@@ -13,6 +13,9 @@
  * - [SEC-006] YAML safety validation
  * - [SEC-007] JSON syntax validation
  * - Path traversal prevention via isPathSafe()
+ * - [Issue #2014] Deny-tier paths refused (sensitive-file-guard.ts): the
+ *   extension allow-list alone let `.env.yml` through, which overwrites a
+ *   secret file the rest of the app refuses to serve.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -21,6 +24,7 @@ import { getWorktreeById } from '@/lib/db';
 import { normalize, extname, resolve } from 'path';
 import { mkdirSync, existsSync } from 'fs';
 import { isPathSafe, resolveAndValidateRealPath } from '@/lib/security/path-validator';
+import { findSensitivePathSegment } from '@/lib/security/sensitive-file-guard';
 import {
   writeBinaryFile,
   isValidNewName,
@@ -59,6 +63,8 @@ const ERROR_CODE_TO_HTTP_STATUS: Record<string, number> = {
   FILE_TOO_LARGE: 413,
   INVALID_FILENAME: 400,
   INVALID_FILE_CONTENT: 400,
+  // [Issue #2014] Target directory or filename matches a deny-tier pattern
+  SENSITIVE_PATH: 403,
 };
 
 /**
@@ -143,6 +149,15 @@ export async function POST(
       return createUploadErrorResponse('INVALID_PATH', 'Invalid path');
     }
 
+    // [Issue #2014] Refuse deny-tier target directories (`.git/`, `.env.d/`).
+    // The filename itself is checked after the extension allow-list, below.
+    if (findSensitivePathSegment(normalizedDir)) {
+      return createUploadErrorResponse(
+        'SENSITIVE_PATH',
+        'This path is protected and cannot be accessed through the file API',
+      );
+    }
+
     // Parse multipart form data
     let formData: FormData;
     try {
@@ -190,6 +205,16 @@ export async function POST(
     const nameValidation = isValidNewName(filename, { forUpload: true });
     if (!nameValidation.valid) {
       return createUploadErrorResponse(createErrorResult('INVALID_FILENAME'));
+    }
+
+    // 6b. [Issue #2014] Deny-tier filename. The extension allow-list above is
+    // not sufficient: `.env.yml` has an allowed extension AND is a `.env.*`
+    // secret file, so an upload could overwrite one.
+    if (findSensitivePathSegment([filename])) {
+      return createUploadErrorResponse(
+        'SENSITIVE_PATH',
+        'This path is protected and cannot be accessed through the file API',
+      );
     }
 
     // 7. Structured file content validation [SEC-006, SEC-007]

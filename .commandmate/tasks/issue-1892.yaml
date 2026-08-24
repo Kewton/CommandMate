@@ -1,0 +1,115 @@
+version: 1
+title: "Issue #1892: Token discipline のパレット列挙漏れを塞ぐ"
+goal: |
+  /bug-fix 1892
+
+  https://github.com/Kewton/CommandMate/issues/1892 を修正してください。
+
+  ## 【最重要】このブランチの土台は develop ではありません
+
+  本ブランチは **#1889 のブランチ tip（`df0943ea`）の上**に積まれています（stacked）。
+  理由: #1889 が `scripts/check-token-discipline.mjs` を **141 行 → 502 行**に拡張しており、
+  develop 起点で作業すると大規模な衝突になるためです。
+
+  - あなたが見るスクリプトには **#1889 のトークン名実在検査が既に入っています**
+  - #1889 は **`TOKEN_DISCIPLINE_PATTERN` には触れていません**。そこがあなたの担当です
+  - **#1889 の実装を書き換えないでください。** 実在検査のロジック・テストには触らず、
+    あなたの変更は**パレット列挙とその周辺、および違反箇所の修正**に限定すること
+  - オーケストレーターが #1889 マージ後に `git rebase --onto` で積み直します。
+    **差分が局所的であるほど積み直しが安全**です
+
+  ## 事象（オーケストレーターが develop で実測済み）
+
+  `TOKEN_DISCIPLINE_PATTERN` は Tailwind の配色パレットのうち **11 個しか列挙していません**:
+
+      (bg|text|border|ring)-(gray|slate|red|green|yellow|amber|orange|purple|violet|sky|blue)-[0-9]
+
+  `neutral` / `zinc` / `stone` / `pink` / `rose` / `fuchsia` / `indigo` / `cyan` / `teal` /
+  `emerald` / `lime` は**素通り**します。移行済みディレクトリ内・`*Terminal*` 除外後・テスト除外後で、
+  **4 箇所が現に検出されずに残っています**:
+
+      src/components/worktree/TreeNode.tsx:220:      css: 'text-pink-500',
+      src/components/worktree/TreeNode.tsx:221:      scss: 'text-pink-500',
+      src/components/worktree/VerificationPane.tsx:263:  <pre className="… bg-neutral-900 … text-neutral-100">
+      src/components/worktree/git/gitPaneShared.tsx:28:  untracked: 'text-teal-600 dark:text-teal-400',
+
+  develop でガードを回すと**この状態で exit 0**（「生配色は無い」と報告する）ことを実測済みです。
+
+  ## やること
+
+  1. パレット列挙を Tailwind の既定パレット全体に広げる。
+     **列挙を手で足すより「Tailwind の既定カラーパレット名の集合」を持つ方が堅い**
+     （新パレットが増えたときに追随漏れしない）。方式は任せますが、
+     **列挙漏れが再発しない根拠**をコード内コメントに書くこと
+  2. 上記 4 箇所をセマンティックトークンへ置き換える
+
+  ## 設計判断が要る点（機械的に置換できない）
+
+  **`VerificationPane.tsx:263` の `<pre>` は検証ログの出力面**で、`bg-neutral-900` / `text-neutral-100` は
+  **意図的な常時ダーク**の可能性が高いです。CommandMate にはターミナル出力面を両テーマでダークに保つ規約があり
+  （#1079）、ガードは**ファイル名に `Terminal` を含むもの**を除外することでそれを実現しています。
+  `VerificationPane` はその命名規則から外れているため除外されません。
+
+  選択肢:
+
+  1. `<pre>` もテーマ追従にする（見た目が変わる。ログの可読性への影響を要確認）
+  2. **ダーク島用のセマンティックトークン**（例 `bg-terminal-surface` / `text-terminal-foreground`）を
+     用意して置換
+  3. 除外の仕組みをファイル名ベースから**明示マーカー**に変える
+
+  **オーケストレーターの推奨は 2**（ダーク島であることを型として表現でき、ファイル名の綴りに依存しない）
+  ですが、**これは推奨であって決定ではありません**。実測・実装の都合で別案が妥当なら、
+  **理由を明記したうえで逸脱してよい**。ただし選んだ理由は必ず `docs/design-system.md` に記録すること。
+
+  ## 受入条件
+
+  - [ ] `neutral` / `zinc` / `stone` / `pink` / `rose` / `fuchsia` / `indigo` / `cyan` / `teal` /
+        `emerald` / `lime` の生配色が**検出される**
+  - [ ] 列挙漏れが再発しない根拠を実装とコメントで示す
+  - [ ] 上記 4 箇所が解消され、`node scripts/check-token-discipline.mjs` が **exit 0**
+  - [ ] `VerificationPane` の `<pre>` の扱いを**根拠つきで決定**し `docs/design-system.md` に記録する
+  - [ ] **修正前の 4 箇所を投入すると非 0 で落ちる**ことをテストで固定する
+  - [ ] `*Terminal*` 例外・`.test.`/`.spec.`/`__tests__` 除外・`src/app/worktrees` 除外が引き続き効く
+  - [ ] **#1889 の実在検査が壊れていない**（既存テストが緑のまま）
+  - [ ] CI と `verify.yaml` が同じスクリプトを呼ぶ構造（#1882）を壊さない
+  - [ ] `npm run lint` / `npx tsc --noEmit` / `npm run test:unit` 全緑
+  - [ ] CHANGELOG `[Unreleased]` に 1 行
+
+  ## スコープ外
+
+  - **`text-white` / `bg-black`**（実測 82 箇所）。パターンは `-[0-9]` を要求するのでこれらも素通りしますが、
+    トークン背景の上の `text-white` が正当なケースも多く方針判断が要るため、本 Issue では扱わない
+  - `bg-[#123456]` 等の arbitrary value
+  - **#1889 のトークン名実在検査そのもの**（上記のとおり触らない）
+
+  ## 注意: あなたの変更は自分自身の裁定に影響する
+
+  `.commandmate/verify.yaml` の `token-discipline` ゲートは**あなたが書き換えたスクリプトを実行します**。
+  パレットを広げた瞬間に上記 4 箇所が違反になるので、**修正しないと自分の `wait --verify` が exit 20 で落ちます**
+  （dogfooding として正しい挙動）。完了前に必ず `node scripts/check-token-discipline.mjs` を回して
+  exit 0 を確認してください。
+
+  ## 作業ルール（厳守）
+
+  - **GitHub Issue / PR を編集しない**（オーケストレーターが管理します）
+  - **PR を作らない・push しない**（オーケストレーターが行います）
+  - 作業は**このブランチ上の単一 commit**。`dev-reports/` は commit に含めない
+  - **Issue 本文と実コードが食い違ったら実コードを正**とし、食い違いを明記する
+  - **稼働サーバ（port 3000）を停止・再起動しない。`MyCodeBranchDesk` で `npm run build` を走らせない**
+  - **`tmux kill-server` / `set-option -g` / `bind-key` / `unbind-key` を打たない**。他セッションに `send-keys` しない
+  - #1889 / #1890 が別 worktree で並走しています。`CHANGELOG.md` は複数が触りますが**自分のぶんだけ書けばよい**
+
+scope:
+  allow:
+    - "scripts/**"
+    - "src/components/**"
+    - "src/app/globals.css"
+    - "tests/unit/**"
+    - "tests/helpers/**"
+    - "docs/**"
+    - "CHANGELOG.md"
+  deny: []
+
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true

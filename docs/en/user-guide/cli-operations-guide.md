@@ -315,8 +315,15 @@ No new exit code was minted, so callers that already branch on exit 10 (a dispat
 | `type` | Meaning | How to answer |
 |--------|---------|---------------|
 | `yes_no` / `multiple_choice` | The prompt was detected and parsed | `commandmate respond <id> <answer>` |
-| `selection_list` | An arrow-key selection UI (Codex's pager and `/model`, antigravity's permission menu, Issue #1628). It cannot be parsed into options | Not `commandmate respond` — send the special keys that stand in for arrow keys |
+| `selection_list` | An arrow-key selection UI (Codex's pager and `/model`, antigravity's permission menu, **opencode's permission dialog** (`Allow once / Allow always / Reject`, Issue #1893), Issue #1628). It cannot be parsed into options | Not `commandmate respond` — send the special keys that stand in for arrow keys |
 | `unclassified` | **An interactive frame the detection layer could not classify** (Issue #1708). Returned only when `isUnclassifiedActive` has been set for **60 consecutive seconds** | Look at the raw pane: `commandmate capture <id> --pane` |
+
+> **Never answer a `selection_list` with `commandmate respond <id> <number>` (Issue #1893).**
+> opencode's permission dialog is an unnumbered button strip, and number keys do nothing on it
+> (measured on 1.18.21). A numeric answer is sent as literal text followed by Enter, so what gets
+> confirmed is **whichever button is highlighted** (`Allow once` by default) — `respond <id> 3`,
+> meant as Reject, approves instead. Use the arrow-key special keys (←/→ then Enter) or the
+> NavigationButtons in the web UI.
 
 `unclassified` is the safety net that turns a detection miss into a stop reason of its own. A frame
 that slips past the detection layer fires neither auto-yes, nor the contract's `autoYes` policy, nor
@@ -813,7 +820,7 @@ function names (`buildCurrentOutput` / `isClaudeRunning`) is the safer way to fi
 
 | Field | Meaning |
 |---|---|
-| `content` | The delta since `lastCapturedLine` (`src/lib/session/current-output-builder.ts:535-556`). Empty even on a healthy session once the poller has already saved it |
+| `content` | Whatever the poller has not saved yet (`buildCurrentOutput`). **It is a delta only for tools whose line count is a usable cursor** — the scrollback tools (codex / gemini / vibe-local / antigravity) while the 10000-line capture window is unsaturated; there it is empty even on a healthy session once the poller has saved it. For the **alternate-screen tools (claude / opencode / copilot), and for any saturated window, it is the WHOLE capture** (the line count is pinned at the pane height / window size and no longer denotes a read position — Issues #1910 / #1670 / #1268) |
 | `realtimeSnippet` | The last 100 rows of the pane — the screen itself (`src/lib/session/current-output-builder.ts:712`) |
 | `lineCount` | The row count of the whole capture, blank rows included. A TUI is drawn on a 1000-row pane, so even a blank pane can report 1001 |
 | `isRunning` | The tmux session exists and is healthy (`src/lib/session/claude-session.ts:543-556`). **It does not mean a turn is in progress** |
@@ -1054,6 +1061,34 @@ commandmate auto-yes <worktree-id> --enable --instance codex-2  # Scoped to one 
 | `--stop-pattern <p>` | Stop automatically when the pattern appears in terminal output |
 | `--instance <id>` | **The recommended way to name the target.** The instance ID; Auto-Yes is controlled independently of the other instances |
 | `--agent <id>` | A helper for instances that are not in the roster (unnecessary when `--instance` alone is enough) |
+
+### The Target Agent Is the Worktree's Default (Issue #1909)
+
+`auto-yes <id> --enable` with neither `--instance` nor `--agent` targets the **worktree's default
+agent** — the same target `send` / `wait` / `capture` address. Before Issue #1909 it was hard-coded
+to claude, so on a worktree whose default is copilot or opencode a claude poller started, logged
+`Claude Code session ... does not exist` every 2 seconds, and left the real dialogs unanswered.
+
+The command now names the agent it armed:
+
+```console
+$ commandmate auto-yes proj-cp --enable
+Auto-yes enabled for proj-cp (copilot).
+```
+
+A non-primary `--instance` reads as `(opencode, instance oc-2)`. If no agent is named at all
+(`Auto-yes enabled for proj-cp.`), the **running server is older than the CLI** and is still
+hard-coding claude; restart it with `commandmate stop && commandmate start`.
+
+Arming a session that is already stuck on a dialog adds a second line reporting what it re-judged
+for **that resolved agent** (Issue #1898-2 — only sources with a `resync` capability, which today
+means opencode; the five hook tools print nothing).
+
+```console
+$ commandmate auto-yes proj-oc --enable
+Auto-yes enabled for proj-oc (opencode).
+Re-judged 2 pending approval(s): 2 answered.
+```
 
 ### `--stop-pattern` Matches Terminal Output (It Cannot Suppress a Command)
 
@@ -1312,7 +1347,7 @@ commandmate report metrics --json                  # JSON output
 | Option | Description | Default |
 |--------|-------------|---------|
 | `--date <date>` | Target date (`YYYY-MM-DD`) | today |
-| `--tool <tool>` | AI tool to use (claude, codex, copilot) | claude |
+| `--tool <tool>` | AI tool to use (claude, codex, copilot, antigravity) | claude |
 | `--model <model>` | Model name (for copilot) | - |
 | `--template <id>` | Template ID used as the instruction | - |
 | `--instruction <text>` | Custom instruction text (alternative to `--template`) | - |
@@ -1328,7 +1363,7 @@ commandmate report metrics --json                  # JSON output
 | `--token <token>` | Auth token (prefer the `CM_AUTH_TOKEN` env var) | - |
 
 > **Note**: `--date` accepts only `YYYY-MM-DD`. An invalid format exits with code 2 (CONFIG_ERROR).
-> `--tool` must be one of claude / codex / copilot, and `--days` must be at least 1.
+> `--tool` must be one of claude / codex / copilot / antigravity, and `--days` must be at least 1.
 
 ### list Output Example
 

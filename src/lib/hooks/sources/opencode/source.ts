@@ -45,6 +45,7 @@ import { AGENT_EVENT_TYPES } from '@/lib/hooks/agent-event-types';
 import { isHookInjectionEnabled, shellQuote } from '@/lib/hooks/hook-settings-generator';
 import { createLogger } from '@/lib/logger';
 import { definePullEventSource } from '../define-source';
+import { recordDecisionDelivery } from '../pending-decisions';
 import type {
   AgentEventSource,
   AgentInstanceRef,
@@ -63,7 +64,7 @@ import {
   OPENCODE_SERVER_HOST,
   type OpencodePermissionReply,
 } from './client';
-import { frameModel, OPENCODE_MAPPERS } from './mappers';
+import { frameModel, opencodeEventIdentity, OPENCODE_MAPPERS } from './mappers';
 import {
   parseOpencodePermissionRequest,
   parseOpencodeQuestion,
@@ -134,6 +135,7 @@ async function decideOpencode(
       decisionId: decision.id,
       consequence: 'the agent waits indefinitely; nothing else will unblock it',
     });
+    recordDecisionDelivery(target, decision.id, { delivered: false, reason: 'abstained' });
     return;
   }
 
@@ -144,6 +146,7 @@ async function decideOpencode(
       instanceId,
       decisionId: decision.id,
     });
+    recordDecisionDelivery(target, decision.id, { delivered: false, reason: 'no-port' });
     return;
   }
 
@@ -158,6 +161,10 @@ async function decideOpencode(
         decisionId: decision.id,
         verdict: verdict.kind,
       });
+      recordDecisionDelivery(target, decision.id, {
+        delivered: false,
+        reason: 'question-needs-answer-verdict',
+      });
       return;
     }
     const delivered = await replyOpencodeQuestion(port, decision.id, verdict.answers);
@@ -167,11 +174,18 @@ async function decideOpencode(
       decisionId: decision.id,
       delivered,
     });
+    recordDecisionDelivery(target, decision.id, {
+      delivered,
+      reason: delivered ? 'question-reply' : 'question-reply-failed',
+    });
     return;
   }
 
   const reply = toOpencodePermissionReply(verdict);
-  if (reply === null) return;
+  if (reply === null) {
+    recordDecisionDelivery(target, decision.id, { delivered: false, reason: 'no-wire-value' });
+    return;
+  }
 
   const delivered = await replyOpencodePermission(
     port,
@@ -185,6 +199,13 @@ async function decideOpencode(
     decisionId: decision.id,
     reply,
     delivered,
+  });
+  // Issue #1898: the fact the ingest needs in order to decide whether a human
+  // is still blocked. `replyOpencodePermission` answers false for a refused
+  // connection, and a verdict that never arrived leaves the dialog on screen.
+  recordDecisionDelivery(target, decision.id, {
+    delivered,
+    reason: delivered ? `permission-reply:${reply}` : 'permission-reply-failed',
   });
 }
 
@@ -217,6 +238,11 @@ async function listOpencodePending(target: AgentInstanceRef): Promise<PendingDec
  * Note what `busy` includes: a session blocked on an approval reads `busy`
  * (#1758 §5.3.1), because from the server's point of view the turn has not
  * ended. This answers "is the turn over", never "is a human needed".
+ *
+ * The aggregate of the same `GET /session/status` the reconnect reads per
+ * session (#1900). Callers outside this directory hold an instance rather than
+ * a session id, so aggregating is the only answer they can use; the reconnect
+ * needs the detail, and both go through one reader in `./client`.
  */
 async function probeOpencodeActivity(
   target: AgentInstanceRef
@@ -279,6 +305,24 @@ export const opencodeAgentEventSource: AgentEventSource = definePullEventSource(
     supportedEvents: OPENCODE_SUPPORTED_EVENTS,
     configScope: 'none',
     decisionTimeoutSeconds: null,
+    // Issue #1924, §4 D3. Not hooks at all: CommandMate holds the SSE stream and
+    // adjudicates itself, so there is no hook answer to forecast a dialog from.
+    permissionHookPredictsDialog: false,
+    sessionStartMayArriveLate: false,
+    // `permission.replied` arrives on the same stream and is a positive
+    // statement that the dialog is gone (#1898). The only source that can say so.
+    permissionReplyReleasesPrompt: true,
+    // `per_...` — the id in the reply URL, which is the same id the frame
+    // carries (#1899). Real identity, so this source does not need the time
+    // window that loses the `stop` of a short turn.
+    eventIdentity: 'permission-id',
+    // pull: the stream can drop, and `GET /session/status` is how a reconnect
+    // finds out whether the conversation is still working (#1900). Read by
+    // `./subscription`, which re-arms a `busy` session and synthesises the
+    // `stop` of one that finished off-stream; flipping this to `'none'` puts
+    // both back to the pre-#1900 behaviour, which is what the mutation case in
+    // `tests/unit/hooks/sources/opencode-resilience-1900.test.ts` asserts.
+    resync: 'session-status-poll',
   },
 
   // C4. Predicates, not a name table: see ./mappers.
@@ -291,14 +335,25 @@ export const opencodeAgentEventSource: AgentEventSource = definePullEventSource(
   // Issue #1783: nor `properties.info.model.*`, so the spec takes the reader
   // instead of a key list. See {@link frameModel} for the two spellings.
   extractModel: frameModel,
+  // Issue #1899: the extraction half of `eventIdentity: 'permission-id'`. The
+  // capability above says which id de-duplication uses; this is what reads it,
+  // and the two must be changed together — declaring the capability without
+  // this puts every frame back on the 3-second window.
+  extractEventIdentity: opencodeEventIdentity,
 
   parsePermissionRequest: parseOpencodePermissionRequest,
   parseQuestion: parseOpencodeQuestion,
 
-  // Self-reference resolves at call time, which is after this const is bound.
+  // Self-reference resolves at call time, which is after this const is bound —
+  // which is also how the reconnect loop gets to read a capability declared in
+  // the same object literal it is declared in (#1900). It is handed across
+  // rather than imported because `./subscription` is imported *by* this module.
   subscribe: (target, onEvent) =>
-    openOpencodeSubscription(target, onEvent, (raw) =>
-      opencodeAgentEventSource.normalizeEvent(raw)
+    openOpencodeSubscription(
+      target,
+      onEvent,
+      (raw) => opencodeAgentEventSource.normalizeEvent(raw),
+      { resync: opencodeAgentEventSource.capabilities.resync }
     ),
 
   decide: decideOpencode,

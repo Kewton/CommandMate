@@ -38,7 +38,7 @@
  * @module lib/session/waiting-episode-state
  */
 
-import { buildCompositeKey } from '@/lib/auto-yes-state';
+import { buildCompositeKey, COMPOSITE_KEY_SEPARATOR } from '@/lib/auto-yes-state';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { createLogger } from '@/lib/logger';
 import type { WaitingKind } from '@/lib/session/waiting-kind';
@@ -203,6 +203,29 @@ export function getWaitingEpisode(
   instanceId?: string,
 ): WaitingEpisode | null {
   return episodes.get(buildCompositeKey(worktreeId, cliToolId, instanceId)) ?? null;
+}
+
+/**
+ * Whether **any** instance in this worktree is still waiting (Issue #2001).
+ *
+ * The cross-device dismissal is keyed on the worktree, because that is what the
+ * Service Worker `tag` names (`<worktreeId>:prompt`, `push-sender`): two agent
+ * instances waiting in one worktree share a single notification card on the
+ * phone. So one instance crossing the closing edge is not on its own a reason
+ * to clear that card — the card is still telling the truth until the last of
+ * them has been answered.
+ *
+ * The prefix test is exact rather than heuristic: `buildCompositeKey` puts the
+ * worktree id first and rejects a worktree id containing
+ * {@link COMPOSITE_KEY_SEPARATOR}, so no other worktree's key can start with
+ * `<worktreeId>:`.
+ */
+export function hasOpenWaitingEpisode(worktreeId: string): boolean {
+  const prefix = `${worktreeId}${COMPOSITE_KEY_SEPARATOR}`;
+  for (const key of episodes.keys()) {
+    if (key.startsWith(prefix)) return true;
+  }
+  return false;
 }
 
 /**

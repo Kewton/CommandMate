@@ -825,6 +825,27 @@ export function detectMultipleChoicePrompt(
   truncateRawContentFn: (content: string) => string,
 ): PromptDetectionResult {
   output = normalizeTuiFrameForDetection(output);
+
+  // [Issue #1896] Tools whose own dialogs are never number-answerable opt out of
+  // the whole numbered-list inference. Checked before anything is scanned
+  // because the verdict does not depend on the frame: on such a tool EVERY
+  // `1. / 2. / 3.` block on the pane is transcript, so there is nothing here a
+  // scan could tell apart.
+  //
+  // Same shape and the same reason as the Issue #1495 `/model` overlay guard
+  // below -- Auto-Yes calls detectPrompt() directly and would resolve the block
+  // to "1" and send it. On opencode that "1" lands in the composer and goes out
+  // as a USER UTTERANCE, and on a frame where opencode's own permission dialog
+  // is open underneath the stale list, the Enter after it confirms whichever
+  // button is highlighted ("Allow once"). Both measured on opencode 1.18.21;
+  // the frames are `opencode-live-1896/{numbered-answer,permission-over-numbered}.txt`.
+  //
+  // Silent on every other tool: the option is unset unless
+  // {@link buildDetectPromptOptions} sets it (opencode only today).
+  if (options?.hasNumberedDialogs === false) {
+    return noPromptResult(output);
+  }
+
   // C-003: Use ?? true for readability instead of !== false double negation
   const requireDefault = options?.requireDefaultIndicator ?? true;
 

@@ -115,6 +115,26 @@ export const claudeAgentEventSource: AgentEventSource = definePushHookSource({
     supportedEvents: AGENT_EVENT_TYPES,
     configScope: 'per-instance',
     decisionTimeoutSeconds: PERMISSION_REQUEST_TIMEOUT_SECONDS,
+    // Issue #1924, the 6x5 table of §4 D3. Claude is the reference row: every
+    // "not audited" cell on another source is set to whatever Claude declares
+    // here, so that a source nobody has measured behaves the way the state
+    // machine already behaves today.
+    //
+    // `PermissionRequest` is registered and a non-allow answer on it really is
+    // the forecast that a dialog is coming — that is the behaviour #1725 built
+    // the provisional dialog record on.
+    permissionHookPredictsDialog: true,
+    // `SessionStart` leads the turn here; copilot is the tool where it does not.
+    sessionStartMayArriveLate: false,
+    // A hook response body releases nothing observable. The dialog is released
+    // by the screen, by `Stop`, or by expiry.
+    permissionReplyReleasesPrompt: false,
+    // `tool_use_id` is present on tool events but absent on `PermissionRequest`
+    // (D2), so there is no id that covers the frames dedup has to cover. The
+    // time window stays.
+    eventIdentity: null,
+    // push. There is no connection to lose and nothing to re-read.
+    resync: 'none',
   },
 
   // S1. A plain name table is enough *for this tool* — one native name, one

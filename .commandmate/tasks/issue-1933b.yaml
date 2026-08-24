@@ -1,0 +1,73 @@
+version: 1
+title: "Issue #1933 追補: build:cli の TS2307（tsconfig.cli.json は paths を持たない）を直す"
+goal: |
+  **PR #1991 の CI で Build が落ちました。** 1 件だけ直してください。
+
+      src/lib/cli-tools/types.ts(9,8): error TS2307:
+      Cannot find module '@/types/cli-tool-contracts' or its corresponding type declarations.
+
+  ## 原因（私が実測しました）
+
+  **`tsconfig.cli.json` は `"paths": {}` です**（`@/` エイリアスを持たない）。CI の Build ジョブは
+  `npm run build` / `npm run build:cli` / `npm run build:server` の 3 本を順に走らせ、
+  `build:cli`（`tsc --project tsconfig.cli.json`）が `src/lib/cli-tools/types.ts` を引くため、
+  **`@/types/cli-tool-contracts` が解決できません**。手元で `npm run build:cli` を回して **exit 2** を再現済みです。
+
+  **これは #1929 の実装者が同じ罠を踏んで記録しています** —
+  「`tsconfig.cli.json` が `"paths": {}` で、`commandmate status` から到達するモジュールが
+  `@/` エイリアスを使えない（`copilot-executable.ts` の env-sanitizer import も同じ理由で相対に変えた）」。
+
+  ## やること
+
+  1. **CLI ビルドから到達する経路の `@/` import を相対パスへ変える。** `src/lib/cli-tools/types.ts` の
+     1 件だけとは限りません — **あなたが新設した 5 モジュール**（`src/types/cli-tool-contracts.ts` /
+     `src/lib/tmux/key-sequence.ts` / `src/lib/cli-tools/{composer,capture}-spec.ts` /
+     `src/lib/cli-tools/graceful-exit.ts`）と、それらを引く既存ファイルを**すべて確認**してください。
+  2. **`npm run build:cli` と `npm run build:server` と `npm run build` の 3 本すべてを実際に回して
+     exit 0 を確認する**こと。`npx tsc --noEmit`（ルート tsconfig）は `paths` を持つので**通ってしまいます** —
+     それが今回すり抜けた理由です。
+  3. 既存 commit へ `--amend` で畳む（新しい commit を作らない）。
+  4. 最終行に `IMPL_COMPLETED` とだけ出力する。
+
+  ## なぜ裁定をすり抜けたか（あなたの落ち度ではありません）
+
+  `.commandmate/verify.yaml` に **build ゲートがありません**（#1946 で実測・記録済み。verify が見ているのは
+  CI 12 ジョブ中 7 本）。あなたはフル `test:unit` と `tsc --noEmit` の緑を確認しており、
+  **見えるはずのない層**でした。この穴が刺さったのは本ランで **3 回目**です
+  （#1943 → PR #1945、#1927 の integration、今回）。
+
+  ## 私（オーケストレーター）が行った作業の共有
+
+  ブランチは develop `7b7a998a`（#1931 込み）へ refresh 済みで、CHANGELOG の衝突は両側保持で解決、
+  断片の一本化（CHANGELOG 1 件・module-reference 新規 5 行＋既存 5 行）も済んでいます。
+  **それらのファイルは触らないでください。**
+
+  ## 触ってよい範囲
+
+  前回と同じ（`src/lib/cli-tools/**`・`src/lib/tmux/**`・`src/lib/session-key-sender.ts`・
+  `src/config/cli-tool-timing-config.ts`・`src/lib/session/worktree-status-helper.ts`・`src/types/**`・
+  `tests/unit/cli-tools/**`・`tests/unit/lib/**`・`tests/unit/config/**`・`tests/unit/session/**`）。
+  加えて、CLI ビルド経路上の `@/` import を持つファイルがこの範囲の外にあった場合は、
+  **変更せずに commit message で報告**してください。
+scope:
+  allow:
+    - "src/lib/cli-tools/**"
+    - "src/lib/tmux/**"
+    - "src/lib/session-key-sender.ts"
+    - "src/config/cli-tool-timing-config.ts"
+    - "src/lib/session/worktree-status-helper.ts"
+    - "src/types/**"
+    - "tests/unit/cli-tools/**"
+    - "tests/unit/lib/**"
+    - "tests/unit/config/**"
+    - "tests/unit/session/**"
+  deny: []
+verify:
+  gates: [token-discipline, control-chars, claudemd-size, route-exports, lint, typecheck, unit]
+autoYes:
+  mode: allow-listed
+  allowPromptTypes: [yes_no, multiple_choice]
+  denyPatterns: []
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true

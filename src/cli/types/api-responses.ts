@@ -37,10 +37,53 @@ export interface WorktreeItem {
   isWaitingForResponse?: boolean;
   isProcessing?: boolean;
   // [DR2-09] Per-CLI-tool session status for agent filtering
+  //
+  // Mirrors: src/lib/session/worktree-status-helper.ts CliToolSessionStatus
+  // (the subset the CLI reads). Entries are the logical-OR aggregate across
+  // every instance of a tool; the un-aggregated per-instance map is
+  // `sessionStatusByInstance`, which the CLI does not read.
   sessionStatusByCli?: Partial<Record<string, {
     isRunning: boolean;
     isWaitingForResponse: boolean;
     isProcessing: boolean;
+    /**
+     * Whether the status rests on something positive, or only on nothing
+     * having matched (Issue #1926, design §4 D1 / §7 / DR3-005).
+     *
+     * The second of Phase 1's two contract changes: `commandmate ls`, the
+     * header status chip and `BranchStatusIndicator` read this object, not
+     * `CurrentOutputResponse`, so the evidence reading had to be published
+     * here as well as there.
+     *
+     * Optional twice over. A server older than #1926 sends no such key, and
+     * even a current one omits it for a session that is not running (there was
+     * no frame to read) and for a tool with two or more instances (an
+     * aggregate has no single reason — read `--json` for the per-tool rows).
+     */
+    statusEvidence?: 'positive' | 'none';
+    /**
+     * The scraper's reason token: `input_prompt` / `no_recent_output` /
+     * `thinking_indicator` / `default` … (Issue #1926).
+     *
+     * `string` rather than a union on purpose, exactly as
+     * {@link CurrentOutputResponse.sessionStatusReason} is: the detector's
+     * vocabulary grows, and a newer server naming a reason this build has never
+     * heard of must not be a parse failure. This is what `commandmate ls`
+     * prints in its REASON column.
+     */
+    sessionStatusReason?: string;
+    /**
+     * The last status anything could positively confirm for this tool, or
+     * absent (Issue #1926, design §7).
+     *
+     * Held in server memory with a TTL and cleared by a restart, so absent is
+     * the ordinary answer for a session nobody has polled recently. Read it
+     * next to {@link statusEvidence}: it earns its keep when that is `'none'`
+     * and the three booleans are a fallback rather than a reading.
+     */
+    lastKnownStatus?: string;
+    /** Epoch ms of {@link lastKnownStatus}. */
+    lastKnownStatusAt?: number;
   }>>;
   // Mirrors: src/lib/cli-tools/types.ts AgentInstance[] (Issue #869/#1000).
   // Present on both GET /api/worktrees and GET /api/worktrees/[id].
@@ -95,7 +138,11 @@ export type AutoYesSuppressionReason =
   | 'deny-pattern'
   | 'deny-pattern-unusable'
   | 'type-not-allowed'
-  | 'agent-launch-dialog';
+  | 'agent-launch-dialog'
+  // `unclassified-frame` is NOT one either (Issue #1924): the generic prompt
+  // estimator matched and the tool's own dialog detector did not, so nothing
+  // was sent. Same channel, third kind of cause.
+  | 'unclassified-frame';
 
 // Mirrors: src/app/api/worktrees/[id]/current-output/route.ts response shape
 // [DR2-03] All server-side fields included
@@ -154,8 +201,78 @@ export interface CurrentOutputResponse {
    * Momentary by nature — a repaint mid-capture can raise it for a single poll —
    * so it is only a stop reason after it has persisted; see
    * UNCLASSIFIED_DWELL_MS in wait.ts.
+   *
+   * Produced by `isUnclassifiedFrame` in `src/lib/session/status-evidence.ts`,
+   * and NOT the negation of {@link statusEvidence} (Issue #2011) — read the two
+   * questions, and the frames on which their answers cross, over there.
    */
   isUnclassifiedActive?: boolean;
+  /**
+   * Whether {@link sessionStatus} rests on something positive, or only on
+   * nothing having matched (Issue #1926, design §4 D1 決定 2 / §7).
+   *
+   * `'positive'` — a completion marker, a thinking indicator, a parsed prompt,
+   * a tool-specific idle-composer rule, or the agent's own `Stop` said so.
+   * `'none'` — nothing on the frame could be read either way, so the status is
+   * a fallback.
+   *
+   * ## NOT the same fact as {@link isUnclassifiedActive} (Issue #2011)
+   *
+   * This comment used to say the two carried one fact under two names, and the
+   * server derived the flag from `evidence === 'none'` to match. Issue #1927
+   * had already broken that: it moved the evidence producer into the per-tool
+   * detectors, and `'none'` widened from "nobody could read this frame" to "no
+   * rule vouched for this verdict" — which an ordinary idle Claude composer
+   * satisfies. Every idle Claude pane then raised the terminal escape hatch and
+   * stopped `wait` completing. #2011 pulled them apart again.
+   *
+   * They ask different questions, and the answers cross in both directions:
+   *
+   *   - an idle composer no tool-specific idle rule vouches for is `'none'`
+   *     and CLASSIFIED (`isUnclassifiedActive: false`) — `wait` completes on it;
+   *   - an unreadable pane whose agent reported `Stop` is `'positive'` and
+   *     UNCLASSIFIED (`isUnclassifiedActive: true`) — `wait` holds.
+   *
+   * This field asks "is there positive proof behind the verdict?", is produced
+   * by the detector per tool, and widens as the §4 D1 rollout reaches each one.
+   * {@link isUnclassifiedActive} asks "could ANY rule read this frame at all?",
+   * is a statement about the reason vocabulary rather than about the strength of
+   * the evidence, and is fixed: `isUnclassifiedFrame` in
+   * `src/lib/session/status-evidence.ts` is `running` plus one of a closed set.
+   *
+   * Unclassified reasons: `no_recent_output`, `unknown_frame`, `default`.
+   * Classified-but-unproven: `input_prompt`.
+   *
+   * A closed union, like {@link sessionStatus} and for the same reason: the
+   * design fixes the domain at two members precisely so a newer server cannot
+   * hand an older CLI a value it has never heard of. Adding a third would be a
+   * breaking change, not an additive one.
+   *
+   * The two marker lines above and the union width are held to the server by
+   * tests/unit/cli/types/status-evidence-contract-2015.test.ts; what it can and
+   * cannot prove is written out there.
+   *
+   * Optional because a server older than #1926 sends no such key — which is not
+   * the same as `'positive'`. Treat `undefined` as "this server does not say".
+   */
+  statusEvidence?: 'positive' | 'none';
+  /**
+   * The last status this server could positively confirm, or null
+   * (Issue #1926, design §7 「直前の確定状態（証拠なしの間の表示）」).
+   *
+   * Equal to {@link sessionStatus} whenever `statusEvidence` is `'positive'`,
+   * because the poll that answered just confirmed it. It says something the
+   * other fields do not only when the evidence is `'none'`: this is what the
+   * session last actually was, as opposed to what the fallback is calling it.
+   *
+   * Held in server memory, so `null` covers "nothing was ever confirmed", "the
+   * confirmation aged out", "the server restarted" and "the session is not
+   * running" without distinguishing them. Undefined means a server older than
+   * #1926.
+   */
+  lastKnownStatus?: 'idle' | 'ready' | 'running' | 'waiting' | null;
+  /** Epoch ms of {@link lastKnownStatus}, null when that is null (Issue #1926). */
+  lastKnownStatusAt?: number | null;
   lastServerResponseTimestamp: number | null;
   serverPollerActive: boolean;
   /**
@@ -193,6 +310,95 @@ export interface CurrentOutputResponse {
     lastEventAt: number | null;
     lastEventDetail: string | null;
     /**
+     * The id of the turn this instance is in, or of the last one it was in
+     * (Issue #1926, made a real identity in #1930).
+     *
+     * Stable for the life of the turn: a `pre_tool_use` arriving mid-turn no
+     * longer re-stamps it, and a session recreated in the same pane does not
+     * inherit it. `wait` reads a change of id as "a new turn began".
+     *
+     * Absent from a server older than #1926, and null on one that has heard
+     * nothing from this instance.
+     */
+    turnId?: string | null;
+    /**
+     * Epoch ms the turn opened, or null (Issue #1926).
+     *
+     * The event that opens a turn is one of `user_prompt_submit` /
+     * `pre_tool_use` / `post_tool_use` — the set `adoptTurnStart` mirrors as
+     * {@link TURN_OPENING_EVENT_TYPES}. Null means the opening was never
+     * observed: a `stop` arrived with no turn open, so the server publishes
+     * null rather than guessing a time `closedAt - openedAt` would be rendered
+     * from.
+     */
+    openedAt?: number | null;
+    /** Epoch ms the turn ended, or null while it is open (Issue #1926). */
+    closedAt?: number | null;
+    /**
+     * Why the turn ended, or null while none has (Issue #1926, filled in by
+     * #1930).
+     *
+     * The six values a server produces today are `stop` (the agent's own
+     * `Stop`), `session_end`, `stale`, `scraper_evidence`, `resync_idle` and
+     * `generation`. A plain `string` on purpose: a newer server can name a
+     * close reason this build has never heard of, and narrowing here would turn
+     * a forward-compatible payload into a parse failure (Issue #1843).
+     */
+    closedBy?: string | null;
+    /**
+     * The approvals this instance is blocked on, oldest first (Issue #1930).
+     *
+     * Empty on a session with no dialog open. The agent's own `tool_input` is
+     * deliberately NOT here — see the server-side type; what is published is
+     * what a reader can act on.
+     *
+     * Mirrors: src/lib/session/current-output-builder.ts PendingDecisionPayload.
+     */
+    pendingDecisions?: Array<{
+      /** The agent's own id for it, or null for a source that publishes none. */
+      id: string | null;
+      at: number;
+      /** `notification` (proved) / `permission-request` (predicted). String-typed per #1843. */
+      source: string;
+      toolName: string | null;
+      confirmedAt: number | null;
+      scraperCorroborated: boolean;
+      /**
+       * Whether a verdict from the server can still reach the agent — the
+       * source's `decisionTimeoutSeconds` applied to this record's age.
+       *
+       * True does **not** mean the dialog is gone. The pane is still blocked;
+       * what has expired is the server's ability to answer it automatically.
+       */
+      deliveryExpired: boolean;
+    }>;
+    /**
+     * What this instance has had dropped by the structured layer's own bounds,
+     * and on whose authority (Issue #1930).
+     *
+     * The field that separates "my `stop` never arrived" from "my `stop`
+     * arrived and something had already claimed its id" — the same symptom with
+     * different fixes.
+     *
+     * Mirrors: src/lib/session/agent-event-state.ts AgentEventDropCounts.
+     */
+    dedupDropped?: {
+      dedupDropped: { identity: number; timeWindow: number };
+      decisionEvicted: number;
+      idsDiscarded: number;
+      dialogTimedOut: number;
+      decisionOverflow: number;
+    };
+    /**
+     * How long a dialog record is retained without being answered, in ms
+     * (Issue #1930).
+     *
+     * Two values because a prediction and a proof are different statements: a
+     * `PermissionRequest` nothing corroborated expires far sooner than a
+     * `Notification` that proved a dialog exists.
+     */
+    dialogPendingMaxMs?: { predicted: number; confirmed: number };
+    /**
      * Epoch ms the structured layer first learned a dialog was open, or null
      * (Issue #1725). Non-null together with `isPromptWaiting` is how a caller
      * tells "the agent told us" from "the screen told us".
@@ -200,6 +406,113 @@ export interface CurrentOutputResponse {
     promptWaitingSince?: number | null;
     /** `notification` / `permission-request`, or null (Issue #1725). */
     promptWaitingSource?: string | null;
+    /**
+     * The last `tool_input` this server had to rewrite before it could
+     * adjudicate it, or null (Issue #1902).
+     *
+     * Mirrors: src/lib/hooks/tool-input-normalization-state.ts
+     * ToolInputNormalizationRecord.
+     *
+     * Copilot 1.0.80's `Edit` sends its apply-patch envelope as a bare string,
+     * which `parseCopilotPermissionRequest` used to refuse — so every file edit
+     * copilot made was answered `unknown-payload` (a no-decision) and drew a
+     * dialog no matter what Auto-Yes said. It is now read as a patch, and this
+     * field is how an operator sees that it was: a non-null `reason` says the
+     * shape that was judged is not the shape the agent sent, and therefore why
+     * the deny patterns were matched against the envelope's action headers
+     * (`*** Add File: …`) rather than against the file body.
+     *
+     * `reason` is string-typed on the wire for the same reason
+     * `lastSuppression.reason` is: a newer server may name a normalisation this
+     * build has never heard of, and narrowing here would turn a
+     * forward-compatible payload into a parse failure (Issue #1843).
+     *
+     * Optional here although the server always sends it — this mirror also
+     * describes what an older daemon answers, and `undefined` means "this
+     * server predates the field" rather than "nothing was normalised".
+     */
+    toolInputNormalization?: {
+      /** `string-tool-input-as-patch` / `string-tool-input-as-text`. */
+      reason: string;
+      /** Key the raw value was stored under: `patch` or `text`. */
+      key: string;
+      /** `typeof` the value the agent sent. `string` is the only measured one. */
+      receivedType: string;
+      /** `tool_name` of the call that was normalised (`Edit` in #1902). */
+      toolName: string;
+      /** Epoch ms. */
+      at: number;
+    } | null;
+    /**
+     * The last approval this server adjudicated on the agent's behalf, or null
+     * (Issue #1898).
+     *
+     * Mirrors: src/lib/hooks/permission-decision-state.ts
+     * PermissionDecisionRecord.
+     *
+     * opencode's approvals are answered over a REST call nobody is holding, so
+     * an Auto-Yes allow can approve a command, dismiss the dialog and leave no
+     * trace on any surface an operator reads. This is that trace: what was
+     * asked (`toolName`), what was answered (`behavior` / `reason`), whether it
+     * reached the agent (`delivered`), and whether it retired the prompt
+     * (`releasedPrompt`). `trigger` tells the live path apart from the
+     * re-judgement `auto-yes --enable` performs on a dialog that was already up.
+     *
+     * `reason` and `trigger` are string-typed on the wire for the same reason
+     * `lastSuppression.reason` is: a newer server may name a value this build
+     * has never heard of, and narrowing here would turn a forward-compatible
+     * payload into a parse failure (Issue #1843).
+     *
+     * Optional here although the server always sends it — this mirror also
+     * describes what an older daemon answers.
+     */
+    permissionDecision?: {
+      /** The agent's own id for the dialog (`per_…`), or null. */
+      decisionId: string | null;
+      /** `tool_name` the approval was judged as, or null. */
+      toolName: string | null;
+      /** `allow`, or null for a no-decision. */
+      behavior: 'allow' | null;
+      /** e.g. `auto-yes`, `auto-yes-disabled`, `policy-suppressed`. */
+      reason: string;
+      /** Whether the verdict actually reached the agent. */
+      delivered: boolean;
+      /** Whether this delivery retired the prompt-waiting record. */
+      releasedPrompt: boolean;
+      /** `event` for the live frame, `policy-recheck` for `auto-yes --enable`. */
+      trigger: string;
+      /** Epoch ms. */
+      at: number;
+    } | null;
+    /**
+     * Which agent event source speaks for this tool, and what it declares it can
+     * do (Issue #1924).
+     *
+     * Mirrors: src/lib/session/current-output-builder.ts StructuredSourcePayload.
+     * Optional here and required there for the usual reason — this CLI can be
+     * newer than the server it is pointed at, and a build from before #1924
+     * sends no `source` at all.
+     *
+     * The string-typed fields are string-typed on purpose, exactly as
+     * `lastSuppression.reason` is: a server newer than this CLI can declare a
+     * `configScope`, an `eventIdentity` or a `resync` strategy this build has
+     * never heard of, and narrowing the wire to the unions this build knows
+     * would turn a forward-compatible payload into a parse failure.
+     */
+    source?: {
+      cliToolId: string;
+      capabilities: {
+        supportedEvents: string[];
+        configScope: string;
+        decisionTimeoutSeconds: number | null;
+        /** Issue #1924, §4 D3: the five declared values, verbatim. */
+        permissionHookPredictsDialog: boolean;
+        sessionStartMayArriveLate: boolean;
+        permissionReplyReleasesPrompt: boolean;
+        eventIdentity: string | null;
+        resync: string;
+      };
+    };
   };
   /**
    * Issue #1839: the upstream (model API) fault visible on the live frame, or
@@ -270,6 +583,63 @@ export interface CurrentOutputResponse {
     skippedCount: number;
     lastSkippedAt: number | null;
   };
+  /**
+   * Issue #1884: which stage of the server's precedence chain picked
+   * {@link CurrentOutputResponse.cliToolId}.
+   *
+   * Mirrors: src/lib/session/current-output-builder.ts
+   * CurrentOutputPayload.resolvedBy — and, like `lastSuppression.reason`,
+   * deliberately typed as the wire's `string` rather than the union this build
+   * knows: a server newer than the CLI can name a stage this build has never
+   * heard of, and narrowing here would turn a forward-compatible payload into a
+   * parse failure.
+   *
+   * The field to read when a session visible in tmux is reported as not
+   * running. Absent from a server that predates #1884 — which is also a server
+   * that resolves `?instance=` incorrectly, so its absence is itself the answer.
+   */
+  resolvedBy?: string;
+  /**
+   * Issue #1884: the explicit `?cliTool` the roster contradicts, or null.
+   *
+   * Mirrors: src/lib/session/current-output-builder.ts
+   * CurrentOutputPayload.conflict. This is a read path, so the server resolves
+   * the contradiction (roster wins) and answers 200 with it attached rather
+   * than 400 — the commands that act refuse it instead (DR3-015).
+   */
+  conflict?: {
+    instanceId: string;
+    rosterCliTool: string;
+    requestedCliTool: string;
+  } | null;
+
+  /**
+   * Whether the server's detection rules were read off the CLI build that is
+   * installed (Issue #1929, design §4 D2 / §7).
+   *
+   * Optional **twice over**, and the two absences mean different things:
+   *
+   *  - no `detector` key at all — either a server older than #1929, or a server
+   *    whose probe cache is still cold. `capture --json` runs on a 5-second
+   *    poll, so the probe is never awaited on that path (DR3-013); the first
+   *    polls after a restart simply carry nothing and a later one carries the
+   *    answer. Read it as "not known yet", never as "nothing is stale".
+   *  - `detector.staleness` present but `{}` — the probe HAS answered and every
+   *    tool it could read is at or below the version its rules were measured
+   *    against.
+   *
+   * A tool appears only when its installed build is strictly newer than
+   * `verifiedAgainst`. A tool that is not installed, whose `--version` could not
+   * be read, or whose executable did not resolve on `PATH` is absent — no probe
+   * was run for it and no child process was spawned (§13.2 S17).
+   *
+   * Kept off `GET /api/capabilities` deliberately: an installed-CLI version list
+   * is a software inventory, so it is published only on authenticated surfaces
+   * (DR4-008).
+   */
+  detector?: {
+    staleness?: Record<string, { installed: string; verifiedAgainst: string }>;
+  };
 }
 
 // Mirrors: src/types/models.ts BasePromptData (subset for CLI output)
@@ -305,6 +675,20 @@ export interface PromptData {
    * the latter is a pane window and carries finished turns.
    */
   approvalTarget?: string;
+  /**
+   * The verdicts a structured approval accepts, when this payload is the
+   * degraded `unclassified` form for a source that can be answered by decision
+   * id (Issue #1898).
+   *
+   * Mirrors: src/lib/session/structured-prompt.ts StructuredDecisionOption.
+   *
+   * Held apart from {@link options}, which stays empty on that payload: a
+   * reader that answers by typing an option number at the pane must go on
+   * finding nothing here, because these numbers are verdicts delivered over the
+   * agent's own API rather than lines on a screen. `commandmate wait` reports
+   * them on its exit-10 output so the caller is told what `respond` will take.
+   */
+  decisionOptions?: Array<{ number: number; label: string; reply: string }>;
   [key: string]: unknown;
 }
 
@@ -344,10 +728,65 @@ export interface PromptResponseResult {
    * matched against the agent's structured options (`respond <id> Blue` → 1).
    */
   resolved?: {
-    via: 'semantic' | 'default';
+    /**
+     * Issue #1898 adds `structured-decision`: the answer was delivered to the
+     * agent's own API by decision id rather than typed at the pane, so
+     * `optionNumber` names a verdict (1 = Allow once, 2 = Allow always,
+     * 3 = Reject) and not a line on a screen.
+     */
+    via: 'semantic' | 'default' | 'structured-decision';
     optionNumber?: number;
     optionLabel: string;
+    /** The approval that was answered (Issue #1898). Absent on the key paths. */
+    decisionId?: string;
   };
+}
+
+/**
+ * Mirrors: src/app/api/worktrees/[id]/auto-yes/route.ts AutoYesResponse
+ * [Issue #1898, extended by Issue #1909].
+ *
+ * Every optional field is optional for the reason the rest of this file states —
+ * the CLI is routinely newer than the daemon it talks to (`npm i -g` does not
+ * restart a running server), so a field's absence means "this daemon predates
+ * it", never "the answer is none". For `cliToolId` that distinction is the bug
+ * itself: a server that does not name the agent is a server still arming a
+ * hard-coded claude (#1909). The CLI reports what it was told and nothing more.
+ */
+export interface AutoYesSetResult {
+  enabled: boolean;
+  expiresAt: number | null;
+  pollingStarted?: boolean;
+  /**
+   * Approvals that were already pending and got re-judged by this call
+   * (Issue #1898-2). Absent when nothing was re-read — which is every hook
+   * tool, whose `resync` capability is `none`.
+   */
+  pendingDecisions?: {
+    examined: number;
+    delivered: number;
+    skipped: number;
+  };
+  /**
+   * Issue #1909: the agent whose poller this request armed — and, therefore,
+   * the agent `pendingDecisions` was re-judged for. One resolved pair.
+   */
+  cliToolId?: string;
+  /** The instance it was armed for (the primary instance's id is its cliToolId). */
+  instanceId?: string;
+  /**
+   * Which stage of the server's precedence chain chose `cliToolId`. Typed as the
+   * wire's `string` rather than a union, like CurrentOutputResponse.resolvedBy:
+   * a newer server may name a stage this build has never heard of, and
+   * narrowing would turn that into a parse failure.
+   */
+  resolvedBy?: string;
+  /** Read path only; a POST that contradicts the roster is refused, not resolved. */
+  conflict?: {
+    instanceId: string;
+    rosterCliTool: string;
+    requestedCliTool: string;
+  } | null;
 }
 
 /** wait exit 10 CLI extended output type */

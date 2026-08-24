@@ -24,12 +24,12 @@
  * coupling via a minimal DTO/projection type.
  */
 
-import { stripAnsi, stripBoxDrawing, detectThinking, getCliToolPatterns, buildDetectPromptOptions, OPENCODE_RESPONSE_COMPLETE, OPENCODE_PROCESSING_INDICATOR, OPENCODE_SELECTION_LIST_PATTERN, CLAUDE_SELECTION_LIST_FOOTER, COPILOT_SELECTION_LIST_PATTERN, CODEX_PROMPT_PATTERN, CODEX_SELECTION_LIST_PATTERN, CODEX_APPROVAL_FOOTER_PATTERN, CODEX_PAGER_FOOTER_PATTERN, CODEX_STATUS_BAR_PATTERN, getCodexLifecycleDialog, CLAUDE_INTERRUPT_HINT_PATTERN, ANTIGRAVITY_SELECTION_LIST_PATTERN } from './cli-patterns';
-import { detectPrompt } from './prompt-detector';
-import { normalizeTuiFrameForDetection } from './tui-detection-frame';
+import { STATUS_REASON } from './status-reason';
+import { normalizeFrame } from './tools/frame';
+import { getToolStatusDetector } from './tools/registry';
 import type { PromptDetectionResult } from './prompt-detector';
 import type { CLIToolType } from '@/lib/cli-tools/types';
-import { THINKING_TAIL_LINE_COUNT } from '@/config/thinking-constants';
+import type { StatusEvidence } from '@/lib/session/status-evidence';
 
 /**
  * Session status types
@@ -81,40 +81,34 @@ export interface StatusDetectionResult {
    * than thinking detection in the internal priority order).
    */
   promptDetection: PromptDetectionResult;
+
+  /**
+   * Whether {@link status} rests on something positive (Issue #1927, §4 D1 決定 2).
+   *
+   * `'positive'` — a completion marker, a running indicator, a parsed dialog, a
+   * selection list, or a tool-specific idle rule said so. `'none'` — nothing on
+   * the frame could be read either way and the status is a fallback.
+   *
+   * This is the field the whole D1 rework turns on, and it lives HERE rather
+   * than beside the consumers because only the detector knows which rule
+   * produced the verdict. Before #1927 the reading was reconstructed downstream
+   * from `(status, reason)`, which worked only while "reason X always means
+   * evidence Y" held — it stops holding the moment `input_prompt` becomes
+   * positive for one tool and not for another, which is exactly what the §4 D1
+   * tool-by-tool rollout does. Issue #2011 deleted that downstream expression
+   * rather than leaving it exported with no caller.
+   *
+   * `current-output-builder` and `worktree-status-helper` publish it as
+   * `statusEvidence`. What neither derives from it is `isUnclassifiedActive`:
+   * that is `isUnclassifiedFrame(status, reason)` in
+   * `src/lib/session/status-evidence.ts`, and deriving it from this field
+   * instead is what #2011 had to undo — see that module for the two questions
+   * and which consumer asks which.
+   */
+  evidence: StatusEvidence;
 }
 
-/**
- * Number of lines from the end to check for prompt and input indicators
- * @constant
- */
-const STATUS_CHECK_LINE_COUNT: number = 15;
-
-// THINKING_TAIL_LINE_COUNT imported from @/config/thinking-constants (Issue #575)
-// Previously THINKING_TAIL_LINE_COUNT = 5 (local constant)
-// See also: THINKING_CHECK_LINE_COUNT (50) in auto-yes-manager.ts (wider window for safety)
-
-/**
- * Reason string constants for StatusDetectionResult.reason.
- * Shared between status-detector.ts and current-output/route.ts to prevent typos (DR2-003).
- */
-export const STATUS_REASON = {
-  PROMPT_DETECTED: 'prompt_detected',
-  THINKING_INDICATOR: 'thinking_indicator',
-  OPENCODE_PROCESSING_INDICATOR: 'opencode_processing_indicator',
-  OPENCODE_SELECTION_LIST: 'opencode_selection_list',
-  CLAUDE_SELECTION_LIST: 'claude_selection_list',
-  COPILOT_SELECTION_LIST: 'copilot_selection_list',
-  CODEX_SELECTION_LIST: 'codex_selection_list',
-  /** Issue #1017: Codex pager / edit-previous (transcript) mode. */
-  CODEX_PAGER: 'codex_pager',
-  /** Issue #1829: Codex's hooks review screens, which only `t`/`esc` leave. */
-  CODEX_HOOKS_REVIEW: 'codex_hooks_review',
-  ANTIGRAVITY_SELECTION_LIST: 'antigravity_selection_list',
-  OPENCODE_RESPONSE_COMPLETE: 'opencode_response_complete',
-  INPUT_PROMPT: 'input_prompt',
-  NO_RECENT_OUTPUT: 'no_recent_output',
-  DEFAULT: 'default',
-} as const;
+export { STATUS_REASON } from './status-reason';
 
 /**
  * Set of STATUS_REASON values that indicate a selection list is active.
@@ -125,6 +119,10 @@ export const STATUS_REASON = {
  */
 export const SELECTION_LIST_REASONS = new Set<string>([
   STATUS_REASON.OPENCODE_SELECTION_LIST,
+  // Issue #1893: opencode's permission dialog is a horizontal button strip that
+  // only ←/→ + Enter drive — typing an option number does nothing (measured on
+  // 1.18.21), so it is a `menu`, not something `respond <id> N` can answer.
+  STATUS_REASON.OPENCODE_PERMISSION_PROMPT,
   STATUS_REASON.CLAUDE_SELECTION_LIST,
   STATUS_REASON.COPILOT_SELECTION_LIST,
   STATUS_REASON.CODEX_SELECTION_LIST,
@@ -137,696 +135,92 @@ export const SELECTION_LIST_REASONS = new Set<string>([
 ]);
 
 /**
- * Time threshold (in ms) for considering output as "stale"
- * If no new output for this duration, assume processing is complete
- * @constant
+ * The `running` reasons that mean "the agent is producing output right now"
+ * (Issue #1912).
+ *
+ * `current-output-builder` derives `thinking` / `isGenerating` from this, and it
+ * was a single `=== THINKING_INDICATOR` comparison until opencode grew a second
+ * one: branch A of the opencode block answers `opencode_processing_indicator`
+ * for the footer that reads `esc interrupt`, which is opencode's ONLY signal
+ * while it is between the submitted prompt and the first transcript row. A
+ * scraper-only session (no hooks) therefore showed no thinking indicator in
+ * `MessageList` for exactly the stretch where one is wanted.
+ *
+ * `DEFAULT` is deliberately absent: it is the "output changed recently" fallback
+ * and says nothing about the agent having announced itself, so promoting it
+ * would light the indicator on any repainting frame.
+ *
+ * @see STATUS_REASON
  */
-const STALE_OUTPUT_THRESHOLD_MS: number = 5000;
+export const GENERATING_REASONS = new Set<string>([
+  STATUS_REASON.THINKING_INDICATOR,
+  STATUS_REASON.OPENCODE_PROCESSING_INDICATOR,
+]);
 
 /**
- * Issue #1160: anchors for the BOTTOM edge of a Codex approval / numbered-choice
- * prompt. Used only by isCodexStalePrompt() to distinguish an ACTIVE prompt (the
- * bottom-most interactive element → waiting) from an already-ANSWERED one lingering
- * in scrollback with Codex processing below it (→ fall through to running detection).
- * Detection-wide Codex patterns live in cli-patterns.ts; these stay local to the guard.
+ * Whether a detection result describes an agent that is actively generating.
  *
- * CODEX_CONFIRMATION_FOOTER_PATTERN matches the "press number/enter to confirm" footer
- * that closes a numbered prompt. CODEX_NUMBERED_OPTION_PATTERN matches an option line
- * ("1. Yes", optionally prefixed by a ❯/›/● selection indicator). Neither pattern uses
- * /g (keeps .test() stateless) nor nested quantifiers (ReDoS-safe).
+ * Both halves matter: the reason alone is not enough because a stale frame can
+ * carry a `running` reason after the status has degraded to `ready`.
  */
-const CODEX_CONFIRMATION_FOOTER_PATTERN = /press\s+(?:number|enter)\s+to\s+confirm/i;
-const CODEX_NUMBERED_OPTION_PATTERN = /^\s*[❯›●]?\s*\d{1,2}[.)]\s/;
-
-/**
- * Issue #1160: decide whether a Codex prompt that detectPrompt() matched is a stale,
- * already-answered prompt left in the 50-line scan window rather than an active one.
- *
- * Codex keeps the answered "1. Yes / 2. No" block + "press number to confirm" footer in
- * its transcript (it draws on the normal screen, so tmux retains a scrollback for it —
- * TMUX_HISTORY_LIMIT lines deep) instead of repainting it away like Claude,
- * so detectPrompt() keeps matching it and detectSessionStatus() reports `waiting` even
- * after the user answered and Codex resumed — the sidebar status dot then stays orange
- * forever (the reported bug).
- *
- * Position-based guard (mirrors isCodexPromptReady()'s bottom-most-element idea): the
- * prompt is stale when a Codex thinking indicator (• Working / • Ran / …) sits strictly
- * BELOW the bottom-most prompt anchor (footer or numbered option) within the content
- * above the status bar. An UNANSWERED prompt has no running indicator below its block,
- * so this returns false and the caller keeps reporting `waiting` (Auto-Yes unaffected).
- *
- * The bare "›" input-line case ("answered, then › below") is already handled upstream by
- * detectPrompt()'s user-input barrier (prompt-detect-multiple-choice.ts), which returns
- * isPrompt=false before this guard runs, so only the thinking-indicator signal is needed
- * here — keeping the guard conservative against flipping a genuine prompt to running.
- */
-function isCodexStalePrompt(contentLines: string[]): boolean {
-  // Locate the Codex status bar (version-independent, Issue #1150). The content of
-  // interest is above it — same footer-boundary scan as priority 2.7 below.
-  let footerBoundary = -1;
-  for (let ci = contentLines.length - 1; ci >= Math.max(0, contentLines.length - 10); ci--) {
-    if (CODEX_STATUS_BAR_PATTERN.test(contentLines[ci])) {
-      footerBoundary = ci;
-      break;
-    }
-  }
-  const end = footerBoundary >= 0 ? footerBoundary : contentLines.length;
-
-  let lastPromptIdx = -1;
-  let lastThinkingIdx = -1;
-  for (let i = 0; i < end; i++) {
-    const line = contentLines[i];
-    const trimmed = line.trim();
-    if (trimmed === '') {
-      continue;
-    }
-    if (
-      CODEX_CONFIRMATION_FOOTER_PATTERN.test(trimmed) ||
-      CODEX_NUMBERED_OPTION_PATTERN.test(trimmed)
-    ) {
-      lastPromptIdx = i;
-    }
-    // detectThinking('codex', …) requires the "•" activity prefix, so option text that
-    // merely contains a word like "Running" cannot be mistaken for a running indicator.
-    if (detectThinking('codex', line)) {
-      lastThinkingIdx = i;
-    }
-  }
-
-  return lastPromptIdx >= 0 && lastThinkingIdx > lastPromptIdx;
+export function isGeneratingStatus(result: {
+  status: SessionStatus;
+  reason: string;
+}): boolean {
+  return result.status === 'running' && GENERATING_REASONS.has(result.reason);
 }
 
-/**
- * Issue #1628: decide whether a Codex frame that matched CODEX_SELECTION_LIST_PATTERN
- * is the agent ASKING FOR APPROVAL rather than the user browsing a menu.
- *
- * Why this exists: Codex renders both with a "Press enter to confirm" footer, so the
- * priority-0.8 selection-list branch (added for `/model` in Issue #622) also swallowed
- * every approval request and returned `hasActivePrompt: false`. `isPromptWaiting` is the
- * only blocked-on-a-human signal the current-output payload carries, so `commandmate wait
- * --on-prompt agent` could never raise exit 10 for a Codex worker sitting on
- * "Would you like to run the following command?" — it polled until the timeout while the
- * agent was stopped. Auto-Yes was unaffected because it calls detectPrompt() directly,
- * which parses these frames correctly; only the status-detector layer lost them.
- *
- * Two OR'd signals, both measured against live codex-cli 0.146.0 captures
- * (5 approval frames from one real session + 2 `/model` picker frames):
- *   1. an interrogative question line directly above the options
- *      ("Would you like to run the following command?" → the extracted question ends
- *      with "?"; a picker's ends with its description, e.g. "…browse all models.")
- *   2. the approval escape verb ("esc to cancel" vs a menu's "esc to go back" /
- *      "esc to dismiss")
- * Either alone covers every measured approval frame, so a rewording of one does not
- * reopen the bug.
- *
- * Gated on `promptDetection.isPrompt` so a frame detectPrompt() could not parse into
- * options (e.g. the unnumbered "Select a model" list of Issue #619) can never be
- * promoted to an active prompt.
- */
-function isCodexApprovalRequest(
-  promptDetection: PromptDetectionResult,
-  selectionWindow: string,
-): boolean {
-  if (!promptDetection.isPrompt) return false;
-  const question = promptDetection.promptData?.question?.trim() ?? '';
-  return question.endsWith('?') || CODEX_APPROVAL_FOOTER_PATTERN.test(selectionWindow);
-}
 
 /**
- * Detect session status with confidence level
+ * Number of lines from the end to check for prompt and input indicators.
  *
- * Priority order:
- * 1. Interactive prompt (yes/no, multiple choice) -> waiting
- * 2. Thinking indicator (spinner, progress) -> running
- * 3. Input prompt (>, ❯, ›, $, %) -> ready
- * 4. No recent output (>5s) -> ready (low confidence)
- * 5. Default -> running (low confidence)
+ * Re-exported from `tools/frame.ts`, where Issue #1927 moved the definition so
+ * the tool modules and the shared chain read one constant. Kept exported here
+ * because it was published from this module first and is imported by name
+ * elsewhere.
+ */
+export { STATUS_CHECK_LINE_COUNT } from './tools/frame';
+
+/**
+ * Detect session status with confidence level.
+ *
+ * Since Issue #1927 this is a facade: it normalises the frame once and hands it
+ * to the tool's own {@link ToolStatusDetector}, which runs the priority chain in
+ * `tools/run-detection.ts`. The signature, the return shape and every verdict a
+ * tool can reach are unchanged by that move; what the split buys is a place to
+ * state, per tool, what counts as evidence (§4 D1 / D2).
+ *
+ * Priority order (see `tools/run-detection.ts` for the full commentary):
+ * 1. Tool-specific pre-prompt branches (pickers, pagers, status bars)
+ * 2. Interactive prompt (yes/no, multiple choice) -> waiting
+ * 3. Thinking indicator (spinner, progress) -> running
+ * 4. Tool-specific running / completion markers
+ * 5. Input prompt (>, ❯, ›, $, %) -> ready, with per-tool idle evidence
+ * 6. No recent output (>5s) -> running, evidence none (Issue #1927; was `ready`)
+ * 7. Floor -> running, evidence none (`unknown_frame` / `default`)
  *
  * @param output - Raw tmux output (including ANSI escape codes).
  *                 This function handles ANSI stripping internally.
  * @param cliToolId - CLI tool identifier for pattern selection (CLIToolType).
  * @param lastOutputTimestamp - Optional timestamp (Date) for time-based heuristic.
- * @returns Detection result with status, confidence, reason, hasActivePrompt, and promptDetection
+ * @returns Detection result with status, confidence, reason, hasActivePrompt, evidence and promptDetection
  */
 export function detectSessionStatus(
   output: string,
   cliToolId: CLIToolType,
   lastOutputTimestamp?: Date
 ): StatusDetectionResult {
-  // Strip ANSI codes and get last N lines for analysis
-  const cleanOutput = normalizeTuiFrameForDetection(stripAnsi(output));
-  const lines = cleanOutput.split('\n');
-  // Strip trailing empty lines (tmux terminal padding) before windowing.
-  // tmux buffers often end with many empty padding lines that would otherwise
-  // fill the entire detection window, hiding the actual prompt/status content.
-  let lastNonEmptyIndex = lines.length - 1;
-  while (lastNonEmptyIndex >= 0 && lines[lastNonEmptyIndex].trim() === '') {
-    lastNonEmptyIndex--;
-  }
-  const contentLines = lines.slice(0, lastNonEmptyIndex + 1);
-  const lastLines = contentLines.slice(-STATUS_CHECK_LINE_COUNT).join('\n');
-  // DR-003: Separate thinking detection window (5 lines) from prompt detection window (15 lines)
-  const thinkingLines = contentLines.slice(-THINKING_TAIL_LINE_COUNT).join('\n');
-
-  // 0. Copilot: selection list detection BEFORE thinking detection
-  // COPILOT_THINKING_PATTERN includes "Reasoning\s+[■▪▮]" which matches the
-  // "Reasoning ■■■ medium" UI element shown in /model selection lists.
-  // Without this early check, the selection list would be misdetected as thinking.
-  // However, yes/no prompts also contain "to navigate · Enter to select" footer,
-  // so we must check detectPrompt first — if a prompt is detected, it takes priority
-  // over selection list (prompts show PromptPanel with Yes/No buttons).
-  const copilotSelectionWindow = contentLines.slice(-30).join('\n');
-  if (cliToolId === 'copilot' && COPILOT_SELECTION_LIST_PATTERN.test(copilotSelectionWindow)) {
-    const promptOptions = buildDetectPromptOptions(cliToolId);
-    const promptDetection = detectPrompt(stripBoxDrawing(cleanOutput), promptOptions);
-    if (promptDetection.isPrompt) {
-      // Distinguish yes/no prompts (2-3 options, e.g., "Do you want to run this command?")
-      // from ask_user multi-select prompts (4+ options). Yes/no prompts should show
-      // PromptPanel with buttons; ask_user prompts need NavigationButtons for ↑↓ selection.
-      const optionsCount = promptDetection.promptData?.options?.length ?? 0;
-      if (optionsCount <= 3) {
-        return {
-          status: 'waiting',
-          confidence: 'high',
-          reason: 'prompt_detected',
-          hasActivePrompt: true,
-          promptDetection,
-        };
-      }
-      // 4+ options: treat as selection list (NavigationButtons)
-    }
-    return {
-      status: 'waiting',
-      confidence: 'high',
-      reason: STATUS_REASON.COPILOT_SELECTION_LIST,
-      hasActivePrompt: false,
-      promptDetection,
-    };
-  }
-
-  // 0.5. Copilot: thinking detection BEFORE prompt detection (Issue #547)
-  // Copilot CLI keeps the "❯" prompt visible even during processing,
-  // so prompt detection would always match first. Check thinking first for copilot.
-  // Uses last 15 lines (not 5) because copilot shows action log lines above prompt.
-  const copilotThinkingWindow = contentLines.slice(-STATUS_CHECK_LINE_COUNT).join('\n');
-  if (cliToolId === 'copilot' && detectThinking(cliToolId, copilotThinkingWindow)) {
-    const promptOptions = buildDetectPromptOptions(cliToolId);
-    const promptDetection = detectPrompt(stripBoxDrawing(cleanOutput), promptOptions);
-    return {
-      status: 'running',
-      confidence: 'high',
-      reason: 'thinking_indicator',
-      hasActivePrompt: false,
-      promptDetection,
-    };
-  }
-
-  // 0.7. Codex: pager / edit-previous (transcript) mode detection (Issue #1017)
-  // Codex's transcript pager renders scroll / edit key-hint footers, e.g.:
-  //   "↑/↓ to scroll   pgup/pgdn to page   home/end to jump"
-  //   "q to quit   esc/← to edit prev   → to edit next   enter to edit message"
-  // together with a scroll-percentage separator ("─ N% ─") in place of the usual
-  // "model · N% left · path" status bar. So neither CODEX_SELECTION_LIST_PATTERN
-  // (footer is "enter to edit message", not "press enter to confirm/select") nor the
-  // status-bar boundary logic in 0.8 / 2.7 fire, leaving the read-only TerminalDisplay
-  // with no way to scroll or escape. Detect the pager footer directly — independent of
-  // the "N% left ·" status bar — and surface it as a selection list so NavigationButtons
-  // render (isSelectionListActive via SELECTION_LIST_REASONS). Checked ahead of
-  // detectPrompt/thinking because the pager has no active y/n prompt and its transcript
-  // content must not be misread as one. CODEX_PAGER_FOOTER_PATTERN does not match the
-  // genuine "/model" selection footer, so the 0.8 path below is unaffected (no regression).
-  if (cliToolId === 'codex' && CODEX_PAGER_FOOTER_PATTERN.test(lastLines)) {
-    const codexPagerPromptOptions = buildDetectPromptOptions(cliToolId);
-    const codexPagerPromptDetection = detectPrompt(stripBoxDrawing(cleanOutput), codexPagerPromptOptions);
-    return {
-      status: 'waiting',
-      confidence: 'high',
-      reason: STATUS_REASON.CODEX_PAGER,
-      hasActivePrompt: false,
-      promptDetection: codexPagerPromptDetection,
-    };
-  }
-
-  // 0.75. Codex: the hooks review screens (Issue #1829)
-  // codex-cli 0.148.0 answers "1. Review hooks" with a two-screen review UI:
-  //   screen 2 "Press t to trust all; enter to review hooks; esc to close"
-  //   screen 3 "Press t to trust; esc to go back"
-  // Neither carries a numbered option, a "press enter to confirm" footer, or any
-  // thinking indicator, so every branch below falls through to the `running`
-  // default -- which is how two live sessions sat parked on screen 3 while the UI
-  // and `cmate wait` both reported them as busy. They are the bottom-most
-  // interactive element and nothing but a keypress moves them: that is `waiting`.
-  // Checked ahead of prompt detection because the transcript rows on screen 2 are
-  // ordinary text that must not be read as options.
-  if (cliToolId === 'codex') {
-    const codexLifecycleDialog = getCodexLifecycleDialog(cleanOutput);
-    if (codexLifecycleDialog === 'hooks-list' || codexLifecycleDialog === 'hooks-detail') {
-      return {
-        status: 'waiting',
-        confidence: 'high',
-        reason: STATUS_REASON.CODEX_HOOKS_REVIEW,
-        hasActivePrompt: false,
-        promptDetection: detectPrompt(stripBoxDrawing(cleanOutput), buildDetectPromptOptions(cliToolId)),
-      };
-    }
-  }
-
-  // 0.8. Codex: selection list detection BEFORE prompt detection (Issue #622)
-  // CODEX_SELECTION_LIST_PATTERN matches "press enter to confirm/select" footer.
-  // Without this early check, detectPrompt() at priority 1 would detect the numbered
-  // options (e.g., "› 1. gpt-5.4") as a multiple_choice prompt, preventing
-  // NavigationButtons from being shown.
-  // This mirrors the Copilot Priority 0 pattern above.
-  //
-  // The pattern is scoped to the content window immediately above the Codex status
-  // bar (mirroring step 2.7's boundary detection). Matching against the full content
-  // would allow stale "Press enter to confirm" text from already-answered approval
-  // prompts high in scrollback to falsely trigger NavigationButtons.
-  if (cliToolId === 'codex') {
-    // Issue #1150: locate the status bar via CODEX_STATUS_BAR_PATTERN (version-
-    // independent; matches both legacy "N% left ·" and v0.141 "model · path" bars).
-    let codexFooterBoundary = -1;
-    for (let ci = contentLines.length - 1; ci >= Math.max(0, contentLines.length - 10); ci--) {
-      if (CODEX_STATUS_BAR_PATTERN.test(contentLines[ci])) {
-        codexFooterBoundary = ci;
-        break;
-      }
-    }
-    let codexContentEnd = codexFooterBoundary >= 0 ? codexFooterBoundary - 1 : contentLines.length - 1;
-    while (codexContentEnd >= 0 && contentLines[codexContentEnd].trim() === '') {
-      codexContentEnd--;
-    }
-    if (codexContentEnd >= 0) {
-      const codexSelectionWindow = contentLines
-        .slice(Math.max(0, codexContentEnd - STATUS_CHECK_LINE_COUNT + 1), codexContentEnd + 1)
-        .join('\n');
-      if (CODEX_SELECTION_LIST_PATTERN.test(codexSelectionWindow)) {
-        const codexPromptOptions = buildDetectPromptOptions(cliToolId);
-        const codexPromptDetection = detectPrompt(stripBoxDrawing(cleanOutput), codexPromptOptions);
-        // Issue #1628: an approval request wears the same footer as a menu but is the
-        // agent blocked on the human, so it must surface as an active prompt (exit 10
-        // for `wait`, PromptPanel in the UI) instead of a navigable list. The #1160
-        // staleness guard still applies: an ALREADY-ANSWERED approval whose footer is
-        // still inside the window, with Codex running below it, is dead scrollback.
-        if (
-          isCodexApprovalRequest(codexPromptDetection, codexSelectionWindow) &&
-          !isCodexStalePrompt(contentLines)
-        ) {
-          return {
-            status: 'waiting',
-            confidence: 'high',
-            reason: STATUS_REASON.PROMPT_DETECTED,
-            hasActivePrompt: true,
-            promptDetection: codexPromptDetection,
-          };
-        }
-        return {
-          status: 'waiting',
-          confidence: 'high',
-          reason: STATUS_REASON.CODEX_SELECTION_LIST,
-          hasActivePrompt: false,
-          promptDetection: codexPromptDetection,
-        };
-      }
-    }
-  }
-
-  // 0.9. Antigravity: selection list detection BEFORE thinking detection (Issue #995)
-  // agy's "Switch Model" (and other) selection TUIs render an "esc to cancel"
-  // footer that ANTIGRAVITY_THINKING_PATTERN also matches, so the generic thinking
-  // check at priority 2 (and the antigravity footer branch at 2.8) would otherwise
-  // misreport the selection screen as "generating" and NavigationButtons would never
-  // be shown. Detecting the selection list here — ahead of thinking — is the fix.
-  // Mirrors the Copilot (priority 0) / Codex (priority 0.8) early-detection pattern.
-  if (cliToolId === 'antigravity' && ANTIGRAVITY_SELECTION_LIST_PATTERN.test(lastLines)) {
-    const agyPromptOptions = buildDetectPromptOptions(cliToolId);
-    const agyPromptDetection = detectPrompt(stripBoxDrawing(cleanOutput), agyPromptOptions);
-    return {
-      status: 'waiting',
-      confidence: 'high',
-      reason: STATUS_REASON.ANTIGRAVITY_SELECTION_LIST,
-      hasActivePrompt: false,
-      promptDetection: agyPromptDetection,
-    };
-  }
-
-  // 1. Interactive prompt detection (highest priority)
-  // This includes yes/no prompts, multiple choice, and approval prompts
-  const promptOptions = buildDetectPromptOptions(cliToolId);
-  // Apply stripBoxDrawing() for Gemini CLI and OpenCode TUI compatibility:
-  // Gemini wraps prompts in box-drawing characters (╭╮╰╯│─) which prevent
-  // detectPrompt() from recognizing the prompt content.
-  // OpenCode TUI uses ┃ borders and █ scrollbar that need stripping.
-  // For OpenCode, Codex, and Claude, use full cleanOutput instead of lastLines
-  // (15-line window) because their multiple-choice prompts with descriptions
-  // can exceed 15 lines. Examples: Codex approval prompts with long file lists,
-  // Claude "Yes, and don't ask again for: git commit -m ..." options that embed
-  // full commit messages. detectPrompt() applies its own 50-line window internally.
-  const promptInput = (cliToolId === 'opencode' || cliToolId === 'codex' || cliToolId === 'claude' || cliToolId === 'copilot')
-    ? stripBoxDrawing(cleanOutput)
-    : stripBoxDrawing(lastLines);
-  let promptDetection = detectPrompt(promptInput, promptOptions);
-  if (promptDetection.isPrompt) {
-    // Issue #1160: Codex keeps an ANSWERED approval / numbered-choice block
-    // ("1. Yes / 2. No" + "press number to confirm" footer) in its transcript
-    // (non-alternate-screen, so tmux keeps TMUX_HISTORY_LIMIT lines of scrollback for
-    // it) instead of repainting it away like Claude. detectPrompt's
-    // 50-line window then keeps matching that dead prompt, so this priority-1 branch
-    // returns `waiting` even after the user answered and Codex resumed — the sidebar
-    // status dot stays orange forever (the reported bug). Guard with a position check:
-    // treat the prompt as active only when it is the bottom-most interactive element.
-    // If a Codex thinking indicator (• Working / • Ran / …) sits BELOW the prompt block,
-    // it is stale scrollback — neutralize the detection (so Auto-Yes and the sidebar
-    // never act on a dead prompt) and fall through to the priority-2.7 running/idle
-    // check. Unanswered prompts (nothing running below the block) still return `waiting`,
-    // so Auto-Yes is unaffected.
-    if (cliToolId === 'codex' && isCodexStalePrompt(contentLines)) {
-      promptDetection = { ...promptDetection, isPrompt: false, promptData: undefined };
-    } else {
-      return {
-        status: 'waiting',
-        confidence: 'high',
-        reason: 'prompt_detected',
-        hasActivePrompt: true,
-        promptDetection,
-      };
-    }
-  }
-
-  // 1.5. Claude CLI selection list detection
-  // Claude CLI's multi-select/checkbox prompts (e.g., AskUserQuestion with checkboxes)
-  // use arrow keys + Enter to navigate and toggle, not number input.
-  // The 15-line window may miss the question line, causing SEC-001a rejection above.
-  // Detect via the footer instruction pattern and show NavigationButtons instead of PromptPanel.
-  if (cliToolId === 'claude' && CLAUDE_SELECTION_LIST_FOOTER.test(lastLines)) {
-    return {
-      status: 'waiting',
-      confidence: 'high',
-      reason: STATUS_REASON.CLAUDE_SELECTION_LIST,
-      hasActivePrompt: false,
-      promptDetection,
-    };
-  }
-
-  // 1.6. Copilot CLI selection list detection — moved to priority 0 (above thinking)
-  // See comment at priority 0 for rationale.
-
-  // 2. Thinking indicator detection - THINKING_TAIL_LINE_COUNT window (narrower)
-  // CLI tool is actively processing (shows spinner, "Planning...", etc.)
-  if (detectThinking(cliToolId, thinkingLines)) {
-    return {
-      status: 'running',
-      confidence: 'high',
-      reason: 'thinking_indicator',
-      hasActivePrompt: false,
-      promptDetection,
-    };
-  }
-
-  // 2.6. Claude status-bar "esc to interrupt" detection — wider STATUS_CHECK_LINE_COUNT window (Issue #805)
-  // When Claude runs a subagent Task (e.g., /pm-auto-dev + general-purpose subagent), the
-  // bottom-of-screen task panel ("⏺ main" / "◯ general-purpose ... 55s" rows) pushes BOTH the
-  // "✶ Running…" spinner (top of the footer) and the "esc to interrupt" status bar above the
-  // narrow THINKING_TAIL_LINE_COUNT (5) window used by step 2. The visible "❯" input box then
-  // matches the input-prompt check at step 3, so the session was misreported as Ready.
-  //
-  // The "esc to interrupt" status bar appears only while Claude is actively processing (idle
-  // sessions show "? for shortcuts" instead) and is repainted live rather than lingering in
-  // scrollback, so matching it in the wider 15-line footer window is a safe running signal and
-  // does not reintroduce the Issue #188 spinner-summary false positive (only the spinner+ellipsis
-  // branch is restricted to the 5-line window).
-  if (cliToolId === 'claude' && CLAUDE_INTERRUPT_HINT_PATTERN.test(lastLines)) {
-    return {
-      status: 'running',
-      confidence: 'high',
-      reason: STATUS_REASON.THINKING_INDICATOR,
-      hasActivePrompt: false,
-      promptDetection,
-    };
-  }
-
-  // 2.5. OpenCode status detection (Issue #379)
-  // OpenCode TUI layout: content area (top) | empty padding (~150 lines) | footer status bar (~6 lines at bottom).
-  // Standard windowed checks (last N lines) only see footer/padding, never the content area.
-  //
-  // Detection strategy:
-  // A. "esc interrupt" in footer → actively processing (running)
-  // B. Find footer boundary via "ctrl+t" keybinding line, extract content above it, check for thinking → running
-  // C. Same content window, check for ▣ Build completion → ready
-  if (cliToolId === 'opencode') {
-    // A. Check footer for processing indicator ("esc interrupt" replaces "ctrl+t variants..." during processing)
-    if (OPENCODE_PROCESSING_INDICATOR.test(lastLines)) {
-      return {
-        status: 'running',
-        confidence: 'high',
-        reason: 'opencode_processing_indicator',
-        hasActivePrompt: false,
-        promptDetection,
-      };
-    }
-
-    // Extract content area by finding TUI footer boundary dynamically.
-    // Footer structure (bottom-up): keybinding hints ("ctrl+t variants..."),
-    // ╹▀▀ separator, model info bar ("Build GPT-5-mini GitHub Copilot"), ┃ padding.
-    // The keybinding line is the anchor; model bar is 2 lines above it.
-    // ┃ padding above the model bar becomes empty after stripBoxDrawing and is
-    // skipped by the lastNonEmpty search below.
-    const strippedForOpenCode = stripBoxDrawing(cleanOutput);
-    const ocLines = strippedForOpenCode.split('\n');
-    let footerBoundary = Math.max(0, ocLines.length - 7); // fallback: skip 7 lines
-    for (let i = ocLines.length - 1; i >= Math.max(0, ocLines.length - 10); i--) {
-      if (/ctrl\+[tp]/.test(ocLines[i])) {
-        // Exclude keybinding line (i), separator (i-1), and model info bar (i-2)
-        footerBoundary = Math.max(0, i - 2);
-        break;
-      }
-    }
-    const contentCandidates = ocLines.slice(0, footerBoundary);
-    let lastContentIdx = contentCandidates.length - 1;
-    while (lastContentIdx >= 0 && contentCandidates[lastContentIdx].trim() === '') {
-      lastContentIdx--;
-    }
-    if (lastContentIdx >= 0) {
-      // B. Check last few content lines for thinking indicators
-      const contentThinkingWindow = contentCandidates
-        .slice(Math.max(0, lastContentIdx - THINKING_TAIL_LINE_COUNT + 1), lastContentIdx + 1)
-        .join('\n');
-      if (detectThinking('opencode', contentThinkingWindow)) {
-        return {
-          status: 'running',
-          confidence: 'high',
-          reason: 'thinking_indicator',
-          hasActivePrompt: false,
-          promptDetection,
-        };
-      }
-
-      // C. Check content area for selection list (Issue #473: fuzzy-search list detection)
-      // Selection list header ("Select model"/"Select provider") may be far above the
-      // last content line when many items are listed, so check all content candidates.
-      const contentCheckWindow = contentCandidates
-        .slice(Math.max(0, lastContentIdx - STATUS_CHECK_LINE_COUNT + 1), lastContentIdx + 1)
-        .join('\n');
-      const fullContentText = contentCandidates.join('\n');
-      if (OPENCODE_SELECTION_LIST_PATTERN.test(fullContentText)) {
-        return {
-          status: 'waiting',
-          confidence: 'high',
-          reason: STATUS_REASON.OPENCODE_SELECTION_LIST,
-          hasActivePrompt: false,
-          promptDetection,
-        };
-      }
-
-      // D. Check last few content lines for completion marker (▣ Build · model · time)
-      if (OPENCODE_RESPONSE_COMPLETE.test(contentCheckWindow)) {
-        return {
-          status: 'ready',
-          confidence: 'high',
-          reason: STATUS_REASON.OPENCODE_RESPONSE_COMPLETE,
-          hasActivePrompt: false,
-          promptDetection,
-        };
-      }
-
-      // E. Check content area for prompt pattern (Issue #473: "Ask anything..." is in content area,
-      // not in lastLines, due to OpenCode TUI padding between content and footer)
-      const { promptPattern: ocPromptPattern } = getCliToolPatterns('opencode');
-      if (ocPromptPattern.test(contentCheckWindow)) {
-        return {
-          status: 'ready',
-          confidence: 'high',
-          reason: STATUS_REASON.PROMPT_DETECTED,
-          hasActivePrompt: true,
-          promptDetection,
-        };
-      }
-    }
-  }
-
-  // 2.7. Codex TUI content area detection (thinking + idle prompt)
-  // Codex TUI layout: conversation area (top) | empty padding (~30 lines) | input area + status bar (bottom).
-  // Standard windowed checks (last 5/15 lines) only see padding/status bar, missing both:
-  // A. Thinking indicators (• Ran, • Planning) in the conversation area → should show spinner
-  // B. Idle prompt (›) at the end of the conversation area → should show ready
-  // Strategy: find the Codex status bar, extract content above it, then check for thinking/idle.
-  //
-  // Issue #1150: the status-bar pattern was relaxed (CODEX_STATUS_BAR_PATTERN) so it
-  // matches v0.141's "model · path" bar (no "N% left ·"). Without this, codexFooterBoundary
-  // stayed -1, this whole block was skipped, and generating sessions fell through to the
-  // input-prompt check below and were misreported as `ready` (static dot, no glow).
-  if (cliToolId === 'codex') {
-    let codexFooterBoundary = -1;
-    for (let ci = contentLines.length - 1; ci >= Math.max(0, contentLines.length - 10); ci--) {
-      if (CODEX_STATUS_BAR_PATTERN.test(contentLines[ci])) {
-        codexFooterBoundary = ci;
-        break;
-      }
-    }
-    if (codexFooterBoundary >= 0) {
-      // Find last non-empty content line above footer (skip padding + input area)
-      let lastContentIdx = codexFooterBoundary - 1;
-      while (lastContentIdx >= 0 && contentLines[lastContentIdx].trim() === '') {
-        lastContentIdx--;
-      }
-      if (lastContentIdx >= 0) {
-        // A. Check content area for thinking indicators (wider window than step 2)
-        const codexThinkingWindow = contentLines
-          .slice(Math.max(0, lastContentIdx - THINKING_TAIL_LINE_COUNT + 1), lastContentIdx + 1)
-          .join('\n');
-        if (detectThinking('codex', codexThinkingWindow)) {
-          return {
-            status: 'running',
-            confidence: 'high',
-            reason: 'thinking_indicator',
-            hasActivePrompt: false,
-            promptDetection,
-          };
-        }
-
-        // A2. (Removed — Codex selection list detection moved to priority 0.8,
-        // before detectPrompt, to prevent false multiple_choice detection. Issue #622)
-
-        // B. Check if the last content line is the idle › prompt.
-        // The last non-empty line above the status bar is the current active line.
-        // When Codex is idle, this is the › prompt (with optional suggestion text).
-        // When processing, this is command output (not ›), so the check naturally fails.
-        const lastContentLine = contentLines[lastContentIdx].trim();
-        if (CODEX_PROMPT_PATTERN.test(lastContentLine)) {
-          return {
-            status: 'ready',
-            confidence: 'high',
-            reason: 'input_prompt',
-            hasActivePrompt: false,
-            promptDetection,
-          };
-        }
-
-        // C. Fallback: status bar present but neither thinking nor idle › detected.
-        // This means Codex is actively processing — command output has pushed the
-        // • Ran/• Working indicators beyond the 5-line thinking window.
-        // The status bar ("model · N% left · path") is always visible during Codex
-        // sessions, and the only idle state (›) was checked in B above.
-        return {
-          status: 'running',
-          confidence: 'high',
-          reason: 'thinking_indicator',
-          hasActivePrompt: false,
-          promptDetection,
-        };
-      }
-    } else {
-      // D. Status-bar-independent running detection (Issue #1150, mitigation B).
-      // Defense-in-depth for the next Codex CLI status-bar format drift: if the bar
-      // can't be located (the exact failure that broke Issue #1150), fall back to the
-      // Codex thinking indicator in the wider 15-line footer window — mirroring
-      // Claude's priority 2.6 interrupt-hint net. Gated so idle frames are unaffected:
-      // only fires when the tail is NOT the idle › prompt, so an idle session still
-      // falls through to the 'ready' input-prompt check at step 3.
-      let codexTailIdx = contentLines.length - 1;
-      while (codexTailIdx >= 0 && contentLines[codexTailIdx].trim() === '') {
-        codexTailIdx--;
-      }
-      const codexTailIsIdlePrompt =
-        codexTailIdx >= 0 && CODEX_PROMPT_PATTERN.test(contentLines[codexTailIdx].trim());
-      if (!codexTailIsIdlePrompt && detectThinking('codex', lastLines)) {
-        return {
-          status: 'running',
-          confidence: 'high',
-          reason: 'thinking_indicator',
-          hasActivePrompt: false,
-          promptDetection,
-        };
-      }
-    }
-  }
-
-  // 2.8. Antigravity (agy) footer-based detection (Issue #988)
-  // agy renders inline (scrollback retained), with the status bar as the last
-  // non-empty line and a bare "> " input box always visible just above it — even
-  // while generating. So the always-visible "> " would make step 3's generic
-  // prompt check report ready during generation. The footer is the source of
-  // truth: "esc to cancel" + braille spinner / "Generating..." while running,
-  // "? for shortcuts" when idle. Resolve running explicitly here first, then idle.
-  if (cliToolId === 'antigravity') {
-    // Running: thinking footer/spinner anywhere in the 15-line footer window.
-    if (detectThinking('antigravity', lastLines)) {
-      return {
-        status: 'running',
-        confidence: 'high',
-        reason: STATUS_REASON.THINKING_INDICATOR,
-        hasActivePrompt: false,
-        promptDetection,
-      };
-    }
-    // Idle: bare "> " input prompt visible and the response has completed.
-    const { promptPattern: agyPromptPattern } = getCliToolPatterns('antigravity');
-    if (agyPromptPattern.test(lastLines)) {
-      return {
-        status: 'ready',
-        confidence: 'high',
-        reason: STATUS_REASON.INPUT_PROMPT,
-        hasActivePrompt: false,
-        promptDetection,
-      };
-    }
-  }
-
-  // 3. Input prompt detection
-  // CLI tool is waiting for user input (shows >, ❯, ›, $, %, etc.)
-  const { promptPattern } = getCliToolPatterns(cliToolId);
-  if (promptPattern.test(lastLines)) {
-    return {
-      status: 'ready',
-      confidence: 'high',
-      reason: 'input_prompt',
-      hasActivePrompt: false,
-      promptDetection,
-    };
-  }
-
-  // 4. Time-based heuristic
-  // If no new output for >5 seconds, assume processing is complete
-  if (lastOutputTimestamp) {
-    const elapsed = Date.now() - lastOutputTimestamp.getTime();
-    if (elapsed > STALE_OUTPUT_THRESHOLD_MS) {
-      return {
-        status: 'ready',
-        confidence: 'low',
-        reason: 'no_recent_output',
-        hasActivePrompt: false,
-        promptDetection,
-      };
-    }
-  }
-
-  // 5. Default: assume running with low confidence
-  // This is a safe default when we cannot determine the state
+  const frame = normalizeFrame(output);
+  const verdict = getToolStatusDetector(cliToolId).detect(frame, { lastOutputTimestamp });
   return {
-    status: 'running',
-    confidence: 'low',
-    reason: 'default',
-    hasActivePrompt: false,
-    promptDetection,
+    status: verdict.status,
+    confidence: verdict.confidence,
+    reason: verdict.reason,
+    hasActivePrompt: verdict.hasActivePrompt,
+    evidence: verdict.evidence,
+    // Every chain exit carries one; the fallback keeps the required field
+    // total rather than letting a future branch publish `undefined` into a
+    // payload that has always had it (Issue #408's defense-in-depth).
+    promptDetection: verdict.promptDetection ?? { isPrompt: false, cleanContent: frame.clean },
   };
 }

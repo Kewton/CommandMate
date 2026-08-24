@@ -31,6 +31,7 @@ import { TerminalSplitPane } from '@/components/worktree/TerminalSplitPane';
 import { TerminalDisplay } from '@/components/worktree/TerminalDisplay';
 import { NavigationButtons } from '@/components/worktree/NavigationButtons';
 import { TerminalEscapeHatch } from '@/components/worktree/TerminalEscapeHatch';
+import { UnsentComposerBar, hasUnsentComposerText } from '@/components/worktree/UnsentComposerBar';
 import { PromptPanel } from '@/components/worktree/PromptPanel';
 import { MessageInput } from '@/components/worktree/MessageInput';
 import { HistoryPane, splitHistorySlotId } from '@/components/worktree/HistoryPane';
@@ -45,6 +46,7 @@ import { usePendingMessages, type OptimisticSendOptions } from '@/hooks/usePendi
 import { useHistoryPaneState } from '@/hooks/useHistoryPaneState';
 import { worktreeApi } from '@/lib/api-client';
 import { buildPromptResponseBody } from '@/lib/prompt-response-body-builder';
+import { readPromptDecisionId } from '@/components/worktree/prompt-decision-id';
 import { getCliToolDisplayName, getInstanceLabel } from '@/lib/cli-tools/types';
 import type {
   TerminalSplitPaneCoreProps,
@@ -264,24 +266,42 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   );
 
   const handlePromptRespond = useCallback(
-    async (answer: string): Promise<void> => {
+    async (answer: string, decisionId?: string | null): Promise<void> => {
       setPromptAnswering(true);
       try {
+        // Issue #1932: an approval the agent named by id goes to `/respond`,
+        // which delivers the verdict over the agent's own API. It cannot go to
+        // `/prompt-response`: that route re-captures the pane and refuses with
+        // `prompt_no_longer_active` when nothing parses, which for the dialogs
+        // that HAVE a decision id is every one of them — that refusal is the
+        // whole reason this path exists.
+        //
         // Issue #1738: `prompt.data` may be the degraded structured form (#1725),
         // and `promptType` on this body is a PromptType — a union the
         // unclassified sentinel is deliberately not a member of. Passing null
         // for it sends no promptType at all, which is the truthful answer to
         // "what kind of prompt is this?" when nobody could read the dialog.
-        // Unreachable from the UI today: neither surface draws a control for the
-        // degraded form, so nothing can call this with one.
-        const requestBody = buildPromptResponseBody(
-          answer,
-          cliToolId,
-          isAnswerablePromptData(prompt.data) ? prompt.data : null,
-          resolvedInstanceId,
-        );
+        const requestBody = decisionId
+          ? {
+              decisionId,
+              answer,
+              cliTool: cliToolId,
+              // Same rule as buildPromptResponseBody: the primary instance is
+              // named by the tool id server-side, so sending it would be noise.
+              ...(resolvedInstanceId && resolvedInstanceId !== cliToolId
+                ? { instanceId: resolvedInstanceId }
+                : {}),
+            }
+          : buildPromptResponseBody(
+              answer,
+              cliToolId,
+              isAnswerablePromptData(prompt.data) ? prompt.data : null,
+              resolvedInstanceId,
+            );
         const response = await fetch(
-          `/api/worktrees/${worktreeId}/prompt-response`,
+          decisionId
+            ? `/api/worktrees/${worktreeId}/respond`
+            : `/api/worktrees/${worktreeId}/prompt-response`,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -308,6 +328,10 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
 
   const showNav = terminal.isSelectionListActive;
   const showPrompt = prompt.visible && !autoYesEnabled;
+  // Issue #1932: the approval this pane's dialog addresses, when the payload
+  // names one. Null for every scraper-read prompt and for every source that
+  // publishes no per-decision id, which is what keeps those on the pane path.
+  const promptDecisionId = readPromptDecisionId(prompt.data);
 
   // Issue #1017 / #1494: detection-independent navigation safety net (←/→/↑/↓/Enter/
   // Esc, plus Codex 'q'). Shown only when the session is interactive but detection
@@ -320,6 +344,16 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
     terminal.isUnclassifiedActive &&
     !showNav &&
     !prompt.visible;
+
+  // Issue #1879: the unsent-input bar. Its gate is the composer's CONTENTS and
+  // nothing else — not isUnclassifiedActive, not isSelectionListActive, not
+  // prompt.visible. Those three gates exist so a stray Enter cannot reach a live
+  // input line; this bar shows the user the exact text before they aim an Enter
+  // at it, which is a different act. Blank composer (including a frame where all
+  // that is on screen is the CLI's dim placeholder — Claude's suggestion, or
+  // codex's since #1890 — which `extractComposerText` has already dropped) means
+  // no bar, so the "no Enter affordance when the box is empty" property holds.
+  const showUnsentComposerBar = hasUnsentComposerText(terminal.composerText);
 
   // Issue #744: the embedded HistoryPane for THIS split. Receives this split's
   // own messages (useSplitMessages) and the per-split highlight namespace via
@@ -494,10 +528,20 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
             onKeysSent={refresh}
           />
         ) : null}
+        {showUnsentComposerBar ? (
+          <UnsentComposerBar
+            worktreeId={worktreeId}
+            cliToolId={cliToolId}
+            instanceId={resolvedInstanceId}
+            composerText={terminal.composerText}
+            onActionSent={refresh}
+          />
+        ) : null}
         {showPrompt ? (
           <PromptPanel
             promptData={prompt.data}
             messageId={prompt.messageId}
+            decisionId={promptDecisionId}
             visible={prompt.visible}
             answering={prompt.answering}
             onRespond={handlePromptRespond}
@@ -543,6 +587,8 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       showNav,
       showPrompt,
       showEscapeHatch,
+      showUnsentComposerBar,
+      terminal.composerText,
       terminal.isPagerActive,
       worktreeId,
       cliToolId,
@@ -550,6 +596,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       refresh,
       prompt.data,
       prompt.messageId,
+      promptDecisionId,
       prompt.visible,
       prompt.answering,
       handlePromptRespond,

@@ -1,0 +1,85 @@
+version: 1
+title: "Issue #1927 追補: PR #1987 の Integration Tests 赤（current-output-structured-status-1723）を裁定して直す"
+goal: |
+  **PR #1987 の CI で Integration Tests が落ちました。** これを直してください。
+
+      FAIL tests/integration/current-output-structured-status-1723.test.ts
+        > Issue #1723: a posted Stop reaches current-output > is running before the event a…
+        AssertionError: expected true to be false
+        > Issue #1723: the benefit reaches `commandmate wait` unchanged > completes on the …
+      Test Files  1 failed | 81 passed (82)
+
+  ## これは想定内かもしれませんが、断定せずに裁定してください
+
+  あなたは commit `9df208a9` の message で、**unit 側**の
+  `tests/unit/session/current-output-structured-status-1723.test.ts` と
+  `status-evidence-1924.test.ts` の「構造化 stop が busy pane の証拠を上げる」ケースを
+  **DR2-003 の意図した変更**として更新したと書いています。
+
+  **`tests/integration/` に同名の双子があり、そちらは更新されていません。** まず次を裁定してください:
+
+  - (a) **unit 側と同じ「意図した変更」** — ならば integration 側も同じ理由で期待値を更新する。
+    ただし **integration 版が unit 版と何を違えて検証しているか**を読んでから決めること
+    （実 route と実 DB を通す層なので、unit では見えない前提を持っている可能性があります）。
+  - (b) **本物の回帰** — DR2-003 の改訂が意図しない場面まで発火している。ならば実装を直す。
+
+  **どちらだったかと根拠を commit message に書いてください。** 「unit を直したから integration も」
+  という理由だけで期待値を書き換えるのは不合格とみなします。
+
+  ## なぜ裁定をすり抜けたか（あなたの落ち度ではありません）
+
+  `wait --verify` の宣言ゲートに **integration が含まれていません**（#1946 で実測・記録済み。
+  `verify.yaml` が見ているのは CI 12 ジョブ中 7 本で、integration / build / e2e / Security Audit /
+  Legacy tmux は対象外）。あなたはフル `npm run test:unit` を回して緑を確認しており、
+  **見えるはずのない層**でした。
+
+  今回の scope に `tests/integration/**` を追加しました。
+
+  ## やること
+
+  - 上記を裁定して直す。
+  - **`npm run test:integration` を実際に回して 82 files 緑を確認**すること
+    （`wait --verify` は integration を見ないので、あなたが回さないと誰も見ません）。
+  - 変異注入: 直した箇所が空振りでないことを示す。(a) なら「DR2-003 の連言を外すと
+    integration 側も赤になる」ことを確認してください。
+  - フル `npm run test:unit` が引き続き exit 0 であること。
+  - 断片（`dev-reports/changelog/issue-1927.md` / `dev-reports/module-reference/issue-1927.md`）に
+    今回の裁定を**追記**してください。
+
+  commit は既存 commit への `--amend` でも 2 本目でも構いません（PR は squash マージします）。
+  PR は作らない・push しない（私が行います）。
+
+  ## 触ってよい範囲
+
+  前回の scope に加えて `tests/integration/**`。
+
+  **`src/lib/detection/tools/*/prompt.ts` と `tools/registry.ts` の `VERIFIED_AGAINST` は
+  触らないでください** — #1928 / #1929 のワーカーが**あなたのブランチの上**で同時に作業しています。
+
+  作業が終わったら最終行に `IMPL_COMPLETED` とだけ出力すること。
+scope:
+  allow:
+    - "src/lib/detection/**"
+    - "src/lib/session/current-output-builder.ts"
+    - "src/lib/session/worktree-status-helper.ts"
+    - "src/config/**"
+    - "tests/unit/detection/**"
+    - "tests/unit/detection-copilot-generating-1885.test.ts"
+    - "tests/unit/detection-help-overlay-1497.test.ts"
+    - "tests/unit/detection-opencode-interrupt-1894.test.ts"
+    - "tests/unit/lib/**"
+    - "tests/unit/session/**"
+    - "tests/unit/guards/**"
+    - "tests/unit/skills/orchestrate-monitor/fixtures/**"
+    - "tests/fixtures/**"
+    - "tests/integration/**"
+  deny: []
+verify:
+  gates: [token-discipline, control-chars, claudemd-size, route-exports, lint, typecheck, unit]
+autoYes:
+  mode: allow-listed
+  allowPromptTypes: [yes_no, multiple_choice]
+  denyPatterns: []
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true

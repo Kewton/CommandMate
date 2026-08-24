@@ -110,26 +110,55 @@
       "statusline": "ステータスラインの表示を設定",
       "usage": "セッションのコスト・プラン使用量・アクティビティ統計を表示",
       "tasks": "バックグラウンドタスクを表示・管理",
-      "memory": "CLAUDE.md メモリファイルを編集し auto-memory を管理",
+      "memory": {
+        "claude": "CLAUDE.md メモリファイルを編集し auto-memory を管理",
+        "copilot": "メモリの状態表示と、セッション間メモリの有効・無効切り替え"
+      },
       "new": "新しい会話を開始",
-      "logout": "Codex からサインアウト",
+      "logout": {
+        "codex": "Codex からサインアウト",
+        "claude": "Anthropic アカウントからサインアウト",
+        "copilot": "現在の OAuth ログインセッションからログアウト"
+      },
       "quit": "Codex CLI を終了",
       "diff": "Git の差分を表示（未追跡ファイルを含む）",
       "mention": "次のやり取りにファイル/フォルダを添付",
       "mcp": "MCP サーバーと利用可能なツールを管理",
-      "init": "カレントディレクトリに AGENTS.md テンプレートを生成",
-      "feedback": "Codex チームにフィードバックを送信",
+      "init": {
+        "codex": "カレントディレクトリに AGENTS.md テンプレートを生成",
+        "claude": "リポジトリ向けの CLAUDE.md ガイドを生成",
+        "copilot": "このリポジトリ向けの Copilot 指示ファイルを初期化",
+        "opencode": "AGENTS.md のガイド付きセットアップを実行"
+      },
+      "feedback": {
+        "codex": "Codex チームにフィードバックを送信",
+        "claude": "Claude Code についてのフィードバックを送信",
+        "copilot": "CLI についてのフィードバックを送信"
+      },
       "plan": "プランモードを切り替え",
       "goal": "現在のセッションの目標を設定",
-      "agent": "アクティブなエージェントを切り替え（Codex）",
+      "agent": {
+        "codex": "アクティブなエージェントを切り替え（Codex）",
+        "copilot": "エージェントを一覧から選択"
+      },
       "subagents": "サブエージェントを管理",
       "fork": "現在のセッションをフォーク",
       "memories": "Codex のメモリを管理",
-      "skills": "Codex のスキルを管理",
+      "skills": {
+        "codex": "Codex のスキルを管理",
+        "claude": "Claude Code のスキルを管理",
+        "copilot": "機能を拡張するスキルを管理",
+        "opencode": "利用可能なスキルを一覧・実行"
+      },
       "hooks": "フック設定を確認・管理",
       "sessions": "会話履歴を閲覧",
-      "connect": "言語サーバーに接続",
-      "exit": "OpenCode TUI を終了",
+      "connect": "プロバイダーを接続",
+      "exit": {
+        "opencode": "OpenCode TUI を終了",
+        "claude": "CLI を終了",
+        "codex": "CLI を終了",
+        "copilot": "CLI を終了"
+      },
       "models": "AI モデルを切り替え",
       "agents": {
         "opencode": "利用可能なエージェントを一覧・管理",
@@ -152,7 +181,10 @@
       "color": "現在のセッションのプロンプトバーの色を設定",
       "copy": "直近の応答を Markdown としてクリップボードにコピー",
       "dataviz": "チャート・グラフ・ダッシュボードの設計ガイダンス",
-      "debug": "デバッグログを有効化し、セッションのデバッグログを読んで問題を切り分け",
+      "debug": {
+        "claude": "デバッグログを有効化し、セッションのデバッグログを読んで問題を切り分け",
+        "opencode": "デバッグ情報を表示"
+      },
       "deep-research": "質問に対して web 検索を展開し、出典を突き合わせて引用付きレポートを作成",
       "design-login": "claude.ai アカウントで /design-sync のデザインシステムアクセスを認可",
       "design-sync": "リポジトリの React デザインシステムを Claude Design にアップロードし、実際のコンポーネントを使わせる",
@@ -164,10 +196,16 @@
       "install-github-app": "リポジトリに Claude GitHub App を導入（GitHub Actions の設定も任意で実施）",
       "install-slack-app": "Claude Slack アプリを導入",
       "keybindings": "キーボードショートカットの設定ファイルを開く",
-      "login": "Anthropic アカウントにサインイン",
+      "login": {
+        "claude": "Anthropic アカウントにサインイン",
+        "copilot": "Copilot にログイン"
+      },
       "mobile": "Claude モバイルアプリのダウンロード用 QR コードを表示",
       "passes": "Claude Code の 1 週間無料パスを友人に共有",
-      "plugin": "Claude Code のプラグインを管理",
+      "plugin": {
+        "claude": "Claude Code のプラグインを管理",
+        "copilot": "プラグインとプラグインマーケットプレイスを管理"
+      },
       "powerup": "対話型レッスンとデモで Claude Code の機能を学ぶ",
       "privacy-settings": "プライバシー設定を確認・更新",
       "radio": "Claude FM の lo-fi ラジオをブラウザで開く",
@@ -212,7 +250,10 @@
       },
       "archive": "このセッションをアーカイブして終了",
       "delete": "このセッションを完全に削除して終了",
-      "app": "このセッションをデスクトップアプリで継続",
+      "app": {
+        "codex": "このセッションをデスクトップアプリで継続",
+        "copilot": "GitHub Copilot デスクトップアプリを開く"
+      },
       "side": "一時的なフォークで別の会話を開始",
       "raw": "コピーしやすい raw スクロールバックモードを切り替え",
       "debug-config": "設定の階層と要件の出所をデバッグ用に表示",
@@ -224,7 +265,41 @@
       "ps": "バックグラウンドのターミナル一覧を表示",
       "personality": "Codex の応答スタイルを選択",
       "test-approval": "承認リクエストのテスト",
-      "list-agents": "Claude がメッセージを送れるサブエージェントと他の Claude Code セッションを宛先名つきで一覧表示"
+      "list-agents": "Claude がメッセージを送れるサブエージェントと他の Claude Code セッションを宛先名つきで一覧表示",
+      "allow-all": "ツール・パス・URL の権限をすべて許可",
+      "ask": "会話履歴に残さない単発の質問",
+      "autopilot": "オートパイロットモードを切り替え",
+      "changelog": "CLI バージョンの変更履歴を表示",
+      "chronicle": "セッション履歴のツールとインサイトを表示",
+      "cwd": "作業ディレクトリを変更、または現在地を表示",
+      "delegate": "このセッションを GitHub に送りプルリクエストを作成",
+      "diagnose": "現在のセッションログを解析",
+      "env": "読み込み済みの環境情報を表示",
+      "fleet": "サブエージェント並列実行のフリートモードを有効化",
+      "footer": "ステータスライン項目を設定",
+      "instructions": "カスタム指示ファイルの表示と有効・無効切り替え",
+      "keep-alive": "システムスリープを防ぐ keep-alive モードを管理",
+      "limits": "セッションの上限を表示・編集",
+      "list-dirs": "許可済みディレクトリをすべて表示",
+      "lsp": "言語サーバーの設定を管理",
+      "pr": "現在のブランチのプルリクエストを操作",
+      "refine": "粗いプロンプトをレビュー用に書き直し",
+      "remote": "GitHub の Web・モバイルからのリモート操作を切り替え",
+      "research": "ディープリサーチ調査を実行",
+      "reset-allowed-tools": "許可済みツールの一覧をリセット",
+      "restart": "現在のセッションを保ったまま CLI を再起動",
+      "rubber-duck": "現在の作業への独立した批評を取得",
+      "search": "会話タイムラインを検索",
+      "session": "セッションを表示・管理",
+      "settings": "設定 UI を開く、または個別の値を表示・設定",
+      "share": "セッションを Markdown ファイルや GitHub gist として共有",
+      "undo": "直前のターンを巻き戻してファイル変更を取り消し",
+      "update": "CLI を最新バージョンに更新",
+      "user": "GitHub ユーザー一覧を管理",
+      "version": "バージョン情報を表示",
+      "mcps": "MCP サーバーの有効・無効を切り替え",
+      "move": "別のプロジェクトディレクトリへ移動",
+      "variants": "モデルのバリアントを切り替え"
     }
   },
   "session": {
@@ -241,7 +316,7 @@
     "responseCompleted": "レスポンス完了",
     "thinking": "考え中...",
     "thinkingStatus": "思考中",
-    "claudeIsThinking": "Claude が考え中です..."
+    "agentIsThinking": "{toolName} が考え中です..."
   },
   "output": {
     "latest": "最新の出力",
@@ -332,6 +407,12 @@
     "searchTerminal": "ターミナル内を検索",
     "endSession": "セッションを終了",
     "endSessionFor": "{name}のセッションを終了"
+  },
+  "unsentComposer": {
+    "regionLabel": "未送信の入力",
+    "label": "未送信の入力:",
+    "run": "実行",
+    "clear": "クリア"
   },
   "todo": {
     "addPlaceholder": "ToDoを追加…",
@@ -708,7 +789,8 @@
     "timer": "タイマー",
     "todo": "ToDo",
     "skills": "スキル",
-    "verification": "検証"
+    "verification": "検証",
+    "env": "環境変数"
   },
   "branchMismatch": {
     "changedFrom": "ブランチが",
@@ -893,6 +975,46 @@
       "failed": "failed（不合格）",
       "not_started": "not_started（作業証跡ゼロ）",
       "cancelled": "cancelled（中止）"
+    }
+  },
+  "envManager": {
+    "title": "環境変数マネージャ",
+    "description": "このワークツリーの環境変数ファイルを表示・編集します。値は既定で伏せられます。",
+    "filePickerLabel": "環境変数ファイル",
+    "viewModeLabel": "表示形式",
+    "viewKeyValue": "キー / 値",
+    "viewRaw": "テキスト",
+    "notCreated": "未作成",
+    "templateBadge": "テンプレート",
+    "notCreatedHint": "{file} はまだ存在しません。キーを追加して保存すると作成されます。",
+    "keyLabel": "変数名",
+    "valueLabel": "{key} の値",
+    "showValue": "{key} の値を表示",
+    "hideValue": "{key} の値を隠す",
+    "removeRow": "{key} を削除",
+    "addRow": "変数を追加",
+    "revealAll": "値を表示",
+    "hideAll": "値を隠す",
+    "reload": "ディスクから再読み込み",
+    "save": "保存",
+    "saved": "保存しました。",
+    "loading": "環境変数ファイルを読み込み中...",
+    "loadError": "環境変数ファイルを読み込めませんでした。",
+    "empty": "変数はまだ定義されていません。",
+    "validationFailed": "このファイルはまだ保存できません。",
+    "suggestionsTitle": "テンプレートのキー",
+    "suggestionsHint": ".env.example / .env.sample にあってこのファイルに無いキーです。タップで追加します。",
+    "rawLabel": "環境変数ファイル（テキスト）",
+    "rawMaskedLabel": "環境変数ファイル（値を伏せた表示）",
+    "rawMaskedHint": "値は {mask} で伏せられています。「値を表示」で表示・編集できます。",
+    "issues": {
+      "invalidSyntax": "{line} 行目: KEY=VALUE の形式ではありません。",
+      "invalidKey": "{line} 行目: 変数名が不正です。英字かアンダースコアで始まり、英数字とアンダースコアのみが使えます。",
+      "unterminatedQuote": "{line} 行目: {key} の引用符が閉じられていません。",
+      "duplicateKey": "{line} 行目: {key} が重複しています。最後の定義が有効になります。",
+      "controlCharacter": "{line} 行目: 環境変数ファイルに使用できない制御文字が含まれています。",
+      "tooLarge": "このファイルは大きすぎるため、ここでは編集できません。",
+      "tooManyEntries": "このファイルは変数が多すぎるため、ここでは編集できません。"
     }
   }
 }

@@ -8,14 +8,25 @@
 import { afterAll, afterEach, describe, it, expect, vi, beforeAll, beforeEach } from 'vitest';
 import { join } from 'path';
 import { makeTempDir, removeTempDir } from '@tests/helpers/temp-dir';
-import { OpenCodeTool, OPENCODE_EXIT_COMMAND, OPENCODE_INIT_WAIT_MS, OPENCODE_PANE_HEIGHT } from '@/lib/cli-tools/opencode';
+import {
+  OpenCodeTool,
+  OPENCODE_EXIT_COMMAND,
+  OPENCODE_PANE_HEIGHT,
+  OPENCODE_READY_MAX_ATTEMPTS,
+  OPENCODE_READY_POLL_INTERVAL_MS,
+} from '@/lib/cli-tools/opencode';
+import { buildOpencodeComposerFrame } from '@tests/fixtures/opencode-launch-boot-11821';
 
 // Mock tmux module
 vi.mock('@/lib/tmux/tmux', () => ({
   hasSession: vi.fn(),
   createSession: vi.fn(),
+  // Issue #1908: the launch path polls the pane instead of sleeping 15 s.
+  capturePane: vi.fn(),
   sendKeys: vi.fn(),
   sendSpecialKey: vi.fn(),
+  // Issue #1905: `/exit` is typed and submitted as two tmux commands.
+  sendSpecialKeys: vi.fn(),
   killSession: vi.fn(),
   reconcileSessionGeometry: vi.fn().mockResolvedValue(false),
 }));
@@ -66,7 +77,9 @@ vi.mock('@/lib/session/agent-session-lifecycle', async (importOriginal) => {
 import {
   hasSession,
   createSession,
+  capturePane,
   sendKeys,
+  sendSpecialKeys,
   killSession,
 } from '@/lib/tmux/tmux';
 import { ensureOpencodeConfig } from '@/lib/cli-tools/opencode-config';
@@ -110,6 +123,10 @@ describe('OpenCodeTool', () => {
     vi.mocked(attachOpencodeEventStream).mockResolvedValue(false);
     vi.mocked(resumeOpencodeEventStream).mockResolvedValue(false);
     vi.mocked(releaseOpencodeEventStream).mockResolvedValue(undefined);
+    // Issue #1908: the default frame is a ready one, so the launch tests below
+    // leave `waitForReady` on its first attempt. The polling itself is pinned in
+    // tests/unit/cli-tools/opencode-launch-readiness-1908.test.ts.
+    vi.mocked(capturePane).mockResolvedValue(buildOpencodeComposerFrame());
     tool = new OpenCodeTool();
   });
 
@@ -137,8 +154,13 @@ describe('OpenCodeTool', () => {
       expect(OPENCODE_EXIT_COMMAND).toBe('/exit');
     });
 
-    it('should export OPENCODE_INIT_WAIT_MS as 15000', () => {
-      expect(OPENCODE_INIT_WAIT_MS).toBe(15000);
+    it('polls for readiness over a 30-second window instead of sleeping (#1908)', () => {
+      // The old `OPENCODE_INIT_WAIT_MS = 15000` was removed, not retuned: no
+      // fixed number is right when the composer lands at 3 s idle and at 24 s
+      // under load. What is pinned instead is the window the poll covers.
+      expect(OPENCODE_READY_POLL_INTERVAL_MS).toBe(500);
+      expect(OPENCODE_READY_MAX_ATTEMPTS).toBe(60);
+      expect(OPENCODE_READY_POLL_INTERVAL_MS * OPENCODE_READY_MAX_ATTEMPTS).toBe(30_000);
     });
 
     it('should export OPENCODE_PANE_HEIGHT as 200', () => {
@@ -199,7 +221,11 @@ describe('OpenCodeTool', () => {
       // — a freshly started pane publishing `running` before anybody typed.
       vi.mocked(hasSession).mockResolvedValue(false);
       vi.mocked(createSession).mockResolvedValue(undefined);
-      vi.mocked(ensureOpencodeConfig).mockResolvedValue(undefined);
+      vi.mocked(ensureOpencodeConfig).mockResolvedValue({
+        written: false,
+        configPath: null,
+        reason: 'disabled',
+      });
 
       vi.useFakeTimers();
       void tool.startSession('test-123', '/test/path', 'opencode-2');
@@ -223,7 +249,11 @@ describe('OpenCodeTool', () => {
       // HTTP server, so there is no `serve` process to start and no `attach`.
       vi.mocked(hasSession).mockResolvedValue(false);
       vi.mocked(createSession).mockResolvedValue(undefined);
-      vi.mocked(ensureOpencodeConfig).mockResolvedValue(undefined);
+      vi.mocked(ensureOpencodeConfig).mockResolvedValue({
+        written: false,
+        configPath: null,
+        reason: 'disabled',
+      });
       vi.mocked(reserveOpencodeServerPort).mockImplementation(async (target) => {
         rememberOpencodePort(target, 4242, '/test/path');
         return 4242;
@@ -248,7 +278,11 @@ describe('OpenCodeTool', () => {
       // behaviour rather than a half-configured one.
       vi.mocked(hasSession).mockResolvedValue(false);
       vi.mocked(createSession).mockResolvedValue(undefined);
-      vi.mocked(ensureOpencodeConfig).mockResolvedValue(undefined);
+      vi.mocked(ensureOpencodeConfig).mockResolvedValue({
+        written: false,
+        configPath: null,
+        reason: 'disabled',
+      });
       rememberOpencodePort(
         { worktreeId: 'test-123', cliToolId: 'opencode' },
         4242,
@@ -268,7 +302,11 @@ describe('OpenCodeTool', () => {
       vi.mocked(hasSession).mockResolvedValue(false);
       vi.mocked(createSession).mockResolvedValue(undefined);
       vi.mocked(sendKeys).mockResolvedValue(undefined);
-      vi.mocked(ensureOpencodeConfig).mockResolvedValue(undefined);
+      vi.mocked(ensureOpencodeConfig).mockResolvedValue({
+        written: false,
+        configPath: null,
+        reason: 'disabled',
+      });
 
       // Speed up test by mocking setTimeout
       vi.useFakeTimers();
@@ -358,9 +396,37 @@ describe('OpenCodeTool', () => {
       await tool.killSession('test-123');
 
       // Should send /exit command
-      expect(sendKeys).toHaveBeenCalledWith('mcbd-opencode-test-123', OPENCODE_EXIT_COMMAND, true);
+      expect(sendKeys).toHaveBeenCalledWith('mcbd-opencode-test-123', OPENCODE_EXIT_COMMAND, false);
       // Should fall back to kill-session
       expect(killSession).toHaveBeenCalledWith('mcbd-opencode-test-123');
+    });
+
+    /**
+     * Issue #1905, measured on opencode 1.18.21: `send-keys '/exit' C-m` in a
+     * single tmux command does not exit — `/` opens the command palette and the
+     * batched `C-m` is eaten by it, so the TUI sits there with `/exit` typed
+     * (still up 10.8 s later, 2 runs of 2). Sent as body-then-Enter it exits in
+     * ~0.45 s. The order matters as much as the split, so both are pinned.
+     */
+    it('types /exit and submits it with a separate Enter, in that order', async () => {
+      vi.mocked(hasSession).mockResolvedValue(true);
+      vi.mocked(sendKeys).mockResolvedValue(undefined);
+      vi.mocked(sendSpecialKeys).mockResolvedValue(undefined);
+      vi.mocked(killSession).mockResolvedValue(true);
+
+      await tool.killSession('test-123');
+
+      // The body must never carry the Enter with it.
+      expect(sendKeys).toHaveBeenCalledWith('mcbd-opencode-test-123', OPENCODE_EXIT_COMMAND, false);
+      expect(sendKeys).not.toHaveBeenCalledWith(
+        'mcbd-opencode-test-123',
+        OPENCODE_EXIT_COMMAND,
+        true
+      );
+      expect(sendSpecialKeys).toHaveBeenCalledWith('mcbd-opencode-test-123', ['Enter']);
+      expect(vi.mocked(sendKeys).mock.invocationCallOrder[0]).toBeLessThan(
+        vi.mocked(sendSpecialKeys).mock.invocationCallOrder[0]
+      );
     });
 
     it('should not kill if /exit successfully terminated the session', async () => {
@@ -371,7 +437,7 @@ describe('OpenCodeTool', () => {
 
       await tool.killSession('test-123');
 
-      expect(sendKeys).toHaveBeenCalledWith('mcbd-opencode-test-123', OPENCODE_EXIT_COMMAND, true);
+      expect(sendKeys).toHaveBeenCalledWith('mcbd-opencode-test-123', OPENCODE_EXIT_COMMAND, false);
       expect(killSession).not.toHaveBeenCalled();
     });
 

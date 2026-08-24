@@ -32,6 +32,26 @@ const PUSH_KEYS = [
   'terminalAttention',
   'stillWaitingPrompt',
   'stillWaitingTerminal',
+  // Issue #2000: the failure bodies. One pair per FailurePushReason, plus a
+  // generic pair `buildFailureBody` falls back to when a producer sends
+  // `kind: 'failure'` without naming the reason.
+  'failureVerificationWithExcerpt',
+  'failureVerification',
+  'failureUpstreamWithExcerpt',
+  'failureUpstream',
+  'failureSessionStartWithExcerpt',
+  'failureSessionStart',
+  // Issue #2009: a start that could not be attempted at all — the CLI is not
+  // installed. Its own pair, because the remedy differs from a CLI that started
+  // and then printed an error, and only the dictionary can say "is not
+  // installed" in the reader's language (the excerpt is just the tool name).
+  'failureSessionUnavailableWithExcerpt',
+  'failureSessionUnavailable',
+  'failureWithExcerpt',
+  'failure',
+  // Issue #2001: the body of the card that *replaces* a resolved wait's
+  // notification on the reader's other devices. No excerpt — the prompt is over.
+  'promptResolved',
 ] as const;
 
 /** Keys whose copy must carry the placeholder push-sender substitutes. */
@@ -39,6 +59,13 @@ const EXCERPT_KEYS = [
   'promptWaitingWithExcerpt',
   'completionWithExcerpt',
   'terminalAttentionWithExcerpt',
+  // Issue #2000
+  'failureVerificationWithExcerpt',
+  'failureUpstreamWithExcerpt',
+  'failureSessionStartWithExcerpt',
+  // Issue #2009
+  'failureSessionUnavailableWithExcerpt',
+  'failureWithExcerpt',
 ] as const;
 
 /** Keys whose copy must carry the elapsed-minutes placeholder (Issue #1790). */

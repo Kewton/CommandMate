@@ -9,6 +9,25 @@
 export type { CLIToolType, ICLITool, CLIToolInfo, IImageCapableCLITool } from './types';
 export { isImageCapableCLITool } from './types';
 
+// Export the per-tool contracts (Issue #1933)
+export type {
+  CaptureSpec,
+  ComposerSpec,
+  ComposerReader,
+  GracefulExitSpec,
+  GracefulExitFailureReason,
+  GracefulExitVerdict,
+  KeySequence,
+  KeySequenceKeyName,
+} from '../../types/cli-tool-contracts';
+export { resolveComposerSpec, DEFAULT_COMPOSER_SPEC } from './composer-spec';
+export { resolveCaptureSpec, GEMINI_PANE_HEIGHT } from './capture-spec';
+export {
+  resolveGracefulExitSpec,
+  verifyGracefulExit,
+  DEFAULT_GRACEFUL_EXIT_SPEC,
+} from './graceful-exit';
+
 // Export base class
 export { BaseCLITool } from './base';
 

@@ -9,6 +9,13 @@ import { invalidateCache } from './tmux-capture-cache';
 import { validateSessionName } from '@/lib/cli-tools/validation';
 import { TMUX_HISTORY_LIMIT, TUI_PANE_HEIGHT, TUI_PANE_WIDTH } from '@/config/tmux-pane-config';
 import { createLogger } from '@/lib/logger';
+import { NAVIGATION_KEY_VALUES, type NavigationKey } from '@/types/terminal-keys';
+import type { KeySequence } from '../../types/cli-tool-contracts';
+import {
+  keySequenceArgs,
+  runKeySequence,
+  type KeySequenceTransport,
+} from './key-sequence';
 
 const execFileAsync = promisify(execFile);
 const logger = createLogger('tmux');
@@ -366,38 +373,120 @@ export async function createSession(
   }
 }
 
+/** Options for {@link sendKeys}. */
+export interface SendKeysOptions {
+  /**
+   * Send `keys` as TEXT rather than letting tmux resolve it as a key name
+   * (Issue #1933, 受入条件 S9).
+   *
+   * Required for anything a user typed. Without it `tmux send-keys` looks the
+   * string up in the key table first, so a message body of exactly `Escape`
+   * interrupts the agent (`1b`), `Enter` submits an empty composer (`0d`) and
+   * `C-c` sends SIGINT — all measured on tmux 3.5a, see
+   * `./key-sequence`. A body starting with `-` is worse still: getopt eats it
+   * and `send-keys` returns 0 having sent nothing at all.
+   *
+   * Mutually exclusive with `sendEnter`: the literal argv carries no `C-m`,
+   * because a `C-m` argument after `-l` would be typed as the three characters
+   * `C`, `-`, `m`. Submit the message with a separate `sendSpecialKeys(…,
+   * ['Enter'])`, which is what every caller in this repository already does —
+   * body and Enter have been separate tmux commands since #1469.
+   */
+  literal?: boolean;
+}
+
 /**
  * Send keys to a tmux session
  *
  * @param sessionName - Target session name
  * @param keys - Keys to send (command text)
  * @param sendEnter - Whether to send Enter key after the command (default: true)
+ * @param options - {@link SendKeysOptions}; pass `{ literal: true }` for text
  *
- * @throws {Error} If session doesn't exist or command fails
+ * @throws {Error} If session doesn't exist, command fails, or `literal` is
+ *   combined with `sendEnter`
  *
  * @example
  * ```typescript
  * await sendKeys('my-session', 'echo hello');
  * await sendKeys('my-session', 'ls -la', true);
  * await sendKeys('my-session', 'incomplete command', false);
+ * // A message body the user typed — never resolved as a key name:
+ * await sendKeys('my-session', userMessage, false, { literal: true });
  * ```
  */
 export async function sendKeys(
   sessionName: string,
   keys: string,
-  sendEnter: boolean = true
+  sendEnter: boolean = true,
+  options?: SendKeysOptions
 ): Promise<void> {
+  if (options?.literal && sendEnter) {
+    throw new Error(
+      'sendKeys: { literal: true } cannot be combined with sendEnter — a trailing C-m would be typed as text. Send Enter as a separate key.'
+    );
+  }
+
   // execFile() passes arguments directly without shell interpretation,
   // so no shell-level escaping is needed
-  const args = sendEnter
-    ? ['send-keys', '-t', exactTarget(sessionName), keys, 'C-m']
-    : ['send-keys', '-t', exactTarget(sessionName), keys];
+  const args = options?.literal
+    ? keySequenceArgs(exactTarget(sessionName), { kind: 'literal', text: keys })
+    : sendEnter
+      ? ['send-keys', '-t', exactTarget(sessionName), keys, 'C-m']
+      : ['send-keys', '-t', exactTarget(sessionName), keys];
 
   try {
     await execFileAsync('tmux', args, { timeout: DEFAULT_TIMEOUT });
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     throw new Error(`Failed to send keys to tmux session: ${errorMessage}`);
+  }
+}
+
+/**
+ * Send a whole {@link KeySequence} to a session (Issue #1933).
+ *
+ * The executor half of `./key-sequence`, bound to this module's `execFile`
+ * transport. Literal steps go out through `send-keys -l --`, key steps through
+ * `send-keys --` after their name is re-validated, and each step is its own
+ * tmux invocation so a TUI cannot read the whole sequence as one paste.
+ *
+ * ## Status: the runner for `GracefulExitSpec.keys`, not yet its caller
+ *
+ * `ICLITool.gracefulExitSequence()` returns a `KeySequence[]`, so something has
+ * to be able to run one; this is that something, and
+ * `tests/unit/lib/key-sequence-1933.test.ts` drives it against a stubbed
+ * `execFile`. The seven `killSession()` implementations do **not** call it yet,
+ * and that is a deliberate scope line rather than an oversight: rerouting them
+ * changes the argv of calls that `tests/unit/api/kill-session-cli-tool-gateway-1905.test.ts`
+ * pins by exact arity, a file Issue #1933 may not edit — and it would buy no
+ * behaviour, because the exit strings (`/exit`, `/quit`) are tool-owned
+ * constants rather than tmux key names, so `-l` changes not one byte for them.
+ * The user-typed message body, which `-l` changes a great deal for, goes through
+ * {@link sendKeys}' `literal` option in the same commit. The Issue that is
+ * allowed to touch that gateway test owns the rest of the move;
+ * `tests/unit/cli-tools/graceful-exit-conformance-1933.test.ts` holds the
+ * declarations equal to the implementations until then.
+ *
+ * @param sessionName - Target session name
+ * @param steps - The sequence, in order
+ * @throws {Error} If a key name is not allowed, or a tmux command fails
+ */
+export async function sendKeySequence(
+  sessionName: string,
+  steps: readonly KeySequence[]
+): Promise<void> {
+  const transport: KeySequenceTransport = {
+    async run(args: string[]): Promise<void> {
+      await execFileAsync('tmux', args, { timeout: DEFAULT_TIMEOUT });
+    },
+  };
+
+  try {
+    await runKeySequence(exactTarget(sessionName), steps, transport);
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to send key sequence to tmux session: ${errorMessage}`);
   }
 }
 
@@ -740,27 +829,55 @@ export async function clearInputLine(sessionName: string): Promise<void> {
 }
 
 /**
+ * Send one `C-e` + `C-u` pass over the TUI input line (Issue #1879).
+ *
+ * `C-u` alone is kill-line-*before-cursor*, so it deletes nothing at all when the
+ * cursor sits at column 0 — the state a human leaves behind after pressing Home
+ * and walking away, measured live in #1878 §5-1. Moving to end-of-line first is
+ * what makes the kill unconditional. Both keys go in one `send-keys` so they
+ * cannot be interleaved with anything else the session receives.
+ *
+ * One pass clears one row. A multi-row composer needs several (also measured in
+ * #1878 §5-1: up to `2N-1` for N rows), which is why callers drive this from
+ * {@link module:lib/session/composer-clear}'s read-back loop rather than firing
+ * it once and declaring victory.
+ *
+ * Like {@link clearInputLine}, the keys are fixed literals passed through
+ * execFile (no shell, no injection) and are deliberately NOT added to
+ * `ALLOWED_SPECIAL_KEYS` / `NAVIGATION_KEY_VALUES`: the special-keys API stays a
+ * navigation surface, and clearing the composer is its own endpoint with its own
+ * verification.
+ *
+ * @param sessionName - Target session name
+ * @throws {Error} If the tmux command fails
+ */
+export async function clearComposerLine(sessionName: string): Promise<void> {
+  try {
+    await execFileAsync(
+      'tmux',
+      ['send-keys', '-t', exactTarget(sessionName), 'C-e', 'C-u'],
+      { timeout: DEFAULT_TIMEOUT },
+    );
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to clear tmux composer line: ${errorMessage}`);
+  }
+}
+
+/**
  * Allowed navigation key names for special-keys API validation.
  * Used for TUI navigation sequences (e.g., Up/Down cursor, Enter/Escape selection).
  *
+ * Declared in `@/types/terminal-keys` and re-exported here so server-side callers
+ * keep their existing import path. The declaration moved out of this module in
+ * Issue #1922: the two client components that type their key props with
+ * `NavigationKey` must not import from `src/lib/tmux/**` (§4 D4).
+ *
  * Separate from SPECIAL_KEY_VALUES (sendSpecialKey() control keys) and
  * ALLOWED_SPECIAL_KEYS (sendSpecialKeys() broader TUI key set).
- * This as const array is exported for route-level validation (immutable, DRY).
- *
- * [DR3-001] Named NAVIGATION_KEY_VALUES to avoid collision with existing SPECIAL_KEY_VALUES.
- * [DR2-004] Exported as as const array + type guard (not Set) for immutability guarantee.
  */
-export const NAVIGATION_KEY_VALUES = [
-  'Up', 'Down', 'Left', 'Right', 'Enter', 'Escape', 'Tab', 'BTab',
-  // Issue #1017: Codex pager / edit-previous mode keys surfaced by NavigationButtons.
-  // 'q' is the pager quit key (literal char). PageUp/PageDown/Home/End are tmux named keys.
-  'PageUp', 'PageDown', 'Home', 'End', 'q',
-] as const;
-
-/**
- * Navigation key type derived from NAVIGATION_KEY_VALUES.
- */
-export type NavigationKey = typeof NAVIGATION_KEY_VALUES[number];
+export { NAVIGATION_KEY_VALUES };
+export type { NavigationKey };
 
 /**
  * Type guard for navigation key validation (special-keys API).

@@ -171,13 +171,22 @@ describe('getStructuredSessionState (Issue #1723)', () => {
 });
 
 describe('mergeStructuredStatus (Issue #1723)', () => {
-  const scraper = (over: Partial<ScraperVerdict> = {}): ScraperVerdict => ({
-    status: 'ready',
-    reason: 'no_recent_output',
-    thinking: false,
-    isUnclassifiedActive: false,
-    ...over,
-  });
+  // Issue #1924: `evidence` and `isUnclassifiedActive` are two readings of one
+  // fact, so the factory derives the first from the second unless a case states
+  // it. A fixture that set only one of them would hand `mergeStructuredStatus`
+  // an input the producer cannot build, and the pins below would be pinning a
+  // shape that never reaches the merge.
+  const scraper = (over: Partial<ScraperVerdict> = {}): ScraperVerdict => {
+    const base: ScraperVerdict = {
+      status: 'ready',
+      reason: 'no_recent_output',
+      thinking: false,
+      evidence: 'positive',
+      isUnclassifiedActive: false,
+      ...over,
+    };
+    return { ...base, evidence: over.evidence ?? (base.isUnclassifiedActive ? 'none' : 'positive') };
+  };
 
   const structured = (over: Partial<StructuredSessionState> = {}): StructuredSessionState => ({
     status: 'ready',
@@ -213,19 +222,39 @@ describe('mergeStructuredStatus (Issue #1723)', () => {
   });
 
   it('completes a session whose pane still looks busy after Stop', () => {
+    // The frame reads `running`/`thinking_indicator` — the spinner is still on
+    // screen — which is POSITIVE evidence, so the structured `ready` lands on a
+    // verdict the scraper had already classified.
     const merged = mergeStructuredStatus(
-      scraper({ status: 'running', reason: 'default', thinking: true, isUnclassifiedActive: true }),
+      scraper({ status: 'running', reason: 'thinking_indicator', thinking: true }),
       structured(),
     );
 
     expect(merged.status).toBe('ready');
     expect(merged.reason).toBe('hook_stop');
     expect(merged.thinking).toBe(false);
-    // Cleared here and only here: `wait` completes on
+    // Down here and only here: `wait` completes on
     // `ready && isUnclassifiedActive !== true`, so leaving it up would make the
     // structured `ready` change nothing at all.
     expect(merged.isUnclassifiedActive).toBe(false);
     expect(merged.structuredApplied).toBe(true);
+  });
+
+  it('does NOT complete a session whose pane nobody could read (Issue #1927)', () => {
+    // DR2-003. The same structured `Stop`, over a frame the scraper could not
+    // classify at all. `sessionStatus` still becomes `ready` — the agent's own
+    // event decides that, as it has since #1723 — but the unclassified hatch
+    // stays up, because "I cannot read the pane and hooks say it is done" is the
+    // shape #1708's stall wears. `wait` falls to its 60-second dwell and exit 10
+    // instead of reporting Completed.
+    const merged = mergeStructuredStatus(
+      scraper({ status: 'running', reason: 'default', thinking: true, isUnclassifiedActive: true }),
+      structured(),
+    );
+
+    expect(merged.status).toBe('ready');
+    expect(merged.evidence).toBe('none');
+    expect(merged.isUnclassifiedActive).toBe(true);
   });
 
   it('leaves a static overlay reachable when both layers already agree on ready', () => {

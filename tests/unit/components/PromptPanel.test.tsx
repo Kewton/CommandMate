@@ -112,7 +112,9 @@ describe('PromptPanel', () => {
       fireEvent.click(screen.getByRole('button', { name: /yes/i }));
 
       await waitFor(() => {
-        expect(onRespond).toHaveBeenCalledWith('yes');
+        // Issue #1932: the panel passes back the `decisionId` it was given —
+        // undefined here, because these props name none.
+        expect(onRespond).toHaveBeenCalledWith('yes', undefined);
       });
     });
 
@@ -131,7 +133,7 @@ describe('PromptPanel', () => {
       fireEvent.click(screen.getByRole('button', { name: /no/i }));
 
       await waitFor(() => {
-        expect(onRespond).toHaveBeenCalledWith('no');
+        expect(onRespond).toHaveBeenCalledWith('no', undefined);
       });
     });
 
@@ -233,7 +235,7 @@ describe('PromptPanel', () => {
       fireEvent.click(submitButton);
 
       await waitFor(() => {
-        expect(onRespond).toHaveBeenCalledWith('1');
+        expect(onRespond).toHaveBeenCalledWith('1', undefined);
       });
     });
 
@@ -329,7 +331,7 @@ describe('PromptPanel', () => {
       fireEvent.click(submitButton);
 
       await waitFor(() => {
-        expect(onRespond).toHaveBeenCalledWith('custom value');
+        expect(onRespond).toHaveBeenCalledWith('custom value', undefined);
       });
     });
   });
@@ -484,7 +486,7 @@ describe('PromptPanel', () => {
       fireEvent.click(yesButton); // Simulate click that would result from Enter
 
       await waitFor(() => {
-        expect(onRespond).toHaveBeenCalledWith('yes');
+        expect(onRespond).toHaveBeenCalledWith('yes', undefined);
       });
     });
   });

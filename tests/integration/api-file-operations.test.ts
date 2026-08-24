@@ -281,7 +281,10 @@ describe('File Operations API', () => {
 
       expect(response.status).toBe(403);
       expect(data.success).toBe(false);
-      expect(data.error.code).toBe('PROTECTED_DIRECTORY');
+      // [Issue #2014] `.git` moved into the deny tier of sensitive-file-guard,
+      // which refuses it before deleteFileOrDirectory is called. The
+      // PROTECTED_DIRECTORY rule itself is unchanged (still pins node_modules).
+      expect(data.error.code).toBe('SENSITIVE_PATH');
     });
 
     it('should return 404 for non-existent file', async () => {

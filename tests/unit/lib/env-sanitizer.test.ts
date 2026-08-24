@@ -31,6 +31,10 @@ describe('env-sanitizer', () => {
   describe('SENSITIVE_ENV_KEYS', () => {
     it('should contain all expected sensitive keys', () => {
       expect(SENSITIVE_ENV_KEYS).toContain('CLAUDECODE');
+      // Issue #1996: the plaintext token, not only its hash. Only the `_HASH`
+      // form was listed, and the plaintext one is what a request is actually
+      // authenticated with — a real child could read it back.
+      expect(SENSITIVE_ENV_KEYS).toContain('CM_AUTH_TOKEN');
       expect(SENSITIVE_ENV_KEYS).toContain('CM_AUTH_TOKEN_HASH');
       expect(SENSITIVE_ENV_KEYS).toContain('CM_AUTH_EXPIRE');
       expect(SENSITIVE_ENV_KEYS).toContain('CM_HTTPS_KEY');
@@ -44,8 +48,9 @@ describe('env-sanitizer', () => {
       expect(SENSITIVE_ENV_KEYS).toContain('GH_DEBUG');
     });
 
-    it('should have exactly 9 entries', () => {
-      expect(SENSITIVE_ENV_KEYS).toHaveLength(9);
+    it('should have exactly 10 entries', () => {
+      // 9 until Issue #1996 added CM_AUTH_TOKEN.
+      expect(SENSITIVE_ENV_KEYS).toHaveLength(10);
     });
   });
 

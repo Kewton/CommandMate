@@ -12,9 +12,10 @@ import type { CurrentOutputResponse, PromptMessageResponse, WorktreeDetailRespon
 import { MAX_MESSAGES_LIMIT } from '../../config/history-display-config';
 import { ApiClient, isValidWorktreeId, isValidInstanceId } from '../utils/api-client';
 import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
-import { isCliToolId } from '../config/cli-tool-ids';
+import { isCliToolId, DEFAULT_CLI_TOOL_ID } from '../config/cli-tool-ids';
 import { AGENT_OPTION_DESCRIPTION, INSTANCE_OPTION_DESCRIPTION } from '../config/agent-target-options';
 import { resolveInstanceCliTool } from './instances';
+import { resolveSessionTarget, describeSessionTargetConflict } from '../utils/session-target';
 import { printMaybePaged } from '../utils/pager';
 import { squeezeTranscript } from '../../lib/tmux/transcript-squeeze';
 
@@ -75,10 +76,20 @@ function parseTail(raw: string | undefined): number | undefined {
 /**
  * Resolve which CLI tool's session the pane should be read from.
  *
- * POST /capture demands an explicit `cliToolId`, while GET /current-output falls
- * back to the worktree's own default server-side. Mirroring that fallback here
- * (`worktree.cliToolId || 'claude'`, matching the route) keeps bare
- * `capture <id> --pane` pointed at the same session the rest of the CLI uses.
+ * POST /capture demands an explicit `cliToolId`, so unlike GET /current-output
+ * this path cannot leave the choice to the server. Issue #1925 moved the choice
+ * itself to the server anyway — `resolveSessionTarget` asks
+ * `/resolve-target`, which applies the same precedence every other route now
+ * uses, so bare `capture <id> --pane` reads the session the rest of the CLI
+ * addresses instead of a locally-guessed one.
+ *
+ * Reading is not a side effect, so a `--agent` that contradicts the roster
+ * warns and reads the roster's agent rather than failing: `capture` is the
+ * inner call of unbounded monitor loops, and a non-zero exit there is a poll
+ * skipped forever rather than an error anyone sees (DR3-015).
+ *
+ * The tail of this function only runs against a server too old to resolve, the
+ * one case where the CLI still has to name a default itself.
  *
  * @param client - API client
  * @param worktreeId - Worktree ID
@@ -92,14 +103,20 @@ async function resolvePaneCliTool(
   agent: string | undefined,
   instance: string | undefined
 ): Promise<string> {
-  if (instance) {
-    const resolved = await resolveInstanceCliTool(client, worktreeId, instance, agent);
-    if (resolved) return resolved;
+  const target = await resolveSessionTarget(client, worktreeId, {
+    instanceId: instance,
+    requestedCliTool: agent,
+  });
+  if (target.conflict) {
+    console.error(
+      `Warning: ${describeSessionTargetConflict(target.conflict)} `
+      + `Reading ${target.conflict.rosterCliTool}.`
+    );
   }
-  if (agent) return agent;
+  if (target.cliToolId) return target.cliToolId;
 
   const worktree = await client.get<WorktreeDetailResponse>(`/api/worktrees/${worktreeId}`);
-  return worktree.cliToolId || 'claude';
+  return worktree.cliToolId || DEFAULT_CLI_TOOL_ID;
 }
 
 /** Default number of prompts `--prompts` lists (Issue #1685). */
@@ -343,9 +360,10 @@ export function createCaptureCommand(): Command {
         // Issue #1629: /current-output takes the CLI tool at face value and
         // otherwise falls back to the worktree default, so `--instance codex`
         // alone captured the wrong (claude-named) session. Resolve the tool the
-        // instance is registered under before asking.
+        // instance is registered under before asking. Issue #1925: 'read-only',
+        // because capture looks rather than acts — see resolvePaneCliTool.
         const agent = options.instance
-          ? await resolveInstanceCliTool(client, worktreeId, options.instance, options.agent)
+          ? await resolveInstanceCliTool(client, worktreeId, options.instance, options.agent, 'read-only')
           : options.agent;
 
         // Build path with optional cliTool/instance query parameters

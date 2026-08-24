@@ -1,0 +1,147 @@
+version: 1
+title: "Issue #1929: VERIFIED_AGAINST と検出器の陳腐化警告（detector.staleness）"
+goal: |
+  https://github.com/Kewton/CommandMate/issues/1929 を実装してください。**#1927 が作った
+  `src/lib/detection/tools/<tool>/patterns.ts` に `VERIFIED_AGAINST` を宣言する**作業です。
+
+  ## Issue 本文の「実装内容」節に誤りが 1 件あります（引き継ぎ節が正）
+
+  「copilot は **`gh copilot -- --version`**、裸の `copilot` は実行しない」は**採用できません**。
+  #1979（PR #1980）で方針書を訂正済みです。理由:
+
+  1. **`gh copilot -- --version` は copilot 未インストール時にダウンロードを起こす** — `gh copilot --help`
+     自身が「PATH に無ければ `~/.local/share/gh/copilot` へダウンロードする」と書いています。
+     version を知るための probe が環境を変更するのは、D2 の「ホットパスで副作用を持たない」前提と両立しません。
+  2. **`copilot` は gh の拡張ではありません**（gh 2.86.0 に組み込まれた preview コマンド）。
+     `gh extension list` は copilot を**一切列挙しません**（実測で出力 0 行）。
+
+  **採る解**: `resolveCopilotExecutable()`（`src/lib/cli-tools/copilot-executable.ts`、#1907 で着地）へ
+  **委譲**します。実測で所在を確認済みで、**`src/lib/slash-command-catalog.ts:109` に
+  `kind: 'delegated'` として既に接続されています**（#1913）。`DETECTOR_VERSION_PROBES` は
+  **この形をそのまま再利用**してください（`VERSION_PROBES` の型は `slash-command-catalog.ts:78` に
+  `| { kind: 'delegated'; probe: () => Promise<string | null> }` として実在）。
+
+  これは DR4-010 の例外ではなく、**規約 (1) をより強く満たします** — `CopilotTool.isInstalled()` /
+  `startSession()` が同じ関数の同じ戻り値で起動先を決めるため、probe と launch が原理的に食い違えません。
+
+  ## コスト規約（ここを外すとホットパスが詰まります）
+
+  - **プロセス内 1 回だけ実行、in-flight 共有、結果キャッシュ。**
+  - **ホットパス（`capture` / `current-output` の 5 秒ポーリング）では await しない。**
+    温まるまで `detector.staleness` は `undefined` のままでよい。
+    **「初回呼び出しが即返る」ことをテストで固定**すること（受入条件）。
+
+  ## 実行面の規約（§10.11 / S17）
+
+  - `which` で**絶対パスに解決してから** `execFile`。解決できなければ **probe をスキップ**し
+    `detector.staleness` は `undefined` のまま（子プロセスを 1 つも起動しないこと）。
+  - `sanitizeEnvForChildProcess()` の env で起動（実測で所在確認: `src/lib/slash-command-catalog.ts` ほか）。
+  - `timeout` に加えて **`maxBuffer` を明示**。
+  - **`detector.staleness` を `GET /api/capabilities` に載せない**（ソフトウェアインベントリの開示になる）。
+    露出先は認証必須の `capture --json` と `commandmate status` に限ること。
+
+  ## この Issue で**やらないこと**
+
+  - **`docs/design/multi-agent-state-architecture.md` を編集しない。** Issue 本文は「方針書 §4 D2 の表も
+    本 Issue で更新する」と書いていますが、**それは #1979 で完了済み**です（develop `561d6706`）。
+  - **ツール別の idle composer 規則 / `detectDialog` / Auto-Yes の接続は #1928 の作業**です。
+    `tools/<tool>/detect.ts` と `prompt.ts` には触らないでください。
+
+  ## 受入条件
+
+  - **S17 を pin**: 絶対パス解決を経ること、**copilot が `resolveCopilotExecutable()` へ委譲され
+    `gh copilot` を子プロセスとして起動しないこと**（`gh copilot -- --version` を綴った実装が赤になる
+    変異ケースを併設）、`copilot` も gh 管理コピーも無い環境で**子プロセスを 1 つも起動せず**
+    probe をスキップして `detector.staleness` が `undefined` のままになること。
+  - **ホットパスで probe を await していないことをテストで固定**（初回呼び出しが即返る）。
+  - gemini の probe コマンドは**実測で確定**すること（方針書は未確定としています）。
+  - CI 任意実行 `npm run check:detector-freshness` を用意。
+  - `npm run lint` / `npx tsc --noEmit` / フル `npm run test:unit` / `npm run build` が exit 0。
+
+  ## 検証時の注意（厳守）
+
+  probe の検証で**ユーザーの環境を変更しないこと**。使い捨ての `PATH` / `HOME` / `XDG_DATA_HOME` を
+  使い、`~/.config/gh` と `~/.local/share/gh` が**変化していないことを実測で確認**してください
+  （#1979 のワーカーが同じ方法で 3 シナリオを測っています）。
+
+  ## 触ってよい範囲（#1927 の実構成を確認して確定しました）
+
+  `src/lib/detection/tools/registry.ts`・`src/lib/detection/tools/*/detect.ts` の
+  **`VERIFIED_AGAINST` 定数ブロックのみ**・`src/lib/detection/version-probes*`（新設）・
+  `src/lib/slash-command-catalog.ts`・`src/lib/cli-tools/copilot-executable.ts`・
+  `src/app/api/worktrees/**`・`src/cli/commands/status.ts`・`src/cli/commands/capture.ts`・
+  `src/cli/types/**`・`package.json`・`scripts/**`・
+  `tests/unit/detection/**`・`tests/unit/cli/**`・`tests/unit/lib/**`。
+
+  **`detect.ts` の検出規則の本体と `prompt.ts` / `fixtures/**` は触らないでください**
+  （#1928 のワーカーが同時に編集しています）。`detect.ts` は共有しますが、あなたは
+  **`VERIFIED_AGAINST` の宣言だけ**です。
+
+  **#1927 の実測**: `VERIFIED_AGAINST` は `tools/registry.ts:31` に未計測ツールの既定
+  （`version:'unmeasured'` / `capturedAt:'never'` / `paneGeometry:'unmeasured'`）があり、
+  **copilot だけ `tools/copilot/detect.ts:24` に実測値**が入っています（#1885 の実キャプチャがあるため）。
+  型は `tools/types.ts:114` の `DetectorProvenance`。この形をそのまま拡張してください。
+
+  ## このブランチのベースについて（重要）
+
+  あなたのブランチは **#1927 の実装コミット `9df208a9` の上**に切ってあります（まだ develop には
+  マージされていません）。したがって:
+
+  - `src/lib/detection/tools/` の構造は**既に存在します**。読んで、その上に足してください。
+  - **#1927 が触ったファイルを書き換えないでください。** `git diff 9df208a9..HEAD` が
+    あなたの変更だけになる状態を保つこと。
+  - #1927 が develop へマージされたら、私（オーケストレーター）が `git merge origin/develop` で
+    取り込みます。あなたは何もしなくて構いません。
+  - **`wait --verify` はまだ走らせません**（scope ゲートが #1927 の 59 ファイルを「範囲外」と読むため）。
+    裁定は #1927 のマージ後に私が行います。あなたは自分で `npm run lint` / `npx tsc --noEmit` /
+    フル `npm run test:unit` を回して確認してください。
+
+  ## 作業ルール（厳守）
+
+  - **commit は 1 本にまとめる。** PR は作らない・push しない（オーケストレーターが行う）。
+  - **`CHANGELOG.md` と `docs/module-reference.md` を編集しない。** 代わりに
+    `dev-reports/changelog/issue-1929.md`（`## [Unreleased]` にそのまま貼れる 1 エントリ。1 行目に
+    どの節へ入るかをコメント）と `dev-reports/module-reference/issue-1929.md` を書くこと。
+    **既存行への追記を指示する場合は `grep -n '^| `<path>`' docs/module-reference.md` で実在を確認してから**書くこと
+    （過去のランで、存在しない行への追記を 4 件指示した実績があります）。
+  - **この契約の方針は「推奨」。** 別解が正しいと判断したら採ってよいが、**逸脱と理由を commit message に明記**すること。
+  - **Issue 本文をコードで裏取りすること。** 食い違ったら**実測を正**とし、commit message に書く。
+    この Issue は私が書いており、自作 Issue の記述が実測と食い違った実績が複数あります。
+  - **フル `npm run test:unit` の実行中にソースやテストを編集しないこと**（vitest の遅延 transform で偽の赤が出る）。
+  - **別ワークツリーと同時にフル `npm run test:unit` を回さないこと**（#1985。30s サブプロセスガードが
+    その条件では小さく、無関係な 44 件が落ちます）。**この repo では今あなたを含め 3 本の worktree が
+    動いています。**
+  - 作業が終わったら最終行に `IMPL_COMPLETED` とだけ出力すること。
+
+  ## 実 tmux を触る検証の追加ルール（厳守）
+
+  - **必ず `tmux -L <専用socket>` で行う。** `-L` / `-S` は `$TMUX` より優先されます。フラグ無しの `tmux` は
+    **ユーザーの本番サーバ**に届きます。
+  - **`kill-server` を `-L` 無しで書かない。** 後始末は `kill-session -t '=<name>:'`（完全一致）で。
+  - **`TMUX_TMPDIR` を隔離手段に使わない**（`$TMUX` があると無視される）。
+  - **`bind-key` / `unbind-key` / `set-option -g` を既定サーバへ撃たない**（サーバグローバル）。
+scope:
+  allow:
+    - "src/lib/detection/tools/**"
+    - "src/lib/detection/version-probes.ts"
+    - "src/lib/slash-command-catalog.ts"
+    - "src/lib/cli-tools/copilot-executable.ts"
+    - "src/app/api/worktrees/**"
+    - "src/cli/commands/status.ts"
+    - "src/cli/commands/capture.ts"
+    - "src/cli/types/**"
+    - "package.json"
+    - "scripts/**"
+    - "tests/unit/detection/**"
+    - "tests/unit/cli/**"
+    - "tests/unit/lib/**"
+  deny: []
+verify:
+  gates: [token-discipline, control-chars, claudemd-size, route-exports, lint, typecheck, unit]
+autoYes:
+  mode: allow-listed
+  allowPromptTypes: [yes_no, multiple_choice]
+  denyPatterns: []
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true

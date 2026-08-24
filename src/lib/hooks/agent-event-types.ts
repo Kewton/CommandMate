@@ -51,3 +51,22 @@ export function isAgentEventType(value: unknown): value is AgentEventType {
 
 /** Bound on the stored `detail`; every observed value is a short enum-ish word. */
 export const MAX_EVENT_DETAIL_LENGTH = 128;
+
+/**
+ * The `notification` detail meaning "the approval dialog has been answered"
+ * (Issue #1898).
+ *
+ * A fourth word beside `permission_prompt` / `idle_prompt` / an error, and the
+ * only one that is *not* a report that something needs a human — it is the
+ * report that something no longer does. Named here rather than in a source's
+ * own file because two unrelated callers have to agree on it: the source that
+ * maps the agent's own "somebody replied" frame, and the adjudicator that
+ * delivered a verdict itself. `lib/session/agent-event-state` keys its
+ * prompt-waiting release off exactly this string.
+ *
+ * Nothing here names a tool, and this does not either: any source that can
+ * observe an approval being answered may publish it. Whether observing one
+ * settles anything is the source's
+ * `AgentSourceCapabilities.permissionReplyReleasesPrompt` to declare.
+ */
+export const PERMISSION_REPLIED_DETAIL = 'permission_replied';

@@ -53,12 +53,48 @@ export const GEMINI_PERMISSIONS = [] as const;
 /** Allowed permission values for vibe-local CLI (no permission flags) */
 export const VIBE_LOCAL_PERMISSIONS = [] as const;
 
-/** Default permission per CLI tool */
+/**
+ * Allowed permission values for opencode CLI (Issue #1914).
+ *
+ * Empty, like gemini's and vibe-local's, but a **separate** constant on purpose:
+ * before this Issue `getPermissionOptionsForTool('opencode')` resolved through
+ * `default: return GEMINI_PERMISSIONS`, so the value was right for a reason that
+ * was not. Object identity is what lets a test tell "opencode has its own case"
+ * apart from "opencode falls through to gemini's".
+ *
+ * opencode has no permission *level* to choose from. `opencode run` does carry a
+ * single boolean `--auto` ("auto-approve permissions that are not explicitly
+ * denied", measured on 1.18.21), but that is a different axis from the
+ * `--permission-mode` / `--sandbox` vocabularies this list models, and
+ * CommandMate does not pass it. Wiring it up is a separate decision.
+ */
+export const OPENCODE_PERMISSIONS = [] as const;
+
+/**
+ * What a CLI tool with no permission flag at all resolves to (Issue #1914).
+ *
+ * The `default:` branch of {@link getPermissionOptionsForTool} returns this
+ * rather than any one tool's constant. A tool added to `CLI_TOOL_IDS` without a
+ * case below then inherits "no flags", which is the safe answer — inheriting
+ * Claude's `--permission-mode` vocabulary is what let `acceptEdits` through on
+ * an opencode schedule (`cmate-parser.ts` / `cmate-validator.ts` carry the same
+ * decision).
+ */
+export const NO_PERMISSION_FLAGS = [] as const;
+
+/**
+ * Default permission per CLI tool.
+ *
+ * Issue #1914 added the `opencode` entry: it was the one id in `CLI_TOOL_IDS`
+ * with no key here, so every reader fell back to its own `?? ''` and the
+ * omission read as an oversight rather than as "this tool takes no flag".
+ */
 export const DEFAULT_PERMISSIONS: Record<string, string> = {
   claude: 'acceptEdits',
   codex: 'workspace-write',
   gemini: '',
   'vibe-local': '',
+  opencode: '',
   copilot: 'allow-all-tools',
   antigravity: '--dangerously-skip-permissions',
 };
@@ -71,24 +107,39 @@ export const DEFAULT_PERMISSIONS: Record<string, string> = {
  * cmate-parser.ts / cmate-validator.ts enforce on read, so any value the dialog
  * writes round-trips through the parser without being silently discarded.
  *
- * Tools not listed (gemini, vibe-local, opencode) have no permission flags, so
- * the dialog hides the Permission field and an empty permission is written.
+ * gemini, vibe-local and opencode have no permission flags, so the dialog hides
+ * the Permission field and an empty permission is written.
+ *
+ * Issue #1914: every id in `CLI_TOOL_IDS` now has its own `case`, and `default:`
+ * returns {@link NO_PERMISSION_FLAGS} instead of `GEMINI_PERMISSIONS`. The
+ * returned *value* is unchanged for every tool that exists today — all three
+ * empty lists are `[]` — but the old spelling said "a tool I do not recognise
+ * gets gemini's rules", which is not a sentence anyone meant. It is also the
+ * shape that hid the real bug in the two switches this function mirrors, where
+ * the same fallback resolved to CLAUDE_PERMISSIONS and let `acceptEdits` onto an
+ * opencode schedule.
  *
  * @param cliToolId - CLI tool identifier
  * @returns Readonly array of allowed permission values (empty = no permission flags)
  */
 export function getPermissionOptionsForTool(cliToolId: string): readonly string[] {
   switch (cliToolId) {
+    case 'claude':
+      return CLAUDE_PERMISSIONS;
     case 'codex':
       return CODEX_SANDBOXES;
     case 'copilot':
       return COPILOT_PERMISSIONS;
     case 'antigravity':
       return ANTIGRAVITY_PERMISSIONS;
-    case 'claude':
-      return CLAUDE_PERMISSIONS;
-    default:
+    case 'gemini':
       return GEMINI_PERMISSIONS;
+    case 'vibe-local':
+      return VIBE_LOCAL_PERMISSIONS;
+    case 'opencode':
+      return OPENCODE_PERMISSIONS;
+    default:
+      return NO_PERMISSION_FLAGS;
   }
 }
 

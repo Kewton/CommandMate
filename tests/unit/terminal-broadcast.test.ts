@@ -47,6 +47,7 @@ import {
   broadcastSessionStatus,
   __resetTerminalBroadcastState,
 } from '@/lib/realtime/terminal-broadcast';
+import { getAgentEventSource } from '@/lib/hooks/sources/registry';
 
 const mockBroadcast = vi.mocked(broadcast);
 const mockHasSubscribers = vi.mocked(hasRoomSubscribers);
@@ -56,9 +57,28 @@ const NO_STRUCTURED_EVENTS = {
   lastEventType: null,
   lastEventAt: null,
   lastEventDetail: null,
+  // Issue #1926: the turn fields are derived from that same absent event, so
+  // "nothing has reported anything" is four more nulls rather than a shape.
+  turnId: null,
+  openedAt: null,
+  closedAt: null,
+  closedBy: null,
   // Issue #1725: no dialog reported either.
   promptWaitingSince: null,
   promptWaitingSource: null,
+  // Issue #1902: nothing on this session had a `tool_input` that needed
+  // rewriting — the ordinary case for every tool but copilot.
+  toolInputNormalization: null,
+  // Issue #1898: additive on `StructuredEventsPayload`, null on every session
+  // nothing has been adjudicated for.
+  permissionDecision: null,
+  // Issue #1924: the source block is present on every payload, reported or not —
+  // it describes the source, not the session. Read from the registry rather than
+  // transcribed, so this fixture cannot claim a capability set no source has.
+  source: {
+    cliToolId: 'claude',
+    capabilities: getAgentEventSource('claude').capabilities,
+  },
 } as const;
 
 /** Nothing has reported a model or an effort either (Issue #1785). */
@@ -69,6 +89,22 @@ const NO_PROMPT_DEDUP = { promptDedup: { skippedCount: 0, lastSkippedAt: null } 
 
 /** No upstream API failure signature on the frame (Issue #1839). */
 const NO_UPSTREAM_FAULT = { upstreamFault: null } as const;
+
+/** Nothing unsent in the composer (Issue #1879). */
+const NO_COMPOSER_TEXT = { composerText: null, composerState: 'empty' } as const;
+
+/**
+ * The evidence trio Issue #1926 adds to every payload.
+ *
+ * `positive` because the fixture's verdict is `thinking_indicator` — a frame the
+ * detector positively recognised — and the latch has nothing older to report on
+ * a session this fixture invented one line ago.
+ */
+const POSITIVE_EVIDENCE = {
+  statusEvidence: 'positive',
+  lastKnownStatus: null,
+  lastKnownStatusAt: null,
+} as const;
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -93,6 +129,8 @@ beforeEach(() => {
     ...NO_MODEL_INFO,
     ...NO_PROMPT_DEDUP,
     ...NO_UPSTREAM_FAULT,
+    ...NO_COMPOSER_TEXT,
+    ...POSITIVE_EVIDENCE,
   });
 });
 
@@ -149,6 +187,8 @@ describe('broadcastTerminalSnapshotAfterInteraction', () => {
         ...NO_MODEL_INFO,
         ...NO_PROMPT_DEDUP,
         ...NO_UPSTREAM_FAULT,
+        ...NO_COMPOSER_TEXT,
+    ...POSITIVE_EVIDENCE,
       })
       .mockResolvedValueOnce({
         isRunning: true,
@@ -164,6 +204,8 @@ describe('broadcastTerminalSnapshotAfterInteraction', () => {
         ...NO_MODEL_INFO,
         ...NO_PROMPT_DEDUP,
         ...NO_UPSTREAM_FAULT,
+        ...NO_COMPOSER_TEXT,
+    ...POSITIVE_EVIDENCE,
       });
 
     const pending = broadcastTerminalSnapshotAfterInteraction(

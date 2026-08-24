@@ -107,6 +107,16 @@
   --color-info-foreground: rgb(var(--info-foreground));
 
   /*
+   * [Issue #1892] Always-dark island (#1075 category (a)): terminal-style output
+   * surfaces, which stay dark in BOTH themes. Declared once in `:root` with no
+   * `.dark` counterpart, so "does not follow the theme" is a property of the
+   * token rather than a spelling convention on the file name. See
+   * docs/design-system.md.
+   */
+  --color-terminal-surface: rgb(var(--terminal-surface));
+  --color-terminal-foreground: rgb(var(--terminal-foreground));
+
+  /*
    * [Issue #1074] Light mode inverted to a gray page with white cards, so
    * shadow-sm must read as a real 2-layer elevation instead of the flat
    * Tailwind default. The slate tint (rgb(15 23 42)) is near-invisible on the
@@ -307,6 +317,16 @@
     --info-subtle: 239 246 255; /* blue-50 */
     --info-border: 191 219 254; /* blue-200 */
     --info-foreground: 30 64 175; /* blue-800 */
+
+    /*
+     * [Issue #1892] Always-dark island. Deliberately NOT re-declared under
+     * `.dark`: both values are mode-invariant, which is the whole point — a
+     * terminal output surface reads as a terminal in light mode too (#1075 (a)).
+     * Values are the ones TerminalDisplay already renders with, so the log
+     * surfaces of the app agree on one dark instead of drifting per component.
+     */
+    --terminal-surface: 17 24 39; /* gray-900 — TerminalDisplay bg */
+    --terminal-foreground: 209 213 219; /* gray-300 — TerminalDisplay text */
 
     /*
      * [Issue #1073] Sidebar surface tokens. STANDALONE literal RGB values — they

@@ -1,6 +1,6 @@
 {
   "name": "commandmate",
-  "version": "0.26.1",
+  "version": "0.27.0",
   "description": "A local control plane for agent CLIs — orchestration and visibility for Claude Code, Codex, Gemini CLI, and more across Git worktrees",
   "keywords": [
     "claude-code",
@@ -37,7 +37,7 @@
   ],
   "scripts": {
     "dev": "tsx server.ts",
-    "build": "next build",
+    "build": "NODE_ENV=production next build",
     "build:cli": "tsc --project tsconfig.cli.json",
     "build:server": "tsc --project tsconfig.server.json && tsc-alias -p tsconfig.server.json",
     "build:all": "npm run build && npm run build:cli && npm run build:server",
@@ -45,6 +45,7 @@
     "start": "NODE_ENV=production node dist/server/server.js",
     "lint": "eslint src --ext .js,.jsx,.ts,.tsx",
     "check:tracking": "./scripts/check-commandmate-tracking.sh",
+    "check:detector-freshness": "tsx scripts/check-detector-freshness.ts",
     "test": "NODE_ENV=test vitest",
     "test:ui": "NODE_ENV=test vitest --ui",
     "test:coverage": "NODE_ENV=test vitest --coverage",

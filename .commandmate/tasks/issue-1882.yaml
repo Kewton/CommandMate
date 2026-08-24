@@ -1,0 +1,125 @@
+version: 1
+title: "Issue #1882: CI の静的ガードを scripts/ へ切出し、verify.yaml のゲートに追加する"
+goal: |
+  /pm-auto-issue2dev 1882
+
+  https://github.com/Kewton/CommandMate/issues/1882 を実装してください。
+
+  ## 背景（実際に起きた事故）
+
+  PR #1881 で `wait --verify` が**全ゲート exit 0（＝合格と裁定）**を返した commit が、
+  CI の **Token discipline で FAILURE** になりました。`.commandmate/verify.yaml` の宣言ゲートは
+  `lint` / `typecheck` / `unit` の 3 本だけで、CI 11 ジョブのうち 8 本を見ていないためです。
+
+  `/orchestrate` はワーカーの完了を `wait --verify` の exit code で裁定する設計なので、
+  このギャップは「散文の自己申告を exit code に置き換えた」という設計意図を部分的に無効化します。
+
+  ## やること
+
+  ### 1. インラインのガード本体を `scripts/` へ切り出す（先にこれ）
+
+  **verify.yaml へ grep をコピーしないでください。** `Token discipline` と `CLAUDE.md size check` は
+  `.github/workflows/ci-pr.yml` に**インラインのシェルとして直書き**されているため、コピーすると
+  同じ検査の実装が 2 箇所に増え、**片方だけ更新されて静かに乖離します**。
+
+  `Control character check` は既に `node scripts/check-control-chars.mjs` を呼ぶ形になっており、
+  **このリポジトリに正しい前例があります**。同じ形に揃えてください:
+
+  - Token discipline の検査本体 → `scripts/` 配下の単一スクリプト
+    （対象ディレクトリ一覧・除外パターン・`*Terminal*` 例外を**単一の権威ソース**として持つ）
+  - CLAUDE.md size check の検査本体 → `scripts/` 配下の単一スクリプト（35000 バイトの上限も単一箇所）
+  - `ci-pr.yml` の当該ジョブは**そのスクリプトを呼ぶだけ**にする
+  - `.commandmate/verify.yaml` の新ゲートも**同じスクリプト**を呼ぶ
+
+  ### 2. verify.yaml に 3 ゲートを追加
+
+  `token-discipline` / `control-chars` / `claudemd-size`。
+  いずれも実測 0.1 分（`ci-pr.yml` 冒頭の計測表、n=12）なので裁定時間への影響はほぼゼロです。
+
+  Integration Tests（2.1m）/ Legacy tmux / Security Audit / Build / E2E は**追加しない**
+  （理由は Issue 本文の表を参照）。
+
+  ## 【厳守】既存の挙動を変えないこと
+
+  - **`*Terminal*` 例外を壊さない。** ターミナル出力面は両テーマでダークを維持する意図的な例外で、
+    ガードはファイル名に `Terminal` を含むものを除外しています。切り出し時にこれを落とすと
+    ターミナル系コンポーネントが軒並み違反扱いになります。
+  - **`.test.` / `.spec.` / `__tests__` の除外**、対象ディレクトリ一覧、`:(exclude)src/app/worktrees` も同様。
+  - **`.github/workflows/` を編集するので、`tests/unit/guards/workflow-timeouts.test.ts` を壊さないこと**
+    （各ジョブに `timeout-minutes` が必要）。
+  - `verify.yaml` の `options.baseRef` / `skipInPrimaryCheckout` の既存挙動を変えないこと。
+
+  ## 切り出しが挙動を変えていないことの証明（必須）
+
+  受入条件です。**単に「移しました」では通りません。**
+
+  - **既知の違反を投入して赤になることを確認する。** 例: PR #1881 の修正前の
+    `src/components/worktree/UnsentComposerBar.tsx`（`bg-sky-50` 等の生 sky 配色 4 箇所）を
+    一時的に再現させると、新スクリプトが非 0 で落ちること。修正後の現状では 0 で通ること。
+  - `*Terminal*` を含むファイルに違反を入れても**通る**こと（例外が生きている証明）。
+  - CLAUDE.md size は、上限超過のダミー入力で非 0 になること。
+
+  検証記録は `dev-reports/issue/1882/guard-parity.md` に残してください（commit には含めない）。
+
+  ## 受入条件
+
+  - [ ] Token discipline の検査本体が `scripts/` 配下の単一スクリプトに切り出されている
+  - [ ] CLAUDE.md size check の検査本体が `scripts/` 配下の単一スクリプトに切り出されている
+  - [ ] `ci-pr.yml` の該当ジョブがそのスクリプトを呼ぶだけになっている（検査ロジックの重複が無い）
+  - [ ] `.commandmate/verify.yaml` に 3 ゲートが追加され、CI と**同じスクリプト**を実行している
+  - [ ] 上記「挙動を変えていないことの証明」を実施し記録した
+  - [ ] `commandmate verify <worktree-id>` が新ゲートを実行し、違反時に exit 20 を返す
+  - [ ] `npm run lint` / `npx tsc --noEmit` / `npm run test:unit` 全緑
+  - [ ] CHANGELOG `[Unreleased]` に 1 行
+
+  ## 注意: あなたの変更は自分自身の裁定に影響する
+
+  `.commandmate/verify.yaml` を編集すると、**あなた自身の `wait --verify` が新しいゲートを実行します**
+  （dogfooding として正しい挙動です）。ただし YAML を壊すと裁定が意味不明な形で失敗するので、
+  編集後は必ず `commandmate verify` をローカルで 1 回回して、
+  **新ゲートが実際に走っていること**をログで確認してください。
+
+  ## 検討の価値がある点（スコープ外だが記録は残すこと）
+
+  Token discipline は「生配色の**不在**」しか見ないため、**存在しないトークン名に置換しても PASS します**
+  （無スタイル化の silent failure を検出できない）。トークン名の実在検証
+  （`src/app/globals.css` の `--color-*` と突き合わせる）は本 Issue の範囲外ですが、
+  気づいた点として最終出力に書いてください。
+
+  ## 作業ルール（厳守）
+
+  ### 並走ワーカーがいる
+
+  #1880 が別 worktree で**同時に走っています**。`CHANGELOG.md` は双方が触るため衝突しますが、
+  **あなたは自分のぶんだけ書けばよい**（マージ順序はオーケストレーターが調整します）。
+  相手の worktree・ブランチ・セッションには触れないでください。
+
+  ### tmux / 稼働環境の保護
+
+  - **`tmux kill-server` / `set-option -g` / `bind-key` / `unbind-key` を絶対に打たない**
+  - **稼働サーバ（port 3000）を停止・再起動しない。`MyCodeBranchDesk` で `npm run build` を走らせない**
+  - 他のセッションに `send-keys` しない
+
+  ### 進め方
+
+  - **GitHub Issue / PR を編集しない**（オーケストレーターが管理します）
+  - **PR を作らない・push しない**（オーケストレーターが行います）
+  - 作業は**このブランチ上の単一 commit** にまとめる。`dev-reports/` は commit に含めない
+  - **Issue 本文と実コードが食い違ったら実コードを正**とし、食い違いを明記する
+    （この Issue はオーケストレーターが書いたもので、完全ではありません）
+
+scope:
+  allow:
+    - "scripts/**"
+    - ".github/workflows/**"
+    - ".commandmate/verify.yaml"
+    - "tests/unit/**"
+    - "tests/helpers/**"
+    - "CHANGELOG.md"
+    - "docs/**"
+    - "package.json"
+  deny: []
+
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true

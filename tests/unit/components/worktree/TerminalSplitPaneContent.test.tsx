@@ -9,6 +9,8 @@
  */
 
 import React from 'react';
+import fs from 'fs';
+import path from 'path';
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, act, fireEvent } from '@testing-library/react';
 import { TerminalSplitPaneContent } from '@/components/worktree/TerminalSplitPaneContent';
@@ -1003,6 +1005,162 @@ describe('TerminalSplitPaneContent', () => {
       // Split 0's button never fired split 1's handler and vice versa.
       expect(end0).toHaveBeenCalledTimes(1);
       expect(end1).toHaveBeenCalledTimes(1);
+    });
+  });
+  /**
+   * Issue #1879: the unsent-input bar.
+   *
+   * These run the REAL `UnsentComposerBar` against REAL raw fixtures through the
+   * real polling hook, so they cover the whole chain the Issue asks to be wired:
+   * frame → `extractComposerText` → `terminal.composerText` → render gate → the
+   * existing `special-keys` endpoint. A mocked bar would have proven only that a
+   * prop was passed.
+   */
+  describe('unsent-input bar (Issue #1879)', () => {
+    const COMPOSER_FIXTURES = path.resolve(
+      __dirname,
+      '../../lib/detection/fixtures/claude-live-1879',
+    );
+    const frame = (name: string): string =>
+      fs.readFileSync(path.join(COMPOSER_FIXTURES, `${name}.txt`), 'utf-8');
+
+    /** Reply with a fixed frame plus whatever detection flags the case needs. */
+    function serveFrame(name: string, flags: Record<string, unknown> = {}) {
+      mockFetch.mockImplementation(() =>
+        okJson({
+          isRunning: true,
+          cliToolId: 'claude',
+          fullOutput: frame(name),
+          thinking: false,
+          isSelectionListActive: false,
+          isPagerActive: false,
+          isPromptWaiting: false,
+          isUnclassifiedActive: false,
+          ...flags,
+        }),
+      );
+    }
+
+    /**
+     * The POST calls the bar made. `mockFetch` is declared with the poll's
+     * one-argument signature, so the init object needs one cast to read.
+     */
+    function postedCalls(): Array<readonly [string, RequestInit]> {
+      return (mockFetch.mock.calls as unknown as Array<[string | URL | Request, RequestInit | undefined]>)
+        .map(([input, init]) => [getUrlString(input), init] as const)
+        .filter((entry): entry is readonly [string, RequestInit] => entry[1]?.method === 'POST');
+    }
+
+    function renderPane() {
+      render(
+        <TerminalSplitPaneContent
+          worktreeId="w-1"
+          splitIndex={0}
+          cliToolId="claude"
+          availableInstances={[inst('claude')]}
+          onInstanceChange={vi.fn()}
+          onFocus={vi.fn()}
+          autoYes={{ onToggle: vi.fn() }}
+        />,
+      );
+    }
+
+    it('shows the bar at a plain idle prompt, where every Enter surface is gated off', async () => {
+      // `isUnclassifiedActive: false` + `isSelectionListActive: false` is exactly
+      // the state in which NavigationButtons and TerminalEscapeHatch are hidden
+      // by design (#1017/#1494). The bar appearing here is the feature.
+      serveFrame('composer-residual-plain');
+      renderPane();
+
+      await waitFor(() => expect(screen.getByTestId('unsent-composer-bar')).toBeInTheDocument());
+      expect(screen.getByTestId('unsent-composer-text')).toHaveTextContent('echo PREFILLED');
+      expect(screen.queryByTestId('terminal-escape-hatch')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('navigation-buttons')).not.toBeInTheDocument();
+    });
+
+    it.each([
+      ['a selection list is active', { isSelectionListActive: true }],
+      ['the frame is unclassified', { isUnclassifiedActive: true }],
+      ['the CLI is generating', { thinking: true }],
+    ])('still shows the bar when %s — the gate is the contents, not a flag', async (_label, flags) => {
+      serveFrame('composer-residual-plain', flags);
+      renderPane();
+
+      await waitFor(() => expect(screen.getByTestId('unsent-composer-bar')).toBeInTheDocument());
+    });
+
+    it('does not show the bar for a dim ghost, however real it looks once stripped', async () => {
+      serveFrame('composer-ghost-suggestion');
+      renderPane();
+
+      await waitFor(() => expect(screen.getByTestId('terminal-display')).toBeInTheDocument());
+      expect(screen.queryByTestId('unsent-composer-bar')).not.toBeInTheDocument();
+    });
+
+    it('does not show the bar for an empty composer', async () => {
+      serveFrame('composer-empty');
+      renderPane();
+
+      await waitFor(() => expect(screen.getByTestId('terminal-display')).toBeInTheDocument());
+      expect(screen.queryByTestId('unsent-composer-bar')).not.toBeInTheDocument();
+    });
+
+    it('leaves the escape-hatch gate untouched: unclassified + empty composer = hatch, no bar', async () => {
+      // The existing guard, unchanged. An unclassified overlay still gets its
+      // navigation pad, and an empty composer still offers no way to send Enter.
+      let fetchCount = 0;
+      mockFetch.mockImplementation(async () => {
+        fetchCount += 1;
+        if (fetchCount > 1) await new Promise(resolve => setTimeout(resolve, 550));
+        return okJson({
+          isRunning: true,
+          cliToolId: 'claude',
+          fullOutput: frame('composer-empty'),
+          thinking: false,
+          isSelectionListActive: false,
+          isPagerActive: false,
+          isPromptWaiting: false,
+          isUnclassifiedActive: true,
+        });
+      });
+      renderPane();
+
+      await waitFor(
+        () => expect(screen.getByTestId('terminal-escape-hatch')).toBeInTheDocument(),
+        { timeout: 1500 },
+      );
+      expect(screen.queryByTestId('unsent-composer-bar')).not.toBeInTheDocument();
+    });
+
+    it('sends Enter to the existing special-keys endpoint — no new API', async () => {
+      serveFrame('composer-residual-slash');
+      renderPane();
+
+      await waitFor(() => expect(screen.getByTestId('unsent-composer-bar')).toBeInTheDocument());
+      fireEvent.click(screen.getByRole('button', { name: 'worktree.unsentComposer.run' }));
+
+      await waitFor(() => {
+        const posted = postedCalls();
+        expect(posted.length).toBeGreaterThan(0);
+        expect(posted[0][0]).toBe('/api/worktrees/w-1/special-keys');
+        expect(JSON.parse(posted[0][1].body as string)).toEqual({
+          cliToolId: 'claude',
+          keys: ['Enter'],
+        });
+      });
+    });
+
+    it('clears the composer through the clear-composer endpoint', async () => {
+      serveFrame('composer-residual-slash');
+      renderPane();
+
+      await waitFor(() => expect(screen.getByTestId('unsent-composer-bar')).toBeInTheDocument());
+      fireEvent.click(screen.getByRole('button', { name: 'worktree.unsentComposer.clear' }));
+
+      await waitFor(() => {
+        const posted = postedCalls();
+        expect(posted.map(([url]) => url)).toContain('/api/worktrees/w-1/clear-composer');
+      });
     });
   });
 });

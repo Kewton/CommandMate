@@ -1,0 +1,54 @@
+version: 1
+title: "Issue #1950 最終: sync-map.json を含む union scope での再裁定（確認のみ）"
+goal: |
+  **追加の実装は不要です。** commit `cf438066` の内容・判断・変異注入をすべて受領しました。
+
+  - `waited=0s` の固定値 assert を「フィールドの存在」＋「holder の待ちが後続より厳密に短い」＋
+    「GATE 行を行頭行末で固定」へ変えた形は**両方向に厳密に強く**なっており、MB の変異が
+    その証明になっています。元の assert の意図を `:785` のコメントから読み取り、
+    **同じ欠陥の片割れ（`duration=3s` の literal）が既に直っていて wait 側だけ残っていた**ことまで
+    突き止めた点も含めて、期待以上です。
+  - `monitor.sh` の `fatal_reported`（first signal wins）で 141 → 143 になり、かつ単独 SIGPIPE は
+    今も 141 を報告するという陽性対照も確認済みであること、了解しました。
+  - **契約の前提 2 件の訂正を受け入れます**（実測が正）: `.agents/skills/` に orchestrate-monitor は
+    存在しない（dual placement は cmate-verify / demo-video / video-to-gif の 3 つだけ）。
+    私が挙げた sha256 `180d7656c29e…` は `run-tests.sh` のもので monitor.sh のものではない。
+  - **`.claude/skills/sync-map.json` の re-pin を承認します。** 「re-pin すると scope が落ち、
+    re-pin しないと unit が落ちる」という相互排他で unit 側を選んだ判断は正しい —
+    unit を赤のまま置くことは #1950 が直そうとしている失敗そのものを再生産します。
+    今回の送信で scope.allow に `.claude/skills/sync-map.json` を追加しました。
+
+  ## やること
+
+  - `git status` を見て、`.commandmate/tasks/` 配下以外に未コミットの変更が無いことを確認する。
+  - **ファイルを 1 つも変更しない。** 新しい commit も作らない。
+  - 最終行に `VERIFY_ONLY_ACK` とだけ出力して終了する。
+
+  未コミットの変更が残っていた場合だけ、それを `cf438066` に `--amend` で畳んでから
+  `VERIFY_ONLY_ACK` を出力してください（新しい commit は作らないこと）。
+
+  ## 申し送り（あなたの作業ではありません）
+
+  commit message の「残っている宿題」— `Kewton/commandmate-skills` への移植 2 件
+  （`run-tests.sh` は byte-identical コピー、`monitor.sh` は port-required なので `fatal_reported` の
+  挙動を再表現）— は**私が別 Issue に切り出します**。`lastSyncedRef` を `9604e8f` のままにして
+  「移植済み」を主張しなかったのは正しい判断です。
+scope:
+  allow:
+    - "tests/**"
+    - "vitest.config.ts"
+    - "package.json"
+    - ".claude/skills/cmate-verify/**"
+    - ".agents/skills/cmate-verify/**"
+    - ".claude/skills/orchestrate-monitor/**"
+    - ".claude/skills/sync-map.json"
+  deny: []
+verify:
+  gates: [token-discipline, control-chars, claudemd-size, route-exports, lint, typecheck, unit]
+autoYes:
+  mode: allow-listed
+  allowPromptTypes: [yes_no, multiple_choice]
+  denyPatterns: []
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true

@@ -292,8 +292,8 @@
         {
           "path": "scripts/tests/run-tests.sh",
           "policy": "byte-identical",
-          "sha256": "180d7656c29ee5c5b94ce19fddf34ae686811386f267b32a4cf2b62e509ac354",
-          "note": "Issue #1639 で追加。 2026-08-03 に counterpart（cmate-verify 0.2.0、skills PR #41）へ移植済み。 2026-08-03 に Issue #1651 の変更も counterpart（cmate-verify 0.3.0、skills PR #42）へ移植済み。 counterpart の同一 suite は `tests/fixtures/cmate-verify/run-tests.sh` に在り、RUNNER の解決とヘッダのコメントだけが違う（Issue #1861 で実測: 差分はその 2 箇所のみ）。 2026-08-20（Issue #1864）に skills #228（PR #230）の case 23 と mutex assertion の分割を取り込んだ。counterpart との差分は依然 RUNNER の解決とヘッダのコメントの 2 箇所のみ。"
+          "sha256": "94b20b1e0739ccfeed60df2b2919e0aa2b0bfd23bf6a0aa145a7e5c255a93416",
+          "note": "Issue #1639 で追加。 2026-08-03 に counterpart（cmate-verify 0.2.0、skills PR #41）へ移植済み。 2026-08-03 に Issue #1651 の変更も counterpart（cmate-verify 0.3.0、skills PR #42）へ移植済み。 counterpart の同一 suite は `tests/fixtures/cmate-verify/run-tests.sh` に在り、RUNNER の解決とヘッダのコメントだけが違う（Issue #1861 で実測: 差分はその 2 箇所のみ）。 2026-08-20（Issue #1864）に skills #228（PR #230）の case 23 と mutex assertion の分割を取り込んだ。counterpart との差分は依然 RUNNER の解決とヘッダのコメントの 2 箇所のみ。 【未移植 #1950】2026-08-22: 本リポジトリ側のみ修正済み。counterpart への移植が未了。 byte-identical 指定なので同じバイトをコピーすること。"
         },
         {
           "path": "scripts/verify-run.sh",
@@ -350,8 +350,8 @@
         {
           "path": "scripts/monitor.sh",
           "policy": "port-required",
-          "sha256": "7cab647dd08890bde450565c2a59c24e1d9f8d740dc72ba8b44a7bd78a18b031",
-          "note": "#1613 で同期済み。それ以前は skills 側だけが FALLBACK MODE 警告を出していた（コード差分 13 行）。 #1728 で両側に反映済み（skills 0.7.0 / commandmate-skills#110、2026-08-07）。hooks-git.sh: worktree id の突合に `slug(basename(path))`（deriveWorktreeId / #1621）を第1候補として追加（ブランチ由来の旧2規則は残置）、診断行に ERROR/WARN のレベル語を付与。monitor.sh: シグナル報告 trap・正常終端以外の EXIT 報告・`--heartbeat`（既定10）を追加。SKILL.md: 上記の挙動記述（突合順の表・レベル語・生存報告）を追記。"
+          "sha256": "387f35abc1db159b46f3c65aa08bff451b187acedf805d2ea3b062a6334de6eb",
+          "note": "#1613 で同期済み。それ以前は skills 側だけが FALLBACK MODE 警告を出していた（コード差分 13 行）。 #1728 で両側に反映済み（skills 0.7.0 / commandmate-skills#110、2026-08-07）。hooks-git.sh: worktree id の突合に `slug(basename(path))`（deriveWorktreeId / #1621）を第1候補として追加（ブランチ由来の旧2規則は残置）、診断行に ERROR/WARN のレベル語を付与。monitor.sh: シグナル報告 trap・正常終端以外の EXIT 報告・`--heartbeat`（既定10）を追加。SKILL.md: 上記の挙動記述（突合順の表・レベル語・生存報告）を追記。 【未移植 #1950】2026-08-22: 本リポジトリ側のみ修正済み。counterpart への移植が未了。 port-required なので逐語コピーせず fatal_reported の挙動を再表現すること。"
         },
         {
           "path": "scripts/quality-gate.sh",

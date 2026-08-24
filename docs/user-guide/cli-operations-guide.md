@@ -99,12 +99,12 @@ commandmate ls --id anvil-              # worktree IDプレフィックスでフ
 ### 出力例
 
 ```
-ID                                               NAME                  STATUS   DEFAULT
------------------------------------------------  --------------------  -------  ------
-localllm-test                                    main                  ready    claude
-commandmate                                      develop               running  claude
-commandmate-issue-518                            feature/518-worktree  ready    claude
-commandmate-main                                 main                  idle     claude
+ID                                               NAME                  STATUS   REASON                          DEFAULT
+-----------------------------------------------  --------------------  -------  ------------------------------  ------
+localllm-test                                    main                  ready    input_prompt                    claude
+commandmate                                      develop               running  thinking_indicator              claude
+commandmate-issue-518                            feature/518-worktree  ready    no_recent_output (no evidence)  claude
+commandmate-main                                 main                  idle     -                               claude
 ```
 
 > ID は **worktree ディレクトリ名**由来です（Issue #1621/#1645）。`/worktree-setup` が作る
@@ -119,6 +119,38 @@ commandmate-main                                 main                  idle     
 | `ready` | セッション起動中・入力待ち（タスク完了後の状態） |
 | `running` | エージェントがタスク実行中 |
 | `waiting` | 確認プロンプト待ち（Yes/No等） |
+
+### REASON列の意味（Issue #1926）
+
+STATUS の**根拠**です。同じ `ready` でも「エージェントが composer に戻った」（`input_prompt`）と
+「画面が読めないまま出力も止まったのでフォールバックで ready と呼んでいる」（`no_recent_output`）は
+別物で、これまで表からは区別できませんでした。
+
+| 表示 | 意味 |
+|---|---|
+| `input_prompt` | composer（入力プロンプト）を検出した |
+| `thinking_indicator` | 思考インジケータを検出した |
+| `prompt_detected` | 確認プロンプトを解析できた |
+| `<reason> (no evidence)` | **肯定的証拠なし**（`statusEvidence: 'none'`）。検出層が画面を分類できず、STATUS はフォールバック値です。現状は `default` と `no_recent_output` の 2 経路 |
+| `-` | サーバーが理由を返さない。#1926 以前のサーバー／セッション未起動／そのツールに 2 つ以上のインスタンスがある（集約に単一の理由は無い）のいずれか |
+
+> `(no evidence)` の行は「完了した」ではありません。`commandmate capture <id> --pane` で
+> 生ペインを確認してください。同じ状態が 60 秒続くと `commandmate wait` は exit 10
+> （`type: 'unclassified'`）を返します。
+
+`--json` の値は**サーバーの行そのまま**で、理由と証拠は `sessionStatusByCli.<tool>` の下に入ります
+（トップレベルには足していません。`GET /api/worktrees` と一致させるためです）。
+
+```bash
+commandmate ls --json \
+  | jq -r '.[] | "\(.id)\t\(.sessionStatusByCli.claude.sessionStatusReason // "-")\t\(.sessionStatusByCli.claude.statusEvidence // "-")"'
+```
+
+| フィールド | 意味 |
+|---|---|
+| `sessionStatusByCli.<tool>.statusEvidence` | `'positive'`（何かが肯定的に確認した）／`'none'`（読めなかった） |
+| `sessionStatusByCli.<tool>.sessionStatusReason` | スクレイパーの理由コード |
+| `sessionStatusByCli.<tool>.lastKnownStatus` / `lastKnownStatusAt` | 最後に**肯定的に確認できた**状態とその時刻。サーバーのメモリ上に保持（TTL 30 分、再起動でクリア、セッション停止で破棄） |
 
 ---
 
@@ -351,8 +383,17 @@ commandmate wait <worktree-id> --fail-on-upstream-fault  # 上流障害で compo
 | 10 | プロンプト検出（`--on-prompt agent` 時） | `respond` で応答し、再度 `wait` |
 | 11 | 上流障害（`--fail-on-upstream-fault` 指定時のみ、Issue #1839） | **`verify` を回さず**時間をおいて同じ内容を再 `send` |
 | 20 | 検証ゲート不合格（`--verify`） | `verify --json` で失敗ゲートを確認し修正 |
-| 21 | 作業証跡ゼロ（コミットも未コミット変更も無い） | エージェントが着手していない。再度 `send` |
+| 21 | 作業証跡ゼロ（コミットも未コミット変更も無い）／セッションが一度も稼働していない | エージェントが着手していない。再度 `send` |
 | 124 | タイムアウト | `capture` で状況確認、再度 `wait` or 中断 |
+
+> **exit 21 が出たときは、まず送り先の解決を疑ってください（Issue #1884）**。
+> `Not started: <id> has no running <agent> session for instance <x> (resolvedBy=...)` の
+> 末尾が**解決の根拠**です。`resolvedBy=worktree-default` なのに `--instance` を渡している場合、
+> その instance は roster にも無くツール名でもないため **worktree の既定エージェント**を
+> 見に行っています（`commandmate instances <id>` で roster を確認してください）。
+> `resolvedBy=fallback` は worktree 自身に CLI ツールが記録されていないという別の異常です。
+> #1884 以前のサーバーはこの末尾を返さないので、**末尾が無いこと自体**が
+> 「サーバーが `--instance` のツールを解決しない版である」ことを意味します。
 
 ### --verify / --require-work（Issue #1544）
 
@@ -406,8 +447,14 @@ esac
 | `type` | 意味 | 応答方法 |
 |--------|------|----------|
 | `yes_no` / `multiple_choice` | プロンプトを検出・解析できた | `commandmate respond <id> <答え>` |
-| `selection_list` | 矢印キー選択 UI（Codex の pager / `/model`、antigravity の権限メニュー等、Issue #1628）。選択肢としては解析できない | `commandmate respond` ではなく矢印キー相当の特殊キー送信 |
+| `selection_list` | 矢印キー選択 UI（Codex の pager / `/model`、antigravity の権限メニュー、**opencode の permission ダイアログ**（`Allow once / Allow always / Reject`、Issue #1893）等、Issue #1628）。選択肢としては解析できない | `commandmate respond` ではなく矢印キー相当の特殊キー送信 |
 | `unclassified` | **対話中の画面なのに検出層が分類できなかった**（Issue #1708）。`isUnclassifiedActive` が **60 秒連続**で立った場合のみ返る | 生ペインを見る: `commandmate capture <id> --pane` |
+
+> **`selection_list` に `commandmate respond <id> <番号>` を送らないこと（Issue #1893）。**
+> opencode の permission ダイアログは番号を持たないボタン列で、実測（1.18.21）では数字キーは無反応です。
+> 数値回答はテキストとして送られたあと Enter が続くため、**ハイライトされているボタン（既定は `Allow once`）が
+> 確定します** —— `respond <id> 3`（Reject のつもり）が承認に化けます。矢印キー相当の特殊キー（←/→ ＋ Enter）
+> か、Web UI の NavigationButtons を使ってください。
 
 `unclassified` は「検出漏れそのものを停止事由にする」ための安全網です。検出層をすり抜けると
 auto-yes も契約の `autoYes` ポリシーも exit 10 も一切発火しないため、以前は `--timeout` を
@@ -418,6 +465,11 @@ auto-yes も契約の `autoYes` ポリシーも exit 10 も一切発火しない
 
 `--timeout` / `--stall-timeout` を 60 秒未満に設定した場合は常にそちらが先に効きます（この滞留判定は
 長い待ちを先回りするためのもので、短い待ちを延ばすものではありません）。
+
+> **この段落の要点は `commandmate wait --help` にも出ます（Issue #1926）。** 滞留判定は専用フラグを
+> 持たない停止事由なので、オプション一覧を読んだだけでは存在に気づけません。60 秒・exit 10・
+> `--stall-timeout` / `--timeout` との優先関係・`capture --pane` への導線を `--help` の
+> `Unclassified frames` 節に置いています。
 
 #### `ready` は必ずしも「完了」ではありません
 
@@ -606,6 +658,36 @@ GATE unit FAIL (exit=1, 45.0s)
 # stdout:
 RESULT failed
 ```
+
+### CI と同じ検査を宣言する（Issue #1882）
+
+`wait --verify` の exit code は `/orchestrate` がワーカーの完了を裁定する根拠なので、**宣言ゲートが
+見ていない CI ジョブは、裁定が緑でも赤になりうる**。PR #1881 では全ゲート exit 0 の commit が
+CI の `Token discipline` で FAILURE になった（宣言ゲートが lint / typecheck / unit の 3 本だけだった）。
+
+このとき **verify.yaml へ検査本体（`git grep` や閾値）をコピーしてはいけない**。同じ検査の実装が
+2 箇所に増え、片方だけ更新されて静かに乖離する。乖離は「verify は緑・CI は赤」の向きに倒れるので、
+塞ごうとした事故そのものが再発する。正しい形は**両方が同じスクリプトを呼ぶ**こと。
+
+```yaml
+# .commandmate/verify.yaml
+gates:
+  - id: token-discipline
+    command: "node scripts/check-token-discipline.mjs"   # ← CI の run: と同一
+    timeoutSec: 120
+```
+
+```yaml
+# .github/workflows/ci-pr.yml — ジョブ側は呼ぶだけ
+      - name: Guard against raw gray/slate + chromatic colors in migrated directories
+        run: node scripts/check-token-discipline.mjs
+```
+
+**何を宣言し、何を宣言しないか**は所要時間で決まる。宣言ゲートは既定で毎ラン走るため
+（「宣言はするが既定では走らない」フラグはスキーマに無い）、1 本の追加はワーカー 1 体あたりの
+裁定時間にそのまま乗る。CommandMate 本体では静的ガード 3 本（各 0.1 分）を足し、
+Integration（2.1 分）/ Legacy tmux（Docker 必須）/ Security Audit（ネットワーク依存）/
+Build（稼働サーバの成果物を差し替える）/ E2E（5 分超）は**足していない**。
 
 ### 並列 worktree と共有資源（Issue #1771）
 
@@ -1061,6 +1143,9 @@ commandmate capture <worktree-id> --instance codex-2 # 追加インスタンス�
   "isSelectionListActive": false,
   "isPagerActive": false,
   "isUnclassifiedActive": false,
+  "statusEvidence": "positive",
+  "lastKnownStatus": "running",
+  "lastKnownStatusAt": 1754296400123,
   "lastServerResponseTimestamp": null,
   "serverPollerActive": true,
   "sessionStatus": "running",
@@ -1070,12 +1155,31 @@ commandmate capture <worktree-id> --instance codex-2 # 追加インスタンス�
     "lastEventType": "user_prompt_submit",
     "lastEventAt": 1754296400000,
     "lastEventDetail": null,
+    "turnId": "turn-1754296400000",
+    "openedAt": 1754296400000,
+    "closedAt": null,
+    "closedBy": null,
     "promptWaitingSince": null,
-    "promptWaitingSource": null
+    "promptWaitingSource": null,
+    "source": {
+      "cliToolId": "claude",
+      "capabilities": {
+        "supportedEvents": ["stop", "notification", "session_start", "user_prompt_submit", "session_end", "pre_tool_use", "post_tool_use"],
+        "configScope": "per-instance",
+        "decisionTimeoutSeconds": 5,
+        "permissionHookPredictsDialog": true,
+        "sessionStartMayArriveLate": false,
+        "permissionReplyReleasesPrompt": false,
+        "eventIdentity": null,
+        "resync": "none"
+      }
+    }
   },
   "model": "claude-opus-5[1m]",
   "reasoningEffort": null,
-  "upstreamFault": null
+  "upstreamFault": null,
+  "resolvedBy": "roster",
+  "conflict": null
 }
 ```
 
@@ -1084,16 +1188,66 @@ commandmate capture <worktree-id> --instance codex-2 # 追加インスタンス�
 
 | フィールド | 意味 |
 |---|---|
-| `content` | lastCapturedLine 以降の差分（`src/lib/session/current-output-builder.ts:535-556`）。ポーラーが保存済みなら正常時でも空 |
+| `content` | ポーラーがまだ保存していない分（`buildCurrentOutput`）。**行数がカーソルとして使えるツールでのみ差分**＝ scrollback を持つ codex / gemini / vibe-local / antigravity で、かつ capture window（10000 行）が未飽和のとき。この場合ポーラーが保存済みなら正常時でも空になる。**alternate screen のツール（claude / opencode / copilot）と、window 飽和時は capture 全体**（行数が pane 高さ・window 幅で pin され「読んだ位置」にならないため。Issue #1910 / #1670 / #1268） |
 | `realtimeSnippet` | pane 末尾 100 行（画面そのもの。`src/lib/session/current-output-builder.ts:712`） |
 | `lineCount` | capture 全体の行数（空白行を含む。TUI は 1000 行のペインに描かれるため、空白 pane でも 1001 になりうる） |
 | `isRunning` | tmux セッションが存在して healthy（`src/lib/session/claude-session.ts:543-556`）。**ターン進行中の意味ではない** |
 | `sessionStatus` / `sessionStatusReason` | 状態と、その根拠（`hook_*` なら hooks 由来、それ以外はスクレイパー由来。`HOOK_STATUS_REASON` は `src/lib/session/status-mapping.ts`） |
 | `structuredEvents.*` / `lastStopEventAt` | hooks の最終イベントと最終 `stop` 時刻。hooks が来ていなければ `null` |
+| `statusEvidence` / `lastKnownStatus` / `lastKnownStatusAt` | 判定が肯定的証拠に基づくか、と直前の確定状態（Issue #1926）。下記参照 |
+| `structuredEvents.turnId` / `openedAt` / `closedAt` / `closedBy` | ターンの暫定境界（Issue #1926）。**まだ安定した turn 同一性ではありません**。下記参照 |
+| `structuredEvents.source` | そのツールの構造化イベントソースの識別子と**宣言値**（Issue #1924）。セッションの状態ではなく**ソースの性質**なので、hooks が 1 件も来ていなくても・セッションが止まっていても必ず入る。ソース実装が無いツール（`vibe-local`）は互換ソースの「未計測」値（`supportedEvents: []`）を返す |
 | `upstreamFault` | 画面に上流障害の署名があれば `{id, matchedText, at}`、無ければ `null`（Issue #1839）。**`null` は「健全」ではなく「既知の署名が無かった」** |
+| `resolvedBy` / `conflict` | `cliToolId` を選んだ**解決段**と、roster と明示指定の矛盾（Issue #1884）。下記参照 |
 
 画面が空かどうかは `realtimeSnippet.trim() === ''` と `lineCount` で見る。
 `content` は差分なので単独では判断しない。
+
+#### `statusEvidence` / `lastKnownStatus`（Issue #1926）
+
+`sessionStatus` が**肯定的証拠に基づく**のか、単に否定パターンに一致しなかっただけなのかを
+分けて出します。設計方針書 §4 D1 の「完了は肯定的証拠でのみ宣言する」に対応する追加フィールドで、
+**`sessionStatus` の値域（`idle` / `ready` / `running` / `waiting`）は変わりません**。
+
+| 値 | 意味 |
+|---|---|
+| `statusEvidence: "positive"` | 完了マーカー・思考インジケータ・解析できたプロンプト・composer、あるいはエージェント自身の `Stop` が判定の根拠 |
+| `statusEvidence: "none"` | 対話中の画面なのに検出層が読めなかった。`sessionStatus` はフォールバック値。現状は `running`/`default` と `ready`/`no_recent_output` の 2 経路で、既存の `isUnclassifiedActive` と**同じ事実**（`statusEvidence === 'none'` ⇔ `isUnclassifiedActive === true`） |
+
+`lastKnownStatus` / `lastKnownStatusAt` は**最後に肯定的に確認できた状態**とその時刻です。
+`statusEvidence` が `"positive"` の間は `sessionStatus` と同じ値で、`"none"` になった瞬間から
+「フォールバックが何と呼んでいるか」ではなく「直前まで実際に何だったか」を答えます。
+
+```bash
+# フォールバックで ready に見えているだけの worktree を弾く
+commandmate capture "$WT" --json | jq -r 'select(.statusEvidence == "none") | .lastKnownStatus'
+```
+
+- サーバーのメモリ上に保持します。**TTL 30 分**（構造化状態の staleness bound と同値）、
+  **サーバー再起動でクリア**、**セッション停止で破棄**します。`null` はこの 4 つを区別しません
+- `isRunning: false` のセッションは `lastKnownStatus: null` です（`model` と同じ理由）。
+  `statusEvidence` は `"positive"` — tmux に問い合わせて「セッションが無い」と確認した結果だからです
+- **キーが無い**のは #1926 以前のサーバーで、`"positive"` とは意味が違います
+- 既存フィールドは一切変わっていません。`isUnclassifiedActive` もそのまま出ます
+
+#### `structuredEvents` のターンフィールド（Issue #1926）
+
+| フィールド | 意味 |
+|---|---|
+| `turnId` | ターンの識別子（`turn-<openedAt>`）、無ければ `null` |
+| `openedAt` | 直近の `user_prompt_submit` / `pre_tool_use` / `post_tool_use` の時刻 |
+| `closedAt` | エージェントがターン終了（`Stop`）を報告した時刻 |
+| `closedBy` | 終了理由。現状は `'stop'` のみ |
+
+> **`turnId` はまだ安定したターン同一性ではありません。** 現状サーバーが保持しているのは
+> **最新イベント 1 件だけ**なので、ターン途中の `pre_tool_use` で `openedAt` と `turnId` が
+> 打ち直されます。`turnId` の変化を「新しいターンが始まった」と読むと 1 ターンの中で何度も
+> 誤検知します。本実装（generation フェンス配下の turn レコード）は Phase 4 です。
+>
+> `commandmate wait` はこれらをまだ読みません。ターン成立の判定（Issue #1839）は
+> `lastEventType` / `lastEventAt` のままで、`lastEventType` / `lastEventAt` も残っています。
+> `closedAt` が `null` でも「ターンが続いている」とは限りません（`notification` が最後なら
+> 4 つとも `null` になります）。
 
 #### `model` / `reasoningEffort`（Issue #1785）
 
@@ -1111,6 +1265,34 @@ commandmate capture <worktree-id> --json | jq -r '.model // "unknown"'
 - `reasoningEffort` は Issue #1784 着地までは常に `null` です
 - **既存フィールドは一切変わっていません**。`content` / `realtimeSnippet` /
   `sessionStatus` / `sessionStatusReason` を読んでいる監視スクリプトはそのままです
+
+#### `resolvedBy` / `conflict`: 送り先の解決（Issue #1884）
+
+`cliToolId` が**どの段で決まったか**と、roster と明示指定（`--agent` / `?cliTool`）が
+食い違っていたかを載せます。どちらも**追加フィールド**で、既存フィールドは変わりません。
+#1884 以前のサーバーは両方とも返しません（キー自体が無い）。
+
+| `resolvedBy` | 意味 |
+|---|---|
+| `roster` | `--instance` が roster に登録されており、その `cliTool` を採用した（最優先） |
+| `explicit` | roster が知らない instance に対して明示指定を採用した／instance 未指定で明示指定があった |
+| `primary` | instance ID がツール名そのもの（`--instance opencode` 等）なので、そのツールのプライマリインスタンスと解釈した（Issue #868） |
+| `worktree-default` | 上記のいずれにも当たらず、worktree の既定エージェントを採用した |
+| `fallback` | worktree に CLI ツールが記録されていなかった。**正常な結果ではありません**（設計 §4 D5 決定 5） |
+
+```bash
+# --instance を渡したのに worktree 既定が返ってきていないか
+commandmate capture <worktree-id> --instance worker-7 --json | jq -r '.resolvedBy'
+```
+
+`conflict` は roster と明示指定が食い違ったときだけ非 `null` になります。
+**読み取り経路なので 400 にはせず 200 を返し、roster を優先して解決した事実を載せます**
+（副作用のある `send` / `respond` / `kill-session` などは同じ矛盾を 400 `instance_tool_conflict`
+で拒否します）。
+
+```json
+"conflict": { "instanceId": "oc-2", "rosterCliTool": "opencode", "requestedCliTool": "claude" }
+```
 
 #### `upstreamFault`: 上流障害の観測（Issue #1839）
 
@@ -1336,6 +1518,34 @@ commandmate auto-yes <worktree-id> --enable --instance codex-2  # 追加イン�
 | `--instance <id>` | **対象の推奨指定方法**。対象インスタンスID。他インスタンスと独立してAuto-Yesを制御 |
 | `--agent <id>` | roster に無いインスタンス向けの補助（`--instance` 単独で足りる場合は不要） |
 
+### 対象エージェントは worktree の既定（Issue #1909）
+
+`--instance` も `--agent` も付けない `auto-yes <id> --enable` は、
+[`--agent` と `--instance` の優先順位](#--agent-と---instance-の優先順位issue-1629--1925)の表を
+そのまま適用します。つまり **worktree の既定エージェント**が対象で、`send` / `wait` / `capture`
+と同じ送り先です。**Issue #1909 以前は claude 固定**で、既定が copilot / opencode の worktree では
+claude の poller が起動して 2 秒ごとに `Claude Code session ... does not exist` を出しつつ、
+実際のダイアログは無応答のまま残っていました。どのエージェントを武装したかは実行時に表示されます。
+
+```console
+$ commandmate auto-yes proj-cp --enable
+Auto-yes enabled for proj-cp (copilot).
+```
+
+`--instance` でプライマリ以外を指定した場合は `(opencode, instance oc-2)` の形になります。
+エージェント名が出ない（`Auto-yes enabled for proj-cp.`）ときは、**稼働中のサーバが CLI より古く**
+まだ claude 固定で動いています。`commandmate stop && commandmate start` で再起動してください。
+
+ダイアログが出たまま停まっているセッションに対して有効化した場合は、**その解決済みエージェントの**
+保留承認を再裁定した結果が 2 行目に出ます（Issue #1898-2。`resync` capability を持つソース＝
+現状 opencode のみが対象で、hook 系 5 ツールでは何も出ません）。
+
+```console
+$ commandmate auto-yes proj-oc --enable
+Auto-yes enabled for proj-oc (opencode).
+Re-judged 2 pending approval(s): 2 answered.
+```
+
 ### `--stop-pattern` はターミナル出力への照合（コマンドの抑止には使えない）
 
 `--stop-pattern` はエージェントが実行する**コマンドを監視するものではなく**、ターミナル出力の
@@ -1496,26 +1706,68 @@ gemini       Gemini  gemini    no       no
 - `send ... --instance <id> --register` を付けると、送信後にそのインスタンスを roster へ自動登録します。UIと状態を一致させたい場合はこちらを使ってください。
 - 有効な `--instance` の値を調べるには `commandmate instances <worktree-id>` で roster と稼働中セッションを確認します。
 
-### `--agent` と `--instance` の優先順位（Issue #1629）
+### `--agent` と `--instance` の優先順位（Issue #1629 / #1925）
 
 `--instance` はインスタンスIDであってCLIツール名ではないため、どのCLIツールで起動するかは
 別に決める必要があります。CLIツールIDは tmux セッション名の一部（`mcbd-<agent>-<worktree>[-<suffix>]`）
 なので、取り違えると「codex という名前のセッションで claude が動く」状態になります。
 決定順は次のとおりで、`send` / `respond` / `capture` / `auto-yes` で共通です。
 
-| ケース | 採用されるCLIツール |
-|--------|--------------------|
-| `--instance` が roster に**ある** / `--agent` 省略 | roster の `CLI_TOOL` |
-| `--instance` が roster に**ある** / `--agent` が roster と**一致** | その値 |
-| `--instance` が roster に**ある** / `--agent` が roster と**不一致** | **エラー（exit 2）**。roster が正本なので黙って上書きしない |
-| `--instance` が roster に**ない** / `--agent` 指定あり | `--agent` の値（アドホック起動） |
-| `--instance` が roster に**ない** / `--agent` 省略・IDがCLIツール名（例 `codex`） | そのCLIツール（プライマリインスタンス） |
-| `--instance` が roster に**ない** / `--agent` 省略・IDが独自名（例 `codex-9`） | worktree の既定エージェント |
+| ケース | 採用されるCLIツール | `resolvedBy` |
+|--------|--------------------|--------------|
+| `--instance` が roster に**ある** / `--agent` 省略 | roster の `CLI_TOOL` | `roster` |
+| `--instance` が roster に**ある** / `--agent` が roster と**一致** | その値 | `roster` |
+| `--instance` が roster に**ある** / `--agent` が roster と**不一致** | **変更系はエラー（exit 2）**。roster が正本なので黙って上書きしない | `roster` ＋ `conflict` |
+| `--instance` が roster に**ない** / `--agent` 指定あり | `--agent` の値（アドホック起動） | `explicit` |
+| `--instance` が roster に**ない** / `--agent` 省略・IDがCLIツール名（例 `codex`） | そのCLIツール（プライマリインスタンス） | `primary` |
+| `--instance` が roster に**ない** / `--agent` 省略・IDが独自名（例 `codex-9`） | worktree の既定エージェント | `worktree-default` |
+| `--instance` 省略 | `--agent` の値、無ければ worktree の既定エージェント（roster は参照しない） | `explicit` / `worktree-default` |
 
 不一致でエラーになった場合は、`--agent` を外す・roster と同じ値にする・
 `commandmate instances <worktree-id> remove/add` で roster を登録し直す、のいずれかで解消します。
 
-> roster を読めない場合（古いデーモンなど）は警告を出して `--agent` をそのまま使います。
+#### 決定するのはサーバ（Issue #1925）
+
+上の表を適用するのは**サーバ**です。CLI は `GET /api/worktrees/<id>/resolve-target` に問い合わせ、
+返ってきた `cliToolId` / `instanceId` / `resolvedBy` をそのまま使います。以前は CLI 側にも
+同じ規則の写しがあり、しかも**プライマリインスタンスの段（上表 5 行目）が欠けていた**ため、
+roster 未登録の `--instance codex` に対して CLI とサーバが違う答えを返していました。
+
+不一致（`conflict`）の扱いは**副作用の有無で分かれます**。
+
+| 区分 | コマンド | 不一致のとき |
+|------|----------|--------------|
+| 変更 | `send` / `respond` / `auto-yes --enable` | **exit 2**。送り先を推測して副作用を起こさない |
+| 読み取り | `capture` | **警告を stderr に 1 行出して roster 側で読む**（exit 0） |
+
+`capture` を例外にしているのは、監視スクリプトが `capture` の非 0 終了を「今回のポーリングを飛ばす」
+と解釈して無限に回り続けるためです（`--agent` を取り違えたワーカー 1 本で、監視が無音のまま止まらなくなる）。
+
+#### CLI が稼働サーバより新しいとき
+
+`npm i -g commandmate` は**稼働中のデーモンを再起動しません**。そこで CLI は
+`GET /api/capabilities`（`{ serverVersion, capabilities }`）をプロセス内 1 回だけ問い合わせ、
+サーバが解決に対応しているかを確かめてから委譲します。判定は次の 4 通りだけです。
+
+| 応答 | 動作 |
+|------|------|
+| 200 ＋ JSON ＋ `capabilities` に `resolve-session-target` | サーバへ委譲する |
+| **本物の 404**（本文が空 or JSON） | 旧サーバとみなし CLI 側で解決（`resolvedBy: client-fallback`）。**stderr に警告 1 行** |
+| 401 / 403 | 認証エラーとして終了。**フォールバックしない** |
+| 3xx / HTML / JSON でない本文 / 500 / 通信エラー | 「サーバの能力を判定できない」として終了。**フォールバックしない** |
+
+`client-fallback` は**プライマリインスタンスの段を持たない劣化解決**です。認証が通っていないだけの
+応答や中間装置（リバースプロキシ・ngrok 等）の応答をここに落とすと `send` / `respond` の着弾先が
+変わりうるため、**旧サーバだと確認できた場合以外はフォールバックしません**。警告が出たら
+`commandmate stop && commandmate start` でサーバを入れ替えてください。
+
+> roster を読めない場合（`client-fallback` 経路のみ）は警告を出して `--agent` をそのまま使います。
+
+#### ツール依存オプションは解決の**後**に検証されます
+
+`send --model` は解決後の CLI ツールに対して検証されます。したがって
+`send <id> "..." --instance copilot-2 --model gpt-5-mini` は `--agent copilot` を重ねなくても通ります
+（roster が `copilot-2` を copilot だと宣言しているため）。
 
 ### per-instance Auto-Yes
 
@@ -1586,7 +1838,7 @@ commandmate report metrics --json                  # JSON出力
 | オプション | 説明 | デフォルト |
 |-----------|------|-----------|
 | `--date <date>` | 対象日（`YYYY-MM-DD`） | 当日 |
-| `--tool <tool>` | 使用するAIツール（claude, codex, copilot） | claude |
+| `--tool <tool>` | 使用するAIツール（claude, codex, copilot, antigravity） | claude |
 | `--model <model>` | モデル名（copilot 向け） | - |
 | `--template <id>` | テンプレートIDを指示文として使用 | - |
 | `--instruction <text>` | カスタム指示文（`--template` の代替） | - |
@@ -1602,7 +1854,7 @@ commandmate report metrics --json                  # JSON出力
 | `--token <token>` | 認証トークン（`CM_AUTH_TOKEN` 環境変数を推奨） | - |
 
 > **注意**: `--date` は `YYYY-MM-DD` 形式のみ受け付けます。不正な形式は `exit 2`（CONFIG_ERROR）になります。
-> `--tool` は claude / codex / copilot のいずれか、`--days` は 1 以上を指定してください。
+> `--tool` は claude / codex / copilot / antigravity のいずれか、`--days` は 1 以上を指定してください。
 
 ### list 出力例
 

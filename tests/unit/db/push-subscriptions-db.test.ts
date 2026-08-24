@@ -35,20 +35,25 @@ describe('push-subscriptions-db', () => {
     deviceLabel: 'Pixel 8',
   });
 
-  it('creates a subscription with both kinds enabled by default', () => {
+  // Issue #2000 flipped the completion default: a new device opts into the
+  // "you need to act" bucket only. The dedicated suite for that decision is
+  // tests/unit/db/push-subscription-defaults-2000.test.ts.
+  it('creates a subscription opted into prompts, with completions off by default', () => {
     const rec = upsertPushSubscription(db, sub('https://push.example/a'));
     expect(rec.id).toBeTruthy();
     expect(rec.endpoint).toBe('https://push.example/a');
     expect(rec.keys).toEqual({ p256dh: 'p256dh-key', auth: 'auth-secret' });
     expect(rec.deviceLabel).toBe('Pixel 8');
     expect(rec.enabledPrompt).toBe(true);
-    expect(rec.enabledCompletion).toBe(true);
+    expect(rec.enabledCompletion).toBe(false);
   });
 
   it('upsert on the same endpoint refreshes keys but preserves preferences', () => {
     upsertPushSubscription(db, sub('https://push.example/a'));
+    // Set away from the creation default in both directions, so the assertion
+    // below cannot pass merely because the default happens to agree.
     updatePushSubscriptionPreferences(db, 'https://push.example/a', {
-      enabledCompletion: false,
+      enabledCompletion: true,
     });
 
     const updated = upsertPushSubscription(db, {
@@ -61,7 +66,7 @@ describe('push-subscriptions-db', () => {
     expect(getAllPushSubscriptions(db)).toHaveLength(1);
     expect(updated.keys.p256dh).toBe('rotated-key');
     expect(updated.deviceLabel).toBe('Pixel 8 Pro');
-    expect(updated.enabledCompletion).toBe(false); // preserved
+    expect(updated.enabledCompletion).toBe(true); // preserved, not reset to the default
     expect(updated.enabledPrompt).toBe(true);
   });
 
@@ -75,6 +80,10 @@ describe('push-subscriptions-db', () => {
     updatePushSubscriptionPreferences(db, 'https://push.example/b', {
       enabledPrompt: false,
     });
+    // Issue #2000: completion is off at creation, so both devices are opted in
+    // explicitly here — otherwise this asserts the default rather than the filter.
+    updatePushSubscriptionPreferences(db, 'https://push.example/a', { enabledCompletion: true });
+    updatePushSubscriptionPreferences(db, 'https://push.example/b', { enabledCompletion: true });
 
     const forPrompt = getPushSubscriptionsForKind(db, 'prompt');
     expect(forPrompt.map((s) => s.endpoint)).toEqual(['https://push.example/a']);

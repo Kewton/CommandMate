@@ -1,0 +1,101 @@
+version: 1
+title: "Issue #1977 追補: ws-server-cleanup を scope に入れ直して直す"
+goal: |
+  **追加の実装は不要な部分が大半です。** commit `7f39b315` の 4 ファイル分の修正・実測・変異注入は
+  受領しました。「予算ではなく遅さの原因から直す」という契約の核心を守り、**本文が挙げた 5 ファイルが
+  実はフル実行の赤の主因ではなかった**ことまで対照で示した点も含めて、良い仕事です。
+
+  この送信は**あなたが「scope 外なので触っていない」と報告した 1 件を、scope を広げて直す**ためのものです。
+
+  ## 1. `ws-server-cleanup` を直す（必須）
+
+  **私の scope.allow が間違っていました。** 契約に `tests/unit/lib/ws-server-cleanup.test.ts` と
+  書きましたが、実際のパスは **`tests/unit/ws-server-cleanup.test.ts`** です。あなたの指摘どおり
+  glob が一度も一致していませんでした。あなたの落ち度ではありません。
+
+  今回 scope に次を追加しました:
+
+      tests/unit/ws-server-cleanup.test.ts
+      src/lib/ws-server.ts
+      src/lib/cli-tools/manager.ts
+
+  あなたの実測（`import('@/lib/ws-server')` 1160ms、うち **1046ms が `@/lib/cli-tools/manager`**）を
+  出発点にしてください。**負荷下フル実行で 2.67-3.33s と 5 ファイル中で最も予算を食う**という
+  あなた自身の計測どおり、ここが残った最大の一本です。
+
+  **判断してほしいこと**: `manager` の 1046ms が
+
+  - (a) **テスト側の問題**（テストが本番の import グラフ全体を引く必要が無いのに引いている）なら、
+    テストだけを直す。`vi.mock` / 遅延 import / 必要な部分だけの import へ。**これが第一選択**。
+  - (b) **本番の import グラフの問題**（`manager` が起動時に不要なものまで静的 import している）なら、
+    プロダクションコードを直す価値がある。ただし `manager.ts` は多くの経路が通る中核なので、
+    **import の向きを変える変更は影響が広い**。直す場合は何が動かなくなりうるかを commit message に
+    書き、フル `npm run test:unit` で確かめること。
+  - (c) 1046ms が本質的（本当にその依存が要る）なら、**直さずに理由を書く**のも正解です。
+    その場合は「なぜこのテストだけ本質的に遅いのか」を根拠つきで書き、個別 `testTimeout` の
+    是非も併せて述べてください。
+
+  **どれを採ってもよいので、実測してから決めてください。**
+
+  ## 2. Issue #1977 の前提が外れていた件を記録する（必須）
+
+  あなたの報告 4:
+
+  > 本文が挙げた 5 ファイルは、そのフル実行での赤の主因ではなかった。ベースライン実行で赤だった
+  > 48 テストはすべて #1950 のファミリで、別ワークツリーのフル test:unit を同時に走らせたことによる
+  > 30s サブプロセスガード超過だった。単独で回せば同じ負荷でも緑（受入 3 回とも 0 failed）。
+
+  **これは重要な訂正**なので、commit message に残したうえで `dev-reports/issue-1977-findings.md` にも
+  書いてください。特に次を明確に:
+
+  - **#1950 が入れた 30s サブプロセスガードが、複数 worktree の同時フル実行では超過しうる**のか。
+    そうならそれは #1950 の残課題であり、私が別 Issue に切り出します。**あなたが直す必要はありません。**
+    「ガードが超過した」のか「ガードが正しく発火して報告した」のかを区別して書いてください。
+  - 「5 ファイルが赤の主因ではない」ことと「5 ファイルが遅い」ことは両立します。あなたが直した
+    4 ファイルの改善は有効です。**それを取り下げる必要はありません。**
+
+  ## 受入条件
+
+  - `ws-server-cleanup` について (a)(b)(c) のいずれかの結論が実測つきで出ていること。
+    (a)(b) を採った場合は、負荷下でフル `npm run test:unit` を**連続 3 回**回して当該ファイルが 3/3 緑、
+    かつ所要（秒）と load avg を commit message に。
+  - 変異注入で、直したものが空振りでないことを示すこと（(c) を採った場合は不要）。
+  - `npm run lint` / `npx tsc --noEmit` / フル `npm run test:unit` が exit 0。
+  - **グローバル `testTimeout` を上げていないこと**（前回と同じ）。
+
+  commit は既存 `7f39b315` への amend でも 2 本目でも構いません（PR は squash マージします）。
+  断片（`dev-reports/changelog/issue-1977.md` / `dev-reports/module-reference/issue-1977.md`）は
+  今回の内容を含めて**更新**してください。
+
+  ## 作業ルール（厳守）
+
+  - PR は作らない・push しない（オーケストレーターが行う）。
+  - **`CHANGELOG.md` と `docs/module-reference.md` を編集しない。** 断片は `dev-reports/` 配下へ。
+    既存行への追記を指示する場合は `grep -n '^| `<path>`' docs/module-reference.md` で**実在を確認**してから書くこと。
+  - **この契約の方針は「推奨」。** 逸脱するなら理由を commit message に明記すること。
+  - **`wait --verify` の unit ゲートは素の実行の約 9 倍かかる**（62s ↔ 560s）。`gate-runner.ts:414` が
+    `CI:'true'` を渡し `fileParallelism:false` になるため。異常ではありません。
+  - **フル `npm run test:unit` の実行中にソースやテストを編集しない**（vitest の遅延 transform で偽の赤が出る）。
+  - 作業が終わったら最終行に `IMPL_COMPLETED` とだけ出力すること。
+scope:
+  allow:
+    - "tests/unit/components/app-version-display.test.tsx"
+    - "tests/unit/ws-server-cleanup.test.ts"
+    - "tests/unit/api/hooks-claude-done-delegation.test.ts"
+    - "tests/unit/lib/tmux-capture-invalidation.test.ts"
+    - "tests/unit/config/eslint-i18n-module-scope-literal.test.ts"
+    - "src/lib/ws-server.ts"
+    - "src/lib/cli-tools/manager.ts"
+    - "src/components/**"
+    - "src/lib/tmux/**"
+    - "src/app/api/hooks/**"
+  deny: []
+verify:
+  gates: [token-discipline, control-chars, claudemd-size, route-exports, lint, typecheck, unit]
+autoYes:
+  mode: allow-listed
+  allowPromptTypes: [yes_no, multiple_choice]
+  denyPatterns: []
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true

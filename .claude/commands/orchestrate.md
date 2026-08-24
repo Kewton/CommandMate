@@ -50,7 +50,7 @@ TodoWriteツールで作業計画を作成：
 - [ ] Phase 3: 並列開発（契約付き send → wait --verify）
 - [ ] Phase 4: 設計突合（バリア）
 - [ ] Phase 5: 品質確認
-- [ ] Phase 6: PR作成・マージ（/pr-merge-pipeline）
+- [ ] Phase 6: PR作成・マージ（同時CIは2〜3本 / refresh→tsc→影響テスト→マージ / 断片の一本化）
 - [ ] Phase 7: UAT（--full時のみ）
 - [ ] Phase 8: 完了報告
 ```
@@ -172,8 +172,7 @@ scope:
   allow:               # Issueの影響範囲。requireScopeClean が true なら1件以上必須
     - "src/lib/<module>/**"
     - "tests/unit/<module>/**"
-    - "docs/module-reference.md"
-  deny: []
+  deny: []             # 共有ファイル（CHANGELOG.md / docs/module-reference.md）は入れない。2-4-1 参照
 verify:
   # キーごと省略が既定（= 全ゲート）。時間制約がある時だけ絞る
   gates: [lint, typecheck, unit]
@@ -188,6 +187,72 @@ success:
   狭すぎる allow は正当な変更を不合格にする。迷ったら Phase 1 の依存関係分析で洗い出した
   ファイル集合をそのまま使う。
 - `verify.gates` を絞ると**絞ったゲートしか裁定しない**。既定（省略）を第一選択にする。
+
+### 2-4-1. 共有ファイルはワーカーに書かせない（必須）
+
+**`CHANGELOG.md` と `docs/module-reference.md` を `scope.allow` に入れてはならない。**
+代わりに各ワーカーには**断片ファイル**を書かせ、オーケストレーターがマージ時に本体へ一本化する。
+
+契約の「作業ルール（厳守）」に次をそのまま転記する:
+
+> - **`CHANGELOG.md` と `docs/module-reference.md` を編集しないでください**（scope 外です）。
+>   代わりに次の 2 ファイルを書いてください。どちらも `dev-reports/` 配下なので commit には入りません。
+>   - `dev-reports/changelog/issue-<N>.md` — `CHANGELOG.md` の `## [Unreleased]` にそのまま
+>     貼れる **1 エントリ**（先頭は `- **<type>(<scope>): …** (#<N>): …`）。どの節
+>     （`### Added` / `### Changed` / `### Fixed`）に入るかを 1 行目にコメントで書く。
+>     **形式は次の実例に合わせてください**（develop の `CHANGELOG.md` にある実エントリを丸ごと 1 本。
+>     エントリは**ファイル中では 1 行**で、下で折り返して見えるのは表示上の都合です）:
+>
+>     ```markdown
+>     <!-- ### Fixed -->
+>     - **fix(cli): `send` 直後の `wait` が「まだ始まっていない」を完了と読む問題を修正** (#1975): `wait` が `sessionStatus==='ready'` を完了と判定する直前に、**「このインスタンスに最後に渡されたプロンプト」と「エージェント自身が最後に報告したターン終了（`lastStopEventAt`）」を突き合わせる**ゲートを追加。`send` 直後は最新の構造化イベントが直前ターンの `stop` のままなので #1839 の `adoptTurnStart()` が何も採用せず、`turnStartedAt === null` が「決着済み」と読まれてアイドル composer をそのまま完了にしていた（隔離サーバ実測 2026-08-22 / copilot 1.0.80: `send`→`wait` 5 回中 3 回が約 0.3 秒・`basis=scraper_ready`・成果物ゼロで exit 0）。ゲートは `GET /api/worktrees/:id/messages?limit=1&unit=pairs` を `--instance`（無指定ならサーバが解決した `cliToolId`）でスコープして読む。**hook を出さないツールは挙動不変** — `structuredEvents.source.capabilities.supportedEvents`（#1924 の宣言値）が `stop` とターン開始語の両方を宣言しているソースだけがこのゲートに入り、legacy-relay（`supportedEvents: []`）と #1924 以前のサーバは従来経路のまま台帳も引かない。保留は `PENDING_PROMPT_HOLD_MS`=60 秒で打ち切り（hooks は全経路 fail-open なので `Stop` の取りこぼしで `wait` が返らなくなってはいけない）、`--timeout` / `--stall-timeout` はそれより短ければ従来どおり優先される。完了行の `basis=` は、エージェントが最新プロンプトの終了を報告していれば `hook_stop` になる（`scraper_ready` は「画面しか言っていない」という文書どおりの意味に戻る）。
+>     ```
+>
+>     - `- **` で始めること — 集計は `grep -cE '^- \*\*'`（6-4 の検証手順）なので、外れるとエントリとして数えられません。
+>     - `(#<N>)` は要約の**外**（`**` を閉じた後）に置くこと — `（Issue #<N>）` を要約の中に埋めると機械的に取り出せません。
+>     - `<type>` は CLAUDE.md のコミットメッセージ規約と同じ語彙（`feat` / `fix` / `docs` / `refactor` / `test` / `chore` / `ci` / `style`）— リリースノート作成時の分類に使います。
+>     - 1 エントリ＝1 行（折らない）— `CHANGELOG.md` は 1 エントリ 1 行で運用しています。本文がどれだけ長くても改行を入れません。
+>   - `dev-reports/module-reference/issue-<N>.md` — `docs/module-reference.md` の表に足す注記を
+>     **行キー（`| \`path\` |`）ごと**に列挙する。既存行への追記なら「どの行に何を足すか」を書く。
+>     **既存行に足すときは `grep -n '^| \`<path>\`' docs/module-reference.md` を実行し、その出力
+>     （行番号つきの行キー）を断片に書き写してから**書くこと。0 件だった行への追記を指示しない
+>     （新しい行を足すなら「新規行」と明記する）。足すものが無ければ「追記なし」の 1 行でよい。実例:
+>
+>     ```markdown
+>     ## 既存行への追記
+>     - `src/lib/session/worktree-status-helper.ts` — 実在確認: `docs/module-reference.md:103`（行番号は確認時点のもの）
+>       追記内容: 「private `getStatusCaptureLines()` を削除し `resolveCaptureSpec(cliToolId).statusLines` に置換（Issue #1933）」
+>
+>     ## 新規行
+>     追記なし
+>     ```
+> - 断片が無いとリリースノートと module-reference に載らない。**実装と同じ commit の時点で書くこと。**
+
+**なぜこうするか（2026-08-22 の実測）**: 全ワーカーが `CHANGELOG.md` の同じ節に追記すると、
+**1 本マージするたびに残りの PR が全部 CONFLICTING になり、refresh → CI 全周やり直しが必要**になる。
+CI は中央値 38 分（self-hosted 1 台・11 ジョブ、同時 5〜6 本なら 55 分）なので、
+N 本のマージが N 回の直列 CI に化ける。実測では PR 21 本に対し CI 53 回（1 PR あたり 2.5 回）で、
+やり直しの大半がこの結合に起因していた。断片方式なら PR 間の強制直列がほぼ消える。
+
+`docs/module-reference.md` は **表**なので、両側保持で解決してはいけない（同じ行が 2 本になる）。
+断片方式ならこの解決自体が不要になる。
+
+**実例を丸ごと貼る理由（2026-08-22〜23 の実測）**: 形式を上の 1 行の抽象仕様だけで示していた Phase 4 では、
+**4 ワーカー中 3 つが形式から外した**（#1930 は `- 構造化層の状態導出を…（Issue #1930、Epic #1921 Phase 4）`、
+#1931 は `- opencode の SSE / REST 経路が…（Issue #1931）。`、#1933 は要約と Issue 番号をまとめて `**…**` の中へ入れた）。
+規約どおりだったのは #1932 だけで、3 本ともオーケストレーターが一本化時に書き直している。一方、契約に実例を
+丸ごと 1 本貼った #1994 の断片は初回から規約どおりだった。**抽象的な形式指定では守られず、実例なら守られる。**
+
+module-reference 側は**実例だけでは足りない**（判断の根拠つき）。#1927 と #1932 の契約には既に
+「`grep -n '^| \`<path>\`' docs/module-reference.md` で実在を確認してから書く」が入っていたのに、
+**存在しない行への追記指示が #1927 で 4 件・#1932 で 1 件**出た（オーケストレーターが一本化時に裁定）。
+CHANGELOG 側が**形式**の誤りで断片を見れば分かるのに対し、こちらは**事実**の誤りなので断片を読んでも分からない
+──手本を足しても検出できる誤りが増えない。そこで指示を「確認する」から**「確認した出力（行番号つきの行キー）を
+断片に書き写す」**へ変え、6-4 で断片を `cat` した時点で証拠の無い追記指示が目に見えるようにした
+（**6-4 の手順自体は変更していない**。既存の `awk … uniq -d` は行が 2 本になった後しか捕まえられないが、
+証拠の有無は写した瞬間に読めるので手順を足す必要が無い）。なお実在確認は**転記ブロックには入っていなかった**
+（実測: 変更前の `.claude/commands/orchestrate.md` に `grep -n` は 1 箇所も無く、上記 2 本の契約は
+オーケストレーターが手で足していた）ので、あわせて転記ブロックへ引き上げた。
 
 ### 2-5. tmux / セッションに触れる Issue の追加ルール（必須）
 
@@ -350,6 +415,22 @@ for each worktree:
   実行し、その結果を exit code にする。ここが「完了したが壊れていた」を目視から exit code へ
   移す一点である。
 
+**完了検出が壊れているときは `verify --gates` へ退避する。** `wait --verify` はゲートの前に
+完了検出を通すので、検出層の欠陥が裁定そのものを止める。2026-08-24 に #2011（`isUnclassifiedActive`
+の回帰）でこれが起き、**3 ワーカーの `wait --verify` が `Unclassified interactive frame …
+Waiting for human response...` を並べたまま 18 分空転した**（`--on-prompt human` なので
+exit 10 にもならない）。退避手順:
+
+```bash
+# 完了検出を経由せずゲートだけ回す（--gates を渡すと scope が選択されず exit 99 に落ちない）
+commandmatedev verify "$WT" --gates token-discipline,control-chars,claudemd-size,route-exports,\
+build-cli,build-server,lint,build,typecheck,integration,unit
+```
+
+このとき `work-evidence` と `scope` は落ちるので、**オーケストレーターが手で照合する**
+（commits ≥ 1 かつ作業ツリークリーン／`git diff --name-only origin/develop...HEAD` を契約の
+`allow` と `deny` に突き合わせる）。ワーカーが完了しているかは commits と作業ツリーの状態で見る。
+
 ### 3-4. exit code 分岐
 
 | exit | 意味 | 対応 |
@@ -458,7 +539,102 @@ for each worktree:
 /pr-merge-pipeline {issue_numbers}
 ```
 
-詳細は `/pr-merge-pipeline` コマンドを参照。
+詳細は `/pr-merge-pipeline` コマンドを参照。ただし**並列オーケストレーションでは次の 3 つを守る**。
+
+### 6-1. 同時 CI は 3〜4 本。**1 本に落とすのも失敗である**
+
+CI は self-hosted ランナー 1 台で PR あたり 11 ジョブを回すので、同時本数を上げると 1 本あたりが
+伸びる。**が、伸び始めるのは 4 本を超えてからで、3〜4 本まではほぼ無償である。**
+
+実測（CI 実行 118 本、2026-08-21〜24）:
+
+| 同時実行ピーク | CI 中央値 | 最大 |
+|---|---|---|
+| 1 | 10.8 分 | 12.3 分 |
+| 3 | 11.6 分 | 15.5 分 |
+| 4 | 14.7 分 | 28.6 分 |
+| **20** | **49.2 分** | **162.4 分** |
+
+**3〜4 本までは +8〜36% で、スループットはほぼ線形に伸びる。** 20 本は 4.5 倍の劣化で、
+増やした分を食い潰す（この帯では 1 マージあたりの CI 実行回数も 3.7 回まで膨らんでいた＝
+refresh のやり直し）。
+
+**逆方向の失敗の方が高くつく。** 2026-08-23〜24 に同時 1 本で回した帯では、CI 単体は
+10.8 分と最速だったのに**スループットは 2.50 → 0.50 PR/h（5 分の 1）**まで落ちた。
+1 本あたりの品質指標（CI 実行回数 3.7 → 2.0、PR 作成→マージ 最長 6 時間 → 11〜13 分）は
+すべて改善していたので、落ちたのは並列度だけである。**「丁寧にやる」を「1 本ずつやる」と
+取り違えないこと。**
+
+裁定が終わったワーカーが 5 本目以降になったら、PR を作らずに待たせる。worktree は残してよい。
+
+### 6-1-1. PR はゲートの**前**に出す（CI とローカルゲートを並走させる）
+
+`wait --verify` / `verify --gates` のローカルゲートと CI は**同じテストを見ている**。
+順に回すと 1 issue あたり約 22 分（ローカル 10.8 分 ＋ CI 10.8 分）を直列で払う。
+
+**速い 3 本（`lint` / `typecheck` / `build`、合計 40 秒前後）だけ先に通したら PR を出し、
+残りのゲート（`integration` / `unit`）は CI と並走させる。** 実測でローカルゲートの
+85〜90% は `unit` 単独（545〜584 秒）なので、**1 issue あたり約 10 分が消える。**
+
+壊れた PR で CI を焼くリスクは、先に通す 3 本でほぼ潰せる。両方が緑になってからマージするので
+裁定の強さは変わらない。
+
+### 6-2. マージは「先行をマージ → 後続を refresh → tsc ＋ 影響テスト → マージ」
+
+**`gh pr view --json mergeable` の `MERGEABLE` は「テキスト衝突が無い」しか意味しない。
+組み合わせがコンパイルできる証拠ではない。** 2026-08-22 に、単独でどちらも全ゲート緑・CI 11/11 の
+2 本を続けてマージして develop の `tsc` と `test:unit` を壊した（一方が関数を rename し、
+他方のテストが旧名を使っていた）。同型の統合破壊はこの run で 2 件あり、**どちらも
+`npx tsc --noEmit` と影響テストのローカル実行で捕まった**。
+
+1 本マージするたびに、残りの各 PR で次を順に行う:
+
+```bash
+git fetch origin && git merge origin/develop     # 衝突は意味を見て解消（機械解決は共有ファイルだけ）
+git grep -l -E '^(<<<<<<< |>>>>>>> |={7}$)' -- .  # 0 件であること。ここは必ず全追跡ファイルを走査する
+npx tsc --noEmit                                  # 実際の統合破壊はここで出る
+CI=true npx vitest run <衝突したファイルに関係するテスト>   # 型に出ない相互作用はここで出る
+git push
+```
+
+**マーカー走査を CHANGELOG などの決め打ちにしないこと。** 2026-08-22 に JSDoc ブロックコメントの
+内側へ落ちた衝突マーカーをコミットした事例がある（**コメント内なので `tsc` は exit 0、
+関連テストも緑**だった）。
+
+上記が通れば**フル CI の完走を待たずにマージしてよい**。develop 側の CI（12〜25 分）が安全網に
+なる。**最後の 1 本だけ**はフル CI を待つ。
+
+### 6-3. マージ前に全チェックが pass であることを機械的に確認する
+
+`gh pr checks <PR> --json name,bucket` を読み、**`bucket` が 1 つでも `pass` 以外なら
+マージしない**。2026-08-22 に「10 pass / 1 fail（Build）」の PR を、fail を目視で見落として
+マージし develop のビルドを壊した。判定は目視ではなくスクリプトで行うこと（`pending` は待ち、
+`fail` / `cancel` は拒否）。
+
+### 6-4. 断片を本体へ一本化する（オーケストレーターの仕事）
+
+2-4-1 でワーカーに書かせた断片を、**オーケストレーターが PR ブランチ上で本体へ写してから
+push する**（マージの直前、6-2 の refresh と同じタイミング）。
+
+```bash
+D=<worktree>
+# CHANGELOG: 断片を [Unreleased] の指定された節の先頭へ 1 エントリだけ挿入
+sed -n '2,$p' "$D/dev-reports/changelog/issue-<N>.md"   # 1 行目は節名のコメント
+# module-reference: 行キーごとに既存行の注記セルへ追記（行を増やさない）
+cat "$D/dev-reports/module-reference/issue-<N>.md"
+```
+
+一本化したら**必ず機械的に検証する**:
+
+```bash
+# CHANGELOG: エントリ集合が develop と完全一致 ＋ 自分の 1 行だけ増えている
+diff <(git show origin/develop:CHANGELOG.md | grep -cE '^- \*\*') <(grep -cE '^- \*\*' CHANGELOG.md)
+# module-reference: 同じ行キーが 2 本になっていない
+awk -F'|' '/^\| `/{print $2}' docs/module-reference.md | sort | uniq -d
+```
+
+**断片が無い PR はマージしない。** リリースノートに載らない Issue が出る（過去に実際に発生し、
+後追いで docs PR が必要になった）。
 
 **`--phase pr` 指定時**: PR作成・マージ完了を確認して終了。
 
@@ -567,6 +743,7 @@ npm run build
 - [ ] 全Issueの開発が完了している（契約付き委任は `wait --verify` が exit 0）
 - [ ] 品質チェック全パス（ESLint, TypeScript, テスト, ビルド）
 - [ ] 全IssueのPRがdevelopにマージ済み
+- [ ] 各Issueの CHANGELOG エントリと module-reference の注記が本体に一本化されている（6-4）
 - [ ] developブランチでの統合ビルド・テストが全パス
 - [ ] （--full時）UAT全テストPASS
 - [ ] 統合サマリーが出力されている

@@ -11,8 +11,9 @@
  * @vitest-environment node
  */
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type Database from 'better-sqlite3';
+import { freezeClock, unfreezeClock } from '../../helpers/frozen-clock';
 
 vi.mock('@/lib/db', () => ({ getSessionState: vi.fn(() => null) }));
 
@@ -41,8 +42,11 @@ import {
   isDuplicateAgentEvent,
   recordAgentEvent,
   recordAgentStopEvent,
+  STRUCTURED_PROMPT_PROVISIONAL_MAX_AGE_MS,
+  STRUCTURED_STATE_MAX_AGE_MS,
 } from '@/lib/session/agent-event-state';
 import type { AgentEventType } from '@/lib/hooks/agent-event-types';
+import { getAgentEventSource } from '@/lib/hooks/sources/registry';
 
 const db = {} as Database.Database;
 
@@ -52,6 +56,9 @@ beforeEach(() => {
   isRunning.mockResolvedValue(true);
   vi.mocked(captureSessionOutput).mockResolvedValue('some agent output\n> ');
 });
+
+// Only the cases that freeze it do; this is the unconditional restore.
+afterEach(() => unfreezeClock());
 
 describe('agent-event-state', () => {
   it('returns null until an event is recorded', () => {
@@ -94,6 +101,13 @@ describe('buildCurrentOutput exposure', () => {
   });
 
   it('surfaces the timestamp without disturbing anything else in the payload', async () => {
+    // Frozen, because this whole-payload equality is the assertion and
+    // `lastKnownStatusAt` (Issue #1926) is `Date.now()` at the poll: two builds
+    // that straddle a millisecond would fail it, which is what CI hit on
+    // PR #1964. Freezing keeps the field IN the comparison — dropping it would
+    // make this case stop checking the one field most likely to move.
+    freezeClock();
+
     const before = await buildCurrentOutput(db, 'wt-1', 'claude', 'claude');
 
     recordAgentStopEvent('wt-1', 'claude', 'claude', 1_700_000_000_000);
@@ -213,6 +227,20 @@ describe('duplicate suppression (Issue #1722)', () => {
 });
 
 describe('structuredEvents exposure (Issue #1722)', () => {
+  /**
+   * The source block Issue #1924 publishes alongside the event fields.
+   *
+   * Read from the registry rather than transcribed: `capabilities.test.ts` is
+   * what pins the values, and a second transcription here would be a second
+   * place for the 6x5 table to be wrong. What these two cases assert is the
+   * shape — that `structuredEvents` carries the block, on a session that has
+   * reported nothing as much as on one that has.
+   */
+  const claudeSource = {
+    cliToolId: 'claude',
+    capabilities: getAgentEventSource('claude').capabilities,
+  };
+
   it('is all nulls for a session whose agent has reported nothing', async () => {
     const payload = await buildCurrentOutput(db, 'wt-1', 'claude', 'claude');
 
@@ -222,10 +250,43 @@ describe('structuredEvents exposure (Issue #1722)', () => {
       lastEventDetail: null,
       promptWaitingSince: null,
       promptWaitingSource: null,
+      // Issue #1902: claude sends `tool_input` as an object, so nothing here is
+      // ever rewritten. The key is present and null rather than absent.
+      toolInputNormalization: null,
+      // Issue #1898: nothing on this session has been adjudicated on the
+      // agent's behalf — claude answers its own hook, so this stays null for it
+      // for the life of the session. Present and null, not absent.
+      permissionDecision: null,
+      // Issue #1926 / #1930: nothing has been reported, so there is no turn.
+      turnId: null,
+      openedAt: null,
+      closedAt: null,
+      closedBy: null,
+      // Issue #1930: present and empty/zeroed rather than absent, for the same
+      // reason `permissionDecision` is present and null — a key that appears
+      // only once something has gone wrong is a key nobody knows to look for.
+      pendingDecisions: [],
+      dedupDropped: {
+        dedupDropped: { identity: 0, timeWindow: 0 },
+        decisionEvicted: 0,
+        idsDiscarded: 0,
+        dialogTimedOut: 0,
+        decisionOverflow: 0,
+      },
+      dialogPendingMaxMs: {
+        predicted: STRUCTURED_PROMPT_PROVISIONAL_MAX_AGE_MS,
+        confirmed: STRUCTURED_STATE_MAX_AGE_MS,
+      },
+      source: claudeSource,
     });
   });
 
   it('surfaces the last event without disturbing anything else in the payload', async () => {
+    // Frozen for the same reason as the `lastStopEventAt` case above: the tail
+    // of this test compares the whole payload minus `structuredEvents`, and
+    // `lastKnownStatusAt` is a wall-clock read.
+    freezeClock();
+
     const before = await buildCurrentOutput(db, 'wt-1', 'claude', 'claude');
 
     // A `Notification` whose type this server has never observed. #1722's
@@ -248,6 +309,34 @@ describe('structuredEvents exposure (Issue #1722)', () => {
       lastEventDetail: 'some_future_type',
       promptWaitingSince: null,
       promptWaitingSource: null,
+      // Issue #1902: claude sends `tool_input` as an object, so nothing here is
+      // ever rewritten. The key is present and null rather than absent.
+      toolInputNormalization: null,
+      // Issue #1898: nothing on this session has been adjudicated on the
+      // agent's behalf — claude answers its own hook, so this stays null for it
+      // for the life of the session. Present and null, not absent.
+      permissionDecision: null,
+      // Issue #1926 / #1930: nothing has been reported, so there is no turn.
+      turnId: null,
+      openedAt: null,
+      closedAt: null,
+      closedBy: null,
+      // Issue #1930: present and empty/zeroed rather than absent, for the same
+      // reason `permissionDecision` is present and null — a key that appears
+      // only once something has gone wrong is a key nobody knows to look for.
+      pendingDecisions: [],
+      dedupDropped: {
+        dedupDropped: { identity: 0, timeWindow: 0 },
+        decisionEvicted: 0,
+        idsDiscarded: 0,
+        dialogTimedOut: 0,
+        decisionOverflow: 0,
+      },
+      dialogPendingMaxMs: {
+        predicted: STRUCTURED_PROMPT_PROVISIONAL_MAX_AGE_MS,
+        confirmed: STRUCTURED_STATE_MAX_AGE_MS,
+      },
+      source: claudeSource,
     });
     expect({ ...after, structuredEvents: null }).toEqual({ ...before, structuredEvents: null });
   });

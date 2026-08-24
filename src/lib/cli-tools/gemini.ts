@@ -19,6 +19,7 @@ import {
   capturePane,
 } from '../tmux/tmux';
 import { sendMessageWithSubmitVerification } from './submit-verified-sender';
+import { GEMINI_PANE_HEIGHT } from './capture-spec';
 import { invalidateCache } from '../tmux/tmux-capture-cache';
 import { GEMINI_PROMPT_PATTERN, stripAnsi } from '../detection/cli-patterns';
 import { GEMINI_CLI_TOOL_ID } from '@/lib/hooks/sources';
@@ -32,6 +33,7 @@ import {
   TUI_INTERRUPT_SETTLE_MS,
   TUI_EXIT_WAIT_MS,
 } from '@/config/cli-tool-timing-config';
+import { SessionStartUnavailableError } from '../session/session-start-error';
 
 const logger = createLogger('cli-tools/gemini');
 
@@ -45,8 +47,15 @@ function getErrorMessage(error: unknown): string {
 /** Wait for Gemini CLI to initialize after launch (banner + auth + dialog) */
 const GEMINI_INIT_WAIT_MS = 6000;
 
-/** Gemini runs in a 200-line tmux pane and keeps the prompt near the top. */
-export const GEMINI_PANE_HEIGHT = 200;
+/**
+ * Gemini runs in a 200-line tmux pane and keeps the prompt near the top.
+ *
+ * Declared in `./capture-spec` since Issue #1933 and re-exported here so every
+ * existing importer is unchanged. It moved for the same reason
+ * `OPENCODE_PANE_HEIGHT` moved to `@/config/tmux-pane-config` in #1906: the
+ * status probe needs the number and must not have to import the tool for it.
+ */
+export { GEMINI_PANE_HEIGHT };
 
 /** Interval for polling trust dialog / prompt detection */
 const GEMINI_POLL_INTERVAL_MS = 1000;
@@ -84,11 +93,11 @@ export class GeminiTool extends BaseCLITool {
    * @param worktreeId - Worktree ID
    * @param worktreePath - Worktree path
    */
-  async startSession(worktreeId: string, worktreePath: string, instanceId?: string): Promise<void> {
+  protected async launchSession(worktreeId: string, worktreePath: string, instanceId?: string): Promise<void> {
     // Check if Gemini is installed
     const geminiAvailable = await this.isInstalled();
     if (!geminiAvailable) {
-      throw new Error('Gemini CLI is not installed or not in PATH');
+      throw new SessionStartUnavailableError(this.name, 'Gemini CLI is not installed or not in PATH');
     }
 
     const sessionName = this.getSessionName(worktreeId, instanceId);
@@ -238,6 +247,7 @@ export class GeminiTool extends BaseCLITool {
         sessionName,
         message,
         cliToolId: 'gemini',
+        composer: this.describeComposer(),
       });
 
       // Issue #405: Invalidate cache after sending message

@@ -362,6 +362,11 @@ function makePaneState(cliToolId: string) {
       isRunning: true,
       isThinking: cliToolId === 'claude',
       isSelectionListActive: false,
+      isPagerActive: false,
+      isUnclassifiedActive: false,
+      // Issue #1879: part of PaneTerminalState. Kept here so the mock does not
+      // claim a shape the hook never returns.
+      composerText: '',
       attaching: false,
       autoScroll: true,
     },

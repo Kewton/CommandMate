@@ -1,0 +1,86 @@
+version: 1
+title: "Issue #1931: opencode SSE の信頼境界の残差（redirect manual / replay 上限）を実測して埋める"
+goal: |
+  https://github.com/Kewton/CommandMate/issues/1931 を実装してください。
+
+  ## 最初にやること: **残差の再スコープ**（この Issue の本文は #1900 より前に書かれています）
+
+  Issue が求める項目の**大半は #1900（Epic #1891）で既に着地しています。** 私が develop `a5934d49` で
+  実測した結果:
+
+  | 項目 | 状態 |
+  |---|---|
+  | `verifyServerIdentity`（health + version 一致の確認） | **着地済み**（`subscription.ts`） |
+  | `port_identity_changed` | **着地済み**（`subscription.ts`） |
+  | `resync_idle` | **着地済み**（`subscription.ts`） |
+  | `probeOpencodeHealth` | **着地済み**（`runtime.ts` / `client.ts` / `subscription.ts`） |
+  | **`redirect: 'manual'`** | **未着地** — `client.ts:81` の `requestJson()` は `signal` しか渡していません（実測） |
+  | **replay 上限** | 要確認 — `MAX_OPENCODE_SESSION_STATUSES = 128` は `/session/status` の上限で、**permission replay の上限は別物**。#1900 の commit message は「50 件上限」と書いていますが、名前つき定数があるか実測してください |
+
+  **まず `git log --oneline -- src/lib/hooks/sources/opencode/` と実コードを読み、
+  「Issue のどの項目が本当に残っているか」を表にして commit message の冒頭に書いてください。**
+  既に着地している項目を作り直さないこと。**残差がほぼ無いなら、それを実測で示すこと自体が成果**です。
+
+  ## 確実に残っている 1 件（S13 / §10.4）
+
+  **`requestJson()` に `redirect: 'manual'` が無い。** opencode の port は使い捨てで、
+  先に port を奪ったプロセスが 3xx を返すと fetch が**別ホストへ追随**しかねません。
+  loopback 固定の前提が崩れる経路なので、ここは確実に塞いでください。
+  `fetch` を使う他の箇所（`client.ts` 内の別関数、`runtime.ts`）も同様に確認すること。
+
+  ## 露出（§7 の発見可能性）
+
+  `port_identity_changed` / `resync_idle` が**運用者が読む層に出ているか**を確認してください。
+  サーバーログにしか出ていないなら `capture --json` の `structuredEvents` に載せる価値があります。
+  ただし **`src/cli/types/api-responses.ts` は #1930 のワーカーが同時に編集中**なので、
+  そこへの追加が必要と判断したら**変更せずに commit message で報告**してください（私が裁きます）。
+
+  ## 受入条件
+
+  - 残差の表（Issue の各項目 × 着地済み / 未着地 / 本 Issue で実装）が commit message にある。
+  - `redirect: 'manual'` が全 fetch 経路に入り、**変異注入**（外すと赤）で pin されている。
+  - replay 上限が名前つき定数で、超過件数がログに出ることを pin。
+  - `npm run lint` / `npx tsc --noEmit` / フル `npm run test:unit` / `npm run test:integration` が exit 0。
+
+  ## 触ってよい範囲
+
+  `src/lib/hooks/sources/opencode/**`・`tests/unit/hooks/sources/**`・`tests/unit/hooks/**`。
+
+  **`src/cli/types/api-responses.ts`・`src/lib/session/**`・`src/lib/hooks/ingest.ts`・
+  `src/lib/hooks/structured-decision-response.ts` は触らないでください**（#1930 が同時に編集中）。
+
+  ## 作業ルール（厳守）
+
+  - **commit は 1 本にまとめる。** PR は作らない・push しない（オーケストレーターが行う）。
+  - **`CHANGELOG.md` と `docs/module-reference.md` を編集しない。** 代わりに
+    `dev-reports/changelog/issue-1931.md`（`## [Unreleased]` にそのまま貼れる 1 エントリ。1 行目に
+    どの節へ入るかをコメント）と `dev-reports/module-reference/issue-1931.md` を書くこと。
+    **既存行への追記を指示する場合は `grep -n '^| `<path>`' docs/module-reference.md` で実在を確認してから**書くこと。
+  - **`docs/design/multi-agent-state-architecture.md` を編集しない**（#1979 で訂正済み・develop `561d6706`）。
+  - **この契約の方針は「推奨」。** 別解が正しいと判断したら採ってよいが、**逸脱と理由を commit message に明記**すること。
+  - **Issue 本文をコードで裏取りすること。** 食い違ったら**実測を正**とし、commit message に書く。
+    この Issue は私が書いており、自作 Issue の記述が実測と食い違った実績が多数あります。
+  - **テストを足した「後」に `npx tsc --noEmit` を回すこと。** `npm run test:unit`（vitest は esbuild で
+    型検査をしない）の緑を tsc の緑と取り違えた事例が直前のランで出ています。
+  - **`npm run test:integration` も自分で回すこと。** `wait --verify` の宣言ゲートに integration は
+    **含まれていません**（#1946）。#1927 はこれで CI を 1 回落としました。
+  - **`wait --verify` の unit ゲートは素の `npm run test:unit` の約 9 倍かかる**（62s ↔ 560s）。異常ではありません。
+  - **フル `npm run test:unit` の実行中にソースやテストを編集しないこと**（vitest の遅延 transform で偽の赤が出る）。
+  - **別ワークツリーと同時にフル `npm run test:unit` を回さないこと**（#1985）。
+    **この repo では今あなたを含め 4 本の worktree が動いています。**
+  - 作業が終わったら最終行に `IMPL_COMPLETED` とだけ出力すること。
+scope:
+  allow:
+    - "src/lib/hooks/sources/opencode/**"
+    - "tests/unit/hooks/sources/**"
+    - "tests/unit/hooks/**"
+  deny: []
+verify:
+  gates: [token-discipline, control-chars, claudemd-size, route-exports, lint, typecheck, unit]
+autoYes:
+  mode: allow-listed
+  allowPromptTypes: [yes_no, multiple_choice]
+  denyPatterns: []
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true

@@ -7,6 +7,7 @@ import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { DetectPromptOptions } from './types';
 import { createLogger } from '@/lib/logger';
 import { stripAnsi } from './ansi';
+import { findClaudeInputBox } from './composer-text';
 import { THINKING_TAIL_LINE_COUNT } from '@/config/thinking-constants';
 
 const logger = createLogger('cli-patterns');
@@ -167,12 +168,6 @@ export const CLAUDE_PROMPT_PATTERN = /^[>❯](\s*$|\s+\S)/m;
  */
 export const CLAUDE_SEPARATOR_PATTERN = /^─{10,}$/m;
 
-/** How far above the last line the input box's closing separator may sit. */
-const CLAUDE_STATUS_BAR_MAX_ROWS = 4;
-
-/** How many rows the input box may span before the block stops looking like the footer. */
-const CLAUDE_INPUT_BOX_MAX_ROWS = 40;
-
 /**
  * Locate the start of Claude Code's bottom-pinned footer within a captured pane.
  *
@@ -201,40 +196,16 @@ const CLAUDE_INPUT_BOX_MAX_ROWS = 40;
  * @returns Index of the first footer row, or -1 when no footer is present
  */
 export function findClaudeChromeStart(lines: string[]): number {
-  const isSeparator = (line: string): boolean => /^─{10,}$/.test(stripAnsi(line).trimEnd());
-
-  // Callers pass both trimmed panes and raw captures padded with blank rows.
-  let lastRow = lines.length - 1;
-  while (lastRow >= 0 && lines[lastRow].trim() === '') lastRow--;
-  if (lastRow < 0) return -1;
-
-  // The input box's closing separator sits just above the status bar.
-  let closingSeparator = -1;
-  for (let i = lastRow; i >= Math.max(0, lastRow - CLAUDE_STATUS_BAR_MAX_ROWS); i--) {
-    if (isSeparator(lines[i])) {
-      closingSeparator = i;
-      break;
-    }
-  }
-  if (closingSeparator < 0) return -1;
-
-  // Walk up over the input box to the opening separator.
-  let openingSeparator = -1;
-  for (let i = closingSeparator - 1; i >= Math.max(0, closingSeparator - CLAUDE_INPUT_BOX_MAX_ROWS); i--) {
-    if (isSeparator(lines[i])) {
-      openingSeparator = i;
-      break;
-    }
-  }
-  if (openingSeparator < 0) return -1;
-
-  // Confirm the rows between the separators really are the input box rather than
-  // a reply that happens to be fenced by two horizontal rules — truncating one of
-  // those would silently swallow the tail of a genuine response.
-  if (!/^[>❯]/.test(stripAnsi(lines[openingSeparator + 1] ?? ''))) return -1;
+  // Issue #1879: the structural search (closing separator → opening separator →
+  // prompt glyph, including the "is this really the input box and not a reply
+  // fenced by two horizontal rules?" check) moved to `findClaudeInputBox` so the
+  // composer reader locates the same box this trimmer does. Behaviour here is
+  // unchanged; only the caller of the search moved.
+  const box = findClaudeInputBox(lines);
+  if (box === null) return -1;
 
   // Include the reserved hint row directly above the opening separator.
-  return Math.max(0, openingSeparator - 1);
+  return Math.max(0, box.openingSeparator - 1);
 }
 
 /**
@@ -727,6 +698,38 @@ export const GEMINI_THINKING_PATTERN = /[\u2800-\u28FF]|Thinking\.\.\./;
 export const OPENCODE_PROMPT_PATTERN = /Ask anything\.\.\./;
 
 /**
+ * OpenCode idle composer pattern (Issue #1883).
+ *
+ * The `Ask anything...` placeholder as opencode actually draws it: **inside the
+ * input box**, behind the box's own gutter (`\u2503`, or `\u2502` on a lighter
+ * border style). Two measured facts make that row positive evidence that the
+ * composer is empty, rather than the mere absence of a busy marker (design
+ * principle D1 in `docs/design/multi-agent-state-architecture.md`):
+ *
+ * - opencode paints the placeholder **only while the input buffer is empty**.
+ *   The first typed character replaces the whole row — measured live on
+ *   opencode 1.18.20, pane 80x200 (`opencode-live-1883/composer-residual.txt`
+ *   holds `\u2503  echo PREFILLED` where the idle frame holds the placeholder).
+ * - the gutter says the row belongs to the input box. `Ask anything...` printed
+ *   in a response body has no gutter, and reading that as an idle composer is
+ *   the "the phrase is on screen somewhere" inference D1 forbids.
+ *
+ * **Match this against the ANSI-stripped frame BEFORE {@link stripBoxDrawing}**,
+ * which strips the very gutter this pattern anchors on.
+ *
+ * The whitespace runs are `[^\S\n]` (horizontal only) on purpose: plain `\s`
+ * crosses newlines under the `m` flag, which let the gutter of one row pair up
+ * with the phrase several rows below it and matched frames that hold no
+ * composer at all (measured on `phrase-in-response.txt`).
+ *
+ * {@link OPENCODE_PROMPT_PATTERN} stays as it is: `response-checker` and
+ * `OPENCODE_SKIP_PATTERNS` want the bare phrase wherever it lands, because they
+ * are deleting the row from an extracted response, not judging a session.
+ */
+export const OPENCODE_IDLE_COMPOSER_PATTERN =
+  /^[^\S\n]*[\u2502\u2503][^\S\n]*Ask anything\.\.\./m;
+
+/**
  * OpenCode prompt pattern after response completion (Issue #379)
  * Shows "tab agents  ctrl+p commands" in the TUI status bar after a response finishes.
  * Used as extraction stop condition in response-poller.ts [D2-003].
@@ -748,32 +751,426 @@ export const OPENCODE_THINKING_PATTERN = /Thinking:/;
 export const OPENCODE_LOADING_PATTERN = /\u2B1D{4,}/;
 
 /**
- * OpenCode response completion pattern (Issue #379)
- * Matches the action summary line: "&#x25A3; {Action} · model" with optional timing "· Ns".
- * (U+25A3 square + action word + middle dot + model name [+ middle dot + timing]).
- * Action can be "Build", "Compaction", or other OpenCode action names.
- * Short responses may omit the timing portion (e.g., "▣ Build · qwen3.5:27b").
- * This is the primary completion signal for OpenCode [D2-002].
- */
-export const OPENCODE_RESPONSE_COMPLETE = /\u25A3\s+\w+\s+\u00b7\s+\S+(?:\s+\u00b7\s+(?:[\d]+h\s*)?(?:[\d]+m\s*)?[\d.]+s)?/;
-
-/**
- * OpenCode processing indicator pattern (Issue #379)
- * Shows "esc interrupt" in the TUI status bar during active model processing.
- * Filtered from response extraction via OPENCODE_SKIP_PATTERNS.
- */
-export const OPENCODE_PROCESSING_INDICATOR = /esc interrupt/;
-
-/**
- * OpenCode TUI selection list pattern (Issue #473)
- * Detects the fuzzy-search selection list overlay in OpenCode TUI
- * (e.g., /models, /providers, /connect commands).
+ * OpenCode's Build summary LINE, in either of the two forms it is drawn in
+ * (Issue #379, corrected by Issue #1893).
  *
- * Matches header lines of selection overlays. Known headers:
- *   "              Select model                                     esc"
- *   "              Connect a provider                               esc"
+ * **This is a line filter, not completion evidence.** It matches
+ * `▣ <Action> · <model>` with the duration OPTIONAL, and opencode 1.18 draws
+ * that duration-less form on a step that is still in flight -- so a frame this
+ * pattern matches may be mid-turn, waiting on a permission dialog, or aborted.
+ * Use {@link OPENCODE_TURN_COMPLETE_PATTERN} to decide that a turn has finished.
+ *
+ * The docstring that stood here until #1893 claimed the opposite ("short
+ * responses may omit the timing portion"). Measured against opencode 1.18.21 at
+ * the production 80x200 geometry, that is wrong in both directions:
+ *
+ * - a 2.3-second answer still carries its duration
+ *   (`▣  Build · GPT-5.6 Luna · 2.3s`, `opencode-live-1893/turn-complete-short.txt`),
+ *   so no completed turn needs the duration-less branch;
+ * - the duration-less form is what opencode leaves on screen while a tool call
+ *   waits for permission and after a rejected one
+ *   (`opencode-live-1893/permission-bash.txt`, `…/turn-aborted-no-duration.txt`).
+ *
+ * Kept loose because three callers want the LINE rather than the verdict:
+ * `tui-accumulator.ts`, `response-cleaner.ts` and `polling/response-checker.ts`
+ * all use it to drop the summary row from an extracted response, and the
+ * mid-step row has to be dropped too. #1911 removed the one caller that used it
+ * as a turn BOUNDARY rather than a line filter (the "second-to-last ▣" anchor,
+ * replaced by {@link findOpenCodeUserEchoEnd}); the name is left alone because
+ * the remaining three callers all want the line.
  */
-export const OPENCODE_SELECTION_LIST_PATTERN = /^\s*(Select\s+(model|provider)|Connect\s+a\s+provider)/m;
+export const OPENCODE_RESPONSE_COMPLETE = /\u25A3\s+\w+\s+·\s+\S+(?:\s+·\s+(?:[\d]+h\s*)?(?:[\d]+m\s*)?[\d.]+s)?/;
+
+/**
+ * OpenCode's finished-turn marker: the Build summary line WITH its duration
+ * (Issue #1893).
+ *
+ * `▣  Build · GPT-5.6 Luna · 5.2s`. This is the one tool-specific completion
+ * marker design rule D1 recognises today
+ * (`docs/design/multi-agent-state-architecture.md` §4 D1 decision 1, item 1),
+ * and the duration is the whole of what makes it positive evidence: opencode
+ * prints the same row without a duration while a step is still open, which is
+ * how a session parked on a permission dialog was published as
+ * `ready`/`opencode_response_complete` (#1893) and how `isOpenCodeComplete`
+ * saved the dialog body as if it were an answer.
+ *
+ * The model segment is `[^·\n]+` rather than `\S+` because real model names
+ * carry spaces (`GPT-5.6 Luna`): with `\S+` the optional-duration group of
+ * {@link OPENCODE_RESPONSE_COMPLETE} could never reach the duration on a
+ * two-word model, so "with duration" and "without duration" were the same match
+ * there. Excluding the middle dot rather than allowing anything keeps the
+ * quantifier unable to swallow its own delimiter (no nested/ambiguous
+ * quantifier -- ReDoS safe), and `.`/`[^·\n]` never cross a line without the
+ * `m` flag, so the duration has to be on the marker's own row.
+ *
+ * Durations observed: `2.3s`, `5.2s`, `45.2s`; the `Nh`/`Nm` prefixes are
+ * inherited from the #379 pattern and kept for long turns.
+ */
+export const OPENCODE_TURN_COMPLETE_PATTERN =
+  /\u25A3\s+\w+\s+·\s+[^·\n]+·\s+(?:\d+h\s*)?(?:\d+m\s*)?[\d.]+s/;
+
+/**
+ * OpenCode's permission dialog, anchored on its button row (Issue #1893).
+ *
+ * opencode 1.18 asks for tool permission with a bottom-anchored box whose last
+ * interactive row is a horizontal button strip:
+ *
+ * ```
+ *   ┃  △   Permission required
+ *   ┃    # Shell command
+ *   ┃  $ ls -la
+ *   ┃   Allow once   Allow always   Reject  ctrl+f fullscreen  ⇆ select  enter con
+ * ```
+ *
+ * Nothing in the detection layer saw it before #1893: it carries no number, no
+ * `(y/n)`, and no "press enter to confirm" footer, so `detectPrompt` answers
+ * `isPrompt: false` and the status detector fell through to the Build marker
+ * above it. The row is matched as POSITIVE evidence that a decision is pending
+ * (design rule D1) -- it is the affordance itself, not the absence of a busy
+ * marker.
+ *
+ * **Match this against the ANSI-stripped frame BEFORE {@link stripBoxDrawing}**,
+ * exactly like {@link OPENCODE_IDLE_COMPOSER_PATTERN}: the leading `┃` (or
+ * `│` on a lighter border style) is what says the row belongs to the dialog box
+ * rather than to a response body that happens to quote the labels -- the
+ * "the phrase is on screen somewhere" inference #1883 had to remove.
+ *
+ * Deliberately NOT anchored on:
+ *
+ * - `enter confirm`, which is truncated to `enter con` at opencode's own 80
+ *   column layout (measured);
+ * - `△ Permission required` alone, which is a heading rather than an
+ *   affordance and survives in the fullscreen (`ctrl+f`) view whose key handling
+ *   was not measured.
+ *
+ * The three labels are the same for the `bash` and the `edit` dialog (measured:
+ * `permission-bash.txt`, `permission-edit.txt`), and the strip is repainted away
+ * the moment the dialog is answered, so a matched row is never scrollback
+ * (`turn-aborted-no-duration.txt` holds no `Allow once`).
+ *
+ * The whitespace runs are `[^\S\n]` (horizontal only) for the reason #1883
+ * documents: plain `\s` crosses newlines under the `m` flag and would pair a
+ * gutter on one row with labels several rows below it.
+ */
+export const OPENCODE_PERMISSION_PATTERN =
+  /^[^\S\n]*[\u2502\u2503][^\S\n]*Allow once[^\S\n]+Allow always[^\S\n]+Reject\b/m;
+
+/**
+ * OpenCode's busy footer, in BOTH of the spellings it is drawn in (Issue #379,
+ * widened by Issue #1894).
+ *
+ * opencode 1.18 needs Escape TWICE to abort a turn, and the first press does not
+ * abort anything -- it re-labels the footer:
+ *
+ * ```
+ *    ⬝⬝⬝⬝⬝⬝⬝⬝  esc interrupt           6.5K (1%) · $0.00  ctrl+p commands
+ *    ⬝■■■■■■⬝  esc again to interrupt  7.2K (1%) · $0.00  ctrl+p commands
+ * ```
+ *
+ * Measured on opencode 1.18.21 at the production 80x200 geometry, sampling the
+ * footer every ~360 ms after a single Escape: the second spelling is up from
+ * 0.31 s to 4.71 s and the row is back to `esc interrupt` at 5.07 s -- a
+ * five-second window, exactly as long as the second-press deadline
+ * ({@link OPENCODE_INTERRUPT_SECOND_ESCAPE_DELAY_MS} is sized against it). The
+ * generation continues throughout; the turn ran to a natural
+ * `▣  Build · GPT-5.6 Luna · 11.3s`, 3 runs out of 3.
+ *
+ * Before #1894 those five seconds matched nothing at all: `detectSessionStatus`
+ * lost branch A and fell through to `running`/`default` while the frame was
+ * fresh, and to `ready`/`no_recent_output` once the poller's
+ * `lastOutputTimestamp` aged past `STALE_OUTPUT_THRESHOLD_MS` -- both of them
+ * `statusEvidence: 'none'`, i.e. a generating session
+ * published with no evidence and, on the second path, as FINISHED. That is the
+ * "vocabulary changed, so `ready` came back" failure design rule D1 names
+ * (`docs/design/multi-agent-state-architecture.md` §4 D1, row #1894), and the
+ * row is the same positive busy evidence in either spelling.
+ *
+ * The optional group is `(?:again to )?` rather than a looser `.*` on purpose:
+ * it matches the two measured strings and nothing between an `esc` and an
+ * `interrupt` several words apart. Linear, no nested quantifiers -- ReDoS safe.
+ *
+ * Filtered from response extraction via OPENCODE_SKIP_PATTERNS, which shares
+ * this constant: the widened row is dropped from a saved answer for the same
+ * reason the narrow one was.
+ */
+export const OPENCODE_PROCESSING_INDICATOR = /esc (?:again to )?interrupt/;
+
+/**
+ * OpenCode's composer bottom border: `  ╹▀▀▀▀▀▀…` (Issue #1911).
+ *
+ * `╹` (heavy up) is the corner opencode joins the input box's `┃`
+ * gutter to, and the `▀` run is the box's bottom edge. It is the one row of
+ * the bottom-anchored chrome that can never appear inside a response body, which
+ * makes it the anchor {@link findOpenCodeChromeStart} walks up from.
+ */
+export const OPENCODE_COMPOSER_BOTTOM_BORDER = /^[^\S\n]*╹▀{4,}/;
+
+/**
+ * A row that belongs to one of opencode's boxes, matched by its own gutter
+ * (Issue #1911).
+ *
+ * opencode draws three different boxes with the same `┃` gutter (`│`
+ * on a lighter border style): the echoed USER PROMPT in the transcript, the
+ * COMPOSER pinned to the bottom of the pane, and the PERMISSION DIALOG that
+ * replaces the composer. Which one a matched row belongs to is decided by where
+ * it sits, not by what it says — see {@link findOpenCodeChromeStart} and
+ * {@link findOpenCodeUserEchoEnd}.
+ *
+ * **Match against the ANSI-stripped frame BEFORE {@link stripBoxDrawing}**,
+ * which removes the very gutter this anchors on.
+ */
+export const OPENCODE_GUTTER_ROW_PATTERN = /^[^\S\n]*[│┃]/;
+
+/**
+ * An echoed user prompt row: a gutter row that carries text (Issue #1911).
+ *
+ * The echo block opencode draws for a submitted message is a blank gutter row,
+ * one or more gutter rows holding the message, and another blank gutter row.
+ * This matches the middle ones.
+ */
+export const OPENCODE_USER_ECHO_PATTERN = /^[^\S\n]*[│┃][^\S\n]*\S/;
+
+/**
+ * The status cell of opencode's bottom footer (Issue #1911).
+ *
+ * Measured at the production 80x200 geometry the footer reads
+ * `<cwd>    6.4K (1%) · $ctrl+p` / `commands` while idle and
+ * `⬝⬝⬝⬝⬝⬝⬝⬝  esc interrupt   6.3K (1%) · $0.00  ctrl+p commands` while running:
+ * a context-usage cell followed by the cost sigil. Neither
+ * {@link OPENCODE_PROMPT_AFTER_RESPONSE} (`tab agents  ctrl+p commands`, which
+ * opencode only prints on the FIRST idle frame, before any turn has run) nor
+ * {@link OPENCODE_PROCESSING_INDICATOR} covers the idle form, so this row used
+ * to be saved as part of the assistant's reply.
+ *
+ * This is a SECONDARY net. The cwd that shares the row wraps over up to three
+ * further rows that carry no signature at all, so the footer is removed
+ * structurally by {@link findOpenCodeChromeStart}; this pattern only catches the
+ * signed row when that boundary is not available (e.g. a caller holding a
+ * fragment rather than a whole pane).
+ *
+ * Linear, no nested quantifiers — ReDoS safe.
+ */
+export const OPENCODE_FOOTER_STATUS_PATTERN =
+  /\d+(?:\.\d+)?[KMGT]?\s+\(\d+%\)\s+·\s+\$/;
+
+/**
+ * Locate the start of opencode's bottom-anchored chrome within a captured pane
+ * (Issue #1911).
+ *
+ * opencode runs in the alternate screen and reserves the last rows of the pane
+ * for chrome that is never transcript content:
+ *
+ * ```
+ *   ┃                              ← composer box (blank rows + model row),
+ *   ┃  Build · GPT-5.6 Luna …        or the permission dialog that replaces it
+ *   ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀   ← composer bottom border
+ *   /private/tmp/…-share-    6.4K (1%) · $ctrl+p   ← footer, cwd wrapped
+ *   work-github-kewton-…                 commands     over up to three rows
+ * ```
+ *
+ * Everything from the returned index down is chrome. This is the opencode twin
+ * of {@link findClaudeChromeStart} and exists for the same reason (#1289): the
+ * footer's cwd rows and the composer's model row were reaching saved responses,
+ * which is defect 1 of #1911.
+ *
+ * Found structurally rather than by matching footer text, because the footer's
+ * text is opencode's to change and two of its four rows (the cwd continuations)
+ * are an arbitrary filesystem path with no signature at all.
+ *
+ * @param lines - Captured pane lines, ANSI-stripped, box drawing intact.
+ *   Trailing blank rows are tolerated.
+ * @returns Index of the first chrome row, or -1 when no chrome is recognisable.
+ */
+export function findOpenCodeChromeStart(lines: string[]): number {
+  let last = lines.length - 1;
+  while (last >= 0 && lines[last].trim() === '') last--;
+  if (last < 0) return -1;
+
+  const walkUpGutter = (from: number): number => {
+    let top = from;
+    while (top - 1 >= 0 && OPENCODE_GUTTER_ROW_PATTERN.test(lines[top - 1])) top--;
+    return top;
+  };
+
+  // The composer's bottom border. Searched from the last row upwards over the
+  // WHOLE pane rather than over the few rows the footer occupies: on the boot
+  // screen opencode centres the composer under its banner (row ~99 of 200) while
+  // the footer stays pinned to the bottom, so a window sized for the footer
+  // misses the border entirely (measured, `opencode-live-1883/boot-idle.txt`).
+  for (let i = last; i >= 0; i--) {
+    if (OPENCODE_COMPOSER_BOTTOM_BORDER.test(lines[i])) {
+      return walkUpGutter(i);
+    }
+  }
+
+  // No border: the permission dialog draws over the composer and its own box
+  // runs to the last row of the pane (measured, `opencode-live-1893/permission-*.txt`).
+  if (OPENCODE_GUTTER_ROW_PATTERN.test(lines[last])) {
+    return walkUpGutter(last);
+  }
+
+  return -1;
+}
+
+/**
+ * Locate the last row of the NEWEST echoed user prompt in a captured pane
+ * (Issue #1911).
+ *
+ * The turn currently being answered starts on the row after this one, so it is
+ * both the extraction anchor (`resolveExtractionStartIndex`'s opencode branch)
+ * and the floor the finished-turn marker has to sit below before a frame counts
+ * as a completed turn (`isOpenCodeComplete`).
+ *
+ * Before #1911 the anchor was "the second-to-last `▣ Build` row", which has two
+ * measured failure modes: on the first turn of a session there is no second row,
+ * so extraction fell back to line 0 and saved the whole pane; and the row it
+ * anchors on belongs to the PREVIOUS turn, so the echoed prompt of the current
+ * one was always included in the reply.
+ *
+ * @param lines - Captured pane lines, ANSI-stripped, box drawing intact.
+ * @param chromeStart - Result of {@link findOpenCodeChromeStart}; the search
+ *   stops above it so the composer's and the permission dialog's own gutter rows
+ *   are never read as an echoed prompt. Pass -1 when no chrome was found.
+ * @returns Index of the echo block's last row, or -1 when no echo is on screen
+ *   (a turn whose head has scrolled out of the alternate-screen pane).
+ */
+export function findOpenCodeUserEchoEnd(lines: string[], chromeStart: number): number {
+  const limit = chromeStart >= 0 ? chromeStart : lines.length;
+
+  for (let i = limit - 1; i >= 0; i--) {
+    if (!OPENCODE_USER_ECHO_PATTERN.test(lines[i])) continue;
+    // The block's trailing blank gutter row(s) belong to the echo, not to the reply.
+    let end = i;
+    while (end + 1 < limit && OPENCODE_GUTTER_ROW_PATTERN.test(lines[end + 1])) end++;
+    return end;
+  }
+
+  return -1;
+}
+
+/**
+ * The rows of opencode's composer that hold the INPUT BUFFER (Issue #1906).
+ *
+ * opencode has no prompt marker — no `>` / `❯` / `›` anywhere near its input —
+ * so "is the message still sitting in the composer?" cannot be asked the way it
+ * is asked of every other TUI. What opencode has instead is a box, and the box
+ * has a fixed shape, measured at the production 80x200 geometry across every
+ * frame in `opencode-live-1883/`, `opencode-live-1893/` and
+ * `opencode-live-1906/`:
+ *
+ * ```
+ *   ┃                                     ← buffer rows: blank when empty,
+ *   ┃  Review the send path.                one row per (wrapped) line of the
+ *   ┃  Check newline handling.              typed message, or the
+ *   ┃  Report findings.                     `Ask anything...` placeholder on a
+ *   ┃                                       session that has not answered yet
+ *   ┃  Build · GPT-5.6 Luna GitHub Copilot ← the agent/model row, ALWAYS last
+ *   ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀ ← the box's bottom border
+ * ```
+ *
+ * The agent/model row is what makes a naive "any guttered row with text" read
+ * wrong: it always carries text, so the composer would never look empty. It is
+ * identified structurally — the last gutter row before the border — rather than
+ * by matching `Build ·` or a model name, both of which are opencode's to change
+ * and neither of which is stable across agents (`Build`, `Plan`, a custom agent).
+ *
+ * Anchored on the border, not on the bottom of the pane, because opencode
+ * centres the whole box under its banner before the first turn (row ~100 of 200)
+ * and only pins it to the bottom afterwards — see {@link findOpenCodeChromeStart},
+ * whose upward walk this shares.
+ *
+ * Returns `null` when no composer is on screen at all. That is the permission
+ * dialog (it replaces the composer and draws no bottom border — measured,
+ * `opencode-live-1893/permission-*.txt`), a full-screen overlay, or a session
+ * still starting.
+ *
+ * @param lines - Captured pane lines, ANSI-stripped, box drawing intact. Must be
+ *   the WHOLE pane: a tail window sized for the other tools does not contain the
+ *   box on a pre-first-turn frame.
+ * @returns The buffer rows with their gutters intact, or `null` when the
+ *   composer is not on screen. An empty array means a box with no buffer row,
+ *   which no measured frame produces.
+ */
+export function findOpenCodeComposerRows(lines: string[]): string[] | null {
+  let border = -1;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (OPENCODE_COMPOSER_BOTTOM_BORDER.test(lines[i])) {
+      border = i;
+      break;
+    }
+  }
+  if (border < 0) return null;
+
+  let top = border;
+  while (top - 1 >= 0 && OPENCODE_GUTTER_ROW_PATTERN.test(lines[top - 1])) top--;
+
+  // `top .. border - 1` are the box's gutter rows; the last of them is the
+  // agent/model row, which belongs to the chrome rather than to the buffer.
+  const modelRow = border - 1;
+  if (modelRow < top) return null;
+  return lines.slice(top, modelRow);
+}
+
+/**
+ * A composer row with its gutter (and the padding either side) removed
+ * (Issue #1906). Blank for an empty buffer row.
+ */
+export function stripOpenCodeGutter(row: string): string {
+  return row.replace(OPENCODE_GUTTER_ROW_PATTERN, '').trim();
+}
+
+/**
+ * OpenCode TUI selection list pattern (Issue #473, narrowed by Issue #1896).
+ *
+ * Detects the fuzzy-search picker overlay opencode draws for `/models`,
+ * `/providers` and `/connect`, anchored on its HEADER ROW COMPLETE WITH the
+ * right-aligned `esc` hatch:
+ *
+ * ```
+ *               Select model                                     esc
+ *
+ *               Search
+ *
+ *               Recent
+ *             ● GPT-5.6 Luna GitHub Copilot
+ * ```
+ *
+ * The `esc` is the picker's own dismiss affordance -- positive evidence that an
+ * overlay is open (design rule D1), rather than the presence of two English
+ * words somewhere on the pane. Until #1896 the pattern was the bare phrase, and
+ * `status-detector.ts` tests it against the WHOLE content area (up to ~200 rows,
+ * because the header can sit far above the last row when the list is long), so
+ * an agent that merely wrote `Select model to continue:` in its answer parked the
+ * session on `waiting` / `opencode_selection_list` for the rest of the session
+ * -- measured live on opencode 1.18.21,
+ * `opencode-live-1896/select-model-in-response.txt`.
+ *
+ * Requiring two or more spaces before `esc` is what separates the header row
+ * from prose: the picker right-aligns the hatch across the overlay's width
+ * (37 spaces in the measured frame), while a sentence that happens to end in
+ * "esc" would not.
+ *
+ * NOT additionally anchored on the `Search` row below the header: its distance
+ * from the header is unmeasured for the `Connect a provider` variant (that
+ * overlay needs an unconfigured provider to open, which the live probe could not
+ * produce without touching the operator's real credentials), and the header's
+ * own hatch is already the affordance.
+ *
+ * The header allowlist is deliberately unchanged. opencode 1.18 draws the same
+ * chrome for its ctrl+p command palette (`Commands … esc`), which this pattern
+ * therefore still does not match; that frame lands on `running` / `default`
+ * (measured, `opencode-live-1896/command-palette.txt`) -- i.e. on the
+ * "no evidence" side, which #1708's unclassified-frame guard already covers.
+ * Widening the allowlist is a separate change with its own live frames.
+ *
+ * The whitespace runs are `[^\S\n]` (horizontal only) for the reason Issue #1883
+ * documents: plain `\s` crosses newlines under the `m` flag, which would let a
+ * header on one row pair up with an `esc` several rows below it.
+ *
+ * Linear pattern, no nested quantifiers -- ReDoS safe (S4-001).
+ */
+export const OPENCODE_SELECTION_LIST_PATTERN =
+  /^[^\S\n]*(?:Select[^\S\n]+(?:model|provider)|Connect[^\S\n]+a[^\S\n]+provider)[^\S\n]{2,}esc[^\S\n]*$/m;
 
 /**
  * [Issue #1495] Footer signature of Claude Code's `/model` local-settings overlay.
@@ -823,7 +1220,8 @@ export const OPENCODE_SEPARATOR_PATTERN = /^[\u2503\u2579\u25A3\u2580\u2500\u250
  * OpenCode skip patterns for response cleaning (Issue #379)
  * Lines matching any of these patterns are filtered from extracted responses.
  * Includes: TUI separators, loading indicators, Build summary prefix,
- * status bar prompts, processing indicators, input prompt, and pasted text markers.
+ * status bar prompts, processing indicators, input prompt, the footer's
+ * context/cost status cell (Issue #1911), and pasted text markers.
  */
 export const OPENCODE_SKIP_PATTERNS: readonly RegExp[] = [
   OPENCODE_SEPARATOR_PATTERN,
@@ -832,6 +1230,7 @@ export const OPENCODE_SKIP_PATTERNS: readonly RegExp[] = [
   OPENCODE_PROMPT_AFTER_RESPONSE,
   OPENCODE_PROCESSING_INDICATOR,
   OPENCODE_PROMPT_PATTERN,
+  OPENCODE_FOOTER_STATUS_PATTERN,
   PASTED_TEXT_PATTERN,
 ] as const;
 
@@ -854,8 +1253,114 @@ export const COPILOT_PROMPT_PATTERN = /^[>❯]\s|^\?\s+/m;
  * Note: "Esc to cancel" alone is not used because trust dialog footer also contains it.
  * Instead, match the action pattern with parenthesized context: "(Esc to cancel ·"
  * Braille spinner characters (U+2800-U+28FF) are also checked.
+ *
+ * Issue #1897: the bare words `Generating` and `Processing` were dropped. This
+ * constant is also a member of {@link COPILOT_SKIP_PATTERNS}, so every
+ * alternative here doubles as a "delete this line from the saved response" rule
+ * and as the tail-window liveness test in `extractResponse`. Those two words are
+ * ordinary English -- a reply whose last line reads "Processing complete." had
+ * the line deleted AND pinned the turn to "still thinking" for as long as it was
+ * on screen, so the response was never saved at all. The remaining alternatives
+ * are all glyph- or punctuation-shaped and cannot occur in prose by accident.
+ * Nothing is lost as a running signal either: #1885 measured 0 matches for this
+ * whole pattern across 44 live generating frames of copilot 1.0.80, whose turn
+ * state is read from the status bar by {@link readCopilotStatusBar} instead.
  */
-export const COPILOT_THINKING_PATTERN = /[\u2800-\u28FF]|\(Esc to cancel|Reasoning\s+[■▪▮]|\.\.\.\s+Thinking|Generating|Processing/;
+export const COPILOT_THINKING_PATTERN = /[\u2800-\u28FF]|\(Esc to cancel|Reasoning\s+[■▪▮]|\.\.\.\s+Thinking/;
+
+/**
+ * Copilot CLI's bottom status bar while a turn is in flight (Issue #1885).
+ *
+ * Measured on copilot 1.0.80 at the production 200x1000 geometry
+ * (`tests/unit/lib/detection/fixtures/copilot-live-1885/`). The bar is the
+ * bottom row of the pane and reads, across 44 captured generating frames:
+ *
+ *   " ● Working esc interrupt                              GPT-5.6 Terra"
+ *   " ◉ Working · 1.5 KiB esc interrupt                       GPT-5.6 Terra"
+ *
+ * The leading glyph cycles through ● ◉ ◎ ○ and the byte counter appears only
+ * once the turn has produced output, so neither is anchored on. `esc interrupt`
+ * is the affordance hint copilot draws for as long as the turn can be
+ * interrupted -- it is on every generating frame and on every tool-execution
+ * frame -- which makes it the same signal opencode's
+ * {@link OPENCODE_PROCESSING_INDICATOR} rests on.
+ *
+ * It is matched against the STATUS BAR ROW ONLY, never a window
+ * (see {@link readCopilotStatusBar}). `status-vocabulary-in-response.txt` is a
+ * live frame where copilot was asked to print this vocabulary and answered
+ * " ● Working esc interrupt" as body text: a window match would have pinned that
+ * finished session to `running` for the rest of its life.
+ *
+ * No /g flag (S4-5: would make test() stateful). No quantifier over a
+ * character class that can match its neighbour (SEC4-001: ReDoS safe).
+ */
+export const COPILOT_WORKING_STATUS_PATTERN = /\besc\s+interrupt\b/;
+
+/**
+ * Copilot CLI's bottom status bar while no turn is running (Issue #1885).
+ *
+ * The same row as {@link COPILOT_WORKING_STATUS_PATTERN}, in the state copilot
+ * paints when it is NOT working:
+ *
+ *   " ← open sidebar · / commands · ? help · tab next tab            GPT-5.6 Terra"
+ *
+ * This is copilot's positive completion evidence under design rule D1
+ * (`docs/design/multi-agent-state-architecture.md` §4 D1 decision 1, item 2):
+ * the key-hint bar and the working bar are two renderings of one row, so seeing
+ * the hints is an affirmative observation that the turn is over -- not the
+ * absence of a busy marker somewhere on screen. The composer cannot carry that
+ * evidence on copilot: `❯` between its two full-width rules is drawn during
+ * generation too (measured on every frame of the running fixtures), which is
+ * exactly why the always-visible prompt used to win at step 3 of
+ * `detectSessionStatus` and report a generating session as ready.
+ *
+ * Two alternative spellings of one affordance, because copilot has reworded
+ * this row before: 1.0.80 shows "? help", and the pre-1.0.79 wording survives
+ * in {@link COPILOT_SKIP_PATTERNS} as "? for shortcuts". "/ commands" covers
+ * the slash-command hint independently, so a rewording of either half alone
+ * does not cost the tool its completion evidence.
+ *
+ * No /g flag (S4-5). Linear alternation, no nested quantifiers (SEC4-001).
+ */
+export const COPILOT_IDLE_STATUS_PATTERN = /\/\s+commands\b|\?\s+(?:help\b|for\s+shortcuts\b)/;
+
+/**
+ * The two states {@link readCopilotStatusBar} can positively identify.
+ */
+export type CopilotStatusBarState = 'working' | 'idle';
+
+/**
+ * Read copilot's bottom status bar out of a captured frame (Issue #1885).
+ *
+ * Takes the whole frame rather than a row so the positional anchor -- "the
+ * status bar is the bottom row of the pane" -- cannot be lost at a call site.
+ * The scan stops at the first non-blank row from the bottom: if that row is
+ * neither state, this returns null and the caller has no evidence, which is the
+ * D1-correct answer rather than a guess. Two measured frames rely on it:
+ *
+ *  - a permission dialog replaces the whole bottom of the pane with its box, so
+ *    the bottom row is `╰───…` and neither pattern matches. The dialog then
+ *    reaches `detectPrompt` and is reported as `waiting`, unchanged.
+ *  - the `/model` picker ends in its own footer
+ *    ("↑/↓ to navigate · … · enter to select · esc to cancel"), which is not the
+ *    status bar either -- so this reports nothing about it and leaves that
+ *    screen to the selection-list branch (Issue #1895's subject).
+ *
+ * @param contentLines - Frame rows, ANSI already stripped, in pane order
+ * @returns The state the bottom row announces, or null when it announces neither
+ */
+export function readCopilotStatusBar(
+  contentLines: readonly string[]
+): CopilotStatusBarState | null {
+  for (let i = contentLines.length - 1; i >= 0; i--) {
+    const row = contentLines[i];
+    if (row.trim() === '') continue;
+    if (COPILOT_WORKING_STATUS_PATTERN.test(row)) return 'working';
+    if (COPILOT_IDLE_STATUS_PATTERN.test(row)) return 'idle';
+    return null;
+  }
+  return null;
+}
 
 /**
  * Copilot separator pattern (Issue #545)
@@ -863,17 +1368,339 @@ export const COPILOT_THINKING_PATTERN = /[\u2800-\u28FF]|\(Esc to cancel|Reasoni
  */
 export const COPILOT_SEPARATOR_PATTERN = /^─{10,}$/m;
 
+/** How far above the bottom row copilot's closing rule may sit. */
+const COPILOT_STATUS_BAR_MAX_ROWS = 2;
+
+/** How many rows copilot's composer may span before the block stops looking like chrome. */
+const COPILOT_COMPOSER_MAX_ROWS = 40;
+
+/** A full-width horizontal rule, with or without the pane's leading padding. */
+const COPILOT_RULE_ROW = /^─{10,}$/;
+
+/** copilot's composer glyph: legacy `>` and current `❯`, at the pane's own indent. */
+const COPILOT_COMPOSER_GLYPH = /^ {0,2}[>❯]/;
+
 /**
- * Copilot CLI selection list pattern (Issue #547)
- * Detects Copilot CLI's interactive selection/navigation prompts:
- *   - Model picker: "Search models..." / "Select Model"
- *   - Trust dialog: "↑↓ to navigate · Enter to select · Esc to cancel"
- *   - Other interactive lists with arrow key navigation
+ * Locate the start of copilot CLI's bottom-pinned chrome within a captured pane
+ * (Issue #1897).
  *
- * No /g flag (S4-5: would make test() stateful).
- * No nested quantifiers (SEC4-001: ReDoS safety).
+ * copilot 1.0.80 runs on the alternate screen and reserves the last five rows of
+ * the pane. Measured at the production 200x1000 geometry
+ * (`tests/unit/lib/detection/fixtures/copilot-live-1885/`), with the transcript
+ * ~970 rows above and nothing but padding in between:
+ *
+ *     <cwd> [⎇ <branch>]                    Session: N AIC used
+ *     ────────────────────  ← opening rule
+ *     ❯ <composer>
+ *     ────────────────────  ← closing rule
+ *      ◉ Working · 1.5 KiB esc interrupt          GPT-5.6 Terra  ← status bar
+ *
+ * The boundary is found structurally -- closing rule, opening rule, composer
+ * glyph -- and never by matching the status bar's wording. That is the same
+ * reasoning {@link findClaudeChromeStart} records (#1289) plus the measurement
+ * behind {@link COPILOT_WORKING_STATUS_PATTERN}: copilot will print its own
+ * status-bar vocabulary as body text when asked to
+ * (`status-vocabulary-in-response.txt` holds ` ● Working esc interrupt` as a
+ * reply), so a vocabulary rule strong enough to delete the real bar also deletes
+ * that reply. Position is the only thing that separates them.
+ *
+ * Without this trim the bar is transcript as far as every consumer is concerned:
+ * it reached the TUI accumulator on every poll and was saved to History as the
+ * agent's answer (#1897's headline symptom, ` Working esc interrupt GPT-5.6
+ * Terra`), and its spinner glyph and byte counter change on every tick, so it
+ * also defeats the content dedup the alternate-screen tools rely on (#1268).
+ *
+ * @param lines - Captured pane rows, ANSI-bearing or not; trailing blanks tolerated
+ * @returns Index of the first chrome row, or -1 when the pane carries no chrome
+ *   (a permission dialog draws its box over the whole bottom of the pane, so
+ *   there is no composer and no bar -- those frames return -1 and are left to
+ *   `detectPrompt`, exactly as {@link readCopilotStatusBar} leaves them)
  */
-export const COPILOT_SELECTION_LIST_PATTERN = /Search\s+\w+\.\.\.|Select\s+Model|to (?:navigate|select).*Enter to (?:select|confirm)/m;
+export function findCopilotChromeStart(lines: readonly string[]): number {
+  const isRule = (line: string): boolean => COPILOT_RULE_ROW.test(stripAnsi(line).trim());
+
+  let lastRow = lines.length - 1;
+  while (lastRow >= 0 && stripAnsi(lines[lastRow]).trim() === '') lastRow--;
+  if (lastRow < 0) return -1;
+
+  let closingRule = -1;
+  for (let i = lastRow; i >= Math.max(0, lastRow - COPILOT_STATUS_BAR_MAX_ROWS); i--) {
+    if (isRule(lines[i])) {
+      closingRule = i;
+      break;
+    }
+  }
+  if (closingRule < 0) return -1;
+
+  let openingRule = -1;
+  for (let i = closingRule - 1; i >= Math.max(0, closingRule - COPILOT_COMPOSER_MAX_ROWS); i--) {
+    if (isRule(lines[i])) {
+      openingRule = i;
+      break;
+    }
+  }
+  if (openingRule < 0) return -1;
+
+  // Confirm the fenced rows are the composer rather than a reply that happens to
+  // sit between two horizontal rules.
+  if (!COPILOT_COMPOSER_GLYPH.test(stripAnsi(lines[openingRule + 1] ?? ''))) return -1;
+
+  // The row above the opening rule is copilot's cwd/branch/session header, which
+  // an overlay (the `/model` picker) replaces with a blank rather than with
+  // transcript -- measured on all five non-dialog fixtures.
+  return Math.max(0, openingRule - 1);
+}
+
+/**
+ * A row copilot draws as part of a box or a collapsed reasoning block
+ * (Issue #1897).
+ *
+ * 1.0.80 renders the model's private reasoning as a `⌄ Thought for 41s` header
+ * followed by rows that each begin `│ `, and draws dialogs inside `╭─╮`/`╰─╯`
+ * frames. {@link COPILOT_SKIP_PATTERNS} already carries a `[╭╮╰╯│]` rule, but
+ * `normalizeCopilotLine` deletes every U+2500..U+257F glyph *before* the skip
+ * patterns are applied, so by the time that rule runs the row it is meant to
+ * catch reads as ordinary prose -- which is how the TUI accumulator came to save
+ * copilot's chain-of-thought as the reply. Matched against the ANSI-stripped row,
+ * before normalisation.
+ *
+ * `─` is deliberately absent: a rule row is {@link COPILOT_SEPARATOR_PATTERN}'s
+ * job, and `── heading ──` is content.
+ */
+export const COPILOT_BOX_ROW_PATTERN = /^\s*[│└╰╭╮╯├┤┬┴┼]/;
+
+/**
+ * copilot's collapsed-section header (Issue #1897).
+ *
+ * Measured on 1.0.80: `⌄ Thinking…` while the reasoning block is live, replaced
+ * by `⌄ Thought for 41s` once the turn moves on. Anchored on the `⌄` disclosure
+ * glyph rather than on the words, because "Thinking…" also occurs as body text
+ * -- `status-vocabulary-in-response.txt` contains exactly that row as a reply,
+ * and it must survive cleaning.
+ */
+export const COPILOT_REASONING_HEADER_PATTERN = /^\s*⌄\s/;
+
+/**
+ * copilot's echo of the operator's own prompt in the transcript (Issue #1897).
+ *
+ * 1.0.80 draws every transcript row at the pane's one-column indent -- ` ❯ Reply
+ * with exactly the word: pong` -- while the composer at the bottom of the pane is
+ * at column 0. The bare `^[>❯]` form therefore never matched the echo, so
+ * `resolveExtractionStartIndex`'s copilot branch found no anchor, fell back to
+ * line 0, and handed the launch banner to the cleaner as the turn's reply.
+ *
+ * Bounded to two leading spaces rather than `\s*` so a quoted `> …` line inside a
+ * reply cannot be mistaken for a new turn boundary.
+ */
+export const COPILOT_USER_ECHO_PATTERN = /^ {0,2}[>❯]\s+\S/;
+
+/**
+ * A wrapped continuation of the copilot transcript row above it (Issue #1897).
+ *
+ * Marker rows (` ❯ `, ` ● `, ` $ `, ` ⌄ `) carry one leading space; the rows they
+ * wrap onto are indented further and carry no marker, and a blank row separates
+ * one block from the next (measured on 1.0.80 at 200x1000). Used to walk past the
+ * tail of a long *user* prompt so the extracted reply does not open with the
+ * second half of the operator's own question.
+ */
+export const COPILOT_TRANSCRIPT_CONTINUATION_PATTERN = /^ {2,}\S/;
+
+/**
+ * Rows that only copilot's first-launch screen draws (Issue #1897).
+ *
+ * The launch screen is a complete, idle frame: the composer is drawn, the status
+ * bar shows key hints, and nothing about it says "no turn has happened yet". So
+ * `extractResponse` classified it as a finished response and History opened with
+ * the banner as the agent's first message -- before the operator's first prompt.
+ *
+ * These anchors are only ever consulted for a frame that carries no echoed user
+ * prompt at all (see the copilot banner guard in `extractResponse`), which is
+ * what keeps a reply that quotes any of this wording from being suppressed.
+ */
+export const COPILOT_BOOT_BANNER_ANCHORS: readonly RegExp[] = [
+  /No copilot-instructions\.md found/,
+  /Copilot uses AI, so always check for mistakes\./,
+  /Copilot v\d[\w.]*\s+uses AI/,
+  /^\s*(?:●\s+)?GitHub Copilot\s+v\d/m,
+  /^\s*(?:●\s+)?Tip:\s*\//m,
+  /Describe a task to get started/,
+  /Prefer a visual workspace\?/,
+] as const;
+
+/**
+ * The key-hint footer copilot draws under a picker, matched one ROW at a time
+ * (Issue #547; rewritten against live 1.0.80 frames by Issue #1895).
+ *
+ * The pattern this replaced --
+ * `/Search\s+\w+\.\.\.|Select\s+Model|to (?:navigate|select).*Enter to (?:select|confirm)/`
+ * -- matched **none** of the eleven pickers 1.0.80 opens (measured; the frames
+ * are in `tests/unit/lib/detection/fixtures/copilot-picker-1895/`, and #1885 /
+ * #1886 / #1913 reached the same result independently). `/model` renders
+ * `❯  Search models…` with U+2026 rather than three periods, no picker carries
+ * the words `Select Model`, and every footer spells its verbs in lower case.
+ *
+ * What all eleven footers do share is the shape of a key-hint bar: `·`-separated
+ * hints carrying either arrow-key navigation or a lower-case dismiss verb.
+ * Measured verbatim, bottom-most first:
+ *
+ *   /model       ↑/↓ to navigate · ←/→ reasoning effort · tab context window ·
+ *                shift+tab group: recommended · enter to select · esc to cancel
+ *   /agent       n new agent · ? learn more · esc cancel
+ *   /theme       ↑/↓ to navigate · enter to select · esc to cancel
+ *   /permissions 1-2 to select · ↑/↓ to navigate · enter to confirm · esc to cancel
+ *   /skills      ↑/↓ to navigate · enter to toggle · esc to close
+ *   /mcp         ↑/↓ to select · enter to show · a to add · esc to close
+ *   /settings    / search · ↑/↓ navigate · tab switch scope · enter edit ·
+ *                ctrl+r reset · ctrl+e editor · esc close
+ *   /statusline  ↑/↓ nav · enter toggle · esc close
+ *   /subagents   ↑/↓ to navigate · space on/off · r reset · enter to select · esc to cancel
+ *   /resume      / search · ↑/↓ navigate · enter select · ←/→ switch tabs · r refresh ·
+ *                x delete · s sort:relevance · esc cancel
+ *   /session     / search · ↑/↓ navigate · enter open · n new · tab switch tabs · a filter:all
+ *
+ * Neither half of the alternation is universal -- `/agent` has no list to walk
+ * so it prints no `↑/↓`, and `/session` offers no `esc` -- but every footer has
+ * one of them, so the union covers 11/11 while each individual disjunct stays
+ * specific enough to be worth requiring. The slash in `↑/↓` is optional only as
+ * a rewording tolerance: the synthetic frames pinned since Issue #547 spell it
+ * `↑↓`, and whether copilot ever drew it that way is not something this Issue
+ * measured. Every 1.0.80 footer above has the slash.
+ *
+ * Three deliberate narrowings keep this off ordinary text:
+ *  - the `·` lookahead, so a sentence such as "press esc to cancel" is not a
+ *    footer unless it is also a hint bar;
+ *  - lower case, which is what 1.0.80 draws. `(Esc to cancel · 2.3 KiB)` -- the
+ *    capitalised spelling in {@link COPILOT_THINKING_PATTERN} -- is a *progress*
+ *    row, and it would otherwise satisfy both halves of this pattern;
+ *  - `cancel|close` only, so the status bar's `esc interrupt`
+ *    ({@link COPILOT_WORKING_STATUS_PATTERN}) is not a footer either.
+ *
+ * The narrowings are defence in depth; the load-bearing guard is positional and
+ * lives in {@link isCopilotSelectionFrame} -- copilot's own answer text can and
+ * does contain these exact rows (`picker-vocabulary-in-response.txt` is a live
+ * frame of it), so no window-scoped match on this vocabulary can be safe.
+ *
+ * No /g flag (S4-5: would make test() stateful). `[^\n]*` cannot cross a row and
+ * no quantifier is nested inside another (SEC4-001: ReDoS safe).
+ */
+export const COPILOT_SELECTION_FOOTER_PATTERN =
+  /^(?=[^\n]*·)[^\n]*(?:↑\/?↓|\besc\s+(?:to\s+)?(?:cancel|close)\b)/m;
+
+/**
+ * How many non-blank rows up from the bottom of the pane may carry the footer.
+ *
+ * Nine of the eleven pickers put it on the bottom row itself; `/agent` and
+ * `/subagents` draw their panel with a closing full-width rule underneath it,
+ * which puts the footer two non-blank rows up. Three is that measurement plus
+ * one row of slack -- deliberately far short of a window that could reach the
+ * transcript, which on the production 200x1000 geometry sits ~950 rows above.
+ */
+const COPILOT_SELECTION_FOOTER_SCAN_ROWS = 3;
+
+/**
+ * Whether the pane is sitting on one of copilot's pickers (Issue #1895).
+ *
+ * Takes the whole frame rather than a window for the same reason
+ * {@link readCopilotStatusBar} does: the evidence is positional, and a call site
+ * cannot be trusted to preserve "near the bottom of the pane" on its own. Two
+ * facts, both measured on 1.0.80, make the position sufficient:
+ *
+ *  - **A picker replaces copilot's chrome.** In the idle and generating states
+ *    the bottom five rows are cwd / rule / composer / rule / status bar; while a
+ *    picker is up, none of them are drawn. So a frame whose bottom row is a
+ *    status bar is not a picker, whatever its transcript says -- which is the
+ *    whole of the false-positive half of Issue #1895. `detectSessionStatus`
+ *    reads the same row for the running verdict at step 0.5, so checking it
+ *    first here also fixes the order between the two branches: the status bar
+ *    wins, and the picker branch only speaks when copilot has taken it away.
+ *  - **An answerable dialog is drawn inside a box; a picker is not.** The
+ *    folder-trust and permission dialogs wear the same lower-case
+ *    `↑/↓ to navigate · enter to select · esc to cancel` footer, but every one of
+ *    their rows reads `│ … │` and the bottom row is `╰─…─╯`. Skipping boxed rows
+ *    keeps those on the prompt branch, where they belong: they are the agent
+ *    blocked on the human (`hasActivePrompt: true`, exit 10 for `wait`), not a
+ *    list the operator opened.
+ *
+ * @param contentLines - Frame rows, ANSI already stripped, in pane order
+ * @returns True when the bottom of the pane is a picker's key-hint footer
+ */
+export function isCopilotSelectionFrame(contentLines: readonly string[]): boolean {
+  if (readCopilotStatusBar(contentLines) !== null) return false;
+
+  let scanned = 0;
+  for (let i = contentLines.length - 1; i >= 0; i--) {
+    const row = contentLines[i];
+    const trimmed = row.trim();
+    if (trimmed === '') continue;
+    if (++scanned > COPILOT_SELECTION_FOOTER_SCAN_ROWS) break;
+    // A boxed row belongs to a dialog, not a picker (see above).
+    if (trimmed.startsWith('│') || trimmed.endsWith('│')) continue;
+    if (COPILOT_SELECTION_FOOTER_PATTERN.test(row)) return true;
+  }
+  return false;
+}
+
+/**
+ * Anchors of Copilot CLI's first-launch "Confirm folder trust" dialog (Issue #1886).
+ *
+ * Recorded from copilot 1.0.80 (`tests/fixtures/copilot-folder-trust-1080.ts`):
+ * copilot asks this once per untrusted git repository, before anything else runs,
+ * and the whole dialog is drawn inside a box — every row reads `│ <content>`.
+ * That is why `COPILOT_PROMPT_PATTERN` (`^[>❯]\s`) does not match the frame at
+ * all and `waitForReady` used to spin its full 30-second window against it.
+ *
+ * Both anchors are required. One of them alone would also match this dialog's
+ * text quoted back inside a model response, and a false positive here does not
+ * merely mis-report a status: it sends a bare `1` into a live composer.
+ *
+ * The anchors live here rather than in `cli-tools/copilot` for the same reason
+ * codex's do (Issue #1829): the Auto-Yes poller judges the same screen through
+ * `detectPrompt`, and two copies of the wording would be two chances to disagree
+ * about what this dialog is.
+ */
+export const COPILOT_FOLDER_TRUST_ANCHORS: readonly string[] = [
+  'Confirm folder trust',
+  'Do you trust the files in this folder?',
+] as const;
+
+/**
+ * The one option CommandMate may answer on the operator's behalf: `1. Yes`,
+ * which grants trust for THIS SESSION only.
+ *
+ * Matching the option text — not just the dialog — is the fail-safe. Option 2
+ * ("Yes, and remember this folder for future sessions") writes `trustedFolders`
+ * into `~/.copilot/config.json`, one file shared by every checkout on the
+ * machine (measured: answering `1` leaves that file byte-identical). If copilot
+ * ever reorders the list so that `1` is the remembering variant, this stops
+ * matching, nothing is sent, and the launch degrades to the pre-#1886 stall
+ * instead of silently persisting a trust grant.
+ *
+ * Written against the box-stripped frame, where the row reads `❯ 1. Yes`.
+ * `[ \t]*$` rather than `\s*$` so the trailing anchor cannot roll onto a later
+ * line and accept `1. Yes, and remember ...`.
+ */
+export const COPILOT_FOLDER_TRUST_SESSION_OPTION_PATTERN = /^[ \t]*(?:[>❯][ \t]*)?1\.[ \t]+Yes[ \t]*$/m;
+
+/**
+ * Key that selects {@link COPILOT_FOLDER_TRUST_SESSION_OPTION_PATTERN}.
+ * Measured on 1.0.80: the digit confirms on its own — sending a trailing Enter
+ * would land on the composer that the dialog's dismissal reveals.
+ */
+export const COPILOT_FOLDER_TRUST_ANSWER_KEY = '1';
+
+/**
+ * Whether the pane is sitting on the folder-trust dialog with the session-only
+ * option in first position.
+ *
+ * @param output - ANSI-stripped pane capture (box drawing still present)
+ * @returns True when both anchors and the `1. Yes` option row are present
+ */
+export function isCopilotFolderTrustDialog(output: string): boolean {
+  if (!COPILOT_FOLDER_TRUST_ANCHORS.every((anchor) => output.includes(anchor))) {
+    return false;
+  }
+  return COPILOT_FOLDER_TRUST_SESSION_OPTION_PATTERN.test(stripBoxDrawing(output));
+}
 
 /**
  * Copilot skip patterns for response cleaning (Issue #545)
@@ -883,7 +1710,12 @@ export const COPILOT_SKIP_PATTERNS: readonly RegExp[] = [
   PASTED_TEXT_PATTERN,
   COPILOT_SEPARATOR_PATTERN,
   COPILOT_THINKING_PATTERN,
-  COPILOT_SELECTION_LIST_PATTERN,
+  // Issue #1895 replaced COPILOT_SELECTION_LIST_PATTERN with the row-scoped
+  // picker footer; the vocabulary it carried (`Search \w+...` / `Select Model`)
+  // is copilot's prose, not its chrome.
+  COPILOT_SELECTION_FOOTER_PATTERN,
+  // Collapsed reasoning header (Issue #1897): "⌄ Thinking…" / "⌄ Thought for 41s"
+  COPILOT_REASONING_HEADER_PATTERN,
   // Logo/banner lines
   /^GitHub Copilot\s+v/,
   /[█▘▝▖▗▔▄▌▐]/,
@@ -1226,8 +2058,35 @@ export function buildDetectPromptOptions(
   }
   // [D2-006] OpenCode prompt "Ask anything..." does not use standard indicators (> / ❯),
   // so requireDefaultIndicator must be false to avoid missing prompt detection.
+  //
+  // [Issue #1896] `hasNumberedDialogs: false` -- opencode 1.18 renders NO dialog
+  // that a typed number drives, so the generic numbered-list inference has
+  // nothing to find on its pane and every hit it scored was transcript text.
+  // Its two interactive surfaces were both measured at the production 80x200
+  // geometry and both are cursor-driven:
+  //
+  //  - the permission dialog is a horizontal button strip
+  //    ({@link OPENCODE_PERMISSION_PATTERN}, Issue #1893) driven by ←/→ + Enter;
+  //    typing a number does nothing to it.
+  //  - the pickers (`/models`, `/providers`, `/connect`, and the ctrl+p command
+  //    palette) are fuzzy-search lists driven by ↑/↓ + Enter, with no numbers
+  //    drawn at all. The first three are what
+  //    {@link OPENCODE_SELECTION_LIST_PATTERN} names; the palette shares the
+  //    chrome but not the header allowlist, and lands on `running` / `default`.
+  //
+  // Both keep their own POSITIVE detection in `status-detector.ts`, so `wait`
+  // still stops for them (exit 10 via `isSelectionListActive`) and the UI still
+  // renders NavigationButtons: nothing that could be answered before stops being
+  // answered. What ends is the false positive -- a response whose body ends in
+  // `1. / 2. / 3.` + a question was published as
+  // `waiting`/`prompt_detected`/`hasActivePrompt: true`, and Auto-Yes typed `1`
+  // into the composer and SENT IT as a user utterance (Issue #1896).
+  //
+  // `requireDefaultIndicator` is kept at its D2-006 value: it is the correct
+  // setting for opencode's ❯-less rendering should the numbered path ever be
+  // re-enabled, and it still describes the tool.
   if (cliToolId === 'opencode') {
-    return { requireDefaultIndicator: false };
+    return { requireDefaultIndicator: false, hasNumberedDialogs: false };
   }
   // [Issue #545] Copilot prompt pattern may not use standard indicators
   if (cliToolId === 'copilot') {

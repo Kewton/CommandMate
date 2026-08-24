@@ -195,9 +195,22 @@ describe('claude-executor', () => {
       expect(args).toEqual(['run', 'hello']);
     });
 
-    it('should build opencode args with -m when model is specified', () => {
-      const args = buildCliArgs('hello', 'opencode', undefined, { model: 'qwen3:8b' });
-      expect(args).toEqual(['run', '-m', 'ollama/qwen3:8b', 'hello']);
+    // Issue #1914: the value reaches `-m` verbatim. `opencode run --help`
+    // documents `-m, --model` as taking "provider/model" (measured on 1.18.21),
+    // so the `ollama/` prefix this branch used to add made every other provider
+    // unreachable and doubled up on any value that already named one.
+    it.each([
+      'ollama/qwen3:8b',
+      'anthropic/claude-sonnet-4-5',
+      'github-copilot/gpt-5',
+    ])('should build opencode args with -m %s verbatim', (model) => {
+      const args = buildCliArgs('hello', 'opencode', undefined, { model });
+      expect(args).toEqual(['run', '-m', model, 'hello']);
+    });
+
+    it('should not prefix an opencode model with ollama/', () => {
+      const args = buildCliArgs('hello', 'opencode', undefined, { model: 'anthropic/claude-sonnet-4-5' });
+      expect(args.join(' ')).not.toContain('ollama/');
     });
 
     it('should build opencode args without -m when model is not specified', () => {

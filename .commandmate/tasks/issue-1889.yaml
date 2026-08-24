@@ -1,0 +1,103 @@
+version: 1
+title: "Issue #1889: Token discipline にトークン名の実在検証を追加する"
+goal: |
+  /pm-auto-issue2dev 1889
+
+  https://github.com/Kewton/CommandMate/issues/1889 を実装してください。
+
+  ## 課題
+
+  Token discipline ガードは「生の配色ユーティリティが**存在しないこと**」しか検査していないため、
+  **実在しないセマンティックトークン名へ置換しても PASS します**。Tailwind は未定義ユーティリティを
+  黙って無視するので、症状は「背景が消える」「文字色が継承されて読めない」という**視覚的な silent failure**
+  になり、lint も tsc も unit も検出しません（クラス名は単なる文字列）。
+
+  PR #1881 で実際に起きかけました。`sky-*` を `info` tint へ置換した際ガードは PASS し、
+  **トークンが実在することは人間が `globals.css` を grep して手で確認**しています。その手作業の自動化です。
+
+  ## 既存資産（#1882 で着地済み。作り直さない）
+
+  - `scripts/check-token-discipline.mjs` — 検査本体の**単一の権威ソース**。
+    `TOKEN_DISCIPLINE_PATTERN` / `GUARDED_PATHSPECS` / 除外ロジックを持つ
+  - `.github/workflows/ci-pr.yml` の `token-discipline` ジョブと
+    `.commandmate/verify.yaml` の `token-discipline` ゲートが**どちらもこのスクリプトを呼ぶ**
+  - `tests/unit/guards/static-guard-single-source.test.ts` が上記の単一ソース構造を固定している
+
+  **このスクリプトを拡張してください。** CI と verify が同じスクリプトを呼ぶ構造を壊さないこと。
+
+  ## オーケストレーターによる事前実測（重要）
+
+  「`globals.css` の `--color-*` に無い名前は全部エラー」という素朴な実装は**大量の偽陽性**を出します。
+  実測しました:
+
+  - `globals.css` が定義する色トークン: **42 個**
+  - `src/app` + `src/components` で使われている `(bg|text|border|ring)-<name>`: **121 種**
+  - うちトークンに無い名前: **79 種**
+
+  79 種のほぼ全部が **Tailwind 組み込みの非配色ユーティリティ**でした。実際に出た例:
+
+      text-align  text-center  text-xs  text-base  text-lg  text-current  text-left
+      border-b  border-b-0  border-b-2  border-l  border-l-2  border-l-4  border-2  border-dashed
+      bg-gradient-to-b  bg-gradient-to-br  bg-none  bg-transparent  bg-black  bg-white
+      ring-offset-2  ring-offset-background  ring-inset  text-decoration  border-collapse
+      text-overflow  border-radius  border-none  bg-card  text-entry  bg-color  border-input-
+
+  **単純な接頭辞マッチでは実装になりません。** Tailwind 組み込みユーティリティを確実に除外する方法を
+  設計してください（許可リスト / Tailwind の設定解決 / 数値サフィックスの有無で判定 など、
+  方式は任せます。ただし**採用理由と検出できない範囲を明記**すること）。
+
+  ## 【重要】あなたの変更は自分自身の裁定に影響する
+
+  `.commandmate/verify.yaml` には既に `token-discipline` ゲートがあり、**あなたが書き換えたスクリプトを実行します**。
+  新しい検査に偽陽性があると、**あなた自身の `wait --verify` が exit 20 で落ちます**（dogfooding として正しい）。
+  完了前に必ずローカルで `node scripts/check-token-discipline.mjs` を回し、**exit 0 になることを確認**してください。
+
+  ## 受入条件
+
+  - [ ] 実在しないトークン名（例 `bg-surface-elevated-typo`）を入れると **非 0 で落ちる**
+  - [ ] 実在するトークン名（`bg-info-subtle` / `text-info-foreground` / `bg-surface` / `hover:bg-muted` /
+        `ring-ring` / `ring-offset-background` 等）は**通る**
+  - [ ] **上に列挙した Tailwind 組み込みユーティリティで偽陽性を出さない**ことをテストで固定する
+        （列挙は実測値なので、テストケースにそのまま使ってよい）
+  - [ ] **現状の develop に対して exit 0** になる（＝既存コードに偽陽性を出さない）
+  - [ ] `*Terminal*` 例外・`.test.`/`.spec.`/`__tests__` 除外・`src/app/worktrees` 除外が引き続き効く
+  - [ ] 検出できない範囲（動的クラス名 `` `bg-${tone}-subtle` `` など）を
+        **スクリプト冒頭と `docs/design-system.md` に明記**する
+  - [ ] CI と `verify.yaml` が同じスクリプトを呼ぶ構造（#1882）を壊さない
+        （`tests/unit/guards/static-guard-single-source.test.ts` が緑のまま）
+  - [ ] `npm run lint` / `npx tsc --noEmit` / `npm run test:unit` 全緑
+  - [ ] CHANGELOG `[Unreleased]` に 1 行
+
+  ## スコープ外（やらないこと）
+
+  - **既存ガードのパレット網羅漏れの修正。** `TOKEN_DISCIPLINE_PATTERN` は
+    `gray|slate|red|green|yellow|amber|orange|purple|violet|sky|blue` しか列挙しておらず、
+    `neutral` / `pink` / `teal` などが素通りしています（オーケストレーターが実測・別 Issue 化）。
+    **本 Issue では触らないでください。** 同じファイルを 2 つの PR が触ると衝突します。
+  - `bg-[#123456]` のような arbitrary value の扱い（現行ガードも拾っていない）
+  - `text-white` / `bg-black`（82 箇所ある。方針判断が要るので別途）
+
+  ## 作業ルール（厳守）
+
+  - **GitHub Issue / PR を編集しない**（オーケストレーターが管理します）
+  - **PR を作らない・push しない**（オーケストレーターが行います）
+  - 作業は**このブランチ上の単一 commit**。`dev-reports/` は commit に含めない
+  - **Issue 本文と実コードが食い違ったら実コードを正**とし、食い違いを明記する
+    （この Issue はオーケストレーターが書いたもので、完全ではありません）
+  - **稼働サーバ（port 3000）を停止・再起動しない。`MyCodeBranchDesk` で `npm run build` を走らせない**
+  - **`tmux kill-server` / `set-option -g` / `bind-key` / `unbind-key` を打たない**。他セッションに `send-keys` しない
+  - #1890 が別 worktree で並走しています。`CHANGELOG.md` は双方が触りますが**自分のぶんだけ書けばよい**
+
+scope:
+  allow:
+    - "scripts/**"
+    - "tests/unit/**"
+    - "tests/helpers/**"
+    - "docs/**"
+    - "CHANGELOG.md"
+    - ".github/workflows/**"
+  deny: []
+
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true

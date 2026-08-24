@@ -21,9 +21,45 @@ vi.mock('@/lib/tmux/tmux', () => ({
   sendSpecialKeys: vi.fn().mockResolvedValue(undefined),
   sendSpecialKey: vi.fn().mockResolvedValue(undefined),
   capturePane: vi.fn().mockResolvedValue('\u276F \n\u203A '),
+  // Issue #1880: the send path now empties the composer first, and the loop
+  // that does it resolves this primitive up front. The frame above carries no
+  // input box, so no pass is ever sent — but the mock still has to expose it.
+  clearComposerLine: vi.fn().mockResolvedValue(undefined),
   killSession: vi.fn().mockResolvedValue(true),
   listSessions: vi.fn().mockResolvedValue([]),
 }));
+
+// Issue #1977: every wait in `src/config/cli-tool-timing-config.ts` is a real
+// `setTimeout` inside production code, and this file awaits nine send/kill
+// paths that go through them. Measured on the unloaded development machine
+// before this mock, the file spent 5.95s of its 5.95s asleep:
+//
+//   opencode killSession 2103ms (OPENCODE_EXIT_WAIT_MS 2000 + text-input 100)
+//   claude   stopSession  502ms (TUI_EXIT_WAIT_MS 500)
+//   vibe-local send       504ms (text-input 100 + processed 200 + double-enter 200)
+//   codex / gemini / opencode send  ~303ms each
+//                               (TUI_TEXT_INPUT_WAIT_MS 100 + TUI_MESSAGE_PROCESSED_WAIT_MS 200,
+//                                both read by src/lib/cli-tools/submit-verified-sender.ts)
+//   prompt-answer-sender  100ms (TUI_TEXT_INPUT_WAIT_MS)
+//
+// Those numbers exist so a real TUI has time to redraw between keystrokes.
+// Nothing in this file drives a real TUI — `@/lib/tmux/tmux` is mocked above —
+// so the sleeps buy nothing here and put the worst `it()` at 2.1s, within 2.4x
+// of vitest's 5000ms default. A machine 2.4x slower than idle turns a green
+// assertion into `Test timed out in 5000ms`, which is Issue #1977.
+//
+// Only the `*_MS` durations are zeroed, and every other export is passed
+// through unchanged, so a future non-duration export in that module does not
+// silently become 0.
+vi.mock('@/config/cli-tool-timing-config', async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([name, value]) => [
+      name,
+      name.endsWith('_MS') && typeof value === 'number' ? 0 : value,
+    ])
+  );
+});
 
 // Mock pasted-text-helper
 vi.mock('@/lib/pasted-text-helper', () => ({
@@ -101,6 +137,15 @@ import { GeminiTool } from '@/lib/cli-tools/gemini';
 import { OpenCodeTool } from '@/lib/cli-tools/opencode';
 import { VibeLocalTool } from '@/lib/cli-tools/vibe-local';
 import { sendPromptAnswer } from '@/lib/prompt-answer-sender';
+// Issue #1977: statically imported alongside every other subject in this file.
+// It used to be `await import('@/lib/session-cleanup')` inside the last `it()`,
+// which charged that test 880ms of module loading — measured with every other
+// subject already warm, and dominated by `@/lib/polling/response-poller`
+// (778ms of the 880ms), a barrel this file never asserts on. Under deliberate
+// process pressure that one `await import` stretched to 4031ms: 80% of the way
+// to a 5000ms timeout, for a cost that is not the assertion. `vi.mock` calls
+// are hoisted above every import, so the mocks above still apply.
+import { cleanupWorktreeSessions } from '@/lib/session-cleanup';
 
 describe('tmux capture cache invalidation (Issue #405)', () => {
   beforeEach(() => {
@@ -202,8 +247,6 @@ describe('tmux capture cache invalidation (Issue #405)', () => {
 
   describe('session-cleanup.ts', () => {
     it('should call clearAllCache during cleanup', async () => {
-      const { cleanupWorktreeSessions } = await import('@/lib/session-cleanup');
-
       await cleanupWorktreeSessions('test-wt', async () => true);
 
       expect(clearAllCacheSpy).toHaveBeenCalled();

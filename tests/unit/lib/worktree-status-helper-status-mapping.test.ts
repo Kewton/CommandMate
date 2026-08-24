@@ -74,6 +74,8 @@ function mockDetectedStatus(status: SessionStatus, hasActivePrompt = false): voi
     confidence: 'high',
     reason: 'input_prompt',
     hasActivePrompt,
+    // Issue #1927: `evidence` became a required field of the detector's result.
+    evidence: 'positive',
     promptDetection: { isPrompt: hasActivePrompt, cleanContent: '' },
   });
 }
@@ -120,6 +122,14 @@ describe('detectWorktreeSessionStatus SessionStatus → flags (Issue #1550)', ()
         waitingKind: isWaitingForResponse ? 'unclassified' : null,
         waitingSince: isWaitingForResponse ? expect.any(Number) : null,
         awaitingInstruction: false,
+        // Issue #1926: the frame's reason and whether it was read positively.
+        // `input_prompt` is a reason the detector positively recognised, so the
+        // evidence is `positive` for every row of this table and the latch
+        // reports the status this poll just confirmed.
+        statusEvidence: 'positive',
+        sessionStatusReason: 'input_prompt',
+        lastKnownStatus: status,
+        lastKnownStatusAt: expect.any(Number),
       });
     }
   );
@@ -159,6 +169,8 @@ describe('detectWorktreeSessionStatus SessionStatus → flags (Issue #1550)', ()
       waitingKind: null,
       waitingSince: null,
       awaitingInstruction: false,
+      // Issue #1926: no frame was read, so there is no reason and no evidence
+      // to report — the keys are absent, not null, exactly as `model` is.
     });
   });
 

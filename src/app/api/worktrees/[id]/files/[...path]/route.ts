@@ -13,6 +13,8 @@
  * [SF-002] Path validation using isPathSafe()
  * [SEC-SF-002] Error responses without absolute paths
  * [REFACTOR] DRY: Centralized error code to HTTP status mapping
+ * [Issue #2014] Deny-tier paths (.env* / *.pem / *.key / .git) are refused on
+ *   EVERY method by getWorktreeAndValidatePath — see sensitive-file-guard.ts
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -20,6 +22,7 @@ import { getDbInstance } from '@/lib/db/db-instance';
 import { getWorktreeById } from '@/lib/db';
 import { normalize, join } from 'path';
 import { isPathSafe, resolveAndValidateRealPath } from '@/lib/security/path-validator';
+import { findSensitivePathSegment } from '@/lib/security/sensitive-file-guard';
 import {
   readFileContent,
   updateFileContent,
@@ -87,6 +90,8 @@ const ERROR_CODE_TO_HTTP_STATUS: Record<string, number> = {
   MOVE_INTO_SELF: 400,
   // PDF-specific error codes (Issue #673)
   PDF_SIZE_EXCEEDED: 413,
+  // [Issue #2014] Path matches a deny-tier pattern (.env / *.pem / *.key / .git)
+  SENSITIVE_PATH: 403,
 };
 
 /**
@@ -191,6 +196,26 @@ async function getWorktreeAndValidatePath(
   if (!resolveAndValidateRealPath(normalizedPath, worktree.path)) {
     return {
       error: createErrorResponse('INVALID_PATH', 'Invalid path'),
+    };
+  }
+
+  // [Issue #2014] Deny-tier patterns are refused here, i.e. for GET, PUT, POST,
+  // DELETE and PATCH alike. A GET-only check was measurably useless: PATCH
+  // {action:'rename'} moved `.env` to `leaked.md` and the next GET returned the
+  // body. The check runs on the raw segments AND on the normalised path, because
+  // only the normalised path is what reaches `fs` (`a/../.env`), while only the
+  // raw segments still carry any percent-encoding.
+  const sensitiveSegment =
+    findSensitivePathSegment(pathSegments) ?? findSensitivePathSegment(normalizedPath);
+  if (sensitiveSegment) {
+    // The offending segment is deliberately NOT echoed back: the response body
+    // is a place secrets have leaked from before, and the client already knows
+    // what it asked for.
+    return {
+      error: createErrorResponse(
+        'SENSITIVE_PATH',
+        'This path is protected and cannot be accessed through the file API',
+      ),
     };
   }
 
@@ -668,6 +693,16 @@ export async function PATCH(
           return createErrorResponse('INVALID_REQUEST', 'newName is required');
         }
 
+        // [Issue #2014] The destination is guarded too, so the API can never
+        // CREATE a path it then refuses to manage: renaming `notes.md` to
+        // `.env` would otherwise strand the file (unreadable, undeletable).
+        if (findSensitivePathSegment([newName])) {
+          return createErrorResponse(
+            'SENSITIVE_PATH',
+            'This path is protected and cannot be accessed through the file API',
+          );
+        }
+
         const renameResult = await renameFileOrDirectory(worktree.path, relativePath, newName);
 
         if (!renameResult.success) {
@@ -687,6 +722,14 @@ export async function PATCH(
         // [MF-S3-002] Validate destination parameter
         if (!destination || typeof destination !== 'string') {
           return createErrorResponse('INVALID_REQUEST', 'destination is required and must be a string');
+        }
+
+        // [Issue #2014] Same rule for the move destination directory.
+        if (findSensitivePathSegment(destination)) {
+          return createErrorResponse(
+            'SENSITIVE_PATH',
+            'This path is protected and cannot be accessed through the file API',
+          );
         }
 
         const moveResult = await moveFileOrDirectory(worktree.path, relativePath, destination);

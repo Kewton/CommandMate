@@ -28,6 +28,7 @@ import {
   TUI_EXIT_WAIT_MS,
   VIBE_LOCAL_DOUBLE_ENTER_WAIT_MS,
 } from '@/config/cli-tool-timing-config';
+import { SessionStartUnavailableError } from '../session/session-start-error';
 
 const logger = createLogger('cli-tools/vibe-local');
 
@@ -68,10 +69,10 @@ export class VibeLocalTool extends BaseCLITool {
    * @param worktreeId - Worktree ID
    * @param worktreePath - Worktree path
    */
-  async startSession(worktreeId: string, worktreePath: string, instanceId?: string): Promise<void> {
+  protected async launchSession(worktreeId: string, worktreePath: string, instanceId?: string): Promise<void> {
     const vibeLocalAvailable = await this.isInstalled();
     if (!vibeLocalAvailable) {
-      throw new Error('vibe-local is not installed or not in PATH');
+      throw new SessionStartUnavailableError(this.name, 'vibe-local is not installed or not in PATH');
     }
 
     const sessionName = this.getSessionName(worktreeId, instanceId);
@@ -155,7 +156,10 @@ export class VibeLocalTool extends BaseCLITool {
         sessionName,
         message,
         cliToolId: 'vibe-local',
-        submitEnterCount: 2,
+        // Issue #1933: the double Enter is `ComposerSpec.submitEnterCount`, so
+        // the IME quirk is declared once on the tool rather than re-passed by
+        // the one call site that knew about it.
+        composer: this.describeComposer(),
         interEnterWaitMs: VIBE_LOCAL_DOUBLE_ENTER_WAIT_MS,
       });
 

@@ -332,6 +332,10 @@ done_count=0
 # `set -u`.
 run_ended=1
 
+# Issue #1950: which fatal signal gets to speak. A second one arriving while the
+# first is still being reported does NOT displace it — see report_fatal_signal.
+fatal_reported=0
+
 report_exit() {
   re__rc=$?
   if [ "$run_ended" = "0" ]; then
@@ -342,7 +346,25 @@ report_exit() {
 
 # Fatal by default: report, then exit 128+n so a supervising shell still sees the
 # conventional status. `cleanup` runs from the EXIT trap that follows.
+#
+# First signal wins, and that guard is load-bearing rather than tidy (Issue
+# #1950). The way this loop is usually killed is `spawnSync(..., { timeout })`,
+# and node does two things in the SAME step: it sends SIGTERM and it closes the
+# child's stdio. So the SIGTERM handler below writes its diagnostic to a stderr
+# that is already gone, takes SIGPIPE for it, and — before this guard — re-entered
+# here as PIPE and exited 141 instead of 143. The 141 was reported as
+# `expected { status: 141 } to deeply equal { status: 0 }` with an empty stderr,
+# which reads like a disagreement about an exit code and is nothing of the kind:
+# it is a timeout. Diagnosing that cost Issue #1950 the better part of a day.
+#
+# The guard does not make SIGPIPE unreportable. A SIGPIPE that arrives on its own
+# — `monitor.sh | head`, the case the trap was added for — still finds
+# `fatal_reported=0`, still prints, still exits 141. Only the second signal of a
+# shutdown already in progress is dropped, and the first one is the one that
+# explains what happened.
 report_fatal_signal() {
+  if [ "$fatal_reported" = "1" ]; then return; fi
+  fatal_reported=1
   echo "monitor: ERROR caught SIG$1 (signal $2) on poll round $poll_round — monitoring stops here" >&2
   exit $((128 + $2))
 }

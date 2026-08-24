@@ -25,6 +25,7 @@ import type { WaitOptions } from '../types';
 import type {
   AutoYesSuppressionReason,
   CurrentOutputResponse,
+  PromptMessageResponse,
   TaskListResponse,
   TaskStatus,
   WaitPromptOutput,
@@ -94,8 +95,17 @@ const COMPLETION_BASIS = {
  * ran nothing at all, because the composer had been idle for a minute. Reading
  * it as a turn boundary would have re-created the false completion this gate
  * exists to stop, one minute later. Only `Stop` ends a turn.
+ *
+ * Exported for the cross-layer pin in
+ * `tests/unit/session/status-contract-1926.test.ts`. The server opens a turn on
+ * the same three events (`src/lib/session/provisional-turn.ts`
+ * TURN_ACTIVITY_EVENTS), and since Issue #1930 `adoptTurnStart` reads that
+ * turn's `openedAt` rather than this set — so a set that drifted would change
+ * this gate silently. The set is still read here for the pre-#1930 fallback
+ * path, and the CLI cannot import the server module (`tsconfig.cli.json` sets
+ * `"paths": {}`), so the test is the only thing holding the two together.
  */
-const TURN_OPENING_EVENT_TYPES: ReadonlySet<string> = new Set([
+export const TURN_OPENING_EVENT_TYPES: ReadonlySet<string> = new Set([
   'user_prompt_submit',
   'pre_tool_use',
   'post_tool_use',
@@ -110,14 +120,16 @@ const TURN_OPENING_EVENT_TYPES: ReadonlySet<string> = new Set([
  * after `wait` is already polling (measured at +0.6 s from the send). One poll
  * interval of slack covers a `wait` that starts a moment late.
  *
- * The bound is what keeps this from being a new way to hang. Structured events
- * live in a server-side Map keyed by (worktree, tool, instance) and are NOT
- * fenced by generation on the way into `structuredEvents` — a stale
- * `user_prompt_submit` from a previous agent process can still be the last event
- * on the wire. Refusing to adopt anything older than this wait means such a
- * record cannot gate it: a `wait` on an already-idle session sees no fresh
- * turn-opening event, keeps `turnStartedAt` null, and behaves exactly as it did
- * before this Issue.
+ * The bound is what keeps this from being a new way to hang, and Issue #1930
+ * narrowed what it has to defend against. It was written when structured events
+ * were NOT fenced by generation on the way into `structuredEvents`, so a stale
+ * `user_prompt_submit` from a previous agent process could still be the last
+ * event on the wire and this window was the only thing stopping it from gating
+ * a wait for ever. The server fences the turn now and publishes null when it
+ * does, so the window's remaining job is narrower and sharper: a turn that has
+ * already CLOSED must have closed inside this wait to count, or `wait` on a
+ * session that finished an hour ago would inherit that turn's gate. An open
+ * turn is adopted whatever its age — see {@link adoptTurnStart}.
  */
 const TURN_ADOPTION_GRACE_MS = POLL_INTERVAL_MS;
 
@@ -194,6 +206,11 @@ const SUPPRESSION_CAUSE: Record<AutoYesSuppressionReason, string> = {
   'deny-pattern-unusable': CONTRACT_POLICY_CAUSE,
   'type-not-allowed': CONTRACT_POLICY_CAUSE,
   'agent-launch-dialog': "while the agent's launch dialog was on screen",
+  // Issue #1924. Deliberately not "by contract policy": no contract was
+  // consulted. The frame looked like a numbered list to the generic estimator
+  // and like prose to the tool's own detector, and an operator who reads this
+  // should go and look at the pane rather than at `denyPatterns`.
+  'unclassified-frame': 'because no tool-specific dialog detector recognised the frame',
 };
 
 /**
@@ -237,7 +254,54 @@ function formatSuppressionNotice(suppression: LastSuppression, ageSeconds: numbe
 }
 
 /**
- * Adopt the turn this wait is about, if this poll shows one opening.
+ * Whether this server publishes a real turn record (Issue #1930).
+ *
+ * `dialogPendingMaxMs` landed with the turn model and is set on every payload a
+ * server of that vintage produces, so its presence is the version probe. A
+ * *value* rather than a version string, for the reason #1924 gives for the
+ * capability block: a payload that has to be interpreted by its sender's
+ * version number is a payload nobody can read forward.
+ *
+ * The probe is needed because the two readings below disagree in exactly the
+ * case that matters. On a #1930 server, `openedAt` being null while
+ * `lastEventType` is `user_prompt_submit` means the turn was fenced off by a
+ * generation or aged out — the server has *decided* it is not this instance's
+ * turn. Falling back to the event on such a payload would put back the stale
+ * adoption the turn record exists to remove.
+ */
+function publishesTurnRecord(data: CurrentOutputResponse): boolean {
+  return data.structuredEvents?.dialogPendingMaxMs != null;
+}
+
+/**
+ * Adopt the turn this wait is about, if this poll shows one (Issue #1839,
+ * moved onto the turn record in #1930).
+ *
+ * ## What changed, and why the grace window is no longer the whole guard
+ *
+ * Before #1930 this read `lastEventType` / `lastEventAt` — the newest event of
+ * any kind — and refused anything older than {@link TURN_ADOPTION_GRACE_MS},
+ * because (in the words of that constant) structured events "are NOT fenced by
+ * generation on the way into `structuredEvents`", so a stale
+ * `user_prompt_submit` from a previous agent process could still be the last
+ * event on the wire. The bound was the only thing keeping such a record from
+ * gating a wait for ever.
+ *
+ * The server fences the turn now, and publishes null when it does. So an **open**
+ * turn is adopted whatever its age — which closes a hole the old reading had:
+ * a turn that opened ten minutes before this `wait` started, and is still
+ * running, used to be adopted only because its *newest* event was fresh. An
+ * agent that goes quiet mid-turn (thinking, a long tool call) has no fresh
+ * event, so the #1839 gate came down at exactly the moment a 529 storm would
+ * exploit it.
+ *
+ * A **closed** turn still has to have opened inside this wait's window, and the
+ * reason is the one the grace constant gives: `wait` does not know when `send`
+ * ran, so the last turn of a session that finished an hour ago must not gate a
+ * wait that has only just started. `commandmate wait` on an already-idle
+ * session therefore adopts nothing and completes on its first poll, exactly as
+ * it did before — #1975 measured that at 234/242/259 ms and it is the
+ * orchestrator's normal path.
  *
  * @param previous - the turn start adopted so far, or null
  * @returns the newest adopted turn start, or `previous` when nothing qualified
@@ -248,10 +312,46 @@ function adoptTurnStart(
   previous: number | null,
 ): number | null {
   const events = data.structuredEvents;
-  if (!events || events.lastEventAt == null || events.lastEventType == null) return previous;
-  if (!TURN_OPENING_EVENT_TYPES.has(events.lastEventType)) return previous;
-  if (events.lastEventAt < waitStartedAt - TURN_ADOPTION_GRACE_MS) return previous;
-  return previous === null || events.lastEventAt > previous ? events.lastEventAt : previous;
+  if (!events) return previous;
+
+  if (!publishesTurnRecord(data)) {
+    // A server older than #1930. Same reading this function has had since
+    // #1839, kept so a newer CLI pointed at an older server does not silently
+    // lose the gate.
+    if (events.lastEventAt == null || events.lastEventType == null) return previous;
+    if (!TURN_OPENING_EVENT_TYPES.has(events.lastEventType)) return previous;
+    if (events.lastEventAt < waitStartedAt - TURN_ADOPTION_GRACE_MS) return previous;
+    return previous === null || events.lastEventAt > previous ? events.lastEventAt : previous;
+  }
+
+  const openedAt = events.openedAt;
+  // Null covers every "there is no turn to adopt" case the server knows about:
+  // nothing reported, a previous generation, aged out, or a `stop` whose
+  // opening was never observed.
+  if (openedAt == null) return previous;
+  if (events.closedAt != null && openedAt < waitStartedAt - TURN_ADOPTION_GRACE_MS) {
+    return previous;
+  }
+  return previous === null || openedAt > previous ? openedAt : previous;
+}
+
+/**
+ * `structuredEvents.closedBy`, phrased for a diagnostic line (Issue #1930).
+ *
+ * The server's close-reason vocabulary and {@link COMPLETION_BASIS} answer two
+ * different questions — "why did the turn end" and "what did `wait` decide on"
+ * — and are deliberately printed side by side rather than folded together.
+ * `hook_stop` is the only place they meet: it is `closedBy: 'stop'` seen from
+ * the CLI's end. Everything else (`stale`, `scraper_evidence`, `session_end`,
+ * `generation`, `resync_idle`) is a reason the turn stopped being trusted, which
+ * is precisely what `wait` must NOT read as completion.
+ */
+function describeTurnClose(data: CurrentOutputResponse): string {
+  const events = data.structuredEvents;
+  if (!events) return 'turn=unknown';
+  const id = events.turnId ?? 'none';
+  const closedBy = events.closedBy ?? (events.openedAt != null ? 'open' : 'none');
+  return `turn=${id} closedBy=${closedBy}`;
 }
 
 /**
@@ -266,6 +366,154 @@ function turnSettled(data: CurrentOutputResponse, turnStartedAt: number | null):
   if (turnStartedAt === null) return true;
   const stoppedAt = data.lastStopEventAt;
   return stoppedAt != null && stoppedAt >= turnStartedAt;
+}
+
+/**
+ * The structured event that ends a turn (Issue #1975).
+ *
+ * The counterpart of {@link TURN_OPENING_EVENT_TYPES}, kept as a bare constant
+ * because the vocabulary a source declares in `capabilities.supportedEvents` is
+ * the wire's, not this build's: a tool that cannot say `stop` cannot release the
+ * hold below, so asking for the word by name is the whole of the check.
+ */
+const TURN_CLOSING_EVENT_TYPE = 'stop';
+
+/**
+ * How long `wait` will hold a composer frame open for an agent that has been
+ * handed a prompt it has not reported the end of (Issue #1975).
+ *
+ * The hold's *reason* is exact — see {@link outstandingPrompt} — so this is not
+ * a settling window standing in for evidence. It is the bound the contract of
+ * this Issue asks for: hooks are fail-open on every path, so a `Stop` that is
+ * simply lost (the receiver was restarted, the machine-wide
+ * `~/.copilot/settings.json` was rewritten by another server mid-session, the
+ * 4-second curl in the hook timed out) must not turn `wait` into a command that
+ * never returns. After this it completes on the frame alone, exactly as it did
+ * before this Issue, and says so.
+ *
+ * 60s is the same dwell {@link UNCLASSIFIED_DWELL_MS} uses for the same job, and
+ * it is ~55x the widest send-to-turn-open window measured for this Issue
+ * (2026-08-22, copilot 1.0.80 against an isolated server: 0.04s / 0.75s / 0.88s
+ * / 1.10s over four sends, the last of them a cold session start). `--timeout`
+ * and `--stall-timeout` below 60s still win, as they do for the unclassified
+ * dwell: this pre-empts long waits, it does not extend short ones.
+ */
+const PENDING_PROMPT_HOLD_MS = 60_000;
+
+/**
+ * Whether this tool's event source claims it can report both ends of a turn
+ * (Issue #1975).
+ *
+ * The gate that keeps the hold below off every path it has no evidence for.
+ * `structuredEvents.source.capabilities` is #1924's declaration, published to
+ * the CLI already, and the compatibility source a tool with no implementation
+ * gets (`src/lib/hooks/sources/legacy-relay.ts`) declares `supportedEvents: []`
+ * — so a tool that posts no hooks answers `false` here and takes precisely the
+ * pre-#1975 path. So does a server older than #1924, which sends no `source` at
+ * all.
+ *
+ * Both words are required. Without a turn-opening word nothing would ever open
+ * the turn this waits for; without `stop` nothing could ever close it, and the
+ * hold would only ever end at its own bound.
+ */
+function reportsTurnBoundaries(data: CurrentOutputResponse): boolean {
+  const declared = data.structuredEvents?.source?.capabilities?.supportedEvents;
+  if (!Array.isArray(declared)) return false;
+  return (
+    declared.includes(TURN_CLOSING_EVENT_TYPE) &&
+    declared.some(event => TURN_OPENING_EVENT_TYPES.has(event))
+  );
+}
+
+/** What the chat ledger could tell us about the newest prompt (Issue #1975). */
+type PromptLedgerRead =
+  /** Epoch ms of the newest prompt sent to this instance, or null if it has had none. */
+  | { readable: true; submittedAt: number | null }
+  /** The ledger could not be read. Not a verdict — see the call site. */
+  | { readable: false };
+
+/**
+ * When this (worktree, instance) was last handed a prompt (Issue #1975).
+ *
+ * `limit=1&unit=pairs` is "every row at or after the newest user message"
+ * (src/lib/db/chat-db.ts), which is the smallest query that is *guaranteed* to
+ * contain that message: plain `limit=1` returns the newest row of either role,
+ * and for a turn the agent has already answered that row is the assistant's.
+ *
+ * Scoped the same way the poll above is: `--instance` when the caller named one,
+ * otherwise the `cliToolId` the server resolved for that same poll. Asking
+ * unscoped would let a message sent to claude decide a wait on codex.
+ *
+ * Never throws. An unreadable ledger is not evidence that nothing was sent, so
+ * it is reported as such rather than as "nothing was sent" — the call site
+ * degrades to the pre-#1975 behaviour instead of holding on a guess.
+ */
+async function readNewestPromptAt(
+  client: ApiClient,
+  worktreeId: string,
+  options: WaitOptions,
+  data: CurrentOutputResponse,
+): Promise<PromptLedgerRead> {
+  const query = new URLSearchParams({ limit: '1', unit: 'pairs' });
+  if (options.instance) query.set('instance', options.instance);
+  else if (data.cliToolId) query.set('cliTool', data.cliToolId);
+
+  try {
+    const rows = await client.get<PromptMessageResponse[]>(
+      `/api/worktrees/${worktreeId}/messages?${query.toString()}`,
+    );
+    let newest: number | null = null;
+    for (const row of rows ?? []) {
+      if (row.role !== 'user') continue;
+      // ISO string on the wire (a JSON-serialized Date), so this is the only
+      // place the two clocks meet — and both sides of the comparison below are
+      // stamped by the server, so no CLI/server skew enters the verdict.
+      const at = Date.parse(row.timestamp);
+      if (Number.isNaN(at)) continue;
+      if (newest === null || at > newest) newest = at;
+    }
+    return { readable: true, submittedAt: newest };
+  } catch (error) {
+    console.error(
+      `Note: could not read the message ledger for ${worktreeId} ` +
+        `(${error instanceof Error ? error.message : String(error)}); ` +
+        'completion will be judged from the frame alone.',
+    );
+    return { readable: false };
+  }
+}
+
+/**
+ * Whether the newest prompt this instance was handed is still unanswered
+ * (Issue #1975).
+ *
+ * This is the distinction the whole Issue turns on, and it is a comparison of
+ * two server-stamped facts rather than a timer:
+ *
+ *   - **idle before this wait began** — the agent's `Stop` postdates the newest
+ *     prompt. Nothing is outstanding; `wait` completes on the first poll exactly
+ *     as it always has. An orchestrator waiting on a session that finished long
+ *     ago pays nothing.
+ *   - **`send` a moment ago** — the newest prompt postdates the last `Stop`
+ *     (or there has never been one). The agent has been given work and has not
+ *     reported finishing it, so a composer frame is "it has not started yet",
+ *     not "it is done".
+ *
+ * `wait` could not tell these apart before, because from `current-output` alone
+ * they are the same payload: in both, the last thing the agent said was the
+ * previous turn's `stop`, and `adoptTurnStart` adopts nothing. Measured against
+ * copilot 1.0.80 on 2026-08-22, the window in which that is true after a send is
+ * ~1s wide, and `wait`'s first poll is immediate — which is why the false
+ * completions came back in 0.3s with `basis=scraper_ready`, 3 times in 5.
+ *
+ * The fast-turn case falls out of the same comparison rather than needing a rule
+ * of its own: a turn that opens and closes between two polls leaves
+ * `lastEventType: 'stop'` (so no turn is adopted) but a `stop` that postdates
+ * the prompt — answered, and completed on the spot.
+ */
+function outstandingPrompt(data: CurrentOutputResponse, submittedAt: number): boolean {
+  const stoppedAt = data.lastStopEventAt;
+  return stoppedAt == null || stoppedAt < submittedAt;
 }
 
 /**
@@ -299,6 +547,13 @@ async function pollWorktree(
    * reported none (Issue #1839). See {@link adoptTurnStart}.
    */
   let turnStartedAt: number | null = null;
+  /**
+   * Whether the chat ledger is still worth asking (Issue #1975). Cleared by the
+   * first read that fails, after which this wait judges completion from the
+   * frame alone — the pre-#1975 behaviour — rather than re-reporting the same
+   * unreachable endpoint on every poll.
+   */
+  let promptLedgerReadable = true;
 
   while (true) {
     // Check timeout
@@ -360,12 +615,24 @@ async function pollWorktree(
         }
 
         // Default (agent mode): output prompt info and exit 10
+        //
+        // Issue #1898: the degraded `unclassified` payload carries no `options`
+        // — by construction, because nothing parsed the screen — but for a
+        // source whose approvals are answered by decision id it does carry
+        // `decisionOptions`, which ARE answerable (`respond <id> 1`). Reporting
+        // an empty list there told the caller a dialog was open and gave it
+        // nothing to do about it, which is the whole of #1898-3 seen from the
+        // pipeline's side.
+        const promptOptions =
+          (data.promptData.options as unknown[])?.length
+            ? (data.promptData.options as unknown[])
+            : (data.promptData.decisionOptions ?? []);
         const promptOutput: WaitPromptOutput = {
           worktreeId,
           cliToolId: data.cliToolId || 'claude',
           type: data.promptData.type || 'unknown',
           question: data.promptData.question || '',
-          options: (data.promptData.options as unknown[]) || [],
+          options: promptOptions,
           status: data.promptData.status || 'pending',
           ...(data.promptData.approvalTarget !== undefined && {
             approvalTarget: data.promptData.approvalTarget,
@@ -429,30 +696,35 @@ async function pollWorktree(
       // to burn its whole --timeout without ever mentioning it. Treat a
       // PERSISTENT unclassified frame as a stop reason of its own.
       //
-      // The dwell deliberately spans BOTH states that raise this flag, and the
-      // completion check below is suppressed while it is up. That is the whole
-      // point, and it is worth spelling out because the obvious reading is the
-      // wrong one:
+      // The dwell deliberately spans ALL THREE states that raise this flag, and
+      // the completion check below is suppressed while it is up. That is the
+      // whole point, and it is worth spelling out because the obvious reading is
+      // the wrong one. The server's definition (`isUnclassifiedFrame` in
+      // `src/lib/session/status-evidence.ts`, restated there by Issue #2011):
       //
-      //   isUnclassifiedActive = (running && default) || (ready && no_recent_output)
+      //   isUnclassifiedActive =
+      //     running && (default | unknown_frame | no_recent_output)
       //
-      // The second disjunct exists because a static unrecognised overlay DEGRADES
-      // into it — once the Auto-Yes poller stamps lastServerResponseTimestamp, a
-      // frame that stopped changing flips from `running`/`default` to
-      // `ready`/`no_recent_output` after STALE_OUTPUT_THRESHOLD_MS (5s). See the
-      // Issue #1497 note in current-output-builder.ts.
+      // `no_recent_output` is there because a static unrecognised overlay
+      // DEGRADES into it — once the Auto-Yes poller stamps
+      // lastServerResponseTimestamp, a frame that stopped changing flips from
+      // `running`/`default` after STALE_OUTPUT_THRESHOLD_MS (5s). `unknown_frame`
+      // is the same floor for a tool that opts out of the generic composer check
+      // (copilot, opencode), and says "this tool's own rules looked and read
+      // nothing". Both arrive about twelve times faster than this dwell. Letting
+      // the completion check claim one turned a stalled worker into `Completed`,
+      // which is worse than the timeout Issue #1708 complained about: exit 124
+      // stops a pipeline, exit 0 lets it merge. Measured before this guard: two
+      // unclassified polls followed by the degraded state returned SUCCESS.
       //
-      // So `ready` here does NOT mean "the agent finished". It means "we still
-      // cannot read this frame, and now its output has gone stale too" — and it
-      // arrives about twelve times faster than this dwell. Letting the completion
-      // check claim it turned a stalled worker into `Completed`, which is worse
-      // than the timeout Issue #1708 complained about: exit 124 stops a pipeline,
-      // exit 0 lets it merge. Measured before this guard: two unclassified polls
-      // followed by the degraded state returned SUCCESS.
-      //
-      // A genuine completion is `ready`/`input_prompt` — the agent back at its
-      // composer — which does not raise the flag at all, so it still exits
-      // SUCCESS on the first poll, unchanged.
+      // What is deliberately NOT in the set is `ready`/`input_prompt` with
+      // `statusEvidence: 'none'` — the agent back at its composer on a frame no
+      // tool-specific idle rule could vouch for. That frame WAS classified; what
+      // is missing is positive proof, which is a different question and §4 D1's
+      // to answer. Issue #1927 folded the two together and every idle Claude pane
+      // stopped completing (#2011). Whether `wait` should hold for evidence as
+      // well as classification is open, and any answer belongs in the same place
+      // as the rollout that produces the evidence — not here.
       if (data.isUnclassifiedActive === true) {
         if (unclassifiedSince === null) unclassifiedSince = Date.now();
         const dwellMs = Date.now() - unclassifiedSince;
@@ -499,16 +771,24 @@ async function pollWorktree(
       if (!data.isRunning && !everRunning) {
         console.error(
           `Not started: ${worktreeId} has no running ${data.cliToolId ?? 'agent'} session` +
-            `${options.instance ? ` for instance ${options.instance}` : ''}.`,
+            `${options.instance ? ` for instance ${options.instance}` : ''}` +
+            // Issue #1884: name the stage that chose the agent above. `wait` has
+            // no --agent to correct a mis-resolution with, so "no running claude
+            // session for instance opencode" was the entire evidence an operator
+            // got for a live agent reported as absent. `worktree-default` here
+            // means the instance is neither in the roster nor named after a
+            // tool; `client-fallback`, that the server is too old to resolve.
+            `${data.resolvedBy ? ` (resolvedBy=${data.resolvedBy})` : ''}.`,
         );
         return { exitCode: VerifyExitCode.NOT_STARTED };
       }
 
       // Issue #1708 narrowed Path B: `ready` is only a completion when the frame
-      // was actually understood. `ready`/`no_recent_output` is the degraded form
-      // of an unreadable overlay (see the note above), and reporting it as
-      // `Completed` is how a stalled worker gets merged. Path A is untouched — a
-      // session that went away really is finished, and carries no flag anyway.
+      // was actually understood. A structured `hook_stop` over an unreadable
+      // pane is the degraded form of an overlay nobody could parse (see the note
+      // above), and reporting it as `Completed` is how a stalled worker gets
+      // merged. Path A is untouched — a session that went away really is
+      // finished, and carries no flag anyway.
       if (!data.isRunning) {
         console.error(`Completed: ${worktreeId} (basis=${COMPLETION_BASIS.SESSION_GONE})`);
         return { exitCode: WaitExitCode.SUCCESS };
@@ -541,7 +821,7 @@ async function pollWorktree(
           console.error(
             `Waiting: ${worktreeId} is back at its composer, but its agent has not reported ` +
               `the end of this turn (turnStartedAt=${turnStartedAt}, ` +
-              `lastStopEventAt=${data.lastStopEventAt ?? 'none'}). ` +
+              `lastStopEventAt=${data.lastStopEventAt ?? 'none'}, ${describeTurnClose(data)}). ` +
               'Not reporting completion; inspect with ' +
               `\`commandmate capture ${worktreeId} --json\`.`,
           );
@@ -549,8 +829,61 @@ async function pollWorktree(
           continue;
         }
 
+        // Issue #1975: the same frame, one question further back. #1839's gate
+        // above can only fire once a turn has been ADOPTED, and `send` leaves a
+        // window ~1s wide in which nothing has been: the newest structured event
+        // is still the previous turn's `stop`, so `adoptTurnStart` takes nothing,
+        // `turnSettled` reads null as "settled", and the composer the agent has
+        // not touched yet is read as the composer it came back to. Measured
+        // 2026-08-22 against copilot 1.0.80 on an isolated server: 3 of 5
+        // send-then-wait runs came back in ~0.3s with `basis=scraper_ready` and
+        // no artefact on disk.
+        //
+        // So ask the ledger instead of the clock: has this instance been handed
+        // a prompt that the agent has not reported the end of? See
+        // {@link outstandingPrompt} for why that comparison is the one that
+        // separates "not started" from "finished", and
+        // {@link reportsTurnBoundaries} for why a tool that posts no hooks never
+        // reaches it.
+        let answeredNewestPrompt = false;
+        if (turnStartedAt === null && promptLedgerReadable && reportsTurnBoundaries(data)) {
+          const ledger = await readNewestPromptAt(client, worktreeId, options, data);
+          // One notice, then stop asking: a ledger that failed once will fail
+          // every poll, and the point of degrading is to stop paying for it.
+          promptLedgerReadable = ledger.readable;
+          if (ledger.readable && ledger.submittedAt !== null) {
+            if (outstandingPrompt(data, ledger.submittedAt)) {
+              const heldMs = Date.now() - startTime;
+              if (heldMs < PENDING_PROMPT_HOLD_MS) {
+                console.error(
+                  `Waiting: ${worktreeId} is at its composer, but the newest prompt sent to it ` +
+                    `has no reported end (sentAt=${new Date(ledger.submittedAt).toISOString()}, ` +
+                    `lastStopEventAt=${data.lastStopEventAt ?? 'none'}, ${describeTurnClose(data)}). ` +
+                    'Not reporting completion: the agent has not started this turn yet.',
+                );
+                await sleep(POLL_INTERVAL_MS);
+                continue;
+              }
+              console.error(
+                `Note: ${worktreeId} has been at its composer for ` +
+                  `${Math.round(heldMs / 1000)}s with the newest prompt still unreported by its ` +
+                  'agent. Its hooks are not answering; completing on the frame alone.',
+              );
+            } else {
+              answeredNewestPrompt = true;
+            }
+          }
+        }
+
+        // `hook_stop` on both branches that have one, and they are the same
+        // statement made from two records: the agent reported the end of the
+        // turn this wait is about. `scraper_ready` keeps its documented meaning
+        // — "the screen said so and nothing corroborated it" — which is now
+        // exactly the set of cases that reach it.
         const basis =
-          turnStartedAt === null ? COMPLETION_BASIS.SCRAPER_READY : COMPLETION_BASIS.HOOK_STOP;
+          turnStartedAt !== null || answeredNewestPrompt
+            ? COMPLETION_BASIS.HOOK_STOP
+            : COMPLETION_BASIS.SCRAPER_READY;
         console.error(`Completed: ${worktreeId} (basis=${basis})`);
         return { exitCode: WaitExitCode.SUCCESS };
       }
@@ -710,6 +1043,43 @@ export function createWaitCommand(): Command {
     .option('--require-work', 'After completion, run only the work-evidence gate; exit 21 when the worktree has no commits and no uncommitted changes')
     .option('--fail-on-upstream-fault', 'Exit 11 instead of 0 when the agent returns to its composer with an upstream API failure (529/limit/API Error) on the frame')
     .option('--token <token>', TOKEN_WARNING)
+    // Issue #1926 (design 規約 3): the unclassified dwell is a stop reason with
+    // no flag of its own, so `--help` is the only place a caller can find out
+    // that it exists — and the only place the interaction with --stall-timeout
+    // and --timeout can be stated. Leaving it to the guide means an operator
+    // debugging an unexpected exit 10 has nowhere local to look.
+    .addHelpText('after', `
+Unclassified frames (exit 10, Issue #1708):
+  A frame that is interactive but that the detection layer could not parse
+  raises isUnclassifiedActive. It is not an immediate stop reason: a capture
+  taken mid-repaint raises it for a single poll. Only after it has held for
+  60 s does wait exit 10 with {"type":"unclassified"}, and --on-prompt human
+  keeps waiting through it like any other prompt.
+
+  Distinct from statusEvidence: 'none', which says the verdict rests on no
+  positive proof — an idle composer no tool-specific rule vouched for is
+  classified but unproven, and wait completes on it (Issue #2011).
+
+  The 60 s dwell is a constant, not a flag. --timeout and --stall-timeout below
+  60 s therefore always win and return 124 instead: the dwell pre-empts long
+  waits, it never extends short ones. Inspect the raw pane with
+  \`commandmate capture <id> --pane\`; see also statusEvidence /
+  sessionStatusReason / lastKnownStatus in \`commandmate capture <id> --json\`.
+
+A prompt the agent has not answered yet (Issue #1975):
+  A composer frame right after a send looks exactly like a composer frame the
+  agent came back to. When the tool's event source declares it reports both
+  ends of a turn, wait therefore checks the chat ledger: if the newest prompt
+  sent to this instance postdates the agent's last reported Stop, the turn has
+  not been answered and wait keeps polling rather than reporting completion.
+
+  Like the dwell above this is a constant, not a flag: the hold ends after 60 s
+  with a note on stderr and a completion of basis=scraper_ready, so hooks that
+  stop answering cannot make wait hang, and --timeout / --stall-timeout below
+  60 s still win and return 124. A tool that posts no hooks (supportedEvents is
+  empty) never enters this path at all. The completion line says which record
+  decided it: basis=hook_stop when the agent reported the end of that turn.
+`)
     .action(async (worktreeIds: string[], options: WaitOptions) => {
       try {
         // [SEC4-04] Validate all worktree IDs

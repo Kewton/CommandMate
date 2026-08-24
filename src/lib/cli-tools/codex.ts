@@ -33,6 +33,7 @@ import {
   TUI_EXIT_WAIT_MS,
   CODEX_DIALOG_SETTLE_MS,
 } from '@/config/cli-tool-timing-config';
+import { SessionStartUnavailableError } from '../session/session-start-error';
 
 const logger = createLogger('cli-tools/codex');
 
@@ -151,11 +152,11 @@ export class CodexTool extends BaseCLITool {
    * @param worktreeId - Worktree ID
    * @param worktreePath - Worktree path
    */
-  async startSession(worktreeId: string, worktreePath: string, instanceId?: string): Promise<void> {
+  protected async launchSession(worktreeId: string, worktreePath: string, instanceId?: string): Promise<void> {
     // Check if Codex is installed
     const codexAvailable = await this.isInstalled();
     if (!codexAvailable) {
-      throw new Error('Codex CLI is not installed or not in PATH');
+      throw new SessionStartUnavailableError(this.name, 'Codex CLI is not installed or not in PATH');
     }
 
     const sessionName = this.getSessionName(worktreeId, instanceId);
@@ -399,6 +400,9 @@ export class CodexTool extends BaseCLITool {
         sessionName,
         message,
         cliToolId: 'codex',
+        // Issue #1933: the tool describes its own composer; the sender no
+        // longer keys three module-level tables on the id.
+        composer: this.describeComposer(),
       });
 
       // Issue #405: Invalidate cache after sending message

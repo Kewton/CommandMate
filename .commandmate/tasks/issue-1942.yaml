@@ -1,0 +1,96 @@
+version: 1
+title: "Issue #1942: CM_HOOK_* の子プロセス env 除去（S8 後半）と COPILOT_HOME 既定"
+goal: |
+  https://github.com/Kewton/CommandMate/issues/1942 を修正してください。
+
+  #1904（PR #1941）が scope 外だったため積み残した 2 件です。どちらも「既定値こそが危険」という同じ形。
+
+  ## 1. S8 後半 — `CM_HOOK_*` を子プロセス環境から除去する
+
+  方針書 §13.2 の S8 は「hook 設定に必要な値だけを env で渡し、**エージェントが起動する子プロセスへは
+  漏らさない**」を要求しています。#1904 は前半（`CM_HOOK_PORT` を launch line に載せ、生成コマンド側で
+  数値検証する）を実装しましたが、**後半（sanitizer 側での除去）が未実装**です。
+
+  - 対象: `src/lib/security/env-sanitizer.ts` の `SENSITIVE_ENV_KEYS`
+  - #1904 が `COMMANDMATE_HOOK_ENV_VARS`（`src/lib/hooks/sources/launch-command.ts`）を置いたので、
+    **sanitizer 側はこれを import すれば足ります**（綴りを 2 箇所に持たない ＝ #1882 の単一実装規律）。
+  - **import の向きが循環を作らないか確認すること。** `security` → `hooks` の依存が新設されるので、
+    逆向きの依存が既にあるなら型だけの共有モジュールへ切り出す等の判断が要ります。
+
+  ## 2. `tests/setup.ts` に `COPILOT_HOME` の既定が無い
+
+  `CODEX_HOME` / `CM_VERIFY_WORKTREE_INDEX_ROOT` には隔離用の既定がありますが、`COPILOT_HOME` には
+  ありません。`~/.copilot/` は**マシン共通の 1 本**（`configScope: 'global-singleton'`）なので、
+  既定が無いテストが 1 本でも実ファイルに到達すると**ユーザーの本番設定を書き換えます**。
+
+  現状は事故になっていません（#1904 の実装者が実測で確認済み: copilot の launch を実行するテストは
+  全て自前で `COPILOT_HOME` か `HOME` を stub しており、`terminal-route` / `api-send-cli-tool` は
+  `CopilotTool` 自体を mock していて実ファイルに到達しない）。**この実測が今も成り立つか裏を取り**、
+  そのうえで `CODEX_HOME` と同じ形で既定を置いてください。
+
+  ## 受入条件
+
+  - **変異注入 1**: `SENSITIVE_ENV_KEYS` から `CM_HOOK_*` の除去を外すと、子プロセス env に
+    `CM_HOOK_*` が現れることを assert するテストが**赤になる**こと。
+  - **変異注入 2**: `tests/setup.ts` の `COPILOT_HOME` 既定を外すと、`~/.copilot/` の実パスへ
+    到達しうることを検出するテストが**赤になる**こと。「既定を置いた」だけでは受入としません。
+  - `COMMANDMATE_HOOK_ENV_VARS` の綴りが**リポジトリ内で 1 箇所**であること（`grep` で確認し、
+    件数を commit message に書く）。
+  - `npm run lint` / `npx tsc --noEmit` / フル `npm run test:unit` が exit 0。
+
+  ## 実ファイルに触れない（厳守）
+
+  `~/.copilot/settings.json` と `~/.copilot/config.json` は**マシン共通**です。検証で触る場合は
+  **事前に sha256 を採り、終了後に必ず復元**してください。テストは `COPILOT_HOME` を使い捨てディレクトリへ
+  向けること。
+
+  ## 触ってよい範囲
+
+  `src/lib/security/**`・`src/lib/hooks/sources/launch-command.ts`・`tests/setup.ts`・
+  `tests/unit/security/**`・`tests/unit/hooks/**`・`tests/unit/config/**`。
+
+  **`vitest.config.ts`・`src/cli/**`・`src/**/__tests__/**` は触らないでください**
+  （#1939 / #1975 のワーカーが同時に編集しています）。
+
+  ## 作業ルール（厳守）
+
+  - **commit は 1 本にまとめる。** PR は作らない・push しない（オーケストレーターが行う）。
+  - **`CHANGELOG.md` と `docs/module-reference.md` を編集しないでください**（scope 外です）。
+    代わりに次の 2 ファイルを書いてください。どちらも `dev-reports/` 配下なので commit には入りません。
+    - `dev-reports/changelog/issue-1942.md` — `CHANGELOG.md` の `## [Unreleased]` にそのまま貼れる
+      **1 エントリ**（先頭は `- **<type>(<scope>): …** (#1942): …`）。1 行目にどの節
+      （`### Added` / `### Changed` / `### Fixed`）へ入るかをコメントで書く。
+    - `dev-reports/module-reference/issue-1942.md` — `docs/module-reference.md` の表に足す注記。
+      **既存行への追記を指示する場合は、その行が実在することを `grep -n '^| `<path>`' docs/module-reference.md`
+      で必ず確認してから書くこと**（前回のランで、存在しない行への追記を 4 件指示した実績があります）。
+  - **この契約に書いた方針は「推奨」であって命令ではない。** コードを読んで別の解のほうが正しいと
+    判断したら、そちらを採ってよい。ただし**逸脱した箇所と理由を commit message に明記すること**。
+  - **Issue 本文をコードで裏取りすること。** 本文と実測が食い違ったら**実測を正**とし、
+    どこがどう違ったかを commit message に書く。この Issue はオーケストレーター（私）が書いており、
+    過去のランでは自作 Issue の記述が実測と食い違った実績が複数あります。
+  - **`wait --verify` / `verify` の出力は 344 行で切られる。** 失敗の帰属を判断するときは必ず
+    `commandmate verify show <id>` で全文を見ること。
+  - **`wait --verify` の unit ゲートは素の `npm run test:unit` の約 9 倍の時間がかかる**
+    （62s ↔ 560s）。`src/lib/verification/gate-runner.ts:414` が `CI: 'true'` を渡し、
+    `vitest.config.ts` が `CI==='true'` で `fileParallelism:false` にするため。異常ではありません。
+  - **フル `npm run test:unit` の実行中にソースやテストを編集しないこと。** vitest の遅延 transform に
+    より「新しいテスト × 古いソース」が走り、実在しない赤が出ます。
+  - 作業が終わったら最終行に `IMPL_COMPLETED` とだけ出力すること。
+scope:
+  allow:
+    - "src/lib/security/**"
+    - "src/lib/hooks/sources/launch-command.ts"
+    - "tests/setup.ts"
+    - "tests/unit/security/**"
+    - "tests/unit/hooks/**"
+    - "tests/unit/config/**"
+  deny: []
+verify:
+  gates: [token-discipline, control-chars, claudemd-size, route-exports, lint, typecheck, unit]
+autoYes:
+  mode: allow-listed
+  allowPromptTypes: [yes_no, multiple_choice]
+  denyPatterns: []
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true

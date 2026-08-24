@@ -16,6 +16,7 @@ import { detectPrompt } from './detection/prompt-detector';
 import { resolveAutoAnswerWithPolicy } from './polling/auto-yes-resolver';
 import { getSessionAutoYesPolicy, invalidateSessionAutoYesPolicy } from './polling/auto-yes-policy';
 import { recordPolicySuppression } from './polling/auto-yes-suppression-state';
+import { evaluateAutoYesDialogGate } from './polling/auto-yes-dialog-gate';
 import { applyEventToActiveTask } from './tasks/task-transition-service';
 import { getDbInstance } from './db/db-instance';
 import { recordAnsweredPrompt, type RecordAnsweredPromptResult } from './db/chat-db';
@@ -391,6 +392,46 @@ export async function detectAndRespondToPrompt(
         instanceId,
         dialog: launchDialog,
         promptType: promptDetection.promptData.type,
+      });
+      return 'no_answer';
+    }
+
+    // 3.5. Issue #1928 (§4 D1 decision 4): the generic numbered-list inference is
+    // not enough to send an answer. `detectPrompt` above judges the ROWS, and the
+    // rows of an agent's own reply can be indistinguishable from a dialog's --
+    // opencode 1.18 answering "list three options and ask which one" is the
+    // reported case (#1896), and the `1` this poller sent in reply was not
+    // answering anything, it was SENT AS A USER UTTERANCE. What separates the two
+    // is position and chrome, which only the tool's own module knows, so the
+    // decision is delegated to `detectDialog` (the seam #1927 declared).
+    //
+    // Per tool, and only for tools whose dialogs were measured from their own
+    // live captures -- see AUTO_YES_DIALOG_GATE_DEFAULT_MODE. An ungated tool
+    // reaches `allowed: true` without being judged, which is the pre-#1928
+    // behaviour and the right one where nobody has measured anything.
+    //
+    // Recorded through the #1684 channel with the reason code #1924 landed for
+    // exactly this position, so `capture --json` and `cmate wait` can name the
+    // gap instead of showing a worker that silently went quiet.
+    const dialogGate = evaluateAutoYesDialogGate(
+      cliToolId,
+      promptDetection.promptData.type,
+      cleanOutput,
+    );
+    if (!dialogGate.allowed) {
+      recordPolicySuppression(worktreeId, cliToolId, instanceId, {
+        reason: 'unclassified-frame',
+        mode: null,
+        promptType: promptDetection.promptData.type,
+      });
+      logger.warn('poller:auto-yes-skipped-unclassified-frame', {
+        worktreeId,
+        cliToolId,
+        instanceId,
+        promptType: promptDetection.promptData.type,
+        dialogKind: dialogGate.dialog?.kind ?? null,
+        answerMode: dialogGate.dialog?.answerMode ?? null,
+        gateMode: dialogGate.mode,
       });
       return 'no_answer';
     }

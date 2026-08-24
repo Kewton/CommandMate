@@ -39,6 +39,7 @@ import { discardAgentEventState } from '@/lib/session/agent-event-state';
 import {
   SessionStartFailedError,
   SessionStartTimeoutError,
+  SessionStartUnavailableError,
   isSafeSessionStartError,
 } from '@/lib/session/session-start-error';
 
@@ -628,7 +629,7 @@ export async function startClaudeSession(
   // Check if Claude is installed
   const claudeAvailable = await isClaudeInstalled();
   if (!claudeAvailable) {
-    throw new Error('Claude CLI is not installed or not in PATH');
+    throw new SessionStartUnavailableError('Claude Code', 'Claude CLI is not installed or not in PATH');
   }
 
   const sessionName = getSessionName(worktreeId, instanceId);
@@ -760,6 +761,16 @@ export async function startClaudeSession(
       // dialog so a dialog still on screen is answered first.
       const errorPattern = findSessionErrorPattern(cleanOutput);
       if (errorPattern !== null) {
+        // Issue #2000 raised the push notification on this line. Issue #2009
+        // moved it up to `BaseCLITool.startSession`, which is the one method
+        // every tool inherits: six of the seven had no such line at all, and a
+        // seventh copy is how "only claude rings" happened in the first place.
+        // Nothing about what the reader receives changed — the error carries the
+        // tool name and the detected pattern, which is everything the
+        // notification was ever built from — and the sibling
+        // `SessionStartTimeoutError` below still deliberately does NOT notify
+        // (#1637: the session and its process are alive and the documented
+        // advice is to retry in a few seconds).
         throw new SessionStartFailedError('Claude Code', sessionName, errorPattern);
       }
     }

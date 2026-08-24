@@ -333,7 +333,82 @@ export interface AgentSourceCapabilities {
    * Claude silently misses copilot's window entirely.
    */
   readonly decisionTimeoutSeconds: number | null;
+  /**
+   * Whether a non-allow verdict on this source's permission hook means "a
+   * dialog is about to appear on the pane" (Issue #1924, §4 D3 decision 1).
+   *
+   * The judgement axis is **not** {@link AgentSourceCapabilities.supportedEvents}
+   * (DR2-014). That list is about what is *delivered*, and `pre_tool_use` is
+   * missing from codex, copilot and antigravity for reasons that have nothing to
+   * do with whether a dialog follows. The axis is: does this source register a
+   * permission hook (`PermissionRequest` / `PreToolUse` ->
+   * `/api/hooks/permission-request`), and is a non-allow answer on it a
+   * prediction that the agent will now ask a human?
+   *
+   * `true` for claude and codex. gemini registers no permission hook at all, so
+   * there is nothing to predict from. copilot registers one but fires it on
+   * every tool call and executes most of them immediately (#1901), so treating
+   * a non-allow as a dialog forecast files a prompt that never appears.
+   * antigravity registers one, but CommandMate is the adjudicator rather than a
+   * forecaster there. opencode is not hooks at all.
+   */
+  readonly permissionHookPredictsDialog: boolean;
+  /**
+   * Whether `session_start` can arrive *after* the `user_prompt_submit` that
+   * opened the turn (Issue #1924, §4 D3 decision 1).
+   *
+   * `true` for copilot alone, and measured rather than inferred: 20.813Z for
+   * `UserPromptSubmit` against 20.915Z for `SessionStart` (#1903, and the module
+   * comment of `../copilot/source`). The residual behaviour is exactly one
+   * point (DR1-017): on such a source a `session_start` seen after the turn
+   * opened must not become the displayed event. It closes no turn either way,
+   * so `false` only means the display is allowed to be overwritten.
+   */
+  readonly sessionStartMayArriveLate: boolean;
+  /**
+   * Whether delivering a verdict releases the prompt-waiting state by itself
+   * (Issue #1924, §4 D3 decision 1).
+   *
+   * `true` for opencode, where `permission.replied` arrives on the same stream
+   * (#1898) and is a positive statement that the dialog is gone. Every hook
+   * source answers `false`: a hook response body is written into a request
+   * nobody hears the end of, so the dialog on screen has to be released by
+   * something that can observe it.
+   */
+  readonly permissionReplyReleasesPrompt: boolean;
+  /**
+   * Where a frame-unique id for de-duplication comes from, or null when the
+   * source publishes none (Issue #1924, §4 D3 decision 1).
+   *
+   * Declares which id to use, not how to read it — extraction stays on the
+   * source's own {@link AgentEventSource} methods. `null` is the instruction to
+   * fall back to the time-window dedup that every push source uses today; it is
+   * the honest answer for a tool whose payloads carry no per-frame id, and the
+   * honest answer for one where nobody has looked yet.
+   */
+  readonly eventIdentity: 'permission-id' | 'tool-call-id' | 'message-id' | null;
+  /**
+   * How state is re-read after the transport drops, for the sources that have a
+   * transport that can drop (Issue #1924, §4 D3 decision 1).
+   *
+   * `'session-status-poll'` for opencode: `GET /session/status` answers whether
+   * the conversation is busy right now (#1900), which is what a reconnect needs
+   * in order to decide between re-arming a turn and synthesising the `stop` it
+   * missed. Push sources answer `'none'` — a hook that was dropped is gone, and
+   * there is nothing to poll.
+   */
+  readonly resync: SourceResync;
 }
+
+/**
+ * The value {@link AgentSourceCapabilities.resync} declares.
+ *
+ * Named rather than spelled inline because the reconnect loop that obeys it
+ * lives in `sources/opencode/subscription` and is imported *by* the source that
+ * declares it, so the value has to be handed across that edge as a parameter.
+ * A second inline copy of the union would be a second place to widen it.
+ */
+export type SourceResync = 'none' | 'session-status-poll';
 
 /**
  * Everything {@link AgentEventSource.prepareLaunch} is given (Issue #1846).
@@ -435,6 +510,30 @@ export interface AgentEventSource {
    * events return null and are counted — see `getUnknownEventTally`.
    */
   normalizeEvent(raw: RawAgentEvent): NormalizedAgentEvent | null;
+
+  /**
+   * This frame's own id — the value {@link AgentSourceCapabilities.eventIdentity}
+   * names — or null when the frame publishes none (Issue #1899).
+   *
+   * The capability declares *which* id de-duplication should use; this reads
+   * it, because only the source knows where it lives and the answer differs
+   * between frames of the same source. opencode alone shows all four shapes: an
+   * approval is asked under `properties.id` and answered under
+   * `properties.requestID` (different spellings for the same permission — see
+   * `./opencode/mappers`), a tool call is `part.callID`, a prompt is
+   * `info.id`, and `session.idle` carries `{ sessionID }` and nothing else.
+   *
+   * **Null is an ordinary answer, not a failure.** A source that declares
+   * `eventIdentity: null` answers null for every frame and falls back to the
+   * time window; a source that declares one still answers null for the frames
+   * that carry no id, and `classifyAgentEventDelivery` decides what that means
+   * per event word.
+   *
+   * Must never throw, for the same reason {@link normalizeEvent} must not: this
+   * runs on a live stream, and an unreadable id may cost the de-duplication but
+   * never the event.
+   */
+  eventIdentityOf(payload: Record<string, unknown>): string | null;
 
   /** Read this source's permission-request payload, or null when unreadable (S7). */
   parsePermissionRequest(payload: Record<string, unknown>): PermissionRequestPayload | null;

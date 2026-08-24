@@ -1,0 +1,155 @@
+version: 1
+title: "Issue #2000: 通知の分類を「出来事」から「要対応かどうか」へ切り替える"
+goal: |
+  https://github.com/Kewton/CommandMate/issues/2000 を実装してください。
+  Epic は #2002 で、1 本目の #1999（Auto-Yes 抑止）は develop `c35a1f11` にマージ済みです。
+
+  ## 未決事項 3 件は裁定済みです（Issue #2000 のコメント 2 本に全文）
+
+  1. **既存利用者の既定** → **新規購読のみ既定 OFF。既存の購読行は 1 行も変えない。**
+     マイグレーションで一律 0 にすると「黙って通知が減る」＝故障に見えるため。
+  2. **検証ゲート不合格の通知対象** → **契約タスク以外の verify だけ**。
+     `/orchestrate` のワーカーが回すゲート不合格では鳴らさない（並列 10 本で 10 回鳴るのは
+     Epic の目的と正面衝突する）。
+  3. **第 3 の種別を足すか** → **足さない方向を推奨（確定ではない）**。Issue の提案表自体が
+     要対応 / 参考情報の 2 バケツで、プロンプト待ちも失敗も同じ「あなたが動く必要がある」側。
+     `enabled_prompt` を「要対応」として意味を広げ、カラム追加を避けるのが最小。
+     **実装中に「失敗だけ切りたい」需要が具体的に見つかったら `enabled_failure` を足す判断に
+     切り替えて構いません。** その場合は理由を書いてください。
+
+  ## 私の下調べ（推奨であって確定ではない。コードで裏取りし、食い違えば実測を正とする）
+
+  develop `c35a1f11` で読んだ結果です。**そのまま信じず必ず裏取りしてください。**
+  食い違いは commit message の「下調べとの食い違い」節に書いてください。
+
+  ### 【重要】既定値は DB の DEFAULT ではなくコードのリテラル — マイグレーションは要らないはず
+
+  `upsertPushSubscription()`（`src/lib/db/push-subscriptions-db.ts:80` 付近）の INSERT は
+
+      VALUES (?, ?, ?, ?, ?, 1, 1, ?, ?, ?)
+
+  と `enabled_prompt` / `enabled_completion` を **1 でハードコード**しています。
+  v41 の `DEFAULT 1`（`src/lib/db/migrations/v41-push-subscriptions.ts`）は**この経路では
+  一度も使われません**。したがって裁定 1 は**このリテラルを `1, 0` にするだけ**で達成でき、
+  マイグレーションも既存行の UPDATE も不要のはずです。**裏取りしてください。**
+
+  スキーマの `DEFAULT 1` を実態に合わせるかは任意です。SQLite は `ALTER COLUMN` で DEFAULT を
+  変えられずテーブル再構築が要るので、**割に合わないなら変えずにコメントで意図を残して構いません**。
+  どちらを採ったか書いてください。
+
+  なお同関数の `ON CONFLICT(endpoint) DO UPDATE` は **per-type 設定を意図的に温存**します
+  （docblock: 「a browser re-subscribe must not silently reset the user's toggles」）。
+  つまり**既存端末は登録し直しても新既定が効きません**。これは裁定 1 と同じ方向なので
+  変えないでください。
+
+  ### 失敗シグナル 3 つは実在します（すべて実測で確認済み）
+
+  | シグナル | 場所 | 備考 |
+  |---|---|---|
+  | 上流障害 | `src/lib/session/current-output-builder.ts:1303` `matchUpstreamFault(realtimeSnippet)` → `:1380` `upstreamFault` | 実装は `src/lib/detection/upstream-faults.ts` |
+  | 検証ゲート結果 | `src/lib/verification/gate-runner.ts:194` `FlakyOutcome = 'flaky' \| 'fail'`、`:679` | |
+  | セッション起動失敗 | `src/lib/session/session-start-error.ts:79` `SessionStartFailedError`、throw は `src/lib/session/claude-session.ts:763` | |
+
+  **ただし「シグナルが在る」と「通知を発火できるエッジが在る」は別です。**
+  とくに `upstreamFault` は `buildCurrentOutput` の**読み取り経路**で計算されるだけで、
+  状態遷移の観測点ではありません（クライアントが status を叩いたときに評価される）。
+  **同じ障害で毎回鳴らないためのエッジ判定が要ります。** #1786 の `observeWaitingEdge` /
+  `src/lib/session/waiting-episode-state.ts` が「エッジを 1 回だけ観測する」既存の型なので、
+  **同型のものを使えるか、無ければどう作るかを設計して根拠を書いてください。**
+  「毎 poll 鳴る」実装は絶対に入れないでください（Epic の目的と正反対です）。
+
+  ### 裁定 2 の判定材料 — `taskId` の有無が discriminator（実測で確認済み）
+
+  `src/app/api/worktrees/[id]/verify/route.ts:66-99` は `payload.taskId` があるときだけ
+  契約タスクに attach します。CLI の `verify` は `taskId` を送りません。
+  **これが「人間が直接回した verify か」の判定に使えるかを裏取りしてください。**
+  違う判定材料が正しければそちらを採り、理由を書いてください。
+
+  ### 正常完了の通知経路
+
+  `src/lib/polling/response-checker.ts:952` の `void notifyPushSubscribers({... kind:'completion' ...})`
+  が唯一の発火点で、worktree による分岐も成否による分岐もありません。
+  `grep -rna "notifyPushSubscribers" src/` は 3 箇所で、うち 2 箇所は #1999 が gate を入れた
+  prompt 経路です。**この 3 箇所が全部かを自分で確認してください**（grep の少数件は
+  「これで全部」の証拠になりません）。
+
+  ### UI と i18n
+
+  - 設定画面: `src/components/notifications/NotificationsSettings.tsx`（`useTranslations('notifications')`）
+  - 辞書: `locales/ja/notifications.json` / `locales/en/notifications.json`。
+    `types.promptWaiting`「応答待ち」/ `types.completion`「セッション完了」/
+    `push.*` の本文テンプレートが該当。**ja / en 両方**を行動ベースに変えてください。
+  - **next-intl のモックはテストで補間 param を落とすことがあります**。補間値をアサートする
+    テストを書く場合は実辞書で確認してください（過去に偽 PASS を出しています）。
+  - `src/lib/push/push-sender.ts` は **CJS（`dist/server`）で読まれるため ESM-only の
+    next-intl を import できません**。本文の i18n は辞書の静的 import ＋自前補間です。
+    既存のやり方に合わせてください。
+
+  ## 受入条件（Issue 本文より。すべて満たすこと）
+
+  - 検証ゲート不合格（**契約タスク以外**）・上流障害・セッション起動失敗が**通知される**
+  - 正常完了の通知が**新規購読で既定 OFF**（既存購読行は 1 行も変わらない）
+  - 通知本文から**成功と失敗が読んで区別できる**
+  - 設定画面の文言が**行動ベース**（ja / en 両方）
+  - 既存の `enabled_prompt` / `enabled_completion` を持つ購読行が**壊れない**
+  - #1999 の Auto-Yes 抑止（`src/lib/push/prompt-push-gate.ts`）を**壊さない**。
+    要対応バケツの「プロンプト待ち」は**抑止判定を通った後のもの**を指します。
+
+  ## 設計上の要求
+
+  1. **同じ障害で鳴り続けないこと。** エッジ判定の設計と根拠を書いてください。
+  2. **判定は理由コードつきでログに出す**（発見可能性の原則:
+     `docs/design/discoverability-principle.md`）。「鳴らない」と「壊れている」を運用者が
+     区別できるようにしてください。
+  3. **失敗通知が Auto-Yes 中に洪水にならないこと**を確認してください。#1999 は prompt だけを
+     gate しています。失敗が同じ経路で毎回飛ぶなら Epic の目的を損ないます。
+
+  ## 検証（必須）
+
+  - **変異注入で空振り緑を反証してください。** 少なくとも:
+    (a) 新既定 OFF を 1 に戻すと新規テストが赤
+    (b) 失敗シグナル 3 つそれぞれについて、検知を殺すと対応するテストだけが赤
+    (c) 契約タスクの verify も通知するように変えると、裁定 2 のテストが赤
+    (d) エッジ判定を外す（毎回鳴る）と、重複抑止のテストが赤
+    各変異を 1 つずつ入れて対象テストのみ実行し、元に戻して再確認。結果を commit message に表で。
+  - 宣言ゲート 11 本すべて（`verify.gates`）。
+
+  ## 成果物
+
+  - 単一 commit（PR は作らないでください。私が作ります）。
+  - **`CHANGELOG.md` は直接編集せず** `dev-reports/changelog/issue-2000.md` に断片を 1 行で。
+    形式は厳密に `- **<type>(<scope>): <subject>** (#2000): <body>`
+    （`(#2000)` は太字の**外側**、1 エントリ 1 行、改行なし）。
+  - module-reference の追記指示は `dev-reports/module-reference/issue-2000.md` に
+    （`docs/module-reference.md` は直接編集しない）。行キーの実在を `grep` で確認してから書く。
+  - commit message に「意図的な逸脱」「下調べとの食い違い」「変異注入」の節を必ず入れる。
+  - 完了したら最後に `IMPL_COMPLETED` とだけ出力してください。
+scope:
+  allow:
+    - "src/lib/db/**"
+    - "src/lib/push/**"
+    - "src/lib/polling/**"
+    - "src/lib/session/**"
+    - "src/lib/verification/**"
+    - "src/lib/detection/upstream-faults.ts"
+    - "src/app/api/push/**"
+    - "src/app/api/worktrees/**"
+    - "src/components/notifications/**"
+    - "src/app/more/**"
+    - "src/types/**"
+    - "locales/**"
+    - "tests/unit/**"
+    - "tests/integration/**"
+    - "dev-reports/changelog/**"
+    - "dev-reports/module-reference/**"
+    - "docs/design/**"
+  deny: []
+verify:
+  gates: [token-discipline, control-chars, claudemd-size, route-exports, build-cli, build-server, lint, build, typecheck, integration, unit]
+autoYes:
+  mode: allow-listed
+  allowPromptTypes: [yes_no, multiple_choice]
+  denyPatterns: []
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true

@@ -4,8 +4,13 @@
  * Verifies that sendUserMessage performs the full send + history-recording flow
  * (savePendingAssistantResponse -> orphan detection -> send -> createMessage ->
  * orphan delete -> updateLastUserMessage -> clearInProgressMessageId ->
- * startPolling) and preserves the image / copilot / model-command branches that
+ * startPolling) and preserves the image / model-command branches that
  * previously lived inline in POST /api/worktrees/[id]/send.
+ *
+ * Issue #1906 removed the copilot branch: it reached past
+ * `CopilotTool.sendMessage` into `sendKeys` + a delayed Enter, flattening `\n+`
+ * to spaces on the way. The tmux mocks below stay so the assertions can say that
+ * nothing here drives tmux any more.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -57,7 +62,9 @@ vi.mock('@/lib/assistant-response-saver', () => ({
   savePendingAssistantResponse: (...args: unknown[]) => mockSavePendingAssistantResponse(...args),
 }));
 
-// Mock tmux (copilot direct-send path)
+// Issue #1906: these exist only as negative controls. Nothing in
+// send-user-message.ts imports them any more (the tmux import allowlist pins
+// that), so any call here would mean the bypass came back.
 const mockSendKeys = vi.fn().mockResolvedValue(undefined);
 const mockSendSpecialKeys = vi.fn().mockResolvedValue(undefined);
 vi.mock('@/lib/tmux/tmux', () => ({
@@ -68,11 +75,6 @@ vi.mock('@/lib/tmux/tmux', () => ({
 const mockInvalidateCache = vi.fn();
 vi.mock('@/lib/tmux/tmux-capture-cache', () => ({
   invalidateCache: (...args: unknown[]) => mockInvalidateCache(...args),
-}));
-
-// Keep the copilot inter-key delay effectively instant
-vi.mock('@/config/copilot-constants', () => ({
-  COPILOT_SEND_ENTER_DELAY_MS: 0,
 }));
 
 // Import after mocking
@@ -227,15 +229,54 @@ describe('sendUserMessage (Issue #1028)', () => {
     });
 
     expect(sendModelCommand).toHaveBeenCalledWith('wt-1', 'gpt-5', 'copilot');
-    // Copilot uses the direct sendKeys + separate Enter path (#559), not sendMessage
-    expect(mockSendKeys).toHaveBeenCalledWith('copilot-session', 'do it', false);
-    expect(mockSendSpecialKeys).toHaveBeenCalledWith('copilot-session', ['Enter']);
-    expect(mockInvalidateCache).toHaveBeenCalledWith('copilot-session');
+    // Issue #1906: copilot takes the same `ICLITool.sendMessage` path as every
+    // other tool. The old branch typed the body with a raw `sendKeys` and never
+    // entered `CopilotTool.sendMessage`, so `waitForPrompt` (#1886's folder-trust
+    // answer), `SELECTION_LIST_COMMANDS` (#1895) and the #1471 submit
+    // verification were all unreachable in production.
+    expect(tool.sendMessage).toHaveBeenCalledWith('wt-1', 'do it', 'copilot');
+    expect(mockSendKeys).not.toHaveBeenCalled();
+    expect(mockSendSpecialKeys).not.toHaveBeenCalled();
+    expect(mockInvalidateCache).not.toHaveBeenCalled();
     expect(mockCreateMessage).toHaveBeenCalledWith(
       mockDb,
       expect.objectContaining({ role: 'user', content: 'do it', cliToolId: 'copilot' })
     );
     expect(result).toMatchObject({ ok: true });
+  });
+
+  /**
+   * Issue #1906. The removed branch did `content.replace(/\n+/g, ' ')` before
+   * typing, so a contract preamble or a Markdown body arrived at copilot as one
+   * line — measured in the Issue as composer `❯ line one line two line three`.
+   *
+   * Measured on copilot 1.0.80 (private tmux socket, 200x50): `send-keys` with
+   * literal newlines leaves the body multi-line in the composer, a SEPARATE
+   * Enter submits all of it, and the transcript echo keeps the line breaks. So
+   * the flattening bought nothing and the body now goes through verbatim.
+   */
+  it('sends a copilot message with its newlines intact (no flattening)', async () => {
+    const tool = makeTool({ getSessionName: vi.fn(() => 'copilot-session') });
+    mockGetTool.mockReturnValue(tool);
+    const body = 'line one\nline two\nline three';
+
+    const result = await sendUserMessage(mockDb, {
+      worktreeId: 'wt-1',
+      content: body,
+      cliToolId: 'copilot',
+      instanceId: 'copilot',
+    });
+
+    expect(result).toMatchObject({ ok: true });
+    expect(tool.sendMessage).toHaveBeenCalledWith('wt-1', body, 'copilot');
+    const sent = tool.sendMessage.mock.calls[0][1] as string;
+    expect(sent).toContain('\n');
+    expect(sent).not.toBe('line one line two line three');
+    // History records the same unflattened text.
+    expect(mockCreateMessage).toHaveBeenCalledWith(
+      mockDb,
+      expect.objectContaining({ content: body })
+    );
   });
 
   it('returns { ok: false, stage: "model" } and does not send when the /model command fails', async () => {

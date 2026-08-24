@@ -195,6 +195,35 @@ export function boundModel(value: string | null): string | null {
   return value.slice(0, MAX_EVENT_DETAIL_LENGTH);
 }
 
+/** Longest frame id accepted as a de-duplication key (Issue #1899). */
+export const MAX_EVENT_IDENTITY_LENGTH = 128;
+
+/**
+ * Characters a frame id may contain.
+ *
+ * Every id the six sources publish is an opaque token in this alphabet —
+ * opencode's `per_…` / `que_…` / `msg_…` / `toolu_…`, Claude's `toolu_…`. The
+ * allowlist is not about display (nothing renders these); it is about what
+ * becomes a key in a long-lived server-side map.
+ */
+const EVENT_IDENTITY_PATTERN = /^[A-Za-z0-9._:-]+$/;
+
+/**
+ * A frame id fit to be a de-duplication key, or null (Issue #1899, §10 DR4-001).
+ *
+ * **Discarded, never truncated**, and that is the whole difference from
+ * {@link boundDetail}. A detail is prose that is shown to a human, so cutting
+ * it long is better than losing it. An identity is compared for equality: a
+ * truncated id would collide with every other id sharing its prefix, which
+ * turns an over-long value into a way of making unrelated frames look like
+ * repeats of each other. Answering null instead puts the frame back on the
+ * time window, which is where it was before this Issue.
+ */
+export function readEventIdentity(value: string | null): string | null {
+  if (value === null || value.length > MAX_EVENT_IDENTITY_LENGTH) return null;
+  return EVENT_IDENTITY_PATTERN.test(value) ? value : null;
+}
+
 /** Type guard for a JSON object (not an array, not null). */
 export function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);

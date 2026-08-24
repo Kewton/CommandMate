@@ -1,0 +1,139 @@
+version: 1
+title: "Issue #1927: 検出をツール別モジュールへ分割し no_recent_output の ready を廃止する（Phase 3 の土台）"
+goal: |
+  https://github.com/Kewton/CommandMate/issues/1927 を実装してください。**Epic #1921 Phase 3 の土台**で、
+  #1928 / #1929 はこの上に乗ります。Epic 全体で 2 番目に重い変更です。
+
+  ## Issue 本文の「実装内容」節に誤りが 1 件あります（引き継ぎ節が正）
+
+  **`StatusVerdict { tool, verifiedAgainst, detect(frame): StatusVerdict, … }` の `StatusVerdict` という型は
+  実在しません。** develop `ccca5005` で実測（`grep -rn '\bStatusVerdict\b' src/` は 0 件）。実在するのは:
+
+  | 型 | 所在 |
+  |---|---|
+  | `StatusDetectionResult` | `src/lib/detection/status-detector.ts` |
+  | `ScraperVerdict` / `MergedStatusVerdict` | `src/lib/session/current-output-builder.ts` |
+  | `StructuredStatusVerdict` | `src/lib/session/agent-event-state.ts` |
+
+  `evidence` は `ScraperVerdict` に載っています（#1924 で着地済み）。`ToolStatusDetector` の戻り値型を
+  何にするかは**あなたが決めてください**。既存型を使うのか新設するのか、決めた理由を commit message に書くこと。
+
+  ## 順序制約（これを逆にするとガードが無音で外れます・DR2-003）
+
+  **必ずこの順で行ってください:**
+
+  1. **先に** `mergeStructuredStatus`（`src/lib/session/current-output-builder.ts`）の
+     「構造化 ready × scraper running」上書き分岐を **「scraper が `evidence:'positive'` のときだけ
+     `isUnclassifiedActive` を下ろす」**に改訂し、**#1708 ガードの pin を merged レベルに置く**。
+  2. **その後で** `no_recent_output` 由来の `ready` を廃止する（`running` ＋ `evidence:'none'`）。
+
+  逆順にすると、`no_recent_output` が `ready` を出さなくなった瞬間に上書き分岐が発火しなくなり、
+  **#1708 のガードが赤くならないまま無効化されます**。1 の完了を（変異注入で）確認してから 2 に進むこと。
+
+  ## 守ること
+
+  - **`input_prompt × evidence:'none'` の wire 値は `ready` のまま**（`running` に倒さない、DR3-002）。
+    `running` にすると `isProcessing` 経由で `ls` / sidebar / トースト / demo-video の probe が一斉に変わります。
+  - **公開関数のシグネチャは不変**（`detectSessionStatus` / `detectPrompt` / `getCliToolPatterns`）。
+  - **`STATUS_REASON.UNKNOWN_FRAME = 'unknown_frame'` の定義と使用の両方を本 Issue で入れる。**
+    `STATUS_REASON` の実体は `src/lib/detection/status-detector.ts:100`（実測）。#1924 の scope 外だったため未着地です。
+  - **ツール単位のキルスイッチ**（env か settings で、当該ツールの `input_prompt` evidence 判定を旧挙動へ戻す）と、
+    **観測条件**（倒す前後で `unclassified_frames` の記録件数が有意に増えない。倒す前に観測だけで走らせる）。
+    キルスイッチで旧挙動へ戻せることをテストで固定すること。
+  - fixture は**実 TUI キャプチャのみ**（claude / copilot は 200x1000、opencode は 80x200）。
+    各ツールに「**処理中語彙を 1 語変えたフレーム → evidence none**」の**変異ケースを必須**にすること
+    （緑の非空虚性はこれでしか証明できません）。
+
+  ## copilot の完了証拠について（#1979 で確定済み。方針書は更新済みです）
+
+  方針書の初版にあった「copilot は `●` 応答行の直後に空の composer」は **1.0.80 の実測と食い違い、
+  既に撤回されています**（#1979 / PR #1980 で方針書を訂正済み）。
+
+  - composer `❯` は 200x1000 ペインの **999 行目に固定**で、応答本文の**約 930〜970 行下**
+  - **composer は生成中も同じ形で描かれる**ので、「空の composer」は完了証拠になりません
+
+  copilot の肯定的完了証拠は**ペイン最下行のステータスバー**で、`readCopilotStatusBar()` /
+  `COPILOT_IDLE_STATUS_PATTERN` / `COPILOT_WORKING_STATUS_PATTERN` として **#1885 で着地済み**です
+  （fixture: `tests/unit/lib/detection/fixtures/copilot-live-1885/`）。**窓で照合してはいけません** —
+  `status-vocabulary-in-response.txt` は copilot 自身が ` ● Working esc interrupt` を本文として印字した
+  実フレームで、窓照合だと完了済みセッションが恒久的に `running` に貼りつきます。
+
+  ## この Issue で**やらないこと**
+
+  - **`docs/design/multi-agent-state-architecture.md` を編集しない。** Phase 2 の実測による訂正 3 件は
+    **#1979 で着地済み**（develop `561d6706`）。方針書は現在正しい状態です。scope 外です。
+  - **`getStatusCaptureLines` を `ICLITool.captureSpec()` へ寄せない。** Issue 本文は「P4-d と調整」と
+    書いていますが、`ICLITool` の拡張は **#1933（Phase 4）**の作業で、いま手を入れると衝突します。
+    寄せずに現状のままにし、#1933 への申し送りを commit message に書いてください。
+  - **`detectDialog` の中身と Auto-Yes の接続は #1928 の作業です。** `ToolStatusDetector` に
+    `detectDialog` の**口（インタフェース）**を用意するところまでが本 Issue で、ツール別の判定規則と
+    `response-checker.ts` への接続は入れないでください。入れると #1928 が空になります。
+
+  ## 受入条件
+
+  - `detectSessionStatus` / `detectPrompt` のシグネチャ不変、既存テスト緑
+    （期待値の更新は `no_recent_output` 関連に限ること。それ以外のテストを書き換えたら、
+    1 件ずつ「なぜ変える必要があったか」を commit message に書く）。
+  - **#1708 ガードの merged レベル pin が緑、かつ上書き分岐を元に戻すと赤**（変異注入）。
+  - キルスイッチで旧挙動に戻せることがテストで固定されている。
+  - 各ツールの fixture に肯定ケースと変異ケースが揃っている。
+  - `npm run lint` / `npx tsc --noEmit` / フル `npm run test:unit` / `npm run build` が exit 0。
+
+  ## 触ってよい範囲
+
+  `src/lib/detection/**`・`src/lib/session/current-output-builder.ts`・`src/lib/session/worktree-status-helper.ts`・
+  `src/config/**`・`tests/unit/detection/**`・`tests/unit/lib/**`・`tests/unit/session/**`・
+  `tests/unit/guards/**`・`tests/unit/skills/orchestrate-monitor/fixtures/**`・`tests/fixtures/**`。
+
+  **次の 5 ファイルは触らないでください**（別 PR #1986 が同時に編集中）:
+  `tests/unit/lib/tmux-capture-invalidation.test.ts` / `tests/unit/components/app-version-display.test.tsx` /
+  `tests/unit/api/hooks-claude-done-delegation.test.ts` /
+  `tests/unit/config/eslint-i18n-module-scope-literal.test.ts` / `tests/unit/ws-server-cleanup.test.ts`。
+
+  ## 作業ルール（厳守）
+
+  - **commit は 1 本にまとめる。** PR は作らない・push しない（オーケストレーターが行う）。
+  - **`CHANGELOG.md` と `docs/module-reference.md` を編集しない。** 代わりに
+    `dev-reports/changelog/issue-1927.md`（`## [Unreleased]` にそのまま貼れる 1 エントリ。1 行目に
+    どの節へ入るかをコメント）と `dev-reports/module-reference/issue-1927.md`（表に足す注記）を書くこと。
+    **既存行への追記を指示する場合は `grep -n '^| `<path>`' docs/module-reference.md` で実在を確認してから**書くこと。
+  - **この契約の方針は「推奨」。** 別解が正しいと判断したら採ってよいが、**逸脱と理由を commit message に明記**すること。
+  - **Issue 本文をコードで裏取りすること。** 食い違ったら**実測を正**とし、commit message に書く。
+    この Issue は私が書いており、過去のランで自作 Issue の記述が実測と食い違った実績が複数あります。
+  - **`wait --verify` / `verify` の出力は 344 行で切られる。** 帰属の判断には `commandmate verify show <id>` で全文を見ること。
+  - **`wait --verify` の unit ゲートは素の `npm run test:unit` の約 9 倍かかる**（62s ↔ 560s）。
+    `gate-runner.ts:414` が `CI:'true'` を渡し `fileParallelism:false` になるためで、異常ではありません。
+  - **フル `npm run test:unit` の実行中にソースやテストを編集しないこと**（vitest の遅延 transform で偽の赤が出る）。
+  - **別ワークツリーと同時にフル `npm run test:unit` を回さないこと**（#1985。30s サブプロセスガードが
+    その条件では小さく、無関係な 44 件が落ちます）。
+  - 作業が終わったら最終行に `IMPL_COMPLETED` とだけ出力すること。
+
+  ## 実 tmux を触る検証の追加ルール（厳守）
+
+  - **必ず `tmux -L <専用socket>` で行う。** `-L` / `-S` は `$TMUX` より優先されます。フラグ無しの `tmux` は
+    **ユーザーの本番サーバ**に届きます。
+  - **`kill-server` を `-L` 無しで書かない。** 後始末は `kill-session -t '=<name>:'`（完全一致）で。
+  - **`TMUX_TMPDIR` を隔離手段に使わない**（`$TMUX` があると無視される）。
+  - **`bind-key` / `unbind-key` / `set-option -g` を既定サーバへ撃たない**（サーバグローバル）。
+scope:
+  allow:
+    - "src/lib/detection/**"
+    - "src/lib/session/current-output-builder.ts"
+    - "src/lib/session/worktree-status-helper.ts"
+    - "src/config/**"
+    - "tests/unit/detection/**"
+    - "tests/unit/lib/**"
+    - "tests/unit/session/**"
+    - "tests/unit/guards/**"
+    - "tests/unit/skills/orchestrate-monitor/fixtures/**"
+    - "tests/fixtures/**"
+  deny: []
+verify:
+  gates: [token-discipline, control-chars, claudemd-size, route-exports, lint, typecheck, unit]
+autoYes:
+  mode: allow-listed
+  allowPromptTypes: [yes_no, multiple_choice]
+  denyPatterns: []
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true

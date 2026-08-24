@@ -25,7 +25,11 @@ export const STATUS_TEXT_COLOR: Record<ChangedFile['status'], string> = {
   modified: 'text-warning-foreground',
   deleted: 'text-danger-foreground',
   renamed: 'text-info',
-  untracked: 'text-teal-600 dark:text-teal-400',
+  // #1892: teal -> the accent scale, keeping untracked distinct from the four
+  // status colors. `--accent-*` is one fixed scale in both themes (unlike the
+  // status tokens), so the light/dark pair stays explicit — same shape as
+  // VerificationPane's `text-accent-600 dark:text-accent-400`.
+  untracked: 'text-accent-600 dark:text-accent-400',
   unmerged: 'text-warning-foreground',
 };
 

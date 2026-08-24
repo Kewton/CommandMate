@@ -28,6 +28,15 @@ import {
   canSubscribeToPush,
 } from '@/lib/pwa/push-client';
 
+/**
+ * The two stored toggles, named after their columns.
+ *
+ * Issue #2000 changed what they mean without changing their shape: `prompt` is
+ * now the whole "you need to act" bucket (a prompt waiting, a failed
+ * verification, an upstream fault, a session that could not start) and
+ * `completion` is the optional "for information" one. The copy under
+ * `notifications.types.*` is what says so to the reader.
+ */
 interface Prefs {
   prompt: boolean;
   completion: boolean;
@@ -59,7 +68,13 @@ export function NotificationsSettings() {
   const [publicKey, setPublicKey] = useState<string | null>(null);
   const [permissionDenied, setPermissionDenied] = useState(false);
   const [endpoint, setEndpoint] = useState<string | null>(null);
-  const [prefs, setPrefs] = useState<Prefs>({ prompt: true, completion: true });
+  /**
+   * Issue #2000: mirrors `NEW_SUBSCRIPTION_DEFAULTS` on the server. Only visible
+   * in the window before the GET lands (the body renders a spinner until then),
+   * but a placeholder that disagreed with the server would flash the wrong
+   * switch position on a device that has just registered.
+   */
+  const [prefs, setPrefs] = useState<Prefs>({ prompt: true, completion: false });
 
   const subscribed = endpoint !== null;
 

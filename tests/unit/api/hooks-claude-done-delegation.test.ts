@@ -22,6 +22,13 @@ import { runMigrations } from '@/lib/db/db-migrations';
 import { createTask, getMessages, getTask, listTaskEvents, upsertWorktree } from '@/lib/db';
 import { parseTaskContract } from '@/lib/tasks/contract-parser';
 import { clearAgentStopEvents, getLastStopEventAt } from '@/lib/session/agent-event-state';
+// Issue #1977: imported here rather than `await import(...)`-ed inside the
+// first `it()`. `vi.mock` is hoisted above every import, so the stubs below
+// still apply, and the route's remaining module load (agent-event-service
+// 270ms + claude-session 219ms + @/lib/db 166ms) is paid once at collection
+// instead of being charged to whichever test happens to run first — where it
+// was the entire cost of that test.
+import { POST as postClaudeDoneRoute } from '@/app/api/hooks/claude-done/route';
 
 declare module '@/lib/db/db-instance' {
   export function setMockDb(db: Database.Database): void;
@@ -45,6 +52,27 @@ vi.mock('@/lib/db/db-instance', () => {
     },
   };
 });
+
+// Issue #1977: `broadcastMessage` is one function, but importing the module it
+// lives in costs 924ms of this file's 987ms route import — measured by timing
+// each of the route's seven imports in a cold worker:
+//
+//   @/lib/ws-server 924ms | @/lib/hooks/agent-event-service 270ms
+//   @/lib/session/claude-session 219ms | @/lib/db 166ms
+//   @/lib/claude-output, @/lib/conversation-logger, the route body: ~0ms
+//
+// Inside ws-server the weight is `@/lib/cli-tools/manager` (1046ms measured on
+// its own), which eagerly constructs every CLI tool implementation. None of
+// that is reachable from this file: no WebSocket client is connected, so the
+// real `broadcastMessage` iterates an empty room map and returns.
+//
+// Paying it made the first `it()` the whole file's cost — 740ms in a loaded
+// full run, 1.98s under deliberate process pressure — for a module-load side
+// effect nothing here asserts on. The stub keeps the call site honest: the
+// route still calls `broadcastMessage`, and a rename would fail here.
+vi.mock('@/lib/ws-server', () => ({
+  broadcastMessage: vi.fn(),
+}));
 
 vi.mock('@/lib/tmux/tmux', () => ({
   hasSession: vi.fn(() => Promise.resolve(true)),
@@ -75,8 +103,7 @@ scope:
 }
 
 async function postClaudeDone(body: unknown) {
-  const { POST } = await import('@/app/api/hooks/claude-done/route');
-  return POST(
+  return postClaudeDoneRoute(
     new Request('http://localhost/api/hooks/claude-done', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },

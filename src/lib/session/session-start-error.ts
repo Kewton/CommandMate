@@ -34,6 +34,17 @@ export const SESSION_STARTING_CODE = 'SESSION_STARTING';
 /** Code for a session that started and then reported a terminal error. */
 export const SESSION_START_FAILED_CODE = 'SESSION_START_FAILED';
 
+/**
+ * Code for a start that could not even be attempted — the CLI is not on PATH.
+ *
+ * Issue #2009: every one of the seven tools already detects this, and every one
+ * of them threw a bare `Error`, so nothing downstream could tell "the binary is
+ * missing" (install it) from "tmux refused" (something else is wrong) from "it
+ * is merely slow" (wait). The code is what lets the ONE notification decision in
+ * `lib/push/failure-push-notifier` answer all three differently.
+ */
+export const SESSION_START_UNAVAILABLE_CODE = 'SESSION_START_UNAVAILABLE';
+
 /** The codes {@link isSafeSessionStartError} recognises. */
 const SAFE_CODES: readonly string[] = [SESSION_STARTING_CODE, SESSION_START_FAILED_CODE];
 
@@ -101,6 +112,37 @@ export class SessionStartFailedError extends Error {
 }
 
 /**
+ * The CLI tool is not installed, so no session could be attempted.
+ *
+ * Issue #2009. The message defaults to the wording `POST /api/worktrees/:id/send`
+ * used to compose at the HTTP layer, so a tool that has nothing more useful to
+ * say keeps the body its callers already read; a tool that DOES (copilot ships
+ * an install hint) passes its own.
+ *
+ * Deliberately NOT in {@link SAFE_CODES}: that list is #1637's exception to
+ * SEC-SF-002 for `startClaudeSession`'s catch, and widening it would change
+ * which messages that catch lets past. Nothing throws this from inside that
+ * try block — claude's own install check runs before it — so membership would
+ * buy nothing and cost the reader a reason to re-audit #1637.
+ */
+export class SessionStartUnavailableError extends Error {
+  /** @see SESSION_START_UNAVAILABLE_CODE */
+  readonly code = SESSION_START_UNAVAILABLE_CODE;
+
+  /**
+   * @param toolName - Display name of the CLI tool (e.g. `Codex CLI`)
+   * @param message - Tool-specific wording; defaults to the generic advice
+   */
+  constructor(
+    readonly toolName: string,
+    message = `${toolName} is not installed. Please install it first.`
+  ) {
+    super(message);
+    this.name = 'SessionStartUnavailableError';
+  }
+}
+
+/**
  * Whether `error` reports a session that is still initializing.
  *
  * @param error - Value caught from a `startSession()` call
@@ -120,6 +162,21 @@ export function isSafeSessionStartError(
 ): error is SessionStartTimeoutError | SessionStartFailedError {
   const code = readErrorCode(error);
   return code !== undefined && SAFE_CODES.includes(code);
+}
+
+/**
+ * Whether `error` reports a CLI tool that is not installed (Issue #2009).
+ *
+ * Duck-typed on `code` for the reason the module docblock gives: the thrower
+ * (seven separate tool modules) and the reader (the push notifier, the API
+ * route) never share a class identity under bundling.
+ *
+ * @param error - Value caught from a `startSession()` call
+ */
+export function isSessionStartUnavailableError(
+  error: unknown
+): error is SessionStartUnavailableError {
+  return readErrorCode(error) === SESSION_START_UNAVAILABLE_CODE;
 }
 
 function readErrorCode(error: unknown): string | undefined {

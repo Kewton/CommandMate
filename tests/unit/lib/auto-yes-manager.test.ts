@@ -862,8 +862,16 @@ describe('auto-yes-manager', () => {
       setAutoYesEnabled('wt-codex-mc', 'codex', true);
       startAutoYesPolling('wt-codex-mc', 'codex');
 
-      // Mock: captureSessionOutput returns a multiple_choice prompt
-      const promptOutput = 'Select an option:\n\u276F 1. Yes\n  2. No';
+      // Mock: captureSessionOutput returns a multiple_choice prompt.
+      //
+      // Issue #1928: the footer row is now load-bearing. Auto-Yes answers a
+      // numbered list only where the tool's own `detectDialog` vouched for it,
+      // and codex's rule is its `Press enter to confirm …` footer (measured in
+      // `codex-live-1628/approval-run-command.txt`). Without it this frame is
+      // three rows of text that happen to be numbered — which is exactly the
+      // shape #1896 reported, so it must NOT be answered.
+      const promptOutput =
+        'Select an option:\n\u276F 1. Yes\n  2. No\n\n  Press enter to confirm or esc to cancel';
       vi.mocked(captureSessionOutput).mockResolvedValue(promptOutput);
       vi.mocked(sendKeys).mockResolvedValue(undefined);
       vi.mocked(sendSpecialKeys).mockResolvedValue(undefined);

@@ -166,10 +166,13 @@ describe('SELECTION_LIST_REASONS Set', () => {
     expect(SELECTION_LIST_REASONS.has(STATUS_REASON.CODEX_PAGER)).toBe(true);
     // Issue #1829: codex's hooks review screens, whose only exits are `t`/`esc`.
     expect(SELECTION_LIST_REASONS.has(STATUS_REASON.CODEX_HOOKS_REVIEW)).toBe(true);
+    // Issue #1893: opencode's permission dialog — a ←/→ button strip that a
+    // typed option number does not drive.
+    expect(SELECTION_LIST_REASONS.has(STATUS_REASON.OPENCODE_PERMISSION_PROMPT)).toBe(true);
   });
 
-  it('should have exactly 7 entries', () => {
-    expect(SELECTION_LIST_REASONS.size).toBe(7);
+  it('should have exactly 8 entries', () => {
+    expect(SELECTION_LIST_REASONS.size).toBe(8);
   });
 
   it('should not contain unrelated reasons', () => {
@@ -181,11 +184,13 @@ describe('SELECTION_LIST_REASONS Set', () => {
 describe('detectSessionStatus - Copilot selection_list detection', () => {
   it('should detect Copilot selection list and return waiting status', () => {
     const output = [
-      'Select Model',
-      'Search models...',
-      '❯ gpt-4o',
-      '  gpt-4o-mini',
-      '  claude-3.5-sonnet',
+      '   Recommended models',
+      ' ❯ Auto                       —          —',
+      '   GPT-5.6 Luna               328K       Medium',
+      ' ──────────────────────────────────────────────',
+      ' ❯  Search models…',
+      ' ──────────────────────────────────────────────',
+      ' ↑/↓ to navigate · enter to select · esc to cancel',
     ].join('\n');
 
     const result = detectSessionStatus(output, 'copilot');
@@ -195,13 +200,31 @@ describe('detectSessionStatus - Copilot selection_list detection', () => {
     expect(result.hasActivePrompt).toBe(false);
   });
 
-  it('should NOT detect copilot_selection_list when cliToolId is claude (negative test)', () => {
-    // Even if the output contains Copilot selection list text,
-    // with cliToolId='claude', it should NOT trigger copilot_selection_list
+  it('should NOT detect a selection list from the picker header alone (Issue #1895)', () => {
+    // The shape this test used to assert as a POSITIVE. `Select Model` and
+    // `Search models...` are words copilot writes in its answers, and a session
+    // was reported `waiting` for the rest of its life for having said them. Only
+    // the key-hint footer at the bottom of the pane decides now. The live frame
+    // is `copilot-picker-1895/picker-vocabulary-in-response.txt`.
     const output = [
       'Select Model',
       'Search models...',
       '❯ gpt-4o',
+      '  gpt-4o-mini',
+      '  claude-3.5-sonnet',
+    ].join('\n');
+
+    const result = detectSessionStatus(output, 'copilot');
+    expect(result.reason).not.toBe(STATUS_REASON.COPILOT_SELECTION_LIST);
+  });
+
+  it('should NOT detect copilot_selection_list when cliToolId is claude (negative test)', () => {
+    // Even if the output contains a Copilot picker footer,
+    // with cliToolId='claude', it should NOT trigger copilot_selection_list
+    const output = [
+      '   Recommended models',
+      ' ❯  Search models…',
+      ' ↑/↓ to navigate · enter to select · esc to cancel',
     ].join('\n');
 
     const result = detectSessionStatus(output, 'claude');

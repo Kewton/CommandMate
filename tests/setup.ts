@@ -1,8 +1,50 @@
 // Vitest setup file
-import { beforeAll, afterAll, afterEach, vi } from 'vitest';
+import { beforeAll, afterAll, afterEach, expect, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import '@testing-library/jest-dom/vitest';
+import {
+  REAL_SHELL_TEST_TIMEOUT_MS,
+  startsRealSubprocess,
+} from './helpers/real-shell-budget';
+
+// Issue #1950: give tests that start a real subprocess a budget that matches
+// what they actually do.
+//
+// This runs once per test file, before collection, so `vi.setConfig` here is
+// the file's default rather than a per-test override: an `it()` that states its
+// own timeout still wins, which is how `compose` keeps its 300_000 and how a
+// future test can opt back down.
+//
+// Membership is read off the file's own source instead of a path list, because
+// a list is a thing that goes stale the first time somebody writes a new test
+// that shells out. The cost is one `readFileSync` per test file — ~974 reads
+// spread across the worker pool, against a suite whose baseline is 66s — and
+// only the ~7% of files that match go on to change their budget.
+//
+// Why this cannot be expressed in vitest.config.ts: `testTimeout` there is
+// global or per-`projects` entry, and splitting the family into its own project
+// changes the pool the files run in. The budget is the fix; the pool is not
+// (serializing the family was measured at 3x the wall clock and rejected).
+// See tests/helpers/real-shell-budget.ts for the measurements.
+const currentTestPath = expect.getState().testPath;
+if (currentTestPath !== undefined) {
+  let source = '';
+  try {
+    source = readFileSync(currentTestPath, 'utf8');
+  } catch {
+    // A file vitest can run but this process cannot read is not a case worth
+    // failing the suite over; it simply keeps the default budget.
+    source = '';
+  }
+  if (startsRealSubprocess(source)) {
+    vi.setConfig({
+      testTimeout: REAL_SHELL_TEST_TIMEOUT_MS,
+      hookTimeout: REAL_SHELL_TEST_TIMEOUT_MS,
+    });
+  }
+}
 
 // Issue #1760: keep agent config generation out of the developer's home.
 //
@@ -13,6 +55,47 @@ import '@testing-library/jest-dom/vitest';
 // here rather than per file because the default is what makes it dangerous.
 // A test that cares about the path sets its own value; this only fills a gap.
 process.env.CODEX_HOME ??= join(tmpdir(), 'commandmate-test-codex-home');
+
+// Issue #1942: the same hazard, for the tool that has no per-session escape.
+//
+// `~/.copilot/settings.json` is where copilot reads its hooks from, and it is
+// the ONLY place: the source declares `configScope: 'global-singleton'` because
+// copilot has no `--settings` flag. `writeCopilotHookSettings` therefore writes
+// one file for the whole machine, and `COPILOT_HOME` is the single override
+// that moves it. A test that starts a copilot session without setting the
+// variable edits the developer's live copilot configuration — merged into,
+// backed up over, and re-pointed at whatever port that run happened to use.
+//
+// Measured before adding this line, so it is a fence rather than a fix: the
+// full `tests/unit` suite was run once with `HOME` redirected to an empty
+// sentinel directory and `COPILOT_HOME` unset. No `.copilot` was created there
+// at all — every copilot test sets `COPILOT_HOME` or `HOME` for itself today,
+// and `terminal-route` / `api-send-cli-tool` mock `CopilotTool` outright. The
+// default is here for the test written next month, which will inherit the
+// isolation without knowing the hazard exists.
+//
+// Blank counts as absent, unlike CODEX_HOME's `??=` above: `resolveSafeDirectory`
+// reads `''` as unset and answers `~/.copilot`, so an empty value left by an
+// isolated runner would route straight back to the file this line is closing.
+// An explicitly chosen directory still wins, and a test that redirects itself
+// with `vi.stubEnv` or a bare assignment still wins over this.
+//
+// Scoped by worker pid, unlike CODEX_HOME's and CM_VERIFY_WORKTREE_INDEX_ROOT's
+// single shared paths, because this default has a real writer and the file it
+// writes is the contended one. `launch-contract-1846` stubs HOME but not
+// COPILOT_HOME, so it lands here — and `writeCopilotHookSettings` MERGES into
+// whatever is already at that path, takes a `.cmate.lock` it will decline to
+// write without, and leaves a `.cmate-backup`. Two checkouts running the suite
+// at once (this repo routinely runs five) would be reproducing the exact
+// machine-global collision the isolation exists to prevent, one directory
+// further down. Grouped under one parent so the whole family is `rm -rf`-able.
+if ((process.env.COPILOT_HOME ?? '').trim() === '') {
+  process.env.COPILOT_HOME = join(
+    tmpdir(),
+    'commandmate-test-copilot-home',
+    String(process.pid)
+  );
+}
 
 // Issue #1873: keep worktree-index claims out of the developer's home.
 //

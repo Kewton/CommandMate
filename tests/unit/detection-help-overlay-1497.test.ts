@@ -13,14 +13,20 @@
  * @vitest-environment node
  */
 
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect } from 'vitest';
 import { detectSessionStatus } from '@/lib/detection/status-detector';
+import { IDLE_EVIDENCE_ENV_VAR } from '@/config/detection-evidence-config';
+import { isUnclassifiedFrame } from '@/lib/session/status-evidence';
 import { buildClaudeHelpOverlayFrame } from '../fixtures/claude-help-overlay';
 
 const HELP_FRAME = buildClaudeHelpOverlayFrame();
 // Stamped by the Auto-Yes poller (auto-yes-poller.ts); older than the 5s
 // STALE_OUTPUT_THRESHOLD_MS so the time-based heuristic fires.
 const STALE_TS = new Date(Date.now() - 60_000);
+
+afterEach(() => {
+  delete process.env[IDLE_EVIDENCE_ENV_VAR];
+});
 
 describe('Issue #1497: real /help overlay classification (detectSessionStatus)', () => {
   it('with no lastOutputTimestamp: running/default (unclassified — hatch gate open)', () => {
@@ -30,10 +36,17 @@ describe('Issue #1497: real /help overlay classification (detectSessionStatus)',
     expect(st.hasActivePrompt).toBe(false);
   });
 
-  it('with a stale lastOutputTimestamp: degrades to ready/no_recent_output (the frame that hid the hatch)', () => {
+  it('with a stale lastOutputTimestamp: running/no_recent_output, still with no evidence', () => {
+    // Issue #1927 (§4 D1 決定 3) abolished the `ready` this used to publish. A
+    // frame that has not repainted for five seconds has produced no completion
+    // evidence, and `ready` was the one word that must not be said on none —
+    // it is what let `wait` report a stalled worker as Completed. The reason
+    // code is kept for diagnosis and the hatch stays open either way, which is
+    // what #1497 needed from this branch in the first place.
     const st = detectSessionStatus(HELP_FRAME, 'claude', STALE_TS);
-    expect(st.status).toBe('ready');
+    expect(st.status).toBe('running');
     expect(st.reason).toBe('no_recent_output');
+    expect(st.evidence).toBe('none');
     expect(st.hasActivePrompt).toBe(false);
   });
 
@@ -50,8 +63,20 @@ describe('Issue #1497: real /help overlay classification (detectSessionStatus)',
     // so widening isUnclassifiedActive to no_recent_output cannot leak the hatch
     // to a real idle prompt.
     const idleFrame = 'Some earlier output\n────────────\n❯\n';
+    process.env[IDLE_EVIDENCE_ENV_VAR] = 'claude=enforce';
     const st = detectSessionStatus(idleFrame, 'claude', STALE_TS);
     expect(st.status).toBe('ready');
     expect(st.reason).toBe('input_prompt');
+    // Issue #1927: the WIRE value is what #1497 depended on and it is unchanged
+    // (DR3-002 keeps `input_prompt` at `ready`). What did change is the second
+    // reading of it: this synthetic frame carries neither of Claude's measured
+    // idle proofs — no `✻ <Verb> for <N>s` completion marker, no startup banner
+    // — so under `enforce` the composer row alone does not count as evidence.
+    // Asked for explicitly because #2011 put claude back to `observe`.
+    expect(st.evidence).toBe('none');
+    // Issue #2011: and the hatch STILL stays shut, which is the whole of #1497's
+    // non-regression. The frame was classified; what is missing is proof that
+    // the pane is idle, and those are two different questions.
+    expect(isUnclassifiedFrame(st.status, st.reason)).toBe(false);
   });
 });

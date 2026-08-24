@@ -1,0 +1,60 @@
+version: 1
+title: "Issue #1927 再裁定: tests/unit 直下の detection-*.test.ts 3 本を scope に入れ直す（確認のみ）"
+goal: |
+  **追加の実装は不要です。** commit `9df208a9` の内容・判断・実測をすべて受領しました。
+
+  - `ToolStatusVerdict` を新設した判断を承認します。既存 3 型を却下した理由——特に
+    「`ScraperVerdict` の `thinking` は `GENERATING_REASONS` からの派生で `current-output-builder` の
+    関心。検出層に持たせると**同じ事実の 2 つ目の生産者ができる**」——は、このリポジトリが #1882 以来
+    守っている軸そのものです。
+  - `mergeStructuredStatus` の改訂を先、`no_recent_output` の `ready` 廃止を後、という順序も守られています。
+  - `detectDialog` を optional な口として用意し `run-detection.ts` で `?? (() => null)` に倒したのは、
+    #1928 の余地を正しく残した形です。
+
+  ## この送信の目的は scope の取り直しだけです
+
+  **私の `scope.allow` が 3 ファイル分足りませんでした。** 契約に `tests/unit/detection/**` と書きましたが、
+  次の 3 本は `tests/unit/` **直下**にあり（`detection/` ディレクトリの中ではない）、glob が一致しませんでした:
+
+      tests/unit/detection-copilot-generating-1885.test.ts
+      tests/unit/detection-help-overlay-1497.test.ts
+      tests/unit/detection-opencode-interrupt-1894.test.ts
+
+  いずれも本 Issue が当然触るべきファイルで、**あなたの落ち度ではありません**。今回 scope に追加しました。
+
+  ## やること
+
+  - `git status` を見て、`.commandmate/tasks/` 配下以外に未コミットの変更が無いことを確認する。
+  - **ファイルを 1 つも変更しない。** 新しい commit も作らない。
+  - 最終行に `VERIFY_ONLY_ACK` とだけ出力して終了する。
+
+  未コミットの変更が残っていた場合だけ `--amend` で畳んでから `VERIFY_ONLY_ACK` を出力してください。
+scope:
+  allow:
+    - "src/lib/detection/**"
+    - "src/lib/session/current-output-builder.ts"
+    - "src/lib/session/worktree-status-helper.ts"
+    - "src/config/**"
+    - "tests/unit/detection/**"
+    - "tests/unit/detection-copilot-generating-1885.test.ts"
+    - "tests/unit/detection-help-overlay-1497.test.ts"
+    - "tests/unit/detection-opencode-interrupt-1894.test.ts"
+    - "tests/unit/lib/**"
+    - "tests/unit/session/**"
+    - "tests/unit/guards/**"
+    - "tests/unit/skills/orchestrate-monitor/fixtures/**"
+    - "tests/fixtures/**"
+  deny: []
+verify:
+  # [オーケストレーターの意図的な絞り込み] unit を外している。
+  # 直前の run 375 で unit は exit 0 / 557.1s で通っており、対象ツリーは 1 バイトも変わっていない。
+  # 落ちたのは scope ゲートのみ（私の glob 漏れ 3 ファイル）。もう一度 10 分回しても新しい情報が出ない。
+  # unit の最終裁定は PR の CI で行う。
+  gates: [token-discipline, control-chars, claudemd-size, route-exports, lint, typecheck]
+autoYes:
+  mode: allow-listed
+  allowPromptTypes: [yes_no, multiple_choice]
+  denyPatterns: []
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true

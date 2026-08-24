@@ -21,6 +21,11 @@
  * @module lib/hooks/permission-request-payload
  */
 
+import {
+  collectPatchMatchTexts,
+  type ToolInputNormalization,
+} from './tool-input-normalization';
+
 /** `hook_event_name` this receiver accepts. Anything else is not ours to judge. */
 export const PERMISSION_REQUEST_EVENT_NAME = 'PermissionRequest';
 
@@ -51,6 +56,22 @@ export interface PermissionRequestPayload {
   permissionMode: string | null;
   /** `addRules` candidates Claude offered. Recorded, never a decision input. */
   permissionSuggestions: unknown[] | null;
+  /**
+   * Non-null when {@link toolInput} is not the shape the agent sent
+   * (Issue #1902).
+   *
+   * Optional and null for every parser but copilot's, which is the only one
+   * measured receiving a string `tool_input` — copilot 1.0.80's `Edit` sends
+   * the whole apply-patch envelope as one. See
+   * `lib/hooks/tool-input-normalization` for what the rewrite is and why the
+   * deny patterns are applied to the patch's action headers rather than to its
+   * body.
+   *
+   * Carried on the payload rather than inferred from the object's shape, so
+   * that {@link collectToolInputMatchTexts} is told what it is looking at
+   * instead of sniffing for a `patch` key a real tool could one day send.
+   */
+  toolInputNormalization?: ToolInputNormalization | null;
 }
 
 function readString(source: Record<string, unknown>, key: string): string | null {
@@ -140,12 +161,30 @@ const PRIMARY_TOOL_INPUT_KEYS: Record<string, readonly string[]> = {
  *
  * @param toolName - `tool_name` from the payload
  * @param toolInput - `tool_input` from the payload
+ * @param normalization - Set when `toolInput` was rewritten from something that
+ *   was not an object (Issue #1902); null or omitted for a payload the agent
+ *   sent as an object, which is every tool but copilot's `Edit`
  * @returns Texts to match, never empty for a non-empty input
  */
 export function collectToolInputMatchTexts(
   toolName: string,
-  toolInput: Record<string, unknown>
+  toolInput: Record<string, unknown>,
+  normalization?: ToolInputNormalization | null
 ): string[] {
+  if (normalization) {
+    const raw = toolInput[normalization.key];
+    if (typeof raw === 'string' && raw !== '') {
+      // The tool-name table cannot help here: the agent sent no named
+      // arguments at all, so the surface comes from the string itself.
+      return normalization.reason === 'string-tool-input-as-patch'
+        ? collectPatchMatchTexts(raw)
+        : [raw];
+    }
+    // The record and the input disagree — something rewrote one without the
+    // other. Fall through to the whole-input fallback rather than trusting
+    // either: over-matching costs a dialog, under-matching costs the protection.
+  }
+
   const keys = PRIMARY_TOOL_INPUT_KEYS[toolName];
   if (keys) {
     const texts = keys

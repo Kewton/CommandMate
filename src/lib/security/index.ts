@@ -37,7 +37,13 @@ export type { CidrRange } from './ip-restriction'
 export { isPathSafe, validateWorktreePath, resolveAndValidateRealPath } from './path-validator'
 
 // env-sanitizer.ts
-export { SENSITIVE_ENV_KEYS, sanitizeEnvForChildProcess } from './env-sanitizer'
+export {
+  SENSITIVE_ENV_KEYS,
+  AGENT_CORRELATION_ENV_KEYS,
+  COMMANDMATE_HOOK_ENV_PREFIX,
+  isStrippedChildProcessEnvKey,
+  sanitizeEnvForChildProcess,
+} from './env-sanitizer'
 
 // sanitize.ts
 export {

@@ -1,0 +1,114 @@
+version: 1
+title: "Issue #1968: ワークツリーの .env を表示・編集する専用「Env Manager」UI（PC/スマホ）"
+goal: |
+  https://github.com/Kewton/CommandMate/issues/1968 を実装してください。
+
+  ## 何を作るのか
+
+  ワークツリー内の環境変数ファイル（`.env` / `.env.local` 等）を、Web GUI から安全に表示・編集できる
+  専用 UI。**PC とスマートフォン（レスポンシブ / PWA）の両方**に対応します。
+
+  現状 `.env` は `EXCLUDED_PATTERNS` でファイルツリーから除外され、`EDITABLE_EXTENSIONS` にも
+  入っていません（シークレット誤露出の防止）。**この一般ファイルツリー側のセキュリティ仕様は
+  維持したまま**、マスキング・構文検証・専用 API を持つ別 UI として提供します。
+
+  ## 受入条件（Issue 本文のチェックリストすべて）
+
+  - [ ] ワークツリー画面から「Env Manager（環境変数）」を開ける
+  - [ ] `.env` の内容を **Key-Value 形式と Raw テキスト形式**の両方で閲覧・編集・保存できる
+  - [ ] 値がデフォルトでマスク表示され、👁️ アイコンで個別に表示/非表示を切り替えられる
+  - [ ] **PC 版とスマートフォン版の両方で崩れなく直感的に操作できる**
+  - [ ] `.env.example` / `.env.sample` があれば、未定義キーの補完サジェストが出る
+  - [ ] 不正な構文や危険な制御文字の入力時に適切なバリデーションエラーが出る
+  - [ ] 一般のファイルツリー（`EXCLUDED_PATTERNS`）のセキュリティ仕様を壊さない
+  - [ ] 単体テスト・統合テストが追加されている
+
+  ## セキュリティ要求（最重要。ここを外すと機能ごと差し戻します）
+
+  1. **パストラバーサル対策を徹底すること** — `isPathSafe` / `resolveAndValidateRealPath`
+     （`src/lib/security/path-validator.ts`）を使う。**worktree の外に出られないことを
+     テストで固定してください**（`../` / 絶対パス / シンボリックリンク経由）。
+  2. **編集対象のファイル名をクライアントの自由入力にしないこと。** 許可する名前を
+     サーバ側の allowlist（`.env` / `.env.local` / `.env.*` の妥当な範囲）で決める。
+  3. **値をログに出さないこと。** エラーログにも値を含めない（キー名までにする）。
+  4. **`EXCLUDED_PATTERNS` を緩めないこと。** 一般ファイルツリー経由で `.env` が読めるように
+     なってはいけません。既存の除外が効き続けることをテストで固定してください。
+
+  ## 実装上の注意（私の下調べ。裏取りし、食い違えば実測を正とする）
+
+  - 新しい API route を足す場合、**Next.js の route entry が受け付ける export 名は限られています**。
+    `route-exports` ゲート（`scripts/check-route-exports.mjs`）が宣言ゲートに入っているので、
+    余計な `export const` を置くと落ちます。
+  - 既存の UI プリミティブ（`src/components/ui/` の Button / Card / Modal / Badge）を使ってください。
+    新しいボタンを直書きしないこと。
+  - **テーマ対応が要ります。** light / dark 両方で読めること。子コンポーネントに色を直書きすると
+    片方のテーマで不可視になります。
+  - **hover でしか出ない UI を作らないこと。** タッチ端末で不可視になります。
+    `[@media(hover:none)]:opacity-100` 相当のフォールバックを必ず置いてください。
+  - i18n は `next-intl`。辞書はリポジトリルートの `locales/{en,ja}/`。**ja / en 両方**を書くこと。
+  - **`dotenv` パーサーを使う場合、依存を新規追加してよいかを確認してから入れてください。**
+    追加が必要なら理由を報告し、避けられるなら自前パーサ＋テストで済ませてください。
+
+  ## 検証（必須）
+
+  - **変異注入で空振り緑を反証してください。** 少なくとも:
+    (a) パス検証を外すと、worktree 外へ出られないことを見るテストが赤
+    (b) マスキングを外すと、既定で値が伏せられることを見るテストが赤
+    (c) `EXCLUDED_PATTERNS` の維持を外すと、一般ファイルツリー経由で `.env` が読めないことを
+        見るテストが赤
+    各変異を 1 つずつ入れて対象テストのみ実行し、元に戻して再確認。結果を commit message に表で。
+  - 宣言ゲート 11 本すべて（`verify.gates`）。
+  - **UI は自動テストだけでは「動く」を保証できません。** 実機・実ブラウザでの確認手順を
+    `docs/` に書いてください（PC / スマホ、light / dark、マスキングのトグル、バリデーションエラー）。
+
+  ## 作業ルール（厳守）
+
+  - **フル `npm run test:unit` を手で回さないでください。** 他に 2 本のワーカーが並列で動いており、
+    同時フル実行は 30s サブプロセスガードを飢餓で落とします（#1985 がまさにその Issue）。
+    開発中は対象テストだけ絞って実行し、フル実行は `wait --verify` の unit ゲートに任せてください
+    （`mutex: cpu.heavy` で直列化されます）。
+  - **開発サーバを起動する場合は必ず別ポート＋隔離 DB で。** このシェルは `NODE_ENV=production` を
+    export しているので `NODE_ENV=development` を明示すること。**ポート 3000 は本番サーバが
+    使っているので触らないでください。** `CM_DB_PATH` も `$HOME` 配下の使い捨てに向けること。
+    停止は明示した PID を kill すること（広域 `pkill -f` は禁止）。
+  - **`CHANGELOG.md` と `docs/module-reference.md` を編集しないでください**（scope 外）。
+    代わりに `dev-reports/changelog/issue-1968.md`（1 行目に `<!-- ### Added -->`、
+    2 行目に **1 エントリ 1 行**で `- **feat(<scope>): <要約>** (#1968): <本文>`。
+    `(#1968)` は太字の**外側**、改行なし、`- **` で始める）と
+    `dev-reports/module-reference/issue-1968.md`（行キーごとの追記指示。既存行に足すときは
+    `grep -n '^| `<path>`' docs/module-reference.md` の出力を断片に書き写してから書く。
+    0 件だった行への追記を指示しない。新規行なら「新規行」と明記）を書いてください。
+  - commit は単一。**PR は作らないでください**（私が作ります）。
+  - commit message に「意図的な逸脱」「下調べとの食い違い」「変異注入」の節を必ず入れてください。
+  - 完了したら最後に `IMPL_COMPLETED` とだけ出力してください。
+scope:
+  allow:
+    - "src/app/api/worktrees/**"
+    - "src/app/worktrees/**"
+    - "src/components/**"
+    - "src/lib/file-tree.ts"
+    - "src/lib/security/**"
+    - "src/lib/env-manager/**"
+    - "src/config/**"
+    - "src/hooks/**"
+    - "src/types/**"
+    - "locales/**"
+    - "tests/unit/**"
+    - "tests/integration/**"
+    - "tests/e2e/**"
+    - "dev-reports/changelog/**"
+    - "dev-reports/module-reference/**"
+    - "docs/**"
+  deny:
+    - "src/lib/session/current-output-builder.ts"
+    - "src/cli/commands/wait.ts"
+    - "src/lib/ws-server.ts"
+verify:
+  gates: [token-discipline, control-chars, claudemd-size, route-exports, build-cli, build-server, lint, build, typecheck, integration, unit]
+autoYes:
+  mode: allow-listed
+  allowPromptTypes: [yes_no, multiple_choice]
+  denyPatterns: []
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true

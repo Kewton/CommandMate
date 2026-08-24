@@ -98,6 +98,8 @@ function mockScraper(
     confidence: 'high',
     reason,
     hasActivePrompt,
+    // Issue #1927: `evidence` became a required field of the detector's result.
+    evidence: 'positive',
     promptDetection: { isPrompt: hasActivePrompt, cleanContent: '' },
   });
 }

@@ -31,6 +31,8 @@ import {
   finishVerificationRun,
   getRunningVerificationRun,
   getTask,
+  // Issue #2000: read back to name the failing gates in the notification body.
+  getVerificationRun,
   listTasks,
   type Task,
   type VerificationGateSource,
@@ -45,6 +47,10 @@ import {
 import { getVerifiableTask } from '@/lib/db/tasks-db';
 import { resolveDefaultBranchName } from '@/lib/git/git-default-branch';
 import { createLogger } from '@/lib/logger';
+// Issue #2000: deep path, not the `@/lib/push` barrel — several suites replace
+// that barrel with a stub declaring only `notifyPushSubscribers`, and a call
+// reached through it would be `undefined` in exactly those tests.
+import { notifyVerificationFailurePush } from '@/lib/push/failure-push-notifier';
 import {
   contractGateDefinitions,
   resolveContractGateIds,
@@ -383,6 +389,43 @@ class TailBuffer {
 }
 
 /**
+ * The environment a gate command runs in (Issue #1994).
+ *
+ * A gate is a re-run of the repository's CI check, so what it must inherit is
+ * CI's shape — not the shape of whatever process happens to be hosting the
+ * runner. `CI=true` was already normalized for that reason; `NODE_ENV` is the
+ * variable where the omission bit.
+ *
+ * Gates are spawned by the CommandMate **server**, and the server has a
+ * NODE_ENV of its own — `production` under `commandmate start`, `development`
+ * under `commandmate start --dev` and `npm run dev`. A gate that shells out to
+ * a framework build reads it. Measured on this branch: `npm run build`
+ * (Next.js 15) exits 0 with NODE_ENV unset and **exits 1 with
+ * NODE_ENV=development**, on `<Html> should not be imported outside of
+ * pages/_document` while prerendering `/404`, `/500` and `/offline`. A `build`
+ * gate would therefore have been red for every worker on every run whenever an
+ * operator had started the server with `--dev`: a verdict about the host,
+ * reported as a verdict about the diff.
+ *
+ * GitHub Actions leaves NODE_ENV unset, so dropping it is precisely what makes
+ * the gate match CI. A command that needs one says so itself, as this
+ * repository's scripts already do (`NODE_ENV=test vitest run`,
+ * `NODE_ENV=production next build`).
+ */
+function gateProcessEnv(gateEnv: Record<string, string>): NodeJS.ProcessEnv {
+  const env: Record<string, string | undefined> = { ...process.env, CI: 'true', ...gateEnv };
+  // Removed rather than set to `undefined`: an explicitly-undefined key can
+  // still reach the child as an empty string, and `NODE_ENV=` is not the same
+  // thing as "unset".
+  delete env.NODE_ENV;
+  // `next/types/global.d.ts` augments NodeJS.ProcessEnv with a *required*
+  // readonly NODE_ENV, so the absence this function exists to produce cannot be
+  // expressed in that type. The runtime contract `spawn` uses is a plain string
+  // map, which is what is built above.
+  return env as NodeJS.ProcessEnv;
+}
+
+/**
  * Run one shell command and report its exit code.
  *
  * `shell: true` so a gate can be written the way a developer would type it
@@ -411,7 +454,7 @@ function runCommand(
       // a different fileParallelism otherwise, and a gate that passes here but
       // fails in CI is worse than no gate. `gateEnv` carries the per-worktree
       // identity (#1771) and is code-supplied, never user input.
-      env: { ...process.env, CI: 'true', ...gateEnv },
+      env: gateProcessEnv(gateEnv),
       detached: true,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -1275,6 +1318,47 @@ function findDetachedContract(
 }
 
 /**
+ * Tell the operator's phone that a run did not pass (Issue #2000).
+ *
+ * Called from both terminal paths — the synchronous config failure and the
+ * executed run — because both leave the caller with no verdict and something to
+ * fix. Whether it actually notifies (a contract run does not) and how it is
+ * logged belongs to `push/failure-push-notifier`; this wrapper exists only to
+ * gather the failing gate ids and to guarantee that a broken notifier cannot
+ * take a verification run down with it.
+ *
+ * Fire-and-forget: the run's verdict is already recorded and the caller is
+ * waiting on it.
+ */
+function notifyRunFailure(
+  db: Database.Database,
+  input: RunVerificationInput,
+  runId: number,
+  taskId: string | null,
+  status: VerificationRunTerminalStatus
+): void {
+  let failedGateIds: string[] | undefined;
+  try {
+    failedGateIds = getVerificationRun(db, runId)
+      ?.gates.filter((gate) => gate.status !== 'passed' && gate.status !== 'skipped')
+      .map((gate) => gate.gateId);
+  } catch {
+    // The row is gone (worktree deleted mid-run). The notification is still
+    // worth sending; it just cannot name the gates.
+  }
+
+  void notifyVerificationFailurePush({
+    worktreeId: input.worktreeId,
+    runId,
+    taskId,
+    status,
+    trigger: input.trigger,
+    instanceId: input.instanceId ?? null,
+    failedGateIds,
+  }).catch(() => {});
+}
+
+/**
  * Open a verification run and execute it in the background.
  *
  * Returns as soon as the run row exists, so an HTTP caller gets an id it can
@@ -1380,6 +1464,10 @@ export async function startVerification(
     });
     finishVerificationRun(db, run.id, 'error');
     logger.warn('verification-config-unusable', { runId: run.id, worktreeId: input.worktreeId });
+    // Issue #2000: an unusable config leaves the verdict as absent as a red
+    // gate does, and the operator's next move is the same — so this path
+    // notifies too, subject to the same contract-task exclusion.
+    notifyRunFailure(db, input, run.id, taskId, 'error');
     if (trackedTask) {
       // The run opened and immediately errored, so the task passes through
       // `verifying` the same way it would for gates that ran: an unusable config
@@ -1440,6 +1528,11 @@ export async function startVerification(
       if (trackedTask) {
         recordTaskTransition(db, trackedTask.id, taskEventForRunStatus(terminalStatus), run.id);
       }
+      // Issue #2000. In the `finally` so a crashed run (which is recorded as
+      // `error` in the catch above) notifies exactly like a judged one, and
+      // after the task transition so the run's own history is complete before
+      // anything is said about it.
+      notifyRunFailure(db, input, run.id, taskId, terminalStatus);
       releaseSlot();
       inFlight.delete(run.id);
     }

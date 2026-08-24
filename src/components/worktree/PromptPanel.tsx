@@ -12,7 +12,10 @@ import { memo, useState, useCallback, useId, useMemo } from 'react';
 import { useTranslations } from 'next-intl';
 import type { LivePromptData, YesNoPromptData, MultipleChoicePromptData } from '@/types/models';
 import { isAnswerablePromptData } from '@/types/models';
-import type { StructuredPromptWaitingData } from '@/lib/session/structured-prompt';
+import type {
+  StructuredDecisionOption,
+  StructuredPromptWaitingData,
+} from '@/lib/session/structured-prompt';
 import { ErrorBoundary } from '@/components/error/ErrorBoundary';
 import { RadioGroup, RadioGroupItem, Button, Spinner } from '@/components/ui';
 import { usePromptAnimation } from '@/hooks/usePromptAnimation';
@@ -52,12 +55,33 @@ export interface PromptPanelProps {
   promptData: PanelPromptData | null;
   /** Associated message ID */
   messageId: string | null;
+  /**
+   * The approval the agent is holding, when it published an id for one
+   * (Issue #1932).
+   *
+   * Not an alternative spelling of {@link PromptPanelProps.messageId}. A
+   * message id names a row this server stored after reading a dialog off the
+   * pane; a decision id names an approval the AGENT is blocked on, answered
+   * over its own API with no keys sent anywhere — which for a source whose
+   * dialog the scraper cannot parse (opencode) is the only way to answer at
+   * all. The panel does not choose between them: it hands whichever it was
+   * given to {@link PromptPanelProps.onRespond}, and the caller decides where
+   * to post.
+   */
+  decisionId?: string | null;
   /** Whether the panel is visible */
   visible: boolean;
   /** Whether user is currently answering (submitting response) */
   answering: boolean;
-  /** Callback when user submits a response */
-  onRespond: (answer: string) => Promise<void>;
+  /**
+   * Callback when user submits a response.
+   *
+   * `decisionId` is the panel's own prop, passed back so a caller answering a
+   * structured approval does not have to thread it through its own state. The
+   * second parameter is optional so every pre-#1932 one-argument handler is
+   * still assignable.
+   */
+  onRespond: (answer: string, decisionId?: string | null) => Promise<void>;
   /** Optional callback to dismiss the panel */
   onDismiss?: () => void;
   /** CLI tool display name (e.g., 'Claude', 'Gemini') for header */
@@ -68,7 +92,9 @@ export interface PromptPanelProps {
 interface PromptPanelContentProps {
   promptData: PanelPromptData;
   answering: boolean;
-  onRespond: (answer: string) => Promise<void>;
+  onRespond: (answer: string, decisionId?: string | null) => Promise<void>;
+  /** Issue #1932. See {@link PromptPanelProps.decisionId}. */
+  decisionId?: string | null;
   onDismiss?: () => void;
   labelId: string;
   cliToolName?: string;
@@ -81,6 +107,7 @@ function PromptPanelContent({
   promptData,
   answering,
   onRespond,
+  decisionId,
   onDismiss,
   labelId,
   cliToolName,
@@ -110,7 +137,7 @@ function PromptPanelContent({
     if (isDisabled) return;
     setIsSubmitting(true);
     try {
-      await onRespond(answer);
+      await onRespond(answer, decisionId);
     } catch (error) {
       // Log error for debugging purposes
       if (process.env.NODE_ENV !== 'production') {
@@ -119,7 +146,7 @@ function PromptPanelContent({
     } finally {
       setIsSubmitting(false);
     }
-  }, [isDisabled, onRespond]);
+  }, [isDisabled, onRespond, decisionId]);
 
   // Handle multiple choice submit
   const handleMultipleChoiceSubmit = useCallback(async () => {
@@ -130,7 +157,7 @@ function PromptPanelContent({
       const answer = requiresTextInput && textInputValue.trim()
         ? textInputValue.trim()
         : selectedOption.toString();
-      await onRespond(answer);
+      await onRespond(answer, decisionId);
     } catch (error) {
       if (process.env.NODE_ENV !== 'production') {
         console.error('[PromptPanel] Failed to respond:', error);
@@ -138,7 +165,27 @@ function PromptPanelContent({
     } finally {
       setIsSubmitting(false);
     }
-  }, [isDisabled, onRespond, selectedOption, requiresTextInput, textInputValue]);
+  }, [isDisabled, onRespond, decisionId, selectedOption, requiresTextInput, textInputValue]);
+
+  // Issue #1932: the degraded form's own submit. Separate from the two above
+  // because there is no `selectedOption` state behind it — the verdict comes
+  // straight off the button that was pressed — and because it must never fire
+  // without a decision id: these numbers address an approval over the agent's
+  // API, and posting one with no id would send it down the keystroke path,
+  // where a bare "1" at a picker means whatever line is highlighted (#1681).
+  const handleDecisionRespond = useCallback(async (answer: string) => {
+    if (isDisabled || !decisionId) return;
+    setIsSubmitting(true);
+    try {
+      await onRespond(answer, decisionId);
+    } catch (error) {
+      if (process.env.NODE_ENV !== 'production') {
+        console.error('[PromptPanel] Failed to respond:', error);
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
+  }, [isDisabled, onRespond, decisionId]);
 
   return (
     <div className="space-y-4">
@@ -230,7 +277,12 @@ function PromptPanelContent({
 
       {/* Issue #1725: a dialog the structured layer reported and nobody parsed */}
       {!isAnswerablePromptData(promptData) && (
-        <UnclassifiedPromptNotice promptData={promptData} />
+        <UnclassifiedPromptNotice
+          promptData={promptData}
+          decisionId={decisionId}
+          disabled={isDisabled}
+          onRespond={handleDecisionRespond}
+        />
       )}
     </div>
   );
@@ -253,10 +305,22 @@ function PromptPanelContent({
  */
 function UnclassifiedPromptNotice({
   promptData,
+  decisionId,
+  disabled,
+  onRespond,
 }: {
   promptData: StructuredPromptWaitingData;
+  /** Issue #1932. See {@link PromptPanelProps.decisionId}. */
+  decisionId?: string | null;
+  disabled: boolean;
+  onRespond: (answer: string) => void;
 }) {
   const t = useTranslations('prompt');
+  // Issue #1932: both halves are required. `decisionOptions` says the dialog
+  // accepts these three verdicts; `decisionId` says WHICH approval they would
+  // be applied to. With options but no id there is nothing to address, and the
+  // panel says what it said before — answer it in the terminal.
+  const answerable = decisionId ? promptData.decisionOptions ?? null : null;
 
   return (
     <div className="space-y-2" data-testid="unclassified-prompt-notice">
@@ -277,9 +341,64 @@ function UnclassifiedPromptNotice({
           </ul>
         </div>
       )}
-      <p className="text-sm text-foreground">
-        {t('unclassifiedInstruction', { command: t('unclassifiedRespondCommand') })}
-      </p>
+      {answerable && answerable.length > 0 ? (
+        <StructuredDecisionActions
+          options={answerable}
+          disabled={disabled}
+          onRespond={onRespond}
+        />
+      ) : (
+        <p className="text-sm text-foreground">
+          {t('unclassifiedInstruction', { command: t('unclassifiedRespondCommand') })}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The three verdicts an addressable approval accepts (Issue #1932).
+ *
+ * One button per verdict rather than a radio group and a submit: there is no
+ * free-text option to guard and no default to preselect, so a second click
+ * would only add a way to press "Allow always" by momentum. The labels are the
+ * agent's own vocabulary and deliberately not translated — see
+ * `STRUCTURED_DECISION_OPTIONS`, which is the same list `commandmate respond`
+ * accepts, and a locale-dependent label would make the two disagree.
+ */
+function StructuredDecisionActions({
+  options,
+  disabled,
+  onRespond,
+}: {
+  options: readonly StructuredDecisionOption[];
+  disabled: boolean;
+  onRespond: (answer: string) => void;
+}) {
+  const t = useTranslations('prompt');
+
+  return (
+    <div
+      className="flex flex-wrap items-center gap-2"
+      role="group"
+      aria-label={t('selectAnOption')}
+      data-testid="structured-decision-actions"
+    >
+      {options.map((option) => (
+        <Button
+          key={option.number}
+          variant="ghost"
+          type="button"
+          disabled={disabled}
+          onClick={() => onRespond(String(option.number))}
+          data-testid={`structured-decision-option-${option.number}`}
+          className={`${BUTTON_BASE_STYLES} ${
+            option.number === 3 ? BUTTON_SECONDARY_STYLES : BUTTON_PRIMARY_STYLES
+          }`}
+        >
+          {option.number}. {option.label}
+        </Button>
+      ))}
     </div>
   );
 }
@@ -478,6 +597,7 @@ export const PromptPanel = memo(function PromptPanel({
   promptData,
   // messageId reserved for future use (tracking, analytics)
   messageId: _messageId,
+  decisionId,
   visible,
   answering,
   onRespond,
@@ -510,6 +630,7 @@ export const PromptPanel = memo(function PromptPanel({
           promptData={promptData}
           answering={answering}
           onRespond={onRespond}
+          decisionId={decisionId}
           onDismiss={onDismiss}
           labelId={labelId}
           cliToolName={cliToolName}

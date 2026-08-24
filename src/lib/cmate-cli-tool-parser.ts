@@ -39,8 +39,24 @@ export interface ParsedCliToolColumn {
  * This Set controls which tools accept the --model option in the CMATE.md schedule table.
  * vibe-local model is managed via DB (worktree.vibe_local_model), not CMATE.md.
  * To add CMATE.md --model support for a new tool, add it here (DR1-006).
+ *
+ * ## `opencode` (Issue #1914)
+ *
+ * `claude-executor.ts` has carried an `opencode run -m <model>` branch since
+ * Issue #379, and it had never once executed: the only caller that supplies a
+ * model for a schedule is `job-executor.resolveModelOption()`, which answered
+ * `undefined` for every tool but copilot and vibe-local, and the other reachable
+ * caller (`daily-summary-generator`) is gated by `SUMMARY_ALLOWED_TOOLS`, which
+ * has no opencode either. Adding the id here is one half of making that branch
+ * reachable; `resolveModelOption()` reads this Set for the other half, so the
+ * two cannot drift apart again.
+ *
+ * The value is passed through **verbatim** as `provider/model`, which is the
+ * format `opencode run --help` documents for `-m, --model` (measured on
+ * opencode 1.18.21). It is not prefixed with `ollama/` — see
+ * `buildCliArgs()` for why that prefix went away.
  */
-export const TOOLS_WITH_MODEL_SUPPORT = new Set(['copilot']);
+export const TOOLS_WITH_MODEL_SUPPORT = new Set(['copilot', 'opencode']);
 
 // =============================================================================
 // Parse Functions
@@ -96,6 +112,18 @@ export function parseCliToolColumn(raw: string): ParsedCliToolColumn {
 /**
  * Validate a Copilot model name using the reject approach (no sanitization).
  * Shared between send API, CLI send, parser, and validator (DR1-003).
+ *
+ * Issue #1914: this is also what validates an **opencode** `provider/model`
+ * value, and the pattern already fits — `MODEL_NAME_PATTERN` allows `/` and `:`
+ * and requires a leading alphanumeric, so `ollama/qwen3:8b` and
+ * `anthropic/claude-sonnet-4-5` pass while a leading `-` (the CLI-option
+ * injection case DR4-001 is about) does not. The name is kept because the export
+ * is reached from the send API and `commandmate send`, which are outside this
+ * Issue's scope; what is deliberately **not** added is a `provider/model` shape
+ * requirement. Two probes against opencode 1.18.21 in an isolated `HOME` — one
+ * with `-m totallynotaprovider/some-model`, one with `-m barewordmodel` — both
+ * exited 1 with the same opaque `UnknownError`, so the CLI gives no signal that
+ * would let this layer reject a bare name without guessing.
  *
  * @param modelName - Model name to validate
  * @returns Validation result with optional reason for rejection

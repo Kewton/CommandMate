@@ -27,6 +27,12 @@ import {
   OPENCODE_PROMPT_AFTER_RESPONSE,
   OPENCODE_RESPONSE_COMPLETE,
   OPENCODE_SKIP_PATTERNS,
+  findCopilotChromeStart,
+  readCopilotStatusBar,
+  COPILOT_BOOT_BANNER_ANCHORS,
+  COPILOT_USER_ECHO_PATTERN,
+  COPILOT_TRANSCRIPT_CONTINUATION_PATTERN,
+  findOpenCodeChromeStart,
 } from '@/lib/detection/cli-patterns';
 import { createLogger } from '@/lib/logger';
 import { THINKING_TAIL_LINE_COUNT } from '@/config/thinking-constants';
@@ -35,7 +41,7 @@ import { CACHE_MAX_CAPTURE_LINES, isCaptureWindowSaturated } from '@/lib/tmux/tm
 const logger = createLogger('response-poller');
 
 // Sub-module imports
-import { resolveExtractionStartIndex, isOpenCodeComplete } from '../response-extractor';
+import { resolveExtractionStartIndex, isOpenCodeComplete, resolveOpenCodeTurnRegion, sliceOpenCodeTurn } from '../response-extractor';
 import { cleanClaudeResponse, cleanGeminiResponse, cleanOpenCodeResponse, cleanCopilotResponse, truncateMessage } from '../response-cleaner';
 import { COPILOT_MAX_MESSAGE_LENGTH, COPILOT_TRUNCATION_MARKER } from '@/config/copilot-constants';
 import {
@@ -51,9 +57,77 @@ import { notifyPushSubscribers } from '@/lib/push';
 // Issue #1790: imported by deep path, not through `@/lib/push`. Suites that
 // replace the barrel to count notifications (e.g. the #1547 escalation test)
 // would otherwise get `undefined` here and take down module evaluation.
+// Issue #1999: imported from its own module, not from the `@/lib/push` barrel
+// above. Several suites replace that barrel wholesale with a stub that only
+// declares `notifyPushSubscribers`, and a gate reached through it would be
+// `undefined` in exactly those tests — a TypeError this function's catch would
+// report as an ordinary "no response found".
+import { isPromptPushSuppressed } from '@/lib/push/prompt-push-gate';
+// Issue #2000: deep path for the same reason as the two imports above.
+import { notifyUpstreamFaultPush } from '@/lib/push/failure-push-notifier';
+import { matchUpstreamFault } from '@/lib/detection/upstream-faults';
 import { startWaitingPushNotifier } from '@/lib/push/waiting-push-notifier';
 import { getWaitingEpisode, observeWaitingEdge } from '@/lib/session/waiting-episode-state';
 import { applyEventToActiveTask } from '@/lib/tasks/task-transition-service';
+
+/**
+ * How many rows from the bottom of a copilot capture may hold its status bar.
+ *
+ * `readCopilotStatusBar` stops at the first non-blank row from the end, and the
+ * capture handed to it here has already had its trailing blanks trimmed, so one
+ * row is enough in practice. The slack exists so the reader keeps working if that
+ * trim ever changes, without mapping a thousand rows through `stripAnsi` on every
+ * poll tick. (Issue #1897)
+ */
+const COPILOT_STATUS_BAR_SCAN_ROWS = 8;
+
+/**
+ * How many rows from the bottom of a capture the upstream-fault check reads
+ * (Issue #2000).
+ *
+ * The same 100 as `current-output-builder`'s `realtimeSnippet`, and for the
+ * reason #1839 gives there: the wider capture keeps a banner from an hour ago
+ * in scope, and "is this happening now" is the only question worth ringing a
+ * phone about. Keeping the two windows equal also means the notification and
+ * the `upstreamFault` field an operator reads in `capture --json` are judging
+ * the same rows — a fault that rang but is invisible in the payload next to it
+ * is unverifiable.
+ */
+const UPSTREAM_FAULT_SCAN_ROWS = 100;
+
+/**
+ * Raise a push notification when this frame shows a NEW upstream fault
+ * (Issue #2000).
+ *
+ * Observed here, on the poller, rather than in `current-output-builder` where
+ * the published `upstreamFault` field is computed. That field is on a read
+ * path: it is evaluated when a browser polls the status API or holds the
+ * WebSocket open, i.e. exactly when the user is already looking. A phone
+ * notification is for the opposite situation, so the observation has to come
+ * from something the server runs on its own — and this poller is it.
+ *
+ * Every decision (new episode / still the same one / inside the cooldown) is
+ * made and logged by `push/failure-push-notifier`; nothing here decides
+ * anything, so the level can be handed over on every poll.
+ */
+function observeUpstreamFaultForPush(
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  instanceId: string | undefined,
+  output: string
+): void {
+  const snippet = output.split('\n').slice(-UPSTREAM_FAULT_SCAN_ROWS).join('\n');
+  const match = matchUpstreamFault(snippet);
+  // Fire-and-forget, like every other push call in this file: the poller must
+  // not slow down or break because a notification could not be delivered.
+  void notifyUpstreamFaultPush({
+    worktreeId,
+    cliToolId,
+    instanceId,
+    faultId: match?.fault.id ?? null,
+    matchedText: match?.matchedText,
+  }).catch(() => {});
+}
 
 // Issue #1790: arm the waiting-edge push subscription.
 //
@@ -86,6 +160,13 @@ export interface ExtractionResult {
    * whose `lineCount` is compared against `session_states.last_captured_line`.
    */
   captureWindowSaturated?: boolean;
+  /**
+   * True when the turn on screen has no echoed user prompt left in the capture
+   * (Issue #1911), i.e. it outgrew the alternate-screen pane and `response` is
+   * missing its head. Set for opencode only; the Layer-2 accumulator is the only
+   * place that head still exists, and this is the flag that says to read it.
+   */
+  turnHeadTruncated?: boolean;
 }
 
 /**
@@ -205,7 +286,35 @@ export function extractResponse(
   // defeating the content dedup from #1268. Completion detection below still
   // reads the untouched buffer: it keys off that very footer (the input box
   // supplies `hasPrompt`, its rules supply `hasSeparator`).
-  const chromeStart = cliToolId === 'claude' ? findClaudeChromeStart(lines) : -1;
+  //
+  // Issue #1897: copilot pins the same shape of chrome (cwd row, two rules, the
+  // composer, the status bar) to the bottom of its pane, and it is the reason the
+  // agent's saved reply read " Working esc interrupt GPT-5.6 Terra" -- see
+  // findCopilotChromeStart().
+  //
+  // Issue #1911: opencode pins the same kind of chrome to the bottom of its
+  // alternate-screen pane — the composer box (whose model row reads
+  // `Build · GPT-5.6 Luna GitHub Copilot`) and, below its `╹▀▀▀` border, a footer
+  // whose wrapped cwd carries no signature at all. Both were being saved as part
+  // of the assistant's reply, which is defect 1 of #1911; no pattern can remove
+  // the cwd rows, so the boundary has to be structural.
+  //
+  // The three readers stay three functions on purpose. All three answer "where
+  // does the transcript stop?", but each is anchored on a DIFFERENT measured
+  // landmark — claude's two full-width rules around its input box (#1289),
+  // copilot's bottom status-bar row (#1885/#1897), opencode's `╹▀▀▀` composer
+  // border (#1911) — and a landmark is only as good as the frames it was measured
+  // on. Folding them into one reader would let a rewording in one tool's chrome
+  // silently delete another tool's boundary, and a boundary that stops existing
+  // does not fail loudly: it puts terminal furniture back into History.
+  const openCodeCleanLines = cliToolId === 'opencode' ? lines.map(stripAnsi) : null;
+  const chromeStart = cliToolId === 'claude'
+    ? findClaudeChromeStart(lines)
+    : cliToolId === 'copilot'
+      ? findCopilotChromeStart(lines)
+      : openCodeCleanLines
+        ? findOpenCodeChromeStart(openCodeCleanLines)
+        : -1;
   const contentEnd = chromeStart >= 0 ? chromeStart : totalLines;
 
   const BUFFER_RESET_TOLERANCE = 25;
@@ -222,8 +331,8 @@ export function extractResponse(
   const checkLineCount = 20;
   const startLine = Math.max(0, totalLines - checkLineCount);
   const linesToCheck = lines.slice(startLine);
-  const outputToCheck = cliToolId === 'opencode'
-    ? stripAnsi(lines.join('\n'))
+  const outputToCheck = openCodeCleanLines
+    ? openCodeCleanLines.join('\n')
     : linesToCheck.join('\n');
 
   // Get tool-specific patterns from shared module
@@ -233,16 +342,41 @@ export function extractResponse(
     let userPromptPattern: RegExp;
     if (cliToolId === 'codex') {
       userPromptPattern = /^›\s+(?!Implement|Find and fix|Type|Summarize)/;
-    } else if (cliToolId === 'opencode') {
-      let buildCount = 0;
-      for (let i = totalLines - 1; i >= Math.max(0, totalLines - windowSize); i--) {
-        const cleanLine = stripAnsi(lines[i]);
-        if (OPENCODE_RESPONSE_COMPLETE.test(cleanLine)) {
-          buildCount++;
-          if (buildCount === 2) {
-            return i;
-          }
+    } else if (openCodeCleanLines) {
+      // Issue #1911: anchor on the newest ECHOED USER PROMPT, not on the
+      // second-to-last `▣ Build` row. The old anchor belonged to the PREVIOUS
+      // turn, so the echoed prompt of the current one was always extracted as
+      // part of the reply — and on the first turn of a session, where there is
+      // no second marker, it fell through to line 0 and the whole pane (banner
+      // included) became the answer. `windowSize` is ignored: the alternate
+      // screen has no scrollback, so the whole pane IS the window, and every
+      // caller already passes `totalLines` or more for this tool.
+      return resolveOpenCodeTurnRegion(openCodeCleanLines).echoEnd;
+    } else if (cliToolId === 'copilot') {
+      // Issue #1897: copilot 1.0.80 draws the transcript one column in, so the
+      // bare `^[>❯]` form below never matched the echoed prompt -- every copilot
+      // extraction fell back to line 0, i.e. to the launch banner. The composer,
+      // which IS at column 0, lives below `contentEnd` and so cannot be picked up
+      // as an echo here.
+      //
+      // The scan then walks past the echo's own wrapped rows and returns the LAST
+      // of them, so that callers' `+ 1` lands on the reply rather than on the
+      // second half of the operator's question.
+      //
+      // Same defect as #1911's opencode branch above and the same shape of fix,
+      // but NOT the same code: opencode's echo is a `┃  <text>` gutter row and
+      // copilot's is ` ❯ <text>` at the pane's one-column indent, so the anchor
+      // and the continuation rule are both tool-specific measurements.
+      for (let i = contentEnd - 1; i >= Math.max(0, contentEnd - windowSize); i--) {
+        if (!COPILOT_USER_ECHO_PATTERN.test(stripAnsi(lines[i]))) continue;
+        let echoEnd = i;
+        while (
+          echoEnd + 1 < contentEnd &&
+          COPILOT_TRANSCRIPT_CONTINUATION_PATTERN.test(stripAnsi(lines[echoEnd + 1]))
+        ) {
+          echoEnd++;
         }
+        return echoEnd;
       }
       return -1;
     } else {
@@ -291,8 +425,30 @@ export function extractResponse(
     ? isCodexTurnActive(lines, checkLineCount)
     : thinkingPattern.test(cleanOutputToCheck);
 
+  // Issue #1897: copilot's `hasPrompt` is worthless as a completion signal and
+  // its `isThinking` is worthless as a liveness one. The `❯` composer is drawn
+  // between its two rules throughout a turn (measured on every frame of #1885's
+  // running fixtures), and `COPILOT_THINKING_PATTERN` matches nothing copilot
+  // 1.0.80 draws (0 of 44 live generating frames). So `hasPrompt && !isThinking`
+  // was true on the very first poll of a running turn -- the extractor declared
+  // the turn finished, saved the status bar as the reply, and `checkForResponse`
+  // stopped polling, which is why the real answer never reached History.
+  //
+  // 1.0.80 paints the turn's state on the bottom row of the pane and nowhere
+  // else, so that ROW -- never a tail window, which copilot's own reply text can
+  // forge (`status-vocabulary-in-response.txt`) -- is the evidence. `idle` is a
+  // positive observation that the turn is over (design policy §4 D1 decision 1
+  // item 2); `working` and `null` (a dialog box has taken the bar away) both mean
+  // "not finished", and the dialog case is already served by the prompt path
+  // above.
+  const copilotStatusBar = cliToolId === 'copilot'
+    ? readCopilotStatusBar(lines.slice(Math.max(0, totalLines - COPILOT_STATUS_BAR_SCAN_ROWS)).map(stripAnsi))
+    : null;
+
   // Prompt-based completion logic
-  const isPromptBasedComplete = (cliToolId === 'codex' || cliToolId === 'gemini' || cliToolId === 'vibe-local' || cliToolId === 'copilot' || cliToolId === 'antigravity') && hasPrompt && !isThinking;
+  const isPromptBasedComplete = cliToolId === 'copilot'
+    ? copilotStatusBar === 'idle'
+    : (cliToolId === 'codex' || cliToolId === 'gemini' || cliToolId === 'vibe-local' || cliToolId === 'antigravity') && hasPrompt && !isThinking;
   const isClaudeComplete = cliToolId === 'claude' && hasPrompt && hasSeparator && !isThinking;
   const isOpenCodeDone = cliToolId === 'opencode' && isOpenCodeComplete(cleanOutputToCheck);
 
@@ -329,7 +485,14 @@ export function extractResponse(
         break;
       }
 
-      if (cliToolId === 'opencode') {
+      // Issue #1911: both rows this stops on (`Ask anything...` in the composer,
+      // `tab agents  ctrl+p commands` under its border) live in the chrome, which
+      // `contentEnd` now excludes structurally. Kept only as the fallback for a
+      // frame whose chrome could not be located, because there it is still the
+      // one boundary available — and #1883 measured that a REPLY can contain
+      // `Ask anything...`, so cutting the turn on it is a last resort, not the
+      // primary rule.
+      if (cliToolId === 'opencode' && chromeStart < 0) {
         if (OPENCODE_PROMPT_PATTERN.test(cleanLine) || OPENCODE_PROMPT_AFTER_RESPONSE.test(cleanLine)) {
           endIndex = i;
           break;
@@ -347,8 +510,16 @@ export function extractResponse(
     const response = responseLines.join('\n').trim();
 
     // DR-004: Check only the tail of the response for thinking indicators.
+    //
+    // Issue #1897: not for copilot. This is the same tail-window match the #1671
+    // codex fix removed from the liveness test, and on copilot it is both
+    // redundant and harmful: the status bar above has already made a positive
+    // `idle` observation about THIS frame, while the window here sees transcript
+    // that never scrolls away. `COPILOT_THINKING_PATTERN`'s braille alternative
+    // matches any spinner glyph a reply happens to quote, and the turn would then
+    // be reported unfinished for the rest of the session.
     const responseTailLines = response.split('\n').slice(-THINKING_TAIL_LINE_COUNT).join('\n');
-    if (thinkingPattern.test(responseTailLines)) {
+    if (cliToolId !== 'copilot' && thinkingPattern.test(responseTailLines)) {
       return incompleteResult(totalLines);
     }
 
@@ -378,6 +549,26 @@ export function extractResponse(
           return incompleteResult(totalLines);
         }
       } else if ((hasBannerArt || hasVersionInfo || hasStartupTips || hasProjectInit) && response.length < 2000) {
+        return incompleteResult(totalLines);
+      }
+    }
+
+    // Issue #1897: copilot's launch screen is a complete, idle frame -- composer
+    // drawn, key hints on the status bar -- so every check above accepts it and
+    // History used to open with the banner ("Current Sessions Issues Pull
+    // requests Gists / No copilot-instructions.md found… / Tip: /app") saved as
+    // the agent's first reply, before the operator had said anything.
+    //
+    // What actually distinguishes it is that no turn has happened: copilot echoes
+    // every prompt into the transcript as ` ❯ <text>`, and the launch screen has
+    // none. The banner anchors are only consulted once that echo is missing, so a
+    // reply that quotes any of this wording is unaffected.
+    if (cliToolId === 'copilot') {
+      const cleanResponse = stripAnsi(response);
+      const hasUserEcho = cleanResponse
+        .split('\n')
+        .some(line => COPILOT_USER_ECHO_PATTERN.test(line));
+      if (!hasUserEcho && COPILOT_BOOT_BANNER_ANCHORS.some(anchor => anchor.test(cleanResponse))) {
         return incompleteResult(totalLines);
       }
     }
@@ -419,6 +610,12 @@ export function extractResponse(
       lineCount: endIndex,
       bufferReset,
       captureWindowSaturated,
+      // Issue #1911: opencode only. `echoEnd < 0` means the turn is longer than
+      // the alternate-screen pane and its head has already scrolled away, so
+      // `response` starts mid-answer. Nothing else in this frame can recover it.
+      turnHeadTruncated: openCodeCleanLines
+        ? resolveOpenCodeTurnRegion(openCodeCleanLines).headTruncated
+        : undefined,
     };
   }
 
@@ -525,10 +722,22 @@ export async function checkForResponse(
     // (Issue #1670) — a literal here would silently decouple the two.
     const output = await captureSessionOutput(worktreeId, cliToolId, CACHE_MAX_CAPTURE_LINES, instanceId);
 
-    // Layer 2: Accumulate TUI content for full-screen TUI tools (for overlap tracking only).
+    // Issue #2000: the frame is in hand, so this is the cheapest place to ask
+    // whether the model API has stalled the session. Level in, edge out — see
+    // the helper.
+    observeUpstreamFaultForPush(worktreeId, cliToolId, instanceId, output);
+
+    // Layer 2: Accumulate TUI content for full-screen TUI tools, so a turn that
+    // outgrows the alternate-screen pane keeps the head that has scrolled away.
     if (cliToolId === 'opencode' || cliToolId === 'copilot') {
       const pollerKey = getPollerKey(worktreeId, cliToolId, instanceId);
-      accumulateTuiContent(pollerKey, output, cliToolId);
+      // Issue #1911: opencode is accumulated from the CURRENT TURN'S REGION
+      // rather than the whole frame. Feeding the raw pane seeded the accumulator
+      // with the previous turn's transcript, the echoed prompt and the bottom
+      // chrome on the very first poll, so the accumulated content could never be
+      // used as a response source without re-introducing defect 1.
+      const accumulatorSource = cliToolId === 'opencode' ? sliceOpenCodeTurn(output) : output;
+      accumulateTuiContent(pollerKey, accumulatorSource, cliToolId);
     }
 
     // Extract response
@@ -646,16 +855,32 @@ export async function checkForResponse(
       const promptWaitingSince =
         getWaitingEpisode(worktreeId, cliToolId, instanceId)?.since ?? promptObservedAt;
 
-      void notifyPushSubscribers({
-        worktreeId,
-        worktreeName: worktree.name,
-        kind: 'prompt',
-        agentName: resolvedInstanceId,
-        instanceId: resolvedInstanceId,
-        waitingKind: 'prompt',
-        waitingSince: promptWaitingSince,
-        excerpt: promptDetection.promptData?.question ?? promptSaveContent,
-      }).catch(() => {});
+      // Issue #1999: Auto-Yes is a declaration that this session's prompts are
+      // answered without a human, so notifying for one is telling the reader the
+      // opposite of the truth. Only the notification is gated — the episode
+      // below still opens, so the WebSocket frame, the status API and the #1790
+      // reminder all see the wait exactly as they did before. The gate runs
+      // before the call rather than inside it because `shouldSendWaitingPush`
+      // records the episode the moment it decides to send.
+      if (
+        !isPromptPushSuppressed({
+          worktreeId,
+          cliToolId,
+          instanceId,
+          waitingSince: promptWaitingSince,
+        })
+      ) {
+        void notifyPushSubscribers({
+          worktreeId,
+          worktreeName: worktree.name,
+          kind: 'prompt',
+          agentName: resolvedInstanceId,
+          instanceId: resolvedInstanceId,
+          waitingKind: 'prompt',
+          waitingSince: promptWaitingSince,
+          excerpt: promptDetection.promptData?.question ?? promptSaveContent,
+        }).catch(() => {});
+      }
 
       observeWaitingEdge({
         worktreeId,
@@ -699,9 +924,27 @@ export async function checkForResponse(
 
       clearTuiAccumulator(pollerKey);
     } else if (cliToolId === 'opencode') {
-      cleanedResponse = cleanOpenCodeResponse(result.response);
-
       const pollerKey = getPollerKey(worktreeId, cliToolId, instanceId);
+      // Issue #1911 defect 3: opencode wrote to the Layer-2 accumulator but never
+      // read it, so any turn longer than the pane was saved without its head.
+      //
+      // Read it only when the head is ACTUALLY gone, which is what
+      // `turnHeadTruncated` measures — deliberately NOT copilot's unconditional
+      // `accumulated || response`. The accumulator appends whatever the overlap
+      // check cannot match against the previous poll, and opencode rewrites rows
+      // in place while it works (`+ Thought: … · 12ms` becomes `· 579ms`, a
+      // pending patch row becomes the applied edit). Every such rewrite breaks
+      // the overlap and re-appends the lines above it, so preferring the
+      // accumulator for the common short answer would duplicate content that
+      // `result.response` already holds exactly. When the echo is off screen the
+      // frame is missing content outright, and a possible duplicate beats a
+      // guaranteed truncation.
+      const accumulatedContent = getAccumulatedContent(pollerKey);
+      const sourceContent = result.turnHeadTruncated && accumulatedContent
+        ? accumulatedContent
+        : result.response;
+      cleanedResponse = cleanOpenCodeResponse(sourceContent);
+
       clearTuiAccumulator(pollerKey);
     }
 

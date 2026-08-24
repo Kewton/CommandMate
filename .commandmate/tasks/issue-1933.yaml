@@ -1,0 +1,105 @@
+version: 1
+title: "Issue #1933: ICLITool に describeComposer / gracefulExitSequence / captureSpec を追加し KeySequence を判別 union にする"
+goal: |
+  https://github.com/Kewton/CommandMate/issues/1933 を実装してください。ツール固有の挙動を
+  ツールクラスに閉じるための**型と契約**です（方針書 §4 D4 / §6.3 / §10.12 / §13.2）。
+
+  ## 着手前の実測（私が develop `b982fb88` で確認済み）
+
+  - **`describeComposer` / `gracefulExitSequence` / `captureSpec` / `ComposerSpec` / `CaptureSpec` /
+    `KeySequence` は src に 1 件も存在しません**（すべて新設）。
+  - **`sendKeys` は `-l` を一度も渡していません** — `grep -n "'-l'" src/lib/tmux/*.ts` が **0 件**。
+    Issue 本文（DR4-011）の「本文が `Escape` / `C-c` / `Enter` だとキーとして着弾する」という
+    前提は**実測で裏が取れました**。
+  - `TUI_EXIT_WAIT_MS` は **既に `src/config/cli-tool-timing-config.ts` にあります**
+    （Issue 本文は「ツール定数へ」と書いていますが、config への集約は済んでいます）。
+    **注意**: このモジュールは **#1977 が `tests/unit/lib/tmux-capture-invalidation.test.ts` で
+    `*_MS` だけ 0 にする部分 mock** に使っています。値の置き場を変えるならその mock も追随が要ります。
+  - `getStatusCaptureLines` は `src/lib/session/worktree-status-helper.ts` にあります。
+    **#1927 は「`captureSpec()` への集約は #1933 の作業」として意図的に手を付けずに残しました。**
+
+  ## 受入の要（S9・実測で裏が取れている唯一の実害）
+
+  `KeySequence` を `{kind:'key', name}` | `{kind:'literal', text}` の**判別 union** にし、
+  **literal は必ず `send-keys -l`** を通ること。**本文が `Escape` / `C-c` / `Enter` である
+  メッセージがキーとして着弾しないこと**を transport スタブで pin してください。
+  これは型の飾りではなく、`-l` が 0 件という実測が示す**現に踏みうるバグ**です。
+
+  ## その他の受入条件
+
+  - **S10**: graceful exit の**後置条件**を pin — `/exit` 後に `hasSession` が false、かつ
+    **opencode は割当 port の `/global/health` が無応答になるまで port を forget しない**。
+    満たせなければ `graceful_exit_timeout` / `port_orphaned` を出して force kill。
+  - **S18**: `AgentLaunchPlan.env` に `CM_AUTH_TOKEN` 等の秘密が入らないことを pin。
+    **#1942 が `sanitizeEnvForChildProcess()` に `CM_HOOK_` 名前空間の prefix 除去を入れた**ので、
+    その仕組みと矛盾しない形にすること。
+  - `BaseCLITool` に claude 相当の既定実装を置き、**既存 7 ツールの挙動を変えないこと**
+    （本 Issue は型と契約であり、挙動変更は #1894 / #1905 / #1906 / #1910 が既に着地させています）。
+
+  ## この Issue で**やらないこと**
+
+  - `OpenCodeTool.interrupt()` の実装（Escape ×2、300ms 間隔）は **#1894 で着地済み**です。
+    本 Issue はそれが乗るインタフェースを整えるだけ。**挙動を書き換えないこと。**
+  - **`src/lib/session/agent-event-state.ts` / `provisional-turn.ts` / `src/cli/commands/wait.ts` に
+    触らないこと**（#1930 のワーカーが同時に編集しています）。
+  - **`src/lib/detection/**` に触らないこと**（Phase 3 が着地したばかり）。
+
+  ## 触ってよい範囲
+
+  `src/lib/cli-tools/**`・`src/lib/tmux/**`・`src/lib/session-key-sender.ts`・
+  `src/config/cli-tool-timing-config.ts`・`src/lib/session/worktree-status-helper.ts`・
+  `src/types/**`・
+  `tests/unit/cli-tools/**`・`tests/unit/lib/**`・`tests/unit/config/**`・`tests/unit/session/**`。
+
+  ## 作業ルール（厳守）
+
+  - **commit は 1 本にまとめる。** PR は作らない・push しない（オーケストレーターが行う）。
+  - **`CHANGELOG.md` と `docs/module-reference.md` を編集しない。** 代わりに
+    `dev-reports/changelog/issue-1933.md`（`## [Unreleased]` にそのまま貼れる 1 エントリ。1 行目に
+    どの節へ入るかをコメント）と `dev-reports/module-reference/issue-1933.md` を書くこと。
+    **既存行への追記を指示する場合は `grep -n '^| `<path>`' docs/module-reference.md` で実在を確認してから**書くこと。
+  - **`docs/design/multi-agent-state-architecture.md` を編集しない。** Phase 2 の実測による訂正は
+    #1979 で着地済み（develop `561d6706`）。方針書は現在正しい状態です。
+  - **この契約の方針は「推奨」。** 別解が正しいと判断したら採ってよいが、**逸脱と理由を commit message に明記**すること。
+  - **Issue 本文をコードで裏取りすること。** 食い違ったら**実測を正**とし、commit message に書く。
+    この Issue は私が書いており、自作 Issue の記述が実測と食い違った実績が多数あります。
+  - **テストを足した「後」に `npx tsc --noEmit` を回すこと。** `npm run test:unit`（vitest は esbuild で
+    型検査をしない）の緑を tsc の緑と取り違えた事例が直前のランで出ています。
+  - **`npm run test:integration` も自分で回すこと。** `wait --verify` の宣言ゲートに integration は
+    **含まれていません**（#1946）。#1927 はこれで CI を 1 回落としました。
+  - **`wait --verify` の unit ゲートは素の `npm run test:unit` の約 9 倍かかる**（62s ↔ 560s）。
+    `gate-runner.ts:414` が `CI:'true'` を渡し `fileParallelism:false` になるためで、異常ではありません。
+  - **フル `npm run test:unit` の実行中にソースやテストを編集しないこと**（vitest の遅延 transform で偽の赤が出る）。
+  - **別ワークツリーと同時にフル `npm run test:unit` を回さないこと**（#1985。30s サブプロセスガードが
+    その条件では小さく、無関係な 44 件が落ちます）。**この repo では今あなたを含め複数の worktree が動いています。**
+  - 作業が終わったら最終行に `IMPL_COMPLETED` とだけ出力すること。
+
+  ## 実 tmux を触る検証の追加ルール（厳守）
+
+  - **必ず `tmux -L <専用socket>` で行う。** `-L` / `-S` は `$TMUX` より優先されます。フラグ無しの `tmux` は
+    **ユーザーの本番サーバ**に届きます。
+  - **`kill-server` を `-L` 無しで書かない。** 後始末は `kill-session -t '=<name>:'`（完全一致）で。
+  - **`TMUX_TMPDIR` を隔離手段に使わない**（`$TMUX` があると無視される）。
+  - **`bind-key` / `unbind-key` / `set-option -g` を既定サーバへ撃たない**（サーバグローバル）。
+scope:
+  allow:
+    - "src/lib/cli-tools/**"
+    - "src/lib/tmux/**"
+    - "src/lib/session-key-sender.ts"
+    - "src/config/cli-tool-timing-config.ts"
+    - "src/lib/session/worktree-status-helper.ts"
+    - "src/types/**"
+    - "tests/unit/cli-tools/**"
+    - "tests/unit/lib/**"
+    - "tests/unit/config/**"
+    - "tests/unit/session/**"
+  deny: []
+verify:
+  gates: [token-discipline, control-chars, claudemd-size, route-exports, lint, typecheck, unit]
+autoYes:
+  mode: allow-listed
+  allowPromptTypes: [yes_no, multiple_choice]
+  denyPatterns: []
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true

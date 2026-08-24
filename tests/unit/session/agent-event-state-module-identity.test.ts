@@ -32,6 +32,8 @@ type AgentEventStateModule = typeof import('@/lib/session/agent-event-state');
 type SuppressionModule = typeof import('@/lib/polling/auto-yes-suppression-state');
 type WaitingEpisodeModule = typeof import('@/lib/session/waiting-episode-state');
 type PromptDedupStateModule = typeof import('@/lib/polling/prompt-dedup-state');
+type ToolInputNormalizationStateModule =
+  typeof import('@/lib/hooks/tool-input-normalization-state');
 
 /**
  * Load a module twice, with a registry reset in between, and hand back both
@@ -196,6 +198,36 @@ describe('agent-event-state is shared across module instances (#1736)', () => {
     second.clearAgentStopEvents();
   });
 
+  it('deduplicates against a frame id claimed by another instance (#1899)', async () => {
+    const { first, second } = await loadTwice<AgentEventStateModule>(
+      () => import('@/lib/session/agent-event-state')
+    );
+    expectsDistinctInstances(first, second, 'classifyAgentEventDelivery');
+    first.clearAgentStopEvents();
+
+    const at = 1_700_000_450_000;
+    const delivery = {
+      worktreeId: WT,
+      cliToolId: 'opencode' as const,
+      instanceId: 'opencode',
+      event: 'notification' as const,
+      detail: 'permission_prompt',
+      sessionId: 'ses_1899',
+      identity: 'per_1899',
+      identityKind: 'permission-id' as const,
+    };
+
+    expect(first.classifyAgentEventDelivery({ ...delivery, at })).toEqual({ duplicate: false });
+    expect(second.getRecentEventIdentityCount(WT, 'opencode', 'opencode')).toBe(1);
+    // The identity rule has no time bound at all, so a re-sync replaying the
+    // frame on the other bundle ten minutes later must still see the claim.
+    expect(second.classifyAgentEventDelivery({ ...delivery, at: at + 600_000 })).toEqual({
+      duplicate: true,
+      by: 'identity',
+    });
+    second.clearAgentStopEvents();
+  });
+
   it('clears through either instance', async () => {
     const { first, second } = await loadTwice<AgentEventStateModule>(
       () => import('@/lib/session/agent-event-state')
@@ -301,5 +333,39 @@ describe('prompt-dedup-state is shared across module instances (#1695)', () => {
     expect(first.getPromptDedupSkips(WT, TOOL).skippedCount).toBe(3);
 
     second.clearPromptDedupSkips();
+  });
+});
+
+describe('tool-input-normalization-state is shared across module instances (#1902)', () => {
+  it('reports a normalisation recorded by another instance', async () => {
+    const { first, second } = await loadTwice<ToolInputNormalizationStateModule>(
+      () => import('@/lib/hooks/tool-input-normalization-state')
+    );
+    expectsDistinctInstances(first, second, 'recordToolInputNormalization');
+    first.clearToolInputNormalizations();
+
+    // Same split as the suppression record: the producer is
+    // `/api/hooks/permission-request` (via permission-decision-service) and the
+    // sole consumer is `buildCurrentOutput` behind the current-output route. A
+    // per-instance map would leave `capture --json` reporting `null` for a
+    // session whose every edit is being rewritten before it is judged — the
+    // silent normalisation §7 forbids, reintroduced by the bundler.
+    first.recordToolInputNormalization(
+      WT,
+      'copilot',
+      undefined,
+      { reason: 'string-tool-input-as-patch', key: 'patch', receivedType: 'string' },
+      'Edit',
+      1_700_000_900_000
+    );
+
+    expect(second.getLastToolInputNormalization(WT, 'copilot')).toEqual({
+      reason: 'string-tool-input-as-patch',
+      key: 'patch',
+      receivedType: 'string',
+      toolName: 'Edit',
+      at: 1_700_000_900_000,
+    });
+    second.clearToolInputNormalizations();
   });
 });

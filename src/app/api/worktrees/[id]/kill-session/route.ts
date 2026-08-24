@@ -7,15 +7,20 @@
  *            If not specified, kills all sessions (backward compatible).
  *
  * Issue #4: Added individual session termination support
+ * Issue #1905: kills through `ICLITool.killSession`, not `lib/tmux` directly
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db/db-instance';
-import { getWorktreeById, deleteSessionState, deleteAllMessages, deleteMessagesByCliTool, deleteMessagesByInstance, recomputeLastUserMessage, getAgentInstances, getAgentInstance } from '@/lib/db';
+import { getWorktreeById, deleteSessionState, deleteAllMessages, deleteMessagesByCliTool, deleteMessagesByInstance, recomputeLastUserMessage, getAgentInstances } from '@/lib/db';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
-import { killSession } from '@/lib/tmux/tmux';
 import { broadcast } from '@/lib/ws-server';
-import { CLI_TOOL_IDS, isCliToolType, isValidInstanceId, type CLIToolType } from '@/lib/cli-tools/types';
+import { CLI_TOOL_IDS, isValidInstanceId, type CLIToolType } from '@/lib/cli-tools/types';
+import {
+  resolveSessionTargetStrict,
+  describeSessionTargetConflict,
+  INSTANCE_TOOL_CONFLICT,
+} from '@/lib/session/resolve-session-target';
 import { createLogger } from '@/lib/logger';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 
@@ -68,21 +73,32 @@ export async function POST(
     const targets: Array<{ cliToolId: CLIToolType; instanceId: string }> = [];
 
     if (instanceParam) {
-      // Single-instance kill: resolve the backing CLI tool from (in priority order)
-      // the explicit cliTool param, the registered instance, or the instance id
-      // itself when it names a primary instance.
-      const known = getAgentInstance(db, id, instanceParam);
-      const resolvedTool: CLIToolType | null =
-        (targetCliTool ?? null)
-        ?? (known ? known.cliTool : null)
-        ?? (isCliToolType(instanceParam) ? instanceParam : null);
-      if (!resolvedTool) {
+      // Issue #1925: single-instance kill resolves through the one shared
+      // resolver (design §4 D5). This route used to inline its own chain with
+      // the explicit `?cliTool` ahead of the roster and no contradiction check,
+      // so `--instance codex --cliTool claude` silently killed (or failed to
+      // find) a Claude session under an instance the roster calls codex. The
+      // roster now wins and the contradiction is refused: killing is a side
+      // effect, so guessing which of the two declarations was meant is not an
+      // option (DR2-009 / DR3-015).
+      const resolution = resolveSessionTargetStrict(db, id, {
+        instanceId: instanceParam,
+        requestedCliTool: targetCliTool ?? undefined,
+      });
+      if (!resolution.ok) {
         return NextResponse.json(
-          { error: 'Could not resolve CLI tool for the specified instance. Provide cliTool.' },
+          {
+            error: describeSessionTargetConflict(resolution.conflict),
+            code: INSTANCE_TOOL_CONFLICT,
+            ...resolution.conflict,
+          },
           { status: 400 }
         );
       }
-      targets.push({ cliToolId: resolvedTool, instanceId: instanceParam });
+      targets.push({
+        cliToolId: resolution.target.cliToolId,
+        instanceId: resolution.target.instanceId,
+      });
     } else {
       // Determine which tools to kill, seeding each tool's primary instance
       // (instanceId === cliToolId) for backward compatibility.
@@ -110,6 +126,7 @@ export async function POST(
 
     // Track killed sessions
     const killedSessions: string[] = [];
+    const failedSessions: string[] = [];
     let anySessionRunning = false;
 
     // Kill targeted sessions
@@ -117,22 +134,51 @@ export async function POST(
       const cliTool = manager.getTool(cliToolId);
       const isRunning = await cliTool.isRunning(id, instanceId);
 
-      if (isRunning) {
-        anySessionRunning = true;
-        const sessionName = cliTool.getSessionName(id, instanceId);
-        const killed = await killSession(sessionName);
+      if (!isRunning) continue;
 
-        if (killed) {
-          killedSessions.push(sessionName);
-          logger.info('killed-session:');
-        }
+      anySessionRunning = true;
+      // `getSessionName` is part of the gateway too; it is only used here to
+      // name the pane in the response and the log, never to address tmux.
+      const sessionName = cliTool.getSessionName(id, instanceId);
 
-        // Stop poller if running (uses CLIToolManager.stopPollers for DIP compliance - MF1-001)
-        manager.stopPollers(id, cliToolId, instanceId);
-
-        // Clean up session state for this instance
-        deleteSessionState(db, id, cliToolId, instanceId);
+      try {
+        // Issue #1905 (design §4 D4): go through the CLITool gateway instead of
+        // `lib/tmux`'s `killSession`. The direct tmux kill skipped every
+        // tool-specific shutdown step — most visibly OpenCode's, where the SSE
+        // subscription was never closed and the allocated port never returned,
+        // so the pane died while a reconnect loop kept retrying a server that
+        // was gone. `CopilotTool.killSession` was reachable from nowhere else,
+        // which is why its defects went unnoticed. tmux kill still happens: it
+        // is the fallback inside each tool's `killSession`.
+        await cliTool.killSession(id, instanceId);
+      } catch (error: unknown) {
+        // One tool failing must not abandon the sessions after it in the list.
+        // The pane is likely still alive, so its poller and session state are
+        // deliberately left in place rather than torn down to match a kill that
+        // did not happen.
+        failedSessions.push(sessionName);
+        logger.error('kill-session-failed', {
+          cliTool: cliToolId,
+          instance: instanceId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        continue;
       }
+
+      killedSessions.push(sessionName);
+      logger.info('killed-session:');
+
+      // Stop poller if running (uses CLIToolManager.stopPollers for DIP compliance - MF1-001)
+      //
+      // Issue #1984: `stopPollers` は `await import('../polling/response-poller')` で
+      // モジュールスコープの循環を切ったため async になった。この `await` を落とすと
+      // poller の停止が下の `deleteSessionState()` より **後ろ**にずれ、
+      // 「state を消してから止める」順序になる（型検査も lint も通ってしまう）。
+      // 順序は tests/unit/api/kill-session-stop-pollers-order-1984.test.ts が固定する。
+      await manager.stopPollers(id, cliToolId, instanceId);
+
+      // Clean up session state for this instance
+      deleteSessionState(db, id, cliToolId, instanceId);
     }
 
     if (!anySessionRunning) {
@@ -142,6 +188,20 @@ export async function POST(
       return NextResponse.json(
         { error: `No active sessions found${targetMsg} for this worktree` },
         { status: 404 }
+      );
+    }
+
+    if (killedSessions.length === 0) {
+      // Every live target refused to die. Reporting 200 here would archive the
+      // messages and broadcast `isRunning: false` for panes that are still up,
+      // which is the shape of failure Issue #1905 is about: a caller that has
+      // no way to tell a completed kill from a skipped one.
+      return NextResponse.json(
+        {
+          error: `Failed to kill sessions: ${failedSessions.join(', ')}`,
+          failedSessions,
+        },
+        { status: 500 }
       );
     }
 
@@ -181,6 +241,7 @@ export async function POST(
           ? `Session killed successfully: ${killedSessions.join(', ')}`
           : `All sessions killed successfully: ${killedSessions.join(', ')}`,
         killedSessions,
+        ...(failedSessions.length > 0 ? { failedSessions } : {}),
         cliTool: targetCliTool || null,
         instance: instanceParam || null,
       },

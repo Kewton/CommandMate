@@ -1,16 +1,16 @@
 {
   "title": "Notifications",
-  "description": "Get a push notification when an agent is waiting for you or finishes a session — even when the app is closed.",
+  "description": "Get a push notification when something needs you — a prompt, a failed verification, an upstream API fault, or a session that could not start — even when the app is closed. Completions are optional.",
   "enable": "Enable notifications",
   "enabling": "Enabling…",
   "enabledOnThisDevice": "Notifications are enabled on this device.",
   "unsubscribe": "Unsubscribe this device",
   "types": {
     "heading": "Notify me about",
-    "promptWaiting": "Prompt waiting",
-    "promptWaitingDesc": "When an agent is waiting for your reply",
-    "completion": "Session complete",
-    "completionDesc": "When an agent finishes a session"
+    "promptWaiting": "When you need to act",
+    "promptWaitingDesc": "A prompt waiting for you, a failed verification gate, an upstream API fault, or a session that could not start. Nothing moves until you do",
+    "completion": "Also tell me about completions (optional)",
+    "completionDesc": "Ordinary completions that need nothing from you. Off by default on newly registered devices (change it for this device here)"
   },
   "permission": {
     "denied": "Notifications are blocked in your browser settings. Allow them for this site to receive push notifications."
@@ -34,7 +34,18 @@
     "terminalAttentionWithExcerpt": "Needs attention in the terminal: {excerpt}",
     "terminalAttention": "Needs attention in the terminal",
     "stillWaitingPrompt": "Still waiting for your reply ({minutes} min)",
-    "stillWaitingTerminal": "Still needs attention in the terminal ({minutes} min)"
+    "stillWaitingTerminal": "Still needs attention in the terminal ({minutes} min)",
+    "failureVerificationWithExcerpt": "Verification failed: {excerpt}",
+    "failureVerification": "Verification failed",
+    "failureUpstreamWithExcerpt": "Stalled by an upstream API fault: {excerpt}",
+    "failureUpstream": "Stalled by an upstream API fault",
+    "failureSessionStartWithExcerpt": "Could not start the session: {excerpt}",
+    "failureSessionStart": "Could not start the session",
+    "failureSessionUnavailableWithExcerpt": "Could not start the session: {excerpt} is not installed",
+    "failureSessionUnavailable": "Could not start the session: the CLI tool is not installed",
+    "failureWithExcerpt": "Failed: {excerpt}",
+    "failure": "Failed",
+    "promptResolved": "Handled — answered on another device"
   },
   "escalation": {
     "heading": "Reminder",

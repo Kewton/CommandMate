@@ -4,10 +4,12 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { CopilotTool } from '@/lib/cli-tools/copilot';
+import { CopilotTool, COPILOT_EXIT_COMMAND } from '@/lib/cli-tools/copilot';
+import { resolveCopilotExecutable } from '@/lib/cli-tools/copilot-executable';
 import type { CLIToolType } from '@/lib/cli-tools/types';
+import { COPILOT_EXIT_WAIT_MS, TUI_EXIT_WAIT_MS } from '@/config/cli-tool-timing-config';
 
-// Mock child_process execFile for isInstalled tests
+// Mock child_process execFile so nothing here can spawn a real process
 vi.mock('child_process', async () => {
   const actual = await vi.importActual<typeof import('child_process')>('child_process');
   return {
@@ -16,12 +18,21 @@ vi.mock('child_process', async () => {
   };
 });
 
+// Issue #1907: install detection is a filesystem probe now (PATH lookup +
+// `--version`), so it is stubbed here and exercised for real against temp
+// directories in copilot-install-detection-1907.test.ts.
+vi.mock('@/lib/cli-tools/copilot-executable', () => ({
+  resolveCopilotExecutable: vi.fn(),
+}));
+
 // Mock tmux functions
 vi.mock('@/lib/tmux/tmux', () => ({
   hasSession: vi.fn().mockResolvedValue(false),
   createSession: vi.fn().mockResolvedValue(undefined),
   sendKeys: vi.fn().mockResolvedValue(undefined),
   sendSpecialKey: vi.fn().mockResolvedValue(undefined),
+  // Issue #1905: the exit command is typed and submitted separately.
+  sendSpecialKeys: vi.fn().mockResolvedValue(undefined),
   killSession: vi.fn().mockResolvedValue(true),
   capturePane: vi.fn().mockResolvedValue(''),
   reconcileSessionGeometry: vi.fn().mockResolvedValue(false),
@@ -67,8 +78,10 @@ describe('CopilotTool', () => {
       expect(tool.name).toBe('Copilot');
     });
 
-    it('should have correct command (gh)', () => {
-      expect(tool.command).toBe('gh');
+    // Issue #1907: was 'gh', from the days when copilot was the `gh-copilot`
+    // extension. Copilot CLI is a standalone executable.
+    it('should have correct command (copilot)', () => {
+      expect(tool.command).toBe('copilot');
     });
 
     it('should have CLIToolType as id type', () => {
@@ -88,57 +101,25 @@ describe('CopilotTool', () => {
     });
   });
 
+  // Issue #1907: `isInstalled` is now the resolver's answer and nothing else.
+  // The resolution rules themselves (PATH first, gh's downloaded copy second,
+  // a version string required) live in copilot-install-detection-1907.test.ts,
+  // where they run against real temp directories.
   describe('isInstalled', () => {
-    it('should return true when both gh and copilot extension are available', async () => {
-      const { execFile } = await import('child_process');
-      const mockExecFile = vi.mocked(execFile);
-      // First call: gh --version (success)
-      // Second call: gh copilot --help (success)
-      mockExecFile.mockImplementation((_command: string, args: unknown, _options: unknown, callback?: unknown) => {
-        const cb = callback as (error: Error | null, stdout: string, stderr: string) => void;
-        if (cb) {
-          cb(null, 'success', '');
-        }
-        return {} as import('child_process').ChildProcess;
+    it('should return true when a copilot executable answered --version', async () => {
+      vi.mocked(resolveCopilotExecutable).mockResolvedValue({
+        path: '/usr/local/bin/copilot',
+        version: '1.0.80',
+        source: 'path',
       });
 
-      const installed = await tool.isInstalled();
-      expect(installed).toBe(true);
-      expect(mockExecFile).toHaveBeenCalledTimes(2);
+      await expect(tool.isInstalled()).resolves.toBe(true);
     });
 
-    it('should return false when gh is installed but copilot extension is not', async () => {
-      const { execFile } = await import('child_process');
-      const mockExecFile = vi.mocked(execFile);
-      let callCount = 0;
-      mockExecFile.mockImplementation((_command: string, args: unknown, _options: unknown, callback?: unknown) => {
-        const cb = callback as (error: Error | null, stdout: string, stderr: string) => void;
-        callCount++;
-        if (callCount === 1) {
-          // gh --version succeeds
-          cb(null, 'gh version 2.0.0', '');
-        } else {
-          // gh copilot --help fails
-          cb(new Error('unknown command "copilot"'), '', 'unknown command "copilot"');
-        }
-        return {} as import('child_process').ChildProcess;
-      });
+    it('should return false when nothing answered', async () => {
+      vi.mocked(resolveCopilotExecutable).mockResolvedValue(null);
 
-      const installed = await tool.isInstalled();
-      expect(installed).toBe(false);
-    });
-
-    it('should return false when gh is not installed', async () => {
-      const { execFile } = await import('child_process');
-      const mockExecFile = vi.mocked(execFile);
-      mockExecFile.mockImplementation((_command: string, _args: unknown, _options: unknown, callback?: unknown) => {
-        const cb = callback as (error: Error | null, stdout: string, stderr: string) => void;
-        cb(new Error('command not found: gh'), '', '');
-        return {} as import('child_process').ChildProcess;
-      });
-
-      const installed = await tool.isInstalled();
-      expect(installed).toBe(false);
+      await expect(tool.isInstalled()).resolves.toBe(false);
     });
   });
 
@@ -167,7 +148,7 @@ describe('CopilotTool', () => {
     it('should have readonly properties', () => {
       expect(tool.id).toBe('copilot');
       expect(tool.name).toBe('Copilot');
-      expect(tool.command).toBe('gh');
+      expect(tool.command).toBe('copilot');
     });
   });
 
@@ -226,29 +207,32 @@ describe('CopilotTool', () => {
       vi.useRealTimers();
     });
 
-    it('should send Enter to confirm selection list when detected', async () => {
+    it('should never send a bare Enter after an argument-form /model (Issue #1895)', async () => {
       vi.useFakeTimers();
 
+      // `/model <id>` switches in place and prints `● Model changed from … for
+      // this session.` — measured on 1.0.80 and captured as
+      // `copilot-picker-1895/model-arg-immediate.txt`. No picker is ever drawn.
+      //
+      // The pane is nonetheless mocked as a picker here, which is the strongest
+      // form of the assertion: even if copilot DID somehow show one, the
+      // argument form must not answer it on the operator's behalf. The old code
+      // waited 5s for exactly this screen and then sent `C-m` into it.
       const { hasSession, capturePane, sendSpecialKey } = await import('@/lib/tmux/tmux');
       vi.mocked(hasSession).mockResolvedValue(true);
-
-      let callCount = 0;
-      vi.mocked(capturePane).mockImplementation(async () => {
-        callCount++;
-        if (callCount <= 3) {
-          return 'Search models...';
-        }
-        return '> ';
-      });
+      vi.mocked(capturePane).mockResolvedValue(
+        [
+          '   Recommended models',
+          ' ❯  Search models…',
+          ' ↑/↓ to navigate · enter to select · esc to cancel',
+        ].join('\n'),
+      );
 
       const promise = tool.sendModelCommand('test-wt', 'gpt-5-mini');
       await vi.advanceTimersByTimeAsync(40000);
-      await promise;
+      await promise.catch(() => undefined);
 
-      expect(sendSpecialKey).toHaveBeenCalledWith(
-        'mcbd-copilot-test-wt',
-        'C-m'
-      );
+      expect(sendSpecialKey).not.toHaveBeenCalledWith('mcbd-copilot-test-wt', 'C-m');
 
       vi.useRealTimers();
     });
@@ -273,7 +257,16 @@ describe('CopilotTool', () => {
     it('should return true when selection list is detected', async () => {
       const { hasSession, capturePane } = await import('@/lib/tmux/tmux');
       vi.mocked(hasSession).mockResolvedValue(true);
-      vi.mocked(capturePane).mockResolvedValue('Search models...');
+      // The picker's key-hint footer at the bottom of the pane — the only thing
+      // `isCopilotSelectionFrame` reads (Issue #1895). `Search models…` alone is
+      // deliberately NOT enough any more.
+      vi.mocked(capturePane).mockResolvedValue(
+        [
+          '   Recommended models',
+          ' ❯  Search models…',
+          ' ↑/↓ to navigate · enter to select · esc to cancel',
+        ].join('\n'),
+      );
 
       // Access private method for testing
       const waitForSelectionList = (tool as unknown as {
@@ -303,6 +296,93 @@ describe('CopilotTool', () => {
       expect(result).toBe(false);
 
       vi.useRealTimers();
+    });
+  });
+
+  /**
+   * Issue #1905. Until this Issue nothing reached this method from the product:
+   * `POST /api/worktrees/:id/kill-session` called `lib/tmux`'s `killSession`
+   * directly and the Assistant session route (the only other caller) does not
+   * allow copilot. Both defects below are therefore first-time regressions,
+   * pinned against measurements on GitHub Copilot CLI 1.0.80.
+   */
+  describe('killSession (Issue #1905)', () => {
+    async function runKill(): Promise<{
+      sendKeys: ReturnType<typeof vi.fn>;
+      sendSpecialKey: ReturnType<typeof vi.fn>;
+      sendSpecialKeys: ReturnType<typeof vi.fn>;
+      killSession: ReturnType<typeof vi.fn>;
+    }> {
+      const tmux = await import('@/lib/tmux/tmux');
+      vi.mocked(tmux.hasSession).mockResolvedValue(true);
+      vi.useFakeTimers();
+      const promise = tool.killSession('feature-foo');
+      await vi.runAllTimersAsync();
+      await promise;
+      vi.useRealTimers();
+      return tmux as unknown as {
+        sendKeys: ReturnType<typeof vi.fn>;
+        sendSpecialKey: ReturnType<typeof vi.fn>;
+        sendSpecialKeys: ReturnType<typeof vi.fn>;
+        killSession: ReturnType<typeof vi.fn>;
+      };
+    }
+
+    /**
+     * The body used to be the bare word `exit` batched with its Enter into one
+     * `send-keys exit C-m`. Measured on 1.0.80, that spelling does end the
+     * process — the Issue's premise that it only becomes a chat message is
+     * wrong for this version — but it is indistinguishable from a prompt and
+     * the batched form is the shape #1471 removed everywhere else.
+     */
+    it('types the slash exit command without batching Enter into it', async () => {
+      const { sendKeys } = await runKill();
+
+      expect(sendKeys).toHaveBeenCalledWith('mcbd-copilot-feature-foo', COPILOT_EXIT_COMMAND, false);
+      expect(COPILOT_EXIT_COMMAND).toBe('/exit');
+      // No `sendEnter: true` batch, and no bare `exit` body, anywhere.
+      for (const call of sendKeys.mock.calls) {
+        expect(call[2]).toBe(false);
+        expect(call[1]).not.toBe('exit');
+      }
+    });
+
+    it('submits with a separate Enter, after the body and after the interrupt', async () => {
+      const { sendSpecialKey, sendSpecialKeys } = await runKill();
+
+      expect(sendSpecialKey).toHaveBeenCalledWith('mcbd-copilot-feature-foo', 'C-c');
+      expect(sendSpecialKeys).toHaveBeenCalledWith('mcbd-copilot-feature-foo', ['Enter']);
+      expect(sendSpecialKey.mock.invocationCallOrder[0]).toBeLessThan(
+        sendSpecialKeys.mock.invocationCallOrder[0]
+      );
+    });
+
+    /**
+     * The wait between the submit and the tmux kill. 11 samples of copilot
+     * 1.0.80's shutdown ran 1.006 s to 2.193 s, so the generic
+     * `TUI_EXIT_WAIT_MS` (500) guaranteed the kill landed mid-shutdown. Held to
+     * the measurement rather than to the constant's identity, so lowering the
+     * constant back under a second fails here.
+     */
+    it('waits longer than the slowest measured shutdown before force-killing', () => {
+      expect(COPILOT_EXIT_WAIT_MS).toBeGreaterThan(2193);
+      expect(COPILOT_EXIT_WAIT_MS).toBeGreaterThan(TUI_EXIT_WAIT_MS);
+    });
+
+    it('still force-kills the tmux session as the fallback', async () => {
+      const { killSession } = await runKill();
+      expect(killSession).toHaveBeenCalledWith('mcbd-copilot-feature-foo');
+    });
+
+    it('does not touch the pane when there is no session to exit', async () => {
+      const tmux = await import('@/lib/tmux/tmux');
+      vi.mocked(tmux.hasSession).mockResolvedValue(false);
+
+      await tool.killSession('feature-foo');
+
+      expect(tmux.sendKeys).not.toHaveBeenCalled();
+      expect(tmux.sendSpecialKeys).not.toHaveBeenCalled();
+      expect(tmux.killSession).toHaveBeenCalledWith('mcbd-copilot-feature-foo');
     });
   });
 });

@@ -1,0 +1,131 @@
+version: 1
+title: "Issue #2001: 端末間で通知を消し込む（iPhone で対応しても Android の通知が残り続ける）"
+goal: |
+  https://github.com/Kewton/CommandMate/issues/2001 を実装してください。
+  Epic は #2002 で、#1999（Auto-Yes 抑止）と #2000（要対応の軸・失敗通知）はマージ済みです
+  （develop `9d2a730b`）。本 Issue は 3 本目・最後です。
+
+  ## 【最重要】Issue の提案は実現できない可能性があります — ここを最初に確定してください
+
+  Issue 本文は「サーバが**無音**（`silent: true`）で解決イベントを送り、SW は
+  **`showNotification` を呼ばず** `getNotifications({tag})` → `close()` だけする」と提案し、
+  「**iOS の制約**を実機で確認せよ」と書いています。
+
+  **しかしこれは iOS だけの問題ではないかもしれません。** この repo は
+
+      src/components/notifications/NotificationsSettings.tsx:154
+        userVisibleOnly: true,
+
+  で購読しています。`userVisibleOnly: true` は「**受け取った push は必ず通知として表示する**」という
+  ブラウザとの契約で、現状これ以外の値は主要ブラウザが受け付けません。この契約下では
+  「表示せず close だけ」は**全ブラウザで契約違反**になり得ます（実装は無音 push に小さな予算を
+  与えており、超過すると「このサイトはバックグラウンドで更新されました」等の汎用通知が出る／
+  購読が取り消される、という挙動が知られています）。
+
+  **したがって最初のタスクは実装ではなく確定です:**
+
+  1. `userVisibleOnly: true` の下で「表示せず close だけ」が成立するかを、
+     **仕様（Push API / Notifications API）と各ブラウザの実装から**確定してください。
+  2. 成立しない場合、採れる形を列挙して**根拠つきで 1 つ選んでください**。例:
+     - 無音 push の予算内で運用する（予算・超過時の挙動・iOS の購読取消リスクを明示）
+     - 同じ `tag` で「対応済み」を出して古い通知を畳む（**確実だが通知が 1 回増える＝Epic の目的と逆方向**。
+       採るなら「増える 1 回」が許容できる根拠を書くこと）
+     - push を使わず別手段にする（次の push の到着時に畳む／アプリを開いたときに畳む 等）
+     - **iOS だけ諦める**（その場合は「その事実と代替」を `docs/` に明記すること＝受入条件）
+  3. **選んだ形が Issue の提案と違う場合、それは逸脱ではなく訂正です。** commit message の
+     「下調べとの食い違い」節に、Issue 本文のどの前提が成り立たなかったかを書いてください。
+
+  ユーザーの指示: **「ワーカーに実測させて決める」**。私が今ここで決め打ちしません。
+
+  ## 実機確認について（ここだけは代行できません）
+
+  受入条件に「iOS / Android のそれぞれで実機確認」がありますが、**私にもあなたにも実機はありません。**
+  ユーザーが実施します。そこで**あなたの成果物は次の 2 つです**:
+
+  - 実装＋自動テスト（unit / integration）で、**実機なしで固められる範囲は全部固める**
+  - `docs/` に**実機確認手順書**を書く。最低限:
+    - iPhone → Android の**双方向**（片方で応答したらもう片方が消えるか）
+    - 解決イベントが**音・バイブを伴わないこと**の確認方法
+    - **新しい通知が表示されないこと**の確認方法（出るなら、それが上記 2 で選んだ形の想定内か）
+    - 購読 **1 台のとき**に挙動が変わらないこと／**0 台のとき**に例外が出ないこと
+    - iOS で成立しなかった場合に**何を記録すればよいか**（次の Issue の材料になる形で）
+
+  ## 私の下調べ（推奨であって確定ではない。裏取りし、食い違えば実測を正とする）
+
+  develop `9d2a730b` で読んだ結果です。**そのまま信じないでください。**
+
+  | 事実 | 場所 |
+  |---|---|
+  | 全購読へファンアウト（購読は端末ごとの行） | `src/lib/db/push-subscriptions-db.ts` `getPushSubscriptionsForKind` |
+  | `tag` は `` `${event.worktreeId}:${event.kind}` `` | `src/lib/push/push-sender.ts:267` |
+  | SW の `push` は `showNotification` を呼ぶだけ | `public/sw.js:147-170`（`renotify: true`） |
+  | `notificationclick` の `close()` はタップした端末だけ | `public/sw.js:172` |
+  | 解決の検知 | `observeWaitingEdge({ waiting: false })`（`polling/response-checker.ts`） |
+  | `getNotifications` / `silent` は SW 未使用 | `public/sw.js` に出現しない |
+
+  **#2000 で `kind` が 3 値（`prompt` / `completion` / `failure`）になりました。**
+  `tag` も `<worktreeId>:failure` が増えています。**消し込みの対象をどの kind にするかを決めて
+  根拠を書いてください**（失敗通知は「解決」の定義が待機と違います）。
+
+  ### 【注意】`public/sw.js` には整合ガードがあります
+
+  `tests/unit/pwa/sw-file.test.ts` が `public/sw.js` を読み込み、
+  `src/lib/pwa/cache-policy.ts` との同期と safety invariants を検査します。
+  `tests/unit/pwa/sw-push.test.ts` も SW の push 挙動を見ています。
+  **sw.js を触ると赤くなる可能性が高いので、両方を通してください。**
+  ガードを緩めて通すのではなく、ガードが見ている不変条件を保ったまま実装してください。
+
+  ## 設計上の要求
+
+  1. **fire-and-forget。** 解決イベントの送信は失敗してもポーラを止めない
+     （既存の `notifyPushSubscribers` と同じ扱い）。購読 0 件でも例外を出さない。
+  2. **通知量が増える点を評価してください。** 解決のたびに Push を 1 通増やすので、
+     Push サービスへの送信数とバッテリ影響が妥当かを根拠つきで書いてください。
+     **#1999 / #2000 が減らした通知を、この Issue が増やして帳消しにしてはいけません。**
+  3. **判定は理由コードつきでログに出す**（`docs/design/discoverability-principle.md`）。
+  4. **#1999 の `prompt-push-gate` と #2000 の `failure-episode-state` を壊さない。**
+
+  ## 検証（必須）
+
+  - **変異注入で空振り緑を反証してください。** 少なくとも:
+    (a) 解決イベントの送信を殺すと、対応するテストが赤
+    (b) SW 側の `getNotifications`→`close` を殺すと、SW のテストが赤
+    (c) 購読 0 件・1 件の分岐を壊すと、対応するテストが赤
+    各変異を 1 つずつ入れて対象テストのみ実行し、元に戻して再確認。結果を commit message に表で。
+  - 宣言ゲート 11 本すべて（`verify.gates`）。
+
+  ## 成果物
+
+  - 単一 commit（PR は作らないでください。私が作ります）。
+  - `dev-reports/changelog/issue-2001.md` に断片を 1 行で。形式は厳密に
+    `- **<type>(<scope>): <subject>** (#2001): <body>`（`(#2001)` は太字の**外側**、改行なし）。
+  - `dev-reports/module-reference/issue-2001.md` に追記指示（行キーの実在を grep で確認してから）。
+  - commit message に「意図的な逸脱」「下調べとの食い違い」「変異注入」の節。
+  - 完了したら最後に `IMPL_COMPLETED` とだけ出力してください。
+scope:
+  allow:
+    - "public/sw.js"
+    - "src/lib/push/**"
+    - "src/lib/pwa/**"
+    - "src/lib/db/**"
+    - "src/lib/polling/**"
+    - "src/lib/session/**"
+    - "src/components/notifications/**"
+    - "src/app/api/push/**"
+    - "src/types/**"
+    - "locales/**"
+    - "docs/**"
+    - "tests/unit/**"
+    - "tests/integration/**"
+    - "dev-reports/changelog/**"
+    - "dev-reports/module-reference/**"
+  deny: []
+verify:
+  gates: [token-discipline, control-chars, claudemd-size, route-exports, build-cli, build-server, lint, build, typecheck, integration, unit]
+autoYes:
+  mode: allow-listed
+  allowPromptTypes: [yes_no, multiple_choice]
+  denyPatterns: []
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true
