@@ -13,6 +13,8 @@ import {
   updateAssistantMessageStatus,
 } from '@/lib/db';
 import { createLogger } from '@/lib/logger';
+import { reportToolUnavailable } from '@/lib/cli-tools/start-availability';
+import { getAssistantChatFailureTarget } from './assistant-chat-subject';
 import { buildNonInteractivePrompt } from './non-interactive-prompt-builder';
 import {
   cancelAssistantExecutionProcess,
@@ -63,6 +65,34 @@ function buildCommandArgs(cliToolId: CLIToolType, resumeSessionId?: string): str
     default:
       return [];
   }
+}
+
+/**
+ * Ring for a `claude -p` that could not be exec'd at all (Issue #2022).
+ *
+ * `POST /api/assistant/start` refuses a missing binary and notifies, so this is
+ * the narrow second window: the CLI disappeared (or stopped being executable)
+ * between that check and the send. Assistant Chat creates no tmux session, so
+ * `spawn`'s ENOENT is the only refusal this path ever produces — the exact fact
+ * `SessionStartUnavailableError` names, which is why the existing reason is
+ * reused rather than a new one invented.
+ *
+ * ENOENT only. Every other `error` event (EACCES, EAGAIN, a killed child) is
+ * already reported to the user as a failed message, and widening this to "the
+ * child errored" would turn one missing dependency into a notification for every
+ * transient exec fault.
+ *
+ * Fire-and-forget and swallowing its own faults, like every other producer: a
+ * phone that cannot be reached must not change what the conversation does next.
+ */
+function reportMissingAssistantBinary(
+  cliToolId: CLIToolType,
+  repository: Repository,
+  error: unknown
+): void {
+  if ((error as { code?: unknown }).code !== 'ENOENT') return;
+
+  reportToolUnavailable(cliToolId, getAssistantChatFailureTarget(repository));
 }
 
 function parseExecutionOutput(cliToolId: CLIToolType, stdout: string) {
@@ -215,6 +245,12 @@ export async function startNonInteractiveAssistantExecution(params: {
       }
       settled = true;
       unregisterAssistantExecutionProcess(execution.id);
+
+      // Issue #2022. Before the DB writes, so a throw in one of them cannot
+      // swallow the notification the operator needs to see.
+      runSafely('missing-binary-report-failed', () => {
+        reportMissingAssistantBinary(cliToolId, repository, error);
+      });
 
       try {
         updateAssistantExecution(db, execution.id, {
