@@ -161,6 +161,18 @@ function printSummary(result: ReconcileResult, args: CliArgs): void {
       const desc = added.enDescription ? ` — ${added.enDescription}` : ' — (needs description)';
       console.log(`  + [${added.tool}] /${added.name}${desc}`);
     }
+    // Issue #2024: the counterpart of the exclusions file. That file makes a
+    // "do not add this" decision readable to the tool; nothing made the *other*
+    // outcome readable to the operator, so a correct addition landed as a wall
+    // of red pins whose reasoning had to be re-derived from old issues. Say it
+    // here, at the moment the additions are on screen.
+    console.log(
+      '\n  Applying these will turn the catalog pins in\n' +
+        '  tests/unit/lib/standard-commands.test.ts red (total / per-tool counts, and the\n' +
+        '  named-set assertions). That is the review gate, not a defect: move each pin\n' +
+        '  *with* its evidence (source + version), and never relax it to stop the red.\n' +
+        `  Reasoning: the "$comment" block in ${path.relative(REPO_ROOT, EXCLUSIONS_PATH)}.`
+    );
   }
 
   const stamped = Object.entries(diff.verifiedAgainstUpdated);
