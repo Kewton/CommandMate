@@ -11,6 +11,7 @@ import { reconcileSessionGeometry, sendSpecialKey, type SessionGeometryOptions }
 import { resolveComposerSpec } from './composer-spec';
 import { resolveCaptureSpec } from './capture-spec';
 import { resolveGracefulExitSpec } from './graceful-exit';
+import { reportSessionStartFailure } from './start-availability';
 import type {
   CaptureSpec,
   ComposerSpec,
@@ -108,18 +109,15 @@ export abstract class BaseCLITool implements ICLITool {
    * nothing left to remember: implement {@link launchSession} and the reporting
    * is already wired.
    *
-   * ## Fire-and-forget, and a deferred import
+   * ## Where the reporting itself lives
    *
-   * The notification is NOT awaited. Web push fans out to every registered
-   * device, and holding a 503 open for that would make a failed start slower to
-   * report than a successful one. `notifySessionStartFailurePush` contains its
-   * own failures, and the `.catch` here is the belt for the import itself.
-   *
-   * `await import()` rather than a static import, for the reason Issue #1984
-   * gives on `CLIToolManager.stopPollers`: `push/failure-push-notifier` pulls
-   * the database and `web-push` behind it, and every one of the seven tool
-   * modules loads THIS file. Deferring it to the failure path keeps the
-   * cli-tools graph the size #1984 cut it down to.
+   * In `./start-availability` (Issue #2022), not inline here. It is still the
+   * only line in the repository that calls `notifySessionStartFailurePush`, and
+   * it is still fire-and-forget behind an `await import()` for the reasons that
+   * module's docblock spells out. It moved so that a caller which never creates
+   * a tmux session — Assistant Chat, which spawns `claude -p` directly and so
+   * never reaches this method — can report through the same one窓口 instead of
+   * opening a second.
    *
    * @param worktreeId - Worktree ID
    * @param worktreePath - Worktree path
@@ -136,17 +134,15 @@ export abstract class BaseCLITool implements ICLITool {
     try {
       await this.launchSession(worktreeId, worktreePath, instanceId, model);
     } catch (error: unknown) {
-      void import('../push/failure-push-notifier')
-        .then(({ notifySessionStartFailurePush }) =>
-          notifySessionStartFailurePush({
-            worktreeId,
-            cliToolId: this.id,
-            instanceId,
-            toolName: this.name,
-            error,
-          })
-        )
-        .catch(() => {});
+      reportSessionStartFailure(
+        {
+          worktreeId,
+          cliToolId: this.id,
+          instanceId,
+          toolName: this.name,
+        },
+        error
+      );
       throw error;
     }
   }

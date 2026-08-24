@@ -139,6 +139,20 @@ export interface NotificationEvent {
    * resolution is a *displayed* notification and not a silent close.
    */
   resolved?: boolean;
+  /**
+   * Where tapping this notification goes (Issue #2022).
+   *
+   * Omitted — which is every caller that shipped before #2022 — the target is
+   * `/worktrees/<worktreeId>`, unchanged. It is set only by a producer whose
+   * subject is not a worktree row: Assistant Chat is scoped to a repository and
+   * lives at `/chat`, so the derived URL would point at a worktree page that
+   * does not exist.
+   *
+   * The `tag` is deliberately NOT derived from it. A tag groups the cards a
+   * Service Worker may replace, and that grouping is per subject
+   * (`worktreeId:kind`), not per destination.
+   */
+  url?: string;
 }
 
 /** The JSON payload delivered to the Service Worker. Minimal by design. */
@@ -295,7 +309,8 @@ export function buildPushPayload(
     title,
     body,
     worktreeId: event.worktreeId,
-    url: `/worktrees/${event.worktreeId}`,
+    // Issue #2022: the worktree page is the default, not the only answer.
+    url: event.url ?? `/worktrees/${event.worktreeId}`,
     // Unchanged by #1790, and deliberately: the escalation carries the same tag
     // as the notification it follows up, so the Service Worker replaces the
     // stale one instead of stacking a second card for the same wait.

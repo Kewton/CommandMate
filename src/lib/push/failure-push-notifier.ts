@@ -10,7 +10,7 @@
  * |---------------------|--------------------------------------------|--------|
  * | verification failed | `lib/verification/gate-runner`              | event  |
  * | upstream API fault  | `lib/polling/response-checker` (#1839 match)| level  |
- * | session start failed| `lib/cli-tools/base` (all 7 tools, #2009)   | event  |
+ * | session start failed| `lib/cli-tools/start-availability` (#2009/#2022)| event |
  *
  * The shape column is the whole design. An **event** fires once by construction
  * — a run closes once, a start attempt throws once — so its only guard is the
@@ -53,6 +53,7 @@ import {
   SESSION_START_FAILED_CODE,
   isSessionStartTimeoutError,
   isSessionStartUnavailableError,
+  type SessionStartSubject,
 } from '@/lib/session/session-start-error';
 import { observeUpstreamFaultEdge } from './failure-episode-state';
 import { notifyPushSubscribers, type FailurePushReason } from './push-sender';
@@ -111,6 +112,11 @@ interface RaiseFailurePushInput {
   excerpt?: string;
   /** Extra fields for the log line only. Never sent to a device. */
   logContext?: Record<string, unknown>;
+  /**
+   * Title and tap target for a subject that is not a worktree row (#2022).
+   * Omitted, both are resolved from {@link worktreeId} exactly as before.
+   */
+  subject?: SessionStartSubject;
 }
 
 /**
@@ -141,12 +147,16 @@ async function raiseFailurePush(input: RaiseFailurePushInput): Promise<void> {
   try {
     await notifyPushSubscribers({
       worktreeId: input.worktreeId,
-      worktreeName: resolveWorktreeName(input.worktreeId),
+      // Issue #2022: a subject that is not a worktree row names itself. The
+      // worktree lookup is not merely redundant for one — it would answer with
+      // the raw id, which for Assistant Chat is a uuid nobody recognises.
+      worktreeName: input.subject?.name ?? resolveWorktreeName(input.worktreeId),
       kind: 'failure',
       agentName: input.instanceId,
       instanceId: input.instanceId,
       excerpt: input.excerpt,
       failure: { reason: input.reason, signature: input.signature },
+      ...(input.subject ? { url: input.subject.url } : {}),
     });
   } catch (error) {
     // `notifyPushSubscribers` already contains its own failures; this is the
@@ -350,6 +360,13 @@ export interface SessionStartFailurePushInput {
    * {@link classifySessionStartFailure}.
    */
   error: unknown;
+  /**
+   * Title and tap target, for a start that does not belong to a worktree
+   * (Issue #2022) — Assistant Chat, which is repository-scoped and lives at
+   * `/chat`. Omitted by every tmux-session caller, which keeps the worktree
+   * title and the `/worktrees/<id>` link #2000 shipped.
+   */
+  subject?: SessionStartSubject;
 }
 
 /**
@@ -433,10 +450,14 @@ function readErrorCode(error: unknown): string | undefined {
 /**
  * Notify that a CLI session could not be started. Never throws.
  *
- * Called from exactly one place — `BaseCLITool.startSession`, the method all
- * seven tools inherit (Issue #2009). Before that it was called from
- * `claude-session`'s throw site, which is why six of the seven agents failed
- * silently: the other six never had a line to call it from.
+ * Called from exactly one place — `reportSessionStartFailure` in
+ * `lib/cli-tools/start-availability` (Issue #2009 / #2022). Before #2009 it was
+ * called from `claude-session`'s throw site, which is why six of the seven
+ * agents failed silently: the other six never had a line to call it from. #2009
+ * moved it to `BaseCLITool.startSession`, the method all seven tools inherit;
+ * #2022 moved the line itself one step further out, because Assistant Chat
+ * never reaches that method — it spawns `claude -p` rather than a tmux session —
+ * and the alternative was a second, private call site.
  *
  * No edge of its own, and deliberately: this is raised from a `throw`, so its
  * rate is bounded by how often something asks to start the session rather than
@@ -470,5 +491,6 @@ export async function notifySessionStartFailurePush(
     signature: verdict.signature,
     excerpt: verdict.excerpt,
     logContext: { cliToolId: input.cliToolId },
+    subject: input.subject,
   });
 }
