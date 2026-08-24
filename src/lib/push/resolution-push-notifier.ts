@@ -44,6 +44,10 @@
  *  - **A card was actually fanned out** (`prompt-card-state`). A wait Auto-Yes
  *    answered never rang anybody (#1999), so there is nothing to clear and
  *    nothing is sent. This is the condition that keeps #1999's saving intact.
+ *    Issue #2057 made that mark survive a restart, so this condition now
+ *    answers about the device rather than about the process: before it, a
+ *    server that came back while a wait was still open could read `no-card`
+ *    for a card that was demonstrably still on the reader's other phone.
  *  - **Nothing in the worktree is still waiting.** The card is per worktree, so
  *    a second instance still waiting means it is still true.
  *  - **At least {@link MIN_DEVICES_FOR_CROSS_DEVICE_CLEAR} devices are
@@ -117,13 +121,24 @@ export interface ResolutionPushDecision {
  * Pure: reads the card state, the episode store and the subscription count and
  * writes none of them, so a test can assert the reason without the fan-out and
  * {@link notifyPromptResolved} can log the same decision it acts on.
+ *
+ * @param now Epoch ms the closing edge was observed. Overridable so a test can
+ *   exercise {@link prompt-card-state!PROMPT_CARD_MAX_AGE_MS} without a fake
+ *   clock.
  */
-export function decidePromptResolution(worktreeId: string): ResolutionPushDecision {
+export function decidePromptResolution(
+  worktreeId: string,
+  now: number = Date.now()
+): ResolutionPushDecision {
   if (!isPushConfigured()) {
     return { send: false, reason: 'push-unconfigured' };
   }
 
-  if (!hasPromptCard(worktreeId)) {
+  // Issue #2057: `now` reaches exactly one place — the card mark's age. The
+  // mark is durable now, so it is the one input to this decision that can be
+  // older than the process asking about it, and the closing edge already knows
+  // when it was observed (`PromptResolvedInput.at`).
+  if (!hasPromptCard(worktreeId, now)) {
     return { send: false, reason: 'no-card' };
   }
 
@@ -192,7 +207,7 @@ export interface PromptResolvedInput {
  */
 export async function notifyPromptResolved(input: PromptResolvedInput): Promise<void> {
   const { worktreeId, agentName, at = Date.now() } = input;
-  const decision = decidePromptResolution(worktreeId);
+  const decision = decidePromptResolution(worktreeId, at);
   const context = {
     worktreeId,
     instanceId: agentName,
