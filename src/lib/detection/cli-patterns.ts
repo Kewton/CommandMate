@@ -879,7 +879,7 @@ export const OPENCODE_PERMISSION_PATTERN =
  * lost branch A and fell through to `running`/`default` while the frame was
  * fresh, and to `ready`/`no_recent_output` once the poller's
  * `lastOutputTimestamp` aged past `STALE_OUTPUT_THRESHOLD_MS` -- both of them
- * `statusEvidence: 'none'` (`deriveScraperEvidence`), i.e. a generating session
+ * `statusEvidence: 'none'`, i.e. a generating session
  * published with no evidence and, on the second path, as FINISHED. That is the
  * "vocabulary changed, so `ready` came back" failure design rule D1 names
  * (`docs/design/multi-agent-state-architecture.md` §4 D1, row #1894), and the

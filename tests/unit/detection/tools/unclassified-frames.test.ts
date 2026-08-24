@@ -1,40 +1,33 @@
 /**
  * The 別表: every frame that publishes `isUnclassifiedActive: true`
- * (Issue #1928, 方針書 §4 D1 決定 2 / DR2-001 / §11).
+ * (Issue #1928, 方針書 §4 D1 決定 2 / DR2-001 / §11; corrected by #2011).
  *
- * §4 D1 決定 2 is explicit about what may and may not be pinned here:
+ * The flag means "no rule could read this frame", and the table below is the
+ * complete list of live captures in this repository that answer `true`. It is
+ * pinned by equality of the whole list rather than by spot checks, so anything
+ * that widens the set has to edit this file — the point being that a widening is
+ * visible in a diff and not discovered in production when `TerminalEscapeHatch`
+ * starts opening on ordinary idle frames. Which is exactly what happened: #1927
+ * widened it by deriving the flag from `statusEvidence`, no equality pin covered
+ * the route it widened, and every idle Claude pane opened the hatch (#2011).
  *
- *  - the `no_recent_output` and `default` routes keep their truth value, and the
- *    existing fixtures pin that equivalence;
- *  - the `input_prompt` route does NOT. It is `false` for every frame today and
- *    the rollout deliberately widens it, so **an equivalence pin there would
- *    fail by design**. What DR2-001 asks for instead is a table: the frames that
- *    newly answer `true`, enumerated by name.
+ * ## What #2011 changed about this file
  *
- * This is that table. It is pinned by equality of the whole list rather than by
- * spot checks, so a rollout step that widens the set has to edit this file — the
- * point being that the widening is visible in a diff and not discovered in
- * production when `TerminalEscapeHatch` starts opening on ordinary idle frames.
+ * The `input_prompt` route does NOT widen the flag, and the second describe
+ * below now pins that. `statusEvidence` widens; the flag does not, because a
+ * composer row an idle rule declined to vouch for is a frame that was READ. The
+ * two questions are separated in `status-evidence.ts`.
  *
- * ## The measurement this file records
- *
- * Across every live capture in the repository, **no frame reaches
- * `input_prompt` with no evidence**. The `evidence: 'none'` set is exactly six
- * opencode frames, all of them on the `unknown_frame` floor — which was
- * `default` (and therefore already `true`) before #1927. So the widening
- * §6.1 row (2) authorises has, as of this branch, no live-capture membership at
- * all; the second table below shows what it WOULD catch, by taking the evidence
- * off a real capture.
- *
- * The verdict pinned is the MERGED one (DR2-003): `mergeStructuredStatus` can
- * clear the flag, and a scraper-only pin cannot see that.
+ * The verdict pinned is the MERGED one (DR2-003): `mergeStructuredStatus` sees
+ * the structured layer, and a scraper-only pin cannot see what it does.
  *
  * @vitest-environment node
  */
 
 import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
+import { IDLE_EVIDENCE_ENV_VAR } from '@/config/detection-evidence-config';
 import { stripAnsi } from '@/lib/detection/cli-patterns';
 import {
   detectSessionStatus,
@@ -42,7 +35,12 @@ import {
   STATUS_REASON,
 } from '@/lib/detection/status-detector';
 import { mergeStructuredStatus } from '@/lib/session/current-output-builder';
+import { isUnclassifiedFrame } from '@/lib/session/status-evidence';
 import type { CLIToolType } from '@/lib/cli-tools/types';
+
+afterEach(() => {
+  delete process.env[IDLE_EVIDENCE_ENV_VAR];
+});
 
 const LIVE_FIXTURES = path.resolve(__dirname, '../../lib/detection/fixtures');
 const CLAUDE_1927_FIXTURES = path.resolve(__dirname, 'claude/fixtures');
@@ -62,6 +60,7 @@ const TOOL_BY_PREFIX: Readonly<Record<string, CLIToolType>> = {
  */
 function unclassifiedOf(raw: string, tool: CLIToolType): {
   isUnclassifiedActive: boolean;
+  evidence: string;
   status: string;
   reason: string;
 } {
@@ -72,12 +71,17 @@ function unclassifiedOf(raw: string, tool: CLIToolType): {
       reason: scraper.reason,
       thinking: isGeneratingStatus({ status: scraper.status, reason: scraper.reason }),
       evidence: scraper.evidence,
-      isUnclassifiedActive: scraper.evidence === 'none',
+      // Issue #2011: the builder's expression, which is no longer
+      // `evidence === 'none'`. Calling the shared predicate rather than
+      // restating it is deliberate — a copy here would agree with a copy in the
+      // builder that had drifted the same way.
+      isUnclassifiedActive: isUnclassifiedFrame(scraper.status, scraper.reason),
     },
     null,
   );
   return {
     isUnclassifiedActive: merged.isUnclassifiedActive,
+    evidence: merged.evidence,
     status: merged.status,
     reason: merged.reason,
   };
@@ -116,9 +120,16 @@ function readCorpus(): CorpusFrame[] {
 }
 
 /**
- * The table. Every live capture whose merged verdict carries no evidence.
+ * The table. Every live capture whose merged verdict is an unclassified frame.
  *
- * All six are opencode frames on the `unknown_frame` floor: a composer holding
+ * The Claude entry is #2011's positive control: a verbatim capture of the
+ * `/help` overlay, which hides the composer entirely and so reaches the
+ * `default` floor. It is what makes the rest of this Issue's fixtures mean
+ * something — five of them are idle Claude panes captured minutes apart from the
+ * same session, and a change that made the flag `false` everywhere would satisfy
+ * every one of those while breaking the hatch this row protects.
+ *
+ * The six opencode entries are on the `unknown_frame` floor: a composer holding
  * residual text with no finished-turn marker above it (#1883), an aborted turn
  * whose `▣ Build` row has no duration (#1893), the pane after the first of two
  * Escapes (#1894), the ctrl+p palette and a composer with a typed `1.` (#1896),
@@ -126,6 +137,7 @@ function readCorpus(): CorpusFrame[] {
  * rules looked at and could not read, which is what `unknown_frame` says.
  */
 const UNCLASSIFIED_LIVE_FRAMES: readonly string[] = [
+  'claude-live-2011/help-overlay.txt',
   'opencode-live-1883/composer-residual.txt',
   'opencode-live-1893/turn-aborted-no-duration.txt',
   'opencode-live-1894/double-esc-interrupted.txt',
@@ -133,6 +145,9 @@ const UNCLASSIFIED_LIVE_FRAMES: readonly string[] = [
   'opencode-live-1896/composer-typed-numbered.txt',
   'opencode-live-1906/composer-multiline-pending.txt',
 ];
+
+/** The floors an entry in the table above is allowed to be sitting on. */
+const FLOOR_REASONS: readonly string[] = [STATUS_REASON.UNKNOWN_FRAME, STATUS_REASON.DEFAULT];
 
 describe('[#1928] the 別表 of frames with no evidence', () => {
   const corpus = readCorpus();
@@ -149,22 +164,23 @@ describe('[#1928] the 別表 of frames with no evidence', () => {
     expect(observed).toEqual([...UNCLASSIFIED_LIVE_FRAMES]);
   });
 
-  it.each(UNCLASSIFIED_LIVE_FRAMES)('%s is on the unknown_frame floor, not the idle route', id => {
-    // The distinction DR2-001 turns on. These six were `running`/`default`
-    // before #1927 and therefore already `true`, so they are NOT part of the
-    // intentional widening — they are the equivalence half of the table.
+  it.each(UNCLASSIFIED_LIVE_FRAMES)('%s is on a detection floor, not the idle route', id => {
+    // The distinction DR2-001 turns on: every entry got here because no rule
+    // could read it, never because a rule read it and declined to vouch.
     const entry = corpus.find(f => f.id === id);
     expect(entry, id).toBeDefined();
 
     const verdict = unclassifiedOf(entry!.raw, entry!.tool);
     expect(verdict.status).toBe('running');
-    expect(verdict.reason).toBe(STATUS_REASON.UNKNOWN_FRAME);
+    expect(FLOOR_REASONS, id).toContain(verdict.reason);
   });
 
-  it('has no live capture on the input_prompt route — the widening is empty today', () => {
-    // Stated as a measurement rather than left implicit. When a tool's rollout
-    // starts catching real frames, this expectation is where it shows up, and
-    // the entry belongs in the table above with an explanation.
+  it('never puts the input_prompt route on the table, whatever the rollout says', () => {
+    // The pin #1927 was missing. `enforce` on every tool at once is the widest
+    // the evidence rollout can ever be, and even then no composer frame may
+    // reach this table: `input_prompt` means the frame WAS read.
+    process.env[IDLE_EVIDENCE_ENV_VAR] = '*=enforce';
+
     const onIdleRoute = corpus.filter(({ raw, tool }) => {
       const verdict = unclassifiedOf(raw, tool);
       return verdict.isUnclassifiedActive && verdict.reason === STATUS_REASON.INPUT_PROMPT;
@@ -172,9 +188,35 @@ describe('[#1928] the 別表 of frames with no evidence', () => {
 
     expect(onIdleRoute.map(f => f.id)).toEqual([]);
   });
+
+  it('has live captures the evidence rollout takes the proof off, and keeps them classified', () => {
+    // The measurement #2011 recorded: with every tool enforcing, the corpus DOES
+    // contain composer frames with no evidence — the five idle Claude panes
+    // captured for this Issue. Under #1927's derivation all five were
+    // `isUnclassifiedActive: true`, which is the production incident. The count
+    // is asserted so this cannot silently become "no such frames exist" and make
+    // the pin above vacuous.
+    process.env[IDLE_EVIDENCE_ENV_VAR] = '*=enforce';
+
+    const unproven = corpus.filter(({ raw, tool }) => {
+      const verdict = unclassifiedOf(raw, tool);
+      return verdict.reason === STATUS_REASON.INPUT_PROMPT && verdict.evidence === 'none';
+    });
+
+    expect(unproven.map(f => f.id)).toEqual([
+      'claude-live-2011/idle-tail-command-result.txt',
+      'claude-live-2011/idle-tail-model-saved.txt',
+      'claude-live-2011/idle-tail-new-task-clear.txt',
+      'claude-live-2011/idle-tail-tip-memory.txt',
+      'claude-live-2011/idle-tail-update-installed.txt',
+    ]);
+    for (const frame of unproven) {
+      expect(unclassifiedOf(frame.raw, frame.tool).isUnclassifiedActive, frame.id).toBe(false);
+    }
+  });
 });
 
-describe('[#1928] what the input_prompt widening WOULD catch', () => {
+describe('[#2011] the input_prompt route moves evidence, never the flag', () => {
   /**
    * A live claude capture with its completion marker reworded by one word.
    *
@@ -206,22 +248,30 @@ describe('[#1928] what the input_prompt widening WOULD catch', () => {
 
   const CLAUDE_IDLE_FIXTURE = path.join(CLAUDE_1927_FIXTURES, 'turn-complete-auto.txt');
 
-  it('turns an ordinary idle claude frame into an unclassified one', () => {
+  it('takes the evidence off an ordinary idle claude frame and leaves it classified', () => {
+    process.env[IDLE_EVIDENCE_ENV_VAR] = 'claude=enforce';
     const raw = readFileSync(CLAUDE_IDLE_FIXTURE, 'utf8');
     const mutated = withoutCompletionMarker(raw);
     expect(mutated).not.toBe(raw);
 
     const before = unclassifiedOf(raw, 'claude');
     expect(before.reason).toBe(STATUS_REASON.INPUT_PROMPT);
+    expect(before.evidence).toBe('positive');
     expect(before.isUnclassifiedActive).toBe(false);
 
+    // Issue #1927 made the SECOND assertion below `true`, and with it every idle
+    // Claude pane on develop. The frame did not become unreadable: the composer
+    // is still on screen, still the row the verdict was read from, and a human
+    // can still type into it. What the rewording removed is the PROOF that the
+    // turn is over — which is what `statusEvidence` is for.
     const after = unclassifiedOf(mutated, 'claude');
     expect(after.status).toBe('ready');
     expect(after.reason).toBe(STATUS_REASON.INPUT_PROMPT);
-    expect(after.isUnclassifiedActive).toBe(true);
+    expect(after.evidence).toBe('none');
+    expect(after.isUnclassifiedActive).toBe(false);
   });
 
-  it('is the only route that can widen: copilot and opencode fall to the floor instead', () => {
+  it('is not the route to the floor at all: copilot and opencode fall there instead', () => {
     // Both opt out of the generic composer check, so a frame their rules cannot
     // vouch for never reaches `input_prompt` at all — it lands on
     // `unknown_frame`. Recorded here so a later reader does not go looking for a
@@ -248,5 +298,8 @@ describe('[#1928] what the input_prompt widening WOULD catch', () => {
     const verdict = unclassifiedOf(rows.join('\n'), 'copilot');
     expect(verdict.isUnclassifiedActive).toBe(true);
     expect(verdict.reason).toBe(STATUS_REASON.UNKNOWN_FRAME);
+    // …and this is the shape that legitimately raises the flag: a tool whose own
+    // rules are the only rules that run for it, reporting that they read
+    // nothing. Not "a rule read the frame and declined to vouch for it".
   });
 });

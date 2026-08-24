@@ -25,8 +25,8 @@
  * | fresh frame | `running` / `default` (low) | `running` / `opencode_processing_indicator` (high) |
  * | `lastOutputTimestamp` older than `STALE_OUTPUT_THRESHOLD_MS` | **`ready` / `no_recent_output`** | `running` / `opencode_processing_indicator` |
  *
- * Both of the "before" rows are `statusEvidence: 'none'`
- * (`deriveScraperEvidence`) — a generating session published with no evidence,
+ * Both of the "before" rows are `statusEvidence: 'none'` — a generating
+ * session published with no evidence,
  * and on the staleness path published as FINISHED. That is exactly the failure
  * design rule D1 names for this Issue
  * (`docs/design/multi-agent-state-architecture.md` §4 D1, row #1894): the tool
@@ -64,7 +64,6 @@ import {
   OPENCODE_SKIP_PATTERNS,
   OPENCODE_TURN_COMPLETE_PATTERN,
 } from '@/lib/detection/cli-patterns';
-import { deriveScraperEvidence } from '@/lib/session/status-evidence';
 import { isOpenCodeComplete } from '@/lib/response-extractor';
 import { cleanOpenCodeResponse } from '@/lib/response-cleaner';
 import { resetDetectPromptCache } from '@/lib/detection/prompt-detector';
@@ -197,7 +196,9 @@ describe('Issue #1894: the interrupt window is running, on positive evidence', (
     expect(result.reason).toBe(STATUS_REASON.OPENCODE_PROCESSING_INDICATOR);
     expect(result.confidence).toBe('high');
     expect(result.hasActivePrompt).toBe(false);
-    expect(deriveScraperEvidence(result.status, result.reason)).toBe('positive');
+    // Issue #2011: read off the detector, which has been the producer since
+    // #1927. The downstream re-derivation this line used to call is gone.
+    expect(result.evidence).toBe('positive');
   });
 
   it.each(WINDOW_FRAMES)('does not let a stale poll turn %s into a completion', name => {

@@ -118,9 +118,12 @@ export interface CliToolSessionStatus {
    * three booleans and no reason at all. §7's rows "スクレイパが肯定的証拠を
    * 得られない" and "直前の確定状態" cannot be built on the other contract.
    *
-   * `'none'` means the frame was interactive and nothing on it could be read
-   * either way — the same fact `CurrentOutputResponse.isUnclassifiedActive`
-   * carries, from the same derivation (`status-evidence.ts`).
+   * `'none'` means the verdict rests on no positive proof: nothing on the frame
+   * could be read either way, OR the frame was read but the tool's §4 D1 idle
+   * rule declined to vouch for it. Issue #2011: NOT the same fact
+   * `CurrentOutputResponse.isUnclassifiedActive` carries — that one is
+   * `isUnclassifiedFrame` in `status-evidence.ts`, and the two sets stopped
+   * coinciding the moment the rollout gave a tool an idle rule that can decline.
    *
    * **The key is omitted rather than set to null when nothing is known**, for
    * the reason {@link model} gives: these objects are compared with `toEqual` in
