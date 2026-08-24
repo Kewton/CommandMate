@@ -96,10 +96,14 @@ export type {
   ResolutionPushReason,
   PromptResolvedInput,
 } from './resolution-push-notifier';
+// The card mark itself, durable across a restart since Issue #2057.
 export {
   markPromptCardShown,
   hasPromptCard,
   clearPromptCard,
   clearAllPromptCards,
+  forgetPromptCardMemory,
   promptCardCount,
+  PROMPT_CARD_KEY_PREFIX,
+  PROMPT_CARD_MAX_AGE_MS,
 } from './prompt-card-state';
