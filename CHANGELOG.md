@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **fix(assistant): Assistant Chat の未インストール起動失敗が push 通知を鳴らさない問題を修正** (#2022): `POST /api/assistant/start` が持っていた自前の `isInstalled()` 検査を、ツール自身の拒否（`SessionStartUnavailableError`）と唯一の通知窓口を通す形へ**付け替え**た。Issue 本文は「検査を削除すれば `cliTool.startSession()`（#2009 の seam）に到達する」としていたが実測では逆で、冒頭の 400 ガードが `NON_INTERACTIVE_TOOLS`（claude / codex / antigravity）以外を落とし、直後の同一述語の分岐が必ず早期 return するため、その `startSession()` はどの入力でも**到達不能**——削除すれば 503 ではなく `status: 'ready'` を返し、実際の失敗は後段 `spawn` の ENOENT として無音で現れていた。通知窓口は `lib/cli-tools/start-availability.ts` に移し（`BaseCLITool.startSession` もそこを呼ぶので `notifySessionStartFailurePush` の呼び出し行は 1 本のまま）、tmux セッションを作らない Assistant Chat も同じ窓口に載せた。通知はリポジトリ名を題に `/chat` を開く（worktree 行が主語でない初のケースなので `SessionStartSubject` で題と遷移先を渡す）。HTTP は 503 のまま・`code: SESSION_START_UNAVAILABLE` を追加し、本文はツール自身の文面（`CLI tool 'claude' is not installed` → `Claude Code is not installed. Please install it first.`）に変わる。`non-interactive-runner` の `spawn` ENOENT も同じ窓口へ接続した（ENOENT のみ、他の exec 失敗では鳴らさない）。
+
 ## [0.27.1] - 2026-08-24
 
 > **Highlight**: スラッシュコマンドカタログの保守機構を作り直したパッチリリースです。`catalog:refresh --write` が、前リリースで tool 別に分割済みの説明（locale 値がオブジェクト）へ 3 つ目のツールを足すときにフラットキーを発行し、**オブジェクト全体を 1 文字列で上書きして opencode / claude の説明を en・ja 同時に消していた**問題を修正しました（#2024。v0.27.0 の リリース作業中に unit 8 件が赤くなって発覚）。あわせて実機 probe（codex 0.149.0、陰性対照つき）で `/agent` が `/agents` へ改名されたことを確定し、カタログを codex 0.149.1 / claude 最新へ照合し直しています。さらにカタログ件数 pin（`toBe(244)` 等）を `src/config/slash-commands-attestations.json` （「版 V で source S は tool T についてこの集合を列挙した」の人間による記録）から導出する形に置き換え、**pin を緩めずに**「正しい追加なのに赤くなる → 数字を手で打ち直す → 根拠は commit message にしか残らない」というループを断ちました（#2026）。副次的に、上流の削除が「追加 0 件」で attestation だけを陳腐化させるため **週次 drift workflow が実際にはドリフトのある run を clean と読んで追跡 Issue を閉じていた**欠陥も修正しています。

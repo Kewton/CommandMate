@@ -143,6 +143,30 @@ export class SessionStartUnavailableError extends Error {
 }
 
 /**
+ * What a start failure is ABOUT, when the subject is not a worktree row
+ * (Issue #2022).
+ *
+ * Every failure notification that shipped before this one belonged to a
+ * worktree, so `failure-push-notifier` could resolve both the title and the tap
+ * target from the worktree id alone. Assistant Chat has neither: it is scoped to
+ * a repository, the id it would supply is a uuid the reader has never seen, and
+ * its screen is `/chat` — so a notification built the worktree way would carry a
+ * raw uuid as its title and link to a worktree page that does not exist.
+ *
+ * Declared here rather than next to `NotificationEvent` in `lib/push` because
+ * the two ends that need it — `lib/cli-tools`, which reports the failure, and
+ * `lib/push`, which renders it — already share this module and nothing else. A
+ * type imported from `push-sender` would put the push graph (the database and
+ * `web-push`) back into the cli-tools graph that Issue #1984 measured and cut.
+ */
+export interface SessionStartSubject {
+  /** Title text, in place of the worktree's name. */
+  name: string;
+  /** Where tapping the notification goes, in place of `/worktrees/<id>`. */
+  url: string;
+}
+
+/**
  * Whether `error` reports a session that is still initializing.
  *
  * @param error - Value caught from a `startSession()` call
