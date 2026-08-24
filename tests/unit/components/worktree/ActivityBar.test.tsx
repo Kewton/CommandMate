@@ -32,14 +32,15 @@ describe('ActivityBar', () => {
     sidebarMock.isOpen = true;
   });
 
-  it('renders all 9 activity tabs', () => {
+  it('renders all 10 activity tabs', () => {
     render(<ActivityBar active="files" onToggle={() => {}} />);
     const tabs = screen.getAllByRole('tab');
     expect(tabs).toHaveLength(ACTIVITIES.length);
-    // Issue #1816 added `verification` (9th). The literal is kept alongside
-    // ACTIVITIES.length on purpose: it is what makes an accidental drop of an
-    // activity fail here instead of agreeing with itself.
-    expect(tabs).toHaveLength(9);
+    // Issue #1816 added `verification` (9th); Issue #1968 added `env` (10th).
+    // The literal is kept alongside ACTIVITIES.length on purpose: it is what
+    // makes an accidental drop of an activity fail here instead of agreeing
+    // with itself.
+    expect(tabs).toHaveLength(10);
   });
 
   it('renders with role="tablist" and aria-orientation="vertical"', () => {
@@ -173,14 +174,14 @@ describe('ActivityBar', () => {
       );
     });
 
-    it('is NOT a tab and lives outside the tablist (tab count stays 9)', () => {
+    it('is NOT a tab and lives outside the tablist (tab count stays 10)', () => {
       render(<ActivityBar active="files" onToggle={() => {}} />);
       const toggle = screen.getByTestId('activity-bar-toggle-sidebar');
       // Regression guard: keeping the toggle out of the tablist preserves the
       // roving-tabindex keyboard navigation and the WAI-ARIA tab count.
       expect(toggle).not.toHaveAttribute('role', 'tab');
       expect(screen.getByRole('tablist')).not.toContainElement(toggle);
-      expect(screen.getAllByRole('tab')).toHaveLength(9);
+      expect(screen.getAllByRole('tab')).toHaveLength(10);
     });
 
     it('does not trigger the activity onToggle when the sidebar toggle is clicked', () => {

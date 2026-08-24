@@ -1,0 +1,96 @@
+version: 1
+title: "Issue #1984: ws-server → manager → response-poller → response-checker → ws-server の循環を切る"
+goal: |
+  https://github.com/Kewton/CommandMate/issues/1984 を実装してください。
+
+  ## 何を直すのか
+
+  `@/lib/cli-tools/manager` を静的 import しているのは **20 モジュール（API route 13 + lib 7）**。
+  モジュールスコープの循環（`ws-server → manager → response-poller → response-checker → ws-server`）が
+  import 1160ms の実体です。**効果はテストに留まりません。**
+
+  ## 切れる辺は 4 つ。#1977 で切れなかった理由が本文に書かれています
+
+  | 切る辺 | 必要な変更 |
+  |---|---|
+  | `ws-server → manager` | `:958` の**同期** `export function migrateWorktreeRooms` を `await import()` 化すると async になり、唯一の呼び出し元 `session/worktree-session-reconcile.ts:625` の署名変更が要る |
+  | `manager → response-poller` | `stopPollers()` は同期 `void`。非同期化すると `api/worktrees/[id]/kill-session/route.ts:172` に `await` が要る。**足さないと kill パスで poller 停止が 1 マイクロタスク遅延する**（型なし lint では検出できない静かな挙動変化） |
+  | `response-poller-core → response-checker` | 本 Issue の候補 |
+  | `response-checker → ws-server`（`broadcastMessage` 1 個のため） | **本 Issue の第一候補**（循環の頭） |
+
+  **本文の主張はコードで裏取りしてください。** 行番号・呼び出し元の本数・「20 モジュール」は
+  実測で確かめ、食い違えば実測を正とし commit message の「下調べとの食い違い」節に書いてください。
+  **grep の 0 件は「存在しない」の証拠になりません** — 定数経由の間接参照を疑い、
+  陽性対照を撃ってから 0 件を信じてください。
+
+  ## やること
+
+  1. **4 辺のどれを切るかを実測で決める。** `response-checker → ws-server` が第一候補
+     （`broadcastMessage` 1 個のためだけに循環の頭を作っている）。**推奨であって指定ではありません。**
+  2. 切ったあと `@/lib/ws-server` と `@/lib/cli-tools/manager` の **import 時間を再測し、
+     before/after を数字で書く**。「速くなった」ではなく実測値で。
+  3. **同期 API を非同期化する場合は、呼び出し元の挙動変化を明示する。** とくに `stopPollers()` の
+     非同期化は kill パスの poller 停止を 1 マイクロタスク遅らせるので、`await` の付け漏れが
+     **静かな挙動変化**になります。付けたことをテストで固定してください。
+
+  ## 注意（この worktree 特有）
+
+  - **`src/lib/session/current-output-builder.ts` と `src/cli/commands/wait.ts` には触らないでください。**
+    並列で #2011 が同じ領域を直しています（scope.allow から外してあります）。
+    触る必要が出たら、実装せずに理由を報告して止まってください。
+  - **`tests/unit/ws-server-cleanup.test.ts` は `tests/unit/` 直下**にあります
+    （`tests/unit/lib/` ではありません）。#1977 の関連テストなので確認してください。
+
+  ## 検証（必須）
+
+  - **変異注入で空振り緑を反証してください。** 少なくとも:
+    (a) 切った辺を戻す（静的 import に戻す）と、循環を検査するテストが赤
+    (b) `await` を落とすと、poller 停止の順序を見るテストが赤
+    各変異を 1 つずつ入れて対象テストのみ実行し、元に戻して再確認。結果を commit message に表で。
+  - 宣言ゲート 11 本すべて（`verify.gates`）。
+
+  ## 作業ルール（厳守）
+
+  - **フル `npm run test:unit` を手で回さないでください。** 他に 2 本のワーカーが並列で動いており、
+    同時フル実行は 30s サブプロセスガードを飢餓で落とします（#1985 がまさにその Issue）。
+    開発中は対象テストだけ絞って実行し、フル実行は `wait --verify` の unit ゲートに任せてください
+    （`mutex: cpu.heavy` で直列化されます）。
+  - **実 tmux を触る検証は必ず `tmux -L <専用socket>` で行う。** `-L` / `-S` は `$TMUX` より優先。
+    あなたは tmux ペインの中で動いていて `$TMUX` が既定サーバを指しているため、フラグ無しの
+    `tmux` 呼び出しは全て**ユーザーの本番サーバ**に届きます。`kill-server` を `-L` 無しで書かない。
+    `TMUX_TMPDIR` を隔離手段に使わない。`bind-key` / `set-option -g` を既定サーバへ撃たない。
+  - **`CHANGELOG.md` と `docs/module-reference.md` を編集しないでください**（scope 外）。
+    代わりに `dev-reports/changelog/issue-1984.md`（1 行目に `<!-- ### Changed -->` 等のコメント、
+    2 行目に **1 エントリ 1 行**で `- **refactor(<scope>): <要約>** (#1984): <本文>`。
+    `(#1984)` は太字の**外側**、改行なし、`- **` で始める）と
+    `dev-reports/module-reference/issue-1984.md`（行キーごとの追記指示。既存行に足すときは
+    `grep -n '^| `<path>`' docs/module-reference.md` の出力を断片に書き写してから書く。
+    0 件だった行への追記を指示しない）を書いてください。
+  - commit は単一。**PR は作らないでください**（私が作ります）。
+  - commit message に「意図的な逸脱」「下調べとの食い違い」「変異注入」の節を必ず入れてください。
+  - 完了したら最後に `IMPL_COMPLETED` とだけ出力してください。
+scope:
+  allow:
+    - "src/lib/ws-server.ts"
+    - "src/lib/cli-tools/**"
+    - "src/lib/polling/**"
+    - "src/lib/session/worktree-session-reconcile.ts"
+    - "src/app/api/worktrees/**"
+    - "src/types/**"
+    - "tests/unit/**"
+    - "tests/integration/**"
+    - "dev-reports/changelog/**"
+    - "dev-reports/module-reference/**"
+    - "docs/design/**"
+  deny:
+    - "src/lib/session/current-output-builder.ts"
+    - "src/cli/commands/wait.ts"
+verify:
+  gates: [token-discipline, control-chars, claudemd-size, route-exports, build-cli, build-server, lint, build, typecheck, integration, unit]
+autoYes:
+  mode: allow-listed
+  allowPromptTypes: [yes_no, multiple_choice]
+  denyPatterns: []
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true

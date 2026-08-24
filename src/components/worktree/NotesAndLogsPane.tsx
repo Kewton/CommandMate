@@ -23,6 +23,7 @@ import { MobileAgentInstancesPane } from './MobileAgentInstancesPane';
 import { TimerPane } from './TimerPane';
 import { WorktreeSkillsPane } from '@/components/skills/WorktreeSkillsPane';
 import { VerificationPane } from './VerificationPane';
+import { EnvManagerPane } from './EnvManagerPane';
 import type { AgentInstance, CLIToolType } from '@/lib/cli-tools/types';
 import type { WorktreeVerificationState } from '@/hooks/useWorktreeVerification';
 
@@ -30,8 +31,8 @@ import type { WorktreeVerificationState } from '@/hooks/useWorktreeVerification'
 // Types
 // ============================================================================
 
-/** Issue #368: Extended with 'agent' sub-tab. Issue #534: Extended with 'timer' sub-tab. Issue #1015: 'todo' sub-tab. Issue #1442: 'skills' sub-tab (mobile). Issue #1816: 'verification' sub-tab (mobile) */
-export type SubTab = 'notes' | 'logs' | 'agent' | 'timer' | 'todo' | 'skills' | 'verification';
+/** Issue #368: Extended with 'agent' sub-tab. Issue #534: Extended with 'timer' sub-tab. Issue #1015: 'todo' sub-tab. Issue #1442: 'skills' sub-tab (mobile). Issue #1816: 'verification' sub-tab (mobile). Issue #1968: 'env' sub-tab (mobile) */
+export type SubTab = 'notes' | 'logs' | 'agent' | 'timer' | 'todo' | 'skills' | 'verification' | 'env';
 
 /**
  * A request from outside to jump to a sub-tab (Issue #1816).
@@ -129,6 +130,9 @@ const SUB_TABS: readonly SubTabConfig[] = [
   // Issue #1816: execution contract + verification gates (mobile). Reuses the PC
   // pane. Label resolves from schedule.json `verificationTab` (BOTH en and ja).
   { id: 'verification', labelKey: 'verificationTab' },
+  // Issue #1968: the masked `.env` editor (mobile). Reuses the PC pane. Label
+  // resolves from schedule.json `envTab` (added to BOTH en and ja).
+  { id: 'env', labelKey: 'envTab' },
 ] as const;
 
 /** CSS class for the active sub-tab button */
@@ -288,6 +292,12 @@ export const NotesAndLogsPane = memo(function NotesAndLogsPane({
             from the one hook the detail controller owns. */}
         {activeSubTab === 'verification' && verification && (
           <VerificationPane state={verification} className="h-full" />
+        )}
+        {/* Issue #1968: same pane the PC Activity Bar mounts. Unlike
+            `verification` it takes no state from the parent, so it is offered
+            unconditionally — every surface that shows this pane has a worktree. */}
+        {activeSubTab === 'env' && (
+          <EnvManagerPane worktreeId={worktreeId} className="h-full" />
         )}
       </div>
     </div>

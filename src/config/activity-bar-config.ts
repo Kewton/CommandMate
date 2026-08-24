@@ -13,7 +13,7 @@
  */
 
 import type { ComponentType, SVGProps } from 'react';
-import { File, GitBranch, StickyNote, Calendar, Bot, Timer, ListTodo, Sparkles, ShieldCheck } from 'lucide-react';
+import { File, GitBranch, StickyNote, Calendar, Bot, Timer, ListTodo, Sparkles, ShieldCheck, KeyRound } from 'lucide-react';
 
 /**
  * Unique identifier for an activity in the Activity Bar.
@@ -27,7 +27,8 @@ export type ActivityId =
   | 'timer'
   | 'todo'
   | 'skills'
-  | 'verification';
+  | 'verification'
+  | 'env';
 
 /**
  * Metadata for a single Activity Bar icon.
@@ -68,6 +69,10 @@ export const ACTIVITIES: readonly ActivityDefinition[] = [
   // rather than inserted so the existing ArrowUp/ArrowDown order — which users
   // and tests both index by position — is unchanged.
   { id: 'verification', labelKey: 'activityBar.verification', icon: ShieldCheck },
+  // Issue #1968: the masked `.env` editor. Appended for the same reason
+  // `verification` was — the ArrowUp/ArrowDown order is indexed by position by
+  // both users and tests, so an insert would silently renumber every tab.
+  { id: 'env', labelKey: 'activityBar.env', icon: KeyRound },
 ] as const;
 
 /**
