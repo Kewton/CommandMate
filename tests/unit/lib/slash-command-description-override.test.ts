@@ -169,13 +169,20 @@ describe('the bundled catalog carries descriptionKey through verbatim', () => {
     // that joined the catalog means something different by the same command
     // name, so the flat key had to become a per-tool object and every claimant
     // had to be rewritten onto its own leaf.
+    // Issue #2024: codex 0.149.0 dropped /agent (so `agent.codex` is gone) and
+    // gained /agents (so `agents` grew a third leaf) plus /cd, whose codex
+    // meaning differs from claude's — the first split this file records that a
+    // *human* had to perform, because the engine refuses to split a key an
+    // earlier release already translated.
     expect(overridden.map((e) => e.descriptionKey).sort()).toEqual([
-      'slashCommands.descriptions.agent.codex',
       'slashCommands.descriptions.agent.copilot',
       'slashCommands.descriptions.agents.claude',
+      'slashCommands.descriptions.agents.codex',
       'slashCommands.descriptions.agents.opencode',
       'slashCommands.descriptions.app.codex',
       'slashCommands.descriptions.app.copilot',
+      'slashCommands.descriptions.cd.claude',
+      'slashCommands.descriptions.cd.codex',
       'slashCommands.descriptions.debug.claude',
       'slashCommands.descriptions.debug.opencode',
       'slashCommands.descriptions.exit.claude',

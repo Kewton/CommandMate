@@ -138,7 +138,6 @@
       "plan": "Toggle plan mode",
       "goal": "Set goal for current session",
       "agent": {
-        "codex": "Switch active agent (Codex)",
         "copilot": "Browse and select an agent"
       },
       "subagents": "Manage subagents",
@@ -162,7 +161,8 @@
       "models": "Switch AI model",
       "agents": {
         "opencode": "List and manage available agents",
-        "claude": "Show a reminder to ask Claude to create or manage subagents, or to edit .claude/agents/ directly"
+        "claude": "Show a reminder to ask Claude to create or manage subagents, or to edit .claude/agents/ directly",
+        "codex": "view and switch between all active agent sessions"
       },
       "themes": "Change TUI theme",
       "editor": "Open editor for long messages",
@@ -174,7 +174,10 @@
       "branch": "Create a branch of the current conversation at this point, so you can try a different direction without losing the conversation as it stands",
       "btw": "Ask a quick side question in an ephemeral fork, without adding it to the conversation",
       "bug": "Report a bug or share your conversation",
-      "cd": "Move this session to a new working directory",
+      "cd": {
+        "claude": "Move this session to a new working directory",
+        "codex": "change the current working directory"
+      },
       "chrome": "Configure Claude in Chrome settings",
       "claude-api": "Load Claude API reference material for your project's language (Python, TypeScript, Java, Go, Ruby, C#, PHP, or cURL) and Managed Agents reference",
       "code-review": "Review the current diff for correctness bugs and cleanup opportunities",
@@ -299,7 +302,10 @@
       "version": "Display version information",
       "mcps": "Toggle MCP servers",
       "move": "Move to another project directory",
-      "variants": "Switch the model variant"
+      "variants": "Switch the model variant",
+      "pwd": "show the current working directory",
+      "artifacts": "List the artifacts you own or that are shared with you, then attach one to the session, open it in your browser, or copy its link",
+      "auto-mode-setup": "Draft autoMode.environment entries from your project and recent sessions, then review the draft and save it to your user settings"
     }
   },
   "session": {

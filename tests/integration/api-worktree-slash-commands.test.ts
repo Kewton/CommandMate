@@ -164,7 +164,7 @@ describe('GET /api/worktrees/[id]/slash-commands', () => {
   });
 
   // Issue #689: New Codex commands are visible when cliTool=codex (DR3-001: global Codex mocked)
-  it('should return new Codex standard commands (plan/goal/agent etc.) when cliTool=codex', async () => {
+  it('should return new Codex standard commands (plan/goal/agents etc.) when cliTool=codex', async () => {
     // Use isolated HOME to avoid global ~/.codex/skills or ~/.codex/prompts overriding standard commands
     const isolatedHome = fs.mkdtempSync(path.join(os.tmpdir(), 'commandmate-test-'));
     const originalHome = process.env.HOME;
@@ -197,8 +197,10 @@ describe('GET /api/worktrees/[id]/slash-commands', () => {
       );
       const allNames = allCommands.map((c) => c.name);
 
-      // New Codex standard commands should be present
-      const newCodexCommands = ['plan', 'goal', 'agent', 'subagents', 'fork', 'memories', 'skills', 'hooks'];
+      // New Codex standard commands should be present.
+      // Issue #2024: /agent → /agents. `SlashCommand::Agent` is gone from the
+      // codex 0.149.0 enum; `Agents` and `MultiAgents` (= /subagents) replaced it.
+      const newCodexCommands = ['plan', 'goal', 'agents', 'subagents', 'fork', 'memories', 'skills', 'hooks'];
       for (const name of newCodexCommands) {
         expect(allNames).toContain(name);
         const cmd = allCommands.find((c) => c.name === name);
@@ -213,8 +215,12 @@ describe('GET /api/worktrees/[id]/slash-commands', () => {
       expect(allNames).not.toContain('focus');
       expect(allNames).not.toContain('lazy');
 
-      // OpenCode-only command 'agents' should not appear for Codex
-      expect(allNames).not.toContain('agents');
+      // OpenCode-only commands should not appear for Codex. Issue #2024 moved
+      // this control off /agents — codex 0.149.0 ships a real /agents of its
+      // own, so the name stopped being opencode-only. /themes and /variants are
+      // still opencode-only in the 1.18.21 palette (#1913).
+      expect(allNames).not.toContain('themes');
+      expect(allNames).not.toContain('variants');
     } finally {
       process.env.HOME = originalHome;
       removeTempDir(isolatedHome);

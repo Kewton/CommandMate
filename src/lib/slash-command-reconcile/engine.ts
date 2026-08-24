@@ -158,6 +158,42 @@ export function toolDescriptionKeyFor(name: string, tool: string): string {
 }
 
 /**
+ * Default keys that are *already* split into per-tool leaves (Issue #2024).
+ *
+ * A name only two tools contested in an earlier release ships as an object in
+ * the dictionary — `descriptions.agents` is `{ opencode, claude }`, not a
+ * string — and every catalog entry for that name carries `<name>.<tool>`. A
+ * third tool arriving later must land on its own leaf too, because the flat key
+ * is not free: it is the *parent* of the existing ones. Before this, the engine
+ * saw only that `descriptions.agents` was unclaimed in this pass and minted the
+ * flat key, so `--write` replaced the whole object with one string and the
+ * opencode/claude sentences vanished from both locales.
+ *
+ * Both halves of the split are read, because either alone has a blind spot: the
+ * catalog knows the shape when the caller passes no dictionary (unit tests), and
+ * the dictionary knows it when a leaf outlives the entry that minted it.
+ */
+function findAlreadySplitKeys(
+  commands: CatalogCommandEntry[],
+  shippedEn: Record<string, string>
+): Set<string> {
+  const split = new Set<string>();
+  const record = (key: string): void => {
+    if (!key.startsWith(DESCRIPTION_KEY_PREFIX)) return;
+    // Command names match /^[a-z][a-z0-9-]*$/, so the first dot after the prefix
+    // is always the name/tool boundary rather than part of the name.
+    const rest = key.slice(DESCRIPTION_KEY_PREFIX.length);
+    const dot = rest.indexOf('.');
+    if (dot > 0) split.add(`${DESCRIPTION_KEY_PREFIX}${rest.slice(0, dot)}`);
+  };
+  for (const entry of commands) {
+    if (entry.descriptionKey) record(entry.descriptionKey);
+  }
+  for (const key of Object.keys(shippedEn)) record(key);
+  return split;
+}
+
+/**
  * A locale key claimed by an addition in this pass, plus every place that would
  * have to be rewritten if a later tool turns out to disagree about the text.
  */
@@ -202,8 +238,12 @@ export function reconcileCatalog(
   const pendingLocale = new Map<string, LocaleAddition>();
   /** Who claimed each default key first, and what would need rewriting on a split. */
   const claims = new Map<string, DescriptionClaim>();
-  /** Default keys already split into per-tool keys — later tools skip straight to their own. */
-  const splitKeys = new Set<string>();
+  /**
+   * Default keys already split into per-tool keys — later tools skip straight to
+   * their own. Seeded from the shipped catalog/dictionary (Issue #2024) so a
+   * split an *earlier release* performed counts, not only one made in this pass.
+   */
+  const splitKeys = findAlreadySplitKeys(commands, shippedEn);
   const conflictedKeys = new Set<string>();
 
   for (const result of providerResults) {

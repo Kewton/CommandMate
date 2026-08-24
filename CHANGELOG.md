@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **fix(catalog): `catalog:refresh --write` が「既に tool 別に分割済みの説明」を新ツール 1 文で潰す破壊を止め、codex 0.149.0 / claude 最新版へ照合し直した** (#2024): `descriptions.agents` のように前リリースで tool 別オブジェクトへ分割済みの名前に 3 つ目のツールが到着すると、engine は「このパスではまだ誰も claim していない」しか見ておらずフラットキー `slashCommands.descriptions.agents` を発行していた。フラットキーは自由キーではなく既存 leaf の**親**なので、`--write` がオブジェクト全体を 1 文字列で上書きし、opencode / claude の説明が en・ja 同時に消える（実測: 修正を戻して `--write` を流すと `"agents": "view and switch between all active agent sessions"` に潰れる）。engine が既存カタログと出荷辞書の両方から「分割済みの既定キー」を読み、到着したツールへ `…descriptions.<name>.<tool>` を発行するようにした。あわせてカタログを codex 0.149.0（`SlashCommand::Agent` は消滅し `Agents` / `MultiAgents` へ、`Cd` / `Pwd` が新設）と claude commands doc へ照合し直し、codex `/agent` を削除（copilot `/agent` は別行なので存置）、codex `/agents` `/cd` `/pwd` と claude `/artifacts` `/auto-mode-setup` を追加、`/cd` は claude の "Move this session to a new working directory" が codex では誤りなので `cd.claude` / `cd.codex` へ人手分割し、ja 訳を `[要レビュー]` プレースホルダ無しで書いた。件数 pin は実測で 240→244 / codex 54→56 / claude 100→102。`catalog:refresh` は追加提案があるとき「この追加はカタログ pin を赤にする。それは審査ゲートであって欠陥ではない（根拠は exclusions.json の `$comment`）」を出力するようになり、pin を緩めずに済ませるための再調査コストを消した。
+
 ## [0.27.0] - 2026-08-24
 
 > **Highlight**: エージェントの状態検出と通知の 2 層を、実測で作り直したリリースです。`wait` がアイドルなペインで返らなくなる回帰（#2011）を、実フレーム 7 枚と実 exit code で裁定して修正しました（修正前 124 → 修正後 0、陽性対照つき）。スマホ通知は「何が起きたか」から「あなたが動く必要があるか」へ軸を切り替え、Auto-Yes 中のプロンプト通知を抑止（#1999）、失敗 3 種を通知に接続（#2000）、端末間の消し込み（#2001）を入れています。あわせてセキュリティ 2 件 — 平文 `CM_AUTH_TOKEN` が子プロセスへ渡っていた問題（#1996）と、`EXCLUDED_PATTERNS` の秘密ファイルが files ルートのパス直指定で読み書きできた問題（#2014、読み取り 2 面＋書き込み 4 面）— を塞ぎました。検証ゲートは 7 → 11 本に増やし（#1994）、`ws-server` / `cli-tools/manager` のモジュール循環を切って import 時間を 1043ms → 228ms / 1025ms → 417ms に短縮しています（#1984、対照つき実測）。

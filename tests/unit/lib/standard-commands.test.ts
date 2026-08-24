@@ -99,8 +99,10 @@ describe('STANDARD_COMMANDS', () => {
   // on 1.0.80 plus the palette-only /undo) and opencode was reconciled against
   // the 1.18.21 palette (+9 entries; /compact left the opencode scope but its
   // claude/codex entry stays). 163 -> 240.
-  it('should have 240 standard commands', () => {
-    expect(STANDARD_COMMANDS.length).toBe(240);
+  // Issue #2024: codex 0.149.0 replaced /agent with /agents and added /cd, /pwd
+  // (-1 +3), and claude added /artifacts, /auto-mode-setup (+2). 240 -> 244.
+  it('should have 244 standard commands', () => {
+    expect(STANDARD_COMMANDS.length).toBe(244);
   });
 
   it('should have all required properties for each command', () => {
@@ -218,7 +220,9 @@ describe('STANDARD_COMMANDS', () => {
       // Issue #689: new Codex commands
       'plan',
       'goal',
-      'agent',
+      // Issue #2024: /agent left the codex enum in 0.149.0 (replaced by
+      // /agents). The copilot /agent entry is a different row and stays.
+      'agents',
       'subagents',
       'fork',
       'memories',
@@ -265,12 +269,16 @@ describe('STANDARD_COMMANDS', () => {
   });
 
   // Issue #1503: -2 codex phantoms (approvals/undo) removed → 23.
-  // v0.21.2: reconciled against the codex 0.146.0 enum → 53.
-  it('should have 53 commands available for Codex', () => {
+  // v0.21.2: reconciled against the codex 0.146.0 enum → 53. Later reconciles
+  // took it to 54 (the title said 53 until #2024 measured it again).
+  // Issue #2024: reconciled against the 0.149.0 enum. `SlashCommand::Agent` is
+  // gone — the enum ships `Agents` and `MultiAgents` (= /subagents) instead —
+  // and `Cd` / `Pwd` are new. -1 +3 → 56.
+  it('should have 56 commands available for Codex', () => {
     const codexCommands = STANDARD_COMMANDS.filter(
       (cmd) => cmd.cliTools?.includes('codex')
     );
-    expect(codexCommands.length).toBe(54);
+    expect(codexCommands.length).toBe(56);
   });
 
   it('should include session management commands', () => {
@@ -329,6 +337,14 @@ describe('STANDARD_COMMANDS', () => {
   // Issue #1503: /clear, /quit, /subagents are REAL on codex 0.144.6 — hidden
   // aliases the bare "/" popup does not list but that match on full input. They
   // must survive the phantom purge; deleting them strips real commands.
+  //
+  // Issue #2024: on codex 0.149.0 all three are plainly *visible*. `is_visible()`
+  // in codex-rs/tui/src/slash_command.rs special-cases only SandboxReadRoot /
+  // Copy / App / Rollout / TestApproval and falls through to `_ => true`, so
+  // Clear, Quit and MultiAgents (`#[strum(serialize = "subagents")]`) are all in
+  // the popup. The 0.144.6 "hidden alias" observation no longer describes the
+  // CLI; the pin it justified — these must not be deleted — still holds, which
+  // is why the assertion is unchanged and only the reasoning is dated.
   it('keeps codex hidden real commands /clear, /quit, /subagents (Issue #1503 regression)', () => {
     for (const name of ['clear', 'quit', 'subagents']) {
       const cmd = STANDARD_COMMANDS.find((c) => c.name === name && c.cliTools?.includes('codex'));
@@ -354,6 +370,12 @@ describe('STANDARD_COMMANDS', () => {
   // matches on full input in the palette ("Rewind the last turn and revert file
   // changes"), exactly the hidden-alias shape /clear and /quit have on codex.
   // Banning the string hid a real command, so the ban now names codex.
+  //
+  // Issue #2024 widens the /agents half a third time, for the third time on
+  // evidence rather than on the string: codex 0.149.0 declares
+  // `SlashCommand::Agents => "view and switch between all active agent
+  // sessions"`, so codex joins claude and opencode. All three still mean
+  // different things, so the "never share a key" half is what carries the pin.
   it('does not carry the Issue #1503 phantom commands', () => {
     for (const name of ['cost', 'lazy', 'todos', 'pr-comments', 'approvals']) {
       expect(STANDARD_COMMANDS.some((c) => c.name === name), `/${name} must be gone`).toBe(false);
@@ -363,8 +385,12 @@ describe('STANDARD_COMMANDS', () => {
       '/undo must stay off codex'
     ).toBe(false);
     const agentsEntries = STANDARD_COMMANDS.filter((c) => c.name === 'agents');
-    expect(agentsEntries.map((c) => c.cliTools?.join(',')).sort()).toEqual(['claude', 'opencode']);
-    expect(new Set(agentsEntries.map((c) => c.descriptionKey)).size).toBe(2);
+    expect(agentsEntries.map((c) => c.cliTools?.join(',')).sort()).toEqual([
+      'claude',
+      'codex',
+      'opencode',
+    ]);
+    expect(new Set(agentsEntries.map((c) => c.descriptionKey)).size).toBe(3);
   });
 
   // Issue #689: New Claude commands with explicit cliTools: ['claude'] (DR1-001)
@@ -390,10 +416,14 @@ describe('STANDARD_COMMANDS', () => {
   });
 
   // Issue #689: New Codex commands (DR1-004)
+  // Issue #2024: /agent → /agents (the 0.149.0 enum dropped `SlashCommand::Agent`).
+  // /agents is selected by tool because claude and opencode also ship the name.
   it('should have new Codex commands in correct categories', () => {
-    const sessionCommands = ['plan', 'goal', 'agent', 'subagents', 'fork'];
+    const sessionCommands = ['plan', 'goal', 'agents', 'subagents', 'fork'];
     sessionCommands.forEach((name) => {
-      const cmd = STANDARD_COMMANDS.find((c) => c.name === name);
+      const cmd = STANDARD_COMMANDS.find(
+        (c) => c.name === name && c.cliTools?.includes('codex')
+      );
       expect(cmd).toBeDefined();
       expect(cmd?.category).toBe('standard-session');
       expect(cmd?.cliTools).toEqual(['codex']);
@@ -414,11 +444,12 @@ describe('STANDARD_COMMANDS', () => {
   // "(removed)" /agents stub) → 24.
   // v0.21.2: reconciled against the claude commands doc → 97.
   // Issue #1767: +3 (/agents, /import, /list-agents) → 100.
-  it('should have 100 commands available for Claude', () => {
+  // Issue #2024: +2 (/artifacts, /auto-mode-setup) from the commands doc → 102.
+  it('should have 102 commands available for Claude', () => {
     const claudeCommands = STANDARD_COMMANDS.filter(
       (cmd) => !cmd.cliTools || cmd.cliTools.includes('claude')
     );
-    expect(claudeCommands.length).toBe(100);
+    expect(claudeCommands.length).toBe(102);
   });
 
   // Issue #689: agent (Codex) vs agents (OpenCode) differentiation (DR1-002)
@@ -428,14 +459,23 @@ describe('STANDARD_COMMANDS', () => {
   // `descriptions.agents` is now a per-tool object rather than one string.
   // Each entry is therefore resolved through its own key (a flat `dict.agents`
   // lookup would silently read undefined here), and all three must differ.
-  it('agent (Codex), agents (OpenCode) and agents (Claude) have distinct descriptions', () => {
+  // Issue #2024: codex moved from /agent to /agents, so the four claimants now
+  // span both names — copilot keeps /agent, and three tools share /agents. This
+  // is the guard the reconcile bug defeated: flattening `descriptions.agents`
+  // to one string collapsed three of these four to a single sentence.
+  it('agent (Copilot) and agents (OpenCode/Claude/Codex) have distinct descriptions', () => {
     type CliTool = NonNullable<SlashCommand['cliTools']>[number];
     const pick = (name: string, tool: CliTool): SlashCommand => {
       const cmd = STANDARD_COMMANDS.find((c) => c.name === name && c.cliTools?.includes(tool));
       expect(cmd, `/${name} must be ${tool}-visible`).toBeDefined();
       return cmd as SlashCommand;
     };
-    const entries = [pick('agent', 'codex'), pick('agents', 'opencode'), pick('agents', 'claude')];
+    const entries = [
+      pick('agent', 'copilot'),
+      pick('agents', 'opencode'),
+      pick('agents', 'claude'),
+      pick('agents', 'codex'),
+    ];
     expect(new Set(entries.map((c) => c.descriptionKey)).size).toBe(entries.length);
 
     for (const locale of LOCALES) {
@@ -478,7 +518,9 @@ describe('STANDARD_COMMANDS', () => {
 
   // Issue #689: new Claude-only 4 commands should not have undefined cliTools (DR1-001)
   it('should not have new commands with undefined cliTools (DR1-001: no new undefined)', () => {
-    const newCommandNames = ['effort', 'fast', 'focus', 'plan', 'goal', 'agent', 'subagents', 'fork', 'memories', 'skills', 'hooks'];
+    // Issue #2024: 'agent' → 'agents'. Leaving 'agent' here would have kept
+    // passing by silently resolving to the copilot entry instead of a codex one.
+    const newCommandNames = ['effort', 'fast', 'focus', 'plan', 'goal', 'agents', 'subagents', 'fork', 'memories', 'skills', 'hooks'];
     newCommandNames.forEach((name) => {
       const cmd = STANDARD_COMMANDS.find((c) => c.name === name);
       expect(cmd).toBeDefined();
@@ -728,8 +770,12 @@ describe('copilot / opencode catalog reconcile (Issue #1913)', () => {
   // string cannot coexist with `<name>.<tool>` leaves, so an entry left on the
   // old flat key resolves to undefined and renders blank.
   it('leaves no entry pointing at a flat key that was split per tool', () => {
+    // Issue #2024: /cd joined the list. The claude docs say "Move this session to
+    // a new working directory"; the codex enum says "change the current working
+    // directory". Inheriting claude's sentence would have described a codex
+    // command wrongly, so the flat key became an object here too.
     const splitNames = ['exit', 'login', 'logout', 'feedback', 'skills', 'init', 'agent',
-      'plugin', 'memory', 'app', 'debug'];
+      'plugin', 'memory', 'app', 'debug', 'cd'];
     for (const locale of LOCALES) {
       const dict = loadDescriptions(locale);
       for (const name of splitNames) {
@@ -747,6 +793,55 @@ describe('copilot / opencode catalog reconcile (Issue #1913)', () => {
   it('records the probed CLI versions in verifiedAgainst', () => {
     expect(CATALOG_VERIFIED_AGAINST.copilot).toBe('1.0.80');
     expect(CATALOG_VERIFIED_AGAINST.opencode).toBe('1.18.21');
+  });
+});
+
+// Issue #2024: reconciled against codex 0.149.0 (the release tag
+// `catalog:refresh --codex-ref rust-v0.149.0` reads
+// codex-rs/tui/src/slash_command.rs from) and the claude commands doc.
+//
+// Pinned by name rather than only by count, for the reason #1913 gave: a count
+// cannot tell "we added the commands that appeared" from "we added commands".
+describe('codex 0.149.0 / claude catalog reconcile (Issue #2024)', () => {
+  const visible = (name: string, tool: string): SlashCommand | undefined =>
+    STANDARD_COMMANDS.find((c) => c.name === name && c.cliTools?.includes(tool as never));
+
+  it('stamps the codex version the enumeration was collated against', () => {
+    expect(CATALOG_VERIFIED_AGAINST.codex).toBe('0.149.0');
+  });
+
+  // `SlashCommand::Agent` is absent from the 0.149.0 enum; `Agents` and
+  // `MultiAgents` (= /subagents) replaced it. The name still exists on copilot,
+  // which is why the removal is scoped to the tool rather than to the string.
+  it('drops /agent from codex and keeps the copilot row', () => {
+    expect(visible('agent', 'codex'), '/agent must be off codex').toBeUndefined();
+    expect(visible('agent', 'copilot')?.cliTools).toEqual(['copilot']);
+  });
+
+  it('adds the codex 0.149.0 arrivals with their own descriptions', () => {
+    expect(visible('agents', 'codex')?.descriptionKey).toBe(
+      toolDescriptionKeyFor('agents', 'codex')
+    );
+    expect(visible('cd', 'codex')?.descriptionKey).toBe(toolDescriptionKeyFor('cd', 'codex'));
+    expect(visible('pwd', 'codex')?.cliTools).toEqual(['codex']);
+
+    for (const locale of LOCALES) {
+      const dict = loadDescriptions(locale);
+      expect(dict['agents.codex'], `${locale} agents.codex`).toBeTruthy();
+      expect(dict['pwd'], `${locale} pwd`).toBeTruthy();
+      // The whole point of splitting /cd: codex must not inherit claude's text.
+      expect(dict['cd.codex']).toBeTruthy();
+      expect(dict['cd.codex']).not.toBe(dict['cd.claude']);
+    }
+  });
+
+  it('adds the claude arrivals /artifacts and /auto-mode-setup', () => {
+    for (const name of ['artifacts', 'auto-mode-setup']) {
+      expect(visible(name, 'claude')?.cliTools, `/${name}`).toEqual(['claude']);
+      for (const locale of LOCALES) {
+        expect(loadDescriptions(locale)[name], `${locale} /${name}`).toBeTruthy();
+      }
+    }
   });
 });
 

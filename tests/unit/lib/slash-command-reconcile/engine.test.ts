@@ -9,7 +9,13 @@ import {
   reconcileCatalog,
   formatNoticesForReport,
   isSuspectDescription,
+  JA_REVIEW_PREFIX,
 } from '@/lib/slash-command-reconcile/engine';
+import {
+  applyLocaleAdditions,
+  lookupNestedValue,
+  type LocaleDictionary,
+} from '@/lib/slash-command-reconcile/locale';
 import type {
   ProviderResult,
   SlashCommandsCatalog,
@@ -497,6 +503,157 @@ describe('reconcileCatalog — active/canonical filter', () => {
     ]);
     expect(result.diff.added.some((a) => a.name === 'btw')).toBe(false);
     expect(result.localeAdditions).toEqual([]);
+  });
+
+  // Issue #2024: the third tool to arrive at a name two tools already contested.
+  //
+  // After a split, `descriptions.<name>` is an OBJECT parenting the per-tool
+  // leaves — it is not a free key. The engine used to see only that no claim had
+  // been staked on it during this pass and mint the flat key anyway, so
+  // `--write` merged a plain string over the object and every existing tool's
+  // sentence vanished from en and ja at once. codex 0.149.0 shipping /agents
+  // (already split between opencode and claude by #1767) is the case that hit.
+  describe('a name an earlier release already split per tool (Issue #2024)', () => {
+    const OPENCODE_EN = 'List and manage available agents';
+    const CLAUDE_EN = 'Show a reminder to ask Claude to create or manage subagents';
+    const CODEX_EN = 'view and switch between all active agent sessions';
+
+    /** The catalog shape a completed split leaves behind: no flat claimant. */
+    function catalogWithSplitAgents(): SlashCommandsCatalog {
+      const catalog = baseCatalog();
+      catalog.commands.push(
+        {
+          name: 'agents',
+          descriptionKey: 'slashCommands.descriptions.agents.opencode',
+          category: 'standard-config',
+          cliTools: ['opencode'],
+          isStandard: true,
+          source: 'standard',
+        },
+        {
+          name: 'agents',
+          descriptionKey: 'slashCommands.descriptions.agents.claude',
+          category: 'standard-util',
+          cliTools: ['claude'],
+          isStandard: true,
+          source: 'standard',
+        }
+      );
+      return catalog;
+    }
+
+    /** The dictionary shape that goes with it: an object, not a string. */
+    const shippedAgents = {
+      'slashCommands.descriptions.agents.opencode': OPENCODE_EN,
+      'slashCommands.descriptions.agents.claude': CLAUDE_EN,
+    };
+
+    const codexAgents: ProviderResult = {
+      tool: 'codex',
+      ok: true,
+      commands: [{ name: 'agents', description: CODEX_EN }],
+      sourceVersion: '0.149.0',
+      warnings: [],
+    };
+
+    it('mints a per-tool leaf for the arriving tool, not the parent key', () => {
+      const result = reconcileCatalog(catalogWithSplitAgents(), [codexAgents], {
+        exclusions: [],
+        existingEnDescriptions: shippedAgents,
+      });
+
+      expect(result.diff.added).toEqual([
+        {
+          tool: 'codex',
+          name: 'agents',
+          descriptionKey: 'slashCommands.descriptions.agents.codex',
+          enDescription: CODEX_EN,
+          minVersion: undefined,
+        },
+      ]);
+      expect(result.localeAdditions).toEqual([
+        {
+          key: 'slashCommands.descriptions.agents.codex',
+          en: CODEX_EN,
+          ja: `${JA_REVIEW_PREFIX}${CODEX_EN}`,
+        },
+      ]);
+      // The already-split siblings are untouched — no rewrite, no re-report.
+      expect(
+        result.catalog.commands
+          .filter((c) => c.name === 'agents')
+          .map((c) => c.descriptionKey)
+          .sort()
+      ).toEqual([
+        'slashCommands.descriptions.agents.claude',
+        'slashCommands.descriptions.agents.codex',
+        'slashCommands.descriptions.agents.opencode',
+      ]);
+    });
+
+    // The symptom itself, not just the key: merging the pass's additions into a
+    // real-shaped dictionary must leave the other tools' text readable. A flat
+    // key here replaces the whole object, which is what `--write` shipped.
+    it('leaves the sibling descriptions resolvable after the additions are merged', () => {
+      const result = reconcileCatalog(catalogWithSplitAgents(), [codexAgents], {
+        exclusions: [],
+        existingEnDescriptions: shippedAgents,
+      });
+
+      const dict = applyLocaleAdditions(
+        {
+          slashCommands: { descriptions: { agents: { opencode: OPENCODE_EN, claude: CLAUDE_EN } } },
+        } as LocaleDictionary,
+        result.localeAdditions,
+        (addition) => addition.en
+      );
+
+      expect(lookupNestedValue(dict, 'slashCommands.descriptions.agents.opencode')).toBe(
+        OPENCODE_EN
+      );
+      expect(lookupNestedValue(dict, 'slashCommands.descriptions.agents.claude')).toBe(CLAUDE_EN);
+      expect(lookupNestedValue(dict, 'slashCommands.descriptions.agents.codex')).toBe(CODEX_EN);
+    });
+
+    // Either half of the evidence alone is enough. The catalog carries the shape
+    // when no dictionary is passed; the dictionary carries it when a leaf
+    // outlives the entry that minted it (a tool dropped from the catalog).
+    it('detects the split from the catalog alone', () => {
+      const result = reconcileCatalog(catalogWithSplitAgents(), [codexAgents], {
+        exclusions: [],
+      });
+      expect(result.diff.added.map((a) => a.descriptionKey)).toEqual([
+        'slashCommands.descriptions.agents.codex',
+      ]);
+    });
+
+    it('detects the split from the shipped dictionary alone', () => {
+      const result = reconcileCatalog(baseCatalog(), [codexAgents], {
+        exclusions: [],
+        existingEnDescriptions: shippedAgents,
+      });
+      expect(result.diff.added.map((a) => a.descriptionKey)).toEqual([
+        'slashCommands.descriptions.agents.codex',
+      ]);
+    });
+
+    // The guard keys off the name/tool boundary, so an uncontested name must
+    // still get the plain shared key — splitting everything would be just as
+    // wrong, and far quieter.
+    it('still mints the shared key for a name nothing has split', () => {
+      const result = reconcileCatalog(catalogWithSplitAgents(), [
+        {
+          tool: 'codex',
+          ok: true,
+          commands: [{ name: 'pwd', description: 'show the current working directory' }],
+          warnings: [],
+        },
+      ], { exclusions: [], existingEnDescriptions: shippedAgents });
+
+      expect(result.diff.added.map((a) => a.descriptionKey)).toEqual([
+        'slashCommands.descriptions.pwd',
+      ]);
+    });
   });
 });
 
