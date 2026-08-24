@@ -11,6 +11,11 @@
  * unchanged; only the storage location moved. The catalog is statically
  * imported so it resolves under Next, build:cli, and build:server alike.
  *
+ * Issue #2026: the per-tool version stamp moved out of that file into
+ * src/config/slash-commands-attestations.json, where it sits beside the command
+ * set it was read from. `CATALOG_VERIFIED_AGAINST` is now derived from there and
+ * keeps its exact previous shape and meaning for every consumer.
+ *
  * References:
  * - Claude Code: https://www.gradually.ai/en/claude-code-commands/
  * - Codex CLI: https://developers.openai.com/codex/cli/slash-commands
@@ -19,6 +24,10 @@
 import type { SlashCommand, SlashCommandGroup, SlashCommandCategory } from '@/types/slash-commands';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { groupByCategory } from '@/lib/command-merger';
+import {
+  DEFAULT_ATTESTATIONS,
+  attestedVersions,
+} from '@/lib/slash-command-reconcile/attestations';
 import catalogJson from '@/config/slash-commands-catalog.json';
 
 /** Raw catalog entry as authored in slash-commands-catalog.json. */
@@ -33,13 +42,6 @@ export interface CatalogCommandEntry {
 
 /** Shape of the bundled catalog file. */
 interface SlashCommandsCatalog {
-  /**
-   * Per-tool CLI version whose `/help` output was last collated against this
-   * catalog's *content* — NOT the version the catalog mechanism was built on
-   * (Issue #1488). Only bump a tool's value when its entries were re-checked
-   * against that CLI, so the staleness signal reflects content drift, not code.
-   */
-  verifiedAgainst: Record<string, string>;
   frequentlyUsed: Record<string, string[]>;
   commands: CatalogCommandEntry[];
 }
@@ -49,10 +51,19 @@ const catalog = catalogJson as SlashCommandsCatalog;
 /**
  * CLI versions whose `/help` output was last collated against catalog *content*
  * (Issue #1476, semantics clarified in Issue #1488). Consumed by the staleness
- * check in slash-command-catalog.ts. Bump a tool only after re-checking its
- * entries against that CLI — not merely because the catalog code changed.
+ * check in slash-command-catalog.ts.
+ *
+ * Issue #2026: derived from src/config/slash-commands-attestations.json rather
+ * than stored in the catalog file. The version and the set it stands for used to
+ * be two independently editable facts — `verifiedAgainst.codex` said 0.149.0
+ * while the only record of *what* 0.149.0 enumerated was a count literal in a
+ * test — and `catalog:refresh --write` bumped the version on its own, re-dating
+ * a reading of a document nobody had re-read. Now the number is one field of the
+ * attestation that carries the set, so it can only move when a human re-reads
+ * the source. Bumping it is that edit, not a side effect of running the tool.
  */
-export const CATALOG_VERIFIED_AGAINST: Record<string, string> = catalog.verifiedAgainst;
+export const CATALOG_VERIFIED_AGAINST: Record<string, string> =
+  attestedVersions(DEFAULT_ATTESTATIONS);
 
 /**
  * Reconstruct a SlashCommand from a catalog entry.

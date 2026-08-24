@@ -12,9 +12,15 @@
  *    catalog). Deletion stays a human decision on the release PR.
  *  - Idempotent. A command already catalogued for a tool is skipped, so a second
  *    run adds nothing and the manual #1488 additions are never duplicated.
- *  - Content and stamp move together. `verifiedAgainst[tool]` is bumped only for
- *    a provider that reports a `sourceVersion` (version-pinned source, e.g.
- *    codex) — the root cause of #1476/#1488 drift.
+ *  - Content and stamp move together. `verifiedAgainst[tool]` is *reported* as
+ *    behind whenever a version-pinned provider (e.g. codex) reports a newer
+ *    `sourceVersion` than the attestation records — the root cause of #1476/#1488
+ *    drift. Issue #2026 stopped the engine from *applying* that bump: the stamp
+ *    now lives in the attestation next to the set it describes, and re-stamping
+ *    is part of re-reading the source, which only a human does.
+ *  - Attestations are the reviewed set (Issue #2026). The engine never writes one.
+ *    It reports how far the source has moved past each one, so a stale claim is
+ *    visible in `--check` rather than only in a red pin at the end of a release.
  *  - Only active, canonical rows are auto-added (Issue #1603). A source lists
  *    more than its current commands: history rows ("Removed in vX") and alias
  *    rows are refused with a categorized notice instead of becoming catalog
@@ -26,7 +32,15 @@
 
 import { sanitizeProviderCommands } from './sanitize';
 import { DEFAULT_EXCLUSIONS, buildExclusionIndex, describeExclusion, findExclusion } from './exclusions';
+import {
+  DEFAULT_ATTESTATIONS,
+  attestedVersions,
+  compareAttestationToSource,
+  hasAttestationDrift,
+} from './attestations';
 import type {
+  AttestationDrift,
+  CatalogAttestation,
   CatalogExclusion,
   ProviderResult,
   ProviderCommand,
@@ -131,6 +145,13 @@ export interface ReconcileOptions {
    * needed in the first place.
    */
   existingEnDescriptions?: Record<string, string>;
+  /**
+   * Source attestations to compare against (Issue #2026). Defaults to the
+   * bundled src/config/slash-commands-attestations.json, and supplies the
+   * version each tool's entries were last collated against — the map that used
+   * to be `catalog.verifiedAgainst`.
+   */
+  attestations?: CatalogAttestation[];
 }
 
 /** True when a catalog entry is in scope for `tool` (undefined cliTools = claude). */
@@ -210,7 +231,7 @@ interface DescriptionClaim {
  * Reconcile the catalog against provider results.
  *
  * Never mutates the input catalog: the returned `catalog` is a fresh object with
- * cloned `commands` and `verifiedAgainst`.
+ * cloned `commands`.
  */
 export function reconcileCatalog(
   catalog: SlashCommandsCatalog,
@@ -220,11 +241,18 @@ export function reconcileCatalog(
   const defaultCategory = options.defaultCategory ?? DEFAULT_CATEGORY;
   const exclusionIndex = buildExclusionIndex(options.exclusions ?? DEFAULT_EXCLUSIONS);
   const shippedEn = options.existingEnDescriptions ?? {};
+  const attestations = options.attestations ?? DEFAULT_ATTESTATIONS;
+  const attested = attestedVersions(attestations);
 
   const commands: CatalogCommandEntry[] = catalog.commands.map((c) => ({ ...c }));
-  const verifiedAgainst: Record<string, string> = { ...catalog.verifiedAgainst };
 
-  const diff: ReconcileDiff = { added: [], missingFromSource: [], verifiedAgainstUpdated: {} };
+  const attestationDrift: AttestationDrift[] = [];
+  const diff: ReconcileDiff = {
+    added: [],
+    missingFromSource: [],
+    verifiedAgainstUpdated: {},
+    attestationDrift,
+  };
   const localeAdditions: LocaleAddition[] = [];
   const warnings: string[] = [];
   const notices: ReconcileNotice[] = [];
@@ -428,23 +456,36 @@ export function reconcileCatalog(
       }
     }
 
-    // Stamp verifiedAgainst only for a version-pinned source.
+    // Report — never apply — a version-pinned source that has moved past the
+    // attested one. Issue #2026: writing this stamp used to be the engine's job,
+    // which meant `--write` re-dated a human's reading of a document it had not
+    // re-read. Now it is one line of the re-attestation a human owes.
     if (result.sourceVersion) {
-      const from = verifiedAgainst[tool];
+      const from = attested[tool];
       if (from !== result.sourceVersion) {
-        verifiedAgainst[tool] = result.sourceVersion;
         diff.verifiedAgainstUpdated[tool] = { from, to: result.sourceVersion };
       }
     }
+
+    // How far the attested *set* has fallen behind the source. Computed from the
+    // rows the engine would consider adding (active + canonical), so a history
+    // row or an alias row never reads as an arrival. Only tools whose provider
+    // answered get a row: "not compared" must not read as "unchanged".
+    const drift = compareAttestationToSource(
+      tool,
+      sourceCommands.filter((c) => c.status !== 'removed' && !c.aliasOf).map((c) => c.name),
+      attestations
+    );
+    if (hasAttestationDrift(drift)) attestationDrift.push(drift);
   }
 
-  const changed =
-    diff.added.length > 0 ||
-    localeAdditions.length > 0 ||
-    Object.keys(diff.verifiedAgainstUpdated).length > 0;
+  // Issue #2026: a version bump no longer counts as a change, because nothing
+  // writes it any more. Reporting `changed` for it would make `--write` print
+  // "Applied changes." over a run that touched no file.
+  const changed = diff.added.length > 0 || localeAdditions.length > 0;
 
   return {
-    catalog: { ...catalog, commands, verifiedAgainst },
+    catalog: { ...catalog, commands },
     localeAdditions,
     diff,
     warnings,
