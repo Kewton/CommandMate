@@ -3,7 +3,8 @@
  *
  *   GET    /api/push/subscriptions?endpoint=... — current per-type prefs for a device
  *   POST   /api/push/subscriptions               — register/refresh a subscription
- *   PATCH  /api/push/subscriptions               — update per-type prefs
+ *   PATCH  /api/push/subscriptions               — update per-type prefs, and/or
+ *                                                  acknowledge the defaults notice (#2056)
  *   DELETE /api/push/subscriptions               — unsubscribe this device
  *
  * Auth is enforced globally by middleware. Endpoints/keys are secrets and are
@@ -17,7 +18,9 @@ import {
   getPushSubscriptionByEndpoint,
   updatePushSubscriptionPreferences,
   deletePushSubscriptionByEndpoint,
+  pushSubscriptionNeedsDefaultsNotice,
   type PushSubscriptionRecord,
+  type PushSubscriptionPreferenceUpdate,
 } from '@/lib/db';
 import { createLogger } from '@/lib/logger';
 import { LOCALE_COOKIE_NAME, resolveLocale } from '@/config/i18n-config';
@@ -47,7 +50,14 @@ function localeFromRequest(request: Request): string {
   );
 }
 
-/** Public view of a subscription — excludes the encryption keys. */
+/**
+ * Public view of a subscription — excludes the encryption keys.
+ *
+ * `defaultsNoticePending` (Issue #2056) is a sibling of `preferences`, not a
+ * member of it: it is not something the reader sets, and the client compares
+ * `preferences` against its own state. The raw `defaults_version` stays on the
+ * server — the client has no use for the number, only for the verdict.
+ */
 function serialize(record: PushSubscriptionRecord) {
   return {
     endpoint: record.endpoint,
@@ -56,6 +66,7 @@ function serialize(record: PushSubscriptionRecord) {
       prompt: record.enabledPrompt,
       completion: record.enabledCompletion,
     },
+    defaultsNoticePending: pushSubscriptionNeedsDefaultsNotice(record),
   };
 }
 
@@ -125,18 +136,29 @@ export async function PATCH(request: Request) {
     const body = (await request.json()) as {
       endpoint?: unknown;
       preferences?: { prompt?: unknown; completion?: unknown };
+      acknowledgeDefaultsNotice?: unknown;
     };
 
     if (!isNonEmptyString(body.endpoint)) {
       return NextResponse.json({ error: 'endpoint is required' }, { status: 400 });
     }
 
-    const prefs: { enabledPrompt?: boolean; enabledCompletion?: boolean } = {};
+    const prefs: PushSubscriptionPreferenceUpdate = {};
     if (typeof body.preferences?.prompt === 'boolean') prefs.enabledPrompt = body.preferences.prompt;
     if (typeof body.preferences?.completion === 'boolean') {
       prefs.enabledCompletion = body.preferences.completion;
     }
-    if (prefs.enabledPrompt === undefined && prefs.enabledCompletion === undefined) {
+    // Issue #2056: "keep this device as it is" sends the acknowledgement and
+    // nothing else, so an ack alone is a valid PATCH. Without this the only way
+    // to dismiss the notice would be to change a preference — i.e. the reader
+    // could not decline the new default.
+    if (body.acknowledgeDefaultsNotice === true) prefs.acknowledgeDefaultsNotice = true;
+
+    if (
+      prefs.enabledPrompt === undefined &&
+      prefs.enabledCompletion === undefined &&
+      prefs.acknowledgeDefaultsNotice === undefined
+    ) {
       return NextResponse.json({ error: 'No valid preferences provided' }, { status: 400 });
     }
 

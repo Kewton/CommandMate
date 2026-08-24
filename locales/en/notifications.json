@@ -12,6 +12,15 @@
     "completion": "Also tell me about completions (optional)",
     "completionDesc": "Ordinary completions that need nothing from you. Off by default on newly registered devices (change it for this device here)"
   },
+  "defaultsNotice": {
+    "heading": "What changed in notifications",
+    "completionChanged": "Ordinary completions that need nothing from you are now off by default on newly registered devices. This device is still on, so they keep arriving.",
+    "failuresAdded": "\"When you need to act\" now also covers a failed verification gate, an upstream API fault, and a session that could not start. This device receives those too.",
+    "adopt": "Use the new default (turn completions off)",
+    "keep": "Keep this device as it is",
+    "adopted": "Completions turned off on this device",
+    "kept": "Left this device's settings unchanged"
+  },
   "permission": {
     "denied": "Notifications are blocked in your browser settings. Allow them for this site to receive push notifications."
   },

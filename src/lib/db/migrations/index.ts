@@ -39,6 +39,7 @@ import { v53_migrations } from './v53-worktree-aliases';
 import { v54_migrations } from './v54-worktree-id-path-derived';
 import { v55_migrations } from './v55-compact-churned-worktree-ids';
 import { v56_migrations } from './v56-gate-result-source';
+import { v57_migrations } from './v57-push-subscription-defaults-notice';
 
 /**
  * Complete ordered list of all migrations.
@@ -83,4 +84,5 @@ export const migrations: Migration[] = [
   ...v54_migrations,
   ...v55_migrations,
   ...v56_migrations,
+  ...v57_migrations,
 ];

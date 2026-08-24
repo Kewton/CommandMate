@@ -12,6 +12,12 @@
  * keys — and those are precisely the installs where the in-app toast is the only
  * notification the user can get. Putting its switch inside that body would hide
  * the control exactly where it matters most.
+ *
+ * Issue #2056 adds the one-off defaults notice, and it goes the other way for
+ * the mirror-image reason: it is about *this device's stored subscription*, so
+ * it belongs directly above the two switches it describes, inside the subscribed
+ * branch. A browser with no Push API has no subscription to be owed a notice
+ * about.
  */
 
 'use client';
@@ -75,6 +81,16 @@ export function NotificationsSettings() {
    * switch position on a device that has just registered.
    */
   const [prefs, setPrefs] = useState<Prefs>({ prompt: true, completion: false });
+  /**
+   * Issue #2056: whether this device is still owed the "the defaults changed"
+   * notice. Server-decided — the client never computes it from `prefs`, because
+   * a reader who deliberately turned completions back ON after acknowledging is
+   * indistinguishable from one who was never told.
+   *
+   * Starts false so the notice can only ever *appear* once the GET has spoken;
+   * a placeholder true would flash a banner at every newly registered device.
+   */
+  const [defaultsNoticePending, setDefaultsNoticePending] = useState(false);
 
   const subscribed = endpoint !== null;
 
@@ -113,10 +129,11 @@ export function NotificationsSettings() {
             );
             const d = (await r.json()) as {
               subscribed: boolean;
-              subscription?: { preferences: Prefs };
+              subscription?: { preferences: Prefs; defaultsNoticePending?: boolean };
             };
             if (d.subscribed && d.subscription && !cancelled) {
               setPrefs(d.subscription.preferences);
+              setDefaultsNoticePending(d.subscription.defaultsNoticePending === true);
             }
           }
         } catch {
@@ -164,10 +181,17 @@ export function NotificationsSettings() {
         }),
       });
       if (!res.ok) throw new Error('subscribe request failed');
-      const data = (await res.json()) as { subscription?: { preferences: Prefs } };
+      const data = (await res.json()) as {
+        subscription?: { preferences: Prefs; defaultsNoticePending?: boolean };
+      };
 
       setEndpoint(sub.endpoint);
       if (data.subscription?.preferences) setPrefs(data.subscription.preferences);
+      // A device registering now is created at the current defaults generation,
+      // so the server says false here. Read it rather than assuming: an endpoint
+      // that already existed comes back through the same ON CONFLICT path and
+      // may well still be owed the notice.
+      setDefaultsNoticePending(data.subscription?.defaultsNoticePending === true);
       setPermissionDenied(false);
       showToast(t('toast.enabled'), 'success');
     } catch {
@@ -222,6 +246,52 @@ export function NotificationsSettings() {
     [endpoint, prefs, showToast, t]
   );
 
+  /**
+   * Answer the one-off defaults notice (Issue #2056).
+   *
+   * Both answers clear the notice — that is what makes the change *consented to*
+   * rather than silent, which is the only way Epic #2002's criterion 3 ("ordinary
+   * completions are not notified by default") and criterion 6 ("no notification
+   * stops unintentionally") can both hold for a row that already existed.
+   *
+   * "Adopt" rides the completion toggle and the acknowledgement into one PATCH,
+   * so a half-applied write cannot leave the reader with completions still on
+   * and no notice left to offer turning them off.
+   */
+  const resolveDefaultsNotice = useCallback(
+    async (adopt: boolean) => {
+      if (!endpoint) return;
+      const previousPrefs = prefs;
+      const nextPrefs = adopt ? { ...prefs, completion: false } : prefs;
+
+      setDefaultsNoticePending(false);
+      if (adopt) setPrefs(nextPrefs);
+      setBusy(true);
+      try {
+        const res = await fetch('/api/push/subscriptions', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            endpoint,
+            // Declining sends no `preferences` at all: "keep this device as it
+            // is" must not rewrite toggles it is not changing.
+            ...(adopt ? { preferences: nextPrefs } : {}),
+            acknowledgeDefaultsNotice: true,
+          }),
+        });
+        if (!res.ok) throw new Error('acknowledge failed');
+        showToast(t(adopt ? 'defaultsNotice.adopted' : 'defaultsNotice.kept'), 'success');
+      } catch {
+        setPrefs(previousPrefs);
+        setDefaultsNoticePending(true);
+        showToast(t('toast.error'), 'error');
+      } finally {
+        setBusy(false);
+      }
+    },
+    [endpoint, prefs, showToast, t]
+  );
+
   const renderBody = () => {
     if (loading) {
       return (
@@ -270,6 +340,37 @@ export function NotificationsSettings() {
         ) : (
           <div className="space-y-4">
             <p className="text-sm font-medium text-foreground">{t('enabledOnThisDevice')}</p>
+
+            {defaultsNoticePending && (
+              <div
+                className="space-y-3 rounded-lg border border-info-border bg-info-subtle p-3"
+                data-testid="notifications-defaults-notice"
+              >
+                <p className="text-sm font-semibold text-info-foreground">
+                  {t('defaultsNotice.heading')}
+                </p>
+                <p className="text-xs text-foreground">{t('defaultsNotice.completionChanged')}</p>
+                <p className="text-xs text-foreground">{t('defaultsNotice.failuresAdded')}</p>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    variant="primary"
+                    onClick={() => resolveDefaultsNotice(true)}
+                    disabled={busy}
+                    data-testid="notifications-defaults-notice-adopt"
+                  >
+                    {t('defaultsNotice.adopt')}
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    onClick={() => resolveDefaultsNotice(false)}
+                    disabled={busy}
+                    data-testid="notifications-defaults-notice-keep"
+                  >
+                    {t('defaultsNotice.keep')}
+                  </Button>
+                </div>
+              </div>
+            )}
 
             <div className="space-y-3">
               <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
