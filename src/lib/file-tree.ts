@@ -29,7 +29,17 @@ export type ApiResult<T> =
   | { success: false; error: ApiErrorResponse };
 
 /**
- * Patterns for files and directories to exclude from the file tree
+ * Patterns for files and directories to exclude from the file tree.
+ *
+ * This list is a LISTING filter: an entry here is not enumerated by the tree
+ * API (`/api/worktrees/:id/tree`) or by file search. It does not, on its own,
+ * make a path unreadable — the read/write deny decision is a separate, smaller
+ * list in `src/lib/security/sensitive-file-guard.ts`, which classifies every
+ * pattern below into "hide only" vs "hide AND refuse" (Issue #2014).
+ *
+ * Adding a pattern here forces that classification: the drift guard in
+ * `tests/unit/lib/security/sensitive-file-guard.test.ts` fails until the new
+ * pattern is listed in exactly one of the two tiers.
  */
 export const EXCLUDED_PATTERNS: string[] = [
   '.git',           // Git internal directory
@@ -59,36 +69,56 @@ export const LIMITS = {
 } as const;
 
 /**
+ * Match a single name against one pattern of the {@link EXCLUDED_PATTERNS}
+ * dialect: an exact name, a `*.ext` suffix wildcard, or a `prefix.*` wildcard.
+ *
+ * [Issue #2014] Extracted so that the read guard
+ * (`src/lib/security/sensitive-file-guard.ts`) matches with exactly the same
+ * semantics as the tree filter. Two hand-written matchers over two subsets of
+ * one list is how `.env.local` ends up hidden but readable.
+ *
+ * @param name - File or directory name (a single path component)
+ * @param pattern - One pattern in the EXCLUDED_PATTERNS dialect
+ * @returns True if the name matches
+ */
+export function matchesNamePattern(name: string, pattern: string): boolean {
+  // Exact match
+  if (pattern === name) {
+    return true;
+  }
+
+  // Wildcard pattern (*.ext)
+  if (pattern.startsWith('*.')) {
+    const ext = pattern.slice(1); // Get .ext
+    if (name.endsWith(ext)) {
+      return true;
+    }
+  }
+
+  // Prefix pattern (name.*)
+  if (pattern.endsWith('.*')) {
+    const prefix = pattern.slice(0, -2); // Get prefix without .*
+    if (name.startsWith(prefix + '.')) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
  * Check if a file or directory name matches any excluded pattern
+ *
+ * NOTE ON SCOPE: this answers "should the tree/search LIST this name?" and
+ * nothing more. It is not a read gate — the general file API enforces its own,
+ * narrower deny list; see `src/lib/security/sensitive-file-guard.ts` for which
+ * of these patterns are also unreadable and why (Issue #2014).
  *
  * @param name - File or directory name to check
  * @returns True if the name should be excluded
  */
 export function isExcludedPattern(name: string): boolean {
-  for (const pattern of EXCLUDED_PATTERNS) {
-    // Exact match
-    if (pattern === name) {
-      return true;
-    }
-
-    // Wildcard pattern (*.ext)
-    if (pattern.startsWith('*.')) {
-      const ext = pattern.slice(1); // Get .ext
-      if (name.endsWith(ext)) {
-        return true;
-      }
-    }
-
-    // Prefix pattern (name.*)
-    if (pattern.endsWith('.*')) {
-      const prefix = pattern.slice(0, -2); // Get prefix without .*
-      if (name.startsWith(prefix + '.')) {
-        return true;
-      }
-    }
-  }
-
-  return false;
+  return EXCLUDED_PATTERNS.some((pattern) => matchesNamePattern(name, pattern));
 }
 
 /**
