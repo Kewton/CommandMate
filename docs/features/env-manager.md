@@ -66,21 +66,27 @@ Env Manager はそれとは別の、狭くて明示的な入口である。
 - **マスキングは表示の制御であって転送の制御ではない。** 編集するにはブラウザに値が要るので、
   API は平文を返す。守っているのは認証と allowlist であって難読化ではない。
 
-### この機能が塞いでいない既知の経路（Issue #1968 の対象外・実測 2026-08-24）
+### かつて塞がっていなかった経路（Issue #2014 で解消済み）
 
 `EXCLUDED_PATTERNS` は**ツリーの一覧に出さない**ための仕組みであって、パス直指定の読み取りは
-塞いでいない。実測すると Issue #1968 以前から次が通る:
+塞いでいなかった。Issue #1968 以前から次が通っていた（実測 2026-08-24 / develop @6696c4bb）:
 
 ```
 GET /api/worktrees/<id>/files/.env
 → 200 {"success":true,"path":".env","content":"SECRET=...","extension":"env",...}
 ```
 
-`GET /api/worktrees/[id]/files/[...path]/route.ts` は `isPathSafe` /
-`resolveAndValidateRealPath` は通すが `isExcludedPattern()` は見ないため、UI からは辿れなくても
-URL を知っていれば読める。**Issue #1968 ではこの挙動を変更していない**（Issue の要求は
-「既存の除外が効き続けること」であって、共有ルートの挙動変更ではないため）。
-塞ぐなら別 Issue で、`files` ルートの GET / PUT に `isExcludedPattern()` ガードを足す必要がある。
+**Issue #2014 でこれを塞いだ。** `src/lib/security/sensitive-file-guard.ts` が
+`EXCLUDED_PATTERNS` を「拒否層」（`.env` 系・`*.pem` / `*.key`・`.git`）と
+「非表示のみの層」（`node_modules` / `.DS_Store` / `Thumbs.db`）に分類し、拒否層は
+`files` ルートの **GET / PUT / POST / DELETE / PATCH 全メソッド**と `upload` ルートで 403
+（`SENSITIVE_PATH`）になる。GET 限定にしなかったのは、`PATCH {action:'rename'}` で `.env` を
+別名に改名してから読む 2 リクエストの迂回が実測で通ったため。
+
+Env Manager はこの変更の影響を受けない。専用 allowlist と 3 層のパス検証を通る別ルート
+（`/api/worktrees/:id/env`）であり、`files` ルートが `.env` を拒否する一方で Env Manager が
+同じファイルを提供し続けることは `tests/integration/api-files-excluded-patterns-2014.test.ts`
+が固定している。
 
 ## 表示と編集
 
