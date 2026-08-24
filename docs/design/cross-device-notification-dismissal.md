@@ -2,8 +2,10 @@
 
 - **Issue**: [#2001](https://github.com/Kewton/CommandMate/issues/2001)（Epic [#2002](https://github.com/Kewton/CommandMate/issues/2002) の 3 本目）
 - **前提**: [#1999](https://github.com/Kewton/CommandMate/issues/1999)（Auto-Yes 抑止）/ [#2000](https://github.com/Kewton/CommandMate/issues/2000)（要対応の軸・失敗通知）はマージ済み
+- **追補**: [#2057](https://github.com/Kewton/CommandMate/issues/2057)（再起動をまたぐ消し込み。§6.2）
 - **ステータス**: Accepted
-- **基準日**: 2026-08-23（仕様・各エンジン実装の実測。行番号は腐るため識別子で参照する）
+- **基準日**: 2026-08-23（仕様・各エンジン実装の実測。行番号は腐るため識別子で参照する）／
+  §6.2 は 2026-08-25（develop `b5743892` の実測）
 
 ---
 
@@ -150,7 +152,7 @@ const sub = await reg.pushManager.subscribe({
 
 | 役割 | 場所 |
 |---|---|
-| カードが実際に端末へ出たかの記録 | `src/lib/push/prompt-card-state.ts`（`markPromptCardShown` / `hasPromptCard` / `clearPromptCard`） |
+| カードが実際に端末へ出たかの記録 | `src/lib/push/prompt-card-state.ts`（`markPromptCardShown` / `hasPromptCard` / `clearPromptCard`）。#2057 以降は in-memory Map ＋ `app_settings` の書き戻しで**再起動をまたぐ**（§6.2） |
 | 記録する唯一の地点 | `src/lib/push/push-sender.ts` の `notifyPushSubscribers` — VAPID チェック・dedup・購読 0 件のいずれも通過した後 |
 | 送るか否かの判定（理由コードつき） | `src/lib/push/resolution-push-notifier.ts` の `decidePromptResolution` |
 | 送信 | 同 `notifyPromptResolved`（never throws） |
@@ -197,6 +199,8 @@ const sub = await reg.pushManager.subscribe({
 
 ## 6. 残る不正確さ（意図的に残したもの）
 
+### 6.1 端末がまだ表示しているかは分からない
+
 サーバは「**自分が送ったか**」は知っているが「**各端末がまだ表示しているか**」は知らない。
 したがって、**通知をタップまたはスワイプで消した端末**には、解決 push が
 「置き換え」ではなく「新規の 1 枚」として届く。無音で、内容は正しい（「対応済み」）が、
@@ -210,6 +214,59 @@ const sub = await reg.pushManager.subscribe({
 報告があるため、tag 置換だけに頼らず明示的に閉じてから 1 枚出す形にしてある。
 この順序は `tests/unit/pwa/sw-file.test.ts` と `tests/unit/pwa/sw-push.test.ts` が固定している
 （逆にすると waitUntil settle 時に 0 枚になり、§1.2 の罰を全部踏む）。
+
+### 6.2 サーバ再起動をまたぐカード（Issue #2057）
+
+#2001 は「鳴ったカードの印」を in-memory の `globalThis` Map に置いた。**`globalThis` を使うこと自体は
+正しい**（`next dev` の route ごとバンドルで Map が二重化するのを避ける、#1736 と同型）が、
+**寿命が間違っていた**。この印だけは tmux ペインではなく「サーバから見えない端末のロック画面に
+まだ乗っているもの」を指しており、サーバの再起動はそれを端末から取り除かない。
+
+#### 実測（develop `b5743892`）— Issue #2057 本文の前提はここで 1 点訂正されている
+
+| # | 状況 | 再起動後の結果 |
+|---|---|---|
+| A | 素の再起動。ステータスプローブが待機を再観測する | `observeWaitingEdge` が**開くエッジ**として再通知 → 印が付き直す ⇒ 閉じるエッジは `cross-device-clear`。**欠陥は出ない** |
+| B | 再起動後、待機の再観測時に Auto-Yes が有効 | #1999 のゲートが再通知を抑止 → 印が付かない ⇒ 閉じるエッジが **`no-card`**。**古いカードが他端末に残り続ける** |
+| C | 待機が「誰にも再観測されないまま」解決した | `observeWaitingEdge` は episode の無い `waiting: false` で**何も emit しない** ⇒ 閉じるエッジ自体が起きず、解決通知は判断すらされない |
+
+Issue 本文は「再起動で印が消える ⇒ `no-card`」と書いているが、**印が消えるだけでは A のとおり
+再通知が付け直す**。実際に欠陥になるのは **B（再通知そのものがゲートされる場合）** である。
+
+#### 採った対処: 印だけを永続化する（B を塞ぐ）
+
+`prompt-card-state` は印を `app_settings`（migration v27 の汎用 KV。**マイグレーション追加なし**）へ
+worktree ごと 1 行で書き、この プロセスに記憶が無いときはそこから読み戻す。SQL は
+`escalation-settings` と同じ理由で `lib/push/` 側に置いた（唯一の消費者の隣・DB 側に 4 つ目の
+リーダを増やさない）。in-memory Map は前段のキャッシュとして残す（両層は同じタイムスタンプを持つので、
+DB は backing store であって第二の意見ではない）。
+
+**TTL は 24 時間**（`PROMPT_CARD_MAX_AGE_MS`）。Issue が候補に挙げた 2 つはどちらも実測で外れる:
+
+- `STRUCTURED_STATE_MAX_AGE_MS`（30 分）は「**いまの状態についての構造化された主張**」の有効期限で、
+  `provisional-turn` 自身が「30 分を超えるターンは普通」と書いている。待機は日常的にこれを超える
+  （#1790 のリマインダの閾値は設定画面から 60 分にできる）。採ると、**古いカードが最も嘘になる長い待機**で
+  ちょうど印が切れる。
+- 待機エピソードには**時計による寿命が無い**（`waiting-episode-state` は閉じるエッジでしか消さない）。
+  「エピソードの寿命に合わせる」は「無期限」と同義で、サーバ停止中に終わった待機の印が数週間後に鳴りうる。
+
+この repo が「待機がまだ開いていておかしくない長さ」として既に約束している唯一の数字は
+`MAX_ESCALATION_THRESHOLD_MINUTES = 1440`（24 時間、「1 日後にもう一度知らせて」を許している）である。
+失敗の非対称性も同じ向きを指す: **短すぎ = 欠陥が戻る**（嘘のカードが残る）／
+**長すぎ = 無音で内容の正しい「対応済み」が最大 1 枚**、しかも購読 2 台以上の install に限られる。
+
+#### 塞いでいない範囲: C
+
+C は**印の問題ではなくエッジの問題**なので、印を永続化しても届かない。塞ぐには
+`waiting-episode-state`（`lib/session`）自体を永続化する必要がある。ここでの判断は
+**「再起動をまたいで待機エピソードを復元することは #2057 の範囲外」** で、
+`tests/unit/push/restart-card-state-2057.test.ts` の
+`raises no closing edge for a wait nothing re-observed after the restart` が
+**現在の挙動として固定**している（黙って変わらないように）。
+
+なお C を「起動時スイープ」で塞ぐ案は採らなかった。再起動直後は episode がまだ 1 件も再観測されて
+いないため、スイープは「まだ開いている待機」に対して**「対応済み」という逆の嘘**を送りうる。
+古いカードが残るより悪い。
 
 ---
 
@@ -226,5 +283,10 @@ const sub = await reg.pushManager.subscribe({
 
 **1 が成立しなかった場合でも、この設計は片肺にならない。** 同じ `tag` の
 `showNotification` による置き換えが効けばカードは 1 枚のまま文面が更新されるので、
-「嘘のカードが残る」という Issue の中核の不満は解消する。記録すべき内容は手順書の
+「嘘のカードが残る」という Issue の中核の不満は解消する。不成立の記録は手順書の
 「§6 記録テンプレート」に従うこと。
+
+**実施結果の置き場は手順書ではなく [docs/qa/2002-push-uat-record.md](../qa/2002-push-uat-record.md)**
+（Issue #2057）。§6.2 で足した再起動の経路は同手順書の **T-8** で見る。
+#1999 / #2000 の実機確認の要否と最小手順は
+[docs/qa/1999-2000-push-quieting-uat.md](../qa/1999-2000-push-quieting-uat.md) §1 に判断ごと書いてある。

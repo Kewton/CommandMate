@@ -186,6 +186,13 @@ export function handleWaitingTransition(transition: WaitingTransition): void {
     // way #1790 already does for the opening one. Fire-and-forget: the notifier
     // never rejects, and the `void` keeps the synchronous listener contract
     // `emit` relies on.
+    //
+    // Issue #2057: what reaches here is bounded by `waiting-episode-state`,
+    // which is in memory. A `waiting: false` poll on an instance this process
+    // never saw waiting emits nothing at all, so a wait that ended while the
+    // server was down produces no closing edge and no resolution — durable card
+    // marks do not change that, and it is the limitation §6.2 of the design
+    // note records rather than one this module can close.
     void notifyPromptResolved({
       worktreeId: transition.worktreeId,
       agentName: transition.instanceId ?? transition.cliToolId,
