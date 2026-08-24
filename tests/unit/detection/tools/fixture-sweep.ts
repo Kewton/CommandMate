@@ -18,7 +18,8 @@
 
 import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
-import { expect, it } from 'vitest';
+import { afterEach, beforeEach, expect, it } from 'vitest';
+import { IDLE_EVIDENCE_ENV_VAR } from '@/config/detection-evidence-config';
 import { detectSessionStatus } from '@/lib/detection/status-detector';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { StatusEvidence } from '@/lib/session/status-evidence';
@@ -99,6 +100,19 @@ function readFrame(dir: string, name: string): string {
 
 /** Register every check §11 asks for, for one tool. */
 export function runToolFixtureSuite(suite: ToolFixtureSuite): void {
+  // Issue #2011: a tool's fixture sweep is a statement about its RULE, so it
+  // runs the rule whatever the rollout table currently says. claude went back to
+  // `observe` in this Issue, and `observe` publishes `'positive'` for every idle
+  // row by design — under it the mutation case below would assert that a frame
+  // with its busy vocabulary removed still carries evidence, i.e. exactly the
+  // vacuous green §11 added the mutation to rule out.
+  beforeEach(() => {
+    process.env[IDLE_EVIDENCE_ENV_VAR] = `${suite.tool}=enforce`;
+  });
+  afterEach(() => {
+    delete process.env[IDLE_EVIDENCE_ENV_VAR];
+  });
+
   const names = readdirSync(suite.fixtureDir)
     .filter(f => f.endsWith('.txt'))
     .map(f => f.replace(/\.txt$/, ''))
