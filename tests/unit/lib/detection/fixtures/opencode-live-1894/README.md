@@ -70,8 +70,8 @@ catches first.
 What the window actually produced, measured on `esc-again-window.txt`, is **no
 evidence at all**: `running` / `default` while the frame is fresh, and
 `ready` / `no_recent_output` once the poller's `lastOutputTimestamp` ages past
-`STALE_OUTPUT_THRESHOLD_MS`. Both are `statusEvidence: 'none'`
-(`deriveScraperEvidence`), and the second one is a false completion — the same
+`STALE_OUTPUT_THRESHOLD_MS`. Both are `statusEvidence: 'none'`, and the second
+one is a false completion — the same
 harm the Issue reports, reached through the staleness fallback rather than
 through the completion marker. The suite pins both halves by deleting the busy
 row from the real capture and asserting the pre-fix verdicts come back.
