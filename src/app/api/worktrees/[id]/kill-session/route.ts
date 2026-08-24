@@ -169,7 +169,13 @@ export async function POST(
       logger.info('killed-session:');
 
       // Stop poller if running (uses CLIToolManager.stopPollers for DIP compliance - MF1-001)
-      manager.stopPollers(id, cliToolId, instanceId);
+      //
+      // Issue #1984: `stopPollers` は `await import('../polling/response-poller')` で
+      // モジュールスコープの循環を切ったため async になった。この `await` を落とすと
+      // poller の停止が下の `deleteSessionState()` より **後ろ**にずれ、
+      // 「state を消してから止める」順序になる（型検査も lint も通ってしまう）。
+      // 順序は tests/unit/api/kill-session-stop-pollers-order-1984.test.ts が固定する。
+      await manager.stopPollers(id, cliToolId, instanceId);
 
       // Clean up session state for this instance
       deleteSessionState(db, id, cliToolId, instanceId);
