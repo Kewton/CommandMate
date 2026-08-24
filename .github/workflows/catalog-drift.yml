@@ -46,13 +46,25 @@ name: Slash-command catalog drift
 #      the rows printed under it. A format change fails loud instead of quietly
 #      reporting zero.
 #
-# 3. ONE TRACKING ISSUE, UPDATED IN PLACE. A fresh issue every Monday is noise
+# 3. "NOTHING TO ADD" IS NOT "NOTHING TO DO" (Issue #2026). The reconcile can
+#    only add commands. The other half of the catalog's correctness is the
+#    attestation record — "as of version V, source S enumerated exactly this set"
+#    — which src/config/slash-commands-attestations.json holds and which only a
+#    human can renew, by re-reading the source. An upstream *removal* produces
+#    zero additions and a stale attestation at the same time, so the parser reads
+#    the "Attestation drift" section too and a run with any such line is `drift`,
+#    which keeps this issue open. A version-only move (`verifiedAgainst updates`
+#    with an unchanged set) is reported but does NOT hold the issue open: a patch
+#    release that renames nothing is a new coordinate for the same reading, and
+#    nagging on every upstream patch is how a watch becomes noise.
+#
+# 4. ONE TRACKING ISSUE, UPDATED IN PLACE. A fresh issue every Monday is noise
 #    nobody reads within a month. Reusing one issue makes the trend legible
 #    ("12 last week → 15 now") and lets the count in the title apply pressure.
 #    The issue is found by its label, reopened if it was closed, and only closed
 #    when a run is both drift-free AND conclusive.
 #
-# 4. THIS WORKFLOW NEVER BLOCKS ANYBODY. It is schedule/dispatch only, touches
+# 5. THIS WORKFLOW NEVER BLOCKS ANYBODY. It is schedule/dispatch only, touches
 #    no PR check, and stays green even when it finds drift — the tracking issue
 #    is the channel, so a red run would just train people to ignore it.
 
@@ -154,7 +166,7 @@ jobs:
             fi
             gh issue edit "$NUMBER" --title "$TITLE" --body-file catalog-drift-body.md
             gh issue close "$NUMBER" \
-              --comment "ドリフト 0 件・要調査の警告なしを確認したため自動 close します。($RUN_URL)"
+              --comment "ドリフト 0 件・attestation の陳腐化なし・要調査の警告なしを確認したため自動 close します。($RUN_URL)"
             echo "Closed #$NUMBER."
             exit 0
           fi
@@ -191,7 +203,7 @@ jobs:
           # `if: always()` means this also runs when an earlier step failed, in
           # which case STATUS is empty — that must not read as "all clear".
           case "$STATUS" in
-            drift) echo "::warning::カタログに未反映のコマンドがあります。追跡 Issue を確認してください。" ;;
+            drift) echo "::warning::カタログに未反映のコマンド、または陳腐化した attestation があります。追跡 Issue を確認してください。" ;;
             inconclusive) echo "::warning::カタログを検査できませんでした（ソース未照合）。追跡 Issue を確認してください。" ;;
             clean) echo "カタログのドリフトはありません。" ;;
             *) echo "::warning::ドリフト判定を取得できませんでした。前段のステップのログを確認してください。" ;;

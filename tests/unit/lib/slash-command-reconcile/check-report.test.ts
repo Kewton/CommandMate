@@ -32,6 +32,13 @@ const CLEAN = fixture('check-clean.txt');
 const CLEAN_KNOWN_WARNING = fixture('check-clean-known-warning.txt');
 const SOURCE_DOWN = fixture('check-source-down.txt');
 const RUNNER_CRASH = fixture('check-runner-crash.txt');
+/**
+ * A byte-for-byte capture from 2026-08-24, taken with the codex attestation
+ * deliberately stepped back one release and one command (Issue #2026). It is the
+ * case a count could never express: zero new commands (the catalog already has
+ * /pwd, so the reconcile is idempotent) and a stale reading of the source.
+ */
+const ATTESTATION_DRIFT = fixture('check-attestation-drift-2026-08-24.txt');
 
 describe('parseCatalogCheckOutput — real --check capture (3 new, exit 0)', () => {
   const report = parseCatalogCheckOutput(DRIFT, { exitCode: 0 });
@@ -70,6 +77,13 @@ describe('parseCatalogCheckOutput — real --check capture (3 new, exit 0)', () 
     expect(report.verifiedAgainstUpdates).toEqual(['codex: 0.146.0 -> 0.146.1']);
   });
 
+  // The 2026-08-06 capture predates the attestation record, so it has no such
+  // section — and a parser that invented rows for it would be reading its own
+  // expectations rather than the report.
+  it('reports no attestation drift for a capture that has no such section', () => {
+    expect(report.attestationDrift).toEqual([]);
+  });
+
   it('strips the npm banner from the text pasted into the issue', () => {
     expect(report.reportText.startsWith('Slash-command catalog reconcile')).toBe(true);
     expect(report.reportText).not.toContain('catalog:refresh');
@@ -92,6 +106,55 @@ describe('parseCatalogCheckOutput — zero drift', () => {
     expect(report.status).toBe('clean');
     expect(report.newCount).toBe(0);
     expect(report.blockingWarnings).toEqual([]);
+  });
+});
+
+describe('parseCatalogCheckOutput — stale attestation (Issue #2026)', () => {
+  const report = parseCatalogCheckOutput(ATTESTATION_DRIFT, { exitCode: 0 });
+
+  it('parses the drift lines the runner printed', () => {
+    expect(report.attestationDrift).toEqual([
+      '[codex] source now lists /pwd; source no longer lists /zzz-retired',
+    ]);
+  });
+
+  // The verdict this issue exists for: nothing to add, and still work to do.
+  // Before #2026 this run was indistinguishable from a clean one, so the weekly
+  // workflow would have closed the tracking issue on it.
+  it('is drift even though the reconcile would add nothing', () => {
+    expect(report.newCount).toBe(0);
+    expect(report.status).toBe('drift');
+    expect(report.blockingWarnings).toEqual([]);
+  });
+
+  it('titles it as staleness rather than as "未反映 0 件"', () => {
+    expect(trackingIssueTitle(report)).toBe(
+      '[catalog-drift] スラッシュコマンドカタログ attestation の陳腐化 1 件'
+    );
+  });
+
+  it('gives the tracking issue a section saying --write cannot clear it', () => {
+    const body = formatTrackingIssueBody(report, { checkedAt: '2026-08-24T00:00:00.000Z' });
+    expect(body).toContain('### attestation の陳腐化');
+    expect(body).toContain('slash-commands-attestations.json');
+    expect(body).toContain('[codex] source now lists /pwd');
+  });
+
+  it('carries the count in the one-line summary', () => {
+    expect(formatCheckSummaryLine(report)).toContain('attestationDrift=1');
+  });
+
+  // A version-only move is a new coordinate for the same reading, so it is
+  // reported without holding the tracking issue open for every upstream patch.
+  it('does not turn a version-only move into drift', () => {
+    const versionOnly = ATTESTATION_DRIFT.replace(
+      /\nAttestation drift[\s\S]*?\n\n/,
+      '\n'
+    );
+    const parsed = parseCatalogCheckOutput(versionOnly, { exitCode: 0 });
+    expect(parsed.verifiedAgainstUpdates).toEqual(['codex: 0.148.0 -> 0.149.1']);
+    expect(parsed.attestationDrift).toEqual([]);
+    expect(parsed.status).toBe('clean');
   });
 });
 
@@ -223,7 +286,7 @@ describe('formatTrackingIssueBody', () => {
 describe('formatCheckSummaryLine', () => {
   it('summarises the verdict for the Actions log', () => {
     expect(formatCheckSummaryLine(parseCatalogCheckOutput(DRIFT))).toBe(
-      'status=drift new=3 needsReview=5 warnings=1(blocking=0)'
+      'status=drift new=3 attestationDrift=0 needsReview=5 warnings=1(blocking=0)'
     );
   });
 });

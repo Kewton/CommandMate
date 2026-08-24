@@ -18,6 +18,7 @@ export * from './types';
 export * from './sanitize';
 export * from './check-report';
 export * from './exclusions';
+export * from './attestations';
 export * from './locale';
 export * from './engine';
 export * from './fetch';

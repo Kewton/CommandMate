@@ -3,12 +3,15 @@
  *
  * The reconcile mechanism keeps the bundled slash-command snapshot
  * (src/config/slash-commands-catalog.json) fresh from each CLI's *authoritative*
- * source, so the catalog content and its `verifiedAgainst` version stamp move
- * together — the root cause of drift #1476/#1488 fought by convention.
+ * source, so the catalog content and the version stamp that describes it move
+ * together — the root cause of drift #1476/#1488 fought by convention. Issue
+ * #2026 moved that stamp into the attestation record, where it sits next to the
+ * set it stands for and can only be moved by hand.
  *
  * This file carries only data shapes; the engine (engine.ts) and providers
- * (providers/*.ts) hold the behavior. None of it is imported by the app runtime
- * — it is consumed by the release-time runner (scripts/) and unit tests.
+ * (providers/*.ts) hold the behavior. The behavior is release-time only, with
+ * one exception: attestations.ts is reachable from the app runtime, because
+ * src/lib/standard-commands.ts derives `CATALOG_VERIFIED_AGAINST` from it.
  */
 
 /**
@@ -106,6 +109,52 @@ export interface CatalogExclusionsFile {
 }
 
 /**
+ * A human's signed reading of one tool's authoritative source (Issue #2026).
+ *
+ * "As of version V, source S enumerated exactly this set of commands for tool
+ * T." Nothing in the toolchain writes it: `catalog:refresh --write` adds catalog
+ * entries and locale strings and stops there, so an attestation moves only when
+ * a person opens the source and edits the file — and that act is the review the
+ * count pins used to stand in for.
+ */
+export interface CatalogAttestation {
+  /** Catalog tool id this reading covers; one record per tool. */
+  tool: string;
+  /**
+   * CLI version the reading is claimed against.
+   *
+   * The only home of that number since #2026: `verifiedAgainst` left
+   * slash-commands-catalog.json and is derived from here, so a stamp can never
+   * outlive the set it stands for.
+   */
+  version: string;
+  /** Where to look to re-run this exact measurement — an instruction, not a citation. */
+  source: string;
+  /**
+   * `YYYY-MM-DD` the source was read. Load-bearing for a source that is not
+   * version-pinned: the claude docs page is live, so a version alone does not
+   * identify a document.
+   */
+  observedAt: string;
+  /** Issue the reading was taken in. */
+  issue: number;
+  /**
+   * The enumerated set, sorted, without the leading '/'.
+   *
+   * Active canonical rows only — a source that also lists history ("Removed in
+   * vX") and alias rows is describing its past, not what the CLI ships. Curation
+   * is *not* applied here: a command a human decided to keep out of the catalog
+   * still belongs in this list, with the reason recorded in the exclusions file.
+   */
+  commands: string[];
+}
+
+/** Shape of src/config/slash-commands-attestations.json. */
+export interface CatalogAttestationsFile {
+  attestations: CatalogAttestation[];
+}
+
+/**
  * Raw catalog entry, as authored in slash-commands-catalog.json.
  *
  * `descriptionKey` is an override point, not a derived value (Issue #1704): it
@@ -123,9 +172,15 @@ export interface CatalogCommandEntry {
   source?: string;
 }
 
-/** Shape of the bundled catalog file (src/config/slash-commands-catalog.json). */
+/**
+ * Shape of the bundled catalog file (src/config/slash-commands-catalog.json).
+ *
+ * Issue #2026 removed `verifiedAgainst` from this file. The version a tool's
+ * entries were collated against is now one field of that tool's attestation
+ * (src/config/slash-commands-attestations.json), so the stamp travels with the
+ * set it describes instead of being a second, separately-editable copy of it.
+ */
 export interface SlashCommandsCatalog {
-  verifiedAgainst: Record<string, string>;
   frequentlyUsed: Record<string, string[]>;
   commands: CatalogCommandEntry[];
 }
@@ -160,8 +215,45 @@ export interface ReconcileDiff {
    * a format change must not silently strip the catalog).
    */
   missingFromSource: Array<{ tool: string; name: string }>;
-  /** verifiedAgainst stamps that changed, per tool. */
+  /**
+   * Version stamps the source has moved past, per tool.
+   *
+   * Issue #2026: `from` is the *attested* version, not a value read off the
+   * catalog, and nothing applies these any more — re-stamping is part of
+   * re-attesting, which is a human edit to the attestations file. Before that,
+   * `--write` bumped the stamp on its own, which quietly re-dated a claim about
+   * a source that nobody had re-read.
+   */
   verifiedAgainstUpdated: Record<string, { from?: string; to: string }>;
+  /**
+   * Per-tool difference between what a source enumerates now and what its
+   * attestation says it enumerated (Issue #2026). Only tools whose provider
+   * actually answered appear; a fail-soft source yields no row rather than an
+   * empty one, because "not compared" must never read as "unchanged".
+   */
+  attestationDrift: AttestationDrift[];
+}
+
+/**
+ * Per-tool comparison of what a source enumerates *now* against the set its
+ * attestation claims it enumerated (Issue #2026).
+ *
+ * This is the staleness signal `catalog:refresh --check` reports. An attestation
+ * is a dated claim about a document, and the run that can actually see the
+ * document is the only place that can say the claim has expired.
+ *
+ * The *version* half of that staleness is not repeated here: it is already
+ * `ReconcileDiff.verifiedAgainstUpdated`, which since #2026 compares the source
+ * version against the attested one. This type carries the set half only.
+ */
+export interface AttestationDrift {
+  tool: string;
+  /** False when no attestation covers this tool at all. */
+  attested: boolean;
+  /** Names the source enumerates that the attestation does not list. */
+  unattested: string[];
+  /** Names the attestation lists that the source no longer enumerates. */
+  vanished: string[];
 }
 
 /**

@@ -155,12 +155,29 @@ Retry loops:  avg 0.0 per failed task
 
 ---
 
-## Phase 1.5: スラッシュコマンドカタログのリコンサイル（Issue #1489）
+## Phase 1.5: スラッシュコマンドカタログのリコンサイル（Issue #1489 / #2026）
 
 版 bump の**前**に、組み込みスラッシュコマンドのカタログを各 CLI の権威ソース
-（claude docs table / codex OSS enum @release tag）から最新化する。これにより
-カタログ内容と `verifiedAgainst` が**同じ関数で一緒に**更新され、内容と版スタンプの
-乖離（#1476 / #1488 の真因）が構造的に解消する。
+（claude docs table / codex OSS enum @release tag）から最新化する。
+
+このフェーズは **2 つの作業**からなる。混ぜないこと:
+
+| | 誰がやるか | 触るファイル |
+|---|---|---|
+| **A. カタログにコマンドを足す** | `--write`（機械） | `src/config/slash-commands-catalog.json`, `locales/{en,ja}/worktree.json` |
+| **B. 「版 V で source S はこの集合を列挙した」を記録し直す** | **人間だけ**（Issue #2026） | `src/config/slash-commands-attestations.json` |
+
+**B を機械にやらせない設計であることが重要**（#2026）。A だけを適用するとカタログが
+attestation より先に進み、`tests/unit/lib/standard-commands.test.ts` の
+`ships exactly the attested command set for every tool` が
+`[<tool>] /<name> is in the catalog but not attested` で落ちる。**それは審査ゲートであって
+欠陥ではない。** 正しい対応は B（ソースを読み直して attestation を書き直す）であって、
+テストの期待値を緩めることではない。
+
+`verifiedAgainst` は #2026 で `slash-commands-catalog.json` から**削除**され、
+attestation の `version` フィールドが唯一の在処になった（`CATALOG_VERIFIED_AGAINST` は
+そこから導出される）。したがって**版スタンプを自動で動かすものは無い** — 版が動くのは
+B を人がやったときだけである。
 
 ### 1.5-1. ドリフト検出（書き込みなし）
 
@@ -168,7 +185,15 @@ Retry loops:  avg 0.0 per failed task
 npm run catalog:refresh -- --check
 ```
 
-- 追加候補・`verifiedAgainst` 更新・ソース未掲載（要レビュー）の差分が表示される。
+- 冒頭に `Holding N attestation(s) from …` として、いま pin が拠っている読み取り
+  （tool / 件数 / 版 / 採取日 / Issue）が出る。
+- `New commands (N)` が A の規模。
+- `verifiedAgainst updates (not applied — re-attest by hand)` は
+  「attestation に記録した版よりソースが先に進んでいる」の**報告のみ**。#2026 以降、
+  これを適用するものは存在しない。
+- `Attestation drift (…)` は「記録した**集合**とソースの現状が食い違っている」。
+  **上流でコマンドが削除された場合、追加は 0 件のままこれだけが出る** ので、
+  「New commands 0 件＝やることなし」と読まないこと。
 - **幻コマンド確認（#1503）**: 「In catalog but not in source（review — not auto-deleted）」に
   出た項目は、現行 CLI に存在しない幻コマンドの候補。自動削除はされない（隠しエイリアスの
   誤検出があるため）ので、実機で「完全入力してもポップアップに一致行が出ない」ものは
@@ -176,7 +201,7 @@ npm run catalog:refresh -- --check
 - ソースが到達不能・体裁変更の場合は **fail-soft**（warn を出して既存カタログ据え置き、
   exit 0）。この場合はリコンサイルをスキップしてそのまま Phase 2 へ進む。
 
-### 1.5-2. 差分があれば適用
+### 1.5-2. 差分があれば適用（A: 機械の担当）
 
 差分が出たときのみ実行する:
 
@@ -185,15 +210,28 @@ npm run catalog:refresh -- --write
 ```
 
 - 書き換わるのは `src/config/slash-commands-catalog.json` と
-  `locales/{en,ja}/worktree.json`（新規 description キー）。
+  `locales/{en,ja}/worktree.json`（新規 description キー）の **2 種類だけ**。
+  `slash-commands-attestations.json` は**書かれない**。
 - **ja 訳は `[要レビュー]` プレフィックス付きプレースホルダ**。en も docs 由来の
   heuristic 抽出なので、**リリース PR の diff で必ず人手レビュー**する（誤抽出・不要な
   内部コマンド混入がないか。これが安全ゲート）。
 - 品質ゲート（下記 2-3）を通してから、変更を**このリリース commit に含める**。
 
-> **注意**: `--write` は `codex` のように版固定できるソースのみ `verifiedAgainst` を
-> 更新する。claude docs は版スタンプが無いため `verifiedAgainst.claude` は触らない
-> （照合した版のときだけ刻む原則）。
+### 1.5-3. attestation を採り直す（B: 人間の担当）
+
+**次のいずれかが出たら必須**:
+
+- `--write` で `New commands` を適用した
+- `Attestation drift (…)` に行が出た
+- `verifiedAgainst updates …` に行が出て、その版で読み直す判断をした
+
+やること: ソース（`source` フィールドが指す URL / タグ / CLI）を**実際に読み**、
+`src/config/slash-commands-attestations.json` の当該 tool の
+`commands` / `version` / `observedAt` を書き直す。手順の詳細と各ツールの採取レシピは
+[`/catalog-reconcile` スキル](../catalog-reconcile/SKILL.md) Phase 5 にある。
+
+**カタログからコピーして緑にしない。** それをやると「ソースがこう言っていた」という
+主張が「カタログがこうなっている」の言い換えになり、審査そのものが消える。
 
 ---
 
@@ -281,14 +319,22 @@ npm run test:unit > /tmp/rel-unit.log 2>&1; echo "UNIT=$?"
 
 ```bash
 git add package.json package-lock.json CHANGELOG.md
-# Phase 1.5 でカタログを --write した場合のみ、その差分も同じ commit に含める:
+# Phase 1.5-2 でカタログを --write した場合のみ:
 git add src/config/slash-commands-catalog.json locales/en/worktree.json locales/ja/worktree.json
+# Phase 1.5-3 で attestation を採り直した場合のみ（--write はこのファイルを書かないので、
+# 1.5-2 の直後に足すものではない。人が編集したときだけ差分が出る）:
+git add src/config/slash-commands-attestations.json
 git commit -m "chore: release v${NEXT_VERSION}"
 git push origin develop
 ```
 
-変更は上記3ファイル（**リコンサイルで差分が出た場合はカタログ＋locales の最大3ファイルを追加**）
-であること（`git diff --stat` で確認）。リコンサイルで書き込みが無かったときは 3 ファイルのみ。
+変更は上記 3 ファイル（**リコンサイルで差分が出た場合はカタログ＋locales の 3 ファイル、
+attestation を採り直した場合はさらに 1 ファイル**）であること（`git diff --stat` で確認）。
+リコンサイルで書き込みが無く attestation も動かさなかったときは 3 ファイルのみ。
+
+> `git status` に `src/config/slash-commands-attestations.json` が出ているのに
+> `New commands` が 0 件だった場合、それは**上流の削除か版の採り直し**である。
+> 正常な状態なので add してよい（commit message にどのソースをいつ読んだかを残す）。
 
 ---
 

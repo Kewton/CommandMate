@@ -34,7 +34,7 @@ const CLAUDE_BTW = 'Ask a quick side question in an ephemeral fork';
 const CODEX_BTW = 'send a message to the model out of band';
 
 function emptyCatalog(): SlashCommandsCatalog {
-  return { verifiedAgainst: {}, frequentlyUsed: {}, commands: [] };
+  return { frequentlyUsed: {}, commands: [] };
 }
 
 function source(tool: string, description: string): ProviderResult {

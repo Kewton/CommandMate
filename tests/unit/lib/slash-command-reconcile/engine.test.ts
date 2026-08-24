@@ -17,13 +17,51 @@ import {
   type LocaleDictionary,
 } from '@/lib/slash-command-reconcile/locale';
 import type {
+  CatalogAttestation,
   ProviderResult,
   SlashCommandsCatalog,
 } from '@/lib/slash-command-reconcile/types';
 
+/**
+ * The attested reading these tests are held to (Issue #2026).
+ *
+ * Written here rather than defaulted to the shipped
+ * src/config/slash-commands-attestations.json, for the reason
+ * history-and-alias-rows.test.ts passes `exclusions: []`: what is under test is
+ * how the engine reads provider results, and borrowing repo data would let a
+ * release-time edit to a real attestation fail an unrelated engine test. It also
+ * supplies the version map that used to be `catalog.verifiedAgainst`.
+ */
+const ATTESTATIONS: CatalogAttestation[] = [
+  {
+    tool: 'claude',
+    version: '2.1.218',
+    source: 'engine.test.ts fixture — the claude rows declared in this file',
+    observedAt: '2026-08-24',
+    issue: 1489,
+    commands: ['loop', 'status'],
+  },
+  {
+    tool: 'codex',
+    version: '0.144.6',
+    source: 'engine.test.ts fixture — the codex rows declared in this file',
+    observedAt: '2026-08-24',
+    issue: 1489,
+    commands: ['status', 'undo'],
+  },
+];
+
+/** reconcileCatalog with this file's attestations, unless a test overrides them. */
+function reconcile(
+  catalog: SlashCommandsCatalog,
+  providerResults: ProviderResult[],
+  options: Parameters<typeof reconcileCatalog>[2] = {}
+): ReturnType<typeof reconcileCatalog> {
+  return reconcileCatalog(catalog, providerResults, { attestations: ATTESTATIONS, ...options });
+}
+
 function baseCatalog(): SlashCommandsCatalog {
   return {
-    verifiedAgainst: { claude: '2.1.218', codex: '0.144.6' },
     frequentlyUsed: { claude: [], codex: [] },
     commands: [
       {
@@ -85,7 +123,7 @@ const antigravitySkipped: ProviderResult = {
 
 describe('reconcileCatalog', () => {
   it('adds only commands missing for a tool, with the correct shape', () => {
-    const result = reconcileCatalog(baseCatalog(), [claudeOk, codexOk, antigravitySkipped]);
+    const result = reconcile(baseCatalog(), [claudeOk, codexOk, antigravitySkipped]);
 
     const focus = result.catalog.commands.find(
       (c) => c.name === 'focus' && c.cliTools?.includes('claude')
@@ -109,34 +147,59 @@ describe('reconcileCatalog', () => {
   });
 
   it('is idempotent — an already-catalogued command is never re-added (no #1488 dupes)', () => {
-    const first = reconcileCatalog(baseCatalog(), [claudeOk, codexOk, antigravitySkipped]);
+    const first = reconcile(baseCatalog(), [claudeOk, codexOk, antigravitySkipped]);
     expect(first.diff.added.some((a) => a.name === 'loop')).toBe(false);
 
     // Re-run against the reconciled catalog: nothing new.
-    const second = reconcileCatalog(first.catalog, [claudeOk, codexOk, antigravitySkipped]);
+    const second = reconcile(first.catalog, [claudeOk, codexOk, antigravitySkipped]);
     expect(second.diff.added).toEqual([]);
     expect(second.changed).toBe(false);
   });
 
   it('reports catalog entries missing from a source without deleting them', () => {
-    const result = reconcileCatalog(baseCatalog(), [claudeOk, codexOk, antigravitySkipped]);
+    const result = reconcile(baseCatalog(), [claudeOk, codexOk, antigravitySkipped]);
     // codex source has no "undo"; it stays in the catalog but is reported.
     expect(result.diff.missingFromSource).toContainEqual({ tool: 'codex', name: 'undo' });
     expect(result.catalog.commands.some((c) => c.name === 'undo')).toBe(true);
   });
 
-  it('stamps verifiedAgainst only for a version-pinned source', () => {
-    const result = reconcileCatalog(baseCatalog(), [claudeOk, codexOk, antigravitySkipped]);
+  // Issue #2026: the stamp is *reported*, never applied. It used to be written
+  // into the catalog by this call, which meant `--write` re-dated a human's
+  // reading of a source it had not re-read. The version now belongs to the
+  // attestation, so the only output here is the delta a re-attestation owes.
+  it('reports a version-pinned source moving past the attested version, and writes nothing', () => {
+    const result = reconcile(baseCatalog(), [claudeOk, codexOk, antigravitySkipped]);
     expect(result.diff.verifiedAgainstUpdated).toEqual({
       codex: { from: '0.144.6', to: '0.145.0' },
     });
-    expect(result.catalog.verifiedAgainst.codex).toBe('0.145.0');
-    // claude has no sourceVersion → untouched.
-    expect(result.catalog.verifiedAgainst.claude).toBe('2.1.218');
+    // claude has no sourceVersion → nothing to report for it.
+    expect(result.diff.verifiedAgainstUpdated.claude).toBeUndefined();
+    expect(result.catalog).not.toHaveProperty('verifiedAgainst');
+  });
+
+  // The set half of the same staleness: a pin can only compare the catalog to
+  // the attestation, so the run that actually fetched the source is the only
+  // place that can say the attestation itself has expired.
+  it('reports how far each attested set has fallen behind its source', () => {
+    const result = reconcile(baseCatalog(), [claudeOk, codexOk, antigravitySkipped]);
+    expect(result.diff.attestationDrift).toEqual([
+      { tool: 'claude', attested: true, unattested: ['focus'], vanished: [] },
+      { tool: 'codex', attested: true, unattested: ['fork'], vanished: ['undo'] },
+    ]);
+    // A fail-soft source yields no row at all — "not compared" must never read
+    // as "unchanged".
+    expect(result.diff.attestationDrift.some((d) => d.tool === 'antigravity')).toBe(false);
+  });
+
+  it('flags a tool the source enumerates but no attestation covers', () => {
+    const result = reconcile(baseCatalog(), [codexOk], { attestations: [] });
+    expect(result.diff.attestationDrift).toEqual([
+      { tool: 'codex', attested: false, unattested: ['fork', 'status'], vanished: [] },
+    ]);
   });
 
   it('produces locale additions: en from source, ja review placeholder, deduped by key', () => {
-    const result = reconcileCatalog(baseCatalog(), [claudeOk, codexOk, antigravitySkipped]);
+    const result = reconcile(baseCatalog(), [claudeOk, codexOk, antigravitySkipped]);
     const focus = result.localeAdditions.find(
       (l) => l.key === 'slashCommands.descriptions.focus'
     );
@@ -163,7 +226,7 @@ describe('reconcileCatalog', () => {
       commands: [{ name: 'shared', description: 'shared cmd' }],
       warnings: [],
     };
-    const result = reconcileCatalog(baseCatalog(), [claudeNew, codexNew]);
+    const result = reconcile(baseCatalog(), [claudeNew, codexNew]);
 
     // One catalog entry per tool scope…
     expect(result.catalog.commands.filter((c) => c.name === 'shared')).toHaveLength(2);
@@ -180,7 +243,7 @@ describe('reconcileCatalog', () => {
       commands: [],
       warnings: ['claude fetch failed'],
     };
-    const result = reconcileCatalog(baseCatalog(), [claudeDown, codexOk]);
+    const result = reconcile(baseCatalog(), [claudeDown, codexOk]);
 
     expect(result.diff.added.some((a) => a.tool === 'claude')).toBe(false);
     expect(result.diff.added.map((a) => a.name)).toEqual(['fork']);
@@ -189,13 +252,13 @@ describe('reconcileCatalog', () => {
 
   it('does not mutate the input catalog', () => {
     const input = baseCatalog();
-    reconcileCatalog(input, [claudeOk, codexOk]);
+    reconcile(input, [claudeOk, codexOk]);
     expect(input.commands).toHaveLength(3);
-    expect(input.verifiedAgainst.codex).toBe('0.144.6');
+    expect(input.commands.map((c) => c.name)).toEqual(['loop', 'status', 'undo']);
   });
 
   it('honors a custom defaultCategory for new commands', () => {
-    const result = reconcileCatalog(baseCatalog(), [claudeOk], { defaultCategory: 'standard-config' });
+    const result = reconcile(baseCatalog(), [claudeOk], { defaultCategory: 'standard-config' });
     expect(result.catalog.commands.find((c) => c.name === 'focus')?.category).toBe(
       'standard-config'
     );
@@ -212,7 +275,7 @@ describe('reconcileCatalog — active/canonical filter', () => {
   });
 
   it('never adds a row the source marks as removed, and says why', () => {
-    const result = reconcileCatalog(baseCatalog(), [
+    const result = reconcile(baseCatalog(), [
       withRows(
         { name: 'vim', description: 'Removed in v2.1.92', maxVersion: '2.1.91', status: 'removed' },
         { name: 'focus', description: 'Toggle focus mode' }
@@ -229,7 +292,7 @@ describe('reconcileCatalog — active/canonical filter', () => {
   });
 
   it('never adds an alias row, and says which command it points at', () => {
-    const result = reconcileCatalog(baseCatalog(), [
+    const result = reconcile(baseCatalog(), [
       withRows({ name: 'cost', description: 'Alias for /usage', aliasOf: 'usage' }),
     ]);
 
@@ -244,7 +307,7 @@ describe('reconcileCatalog — active/canonical filter', () => {
   });
 
   it('reports a refused row that the catalog still ships, without deleting it', () => {
-    const result = reconcileCatalog(baseCatalog(), [
+    const result = reconcile(baseCatalog(), [
       withRows({ name: 'loop', description: 'Removed in v9.9.9', status: 'removed' }),
     ]);
 
@@ -255,7 +318,7 @@ describe('reconcileCatalog — active/canonical filter', () => {
   });
 
   it('drops a marker-like description but keeps the command', () => {
-    const result = reconcileCatalog(baseCatalog(), [
+    const result = reconcile(baseCatalog(), [
       withRows({ name: 'simplify', description: 'Skill' }),
     ]);
 
@@ -290,7 +353,7 @@ describe('reconcileCatalog — active/canonical filter', () => {
       commands: [{ name: 'vim', description: 'toggle vim keybindings in the composer' }],
       warnings: [],
     };
-    const result = reconcileCatalog(baseCatalog(), [claudeSide, codexSide]);
+    const result = reconcile(baseCatalog(), [claudeSide, codexSide]);
 
     // Nothing is written under the shared key any more.
     expect(
@@ -339,7 +402,7 @@ describe('reconcileCatalog — active/canonical filter', () => {
       commands: [{ name: 'vim', description: `description ${i}` }],
       warnings: [],
     }));
-    const result = reconcileCatalog(baseCatalog(), three);
+    const result = reconcile(baseCatalog(), three);
     expect(result.notices.filter((n) => n.category === 'description-conflict')).toHaveLength(1);
     // Once contested, every tool keeps its own key — including the third one,
     // which arrives after the split was already decided.
@@ -357,7 +420,7 @@ describe('reconcileCatalog — active/canonical filter', () => {
       commands: [{ name: 'theme', description: 'Choose the color theme' }],
       warnings: [],
     }));
-    const result = reconcileCatalog(baseCatalog(), sides);
+    const result = reconcile(baseCatalog(), sides);
 
     expect(result.localeAdditions).toEqual([
       {
@@ -388,7 +451,7 @@ describe('reconcileCatalog — active/canonical filter', () => {
       commands: [{ name: 'loop', description: 'Run a prompt on a schedule' }],
       warnings: [],
     };
-    const result = reconcileCatalog(baseCatalog(), [codexSide, antigravitySide]);
+    const result = reconcile(baseCatalog(), [codexSide, antigravitySide]);
 
     expect(result.localeAdditions).toEqual([]);
     expect(
@@ -432,7 +495,7 @@ describe('reconcileCatalog — active/canonical filter', () => {
     };
 
     it('reports the inherited description and names the key to split to', () => {
-      const result = reconcileCatalog(catalogWithOpencodeAgents(), [claudeAgents], {
+      const result = reconcile(catalogWithOpencodeAgents(), [claudeAgents], {
         exclusions: [],
         existingEnDescriptions: {
           'slashCommands.descriptions.agents': 'List and manage available agents',
@@ -454,7 +517,7 @@ describe('reconcileCatalog — active/canonical filter', () => {
     });
 
     it('stays quiet when the tools actually agree', () => {
-      const result = reconcileCatalog(catalogWithOpencodeAgents(), [claudeAgents], {
+      const result = reconcile(catalogWithOpencodeAgents(), [claudeAgents], {
         exclusions: [],
         existingEnDescriptions: {
           'slashCommands.descriptions.agents': 'Prints a reminder to ask Claude instead',
@@ -464,7 +527,7 @@ describe('reconcileCatalog — active/canonical filter', () => {
     });
 
     it('stays quiet when the shipped text is unknown to the caller', () => {
-      const result = reconcileCatalog(catalogWithOpencodeAgents(), [claudeAgents], {
+      const result = reconcile(catalogWithOpencodeAgents(), [claudeAgents], {
         exclusions: [],
       });
       expect(result.notices.filter((n) => n.category === 'description-conflict')).toEqual([]);
@@ -489,7 +552,7 @@ describe('reconcileCatalog — active/canonical filter', () => {
       commands: [{ name: 'btw', description: 'Ask a quick side question' }],
       warnings: [],
     };
-    const result = reconcileCatalog(catalog, [claudeSide]);
+    const result = reconcile(catalog, [claudeSide]);
 
     expect(result.catalog.commands.filter((c) => c.name === 'btw')).toEqual([
       {
@@ -557,7 +620,7 @@ describe('reconcileCatalog — active/canonical filter', () => {
     };
 
     it('mints a per-tool leaf for the arriving tool, not the parent key', () => {
-      const result = reconcileCatalog(catalogWithSplitAgents(), [codexAgents], {
+      const result = reconcile(catalogWithSplitAgents(), [codexAgents], {
         exclusions: [],
         existingEnDescriptions: shippedAgents,
       });
@@ -595,7 +658,7 @@ describe('reconcileCatalog — active/canonical filter', () => {
     // real-shaped dictionary must leave the other tools' text readable. A flat
     // key here replaces the whole object, which is what `--write` shipped.
     it('leaves the sibling descriptions resolvable after the additions are merged', () => {
-      const result = reconcileCatalog(catalogWithSplitAgents(), [codexAgents], {
+      const result = reconcile(catalogWithSplitAgents(), [codexAgents], {
         exclusions: [],
         existingEnDescriptions: shippedAgents,
       });
@@ -619,7 +682,7 @@ describe('reconcileCatalog — active/canonical filter', () => {
     // when no dictionary is passed; the dictionary carries it when a leaf
     // outlives the entry that minted it (a tool dropped from the catalog).
     it('detects the split from the catalog alone', () => {
-      const result = reconcileCatalog(catalogWithSplitAgents(), [codexAgents], {
+      const result = reconcile(catalogWithSplitAgents(), [codexAgents], {
         exclusions: [],
       });
       expect(result.diff.added.map((a) => a.descriptionKey)).toEqual([
@@ -628,7 +691,7 @@ describe('reconcileCatalog — active/canonical filter', () => {
     });
 
     it('detects the split from the shipped dictionary alone', () => {
-      const result = reconcileCatalog(baseCatalog(), [codexAgents], {
+      const result = reconcile(baseCatalog(), [codexAgents], {
         exclusions: [],
         existingEnDescriptions: shippedAgents,
       });
@@ -641,7 +704,7 @@ describe('reconcileCatalog — active/canonical filter', () => {
     // still get the plain shared key — splitting everything would be just as
     // wrong, and far quieter.
     it('still mints the shared key for a name nothing has split', () => {
-      const result = reconcileCatalog(catalogWithSplitAgents(), [
+      const result = reconcile(catalogWithSplitAgents(), [
         {
           tool: 'codex',
           ok: true,

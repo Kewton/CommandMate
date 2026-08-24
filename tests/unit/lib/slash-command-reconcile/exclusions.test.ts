@@ -36,7 +36,7 @@ const EXCLUSIONS_PATH = path.resolve(
 );
 
 function emptyCatalog(): SlashCommandsCatalog {
-  return { verifiedAgainst: {}, frequentlyUsed: {}, commands: [] };
+  return { frequentlyUsed: {}, commands: [] };
 }
 
 function valid(overrides: Partial<CatalogExclusion> = {}): CatalogExclusion {
