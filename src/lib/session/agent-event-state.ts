@@ -65,6 +65,7 @@ import type { StructuredPromptSource } from '@/lib/session/structured-prompt';
 import {
   acceptExternalId,
   boundDecisionMessage,
+  boundDecisionPatterns,
   boundDecisionToolName,
   closesTurn,
   derivePublishedTurn,
@@ -592,6 +593,33 @@ export interface AgentEventRecord {
    * rather than refusing to act.
    */
   decisionId?: string | null;
+  /**
+   * The tool the dialog this event opens is about, or null/absent (Issue #2031).
+   *
+   * Only a source that can answer "which tool?" at the moment the dialog is
+   * reported may set it. opencode is the measured case and the reason the field
+   * exists: its `permission.asked` frame carries no tool name at all (#1758
+   * §5.4) — the name comes from the `message.part.updated` frame for the same
+   * `callID`, which the subscription correlates as it goes. Before this Issue
+   * the notification path passed `toolName: null` unconditionally, so an
+   * opencode approval reached the panel with no statement of what it was for.
+   *
+   * Absent leaves the record's existing `toolName` alone, which is what keeps a
+   * `Notification` from erasing the name a `PermissionRequest` already supplied.
+   */
+  toolName?: string | null;
+  /**
+   * What `Allow always` on this dialog would permit (Issue #2031).
+   *
+   * Typed `unknown[]` rather than `string[]`, and bounded by `openDecision`
+   * rather than by the caller, for the same reason `message` is: this record is
+   * retained for up to 30 minutes and served back over HTTP, so its footprint
+   * may not depend on what an agent chose to send — and neither may its
+   * element types, since the entries are rendered verbatim. See
+   * {@link boundDecisionPatterns}, which drops anything that is not a non-empty
+   * string.
+   */
+  decisionPatterns?: readonly unknown[] | null;
   /**
    * Whether the source states that no dialog is left open by this event
    * (Issue #1898).
@@ -1184,7 +1212,13 @@ function applyNotificationToTurn(
       source: 'notification',
       at: record.at,
       message: record.message ?? null,
-      toolName: null,
+      // Issue #2031. Was a hard `null`, which is what left an opencode approval
+      // reaching the browser with no statement of what it was for: the tool
+      // name is not in `permission.asked` and has to be carried on the record
+      // by whoever correlated it. Absent still means "this source had nothing
+      // to say", and `openDecision` leaves an earlier name in place for that.
+      toolName: record.toolName ?? null,
+      patterns: record.decisionPatterns ?? null,
       decisionId: record.decisionId ?? null,
       bootstrapDisplay: displayOf(record),
     });
@@ -1250,6 +1284,8 @@ function openDecision(
     message: string | null;
     toolName: string | null;
     decisionId: string | null;
+    /** Issue #2031. Bounded here, not by the caller. */
+    patterns: readonly unknown[] | null;
     bootstrapDisplay: TurnRecord['displayEvent'];
   }
 ): void {
@@ -1322,6 +1358,11 @@ function openDecision(
     // age bound are measured from — and take the confirmation.
     existing.message = boundDecisionMessage(input.message) ?? existing.message;
     existing.toolName = boundDecisionToolName(input.toolName) ?? existing.toolName;
+    // Issue #2031, same rule as the two lines above it: a second sighting that
+    // knows the rules fills them in, one that does not leaves the earlier
+    // answer alone. The measured pair is exactly this — the `PermissionRequest`
+    // forecast carries no patterns, the `Notification` that confirms it does.
+    existing.patterns = boundDecisionPatterns(input.patterns) ?? existing.patterns;
     existing.decisionId ??= decisionId;
     if (confirmed) {
       existing.source = 'notification';
@@ -1344,6 +1385,7 @@ function openDecision(
     source: input.source,
     message: boundDecisionMessage(input.message),
     toolName: boundDecisionToolName(input.toolName),
+    patterns: boundDecisionPatterns(input.patterns),
     confirmedAt: confirmed ? input.at : null,
     scraperCorroborated: false,
     recorded: false,
@@ -1776,6 +1818,10 @@ export function reportPermissionRequestPending(
     at,
     message: null,
     toolName,
+    // A forecast has no payload behind it: the hook that fires it names the
+    // tool and nothing else, so there are no `Allow always` rules to state yet.
+    // The `Notification` that confirms this record supplies them (Issue #2031).
+    patterns: null,
     decisionId: null,
     // A forecast carries no event of its own, so the record it bootstraps is
     // described by the thing it is forecasting. `structuredEvents.lastEventType`
