@@ -33,8 +33,8 @@ describe('db-migrations', () => {
   });
 
   describe('CURRENT_SCHEMA_VERSION', () => {
-    it('should be 56 after Migration #56 (verification gate source, #1791)', () => {
-      expect(CURRENT_SCHEMA_VERSION).toBe(56);
+    it('should be 57 after Migration #57 (push defaults notice, #2056)', () => {
+      expect(CURRENT_SCHEMA_VERSION).toBe(57);
     });
   });
 
