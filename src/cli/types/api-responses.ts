@@ -201,6 +201,10 @@ export interface CurrentOutputResponse {
    * Momentary by nature — a repaint mid-capture can raise it for a single poll —
    * so it is only a stop reason after it has persisted; see
    * UNCLASSIFIED_DWELL_MS in wait.ts.
+   *
+   * Produced by `isUnclassifiedFrame` in `src/lib/session/status-evidence.ts`,
+   * and NOT the negation of {@link statusEvidence} (Issue #2011) — read the two
+   * questions, and the frames on which their answers cross, over there.
    */
   isUnclassifiedActive?: boolean;
   /**
@@ -208,17 +212,45 @@ export interface CurrentOutputResponse {
    * nothing having matched (Issue #1926, design §4 D1 決定 2 / §7).
    *
    * `'positive'` — a completion marker, a thinking indicator, a parsed prompt,
-   * an idle composer, or the agent's own `Stop` said so. `'none'` — the frame
-   * was interactive and nothing on it could be read either way, so the status is
-   * a fallback. It is the same fact {@link isUnclassifiedActive} carries, named
-   * the way the design names it; both are published because the flag is the
-   * older contract (`wait`'s `ready && !isUnclassifiedActive` rule) and this is
-   * the reading design Phase 3 widens, tool by tool.
+   * a tool-specific idle-composer rule, or the agent's own `Stop` said so.
+   * `'none'` — nothing on the frame could be read either way, so the status is
+   * a fallback.
+   *
+   * ## NOT the same fact as {@link isUnclassifiedActive} (Issue #2011)
+   *
+   * This comment used to say the two carried one fact under two names, and the
+   * server derived the flag from `evidence === 'none'` to match. Issue #1927
+   * had already broken that: it moved the evidence producer into the per-tool
+   * detectors, and `'none'` widened from "nobody could read this frame" to "no
+   * rule vouched for this verdict" — which an ordinary idle Claude composer
+   * satisfies. Every idle Claude pane then raised the terminal escape hatch and
+   * stopped `wait` completing. #2011 pulled them apart again.
+   *
+   * They ask different questions, and the answers cross in both directions:
+   *
+   *   - an idle composer no tool-specific idle rule vouches for is `'none'`
+   *     and CLASSIFIED (`isUnclassifiedActive: false`) — `wait` completes on it;
+   *   - an unreadable pane whose agent reported `Stop` is `'positive'` and
+   *     UNCLASSIFIED (`isUnclassifiedActive: true`) — `wait` holds.
+   *
+   * This field asks "is there positive proof behind the verdict?", is produced
+   * by the detector per tool, and widens as the §4 D1 rollout reaches each one.
+   * {@link isUnclassifiedActive} asks "could ANY rule read this frame at all?",
+   * is a statement about the reason vocabulary rather than about the strength of
+   * the evidence, and is fixed: `isUnclassifiedFrame` in
+   * `src/lib/session/status-evidence.ts` is `running` plus one of a closed set.
+   *
+   * Unclassified reasons: `no_recent_output`, `unknown_frame`, `default`.
+   * Classified-but-unproven: `input_prompt`.
    *
    * A closed union, like {@link sessionStatus} and for the same reason: the
    * design fixes the domain at two members precisely so a newer server cannot
    * hand an older CLI a value it has never heard of. Adding a third would be a
    * breaking change, not an additive one.
+   *
+   * The two marker lines above and the union width are held to the server by
+   * tests/unit/cli/types/status-evidence-contract-2015.test.ts; what it can and
+   * cannot prove is written out there.
    *
    * Optional because a server older than #1926 sends no such key — which is not
    * the same as `'positive'`. Treat `undefined` as "this server does not say".
