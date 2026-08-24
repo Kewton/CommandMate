@@ -12,9 +12,15 @@
  *    catalog). Deletion stays a human decision on the release PR.
  *  - Idempotent. A command already catalogued for a tool is skipped, so a second
  *    run adds nothing and the manual #1488 additions are never duplicated.
- *  - Content and stamp move together. `verifiedAgainst[tool]` is bumped only for
- *    a provider that reports a `sourceVersion` (version-pinned source, e.g.
- *    codex) — the root cause of #1476/#1488 drift.
+ *  - Content and stamp move together. `verifiedAgainst[tool]` is *reported* as
+ *    behind whenever a version-pinned provider (e.g. codex) reports a newer
+ *    `sourceVersion` than the attestation records — the root cause of #1476/#1488
+ *    drift. Issue #2026 stopped the engine from *applying* that bump: the stamp
+ *    now lives in the attestation next to the set it describes, and re-stamping
+ *    is part of re-reading the source, which only a human does.
+ *  - Attestations are the reviewed set (Issue #2026). The engine never writes one.
+ *    It reports how far the source has moved past each one, so a stale claim is
+ *    visible in `--check` rather than only in a red pin at the end of a release.
  *  - Only active, canonical rows are auto-added (Issue #1603). A source lists
  *    more than its current commands: history rows ("Removed in vX") and alias
  *    rows are refused with a categorized notice instead of becoming catalog
@@ -26,7 +32,15 @@
 
 import { sanitizeProviderCommands } from './sanitize';
 import { DEFAULT_EXCLUSIONS, buildExclusionIndex, describeExclusion, findExclusion } from './exclusions';
+import {
+  DEFAULT_ATTESTATIONS,
+  attestedVersions,
+  compareAttestationToSource,
+  hasAttestationDrift,
+} from './attestations';
 import type {
+  AttestationDrift,
+  CatalogAttestation,
   CatalogExclusion,
   ProviderResult,
   ProviderCommand,
@@ -131,6 +145,13 @@ export interface ReconcileOptions {
    * needed in the first place.
    */
   existingEnDescriptions?: Record<string, string>;
+  /**
+   * Source attestations to compare against (Issue #2026). Defaults to the
+   * bundled src/config/slash-commands-attestations.json, and supplies the
+   * version each tool's entries were last collated against — the map that used
+   * to be `catalog.verifiedAgainst`.
+   */
+  attestations?: CatalogAttestation[];
 }
 
 /** True when a catalog entry is in scope for `tool` (undefined cliTools = claude). */
@@ -158,6 +179,42 @@ export function toolDescriptionKeyFor(name: string, tool: string): string {
 }
 
 /**
+ * Default keys that are *already* split into per-tool leaves (Issue #2024).
+ *
+ * A name only two tools contested in an earlier release ships as an object in
+ * the dictionary — `descriptions.agents` is `{ opencode, claude }`, not a
+ * string — and every catalog entry for that name carries `<name>.<tool>`. A
+ * third tool arriving later must land on its own leaf too, because the flat key
+ * is not free: it is the *parent* of the existing ones. Before this, the engine
+ * saw only that `descriptions.agents` was unclaimed in this pass and minted the
+ * flat key, so `--write` replaced the whole object with one string and the
+ * opencode/claude sentences vanished from both locales.
+ *
+ * Both halves of the split are read, because either alone has a blind spot: the
+ * catalog knows the shape when the caller passes no dictionary (unit tests), and
+ * the dictionary knows it when a leaf outlives the entry that minted it.
+ */
+function findAlreadySplitKeys(
+  commands: CatalogCommandEntry[],
+  shippedEn: Record<string, string>
+): Set<string> {
+  const split = new Set<string>();
+  const record = (key: string): void => {
+    if (!key.startsWith(DESCRIPTION_KEY_PREFIX)) return;
+    // Command names match /^[a-z][a-z0-9-]*$/, so the first dot after the prefix
+    // is always the name/tool boundary rather than part of the name.
+    const rest = key.slice(DESCRIPTION_KEY_PREFIX.length);
+    const dot = rest.indexOf('.');
+    if (dot > 0) split.add(`${DESCRIPTION_KEY_PREFIX}${rest.slice(0, dot)}`);
+  };
+  for (const entry of commands) {
+    if (entry.descriptionKey) record(entry.descriptionKey);
+  }
+  for (const key of Object.keys(shippedEn)) record(key);
+  return split;
+}
+
+/**
  * A locale key claimed by an addition in this pass, plus every place that would
  * have to be rewritten if a later tool turns out to disagree about the text.
  */
@@ -174,7 +231,7 @@ interface DescriptionClaim {
  * Reconcile the catalog against provider results.
  *
  * Never mutates the input catalog: the returned `catalog` is a fresh object with
- * cloned `commands` and `verifiedAgainst`.
+ * cloned `commands`.
  */
 export function reconcileCatalog(
   catalog: SlashCommandsCatalog,
@@ -184,11 +241,18 @@ export function reconcileCatalog(
   const defaultCategory = options.defaultCategory ?? DEFAULT_CATEGORY;
   const exclusionIndex = buildExclusionIndex(options.exclusions ?? DEFAULT_EXCLUSIONS);
   const shippedEn = options.existingEnDescriptions ?? {};
+  const attestations = options.attestations ?? DEFAULT_ATTESTATIONS;
+  const attested = attestedVersions(attestations);
 
   const commands: CatalogCommandEntry[] = catalog.commands.map((c) => ({ ...c }));
-  const verifiedAgainst: Record<string, string> = { ...catalog.verifiedAgainst };
 
-  const diff: ReconcileDiff = { added: [], missingFromSource: [], verifiedAgainstUpdated: {} };
+  const attestationDrift: AttestationDrift[] = [];
+  const diff: ReconcileDiff = {
+    added: [],
+    missingFromSource: [],
+    verifiedAgainstUpdated: {},
+    attestationDrift,
+  };
   const localeAdditions: LocaleAddition[] = [];
   const warnings: string[] = [];
   const notices: ReconcileNotice[] = [];
@@ -202,8 +266,12 @@ export function reconcileCatalog(
   const pendingLocale = new Map<string, LocaleAddition>();
   /** Who claimed each default key first, and what would need rewriting on a split. */
   const claims = new Map<string, DescriptionClaim>();
-  /** Default keys already split into per-tool keys — later tools skip straight to their own. */
-  const splitKeys = new Set<string>();
+  /**
+   * Default keys already split into per-tool keys — later tools skip straight to
+   * their own. Seeded from the shipped catalog/dictionary (Issue #2024) so a
+   * split an *earlier release* performed counts, not only one made in this pass.
+   */
+  const splitKeys = findAlreadySplitKeys(commands, shippedEn);
   const conflictedKeys = new Set<string>();
 
   for (const result of providerResults) {
@@ -388,23 +456,36 @@ export function reconcileCatalog(
       }
     }
 
-    // Stamp verifiedAgainst only for a version-pinned source.
+    // Report — never apply — a version-pinned source that has moved past the
+    // attested one. Issue #2026: writing this stamp used to be the engine's job,
+    // which meant `--write` re-dated a human's reading of a document it had not
+    // re-read. Now it is one line of the re-attestation a human owes.
     if (result.sourceVersion) {
-      const from = verifiedAgainst[tool];
+      const from = attested[tool];
       if (from !== result.sourceVersion) {
-        verifiedAgainst[tool] = result.sourceVersion;
         diff.verifiedAgainstUpdated[tool] = { from, to: result.sourceVersion };
       }
     }
+
+    // How far the attested *set* has fallen behind the source. Computed from the
+    // rows the engine would consider adding (active + canonical), so a history
+    // row or an alias row never reads as an arrival. Only tools whose provider
+    // answered get a row: "not compared" must not read as "unchanged".
+    const drift = compareAttestationToSource(
+      tool,
+      sourceCommands.filter((c) => c.status !== 'removed' && !c.aliasOf).map((c) => c.name),
+      attestations
+    );
+    if (hasAttestationDrift(drift)) attestationDrift.push(drift);
   }
 
-  const changed =
-    diff.added.length > 0 ||
-    localeAdditions.length > 0 ||
-    Object.keys(diff.verifiedAgainstUpdated).length > 0;
+  // Issue #2026: a version bump no longer counts as a change, because nothing
+  // writes it any more. Reporting `changed` for it would make `--write` print
+  // "Applied changes." over a run that touched no file.
+  const changed = diff.added.length > 0 || localeAdditions.length > 0;
 
   return {
-    catalog: { ...catalog, commands, verifiedAgainst },
+    catalog: { ...catalog, commands },
     localeAdditions,
     diff,
     warnings,

@@ -8,8 +8,13 @@
  *    and merged into the standard layer so users can surface commands the
  *    bundled snapshot has not caught up to yet (e.g. Claude Code `/loop`).
  *  - Staleness detection: probe the installed claude/codex/antigravity CLI
- *    versions and compare against the catalog's `verifiedAgainst`, so the UI can
- *    hint when the built-in list is likely behind.
+ *    versions and compare against `CATALOG_VERIFIED_AGAINST`, so the UI can hint
+ *    when the built-in list is likely behind. Issue #2026 changed where that map
+ *    comes from — the attestation record rather than a field in the catalog file
+ *    — but not its shape or meaning here. What it buys this module is that the
+ *    version can no longer be newer than the reading it claims to summarize:
+ *    `catalog:refresh --write` used to bump the stamp by itself, so a tool could
+ *    report "not stale" off a version no human had checked the entries against.
  *
  * Server-only: this module shells out via execFile and reads the filesystem, so
  * it must never be imported from a client component.

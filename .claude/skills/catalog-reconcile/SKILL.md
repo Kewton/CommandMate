@@ -1,6 +1,6 @@
 ---
 name: catalog-reconcile
-description: "組み込みスラッシュコマンドのカタログを各 CLI の権威ソースへリコンサイルする（--check で規模把握 → --write → 人手レビュー → ガードテスト更新 → 検証）"
+description: "組み込みスラッシュコマンドのカタログを各 CLI の権威ソースへリコンサイルする（--check で規模把握 → --write → 人手レビュー → attestation の採り直し → 検証）"
 disable-model-invocation: true
 allowed-tools: "Bash, Read, Edit, Write, WebFetch"
 argument-hint: "[--codex-ref <tag>] (任意。codex のソースを特定の release タグに固定する)"
@@ -9,13 +9,23 @@ argument-hint: "[--codex-ref <tag>] (任意。codex のソースを特定の rel
 # スラッシュコマンドカタログ リコンサイル スキル
 
 `src/config/slash-commands-catalog.json` と `locales/{en,ja}/worktree.json` を、
-各 CLI の権威ソース（claude docs / codex OSS enum @release タグ）へ合わせるスキルです。
+各 CLI の権威ソース（claude docs / codex OSS enum @release タグ）へ合わせ、
+**その読み取りを `src/config/slash-commands-attestations.json` に記録し直す**スキルです。
 
 > **このスキルは「機械が出した差分を人が確定させる」手順である。**
 > `npm run catalog:refresh -- --write` は追加候補を流し込むだけで、
 > **ja 訳・説明衝突・過去の除外判断の 3 点は決められない**（Phase 4）。
 > そこを埋めずに commit すると、`[要レビュー]` 混じりの ja 辞書と
 > 「/btw — btw」のような説明が出荷される。
+
+> **attestation は機械が書かない（Issue #2026）。**
+> 「版 V で source S は tool T についてこの集合を列挙した」という記録は
+> `--write` の対象外で、**人がソースを読んで書くときだけ動く**。
+> カタログ側の pin が守る不変条件は
+> `catalog(tool) ≡ attested(tool) \ excluded(tool)` なので、`--write` だけを適用すると
+> `[<tool>] /<name> is in the catalog but not attested` で赤くなる。
+> **それが審査ゲートである。** カタログからコピーして緑にするとゲートが恒真になり、
+> 「ソースがこう言っていた」が「カタログがこうなっている」の言い換えに退化する。
 
 ## 使用方法
 
@@ -42,9 +52,10 @@ argument-hint: "[--codex-ref <tag>] (任意。codex のソースを特定の rel
 | `src/config/slash-commands-catalog.json` | `--write`（追加は自動。除外は人間） |
 | `locales/en/worktree.json` | `--write` が heuristic 抽出した英文 → **人手で文体を正す** |
 | `locales/ja/worktree.json` | `--write` が `[要レビュー]` プレースホルダを置く → **人手で全件翻訳** |
-| `src/config/slash-commands-exclusions.json` | 人間（除外の**意図**。engine はここを読んで再提案をやめる） |
-| `tests/unit/lib/standard-commands.test.ts` | 人間（件数・名前集合の固定テスト。禁止系ガードは触らない） |
-| `tests/unit/lib/slash-command-catalog.test.ts` | 人間（`verifiedAgainst` を固定している箇所） |
+| `src/config/slash-commands-exclusions.json` | 人間（除外の**意図**＝「ソースに在るが載せない」。engine はここを読んで再提案をやめる） |
+| `src/config/slash-commands-attestations.json` | **人間だけ**（Issue #2026。「ソースが列挙した集合そのもの」＋版＋採取日。`--write` は触らない） |
+| `tests/unit/lib/standard-commands.test.ts` | 原則**触らない**（Issue #2026 で件数 pin は撤去され、期待値は attestation から導出される）。禁止系ガードは絶対に触らない |
+| `tests/unit/lib/slash-command-catalog.test.ts` | 人間（attestation の `version` を上げたときだけ。`verifiedAgainst` リテラルを持つ箇所） |
 
 ---
 
@@ -60,44 +71,68 @@ npm run catalog:refresh -- --check > /tmp/catalog-check.log 2>&1; echo "CHECK=$?
 （ドリフトが 104 件あっても 0、全ソースが到達不能でも 0）。非 0 になるのは想定外の例外だけ。
 判定は**出力の中身**で行う。
 
-実測の出力例（2026-08-06 / develop 相当）:
+実測の出力例（2026-08-24 / Issue #2026 のブランチ。codex の attestation が
+まだ 0.149.0 を記録していた時点のもの。説明文は横幅のため一部省略）:
 
 ```
 Slash-command catalog reconcile
 ================================
 
+Honoring 4 exclusion(s) from src/config/slash-commands-exclusions.json
+Holding 5 attestation(s) from src/config/slash-commands-attestations.json:
+  = claude: 104 command(s) read off claude 2.1.218 on 2026-08-24 (#2026)
+  = codex: 56 command(s) read off codex 0.149.0 on 2026-08-24 (#2026)
+  = antigravity: 13 command(s) read off antigravity 1.1.3 on 2026-07-24 (#1502)
+  = copilot: 68 command(s) read off copilot 1.0.80 on 2026-08-22 (#1913)
+  = opencode: 18 command(s) read off opencode 1.18.21 on 2026-08-22 (#1913)
+
 Warnings (fail-soft — affected sources left untouched):
   ! antigravity provider not implemented yet (Issue #1489 Phase 2)
 
 Not added / needs review (by category):
+  [excluded] (2)
+    - [claude] /schedule: excluded as out-of-scope (#1488): Real upstream with a ...
+    - [claude] /ultraplan: excluded as phantom (#1503): The claude docs row carries ...
   [removed-row] (2)
     - [claude] /pr-comments: documented as removed; not added
     - [claude] /vim: documented as removed; not added
   [alias-row] (2)
     - [claude] /cost: alias for /usage; not added
     - [claude] /stats: alias for /usage; not added
-  [suspect-description] (1)
-    - [claude] /ultraplan: dropped a marker-like description: "Removed"
 
-New commands (3):
-  + [claude] /agents — As of v2.1.198, running /agents prints a reminder to ask Claude to ...
-  + [claude] /schedule — Create, update, list, or run routines, which execute on Anthropic-...
-  + [claude] /ultraplan — (needs description)
+No new commands to add.
 
-verifiedAgainst updates:
-  ~ codex: 0.146.0 -> 0.146.1
+verifiedAgainst updates (not applied — re-attest by hand):
+  ~ codex: 0.149.0 -> 0.149.1
 
 (check mode — no files written; run with --write to apply)
 ```
 
-### 1-2. 出力の 5 ブロックの読み方
+**この実測が示していること**: 追加は 0 件だが「やることなし」ではない。上流の codex は
+rust-v0.149.1 まで進んでおり、attestation が記録している版は 0.149.0 である。
+#2026 より前ならこの版差は `--write` が黙って書き込んでいた（＝誰も読み直していない版に
+対してスタンプだけが進んだ）。今は人が読み直して attestation を採り直す（Phase 5-1）。
+
+集合そのものが食い違ったときは、もう 1 ブロック出る。実測（コミット済み fixture
+`tests/unit/lib/slash-command-reconcile/fixtures/check-attestation-drift-2026-08-24.txt`。
+codex の attestation を 1 版・1 コマンドだけ戻して採ったもの）:
+
+```
+Attestation drift (the recorded reading no longer matches the source):
+  * [codex] source now lists /pwd; source no longer lists /zzz-retired
+```
+
+### 1-2. 出力ブロックの読み方
 
 | ブロック | 意味 | 対応 |
 |---|---|---|
+| `Honoring N exclusion(s) …` | いま engine が honor している「載せない」判断の件数 | 中身は Phase 4-3 |
+| `Holding N attestation(s) …` | いま pin が拠っている読み取り（tool / 件数 / 版 / 採取日 / Issue） | ここが古いなら Phase 5-1 |
 | `Warnings (fail-soft …)` | そのソースは**取得できなかった／形が変わった**。そのツールのエントリは一切触られない | Phase 1-3 へ。**無視して先へ進まない** |
 | `Not added / needs review (by category)` | エンジンが分類した「そのままでは足せない行」 | 下表参照 |
 | `New commands (N)` | カタログに追加される `(tool, name)` の件数 | **これが規模。Phase 2 の判断材料** |
-| `verifiedAgainst updates` | 版スタンプの更新。**版固定できるソース（codex）だけ**が出る。claude docs は版スタンプが無いので `verifiedAgainst.claude` は動かない | Phase 5-2 のテストを直す |
+| `verifiedAgainst updates (not applied — re-attest by hand)` | **報告のみ**。ソースの版が attestation の `version` より進んでいる。版固定できるソース（codex）だけが出る（claude docs は版スタンプが無いので出ない） | Phase 5-1 で attestation を採り直すか、据え置く判断をする。**適用するものは存在しない**（#2026） |
+| `Attestation drift (…)` | 記録した**集合**とソースの現状の差。`source now lists /X`＝ソースが増えた、`source no longer lists /X`＝ソースから消えた | Phase 5-1。**上流の削除は追加 0 件でここだけが出る** |
 | `In catalog but not in source (review — not auto-deleted)` | カタログにあるがソースに無い＝**削除候補**。自動削除はしない | 幻コマンドの疑い。実機で完全入力しても一致行が出ないものだけ手で消す（#1503） |
 
 `Not added / needs review` の 4 カテゴリ（`src/lib/slash-command-reconcile/engine.ts` の
@@ -125,10 +160,13 @@ verifiedAgainst updates:
 報告に書くときは必ず分けること:
 
 ```
-claude:      新規 3 件 / 要レビュー 5 件      ← 照合した
-codex:       新規 0 件、verifiedAgainst 更新のみ ← 照合した
-antigravity: 未照合（provider 未実装）          ← 「0 件」ではない
+claude:      新規 3 件 / 要レビュー 5 件            ← 照合した
+codex:       新規 0 件、ソースの版だけ先行（要 re-attest） ← 照合した
+antigravity: 未照合（provider 未実装）              ← 「0 件」でも「attestation が正しい」でもない
 ```
+
+**antigravity / copilot / opencode の attestation は `--check` が一切検証しない。**
+provider が無いので `Attestation drift` にも出ない（Phase 4-4 で手で照合する）。
 
 ---
 
@@ -180,7 +218,10 @@ npm run catalog:refresh -- --write > /tmp/catalog-write.log 2>&1; echo "WRITE=$?
 git diff --stat
 ```
 
-書き換わるのは冒頭の表の 3 ファイルだけ。それ以外に差分が出たら止めて調べること。
+書き換わるのは `src/config/slash-commands-catalog.json` と
+`locales/{en,ja}/worktree.json` の 3 ファイルだけ。それ以外に差分が出たら止めて調べること。
+**`src/config/slash-commands-attestations.json` はここでは動かない**（Issue #2026。
+記録し直すのは Phase 5-1 で、人が読んでからである）。
 
 **`--write` は追加専用。** ソースに無くなったコマンドを消すことはない
 （一時的な fetch 失敗でカタログが削られるのを防ぐため）。削除は常に人間の判断。
@@ -219,7 +260,9 @@ en 側も `--write` が docs から heuristic 抽出したものなので、**�
 
 **説明に `<...>` を書かないこと。** 説明の安全ガードが
 `dangerousPatterns = [/<[^>]+>/, /javascript:/i, /onerror=/i, /onclick=/i]` で
-**en/ja 両辞書のテキストを検査する**（`tests/unit/lib/standard-commands.test.ts:377`）。
+**en/ja 両辞書のテキストを検査する**
+（`tests/unit/lib/standard-commands.test.ts` の
+`should have all descriptions without HTML tags or dangerous patterns`）。
 v0.21.2 では `/sandbox-add-read-dir` の説明が `<absolute_path>` を含んでいて実際に赤くなった。
 **角括弧で書く**:
 
@@ -259,29 +302,48 @@ console.log(bad.length ? bad.map(([k]) => k).join(', ') : 'なし');
 ### 4-3. 過去の除外判断と突き合わせる
 
 **ツールは curation の履歴を知らない。** 過去に意図的に外したものを毎回また足してくる。
-除外判断が 1 箇所にまとまったリストは**まだ無い**（Issue #1706 本文の `#B1`）。
-現時点の在り処は 2 つ:
+判断の正本は **`src/config/slash-commands-exclusions.json`**（Issue #1704）で、engine は
+これを読んで再提案をやめる。**この手順書に一覧をコピーしない** — 過去にコピーを置いた結果、
+`/agents` の行が #1767 / #2024 で覆されたあとも「opencode の 1 件のみ残す」と書き続けていた。
+その場で実物を読むこと:
 
 ```bash
-# 1) テストのコメント（何を禁止しているか＋その理由）
-grep -n "does not add\|must not be\|phantom\|Issue #150" tests/unit/lib/standard-commands.test.ts
+# 1) 判断の正本（name / cliTools / kind / reason / issue が全部入っている）
+node -e "
+for (const e of require('./src/config/slash-commands-exclusions.json').exclusions)
+  console.log(\`/\${e.name}\`.padEnd(18), e.cliTools.join(',').padEnd(10), e.kind.padEnd(13), '#'+e.issue, e.reason);
+"
 
-# 2) 過去のリコンサイル commit の本文（判断の記録はここが最も詳しい）
+# 2) 判断の全文（なぜ pin を緩めないか、何がこのファイルで表現**できない**か）
+node -e "console.log(require('./src/config/slash-commands-exclusions.json').\$comment.join('\n'))"
+
+# 3) exclusions.json に無い禁止（テストだけが守っているもの）
+grep -n "does not add\|must not be\|must stay off\|must be gone\|NOT expose" tests/unit/lib/standard-commands.test.ts
+
+# 4) 過去のリコンサイル commit の本文
 git log --format="%h %s%n%b" --grep="リコンサイル\|reconcile\|幻コマンド" -i -- src/config/slash-commands-catalog.json
 ```
 
-現在有効な除外（2026-08-22 時点の実測）:
+`kind` の 2 値は再判断コストが桁違いなので混ぜない:
 
-| 対象 | 理由 |
+| kind | 意味 | 誰が解除できるか |
+|---|---|---|
+| `phantom` | そのツールに実在しない（履歴行・マーカー・スタブ） | **上流が変われば自動決着**。実在し始めたら行を消す |
+| `out-of-scope` | 上流に実在し説明も正しいが、方針として載せない | **人の再判断だけ** |
+
+`out-of-scope` は「上流に実在」の意味なので、当該 tool の attestation が必ずその名前を
+列挙していなければならない（`backs every out-of-scope exclusion with an attestation that
+lists it` が固定している）。`phantom` にはこの制約が無い — `/ultraplan` は docs のスタブ行を
+パーサが active と読むので attested、`/streamer-mode` は copilot のどの面にも無いので
+attested でない。どちらも正しく phantom である。
+
+**exclusions.json に無い禁止**（テストだけが守っている。上の grep 3 で確認できる）:
+
+| テスト | 守っているもの |
 |---|---|
-| `/ultraplan` | claude docs の説明が `Removed` マーカー。#1502/#1503 で除いた幻コマンドと同型 |
-| `/schedule` | #1488 で対象外と判断済み |
-| `/agents` の claude entry | #1503 が除いた `(removed)` スタブ。opencode の 1 件のみ残す |
-| `/compact` `/status` `/review` の antigravity 露出 | agy 1.1.3 に存在しない（#1502）。露出すると send で誤実行する |
-| `/vim` の **claude** 露出 | claude 2.1.92 で上流削除。**codex には残す**（下記） |
-| `/streamer-mode` の **copilot** 露出 | copilot 1.0.80 の help にもパレットにも無い（#1913） |
-| `/compact` の **opencode** 露出 | opencode 1.18.21 のパレットに無い（#1913）。`frequentlyUsed.opencode` からも外す |
-| `/undo` の **codex** 露出 | codex 0.144.6 で幻（#1503）。**copilot には残す**（1.0.80 の隠しエイリアス。下記） |
+| `should NOT expose phantom commands (compact/status/review) to Antigravity` | agy 1.1.3 に無い 3 件（#1502）。露出すると send で誤実行する |
+| `does not add /schedule, and keeps /vim off claude` | `/vim` は claude 2.1.92 で上流削除（docs が `Removed` と書くので attested でもない）。**codex には実在するので残す** |
+| `does not carry the Issue #1503 phantom commands` | 幻 5 件（cost / lazy / todos / pr-comments / approvals）と、`/undo` の **codex** 露出（#1503）。**copilot の `/undo` は実在するので残す** |
 
 #### リストに無いのに怪しいものは、上流ソースを実際に取得して裏取りする
 
@@ -295,7 +357,10 @@ v0.21.2 の実例: テストは `/vim` を**名前ごと**禁止していた。c
 
 ```bash
 # codex: enum を release タグ固定で生で取る
-TAG=rust-v0.146.1     # verifiedAgainst.codex に対応するタグ
+# 対応するタグは attestation の codex 行から取る:
+#   node -e "console.log(require('./src/config/slash-commands-attestations.json')
+#     .attestations.find(a => a.tool === 'codex').version)"
+TAG=rust-v0.149.1     # attestation の codex.version に対応するタグ
 curl -sS "https://raw.githubusercontent.com/openai/codex/${TAG}/codex-rs/tui/src/slash_command.rs" \
   -o /tmp/slash_command.rs -w "HTTP=%{http_code}\n"
 grep -n "SlashCommand::Vim" /tmp/slash_command.rs
@@ -384,9 +449,11 @@ tmux -L cmcat kill-server
 
 ### 版は起動実体で採る
 
-`verifiedAgainst` に入れる版は **CommandMate が起動する実行体**から採る。
-copilot は `COPILOT_LAUNCH_COMMAND = 'gh copilot'` なので `gh copilot -- --version`
-であって、PATH 上の裸の `copilot` ではない（`VERSION_PROBES` も同じ規約。
+attestation の `version` に入れる版は **CommandMate が起動する実行体**から採る
+（`CATALOG_VERIFIED_AGAINST` はここから導出されるので、陳腐化判定が比べる相手と
+同じ実行体でなければ意味を成さない）。copilot は
+`COPILOT_LAUNCH_COMMAND = 'gh copilot'` なので `gh copilot -- --version` であって、
+PATH 上の裸の `copilot` ではない（`VERSION_PROBES` も同じ規約。
 docs/design/multi-agent-state-architecture.md §4 D2 / DR4-010）。
 
 ```bash
@@ -399,80 +466,114 @@ opencode --version          # 1.18.21
 
 ---
 
-## Phase 5: ガードテストの更新
+## Phase 5: attestation を採り直す（審査の本体）
 
-### 5-1. 件数を固定しているテスト（curated set の実数に合わせる）
+**Issue #2026 でこのフェーズの中身が入れ替わった。** かつてはここで「件数を固定しているテストの
+数字を直す」ことをしていた（`toBe(244)` / `toBe(56)` / `toBe(102)` …）。その数字の根拠は
+commit message にしか残らず、次のリリースで同じ調査をやり直すことになっていた。
 
-| ファイル:行 | 何を固定しているか | 述語 |
-|---|---|---|
-| `tests/unit/lib/standard-commands.test.ts:48` | 総数 | `STANDARD_COMMANDS.length` |
-| `…:210` | codex 可視数 | `cliTools?.includes('codex')` |
-| `…:338` | claude 可視数 | `!cliTools \|\| cliTools.includes('claude')` |
-| `…:136` | antigravity 可視数 | `cliTools?.includes('antigravity')` |
-| `…:201` | opencode 可視数 | `cliTools?.includes('opencode')` |
-| `standard-commands.test.ts` の `describe('copilot / opencode catalog reconcile (Issue #1913)')` | copilot / opencode の**名前集合**（件数ではない） | `cliTools?.includes(tool)` |
+いまカタログ pin が守る不変条件は
 
-> **⚠️ 件数の数え方はツールごとに述語が違う。揃えて数えると実数とずれる。**
-> claude だけが `!cliTools ||`（＝ `cliTools` 未指定を claude 扱いする）で、
-> 他は `cliTools?.includes(...)` の厳密一致。この非対称は
-> `engine.ts` の `entryHasTool()`（「undefined cliTools = claude」）と同じ規約。
->
-> **実測（2026-08-22 のカタログ 240 件）**:
->
-> | 数え方 | 結果 |
-> |---|---|
-> | codex `cliTools?.includes('codex')` | **54** ← 正 |
-> | codex `!cliTools \|\| includes('codex')` | 59 ← 誤り |
-> | claude `!cliTools \|\| includes('claude')` | **100** ← 正 |
-> | `cliTools` 未指定のエントリ | 5（この 5 件が 54 と 59 の差） |
-> | copilot / opencode / antigravity | **68 / 18 / 13** |
->
-> v0.21.2 で実際にこの取り違えをして codex を 58 と報告し、正は 53 だった。
-> **必ずテスト本体と同じ述語で数えること**:
+```
+catalog(tool) ≡ attested(tool) \ excluded(tool)
+```
+
+で、期待値は `src/config/slash-commands-attestations.json` から導出される。
+**直すのはテストではなくこのファイル**である。
+
+### 5-1. `slash-commands-attestations.json` を書き直す
+
+**やる条件**（1 つでも当てはまれば必須）:
+
+- `--write` で `New commands` を適用した
+- `--check` の `Attestation drift (…)` に行が出た
+- `--check` の `verifiedAgainst updates …` に行が出て、その版で読み直す判断をした
+- Phase 4-4 で copilot / opencode を手で照合した（provider が無いので `--check` は何も言わない）
+
+**やり方**: 当該 tool の `source` フィールドが指す先を**実際に開いて読み**、
+
+| フィールド | 書くもの |
+|---|---|
+| `commands` | ソースが列挙した名前の**全集合**。ソート済み・重複なし（ローダが強制する）。**curation は引かない** — `/schedule` のように「実在するが載せない」ものも入れる（引き算は exclusions.json 側の仕事） |
+| `version` | Phase 4-4 の「版は起動実体で採る」に従った版。`major.minor.patch` |
+| `observedAt` | **実際に読んだ日**（`YYYY-MM-DD`）。claude docs のように版固定できないソースでは、これだけが再現座標になる |
+| `source` | 同じ測定をもう一度やるための**指示**。引用ではない（20 文字未満はローダが弾く） |
+| `issue` | その読み取りを行った Issue 番号 |
+
+`commands` は「ソースが現に配っているコマンド」＝ **active かつ canonical な行だけ**。
+claude docs の表は履歴行（`Removed in vX`）と `Alias for /X` 行を含むが、それらはコマンドではない。
+
+claude / codex は provider が同じ抽出をしているので、突き合わせに使える:
 
 ```bash
-node -e "
-const c = require('./src/config/slash-commands-catalog.json').commands;
-console.log('total ', c.length);
-console.log('claude', c.filter(x => !x.cliTools || x.cliTools.includes('claude')).length);
-for (const t of ['codex','opencode','antigravity'])
-  console.log(t.padEnd(6), c.filter(x => x.cliTools?.includes(t)).length);
+# provider が読んだ active/canonical 集合をそのまま出す（--check と同じ経路）
+npx tsx -e "
+import { fetchClaudeCommands } from './src/lib/slash-command-reconcile/providers/claude';
+import { fetchCodexCommands } from './src/lib/slash-command-reconcile/providers/codex';
+(async () => {
+  for (const [tool, r] of [['claude', await fetchClaudeCommands({})],
+                           ['codex',  await fetchCodexCommands({})]]) {
+    const active = r.commands.filter(c => c.status !== 'removed' && !c.aliasOf).map(c => c.name).sort();
+    console.log(tool, r.ok, r.sourceVersion ?? '(版スタンプ無し)', active.length);
+    console.log(JSON.stringify(active));
+  }
+})();
 "
 ```
 
-コメントは「何がその数を守っているか」を残す形で更新する。数字だけ書き換えない:
+> **これをコピペで済ませない。** provider は「ソースの読み方」の実装であって、
+> ソースそのものではない。パーサの取りこぼし（#1603 の履歴行、#1704 の説明衝突）は
+> まさにこの経路で起きてきた。**ソースを開いて件数と境界を目視してから**貼ること。
+> copilot / opencode / antigravity には provider が無いので、Phase 4-4 の実 TUI 採取が唯一の手段。
 
-```ts
-// Issue #1503: -2 codex phantoms (approvals/undo) removed → 23.
-// v0.21.2: reconciled against the codex 0.146.0 enum → 53.
-it('should have 53 commands available for Codex', () => {
-```
+### 5-2. `verifiedAgainst` リテラルを持つテスト
 
-### 5-2. `verifiedAgainst` を固定しているテスト
-
-`verifiedAgainst updates` が出たら `tests/unit/lib/slash-command-catalog.test.ts:316`
-（`getCatalogStaleness` の期待値）も直す。ここを忘れると、赤の原因がカタログ件数ではなく
-staleness 判定側にあることに気づくまで時間を溶かす。
+attestation の `version` を上げたときだけ直す（`--check` の `verifiedAgainst updates` が
+出ただけでは直さない。**版を上げるのは人の判断**であり、上げなければテストは緑のまま）。
 
 ```bash
 grep -n "verifiedAgainst: '" tests/unit/lib/slash-command-catalog.test.ts
 ```
 
+現状のリテラル（2026-08-24 実測）:
+
+| テスト | 持っているリテラル |
+|---|---|
+| `marks a tool stale when the installed CLI is newer than verifiedAgainst` | claude の版（codex 側は `CATALOG_VERIFIED_AGAINST.codex` を読むので直さなくてよい） |
+| `reports opencode and copilot against their catalog verifiedAgainst` | opencode / copilot の版 |
+| `getCatalogStalenessSnapshot` の describe 内 | claude の版 |
+
+ここを忘れると、赤の原因が attestation ではなく staleness 判定側にあることに気づくまで
+時間を溶かす。
+
 ### 5-3. 触ってはいけないガード
 
-**「何を入れてはいけないか」を守っているテストは、赤くなっても数字を合わせない。**
-赤いなら Phase 4-3 の除外判断が漏れている。
+**「何を入れてはいけないか」を守っているテストは、赤くなっても期待値を合わせない。**
+赤いなら Phase 4-3 の除外判断か Phase 5-1 の attestation が漏れている。
 
-| ファイル:行 | 守っているもの |
+| テスト（`tests/unit/lib/standard-commands.test.ts`） | 守っているもの |
 |---|---|
-| `standard-commands.test.ts:112` | 幻コマンド（`compact`/`status`/`review`）を antigravity に露出しない（#1502） |
-| `…` の `does not add /schedule, and keeps /vim off claude` | `/schedule` を足さない・`/vim` を claude に出さない |
-| `…` の `does not carry the Issue #1503 phantom commands` | 幻 5 件を足さない・`/undo` を **codex** に出さない（copilot には出す） |
-| `…:360` | コマンド名が `/^[a-z][a-z0-9-]*$/` に一致する |
-| `…:377` | 説明に HTML タグ・`javascript:` 等を含まない（4-1 の `<...>` はここで落ちる） |
-| `…:344` | `/agent`（codex）と `/agents`（opencode）の説明が別テキストである |
+| `ships exactly the attested command set for every tool` | `catalog ≡ attested \ excluded`。赤いときは**カタログか attestation か exclusions のどれかが実態とずれている** |
+| `should NOT expose phantom commands (compact/status/review) to Antigravity` | agy 1.1.3 に無い 3 件を露出しない（#1502） |
+| `does not add /schedule, and keeps /vim off claude` | `/schedule` を足さない・`/vim` を claude に出さない |
+| `does not carry the Issue #1503 phantom commands` | 幻 5 件を足さない・`/undo` を **codex** に出さない（copilot には出す） |
+| `should have all command names matching allowed pattern /^[a-z][a-z0-9-]*$/` | コマンド名の allowlist |
+| `should have all descriptions without HTML tags or dangerous patterns` | 説明に HTML タグ・`javascript:` 等を含まない（4-1 の `<...>` はここで落ちる） |
+| `agent (Copilot) and agents (OpenCode/Claude/Codex) have distinct descriptions` | 同名・別意味のコマンドが説明を共有しない |
+| `keeps the version stamp out of the catalog file` | `verifiedAgainst` を `slash-commands-catalog.json` へ書き戻さない（二重管理の復活） |
 
-これらが赤いときの正しい対応は**カタログか辞書を直すこと**であって、期待値を緩めることではない。
+これらが赤いときの正しい対応は**カタログ・辞書・attestation・exclusions のどれかを直すこと**
+であって、期待値を緩めることではない。
+
+`ships exactly the attested command set for every tool` の失敗メッセージは
+どちら向きにずれたかを名指しする:
+
+| メッセージ | 意味 | 対応 |
+|---|---|---|
+| `/X is in the catalog but not attested` | `--write` を適用したが attestation を採り直していない、または幻が入った | 5-1（実在するなら）／カタログから消す（幻なら＋exclusions.json に記録） |
+| `/X is attested but missing from the catalog` | ソースに在るのにカタログに無い | カタログへ追加する。**意図的に載せないなら exclusions.json に行を足す**（それが不在の正当な理由になる） |
+| `/X is in the catalog although it is excluded` | 除外したはずのものが入っている | カタログから消す |
+| `no attestation covers this tool` | カタログが配っている tool の attestation が無い | その tool の読み取りを 5-1 の手順で新規に採る |
 
 ---
 
@@ -495,7 +596,19 @@ npm run test:unit > /tmp/cat-unit.log 2>&1; echo "UNIT=$?"
 
 ```bash
 npx vitest run tests/unit/lib/standard-commands.test.ts tests/unit/lib/slash-command-catalog.test.ts \
+  tests/unit/lib/slash-command-reconcile/ \
   > /tmp/cat-unit-single.log 2>&1; echo "SINGLE=$?"
+```
+
+attestation を編集したなら、**ローダが読めることを先に確かめる**と原因の切り分けが速い
+（不正行は skip されず throw するので、import しているテストが軒並み赤くなる）:
+
+```bash
+npx tsx -e "
+import { DEFAULT_ATTESTATIONS } from './src/lib/slash-command-reconcile/attestations';
+for (const a of DEFAULT_ATTESTATIONS)
+  console.log(a.tool.padEnd(12), a.version.padEnd(9), a.observedAt, String(a.commands.length).padStart(4));
+"
 ```
 
 ---
@@ -504,19 +617,31 @@ npx vitest run tests/unit/lib/standard-commands.test.ts tests/unit/lib/slash-com
 
 ```bash
 git add src/config/slash-commands-catalog.json locales/en/worktree.json locales/ja/worktree.json \
-        tests/unit/lib/standard-commands.test.ts tests/unit/lib/slash-command-catalog.test.ts
+        src/config/slash-commands-attestations.json
+# 除外を足した／狭めたなら:
+git add src/config/slash-commands-exclusions.json
+# 5-2 で staleness テストのリテラルを直したなら:
+git add tests/unit/lib/slash-command-catalog.test.ts
 git commit
 ```
 
-commit message に**必ず残すこと**（次にリコンサイルする人が Phase 4-3 で読む唯一の記録）:
+> `tests/unit/lib/standard-commands.test.ts` は**原則ここに出てこない**（Issue #2026）。
+> 出てくるなら、期待値を直しにいっていないか確認すること — 直すべきは
+> attestation か exclusions かカタログである。
+
+commit message に**必ず残すこと**:
 
 - ドリフト規模（新規 `(tool, name)` 件数 / 新規 locale キー数）
 - **除外したものと、その理由**（どのソースのどの版でどう書かれていたか）
 - **過去の判断を変えたものと、変えた根拠**（上流ソースの実測結果）
-- 件数固定テストの遷移（`56 -> 159` のように）
-- `verifiedAgainst` の遷移
+- **attestation の遷移**（tool ごとに `version` / `observedAt` / 件数がどう動いたか）
 
-`ea02c9d9` がこの形の実例。
+attestation を導入する前は、この最後の 1 点が commit message にしか残らないことが問題だった
+（次のリリースで同じ調査をやり直す羽目になる）。いまは
+`src/config/slash-commands-attestations.json` が正本なので、commit message は
+**その diff を読む人向けの補足**である。判断の実体をここだけに書かないこと。
+
+`ea02c9d9` が（attestation 導入前の形ではあるが）記述の粒度の実例。
 
 ---
 
@@ -527,10 +652,14 @@ commit message に**必ず残すこと**（次にリコンサイルする人が 
 | `--check` が exit 0 なのに何も出ない | **正常**（差分なし）とは限らない。`Warnings` にツールが挙がっていないかを見る。挙がっていれば「未照合」であって「0 件」ではない |
 | `Warnings` に全ソースが挙がる | ネットワーク／ソースの体裁変更。カタログは触られていないので、そのままリコンサイルをスキップしてよい |
 | `--json` が `JSON.parse` で落ちる | `npm run` のバナーが混ざっている。`npm run --silent` を使う |
-| 件数テストが赤い | 5-1 の述語どおりに数え直す。**揃えて数えない** |
+| `is in the catalog but not attested` で赤い | **数字合わせではない。** 5-1 で attestation を採り直す（実在するなら）／カタログから消す（幻なら＋ exclusions.json に記録） |
+| `is attested but missing from the catalog` で赤い | カタログに足す。載せない判断なら exclusions.json に行を足す（5-3 の表） |
+| `no attestation covers this tool` で赤い | その tool の attestation が無い。5-1 で新規に採る |
+| `slash-command attestations: …` という例外で軒並み赤い | attestations.json の形式違反（ソート漏れ・重複・`observedAt` の書式など）。ローダは skip せず throw する。Phase 6 の `DEFAULT_ATTESTATIONS` 出力で切り分ける |
 | 説明の安全ガードが赤い | 4-1 の `<...>`。角括弧に直す |
 | 幻コマンド禁止／antigravity 非露出が赤い | **期待値を直さない。** 除外し損ねたものが入っている（4-3） |
-| `getCatalogStaleness` が赤い | 5-2 の `verifiedAgainst` 期待値 |
+| `getCatalogStaleness` が赤い | 5-2。attestation の `version` を上げたなら staleness テストのリテラルも直す |
+| `keeps the version stamp out of the catalog file` が赤い | `verifiedAgainst` を catalog.json へ書き戻している。版の在処は attestation だけ（#2026） |
 | 別のツールの件数まで動いた | `--write` は追加専用。想定外の減少は差分を読んで原因を特定する |
 
 ## 安全ガード
@@ -540,7 +669,9 @@ commit message に**必ず残すこと**（次にリコンサイルする人が 
 - **fail-soft 警告を無視しない**（「0 件」と「未照合」を混同しない）
 - **`--write` の出力をそのまま commit しない**（Phase 4 の 3 点が必ず残っている）
 - **禁止系ガードの期待値を緩めない**（赤いのは除外漏れのサイン）
-- **除外判断を消さない**（テストのコメントと commit message が唯一の記録）
+- **除外判断を消さない**（`src/config/slash-commands-exclusions.json` が正本）
+- **attestation をカタログからコピーして緑にしない**（ゲートが恒真になり審査が消える。#2026）
+- **`--write` が attestation を書いたと思い込まない**（書かない。人が書くまで pin は赤いまま）
 
 ## 参考
 
@@ -549,4 +680,7 @@ commit message に**必ず残すこと**（次にリコンサイルする人が 
 - `src/lib/slash-command-reconcile/engine.ts` — 追加・拒否・衝突の判定本体
 - `src/lib/slash-command-reconcile/providers/` — 各ソースの URL とパース
 - `src/lib/slash-command-reconcile/sanitize.ts` — 名前の allowlist と説明の正規化
+- `src/lib/slash-command-reconcile/exclusions.ts` — 「載せない」判断の読み込みと検証
+- `src/lib/slash-command-reconcile/attestations.ts` — 「ソースが列挙した集合」の読み込み・検証・突き合わせ
 - Issue #1489（リコンサイル基盤） / #1502・#1503（幻コマンド） / #1603（history / alias 行の拒否）
+  / #1704（exclusions） / #2024（pin を緩めない判断） / #2026（attestation）

@@ -1,0 +1,39 @@
+
+> commandmate@0.27.0 catalog:refresh
+> tsx scripts/refresh-slash-command-catalog.ts --check
+
+
+Slash-command catalog reconcile
+================================
+
+Honoring 4 exclusion(s) from src/config/slash-commands-exclusions.json
+Holding 5 attestation(s) from src/config/slash-commands-attestations.json:
+  = claude: 104 command(s) read off claude 2.1.218 on 2026-08-24 (#2026)
+  = codex: 56 command(s) read off codex 0.148.0 on 2026-08-24 (#2026)
+  = antigravity: 13 command(s) read off antigravity 1.1.3 on 2026-07-24 (#1502)
+  = copilot: 68 command(s) read off copilot 1.0.80 on 2026-08-22 (#1913)
+  = opencode: 18 command(s) read off opencode 1.18.21 on 2026-08-22 (#1913)
+
+Warnings (fail-soft — affected sources left untouched):
+  ! antigravity provider not implemented yet (Issue #1489 Phase 2)
+
+Not added / needs review (by category):
+  [excluded] (2)
+    - [claude] /schedule: excluded as out-of-scope (#1488): Real upstream with a correct description (cloud-run routines), but #1488 decided the palette does not carry it. A curation call, not a phantom — removing this row needs a human to re-decide.
+    - [claude] /ultraplan: excluded as phantom (#1503): The claude docs row carries the bare marker "Removed" as its description; the command is not on the CLI. Adding it re-creates exactly the phantom entries #1502/#1503 purged.
+  [removed-row] (2)
+    - [claude] /pr-comments: documented as removed; not added
+    - [claude] /vim: documented as removed; not added
+  [alias-row] (2)
+    - [claude] /cost: alias for /usage; not added
+    - [claude] /stats: alias for /usage; not added
+
+No new commands to add.
+
+verifiedAgainst updates (not applied — re-attest by hand):
+  ~ codex: 0.148.0 -> 0.149.1
+
+Attestation drift (the recorded reading no longer matches the source):
+  * [codex] source now lists /pwd; source no longer lists /zzz-retired
+
+(check mode — no files written; run with --write to apply)

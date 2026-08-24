@@ -37,7 +37,6 @@ const CLAUDE_DOC = [
 /** An empty catalog: every fixture row is a potential *new* command. */
 function emptyCatalog(): SlashCommandsCatalog {
   return {
-    verifiedAgainst: { claude: '2.1.218', codex: '0.144.6' },
     frequentlyUsed: { claude: [], codex: [] },
     commands: [],
   };
@@ -52,7 +51,7 @@ function claudeResult(): ProviderResult {
 // names (`/agents`, `/vim`) are exactly the ones a future exclusion row might
 // cover. Coupling them would turn a curation decision into an unrelated failure.
 describe('catalog reconcile over the real claude docs shapes (Issue #1603)', () => {
-  const result = reconcileCatalog(emptyCatalog(), [claudeResult()], { exclusions: [] });
+  const result = reconcileCatalog(emptyCatalog(), [claudeResult()], { exclusions: [], attestations: [] });
   const addedNames = result.diff.added.map((a) => a.name);
   const added = (name: string) => result.diff.added.find((a) => a.name === name);
 
@@ -108,7 +107,7 @@ describe('catalog reconcile over the real claude docs shapes (Issue #1603)', () 
       commands: [{ name: 'vim', description: 'toggle vim keybindings in the composer' }],
       warnings: [],
     };
-    const shared = reconcileCatalog(emptyCatalog(), [claudeResult(), codex], { exclusions: [] });
+    const shared = reconcileCatalog(emptyCatalog(), [claudeResult(), codex], { exclusions: [], attestations: [] });
 
     // claude's /vim is refused, so codex's real description owns the key.
     expect(

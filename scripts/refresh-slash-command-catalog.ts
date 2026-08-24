@@ -3,9 +3,15 @@
  * refresh-slash-command-catalog (Issue #1489)
  *
  * Reconciles src/config/slash-commands-catalog.json against each CLI's
- * authoritative source (claude docs table, codex OSS enum @release tag), so the
- * catalog content and its `verifiedAgainst` version stamp update together. Wired
+ * authoritative source (claude docs table, codex OSS enum @release tag). Wired
  * into the /release skill so every release naturally refreshes the catalog.
+ *
+ * Issue #2026: `--write` adds catalog entries and locale strings, and nothing
+ * else. It no longer stamps a version, because the version now lives in
+ * src/config/slash-commands-attestations.json next to the command set a human
+ * read off that source — and re-reading the source is the whole point. What the
+ * run does instead is *say* how far each attestation has fallen behind, so the
+ * work left over after `--write` is on screen rather than only in a red pin.
  *
  * Usage:
  *   tsx scripts/refresh-slash-command-catalog.ts [--check | --write]
@@ -28,6 +34,8 @@ import {
   formatNoticesForReport,
   applyLocaleAdditions,
   flattenDictionary,
+  describeAttestationDrift,
+  DEFAULT_ATTESTATIONS,
   DEFAULT_EXCLUSIONS,
   type LocaleAddition,
   type LocaleDictionary,
@@ -38,6 +46,7 @@ import {
 const REPO_ROOT = path.resolve(__dirname, '..');
 const CATALOG_PATH = path.join(REPO_ROOT, 'src/config/slash-commands-catalog.json');
 const EXCLUSIONS_PATH = path.join(REPO_ROOT, 'src/config/slash-commands-exclusions.json');
+const ATTESTATIONS_PATH = path.join(REPO_ROOT, 'src/config/slash-commands-attestations.json');
 const EN_LOCALE_PATH = path.join(REPO_ROOT, 'locales/en/worktree.json');
 const JA_LOCALE_PATH = path.join(REPO_ROOT, 'locales/ja/worktree.json');
 
@@ -140,6 +149,20 @@ function printSummary(result: ReconcileResult, args: CliArgs): void {
       `${path.relative(REPO_ROOT, EXCLUSIONS_PATH)}`
   );
 
+  // Issue #2026: the same move for the other half of the decision. Say which
+  // reading each tool's pins are being held to, so "why is the pin red?" is
+  // answered by the run rather than by reading a test file.
+  console.log(
+    `Holding ${DEFAULT_ATTESTATIONS.length} attestation(s) from ` +
+      `${path.relative(REPO_ROOT, ATTESTATIONS_PATH)}:`
+  );
+  for (const attestation of DEFAULT_ATTESTATIONS) {
+    console.log(
+      `  = ${attestation.tool}: ${attestation.commands.length} command(s) read off ` +
+        `${attestation.tool} ${attestation.version} on ${attestation.observedAt} (#${attestation.issue})`
+    );
+  }
+
   if (result.warnings.length > 0) {
     console.log('\nWarnings (fail-soft — affected sources left untouched):');
     for (const warning of result.warnings) console.log(`  ! ${warning}`);
@@ -161,13 +184,40 @@ function printSummary(result: ReconcileResult, args: CliArgs): void {
       const desc = added.enDescription ? ` — ${added.enDescription}` : ' — (needs description)';
       console.log(`  + [${added.tool}] /${added.name}${desc}`);
     }
+    // Issue #2024 put this paragraph here, at the moment the additions are on
+    // screen, because nothing made the correct-addition outcome readable to the
+    // operator. Issue #2026 turned "retype the pin" into "record the reading":
+    // the pins no longer hold literals, so the response is an edit to a file
+    // that states what the source said, not a number whose evidence is a commit
+    // message. Blank-line separated, so check-report.ts's section parser skips it.
+    console.log(
+      '\n  Applying these will turn the catalog pins in\n' +
+        '  tests/unit/lib/standard-commands.test.ts red, because the catalog will no\n' +
+        '  longer match the attested set. That is the review gate, not a defect.\n' +
+        `  The response is to re-read the source and update ${path.relative(REPO_ROOT, ATTESTATIONS_PATH)}\n` +
+        '  (its command list, its version, and its observedAt date) — never to relax a pin.\n' +
+        `  Reasoning: the "$comment" blocks in that file and in ${path.relative(REPO_ROOT, EXCLUSIONS_PATH)}.`
+    );
   }
 
+  // Issue #2026: still printed under the header check-report.ts has always
+  // parsed, but these are no longer applied — the stamp is a field of the
+  // attestation, so moving it is part of the human re-read this section asks for.
   const stamped = Object.entries(diff.verifiedAgainstUpdated);
   if (stamped.length > 0) {
-    console.log('\nverifiedAgainst updates:');
+    console.log('\nverifiedAgainst updates (not applied — re-attest by hand):');
     for (const [tool, change] of stamped) {
       console.log(`  ~ ${tool}: ${change.from ?? '(unset)'} -> ${change.to}`);
+    }
+  }
+
+  // Issue #2026: the staleness signal the pins cannot give. A pin compares the
+  // catalog to the attestation; only a run that fetched the source can say the
+  // attestation itself has expired.
+  if (diff.attestationDrift.length > 0) {
+    console.log('\nAttestation drift (the recorded reading no longer matches the source):');
+    for (const drift of diff.attestationDrift) {
+      console.log(`  * ${describeAttestationDrift(drift)}`);
     }
   }
 

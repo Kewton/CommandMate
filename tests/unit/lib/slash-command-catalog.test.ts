@@ -75,7 +75,7 @@ import {
   getCatalogStalenessSnapshot,
 } from '@/lib/slash-command-catalog';
 import { SENSITIVE_ENV_KEYS } from '@/lib/security/env-sanitizer';
-import { getStandardCommandGroups } from '@/lib/standard-commands';
+import { getStandardCommandGroups, CATALOG_VERIFIED_AGAINST } from '@/lib/standard-commands';
 import { mergeCommandGroups } from '@/lib/command-merger';
 import type { SlashCommand, SlashCommandGroup } from '@/types/slash-commands';
 import { removeTempDir } from '@tests/helpers/temp-dir';
@@ -335,15 +335,26 @@ describe('compareCliVersions', () => {
 // --- Staleness detection ----------------------------------------------------
 
 describe('getCatalogStaleness', () => {
+  // Issue #2024: the codex half reads its version out of the catalog rather than
+  // repeating it. The assertion under test is "installed == verifiedAgainst is
+  // not stale", not "the catalog says 0.148.0" — and hard-coding the number made
+  // every reconcile break a test about comparison logic. (The codex row had also
+  // silently stopped being the `// equal` case it claimed to be: 0.144.6 vs
+  // 0.148.0 was passing as older-than, so the equality path went uncovered.)
   it('marks a tool stale when the installed CLI is newer than verifiedAgainst', async () => {
+    const codexVerified = CATALOG_VERIFIED_AGAINST.codex;
     execTable = {
       claude: { stdout: '2.5.0 (Claude Code)' },
-      codex: { stdout: 'codex-cli 0.144.6' }, // equal
+      codex: { stdout: `codex-cli ${codexVerified}` }, // equal
       agy: { error: true }, // missing
     };
     const staleness = await getCatalogStaleness();
     expect(staleness.claude).toEqual({ current: '2.5.0', verifiedAgainst: '2.1.218', stale: true });
-    expect(staleness.codex).toEqual({ current: '0.144.6', verifiedAgainst: '0.148.0', stale: false });
+    expect(staleness.codex).toEqual({
+      current: codexVerified,
+      verifiedAgainst: codexVerified,
+      stale: false,
+    });
     // Missing binary → not reported at all.
     expect(staleness.antigravity).toBeUndefined();
   });

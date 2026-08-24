@@ -1,11 +1,4 @@
 {
-  "verifiedAgainst": {
-    "claude": "2.1.218",
-    "codex": "0.148.0",
-    "antigravity": "1.1.3",
-    "copilot": "1.0.80",
-    "opencode": "1.18.21"
-  },
   "frequentlyUsed": {
     "claude": [
       "clear",
@@ -383,16 +376,6 @@
       "source": "standard"
     },
     {
-      "name": "agent",
-      "descriptionKey": "slashCommands.descriptions.agent.codex",
-      "category": "standard-session",
-      "cliTools": [
-        "codex"
-      ],
-      "isStandard": true,
-      "source": "standard"
-    },
-    {
       "name": "subagents",
       "descriptionKey": "slashCommands.descriptions.subagents",
       "category": "standard-session",
@@ -684,7 +667,7 @@
     },
     {
       "name": "cd",
-      "descriptionKey": "slashCommands.descriptions.cd",
+      "descriptionKey": "slashCommands.descriptions.cd.claude",
       "category": "standard-util",
       "cliTools": [
         "claude"
@@ -2438,6 +2421,56 @@
       "category": "standard-config",
       "cliTools": [
         "copilot"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "agents",
+      "descriptionKey": "slashCommands.descriptions.agents.codex",
+      "category": "standard-session",
+      "cliTools": [
+        "codex"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "cd",
+      "descriptionKey": "slashCommands.descriptions.cd.codex",
+      "category": "standard-util",
+      "cliTools": [
+        "codex"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "pwd",
+      "descriptionKey": "slashCommands.descriptions.pwd",
+      "category": "standard-util",
+      "cliTools": [
+        "codex"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "artifacts",
+      "descriptionKey": "slashCommands.descriptions.artifacts",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "auto-mode-setup",
+      "descriptionKey": "slashCommands.descriptions.auto-mode-setup",
+      "category": "standard-config",
+      "cliTools": [
+        "claude"
       ],
       "isStandard": true,
       "source": "standard"

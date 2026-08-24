@@ -18,7 +18,7 @@
  *
  * Outputs (when the matching env var is set):
  *   $GITHUB_OUTPUT        status / new_count / needs_review_count /
- *                         blocking_warning_count / title
+ *                         attestation_drift_count / blocking_warning_count / title
  *   $GITHUB_STEP_SUMMARY  human summary
  *
  * Always exits 0 for a parse it understood — the verdict travels in `status`,
@@ -107,6 +107,9 @@ function main(): void {
   appendToFile('GITHUB_OUTPUT', `status=${report.status}`);
   appendToFile('GITHUB_OUTPUT', `new_count=${report.newCount ?? -1}`);
   appendToFile('GITHUB_OUTPUT', `needs_review_count=${report.needsReviewCount}`);
+  // Issue #2026: exposed alongside new_count because the two are different kinds
+  // of work — one `--write` can do, one only a human re-reading a source can.
+  appendToFile('GITHUB_OUTPUT', `attestation_drift_count=${report.attestationDrift.length}`);
   appendToFile('GITHUB_OUTPUT', `blocking_warning_count=${report.blockingWarnings.length}`);
   appendToFile('GITHUB_OUTPUT', `title=${title}`);
 
