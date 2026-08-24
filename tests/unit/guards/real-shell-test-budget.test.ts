@@ -1,10 +1,14 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import {
+  REAL_SHELL_CONCURRENT_FULL_RUNS,
+  REAL_SHELL_GUARD_MARGIN_MIN,
+  REAL_SHELL_LOAD_SWEEP,
   REAL_SHELL_MARKERS,
+  REAL_SHELL_SIZING_CONCURRENCY,
   REAL_SHELL_SUBPROCESS_TIMEOUT_MS,
   REAL_SHELL_TEST_TIMEOUT_MS,
   assertSubprocessCompleted,
@@ -13,6 +17,7 @@ import {
 
 const REPO = process.cwd();
 const SETUP = path.join(REPO, 'tests/setup.ts');
+const RECORD = path.join(REPO, 'docs/qa/1985-real-shell-budget-concurrency.md');
 
 /**
  * Issue #1950. This file is itself a member of the family it guards — it starts
@@ -87,6 +92,94 @@ describe('real-shell test budget (Issue #1950)', () => {
 
     const config = readFileSync(path.join(REPO, 'vitest.config.ts'), 'utf8');
     expect(config).toContain("setupFiles: ['./tests/setup.ts']");
+  });
+
+  /**
+   * Issue #1985. The guard's size was defensible and its CONDITION was not
+   * written down anywhere, so #1977 read a guard doing its job as a guard that
+   * was broken. These pin the derivation rather than the number: the constant
+   * may move, but only together with a measurement that justifies it.
+   */
+  describe('the concurrency the size is valid for (Issue #1985)', () => {
+    it('declares a concurrency, and the sweep actually covers it', () => {
+      expect(Number.isInteger(REAL_SHELL_CONCURRENT_FULL_RUNS)).toBe(true);
+      // At least two: `mutex: cpu.heavy` already permits verify's copy, and a
+      // person typing the command is the second. A declaration of 1 would be a
+      // claim that nobody may run the suite by hand.
+      expect(REAL_SHELL_CONCURRENT_FULL_RUNS).toBeGreaterThanOrEqual(2);
+      expect(REAL_SHELL_SIZING_CONCURRENCY).toBe(REAL_SHELL_CONCURRENT_FULL_RUNS + 1);
+      expect(REAL_SHELL_LOAD_SWEEP[REAL_SHELL_CONCURRENT_FULL_RUNS]).toBeDefined();
+      expect(REAL_SHELL_LOAD_SWEEP[REAL_SHELL_SIZING_CONCURRENCY]).toBeDefined();
+    });
+
+    it('holds the declared margin at the concurrency it claims to be sized at', () => {
+      // THE assertion of this Issue. Raise the guard without re-measuring and
+      // nothing here moves; re-measure a heavier machine without raising the
+      // guard and this goes red naming the ratio that fell short.
+      const sized = REAL_SHELL_LOAD_SWEEP[REAL_SHELL_SIZING_CONCURRENCY];
+      const ratio = REAL_SHELL_SUBPROCESS_TIMEOUT_MS / sized.maxMs;
+      expect(ratio).toBeGreaterThanOrEqual(REAL_SHELL_GUARD_MARGIN_MIN);
+    });
+
+    it('carries a sweep that reads as a measurement rather than a guess', () => {
+      const levels = Object.keys(REAL_SHELL_LOAD_SWEEP)
+        .map(Number)
+        .sort((a, b) => a - b);
+      expect(levels.length).toBeGreaterThanOrEqual(REAL_SHELL_SIZING_CONCURRENCY);
+      let previous = { samples: 0, p999Ms: 0, maxMs: 0, peakLoadAvg: 0 };
+      for (const level of levels) {
+        const row = REAL_SHELL_LOAD_SWEEP[level];
+        // Contention costs time, never saves it: every column must climb with
+        // the number of suites. A hand-edited row that says otherwise is a
+        // typo or an invention, and either way it must not size a guard.
+        expect(row.samples).toBeGreaterThan(previous.samples);
+        expect(row.p999Ms).toBeGreaterThan(previous.p999Ms);
+        expect(row.maxMs).toBeGreaterThan(previous.maxMs);
+        expect(row.peakLoadAvg).toBeGreaterThan(previous.peakLoadAvg);
+        // p99.9 is a percentile of the same samples the max comes from.
+        expect(row.maxMs).toBeGreaterThanOrEqual(row.p999Ms);
+        previous = row;
+      }
+    });
+
+    it('keeps the written record and the constants saying the same thing', () => {
+      // The prose is where the reasoning lives and the constants are where the
+      // behaviour lives; a repository that lets them disagree has the #1985
+      // defect again, one level up. Numbers only, so editing the prose around
+      // them stays free.
+      const record = readFileSync(RECORD, 'utf8');
+      // `NAME = VALUE`, not the bare value: "2" and "3" occur all over a page
+      // of prose, so a bare-value check would call any declaration consistent.
+      expect(record).toContain(
+        `REAL_SHELL_CONCURRENT_FULL_RUNS = ${REAL_SHELL_CONCURRENT_FULL_RUNS}`,
+      );
+      expect(record).toContain(`REAL_SHELL_SIZING_CONCURRENCY = ${REAL_SHELL_SIZING_CONCURRENCY}`);
+      expect(record).toContain(`REAL_SHELL_GUARD_MARGIN_MIN = ${REAL_SHELL_GUARD_MARGIN_MIN}`);
+      expect(record).toContain(
+        `REAL_SHELL_SUBPROCESS_TIMEOUT_MS = ${REAL_SHELL_SUBPROCESS_TIMEOUT_MS}`,
+      );
+      expect(record).toContain(`REAL_SHELL_TEST_TIMEOUT_MS = ${REAL_SHELL_TEST_TIMEOUT_MS}`);
+      // Every measured row has to be in the record too, so a sweep edited in
+      // code alone stops looking sourced.
+      for (const level of Object.keys(REAL_SHELL_LOAD_SWEEP).map(Number)) {
+        expect(record).toContain(String(REAL_SHELL_LOAD_SWEEP[level].maxMs));
+        expect(record).toContain(String(REAL_SHELL_LOAD_SWEEP[level].p999Ms));
+      }
+    });
+
+    it('names the guard it tripped, on a real subprocess, at the current size', () => {
+      // The sibling case below builds the `spawnSync` result by hand. This one
+      // starts a real child and lets node's own `timeout` produce ETIMEDOUT, so
+      // the reported number is the constant this file is guarding rather than a
+      // literal somebody kept in step. 300ms because the guard's SIZE is what
+      // the assertions above cover; what this covers is that the message is
+      // still wired to the constant.
+      const outcome = spawnSync('sleep', ['5'], { timeout: 300 });
+      expect((outcome.error as NodeJS.ErrnoException | undefined)?.code).toBe('ETIMEDOUT');
+      expect(() => assertSubprocessCompleted(outcome, 'sleep 5')).toThrow(
+        new RegExp(`${REAL_SHELL_SUBPROCESS_TIMEOUT_MS}ms guard`),
+      );
+    });
   });
 
   describe('assertSubprocessCompleted', () => {

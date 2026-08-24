@@ -564,6 +564,26 @@ claudemd-size / route-exports。各 0.1〜0.3s）は失敗を秒で返すため�
 実機記録は [docs/qa/1917-parallel-unit-mutex.md](../qa/1917-parallel-unit-mutex.md)。
 `build` / `build-cli` / `build-server` も同じ側である（Issue #1994、判定基準は 9.6）。
 
+#### 9.2.1 `mutex` が届かない範囲 — 手で回すフル `test:unit`（Issue #1985）
+
+`mutex` を取るのは `gate-runner.ts` の `runGateAttempt` **だけ**である。したがって
+`cpu.heavy` が保証するのは「**ゲートとして**起動されたフル `test:unit` は同時に 1 本」
+までであって、ワーカーや開発者が手で叩く `npm run test:unit`（`NODE_ENV=test vitest run
+tests/unit`）はこの枠の外側にある。
+
+ここを機構で塞ぐ案（vitest の `globalSetup` から同じロックを取る）は**採らない**。
+すでに `cpu.heavy` を保有した `unit` ゲートがそのコマンドを起動するため、ロックを 2 回取って
+**ゲートが自分を待つ**。9.2 のロック規約に再入は無いので、これは設定 1 行ではなく再入プロトコルの
+新設になり、その失敗は「ワーカーが完了したか」を裁定するゲートの中のデッドロックである。
+待ち切れた場合も 9.4 のとおり exit 99（裁定不能）になる。
+
+よってここは**運用規約**である: **1 台で同時に走らせてよいフル `npm run test:unit` は 2 本まで**
+（`cpu.heavy` 由来の 1 本 ＋ 手で回す 1 本）。規約は破られうるので、実シェルを起動する unit
+テストの時間予算（`tests/helpers/real-shell-budget.ts`）は**宣言 + 超過 1 本 ＝ 3 本**の条件で
+測った最遅実測から逆算してある。実測（N=1..4 のスイープ、ガード値の導出、N=4 では
+ガードでは直らない形で 4 本とも赤になること）は
+[docs/qa/1985-real-shell-budget-concurrency.md](../qa/1985-real-shell-budget-concurrency.md)。
+
 ### 9.3 待ち時間は duration と別に記録する
 
 ```
