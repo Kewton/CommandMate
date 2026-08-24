@@ -211,7 +211,12 @@ describe('Security Tests', () => {
       const data = await response.json();
 
       expect(response.status).toBe(403);
-      expect(data.error.code).toBe('PROTECTED_DIRECTORY');
+      // [Issue #2014] Still 403, but now refused one layer earlier: `.git` is in
+      // the deny tier of sensitive-file-guard, so the route rejects it before
+      // deleteFileOrDirectory's PROTECTED_DIRECTORY rule is reached. That rule
+      // is unchanged and still pins `node_modules`
+      // (tests/integration/api-files-excluded-patterns-2014.test.ts).
+      expect(data.error.code).toBe('SENSITIVE_PATH');
       expect(existsSync(join(testDir, '.git'))).toBe(true);
     });
 
@@ -225,7 +230,8 @@ describe('Security Tests', () => {
       const data = await response.json();
 
       expect(response.status).toBe(403);
-      expect(data.error.code).toBe('PROTECTED_DIRECTORY');
+      // [Issue #2014] See above — the deny-tier guard fires first for `.git`.
+      expect(data.error.code).toBe('SENSITIVE_PATH');
     });
   });
 
@@ -342,7 +348,10 @@ describe('Security Tests', () => {
       const data = await response.json();
 
       expect(response.status).toBe(403);
-      expect(data.error.code).toBe('NOT_EDITABLE');
+      // [Issue #2014] `.env` is now refused by the deny-tier guard before the
+      // editable-extension check runs. Same 403, earlier layer; NOT_EDITABLE is
+      // still pinned by the JavaScript case below.
+      expect(data.error.code).toBe('SENSITIVE_PATH');
     });
 
     it('should not allow editing JavaScript files', async () => {
