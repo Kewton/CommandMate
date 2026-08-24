@@ -74,8 +74,15 @@ export type FailurePushReason =
   | 'verification-failed'
   /** An upstream (model API) fault signature appeared on the pane (#1839). */
   | 'upstream-fault'
-  /** `SessionStartFailedError` — the CLI printed a terminal error while starting. */
-  | 'session-start-failed';
+  /** `SessionStartFailedError`, or any other failed launch — the session never came up. */
+  | 'session-start-failed'
+  /**
+   * `SessionStartUnavailableError` — the CLI is not installed, so no session
+   * could even be attempted (Issue #2009). Separate from the line above because
+   * the remedy is different and the body has to say so: "install it", not "read
+   * the pane".
+   */
+  | 'session-start-unavailable';
 
 /** What a failure notification is about (Issue #2000). */
 export interface FailureContext {
@@ -233,6 +240,10 @@ const FAILURE_BODY_KEYS: Record<
   'session-start-failed': {
     withExcerpt: 'failureSessionStartWithExcerpt',
     plain: 'failureSessionStart',
+  },
+  'session-start-unavailable': {
+    withExcerpt: 'failureSessionUnavailableWithExcerpt',
+    plain: 'failureSessionUnavailable',
   },
 };
 

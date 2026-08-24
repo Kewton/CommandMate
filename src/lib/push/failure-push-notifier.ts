@@ -10,7 +10,7 @@
  * |---------------------|--------------------------------------------|--------|
  * | verification failed | `lib/verification/gate-runner`              | event  |
  * | upstream API fault  | `lib/polling/response-checker` (#1839 match)| level  |
- * | session start failed| `lib/session/claude-session`                | event  |
+ * | session start failed| `lib/cli-tools/base` (all 7 tools, #2009)   | event  |
  *
  * The shape column is the whole design. An **event** fires once by construction
  * — a run closes once, a start attempt throws once — so its only guard is the
@@ -49,6 +49,11 @@ import { getDbInstance } from '@/lib/db/db-instance';
 import type { VerificationRunTerminalStatus, VerificationTrigger } from '@/lib/db/verification-db';
 import { getWorktreeById } from '@/lib/db/worktree-db';
 import { createLogger } from '@/lib/logger';
+import {
+  SESSION_START_FAILED_CODE,
+  isSessionStartTimeoutError,
+  isSessionStartUnavailableError,
+} from '@/lib/session/session-start-error';
 import { observeUpstreamFaultEdge } from './failure-episode-state';
 import { notifyPushSubscribers, type FailurePushReason } from './push-sender';
 import { isPushConfigured } from './vapid';
@@ -72,7 +77,13 @@ export type FailurePushSuppressionReason =
   /** The same upstream fault is still on the frame (not a new incident). */
   | 'upstream-same-episode'
   /** A new fault episode, but this instance rang inside the cooldown. */
-  | 'upstream-cooldown';
+  | 'upstream-cooldown'
+  /**
+   * The start is merely slow (Issue #1637 / #2009). The tmux session and the CLI
+   * process are both alive and deliberately left running, so there is nothing to
+   * repair and the documented advice is to retry in a few seconds.
+   */
+  | 'session-still-starting';
 
 /**
  * The worktree's display name, for the notification title.
@@ -330,38 +341,134 @@ export interface SessionStartFailurePushInput {
   /** Display name of the CLI tool, e.g. `Claude Code`. */
   toolName: string;
   /**
-   * The matched entry from `cli-patterns.ts` — a fixed string this repository
-   * authored, never captured output (see `session-start-error`), so it is safe
-   * to put in a notification body.
+   * Exactly what `startSession()` threw (Issue #2009).
+   *
+   * The caller hands the error over rather than a pre-digested reason: this
+   * module is "the only module that decides whether a failure is worth ringing
+   * for" (see the file docblock), and that decision is not one a seam sitting
+   * above seven CLI tools can make. It is made once, here, in
+   * {@link classifySessionStartFailure}.
    */
-  detectedPattern: string;
+  error: unknown;
 }
 
 /**
- * Notify that a CLI session printed a terminal error while starting.
+ * What a caught session-start error means for the phone.
+ *
+ * `null` is the deliberate silence: it carries the suppression reason so the
+ * caller's log line answers "why did my phone stay quiet?" without the reader
+ * having to know which of the three shapes came back.
+ */
+type SessionStartVerdict =
+  | { notify: false; reason: FailurePushSuppressionReason }
+  | { notify: true; reason: FailurePushReason; excerpt: string; signature: string };
+
+/**
+ * Decide what a session-start failure is, from the error alone.
+ *
+ * ## The excerpt never carries captured output
+ *
+ * A notification body leaves this machine. `SessionStartFailedError` is the one
+ * shape whose detail may be quoted, and it earns that by construction: its
+ * `detectedPattern` is a fixed string from `cli-patterns.ts` that this
+ * repository authored, never anything the CLI printed (`session-start-error`
+ * spells the argument out). Every other shape — a bare `Error` from a tool's own
+ * launch path, whose message interpolates raw tmux/CLI text — contributes only
+ * the tool NAME, which is the fact the Issue's acceptance asks the body to
+ * carry.
+ *
+ * @param input - The failure, as reported by the seam
+ * @param instanceId - Resolved instance id; part of every signature
+ */
+function classifySessionStartFailure(
+  input: SessionStartFailurePushInput,
+  instanceId: string
+): SessionStartVerdict {
+  // #1637: the session and its process are both alive and still initializing.
+  // Notifying here would be the "nothing needs repairing" case ringing a phone.
+  if (isSessionStartTimeoutError(input.error)) {
+    return { notify: false, reason: 'session-still-starting' };
+  }
+
+  if (isSessionStartUnavailableError(input.error)) {
+    return {
+      notify: true,
+      reason: 'session-start-unavailable',
+      // Just the name: the dictionary supplies "is not installed" in the
+      // reader's language, which an English error message could not.
+      excerpt: input.toolName,
+      // Not the message — copilot's carries an install hint that would make two
+      // attempts at the same missing binary look like two incidents.
+      signature: `session-start:${instanceId}:not-installed`,
+    };
+  }
+
+  if (readErrorCode(input.error) === SESSION_START_FAILED_CODE) {
+    const detectedPattern = (input.error as { detectedPattern?: unknown }).detectedPattern;
+    const pattern = typeof detectedPattern === 'string' ? detectedPattern : '';
+    return {
+      notify: true,
+      reason: 'session-start-failed',
+      excerpt: pattern ? `${input.toolName}: ${pattern}` : input.toolName,
+      // Unchanged from #2000, so a claude start that keeps hitting the same
+      // pattern still collapses to one notification exactly as it did.
+      signature: `session-start:${instanceId}:${pattern}`,
+    };
+  }
+
+  return {
+    notify: true,
+    reason: 'session-start-failed',
+    excerpt: input.toolName,
+    signature: `session-start:${instanceId}:start-error`,
+  };
+}
+
+function readErrorCode(error: unknown): string | undefined {
+  if (typeof error !== 'object' || error === null) return undefined;
+  const code = (error as { code?: unknown }).code;
+  return typeof code === 'string' ? code : undefined;
+}
+
+/**
+ * Notify that a CLI session could not be started. Never throws.
+ *
+ * Called from exactly one place — `BaseCLITool.startSession`, the method all
+ * seven tools inherit (Issue #2009). Before that it was called from
+ * `claude-session`'s throw site, which is why six of the seven agents failed
+ * silently: the other six never had a line to call it from.
  *
  * No edge of its own, and deliberately: this is raised from a `throw`, so its
  * rate is bounded by how often something asks to start the session rather than
  * by a poll interval. The 30 s content window in `push-sender` collapses the
  * burst a retrying caller produces; a human who retries minutes later gets a
  * second notification, which is correct — that is a second failed attempt.
- *
- * Note that only `SessionStartFailedError` reaches here.
- * `SessionStartTimeoutError` is explicitly *not* a failure (#1637: the session
- * and its process are both alive and still initializing, and the documented
- * advice is to retry in a few seconds), so notifying for it would be the
- * "nothing needs repairing" case ringing a phone.
  */
 export async function notifySessionStartFailurePush(
   input: SessionStartFailurePushInput
 ): Promise<void> {
   const instanceId = input.instanceId ?? input.cliToolId;
+  const verdict = classifySessionStartFailure(input, instanceId);
+
+  if (!verdict.notify) {
+    // At info, not debug: "the agent did not come up and my phone said nothing"
+    // is a question an operator actually asks, and this is the line that answers
+    // it. It is once per start attempt, not once per poll, so it cannot flood.
+    logger.info('failure-push-suppressed', {
+      worktreeId: input.worktreeId,
+      instanceId,
+      cliToolId: input.cliToolId,
+      reason: verdict.reason,
+    });
+    return;
+  }
+
   await raiseFailurePush({
-    reason: 'session-start-failed',
+    reason: verdict.reason,
     worktreeId: input.worktreeId,
     instanceId,
-    signature: `session-start:${instanceId}:${input.detectedPattern}`,
-    excerpt: `${input.toolName}: ${input.detectedPattern}`,
+    signature: verdict.signature,
+    excerpt: verdict.excerpt,
     logContext: { cliToolId: input.cliToolId },
   });
 }

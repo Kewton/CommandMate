@@ -33,6 +33,7 @@ import {
   TUI_INTERRUPT_SETTLE_MS,
   TUI_EXIT_WAIT_MS,
 } from '@/config/cli-tool-timing-config';
+import { SessionStartUnavailableError } from '../session/session-start-error';
 
 const logger = createLogger('cli-tools/gemini');
 
@@ -92,11 +93,11 @@ export class GeminiTool extends BaseCLITool {
    * @param worktreeId - Worktree ID
    * @param worktreePath - Worktree path
    */
-  async startSession(worktreeId: string, worktreePath: string, instanceId?: string): Promise<void> {
+  protected async launchSession(worktreeId: string, worktreePath: string, instanceId?: string): Promise<void> {
     // Check if Gemini is installed
     const geminiAvailable = await this.isInstalled();
     if (!geminiAvailable) {
-      throw new Error('Gemini CLI is not installed or not in PATH');
+      throw new SessionStartUnavailableError(this.name, 'Gemini CLI is not installed or not in PATH');
     }
 
     const sessionName = this.getSessionName(worktreeId, instanceId);

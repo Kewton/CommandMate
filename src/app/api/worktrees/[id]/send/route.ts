@@ -23,7 +23,9 @@ import { sendUserMessage } from '@/lib/session/send-user-message';
 import { PROMPT_WAITING_CODE } from '@/lib/session/prompt-waiting-guard';
 import {
   isSessionStartTimeoutError,
+  isSessionStartUnavailableError,
   SESSION_STARTING_CODE,
+  SESSION_START_UNAVAILABLE_CODE,
 } from '@/lib/session/session-start-error';
 import { getGitStatus } from '@/lib/git/git-utils';
 import { isPathSafe, resolveAndValidateRealPath } from '@/lib/security/path-validator';
@@ -234,14 +236,22 @@ export async function POST(
     const manager = CLIToolManager.getInstance();
     const cliTool = manager.getTool(cliToolId);
 
-    // Check if CLI tool is installed
-    const toolAvailable = await cliTool.isInstalled();
-    if (!toolAvailable) {
-      return NextResponse.json(
-        { error: `${cliTool.name} is not installed. Please install it first.` },
-        { status: 503 }
-      );
-    }
+    // Issue #2009: the install check that used to sit here was a SECOND gate.
+    // Every one of the seven tools already refuses to launch when its binary is
+    // missing, and this copy ran first — so the tools' own refusals were
+    // unreachable from this route, and with them the one seam that reports a
+    // failed start to a phone (`BaseCLITool.startSession`). Removing the copy
+    // leaves one gate, and it is the one that notifies.
+    //
+    // The 503 is preserved below by mapping SESSION_START_UNAVAILABLE, and the
+    // body is now the tool's own wording — which for copilot carries its install
+    // hint (#1907) that this route's fixed sentence used to discard.
+    //
+    // One behaviour deliberately changes: a tool whose binary is not on the
+    // server's PATH but whose tmux session is already RUNNING is no longer
+    // refused. `isRunning` is positive evidence that the agent is alive, and
+    // `which` failing (a server started from a shell without the nvm PATH, say)
+    // says nothing about whether it can be typed into.
 
     // Check if CLI tool session is running
     const running = await cliTool.isRunning(id, instanceId);
@@ -292,6 +302,17 @@ export async function POST(
         if (isSessionStartTimeoutError(error)) {
           return NextResponse.json(
             { error: error.message, code: SESSION_STARTING_CODE },
+            { status: 503 }
+          );
+        }
+        // Issue #2009: the CLI is not installed. Also a 503 — the request was
+        // well formed and the server is healthy, the machine is simply missing
+        // the binary — and the message is the tool's own, which is authored text
+        // (a name plus, for copilot, a fixed install hint), never captured
+        // output. `BaseCLITool.startSession` has already reported it.
+        if (isSessionStartUnavailableError(error)) {
+          return NextResponse.json(
+            { error: error.message, code: SESSION_START_UNAVAILABLE_CODE },
             { status: 503 }
           );
         }

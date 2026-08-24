@@ -66,9 +66,90 @@ export abstract class BaseCLITool implements ICLITool {
 
   // Abstract methods that must be implemented by subclasses
   abstract isRunning(worktreeId: string, instanceId?: string): Promise<boolean>;
-  abstract startSession(worktreeId: string, worktreePath: string, instanceId?: string): Promise<void>;
   abstract sendMessage(worktreeId: string, message: string, instanceId?: string): Promise<void>;
   abstract killSession(worktreeId: string, instanceId?: string): Promise<void>;
+
+  /**
+   * Launch this tool's session. Implemented by every tool; called by nobody but
+   * {@link startSession}.
+   *
+   * `protected` on purpose (Issue #2009): the public entry point below is the
+   * ONE place a start failure becomes a notification decision, and a caller that
+   * could reach the launch directly would be a hole in it.
+   *
+   * @param worktreeId - Worktree ID
+   * @param worktreePath - Worktree path
+   * @param instanceId - Agent instance ID (defaults to the primary instance)
+   * @param model - Model to launch with; only antigravity honours it (#989)
+   */
+  protected abstract launchSession(
+    worktreeId: string,
+    worktreePath: string,
+    instanceId?: string,
+    model?: string
+  ): Promise<void>;
+
+  /**
+   * Start this tool's session, reporting a failure exactly once (Issue #2009).
+   *
+   * ## Why the seam is here and not at the seven throw sites
+   *
+   * #2000 made "the session refused to start" reach a phone, and wired it at the
+   * single place that established the fact: `claude-session`'s
+   * `SessionStartFailedError`. Measured on this tree that was also the ONLY
+   * place — the other six tools detect their own start failures and throw a bare
+   * `Error`, so six of seven agents failed silently. Copying the #2000 call into
+   * the other six would have made the eighth tool a new silent one, which is the
+   * failure mode the Issue names ("片方だけ直る改修").
+   *
+   * So the call moved up one level, to the one method every tool inherits and
+   * every caller goes through — the two API routes that start sessions, and
+   * anything added later. A tool author cannot forget it, because there is
+   * nothing left to remember: implement {@link launchSession} and the reporting
+   * is already wired.
+   *
+   * ## Fire-and-forget, and a deferred import
+   *
+   * The notification is NOT awaited. Web push fans out to every registered
+   * device, and holding a 503 open for that would make a failed start slower to
+   * report than a successful one. `notifySessionStartFailurePush` contains its
+   * own failures, and the `.catch` here is the belt for the import itself.
+   *
+   * `await import()` rather than a static import, for the reason Issue #1984
+   * gives on `CLIToolManager.stopPollers`: `push/failure-push-notifier` pulls
+   * the database and `web-push` behind it, and every one of the seven tool
+   * modules loads THIS file. Deferring it to the failure path keeps the
+   * cli-tools graph the size #1984 cut it down to.
+   *
+   * @param worktreeId - Worktree ID
+   * @param worktreePath - Worktree path
+   * @param instanceId - Agent instance ID (defaults to the primary instance)
+   * @param model - Model to launch with; only antigravity honours it (#989)
+   * @throws Whatever {@link launchSession} threw — unchanged, after reporting
+   */
+  async startSession(
+    worktreeId: string,
+    worktreePath: string,
+    instanceId?: string,
+    model?: string
+  ): Promise<void> {
+    try {
+      await this.launchSession(worktreeId, worktreePath, instanceId, model);
+    } catch (error: unknown) {
+      void import('../push/failure-push-notifier')
+        .then(({ notifySessionStartFailurePush }) =>
+          notifySessionStartFailurePush({
+            worktreeId,
+            cliToolId: this.id,
+            instanceId,
+            toolName: this.name,
+            error,
+          })
+        )
+        .catch(() => {});
+      throw error;
+    }
+  }
 
   /** Repair geometry when reusing a tmux session that predates the current defaults. */
   protected async reconcileExistingSession(

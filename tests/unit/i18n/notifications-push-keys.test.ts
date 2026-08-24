@@ -41,6 +41,12 @@ const PUSH_KEYS = [
   'failureUpstream',
   'failureSessionStartWithExcerpt',
   'failureSessionStart',
+  // Issue #2009: a start that could not be attempted at all — the CLI is not
+  // installed. Its own pair, because the remedy differs from a CLI that started
+  // and then printed an error, and only the dictionary can say "is not
+  // installed" in the reader's language (the excerpt is just the tool name).
+  'failureSessionUnavailableWithExcerpt',
+  'failureSessionUnavailable',
   'failureWithExcerpt',
   'failure',
   // Issue #2001: the body of the card that *replaces* a resolved wait's
@@ -57,6 +63,8 @@ const EXCERPT_KEYS = [
   'failureVerificationWithExcerpt',
   'failureUpstreamWithExcerpt',
   'failureSessionStartWithExcerpt',
+  // Issue #2009
+  'failureSessionUnavailableWithExcerpt',
   'failureWithExcerpt',
 ] as const;
 
