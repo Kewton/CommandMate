@@ -1,0 +1,84 @@
+version: 1
+title: "Issue #2014: EXCLUDED_PATTERNS はツリー除外だけで files ルートのパス直指定は .env を生で返す"
+goal: |
+    https://github.com/Kewton/CommandMate/issues/2014 を実装してください。**セキュリティ修正です。**
+
+    実測（#1968 の実装中に確認、develop）:
+
+        GET /api/worktrees/<id>/files/.env  →  200 / {"content":"SECRET=probe-value\n", ...}
+
+    `EXCLUDED_PATTERNS`（`src/lib/file-tree.ts`）は**ツリー一覧の除外**であって、
+    `src/app/api/worktrees/[id]/files/[...path]/route.ts` の GET は `isExcludedPattern()` を見ていません。
+    **まずこれを自分で再現してください**（使い捨ての integration テストで可。コミットには含めない）。
+
+    ## 決めるべきこと（本文の「決めるべきこと」3 点。設計判断が要ります）
+
+    1. **単に 403 にすると `EXCLUDED_PATTERNS` の他パターン（`node_modules` 等）の読み取りまで一括で変わります。**
+       現在何が入っているかを**実測して列挙し**、パターンごとに「一覧から隠す」と「読ませない」を
+       分けるべきかを判断してください。判断の根拠を docblock かテスト名に残すこと。
+    2. **既存利用者を壊さないこと。** このルートを叩いている画面・経路を洗い、除外パターンに当たる
+       ファイルを実際に開いている UI が無いことを確認してください（あるなら壊さない形を選ぶ）。
+    3. PUT / DELETE 側にも同じ穴が開いていないか確認してください。
+
+    ## 壊してはいけないもの
+
+    - **#1968 の Env Manager**（`src/lib/env-manager/**` / `src/app/api/worktrees/[id]/env/`）は
+      専用 allowlist と 3 層のパス検証を通る**別経路**です。壊さないでください（scope にも入れていません）。
+    - `EXCLUDED_PATTERNS` に載っていないファイルの読み取りが**現状から変わらない**ことをテストで固定。
+
+    変異注入は最低 2 つ: (a) 追加したガードを外すと `.env` が読めてしまうテストが赤 /
+    (b) 許可すべきファイルを誤って塞ぐ変異で、通常ファイルの読み取りテストが赤
+
+    ## 作業ルール（厳守）
+
+    - **フル `npm run test:unit` を手で回さないでください。** 他に 3 本のワーカーが並列で動いており、
+      同時フル実行は 30s サブプロセスガードを飢餓で落とします（#1985 がまさにその Issue）。
+      開発中は対象テストだけ絞って実行し、フル実行は裁定側のゲート（`mutex: cpu.heavy` で直列化）に任せてください。
+    - **Issue 本文の主張はコードで裏取りし、食い違えば実測を正とし**、commit message の
+      「下調べとの食い違い」節に書いてください。**grep の 0 件は「存在しない」の証拠になりません** —
+      陽性対照を撃ってから 0 件を信じてください。
+    - **実 tmux を触る検証は必ず `tmux -L <専用socket>` で。** `-L` は `$TMUX` より優先されます。
+      あなたは tmux ペインの中で動いていて `$TMUX` が既定サーバを指しているため、フラグ無しの
+      `tmux` はユーザーの本番サーバに届きます。`kill-server` を `-L` 無しで書かない。
+      `TMUX_TMPDIR` を隔離手段に使わない。`bind-key` / `set-option -g` を既定サーバへ撃たない。
+    - **ポート 3000 は本番サーバです。触らないでください。** 開発サーバが要るなら別ポート＋
+      `CM_DB_PATH` を `$HOME` 配下の使い捨てに。このシェルは `NODE_ENV=production` を export
+      しているので `NODE_ENV=development` を明示すること。停止は明示 PID を kill（広域 `pkill -f` 禁止）。
+    - **`CHANGELOG.md` と `docs/module-reference.md` を編集しないでください**（scope 外）。代わりに:
+      - `dev-reports/changelog/issue-2014.md` — 1 行目に `<!-- ### Added -->` 等の節コメント、
+        2 行目に **1 エントリ 1 行**で `- **<type>(<scope>): <要約>** (#2014): <本文>`。
+        `(#2014)` は太字の**外側**、改行なし、`- **` で始める。
+      - `dev-reports/module-reference/issue-2014.md` — 行キーごとの追記指示。既存行に足すときは
+        **`grep -n "^| \`<path>\`" docs/module-reference.md` の出力（行番号つきの行キー）を断片に
+        書き写してから**書くこと。0 件だった行への追記を指示しない（新規行なら「新規行」と明記）。
+    - **変異注入で空振り緑を反証してください。** 各変異を 1 つずつ入れて対象テストのみ実行し、
+      元に戻して再確認。結果を commit message に表で。
+    - commit は単一。**PR は作らないでください**（私が作ります）。
+    - commit message に「意図的な逸脱」「下調べとの食い違い」「変異注入」の節を必ず入れてください。
+    - 完了したら最後に `IMPL_COMPLETED` とだけ出力してください。
+scope:
+  allow:
+    - "src/app/api/worktrees/**"
+    - "src/lib/file-tree.ts"
+    - "src/lib/security/**"
+    - "src/config/**"
+    - "src/types/**"
+    - "tests/unit/**"
+    - "tests/integration/**"
+    - "dev-reports/changelog/**"
+    - "dev-reports/module-reference/**"
+    - "docs/**"
+  deny:
+    - "src/lib/env-manager/**"
+    - "src/app/api/worktrees/[id]/env/route.ts"
+    - "src/lib/session/current-output-builder.ts"
+    - "src/cli/commands/wait.ts"
+verify:
+  gates: [token-discipline, control-chars, claudemd-size, route-exports, build-cli, build-server, lint, build, typecheck, integration, unit]
+autoYes:
+  mode: allow-listed
+  allowPromptTypes: [yes_no, multiple_choice]
+  denyPatterns: []
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true
