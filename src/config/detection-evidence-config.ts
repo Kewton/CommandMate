@@ -5,9 +5,17 @@
  * §4 D1 forbids declaring a turn finished on the absence of a busy marker. The
  * fix has to land **one tool at a time**: a tool whose idle rule is not yet
  * measured must keep the pre-#1927 reading, because flipping it early publishes
- * `evidence: 'none'` for ordinary idle frames — `TerminalEscapeHatch` opens
- * permanently and `wait`'s completion rule (`ready && !isUnclassifiedActive`)
- * stops holding for a session that is genuinely done (DR2-002).
+ * `evidence: 'none'` for ordinary idle frames (DR2-002).
+ *
+ * Issue #2011 is the incident this warning predicted, and it also narrowed what
+ * an early flip actually costs. `TerminalEscapeHatch` and `wait`'s completion
+ * rule are gated on `isUnclassifiedActive`, which #1927 had derived from
+ * `evidence` — so an early flip took both of them out. #2011 gave the flag its
+ * own expression again (`isUnclassifiedFrame`, in `status-evidence.ts`), so a
+ * premature `enforce` now degrades only what `statusEvidence` itself feeds:
+ * §7's "last confirmed status" row and the `unclassified_frames` tally that
+ * measures the rollout. That is a smaller blast radius, not a licence to skip
+ * the `observe` step below.
  *
  * That makes three things necessary, and all three live here:
  *
@@ -41,15 +49,27 @@ export const IDLE_EVIDENCE_MODES: readonly IdleEvidenceMode[] = ['enforce', 'obs
 /**
  * The rollout state each tool ships in.
  *
- * `enforce` is set only for the three tools that have a rule measured from
- * their own live frames at production pane geometry, with a positive fixture
- * and a mutation fixture each:
+ * `enforce` is set only for a tool whose rule was measured from its own live
+ * frames at production pane geometry, with a positive fixture and a mutation
+ * fixture each, AND whose `observe` run has shown that enforcing it does not
+ * move the `unclassified_frames` rate (§11's live row):
  *
  * | tool     | rule                                                        | Issue |
  * |----------|-------------------------------------------------------------|-------|
  * | claude   | turn-completion marker `✻ <Verb> for <N>s` at the transcript tail, or the startup banner with no user turn under it | #1927 |
  * | copilot  | the pane's bottom status bar reads idle (`readCopilotStatusBar`) | #1885 |
  * | opencode | the gutter-anchored idle composer, or `▣ … · <duration>`     | #1883 / #1893 |
+ *
+ * **claude is `observe`, not `enforce` (Issue #2011).** It shipped straight to
+ * `enforce` in #1927 without the measurement above, and the live rate was
+ * measured afterwards instead: on 2026-08-24, 7 of 8 idle Claude panes answered
+ * `'none'`. The rule is not wrong about those frames — a `/model` result row, a
+ * `⎿ Tip:` row, `✔ Update installed` and `new task? /clear to save …` really do
+ * carry no completion marker — it is simply not yet complete enough to be the
+ * authority, because a legitimately idle Claude pane has no marker at all after
+ * `/model`, after `/clear`, at startup, or after an Esc interrupt. Building the
+ * rule that covers those is deliberately a separate Issue; what `observe` buys
+ * meanwhile is the tally that says when it is done.
  *
  * The rest are `legacy` because no rule has been read off their frames yet, and
  * D1 決定 1 says in as many words that a tool without a rule must not be
@@ -59,7 +79,7 @@ export const IDLE_EVIDENCE_MODES: readonly IdleEvidenceMode[] = ['enforce', 'obs
  * hiding it in an omission.
  */
 export const IDLE_EVIDENCE_DEFAULT_MODE: Readonly<Record<CLIToolType, IdleEvidenceMode>> = {
-  claude: 'enforce',
+  claude: 'observe',
   copilot: 'enforce',
   opencode: 'enforce',
   codex: 'legacy',

@@ -82,6 +82,7 @@ import {
 import {
   forgetLastKnownStatus,
   getLastKnownStatus,
+  isUnclassifiedFrame,
   observeStatusEvidence,
   type StatusEvidence,
 } from '@/lib/session/status-evidence';
@@ -727,23 +728,25 @@ export interface ScraperVerdict {
   /**
    * Whether `status` was positively confirmed (Issue #1924).
    *
-   * Landed as a type in Phase 1 with the producer unchanged, so today it is
-   * exactly the negation of {@link ScraperVerdict.isUnclassifiedActive} — the
-   * two `reason`s that mean "the frame said nothing" are the two that already
-   * open the hatch. Phase 3 (§8) moves the producer tool by tool: an
-   * `input_prompt` frame that no tool-specific idle-composer rule vouches for
-   * becomes `'none'` here, and `isUnclassifiedActive` widens with it because it
-   * is derived from this field rather than computed beside it.
+   * Produced by the detector since #1927 (§8 Phase 3): an `input_prompt` frame
+   * that no tool-specific idle-composer rule vouches for is `'none'` here, with
+   * the same status and reason on the wire as one that was vouched for.
+   *
+   * NOT the negation of {@link ScraperVerdict.isUnclassifiedActive}, though it
+   * was when both were introduced. Issue #2011 separated them after the rollout
+   * made the two sets diverge — see `status-evidence.ts` for the two questions
+   * and which consumer asks which.
    */
   evidence: StatusEvidence;
   /**
    * The frame is interactive but could not be classified (#1497 / #1708).
    *
-   * Since Issue #1924 this is `evidence === 'none'`, kept as its own field
-   * because it is a published CLI contract (`capture --json`, and `wait`'s
-   * `ready && !isUnclassifiedActive` completion rule). It is derived at every
-   * site that produces a verdict, never computed independently — two
-   * expressions for one fact is how §4 D1 decision 2 says this drifts.
+   * `isUnclassifiedFrame(status, reason)` — the reason vocabulary, not the
+   * evidence. A published CLI contract (`capture --json`, and `wait`'s
+   * `ready && !isUnclassifiedActive` completion rule), so it is derived from the
+   * one expression in `status-evidence.ts` at the single site that produces a
+   * verdict and carried through everywhere else — two expressions for one fact
+   * is how §4 D1 decision 2 says this drifts, and #2011 is what it cost.
    */
   isUnclassifiedActive: boolean;
 }
@@ -807,31 +810,38 @@ function summarizeAskUserQuestion(
  * those, passed in explicitly; the raw `structured.status === 'waiting'` still
  * decides nothing on its own.
  *
- * ## The one flag this touches beyond `sessionStatus`
+ * ## `isUnclassifiedActive` is not this function's to move (Issue #2011)
  *
- * `isUnclassifiedActive` is cleared only for the `Stop`-arrived-but-the-pane-
- * still-looks-busy case (structured `ready` over scraper `running`). That case
- * is the entire point of the Issue for `commandmate wait`, whose completion
- * check is `sessionStatus === 'ready' && isUnclassifiedActive !== true` — leave
- * the flag up and the structured `ready` buys nothing.
- *
- * Everywhere else the flag is left exactly as the scraper set it, which is not
- * timidity but two specific behaviours that must survive:
+ * The flag is carried through from the scraper on every path. It answers "could
+ * the detection layer read this frame?", and no amount of knowledge about the
+ * TURN changes the answer for the FRAME:
  *
  *  - a static overlay left on screen after a turn (`/help`, #1497) reads as
- *    `ready`/`no_recent_output` while the structured layer also says `ready` —
- *    the two agree, the structured layer adds nothing, and clearing the flag
- *    would take away the navigation hatch the user needs to escape;
+ *    `running`/`no_recent_output` while the structured layer says `ready` — the
+ *    structured layer adds nothing about the screen, and clearing the flag would
+ *    take away the navigation hatch the user needs to escape;
  *  - a frame nobody can classify while the structured layer says `running` is
  *    still a frame nobody can classify. `wait`'s unclassified dwell (exit 10)
  *    is the last hatch for a screen that produces no events at all, and #1708
  *    exists because it was missing. A structured `running` does not prove a
  *    human is not needed — see the AskUserQuestion case above.
+ *
+ * `#1723`'s reported case — `Stop` arrives while the spinner is still painted —
+ * needs no help from here: that frame reads `running`/`thinking_indicator`, which
+ * is classified, so the flag was already down and `wait` completes on the
+ * structured `ready` alone.
+ *
+ * What this function DOES move is `evidence`, and only upwards: see
+ * {@link hookClosedTurn}.
+ *
+ * @param turn - The published turn record for this instance, or null. Read only
+ *   for {@link hookClosedTurn}; `structured` remains the status authority.
  */
 export function mergeStructuredStatus(
   scraper: ScraperVerdict,
   structured: StructuredSessionState | null,
   promptWaiting: StructuredPromptWaitingState | null = null,
+  turn: PublishedTurn | null = null,
 ): MergedStatusVerdict {
   if (scraper.status === 'waiting') {
     return { ...scraper, structuredApplied: false };
@@ -861,39 +871,65 @@ export function mergeStructuredStatus(
   }
 
   const thinking = structured.status === 'running';
-  // Issue #1927 (DR2-003): the override that used to raise `evidence` here is
-  // now gated on the scraper having something positive to say.
+  // Issue #2011 (対応 2): the agent's own turn close IS positive evidence.
   //
-  // #1924 wrote it as "a structured `ready` over a scraper `running` IS the
-  // positive completion evidence §4 D1 asks for". That reading was safe only
-  // while `running` meant "the pane looks busy": the two frames that carry no
-  // evidence at all published `ready`/`no_recent_output` and `running`/`default`,
-  // and only the second could reach this branch. Issue #1927 moves
-  // `no_recent_output` to `running` (§4 D1 決定 3), so from now on BOTH
-  // no-evidence frames land here — and the branch would clear
-  // `isUnclassifiedActive` at exactly the moment worth protecting: the frame
-  // cannot be read and the agent's events say it is done. That is #1708's stall
-  // with the hatch nailed shut, and no scraper-level fixture can see it,
-  // which is why the guard for it is pinned on the MERGED verdict
-  // (`tests/unit/session/current-output-unclassified-1927.test.ts`).
+  // #1927 (DR2-003) guarded this override with `scraper.evidence === 'positive'`
+  // to stop a structured `ready` clearing `isUnclassifiedActive` on a frame
+  // nobody could read. It over-corrected twice over. First, the conjunct made
+  // the whole expression a no-op: `evidence = cond ? 'positive' : scraper.evidence`
+  // where `cond` requires `scraper.evidence === 'positive'` returns
+  // `scraper.evidence` on both arms, so the branch could not change a value in
+  // any direction. Second, the fix it was reaching for belonged one field over —
+  // the hatch is held open by {@link ScraperVerdict.isUnclassifiedActive}, which
+  // is carried through below rather than re-derived, so the evidence no longer
+  // has to be understated to protect it.
   //
-  // What survives is the case #1723 actually reported: `Stop` arrived while the
-  // spinner is still on screen. That frame reads `running`/`thinking_indicator`
-  // — POSITIVE evidence — so the hatch is already down and `wait` still
-  // completes on it. Only a frame nobody could classify keeps the flag up.
-  const scraperVouched = scraper.evidence === 'positive';
+  // What that leaves is a payload that stopped contradicting itself. A pane
+  // whose `reason` reads `hook_stop` while `statusEvidence` reads `'none'` is
+  // denying, in one field, the strongest positive signal this server can get: a
+  // `Stop` from the agent, for a turn this server watched open. `closedAt >
+  // openedAt` is what narrows it to that case — a `Stop` that arrived with no
+  // turn open publishes `openedAt: null` (see `recordAgentEvent`), and a close
+  // the SCREEN inferred carries one of the other {@link TurnCloseReason} values.
+  // Freshness needs no bound of its own: `getStructuredSessionState` answered
+  // null above once the display event passed STRUCTURED_STATE_MAX_AGE_MS.
+  //
+  // `scraper.status === 'running'` is deliberately NOT required. The session this
+  // Issue was reported from sat at `ready`/`input_prompt` with `closedBy: 'stop'`
+  // — the agent had said it was done and the frame agreed — and the old conjunct
+  // is what kept publishing `'none'` for it.
   const evidence: StatusEvidence =
-    structured.status === 'ready' && scraper.status === 'running' && scraperVouched
-      ? 'positive'
-      : scraper.evidence;
+    structured.status === 'ready' && hookClosedTurn(turn) ? 'positive' : scraper.evidence;
   return {
     status: structured.status,
     reason: structured.reason,
     thinking,
     evidence,
-    isUnclassifiedActive: evidence === 'none',
+    // Issue #2011: what the structured layer knows about the TURN says nothing
+    // about whether this FRAME could be read. #1708's dwell and the nav hatch
+    // are the last way out of a pane nothing can drive, and a `Stop` does not
+    // make an unreadable pane readable — see the `/help` overlay fixture in
+    // `tests/unit/lib/detection/fixtures/claude-live-2011/`.
+    isUnclassifiedActive: scraper.isUnclassifiedActive,
     structuredApplied: true,
   };
+}
+
+/**
+ * Whether the agent's own `Stop` closed a turn this server watched open
+ * (Issue #2011, 対応 2).
+ *
+ * Both halves are required. `closedBy: 'stop'` rules out the five close reasons
+ * that are the server's inference rather than the agent's word (`stale`,
+ * `generation`, `session_end`, `scraper_evidence`, `resync_idle`), and
+ * `closedAt > openedAt` rules out a `Stop` whose turn was never observed
+ * opening — `recordAgentEvent` publishes `openedAt: null` for that, and a close
+ * with nothing behind it is not a completion anybody watched.
+ */
+function hookClosedTurn(turn: PublishedTurn | null): boolean {
+  if (turn === null) return false;
+  const { closedBy, closedAt, openedAt } = turn;
+  return closedBy === 'stop' && closedAt !== null && openedAt !== null && closedAt > openedAt;
 }
 
 /**
@@ -1096,24 +1132,29 @@ async function buildPayload(
   const isPagerActive = statusResult.reason === STATUS_REASON.CODEX_PAGER;
   // Issue #1497: the detection-independent nav hatch (#1017/#1494) is gated on
   // isUnclassifiedActive. A static, unrecognized TUI overlay (e.g. Claude `/help`)
-  // whose frame stops changing degrades from `running`/`default` to `ready`/
+  // whose frame stops changing degrades from `running`/`default` to
   // `no_recent_output` once the Auto-Yes poller has stamped lastOutputTimestamp
   // (its sole writer, auto-yes-poller.ts). That is still an interactive-but-
   // unclassified frame — a real idle prompt (`❯`) is classified earlier as
   // `input_prompt`, never as `no_recent_output` — so treat the timed-out fallback
   // as unclassified too and keep the hatch open instead of stranding the user.
-  // Issue #1924, §4 D1 decision 2: stated as evidence, with the published flag
-  // derived from it.
-  //
-  // Issue #1927 moved the PRODUCER into the detector. `deriveScraperEvidence`
-  // reconstructed the reading downstream from `(status, reason)`, which holds
-  // only while a reason code means the same thing for every tool — and §4 D1's
-  // tool-by-tool rollout ends that: `input_prompt` is positive for a tool whose
-  // idle rule vouched for the frame and `'none'` for one whose rule declined,
-  // with the same status and the same reason on the wire. Only the detector
-  // knows which happened, so it is what says so now.
+  // Issue #1924, §4 D1 decision 2: stated as evidence. Issue #1927 moved that
+  // PRODUCER into the detector, because only the detector knows which rule
+  // answered — `input_prompt` is positive for a tool whose idle rule vouched for
+  // the frame and `'none'` for one whose rule declined, with the same status and
+  // the same reason on the wire.
   const evidence: StatusEvidence = statusResult.evidence;
-  const isUnclassifiedActive = evidence === 'none';
+  // Issue #2011: the flag is NOT that fact, and deriving it from `evidence` is
+  // the regression this Issue fixes. `'none'` is "I could not prove this pane is
+  // idle" — an ordinary Claude composer with no completion marker above it
+  // qualifies, and 7 of 8 live idle panes did on 2026-08-24. The flag's three
+  // consumers all ask the older, narrower question instead: `TerminalEscapeHatch`
+  // opens on a frame a human has to drive by hand, `wait` suppresses its
+  // completion check and eventually exits 10 on one, and `unclassified_frames`
+  // records it as a detection failure worth capturing as a fixture. That is
+  // `isUnclassifiedFrame` — the reason vocabulary, not the strength of the
+  // evidence behind a readable verdict.
+  const isUnclassifiedActive = isUnclassifiedFrame(statusResult.status, statusResult.reason);
 
   // Issue #1723: the two-layer merge. Everything above this line is the string
   // analysis, unchanged and still the only source on a machine where no hook
@@ -1171,6 +1212,12 @@ async function buildPayload(
     },
     structured,
     promptWaiting,
+    // Issue #2011: the same record `structuredEvents` publishes, read once. The
+    // merge needs `closedBy` / `closedAt` / `openedAt`, which
+    // `StructuredSessionState` folds away into `hook_stop` — and the folded form
+    // cannot tell a `Stop` that closed a watched turn from one that arrived with
+    // no turn open.
+    structuredEvents,
   );
 
   // The OR rule, computed once for the whole server (Issue #1737): this is the
