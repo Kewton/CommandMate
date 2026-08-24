@@ -49,8 +49,8 @@ import {
 } from '@/lib/session/agent-event-state';
 import {
   clearLastKnownStatuses,
-  deriveScraperEvidence,
   forgetLastKnownStatus,
+  isUnclassifiedFrame,
   getLastKnownStatus,
   LAST_KNOWN_STATUS_TTL_MS,
   MAX_LATCHES,
@@ -273,43 +273,58 @@ describe('[#1926] lastKnownStatus — the latch behind §7', () => {
   });
 });
 
-describe('[#1926] deriveScraperEvidence, superseded by the detector (#1927)', () => {
+describe('[#2011] isUnclassifiedFrame — the flag, restated as its own expression', () => {
   /**
-   * The rows §6.1 calls "the absence of a negative", and one row of each of the
-   * kinds that are NOT.
+   * The three reasons that mean "no rule could read this frame", and one row of
+   * each kind that is NOT.
    *
-   * Issue #1927 is the Phase 3 move this table was written to make visible, and
-   * it turned out to be a move OF THE PRODUCER rather than of a row: the
-   * `(status, reason) -> evidence` mapping stops being expressible once
-   * `input_prompt` is positive for a tool whose idle rule vouched and `'none'`
-   * for one whose rule declined, with the same status and reason on the wire.
-   * So `StatusDetectionResult.evidence` is the producer now, and neither
-   * `current-output-builder` nor `worktree-status-helper` calls this function
-   * any more.
+   * The table this replaces derived {@link StatusEvidence} from `(status,
+   * reason)`. Issue #1927 moved that producer into the detector and left the
+   * function behind with no production caller, and #1928 recorded the drift it
+   * had already accumulated (`running`/`no_recent_output` answered `'positive'`
+   * there while the detector emitted `'none'`). #2011 removed it and put THIS
+   * question in its place, because this is the one a downstream expression can
+   * still answer correctly: `isUnclassifiedActive` is a statement about the
+   * reason vocabulary, which is shared across tools, and not about the strength
+   * of the evidence, which the §4 D1 rollout makes tool-specific.
    *
-   * The table is kept because the function is still exported and still correct
-   * for the shapes it can express — but note the last row: `running` /
-   * `no_recent_output` is what the detector emits since #1927, and this
-   * function answers `'positive'` for it. That is the drift a second expression
-   * produces, pinned here rather than left to be discovered. Removing the
-   * function is `status-evidence.ts`'s to do, one Issue's scope away.
+   * The row that matters most is the last pair: `ready`/`input_prompt` is FALSE
+   * whatever the evidence turned out to be. Deriving the flag from `evidence`
+   * instead is what closed `wait` on every idle Claude pane (#2011).
    */
-  const ROWS: Array<[Parameters<typeof deriveScraperEvidence>[0], string, 'positive' | 'none']> = [
-    ['running', STATUS_REASON.DEFAULT, 'none'],
-    ['ready', STATUS_REASON.NO_RECENT_OUTPUT, 'none'],
-    ['ready', STATUS_REASON.INPUT_PROMPT, 'positive'],
-    ['running', STATUS_REASON.THINKING_INDICATOR, 'positive'],
-    ['waiting', STATUS_REASON.PROMPT_DETECTED, 'positive'],
-    ['idle', 'session_not_running', 'positive'],
+  const ROWS: Array<[Parameters<typeof isUnclassifiedFrame>[0], string, boolean]> = [
+    ['running', STATUS_REASON.DEFAULT, true],
+    ['running', STATUS_REASON.UNKNOWN_FRAME, true],
+    ['running', STATUS_REASON.NO_RECENT_OUTPUT, true],
+    ['ready', STATUS_REASON.INPUT_PROMPT, false],
+    ['running', STATUS_REASON.THINKING_INDICATOR, false],
+    ['waiting', STATUS_REASON.PROMPT_DETECTED, false],
+    ['idle', 'session_not_running', false],
     // The status matters as much as the reason: `default` on anything but
-    // `running` is not the fallback row, and a derivation that keyed on the
-    // reason alone would be wrong here.
-    ['ready', STATUS_REASON.DEFAULT, 'positive'],
-    ['running', STATUS_REASON.NO_RECENT_OUTPUT, 'positive'],
+    // `running` is not the floor, and a derivation that keyed on the reason
+    // alone would be wrong here. Since #1927 no producer emits either shape, so
+    // these two are a guard against a future one rather than live rows.
+    ['ready', STATUS_REASON.DEFAULT, false],
+    ['ready', STATUS_REASON.NO_RECENT_OUTPUT, false],
   ];
 
   it.each(ROWS)('%s / %s -> %s', (status, reason, expected) => {
-    expect(deriveScraperEvidence(status, reason)).toBe(expected);
+    expect(isUnclassifiedFrame(status, reason)).toBe(expected);
+  });
+
+  it('covers every reason the detection chain can floor on', () => {
+    // The set is defined in `status-evidence.ts` and the chain that produces it
+    // is in `tools/run-detection.ts`. A new floor added there without a row here
+    // would publish a frame nobody can read with the hatch shut, which is the
+    // #1708 stall this flag exists to prevent — so the two are pinned equal.
+    const floorReasons = [
+      STATUS_REASON.NO_RECENT_OUTPUT,
+      STATUS_REASON.UNKNOWN_FRAME,
+      STATUS_REASON.DEFAULT,
+    ];
+    for (const reason of floorReasons) {
+      expect(isUnclassifiedFrame('running', reason), reason).toBe(true);
+    }
   });
 });
 

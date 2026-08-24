@@ -9,10 +9,13 @@
  * alone would have left those four rows unimplementable, which is why the design
  * calls this a second contract change rather than a detail of the first.
  *
- * The table below is written out rather than derived from
- * `deriveScraperEvidence`: this suite's job is to catch a re-inlined copy of the
- * expression in `worktree-status-helper`, and a table that called the shared
- * function would agree with any copy that had drifted the same way.
+ * The table below is written out literally: this suite's job is to catch a
+ * re-inlined `(status, reason) -> evidence` derivation in
+ * `worktree-status-helper`, and a table that computed its own expectations from
+ * one would agree with any copy that had drifted the same way. Since Issue #1927
+ * there is no shared derivation left to call — the detector is the producer —
+ * and the table carries two `ready`/`input_prompt` rows with different evidence
+ * to pin that the helper cannot be re-deriving anything.
  *
  * @vitest-environment node
  */
@@ -74,7 +77,6 @@ import { detectSessionStatus, STATUS_REASON } from '@/lib/detection/status-detec
 import { captureSessionOutput } from '@/lib/session/cli-session';
 import {
   clearLastKnownStatuses,
-  deriveScraperEvidence,
   type StatusEvidence,
 } from '@/lib/session/status-evidence';
 
@@ -90,7 +92,12 @@ function mockDetectedStatus(
   // well. The table below stopped being "the helper re-derives this from
   // (status, reason)" and became "the helper publishes what the detector said",
   // which is the point of moving the producer — see `status-detector.ts`.
-  evidence: StatusEvidence = deriveScraperEvidence(status, reason),
+  //
+  // Issue #2011 made the default a literal rather than a call into
+  // `status-evidence.ts`: the downstream re-derivation is gone, and a test
+  // double that reached for one would be reintroducing the second expression
+  // §4 D1 決定 2 forbids. Every caller that needs `'none'` now says so.
+  evidence: StatusEvidence = 'positive',
 ): void {
   vi.mocked(detectSessionStatus).mockReturnValue({
     status,
@@ -125,14 +132,22 @@ describe('[#1926] sessionStatusByCli carries the reason and the evidence', () =>
   /** status, reason, expected evidence — see the header for why it is literal. */
   const ROWS: ReadonlyArray<[SessionStatus, string, 'positive' | 'none']> = [
     ['running', STATUS_REASON.DEFAULT, 'none'],
-    ['ready', STATUS_REASON.NO_RECENT_OUTPUT, 'none'],
+    // Issue #1927 §4 D1 決定 3 moved this row off `ready`; Issue #2011 corrects
+    // the table, which had kept the pre-#1927 status next to the post-#1927
+    // producer.
+    ['running', STATUS_REASON.NO_RECENT_OUTPUT, 'none'],
     ['ready', STATUS_REASON.INPUT_PROMPT, 'positive'],
+    // The row the rollout adds: a composer frame whose tool-specific idle rule
+    // declined. Same status and same reason as the row above it, different
+    // evidence — which is exactly why the helper must publish rather than
+    // re-derive.
+    ['ready', STATUS_REASON.INPUT_PROMPT, 'none'],
     ['running', STATUS_REASON.THINKING_INDICATOR, 'positive'],
     ['waiting', STATUS_REASON.PROMPT_DETECTED, 'positive'],
   ];
 
   it.each(ROWS)('%s / %s publishes evidence %s', async (status, reason, evidence) => {
-    mockDetectedStatus(status, reason);
+    mockDetectedStatus(status, reason, evidence);
 
     const result = await detect();
 
@@ -198,7 +213,7 @@ describe('[#1926] lastKnownStatus on sessionStatusByCli', () => {
     mockDetectedStatus('waiting', STATUS_REASON.PROMPT_DETECTED);
     await detect();
 
-    mockDetectedStatus('running', STATUS_REASON.DEFAULT);
+    mockDetectedStatus('running', STATUS_REASON.DEFAULT, 'none');
     const blind = await detect();
 
     expect(blind.sessionStatusByCli.claude).toMatchObject({
@@ -209,7 +224,7 @@ describe('[#1926] lastKnownStatus on sessionStatusByCli', () => {
   });
 
   it('is absent until something has been confirmed', async () => {
-    mockDetectedStatus('running', STATUS_REASON.DEFAULT);
+    mockDetectedStatus('running', STATUS_REASON.DEFAULT, 'none');
 
     const result = await detect();
 
@@ -225,7 +240,7 @@ describe('[#1926] lastKnownStatus on sessionStatusByCli', () => {
 
     // And the next session on the same key starts with no history rather than
     // inheriting the dead one's verdict.
-    mockDetectedStatus('running', STATUS_REASON.DEFAULT);
+    mockDetectedStatus('running', STATUS_REASON.DEFAULT, 'none');
     const restarted = await detect();
     expect(restarted.sessionStatusByCli.claude).not.toHaveProperty('lastKnownStatus');
   });

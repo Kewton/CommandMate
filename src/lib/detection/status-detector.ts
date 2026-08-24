@@ -92,14 +92,18 @@ export interface StatusDetectionResult {
    * This is the field the whole D1 rework turns on, and it lives HERE rather
    * than beside the consumers because only the detector knows which rule
    * produced the verdict. Before #1927 the reading was reconstructed downstream
-   * from `(status, reason)` by `deriveScraperEvidence`, which worked only while
-   * "reason X always means evidence Y" held — it stops holding the moment
-   * `input_prompt` becomes positive for one tool and not for another, which is
-   * exactly what the §4 D1 tool-by-tool rollout does.
+   * from `(status, reason)`, which worked only while "reason X always means
+   * evidence Y" held — it stops holding the moment `input_prompt` becomes
+   * positive for one tool and not for another, which is exactly what the §4 D1
+   * tool-by-tool rollout does. Issue #2011 deleted that downstream expression
+   * rather than leaving it exported with no caller.
    *
    * `current-output-builder` and `worktree-status-helper` publish it as
-   * `statusEvidence`, and both derive `isUnclassifiedActive` from
-   * `evidence === 'none'`.
+   * `statusEvidence`. What neither derives from it is `isUnclassifiedActive`:
+   * that is `isUnclassifiedFrame(status, reason)` in
+   * `src/lib/session/status-evidence.ts`, and deriving it from this field
+   * instead is what #2011 had to undo — see that module for the two questions
+   * and which consumer asks which.
    */
   evidence: StatusEvidence;
 }

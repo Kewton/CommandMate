@@ -13,14 +13,20 @@
  * @vitest-environment node
  */
 
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect } from 'vitest';
 import { detectSessionStatus } from '@/lib/detection/status-detector';
+import { IDLE_EVIDENCE_ENV_VAR } from '@/config/detection-evidence-config';
+import { isUnclassifiedFrame } from '@/lib/session/status-evidence';
 import { buildClaudeHelpOverlayFrame } from '../fixtures/claude-help-overlay';
 
 const HELP_FRAME = buildClaudeHelpOverlayFrame();
 // Stamped by the Auto-Yes poller (auto-yes-poller.ts); older than the 5s
 // STALE_OUTPUT_THRESHOLD_MS so the time-based heuristic fires.
 const STALE_TS = new Date(Date.now() - 60_000);
+
+afterEach(() => {
+  delete process.env[IDLE_EVIDENCE_ENV_VAR];
+});
 
 describe('Issue #1497: real /help overlay classification (detectSessionStatus)', () => {
   it('with no lastOutputTimestamp: running/default (unclassified — hatch gate open)', () => {
@@ -57,6 +63,7 @@ describe('Issue #1497: real /help overlay classification (detectSessionStatus)',
     // so widening isUnclassifiedActive to no_recent_output cannot leak the hatch
     // to a real idle prompt.
     const idleFrame = 'Some earlier output\n────────────\n❯\n';
+    process.env[IDLE_EVIDENCE_ENV_VAR] = 'claude=enforce';
     const st = detectSessionStatus(idleFrame, 'claude', STALE_TS);
     expect(st.status).toBe('ready');
     expect(st.reason).toBe('input_prompt');
@@ -64,7 +71,12 @@ describe('Issue #1497: real /help overlay classification (detectSessionStatus)',
     // (DR3-002 keeps `input_prompt` at `ready`). What did change is the second
     // reading of it: this synthetic frame carries neither of Claude's measured
     // idle proofs — no `✻ <Verb> for <N>s` completion marker, no startup banner
-    // — so the composer row alone no longer counts as evidence.
+    // — so under `enforce` the composer row alone does not count as evidence.
+    // Asked for explicitly because #2011 put claude back to `observe`.
     expect(st.evidence).toBe('none');
+    // Issue #2011: and the hatch STILL stays shut, which is the whole of #1497's
+    // non-regression. The frame was classified; what is missing is proof that
+    // the pane is idle, and those are two different questions.
+    expect(isUnclassifiedFrame(st.status, st.reason)).toBe(false);
   });
 });

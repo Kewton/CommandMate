@@ -1,0 +1,104 @@
+version: 1
+title: "Issue #2011: isUnclassifiedActive の意味の混線を戻す（脱出ハッチ常時表示・wait が完了しない）"
+goal: |
+  https://github.com/Kewton/CommandMate/issues/2011 を実装してください。
+  **これは #1927 / PR #1987（`abfd6332`）が入れた回帰で、develop に載っています。最優先です。**
+
+  ## なぜ最優先か
+
+  同じ旗を `commandmate wait` が読んでいるため、**アイドルなセッションで `wait` が完了しません**
+  （exit 124 / 偽の exit 10）。`/orchestrate` の裁定ループは `wait --verify` に全面依存しているので、
+  **並列開発の委任機構そのものが壊れています。** つまりこの Issue は、あなた自身を含む
+  今後のワーカーの裁定基盤を直す作業です。
+
+  ## Issue 本文には詳細な根本原因分析（R1 / R2 / R3）が既に入っています
+
+  **ただし鵜呑みにしないでください。** 本文の主張を 1 つずつコードで裏取りし、
+  食い違えば実測を正とし、commit message の「下調べとの食い違い」節に書いてください。
+  過去に、Issue 本文に書かれた根本原因が実測と違っていた例が複数あります。
+
+  裏取りしてほしい主張（本文より）:
+
+  1. `current-output-builder.ts:1116` が `isUnclassifiedActive = evidence === 'none'` になっている
+  2. 旧定義の `deriveScraperEvidence`（`status-evidence.ts:64`）の**本番呼び出しがゼロ**になった
+  3. `wait.ts:704` のコメントが**旧定義のまま**
+  4. `mergeStructuredStatus`（`current-output-builder.ts:884-888`）の `scraperVouched` 条件のせいで
+     hook の `Stop` が evidence を引き上げられない
+  5. `IDLE_EVIDENCE_DEFAULT_MODE.claude` が `observe` を経ずに `enforce` で出荷された
+
+  **grep の 0 件は「存在しない」の証拠になりません。** 定数経由の間接参照・別綴り・
+  語彙レイヤの違いを疑い、陽性対照を撃ってから 0 件を信じてください。
+
+  ## 対応方針（本文の 3 つ。いずれも必須）
+
+  1. **旗を 2 つに戻す** — `isUnclassifiedActive` は「フレームを分類できなかった」に戻す
+     （`unknown_frame` / `default` / `no_recent_output` のみ）。`statusEvidence: 'none'` は
+     新しい弱い事実として別に持つ。
+     **`wait` が `statusEvidence: 'none'` をどう扱うかは、この Issue では変えないでください。**
+  2. **hook の turn-close を positive として認める** — `scraperVouched` の縛りを外し、
+     新鮮な構造化状態で `closedBy: 'stop'` かつ `closedAt > openedAt` なら `positive` を publish。
+  3. **`claude` を `observe` に戻す** — `IDLE_EVIDENCE_DEFAULT_MODE.claude = 'observe'`。
+
+  **本文が明示的に禁じている解（採用しないこと）**: `findClaudeTranscriptTail` の
+  スキップリストに chrome 行を足す当座しのぎ。理由は本文参照（`/model` 後・`/clear` 後・
+  起動直後・Esc 中断後には完了マーカーがそもそも無い／pinned 行は Claude Code 側が随時追加する）。
+
+  ## 検証（必須。受入条件は本文の 8 項目すべて）
+
+  - **実フレーム fixture は本番のペイン形状（200x1000）で採ること。** 既定サイズだと再現しない。
+  - **陽性対照を必ず用意すること** — 本物の未分類フレーム（Claude の `/help` オーバーレイ）で
+    `isUnclassifiedActive === true` が維持されること。これが赤くなることを確認してから緑を信じる。
+  - **`wait` の exit code は `> log; echo $?` でファイルに落として実測すること。**
+    grep に pipe すると偽 PASS します。
+  - **変異注入**: 旗の分離を外すと `wait` のテストが赤くなることを実測し、表で報告してください。
+
+  ## 作業ルール（厳守）
+
+  - **実 tmux を触る検証は必ず `tmux -L <専用socket>` で行う。** `-L` / `-S` は `$TMUX` より優先。
+    あなたは tmux ペインの中で動いていて `$TMUX` が既定サーバを指しているため、フラグ無しの
+    `tmux` 呼び出しは全て**ユーザーの本番サーバ**に届きます。
+  - **`kill-server` を `-L` 無しで書かない。** 後始末は `kill-session -t '=<name>:'`（完全一致）。
+  - **`TMUX_TMPDIR` を隔離手段に使わない**（`$TMUX` があると完全に無視される）。
+  - **`bind-key` / `unbind-key` / `set-option -g` を既定サーバへ撃たない。**
+  - **フル `npm run test:unit` を手で回さないでください。** 他に 2 本のワーカーが並列で動いており、
+    同時フル実行は 30s サブプロセスガードを飢餓で落とします（#1985 がまさにその Issue）。
+    開発中は対象テストだけを絞って実行し、フル実行は `wait --verify` の unit ゲートに任せてください
+    （こちらは `mutex: cpu.heavy` で直列化されます）。
+  - **`CHANGELOG.md` と `docs/module-reference.md` を編集しないでください**（scope 外）。
+    代わりに次の 2 ファイルを書いてください（どちらも `dev-reports/` 配下なので commit に入りません）。
+    - `dev-reports/changelog/issue-2011.md` — 1 行目に節名のコメント（`<!-- ### Fixed -->`）、
+      2 行目に **1 エントリ 1 行**で
+      `- **fix(<scope>): <要約>** (#2011): <本文>`。
+      `(#2011)` は太字の**外側**。改行を入れない。`- **` で始めること（集計が `grep -cE '^- \*\*'`）。
+    - `dev-reports/module-reference/issue-2011.md` — 行キーごとの追記指示。
+      **既存行に足すときは `grep -n '^| `<path>`' docs/module-reference.md` を実行し、
+      その出力（行番号つきの行キー）を断片に書き写してから**書くこと。
+      0 件だった行への追記を指示しないでください（新規行なら「新規行」と明記）。
+  - commit は単一。**PR は作らないでください**（私が作ります）。
+  - commit message に「意図的な逸脱」「下調べとの食い違い」「変異注入」の節を必ず入れてください。
+  - 完了したら最後に `IMPL_COMPLETED` とだけ出力してください。
+scope:
+  allow:
+    - "src/lib/session/**"
+    - "src/lib/detection/**"
+    - "src/config/detection-evidence-config.ts"
+    - "src/cli/commands/wait.ts"
+    - "src/components/worktree/**"
+    - "src/components/mobile/**"
+    - "src/hooks/**"
+    - "src/types/**"
+    - "tests/unit/**"
+    - "tests/integration/**"
+    - "dev-reports/changelog/**"
+    - "dev-reports/module-reference/**"
+    - "docs/design/**"
+  deny: []
+verify:
+  gates: [token-discipline, control-chars, claudemd-size, route-exports, build-cli, build-server, lint, build, typecheck, integration, unit]
+autoYes:
+  mode: allow-listed
+  allowPromptTypes: [yes_no, multiple_choice]
+  denyPatterns: []
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true
