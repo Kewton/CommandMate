@@ -137,6 +137,7 @@
   "todoTab": "ToDo",
   "skillsTab": "Skills",
   "verificationTab": "検証",
+  "envTab": "環境変数",
   "timer": {
     "title": "遅延メッセージ",
     "titleCreate": "タイマー作成",

@@ -137,6 +137,7 @@
   "todoTab": "ToDo",
   "skillsTab": "Skills",
   "verificationTab": "Verification",
+  "envTab": "Env",
   "timer": {
     "title": "Delayed Messages",
     "titleCreate": "New Timer",
