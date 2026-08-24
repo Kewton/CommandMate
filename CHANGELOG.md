@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-08-24
+
+> **Highlight**: エージェントの状態検出と通知の 2 層を、実測で作り直したリリースです。`wait` がアイドルなペインで返らなくなる回帰（#2011）を、実フレーム 7 枚と実 exit code で裁定して修正しました（修正前 124 → 修正後 0、陽性対照つき）。スマホ通知は「何が起きたか」から「あなたが動く必要があるか」へ軸を切り替え、Auto-Yes 中のプロンプト通知を抑止（#1999）、失敗 3 種を通知に接続（#2000）、端末間の消し込み（#2001）を入れています。あわせてセキュリティ 2 件 — 平文 `CM_AUTH_TOKEN` が子プロセスへ渡っていた問題（#1996）と、`EXCLUDED_PATTERNS` の秘密ファイルが files ルートのパス直指定で読み書きできた問題（#2014、読み取り 2 面＋書き込み 4 面）— を塞ぎました。検証ゲートは 7 → 11 本に増やし（#1994）、`ws-server` / `cli-tools/manager` のモジュール循環を切って import 時間を 1043ms → 228ms / 1025ms → 417ms に短縮しています（#1984、対照つき実測）。
+
 ### Added
 
 - **feat(env-manager): ワークツリーの `.env` を PC / スマホ両対応の専用 UI で表示・編集できるようにした** (#1968): Activity Bar の `env`（PC）と Tools タブの `環境変数`（スマホ）から開く `EnvManagerPane` を追加。Key-Value 形式と Raw テキスト形式の双方で閲覧・編集・保存でき、値は既定でマスク（固定 8 文字。長さを漏らさない）され 👁️ で 1 行ずつ解除する。`.env.example` / `.env.sample` があれば未定義キーを補完サジェストとして提示し、dotenv 構文・危険な制御文字・サイズをクライアントとサーバの両方で検証する。対象ファイル名はサーバ側 allowlist（`.env` / `.env.<segment>` / `.env.<segment>.local`、`[A-Za-z0-9_-]` 1〜32 文字）で決まり、加えて `isPathSafe`（字句）と `resolveAndValidateRealPath`（シンボリックリンク）でワークツリー外への到達を塞ぐ。値はログにもエラー本文にも出さない。一般ファイルツリーの `EXCLUDED_PATTERNS` は緩めておらず、2 つの面が交わらないことを統合テストで固定している。実機確認手順は `docs/features/env-manager.md`。
