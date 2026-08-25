@@ -90,6 +90,7 @@ import { applyAskUserQuestion } from '@/lib/session/ask-user-question-prompt';
 import {
   buildStructuredPromptData,
   buildStructuredPromptHistoryRecord,
+  isAddressableDecision,
   STRUCTURED_DECISION_OPTIONS,
   type StructuredAskUserQuestionSummary,
   type StructuredPromptFacts,
@@ -1252,12 +1253,24 @@ async function buildPayload(
   // it to a dialog the agent actually reported — a `permission-request` record
   // is a prediction, and a question is answered with a choice rather than with
   // one of these three verdicts.
-  const decisionOptions =
+  //
+  // Issue #2031 adds the fourth conjunct and folds the whole gate into ONE
+  // value. The three verdicts and the id they are delivered to are now derived
+  // from the same expression, so they cannot be published apart — and "apart"
+  // is not hypothetical, it is the state #1932 shipped: options were published
+  // on the capability alone while `decisionId` was published nowhere at all, so
+  // the panel drew no buttons and the only way out of an opencode approval in a
+  // browser was the arrow-key safety net. Options WITHOUT an id is the worse
+  // half of that pair — the numbers would reach the keystroke path, where a
+  // bare "1" selects whatever the picker happens to be highlighting (#1681).
+  const addressableDecisionId =
     promptWaiting !== null &&
     promptWaiting.source === 'notification' &&
-    eventSource.capabilities.eventIdentity === 'permission-id'
-      ? STRUCTURED_DECISION_OPTIONS
+    eventSource.capabilities.eventIdentity === 'permission-id' &&
+    isAddressableDecision(promptWaiting.decisionId)
+      ? promptWaiting.decisionId
       : null;
+  const decisionOptions = addressableDecisionId !== null ? STRUCTURED_DECISION_OPTIONS : null;
 
   const structuredFacts: StructuredPromptFacts | null =
     promptWaiting === null
@@ -1266,6 +1279,19 @@ async function buildPayload(
           ...promptWaiting,
           askUserQuestion: summarizeAskUserQuestion(askUserQuestion),
           decisionOptions,
+          // Explicit, though the spread above already carries a `decisionId`
+          // off the record: the spread's copy is the raw one, and what may be
+          // published is the GATED one. Letting the record's value through
+          // would put an id on a payload whose verdicts were withheld, which is
+          // the biconditional this Issue exists to hold.
+          decisionId: addressableDecisionId,
+          // Gated on the same value, for a reason of its own: `patterns` is
+          // what the `Allow always` BUTTON grants, so publishing it where no
+          // button is drawn adds a rule list to a panel that is telling the
+          // user to go and answer in the terminal. Every source but opencode
+          // therefore keeps the exact payload it had before this Issue, plus
+          // the one `decisionId: null`.
+          patterns: addressableDecisionId !== null ? promptWaiting.patterns : null,
         };
 
   const promptData: PromptData | StructuredPromptWaitingData | null = scraperPromptWaiting
