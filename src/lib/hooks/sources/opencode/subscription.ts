@@ -59,6 +59,7 @@ import {
   readOpencodeSessionFrame,
   recordAgentSessionTelemetry,
 } from '@/lib/hooks/agent-session-telemetry';
+import { getRememberedOpencodeSession } from '@/lib/session/opencode-session-store';
 import { isPlainObject, readStringField } from '../event-mapper';
 import type {
   AgentInstanceRef,
@@ -76,6 +77,12 @@ import {
   probeOpencodeHealth,
   type OpencodeFrame,
 } from './client';
+import {
+  backfillOpencodeHistory,
+  flushOpencodeTurn,
+  forgetOpencodeTranscripts,
+  recordOpencodeTranscriptFrame,
+} from './history';
 import { partCallId, partToolName } from './mappers';
 import { rememberOpencodeToolCall } from './payloads';
 import { getAssignedOpencodePort } from './ports';
@@ -186,6 +193,34 @@ export function isOpencodeSubscribed(target: AgentInstanceRef): boolean {
  */
 export function getOpencodeLiveness(target: AgentInstanceRef): SourceLiveness {
   return subscriptions.get(keyOf(target))?.liveness ?? { state: 'unknown' };
+}
+
+/**
+ * Whether this instance's conversation history is being written from the server
+ * (Issue #2041).
+ *
+ * The screen scraper's stand-down test, and the one place the "port connected"
+ * of the Issue text is turned into something checkable. `lib/polling/response-
+ * checker` calls it before saving an opencode reply: true means `./history` has
+ * the agent's own Markdown and the pane's rendering of it must not be saved on
+ * top, false means nothing else is recording the turn and the scrape is the
+ * only record there will be.
+ *
+ * Deliberately **not** {@link isOpencodeSubscribed}. A subscription whose stream
+ * has dropped is `lost` — it delivers no `session.idle`, so it flushes no turn —
+ * and standing the scraper down for one would leave the reply recorded by
+ * nobody. `live` is the same word `cli-tools/opencode` requires before it will
+ * post a prompt over REST (#2034 / #2035), and for the same reason: it is the
+ * only state in which the port is known to still belong to this pane.
+ *
+ * The fallback direction is safe and the other is not, which is why the test is
+ * this way round: two writers produce a duplicated reply, no writer produces a
+ * turn that never happened.
+ *
+ * @param target - The instance
+ */
+export function isOpencodeStructuredHistoryLive(target: AgentInstanceRef): boolean {
+  return getOpencodeLiveness(target).state === 'live';
 }
 
 /**
@@ -414,6 +449,11 @@ export async function closeOpencodeSubscription(target: AgentInstanceRef): Promi
   // instance id — the same argument `buildCurrentOutput` makes for blanking
   // `model` on a session that is not running.
   forgetAgentSessionTelemetry(target);
+  // Issue #2041, on the same terms: an accumulator holds a reply a process was
+  // in the middle of writing, and a process that is gone will not finish it.
+  // Whatever it had already produced is in `opencode.db` and comes back through
+  // `recoverHistory` on the next attach.
+  forgetOpencodeTranscripts(target);
   logger.info('opencode-subscription-closed', {
     worktreeId: target.worktreeId,
     instanceId: target.instanceId ?? target.cliToolId,
@@ -429,6 +469,7 @@ export function resetOpencodeSubscriptions(): void {
     releaseIdleWaiters(state);
     state.streamController.abort();
     state.lifetimeController.abort();
+    forgetOpencodeTranscripts(state.target);
   }
   subscriptions.clear();
 }
@@ -549,6 +590,13 @@ async function runStream(state: OpencodeSubscriptionState): Promise<void> {
         armWatchdog(state);
         await resyncPending(state);
         await recoverTurnState(state, armedBefore);
+        // Issue #2041. After `recoverTurnState`, so a session the status poll
+        // re-armed has already named itself to the gate and this can prefer it
+        // over the remembered id. Awaited rather than fired-and-forgotten: it
+        // must finish before the loop starts delivering frames, so a turn that
+        // completes on the new connection cannot be written by the stream and
+        // then written again by a backfill that had not read the row yet.
+        await recoverHistory(state);
         attempt = 0;
         for await (const frame of frames) {
           attempt = 0;
@@ -775,6 +823,46 @@ async function recoverTurnState(
   }
 }
 
+/**
+ * Recover replies that were produced while nothing was listening (Issue #2041).
+ *
+ * The event stream cannot answer this. Measured on 1.18.22: a second
+ * subscription opened to `/event` after three completed turns received one
+ * `server.connected` frame and then nothing at all — there is no replay, with
+ * or without `?after=<seq>` (#1758 §5.2.2). So every turn that finished while
+ * CommandMate was down, or between the drop and the reconnect, exists only in
+ * `opencode.db`, and `GET /session/:id/message` is the only way to it.
+ *
+ * ## Which session
+ *
+ * The gate first, because after {@link recoverTurnState} it holds a session the
+ * server has just confirmed is this pane's. Then #2038's persisted memory,
+ * which is the only source that survives a CommandMate restart — and a restart
+ * is the case this whole function exists for.
+ *
+ * `GET /session/status` is deliberately not consulted as a third source. It was
+ * measured answering `{}` for a server whose session had completed three turns:
+ * the map lists what is *doing* something, so on the quiet server a restart
+ * finds, it names nothing.
+ *
+ * Nothing here throws, and a failure costs history rather than the connection.
+ */
+async function recoverHistory(state: OpencodeSubscriptionState): Promise<void> {
+  try {
+    const remembered = getRememberedOpencodeSession(state.target)?.sessionId ?? null;
+    const sessionId = state.gate.primarySession() ?? remembered;
+    if (!sessionId) return;
+    await backfillOpencodeHistory(state.target, state.port, sessionId);
+  } catch (error) {
+    logger.warn('opencode-history-recovery-failed', {
+      worktreeId: state.target.worktreeId,
+      instanceId: state.target.instanceId ?? state.target.cliToolId,
+      port: state.port,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
 /** Process one frame off the stream. */
 function handleFrame(state: OpencodeSubscriptionState, frame: OpencodeFrame): void {
   const type = readStringField(frame, 'type');
@@ -828,6 +916,20 @@ function deliver(
     if (session) recordAgentSessionTelemetry(state.target, session);
   }
 
+  // Issue #2041, in the same position and for the same reason as the two reads
+  // above: the agent's reply travels on `message.part.updated`, which maps to
+  // `pre_tool_use` / `post_tool_use` for its tool parts and to *nothing at all*
+  // for its text ones — the seven words have no place to put prose. So the only
+  // chance to keep the text is before `normalize` decides the frame is silent.
+  //
+  // `message.part.delta` is deliberately absent from this branch: the closing
+  // `message.part.updated` carries the whole part text, which makes the reader
+  // idempotent against a re-sent boundary frame instead of dependent on a dedup
+  // set. See `./transcript` for the measurement.
+  if (type === 'message.updated' || type === 'message.part.updated') {
+    recordOpencodeTranscriptFrame(state.target, frame, receivedAt);
+  }
+
   // Issue #2034: before the gate, and independent of what it decides. An abort
   // asked whether THIS session reached idle; whether the frame is also publishable
   // as a `stop` is a separate question with its own — correct — answer below.
@@ -836,7 +938,14 @@ function deliver(
       isPlainObject(frame.properties) ? frame.properties : {},
       'sessionID'
     );
-    if (idleSession) notifyIdleWaiters(state, idleSession);
+    if (idleSession) {
+      notifyIdleWaiters(state, idleSession);
+      // Issue #2041: the turn is over, so the reply is complete. Not awaited —
+      // `deliver` is synchronous by contract (the SSE read loop calls it once
+      // per frame) and a database write must not hold the stream. Nothing here
+      // rejects; `flushOpencodeTurn` catches its own failures.
+      void flushOpencodeTurn(state.target, idleSession);
+    }
   }
 
   const observation = state.gate.observe(type, frame);

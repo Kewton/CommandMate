@@ -22,12 +22,18 @@
 
 'use client';
 
-import React, { memo, useCallback, useMemo } from 'react';
+import React, { memo, useCallback, useEffect, useMemo } from 'react';
 import { X } from 'lucide-react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import type { AgentInstance, CLIToolType } from '@/lib/cli-tools/types';
 import { isAnswerablePromptData } from '@/types/models';
 import { TerminalSplitPane } from '@/components/worktree/TerminalSplitPane';
+import {
+  formatAgentModelLabel,
+  formatAgentSessionTooltip,
+  formatAgentSessionUsage,
+} from '@/components/worktree/WorktreeDetailSubComponents';
+import type { AgentSessionSnapshot } from '@/types/agent-session';
 import { TerminalDisplay } from '@/components/worktree/TerminalDisplay';
 import { NavigationButtons } from '@/components/worktree/NavigationButtons';
 import { TerminalEscapeHatch } from '@/components/worktree/TerminalEscapeHatch';
@@ -110,6 +116,19 @@ export interface TerminalSplitPaneContentProps extends TerminalSplitPaneCoreProp
    * renders no model, which is the correct display for a tool that reports none.
    */
   agentModel?: string | null;
+  /**
+   * Issue #2042: published when this split's agent changes what it says about
+   * its own session (persona / cost / context), so the surfaces above — the
+   * desktop header's instance pills — can show it too.
+   *
+   * The pane's own `current-output` poll is the only path this data takes to the
+   * browser, so a header pill for an instance with no open split has nothing to
+   * show; that is why this is handed up rather than fetched again. Called only
+   * when a rendered value actually changed (`useTerminalPanePolling` holds the
+   * identity stable otherwise), so a parent may keep it in state without
+   * re-rendering every split twice a second.
+   */
+  onAgentSessionChange?: (instanceId: string, snapshot: AgentSessionSnapshot) => void;
 }
 
 export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
@@ -132,6 +151,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   draggedInstanceId,
   onRequestSessionEnd,
   agentModel,
+  onAgentSessionChange,
 }: TerminalSplitPaneContentProps) {
   // Issue #869: resolve the instance id this split targets. Defaults to the
   // primary instance (`=== cliToolId`) so pre-#869 single-instance behavior —
@@ -156,10 +176,12 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   const showToast = history?.showToast;
 
   const t = useTranslations('worktree');
+  const locale = useLocale();
 
   const {
     terminal,
     prompt,
+    agentSession,
     setAutoScroll,
     setPromptAnswering,
     clearPrompt,
@@ -655,6 +677,34 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
     );
   }, [onRequestSessionEnd, terminal.isRunning, t, endTargetLabel, handleRequestSessionEnd, splitIndex]);
 
+  // Issue #2042: hand this split's session facts up. In an effect rather than
+  // in render because it writes the parent's state, and only when the snapshot
+  // identity actually moved — the poller holds it stable across the polls that
+  // repeat the same numbers, so this fires roughly once a turn.
+  useEffect(() => {
+    onAgentSessionChange?.(resolvedInstanceId, agentSession);
+  }, [onAgentSessionChange, resolvedInstanceId, agentSession]);
+
+  // Issue #2042: `agentModel` arrives already composed (`model · effort`); this
+  // re-enters the shared formatter to put the persona in front of it, so the
+  // pane header and the header pill's tooltip cannot word it differently. Null
+  // agent (every tool but opencode) returns the string unchanged.
+  const paneAgentModel = formatAgentModelLabel(agentModel, null, agentSession.session?.agent);
+  // Issue #2042: `$0.03 · 8.5K (1%)` — the same three values, in the same order,
+  // that opencode's own footer prints for the session this pane is attached to.
+  const paneAgentUsage = formatAgentSessionUsage(
+    agentSession.session,
+    agentSession.context,
+    t,
+    locale
+  );
+  const paneAgentUsageDetail = formatAgentSessionTooltip(
+    agentSession.session,
+    agentSession.context,
+    t,
+    locale
+  );
+
   return (
     <TerminalSplitPane
       worktreeId={worktreeId}
@@ -669,7 +719,11 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       // the selector trigger (session title bar). BranchStatus ⊂ StatusDotStatus.
       status={cliStatus}
       // Issue #1783: the model the agent reported, shown beside the alias.
-      agentModel={agentModel}
+      // Issue #2042 prefixes the persona when the agent named one.
+      agentModel={paneAgentModel}
+      // Issue #2042: cost / context, as a second muted chip.
+      agentUsage={paneAgentUsage}
+      agentUsageDetail={paneAgentUsageDetail}
       onFocus={onFocus}
       attaching={terminal.attaching}
       terminal={terminalSlot}

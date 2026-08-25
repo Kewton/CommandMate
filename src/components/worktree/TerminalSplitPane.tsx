@@ -77,6 +77,29 @@ export interface TerminalSplitPaneProps {
    * the screen.
    */
   agentModel?: string | null;
+  /**
+   * Issue #2042: what this split's session has cost and how full its context is,
+   * pre-composed — `$0.03 · 8.5K (1%)`, the same three values in the same order
+   * opencode's own footer prints.
+   *
+   * A formatted string rather than the numbers, for the reason `agentModel` is
+   * one: this component renders a header row and the wording lives with the
+   * other agent labels in `WorktreeDetailSubComponents`, so the pane header and
+   * the desktop header's pill tooltip cannot drift apart. `null`/`undefined`
+   * renders **nothing** — which is every claude, codex, gemini and copilot pane,
+   * none of which publish a cost.
+   */
+  agentUsage?: string | null;
+  /**
+   * Issue #2042: the long form for `title` — session title, persona, cost at
+   * four decimals, cumulative spend and context occupancy, one per line.
+   *
+   * Separate from {@link agentUsage} because the chip and its tooltip answer
+   * different questions: the chip is what the agent's own footer shows, and this
+   * is what distinguishes the session's *cumulative* spend from the context
+   * *currently* in use — two numbers that look interchangeable and are not.
+   */
+  agentUsageDetail?: string | null;
   /** Called when the textarea (or any input) inside this pane gains focus. */
   onFocus: () => void;
   /** Whether tmux attach is in progress for this split. */
@@ -118,6 +141,8 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
   onInstanceChange,
   status = 'idle',
   agentModel,
+  agentUsage,
+  agentUsageDetail,
   onFocus,
   attaching = false,
   headerExtras,
@@ -287,6 +312,23 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
             className="min-w-0 max-w-[10rem] truncate text-[11px] leading-none text-muted-foreground"
           >
             {agentModel}
+          </span>
+        )}
+
+        {/* Issue #2042: cost / context, as a sibling chip of the model rather
+            than an extension of it. Two strings, because they answer different
+            questions and go stale at different rates — the model is fixed for
+            the session while these move every turn — and because a reader
+            comparing this row against the agent's own footer is comparing the
+            second half only. `tabular-nums` so a changing count does not jitter
+            the row; `truncate` + `title` keep a long detail off the layout. */}
+        {agentUsage && (
+          <span
+            data-testid={`split-agent-usage-${splitIndex}`}
+            title={agentUsageDetail ?? t('agentSession.chipLabel', { usage: agentUsage })}
+            className="min-w-0 max-w-[10rem] truncate text-[11px] leading-none tabular-nums text-muted-foreground"
+          >
+            {agentUsage}
           </span>
         )}
 

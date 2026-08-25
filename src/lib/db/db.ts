@@ -56,6 +56,7 @@ export {
   getMessages,
   getLastUserMessage,
   getLastMessage,
+  findMessageByRequestId,
   deleteAllMessages,
   deleteMessageById,
   deleteMessagesByCliTool,
