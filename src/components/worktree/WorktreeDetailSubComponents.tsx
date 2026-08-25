@@ -12,7 +12,7 @@
 'use client';
 
 import React, { useEffect, useCallback, useState, memo, useRef } from 'react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { type WorktreeStatus } from '@/components/mobile/MobileHeader';
 import { DESKTOP_STATUS_LABEL_KEYS } from '@/config/status-colors';
 import { StatusDot } from '@/components/ui/StatusDot';
@@ -36,6 +36,12 @@ import { copyToClipboard } from '@/lib/clipboard-utils';
 import { NotificationDot } from '@/components/common/NotificationDot';
 import { deriveCliStatus } from '@/types/sidebar';
 import type { Worktree, ChatMessage, GitStatus } from '@/types/models';
+import {
+  sumAgentSessionTokens,
+  type AgentSessionContextView,
+  type AgentSessionSnapshot,
+  type AgentSessionView,
+} from '@/types/agent-session';
 import { getInstanceLabel, type AgentInstance, type CLIToolType } from '@/lib/cli-tools/types';
 import { COPY_FEEDBACK_RESET_MS } from '@/config/ui-feedback-config';
 import { AGENT_INSTANCE_DND_MIME } from '@/components/worktree/TerminalSplitPane';
@@ -125,13 +131,170 @@ export function deriveWorktreeStatus(
  * Centralised rather than interpolated at each of the four display sites so the
  * pane header, the roster rows, the mobile sheet and the header pill's tooltip
  * cannot drift apart.
+ *
+ * Issue #2042 prepends the agent *persona* — opencode's `build` / `plan`, from
+ * `structuredEvents.session.agent` — when one is known, giving
+ * `build · claude-sonnet-4.6`. Only opencode publishes one, so every other
+ * tool's label is byte-identical to pre-#2042; the parameter is last and
+ * optional so every existing call site is too.
+ *
+ * @param model - The model id, **or an already-composed model label**: the split
+ *   pane re-enters here with the string its parent formatted, to add a persona
+ *   to it without a second join living somewhere else. Null returns null.
+ * @param effort - The reasoning effort, when the CLI's chrome showed one
+ * @param agent - The persona driving the session (Issue #2042), or null
  */
 export function formatAgentModelLabel(
   model: string | null | undefined,
-  effort?: string | null
+  effort?: string | null,
+  agent?: string | null
 ): string | null {
   if (!model) return null;
-  return effort ? `${model} · ${effort}` : model;
+  const withEffort = effort ? `${model} · ${effort}` : model;
+  return agent ? `${agent} · ${withEffort}` : withEffort;
+}
+
+/**
+ * How many tokens are rendered, in the agent's own compact form (#2042).
+ *
+ * `8.5K`, not `8,508`, because that is what the surface being matched shows:
+ * opencode's footer reads `8.5K (1%)` and this chip sits in the same role on a
+ * row with the same width problem. The exact count is in the tooltip, where
+ * there is room for it — see {@link formatAgentSessionTooltip}.
+ *
+ * @param tokens - A token count, or null
+ * @param locale - BCP-47 tag; `undefined` takes the runtime's own
+ */
+export function formatAgentTokenCount(
+  tokens: number | null | undefined,
+  locale?: string
+): string | null {
+  if (typeof tokens !== 'number' || !Number.isFinite(tokens)) return null;
+  return new Intl.NumberFormat(locale, {
+    notation: 'compact',
+    maximumFractionDigits: 1,
+  }).format(tokens);
+}
+
+/**
+ * What a session has cost, formatted the way the agent formats it (#2042).
+ *
+ * USD with two decimals, which is not this app choosing a currency: it is
+ * opencode's own `Intl.NumberFormat("en-US", { style: "currency", currency:
+ * "USD" })`, transcribed so the chip and the agent's own footer print the same
+ * string for the same session. `cost` is the agent's raw number and only
+ * opencode publishes one today; a tool that later reports a cost in some other
+ * unit would need this to learn about the unit, not to guess harder.
+ *
+ * @param cost - The agent's own number, or null
+ * @param locale - BCP-47 tag for grouping/decimal marks; the currency is fixed
+ * @param fractionDigits - Raised to 4 for the tooltip, where `$0.0346` is the
+ *   value `opencode stats` prints and `$0.03` is not
+ */
+export function formatAgentSessionCost(
+  cost: number | null | undefined,
+  locale?: string,
+  fractionDigits = 2
+): string | null {
+  if (typeof cost !== 'number' || !Number.isFinite(cost)) return null;
+  return new Intl.NumberFormat(locale, {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: fractionDigits,
+    maximumFractionDigits: fractionDigits,
+  }).format(cost);
+}
+
+/**
+ * The visible `cost · tokens (percent)` chip, or null (Issue #2042).
+ *
+ * Null — render nothing — whenever the agent has published neither a cost nor a
+ * context measurement, which is every session of every tool but opencode and
+ * every opencode pane that has not finished a turn. That is the same rule
+ * {@link formatAgentModelLabel} follows and the reason both return null instead
+ * of an "unknown" string: an unknown badge on every claude and codex pane would
+ * be noise on the busiest row of the screen.
+ *
+ * **The token count is the context one, not the session one.** They are
+ * different quantities — see `types/agent-session`'s
+ * {@link AgentSessionContextView} — and this chip is the one that has to line up
+ * with opencode's own footer, so it shows what the footer shows. The session's
+ * cumulative spend is in the tooltip, labelled as such.
+ *
+ * @param session - `structuredEvents.session`, or null
+ * @param context - `structuredEvents.sessionContext`, or null
+ * @param t - The `worktree` namespace translator
+ * @param locale - BCP-47 tag for the number formats
+ */
+export function formatAgentSessionUsage(
+  session: AgentSessionView | null | undefined,
+  context: AgentSessionContextView | null | undefined,
+  t: (key: string, values?: Record<string, string | number>) => string,
+  locale?: string
+): string | null {
+  const cost = formatAgentSessionCost(session?.cost, locale);
+  const tokens = formatAgentTokenCount(context?.tokens, locale);
+  const segments: string[] = [];
+  if (cost) segments.push(cost);
+  if (tokens) {
+    segments.push(
+      typeof context?.percent === 'number'
+        ? t('agentSession.context', { tokens, percent: context.percent })
+        : tokens
+    );
+  }
+  return segments.length > 0 ? segments.join(' · ') : null;
+}
+
+/**
+ * The long form, for the `title` / accessible name (Issue #2042).
+ *
+ * Everything the chip had no room for, one fact per line: the session's own
+ * title, which persona is driving, the cost at four decimal places (the
+ * precision `opencode stats` prints, where the chip's two would read `$0.00` for
+ * a whole afternoon of cheap turns), what the session has spent in total, and
+ * how full the window is.
+ *
+ * The two token lines are deliberately both here and deliberately worded
+ * differently. "Spent this session" is cumulative and is what `opencode stats`
+ * reports; "Context in use" is the last finished turn's footprint and is what
+ * the agent's footer shows. Reading one as the other is the mistake this Issue
+ * was one summation away from shipping.
+ *
+ * @returns A newline-joined description, or null when nothing is known
+ */
+export function formatAgentSessionTooltip(
+  session: AgentSessionView | null | undefined,
+  context: AgentSessionContextView | null | undefined,
+  t: (key: string, values?: Record<string, string | number>) => string,
+  locale?: string
+): string | null {
+  const lines: string[] = [];
+  if (session?.title) lines.push(t('agentSession.titleLabel', { title: session.title }));
+  if (session?.agent) lines.push(t('agentSession.agentLabel', { agent: session.agent }));
+  const cost = formatAgentSessionCost(session?.cost, locale, 4);
+  if (cost) lines.push(t('agentSession.costLabel', { cost }));
+  const spent = sumAgentSessionTokens(session?.tokens);
+  if (spent !== null) {
+    lines.push(
+      t('agentSession.spentLabel', {
+        tokens: new Intl.NumberFormat(locale).format(spent),
+      })
+    );
+  }
+  if (typeof context?.tokens === 'number') {
+    const used = new Intl.NumberFormat(locale).format(context.tokens);
+    lines.push(
+      typeof context.limit === 'number' && typeof context.percent === 'number'
+        ? t('agentSession.contextLabel', {
+            tokens: used,
+            limit: new Intl.NumberFormat(locale).format(context.limit),
+            percent: context.percent,
+          })
+        : t('agentSession.contextUnknownLabel', { tokens: used })
+    );
+  }
+  return lines.length > 0 ? lines.join('\n') : null;
 }
 
 /**
@@ -567,6 +730,21 @@ interface DesktopHeaderProps {
    * nothing, which is what every worktree without a task row gets.
    */
   verificationChip?: React.ReactNode;
+  /**
+   * What each instance's agent says about the session it is in (Issue #2042).
+   *
+   * Keyed by instanceId, and sparse on purpose: the only path this data takes
+   * to the browser is a terminal pane's own `current-output` poll, so an
+   * instance in the roster with no open split has no entry, and every tool but
+   * opencode has none either. Absent renders exactly what pre-#2042 rendered.
+   *
+   * **Tooltip only, like the model before it.** This row is width-budgeted —
+   * `MAX_HEADER_AGENT_PILLS` caps the labelled pills and the rest fold into
+   * "+N" — so a second visible string per pill would push a working instance
+   * into the overflow menu to make room for a cost nobody is scanning for. The
+   * visible chip lives on the split pane's own header, which has the width.
+   */
+  agentSessionByInstance?: Readonly<Record<string, AgentSessionSnapshot>>;
 }
 
 /** Status indicator configuration is imported from @/config/status-colors (SF1) */
@@ -599,8 +777,10 @@ export const DesktopHeader = memo(function DesktopHeader({
   onAgentDragEnd,
   onKillSession,
   verificationChip,
+  agentSessionByInstance,
 }: DesktopHeaderProps) {
   const tWorktree = useTranslations('worktree');
+  const locale = useLocale();
   // Issue #1277: agent-instance status labels resolve through the generic
   // `common.status.*` keys (defined by #1273), so the wording has a single
   // source of truth. The config keeps owning the color/type mapping.
@@ -817,17 +997,37 @@ export const DesktopHeader = memo(function DesktopHeader({
                 // Issue #1784 appends "· <effort>" here too; the pill's visible
                 // text is still untouched, so the width budget above is unmoved.
                 const instanceStatus = sessionStatusByInstance?.[inst.id];
+                // Issue #2042: the same tooltip, with the persona in front of
+                // the model when the agent named one. Only opencode does, so
+                // every other pill's string is byte-identical to pre-#2042.
+                const instanceSession = agentSessionByInstance?.[inst.id];
                 const instanceModel = formatAgentModelLabel(
                   instanceStatus?.model,
-                  instanceStatus?.reasoningEffort
+                  instanceStatus?.reasoningEffort,
+                  instanceSession?.session?.agent
                 );
-                const labelWithModel = instanceModel
+                const baseLabel = instanceModel
                   ? tWorktree('detail.statusPillWithModel', {
                       label,
                       status: tCommon(`status.${c.status}`),
                       model: instanceModel,
                     })
                   : fullLabel;
+                // Issue #2042: cost / context ride on the tooltip for the reason
+                // #1783 put the model there — the visible pill text is still
+                // untouched, so MAX_HEADER_AGENT_PILLS's width budget is unmoved.
+                const instanceUsage = formatAgentSessionUsage(
+                  instanceSession?.session,
+                  instanceSession?.context,
+                  tWorktree,
+                  locale
+                );
+                const labelWithModel = instanceUsage
+                  ? tWorktree('detail.statusPillWithUsage', {
+                      base: baseLabel,
+                      usage: instanceUsage,
+                    })
+                  : baseLabel;
                 const isActive = c.isActive;
                 // Issue #786: drag source. click and drag are mutually exclusive
                 // in HTML; a plain click (no drag) still fires onClick exactly

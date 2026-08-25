@@ -877,7 +877,8 @@
     "statusPill": "{label}: {status}",
     "subTabMessage": "Message",
     "subTabGit": "Git",
-    "statusPillWithModel": "{label}: {status} — model {model}"
+    "statusPillWithModel": "{label}: {status} — model {model}",
+    "statusPillWithUsage": "{base} — {usage}"
   },
   "detailStatus": {
     "idle": "Idle - No active session",
@@ -1022,5 +1023,15 @@
       "tooLarge": "This file is too large to edit here.",
       "tooManyEntries": "This file defines too many variables to edit here."
     }
+  },
+  "agentSession": {
+    "context": "{tokens} ({percent}%)",
+    "chipLabel": "Session usage — {usage}",
+    "titleLabel": "Session: {title}",
+    "agentLabel": "Agent: {agent}",
+    "costLabel": "Cost so far: {cost}",
+    "spentLabel": "Spent this session: {tokens} tokens",
+    "contextLabel": "Context in use: {tokens} of {limit} tokens ({percent}%)",
+    "contextUnknownLabel": "Context in use: {tokens} tokens (window unknown)"
   }
 }

@@ -1,0 +1,32 @@
+{
+  "providers": [
+    {
+      "id": "github-copilot",
+      "name": "GitHub Copilot",
+      "source": "custom",
+      "models": {
+        "claude-sonnet-4.6": {
+          "id": "claude-sonnet-4.6",
+          "providerID": "github-copilot",
+          "name": "Claude Sonnet 4.6",
+          "cost": {
+            "input": 3,
+            "output": 15,
+            "cache": {
+              "read": 0.3,
+              "write": 0
+            }
+          },
+          "limit": {
+            "context": 1000000,
+            "input": 936000,
+            "output": 64000
+          }
+        }
+      }
+    }
+  ],
+  "default": {
+    "github-copilot": "claude-sonnet-4.6"
+  }
+}

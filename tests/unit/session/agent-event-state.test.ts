@@ -283,6 +283,10 @@ describe('structuredEvents exposure (Issue #1722)', () => {
       // present-and-null rather than absent, for the reason `permissionDecision`
       // above is.
       session: null,
+      // Issue #2042: how full the context is. Derived from two reads of the
+      // agent's own API, so it is null wherever `session` is — there is no
+      // session to ask about — and null forever for claude.
+      sessionContext: null,
     });
   });
 
@@ -345,6 +349,8 @@ describe('structuredEvents exposure (Issue #1722)', () => {
       // Issue #2040: still null — a `notification` says nothing about the
       // conversation's cost, and only opencode's `session.updated` fills this.
       session: null,
+      // Issue #2042: and with no session there is nothing to measure.
+      sessionContext: null,
     });
     expect({ ...after, structuredEvents: null }).toEqual({ ...before, structuredEvents: null });
   });

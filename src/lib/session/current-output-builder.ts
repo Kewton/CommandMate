@@ -30,7 +30,9 @@ import {
   type ToolInputNormalizationRecord,
 } from '@/lib/hooks/tool-input-normalization-state';
 import {
+  ensureAgentSessionContextUsage,
   getAgentSessionTelemetry,
+  type AgentSessionContextUsage,
   type AgentSessionRecord,
 } from '@/lib/hooks/agent-session-telemetry';
 import {
@@ -229,6 +231,32 @@ export interface StructuredEventsPayload extends PublishedTurn {
    * `?? null`.
    */
   session?: AgentSessionRecord | null;
+  /**
+   * How full this instance's context window is, or null (Issue #2042).
+   *
+   * The one number {@link session} cannot answer. `Session.tokens` is the
+   * session's *cumulative* spend — the figure `opencode stats` prints — while
+   * "how much of the window is in use" is the last finished assistant turn's
+   * footprint, which is a different quantity and a smaller one. Summing the
+   * record would have published `2%` where opencode's own footer says `1%`, so
+   * this block is measured separately rather than derived from a field that
+   * looks like it should work.
+   *
+   * **Derived, and separated for that reason.** Everything on {@link session} is
+   * a value the agent published on a frame; everything here is this server
+   * asking the agent's own server two further questions
+   * (`GET /session/:id/message?limit=4` and `GET /config/providers`) and doing
+   * arithmetic on the answers. Folding the two together would make one object a
+   * mixture of quoted and computed values.
+   *
+   * **Always present, null while nothing has been measured.** The measurement
+   * is refreshed off the hot path — the poll that notices the session moved
+   * publishes the previous turn's numbers (or null on the first one) and the
+   * next poll publishes the new ones. Null forever for every tool but opencode.
+   *
+   * Optional on the type for the reason `pendingDecisions` below is.
+   */
+  sessionContext?: AgentSessionContextUsage | null;
   /**
    * The approvals this instance is blocked on, oldest first (Issue #1930).
    *
@@ -1063,6 +1091,10 @@ async function buildPayload(
   // decision entry — and the degraded prompt below re-uses this read rather than
   // taking a second one, so the two cannot describe different instants.
   const askUserQuestion = getAskUserQuestion(worktreeId, cliToolId, instanceId, now);
+  // Issue #2040, read once: #2042's context measurement is keyed on this
+  // record's `at`, so reading it twice would risk keying the derived block to a
+  // different instant than the one it is published beside.
+  const agentSession = getAgentSessionTelemetry(worktreeId, cliToolId, instanceId);
   const structuredEvents: StructuredEventsPayload = {
     lastEventType: lastEvent?.event ?? null,
     lastEventAt: lastEvent?.at ?? null,
@@ -1125,7 +1157,17 @@ async function buildPayload(
     // paths carry the key — but the record itself is dropped when the
     // subscription closes, so a pane that is not running answers null without
     // this layer needing a rule of its own.
-    session: getAgentSessionTelemetry(worktreeId, cliToolId, instanceId),
+    session: agentSession,
+    // Issue #2042. `ensure…` never awaits: it answers from the cache and starts
+    // a refresh only when the session record has moved since the last one, so
+    // the two HTTP round trips it needs happen once per *turn* rather than once
+    // per poll and never in front of this payload. See
+    // `ensureAgentSessionContextUsage` for why that trade is the right way
+    // round here.
+    sessionContext: ensureAgentSessionContextUsage(
+      { worktreeId, cliToolId, instanceId },
+      agentSession
+    ),
   };
 
   const running = await cliTool.isRunning(worktreeId, instanceId);

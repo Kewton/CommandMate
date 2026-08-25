@@ -22,7 +22,7 @@
 
 'use client';
 
-import React, { memo, useCallback, useMemo } from 'react';
+import React, { memo, useCallback, useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { WorktreeDesktopLayout } from '@/components/worktree/WorktreeDesktopLayout';
 import { TerminalContainer } from '@/components/worktree/TerminalContainer';
@@ -51,6 +51,7 @@ import { BranchMismatchAlert } from '@/components/worktree/BranchMismatchAlert';
 import { MoveDialog } from '@/components/worktree/MoveDialog';
 import { NewFileDialog } from '@/components/worktree/NewFileDialog';
 import { buildModelByInstance, DesktopHeader, formatAgentModelLabel, InfoModal } from '@/components/worktree/WorktreeDetailSubComponents';
+import type { AgentSessionSnapshot } from '@/types/agent-session';
 import { UPLOADABLE_EXTENSIONS } from '@/config/uploadable-extensions';
 import { deriveCliStatus } from '@/types/sidebar';
 import { getCliToolDisplayName, type AgentInstance, type CLIToolType } from '@/lib/cli-tools/types';
@@ -326,6 +327,33 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
   );
 
   /**
+   * Issue #2042: instanceId -> what that instance's agent says about its session.
+   *
+   * Collected from the splits rather than fetched here, because the only server
+   * route that carries it is `current-output`, which each split already polls
+   * for its own instance — a second fetch per roster row would multiply that
+   * poll by the roster size to fill a tooltip.
+   *
+   * Consequences worth stating: an instance with no open split has no entry (its
+   * pill's tooltip reads exactly as it did before #2042), and an entry outlives
+   * the split that produced it until another one replaces it. The second is
+   * deliberate — a user closing a split has not ended the session — and bounded,
+   * because the server retires the record when the pane is killed and the next
+   * poll from any split then publishes nulls.
+   */
+  const [agentSessionByInstance, setAgentSessionByInstance] = useState<
+    Readonly<Record<string, AgentSessionSnapshot>>
+  >({});
+  const handleAgentSessionChange = useCallback(
+    (instanceId: string, snapshot: AgentSessionSnapshot) => {
+      setAgentSessionByInstance(prev =>
+        prev[instanceId] === snapshot ? prev : { ...prev, [instanceId]: snapshot }
+      );
+    },
+    []
+  );
+
+  /**
    * Issue #1152: header instance switcher → terminal wiring.
    *
    * Previously the DesktopHeader instance pills called `setActiveInstanceId`
@@ -440,6 +468,7 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
           // the tool, so it has no model to speak of. Undefined (no entry, no
           // hooks, no model) renders nothing.
           // Issue #1784 appends "· <effort>" when the frame showed one.
+          onAgentSessionChange={handleAgentSessionChange}
           agentModel={formatAgentModelLabel(
             worktree?.sessionStatusByInstance?.[paneInstanceId]?.model,
             worktree?.sessionStatusByInstance?.[paneInstanceId]?.reasoningEffort
@@ -518,6 +547,8 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
       draggedInstanceId,
       // Issue #1171: stable controller callback; listed for exhaustive-deps.
       onRequestSessionEnd,
+      // Issue #2042: stable (useCallback with no deps); listed for exhaustive-deps.
+      handleAgentSessionChange,
     ],
   );
 
@@ -794,6 +825,9 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
             onAgentDragStart={handleAgentDragStart}
             onAgentDragEnd={handleAgentDragEnd}
             onKillSession={onKillSession}
+            // Issue #2042: cost / context for the pills' tooltips. Sparse — only
+            // instances with an open split have an entry.
+            agentSessionByInstance={agentSessionByInstance}
             // Issue #1816: hidden entirely when the worktree has no task row.
             verificationChip={
               <VerificationStatusChip

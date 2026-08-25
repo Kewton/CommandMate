@@ -32,6 +32,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { LivePromptData } from '@/types/models';
+import type {
+  AgentSessionContextView,
+  AgentSessionSnapshot,
+  AgentSessionView,
+} from '@/types/agent-session';
 import { useRealtime } from '@/hooks/useRealtimeConnection';
 import type { RealtimeEvent, TerminalSnapshotEvent, SessionStatusEvent } from '@/lib/realtime/types';
 import { extractComposerText } from '@/lib/detection/composer-text';
@@ -50,6 +55,40 @@ export const WS_PUSH_STALE_AFTER_MS = 5000;
 /** Require two consecutive low-confidence frames before exposing escape controls. */
 export const UNCLASSIFIED_CONFIRMATION_COUNT = 2;
 export const UNCLASSIFIED_CONFIRMATION_DELAY_MS = 500;
+
+/**
+ * What a pane reports before it has heard anything (Issue #2042).
+ *
+ * A module-level constant rather than a fresh object per pane: it is the value
+ * every claude, codex, gemini and copilot pane holds forever, and a new
+ * `{ session: null, context: null }` on each render would break the memo of
+ * every consumer that takes it as a prop.
+ */
+const EMPTY_AGENT_SESSION: AgentSessionSnapshot = { session: null, context: null };
+
+/**
+ * A string that changes exactly when the rendered agent-session values do.
+ *
+ * Compared against the previous one so a poll that repeats the same numbers —
+ * which is every poll between turns, at 2s intervals, on every open split —
+ * keeps the same object identity and re-renders nobody. Only the fields that
+ * reach a surface are in it: `at` and `sessionAt` move on every frame the agent
+ * sends and change no pixel.
+ */
+function agentSessionSignature(snapshot: AgentSessionSnapshot): string {
+  const s = snapshot.session;
+  const c = snapshot.context;
+  return JSON.stringify([
+    s?.title ?? null,
+    s?.agent ?? null,
+    s?.model ?? null,
+    s?.cost ?? null,
+    s?.tokens ?? null,
+    c?.tokens ?? null,
+    c?.limit ?? null,
+    c?.percent ?? null,
+  ]);
+}
 
 export interface PaneTerminalState {
   output: string;
@@ -112,6 +151,18 @@ interface CurrentOutputResponse {
   isSelectionListActive?: boolean;
   isPagerActive?: boolean;
   isUnclassifiedActive?: boolean;
+  /**
+   * Issue #2042: the two blocks that describe the conversation rather than the
+   * screen. Only the two this pane renders are declared — the payload carries a
+   * dozen more and none of them belong to a terminal pane.
+   *
+   * Optional at every level because a server older than #2040 / #2042 sends
+   * neither, and `undefined` there means "this daemon predates the field".
+   */
+  structuredEvents?: {
+    session?: AgentSessionView | null;
+    sessionContext?: AgentSessionContextView | null;
+  };
 }
 
 export interface UseTerminalPanePollingOptions {
@@ -131,6 +182,15 @@ export interface UseTerminalPanePollingOptions {
 export interface UseTerminalPanePollingReturn {
   terminal: PaneTerminalState;
   prompt: PanePromptState;
+  /**
+   * What this pane's agent says about the conversation it is in (Issue #2042).
+   *
+   * `{ session: null, context: null }` for every tool that publishes none — all
+   * of them but opencode — and for a server that predates the fields. Refreshed
+   * only when a rendered value actually changed, so a poll that repeats the same
+   * numbers does not hand the consumer a new object to re-render on.
+   */
+  agentSession: AgentSessionSnapshot;
   setAutoScroll: (next: boolean) => void;
   setPromptAnswering: (answering: boolean) => void;
   clearPrompt: () => void;
@@ -165,6 +225,15 @@ export function useTerminalPanePolling({
     messageId: null,
     answering: false,
   }));
+
+  // Issue #2042: what the agent says about its own conversation. Its own state
+  // rather than a member of `terminal`, because it is not on the terminal's
+  // update path: `applySnapshot` is shared with the WebSocket push, and a push
+  // carries a screen and no `structuredEvents` at all — folding this in there
+  // would blank the cost every time a snapshot streamed in.
+  const [agentSession, setAgentSession] = useState<AgentSessionSnapshot>(
+    EMPTY_AGENT_SESSION
+  );
 
   // Stale-response guard. Bump on every fetch; ignore older resolutions.
   const requestIdRef = useRef(0);
@@ -305,6 +374,19 @@ export function useTerminalPanePolling({
       }
 
       applySnapshot(data);
+      // Issue #2042: only the poll carries these — the WebSocket push has no
+      // `structuredEvents` — so they are applied here rather than in the shared
+      // `applySnapshot`. The signature guard keeps the object identity stable
+      // across the polls (most of them) that repeat the same numbers.
+      const nextAgentSession: AgentSessionSnapshot = {
+        session: data.structuredEvents?.session ?? null,
+        context: data.structuredEvents?.sessionContext ?? null,
+      };
+      setAgentSession(prev =>
+        agentSessionSignature(prev) === agentSessionSignature(nextAgentSession)
+          ? prev
+          : nextAgentSession
+      );
     } catch (err) {
       if (
         requestIdRef.current !== requestId ||
@@ -351,6 +433,11 @@ export function useTerminalPanePolling({
       attaching: true,
     }));
     setPrompt({ visible: false, data: null, messageId: null, answering: false });
+    // Issue #2042: a different (worktree, tool, instance) is a different
+    // conversation. Cleared rather than left to be overwritten so the new pane
+    // never shows the previous instance's cost while its first poll is in
+    // flight — the same reason the terminal output above is blanked.
+    setAgentSession(EMPTY_AGENT_SESSION);
   }, [compositeKey]);
 
   // Issue #1120: subscribe to the worktree room so terminal snapshots stream in.
@@ -523,6 +610,7 @@ export function useTerminalPanePolling({
   return {
     terminal,
     prompt,
+    agentSession,
     setAutoScroll,
     setPromptAnswering,
     clearPrompt,

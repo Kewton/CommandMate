@@ -1,0 +1,198 @@
+[
+  {
+    "info": {
+      "id": "msg_0000000000000000000000001",
+      "sessionID": "ses_0000000000000000000000000",
+      "role": "user",
+      "time": {
+        "created": 1787648605928
+      },
+      "summary": {
+        "diffs": []
+      },
+      "agent": "build",
+      "model": {
+        "providerID": "github-copilot",
+        "modelID": "claude-sonnet-4.6"
+      }
+    },
+    "parts": [
+      {
+        "id": "prt_0000000000000000000000001",
+        "sessionID": "ses_0000000000000000000000000",
+        "messageID": "msg_0000000000000000000000001",
+        "type": "text",
+        "text": "Reply with exactly one word: PONG"
+      }
+    ]
+  },
+  {
+    "info": {
+      "id": "msg_0000000000000000000000002",
+      "sessionID": "ses_0000000000000000000000000",
+      "role": "assistant",
+      "time": {
+        "created": 1787648605938,
+        "completed": 1787648608804
+      },
+      "parentID": "msg_0000000000000000000000001",
+      "modelID": "claude-sonnet-4.6",
+      "providerID": "github-copilot",
+      "mode": "build",
+      "agent": "build",
+      "path": {
+        "cwd": "<WORKTREE_PATH>",
+        "root": "<WORKTREE_PATH>"
+      },
+      "cost": 0.0319065,
+      "tokens": {
+        "total": 8491,
+        "input": 3,
+        "output": 6,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 8482
+        }
+      },
+      "finish": "stop"
+    },
+    "parts": [
+      {
+        "id": "prt_0000000000000000000000002",
+        "sessionID": "ses_0000000000000000000000000",
+        "messageID": "msg_0000000000000000000000002",
+        "type": "step-start",
+        "snapshot": "853694aae8816094a0d875fee7ea26278dbf5d0f"
+      },
+      {
+        "id": "prt_0000000000000000000000003",
+        "sessionID": "ses_0000000000000000000000000",
+        "messageID": "msg_0000000000000000000000002",
+        "type": "text",
+        "text": "PONG",
+        "time": {
+          "start": 1787648608748,
+          "end": 1787648608749
+        }
+      },
+      {
+        "id": "prt_0000000000000000000000004",
+        "sessionID": "ses_0000000000000000000000000",
+        "messageID": "msg_0000000000000000000000002",
+        "type": "step-finish",
+        "reason": "stop",
+        "snapshot": "853694aae8816094a0d875fee7ea26278dbf5d0f",
+        "cost": 0.0319065,
+        "tokens": {
+          "total": 8491,
+          "input": 3,
+          "output": 6,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 8482
+          }
+        }
+      }
+    ]
+  },
+  {
+    "info": {
+      "id": "msg_0000000000000000000000003",
+      "sessionID": "ses_0000000000000000000000000",
+      "role": "user",
+      "time": {
+        "created": 1787648899021
+      },
+      "summary": {
+        "diffs": []
+      },
+      "agent": "build",
+      "model": {
+        "providerID": "github-copilot",
+        "modelID": "claude-sonnet-4.6"
+      }
+    },
+    "parts": [
+      {
+        "id": "prt_0000000000000000000000005",
+        "sessionID": "ses_0000000000000000000000000",
+        "messageID": "msg_0000000000000000000000003",
+        "type": "text",
+        "text": "Now reply with exactly one word: PING"
+      }
+    ]
+  },
+  {
+    "info": {
+      "id": "msg_0000000000000000000000004",
+      "sessionID": "ses_0000000000000000000000000",
+      "role": "assistant",
+      "time": {
+        "created": 1787648899029,
+        "completed": 1787648901009
+      },
+      "parentID": "msg_0000000000000000000000003",
+      "modelID": "claude-sonnet-4.6",
+      "providerID": "github-copilot",
+      "mode": "build",
+      "agent": "build",
+      "path": {
+        "cwd": "<WORKTREE_PATH>",
+        "root": "<WORKTREE_PATH>"
+      },
+      "cost": 0.0026961,
+      "tokens": {
+        "total": 8508,
+        "input": 3,
+        "output": 5,
+        "reasoning": 0,
+        "cache": {
+          "read": 8482,
+          "write": 18
+        }
+      },
+      "finish": "stop"
+    },
+    "parts": [
+      {
+        "id": "prt_0000000000000000000000006",
+        "sessionID": "ses_0000000000000000000000000",
+        "messageID": "msg_0000000000000000000000004",
+        "type": "step-start",
+        "snapshot": "853694aae8816094a0d875fee7ea26278dbf5d0f"
+      },
+      {
+        "id": "prt_0000000000000000000000007",
+        "sessionID": "ses_0000000000000000000000000",
+        "messageID": "msg_0000000000000000000000004",
+        "type": "text",
+        "text": "PING",
+        "time": {
+          "start": 1787648900963,
+          "end": 1787648900964
+        }
+      },
+      {
+        "id": "prt_0000000000000000000000008",
+        "sessionID": "ses_0000000000000000000000000",
+        "messageID": "msg_0000000000000000000000004",
+        "type": "step-finish",
+        "reason": "stop",
+        "snapshot": "853694aae8816094a0d875fee7ea26278dbf5d0f",
+        "cost": 0.0026961,
+        "tokens": {
+          "total": 8508,
+          "input": 3,
+          "output": 5,
+          "reasoning": 0,
+          "cache": {
+            "read": 8482,
+            "write": 18
+          }
+        }
+      }
+    ]
+  }
+]
