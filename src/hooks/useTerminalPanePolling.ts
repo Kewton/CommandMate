@@ -34,6 +34,8 @@ import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { LivePromptData } from '@/types/models';
 import type {
   AgentSessionContextView,
+  AgentSessionDiffFileView,
+  AgentSessionDiffView,
   AgentSessionSnapshot,
   AgentSessionView,
 } from '@/types/agent-session';
@@ -64,7 +66,7 @@ export const UNCLASSIFIED_CONFIRMATION_DELAY_MS = 500;
  * `{ session: null, context: null }` on each render would break the memo of
  * every consumer that takes it as a prop.
  */
-const EMPTY_AGENT_SESSION: AgentSessionSnapshot = { session: null, context: null };
+const EMPTY_AGENT_SESSION: AgentSessionSnapshot = { session: null, context: null, diff: null };
 
 /**
  * A string that changes exactly when the rendered agent-session values do.
@@ -78,6 +80,7 @@ const EMPTY_AGENT_SESSION: AgentSessionSnapshot = { session: null, context: null
 function agentSessionSignature(snapshot: AgentSessionSnapshot): string {
   const s = snapshot.session;
   const c = snapshot.context;
+  const d = snapshot.diff;
   return JSON.stringify([
     s?.title ?? null,
     s?.agent ?? null,
@@ -87,7 +90,21 @@ function agentSessionSignature(snapshot: AgentSessionSnapshot): string {
     c?.tokens ?? null,
     c?.limit ?? null,
     c?.percent ?? null,
+    // Issue #2043. The file *names* and counts, not `filesAt` or `at`: those
+    // move on frames that change no pixel, which is the whole point of this
+    // signature. `revertedMessageId` is in because it flips the panel between
+    // offering revert and offering unrevert.
+    d?.turnMessageId ?? null,
+    d?.revertedMessageId ?? null,
+    d?.files.map(diffFileSignature) ?? null,
+    d?.revertedFiles.map(diffFileSignature) ?? null,
   ]);
+}
+
+/** The fields of one diff row that reach a surface. `patch` does not — it is
+ * only read when a row is clicked, and it is the largest field on the payload. */
+function diffFileSignature(file: AgentSessionDiffFileView): string {
+  return `${file.file ?? ''}:${file.status ?? ''}:${file.additions}:${file.deletions}`;
 }
 
 export interface PaneTerminalState {
@@ -162,6 +179,8 @@ interface CurrentOutputResponse {
   structuredEvents?: {
     session?: AgentSessionView | null;
     sessionContext?: AgentSessionContextView | null;
+    /** Issue #2043. opencode only; absent on every other tool and every older daemon. */
+    sessionDiff?: AgentSessionDiffView | null;
   };
 }
 
@@ -381,6 +400,8 @@ export function useTerminalPanePolling({
       const nextAgentSession: AgentSessionSnapshot = {
         session: data.structuredEvents?.session ?? null,
         context: data.structuredEvents?.sessionContext ?? null,
+        // Issue #2043, carried on the same poll and for the same reason.
+        diff: data.structuredEvents?.sessionDiff ?? null,
       };
       setAgentSession(prev =>
         agentSessionSignature(prev) === agentSessionSignature(nextAgentSession)

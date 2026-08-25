@@ -60,6 +60,7 @@ import {
   recordAgentSessionTelemetry,
 } from '@/lib/hooks/agent-session-telemetry';
 import { getRememberedOpencodeSession } from '@/lib/session/opencode-session-store';
+import { forgetOpencodeSessionDiff, recordOpencodeDiffFrame } from './diff';
 import { isPlainObject, readStringField } from '../event-mapper';
 import type {
   AgentInstanceRef,
@@ -454,6 +455,10 @@ export async function closeOpencodeSubscription(target: AgentInstanceRef): Promi
   // Whatever it had already produced is in `opencode.db` and comes back through
   // `recoverHistory` on the next attach.
   forgetOpencodeTranscripts(target);
+  // Issue #2043, on the same terms again: a revert this pane was holding is the
+  // previous process's business, and a file list left behind would be offered
+  // for "unrevert" against a session that no longer exists.
+  forgetOpencodeSessionDiff(target);
   logger.info('opencode-subscription-closed', {
     worktreeId: target.worktreeId,
     instanceId: target.instanceId ?? target.cliToolId,
@@ -928,6 +933,26 @@ function deliver(
   // set. See `./transcript` for the measurement.
   if (type === 'message.updated' || type === 'message.part.updated') {
     recordOpencodeTranscriptFrame(state.target, frame, receivedAt);
+  }
+
+  // Issue #2043, a block of its own directly after #2041's and deliberately not
+  // merged into it: `session.diff` maps to none of the seven event words, and
+  // #2045 is adding a reader to this same function in parallel -- independent
+  // blocks are what makes "keep both" a mechanical merge rather than a rewrite.
+  //
+  // Three frame types, because the state needs all three and no single one
+  // carries it (measured on 1.18.22, see `./diff` and the design doc's §16):
+  //
+  //  - `session.diff` -- the files a revert is holding back. **Empty on every
+  //    frame of an ordinary turn**, which is why it is not read as "what this
+  //    turn changed";
+  //  - `session.updated` -- `Session.revert`, the only signal an *unrevert*
+  //    produces (a successful one emits no `session.diff` at all);
+  //  - `message.updated` (role `user`) -- the message id
+  //    `GET /session/:id/diff?messageID=...` needs, which is the only call
+  //    measured to answer the turn's files.
+  if (type === 'session.diff' || type === 'session.updated' || type === 'message.updated') {
+    recordOpencodeDiffFrame(state.target, frame, receivedAt);
   }
 
   // Issue #2034: before the gate, and independent of what it decides. An abort

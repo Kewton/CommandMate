@@ -2235,3 +2235,212 @@ argv:    ['run','--format','json','--agent','plan','--variant','high',"Review to
 - `src/lib/db/agent-session-cost-db.ts` / `agent-session-cost-sampler.ts`（新規）— 台帳 CRUD と in-memory からの写し取り
 - `src/lib/daily-summary-generator.ts` — レポート末尾に cost 節を **additive** に追記（プロンプトは不変）
 - `src/components/review/ReportTab.tsx` / `worktree/schedules/ScheduleEditDialog.tsx` — 選択肢と入力欄
+
+---
+
+## 16. Issue 2043: このターンの変更ファイル / revert / unrevert（opencode 1.18.22 / 2026-08-26）
+
+### 16.0 結論サマリ（**Issue 本文の前提は実測で崩れた**）
+
+Issue #2043 は「`session.diff` を保持して『このターンの変更ファイル』を出す」と書いている。
+**1.18.22 の `session.diff` はそれを運んでいない。**
+
+| 問い | Issue の前提 | 実測 |
+|---|---|---|
+| `session.diff` は何を運ぶか | このターンが変えたファイル | **revert が現在せき止めている変更**。通常ターン中は常に `diff: []` |
+| このターンのファイルはどこから取るか | `session.diff` | `GET /session/:id/diff?**messageID**=<user msg>` のみ |
+| `GET /session/:id/diff`（messageID なし） | — | **常に `[]`**。ターン前も後も |
+| `POST /revert` の引数 | （記載なし） | `{ messageID }` が**必須**。省略は 400 |
+| revert 失敗の見分け方 | （記載なし） | **200 が失敗を意味しうる**。body の `Session.revert` を見るしかない |
+
+Issue 本文が引く「#1758 で 26 通観測」は本リポジトリに証跡が残っていないため、
+本節はすべて 2026-08-26 に取り直した一次実測である。**推測値は 1 つも入れていない。**
+
+### 16.1 隔離の確認（先に撃つ）
+
+§4 のハーネスをそのまま使い、`HOME` ごと scratchpad へ差し替えて port 4843 で `opencode serve`。
+`auth.json` は mode 600 で複製し、検証後に削除した。TUI のモデルピッカーは一度も開いていない（config で固定）。
+
+```console
+$ curl -sS http://127.0.0.1:4843/path
+{"home":"…/scratchpad/oc2043/home","state":"…/scratchpad/oc2043/home/.local/state/opencode",
+ "config":"…/scratchpad/oc2043/home/.config/opencode","worktree":"…/scratchpad/oc2043/work",
+ "directory":"…/scratchpad/oc2043/work"}
+```
+
+5 つとも scratchpad 配下。**tmux は本節では一度も使っていない**（REST と SSE tap だけで足りた）ので、
+既定 tmux サーバには一切触れていない。後始末は PID 指定 kill（`pkill -f` は使っていない）。
+検証後、ユーザーの `~/.local/share/opencode/opencode.db` の mtime が spike 開始前のままであることを確認した。
+
+### 16.2 語彙とスキーマは `GET /doc` から取った（推測していない）
+
+`Event` の 89 種のうち diff / revert 系は 4 種:
+
+```
+session.diff                  -> EventSessionDiff
+session.next.revert.staged    -> EventSessionNextRevertStaged
+session.next.revert.cleared   -> EventSessionNextRevertCleared
+session.next.revert.committed -> EventSessionNextRevertCommitted
+```
+
+ルートは 3 本（`/api/session/:id/revert/{stage,clear,commit}` は別系統で本 Issue では未使用）:
+
+```
+GET  /session/{sessionID}/diff        （query: directory / workspace / messageID）
+POST /session/{sessionID}/revert      （body: { messageID: ^msg (required), partID?: ^prt }）
+POST /session/{sessionID}/unrevert    （body なし）
+```
+
+`SnapshotFileDiff` の **required は `additions` / `deletions` の 2 つだけ**である。
+`file` / `patch` / `status` は optional。したがって「`file` は必ずある」と書いたコードは
+opencode がその自由を行使した瞬間に `undefined` をファイル名として描画する。
+`status` の enum は `added` / `deleted` / `modified` の 3 値。
+
+`Session` 側には `revert?: { messageID, partID?, snapshot?, diff? }` と
+`summary?: { additions, deletions, files, diffs? }` がある。
+
+### 16.3 `session.diff` は通常ターンでは**常に空**（本節の中心的な実測）
+
+ファイルを 1 つ作り 1 つ書き換えるターンを 2 回流した。SSE tap の全フレーム内訳（1 ターン目）:
+
+```
+45 plugin.added / 20 message.part.updated / 14 message.updated / 8 session.status
+ 7 session.updated / 4 server.heartbeat / 4 session.diff / 2 file.edited / 1 session.idle …
+```
+
+`session.diff` は 4 通来た。**4 通とも `diff: []`。** 時系列は次のとおりで、
+**編集が着地した後・`session.idle` と同一ミリ秒のフレームすら空**である。
+
+```
+00:58:16.329 file.edited  sample.txt
+00:58:17.141 file.edited  added.txt
+00:58:19.495 session.idle
+00:58:19.495 session.updated  summary={"additions":0,"deletions":0,"files":0}
+00:58:19.495 session.diff     diff_len=0        ← 編集 2 件の後、idle と同時刻
+```
+
+2 ターン目も同じ（4 通すべて `diff_len=0`）。**合計 8 通 / 空 8 通。**
+`Session.summary` も同じ間ずっと `{0,0,0}` だった。
+
+一方、同時刻のファイル系は確かに変わっている:
+
+```console
+$ cat work/sample.txt          $ git -C work status --porcelain
+line1                           M sample.txt
+LINE-TWO-EDITED                ?? added.txt
+line3
+```
+
+### 16.4 ターンの変更ファイルは `?messageID=` でしか取れない
+
+```console
+$ curl -sS "http://127.0.0.1:4843/session/$SES/diff"
+[]
+
+$ curl -sS "http://127.0.0.1:4843/session/$SES/diff?messageID=$USER_MSG"
+[{"file":"added.txt","patch":"Index: added.txt\n…@@ -0,0 +1,1 @@\n+banana\n…",
+  "additions":1,"deletions":0,"status":"added"},
+ {"file":"sample.txt","patch":"Index: sample.txt\n…@@ -1,3 +1,3 @@\n line1\n-line2\n+LINE-TWO-EDITED\n line3\n",
+  "additions":1,"deletions":1,"status":"modified"}]
+```
+
+`messageID` は**ターンを開いた user メッセージの id**（`^msg`）。`^msg` でない値は **400 BadRequest**、
+`^msg` だが存在しない値は **200 `[]`**。
+`patch` は素の unified diff なので、既存の `DiffViewer` にそのまま渡せる（実装はそうしている）。
+
+**この応答は履歴であって現況ではない。** そのターンを revert した後も同じ 2 件を返し続ける（16.5）。
+
+### 16.5 revert / unrevert の実測
+
+`POST /session/:id/revert {"messageID": <2 ターン目の user msg>}` → **200**。
+
+```json
+"revert": {"messageID":"msg_cmateab46…","snapshot":"f920e809…",
+           "diff":"diff --git a/sample.txt b/sample.txt\n…-SECOND-TURN"}
+"summary": {"additions":1,"deletions":0,"files":1}
+```
+
+- ファイルは戻る（`SECOND-TURN` の行が消えた）。
+- **直後に `session.diff` が `diff_len=1` で飛んでくる**（それまで 8 通連続で空だったもの）。
+  内容は「revert がせき止めているファイル」そのもの。`session.updated` の `revert.messageID` も同時に立つ。
+- `GET /diff?messageID=<そのターン>` は**依然として非空**（履歴だから）。
+- `GET /diff`（messageID なし）は revert の前後とも `[]` なので、
+  **受入条件の「revert で `GET /session/:id/diff` が空になる」は前後とも空という意味で空虚**である。
+  意味のある観測は上の `session.diff` と `Session.revert` の方。
+
+**revert は破壊的である。**1 ターン目の user msg を指定して revert すると、
+`sample.txt` はセッション前の内容に戻り、**エージェントが作った `added.txt` は削除された**。
+さらに、`.gitignore` を commit した後で 1 ターン目へ revert したところ、
+**commit 済みの変更まで作業ツリー上で巻き戻り**、`git status` が ` D added.txt` / ` M sample.txt` になった。
+revert は git snapshot 台帳からの復元であって「未 commit 分の取り消し」ではない。
+
+`POST /session/:id/unrevert`（body 不要）→ **200**、`Session.revert` が `null` になり `SECOND-TURN` が戻った。
+**このとき `session.diff` は 1 通も飛んでこない。** 出たのは `session.updated`（`revert: null`）だけ。
+`session.diff` が空になるのを待つ実装は永久に待つ。
+
+#### 16.5.1 200 が失敗を意味する 2 つの形（**実装が最も落ちやすい所**）
+
+| 状況 | HTTP | body の `Session.revert` | 実際に起きたこと |
+|---|---|---|---|
+| 未 revert 状態で存在しない `msg_…` を指定 | **200** | `null` | 何もしていない |
+| **既に revert 中**に存在しない `msg_…` を指定 | **200** | **既存の revert がそのまま** | 何もしていない |
+| 正常な revert | 200 | 指定した `messageID` が入る | 実行された |
+| `^msg` でない値 | 400 | — | `{"name":"BadRequest","data":{…,"kind":"Payload"}}` |
+| ターン実行中 | **409** | — | `{"_tag":"SessionBusyError","sessionID":…}`（revert / unrevert 両方） |
+| 何も revert されていない状態での unrevert | 200 | `null` | no-op |
+
+2 行目が厄介で、**`revert === null` かどうかだけを見る実装は「成功」と誤読し、しかも直前の revert の
+messageID を成功として報告する。** 本実装はこれを実サーバ相手のプローブで踏んで直した
+（`revert.messageID === 要求した id` で判定する）。
+なお revert 中に別のターンへ revert し直すことはでき、その場合 `revert.messageID` は差し替わる。
+
+### 16.6 opencode の diff は git の死角を見ない（work-evidence への含意）
+
+`.gitignore` に `ignored/` を書いて commit したうえで、エージェントに `ignored/secret.txt` を作らせた。
+
+```console
+$ git -C work status --porcelain      # 空（ignore が効いている）
+$ cat work/ignored/secret.txt
+hidden
+$ curl -sS ".../diff?messageID=$MSG"
+[]
+```
+
+**opencode 側も `[]`。** opencode の台帳は git snapshot なので git と同じ死角を持つ。
+したがって「`session.diff` を work-evidence の証跡に使うと git より広く見える」という期待は**成り立たない**。
+それでも additive にする価値があるのは 16.5 の方で、
+**この Issue が足す revert ボタン自体が、作業ツリーを git から見て「何もしていない」状態にしうる**からである。
+
+### 16.7 CommandMate 側の実装（#2043 で入れたもの）
+
+- `src/lib/hooks/sources/opencode/client.ts`（末尾に追記）— `readOpencodeFileDiffs()` /
+  `fetchOpencodeMessageDiff()` / `revertOpencodeMessage()` / `unrevertOpencodeSession()`。
+  戻り値は `OpencodeRevertOutcome`（`reverted` / `restored` / `no_op` / `busy` / `rejected` / `unreachable`）で、
+  16.5.1 の 200 を `no_op` として分離している。
+- `src/lib/hooks/sources/opencode/diff.ts`（新規）— インスタンスごとの diff 状態。
+  `session.diff`（せき止め分）・`session.updated`（`Session.revert`）・
+  `message.updated` role=user（`messageID`）の 3 種から組み立て、
+  `ensureOpencodeSessionDiff()` が #2042 と同じく**ターンが動いたときだけ** REST を 1 回撃つ。
+- `src/lib/hooks/sources/opencode/subscription.ts` — `deliver()` に**独立した 1 ブロック**を追加（#2041 の直後）。
+- `structuredEvents.sessionDiff` — `session`（#2040）/ `sessionContext`（#2042）に次ぐ 3 つ目。**additive**。
+- `src/app/api/worktrees/[id]/opencode/diff/route.ts`（新規）— `GET`（強制再読）と `POST`（`revert` / `unrevert`）。
+  revert の対象 `messageID` は**サーバ側の記録から取る**（ブラウザからは受け取らない）。
+- `src/components/worktree/OpencodeTurnDiffPanel.tsx`（新規）— opencode 限定・空なら非表示。
+  ファイル名クリックで既存 `DiffViewer` を開き、revert / unrevert は確認ダイアログ必須。
+- `src/lib/verification/gate-runner.ts` — `work-evidence` に第 2 証跡を additive に追加。
+  **git が何も見つけなかった分岐でしか呼ばれない**、かつ**opencode インスタンスを名指しした run でしか呼ばれない**。
+
+### 16.8 実測で確認したもの / していないもの
+
+確認したもの: 16.2〜16.6 の全て（`GET /doc` の schema / `session.diff` 8 通の中身 / `?messageID=` の応答 /
+revert・unrevert の 200・400・409 / 破壊性 / 200 の 2 つの失敗形 / gitignore の死角）。
+実装コードそのものを稼働中サーバへ当てて 6 通りの `OpencodeRevertOutcome` を確認した（`tsx` で直接実行）。
+
+**計測していないもの**（推測で埋めていない）:
+
+- `POST /revert` の `partID`。ターンの途中まで戻す用途と読めるが撃っていない。実装も送っていない。
+- `session.next.revert.staged` / `.cleared` / `.committed` の 3 イベントと
+  `/api/session/:id/revert/{stage,clear,commit}`。別系統で、本 Issue の UI からは触っていない。
+- `GET /diff` の `directory` / `workspace` query。
+- CommandMate の UI を通した実機の end-to-end（隔離サーバ + ブラウザ）。
+  検証したのは REST / SSE の層と、実装関数を稼働サーバへ当てた層まで。UI 側は unit test で挟んである。

@@ -40,6 +40,7 @@ import { TerminalEscapeHatch } from '@/components/worktree/TerminalEscapeHatch';
 import { UnsentComposerBar, hasUnsentComposerText } from '@/components/worktree/UnsentComposerBar';
 import { PromptPanel } from '@/components/worktree/PromptPanel';
 import { MessageInput } from '@/components/worktree/MessageInput';
+import { OpencodeTurnDiffPanel } from '@/components/worktree/OpencodeTurnDiffPanel';
 import { HistoryPane, splitHistorySlotId } from '@/components/worktree/HistoryPane';
 import { PaneResizer } from '@/components/worktree/PaneResizer';
 import { AutoYesToggle } from '@/components/worktree/AutoYesToggle';
@@ -571,6 +572,19 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
             cliToolName={getCliToolDisplayName(cliToolId)}
           />
         ) : null}
+        {/* Issue #2043: opencode only, and only when opencode has named files.
+            Renders nothing at all for every other tool -- see
+            OpencodeTurnDiffPanel / hasAgentSessionDiff. Placed directly above
+            the composer, beside OpencodeSessionControls, because both are
+            opencode-only affordances that act on the conversation in this
+            split. */}
+        <OpencodeTurnDiffPanel
+          worktreeId={worktreeId}
+          cliToolId={cliToolId}
+          instanceId={resolvedInstanceId}
+          diff={agentSession.diff}
+          disabled={!terminal.isRunning}
+        />
         <MessageInput
           worktreeId={worktreeId}
           onMessageSent={handleMessageSent}
@@ -636,6 +650,10 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       onAutoYesToggle,
       // Issue #806: toast surface for the "queued (session busy)" hint.
       showToast,
+      // Issue #2043: the poll gives this a stable identity between turns (see
+      // `agentSessionSignature`), so it re-runs the memo when the file list
+      // actually changes and not on every 2s poll that repeats it.
+      agentSession.diff,
     ],
   );
 

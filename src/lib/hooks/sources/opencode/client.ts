@@ -1059,3 +1059,283 @@ export async function fetchOpencodeContextTokens(
   }
   return null;
 }
+
+
+// ============================================================================
+// Turn diff, revert and unrevert (Issue #2043). Appended at the end of the file
+// for the reason #2042's block above says: nothing here touches an export above
+// it, so a parallel branch editing this module's neighbours cannot conflict.
+//
+// ## What was measured, and how it contradicts Issue #2043's premise
+//
+// Measured live on opencode **1.18.22** in an isolated `HOME`
+// (`docs/design/opencode-server-live-verification.md` §16). Two full turns that
+// edited files produced **eight `session.diff` frames and every one carried
+// `diff: []`** — including the frame emitted in the same millisecond as
+// `session.idle`, after both `file.edited` frames. `session.diff` is therefore
+// **not** "the files this turn changed". It is *what a revert is currently
+// holding back*: it went non-empty the instant `POST /session/:id/revert`
+// returned, naming exactly the files that revert undid.
+//
+// The turn's changed files come from `GET /session/:id/diff?messageID=<the user
+// message that started the turn>`. The same route **without** `messageID`
+// answered `[]` on every call, before and after a turn alike.
+// ============================================================================
+
+/**
+ * One file in an opencode diff — the wire's `SnapshotFileDiff`.
+ *
+ * `file`, `patch` and `status` are nullable because the server's own OpenAPI
+ * (`GET /doc`, 1.18.22) marks only `additions` and `deletions` required. A UI
+ * that assumed `file` was always there would render `undefined` as a filename
+ * the first time opencode exercised that freedom.
+ */
+export interface OpencodeFileDiff {
+  /** Repository-relative path, or null when the server did not name one. */
+  file: string | null;
+  /** Unified diff for this file, or null. Rendered verbatim by `DiffViewer`. */
+  patch: string | null;
+  additions: number;
+  deletions: number;
+  /** `added` | `deleted` | `modified`, or null. */
+  status: OpencodeFileDiffStatus | null;
+}
+
+/** The three values 1.18.22's `SnapshotFileDiff.status` enum declares. */
+export type OpencodeFileDiffStatus = 'added' | 'deleted' | 'modified';
+
+const OPENCODE_FILE_DIFF_STATUSES: readonly string[] = ['added', 'deleted', 'modified'];
+
+/**
+ * Cap on files kept from one diff.
+ *
+ * A diff is carried on the status poll's payload, and `patch` is unbounded — a
+ * generated lockfile is megabytes of it. The cap is on *files* rather than
+ * bytes so the panel never shows half a file's name; {@link MAX_OPENCODE_DIFF_PATCH_CHARS}
+ * is the byte-side companion.
+ */
+export const MAX_OPENCODE_DIFF_FILES = 200;
+
+/** Cap on one file's `patch`. Truncated patches still render; huge ones do not. */
+export const MAX_OPENCODE_DIFF_PATCH_CHARS = 64 * 1024;
+
+/**
+ * Read an array of `SnapshotFileDiff` off any opencode payload.
+ *
+ * Shared by the event reader and the REST reader on purpose: `session.diff`'s
+ * `properties.diff` and `GET /session/:id/diff`'s body are the *same* schema,
+ * and two readers of one shape is how they come apart.
+ *
+ * Entries that are not objects are dropped rather than represented, and a
+ * non-array answers the empty array — "the server said nothing readable" and
+ * "the server said no files" are the same instruction to a panel that hides
+ * itself when empty.
+ */
+export function readOpencodeFileDiffs(value: unknown): OpencodeFileDiff[] {
+  if (!Array.isArray(value)) return [];
+  const files: OpencodeFileDiff[] = [];
+  for (const entry of value) {
+    if (!isPlainObject(entry)) continue;
+    const patch = typeof entry.patch === 'string' ? entry.patch : null;
+    files.push({
+      file: typeof entry.file === 'string' && entry.file.length > 0 ? entry.file : null,
+      patch: patch === null ? null : patch.slice(0, MAX_OPENCODE_DIFF_PATCH_CHARS),
+      additions: typeof entry.additions === 'number' && Number.isFinite(entry.additions)
+        ? entry.additions
+        : 0,
+      deletions: typeof entry.deletions === 'number' && Number.isFinite(entry.deletions)
+        ? entry.deletions
+        : 0,
+      status:
+        typeof entry.status === 'string' && OPENCODE_FILE_DIFF_STATUSES.includes(entry.status)
+          ? (entry.status as OpencodeFileDiffStatus)
+          : null,
+    });
+    if (files.length >= MAX_OPENCODE_DIFF_FILES) break;
+  }
+  return files;
+}
+
+/**
+ * The files one user message's turn changed (Issue #2043).
+ *
+ * `GET /session/:id/diff?messageID=<msg…>`. **The `messageID` is not optional in
+ * practice**: measured on 1.18.22, the same route without it answered `[]` both
+ * before and after a turn that changed two files, while the same call *with* it
+ * answered both files and their patches.
+ *
+ * The answer is a historical record rather than live state — measured: it still
+ * returned the turn's two files after that turn had been reverted — so a caller
+ * showing "what this turn changed" is reading the right thing, and a caller
+ * asking "is this still applied" is not.
+ *
+ * A malformed `messageID` (one not starting with `msg`) is a **400** from the
+ * server, which collapses to null here like every other failure.
+ *
+ * @param port - The instance's server
+ * @param sessionId - `ses_…`
+ * @param messageId - `msg_…`, the *user* message that opened the turn
+ * @returns The files, or null when the server could not be asked
+ */
+export async function fetchOpencodeMessageDiff(
+  port: number,
+  sessionId: string,
+  messageId: string
+): Promise<OpencodeFileDiff[] | null> {
+  const url =
+    `${opencodeBaseUrl(port)}/session/${encodeURIComponent(sessionId)}/diff` +
+    `?messageID=${encodeURIComponent(messageId)}`;
+  const body = await requestJson(url);
+  if (!Array.isArray(body)) return null;
+  return readOpencodeFileDiffs(body);
+}
+
+/**
+ * What a revert or unrevert did, told apart by what the caller can do next.
+ *
+ * Six outcomes rather than a boolean, because three of them were measured to be
+ * indistinguishable from success at the HTTP layer:
+ *
+ *  - **`no_op`** — `POST /revert` with a well-formed but *nonexistent*
+ *    `messageID` answered **200** with `revert: null`. The server did nothing
+ *    and said so only in the body. A UI that trusted the status code would
+ *    report a revert that never happened.
+ *  - **`busy`** — a **409 `SessionBusyError`** while the agent is mid-turn.
+ *    Measured for both routes. Recoverable by waiting, unlike `rejected`.
+ *  - **`rejected`** — a 400 `BadRequest` (a `messageID` not matching `^msg`),
+ *    or any other status. Asking again will not help.
+ */
+export type OpencodeRevertOutcome =
+  /** The session is now holding work back; `messageID` is what it reverted to. */
+  | { kind: 'reverted'; messageId: string }
+  /** No work is held back any more. The answer to a successful unrevert. */
+  | { kind: 'restored' }
+  /** 200, but the session came back with no revert: nothing happened. */
+  | { kind: 'no_op' }
+  /** 409 `SessionBusyError`: the agent is mid-turn. Retryable. */
+  | { kind: 'busy' }
+  /** The server refused. Not retryable. */
+  | { kind: 'rejected'; status: number }
+  /** Nothing answered, or the answer was not opencode's. */
+  | { kind: 'unreachable' };
+
+/**
+ * `Session.revert.messageID`, or null when the session holds nothing back.
+ *
+ * The one field that distinguishes a revert that took from one that did not,
+ * for both routes: `POST /revert` sets it, `POST /unrevert` clears it, and a
+ * no-op leaves it as it was.
+ */
+function readSessionRevertMessageId(body: unknown): string | null {
+  if (!isPlainObject(body)) return null;
+  const revert = isPlainObject(body.revert) ? body.revert : null;
+  if (!revert) return null;
+  return typeof revert.messageID === 'string' && revert.messageID.length > 0
+    ? revert.messageID
+    : null;
+}
+
+/** One POST to a revert route, with the three measured statuses kept apart. */
+async function postOpencodeRevertRoute(
+  url: string,
+  body: Record<string, unknown>
+): Promise<{ outcome: OpencodeRevertOutcome } | { revertedTo: string | null }> {
+  let response: Response;
+  try {
+    response = await loopbackFetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': OPENCODE_JSON_CONTENT_TYPE },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(OPENCODE_REQUEST_TIMEOUT_MS),
+    });
+  } catch (error) {
+    logger.debug('opencode-request-failed', {
+      url,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return { outcome: { kind: 'unreachable' } };
+  }
+
+  if (response.status === 409) return { outcome: { kind: 'busy' } };
+  if (!response.ok) {
+    logger.warn('opencode-revert-rejected', { url, status: response.status });
+    return { outcome: { kind: 'rejected', status: response.status } };
+  }
+  // #1931: an unknown route on a real opencode answers `200 text/html`, so a
+  // 200 alone does not mean this route exists on the server that answered.
+  if (!hasContentType(response, OPENCODE_JSON_CONTENT_TYPE)) {
+    return { outcome: { kind: 'unreachable' } };
+  }
+
+  try {
+    return { revertedTo: readSessionRevertMessageId(await response.json()) };
+  } catch {
+    return { outcome: { kind: 'unreachable' } };
+  }
+}
+
+/**
+ * Undo one turn's file changes (Issue #2043).
+ *
+ * `POST /session/:id/revert` with `{ messageID }`. **Destructive and measured to
+ * be so**: reverting to the first turn of a two-turn session restored
+ * `sample.txt` to its pre-session contents *and deleted* the `added.txt` the
+ * agent had created. It rewrites the working tree from opencode's own git
+ * snapshot ledger, so it can also undo work that was already committed — the
+ * measurement in §16.5 left a clean tree reading ` D added.txt` / ` M
+ * sample.txt` afterwards.
+ *
+ * That is why the caller is expected to confirm first, and why a `no_op` is
+ * reported rather than swallowed.
+ *
+ * @param port - The instance's server
+ * @param sessionId - `ses_…`
+ * @param messageId - `msg_…`, the user message whose turn is being undone
+ */
+export async function revertOpencodeMessage(
+  port: number,
+  sessionId: string,
+  messageId: string
+): Promise<OpencodeRevertOutcome> {
+  const url = `${opencodeBaseUrl(port)}/session/${encodeURIComponent(sessionId)}/revert`;
+  const result = await postOpencodeRevertRoute(url, { messageID: messageId });
+  if ('outcome' in result) return result.outcome;
+  // Measured twice, and the second measurement is why this compares ids rather
+  // than testing for null. From a session with nothing reverted, an unknown
+  // `messageID` answers `200` with `revert: null`. From a session that is
+  // **already** holding a revert, the same request answers `200` with the
+  // *existing* `revert` untouched — so a null check alone reported success, and
+  // reported it under the previous revert's message id. A revert that took
+  // echoes the id that was asked for; anything else did nothing.
+  return result.revertedTo === messageId
+    ? { kind: 'reverted', messageId }
+    : { kind: 'no_op' };
+}
+
+/**
+ * Put back everything a revert is holding (Issue #2043).
+ *
+ * `POST /session/:id/unrevert`. Takes no arguments — it restores *all*
+ * previously reverted messages, per the server's own summary — and answers
+ * **200 on a session with nothing reverted**, which is why "restored" here means
+ * "nothing is held back now" rather than "something moved".
+ *
+ * Measured asymmetry worth knowing: a successful unrevert emits **no
+ * `session.diff` frame at all**, only `session.updated` with `revert: null`. A
+ * reader that waited for `session.diff` to go empty would wait forever, which is
+ * why {@link readOpencodeRevertState} reads the session frame too.
+ */
+export async function unrevertOpencodeSession(
+  port: number,
+  sessionId: string
+): Promise<OpencodeRevertOutcome> {
+  const url = `${opencodeBaseUrl(port)}/session/${encodeURIComponent(sessionId)}/unrevert`;
+  const result = await postOpencodeRevertRoute(url, {});
+  if ('outcome' in result) return result.outcome;
+  // Here the null check *is* the right test: unrevert takes no argument, so
+  // "nothing is held back any more" is the whole success condition. A session
+  // that still reports a revert refused to let go of it.
+  return result.revertedTo === null
+    ? { kind: 'restored' }
+    : { kind: 'no_op' };
+}

@@ -287,6 +287,10 @@ describe('structuredEvents exposure (Issue #1722)', () => {
       // agent's own API, so it is null wherever `session` is — there is no
       // session to ask about — and null forever for claude.
       sessionContext: null,
+      // Issue #2043: the third additive key. Named here because this assertion
+      // is a whole-shape one on purpose — a field that appeared without anyone
+      // deciding it should is exactly what it catches.
+      sessionDiff: null,
     });
   });
 
@@ -351,6 +355,8 @@ describe('structuredEvents exposure (Issue #1722)', () => {
       session: null,
       // Issue #2042: and with no session there is nothing to measure.
       sessionContext: null,
+      // Issue #2043: nor anything to have changed on disk.
+      sessionDiff: null,
     });
     expect({ ...after, structuredEvents: null }).toEqual({ ...before, structuredEvents: null });
   });

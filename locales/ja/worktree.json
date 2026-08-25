@@ -1033,5 +1033,29 @@
     "spentLabel": "このセッションの消費: {tokens} トークン",
     "contextLabel": "コンテキスト使用量: {limit} トークン中 {tokens} トークン（{percent}%）",
     "contextUnknownLabel": "コンテキスト使用量: {tokens} トークン（上限不明）"
+  },
+  "opencodeDiff": {
+    "title": "このターンの変更ファイル",
+    "subtitle": "{count} ファイル",
+    "revertedTitle": "取り消し中の変更",
+    "revertedSubtitle": "{count} ファイルが取り消されています",
+    "openDiff": "{file} の差分を表示",
+    "unnamedFile": "(ファイル名なし)",
+    "status": {
+      "added": "追加",
+      "deleted": "削除",
+      "modified": "変更"
+    },
+    "revert": "このターンを取り消す",
+    "unrevert": "やり直す",
+    "revertConfirmTitle": "このターンを取り消しますか？",
+    "revertConfirmBody": "opencode が {count} ファイルへの変更を巻き戻します。追加されたファイルは削除され、コミット済みの変更も作業ツリー上では巻き戻ります。この操作は「やり直す」で復元できます。",
+    "revertConfirmLabel": "取り消す",
+    "unrevertConfirmTitle": "取り消した変更をやり直しますか？",
+    "unrevertConfirmBody": "opencode が取り消し中の {count} ファイルへの変更をすべて作業ツリーに戻します。",
+    "unrevertConfirmLabel": "やり直す",
+    "busy": "エージェントが実行中のため実行できません。ターンの完了後に再試行してください。",
+    "noop": "opencode は変更しませんでした（対象のターンが見つかりません）。",
+    "failed": "opencode が操作を拒否しました。"
   }
 }
