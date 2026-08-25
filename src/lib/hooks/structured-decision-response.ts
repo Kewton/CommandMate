@@ -33,11 +33,37 @@
  * IDOR the design policy asks to be closed is closed by construction rather
  * than by a lookup that has to remember to filter.
  *
+ * ## Questions are answered here too, and NOT as verdicts (Issue #2039)
+ *
+ * Until #2039 a pending `question.asked` was declined outright, and the reason
+ * given was sound but was read as one reason too many: a question is answered
+ * with a *choice* from a list the agent supplied, not with one of the three
+ * approval verdicts, and its numbers are the picker's rather than these. All of
+ * that is still true. What #2039 adds is the *other* mapping — see
+ * {@link questionDecisionOptions} and {@link resolveStructuredQuestionAnswer},
+ * which turn an option number, an option label or free text into the
+ * `answers: string[][]` that `POST /question/:id/reply` takes, and produce a
+ * `{ kind: 'answer' }` verdict that no permission path can consume.
+ *
+ * The two vocabularies never meet. `resolveStructuredDecisionOption` resolves
+ * against {@link STRUCTURED_DECISION_OPTIONS} — three fixed verdicts — and the
+ * question resolver resolves against the choices *this question* published;
+ * neither falls back to the other. A verdict delivered to a question is refused
+ * at the source (`question-needs-answer-verdict` in `sources/opencode/source`)
+ * and an `answer` delivered to an approval has no wire value
+ * (`toOpencodePermissionReply` answers null), so a crossed wire fails closed on
+ * both sides rather than approving something.
+ *
  * ## What is deliberately not answered here
  *
- * A pending `question.asked`. It is answered with a *choice* from a list the
- * agent supplied, not with one of the three approval verdicts, and its numbers
- * are the picker's rather than these. Questions keep the existing path.
+ * A question **selected off `listPending()` by this function**. See
+ * {@link answerStructuredDecision}: it goes on picking approvals only, because
+ * choosing to route a bare `commandmate respond <worktree> 2` onto a pending
+ * question is Issue #2040's decision (its rule is "exactly one pending decision,
+ * or 404/409"), and the mapping this module now exports is what #2040 calls when
+ * it makes it. The addressed path — `{ decisionId, answer }` — does not have
+ * that ambiguity to resolve and answers questions today: see
+ * `app/api/worktrees/[id]/respond/structured-decision`.
  *
  * A `permissionDecision` record. That field says what **this server** decided
  * on the agent's behalf while nobody was looking, which is the thing that would
@@ -49,6 +75,7 @@
  */
 
 import type { CLIToolType } from '@/lib/cli-tools/types';
+import type { AskUserQuestionSpec } from '@/lib/hooks/ask-user-question-payload';
 import { createLogger } from '@/lib/logger';
 import {
   STRUCTURED_DECISION_OPTIONS,
@@ -152,6 +179,231 @@ export function resolveStructuredDecisionOption(answer: string): StructuredDecis
     if ((VERDICT_ALIASES[option.number] ?? []).includes(normalized)) return option;
   }
   return null;
+}
+
+// =============================================================================
+// Questions (Issue #2039)
+// =============================================================================
+
+/**
+ * Cap on a free-text answer to a question.
+ *
+ * The same bound `ask-user-question-payload` puts on the question TEXT, applied
+ * to the reply for the symmetric reason: both are prose that reaches the agent
+ * verbatim, and the request body this is read from is whatever a caller chose to
+ * POST. **Refused, never truncated** — the rule #1932 states for ids holds for
+ * prose too, one step weaker: a truncated id answers the wrong approval, and a
+ * truncated sentence answers the right question with something the operator did
+ * not say.
+ */
+export const MAX_QUESTION_FREE_TEXT_LENGTH = 1000;
+
+/**
+ * The choices one question offers, numbered the way `respond` numbers them
+ * (Issue #2039).
+ *
+ * Shaped as {@link StructuredDecisionOption} on purpose, and this is the design
+ * judgement to know about rather than an economy of types. Issue #2040 maps a
+ * bare `commandmate respond <worktree> <n>` onto whatever single decision an
+ * instance is holding, and it must be able to do that without asking which KIND
+ * of decision it is: an approval publishes three fixed verdicts, a question
+ * publishes its own list, and both come back as `{ number, label, reply }`. What
+ * `reply` MEANS still differs — for a verdict it is opencode's wire word
+ * (`once` / `always` / `reject`), for a choice it is the label itself, which is
+ * exactly what `answers: string[][]` carries — but neither caller has to know
+ * that, because the value goes straight onto the wire in both cases.
+ *
+ * Only the first question is numbered. See
+ * {@link resolveStructuredQuestionAnswer} for why a multi-question call is
+ * refused rather than partially answered.
+ *
+ * @param spec - The question the agent published
+ * @returns One option per choice, 1-based in payload order; empty when the spec
+ *   carries no questions
+ */
+export function questionDecisionOptions(
+  spec: AskUserQuestionSpec
+): readonly StructuredDecisionOption[] {
+  const entry = spec.questions[0];
+  if (!entry) return [];
+  return entry.choices.map((choice, index) => ({
+    number: index + 1,
+    label: choice.label,
+    // The wire value for a question IS the label (#1758 §5.2.4:
+    // `{"answers":[["Blue"]]}`), so `reply` is not a second spelling of it.
+    reply: choice.label,
+  }));
+}
+
+/** Why an answer could not be turned into a reply to this question. */
+export type QuestionAnswerRefusal =
+  /** A number outside the published list, so it names no choice. */
+  | 'answer_out_of_range'
+  /** Several numbers for a question the agent declared single-select. */
+  | 'multi_select_not_offered'
+  /** More than one question in one call; see {@link resolveStructuredQuestionAnswer}. */
+  | 'multi_question_unsupported'
+  /** Empty, whitespace, or longer than {@link MAX_QUESTION_FREE_TEXT_LENGTH}. */
+  | 'unresolvable_answer';
+
+/** An answer this server is prepared to POST to `/question/:id/reply`. */
+export interface ResolvedQuestionAnswer {
+  /** The wire value: one array of chosen labels per question. */
+  answers: string[][];
+  /** The choices the numbers named. Empty for a free-text answer. */
+  selected: readonly StructuredDecisionOption[];
+  /** Whether this is prose the agent never offered. */
+  freeText: boolean;
+}
+
+/** {@link resolveStructuredQuestionAnswer}'s two outcomes. */
+export type QuestionAnswerResolution =
+  | { ok: true; resolved: ResolvedQuestionAnswer }
+  | { ok: false; reason: QuestionAnswerRefusal; message: string };
+
+/**
+ * A selection is written as digits, optionally several of them.
+ *
+ * Anchored and digits-only so it can never half-match: `1,3` is a selection,
+ * `1 apple` is not, and the fall-through for anything that is not a selection is
+ * a label match and then free text. The order matters — a numeric answer is
+ * resolved as a NUMBER first and refused if it is out of range, rather than
+ * quietly becoming free text, because "3" typed at a two-option question is an
+ * operator who miscounted and not an operator who meant to say the word three.
+ */
+const QUESTION_SELECTION_PATTERN = /^\d+(?:\s*[,\s]\s*\d+)*$/;
+
+/** The `1 = Red, 2 = Blue` list every refusal quotes back. */
+function describeQuestionOptions(options: readonly StructuredDecisionOption[]): string {
+  return options.map((option) => `${option.number} = ${option.label}`).join(', ');
+}
+
+/**
+ * Turn an operator's answer into the `answers` a question reply carries
+ * (Issue #2039).
+ *
+ * Three forms, resolved in this order:
+ *
+ *  1. **option numbers** — `2`, or `1,3` when the agent declared `multiSelect`.
+ *     Resolved against {@link questionDecisionOptions}, so the numbers are the
+ *     payload's own order rather than a screen's.
+ *  2. **an option label** — `Blue`, case-insensitively. The same convenience
+ *     `resolveStructuredDecisionOption` offers, and safe for the same reason:
+ *     nothing is typed at a pane, so #1681's "a word arrives as the highlighted
+ *     default" cannot happen here.
+ *  3. **free text** — anything else, sent as the single answer.
+ *
+ * ## Why a multi-question call is refused
+ *
+ * `answers` is one array PER QUESTION, in payload order (#1758 §5.2.4). A single
+ * answer string can name choices for one of them, and there is no measured
+ * meaning for the arrays belonging to the others — an empty array is not known
+ * to mean "skip". Answering the first and guessing the rest would deliver an
+ * answer the operator did not give, so a call carrying more than one question is
+ * refused and the terminal keeps it. Every `question.asked` captured so far
+ * carries exactly one (`tests/fixtures/hooks/opencode/question-asked.json`), and
+ * the browser payload only ever summarises the first
+ * (`summarizeAskUserQuestion`), so this is the honest bound rather than a
+ * shortcut.
+ *
+ * @param spec - The question, as `listPending()` reported it
+ * @param answer - What the operator sent
+ * @returns The reply, or the reason it is not one
+ */
+export function resolveStructuredQuestionAnswer(
+  spec: AskUserQuestionSpec,
+  answer: string
+): QuestionAnswerResolution {
+  const trimmed = answer.trim();
+  if (trimmed === '') {
+    return {
+      ok: false,
+      reason: 'unresolvable_answer',
+      message: 'An empty answer names no choice.',
+    };
+  }
+
+  if (spec.questions.length !== 1) {
+    return {
+      ok: false,
+      reason: 'multi_question_unsupported',
+      message:
+        `This call asks ${spec.questions.length} questions and \`answers\` carries one array ` +
+        'per question; a single answer cannot say what the others are. Answer it in the terminal.',
+    };
+  }
+
+  const entry = spec.questions[0];
+  const options = questionDecisionOptions(spec);
+
+  if (QUESTION_SELECTION_PATTERN.test(trimmed)) {
+    const picked: StructuredDecisionOption[] = [];
+    for (const token of trimmed.split(/[,\s]+/)) {
+      const option = options.find((candidate) => candidate.number === Number(token));
+      if (!option) {
+        return {
+          ok: false,
+          reason: 'answer_out_of_range',
+          message:
+            `'${trimmed}' names no choice this question offers. ` +
+            `${describeQuestionOptions(options)}.`,
+        };
+      }
+      // A repeated number is the same choice, not a second one — de-duplicated
+      // here so `1,1` cannot make a single-select answer look like two.
+      if (!picked.some((already) => already.number === option.number)) picked.push(option);
+    }
+    if (picked.length > 1 && !entry.multiSelect) {
+      return {
+        ok: false,
+        reason: 'multi_select_not_offered',
+        message:
+          'This question accepts one choice. Send a single number: ' +
+          `${describeQuestionOptions(options)}.`,
+      };
+    }
+    return {
+      ok: true,
+      resolved: {
+        answers: [picked.map((option) => option.reply)],
+        selected: picked,
+        freeText: false,
+      },
+    };
+  }
+
+  const labelled = options.find(
+    (option) => option.label.toLowerCase() === trimmed.toLowerCase()
+  );
+  if (labelled) {
+    return {
+      ok: true,
+      resolved: { answers: [[labelled.reply]], selected: [labelled], freeText: false },
+    };
+  }
+
+  if (trimmed.length > MAX_QUESTION_FREE_TEXT_LENGTH) {
+    return {
+      ok: false,
+      reason: 'unresolvable_answer',
+      message:
+        `A free-text answer is limited to ${MAX_QUESTION_FREE_TEXT_LENGTH} characters; ` +
+        'this one is longer and is refused rather than cut short.',
+    };
+  }
+
+  return { ok: true, resolved: { answers: [[trimmed]], selected: [], freeText: true } };
+}
+
+/**
+ * The verdict a resolved question answer is delivered as (Issue #2039).
+ *
+ * A one-line constructor rather than an inline object literal, because the
+ * `answer` member of {@link Verdict} is the only one that carries a payload and
+ * building it beside the permission verdicts is how the two get confused.
+ */
+export function questionAnswerVerdict(resolved: ResolvedQuestionAnswer): Verdict {
+  return { kind: 'answer', answers: resolved.answers };
 }
 
 /**

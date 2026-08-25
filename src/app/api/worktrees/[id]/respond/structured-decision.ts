@@ -29,6 +29,30 @@
  * cannot see at all, which is why the refusal is `decision_not_found` and not
  * `forbidden`.
  *
+ * ## Questions (Issue #2039)
+ *
+ * opencode publishes two kinds of pending decision on one stream and answers
+ * them with two near-identical REST calls (#1758 §5.4/§5.5), so this route now
+ * addresses both. **The membership rule above is unchanged and is applied
+ * before the kind is looked at**: an id that is not in `listPending()` for this
+ * scope is 404 whether it names an approval or a question, and widening the
+ * `find` to accept questions widened WHAT can be answered, never WHERE it is
+ * looked for.
+ *
+ * What the kind decides is only the vocabulary the answer is resolved in, and
+ * the two are kept apart on purpose:
+ *
+ *  - `permission` -> {@link resolveStructuredDecisionOption}, three fixed
+ *    verdicts (`once` / `always` / `reject`).
+ *  - `question` -> {@link resolveStructuredQuestionAnswer}, the choices THIS
+ *    question published, delivered as `{ kind: 'answer', answers }`.
+ *
+ * Neither resolver falls back to the other, and both wire formats fail closed if
+ * they ever met: a verdict handed to a question is refused at the source
+ * (`question-needs-answer-verdict`) and an `answer` handed to an approval has no
+ * wire value (`toOpencodePermissionReply` answers null). So "3" at a
+ * two-option question is `answer_out_of_range` — never `Reject`.
+ *
  * @module app/api/worktrees/[id]/respond/structured-decision
  */
 
@@ -40,12 +64,15 @@ import {
   resolveSessionTargetStrict,
   INSTANCE_TOOL_CONFLICT,
 } from '@/lib/session/resolve-session-target';
-import { isCliToolType, isValidInstanceId } from '@/lib/cli-tools/types';
+import { isCliToolType, isValidInstanceId, type CLIToolType } from '@/lib/cli-tools/types';
 import { getAgentEventSource } from '@/lib/hooks/sources';
 import type { AgentInstanceRef, PendingDecision, Verdict } from '@/lib/hooks/sources';
 import { answerPendingDecisionWithReceipt } from '@/lib/hooks/sources/pending-decisions';
 import {
+  questionAnswerVerdict,
+  questionDecisionOptions,
   resolveStructuredDecisionOption,
+  resolveStructuredQuestionAnswer,
   STRUCTURED_REJECT_MESSAGE,
 } from '@/lib/hooks/structured-decision-response';
 import { STRUCTURED_DECISION_OPTIONS } from '@/lib/session/structured-prompt';
@@ -249,9 +276,14 @@ export async function respondByDecisionId({
 
   // The scope rule, in one line: only decisions this (worktree, tool, instance)
   // is holding. Removing this filter is the mutation the acceptance test pins.
-  const decision = pending.find(
-    (candidate) => candidate.kind === 'permission' && candidate.id === decisionId
-  );
+  //
+  // Issue #2039 widened the predicate from `kind === 'permission' && id === …`
+  // to the id alone, and what that widened is WHAT can be answered, never WHERE
+  // it is looked for: the array is still `listPending(target)` for the scope
+  // this request already resolved to, so a question belonging to another
+  // instance is as invisible as an approval belonging to one. The kind decides
+  // the vocabulary the answer is resolved in, below, and nothing else.
+  const decision = pending.find((candidate) => candidate.id === decisionId);
   if (!decision) {
     logger.info('respond-decision-not-found', {
       worktreeId,
@@ -260,6 +292,19 @@ export async function respondByDecisionId({
       pending: pending.length,
     });
     return decisionNotFound(decisionId);
+  }
+
+  if (decision.kind === 'question') {
+    return await answerPendingQuestion({
+      db,
+      source,
+      target,
+      decision,
+      answer,
+      worktreeId,
+      cliToolId,
+      instanceId,
+    });
   }
 
   const option = resolveStructuredDecisionOption(answer);
@@ -283,27 +328,15 @@ export async function respondByDecisionId({
   const { delivery } = await answerPendingDecisionWithReceipt(source, target, decision, verdict);
   const delivered = delivery?.delivered === true;
 
-  if (delivered && source.capabilities.permissionReplyReleasesPrompt) {
-    // The release the agent's own `permission.replied` frame would take, taken
-    // here as well because that frame may be seconds away and the operator is
-    // watching this response. Same call `answerStructuredDecision` makes.
-    recordAgentEvent(worktreeId, cliToolId, instanceId, {
-      event: 'notification',
-      at: Date.now(),
-      detail: PERMISSION_REPLIED_DETAIL,
-      sessionId: decision.conversationId,
-      decisionId: decision.id,
-      promptSettled: true,
-    });
-  }
-
-  // Issue #1548: a person answered, attributed exactly as every other
-  // human-answered path attributes it.
-  applyEventToActiveTask(db, worktreeId, cliToolId, instanceId, 'prompt_answered_human', {
-    promptType: 'multiple_choice',
+  settleAnsweredDecision({
+    db,
+    source,
+    decision,
+    delivered,
+    worktreeId,
+    cliToolId,
+    instanceId,
   });
-  startPolling(worktreeId, cliToolId, instanceId);
-  void broadcastTerminalSnapshotAfterInteraction(worktreeId, cliToolId, instanceId);
 
   logger.info('respond-decision-answered', {
     worktreeId,
@@ -324,6 +357,177 @@ export async function respondByDecisionId({
       optionNumber: option.number,
       optionLabel: option.label,
       decisionId: decision.id,
+    },
+  });
+}
+
+/**
+ * Everything both branches do once the agent has been told (Issue #2039).
+ *
+ * Lifted out of the approval path rather than copied into the question one. The
+ * four effects here are the difference between "the POST returned 200" and "the
+ * server stopped saying a human is blocked", and #1898's measurement is what
+ * they cost when one of them is missed: `capture --json` read
+ * `waiting / hook_permission_prompt` for the whole of the tool call that
+ * followed a delivered verdict. A question blocks the session in exactly the
+ * same way (§5.3.1 — the session reads `busy` and no `session.idle` arrives
+ * until it is answered), so it has to be released in exactly the same way.
+ */
+function settleAnsweredDecision({
+  db,
+  source,
+  decision,
+  delivered,
+  worktreeId,
+  cliToolId,
+  instanceId,
+}: {
+  db: Database.Database;
+  source: ReturnType<typeof getAgentEventSource>;
+  decision: PendingDecision;
+  delivered: boolean;
+  worktreeId: string;
+  cliToolId: CLIToolType;
+  instanceId: string;
+}): void {
+  if (delivered && source.capabilities.permissionReplyReleasesPrompt) {
+    // The release the agent's own `permission.replied` frame would take, taken
+    // here as well because that frame may be seconds away and the operator is
+    // watching this response. Same call `answerStructuredDecision` makes.
+    //
+    // Issue #2039: taken for a question too, and the detail word stays
+    // `permission_replied` on purpose. `agent-event-state` reads it as "the
+    // dialog this instance was holding is gone" and retires the record by id
+    // (`releaseSettledDecision`); it is the vocabulary of the STATE MACHINE, not
+    // a claim about which endpoint was POSTed to. A second word would oblige
+    // every reader of that machine to learn both for one meaning.
+    recordAgentEvent(worktreeId, cliToolId, instanceId, {
+      event: 'notification',
+      at: Date.now(),
+      detail: PERMISSION_REPLIED_DETAIL,
+      sessionId: decision.conversationId,
+      decisionId: decision.id,
+      promptSettled: true,
+    });
+  }
+
+  // Issue #1548: a person answered, attributed exactly as every other
+  // human-answered path attributes it.
+  applyEventToActiveTask(db, worktreeId, cliToolId, instanceId, 'prompt_answered_human', {
+    promptType: 'multiple_choice',
+  });
+  startPolling(worktreeId, cliToolId, instanceId);
+  void broadcastTerminalSnapshotAfterInteraction(worktreeId, cliToolId, instanceId);
+}
+
+/**
+ * Answer the question this instance is holding (Issue #2039).
+ *
+ * Reached only from {@link respondByDecisionId}, and only after the membership
+ * check has already passed — this function does no lookup of its own, which is
+ * how the scope rule stays stated in exactly one place.
+ *
+ * The answer is resolved against the choices THIS question published
+ * (`resolveStructuredQuestionAnswer`), never against the three approval
+ * verdicts, and the two lists cannot be reached from one another: `3` at a
+ * two-option question is `answer_out_of_range` here, where the approval branch
+ * would have read it as `Reject`.
+ */
+async function answerPendingQuestion({
+  db,
+  source,
+  target,
+  decision,
+  answer,
+  worktreeId,
+  cliToolId,
+  instanceId,
+}: {
+  db: Database.Database;
+  source: ReturnType<typeof getAgentEventSource>;
+  target: AgentInstanceRef;
+  decision: PendingDecision;
+  answer: string;
+  worktreeId: string;
+  cliToolId: CLIToolType;
+  instanceId: string;
+}): Promise<NextResponse> {
+  if (decision.subject.kind !== 'question') {
+    // The source said `kind: 'question'` and then handed back an approval
+    // subject. Nothing can be resolved against a list that is not there, and the
+    // caller's fact is unchanged — there is no question here it can address — so
+    // this is the same 404 an absent id gets rather than a new failure mode.
+    logger.warn('respond-decision-question-subject-missing', {
+      worktreeId,
+      cliToolId,
+      instanceId,
+      decisionId: decision.id,
+      subjectKind: decision.subject.kind,
+    });
+    return decisionNotFound(decision.id);
+  }
+
+  const spec = decision.subject.spec;
+  const resolution = resolveStructuredQuestionAnswer(spec, answer);
+  if (!resolution.ok) {
+    return NextResponse.json(
+      {
+        error: resolution.message,
+        code: resolution.reason,
+        reason: resolution.reason,
+        // The list the answer was judged against, so a caller that guessed a
+        // number can see the real one without a second round trip. Issue #2040
+        // maps a bare `respond <worktree> <n>` onto this same list.
+        options: questionDecisionOptions(spec).map((option) => ({
+          number: option.number,
+          label: option.label,
+        })),
+      },
+      { status: 400 }
+    );
+  }
+
+  const verdict = questionAnswerVerdict(resolution.resolved);
+  const { delivery } = await answerPendingDecisionWithReceipt(source, target, decision, verdict);
+  const delivered = delivery?.delivered === true;
+
+  settleAnsweredDecision({
+    db,
+    source,
+    decision,
+    delivered,
+    worktreeId,
+    cliToolId,
+    instanceId,
+  });
+
+  const optionNumbers = resolution.resolved.selected.map((option) => option.number);
+
+  logger.info('respond-question-answered', {
+    worktreeId,
+    cliToolId,
+    instanceId,
+    decisionId: decision.id,
+    optionNumbers,
+    // The labels themselves are the agent's own text and reach the agent
+    // verbatim; whether this was a choice or prose is the fact a log can act on.
+    freeText: resolution.resolved.freeText,
+    delivered,
+  });
+
+  return NextResponse.json({
+    success: delivered,
+    answer: optionNumbers.length > 0 ? optionNumbers.join(',') : answer.trim(),
+    ...(delivered ? {} : { reason: 'decision_not_delivered' }),
+    resolved: {
+      via: 'structured-question',
+      decisionId: decision.id,
+      // Exactly what went on the wire. A caller reconciling its own UI against
+      // what the agent was told needs the labels, not the numbers it sent.
+      answers: resolution.resolved.answers,
+      optionNumbers,
+      optionLabels: resolution.resolved.selected.map((option) => option.label),
+      freeText: resolution.resolved.freeText,
     },
   });
 }
