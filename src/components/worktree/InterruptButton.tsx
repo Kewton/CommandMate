@@ -1,8 +1,14 @@
 /**
  * InterruptButton Component
- * Sends Escape key to interrupt CLI tool processing
+ * Asks the CLI tool to abort whatever it is processing
  *
  * Issue #46: エスケープを入力可能にしたい
+ *
+ * The button posts to `/api/worktrees/:id/interrupt` and the route calls
+ * `ICLITool.interrupt()`; how the abort is delivered is the tool's decision and
+ * is deliberately invisible from here. It is not always a keystroke: opencode
+ * ends the turn over its own HTTP API when the port is live and falls back to
+ * Escape twice when it is not (Issue #2034).
  */
 
 'use client';
@@ -30,7 +36,7 @@ const DEBOUNCE_DELAY_MS = 1000;
 
 /**
  * Stop/Interrupt button component
- * Sends Escape key to CLI session via /api/worktrees/:id/interrupt
+ * Interrupts the CLI session via /api/worktrees/:id/interrupt
  *
  * Features:
  * - 1 second debounce to prevent rapid fire
