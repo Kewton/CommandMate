@@ -100,6 +100,22 @@
 
 `cost` / `tokens` / `time` / 本文は実測値のまま。
 
+## Issue #2045 の追加分（opencode **1.18.22** / 2026-08-25）
+
+push 通知の分岐に使う 2 本。**採取のしかたが 2 本で違うので、混ぜないこと。**
+
+| ファイル | 中身 | 出所 |
+|---|---|---|
+| [`session-error-aborted.json`](./session-error-aborted.json) | `session.error` の `MessageAbortedError`（`POST /session/:id/abort` の結果） | **実測**。設計書 §5.3.2 (b) の tap 行（`08:15:00.416 session.error {"name":"MessageAbortedError","data":{"message":"Aborted"}}`）をそのまま envelope に戻したもの |
+| [`installation-update-available.json`](./installation-update-available.json) | `installation.update-available` | **実測ではない。サーバ自身の `GET /doc` から起こした**（`EventInstallationUpdate-available`）。**発火は再現できていない**（保留中の更新を作れない。設計書 §6 / §17.4） |
+
+`installation-update-available.json` について **payload の形は一次情報**である
+（`properties` は `{ version: string }` のみで `required: ["version"]`、`additionalProperties: false`。
+**`sessionID` は無い**）。**無いのは「いつ飛ぶか」だけ**で、これは §17.4 に未計測として記録してある。
+
+`session-error.json`（1.18.3 採取）は 1.18.22 でも**バイト構造が変わっていないこと**を再確認した
+（LM Studio に model 未ロードで `APIError` を再現。設計書 §17.1）。`question-asked.json` も同様。
+
 ## プレースホルダ
 
 環境固有値はすべて置換済み（`grep` で実 ID・実パスが残っていないことを確認済み）。

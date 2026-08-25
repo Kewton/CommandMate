@@ -85,6 +85,7 @@ import {
 } from './history';
 import { partCallId, partToolName } from './mappers';
 import { rememberOpencodeToolCall } from './payloads';
+import { notifyOpencodeUpdateAvailablePush } from './push';
 import { getAssignedOpencodePort } from './ports';
 import { createTurnGate, type TurnGate, type TurnObservation } from './turn-gate';
 
@@ -137,6 +138,21 @@ interface OpencodeSubscriptionState {
    * rather than the gate's verdict.
    */
   readonly idleWaiters: Map<string, Set<(seen: boolean) => void>>;
+  /**
+   * opencode versions this subscription has already announced (Issue #2045).
+   *
+   * The Issue asks for "once per session", and this is the only place that can
+   * answer it: `installation.update-available` carries `{ version }` and
+   * **nothing else** — no `sessionID` — measured against 1.18.22's own
+   * `GET /doc` (`docs/design/opencode-server-live-verification.md` §17). So the
+   * unit the notice can be scoped to is the connection, not an opencode chat
+   * session, and this set is the connection: it survives every reconnect (the
+   * state object outlives `runStream`'s retry loop) and dies with `close()`.
+   *
+   * Keyed by version rather than a boolean so a server that *does* update
+   * mid-connection can still say so once for the next version.
+   */
+  readonly announcedUpdates: Set<string>;
   /** Aborts the current attempt. Replaced on every reconnect. */
   streamController: AbortController;
   /**
@@ -398,6 +414,7 @@ export async function openOpencodeSubscription(
     resync: options.resync ?? 'none',
     seenDecisions: new Set<string>(),
     idleWaiters: new Map<string, Set<(seen: boolean) => void>>(),
+    announcedUpdates: new Set<string>(),
     streamController: new AbortController(),
     lifetimeController: new AbortController(),
     serverVersion: null,
@@ -930,6 +947,16 @@ function deliver(
     recordOpencodeTranscriptFrame(state.target, frame, receivedAt);
   }
 
+  // Issue #2045, an independent block for the same reason the three above are
+  // independent: `installation.update-available` maps to none of the seven
+  // words, so `normalize` returns null for it and the `return` below would drop
+  // the only frame that ever names a newer opencode. Not gated on the turn gate
+  // — the notice is about the installation, not about any turn — and not on a
+  // session id, because the frame carries none (measured, §17).
+  if (type === 'installation.update-available') {
+    announceOpencodeUpdate(state, frame, receivedAt);
+  }
+
   // Issue #2034: before the gate, and independent of what it decides. An abort
   // asked whether THIS session reached idle; whether the frame is also publishable
   // as a `stop` is a separate question with its own — correct — answer below.
@@ -1022,6 +1049,57 @@ function gateVerdict(event: AgentEventType, observation: TurnObservation): strin
     return observation.kind === 'suppressed' ? observation.reason : 'not-a-new-prompt';
   }
   return null;
+}
+
+/**
+ * Announce a newer opencode, at most once per connection per version
+ * (Issue #2045).
+ *
+ * The suppression lives here rather than inside `notifyPushSubscribers`
+ * because the two guards answer different questions and neither subsumes the
+ * other: the fan-out's own `passesDedup` collapses *identical content within
+ * 30 s*, which an update notice re-sent an hour later would sail straight
+ * through, while this one is "this connection has already said it". Running
+ * both is not double suppression — the outer one is the Issue's rule and the
+ * inner one is the fan-out's ordinary hygiene. The unit test proves they are
+ * independent by clearing the content window between two frames.
+ *
+ * Recorded before the send, and deliberately: the notice is advisory, and a
+ * fan-out that fails is not a reason to try again on every subsequent frame.
+ */
+function announceOpencodeUpdate(
+  state: OpencodeSubscriptionState,
+  frame: OpencodeFrame,
+  receivedAt: number
+): void {
+  const properties = isPlainObject(frame.properties) ? frame.properties : {};
+  const version = readStringField(properties, 'version');
+  if (!version) return;
+  if (state.announcedUpdates.has(version)) {
+    logger.info('opencode-update-available-repeat-dropped', {
+      worktreeId: state.target.worktreeId,
+      instanceId: state.target.instanceId ?? state.target.cliToolId,
+      version,
+    });
+    return;
+  }
+  state.announcedUpdates.add(version);
+
+  logger.info('opencode-update-available', {
+    worktreeId: state.target.worktreeId,
+    instanceId: state.target.instanceId ?? state.target.cliToolId,
+    version,
+  });
+
+  // Not awaited — `deliver` is synchronous by contract (the SSE read loop calls
+  // it once per frame) and a push fan-out must not hold the stream. The
+  // notifier contains its own failures.
+  void notifyOpencodeUpdateAvailablePush(
+    state.target,
+    state.target.instanceId ?? state.target.cliToolId,
+    version,
+    receivedAt
+  );
 }
 
 /** Note an approval / question id so a later re-sync does not repeat it. */

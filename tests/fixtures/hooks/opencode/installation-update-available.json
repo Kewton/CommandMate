@@ -1,0 +1,7 @@
+{
+  "id": "evt_0000000000000000000000000",
+  "type": "installation.update-available",
+  "properties": {
+    "version": "1.19.0"
+  }
+}

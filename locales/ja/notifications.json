@@ -54,7 +54,10 @@
     "failureSessionUnavailable": "セッションを起動できませんでした: CLI ツールがインストールされていません",
     "failureWithExcerpt": "失敗しました: {excerpt}",
     "failure": "失敗しました",
-    "promptResolved": "対応済みです（他の端末で応答されました）"
+    "failureAgentSessionWithExcerpt": "エージェントがエラーで停止しました: {excerpt}",
+    "failureAgentSession": "エージェントがエラーで停止しました",
+    "promptResolved": "対応済みです（他の端末で応答されました）",
+    "updateAvailable": "{agent} の更新が利用できます: {version}"
   },
   "escalation": {
     "heading": "再通知",

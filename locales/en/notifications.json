@@ -54,7 +54,10 @@
     "failureSessionUnavailable": "Could not start the session: the CLI tool is not installed",
     "failureWithExcerpt": "Failed: {excerpt}",
     "failure": "Failed",
-    "promptResolved": "Handled — answered on another device"
+    "failureAgentSessionWithExcerpt": "The agent stopped with an error: {excerpt}",
+    "failureAgentSession": "The agent stopped with an error",
+    "promptResolved": "Handled — answered on another device",
+    "updateAvailable": "An update for {agent} is available: {version}"
   },
   "escalation": {
     "heading": "Reminder",

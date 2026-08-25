@@ -2235,3 +2235,189 @@ argv:    ['run','--format','json','--agent','plan','--variant','high',"Review to
 - `src/lib/db/agent-session-cost-db.ts` / `agent-session-cost-sampler.ts`（新規）— 台帳 CRUD と in-memory からの写し取り
 - `src/lib/daily-summary-generator.ts` — レポート末尾に cost 節を **additive** に追記（プロンプトは不変）
 - `src/components/review/ReportTab.tsx` / `worktree/schedules/ScheduleEditDialog.tsx` — 選択肢と入力欄
+
+---
+
+## 17. Issue 2045: `question.asked` / `session.error` / `installation.update-available` を push に繋ぐ（opencode 1.18.22 / 2026-08-25）
+
+> **この節は #2045 が追記したものです。§1〜§16 は書き換えていません。**
+> §11 と同様、§1〜§10（1.18.3）と食い違う記述があれば **版が違う**ことを先に疑ってください。
+
+### 17.1 結論サマリ
+
+| 検証項目 | 結果 |
+|---|---|
+| `question.asked` の payload が 1.18.3 の fixture と同形か | **一致**（[§17.2](#172-questionasked-の実測)） |
+| `question.asked` のあと `session.idle` が来ないこと | **来ない**。20 秒後も `GET /session/status` は `busy` のまま |
+| `session.error`（provider エラー）を隔離サーバで発生させられるか | **可**。LM Studio に model 未ロードで `APIError`（[§17.3](#173-sessionerror-の実測)） |
+| `session.error` が 1 ターンで何回出るか | **1 回**（`session.idle` は 2 回。§5.3.2 の再確認） |
+| `session.error` の `error.name` の全列挙 | **8 種**（`GET /doc` 一次情報。[§17.3](#173-sessionerror-の実測)） |
+| `installation.update-available` の payload | **`{ version }` のみ。`sessionID` は無い**（`GET /doc` 一次情報） |
+| `installation.update-available` の発火 | **未計測**。保留中の更新を作れなかった（[§17.4](#174-installationupdate-available-は発火を計測できていない)） |
+| push が 1 通ずつ届くこと | **単体では実測できていない**（[§17.5](#175-受入条件のうち実測できた範囲とできなかった範囲)） |
+
+### 17.2 `question.asked` の実測
+
+§4 のハーネス（隔離 HOME・専用 socket・`--port 4795`）で、
+`POST /session/:id/prompt_async` に「`question` tool を 1 回だけ呼べ」と指示して誘発した。
+**TUI のモデルピッカーは一度も開いていない**（モデルは隔離 HOME の `opencode.jsonc` で固定）。
+
+```text
+01:00:57.396 session.created
+01:00:57.544 session.status  busy
+01:00:59.689 message.part.updated
+01:01:00.596 question.asked          ← ここで止まる
+01:01:00.596 message.part.updated
+（以降 20 秒間、このセッションのフレームは 1 件も無い）
+```
+
+```json
+{"id":"evt_…","type":"question.asked","properties":{
+  "id":"que_…","sessionID":"ses_…",
+  "questions":[{"question":"Which colour do you prefer?","header":"Colour preference",
+    "options":[{"label":"Red","description":"The colour red"},
+               {"label":"Blue","description":"The colour blue"}]}],
+  "tool":{"messageID":"msg_…","callID":"toolu_…"}}}
+```
+
+**`tests/fixtures/hooks/opencode/question-asked.json`（1.18.3 採取）と構造が完全に一致**したので、
+fixture は差し替えていない。
+
+20 秒後の `GET /session/status`:
+
+```json
+{"ses_fc658bfcfffefpZkL5Uy1uPLJ2":{"type":"busy"}}
+```
+
+→ **§5.3.1 が 1.18.22 でも成立する。** 質問は `busy` のままで `session.idle` を出さない。
+加えて **このリポジトリには opencode の質問を自動応答する経路が無い**（コードで確認）:
+
+- `replyOpencodeQuestion` の呼び出し元は `source.ts` の `decision.kind === 'question'` 分岐 1 箇所のみ。
+  そこへ到達するのは `answerPendingDecisionWithReceipt` の 4 呼び出し元のうち、
+  **人間が起点の 2 つ**（`respond` の構造化 decision、`structured-decision-response`）だけである。
+- 残る 2 つは Auto-Yes 側で、どちらも質問に掛からない。`permission-adjudication` は
+  `ingest` の **`permission.asked` 分岐**からしか呼ばれず、
+  `pending-decision-recheck` は `pending.filter(d => d.kind === 'permission')` で
+  **質問を明示的に落としている**。
+- 陰性対照ではなく**陽性対照**で確かめてある: 同じ grep が `replyOpencodePermission` については
+  自動経路（`permission-adjudication` 経由）を見つける。
+**だから質問は人間が触るまで無期限に止まる**というのが、この Issue が push を
+「status プローブが観測する waiting edge」ではなく **ingest から直接**上げる根拠である。
+
+### 17.3 `session.error` の実測
+
+同じハーネスで、`lmstudio`（model 未ロード）を指定して 1 ターン投げた。
+
+```text
+01:00:26.104 session.status  busy
+01:00:26.120 session.error           ← 1 回だけ
+01:00:26.120 session.status  idle
+01:00:26.120 session.idle            ← 1 回目
+01:00:26.144 session.idle            ← 2 回目（24 ms 後）
+```
+
+**`session.error` は 1 回、`session.idle` は 2 回。** §5.3.2 (a) と同じ形が 1.18.22 でも再現した。
+payload も `tests/fixtures/hooks/opencode/session-error.json`（1.18.3）と同形。
+
+`GET /doc` の `EventSessionError.properties.error` は **8 つの anyOf**（一次情報）:
+
+| `error.name` | `data` に `message` があるか | push で failure として通知するか |
+|---|---|---|
+| `APIError` | あり（＋ `statusCode` / `isRetryable` / `responseBody` …） | する |
+| `ProviderAuthError` | あり（＋ `providerID`） | する |
+| `UnknownError` | あり（＋ `ref`） | する |
+| `MessageOutputLengthError` | **無い**（`data` は空オブジェクト） | する（本文は `error.name` にフォールバック） |
+| `StructuredOutputError` | あり（＋ `retries`） | する |
+| `ContextOverflowError` | あり（＋ `responseBody`） | する |
+| `ContentFilterError` | あり | する |
+| `MessageAbortedError` | あり（`"Aborted"`） | **しない**（interrupt。§5.3.2 (b)） |
+
+**`upstream-fault`（既存の `FailurePushReason`）を再利用しなかった理由**はこの表にある。
+上流由来と言い切れるのは `APIError` / `ProviderAuthError` の 2 つだけで、
+残り 5 つはローカル側の失敗（§11.4 の `UnknownError: TypeError: … cannot be parsed as a URL` が実例）。
+「上流APIの障害で停止しています」は**フレームが立証していないことを断言する文言**になるので、
+`agent-session-error` を新設して「エージェントがエラーで停止しました: {excerpt}」とし、
+どの失敗かは excerpt（＝ `error.data.message`）に語らせる。
+
+`MessageOutputLengthError` に `message` が無いことは実装に効いている：
+`describeNotification()` の `error.data.message ?? error.name` のフォールバックは、
+**8 種のうちこの 1 種のためだけに必要**である。
+
+### 17.4 `installation.update-available` は発火を計測できていない
+
+**payload の形は一次情報**（`GET /doc`、1.18.22）:
+
+```json
+{"type":"object","properties":{
+  "id":{"type":"string","pattern":"^evt_"},
+  "type":{"type":"string","enum":["installation.update-available"]},
+  "properties":{"type":"object","properties":{"version":{"type":"string"}},
+                "required":["version"],"additionalProperties":false}},
+ "required":["id","type","properties"],"additionalProperties":false}
+```
+
+**`properties` は `version` だけで、`sessionID` は無い。**
+
+**発火は再現できなかった。** 手元の opencode は 1.18.22 で最新（`GET /global/health` →
+`{"healthy":true,"version":"1.18.22"}`）であり、**保留中の更新という状態を作れない**。
+§6 が `installation.update-available` を「未計測（更新保留状態を作れなかった）」と書いたのと同じ理由で、
+この Issue でも計測できていない。**推測で埋めていない。**
+
+実装上の帰結は 2 つある。
+
+1. **Issue 本文の「1 セッション 1 回に抑える」は、opencode の chat session では実現できない。**
+   フレームに `sessionID` が無いので、写像できる単位は**購読（＝ SSE 接続）**しかない。
+   実装は `OpencodeSubscriptionState.announcedUpdates: Set<string>`（version をキー）で、
+   接続が生きているあいだ同じ version を 1 回しか通知しない。接続が閉じれば忘れる。
+2. **fixture は実測ではない。** `tests/fixtures/hooks/opencode/installation-update-available.json` は
+   上のスキーマから起こしたもので、README にもそう明記してある。
+   **実フレームが来たら差し替えること**（`version` 以外のキーが増えていないかを最初に確認する）。
+
+### 17.5 受入条件のうち実測できた範囲とできなかった範囲
+
+Issue の受入条件は「隔離サーバで question / provider エラーを発生させ、**push が 1 通ずつ届く**」である。
+
+| 受入条件の部分 | 実測 |
+|---|---|
+| 隔離サーバで question を発生させる | **済**（§17.2） |
+| 隔離サーバで provider エラーを発生させる | **済**（§17.3） |
+| **端末に push が 1 通ずつ届く** | **未実施**。VAPID 鍵つきの CommandMate サーバと実際に購読済みの端末（iOS/Android）が要るため、この作業では踏んでいない |
+| claude / codex の発火回数が変更前と一致する | **済**（テスト。`tests/integration/opencode-push-parity-2045.test.ts`） |
+
+**「1 通ずつ」は端末の代わりに `web-push` の直前で数えた。**
+`tests/unit/hooks/sources/opencode-push-2045.test.ts` は実 SQLite・実 `notifyPushSubscribers`・
+実 dedup で走り、`webpush.sendNotification` の呼び出し回数だけを見る。
+そこで押さえた性質は 4 つ:
+
+- question 1 件 → 1 通。**その後 status プローブが同じ待ちを報告しても 2 通目は出ない**
+  （`waitingSince` を frame の `receivedAt` に揃えてあるので `shouldSendWaitingPush` が重複と判定する）。
+- 同じフレームの二重配送 → 1 通（#1899 の identity ガードの後ろに居るため）。
+- `session.error` 1 件 → 1 通。`MessageAbortedError` → **0 通**。
+- `installation.update-available` → 接続あたり version ごとに 1 通。
+
+**残った既知の限界**（テストにも明記した）: `session.error` は per-frame id を持たないので
+`classifyAgentEventDelivery` の 3 秒窓（`AGENT_EVENT_DEDUP_WINDOW_MS`）に掛かる。
+**3 秒以内に届いた別種のエラー 2 件は 1 通に潰れる。**
+これは push 側ではなく ingest 側の配送ガードの性質で、#1898 が確立した
+「裁定・記録が push より先」という順序を崩さないかぎり動かせない。動かしていない。
+
+### 17.6 非汚染の証拠
+
+| 項目 | 値 |
+|---|---|
+| 版 | **1.18.22**（`GET /global/health` → `{"healthy":true,"version":"1.18.22"}`） |
+| 隔離 HOME | `GET /path` の `home` / `state` / `config` / `worktree` / `directory` **5 つすべてが scratchpad 配下**であることを確認済み |
+| ポート | **4795**。3000 は使っていない。`--hostname 127.0.0.1` |
+| tmux | **使っていない**（TUI を起動せず REST + SSE tap だけで完結した。既定 tmux サーバには 1 コマンドも撃っていない） |
+| モデルピッカー | **一度も開いていない**（隔離 HOME の `opencode.jsonc` で固定） |
+| `auth.json` | mode 600 で複製し、**検証後に削除**（削除確認済み） |
+| ユーザー HOME 非汚染 | 検証終了時点で `~/.local/share/opencode/opencode.db` の mtime は **検証開始（8/26 00:59）より前の 8/25 14:16 のまま**、`~/.config/opencode/opencode.jsonc` は 7/19 のまま |
+| 後始末 | `opencode serve` と SSE tap を **PID 指定で kill**（`pkill -f opencode` は使っていない）。質問で止まったセッションは `POST /session/:id/abort` で閉じた |
+
+### 17.7 変更ファイル
+
+- `src/lib/hooks/sources/opencode/push.ts`（新規）— opencode に閉じた 3 つの通知プロデューサ
+- `src/lib/hooks/sources/opencode/ingest.ts` — `question.asked` / `session.error` から上記を呼ぶ
+- `src/lib/hooks/sources/opencode/subscription.ts` — `installation.update-available` を `deliver()` で読む（7 語に写像されないため）＋ 接続スコープの重複抑止
+- `src/lib/push/push-sender.ts` — `FailurePushReason` に `agent-session-error`、`NotificationEvent.updateAvailable`
+- `locales/{en,ja}/notifications.json` — `failureAgentSession*` / `updateAvailable`
