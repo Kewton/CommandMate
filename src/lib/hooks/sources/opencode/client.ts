@@ -41,6 +41,8 @@
  * @module lib/hooks/sources/opencode/client
  */
 
+import { randomBytes } from 'crypto';
+import { pathToFileURL } from 'url';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('lib/hooks/sources/opencode/client');
@@ -395,6 +397,207 @@ export async function abortOpencodeSession(port: number, sessionId: string): Pro
     { method: 'POST' }
   );
   return result === true;
+}
+
+/**
+ * One part of a prompt posted to `POST /session/:id/prompt_async`.
+ *
+ * The two shapes CommandMate sends, out of the four the route's own schema
+ * accepts (`GET /doc`, `operationId: session.prompt_async`): `TextPartInput` and
+ * `FilePartInput`. `AgentPartInput` / `SubtaskPartInput` address opencode's own
+ * sub-agent machinery and have no CommandMate caller.
+ *
+ * `url` on a file part is a **URL, not a path** — see {@link opencodeFileUrl}.
+ */
+export type OpencodePromptPart =
+  | { type: 'text'; text: string }
+  | { type: 'file'; mime: string; filename: string; url: string };
+
+/**
+ * The `file://` URL for a local file, which is the only form the route takes.
+ *
+ * Measured on 1.18.22 (Issue #2035). A bare absolute path in `FilePartInput.url`
+ * is **accepted with `204` and then silently discarded** — the server answers
+ * before it resolves the part, and the resolution failure arrives on the event
+ * stream instead:
+ *
+ * ```
+ * session.error  UnknownError
+ *   TypeError: "/…/probe.png" cannot be parsed as a URL.
+ *     at SessionPrompt.resolveUserPart …
+ * ```
+ *
+ * and the **whole message is dropped, its text part included** — a read-back of
+ * the message id answers `404`. So this is not a nicety: a path handed over
+ * unencoded loses the operator's message with a success status code on the wire.
+ *
+ * `pathToFileURL` rather than `'file://' + path` because the difference is
+ * exactly the paths people have: a space or a `#` in a worktree name makes the
+ * concatenated string a different URL, and non-ASCII makes it an invalid one.
+ *
+ * @param absolutePath - Absolute path to a local file
+ * @returns `file:///…`, percent-encoded
+ */
+export function opencodeFileUrl(absolutePath: string): string {
+  return pathToFileURL(absolutePath).href;
+}
+
+/**
+ * A message id for a prompt CommandMate is about to post.
+ *
+ * The route accepts a caller-chosen `messageID` (schema: `pattern: "^msg"`), and
+ * that is what makes the send verifiable: the id is known *before* the request,
+ * so {@link readOpencodeUserMessage} can ask for that exact message afterwards
+ * rather than guessing which of the session's messages was this one. Measured on
+ * 1.18.22 — `msg_cmate2035probe0001` was accepted and read back verbatim.
+ *
+ * The `cmate` infix is deliberate: opencode's own ids are
+ * `msg_037794348001Ajss6k50nWrocp`, so a CommandMate-originated message stays
+ * identifiable in `opencode.db` afterwards, and the two generators cannot
+ * collide.
+ */
+export function newOpencodeMessageId(): string {
+  return `msg_cmate${randomBytes(12).toString('hex')}`;
+}
+
+/**
+ * Post one prompt to a session without waiting for the reply (Issue #2035).
+ *
+ * `POST /session/:id/prompt_async`. This is the route the send path takes when
+ * the instance has a server, and it was chosen over `/tui/append-prompt` +
+ * `/tui/submit-prompt` on a measurement, not a preference — see
+ * `docs/design/opencode-server-live-verification.md` §11.4. The short version:
+ * the `/tui/*` pair drives the TUI's **composer**, so it inherits the composer's
+ * state, and a body whose first token matches a slash command opens the command
+ * palette and the palette then eats the submit. `/exit` as a message body
+ * answered `200 true` on all three calls and produced no message at all. This
+ * route does not go through the composer, and the same body arrived verbatim.
+ *
+ * **`204` means accepted, not delivered.** Three measured ways that gap opens:
+ *
+ *  - a file part whose `url` is not a URL is dropped along with its whole
+ *    message ({@link opencodeFileUrl});
+ *  - a server that shares `HOME` + project with this one answers `204` for a
+ *    session it can reach through `opencode.db` — and the message then appears
+ *    on **neither** this server's event stream nor this pane's screen;
+ *  - an unknown route on a real opencode answers `200 text/html` (#1931), which
+ *    is why the status is compared exactly rather than through `response.ok`.
+ *
+ * {@link readOpencodeUserMessage} is the other half, and callers are expected to
+ * use it. Nothing here throws.
+ *
+ * @param port - The instance's server
+ * @param sessionId - `ses_…`, the session the message belongs to
+ * @param messageId - `msg_…`, from {@link newOpencodeMessageId}
+ * @param parts - The message body; at least one part
+ * @returns Whether the server answered `204`
+ */
+export async function sendOpencodePrompt(
+  port: number,
+  sessionId: string,
+  messageId: string,
+  parts: readonly OpencodePromptPart[]
+): Promise<boolean> {
+  const url = `${opencodeBaseUrl(port)}/session/${encodeURIComponent(sessionId)}/prompt_async`;
+  try {
+    const response = await loopbackFetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': OPENCODE_JSON_CONTENT_TYPE },
+      body: JSON.stringify({ messageID: messageId, parts }),
+      signal: AbortSignal.timeout(OPENCODE_REQUEST_TIMEOUT_MS),
+    });
+    if (response.status !== 204) {
+      logger.warn('opencode-prompt-rejected', { port, sessionId, status: response.status });
+      return false;
+    }
+    return true;
+  } catch (error) {
+    logger.debug('opencode-request-failed', {
+      url,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return false;
+  }
+}
+
+/**
+ * What a read-back of one posted message found (Issue #2035).
+ *
+ * Three answers rather than two, because the middle one is the whole reason the
+ * read-back exists. `missing` is the server saying *this message does not
+ * exist* — it was accepted and then dropped — and it is the only outcome that
+ * makes re-sending over the keyboard safe. `unknown` is "could not ask", where a
+ * re-send may duplicate.
+ */
+export type OpencodeMessageReadback =
+  /** The message exists, is the user's, and these are its text parts. */
+  | { kind: 'found'; texts: string[] }
+  /** The server answered `404`: nothing was created under this id. */
+  | { kind: 'missing' }
+  /** The server could not be asked, or answered something unreadable. */
+  | { kind: 'unknown'; reason: string };
+
+/**
+ * Read back one message by the id it was posted under (Issue #2035).
+ *
+ * `GET /session/:id/message/:messageID`. The positive evidence for a send, in
+ * the same sense `session.idle` is the positive evidence for an abort (#2034):
+ * the status code on the way in says the request was taken, and only this says
+ * the message exists.
+ *
+ * Measured on 1.18.22 across five runs: the message was readable on the **first**
+ * attempt, 8-23 ms after the POST began — `prompt_async` answers `204` after the
+ * message is created, not before. The falsification ran too: a message posted
+ * with a malformed file part answered `204` and then `404` here, which is the
+ * case the whole ladder is for.
+ *
+ * `info.role` is checked because the id space is shared with the assistant's
+ * messages: a `messageID` that collided with one would otherwise read back as a
+ * perfectly good delivery of somebody else's text.
+ *
+ * @param port - The instance's server
+ * @param sessionId - `ses_…`
+ * @param messageId - `msg_…`, the id the prompt was posted under
+ */
+export async function readOpencodeUserMessage(
+  port: number,
+  sessionId: string,
+  messageId: string
+): Promise<OpencodeMessageReadback> {
+  const url =
+    `${opencodeBaseUrl(port)}/session/${encodeURIComponent(sessionId)}` +
+    `/message/${encodeURIComponent(messageId)}`;
+  let response: Response;
+  try {
+    response = await loopbackFetch(url, {
+      signal: AbortSignal.timeout(OPENCODE_REQUEST_TIMEOUT_MS),
+    });
+  } catch (error) {
+    return { kind: 'unknown', reason: error instanceof Error ? error.message : String(error) };
+  }
+
+  if (response.status === 404) return { kind: 'missing' };
+  if (!response.ok) return { kind: 'unknown', reason: `status ${response.status}` };
+  if (!hasContentType(response, OPENCODE_JSON_CONTENT_TYPE)) {
+    return { kind: 'unknown', reason: 'content-type' };
+  }
+
+  let body: unknown;
+  try {
+    body = (await response.json()) as unknown;
+  } catch {
+    return { kind: 'unknown', reason: 'body' };
+  }
+  if (!isPlainObject(body)) return { kind: 'unknown', reason: 'body' };
+
+  const info = isPlainObject(body.info) ? body.info : null;
+  if (info === null || info.role !== 'user') return { kind: 'unknown', reason: 'role' };
+
+  const texts = (Array.isArray(body.parts) ? body.parts : [])
+    .filter(isPlainObject)
+    .filter((part) => part.type === 'text' && typeof part.text === 'string')
+    .map((part) => part.text as string);
+  return { kind: 'found', texts };
 }
 
 /** The three answers opencode accepts for an approval (#1758 §5.5.1). */
