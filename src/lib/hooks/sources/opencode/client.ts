@@ -379,8 +379,17 @@ export async function replyOpencodePermission(
 /**
  * Answer one question.
  *
+ * Reachable from production since Issue #2039. It was written with #1763's
+ * source and then had no caller for a year of Issues: `decideOpencode` routes
+ * `{ kind: 'answer' }` here, and nothing in `src/` built that verdict, so a
+ * `question.asked` could be displayed and never answered except with arrow
+ * keys. What #2039 added is the two mappings above it —
+ * `resolveStructuredQuestionAnswer` and the `kind === 'question'` branch of
+ * `respondByDecisionId` — not a line of this function.
+ *
  * @param answers - One array of selected labels per question, in the order the
- *   `question.asked` frame listed them
+ *   `question.asked` frame listed them. Measured shape: `{"answers":[["Blue"]]}`
+ *   for the one-question call (#1758 §5.2.4)
  */
 export async function replyOpencodeQuestion(
   port: number,
