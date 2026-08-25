@@ -25,6 +25,11 @@
  *   is what stands between "the pane owns this port" and a squatter closing a
  *   `wait` with one frame (§4 D3, DR4-004).
  * - **Not report a turn twice.** See `./turn-gate`.
+ * - **Answer "did this session just go idle?" for somebody who is not the
+ *   status layer.** An abort sent over the API is confirmed by the frame, not
+ *   by its own reply (Issue #2034) — see {@link watchOpencodeSessionIdle},
+ *   which observes the frame without taking any of the publishing decision
+ *   away from the gate.
  * - **Not throw on an unknown frame.** `server.heartbeat` arrives every ten
  *   seconds and is not in the server's own OpenAPI `Event` union (#1758 D5), so
  *   a strict reader would fail six times a minute on a healthy connection. It is
@@ -112,6 +117,14 @@ interface OpencodeSubscriptionState {
   readonly resync: SourceResync;
   /** Ids already delivered, so a re-sync does not re-announce a live dialog. */
   readonly seenDecisions: Set<string>;
+  /**
+   * Who is waiting for a `session.idle`, by session id (Issue #2034).
+   *
+   * Fed from {@link deliver}, so a synthesised idle from a re-sync counts too.
+   * See {@link watchOpencodeSessionIdle} for why this observes the *frame*
+   * rather than the gate's verdict.
+   */
+  readonly idleWaiters: Map<string, Set<(seen: boolean) => void>>;
   /** Aborts the current attempt. Replaced on every reconnect. */
   streamController: AbortController;
   /**
@@ -168,6 +181,111 @@ export function isOpencodeSubscribed(target: AgentInstanceRef): boolean {
  */
 export function getOpencodeLiveness(target: AgentInstanceRef): SourceLiveness {
   return subscriptions.get(keyOf(target))?.liveness ?? { state: 'unknown' };
+}
+
+/**
+ * The session whose turn is this instance's turn, or null (Issue #2034).
+ *
+ * One server can carry several sessions and a sub-agent runs in one of its own,
+ * so "abort this instance" has to name a session — and the gate has already
+ * decided which one that is (see `./turn-gate`). Null when there is no
+ * subscription, or when no session has been seen busy on this connection yet:
+ * both mean CommandMate does not know whose turn to end, which the caller reads
+ * as "use the keyboard instead".
+ */
+export function getOpencodePrimarySession(target: AgentInstanceRef): string | null {
+  return subscriptions.get(keyOf(target))?.gate.primarySession() ?? null;
+}
+
+/** A registered interest in one session's next `session.idle`. */
+export interface OpencodeIdleWatch {
+  /** True if the frame arrived before the timeout, false otherwise. */
+  readonly seen: Promise<boolean>;
+  /** Stop waiting and resolve `seen` false. Idempotent. */
+  cancel(): void;
+}
+
+/**
+ * Watch for one session's next `session.idle` (Issue #2034).
+ *
+ * The confirmation half of an API abort: `POST /session/:id/abort` answers
+ * `200 true` even for a session that was already idle (measured on 1.18.22, see
+ * `./client`), so the reply says the request was taken and nothing about
+ * whether a turn ended. The frame is the only thing that does.
+ *
+ * **Armed before the request, not after.** The same measurement had the first
+ * idle emitted in the same millisecond the abort replied, so a caller that
+ * awaits the POST and only then starts watching is racing its own completion.
+ *
+ * ## Why this reads the frame and not the gate's verdict
+ *
+ * `session.idle` arrives **twice** for an abort — 23 ms apart on 1.18.22, 19 ms
+ * on 1.18.3 (#1758 §5.3.2) — and the gate is what stops the repeat from being
+ * published as a second `stop`. This watch does not second-guess that: it
+ * settles on the *first* frame and unregisters, so the duplicate lands on no
+ * waiter, which is the same idempotence by a different route. Publication stays
+ * the gate's decision alone.
+ *
+ * Reading the raw frame also keeps the watch working in the one case the gate
+ * deliberately says nothing about: an idle for a session the gate never saw
+ * arm — a stream that opened mid-turn — is `never-armed` and is not published,
+ * but it is still the answer to "did the turn this abort targeted end?".
+ *
+ * @param target - The instance
+ * @param sessionId - `ses_…`, from {@link getOpencodePrimarySession}
+ * @param timeoutMs - How long to wait before answering false
+ * @returns A handle whose `seen` resolves once, either way. `seen` is already
+ *   `false` when there is no subscription to watch
+ */
+export function watchOpencodeSessionIdle(
+  target: AgentInstanceRef,
+  sessionId: string,
+  timeoutMs: number
+): OpencodeIdleWatch {
+  const state = subscriptions.get(keyOf(target));
+  if (!state) return { seen: Promise.resolve(false), cancel: () => {} };
+
+  let resolveSeen: (seen: boolean) => void = () => {};
+  const seen = new Promise<boolean>((resolve) => {
+    resolveSeen = resolve;
+  });
+
+  const waiters = state.idleWaiters.get(sessionId) ?? new Set<(seen: boolean) => void>();
+  state.idleWaiters.set(sessionId, waiters);
+
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const settle = (value: boolean): void => {
+    // The delete is the guard: a waiter that is no longer registered has
+    // already answered, and the second idle must not resolve anything twice.
+    if (!waiters.delete(settle)) return;
+    if (waiters.size === 0) state.idleWaiters.delete(sessionId);
+    if (timer !== null) clearTimeout(timer);
+    resolveSeen(value);
+  };
+
+  waiters.add(settle);
+  timer = setTimeout(() => settle(false), timeoutMs);
+  // The turn is over whether or not this timer fires; it must never be the
+  // reason a CLI process stays up.
+  timer.unref?.();
+
+  return { seen, cancel: () => settle(false) };
+}
+
+/** Answer every outstanding watch false — the connection is going away. */
+function releaseIdleWaiters(state: OpencodeSubscriptionState): void {
+  for (const waiters of [...state.idleWaiters.values()]) {
+    for (const settle of [...waiters]) settle(false);
+  }
+  state.idleWaiters.clear();
+}
+
+/** Tell whoever asked that this session reached idle (Issue #2034). */
+function notifyIdleWaiters(state: OpencodeSubscriptionState, sessionId: string): void {
+  const waiters = state.idleWaiters.get(sessionId);
+  if (!waiters) return;
+  // A copy: each `settle` unregisters itself from the live set.
+  for (const settle of [...waiters]) settle(true);
 }
 
 /** A subscription handle for an instance that has no server to subscribe to. */
@@ -239,6 +357,7 @@ export async function openOpencodeSubscription(
     gate: createTurnGate(),
     resync: options.resync ?? 'none',
     seenDecisions: new Set<string>(),
+    idleWaiters: new Map<string, Set<(seen: boolean) => void>>(),
     streamController: new AbortController(),
     lifetimeController: new AbortController(),
     serverVersion: null,
@@ -279,6 +398,7 @@ export async function closeOpencodeSubscription(target: AgentInstanceRef): Promi
   if (!state) return;
   state.closed = true;
   clearWatchdog(state);
+  releaseIdleWaiters(state);
   state.streamController.abort();
   // Issue #1900: the only signal a backoff is listening to.
   state.lifetimeController.abort();
@@ -295,6 +415,7 @@ export function resetOpencodeSubscriptions(): void {
   for (const state of subscriptions.values()) {
     state.closed = true;
     clearWatchdog(state);
+    releaseIdleWaiters(state);
     state.streamController.abort();
     state.lifetimeController.abort();
   }
@@ -679,6 +800,17 @@ function deliver(
     const callId = partCallId(frame);
     const toolName = partToolName(frame);
     if (callId && toolName) rememberOpencodeToolCall(callId, toolName);
+  }
+
+  // Issue #2034: before the gate, and independent of what it decides. An abort
+  // asked whether THIS session reached idle; whether the frame is also publishable
+  // as a `stop` is a separate question with its own — correct — answer below.
+  if (type === 'session.idle') {
+    const idleSession = readStringField(
+      isPlainObject(frame.properties) ? frame.properties : {},
+      'sessionID'
+    );
+    if (idleSession) notifyIdleWaiters(state, idleSession);
   }
 
   const observation = state.gate.observe(type, frame);

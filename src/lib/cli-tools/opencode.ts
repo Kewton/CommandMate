@@ -6,7 +6,8 @@
  * - startSession: launches `opencode` TUI in tmux
  * - sendMessage: sends text via tmux send-keys + Enter
  * - killSession: types `/exit` + a separate Enter, then falls back to tmux kill-session
- * - interrupt(): Escape TWICE, 300 ms apart -- one press does not abort (Issue #1894)
+ * - interrupt(): `POST /session/:id/abort` when the port is live (Issue #2034),
+ *   else Escape TWICE, 300 ms apart -- one press does not abort (Issue #1894)
  *
  * ## Structured events (Issue #1763, Epic #1720 Phase 4-5)
  *
@@ -72,6 +73,7 @@ import {
   buildAgentLaunchCommandLine,
 } from '@/lib/session/agent-session-lifecycle';
 import {
+  abortOpencodeTurn,
   attachOpencodeEventStream,
   opencodeTarget,
   releaseOpencodeEventStream,
@@ -525,7 +527,26 @@ export class OpenCodeTool extends BaseCLITool {
   }
 
   /**
-   * Abort the running turn: Escape, wait, Escape (Issue #1894).
+   * Abort the running turn: the server if there is one, Escape twice if not.
+   *
+   * ## The server route (Issue #2034)
+   *
+   * `POST /session/:id/abort` on the port this instance's TUI already serves,
+   * against the session `./turn-gate` calls this instance's own. It ends the
+   * turn outright — measured live on 1.18.22 with an isolated `opencode serve`:
+   * `200 true`, and `session.error MessageAbortedError` + `session.idle` on the
+   * stream in the same millisecond. The keystroke route below cannot claim that
+   * unconditionally: it depends on what the TUI has drawn, and a picker or a
+   * dialog on screen eats the presses.
+   *
+   * {@link abortOpencodeTurn} answers false for every way that can fail to
+   * apply — no port, a subscription that is not live, no session known, a
+   * refused request, a completion that never arrived — and then the Escapes go
+   * out exactly as they did before. An instance launched with
+   * `CM_AGENT_HOOKS_INJECT=0`, or on an opencode too old for `--port`, keeps
+   * the interrupt it has always had.
+   *
+   * ## The keyboard route (Issue #1894)
    *
    * `BaseCLITool.interrupt()` sends ONE Escape, and on opencode 1.18 that
    * aborts nothing. The first press is a confirmation prompt drawn in the
@@ -568,6 +589,15 @@ export class OpenCodeTool extends BaseCLITool {
    */
   async interrupt(worktreeId: string, instanceId?: string): Promise<void> {
     const sessionName = this.getSessionName(worktreeId, instanceId);
+
+    // Issue #2034: the server first, and the keyboard only if it did not apply.
+    if (await abortOpencodeTurn(opencodeTarget(worktreeId, instanceId))) {
+      // Issue #405: the turn is over, so the cached capture is stale — the same
+      // reason the keystroke path invalidates below.
+      invalidateCache(sessionName);
+      logger.info('opencode-interrupt-aborted-via-api');
+      return;
+    }
 
     await sendSpecialKey(sessionName, 'Escape');
     await new Promise((resolve) =>

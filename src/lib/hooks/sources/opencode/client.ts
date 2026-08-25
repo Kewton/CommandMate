@@ -346,6 +346,57 @@ export async function fetchOpencodeActivity(port: number): Promise<'busy' | 'idl
   return Object.values(statuses).includes('busy') ? 'busy' : 'idle';
 }
 
+/**
+ * Stop the turn one session is running (Issue #2034).
+ *
+ * `POST /session/:id/abort`. Measured live on **1.18.22** — isolated HOME, an
+ * `opencode serve` on 127.0.0.1:4298, LM Studio as the provider, a generation
+ * aborted 6 s in:
+ *
+ * ```
+ * HTTP/1.1 200 OK
+ * Content-Type: application/json
+ * Content-Length: 4
+ *
+ * true
+ * ```
+ *
+ * and on the event stream, in the same millisecond as the reply:
+ *
+ * ```
+ * 10:17:25.946  session.error   MessageAbortedError
+ * 10:17:25.946  session.status  idle
+ * 10:17:25.946  session.idle          <- 1st
+ * 10:17:25.969  session.idle          <- 2nd, 23 ms later
+ * ```
+ *
+ * Two consequences for the caller, and neither is visible from the status code:
+ *
+ *  - **`true` is "accepted", not "a turn was stopped".** Aborting the SAME
+ *    session again once it was already idle answered `200 true` as well, and
+ *    emitted one more `session.idle`. So the reply cannot confirm the turn
+ *    ended; only the event can — see `./subscription`'s idle watch.
+ *  - **The idle can arrive before this promise resolves.** It did here: the
+ *    frame is emitted while the request is still in flight. A caller that
+ *    starts watching *after* awaiting this call can miss its own completion.
+ *
+ * `true` is required rather than "not null" because the route's own schema
+ * (`GET /doc`, `operationId: session.abort`) declares a bare boolean body: a
+ * `false` is the server saying it did not take the request, and `requestJson`
+ * would hand that back as a perfectly good parsed body.
+ *
+ * @param port - The instance's server
+ * @param sessionId - `ses_…`, the session whose turn should stop
+ * @returns Whether the server accepted the abort
+ */
+export async function abortOpencodeSession(port: number, sessionId: string): Promise<boolean> {
+  const result = await requestJson(
+    `${opencodeBaseUrl(port)}/session/${encodeURIComponent(sessionId)}/abort`,
+    { method: 'POST' }
+  );
+  return result === true;
+}
+
 /** The three answers opencode accepts for an approval (#1758 §5.5.1). */
 export type OpencodePermissionReply = 'once' | 'always' | 'reject';
 
