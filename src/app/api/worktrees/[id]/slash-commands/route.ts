@@ -17,14 +17,18 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { getDbInstance } from '@/lib/db/db-instance';
 import { getWorktreeById } from '@/lib/db';
-import { getSlashCommandGroups, loadSkills, loadCodexSkills, loadAgentsSkills, mergeCodexFamilySkills, getCopilotBuiltinCommands, getGeminiBuiltinCommands } from '@/lib/slash-commands';
+import { getSlashCommandGroups, loadSkills, loadCodexSkills, loadAgentsSkills, loadOpencodeSkills, mergeCodexFamilySkills, getCopilotBuiltinCommands, getGeminiBuiltinCommands, opencodeLiveCommandsToSlashCommands } from '@/lib/slash-commands';
+import {
+  getOpencodeLiveCommands,
+  scheduleOpencodeLiveRefresh,
+} from './opencode-live';
 import { getStandardCommandGroups } from '@/lib/standard-commands';
 import {
   loadUserCatalogCommands,
   composeStandardLayer,
   getCatalogStalenessSnapshot,
 } from '@/lib/slash-command-catalog';
-import { mergeCommandGroups, filterCommandsByCliTool, groupByCategory } from '@/lib/command-merger';
+import { mergeCommandGroups, filterCommandsByCliTool, groupByCategory, foldInMissingCommands } from '@/lib/command-merger';
 import { isValidWorktreePath } from '@/lib/security/worktree-path-validator';
 import { CLI_TOOL_IDS, type CLIToolType } from '@/lib/cli-tools/types';
 import type { SlashCommandGroup, CatalogStaleness } from '@/types/slash-commands';
@@ -140,6 +144,25 @@ export async function GET(
     // codex/antigravity). Missing dir tolerated by scanSkillDirs + .catch.
     const globalClaudeSkills = await loadSkills(os.homedir()).catch(() => []);
 
+    // Skill roots opencode was measured to read — `.opencode/skills`,
+    // `.claude/skills` and `.agents/skills`, in the worktree and under $HOME
+    // (Issue #2037, opencode 1.18.22). opencode discovers a Skill in all six and
+    // runs it as `/<name>`, but its own palette never offers one, so this is the
+    // only place the route is discoverable.
+    //
+    // Loaded only for an opencode session, and here rather than inside
+    // getSlashCommandGroups: the entries carry cliTools ['opencode'] so
+    // filterCommandsByCliTool would drop them for every other tool anyway, and
+    // keeping them out of the shared worktree layer means no other caller of
+    // that function gains an opencode-scoped copy of every Skill.
+    const [worktreeOpencodeSkills, globalOpencodeSkills] =
+      cliTool === 'opencode'
+        ? await Promise.all([
+            loadOpencodeSkills(worktree.path).catch(() => []),
+            loadOpencodeSkills(os.homedir()).catch(() => []),
+          ])
+        : [[], []];
+
     // SF-1: Merge with worktree commands taking priority
     // Include global Codex skills in worktree groups (local ones already included via getSlashCommandGroups)
     const globalCodexGroups: SlashCommandGroup[] = globalSkills.length > 0
@@ -163,13 +186,40 @@ export async function GET(
       ? groupByCategory(getGeminiBuiltinCommands())
       : [];
 
+    // Global first, worktree second: mergeCommandGroups lets a later group win,
+    // so a Skill installed into this worktree beats a same-named one in $HOME.
+    const globalOpencodeGroups: SlashCommandGroup[] = globalOpencodeSkills.length > 0
+      ? [{ category: 'skill' as const, label: 'Skills', commands: globalOpencodeSkills }]
+      : [];
+    const worktreeOpencodeGroups: SlashCommandGroup[] = worktreeOpencodeSkills.length > 0
+      ? [{ category: 'skill' as const, label: 'Skills', commands: worktreeOpencodeSkills }]
+      : [];
+
     const mergedGroups = mergeCommandGroups(
       standardGroups,
-      [...globalClaudeGroups, ...worktreeGroups, ...globalCodexGroups, ...copilotBuiltinGroups, ...geminiBuiltinGroups]
+      [...globalClaudeGroups, ...globalOpencodeGroups, ...worktreeGroups, ...worktreeOpencodeGroups, ...globalCodexGroups, ...copilotBuiltinGroups, ...geminiBuiltinGroups]
     );
 
     // Issue #4: Filter by CLI tool
-    const filteredGroups = filterCommandsByCliTool(mergedGroups, cliTool);
+    let filteredGroups = filterCommandsByCliTool(mergedGroups, cliTool);
+
+    // Issue #2036: fold in what only the running opencode server knows — the
+    // project's own `.opencode/commands/*.md` and the Skills it discovered, with
+    // their descriptions and argument hints. Read from the process cache and
+    // additive only (foldInMissingCommands), so a catalog entry keeps its
+    // translated description and a tool with no live source is untouched.
+    //
+    // The refresh is started *after* the snapshot is taken and never awaited
+    // (#1913 §4 D2): a palette keystroke must not carry a request to a process
+    // CommandMate did not start. An empty snapshot means "not known yet" — the
+    // catalog answers this open and the live rows appear on the next one.
+    if (cliTool === 'opencode') {
+      filteredGroups = foldInMissingCommands(
+        filteredGroups,
+        opencodeLiveCommandsToSlashCommands(getOpencodeLiveCommands(id))
+      );
+      scheduleOpencodeLiveRefresh(id, worktree.path);
+    }
 
     // Calculate source counts in a single pass
     const sourceCounts = { standard: 0, worktree: 0, skill: 0, codexSkill: 0, userCatalog: 0 };

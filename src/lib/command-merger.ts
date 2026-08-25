@@ -157,6 +157,56 @@ export function mergeCommandGroups(
 }
 
 /**
+ * Add commands the groups do not already serve, without overriding any of them.
+ *
+ * Issue #2036: the opencode palette is enriched from that session's live
+ * `GET /command` registry, and the enrichment must be strictly additive.
+ * `mergeCommandGroups` is the wrong tool for it — its contract is "later wins",
+ * which would let a live row replace a catalog row that shares its key, and a
+ * catalog row carries a `descriptionKey` while a live row carries literal
+ * English. Replacing `/init` or `/review` that way turns a translated palette
+ * entry into an untranslated one for every non-English locale, silently. So the
+ * two names the live registry and the catalog both know keep the catalog's
+ * localized text, and only genuinely new names — the project's own
+ * `.opencode/commands/*.md`, and discovered Skills — are added.
+ *
+ * The dedup key is `keyOf` (name + CLI tool scope), the same one both other
+ * dedup layers use, so "already served" means "already served *to this tool*".
+ *
+ * @param groups - Groups already assembled (standard + worktree + skills)
+ * @param additions - Candidates to fold in; ones whose key is present are dropped
+ * @returns Regrouped commands, in CATEGORY_ORDER
+ */
+export function foldInMissingCommands(
+  groups: SlashCommandGroup[],
+  additions: SlashCommand[]
+): SlashCommandGroup[] {
+  if (additions.length === 0) {
+    return groups;
+  }
+
+  const served = new Set<string>();
+  const commands: SlashCommand[] = [];
+  for (const group of groups) {
+    for (const cmd of group.commands) {
+      served.add(keyOf(cmd));
+      commands.push(cmd);
+    }
+  }
+
+  let added = 0;
+  for (const candidate of additions) {
+    const key = keyOf(candidate);
+    if (served.has(key)) continue;
+    served.add(key);
+    commands.push(candidate);
+    added++;
+  }
+
+  return added === 0 ? groups : groupByCategory(commands);
+}
+
+/**
  * Count commands in groups
  *
  * @param groups - Array of SlashCommandGroup objects

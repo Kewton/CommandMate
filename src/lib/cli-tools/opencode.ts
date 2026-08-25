@@ -66,8 +66,10 @@ import { invalidateCache } from '../tmux/tmux-capture-cache';
 import { ensureOpencodeConfig } from './opencode-config';
 import { OPENCODE_PANE_HEIGHT } from '@/config/tmux-pane-config';
 import { execFile } from 'child_process';
+import { basename, extname } from 'path';
 import { promisify } from 'util';
 import { createLogger } from '@/lib/logger';
+import { getMimeTypeByExtension } from '@/config/image-extensions';
 import {
   beginAgentSession,
   buildAgentLaunchCommandLine,
@@ -81,7 +83,19 @@ import {
   resumeOpencodeEventStream,
 } from '@/lib/hooks/sources/opencode/runtime';
 import { getAssignedOpencodePort } from '@/lib/hooks/sources/opencode/ports';
-import { fetchOpencodeHealth } from '@/lib/hooks/sources/opencode/client';
+import {
+  fetchOpencodeHealth,
+  newOpencodeMessageId,
+  opencodeFileUrl,
+  readOpencodeUserMessage,
+  sendOpencodePrompt,
+  type OpencodePromptPart,
+} from '@/lib/hooks/sources/opencode/client';
+import {
+  getOpencodeLiveness,
+  getOpencodePrimarySession,
+} from '@/lib/hooks/sources/opencode/subscription';
+import type { AgentInstanceRef } from '@/lib/hooks/sources/types';
 import { captureOpencodeSessionMemory } from '@/lib/session/opencode-session-recall';
 import {
   recoverOpencodeSessionId,
@@ -153,6 +167,47 @@ export const OPENCODE_READY_MAX_ATTEMPTS = 60;
  * in the frame regardless of this number. Matches copilot's 50.
  */
 const OPENCODE_READY_CAPTURE_LINES = 50;
+
+/**
+ * Waits before each read-back of a message just posted to the server (#2035).
+ *
+ * Delays *before* each attempt, so the first costs nothing — which is the whole
+ * ladder in the ordinary case. Measured on 1.18.22 across five posts: the
+ * message was readable on the **first** `GET`, 8-23 ms after the POST began, so
+ * `prompt_async` answers `204` after the message exists rather than before.
+ *
+ * The three retries are for the race that measurement did not produce, and they
+ * are cheap because the alternative is expensive in one direction only: a
+ * `missing` verdict sends the body again over the keyboard, so calling a message
+ * missing while it is still being written would deliver it twice. Total worst
+ * case 350 ms, inside the HTTP request the operator's send is waiting on.
+ */
+export const OPENCODE_SEND_READBACK_DELAYS_MS: readonly number[] = [0, 50, 100, 200];
+
+/**
+ * The body a tool that cannot attach an image sends instead (Issue #474).
+ *
+ * Defined here, and imported by `@/lib/session/send-user-message`, because
+ * opencode is the one tool where the choice is made **at run time**: every other
+ * tool either attaches natively for every session or never does, and their
+ * branch is picked once by `isImageCapableCLITool`. opencode's native path needs
+ * a server that a given pane may not have (no `--port`, `CM_AGENT_HOOKS_INJECT=0`,
+ * a version too old), so {@link OpenCodeTool.sendMessageWithImage} has to be able
+ * to produce this degraded form itself. One definition rather than two: the
+ * string is what an operator reads in Message History, and a second copy of it
+ * here would drift from the one in the send service without anything noticing.
+ *
+ * @param content - The operator's message; may be empty
+ * @param absoluteImagePath - Absolute path to the attachment
+ */
+export function formatImagePathFallbackMessage(
+  content: string,
+  absoluteImagePath: string
+): string {
+  return content
+    ? `${content}\n\n[添付画像: ${absoluteImagePath}]`
+    : `[添付画像: ${absoluteImagePath}]`;
+}
 
 /**
  * OpenCode CLI tool implementation
@@ -373,8 +428,185 @@ export class OpenCodeTool extends BaseCLITool {
   }
 
   /**
+   * Post one prompt to this instance's server, and verify it landed (#2035).
+   *
+   * The primary half of `sendMessage` / `sendMessageWithImage`. Answers false
+   * for every way the server route can fail to apply, and the caller then types
+   * the body exactly as it did before this Issue.
+   *
+   * ## Why `prompt_async` and not `/tui/append-prompt` + `/tui/submit-prompt`
+   *
+   * Both were measured live on 1.18.22 (design doc §11). The `/tui/*` pair does
+   * work — the composer reflects the text, `/tui/clear-prompt` removes residue
+   * a keystroke left, and a three-line and a 266-character body both arrived
+   * byte-identical. But it drives the **composer**, so it inherits the
+   * composer's state, and the Issue's own example is where that shows: a body
+   * of `/exit` opens the command palette on append, and the palette then eats
+   * the submit. All three calls answered `200 true`; no message was created;
+   * the TUI did not exit either. `prompt_async` does not touch the composer, and
+   * the same `/exit` arrived as literal text — as did `--force …`,
+   * `$(whoami)`, three lines, and 266 characters.
+   *
+   * It also leaves an operator's half-typed draft alone, which `/tui/*` cannot:
+   * `append-prompt` concatenates (`AAA` + `BBB` = `AAABBB`), so sending through
+   * the composer means either splicing CommandMate's body onto the draft or
+   * clearing the draft away.
+   *
+   * ## Why the read-back
+   *
+   * `204` is "accepted", not "delivered", and the gap is not theoretical:
+   * a file part whose `url` is a bare path is accepted and then dropped
+   * *together with its text part* (see `opencodeFileUrl`), and a server sharing
+   * `HOME` and project with this one accepts a prompt for a session it can
+   * reach through `opencode.db` while the message appears on neither this
+   * server's stream nor this pane's screen. So the message id is chosen up
+   * front and read back afterwards — the same shape as #2034's idle watch, one
+   * request instead of a subscription.
+   *
+   * ## What a `missing` verdict costs, and why `unknown` is treated like it
+   *
+   * `missing` is a `404` on the id: nothing exists, so typing the body is free
+   * of duplication. `unknown` — the server stopped answering between the POST
+   * and the read-back — cannot say that, and is still treated as a failure,
+   * following #2034: the operator's message must not be silently dropped, and
+   * a pane whose server just died is one where the keystroke route is the only
+   * one left. The residual risk is one duplicate message inside that window,
+   * and it is logged as `opencode-send-unverified` so it is visible rather than
+   * inferred.
+   *
+   * @param target - The instance
+   * @param message - The body, sent verbatim
+   * @param imagePath - Absolute path to an attachment, if there is one
+   * @returns Whether the message was posted **and** read back
+   */
+  private async trySendViaServer(
+    target: AgentInstanceRef,
+    message: string,
+    imagePath?: string
+  ): Promise<boolean> {
+    const instanceId = target.instanceId ?? target.cliToolId;
+    try {
+      const port = getAssignedOpencodePort(target);
+      if (port === null) return false;
+
+      // The same three preconditions the abort path checks (#2034): a port with
+      // a live subscription behind it, and a session this instance owns. The
+      // liveness check is what keeps a squatter on a remembered port from being
+      // handed the operator's message.
+      const liveness = getOpencodeLiveness(target);
+      if (liveness.state !== 'live') {
+        logger.info('opencode-send-skipped-not-live', {
+          worktreeId: target.worktreeId,
+          instanceId,
+          port,
+          liveness: liveness.state,
+        });
+        return false;
+      }
+
+      // Null on a pane that has not run a turn yet — the gate learns the session
+      // from the first frame that names it. That first send goes over the
+      // keyboard, and every send after it takes this route.
+      const sessionId = getOpencodePrimarySession(target);
+      if (sessionId === null) {
+        logger.info('opencode-send-skipped-no-session', {
+          worktreeId: target.worktreeId,
+          instanceId,
+          port,
+        });
+        return false;
+      }
+
+      const parts: OpencodePromptPart[] = [{ type: 'text', text: message }];
+      if (imagePath !== undefined) {
+        parts.push({
+          type: 'file',
+          mime: getMimeTypeByExtension(extname(imagePath)),
+          filename: basename(imagePath),
+          url: opencodeFileUrl(imagePath),
+        });
+      }
+
+      const messageId = newOpencodeMessageId();
+      if (!(await sendOpencodePrompt(port, sessionId, messageId, parts))) return false;
+
+      const verified = await this.verifyPostedMessage(port, sessionId, messageId, message);
+      if (!verified) {
+        logger.warn('opencode-send-unverified', {
+          worktreeId: target.worktreeId,
+          instanceId,
+          port,
+          sessionId,
+          messageId,
+          hasImage: imagePath !== undefined,
+        });
+        return false;
+      }
+
+      logger.info('opencode-send-delivered-via-api', {
+        worktreeId: target.worktreeId,
+        instanceId,
+        port,
+        sessionId,
+        messageId,
+        hasImage: imagePath !== undefined,
+      });
+      return true;
+    } catch (error: unknown) {
+      // Nothing above is allowed to take the send down: the keystroke route is
+      // still there and is what runs when this answers false.
+      logger.warn('opencode-send-api-failed', {
+        worktreeId: target.worktreeId,
+        instanceId,
+        error: getErrorMessage(error),
+      });
+      return false;
+    }
+  }
+
+  /**
+   * Read the posted message back until it is there, or until it is not (#2035).
+   *
+   * The text is compared rather than merely counted, because the acceptance
+   * condition for this Issue is that the body is unchanged: a `/`-leading body,
+   * a three-line body and a 200-column body all have to come back identical to
+   * what was sent. An image send adds parts CommandMate did not write — 1.18.22
+   * synthesises a `Called the Read tool with …` text part beside the operator's
+   * — so the check is that the sent body is *among* the text parts, not that it
+   * is the only one.
+   *
+   * @returns True once the body was found; false on a `404` or after the ladder
+   */
+  private async verifyPostedMessage(
+    port: number,
+    sessionId: string,
+    messageId: string,
+    message: string
+  ): Promise<boolean> {
+    for (const waitMs of OPENCODE_SEND_READBACK_DELAYS_MS) {
+      if (waitMs > 0) await new Promise((resolve) => setTimeout(resolve, waitMs));
+      const readback = await readOpencodeUserMessage(port, sessionId, messageId);
+      if (readback.kind === 'found') return readback.texts.includes(message);
+      // A `404` is the server saying the message does not exist, which does not
+      // become truer by asking again — the measured cause is a part the server
+      // could not resolve, and it discards the whole message when that happens.
+      if (readback.kind === 'missing') return false;
+    }
+    return false;
+  }
+
+  /**
    * Send a message to OpenCode interactive session
    * [D1-004] Same pattern as Codex/Gemini/VibeLocal (future Template Method candidate)
+   *
+   * Issue #2035: the server first, the keyboard second. {@link trySendViaServer}
+   * documents the measurements behind the choice; what matters here is that
+   * every no it can answer — no port, a subscription that is not live, no
+   * session yet, a refused POST, a message that did not read back — lands on the
+   * `sendMessageWithSubmitVerification` call below, which is the send path
+   * exactly as it was before this Issue. A pane launched with
+   * `CM_AGENT_HOOKS_INJECT=0`, or on an opencode too old for `--port`, must not
+   * become a pane that cannot be sent to.
    *
    * @param worktreeId - Worktree ID
    * @param message - Message to send
@@ -387,6 +619,13 @@ export class OpenCodeTool extends BaseCLITool {
       throw new Error(
         `OpenCode session ${sessionName} does not exist. Start the session first.`
       );
+    }
+
+    if (await this.trySendViaServer(opencodeTarget(worktreeId, instanceId), message)) {
+      // Issue #405: the transcript grew, so the cached capture is stale — the
+      // same reason the keystroke path invalidates below.
+      invalidateCache(sessionName);
+      return;
     }
 
     try {
@@ -407,6 +646,74 @@ export class OpenCodeTool extends BaseCLITool {
       const errorMessage = getErrorMessage(error);
       throw new Error(`Failed to send message to OpenCode: ${errorMessage}`);
     }
+  }
+
+  /**
+   * opencode can attach an image — sometimes (Issue #2035).
+   *
+   * `IImageCapableCLITool` is a *static* declaration: `supportsImage()` takes no
+   * arguments, so it cannot answer per pane, and `send-user-message` picks the
+   * branch from it once. Saying `true` here therefore means
+   * {@link sendMessageWithImage} owns the degraded form as well — which it does.
+   *
+   * Measured on 1.18.22: `POST /session/:id/prompt_async` with a `file` part
+   * delivers a real image. The part came back on the stream re-encoded as
+   * `data:image/png;base64,…`, the TUI rendered it as `File  blue.png`, and the
+   * vision model answered the question that was asked about it. That is the
+   * whole of the claim being made here.
+   */
+  supportsImage(): true {
+    return true;
+  }
+
+  /**
+   * Send a message with an image attached (Issue #2035).
+   *
+   * Before this Issue opencode had no image path at all, so `send-user-message`
+   * took its `else` branch and appended `[添付画像: <path>]` to the text — the
+   * agent received a *path*, and whether it ever looked at the file was up to
+   * it. The server route sends the file itself.
+   *
+   * The fallback is that same degraded body, reached whenever the server route
+   * does not apply, and it is deliberately routed back through
+   * {@link sendMessage} rather than `sendMessageWithSubmitVerification`: the
+   * reason the image could not be attached is usually "no session yet", and by
+   * the time the text is sent that can already have changed. Going through
+   * `sendMessage` gives the text one honest attempt at the API before the
+   * keyboard, at the cost of one cheap re-check.
+   *
+   * @param worktreeId - Worktree ID
+   * @param message - Message text; may be empty
+   * @param imagePath - Absolute path to the image file
+   * @param instanceId - Agent instance ID (defaults to the primary instance)
+   */
+  async sendMessageWithImage(
+    worktreeId: string,
+    message: string,
+    imagePath: string,
+    instanceId?: string
+  ): Promise<void> {
+    const sessionName = this.getSessionName(worktreeId, instanceId);
+
+    const exists = await hasSession(sessionName);
+    if (!exists) {
+      throw new Error(
+        `OpenCode session ${sessionName} does not exist. Start the session first.`
+      );
+    }
+
+    const target = opencodeTarget(worktreeId, instanceId);
+    if (await this.trySendViaServer(target, message, imagePath)) {
+      invalidateCache(sessionName);
+      return;
+    }
+
+    logger.info('opencode-image-degraded-to-path', { worktreeId, instanceId: instanceId ?? this.id });
+    await this.sendMessage(
+      worktreeId,
+      formatImagePathFallbackMessage(message, imagePath),
+      instanceId
+    );
   }
 
   /**

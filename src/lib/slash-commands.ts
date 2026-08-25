@@ -30,6 +30,7 @@ import { isCliToolType, type CLIToolType } from '@/lib/cli-tools/types';
 import { truncateString } from '@/lib/utils';
 import { clearCatalogCache } from '@/lib/slash-command-catalog';
 import { STANDARD_COMMANDS } from '@/lib/standard-commands';
+import type { OpencodeLiveCommand } from '@/lib/slash-command-reconcile/providers/opencode';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('slash-commands');
@@ -50,6 +51,29 @@ const CODEX_SKILLS_SUBDIR = path.join('.codex', 'skills');
 
 /** Codex skills subdirectory path, current CLI standard location (Issue #1165) */
 const AGENTS_SKILLS_SUBDIR = path.join('.agents', 'skills');
+
+/** opencode's own project/global skills subdirectory (Issue #2037) */
+const OPENCODE_SKILLS_SUBDIR = path.join('.opencode', 'skills');
+
+/**
+ * Skill roots opencode 1.18.22 was **measured** to scan, in the order they are
+ * folded together here (Issue #2037).
+ *
+ * Not taken from the docs. Six probe Skills were planted, one per candidate
+ * root, and `GET /skill` answered with the absolute `SKILL.md` path of every
+ * one — which is what makes this a measurement rather than a reading. Two of the
+ * three project roots are exactly `SKILL_INSTALL_ROOT_PREFIXES`, so a Skill
+ * CommandMate installs is discovered by opencode with no extra placement.
+ *
+ * `.agents/skills` is listed last on purpose: it is CommandMate's primary
+ * install root, and the fold below lets the last occurrence of a name win, so a
+ * package installed by CommandMate beats a same-named copy left in another root.
+ */
+const OPENCODE_SKILL_SUBDIRS = [
+  OPENCODE_SKILLS_SUBDIR,
+  path.join('.claude', 'skills'),
+  AGENTS_SKILLS_SUBDIR,
+] as const;
 
 /** Skills subdirectory scan limit (Issue #343) */
 const MAX_SKILLS_COUNT = 100;
@@ -401,6 +425,103 @@ export async function loadAgentsSkills(basePath?: string): Promise<SlashCommand[
 }
 
 /**
+ * Load the Skills an opencode session can actually invoke (Issue #2037).
+ *
+ * ## What was measured, on opencode 1.18.22, 2026-08-25
+ *
+ * Isolated `HOME` per `docs/design/opencode-server-live-verification.md` §4, one
+ * probe Skill planted per candidate root, each instructed to answer a unique
+ * token:
+ *
+ *  - **discovery** — `GET /skill` returned all six probes with their absolute
+ *    `SKILL.md` paths, `.agents/skills` and `.claude/skills` (project *and*
+ *    `$HOME`) among them. The `/skills` picker in the TUI listed the same six.
+ *  - **invocation** — submitting `/probe-agents-root` loaded that Skill's
+ *    instructions and the agent answered `PROBE_OK_probe-agents-root`. Repeated
+ *    for `.claude/skills` and `.opencode/skills`; all three answered their own
+ *    token. So a `/`-prefixed name is a working invocation route.
+ *  - **the gap this function fills** — typing `/probe-agents-root` into the
+ *    opencode composer shows **"No matching items"**. opencode's own slash
+ *    palette lists `source: "command"` rows only, so the invocation route above
+ *    exists and is *undiscoverable* from the palette. Positive control: `/status`
+ *    matched its own row; negative control: `/zzzznotacommand` matched nothing.
+ *
+ * That is why these are surfaced with `cliTools: ['opencode']` and
+ * `source: 'skill'` rather than folded into the `codex-skill` entries
+ * `loadAgentsSkills` already produces: `getSlashCommandTrigger` spells a
+ * `codex-skill` as `$name` for everything except antigravity, and `$name` is not
+ * the route measured to work here. A separate entry also keeps `keyOf`
+ * (`name::opencode`) distinct from `name::antigravity,codex`, so codex and
+ * antigravity palettes are byte-identical to before.
+ *
+ * ## The trailing space is load-bearing
+ *
+ * Also measured: `POST /tui/append-prompt` with a bare `/name` opens the
+ * completion dropdown, and while it is open `POST /tui/submit-prompt` answers
+ * `true` and submits nothing. Appending one space closes it and the Skill runs.
+ * `MessageInput` already inserts `` `${trigger} ` ``, so the palette path is
+ * safe; a caller that builds the trigger by hand must keep that space.
+ *
+ * @param basePath - Repository root to scan, or os.homedir() for the global roots
+ * @returns Skills scoped to opencode, later roots winning a name collision
+ */
+export async function loadOpencodeSkills(basePath?: string): Promise<SlashCommand[]> {
+  const root = basePath ?? os.homedir();
+  const byName = new Map<string, SlashCommand>();
+
+  for (const subdir of OPENCODE_SKILL_SUBDIRS) {
+    const skills = scanSkillDirs(
+      path.join(root, subdir),
+      { source: 'skill', cliTools: ['opencode'] },
+      'opencode-skills-count-limit',
+    );
+    for (const skill of skills) byName.set(skill.name, skill);
+  }
+
+  return Array.from(byName.values()).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * Turn one `GET /command` document into palette entries (Issue #2036).
+ *
+ * The live registry is the only place a project's own `.opencode/commands/*.md`
+ * exists — the bundled catalog cannot know about it — so this is what puts a
+ * `/test` row in the palette with the description its frontmatter declares.
+ *
+ * `hints` (`['$ARGUMENTS']`) are appended to the description rather than carried
+ * in a field of their own: `SlashCommand` has no argument-hint slot, and adding
+ * one would be a change to `src/types` that every consumer would have to learn.
+ * The suffix is what the operator needs to know anyway — that the command takes
+ * arguments — and it survives the description search in `filterCommandGroups`.
+ *
+ * Entries carry a literal `description`, never a `descriptionKey`: this text is
+ * authored by the operator (or by opencode upstream) and there is nothing to
+ * translate it to. That is also why the caller must not let one of these
+ * override a catalog entry — see `foldInMissingCommands` in command-merger.ts.
+ *
+ * @param live - Rows parsed from `GET /command`
+ * @returns Palette entries scoped to opencode
+ */
+export function opencodeLiveCommandsToSlashCommands(
+  live: readonly OpencodeLiveCommand[]
+): SlashCommand[] {
+  return live.map((command) => {
+    const hint = command.hints.length > 0 ? command.hints.join(' ') : '';
+    const description = [command.description, hint].filter((part) => part.length > 0).join(' · ');
+    const isSkill = command.source === 'skill';
+
+    return {
+      name: truncateString(command.name, MAX_SKILL_NAME_LENGTH),
+      description: truncateString(description, MAX_SKILL_DESCRIPTION_LENGTH),
+      category: isSkill ? 'skill' : 'workflow',
+      source: isSkill ? 'skill' : 'worktree',
+      cliTools: ['opencode'],
+      filePath: '',
+    } satisfies SlashCommand;
+  });
+}
+
+/**
  * Collapse skills that exist in both .codex/skills and .agents/skills (Issue #1504).
  *
  * The two locations feed the same codex-skill palette, but .agents/skills entries
@@ -531,6 +652,12 @@ export async function getSlashCommandGroups(basePath?: string): Promise<SlashCom
     const codexLocalSkills = await loadCodexSkills(basePath);
     const agentsLocalSkills = await loadAgentsSkills(basePath);
     const codexFamilySkills = mergeCodexFamilySkills(codexLocalSkills, agentsLocalSkills);
+    // opencode's own rows are deliberately NOT loaded here (Issue #2037). This
+    // function is the tool-agnostic worktree layer, and an opencode-scoped copy
+    // of every Skill would ride along into every caller — including the ones
+    // that count entries by name across all tools. The route loads them beside
+    // the global Skill scans, under `cliTool === 'opencode'`, which is also the
+    // only session that can see them (see loadOpencodeSkills).
     const deduplicated = deduplicateByName(
       [...skills, ...codexFamilySkills],
       commands,
