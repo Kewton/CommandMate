@@ -3,7 +3,7 @@
  *
  * The fixtures below are the real bodies `GET /command` answered on opencode
  * 1.18.22 in the isolated harness (docs/design/opencode-server-live-verification.md
- * §11), trimmed of the `template` field for length. Everything asserted here was
+ * §12), trimmed of the `template` field for length. Everything asserted here was
  * observed before it was written down.
  *
  * @vitest-environment node
@@ -252,7 +252,7 @@ describe('opencodeLiveCommandsToSlashCommands (Issue #2036)', () => {
     expect(skill?.category).toBe('skill');
     expect(skill?.source).toBe('skill');
     // Not 'codex-skill': getSlashCommandTrigger spells that as `$name`, and the
-    // route measured to work on opencode is `/name` (§11.5).
+    // route measured to work on opencode is `/name` (§12.5).
     expect(skill?.source).not.toBe('codex-skill');
   });
 

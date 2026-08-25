@@ -36,7 +36,7 @@ receipt の `install_roots` に両方が記録される。`install_roots` を持
 計測環境（Claude / Codex 行）: 専用 port・専用 DB・skills 未導入の新規 git repository / CommandMate 0.15.0 / macOS 26.5.2 / Node v24.1.0。
 証跡: <https://github.com/Kewton/CommandMate/issues/1513#issuecomment-5083878264>
 
-計測環境（OpenCode 行, Issue #2037）: 同じ形の隔離 — 専用 port（4903 / 4904）・skills 未導入の新規 git repository・**`HOME` ごと差し替えた scratchpad**。手順は `docs/design/opencode-server-live-verification.md` §4、生の測定結果は同 §11。model は config で固定し、TUI の model picker は一度も開いていない。
+計測環境（OpenCode 行, Issue #2037）: 同じ形の隔離 — 専用 port（4903 / 4904）・skills 未導入の新規 git repository・**`HOME` ごと差し替えた scratchpad**。手順は `docs/design/opencode-server-live-verification.md` §4、生の測定結果は同 §12。model は config で固定し、TUI の model picker は一度も開いていない。
 
 ### 読み取り方
 

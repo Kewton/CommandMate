@@ -1291,7 +1291,202 @@ const OPENCODE_MAPPERS: ReadonlyArray<EventMapper> = [
 
 ---
 
-## 11. Issue 2036 / 2037: opencode 1.18.22 (2026-08-25)
+## 11. 追加スパイク: メッセージ送信の API 化（Issue #2035 / opencode 1.18.22）
+
+> **この節は #2035 が追記したものです。§1〜§10（#1758、1.18.3）は書き換えていません。**
+> §1〜§10 と食い違う記述がある場合は、**版が違う**（1.18.3 と 1.18.22）ことを先に疑ってください。
+
+### 11.1 結論サマリ
+
+| 検証項目 | 結果 |
+|---|---|
+| `/tui/append-prompt` → `/tui/submit-prompt` が composer に反映され**送信される** | **可（ただし条件つき）**。[§11.3](#113-tui-系の実測) |
+| `/tui/clear-prompt` で残存が消える | **可**。キーストロークで打ち込んだ残存も、開いてしまったコマンドパレットも消える |
+| `/` 始まり本文が改変されない | **`/tui/*` では不可**。**先頭トークンが実在コマンドに前方一致すると palette が開き、submit が食われる**（`200 true` を返して何も送られない）。`prompt_async` では**可** |
+| 複数行本文が改変されない | **両経路とも可**（`\n` がそのまま） |
+| 長文（wrap 超）が改変されない | **両経路とも可**（266 文字 / 80 桁 pane で 4 行に折り返して表示、送信テキストは完全一致） |
+| submit 検証に使える positive evidence | **可**。SSE `message.updated(role:user)` / `message.part.updated(text)`（submit の 10〜21 ms 後）。**加えて `messageID` 指定 + read-back という、購読なしで済む手段がある**（[§11.5](#115-送信の-positive-evidence)） |
+| 画像添付（`POST /session/:id/prompt_async` の file part） | **可**。実モデルが画像を読んで回答するところまで確認 |
+
+**採用**: `OpenCodeTool.sendMessage` / `sendMessageWithImage` は **`POST /session/:id/prompt_async` を一次**とし、
+**キーストローク経路を fallback** とする。`/tui/*` は**採らない**（理由は [§11.4](#114-tui-系を採らない理由)）。
+
+### 11.2 ハーネスと非汚染の証拠
+
+[§4](#4-再現環境ハーネス) のとおり。差分だけ記す。
+
+| 項目 | 値 |
+|---|---|
+| 版 | **1.18.22**（`GET /global/health` → `{"healthy":true,"version":"1.18.22"}`） |
+| 隔離 HOME | scratchpad 配下。`GET /path` の `home` / `state` / `config` / `worktree` / `directory` **5 つすべてが scratchpad 配下**であることを確認済み |
+| tmux socket | `tmux -L cmate-i2035-oc`（専用）。後始末は `kill-session -t '=<name>:'`。**`kill-server` は使っていない** |
+| ポート | **4835**（素の TUI + `--port`）/ **4836**（比較用の headless `opencode serve`）。3000 は使っていない |
+| provider | `lmstudio`。既定は「モデル未ロード」状態で `session.error APIError` になるが、**ユーザーメッセージは正常に作られる**ので大半の検証はこれで足りる。実ターンを 1 本通すため `qwen/qwen3-vl-4b` を **TTL 900 秒つきでロードし、検証後に unload**（検証前後とも loaded モデルは 0 件） |
+| モデルピッカー | **一度も開いていない**。モデルは隔離 HOME の `opencode.jsonc` で固定した（TUI の picker は既定モデルを書き換えるため） |
+| `auth.json` | mode 600 で複製し、**検証後に削除**（削除確認済み） |
+| ユーザー HOME 非汚染 | 検証終了時点で `~/.local/share/opencode/opencode.db` の mtime は **検証開始（14:49）より前の 8/25 14:16 のまま**、`~/.config/opencode/opencode.jsonc` は 7/19 のまま。**1 バイトも触っていない** |
+
+### 11.3 `/tui/*` 系の実測
+
+`GET /doc` に存在するルート（1.18.22）:
+`POST /tui/append-prompt {text}` / `POST /tui/submit-prompt`（body なし）/ `POST /tui/clear-prompt`（body なし）/
+`POST /tui/execute-command {command}` / `POST /tui/open-help` / `POST /tui/open-models` ほか。
+
+#### 11.3.1 動く（画面で確認した）
+
+| 操作 | HTTP | 画面 | 同一サーバの `/event` に流れるフレーム |
+|---|---|---|---|
+| `append-prompt {"text":"hello from api"}` | `200 true` | composer が `Ask anything...` から `hello from api` に変わる | `tui.prompt.append {"text":"hello from api"}` |
+| `append-prompt` を 2 回（`AAA` → `BBB`） | `200 true` | **`AAABBB`**（連結。区切りは入らない） | 各 1 件 |
+| `clear-prompt` | `200 true` | composer が空（placeholder に戻る） | `tui.command.execute {"command":"prompt.clear"}` |
+| tmux `send-keys` で打った残存 → `clear-prompt` | `200 true` | **残存が消える**（キーストローク由来でも消せる） | 同上 |
+| `/exit` を入れて palette が開いた状態 → `clear-prompt` | `200 true` | **palette ごと閉じて composer も空になる** | 同上 |
+| `submit-prompt` | `200 true` | 送信される | `tui.command.execute {"command":"prompt.submit"}` → 10〜21 ms 後に `message.updated(role:user)` |
+
+`/tui/*` を投げても `session` が無ければ `submit-prompt` が**新しい session を作る**（`session.created` が流れる）。
+
+#### 11.3.2 本文の改変（3 ケース）
+
+いずれも `clear-prompt` → `append-prompt` → `submit-prompt` の順で送り、SSE の
+`message.part.updated(part.type=text)` の `text` と**完全一致（`===`）**することを確認した。
+
+| ケース | 本文 | 長さ | 一致 |
+|---|---|---|---|
+| `/` 始まり | `/tmp/spike-2035.txt の中身を1行で答えて` | 30 | **一致**（palette は開かない） |
+| 3 行 | `line one about the spike\nline two has 日本語 text\nline three ends here` | 67 | **一致**（`\n` 保持。composer にも 3 行で表示される） |
+| 長文 | `D:[001]…[052]:END` | 266 | **一致**（80 桁 pane で 4 行に折り返して表示されるが送信テキストは無傷） |
+
+#### 11.3.3 **`200 true` は「受理された」であって「composer に入った」ではない**（#2038 の注意が 1.18.22 でも成立）
+
+3 通りの反例を実測した。**いずれも `200 true` を返し、メッセージは 1 件も作られない。**
+
+| 反例 | 実測 |
+|---|---|
+| **TUI が 1 つも繋がっていない headless サーバ**（`opencode serve` 単独、4836） | `append-prompt` / `submit-prompt` / `clear-prompt` すべて `200 true`。`GET /session/status` は `{}` のまま |
+| **composer が空のまま `submit-prompt`** | `200 true`、`tui.command.execute {"command":"prompt.submit"}` は流れるが `message.updated` は**来ない** |
+| **本文が実在コマンドに前方一致**（`/exit`） | `append-prompt` `200 true` → **画面に palette が開く**（`/exit  Exit the app` / `/export  Export session transcript` の 2 行）。`submit-prompt` `200 true` → **メッセージは作られず、TUI も終了しない**。composer には `/exit` が残り palette も開いたまま |
+
+なお **サーバをまたいだ混線は無い**：4836（headless）へ `append-prompt {"text":"XLEAKPROBE2035X"}` を投げても、
+4835 の `/event` にもその TUI の画面にも一切現れない。
+
+### 11.4 `/tui/*` 系を採らない理由
+
+**Issue が挙げた制約 2「`/` 始まりの本文がパレットを開く」を `/tui/*` は解決しない**（[§11.3.3](#1133-200-true-は受理されたであってcomposer-に入ったではない2038-の注意が-11822-でも成立)）。
+`/tui/append-prompt` は TUI の **composer** を操作するので、composer の状態をそのまま引き継ぐ。結果:
+
+1. **先頭トークンが実在コマンドに前方一致すると submit が palette に食われる。** `/exit` で実測。
+   `/tmp/…` が通ったのは「一致するコマンドが無く palette が閉じたから」であって、`/` が安全だからではない。
+2. **利用者が書きかけの下書きを壊す。** `append-prompt` は連結（`AAA`+`BBB`=`AAABBB`）なので、
+   CommandMate の本文を下書きに継ぎ足すか、`clear-prompt` で下書きを消すかの二択になる。
+
+`POST /session/:id/prompt_async` は composer を経由しない。同じ本文で比較した:
+
+| 本文 | 長さ | `prompt_async` の `message.part.updated(text)` |
+|---|---|---|
+| `/exit` | 5 | **一致**（コマンドとして解釈されない。TUI も終了しない） |
+| `/tmp/spike-2035.txt の中身を1行で答えて` | 30 | 一致 |
+| 3 行本文 | 67 | 一致 |
+| 266 文字本文 | 266 | 一致 |
+| `--force を付けずに実行して` | 17 | 一致（`-` 始まりも無傷） |
+| `Escape と C-c と ; と $(whoami) を含む本文` | 34 | 一致（tmux/シェルのメタ文字も無傷） |
+
+**TUI の画面にも通常どおり描画される**（transcript に本文が出る）。`prompt_async` を使っても
+「利用者が TUI を見て会話を追える」性質は失われない。
+
+### 11.5 送信の positive evidence
+
+#### 11.5.1 SSE（購読がある場合）
+
+`tui.command.execute {"command":"prompt.submit"}` の **10 / 12 / 21 ms 後**に
+`message.updated(role:user)` と `message.part.updated(part.type=text)` が届いた（3 ケース）。
+Issue が候補に挙げた `message.updated(role:user)` は**そのまま使える**。
+
+#### 11.5.2 `messageID` 指定 + read-back（採用したのはこちら）
+
+`POST /session/:id/prompt_async` の body は **`messageID`（schema: `pattern: "^msg"`）を呼び出し側が指定できる**。
+`msg_cmate2035probe0001` を指定して投げ、`GET /session/:id/message/msg_cmate2035probe0001` を引くと
+`200` + `info.role: "user"` + `parts[0].text` が**送った本文と完全一致**した。
+
+| 計測 | 結果 |
+|---|---|
+| `204` から read-back が `200` になるまで | **5 回中 5 回とも 1 回目の `GET` で `200`**。POST 開始から 8 / 11 / 13 / 20 / 23 ms。つまり `prompt_async` は**メッセージ作成後に `204` を返す** |
+| **反証（落ちたメッセージを検出できるか）** | file part の `url` に**スキーム無しの絶対パス**を入れると `204` → `GET` は **`404 NotFoundError`**。read-back は「受理されたが落ちた」を実際に検出する |
+
+**`204` は「受理」であって「届いた」ではない**ことの直接証拠も取れている:
+`HOME` と project を共有する**別サーバ**（4836）へ、4835 の session ID を指定して `prompt_async` を投げると **`204`** が返るが、
+そのメッセージは **4835 の `/event` にも 4835 の TUI 画面にも現れない**（`opencode.db` 経由で session が共有されているため受理はされる。§5.6.3 の落とし穴の続き）。
+
+### 11.6 画像添付（`FilePartInput`）
+
+`POST /session/:id/prompt_async` の `parts` に `{"type":"file","mime","filename","url"}` を混ぜる。
+
+| 実測 | 結果 |
+|---|---|
+| `url: "file:///…/blue.png"` | **`204`**。SSE では `part.type=file` が **`data:image/png;base64,…` に再エンコードされて**流れる。TUI は `File  blue.png` と描画。`text` part も同じメッセージに同居する |
+| `url: "data:image/png;base64,…"`（直接） | **`204`**、同様に届く |
+| `url: "/…/blue.png"`（**スキーム無し**） | **`204` を返した上で `session.error UnknownError: TypeError: "/…/blue.png" cannot be parsed as a URL. at SessionPrompt.resolveUserPart` となり、<br>**text part を含むメッセージ全体が破棄される**（read-back は `404`）。**`file://` は必須** |
+| 実モデルでの動作 | `qwen/qwen3-vl-4b`（LM Studio）に 64x64 の純青 PNG を添付して「何色か」と聞くと **`画像の色名は blue です。`** と返った。**画像は実際に読まれている** |
+
+1.18.22 は file part を解決するとき、利用者の text part の隣に
+`Called the Read tool with the following input: {"filePath":"…"}` という **合成 text part を自分で足す**。
+read-back で本文を照合するときは「唯一の text part であること」ではなく「**送った本文が text part 群に含まれること**」を見ること。
+
+### 11.7 その他の実測
+
+| 項目 | 実測 |
+|---|---|
+| **ダイアログが開いている最中の送信** | `POST /tui/open-help` で Help ダイアログを出したまま `clear` → `append` → `submit` を投げると、**本文はそのまま送信された**（`message.part.updated(text)` が 42 ms 後に一致）。キーストロークが吸われる状態でも API は通る。**したがって「ダイアログ中は送らない」判断は CommandMate 側（`isPromptWaiting`）が持ち続ける必要がある**。API 経路はガードにならない |
+| **ターン実行中（busy）の送信** | 実行中の session へ `prompt_async` を投げると **`204` で受理され、メッセージも作られる**（read-back `200`）。assistant のメッセージがもう 1 本作られ、最後に `session.idle` が 1 回。**取りこぼしは起きなかった** |
+| **存在しない session への `prompt_async`** | **`404 {"name":"NotFoundError","data":{"message":"Session not found: …"}}`**。`/tui/*` と違い、**本物の negative signal が返る** |
+| **`GET /session`** | 同一 HOME + project の**他プロセスの session も返る**（§5.6.3 のとおり 1.18.22 でも成立。検証中に 3 件並んだ） |
+
+### 11.8 未計測（推測で埋めていない項目）
+
+- **`POST /api/session/:id/prompt`（v2）の `delivery: "steer" | "queue"`** — busy 中の配送を明示制御できる可能性があるが、
+  v2 の `/api/event` が使えない（§5.2.2）ため今回は v1 の `prompt_async` に絞った。**未計測**
+- **`prompt_async` の `model` / `agent` / `system` / `tools` フィールド** — `model` のみ「存在しないモデル ID は
+  `session.error ProviderModelNotFoundError`」を確認。他は**未計測**（CommandMate は指定しない）
+- **`/tui/select-session`** — TUI が別 session を表示しているときに `prompt_async` の宛先を合わせる用途で使えそうだが**未計測**
+- **画像以外の file part（PDF 等）** — `mime` は任意文字列を受けるが、画像以外は**未計測**
+- **`prompt_async` を秒間多数投げたときの挙動 / レート制限** — **未計測**
+
+### 11.9 CommandMate 側の実装（#2035 で入れたもの）
+
+```
+OpenCodeTool.sendMessage(worktreeId, message, instanceId)
+  ├─ hasSession()                        … 無ければ従来どおり throw（変更なし）
+  ├─ trySendViaServer()                  … ★一次
+  │    ├─ getAssignedOpencodePort()      … null → false
+  │    ├─ getOpencodeLiveness()          … 'live' 以外 → false
+  │    ├─ getOpencodePrimarySession()    … null → false（初回ターン前の pane）
+  │    ├─ POST /session/:id/prompt_async … messageID は CommandMate が採番
+  │    └─ GET  /session/:id/message/:id  … found かつ text 一致で初めて true
+  └─ sendMessageWithSubmitVerification() … ★fallback（#1471 の従来経路そのまま）
+```
+
+- **`trySendViaServer` が false を返す道はすべて fallback に落ちる。** ポート未割当（`CM_AGENT_HOOKS_INJECT=0` や
+  `--port` を知らない旧版）、購読が live でない、session 未確定、POST 拒否、read-back 不一致 —— すべて従来のキーストローク経路になる。
+  **これは #2034（abort）と同じ設計。**
+- **read-back の `404`（`missing`）は「作られていない」ことの確定情報**なので、そこから再送しても二重送信にならない。
+  read-back が**取れなかった**場合（`unknown`）も fallback するが、この窓では二重送信になりうるため
+  `opencode-send-unverified` を warn で残す。
+- 画像は `supportsImage(): true` + `sendMessageWithImage()`。サーバ経路が使えないときは
+  従来どおり `[添付画像: <path>]` に劣化する（文言は `formatImagePathFallbackMessage` に一本化し、
+  `src/lib/session/send-user-message.ts` の汎用分岐もそれを使う）。
+- **`composer-spec.ts` の `clearBeforeSend: false` は変えていない。** `prompt_async` は composer を経由しないので
+  クリアが要らず、`C-e`+`C-u`（`clearComposer` が撃つキー列）を opencode の入力枠に対して実測していないため。
+  なお `/tui/clear-prompt` なら残存を消せることは [§11.3.1](#1131-動く画面で確認した) で実測済み。
+
+### 11.10 Issue #2035 が挙げた 4 つの制約への回答
+
+| Issue が挙げた制約 | 実測を踏まえた回答 |
+|---|---|
+| composer クリアが不可（`clearBeforeSend: false`） | **一次経路では問題にならない**。`prompt_async` は composer を経由しないので、利用者の書きかけを壊さないし残存とも結合しない。fallback 経路では従来どおり残る |
+| `/` 始まりの本文がパレットを開く（`key-sequence.ts` の `/exit` 事例） | **一次経路で解決**。`/exit` が literal text として届くことを実測。**`/tui/*` では解決しないことも実測**（[§11.3.3](#1133-200-true-は受理されたであってcomposer-に入ったではない2038-の注意が-11822-でも成立)） |
+| 画像が `[添付画像: path]` テキストに劣化 | **一次経路で解決**。file part で実画像が届き、モデルが読んで回答するところまで確認。サーバが無い pane では従来の劣化に落ちる |
+| 複数行が wrap の影響を受ける | **一次経路で解決**。3 行 / 266 文字とも `message.part.updated(text)` と完全一致 |
+
+## 12. Issue 2036 / 2037: opencode 1.18.22 (2026-08-25)
 
 §4 のハーネスをそのまま再実行して取った追加計測。目的は 2 つ。
 
@@ -1299,7 +1494,7 @@ const OPENCODE_MAPPERS: ReadonlyArray<EventMapper> = [
 2. **#2037** — `commandmate skill install` の install root（`.agents/skills` / `.claude/skills`）を opencode が
    **発見できるか / 呼び出せるか**の 2 軸。
 
-### 11.1 隔離の確認（先に撃つ）
+### 12.1 隔離の確認（先に撃つ）
 
 ```bash
 curl -sS http://127.0.0.1:4904/path
@@ -1316,7 +1511,7 @@ curl -sS http://127.0.0.1:4904/global/health   # {"healthy":true,"version":"1.18
 検証後、複製した `auth.json` は削除済み。ユーザ実データ（`~/.local/share/opencode/opencode.db`、`auth.json`、
 `~/.config/opencode/opencode.jsonc`）の mtime はいずれも検証開始より前のまま。
 
-### 11.2 `GET /command` は palette ではない（#2036 の前提が半分崩れる）
+### 12.2 `GET /command` は palette ではない（#2036 の前提が半分崩れる）
 
 Issue #2036 は「palette 目視を `GET /command` に置換する」と書いていたが、**置換できない**。
 
@@ -1346,7 +1541,7 @@ curl -sS http://127.0.0.1:4904/command | jq -r '.[] | "\(.name)\t\(.source)"'
 **server は起動時に一度だけ走査して cache する。** `.opencode/commands/test.md` を置いて同じ process の
 `GET /command` を読み直しても古いまま。再起動した server は新しいリストを返す。ポーリングしても意味がない。
 
-### 11.3 phantom 再計測（陽性・陰性対照つき）
+### 12.3 phantom 再計測（陽性・陰性対照つき）
 
 palette を `/` で開いて 40 回スクロールし全行を採取 → **19 行**。18 行は 1.18.21 と同一
 （`/agents` … `/variants`）。19 行目は probe の `/test`（`Issue 2036 probe custom command` という
@@ -1362,7 +1557,7 @@ palette を `/` で開いて 40 回スクロールし全行を採取 → **19 �
 つまり `/compact` を palette に出すと「押した名前と違うコマンドを渡す」ことになる。
 exclusion は据え置き、理由をこの実測に更新した（`src/config/slash-commands-exclusions.json`）。
 
-### 11.4 Skill の発見（#2037 discovery 軸）— 機械的
+### 12.4 Skill の発見（#2037 discovery 軸）— 機械的
 
 候補 root ごとに probe Skill を 1 個ずつ、計 6 個植えて server を再起動した。
 
@@ -1381,7 +1576,7 @@ curl -sS http://127.0.0.1:4904/skill | jq -r '.[] | "\(.name)\t\(.location)"'
 
 TUI の `/skills` picker も同じ 6 個を列挙した。`location` が実 path を返すので、これは self-report ではなく **機械的証跡**である。
 
-### 11.5 Skill の呼出（#2037 invocation 軸）— 動くが palette には出ない
+### 12.5 Skill の呼出（#2037 invocation 軸）— 動くが palette には出ない
 
 | 入力 | 結果 |
 |---|---|
@@ -1394,7 +1589,7 @@ TUI の `/skills` picker も同じ 6 個を列挙した。`location` が実 path
 palette は `source: "command"` の行しか載せない。opencode 自身の入口は `/skills` picker だけである。
 **CommandMate の palette が install 済み Skill を opencode session に供給する意味がここにある**（#2037）。
 
-### 11.6 `/` 始まりの prompt は dropdown に submit を吸われる（実装上の罠）
+### 12.6 `/` 始まりの prompt は dropdown に submit を吸われる（実装上の罠）
 
 CommandMate が送信に使う経路そのもので再現する。
 
@@ -1409,18 +1604,18 @@ CommandMate が送信に使う経路そのもので再現する。
 `MessageInput` は元から `` `${trigger} ` `` を入れるので palette 経路は安全。**trigger を手で組む呼び出し側は
 末尾の空白を落とさないこと。**
 
-### 11.7 プログラム的な呼出経路（未採用・記録のみ）
+### 12.7 プログラム的な呼出経路（未採用・記録のみ）
 
 `POST /session/{sessionID}/command {"command","arguments"}` が OpenAPI にある。TUI を経由せずに
-command / Skill を起動できるはずで、11.6 の dropdown 問題を丸ごと回避する。#2036 では**採用していない**
+command / Skill を起動できるはずで、12.6 の dropdown 問題を丸ごと回避する。#2036 では**採用していない**
 （`src/lib/cli-tools/opencode.ts` は #2035 が触っている）。`GET /experimental/tool/ids` に `skill` が
 実在することも確認済み。
 
-### 11.8 この節が変えたもの
+### 12.8 この節が変えたもの
 
-- `src/lib/slash-command-reconcile/providers/opencode.ts`（新規）— `GET /command` provider。11.2 の限界を docblock に持つ
+- `src/lib/slash-command-reconcile/providers/opencode.ts`（新規）— `GET /command` provider。12.2 の限界を docblock に持つ
 - `src/app/api/worktrees/[id]/slash-commands/opencode-live.ts`（新規）— cache + 背景 refresh（hot path で await しない）
 - `src/lib/slash-commands.ts` — `loadOpencodeSkills()` / `opencodeLiveCommandsToSlashCommands()`
-- `src/lib/skills/compatibility-matrix.ts` — opencode 行を `unmeasuredEntry` から 11.4 / 11.5 の実測へ
+- `src/lib/skills/compatibility-matrix.ts` — opencode 行を `unmeasuredEntry` から 12.4 / 12.5 の実測へ
 - `src/config/slash-commands-attestations.json` — opencode を 1.18.22 / 2026-08-25 に（18 個の名前は不変）
-- `src/config/slash-commands-exclusions.json` — `/compact` の理由を 11.3 に
+- `src/config/slash-commands-exclusions.json` — `/compact` の理由を 12.3 に

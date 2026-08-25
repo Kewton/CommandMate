@@ -2,7 +2,7 @@
  * `.agents/skills` / `.claude/skills` reach the opencode palette (Issue #2037)
  *
  * The measurement behind this file (opencode 1.18.22, isolated HOME,
- * docs/design/opencode-server-live-verification.md §11): opencode discovers a
+ * docs/design/opencode-server-live-verification.md §12): opencode discovers a
  * Skill in every one of these roots and runs it when `/<name>` is submitted, but
  * its own palette never offers one — typing the full name shows "No matching
  * items". So CommandMate's palette is the only place the route is discoverable,
