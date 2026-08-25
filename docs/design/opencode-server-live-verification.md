@@ -1619,3 +1619,158 @@ command / Skill を起動できるはずで、12.6 の dropdown 問題を丸ご�
 - `src/lib/skills/compatibility-matrix.ts` — opencode 行を `unmeasuredEntry` から 12.4 / 12.5 の実測へ
 - `src/config/slash-commands-attestations.json` — opencode を 1.18.22 / 2026-08-25 に（18 個の名前は不変）
 - `src/config/slash-commands-exclusions.json` — `/compact` の理由を 12.3 に
+
+---
+
+## 13. Issue 2041: 会話履歴を SSE / `GET /session/:id/message` から生成する（opencode 1.18.22 / 2026-08-25）
+
+**計測は実施した。** §4 のハーネスをそのまま使い、隔離 HOME 上の `opencode serve --port 4881` に対して
+3 ターン（プレーン Markdown / tool 呼び出しあり / 967 文字 1 行の段落）を流し、SSE tap と
+`GET /session/:id/message` の両方を採取した。以下はすべてその実測である。
+
+### 13.1 隔離の確認（先に撃つ）
+
+```
+$ curl -sS http://127.0.0.1:4881/global/health
+{"healthy":true,"version":"1.18.22"}
+
+$ curl -sS http://127.0.0.1:4881/path
+{"home":"…/scratchpad/oc2041/home",
+ "state":"…/scratchpad/oc2041/home/.local/state/opencode",
+ "config":"…/scratchpad/oc2041/home/.config/opencode",
+ "worktree":"…/scratchpad/oc2041/work",
+ "directory":"…/scratchpad/oc2041/work"}
+```
+
+5 値すべて scratchpad 配下。`auth.json` は mode 600 で複製し、検証後に削除済み。TUI は一度も起動して
+おらず（`prompt_async` で REST から流した）、**モデルピッカーは開いていない**。ユーザーの
+`~/.local/share/opencode/opencode.db` の mtime は計測前後で不変。tmux は一切使っていない。
+
+### 13.2 assistant の本文はどのフレームに乗るか（**Issue 本文と食い違う**）
+
+Issue 本文は「assistant の text part を messageID 単位で集約」と書いているが、1.18.22 の実際は違う。
+
+| フレーム | 実測 |
+|---|---|
+| `message.part.updated`（text part の**開始**） | `part.text` が **空文字** で 1 回 |
+| `message.part.delta` | 増分が `{partID, field:"text", delta}` で N 回。**1.18.3 の fixture には存在しないイベント** |
+| `message.part.updated`（text part の**終了**） | `part.text` に **本文全体**。`time.end` つき |
+
+3 ターン 142 フレーム中 **95 が `message.part.delta`**。text part ごとの `message.part.updated` は
+必ず 2 回（空 → 全文）で、**途中経過の `message.part.updated` は 1 度も来ない**。
+
+→ **本文は `message.part.updated` から取り、delta は 1 件も読まない。**
+これが「境界フレームが byte 同一で再送される」（#1763 / #1899）への答えでもある。
+part id をキーに last-write-wins で上書きするので、**再送は同じ値を同じスロットに書くだけ**であり、
+dedup セットを持たずに冪等になる。
+
+#### delta は内容で dedup できない（重要な反証）
+
+tap 中に **byte 同一の delta が 3 組**あった（`","` ×2 / `"."` ×2 / `" without"` ×2）。
+しかし全 88 delta を連結した文字列は最終 `message.part.updated` の 967 文字と**完全一致**した。
+つまり**この 3 組は再送ではなく実際の本文**であり、delta を溜めて重複除去していたら
+967 文字の段落から 3 文字が黙って消えていた。
+
+```
+prt_…PcFwgDisX9SZKY deltas=88 joined=967 final=967 MATCH=True
+```
+
+### 13.3 1 ターンは assistant メッセージ 1 通とは限らない（**Issue 本文と食い違う**）
+
+tool を使ったターンは assistant メッセージを **2 通**生んだ。
+
+| id | `finish` | parts |
+|---|---|---|
+| `msg_…bdd3` | `tool-calls` | `step-start`, `tool(bash)`, `step-finish` |
+| `msg_…c52d` | `stop` | `step-start`, `text`, `step-finish` |
+
+両方の `parentID` は同じ **user メッセージ id**。よって**ターンの identity は `parentID`**であり、
+assistant の messageID ではない。messageID で束ねると 1 つの返答が 2 行に割れ、
+再取得時に割れ方が変わって冪等にならない。
+
+`chat_messages.request_id` に `oc-turn:<parentID>` を書くのはこのため（`src/types/agent-transcript.ts`）。
+
+### 13.4 `Part` は 12 種（`GET /doc` 一次証拠）
+
+```
+Part => TextPart SubtaskPart ReasoningPart FilePart ToolPart StepStartPart
+        StepFinishPart SnapshotPart PatchPart AgentPart RetryPart CompactionPart
+```
+
+本文になるのは `text` / `reasoning` / `tool` の 3 種のみ。`step-start` / `step-finish` /
+`snapshot` / `patch` は**明示的な無視リスト**にした（allow ではなく deny にしたのは、
+将来 opencode が増やした variant を「未知 part」としてログに出すため。C8 と同じ規則）。
+
+`TextPart` は `synthetic` / `ignored` フラグを持つ（schema 上）。今回の計測では 1 件も観測していない。
+
+**`reasoning` part は今回のプロバイダ（`github-copilot` / `claude-sonnet-4.6`）では 1 件も出なかった。**
+形は `GET /doc`（§4.5 の一次証拠）から取っており、**実機での観測はしていない**。推測で埋めていない。
+
+### 13.5 再接続はイベントを 1 件も replay しない → REST 補完が必須
+
+3 ターン完了後に **2 本目の SSE を張った**。受け取ったのは:
+
+```
+server.connected   ← これ 1 件のみ。以後は heartbeat だけ
+```
+
+`?after=<seq>` が効かない（§5.2.2）ことと合わせて、**落ちている間に走ったターンはストリームからは
+永久に取れない**。`GET /session/:id/message` が唯一の経路。
+
+### 13.6 `GET /session/status` は静かなサーバでは `{}` を返す
+
+ターンが全部終わったサーバに対して:
+
+```
+$ curl -sS http://127.0.0.1:4881/session/status
+{}
+```
+
+**「今なにかしている」セッションしか載らない。** したがって CommandMate 再起動後の補完で
+「どのセッションを読むか」を `/session/status` から取ることはできない。
+`recoverHistory()` は **turn-gate の primarySession → #2038 の永続化 sessionID** の順で解決する。
+
+### 13.7 保存された本文と `GET /session/:id/message` の一致（受入条件）
+
+3 ターンぶんの実測を fixture に落とし、テストで突き合わせている（**環境固有値は置換済み**）。
+
+| fixture | 中身 |
+|---|---|
+| `tests/fixtures/hooks/opencode/history-turns-1-18-22.json` | SSE tap から `message.*` / `session.idle` の 142 フレーム（到着順） |
+| `tests/fixtures/hooks/opencode/session-messages-1-18-22.json` | 同セッションの `GET /session/:id/message` 応答（7 メッセージ） |
+
+この 2 つは**同じ 3 ターンの 2 つの見え方**なので、「保存された本文が REST の text と一致する」は
+テストで検証できる性質になる:
+
+- `tests/unit/hooks/sources/opencode-transcript-2041.test.ts`
+- `tests/integration/opencode-history-2041.test.ts`
+
+実測された 3 ターンの保存結果:
+
+| ターン | 保存された本文 |
+|---|---|
+| 1（tool なし） | `## Heading A\n\n- item one\n- item two\n\n**bold** and \`code\``（56 文字、そのまま） |
+| 2（tool あり） | `- \`bash\` — echo CMATE-2041-TOOL-MARKER\n\nIt printed \`CMATE-2041-TOOL-MARKER\`.` |
+| 3（967 文字 1 行） | 967 文字が **1 行のまま**。scrape 版は 200 桁でハードラップされている |
+
+### 13.8 未計測（推測で埋めていない項目）
+
+- **`reasoning` part の実物**（13.4）。折りたたみ表現の判断は形からしており、実機で見ていない。
+- **`message.part.removed` / `message.removed`**。`Event` union にあるが 1 件も観測していない。
+  part の削除は現在の実装では反映されない（削除されたはずの part が残る）。
+- **`compaction` 後のセッション**。`GET /session/:id/message` が compaction 前のメッセージを
+  どう返すかは未確認。`MAX_OPENCODE_SESSION_MESSAGES` は新しい方 500 件で切る。
+- **sub-agent のセッション**。`parentID` を持つ session の履歴は今回の対象外（#2040 の
+  telemetry 側で除外している判断と揃えてある）。
+
+### 13.9 この節が変えたもの
+
+- `src/lib/hooks/sources/opencode/transcript.ts`（新規）— part 蓄積と Markdown 化。純関数、DB も fetch も持たない
+- `src/lib/hooks/sources/opencode/history.ts`（新規）— `chat_messages` への writer と REST 補完
+- `src/lib/hooks/sources/opencode/client.ts` — `fetchOpencodeSessionMessages()` を**末尾に追加**（既存 export は不変）
+- `src/lib/hooks/sources/opencode/subscription.ts` — `deliver()` の #2040 と同じ位置で `message.*` を読み、
+  `session.idle` で flush、接続時に `recoverHistory()`
+- `src/lib/polling/structured-history-gate.ts`（新規）／`src/lib/polling/response-checker.ts` — port 接続中は scrape 保存を止める
+- `src/lib/db/chat-db.ts` — `findMessageByRequestId()`（冪等性の判定。**migration は追加していない**）
+- `src/types/agent-transcript.ts`（新規）— `request_id` に載せる provenance マーカーと turn key
+- `src/components/worktree/ConversationPairCard.tsx` — 当該行だけ Markdown 描画（`rehype-raw` は使わない）

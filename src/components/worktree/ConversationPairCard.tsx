@@ -10,8 +10,13 @@
 import React, { useMemo, useCallback, memo } from 'react';
 import { Copy, ArrowDownToLine, ChevronDown, Loader2, AlertCircle, RotateCcw, X } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
+import ReactMarkdown, { type Components } from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import rehypeSanitize from 'rehype-sanitize';
+import rehypeHighlight from 'rehype-highlight';
 import type { ConversationPair } from '@/types/conversation';
 import type { ChatMessage } from '@/types/models';
+import { isAgentAuthoredMarkdown } from '@/types/agent-transcript';
 import { getDateFnsLocale } from '@/lib/date-locale';
 import { formatMessageTimestamp } from '@/lib/date-utils';
 
@@ -193,6 +198,94 @@ const MessageContent = memo(function MessageContent({
         )
       )}
     </span>
+  );
+});
+
+/**
+ * How tall a collapsed Markdown reply is allowed to be.
+ *
+ * Issue #2041. {@link COLLAPSED_MAX_LINES} cannot be used for these: it
+ * truncates the *string*, and a Markdown string cut at 100 characters is
+ * routinely cut inside a token — `**bol`, a fence with no closing fence, a
+ * table with a header and no body — so the collapsed card would render garbage
+ * that the expanded one does not. Clamping the rendered height instead cuts
+ * pixels, which no syntax can be halfway through. The value is two lines of
+ * `text-xs` plus the paragraph margin `.assistant-md` adds, i.e. the same
+ * "about two lines" {@link COLLAPSED_MAX_LINES} means.
+ *
+ * `hasLongContent` — which decides whether the expand toggle appears at all —
+ * is deliberately still computed from the string, so a Markdown reply and a
+ * scraped one agree about what counts as long.
+ */
+const COLLAPSED_MARKDOWN_MAX_HEIGHT = 'max-h-[3.25rem]';
+
+/**
+ * Renders one assistant reply that is the agent's own Markdown (Issue #2041).
+ *
+ * Only rows written by `lib/hooks/sources/opencode/history` reach this — see
+ * {@link isAgentAuthoredMarkdown} for why the distinction has to travel on the
+ * row. Every other row is a scrape of a terminal, and rendering *that* as
+ * Markdown would be actively wrong: a `┌──────┐` box becomes a table, a `# ` in
+ * a captured shell prompt becomes a heading, and `*` bullets the TUI drew get
+ * re-bulleted at a different indent.
+ *
+ * ## The plugin set, and the one that is missing
+ *
+ * `remarkGfm` + `rehypeSanitize` + `rehypeHighlight`, which is exactly what
+ * `components/home/AssistantMessageList` already renders assistant Markdown
+ * with. `rehypeRaw` is deliberately **not** in the list, unlike
+ * `MarkdownPreview`: that component renders files a human wrote and asked to
+ * see, this one renders whatever a language model emitted, and turning the HTML
+ * parser on costs every unfenced `<T>` in ordinary prose — a real regression on
+ * the majority case to gain `<details>` on a rare one. It is also why
+ * `./transcript` folds reasoning behind a blockquote rather than a `<details>`.
+ *
+ * ## File paths stay clickable
+ *
+ * The existing affordance survives the change: {@link MessageContent} is spliced
+ * into the text children of every block element the linkifier can safely reach.
+ * `code` and `pre` are left alone — a path inside a fence is part of a command,
+ * not a link, and a `<button>` there would break selection and copy.
+ */
+const AssistantMarkdown = memo(function AssistantMarkdown({
+  content,
+  onFilePathClick,
+}: {
+  content: string;
+  onFilePathClick: (path: string) => void;
+}) {
+  // Memoised for the reason `MarkdownPreview` documents: a fresh object or array
+  // identity makes ReactMarkdown rebuild the whole DOM tree on every render.
+  const components = useMemo<Components>(() => {
+    const linkify = (children: React.ReactNode): React.ReactNode =>
+      React.Children.map(children, (child) =>
+        typeof child === 'string' ? (
+          <MessageContent content={child} onFilePathClick={onFilePathClick} />
+        ) : (
+          child
+        )
+      );
+    return {
+      p: ({ children }) => <p>{linkify(children)}</p>,
+      li: ({ children }) => <li>{linkify(children)}</li>,
+      td: ({ children }) => <td>{linkify(children)}</td>,
+      th: ({ children }) => <th>{linkify(children)}</th>,
+      strong: ({ children }) => <strong>{linkify(children)}</strong>,
+      em: ({ children }) => <em>{linkify(children)}</em>,
+    };
+  }, [onFilePathClick]);
+
+  const remarkPlugins = useMemo(() => [remarkGfm], []);
+  const rehypePlugins = useMemo(() => [rehypeSanitize, rehypeHighlight], []);
+
+  return (
+    <ReactMarkdown
+      remarkPlugins={remarkPlugins}
+      rehypePlugins={rehypePlugins}
+      components={components}
+    >
+      {content}
+    </ReactMarkdown>
   );
 });
 
@@ -402,6 +495,10 @@ const AssistantMessageItem = memo(function AssistantMessageItem({
   );
 
   const displayContent = isExpanded || !isTruncated ? message.content : truncatedText;
+  // Issue #2041: the row says whether its content is the agent's Markdown or a
+  // scrape of its terminal. Only the first may be parsed as Markdown.
+  const isMarkdown = isAgentAuthoredMarkdown(message.requestId);
+  const clampCollapsed = isMarkdown && isTruncated && !isExpanded;
   // The expand/collapse control governs the whole pair, so render it once on the
   // first assistant item's header (Issue #1075: moved out of the body overlay).
   const showExpandToggle = index === 0 && hasLongContent && !!onToggleExpand;
@@ -449,15 +546,32 @@ const AssistantMessageItem = memo(function AssistantMessageItem({
           )}
         </div>
       </div>
-      <div
-        data-message-id={message.id}
-        className="text-xs text-foreground whitespace-pre-wrap break-words [word-break:break-word] max-w-full overflow-x-hidden"
-      >
-        <MessageContent content={displayContent} onFilePathClick={onFilePathClick} />
-        {!isExpanded && isTruncated && (
-          <span className="text-muted-foreground">...</span>
-        )}
-      </div>
+      {isMarkdown ? (
+        <div
+          data-message-id={message.id}
+          data-markdown="true"
+          className={[
+            'assistant-md text-xs text-foreground break-words [word-break:break-word] max-w-full overflow-x-hidden',
+            clampCollapsed ? `${COLLAPSED_MARKDOWN_MAX_HEIGHT} overflow-y-hidden` : '',
+          ]
+            .filter(Boolean)
+            .join(' ')}
+        >
+          {/* The FULL body either way. The collapse is a height clamp, not a
+              string cut — see COLLAPSED_MARKDOWN_MAX_HEIGHT. */}
+          <AssistantMarkdown content={message.content} onFilePathClick={onFilePathClick} />
+        </div>
+      ) : (
+        <div
+          data-message-id={message.id}
+          className="text-xs text-foreground whitespace-pre-wrap break-words [word-break:break-word] max-w-full overflow-x-hidden"
+        >
+          <MessageContent content={displayContent} onFilePathClick={onFilePathClick} />
+          {!isExpanded && isTruncated && (
+            <span className="text-muted-foreground">...</span>
+          )}
+        </div>
+      )}
     </div>
   );
 });
