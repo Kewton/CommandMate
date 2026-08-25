@@ -24,6 +24,16 @@
  * starts without structured events is the pre-#1763 status quo, and the screen
  * scraper keeps deciding for it exactly as before.
  *
+ * ## Session continuity (Issue #2038)
+ *
+ * opencode is the one supported agent whose conversation is addressable from
+ * the command line (`-s` / `-c` / `--fork`, measured on 1.18.22). `killSession`
+ * writes the instance's session down while its server can still be asked
+ * (`@/lib/session/opencode-session-recall`), and the creation path appends
+ * `-s <id>` to the launch line when — and only when — the recorded
+ * `Session.directory` is this worktree. The flag is composed HERE rather than in
+ * `prepareOpencodeLaunch` so no other tool's launch plan can be reached by it.
+ *
  * ## Launch side effects (Issue #1908)
  *
  * Two things this file used to do on the way up are gone. The 15-second sleep
@@ -70,6 +80,11 @@ import {
 } from '@/lib/hooks/sources/opencode/runtime';
 import { getAssignedOpencodePort } from '@/lib/hooks/sources/opencode/ports';
 import { fetchOpencodeHealth } from '@/lib/hooks/sources/opencode/client';
+import { captureOpencodeSessionMemory } from '@/lib/session/opencode-session-recall';
+import {
+  recoverOpencodeSessionId,
+  withOpencodeResumedSession,
+} from '@/lib/session/opencode-session-store';
 import { verifyGracefulExit } from './graceful-exit';
 import {
   TUI_SESSION_CREATE_WAIT_MS,
@@ -233,11 +248,35 @@ export class OpenCodeTool extends BaseCLITool {
       // `AgentEventSource` for the plan (S3/S4/S5) and never throws. opencode's
       // environment is empty — it is the one source with no correlation
       // variable, because CommandMate holds the connection (#1846).
-      const launchCommand = buildAgentLaunchCommandLine({
+      const plannedCommand = buildAgentLaunchCommandLine({
         target,
         executablePath: this.command,
         worktreePath,
       });
+
+      // Issue #2038: continue the conversation this instance was in before it
+      // was stopped. `-s <id>` is appended HERE rather than inside
+      // `prepareOpencodeLaunch` because the plan is a statement about the tool
+      // and this is a fact about one pane's history; keeping them apart is also
+      // what makes "claude / codex の起動引数は不変" a property of the code
+      // rather than of a test — no other tool's launcher can reach this line.
+      //
+      // Null whenever there is nothing to resume, and — the acceptance
+      // condition — whenever the remembered session belongs to a different
+      // worktree than the one being launched. See `./opencode-session-store`.
+      const resumeSessionId = recoverOpencodeSessionId(target, worktreePath);
+      const launchCommand =
+        resumeSessionId === null
+          ? plannedCommand
+          : withOpencodeResumedSession(plannedCommand, resumeSessionId);
+      if (resumeSessionId !== null) {
+        logger.info('opencode-session-resumed', {
+          worktreeId,
+          instanceId: instanceId ?? this.id,
+          sessionId: resumeSessionId,
+        });
+      }
+
       await sendKeys(sessionName, launchCommand, true);
 
       // Issue #1908: poll for opencode's own composer instead of sleeping 15 s.
@@ -404,6 +443,20 @@ export class OpenCodeTool extends BaseCLITool {
     // Null whenever structured events are off or no port was ever allocated, and
     // then the health probe is skipped entirely — there is nothing to orphan.
     const assignedPort = getAssignedOpencodePort(target);
+
+    // Issue #2038: the last moment the server that knows which session this
+    // instance is in is still answering. Verified against opencode's own
+    // `Session.directory` and followed up its `parentID` chain so a sub-agent's
+    // turn cannot be mistaken for the operator's conversation — see
+    // `@/lib/session/opencode-session-recall`. Never throws, and a skip costs
+    // the next launch its `-s <id>`, never the kill.
+    const captured = await captureOpencodeSessionMemory(target).catch(() => null);
+    if (captured && !captured.captured) {
+      logger.info('opencode-session-capture-skipped', {
+        sessionName,
+        reason: captured.skipped,
+      });
+    }
 
     // Issue #1763: stop watching before the pane goes, so the stream is not
     // reconnecting to a server that is being shut down. Also gives the port

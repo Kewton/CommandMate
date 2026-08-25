@@ -164,6 +164,22 @@ export function getAssignedOpencodePort(target: AgentInstanceRef): number | null
   return assignments.get(keyOf(target))?.port ?? null;
 }
 
+/**
+ * The worktree an assignment was made for, in this process. Null when there is
+ * none (Issue #2038).
+ *
+ * Exists because `killSession` is handed `(worktreeId, instanceId)` and no
+ * path, and Issue #2038 has to answer "is the session opencode is about to
+ * forget rooted in THIS worktree?" at exactly that moment. The assignment is
+ * already the record of "this instance is running there" — `recoverOpencodePort`
+ * trusts the same field — so reading it is cheaper and more honest than
+ * re-deriving the path from the database inside a launcher that is deliberately
+ * kept out of the database's import graph.
+ */
+export function getAssignedOpencodeWorktreePath(target: AgentInstanceRef): string | null {
+  return assignments.get(keyOf(target))?.worktreePath ?? null;
+}
+
 /** Record an assignment in memory and on disk. */
 export function rememberOpencodePort(
   target: AgentInstanceRef,
