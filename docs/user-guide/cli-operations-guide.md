@@ -1963,8 +1963,8 @@ commandmate report metrics --json                  # JSON出力
 | オプション | 説明 | デフォルト |
 |-----------|------|-----------|
 | `--date <date>` | 対象日（`YYYY-MM-DD`） | 当日 |
-| `--tool <tool>` | 使用するAIツール（claude, codex, copilot, antigravity） | claude |
-| `--model <model>` | モデル名（copilot 向け） | - |
+| `--tool <tool>` | 使用するAIツール（claude, codex, copilot, antigravity, opencode） | claude |
+| `--model <model>` | モデル名（copilot は `--model` の値、opencode は `provider/model`） | - |
 | `--template <id>` | テンプレートIDを指示文として使用 | - |
 | `--instruction <text>` | カスタム指示文（`--template` の代替） | - |
 | `--token <token>` | 認証トークン（`CM_AUTH_TOKEN` 環境変数を推奨） | - |
@@ -1979,7 +1979,35 @@ commandmate report metrics --json                  # JSON出力
 | `--token <token>` | 認証トークン（`CM_AUTH_TOKEN` 環境変数を推奨） | - |
 
 > **注意**: `--date` は `YYYY-MM-DD` 形式のみ受け付けます。不正な形式は `exit 2`（CONFIG_ERROR）になります。
-> `--tool` は claude / codex / copilot / antigravity のいずれか、`--days` は 1 以上を指定してください。
+> `--tool` は claude / codex / copilot / antigravity / opencode のいずれか、`--days` は 1 以上を指定してください。
+
+> **opencode（Issue #2044）**: `--tool opencode` は `opencode run --format json` で実行され、
+> JSON イベント列の**最後のアシスタントメッセージの text** が本文になります。
+> `--format default` の装飾を剥がしているわけではないので、ツール呼び出しを挟んだ実行でも
+> 「ツールを呼ぶと決めたメッセージ」ではなく答えの側が採用されます。
+> `--model` を渡すときは `provider/model`（例: `github-copilot/claude-sonnet-4.6`）で書いてください。
+
+### レポート末尾の「Agent session cost」節（Issue #2044）
+
+その日にエージェントが報告したコスト／トークンが台帳（`agent_session_costs`）にあると、
+生成された本文の**末尾に** worktree 別の表が追記されます。**AI には渡していません**
+（数字を要約させると `opencode stats` と突き合わせられなくなるため、生成後に決定的に付けています）。
+台帳が空の日は節ごと出ません＝ claude / codex の生成結果は従来どおりです。
+
+見出しは `## Agent session cost (YYYY-MM-DD)` で、その下に次の表が付きます。
+
+```markdown
+| Worktree | Sessions | Cost (USD) | Input | Output | Reasoning | Cache read | Cache write |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| feature/2044-opencode | 2 | 0.067939 | 6 | 181 | 0 | 8367 | 16719 |
+| **Total** | 2 | 0.067939 | 6 | 181 | 0 | 8367 | 16719 |
+```
+
+- 数字は**エージェント自身のセッション累計**をそのまま足したものです。opencode 1.18.22 で
+  `opencode stats --project "" ` の Total Cost / Input / Output / Cache Read / Cache Write と
+  一致することを実測しています（`docs/design/opencode-server-live-verification.md` §15.3）。
+- `-` は 0 ではなく「エージェントが値を報告しなかった」という意味です。
+- 突き合わせは `opencode stats --project <worktree のパス> --days 1` で行えます。
 
 ### list 出力例
 

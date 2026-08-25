@@ -34,7 +34,7 @@ describe('db-migrations', () => {
 
   describe('CURRENT_SCHEMA_VERSION', () => {
     it('should be 57 after Migration #57 (push defaults notice, #2056)', () => {
-      expect(CURRENT_SCHEMA_VERSION).toBe(57);
+      expect(CURRENT_SCHEMA_VERSION).toBe(58);
     });
   });
 

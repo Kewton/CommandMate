@@ -93,8 +93,10 @@ describe('the CMATE.md model reaches argv (Issue #1914)', () => {
    * assertion below is exactly what was impossible.
    */
   it.each([
-    ['opencode', 'ollama/qwen3:8b', ['run', '-m', 'ollama/qwen3:8b', 'do something']],
-    ['opencode', 'anthropic/claude-sonnet-4-5', ['run', '-m', 'anthropic/claude-sonnet-4-5', 'do something']],
+    // Issue #2044 inserted `--format json` ahead of `-m`; the reachability
+    // claim this suite makes is unchanged.
+    ['opencode', 'ollama/qwen3:8b', ['run', '--format', 'json', '-m', 'ollama/qwen3:8b', 'do something']],
+    ['opencode', 'anthropic/claude-sonnet-4-5', ['run', '--format', 'json', '-m', 'anthropic/claude-sonnet-4-5', 'do something']],
   ])('%s + %s', (cliToolId, model, expected) => {
     const e = entry({ cliToolId, model });
     const options = resolveModelOption(e, NO_DB_MODEL);
@@ -132,6 +134,8 @@ describe('the CMATE.md model reaches argv (Issue #1914)', () => {
     const options = resolveModelOption(e, NO_DB_MODEL);
     expect(buildCliArgs(e.message, e.cliToolId, e.permission, options)).toEqual([
       'run',
+      '--format',
+      'json',
       'do something',
     ]);
   });

@@ -30,6 +30,7 @@
     "regenerateConfirm": "A report already exists for this date. Regenerate and overwrite?",
     "toolLabel": "Tool:",
     "modelPlaceholder": "Model (optional)",
+    "modelPlaceholderOpencode": "provider/model (optional)",
     "generationMode": "Generation Mode",
     "modes": {
       "none": "No instruction",

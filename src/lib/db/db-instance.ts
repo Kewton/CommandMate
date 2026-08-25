@@ -10,6 +10,7 @@ import Database from 'better-sqlite3';
 import path from 'path';
 import { runMigrations } from './db-migrations';
 import { openDatabaseWithAbiRecovery } from './abi-recovery';
+import { startAgentSessionCostSampler, stopAgentSessionCostSampler } from './agent-session-cost-sampler';
 import { getEnv } from '@/lib/env';
 
 let dbInstance: Database.Database | null = null;
@@ -69,6 +70,14 @@ export function getDbInstance(): Database.Database {
       throw error;
     }
     dbInstance = db;
+
+    // Issue #2044: the agent cost ledger needs somebody to copy the in-memory
+    // telemetry in before the pane that holds it is killed. This is the one
+    // place that runs once per process, after the schema is verified, in every
+    // process that has a database — and the sampler is a no-op wherever the
+    // telemetry map is empty. It refuses to start under Vitest and unrefs its
+    // timer, so nothing here holds a test or the CLI open.
+    startAgentSessionCostSampler(db);
   }
 
   return dbInstance;
@@ -80,6 +89,9 @@ export function getDbInstance(): Database.Database {
  */
 export function closeDbInstance(): void {
   if (dbInstance) {
+    // Issue #2044: stop the sampler before the handle it writes through goes
+    // away, or the next tick throws `The database connection is not open`.
+    stopAgentSessionCostSampler();
     dbInstance.close();
     dbInstance = null;
   }

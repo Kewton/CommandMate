@@ -4,6 +4,8 @@
  *
  * Issue #607: Daily summary feature
  * Issue #618: Report template system - 3 generation modes
+ * Issue #2044: opencode joins the tool selector; the Model box follows
+ *   TOOLS_WITH_MODEL_SUPPORT instead of naming copilot.
  */
 
 'use client';
@@ -14,6 +16,7 @@ import ReportDatePicker from './ReportDatePicker';
 import { Button, Card, Input, RadioGroup, RadioGroupItem, Skeleton, Spinner, Textarea } from '@/components/ui';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { SUMMARY_ALLOWED_TOOLS, MAX_USER_INSTRUCTION_LENGTH } from '@/config/review-config';
+import { TOOLS_WITH_MODEL_SUPPORT } from '@/lib/cmate-cli-tool-parser';
 import { useReportGeneration } from '@/hooks/useReportGeneration';
 import { useGenerationStatus } from '@/hooks/useGenerationStatus';
 import { copyToClipboard } from '@/lib/clipboard-utils';
@@ -61,6 +64,16 @@ export default function ReportTab() {
   const [isSaving, setIsSaving] = useState(false);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  /**
+   * Whether the tool takes a `--model`.
+   *
+   * Issue #2044: reads the parser's Set rather than testing for `'copilot'`.
+   * opencode accepts `-m provider/model` and is in that Set, so hard-coding the
+   * id here would have left the box hidden and the option unreachable from the
+   * UI while the API happily accepted it.
+   */
+  const showModelInput = TOOLS_WITH_MODEL_SUPPORT.has(selectedTool);
 
   const {
     mode,
@@ -134,7 +147,7 @@ export default function ReportTab() {
     setError(null);
     try {
       const body: Record<string, string> = { date: selectedDate, tool: selectedTool };
-      if (selectedTool === 'copilot' && modelInput.trim()) {
+      if (showModelInput && modelInput.trim()) {
         body.model = modelInput.trim();
       }
       if (mode !== 'none' && userInstruction.trim()) {
@@ -219,11 +232,15 @@ export default function ReportTab() {
             ))}
           </select>
 
-          {selectedTool === 'copilot' && (
+          {showModelInput && (
             <Input
               type="text"
               inputSize="sm"
-              placeholder={t('report.modelPlaceholder')}
+              placeholder={
+                selectedTool === 'opencode'
+                  ? t('report.modelPlaceholderOpencode')
+                  : t('report.modelPlaceholder')
+              }
               value={modelInput}
               onChange={(e) => setModelInput(e.target.value)}
               className="w-auto"

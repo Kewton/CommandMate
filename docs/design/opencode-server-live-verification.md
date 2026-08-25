@@ -1619,3 +1619,226 @@ command / Skill を起動できるはずで、12.6 の dropdown 問題を丸ご�
 - `src/lib/skills/compatibility-matrix.ts` — opencode 行を `unmeasuredEntry` から 12.4 / 12.5 の実測へ
 - `src/config/slash-commands-attestations.json` — opencode を 1.18.22 / 2026-08-25 に（18 個の名前は不変）
 - `src/config/slash-commands-exclusions.json` — `/compact` の理由を 12.3 に
+
+---
+
+## 15. Issue 2044: `run --format json` / cost 集計 / schedule 引数 (opencode 1.18.22, 2026-08-25)
+
+§4 のハーネスをそのまま再実行して取った実測。目的は 3 つ。
+
+1. **日次レポート参加** — `opencode run --format json` の stdout から「本文」を機械的に取り出せるか。
+2. **cost 集計** — `session.updated`（#2040 が保持している `{cost, tokens}`）を worktree × 日で足したとき、
+   `opencode stats --project` と**一致するのか**。一致の根拠がなければ「照合できる形」とは言えない。
+3. **schedule 引数** — `--agent` / `--variant` / `--continue` / `--title` が実際に効くのか
+   （`opencode run --help` に載っていることと、セッションに反映されることは別）。
+
+### 15.1 隔離の確認（先に撃つ）
+
+```bash
+curl -sS http://127.0.0.1:4877/path
+```
+
+返り値（全項目が scratchpad 配下）:
+
+```json
+{"home":"…/scratchpad/oc2044/home",
+ "state":"…/scratchpad/oc2044/home/.local/state/opencode",
+ "config":"…/scratchpad/oc2044/home/.config/opencode",
+ "worktree":"…/scratchpad/oc2044/work",
+ "directory":"…/scratchpad/oc2044/work"}
+```
+
+`auth.json` は `umask 077` で複製し、検証後に削除した。モデルは
+`opencode.jsonc` の `"model": "github-copilot/claude-sonnet-4.6"` で固定し、**TUI のモデルピッカーは一度も開いていない**
+（この節の計測は TUI をまったく使っていない。tmux も使っていない）。ポートは 4877 のみ、`--hostname 127.0.0.1`。
+
+### 15.2 `run --format json` は NDJSON である（`event:` も配列もない）
+
+```bash
+opencode run --format json "Reply with exactly this text and nothing else: hello-2044"
+```
+
+stdout（1 行 1 JSON、3 行）:
+
+```text
+{"type":"step_start","timestamp":…,"sessionID":"ses_fc7d2c1daffeoHDeorpPDSsbrN","part":{…,"type":"step-start"}}
+{"type":"text","timestamp":…,"sessionID":"ses_…","part":{"id":"prt_…","messageID":"msg_0382d42c800146obXtj88Cj4Tr","type":"text","text":"hello-2044","time":{…}}}
+{"type":"step_finish","timestamp":…,"part":{…,"type":"step-finish","tokens":{"total":8086,"input":3,"output":7,"reasoning":0,"cache":{"write":8076,"read":0}},"cost":0.030399}}
+```
+
+観測された `type`: **`step_start` / `text` / `tool_use` / `step_finish` / `error`**。
+`text` の本文は `part.text`。**SSE の `/event` とは別語彙**（§4.3 の 89 語とは重ならない）ので、
+`session.updated` の写像を流用してはいけない。
+
+ツールを使う実行では**アシスタントメッセージが 2 通**になる:
+
+```bash
+opencode run --format json --agent plan --variant high --title cm-2044-probe \
+  "Read README.md and reply with its exact contents."
+```
+
+| # | `type` | `part.messageID` | 中身 |
+|---|--------|------------------|------|
+| 1 | `step_start` | `msg_0382da04a0…` | |
+| 2 | `tool_use` | `msg_0382da04a0…` | `part.tool = "read"` |
+| 3 | `step_finish` | `msg_0382da04a0…` | `cost 0.03372225` |
+| 4 | `step_start` | `msg_0382dafbd0…` | |
+| 5 | `text` | `msg_0382dafbd0…` | 答え |
+| 6 | `step_finish` | `msg_0382dafbd0…` | `cost 0.0038181` |
+
+**「最後の `text` イベント」ではなく「最後の messageID に属する `text` 群」を取る**のはこれが理由。
+1 通目は「ツールを呼ぶと決めた」メッセージであって答えではない。
+
+失敗時（`-m bogusprovider/nope`）は **exit 1 / stderr 空 / stdout に `error` フレーム 1 行**:
+
+```json
+{"type":"error","sessionID":"ses_…","error":{"name":"UnknownError","data":{"message":"Unexpected server error. Check server logs for details.","ref":"err_35bf9864"}}}
+```
+
+`-c`（`--continue`）は**直近のセッションを再利用**した（`sessionID` が 1 回目と同じ `ses_fc7d263fdffe…`、exit 0）。
+
+これらの stdout は `tests/fixtures/opencode-run-json-2044/*.jsonl` に**そのまま**置いてある（加工なし）。
+
+### 15.3 cost は「セッション累計」で、足すと `opencode stats` に一致する（**この Issue の核心**）
+
+`step_finish.part.cost` は**ステップごと**、`Session.cost`（SSE `session.updated` / `GET /session`）は
+**セッション累計**。実測（同じ project の 2 セッション）:
+
+| session | agent | variant | `GET /session` の `cost` | step の内訳 |
+|---------|-------|---------|--------------------------|-------------|
+| `ses_fc7d263fdffe…` | `plan` | `high` | `0.03754035` | `0.03372225 + 0.0038181` |
+| `ses_fc7d2c1daffe…` | `build` | `default` | `0.030399` | `0.030399` |
+
+そして `opencode stats --project ""`:
+
+```text
+Sessions 2 / Messages 5 / Days 1
+Total Cost $0.07   Input 6   Output 181   Cache Read 8.4K   Cache Write 16.7K
+```
+
+突き合わせ:
+
+| 項目 | セッション累計の和 | `opencode stats` |
+|------|--------------------|------------------|
+| cost | `0.03754035 + 0.030399 = 0.06793935` | `$0.07` |
+| input | `3 + 3 = 6` | `6` |
+| output | `174 + 7 = 181` | `181` |
+| cache read | `8367 + 0 = 8367` | `8.4K` |
+| cache write | `8643 + 8076 = 16719` | `16.7K` |
+
+**結論**: 「セッションごとに最新のスナップショットを 1 行だけ持ち、日で足す」と `opencode stats` に一致する。
+逆に言えば、サンプルを**加算してはいけない**（累計値を何度も足すことになる）。
+これが migration v58 が `session_id` を PRIMARY KEY にし、`ON CONFLICT DO UPDATE` で**上書き**する理由。
+サンプリング周期は正しさに影響しない（最後の 1 回が取れていればよい）。
+
+`Session.tokens` に `total` は無い（`input` / `output` / `reasoning` / `cache.{read,write}` のみ）。
+#2040 の `AgentSessionTokenUsage.total` が常に null なのはこのため、という記述と一致した。
+
+### 15.4 `--agent` / `--variant` / `--title` / `-c` はセッションに反映される
+
+`--help` に載っていることと効くことは別なので、`GET /session` で確認した:
+
+```bash
+opencode run --format json --agent plan --variant high --title cm-2044-probe "…"
+curl -sS http://127.0.0.1:4877/session
+```
+
+```json
+{"id":"ses_fc7d263fdffe…","title":"cm-2044-probe","agent":"plan",
+ "model":{"id":"claude-sonnet-4.6","providerID":"github-copilot","variant":"high"}, …}
+```
+
+- `--agent plan` → `Session.agent === "plan"`
+- `--variant high` → `Session.model.variant === "high"`（既定は `"default"`）
+- `--title cm-2044-probe` → `Session.title`（無指定だとプロンプトを要約した題が付く）
+- `-c` → 直近セッションの再利用（15.2）
+
+`--title` は値必須の string option なので、値を省くと**次の引数を食う**。CMATE.md の列でも常に値付きで書く。
+
+### 15.5 `commandmate report generate --tool opencode` の実機実行（受入条件 1）
+
+隔離 HOME のまま、CommandMate 側も隔離して 1 回だけ通した。
+
+```bash
+# DB は /tmp 配下を env.ts が system directory として拒否するので worktree の data/ に置く
+HOME="$SP/home" CM_DB_PATH="$WT/data/cm-uat-2044.db" CM_PORT=3077 CM_HOST=127.0.0.1   NODE_ENV=development WORKTREE_REPOS="$SP/work" npx tsx server.ts
+# worktree 1 件 + chat_messages 2 件 + agent_session_costs 2 件（§15.3 の実測値）を seed
+HOME="$SP/home" CM_PORT=3077 npx tsx src/cli/index.ts report generate --date 2026-08-25 --tool opencode
+```
+
+結果: **exit 0**。本文は装飾のない Markdown で、`step_start` などのイベント語は 1 つも出ていない。
+末尾に cost 節が additive に付き、§15.3 の実測どおりの数字になった:
+
+```markdown
+## Agent session cost (2026-08-25)
+
+| Worktree | Sessions | Cost (USD) | Input | Output | Reasoning | Cache read | Cache write |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| feature/2044-opencode | 2 | 0.067939 | 6 | 181 | 0 | 8367 | 16719 |
+| **Total** | 2 | 0.067939 | 6 | 181 | 0 | 8367 | 16719 |
+```
+
+**「本文が JSON イベントの最終 text と一致する」は目視ではなくバイト比較で確認した。**
+生成に使われた opencode セッション（`ses_fc7bb6007ffe5k7qrsRUH7bLQn` / title `opencode 日次レポート実装まとめ`）を
+`GET /session/{id}/message` で引き、最後の assistant message の `text` part 群と、
+保存されたレポート本文（cost 節を除いた部分）を突き合わせた結果は **完全一致**。
+
+```text
+assistant text parts: 1
+final message id: msg_03844a47e001apSWELa3noLKWE
+MATCH: True
+```
+
+executor 単体でも同じことを確かめてある（`executeClaudeCommand(..., 'opencode', ...)` の返り値と、
+同じ argv を手で実行した stdout に `extractOpencodeFinalText()` を当てた結果が一致）。
+
+後始末: CommandMate サーバと opencode serve を PID 指定で停止、`auth.json` を削除、
+`data/cm-uat-2044.db` と seed スクリプトを削除。実 tmux は**一度も触っていない**。
+
+### 15.6 未計測 / 計測しなかったこと（推測で埋めていない箇所）
+
+- **`--fork` / `--share` / `-s <id>` は触っていない。** #2038 が `-s` を扱っている。
+- **`opencode stats --days` の日境界がローカル日かどうかは未確認。** 本 Issue の `date` 列は
+  「エージェントが最後に喋った瞬間のローカル日」で、`daily_reports.date` と同じ綴りに揃えてある。
+  `stats --days 1` と厳密に同じ窓である保証は取っていない。§15.3 の突き合わせは `--days` 無し
+  （all time）で、たまたま `Days 1` だったケースである。
+- **`session.updated` を SSE で受けながらサンプラが台帳へ書く経路は、実 opencode ペインでは踏んでいない。**
+  #2040 の記録側（`recordAgentSessionTelemetry`）から台帳までは unit test で通してあるが、
+  「TUI ペインを立てて会話し、60 秒サンプラが拾う」ところまでは実測していない。
+  §15.3 の数値は `GET /session` から直接取ったもので、写経ではない。
+- **スケジュール実行そのものは踏んでいない。** 理由は §15.7。
+
+### 15.7 残っている 1 行（scope 外）
+
+`--agent` / `--variant` / `--continue` / `--title` は、CMATE.md の読み書き・検証・`buildCliArgs()` まで
+すべて実装してあり、`resolveScheduleCommandOptions()` が
+`executeClaudeCommand()` に渡す形まで作ってある。**しかし `src/lib/job-executor.ts` は
+Issue #2044 の scope.allow に無い。** `executeSchedule()` は今も
+`resolveModelOption()`（`{ model }` しか返せない）を呼ぶので、
+**スケジュール経由の `opencode --agent plan` は現時点ではモデルだけで起動する。**
+
+残作業は `job-executor.ts` の 1 行:
+
+```ts
+// const options = resolveModelOption(state.entry, worktree);
+const options = resolveScheduleCommandOptions(state.entry)
+  ?? (state.entry.cliToolId === 'vibe-local' && worktree.vibe_local_model
+        ? { model: worktree.vibe_local_model } : undefined);
+```
+
+`resolveScheduleCommandOptions()` は vibe-local の DB 由来モデルを扱わない（CMATE.md しか見ない）ので、
+その分岐は `resolveModelOption()` 側に残すか、上のように呼び出し側で足す。
+`tests/unit/lib/cmate-opencode-run-options-2044.test.ts` は
+**この 1 行の手前まで**を検証している。テストが緑であることを「スケジュールで効く」と読まないこと。
+
+### 15.8 この節が変えたもの
+
+- `src/config/review-config.ts` — `SUMMARY_ALLOWED_TOOLS` に `opencode` を**末尾**追加（既定は `claude` のまま）
+- `src/config/opencode-constants.ts`（新規）— `--agent` / `--variant` / `--title` の許容形と長さ
+- `src/lib/session/claude-executor.ts` — opencode を `run --format json …` に。`extractOpencodeFinalText()` を追加
+- `src/lib/cmate-cli-tool-parser.ts` — CLI Tool 列に opencode のフラグ列を追加（quote 対応 tokenizer / `resolveScheduleCommandOptions()`）
+- `src/lib/cmate-parser.ts` / `cmate-validator.ts` / `cmate-writer.ts` — 同オプションの読み書きと検証
+- `src/lib/db/migrations/v58-agent-session-costs.ts`（新規）— cost 台帳。`session_id` PK / 上書き（15.3）
+- `src/lib/db/agent-session-cost-db.ts` / `agent-session-cost-sampler.ts`（新規）— 台帳 CRUD と in-memory からの写し取り
+- `src/lib/daily-summary-generator.ts` — レポート末尾に cost 節を **additive** に追記（プロンプトは不変）
+- `src/components/review/ReportTab.tsx` / `worktree/schedules/ScheduleEditDialog.tsx` — 選択肢と入力欄

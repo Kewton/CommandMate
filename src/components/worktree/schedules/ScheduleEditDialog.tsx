@@ -14,7 +14,10 @@
  *
  * Dynamic behavior:
  * - The Permission dropdown options change when the CLI Tool changes.
- * - The Model field is shown only for CLI tools that support `--model` (copilot).
+ * - The Model field is shown for CLI tools that support `--model`
+ *   (`TOOLS_WITH_MODEL_SUPPORT`: copilot and, since Issue #1914, opencode).
+ * - Issue #2044: opencode additionally shows Agent / Variant / Continue / Title,
+ *   which serialize into the same CMATE.md CLI Tool cell as `--model`.
  */
 
 'use client';
@@ -39,7 +42,13 @@ import {
   MAX_SCHEDULE_MESSAGE_LENGTH,
 } from '@/config/schedule-config';
 import { NAME_PATTERN, isValidCronExpression } from '@/config/cmate-constants';
-import { validateCopilotModelName } from '@/lib/cmate-cli-tool-parser';
+import {
+  TOOLS_WITH_MODEL_SUPPORT,
+  TOOLS_WITH_RUN_OPTIONS,
+  validateCopilotModelName,
+  validateOpencodeRunName,
+  validateOpencodeTitle,
+} from '@/lib/cmate-cli-tool-parser';
 import { cronPrompt, messageDraftPrompt } from '@/lib/schedule-ai-prompt-templates';
 
 // ============================================================================
@@ -54,6 +63,14 @@ export interface ScheduleFormValues {
   enabled: boolean;
   permission: string;
   model: string;
+  /** opencode `--agent` (Issue #2044). Empty string = not set. */
+  agent: string;
+  /** opencode `--variant` (Issue #2044). Empty string = not set. */
+  variant: string;
+  /** opencode `-c` (Issue #2044). */
+  continueSession: boolean;
+  /** opencode `--title` (Issue #2044). Empty string = not set. */
+  title: string;
 }
 
 export interface ScheduleEditDialogProps {
@@ -101,6 +118,10 @@ const DEFAULT_FORM: ScheduleFormValues = {
   enabled: true,
   permission: DEFAULT_PERMISSIONS.claude ?? '',
   model: '',
+  agent: '',
+  variant: '',
+  continueSession: false,
+  title: '',
 };
 
 /** Default permission for a CLI tool (falls back to the first allowed option). */
@@ -264,6 +285,10 @@ export function ScheduleEditDialog({
       enabled: initialValues?.enabled ?? DEFAULT_FORM.enabled,
       permission: initialValues?.permission ?? DEFAULT_FORM.permission,
       model: initialValues?.model ?? DEFAULT_FORM.model,
+      agent: initialValues?.agent ?? DEFAULT_FORM.agent,
+      variant: initialValues?.variant ?? DEFAULT_FORM.variant,
+      continueSession: initialValues?.continueSession ?? DEFAULT_FORM.continueSession,
+      title: initialValues?.title ?? DEFAULT_FORM.title,
     });
     // Issue #942: pick the instance backing the seeded CLI tool. The modal is
     // blocking, so the roster cannot change while it is open.
@@ -292,7 +317,10 @@ export function ScheduleEditDialog({
 
   const permissionOptions = getPermissionOptionsForTool(form.cliToolId);
   const showPermission = permissionOptions.length > 0;
-  const showModel = form.cliToolId === 'copilot';
+  // Issue #2044: both flags read the parser's Sets, so the dialog cannot offer a
+  // field the CMATE.md grammar would reject — nor hide one it accepts.
+  const showModel = TOOLS_WITH_MODEL_SUPPORT.has(form.cliToolId);
+  const showRunOptions = TOOLS_WITH_RUN_OPTIONS.has(form.cliToolId);
   const isEdit = Boolean(originalName);
 
   // ----- Validation -----
@@ -324,7 +352,28 @@ export function ScheduleEditDialog({
     return validateCopilotModelName(form.model.trim()).valid ? null : t('edit.errorModelInvalid');
   }, [showModel, form.model, t]);
 
-  const isValid = !nameError && !cronError && !messageError && !modelError;
+  const agentError = useMemo(() => {
+    if (!showRunOptions || !form.agent.trim()) return null;
+    return validateOpencodeRunName(form.agent.trim(), 'agent').valid
+      ? null
+      : t('edit.errorAgentInvalid');
+  }, [showRunOptions, form.agent, t]);
+
+  const variantError = useMemo(() => {
+    if (!showRunOptions || !form.variant.trim()) return null;
+    return validateOpencodeRunName(form.variant.trim(), 'variant').valid
+      ? null
+      : t('edit.errorVariantInvalid');
+  }, [showRunOptions, form.variant, t]);
+
+  const titleError = useMemo(() => {
+    if (!showRunOptions || !form.title.trim()) return null;
+    return validateOpencodeTitle(form.title.trim()).valid ? null : t('edit.errorTitleInvalid');
+  }, [showRunOptions, form.title, t]);
+
+  const isValid =
+    !nameError && !cronError && !messageError && !modelError
+    && !agentError && !variantError && !titleError;
 
   // ----- Handlers -----
   const handleToolChange = useCallback((next: string) => {
@@ -332,7 +381,13 @@ export function ScheduleEditDialog({
       ...prev,
       cliToolId: next,
       permission: permissionDefaultFor(next),
-      model: next === 'copilot' ? prev.model : '',
+      // Issue #2044: clear anything the new tool cannot express, so a switch
+      // never writes a flag the parser would refuse on read.
+      model: TOOLS_WITH_MODEL_SUPPORT.has(next) ? prev.model : '',
+      agent: TOOLS_WITH_RUN_OPTIONS.has(next) ? prev.agent : '',
+      variant: TOOLS_WITH_RUN_OPTIONS.has(next) ? prev.variant : '',
+      continueSession: TOOLS_WITH_RUN_OPTIONS.has(next) ? prev.continueSession : false,
+      title: TOOLS_WITH_RUN_OPTIONS.has(next) ? prev.title : '',
     }));
   }, []);
 
@@ -381,6 +436,10 @@ export function ScheduleEditDialog({
           enabled: form.enabled,
           permission: showPermission ? form.permission : '',
           model: showModel && form.model.trim() ? form.model.trim() : undefined,
+          agent: showRunOptions && form.agent.trim() ? form.agent.trim() : undefined,
+          variant: showRunOptions && form.variant.trim() ? form.variant.trim() : undefined,
+          continueSession: showRunOptions && form.continueSession ? true : undefined,
+          title: showRunOptions && form.title.trim() ? form.title.trim() : undefined,
           originalName: originalName ?? undefined,
         }),
       });
@@ -403,6 +462,7 @@ export function ScheduleEditDialog({
     form,
     showPermission,
     showModel,
+    showRunOptions,
     originalName,
     onSaved,
     onClose,
@@ -421,6 +481,9 @@ export function ScheduleEditDialog({
     cliToolName,
     showPermission ? form.permission : null,
     showModel && form.model.trim() ? form.model.trim() : null,
+    showRunOptions && form.agent.trim() ? `--agent ${form.agent.trim()}` : null,
+    showRunOptions && form.variant.trim() ? `--variant ${form.variant.trim()}` : null,
+    showRunOptions && form.continueSession ? '--continue' : null,
   ]
     .filter(Boolean)
     .join(' · ');
@@ -545,6 +608,76 @@ export function ScheduleEditDialog({
             <p className={ERROR_CLASS} data-testid="schedule-model-error">{modelError}</p>
           )}
         </div>
+      )}
+
+      {/* opencode run options (Issue #2044) */}
+      {showRunOptions && (
+        <>
+          <div>
+            <label className={LABEL_CLASS} htmlFor="schedule-agent-input">
+              {t('edit.opencodeAgent')}
+            </label>
+            <input
+              id="schedule-agent-input"
+              data-testid="schedule-agent-input"
+              type="text"
+              value={form.agent}
+              placeholder={t('edit.opencodeAgentPlaceholder')}
+              onChange={(e) => setForm((prev) => ({ ...prev, agent: e.target.value }))}
+              className={INPUT_CLASS}
+            />
+            {agentError && (
+              <p className={ERROR_CLASS} data-testid="schedule-agent-error">{agentError}</p>
+            )}
+          </div>
+
+          <div>
+            <label className={LABEL_CLASS} htmlFor="schedule-variant-input">
+              {t('edit.opencodeVariant')}
+            </label>
+            <input
+              id="schedule-variant-input"
+              data-testid="schedule-variant-input"
+              type="text"
+              value={form.variant}
+              placeholder={t('edit.opencodeVariantPlaceholder')}
+              onChange={(e) => setForm((prev) => ({ ...prev, variant: e.target.value }))}
+              className={INPUT_CLASS}
+            />
+            {variantError && (
+              <p className={ERROR_CLASS} data-testid="schedule-variant-error">{variantError}</p>
+            )}
+          </div>
+
+          <div>
+            <label className={LABEL_CLASS} htmlFor="schedule-title-input">
+              {t('edit.opencodeTitle')}
+            </label>
+            <input
+              id="schedule-title-input"
+              data-testid="schedule-title-input"
+              type="text"
+              value={form.title}
+              placeholder={t('edit.opencodeTitlePlaceholder')}
+              onChange={(e) => setForm((prev) => ({ ...prev, title: e.target.value }))}
+              className={INPUT_CLASS}
+            />
+            {titleError && (
+              <p className={ERROR_CLASS} data-testid="schedule-title-error">{titleError}</p>
+            )}
+          </div>
+
+          <label className="flex items-center gap-2 cursor-pointer">
+            <Checkbox
+              data-testid="schedule-continue-toggle"
+              checked={form.continueSession}
+              onCheckedChange={(checked) =>
+                setForm((prev) => ({ ...prev, continueSession: checked === true }))
+              }
+            />
+            <span className="text-sm text-foreground">{t('edit.opencodeContinue')}</span>
+          </label>
+        </>
       )}
 
       {/* Permission (dynamic per CLI tool) */}
