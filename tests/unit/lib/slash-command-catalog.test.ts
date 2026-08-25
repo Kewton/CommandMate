@@ -372,7 +372,9 @@ describe('getCatalogStaleness', () => {
     const staleness = await getCatalogStaleness();
     expect(staleness.opencode).toEqual({
       current: '1.18.30',
-      verifiedAgainst: '1.18.21',
+      // Issue #2036 re-attested opencode at 1.18.22. The literal moves with the
+      // attestation on purpose: it is what makes a version bump visible here.
+      verifiedAgainst: '1.18.22',
       stale: true,
     });
     expect(staleness.copilot).toEqual({

@@ -1485,3 +1485,137 @@ OpenCodeTool.sendMessage(worktreeId, message, instanceId)
 | `/` 始まりの本文がパレットを開く（`key-sequence.ts` の `/exit` 事例） | **一次経路で解決**。`/exit` が literal text として届くことを実測。**`/tui/*` では解決しないことも実測**（[§11.3.3](#1133-200-true-は受理されたであってcomposer-に入ったではない2038-の注意が-11822-でも成立)） |
 | 画像が `[添付画像: path]` テキストに劣化 | **一次経路で解決**。file part で実画像が届き、モデルが読んで回答するところまで確認。サーバが無い pane では従来の劣化に落ちる |
 | 複数行が wrap の影響を受ける | **一次経路で解決**。3 行 / 266 文字とも `message.part.updated(text)` と完全一致 |
+
+## 12. Issue 2036 / 2037: opencode 1.18.22 (2026-08-25)
+
+§4 のハーネスをそのまま再実行して取った追加計測。目的は 2 つ。
+
+1. **#2036** — palette を `GET /command` から動的に作れるか。`/compact` ほかの phantom 判定を 1.18.22 で取り直す。
+2. **#2037** — `commandmate skill install` の install root（`.agents/skills` / `.claude/skills`）を opencode が
+   **発見できるか / 呼び出せるか**の 2 軸。
+
+### 12.1 隔離の確認（先に撃つ）
+
+```bash
+curl -sS http://127.0.0.1:4904/path
+# home      …/scratchpad/oc2036/home
+# state     …/scratchpad/oc2036/home/.local/state/opencode
+# config    …/scratchpad/oc2036/home/.config/opencode
+# worktree  …/scratchpad/oc2036/work
+# directory …/scratchpad/oc2036/work
+curl -sS http://127.0.0.1:4904/global/health   # {"healthy":true,"version":"1.18.22"}
+```
+
+5 つとも scratchpad 配下。TUI は `tmux -L cmate-2036-oc` の専用 socket 上でだけ動かし、後始末は
+`kill-session -t '=oc2036:'`（`kill-server` は使っていない）。model は config で固定し、**model picker は一度も開いていない**。
+検証後、複製した `auth.json` は削除済み。ユーザ実データ（`~/.local/share/opencode/opencode.db`、`auth.json`、
+`~/.config/opencode/opencode.jsonc`）の mtime はいずれも検証開始より前のまま。
+
+### 12.2 `GET /command` は palette ではない（#2036 の前提が半分崩れる）
+
+Issue #2036 は「palette 目視を `GET /command` に置換する」と書いていたが、**置換できない**。
+
+```bash
+curl -sS http://127.0.0.1:4904/command | jq -r '.[] | "\(.name)\t\(.source)"'
+# init                        command
+# review                      command
+# test                        command      ← .opencode/commands/test.md
+# customize-opencode          skill        ← opencode 組込みの Skill
+# probe-…                     skill        ← 植えた probe Skill 6 個
+```
+
+| palette の行 | `GET /command` にある？ |
+|---|---|
+| `/init` `/review` | **ある**（`source: "command"`） |
+| `/agents` `/connect` `/debug` `/diff` `/editor` `/exit` `/help` `/mcps` `/models` `/move` `/new` `/sessions` `/skills` `/status` `/themes` `/variants` | **ない** |
+
+残り 16 個は **TUI クライアント側のコマンド**で、server は存在すら知らない。TUI を attach した状態で
+取り直しても 10 件のまま変わらない。したがって:
+
+- `GET /command` は **その project が足したもの**（`.opencode/commands/*.md` と発見された Skill 全部）について権威である。
+- 組込み 18 個のうち 16 個については何も言わない。attestation の当該 16 個は **palette 読みのまま**残す。
+
+各行のフィールド: `name` / `description` / `source`（`command` \| `skill`）/ `hints`（`["$ARGUMENTS"]`）/
+`agent` / `subtask` / `template`。**`description` と `hints` が #2036 の「説明・引数ヒント」の実体**である。
+
+**server は起動時に一度だけ走査して cache する。** `.opencode/commands/test.md` を置いて同じ process の
+`GET /command` を読み直しても古いまま。再起動した server は新しいリストを返す。ポーリングしても意味がない。
+
+### 12.3 phantom 再計測（陽性・陰性対照つき）
+
+palette を `/` で開いて 40 回スクロールし全行を採取 → **19 行**。18 行は 1.18.21 と同一
+（`/agents` … `/variants`）。19 行目は probe の `/test`（`Issue 2036 probe custom command` という
+**frontmatter の description つき**で出た）。
+
+| 入力 | 結果 |
+|---|---|
+| `/status`（**陽性対照**） | 自分の行にマッチ。Enter で Status 画面が開く |
+| `/zzzznotacommand`（**陰性対照**） | 1 行もマッチしない |
+| `/compact`（対象） | `/review` の**説明文**にファジーマッチするだけ。`/compact` の行は出ない |
+
+`/compact` はさらに悪い。**この状態で Enter を押すと composer が `/review` に置き換わる。**
+つまり `/compact` を palette に出すと「押した名前と違うコマンドを渡す」ことになる。
+exclusion は据え置き、理由をこの実測に更新した（`src/config/slash-commands-exclusions.json`）。
+
+### 12.4 Skill の発見（#2037 discovery 軸）— 機械的
+
+候補 root ごとに probe Skill を 1 個ずつ、計 6 個植えて server を再起動した。
+
+```bash
+curl -sS http://127.0.0.1:4904/skill | jq -r '.[] | "\(.name)\t\(.location)"'
+```
+
+| 植えた場所 | `GET /skill` が返した？ |
+|---|---|
+| `<project>/.agents/skills/` （**CommandMate primary install root**） | ✅ 絶対 path つき |
+| `<project>/.claude/skills/` （**CommandMate secondary install root**） | ✅ 絶対 path つき |
+| `<project>/.opencode/skills/` | ✅ 絶対 path つき |
+| `$HOME/.agents/skills/` | ✅ 絶対 path つき |
+| `$HOME/.claude/skills/` | ✅ 絶対 path つき |
+| `$HOME/.config/opencode/skills/` | ✅ 絶対 path つき |
+
+TUI の `/skills` picker も同じ 6 個を列挙した。`location` が実 path を返すので、これは self-report ではなく **機械的証跡**である。
+
+### 12.5 Skill の呼出（#2037 invocation 軸）— 動くが palette には出ない
+
+| 入力 | 結果 |
+|---|---|
+| `/probe-agents-root`（`/skills` picker が composer に挿入 → 送信） | Skill 本文が読み込まれ、agent が `PROBE_OK_probe-agents-root` を返す ✅ |
+| `/probe-claude-root`（同上） | `PROBE_OK_probe-claude-root` ✅ |
+| `/probe-opencode-root ` | `PROBE_OK_probe-opencode-root` ✅ |
+| `/probe-agents-root` を **composer に直接タイプ** | 補完が **`No matching items`** |
+
+つまり **`/`+名前は動く呼出経路だが、opencode 自身の palette からは発見できない**。
+palette は `source: "command"` の行しか載せない。opencode 自身の入口は `/skills` picker だけである。
+**CommandMate の palette が install 済み Skill を opencode session に供給する意味がここにある**（#2037）。
+
+### 12.6 `/` 始まりの prompt は dropdown に submit を吸われる（実装上の罠）
+
+CommandMate が送信に使う経路そのもので再現する。
+
+| 手順 | 結果 |
+|---|---|
+| `POST /tui/append-prompt {"text":"/probe-claude-root"}` → `POST /tui/submit-prompt` | 両方 `true`。**しかし送信されない**（`No matching items` の dropdown が開いており Enter/submit を吸う） |
+| composer に空の dropdown が無い状態で `POST /tui/submit-prompt` | 送信される ✅ |
+| `POST /tui/append-prompt {"text":"/probe-opencode-root "}`（**末尾に空白 1 つ**）→ submit | dropdown が閉じて送信される ✅ |
+| `POST /tui/append-prompt {"text":"/test hello"}` → submit | custom command の template が展開され `CUSTOM_CMD_OK` が返る ✅ |
+
+`/tui/*` の `true` は「TUI 制御チャネルに受理された」であって「送信された」ではない（§5 の既知事項と同じ）。
+`MessageInput` は元から `` `${trigger} ` `` を入れるので palette 経路は安全。**trigger を手で組む呼び出し側は
+末尾の空白を落とさないこと。**
+
+### 12.7 プログラム的な呼出経路（未採用・記録のみ）
+
+`POST /session/{sessionID}/command {"command","arguments"}` が OpenAPI にある。TUI を経由せずに
+command / Skill を起動できるはずで、12.6 の dropdown 問題を丸ごと回避する。#2036 では**採用していない**
+（`src/lib/cli-tools/opencode.ts` は #2035 が触っている）。`GET /experimental/tool/ids` に `skill` が
+実在することも確認済み。
+
+### 12.8 この節が変えたもの
+
+- `src/lib/slash-command-reconcile/providers/opencode.ts`（新規）— `GET /command` provider。12.2 の限界を docblock に持つ
+- `src/app/api/worktrees/[id]/slash-commands/opencode-live.ts`（新規）— cache + 背景 refresh（hot path で await しない）
+- `src/lib/slash-commands.ts` — `loadOpencodeSkills()` / `opencodeLiveCommandsToSlashCommands()`
+- `src/lib/skills/compatibility-matrix.ts` — opencode 行を `unmeasuredEntry` から 12.4 / 12.5 の実測へ
+- `src/config/slash-commands-attestations.json` — opencode を 1.18.22 / 2026-08-25 に（18 個の名前は不変）
+- `src/config/slash-commands-exclusions.json` — `/compact` の理由を 12.3 に
