@@ -496,16 +496,44 @@ export async function sendKeySequence(
  * Restricts input to prevent command injection via arbitrary tmux key names.
  *
  * Separate from ALLOWED_SINGLE_SPECIAL_KEYS which covers control keys for sendSpecialKey().
+ *
+ * INVARIANT (Issue #2032): `NAVIGATION_KEY_VALUES` ⊆ this set. The special-keys API
+ * publishes `NAVIGATION_KEY_VALUES` as its accepted vocabulary, and every key it
+ * accepts must be deliverable here — otherwise the route validates a request and
+ * then throws while sending it. The relation is one-way containment, NOT equality:
+ * `Space` / `BSpace` / `DC` are sendable but deliberately absent from the navigation
+ * vocabulary, so asserting set equality would be wrong.
+ * Pinned by tests/unit/tmux/special-keys-allowlist-2032.test.ts.
  */
 const ALLOWED_SPECIAL_KEYS = new Set([
   'Up', 'Down', 'Left', 'Right',
   'Enter', 'Space', 'Tab', 'Escape',
+  // Issue #2032: BTab (back-tab / Shift-Tab) has been part of the special-keys API
+  // vocabulary since Issue #473 but was never added here, so `POST
+  // /api/worktrees/[id]/special-keys` with `["BTab"]` passed validation and then
+  // threw `Invalid special key: BTab` inside sendSpecialKeys() → HTTP 500.
+  'BTab',
   'BSpace', 'DC',  // Backspace, Delete
   // Issue #1017: Codex pager / edit-previous mode navigation. PageUp/PageDown/Home/End
   // are tmux named keys; 'q' is the pager's literal "quit" character (sent verbatim by
   // `tmux send-keys`, no injection risk — single fixed char via execFile, not a shell).
   'PageUp', 'PageDown', 'Home', 'End', 'q',
 ]);
+
+/**
+ * Type guard for "sendSpecialKeys() will actually deliver this key" (Issue #2032).
+ *
+ * Exported so callers can pre-flight a key against the transport's allow-list
+ * instead of discovering the rejection as a thrown error mid-send, and so the
+ * `NAVIGATION_KEY_VALUES` ⊆ `ALLOWED_SPECIAL_KEYS` invariant is observable from a
+ * test without exposing the mutable Set itself.
+ *
+ * @param key - String to validate
+ * @returns True if sendSpecialKeys() accepts the key
+ */
+export function isSendableSpecialKey(key: string): boolean {
+  return ALLOWED_SPECIAL_KEYS.has(key);
+}
 
 /** Delay between individual key presses for TUI apps that need processing time (ms). */
 const SPECIAL_KEY_DELAY_MS = 100;
@@ -881,15 +909,34 @@ export type { NavigationKey };
 
 /**
  * Type guard for navigation key validation (special-keys API).
- * Returns true if the key is in the NAVIGATION_KEY_VALUES set.
+ * Returns true if the key is in the NAVIGATION_KEY_VALUES set AND sendSpecialKeys()
+ * can actually deliver it.
  * Named "SpecialKey" to align with the special-keys API route that calls it,
  * though it validates NavigationKey (a subset of all special keys).
  *
+ * Issue #2032 — why the transport check lives in the *input validation* guard, i.e.
+ * why a vocabulary/transport divergence answers 400 and not 500:
+ *
+ * - The caller-visible contract of the endpoint is "the keys I may send". A key the
+ *   transport refuses is, from the caller's side, a key that cannot be sent — the
+ *   only actionable response is "send a different key", which is exactly what 4xx
+ *   means. 500 tells the caller "retry later, the server broke", and retrying a
+ *   `BTab` that will never be deliverable is not actionable.
+ * - Letting it reach sendSpecialKeys() converts the same condition into a thrown
+ *   error that the route can only report as an opaque 500, i.e. the divergence is
+ *   laundered into "server fault" and shows up in error dashboards as an outage.
+ * - The divergence really *is* a server-side configuration bug, but it is one the
+ *   build must catch, not production: the `NAVIGATION_KEY_VALUES` ⊆
+ *   `ALLOWED_SPECIAL_KEYS` invariant is pinned by
+ *   tests/unit/tmux/special-keys-allowlist-2032.test.ts, so this branch is a
+ *   defense-in-depth backstop that cannot fire in a green build.
+ *
  * @param key - String to validate
- * @returns True if key is a valid NavigationKey
+ * @returns True if key is a valid NavigationKey that sendSpecialKeys() can deliver
  */
 export function isAllowedSpecialKey(key: string): key is NavigationKey {
-  return (NAVIGATION_KEY_VALUES as readonly string[]).includes(key);
+  return (NAVIGATION_KEY_VALUES as readonly string[]).includes(key)
+    && isSendableSpecialKey(key);
 }
 
 /**

@@ -6,6 +6,10 @@
  * Issue #473: Multi-layer defense following terminal/route.ts pattern.
  * [DR1-001] Validation structure mirrors terminal/route.ts.
  * [DR4-001] Rate limiting intentionally not implemented (auth + IP + MAX_KEYS_LENGTH sufficient).
+ * Issue #2032: `isAllowedSpecialKey()` now also requires the key to be deliverable by
+ * `sendSpecialKeys()`, so a vocabulary/transport divergence is answered 400 here
+ * instead of escaping as a thrown error and being reported as 500. Rationale in the
+ * `isAllowedSpecialKey` docblock (src/lib/tmux/tmux.ts).
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -69,6 +73,8 @@ export async function POST(
     }
 
     // 3. keys content validation (isAllowedSpecialKey, MAX_KEYS_LENGTH) [DR2-004]
+    //    isAllowedSpecialKey covers both the published navigation vocabulary and the
+    //    tmux transport allow-list (Issue #2032), so an undeliverable key stops at 400.
     if (keys.length > MAX_KEYS_LENGTH) {
       return NextResponse.json(
         { error: 'Invalid keys parameter' },
