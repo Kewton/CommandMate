@@ -87,6 +87,9 @@ describe('instances table: MODEL / EFFORT columns', () => {
       'AUTO_YES',
       'MODEL',
       'EFFORT',
+      // Issue #2038 appended two more, for the same reason and in the same way.
+      'SESSION_ID',
+      'SESSION_TITLE',
     ]);
   });
 });
@@ -111,6 +114,9 @@ describe('instances --json: model / reasoningEffort fields', () => {
         autoYes: false,
         model: 'claude-opus-5[1m]',
         reasoningEffort: 'xhigh',
+        // Issue #2038: null for every non-opencode instance, by construction.
+        sessionId: null,
+        sessionTitle: null,
       },
       {
         instanceId: 'codex-2',
@@ -120,6 +126,8 @@ describe('instances --json: model / reasoningEffort fields', () => {
         autoYes: false,
         model: null,
         reasoningEffort: null,
+        sessionId: null,
+        sessionTitle: null,
       },
     ]);
   });

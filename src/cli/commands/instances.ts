@@ -26,7 +26,7 @@ import {
   MIN_AGENT_INSTANCES,
 } from '../utils/agent-instances';
 import { resolveSessionTarget, describeSessionTargetConflict } from '../utils/session-target';
-import type { CurrentOutputResponse } from '../types/api-responses';
+import type { CurrentOutputResponse, OpencodeSessionsResponse } from '../types/api-responses';
 
 type InstanceRow = {
   instanceId: string;
@@ -45,7 +45,26 @@ type InstanceRow = {
   model: string | null;
   /** Issue #1785: reasoning effort, or null. Verbatim, as above. */
   reasoningEffort: string | null;
+  /**
+   * Issue #2038: the opencode session this instance will resume, or null.
+   *
+   * Null for every non-opencode instance, and that is the honest answer rather
+   * than a gap: no other supported agent's launch command names a conversation,
+   * so there is nothing for this column to say about them. Null also for an
+   * opencode instance CommandMate has never watched finish a turn.
+   */
+  sessionId: string | null;
+  /** Issue #2038: opencode's own title for {@link sessionId}, or null. */
+  sessionTitle: string | null;
 };
+
+/**
+ * Longest session title printed in the table (Issue #2038).
+ *
+ * opencode titles the session after the first prompt, so they run to a whole
+ * sentence. `--json` carries the full string; the table is a table.
+ */
+const MAX_SESSION_TITLE_COLUMN = 40;
 
 /**
  * Format instance rows as a table for terminal display.
@@ -57,7 +76,12 @@ type InstanceRow = {
 function formatInstancesTable(rows: InstanceRow[]): string {
   if (rows.length === 0) return 'No agent instances found.';
 
-  const headers = ['INSTANCE_ID', 'ALIAS', 'CLI_TOOL', 'RUNNING', 'AUTO_YES', 'MODEL', 'EFFORT'];
+  const headers = [
+    'INSTANCE_ID', 'ALIAS', 'CLI_TOOL', 'RUNNING', 'AUTO_YES', 'MODEL', 'EFFORT',
+    // Issue #2038 appends, exactly as #1785 did, so anything reading this table
+    // by column position keeps working.
+    'SESSION_ID', 'SESSION_TITLE',
+  ];
   const dataRows = rows.map(r => [
     r.instanceId,
     r.alias,
@@ -69,6 +93,8 @@ function formatInstancesTable(rows: InstanceRow[]): string {
     // column of `-` reads like a value the reader has to look up.
     r.model ?? '',
     r.reasoningEffort ?? '',
+    r.sessionId ?? '',
+    (r.sessionTitle ?? '').slice(0, MAX_SESSION_TITLE_COLUMN),
   ]);
 
   const colWidths = headers.map((h, i) =>
@@ -145,6 +171,36 @@ export async function resolveInstanceCliTool(
 }
 
 /**
+ * The opencode session each instance will resume, keyed by instance id
+ * (Issue #2038).
+ *
+ * Empty — never an error — when the roster has no opencode instance, when the
+ * daemon predates this endpoint (404), or when the request fails for any other
+ * reason. `instances` is a listing command: two new columns are worth one extra
+ * request, and never worth turning a working listing into a non-zero exit.
+ */
+async function fetchOpencodeSessions(
+  client: ApiClient,
+  worktreeId: string,
+  instances: AgentInstance[]
+): Promise<Map<string, { sessionId: string | null; title: string | null }>> {
+  const result = new Map<string, { sessionId: string | null; title: string | null }>();
+  if (!instances.some(inst => inst.cliTool === 'opencode')) return result;
+
+  try {
+    const response = await client.get<OpencodeSessionsResponse>(
+      `/api/worktrees/${worktreeId}/opencode/session`
+    );
+    for (const entry of response.instances ?? []) {
+      result.set(entry.instanceId, { sessionId: entry.sessionId, title: entry.title });
+    }
+  } catch {
+    // An older server has no such route. The rest of the table is still true.
+  }
+  return result;
+}
+
+/**
  * List action: roster + live running/auto-yes status per instance.
  * Probes GET .../current-output?cliTool=&instance= per instance (same
  * endpoint capture.ts uses) since the roster itself carries no session state.
@@ -152,6 +208,11 @@ export async function resolveInstanceCliTool(
 async function listInstances(worktreeId: string, options: InstancesOptions): Promise<void> {
   const client = new ApiClient({ token: options.token });
   const instances = await fetchAgentInstances(client, worktreeId);
+
+  // Issue #2038: one extra request for the whole worktree, and only when there
+  // is an opencode instance to ask about — the endpoint is opencode-only and a
+  // roster without one has nothing to learn from it.
+  const opencodeSessions = await fetchOpencodeSessions(client, worktreeId, instances);
 
   const rows: InstanceRow[] = await Promise.all(
     instances.map(async (inst): Promise<InstanceRow> => {
@@ -175,6 +236,9 @@ async function listInstances(worktreeId: string, options: InstancesOptions): Pro
         // two answers get to disagree.
         model: output.model ?? null,
         reasoningEffort: output.reasoningEffort ?? null,
+        // Issue #2038: additive, and absent for every tool that is not opencode.
+        sessionId: opencodeSessions.get(inst.id)?.sessionId ?? null,
+        sessionTitle: opencodeSessions.get(inst.id)?.title ?? null,
       };
     })
   );
