@@ -51,7 +51,7 @@ import {
   OPENCODE_QUESTION_DETAIL,
   repliedPermissionId,
 } from './mappers';
-import { toOpencodePendingPermission } from './payloads';
+import { readOpencodePermissionSubject, toOpencodePendingPermission } from './payloads';
 import { OPENCODE_CLI_TOOL_ID } from './tool-id';
 
 const logger = createLogger('lib/hooks/sources/opencode/ingest');
@@ -329,6 +329,15 @@ export async function ingestOpencodeEvent(
         isPlainObject(event.raw.properties) ? event.raw.properties : {},
         'id'
       );
+      // Issue #2031: what the dialog is FOR, carried on the record because the
+      // frame itself cannot answer it. The tool name lives in the
+      // `message.part.updated` correlation this module's `payloads` holds, and
+      // `patterns` is the rule an `Allow always` would save — the one verdict
+      // whose effect outlives the dialog, and therefore the one the browser
+      // must be able to show the size of before it is pressed.
+      const subject = readOpencodePermissionSubject(event.raw, event.receivedAt);
+      record.toolName = subject?.toolName ?? null;
+      record.decisionPatterns = subject?.patterns ?? null;
       record.promptSettled = await adjudicatePermission(target, event, instanceId);
       recordAgentEvent(target.worktreeId, OPENCODE_CLI_TOOL_ID, instanceId, record, options);
       return;

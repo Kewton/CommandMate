@@ -193,6 +193,53 @@ export function toOpencodePendingPermission(
   };
 }
 
+/**
+ * What an approval is ABOUT, for the surfaces that have to show it
+ * (Issue #2031).
+ *
+ * Read back off {@link toOpencodePendingPermission} rather than re-parsed from
+ * the frame, and that is the point rather than an economy: the pending decision
+ * is what the adjudicator judges and what `Allow always` is delivered against,
+ * so a panel describing a *differently* parsed view of the same frame could
+ * tell the user one thing while the verdict did another. One parse, two
+ * readers.
+ *
+ * The tool name is the `message.part.updated` correlation
+ * ({@link lookupOpencodeToolName}) with the approval kind behind it, because
+ * `permission.asked` carries no tool name of its own (#1758 §5.4).
+ *
+ * `patterns` comes back as `toolInput.patterns`, which is NOT always the
+ * frame's top-level `properties.patterns`: `parseOpencodePermissionRequest`
+ * spreads `metadata` last, so an approval whose metadata carries its own
+ * `patterns` shadows the outer list. That is the behaviour to keep, not a wart
+ * to route around — the shadowed list is what the adjudicator judged and what
+ * `Allow always` is delivered against, and a panel showing the other one would
+ * describe a verdict nobody is about to take. Pinned in
+ * `opencode-permission-subject-2031`.
+ *
+ * `patterns` is left unbounded here on purpose. It is bounded where it is
+ * *retained* — `boundDecisionPatterns` in `lib/session/provisional-turn`,
+ * beside the bounds on `message` and `toolName` — so there is one place the
+ * footprint of a stored decision is decided, and a second bound here would be a
+ * second number to keep in step with it.
+ *
+ * @param payload - A `permission.asked` frame or a `GET /permission` entry
+ * @param askedAt - Epoch ms
+ * @returns The subject, or null when this is not an approval this server reads
+ */
+export function readOpencodePermissionSubject(
+  payload: Record<string, unknown>,
+  askedAt: number
+): { toolName: string | null; patterns: readonly unknown[] } | null {
+  const pending = toOpencodePendingPermission(payload, askedAt);
+  if (!pending || pending.subject.kind !== 'permission') return null;
+  const patterns = (pending.subject.toolInput as { patterns?: unknown }).patterns;
+  return {
+    toolName: pending.subject.toolName,
+    patterns: Array.isArray(patterns) ? patterns : [],
+  };
+}
+
 /** Turn a question into a {@link PendingDecision}. */
 export function toOpencodePendingQuestion(
   payload: Record<string, unknown>,

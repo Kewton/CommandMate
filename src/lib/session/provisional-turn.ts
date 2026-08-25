@@ -194,6 +194,34 @@ export const MAX_PENDING_DECISIONS_PER_TURN = 16;
 export const MAX_EXTERNAL_ID_LENGTH = 128;
 
 /**
+ * How many `patterns` are retained with an approval (Issue #2031).
+ *
+ * opencode's `permission.asked` carries the rules answering `Allow always`
+ * would save. They are worth keeping where `message` and `toolName` are — they
+ * are the only statement of what the *durable* verdict grants, and a button
+ * that saves a rule without showing it is asking for a decision whose size the
+ * user cannot see. They are kept under the same discipline as those two: a
+ * count bound and a per-entry length bound, so the record's footprint stays
+ * fixed no matter what the agent sent.
+ *
+ * Eight because the captured approvals carry one (`["/tmp/*"]`) and the shape
+ * that produced them is a directory list; a number this far above the observed
+ * one is a cap on a runaway, not a display limit somebody has to tune.
+ */
+export const MAX_DECISION_PATTERNS = 8;
+
+/**
+ * Per-entry bound on a retained pattern (Issue #2031).
+ *
+ * A glob, not prose, so it is bounded well below {@link
+ * MAX_STRUCTURED_PROMPT_MESSAGE_LENGTH}. Truncation is safe here in a way it is
+ * NOT for an id (see {@link acceptExternalId}): nothing matches on these — they
+ * are displayed — so a shortened pattern misinforms visibly rather than
+ * colliding silently with another rule.
+ */
+export const MAX_DECISION_PATTERN_LENGTH = 200;
+
+/**
  * One approval this instance is blocked on, as much of it as is kept (S3).
  *
  * **The received payload is deliberately not retained.** What a permission
@@ -228,6 +256,19 @@ export interface StructuredPendingDecision {
   message: string | null;
   /** Tool the pre-empted permission request named, or null. */
   toolName: string | null;
+  /**
+   * What answering `Allow always` would permit, bounded, or null (Issue #2031).
+   *
+   * The one part of the received payload that IS retained, and the exception is
+   * argued rather than assumed: the paragraph above refuses to keep
+   * `tool_input` because it is the agent's own content — a command line, a
+   * patch, a file — held for up to 30 minutes in a process that serves it back
+   * over HTTP. `patterns` is not content. It is the *rule* the approval would
+   * be saved as (`"/tmp/*"`), it is what distinguishes this dialog's `Allow
+   * always` from any other's, and it is bounded on both axes by
+   * {@link boundDecisionPatterns}.
+   */
+  patterns: readonly string[] | null;
   /**
    * Epoch ms something independent established that a dialog is really there:
    * a `Notification(permission_prompt)`, or the scraper reading the frame as
@@ -418,6 +459,32 @@ export function boundDecisionMessage(raw: string | null | undefined): string | n
 /** {@link boundDisplayText} at the detail bound — tool names, subtypes. */
 export function boundDecisionToolName(raw: string | null | undefined): string | null {
   return boundDisplayText(raw, MAX_EVENT_DETAIL_LENGTH);
+}
+
+/**
+ * Bound the `patterns` of an approval before they are retained (Issue #2031).
+ *
+ * Both axes, because either one alone leaves the footprint unbounded: a
+ * thousand short globs and one enormous glob are the same failure. Non-strings
+ * and empty strings are dropped rather than coerced — this list is displayed
+ * verbatim next to an `Allow always` button, and `"undefined"` rendered there
+ * would be a rule the user believes they are granting.
+ *
+ * @returns The bounded list, or null when nothing survived — so "the approval
+ *   named no rules" and "there were none to begin with" are the same value, and
+ *   a surface can render on presence alone
+ */
+export function boundDecisionPatterns(
+  raw: readonly unknown[] | null | undefined,
+): string[] | null {
+  if (!Array.isArray(raw)) return null;
+  const kept: string[] = [];
+  for (const entry of raw) {
+    if (typeof entry !== 'string' || entry === '') continue;
+    kept.push(entry.slice(0, MAX_DECISION_PATTERN_LENGTH));
+    if (kept.length >= MAX_DECISION_PATTERNS) break;
+  }
+  return kept.length > 0 ? kept : null;
 }
 
 /**

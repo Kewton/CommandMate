@@ -342,15 +342,97 @@ function UnclassifiedPromptNotice({
         </div>
       )}
       {answerable && answerable.length > 0 ? (
-        <StructuredDecisionActions
-          options={answerable}
-          disabled={disabled}
-          onRespond={onRespond}
-        />
+        <>
+          {/* Issue #2031: what these three buttons are about. Rendered only on
+              the addressable branch, so no other tool's panel changes: for
+              claude / codex / gemini / copilot / antigravity the payload
+              carries `decisionId: null`, `answerable` is null, and this whole
+              subtree is the same "answer it in the terminal" line it was. */}
+          <StructuredDecisionSubject
+            toolName={promptData.toolName ?? null}
+            patterns={promptData.patterns ?? null}
+            allowAlwaysLabel={
+              answerable.find((option) => option.reply === 'always')?.label ?? null
+            }
+          />
+          <StructuredDecisionActions
+            options={answerable}
+            disabled={disabled}
+            onRespond={onRespond}
+          />
+        </>
       ) : (
         <p className="text-sm text-foreground">
           {t('unclassifiedInstruction', { command: t('unclassifiedRespondCommand') })}
         </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * What the approval in front of the user is actually about (Issue #2031).
+ *
+ * Two facts the payload has been carrying and no surface was showing. The tool
+ * name is the `message.part.updated` correlation — `permission.asked` does not
+ * name the tool itself (#1758 §5.4) — and `patterns` is the rule answering
+ * `Allow always` would SAVE, which is the one verdict here whose effect
+ * outlives this dialog. Offering that button without showing its scope asks for
+ * a decision whose size the user cannot see.
+ *
+ * ## Why there is no translated label on any of this
+ *
+ * Every string rendered here is the agent's own: a tool name, a glob, and the
+ * `Allow always` label read straight off {@link STRUCTURED_DECISION_OPTIONS} —
+ * which is deliberately untranslated CLI answer vocabulary, for the reason its
+ * own comment gives. That is the same rule the rest of this notice already
+ * follows: `promptData.message` and the `askUserQuestion` labels above are
+ * printed verbatim too. Adding English chrome ("Tool:", "Allows:") would be the
+ * only untranslated *display* text in the panel, so the layout carries the
+ * relation instead — the label sits directly above the rules it grants.
+ */
+function StructuredDecisionSubject({
+  toolName,
+  patterns,
+  allowAlwaysLabel,
+}: {
+  toolName: string | null;
+  patterns: readonly string[] | null;
+  /** The `Allow always` verdict's own label, or null if it was not offered. */
+  allowAlwaysLabel: string | null;
+}) {
+  const hasPatterns = patterns !== null && patterns.length > 0;
+  if (!toolName && !hasPatterns) return null;
+
+  return (
+    <div className="space-y-1" data-testid="structured-decision-subject">
+      {toolName && (
+        <p
+          className="text-sm font-medium text-foreground font-mono break-all"
+          data-testid="structured-decision-tool"
+        >
+          {toolName}
+        </p>
+      )}
+      {hasPatterns && (
+        <div className="text-xs text-muted-foreground">
+          {allowAlwaysLabel && (
+            <span data-testid="structured-decision-patterns-label">{allowAlwaysLabel}</span>
+          )}
+          <ul
+            className="mt-0.5 flex flex-wrap gap-1"
+            data-testid="structured-decision-patterns"
+          >
+            {patterns.map((pattern) => (
+              <li
+                key={pattern}
+                className="font-mono break-all bg-muted border border-border rounded px-1.5 py-0.5"
+              >
+                {pattern}
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
     </div>
   );
