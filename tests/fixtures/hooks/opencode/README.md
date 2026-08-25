@@ -67,6 +67,39 @@
 | [`question-replied.json`](./question-replied.json) | `question.replied` | `POST /question/:id/reply` のエコー |
 | [`api-event-envelope-message-updated.json`](./api-event-envelope-message-updated.json) | `message.updated` | **`/api/event`（v2）側の envelope 比較用**。`properties` ではなく `data` |
 
+## Issue #2041 の追加分（opencode **1.18.22** / 2026-08-13 ではなく **2026-08-25** 採取）
+
+上の表とは**採取日もバージョンも違う**。§4 のハーネス（隔離 HOME・`--port 4881`）で 3 ターン
+（プレーン Markdown / tool 呼び出しあり / 967 文字 1 行の段落）を流して採った。
+詳細は設計書 [§13](../../../../docs/design/opencode-server-live-verification.md)。
+
+| ファイル | 中身 |
+|---|---|
+| [`history-turns-1-18-22.json`](./history-turns-1-18-22.json) | SSE tap から `message.updated` / `message.part.updated` / `message.part.delta` / `session.idle` の **142 フレーム**を到着順に。`server.heartbeat` 等は除いてある |
+| [`session-messages-1-18-22.json`](./session-messages-1-18-22.json) | 同じセッションの `GET /session/:id/message` 応答（7 メッセージ = user 3 + assistant 4） |
+
+**この 2 つは同じ 3 ターンの 2 つの見え方**なので、「保存された本文が REST の text と一致する」を
+テストで突き合わせられる。
+
+1.18.3 の fixture 群に無い、ここで初めて記録された事実:
+
+- **`message.part.delta` が存在する。** 142 フレーム中 95。text part の増分はこちらに乗る。
+- **text part の `message.part.updated` は必ず 2 回**（`text: ""` → 本文全体）。途中経過は来ない。
+- **`step-start` / `step-finish` も part** である（`message.part.updated` で届く）。
+- **1 ターンが assistant メッセージ 2 通になりうる**（`finish: "tool-calls"` → `finish: "stop"`）。
+  束ねるキーは assistant の `messageID` ではなく `parentID`。
+
+### プレースホルダ（追加分）
+
+| 元の値 | プレースホルダ |
+|---|---|
+| user メッセージ id | `msg_user000000000000000000N` |
+| assistant メッセージ id | `msg_asst00000000000000000NN` |
+| part id | `prt_00000000000000000000000NN` |
+| tool call id | `toolu_000000000000000000000NN` |
+
+`cost` / `tokens` / `time` / 本文は実測値のまま。
+
 ## プレースホルダ
 
 環境固有値はすべて置換済み（`grep` で実 ID・実パスが残っていないことを確認済み）。

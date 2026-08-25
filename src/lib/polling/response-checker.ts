@@ -52,6 +52,7 @@ import {
 import { isDuplicatePrompt, normalizePromptForDedup } from './prompt-dedup';
 import { recordPromptDedupSkip } from './prompt-dedup-state';
 import { isDuplicateResponse } from './response-dedup';
+import { isStructuredHistoryWriterLive } from './structured-history-gate';
 import { getPollerKey, stopPolling, GEMINI_LOADING_INDICATORS } from './response-poller-core';
 import { notifyPushSubscribers } from '@/lib/push';
 // Issue #1790: imported by deep path, not through `@/lib/push`. Suites that
@@ -979,8 +980,20 @@ export async function checkForResponse(
       }
     }
 
+    // Issue #2041: opencode's own server is publishing this reply as Markdown
+    // over the SSE stream `lib/hooks/sources/opencode/history` is writing from,
+    // so the scrape below would be a second copy of the same turn — the agent's
+    // text once as it wrote it and once as its TUI drew it, 200 columns wide.
+    //
+    // Read here rather than at the top of the function on purpose: everything
+    // above this line is bookkeeping the event stream has no second producer for
+    // (the prompt row, Auto-Yes, the waiting episode, the push fan-out), and the
+    // liveness answer is only allowed to suppress the two calls that RECORD THE
+    // REPLY. See `./structured-history-gate` for the whole argument.
+    const structuredHistoryLive = isStructuredHistoryWriterLive(worktreeId, cliToolId, instanceId);
+
     // Create Markdown log file for the conversation pair
-    if (cleanedResponse) {
+    if (cleanedResponse && !structuredHistoryLive) {
       await recordClaudeConversation(db, worktreeId, cleanedResponse, cliToolId);
     }
 
@@ -999,22 +1012,36 @@ export async function checkForResponse(
       return false;
     }
 
-    // Create new CLI tool message in database
-    const message = createMessage(db, {
-      worktreeId,
-      role: 'assistant',
-      content: cleanedResponse,
-      messageType: 'normal',
-      timestamp: new Date(),
-      cliToolId,
-      instanceId: resolvedInstanceId,
-      summary: claudeMetadata?.summary,
-      logFileName: claudeMetadata?.logFileName,
-      requestId: claudeMetadata?.requestId,
-    });
+    // Issue #2041: the one write the structured path replaces. The scraped text
+    // is dropped, not saved-and-deduped, because the two renderings of one turn
+    // are not byte-comparable — the pane's copy is hard-wrapped at the pane
+    // width and gutter-prefixed, so no content check could ever recognise them
+    // as the same reply.
+    if (!structuredHistoryLive) {
+      // Create new CLI tool message in database
+      const message = createMessage(db, {
+        worktreeId,
+        role: 'assistant',
+        content: cleanedResponse,
+        messageType: 'normal',
+        timestamp: new Date(),
+        cliToolId,
+        instanceId: resolvedInstanceId,
+        summary: claudeMetadata?.summary,
+        logFileName: claudeMetadata?.logFileName,
+        requestId: claudeMetadata?.requestId,
+      });
 
-    // Broadcast message to WebSocket clients
-    broadcastMessage('message', { worktreeId, message });
+      // Broadcast message to WebSocket clients
+      broadcastMessage('message', { worktreeId, message });
+    } else {
+      logger.info('structured-history-scrape-suppressed', {
+        worktreeId,
+        cliToolId,
+        instanceId: resolvedInstanceId,
+        scrapedLength: cleanedResponse.length,
+      });
+    }
 
     // Issue #1790: the agent has just produced a reply, so whatever it was
     // waiting for is over. Closing the episode here is what makes a *second*
