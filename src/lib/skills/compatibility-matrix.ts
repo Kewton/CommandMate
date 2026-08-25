@@ -157,6 +157,17 @@ const G4_EVIDENCE_SOURCE =
 
 const MEASURED_DATE_2026_07_26 = '2026-07-26';
 
+/**
+ * Evidence reference for the opencode 1.18.22 measurement (Issue #2037).
+ *
+ * The design note is the primary record — it carries the harness, the controls
+ * and the raw endpoint output, which an issue comment cannot.
+ */
+const OPENCODE_EVIDENCE_SOURCE =
+  'https://github.com/Kewton/CommandMate/blob/main/docs/design/opencode-server-live-verification.md#11-issue-2036--2037-opencode-11822-2026-08-25';
+
+const MEASURED_DATE_2026_08_25 = '2026-08-25';
+
 function unmeasuredEntry(agent: CLIToolType): SkillAgentMatrixEntry {
   return {
     agent,
@@ -243,7 +254,48 @@ const AGENT_DISCOVERY_MATRIX: readonly SkillAgentMatrixEntry[] = [
   },
   unmeasuredEntry('gemini'),
   unmeasuredEntry('vibe-local'),
-  unmeasuredEntry('opencode'),
+  {
+    agent: 'opencode',
+    // Measured, not read off the docs. The docs do say opencode scans
+    // `.claude/skills` and `.agents/skills`, and Issue #2037 said outright that
+    // this would probably come back `native` — neither is why this row is what
+    // it is. Six probe Skills were planted, one per candidate root, each told to
+    // answer a unique token; `GET /skill` returned all six with their absolute
+    // SKILL.md paths, including both roots below.
+    discoveryRoots: [SKILL_INSTALL_ROOT_PREFIX, SKILL_CLAUDE_INSTALL_ROOT_PREFIX],
+    discovery: {
+      outcome: 'verified',
+      evidenceKind: 'mechanical',
+      labelKey: AGENT_AXIS_OUTCOME_LABEL_KEYS.verified,
+      evidenceKindKey: AGENT_EVIDENCE_KIND_LABEL_KEYS.mechanical,
+      limitationKey: null,
+    },
+    invocation: {
+      // Submitting `/probe-agents-root` loaded that Skill's instructions and the
+      // agent answered `PROBE_OK_probe-agents-root`; `.claude/skills` answered
+      // its own token the same way. That is a slash command that runs, so this
+      // is `verified` rather than codex's `unsupported`.
+      //
+      // The limitation is narrower than "no slash command" and is recorded as
+      // one anyway: opencode's *own* palette does not offer Skills (typing the
+      // full name shows "No matching items" — positive control `/status` matched
+      // its own row, negative control `/zzzznotacommand` matched nothing), so
+      // without CommandMate's palette the route is invisible. The `/skills`
+      // picker is opencode's own way in, and it inserts exactly this `/name`.
+      outcome: 'verified',
+      evidenceKind: 'mechanical',
+      labelKey: AGENT_AXIS_OUTCOME_LABEL_KEYS.verified,
+      evidenceKindKey: AGENT_EVIDENCE_KIND_LABEL_KEYS.mechanical,
+      limitationKey: AGENT_LIMITATION_MESSAGE_KEYS.NO_SLASH_COMMAND,
+    },
+    testedVersion: '1.18.22',
+    testedDate: MEASURED_DATE_2026_08_25,
+    evidenceSource: OPENCODE_EVIDENCE_SOURCE,
+    // Also measured: the server scans commands and Skills once at boot and
+    // caches them, so a freshly installed Skill appears only after a restart.
+    reloadKey: AGENT_RELOAD_MESSAGE_KEYS.SESSION_RESTART,
+    skipReasonKey: null,
+  },
   unmeasuredEntry('copilot'),
   // CommandMate's own slash palette serves `.agents/skills` entries to
   // antigravity sessions (#1504). That is CommandMate injecting a command, not

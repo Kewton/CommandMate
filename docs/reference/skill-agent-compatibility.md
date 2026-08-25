@@ -28,19 +28,24 @@ receipt の `install_roots` に両方が記録される。`install_roots` を持
 | Claude Code | `2.1.220` | `.claude/skills` のみ | ✅ 確認済み | ✅ 確認済み | 機械的（palette 完全一致・`(project)` scope 表示） | 2026-07-26 |
 | Codex CLI | `0.145.0` | `.agents/skills` | ✅ 確認済み | ❌ 露出しない | 発見は self-report / 呼出は機械的 | 2026-07-26 |
 | Gemini | — | — | ❔ 未計測 | ❔ 未計測 | 実測なし | — |
-| OpenCode | — | — | ❔ 未計測 | ❔ 未計測 | 実測なし | — |
+| OpenCode | `1.18.22` | `.agents/skills` と `.claude/skills`（project / global の両方） | ✅ 確認済み | ✅ 確認済み（ただし opencode 自身の palette には出ない） | 機械的（`GET /skill` が絶対 path を返し、`/<name>` 送信で Skill 本文が読み込まれ probe token が返る） | 2026-08-25 |
 | Vibe Local | — | — | ❔ 未計測 | ❔ 未計測 | 実測なし | — |
 | Copilot | — | — | ❔ 未計測 | ❔ 未計測 | 実測なし | — |
 | Antigravity | — | — | ❔ 未計測 | ❔ 未計測 | 実測なし | — |
 
-計測環境: 専用 port・専用 DB・skills 未導入の新規 git repository / CommandMate 0.15.0 / macOS 26.5.2 / Node v24.1.0。
+計測環境（Claude / Codex 行）: 専用 port・専用 DB・skills 未導入の新規 git repository / CommandMate 0.15.0 / macOS 26.5.2 / Node v24.1.0。
 証跡: <https://github.com/Kewton/CommandMate/issues/1513#issuecomment-5083878264>
+
+計測環境（OpenCode 行, Issue #2037）: 同じ形の隔離 — 専用 port（4903 / 4904）・skills 未導入の新規 git repository・**`HOME` ごと差し替えた scratchpad**。手順は `docs/design/opencode-server-live-verification.md` §4、生の測定結果は同 §11。model は config で固定し、TUI の model picker は一度も開いていない。
 
 ### 読み取り方
 
 - **Claude Code は `.agents/skills` を読まない。** 公式 catalog の旧エントリは evidence として「Standard SKILL.md discovery from `.agents/skills`」を挙げて `claude: native` と宣言していたが、**結論は正しく根拠が誤り**である。実際には #1460 が `.claude/skills` にも配置することで成立している。
 - **Codex が palette に出ないのは配置先の問題ではない。** 対照実験で `/mo` → `/model` はマッチし、`~/.codex/skills` の既存 skill もマッチしないことを確認済み。当該 CLI version の制約である。
 - **Antigravity の「未計測」は CommandMate の palette 挙動と別物。** CommandMate の slash loader は `.agents/skills` のエントリを antigravity session にも供給する（#1504）が、これは CommandMate がコマンドを注入しているのであって Agent 自身が Skill を発見しているわけではない。native discovery の evidence にはならない。
+- **OpenCode の行は「公式 docs にそう書いてあるから」ではない。** Issue #2037 は「実測すれば `native` になる可能性が高い」と書いていたが、根拠にしたのは実測だけである。候補 root ごとに 1 個ずつ、固有 token を返すよう指示した probe Skill を 6 個植え、`GET /skill` が 6 個すべてを**絶対 `SKILL.md` path つきで**返すことを確認した（project の `.opencode/skills` / `.claude/skills` / `.agents/skills`、global の `~/.config/opencode/skills` / `~/.claude/skills` / `~/.agents/skills`）。呼出軸は `/probe-agents-root` を送って Skill 本文が読み込まれ `PROBE_OK_probe-agents-root` が返ることで確認し、`.claude/skills` 側でも同じ結果を得た。
+- **OpenCode は「呼べるが palette には出ない」。** `/probe-agents-root` を composer に打ち込むと補完は **`No matching items`** になる（陽性対照 `/status` は自分の行にマッチし、陰性対照 `/zzzznotacommand` は何にもマッチしない）。opencode 自身の slash palette は `source: "command"` の行だけを載せるためで、Skill への入口は `/skills` picker しかない。**CommandMate の palette が `.agents/skills` / `.claude/skills` のエントリを opencode session にも供給する理由がこれである**（#1504 と同型、Issue #2037）。
+- **OpenCode に送る trigger は末尾の空白まで含めて 1 つ。** `POST /tui/append-prompt` に裸の `/name` を渡すと補完 dropdown が開き、開いている間は `POST /tui/submit-prompt` が `true` を返して**何も送信しない**。空白を 1 つ足すと dropdown が閉じて Skill が走る。`MessageInput` は元から `` `${trigger} ` `` を入れるため palette 経路は安全。
 - **未計測は `unsupported` ではない。** 「動かないと確認した」ではなく「確認していない」であり、UI では `unknown` と skip 理由を表示する。
 
 ---
@@ -76,6 +81,7 @@ support 値の強さ順は `unsupported` < `unknown` < `commandmate_runtime` < `
 |-------|------|
 | Claude Code | 当該 repository で新しいセッションを開始する。Skill はセッション開始時に走査される |
 | Codex CLI | 新しいセッションを開始したうえで、Skill を**名前で指定**して呼び出す（slash command には出ない） |
+| OpenCode | 新しいセッションを開始する。server は起動時に一度だけ command / Skill を走査して cache するため、install 直後の Skill は**再起動するまで出ない**（実測）。呼び出しは `/<name>`（CommandMate の palette、または opencode 自身の `/skills` picker から） |
 | 未計測の Agent | 実測していない。セッション再起動が安全な前提 |
 
 ---

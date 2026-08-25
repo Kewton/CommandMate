@@ -28,6 +28,7 @@ import { filterCommandsByCliTool } from '@/lib/command-merger';
 import {
   loadAgentsSkills,
   loadCodexSkills,
+  loadOpencodeSkills,
   loadSkills,
   mergeCodexFamilySkills,
 } from '@/lib/slash-commands';
@@ -64,6 +65,22 @@ let workspace: string;
 const LOADER_BY_ROOT: Record<string, (basePath: string) => Promise<SlashCommand[]>> = {
   [SKILL_INSTALL_ROOT_PREFIX]: loadAgentsSkills,
   [SKILL_CLAUDE_INSTALL_ROOT_PREFIX]: loadSkills,
+};
+
+/**
+ * Agents whose entries do not come from the root-keyed loaders above (#2037).
+ *
+ * opencode was measured to read *both* install roots and to run a Skill as
+ * `/<name>`, so its palette entries are produced by one loader that folds every
+ * root it reads — `loadOpencodeSkills` — rather than by the per-root loader the
+ * codex/claude split uses. Resolving by agent first keeps the binding this
+ * suite exists for: a root named in the matrix must be reachable from *that
+ * Agent's* loader, whichever loader that is.
+ */
+const LOADER_BY_AGENT: Partial<
+  Record<SkillAgentMatrixEntry['agent'], (basePath: string) => Promise<SlashCommand[]>>
+> = {
+  opencode: loadOpencodeSkills,
 };
 
 function asGroup(commands: SlashCommand[]): SlashCommandGroup[] {
@@ -117,8 +134,8 @@ describe('every root the matrix names is reachable from that Agent', () => {
     '%s finds the Skill through the loader for the root it reads',
     async (agent, entry: SkillAgentMatrixEntry) => {
       for (const root of entry.discoveryRoots) {
-        const loader = LOADER_BY_ROOT[root];
-        expect(loader, `no CommandMate loader for ${root}`).toBeTypeOf('function');
+        const loader = LOADER_BY_AGENT[agent] ?? LOADER_BY_ROOT[root];
+        expect(loader, `no CommandMate loader for ${agent} + ${root}`).toBeTypeOf('function');
 
         const loaded = await loader(workspace);
         expect(

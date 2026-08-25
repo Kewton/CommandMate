@@ -328,10 +328,10 @@
     },
     {
       "tool": "opencode",
-      "version": "1.18.21",
-      "source": "the opencode 1.18.21 slash palette, scrolled end to end (18 rows, /agents through /variants; typing the full /compact matched nothing but the /review description text).",
-      "observedAt": "2026-08-22",
-      "issue": 1913,
+      "version": "1.18.22",
+      "source": "opencode 1.18.22, isolated HOME per docs/design/opencode-server-live-verification.md §4, two readings that must agree. (1) `GET /command` on the loopback server (`src/lib/slash-command-reconcile/providers/opencode.ts`) — authoritative for /init and /review, and for nothing else: it carries markdown commands and Skills only, so the other 16 names are NOT in it. (2) the TUI slash palette, opened with `/` and scrolled end to end (10 rows per screen, cycles) — 19 rows, of which 18 are these and the 19th was the probe `.opencode/commands/test.md`. Controls: typing the full /status matched its own row, /zzzznotacommand matched nothing.",
+      "observedAt": "2026-08-25",
+      "issue": 2036,
       "commands": [
         "agents",
         "connect",
