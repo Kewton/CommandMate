@@ -38,6 +38,7 @@ import { savePendingAssistantResponse } from '@/lib/assistant-response-saver';
 import { createLogger } from '@/lib/logger';
 import { isPromptWaiting, promptWaitingMessage } from '@/lib/session/prompt-waiting-guard';
 import type { CopilotTool } from '@/lib/cli-tools/copilot';
+import { formatImagePathFallbackMessage } from '@/lib/cli-tools/opencode';
 import type { ChatMessage, MessageType } from '@/types/models';
 
 const logger = createLogger('session/send-user-message');
@@ -184,11 +185,15 @@ export async function sendUserMessage(
         // Image-capable tool: use native image sending
         await cliTool.sendMessageWithImage(worktreeId, content, absoluteImagePath, instanceId);
       } else {
-        // Fallback: embed path in message
-        const messageWithPath = content
-          ? `${content}\n\n[添付画像: ${absoluteImagePath}]`
-          : `[添付画像: ${absoluteImagePath}]`;
-        await cliTool.sendMessage(worktreeId, messageWithPath, instanceId);
+        // Fallback: embed path in message. Issue #2035 moved the wording to
+        // `@/lib/cli-tools/opencode` so this branch and opencode's own fallback
+        // — reached when a pane has no server to attach through — cannot drift
+        // apart; the behaviour of this line is unchanged.
+        await cliTool.sendMessage(
+          worktreeId,
+          formatImagePathFallbackMessage(content, absoluteImagePath),
+          instanceId
+        );
       }
     } else {
       // Issue #1906: every tool — copilot included — goes through its own
