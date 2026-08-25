@@ -278,6 +278,11 @@ describe('structuredEvents exposure (Issue #1722)', () => {
         confirmed: STRUCTURED_STATE_MAX_AGE_MS,
       },
       source: claudeSource,
+      // Issue #2040: what the agent says about the conversation it is in. Null
+      // for claude for the life of the session — it publishes none — and
+      // present-and-null rather than absent, for the reason `permissionDecision`
+      // above is.
+      session: null,
     });
   });
 
@@ -337,6 +342,9 @@ describe('structuredEvents exposure (Issue #1722)', () => {
         confirmed: STRUCTURED_STATE_MAX_AGE_MS,
       },
       source: claudeSource,
+      // Issue #2040: still null — a `notification` says nothing about the
+      // conversation's cost, and only opencode's `session.updated` fills this.
+      session: null,
     });
     expect({ ...after, structuredEvents: null }).toEqual({ ...before, structuredEvents: null });
   });

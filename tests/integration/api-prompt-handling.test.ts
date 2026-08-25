@@ -293,13 +293,15 @@ describe('POST /api/worktrees/:id/respond', () => {
   });
 
   describe('Error handling', () => {
-    it('should return 400 if messageId is missing', async () => {
+    it('should return 400 if messageId and answer are both missing', async () => {
+      // Issue #2040 gave `{ answer }` alone a meaning — the one decision this
+      // instance is holding — so what is left of the pre-#1932 refusal is the
+      // request that names nothing at all. The wording is unchanged because the
+      // Web UI's existing flow reads it.
       const request = new Request('http://localhost:3000/api/worktrees/test-worktree/respond', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          answer: 'yes',
-        }),
+        body: JSON.stringify({}),
       });
 
       const response = await respondToPrompt(request as unknown as import('next/server').NextRequest, {
@@ -309,6 +311,24 @@ describe('POST /api/worktrees/:id/respond', () => {
       expect(response.status).toBe(400);
       const data = await response.json();
       expect(data.error).toContain('messageId and answer are required');
+    });
+
+    it('reads a bare answer as the sole-pending-decision shape (Issue #2040)', async () => {
+      // `claude` declares `eventIdentity: null`, so there is nothing here a
+      // number could address and the refusal carries its own code — never
+      // `decision_not_found`, which a caller must not retry through.
+      const request = new Request('http://localhost:3000/api/worktrees/test-worktree/respond', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ answer: 'yes' }),
+      });
+
+      const response = await respondToPrompt(request as unknown as import('next/server').NextRequest, {
+        params: Promise.resolve({ id: 'test-worktree' }),
+      });
+
+      expect(response.status).toBe(404);
+      expect((await response.json()).code).toBe('decision_source_unaddressable');
     });
 
     it('should return 400 if answer is missing', async () => {

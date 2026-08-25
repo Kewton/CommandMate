@@ -16,14 +16,14 @@ import { broadcastTerminalSnapshotAfterInteraction } from '@/lib/realtime/termin
 import { applyEventToActiveTask } from '@/lib/tasks/task-transition-service';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 import { isAnswerablePromptData } from '@/types/models';
-import { respondByDecisionId } from './structured-decision';
+import { respondByDecisionId, respondToSolePendingDecision } from './structured-decision';
 
 const logger = createLogger('api/respond');
 
 /**
  * POST /api/worktrees/[id]/respond
  *
- * Request body — one of two shapes (Issue #1932):
+ * Request body — one of three shapes (Issue #1932, #2040):
  * {
  *   "messageId": "uuid",       // a stored prompt row; answered at the pane
  *   "answer": "yes" | "no"
@@ -34,6 +34,11 @@ const logger = createLogger('api/respond');
  *   "cliTool": "opencode",     // optional; defaults to the worktree's tool
  *   "instanceId": "opencode-2" // optional; defaults to the primary
  * }
+ * {
+ *   "answer": "3",             // Issue #2040: the ONE decision this instance is
+ *   "cliTool": "opencode",     // holding, whichever it is. 404 when it holds
+ *   "instanceId": "opencode-2" // none, 409 when it holds more than one — and
+ * }                            // neither refusal touches the pane.
  *
  * Response:
  * {
@@ -50,19 +55,21 @@ export async function POST(
     const id = canonicalWorktreeId(requestedWorktreeId);
     const { messageId, decisionId, answer, cliTool: bodyCliTool, instanceId: bodyInstanceId } = await req.json();
 
-    // Validation. Issue #1932 makes `messageId` optional, and only that: when
-    // no `decisionId` is offered the refusal is the pre-#1932 one, byte for
-    // byte, because the Web UI's existing flow reads it.
-    if (!decisionId) {
-      if (!messageId || !answer) {
-        return NextResponse.json(
-          { error: 'messageId and answer are required' },
-          { status: 400 }
-        );
-      }
-    } else if (!answer) {
+    // Validation. Issue #1932 made `messageId` optional when a `decisionId` is
+    // offered; Issue #2040 makes both optional, so the one field every shape
+    // needs is an answer.
+    //
+    // The refusal wording is unchanged for every request that already got one:
+    // a body with no `decisionId` still reads `messageId and answer are
+    // required` whether or not it carried a `messageId`, because the Web UI's
+    // existing flow reads that string. What #2040 widened is what is ACCEPTED —
+    // a bare `{ answer }` is no longer a malformed stored-message request — not
+    // what a rejection says.
+    if (!answer) {
       return NextResponse.json(
-        { error: 'answer is required' },
+        decisionId
+          ? { error: 'answer is required' }
+          : { error: 'messageId and answer are required' },
         { status: 400 }
       );
     }
@@ -73,14 +80,26 @@ export async function POST(
     // sent, so a request carrying both goes on being the stored-message request
     // it has always been.
     if (!messageId) {
-      return await respondByDecisionId({
-        db,
-        worktreeId: id,
-        decisionId,
-        answer,
-        cliToolParam: bodyCliTool,
-        instanceParam: bodyInstanceId,
-      });
+      // Issue #2040: an answer with neither id names the ONE decision this
+      // instance is holding — and refuses, without sending anything anywhere,
+      // when that count is not one. Split here rather than inside the module so
+      // the two shapes stay two functions with two contracts.
+      return decisionId
+        ? await respondByDecisionId({
+            db,
+            worktreeId: id,
+            decisionId,
+            answer,
+            cliToolParam: bodyCliTool,
+            instanceParam: bodyInstanceId,
+          })
+        : await respondToSolePendingDecision({
+            db,
+            worktreeId: id,
+            answer,
+            cliToolParam: bodyCliTool,
+            instanceParam: bodyInstanceId,
+          });
     }
 
     // Get message

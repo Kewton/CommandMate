@@ -54,6 +54,11 @@
 import { createLogger } from '@/lib/logger';
 import { buildCompositeKey } from '@/lib/auto-yes-state';
 import type { AgentEventType } from '@/lib/hooks/agent-event-types';
+import {
+  forgetAgentSessionTelemetry,
+  readOpencodeSessionFrame,
+  recordAgentSessionTelemetry,
+} from '@/lib/hooks/agent-session-telemetry';
 import { isPlainObject, readStringField } from '../event-mapper';
 import type {
   AgentInstanceRef,
@@ -403,6 +408,12 @@ export async function closeOpencodeSubscription(target: AgentInstanceRef): Promi
   // Issue #1900: the only signal a backoff is listening to.
   state.lifetimeController.abort();
   subscriptions.delete(key);
+  // Issue #2040: the record describes the conversation a process was having,
+  // and this is the call that means the process is gone. Left behind, it would
+  // report the previous session's cost against the next pane started on the same
+  // instance id — the same argument `buildCurrentOutput` makes for blanking
+  // `model` on a session that is not running.
+  forgetAgentSessionTelemetry(target);
   logger.info('opencode-subscription-closed', {
     worktreeId: target.worktreeId,
     instanceId: target.instanceId ?? target.cliToolId,
@@ -800,6 +811,21 @@ function deliver(
     const callId = partCallId(frame);
     const toolName = partToolName(frame);
     if (callId && toolName) rememberOpencodeToolCall(callId, toolName);
+  }
+
+  // Issue #2040, recorded on the same terms and for the same reason as the tool
+  // name above: `session.updated` maps to none of the seven event words, so a
+  // fact that only this frame carries would be lost between `normalize` and the
+  // `return` two lines below it. What it carries is the whole `Session` — title,
+  // agent, model, cost, tokens (measured against 1.18.22's own `GET /doc`) — and
+  // it is the only place any of those reach this server without a request.
+  //
+  // Deliberately not gated on the turn gate's primary session: the frame's own
+  // `parentID` is the sub-agent marker and `readOpencodeSessionFrame` reads it,
+  // so this stays a frame-local rule with no ordering relationship to `observe`.
+  if (type === 'session.updated') {
+    const session = readOpencodeSessionFrame(frame, receivedAt);
+    if (session) recordAgentSessionTelemetry(state.target, session);
   }
 
   // Issue #2034: before the gate, and independent of what it decides. An abort

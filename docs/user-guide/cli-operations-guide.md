@@ -593,13 +593,47 @@ commandmate respond <worktree-id> "yes" --instance codex-2        # 追加イン
 - 解決結果は監査のため stdout に出力されます: `Resolved "no" to option 3: No, and tell Claude ...`
 - `--default` は default 選択肢（❯ ハイライト位置）を明示的に選びます（`<answer>` と排他）
 
+### 構造化 decision への番号写像（Issue #2040）
+
+**エージェントが decision ごとの ID を publish する場合**（`capture --json` の
+`structuredEvents.source.capabilities.eventIdentity` が `null` 以外。実装上は現在 opencode のみ）、
+`respond <worktree-id> <n>` は **pane にキーを送らず**、そのインスタンスが保持している
+decision へエージェント自身の API で回答します。
+
+- **承認（permission）** → `POST /permission/:id/reply`。番号は 3 つの verdict です:
+  `1` = Allow once / `2` = Allow always / `3` = Reject（`once` / `always` / `reject` / `yes` / `no` も同義語として解決）
+- **質問（question）** → `POST /question/:id/reply`。番号は**その質問が publish した選択肢の並び順**です。
+  ラベル（`Blue`）・自由入力（`neither, use green`）でも回答できます
+
+**回答されるのは「保持している decision がちょうど 1 件」のときだけです。**
+
+| 保持数 | 結果 | pane |
+|:------:|------|------|
+| 0 件 | exit 99（`decision_not_found`）| **何も送らない** |
+| 1 件 | 回答して exit 0 | **何も送らない** |
+| 2 件以上 | exit 99（`multiple_pending_decisions`）。開いている decision の ID / kind を stderr に列挙 | **何も送らない** |
+
+番号は「どれかの一覧の中の位置」であって、どの一覧かは呼び出し側が言っていません。2 件以上あるときに
+最も古いものへ当てにいくと、利用者が見てもいない承認に答えてしまうため、拒否します。個別に答えるには
+列挙された ID を使って `POST /api/worktrees/<id>/respond` に `{"decisionId": "...", "answer": "3"}` を
+送るか、ターミナルで直接答えてください。
+
+`eventIdentity: null` のエージェント（claude / codex / gemini / copilot / antigravity）は**従来どおり**
+`/prompt-response` 経由のキー送出です。`--default` も従来どおりで、これは意図的です:
+TUI にはハイライトされた選択肢がありますが、それがどれかは wire 上のどこにも書かれていないため、
+構造化経路は `--default` を拒否します（一方でキー送出経路の Enter は実際に答えになります）。
+
+判定に使うのはツール名ではなく**サーバが申告した capability** です。そのため `respond` は送信前に
+`GET /api/worktrees/<id>/current-output` を 1 回だけ読みます。この読み取りが失敗した場合
+（古い daemon・サーバ停止など）は**従来経路にフォールバック**します。
+
 ### 終了コード
 
 | コード | 意味 |
 |:------:|------|
 | 0 | 応答成功 |
-| 2 | 引数エラー（`<answer>` と `--default` の同時指定・両方欠落 等）|
-| 99 | プロンプトが既に消えている（`prompt_no_longer_active`）/ yes・no を選択肢に解決できない（`unresolvable_answer`）|
+| 2 | 引数エラー（`<answer>` と `--default` の同時指定・両方欠落 等）/ 選択肢に無い番号（`answer_out_of_range`）|
+| 99 | プロンプトが既に消えている（`prompt_no_longer_active`）/ yes・no を選択肢に解決できない（`unresolvable_answer`）/ 保持している decision が 0 件（`decision_not_found`）・2 件以上（`multiple_pending_decisions`、Issue #2040）|
 
 ---
 
@@ -1161,6 +1195,8 @@ commandmate capture <worktree-id> --instance codex-2 # 追加インスタンス�
     "closedBy": null,
     "promptWaitingSince": null,
     "promptWaitingSource": null,
+    "pendingDecisions": [],
+    "session": null,
     "source": {
       "cliToolId": "claude",
       "capabilities": {
@@ -1197,11 +1233,82 @@ commandmate capture <worktree-id> --instance codex-2 # 追加インスタンス�
 | `statusEvidence` / `lastKnownStatus` / `lastKnownStatusAt` | 判定が肯定的証拠に基づくか、と直前の確定状態（Issue #1926）。下記参照 |
 | `structuredEvents.turnId` / `openedAt` / `closedAt` / `closedBy` | ターンの暫定境界（Issue #1926）。**まだ安定した turn 同一性ではありません**。下記参照 |
 | `structuredEvents.source` | そのツールの構造化イベントソースの識別子と**宣言値**（Issue #1924）。セッションの状態ではなく**ソースの性質**なので、hooks が 1 件も来ていなくても・セッションが止まっていても必ず入る。ソース実装が無いツール（`vibe-local`）は互換ソースの「未計測」値（`supportedEvents: []`）を返す |
+| `structuredEvents.pendingDecisions[]` | そのインスタンスが保持している dialog（Issue #1930、`kind` / `questionOptions` は Issue #2040）。下記参照 |
+| `structuredEvents.session` | エージェント自身が申告した「いま入っている会話」（Issue #2040）。publish しないツールでは常に `null`。下記参照 |
 | `upstreamFault` | 画面に上流障害の署名があれば `{id, matchedText, at}`、無ければ `null`（Issue #1839）。**`null` は「健全」ではなく「既知の署名が無かった」** |
 | `resolvedBy` / `conflict` | `cliToolId` を選んだ**解決段**と、roster と明示指定の矛盾（Issue #1884）。下記参照 |
 
 画面が空かどうかは `realtimeSnippet.trim() === ''` と `lineCount` で見る。
 `content` は差分なので単独では判断しない。
+
+#### `structuredEvents.pendingDecisions[]` の `kind` / `questionOptions`（Issue #2040）
+
+保持中の dialog が**承認待ちなのか質問待ちなのか**を分けて出します。両者はワーカーを同じように
+塞ぎますが、答え方がまったく違う（承認は 3 つの verdict、質問はエージェントが publish した選択肢）ため、
+`capture --json` を読むオーケストレーターは先にこれを見分けられる必要があります。
+
+```json
+"pendingDecisions": [
+  {
+    "id": "que_0000000000000000000000000",
+    "at": 1754296400000,
+    "source": "permission-request",
+    "toolName": "question",
+    "confirmedAt": null,
+    "scraperCorroborated": false,
+    "deliveryExpired": false,
+    "kind": "question",
+    "questionOptions": [
+      { "number": 1, "label": "Red" },
+      { "number": 2, "label": "Blue" }
+    ]
+  }
+]
+```
+
+- `kind`: `permission` / `question`。**必ず入ります**
+- `questionOptions`: `kind === "question"` かつエージェントの payload をまだ保持しているときだけ非 `null`。
+  番号は**その payload の並び順**で、`commandmate respond <id> <n>` が解決に使う番号と同一です
+- 承認の 3 verdict はここではなく `promptData.decisionOptions` に出ます（そのソースの性質であって、
+  この dialog の性質ではないため）
+- **追加は additive です。** `id` / `at` / `source` / `toolName` / `confirmedAt` /
+  `scraperCorroborated` / `deliveryExpired` の型・意味・有無は変わりません
+
+#### `structuredEvents.session`（Issue #2040）
+
+エージェント自身が申告した「いま入っている会話」です。ターミナルの画面からは読めない半分
+（どのセッション・どの persona・どのモデル・いくら使ったか）で、opencode の `session.updated`
+フレーム（既に購読済みのストリーム）から読むため**追加のリクエストもポーリングも発生しません**。
+
+```json
+"session": {
+  "id": "ses_0000000000000000000000000",
+  "title": "Fix the flaky test",
+  "agent": "build",
+  "model": "claude-sonnet-4.6",
+  "provider": "github-copilot",
+  "cost": 0.4213,
+  "tokens": {
+    "input": 120,
+    "output": 30,
+    "reasoning": 0,
+    "cacheRead": 4096,
+    "cacheWrite": 512,
+    "total": null
+  },
+  "at": 1754296400000
+}
+```
+
+- **必ずキーは存在し、判らないときは `null`** です。`null` になるのは opencode 以外の全ツール、
+  まだ `session.updated` が届いていない opencode ペイン、および kill 済みのペイン
+- 値は**そのまま**です。コストは丸めず、モデル名も整形しません（エージェント自身の申告と
+  突き合わせられることが目的なので、出口で整えると必要なときに比較できなくなります）
+- `tokens.cacheRead` / `cacheWrite` は opencode の `tokens.cache.read` / `.write` を平坦化したものです。
+  `total` はセッションではなく assistant message 側の宣言なので、現状は常に `null`（自前で合計しません）
+- サブエージェント（`parentID` を持つセッション）の `session.updated` は**無視します**。
+  そのコストはペインのものではなく、採ると会話とバックグラウンドジョブの間で値が往復するためです
+- `at` はこのレコードを書いた時刻です。古さの判断に使ってください
 
 #### `statusEvidence` / `lastKnownStatus`（Issue #1926）
 
@@ -1587,11 +1694,11 @@ commandmate instances <worktree-id> kill <instance-id>                 # 該当�
 `commandmate instances <worktree-id>`:
 
 ```
-INSTANCE_ID  ALIAS   CLI_TOOL  RUNNING  AUTO_YES  MODEL              EFFORT
------------  ------  --------  -------  --------  -----------------  ------
-claude       Claude  claude    yes      no        claude-opus-5[1m]        
-codex-2      レビュー用   codex     yes      yes       gpt-5.6-sol              
-gemini       Gemini  gemini    no       no                                 
+INSTANCE_ID  ALIAS   CLI_TOOL  RUNNING  AUTO_YES  MODEL              EFFORT  SESSION_ID  SESSION_TITLE
+-----------  ------  --------  -------  --------  -----------------  ------  ----------  -------------
+claude       Claude  claude    yes      no        claude-opus-5[1m]                                   
+codex-2      レビュー用   codex     yes      yes       gpt-5.6-sol                                        
+opencode     opencode opencode yes      no        claude-sonnet-4.6          ses_01H…    Fix the flaky test
 ```
 
 `commandmate instances <worktree-id> --json`:
@@ -1617,16 +1724,34 @@ gemini       Gemini  gemini    no       no
     "reasoningEffort": null
   },
   {
-    "instanceId": "gemini",
-    "alias": "Gemini",
-    "cliTool": "gemini",
-    "running": false,
+    "instanceId": "opencode",
+    "alias": "opencode",
+    "cliTool": "opencode",
+    "running": true,
     "autoYes": false,
-    "model": null,
-    "reasoningEffort": null
+    "model": "claude-sonnet-4.6",
+    "reasoningEffort": null,
+    "sessionId": "ses_01H0000000000000000000000",
+    "sessionTitle": "Fix the flaky test"
   }
 ]
 ```
+
+#### `SESSION_ID` / `SESSION_TITLE` 列（Issue #2038）
+
+opencode は、サポート対象エージェントの中で唯一**会話をコマンドラインから指定できる**ため
+（`opencode -s <id>`）、次に起動したときに再開されるセッションを列に出しています。
+
+| 状態 | 表示 |
+|------|------|
+| opencode で、CommandMate がセッションを記憶している | `ses…` とそのタイトル |
+| opencode 以外のエージェント | 空欄（`--json` では `null`）。他のどのエージェントの起動コマンドも会話を名指さないため、これは欠落ではなく正しい答えです |
+| CommandMate が一度もターン終了を見ていない opencode インスタンス | 空欄（`--json` では `null`） |
+
+- **`--json` のキー名は `sessionId` / `sessionTitle` です。** 表の列名（`SESSION_TITLE`）とは一致しますが、
+  `GET /api/worktrees/<id>/opencode/session` が返す同じ値のキーは `title` です。両者を取り違えないでください
+- 列は**末尾に追加**しています。`INSTANCE_ID` 〜 `EFFORT` を列位置で読んでいるスクリプトはそのまま動きます
+- 表のタイトルは 40 文字で切りますが、`--json` は全文を返します
 
 #### `MODEL` / `EFFORT` 列（Issue #1785）
 

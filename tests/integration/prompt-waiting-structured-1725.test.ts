@@ -219,15 +219,21 @@ describe('Issue #1725: a posted permission notification reaches current-output',
     });
     // The agent's own `tool_input` is not on the wire, and neither is anything
     // else the payload carried: only the keys the published type declares.
+    // Issue #2040 added `kind` and `questionOptions` — an approval, and null,
+    // here — and this list is what makes such an addition deliberate rather than
+    // incidental.
     expect(Object.keys(decisions[0]).sort()).toEqual([
       'at',
       'confirmedAt',
       'deliveryExpired',
       'id',
+      'kind',
+      'questionOptions',
       'scraperCorroborated',
       'source',
       'toolName',
     ]);
+    expect(decisions[0]).toMatchObject({ kind: 'permission', questionOptions: null });
 
     // The two bookkeeping blocks travel with it: zeroed rather than absent, so
     // an operator reading a healthy payload knows where to look when it is not.

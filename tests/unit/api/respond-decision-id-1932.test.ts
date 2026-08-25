@@ -196,10 +196,22 @@ afterEach(() => {
 });
 
 describe('the request shape', () => {
-  it('still refuses a request naming neither a message nor a decision', async () => {
-    const response = await post('wt-alpha', { answer: 'yes' });
+  it('still refuses a request naming neither a message nor a decision NOR an answer', async () => {
+    // Issue #2040 gave `{ answer }` alone a meaning — the one decision this
+    // instance is holding — so the request that names nothing at all is what is
+    // left of the pre-#1932 refusal, and the wording is unchanged because the
+    // Web UI's existing flow reads it.
+    const response = await post('wt-alpha', {});
     expect(response.status).toBe(400);
-    // The pre-#1932 wording, unchanged: the Web UI's existing flow reads it.
+    expect((await response.json()).error).toContain('messageId and answer are required');
+  });
+
+  it('keeps the pre-#1932 wording for a messageId with no answer', async () => {
+    // The other half of the same guarantee: #2040 widened what is ACCEPTED, and
+    // a request that carried a `messageId` and no answer gets the string it
+    // always got rather than the `decisionId` shape's shorter one.
+    const response = await post('wt-alpha', { messageId: 'some-uuid' });
+    expect(response.status).toBe(400);
     expect((await response.json()).error).toContain('messageId and answer are required');
   });
 
