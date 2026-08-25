@@ -372,7 +372,12 @@ const BASELINE: BaselineEntry[] = [
   {
     file: 'src/cli/commands/report.ts',
     kind: 'call-arg',
-    snippet: ".option('--tool <tool>', 'AI tool to use (claude, codex, copilot, antigravity)', 'claude')",
+    // Issue #2044: the tool list is interpolated from ALLOWED_TOOLS now (adding
+    // `opencode` to a hand-written list was how the sibling message in
+    // `/api/daily-summary` came to say "claude, codex, copilot" for a year).
+    // The `'claude'` this entry classifies is commander's default value, which
+    // is unchanged — only the line it sits on was reworded.
+    snippet: ".option('--tool <tool>', `AI tool to use (${ALLOWED_TOOLS.join(', ')})`, 'claude')",
     count: 1,
     verdict: 'not-a-fallback',
     reason: 'commander の option 既定（§4 D5 決定 4 (3) (b)）。--help に出る既定値であって送り先の解決ではない',

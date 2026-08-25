@@ -3,6 +3,8 @@
  * Generates AI-powered daily summary reports from chat messages.
  *
  * Issue #607: Daily summary feature
+ * Issue #2044: opencode joins SUMMARY_ALLOWED_TOOLS, and the report grows an
+ *   agent cost section built from the `agent_session_costs` ledger.
  *
  * Features:
  * - Concurrent execution control via globalThis flag (DR4-004)
@@ -22,6 +24,8 @@ import { DEFAULT_PERMISSIONS } from '@/config/schedule-config';
 import { getMessagesByDateRange } from '@/lib/db/chat-db';
 import { saveDailyReport } from '@/lib/db/daily-report-db';
 import { getWorktrees } from '@/lib/db/worktree-db';
+import { getDailyAgentCostSummary, type DailyAgentCostSummary } from '@/lib/db/agent-session-cost-db';
+import { sampleAgentSessionCosts } from '@/lib/db/agent-session-cost-sampler';
 import { getAllRepositories } from '@/lib/db/db-repository';
 import type { DailyReport } from '@/lib/db/daily-report-db';
 import { SUMMARY_GENERATION_TIMEOUT_MS, GIT_LOG_TOTAL_TIMEOUT_MS, ISSUE_FETCH_TOTAL_TIMEOUT_MS } from '@/config/review-config';
@@ -120,6 +124,94 @@ export class OutputValidationError extends Error {
 }
 
 // =============================================================================
+// Agent cost section (Issue #2044)
+// =============================================================================
+
+/** Heading the appended cost section always starts with. */
+export const AGENT_COST_SECTION_HEADING = '## Agent session cost';
+
+/**
+ * A number for the table, or `-` when nobody reported one.
+ *
+ * `-` and `0` mean different things here and the distinction is the reason the
+ * whole ledger keeps nulls: `0` is "this session spent nothing", `-` is "the
+ * agent never said what it spent". Printing `0` for both would make a broken
+ * telemetry stream look like a free day.
+ */
+function formatLedgerNumber(value: number | null, fractionDigits = 0): string {
+  if (value === null) return '-';
+  return fractionDigits > 0 ? value.toFixed(fractionDigits) : String(value);
+}
+
+/**
+ * Render the day's agent spend as a Markdown table, or `null` when the ledger
+ * is empty for that day.
+ *
+ * ## Why this is not in the prompt
+ *
+ * These are exact numbers meant to be *reconciled* against
+ * `opencode stats --project <path>`, and an LLM asked to include them in prose
+ * will round, re-order, or summarise them — at which point they no longer
+ * reconcile and the section is worse than absent. So the model never sees them:
+ * the section is appended to the generated text, deterministically, after
+ * generation. That also makes it **additive** in the strict sense the Issue
+ * asks for — `buildSummaryPrompt()` is byte-identical to what it produced
+ * before, so `claude` and `codex` generate exactly the text they used to.
+ *
+ * ## The correspondence with `opencode stats`
+ *
+ * Measured on opencode 1.18.22 (`docs/design/opencode-server-live-verification.md`
+ * §15): summing each session's cumulative `cost` / `tokens` reproduces
+ * `opencode stats --project ""`'s Total Cost, Input, Output, Cache Read and
+ * Cache Write for the same project. The per-worktree row is therefore the
+ * `--project <worktree path>` figure and the total row is the all-projects one,
+ * restricted to a single day — which is what `stats --days 1` reports.
+ *
+ * The cost column carries six decimals because a single opencode step costs
+ * ~0.003 and two decimals would print `0.00` for a real charge.
+ *
+ * @param summary - Ledger rollup for the day
+ * @param worktreeNames - worktree id -> display name, for legibility
+ * @returns Markdown section, or null when there is nothing to report
+ */
+export function buildAgentCostSection(
+  summary: DailyAgentCostSummary,
+  worktreeNames: Map<string, string>
+): string | null {
+  if (summary.worktrees.length === 0) return null;
+
+  const header = [
+    '| Worktree | Sessions | Cost (USD) | Input | Output | Reasoning | Cache read | Cache write |',
+    '|---|---:|---:|---:|---:|---:|---:|---:|',
+  ];
+
+  const rows = summary.worktrees.map((row) => {
+    const name = worktreeNames.get(row.worktreeId) ?? row.worktreeId;
+    return `| ${name} | ${row.sessions} | ${formatLedgerNumber(row.cost, 6)} | ` +
+      `${formatLedgerNumber(row.tokensInput)} | ${formatLedgerNumber(row.tokensOutput)} | ` +
+      `${formatLedgerNumber(row.tokensReasoning)} | ${formatLedgerNumber(row.tokensCacheRead)} | ` +
+      `${formatLedgerNumber(row.tokensCacheWrite)} |`;
+  });
+
+  const total = summary.total;
+  const totalRow =
+    `| **Total** | ${total.sessions} | ${formatLedgerNumber(total.cost, 6)} | ` +
+    `${formatLedgerNumber(total.tokensInput)} | ${formatLedgerNumber(total.tokensOutput)} | ` +
+    `${formatLedgerNumber(total.tokensReasoning)} | ${formatLedgerNumber(total.tokensCacheRead)} | ` +
+    `${formatLedgerNumber(total.tokensCacheWrite)} |`;
+
+  return [
+    `${AGENT_COST_SECTION_HEADING} (${summary.date})`,
+    '',
+    ...header,
+    ...rows,
+    totalRow,
+    '',
+    '_Cross-check: `opencode stats --project <worktree path> --days 1`. Figures are the agent\'s own cumulative per-session totals; `-` means the agent reported no value._',
+  ].join('\n');
+}
+
+// =============================================================================
 // Generator
 // =============================================================================
 
@@ -159,6 +251,23 @@ export async function generateDailySummary(
 
   try {
     logger.info('generation-started', { date, tool });
+
+    // 0. Flush the in-memory agent telemetry into the ledger (Issue #2044).
+    //
+    // The background sampler has been doing this once a minute, but a session
+    // that is alive right now may have moved since its last sample, and the
+    // report is about to quote a number. Cheap and idempotent: the ledger is
+    // keyed by the agent's own session id and writes overwrite, so an extra
+    // sample changes nothing except the freshness of the row.
+    try {
+      sampleAgentSessionCosts(db);
+    } catch (error) {
+      // A failed sample must not fail the report: the section it feeds is
+      // additive, and the alternative is losing the whole summary over a number.
+      logger.warn('cost-sample-failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
 
     // 1. Get messages for the date
     const dayStart = new Date(date + 'T00:00:00');
@@ -256,6 +365,31 @@ export async function generateDailySummary(
 
     if (output.length > MAX_SUMMARY_OUTPUT_LENGTH) {
       output = output.slice(0, MAX_SUMMARY_OUTPUT_LENGTH);
+    }
+
+    // 6.5. Append the agent cost section (Issue #2044).
+    //
+    // After generation and after truncation, so a long AI answer cannot push the
+    // numbers out of the report, and so the section is byte-for-byte the ledger
+    // rather than the model's recollection of it. `sampleAgentSessionCosts()`
+    // ran before generation (step 0) to catch sessions still alive then; this
+    // read includes whatever the background sampler collected earlier in the
+    // day.
+    //
+    // Wrapped, like the sample above and for the same reason: this section is
+    // *additive*. Losing a generated summary because a ledger query threw would
+    // trade the feature that exists for the one being added.
+    try {
+      const costSummary = getDailyAgentCostSummary(db, date);
+      const costSection = buildAgentCostSection(costSummary, worktreeMap);
+      if (costSection) {
+        output = `${output}\n\n${costSection}`;
+      }
+    } catch (error) {
+      logger.warn('cost-section-failed', {
+        date,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
 
     // 7. Save to database

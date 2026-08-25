@@ -30,6 +30,7 @@
     "regenerateConfirm": "この日付のレポートは既に存在します。再生成して上書きしますか？",
     "toolLabel": "ツール:",
     "modelPlaceholder": "モデル（任意）",
+    "modelPlaceholderOpencode": "provider/model（任意）",
     "generationMode": "生成モード",
     "modes": {
       "none": "指示なし",

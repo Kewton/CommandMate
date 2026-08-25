@@ -47,8 +47,26 @@ function resolveWorktree(
   return { worktree };
 }
 
-/** Normalize an untrusted request body into a ScheduleWriteInput. */
+/** A trimmed non-empty string from an untrusted body field, or undefined. */
+function optionalString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+/**
+ * Normalize an untrusted request body into a ScheduleWriteInput.
+ *
+ * Issue #2044: opencode's run options join the shape. They are only *shaped*
+ * here — `validateScheduleInput()` is what refuses them for a tool that has no
+ * such flags, and what checks their contents, so this function stays a
+ * body-to-struct mapping with no policy in it.
+ *
+ * `sanitizeContent()` is applied to `title` and not to `agent` / `variant`: a
+ * title is prose that may legitimately contain anything printable, whereas the
+ * other two are validated against a strict pattern that already excludes
+ * everything sanitizing would remove.
+ */
 function normalizeInput(body: Record<string, unknown>): ScheduleWriteInput {
+  const title = typeof body.title === 'string' ? sanitizeContent(body.title).trim() : '';
   return {
     name: typeof body.name === 'string' ? sanitizeContent(body.name).trim() : '',
     cronExpression: typeof body.cronExpression === 'string' ? body.cronExpression.trim() : '',
@@ -56,8 +74,11 @@ function normalizeInput(body: Record<string, unknown>): ScheduleWriteInput {
     cliToolId: typeof body.cliToolId === 'string' ? body.cliToolId.trim() : 'claude',
     enabled: body.enabled !== false,
     permission: typeof body.permission === 'string' ? body.permission.trim() : '',
-    model:
-      typeof body.model === 'string' && body.model.trim() ? body.model.trim() : undefined,
+    model: optionalString(body.model),
+    agent: optionalString(body.agent),
+    variant: optionalString(body.variant),
+    continueSession: body.continueSession === true ? true : undefined,
+    title: title || undefined,
   };
 }
 

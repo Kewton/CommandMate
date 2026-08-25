@@ -23,8 +23,15 @@ import { ApiClient } from '../utils/api-client';
 import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
 import { createSpinner } from '../utils/spinner';
 
-/** Allowed tool values for report generation */
-const ALLOWED_TOOLS = ['claude', 'codex', 'copilot', 'antigravity'] as const;
+/**
+ * Allowed tool values for report generation.
+ *
+ * Issue #2044: mirrors `SUMMARY_ALLOWED_TOOLS` (`src/config/review-config.ts`),
+ * which the server validates against. Duplicated rather than imported because
+ * the CLI bundle does not pull `@/config` — the cost of that is this comment,
+ * and `report-opencode-2044.test.ts` asserts the two lists still agree.
+ */
+const ALLOWED_TOOLS = ['claude', 'codex', 'copilot', 'antigravity', 'opencode'] as const;
 
 /** Validate YYYY-MM-DD date format (client-side) */
 function isValidDate(date: string): boolean {
@@ -94,8 +101,8 @@ export function createReportCommand(): Command {
     .command('generate')
     .description('Generate a daily report')
     .option('--date <date>', 'Target date (YYYY-MM-DD, default: today)')
-    .option('--tool <tool>', 'AI tool to use (claude, codex, copilot, antigravity)', 'claude')
-    .option('--model <model>', 'Model name (for copilot)')
+    .option('--tool <tool>', `AI tool to use (${ALLOWED_TOOLS.join(', ')})`, 'claude')
+    .option('--model <model>', 'Model name (copilot: --model, opencode: provider/model)')
     .option('--template <id>', 'Template ID to use as instruction')
     .option('--instruction <text>', 'Custom instruction text')
     .option('--token <token>', TOKEN_WARNING)

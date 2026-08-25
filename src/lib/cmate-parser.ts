@@ -191,6 +191,9 @@ export function parseCmateFile(content: string): CmateConfig {
  * |------|------|---------|----------|---------|
  * | daily-review | 0 9 * * * | Review code changes | claude | true |
  *
+ * Issue #2044: the CLI Tool cell may carry opencode's run options, e.g.
+ * `opencode --agent plan --variant high`. See `cmate-cli-tool-parser.ts`.
+ *
  * Entries with invalid names, cron expressions, or missing required fields
  * are silently skipped with a console.warn.
  *
@@ -301,7 +304,16 @@ export function parseSchedulesSection(rows: string[][]): ScheduleEntry[] {
       cliToolId: resolvedCliToolId,
       enabled,
       permission,
+      // Issue #2044: the opencode run options ride alongside the model. The
+      // parser copies whatever `parseAndValidateCliToolColumn()` filled and
+      // does not re-gate on the tool id — that gate lives in the column parser
+      // (TOOLS_WITH_RUN_OPTIONS), and duplicating it here is how the copilot
+      // model gate ended up in two places and drifted (#1914).
       model: parsed.model,
+      agent: parsed.agent,
+      variant: parsed.variant,
+      continueSession: parsed.continueSession,
+      title: parsed.title,
     });
   }
 

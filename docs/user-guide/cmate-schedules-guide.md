@@ -67,7 +67,7 @@ your-project/          ← worktreeルート
 | **Name** | はい | スケジュール名。1〜100文字。英数字・日本語・ハイフン・スペースが使用可能 | - |
 | **Cron** | はい | cron式（5〜6フィールド）。実行タイミングを指定 | - |
 | **Message** | はい | `claude -p`に送信するプロンプト。最大10,000文字 | - |
-| **CLI Tool** | いいえ | 使用するCLIツール（`claude` / `codex` / `gemini` / `vibe-local` / `opencode` / `copilot` / `antigravity`。正本は `src/lib/cli-tools/types.ts` の `CLI_TOOL_IDS`）。**`--model <model-name>` を書けるのは copilot と opencode のみ**で、他のツールに書くと構文エラーとして行ごとスキップされる | `claude` |
+| **CLI Tool** | いいえ | 使用するCLIツール（`claude` / `codex` / `gemini` / `vibe-local` / `opencode` / `copilot` / `antigravity`。正本は `src/lib/cli-tools/types.ts` の `CLI_TOOL_IDS`）。**`--model <model-name>` を書けるのは copilot と opencode のみ**で、他のツールに書くと構文エラーとして行ごとスキップされる。opencode だけは `--agent` / `--variant` / `--continue` / `--title` も書ける（Issue #2044） | `claude` |
 | **Enabled** | いいえ | スケジュールの有効/無効（`true` / `false`） | `true` |
 | **Permission** | いいえ | 実行時の許可レベル。下記のPermission一覧を参照 | ツール別のデフォルト値 |
 
@@ -161,15 +161,46 @@ CLI Tool 列で `opencode --model <provider/model>` と記述すると、スケ�
 値は **`provider/model` 形式**です（`opencode run --help` の `-m, --model` が
 "model to use in the format of provider/model" と明記。opencode 1.18.21 で実測）。
 CommandMate は値を**そのまま渡します** — Issue #1914 以前のコードは `ollama/` を前置していましたが、
-その分岐は到達不能で（`resolveModelOption()` が opencode に対して常に `undefined` を返していた）、
+その分岐は到達不能で（当時の `resolveModelOption()`、現在の `resolveScheduleExecuteOptions()` が
+opencode に対して常に `undefined` を返していた）、
 Ollama 以外のプロバイダを指定する手段が無く、`ollama/anthropic/…` のように二重化する形でした。
 モデル名の書式が誤っている場合、opencode 側は不透明なエラーで終了します
 （実測: 存在しない provider と裸のモデル名は同じ `UnknownError` になり区別できないため、
 CommandMate は書式を推測して拒否することはしません）。実行結果は Execution Log で確認してください。
 
-> **Note:** `commandmate report generate --tool` に opencode は含まれません
-> （`SUMMARY_ALLOWED_TOOLS` は claude / codex / copilot / antigravity）。
-> `--model` が使えるようになったのは CMATE.md のスケジュール実行だけです。
+#### opencode の run オプション（Issue #2044）
+
+CLI Tool 列は opencode に限り**フラグの並び**を受け付けます（他のツールは従来どおり
+`<tool> --model <name>` の 3 トークンのみ）。
+
+| フラグ | opencode 側 | 例 |
+|--------|-------------|-----|
+| `--model` / `-m` | `-m <provider/model>` | `--model github-copilot/claude-sonnet-4.6` |
+| `--agent` | `--agent <name>` | `--agent plan` |
+| `--variant` | `--variant <name>`（provider ごとの reasoning effort） | `--variant high` |
+| `--continue` / `-c` | `-c`（直近セッションを継続） | `--continue` |
+| `--title` | `--title <text>`（セッション名） | `--title "夜間レビュー"` |
+
+```markdown
+| nightly | 0 3 * * * | 今日の差分をレビューして | opencode --agent plan --variant high | true | |
+```
+
+- 順序は自由ですが、**同じフラグを 2 回書くとその行はスキップされます**（どちらの値か決められないため）。
+- 値を伴うフラグの直後に別のフラグが来る書き方（`--agent --title x`）もエラーです。
+- 空白を含む `--title` は `"…"` または `'…'` で囲みます。`|` は表を壊すため使えません。
+- `--agent` / `--variant` は英数字と `.` `_` `-` のみ（先頭は英数字）。`/` や `:` は使えません。
+- opencode 1.18.22 で `--agent plan --variant high --title …` がセッションに反映されることを
+  実測済みです（`docs/design/opencode-server-live-verification.md` §15.4）。
+
+> **スケジュール実行まで配線済みです（Issue #2044）**。`executeSchedule()` は
+> `resolveScheduleExecuteOptions()` 経由で CLI Tool 列の内容を解決するので、ここに書いた
+> フラグはそのまま `opencode run` の引数になります。vibe-local のモデル（worktree の Agent 設定＝DB）は
+> 従来どおり別経路で解決され、他のツールの起動引数も変わりません。
+> 経路の固定は `tests/integration/schedule-opencode-run-options-2044.test.ts`、
+> 設計上の理由は `docs/design/opencode-server-live-verification.md` §15.7 を参照してください。
+
+> **Note:** `commandmate report generate --tool` に opencode が入りました（Issue #2044）。
+> `SUMMARY_ALLOWED_TOOLS` は claude / codex / copilot / antigravity / opencode で、既定は `claude` のままです。
 
 ### vibe-local
 
@@ -240,7 +271,7 @@ CMATE.mdの内容はCommandMateが自動的にバリデーションします。
 | Name | 1〜100文字、英数字・日本語・ハイフン・スペースのみ |
 | Cron | 5〜6フィールドの有効なcron式 |
 | Message | 空でないこと。最大10,000文字 |
-| CLI Tool | `claude`、`codex`、`gemini`、`vibe-local`、`opencode`、`copilot`、`antigravity` のいずれか |
+| CLI Tool | `claude`、`codex`、`gemini`、`vibe-local`、`opencode`、`copilot`、`antigravity` のいずれか。opencode のみ `--model` / `--agent` / `--variant` / `--continue` / `--title` を後置できる |
 | Permission | ツールごとの許可値一覧に一致すること |
 
 無効なエントリは警告ログとともにスキップされます。他の有効なエントリは正常に処理されます。
