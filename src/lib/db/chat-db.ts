@@ -304,6 +304,45 @@ export function getLastUserMessage(
 }
 
 /**
+ * Fetch the message a producer wrote under this `request_id`, if any.
+ *
+ * Issue #2041: the idempotency probe for a history writer that can be asked to
+ * save the same turn twice — once from the event stream and once from the
+ * `GET /session/:id/message` backfill that runs on every reconnect. Both derive
+ * the id from the agent's own message id, so "already there" is the whole test.
+ *
+ * `ACTIVE_FILTER` is deliberately **not** applied. An archived row is still a
+ * row that was written, and skipping it here would make "kill the session"
+ * (which archives) into "re-save every turn on the next attach", which is the
+ * duplication this is for.
+ *
+ * Scoped by worktree because `request_id` is unique per producer, not globally:
+ * two worktrees talking to the same `opencode.db` see the same session, and a
+ * global lookup would let the first one to save a turn suppress it for the
+ * second.
+ *
+ * @param requestId - The producer's own id for this row
+ * @returns The row, or null when nothing has been written under it
+ */
+export function findMessageByRequestId(
+  db: Database.Database,
+  worktreeId: string,
+  requestId: string
+): ChatMessage | null {
+  const stmt = db.prepare(`
+    SELECT id, worktree_id, role, content, summary, timestamp, log_file_name, request_id, message_type, prompt_data, cli_tool_id, instance_id, archived
+    FROM chat_messages
+    WHERE worktree_id = ? AND request_id = ?
+    ORDER BY timestamp DESC
+    LIMIT 1
+  `);
+
+  const row = stmt.get(worktreeId, requestId) as ChatMessageRow | undefined;
+
+  return row ? mapChatMessage(row) : null;
+}
+
+/**
  * Fetch the most recent message for a worktree (any role).
  * Used to determine if waiting for Claude's response.
  */

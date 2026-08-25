@@ -889,6 +889,57 @@ function safeParseFrame(raw: string): OpencodeFrame | null {
   }
 }
 
+/**
+ * Cap on messages read back from one `GET /session/:id/message` (Issue #2041).
+ *
+ * Same argument as {@link MAX_OPENCODE_SESSION_STATUSES}: the document comes off
+ * a process CommandMate did not start, one server's `opencode.db` is shared by
+ * every TUI with the same HOME and project (#1758 §5.6.3), and a session that
+ * has been going for a week is not bounded by this instance's behaviour. Two
+ * messages per turn measured on 1.18.22 (one user, one or two assistant), so
+ * this is roughly 250 turns.
+ */
+export const MAX_OPENCODE_SESSION_MESSAGES = 500;
+
+/**
+ * Every message in one session, with its parts (Issue #2041).
+ *
+ * `GET /session/:id/message`. The only route to a reply CommandMate did not see
+ * arrive: a fresh subscription to `/event` replays **nothing** — measured on
+ * 1.18.22, a second SSE connection opened after three completed turns received
+ * one `server.connected` frame and then silence — so a turn that ran while this
+ * server was down exists only here.
+ *
+ * The body is an array of `{ info, parts }`. Returned raw rather than parsed
+ * because the parsing lives in `./transcript`, which has to read the *same*
+ * shape off the event stream and must not have two readers of it.
+ *
+ * Answers null for every failure, including the ordinary "nothing is listening
+ * because the pane exited" — a caller cannot act on the difference and the
+ * distinction {@link OpencodeMessageReadback} draws is not available here (a
+ * missing session is a 404 that means the same as an unreachable one for a
+ * backfill: there is nothing to recover).
+ *
+ * @param port - The instance's server
+ * @param sessionId - `ses_…`
+ * @returns The array, bounded to the newest {@link MAX_OPENCODE_SESSION_MESSAGES}, or null
+ */
+export async function fetchOpencodeSessionMessages(
+  port: number,
+  sessionId: string
+): Promise<Record<string, unknown>[] | null> {
+  const url = `${opencodeBaseUrl(port)}/session/${encodeURIComponent(sessionId)}/message`;
+  const body = await requestJson(url);
+  if (!Array.isArray(body)) return null;
+  const entries = body.filter(isPlainObject);
+  // Newest kept, and the array stays in the server's own order so `parentID`
+  // grouping still sees a turn's messages together.
+  return entries.length > MAX_OPENCODE_SESSION_MESSAGES
+    ? entries.slice(entries.length - MAX_OPENCODE_SESSION_MESSAGES)
+    : entries;
+}
+
+
 // ============================================================================
 // Context occupancy (Issue #2042). Appended at the end of the file on purpose:
 // #2041 is rewriting this module's neighbours in parallel, and everything below

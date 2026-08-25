@@ -1,0 +1,381 @@
+[
+  {
+    "info": {
+      "id": "msg_user0000000000000000001",
+      "sessionID": "ses_0000000000000000000000000",
+      "role": "user",
+      "time": {
+        "created": 1787648517229
+      },
+      "summary": {
+        "diffs": []
+      },
+      "agent": "build",
+      "model": {
+        "providerID": "github-copilot",
+        "modelID": "claude-sonnet-4.6"
+      }
+    },
+    "parts": [
+      {
+        "id": "prt_0000000000000000000000001",
+        "sessionID": "ses_0000000000000000000000000",
+        "messageID": "msg_user0000000000000000001",
+        "type": "text",
+        "text": "Reply with EXACTLY this markdown and nothing else:\n\n## Heading A\n\n- item one\n- item two\n\n**bold** and `code`\n\nDo not use any tools."
+      }
+    ]
+  },
+  {
+    "info": {
+      "id": "msg_asst0000000000000000001",
+      "sessionID": "ses_0000000000000000000000000",
+      "role": "assistant",
+      "time": {
+        "created": 1787648518532,
+        "completed": 1787648522109
+      },
+      "parentID": "msg_user0000000000000000001",
+      "modelID": "claude-sonnet-4.6",
+      "providerID": "github-copilot",
+      "mode": "build",
+      "agent": "build",
+      "path": {
+        "cwd": "<WORKTREE_PATH>",
+        "root": "<WORKTREE_PATH>"
+      },
+      "cost": 0.03225525,
+      "tokens": {
+        "total": 8533,
+        "input": 3,
+        "output": 23,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 8507
+        }
+      },
+      "finish": "stop"
+    },
+    "parts": [
+      {
+        "id": "prt_0000000000000000000000002",
+        "sessionID": "ses_0000000000000000000000000",
+        "messageID": "msg_asst0000000000000000001",
+        "type": "step-start",
+        "snapshot": "853694aae8816094a0d875fee7ea26278dbf5d0f"
+      },
+      {
+        "id": "prt_0000000000000000000000003",
+        "sessionID": "ses_0000000000000000000000000",
+        "messageID": "msg_asst0000000000000000001",
+        "type": "text",
+        "text": "## Heading A\n\n- item one\n- item two\n\n**bold** and `code`",
+        "time": {
+          "start": 1787648522036,
+          "end": 1787648522053
+        }
+      },
+      {
+        "id": "prt_0000000000000000000000004",
+        "sessionID": "ses_0000000000000000000000000",
+        "messageID": "msg_asst0000000000000000001",
+        "type": "step-finish",
+        "reason": "stop",
+        "snapshot": "853694aae8816094a0d875fee7ea26278dbf5d0f",
+        "cost": 0.03225525,
+        "tokens": {
+          "total": 8533,
+          "input": 3,
+          "output": 23,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 8507
+          }
+        }
+      }
+    ]
+  },
+  {
+    "info": {
+      "id": "msg_user0000000000000000002",
+      "sessionID": "ses_0000000000000000000000000",
+      "role": "user",
+      "time": {
+        "created": 1787648589261
+      },
+      "summary": {
+        "diffs": []
+      },
+      "agent": "build",
+      "model": {
+        "providerID": "github-copilot",
+        "modelID": "claude-sonnet-4.6"
+      }
+    },
+    "parts": [
+      {
+        "id": "prt_0000000000000000000000005",
+        "sessionID": "ses_0000000000000000000000000",
+        "messageID": "msg_user0000000000000000002",
+        "type": "text",
+        "text": "Run the bash command `echo CMATE-2041-TOOL-MARKER` and then tell me in one short sentence what it printed."
+      }
+    ]
+  },
+  {
+    "info": {
+      "id": "msg_asst0000000000000000002",
+      "sessionID": "ses_0000000000000000000000000",
+      "role": "assistant",
+      "time": {
+        "created": 1787648589267,
+        "completed": 1787648591148
+      },
+      "parentID": "msg_user0000000000000000002",
+      "modelID": "claude-sonnet-4.6",
+      "providerID": "github-copilot",
+      "mode": "build",
+      "agent": "build",
+      "path": {
+        "cwd": "<WORKTREE_PATH>",
+        "root": "<WORKTREE_PATH>"
+      },
+      "cost": 0.00373485,
+      "tokens": {
+        "total": 8631,
+        "input": 3,
+        "output": 64,
+        "reasoning": 0,
+        "cache": {
+          "read": 8507,
+          "write": 57
+        }
+      },
+      "finish": "tool-calls"
+    },
+    "parts": [
+      {
+        "id": "prt_0000000000000000000000006",
+        "sessionID": "ses_0000000000000000000000000",
+        "messageID": "msg_asst0000000000000000002",
+        "type": "step-start",
+        "snapshot": "853694aae8816094a0d875fee7ea26278dbf5d0f"
+      },
+      {
+        "id": "prt_0000000000000000000000007",
+        "sessionID": "ses_0000000000000000000000000",
+        "messageID": "msg_asst0000000000000000002",
+        "type": "tool",
+        "callID": "toolu_00000000000000000000001",
+        "tool": "bash",
+        "state": {
+          "status": "completed",
+          "input": {
+            "command": "echo CMATE-2041-TOOL-MARKER"
+          },
+          "output": "CMATE-2041-TOOL-MARKER\n",
+          "title": "echo CMATE-2041-TOOL-MARKER",
+          "metadata": {
+            "output": "CMATE-2041-TOOL-MARKER\n",
+            "exit": 0,
+            "truncated": false
+          },
+          "time": {
+            "start": 1787648591093,
+            "end": 1787648591096
+          }
+        }
+      },
+      {
+        "id": "prt_0000000000000000000000008",
+        "sessionID": "ses_0000000000000000000000000",
+        "messageID": "msg_asst0000000000000000002",
+        "type": "step-finish",
+        "reason": "tool-calls",
+        "snapshot": "853694aae8816094a0d875fee7ea26278dbf5d0f",
+        "cost": 0.00373485,
+        "tokens": {
+          "total": 8631,
+          "input": 3,
+          "output": 64,
+          "reasoning": 0,
+          "cache": {
+            "read": 8507,
+            "write": 57
+          }
+        }
+      }
+    ]
+  },
+  {
+    "info": {
+      "id": "msg_asst0000000000000000003",
+      "sessionID": "ses_0000000000000000000000000",
+      "role": "assistant",
+      "time": {
+        "created": 1787648591149,
+        "completed": 1787648592819
+      },
+      "parentID": "msg_user0000000000000000002",
+      "modelID": "claude-sonnet-4.6",
+      "providerID": "github-copilot",
+      "mode": "build",
+      "agent": "build",
+      "path": {
+        "cwd": "<WORKTREE_PATH>",
+        "root": "<WORKTREE_PATH>"
+      },
+      "cost": 0.00319845,
+      "tokens": {
+        "total": 8675,
+        "input": 1,
+        "output": 19,
+        "reasoning": 0,
+        "cache": {
+          "read": 8564,
+          "write": 91
+        }
+      },
+      "finish": "stop"
+    },
+    "parts": [
+      {
+        "id": "prt_0000000000000000000000009",
+        "sessionID": "ses_0000000000000000000000000",
+        "messageID": "msg_asst0000000000000000003",
+        "type": "step-start",
+        "snapshot": "853694aae8816094a0d875fee7ea26278dbf5d0f"
+      },
+      {
+        "id": "prt_0000000000000000000000010",
+        "sessionID": "ses_0000000000000000000000000",
+        "messageID": "msg_asst0000000000000000003",
+        "type": "text",
+        "text": "It printed `CMATE-2041-TOOL-MARKER`.",
+        "time": {
+          "start": 1787648592697,
+          "end": 1787648592768
+        }
+      },
+      {
+        "id": "prt_0000000000000000000000011",
+        "sessionID": "ses_0000000000000000000000000",
+        "messageID": "msg_asst0000000000000000003",
+        "type": "step-finish",
+        "reason": "stop",
+        "snapshot": "853694aae8816094a0d875fee7ea26278dbf5d0f",
+        "cost": 0.00319845,
+        "tokens": {
+          "total": 8675,
+          "input": 1,
+          "output": 19,
+          "reasoning": 0,
+          "cache": {
+            "read": 8564,
+            "write": 91
+          }
+        }
+      }
+    ]
+  },
+  {
+    "info": {
+      "id": "msg_user0000000000000000003",
+      "sessionID": "ses_0000000000000000000000000",
+      "role": "user",
+      "time": {
+        "created": 1787648673653
+      },
+      "summary": {
+        "diffs": []
+      },
+      "agent": "build",
+      "model": {
+        "providerID": "github-copilot",
+        "modelID": "claude-sonnet-4.6"
+      }
+    },
+    "parts": [
+      {
+        "id": "prt_0000000000000000000000012",
+        "sessionID": "ses_0000000000000000000000000",
+        "messageID": "msg_user0000000000000000003",
+        "type": "text",
+        "text": "Write ONE single paragraph of at least 400 characters on a SINGLE line with no newlines inside it, about why deterministic build outputs matter. Do not use tools. Do not use lists or headings."
+      }
+    ]
+  },
+  {
+    "info": {
+      "id": "msg_asst0000000000000000004",
+      "sessionID": "ses_0000000000000000000000000",
+      "role": "assistant",
+      "time": {
+        "created": 1787648673659,
+        "completed": 1787648679754
+      },
+      "parentID": "msg_user0000000000000000003",
+      "modelID": "claude-sonnet-4.6",
+      "providerID": "github-copilot",
+      "mode": "build",
+      "agent": "build",
+      "path": {
+        "cwd": "<WORKTREE_PATH>",
+        "root": "<WORKTREE_PATH>"
+      },
+      "cost": 0.0054555,
+      "tokens": {
+        "total": 8896,
+        "input": 3,
+        "output": 174,
+        "reasoning": 0,
+        "cache": {
+          "read": 8655,
+          "write": 64
+        }
+      },
+      "finish": "stop"
+    },
+    "parts": [
+      {
+        "id": "prt_0000000000000000000000013",
+        "sessionID": "ses_0000000000000000000000000",
+        "messageID": "msg_asst0000000000000000004",
+        "type": "step-start",
+        "snapshot": "853694aae8816094a0d875fee7ea26278dbf5d0f"
+      },
+      {
+        "id": "prt_0000000000000000000000014",
+        "sessionID": "ses_0000000000000000000000000",
+        "messageID": "msg_asst0000000000000000004",
+        "type": "text",
+        "text": "Deterministic build outputs matter because they ensure that given the same source code and build environment, the compiled artifacts are always byte-for-byte identical, which is critical for security, reproducibility, and trust in software distribution. When builds are deterministic, teams can verify that a distributed binary actually corresponds to the published source code, making it far harder for malicious actors to inject backdoors or tampered code into the build pipeline without detection. This property also simplifies debugging and auditing, since engineers can reliably reproduce a specific build state from any point in history without worrying about timestamps, random seeds, or environment-specific variables polluting the output. Reproducible builds strengthen the entire software supply chain by allowing independent third parties to verify artifacts, enabling stronger guarantees for end users who depend on the integrity of the software they run.",
+        "time": {
+          "start": 1787648675435,
+          "end": 1787648679699
+        }
+      },
+      {
+        "id": "prt_0000000000000000000000015",
+        "sessionID": "ses_0000000000000000000000000",
+        "messageID": "msg_asst0000000000000000004",
+        "type": "step-finish",
+        "reason": "stop",
+        "snapshot": "853694aae8816094a0d875fee7ea26278dbf5d0f",
+        "cost": 0.0054555,
+        "tokens": {
+          "total": 8896,
+          "input": 3,
+          "output": 174,
+          "reasoning": 0,
+          "cache": {
+            "read": 8655,
+            "write": 64
+          }
+        }
+      }
+    ]
+  }
+]
