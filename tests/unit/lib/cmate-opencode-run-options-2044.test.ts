@@ -7,15 +7,15 @@
  * → `parseSchedulesSection` → `resolveScheduleCommandOptions` → `buildCliArgs` —
  * and asserts the argv at the end of it.
  *
- * ## The one seam this suite does not cross
+ * ## What this suite does and does not prove
  *
- * `src/lib/job-executor.ts` is outside this Issue's declared scope, so
- * `executeSchedule()` still resolves its options through `resolveModelOption()`,
- * which can only express `{ model }`. The chain below is complete and the
- * options object it produces is exactly what `executeClaudeCommand()` takes;
- * what remains is swapping that one call. Read
- * `resolveScheduleCommandOptions()`'s doc comment before assuming this suite
- * proves the scheduled path end to end — it does not, deliberately, and says so.
+ * It proves the *column grammar* end of the path: text in, options out, argv
+ * out. It says nothing about whether `executeSchedule()` calls the resolver —
+ * that is `tests/integration/schedule-opencode-run-options-2044.test.ts`, which
+ * drives the scheduler entry point and asserts the argv `execFile` receives.
+ * The two are kept apart on purpose: this file would stay green if the
+ * scheduler stopped calling the resolver, which is exactly the gap #2044's
+ * first pass shipped with.
  *
  * Every flag asserted here was confirmed against opencode 1.18.22 in an isolated
  * `HOME`: after `--agent plan --variant high --title cm-2044-probe`,

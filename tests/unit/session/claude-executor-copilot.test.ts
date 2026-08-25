@@ -6,7 +6,7 @@
 import { describe, it, expect } from 'vitest';
 import { getCommandForTool, buildCliArgs, ALLOWED_CLI_TOOLS } from '@/lib/session/claude-executor';
 import { CLI_TOOL_IDS } from '@/lib/cli-tools/types';
-import { resolveModelOption } from '@/lib/job-executor';
+import { resolveScheduleExecuteOptions } from '@/lib/job-executor';
 
 describe('getCommandForTool() [SEC4-008]', () => {
   it('should return "gh" for copilot', () => {
@@ -87,38 +87,41 @@ describe('buildCliArgs copilot case', () => {
   });
 });
 
-// Issue #588: resolveModelOption tests
-describe('resolveModelOption (DR1-004)', () => {
+// Issue #588: schedule option resolution tests
+// Issue #2044: `resolveModelOption` became `resolveScheduleExecuteOptions` when it
+// grew opencode's run options. Every assertion below is unchanged — these are the
+// per-tool answers that must not move.
+describe('resolveScheduleExecuteOptions (DR1-004)', () => {
   const baseWorktree = { path: '/tmp/wt', vibe_local_model: null };
 
   it('should return model for copilot entry with model', () => {
     const entry = { name: 't', cronExpression: '* * * * *', message: 'msg', cliToolId: 'copilot', enabled: true, permission: '', model: 'gpt-4' };
-    expect(resolveModelOption(entry, baseWorktree)).toEqual({ model: 'gpt-4' });
+    expect(resolveScheduleExecuteOptions(entry, baseWorktree)).toEqual({ model: 'gpt-4' });
   });
 
   it('should return undefined for copilot entry without model', () => {
     const entry = { name: 't', cronExpression: '* * * * *', message: 'msg', cliToolId: 'copilot', enabled: true, permission: '' };
-    expect(resolveModelOption(entry, baseWorktree)).toBeUndefined();
+    expect(resolveScheduleExecuteOptions(entry, baseWorktree)).toBeUndefined();
   });
 
   it('should return vibe_local_model for vibe-local entry', () => {
     const entry = { name: 't', cronExpression: '* * * * *', message: 'msg', cliToolId: 'vibe-local', enabled: true, permission: '' };
     const worktree = { path: '/tmp/wt', vibe_local_model: 'llama3' };
-    expect(resolveModelOption(entry, worktree)).toEqual({ model: 'llama3' });
+    expect(resolveScheduleExecuteOptions(entry, worktree)).toEqual({ model: 'llama3' });
   });
 
   it('should return undefined for vibe-local without DB model', () => {
     const entry = { name: 't', cronExpression: '* * * * *', message: 'msg', cliToolId: 'vibe-local', enabled: true, permission: '' };
-    expect(resolveModelOption(entry, baseWorktree)).toBeUndefined();
+    expect(resolveScheduleExecuteOptions(entry, baseWorktree)).toBeUndefined();
   });
 
   it('should return undefined for claude entry', () => {
     const entry = { name: 't', cronExpression: '* * * * *', message: 'msg', cliToolId: 'claude', enabled: true, permission: '' };
-    expect(resolveModelOption(entry, baseWorktree)).toBeUndefined();
+    expect(resolveScheduleExecuteOptions(entry, baseWorktree)).toBeUndefined();
   });
 
   it('should return undefined for codex entry', () => {
     const entry = { name: 't', cronExpression: '* * * * *', message: 'msg', cliToolId: 'codex', enabled: true, permission: '' };
-    expect(resolveModelOption(entry, baseWorktree)).toBeUndefined();
+    expect(resolveScheduleExecuteOptions(entry, baseWorktree)).toBeUndefined();
   });
 });

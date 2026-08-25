@@ -161,7 +161,8 @@ CLI Tool 列で `opencode --model <provider/model>` と記述すると、スケ�
 値は **`provider/model` 形式**です（`opencode run --help` の `-m, --model` が
 "model to use in the format of provider/model" と明記。opencode 1.18.21 で実測）。
 CommandMate は値を**そのまま渡します** — Issue #1914 以前のコードは `ollama/` を前置していましたが、
-その分岐は到達不能で（`resolveModelOption()` が opencode に対して常に `undefined` を返していた）、
+その分岐は到達不能で（当時の `resolveModelOption()`、現在の `resolveScheduleExecuteOptions()` が
+opencode に対して常に `undefined` を返していた）、
 Ollama 以外のプロバイダを指定する手段が無く、`ollama/anthropic/…` のように二重化する形でした。
 モデル名の書式が誤っている場合、opencode 側は不透明なエラーで終了します
 （実測: 存在しない provider と裸のモデル名は同じ `UnknownError` になり区別できないため、
@@ -191,10 +192,12 @@ CLI Tool 列は opencode に限り**フラグの並び**を受け付けます（
 - opencode 1.18.22 で `--agent plan --variant high --title …` がセッションに反映されることを
   実測済みです（`docs/design/opencode-server-live-verification.md` §15.4）。
 
-> **既知の制限（Issue #2044 時点）**: これらのオプションは CMATE.md の読み書き・検証・argv 組み立てまで
-> 実装済みですが、**スケジュール実行の呼び出し側（`src/lib/job-executor.ts`）が未接続**のため、
-> 現時点でスケジュールから起動される opencode には `--model` しか渡りません。
-> 詳細と残作業は `docs/design/opencode-server-live-verification.md` §15.7 を参照してください。
+> **スケジュール実行まで配線済みです（Issue #2044）**。`executeSchedule()` は
+> `resolveScheduleExecuteOptions()` 経由で CLI Tool 列の内容を解決するので、ここに書いた
+> フラグはそのまま `opencode run` の引数になります。vibe-local のモデル（worktree の Agent 設定＝DB）は
+> 従来どおり別経路で解決され、他のツールの起動引数も変わりません。
+> 経路の固定は `tests/integration/schedule-opencode-run-options-2044.test.ts`、
+> 設計上の理由は `docs/design/opencode-server-live-verification.md` §15.7 を参照してください。
 
 > **Note:** `commandmate report generate --tool` に opencode が入りました（Issue #2044）。
 > `SUMMARY_ALLOWED_TOOLS` は claude / codex / copilot / antigravity / opencode で、既定は `claude` のままです。

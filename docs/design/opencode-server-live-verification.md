@@ -1808,28 +1808,79 @@ executor 単体でも同じことを確かめてある（`executeClaudeCommand(.
   §15.3 の数値は `GET /session` から直接取ったもので、写経ではない。
 - **スケジュール実行そのものは踏んでいない。** 理由は §15.7。
 
-### 15.7 残っている 1 行（scope 外）
+### 15.7 スケジュール実行への配線（完了）
 
-`--agent` / `--variant` / `--continue` / `--title` は、CMATE.md の読み書き・検証・`buildCliArgs()` まで
-すべて実装してあり、`resolveScheduleCommandOptions()` が
-`executeClaudeCommand()` に渡す形まで作ってある。**しかし `src/lib/job-executor.ts` は
-Issue #2044 の scope.allow に無い。** `executeSchedule()` は今も
-`resolveModelOption()`（`{ model }` しか返せない）を呼ぶので、
-**スケジュール経由の `opencode --agent plan` は現時点ではモデルだけで起動する。**
+> **この節は 2 回書かれている。** 初回の #2044 では `src/lib/job-executor.ts` が scope.allow に
+> 無く、`executeSchedule()` が `resolveModelOption()`（`{ model }` しか返せない）を呼び続けたため、
+> **CMATE.md に書いた `--agent` / `--variant` / `--continue` / `--title` が実行に届いていなかった**。
+> 後続の契約で当該ファイルが scope に入り、配線した。以下が現在の姿である。
 
-残作業は `job-executor.ts` の 1 行:
+`job-executor.ts` の `resolveModelOption()` を **`resolveScheduleExecuteOptions()` に改名**し、
+CMATE.md 側の規則を `resolveScheduleCommandOptions()`（`cmate-cli-tool-parser.ts`）へ委譲した:
 
 ```ts
-// const options = resolveModelOption(state.entry, worktree);
-const options = resolveScheduleCommandOptions(state.entry)
-  ?? (state.entry.cliToolId === 'vibe-local' && worktree.vibe_local_model
-        ? { model: worktree.vibe_local_model } : undefined);
+export function resolveScheduleExecuteOptions(
+  entry: ScheduleEntry,
+  worktree: WorktreeRow
+): ExecuteCommandOptions | undefined {
+  const fromCmate = resolveScheduleCommandOptions(entry);
+  if (fromCmate) return fromCmate;
+
+  if (entry.cliToolId === 'vibe-local' && worktree.vibe_local_model) {
+    return { model: worktree.vibe_local_model };
+  }
+  return undefined;
+}
 ```
 
-`resolveScheduleCommandOptions()` は vibe-local の DB 由来モデルを扱わない（CMATE.md しか見ない）ので、
-その分岐は `resolveModelOption()` 側に残すか、上のように呼び出し側で足す。
-`tests/unit/lib/cmate-opencode-run-options-2044.test.ts` は
-**この 1 行の手前まで**を検証している。テストが緑であることを「スケジュールで効く」と読まないこと。
+- **委譲であって再実装ではない。** 旧実装は `if (entry.model && TOOLS_WITH_MODEL_SUPPORT.has(...))`
+  を**この層に書き写して**いた。1 オプションしか表現できない形だったため #2044 の 4 フラグが落ちた。
+  列の文法はパーサの担当で、呼び出し側がその一部でも言い直せば必ずずれる（#1914 が
+  `cliToolId === 'copilot'` のハードコードで踏んだのと同じ穴を、1 フィールド後ろで踏んだ）。
+- **vibe-local の DB 由来モデルは維持。** そのモデルは worktree row にあり CMATE.md には無いので、
+  この分岐は `resolveScheduleExecuteOptions()` 側に残っている。
+  `resolveScheduleCommandOptions()` は vibe-local に対して常に `undefined` を返す（どちらの Set にも
+  入っていない）ので、2 つの源は実際には交わらない。順序（CMATE.md が先）は旧実装のまま。
+- **改名は装飾ではない。** `{ model }` しか返せなかった頃は「model option」で正しかった。
+  agent やセッションタイトルまで運ぶ関数には、読み手が信用できる名前が要る。
+
+#### 検証
+
+受入条件「CMATE.md に `opencode --agent plan --variant high` を書いたスケジュールが該当引数で起動する」は
+**`executeSchedule()` の入口から** `child_process.execFile` が受け取る argv までを
+`tests/integration/schedule-opencode-run-options-2044.test.ts` が固定している
+（差し替えているのは `child_process` と DB だけで、`resolveScheduleExecuteOptions` /
+`resolveScheduleCommandOptions` / `executeClaudeCommand` / `buildCliArgs` はすべて本物）:
+
+```text
+command: 'opencode'
+argv:    ['run','--format','json','--agent','plan','--variant','high',"Review today's diff"]
+```
+
+同ファイルは claude / codex / gemini / copilot / antigravity / vibe-local の argv を**リテラルの表**で
+固定している（導出した期待値は、固定したいコードと一緒に動いてしまう）。
+
+**空振りでないことは変異注入で確認した**（2 回とも実施後に復元済み）:
+
+| 変異 | 結果 |
+|------|------|
+| `resolveScheduleExecuteOptions()` が `{ model }` だけを返すよう縮退 | 9 件が赤 |
+| `executeSchedule()` の呼び出しを削除（＝初回 #2044 が出荷した姿） | **integration の 5 件だけが赤**、unit 2 本は緑のまま |
+
+2 つ目が要点で、**パーサ単体のテストはこの欠陥を検出できない**（両端を検証しても、その間の線については
+何も言っていない）。だから scheduler 入口からの integration テストを別に置いてある。
+
+#### §15.6 の「スケジュール実行そのものは踏んでいない」について
+
+その項目は**今も有効**である。ここで固定したのは `execFile` が受け取る argv であって、
+`croner` が実際に発火して実機の `opencode` が起動するところまでは踏んでいない
+（`child_process` を差し替えている）。実機で確かめてあるのは §15.4 の
+「その argv を渡すと `Session.agent` / `Session.model.variant` / `Session.title` がそう変わる」側で、
+両者を合わせると経路全体が実測とテストで挟まれている、という状態である。
+§15.6 の当該行が指す「理由」は本節の変異注入の結果に置き換わったと読んでほしい。
+
+このほか本節が変えたファイルは `src/lib/job-executor.ts` の 1 関数（改名＋委譲）と
+その呼び出し 1 行だけで、`src/lib/cmate-cli-tool-parser.ts` は docblock のみ更新した。
 
 ### 15.8 この節が変えたもの
 

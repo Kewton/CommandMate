@@ -58,12 +58,13 @@ export interface ParsedCliToolColumn extends OpencodeRunOptions {
  *
  * `claude-executor.ts` has carried an `opencode run -m <model>` branch since
  * Issue #379, and it had never once executed: the only caller that supplies a
- * model for a schedule is `job-executor.resolveModelOption()`, which answered
+ * model for a schedule is job-executor's option resolver, which answered
  * `undefined` for every tool but copilot and vibe-local, and the other reachable
  * caller (`daily-summary-generator`) is gated by `SUMMARY_ALLOWED_TOOLS`, which
  * has no opencode either. Adding the id here is one half of making that branch
- * reachable; `resolveModelOption()` reads this Set for the other half, so the
- * two cannot drift apart again.
+ * reachable; the resolver reads this Set for the other half (through
+ * {@link resolveScheduleCommandOptions} since #2044), so the two cannot drift
+ * apart again.
  *
  * The value is passed through **verbatim** as `provider/model`, which is the
  * format `opencode run --help` documents for `-m, --model` (measured on
@@ -519,25 +520,25 @@ export function parseAndValidateCliToolColumn(
 /**
  * Turn a parsed CMATE.md row into the options `executeClaudeCommand()` takes.
  *
- * This is the successor to `job-executor.resolveModelOption()`, which can only
- * express `{ model }` and therefore drops `--agent` / `--variant` / `-c` /
- * `--title` on the floor. It reads {@link TOOLS_WITH_MODEL_SUPPORT} for the
- * model, exactly as its predecessor does, so the two agree about which tools
- * take a model; the run options are additionally gated on
- * {@link TOOLS_WITH_RUN_OPTIONS} so a future tool cannot inherit opencode's
- * flags by accident.
+ * This is what `job-executor.resolveScheduleExecuteOptions()` delegates the
+ * CMATE.md half of its job to, and it replaced an inlined
+ * `if (entry.model && TOOLS_WITH_MODEL_SUPPORT.has(…)) return { model }` at that
+ * call site — a shape that can express exactly one option and therefore dropped
+ * `--agent` / `--variant` / `-c` / `--title` on the floor. It reads
+ * {@link TOOLS_WITH_MODEL_SUPPORT} for the model, exactly as that line did, so
+ * the two agree about which tools take one; the run options are additionally
+ * gated on {@link TOOLS_WITH_RUN_OPTIONS} so a future tool cannot inherit
+ * opencode's flags by accident.
  *
- * **Not yet wired at the schedule call site.** `src/lib/job-executor.ts` is
- * outside Issue #2044's declared scope, so `executeSchedule()` still calls
- * `resolveModelOption()` and a scheduled `opencode --agent plan` currently runs
- * with the model only. Replacing that one call with this function is the whole
- * of the remaining change; every layer on both sides of it — parser, validator,
- * writer, `buildCliArgs()` — is complete and covered by
- * `tests/unit/lib/cmate-opencode-run-options-2044.test.ts`.
+ * Living here rather than in `job-executor.ts` is the point: the column's
+ * grammar is this module's business, and a scheduler that re-states any part of
+ * it is a second copy that will drift — which is precisely what #1914 found
+ * (`cliToolId === 'copilot'` hard-coded next to the parser's Set) and what
+ * #2044 found one field later.
  *
  * `vibe-local` is deliberately absent: its model lives in the worktree row
- * rather than in CMATE.md, so it stays `resolveModelOption()`'s business until
- * that function delegates here.
+ * rather than in CMATE.md, so `resolveScheduleExecuteOptions()` keeps that
+ * branch and this function answers `undefined` for it.
  *
  * @param entry - Parsed schedule entry from CMATE.md
  * @returns Options to pass to `executeClaudeCommand`, or undefined when the row

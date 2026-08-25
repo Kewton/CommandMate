@@ -77,7 +77,7 @@ export function getCommandForTool(cliToolId: string): string {
  * Issue #2044: extends {@link OpencodeRunOptions} rather than redeclaring
  * `model`, so the CMATE.md parse result and the executor argument are the same
  * five fields by construction. Every one of them is optional, which is what
- * keeps `resolveModelOption()`'s `{ model }` literal assignable.
+ * keeps `job-executor`'s vibe-local `{ model }` literal assignable.
  */
 export interface ExecuteCommandOptions extends OpencodeRunOptions {
   /** Execution timeout in milliseconds (default: EXECUTION_TIMEOUT_MS) */
