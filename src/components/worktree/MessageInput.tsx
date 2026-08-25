@@ -13,6 +13,7 @@ import { Kbd } from '@/components/ui/Kbd';
 import { Button, Spinner } from '@/components/ui';
 import { SlashCommandSelector } from './SlashCommandSelector';
 import { InterruptButton } from './InterruptButton';
+import { OpencodeSessionControls } from './OpencodeSessionControls';
 import { useSlashCommands } from '@/hooks/useSlashCommands';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { useImageAttachment } from '@/hooks/useImageAttachment';
@@ -535,6 +536,14 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
                 </svg>
               )}
             </Button>
+            {/* Issue #2038: opencode-only session operations (new / list / fork).
+                Renders nothing for every other tool — see OpencodeSessionControls. */}
+            <OpencodeSessionControls
+              worktreeId={worktreeId}
+              cliToolId={cliToolId || 'claude'}
+              instanceId={instanceId}
+              disabled={!isSessionRunning}
+            />
             <InterruptButton
               worktreeId={worktreeId}
               cliToolId={cliToolId || 'claude'}
@@ -586,6 +595,17 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
             className="flex-1 outline-none bg-transparent resize-none overflow-y-auto scrollbar-thin"
             style={{ minHeight: '36px', maxHeight: '160px', paddingTop: '8px', paddingBottom: '8px', lineHeight: '20px' }}
           />
+
+          {/* Desktop: opencode session controls (Issue #2038) — renders nothing
+              for every other tool, see OpencodeSessionControls */}
+          {!isMobile && (
+            <OpencodeSessionControls
+              worktreeId={worktreeId}
+              cliToolId={cliToolId || 'claude'}
+              instanceId={instanceId}
+              disabled={!isSessionRunning}
+            />
+          )}
 
           {/* Desktop: Interrupt Button */}
           {!isMobile && (

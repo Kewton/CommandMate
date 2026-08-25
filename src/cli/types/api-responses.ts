@@ -110,6 +110,33 @@ export interface AgentInstance {
   order: number;
 }
 
+/**
+ * Mirrors: src/app/api/worktrees/[id]/opencode/session/route.ts GET response
+ * (Issue #2038).
+ *
+ * opencode-only. Every field is nullable because the interesting case is a
+ * **stopped** instance: the session id there is what the next launch will pass
+ * to `opencode -s <id>`, and nothing is running to describe it.
+ */
+export interface OpencodeInstanceSession {
+  instanceId: string;
+  /** opencode's `Session.id`, or null when nothing has been recorded yet. */
+  sessionId: string | null;
+  /** opencode's `Session.title`, or null. Display only. */
+  title: string | null;
+  /** The directory opencode reported the session belongs to, or null. */
+  worktreePath: string | null;
+  /** Epoch ms the memory was written, or null. */
+  updatedAt: number | null;
+  /** Whether an opencode server is currently attached to this instance. */
+  live: boolean;
+}
+
+/** Mirrors: the same route's GET body (Issue #2038). */
+export interface OpencodeSessionsResponse {
+  instances: OpencodeInstanceSession[];
+}
+
 // Mirrors: src/app/api/worktrees/[id]/route.ts GET response shape (subset used
 // by the CLI `instances` command; omits gitStatus/session fields not needed here)
 export interface WorktreeDetailResponse extends WorktreeItem {

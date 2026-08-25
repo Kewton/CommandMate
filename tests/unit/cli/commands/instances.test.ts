@@ -60,9 +60,12 @@ describe('instances command: list (default action)', () => {
 
     const output = JSON.parse(mockConsoleLog.mock.calls[0][0]);
     expect(output).toEqual([
-      // model / reasoningEffort added by Issue #1785; this stub server sends
-      // neither, which the command reports as null. Their behaviour is pinned in
-      // instances-model-1785.test.ts.
+      // model / reasoningEffort added by Issue #1785; sessionId / sessionTitle
+      // by Issue #2038. This stub server sends none of them, which the command
+      // reports as null — and the session fields are null for every non-opencode
+      // instance by construction, because no other agent's launch command names
+      // a conversation. Their behaviour is pinned in instances-model-1785.test.ts
+      // and instances-opencode-session-2038.test.ts.
       {
         instanceId: 'claude',
         alias: 'Claude',
@@ -71,6 +74,8 @@ describe('instances command: list (default action)', () => {
         autoYes: true,
         model: null,
         reasoningEffort: null,
+        sessionId: null,
+        sessionTitle: null,
       },
     ]);
   });
