@@ -877,7 +877,8 @@
     "statusPill": "{label}: {status}",
     "subTabMessage": "メッセージ",
     "subTabGit": "Git",
-    "statusPillWithModel": "{label}: {status} — モデル {model}"
+    "statusPillWithModel": "{label}: {status} — モデル {model}",
+    "statusPillWithUsage": "{base} — {usage}"
   },
   "detailStatus": {
     "idle": "アイドル - セッションなし",
@@ -1022,5 +1023,15 @@
       "tooLarge": "このファイルは大きすぎるため、ここでは編集できません。",
       "tooManyEntries": "このファイルは変数が多すぎるため、ここでは編集できません。"
     }
+  },
+  "agentSession": {
+    "context": "{tokens}（{percent}%）",
+    "chipLabel": "セッション使用量 — {usage}",
+    "titleLabel": "セッション: {title}",
+    "agentLabel": "エージェント: {agent}",
+    "costLabel": "現在までのコスト: {cost}",
+    "spentLabel": "このセッションの消費: {tokens} トークン",
+    "contextLabel": "コンテキスト使用量: {limit} トークン中 {tokens} トークン（{percent}%）",
+    "contextUnknownLabel": "コンテキスト使用量: {tokens} トークン（上限不明）"
   }
 }

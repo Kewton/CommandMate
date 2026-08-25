@@ -126,3 +126,28 @@
 ```bash
 for f in tests/fixtures/hooks/opencode/*.json; do python3 -m json.tool "$f" > /dev/null || echo "NG: $f"; done
 ```
+
+---
+
+## コンテキスト使用率（Issue #2042 / opencode 1.18.22 / 2026-08-25）
+
+SSE ではなく **REST の応答**を 2 本追加した。`GET /event` のフレームではないので、
+上の envelope 規約（`{id,type,properties}`）は当てはまらない。
+
+| ファイル | 採取元 | 何のため |
+|---|---|---|
+| [`session-message-window-2042.json`](./session-message-window-2042.json) | `GET /session/<id>/message?limit=4` | 「いまコンテキストに何トークン載っているか」の一次情報 |
+| [`config-providers-2042.json`](./config-providers-2042.json) | `GET /config/providers` | モデルの context 上限（`limit.context`） |
+
+**この 2 本が必要な理由**は `session.updated` の `tokens` では足りないからである。
+`Session.tokens` は**セッション累計**（2 ターン後に `input 6 / output 11 / cache.read 8482 / cache.write 8500`）で、
+これは `opencode stats` が印字する値と一致する。いっぽう opencode 自身のフッタが出す `8.5K (1%)` は
+**直近の assistant メッセージ 1 通**の合計（8,508）であって別の量である。詳細と一次証拠は
+[設計書 §14](../../../../docs/design/opencode-server-live-verification.md) を参照。
+
+`config-providers-2042.json` は `github-copilot/claude-sonnet-4.6` 1 モデルだけに間引いてある
+（実応答は 4 provider・42,968 bytes）。`limit.context` = 1,000,000 と `limit.input` = 936,000 は
+**両方とも実値**で、分母がどちらなのかを取り違えないために両方残している。
+
+`session-message-window-2042.json` は 2 ターン分（user / assistant × 2）をそのまま収録した。
+1 通目の assistant が `total 8491`、2 通目が `total 8508` で、後者が「直近」である。

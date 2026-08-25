@@ -1774,3 +1774,192 @@ $ curl -sS http://127.0.0.1:4881/session/status
 - `src/lib/db/chat-db.ts` — `findMessageByRequestId()`（冪等性の判定。**migration は追加していない**）
 - `src/types/agent-transcript.ts`（新規）— `request_id` に載せる provenance マーカーと turn key
 - `src/components/worktree/ConversationPairCard.tsx` — 当該行だけ Markdown 描画（`rehype-raw` は使わない）
+
+## 14. Issue 2042: コンテキスト使用率とコスト（opencode 1.18.22 / 2026-08-25）
+
+§4 のハーネスをそのまま再実行して取った追加計測。目的は 1 つだけ。
+
+**#2042** — ヘッダに出す `cost · N tokens (x%)` の **x% の算出方法を決める**。
+Issue 本文は「footer の `6.4K (1%)` と突き合わせて算出方法を決める（モデルの context 上限は
+`GET /config/providers` から）」としか書いていない。
+
+> **結論を先に**: `#2040` が publish している `structuredEvents.session.tokens` **からは x% を出せない**。
+> `Session.tokens` は**セッション累計**で、footer の `(1%)` は**直近の assistant メッセージ 1 通**が
+> 母数である。合計してしまうと opencode 自身が `1%` と出しているところで `2%` と表示し、
+> ターンを重ねるほど乖離が開く。
+
+### 14.1 隔離の確認（先に撃つ）
+
+```bash
+curl -sS http://127.0.0.1:4942/path
+# home      …/scratchpad/oc2042/home
+# state     …/scratchpad/oc2042/home/.local/state/opencode
+# config    …/scratchpad/oc2042/home/.config/opencode
+# worktree  …/scratchpad/oc2042/work
+# directory …/scratchpad/oc2042/work
+curl -sS http://127.0.0.1:4942/global/health   # {"healthy":true,"version":"1.18.22"}
+```
+
+5 つとも scratchpad 配下。TUI は `tmux -L cmate-2042-oc` の専用 socket 上でだけ動かし、後始末は
+`kill-session -t '=oc2042:'`（`kill-server` は使っていない）。model は config で
+`github-copilot/claude-sonnet-4.6` に固定し、**model picker は一度も開いていない**。
+検証後、複製した `auth.json` は削除済み。ユーザ実データ（`~/.local/share/opencode/opencode.db` は
+`8月 25 14:16`、`auth.json` は `3月 6 09:23`、`~/.config/opencode/opencode.jsonc` は `7月 19 23:54`）の
+mtime はいずれも**検証開始（18:02）より前のまま**。
+
+### 14.2 算出式は一次ソースから取った（推測していない）
+
+opencode の TUI は Go ではなく JS で、**バイナリに bundle がそのまま入っている**。
+`strings` で当該コンポーネントを引くと式が読める。
+
+```bash
+strings -n 6 ~/.opencode/bin/opencode | grep -o '.\{700\}% used'
+```
+
+```js
+const J = N1(() => Q()?.cost ?? 0)                      // ← Session.cost（累計）
+const Y = N1(() => {
+  const W = X().findLast((K) => K.role === "assistant" && K.tokens.output > 0)
+  if (!W) return { tokens: 0, percent: null }
+  const H = W.tokens.input + W.tokens.output + W.tokens.reasoning
+          + W.tokens.cache.read + W.tokens.cache.write
+  const q = B.api.state.provider.find((K) => K.id === W.providerID)?.models[W.modelID]
+  return { tokens: H, percent: q?.limit.context ? Math.round(H / q.limit.context * 100) : null }
+})
+// …<b>Context</b> {H} tokens / {percent}% used / {MD0.format(J)} spent
+// MD0 = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" })
+```
+
+読み取れることが 4 つあり、**どれも実測なしには当てられない**。
+
+| 決めるべきこと | opencode の答え | 間違えやすい候補 |
+|---|---|---|
+| 母数（分子） | **直近の assistant メッセージ**の 5 項目の和 | `Session.tokens` の和（＝累計） |
+| 分母 | `model.limit.context` | `model.limit.input`（同じ document に載っている） |
+| 丸め | `Math.round` | `Math.ceil` |
+| cost の出所 | `Session.cost`（累計）、USD 2 桁 | 直近メッセージの cost |
+
+`findLast` の `tokens.output > 0` 条件は、**ターン開始直後の assistant メッセージ**（カウントが全部 0）を
+飛ばすためのもの。これを落とすと、ターンが始まるたびに実測値の上に `0 (0%)` が一瞬かぶる。
+
+### 14.3 実測（2 ターン）— 累計と「いま載っている量」は別物
+
+`Reply with exactly one word: PONG` → `Now reply with exactly one word: PING` の 2 ターンを
+TUI から流し、`GET /event` の SSE tap と TUI の capture-pane を突き合わせた。
+
+| | ターン 1 後 | ターン 2 後 |
+|---|---|---|
+| `session.updated` の `tokens` | `input 3 / output 6 / reasoning 0 / cache.read 0 / cache.write 8482` | `input 6 / output 11 / reasoning 0 / cache.read 8482 / cache.write 8500` |
+| 上の和 | 8,491 | **16,999** |
+| `session.updated` の `cost` | 0.0319065 | 0.0346026 |
+| assistant `message.updated` の `tokens.total` | 8,491 | **8,508** |
+| TUI サイドパネル | `8,491 tokens` / `1% used` / `$0.03 spent` | `8,508 tokens` / `1% used` / `$0.03 spent` |
+| TUI フッタ | — | `8.5K (1%) · $0.…` |
+
+**`Session.tokens` は累計である。** ターン 2 の `input` が `3+3=6`、`output` が `6+5=11`、
+`cache.write` が `8482+18=8500` になっている。いっぽう TUI が出すのは 8,508 ＝ **ターン 2 の
+assistant メッセージ 1 通**の total であって、16,999 ではない。
+
+`opencode stats` は**累計のほう**を印字する:
+
+```
+Input 6 / Output 11 / Cache Read 8.5K / Cache Write 8.5K
+Avg Tokens/Session 17.0K        ← 16,999
+Total Cost $0.03                ← 0.0346026
+```
+
+つまり **Issue #2042 の受入条件 2 本は別々の数を指している**:
+
+- 「`opencode stats --project <path>` の値と一致する」→ **累計**（`session.tokens` の和 16,999 / `cost` 0.0346026）
+- 「footer の `6.4K (1%)` と突き合わせ」→ **直近ターンのフットプリント**（8,508 / 1%）
+
+両方出す。ただし**同じ行に混ぜない**。chip は footer と同じ 3 値（`$0.03 · 8.5K (1%)`）、
+累計は tooltip に `Spent this session: 16,999 tokens` として別の言葉で置く。
+
+### 14.4 上限の取り方 — `limit.context` であって `limit.input` ではない
+
+```bash
+curl -sS http://127.0.0.1:4942/config/providers | jq '.providers[]|select(.id=="github-copilot")|.models["claude-sonnet-4.6"].limit'
+# { "context": 1000000, "input": 936000, "output": 64000 }
+```
+
+`limit.input` は `limit.context - limit.output` にちょうど一致する（1,000,000 − 64,000 = 936,000）。
+**実測 1 点では判別できない**: 8,508 / 1,000,000 = 0.85% も 8,508 / 936,000 = 0.91% も、
+`Math.round` すればどちらも `1%` になる。判別には 44,000 トークン規模のセッションを回すか、
+14.2 の bundle を読むかのどちらかが要る。**後者を採った。**
+
+shape は `{ providers: [{ id, models: { <modelID>: { limit: { context } } } }] }`。
+`models` は配列ではなく**オブジェクト**。
+
+### 14.5 直近ターンのトークン数の取り方
+
+`GET /session/{sessionID}/message?limit=N` は **末尾 N 件**を時系列順で返す（実測）。
+
+```bash
+curl -sS "http://127.0.0.1:4942/session/$SID/message?limit=1"   # 1,510 bytes、最後の 1 件だけ
+curl -sS "http://127.0.0.1:4942/session/$SID/message?limit=3"   # 3,468 bytes、末尾 3 件
+```
+
+各要素は `{ info, parts }` で、カウントは `info.tokens` にある。`limit=4`（＝ user/assistant 2 往復）を
+採った理由は 2 つ: ターン進行中で最新 assistant が `output === 0` のとき 1 つ前の完了ターンに
+落とせること、そして会話全体を毎回引かずに済むこと。
+
+`info.tokens.total` は opencode 自身の 5 項目の和で、実測 2 通とも 5 項目の和と一致した（8,491 / 8,508）。
+**CommandMate は `total` を読まず 5 項目を足している**: `total` はターンが終わるまで現れないので
+「進行中は null、終わったら数字」という揺れを避けるため。
+
+**`GET /api/session/{sessionID}/context`（v2）は使えない。** 説明は
+"Retrieve the active context messages for a session (all messages after the last compaction)" だが、
+実測では 2 ターン走ったセッションに対して `{"data":[]}` を返した（§5.2.2 の v2 全般の不調と同じ傾向）。
+
+### 14.6 CommandMate 側の実装（#2042 で入れたもの）
+
+- `src/lib/hooks/sources/opencode/client.ts`（末尾に追記のみ）
+  - `fetchOpencodeModelContextLimit(port, providerId, modelId)` — 14.4
+  - `fetchOpencodeContextTokens(port, sessionId)` — 14.5。opencode 自身の `findLast` 条件をそのまま実装
+- `src/lib/hooks/agent-session-telemetry.ts` — `AgentSessionContextUsage` と、
+  `ensureAgentSessionContextUsage()`（**cache 読みだけで await しない**／stale 判定は `record.at`）。
+  `#2040` の `AgentSessionRecord` は 1 バイトも変えていない（verbatim のまま。`tokens.total` も null のまま）
+- `src/lib/session/current-output-builder.ts` — `structuredEvents.sessionContext` として publish
+- `src/cli/types/api-responses.ts` — CLI 側ミラー
+- UI — pane header に `agent · model` と `$0.03 · 8.5K (1%)` の 2 chip、
+  desktop header の instance pill は **tooltip のみ**（`MAX_HEADER_AGENT_PILLS` の幅予算を動かさないため）
+
+refresh が 1 ターンに 1 回で済むのは、stale 判定を時計ではなく `record.at` にしているから。
+`session.updated` は 1 ターンに数フレームしか来ないので、誰も喋っていないセッションは 1 リクエストも出さない。
+
+### 14.7 実測で確認したもの / していないもの
+
+**したもの**（すべて隔離ハーネス上の 1.18.22 実機）:
+
+- `GET /path` の 5 パスが scratchpad 配下であること
+- `session.updated` / `message.updated` の tokens・cost（2 ターン分、SSE tap の JSONL）
+- TUI サイドパネルとフッタの表示（`capture-pane`）
+- `opencode stats --models` の出力
+- `GET /config/providers` の `limit` 3 値
+- `GET /session/:id/message?limit=1|2|3|4` の件数と順序
+- `GET /api/session/:id/context` が空配列を返すこと
+- 実装した `fetchOpencodeContextTokens` / `fetchOpencodeModelContextLimit` を**動いているサーバに撃って**
+  `{tokens: 8508, limit: 1000000, percent: 1}` を得たこと
+- `ports → client → cache → percent` のサーバ側一連を実機に対して通し、
+  1 回目の poll が `null`（＝ await していない）、2 回目が上記の値になること
+
+**していないもの**（推測で埋めていない）:
+
+- **CommandMate の Web UI 実画面での目視**。dev サーバ＋実 worktree＋tmux を立てての UAT は行っていない。
+  chip の文字列はユニットテストで実辞書に対して固定してあるが、「画面で見た」証拠ではない。
+- **claude / codex で `session.updated` 相当が出ないことの再確認**。#2040 の測定に依拠している。
+- **コンテキストが実際に大きいセッション**（44K トークン超）での百分率。14.4 のとおり分母は bundle から
+  確定させたので不要と判断したが、`Math.round` の境界（0.5% 付近）は実データでは踏んでいない。
+- **`limit.context` を持たないモデル**の実例。`percent: null` の経路はフィクスチャでしか通していない。
+
+### 14.8 この節が変えたもの
+
+- `src/lib/hooks/sources/opencode/client.ts` — 末尾に 2 関数（既存 export は不変）
+- `src/lib/hooks/agent-session-telemetry.ts` — 派生レコードとその cache
+- `src/lib/session/current-output-builder.ts` — `structuredEvents.sessionContext`
+- `src/cli/types/api-responses.ts` — ミラー
+- `src/types/agent-session.ts`（新規）— ブラウザ側の型と `sumAgentSessionTokens()`
+- `src/components/worktree/*` / `src/hooks/useTerminalPanePolling.ts` — 表示
+- `locales/{en,ja}/worktree.json` — `agentSession.*` と `detail.statusPillWithUsage`
+- `tests/fixtures/hooks/opencode/{config-providers,session-message-window}-2042.json`（新規）— 14.4 / 14.5 の実応答

@@ -938,3 +938,124 @@ export async function fetchOpencodeSessionMessages(
     ? entries.slice(entries.length - MAX_OPENCODE_SESSION_MESSAGES)
     : entries;
 }
+
+
+// ============================================================================
+// Context occupancy (Issue #2042). Appended at the end of the file on purpose:
+// #2041 is rewriting this module's neighbours in parallel, and everything below
+// is additive — no export above it is touched.
+// ============================================================================
+
+/**
+ * How many trailing messages are read back to find the last assistant turn.
+ *
+ * `GET /session/:id/message?limit=N` answers the **last** N messages in
+ * chronological order — measured on 1.18.22, see
+ * `docs/design/opencode-server-live-verification.md` §14.3. Four is two
+ * user/assistant pairs: enough that a turn still streaming (its assistant
+ * message exists but has `output === 0`) falls back to the previous completed
+ * one, and small enough that the read stays a few KB rather than the whole
+ * conversation. A session whose last four messages contain no finished
+ * assistant turn answers null, which is the honest answer — it has not spent a
+ * turn yet.
+ */
+export const OPENCODE_CONTEXT_MESSAGE_WINDOW = 4;
+
+/**
+ * What one model declares it can hold, as `GET /config/providers` states it.
+ *
+ * Only `context` is read. `limit.input` is also published and is **not** the
+ * denominator: on `github-copilot/claude-sonnet-4.6` it is 936,000 against a
+ * `context` of 1,000,000, and opencode's own readout divides by `context`
+ * (§14.2 quotes the 1.18.22 bundle).
+ */
+export async function fetchOpencodeModelContextLimit(
+  port: number,
+  providerId: string,
+  modelId: string
+): Promise<number | null> {
+  const body = await requestJson(`${opencodeBaseUrl(port)}/config/providers`);
+  if (!isPlainObject(body)) return null;
+  const providers = Array.isArray(body.providers) ? body.providers : [];
+  for (const provider of providers) {
+    if (!isPlainObject(provider) || provider.id !== providerId) continue;
+    const models = isPlainObject(provider.models) ? provider.models : null;
+    if (!models) return null;
+    const model = models[modelId];
+    if (!isPlainObject(model)) return null;
+    const limit = isPlainObject(model.limit) ? model.limit : null;
+    if (!limit) return null;
+    const context = limit.context;
+    // A zero or a negative would divide into a percentage nobody can read, and
+    // opencode itself treats a falsy `limit.context` as "no percentage".
+    if (typeof context !== 'number' || !Number.isFinite(context) || context <= 0) return null;
+    return context;
+  }
+  return null;
+}
+
+/** A finite, non-negative token count, or 0 — the shape `tokens.*` arrives in. */
+function readTokenCount(source: Record<string, unknown>, key: string): number {
+  const value = source[key];
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+/**
+ * How full this session's context is, in tokens (Issue #2042).
+ *
+ * **This is not `Session.tokens` and the difference is the whole point.**
+ * `session.updated` reports a *cumulative* count — after two turns the measured
+ * session read `input 6 / output 11 / cache.read 8482 / cache.write 8500`, which
+ * is what `opencode stats` prints and what `AgentSessionRecord` carries.
+ * What opencode's own TUI shows as `8.5K (1%)` is a different quantity: the
+ * token footprint of the **last assistant message**, which is what the next
+ * request actually has to fit into a context window. Summing the session's
+ * counts would have said 16,999 where opencode says 8,508, and the gap widens
+ * with every turn (§14.2).
+ *
+ * The rule is opencode's own, transcribed from the 1.18.22 bundle rather than
+ * inferred: take the last message with `role === 'assistant'` **and**
+ * `tokens.output > 0`, and add `input + output + reasoning + cache.read +
+ * cache.write`. The `output > 0` clause is what skips the assistant message a
+ * turn opens with, whose counts are all zero until the turn finishes.
+ *
+ * `tokens.total` on that message is opencode's own sum of exactly those five
+ * and was measured equal to it (8491, then 8508) — it is not read here because
+ * it is absent until the turn completes, and the five are the definition.
+ *
+ * @param port - The instance's server
+ * @param sessionId - `ses_…`
+ * @returns The occupancy in tokens, or null when no finished assistant turn is
+ *   in the window (a fresh session, or one whose last four messages are all
+ *   user prompts) and on every transport failure
+ */
+export async function fetchOpencodeContextTokens(
+  port: number,
+  sessionId: string
+): Promise<number | null> {
+  const url =
+    `${opencodeBaseUrl(port)}/session/${encodeURIComponent(sessionId)}/message` +
+    `?limit=${OPENCODE_CONTEXT_MESSAGE_WINDOW}`;
+  const body = await requestJson(url);
+  if (!Array.isArray(body)) return null;
+  for (let index = body.length - 1; index >= 0; index -= 1) {
+    const entry = body[index];
+    if (!isPlainObject(entry)) continue;
+    // `{ info, parts }`; only `info` carries the counts.
+    const info = isPlainObject(entry.info) ? entry.info : null;
+    if (!info || info.role !== 'assistant') continue;
+    const tokens = isPlainObject(info.tokens) ? info.tokens : null;
+    if (!tokens) continue;
+    const output = readTokenCount(tokens, 'output');
+    if (output <= 0) continue;
+    const cache = isPlainObject(tokens.cache) ? tokens.cache : {};
+    return (
+      readTokenCount(tokens, 'input') +
+      output +
+      readTokenCount(tokens, 'reasoning') +
+      readTokenCount(cache, 'read') +
+      readTokenCount(cache, 'write')
+    );
+  }
+  return null;
+}

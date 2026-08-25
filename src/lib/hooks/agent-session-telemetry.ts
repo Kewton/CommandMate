@@ -47,11 +47,29 @@
  * the reader is `/api/worktrees/:id/current-output`, which `next dev` bundles
  * separately and would otherwise give a private copy of this map each.
  *
+ * ## What the record deliberately does not answer (Issue #2042)
+ *
+ * "How full is the context?" is not in here, and cannot be derived from what
+ * is: `Session.tokens` is **cumulative for the session** — measured over two
+ * turns it read `input 6 / output 11 / cache.read 8482 / cache.write 8500`,
+ * which is exactly what `opencode stats` prints — while opencode's own footer
+ * shows the **last assistant message's** footprint, 8,508. Summing the record
+ * would have answered 16,999 and `2%` where the agent says 8,508 and `1%`, and
+ * the gap grows with every turn. The second half of this file therefore asks the
+ * agent's server two further questions and keeps the arithmetic in a record of
+ * its own — see {@link AgentSessionContextUsage} and
+ * `docs/design/opencode-server-live-verification.md` §14.
+ *
  * @module lib/hooks/agent-session-telemetry
  */
 
 import { buildCompositeKey } from '@/lib/auto-yes-state';
 import type { CLIToolType } from '@/lib/cli-tools/types';
+import {
+  fetchOpencodeContextTokens,
+  fetchOpencodeModelContextLimit,
+} from './sources/opencode/client';
+import { getAssignedOpencodePort } from './sources/opencode/ports';
 import type { AgentInstanceRef } from './sources/types';
 
 /**
@@ -121,6 +139,10 @@ export interface AgentSessionRecord {
 declare global {
   // eslint-disable-next-line no-var
   var __agentSessionTelemetry: Map<string, AgentSessionRecord> | undefined;
+  // eslint-disable-next-line no-var
+  var __agentSessionContextUsage: Map<string, AgentSessionContextUsage> | undefined;
+  // eslint-disable-next-line no-var
+  var __agentSessionContextRefreshes: Set<string> | undefined;
 }
 
 /** compositeKey -> the most recent session description for that instance. */
@@ -151,9 +173,17 @@ export function getAgentSessionTelemetry(
   return records.get(buildCompositeKey(worktreeId, cliToolId, instanceId)) ?? null;
 }
 
-/** Drop one instance's record. Called when its subscription closes. */
+/**
+ * Drop one instance's record. Called when its subscription closes.
+ *
+ * Issue #2042 hangs the derived context measurement off the same call rather
+ * than off a second one at the call site: the measurement describes the record,
+ * so a lifetime it did not share would leave a pane reporting "87% full" about a
+ * conversation that ended.
+ */
 export function forgetAgentSessionTelemetry(target: AgentInstanceRef): void {
   records.delete(buildCompositeKey(target.worktreeId, target.cliToolId, target.instanceId));
+  forgetAgentSessionContextUsage(target);
 }
 
 /** Drop every record. Test seam. */
@@ -248,4 +278,181 @@ export function readOpencodeSessionFrame(
     tokens: readTokenUsage(info),
     at,
   };
+}
+
+// ============================================================================
+// How full the context is (Issue #2042)
+// ============================================================================
+
+/**
+ * How full one instance's context window is, and against what.
+ *
+ * Derived rather than reported, and kept in its own record rather than folded
+ * into {@link AgentSessionRecord} for exactly that reason: everything in the
+ * record above is a value the agent published on a frame, and everything here
+ * is this server asking the agent two further questions and doing arithmetic on
+ * the answers. Merging them would make `structuredEvents.session` a mixture of
+ * quoted and computed values with no way to tell which was which — the thing
+ * Issue #2040's "verbatim" rule exists to prevent.
+ */
+export interface AgentSessionContextUsage {
+  /**
+   * The last finished assistant turn's token footprint, or null.
+   *
+   * **Not the sum of {@link AgentSessionTokenUsage}.** Those are cumulative for
+   * the whole session — the number `opencode stats` prints — while this is what
+   * the next request has to fit into the window. See
+   * `fetchOpencodeContextTokens`, which carries the measurement.
+   */
+  tokens: number | null;
+  /** The model's declared context window, or null when nothing knows. */
+  limit: number | null;
+  /** `round(tokens / limit * 100)`, or null when either input is null. */
+  percent: number | null;
+  /**
+   * The {@link AgentSessionRecord.at} this was measured against.
+   *
+   * The cache key for freshness: a record with a newer `at` means the agent has
+   * spoken since, so these numbers describe a turn that is over.
+   */
+  sessionAt: number;
+  /** Epoch ms this record was written. */
+  at: number;
+}
+
+/** compositeKey -> the last context occupancy measured for that instance. */
+const contextUsages = globalThis.__agentSessionContextUsage ??
+  (globalThis.__agentSessionContextUsage = new Map<string, AgentSessionContextUsage>());
+
+/** compositeKeys with a refresh in flight, so a poll storm makes one request. */
+const contextRefreshes = globalThis.__agentSessionContextRefreshes ??
+  (globalThis.__agentSessionContextRefreshes = new Set<string>());
+
+/**
+ * The percentage opencode's own footer shows, by opencode's own rule.
+ *
+ * `Math.round(tokens / limit * 100)`, transcribed from the 1.18.22 bundle
+ * (`docs/design/opencode-server-live-verification.md` §14.2) rather than
+ * guessed, because the alternatives are all plausible and all wrong: the
+ * denominator is `limit.context` and not `limit.input` (1,000,000 not 936,000 on
+ * the measured model), and the rounding is `round` and not `ceil`, so a session
+ * holding less than half a percent reads `0%` rather than `1%`.
+ *
+ * @returns The whole-number percentage, or null when either input is unknown
+ */
+export function agentSessionContextPercent(
+  tokens: number | null,
+  limit: number | null
+): number | null {
+  if (tokens === null || limit === null) return null;
+  if (!Number.isFinite(tokens) || !Number.isFinite(limit) || limit <= 0) return null;
+  return Math.round((tokens / limit) * 100);
+}
+
+/** What this instance's context last measured, or null. Synchronous. */
+export function getAgentSessionContextUsage(
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  instanceId?: string
+): AgentSessionContextUsage | null {
+  return contextUsages.get(buildCompositeKey(worktreeId, cliToolId, instanceId)) ?? null;
+}
+
+/** Store one measurement. Exported for the suites that stand in for the fetch. */
+export function recordAgentSessionContextUsage(
+  target: AgentInstanceRef,
+  usage: AgentSessionContextUsage
+): void {
+  contextUsages.set(
+    buildCompositeKey(target.worktreeId, target.cliToolId, target.instanceId),
+    usage
+  );
+}
+
+/** Drop one instance's measurement. */
+export function forgetAgentSessionContextUsage(target: AgentInstanceRef): void {
+  contextUsages.delete(buildCompositeKey(target.worktreeId, target.cliToolId, target.instanceId));
+}
+
+/** Drop every measurement and every in-flight marker. Test seam. */
+export function resetAgentSessionContextUsage(): void {
+  contextUsages.clear();
+  contextRefreshes.clear();
+}
+
+/**
+ * Answer with what is cached, and start a refresh when it is stale (#2042).
+ *
+ * **Never awaits and never throws**, which is the whole shape of it. The caller
+ * is `buildCurrentOutput`, on the path `commandmate capture` and every terminal
+ * pane poll take several times a second, and the two numbers here need two HTTP
+ * round trips to an agent's own server. Awaiting them would put a foreign
+ * process's latency in front of a payload that is mostly a terminal frame; so
+ * the poll that notices the record moved answers `null` (or the previous turn's
+ * numbers) and the next one, a second or two later, answers the new ones.
+ *
+ * Staleness is `record.at`, not a clock: `session.updated` fires a handful of
+ * times per turn, so a refresh happens per *turn* rather than per poll, and a
+ * session nobody is talking to makes no requests at all.
+ *
+ * @param target - The instance whose context is being described
+ * @param record - Its current telemetry, or null when the agent has said nothing
+ * @returns The cached measurement, or null when there is none yet
+ */
+export function ensureAgentSessionContextUsage(
+  target: AgentInstanceRef,
+  record: AgentSessionRecord | null
+): AgentSessionContextUsage | null {
+  const key = buildCompositeKey(target.worktreeId, target.cliToolId, target.instanceId);
+  const cached = contextUsages.get(key) ?? null;
+  // No session, or one the agent has not named: nothing to ask about. The
+  // cached value is left in place rather than cleared — the subscription's
+  // close is what retires it, the same lifetime the record itself has.
+  if (!record || !record.id) return cached;
+  if (cached && cached.sessionAt === record.at) return cached;
+  if (contextRefreshes.has(key)) return cached;
+  contextRefreshes.add(key);
+  void refreshAgentSessionContextUsage(target, record).finally(() => {
+    contextRefreshes.delete(key);
+  });
+  return cached;
+}
+
+/**
+ * Ask the instance's own server the two questions and store the answer.
+ *
+ * Exported so a caller that *can* wait — a test, or a future CLI path — can,
+ * and so the fire-and-forget above has a name to point at. Resolves to the
+ * measurement it stored, or null when the instance has no reachable server:
+ * `getAssignedOpencodePort` answers null for every tool but opencode and for an
+ * opencode pane whose port was never written down.
+ */
+export async function refreshAgentSessionContextUsage(
+  target: AgentInstanceRef,
+  record: AgentSessionRecord
+): Promise<AgentSessionContextUsage | null> {
+  const sessionId = record.id;
+  if (!sessionId) return null;
+  const port = getAssignedOpencodePort(target);
+  if (port === null) return null;
+
+  const [tokens, limit] = await Promise.all([
+    fetchOpencodeContextTokens(port, sessionId),
+    record.provider && record.model
+      ? fetchOpencodeModelContextLimit(port, record.provider, record.model)
+      : Promise.resolve(null),
+  ]);
+  // Both null means the two calls found nothing to say — a fresh session and an
+  // unrecognised model. Stored anyway, with `sessionAt` set: the point of the
+  // record is to stop this pair of requests repeating every poll, and a null
+  // that is dated is what says "asked, and the answer was nothing".
+  const usage: AgentSessionContextUsage = {
+    tokens,
+    limit,
+    percent: agentSessionContextPercent(tokens, limit),
+    sessionAt: record.at,
+    at: Date.now(),
+  };
+  recordAgentSessionContextUsage(target, usage);
+  return usage;
 }

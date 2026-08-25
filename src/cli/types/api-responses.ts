@@ -623,6 +623,41 @@ export interface CurrentOutputResponse {
       /** Epoch ms this record was written, so a reader can judge its age. */
       at: number;
     } | null;
+    /**
+     * How full this instance's context window is, or null (Issue #2042).
+     *
+     * Mirrors: src/lib/hooks/agent-session-telemetry.ts
+     * AgentSessionContextUsage.
+     *
+     * **Not derivable from `session.tokens`, which is why it is its own block.**
+     * Those counts are the session's *cumulative* spend — the figure `opencode
+     * stats` prints — while "how much of the window is in use" is the last
+     * finished assistant turn's footprint. Measured over two turns the session
+     * summed to 16,999 (`2%`) where opencode's own footer read 8,508 (`1%`), and
+     * the gap widens with every turn.
+     *
+     * Every member here is computed by the server from two reads of the agent's
+     * own API, so unlike `session` this block is *derived*: `percent` is
+     * opencode's own `round(tokens / limit.context * 100)`, transcribed from
+     * 1.18.22 rather than guessed.
+     *
+     * Optional, and null until the first measurement lands — it is refreshed off
+     * the poll path, so the poll that notices a turn ended publishes the
+     * previous numbers and the next one publishes the new. Null forever on every
+     * tool but opencode.
+     */
+    sessionContext?: {
+      /** The last finished assistant turn's token footprint, or null. */
+      tokens: number | null;
+      /** The model's declared context window (`limit.context`), or null. */
+      limit: number | null;
+      /** `round(tokens / limit * 100)`, or null when either input is null. */
+      percent: number | null;
+      /** The `session.at` these numbers were measured against. */
+      sessionAt: number;
+      /** Epoch ms this record was written. */
+      at: number;
+    } | null;
   };
   /**
    * Issue #1839: the upstream (model API) fault visible on the live frame, or
