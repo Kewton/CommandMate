@@ -53,6 +53,29 @@
  * wire value (`toOpencodePermissionReply` answers null). So "3" at a
  * two-option question is `answer_out_of_range` — never `Reject`.
  *
+ * ## The sole pending decision (Issue #2040)
+ *
+ * A third way in, and the one `commandmate respond <worktree> 3` takes:
+ * `{ answer }` with no id at all. It exists because naming an id is not
+ * something a person does — the id has to be lifted out of `capture --json`
+ * first — and because the number typed instead used to be a KEYSTROKE, which on
+ * opencode is either refused (#2033: every opencode dialog is `answerMode:
+ * 'keys'`) or, before that, typed at a composer.
+ *
+ * The rule is stated in one sentence and the whole of it is the safety
+ * argument: **the answer is delivered only when this instance is holding
+ * exactly one decision.** Zero is `404 decision_not_found` — there is nothing a
+ * number could name. Two or more is `409 multiple_pending_decisions`, because a
+ * number is a position and the caller never said in which list: answering the
+ * oldest would approve a command the operator did not look at, which is the
+ * whole failure this Issue exists to prevent. Neither refusal sends anything,
+ * anywhere.
+ *
+ * The membership rule above is untouched — there is no id to check membership
+ * of, because the decision is *read back* for the scope the request already
+ * resolved to, which is `lib/hooks/structured-decision-response`'s
+ * by-construction property rather than this module's lookup.
+ *
  * @module app/api/worktrees/[id]/respond/structured-decision
  */
 
@@ -148,13 +171,25 @@ function verdictFor(optionNumber: number): Verdict | null {
       return null;
   }
 }
-
 export interface RespondByDecisionIdParams {
   db: Database.Database;
   /** The canonical worktree id the route already resolved. */
   worktreeId: string;
   /** As sent. Unvalidated — see {@link isValidDecisionId}. */
   decisionId: unknown;
+  /** As sent. An option number, a label, or a `reply` word. */
+  answer: unknown;
+  /** Optional `cliTool` from the body. */
+  cliToolParam?: unknown;
+  /** Optional `instanceId` from the body. */
+  instanceParam?: unknown;
+}
+
+/** {@link respondToSolePendingDecision}'s input — the same, minus the id. */
+export interface RespondToSolePendingDecisionParams {
+  db: Database.Database;
+  /** The canonical worktree id the route already resolved. */
+  worktreeId: string;
   /** As sent. An option number, a label, or a `reply` word. */
   answer: unknown;
   /** Optional `cliTool` from the body. */
@@ -173,6 +208,235 @@ function decisionNotFound(decisionId: string): NextResponse {
     },
     { status: 404 }
   );
+}
+
+/**
+ * The same 404, for a request that named no id (Issue #2040).
+ *
+ * Deliberately the same `code`. From the caller's side the fact is identical —
+ * there is no decision here for this answer to reach — and a second code would
+ * oblige every reader to learn two words for one outcome. What differs is only
+ * the sentence, because there is no id to quote back.
+ */
+function noPendingDecision(): NextResponse {
+  return NextResponse.json(
+    {
+      error: 'This agent instance is not holding a decision to answer',
+      code: 'decision_not_found',
+      reason: 'decision_not_found',
+    },
+    { status: 404 }
+  );
+}
+
+/**
+ * The 409 a number cannot be resolved through (Issue #2040).
+ *
+ * The ids are listed because the refusal is otherwise a dead end: they are what
+ * `{ decisionId, answer }` takes, so an operator who wants one of these answered
+ * has somewhere to go. `toolName` is included for an approval — it is what the
+ * dialog is *about*, and it is already published on `structuredEvents` — and the
+ * question's text is not, for the reason `PendingDecisionPayload` gives for
+ * leaving `tool_input` out: this body is an error, and an error is the wrong
+ * place to start serving the agent's own content from.
+ */
+function multiplePendingDecisions(pending: readonly PendingDecision[]): NextResponse {
+  return NextResponse.json(
+    {
+      error:
+        `This agent instance is holding ${pending.length} decisions, and an option number ` +
+        'names a position in one of them. Answer them one at a time by id, or in the terminal.',
+      code: 'multiple_pending_decisions',
+      reason: 'multiple_pending_decisions',
+      decisions: pending.map((decision) => ({
+        id: decision.id,
+        kind: decision.kind,
+        toolName: decision.subject.kind === 'permission' ? decision.subject.toolName : null,
+      })),
+    },
+    { status: 409 }
+  );
+}
+
+/** The (tool, instance) a request resolved to, and the source that speaks for it. */
+interface DecisionScope {
+  cliToolId: CLIToolType;
+  instanceId: string;
+  source: ReturnType<typeof getAgentEventSource>;
+  target: AgentInstanceRef;
+}
+
+/** Either a scope to act in, or the response to write instead. */
+type ScopeResolution =
+  | { ok: true; scope: DecisionScope }
+  | { ok: false; response: NextResponse };
+
+/**
+ * Validate the request's optional target fields and resolve the scope.
+ *
+ * Shared by both entry points so the id-addressed path and the sole-decision
+ * path cannot resolve differently — the tool id is half of the scope the
+ * membership rule is about, and two resolvers is how a verdict gets verified
+ * against one instance and delivered to another.
+ */
+function resolveDecisionScope({
+  db,
+  worktreeId,
+  cliToolParam,
+  instanceParam,
+}: {
+  db: Database.Database;
+  worktreeId: string;
+  cliToolParam?: unknown;
+  instanceParam?: unknown;
+}): ScopeResolution {
+  // Same allowlists the `/prompt-response` route applies to the same two
+  // fields, and rejected on the same terms: an unknown tool or a malformed
+  // instance id is a client bug, not a target to guess at.
+  if (cliToolParam !== undefined && !(typeof cliToolParam === 'string' && isCliToolType(cliToolParam))) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { error: `Invalid cliTool: '${String(cliToolParam)}'` },
+        { status: 400 }
+      ),
+    };
+  }
+  if (instanceParam !== undefined && !(typeof instanceParam === 'string' && isValidInstanceId(instanceParam))) {
+    return {
+      ok: false,
+      response: NextResponse.json({ error: 'Invalid instanceId parameter' }, { status: 400 }),
+    };
+  }
+
+  const worktree = getWorktreeById(db, worktreeId);
+  if (!worktree) {
+    return {
+      ok: false,
+      response: NextResponse.json({ error: `Worktree '${worktreeId}' not found` }, { status: 404 }),
+    };
+  }
+
+  // The one resolver (design S4 D5), rather than a fifth copy of
+  // `cliTool ?? worktree.cliToolId ?? 'claude'` — the tool id is half of the
+  // scope this whole module is about, so resolving it differently here than
+  // `send` does would mean the id is verified against one instance and the
+  // verdict delivered to another. Strict because this route has a side effect:
+  // a request whose named tool contradicts the roster is refused rather than
+  // guessed at (D5 decision 3 / DR3-015).
+  const resolution = resolveSessionTargetStrict(db, worktreeId, {
+    ...(instanceParam === undefined ? {} : { instanceId: instanceParam }),
+    ...(cliToolParam === undefined ? {} : { requestedCliTool: cliToolParam }),
+  });
+  if (!resolution.ok) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        {
+          error: describeSessionTargetConflict(resolution.conflict),
+          code: INSTANCE_TOOL_CONFLICT,
+          reason: INSTANCE_TOOL_CONFLICT,
+        },
+        { status: 400 }
+      ),
+    };
+  }
+  const { cliToolId, instanceId } = resolution.target;
+
+  return {
+    ok: true,
+    scope: {
+      cliToolId,
+      instanceId,
+      source: getAgentEventSource(cliToolId),
+      target: { worktreeId, cliToolId, instanceId },
+    },
+  };
+}
+
+/** Either the decisions this scope is holding, or the response to write. */
+type PendingLookup =
+  | { ok: true; pending: PendingDecision[] }
+  | { ok: false; response: NextResponse };
+
+/**
+ * Read back what this instance is holding, refusing rather than guessing.
+ *
+ * Unreachable is NOT not-found, and it is emphatically not "deliver anyway":
+ * membership could not be established, so nothing may be sent.
+ * `answerStructuredDecision` fails open here because it has a keystroke path to
+ * fall back to; this route has none.
+ */
+async function listPendingForScope(
+  scope: DecisionScope,
+  worktreeId: string
+): Promise<PendingLookup> {
+  try {
+    return { ok: true, pending: await scope.source.listPending(scope.target) };
+  } catch (error) {
+    logger.warn('respond-decision-source-unreachable', {
+      worktreeId,
+      cliToolId: scope.cliToolId,
+      instanceId: scope.instanceId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return {
+      ok: false,
+      response: NextResponse.json(
+        {
+          error: 'The agent could not be reached to verify the decision',
+          code: 'decision_source_unreachable',
+          reason: 'decision_source_unreachable',
+        },
+        { status: 502 }
+      ),
+    };
+  }
+}
+
+/**
+ * Deliver an answer to a decision this scope has already been shown to hold.
+ *
+ * The one place the kind chooses a vocabulary, reached from both entry points.
+ * Neither branch looks anything up: whichever way the decision was selected —
+ * by the id the caller named (#1932/#2039) or by being the only one (#2040) —
+ * the scope rule has already been satisfied before this is called.
+ */
+async function answerResolvedDecision({
+  db,
+  scope,
+  decision,
+  answer,
+  worktreeId,
+}: {
+  db: Database.Database;
+  scope: DecisionScope;
+  decision: PendingDecision;
+  answer: string;
+  worktreeId: string;
+}): Promise<NextResponse> {
+  if (decision.kind === 'question') {
+    return await answerPendingQuestion({
+      db,
+      source: scope.source,
+      target: scope.target,
+      decision,
+      answer,
+      worktreeId,
+      cliToolId: scope.cliToolId,
+      instanceId: scope.instanceId,
+    });
+  }
+  return await answerPendingApproval({
+    db,
+    source: scope.source,
+    target: scope.target,
+    decision,
+    answer,
+    worktreeId,
+    cliToolId: scope.cliToolId,
+    instanceId: scope.instanceId,
+  });
 }
 
 /**
@@ -199,80 +463,19 @@ export async function respondByDecisionId({
     return NextResponse.json({ error: 'answer must be a string' }, { status: 400 });
   }
 
-  // Same allowlists the `/prompt-response` route applies to the same two
-  // fields, and rejected on the same terms: an unknown tool or a malformed
-  // instance id is a client bug, not a target to guess at.
-  if (cliToolParam !== undefined && !(typeof cliToolParam === 'string' && isCliToolType(cliToolParam))) {
-    return NextResponse.json(
-      { error: `Invalid cliTool: '${String(cliToolParam)}'` },
-      { status: 400 }
-    );
-  }
-  if (instanceParam !== undefined && !(typeof instanceParam === 'string' && isValidInstanceId(instanceParam))) {
-    return NextResponse.json({ error: 'Invalid instanceId parameter' }, { status: 400 });
-  }
+  const resolved = resolveDecisionScope({ db, worktreeId, cliToolParam, instanceParam });
+  if (!resolved.ok) return resolved.response;
+  const scope = resolved.scope;
 
-  const worktree = getWorktreeById(db, worktreeId);
-  if (!worktree) {
-    return NextResponse.json({ error: `Worktree '${worktreeId}' not found` }, { status: 404 });
-  }
-
-  // The one resolver (design S4 D5), rather than a fifth copy of
-  // `cliTool ?? worktree.cliToolId ?? 'claude'` — the tool id is half of the
-  // scope this whole module is about, so resolving it differently here than
-  // `send` does would mean the id is verified against one instance and the
-  // verdict delivered to another. Strict because this route has a side effect:
-  // a request whose named tool contradicts the roster is refused rather than
-  // guessed at (D5 decision 3 / DR3-015).
-  const resolution = resolveSessionTargetStrict(db, worktreeId, {
-    ...(instanceParam === undefined ? {} : { instanceId: instanceParam }),
-    ...(cliToolParam === undefined ? {} : { requestedCliTool: cliToolParam }),
-  });
-  if (!resolution.ok) {
-    return NextResponse.json(
-      {
-        error: describeSessionTargetConflict(resolution.conflict),
-        code: INSTANCE_TOOL_CONFLICT,
-        reason: INSTANCE_TOOL_CONFLICT,
-      },
-      { status: 400 }
-    );
-  }
-  const { cliToolId, instanceId } = resolution.target;
-
-  const source = getAgentEventSource(cliToolId);
-  if (source.capabilities.eventIdentity === null) {
+  if (scope.source.capabilities.eventIdentity === null) {
     // This source publishes no per-decision id, so nothing it is holding can be
     // named by one. Same answer as an id that simply is not pending — from the
     // caller's side the two are the same fact.
     return decisionNotFound(decisionId);
   }
 
-  const target: AgentInstanceRef = { worktreeId, cliToolId, instanceId };
-
-  let pending: PendingDecision[];
-  try {
-    pending = await source.listPending(target);
-  } catch (error) {
-    // Unreachable is NOT not-found, and it is emphatically not "deliver
-    // anyway": membership could not be established, so nothing may be sent.
-    // `answerStructuredDecision` fails open here because it has a keystroke
-    // path to fall back to; this route has none.
-    logger.warn('respond-decision-source-unreachable', {
-      worktreeId,
-      cliToolId,
-      instanceId,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return NextResponse.json(
-      {
-        error: 'The agent could not be reached to verify the decision',
-        code: 'decision_source_unreachable',
-        reason: 'decision_source_unreachable',
-      },
-      { status: 502 }
-    );
-  }
+  const lookup = await listPendingForScope(scope, worktreeId);
+  if (!lookup.ok) return lookup.response;
 
   // The scope rule, in one line: only decisions this (worktree, tool, instance)
   // is holding. Removing this filter is the mutation the acceptance test pins.
@@ -283,30 +486,126 @@ export async function respondByDecisionId({
   // this request already resolved to, so a question belonging to another
   // instance is as invisible as an approval belonging to one. The kind decides
   // the vocabulary the answer is resolved in, below, and nothing else.
-  const decision = pending.find((candidate) => candidate.id === decisionId);
+  const decision = lookup.pending.find((candidate) => candidate.id === decisionId);
   if (!decision) {
     logger.info('respond-decision-not-found', {
       worktreeId,
-      cliToolId,
-      instanceId,
-      pending: pending.length,
+      cliToolId: scope.cliToolId,
+      instanceId: scope.instanceId,
+      pending: lookup.pending.length,
     });
     return decisionNotFound(decisionId);
   }
 
-  if (decision.kind === 'question') {
-    return await answerPendingQuestion({
-      db,
-      source,
-      target,
-      decision,
-      answer,
-      worktreeId,
-      cliToolId,
-      instanceId,
-    });
+  return await answerResolvedDecision({ db, scope, decision, answer, worktreeId });
+}
+
+/**
+ * Answer the one decision this instance is holding, or refuse (Issue #2040).
+ *
+ * `commandmate respond <worktree> 3`'s path. See the module comment for the
+ * safety argument; the code below is that argument in four branches, and none
+ * of them sends anything unless the count is exactly one.
+ *
+ * @returns The response to write. Never throws for a caller error.
+ */
+export async function respondToSolePendingDecision({
+  db,
+  worktreeId,
+  answer,
+  cliToolParam,
+  instanceParam,
+}: RespondToSolePendingDecisionParams): Promise<NextResponse> {
+  if (typeof answer !== 'string') {
+    return NextResponse.json({ error: 'answer must be a string' }, { status: 400 });
   }
 
+  const resolved = resolveDecisionScope({ db, worktreeId, cliToolParam, instanceParam });
+  if (!resolved.ok) return resolved.response;
+  const scope = resolved.scope;
+
+  if (scope.source.capabilities.eventIdentity === null) {
+    // The capability read, never a tool check (§4 D3). A source with no
+    // per-decision id has no decision this path could deliver to, and the
+    // keystroke path it would otherwise fall back to is a DIFFERENT route
+    // (`/prompt-response`) — so this is refused with its own code rather than
+    // sharing `decision_not_found`, which a caller must not retry through.
+    return NextResponse.json(
+      {
+        error:
+          `The '${scope.cliToolId}' agent publishes no per-decision id, so a structured ` +
+          'answer cannot be addressed to it. Answer it through /prompt-response instead.',
+        code: 'decision_source_unaddressable',
+        reason: 'decision_source_unaddressable',
+      },
+      { status: 404 }
+    );
+  }
+
+  const lookup = await listPendingForScope(scope, worktreeId);
+  if (!lookup.ok) return lookup.response;
+  const pending = lookup.pending;
+
+  if (pending.length === 0) {
+    logger.info('respond-sole-decision-none-pending', {
+      worktreeId,
+      cliToolId: scope.cliToolId,
+      instanceId: scope.instanceId,
+    });
+    return noPendingDecision();
+  }
+  if (pending.length > 1) {
+    // Refused, never resolved to the oldest. `answerStructuredDecision` does
+    // take the oldest and says why (it is a tie-break on a list an agent fills
+    // one at a time), but that path has a keystroke to fall back to and this one
+    // delivers a verdict over the agent's own API: the day it is not a tie, the
+    // caller would have approved a command it never saw.
+    logger.info('respond-sole-decision-ambiguous', {
+      worktreeId,
+      cliToolId: scope.cliToolId,
+      instanceId: scope.instanceId,
+      pending: pending.length,
+    });
+    return multiplePendingDecisions(pending);
+  }
+
+  return await answerResolvedDecision({
+    db,
+    scope,
+    decision: pending[0],
+    answer,
+    worktreeId,
+  });
+}
+
+/**
+ * Answer an approval with one of the three verdicts (Issue #1932).
+ *
+ * Reached only once the scope rule has been satisfied — see
+ * {@link answerResolvedDecision}. Lifted out of `respondByDecisionId` by Issue
+ * #2040 so the sole-decision path resolves the SAME three verdicts against the
+ * SAME list; a second copy is how `3` would come to mean `Reject` on one path
+ * and something else on the other.
+ */
+async function answerPendingApproval({
+  db,
+  source,
+  target,
+  decision,
+  answer,
+  worktreeId,
+  cliToolId,
+  instanceId,
+}: {
+  db: Database.Database;
+  source: ReturnType<typeof getAgentEventSource>;
+  target: AgentInstanceRef;
+  decision: PendingDecision;
+  answer: string;
+  worktreeId: string;
+  cliToolId: CLIToolType;
+  instanceId: string;
+}): Promise<NextResponse> {
   const option = resolveStructuredDecisionOption(answer);
   const verdict = option ? verdictFor(option.number) : null;
   if (!option || !verdict) {

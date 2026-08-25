@@ -29,6 +29,15 @@ import {
   getLastToolInputNormalization,
   type ToolInputNormalizationRecord,
 } from '@/lib/hooks/tool-input-normalization-state';
+import {
+  getAgentSessionTelemetry,
+  type AgentSessionRecord,
+} from '@/lib/hooks/agent-session-telemetry';
+import {
+  pendingDecisionKind,
+  type PendingDecisionKind,
+} from '@/lib/hooks/pending-decision-kind';
+import { questionDecisionOptions } from '@/lib/hooks/structured-decision-response';
 import type { AgentSourceCapabilities } from '@/lib/hooks/sources/types';
 import { captureSessionOutput } from '@/lib/session/cli-session';
 import {
@@ -198,6 +207,29 @@ export interface StructuredEventsPayload extends PublishedTurn {
    */
   source: StructuredSourcePayload;
   /**
+   * What the agent says about the conversation this instance is in, or null
+   * (Issue #2040).
+   *
+   * The half of a worker's state a terminal frame cannot show: which session,
+   * which persona, which model, what it has cost and how many tokens it has
+   * spent. Read off opencode's `session.updated` frames, which were already
+   * arriving and mapped to none of the seven event words — so this costs no
+   * request and no poll.
+   *
+   * **Sent on every payload this build produces, null when nothing knows** —
+   * which is every tool but opencode, every opencode pane whose stream has not
+   * reported a session yet, and every pane that has been killed since it did.
+   * See {@link AgentSessionRecord} for the field-by-field contract and for why
+   * the values are verbatim.
+   *
+   * Optional on the type for the reason `pendingDecisions` below is, stated
+   * once there: this shape is also *constructed* — by suites that stand in for
+   * the builder, and by the CLI's mirror in `api-responses.ts`, which has to
+   * describe a server older than the field as well as one newer. A reader takes
+   * `?? null`.
+   */
+  session?: AgentSessionRecord | null;
+  /**
    * The approvals this instance is blocked on, oldest first (Issue #1930).
    *
    * Set on every payload this build produces, and empty on every session with
@@ -245,6 +277,14 @@ export interface StructuredEventsPayload extends PublishedTurn {
   dialogPendingMaxMs?: { predicted: number; confirmed: number };
 }
 
+/** One choice a pending question offers, as it is published (Issue #2040). */
+export interface PendingQuestionOptionPayload {
+  /** 1-based, in the order the agent's own payload listed the choices. */
+  number: number;
+  /** The choice's label, verbatim. This is also what answering it sends. */
+  label: string;
+}
+
 /** One approval, as it is published (Issue #1930). */
 export interface PendingDecisionPayload {
   /** The agent's own id for it, or null for a source that publishes none. */
@@ -268,6 +308,39 @@ export interface PendingDecisionPayload {
    * because copilot stopped listening would be the wrong half of the fact.
    */
   deliveryExpired: boolean;
+  /**
+   * Whether a human is being asked to approve or to choose (Issue #2040).
+   *
+   * The two block a worker identically and are answered completely differently,
+   * so an orchestrator reading `capture --json` has to be able to tell them
+   * apart before it decides whether a verdict is even meaningful. Recovered from
+   * what the writers already record rather than stored — see
+   * `lib/hooks/pending-decision-kind` for why, and for the one place that says
+   * how.
+   *
+   * **Always present.** Unlike the optional fields on
+   * {@link StructuredEventsPayload}, this one is per-entry: an entry that exists
+   * at all comes from this build, so there is no older-server case for a reader
+   * to interpret an absence as.
+   */
+  kind: PendingDecisionKind;
+  /**
+   * The choices this question offers, or null (Issue #2040).
+   *
+   * Null on every approval — an approval's three verdicts are the source's, not
+   * this dialog's, and they are published as `promptData.decisionOptions` where
+   * they belong. Null on a question too whenever the agent's own payload is no
+   * longer held: the numbers here are the payload's order, so publishing them
+   * from anything else would number a list the agent never sent.
+   *
+   * **One in-flight question per instance is all this can describe.** The
+   * payload is `getAskUserQuestion`'s single episode, so two concurrent
+   * questions on one instance would both quote it. Not observed — every
+   * captured `question.asked` carries one call, and an agent asks one thing at a
+   * time — and stated here rather than guarded, because the guard would have to
+   * invent which episode belongs to which record.
+   */
+  questionOptions: PendingQuestionOptionPayload[] | null;
 }
 
 /**
@@ -985,6 +1058,11 @@ async function buildPayload(
   const eventSource = getAgentEventSource(cliToolId);
   const now = Date.now();
   const pendingDecisions = getPendingDecisions(worktreeId, cliToolId, instanceId, now);
+  // Issue #1726's episode, read once at the same `now` the decisions were read
+  // at. Issue #2040 needs it up here — a question's choices are published on the
+  // decision entry — and the degraded prompt below re-uses this read rather than
+  // taking a second one, so the two cannot describe different instants.
+  const askUserQuestion = getAskUserQuestion(worktreeId, cliToolId, instanceId, now);
   const structuredEvents: StructuredEventsPayload = {
     lastEventType: lastEvent?.event ?? null,
     lastEventAt: lastEvent?.at ?? null,
@@ -997,19 +1075,36 @@ async function buildPayload(
     // source's declared `decisionTimeoutSeconds`. `agent-event-state` cannot
     // reach the registry — its module graph pulls in `better-sqlite3` — which
     // is why every capability arrives there as a value a caller hands over.
-    pendingDecisions: pendingDecisions.map((decision) => ({
-      id: decision.decisionId,
-      at: decision.at,
-      source: decision.source,
-      toolName: decision.toolName,
-      confirmedAt: decision.confirmedAt,
-      scraperCorroborated: decision.scraperCorroborated,
-      deliveryExpired: isDeliveryExpired(
-        decision,
-        eventSource.capabilities.decisionTimeoutSeconds,
-        now
-      ),
-    })),
+    pendingDecisions: pendingDecisions.map((decision) => {
+      // Issue #2040. Recovered rather than stored — see `pending-decision-kind`.
+      const kind = pendingDecisionKind(decision.toolName);
+      return {
+        id: decision.decisionId,
+        at: decision.at,
+        source: decision.source,
+        toolName: decision.toolName,
+        confirmedAt: decision.confirmedAt,
+        scraperCorroborated: decision.scraperCorroborated,
+        deliveryExpired: isDeliveryExpired(
+          decision,
+          eventSource.capabilities.decisionTimeoutSeconds,
+          now
+        ),
+        kind,
+        // Issue #2040: the agent's own list, numbered the way `respond` numbers
+        // it — the same `questionDecisionOptions` the reply path resolves an
+        // answer against (#2039), so what is printed here and what a number
+        // means cannot come apart. Null for an approval and for a question whose
+        // payload is no longer held; never a screen's numbering.
+        questionOptions:
+          kind === 'question' && askUserQuestion
+            ? questionDecisionOptions(askUserQuestion.spec).map((option) => ({
+                number: option.number,
+                label: option.label,
+              }))
+            : null,
+      };
+    }),
     dedupDropped: getAgentEventDropCounts(worktreeId, cliToolId, instanceId),
     dialogPendingMaxMs: { ...DIALOG_PENDING_MAX_MS },
     promptWaitingSince: null,
@@ -1026,6 +1121,11 @@ async function buildPayload(
       cliToolId: eventSource.cliToolId,
       capabilities: eventSource.capabilities,
     },
+    // Issue #2040. Read here, before the `isRunning` branch, so both return
+    // paths carry the key — but the record itself is dropped when the
+    // subscription closes, so a pane that is not running answers null without
+    // this layer needing a rule of its own.
+    session: getAgentSessionTelemetry(worktreeId, cliToolId, instanceId),
   };
 
   const running = await cliTool.isRunning(worktreeId, instanceId);
@@ -1234,7 +1334,9 @@ async function buildPayload(
   // all while an AskUserQuestion picker is up (§5.6) and a record that asserted
   // `waiting` from the invocation would go on asserting it long after a human
   // answered in the terminal.
-  const askUserQuestion = getAskUserQuestion(worktreeId, cliToolId, instanceId);
+  // Issue #2040 moved the read to the top of this function (the decision entries
+  // publish the same episode's choices) and this line now re-uses it, so the two
+  // surfaces cannot describe different instants.
   const scraperPromptData = statusResult.promptDetection.promptData;
   const correctedPromptData =
     scraperPromptData && askUserQuestion

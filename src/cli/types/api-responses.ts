@@ -398,6 +398,33 @@ export interface CurrentOutputResponse {
        * what has expired is the server's ability to answer it automatically.
        */
       deliveryExpired: boolean;
+      /**
+       * Whether a human is being asked to approve or to choose (Issue #2040).
+       *
+       * `permission` / `question`. The two block a worker identically and are
+       * answered completely differently — three fixed verdicts against the
+       * agent's own published choices — so a reader deciding whether to answer
+       * at all has to see this first.
+       *
+       * String-typed and optional for this file's two usual reasons: a newer
+       * server may name a third kind, and a server from before #2040 sends no
+       * such key. Absent means "this daemon predates the field", never
+       * "unknown".
+       */
+      kind?: string;
+      /**
+       * The choices a pending question offers, or null (Issue #2040).
+       *
+       * Null on every approval — an approval's three verdicts belong to the
+       * SOURCE and are published as `promptData.decisionOptions` — and null on a
+       * question whose payload is no longer held, because the numbers are the
+       * payload's own order and quoting them from anything else would number a
+       * list the agent never sent.
+       *
+       * These are the numbers `commandmate respond <worktree> <n>` resolves
+       * against on an agent that publishes decision ids.
+       */
+      questionOptions?: Array<{ number: number; label: string }> | null;
     }>;
     /**
      * What this instance has had dropped by the structured layer's own bounds,
@@ -536,10 +563,66 @@ export interface CurrentOutputResponse {
         permissionHookPredictsDialog: boolean;
         sessionStartMayArriveLate: boolean;
         permissionReplyReleasesPrompt: boolean;
+        /**
+         * Where a frame-unique id for this source comes from, or null.
+         *
+         * Non-null is what makes an option number a VERDICT the server can POST
+         * rather than a key it has to type, which is the gate `commandmate
+         * respond` reads before choosing an endpoint (Issue #2040).
+         */
         eventIdentity: string | null;
         resync: string;
       };
     };
+    /**
+     * What the agent says about the conversation this instance is in, or null
+     * (Issue #2040).
+     *
+     * Mirrors: src/lib/hooks/agent-session-telemetry.ts AgentSessionRecord.
+     *
+     * The half of a worker's state a terminal frame cannot show — which
+     * session, which persona, which model, what it has cost. Read off frames
+     * the server was already receiving, so it costs no request; null on every
+     * tool that publishes none (all but opencode today), on an opencode pane
+     * whose stream has not reported a session yet, and on one that has been
+     * killed since it did.
+     *
+     * Every value is the agent's own, unrounded and unformatted: a reader
+     * compares them against what the agent reports about itself, and tidying on
+     * the way out breaks that comparison exactly when it matters.
+     */
+    session?: {
+      /** The agent's own session id, or null. */
+      id: string | null;
+      /** The agent's own title for it, or null. Display only, bounded. */
+      title: string | null;
+      /** Which persona is driving (opencode's `build` / `plan` / …), or null. */
+      agent: string | null;
+      /** The model id, verbatim, or null. */
+      model: string | null;
+      /** The provider that model belongs to, verbatim, or null. */
+      provider: string | null;
+      /** What the session has cost so far, in the agent's own unit, or null. */
+      cost: number | null;
+      /**
+       * The tokens spent, as the agent counts them.
+       *
+       * Null members mean "the agent did not say", never zero. `cacheRead` /
+       * `cacheWrite` are opencode's `tokens.cache.read` / `.write`, flattened;
+       * `total` is declared on an assistant message rather than on a session, so
+       * it is null today and is NOT this server's own sum of the other five.
+       */
+      tokens: {
+        input: number | null;
+        output: number | null;
+        reasoning: number | null;
+        cacheRead: number | null;
+        cacheWrite: number | null;
+        total: number | null;
+      };
+      /** Epoch ms this record was written, so a reader can judge its age. */
+      at: number;
+    } | null;
   };
   /**
    * Issue #1839: the upstream (model API) fault visible on the live frame, or
@@ -766,6 +849,51 @@ export interface PromptResponseResult {
     optionLabel: string;
     /** The approval that was answered (Issue #1898). Absent on the key paths. */
     decisionId?: string;
+  };
+}
+
+/**
+ * Mirrors: src/app/api/worktrees/[id]/respond/structured-decision.ts, the body
+ * of `POST /api/worktrees/[id]/respond` for the two id-less shapes
+ * (Issue #2040).
+ *
+ * A different route from {@link PromptResponseResult} and therefore a different
+ * mirror, even though `respond` reports both through the same lines. The
+ * difference that matters is `resolved.via`: this route answers a QUESTION as
+ * well as an approval, and a question's answer is a list of labels rather than
+ * one verdict — so `optionNumber` / `optionLabel` are absent on that branch and
+ * `answers` / `optionNumbers` / `optionLabels` / `freeText` take their place.
+ *
+ * Every field is optional for this file's usual reason: the CLI is routinely
+ * newer than the daemon it dials, and a server from before #2040 answers this
+ * body's shape only for the `{ decisionId, answer }` request.
+ */
+export interface StructuredDecisionResult {
+  /** False when the verdict was resolved but the POST to the agent did not land. */
+  success: boolean;
+  /** The option number for an approval; the chosen numbers, or the text, for a question. */
+  answer: string;
+  /** `decision_not_delivered` — the only reason this shape carries on a 200. */
+  reason?: string;
+  /** Detail accompanying a reason, when the server sent one. */
+  message?: string;
+  resolved?: {
+    /** `structured-decision` for an approval, `structured-question` for a question. */
+    via: 'structured-decision' | 'structured-question';
+    /** Approval only: 1 = Allow once, 2 = Allow always, 3 = Reject. */
+    optionNumber?: number;
+    /** Approval only: the verdict's label. */
+    optionLabel?: string;
+    /** The decision that was answered. */
+    decisionId?: string;
+    /** Question only: exactly what went on the wire — one array of labels per question. */
+    answers?: string[][];
+    /** Question only: the numbers the answer named, empty for free text. */
+    optionNumbers?: number[];
+    /** Question only: the labels those numbers named. */
+    optionLabels?: string[];
+    /** Question only: whether this was prose the agent never offered as a choice. */
+    freeText?: boolean;
   };
 }
 

@@ -33,6 +33,7 @@
 import { createLogger } from '@/lib/logger';
 import { MAX_EVENT_DETAIL_LENGTH } from '@/lib/hooks/agent-event-types';
 import { adjudicatePendingPermission } from '@/lib/hooks/permission-adjudication';
+import { OPENCODE_QUESTION_TOOL_NAME } from '@/lib/hooks/pending-decision-kind';
 import {
   classifyAgentEventDelivery,
   recordAgentEvent,
@@ -193,7 +194,10 @@ function recordQuestion(
     target.worktreeId,
     OPENCODE_CLI_TOOL_ID,
     instanceId,
-    'question',
+    // Issue #2040: the marker `structuredEvents.pendingDecisions[].kind` is
+    // recovered from, named once in `pending-decision-kind` so the writer here
+    // and the reader in `current-output-builder` cannot drift apart.
+    OPENCODE_QUESTION_TOOL_NAME,
     event.receivedAt
   );
   logger.info('opencode-question-recorded', {
