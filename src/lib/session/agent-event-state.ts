@@ -46,7 +46,12 @@ import {
   type AgentEventType,
 } from '@/lib/hooks/agent-event-types';
 import type { AskUserQuestionSpec } from '@/lib/hooks/ask-user-question-payload';
-import { ASK_USER_QUESTION_TOOL } from '@/lib/hooks/permission-request-payload';
+// Issue #2100: the shared list of tool names that mean "a human is being asked
+// to CHOOSE". Pure — its own only import is `permission-request-payload`, which
+// this module already reached for `ASK_USER_QUESTION_TOOL` — and importing it
+// here rather than repeating `'question'` is what keeps the release rule below
+// and `pendingDecisionKind`'s reader from drifting apart.
+import { QUESTION_DECISION_TOOL_NAMES } from '@/lib/hooks/pending-decision-kind';
 // Issue #1899: type-only, so nothing in the source registry's module graph —
 // `better-sqlite3` included — is pulled into this module at runtime.
 import type { AgentSourceCapabilities } from '@/lib/hooks/sources/types';
@@ -1915,6 +1920,68 @@ export function reportPermissionRequestPending(
 }
 
 /**
+ * Report that a QUESTION dialog is open, naming the decision it is answered by
+ * (Issue #2100).
+ *
+ * ## Why this is not {@link reportPermissionRequestPending}
+ *
+ * That function is a *forecast*: `source: 'permission-request'`, no id, no
+ * payload, and `confirmedAt: null`, which bounds the record at
+ * {@link DIALOG_PENDING_MAX_MS}`.predicted` — 20 seconds — until something
+ * corroborates it. It was the only exported way to say "a human is blocked", so
+ * opencode's ingest called it for `question.asked` too, and that one call cost
+ * three separate facts:
+ *
+ *  1. the `que_…` the frame carried was **discarded** (`decisionId: null`), so
+ *     `current-output-builder`'s addressable-decision gate could never pass and
+ *     `promptData.decisionId` was null while the server was holding the id;
+ *  2. `source` read `permission-request` — "a dialog is about to be drawn" — for
+ *     an event that is the agent's own proof that one **is** drawn;
+ *  3. the record **expired after 20 s**. Measured on 1.18.23: at t+20 s
+ *     `pendingDecisions` emptied, `dedupDropped.dialogTimedOut` incremented and
+ *     `sessionStatus` flipped from `waiting` back to `ready` with the question
+ *     still on screen and the agent still blocked — opencode publishes no
+ *     `session.idle` at all while a question is pending (§27.4).
+ *
+ * A question is proof, so it is opened as `'notification'`: confirmed on
+ * arrival, bounded by `DIALOG_PENDING_MAX_MS.confirmed`, and released by the
+ * `post_tool_use` the answer produces exactly as an approval is.
+ *
+ * Names no tool and no event word — both arrive as values, from the ingest that
+ * owns them — so this module keeps the property that it can be read without
+ * knowing which agent is on the other end.
+ *
+ * @param toolName - The marker `pendingDecisionKind` recovers the kind from
+ * @param decisionId - The agent's own id for the question, or null when the
+ *   payload named none (the record is then anonymous, as before)
+ * @param detail - The event detail a bootstrapped display record carries
+ * @param at - Epoch ms; defaults to now
+ */
+export function reportQuestionPending(
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  instanceId: string | undefined,
+  input: { toolName: string; decisionId: string | null; detail: string },
+  at: number = Date.now(),
+): void {
+  const key = buildCompositeKey(worktreeId, cliToolId, instanceId);
+  openDecision(key, currentGeneration(key), {
+    source: 'notification',
+    at,
+    // The question TEXT is not the dialog's `message`: it is published as
+    // `promptData.askUserQuestion`, from the episode `recordAskUserQuestion`
+    // holds, so that one parse feeds the summary and the answerable numbers.
+    message: null,
+    toolName: input.toolName,
+    // A question grants nothing that outlives it — there is no `Allow always`
+    // to state the size of.
+    patterns: null,
+    decisionId: input.decisionId,
+    bootstrapDisplay: { event: 'notification', at, detail: input.detail },
+  });
+}
+
+/**
  * The open dialog this instance's structured events imply, or null.
  *
  * Bounded exactly like {@link getStructuredSessionState}: a record from a
@@ -2070,7 +2137,24 @@ function applyAskUserQuestionTransition(key: string, record: AgentEventRecord): 
       // reachable when the operator's own settings.json registers a wider
       // matcher than the injected `AskUserQuestion` one — the two files are
       // concatenated, not substituted (#1722).
-      if (record.detail !== ASK_USER_QUESTION_TOOL) askUserQuestion.delete(key);
+      //
+      // Issue #2100: the exemption is the whole QUESTION vocabulary, not
+      // Claude's one spelling. opencode names its question tool `question`, and
+      // it publishes a tool part for the same call: measured on 1.18.23 in an
+      // isolated HOME, `question.asked` and
+      // `message.part.updated(tool=question, status=running)` arrive **in the
+      // same millisecond**, in that order (§27.3). Under the old test the
+      // second frame read as "the agent moved on to another tool" and deleted
+      // the episode 1 ms after the ingest recorded it, which is why
+      // `pendingDecisions[].questionOptions` and `promptData.askUserQuestion`
+      // were null for every opencode question. Claude is unaffected —
+      // `AskUserQuestion` is the first member of the same list — and the cost
+      // is that a hook tool literally named `question` no longer releases the
+      // episode, which is the same name `pendingDecisionKind` already reads as
+      // "this record is a question" for every tool.
+      if (!QUESTION_DECISION_TOOL_NAMES.includes(record.detail ?? '')) {
+        askUserQuestion.delete(key);
+      }
       return;
     case 'notification':
       if (record.detail === 'idle_prompt') askUserQuestion.delete(key);

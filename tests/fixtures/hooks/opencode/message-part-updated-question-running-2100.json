@@ -1,0 +1,40 @@
+{
+  "id": "evt_0000000000000000000000000",
+  "type": "message.part.updated",
+  "properties": {
+    "sessionID": "ses_0000000000000000000000000",
+    "part": {
+      "type": "tool",
+      "tool": "question",
+      "callID": "toolu_0000000000000000000000000",
+      "state": {
+        "status": "running",
+        "input": {
+          "questions": [
+            {
+              "header": "Colour preference",
+              "question": "Which colour do you prefer?",
+              "options": [
+                {
+                  "label": "Red",
+                  "description": "The colour red"
+                },
+                {
+                  "label": "Blue",
+                  "description": "The colour blue"
+                }
+              ]
+            }
+          ]
+        },
+        "time": {
+          "start": 1787742117489
+        }
+      },
+      "id": "prt_0000000000000000000000000",
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_0000000000000000000000000"
+    },
+    "time": 1787742117489
+  }
+}

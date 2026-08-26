@@ -901,6 +901,35 @@ export interface PromptData {
    * them on its exit-10 output so the caller is told what `respond` will take.
    */
   decisionOptions?: Array<{ number: number; label: string; reply: string }>;
+  /**
+   * The agent's own id for the decision this dialog is (Issue #1932 / #2100).
+   *
+   * Mirrors: src/lib/session/structured-prompt.ts
+   * StructuredPromptWaitingData.decisionId.
+   *
+   * `null` is a real answer — "this server looked and there is no addressable
+   * decision" — and is distinct from the field being absent, which means a
+   * daemon from before #2031 sent no such key at all. Present for BOTH kinds of
+   * addressable decision since #2100: an approval, whose replies are
+   * {@link decisionOptions}, and a question, whose replies are the numbered
+   * choices published on `structuredEvents.pendingDecisions[].questionOptions`.
+   * The two are never published together — see the note on
+   * `readPromptQuestionChoices`.
+   */
+  decisionId?: string | null;
+  /**
+   * What the agent asked, when this dialog is an `AskUserQuestion`-style call
+   * (Issue #1726).
+   *
+   * Mirrors: src/lib/session/structured-prompt.ts
+   * StructuredAskUserQuestionSummary.
+   *
+   * Whether the numbers here may be ANSWERED is not a property of this field:
+   * it is `decisionId` plus `questionCount === 1` plus the absence of
+   * {@link decisionOptions}. Claude publishes this summary for a picker only
+   * its pane can see, with no id to deliver an answer to.
+   */
+  askUserQuestion?: { question: string; labels: string[]; questionCount: number };
   [key: string]: unknown;
 }
 
