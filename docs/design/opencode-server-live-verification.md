@@ -4799,3 +4799,174 @@ Response sent.
 - `src/cli/types/api-responses.ts` — `PromptData` に 2 フィールド追加
 - `docs/design/opencode-server-live-verification.md` — **§4.6（CommandMate 経由のハーネス）** と本節
 - `tests/fixtures/hooks/opencode/message-part-updated-question-running-2100.json` — 欠陥 2 の一次証拠
+
+---
+
+## 28. Issue 2108: CommandMate 再起動後に生きている opencode ペインへ購読を戻す（opencode **1.18.23** / 2026-08-26）
+
+「ターミナルは動いて見えるのに HTTP 経路だけ死んでいる」不具合。CommandMate を再起動すると、
+tmux ペインも opencode サーバも生きているまま `POST /api/worktrees/<id>/opencode/session` が
+**409 `NO_OPENCODE_PORT`** を返し続ける。
+
+### 28.1 結論サマリ
+
+- **Issue 本文の原因分析（5 点）は実測でそのまま裏取りできた。** `getAssignedOpencodePort()` は
+  in-memory の `assignments` しか見ず、そこに書くのは `rememberOpencodePort()` と
+  `recoverOpencodePort()` の 2 本だけで、**プロセス起動時にファイルから読む経路が無い**。
+  `recoverOpencodePort()` の唯一の呼び出し連鎖は `launchSession()`（「セッションが既にある」分岐）
+  → `resumeOpencodeEventStream()` で、`POST /send` は `isRunning` が真なら `startSession` を通らない。
+  `server.ts` に opencode の再アタッチ経路は無かった。
+- **本文と食い違った点が 2 つある。どちらも実測を正とした。**
+  1. **`recoverOpencodePort()` は「必要なことを全部やって」はいない。** やるのは
+     *呼び手が独立に持ってきた* `worktreePath` との照合であって、**永続ファイルを起点にした sweep が
+     記録値をそのまま渡すと、この guard は恒真になる**（§28.5 で実測）。したがって sweep は
+     worktree のパスを**データベース**（直前に `initializeWorktrees()` が再スキャンしたもの）から引き、
+     ファイル側の記録値と突き合わせる。ファイルに自分自身を保証させない。
+  2. **「tmux ペインが実在するものだけ」を `tmux list-sessions` 1 回では実装できない。**
+     Issue #1922 §4 D4 の ESLint 規則が `src/lib/tmux/**` を CLITool gateway の外から触らせない
+     （`no-restricted-imports` の静的形に加え、`no-restricted-syntax` で **動的 `import()` も塞いでいる。
+     こちらに allowlist は無い**）。実装は `ICLITool.isRunning()`（gateway の 5 経路の 1 つ）を
+     エントリごとに並列で呼ぶ。コストは sweep 1 回の `list-sessions` ではなく行ごとの `has-session`。
+- 版は **1.18.23**。Issue 本文は 1.18.22 と書いているが、計測時点で PATH にあるのは 1.18.23 だった
+  （`opencode --version` / `GET /global/health` の `version` とも）。**1.18.22 では再測していない。**
+- 修正は `src/lib/hooks/sources/opencode/reattach.ts`（新規）と `server.ts` の起動シーケンス 1 箇所。
+  **`recoverOpencodePort` / `resumeOpencodeEventStream` は 1 行も変えていない**（本文の推奨どおり）。
+
+### 28.2 隔離の確認（毎回の関門）
+
+§4.6 の手順。私設 tmux サーバ `-L cm2108` を `HOME=<scratchpad>/home` で起こし、ペインの `HOME` を
+`printenv` で実測してから CommandMate dev server（4713）へ `$TMUX` で向けた。
+
+```
+$ tmux -L cm2108 send-keys -t '=probe:' -l -- "printenv HOME > $SP/probe.txt"; tmux -L cm2108 send-keys -t '=probe:' Enter
+$ cat $SP/probe.txt
+<scratchpad>/home
+
+$ ps eww -p <opencode pid> | tr ' ' '\n' | grep '^HOME='
+HOME=<scratchpad>/home
+
+$ curl -sS http://127.0.0.1:4255/path
+{"home":"<scratchpad>/home","state":"<scratchpad>/home/.local/state/opencode",
+ "config":"<scratchpad>/home/.config/opencode",
+ "worktree":"<scratchpad>/work","directory":"<scratchpad>/work"}
+```
+
+`auth.json` は mode 600 で複製し検証後に削除した。モデルは config で
+`github-copilot/claude-sonnet-4.6` に固定し、**TUI のモデルピッカーは一度も開いていない**。
+検証後、`opencode.db` は scratchpad 側にだけ生成されていた（実 HOME 側は無傷）。
+
+> **`GET /path` は 1 回では返らないことがある。** 計測機は load average 16 で、opencode の HTTP
+> サーバは起動直後 30〜50 秒のあいだ応答が断続した（`curl -m 6` が 6 回連続でタイムアウトしたあと、
+> 次の 1 回が 12 ms で返る）。関門は「答えるまで撃つ」であって「1 回で答えること」ではない。
+
+### 28.3 再現（修正前）
+
+opencode ペインを起動 → CommandMate dev server を SIGTERM → 同じ env で起動し直す。
+tmux ペインと opencode サーバはどちらも生き残っている。
+
+```
+$ cat ~/.commandmate/data/opencode-ports-2108.json
+{"work:opencode":{"port":4255,"worktreePath":"<scratchpad>/work","updatedAt":1787757684159}}
+
+$ curl -sS http://127.0.0.1:4255/global/health
+{"healthy":true,"version":"1.18.23"}                       ← サーバは生きている
+
+$ curl -X POST .../api/worktrees/work/opencode/session -d '{"action":"list","instanceId":"opencode"}'
+{"error":"No opencode server is attached to this instance","code":"NO_OPENCODE_PORT"}   http 409
+
+$ curl -sS .../api/worktrees/work/opencode/session
+{"instances":[{"instanceId":"opencode", … ,"live":false}]}
+
+$ curl -sS .../api/worktrees/work/instances/opencode
+connected = False
+
+$ curl -sS '.../api/worktrees/work/current-output?cliTool=opencode&instance=opencode'
+isRunning = True   source.kind = scraper   degradedReason = not_subscribed
+```
+
+**壊れているのが HTTP 経路だけ**であることの一次証拠がこの並び。`current-output` は
+`isRunning: true` を返し続けるので、画面を見ているかぎり異常が見えない。
+
+### 28.4 修正後（同じ手順、メッセージは 1 通も送っていない）
+
+```
+{"action":"opencode-port-recovered",  "data":{"worktreeId":"work","port":4255,"version":"1.18.23"}}
+{"action":"opencode-event-stream-attached","data":{"worktreeId":"work","port":4255,"activity":"idle"}}
+{"action":"opencode-reattach-complete","data":{"persisted":1,"candidates":1,"reattached":1,"skipped":0}}
+opencode streams reattached: 1/1 live pane(s) (persisted=1 skipped=0)
+
+POST .../opencode/session         -> 200 {"action":"list","accepted":true}
+GET  .../opencode/session         -> live: true
+GET  .../instances/opencode       -> connected: true (providers=4, agents=4)
+GET  .../current-output           -> kind=sse  liveness=live  probedActivity={"activity":"idle"}
+```
+
+sweep 全体は **7 ms**（`opencode-port-recovered` 15:49:26.809 → `-complete` 15:49:26.816）。
+`server.ts` は sweep を await しない（`void (async () => …)()`）ので、この 7 ms すら
+起動シーケンスには乗らない。
+
+`structuredEvents.source.liveness === 'live'`（#2054 の受入条件）は、購読が張られてはじめて
+`kind: 'sse'` になるので、**ポート復元だけでは足りない**。`resumeOpencodeEventStream()` が
+`attachOpencodeEventStream()` まで進んで `probeActivity` を撃つところまでが 1 単位である。
+
+### 28.5 ポートが死んでいる／ペインが死んでいる場合（修正後）
+
+CommandMate を落としてから **opencode プロセスだけ**を kill し（ペインのシェルは残るので
+tmux セッションは生きたまま）、`wt-alpha` / `wt-beta` の死んだ行をファイルに足して再起動した。
+
+```
+{"action":"opencode-port-recovery-unhealthy","data":{"worktreeId":"work","port":4255}}
+{"action":"opencode-reattach-skipped",       "data":{"worktreeId":"work","port":4255}}
+{"action":"opencode-reattach-complete","data":{"persisted":3,"candidates":1,"reattached":0,"skipped":1}}
+opencode streams reattached: 0/1 live pane(s) (persisted=3 skipped=1)
+
+POST .../opencode/session -> 409 NO_OPENCODE_PORT      ← 復元していない
+```
+
+- `persisted: 3` に対し `candidates: 1`。`wt-alpha` / `wt-beta` は **health check を 1 度も撃たれずに**
+  落ちている（`isRunning` が偽）。この機のユーザ実ファイルは 8 行中 7 行がこの形だった。
+- ポートを別プロセスに奪われた場合は `probeOpencodeHealth` の content-type 検証（#1931）で弾かれ、
+  *別の opencode* が居座った場合は購読 watchdog の既存 `port_identity_changed` に乗る。
+  **どちらもこの Issue では 1 行も書いていない。**
+
+### 28.6 worktreePath guard が恒真になる件（本文との食い違い 1 の一次証拠）
+
+最初の実装は `recoverOpencodePort(target, <ファイルに記録されたパス>)` を呼んでいた。
+統合テスト（実ソケット）で、**データベースが別のパスを答える worktree のエントリがそのまま復元された**。
+
+```
+expected { candidates: 1, reattached: 0, skipped: 1 }
+received { candidates: 1, reattached: 1, skipped: 0 }
+```
+
+`recoverOpencodePort` の `persisted.worktreePath !== worktreePath` は、2 辺の出所が違うときにしか
+意味を持たない。launch 経路では呼び手が worktree の実パスを持っているので成立していたが、
+**ファイル起点の sweep では自分で書いた値を自分で照合することになる**。修正後は
+`getWorktreeById(db, worktreeId).path` を渡し、DB が知らない worktree は probe せずに落とす。
+
+### 28.7 付随して観測したこと（この Issue の範囲外）
+
+- **起動直後の attach が高負荷下で恒久的に落ちる。** 計測中 3 回とも `opencode-server-not-reachable`
+  （`attempts: 5`）で、`opencode --port` の起動から HTTP が答えるまで 38〜50 秒かかっていた。
+  `OPENCODE_ATTACH_HEALTH_DELAYS_MS` は 0/0.5/1/2/4 秒＝7.5 秒窓（#1900）なので届かない。
+  **この Issue の sweep は、その取りこぼしも次の再起動で回収する**（実測: attach に失敗したペインが
+  再起動後に `liveness: live` になった）が、一次の窓を広げる話は別 Issue である。
+- **ユニットテスト群が実ユーザの `~/.commandmate/opencode-ports.json` に書いている。**
+  `wt-1898` / `wt-recheck` / `wt-respond` / `wt-alpha` / `wt-beta` を使う 4 ファイル
+  （`tests/unit/hooks/structured-decision-response-1898.test.ts`、
+  `tests/unit/hooks/pending-decision-recheck-1898.test.ts`、
+  `tests/unit/hooks/sources/opencode-permission-1898.test.ts`、
+  `tests/unit/lib/auto-yes-manager.test.ts`）が `CM_OPENCODE_PORT_FILE` を stub せずに
+  `rememberOpencodePort()` を呼ぶため、テストを回すたびに実ファイルの `updatedAt` が動く。
+  **#2108 以前からの既存挙動**で、sweep 側は `isRunning` で弾くので実害は無いが、
+  ファイルの中身が「テスト由来の死んだ行」で埋まる原因はこれである。
+
+### 28.8 変更したファイル
+
+- `src/lib/hooks/sources/opencode/reattach.ts` — 新規。永続ポートの sweep 本体
+- `server.ts` — `initializeWorktrees()` の直後に **await しない** 1 呼び出し
+- `tests/unit/hooks/sources/opencode-reattach-2108.test.ts` — どの行が候補になるか
+- `tests/integration/opencode-reattach-startup-2108.test.ts` — 実ソケットに対する復元・拒否
+- `tests/unit/server-opencode-reattach-2108.test.ts` — `server.ts` の配線（#1804 と同じ「バイトを読んで
+  ブロックを実行する」形。起動をブロックしないことを、後続文の実行順で検査する）
+- `docs/design/opencode-server-live-verification.md` — 本節
