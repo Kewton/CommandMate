@@ -13,6 +13,7 @@ import { sanitizeTerminalOutput } from '@/lib/security/sanitize';
 import { MAX_TERMINAL_OUTPUT_LENGTH } from '@/config/terminal-output-config';
 import { computeTerminalUpdate } from '@/lib/terminal/terminal-diff';
 import { normalizeTerminalOutputForDisplay } from '@/lib/terminal/terminal-display-normalizer';
+import { normalizeOpencodeTerminalOutputForDisplay } from '@/lib/terminal-display-normalize';
 import { useTerminalScroll } from '@/hooks/useTerminalScroll';
 import { useTerminalSearch } from '@/hooks/useTerminalSearch';
 import { TerminalSearchBar } from '@/components/worktree/TerminalSearchBar';
@@ -47,6 +48,15 @@ export interface TerminalDisplayProps {
    * display changes.
    */
   compactTuiLayoutPadding?: boolean;
+  /**
+   * Issue #2049: while compacting, keep visually-blank rows that paint columns
+   * with a background colour. opencode draws its `ctrl+p` palette and model
+   * picker as a background-painted panel whose separator rows carry no glyphs;
+   * without this they read as layout padding and the panel loses its top band
+   * and section separators. Ignored unless `compactTuiLayoutPadding` is true.
+   * Default false — claude / codex keep the exact Issue #1172 rule.
+   */
+  preservePaintedPanelRows?: boolean;
   /** Additional CSS classes */
   className?: string;
 }
@@ -92,6 +102,7 @@ export const TerminalDisplay = memo(function TerminalDisplay({
   onScrollChange,
   disableAutoFollow = false,
   compactTuiLayoutPadding = false,
+  preservePaintedPanelRows = false,
   className = '',
 }: TerminalDisplayProps) {
   const { scrollRef, autoScroll, handleScroll, scrollToBottom, scrollToTop } =
@@ -108,13 +119,14 @@ export const TerminalDisplay = memo(function TerminalDisplay({
   // yields an identical `displayOutput` is `Object.is`-equal here, so downstream
   // memos/effects do not re-render, re-search or re-scroll.
   const rawOutput = output ?? '';
-  const displayOutput = useMemo(
-    () =>
-      compactTuiLayoutPadding
-        ? normalizeTerminalOutputForDisplay(rawOutput)
-        : rawOutput,
-    [compactTuiLayoutPadding, rawOutput]
-  );
+  const displayOutput = useMemo(() => {
+    if (!compactTuiLayoutPadding) return rawOutput;
+    // Issue #2049: same collapse rule, but opencode's painted panel rows count
+    // as structure instead of padding.
+    return preservePaintedPanelRows
+      ? normalizeOpencodeTerminalOutputForDisplay(rawOutput)
+      : normalizeTerminalOutputForDisplay(rawOutput);
+  }, [compactTuiLayoutPadding, preservePaintedPanelRows, rawOutput]);
 
   // [Issue #47] Terminal search - scrollRef is reused as containerRef
   const {

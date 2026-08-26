@@ -1,18 +1,21 @@
 /**
- * Live throwaway `claude` session for the detection canary (Issue #1727).
+ * Live throwaway agent session for the detection canary (Issue #1727; per-tool
+ * since #2050).
  *
  * Each scenario gets its own tmux session on the canary's private socket and its
  * own working directory, so a frame can never contain another scenario's
- * scrollback. Geometry and history-limit come from the production constants so
- * the captured frames have the same shape production detects on (a 200x1000
- * pane, where the interactive block sits at the top and Claude's task panel at
- * the very bottom — the layout Issue #1708 turns on).
+ * scrollback. Geometry, history-limit, the readiness row and the launch flags
+ * all come from the scenario's {@link CanaryToolProfile}, which reads them from
+ * the production constants — a 200x1000 pane for claude (where the interactive
+ * block sits at the top and the task panel at the very bottom, the layout Issue
+ * #1708 turns on) and an 80x200 pane for opencode (the geometry
+ * `launchSession()` resizes every real opencode session to).
  */
 
-import { TMUX_HISTORY_LIMIT, TUI_PANE_HEIGHT, TUI_PANE_WIDTH } from '@/config/tmux-pane-config';
 import { stripAnsi } from '@/lib/detection/ansi';
 import { findStartupOverlay, findUpstreamFault } from './expectations';
-import { CANARY_CAPTURE_LINES, probeFrame } from './probe';
+import { probeFrame } from './probe';
+import type { CanaryToolProfile } from './tool-profiles';
 import type { PrivateTmuxServer } from './tmux-private';
 import {
   ObservationTimeoutError,
@@ -22,15 +25,6 @@ import {
   type SpecialKey,
 } from './types';
 
-/**
- * Idle footer Claude renders when the composer is accepting input
- * ("? for shortcuts"). Deliberately a RAW-TEXT check rather than a detector
- * call: if readiness were gated on `detectSessionStatus()` saying `ready`,
- * scenario 1 would assert something the gate had already guaranteed.
- */
-const COMPOSER_READY_PATTERN = /\?\s+for\s+shortcuts/i;
-
-const DEFAULT_STARTUP_TIMEOUT_MS = 90_000;
 const STARTUP_POLL_INTERVAL_MS = 1_000;
 /** Pause between typing text and pressing Enter, so the TUI has composed it. */
 const SUBMIT_SETTLE_MS = 700;
@@ -45,44 +39,15 @@ export const UPSTREAM_FAULT_GRACE_MS = 180_000;
 
 export const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
 
-/**
- * Permission mode every canary session is launched in (Issue #1847).
- *
- * Claude Code 2.1.236 made **auto mode** the default — "Claude checks each tool
- * call for risky actions … runs the ones it assesses as lower-risk, and blocks
- * the rest" — and in that mode the approval dialog this canary exists to read
- * is simply not drawn. Measured on 2026-08-20 (2.1.236 / 2.1.237): in one
- * throwaway HOME the FIRST `claude` still starts in manual mode and every later
- * one migrates itself to auto, so a multi-scenario run silently stopped
- * measuring what a single-scenario run measured. It surfaced as a startup
- * timeout rather than as a wrong verdict, because the ready footer differs
- * between the modes (`? for shortcuts` only exists in manual).
- *
- * Pinned on the command line rather than in the throwaway `settings.json`:
- * writing `permissions.defaultMode` there puts an interactive
- * "Make auto mode your default permission mode?" choice in front of the
- * composer instead (measured — `defaultMode: "default"` is no longer one of the
- * modes `--permission-mode` accepts). This is a statement about the canary,
- * not about what a CommandMate session gets.
- */
-export const CANARY_PERMISSION_MODE = 'manual';
-
-/**
- * The shell command tmux runs for a scenario.
- *
- * @param baseCommand - `<claude>` for a bare scenario, or the production
- *   launcher's `'<claude>' --settings '<file>'` for a hook scenario
- */
-export function buildLaunchCommand(baseCommand: string): string {
-  return `${baseCommand} --permission-mode ${CANARY_PERMISSION_MODE}`;
-}
-
 export interface CanarySessionOptions {
   tmux: PrivateTmuxServer;
+  /** Geometry, readiness row, startup overlays and launch flags for this tool. */
+  profile: CanaryToolProfile;
   sessionName: string;
   workingDirectory: string;
   isolatedHome: string;
-  claudeBinary: string;
+  /** Absolute path of the tool's executable, as resolved by the preflight. */
+  toolBinary: string;
   log: (message: string) => void;
   startupTimeoutMs?: number;
   /**
@@ -91,7 +56,7 @@ export interface CanarySessionOptions {
    * For a hook scenario this is `'<claude>' --settings '<file>'`, produced by
    * the PRODUCTION launcher `buildClaudeLaunchCommand` — the same string a real
    * CommandMate session is started with, so the settings file the run observes
-   * against is the one users get. Defaults to {@link claudeBinary}.
+   * against is the one users get. Defaults to {@link toolBinary}.
    */
   launchCommand?: string;
   /**
@@ -100,12 +65,12 @@ export interface CanarySessionOptions {
    * Called with the frame's own detection verdicts, because the structured
    * layer's release rule needs the scraper's answer for the SAME frame — see
    * `CanaryHookReceiver.observe`. Omitted for the scenarios that run a bare
-   * `claude`, which leaves `hooks` undefined.
+   * CLI, which leaves `hooks` undefined.
    */
   observeHooks?: (scraper: Observation) => HookObservation;
 }
 
-/** A running `claude` in a throwaway tmux session. */
+/** A running agent CLI in a throwaway tmux session. */
 export class CanarySession implements ScenarioDriver {
   private constructor(
     private readonly options: CanarySessionOptions,
@@ -114,19 +79,19 @@ export class CanarySession implements ScenarioDriver {
   ) {}
 
   /**
-   * Start `claude`, verify HOME isolation actually took effect, then wait until
+   * Start the tool, verify HOME isolation actually took effect, then wait until
    * the composer accepts input (dismissing first-run overlays on the way).
    */
   static async start(options: CanarySessionOptions): Promise<CanarySession> {
-    const { tmux, sessionName, workingDirectory, isolatedHome, claudeBinary } = options;
+    const { tmux, profile, sessionName, workingDirectory, isolatedHome, toolBinary } = options;
 
     await tmux.newSession({
       sessionName,
       workingDirectory,
-      command: options.launchCommand ?? claudeBinary,
-      width: TUI_PANE_WIDTH,
-      height: TUI_PANE_HEIGHT,
-      historyLimit: TMUX_HISTORY_LIMIT,
+      command: options.launchCommand ?? toolBinary,
+      width: profile.paneWidth,
+      height: profile.paneHeight,
+      historyLimit: profile.historyLimit,
       env: { HOME: isolatedHome, TERM: 'xterm-256color', CM_DETECTION_CANARY: '1' },
     });
 
@@ -143,7 +108,7 @@ export class CanarySession implements ScenarioDriver {
       );
     }
     const session = new CanarySession(options, reportedHome);
-    await session.waitForComposer(options.startupTimeoutMs ?? DEFAULT_STARTUP_TIMEOUT_MS);
+    await session.waitForComposer(options.startupTimeoutMs ?? profile.startupTimeoutMs);
     return session;
   }
 
@@ -153,8 +118,11 @@ export class CanarySession implements ScenarioDriver {
 
   /** Capture the pane exactly as production does, then run both detectors. */
   async observe(): Promise<Observation> {
-    const frame = await this.options.tmux.capturePane(this.options.sessionName, CANARY_CAPTURE_LINES);
-    const observation = probeFrame(frame);
+    const frame = await this.options.tmux.capturePane(
+      this.options.sessionName,
+      this.options.profile.captureLines
+    );
+    const observation = probeFrame(frame, this.options.profile.id);
     const observeHooks = this.options.observeHooks;
     // Sampled here rather than in the scenario so `waitFor`, `submitPrompt` and
     // the fixture writer all see the same paired frame + structured state — and
@@ -243,10 +211,13 @@ export class CanarySession implements ScenarioDriver {
   /**
    * Wait until the composer is usable, dismissing first-run overlays.
    *
-   * Claude's trust / theme / release-notes screens eat the first keystrokes, so
-   * a prompt sent too early silently lands in the wrong place (a known trap in
-   * this Issue). Seeding `~/.claude.json` normally prevents them; this loop is
-   * the defense for the version that adds a new one.
+   * Claude's trust / theme / release-notes screens (and opencode's
+   * `Connect a provider` chooser) eat the first keystrokes, so a prompt sent too
+   * early silently lands in the wrong place (a known trap in this Issue).
+   * Seeding the tool's config normally prevents them; this loop is the defense
+   * for the version that adds a new one. The row it waits for is
+   * `profile.composerReadyPattern`, which is deliberately NOT a row any status
+   * branch reads — see rule 1 in `tool-profiles.ts`.
    */
   private async waitForComposer(timeoutMs: number): Promise<void> {
     const deadline = Date.now() + timeoutMs;
@@ -257,7 +228,7 @@ export class CanarySession implements ScenarioDriver {
       const observation = await this.observe();
       const clean = stripAnsi(observation.frame);
 
-      const overlay = findStartupOverlay(observation.frame);
+      const overlay = findStartupOverlay(observation.frame, this.options.profile.startupOverlays);
       if (overlay) {
         if (overlay.dismissKey === null) {
           throw new Error(`canary: cannot start a session — ${overlay.fatalHint ?? overlay.id}`);
@@ -276,11 +247,11 @@ export class CanarySession implements ScenarioDriver {
         continue;
       }
 
-      if (COMPOSER_READY_PATTERN.test(clean)) return;
+      if (this.options.profile.composerReadyPattern.test(clean)) return;
 
       if (Date.now() >= deadline) {
         throw new ObservationTimeoutError(
-          `canary: claude did not reach an input-ready composer within ${Math.round(timeoutMs / 1000)}s`,
+          `canary: ${this.options.profile.executable} did not reach an input-ready composer within ${Math.round(timeoutMs / 1000)}s`,
           observation,
           timeoutMs
         );

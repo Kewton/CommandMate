@@ -1,0 +1,156 @@
+version: 1
+title: "Issue #2048: opencode の model / agent / variant を instance 設定と起動引数で指定し、ヘッダに表示する"
+goal: |
+  /pm-auto-issue2dev
+
+  https://github.com/Kewton/CommandMate/issues/2048 を実装してください。
+
+  ## 実装内容（Issue 本文から転記）
+
+  - instance 設定に `model` / `agent` / `variant` を追加し、候補を `GET /config/providers`（provider / model 一覧）と
+    `GET /agent` から取得（port 未接続時は自由入力）。launch plan
+    （`src/lib/hooks/sources/opencode/source.ts` の plan）に反映。
+  - 実行中の切替は P3-1 の `/tui/open-models` / Tab / `ctrl+t` に委ねる（`send --model` は opencode でも 400 のまま。
+    TUI の picker はグローバル既定を書き換える点に注意）。
+  - ヘッダ / instance pill に `agent · model · variant`（`message.updated.info.agent` / `info.model`、
+    variant は payload に含まれるか実測）。
+
+  ## 受入条件（Issue 本文から転記）
+
+  - instance 設定で `plan` / `openai/gpt-5` / `high` を指定して起動 → pane の footer と `message.updated` が一致する。
+  - claude / codex の instance 設定 UI とスナップショットが不変。
+
+  ## オーケストレーターが develop 上で実測した前提
+
+  1. **`GET /config/providers` の読み手は既に居ます。** #2042 が
+     `src/lib/hooks/sources/opencode/client.ts` に `fetchOpencodeModelContextLimit()` を追加しており、
+     同じ endpoint から `limit.context` を読んでいます（`models` は配列ではなく**オブジェクト**、
+     `limit.input` は `context - output` に一致するので取り違えやすい、という実測メモつき）。
+     **同じ endpoint の 2 人目の読み手を作らず、既存の関数を再利用するか、そこから派生させてください。**
+  2. `send/route.ts` は `copilot` / `antigravity` 以外の `model` を 400 で拒否します（確認済み）。
+     Issue の指示どおり **opencode でも 400 のまま**にしてください（実行中の切替は #2046 の担当）。
+  3. `src/lib/detection/model-info-extractor.ts` には
+     「opencode は reasoning effort をペインのどこにも出さない（17 の live フレームで実測）」という docblock があります。
+     effort が null なのは読み手の不足ではありません。**variant が effort 相当**という Issue の想定を、
+     `message.updated` の payload に variant が実際に載るか**実測してから**実装してください。
+     載らないなら「載らない」と記録し、ヘッダ表示は載る項目だけにしてください。**推測で埋めないこと。**
+  4. `structuredEvents` には既に `session`（#2040）/ `sessionContext`（#2042）/ `sessionDiff`（#2043）があります。
+     追加するなら **additive** で、既存キーの型・意味・有無を変えないでください。
+
+  ## モデルピッカーを開かないこと（実機計測時の必須事項）
+
+  opencode の TUI モデルピッカーは**グローバル既定のモデルを書き換えます**。
+  実機計測では設定ファイルでモデルを固定し、ピッカーは一度も開かないでください（下の安全規則も参照）。
+
+  ## 他ワーカーとの取り決め（並列開発中）
+
+  - **いま #2050（detection canary）と #2049（端末ビューの空行圧縮）が並列で走っています。**
+  - **あなたが所有するのは** `src/components/worktree/AgentSettingsPane.tsx`・
+    `WorktreeDetailSubComponents.tsx`・`src/lib/hooks/sources/opencode/**`・
+    `src/lib/detection/model-info-extractor.ts`・`src/lib/db/agent-instances-db.ts`・
+    `src/app/api/worktrees/[id]/send/route.ts` **です。**
+  - **触らないでください**: `TerminalSplitPaneContent.tsx` / `MobileTerminalTab.tsx` / `TerminalDisplay.tsx`
+    （#2049 の所有）、`src/lib/detection/tools/**` と `scripts/canary/**`（#2050 の所有）。
+  - `docs/design/opencode-server-live-verification.md` に追記するときは
+    **`## 20.` から始まる新しい節**を作ってください。
+    **§11〜§17 は使用済み、§18 は #2050、§19 は #2049 が使用予定**です。
+  ## 実機計測の安全規則（厳守）
+
+  この Issue は opencode 1.18.22 の実機計測が受入条件です。**手順は
+  `docs/design/opencode-server-live-verification.md` §4「再現環境（ハーネス）」に完全に文書化
+  されているので、まずそれを読み、そのとおりに再現してください。** 自分で新しい隔離方法を発明しないこと。
+
+  §4 が明記している、破ると実害が出る点:
+
+  - **`HOME` ごと差し替える。** opencode は `$HOME` から config（`~/.config/opencode`）・
+    state・データ（`~/.local/share/opencode`、**`opencode.db` を含む**）を解決し、
+    セッションを 1 回動かすだけで `opencode.db` に書き込みます。
+    HOME を差し替えないと**ユーザーの実データを汚します**。
+  - **隔離できていることを `GET /path` で確認する。** 返る `home` / `state` / `config` /
+    `worktree` / `directory` が**すべて scratchpad 配下**であることを目視ではなく実際に確認すること。
+  - **TUI のモデルピッカーを開かない。** opencode はピッカーで**既定モデルを書き換えます**
+    （Claude の `/model` overlay と同じ罠）。§4 のとおり config でモデルを固定し、
+    ピッカーは一度も開かないこと。
+  - **`auth.json` は mode 600 で複製し、検証後に削除する。**
+
+  加えて tmux について:
+
+  - **実 tmux を触る検証は必ず `tmux -L <専用socket>` で行う。** `-L` / `-S` は `$TMUX` より優先されます。
+    あなたは tmux ペインの中で動いていて `$TMUX` が既定サーバを指しているため、フラグ無しの
+    `tmux` 呼び出しは全て**ユーザーの本番サーバ**に届きます。
+  - **`kill-server` を `-L` 無しで書かない。** 後始末は `kill-session -t '=<name>:'`（完全一致）で。
+  - **`TMUX_TMPDIR` を隔離手段に使わない。** `$TMUX` が設定されていると完全に無視されます。
+  - **`bind-key` / `unbind-key` / `set-option -g` を既定サーバへ撃たない。**
+
+  **いま他に 2 つのワーカーが並列で走っています。**既定 tmux サーバを壊すと巻き添えになります。
+
+  ## 計測できなかった場合
+
+  隔離ハーネスが立ち上がらない、opencode が期待どおり動かない等で計測できなかったら、
+  **推測で埋めないでください。** 「計測できなかった」ことと理由を設計書と commit に書き、
+  コード側は計測に依存しない範囲だけを実装してください。
+  **推測値を実測として記録するのが、この Issue で最も避けたい失敗です。**
+  ## 作業ルール（厳守）
+
+  - **Issue 本文を書き戻さないでください。** Issue の管理はオーケストレーターが行います。
+    本文とコード／実機が食い違ったら**実測を正**とし、差異は commit メッセージと docblock に残してください。
+  - **PR を作らないでください。** commit までで止めてください。
+  - 作業は **単一 commit** にまとめてください。
+  - 新規テストファイルは `-2048` の接尾辞をつけてください。
+  - **`CHANGELOG.md` と `docs/module-reference.md` を編集しないでください**（scope 外です）。
+    代わりに次の 2 ファイルを書いてください。どちらも `dev-reports/` 配下なので commit には入りません。
+    - `dev-reports/changelog/issue-2048.md` — `CHANGELOG.md` の `## [Unreleased]` にそのまま
+      貼れる **1 エントリ**。どの節に入るかを 1 行目に HTML コメントで書く。
+      **形式は次の実例に合わせてください**（エントリは**ファイル中では 1 行**で、
+      下で折り返して見えるのは表示上の都合です）:
+
+      ```markdown
+      <!-- ### Fixed -->
+      - **fix(cli): `send` 直後の `wait` が「まだ始まっていない」を完了と読む問題を修正** (#1975): `wait` が `sessionStatus==='ready'` を完了と判定する直前に、**「このインスタンスに最後に渡されたプロンプト」と「エージェント自身が最後に報告したターン終了（`lastStopEventAt`）」を突き合わせる**ゲートを追加。`send` 直後は最新の構造化イベントが直前ターンの `stop` のままなので #1839 の `adoptTurnStart()` が何も採用せず、`turnStartedAt === null` が「決着済み」と読まれてアイドル composer をそのまま完了にしていた。
+      ```
+
+      - `- **` で始めること（集計は `grep -cE '^- \*\*'`）
+      - `(#2048)` は要約の**外**（`**` を閉じた後）に置くこと
+      - `<type>` は CLAUDE.md の規約語彙（`feat` / `fix` / `docs` / `refactor` / `test` / `chore` / `ci` / `style`）
+      - 1 エントリ＝1 行（折らない）
+    - `dev-reports/module-reference/issue-2048.md` — `docs/module-reference.md` の表に足す注記を
+      **行キー（`| \`path\` |`）ごと**に列挙する。**既存行に足すときは
+      `grep -n '^| \`<path>\`' docs/module-reference.md` を実行し、その出力（行番号つきの行キー）を
+      断片に書き写してから**書くこと。**0 件だった行への追記を指示しないでください**
+      （0 件なら「行が無いので追記指示は出さない」と書けばよい）。実例:
+
+      ```markdown
+      ## 既存行への追記
+      - `src/lib/foo/bar.ts` — 実在確認: `docs/module-reference.md:NNN`
+        追記内容: 「…（Issue #2048）」
+
+      ## 新規行
+      追記なし
+      ```
+  - 断片が無いとリリースノートと module-reference に載りません。**実装と同じ commit の時点で書くこと。**
+  - 完了したら `IMPL_COMPLETED` と出力してください。
+scope:
+  allow:
+    - "src/components/worktree/AgentSettingsPane.tsx"
+    - "src/components/worktree/WorktreeDetailSubComponents.tsx"
+    - "src/lib/hooks/sources/opencode/**"
+    - "src/lib/detection/model-info-extractor.ts"
+    - "src/lib/db/agent-instances-db.ts"
+    - "src/lib/db/migrations/**"
+    - "src/app/api/worktrees/[id]/send/route.ts"
+    - "src/app/api/worktrees/[id]/instances/**"
+    - "src/lib/cli-tools/opencode.ts"
+    - "src/lib/session/**"
+    - "src/cli/types/**"
+    - "src/types/**"
+    - "src/config/**"
+    - "locales/**"
+    - "docs/design/opencode-server-live-verification.md"
+    - "docs/user-guide/**"
+    - "tests/unit/**"
+    - "tests/integration/**"
+    - "tests/fixtures/**"
+  deny: []
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true

@@ -41,6 +41,19 @@ describe('parseArgs', () => {
     expect(help).toContain('--mutate');
     expect(help).toContain('idle');
   });
+
+  it('accepts --tool and rejects an unknown one (Issue #2050)', () => {
+    expect(parseArgs([]).tool).toBe('claude');
+    expect(parseArgs(['--tool', 'opencode']).tool).toBe('opencode');
+    expect(parseArgs(['--tool=opencode']).tool).toBe('opencode');
+    expect(() => parseArgs(['--tool', 'gemini'])).toThrow(/unknown tool/);
+    expect(() => parseArgs(['--tool'])).toThrow(/--tool needs a tool id/);
+  });
+
+  it('parses --strict-version, which defaults off (Issue #2050)', () => {
+    expect(parseArgs([]).strictVersion).toBe(false);
+    expect(parseArgs(['--strict-version']).strictVersion).toBe(true);
+  });
 });
 
 describe('selectScenarios', () => {
@@ -54,9 +67,36 @@ describe('selectScenarios', () => {
   it('rejects unknown ids instead of silently running nothing', () => {
     expect(() => selectScenarios(['typo'], [])).toThrow(/unknown scenario/);
   });
+
+  it('narrows to one tool before --only / --skip are applied (Issue #2050)', () => {
+    const opencodeIds = selectScenarios([], [], 'opencode').map(s => s.id);
+    expect(opencodeIds.length).toBeGreaterThan(0);
+    expect(opencodeIds.every(id => id.startsWith('opencode-'))).toBe(true);
+    expect(selectScenarios([], [], 'claude').some(s => s.id.startsWith('opencode-'))).toBe(false);
+  });
+
+  it('names the tool a cross-tool id belongs to rather than calling it a typo', () => {
+    // `--only opencode-idle` with no --tool reads as a typo when it is really a
+    // missing flag, and the operator would go looking for the wrong bug.
+    expect(() => selectScenarios(['opencode-idle'], [], 'claude')).toThrow(
+      /belongs to --tool opencode/
+    );
+  });
 });
 
 describe('scenario definitions', () => {
+  it('tags every scenario with the tool it drives (Issue #2050)', () => {
+    for (const scenario of SCENARIOS) {
+      expect(['claude', 'opencode'], scenario.id).toContain(scenario.tool);
+    }
+    // Hook scenarios call claude-only production code (`buildClaudeLaunchCommand`,
+    // `resolvePermissionRequest`); one tagged otherwise would start a session
+    // with no hooks at all and assert nothing.
+    for (const scenario of SCENARIOS.filter(s => s.hooks)) {
+      expect(scenario.tool, scenario.id).toBe('claude');
+    }
+  });
+
   it('gives every scenario a DIFFERENT mutant expectation, so --mutate can prove non-vacuity', () => {
     for (const scenario of SCENARIOS) {
       expect(scenario.mutantExpectation.label, scenario.id).not.toBe(scenario.expectation.label);
@@ -99,7 +139,9 @@ describe('fixture serialization', () => {
     const module = serializeFixtureModule({
       scenarioId: 'idle',
       title: 'Idle composer right after startup',
-      claudeVersion: '2.1.223 (Claude Code)',
+      toolLabel: 'Claude Code',
+      toolVersion: '2.1.223 (Claude Code)',
+      paneGeometry: '200x1000',
       capturedAtIso: '2026-08-06T08:00:00.000Z',
       expectationLabel: 'status=ready reason=input_prompt',
       passed: false,
@@ -108,6 +150,7 @@ describe('fixture serialization', () => {
     });
 
     expect(module).toContain('Claude Code version : 2.1.223 (Claude Code)');
+    expect(module).toContain('Pane geometry       : 200x1000');
     expect(module).toContain('did NOT match the expectation');
     expect(module).toContain('export const CANARY_IDLE = `');
     expect(module).toContain('\\`tick\\`');

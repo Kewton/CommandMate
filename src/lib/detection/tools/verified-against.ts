@@ -46,10 +46,21 @@ export const COPILOT_VERIFIED_AGAINST = {
   paneGeometry: '200x1000',
 } as const;
 
-/** opencode these rules were read off (#1883 / #1893 / #1896 fixtures). */
+/**
+ * opencode these rules were read off (#1883 / #1893 / #1896 fixtures; re-measured
+ * against 1.18.22 by the canary in #2050).
+ *
+ * Bumped from 1.18.21 because the frames were RE-CAPTURED, not because the
+ * version number moved: `npm run canary -- --tool opencode` drove 1.18.22 into
+ * all five states branches A0-E read (idle composer / `esc interrupt` /
+ * `Allow once   Allow always   Reject` / `/models` picker / `▣ … · <duration>`)
+ * at the production 80x200 geometry and every rule answered as it did on
+ * 1.18.21. The frames are `tests/fixtures/canary/opencode-*.ts` and the run is
+ * written up in `docs/design/opencode-server-live-verification.md` §18.
+ */
 export const OPENCODE_VERIFIED_AGAINST = {
-  version: '1.18.21',
-  capturedAt: '2026-08-21',
+  version: '1.18.22',
+  capturedAt: '2026-08-26',
   paneGeometry: '80x200',
 } as const;
 

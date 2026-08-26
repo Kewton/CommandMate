@@ -2631,6 +2631,290 @@ Issue の受入条件は「隔離サーバで question / provider エラーを�
 
 ---
 
+## 18. Issue 2050: 検出カナリアに opencode を入れる（opencode 1.18.22 / 2026-08-26）
+
+**目的**: `scripts/canary/` は #1727 以来 claude 専用で、`docs/qa/detection-canary.md` にも
+「claude 以外のツール（codex / gemini / antigravity / copilot / opencode）は未対応」と書いてあった。
+`src/lib/detection/tools/opencode/detect.ts` の規則は 1.18.21 の capture から読んだきりで、
+**インストール済みは 1.18.22** だった。本節は 1.18.22 で 5 状態を実測し直し、
+`OPENCODE_VERIFIED_AGAINST` を更新するまでの記録。
+
+### 18.1 ハーネス
+
+§4 の手順**そのまま**。新しい隔離方法は発明していない。
+
+- 使い捨て `HOME`（`mkdtemp`）。`~/.local/share/opencode/auth.json` を **mode 600 で複製**し、
+  実行後に HOME ごと削除
+- `~/.config/opencode/opencode.jsonc` で model を固定（**モデルピッカーは事前調査で一度も確定していない**）
+- 私設 tmux socket（`tmux -L cmate-canary-<pid>-<run>`）。`kill-server` は
+  `PrivateTmuxServer.killServer()` 経由でしか到達できず、必ず `-L` が前に付く
+- pane は本番と同じ **80 x `OPENCODE_PANE_HEIGHT`(200)**（`launchSession()` が実セッションを
+  resize する値）。`capture-pane -p -e -S -200`
+
+§4 に無い追加が 2 点ある。どちらも「§4 の隔離を弱めない追加」である:
+
+1. **XDG 変数を子環境から落とす**（`XDG_{CONFIG,DATA,STATE,CACHE}_HOME` / `OPENCODE_CONFIG*`）。
+   HOME を差し替えても、これらが残っていると使い捨て HOME の中から実ディレクトリへ戻れる
+2. **実ファイルの before/after 照合**を canary の guard に追加。
+   `~/.config/opencode/opencode.json{,c}` と `auth.json` は sha256、
+   `~/.local/share/opencode/opencode.db` は **size+mtime**（58MB あり、シナリオごとに 2 回ハッシュすると
+   実行そのものより重くなる）。違反は exit 3
+
+### 18.2 実測: 5 状態と検出結果（opencode 1.18.22, 80x200, 2026-08-26）
+
+`detect.ts` の**陽性分岐 A0 / A / C / D / E に 1 本ずつ**。この 5 本が opencode の status detector が
+言えることの全部なので、5 本緑＝「その版で規則がまだ成り立っている」になる。
+
+| branch | 画面 | `detectSessionStatus(frame,'opencode')` | `evidence` | Auto-Yes |
+|---|---|---|---|---|
+| E | 起動直後 `┃  Ask anything...` | `ready` / `input_prompt` | positive | 沈黙 |
+| A | 生成中 `⬝⬝⬝⬝⬝⬝⬝⬝  esc interrupt` | `running` / `opencode_processing_indicator` | positive | 沈黙 |
+| A0 | `┃   Allow once   Allow always   Reject  ctrl+f fullscreen  ⇆ select  enter con` | `waiting` / `opencode_permission_prompt`（`hasActivePrompt=false`） | positive | **見えない** |
+| C | `/models`（ヘッダ `Select model … esc`） | `waiting` / `opencode_selection_list` | positive | **見えない** |
+| D | `▣  Build · Claude Sonnet 4.6 · 12.8s` | `ready` / `opencode_response_complete` | positive | 沈黙 |
+
+**1.18.21 からの差分は無い。** 5 分岐すべてが 1.18.21 と同じ答えを返した。よって別 Issue への切り出しは不要。
+
+### 18.3 実測でわかった 4 点（推測ではない）
+
+1. **既定の permission では承認ダイアログが出ない。** 素の 1.18.22 に
+   「`ls -la` を実行して」と頼むと**そのまま実行され**、`▣ Build · … · 4.6s` で終わる。
+   A0 を観測するには使い捨て config に `permission: { bash: "ask", edit: "ask", webfetch: "ask" }` が要る。
+   claude の `--permission-mode manual`（#1847）と**同じ性質の固定**であり、
+   カナリアについての言明であって CommandMate のセッションがこうなるという話ではない。
+2. **`Ask anything...` はホーム画面だけ。** 1 ターン走ったあとの composer は素の `┃` になり、
+   完了フレームの `ready` は branch E ではなく **branch D（完了マーカー）**から出る。
+   よって `opencode-idle` と `opencode-turn-complete` は `reason` が異なる別状態である。
+3. **承認ダイアログは Escape で reject できる。** 押した直後のフレームは
+   duration の無い `▣  Build · Claude Sonnet 4.6` だけが残り、`running` / `unknown_frame` になる
+   （`turn-aborted-no-duration` と同じ形）。canary の `resetKeys: ['Escape']` はこれ。
+4. **`/models` picker は Escape で「確定せずに」閉じる。** 閉じたあとの config は複製したままで、
+   model は書き換わっていない（隔離 config を diff して確認）。
+
+補助データ: `▣ Build` の duration は 12.8s / 4.6s / 20.7s を観測。
+`opencode --version` は 1.18.22、TUI は起動から約 3.6 秒で composer に到達（#1908 の実測と一致）。
+
+### 18.4 版ずれ検出（`opencode --version` × `verifiedAgainst`）
+
+preflight が実行する `<tool> --version` を**そのまま陳腐化プローブに使う**。出力は
+`src/lib/detection/version-probes.ts` と同じ `parseCliVersion` を通り、
+`commandmate status` / `npm run check:detector-freshness` が読むのと同じ
+`DETECTOR_VERIFIED_AGAINST` と突き合わされる（子プロセスは増えない）。
+
+更新前（stamp = 1.18.21）の実出力:
+
+```
+opencode 1.18.22 · tmux 3.5a · pane 80x200
+VERSION DRIFT: opencode 1.18.22 is installed, rules read off 1.18.21 @ 80x200
+  — re-capture fixtures and update tools/verified-against.ts
+```
+
+更新後（stamp = 1.18.22）:
+
+```
+rules     : opencode 1.18.22 · rules read off 1.18.22 @ 80x200
+```
+
+既定は**警告のみ**で exit code に影響しない。`--strict-version` のときだけ exit 5 になる。
+版が上がった当日でも全シナリオが緑のことはあり、版番号だけで赤くなるカナリアは
+「無視してよいもの」として学習されて仕組みごと死ぬため。
+赤が出たときはサマリ直後にも drift を再掲する（「検出回帰か、昨日上げただけか」を同じ画面で判別させる）。
+
+pane geometry も一緒に報告する。**別の幅で採った fixture は本番が見ている画面の fixture ではない**ため
+（今回は 80 桁のみ採取。120 / 200 桁は #2047 の担当で、互いの幅に触らない）。
+
+### 18.5 非空振りの証明（3 段構え）
+
+| 何を壊したか | どう壊したか | 結果 |
+|---|---|---|
+| **本番パターン 1 つ** | `OPENCODE_PERMISSION_PATTERN` の `Allow once` → `Approve once`（gutter アンカーと他 2 ラベルは温存） | `opencode-permission` が **181 秒 timeout で FAIL**（`running` / `unknown_frame`）、exit 1。パターンは実行後に復元 |
+| **ハーネスの期待値** | `npm run canary -- --tool opencode --mutate` | **5/5 赤** → `mutation self-test PASSED`（exit 0）、180.7 秒 |
+| **commit 済みフレームの 1 行** | `tests/unit/canary/canary-opencode-2050.test.ts` の `frame mutation` ブロック（ボタン列ラベル / ボタン列 gutter / busy フッタの語 / picker ヘッダ / 完了マーカーの duration / composer プレースホルダ） | 各期待値が不一致になることを CI で保持 |
+
+**変異はすべて構造を保つもの**にしてある。gutter 行ごと削除するような変異は、
+後段が gutter を境界に使っている場合に別の理由で赤くなり、何を証明したのか分からなくなる。
+1 段目の gutter 変異だけは gutter を**空白に置換**（削除ではない）しており、行の幅と位置は保たれる。
+
+mutant の選び方には落とし穴がある: `--mutate` は「mutant で緑になったら空振り」と報告するので、
+**シナリオが自然に流れ着く状態を mutant にしてはならない**。
+`opencode-generating` の mutant に `opencode-turn-complete` を当てるのは駄目で、
+実測のターンは 12.8 秒 —— `--mutate` の 30 秒時計に収まるので mutant が真になり誤報になる。
+現行 5 本の mutant はどれも「そのシナリオが決して描かない行」を要求している。
+
+### 18.6 非汚染の証拠
+
+| 項目 | 実測 |
+|---|---|
+| tmux | 全呼び出しが `-L cmate-canary-*`。既定サーバへは `guards.listUserTmuxSessions()` の `list-sessions`（読み取り専用）だけ |
+| `mcbd-*` セッション | 31 本を実行前後で照合、増減なし（違反なら exit 3） |
+| モデルピッカー | 隔離 HOME 内でのみ開き、**Escape で閉じて一度も確定していない** |
+| 実 `~/.config/opencode/opencode.jsonc` | 実行前後で sha256 一致（`4e901f9e…`） |
+| 実 `~/.local/share/opencode/auth.json` | 実行前後で sha256 一致（`eec9856e…`） |
+| 実 `~/.local/share/opencode/opencode.db` | size 58531840 / mtime 8/25 14:16 のまま（本作業より前） |
+| `auth.json` の複製 | 使い捨て HOME に mode 600 で作り、HOME ごと削除 |
+| 事前調査用セッション | `tmux -L cmate-canary-2050 kill-session -t '=<name>:'` で個別に終了（`kill-server` は使っていない） |
+
+### 18.7 未実施・積み残し
+
+- **codex / gemini / antigravity / copilot は未対応のまま。** canary は `tool-profiles.ts` に
+  1 エントリ足せば増やせる形になったが、実測は各ツールで別途必要
+- **opencode の hooks シナリオは無い。** #1847 の 2 本は claude の `PermissionRequest` 契約を見るもので、
+  opencode の `AgentEventSource` には裁定して返す相当物が無い。`--mutate-verdict` に
+  `--tool opencode` を渡すと「mutate するものが無い」と拒否する
+- **`ctrl+p` コマンドパレットはシナリオにしていない。** `OPENCODE_SELECTION_LIST_PATTERN` が
+  名前を持たずフレームは `running` / `default`（証拠なし）に落ちる —— #1896 で実測済みの既知の穴で、
+  既知の穴を緑の期待値に固定するとカナリアが恒常的に赤になり signal として死ぬ
+- **120 / 200 桁の fixture は採っていない**（#2047 の担当）
+
+### 18.8 変更ファイル
+
+- `scripts/canary/tool-profiles.ts`（新規）— ツールごとの実行形。geometry / capture 行数 /
+  起動完了行 / 起動オーバーレイ / 起動フラグ
+- `scripts/canary/opencode-scenarios.ts`・`opencode-expectations.ts`（新規）— 5 シナリオと純関数の期待値
+- `scripts/canary/{types,probe,session,isolated-home,guards,cli,scenarios,fixtures,runner}.ts` —
+  ツール次元の導入、opencode の HOME シード、実ファイル guard の一般化、`--tool` / `--strict-version`、版ずれ報告
+- `src/lib/detection/tools/verified-against.ts` — opencode を 1.18.22 / 2026-08-26 に更新
+- `tests/unit/canary/canary-opencode-2050.test.ts`（新規）・`canary-cli-fixtures.test.ts`
+- `tests/fixtures/canary/opencode-*.{ts,raw.txt}`（新規、5 状態 × 2）
+- `docs/qa/detection-canary.md`・`scripts/canary/README.md`
+## 19. Issue 2049: 端末ビューの空行圧縮を opencode に開く（opencode 1.18.22 / 2026-08-26）
+
+### 19.1 結論サマリ
+
+| | |
+|---|---|
+| Issue 本文の前提 | 「opencode の端末ビューには空行圧縮が無い」 |
+| **実測** | **圧縮機構は Issue #1172 で既にある。`claude` / `codex` 限定になっていただけ**（宣言は PC / モバイルの 2 箇所） |
+| 素直に opencode を足すと何が起きるか | **picker / command palette のパネル帯が消える。** 実測フレームで 8 行中 7 行しか残らない |
+| なぜ消えるか | opencode のオーバーレイは**背景色で塗ったパネル**で、区切り行に**グリフが 1 つも無い**（70 桁のスペースに `ESC[48;2;20;20;20m`）。`stripAnsi(row).trim() === ''` なので #1172 の規則が layout padding と読む |
+| 採った規則 | **「桁を塗っていて（`stripAnsi(line) !== ''`）かつ背景色 SGR を持つ空行」は構造**。それ以外の空行はこれまでどおり畳む |
+| composer / 承認ダイアログ | **何もしなくてよい。** どちらも `┃`（U+2503）を持つのでそもそも空行ではない。テストは「そう仮定する」のではなく**そう assert する** |
+| 圧縮率（実測） | boot idle 201 行 → **16 行** / 2 ターン完了 201 行 → **43 行** / palette 展開 201 行 → **58 行** |
+
+### 19.2 隔離の確認（先に撃つ）
+
+§4 のハーネスをそのまま使った。TUI を起動する必要があったので tmux も使っている。
+
+```bash
+SP=…/scratchpad/oc2049
+# §4.1 のとおり HOME ごと差し替え、auth.json は umask 077 で複製、model は config で固定
+HOME="$SP/home" opencode serve --port 4796 --hostname 127.0.0.1 &
+curl -sS http://127.0.0.1:4796/path
+```
+
+`GET /path` の返り値（`home` / `state` / `config` / `worktree` / `directory` の **5 つすべて**）が
+`…/scratchpad/oc2049/` 配下であることを確認してから 1 打鍵目を送った。
+
+TUI は**専用 socket** で、CommandMate の本番ジオメトリ（80 桁 × `OPENCODE_PANE_HEIGHT` = 200 行）:
+
+```bash
+tmux -L cmate-2049-oc new-session -d -s oc2049 -x 80 -y 200 -c "$SP/work" \
+  "env HOME='$SP/home' TERM=xterm-256color opencode"
+tmux -L cmate-2049-oc capture-pane -p -e -t '=oc2049:0.0' -S -0 -E -
+tmux -L cmate-2049-oc kill-session -t '=oc2049:'     # kill-server は使っていない
+```
+
+**モデルピッカーは一度も開いていない。** opencode はピッカーで既定モデルを書き換えるため、
+同じパネル chrome を持つ `ctrl+p` command palette（読むだけのコマンド一覧）で代替し、`Esc` で閉じた。
+
+### 19.3 空行は 3 種類しかない（これが規則の根拠）
+
+リポジトリ内の opencode 実キャプチャ全 22 本＋今回の 1.18.22 の 3 本について、
+`stripAnsi(row).trim() === ''` な行を「桁を塗っているか」×「背景色 SGR を持つか」で分類した:
+
+| 分類 | 実例 | 出現数 | 正体 |
+|---|---|---|---|
+| 桁なし・SGR なし | `''` | 1 フレームあたり 114〜188 | **layout padding** |
+| 桁なし・背景 SGR あり | `ESC[38;2;255;255;255m ESC[48;2;4;4;4m` | **1 フレームにちょうど 1** | フレーム全体の色初期化 |
+| **桁あり・背景 SGR あり** | `ESC[48;2;20;20;20m` ＋ 70 桁スペース ＋ `ESC[48;2;4;4;4m` | オーバーレイのフレームだけ 8〜9 | **パネル本体** |
+
+**「桁あり・背景 SGR なし」は 1 行も存在しない。** 2 条件を AND にしても OR にしても
+このコーパスでは同じ判定になるが、AND を採った（「帯を塗っている」ほうが「たまたま空白が残っている」より
+パネルの定義として素直で、padding を過剰に守らない）。
+
+「桁なし・背景 SGR あり」を除外するために条件 1（桁を塗っていること）が要る。
+これを落とすと**全フレームの先頭 1 行が構造扱いになり、leading trim が効かなくなる**。
+
+### 19.4 `ctrl+p` の実測フレーム（1.18.22）
+
+`tests/fixtures/opencode-live-2049/command-palette-11822.txt` の行番号:
+
+```
+   1  空行（桁なし・背景 SGR あり）    ← フレーム色初期化
+   2..50  空行（桁なし・SGR なし）      ← layout padding（49 行）
+  51  ★ パネル帯（70 桁・ESC[48;2;20;20;20m）
+  52  '              Commands                                         esc    '
+  53  ★ パネル帯
+  54  '              Search                                                  '
+  55  ★ パネル帯
+  …
+  93  ★ パネル帯
+  94..98  コマンド項目
+  99..104 composer（`┃` 行）とその下の `╹▀▀▀…`
+ 105..196 空行（layout padding）
+ 197..199 パス／版表示（`1.18.22`）
+```
+
+**行 2..51 は #1172 の規則から見れば「50 行連続の空行」で、1 行に畳まれる。**
+その 1 行は `extractAnsiSequences()` の結果なので**桁を持たない**——つまり
+**パネルの上端がフレームから消える。** これが Issue #2049 の実体。
+
+| 規則 | 出力行数 | 残ったパネル帯 | `┃` 行 | `╹` 行 |
+|---|---|---|---|---|
+| 生キャプチャ | 201 | 8 | 4 | 1 |
+| #1172（素直に opencode を足した場合） | 57 | **7** | 4 | 1 |
+| **#2049** | 58 | **8** | 4 | 1 |
+
+他の 2 フレーム（`boot-idle-11822` / `two-turn-idle-11822`）はパネルを持たないので
+**両規則の出力がバイト一致**する（201 → 16 行 / 201 → 43 行）。
+`┃` は boot idle で 4 行、2 ターン完了フレームで 24 行、いずれも**全数が残る**。
+
+### 19.5 実測できなかったもの（推測で埋めていない）
+
+- **1.18.22 の承認ダイアログのフレームは採れていない。** 隔離 config の下で
+  1.18.22 は `ls -la` の実行も `probe.txt` の書き込みも**ダイアログを出さずに実行した**
+  （12 回 × 3 秒のポーリングで `Permission required` は 1 度も出現せず）。
+  そのため承認ダイアログの行は、リポジトリに既にある 1.18.20 / 1.18.21 の実キャプチャ
+  （`tests/unit/lib/detection/fixtures/opencode-live-1893/`、`…/opencode-live-1896/permission-over-numbered.txt`）
+  に対して assert している。**版が違うことを承知のうえでの代替**であり、
+  1.18.22 で採れたことにはしていない。
+- **モデルピッカーのフレームは 1.18.22 では採っていない**（既定モデルを書き換える罠を避けたため）。
+  同じパネル chrome を持つ `ctrl+p` で代替した。1.18.21 のピッカー実キャプチャ
+  （`…/opencode-live-1896/model-picker.txt`）もテストに入れてある。
+- **`copilot` の padding 量は測っていない。** よって copilot は圧縮対象に**入れていない**
+  （Issue の受入条件「claude / codex / copilot の端末ビューは不変」とも一致する）。
+- **「履歴タブを既定にする」UI 設定（Issue 本文の任意項目）は入れていない。** 設定の描画面
+  （`AgentSettingsPane.tsx` / `WorktreeDetailSubComponents.tsx`）は並行する Issue #2048 の所有物で、
+  本 Issue の scope 外。UI の無い設定値だけを足すのは半端なので見送った。
+
+### 19.6 非汚染の証拠
+
+| 項目 | 値 |
+|---|---|
+| 版 | **1.18.22**（フレーム右下の版表示、および `capture-pane` の行 197） |
+| 隔離 HOME | `GET /path` の 5 項目すべてが scratchpad 配下であることを確認済み |
+| ポート | **4796**。3000 は使っていない。`--hostname 127.0.0.1` |
+| tmux | **専用 socket `cmate-2049-oc` のみ**。既定サーバへは 1 コマンドも撃っていない。後始末は `kill-session -t '=oc2049:'`（`kill-server` は使っていない） |
+| モデルピッカー | **一度も開いていない** |
+| `auth.json` | mode 600 で複製し、**検証後に削除**（削除確認済み） |
+| ユーザー HOME 非汚染 | 検証終了時点で `~/.local/share/opencode/opencode.db` の mtime は**検証開始（8/26 09:57）より前の 8/25 14:16 のまま**、`~/.config/opencode/opencode.jsonc` は 7/19 のまま |
+| 後始末 | `opencode serve` は **PID 指定で kill**（`pkill -f opencode` は使っていない）。ポート 4796 の LISTEN が無いことを確認済み |
+
+### 19.7 変更ファイル
+
+- `src/lib/terminal-display-normalize.ts`（新規）— パネル対応の圧縮規則。`compactBlankRuns()` が共有エンジン
+- `src/config/terminal-display-compaction.ts`（新規）— どのツールをどう圧縮するかの**唯一の宣言**
+- `src/components/worktree/TerminalDisplay.tsx` — `preservePaintedPanelRows` prop
+- `src/components/worktree/TerminalSplitPaneContent.tsx` / `MobileTerminalTab.tsx` — 手書きのツール列挙をやめ、config を読む
+- `tests/fixtures/opencode-live-2049/` — 1.18.22 の実キャプチャ 3 本と README
+
+### 19.8 この節が変えたもの
+
+- 「opencode には空行圧縮が無い」→ **ある。claude / codex 限定だっただけ。**
+- 「opencode を足せば済む」→ **足すだけだと picker / palette の帯が消える。**
+- **PC とモバイルで圧縮の宣言が 2 箇所に割れていた**（`TerminalSplitPaneContent.tsx:260` /
+  `MobileTerminalTab.tsx:53`）。同じセッションが画面によって別の見え方をしうる形だったので、
+  config 1 箇所に集約し、ソースを読むテストで再発を止めた。
 ## 20. Issue 2048: instance ごとの agent / model / variant（opencode 1.18.22 / 2026-08-26）
 
 Issue #2048 は「instance 設定に `model` / `agent` / `variant` を追加し、launch plan に反映し、

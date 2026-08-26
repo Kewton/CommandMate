@@ -28,6 +28,7 @@ import { TerminalDisplay } from '@/components/worktree/TerminalDisplay';
 import { TerminalEscapeHatch } from '@/components/worktree/TerminalEscapeHatch';
 import { UnsentComposerBar, hasUnsentComposerText } from '@/components/worktree/UnsentComposerBar';
 import { useTerminalPanePolling } from '@/hooks/useTerminalPanePolling';
+import { getTerminalDisplayCompaction } from '@/config/terminal-display-compaction';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 
 export interface MobileTerminalTabProps {
@@ -49,8 +50,12 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
     cliToolId,
     instanceId,
   });
-  // Issue #1172: compact the 1000-row layout padding for Claude/Codex (display only).
-  const compactTuiLayoutPadding = cliToolId === 'claude' || cliToolId === 'codex';
+  // Issue #1172 / #2049: compact the tall pane's layout padding (display only).
+  // Shares the PC declaration in `TerminalSplitPaneContent` through one config
+  // module — before #2049 this was a second hand-written copy of the tool list,
+  // which is how PC and phone would come to render the same session differently.
+  const { compactTuiLayoutPadding, preservePaintedPanelRows } =
+    getTerminalDisplayCompaction(cliToolId);
 
   // Issue #1494 / #1496: detection-independent navigation hatch on mobile.
   // `terminal.isUnclassifiedActive` is already false whenever a selection list /
@@ -76,6 +81,7 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
           onScrollChange={setAutoScroll}
           disableAutoFollow={disableAutoFollow}
           compactTuiLayoutPadding={compactTuiLayoutPadding}
+          preservePaintedPanelRows={preservePaintedPanelRows}
           className="h-full"
         />
       </div>
