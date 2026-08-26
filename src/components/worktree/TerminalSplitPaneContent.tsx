@@ -35,6 +35,7 @@ import {
 } from '@/components/worktree/WorktreeDetailSubComponents';
 import type { AgentSessionSnapshot } from '@/types/agent-session';
 import { TerminalDisplay } from '@/components/worktree/TerminalDisplay';
+import { getTerminalDisplayCompaction } from '@/config/terminal-display-compaction';
 import { NavigationButtons } from '@/components/worktree/NavigationButtons';
 import { TerminalEscapeHatch } from '@/components/worktree/TerminalEscapeHatch';
 import { UnsentComposerBar, hasUnsentComposerText } from '@/components/worktree/UnsentComposerBar';
@@ -255,9 +256,14 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   // would hide the menus at the top of the screen.
   const disableAutoFollow = cliToolId === 'opencode' || cliToolId === 'copilot';
 
-  // Issue #1172: Claude/Codex pin a 1000-row pane and pad the layout with
-  // hundreds of blank rows; compact them for display only (raw output untouched).
-  const compactTuiLayoutPadding = cliToolId === 'claude' || cliToolId === 'codex';
+  // Issue #1172 / #2049: several TUIs pin a tall pane and pad the layout with
+  // hundreds of blank rows; compact them for display only (raw output
+  // untouched). The policy lives in one config module so this PC declaration and
+  // the mobile one in `MobileTerminalTab` cannot drift apart.
+  const { compactTuiLayoutPadding, preservePaintedPanelRows } = useMemo(
+    () => getTerminalDisplayCompaction(cliToolId),
+    [cliToolId],
+  );
 
   const handleAutoScrollChange = useCallback(
     (enabled: boolean) => setAutoScroll(enabled),
@@ -437,6 +443,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
         onScrollChange={handleAutoScrollChange}
         disableAutoFollow={disableAutoFollow}
         compactTuiLayoutPadding={compactTuiLayoutPadding}
+        preservePaintedPanelRows={preservePaintedPanelRows}
       />
     ),
     [
@@ -448,6 +455,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       handleAutoScrollChange,
       disableAutoFollow,
       compactTuiLayoutPadding,
+      preservePaintedPanelRows,
     ],
   );
 
