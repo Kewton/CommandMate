@@ -467,6 +467,46 @@ app.prepare().then(() => {
     // Initialize worktrees after server starts
     await initializeWorktrees();
 
+    // Issue #2108: re-open the event streams of opencode panes that outlived
+    // the last process. The port each one's server listens on is in
+    // `~/.commandmate/opencode-ports.json`, and until this call nothing read it
+    // at startup: the only chain that reached `recoverOpencodePort` was a
+    // *launch*, and a restart does not launch anything — `POST /send` skips
+    // `startSession` while the pane is running. The result was a server that
+    // was alive and reachable while every HTTP surface answered
+    // `409 NO_OPENCODE_PORT`, with the terminal view still working because the
+    // screen scraper never needed the port.
+    //
+    // Deliberately NOT awaited. The sweep's cost is a health probe per live
+    // pane, and a pane whose server has died pays a timeout for it; the
+    // managers below must not queue behind that. It is fail-open in its own
+    // right (it never rejects) and the `try`/`catch` below is belt-and-braces.
+    //
+    // Runs after `initializeWorktrees()` because the ingest path this
+    // re-subscribes reaches `@/lib/db` at event time and the migrations above
+    // are what make that table set current.
+    //
+    // Dynamic import for the same reason as every reconciler above: adding this
+    // module graph to server.ts's eval-time graph perturbs Next's
+    // AsyncLocalStorage bootstrap under `tsx server.ts` and the first request
+    // that compiles middleware then dies. Do not hoist this.
+    void (async () => {
+      try {
+        const { reattachOpencodeEventStreams } = await import(
+          './src/lib/hooks/sources/opencode/reattach'
+        );
+        const report = await reattachOpencodeEventStreams();
+        if (report.candidates > 0) {
+          console.log(
+            `opencode streams reattached: ${report.reattached}/${report.candidates} ` +
+              `live pane(s) (persisted=${report.persisted} skipped=${report.skipped})`
+          );
+        }
+      } catch (error) {
+        console.error('Error reattaching opencode event streams:', error);
+      }
+    })();
+
     // Issue #1623: reconcile the `prefix+g` reading-mode binding on the user's
     // tmux server. Fail-open in its own try/catch — a convenience key must never
     // be able to stop the server from serving.
