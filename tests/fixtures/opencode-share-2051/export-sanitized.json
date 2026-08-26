@@ -1,0 +1,222 @@
+{
+    "info": {
+        "id": "ses_fc36974d1ffeD1cvPY7zlYJnhs",
+        "slug": "quick-wolf",
+        "projectID": "44b7340824bf1a0288c09e245d71c357a85f2afb",
+        "directory": "[redacted:session-directory:ses_fc36974d1ffeD1cvPY7zlYJnhs]",
+        "path": "",
+        "title": "[redacted:session-title:ses_fc36974d1ffeD1cvPY7zlYJnhs]",
+        "agent": "build",
+        "model": {
+            "id": "claude-sonnet-4.6",
+            "providerID": "github-copilot",
+            "variant": "default"
+        },
+        "version": "1.18.22",
+        "summary": {
+            "additions": 0,
+            "deletions": 0,
+            "files": 0
+        },
+        "cost": 0.0378372,
+        "tokens": {
+            "input": 4,
+            "output": 136,
+            "reasoning": 0,
+            "cache": {
+                "read": 8509,
+                "write": 8862
+            }
+        },
+        "time": {
+            "created": 1787722894126,
+            "updated": 1787723233375
+        }
+    },
+    "messages": [
+        {
+            "info": {
+                "role": "user",
+                "time": {
+                    "created": 1787722950372
+                },
+                "agent": "build",
+                "model": {
+                    "providerID": "github-copilot",
+                    "modelID": "claude-sonnet-4.6"
+                },
+                "summary": {
+                    "diffs": []
+                },
+                "id": "msg_03c9766e40017rcqSB6CU4pfuZ",
+                "sessionID": "ses_fc36974d1ffeD1cvPY7zlYJnhs"
+            },
+            "parts": [
+                {
+                    "type": "text",
+                    "text": "[redacted:text:prt_03c9766e7001yRvaEvkQi4pWpQ]",
+                    "id": "prt_03c9766e7001yRvaEvkQi4pWpQ",
+                    "sessionID": "ses_fc36974d1ffeD1cvPY7zlYJnhs",
+                    "messageID": "msg_03c9766e40017rcqSB6CU4pfuZ"
+                }
+            ]
+        },
+        {
+            "info": {
+                "parentID": "msg_03c9766e40017rcqSB6CU4pfuZ",
+                "role": "assistant",
+                "mode": "build",
+                "agent": "build",
+                "path": {
+                    "cwd": "[redacted:cwd:msg_03c976c13001HeMC8AAbDz3EDo]",
+                    "root": "[redacted:root:msg_03c976c13001HeMC8AAbDz3EDo]"
+                },
+                "cost": 0.03379275,
+                "tokens": {
+                    "total": 8637,
+                    "input": 3,
+                    "output": 125,
+                    "reasoning": 0,
+                    "cache": {
+                        "write": 8509,
+                        "read": 0
+                    }
+                },
+                "modelID": "claude-sonnet-4.6",
+                "providerID": "github-copilot",
+                "time": {
+                    "created": 1787722951699,
+                    "completed": 1787723231066
+                },
+                "finish": "tool-calls",
+                "id": "msg_03c976c13001HeMC8AAbDz3EDo",
+                "sessionID": "ses_fc36974d1ffeD1cvPY7zlYJnhs"
+            },
+            "parts": [
+                {
+                    "snapshot": "[redacted:snapshot:prt_03c977aed001Iv4IHWiKWpMLFL]",
+                    "type": "step-start",
+                    "id": "prt_03c977aed001Iv4IHWiKWpMLFL",
+                    "sessionID": "ses_fc36974d1ffeD1cvPY7zlYJnhs",
+                    "messageID": "msg_03c976c13001HeMC8AAbDz3EDo"
+                },
+                {
+                    "type": "tool",
+                    "tool": "read",
+                    "callID": "toolu_01VmwSTT2GyZWr19PTYpin4J",
+                    "state": {
+                        "status": "completed",
+                        "input": {
+                            "redacted": "tool-input:prt_03c977af0001QhGSbbew0luIbz"
+                        },
+                        "output": "[redacted:tool-output:prt_03c977af0001QhGSbbew0luIbz]",
+                        "metadata": {
+                            "redacted": "tool-state-metadata:prt_03c977af0001QhGSbbew0luIbz"
+                        },
+                        "title": "[redacted:tool-title:prt_03c977af0001QhGSbbew0luIbz]",
+                        "time": {
+                            "start": 1787722956310,
+                            "end": 1787723231018
+                        }
+                    },
+                    "metadata": {
+                        "redacted": "tool-metadata:prt_03c977af0001QhGSbbew0luIbz"
+                    },
+                    "id": "prt_03c977af0001QhGSbbew0luIbz",
+                    "sessionID": "ses_fc36974d1ffeD1cvPY7zlYJnhs",
+                    "messageID": "msg_03c976c13001HeMC8AAbDz3EDo"
+                },
+                {
+                    "reason": "tool-calls",
+                    "snapshot": "[redacted:snapshot:prt_03c9baf44001t8eyU1nzw1yLLC]",
+                    "type": "step-finish",
+                    "tokens": {
+                        "total": 8637,
+                        "input": 3,
+                        "output": 125,
+                        "reasoning": 0,
+                        "cache": {
+                            "write": 8509,
+                            "read": 0
+                        }
+                    },
+                    "cost": 0.03379275,
+                    "id": "prt_03c9baf44001t8eyU1nzw1yLLC",
+                    "sessionID": "ses_fc36974d1ffeD1cvPY7zlYJnhs",
+                    "messageID": "msg_03c976c13001HeMC8AAbDz3EDo"
+                }
+            ]
+        },
+        {
+            "info": {
+                "parentID": "msg_03c9766e40017rcqSB6CU4pfuZ",
+                "role": "assistant",
+                "mode": "build",
+                "agent": "build",
+                "path": {
+                    "cwd": "[redacted:cwd:msg_03c9baf5b001Gdm19TFCIOd9Zw]",
+                    "root": "[redacted:root:msg_03c9baf5b001Gdm19TFCIOd9Zw]"
+                },
+                "cost": 0.00404445,
+                "tokens": {
+                    "total": 8874,
+                    "input": 1,
+                    "output": 11,
+                    "reasoning": 0,
+                    "cache": {
+                        "write": 353,
+                        "read": 8509
+                    }
+                },
+                "modelID": "claude-sonnet-4.6",
+                "providerID": "github-copilot",
+                "time": {
+                    "created": 1787723231067,
+                    "completed": 1787723233371
+                },
+                "finish": "stop",
+                "id": "msg_03c9baf5b001Gdm19TFCIOd9Zw",
+                "sessionID": "ses_fc36974d1ffeD1cvPY7zlYJnhs"
+            },
+            "parts": [
+                {
+                    "snapshot": "[redacted:snapshot:prt_03c9bb7f7001qPcOPMEw2LLwLa]",
+                    "type": "step-start",
+                    "id": "prt_03c9bb7f7001qPcOPMEw2LLwLa",
+                    "sessionID": "ses_fc36974d1ffeD1cvPY7zlYJnhs",
+                    "messageID": "msg_03c9baf5b001Gdm19TFCIOd9Zw"
+                },
+                {
+                    "type": "text",
+                    "text": "[redacted:text:prt_03c9bb7f9001KDlw3gufDsPK0j]",
+                    "time": {
+                        "start": 1787723233273,
+                        "end": 1787723233275
+                    },
+                    "id": "prt_03c9bb7f9001KDlw3gufDsPK0j",
+                    "sessionID": "ses_fc36974d1ffeD1cvPY7zlYJnhs",
+                    "messageID": "msg_03c9baf5b001Gdm19TFCIOd9Zw"
+                },
+                {
+                    "reason": "stop",
+                    "snapshot": "[redacted:snapshot:prt_03c9bb845001V2byZf4H3ENZhB]",
+                    "type": "step-finish",
+                    "tokens": {
+                        "total": 8874,
+                        "input": 1,
+                        "output": 11,
+                        "reasoning": 0,
+                        "cache": {
+                            "write": 353,
+                            "read": 8509
+                        }
+                    },
+                    "cost": 0.00404445,
+                    "id": "prt_03c9bb845001V2byZf4H3ENZhB",
+                    "sessionID": "ses_fc36974d1ffeD1cvPY7zlYJnhs",
+                    "messageID": "msg_03c9baf5b001Gdm19TFCIOd9Zw"
+                }
+            ]
+        }
+    ]
+}

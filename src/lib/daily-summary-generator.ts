@@ -14,6 +14,7 @@
  * - Output sanitization (control character removal)
  */
 
+import { execFile } from 'child_process';
 import { existsSync } from 'fs';
 import { join } from 'path';
 import type Database from 'better-sqlite3';
@@ -24,7 +25,11 @@ import { DEFAULT_PERMISSIONS } from '@/config/schedule-config';
 import { getMessagesByDateRange } from '@/lib/db/chat-db';
 import { saveDailyReport } from '@/lib/db/daily-report-db';
 import { getWorktrees } from '@/lib/db/worktree-db';
-import { getDailyAgentCostSummary, type DailyAgentCostSummary } from '@/lib/db/agent-session-cost-db';
+import {
+  getAgentSessionCostsByDate,
+  getDailyAgentCostSummary,
+  type DailyAgentCostSummary,
+} from '@/lib/db/agent-session-cost-db';
 import { sampleAgentSessionCosts } from '@/lib/db/agent-session-cost-sampler';
 import { getAllRepositories } from '@/lib/db/db-repository';
 import type { DailyReport } from '@/lib/db/daily-report-db';
@@ -33,6 +38,12 @@ import { collectRepositoryCommitLogs } from '@/lib/git/git-utils';
 import { collectIssueInfos } from '@/lib/git/github-api';
 import { computeVibeMetrics, MS_PER_DAY } from '@/lib/metrics/vibe-metrics';
 import { withTimeout } from '@/lib/utils';
+import { OPENCODE_CLI_TOOL_ID } from '@/lib/hooks/sources/opencode/tool-id';
+import {
+  auditOpencodeExportRedaction,
+  summarizeOpencodeExport,
+  type OpencodeExportSummary,
+} from '@/types/opencode-export';
 
 const logger = createLogger('daily-summary');
 
@@ -212,6 +223,256 @@ export function buildAgentCostSection(
 }
 
 // =============================================================================
+// opencode sanitized export section (Issue #2051)
+// =============================================================================
+
+/** Heading the appended opencode export section always starts with. */
+export const OPENCODE_EXPORT_SECTION_HEADING = '## opencode session transcripts (sanitized)';
+
+/**
+ * Longest one `opencode export --sanitize` may take before it is abandoned.
+ *
+ * The measured export of a two-turn session took under two seconds, but the
+ * command opens opencode's SQLite database and the size of that grows with the
+ * operator's whole history, so the bound is generous. It exists at all because
+ * of a measured trap: **`opencode export` with no session id does not fail, it
+ * waits** — it opens an interactive picker and sits there. Nothing here omits
+ * the id, and this timeout is the second line of defence if a future release
+ * finds another way to block.
+ */
+export const OPENCODE_EXPORT_TIMEOUT_MS = 30_000;
+
+/**
+ * Largest export stdout that will be buffered, per session.
+ *
+ * A sanitized export is small — the measured two-turn session produced 6.5 KB,
+ * and it stays small because `--sanitize` replaces every transcript field with
+ * a fixed-length token, so the size tracks the number of parts rather than the
+ * length of the conversation. 4 MB is far above any plausible session and still
+ * bounds a runaway.
+ */
+export const OPENCODE_EXPORT_MAX_BUFFER = 4 * 1024 * 1024;
+
+/**
+ * How many sessions the section will export for one day.
+ *
+ * Each one is a process spawn. When a day has more, the section says so rather
+ * than quietly showing the first few — a truncated list that looks complete is
+ * worse than a short one that admits it.
+ */
+export const OPENCODE_EXPORT_MAX_SESSIONS = 20;
+
+/**
+ * Total wall clock the whole section may spend spawning exports.
+ *
+ * The per-call timeout bounds one export; this bounds the run. Without it the
+ * worst case is {@link OPENCODE_EXPORT_MAX_SESSIONS} sequential timeouts —
+ * ten minutes appended to a report generation that has already produced its
+ * text — for a section that is, by design, optional. Sessions still pending
+ * when the budget runs out are counted as skipped and reported as such.
+ */
+export const OPENCODE_EXPORT_TOTAL_BUDGET_MS = 90_000;
+
+/** One session's sanitized export, reduced to what survived redaction. */
+export interface OpencodeExportEntry {
+  worktreeId: string;
+  summary: OpencodeExportSummary;
+}
+
+/**
+ * Run `opencode export --sanitize <sessionID>` and summarise the result.
+ *
+ * ## Why the redaction is re-checked here
+ *
+ * `--sanitize` was measured on opencode 1.18.22 and it is thorough — every
+ * transcript field, tool input and tool output is replaced (the table is in
+ * `src/types/opencode-export.ts`). But this function attaches its output to a
+ * report, so "the flag is called sanitize" is not a good enough reason to trust
+ * the bytes: the flag could fail to apply, a future release could stop redacting
+ * a field, or the process could return something else entirely.
+ * {@link auditOpencodeExportRedaction} checks every field measured to be
+ * sensitive, and anything that still reads as plaintext makes this return null.
+ * The report then loses a row, which is the failure worth having.
+ *
+ * @param sessionId - `ses_…`, always passed; see {@link OPENCODE_EXPORT_TIMEOUT_MS}
+ * @param cwd - Directory to run in. opencode resolves a session by id
+ *   regardless of the working directory — measured, exporting a session
+ *   belonging to one project from inside another — so this only decides which
+ *   config applies
+ * @returns The summary, or null when the export failed or failed the audit
+ */
+export async function exportOpencodeSessionSummary(
+  sessionId: string,
+  cwd?: string
+): Promise<OpencodeExportSummary | null> {
+  let stdout: string;
+  try {
+    // execFile, never exec: the session id reaches argv and a shell would give
+    // it meta-characters. `--sanitize` before the positional, matching the
+    // measured invocation.
+    //
+    // Wrapped by hand rather than with `promisify`, which resolves `execFile`
+    // through its `util.promisify.custom` hook — a detail that makes this
+    // function untestable without reproducing the hook on the double, and that
+    // buys nothing over the lines below.
+    stdout = await new Promise<string>((resolve, reject) => {
+      execFile(
+        'opencode',
+        ['export', '--sanitize', sessionId],
+        {
+          cwd,
+          timeout: OPENCODE_EXPORT_TIMEOUT_MS,
+          maxBuffer: OPENCODE_EXPORT_MAX_BUFFER,
+          // Measured: the `Exporting session: <id>` progress line goes to
+          // stderr and stdout carries nothing but the JSON, so stdout parses
+          // directly.
+          encoding: 'utf8',
+        },
+        (error, out) => (error ? reject(error) : resolve(out))
+      );
+    });
+  } catch (error) {
+    // Measured: an unknown session id exits 1 with an empty stdout and
+    // `Error: Session not found: <id>` on stderr. A session sampled into the
+    // ledger and later deleted lands here, which is ordinary.
+    logger.debug('opencode-export-failed', {
+      sessionId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stdout) as unknown;
+  } catch {
+    logger.warn('opencode-export-unparsable', { sessionId, bytes: stdout.length });
+    return null;
+  }
+
+  const leaks = auditOpencodeExportRedaction(parsed);
+  if (leaks.length > 0) {
+    logger.warn('opencode-export-redaction-audit-failed', {
+      sessionId,
+      leaks: leaks.length,
+      // The paths, never the values: logging what leaked would leak it.
+      paths: leaks.slice(0, 5).map((leak) => leak.path),
+    });
+    return null;
+  }
+
+  return summarizeOpencodeExport(parsed);
+}
+
+/**
+ * Render the day's sanitized opencode exports as a Markdown table.
+ *
+ * ## Why this is a table of counts and not an attached transcript
+ *
+ * The Issue asks for `opencode export --sanitize` to become an attachment
+ * candidate, and the measurement changed what that can mean. `--sanitize`
+ * removes **every** message text, from the operator and the agent alike, along
+ * with every tool input and output. What survives is ids, timings, token counts,
+ * costs, model and agent names, and the names of the tools that ran. A sanitized
+ * export is therefore not a redacted transcript at all — it is a record of the
+ * *shape* of a session, and the honest way to attach it is to report that shape.
+ * Pasting the JSON in would add kilobytes of redaction tokens saying nothing.
+ *
+ * Appended after generation for the same reason as the cost section: these are
+ * exact figures meant to be checked, and a model asked to weave them into prose
+ * will round and re-order them.
+ *
+ * @param entries - One per successfully exported and audited session
+ * @param worktreeNames - worktree id -> display name, for legibility
+ * @param skipped - Sessions not exported, whether because of
+ *   {@link OPENCODE_EXPORT_MAX_SESSIONS} or {@link OPENCODE_EXPORT_TOTAL_BUDGET_MS};
+ *   reported rather than hidden
+ * @returns Markdown section, or null when there is nothing to report
+ */
+export function buildOpencodeExportSection(
+  entries: OpencodeExportEntry[],
+  worktreeNames: Map<string, string>,
+  skipped = 0
+): string | null {
+  if (entries.length === 0) return null;
+
+  const rows = entries.map(({ worktreeId, summary }) => {
+    const name = worktreeNames.get(worktreeId) ?? worktreeId;
+    const tools = summary.tools.length > 0 ? summary.tools.join(', ') : '-';
+    const turns = `${summary.userMessages} / ${summary.assistantMessages}`;
+    return (
+      `| ${name} | \`${summary.sessionId ?? '-'}\` | ${summary.agent ?? '-'} | ` +
+      `${summary.model ?? '-'} | ${turns} | ${summary.toolCalls} | ${tools} | ` +
+      `${formatLedgerNumber(summary.cost, 6)} |`
+    );
+  });
+
+  const notes = [
+    '_`opencode export --sanitize <sessionID>`. Measured on opencode 1.18.22: `--sanitize` removes every ' +
+      'message text (operator and agent alike), every tool input and output, the session title and every ' +
+      'filesystem path. What it keeps — and what this table is built from — is ids, timings, token counts, ' +
+      'costs, model and agent names, and the names of the tools that ran._',
+    '_Every export above was re-checked field by field before it was used; one that still contained readable ' +
+      'text was dropped rather than reported._',
+  ];
+  if (skipped > 0) {
+    notes.push(
+      `_${skipped} further opencode session(s) were not exported: the day exceeded the ` +
+        `${OPENCODE_EXPORT_MAX_SESSIONS}-session cap, or the section's ` +
+        `${Math.round(OPENCODE_EXPORT_TOTAL_BUDGET_MS / 1000)}s export budget ran out._`
+    );
+  }
+
+  return [
+    OPENCODE_EXPORT_SECTION_HEADING,
+    '',
+    '| Worktree | Session | Agent | Model | Turns (user / agent) | Tool calls | Tools | Cost (USD) |',
+    '|---|---|---|---|---:|---:|---|---:|',
+    ...rows,
+    '',
+    ...notes,
+  ].join('\n');
+}
+
+/**
+ * Export and audit every opencode session the ledger recorded for one day.
+ *
+ * Sequential rather than concurrent: each entry is a process spawn against the
+ * same SQLite database, and a day's worth in parallel buys a second of wall
+ * clock at the cost of contending with whatever opencode instances are running.
+ *
+ * @param db - Database instance
+ * @param date - `YYYY-MM-DD`
+ * @returns The entries, and how many sessions the cap left out
+ */
+export async function collectOpencodeExportEntries(
+  db: Database.Database,
+  date: string
+): Promise<{ entries: OpencodeExportEntry[]; skipped: number }> {
+  const opencodeSessions = getAgentSessionCostsByDate(db, date).filter(
+    (row) => row.cliToolId === OPENCODE_CLI_TOOL_ID
+  );
+  const selected = opencodeSessions.slice(0, OPENCODE_EXPORT_MAX_SESSIONS);
+  const skipped = opencodeSessions.length - selected.length;
+
+  const entries: OpencodeExportEntry[] = [];
+  const deadline = Date.now() + OPENCODE_EXPORT_TOTAL_BUDGET_MS;
+  let abandoned = 0;
+  for (const [index, row] of selected.entries()) {
+    if (Date.now() >= deadline) {
+      // Counted, not silently dropped: the section reports the remainder, and
+      // a budget that hides what it cost is how a report starts lying.
+      abandoned = selected.length - index;
+      logger.warn('opencode-export-budget-exhausted', { date, abandoned });
+      break;
+    }
+    const summary = await exportOpencodeSessionSummary(row.sessionId);
+    if (summary !== null) entries.push({ worktreeId: row.worktreeId, summary });
+  }
+  return { entries, skipped: skipped + abandoned };
+}
+
+// =============================================================================
 // Generator
 // =============================================================================
 
@@ -387,6 +648,26 @@ export async function generateDailySummary(
       }
     } catch (error) {
       logger.warn('cost-section-failed', {
+        date,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+
+    // 6.6. Append the sanitized opencode export section (Issue #2051).
+    //
+    // Same placement and same contract as the cost section above: after
+    // generation, after truncation, deterministic, and wrapped so that a
+    // failure loses this section rather than the report. It runs last because
+    // it is the only step here that spawns processes, and a slow one must not
+    // sit between the model's answer and the numbers.
+    try {
+      const { entries, skipped } = await collectOpencodeExportEntries(db, date);
+      const exportSection = buildOpencodeExportSection(entries, worktreeMap, skipped);
+      if (exportSection) {
+        output = `${output}\n\n${exportSection}`;
+      }
+    } catch (error) {
+      logger.warn('opencode-export-section-failed', {
         date,
         error: error instanceof Error ? error.message : String(error),
       });

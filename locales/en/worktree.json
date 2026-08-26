@@ -1097,5 +1097,17 @@
       "first": "First message",
       "last": "Latest message"
     }
+  },
+  "opencodeSession": {
+    "new": "New opencode session",
+    "list": "Open opencode session list",
+    "fork": "Fork this opencode session",
+    "share": "Create a share link",
+    "unshare": "Revoke the share link",
+    "shareCopy": "Copy link",
+    "shareConfirmTitle": "Publish this conversation?",
+    "shareConfirmBody": "opencode will publish this session to its own hosting, where anyone with the link can read it. What goes out is the conversation itself — your prompts, the agent's replies, and the input and output of every tool it ran — together with the absolute path of the session's working directory. Nothing is redacted. You can take the page down afterwards with \"Revoke the share link\", but that cannot un-read anything already read.",
+    "shareConfirmLabel": "Publish",
+    "sharePublicNotice": "Anyone with this link can read it."
   }
 }
