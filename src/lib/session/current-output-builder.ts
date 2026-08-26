@@ -1494,7 +1494,23 @@ async function buildPayload(
     isAddressableDecision(promptWaiting.decisionId)
       ? promptWaiting.decisionId
       : null;
-  const decisionOptions = addressableDecisionId !== null ? STRUCTURED_DECISION_OPTIONS : null;
+  // Issue #2100 splits the two halves of #2031's single expression, because an
+  // addressable decision is now of two KINDS. The id is published for both — it
+  // is what `POST /respond` names, and a question needs it exactly as much as an
+  // approval does — but the three verdicts belong to an approval alone.
+  //
+  // Publishing both for a question is not a cosmetic error: it is precisely what
+  // #2039's third gate refuses. `readPromptQuestionChoices` returns null the
+  // moment `decisionOptions` is non-empty, so a question carrying them would
+  // draw `Allow once / Allow always / Reject` over the agent's own choices, and
+  // a verdict sent to a question is refused at the source
+  // (`question-needs-answer-verdict`). The kind is recovered from the record the
+  // same way `structuredEvents.pendingDecisions[].kind` is, through the one
+  // reader in `pending-decision-kind`.
+  const addressesQuestion =
+    promptWaiting !== null && pendingDecisionKind(promptWaiting.toolName) === 'question';
+  const decisionOptions =
+    addressableDecisionId !== null && !addressesQuestion ? STRUCTURED_DECISION_OPTIONS : null;
 
   const structuredFacts: StructuredPromptFacts | null =
     promptWaiting === null
@@ -1515,7 +1531,14 @@ async function buildPayload(
           // user to go and answer in the terminal. Every source but opencode
           // therefore keeps the exact payload it had before this Issue, plus
           // the one `decisionId: null`.
-          patterns: addressableDecisionId !== null ? promptWaiting.patterns : null,
+          //
+          // Issue #2100 moves the gate onto `decisionOptions` rather than the
+          // id, which is the same value for every approval and the honest one
+          // for a question: a question draws no `Allow always`, so it may not
+          // carry the rules one would have saved. (`reportQuestionPending`
+          // records `patterns: null` anyway; the two agree by construction now
+          // instead of by coincidence.)
+          patterns: decisionOptions !== null ? promptWaiting.patterns : null,
         };
 
   const promptData: PromptData | StructuredPromptWaitingData | null = scraperPromptWaiting
