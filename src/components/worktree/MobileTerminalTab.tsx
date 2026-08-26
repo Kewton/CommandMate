@@ -20,6 +20,14 @@
  * a phone has no keyboard aimed at the pane at all, so opencode's `tab` /
  * `ctrl+p` / `ctrl+x` chords are unreachable without it.
  *
+ * Issue #2106: and it is rendered `collapsible`, i.e. folded behind one 44px
+ * toggle that starts CLOSED. Measured in a real browser (see
+ * `tests/e2e/mobile-opencode-quick-keys-2106.spec.ts`), the open strip wraps to
+ * seven rows and stands 378px tall, which left this tab's `TerminalDisplay` 40px
+ * at 390x730 and 0px at 360x640 — the user report that the terminal is barely
+ * visible was accurate, and the strip was the cause. Only this mobile surface
+ * passes the flag; the PC split pane keeps the always-open strip.
+ *
  * Issue #1879: the unsent-input bar ({@link UnsentComposerBar}) is rendered here
  * for the same reason — the PC footer has it, and a phone is where a half-typed
  * composer is most likely to be discovered. Its gate is the composer text, not a
@@ -81,7 +89,10 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
 
   return (
     <div className="flex flex-col h-full min-h-0">
-      <div className="flex-1 min-h-0">
+      {/* Issue #2106: the measured surface. The wrapper is what the flex column
+          hands to TerminalDisplay (which is `h-full`), so its rect IS the
+          terminal's visible height -- the number the collapse has to move. */}
+      <div className="flex-1 min-h-0" data-testid="mobile-terminal-region">
         <TerminalDisplay
           output={terminal.output}
           isActive={terminal.isRunning}
@@ -108,12 +119,16 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
       ) : null}
       {/* Issue #2046: opencode's own chords, on the phone for the same reason
           #1494 put the escape hatch here -- the mobile terminal is read-only and
-          has no other way to send them. `compact` drops the key-notation suffix
-          so seventeen 44px targets still wrap sensibly on a phone; the keys, the
-          gate and the omissions are identical to PC because they come from one
-          component. */}
+          has no other way to send them. `compact` drops the key-notation suffix;
+          the keys, the gate and the omissions are identical to PC because they
+          come from one component.
+          Issue #2106: `collapsible` folds all seventeen behind one 44px toggle,
+          closed by default. The slot below renders for every tool while the
+          session is running, but OpencodeQuickKeys still returns null for
+          anything other than opencode -- so on claude / codex / copilot this is
+          an empty div exactly as it was before #2106. */}
       {terminal.isRunning ? (
-        <div className="shrink-0 px-2 pt-1">
+        <div className="shrink-0 px-2 pt-1" data-testid="mobile-quick-keys-slot">
           <OpencodeQuickKeys
             worktreeId={worktreeId}
             cliToolId={cliToolId}
@@ -121,6 +136,7 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
             hasAgentSession={agentSession.session !== null}
             onKeysSent={refresh}
             compact
+            collapsible
           />
         </div>
       ) : null}

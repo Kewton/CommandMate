@@ -1078,6 +1078,8 @@
     "toolbarLabel": "opencode クイックキー",
     "caption": "opencode",
     "needsSession": "このペインの最初のターン以降に使えます（{notation}）",
+    "showKeys": "opencode クイックキーを表示",
+    "hideKeys": "opencode クイックキーを隠す",
     "keys": {
       "agentNext": "次のエージェント",
       "agentPrev": "前のエージェント",
