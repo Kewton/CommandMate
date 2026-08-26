@@ -46,6 +46,11 @@
 
 import { BaseCLITool } from './base';
 import type { CLIToolType } from './types';
+import type { NavigationKeySpec } from '@/types/cli-tool-contracts';
+import {
+  OPENCODE_LEADER_KEY,
+  OPENCODE_NAVIGATION_KEY_VALUES,
+} from '@/types/terminal-keys';
 import {
   hasSession,
   createSession,
@@ -278,6 +283,35 @@ export class OpenCodeTool extends BaseCLITool {
   readonly id: CLIToolType = 'opencode';
   readonly name = 'OpenCode';
   readonly command = 'opencode';
+
+  /**
+   * Declare opencode's key vocabulary (Issue #2046).
+   *
+   * The base pad plus opencode's own chords: the `C-x` leader, the letters that
+   * complete it, and the two control keys that need no leader (`C-p` palette,
+   * `C-t` variant cycle). Measured against a live opencode 1.18.22 on an
+   * isolated `HOME` and a private tmux socket; the defaults are also readable in
+   * the shipped binary (`leader: "ctrl+x"`, `leader_timeout: 2000`). Full run in
+   * `docs/design/opencode-server-live-verification.md` §22.
+   *
+   * **`b` (`sidebar_toggle`) is not here**, and that absence is the Issue's main
+   * finding rather than an oversight: at the 80 columns
+   * `resolveOpencodePaneWidth()` defaults to, an explicit `C-x` `b` turns the
+   * sidebar on *anyway* — it overrides the 121-column auto-gate #2047 measured —
+   * and in that state the same three readers #2047 documented at 200 columns
+   * break at 80 (§22.3). Before the first turn the binding is inert and the `b`
+   * lands in the composer as text instead. Neither branch has a width where it
+   * is safe, so the key is not published and the route will answer 400 for it.
+   *
+   * This method is the ONLY thing #2046 added to this file. Pane width and
+   * geometry stay where #2047 put them (`src/config/tmux-pane-config.ts`).
+   */
+  navigationKeys(): NavigationKeySpec {
+    return {
+      keys: OPENCODE_NAVIGATION_KEY_VALUES,
+      leaderKey: OPENCODE_LEADER_KEY,
+    };
+  }
 
   /**
    * Check if OpenCode session is running for a worktree

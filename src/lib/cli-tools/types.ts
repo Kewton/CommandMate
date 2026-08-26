@@ -6,6 +6,7 @@ import type {
   CaptureSpec,
   ComposerSpec,
   GracefulExitSpec,
+  NavigationKeySpec,
 } from '../../types/cli-tool-contracts';
 
 /**
@@ -298,6 +299,17 @@ export interface ICLITool {
    * (Issue #1933, §10.12).
    */
   captureSpec(): CaptureSpec;
+
+  /**
+   * Declare the keys this tool's terminal UI may send (Issue #2046).
+   *
+   * `POST /api/worktrees/[id]/special-keys` validates against the answer for
+   * the tool it was given, instead of against one global list shared by every
+   * tool. See {@link NavigationKeySpec} for why a shared list stopped working
+   * once opencode's `ctrl+x`-leader chords arrived, and for the #2032 invariant
+   * every declaration has to keep.
+   */
+  navigationKeys(): NavigationKeySpec;
 }
 
 /**

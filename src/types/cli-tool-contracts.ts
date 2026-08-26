@@ -14,6 +14,8 @@
  * and types only — nothing here touches a process.
  */
 
+import type { TerminalKey } from './terminal-keys';
+
 // ---------------------------------------------------------------------------
 // Key sequences (受入条件 S9)
 // ---------------------------------------------------------------------------
@@ -128,6 +130,58 @@ export function isKeyStep(step: KeySequence): step is Extract<KeySequence, { kin
  */
 export function isKeySequenceKeyName(name: string): name is KeySequenceKeyName {
   return (KEY_SEQUENCE_KEY_NAMES as readonly string[]).includes(name);
+}
+
+// ---------------------------------------------------------------------------
+// Navigation keys (Issue #2046)
+// ---------------------------------------------------------------------------
+
+/**
+ * The keys one tool's UI may ask the special-keys API to deliver.
+ *
+ * Returned by `ICLITool.navigationKeys()`. Before Issue #2046 this was a single
+ * module-level list (`NAVIGATION_KEY_VALUES`) that `POST
+ * /api/worktrees/[id]/special-keys` validated EVERY request against, regardless
+ * of which tool the request named. That worked only while every tool wanted the
+ * same twelve keys. opencode does not: its TUI is driven by a `ctrl+x` leader
+ * plus a bare letter, and a bare letter is a character — `a` sent to claude's
+ * pane is an `a` typed into claude's composer, not a command.
+ *
+ * So the vocabulary moved into the tool, and the route now asks the tool it was
+ * given. 設計方針書 §6 ("tool-specific behaviour belongs in the tool class") is
+ * the same reason `describeComposer()` / `captureSpec()` / `gracefulExitSequence()`
+ * exist.
+ *
+ * ## The invariant this must not break (Issue #2032)
+ *
+ * Every key a tool declares must be one `sendSpecialKeys()` will actually hand
+ * to tmux. When the vocabulary was global that was stated as
+ * `NAVIGATION_KEY_VALUES` ⊆ `ALLOWED_SPECIAL_KEYS`; per tool it is the same
+ * statement quantified over the registry, and it is checked the same way —
+ * `isSendableSpecialKey()`. Breaking it restores exactly the #2032 failure: the
+ * route validates a request, answers nothing, and then throws inside the
+ * transport and reports 500.
+ */
+export interface NavigationKeySpec {
+  /**
+   * Every key name this tool's UI may send, including the leader prefix and any
+   * literal characters that complete a chord.
+   */
+  readonly keys: readonly TerminalKey[];
+  /**
+   * The prefix key of this tool's two-step chord, or `null` when it has none.
+   *
+   * opencode alone today (`C-x`, measured default of 1.18.22). The UI reads this
+   * instead of writing `C-x` next to every chord, so a tool whose leader differs
+   * — or a future opencode that renames it — changes one declaration.
+   *
+   * A chord is delivered as TWO array entries in one special-keys request
+   * (`['C-x', 'b']`), which `sendSpecialKeys()` sends one at a time with
+   * `SPECIAL_KEY_DELAY_MS` between them. That is the same sequential-step
+   * discipline `runKeySequence` applies to `KeySequence`, minus the literal/key
+   * distinction the special-keys transport does not have.
+   */
+  readonly leaderKey: TerminalKey | null;
 }
 
 // ---------------------------------------------------------------------------

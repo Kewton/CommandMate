@@ -20,11 +20,29 @@ vi.mock('@/lib/cli-tools/types', async (importOriginal) => {
   return { ...actual };
 });
 
+const { NAVIGATION_KEY_VALUES } = vi.hoisted(() => ({
+  // Issue #2046: hoisted so the `@/lib/cli-tools/manager` factory below can use
+  // it. Kept as the literal base vocabulary rather than an import so the mock
+  // factory stays free of module resolution order.
+  NAVIGATION_KEY_VALUES: [
+    'Up', 'Down', 'Left', 'Right', 'Enter', 'Escape', 'Tab', 'BTab',
+    'PageUp', 'PageDown', 'Home', 'End', 'q',
+  ] as const,
+}));
+
 vi.mock('@/lib/cli-tools/manager', () => ({
   CLIToolManager: {
     getInstance: vi.fn(() => ({
       getTool: vi.fn((id: string) => ({
         getSessionName: vi.fn((worktreeId: string) => `mcbd-${id}-${worktreeId}`),
+        // Issue #2046: the route asks the tool which keys it publishes. This
+        // stub answers `BaseCLITool`'s default — the pre-#2046 global list —
+        // which is exactly what claude and codex answer in production, so the
+        // cases below still exercise the vocabulary they were written for.
+        // opencode's wider declaration is covered by
+        // tests/unit/api/special-keys-per-tool-vocabulary-2046.test.ts, which
+        // uses the REAL registry rather than a stub.
+        navigationKeys: vi.fn(() => ({ keys: NAVIGATION_KEY_VALUES, leaderKey: null })),
       })),
     })),
   },

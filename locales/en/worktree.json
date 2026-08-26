@@ -1057,5 +1057,29 @@
     "busy": "The agent is mid-turn. Try again once the turn finishes.",
     "noop": "opencode changed nothing (it could not find that turn).",
     "failed": "opencode refused the operation."
+  },
+  "opencodeQuickKeys": {
+    "toolbarLabel": "opencode quick keys",
+    "caption": "opencode",
+    "needsSession": "Available after this pane's first turn ({notation})",
+    "keys": {
+      "agentNext": "Next agent",
+      "agentPrev": "Previous agent",
+      "commands": "Commands",
+      "variant": "Variant",
+      "agents": "Agents",
+      "sessions": "Sessions",
+      "newSession": "New session",
+      "models": "Models",
+      "themes": "Themes",
+      "timeline": "Timeline",
+      "undo": "Undo",
+      "redo": "Redo",
+      "compact": "Compact",
+      "pageUp": "Page up",
+      "pageDown": "Page down",
+      "first": "First message",
+      "last": "Latest message"
+    }
   }
 }

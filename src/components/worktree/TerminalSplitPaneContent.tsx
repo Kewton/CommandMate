@@ -6,6 +6,7 @@
  *   - AutoYesToggle (Issue #740; per-split, keyed by this split's cliToolId so
  *     each CLI toggles auto-yes independently)
  *   - NavigationButtons (when CLI is in selection-list state, e.g. OpenCode)
+ *   - OpencodeQuickKeys (opencode only, Issue #2046)
  *   - PromptPanel (when /current-output reports isPromptWaiting)
  *   - MessageInput (always; carries draft persistence per splitIndex)
  *
@@ -38,6 +39,7 @@ import { TerminalDisplay } from '@/components/worktree/TerminalDisplay';
 import { getTerminalDisplayCompaction } from '@/config/terminal-display-compaction';
 import { NavigationButtons } from '@/components/worktree/NavigationButtons';
 import { TerminalEscapeHatch } from '@/components/worktree/TerminalEscapeHatch';
+import { OpencodeQuickKeys } from '@/components/worktree/OpencodeQuickKeys';
 import { UnsentComposerBar, hasUnsentComposerText } from '@/components/worktree/UnsentComposerBar';
 import { PromptPanel } from '@/components/worktree/PromptPanel';
 import { MessageInput } from '@/components/worktree/MessageInput';
@@ -580,6 +582,23 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
             cliToolName={getCliToolDisplayName(cliToolId)}
           />
         ) : null}
+        {/* Issue #2046: opencode only. The chords opencode's TUI is driven by
+            (`tab` agents, `ctrl+p` commands, and the `ctrl+x` leader) have no
+            other way in, because this terminal is read-only. Rendered only while
+            the pane is live, since the special-keys route 404s otherwise. The
+            component itself decides which of its buttons a pane without an agent
+            session may press -- see its docblock, and §22 of
+            docs/design/opencode-server-live-verification.md for why `ctrl+x b`
+            is not among them. */}
+        {terminal.isRunning ? (
+          <OpencodeQuickKeys
+            worktreeId={worktreeId}
+            cliToolId={cliToolId}
+            instanceId={resolvedInstanceId}
+            hasAgentSession={agentSession.session !== null}
+            onKeysSent={refresh}
+          />
+        ) : null}
         {/* Issue #2043: opencode only, and only when opencode has named files.
             Renders nothing at all for every other tool -- see
             OpencodeTurnDiffPanel / hasAgentSessionDiff. Placed directly above
@@ -632,6 +651,8 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       showPrompt,
       showEscapeHatch,
       showUnsentComposerBar,
+      // Issue #2046: the opencode quick-key strip's session gate.
+      agentSession.session,
       terminal.composerText,
       terminal.isPagerActive,
       worktreeId,
