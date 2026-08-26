@@ -1,0 +1,604 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Issue #2046 acceptance: the shared navigation surfaces did not change > NavigationButtons renders identically for claude 1`] = `
+<div
+  aria-label="TUI Navigation"
+  class="flex flex-wrap items-center gap-1.5 py-1.5 bg-muted rounded-lg"
+  role="toolbar"
+>
+  <span
+    class="text-xs text-muted-foreground mx-2"
+  >
+    Nav
+  </span>
+  <button
+    aria-label="Left"
+    class="min-w-[44px] min-h-[44px] px-3 py-2 text-sm font-medium rounded-md
+            border border-border
+            focus:outline-none focus:ring-2 focus:ring-ring
+            transition-colors duration-75
+            bg-surface dark:bg-surface-2 hover:bg-muted active:bg-muted"
+    type="button"
+  >
+    ◀
+  </button>
+  <button
+    aria-label="Up"
+    class="min-w-[44px] min-h-[44px] px-3 py-2 text-sm font-medium rounded-md
+            border border-border
+            focus:outline-none focus:ring-2 focus:ring-ring
+            transition-colors duration-75
+            bg-surface dark:bg-surface-2 hover:bg-muted active:bg-muted"
+    type="button"
+  >
+    ▲
+  </button>
+  <button
+    aria-label="Down"
+    class="min-w-[44px] min-h-[44px] px-3 py-2 text-sm font-medium rounded-md
+            border border-border
+            focus:outline-none focus:ring-2 focus:ring-ring
+            transition-colors duration-75
+            bg-surface dark:bg-surface-2 hover:bg-muted active:bg-muted"
+    type="button"
+  >
+    ▼
+  </button>
+  <button
+    aria-label="Right"
+    class="min-w-[44px] min-h-[44px] px-3 py-2 text-sm font-medium rounded-md
+            border border-border
+            focus:outline-none focus:ring-2 focus:ring-ring
+            transition-colors duration-75
+            bg-surface dark:bg-surface-2 hover:bg-muted active:bg-muted"
+    type="button"
+  >
+    ▶
+  </button>
+  <button
+    aria-label="Enter"
+    class="min-w-[44px] min-h-[44px] px-3 py-2 text-sm font-medium rounded-md
+            border border-border
+            focus:outline-none focus:ring-2 focus:ring-ring
+            transition-colors duration-75
+            bg-surface dark:bg-surface-2 hover:bg-muted active:bg-muted"
+    type="button"
+  >
+    ↵
+  </button>
+  <button
+    aria-label="Escape"
+    class="min-w-[44px] min-h-[44px] px-3 py-2 text-sm font-medium rounded-md
+            border border-border
+            focus:outline-none focus:ring-2 focus:ring-ring
+            transition-colors duration-75
+            bg-surface dark:bg-surface-2 hover:bg-muted active:bg-muted"
+    type="button"
+  >
+    Esc
+  </button>
+</div>
+`;
+
+exports[`Issue #2046 acceptance: the shared navigation surfaces did not change > NavigationButtons renders identically for codex 1`] = `
+<div
+  aria-label="TUI Navigation"
+  class="flex flex-wrap items-center gap-1.5 py-1.5 bg-muted rounded-lg"
+  role="toolbar"
+>
+  <span
+    class="text-xs text-muted-foreground mx-2"
+  >
+    Nav
+  </span>
+  <button
+    aria-label="Left"
+    class="min-w-[44px] min-h-[44px] px-3 py-2 text-sm font-medium rounded-md
+            border border-border
+            focus:outline-none focus:ring-2 focus:ring-ring
+            transition-colors duration-75
+            bg-surface dark:bg-surface-2 hover:bg-muted active:bg-muted"
+    type="button"
+  >
+    ◀
+  </button>
+  <button
+    aria-label="Up"
+    class="min-w-[44px] min-h-[44px] px-3 py-2 text-sm font-medium rounded-md
+            border border-border
+            focus:outline-none focus:ring-2 focus:ring-ring
+            transition-colors duration-75
+            bg-surface dark:bg-surface-2 hover:bg-muted active:bg-muted"
+    type="button"
+  >
+    ▲
+  </button>
+  <button
+    aria-label="Down"
+    class="min-w-[44px] min-h-[44px] px-3 py-2 text-sm font-medium rounded-md
+            border border-border
+            focus:outline-none focus:ring-2 focus:ring-ring
+            transition-colors duration-75
+            bg-surface dark:bg-surface-2 hover:bg-muted active:bg-muted"
+    type="button"
+  >
+    ▼
+  </button>
+  <button
+    aria-label="Right"
+    class="min-w-[44px] min-h-[44px] px-3 py-2 text-sm font-medium rounded-md
+            border border-border
+            focus:outline-none focus:ring-2 focus:ring-ring
+            transition-colors duration-75
+            bg-surface dark:bg-surface-2 hover:bg-muted active:bg-muted"
+    type="button"
+  >
+    ▶
+  </button>
+  <button
+    aria-label="Enter"
+    class="min-w-[44px] min-h-[44px] px-3 py-2 text-sm font-medium rounded-md
+            border border-border
+            focus:outline-none focus:ring-2 focus:ring-ring
+            transition-colors duration-75
+            bg-surface dark:bg-surface-2 hover:bg-muted active:bg-muted"
+    type="button"
+  >
+    ↵
+  </button>
+  <button
+    aria-label="Escape"
+    class="min-w-[44px] min-h-[44px] px-3 py-2 text-sm font-medium rounded-md
+            border border-border
+            focus:outline-none focus:ring-2 focus:ring-ring
+            transition-colors duration-75
+            bg-surface dark:bg-surface-2 hover:bg-muted active:bg-muted"
+    type="button"
+  >
+    Esc
+  </button>
+</div>
+`;
+
+exports[`Issue #2046 acceptance: the shared navigation surfaces did not change > NavigationButtons with the pager keys renders identically for claude 1`] = `
+<div
+  aria-label="TUI Navigation"
+  class="flex flex-wrap items-center gap-1.5 py-1.5 bg-muted rounded-lg"
+  role="toolbar"
+>
+  <span
+    class="text-xs text-muted-foreground mx-2"
+  >
+    Nav
+  </span>
+  <button
+    aria-label="Left"
+    class="min-w-[44px] min-h-[44px] px-3 py-2 text-sm font-medium rounded-md
+            border border-border
+            focus:outline-none focus:ring-2 focus:ring-ring
+            transition-colors duration-75
+            bg-surface dark:bg-surface-2 hover:bg-muted active:bg-muted"
+    type="button"
+  >
+    ◀
+  </button>
+  <button
+    aria-label="Up"
+    class="min-w-[44px] min-h-[44px] px-3 py-2 text-sm font-medium rounded-md
+            border border-border
+            focus:outline-none focus:ring-2 focus:ring-ring
+            transition-colors duration-75
+            bg-surface dark:bg-surface-2 hover:bg-muted active:bg-muted"
+    type="button"
+  >
+    ▲
+  </button>
+  <button
+    aria-label="Down"
+    class="min-w-[44px] min-h-[44px] px-3 py-2 text-sm font-medium rounded-md
+            border border-border
+            focus:outline-none focus:ring-2 focus:ring-ring
+            transition-colors duration-75
+            bg-surface dark:bg-surface-2 hover:bg-muted active:bg-muted"
+    type="button"
+  >
+    ▼
+  </button>
+  <button
+    aria-label="Right"
+    class="min-w-[44px] min-h-[44px] px-3 py-2 text-sm font-medium rounded-md
+            border border-border
+            focus:outline-none focus:ring-2 focus:ring-ring
+            transition-colors duration-75
+            bg-surface dark:bg-surface-2 hover:bg-muted active:bg-muted"
+    type="button"
+  >
+    ▶
+  </button>
+  <button
+    aria-label="Enter"
+    class="min-w-[44px] min-h-[44px] px-3 py-2 text-sm font-medium rounded-md
+            border border-border
+            focus:outline-none focus:ring-2 focus:ring-ring
+            transition-colors duration-75
+            bg-surface dark:bg-surface-2 hover:bg-muted active:bg-muted"
+    type="button"
+  >
+    ↵
+  </button>
+  <button
+    aria-label="Escape"
+    class="min-w-[44px] min-h-[44px] px-3 py-2 text-sm font-medium rounded-md
+            border border-border
+            focus:outline-none focus:ring-2 focus:ring-ring
+            transition-colors duration-75
+            bg-surface dark:bg-surface-2 hover:bg-muted active:bg-muted"
+    type="button"
+  >
+    Esc
+  </button>
+  <button
+    aria-label="Page Up"
+    class="min-w-[44px] min-h-[44px] px-3 py-2 text-sm font-medium rounded-md
+            border border-border
+            focus:outline-none focus:ring-2 focus:ring-ring
+            transition-colors duration-75
+            bg-surface dark:bg-surface-2 hover:bg-muted active:bg-muted"
+    type="button"
+  >
+    PgUp
+  </button>
+  <button
+    aria-label="Page Down"
+    class="min-w-[44px] min-h-[44px] px-3 py-2 text-sm font-medium rounded-md
+            border border-border
+            focus:outline-none focus:ring-2 focus:ring-ring
+            transition-colors duration-75
+            bg-surface dark:bg-surface-2 hover:bg-muted active:bg-muted"
+    type="button"
+  >
+    PgDn
+  </button>
+  <button
+    aria-label="Home"
+    class="min-w-[44px] min-h-[44px] px-3 py-2 text-sm font-medium rounded-md
+            border border-border
+            focus:outline-none focus:ring-2 focus:ring-ring
+            transition-colors duration-75
+            bg-surface dark:bg-surface-2 hover:bg-muted active:bg-muted"
+    type="button"
+  >
+    Home
+  </button>
+  <button
+    aria-label="End"
+    class="min-w-[44px] min-h-[44px] px-3 py-2 text-sm font-medium rounded-md
+            border border-border
+            focus:outline-none focus:ring-2 focus:ring-ring
+            transition-colors duration-75
+            bg-surface dark:bg-surface-2 hover:bg-muted active:bg-muted"
+    type="button"
+  >
+    End
+  </button>
+  <button
+    aria-label="Quit pager"
+    class="min-w-[44px] min-h-[44px] px-3 py-2 text-sm font-medium rounded-md
+            border border-border
+            focus:outline-none focus:ring-2 focus:ring-ring
+            transition-colors duration-75
+            bg-surface dark:bg-surface-2 hover:bg-muted active:bg-muted"
+    type="button"
+  >
+    q
+  </button>
+</div>
+`;
+
+exports[`Issue #2046 acceptance: the shared navigation surfaces did not change > NavigationButtons with the pager keys renders identically for codex 1`] = `
+<div
+  aria-label="TUI Navigation"
+  class="flex flex-wrap items-center gap-1.5 py-1.5 bg-muted rounded-lg"
+  role="toolbar"
+>
+  <span
+    class="text-xs text-muted-foreground mx-2"
+  >
+    Nav
+  </span>
+  <button
+    aria-label="Left"
+    class="min-w-[44px] min-h-[44px] px-3 py-2 text-sm font-medium rounded-md
+            border border-border
+            focus:outline-none focus:ring-2 focus:ring-ring
+            transition-colors duration-75
+            bg-surface dark:bg-surface-2 hover:bg-muted active:bg-muted"
+    type="button"
+  >
+    ◀
+  </button>
+  <button
+    aria-label="Up"
+    class="min-w-[44px] min-h-[44px] px-3 py-2 text-sm font-medium rounded-md
+            border border-border
+            focus:outline-none focus:ring-2 focus:ring-ring
+            transition-colors duration-75
+            bg-surface dark:bg-surface-2 hover:bg-muted active:bg-muted"
+    type="button"
+  >
+    ▲
+  </button>
+  <button
+    aria-label="Down"
+    class="min-w-[44px] min-h-[44px] px-3 py-2 text-sm font-medium rounded-md
+            border border-border
+            focus:outline-none focus:ring-2 focus:ring-ring
+            transition-colors duration-75
+            bg-surface dark:bg-surface-2 hover:bg-muted active:bg-muted"
+    type="button"
+  >
+    ▼
+  </button>
+  <button
+    aria-label="Right"
+    class="min-w-[44px] min-h-[44px] px-3 py-2 text-sm font-medium rounded-md
+            border border-border
+            focus:outline-none focus:ring-2 focus:ring-ring
+            transition-colors duration-75
+            bg-surface dark:bg-surface-2 hover:bg-muted active:bg-muted"
+    type="button"
+  >
+    ▶
+  </button>
+  <button
+    aria-label="Enter"
+    class="min-w-[44px] min-h-[44px] px-3 py-2 text-sm font-medium rounded-md
+            border border-border
+            focus:outline-none focus:ring-2 focus:ring-ring
+            transition-colors duration-75
+            bg-surface dark:bg-surface-2 hover:bg-muted active:bg-muted"
+    type="button"
+  >
+    ↵
+  </button>
+  <button
+    aria-label="Escape"
+    class="min-w-[44px] min-h-[44px] px-3 py-2 text-sm font-medium rounded-md
+            border border-border
+            focus:outline-none focus:ring-2 focus:ring-ring
+            transition-colors duration-75
+            bg-surface dark:bg-surface-2 hover:bg-muted active:bg-muted"
+    type="button"
+  >
+    Esc
+  </button>
+  <button
+    aria-label="Page Up"
+    class="min-w-[44px] min-h-[44px] px-3 py-2 text-sm font-medium rounded-md
+            border border-border
+            focus:outline-none focus:ring-2 focus:ring-ring
+            transition-colors duration-75
+            bg-surface dark:bg-surface-2 hover:bg-muted active:bg-muted"
+    type="button"
+  >
+    PgUp
+  </button>
+  <button
+    aria-label="Page Down"
+    class="min-w-[44px] min-h-[44px] px-3 py-2 text-sm font-medium rounded-md
+            border border-border
+            focus:outline-none focus:ring-2 focus:ring-ring
+            transition-colors duration-75
+            bg-surface dark:bg-surface-2 hover:bg-muted active:bg-muted"
+    type="button"
+  >
+    PgDn
+  </button>
+  <button
+    aria-label="Home"
+    class="min-w-[44px] min-h-[44px] px-3 py-2 text-sm font-medium rounded-md
+            border border-border
+            focus:outline-none focus:ring-2 focus:ring-ring
+            transition-colors duration-75
+            bg-surface dark:bg-surface-2 hover:bg-muted active:bg-muted"
+    type="button"
+  >
+    Home
+  </button>
+  <button
+    aria-label="End"
+    class="min-w-[44px] min-h-[44px] px-3 py-2 text-sm font-medium rounded-md
+            border border-border
+            focus:outline-none focus:ring-2 focus:ring-ring
+            transition-colors duration-75
+            bg-surface dark:bg-surface-2 hover:bg-muted active:bg-muted"
+    type="button"
+  >
+    End
+  </button>
+  <button
+    aria-label="Quit pager"
+    class="min-w-[44px] min-h-[44px] px-3 py-2 text-sm font-medium rounded-md
+            border border-border
+            focus:outline-none focus:ring-2 focus:ring-ring
+            transition-colors duration-75
+            bg-surface dark:bg-surface-2 hover:bg-muted active:bg-muted"
+    type="button"
+  >
+    q
+  </button>
+</div>
+`;
+
+exports[`Issue #2046 acceptance: the shared navigation surfaces did not change > TerminalEscapeHatch renders identically for claude 1`] = `
+<div
+  aria-label="Terminal navigation keys"
+  class="flex flex-wrap items-center gap-1.5 py-1.5 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50 rounded-lg"
+  role="toolbar"
+>
+  <span
+    class="text-xs text-amber-700 dark:text-amber-400 mx-2"
+    title="Send navigation / escape keys when the terminal is stuck in a TUI overlay"
+  >
+    Navigate
+  </span>
+  <button
+    aria-label="Send Left"
+    class="min-w-[44px] min-h-[44px] px-3 py-2 text-sm font-medium rounded-md
+            border border-amber-300 dark:border-amber-700
+            focus:outline-none focus:ring-2 focus:ring-amber-500
+            transition-colors duration-75
+            bg-white dark:bg-gray-700 hover:bg-amber-50 dark:hover:bg-gray-600 active:bg-amber-100 dark:active:bg-gray-500"
+    type="button"
+  >
+    ◀
+  </button>
+  <button
+    aria-label="Send Up"
+    class="min-w-[44px] min-h-[44px] px-3 py-2 text-sm font-medium rounded-md
+            border border-amber-300 dark:border-amber-700
+            focus:outline-none focus:ring-2 focus:ring-amber-500
+            transition-colors duration-75
+            bg-white dark:bg-gray-700 hover:bg-amber-50 dark:hover:bg-gray-600 active:bg-amber-100 dark:active:bg-gray-500"
+    type="button"
+  >
+    ▲
+  </button>
+  <button
+    aria-label="Send Down"
+    class="min-w-[44px] min-h-[44px] px-3 py-2 text-sm font-medium rounded-md
+            border border-amber-300 dark:border-amber-700
+            focus:outline-none focus:ring-2 focus:ring-amber-500
+            transition-colors duration-75
+            bg-white dark:bg-gray-700 hover:bg-amber-50 dark:hover:bg-gray-600 active:bg-amber-100 dark:active:bg-gray-500"
+    type="button"
+  >
+    ▼
+  </button>
+  <button
+    aria-label="Send Right"
+    class="min-w-[44px] min-h-[44px] px-3 py-2 text-sm font-medium rounded-md
+            border border-amber-300 dark:border-amber-700
+            focus:outline-none focus:ring-2 focus:ring-amber-500
+            transition-colors duration-75
+            bg-white dark:bg-gray-700 hover:bg-amber-50 dark:hover:bg-gray-600 active:bg-amber-100 dark:active:bg-gray-500"
+    type="button"
+  >
+    ▶
+  </button>
+  <button
+    aria-label="Send Enter"
+    class="min-w-[44px] min-h-[44px] px-3 py-2 text-sm font-medium rounded-md
+            border border-amber-300 dark:border-amber-700
+            focus:outline-none focus:ring-2 focus:ring-amber-500
+            transition-colors duration-75
+            bg-white dark:bg-gray-700 hover:bg-amber-50 dark:hover:bg-gray-600 active:bg-amber-100 dark:active:bg-gray-500"
+    type="button"
+  >
+    ↵
+  </button>
+  <button
+    aria-label="Send Escape"
+    class="min-w-[44px] min-h-[44px] px-3 py-2 text-sm font-medium rounded-md
+            border border-amber-300 dark:border-amber-700
+            focus:outline-none focus:ring-2 focus:ring-amber-500
+            transition-colors duration-75
+            bg-white dark:bg-gray-700 hover:bg-amber-50 dark:hover:bg-gray-600 active:bg-amber-100 dark:active:bg-gray-500"
+    type="button"
+  >
+    Esc
+  </button>
+</div>
+`;
+
+exports[`Issue #2046 acceptance: the shared navigation surfaces did not change > TerminalEscapeHatch renders identically for codex 1`] = `
+<div
+  aria-label="Terminal navigation keys"
+  class="flex flex-wrap items-center gap-1.5 py-1.5 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50 rounded-lg"
+  role="toolbar"
+>
+  <span
+    class="text-xs text-amber-700 dark:text-amber-400 mx-2"
+    title="Send navigation / escape keys when the terminal is stuck in a TUI overlay"
+  >
+    Navigate
+  </span>
+  <button
+    aria-label="Send Left"
+    class="min-w-[44px] min-h-[44px] px-3 py-2 text-sm font-medium rounded-md
+            border border-amber-300 dark:border-amber-700
+            focus:outline-none focus:ring-2 focus:ring-amber-500
+            transition-colors duration-75
+            bg-white dark:bg-gray-700 hover:bg-amber-50 dark:hover:bg-gray-600 active:bg-amber-100 dark:active:bg-gray-500"
+    type="button"
+  >
+    ◀
+  </button>
+  <button
+    aria-label="Send Up"
+    class="min-w-[44px] min-h-[44px] px-3 py-2 text-sm font-medium rounded-md
+            border border-amber-300 dark:border-amber-700
+            focus:outline-none focus:ring-2 focus:ring-amber-500
+            transition-colors duration-75
+            bg-white dark:bg-gray-700 hover:bg-amber-50 dark:hover:bg-gray-600 active:bg-amber-100 dark:active:bg-gray-500"
+    type="button"
+  >
+    ▲
+  </button>
+  <button
+    aria-label="Send Down"
+    class="min-w-[44px] min-h-[44px] px-3 py-2 text-sm font-medium rounded-md
+            border border-amber-300 dark:border-amber-700
+            focus:outline-none focus:ring-2 focus:ring-amber-500
+            transition-colors duration-75
+            bg-white dark:bg-gray-700 hover:bg-amber-50 dark:hover:bg-gray-600 active:bg-amber-100 dark:active:bg-gray-500"
+    type="button"
+  >
+    ▼
+  </button>
+  <button
+    aria-label="Send Right"
+    class="min-w-[44px] min-h-[44px] px-3 py-2 text-sm font-medium rounded-md
+            border border-amber-300 dark:border-amber-700
+            focus:outline-none focus:ring-2 focus:ring-amber-500
+            transition-colors duration-75
+            bg-white dark:bg-gray-700 hover:bg-amber-50 dark:hover:bg-gray-600 active:bg-amber-100 dark:active:bg-gray-500"
+    type="button"
+  >
+    ▶
+  </button>
+  <button
+    aria-label="Send Enter"
+    class="min-w-[44px] min-h-[44px] px-3 py-2 text-sm font-medium rounded-md
+            border border-amber-300 dark:border-amber-700
+            focus:outline-none focus:ring-2 focus:ring-amber-500
+            transition-colors duration-75
+            bg-white dark:bg-gray-700 hover:bg-amber-50 dark:hover:bg-gray-600 active:bg-amber-100 dark:active:bg-gray-500"
+    type="button"
+  >
+    ↵
+  </button>
+  <button
+    aria-label="Send Escape"
+    class="min-w-[44px] min-h-[44px] px-3 py-2 text-sm font-medium rounded-md
+            border border-amber-300 dark:border-amber-700
+            focus:outline-none focus:ring-2 focus:ring-amber-500
+            transition-colors duration-75
+            bg-white dark:bg-gray-700 hover:bg-amber-50 dark:hover:bg-gray-600 active:bg-amber-100 dark:active:bg-gray-500"
+    type="button"
+  >
+    Esc
+  </button>
+  <button
+    aria-label="Send q (quit)"
+    class="min-w-[44px] min-h-[44px] px-3 py-2 text-sm font-medium rounded-md
+            border border-amber-300 dark:border-amber-700
+            focus:outline-none focus:ring-2 focus:ring-amber-500
+            transition-colors duration-75
+            bg-white dark:bg-gray-700 hover:bg-amber-50 dark:hover:bg-gray-600 active:bg-amber-100 dark:active:bg-gray-500"
+    type="button"
+  >
+    q
+  </button>
+</div>
+`;

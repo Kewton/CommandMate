@@ -8,9 +8,11 @@ import { isImageCapableCLITool } from '@/lib/cli-tools/types';
 import { resolveComposerSpec } from '@/lib/cli-tools/composer-spec';
 import { resolveCaptureSpec } from '@/lib/cli-tools/capture-spec';
 import { resolveGracefulExitSpec } from '@/lib/cli-tools/graceful-exit';
+import { NAVIGATION_KEY_VALUES } from '@/types/terminal-keys';
 
 /**
- * The three contract methods Issue #1933 added to `ICLITool`, as a literal
+ * The contract methods `ICLITool` requires beyond the session verbs — the three
+ * Issue #1933 added plus `navigationKeys()` from Issue #2046 — as a literal
  * would implement them. `BaseCLITool` supplies exactly these defaults, so a
  * hand-rolled tool object in this file stays a valid `ICLITool`.
  */
@@ -18,6 +20,7 @@ const contractMethods = (id: CLIToolType) => ({
   describeComposer: () => resolveComposerSpec(id),
   gracefulExitSequence: () => resolveGracefulExitSpec(id),
   captureSpec: () => resolveCaptureSpec(id),
+  navigationKeys: () => ({ keys: NAVIGATION_KEY_VALUES, leaderKey: null }),
 });
 
 describe('CLITool Types', () => {

@@ -28,6 +28,10 @@ import {
   SPECIAL_KEY_VALUES,
   sendSpecialKeys,
 } from '@/lib/tmux/tmux';
+import {
+  OPENCODE_NAVIGATION_KEY_VALUES,
+  type TerminalKey,
+} from '@/types/terminal-keys';
 import { invalidateCache } from '@/lib/tmux/tmux-capture-cache';
 
 describe('NAVIGATION_KEY_VALUES', () => {
@@ -100,13 +104,32 @@ describe('isAllowedSpecialKey', () => {
     expect(isAllowedSpecialKey('DC')).toBe(false);
   });
 
-  it('should act as type guard (narrows to NavigationKey)', () => {
+  it('should act as type guard (narrows to TerminalKey)', () => {
     const key: string = 'Up';
     if (isAllowedSpecialKey(key)) {
-      // TypeScript should narrow key to NavigationKey here
-      const _navKey: NavigationKey = key;
+      // Issue #2046: the guard narrows to TerminalKey (the union of every tool's
+      // vocabulary) rather than to NavigationKey, because the vocabulary it
+      // checks against is now the caller's — a tool's own declaration. Assigning
+      // through NavigationKey still works for a base-vocabulary key, which is
+      // what this asserts.
+      const _terminalKey: TerminalKey = key;
+      const _navKey: NavigationKey = _terminalKey as NavigationKey;
       expect(_navKey).toBe('Up');
     }
+  });
+
+  // Issue #2046: the second parameter is the declaring tool's key list.
+  it('accepts an opencode chord key only when the opencode vocabulary is passed', () => {
+    expect(isAllowedSpecialKey('C-x')).toBe(false);
+    expect(isAllowedSpecialKey('C-x', OPENCODE_NAVIGATION_KEY_VALUES)).toBe(true);
+    expect(isAllowedSpecialKey('a', OPENCODE_NAVIGATION_KEY_VALUES)).toBe(true);
+  });
+
+  it('still refuses a key the transport cannot deliver, whatever vocabulary is passed', () => {
+    // `F2` is a real opencode binding (model_cycle_recent) that this Issue did
+    // NOT publish; a vocabulary that names it must still not get it through.
+    expect(isAllowedSpecialKey('F2', ['F2'])).toBe(false);
+    expect(isAllowedSpecialKey('b', OPENCODE_NAVIGATION_KEY_VALUES)).toBe(false);
   });
 });
 

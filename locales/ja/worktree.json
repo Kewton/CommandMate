@@ -1057,5 +1057,29 @@
     "busy": "エージェントが実行中のため実行できません。ターンの完了後に再試行してください。",
     "noop": "opencode は変更しませんでした（対象のターンが見つかりません）。",
     "failed": "opencode が操作を拒否しました。"
+  },
+  "opencodeQuickKeys": {
+    "toolbarLabel": "opencode クイックキー",
+    "caption": "opencode",
+    "needsSession": "このペインの最初のターン以降に使えます（{notation}）",
+    "keys": {
+      "agentNext": "次のエージェント",
+      "agentPrev": "前のエージェント",
+      "commands": "コマンド",
+      "variant": "バリアント",
+      "agents": "エージェント",
+      "sessions": "セッション",
+      "newSession": "新規セッション",
+      "models": "モデル",
+      "themes": "テーマ",
+      "timeline": "タイムライン",
+      "undo": "取り消し",
+      "redo": "やり直し",
+      "compact": "圧縮",
+      "pageUp": "1ページ上",
+      "pageDown": "1ページ下",
+      "first": "先頭メッセージ",
+      "last": "最新メッセージ"
+    }
   }
 }

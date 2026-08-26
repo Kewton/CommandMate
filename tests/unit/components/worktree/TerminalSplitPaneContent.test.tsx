@@ -331,6 +331,77 @@ describe('TerminalSplitPaneContent', () => {
     expect(screen.queryByTestId('terminal-escape-hatch')).not.toBeInTheDocument();
   });
 
+  it('renders OpencodeQuickKeys for an opencode split and for no other tool (Issue #2046)', async () => {
+    mockFetch.mockImplementation((input) => {
+      const url = new URL(getUrlString(input), 'http://localhost');
+      const cli = url.searchParams.get('cliTool') ?? '';
+      return okJson({
+        isRunning: true,
+        fullOutput: `${cli} body`,
+        thinking: false,
+        structuredEvents: { session: { id: 'ses_1' } },
+      });
+    });
+
+    render(
+      <>
+        <TerminalSplitPaneContent
+          worktreeId="w-1"
+          splitIndex={0}
+          cliToolId="opencode"
+          availableInstances={[inst('opencode')]}
+          onInstanceChange={vi.fn()}
+          onFocus={vi.fn()}
+          autoYes={{ onToggle: vi.fn() }}
+        />
+        <TerminalSplitPaneContent
+          worktreeId="w-1"
+          splitIndex={1}
+          cliToolId="claude"
+          availableInstances={[inst('claude')]}
+          onInstanceChange={vi.fn()}
+          onFocus={vi.fn()}
+          autoYes={{ onToggle: vi.fn() }}
+        />
+      </>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId('opencode-quick-keys')).toHaveLength(1);
+    });
+    // The claude split rendered a footer too; it simply has no strip in it.
+    expect(screen.getAllByTestId('message-input-1')).toHaveLength(1);
+  });
+
+  it('enables the session-scoped opencode chords only once structuredEvents names a session (Issue #2046)', async () => {
+    // No `structuredEvents.session` => this pane has not had a turn, so opencode
+    // would not consume the letter after the leader and it would land in the
+    // composer as text. Measured for b/u/r/c/g on 1.18.22; see §22.
+    mockFetch.mockImplementation(() =>
+      okJson({ isRunning: true, fullOutput: 'opencode body', thinking: false }),
+    );
+
+    render(
+      <TerminalSplitPaneContent
+        worktreeId="w-1"
+        splitIndex={0}
+        cliToolId="opencode"
+        availableInstances={[inst('opencode')]}
+        onInstanceChange={vi.fn()}
+        onFocus={vi.fn()}
+        autoYes={{ onToggle: vi.fn() }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('opencode-quick-keys')).toBeInTheDocument();
+    });
+    expect(screen.getByTestId('opencode-quick-key-undo')).toBeDisabled();
+    expect(screen.getByTestId('opencode-quick-key-agents')).toBeEnabled();
+    // The refused chord has no button on any code path.
+    expect(screen.queryByTestId('opencode-quick-key-sidebar')).not.toBeInTheDocument();
+  });
+
   it('renders the C-lite escape hatch for an unclassified running session (Issue #1017)', async () => {
     let fetchCount = 0;
     mockFetch.mockImplementation(async () => {

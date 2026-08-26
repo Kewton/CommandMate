@@ -16,6 +16,10 @@
  * terminal under the same gate the PC footer uses, giving mobile parity for
  * ←/→/↑/↓/Enter/Esc in detection-independent overlays.
  *
+ * Issue #2046: {@link OpencodeQuickKeys} is rendered here for the same reason —
+ * a phone has no keyboard aimed at the pane at all, so opencode's `tab` /
+ * `ctrl+p` / `ctrl+x` chords are unreachable without it.
+ *
  * Issue #1879: the unsent-input bar ({@link UnsentComposerBar}) is rendered here
  * for the same reason — the PC footer has it, and a phone is where a half-typed
  * composer is most likely to be discovered. Its gate is the composer text, not a
@@ -27,6 +31,7 @@ import { memo } from 'react';
 import { TerminalDisplay } from '@/components/worktree/TerminalDisplay';
 import { TerminalEscapeHatch } from '@/components/worktree/TerminalEscapeHatch';
 import { UnsentComposerBar, hasUnsentComposerText } from '@/components/worktree/UnsentComposerBar';
+import { OpencodeQuickKeys } from '@/components/worktree/OpencodeQuickKeys';
 import { useTerminalPanePolling } from '@/hooks/useTerminalPanePolling';
 import { getTerminalDisplayCompaction } from '@/config/terminal-display-compaction';
 import type { CLIToolType } from '@/lib/cli-tools/types';
@@ -45,7 +50,7 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
   instanceId,
   disableAutoFollow,
 }: MobileTerminalTabProps) {
-  const { terminal, prompt, setAutoScroll, refresh } = useTerminalPanePolling({
+  const { terminal, prompt, agentSession, setAutoScroll, refresh } = useTerminalPanePolling({
     worktreeId,
     cliToolId,
     instanceId,
@@ -98,6 +103,24 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
             instanceId={instanceId}
             composerText={terminal.composerText}
             onActionSent={refresh}
+          />
+        </div>
+      ) : null}
+      {/* Issue #2046: opencode's own chords, on the phone for the same reason
+          #1494 put the escape hatch here -- the mobile terminal is read-only and
+          has no other way to send them. `compact` drops the key-notation suffix
+          so seventeen 44px targets still wrap sensibly on a phone; the keys, the
+          gate and the omissions are identical to PC because they come from one
+          component. */}
+      {terminal.isRunning ? (
+        <div className="shrink-0 px-2 pt-1">
+          <OpencodeQuickKeys
+            worktreeId={worktreeId}
+            cliToolId={cliToolId}
+            instanceId={instanceId}
+            hasAgentSession={agentSession.session !== null}
+            onKeysSent={refresh}
+            compact
           />
         </div>
       ) : null}

@@ -16,7 +16,9 @@ import type {
   CaptureSpec,
   ComposerSpec,
   GracefulExitSpec,
+  NavigationKeySpec,
 } from '../../types/cli-tool-contracts';
+import { NAVIGATION_KEY_VALUES } from '../../types/terminal-keys';
 
 const execAsync = promisify(exec);
 
@@ -204,5 +206,27 @@ export abstract class BaseCLITool implements ICLITool {
    */
   captureSpec(): CaptureSpec {
     return resolveCaptureSpec(this.id);
+  }
+
+  /**
+   * Declare the keys this tool's terminal UI may send (Issue #2046).
+   *
+   * The default IS the pre-#2046 global list, verbatim: the twelve navigation
+   * keys plus the codex pager's `q` that `NAVIGATION_KEY_VALUES` has published
+   * since #1017, and no leader. claude / codex / copilot / gemini / antigravity
+   * / vibe-local all take it unchanged, which is the point of putting it here
+   * rather than copying a literal into six classes — there is no per-tool list
+   * to drift, so "the six existing tools' key sets did not change" is true by
+   * construction and not merely by review.
+   * `tests/unit/cli-tools/navigation-keys-declaration-2046.test.ts` asserts it
+   * against `NAVIGATION_KEY_VALUES` anyway, because a future edit could still
+   * add an override to one of the six.
+   *
+   * opencode overrides it. Nothing else does.
+   *
+   * @returns This tool's {@link NavigationKeySpec}
+   */
+  navigationKeys(): NavigationKeySpec {
+    return { keys: NAVIGATION_KEY_VALUES, leaderKey: null };
   }
 }

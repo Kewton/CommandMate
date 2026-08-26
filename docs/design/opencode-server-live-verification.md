@@ -3335,3 +3335,268 @@ opencode のペインは固定桁で組まれているので、スマホ幅で�
 - `src/components/worktree/MobileTerminalTab.tsx` — ポリシーから `mobileWrapMode` を渡す
 - `scripts/canary/tool-profiles.ts` — `paneWidth` を定数へ
 - `tests/fixtures/opencode-live-2047/**` — 13 フレーム × 3 幅 ＋ 採取手順の README
+
+## 22. Issue 2046: ターミナルのクイックキーをツール別宣言にする（opencode 1.18.22 / 2026-08-26）
+
+Issue #2046 は「キー allowlist をグローバル定数から `ICLITool` のツール別宣言へ移し、
+opencode 用クイックキー列（PC / モバイル）を足す」。宣言への移行は入れた。
+**キー列からは 2 つのキーを外した。`ctrl+x b`（サイドバー）と `F2`（model 巡回）である。**
+外した理由はどちらも実測で、下の §22.3 と §22.7 に書く。
+
+| Issue 本文の想定 | 実測 |
+|---|---|
+| `ICLITool.navigationKeys()` は新規追加 | **そのとおり**（`describeComposer()` / `captureSpec()` と同じ形にした） |
+| leader は `ctrl+x` | **そのとおり**（1.18.22 のバイナリに `leader: "ctrl+x"` / `leader_timeout: 2000`） |
+| footer の `tab agents` / `ctrl+p commands` | **そのとおり**。Tab は Build ⇄ Plan を実測（§22.2） |
+| leader ＋ b / l / m / a / n / u / r / c / g / t | **キーバインドは 10 個とも実在**。ただし **b は採らない**（§22.3）。u / r / c / g は**セッション成立後だけ**有効（§22.4） |
+| `F2` で model recent 巡回 | **バインドは実在**。**計測できなかったので採らない**（§22.7） |
+| `ctrl+t` で variant | **そのとおり**。ステータス行が `… GitHub Copilot · low` になるところまで実測 |
+| PgUp / PgDn / Home / End | **そのとおり**。しかも**既存語彙のまま**（#1017 が入れた 4 つ）で足りる。transport 変更ゼロ |
+| `/tui/open-models` などを一次経路に | **1 つも採らなかった**（§22.6） |
+
+### 22.0 隔離の確認（先に撃つ）
+
+```bash
+curl -sS http://127.0.0.1:4790/path
+```
+
+返り値（全 5 項目が scratchpad 配下）:
+
+```json
+{"home":"…/scratchpad/oc2046/home",
+ "state":"…/scratchpad/oc2046/home/.local/state/opencode",
+ "config":"…/scratchpad/oc2046/home/.config/opencode",
+ "worktree":"…/scratchpad/oc2046/work",
+ "directory":"…/scratchpad/oc2046/work"}
+```
+
+`GET /global/health` は `{"healthy":true,"version":"1.18.22"}`。
+`auth.json` は `umask 077` で複製し検証後に削除（削除確認済み）。モデルは隔離 `opencode.jsonc` の
+`"model": "github-copilot/claude-sonnet-4.6"` で固定。ポートは 4790 のみ、`--hostname 127.0.0.1`。
+3000 は使っていない。tmux は専用 socket `cmate-2046-oc` のみで、後始末は
+`kill-session -t '=ocw:'` と `kill-session -t '=bytes:'`。**`kill-server` は使っていない**
+（専用 socket なので最後の session 終了でサーバも自然終了した）。
+検証後、ユーザーの `~/.local/share/opencode/opencode.db` の mtime は開始前と同じ 8/25 14:16:54、
+`~/.config/opencode/opencode.jsonc` は 7/19 のまま。既定 tmux サーバのセッション数は
+検証前後とも 33 で不変。
+
+### 22.1 キーバインドの一次ソースはバイナリの既定テーブル
+
+opencode 1.18.22 の実行ファイルには既定キーバインド表がそのまま入っている。
+画面から読み取るより網羅的で、版が変われば差分が出る。
+
+```bash
+strings -a ~/.opencode/bin/opencode > oc.strings
+# leader の既定
+python3 - <<'PY'
+import re; d=open('oc.strings','rb').read()
+print(re.search(rb'M9="ctrl\+x",H=\(_,J\)=>\(\{default:_,description:J\}\),x_=\{leader:H\(M9', d) is not None)
+PY
+# 個々のバインド（H("<default>","<description>") 形式）
+```
+
+これで確定したもの（本 Issue に関係するものだけ抜粋）:
+
+| 内部名 | 既定 | 説明 |
+|---|---|---|
+| `leader` | **`ctrl+x`** | leader key |
+| `leader_timeout` | **2000**（ms） | leader を押してから次のキーまでの猶予 |
+| `agent_cycle` / `agent_cycle_reverse` | `tab` / `shift+tab` | エージェント切替 |
+| `command_list` | `ctrl+p` | コマンドパレット |
+| `variant_cycle` | `ctrl+t` | model variant 巡回 |
+| `agent_list` / `session_list` / `session_new` / `model_list` / `theme_list` | `<leader>a` / `l` / `n` / `m` / `t` | ダイアログ |
+| `session_timeline` / `messages_undo` / `messages_redo` / `session_compact` | `<leader>g` / `u` / `r` / `c` | セッション操作 |
+| `sidebar_toggle` | `<leader>b` | サイドバー |
+| `model_cycle_recent` / `model_cycle_recent_reverse` | `f2` / `shift+f2` | 直近モデル巡回 |
+| `messages_page_up` / `messages_page_down` | `pageup` / `pagedown` | 1 ページスクロール |
+| `messages_first` / `messages_last` | `ctrl+g,home` / `ctrl+alt+g,end` | 先頭 / 末尾 |
+| `app_exit` | `ctrl+c,ctrl+d,<leader>q` | 終了 |
+
+**PgUp / PgDn / Home / End が opencode でもそのまま効く**ことがここで確定した。
+この 4 つは #1017 が codex pager 用に `NAVIGATION_KEY_VALUES` へ入れてあるので、
+opencode に開くのに transport 側の変更は要らない。
+
+### 22.2 Tab — Build ⇄ Plan（受入条件）
+
+80x200 の実ペインで `tmux send-keys Tab` を 2 回。composer のステータス行だけが動く。
+
+```
+before : ┃  Build · Claude Sonnet 4.6 GitHub Copilot
+after 1: ┃  Plan  · Claude Sonnet 4.6 GitHub Copilot
+after 2: ┃  Build · Claude Sonnet 4.6 GitHub Copilot
+```
+
+footer の `tab agents` は静的なヒント行で、切り替わるのは composer のステータス行のほう。
+fixture は `tests/fixtures/opencode-live-2046/w80/agent-{build,plan}.txt`。
+**2 回押した後のフレームは押す前とバイト一致**（`agent-build.txt` と `sidebar-off.txt` が同一ファイル）。
+ラベルが戻っただけでなく、検出が読む他の何も動いていない。
+
+### 22.3 `ctrl+x b`（サイドバー）— **採らない**。80 桁で検出が壊れる
+
+これが本 Issue の中心的な実測である。
+
+#### 22.3.1 明示トグルは #2047 の 121 桁ゲートを**無視する**
+
+#2047 は「opencode は 121 桁以上でサイドバーを描き、120 桁以下では描かない」を 1 桁刻みで確定させた。
+そこから「既定 80 桁では `ctrl+x b` を押しても見えるものが無い」という予想が立つ。**違った。**
+
+| 幅 | セッション | `ctrl+x b` の結果 |
+|---|---|---|
+| 200 | 無し（ホーム画面） | **`b` が composer に入る**（バインドが不活性） |
+| 200 | 有り | サイドバー ON ⇄ OFF（3 マーカー行 ⇄ 0 行） |
+| **80** | **有り** | **サイドバー ON**（`Context` / `8,498 tokens` / `1% used` / `$0.03 spent` / `LSP` / `LSPs are disabled` が出る） |
+
+つまり**自動表示の閾値は 121 桁だが、明示トグルには閾値が無い**。
+200 桁で ON にしてから 80 桁へ resize しても ON のまま残った。
+
+80 桁で ON にしたフレーム（`w80/sidebar-on.txt`、ANSI 除去）:
+
+```
+  ┃                                     OK2046
+  ┃  Reply with exactly this one line          ← 本文がここで切れる
+  ┃                                     Context
+                                        8,498 tokens
+     OK2046                             1% used
+                                        $0.03 spent
+     ▣  Build · Claude Sonnet 4.6 · 2.          ← ターンフッタも切れる
+                                        LSP
+                                        LSPs are disabled
+```
+
+サイドバーが 80 桁のうち ~37 桁を取るので、transcript 側は ~37 桁に潰れる。
+
+#### 22.3.2 その状態で検出が壊れる（#2047 が 200 桁で見たものが 80 桁で起きる）
+
+`tests/unit/detection-opencode-quick-key-frames-2046.test.ts` が同じセッションの
+2 フレームを実 detector に通した結果:
+
+| | `sidebar-off`（対照） | `sidebar-on` |
+|---|---|---|
+| `detectSessionStatus` | `ready` / `opencode_response_complete` | **`running` / `unknown_frame`** |
+| `isOpenCodeComplete` | `true` | **`false`** |
+| 保存される reply | `OK2046` | **`8,498 tokens OK2046 1% used $0.03 spent LSP LSPs are disabled`** |
+
+**終わったターンが永久に `running` に見える。** `commandmate wait` は返らない。
+そして **Escape ×2 でも元に戻らない**（実測）。復帰手段は同じ `ctrl+x b` をもう一度押すことだけで、
+それは「壊れていると気づいた人」にしか押せない。
+
+#### 22.3.3 セッション成立前は composer にゴミが入る
+
+ホーム画面（そのペインの初回ターンが終わるまで）では `sidebar_toggle` が不活性で、
+leader が次のキーを**食わない**。`b` が composer に literal で入る。
+`w80/home-leader-b-fallthrough.txt`:
+
+| | `home-idle` | `home-leader-b-fallthrough` |
+|---|---|---|
+| `detectSessionStatus` | `ready` / `input_prompt` | **`running` / `unknown_frame`** |
+| `OPENCODE_IDLE_COMPOSER_PATTERN` | `true` | **`false`** |
+
+#### 22.3.4 判断
+
+**どちらの枝も害がある。効く枝では検出が壊れ、効かない枝では composer が汚れる。
+「安全な幅」は存在しない**（見えるにはサイドバーが要り、安全であるにはサイドバーが無いことが要る）。
+`resolveOpencodePaneWidth() >= 121` のときだけ出す、という案も成り立たない —— #2047 が
+測ったとおり 121 以上こそ検出が壊れる領域だからである。
+
+よって **`b` は `OPENCODE_LEADER_CHORD_VALUES` に入れない**。ボタンも出さないし、
+route も `{cliToolId:"opencode", keys:["C-x","b"]}` に **400** を返す
+（`tests/unit/api/special-keys-per-tool-vocabulary-2046.test.ts` が固定）。
+
+**正直に書いておく限界**: `ctrl+p` のコマンドパレットには `sidebar_toggle` も登録されているので、
+パレットを開いて検索すれば到達はできる。本 Issue が消したのは「ワンクリックで置く」ことであって、
+opencode 自身の機能ではない。パレット経由でこの状態に入った pane をどう検出するかは**未対応**（§22.8）。
+
+### 22.4 セッション成立前に落ちるのは b だけではない
+
+ホーム画面で leader ＋ 各キーを撃ち、composer に literal が入るかを見た。
+
+| キー | ホーム画面（セッション前） | セッション有り |
+|---|---|---|
+| `a` / `l` / `n` / `t` / `m` | **ダイアログが開く**（食われる） | 同左 |
+| `b` / `u` / `r` / `c` / `g` | **literal が composer に入る** | `g` はタイムラインが開く（実測）。u / r / c はバインド表による |
+
+つまり **`u` / `r` / `c` / `g` は session-scoped** で、b と同じ取りこぼし方をする。
+b と違うのは「効いたときに検出を壊さない」点なので、**採るが初回ターンまで disabled** にした。
+
+ゲートに使う信号は `agentSession.session !== null`（`useTerminalPanePolling` が
+`/current-output` の `structuredEvents.session` から作る、#2042 の値）。
+**イベント購読が張れていない pane では常に disabled になる**という偽陰性がある。
+見えていて押せないのは可視で可逆な劣化なので、黙ってゴミを打ち込むより良いほうを取った。
+
+### 22.5 chord は 1 リクエスト 2 エントリ。100 ms で通る
+
+`['C-x','b']` のように**1 回の special-keys リクエストに 2 エントリ**として渡す。
+`sendSpecialKeys()` が `SPECIAL_KEY_DELAY_MS`（100 ms）を挟んで 1 つずつ送るので、
+`runKeySequence` の逐次送出規約と同じ形になる（literal / key の区別だけは
+special-keys transport に無い）。
+
+opencode の `leader_timeout` 既定は 2000 ms。**本番と同じ 100 ms 間隔で `C-x` `a` を 3 回撃ち、3/3 でダイアログが開いた。**
+（300 ms でも同じ。tmux が送るバイトは `send-keys C-x` = `0x18`、`send-keys a` = `a`。
+`send-keys -H 18` と `send-keys C-x` は同一挙動であることも A/B で確認した。）
+
+### 22.6 `/tui/*` は 1 つも採らなかった
+
+Issue 本文は `/tui/open-models` などを一次経路にと書いていた。**採っていない。** 理由:
+
+1. **`200 true` は「起きた」ではない**（§11.3.3）。TUI が 1 つも繋がっていない headless サーバでも
+   `/tui/open-*` は全部 `200 true` を返す。したがって「HTTP が通った」は配線の根拠にならない。
+2. 本 Issue が実測したダイアログ（agents / sessions / timeline / commands）は**すべてキーストロークで開いた**もので、
+   HTTP 経路では 1 度も開いていない。**確認していない経路を「たぶん動く」で配線しない**という
+   オーケストレーターの指示どおり、キーストロークだけを配線した。
+3. そもそもキーストローク経路には `/tui/*` に無い利点がある: **route を増やさない**。
+   `POST /api/worktrees/[id]/special-keys` は既にあり、認証・IP 制限・instance 解決・
+   キャプチャキャッシュ無効化・スナップショット broadcast が既に通っている。
+   ダイアログ 1 つごとに opencode 専用 route を足すと、その全部を再実装することになる。
+
+なお `/tui/open-sessions` は #2038 が `OpencodeSessionControls` で既に使っている。
+本 Issue はそれを取り上げも増やしもしていない（`ctrl+x l` は同じダイアログへの別経路で、
+キーストロークのほうは実測済み、という状態）。
+
+### 22.7 `F2`（model recent 巡回）— **計測できなかったので採らない**
+
+`model_cycle_recent: f2` はバインド表に実在する。しかし:
+
+- **ダイアログを出さずにその場でモデルを切り替える。**確認も取り消しも無い。
+- **計測するには recent リストに 2 個目のモデルを入れる必要があり、それはピッカーで選ぶということ**である。
+  §4 の規則（ピッカーは既定モデルを書き換えるので開かない）に真正面からぶつかる。
+
+よって `F2` は `TERMINAL_KEY_VALUES` に入れていない。route は 400 を返す。
+バインド自体は §22.1 に記録したので、計測できる形が見つかったときに足せばよい。
+
+**逸脱の報告**: leader の取りこぼしを網羅する probe ループに `m` を入れてしまい、
+**モデルピッカーを 1 度開いた**。隔離 HOME の中で、Escape で何も選ばずに閉じ、直後に
+①隔離 `opencode.jsonc` が `github-copilot/claude-sonnet-4.6` のままであること
+②ステータス行が `Claude Sonnet 4.6` のままであること
+③ユーザーの `~/.config/opencode/opencode.jsonc`（7/19）と `~/.local/share/opencode/opencode.db`（8/25 14:16:54）の
+mtime が検証開始前と同一であることを確認した。**ユーザー側への書き込みは無い。**
+`ctrl+x m`（`model_list`）は「ダイアログが開き、Escape で何も選ばずに閉じ、設定が書かれない」ところまで
+これで実測できてしまったので、**採用した**。選択した場合に既定モデルが書き換わることは §4 のとおりで、
+それは利用者が opencode 自身のダイアログの中で行う操作であり、CommandMate が代行するものではない。
+
+### 22.8 未計測・積み残し
+
+- **`ctrl+x u` / `ctrl+x r` / `ctrl+x c` をセッション有りで押していない。** undo / redo は
+  メッセージを巻き戻し、compact は API を消費する圧縮ターンを起こす。バインド表（§22.1）と
+  「ホーム画面では落ちる」ことだけが実測で、**効いたときの画面は未計測**。
+- **`F2` / `shift+f2` / `shift+tab`** — `shift+tab`（`BTab`）はバインド表にあり transport も
+  #2032 以来通るが、**実 TUI で押していない**（`Tab` のみ実測）。
+- **パレット経由でサイドバーを ON にした pane の検出** — §22.3.4 の残り。
+  サイドバーが出ている frame を検出して警告する、という手当ては本 Issue では入れていない。
+- **121〜199 桁でのサイドバー列数** — #2047 の積み残しのまま。本 Issue は既定幅しか触らない。
+
+### 22.9 この節が変えたもの
+
+- `src/types/terminal-keys.ts` — `OPENCODE_LEADER_KEY` / `OPENCODE_LEADER_CHORD_VALUES` /
+  `OPENCODE_DIRECT_KEY_VALUES` / `OPENCODE_NAVIGATION_KEY_VALUES` / `TERMINAL_KEY_VALUES` / `TerminalKey`
+- `src/types/cli-tool-contracts.ts` — `NavigationKeySpec`
+- `src/lib/cli-tools/types.ts` — `ICLITool.navigationKeys()`
+- `src/lib/cli-tools/base.ts` — 既定実装（＝ #2046 以前のグローバル集合そのまま。6 ツールは差分ゼロ）
+- `src/lib/cli-tools/opencode.ts` — `navigationKeys()` の override **のみ**（幅 / geometry は #2047 のまま）
+- `src/lib/tmux/tmux.ts` — `ALLOWED_SPECIAL_KEYS` に `C-x` / `C-p` / `C-t` と chord letters を追加、
+  `isAllowedSpecialKey(key, vocabulary)` の第 2 引数
+- `src/app/api/worktrees/[id]/special-keys/route.ts` — 検証をツール別宣言に
+- `src/components/worktree/OpencodeQuickKeys.tsx` — PC / モバイル共通のクイックキー列
+- `src/components/worktree/TerminalSplitPaneContent.tsx` / `MobileTerminalTab.tsx` — 配線
+- `src/app/worktrees/[id]/terminal/page.tsx` — 未リンクページのツール一覧に opencode
+- `locales/{en,ja}/worktree.json` — `opencodeQuickKeys`
+- `tests/fixtures/opencode-live-2046/**` — 10 フレーム ＋ 採取手順の README

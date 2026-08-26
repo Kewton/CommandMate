@@ -189,3 +189,51 @@ describe('MobileTerminalTab unsent-input bar (Issue #1879)', () => {
     expect(fetchMock.mock.calls[0][0]).toBe('/api/worktrees/w-1/clear-composer');
   });
 });
+
+describe('MobileTerminalTab opencode quick keys (Issue #2046)', () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    fetchMock = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve({ success: true }) }));
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+  });
+
+  it('renders the strip for opencode and nothing for another tool', () => {
+    mockPaneState({});
+    const { unmount } = render(<MobileTerminalTab worktreeId="w-1" cliToolId="opencode" />);
+    expect(screen.getByTestId('opencode-quick-keys')).toBeInTheDocument();
+    unmount();
+
+    mockPaneState({});
+    render(<MobileTerminalTab worktreeId="w-1" cliToolId="claude" />);
+    expect(screen.queryByTestId('opencode-quick-keys')).not.toBeInTheDocument();
+  });
+
+  it('disables the session-scoped chords while agentSession.session is null', () => {
+    // `mockPaneState` returns `{ session: null }` — a pane before its first
+    // turn, which is where opencode's leader stops consuming the letter.
+    mockPaneState({});
+    render(<MobileTerminalTab worktreeId="w-1" cliToolId="opencode" />);
+
+    expect(screen.getByTestId('opencode-quick-key-undo')).toBeDisabled();
+    expect(screen.getByTestId('opencode-quick-key-commands')).toBeEnabled();
+  });
+
+  it('POSTs the two-step leader chord for an enabled button', async () => {
+    mockPaneState({});
+    render(<MobileTerminalTab worktreeId="w-1" cliToolId="opencode" />);
+    fireEvent.click(screen.getByTestId('opencode-quick-key-agents'));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/worktrees/w-1/special-keys');
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1].body))).toEqual({
+      cliToolId: 'opencode',
+      keys: ['C-x', 'a'],
+    });
+  });
+});
