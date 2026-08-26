@@ -1078,6 +1078,8 @@
     "toolbarLabel": "opencode quick keys",
     "caption": "opencode",
     "needsSession": "Available after this pane's first turn ({notation})",
+    "showKeys": "Show opencode quick keys",
+    "hideKeys": "Hide opencode quick keys",
     "keys": {
       "agentNext": "Next agent",
       "agentPrev": "Previous agent",

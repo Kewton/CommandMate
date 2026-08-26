@@ -60,14 +60,33 @@
  * 100 ms gap was confirmed to land the chord 3/3 on a live TUI. The leader key
  * itself is read from `OPENCODE_LEADER_KEY` rather than written next to each
  * row, so a tool whose leader differs changes one declaration.
+ *
+ * ## The phone had to fold it away (Issue #2106)
+ *
+ * Seventeen 44px targets do not fit beside a terminal on a phone. Measured in a
+ * real browser at the two viewports #2106 names — see
+ * `tests/e2e/mobile-opencode-quick-keys-2106.spec.ts` — this strip wraps to
+ * SEVEN rows and stands **378px** tall at both 390x730 and 360x640, which left
+ * `TerminalDisplay` 40px at 390x730 and **0px** at 360x640. (#2106's own
+ * estimate, taken from label widths rather than a browser, said ~265px for the
+ * strip and ~140px left for the terminal. The measurement is worse on both
+ * counts and is what this component now records.)
+ *
+ * So the mobile caller passes `collapsible`, which folds the whole strip behind
+ * one 44px toggle that is CLOSED by default. PC does not: `collapsible` defaults
+ * to false and `TerminalSplitPaneContent` renders the same always-open toolbar
+ * it rendered before, because a split pane has the width and nothing there is
+ * being squeezed.
  */
 
-import { memo, useCallback, useState } from 'react';
+import { memo, useCallback, useId, useState } from 'react';
 import { useTranslations } from 'next-intl';
+import { ChevronDown } from 'lucide-react';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { OPENCODE_LEADER_KEY } from '@/types/terminal-keys';
 import { useSpecialKeys } from '@/hooks/useSpecialKeys';
 import { KEY_PRESS_FEEDBACK_RESET_MS } from '@/config/ui-feedback-config';
+import { useOpencodeQuickKeysDisclosure } from '@/hooks/useOpencodeQuickKeysDisclosure';
 
 export interface OpencodeQuickKeysProps {
   worktreeId: string;
@@ -86,6 +105,17 @@ export interface OpencodeQuickKeysProps {
   onKeysSent?: () => void;
   /** Phone rendering: drop the key-notation suffix, keep the touch targets. */
   compact?: boolean;
+  /**
+   * Issue #2106: wrap the strip in a persisted disclosure (mobile only).
+   *
+   * Off by default, so PC (`TerminalSplitPaneContent`) keeps rendering the bare
+   * always-open toolbar it has rendered since #2046 — it has the width, and
+   * nothing there is being squeezed. When on, the component renders a single
+   * 44px toggle row and reveals the toolbar underneath only while open; the
+   * open/closed state is device-wide and survives reloads
+   * ({@link useOpencodeQuickKeysDisclosure}).
+   */
+  collapsible?: boolean;
 }
 
 /** One button: a label, the keys it sends, and whether it needs a session. */
@@ -157,6 +187,12 @@ const GROUPS: ReadonlyArray<ReadonlyArray<QuickKeyDef>> = [
   SCROLL_KEYS,
 ];
 
+/**
+ * How many keys the disclosure toggle says are hidden underneath (Issue #2106).
+ * Derived, so it cannot drift from the groups the way a written-out 17 would.
+ */
+const QUICK_KEY_COUNT = GROUPS.reduce((total, group) => total + group.length, 0);
+
 export const OpencodeQuickKeys = memo(function OpencodeQuickKeys({
   worktreeId,
   cliToolId,
@@ -164,10 +200,17 @@ export const OpencodeQuickKeys = memo(function OpencodeQuickKeys({
   hasAgentSession,
   onKeysSent,
   compact = false,
+  collapsible = false,
 }: OpencodeQuickKeysProps) {
   const t = useTranslations('worktree');
   const [activeId, setActiveId] = useState<string | null>(null);
   const send = useSpecialKeys(worktreeId, cliToolId, instanceId, onKeysSent);
+  // Issue #2106. Called unconditionally (hooks rule) and for every tool, which
+  // is one localStorage read on a PC pane that then ignores the value — the
+  // alternative was moving the `cliToolId !== 'opencode'` gate into the mobile
+  // caller, i.e. a second copy of the one gate #2046 deliberately kept here.
+  const { open: disclosureOpen, toggle: toggleDisclosure } = useOpencodeQuickKeysDisclosure();
+  const panelId = useId();
 
   const handleClick = useCallback(
     (def: QuickKeyDef) => {
@@ -179,19 +222,32 @@ export const OpencodeQuickKeys = memo(function OpencodeQuickKeys({
   );
 
   // Not a feature flag: every binding on this strip belongs to opencode's TUI,
-  // so for any other tool there is nothing to render.
+  // so for any other tool there is nothing to render. Issue #2106 keeps the gate
+  // here (rather than in the mobile caller) so there is still exactly one of it,
+  // which is also what keeps the disclosure toggle from appearing for claude.
   if (cliToolId !== 'opencode') return null;
 
-  return (
+  const toolbar = (
     <div
-      className="flex flex-wrap items-center gap-1.5 py-1.5 bg-muted rounded-lg"
+      // Issue #2106: inside the disclosure the rounded muted panel belongs to the
+      // wrapper, so the toolbar drops its own background and top padding and
+      // becomes the panel's body.
+      className={`flex flex-wrap items-center gap-1.5 ${
+        collapsible ? 'px-1.5 pb-1.5' : 'py-1.5 bg-muted rounded-lg'
+      }`}
+      id={collapsible ? panelId : undefined}
       role="toolbar"
       aria-label={t('opencodeQuickKeys.toolbarLabel')}
       data-testid="opencode-quick-keys"
     >
-      <span className="text-xs text-muted-foreground mx-2">
-        {t('opencodeQuickKeys.caption')}
-      </span>
+      {/* Issue #2106: the disclosure's own toggle already names the strip, so
+          repeating the caption two lines below it is duplicate label text that
+          also costs a wrap slot on a phone. */}
+      {collapsible ? null : (
+        <span className="text-xs text-muted-foreground mx-2">
+          {t('opencodeQuickKeys.caption')}
+        </span>
+      )}
       {GROUPS.map((group, groupIndex) => (
         <div key={group[0].id} className="flex flex-wrap items-center gap-1.5">
           {groupIndex > 0 ? (
@@ -232,6 +288,43 @@ export const OpencodeQuickKeys = memo(function OpencodeQuickKeys({
           })}
         </div>
       ))}
+    </div>
+  );
+
+  // PC (`TerminalSplitPaneContent`) takes this branch and renders exactly what
+  // it rendered before #2106.
+  if (!collapsible) return toolbar;
+
+  return (
+    <div className="bg-muted rounded-lg" data-testid="opencode-quick-keys-disclosure">
+      <button
+        type="button"
+        // Issue #1127's tap-target rule: min-h-[44px] + touch-manipulation. This
+        // one row is the ENTIRE footprint of the strip while it is closed.
+        className="w-full min-h-[44px] flex items-center gap-2 px-3 py-2 text-sm font-medium
+          rounded-lg touch-manipulation transition-colors
+          hover:bg-surface-2 active:bg-surface-2
+          focus:outline-none focus:ring-2 focus:ring-ring"
+        aria-expanded={disclosureOpen}
+        aria-controls={panelId}
+        aria-label={
+          disclosureOpen
+            ? t('opencodeQuickKeys.hideKeys')
+            : t('opencodeQuickKeys.showKeys')
+        }
+        data-testid="opencode-quick-keys-toggle"
+        onClick={toggleDisclosure}
+      >
+        <ChevronDown
+          className={`w-4 h-4 shrink-0 transition-transform duration-150 ${
+            disclosureOpen ? '' : '-rotate-90'
+          }`}
+          aria-hidden="true"
+        />
+        <span>{t('opencodeQuickKeys.toolbarLabel')}</span>
+        <span className="ml-auto text-xs text-muted-foreground">{QUICK_KEY_COUNT}</span>
+      </button>
+      {disclosureOpen ? toolbar : null}
     </div>
   );
 });
