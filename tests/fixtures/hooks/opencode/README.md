@@ -193,3 +193,24 @@ SSE フレーム 4 本と REST 応答 2 本。**冒頭の「採取日 2026-08-13
 `SnapshotFileDiff` の required は **`additions` / `deletions` の 2 つだけ**（`GET /doc` 一次証拠）で、
 `file` / `patch` / `status` は optional である。fixture にはたまたま 3 つとも入っているが、
 読み手はそれを前提にしてはいけない。パスは `<WORKTREE_PATH>` に置換してある。
+
+## Issue #2100 の追加分（opencode **1.18.23** / 2026-08-26 採取）
+
+| ファイル | 採取元 | 何のため |
+|---|---|---|
+| [`message-part-updated-question-running-2100.json`](./message-part-updated-question-running-2100.json) | `GET /event` | **`question.asked` と同一ミリ秒で届く、同じ question 呼び出しの tool part。** `pre_tool_use` / detail `question` に写る |
+
+`question.asked` は単独では届かない。opencode の question は tool 呼び出しでもあるので、
+実測した 3 回すべてで次の順に並んだ（1.18.23・隔離 HOME・設計書 §27.3）。
+
+```
+message.part.updated  tool=question status=pending    → どの語にも写らない
+question.asked        id=que_… questions=[…]          → notification / question_prompt
+message.part.updated  tool=question status=running    → pre_tool_use / "question"   （0〜1 ms 後）
+```
+
+この 3 通目が `agent-event-state` の「別 tool に移った＝question は終わった」規則に当たって
+`recordAskUserQuestion` の記録を 1 ms で消していたのが Issue #2100 の欠陥の片方である
+（`tool: "question"` は Claude の `AskUserQuestion` と綴りが違う）。
+`state.input.questions` に選択肢がそのまま入っている点は記録のみ——CommandMate は
+`question.asked` 側を権威として読む（id が乗るのはそちらだけ）。

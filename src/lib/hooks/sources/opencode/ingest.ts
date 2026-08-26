@@ -50,7 +50,7 @@ import {
   classifyAgentEventDelivery,
   recordAgentEvent,
   recordAskUserQuestion,
-  reportPermissionRequestPending,
+  reportQuestionPending,
   type AgentEventRecord,
 } from '@/lib/session/agent-event-state';
 import { MAX_STRUCTURED_PROMPT_MESSAGE_LENGTH } from '@/lib/session/structured-prompt';
@@ -180,12 +180,26 @@ function replyReleasesPrompt(target: AgentInstanceRef, instanceId: string): bool
  * be read off the screen (#1708), while opencode publishes the questions and
  * their choices as data (#1758 §5.2.4).
  *
- * `reportPermissionRequestPending` is called alongside because that is the only
- * exported way to tell the detection layer a human is blocked, and a question
- * blocks exactly as an approval does — the session reads `busy` and no
- * `session.idle` arrives until it is answered (§5.3.1). It is recorded as
- * provisional, so it expires unless the scraper corroborates it, which is the
- * same treatment Claude's pre-dialog prediction gets.
+ * `reportQuestionPending` is called alongside to tell the detection layer a
+ * human is blocked, because a question blocks exactly as an approval does — the
+ * session reads `busy` and no `session.idle` arrives until it is answered
+ * (§5.3.1, re-measured on 1.18.23 in §27.4).
+ *
+ * ## Issue #2100: the id goes ON the record
+ *
+ * This used to call `reportPermissionRequestPending`, which opens a *forecast*:
+ * anonymous, `source: 'permission-request'`, and bounded at 20 s. The `que_…`
+ * parsed one line above — `spec.promptId`, the very id
+ * `POST /question/:id/reply` takes — was thrown away, so the browser was told
+ * `decisionId: null` about a decision this server could name, and the record
+ * vanished 20 s into a wait that has no timeout at all. The choices went the
+ * same way for a different reason; see `agent-event-state`'s
+ * `applyAskUserQuestionTransition`.
+ *
+ * Nothing about the *reply* path changed: a question is still answered by
+ * `answerPendingQuestion` against `listPending()`, which reads the agent's own
+ * `GET /question` rather than this record. What the record now carries is the
+ * id that lets a surface address one without asking which of several is meant.
  */
 function recordQuestion(
   target: AgentInstanceRef,
@@ -203,19 +217,31 @@ function recordQuestion(
     spec,
     event.receivedAt
   );
-  reportPermissionRequestPending(
+  reportQuestionPending(
     target.worktreeId,
     OPENCODE_CLI_TOOL_ID,
     instanceId,
-    // Issue #2040: the marker `structuredEvents.pendingDecisions[].kind` is
-    // recovered from, named once in `pending-decision-kind` so the writer here
-    // and the reader in `current-output-builder` cannot drift apart.
-    OPENCODE_QUESTION_TOOL_NAME,
+    {
+      // Issue #2040: the marker `structuredEvents.pendingDecisions[].kind` is
+      // recovered from, named once in `pending-decision-kind` so the writer here
+      // and the reader in `current-output-builder` cannot drift apart.
+      toolName: OPENCODE_QUESTION_TOOL_NAME,
+      // Issue #2100. `parseOpencodeQuestion` refuses a payload with no `id`, so
+      // this is non-null for every question that got this far; the null branch
+      // exists because the type says it can be, not because a frame was seen
+      // without one.
+      decisionId: spec.promptId,
+      detail: OPENCODE_QUESTION_DETAIL,
+    },
     event.receivedAt
   );
   logger.info('opencode-question-recorded', {
     worktreeId: target.worktreeId,
     instanceId,
+    // Issue #2100: logged so a live run says whether the id reached the record.
+    // It was the missing half — the count and the option counts below were
+    // already right while `pendingDecisions[0].id` read null.
+    decisionId: spec.promptId,
     questionCount: spec.questions.length,
     optionCounts: spec.questions.map((question) => question.choices.length),
   });

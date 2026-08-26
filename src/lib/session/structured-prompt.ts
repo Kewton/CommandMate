@@ -323,11 +323,32 @@ export function buildStructuredPromptQuestion(
   }
   if (facts.askUserQuestion) {
     const { question, labels, questionCount } = facts.askUserQuestion;
+    // Issue #2100: whether these numbers may be QUOTED is the same test the
+    // browser applies before drawing them as buttons — see
+    // `components/worktree/prompt-decision-id`'s `readPromptQuestionChoices`:
+    // an id to deliver an answer to, exactly one question, and no approval
+    // verdicts on the same payload. Claude satisfies none of it (its picker is
+    // read off the screen, renumbered, with entries the payload never
+    // mentioned), so its sentence is the unchanged warning.
+    //
+    // This is not a nicety. `promptData.question` is what PromptPanel renders
+    // ABOVE the choice buttons, so before this Issue an opencode question
+    // showed working numbered buttons under a line telling the reader not to
+    // count the list they were numbered from.
+    const answerable =
+      isAddressableDecision(facts.decisionId) &&
+      questionCount === 1 &&
+      !(facts.decisionOptions && facts.decisionOptions.length > 0);
     parts.push(
       `The agent asked${questionCount > 1 ? ` ${questionCount} questions, the first being` : ''}: ` +
         `"${question}" — offering: ${labels.join(' / ')}. ` +
-        `The picker renumbers and adds its own entries, so read the option NUMBER off the ` +
-        `terminal rather than counting this list.`,
+        (answerable
+          ? `Answer it with \`commandmate respond ${worktreeId} <number>\`: ` +
+            labels.map((label, index) => `${index + 1} = ${label}`).join(', ') +
+            `. The number is this list's own position and the reply goes to the agent's own ` +
+            `API, so no keys are sent to the terminal (the label works too).`
+          : `The picker renumbers and adds its own entries, so read the option NUMBER off the ` +
+            `terminal rather than counting this list.`),
     );
   }
   return parts.join(' ');

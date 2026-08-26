@@ -225,6 +225,73 @@ PY
 # => 89 行
 ```
 
+### 4.6 CommandMate 経由で計測する場合（Issue #2100 で追記・**§4.1 の HOME 隔離はここでは効かない**）
+
+§4.1〜§4.4 は「素の `opencode serve` にコマンドラインで `HOME=` を渡す」前提で書かれている。
+**エージェントを CommandMate に起動させて計測するときは、この手順では隔離できない。**
+
+`tmux new-session` で作られるペインは、**クライアントの環境ではなく tmux サーバのプロセス環境**を継ぐ。
+`HOME` は tmux の `update-environment` 既定リストに入っていないので、CommandMate サーバに
+`HOME=<scratchpad>` を渡しても、**既定 tmux サーバに作られたペインの `HOME` は実 HOME のまま**になる。
+2026-08-26 にこれを踏んで、ユーザーの `~/.local/share/opencode/opencode.db` に書き込む事故が実際に起きた。
+
+隔離は **tmux サーバ自身を隔離 HOME で起こす**ことでしか成立しない。`TMUX_TMPDIR` は使えない
+（解決順が `-L` / `-S` > `$TMUX` > `TMUX_TMPDIR` なので、`$TMUX` が立っている環境では無視される）。
+`src/lib/tmux/tmux.ts` は socket 引数を取らないので、CommandMate をその私設サーバに向ける経路は **`$TMUX` だけ**である。
+
+以下は Issue #2100 の計測でそのまま動いた手順（opencode 1.18.23 / 2026-08-26）。
+
+```bash
+SP=<scratchpad>            # §4.1 の隔離 HOME をここまでに作っておく
+
+# 1) 私設 tmux サーバを「隔離 HOME を持つプロセスとして」起こす
+env -u TMUX HOME="$SP/home" tmux -L cm2100 new-session -d -s probe -x 200 -y 60 -c "$SP/work"
+
+# 2) ペインの HOME を実測して確認する（推測しない）
+tmux -L cm2100 send-keys -t '=probe:' -l -- "printenv HOME > $SP/probe.txt"
+tmux -L cm2100 send-keys -t '=probe:' Enter
+cat "$SP/probe.txt"        # => <scratchpad>/home であること
+
+# 3) socket と pid を取る
+SOCK=$(tmux -L cm2100 display-message -p '#{socket_path}')   # /private/tmp/tmux-501/cm2100
+PID=$(tmux -L cm2100 display-message -p '#{pid}')
+
+# 4) CommandMate dev server を隔離して起こし、$TMUX でその私設サーバへ向ける
+NODE_ENV=development CM_PORT=4711 CM_BIND=127.0.0.1 \
+  CM_DB_PATH="$HOME/.commandmate/data/cm-uat-2100.db" \
+  CM_ROOT_DIR="$SP" WORKTREE_REPOS="$SP/work" \
+  CM_OPENCODE_PORT_FILE="$HOME/.commandmate/data/opencode-ports-2100.json" \
+  CM_LOG_LEVEL=debug CM_LOG_FORMAT=json \
+  TMUX="$SOCK,$PID,0" \
+  node_modules/.bin/tsx server.ts > "$SP/logs/devserver.log" 2>&1 &
+```
+
+**セッションを起こした直後に `GET /path` を撃つ。これは初期チェックではなく毎回の関門である。**
+`home` が scratchpad 配下でなければ**即** `tmux -L cm2100 kill-session -t '=<name>:'` で落とす。
+
+```bash
+# CommandMate が割り当てたポートは port file から読む（--port は CommandMate が決める。§5.9）
+PORT=$(python3 -c "import json;print(json.load(open('$HOME/.commandmate/data/opencode-ports-2100.json'))['work:opencode']['port'])")
+curl -sS "http://127.0.0.1:$PORT/path"
+# {"home":"<scratchpad>/home", "state":"…", "config":"…", "worktree":"<scratchpad>/work", …}
+```
+
+落とし穴（すべて #2100 で実際に踏んだ）:
+
+- **`CM_OPENCODE_PORT_FILE` を渡さないと、本番の `~/.commandmate/opencode-ports.json` を書き換える。**
+  opencode のポート割当は CommandMate が決めてファイルに残す（§5.9）ので、計測用に別ファイルへ逃がす。
+- **`CM_DB_PATH` は homedir 配下でなければならない。** scratchpad 配下は `validateDbPath()` に拒否されて起動が落ちる。
+- **`NODE_ENV` / `CM_PORT` / `CM_DB_PATH` は明示で上書きする。** 開発シェルが本番値を export していることがある。
+  3000 番は使わない（ユーザーの稼働中サーバ）。`47xx` 帯を使う（`48xx` は他の計測と衝突した実績あり）。
+- **`current-output` のクエリは `?cliTool=` / `?instance=`。** `cliToolId` / `instanceId` ではない
+  （そう書くと黙って worktree 既定のツールに解決され、`structuredEvents` が全部 null に見える）。
+- **CommandMate を再起動しても、生きているペインの購読は自動で戻らない。**
+  `resumeOpencodeEventStream` を呼ぶのは `launchSession` の「セッションが既にある」分岐だけで、
+  `send` はセッションが動いていれば `startSession` を通らない。再起動後に購読を戻したいなら
+  ペインごと落として作り直すのが確実。
+- **後始末は `kill-session -t '=<name>:'`（完全一致）。`kill-server` を `-L` 無しで書かない。**
+  既定サーバにはユーザーの本番セッションが生きている。
+
 ---
 
 ## 5. 検証項目ごとの実測
@@ -4501,3 +4568,234 @@ CommandMate が JSON を作る以上、壊れた JSON を渡す可能性が生�
 - `src/lib/cli-tools/opencode-config.ts` — 冒頭 docblock の precedence 表を **4 行 → 5 行**に更新
 - `src/lib/hooks/sources/opencode/source.ts` — `configScope: 'none'` の docblock に #2053 の裁定を追記
 - `tests/unit/hooks/sources/opencode-config-scope-2053.test.ts` — 裁定の pin（**不採用も固定する**）
+
+---
+
+## 27. Issue 2100: question の `decisionId` と選択肢を `current-output` に publish する（opencode **1.18.23** / 2026-08-26）
+
+Epic #2055 受入条件 1 の未達 2 件のうち 1 件。
+「question ダイアログが出ている間、Web の PromptPanel が選択肢ボタンを描き、選んだ答えが
+`POST /question/:id/reply` に届く」ところまでを実機で通した。
+
+### 27.1 結論サマリ
+
+- **Issue 本文の仮説（`question.asked` 経路と `permission-request` 経路の 2 本がある）は誤り。**
+  実測では**到着経路は 1 本**で、それは `question.asked` であり、**id (`que_…`) は最初から乗っている**。
+  payload の `source: "permission-request"` は経路名ではなく、ingest が
+  `reportPermissionRequestPending()` を呼んでいたことによる**刻印**だった。
+- 欠陥は**独立に 2 つ**あり、どちらか一方だけ直しても `readPromptQuestionChoices()` は null のままだった。
+  1. **id が捨てられていた。** `parseOpencodeQuestion` が `spec.promptId` に入れた `que_…` を
+     `reportPermissionRequestPending()` が `decisionId: null` で握りつぶしていた。
+  2. **選択肢が 1 ms 後に消されていた。** 同じ question 呼び出しの tool part
+     (`message.part.updated` / `tool=question` / `status=running`) が `pre_tool_use` / detail `question` に写り、
+     `applyAskUserQuestionTransition` の「別の tool に移った＝question は終わった」規則
+     （`ASK_USER_QUESTION_TOOL` のみを除外）に当たって `recordAskUserQuestion` の記録を削除していた。
+- **本文に無かった 3 つ目の欠陥も見つかった。** forecast として開かれた record は
+  `DIALOG_PENDING_MAX_MS.predicted = 20 s` で失効する。opencode の question は無期限に待つので、
+  **t+20 s で `pendingDecisions` が空になり `sessionStatus` が `waiting` → `ready` に戻る**。
+  受入条件は「ダイアログが出ている**間**」なので、これを直さないと条件を満たさない。
+- **ゲートは 1 行も緩めていない。** `readPromptQuestionChoices()`（`prompt-decision-id.ts:112`）の
+  3 条件はそのまま。入力を出すようにしただけである。
+- 版は **1.18.23**。Issue 本文は 1.18.22 と書いているが、計測時点で PATH にあるバイナリは 1.18.23 だった
+  （`opencode --version`、`GET /global/health` の `version` も `1.18.23`）。**1.18.22 では再測していない。**
+
+### 27.2 隔離の確認（先に撃つ）
+
+§4.6 の手順（この Issue で追記した）。私設 tmux サーバ `-L cm2100` を `HOME=<scratchpad>/home` で起こし、
+ペインの `HOME` を `printenv` で実測してから CommandMate dev server（4711）に `$TMUX` で向けた。
+
+```
+$ tmux -L cm2100 send-keys -t '=probe:' -l -- "printenv HOME > $SP/probe.txt"; tmux -L cm2100 send-keys -t '=probe:' Enter
+$ cat $SP/probe.txt
+<scratchpad>/home
+
+$ curl -sS http://127.0.0.1:4255/path
+{"home":"<scratchpad>/home",
+ "state":"<scratchpad>/home/.local/state/opencode",
+ "config":"<scratchpad>/home/.config/opencode",
+ "worktree":"<scratchpad>/work","directory":"<scratchpad>/work"}
+```
+
+`auth.json` は mode 600 で複製し、検証後に scratchpad ごと破棄した。モデルは config で
+`github-copilot/claude-sonnet-4.6` に固定し、**TUI のモデルピッカーは一度も開いていない**。
+
+### 27.3 フレーム列（SSE tap の一次証拠）
+
+3 回の question 呼び出しすべてで同じ順に並んだ。`message.part.updated` は tool part のみ抜粋。
+
+```
+20:01:55.482  message.part.updated  tool=question status=pending    callID=toolu_…   → どの語にも写らない
+20:01:57.490  question.asked        id=que_03dbbde6f001…            questions=[…]    → notification / question_prompt
+20:01:57.491  message.part.updated  tool=question status=running    callID=toolu_…   → pre_tool_use / "question"
+   …（人間が答えるまで無音。session.idle は 1 通も出ない）…
+20:03:48.719  question.replied      requestID=que_03dbbde6f001…     answers=[["crimson"]]  → どの語にも写らない
+20:03:48.719  message.part.updated  tool=question status=completed  callID=toolu_…   → post_tool_use / "question"
+```
+
+- **`question.asked` と running の tool part は同一ミリ秒**（0〜1 ms）。到着順は必ず `question.asked` が先だった。
+- **`question.replied` はマッパの表に無い**（`OPENCODE_BASE_MAPPERS` に載っていない）。
+  答えたことを state に伝えるのは `post_tool_use` である。これは修正後も変えていない。
+- running の tool part は `state.input.questions` に選択肢を丸ごと持っているが、**id は持たない**。
+  したがって「id が乗るのは `question.asked` だけ」であり、そこを権威として読むのが正しい。
+  fixture: [`message-part-updated-question-running-2100.json`](../../tests/fixtures/hooks/opencode/message-part-updated-question-running-2100.json)
+
+### 27.4 `session.idle` は question 待ちの間 1 通も来ない（§5.3.1 の再確認）
+
+`session.status` は `busy` のまま、`session.idle` は答えたあとにしか出ない。
+
+```
+20:01:53.737  session.status  busy
+20:01:57.490  question.asked                 ← 以降 1m51s、idle も status 変化も無し
+20:03:48.719  question.replied
+20:03:51.650  session.status  idle
+20:03:51.650  session.idle
+```
+
+**これが 20 s 失効を致命的にしていた理由**である。record が消えたあと、それを開き直すイベントは永久に来ない。
+
+### 27.5 修正前の実測（CommandMate 側）
+
+`GET /api/worktrees/work/current-output?cliTool=opencode&instance=opencode` を 1 秒間隔でポーリング。
+
+t+3 s（ダイアログ検出）:
+
+```json
+{"pendingDecisions":[{"id":null,"source":"permission-request","toolName":"question",
+                      "confirmedAt":null,"kind":"question","questionOptions":null}],
+ "promptData":{"type":"unclassified","source":"permission-request","toolName":"question",
+               "decisionId":null},
+ "sessionStatus":"waiting","sessionStatusReason":"hook_permission_request"}
+```
+
+t+22 s（**質問はまだ画面に出ている**）:
+
+```json
+{"pendingDecisions":[], "promptData":null,
+ "sessionStatus":"ready","sessionStatusReason":"opencode_response_complete",
+ "structuredEvents":{"dedupDropped":{"dialogTimedOut":2}}}
+```
+
+サーバ側ログは、この間ずっと選択肢を数えられていた。**能力ではなく publish の欠落**であることの証拠:
+
+```
+opencode-question-recorded {"questionCount":1,"optionCounts":[2]}
+opencode-event-received    {"event":"pre_tool_use","detail":"question"}   ← 2 ms 後
+```
+
+同じ瞬間に `commandmate respond work <n>` を撃つと通る（`listPending()` は REST の
+`GET /question` を読むので、この record を経由しない）。Issue 本文の観測と一致した。
+
+### 27.6 修正の中身
+
+| ファイル | 変更 |
+|---|---|
+| `src/lib/session/agent-event-state.ts` | `reportQuestionPending()` を新設（`source: 'notification'` ＋ `decisionId` ＋ tool 名・detail は呼び手から受け取る）。`applyAskUserQuestionTransition` の `pre_tool_use` 除外を `QUESTION_DECISION_TOOL_NAMES` 全体に広げた |
+| `src/lib/hooks/sources/opencode/ingest.ts` | `recordQuestion` が `reportPermissionRequestPending` ではなく `reportQuestionPending` を呼び、`spec.promptId` を渡す |
+| `src/lib/session/current-output-builder.ts` | `decisionId` と `decisionOptions` の生成条件を分離。question のときは id だけを publish し、3 つの verdict は出さない |
+| `src/lib/session/structured-prompt.ts` | `promptData.question` の末尾を分岐。番号が実際に届く payload では「画面から番号を読め」という Claude 向けの警告ではなく `1 = alpha, 2 = beta` を出す |
+| `src/cli/types/api-responses.ts` | `PromptData` に `decisionId` / `askUserQuestion` を**追加のみ**（index signature 越しに既に通っていたものを宣言した） |
+
+`readPromptQuestionChoices()` と `PromptPanel` は**未変更**。#2039 が置いた受け口に入力が来るようになっただけである。
+
+`source: 'notification'` を選んだ理由は 2 つある。`StructuredPromptSource` の定義がそのまま
+「`notification` はダイアログが存在する証拠 / `permission-request` はこれから描かれるという予測」であり、
+`question.asked` は前者だから。そして `confirmedAt` が入ることで retention が
+`DIALOG_PENDING_MAX_MS.confirmed` に変わり、27.4 の 20 s 失効が構造的に消えるから。
+`sessionStatusReason` はこれに伴って `hook_permission_request` → `hook_permission_prompt` に変わる
+（新しい語は増やしていない）。
+
+### 27.7 修正後の実測
+
+同じポーリングを 70 秒。
+
+t+3 s:
+
+```json
+{"pendingDecisions":[{"id":"que_03dc885bc001HI96F7K2i7q5c9","source":"notification",
+                      "toolName":"question","confirmedAt":1787742946753,"kind":"question",
+                      "questionOptions":[{"number":1,"label":"alpha"},{"number":2,"label":"beta"}]}],
+ "promptData":{"type":"unclassified","source":"notification","toolName":"question",
+               "askUserQuestion":{"question":"Which option do you prefer?",
+                                  "labels":["alpha","beta"],"questionCount":1},
+               "decisionId":"que_03dc885bc001HI96F7K2i7q5c9"},
+ "sessionStatus":"waiting","sessionStatusReason":"hook_permission_prompt"}
+```
+
+- `decisionOptions` は**出ていない**（question なので）。したがって #2039 の第 3 ゲートを通る。
+- **t+70 s まで 1 度も遷移しなかった。** `dedupDropped.dialogTimedOut` は `0`。
+- `promptData.question` の末尾は
+  `Answer it with \`commandmate respond work <number>\`: 1 = alpha, 2 = beta.` になった。
+
+### 27.8 Web からの応答（受入条件・実機）
+
+ブラウザで `http://127.0.0.1:4711/worktrees/work` を開き、Terminal split の instance を OpenCode に切り替えた。
+
+- PromptPanel が radiogroup を描いた: `1. alpha` / `2. beta` ＋ Submit。
+- `2. beta` を選んで Submit → `POST /api/worktrees/work/respond` → **200**。
+- サーバログ:
+  `respond-question-answered {"decisionId":"que_03dc885bc001HI96F7K2i7q5c9","optionNumbers":[2],"freeText":false,"delivered":true}`
+  ／ `opencode-question-replied {"delivered":true}`
+- opencode 側 `GET /question` が `[]` になり、ペインに `You prefer beta.` が出た。**エージェントが進んだ。**
+
+ブラウザが叩く経路は `TerminalSplitPaneContent.handlePromptRespond` の `decisionId` 分岐で、
+`/prompt-response`（ペイン再キャプチャ）ではなく `/respond`（agent の API に REST で届ける）である。
+ペインにキーは 1 つも送っていない。
+
+### 27.9 CLI 経路（不変であることの実測）
+
+修正後に別の question を出して `commandmate respond work 1 --instance opencode` を撃った:
+
+```
+Answered question que_03dcc7a06001gahQ3YJOd0AaXl with 1: copper
+Response sent.
+```
+
+`capture --json` も同じ record を見せる（こちらは #2100 で id と選択肢が**増えた**）:
+
+```json
+"pendingDecisions":[{"id":"que_03dcc7a06001gahQ3YJOd0AaXl","kind":"question",
+                     "questionOptions":[{"number":1,"label":"copper"},{"number":2,"label":"zinc"}]}]
+"promptData":{"decisionId":"que_03dcc7a06001gahQ3YJOd0AaXl",
+              "askUserQuestion":{"question":"Which metal do you prefer?",
+                                 "labels":["copper","zinc"],"questionCount":1}}
+```
+
+### 27.10 変異注入（緑が空振りでないことの確認）
+
+構造を保つ変異を 5 つ入れ、いずれも赤になることを確認したうえで復元した（復元後は byte 一致・再実行で緑）。
+
+| # | 変異 | 落ちたテスト |
+|---|---|---|
+| 1 | `ingest.ts` の `decisionId: spec.promptId` → `null` | `opens the dialog under the question id` |
+| 2 | 解放規則を `QUESTION_DECISION_TOOL_NAMES.slice(0, 1)` に戻す（＝Claude の綴りだけ） | `keeps the recorded question when the SAME call publishes its running part` |
+| 3 | `decisionOptions` の `&& !addressesQuestion` を `\|\| addressesQuestion` に | payload 側 4 件（Claude 不変の pin を含む） |
+| 4 | `reportQuestionPending` の `source` を `'permission-request'` に | `records the dialog as PROVED, so it outlives the 20 s forecast bound` ほか 4 件 |
+| 5 | `structured-prompt.ts` の `answerable` を反転 | 番号を出す pin ほか 2 件 |
+
+### 27.11 計測していないこと（推測で埋めていない）
+
+- **1.18.22 での再現。** PATH のバイナリが 1.18.23 だったので、そちらで測った。Issue 本文の観測（1.18.22）と
+  症状は完全に一致したが、「1.18.22 でも同じ 3 フレームか」は**測っていない**。
+- **`multiSelect: true` の question。** opencode がそれを出すのか、`answers` に複数入るのかは撃っていない。
+  CommandMate 側は `resolveStructuredQuestionAnswer` が `1,3` を受ける実装のままで、
+  `summarizeAskUserQuestion` は `multiSelect` を browser に運ばないので、**ブラウザは常に単一選択**である。
+- **1 ターンに question が 2 件同時。** `getPendingDecisions()[0]`（最も古い 1 件）が
+  `promptData` になる既存規則のままで、2 件同時は作れていない。
+- **resync（再接続）経路の実機確認。** `resyncPending()` は `GET /question` の各件を
+  `{id: "resync_…", type: "question.asked", properties: <entry>}` に組み直して `deliver()` に流すので、
+  live 経路と**同じ mapper・同じ ingest**を通る（コードで確認）。ただし CommandMate 再起動後に
+  生きているペインの購読が自動で戻らない（§4.6 の落とし穴）ため、**実機では踏ませられなかった**。
+  unit では `question.asked` フレームから ingest を駆動して押さえてある。
+- **claude / codex の実機再確認。** payload 不変は unit の pin
+  （`current-output-question-decision-2100.test.ts` の「leaves Claude's AskUserQuestion payload
+  byte-identical」＋ #2031 / #2039 / #2040 の既存 suite）で押さえた。**実機セッションは回していない。**
+
+### 27.12 この節が変えたもの
+
+- `src/lib/session/agent-event-state.ts` — `reportQuestionPending()` 新設 / `pre_tool_use` の解放規則
+- `src/lib/hooks/sources/opencode/ingest.ts` — `recordQuestion` の書き込み先
+- `src/lib/session/current-output-builder.ts` — `decisionId` と `decisionOptions` の分離
+- `src/lib/session/structured-prompt.ts` — 答えられる番号を名指す分岐
+- `src/cli/types/api-responses.ts` — `PromptData` に 2 フィールド追加
+- `docs/design/opencode-server-live-verification.md` — **§4.6（CommandMate 経由のハーネス）** と本節
+- `tests/fixtures/hooks/opencode/message-part-updated-question-running-2100.json` — 欠陥 2 の一次証拠
