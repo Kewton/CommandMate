@@ -3603,6 +3603,266 @@ mtime が検証開始前と同一であることを確認した。**ユーザー
 
 ---
 
+## 24. Issue 2052: opencode 同居 Web UI を External Apps proxy 越しに開けるか（opencode 1.18.22 / 2026-08-26）
+
+Epic #2055 Phase 4 の spike。成果物はこの節だけで、**production コードは 1 行も変えていない。**
+一次証拠は `tests/fixtures/opencode-web-2052/`（採取手順は同ディレクトリの README）。
+
+### 24.0 結論サマリ
+
+| # | 問い | 実測 |
+|---|---|---|
+| 1 | `GET /` は本当に Web UI か | **Yes。** `opencode serve` も `opencode web` も同じ 2884 B の SPA シェルを返し、`index-K3ryTWVK.js`（2,738,995 B）が読み込まれて UI が起動する。`serve` と `web` の HTML / JS は**バイト一致**（sha256 `51ee4d8f…`） |
+| 2 | アセットの参照は絶対か | **絶対のみ。** `/assets/…`・`/site.webmanifest`・`/favicon-*`。バンドル内の `/assets/…` 文字列リテラル 10 件はすべて絶対で、相対 `./assets/…` は **0 件**、`import.meta.env.BASE_URL` 相当の間接も **0 件** |
+| 3 | UI が生きるのに要る transport | **SSE 1 本（`GET /global/event`）だけ。** 初回描画〜アイドルで WebSocket は **0 本**。`new WebSocket` はバンドル中 1 箇所で、呼出元は組込み PTY ターミナル（`/api/pty`）専用 |
+| 4 | `--cors` 無しで別 origin から動くか | **loopback origin だけ許可される。** `http://127.0.0.1:3052` / `http://localhost:3052` には ACAO が返るが、`http://192.168.1.50:3000`・`https://evil.example.com`・`null` には**返らない** |
+| 5 | TUI と同時操作でセッションが同期するか | **する（双方向・リロード不要）。** ただしホーム画面の「最近のセッション」一覧だけは、他所で作られたセッションを live 更新しない |
+
+**判定: 現状の External Apps proxy 越しには不可。** 理由は 1 点に切り分けられる ——
+**proxy が `/proxy/<prefix>` を剥がさない（path rewrite が無い）こと**と、
+**opencode 側に basePath を持たせる手段が無いこと**の噛み合わせ。
+**WebSocket 非対応でも CORS でもない**（下記 24.5 / 24.7 で両方とも「原因ではない」ことを実測で外した）。
+
+### 24.1 Issue 本文とブリーフィングの誤りを 2 件訂正する
+
+- **「proxy は現状 WebSocket を運べない」は誤り。** `proxyWebSocket()`（`src/lib/proxy/handler.ts:194`）が
+  426 を返すだけなのは事実だが、それは `@deprecated` の防御的 fallback で、実際の upgrade は
+  `handleProxyUpgrade()`（`src/lib/ws-server.ts:148`、Issue #671）が **raw TCP pass-through** で通す。
+  `server.on('upgrade')` の `pathname.startsWith('/proxy/')` 分岐（`src/lib/ws-server.ts:363`）がそれ。
+  実測でも proxy 越しの WS は往復した（24.5）。
+- **「未知ルートの `200 text/html` は Web UI が同居している証拠ではなく 404 を返さないだけかもしれない」は、
+  前半が正しく後半が外れ。** 実際に Web UI が同居しており、SPA シェルはブラウザで起動する（24.2）。
+  ただし「未知ルートにも同じシェルを返す」ことは事実で、それが 24.5 の実害の直接原因になる。
+
+### 24.2 隔離の確認（先に撃つ）
+
+§4 のハーネスをそのまま使用。`opencode serve --port 4852`／`opencode web --port 4853`／
+`OPENCODE_SERVER_PASSWORD` つき `--port 4855`。3 台とも `GET /path` が
+
+```
+home      …/scratchpad/home
+state     …/scratchpad/home/.local/state/opencode
+config    …/scratchpad/home/.config/opencode
+worktree  …/scratchpad/work
+directory …/scratchpad/work
+```
+
+を返すことを確認してから計測した。**モデルピッカーは一度も開いていない**（config で
+`github-copilot/claude-sonnet-4.6` に固定）。Web UI のフォルダピッカーが列挙したホーム直下も
+`.cache / .config / .local / Library` の 4 件のみで、実ホーム（`.claude`・`.codex`・`.commandmate` ほか
+多数）とは一致しない ＝ Web UI 側から見ても隔離できている。非汚染の実測は 24.11。
+
+CommandMate 側も隔離した（**本番 3000 と本番 DB を踏まないこと**）:
+`env -u CM_DB_PATH NODE_ENV=development CM_PORT=3052 CM_BIND=127.0.0.1 npx tsx server.ts`。
+シェルには `CM_PORT=3000` / `CM_DB_PATH=<本番>` / `NODE_ENV=production` が export されているので
+明示上書きが必須。`CM_DB_PATH` を scratchpad に向けるとシステムディレクトリガードに弾かれる
+（`Invalid CM_DB_PATH: … cannot be in system directory`）ので、`env -u` で worktree 既定の
+`./data/cm.db`（gitignore 済、検証後に削除）に落とした。
+
+### 24.3 `GET /` は本物の Web UI（`opencode web` と同一物）
+
+`opencode serve` の `GET /` は 2884 B / `text/html`、`Content-Length: 2884`。
+**同じバイト列が未知ルートでも返る**（`/this/route/does/not/exist` と `cmp` して一致）。
+中身は `tests/fixtures/opencode-web-2052/spa-shell.html`。参照しているのは:
+
+| 種別 | 参照 |
+|---|---|
+| JS | `/assets/index-K3ryTWVK.js`（`type="module" crossorigin`、2,738,995 B、`text/javascript`） |
+| CSS | `/assets/index-CMLUT3g5.css`（482,527 B） |
+| manifest | `/site.webmanifest`（487 B、`application/manifest+json`） |
+| favicon | `/favicon-96x96-v3.png` / `/favicon-v3.svg` / `/favicon-v3.ico` / `/apple-touch-icon-v3.png` |
+| inline | テーマ先読み `<script id="oc-theme-preload-script">`（opencode 自身の CSP に sha256 が入っている） |
+
+Chromium で `http://127.0.0.1:4852/` を開くと UI が起動し（`screenshot-direct-4852.png`）、
+コンソールエラー **0 件**。日本語ロケールで「プロジェクト」「最近のセッション」等が描画される。
+遅延 import される追加チャンク（`/assets/ja-vqBZHfTW.js`・`/assets/ja-BaAAHI8J.js`・`/assets/Inter.ttf`）も
+すべて絶対パス。全リクエストは `network-direct-4852.txt`。
+
+`opencode web --port 4853` は **同じ HTML（`cmp` 一致）と同じ JS（sha256 一致）** を返し、違いは
+「起動時に既定ブラウザを開く」ことだけだった（本検証では `open` を PATH shim で無効化して確認）。
+**つまり「`opencode web` の UI」と「`--port` つき TUI に同居する UI」は同一物**で、
+CommandMate が opencode ペインごとに立てている `127.0.0.1:42xx`（`OPENCODE_PORT_RANGE`、
+`src/lib/hooks/sources/opencode/ports.ts:59`）でも同じ UI が出る。
+
+opencode の CSP は `default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'sha256-…'; …; connect-src *`。
+`connect-src *` なので **opencode 自身は API 先の origin を縛っていない**（縛っているのは 24.7 の CORS 側）。
+
+### 24.4 UI が要る transport は SSE 1 本。WebSocket は PTY 専用
+
+初回描画で開くのは `GET /global/event` の 1 本きり:
+
+```
+Content-Type: text/event-stream / Cache-Control: no-cache, no-transform
+x-accel-buffering: no / Transfer-Encoding: chunked
+data: {"payload":{"id":"evt_…","type":"server.connected","properties":{}}}
+```
+
+`§4.3` の実測どおり `event:` 行は無く、種別は `data` の JSON の `type` にしか入らない。
+バンドル側も `EventSource` を **0 回**しか使わず、`fetch` + 手書きの `text/event-stream` リーダで読む。
+
+`new WebSocket` はバンドル中 **1 箇所**だけで、周辺の識別子は
+`terminal.connectTicket.csrfError` / `binaryType="arraybuffer"` / cursor 復帰 ＝ **組込み PTY ターミナル**
+（`/api/pty` 系）。**チャット UI・セッション一覧・diff の描画に WebSocket は要らない。**
+（未計測: PTY パネルを実際に開いてはいない。開けば WS が 1 本増えるはずだが撃っていない。）
+
+その他の REST は `/global/health`・`/api/health`・`/api/session?limit=…`・`/global/config`・
+`/provider`・`/path`・`/session/status`・`/project` ほか、**すべて絶対パス**。
+プロジェクトを開いた後は `?directory=<絶対パス>` つきのクエリが大量に飛ぶ。
+
+### 24.5 CommandMate の proxy が実際にできること・できないこと（実測）
+
+すべて `develop@ceb1059d` の実コード（`proxyHttp` / `handleProxyUpgrade`）に対する実測。
+echo upstream を External App として登録して素性を切り分けた（`probe-proxy-sse-ws.txt`）。
+
+| 能力 | 実測 | 根拠 |
+|---|---|---|
+| path rewrite | **無い。** `/proxy/echo/hello?x=1` を投げると upstream は `receivedUrl:"/proxy/echo/hello?x=1"` を受け取る | `buildUpstreamUrl()` は `http://host:port${path}` を組むだけ（`src/lib/proxy/handler.ts:50`）。docblock も「上流を `basePath: '/proxy/{pathPrefix}'` で構成せよ」と要求している |
+| SSE | **通る。バッファしない。** 500 ms 間隔で吐く upstream の各フレームが `+0.416 / +0.916 / +1.418 / …` と 500 ms 刻みで到達 | 同上 |
+| WebSocket | **通る。** `ws://127.0.0.1:3052/proxy/echo/socket` が 101 → 往復メッセージ成功。upstream は `receivedUrl:"/proxy/echo/socket"` を受ける（WS でも path は無加工） | `handleProxyUpgrade()`（Issue #671） |
+| WS の陰性対照 | `websocketEnabled=false` → **403**、未知 prefix → **404** | 3 通りが撃ち分けられている ＝ 応答しているのは確かに `ws-server.ts` の分岐であって Next の 404 ではない |
+| `authorization` の転送 | **剥がされる。** 直叩き 200 / proxy 越し 401 | `SENSITIVE_REQUEST_HEADERS`（`src/lib/proxy/config.ts:38`）に `authorization` / `cookie` |
+| 上流 CSP / CORS ヘッダ | **剥がされ、CommandMate 自身のものに差し替わる。** proxy 応答の CSP は `connect-src 'self' data: ws: wss:` | `SENSITIVE_RESPONSE_HEADERS`（同 `:94`）に `content-security-policy` と `access-control-*` |
+| ExternalAppCache | TTL **30 秒**。登録直後の proxy 参照は 404 を返す | `src/lib/external-apps/cache.ts:30` |
+
+**したがって「WS が無いから不可」ではない。SSE も WS も通る。**
+
+### 24.6 実測: proxy 越しに開くと真っ白（`screenshot-proxied-3052.png`）
+
+External App `oc`（`pathPrefix=oc` → `127.0.0.1:4852`、`websocketEnabled=true`）を登録し、
+Chromium で `http://127.0.0.1:3052/proxy/oc/` を開いた結果:
+
+```
+1. GET /proxy/oc/                    => 200  (SPA シェル。直叩きと cmp 一致)
+2. GET /assets/index-K3ryTWVK.js     => 404
+3. GET /assets/index-CMLUT3g5.css    => ERR_ABORTED (404 本文が text/html で MIME 拒否)
+4. GET /site.webmanifest             => 404
+8. GET /favicon-v3.ico               => 404   (以下 favicon 3 件も 404)
+```
+
+**SPA のファイルが 1 つも読めないので JS が一度も走らず、API 呼出は 1 本も発生しない。**
+`#root` は空のまま（アクセシビリティスナップショットが空）。
+
+壊れ方は二重で、**片方だけ直しても動かない**:
+
+1. **シェルの参照が絶対なので、ブラウザは mount point を捨てて origin ルートに取りに行く。**
+   `/proxy/oc/assets/…` ではなく `/assets/…` を要求し、そこは CommandMate の Next.js が 404 を返す
+   （しかも `/_next/static/...` という CommandMate 自身の名前空間と同じ根に生えることになる）。
+2. **仮にクライアント側で `/proxy/oc/assets/…` に書き換えても届かない。**
+   proxy は prefix を剥がさないので上流は `/proxy/oc/assets/index-K3ryTWVK.js` を受け取り、
+   opencode はそれを未知ルートとして **SPA シェル（2884 B / text/html）** で返す。
+   同じ理由で `/proxy/oc/api/event` も `/proxy/oc/path` も **全部 2884 B の HTML**（`probe-proxy-paths.txt`）。
+   `GET /doc` の `ServerConfig` は `port` / `hostname` / `mdns` / `mdnsDomain` / `cors` の 5 キーのみで、
+   **basePath に相当する設定は存在しない**（一次証拠。`opencode serve --help` にも無い）。
+
+### 24.7 CORS: 既定は loopback origin だけ（`--cors` は効く）
+
+`--cors` を渡さない 4852 に `Origin` を変えて撃った結果:
+
+| Origin | `Access-Control-Allow-Origin` |
+|---|---|
+| `http://127.0.0.1:3052` | 返る（同値を反射） |
+| `http://localhost:3052` | 返る（同値を反射） |
+| `http://192.168.1.50:3000` | **返らない** |
+| `https://evil.example.com` | **返らない** |
+| `null` | **返らない** |
+
+`--cors http://192.168.1.50:3000` を付けた 4855 では同 origin に ACAO が返り、
+`https://evil.example.com` には返らない（陽性・陰性対照そろい）。preflight は
+`204` ＋ `Allow-Methods: GET, HEAD, PUT, PATCH, POST, DELETE`、`Allow-Credentials` は返らない。
+
+**この spike の構成（proxy で同一 origin に載せる）では CORS は最初から関与しない**ので、
+**CORS は不可の原因ではない。** 関与するのは「proxy をやめて別 origin の opencode を直接叩く」案
+（24.9）で、そのときは `--cors` が必須になる。
+
+なお SPA には `/server/<base64(サーバURL)>/session/<id>` というクライアントルートがあり
+（UI 内のセッションリンクの `href` がそれ）、`http://127.0.0.1:4852` を base64 した
+`aHR0cDovLzEyNy4wLjAuMTo0ODUy` が実際に入る。ただし **4853 でそのパスを開いても API 呼出は
+すべて 4853（自 origin）に飛び、4852 へは 1 本も飛ばず、main は空のまま**だった。
+「UI を別 origin にホストして任意の opencode サーバへ向ける」機能としては**成立を確認できていない**
+（この 1 通りしか撃っていない。24.10 参照）。
+
+### 24.8 認証
+
+- **opencode 側**: `OPENCODE_SERVER_PASSWORD` を設定すると全パスが **HTTP Basic**
+  （`WWW-Authenticate: Basic realm="Secure Area"`）になる。SPA シェル `GET /` も 401。
+  **ユーザ名は `opencode` 固定**（`opencode:pw` → 200、`x` / `admin` / 空 / 任意文字列 → いずれも 401）。
+  `Authorization: Bearer <pw>` は 401。`GET /doc` の `securitySchemes` は空で、OpenAPI には現れない。
+  CommandMate が起動する opencode ペインはこの変数を設定していないので、**`127.0.0.1:42xx` は無認証**
+  （起動行は `--port <n> --hostname 127.0.0.1` のみ ＝ `src/lib/hooks/sources/opencode/source.ts:306`）。
+- **CommandMate 側**: `/proxy/**` は middleware の matcher に入るので、認証を有効にした環境では
+  proxy 経由もログイン必須になる。ただし matcher は `.svg|.png|.jpg|.jpeg|.gif|.webp|.ico` で終わるパスを
+  除外しているので、opencode の `/assets/sprite-*.svg` 等は**認証を通らずに抜ける**（今回の構成では
+  そもそも 404 なので実害は出ていないが、root マウント案を採るなら効いてくる）。
+- **組み合わせ**: proxy は `authorization` を剥がすので、**パスワード保護した opencode は
+  proxy 越しに開けない**（直叩き 200 / proxy 越し 401 を実測）。
+  「CommandMate 認証で包む」と「opencode 側にもパスワードを掛ける」は現状**両立しない**。
+
+### 24.9 TUI と Web の同時操作（項目 5）
+
+`tmux -L cmate-2052-web` の専用 socket で `opencode attach http://127.0.0.1:4852` を起動し、
+Web UI（4852 直叩き、リロードなし）と突き合わせた。
+
+| 操作 | 結果 |
+|---|---|
+| TUI で送信 → Web のセッション画面 | **live で反映**（`LIVE-SYNC-2052` の user / assistant 両方が、リロード無しで追加された） |
+| Web で送信 → TUI ペイン | **live で反映**（`WEB-TO-TUI-2052` が TUI に出た。再 attach 不要） |
+| TUI で新規セッション作成 → Web のホーム「最近のセッション」 | **live 更新されない。** リロードすると出る |
+| REST で作ったセッション（`POST /session`） | プロジェクトを追加した後のホーム一覧に出る。中身も Web から読める |
+
+つまり**会話状態は 1 つの実体で、TUI と Web はその 2 つのビュー**。
+ホーム一覧だけが「開いた時点のスナップショット」で、他所発のセッション追加を拾わない。
+
+### 24.10 不可の切り分けと、次にやるなら何を直すか
+
+**不可の原因は「proxy の path 書き換えが無い」の 1 点。** 以下は原因ではないことを実測で外した:
+WebSocket 非対応（→ 通る）、SSE のバッファリング（→ しない）、CORS（→ 同一 origin なので無関係）。
+
+取りうる形は 3 つで、コストが違う:
+
+| 案 | 必要な変更 | 実測から言える難所 |
+|---|---|---|
+| A. proxy に prefix ストリップを足す | `buildUpstreamUrl` に「`/proxy/<prefix>` を剥がす」オプション（App ごとのフラグ）。WS 側は `buildUpstreamUpgradeRequest` の request-line も同様に書き換え | **これだけでは足りない。** シェルの `<script src="/assets/…">` が絶対なので、ブラウザは prefix を付けずに取りに行く。HTML / JS の書き換えまでやらないと閉じない |
+| B. root マウント（別ホスト名 / 別ポートで丸ごと前段に置く） | `/proxy/<prefix>` ではなく、CommandMate が opencode 専用のリスナ（または `Host` ベースの分岐）を持つ | 絶対パスがそのまま成立するので**アセットも API も無改造で通る**。SSE も WS も通ることは実測済み。CommandMate の `/assets`・`/_next` と名前空間が衝突しないことが条件 |
+| C. proxy をやめて別 origin を直接開く | 「OpenCode Web で開く」を `http://127.0.0.1:42xx/` へのリンクにするだけ | **同一ホストのブラウザからしか成立しない。** ペインは `--hostname 127.0.0.1` で立つので、外出先のスマホからは到達不能。LAN に出すには `--hostname 0.0.0.0` ＋ `--cors <CommandMate の origin>` ＋ `OPENCODE_SERVER_PASSWORD` が要り、Issue の動機（CommandMate 認証で包む）とは別物になる |
+
+Issue の動機（外出先のスマホから同一セッションを開く）を満たすのは **B のみ**。
+A は中途半端に見えて実は HTML/JS 書き換えを伴うので、B より高くつく可能性が高い。
+C は「PC で開発中に手元のブラウザで diff を見る」用途なら最小コストで成立する。
+
+後続 Issue の本文案は `dev-reports/issue-2052-followup.md`。
+
+### 24.11 非汚染の証拠
+
+- 検証前に採った `~/.local/share/opencode/{opencode.db, opencode.db-wal, auth.json}` と
+  `~/.config/opencode/*` の mtime 一覧を検証後に取り直し、**diff が空**であることを確認した。
+  一方、隔離 HOME 側の `opencode.db` は 278,528 B に育っている（＝書き込みは確かにそちらへ行った）。
+- 複製した `auth.json`（mode 600）は検証後に削除済み。
+- tmux は専用 socket `cmate-2052-web` のみを使い、`kill-server` は撃っていない。
+  既定サーバのセッション一覧は検証後も無傷（並走中の他ワーカーのセッションが残っている）。
+- 使ったポートは 3052 / 4852 / 4853 / 4854 / 4855。**3000 は触っていない**（検証後も本番の
+  node が LISTEN したまま）。全プローブプロセスは PID 指定で停止済みで、5 ポートとも LISTEN 0。
+- CommandMate 側の検証 DB は worktree 既定の `./data/cm.db`（gitignore 済）で、検証後に削除した。
+
+### 24.12 未計測（推測で埋めていない箇所）
+
+- **PTY パネル（`/api/pty`）を実際に開いていない。** WS の呼出元がそこだと**バンドルの静的解析**で
+  特定しただけで、開いたときに何本 WS が張られるか、proxy 越しに通るかは撃っていない。
+  proxy が WS を通すこと自体は echo upstream で実測済み。
+- **`/server/<base64>` ルートの意味を確定していない。** 別 origin で開くと自 origin へフォールバック
+  したところまでしか観測しておらず、「任意サーバに向ける機能」として使えるかは不明。
+- **prefix ストリップを実装して試していない。** 24.10 の A / B は「実測から導ける帰結」であって、
+  実装して動かした結果ではない。
+- **スマホ実機・LAN 越しは撃っていない。** 24.7 の LAN origin は `Origin` ヘッダを詐称した
+  curl による CORS 応答の観測のみで、実機からの到達性は測っていない。
+- **CommandMate 認証を有効にした状態での proxy 経由アクセス**は測っていない（本検証は認証無効の dev）。
+- **diff / レビュー画面**（`レビューの切り替え` ボタン）は開いていない。Issue が動機に挙げた
+  「リッチな diff」が実際にどう見えるかは未確認。
+
+### 24.13 この節が変えたもの
+
+- `docs/design/opencode-server-live-verification.md` — 本節（§24）
+- `tests/fixtures/opencode-web-2052/**` — 一次証拠 9 ファイル ＋ 採取手順の README
+- **production コードの変更は無い**（この Issue は spike で、受入条件は実測の記録だけ）
 ## 25. Issue 2054: `liveness` / `probeActivity` を実際に読む（opencode 1.18.22 / 2026-08-26）
 
 Phase 4 は `AgentEventSource` に `liveness()` と `probeActivity()` を生やしたが、
