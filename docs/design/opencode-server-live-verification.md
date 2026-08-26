@@ -2628,3 +2628,144 @@ Issue の受入条件は「隔離サーバで question / provider エラーを�
 - `src/lib/hooks/sources/opencode/subscription.ts` — `installation.update-available` を `deliver()` で読む（7 語に写像されないため）＋ 接続スコープの重複抑止
 - `src/lib/push/push-sender.ts` — `FailurePushReason` に `agent-session-error`、`NotificationEvent.updateAvailable`
 - `locales/{en,ja}/notifications.json` — `failureAgentSession*` / `updateAvailable`
+
+---
+
+## 19. Issue 2049: 端末ビューの空行圧縮を opencode に開く（opencode 1.18.22 / 2026-08-26）
+
+### 19.1 結論サマリ
+
+| | |
+|---|---|
+| Issue 本文の前提 | 「opencode の端末ビューには空行圧縮が無い」 |
+| **実測** | **圧縮機構は Issue #1172 で既にある。`claude` / `codex` 限定になっていただけ**（宣言は PC / モバイルの 2 箇所） |
+| 素直に opencode を足すと何が起きるか | **picker / command palette のパネル帯が消える。** 実測フレームで 8 行中 7 行しか残らない |
+| なぜ消えるか | opencode のオーバーレイは**背景色で塗ったパネル**で、区切り行に**グリフが 1 つも無い**（70 桁のスペースに `ESC[48;2;20;20;20m`）。`stripAnsi(row).trim() === ''` なので #1172 の規則が layout padding と読む |
+| 採った規則 | **「桁を塗っていて（`stripAnsi(line) !== ''`）かつ背景色 SGR を持つ空行」は構造**。それ以外の空行はこれまでどおり畳む |
+| composer / 承認ダイアログ | **何もしなくてよい。** どちらも `┃`（U+2503）を持つのでそもそも空行ではない。テストは「そう仮定する」のではなく**そう assert する** |
+| 圧縮率（実測） | boot idle 201 行 → **16 行** / 2 ターン完了 201 行 → **43 行** / palette 展開 201 行 → **58 行** |
+
+### 19.2 隔離の確認（先に撃つ）
+
+§4 のハーネスをそのまま使った。TUI を起動する必要があったので tmux も使っている。
+
+```bash
+SP=…/scratchpad/oc2049
+# §4.1 のとおり HOME ごと差し替え、auth.json は umask 077 で複製、model は config で固定
+HOME="$SP/home" opencode serve --port 4796 --hostname 127.0.0.1 &
+curl -sS http://127.0.0.1:4796/path
+```
+
+`GET /path` の返り値（`home` / `state` / `config` / `worktree` / `directory` の **5 つすべて**）が
+`…/scratchpad/oc2049/` 配下であることを確認してから 1 打鍵目を送った。
+
+TUI は**専用 socket** で、CommandMate の本番ジオメトリ（80 桁 × `OPENCODE_PANE_HEIGHT` = 200 行）:
+
+```bash
+tmux -L cmate-2049-oc new-session -d -s oc2049 -x 80 -y 200 -c "$SP/work" \
+  "env HOME='$SP/home' TERM=xterm-256color opencode"
+tmux -L cmate-2049-oc capture-pane -p -e -t '=oc2049:0.0' -S -0 -E -
+tmux -L cmate-2049-oc kill-session -t '=oc2049:'     # kill-server は使っていない
+```
+
+**モデルピッカーは一度も開いていない。** opencode はピッカーで既定モデルを書き換えるため、
+同じパネル chrome を持つ `ctrl+p` command palette（読むだけのコマンド一覧）で代替し、`Esc` で閉じた。
+
+### 19.3 空行は 3 種類しかない（これが規則の根拠）
+
+リポジトリ内の opencode 実キャプチャ全 22 本＋今回の 1.18.22 の 3 本について、
+`stripAnsi(row).trim() === ''` な行を「桁を塗っているか」×「背景色 SGR を持つか」で分類した:
+
+| 分類 | 実例 | 出現数 | 正体 |
+|---|---|---|---|
+| 桁なし・SGR なし | `''` | 1 フレームあたり 114〜188 | **layout padding** |
+| 桁なし・背景 SGR あり | `ESC[38;2;255;255;255m ESC[48;2;4;4;4m` | **1 フレームにちょうど 1** | フレーム全体の色初期化 |
+| **桁あり・背景 SGR あり** | `ESC[48;2;20;20;20m` ＋ 70 桁スペース ＋ `ESC[48;2;4;4;4m` | オーバーレイのフレームだけ 8〜9 | **パネル本体** |
+
+**「桁あり・背景 SGR なし」は 1 行も存在しない。** 2 条件を AND にしても OR にしても
+このコーパスでは同じ判定になるが、AND を採った（「帯を塗っている」ほうが「たまたま空白が残っている」より
+パネルの定義として素直で、padding を過剰に守らない）。
+
+「桁なし・背景 SGR あり」を除外するために条件 1（桁を塗っていること）が要る。
+これを落とすと**全フレームの先頭 1 行が構造扱いになり、leading trim が効かなくなる**。
+
+### 19.4 `ctrl+p` の実測フレーム（1.18.22）
+
+`tests/fixtures/opencode-live-2049/command-palette-11822.txt` の行番号:
+
+```
+   1  空行（桁なし・背景 SGR あり）    ← フレーム色初期化
+   2..50  空行（桁なし・SGR なし）      ← layout padding（49 行）
+  51  ★ パネル帯（70 桁・ESC[48;2;20;20;20m）
+  52  '              Commands                                         esc    '
+  53  ★ パネル帯
+  54  '              Search                                                  '
+  55  ★ パネル帯
+  …
+  93  ★ パネル帯
+  94..98  コマンド項目
+  99..104 composer（`┃` 行）とその下の `╹▀▀▀…`
+ 105..196 空行（layout padding）
+ 197..199 パス／版表示（`1.18.22`）
+```
+
+**行 2..51 は #1172 の規則から見れば「50 行連続の空行」で、1 行に畳まれる。**
+その 1 行は `extractAnsiSequences()` の結果なので**桁を持たない**——つまり
+**パネルの上端がフレームから消える。** これが Issue #2049 の実体。
+
+| 規則 | 出力行数 | 残ったパネル帯 | `┃` 行 | `╹` 行 |
+|---|---|---|---|---|
+| 生キャプチャ | 201 | 8 | 4 | 1 |
+| #1172（素直に opencode を足した場合） | 57 | **7** | 4 | 1 |
+| **#2049** | 58 | **8** | 4 | 1 |
+
+他の 2 フレーム（`boot-idle-11822` / `two-turn-idle-11822`）はパネルを持たないので
+**両規則の出力がバイト一致**する（201 → 16 行 / 201 → 43 行）。
+`┃` は boot idle で 4 行、2 ターン完了フレームで 24 行、いずれも**全数が残る**。
+
+### 19.5 実測できなかったもの（推測で埋めていない）
+
+- **1.18.22 の承認ダイアログのフレームは採れていない。** 隔離 config の下で
+  1.18.22 は `ls -la` の実行も `probe.txt` の書き込みも**ダイアログを出さずに実行した**
+  （12 回 × 3 秒のポーリングで `Permission required` は 1 度も出現せず）。
+  そのため承認ダイアログの行は、リポジトリに既にある 1.18.20 / 1.18.21 の実キャプチャ
+  （`tests/unit/lib/detection/fixtures/opencode-live-1893/`、`…/opencode-live-1896/permission-over-numbered.txt`）
+  に対して assert している。**版が違うことを承知のうえでの代替**であり、
+  1.18.22 で採れたことにはしていない。
+- **モデルピッカーのフレームは 1.18.22 では採っていない**（既定モデルを書き換える罠を避けたため）。
+  同じパネル chrome を持つ `ctrl+p` で代替した。1.18.21 のピッカー実キャプチャ
+  （`…/opencode-live-1896/model-picker.txt`）もテストに入れてある。
+- **`copilot` の padding 量は測っていない。** よって copilot は圧縮対象に**入れていない**
+  （Issue の受入条件「claude / codex / copilot の端末ビューは不変」とも一致する）。
+- **「履歴タブを既定にする」UI 設定（Issue 本文の任意項目）は入れていない。** 設定の描画面
+  （`AgentSettingsPane.tsx` / `WorktreeDetailSubComponents.tsx`）は並行する Issue #2048 の所有物で、
+  本 Issue の scope 外。UI の無い設定値だけを足すのは半端なので見送った。
+
+### 19.6 非汚染の証拠
+
+| 項目 | 値 |
+|---|---|
+| 版 | **1.18.22**（フレーム右下の版表示、および `capture-pane` の行 197） |
+| 隔離 HOME | `GET /path` の 5 項目すべてが scratchpad 配下であることを確認済み |
+| ポート | **4796**。3000 は使っていない。`--hostname 127.0.0.1` |
+| tmux | **専用 socket `cmate-2049-oc` のみ**。既定サーバへは 1 コマンドも撃っていない。後始末は `kill-session -t '=oc2049:'`（`kill-server` は使っていない） |
+| モデルピッカー | **一度も開いていない** |
+| `auth.json` | mode 600 で複製し、**検証後に削除**（削除確認済み） |
+| ユーザー HOME 非汚染 | 検証終了時点で `~/.local/share/opencode/opencode.db` の mtime は**検証開始（8/26 09:57）より前の 8/25 14:16 のまま**、`~/.config/opencode/opencode.jsonc` は 7/19 のまま |
+| 後始末 | `opencode serve` は **PID 指定で kill**（`pkill -f opencode` は使っていない）。ポート 4796 の LISTEN が無いことを確認済み |
+
+### 19.7 変更ファイル
+
+- `src/lib/terminal-display-normalize.ts`（新規）— パネル対応の圧縮規則。`compactBlankRuns()` が共有エンジン
+- `src/config/terminal-display-compaction.ts`（新規）— どのツールをどう圧縮するかの**唯一の宣言**
+- `src/components/worktree/TerminalDisplay.tsx` — `preservePaintedPanelRows` prop
+- `src/components/worktree/TerminalSplitPaneContent.tsx` / `MobileTerminalTab.tsx` — 手書きのツール列挙をやめ、config を読む
+- `tests/fixtures/opencode-live-2049/` — 1.18.22 の実キャプチャ 3 本と README
+
+### 19.8 この節が変えたもの
+
+- 「opencode には空行圧縮が無い」→ **ある。claude / codex 限定だっただけ。**
+- 「opencode を足せば済む」→ **足すだけだと picker / palette の帯が消える。**
+- **PC とモバイルで圧縮の宣言が 2 箇所に割れていた**（`TerminalSplitPaneContent.tsx:260` /
+  `MobileTerminalTab.tsx:53`）。同じセッションが画面によって別の見え方をしうる形だったので、
+  config 1 箇所に集約し、ソースを読むテストで再発を止めた。
