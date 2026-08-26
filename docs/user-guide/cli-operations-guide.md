@@ -1206,8 +1206,11 @@ commandmate capture <worktree-id> --instance codex-2 # 追加インスタンス�
     "promptWaitingSource": null,
     "pendingDecisions": [],
     "session": null,
+    "sessionContext": null,
+    "sessionDiff": null,
     "source": {
       "cliToolId": "claude",
+      "kind": "hooks",
       "capabilities": {
         "supportedEvents": ["stop", "notification", "session_start", "user_prompt_submit", "session_end", "pre_tool_use", "post_tool_use"],
         "configScope": "per-instance",
@@ -1217,7 +1220,8 @@ commandmate capture <worktree-id> --instance codex-2 # 追加インスタンス�
         "permissionReplyReleasesPrompt": false,
         "eventIdentity": null,
         "resync": "none"
-      }
+      },
+      "probedActivity": null
     }
   },
   "model": "claude-opus-5[1m]",
@@ -1242,6 +1246,9 @@ commandmate capture <worktree-id> --instance codex-2 # 追加インスタンス�
 | `statusEvidence` / `lastKnownStatus` / `lastKnownStatusAt` | 判定が肯定的証拠に基づくか、と直前の確定状態（Issue #1926）。下記参照 |
 | `structuredEvents.turnId` / `openedAt` / `closedAt` / `closedBy` | ターンの暫定境界（Issue #1926）。**まだ安定した turn 同一性ではありません**。下記参照 |
 | `structuredEvents.source` | そのツールの構造化イベントソースの識別子と**宣言値**（Issue #1924）。セッションの状態ではなく**ソースの性質**なので、hooks が 1 件も来ていなくても・セッションが止まっていても必ず入る。ソース実装が無いツール（`vibe-local`）は互換ソースの「未計測」値（`supportedEvents: []`）を返す |
+| `structuredEvents.source.kind` / `liveness` / `degradedReason` / `probedActivity` | そのソースが**いま生きているか**（Issue #2054）。宣言値と違い**セッションの状態**。下記参照 |
+| `structuredEvents.sessionContext` | コンテキスト窓の使用率（Issue #2042）。publish しないツールでは常に `null`。下記参照 |
+| `structuredEvents.sessionDiff` | **このターンが触ったファイル**とその revert 状態（Issue #2043）。publish しないツールでは常に `null`。下記参照 |
 | `structuredEvents.pendingDecisions[]` | そのインスタンスが保持している dialog（Issue #1930、`kind` / `questionOptions` は Issue #2040）。下記参照 |
 | `structuredEvents.session` | エージェント自身が申告した「いま入っている会話」（Issue #2040）。publish しないツールでは常に `null`。下記参照 |
 | `upstreamFault` | 画面に上流障害の署名があれば `{id, matchedText, at}`、無ければ `null`（Issue #1839）。**`null` は「健全」ではなく「既知の署名が無かった」** |
@@ -1318,6 +1325,87 @@ commandmate capture <worktree-id> --instance codex-2 # 追加インスタンス�
 - サブエージェント（`parentID` を持つセッション）の `session.updated` は**無視します**。
   そのコストはペインのものではなく、採ると会話とバックグラウンドジョブの間で値が往復するためです
 - `at` はこのレコードを書いた時刻です。古さの判断に使ってください
+
+#### `structuredEvents.sessionContext`（Issue #2042）
+
+コンテキスト窓をどれだけ使ったかです。`session` と同じく opencode の `session.updated` から読むので
+**追加のリクエストは発生しません**。
+
+```json
+"sessionContext": {
+  "tokens": 8510,
+  "limit": 1000000,
+  "percent": 1,
+  "sessionAt": 1787738184568,
+  "at": 1787738205025
+}
+```
+
+- **publish しないツールでは常に `null`** です（現状 opencode 以外の全ツール）
+- `percent` は `tokens / limit` をサーバが計算した整数です。`limit` が判らないときは `null`
+- `sessionAt` は**エージェントがその数字を申告した時刻**、`at` はこのレコードを書いた時刻です。
+  2 つが離れていれば「表示している使用率が古い」と判断できます
+
+```bash
+# コンテキストを 80% 以上使ったペインを拾う
+commandmate capture "$WT" --json | jq -r 'select(.structuredEvents.sessionContext.percent >= 80) | .structuredEvents.session.id'
+```
+
+#### `structuredEvents.sessionDiff`（Issue #2043）
+
+**このターンが触ったファイル**と、その revert 状態です。
+
+```json
+"sessionDiff": {
+  "sessionId": "ses_0000000000000000000000000",
+  "turnMessageId": "msg_0000000000000000000000000",
+  "files": [],
+  "filesAt": 1787738205026,
+  "revertedFiles": [],
+  "revertedMessageId": null,
+  "at": 1787738205026
+}
+```
+
+- **publish しないツールでは常に `null`** です（現状 opencode 以外の全ツール）
+- `files` は**そのターンの**変更で、worktree 全体の `git status` ではありません
+- `revertedMessageId` が非 `null` なら、そのターンは取り消されています。
+  このとき作業ツリーは git から見て「何もしていない」状態になりうるので、
+  `wait --verify` の work-evidence は opencode を名指しした run に限りこの台帳を参照します
+  （[--verify の節](#--verify----require-workissue-1544)）
+- opencode の台帳は git snapshot なので、`.gitignore` された作業は**ここにも出ません**（実測）
+
+#### `structuredEvents.source` の健全性フィールド（Issue #2054）
+
+`source.capabilities` が**ソースの性質**（宣言値）なのに対し、こちらは**いまそのソースが生きているか**です。
+
+| フィールド | 意味 |
+|---|---|
+| `kind` | `sse`（pull 型＝ opencode）/ `hooks`（push 型＝ claude / codex / copilot / gemini / antigravity）/ `scraper`（構造化ソースが無い＝ `vibe-local`）。**全ツールで必ず入ります** |
+| `liveness` | `live` / `stale`。**降格しうるソースでしか入りません**（現状 opencode のみ）。ハートビート断 30 秒で `stale` |
+| `degradedReason` | scraper へ降格した理由（`port_identity_changed` など）。降格していなければキーごと出ません |
+| `probedActivity` | 再接続直後に 1 回だけ問い合わせた活動状態 `{activity, at}`、または `null` |
+
+```json
+"source": {
+  "cliToolId": "opencode",
+  "kind": "sse",
+  "liveness": "live",
+  "probedActivity": { "activity": "idle", "at": 1787738180830 },
+  "capabilities": { "...": "..." }
+}
+```
+
+- **push 型のツールでは `kind` 以外は publish されません。**claude / codex の payload は
+  `kind` と `probedActivity: null` が増えるだけで、他は #2054 以前と同一です
+- `liveness` が `stale` / `degradedReason` が非 `null` のときは、**その worktree の状態は
+  構造化イベントではなく画面スクレイプ由来**になっています。`sessionStatusReason` が
+  `hook_*` から離れるのと同じ意味です
+
+```bash
+# 降格したペインだけ拾う
+commandmate capture "$WT" --json | jq -r 'select(.structuredEvents.source.degradedReason != null) | .structuredEvents.source.degradedReason'
+```
 
 #### `statusEvidence` / `lastKnownStatus`（Issue #1926）
 
