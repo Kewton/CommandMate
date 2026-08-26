@@ -21,6 +21,8 @@ import type {
   SessionTargetResolvedBy,
 } from '@/lib/session/resolve-session-target';
 import { getAgentEventSource } from '@/lib/hooks/sources/registry';
+import { describeAgentEventSource } from '@/lib/hooks/sources/define-source';
+import { getOpencodeProbedActivity } from '@/lib/hooks/sources/opencode/subscription';
 import {
   getLastPermissionDecision,
   type PermissionDecisionRecord,
@@ -44,7 +46,10 @@ import {
   type OpencodeSessionDiffRecord,
 } from '@/lib/hooks/sources/opencode/diff';
 import { questionDecisionOptions } from '@/lib/hooks/structured-decision-response';
-import type { AgentSourceCapabilities } from '@/lib/hooks/sources/types';
+import type {
+  AgentEventSourceStatus,
+  AgentSourceCapabilities,
+} from '@/lib/hooks/sources/types';
 import { captureSessionOutput } from '@/lib/session/cli-session';
 import {
   detectSessionStatus,
@@ -409,6 +414,39 @@ export interface StructuredSourcePayload {
   cliToolId: CLIToolType;
   /** The declared block, copied. See {@link AgentSourceCapabilities}. */
   capabilities: AgentSourceCapabilities;
+  /**
+   * Which machinery is speaking for THIS pane right now (Issue #2054).
+   *
+   * Additive, and the two fields above are untouched: #1924's readers keep
+   * reading exactly what they read. The difference between this and
+   * {@link capabilities} is instant versus declaration — capabilities say what
+   * opencode's source can do, `kind` says whether it is currently doing it, and
+   * on a pane whose port was taken over by another process the answer is
+   * `scraper` while every capability above still describes the SSE source.
+   *
+   * `degradedReason` and `liveness` are absent for every push tool, by
+   * construction rather than by omission — see {@link describeAgentEventSource}.
+   */
+  kind: AgentEventSourceStatus['kind'];
+  /** Issue #2054. Absent unless something is degraded. */
+  degradedReason?: string;
+  /** Issue #2054. Absent for a source with no heartbeat to miss. */
+  liveness?: AgentEventSourceStatus['liveness'];
+  /**
+   * What `AgentEventSource.probeActivity` answered when this instance's stream
+   * was last attached, or null (Issue #2054).
+   *
+   * **A record of one instant, not a live reading**, which is why it carries its
+   * own `at` and why nothing derives a status from it: a stream that opens in
+   * the middle of a turn delivers nothing until that turn ends, so this is the
+   * only answer to "was the pane already working when CommandMate connected?"
+   * that exists — and it stops being current the moment the next frame lands.
+   *
+   * Null for every tool but opencode (`probeActivity` answers null for a push
+   * source by construction: an event cannot be re-read) and for an opencode
+   * instance whose stream has never been attached in this process.
+   */
+  probedActivity: { activity: 'busy' | 'idle' | null; at: number } | null;
 }
 
 export interface CurrentOutputPayload {
@@ -1170,6 +1208,25 @@ async function buildPayload(
     source: {
       cliToolId: eventSource.cliToolId,
       capabilities: eventSource.capabilities,
+      // Issue #2054. Read through the source interface — `liveness(target)` —
+      // rather than through opencode's subscription map, so this layer keeps
+      // naming no tool: every push source answers `{ state: 'unknown' }` from
+      // `definePushHookSource` at no cost, and the fold that turns that into a
+      // published `kind` is the same one `worktree-status-helper` calls.
+      ...describeAgentEventSource(
+        eventSource,
+        eventSource.liveness({ worktreeId, cliToolId, instanceId: resolvedInstanceId }),
+        now
+      ),
+      // Issue #2054: opencode-only by construction, and read from the module
+      // that owns the attach. `./opencode/diff` is imported here for the same
+      // reason (#2043) — the alternative is a field that exists on the wire and
+      // is filled in by nothing.
+      probedActivity: getOpencodeProbedActivity({
+        worktreeId,
+        cliToolId,
+        instanceId: resolvedInstanceId,
+      }),
     },
     // Issue #2040. Read here, before the `isRunning` branch, so both return
     // paths carry the key — but the record itself is dropped when the

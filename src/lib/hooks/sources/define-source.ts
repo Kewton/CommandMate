@@ -48,6 +48,8 @@ import {
 } from './pending-decisions';
 import type {
   AgentEventSource,
+  AgentEventSourceKind,
+  AgentEventSourceStatus,
   AgentInstanceRef,
   AgentLaunchContext,
   AgentLaunchPlan,
@@ -379,4 +381,96 @@ export function definePullEventSource(spec: PullEventSourceSpec): AgentEventSour
     probeActivity: spec.probeActivity,
     liveness: spec.liveness,
   };
+}
+
+// ============================================================================
+// What a caller is told about the machinery behind one pane (Issue #2054)
+// ============================================================================
+
+/**
+ * How long a heartbeat may be missing before the stream counts as stale.
+ *
+ * The same 30 s `OPENCODE_HEARTBEAT_TIMEOUT_MS` gives the watchdog that tears
+ * the connection down, and deliberately the same number rather than a second
+ * one tuned for display: a UI that called a stream `stale` before the transport
+ * agreed would blame the agent for a beat that was merely late, and one that
+ * called it `live` after the watchdog had already fired would contradict the
+ * reconnect happening underneath it. Asserted equal in
+ * `tests/unit/hooks/sources/opencode-liveness-2054.test.ts`, because the two
+ * constants live in modules that cannot import each other — `./define-source`
+ * is imported *by* `./opencode/source`, which is what owns the transport one.
+ */
+export const AGENT_SOURCE_STALE_AFTER_MS = 30_000;
+
+/**
+ * What a source says it is, before anything that happened to one pane (#2054).
+ *
+ * Read off two things the source already declares, so no tool has to be named
+ * and no existing implementer has to be edited to answer:
+ *
+ *  - `pull` is `sse` — the only pull transport is a subscription to the agent's
+ *    own server, which is what `sse` means.
+ *  - `push` with an empty `supportedEvents` is `scraper`. That is not a
+ *    heuristic: `createLegacyRelaySource` empties the list on purpose ("the
+ *    honest answer to 'what does this tool emit?' when nobody has measured it"),
+ *    and a tool on the compatibility relay has no structured reader — the frame
+ *    is all there is.
+ *  - every other `push` is `hooks`.
+ */
+export function declaredAgentSourceKind(source: AgentEventSource): AgentEventSourceKind {
+  if (source.transport === 'pull') return 'sse';
+  return source.capabilities.supportedEvents.length === 0 ? 'scraper' : 'hooks';
+}
+
+/**
+ * Fold a source's declaration together with one pane's liveness (Issue #2054).
+ *
+ * **The one place `structuredEvents.source.kind` and
+ * `CliToolSessionStatus.eventSource` are derived**, called by
+ * `lib/session/current-output-builder` and `lib/session/worktree-status-helper`
+ * so the header chip's tooltip and the roster's warning row cannot disagree
+ * about the same pane.
+ *
+ * ## Why a push source gets exactly one field
+ *
+ * `liveness` and `degradedReason` are omitted for anything that is not a
+ * subscription, and that is acceptance criterion 2 rather than tidiness: claude
+ * and codex answer `{ state: 'unknown' }` by construction (`definePushHookSource`
+ * — "a hook that has not fired and an agent that has died look the same"), so
+ * publishing `liveness: 'stale'` for them would turn an unmeasurable into a
+ * warning on every pane in the app. The surfaces render the extra two fields or
+ * nothing, so a push tool's chip is byte-identical to its pre-#2054 self.
+ *
+ * @param source - The registry's source for this tool
+ * @param liveness - `source.liveness(target)` for the pane being described
+ * @param now - Epoch ms to age `lastHeartbeatAt` against
+ */
+export function describeAgentEventSource(
+  source: AgentEventSource,
+  liveness: SourceLiveness,
+  now: number
+): AgentEventSourceStatus {
+  const declared = declaredAgentSourceKind(source);
+  if (declared !== 'sse') return { kind: declared };
+
+  switch (liveness.state) {
+    case 'live':
+      // Stale, not lost: the watchdog is about to fire and the reconnect will
+      // say so itself. Reported as the declared `sse` because the stream is
+      // still held — what the operator needs to know is that it went quiet, not
+      // that it is gone.
+      return now - liveness.lastHeartbeatAt >= AGENT_SOURCE_STALE_AFTER_MS
+        ? { kind: 'sse', liveness: 'stale', degradedReason: 'heartbeat_stale' }
+        : { kind: 'sse', liveness: 'live' };
+    case 'lost':
+      // The transport's own word for what went wrong, forwarded verbatim —
+      // `port_identity_changed` is the one Issue #2054 is written around, and
+      // inventing a display token here would hide every other one.
+      return { kind: 'scraper', liveness: 'stale', degradedReason: liveness.reason };
+    case 'unknown':
+      // A pull source with no subscription: no port was assigned, hook injection
+      // is off, or the pane predates the feature. All three mean the frame is
+      // the only reader, which is what `scraper` says.
+      return { kind: 'scraper', degradedReason: 'not_subscribed' };
+  }
 }

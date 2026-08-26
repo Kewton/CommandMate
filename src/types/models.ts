@@ -109,6 +109,37 @@ export interface SessionWaitingDetail {
 }
 
 /**
+ * What is reading one agent pane besides the terminal frame (Issue #2054).
+ *
+ * Client mirror of `AgentEventSourceStatus` in `lib/hooks/sources/types.ts`.
+ * Declared here rather than imported for the mechanical reason the agent-session
+ * views give: that module's graph reaches `fs` through the sources it defines,
+ * so a `'use client'` component cannot import it.
+ *
+ * **Published for opencode and nothing else today.** Every push (hook) tool
+ * answers "unknown" by construction — a hook that has not fired and an agent
+ * that has died look identical — so the server omits the whole object for them
+ * and every surface that renders it renders nothing. That is what keeps the
+ * claude / codex header chips byte-identical to their pre-#2054 selves.
+ */
+export interface AgentEventSourceView {
+  /**
+   * `sse` — CommandMate holds the agent's own event stream.
+   * `hooks` — the agent posts events at CommandMate.
+   * `scraper` — nothing structured is left; the frame is the only reader.
+   */
+  kind?: 'sse' | 'hooks' | 'scraper';
+  /**
+   * Why the pane is not on the machinery its tool declares, as a token:
+   * `port_identity_changed` (another process took the port), `heartbeat_stale`,
+   * `not_subscribed`. Absent when nothing is degraded.
+   */
+  degradedReason?: string;
+  /** Whether the stream is beating. Absent for a source with no heartbeat. */
+  liveness?: 'live' | 'stale';
+}
+
+/**
  * Worktree representation
  */
 export interface Worktree {
@@ -192,6 +223,14 @@ export interface Worktree {
      * scrolled its banner out of tmux history. Render nothing when absent.
      */
     reasoningEffort?: string | null;
+    /**
+     * What is reading this instance besides the frame (Issue #2054), or absent.
+     *
+     * Absent is the ordinary state and means "nothing to say": the tool's source
+     * is a hook source, or the session is not running. See
+     * {@link AgentEventSourceView}.
+     */
+    eventSource?: AgentEventSourceView;
   } & SessionWaitingDetail>>;
   /** Whether this worktree is marked as favorite */
   favorite?: boolean;

@@ -878,13 +878,29 @@
     "subTabMessage": "Message",
     "subTabGit": "Git",
     "statusPillWithModel": "{label}: {status} — model {model}",
-    "statusPillWithUsage": "{base} — {usage}"
+    "statusPillWithUsage": "{base} — {usage}",
+    "statusPillWithSource": "{base} — {source}"
   },
   "detailStatus": {
     "idle": "Idle - No active session",
     "ready": "Ready - Waiting for input",
     "running": "Running - Processing",
     "waiting": "Waiting - User input required"
+  },
+  "agentSource": {
+    "line": "Events: {kind} ({state})",
+    "lineBare": "Events: {kind}",
+    "kindSse": "SSE",
+    "kindHooks": "hooks",
+    "kindScraper": "screen scrape",
+    "livenessLive": "connected",
+    "livenessStale": "stalled",
+    "reasonPortIdentityChanged": "another process took the port",
+    "reasonHeartbeatStale": "no heartbeat for over 30s",
+    "reasonNotSubscribed": "no event subscription",
+    "reasonOther": "reason: {reason}",
+    "degradedTitle": "Structured events are not arriving",
+    "healthyTitle": "Receiving structured events"
   },
   "agentModel": {
     "label": "Model",

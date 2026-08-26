@@ -78,6 +78,10 @@ const NO_STRUCTURED_EVENTS = {
   source: {
     cliToolId: 'claude',
     capabilities: getAgentEventSource('claude').capabilities,
+    // Issue #2054: the same shape the builder publishes for a push source —
+    // `hooks`, and neither of the two fields only a subscription can fill in.
+    kind: 'hooks',
+    probedActivity: null,
   },
 } as const;
 

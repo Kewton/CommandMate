@@ -573,6 +573,37 @@ export interface CurrentOutputResponse {
         eventIdentity: string | null;
         resync: string;
       };
+      /**
+       * Which machinery is speaking for this pane right now (Issue #2054).
+       *
+       * `sse` / `hooks` / `scraper` — **string-typed, and optional, for the two
+       * reasons the block above already gives.** A server newer than this CLI
+       * can name a transport this build has never heard of, and a server older
+       * than #2054 sends no `kind` at all; narrowing to the union would turn
+       * both into a parse failure on a payload the reader could otherwise print.
+       */
+      kind?: string;
+      /**
+       * Why this pane is not on the machinery its tool declares (Issue #2054).
+       *
+       * A token — `port_identity_changed`, `heartbeat_stale`, `not_subscribed`,
+       * or whatever the transport recorded. Absent when nothing is degraded, and
+       * absent on every push tool.
+       */
+      degradedReason?: string;
+      /** `live` / `stale`, or absent. Issue #2054, string-typed as above. */
+      liveness?: string;
+      /**
+       * What the source said about this instance's activity when its stream was
+       * last attached, or null (Issue #2054).
+       *
+       * A record of one instant — `at` is when it was asked — and not a live
+       * reading: `capture --json | jq '.structuredEvents.source.probedActivity'`
+       * answers "was the pane mid-turn when CommandMate connected?", which is a
+       * question the stream itself cannot answer until the turn ends. Null for
+       * every tool that is not a subscription source.
+       */
+      probedActivity?: { activity: string | null; at: number } | null;
     };
     /**
      * What the agent says about the conversation this instance is in, or null

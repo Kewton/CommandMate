@@ -47,6 +47,7 @@ import {
   getOpencodeLiveness,
   getOpencodePrimarySession,
   isOpencodeSubscribed,
+  recordOpencodeProbedActivity,
   watchOpencodeSessionIdle,
 } from './subscription';
 
@@ -174,11 +175,13 @@ export async function attachOpencodeEventStream(target: AgentInstanceRef): Promi
     await opencodeAgentEventSource.subscribe(target, (event) => {
       void ingestOpencodeEvent(target, event);
     });
+    const activity = await probeAttachedActivity(target);
     logger.info('opencode-event-stream-attached', {
       worktreeId: target.worktreeId,
       instanceId: target.instanceId ?? target.cliToolId,
       port,
       version: health.version,
+      activity,
     });
     return true;
   } catch (error) {
@@ -188,6 +191,57 @@ export async function attachOpencodeEventStream(target: AgentInstanceRef): Promi
     });
     return false;
   }
+}
+
+/**
+ * Re-read whether the conversation is working, right after a stream attaches
+ * (Issue #2054).
+ *
+ * **The first production caller of `AgentEventSource.probeActivity`.** The
+ * method has existed since Phase 4-1 (#1759) with nothing but its own definition
+ * reading it, and this is the gap it was written for: a stream that opens in the
+ * middle of a turn delivers its first frame when that turn *ends*, so between
+ * {@link attachOpencodeEventStream} and the next `session.idle` — which on a
+ * long turn is minutes — CommandMate has no answer to "is this pane working
+ * right now?" except the screen. `GET /session/status` has the answer and this
+ * is the one call that asks it.
+ *
+ * Deliberately **through the source interface** rather than through
+ * `client.fetchOpencodeActivity`, which this module could import directly. Three
+ * call sites already read `getOpencodeLiveness` directly and Issue #2054's
+ * instruction was not to add a fourth of anything; going through the registered
+ * source also means the port lookup, the "no port assigned" null and the request
+ * timeout are the source's business rather than a second copy of them here.
+ *
+ * Not the same read as `subscription.recoverTurnState`, and it does not replace
+ * it: that one is per *session* and re-arms the turn gate, this one is the
+ * instance-level aggregate the surfaces can render. Both go through the single
+ * reader in `./client`.
+ *
+ * Never throws and never blocks the attach for long — one loopback request
+ * against a server whose health probe has just succeeded, capped by
+ * `OPENCODE_REQUEST_TIMEOUT_MS`.
+ *
+ * @param target - The instance whose stream has just been attached
+ * @returns The answer, or null when the source could not be asked
+ */
+async function probeAttachedActivity(
+  target: AgentInstanceRef
+): Promise<'busy' | 'idle' | null> {
+  let activity: 'busy' | 'idle' | null = null;
+  try {
+    activity = await opencodeAgentEventSource.probeActivity(target);
+  } catch (error) {
+    // A probe that throws is a probe that did not answer, which is what null
+    // already means. The attach itself succeeded and must not be undone by it.
+    logger.debug('opencode-activity-probe-failed', {
+      worktreeId: target.worktreeId,
+      instanceId: target.instanceId ?? target.cliToolId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+  recordOpencodeProbedActivity(target, activity, Date.now());
+  return activity;
 }
 
 /**

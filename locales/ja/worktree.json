@@ -878,13 +878,29 @@
     "subTabMessage": "メッセージ",
     "subTabGit": "Git",
     "statusPillWithModel": "{label}: {status} — モデル {model}",
-    "statusPillWithUsage": "{base} — {usage}"
+    "statusPillWithUsage": "{base} — {usage}",
+    "statusPillWithSource": "{base} — {source}"
   },
   "detailStatus": {
     "idle": "アイドル - セッションなし",
     "ready": "準備完了 - 入力待ち",
     "running": "実行中 - 処理しています",
     "waiting": "待機中 - ユーザー入力が必要です"
+  },
+  "agentSource": {
+    "line": "イベント源: {kind}（{state}）",
+    "lineBare": "イベント源: {kind}",
+    "kindSse": "SSE",
+    "kindHooks": "hooks",
+    "kindScraper": "画面スクレイプ",
+    "livenessLive": "接続中",
+    "livenessStale": "停止",
+    "reasonPortIdentityChanged": "ポートが別プロセスに変わりました",
+    "reasonHeartbeatStale": "ハートビートが30秒以上ありません",
+    "reasonNotSubscribed": "イベント購読なし",
+    "reasonOther": "理由: {reason}",
+    "degradedTitle": "構造化イベントが届いていません",
+    "healthyTitle": "構造化イベントを受信中"
   },
   "agentModel": {
     "label": "モデル",
