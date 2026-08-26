@@ -3600,3 +3600,281 @@ mtime が検証開始前と同一であることを確認した。**ユーザー
 - `src/app/worktrees/[id]/terminal/page.tsx` — 未リンクページのツール一覧に opencode
 - `locales/{en,ja}/worktree.json` — `opencodeQuickKeys`
 - `tests/fixtures/opencode-live-2046/**` — 10 フレーム ＋ 採取手順の README
+
+---
+
+## 23. Issue 2051: 共有リンク（`/share`）と `export --sanitize`（opencode 1.18.22 / 2026-08-26）
+
+### 23.1 計測環境と隔離の確認
+
+§4 のハーネスをそのまま使用。scratchpad は
+`…/commandmate-issue-2051/…/scratchpad/oc2051`、`HOME` を `$SP/home` に差し替え、
+`auth.json` は mode 600 で複製（計測後に削除済み）。ポートは 4877 / 4878 / 4879 / 4880。
+
+`GET /path` で隔離を確認済み（`home` / `state` / `config` / `worktree` / `directory` が
+すべて scratchpad 配下）。TUI のモデルピッカーは一度も開いていない（config で
+`github-copilot/claude-sonnet-4.6` に固定）。実 tmux は使っていない。
+
+> **計測中に起きた事故と回避 —— 記録しておく価値がある。**
+> 最初 4851 → 4852 とポートを移した際、**4852 は並行ワーカー #2052 が先に掴んでいた。**
+> 起動時の `lsof` では空いていたが、その後に #2052 が bind した。こちらの
+> `opencode serve --port 4852` は `ServeError` で即死し、以降の `curl` は**すべて #2052 の
+> サーバに届いていた**（`GET /session` に #2052 のセッションが並んで発覚）。
+> その間に `POST /session/<自分の sid>/share` を 1 回撃っているが、#2052 のサーバには
+> その session が無いため **404 で何も公開されていない**。
+> 以後は毎回 `GET /path` の `home` が自分の scratchpad と一致することを**確認してから**
+> 計測する guard スクリプトを噛ませた。**§4 の「`GET /path` で確認する」は
+> 単なる初期チェックではなく、毎回のゲートとして使うべき。**
+
+### 23.2 ルートの実在（一次証拠は `GET /doc`）
+
+`GET /doc` は 478,742 bytes の OpenAPI 3.1.0。`share` / `export` を含むパスは **2 本だけ**。
+
+| method | path | operationId | requestBody | 200 |
+|---|---|---|---|---|
+| `POST` | `/session/{sessionID}/share` | `session.share` | **なし（`requestBody: null`）** | `Session` |
+| `DELETE` | `/session/{sessionID}/share` | `session.unshare` | **なし** | `Session` |
+
+- **`/unshare` というルートは存在しない。** 取り消しは同じパスへの `DELETE`。
+- **`/export` という HTTP ルートは存在しない。** `export` は CLI だけの機能。
+- 400 / 404 / 500 のレスポンススキーマは両方に定義されている。
+
+`Session` スキーマの `share` は `{"type":"object","properties":{"url":{"type":"string"}},"required":["url"],"additionalProperties":false}`。
+
+### 23.3 `GET /config` の `share`
+
+OpenAPI の `Config.share`:
+
+```json
+{"type": "string", "enum": ["manual", "auto", "disabled"]}
+```
+
+**Issue 本文の `share: disabled` という綴りは値としては正しい。** ただし実測で重要な点が 2 つ。
+
+1. **設定していなければ `GET /config` に `share` キーは現れない。**
+   config に `share` を書いていないサーバの `/config`（実測、逐語）:
+   ```json
+   {"$schema":"https://opencode.ai/config.json","command":{},"plugin":[],
+    "model":"github-copilot/claude-sonnet-4.6","username":"maenokota","mode":{},"agent":{}}
+   ```
+   `"share": "disabled"` を書いたサーバの `/config`（実測、逐語）:
+   ```json
+   {"$schema":"https://opencode.ai/config.json","command":{},"plugin":[],"share":"disabled",
+    "model":"github-copilot/claude-sonnet-4.6","username":"maenokota","mode":{},"agent":{}}
+   ```
+   → **「キー不在」と「`disabled`」は別の状態。**同一視すると既定インストールの全ユーザで
+   ボタンが消える。実装のゲートは `=== 'disabled'` のみ。
+
+2. **`share: "disabled"` での `POST /share` は 4xx ではなく HTTP 500。**
+   ```
+   HTTP 500
+   {"name":"UnknownError","data":{"message":"Unexpected server error. Check server logs for details.","ref":"err_b14ff12c"}}
+   ```
+   本当の理由はサーバ側ログにしか出ない:
+   ```
+   level=ERROR ref=err_b14ff12c error="Error: Sharing is disabled in configuration"
+   ```
+   → **レスポンスからは他の 500 と区別できない。**「撃ってから謝る」ができないので、
+   **UI 側で `GET /config` を先に見て出し分けるしかない。**Issue の受入条件
+   「`share` が無効な設定でボタンが出ない」は、この制約から必然的にそうなる。
+
+> **未計測（推測で埋めていない）**: `share` キーが**不在**のときの opencode の既定挙動。
+> これを確かめるには実際に `POST /share` を撃つ必要があり、ユーザ承認の範囲
+> （使い捨てセッション 1 件の発行→即取消）を超えるため実施していない。
+> 実装は「`disabled` 以外は試させる」側に倒してある（確認ダイアログが手前にあり、
+> 失敗しても読めるエラーになるだけ）。
+
+### 23.4 発行 → 取り消しの実測（ユーザ承認のもとで 1 回だけ）
+
+**公開したのは使い捨てセッション 1 件のみ。** §4 の隔離 HOME 内、`$SP/clean`
+（`git init` と空の `.gitkeep` だけのディレクトリ）で新規作成し、会話は次の 2 行だけ。
+ツール呼び出しゼロ、リポジトリ内容・実ファイルパス・環境変数は 1 文字も入れていない。
+
+```
+user      : Reply with exactly this token and nothing else. Use no tools. Do not mention or
+            describe any file, path, directory, or workspace. Token: SHARE-PROBE-2051-39ef43682d527af1
+assistant : SHARE-PROBE-2051-39ef43682d527af1
+```
+
+> 最初 `$SP/work` で作ったセッションは、応答が `README.md` / `secrets.env` という
+> ワークディレクトリのファイル名に言及した（opencode がディレクトリ一覧を
+> システムプロンプトに載せるため）。**それは公開せず**、空ディレクトリで作り直した。
+
+| # | 操作 | 結果（実測） |
+|---|---|---|
+| 1 | `POST /session/:id/share` | `HTTP 200`、`share: {"url":"https://opncd.ai/share/jJBtxFhy"}` |
+| 2 | `GET https://opncd.ai/share/jJBtxFhy` | `HTTP 200` / 7,088 bytes、**会話が伏せ字なしで載っている** |
+| 3 | `DELETE /session/:id/share` | `HTTP 200`。ただし**レスポンスの `share` は元の URL のまま** |
+| 4 | `GET https://opncd.ai/share/jJBtxFhy` | **`HTTP 200`** / 3,855 bytes、本文は `OpenCode Not Found`。会話は消えている |
+| 5 | `GET /session/:id` | **`share: {"url":"https://opncd.ai/share/jJBtxFhy"}` が残る** |
+| 6 | サーバ再起動後 `GET /session/:id` | **同上。永続化されている** |
+
+**URL の綴りは `https://opncd.ai/share/<sessionID の末尾 8 文字>`。**
+`ses_fc35f3dadffe2uirJpjJBtxFhy` → `https://opncd.ai/share/jJBtxFhy`。
+**Issue 本文の `opncd.ai/s/<id>` は 1.18.22 には存在しない。**
+
+これから出る実装上の制約が 3 つある。
+
+- **受入条件「取り消しでリンクが 404 になる」は、HTTP ステータスとしては満たされない。**
+  取り消し後もステータスは **200** のままで、`Not Found` は SolidJS 製 SPA が
+  クライアント側で描画する画面。**「URL を fetch して 404 かどうか」で取り消しを
+  検証してはいけない。**内容としては消えている（マーカー・パスとも 0 件）ので、
+  受入条件の意図（リンクが死ぬ）は満たされている。
+- **`session.share` は「いま公開中か」ではなく「かつて公開したことがあるか」。**
+  `DELETE` 後も残り、再起動しても残る。UI がこれを現在状態として読むと、
+  取り消し済みのページを永久に「公開中」と表示する。API ルートはこの値を
+  `lastShareUrl` という名前で返し、`DELETE` のレスポンスには**含めない**。
+- **公開ページは伏せ字ではない。** ページ HTML には会話本文に加えて
+  セッションの `directory`（絶対パス）と provider の `username` が入っていた。
+  実測での該当箇所（逐語、抜粋）:
+  ```
+  …/scratchpad/oc2051/clean",path:"",title:"SHARE-PROBE-2051-39ef43682d527af1",agent:"build",…
+  ```
+  → **`export --sanitize` とは正反対の性質。**確認ダイアログの文面は
+  「第三者が読める」だけでなく「伏せ字にならない」ことまで書いてある。
+
+#### 23.4.1 後始末（公開物ゼロの確認）
+
+- 取り消し後の `https://opncd.ai/share/jJBtxFhy` は `OpenCode Not Found`。
+  マーカー `SHARE-PROBE-2051` **0 件**、`scratchpad` **0 件**。
+- 隔離 DB の全セッションを走査し、**他に `share` が付いたセッションは 1 件も無い**
+  （`EXPORT-PROBE-2051` と最初の `SHARE-PROBE-2051` はいずれも `share: null`）。
+- **公開したまま残っているものは無い。**
+- `auth.json` は削除済み。ユーザ実 HOME の `~/.local/share/opencode/opencode.db` は
+  mtime が計測前（8月25日 14:16）のまま＝**汚していない**。
+
+### 23.5 `opencode export --sanitize` が落とすもの / 落とさないもの
+
+`opencode export --help`（実測）:
+
+```
+opencode export [sessionID]        export session data as JSON
+  --sanitize    redact sensitive transcript and file data
+```
+
+計測は「最大限漏れる」セッションを作って行った: プロンプトにインラインのパスワードを含め、
+`read` ツールで鍵らしき文字列を並べたファイルを読ませた 2 ターン。
+素の `export`（8,335 bytes）と `--sanitize`（6,490 bytes）を diff した。
+
+#### 落とすもの
+
+| フィールド | sanitize 後の値 |
+|---|---|
+| `info.directory` | `[redacted:session-directory:<sessionID>]` |
+| `info.title` | `[redacted:session-title:<sessionID>]` |
+| `messages[].info.path.cwd` / `.root` | `[redacted:cwd:<messageID>]` / `[redacted:root:<messageID>]` |
+| `messages[].parts[].text` | `[redacted:text:<partID>]` —— **利用者の発話もエージェントの応答も両方** |
+| `messages[].parts[].snapshot` | `[redacted:snapshot:<partID>]` |
+| `messages[].parts[].state.output` | `[redacted:tool-output:<partID>]` |
+| `messages[].parts[].state.title` | `[redacted:tool-title:<partID>]` |
+| `messages[].parts[].state.input` | オブジェクトごと `{ "redacted": "tool-input:<partID>" }` に置換 |
+| `messages[].parts[].state.metadata` | オブジェクトごと `{ "redacted": "tool-state-metadata:<partID>" }` に置換 |
+| `messages[].parts[].metadata` | オブジェクトごと `{ "redacted": "tool-metadata:<partID>" }` に置換 |
+
+needle での裏取り（素 → sanitize 後の出現回数）:
+
+| needle | 素 | sanitize 後 |
+|---|---:|---:|
+| `AKIAIOSFODNN7EXAMPLE` | 3 | **0** |
+| `hunter2`（プロンプト内とファイル内の両方） | 4 | **0** |
+| `ghp_EXAMPLE…` | 3 | **0** |
+| `secrets.env`（読んだファイル名） | 5 | **0** |
+| `maenokota`（利用者名） | 8 | **0** |
+| `scratchpad`（パス断片） | 8 | **0** |
+| `4 lines`（エージェントの応答本文） | 2 | **0** |
+
+#### 落とさないもの
+
+各種 ID（`session` / `message` / `part` / `callID`）・`slug`・`projectID`・`path`・
+`agent`・`model.id` / `model.providerID` / `model.variant`・`version`・
+全タイムスタンプ・全トークン数・`cost`・`finish`・`state.status`・各 part の `type`・
+差分の `summary`（`files` / `additions` / `deletions`）、そして **ツール名**（`"read"`）。
+
+#### 判断（「sanitize と付いているから安全」で通していない）
+
+**もっとも重要な帰結: sanitize 済み JSON には会話が 1 文字も残らない。**
+これは「伏せ字にした議事録」ではなく「セッションの形の記録」——
+何ターンか、どのツールを使ったか、いくら掛かったか、どれだけ時間が掛かったか。
+日次レポート / PR に添付する価値はあるが、**「トランスクリプトの添付」ではない**ので、
+実装は生 JSON を貼らず**要約表**にしている（生 JSON を貼っても大半が
+`[redacted:…]` トークンで情報量が無い）。
+
+落ちないもののうち、添付可否の判断が要ったのは 2 点。
+
+- **`projectID`**（実測値 `44b7340824bf1a0288c09e245d71c357a85f2afb`）は
+  **作業ディレクトリの絶対パスから導出されたハッシュ**。復元はできないが、
+  同一チェックアウトを指す安定した指紋にはなる。日次レポートも PR も元々
+  リポジトリを明示しているので開示にあたらないと判断し、**残す**。
+- **ツール名**は作業の性質（`read` / `bash` / `edit`）を表す。同じ理由で**残す**。
+  要約の価値のほとんどがここにある。
+
+いずれも「落ちないことに気づかず残った」のではなく、**気づいたうえで残している**。
+`auditOpencodeExportRedaction()` は上表の全フィールドを毎回検査し、
+1 つでも素のテキストが残っていれば**その export を捨てる**（レポートの行が減る）。
+
+#### CLI の挙動（実装が踏んではいけない罠）
+
+| 呼び方 | 実測 |
+|---|---|
+| `opencode export <sessionID>` | exit 0。stdout は純粋な JSON |
+| `opencode export --sanitize <sessionID>` | 同上 |
+| **`opencode export`（ID なし）** | **失敗しない。対話ピッカーを開いて止まる**（3 分で打ち切り） |
+| `opencode export <存在しない ID>` | exit 1 / stdout 空 / stderr に `Error: Session not found: <id>` |
+| 別プロジェクトの session を他ディレクトリから | **exit 0。ID だけで解決する**（cwd に依存しない） |
+
+進捗行 `Exporting session: <id>` は **stderr**。stdout はそのまま JSON として読める。
+
+### 23.6 実装（Issue #2051）
+
+| ファイル | 役割 |
+|---|---|
+| `src/types/opencode-share.ts` | `share` モードの語彙と読み取り、URL の検証、`OpencodeShareState` |
+| `src/types/opencode-export.ts` | sanitize 済み export の要約と**伏せ字監査** |
+| `src/lib/hooks/sources/opencode/client.ts` | `fetchOpencodeShareMode` / `shareOpencodeSession` / `unshareOpencodeSession` / `fetchOpencodeSessionShareUrl`（末尾に追記） |
+| `src/app/api/worktrees/[id]/opencode/share/route.ts` | `GET`（出し分け）/ `POST`（公開）/ `DELETE`（取り消し） |
+| `src/components/worktree/OpencodeSessionControls.tsx` | 共有ボタン＋確認ダイアログ＋発行後の URL 表示と取り消し |
+| `src/lib/daily-summary-generator.ts` | `opencode export --sanitize` の要約節 |
+| `.claude/commands/create-pr.md` | Phase 4-2（添付手順と、貼ってはいけないもの） |
+| `locales/{ja,en}/worktree.json` | `worktree.opencodeSession.*`（#2038 の直書きラベルもここへ移した） |
+| `tests/fixtures/opencode-share-2051/export-sanitized.json` | 実測の sanitize 済み export（needle 0 件を確認済み） |
+
+### 23.6.1 実装で踏んだ罠: レポート生成の spawn が実 HOME に届く
+
+`generateDailySummary` に足した step 6.6 は、当日の台帳にある opencode セッションごとに
+`opencode export --sanitize` を **spawn** する。ところが既存の
+`tests/unit/lib/daily-summary-opencode-cost-2044.test.ts` は
+`cliToolId: 'opencode'` の台帳行を撒いて `generateDailySummary` を呼ぶのに
+`child_process` をモックしていない。結果、**`npm run test:unit` が
+利用者の実 `$HOME` に対して opencode を起動し、`~/.local/share/opencode/opencode.db` を
+読み書きした**（実測: db / `-wal` / `-shm` の mtime が unit 実行時刻に更新される。
+`log/opencode.log` は更新されないのでセッションは走っていない＝
+`export` が DB を開いて `Session not found` で exit 1 しただけ）。
+
+**テストは緑のまま**だった —— export は失敗し、こちらのコードは `null` を返し、
+節が出ないだけなので既存 assert は何も壊れない。**赤にならない副作用**なので、
+db の mtime を見に行かなければ気づかない類のもの。
+
+対処:
+
+- 2044 のテストで `child_process` をモックし、`opencode export` が
+  「そのセッションは無い」と答える形にした。修正後、同テストを回しても
+  実 db の mtime は動かないことを確認済み。
+- 同時に本番側にも `OPENCODE_EXPORT_TOTAL_BUDGET_MS = 90_000` を入れた。
+  1 回あたりのタイムアウトは 30s なので、上限 20 セッションが全部タイムアウトすると
+  **本文生成が終わったあとのレポートに 10 分積み増す**。節は任意なのでその代償は
+  釣り合わない。予算切れ分は `skipped` に合算して節に明記する。
+
+なお `opencode --version` は DB を作らない（空 HOME で実測。`Library/Caches/bun` しか作らない）。
+DB を開くのは `export` のように実際にセッションを引くサブコマンド。
+
+### 23.7 Issue 本文と実測の食い違い
+
+| Issue 本文 | 実測 |
+|---|---|
+| `opncd.ai/s/<id>` を発行 | `https://opncd.ai/share/<sessionID の末尾 8 文字>` |
+| `GET /config` の `share: disabled` を尊重 | 綴りは正しいが、**未設定時はキー自体が無い**。`disabled` と同一視してはいけない |
+| 発行 → 取り消しでリンクが **404** になる | 内容は消えるが **HTTP ステータスは 200 のまま**（`Not Found` は SPA 描画） |
+| （言及なし） | `DELETE` 後も `session.share` が**永続的に残る** |
+| （言及なし） | `share: disabled` での `POST` は**コードなしの HTTP 500** |
+| （言及なし） | 公開ページは**伏せ字なし**（会話・絶対パス・利用者名） |
+| `/share` `/unshare` `/export` | HTTP ルートは `POST` / `DELETE /session/:id/share` の **2 本だけ**。`export` は CLI 専用 |

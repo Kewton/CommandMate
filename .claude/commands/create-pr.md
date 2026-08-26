@@ -155,6 +155,67 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 
 ---
 
+### Phase 4-2: opencode セッションの添付（任意 / opencode を使った場合のみ）
+
+このブランチの作業を **opencode** で進めた場合、その作業の「かたち」を PR に添付できる。
+opencode 1.18.22 で実測した内容にもとづく手順なので、そのとおりに実行すること
+（記録: `docs/design/opencode-server-live-verification.md` §23）。
+
+#### 4-2-1. セッション ID を得る
+
+```bash
+# CommandMate が覚えている opencode セッション（worktree ごと）
+curl -sS "http://127.0.0.1:${CM_PORT:-3000}/api/worktrees/<worktree-id>/opencode/session" | jq -r '.instances[].sessionId'
+```
+
+#### 4-2-2. sanitize した JSON を取り出す
+
+```bash
+opencode export --sanitize <sessionID> > /tmp/opencode-session.json
+```
+
+**必ず `<sessionID>` を渡すこと。** 実測: 引数なしの `opencode export` は失敗せず、
+対話ピッカーを開いて**そのまま止まる**。存在しない ID は exit 1・stdout 空・
+stderr に `Error: Session not found: <id>`。進捗行 `Exporting session: <id>` は
+**stderr** に出るので、stdout はそのまま JSON として読める。
+
+#### 4-2-3. `--sanitize` が落とすもの / 落とさないもの（実測）
+
+**落とす**（すべて `[redacted:…]` に置換される）:
+`info.directory` / `info.title` / `messages[].info.path.cwd` / `.root` /
+`messages[].parts[].text`（**利用者の発話もエージェントの応答も両方**）/
+`parts[].snapshot` / `parts[].state.output` / `parts[].state.title` /
+`parts[].state.input` / `parts[].state.metadata` / `parts[].metadata`。
+
+**落とさない**:
+各種 ID（session / message / part / `callID`）・`slug`・`projectID`・`agent`・
+`model.id` / `providerID` / `variant`・`version`・全タイムスタンプ・全トークン数・
+コスト・`finish`・`state.status`・各 part の `type`・差分の `summary` 件数、そして
+**ツール名**（`read` など）。
+
+つまり **sanitize 済み JSON に会話は 1 文字も残らない。** これは「伏せ字にした議事録」
+ではなく「セッションの形（何ターン・どのツール・いくら・どれだけ掛かったか）の記録」である。
+PR に貼るなら**その前提で貼ること** — 生 JSON を貼っても大半は伏せ字トークンで情報量が無い。
+日次レポートの `## opencode session transcripts (sanitized)` 節と同じ要約表にするのが望ましい。
+
+判断が要った 2 点:
+
+- `projectID` は**作業ディレクトリの絶対パスから導出されたハッシュ**。復元はできないが
+  同一チェックアウトを指す安定した指紋にはなる。PR は元々リポジトリ名を明示しているので
+  開示にはあたらないと判断し、残している。
+- **ツール名**も同じ判断で残している（要約の価値のほとんどがここにある）。
+
+#### 4-2-4. 貼らないもの
+
+- `opencode export`（`--sanitize` なし）の出力は **PR に貼らないこと。** 実測で、
+  会話本文・読んだファイルの中身・絶対パス・利用者名がそのまま入る。
+- `POST /session/:id/share` が発行する `https://opncd.ai/share/…` の URL も
+  **PR には貼らないこと。** 実測で、公開ページは会話を**伏せ字なしで**載せる
+  （プロンプト・応答・セッションの絶対パス）。共有は UI の確認ダイアログを通した
+  意図的な操作としてのみ行う。
+
+---
+
 ### Phase 5: PR作成実行
 
 #### 5-1. PR作成コマンド実行
