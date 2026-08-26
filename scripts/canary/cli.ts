@@ -6,7 +6,18 @@
  * without tmux or a Claude session.
  */
 
+import { CANARY_TOOL_IDS, DEFAULT_CANARY_TOOL } from './tool-profiles';
+import type { CanaryToolId } from './types';
+
 export interface CanaryOptions {
+  /**
+   * Which CLI to drive (Issue #2050).
+   *
+   * A run drives exactly one tool: the throwaway HOME, the pane geometry, the
+   * readiness row and the launch flags all differ per tool, so mixing them in
+   * one run would mean tearing the harness down and rebuilding it mid-flight.
+   */
+  tool: CanaryToolId;
   /** Run only these scenario ids. */
   only: string[];
   /** Skip these scenario ids. */
@@ -32,6 +43,16 @@ export interface CanaryOptions {
    * wrong predicate does not test what they are for — a wrong reply does.
    */
   mutateVerdict: boolean;
+  /**
+   * Turn a version drift into a non-zero exit (Issue #2050).
+   *
+   * The canary always REPORTS whether the tool's `verifiedAgainst` stamp still
+   * names the installed build; this makes that report fail the run. Off by
+   * default because a drift is not by itself a detection regression — the day
+   * opencode ships 1.18.23 every scenario may still be green, and a canary that
+   * goes red for a version bump alone teaches its operator to ignore it.
+   */
+  strictVersion: boolean;
   /** Print the scenario table and exit. */
   list: boolean;
   /** Print help and exit. */
@@ -39,12 +60,14 @@ export interface CanaryOptions {
 }
 
 export const DEFAULT_OPTIONS: CanaryOptions = {
+  tool: DEFAULT_CANARY_TOOL,
   only: [],
   skip: [],
   json: false,
   keep: false,
   mutate: false,
   mutateVerdict: false,
+  strictVersion: false,
   list: false,
   help: false,
 };
@@ -69,6 +92,17 @@ export function parseArgs(argv: readonly string[]): CanaryOptions {
     const takeValue = (): string | undefined => (inlineValue !== undefined ? inlineValue : argv[++i]);
 
     switch (flag) {
+      case '--tool': {
+        const value = takeValue();
+        if (!value) throw new Error('canary: --tool needs a tool id');
+        if (!(CANARY_TOOL_IDS as readonly string[]).includes(value)) {
+          throw new Error(
+            `canary: unknown tool "${value}" (known: ${CANARY_TOOL_IDS.join(', ')})`
+          );
+        }
+        options.tool = value as CanaryToolId;
+        break;
+      }
       case '--only':
         options.only.push(...parseIdList(takeValue(), '--only'));
         break;
@@ -86,6 +120,9 @@ export function parseArgs(argv: readonly string[]): CanaryOptions {
         break;
       case '--mutate-verdict':
         options.mutateVerdict = true;
+        break;
+      case '--strict-version':
+        options.strictVersion = true;
         break;
       case '--list':
         options.list = true;
@@ -112,13 +149,15 @@ export function parseArgs(argv: readonly string[]): CanaryOptions {
 }
 
 export function formatHelp(scenarioIds: readonly string[]): string {
-  return `Detection canary — drives a real Claude Code TUI and asserts what the
-detection layer concludes about each frame (Issue #1727).
+  return `Detection canary — drives a real agent CLI and asserts what the
+detection layer concludes about each frame (Issue #1727, opencode in #2050).
 
 Usage:
   npm run canary [-- <options>]
 
 Options:
+  --tool <id>    CLI to drive: ${CANARY_TOOL_IDS.join(' | ')} (default ${DEFAULT_CANARY_TOOL}).
+                 A run drives one tool; the scenario list is filtered to it.
   --only <ids>   Run only these scenarios (comma-separated)
   --skip <ids>   Skip these scenarios (comma-separated)
   --list         Print the scenario table and exit
@@ -131,11 +170,17 @@ Options:
                  answers the OPPOSITE verdict (allow becomes {} and back), with
                  the real expectations left in place. A healthy harness fails
                  every hook scenario; the others are skipped.
+  --strict-version
+                 Exit non-zero when the installed CLI is newer than the build
+                 the detector rules were read off (tools/verified-against.ts).
+                 The drift is reported either way.
   -h, --help     Show this help
 
 Scenarios: ${scenarioIds.join(', ')}
 
-Requires: tmux >= 3.2, a working \`claude\` on PATH, and Claude auth
-(CLAUDE_CODE_OAUTH_TOKEN / ANTHROPIC_API_KEY, or the macOS keychain).
+Requires: tmux >= 3.2 and the tool on PATH.
+  claude   — auth via CLAUDE_CODE_OAUTH_TOKEN / ANTHROPIC_API_KEY, or the macOS keychain
+  opencode — auth via ~/.local/share/opencode/auth.json (\`opencode auth login\`);
+             CM_CANARY_OPENCODE_MODEL overrides the pinned model
 See docs/qa/detection-canary.md.`;
 }

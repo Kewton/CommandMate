@@ -1,10 +1,22 @@
 /**
- * Throwaway HOME for the detection canary (Issue #1727).
+ * Throwaway HOME for the detection canary (Issue #1727; per-tool since #2050).
  *
- * Scenario 4 opens Claude's `/model` overlay, which exists to WRITE the default
- * model into `~/.claude/settings.json`. So the canary runs every session against
+ * The `model-overlay` scenario opens Claude's `/model` overlay and
+ * `opencode-picker` opens opencode's `/models` chooser — both exist to WRITE the
+ * default model into the user's config. So the canary runs every session against
  * a temporary HOME that is deleted afterwards, and `guards.ts` verifies the real
  * one did not change.
+ *
+ * ## opencode resolves EVERYTHING from `$HOME`
+ *
+ * config (`~/.config/opencode`), state (`~/.local/state/opencode`) and data
+ * (`~/.local/share/opencode`, **including `opencode.db`**) — and it writes to
+ * `opencode.db` after a single session. Moving HOME is therefore not a nicety
+ * here, it is the only thing standing between the canary and the developer's
+ * real opencode database (方針書 `docs/design/opencode-server-live-verification.md`
+ * §4.1). The XDG variables are stripped from the child environment for the same
+ * reason: any one of them left set would point opencode back at the real dirs
+ * from inside the throwaway HOME.
  *
  * Auth inside an isolated HOME
  * ----------------------------
@@ -30,6 +42,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { assertIsolatedHome } from './guards';
+import type { CanaryToolId } from './types';
 
 const execFileAsync = promisify(execFile);
 
@@ -58,6 +71,15 @@ export const STRIPPED_ENV_VARS = [
   'TMUX',
   'TMUX_PANE',
   'TMUX_TMPDIR',
+  // Issue #2050: opencode resolves its config / state / data dirs from these
+  // before falling back to `$HOME`, so leaving one set would take the throwaway
+  // session straight back to the real `~/.local/share/opencode/opencode.db`.
+  'XDG_CONFIG_HOME',
+  'XDG_DATA_HOME',
+  'XDG_STATE_HOME',
+  'XDG_CACHE_HOME',
+  'OPENCODE_CONFIG',
+  'OPENCODE_CONFIG_CONTENT',
 ] as const;
 
 /**
@@ -170,7 +192,50 @@ export function assertCredentialUsable(payload: unknown, nowMs: number, minTtlMs
 /** How the throwaway session authenticates. */
 export type AuthSource =
   | { kind: 'env'; variable: string }
-  | { kind: 'keychain'; service: string };
+  | { kind: 'keychain'; service: string }
+  /** A credential file copied into the throwaway HOME (opencode, Issue #2050). */
+  | { kind: 'file'; path: string };
+
+/** Where opencode keeps its provider credentials, relative to `$HOME`. */
+export const OPENCODE_AUTH_RELATIVE_PATH = path.join('.local', 'share', 'opencode', 'auth.json');
+
+/** Where opencode reads its config from, relative to `$HOME`. */
+export const OPENCODE_CONFIG_RELATIVE_PATH = path.join('.config', 'opencode', 'opencode.jsonc');
+
+/**
+ * Model the throwaway opencode is pinned to.
+ *
+ * Pinned so the canary never has to OPEN the model chooser to get a working
+ * session — the chooser rewrites the default model, which is the whole reason
+ * `opencode-picker` escapes out of it instead of confirming. Overridable with
+ * `CM_CANARY_OPENCODE_MODEL` for a machine authenticated to a different
+ * provider; the value must be one the copied `auth.json` can actually serve, or
+ * opencode parks on its `Connect a provider` chooser and the run aborts with
+ * that overlay's hint.
+ */
+export const DEFAULT_OPENCODE_MODEL = 'github-copilot/claude-sonnet-4.6';
+
+/**
+ * Build the throwaway `opencode.jsonc`.
+ *
+ * Two settings, both of them statements about the canary rather than about what
+ * a CommandMate session gets:
+ *
+ * - `model` pins the provider so the chooser never has to be opened (above);
+ * - `permission` forces the approval dialog. Measured on opencode 1.18.22 with
+ *   opencode's own defaults: `ls -la` simply RAN and the turn completed, so the
+ *   `opencode-permission` scenario had nothing to capture. This is the exact
+ *   counterpart of claude's `--permission-mode manual` (#1847), which the canary
+ *   pins for the same reason — a default that answers for itself draws no
+ *   dialog, and the dialog is what branch A0 exists to read.
+ */
+export function buildOpenCodeSeedConfig(model: string): Record<string, unknown> {
+  return {
+    $schema: 'https://opencode.ai/config.json',
+    model,
+    permission: { bash: 'ask', edit: 'ask', webfetch: 'ask' },
+  };
+}
 
 export interface IsolatedHome {
   /** Absolute path of the throwaway HOME. */
@@ -210,7 +275,10 @@ function readRealClaudeConfig(realHome: string): Record<string, unknown> {
 
 export interface CreateIsolatedHomeOptions {
   realHome: string;
+  /** Which CLI this HOME is seeded for (Issue #2050). */
+  tool: CanaryToolId;
   scenarioIds: readonly string[];
+  /** The installed version, written into the tool's onboarding seed. */
   claudeVersion: string;
   parentEnv: NodeJS.ProcessEnv;
   /**
@@ -225,29 +293,19 @@ export interface CreateIsolatedHomeOptions {
 }
 
 /**
- * Create and seed the throwaway HOME.
+ * Seed the throwaway HOME for claude and resolve its auth (Issue #1727).
  *
- * The directory is created with 0700 under the OS temp dir and holds a copy of
- * the Claude credential, so it is deleted in `dispose()` (and by `--keep` only
- * when the developer explicitly asks to inspect it).
+ * @returns how the throwaway session will authenticate
+ * @throws when no usable credential is available; the caller removes `root`
  */
-export async function createIsolatedHome(options: CreateIsolatedHomeOptions): Promise<IsolatedHome> {
-  const now = options.now ?? Date.now;
-  const base = options.tmpDir ?? os.tmpdir();
-  // realpath matters: on macOS `os.tmpdir()` is /var/folders/... which is a
-  // symlink to /private/var/folders/.... Claude keys its per-project trust state
-  // by the RESOLVED path, so seeding `projects` with the symlinked path leaves
-  // the trust dialog waiting in front of every scenario.
-  const root = realpathSync(mkdtempSync(path.join(base, 'cmate-canary-home-')));
-  assertIsolatedHome(options.realHome, root);
-
+async function seedClaudeHome(
+  root: string,
+  options: CreateIsolatedHomeOptions,
+  workingDirectories: readonly string[],
+  now: () => number
+): Promise<AuthSource> {
   const claudeDir = path.join(root, '.claude');
   mkdirSync(claudeDir, { recursive: true, mode: 0o700 });
-
-  const workingDirectories = options.scenarioIds.map(id => path.join(root, 'work', id));
-  for (const dir of workingDirectories) {
-    mkdirSync(dir, { recursive: true, mode: 0o700 });
-  }
 
   const realConfig = readRealClaudeConfig(options.realHome);
   const seed = buildSeedConfig({
@@ -268,48 +326,123 @@ export async function createIsolatedHome(options: CreateIsolatedHomeOptions): Pr
     mode: 0o600,
   });
 
-  const env = sanitizeEnv(options.parentEnv, root);
-
-  let authSource: AuthSource | null = null;
   for (const variable of AUTH_ENV_VARS) {
-    if (options.parentEnv[variable]) {
-      authSource = { kind: 'env', variable };
-      break;
-    }
+    if (options.parentEnv[variable]) return { kind: 'env', variable };
   }
 
-  if (!authSource) {
-    if (process.platform !== 'darwin') {
-      throw new Error(
-        'canary: no Claude auth available. Set CLAUDE_CODE_OAUTH_TOKEN (`claude setup-token`) or ANTHROPIC_API_KEY before running.'
-      );
-    }
-    let raw: string;
-    try {
-      raw = await readKeychainCredential(KEYCHAIN_SERVICE);
-    } catch {
-      rmSync(root, { recursive: true, force: true });
-      throw new Error(
-        `canary: no Claude auth available — keychain item "${KEYCHAIN_SERVICE}" not found and no ` +
-          `CLAUDE_CODE_OAUTH_TOKEN / ANTHROPIC_API_KEY in the environment.`
-      );
-    }
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(raw);
-    } catch {
-      rmSync(root, { recursive: true, force: true });
-      throw new Error('canary: keychain credential is not JSON — refusing to copy it');
-    }
-    try {
-      assertCredentialUsable(parsed, now(), CREDENTIAL_MIN_TTL_MS);
-    } catch (error) {
-      rmSync(root, { recursive: true, force: true });
-      throw error;
-    }
-    writeFileSync(path.join(claudeDir, '.credentials.json'), `${raw}\n`, { mode: 0o600 });
-    authSource = { kind: 'keychain', service: KEYCHAIN_SERVICE };
+  if (process.platform !== 'darwin') {
+    throw new Error(
+      'canary: no Claude auth available. Set CLAUDE_CODE_OAUTH_TOKEN (`claude setup-token`) or ANTHROPIC_API_KEY before running.'
+    );
   }
+  let raw: string;
+  try {
+    raw = await readKeychainCredential(KEYCHAIN_SERVICE);
+  } catch {
+    throw new Error(
+      `canary: no Claude auth available — keychain item "${KEYCHAIN_SERVICE}" not found and no ` +
+        `CLAUDE_CODE_OAUTH_TOKEN / ANTHROPIC_API_KEY in the environment.`
+    );
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error('canary: keychain credential is not JSON — refusing to copy it');
+  }
+  assertCredentialUsable(parsed, now(), CREDENTIAL_MIN_TTL_MS);
+  writeFileSync(path.join(claudeDir, '.credentials.json'), `${raw}\n`, { mode: 0o600 });
+  return { kind: 'keychain', service: KEYCHAIN_SERVICE };
+}
+
+/**
+ * Seed the throwaway HOME for opencode and resolve its auth (Issue #2050).
+ *
+ * Follows 方針書 §4.1 step for step: copy `auth.json` at mode 600, pin the model
+ * and the permission mode in `~/.config/opencode/opencode.jsonc`, and make each
+ * scenario's working directory a git repository so opencode treats it as a
+ * project. There is no env-variable path — opencode reads provider credentials
+ * from `auth.json` and nothing else — so a machine that has never run
+ * `opencode auth login` is refused here rather than parking on the
+ * `Connect a provider` chooser 90 seconds later.
+ */
+async function seedOpenCodeHome(
+  root: string,
+  options: CreateIsolatedHomeOptions,
+  workingDirectories: readonly string[]
+): Promise<AuthSource> {
+  const realAuth = path.join(options.realHome, OPENCODE_AUTH_RELATIVE_PATH);
+  if (!existsSync(realAuth)) {
+    throw new Error(
+      `canary: no opencode credential to copy — ${realAuth} does not exist. ` +
+        `Run \`opencode auth login\` once, then re-run.`
+    );
+  }
+
+  const authTarget = path.join(root, OPENCODE_AUTH_RELATIVE_PATH);
+  const configTarget = path.join(root, OPENCODE_CONFIG_RELATIVE_PATH);
+  mkdirSync(path.dirname(authTarget), { recursive: true, mode: 0o700 });
+  mkdirSync(path.dirname(configTarget), { recursive: true, mode: 0o700 });
+
+  // Written rather than `copyFileSync`d so the mode is ours (600) and not the
+  // source file's, whatever that happens to be. The copy is deleted with the
+  // throwaway HOME in `dispose()`.
+  writeFileSync(authTarget, readFileSync(realAuth), { mode: 0o600 });
+
+  const model = options.model ?? DEFAULT_OPENCODE_MODEL;
+  writeFileSync(configTarget, `${JSON.stringify(buildOpenCodeSeedConfig(model), null, 2)}\n`, {
+    mode: 0o600,
+  });
+
+  for (const dir of workingDirectories) {
+    await execFileAsync('git', ['init', '-q'], { cwd: dir });
+    writeFileSync(path.join(dir, 'README.md'), 'canary\n', { mode: 0o600 });
+    await execFileAsync('git', ['add', '-A'], { cwd: dir });
+    await execFileAsync(
+      'git',
+      ['-c', 'user.email=canary@example.com', '-c', 'user.name=canary', 'commit', '-qm', 'init'],
+      { cwd: dir }
+    );
+  }
+
+  return { kind: 'file', path: authTarget };
+}
+
+/**
+ * Create and seed the throwaway HOME.
+ *
+ * The directory is created with 0700 under the OS temp dir and holds a copy of
+ * the tool's credential, so it is deleted in `dispose()` (and by `--keep` only
+ * when the developer explicitly asks to inspect it).
+ */
+export async function createIsolatedHome(options: CreateIsolatedHomeOptions): Promise<IsolatedHome> {
+  const now = options.now ?? Date.now;
+  const base = options.tmpDir ?? os.tmpdir();
+  // realpath matters: on macOS `os.tmpdir()` is /var/folders/... which is a
+  // symlink to /private/var/folders/.... Claude keys its per-project trust state
+  // by the RESOLVED path, so seeding `projects` with the symlinked path leaves
+  // the trust dialog waiting in front of every scenario.
+  const root = realpathSync(mkdtempSync(path.join(base, 'cmate-canary-home-')));
+  assertIsolatedHome(options.realHome, root);
+
+  const workingDirectories = options.scenarioIds.map(id => path.join(root, 'work', id));
+  for (const dir of workingDirectories) {
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+  }
+
+  let authSource: AuthSource;
+  try {
+    authSource =
+      options.tool === 'opencode'
+        ? await seedOpenCodeHome(root, options, workingDirectories)
+        : await seedClaudeHome(root, options, workingDirectories, now);
+  } catch (error) {
+    // Never leave a half-seeded HOME behind: it may already hold a credential.
+    rmSync(root, { recursive: true, force: true });
+    throw error;
+  }
+
+  const env = sanitizeEnv(options.parentEnv, root);
 
   return {
     root,
@@ -320,7 +453,7 @@ export async function createIsolatedHome(options: CreateIsolatedHomeOptions): Pr
     },
     dispose(): void {
       assertIsolatedHome(options.realHome, root);
-      // Retries matter: the `claude` processes are killed a moment earlier and
+      // Retries matter: the tool's processes are killed a moment earlier and
       // can still be flushing state into HOME while the tree is being removed,
       // which otherwise leaves an empty directory (or a raced ENOTEMPTY) behind.
       rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
