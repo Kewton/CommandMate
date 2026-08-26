@@ -18,8 +18,9 @@
  * via next-intl's `createTranslator`: this module is compiled to CommonJS for
  * `dist/server` (what `npm start` runs) and next-intl is ESM-only, so importing
  * it here would `require()` an ES module — fatal below Node 22.12, which our
- * `engines: ">=22.0.0"` still admits. These four strings only ever substitute
- * `{excerpt}`, so a dependency-free replace covers them.
+ * `engines: ">=22.0.0"` still admits. The bodies only ever substitute a handful
+ * of named placeholders — `{excerpt}`, `{minutes}` (#1790), `{agent}` /
+ * `{version}` (#2045) — so a dependency-free replace covers them.
  */
 
 import webpush from 'web-push';
@@ -82,7 +83,23 @@ export type FailurePushReason =
    * the remedy is different and the body has to say so: "install it", not "read
    * the pane".
    */
-  | 'session-start-unavailable';
+  | 'session-start-unavailable'
+  /**
+   * The agent's own server reported that a turn ended in an error
+   * (Issue #2045). Today only opencode publishes such a frame — `session.error`,
+   * raised from `sources/opencode/push`.
+   *
+   * Deliberately **not** folded into `upstream-fault`. That wording asserts an
+   * upstream cause, and this signal does not establish one: opencode 1.18.22's
+   * `session.error` carries any of eight error names (measured from its own
+   * `GET /doc`, `docs/design/opencode-server-live-verification.md` §17), and
+   * only `APIError` / `ProviderAuthError` are upstream. `UnknownError`,
+   * `MessageOutputLengthError`, `StructuredOutputError`, `ContextOverflowError`
+   * and `ContentFilterError` are local to the run, so the copy names the fact
+   * the frame does establish — the agent stopped — and lets the excerpt (the
+   * agent's own `error.data.message`) say which.
+   */
+  | 'agent-session-error';
 
 /** What a failure notification is about (Issue #2000). */
 export interface FailureContext {
@@ -139,6 +156,29 @@ export interface NotificationEvent {
    * resolution is a *displayed* notification and not a silent close.
    */
   resolved?: boolean;
+  /**
+   * A newer build of the agent CLI exists (Issue #2045).
+   *
+   * Rides on `kind: 'completion'` and is meaningless on the other two, which is
+   * the honest bucket for it: nothing is blocked and nobody has to act, so it
+   * belongs to the same opt-in toggle (`enabled_completion`) an ordinary
+   * completion does rather than to the "you need to act" one. Set, it replaces
+   * the completion body — "Done: …" would be a lie about a notice that reports
+   * no work at all.
+   *
+   * It shares the completion `tag`, so an update notice and a completion card
+   * replace each other on the device. Deliberate: both are informational, the
+   * notice is raised at most once per subscription, and giving it a tag of its
+   * own would let a stale "1.19.0 is available" outlive the update itself.
+   *
+   * Producers: `sources/opencode/push`, from `installation.update-available`.
+   */
+  updateAvailable?: {
+    /** The instance the notice is about — `opencode`, `opencode-2`, …. */
+    agent: string;
+    /** The version opencode says is available (`properties.version`). */
+    version: string;
+  };
   /**
    * Where tapping this notification goes (Issue #2022).
    *
@@ -259,6 +299,10 @@ const FAILURE_BODY_KEYS: Record<
     withExcerpt: 'failureSessionUnavailableWithExcerpt',
     plain: 'failureSessionUnavailable',
   },
+  'agent-session-error': {
+    withExcerpt: 'failureAgentSessionWithExcerpt',
+    plain: 'failureAgentSession',
+  },
 };
 
 function buildFailureBody(
@@ -300,9 +344,15 @@ export function buildPushPayload(
         : buildWaitingBody(event, messages, excerpt, now)
       : event.kind === 'failure'
         ? buildFailureBody(event, messages, excerpt)
-        : excerpt
-          ? messages.completionWithExcerpt.replace('{excerpt}', excerpt)
-          : messages.completion;
+        : // Issue #2045: an update notice is a completion by *bucket*, not by
+          // content, so it is the one completion whose body is not "Done".
+          event.updateAvailable
+          ? messages.updateAvailable
+              .replace('{agent}', event.updateAvailable.agent)
+              .replace('{version}', event.updateAvailable.version)
+          : excerpt
+            ? messages.completionWithExcerpt.replace('{excerpt}', excerpt)
+            : messages.completion;
 
   return {
     kind: event.kind,
