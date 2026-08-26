@@ -278,6 +278,62 @@ export type SourceLiveness =
   | { state: 'live'; lastHeartbeatAt: number }
   | { state: 'lost'; since: number; reason: string };
 
+/**
+ * Which machinery is actually speaking for one pane right now (Issue #2054).
+ *
+ * Not {@link AgentEventTransport}, and the difference is the whole point.
+ * `transport` is a property of the *source* — a compile-time fact about how
+ * claude's file is written — while this describes the **pane in front of the
+ * operator at this instant**, which can be worse than what the source declares:
+ * an opencode whose port was taken over by another process is served by
+ * `'scraper'` even though `opencodeAgentEventSource.transport` still says
+ * `'pull'`.
+ *
+ * - `sse` — CommandMate holds a live subscription to the agent's own server.
+ *   opencode, and only while its stream is up.
+ * - `hooks` — the agent posts events at CommandMate. Every push source that has
+ *   declared what it emits.
+ * - `scraper` — nothing structured is speaking; the terminal frame is the only
+ *   reader left. Either a tool nobody has written a source for (the
+ *   compatibility relay, whose `supportedEvents` is empty on purpose), or a
+ *   pull source that has lost its stream.
+ */
+export type AgentEventSourceKind = 'sse' | 'hooks' | 'scraper';
+
+/**
+ * How fresh the stream behind an {@link AgentEventSourceKind} is (Issue #2054).
+ *
+ * Published only for a source that can actually go stale — i.e. one with a
+ * heartbeat to miss. A push source has no such fact and publishes no such field;
+ * see {@link describeAgentEventSource}.
+ */
+export type AgentEventSourceLiveness = 'live' | 'stale';
+
+/**
+ * What `structuredEvents.source` says beyond the source's identity (#2054).
+ *
+ * The **only** three fields Issue #2054 adds, and every one of them is either
+ * required-and-always-derivable (`kind`) or absent for the tools it cannot
+ * describe. That asymmetry is deliberate and is what makes acceptance criterion
+ * 2 hold: claude / codex publish `{ kind: 'hooks' }` and nothing else, so every
+ * surface that renders the extra two renders nothing for them.
+ */
+export interface AgentEventSourceStatus {
+  /** Which machinery is speaking for this pane now. Always present. */
+  kind: AgentEventSourceKind;
+  /**
+   * Why the pane is not on the machinery its source declares, or absent.
+   *
+   * A token, not a sentence: `port_identity_changed` (#1900's health-before-
+   * trust verdict), `heartbeat_stale`, `not_subscribed`, or whatever reason
+   * string the transport recorded when it dropped. Absent whenever nothing is
+   * degraded.
+   */
+  degradedReason?: string;
+  /** `live` / `stale`, or absent when this source has no heartbeat to miss. */
+  liveness?: AgentEventSourceLiveness;
+}
+
 /** A subscription handle. Closing a push subscription is legal and does nothing. */
 export interface Subscription {
   close(): Promise<void>;

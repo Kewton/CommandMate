@@ -35,7 +35,7 @@ import { ClipboardCopy, Check } from 'lucide-react';
 import { copyToClipboard } from '@/lib/clipboard-utils';
 import { NotificationDot } from '@/components/common/NotificationDot';
 import { deriveCliStatus } from '@/types/sidebar';
-import type { Worktree, ChatMessage, GitStatus } from '@/types/models';
+import type { AgentEventSourceView, Worktree, ChatMessage, GitStatus } from '@/types/models';
 import {
   sumAgentSessionTokens,
   type AgentSessionContextView,
@@ -161,6 +161,84 @@ export function formatAgentModelLabel(
   if (!model) return null;
   const withEffort = effort ? `${model} · ${effort}` : model;
   return agent ? `${agent} · ${withEffort}` : withEffort;
+}
+
+/**
+ * The one sentence that describes what is reading an agent pane (Issue #2054).
+ *
+ * Returns null when there is nothing to say, and **that is the whole of
+ * acceptance criterion 2**: the server publishes `eventSource` only for a source
+ * that can be degraded (opencode, and nothing else today — see
+ * `describeAgentEventSource`), so every claude / codex call site keeps its
+ * existing `{label && …}` guard and renders a byte-identical chip. The rule is
+ * enforced HERE as well as on the server, because a surface that decided for
+ * itself which tools to draw for would be a second copy of the rule to keep in
+ * sync: nothing is drawn unless the pair the server can only fill in for a
+ * subscription source is actually filled in.
+ *
+ * Centralised for the reason {@link formatAgentModelLabel} is: the header pill's
+ * tooltip and the roster's warning row must not describe one disconnection two
+ * ways.
+ *
+ * @param source - `sessionStatusByInstance[id].eventSource`, or undefined
+ * @param t - The `worktree` namespace translator
+ * @returns The line, or null when this pane has nothing degraded to report
+ */
+export function formatAgentSourceLabel(
+  source: AgentEventSourceView | null | undefined,
+  t: ReturnType<typeof useTranslations<'worktree'>>
+): string | null {
+  if (!source) return null;
+  // Neither half present means the server had nothing a pane could differ on.
+  if (!source.liveness && !source.degradedReason) return null;
+
+  const kind =
+    source.kind === 'sse'
+      ? t('agentSource.kindSse')
+      : source.kind === 'scraper'
+        ? t('agentSource.kindScraper')
+        : t('agentSource.kindHooks');
+
+  // Fixed keys, never `t(\`agentSource.reason.\${x}\`)`: the reason is a token a
+  // transport wrote and a future one can spell a way this build has no message
+  // for, and a dynamic lookup would render a raw key path at the operator. The
+  // unknown branch shows the token itself, which is the honest fallback.
+  const reason =
+    source.degradedReason === undefined
+      ? null
+      : source.degradedReason === 'port_identity_changed'
+        ? t('agentSource.reasonPortIdentityChanged')
+        : source.degradedReason === 'heartbeat_stale'
+          ? t('agentSource.reasonHeartbeatStale')
+          : source.degradedReason === 'not_subscribed'
+            ? t('agentSource.reasonNotSubscribed')
+            : t('agentSource.reasonOther', { reason: source.degradedReason });
+
+  const liveness =
+    source.liveness === 'stale'
+      ? t('agentSource.livenessStale')
+      : source.liveness === 'live'
+        ? t('agentSource.livenessLive')
+        : null;
+
+  const state = [liveness, reason].filter((part): part is string => part !== null).join(' · ');
+  return state ? t('agentSource.line', { kind, state }) : t('agentSource.lineBare', { kind });
+}
+
+/**
+ * Whether {@link formatAgentSourceLabel}'s line is a problem or a reassurance
+ * (Issue #2054).
+ *
+ * Only `sse` + `live` is the healthy state. Everything else — a stream that went
+ * quiet, a port another process took, a pane with no subscription at all — means
+ * the frame is the only thing left reading this agent, which is the state the
+ * roster row is styled to warn about.
+ */
+export function isAgentSourceDegraded(
+  source: AgentEventSourceView | null | undefined
+): boolean {
+  if (!source) return false;
+  return !(source.kind === 'sse' && source.liveness === 'live');
 }
 
 /**
@@ -1031,12 +1109,29 @@ export const DesktopHeader = memo(function DesktopHeader({
                   tWorktree,
                   locale
                 );
-                const labelWithModel = instanceUsage
+                const usageLabel = instanceUsage
                   ? tWorktree('detail.statusPillWithUsage', {
                       base: baseLabel,
                       usage: instanceUsage,
                     })
                   : baseLabel;
+                // Issue #2054: what is reading this pane, appended to the same
+                // hover/`title` affordance #1783 chose over row width — and for
+                // the same reason: MAX_HEADER_AGENT_PILLS's budget is unmoved,
+                // so nothing is pushed into the "+N" overflow to make room. Null
+                // for every tool whose source cannot be degraded, which leaves
+                // the claude / codex pill strings byte-identical to pre-#2054
+                // (`DesktopHeader-source-2054.test.tsx` pins that).
+                const sourceLabel = formatAgentSourceLabel(
+                  instanceStatus?.eventSource,
+                  tWorktree
+                );
+                const labelWithModel = sourceLabel
+                  ? tWorktree('detail.statusPillWithSource', {
+                      base: usageLabel,
+                      source: sourceLabel,
+                    })
+                  : usageLabel;
                 const isActive = c.isActive;
                 // Issue #786: drag source. click and drag are mutually exclusive
                 // in HTML; a plain click (no drag) still fires onClick exactly

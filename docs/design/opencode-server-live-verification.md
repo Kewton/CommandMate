@@ -3600,3 +3600,161 @@ mtime が検証開始前と同一であることを確認した。**ユーザー
 - `src/app/worktrees/[id]/terminal/page.tsx` — 未リンクページのツール一覧に opencode
 - `locales/{en,ja}/worktree.json` — `opencodeQuickKeys`
 - `tests/fixtures/opencode-live-2046/**` — 10 フレーム ＋ 採取手順の README
+
+---
+
+## 25. Issue 2054: `liveness` / `probeActivity` を実際に読む（opencode 1.18.22 / 2026-08-26）
+
+Phase 4 は `AgentEventSource` に `liveness()` と `probeActivity()` を生やしたが、
+**本番の呼び出し元を 1 つも作らなかった**。`.probeActivity(` / `.liveness(` を `src/` 全体で
+検索すると定義箇所以外 0 件で、`port_identity_changed` を立てるコード（`subscription.ts`）は
+存在するのに、その結果を読む画面が存在しない。本節はそれを塞いだ実測記録である。
+
+### 25.1 Issue 本文と実装の食い違い（実測を正とした）
+
+| Issue 本文 | 実際 | 採用 |
+|---|---|---|
+| `structuredEvents.source` を新設 | #1924 が `{cliToolId, capabilities}` で既に存在 | **既存 2 フィールドを保ったまま additive 拡張**。`tests/unit/session/status-evidence-1924.test.ts` の `toEqual` は網羅性を保ったまま新フィールドを足して更新 |
+| `source.ts:361-362` | 実際は `source.ts:384-385`。中身は実装済み | 行番号は陳腐化。足りないのは呼び出し元だけ、という読みで正しい |
+| `liveness` を `worktree-status-helper` から読む | 同ファイルに `liveness` / `degraded` は 0 件 | 新規配線。`CliToolSessionStatus.eventSource` を追加 |
+
+### 25.2 `getOpencodeLiveness` の直接読み手を増やさない、という判断
+
+既に 3 箇所が `getOpencodeLiveness` を直接呼んでいる
+（`api/worktrees/[id]/instances/opencode/route.ts` / `lib/cli-tools/opencode.ts` /
+`lib/hooks/sources/opencode/runtime.ts`）。本 Issue は **4 人目を作らず、source I/F 経由に寄せた**。
+
+- `current-output-builder` と `worktree-status-helper` はどちらも
+  `getAgentEventSource(cliToolId).liveness(target)` を呼ぶ。**ツール名を書かない。**
+- 畳み込みは `define-source.ts` の `describeAgentEventSource()` **1 箇所だけ**。
+  ヘッダチップの tooltip とロスターの警告行が同じ pane を別々に説明することが構造上できない。
+- 理由: 上記 3 箇所は「opencode の port に HTTP を投げてよいか」を判断する opencode 固有の
+  ゲートで、`sources/opencode/` の中か、その直接の利用者（`cli-tools/opencode.ts`）にある。
+  対して本 Issue の 2 つの読み手は **全ツール共通のステータス組み立て層**で、そこにツール名が
+  出た時点で 7 ツール分の分岐が始まる。同じ関数を呼ぶが、呼び方を分けたのはそのため。
+
+`probeActivity` だけは例外で、`runtime.ts`（＝ opencode 固有層）から
+`opencodeAgentEventSource.probeActivity(target)` を呼ぶ。`client.fetchOpencodeActivity` を
+直接呼べる場所だが、**I/F 経由にした**（port 解決・no-port の null・タイムアウトを二重に持たない）。
+
+### 25.3 実測ハーネス
+
+§4 のとおり。**新しい隔離方法は発明していない。**
+
+- `HOME` ごと差し替え。`GET /path` で `home` / `state` / `config` / `worktree` / `directory` が
+  **すべて scratchpad 配下**であることを確認済み。
+- `auth.json` は `umask 077` で複製し、検証後に削除した（`ls -l` で確認）。
+  ユーザーの実 `~/.local/share/opencode/auth.json` は mtime も変わっていない。
+- モデルは `opencode.jsonc` で固定。**TUI のモデルピッカーは一度も開いていない**
+  （そもそも TUI を起動していない。後述）。
+- ポートは **4818**。3000 も §4 の 4788–4792 も使っていない（並行ワーカーと衝突しないため）。
+- **tmux はいっさい触っていない。** 本節の観測対象は「CommandMate 側の購読がポート奪取を
+  どう報告するか」で、pane の描画ではない。したがって `openOpencodeSubscription({ port })` を
+  `tsx` から直接叩いており、既定 tmux サーバに 1 コマンドも送っていない。
+  `-L` を忘れて本番サーバを壊す経路そのものが無い。
+- `CM_DB_PATH` も scratchpad に差し替え（`recoverHistory` が DB に触る可能性への保険）。
+
+ポート奪取は「opencode を `SIGTERM` → 同じ 4818 に別プロセスの HTTP サーバを bind し、
+`GET /global/health` に `{"healthy":true,"version":"9.9.9-squatter"}` を返させる」で再現した。
+これは `verifyServerIdentity()` が version 差を見る #1900 の経路そのものである。
+
+生ログは `tests/fixtures/opencode-liveness-2054/live-probe.json`（2 ラン分）。
+
+### 25.4 実測結果
+
+**`subscription.ts` の `degradeToScraper` は実際に通った。** サーバログ:
+
+```
+opencode-subscription-port-identity-changed
+  {"port":4818,"reason":"port_identity_changed",
+   "expectedVersion":"1.18.22","observedVersion":"9.9.9-squatter"}
+```
+
+公開される 4 状態（`describeAgentEventSource` の出力、実測値そのまま）:
+
+| 状態 | `kind` | `liveness` | `degradedReason` |
+|---|---|---|---|
+| ストリーム生存 | `sse` | `live` | — |
+| ポート奪取後 | `scraper` | `stale` | `port_identity_changed` |
+| 購読なし（port 未割当 / hooks 無効） | `scraper` | — | `not_subscribed` |
+| pane を閉じた後 | `scraper` | — | `not_subscribed` |
+
+タイミング（2 ラン一致）:
+
+- opencode を kill してから degraded が観測されるまで **1,071 ms**。
+  内訳は `OPENCODE_RECONNECT_BACKOFF_MS[0] = 1000 ms` ＋ health probe。
+- ハートビート間隔: **9,997 / 10,002 / 10,005 / 9,993 / 10,006 ms**（5 サンプル）。
+  10 s メトロノームは 1.18.22 でも変わらない。`AGENT_SOURCE_STALE_AFTER_MS = 30_000` は
+  **3 拍落ち**であり、`OPENCODE_HEARTBEAT_TIMEOUT_MS` と同じ数であることを
+  `opencode-liveness-2054.test.ts` が assert している（両者は互いを import できない）。
+
+### 25.5 実測で見つかった欠陥 2 件（本 Issue で修正）
+
+1. **`degradeToScraper` が理由を捨てていた。**
+   `state.liveness = {state:'lost', reason:'port_identity_changed'}` を立てた**次の行**で
+   `subscriptions.delete(state.key)` しており、以後 `getOpencodeLiveness` は
+   `{state:'unknown'}` を返す。つまり受入条件が求める `port_identity_changed` は
+   **どの画面からも観測不可能**だった。落とした購読の最後の liveness を残す tombstone
+   （`droppedLiveness`）を追加した。`lost` しか書かないので、`state === 'live'` を見る
+   既存 3 箇所の判断は 1 つも変わらない（`unknown` → `lost` はどちらも「live でない」）。
+2. **`closeOpencodeSubscription` が tombstone を消せなかった。**
+   1 ラン目の `after-close` が `port_identity_changed` のままだった（実測）。
+   tombstone を持つのは「既に map から消された」インスタンスだけなので、
+   `if (!state) return` の**手前**で消す必要がある。修正後の 2 ラン目で
+   `after-close` が `{state:'unknown'}` に戻ることを確認した。
+
+### 25.6 `probeActivity` の接続先
+
+`runtime.attachOpencodeEventStream()` が `subscribe()` 成功直後に 1 回だけ呼ぶ。
+**Phase 4-1 以来はじめての本番呼び出し元。**
+
+埋めている穴: ストリームがターンの途中で開くと、**最初のフレームはそのターンが終わったとき**に
+来る。長いターンなら数分間、「この pane はいま働いているか」に答えられるのは画面だけになる。
+`GET /session/status` はその答えを持っており、これがそれを聞く唯一の呼び出しである。
+
+`subscription.recoverTurnState()` の per-session 読み取りとは別物で、置き換えでもない
+（あちらは turn gate を再武装する。こちらはインスタンス単位の集約で、画面が描ける）。
+結果は `structuredEvents.source.probedActivity = {activity, at}` として publish する。
+`at` を必ず添えるのは、これが**一瞬の記録であって現在値ではない**からで、
+ここから status を導出しているコードは無い。
+
+### 25.7 計測していないこと（推測で埋めていない）
+
+- **ブラウザ上のチップの実描画。** 隔離 dev サーバを立てて実 opencode pane を tmux で
+  起動する UAT は行っていない。並行して 2 ワーカーが走っており、tmux 既定サーバと
+  ポートに触るリスクに見合わないと判断した。代わりに、
+  - サーバが publish する値は上記のとおり**実 opencode で実測**、
+  - その値からチップ / 警告行が何を描くかは `agent-source-display-2054.test.tsx` が
+    **実辞書（`locales/en`）で** assert、
+  という 2 段で担保している。「チップに `port_identity_changed` が出る」の
+  サーバ側半分は実測、描画側半分はユニットである。**この切り分けは意図的で、
+  描画側を実測したとは書かない。**
+- **`heartbeat_stale`（30 s 無音）の実観測。** 実測したのは 10 s 周期の方で、
+  「30 s 落ちたら stale」は周期からの導出。opencode を止めると SSE が即座に閉じ、
+  watchdog より先に `stream-ended` で `lost` になるため、`live` のまま 30 s 沈黙する状態を
+  実サーバで作るのは容易ではない（プロセス停止 `SIGSTOP` が要る）。今回は行っていない。
+- **`AgentInstancesPane` の自前ポーリングの実負荷。** roster に opencode が居るときだけ
+  `GET /api/worktrees/:id` を 10 s 間隔で読む設計だが、実サーバでの負荷は測っていない。
+  claude / codex だけの roster では 1 リクエストも出ないことはユニットで assert 済み。
+
+### 25.8 この節が変えたもの
+
+- `src/lib/hooks/sources/types.ts` — `AgentEventSourceKind` / `AgentEventSourceLiveness` /
+  `AgentEventSourceStatus`
+- `src/lib/hooks/sources/define-source.ts` — `AGENT_SOURCE_STALE_AFTER_MS` /
+  `declaredAgentSourceKind()` / `describeAgentEventSource()`
+- `src/lib/hooks/sources/opencode/subscription.ts` — `droppedLiveness` tombstone /
+  `recordOpencodeProbedActivity()` / `getOpencodeProbedActivity()` / close の消去順
+- `src/lib/hooks/sources/opencode/runtime.ts` — `probeAttachedActivity()`（attach 直後の probe）
+- `src/lib/session/current-output-builder.ts` — `StructuredSourcePayload` に
+  `kind` / `degradedReason?` / `liveness?` / `probedActivity`
+- `src/cli/types/api-responses.ts` — 同じ 4 つ。#1924 と同じ理由で**文字列型のまま**
+- `src/lib/session/worktree-status-helper.ts` — `CliToolSessionStatus.eventSource`
+- `src/types/models.ts` — `AgentEventSourceView`、`sessionStatusByInstance` に `eventSource`
+- `src/components/worktree/WorktreeDetailSubComponents.tsx` — `formatAgentSourceLabel()` /
+  `isAgentSourceDegraded()` / ヘッダピルの tooltip
+- `src/components/worktree/AgentInstancesPane.tsx` — 警告行と `useAgentSourceByInstance()`
+- `src/components/worktree/MobileAgentInstancesPane.tsx` — `sourceByInstance` の受け渡し
+- `src/config/agent-source-config.ts` — `AGENT_SOURCE_POLL_INTERVAL_MS`
+- `locales/{en,ja}/worktree.json` — `agentSource` / `detail.statusPillWithSource`
+- `tests/fixtures/opencode-liveness-2054/live-probe.json` — 実測 2 ラン

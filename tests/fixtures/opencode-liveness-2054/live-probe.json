@@ -1,0 +1,251 @@
+{
+  "issue": 2054,
+  "measuredOn": "2026-08-26",
+  "opencodeVersion": "1.18.22",
+  "harness": {
+    "isolation": "HOME replaced (docs/design/opencode-server-live-verification.md §4.1); GET /path confirmed home/state/config/worktree/directory all under the scratchpad",
+    "port": 4818,
+    "hostname": "127.0.0.1",
+    "takeover": "the opencode process was SIGTERMed and a second HTTP server bound the same port, answering GET /global/health with {\"healthy\":true,\"version\":\"9.9.9-squatter\"}",
+    "note": "no tmux was involved: the subscription was driven directly through openOpencodeSubscription({ port }), so the default tmux server was never addressed"
+  },
+  "heartbeatIntervalsMs": {
+    "run1": [
+      9997,
+      10002,
+      10005
+    ],
+    "run2": [
+      9993,
+      10006
+    ],
+    "conclusion": "10s metronome; OPENCODE_HEARTBEAT_TIMEOUT_MS / AGENT_SOURCE_STALE_AFTER_MS = 30_000 is three missed beats"
+  },
+  "publishedStates": {
+    "live": {
+      "kind": "sse",
+      "liveness": "live"
+    },
+    "portIdentityChanged": {
+      "kind": "scraper",
+      "liveness": "stale",
+      "degradedReason": "port_identity_changed"
+    },
+    "neverSubscribed": {
+      "kind": "scraper",
+      "degradedReason": "not_subscribed"
+    },
+    "afterClose": {
+      "kind": "scraper",
+      "degradedReason": "not_subscribed"
+    }
+  },
+  "livenessRecords": {
+    "live": {
+      "state": "live",
+      "lastHeartbeatAt": 1787723957577
+    },
+    "portIdentityChanged": {
+      "state": "lost",
+      "since": 1787723963658,
+      "reason": "port_identity_changed"
+    },
+    "afterClose": {
+      "state": "unknown"
+    }
+  },
+  "timings": {
+    "killToDegradedMs_run1": 1071,
+    "killToDegradedMs_run2": 1071,
+    "note": "the first reconnect attempt is OPENCODE_RECONNECT_BACKOFF_MS[0] = 1000ms after the stream ends; the identity check fires on that attempt"
+  },
+  "rawRuns": {
+    "run1": [
+      {
+        "atMs": 11,
+        "event": "subscription-opened",
+        "liveness": {
+          "state": "unknown"
+        }
+      },
+      {
+        "atMs": 112,
+        "event": "after-connect",
+        "liveness": {
+          "state": "live",
+          "lastHeartbeatAt": 1787723834235
+        }
+      },
+      {
+        "atMs": 35135,
+        "event": "heartbeat-sampled",
+        "liveness": {
+          "state": "live",
+          "lastHeartbeatAt": 1787723864239
+        },
+        "beatsMs": [
+          9997,
+          10002,
+          10005
+        ],
+        "frames": 0
+      },
+      {
+        "atMs": 35135,
+        "event": "describe-live",
+        "liveness": {
+          "state": "live",
+          "lastHeartbeatAt": 1787723864239
+        },
+        "describe": {
+          "kind": "sse",
+          "liveness": "live"
+        }
+      },
+      {
+        "atMs": 35135,
+        "event": "opencode-killed",
+        "liveness": {
+          "state": "live",
+          "lastHeartbeatAt": 1787723864239
+        }
+      },
+      {
+        "atMs": 35397,
+        "event": "squatter-bound",
+        "liveness": {
+          "state": "lost",
+          "since": 1787723869359,
+          "reason": "terminated"
+        },
+        "bound": true
+      },
+      {
+        "atMs": 36206,
+        "event": "after-takeover",
+        "liveness": {
+          "state": "lost",
+          "since": 1787723870366,
+          "reason": "port_identity_changed"
+        },
+        "describe": {
+          "kind": "scraper",
+          "liveness": "stale",
+          "degradedReason": "port_identity_changed"
+        }
+      },
+      {
+        "atMs": 36206,
+        "event": "after-close",
+        "liveness": {
+          "state": "lost",
+          "since": 1787723870366,
+          "reason": "port_identity_changed"
+        },
+        "describe": {
+          "kind": "scraper",
+          "liveness": "stale",
+          "degradedReason": "port_identity_changed"
+        }
+      }
+    ],
+    "run2": [
+      {
+        "atMs": 10,
+        "event": "subscription-opened",
+        "liveness": {
+          "state": "unknown"
+        }
+      },
+      {
+        "atMs": 112,
+        "event": "after-connect",
+        "liveness": {
+          "state": "live",
+          "lastHeartbeatAt": 1787723937578
+        }
+      },
+      {
+        "atMs": 25151,
+        "event": "heartbeat-sampled",
+        "liveness": {
+          "state": "live",
+          "lastHeartbeatAt": 1787723957577
+        },
+        "beatsMs": [
+          9993,
+          10006
+        ],
+        "frames": 0
+      },
+      {
+        "atMs": 25152,
+        "event": "describe-live",
+        "liveness": {
+          "state": "live",
+          "lastHeartbeatAt": 1787723957577
+        },
+        "describe": {
+          "kind": "sse",
+          "liveness": "live"
+        }
+      },
+      {
+        "atMs": 25152,
+        "event": "opencode-killed",
+        "liveness": {
+          "state": "live",
+          "lastHeartbeatAt": 1787723957577
+        }
+      },
+      {
+        "atMs": 25414,
+        "event": "squatter-bound",
+        "liveness": {
+          "state": "lost",
+          "since": 1787723962649,
+          "reason": "terminated"
+        },
+        "bound": true
+      },
+      {
+        "atMs": 26223,
+        "event": "after-takeover",
+        "liveness": {
+          "state": "lost",
+          "since": 1787723963658,
+          "reason": "port_identity_changed"
+        },
+        "describe": {
+          "kind": "scraper",
+          "liveness": "stale",
+          "degradedReason": "port_identity_changed"
+        }
+      },
+      {
+        "atMs": 26223,
+        "event": "never-subscribed",
+        "liveness": {
+          "state": "lost",
+          "since": 1787723963658,
+          "reason": "port_identity_changed"
+        },
+        "describe": {
+          "kind": "scraper",
+          "degradedReason": "not_subscribed"
+        }
+      },
+      {
+        "atMs": 26223,
+        "event": "after-close",
+        "liveness": {
+          "state": "unknown"
+        },
+        "describe": {
+          "kind": "scraper",
+          "degradedReason": "not_subscribed"
+        }
+      }
+    ]
+  }
+}
