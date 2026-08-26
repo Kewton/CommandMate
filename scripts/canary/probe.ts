@@ -16,9 +16,15 @@
 import { detectSessionStatus } from '@/lib/detection/status-detector';
 import { detectPrompt } from '@/lib/detection/prompt-detector';
 import { buildDetectPromptOptions, stripAnsi, stripBoxDrawing } from '@/lib/detection/cli-patterns';
-import type { Observation } from './types';
+import type { CanaryToolId, Observation } from './types';
 
-/** CLI tool under test. Other tools are out of scope for this Issue. */
+/**
+ * The tool the Auto-Yes v2 hook plumbing is written for.
+ *
+ * Still a constant, and still `claude`, after #2050 added a second tool: only
+ * claude has a `PermissionRequest` hook for `hook-receiver.ts` to adjudicate.
+ * The DETECTION path is parameterised instead — see {@link probeFrame}.
+ */
 export const CANARY_CLI_TOOL = 'claude' as const;
 
 /**
@@ -28,15 +34,21 @@ export const CANARY_CLI_TOOL = 'claude' as const;
  */
 export const CANARY_CAPTURE_LINES = 1000;
 
-/** Run both production detection paths over one captured frame. */
-export function probeFrame(frame: string): Observation {
+/**
+ * Run both production detection paths over one captured frame.
+ *
+ * @param tool - which tool's rules to judge the frame by. Defaults to `claude`
+ *   so the #1727 call sites and their tests read unchanged; the opencode
+ *   scenarios pass `'opencode'`, which is what selects branches A0-E in
+ *   `src/lib/detection/tools/opencode/detect.ts` and the
+ *   `hasNumberedDialogs: false` declaration in `buildDetectPromptOptions`
+ *   (Issue #2050).
+ */
+export function probeFrame(frame: string, tool: CanaryToolId = CANARY_CLI_TOOL): Observation {
   return {
     frame,
-    status: detectSessionStatus(frame, CANARY_CLI_TOOL),
-    autoYes: detectPrompt(
-      stripBoxDrawing(stripAnsi(frame)),
-      buildDetectPromptOptions(CANARY_CLI_TOOL)
-    ),
+    status: detectSessionStatus(frame, tool),
+    autoYes: detectPrompt(stripBoxDrawing(stripAnsi(frame)), buildDetectPromptOptions(tool)),
   };
 }
 

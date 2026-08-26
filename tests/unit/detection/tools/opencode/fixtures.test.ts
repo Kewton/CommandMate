@@ -126,9 +126,15 @@ describe('[#1927] opencode detection fixtures', () => {
   });
 
   it('records the build it was measured against', () => {
+    // Bumped to 1.18.22 by Issue #2050: the detection canary
+    // (`npm run canary -- --tool opencode`) drove 1.18.22 into all five states
+    // branches A0-E read, at the same 80x200 geometry, and every rule answered
+    // as it does for the 1.18.21 frames above. The 1.18.22 captures are in
+    // `tests/fixtures/canary/opencode-*.ts`; the run is written up in
+    // `docs/design/opencode-server-live-verification.md` §18.
     expect(opencodeStatusDetector.verifiedAgainst).toEqual({
-      version: '1.18.21',
-      capturedAt: '2026-08-21',
+      version: '1.18.22',
+      capturedAt: '2026-08-26',
       paneGeometry: '80x200',
     });
   });
