@@ -69,6 +69,7 @@ CM_PORT=3000 node bin/commandmate.js send abc123 "msg"
 | [`commandmate send`](#commandmate-send) | エージェントへのメッセージ送信 |
 | [`commandmate wait`](#commandmate-wait) | エージェント完了の待機 |
 | [`commandmate respond`](#commandmate-respond) | プロンプトへの応答 |
+| [`commandmate interrupt`](#commandmate-interrupt) | 生成中のターンの中断（GUI の中断ボタン相当） |
 | [`commandmate verify`](#commandmate-verify) | 検証ゲート（.commandmate/verify.yaml）の実行と検証履歴の参照 |
 | [`commandmate task`](#commandmate-task) | 実行契約（.commandmate/tasks/*.yaml）の一覧・詳細 |
 | [`commandmate capture`](#commandmate-capture) | ターミナル出力の取得 |
@@ -643,6 +644,98 @@ TUI にはハイライトされた選択肢がありますが、それがどれ�
 | 0 | 応答成功 |
 | 2 | 引数エラー（`<answer>` と `--default` の同時指定・両方欠落 等）/ 選択肢に無い番号（`answer_out_of_range`）|
 | 99 | プロンプトが既に消えている（`prompt_no_longer_active`）/ yes・no を選択肢に解決できない（`unresolvable_answer`）/ 保持している decision が 0 件（`decision_not_found`）・2 件以上（`multiple_pending_decisions`、Issue #2040）|
+
+---
+
+### commandmate interrupt
+
+生成中のターンを中断します。GUI の中断ボタンと**同じ** `POST /api/worktrees/:id/interrupt` を呼びます。
+
+> **`stop` ではありません。** `commandmate stop` は CommandMate **サーバ**を止めるコマンドです。
+> エージェントの生成を止めるのはこの `interrupt` です。
+
+### 使用方法
+
+```bash
+commandmate interrupt <worktree-id>                     # 稼働中の全セッションを中断
+commandmate interrupt <worktree-id> --instance codex-2  # インスタンスを指定して中断
+commandmate interrupt <worktree-id> --json              # interrupted[] を JSON で取得
+```
+
+### オプション
+
+| オプション | 説明 |
+|-----------|------|
+| `--instance <id>` | 中断するインスタンス（`<agent>` または `<agent>-<n>`） |
+| `--json` | API レスポンスをそのまま JSON 出力（`success` / `message` / `interrupted[]`） |
+| `--token <token>` | 認証トークン（`CM_AUTH_TOKEN` 推奨） |
+
+`--instance` を**省略した場合は「既定エージェント」ではなく、その worktree で稼働中の全セッション**が
+対象になります（ルート側の仕様）。`send` / `respond` / `capture` の `--instance` 省略時とは既定が
+異なる点に注意してください。
+
+`--agent` はありません（`wait` と同じ理由 — Issue #1629。ツール名だけでは「どのセッションか」が
+決まらないため）。roster 登録済みインスタンスは `--instance` だけで CLI ツールまで解決されます。
+
+### JSON 出力
+
+```bash
+$ commandmate interrupt anvil-develop --json
+{
+  "success": true,
+  "message": "Interrupt sent to 1 session(s)",
+  "interrupted": [
+    {
+      "cliToolId": "opencode",
+      "instanceId": "opencode",
+      "sessionName": "mcbd-opencode-anvil-develop"
+    }
+  ]
+}
+```
+
+対象セッションが無い場合も `--json` は同じフィールド名で返します（`interrupted` は**空配列**であって
+欠落ではありません。呼び出し側が `.interrupted.length` を読めるようにするためです）。
+
+```bash
+$ commandmate interrupt anvil-develop --json ; echo "exit=$?"
+{
+  "success": false,
+  "message": "No active sessions found",
+  "interrupted": []
+}
+exit=30
+```
+
+### 終了コード
+
+| コード | 定数名 | 意味 |
+|:------:|--------|------|
+| 0 | SUCCESS | 1 つ以上のセッションを中断した |
+| 2 | CONFIG_ERROR | worktree ID / `--instance` の形式不正、インスタンスの CLI ツールを解決できない（400 passthrough）|
+| 30 | NO_ACTIVE_SESSIONS | worktree は存在するが稼働中セッションが無く、**何も中断していない** |
+| 99 | UNEXPECTED_ERROR | worktree が見つからない、その他の失敗 |
+
+30 は「既に止まっている（=目的の状態に到達済み）」、99 は「ID が違う」で、必要な復旧が逆になります。
+サーバはどちらも 404 で返すため（機械可読な `code` は付きません）、CLI 側でメッセージ
+`No active sessions found` を見て振り分けています。
+
+stderr は次の形です（`--instance` を指定したときはインスタンス名も入ります）:
+
+```
+Error: No active sessions found for worktree 'anvil-develop'. Nothing was interrupted.
+```
+
+### opencode での中断経路（Issue #2034 / #2101）
+
+opencode では、まず **opencode 自身のサーバへ `POST /session/:id/abort`** を投げます（一次経路）。
+これが適用できた場合はログに `opencode-interrupt-aborted-via-api` が出ます。適用できなかった場合のみ
+Esc ×2（`opencode-interrupt-sent`）にフォールバックします。Esc 1 回では opencode のターンは
+止まりません（実測。`src/lib/cli-tools/opencode.ts` の docblock 参照）。
+
+中断されたターンは `· interrupted` で終わり、`· 11.3s` のような duration 付き完了マーカーを残しません。
+そのため `sessionStatus` は「肯定的な完了検知」ではなく staleness フォールバック経由で `ready` に
+戻ります（Issue #1893 と同じ扱い）。
 
 ---
 
@@ -2507,6 +2600,7 @@ commandmate ls --token your-token
 | 4 | STOP_FAILED | サーバーの停止に失敗（`stop` / `update`） |
 | 5 | UPDATE_FAILED | 更新に失敗（`update`: registry照会 / `npm install -g` / バージョン検証） |
 | 10 | PROMPT_DETECTED | wait中にプロンプトを検出 |
+| 30 | NO_ACTIVE_SESSIONS | interruptの対象となる稼働中セッションが無い |
 | 99 | UNEXPECTED_ERROR | 予期しないエラー / リソース未検出 |
 | 124 | TIMEOUT | waitのタイムアウト |
 
