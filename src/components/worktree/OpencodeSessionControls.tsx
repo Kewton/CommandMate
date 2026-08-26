@@ -48,6 +48,67 @@
  * because its change scope excluded `locales/`, and left the move as a
  * follow-up; #2051 has `locales/` in scope and has to add dialog copy in both
  * languages anyway, so the map is gone rather than grown.
+ *
+ * ## Failures reach the screen (Issue #2109)
+ *
+ * Until #2109 every failure here ended at `console.error`. The only feedback a
+ * press produced was the `pending` spinner, so a refusal looked exactly like a
+ * button that does nothing: the spinner appeared for one frame and left.
+ *
+ * The routes behind these controls do not fail vaguely — they answer 409 with a
+ * machine-readable `code`, verified against the route sources on 2026-08-27:
+ *
+ * | code | emitted by | means |
+ * | --- | --- | --- |
+ * | `NO_OPENCODE_PORT` | session + share, both verbs | no server on this pane |
+ * | `NO_OPENCODE_SESSION` | session (`fork` only), share, unshare | nothing to act on yet |
+ * | `SHARE_DISABLED` / `SHARE_REFUSED` | share `POST` | opencode said no |
+ *
+ * So the two codes the operator can actually do something about get a sentence
+ * of their own, and everything else passes the route's `error` string through
+ * unaltered — the same rule the sidebar's sync button follows.
+ *
+ * ### What the two 409s actually cost, measured
+ *
+ * Measured on opencode 1.18.23 (2026-08-27) against a CommandMate dev server in
+ * an isolated `HOME` on a private tmux socket:
+ *
+ *   - **`NO_OPENCODE_PORT` reproduces trivially and #2108 will not remove it.**
+ *     A pane that is *running* with no opencode server behind it — stopped
+ *     server, or launched with `CM_AGENT_HOOKS_INJECT=0` — answers 409 with this
+ *     code for all three of `new`, `list` and `fork`, while the buttons stay
+ *     enabled because `disabled` tracks the tmux session, not the HTTP server.
+ *   - **`NO_OPENCODE_SESSION` is rarer than "a pane that has not run a turn".**
+ *     A freshly launched pane that has completed no turn still forks with 200:
+ *     CommandMate's own launcher writes an entry into the session store, so
+ *     `resolveOpencodeCurrentSessionId` answers from there. It returns null only
+ *     when *both* its sources are empty — no observed agent-event session and no
+ *     remembered one — which is a server CommandMate did not launch, or a store
+ *     that was cleared. The share and unshare paths use the same resolver, so
+ *     the code reaches this component from three routes regardless.
+ *
+ *   The live check covered `NO_OPENCODE_PORT` end to end (409 → toast, `ja` and
+ *   `en`, with HEAD's build showing nothing at all for five seconds under the
+ *   same click). `NO_OPENCODE_SESSION` was **not** reproduced on live hardware
+ *   for the reason above; its wording is covered by the unit suite only.
+ *
+ * `NO_OPENCODE_SESSION` is deliberately not one sentence for both surfaces.
+ * "nothing to fork yet" is wrong wording on a share button, so the caller picks
+ * which of the two dedicated strings the code resolves to.
+ *
+ * ### Which surface the message lands on
+ *
+ * `showToast` when the mount supplies one — `MessageInput` passes the composer's
+ * existing toast surface down — and an inline chip beside the buttons when it
+ * does not. The fallback is not decoration: `WorktreeDetailRefactored.tsx`
+ * renders `MessageInput` without `showToast`, so a toast-only fix would leave
+ * the single-pane desktop view exactly as silent as before. Only one of the two
+ * ever fires, never both.
+ *
+ * `console.error` stays. It is the record for a bug report, and it carries the
+ * raw body, which the operator-facing sentence deliberately does not.
+ *
+ * Success is untouched: nothing is announced when a call is accepted.
  */
 
 'use client';
@@ -57,6 +118,7 @@ import { useTranslations } from 'next-intl';
 import { Check, Copy, GitFork, Link2, Link2Off, ListTree, MessageSquarePlus } from 'lucide-react';
 import { Button, Spinner, useConfirm } from '@/components/ui';
 import type { CLIToolType } from '@/lib/cli-tools/types';
+import type { ShowToast } from '@/types/markdown-editor';
 import type { OpencodeShareState } from '@/types/opencode-share';
 
 /** The actions the session route accepts. Mirrors `OPENCODE_SESSION_ACTIONS`. */
@@ -64,6 +126,20 @@ export type OpencodeSessionAction = 'new' | 'list' | 'fork';
 
 /** Every control this component can show as busy. */
 type PendingAction = OpencodeSessionAction | 'share' | 'unshare';
+
+/** The shape every route behind these controls uses to refuse (Issue #2109). */
+interface RouteFailure {
+  error?: string;
+  code?: string;
+}
+
+/**
+ * The dedicated sentence for `NO_OPENCODE_SESSION` on the surface being used.
+ *
+ * The code is shared by the fork button and both share verbs, but "no session to
+ * fork yet" is the wrong sentence to show someone who pressed *share*.
+ */
+type NoSessionKey = 'errorNoSessionFork' | 'errorNoSessionShare';
 
 export interface OpencodeSessionControlsProps {
   worktreeId: string;
@@ -75,6 +151,14 @@ export interface OpencodeSessionControlsProps {
   disabled?: boolean;
   /** Called after an action the server accepted. */
   onActionComplete?: (action: OpencodeSessionAction) => void;
+  /**
+   * Where failures are announced (Issue #2109).
+   *
+   * Optional because not every mount has a toast surface to lend — see the
+   * component docblock. When it is absent the message is rendered inline
+   * instead, so a failure is visible either way.
+   */
+  showToast?: ShowToast;
 }
 
 export const OpencodeSessionControls = memo(function OpencodeSessionControls({
@@ -83,6 +167,7 @@ export const OpencodeSessionControls = memo(function OpencodeSessionControls({
   instanceId,
   disabled = false,
   onActionComplete,
+  showToast,
 }: OpencodeSessionControlsProps) {
   const t = useTranslations('worktree.opencodeSession');
   const confirm = useConfirm();
@@ -99,9 +184,58 @@ export const OpencodeSessionControls = memo(function OpencodeSessionControls({
    */
   const [publishedUrl, setPublishedUrl] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  /**
+   * The last failure, shown inline (Issue #2109).
+   *
+   * Only ever set when there is no `showToast` to hand the message to, so the
+   * two surfaces cannot both report the same failure. It survives until the
+   * next press rather than fading, because the composer row is easy to look
+   * away from and the reason is the whole point.
+   */
+  const [failure, setFailure] = useState<string | null>(null);
 
   const isOpencode = cliToolId === 'opencode';
   const target = instanceId ?? cliToolId;
+
+  /**
+   * Put one sentence in front of the operator.
+   *
+   * The toast surface is preferred when the mount lends one; the inline chip is
+   * the fallback for the mounts that do not.
+   */
+  const notifyFailure = useCallback(
+    (message: string) => {
+      if (showToast) {
+        setFailure(null);
+        showToast(message, 'error');
+        return;
+      }
+      setFailure(message);
+    },
+    [showToast]
+  );
+
+  /**
+   * The route's refusal, in the operator's language.
+   *
+   * `NO_OPENCODE_PORT` and `NO_OPENCODE_SESSION` are the two the operator can
+   * act on, so they get a sentence. Everything else — `SHARE_DISABLED`,
+   * `SHARE_REFUSED`, a 502 from opencode, a 400 — passes the route's own `error`
+   * through untouched, which keeps this map from having to track every code the
+   * routes will ever grow.
+   *
+   * @param detail - the parsed failure body, `{}` when it did not parse
+   * @param statusText - fallback when the body carried no `error` at all
+   * @param noSessionKey - which `NO_OPENCODE_SESSION` sentence this surface wants
+   */
+  const failureReason = useCallback(
+    (detail: RouteFailure, statusText: string | undefined, noSessionKey: NoSessionKey): string => {
+      if (detail.code === 'NO_OPENCODE_PORT') return t('errorNoPort');
+      if (detail.code === 'NO_OPENCODE_SESSION') return t(noSessionKey);
+      return detail.error || statusText || t('errorUnknown');
+    },
+    [t]
+  );
 
   const refreshShare = useCallback(async () => {
     if (!isOpencode) return;
@@ -128,6 +262,7 @@ export const OpencodeSessionControls = memo(function OpencodeSessionControls({
   const run = useCallback(
     async (action: OpencodeSessionAction) => {
       setPending(action);
+      setFailure(null);
       try {
         const response = await fetch(`/api/worktrees/${worktreeId}/opencode/session`, {
           method: 'POST',
@@ -135,12 +270,17 @@ export const OpencodeSessionControls = memo(function OpencodeSessionControls({
           body: JSON.stringify({ action, instanceId: target }),
         });
         if (!response.ok) {
-          const detail = await response.json().catch(() => ({}));
+          const detail = (await response.json().catch(() => ({}))) as RouteFailure;
           console.error(
             '[OpencodeSessionControls] action failed:',
             action,
             detail.error || response.statusText
           );
+          // Only `fork` can reach `NO_OPENCODE_SESSION` on this route (the port
+          // check comes first for all three, the session lookup only after the
+          // `new`/`list` branches have returned), so the fork wording is right
+          // for every caller that gets here.
+          notifyFailure(failureReason(detail, response.statusText, 'errorNoSessionFork'));
           return;
         }
         onActionComplete?.(action);
@@ -152,11 +292,12 @@ export const OpencodeSessionControls = memo(function OpencodeSessionControls({
         }
       } catch (error) {
         console.error('[OpencodeSessionControls] request error:', error);
+        notifyFailure(t('errorRequestFailed'));
       } finally {
         setPending(null);
       }
     },
-    [worktreeId, target, onActionComplete, refreshShare]
+    [worktreeId, target, onActionComplete, refreshShare, notifyFailure, failureReason, t]
   );
 
   const onShare = useCallback(async () => {
@@ -171,21 +312,25 @@ export const OpencodeSessionControls = memo(function OpencodeSessionControls({
     if (!ok) return;
 
     setPending('share');
+    setFailure(null);
     try {
       const response = await fetch(`/api/worktrees/${worktreeId}/opencode/share`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ instanceId: target }),
       });
-      const detail = (await response.json().catch(() => ({}))) as {
+      const detail = (await response.json().catch(() => ({}))) as RouteFailure & {
         url?: string;
-        error?: string;
       };
       if (!response.ok || typeof detail.url !== 'string') {
         console.error(
           '[OpencodeSessionControls] share failed:',
           detail.error || response.statusText
         );
+        // Reported louder than the other three on purpose: this is the one
+        // control whose outcome is a public URL, so "did it publish or not?"
+        // must never be left to the operator to guess.
+        notifyFailure(failureReason(detail, response.statusText, 'errorNoSessionShare'));
         // Re-read rather than assume: a 409 `SHARE_DISABLED` means the setting
         // changed under this view, and the button should now disappear.
         void refreshShare();
@@ -196,24 +341,29 @@ export const OpencodeSessionControls = memo(function OpencodeSessionControls({
       void refreshShare();
     } catch (error) {
       console.error('[OpencodeSessionControls] share request error:', error);
+      notifyFailure(t('errorRequestFailed'));
     } finally {
       setPending(null);
     }
-  }, [confirm, t, worktreeId, target, refreshShare]);
+  }, [confirm, t, worktreeId, target, refreshShare, notifyFailure, failureReason]);
 
   const onUnshare = useCallback(async () => {
     setPending('unshare');
+    setFailure(null);
     try {
       const response = await fetch(
         `/api/worktrees/${worktreeId}/opencode/share?instance=${encodeURIComponent(target)}`,
         { method: 'DELETE' }
       );
       if (!response.ok) {
-        const detail = await response.json().catch(() => ({}));
+        const detail = (await response.json().catch(() => ({}))) as RouteFailure;
         console.error(
           '[OpencodeSessionControls] unshare failed:',
           detail.error || response.statusText
         );
+        // The link stays on screen when this fails (see the render below); the
+        // message is what tells the operator the page is *still up*.
+        notifyFailure(failureReason(detail, response.statusText, 'errorNoSessionShare'));
         return;
       }
       setPublishedUrl(null);
@@ -221,20 +371,28 @@ export const OpencodeSessionControls = memo(function OpencodeSessionControls({
       void refreshShare();
     } catch (error) {
       console.error('[OpencodeSessionControls] unshare request error:', error);
+      notifyFailure(t('errorRequestFailed'));
     } finally {
       setPending(null);
     }
-  }, [worktreeId, target, refreshShare]);
+  }, [worktreeId, target, refreshShare, notifyFailure, failureReason, t]);
 
   const onCopy = useCallback(async () => {
     if (publishedUrl === null) return;
     try {
       await navigator.clipboard.writeText(publishedUrl);
       setCopied(true);
-    } catch {
-      // Clipboard access can be refused; the URL is on screen and selectable.
+      setFailure(null);
+    } catch (error) {
+      // Clipboard access is refused outside a secure context and by permission
+      // policy, and `navigator.clipboard` is simply absent on plain HTTP — which
+      // is how CommandMate is reached from a phone on the LAN. Silence here read
+      // as "copied": the icon did not change and nothing said why. The URL is on
+      // screen and selectable, so the message says to copy it by hand.
+      console.error('[OpencodeSessionControls] clipboard write failed:', error);
+      notifyFailure(t('errorCopyFailed'));
     }
-  }, [publishedUrl]);
+  }, [publishedUrl, notifyFailure, t]);
 
   // Not a runtime feature flag: every endpoint behind these buttons exists only
   // on opencode's server, so for any other tool there is nothing to render.
@@ -340,6 +498,21 @@ export const OpencodeSessionControls = memo(function OpencodeSessionControls({
               <Link2Off className="h-3.5 w-3.5" aria-hidden="true" />
             )}
           </Button>
+        </span>
+      ) : null}
+
+      {/* Issue #2109: the fallback surface, used only where no `showToast` was
+          handed down. `role="alert"` so a screen reader hears the refusal the
+          same way a sighted operator sees it, and `title` because the composer
+          row is narrow enough that a passed-through route string can truncate. */}
+      {failure !== null ? (
+        <span
+          role="alert"
+          className="flex min-w-0 items-center rounded-full border border-danger-border bg-danger-subtle px-2 py-0.5 text-xs text-danger-foreground"
+          title={failure}
+          data-testid="opencode-session-error"
+        >
+          <span className="truncate">{failure}</span>
         </span>
       ) : null}
     </div>
