@@ -24,6 +24,18 @@
  * then. (`./source` does not import this module at all; the runtime wires the
  * two together.)
  *
+ * ## Why the phone is notified from here (Issue #2045)
+ *
+ * For every other tool a prompt notification is raised from the waiting edge,
+ * which is only observed by a status probe — so a wait notifies when somebody
+ * is already looking. opencode cannot afford that: after `question.asked` the
+ * session stays `busy` forever and nothing in this process answers it, so the
+ * turn is stopped until a human acts. Two events therefore notify through
+ * `./push` directly, and only these two: `question.asked` and
+ * `session.error`. The call is closed to opencode by construction — the other
+ * five tools arrive through `POST /api/hooks/agent-event`, which does not
+ * import this module.
+ *
  * Nothing here throws. An event is a fact about a session that is still
  * running, and a failure to record it must cost the record, never the session.
  *
@@ -53,6 +65,7 @@ import {
   repliedPermissionId,
 } from './mappers';
 import { readOpencodePermissionSubject, toOpencodePendingPermission } from './payloads';
+import { notifyOpencodeQuestionPush, notifyOpencodeSessionErrorPush } from './push';
 import { OPENCODE_CLI_TOOL_ID } from './tool-id';
 
 const logger = createLogger('lib/hooks/sources/opencode/ingest');
@@ -367,12 +380,42 @@ export async function ingestOpencodeEvent(
 
     if (event.event === 'notification' && event.detail === OPENCODE_QUESTION_DETAIL) {
       recordQuestion(target, event, instanceId);
+      // Issue #2045: after the record, so the notification cannot describe a
+      // wait the rest of the process has not been told about yet — and after it
+      // for a second, load-bearing reason: `recordQuestion` is what makes the
+      // wait visible to `peekPromptWaiting`, whose `structured.at` is the very
+      // `receivedAt` passed below. The two producers name the wait identically
+      // only if both read the same record. See `./push`.
+      await notifyOpencodeQuestionPush(
+        target,
+        instanceId,
+        record.message ?? null,
+        event.receivedAt
+      );
       return;
     }
 
     if (event.event === 'stop') {
       await applyStop(target, instanceId);
       return;
+    }
+
+    if (event.event === 'notification' && event.detail === OPENCODE_ERROR_DETAIL) {
+      // Issue #2045. Deliberately not a generic `notification` / `error` hook:
+      // this is the opencode ingest, the other five tools reach
+      // `recordAgentEvent` through `POST /api/hooks/agent-event`, and nothing
+      // there imports this module — so their push counts cannot move.
+      await notifyOpencodeSessionErrorPush(
+        target,
+        instanceId,
+        readNestedString(isPlainObject(event.raw.properties) ? event.raw.properties : {}, [
+          'error',
+          'name',
+        ]),
+        record.message ?? null,
+        event.conversationId,
+        event.receivedAt
+      );
     }
 
     logger.info('opencode-event-received', {

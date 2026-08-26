@@ -49,9 +49,19 @@ const PUSH_KEYS = [
   'failureSessionUnavailable',
   'failureWithExcerpt',
   'failure',
+  // Issue #2045: the agent's own server reported that a turn ended in an error.
+  // Its own pair rather than a reuse of `failureUpstream*` — opencode's
+  // `session.error` spans provider faults and local ones alike, so the copy may
+  // not assert an upstream cause (see `FailurePushReason`).
+  'failureAgentSessionWithExcerpt',
+  'failureAgentSession',
   // Issue #2001: the body of the card that *replaces* a resolved wait's
   // notification on the reader's other devices. No excerpt — the prompt is over.
   'promptResolved',
+  // Issue #2045: a newer build of the agent CLI exists. Rides `kind:
+  // 'completion'` — the informational bucket — and substitutes `{agent}` and
+  // `{version}` rather than `{excerpt}`, which is why it is in neither list below.
+  'updateAvailable',
 ] as const;
 
 /** Keys whose copy must carry the placeholder push-sender substitutes. */
@@ -66,6 +76,8 @@ const EXCERPT_KEYS = [
   // Issue #2009
   'failureSessionUnavailableWithExcerpt',
   'failureWithExcerpt',
+  // Issue #2045
+  'failureAgentSessionWithExcerpt',
 ] as const;
 
 /** Keys whose copy must carry the elapsed-minutes placeholder (Issue #1790). */
@@ -94,6 +106,13 @@ describe('notifications.push dictionary', () => {
           expect(push[key] as string).toContain('{minutes}');
         });
       }
+
+      it('keeps both placeholders in updateAvailable (Issue #2045)', () => {
+        // The only body that substitutes two values. A locale that dropped
+        // either would ship a notice naming no version, or no agent.
+        expect(push.updateAvailable as string).toContain('{agent}');
+        expect(push.updateAvailable as string).toContain('{version}');
+      });
 
       it('has no keys beyond the ones push-sender reads', () => {
         expect(Object.keys(push).sort()).toEqual([...PUSH_KEYS].sort());
