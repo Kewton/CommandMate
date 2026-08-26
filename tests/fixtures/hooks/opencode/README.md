@@ -167,3 +167,29 @@ SSE ではなく **REST の応答**を 2 本追加した。`GET /event` のフ�
 
 `session-message-window-2042.json` は 2 ターン分（user / assistant × 2）をそのまま収録した。
 1 通目の assistant が `total 8491`、2 通目が `total 8508` で、後者が「直近」である。
+
+---
+
+## ターンの変更ファイルと revert（Issue #2043 / opencode **1.18.22** / **2026-08-26** 採取）
+
+SSE フレーム 4 本と REST 応答 2 本。**冒頭の「採取日 2026-08-13 / 1.18.3」ではなく 1.18.22 / 08-26 のもの**。
+
+| ファイル | 採取元 | 何のため |
+|---|---|---|
+| [`session-diff-empty-2043.json`](./session-diff-empty-2043.json) | `GET /event` | **Issue 本文の前提を反証する 1 通。** `session.idle` と同一ミリ秒・`file.edited` 2 件の後なのに `diff: []` |
+| [`session-diff-reverted-2043.json`](./session-diff-reverted-2043.json) | `GET /event` | revert 直後の非空フレーム。`session.diff` が運ぶのは「revert がせき止めている変更」であることの証拠 |
+| [`session-updated-reverted-2043.json`](./session-updated-reverted-2043.json) | `GET /event` | `Session.revert = { messageID, snapshot, diff }` |
+| [`session-updated-unreverted-2043.json`](./session-updated-unreverted-2043.json) | `GET /event` | `revert: null`。**unrevert が出す唯一の信号**（`session.diff` は 1 通も出ない） |
+| [`message-updated-user-2043.json`](./message-updated-user-2043.json) | `GET /event` | `?messageID=` に渡す user メッセージ id の出どころ |
+| [`session-message-diff-2043.json`](./session-message-diff-2043.json) | `GET /session/<id>/diff?messageID=<msg>` | そのターンが変えたファイル。**`messageID` 無しの同ルートは常に `[]`** |
+| [`session-diff-no-message-id-2043.json`](./session-diff-no-message-id-2043.json) | `GET /session/<id>/diff` | ↑ の対照。ターン前後とも空であることの記録（中身は `[]`） |
+
+**この構成が要る理由**は、`session.diff` が Issue #2043 の想定と違うものを運んでいるからである。
+ファイル編集を伴う 2 ターンで観測した `session.diff` は 8 通あり、**8 通すべて空**だった。
+非空になるのは revert の直後だけで、そのときの内容は「revert がせき止めている変更」である。
+したがって「このターンの変更ファイル」は `?messageID=` から取るしかない。
+実測の全体は [設計書 §16](../../../../docs/design/opencode-server-live-verification.md) を参照。
+
+`SnapshotFileDiff` の required は **`additions` / `deletions` の 2 つだけ**（`GET /doc` 一次証拠）で、
+`file` / `patch` / `status` は optional である。fixture にはたまたま 3 つとも入っているが、
+読み手はそれを前提にしてはいけない。パスは `<WORKTREE_PATH>` に置換してある。

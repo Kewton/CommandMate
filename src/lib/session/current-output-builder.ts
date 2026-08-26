@@ -39,6 +39,10 @@ import {
   pendingDecisionKind,
   type PendingDecisionKind,
 } from '@/lib/hooks/pending-decision-kind';
+import {
+  ensureOpencodeSessionDiff,
+  type OpencodeSessionDiffRecord,
+} from '@/lib/hooks/sources/opencode/diff';
 import { questionDecisionOptions } from '@/lib/hooks/structured-decision-response';
 import type { AgentSourceCapabilities } from '@/lib/hooks/sources/types';
 import { captureSessionOutput } from '@/lib/session/cli-session';
@@ -257,6 +261,20 @@ export interface StructuredEventsPayload extends PublishedTurn {
    * Optional on the type for the reason `pendingDecisions` below is.
    */
   sessionContext?: AgentSessionContextUsage | null;
+
+  /**
+   * What the last opencode turn changed on disk, and what a revert is holding
+   * back (Issue #2043). Omitted-as-null for every other tool.
+   *
+   * A third key beside {@link session} and {@link sessionContext} rather than a
+   * field on either, because it answers a different kind of question: those two
+   * describe the *conversation*, this one describes the **working tree**. It is
+   * also the only one of the three the operator can act on — the panel it feeds
+   * offers revert / unrevert.
+   *
+   * Mirrors: src/lib/hooks/sources/opencode/diff.ts OpencodeSessionDiffRecord.
+   */
+  sessionDiff?: OpencodeSessionDiffRecord | null;
   /**
    * The approvals this instance is blocked on, oldest first (Issue #1930).
    *
@@ -1168,6 +1186,11 @@ async function buildPayload(
       { worktreeId, cliToolId, instanceId },
       agentSession
     ),
+    // Issue #2043, on exactly #2042's terms: `ensure...` answers from the store
+    // and starts at most one `GET /session/:id/diff` per *turn*, never in front
+    // of this payload. It answers null for every tool but opencode, so no other
+    // tool's status poll grows a field or a request.
+    sessionDiff: ensureOpencodeSessionDiff({ worktreeId, cliToolId, instanceId }),
   };
 
   const running = await cliTool.isRunning(worktreeId, instanceId);

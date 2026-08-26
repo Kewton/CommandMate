@@ -658,6 +658,42 @@ export interface CurrentOutputResponse {
       /** Epoch ms this record was written. */
       at: number;
     } | null;
+    /**
+     * What the last opencode turn changed on disk (Issue #2043), or null.
+     *
+     * Mirrors: src/lib/hooks/sources/opencode/diff.ts
+     * OpencodeSessionDiffRecord.
+     *
+     * **`files` and `revertedFiles` are different questions.** `files` is what
+     * the turn named by `turnMessageId` changed, read from
+     * `GET /session/:id/diff?messageID=...` — the only call measured to answer
+     * it on 1.18.22. `revertedFiles` is what a revert is holding back right now,
+     * off the `session.diff` frame, and is empty whenever nothing is reverted.
+     *
+     * Issue #2043 assumed `session.diff` carried the first of these. It does
+     * not: every `session.diff` frame of two file-editing turns carried
+     * `diff: []`, including the one emitted alongside `session.idle`. See
+     * `docs/design/opencode-server-live-verification.md` §16.
+     *
+     * Optional and null for every tool but opencode, and for an opencode pane
+     * whose stream has not reported a turn yet.
+     */
+    sessionDiff?: {
+      /** The session these files belong to, or null. */
+      sessionId: string | null;
+      /** The user message whose turn `files` describes, or null. */
+      turnMessageId: string | null;
+      /** What that turn changed. Empty until the read has answered. */
+      files: AgentSessionDiffFile[];
+      /** Epoch ms `files` was read at, or null when it never was. */
+      filesAt: number | null;
+      /** What a revert is holding back. Empty when nothing is. */
+      revertedFiles: AgentSessionDiffFile[];
+      /** The message a revert is holding back to, or null. */
+      revertedMessageId: string | null;
+      /** Epoch ms the newest frame that touched this record arrived. */
+      at: number;
+    } | null;
   };
   /**
    * Issue #1839: the upstream (model API) fault visible on the live frame, or
@@ -1749,4 +1785,24 @@ export interface TaskListResponse {
 export interface TaskDetailResponse {
   task: TaskView;
   lastVerificationRun: VerificationRunView | null;
+}
+
+/**
+ * One file in `structuredEvents.sessionDiff` (Issue #2043).
+ *
+ * Mirrors: src/lib/hooks/sources/opencode/client.ts OpencodeFileDiff.
+ *
+ * `file`, `patch` and `status` are nullable because opencode's own OpenAPI
+ * marks only `additions` and `deletions` required on `SnapshotFileDiff`
+ * (1.18.22, `GET /doc`).
+ */
+export interface AgentSessionDiffFile {
+  /** Repository-relative path, or null when the agent did not name one. */
+  file: string | null;
+  /** Unified diff for this file, or null. */
+  patch: string | null;
+  additions: number;
+  deletions: number;
+  /** `added` | `deleted` | `modified`, or null. */
+  status: 'added' | 'deleted' | 'modified' | null;
 }

@@ -105,7 +105,7 @@ describe('useTerminalPanePolling agent session (Issue #2042)', () => {
       useTerminalPanePolling({ worktreeId: 'w-1', cliToolId: 'opencode' }),
     );
 
-    expect(result.current.agentSession).toEqual({ session: null, context: null });
+    expect(result.current.agentSession).toEqual({ session: null, context: null, diff: null });
   });
 
   it('answers nulls for a tool that publishes none', async () => {
@@ -116,7 +116,7 @@ describe('useTerminalPanePolling agent session (Issue #2042)', () => {
     );
 
     await waitFor(() => expect(result.current.terminal.isRunning).toBe(true));
-    expect(result.current.agentSession).toEqual({ session: null, context: null });
+    expect(result.current.agentSession).toEqual({ session: null, context: null, diff: null });
   });
 
   it('keeps the same object across polls that repeat the same numbers', async () => {
@@ -235,6 +235,6 @@ describe('useTerminalPanePolling agent session (Issue #2042)', () => {
 
     // A different conversation. Showing the previous instance's cost while the
     // first poll is in flight is the same mistake blanking the terminal avoids.
-    expect(result.current.agentSession).toEqual({ session: null, context: null });
+    expect(result.current.agentSession).toEqual({ session: null, context: null, diff: null });
   });
 });

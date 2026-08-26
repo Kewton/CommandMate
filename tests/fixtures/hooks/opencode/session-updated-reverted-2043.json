@@ -1,0 +1,46 @@
+{
+  "id": "evt_039a62890001XUqfVAD5wdg6z9",
+  "type": "session.updated",
+  "properties": {
+    "sessionID": "ses_fc65b58b2ffe0kur0cUkuLmkrr",
+    "info": {
+      "id": "ses_fc65b58b2ffe0kur0cUkuLmkrr",
+      "slug": "lucky-canyon",
+      "projectID": "3a8e812fc52219ea0e9d31f999571c626186efd6",
+      "directory": "<WORKTREE_PATH>",
+      "path": "",
+      "title": "Editing sample.txt line2 and creating added.txt with banana",
+      "agent": "build",
+      "model": {
+        "id": "claude-sonnet-4.6",
+        "providerID": "github-copilot",
+        "variant": "default"
+      },
+      "version": "1.18.22",
+      "summary": {
+        "additions": 1,
+        "deletions": 0,
+        "files": 1
+      },
+      "cost": 0.060431250000000006,
+      "tokens": {
+        "input": 10,
+        "output": 719,
+        "reasoning": 0,
+        "cache": {
+          "read": 45075,
+          "write": 9625
+        }
+      },
+      "revert": {
+        "messageID": "msg_cmateab46bd45831a705d3141051f",
+        "snapshot": "f920e8098274a5abeef085bdec3d4a37488097dc",
+        "diff": "diff --git a/sample.txt b/sample.txt\nindex bf83f59..5d0faf2 100644\n--- a/sample.txt\n+++ b/sample.txt\n@@ -1,4 +1,3 @@\n line1\n LINE-TWO-EDITED\n line3\n-SECOND-TURN"
+      },
+      "time": {
+        "created": 1787673487181,
+        "updated": 1787673585808
+      }
+    }
+  }
+}

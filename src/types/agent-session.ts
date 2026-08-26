@@ -66,6 +66,17 @@ export interface AgentSessionContextView {
 export interface AgentSessionSnapshot {
   session: AgentSessionView | null;
   context: AgentSessionContextView | null;
+  /**
+   * `structuredEvents.sessionDiff` (Issue #2043), or null.
+   *
+   * Additive, and **optional** rather than required for that reason: every
+   * existing construction of this snapshot predates #2043 and describes a pane
+   * with no diff, which is exactly what an absent field means here.
+   *
+   * Null for every tool but opencode, and for an opencode pane whose stream has
+   * not reported a turn yet.
+   */
+  diff?: AgentSessionDiffView | null;
 }
 
 /**
@@ -95,4 +106,75 @@ export function sumAgentSessionTokens(tokens: AgentSessionTokensView | null | un
   ].filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
   if (parts.length === 0) return null;
   return parts.reduce((sum, value) => sum + value, 0);
+}
+
+// ============================================================================
+// The turn's changed files (Issue #2043)
+// ============================================================================
+
+/** One file in `structuredEvents.sessionDiff`. Mirrors opencode's `SnapshotFileDiff`. */
+export interface AgentSessionDiffFileView {
+  /**
+   * Repository-relative path, or null.
+   *
+   * Nullable because opencode's own OpenAPI marks only `additions` and
+   * `deletions` required on `SnapshotFileDiff` (1.18.22, `GET /doc`). A row with
+   * no path is still a change; it is just one the panel cannot link to a diff.
+   */
+  file: string | null;
+  /** Unified diff for this file, or null. This is what the diff viewer renders. */
+  patch: string | null;
+  additions: number;
+  deletions: number;
+  /** `added` | `deleted` | `modified`, or null when the agent did not say. */
+  status: 'added' | 'deleted' | 'modified' | null;
+}
+
+/**
+ * `structuredEvents.sessionDiff` — opencode only, null for every other tool.
+ *
+ * **The two file lists are different questions and neither substitutes for the
+ * other**, which is why they are separate fields rather than one merged list:
+ *
+ *  - {@link files} is what the last turn changed, read from
+ *    `GET /session/:id/diff?messageID=…`. A historical record — measured to keep
+ *    answering after that turn was reverted.
+ *  - {@link revertedFiles} is what a revert is holding back *right now*, off the
+ *    `session.diff` frame. Empty whenever nothing is reverted, which is almost
+ *    always.
+ *
+ * Issue #2043's own premise was that `session.diff` carried the first of these.
+ * It does not — measured on opencode 1.18.22, every `session.diff` frame of two
+ * file-editing turns carried `diff: []`. See
+ * `docs/design/opencode-server-live-verification.md` §16.
+ */
+export interface AgentSessionDiffView {
+  /** The session these files belong to, or null. */
+  sessionId: string | null;
+  /** The user message whose turn {@link files} describes, or null. */
+  turnMessageId: string | null;
+  /** What that turn changed. Empty until the read has answered. */
+  files: AgentSessionDiffFileView[];
+  /** Epoch ms {@link files} was read at, or null when it never was. */
+  filesAt: number | null;
+  /** What a revert is holding back. Empty when nothing is. */
+  revertedFiles: AgentSessionDiffFileView[];
+  /** The message a revert is holding back to, or null when nothing is. */
+  revertedMessageId: string | null;
+  at: number;
+}
+
+/**
+ * Whether this pane has anything to show in the turn-diff panel.
+ *
+ * The panel's whole visibility rule in one place, because Issue #2043's second
+ * acceptance criterion is that **claude and codex never see an empty panel** —
+ * and those tools publish no `sessionDiff` at all, so `null` has to be a "no"
+ * rather than a shape the panel renders zero rows of.
+ */
+export function hasAgentSessionDiff(
+  diff: AgentSessionDiffView | null | undefined
+): diff is AgentSessionDiffView {
+  if (!diff) return false;
+  return diff.files.length > 0 || diff.revertedFiles.length > 0;
 }

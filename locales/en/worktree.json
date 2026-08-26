@@ -1033,5 +1033,29 @@
     "spentLabel": "Spent this session: {tokens} tokens",
     "contextLabel": "Context in use: {tokens} of {limit} tokens ({percent}%)",
     "contextUnknownLabel": "Context in use: {tokens} tokens (window unknown)"
+  },
+  "opencodeDiff": {
+    "title": "Files this turn changed",
+    "subtitle": "{count} files",
+    "revertedTitle": "Changes held back by a revert",
+    "revertedSubtitle": "{count} files are reverted",
+    "openDiff": "Show the diff for {file}",
+    "unnamedFile": "(unnamed file)",
+    "status": {
+      "added": "added",
+      "deleted": "deleted",
+      "modified": "modified"
+    },
+    "revert": "Revert this turn",
+    "unrevert": "Restore",
+    "revertConfirmTitle": "Revert this turn?",
+    "revertConfirmBody": "opencode will roll back its changes to {count} files. Files it created are deleted, and committed changes are rolled back in the working tree too. Restore undoes this.",
+    "revertConfirmLabel": "Revert",
+    "unrevertConfirmTitle": "Restore the reverted changes?",
+    "unrevertConfirmBody": "opencode will put the reverted changes to {count} files back into the working tree.",
+    "unrevertConfirmLabel": "Restore",
+    "busy": "The agent is mid-turn. Try again once the turn finishes.",
+    "noop": "opencode changed nothing (it could not find that turn).",
+    "failed": "opencode refused the operation."
   }
 }

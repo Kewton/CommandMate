@@ -402,6 +402,15 @@ commandmate wait <worktree-id> --fail-on-upstream-fault  # 上流障害で compo
 - `--verify`: 全ゲート（work-evidence + `.commandmate/verify.yaml` の宣言ゲート）を実行
 - `--require-work`: work-evidence ゲートのみ実行。全ゲートを回す前の安価な事前確認に使う
 - 両方を同時指定してもエラーにはならない。work-evidence は常に全ゲートに含まれるため `--verify` が包含する
+- **opencode を名指しした run だけ、work-evidence に第 2 の証跡が加わる（Issue #2043）**。
+  git が「コミットも未コミット変更も無い」と判定した**その分岐でのみ**、opencode 自身の diff 台帳を参照し、
+  ファイルが挙がっていれば合格にする（log_tail に `opencode session diff: N file(s) changed` が出る）。
+  **`--instance` で opencode を名指ししたときだけ**参照する ―― work-evidence の git カウントは
+  worktree 単位なので、名指しの無い `wait --verify` が同じ worktree の opencode ペインの diff を
+  他ツールの判定に流用しないための制限。`requireCommit` は緩めない。
+  これが要るのは、worktree 詳細に付いた **「このターンを取り消す（revert）」が、
+  作業ツリーを git から見て「何もしていない」状態にしうる**ため。
+  なお opencode の台帳は git snapshot なので、`.gitignore` された作業は opencode 側も見えない（実測）。
 - 検証は**完了検知できたときだけ**走る。プロンプト検出（10）やタイムアウト（124）はそのまま返し、検証しない
 - 複数 worktree を指定した場合、完了検知は並行・検証は**直列**。サーバ側が同時実行数を制限しているため
 - 複数 worktree の終了コードは優先順位 **10 > 11 > 20 > 21 > 124** で集約される（Issue #1839 で 11 を追加）

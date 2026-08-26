@@ -29,6 +29,8 @@ import {
   createVerificationRun,
   finishGateResult,
   finishVerificationRun,
+  // Issue #2043: resolve whether the instance this run names is an opencode one.
+  getAgentInstances,
   getRunningVerificationRun,
   getTask,
   // Issue #2000: read back to name the failing gates in the notification body.
@@ -89,6 +91,11 @@ import {
   type VerifyConfig,
   type VerifyGate,
 } from './verify-config';
+// Issue #2043: the second work-evidence witness. opencode-only by construction
+// -- it answers null for every other tool -- so this import adds no behaviour
+// to any run that is not judging an opencode instance.
+import { opencodeWorkEvidenceFileCount } from '@/lib/hooks/sources/opencode/diff';
+import { OPENCODE_CLI_TOOL_ID } from '@/lib/hooks/sources/opencode/tool-id';
 
 const logger = createLogger('lib/verification/gate-runner');
 
@@ -734,6 +741,46 @@ function runGit(args: string[], cwd: string): Promise<{ code: number | null; std
 // =============================================================================
 
 /**
+ * A second witness to "did the agent do anything" (Issue #2043).
+ *
+ * An interface rather than a direct call so `evaluateWorkEvidence` stays a pure
+ * function of its arguments and its tests can hand it a witness that says
+ * nothing -- which is exactly what every non-opencode run supplies, and the
+ * case that has to keep behaving byte-for-byte as it did before #2043.
+ */
+interface AgentWorkEvidence {
+  /** Named in the gate's log tail, so the verdict says where the count came from. */
+  label: string;
+  /** Files the agent says it changed, or null when the agent said nothing. */
+  fileCount: () => number | null;
+}
+
+/**
+ * Whether this run is judging an opencode instance (Issue #2043).
+ *
+ * **An unnamed instance answers `false`, deliberately.** work-evidence's git
+ * counts are worktree-wide, so a bare `wait --verify` on a worktree that also
+ * happens to run an opencode pane would otherwise start reading that pane's
+ * diff into a verdict about a claude session. The rule Issue #2043 was given is
+ * that no other tool's judgement moves by a byte, and the way to guarantee that
+ * is to consult the second witness only when the caller pointed at it --
+ * `wait --instance opencode --verify`, or a `verify` naming an opencode
+ * instance from the roster.
+ */
+function namesOpencodeInstance(
+  db: Database.Database,
+  worktreeId: string,
+  instanceId: string | undefined
+): boolean {
+  if (instanceId === undefined) return false;
+  // The primary instance is addressed by the tool id itself.
+  if (instanceId === OPENCODE_CLI_TOOL_ID) return true;
+  return getAgentInstances(db, worktreeId).some(
+    (instance) => instance.id === instanceId && instance.cliTool === OPENCODE_CLI_TOOL_ID
+  );
+}
+
+/**
  * Decide whether the worktree contains work at all.
  *
  * Commits ahead of `baseRef` or a dirty tree both count. Neither means the
@@ -743,11 +790,33 @@ function runGit(args: string[], cwd: string): Promise<{ code: number | null; std
  *
  * Contract files are evidence of the *orchestrator*, not of the agent, so
  * neither side counts them (see {@link CONTRACT_DIR_PREFIX}).
+ *
+ * ## The opencode second witness (Issue #2043)
+ *
+ * **Strictly additive, and only in the branch that would otherwise fail.** The
+ * git counts above are computed and interpreted exactly as they were; the only
+ * new behaviour is that a run which found *nothing at all* asks opencode
+ * whether it names files before reporting `not_started`. Every other tool
+ * reaches {@link opencodeWorkEvidenceFileCount} as `null` and takes the same
+ * path it always did.
+ *
+ * The reason it is worth asking is the feature #2043 adds: **its revert button
+ * can make a worktree look untouched to git** while opencode still holds the
+ * turn's whole file list. `requireCommit` is deliberately *not* relaxed — a
+ * diff opencode is holding is not a commit — so a repository that demands one
+ * still gets the same verdict.
+ *
+ * Measured limit, so this is not read as more than it is: opencode's ledger is
+ * git snapshots and shares git's blind spots. A `.gitignore`d file the agent
+ * created was invisible to `git status` **and** answered `[]` from
+ * `GET /session/:id/diff` (`docs/design/opencode-server-live-verification.md`
+ * §16.6). This corroborates git; it does not see past it.
  */
 async function evaluateWorkEvidence(
   worktreePath: string,
   baseRef: string | null,
-  requireCommit: RequireCommitDecision
+  requireCommit: RequireCommitDecision,
+  agentEvidence: AgentWorkEvidence
 ): Promise<GateOutcome> {
   const startedAt = Date.now();
   const done = (
@@ -824,7 +893,24 @@ async function evaluateWorkEvidence(
     ' (contract files excluded)';
 
   if (!Number.isFinite(commitCount) || (commitCount === 0 && uncommittedCount === 0)) {
-    return done('failed', `${summary}\nNo commits and no uncommitted changes: nothing to verify.`, 1);
+    // Issue #2043, and the ONLY place this gate's verdict differs from what it
+    // was: git found nothing, so ask the agent. `null` — every tool but
+    // opencode, and every opencode pane that never reported a turn — falls
+    // straight through to the same failure as before.
+    const agentFiles = Number.isFinite(commitCount) ? agentEvidence.fileCount() : null;
+    if (agentFiles === null || agentFiles === 0) {
+      return done(
+        'failed',
+        `${summary}\nNo commits and no uncommitted changes: nothing to verify.`,
+        1
+      );
+    }
+    return done(
+      'passed',
+      `${summary}\n${agentEvidence.label}: ${agentFiles} file(s) changed. ` +
+        'git found nothing; the agent did.',
+      0
+    );
   }
   // Issue #1628 (D-4): `commits=0 uncommitted=1` passing is what let a task
   // contract that says "未 commit の作業は未完了とみなされる" still end in
@@ -1024,6 +1110,8 @@ async function executeRun(
   runId: number,
   worktreeId: string,
   worktreePath: string,
+  /** Issue #2043: which agent instance the run is judging, for the second witness. */
+  instanceId: string | undefined,
   config: VerifyConfig,
   selection: GateSelection,
   baseRef: string | null,
@@ -1033,6 +1121,16 @@ async function executeRun(
 ): Promise<VerificationRunTerminalStatus> {
   const { maxLogTailBytes, skipInPrimaryCheckout } = config.options;
   const { runWorkEvidence, gates } = selection;
+  // Issue #2043. A thunk rather than a number so the store is read at the
+  // instant the gate runs, not at the instant the run was set up — a turn can
+  // finish in between.
+  const agentEvidence: AgentWorkEvidence = {
+    label: 'opencode session diff',
+    fileCount: () =>
+      namesOpencodeInstance(db, worktreeId, instanceId)
+        ? opencodeWorkEvidenceFileCount(worktreeId, instanceId)
+        : null,
+  };
   // ORed with the repository-wide switch rather than replacing it (#1642): a
   // delegation may tighten the rule, never relax one the repository declared.
   const requireCommit = resolveRequireCommit(task?.contract ?? null, config);
@@ -1119,7 +1217,7 @@ async function executeRun(
       WORK_EVIDENCE_GATE_ID,
       WORK_EVIDENCE_GATE_COMMAND,
       'builtin',
-      () => evaluateWorkEvidence(worktreePath, baseRef, requireCommit)
+      () => evaluateWorkEvidence(worktreePath, baseRef, requireCommit, agentEvidence)
     );
 
     if (outcome.status !== 'passed') {
@@ -1503,6 +1601,7 @@ export async function startVerification(
         run.id,
         input.worktreeId,
         input.worktreePath,
+        input.instanceId,
         resolvedConfig,
         resolvedSelection,
         baseRef,
