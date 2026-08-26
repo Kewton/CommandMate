@@ -1110,6 +1110,12 @@
     "shareConfirmTitle": "Publish this conversation?",
     "shareConfirmBody": "opencode will publish this session to its own hosting, where anyone with the link can read it. What goes out is the conversation itself — your prompts, the agent's replies, and the input and output of every tool it ran — together with the absolute path of the session's working directory. Nothing is redacted. You can take the page down afterwards with \"Revoke the share link\", but that cannot un-read anything already read.",
     "shareConfirmLabel": "Publish",
-    "sharePublicNotice": "Anyone with this link can read it."
+    "sharePublicNotice": "Anyone with this link can read it.",
+    "errorNoPort": "No opencode server is attached to this pane. Restart the pane and try again.",
+    "errorNoSessionFork": "There is no session to fork yet. Run one turn first, then try again.",
+    "errorNoSessionShare": "There is no session to share yet. Run one turn first, then try again.",
+    "errorRequestFailed": "The request could not be sent. The CommandMate server is unreachable.",
+    "errorUnknown": "The action failed. The server gave no reason.",
+    "errorCopyFailed": "Could not copy the link. Select the link shown here and copy it manually."
   }
 }

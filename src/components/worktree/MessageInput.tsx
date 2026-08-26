@@ -543,6 +543,11 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
               cliToolId={cliToolId || 'claude'}
               instanceId={instanceId}
               disabled={!isSessionRunning}
+              // Issue #2109: the composer's existing toast surface, so a 409
+              // from a session or share control says why instead of only
+              // reaching the console. Undefined at mounts that pass no
+              // showToast; the control falls back to an inline message there.
+              showToast={showToast}
             />
             <InterruptButton
               worktreeId={worktreeId}
@@ -604,6 +609,8 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
               cliToolId={cliToolId || 'claude'}
               instanceId={instanceId}
               disabled={!isSessionRunning}
+              // Issue #2109 — see the mobile mount above.
+              showToast={showToast}
             />
           )}
 
