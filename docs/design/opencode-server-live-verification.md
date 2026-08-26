@@ -3133,3 +3133,205 @@ Issue の受入条件は `plan` / `openai/gpt-5` / `high`。計測機に openai 
 - `src/lib/db/migrations/v59-opencode-instance-settings.ts` / `src/lib/db/agent-instances-db.ts` — 保存先
 - `src/app/api/worktrees/[id]/instances/opencode/route.ts`（新規）— 設定の読み書きと候補配布
 - `src/components/worktree/AgentSettingsPane.tsx` — `OpencodeInstanceSettings`
+
+---
+
+## 21. Issue 2047: ペイン幅をツール別設定にする（opencode 1.18.22 / 2026-08-26）
+
+Issue #2047 は「幅 80 のベタ書きを `OPENCODE_PANE_WIDTH` / `CM_OPENCODE_PANE_WIDTH` に寄せ、
+120 桁 / 200 桁の実 fixture で scraper を再検証し、**全部緑なら既定を 200 に上げる**」。
+
+**上げなかった。** 200 桁は緑ではない。理由は 1 行で言える:
+
+> **opencode 1.18.22 は 121 桁以上で右サイドバーを描き、120 桁以下では描かない。
+> サイドバーは capture の行を transcript と共有するので、121 桁以上では
+> 1 行が `<transcript>   …   <sidebar>` になる。**
+
+`launchSession()` に昔から書かれていた `// Resize tmux window to 80 columns (hide sidebar for
+clean capture-pane output)` というコメントは、**正しかった**。#2047 はそれを数値で確定させ、
+定数と env var と回帰テストに変えた作業である。
+
+| Issue 本文の想定 | 実測 |
+|---|---|
+| 幅 80 は `opencode.ts` に 2 箇所ベタ書き、高さだけ定数 | **そのとおり**（`:253` の reconcile と `:294` の resize） |
+| `CM_OPENCODE_PANE_WIDTH` は repo に 0 件 | **そのとおり**。#2047 が新設した |
+| `enter confirm` は 80 桁で `enter con` に切れる | **そのとおり**（§21.3）。120 / 200 では切れない。アンカーは 3 ラベル側なので幅に依存しない |
+| 再検証が全部緑なら既定を 200 へ | **緑にならなかった**（§21.4）。既定は 80 のまま、**計測された安全上限は 120** |
+| 既定を 200 にするならカナリアも動かす（(a)/(b) の選択） | **どちらも不要になった**。既定が動かないのでカナリアの 80×200 は本番と一致したまま（§21.6） |
+
+### 21.0 隔離の確認（先に撃つ）
+
+```bash
+curl -sS http://127.0.0.1:4789/path
+```
+
+返り値（全項目が scratchpad 配下）:
+
+```json
+{"home":"…/scratchpad/oc2047/home",
+ "state":"…/scratchpad/oc2047/home/.local/state/opencode",
+ "config":"…/scratchpad/oc2047/home/.config/opencode",
+ "worktree":"…/scratchpad/oc2047/work",
+ "directory":"…/scratchpad/oc2047/work"}
+```
+
+`auth.json` は `umask 077` で複製し、検証後に削除した（削除確認済み）。モデルは `opencode.jsonc` の
+`"model": "github-copilot/claude-sonnet-4.6"` で固定し、**TUI のモデルピッカーは一度も開いていない**。
+ポートは 4788 / 4789 のみ、`--hostname 127.0.0.1`。3000 は使っていない。
+tmux は専用 socket `cmate-2047-oc` のみで、後始末は `kill-session -t '=ocw:'`。**`kill-server` は
+使っていない**（専用 socket なので最後の session 終了でサーバも自然終了した）。
+検証後にユーザーの `~/.local/share/opencode/opencode.db` の mtime が 8/25 のまま（＝書かれていない）
+ことと、既定 tmux サーバの 32 session が全部生きていることを確認している。
+
+### 21.1 サイドバー境界 — **121 桁**（1 桁刻みで両方向に再現）
+
+同一セッションの window を `resize-window -x <W> -y 200` で振り、
+`capture-pane` にサイドバー見出し（`Context` / `N tokens` / `LSP`）が現れるかを見た。
+
+```
+ 80x200 -> no-sidebar     121x200 -> sidebar
+100x200 -> no-sidebar     122x200 -> sidebar
+110x200 -> no-sidebar     ...
+119x200 -> no-sidebar     130x200 -> sidebar
+120x200 -> no-sidebar     200x200 -> sidebar
+```
+
+120 → 121 → 120 → 121 と往復させても同じ。**120 が「サイドバーが出ない最大幅」**である。
+
+サイドバーは右端 ~40 桁に、セッションタイトル・`Context` / トークン数 / 使用率 / 課金額・`LSP` 状態を
+描く。**別リージョンではない**: capture の同じ行の右側に載る。
+
+```
+# 200 桁での 1 フレーム（ANSI 除去、右端まで）
+  ┃                                    ... Ask anything... is the placeholder   ← セッションタイトル
+  ┃  Output exactly this one line ...      Context
+                                           9,174 tokens
+     1                                     1% used
+     2                                     $0.04 spent
+```
+
+### 21.2 fixture — 同一セッションを 3 幅で採った
+
+`tests/fixtures/opencode-live-2047/{w80,w120,w200}/` に 13 フレーム × 3 幅。
+**会話を撃ち直したのではなく、同じ状態のまま window を resize して撮った**ので、
+3 ファイルの差は幅の差だけである。`w80/` は対照であって置き換えではない
+（#1883 / #1893 / #1894 / #1896 が持つ 80 桁 fixture は 1 バイトも触っていない）。
+
+frames: `boot-idle` / `composer-residual` / `turn-running` / `esc-again-window` /
+`double-esc-interrupted` / `turn-complete` / `permission-bash` / `permission-edit` /
+`numbered-answer` / `phrase-in-response` / `sidebar-title-phrase` /
+`turn-aborted-after-complete` / `command-palette`
+
+### 21.3 120 桁 — **13 フレームすべてで verdict が 80 桁と一致**
+
+`detectSessionStatus` / `detectPrompt` / `resolvePromptWaiting` /
+`OPENCODE_IDLE_COMPOSER_PATTERN` / `OPENCODE_PERMISSION_PATTERN` /
+`OPENCODE_PROCESSING_INDICATOR` / `isOpenCodeComplete` を 1 オブジェクトにまとめて
+`toEqual` で比較（期待値を書かない比較なので、想定していない依存も落ちる）。**全 13 フレーム一致。**
+
+- `enter confirm`: 80 桁では `enter con` に切れ、120 / 200 では切れない。
+  `OPENCODE_PERMISSION_PATTERN` が **アンカーにしていない**のはこの truncation のため、という
+  docblock の判断がここで裏付けられた。アンカーである `Allow once  Allow always  Reject` は
+  3 幅ともバイト一致。
+- 保存される reply（`sliceOpenCodeTurn` → `cleanOpenCodeResponse`）は**改行位置だけ**が違う。
+  opencode が本文をペインに合わせて hard wrap するためで、空白を全部除けば一致する。
+  ただし 200 行の窓に入る本文量は幅で変わるので、**同一ではなく前方一致**が正しい比較。
+- `findOpenCodeChromeStart` は **80 桁で 190、120 / 200 桁で 192**。cwd フッタが 80 桁では 3 行、
+  120 桁以上では 1 行になるぶんだけ chrome が 2 行短い。#1911 がこのアンカーを
+  「下端からの固定オフセット」ではなく構造探索にしたのは、まさにこの動きのためである。
+
+### 21.4 200 桁 — 3 つの reader が壊れる
+
+| # | 壊れるもの | 80 / 120 | 200 | ユーザー入力に依存するか |
+|---|---|---|---|---|
+| 1 | `sliceOpenCodeTurn` + `cleanOpenCodeResponse` | reply は空文字列 | **サイドバーが reply として保存される**（`8,501 tokens` / `$0.00 spent` / `LSP` / `LSPs are disabled`） | **しない**（構造的） |
+| 2 | `detectSessionStatus`（branch D） | `ready` / `opencode_response_complete` | **`running` / `unknown_frame`** | しない |
+| 3 | `OPENCODE_IDLE_COMPOSER_PATTERN` | false | **true（誤検出）** | する（セッションタイトル依存） |
+
+1. **サイドバーが reply になる。** #1911 の turn region は「行の範囲」なので、
+   その行の右端に載っているサイドバーごと保存する。`phrase-in-response` は 80 / 120 では
+   空文字列に落ちる（本文が echo と marker の間に無い）ターンだが、200 では
+   サイドバーだけが本文として保存された。
+   なお `numbered-answer` は 200 でも clean に取れる — turn region の開始行(26)が
+   サイドバー最終行より下だったため。**つまり被害はターンがペインのどこに来たかで決まる**。
+   設定ごとに一定ではなくターンごとに不定という意味で、これは「常に壊れる」より悪い。
+2. **中断ターンの verdict が反転する。** branch D は content 行を末尾から一定本数だけ見る。
+   サイドバーが content 行を増やすので、80 / 120 では窓の中にあった**前のターンの
+   `▣ … · 36.1s`** が 200 では窓から外れる。同じセッションの同じ瞬間に別の答えが出る。
+3. **セッションタイトルが idle composer に化ける。** `OPENCODE_IDLE_COMPOSER_PATTERN` は
+   `^\s*┃\s*Ask anything\.\.\.` — 「gutter が先、次が phrase、間には空白しかない」。
+   これが「入力ボックスの行だ」と言えるのは **1 行が 1 ペインに属している間だけ**である。
+   121 桁以上ではサイドバーが transcript の gutter と同じ行にセッションタイトルを描くので、
+   タイトルに phrase が入っていれば #1883 が立てたアンカーをそのまま通り抜ける。
+
+副次的なコスト: 200 行 1 フレームは 80 桁で ~2.5 KB、200 桁で ~40 KB。
+サイドバーが触る行の全幅に背景色を塗るため。`capturePane` は tmux を `maxBuffer: 10 MB` で
+回している（`TMUX_HISTORY_LIMIT` の docblock 参照）。
+
+### 21.5 結論 — 既定は 80、上限は 120、env で開ける
+
+- `OPENCODE_PANE_WIDTH = 80`（既定、`src/config/tmux-pane-config.ts`）
+- `OPENCODE_SIDEBAR_MIN_WIDTH = 121`（計測値。ここ以上でサイドバーが出る）
+- `CM_OPENCODE_PANE_WIDTH` で上書き可。受理範囲 `[40, 400]`、10 進整数のみ。
+  範囲外・非整数は**既定に落とす**（`Number('0x50')` を 80 桁と読むような偶然を作らない）。
+  121 以上を指定した場合は `opencode-pane-width-sidebar-visible` を warn するが**拒否はしない**
+  （ブラウザで読むだけの運用者には選ばせてよい。黙って通さないだけ）。
+- **`opencode.ts` の 2 箇所は両方ともこの 1 本から読む。** 片方だけ直すと
+  「新規作成は 200 / 再接続は 80」になり、その差はサーバ再起動のあとにしか出ない。
+  `tests/unit/cli-tools/opencode-pane-width-2047.test.ts` が両経路を実 `OpenCodeTool` で撃つ。
+
+### 21.6 カナリア（#2050）との結合 — 既定が動かないので (a)/(b) は発生しない
+
+Issue 本文は「既定を 200 にするならカナリアも 200 へ移す (a) か、80 に留める理由を書く (b)」と
+言っていた。**既定を上げなかったので、カナリアの 80×200 は本番と一致したままである。**
+`tests/fixtures/canary/opencode-*.raw.txt` の 5 本は採り直していない（採り直す理由が無い）。
+
+ただし**将来ずれる形**は潰した:
+
+- `scripts/canary/tool-profiles.ts` の `paneWidth` はリテラル `80` から `OPENCODE_PANE_WIDTH` に変えた。
+  **`resolveOpencodePaneWidth()` ではない** — 運用者の `CM_OPENCODE_PANE_WIDTH` は自分のペインの話であって、
+  それがカナリアに届くと「fixture を採った幅と違う幅で撃つ」ことになる。
+- `tests/unit/canary-opencode-geometry-2047.test.ts` が、既定が動いた瞬間に赤くする。
+  赤はバグではなくチェックリスト（fixture 5 本の採り直しと
+  `OPENCODE_VERIFIED_AGAINST.paneGeometry` の押し直しが要る、という通知）。
+- `OPENCODE_VERIFIED_AGAINST.paneGeometry` は `'80x200'` のまま。同テストが
+  `${OPENCODE_PANE_WIDTH}x${OPENCODE_PANE_HEIGHT}` と一致することを固定する。
+
+### 21.7 モバイルの折返し（表示のみ・TUI 幅とは独立）
+
+opencode のペインは固定桁で組まれているので、スマホ幅で再折返しすると入力ボックス・
+権限ダイアログのボタン列・フッタが全部 2 行に割れる。#2049 が作った端末ビューのポリシー宣言
+（`src/config/terminal-display-compaction.ts`）に 3 つ目のフィールドを足した:
+
+- `mobileWrapMode: 'viewport' | 'frame'` — `frame` はフレーム自身の桁数を `ch` で与えて横スクロールさせる。
+  **opencode だけ** `frame`。claude / codex / copilot は `viewport`（＝#2047 以前と同じ）。
+- 桁数は `measureTerminalFrameColumns(output)` が**フレームから実測**する。
+  `OPENCODE_PANE_WIDTH` を読まないので、`CM_OPENCODE_PANE_WIDTH` を変えても配線ゼロで追従し、
+  幅を変える前に採ったフレームは採ったときの幅で描かれる。SGR を除いてから測り、
+  行末は trim する（opencode は全行を背景色つき空白でペイン幅まで埋めるので、
+  trim しないと**どのフレームもぴったりペイン幅**になって計測にならない）。
+- PC（`TerminalSplitPaneContent`）は読まない。PC のペインはどのみち幅が足りている。
+
+### 21.8 未計測・積み残し
+
+- **モデルピッカーは開いていない**ので、`model-picker` フレームの幅依存は測っていない
+  （ピッカーは既定モデルを書き換えるため、§4 の規則どおり触っていない）。
+  `command-palette` は `ctrl+p` で開けるので 3 幅とも採ってある。
+- `esc-again-after-marker`（#1894 の 2 つ目の window フレーム）は 3 幅では採っていない。
+  前ターンの marker と新ターンの echo と `⠦ Thinking:` が同時に窓に入る瞬間を
+  resize しながら 3 回捕まえる必要があり、5 秒の window では安定して撮れなかった。
+- 121〜199 桁のあいだで **サイドバーの列数が幅とともに変わるか**は測っていない（121 と 200 のみ）。
+  既定を上げない以上、上げるときに測ればよい。
+
+### 21.9 この節が変えたもの
+
+- `src/config/tmux-pane-config.ts` — `OPENCODE_PANE_WIDTH` / `OPENCODE_SIDEBAR_MIN_WIDTH` /
+  `OPENCODE_PANE_WIDTH_ENV` / `OPENCODE_PANE_WIDTH_MIN` / `OPENCODE_PANE_WIDTH_MAX` /
+  `resolveOpencodePaneWidth()`
+- `src/lib/cli-tools/opencode.ts` — ベタ書き 2 箇所を `resolveOpencodePaneWidthChecked()` へ
+  （警告はここ。config module は import ゼロを保つ）
+- `src/config/terminal-display-compaction.ts` — `mobileWrapMode` と `measureTerminalFrameColumns()`
+- `src/components/worktree/TerminalDisplay.tsx` — `wrapMode` prop
+- `src/components/worktree/MobileTerminalTab.tsx` — ポリシーから `mobileWrapMode` を渡す
+- `scripts/canary/tool-profiles.ts` — `paneWidth` を定数へ
+- `tests/fixtures/opencode-live-2047/**` — 13 フレーム × 3 幅 ＋ 採取手順の README

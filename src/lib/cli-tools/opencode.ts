@@ -64,7 +64,13 @@ import {
 import { sendMessageWithSubmitVerification } from './submit-verified-sender';
 import { invalidateCache } from '../tmux/tmux-capture-cache';
 import { ensureOpencodeConfig } from './opencode-config';
-import { OPENCODE_PANE_HEIGHT } from '@/config/tmux-pane-config';
+import {
+  OPENCODE_PANE_HEIGHT,
+  OPENCODE_PANE_WIDTH,
+  OPENCODE_PANE_WIDTH_ENV,
+  OPENCODE_SIDEBAR_MIN_WIDTH,
+  resolveOpencodePaneWidth,
+} from '@/config/tmux-pane-config';
 import { execFile } from 'child_process';
 import { basename, extname } from 'path';
 import { promisify } from 'util';
@@ -141,6 +147,57 @@ export const OPENCODE_EXIT_COMMAND = '/exit';
  * to size its read-back window.
  */
 export { OPENCODE_PANE_HEIGHT };
+
+/**
+ * OpenCode tmux pane width (columns).
+ *
+ * Re-exported from `@/config/tmux-pane-config` alongside the height (Issue
+ * #2047) so a caller that needs the geometry gets both from one import.
+ */
+export { OPENCODE_PANE_WIDTH };
+
+/**
+ * {@link resolveOpencodePaneWidth}, plus the one-line operator feedback the
+ * pure config module deliberately cannot emit (Issue #2047).
+ *
+ * `tmux-pane-config.ts` has no imports at all — that is a documented property
+ * (#1906), and pulling the logger in there would make every consumer of a
+ * constant depend on the logging stack. So the resolver stays silent and the
+ * warning lives here, at the two call sites that actually resize a pane.
+ *
+ * Two things are worth telling the operator, and neither is an error:
+ *
+ * - the value was DROPPED (not an integer, or outside the accepted bounds), so
+ *   the pane they are about to look at is the 80-column default rather than
+ *   what they asked for;
+ * - the value was ACCEPTED but lands at or above
+ *   {@link OPENCODE_SIDEBAR_MIN_WIDTH}, where opencode 1.18.22 paints its
+ *   right-hand sidebar into the same rows as the transcript. #2047 measured
+ *   what that does to this repo's own readers — a saved "reply" made entirely
+ *   of sidebar chrome, a status flip on an aborted turn, and a false idle
+ *   composer off the session title. It is still allowed, because an operator
+ *   who only ever reads the pane in the browser may want it; it is not silent.
+ *
+ * @returns Pane width in columns, ready to hand to `resize-window`.
+ */
+function resolveOpencodePaneWidthChecked(): number {
+  const requested = process.env[OPENCODE_PANE_WIDTH_ENV];
+  const width = resolveOpencodePaneWidth();
+
+  if (requested !== undefined && String(width) !== requested.trim()) {
+    logger.warn('opencode-pane-width-rejected', {
+      requested,
+      applied: width,
+    });
+  } else if (width >= OPENCODE_SIDEBAR_MIN_WIDTH) {
+    logger.warn('opencode-pane-width-sidebar-visible', {
+      width,
+      sidebarMinWidth: OPENCODE_SIDEBAR_MIN_WIDTH,
+    });
+  }
+
+  return width;
+}
 
 /**
  * Interval between readiness polls while opencode paints its TUI (Issue #1908).
@@ -249,8 +306,13 @@ export class OpenCodeTool extends BaseCLITool {
 
     const exists = await hasSession(sessionName);
     if (exists) {
+      // Issue #2047: the SAME width as the creation path below. These two used
+      // to spell `80` independently, which is the shape where "new sessions are
+      // 200 wide, reconnected ones are 80" ships without anyone noticing —
+      // a reconnect would silently hand the detectors a geometry the creation
+      // path had been moved away from.
       await this.reconcileExistingSession(sessionName, {
-        windowWidth: 80,
+        windowWidth: resolveOpencodePaneWidthChecked(),
         windowHeight: OPENCODE_PANE_HEIGHT,
       });
       // Issue #1763: the pane outlived this process (a CommandMate restart), so
@@ -285,13 +347,16 @@ export class OpenCodeTool extends BaseCLITool {
       // Wait a moment for the session to be created
       await new Promise((resolve) => setTimeout(resolve, TUI_SESSION_CREATE_WAIT_MS));
 
-      // Resize tmux window to 80 columns (hide sidebar for clean capture-pane output)
+      // Resize tmux window so opencode's right-hand sidebar stays hidden and
+      // `capture-pane` returns transcript rows only. Issue #2047 measured the
+      // boundary this depends on (sidebar at >=121 columns, hidden at <=120) and
+      // moved the number to `OPENCODE_PANE_WIDTH` / `CM_OPENCODE_PANE_WIDTH`.
       // [SEC-001] Uses execFile (not exec) to prevent shell meta-character injection via sessionName
       try {
         await execFileAsync('tmux', [
           // Issue #1156: exact-match target so resize never leaks to a prefix-colliding instance
           'resize-window', '-t', exactTarget(sessionName),
-          '-x', '80', '-y', String(OPENCODE_PANE_HEIGHT),
+          '-x', String(resolveOpencodePaneWidthChecked()), '-y', String(OPENCODE_PANE_HEIGHT),
         ]);
       } catch {
         // Non-fatal: resize may fail in some environments

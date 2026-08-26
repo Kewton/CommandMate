@@ -21,13 +21,19 @@
  *    branch E of `tools/opencode/detect.ts` anchors on.
  * 2. **Geometry is production's, per tool.** claude's pane is
  *    `TUI_PANE_WIDTH x TUI_PANE_HEIGHT` (200x1000); opencode's is
- *    `80 x OPENCODE_PANE_HEIGHT` (80x200), the geometry `launchSession()` in
+ *    `OPENCODE_PANE_WIDTH x OPENCODE_PANE_HEIGHT` (80x200), the geometry `launchSession()` in
  *    `src/lib/cli-tools/opencode.ts` resizes every real session to. The
  *    `verifiedAgainst` stamps record exactly these two shapes, and a fixture
  *    captured at any other width is not a capture of what production sees.
  */
 
-import { OPENCODE_PANE_HEIGHT, TMUX_HISTORY_LIMIT, TUI_PANE_HEIGHT, TUI_PANE_WIDTH } from '@/config/tmux-pane-config';
+import {
+  OPENCODE_PANE_HEIGHT,
+  OPENCODE_PANE_WIDTH,
+  TMUX_HISTORY_LIMIT,
+  TUI_PANE_HEIGHT,
+  TUI_PANE_WIDTH,
+} from '@/config/tmux-pane-config';
 import { STARTUP_OVERLAYS } from './expectations';
 import { OPENCODE_STARTUP_OVERLAYS } from './opencode-expectations';
 import { CANARY_CAPTURE_LINES } from './probe';
@@ -133,10 +139,23 @@ export const OPENCODE_TOOL_PROFILE: CanaryToolProfile = {
   id: 'opencode',
   label: 'opencode',
   executable: 'opencode',
-  // 80 columns: `launchSession()` resizes every production opencode pane to
-  // exactly this, and OPENCODE_PERMISSION_PATTERN's docblock records that the
-  // dialog's `enter confirm` hint is truncated to `enter con` at this width.
-  paneWidth: 80,
+  // `launchSession()` resizes every production opencode pane to exactly this,
+  // and OPENCODE_PERMISSION_PATTERN's docblock records that the dialog's
+  // `enter confirm` hint is truncated to `enter con` at 80 columns.
+  //
+  // Issue #2047 replaced the literal `80` with the constant so the canary cannot
+  // be left behind by a change to the default: this profile IS the claim "the
+  // canary fires at production geometry", and a default that moved while this
+  // number stayed put would turn that claim into a lie without failing anything.
+  // The `tests/unit/canary-opencode-geometry-2047.test.ts` guard is the other
+  // half — it fails if the default moves while `tests/fixtures/canary/opencode-*`
+  // still holds frames captured at the old width.
+  //
+  // Deliberately the DEFAULT (`OPENCODE_PANE_WIDTH`) and not
+  // `resolveOpencodePaneWidth()`: an operator's `CM_OPENCODE_PANE_WIDTH` is a
+  // choice about their own panes, and letting it reach in here would silently
+  // re-shoot the canary at a width its recorded fixtures were never captured at.
+  paneWidth: OPENCODE_PANE_WIDTH,
   paneHeight: OPENCODE_PANE_HEIGHT,
   // opencode runs in the alternate screen, so a capture can never return more
   // than the pane's own rows — the same number `resolveCaptureSpec('opencode')`
