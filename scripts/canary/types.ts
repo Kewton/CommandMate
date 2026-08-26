@@ -1,17 +1,47 @@
 /**
- * Shared types for the detection canary (Issue #1727).
+ * Shared types for the detection canary (Issue #1727, second tool in #2050).
  *
- * The canary drives a REAL `claude` TUI inside a throwaway tmux session and
- * feeds the captured frames to the same detection entry points production uses
+ * The canary drives a REAL agent TUI inside a throwaway tmux session and feeds
+ * the captured frames to the same detection entry points production uses
  * (`detectSessionStatus` for the sidebar/status path, `detectPrompt` for the
- * Auto-Yes path). A new Claude Code release that changes the TUI therefore
+ * Auto-Yes path). A new release of that CLI that changes the TUI therefore
  * turns the canary red before a user hits it.
+ *
+ * Which CLI a scenario drives is {@link CanaryScenario.tool}; everything the
+ * harness needs to know about that CLI is its {@link StartupOverlay} list and
+ * the rest of its profile in `tool-profiles.ts`.
  */
 
 import type { StatusDetectionResult } from '@/lib/detection/status-detector';
 import type { PromptDetectionResult } from '@/lib/detection/prompt-detector';
 import type { AutoYesPolicy } from '@/lib/polling/auto-yes-resolver';
 import type { AutoYesPolicySuppression } from '@/lib/polling/auto-yes-suppression-state';
+
+/**
+ * CLI tools the canary can drive (Issue #2050).
+ *
+ * Declared here rather than in `tool-profiles.ts` so the profile table can
+ * import the scenario/observation types without a cycle.
+ */
+export type CanaryToolId = 'claude' | 'opencode';
+
+/**
+ * A startup screen that eats keystrokes before the composer is usable
+ * (Issue #1727; per-tool since #2050).
+ *
+ * `isolated-home.ts` seeds each tool's config so none of these should appear,
+ * but a new CLI version can add one back — and a swallowed first prompt looks
+ * exactly like a detection regression. `session.ts` dismisses the answerable
+ * ones and aborts on the fatal ones with an actionable message.
+ */
+export interface StartupOverlay {
+  id: string;
+  pattern: RegExp;
+  /** Key to dismiss it, or `null` when the run cannot continue. */
+  dismissKey: 'Enter' | 'Escape' | null;
+  /** Explanation printed when `dismissKey` is null. */
+  fatalHint?: string;
+}
 
 /**
  * One hook delivery the canary's receiver answered (Issue #1847).
@@ -169,6 +199,16 @@ export class ObservationTimeoutError extends Error {
 export interface CanaryScenario {
   /** Stable id, used by `--only` / `--skip` and as the fixture filename. */
   id: string;
+  /**
+   * Which CLI this scenario drives (Issue #2050).
+   *
+   * A run drives exactly one tool (`--tool`), because the throwaway HOME, the
+   * pane geometry and the readiness row all differ per tool. The id is also
+   * what `probeFrame` passes to `detectSessionStatus` / `buildDetectPromptOptions`,
+   * so a scenario tagged with the wrong tool would be judged by another tool's
+   * rules rather than failing to run.
+   */
+  tool: CanaryToolId;
   /** One-line title for `--list` and the summary table. */
   title: string;
   /** What the scenario proves, in prose (printed by `--list`). */
