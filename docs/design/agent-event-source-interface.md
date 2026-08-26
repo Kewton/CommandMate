@@ -210,6 +210,93 @@ turn-gate の**状態機械**は汎用（初出だけ通す／arm→complete）�
 
 ---
 
+### 3.4 `configScope: 'none'` を維持する裁定（#2053）
+
+**裁定: 不採用。opencode の `configScope` は `'none'` のまま、launch plan に
+`OPENCODE_CONFIG_CONTENT` を載せない。**
+
+#2053 は「Auto-Yes の deny を `OPENCODE_CONFIG_CONTENT`（inline JSON、ファイルを書かない）で
+起動時に注入すれば、`permission.asked` の往復ごと消せる」という提案である。
+**機構は実在し、狙いどおりに効くことを実測した。** それでも採らない。
+
+実測は [`opencode-server-live-verification.md` §26](./opencode-server-live-verification.md#26-issue-2053-auto-yes-の-deny-を-opencode_config_content-で注入できるか-opencode-11822--2026-08-26)
+（opencode 1.18.22、隔離 HOME、`47xx` 帯、`GET /path` を毎回のゲートに）。**以下の数字はすべてそこにある。**
+
+#### 3.4.1 効くことは確かめた（不採用の理由は「効かないから」ではない）
+
+- `OPENCODE_CONFIG_CONTENT` は 1.18.22 に**実在し、読まれる**。#1908 が測った 4 層の**上に乗る 5 層目**で、
+  `<worktree>/opencode.jsonc` にも勝つ。Issue 本文の「project config より上位」は**正しい**（§26.3）。
+- **受入条件は満たした。** L3 に `{"permission":{"bash":"ask"}}` を置いた状態で `rm -rf ./victim` を撃つと
+  `permission.asked` が 1 件出てターンが固着する（対照）。inline に `{"permission":{"bash":{"rm *":"deny"}}}` を
+  足すと **`permission.asked` は 0 件**、tool part は `error`、**4.3 秒後に `session.idle`** でターンが完走する（§26.4）。
+- **§3.1 の `noDecision: { kind: 'blocks' }` が意味する事故（10 分 19 秒放置しても解けない承認待ち）が、
+  その 1 件については消える。** 論点 1 の `share: "disabled"` も同じ経路で入る。
+
+#### 3.4.2 それでも採らない理由
+
+**理由 1（決定打）— 利用者の permission 設定を、警告なしに、2 通りの経路で壊す。**
+
+| 経路 | 実測（§26.5） |
+|---|---|
+| **型が違うと層ごと消える** | 利用者の `permission.bash: "ask"`（文字列）に CommandMate が `{"rm *":"deny"}`（オブジェクト）を注入すると、深いマージは働かず**利用者の層が丸ごと置き換わる**。同じ `echo hello-2053` が、注入前は `permission.asked` を出して止まり、**注入後は無ダイアログで `exit 0` で走った**。「全部訊いて」が既定の `*: allow` に降格している |
+| **順序が具体性に勝つ** | 解決後のルールは層の順に並んだ**平坦なリストで後勝ち**。利用者が**完全一致で明示的に許可**した `"rm -rf ./victim": "allow"` が、後ろに並んだ CommandMate の `"rm *": "deny"` に負けた |
+
+**#1908 と同じ問題だが、#1908 の解が使えない。** #1908 は「自分が書く先の隣に操作者のファイルがあるか」を
+`fs` で見て**降りる**ことができた（`ensureOpencodeConfig()` の skip list）。ここで衝突するのは
+**ファイルではなく opencode のマージ結果**で、CommandMate からは見えない。`GET /config` は合流後の
+1 個のオブジェクトしか返さず、**どのキーが誰の由来かを CommandMate も利用者も後から言えない。**
+より下の層へ逃がすこともできない — CommandMate が持てる最下位 `$OPENCODE_CONFIG`（L2）は
+**利用者のマシン全体設定 L1 に勝ってしまう**うえ、その変数は #1908 が
+「操作者が設定を所有している証拠」として読んでいる。**降りる判断を下せる場所が無い。**
+
+**理由 2 — 論点 2 の写像が存在しない（§26.6）。** CommandMate の `stopPattern` は
+**ANSI 除去済みペイン全文に対する JS `RegExp`** で、効果は**ラッチ**（そのインスタンスの Auto-Yes を
+止め、`stop_pattern_matched` と一致抜粋を人間に見せる）。`denyPatterns` も regex で、効果は
+**「この 1 件を自動応答しない」＝人間に返す**。opencode 側は **1 回の tool call の command 文字列に対する glob** で、
+効果は**その 1 回の拒否（人間には何も返らない）**。regex → glob は全域写像ではなく、
+変換できる部分でも**人間に返っていたものが人間に見えない自動拒否に化ける**。
+決定打は時刻で、**`stopPattern` は `send` のたびに決まり、`OPENCODE_CONFIG_CONTENT` は
+プロセス起動時に固定される。** 実行時の差し替え口も無い: `PATCH /config` は
+**ボディをエコーするだけで解決後の config が変わらない**（ファイルも書かれない）、
+`PATCH /global/config` は**効くが `~/.config/opencode/opencode.jsonc` を書き換える**
+（コメントの消える整形で。マシン全体で、#1908 が潰した破壊そのもの）。
+
+**理由 3 — CommandMate のバグが「見えない死に方」になる（§26.7）。**
+壊れた JSON を渡すと **TUI は起動を拒否して exit status 0 で消え、ポートが開かない**
+（`prepareLaunch` の「throw しない＝ fail-open」規約では防げない。失敗するのは子プロセスである）。
+`serve` 形態では**プロセスが生き残り `GET /global/health` は `{"healthy":true}` を返し続ける**一方、
+`GET /path` も `GET /config` も `ConfigJsonError` になる — つまり **#2054 が UI に繋いだ
+`liveness` / `probeActivity` が「生きている」と報告する。** 逆向きにも静かで、
+**種別キーの綴り間違いは無警告で無視される**ので「注入したつもりで 1 つも効いていない」状態が
+効いている状態と外から区別できない。`configScope: 'none'` の現状では、
+CommandMate がこの故障を作ることが**構造的にできない**。
+
+> 引き換えに得られるのは、**利用者が既に deny と設定した 1 件**の往復が消えることである。
+> 承認待ちで固着する事故（§3.1 の `blocks`）の本体は、**利用者が `ask` にしたもの**で起きる。
+> そこは deny 注入では消せない — 消すには利用者の `ask` を CommandMate が `deny` に書き換えることになり、
+> それが理由 1 そのものである。
+
+#### 3.4.3 次に読む人へ（再検討するならこの形）
+
+Issue が指している問題は本物で、**閉じていない**: opencode の承認往復は
+**タイムアウト無しの fail-closed**（§3.1 / [§5.5](./opencode-server-live-verification.md#55-項目-5--承認裁定の応答とno-decision-の実際の意味)）で、
+CommandMate が黙るとエージェントは永久に止まる。
+
+再検討するなら**書く向きではなく読む向き**にすること。`beginAgentSession()` の時点で
+**既に合流済みの `permission` を読む**（`GET /config`、または launch 前なら `opencode debug config`）だけなら、
+
+- 利用者の意図が CommandMate に入る一方で、**CommandMate の意図は利用者の config に入らない**
+- precedence 層が 1 つも増えないので理由 1 が発生しない
+- 壊れた JSON を子プロセスに渡さないので理由 3 が発生しない
+
+「この tool call は config で deny 済みなので、承認を待つ必要が無い／利用者に見せるべきだ」を
+CommandMate 側だけで言える。**本 Issue のスコープ外**なので、やるなら別 Issue を立てること。
+
+**この裁定は `tests/unit/hooks/sources/opencode-config-scope-2053.test.ts` に固定してある。**
+§3.3 の 5 件と同じ扱いで、**不採用も pin する** — 同じ提案が 3 回目に来ないようにするためである。
+
+---
+
 ## 4. ツールを 1 つ足す手順
 
 > 見積りの目安: push 型（codex / copilot / gemini / antigravity）は**ファイル 1 本 ＋ レジストリ 1 行 ＋ テスト 1 本**。
@@ -289,6 +376,7 @@ turn-gate の**状態機械**は汎用（初出だけ通す／arm→complete）�
 - **`AgentInstanceRef` にパスや設定の場所を足す。** あれはキーで、6 モジュールが等値比較する。起動時だけ要るものは `AgentLaunchContext` へ。
 - **pull 型を turn-gate 無しで足す。** 再送は必ず来る（§4 手順 6′）。
 - **`supportedEvents` に「出せるが CommandMate には届かない語」を書く。** あの一覧は**届く語**の約束で、待つ側はそれしか見ない（§3.3.2）。
+- **opencode の launch plan に `OPENCODE_CONFIG_CONTENT` を足す。** inline config は precedence の**最上位**で、利用者が書いた `permission` を**警告なしに上書きする**（型が違えば層ごと消え、順序は具体性に勝つ）。壊れた JSON は TUI を**exit 0 で黙って落とし**、`serve` 形態では `/global/health` だけが `healthy` を返し続ける。#2053 で実測のうえ不採用（§3.4）。
 
 ---
 
