@@ -72,3 +72,108 @@ export const OPENCODE_PANE_HEIGHT = 200;
  * 1977/2000 lines used, i.e. actively losing transcript).
  */
 export const TMUX_HISTORY_LIMIT = 20000;
+
+/**
+ * Default OpenCode tmux pane width (columns) — Issue #2047.
+ *
+ * ## Why 80 is a measurement and not a leftover
+ *
+ * `launchSession()` in `lib/cli-tools/opencode.ts` used to spell this `80`
+ * inline, twice, with the comment "hide sidebar for clean capture-pane output".
+ * #2047 measured what that comment is worth on opencode 1.18.22, and it is
+ * load-bearing: **opencode paints a right-hand sidebar at 121 columns and wider,
+ * and hides it at 120 and narrower.** The boundary was walked one column at a
+ * time on a live TUI and is reproducible in both directions (see
+ * `docs/design/opencode-server-live-verification.md` §21).
+ *
+ * The sidebar is not a separate region of the capture. It shares ROWS with the
+ * transcript, so at >=121 columns every captured line is
+ * `<transcript text> … <sidebar text>` and the detection layer reads both as one
+ * row. Measured consequences at 200 columns, on frames captured from the same
+ * session as their 80/120 counterparts:
+ *
+ * - `sliceOpenCodeTurn()` + `cleanOpenCodeResponse()` saved the sidebar as the
+ *   assistant's reply (`8,501 tokens / $0.00 spent / LSP / LSPs are disabled`)
+ *   for a turn whose real reply extracted to the empty string at 80 and 120.
+ * - `detectSessionStatus` flipped `ready`/`opencode_response_complete` to
+ *   `running`/`unknown_frame` on an aborted turn, because the sidebar rows push
+ *   the previous turn's `▣ … · 36.1s` out of branch D's content window.
+ * - `OPENCODE_IDLE_COMPOSER_PATTERN` false-matched, because the sidebar prints
+ *   the session TITLE on a row that already carries the transcript gutter — so
+ *   `^\s*┃\s*Ask anything\.\.\.` matches a title, not a composer.
+ *
+ * At 120 columns all 13 measured frames produced byte-identical verdicts to 80.
+ * **120 is therefore the measured safe ceiling, and the default stays 80** —
+ * #2047's acceptance condition was "raise the default only if 200 is green",
+ * and 200 is not.
+ *
+ * @see OPENCODE_SIDEBAR_MIN_WIDTH
+ * @see resolveOpencodePaneWidth
+ */
+export const OPENCODE_PANE_WIDTH = 80;
+
+/**
+ * The narrowest pane width at which opencode 1.18.22 paints its right-hand
+ * sidebar (Issue #2047, measured — 120 hides it, 121 shows it, walked one column
+ * at a time and reproduced in both directions).
+ *
+ * Anything at or above this width interleaves sidebar text into transcript rows,
+ * which is what {@link OPENCODE_PANE_WIDTH}'s docblock lists the damage from.
+ * `lib/cli-tools/opencode.ts` warns when an operator's
+ * `CM_OPENCODE_PANE_WIDTH` lands here or above.
+ */
+export const OPENCODE_SIDEBAR_MIN_WIDTH = 121;
+
+/** Environment variable that overrides {@link OPENCODE_PANE_WIDTH}. */
+export const OPENCODE_PANE_WIDTH_ENV = 'CM_OPENCODE_PANE_WIDTH';
+
+/**
+ * Bounds accepted for {@link OPENCODE_PANE_WIDTH_ENV}.
+ *
+ * The floor is opencode's own layout: its input box plus gutter needs room, and
+ * below ~40 columns the footer rows the detector anchors on wrap into each
+ * other. The ceiling is a guard against a typo (`8000`) resizing a pane to
+ * something tmux will accept and every `capture-pane` will then pay for — a
+ * 200-row frame already grows from ~2.5 KB at 80 columns to ~40 KB at 200
+ * because of the sidebar's background painting (measured, #2047 §21).
+ */
+export const OPENCODE_PANE_WIDTH_MIN = 40;
+/** @see OPENCODE_PANE_WIDTH_MIN */
+export const OPENCODE_PANE_WIDTH_MAX = 400;
+
+/**
+ * Resolve the pane width a new or reconnected opencode session is sized to.
+ *
+ * Read at CALL time rather than at module load so a process can be started with
+ * the variable set without import-order deciding whether it is seen, and so
+ * tests can drive it without module-registry surgery.
+ *
+ * A value that is not a base-10 integer, or that falls outside
+ * [{@link OPENCODE_PANE_WIDTH_MIN}, {@link OPENCODE_PANE_WIDTH_MAX}], is ignored
+ * in favour of {@link OPENCODE_PANE_WIDTH}: a malformed override must never
+ * produce a pane no detector has ever been measured against. Callers that want
+ * to tell the operator their value was dropped compare the result against what
+ * they passed in.
+ *
+ * @param env - Environment to read. Defaults to `process.env` where there is one.
+ * @returns Pane width in columns.
+ */
+export function resolveOpencodePaneWidth(
+  env: Record<string, string | undefined> | undefined = typeof process === 'undefined'
+    ? undefined
+    : process.env
+): number {
+  const raw = env?.[OPENCODE_PANE_WIDTH_ENV];
+  if (raw === undefined) return OPENCODE_PANE_WIDTH;
+
+  const trimmed = raw.trim();
+  // `Number()` accepts '0x50', '1e2' and '' — none of which an operator means by
+  // a column count, and all of which would silently resize a real pane.
+  if (!/^\d+$/.test(trimmed)) return OPENCODE_PANE_WIDTH;
+
+  const parsed = Number.parseInt(trimmed, 10);
+  if (parsed < OPENCODE_PANE_WIDTH_MIN || parsed > OPENCODE_PANE_WIDTH_MAX) {
+    return OPENCODE_PANE_WIDTH;
+  }
+  return parsed;
+}

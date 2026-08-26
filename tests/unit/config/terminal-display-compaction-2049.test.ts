@@ -39,9 +39,13 @@ describe('Issue #2049: getTerminalDisplayCompaction', () => {
     );
     expect(untouched).toContain('copilot');
     for (const tool of untouched) {
+      // `mobileWrapMode` joined the policy in Issue #2047; `viewport` is the
+      // pre-#2047 behaviour, so this still says "nothing about these tools
+      // changed" — which is what the assertion is for.
       expect(getTerminalDisplayCompaction(tool), tool).toEqual({
         compactTuiLayoutPadding: false,
         preservePaintedPanelRows: false,
+        mobileWrapMode: 'viewport',
       });
     }
   });

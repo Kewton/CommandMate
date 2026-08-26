@@ -54,7 +54,11 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
   // Shares the PC declaration in `TerminalSplitPaneContent` through one config
   // module — before #2049 this was a second hand-written copy of the tool list,
   // which is how PC and phone would come to render the same session differently.
-  const { compactTuiLayoutPadding, preservePaintedPanelRows } =
+  // Issue #2047 added `mobileWrapMode` to the same declaration: opencode's pane
+  // is pinned to a fixed column count on the tmux side, so on a phone the frame
+  // keeps that width and the pane scrolls sideways rather than re-wrapping every
+  // row in half. PC (`TerminalSplitPaneContent`) deliberately does not read it.
+  const { compactTuiLayoutPadding, preservePaintedPanelRows, mobileWrapMode } =
     getTerminalDisplayCompaction(cliToolId);
 
   // Issue #1494 / #1496: detection-independent navigation hatch on mobile.
@@ -82,6 +86,7 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
           disableAutoFollow={disableAutoFollow}
           compactTuiLayoutPadding={compactTuiLayoutPadding}
           preservePaintedPanelRows={preservePaintedPanelRows}
+          wrapMode={mobileWrapMode}
           className="h-full"
         />
       </div>

@@ -17,6 +17,10 @@ import { normalizeOpencodeTerminalOutputForDisplay } from '@/lib/terminal-displa
 import { useTerminalScroll } from '@/hooks/useTerminalScroll';
 import { useTerminalSearch } from '@/hooks/useTerminalSearch';
 import { TerminalSearchBar } from '@/components/worktree/TerminalSearchBar';
+import {
+  measureTerminalFrameColumns,
+  type TerminalWrapMode,
+} from '@/config/terminal-display-compaction';
 
 /**
  * Props for TerminalDisplay component
@@ -57,6 +61,19 @@ export interface TerminalDisplayProps {
    * Default false — claude / codex keep the exact Issue #1172 rule.
    */
   preservePaintedPanelRows?: boolean;
+  /**
+   * Issue #2047: how the pane lays the frame out horizontally.
+   *
+   * `'viewport'` (default, and what every caller did before #2047) re-wraps rows
+   * at the pane's own width. `'frame'` gives the output block the frame's own
+   * measured column count in `ch` and lets the pane scroll sideways, so a TUI's
+   * boxes and gutters stay aligned on a screen narrower than the capture.
+   *
+   * Display only, like the compaction flags above: `output` and every consumer
+   * of it are untouched, and the value is measured from the frame in hand rather
+   * than read from the tmux geometry config, so the two never have to agree.
+   */
+  wrapMode?: TerminalWrapMode;
   /** Additional CSS classes */
   className?: string;
 }
@@ -103,6 +120,7 @@ export const TerminalDisplay = memo(function TerminalDisplay({
   disableAutoFollow = false,
   compactTuiLayoutPadding = false,
   preservePaintedPanelRows = false,
+  wrapMode = 'viewport',
   className = '',
 }: TerminalDisplayProps) {
   const { scrollRef, autoScroll, handleScroll, scrollToBottom, scrollToTop } =
@@ -127,6 +145,19 @@ export const TerminalDisplay = memo(function TerminalDisplay({
       ? normalizeOpencodeTerminalOutputForDisplay(rawOutput)
       : normalizeTerminalOutputForDisplay(rawOutput);
   }, [compactTuiLayoutPadding, preservePaintedPanelRows, rawOutput]);
+
+  // Issue #2047: in `frame` mode the output block is given the frame's OWN width
+  // so its rows stay column-aligned on a screen narrower than the capture, and
+  // the pane scrolls sideways instead of re-wrapping. `min-width` rather than
+  // `width` so a phone WIDER than the frame still fills its pane.
+  //
+  // Measured from `displayOutput`, i.e. after compaction — compaction only
+  // removes whole rows, never columns, so the widest row is the same either way,
+  // but reading the same string the renderer reads keeps them from diverging.
+  const frameStyle = useMemo<React.CSSProperties | undefined>(() => {
+    if (wrapMode !== 'frame') return undefined;
+    return { minWidth: `${measureTerminalFrameColumns(displayOutput)}ch` };
+  }, [wrapMode, displayOutput]);
 
   // [Issue #47] Terminal search - scrollRef is reused as containerRef
   const {
@@ -272,7 +303,10 @@ export const TerminalDisplay = memo(function TerminalDisplay({
         'p-4',
         'rounded-lg',
         'overflow-y-auto',
-        'overflow-x-hidden',
+        // Issue #2047: `frame` mode gives the output block a fixed `ch` width, so
+        // the pane has to be able to scroll to the far end of it. `viewport`
+        // mode keeps the pre-#2047 clip.
+        wrapMode === 'frame' ? 'overflow-x-auto' : 'overflow-x-hidden',
         // Dark theme
         'bg-gray-900',
         'text-gray-300',
@@ -290,7 +324,7 @@ export const TerminalDisplay = memo(function TerminalDisplay({
       ]
         .filter(Boolean)
         .join(' '),
-    [isActive, className]
+    [isActive, className, wrapMode]
   );
 
   // Issue #1079: the scroll FAB stays subtle while idle and reveals to full
@@ -353,7 +387,14 @@ export const TerminalDisplay = memo(function TerminalDisplay({
       >
         {/* Terminal output with sanitized HTML. Issue #1120: rendered as keyed
             append-only chunks so text selection survives streaming updates. */}
-        <div className="whitespace-pre-wrap break-words">
+        <div
+          className={
+            wrapMode === 'frame'
+              ? 'whitespace-pre w-max'
+              : 'whitespace-pre-wrap break-words'
+          }
+          style={frameStyle}
+        >
           {renderedChunks.map((chunk) => (
             <span key={chunk.key} dangerouslySetInnerHTML={{ __html: chunk.html }} />
           ))}
