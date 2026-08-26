@@ -219,6 +219,23 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
     0  - Response sent
     99 - Prompt already dismissed (prompt_no_longer_active)
 
+### commandmate interrupt <worktree-id>
+  Interrupt the turn an agent is generating (the GUI's interrupt button).
+  Not 'stop' -- that stops the CommandMate server.
+
+  commandmate interrupt <id>                    # Every running session of the worktree
+  commandmate interrupt <id> --instance codex-2 # Only that instance
+  commandmate interrupt <id> --json             # { success, message, interrupted[] }
+
+  Omitting --instance is a broadcast, not "the primary instance": the route
+  interrupts every session that is running. There is no --agent (wait's rule:
+  a tool name does not say which session).
+
+  Exit codes:
+    0  - At least one session was interrupted
+    30 - The worktree exists but nothing was running (nothing was interrupted)
+    99 - No such worktree
+
 ### commandmate capture <worktree-id>
   Get current terminal output.
 
@@ -336,6 +353,7 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
   10  PROMPT_DETECTED  - Prompt detected during wait
   20  VERIFY_FAILED    - A verification gate failed (verify, wait --verify)
   21  NOT_STARTED      - Nothing to verify: no commits, no uncommitted changes
+  30  NO_ACTIVE_SESSIONS - interrupt found no running session to interrupt
   99  UNEXPECTED_ERROR - Unexpected error / resource not found / no verdict
   124 TIMEOUT          - Wait or verification timeout exceeded
 

@@ -1837,3 +1837,38 @@ export interface AgentSessionDiffFile {
   /** `added` | `deleted` | `modified`, or null. */
   status: 'added' | 'deleted' | 'modified' | null;
 }
+
+/**
+ * One session an interrupt actually reached (Issue #2101).
+ *
+ * Mirrors: src/app/api/worktrees/[id]/interrupt/route.ts InterruptResult.
+ *
+ * `cliToolId` is `string` rather than a union for the same reason
+ * {@link WorktreeItem.cliToolId} is: the CLI bundle keeps its own copy of the
+ * API shapes, and a newer daemon naming a tool this build has never heard of
+ * must print through rather than fail to parse.
+ */
+export interface InterruptedSession {
+  cliToolId: string;
+  /** Primary instances carry `instanceId === cliToolId` (Issue #868). */
+  instanceId: string;
+  /** tmux session name, e.g. `mcbd-opencode-<worktree-id>`. */
+  sessionName: string;
+}
+
+/**
+ * Mirrors: src/app/api/worktrees/[id]/interrupt/route.ts POST 200 response
+ * (Issue #2101).
+ *
+ * The route answers 404 `{ error: 'No active sessions found' }` instead of a
+ * 200 with an empty list, so `interrupted` is never empty on this shape — see
+ * `src/cli/commands/interrupt.ts` for how that 404 becomes
+ * {@link InterruptExitCode.NO_ACTIVE_SESSIONS} rather than a generic
+ * "resource not found".
+ */
+export interface InterruptResponse {
+  success: boolean;
+  /** e.g. `Interrupt sent to 1 session(s)`. */
+  message: string;
+  interrupted: InterruptedSession[];
+}

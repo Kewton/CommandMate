@@ -20,6 +20,8 @@ import { createSyncCommand } from './commands/sync';
 import { createSendCommand } from './commands/send';
 import { createWaitCommand } from './commands/wait';
 import { createRespondCommand } from './commands/respond';
+// Issue #2101: CLI face of POST /api/worktrees/:id/interrupt
+import { createInterruptCommand } from './commands/interrupt';
 import { createCaptureCommand } from './commands/capture';
 import { createAutoYesCommand } from './commands/auto-yes';
 import { createVerifyCommand } from './commands/verify';
@@ -227,6 +229,10 @@ export function buildProgram(): Command {
   program.addCommand(createSendCommand());
   program.addCommand(createWaitCommand());
   program.addCommand(createRespondCommand());
+  // Issue #2101: stop the turn an agent is generating. Registered next to
+  // `respond` because the two are the pair that act on a LIVE turn; `stop`
+  // above stops the CommandMate server and is not related.
+  program.addCommand(createInterruptCommand());
   program.addCommand(createCaptureCommand());
   program.addCommand(createAutoYesCommand());
 

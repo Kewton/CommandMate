@@ -421,6 +421,18 @@ export interface CaptureOptions {
   limit?: string;
 }
 
+/** interrupt command options [Issue #2101] */
+export interface InterruptOptions {
+  json?: boolean;
+  /**
+   * Issue #2101: agent instance ID or alias. Omitted, EVERY running session of
+   * the worktree is interrupted — that is the route's own behaviour and the
+   * reason the flag is worth reaching for on a multi-instance worktree.
+   */
+  instance?: string;
+  token?: string;
+}
+
 /** auto-yes command options [Issue #518] */
 export interface AutoYesOptions {
   enable?: boolean;
@@ -456,6 +468,38 @@ export const SkillExitCode = {
   COMMITTED_RECONCILING: 13,
 } as const;
 export type SkillExitCode = typeof SkillExitCode[keyof typeof SkillExitCode];
+
+/**
+ * interrupt command exit codes (Issue #2101).
+ *
+ * Follows the WaitExitCode / VerifyExitCode / SkillExitCode precedent:
+ * infrastructure and input failures keep using {@link ExitCode}, and only the
+ * one outcome a caller has to branch on gets a code of its own.
+ *
+ * 30 rather than a value already spent by another command. The other three
+ * namespaces overlap on purpose — 11 is both {@link WaitExitCode.UPSTREAM_FAULT}
+ * and {@link SkillExitCode.BLOCKED} — and that is tolerable there because no
+ * script pipes a `wait` verdict into a `skill` handler. `interrupt` is
+ * different: the orchestration loop that runs it is the same loop that reads
+ * `wait`'s and `verify`'s codes out of one `$?`, so a shared value would make
+ * "nothing was generating" indistinguishable from "a gate failed" (20) or "the
+ * agent never started" (21) at exactly the point where those three lead to
+ * opposite recoveries.
+ */
+export const InterruptExitCode = {
+  SUCCESS: 0,
+  /**
+   * The worktree exists but no session was running, so nothing was interrupted.
+   *
+   * Non-zero because the caller asked for a turn to be stopped and no turn was
+   * stopped — but deliberately NOT {@link ExitCode.UNEXPECTED_ERROR}, which is
+   * where the generic 404 mapping would have put it alongside "that worktree
+   * does not exist". Those two need different recoveries: this one means "you
+   * are already past the state you wanted", the other means "your id is wrong".
+   */
+  NO_ACTIVE_SESSIONS: 30,
+} as const;
+export type InterruptExitCode = typeof InterruptExitCode[keyof typeof InterruptExitCode];
 
 /** Shared by every skill subcommand [Issue #1237] */
 export interface SkillCommonOptions {

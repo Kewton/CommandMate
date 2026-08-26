@@ -102,6 +102,8 @@ describe('buildProgram', () => {
       'send',
       'wait',
       'respond',
+      // Issue #2101: CLI face of POST /api/worktrees/:id/interrupt
+      'interrupt',
       'capture',
       'auto-yes',
       // Issue #1544: verification gates (.commandmate/verify.yaml)
