@@ -2628,3 +2628,224 @@ Issue の受入条件は「隔離サーバで question / provider エラーを�
 - `src/lib/hooks/sources/opencode/subscription.ts` — `installation.update-available` を `deliver()` で読む（7 語に写像されないため）＋ 接続スコープの重複抑止
 - `src/lib/push/push-sender.ts` — `FailurePushReason` に `agent-session-error`、`NotificationEvent.updateAvailable`
 - `locales/{en,ja}/notifications.json` — `failureAgentSession*` / `updateAvailable`
+
+---
+
+## 20. Issue 2048: instance ごとの agent / model / variant（opencode 1.18.22 / 2026-08-26）
+
+Issue #2048 は「instance 設定に `model` / `agent` / `variant` を追加し、launch plan に反映し、
+ヘッダに `agent · model · variant` を出す」。**Issue 本文の想定のうち 1 つは実測で崩れ、
+1 つは実測で裏付けられ、1 つは Issue が想定していなかった既存欠陥として出てきた。**
+
+| Issue 本文の想定 | 実測 |
+|---|---|
+| 候補は `GET /config/providers` と `GET /agent` から取れる | **取れる**（§20.1）。ただし `models` も `variants` も **配列ではなくオブジェクト** |
+| variant は launch plan に反映できる | **できない**（§20.3）。TUI に `--variant` が無く、渡すと usage を出して終了する |
+| variant が `message.updated` の payload に載るか（要実測） | **載る**（§20.4）。`info.variant` / `Session.model.variant` |
+| （言及なし） | `prompt_async` に `agent` を載せないと、`--agent plan` で起動したペインでもそのターンは `build` で走る（§20.5） |
+
+### 20.0 隔離の確認（先に撃つ）
+
+```bash
+curl -sS http://127.0.0.1:4848/path
+```
+
+返り値（全項目が scratchpad 配下）:
+
+```json
+{"home":"…/scratchpad/oc2048/home",
+ "state":"…/scratchpad/oc2048/home/.local/state/opencode",
+ "config":"…/scratchpad/oc2048/home/.config/opencode",
+ "worktree":"…/scratchpad/oc2048/work",
+ "directory":"…/scratchpad/oc2048/work"}
+```
+
+`auth.json` は `umask 077` で複製し、検証後に削除した（削除確認済み）。モデルは `opencode.jsonc` の
+`"model": "github-copilot/claude-sonnet-4.6"` で固定し、**TUI のモデルピッカーは一度も開いていない**。
+ポートは 4848 / 4849 / 4850 / 4851 のみ、`--hostname 127.0.0.1`。3000 は使っていない。
+tmux は専用 socket `cmate-2048-oc` のみ（既定サーバには 1 コマンドも撃っていない。後始末は
+`kill-session -t '=<name>:'` で、`kill-server` は使っていない）。
+
+### 20.1 候補の取り方 — `models` も `variants` も **オブジェクト**
+
+`GET /config/providers` は `{ default, providers }`。`providers` は配列だが、その中の `models` は
+**model id をキーにしたオブジェクト**である（#2042 が `limit.context` を読むときに踏んだのと同じ形）。
+さらに各 model の `variants` も **variant 名をキーにしたオブジェクト**で、値が `effort` /
+`reasoningEffort` を持つ。
+
+```jsonc
+// providers[] の 1 要素（github-copilot / claude-sonnet-4.6 を抜粋）
+{ "id": "github-copilot", "name": "GitHub Copilot",
+  "models": {
+    "claude-sonnet-4.6": {
+      "id": "claude-sonnet-4.6", "name": "Claude Sonnet 4.6",
+      "limit": { "context": 1000000, "input": 936000, "output": 64000 },
+      "variants": {
+        "low":    { "thinking": { "type": "adaptive" }, "effort": "low" },
+        "medium": { "thinking": { "type": "adaptive" }, "effort": "medium" },
+        "high":   { "thinking": { "type": "adaptive" }, "effort": "high" },
+        "max":    { "thinking": { "type": "adaptive" }, "effort": "max" } } } } }
+```
+
+- 計測機の 4 provider 20 model のうち **`variants: {}`（バリアント無し）が実在する**（`kimi-k2.7-code`）。
+  「キーが無い」ではなく「空オブジェクト」なので、`variants` の有無で判定してはいけない。
+- 観測された variant 名は `low` / `medium` / `high` / `max` / `minimal` / `none` / `xhigh` の 7 種。
+  **列挙ではなく model ごとの `variants` のキー**として扱うこと（model により集合が違う）。
+- model id には `/` と `:` が入る（`lmstudio/qwen/qwen3-coder-30b`、`ollama-cloud/deepseek-v4-flash:0731`）。
+  `provider/model` を分解するときは **最初の `/`** で切る。
+
+`GET /agent` は**配列**（`/config/providers` と形が違う）。
+
+```jsonc
+[ {"name":"build","mode":"primary","description":"The default agent. …"},
+  {"name":"compaction","mode":"primary","hidden":true},
+  {"name":"explore","mode":"subagent","description":"…"},
+  {"name":"general","mode":"subagent","description":"…"},
+  {"name":"plan","mode":"primary","description":"Plan mode. Disallows all edit tools."},
+  {"name":"summary","mode":"primary","hidden":true},
+  {"name":"title","mode":"primary","hidden":true} ]
+```
+
+素の 1.18.22 で 7 件。`hidden: true` が 3 件（可視な agent には `hidden` キー自体が無い）、
+`mode: "subagent"` が 2 件。**起動時に指定できるのは `primary` かつ非 hidden の 2 件＝`build` / `plan`**
+で、これは Issue #2048 の受入条件が名指ししている組と一致する。
+
+### 20.2 TUI が受け付ける起動フラグ
+
+`opencode --help`（1.18.22、TUI = `opencode [project]`）の Options に在るもの:
+
+```text
+  -m, --model      model to use in the format of provider/model      [string]
+      --agent      agent to use                                      [string]
+  -c, --continue / -s, --session / --fork / --prompt / --auto / --mini …
+```
+
+`--agent` / `-m` はどちらも効く。実測（`--agent plan --model github-copilot/claude-haiku-4.5`）で
+composer のフッタが `Plan · Claude Haiku 4.5 (latest) GitHub Copilot` になり、
+`message.updated.info` も `agent: "plan"` / `modelID: "claude-haiku-4.5"` になった。
+
+### 20.3 **`--variant` は TUI に無い。渡すと起動しない**（Issue 本文と食い違う）
+
+`--variant` は **`opencode run` のフラグ**であって TUI のフラグではない。
+
+```text
+$ opencode run --help
+      --variant      model variant (provider-specific reasoning effort, e.g., high, max, minimal)
+```
+
+TUI に渡すと yargs が **usage バナーを出して終了**する。実測 2 回（tmux 内 / 直接実行の両方）で、
+どちらもプロセスが即終了し `GET /global/health` は接続拒否だった＝**ペインにエージェントが 1 つも立たない**。
+
+```bash
+# tmux 内。18 秒後に session ごと消えている
+tmux -L cmate-2048-oc new-session -d -s oc-tui … "opencode --port 4849 --hostname 127.0.0.1 \
+  --agent plan --model github-copilot/claude-haiku-4.5 --variant high"
+# => no server running on …/cmate-2048-oc、curl 4849 は Failed to connect
+```
+
+`opencode.jsonc` の `"agent": { "plan": { "variant": "high" } }` も試したが、**ターンに届かなかった**
+（`--agent plan` で起動して 1 ターン回し、`message.updated.info.variant` は**キーごと不在**）。
+`--model github-copilot/claude-sonnet-4.6/high` という綴りも試したが、5 分以上応答が返らず
+**サーバ側ログに 1 行も届かなかった**（サポートされない綴り）。
+
+→ **結論: variant は起動引数では渡せない。** CommandMate の launch plan は `--agent` と `--model` だけを付ける。
+
+### 20.4 variant は `message.updated` に**載る**（Issue の要実測項目への回答）
+
+`AssistantMessage` は `variant` を宣言している（`GET /doc`。`required` には無い＝任意）。
+実測でも載った。
+
+| 経路 | `message.updated.info.variant` |
+|---|---|
+| `opencode run --agent plan --variant high --model …` | `"high"` |
+| `POST /session/:id/prompt_async` に `{"variant":"high"}` | `"high"` |
+| 何も指定しない（モデル既定） | **キーごと不在** |
+| `opencode.jsonc` の `agent.plan.variant` | **キーごと不在**（§20.3） |
+
+`session.updated` 側は `Session.model` が `ModelRef`（`{id, providerID, variant?}`）なので
+**`info.model.variant`** に入る。つまり読み手は 2 つの綴りを持つ必要がある。
+
+```jsonc
+// session.updated（variant あり）
+"info": { "agent": "build", "model": { "id":"claude-sonnet-4.6", "providerID":"github-copilot", "variant":"high" } }
+// message.updated（variant あり）— こちらは info 直下のフラットなキー
+"info": { "role":"assistant", "agent":"build", "mode":"build", "variant":"high",
+          "modelID":"claude-sonnet-4.6", "providerID":"github-copilot" }
+```
+
+**ペインには出ない。** variant を効かせたターンでも step 行は `▣  Build · Claude Sonnet 4.6 · 2.3s`、
+composer フッタは `Plan · Claude Haiku 4.5 (latest) GitHub Copilot` のままで、
+どちらにも variant は現れなかった。`src/lib/detection/model-info-extractor.ts` の
+「opencode は reasoning effort をペインのどこにも出さない」は 1.18.22 でも成立している。
+**画面に無いだけで、構造化イベントには在る** — これが #2048 が effort 表示を埋められる理由。
+
+未検証（推測で埋めていない）: variant を指定したときに実際に推論量が変わるか（トークン数の比較はしていない）。
+opencode は**未知の variant も検証せず受け付ける**（`"totally-not-a-variant"` を送って `204`、
+`message.updated.info.variant` にそのまま反射。`session.error` も出ない）ので、
+`variants` に無い名前を送っても壊れないが、効いている保証も無い。
+
+### 20.5 `prompt_async` に `agent` を載せないと `build` に戻る（既存欠陥）
+
+`POST /session/:id/prompt_async` の body は `{ messageID, model:{providerID,modelID}, agent, variant, parts, … }`。
+**`agent` を省いたリクエストは、`--agent plan` で起動したペインでも `build` でターンを回す。**
+
+```text
+# ペインは --agent plan で起動。TUI からタイプした 1 ターン目 => agent: "plan"
+# 2 ターン目を prompt_async（agent 無し・variant:"high"）で投げる
+=> message.updated.info: {"agent":"build","mode":"build","variant":"high", …}
+=> ペインの step 行も  ▣  Build · Claude Sonnet 4.6 · 2.3s
+```
+
+TUI から打った場合に `plan` が保たれるのは、TUI が自分の agent を body に載せているから。
+CommandMate は #2035 以降 `agent` を載せずに `prompt_async` を使っているので、
+**`--agent plan` のペインは CommandMate が送信するたび `build` に戻っていた。**
+#2048 で instance 設定の `agent` を body に載せることで解消する（未設定の instance は
+キーごと省くので、従来の body とバイト一致のまま）。
+
+### 20.6 受入条件の実測（`plan` / model / `high`）
+
+Issue の受入条件は `plan` / `openai/gpt-5` / `high`。計測機に openai provider が無いため
+**model は `github-copilot/claude-haiku-4.5` で代用**した（provider/model の解決経路は同一）。
+起動行は CommandMate が組み立てる文字列そのものを使った。
+
+```bash
+'opencode' --port 4851 --hostname 127.0.0.1 --agent 'plan' --model 'github-copilot/claude-haiku-4.5'
+```
+
+| 観測点 | 値 |
+|---|---|
+| composer フッタ | `Plan · Claude Haiku 4.5 (latest) GitHub Copilot` |
+| step 行（`prompt_async` のターン） | `▣  Plan · Claude Haiku 4.5 (latest) · 3.0s` |
+| `message.updated.info` | `{"agent":"plan","mode":"plan","modelID":"claude-haiku-4.5","providerID":"github-copilot","variant":"high"}` |
+
+**agent と model はフッタと `message.updated` が一致する。variant はフッタに存在しない**
+（§20.4 のとおり、opencode 側の非対称であって CommandMate の読み落としではない）。
+
+### 20.7 非汚染の証拠
+
+| 項目 | 値 |
+|---|---|
+| 版 | **1.18.22**（`GET /global/health`） |
+| 隔離 HOME | `GET /path` の 5 項目すべてが scratchpad 配下であることを確認済み |
+| ポート | 4848 / 4849 / 4850 / 4851。3000 は使っていない。`--hostname 127.0.0.1` |
+| tmux | 専用 socket `cmate-2048-oc` のみ。`kill-server` / `set-option -g` / `bind-key` は使っていない |
+| モデルピッカー | **一度も開いていない**（`opencode.jsonc` で固定。`tab` / `ctrl+t` / `/models` も押していない） |
+| `auth.json` | mode 600 で複製し、**検証後に削除**（削除確認済み） |
+| ユーザー HOME 非汚染 | 検証終了時点で `~/.local/share/opencode/opencode.db` の mtime は検証開始より前の **8/25 14:16** のまま |
+| 後始末 | serve / SSE tap を **PID 指定で kill**（`pkill -f opencode` は使っていない）。tmux は `kill-session -t '=<name>:'` |
+
+### 20.8 この節が変えたもの
+
+- `src/types/opencode-instance-settings.ts`（新規）— 3 設定の語彙とパターン検証（シェル行に載るため）
+- `src/lib/hooks/sources/opencode/client.ts` — `GET /config/providers` の読み手を 1 本化し
+  （#2042 の `limit.context` もそこから派生）、`GET /agent` の読み手と `prompt_async` の
+  `agent` / `model` / `variant` を追加
+- `src/lib/hooks/sources/opencode/launch-settings.ts`（新規）— 起動行が同期で読めるミラー
+- `src/lib/hooks/sources/opencode/source.ts` — `prepareOpencodeLaunch` に `--agent` / `--model`
+  （**`--variant` は付けない**）
+- `src/lib/hooks/sources/opencode/mappers.ts` / `subscription.ts` — `frameVariant` と effort ラッチへの記録
+- `src/lib/session/agent-event-state.ts` / `src/lib/detection/model-info-extractor.ts` —
+  「エージェント自身が申告した effort」を第 3 の情報源として `mergeModelInfo` に追加
+- `src/lib/db/migrations/v59-opencode-instance-settings.ts` / `src/lib/db/agent-instances-db.ts` — 保存先
+- `src/app/api/worktrees/[id]/instances/opencode/route.ts`（新規）— 設定の読み書きと候補配布
+- `src/components/worktree/AgentSettingsPane.tsx` — `OpencodeInstanceSettings`

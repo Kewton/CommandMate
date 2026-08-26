@@ -205,5 +205,19 @@
   "memoSearchInputLabel": "メモを検索",
   "memoSearchPrev": "前の一致（前へ）",
   "memoSearchNext": "次の一致（次へ）",
-  "memoSearchClose": "検索を閉じる（閉じる）"
+  "memoSearchClose": "検索を閉じる（閉じる）",
+  "opencodeSettings": "opencode 起動設定",
+  "opencodeSettingsDescription": "このインスタンスが opencode を起動・送信するときのエージェント／モデル／バリアントを指定します。",
+  "opencodeAgent": "エージェント",
+  "opencodeModel": "モデル",
+  "opencodeVariant": "バリアント（推論の深さ）",
+  "opencodeDefault": "opencode のデフォルト",
+  "opencodeAgentPlaceholder": "build",
+  "opencodeModelPlaceholder": "provider/model",
+  "opencodeVariantPlaceholder": "high",
+  "opencodeNoVariants": "このモデルにバリアントはありません。",
+  "opencodeSettingsOffline": "opencode が起動していないため候補を取得できません。値は直接入力できます（モデルは provider/model 形式）。",
+  "opencodeVariantLaunchNote": "エージェントとモデルは次回の起動から反映されます。バリアントは opencode 1.18.22 の TUI に --variant が無いため起動引数では渡せず、CommandMate が送信するプロンプトに適用されます（次のメッセージから反映）。",
+  "opencodeSettingsLoadError": "opencode 起動設定の読み込みに失敗しました。",
+  "opencodeSettingsSaveError": "opencode 起動設定の保存に失敗しました。"
 }

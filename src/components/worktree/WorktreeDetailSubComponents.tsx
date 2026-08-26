@@ -122,11 +122,20 @@ export function deriveWorktreeStatus(
  * The one string every surface shows for "what is this agent running on"
  * (Issue #1783 model, #1784 effort).
  *
- * `model · effort`, or the model alone when the effort is unknown — which is
- * the ordinary case, not an edge one: no tool publishes an effort over hooks,
- * so it is only known while the CLI's chrome is on screen to be read. Returns
- * null when there is no model either, so every call site's existing
+ * `model · effort`, or the model alone when the effort is unknown — still the
+ * ordinary case rather than an edge one, though for a narrower reason since
+ * Issue #2048: it is read off the CLI's own chrome for codex and claude, derived
+ * from the model id for antigravity, and **published by the agent** for opencode
+ * alone, which calls it a `variant`. Nothing knows it for gemini or copilot.
+ * Returns null when there is no model either, so every call site's existing
  * `{label && …}` guard keeps meaning "show nothing".
+ *
+ * Issue #2048 needed no change here, and that is the point of the parameter
+ * order: opencode's variant arrives through the same `reasoningEffort` field
+ * every other tool's level does (`agent-event-state` latches it and
+ * `mergeModelInfo` ranks it), so `agent · model · variant` is what this already
+ * composed. What did change is that the third segment is now reachable for a
+ * tool whose pane never prints it.
  *
  * Centralised rather than interpolated at each of the four display sites so the
  * pane header, the roster rows, the mobile sheet and the header pill's tooltip

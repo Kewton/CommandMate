@@ -71,6 +71,10 @@ import {
   toOpencodePendingPermission,
   toOpencodePendingQuestion,
 } from './payloads';
+import {
+  getOpencodeLaunchSettings,
+  opencodeLaunchArguments,
+} from './launch-settings';
 import { getAssignedOpencodePort } from './ports';
 import {
   getOpencodeLiveness,
@@ -268,6 +272,22 @@ async function probeOpencodeActivity(
  * `--hostname` is passed explicitly even though `127.0.0.1` is the default,
  * because the default is the security property: the server is unauthenticated,
  * and `--mdns` (never passed) would move it to `0.0.0.0` (#1758 §5.8.3).
+ *
+ * ## The instance's own settings (Issue #2048)
+ *
+ * `--agent` and `--model` are appended when the operator configured them for
+ * this instance, from the cache `loadOpencodeLaunchSettings` filled immediately
+ * before this call — see `./launch-settings` for why the value arrives that way
+ * rather than on {@link AgentLaunchContext}. **The `bare` branches above stay
+ * bare**: a launch with no port has no structured events, and an operator who
+ * turned hook injection off asked for the pre-#1763 command line, so neither is
+ * a place to start adding flags.
+ *
+ * The variant is deliberately not here. `--variant` is a flag of `opencode run`
+ * and **not** of the TUI (measured on 1.18.22,
+ * `docs/design/opencode-server-live-verification.md` §20.3): passing it makes
+ * opencode print its usage and exit, leaving an empty pane. It travels on the
+ * prompt instead, which is the one channel measured to apply it.
  */
 export function prepareOpencodeLaunch({
   target,
@@ -280,8 +300,11 @@ export function prepareOpencodeLaunch({
   if (!isHookInjectionEnabled()) return bare;
   const port = getAssignedOpencodePort(target);
   if (port === null) return bare;
+  const settings = opencodeLaunchArguments(getOpencodeLaunchSettings(target));
   return {
-    command: `${shellQuote(executablePath)} --port ${port} --hostname ${OPENCODE_SERVER_HOST}`,
+    command:
+      `${shellQuote(executablePath)} --port ${port} --hostname ${OPENCODE_SERVER_HOST}` +
+      settings,
     // Nothing is written to disk. `configScope: 'none'` says the same thing to
     // a caller that asks the capabilities instead of the plan.
     settingsPath: null,

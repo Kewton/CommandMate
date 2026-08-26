@@ -430,6 +430,18 @@ function sameModel(a: string, b: string): boolean {
  * live frames, so `effort` is always null here. That is not a gap in this
  * reader: the number is not on screen to read.
  *
+ * **Issue #2048 re-measured this on 1.18.22 and it still holds — the effort was
+ * never on the pane, and now it does not need to be.** A session deliberately
+ * run at `variant: high` printed `▣  Build · Claude Sonnet 4.6 · 2.3s` on the
+ * step row and `Plan · Claude Haiku 4.5 (latest) GitHub Copilot` on the composer
+ * footer: neither surface gained a variant
+ * (`docs/design/opencode-server-live-verification.md` §20.4). The value arrives
+ * on the *structured* channel instead — `Session.model.variant` and
+ * `message.updated.info.variant` — and is latched by
+ * `agent-event-state`'s `recordAgentReportedEffort`, which {@link mergeModelInfo}
+ * now ranks above everything this module can see. So the null below is still the
+ * honest answer for the screen, and the display is no longer limited by it.
+ *
  * ## Why not the footer model bar
  *
  * The Issue also names `Build · <model> GitHub Copilot` — the bar two rows above
@@ -589,6 +601,13 @@ export function deriveEffortFromModelId(modelId: string | null | undefined): str
  *  - **effort — the id wins for antigravity**, because agy encodes the level in
  *    the id it reports on every event, and that beats a bar that is only on
  *    screen while the session lives.
+ *  - **effort — the agent's own word wins outright when it said one**
+ *    (Issue #2048). opencode publishes a `variant` on the frames CommandMate is
+ *    subscribed to, and that is the agent naming its own reasoning effort — the
+ *    same argument the model half makes for hooks beating the screen, applied to
+ *    the half #1784 had no hook source for. It ranks above the antigravity
+ *    derivation as well, because a tool that states the value has not left it to
+ *    be inferred from an id.
  *
  * The derivation reads the *merged* model rather than the hook value alone:
  * effort-in-the-id is a property of the id being published, and when no hook has
@@ -598,15 +617,20 @@ export function deriveEffortFromModelId(modelId: string | null | undefined): str
  * @param cliToolId - Which tool; only `antigravity` derives effort from the id
  * @param hooksModel - {@link import('@/lib/session/agent-event-state').getLastKnownAgentModel}
  * @param captured - {@link extractModelInfo}'s answer, latched by the caller
+ * @param hooksEffort - {@link import('@/lib/session/agent-event-state').getLastReportedAgentEffort}
+ *   (Issue #2048). Optional and last so every pre-#2048 call site is unchanged,
+ *   and null for every tool that publishes no effort — which is all of them but
+ *   opencode.
  */
 export function mergeModelInfo(
   cliToolId: CLIToolType,
   hooksModel: string | null | undefined,
-  captured: ModelInfo | null | undefined
+  captured: ModelInfo | null | undefined,
+  hooksEffort?: string | null
 ): ModelInfo {
   const model = (hooksModel || null) ?? captured?.model ?? null;
   const capturedEffort = captured?.effort ?? null;
-  const effort =
+  const derivedEffort =
     cliToolId === 'antigravity' ? (deriveEffortFromModelId(model) ?? capturedEffort) : capturedEffort;
-  return { model, effort };
+  return { model, effort: (hooksEffort || null) ?? derivedEffort };
 }

@@ -44,6 +44,11 @@
 import { randomBytes } from 'crypto';
 import { pathToFileURL } from 'url';
 import { createLogger } from '@/lib/logger';
+import type {
+  OpencodeAgentChoice,
+  OpencodeModelChoice,
+  OpencodeProviderChoice,
+} from '@/types/opencode-instance-settings';
 
 const logger = createLogger('lib/hooks/sources/opencode/client');
 
@@ -461,6 +466,55 @@ export function newOpencodeMessageId(): string {
 }
 
 /**
+ * What one prompt should run as, when the instance has it configured (#2048).
+ *
+ * Every field is optional and an absent field is **not** the same as a default:
+ * the body below simply does not carry the key, and opencode then applies its
+ * own. That distinction is measured rather than assumed, and it is the reason
+ * {@link promptSelectionBody} omits keys instead of sending nulls — a turn
+ * posted with no `agent` runs as `build` even when the pane was launched
+ * `--agent plan` (§20.5), so "omit" and "send the launch value" are two
+ * different behaviours and only one of them is what a configured instance wants.
+ */
+export interface OpencodePromptSelection {
+  /** The persona this turn should run as, e.g. `plan`. */
+  agent?: string | null;
+  /** `{ providerID, modelID }`, both halves or neither. */
+  model?: { providerID: string; modelID: string } | null;
+  /**
+   * The model variant, e.g. `high`.
+   *
+   * The **only** channel that applies one. The TUI has no `--variant` flag and
+   * `opencode.jsonc`'s `agent.<name>.variant` did not reach the turn either;
+   * this key did, and `message.updated.info.variant` came back with it
+   * (`docs/design/opencode-server-live-verification.md` §20.4).
+   */
+  variant?: string | null;
+}
+
+/**
+ * The `prompt_async` body keys a selection contributes, or nothing.
+ *
+ * Keys are omitted rather than nulled so a request from an instance with no
+ * settings is byte-identical to the pre-#2048 one.
+ */
+export function promptSelectionBody(
+  selection: OpencodePromptSelection | null | undefined
+): Record<string, unknown> {
+  if (!selection) return {};
+  const body: Record<string, unknown> = {};
+  if (selection.agent) body.agent = selection.agent;
+  if (selection.model?.providerID && selection.model.modelID) {
+    body.model = {
+      providerID: selection.model.providerID,
+      modelID: selection.model.modelID,
+    };
+  }
+  if (selection.variant) body.variant = selection.variant;
+  return body;
+}
+
+/**
  * Post one prompt to a session without waiting for the reply (Issue #2035).
  *
  * `POST /session/:id/prompt_async`. This is the route the send path takes when
@@ -496,14 +550,19 @@ export async function sendOpencodePrompt(
   port: number,
   sessionId: string,
   messageId: string,
-  parts: readonly OpencodePromptPart[]
+  parts: readonly OpencodePromptPart[],
+  selection?: OpencodePromptSelection | null
 ): Promise<boolean> {
   const url = `${opencodeBaseUrl(port)}/session/${encodeURIComponent(sessionId)}/prompt_async`;
   try {
     const response = await loopbackFetch(url, {
       method: 'POST',
       headers: { 'Content-Type': OPENCODE_JSON_CONTENT_TYPE },
-      body: JSON.stringify({ messageID: messageId, parts }),
+      body: JSON.stringify({
+        messageID: messageId,
+        ...promptSelectionBody(selection),
+        parts,
+      }),
       signal: AbortSignal.timeout(OPENCODE_REQUEST_TIMEOUT_MS),
     });
     if (response.status !== 204) {
@@ -974,7 +1033,37 @@ export async function fetchOpencodeModelContextLimit(
   providerId: string,
   modelId: string
 ): Promise<number | null> {
-  const body = await requestJson(`${opencodeBaseUrl(port)}/config/providers`);
+  const body = await fetchOpencodeProvidersDocument(port);
+  return readOpencodeModelContextLimit(body, providerId, modelId);
+}
+
+/**
+ * `GET /config/providers`, unparsed — the one reader of that route (#2048).
+ *
+ * Issue #2042 read this route for `limit.context` and Issue #2048 needs the
+ * same document for the *model and variant catalogue* the settings pane offers.
+ * Two independent readers of one endpoint is how the two come to disagree about
+ * its shape, so both go through here and each takes what it needs from the
+ * body. Nothing is cached: the call is a loopback round trip on a route that
+ * answers from memory, and the alternative is a cache that has to be invalidated
+ * when the operator adds a provider.
+ */
+async function fetchOpencodeProvidersDocument(port: number): Promise<unknown | null> {
+  return requestJson(`${opencodeBaseUrl(port)}/config/providers`);
+}
+
+/**
+ * `limit.context` for one model, out of a `GET /config/providers` body.
+ *
+ * Split from the fetch so the arithmetic is testable against a recorded body
+ * rather than a live server. Behaviour is #2042's, unchanged: `context` only,
+ * and a non-positive value is "no percentage" rather than a divisor.
+ */
+export function readOpencodeModelContextLimit(
+  body: unknown,
+  providerId: string,
+  modelId: string
+): number | null {
   if (!isPlainObject(body)) return null;
   const providers = Array.isArray(body.providers) ? body.providers : [];
   for (const provider of providers) {
@@ -992,6 +1081,121 @@ export async function fetchOpencodeModelContextLimit(
     return context;
   }
   return null;
+}
+
+/**
+ * The provider / model / variant catalogue the settings pane offers (#2048).
+ *
+ * Three shapes measured on 1.18.22 (§20.1), each of which is easy to guess
+ * wrong:
+ *
+ *  - **`providers` is an array, `models` is an object.** The models are keyed by
+ *    model id, not listed — `providers[].models["claude-sonnet-4.6"]` — so an
+ *    `Array.isArray` guard on it drops every model there is.
+ *  - **`variants` is an object too**, keyed by variant name (`low` / `medium` /
+ *    `high` / `max` / `minimal` / `none` / `xhigh` across the measured
+ *    catalogue), whose values carry `effort` or `reasoningEffort`. Only the keys
+ *    are kept: the name is what `prompt_async` takes, and the effort inside it
+ *    is opencode's own restatement of the same word.
+ *  - **`variants: {}` is a real answer**, not a missing field — `kimi-k2.7-code`
+ *    publishes it — and it is how the pane knows to offer no variant at all.
+ *
+ * Entries that do not parse are dropped rather than represented: this feeds a
+ * `<select>`, and an option with no id is an option that cannot be chosen.
+ *
+ * @param port - The instance's server
+ * @returns The catalogue, or an empty array when the server could not be asked
+ */
+export async function fetchOpencodeProviderCatalog(
+  port: number
+): Promise<OpencodeProviderChoice[]> {
+  return readOpencodeProviderCatalog(await fetchOpencodeProvidersDocument(port));
+}
+
+/** {@link fetchOpencodeProviderCatalog}'s parser, over an already-read body. */
+export function readOpencodeProviderCatalog(body: unknown): OpencodeProviderChoice[] {
+  if (!isPlainObject(body)) return [];
+  const providers = Array.isArray(body.providers) ? body.providers : [];
+  const catalog: OpencodeProviderChoice[] = [];
+  for (const provider of providers) {
+    if (!isPlainObject(provider)) continue;
+    const id = typeof provider.id === 'string' ? provider.id : null;
+    if (!id) continue;
+    const models: OpencodeModelChoice[] = [];
+    const rawModels = isPlainObject(provider.models) ? provider.models : {};
+    for (const [modelId, rawModel] of Object.entries(rawModels)) {
+      if (!isPlainObject(rawModel)) continue;
+      const variants = isPlainObject(rawModel.variants) ? Object.keys(rawModel.variants) : [];
+      models.push({
+        id: modelId,
+        name: typeof rawModel.name === 'string' && rawModel.name.length > 0
+          ? rawModel.name
+          : modelId,
+        variants: variants.sort(),
+      });
+    }
+    models.sort((a, b) => a.id.localeCompare(b.id));
+    catalog.push({
+      id,
+      name: typeof provider.name === 'string' && provider.name.length > 0 ? provider.name : id,
+      models,
+    });
+  }
+  catalog.sort((a, b) => a.id.localeCompare(b.id));
+  return catalog;
+}
+
+/**
+ * The personas this server will start a session as — `GET /agent` (#2048).
+ *
+ * An **array**, unlike `/config/providers`'s object-of-models, and its entries
+ * carry two fields that decide what the pane may offer (§20.1): `mode` is
+ * `primary` or `subagent`, and `hidden` is `true` on the three internal
+ * personas (`compaction`, `summary`, `title`). A stock 1.18.22 install answered
+ * seven agents of which exactly two — `build` and `plan` — are primary and
+ * visible, which is the pair Issue #2048's acceptance condition names.
+ *
+ * Both fields are kept rather than filtered here: this is the reader, and which
+ * agents a *launch* may name is a policy the caller states —
+ * {@link isOpencodeLaunchableAgent}.
+ *
+ * @param port - The instance's server
+ * @returns Every agent the server declared, or an empty array when it could not
+ *   be asked
+ */
+export async function fetchOpencodeAgents(port: number): Promise<OpencodeAgentChoice[]> {
+  return readOpencodeAgents(await requestJson(`${opencodeBaseUrl(port)}/agent`));
+}
+
+/** {@link fetchOpencodeAgents}'s parser, over an already-read body. */
+export function readOpencodeAgents(body: unknown): OpencodeAgentChoice[] {
+  if (!Array.isArray(body)) return [];
+  const agents: OpencodeAgentChoice[] = [];
+  for (const entry of body) {
+    if (!isPlainObject(entry)) continue;
+    const name = typeof entry.name === 'string' ? entry.name : null;
+    if (!name) continue;
+    // `hidden` is absent on the visible ones rather than `false`, so the test is
+    // truthiness of the key and not a comparison against `false`.
+    if (entry.hidden === true) continue;
+    agents.push({
+      name,
+      mode: typeof entry.mode === 'string' ? entry.mode : '',
+      description: typeof entry.description === 'string' ? entry.description : null,
+    });
+  }
+  return agents;
+}
+
+/**
+ * Whether an agent may be named on a launch line or a prompt.
+ *
+ * `primary` only. A `subagent` (`explore`, `general`) is something a running
+ * session spawns for a `task` tool call; naming one as the session's own persona
+ * is not a thing opencode's UI offers and not something measured to work.
+ */
+export function isOpencodeLaunchableAgent(agent: OpencodeAgentChoice): boolean {
+  return agent.mode === 'primary';
 }
 
 /** A finite, non-negative token count, or 0 — the shape `tokens.*` arrives in. */

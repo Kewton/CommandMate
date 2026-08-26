@@ -84,6 +84,10 @@ import {
 } from '@/lib/hooks/sources/opencode/runtime';
 import { getAssignedOpencodePort } from '@/lib/hooks/sources/opencode/ports';
 import {
+  getOpencodeLaunchSettings,
+  opencodePromptSelection,
+} from '@/lib/hooks/sources/opencode/launch-settings';
+import {
   fetchOpencodeHealth,
   newOpencodeMessageId,
   opencodeFileUrl,
@@ -528,7 +532,17 @@ export class OpenCodeTool extends BaseCLITool {
       }
 
       const messageId = newOpencodeMessageId();
-      if (!(await sendOpencodePrompt(port, sessionId, messageId, parts))) return false;
+      // Issue #2048: the instance's own persona / model / variant, when the
+      // operator configured any. Read on every send rather than once at launch,
+      // because a send can be the first thing this process does for a pane it
+      // did not start (a CommandMate restart reattaches an existing session) —
+      // and because an omitted `agent` is not a no-op: a `prompt_async` body
+      // with no `agent` runs the turn as `build` even on a pane launched
+      // `--agent plan` (`docs/design/opencode-server-live-verification.md`
+      // §20.5). Null when nothing is configured, and the request body is then
+      // byte-identical to the pre-#2048 one.
+      const selection = opencodePromptSelection(getOpencodeLaunchSettings(target));
+      if (!(await sendOpencodePrompt(port, sessionId, messageId, parts, selection))) return false;
 
       const verified = await this.verifyPostedMessage(port, sessionId, messageId, message);
       if (!verified) {

@@ -1,0 +1,37 @@
+[
+  {
+    "name": "build",
+    "mode": "primary",
+    "description": "The default agent. Executes tools based on configured permissions."
+  },
+  {
+    "name": "compaction",
+    "mode": "primary",
+    "hidden": true
+  },
+  {
+    "name": "explore",
+    "mode": "subagent",
+    "description": "Fast agent specialized for exploring codebases. Use this when you need to quickly find files by patterns (eg. \"src/components/**/*.tsx\"), search code for keywords (eg. \"API endpoints\"), or answer questions about the codebase (eg. \"how do API endpoints work?\"). When calling this agent, specify the desired thoroughness level: \"quick\" for basic searches, \"medium\" for moderate exploration, or \"very thorough\" for comprehensive analysis across multiple locations and naming conventions."
+  },
+  {
+    "name": "general",
+    "mode": "subagent",
+    "description": "General-purpose agent for researching complex questions and executing multi-step tasks. Use this agent to execute multiple units of work in parallel."
+  },
+  {
+    "name": "plan",
+    "mode": "primary",
+    "description": "Plan mode. Disallows all edit tools."
+  },
+  {
+    "name": "summary",
+    "mode": "primary",
+    "hidden": true
+  },
+  {
+    "name": "title",
+    "mode": "primary",
+    "hidden": true
+  }
+]
