@@ -1,0 +1,27 @@
+# Issue #2052 — does the CommandMate proxy carry SSE and WebSocket?
+# Measured against an echo upstream (127.0.0.1:4854) registered as External App
+# 'echo' (websocketEnabled=true) and 'echonows' (websocketEnabled=false).
+# The Issue #2052 briefing claimed the proxy cannot carry WebSocket. It can — see 2.
+
+## 1. SSE through the proxy: arrival times of an upstream that emits every 500 ms
+  +0.416s  data: {"tick":1,"t":1787723730426}
+  +0.916s  data: {"tick":2,"t":1787723730927}
+  +1.418s  data: {"tick":3,"t":1787723731430}
+  +1.920s  data: {"tick":4,"t":1787723731932}
+  +2.423s  data: {"tick":5,"t":1787723732434}
+  +2.923s  data: {"tick":6,"t":1787723732935}
+  +3.423s  data: {"tick":7,"t":1787723733435}
+  +3.926s  data: {"tick":8,"t":1787723733937}
+# => frames arrive ~500 ms apart: proxyHttp streams the body, it does not buffer.
+
+## 2. WebSocket through the proxy (handleProxyUpgrade, ws-server.ts, Issue #671)
+direct  ws://127.0.0.1:4854/direct             : RESULT: WS round-trip OK
+proxied ws://.../proxy/echo/socket             : RESULT: WS round-trip OK
+
+## 3. Negative controls proving the ws-server.ts branch is what answered
+websocketEnabled=false -> expect 403           : RESULT: WS unexpected-response HTTP 403
+unknown pathPrefix     -> expect 404           : RESULT: WS unexpected-response HTTP 404
+
+## 4. What the upstream saw on the upgrade (path forwarded verbatim here too)
+[+2ms] OPEN ws://127.0.0.1:3052/proxy/echo/deep/path
+[+3ms] RECV {"hello":"ws-upstream","receivedUrl":"/proxy/echo/deep/path"}

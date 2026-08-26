@@ -1,0 +1,29 @@
+# opencode 1.18.22 / CommandMate develop @ ceb1059d — Issue #2052 live probe
+# captured 2026-08-26, isolated HOME + isolated CommandMate dev server (port 3052)
+
+## 1. CORS: which Origin values get Access-Control-Allow-Origin (no --cors flag, port 4852)
+http://127.0.0.1:3052        -> Access-Control-Allow-Origin: http://127.0.0.1:3052
+http://localhost:3052        -> Access-Control-Allow-Origin: http://localhost:3052
+http://192.168.1.50:3000     -> (no ACAO header)
+https://evil.example.com     -> (no ACAO header)
+null                         -> (no ACAO header)
+
+## 2. CORS: same probe against a server started with --cors http://192.168.1.50:3000 (port 4855)
+http://192.168.1.50:3000     -> Access-Control-Allow-Origin: http://192.168.1.50:3000
+https://evil.example.com     -> (no ACAO header)
+
+## 3. OPENCODE_SERVER_PASSWORD (port 4855, password=spike2052pw)
+no credentials, GET /path                      -> 401
+WWW-Authenticate                               -> www-authenticate: Basic realm="Secure Area"
+no credentials, GET / (the SPA shell)          -> 401
+Basic opencode:spike2052pw                     -> 200
+Basic x:spike2052pw                            -> 401
+Basic admin:spike2052pw                        -> 401
+Basic <empty>:spike2052pw                      -> 401
+Basic anything-goes:spike2052pw                -> 401
+Basic opencode:wrong                           -> 401
+Bearer spike2052pw                             -> 401
+
+## 4. Basic auth through the CommandMate proxy (authorization is in SENSITIVE_REQUEST_HEADERS)
+direct  4855 /path      + Basic                -> 200
+proxied 3052 /proxy/ocpw/path + Basic          -> 401

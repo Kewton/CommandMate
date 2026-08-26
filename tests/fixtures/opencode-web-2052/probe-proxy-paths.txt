@@ -1,0 +1,29 @@
+# Issue #2052 — CommandMate proxy transport probe (real proxyHttp / handleProxyUpgrade)
+# CommandMate dev server on 3052; upstreams: opencode 4852, echo-upstream 4854
+
+## 1. Path rewriting: what the upstream actually receives
+GET /proxy/echo/hello?x=1                            -> {"receivedUrl":"/proxy/echo/hello?x=1","method":"GET"}
+GET /proxy/echonows/hello (ws disabled app)          -> {"receivedUrl":"/proxy/echonows/hello","method":"GET"}
+# => the /proxy/<prefix> segment is FORWARDED VERBATIM. buildUpstreamUrl() does no rewriting.
+
+## 2. opencode through the proxy: every path lands on the SPA shell
+GET /proxy/oc/                                       -> 200 2884B text/html
+GET /proxy/oc/assets/index-K3ryTWVK.js               -> 200 2884B text/html
+GET /proxy/oc/api/event                              -> 200 2884B text/html
+GET /proxy/oc/path                                   -> 200 2884B text/html
+# 2884 B text/html is the SPA shell (see spa-shell.html). No API response ever comes back.
+
+## 3. The same paths at the CommandMate ROOT (what the browser really asks for)
+GET /assets/index-K3ryTWVK.js                        -> 404 text/html; charset=utf-8
+GET /assets/index-CMLUT3g5.css                       -> 404 text/html; charset=utf-8
+GET /site.webmanifest                                -> 404 text/html; charset=utf-8
+GET /favicon-v3.ico                                  -> 404 text/html; charset=utf-8
+
+## 4. Direct upstream control (same paths, port 4852)
+GET /                                                -> 200 2884B text/html
+GET /assets/index-K3ryTWVK.js                        -> 200 2738995B text/javascript
+GET /assets/index-CMLUT3g5.css                       -> 200 482527B text/css
+GET /site.webmanifest                                -> 200 487B application/manifest+json
+GET /global/event                                    -> curl: (28) Operation timed out after 2006 milliseconds with 101 bytes received
+200 101B text/event-stream
+(stream stayed open - SSE)
