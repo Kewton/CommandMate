@@ -1,0 +1,23 @@
+# Chromium network log for GET http://127.0.0.1:3052/proxy/oc/
+# (CommandMate dev server on 3052, External App `oc` -> 127.0.0.1:4852, websocketEnabled=true)
+# Captured 2026-08-26 via Playwright. The page renders BLANK: see screenshot-proxied-3052.png.
+
+ 1. [GET] /proxy/oc/                             => 200  OK        (the SPA shell, byte-identical)
+ 2. [GET] /assets/index-K3ryTWVK.js              => 404  Not Found
+ 3. [GET] /assets/index-CMLUT3g5.css             => FAILED net::ERR_ABORTED  (404 body is text/html,
+                                                       refused by strict MIME checking)
+ 4. [GET] /site.webmanifest                      => 404  Not Found
+ 5. [GET] /_next/static/media/0b78ff376f6b9734-s.p.woff2   => 200  (CommandMate's own asset)
+ 6. [GET] /_next/static/media/723e11e5093b8e80.p.woff2     => 200  (CommandMate's own asset)
+ 7. [GET] /_next/static/css/app/layout.css?v=...           => 200  (CommandMate's own asset)
+ 8. [GET] /favicon-v3.ico                        => 404  Not Found
+ 9. [GET] /favicon-v3.svg                        => 404  Not Found
+10. [GET] /favicon-96x96-v3.png                  => 404  Not Found
+
+# Not a single one of the SPA's own files loaded, so no script ever ran and no API call
+# was ever attempted. #root stayed empty; the accessibility snapshot of the page is empty.
+#
+# The 404s are at the CommandMate ROOT, not under /proxy/oc/: the shell's `<script src>` and
+# `<link href>` are absolute (`/assets/...`), so the browser resolves them against the ORIGIN,
+# discarding the /proxy/oc/ mount point. Frames 5-7 are CommandMate's own Next.js assets,
+# which is what /assets/... would have to collide with if it were ever mounted at the root.
