@@ -4018,3 +4018,211 @@ opencode-subscription-port-identity-changed
 - `src/config/agent-source-config.ts` — `AGENT_SOURCE_POLL_INTERVAL_MS`
 - `locales/{en,ja}/worktree.json` — `agentSource` / `detail.statusPillWithSource`
 - `tests/fixtures/opencode-liveness-2054/live-probe.json` — 実測 2 ラン
+
+---
+
+## 26. Issue 2053: Auto-Yes の deny を `OPENCODE_CONFIG_CONTENT` で注入できるか（opencode 1.18.22 / 2026-08-26）
+
+> **この節は #2053 が追記したものです。§1〜§25 は書き換えていません。**
+> 食い違う記述があれば**版が違う**（§1〜§10 は 1.18.3、本節は 1.18.22）ことを先に疑ってください。
+
+Issue #2053 は「`permission` の `deny` を起動時に inline 注入すれば `permission.asked` の往復ごと
+消せるのではないか」という提案である。**機構は実在し、狙いどおりに効いた。**
+それでもなお**採らない**と決めた。裁定と理由は
+[`agent-event-source-interface.md` §3.4](./agent-event-source-interface.md#34-configscope-none-を維持する裁定2053)
+に置き、本節はその根拠となる実測だけを記す。
+
+### 26.1 結論サマリ
+
+| 測ったこと | 結果 |
+|---|---|
+| `OPENCODE_CONFIG_CONTENT` は 1.18.22 に実在し、読まれるか | **実在する**（[26.3](#263-precedence-4-層から-5-層へ実測)）。repo 側の参照は 0 件だった＝**未検証の外部ドキュメント由来という Issue 本文の前提は正しかった** |
+| Issue の言う「inline は project config より上位」 | **正しい。** 5 層の**最上位**（4 層すべてに勝つ） |
+| 受入条件: `rm -rf` を含む bash が**ダイアログなしで拒否**され `permission.asked` が発生しない | **満たす。** `permission.asked` **0 件**、tool part は `error`、4.3 秒後に `session.idle`（[26.4](#264-受入条件の実測-deny-はダイアログを消す)） |
+| `share: "disabled"` も同じ経路で入るか（論点 1） | **入る。** `GET /config` に `"share":"disabled"` が出る |
+| CommandMate の stop-pattern を写せるか（論点 2） | **写せない。** 定義域・言語・効果・**決まる時刻**の 4 つが違う（[26.6](#266-論点-2-stop-pattern-との写像は存在しない)） |
+| 利用者の既存 `permission` 設定との併存（論点 3） | **併存しない。2 通りの経路で黙って壊す**（[26.5](#265-論点-3-利用者設定を黙って壊す-2-つの経路実測)） |
+| 注入が壊れたときの失敗の出方 | **TUI は起動を拒否して exit 0**（ポートが開かない）。`serve` は `/global/health` だけ `healthy` を返し続ける（[26.7](#267-注入が壊れたときの失敗の出方)） |
+
+### 26.2 ハーネスと非汚染の証拠
+
+[§4](#4-再現環境ハーネス) のとおり。差分だけ記す。
+
+| 項目 | 値 |
+|---|---|
+| 版 | **1.18.22**（`GET /global/health` → `{"healthy":true,"version":"1.18.22"}`） |
+| 隔離 HOME | scratchpad 配下。**計測のたびに `GET /path` を撃ち**、`home` / `state` / `config` / `worktree` / `directory` の 5 つが自分の scratchpad 配下であることをゲートにした（`probe.sh` が一致しなければ `exit 90` で止まる）。#2051 / #2052 の「lsof は次の瞬間の保証にならない」への対応 |
+| ポート | **4731〜4742**（`47xx` 帯。`48xx` は使っていない。3000 も使っていない）。すべて `--hostname 127.0.0.1` |
+| provider / model | `github-copilot/claude-sonnet-4.6`。隔離 HOME の `opencode.jsonc` で固定し、**モデルピッカーは一度も開いていない** |
+| 送信経路 | `POST /session` → `POST /session/:id/prompt_async`（[§11.4](#114-tui-系を採らない理由) の裁定に従い `/tui/*` は使わない）。TUI を立てないので**ピッカーに触れる経路自体が無い** |
+| tmux | `tmux -L cmate-i2053-oc`（専用 socket）。[26.7](#267-注入が壊れたときの失敗の出方) の TUI 起動確認 1 回だけ。後始末は `kill-session -t '=oc-bad:'`。**`kill-server` は使っていない。`set-option -g` / `bind-key` も既定サーバへ撃っていない** |
+| `auth.json` | mode 600 で複製し、**検証後に削除**（削除確認済み） |
+| ユーザー HOME 非汚染 | 検証終了時点で `~/.local/share/opencode/opencode.db` の mtime は **8/26 16:54:44**（計測開始 17:38 より前）、`~/.config/opencode/opencode.jsonc` は **7/19 23:54** のまま。**1 バイトも触っていない** |
+
+### 26.3 precedence: 4 層から 5 層へ（実測）
+
+#1908 が `opencode debug config` で測った 4 層（`src/lib/cli-tools/opencode-config.ts:20-28`）に
+**`OPENCODE_CONFIG_CONTENT` の行が無い**。同じ手順を 1.18.22 で回し、5 行に更新した。
+
+`username` という単一スカラーキーを 5 層それぞれに別の値で置き、上から順に足していった:
+
+| # | layer | 読む | 勝つ相手 | 実測 `username` |
+|---|---|---|---|---|
+| L1 | `$XDG_CONFIG_HOME/opencode/opencode.json(c)` | yes | （最下位） | `L1-global` |
+| L2 | `$OPENCODE_CONFIG` | yes | L1 | `L2-envfile` |
+| L3 | `<worktree>/opencode.json` | yes | L1 / L2 | `L3-project-json` |
+| L4 | `<worktree>/opencode.jsonc` | yes | L1 / L2 / L3 | `L4-project-jsonc` |
+| L5 | **`$OPENCODE_CONFIG_CONTENT`** | **yes** | **L1〜L4 すべて** | `L5-inline` |
+
+対照（層を 2 つだけ立てた場合）も撃った: `L1+L2` → `L2-envfile` / `L1+L5` → `L5-inline` /
+`L2+L5` → `L5-inline`。**#1908 の 4 層の順序はそのまま再現し、inline がその上に乗る。**
+Issue 本文の「inline は project config より上位」は**正しい**（「precedence 6 位」という順位の
+数え方だけは、この 5 層の数え方と一致しない）。
+
+**マージは深い。** `permission.bash` のようなマップは層をまたいで**キー単位で合流**する
+（`{"gl *","ev *","pj *","jc *","in *"}` が全部残る）。衝突したキーだけが上位層の値になる。
+
+**解決後のルールは「層の順に並んだ平坦なリスト」で、後勝ち。**
+拒否された tool call の `error` 文字列がそのリストを丸ごと吐くので、順序を直接読める:
+
+```text
+The user has specified a rule which prevents you from using this specific tool call.
+Here are some of the relevant rules
+[{"permission":"*","action":"allow","pattern":"*"},                    ← 組み込み既定
+ {"permission":"bash","pattern":"*","action":"ask"},                   ← L3（利用者）
+ {"permission":"bash","pattern":"rm -rf ./victim","action":"allow"},   ← L3（利用者）
+ {"permission":"bash","pattern":"rm *","action":"deny"}]               ← L5（inline）
+```
+
+### 26.4 受入条件の実測: `deny` はダイアログを消す
+
+対照を先に撃った。**対照が `permission.asked` を出せることを示さないと、注入後の 0 件は空振りと区別できない。**
+
+| # | 層構成 | コマンド | `permission.asked` | tool part | `session.idle` | 結果 |
+|---|---|---|---|---|---|---|
+| A | 素（`permission` 無し） | `touch /tmp/…` | **1**（`permission: "external_directory"`） | `running` で停止 | **0** | 承認待ちで固着（§5.4 の再現） |
+| B | inline `{"permission":{"external_directory":"deny"}}` | 同上 | **0** | `error` | **1**（3.9 秒後） | ダイアログ無しで拒否、ターン完走 |
+| C0b | L3 `{"permission":{"bash":"ask"}}` | `rm -rf ./victim` | **1**（`permission: "bash"`、`patterns:["rm -rf ./victim"]`、`always:["rm *"]`） | `running` で停止 | **0** | 承認待ちで固着 |
+| C1 | C0b ＋ inline `{"permission":{"bash":{"rm *":"deny"}}}` | 同上 | **0** | `error` | **1**（4.3 秒後） | **受入条件を満たす** |
+
+- C1 の `error` 本文は
+  `The user has specified a rule which prevents you from using this specific tool call.` で、
+  **拒否理由がエージェントに届く**（§5.5.2 と同じ性質）。`./victim` は残っていた。
+- **§5.5 の「タイムアウト無しで無限待ち」が消える。** 承認要求が発生しないので、
+  CommandMate が黙っても止まらない。**Issue の狙いは実測として成立している。**
+- 注意: A / B の承認種別は `bash` ではなく **`external_directory`** だった。
+  Issue 本文の `bash: {"rm *": "deny"}` は**この種別には当たらない**。
+  `permission` の種別は `read` / `edit` / `glob` / `grep` / `list` / `bash` / `task` /
+  `external_directory` / `todowrite` / `question` / `webfetch` / `websearch` / `lsp` /
+  `doom_loop` / `skill`（`GET /doc` の `PermissionConfig`）。**「危険な bash を止める」つもりで
+  `bash` だけ書くと、実際に出るダイアログの多くを外す。**
+
+### 26.5 論点 3: 利用者設定を黙って壊す 2 つの経路（実測）
+
+Issue が「いちばん重要な判断」と書いた論点である。**壊れ方は 2 通りあり、両方とも実測した。**
+
+#### 26.5.1 型が違うと層ごと消える（`ask` が `allow` に降格する）
+
+利用者が `permission.bash` を**文字列**で書き、CommandMate が**オブジェクト**を注入すると、
+深いマージは働かず**利用者の層が丸ごと置き換わる**。
+
+| # | L3（利用者の `opencode.json`） | L5（inline） | 解決後の `permission` |
+|---|---|---|---|
+| F | `{"permission":{"bash":"ask"}}` | なし | `{"bash":"ask"}` |
+| E | 同上 | `{"permission":{"bash":{"rm *":"deny"}}}` | **`{"bash":{"rm *":"deny"}}`** ← `"ask"` が消えた |
+
+同じコマンド `echo hello-2053` を同じ層構成で撃った結果:
+
+| # | `permission.asked` | 実行 | 意味 |
+|---|---|---|---|
+| F（対照） | **1**（`patterns:["echo hello-2053"]`） | されない（承認待ち） | 利用者の「全部訊いて」が効いている |
+| E（注入後） | **0** | **された**（`exit 0` / `output: "hello-2053\n"`） | 利用者の「全部訊いて」が**消え、既定の `*: allow` に落ちた** |
+
+**安全のための機能が、利用者の安全設定を黙って引き下げる。**
+警告は出ない。`GET /config` は合流後の 1 個のオブジェクトしか返さないので、
+**どのキーが CommandMate 由来かを利用者も CommandMate も後から言えない。**
+
+#### 26.5.2 順序が具体性に勝つ（利用者の例外指定が広い glob に負ける）
+
+両方がオブジェクトで、深いマージが正しく働いた場合でも壊れる。
+[26.3](#263-precedence-4-層から-5-層へ実測) のとおりルールは**平坦なリストで後勝ち**なので、
+**より具体的な利用者のルールが、より広い CommandMate のルールに負ける。**
+
+| # | L3（利用者） | L5（inline） | コマンド | 結果 |
+|---|---|---|---|---|
+| D | `{"bash":{"*":"ask","rm -rf ./victim":"allow"}}` | `{"bash":{"rm *":"deny"}}` | `rm -rf ./victim` | **拒否**（`permission.asked` 0 件、`error`、`session.idle`） |
+
+利用者は `rm -rf ./victim` を**完全一致で明示的に許可**していた。CommandMate の `rm *` が後に
+並んだだけで、それが無効になる。**より下の層へ逃がすこともできない**:
+CommandMate が持てる最下位は L2（`$OPENCODE_CONFIG`）だが、**L2 は利用者のマシン全体設定 L1 に勝つ**
+（実測: `L1+L2` → `L2-envfile`）。しかも `$OPENCODE_CONFIG` は #1908 が
+「操作者が設定を所有している証拠」として読む変数で、CommandMate が上書きする先ではない。
+
+**#1908 との違い。** #1908 は「自分が書こうとしているファイルの隣に、操作者のファイルがあるか」を
+`fs` で見て降りられた。ここで衝突するのは**ファイルではなく opencode のマージ結果**で、
+CommandMate からは見えない。降りる判断を下せる場所が無い。
+
+### 26.6 論点 2: stop-pattern との写像は存在しない
+
+| 軸 | CommandMate の `stopPattern` / `denyPatterns` | opencode の `permission` ルール |
+|---|---|---|
+| 言語 | **JS `RegExp`**（`validateStopPattern` が safe-regex2 で ReDoS を弾く。`src/config/auto-yes-config.ts:101`） | **glob**（`rm *` / `*`） |
+| 定義域 | `stopPattern` は **ANSI 除去済みのペイン全文**（`checkStopCondition`、`src/lib/auto-yes-state.ts:421`）。`denyPatterns` はプロンプトの表示テキスト群（`src/lib/polling/auto-yes-resolver.ts:175`） | **1 回の tool call の command 文字列**（`metadata.command`） |
+| 効果 | `stopPattern` は**ラッチ**: そのインスタンスの Auto-Yes を丸ごと止め、`stop_pattern_matched` と一致箇所の抜粋を利用者に見せる。`denyPatterns` は「この 1 件を自動応答しない」＝**人間に返す** | **その 1 回を拒否してターンは続く**（26.4 の `error` → `session.idle`）。人間には何も返らない |
+| 決まる時刻 | **`send` のたび**（`commandmate send --auto-yes --stop-pattern` / `POST /api/worktrees/:id/auto-yes`）。稼働中に切り替わる | **プロセス起動時**。`OPENCODE_CONFIG_CONTENT` は env なので再起動しないと変わらない |
+
+正規表現から glob への変換は全域写像ではないし、変換できる部分集合でも**効果が変わる**
+（人間に返していたものが、人間に見えない自動拒否になる）。
+そして最後の行が決定的で、**起動時に固定される値に、`send` ごとに変わる値は載らない。**
+
+**実行時に差し替える経路も無い**（両方測った）:
+
+| endpoint | 実測 |
+|---|---|
+| `PATCH /config` | `200` で**リクエストボディをそのままエコーする**が、直後の `GET /config` は**変わらない**。ファイルも 1 つも書かれない（`work/opencode.json` と `~/.config/opencode/opencode.jsonc` の md5 が不変）。**無効** |
+| `PATCH /global/config` | `200`。**即座に効く**（`GET /config` にルールが最下位で現れる）が、**`~/.config/opencode/opencode.jsonc` を書き換える**（md5 変化。1 行の JSONC が整形済み JSON 164 バイトに再出力され、**コメントが消える形式**）。これは #1908 が潰した破壊そのもので、しかもマシン全体 |
+
+### 26.7 注入が壊れたときの失敗の出方
+
+CommandMate が JSON を作る以上、壊れた JSON を渡す可能性が生まれる。その挙動を測った。
+
+| 入力 | `opencode debug config` | `opencode serve` | TUI（`opencode --port`） |
+|---|---|---|---|
+| 壊れた JSON（`{not json`） | **exit 1**、パースエラー | **プロセスは生きる。`GET /global/health` は `{"healthy":true}` を返し続ける**が、`GET /path` も `GET /config` も **`ConfigJsonError`** | **起動を拒否してエラーを出し終了。exit status は 0。ポートは開かない** |
+| schema 違反（`{"permission":{"bash":"nonsense"}}`） | **exit 1**（`Expected PermissionActionConfig`） | 同上と推定（未実測） | 未実測 |
+| 未知のトップレベルキー | exit 0（**無警告で無視**） | — | — |
+| 未知の `permission` 種別キー | exit 0（**無警告で無視**） | — | — |
+| 空文字列 / `{}` | exit 0（未設定と同じ） | — | — |
+| JSONC コメント / 末尾カンマ | exit 0（**受理される**。JSONC なので） | — | — |
+
+2 つの含意がある。
+
+1. **`prepareLaunch` の「throw しない＝ fail-open」規約では守れない。** 失敗するのは
+   `prepareLaunch` ではなく**子プロセス**で、TUI は**ポートを開かずに消える**。
+   `configScope: 'none'` の現状では CommandMate がこの故障を作ることが**構造的にできない**。
+2. **`healthy` は嘘をつく。** `serve` 形態では `/global/health` だけが通り、
+   #2054 が UI に繋いだ `liveness` / `probeActivity` は**「生きている」と報告する**一方で、
+   セッション系は全滅する。**注入の失敗が、いちばん見えにくい形で出る。**
+
+そして逆向きの静かな失敗もある: **種別キーの綴り間違いは無警告で無視される**ので、
+注入したつもりのルールが 1 つも効いていない状態と、効いている状態が**外から区別できない**。
+効いた証拠はどこにも出ない（唯一の証拠が「拒否された tool call の `error` 文字列」）。
+
+### 26.8 計測していないこと
+
+- **schema 違反 JSON での `serve` / TUI の挙動。** `debug config` の exit 1 は測ったが、
+  サーバ形態・TUI 形態は撃っていない。壊れた JSON の 2 形態から**同じだろうと書かない。**
+- **`permission` を `agent` ごとに上書きしたときの precedence。** Issue 本文が触れている
+  per-agent 上書きは、採否の判断に効かないので測っていない。
+- **`share:"disabled"` 下の `POST /share`。** #2051 が測った（コードを持たない HTTP 500）ものを
+  再測していない。本節が測ったのは「inline 経由で `share` が `GET /config` に載る」ところまで。
+- **1.18.21 以前での `OPENCODE_CONFIG_CONTENT` の有無。** 測ったのは 1.18.22 だけ。
+  #1908 の 4 層表が 1.18.21 で 5 行目を持たなかったのが「機構が無かった」のか
+  「測っていなかった」のかは**判らない**。
+
+### 26.9 この節が変えたもの
+
+- `docs/design/agent-event-source-interface.md` — §3.4（**裁定本体**）
+- `src/lib/cli-tools/opencode-config.ts` — 冒頭 docblock の precedence 表を **4 行 → 5 行**に更新
+- `src/lib/hooks/sources/opencode/source.ts` — `configScope: 'none'` の docblock に #2053 の裁定を追記
+- `tests/unit/hooks/sources/opencode-config-scope-2053.test.ts` — 裁定の pin（**不採用も固定する**）
