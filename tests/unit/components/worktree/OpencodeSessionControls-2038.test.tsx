@@ -10,6 +10,13 @@
  *    `POST /api/worktrees/:id/opencode/session` validates against; a rename on
  *    this side alone is a 400 the operator sees as "nothing happened".
  *
+ * Issue #2051 added a share control, and with it a `GET …/opencode/share` on
+ * mount. The `fetch` stub here therefore routes by URL, and the action
+ * assertions look at the session `POST` rather than at call index 0 — otherwise
+ * they would be reading the share probe. The labels moved to `next-intl` in the
+ * same Issue, so what used to be a two-locale map assertion now lives in
+ * `OpencodeSessionControls-share-2051.test.tsx` as a check on the dictionaries.
+ *
  * @vitest-environment jsdom
  */
 
@@ -28,15 +35,33 @@ import { OpencodeSessionControls } from '@/components/worktree/OpencodeSessionCo
 
 const WORKTREE_ID = 'wt-2038';
 
+/** The session-route calls only — never the share probe the mount effect makes. */
+function sessionCalls(mock: ReturnType<typeof vi.fn>): [string, RequestInit][] {
+  return (mock.mock.calls as [string, RequestInit][]).filter(([url]) =>
+    url.endsWith('/opencode/session')
+  );
+}
+
 let fetchMock: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   locale.value = 'en';
-  fetchMock = vi.fn(async () => ({
-    ok: true,
-    status: 200,
-    json: async () => ({ action: 'new', accepted: true }),
-  }));
+  fetchMock = vi.fn(async (url: string) => {
+    if (String(url).includes('/opencode/share')) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          instanceId: 'opencode',
+          shareMode: 'disabled',
+          canShare: false,
+          sessionId: null,
+          lastShareUrl: null,
+        }),
+      };
+    }
+    return { ok: true, status: 200, json: async () => ({ action: 'new', accepted: true }) };
+  });
   vi.stubGlobal('fetch', fetchMock);
 });
 
@@ -73,13 +98,12 @@ describe('rendering', () => {
     }
   });
 
-  it('labels the buttons in the viewer locale', () => {
-    locale.value = 'ja';
+  it('labels the buttons from the worktree.opencodeSession namespace', () => {
+    // The stub returns the key, so this pins the key the component asks for.
+    // Whether both dictionaries answer it is checked in the #2051 suite.
     render(<OpencodeSessionControls worktreeId={WORKTREE_ID} cliToolId="opencode" />);
-    expect(screen.getByTestId('opencode-session-new')).toHaveAttribute(
-      'aria-label',
-      '新規セッション'
-    );
+    expect(screen.getByTestId('opencode-session-new')).toHaveAttribute('aria-label', 'new');
+    expect(screen.getByTestId('opencode-session-fork')).toHaveAttribute('aria-label', 'fork');
   });
 });
 
@@ -89,8 +113,8 @@ describe('actions', () => {
 
     fireEvent.click(screen.getByTestId(`opencode-session-${action}`));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    await waitFor(() => expect(sessionCalls(fetchMock)).toHaveLength(1));
+    const [url, init] = sessionCalls(fetchMock)[0];
     expect(url).toBe(`/api/worktrees/${WORKTREE_ID}/opencode/session`);
     expect(init.method).toBe('POST');
     expect(JSON.parse(String(init.body))).toEqual({ action, instanceId: 'opencode' });
@@ -107,8 +131,8 @@ describe('actions', () => {
 
     fireEvent.click(screen.getByTestId('opencode-session-fork'));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    await waitFor(() => expect(sessionCalls(fetchMock)).toHaveLength(1));
+    const [, init] = sessionCalls(fetchMock)[0];
     expect(JSON.parse(String(init.body))).toMatchObject({ instanceId: 'opencode-2' });
   });
 
@@ -129,12 +153,23 @@ describe('actions', () => {
   it('does not report completion when the instance has no server', async () => {
     const onActionComplete = vi.fn();
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
-    fetchMock.mockImplementationOnce(async () => ({
-      ok: false,
-      status: 409,
-      statusText: 'Conflict',
-      json: async () => ({ error: 'No opencode server is attached to this instance' }),
-    }));
+    // Routed rather than `mockImplementationOnce`: the mount share probe would
+    // otherwise consume the one-shot and the fork would get a 200.
+    fetchMock.mockImplementation(async (url: string) => {
+      if (String(url).includes('/opencode/share')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ canShare: false, sessionId: null, lastShareUrl: null }),
+        };
+      }
+      return {
+        ok: false,
+        status: 409,
+        statusText: 'Conflict',
+        json: async () => ({ error: 'No opencode server is attached to this instance' }),
+      };
+    });
 
     render(
       <OpencodeSessionControls

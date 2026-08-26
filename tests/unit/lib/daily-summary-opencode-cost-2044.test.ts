@@ -29,6 +29,21 @@ const DATE = '2026-08-25';
 
 // The only thing that must not really run: the CLI itself.
 const mockExecuteClaudeCommand = vi.fn();
+
+/**
+ * Nor the *other* CLI. Issue #2051 gave `generateDailySummary` a step that runs
+ * `opencode export --sanitize <sessionID>` once per opencode row in the day's
+ * ledger, and this file seeds exactly those rows. Unmocked, the suite spawns the
+ * real binary against the developer's own `$HOME` — which reads and writes
+ * `~/.local/share/opencode/opencode.db`. The exports fail ("Session not found")
+ * and the assertions here still pass, so nothing goes red: the mock is the only
+ * thing that keeps a unit run from touching real user data.
+ */
+const execFileMock = vi.hoisted(() => vi.fn());
+vi.mock('child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('child_process')>();
+  return { ...actual, execFile: execFileMock };
+});
 vi.mock('@/lib/session/claude-executor', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/session/claude-executor')>();
   return {
@@ -38,6 +53,18 @@ vi.mock('@/lib/session/claude-executor', async (importOriginal) => {
 });
 
 let db: Database.Database;
+
+/** Behave like `opencode export` for a session the local install does not have. */
+function stubOpencodeExportMissing(): void {
+  execFileMock.mockImplementation(
+    (
+      _file: string,
+      _args: string[],
+      _options: unknown,
+      callback: (error: Error | null, stdout: string, stderr: string) => void
+    ) => callback(new Error('Command failed: opencode export'), '', 'Error: Session not found')
+  );
+}
 
 function openDb(): Database.Database {
   const testDb = new Database(':memory:');
@@ -81,6 +108,8 @@ function seedCost(sessionId: string, worktreeId: string, cost: number): void {
 
 beforeEach(() => {
   db = openDb();
+  execFileMock.mockReset();
+  stubOpencodeExportMissing();
   mockExecuteClaudeCommand.mockReset();
   mockExecuteClaudeCommand.mockResolvedValue({
     output: 'A'.repeat(120),

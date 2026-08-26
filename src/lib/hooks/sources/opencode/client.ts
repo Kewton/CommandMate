@@ -49,6 +49,8 @@ import type {
   OpencodeModelChoice,
   OpencodeProviderChoice,
 } from '@/types/opencode-instance-settings';
+import { readOpencodeShareMode, readOpencodeShareUrl } from '@/types/opencode-share';
+import type { OpencodeShareMode } from '@/types/opencode-share';
 
 const logger = createLogger('lib/hooks/sources/opencode/client');
 
@@ -1542,4 +1544,183 @@ export async function unrevertOpencodeSession(
   return result.revertedTo === null
     ? { kind: 'restored' }
     : { kind: 'no_op' };
+}
+
+// =============================================================================
+// Session sharing (Issue #2051)
+// =============================================================================
+
+/**
+ * Timeout for the two share routes.
+ *
+ * Longer than {@link OPENCODE_REQUEST_TIMEOUT_MS}, which bounds loopback calls
+ * that opencode answers out of its own process. These two do not stay on the
+ * loopback: opencode uploads the session to its hosting and waits for the reply,
+ * so the round trip includes somebody else's network. 20s rather than 5s, and
+ * still bounded, because the operator is watching a spinner.
+ */
+export const OPENCODE_SHARE_REQUEST_TIMEOUT_MS = 20_000;
+
+/**
+ * The `share` setting this server is running with.
+ *
+ * A whole `GET /config` fetch for one key, because that is the only place the
+ * setting is exposed: there is no `/config/share`, and the value is not on the
+ * session. Cheap enough — the measured body is under 200 bytes.
+ *
+ * @param port - The instance's server
+ * @returns The mode, or null when the key is unset, unknown to this build, or
+ *   the server could not be asked. `null` must not be read as `'disabled'`;
+ *   see `src/types/opencode-share.ts`
+ */
+export async function fetchOpencodeShareMode(port: number): Promise<OpencodeShareMode | null> {
+  const body = await requestJson(`${opencodeBaseUrl(port)}/config`);
+  return readOpencodeShareMode(body);
+}
+
+/**
+ * What a publish attempt did.
+ *
+ * `refused` rather than `disabled`, because the server does not say which it
+ * is. Measured on 1.18.22: publishing with `share: "disabled"` configured comes
+ * back as a bare **HTTP 500 `UnknownError`** whose only distinguishing mark
+ * (`Error: Sharing is disabled in configuration`) is written to the server's own
+ * log. The route in front of this checks `GET /config` first precisely because
+ * this outcome cannot be decoded after the fact.
+ */
+export type OpencodeShareOutcome =
+  /** Published. The page at `url` is readable by anyone holding the link. */
+  | { kind: 'shared'; url: string }
+  /** The server has no such session. */
+  | { kind: 'not-found' }
+  /** The server answered, and refused. Includes the disabled-in-config case. */
+  | { kind: 'refused'; status: number }
+  /** The server could not be reached, or answered something unreadable. */
+  | { kind: 'failed'; reason: string };
+
+/**
+ * Publish one session to opencode's hosting.
+ *
+ * **This makes the conversation readable by anyone with the link**, under the
+ * operator's own credentials. Measured on 1.18.22: the published page carries
+ * the session *unredacted* — the prompts, the replies and the absolute
+ * `directory` path were all present in the HTML. It is the exact opposite of
+ * `opencode export --sanitize`, and nothing between here and the operator
+ * removes anything. Every caller must have taken an explicit confirmation
+ * first.
+ *
+ * Written against `requestJson`'s siblings rather than through it because the
+ * status code is load-bearing here: `requestJson` collapses every non-2xx to
+ * null, and a 404 (no such session) needs telling apart from a 500 (refused).
+ *
+ * @param port - The instance's server
+ * @param sessionId - `ses_…`
+ * @returns The outcome; on success, the URL opencode minted
+ */
+export async function shareOpencodeSession(
+  port: number,
+  sessionId: string
+): Promise<OpencodeShareOutcome> {
+  const url = `${opencodeBaseUrl(port)}/session/${encodeURIComponent(sessionId)}/share`;
+  try {
+    // Measured: the route takes no request body at all (`requestBody: null` in
+    // opencode's own OpenAPI), so none is sent.
+    const response = await loopbackFetch(url, {
+      method: 'POST',
+      signal: AbortSignal.timeout(OPENCODE_SHARE_REQUEST_TIMEOUT_MS),
+    });
+    if (response.status === 404) return { kind: 'not-found' };
+    if (!response.ok) {
+      logger.warn('opencode-share-refused', { port, sessionId, status: response.status });
+      return { kind: 'refused', status: response.status };
+    }
+    if (!hasContentType(response, OPENCODE_JSON_CONTENT_TYPE)) {
+      return { kind: 'failed', reason: 'response was not JSON' };
+    }
+    const body = (await response.json()) as unknown;
+    const shareUrl = readOpencodeShareUrl(body);
+    if (shareUrl === null) {
+      // A 200 with no usable URL is the one case that must not read as success:
+      // the session may well be published, and the operator would be told it is
+      // not. Reported as a failure so the UI keeps the revoke path visible.
+      logger.warn('opencode-share-no-url', { port, sessionId });
+      return { kind: 'failed', reason: 'server returned no share URL' };
+    }
+    logger.info('opencode-share-created', { port, sessionId });
+    return { kind: 'shared', url: shareUrl };
+  } catch (error) {
+    return {
+      kind: 'failed',
+      reason: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/**
+ * Take one session's published page down.
+ *
+ * Measured on 1.18.22, and both halves matter:
+ *
+ * - It **works**: the public URL stops serving the conversation and renders
+ *   opencode's own "Not Found" view instead. Note that the HTTP status stays
+ *   **200** — the not-found view is client-rendered — so a caller must not
+ *   verify revocation by fetching the URL and testing for 404.
+ * - The session **keeps its `share: { url }`** afterwards, in the response to
+ *   this very call and in `GET /session/:id`, and it survives a server restart.
+ *   So there is no server-side flag saying "currently shared", and this
+ *   function's boolean is the only signal a caller gets.
+ *
+ * @param port - The instance's server
+ * @param sessionId - `ses_…`
+ * @returns Whether opencode accepted the revocation
+ */
+export async function unshareOpencodeSession(
+  port: number,
+  sessionId: string
+): Promise<boolean> {
+  const url = `${opencodeBaseUrl(port)}/session/${encodeURIComponent(sessionId)}/share`;
+  try {
+    const response = await loopbackFetch(url, {
+      method: 'DELETE',
+      signal: AbortSignal.timeout(OPENCODE_SHARE_REQUEST_TIMEOUT_MS),
+    });
+    if (!response.ok) {
+      logger.warn('opencode-unshare-refused', { port, sessionId, status: response.status });
+      return false;
+    }
+    logger.info('opencode-share-removed', { port, sessionId });
+    return true;
+  } catch (error) {
+    logger.warn('opencode-unshare-failed', {
+      port,
+      sessionId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return false;
+  }
+}
+
+/**
+ * The share URL opencode currently records against one session.
+ *
+ * A raw `GET /session/:id` rather than `fetchOpencodeSession()`, which projects
+ * the body down to `{ id, title, directory, parentId }` and drops `share`
+ * along with it.
+ *
+ * Read what this returns as **"a page was published for this session at some
+ * point"**, never as "a page is up now": the field survives
+ * {@link unshareOpencodeSession} and a server restart. See that function.
+ *
+ * @param port - The instance's server
+ * @param sessionId - `ses_…`
+ * @returns The recorded `https:` URL, or null when there is none
+ */
+export async function fetchOpencodeSessionShareUrl(
+  port: number,
+  sessionId: string
+): Promise<string | null> {
+  const body = await requestJson(
+    `${opencodeBaseUrl(port)}/session/${encodeURIComponent(sessionId)}`
+  );
+  return readOpencodeShareUrl(body);
 }
