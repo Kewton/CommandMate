@@ -59,6 +59,7 @@ import {
   readOpencodeSessionFrame,
   recordAgentSessionTelemetry,
 } from '@/lib/hooks/agent-session-telemetry';
+import { recordAgentReportedEffort } from '@/lib/session/agent-event-state';
 import { getRememberedOpencodeSession } from '@/lib/session/opencode-session-store';
 import { forgetOpencodeSessionDiff, recordOpencodeDiffFrame } from './diff';
 import { isPlainObject, readStringField } from '../event-mapper';
@@ -84,7 +85,7 @@ import {
   forgetOpencodeTranscripts,
   recordOpencodeTranscriptFrame,
 } from './history';
-import { partCallId, partToolName } from './mappers';
+import { frameVariant, partCallId, partToolName } from './mappers';
 import { rememberOpencodeToolCall } from './payloads';
 import { notifyOpencodeUpdateAvailablePush } from './push';
 import { getAssignedOpencodePort } from './ports';
@@ -936,6 +937,26 @@ function deliver(
   if (type === 'session.updated') {
     const session = readOpencodeSessionFrame(frame, receivedAt);
     if (session) recordAgentSessionTelemetry(state.target, session);
+  }
+
+  // Issue #2048, deliberately its own block rather than a line inside #2040's:
+  // the variant rides on **two** frame types and `AgentSessionRecord` has no
+  // field for it, so folding it into the branch above would have to widen a
+  // record that three other Issues publish. It goes to the model/effort latch
+  // instead, which is the map every surface already reads an effort out of.
+  //
+  // Both types are read because neither alone is enough: `session.updated`
+  // carries `Session.model.variant` and is the frame that arrives when the
+  // *session's* selection changes, while `message.updated` carries
+  // `info.variant` and is the only frame that states what **this turn** ran at —
+  // which is what the header has to agree with (§20.4).
+  if (type === 'session.updated' || type === 'message.updated') {
+    recordAgentReportedEffort(
+      state.target.worktreeId,
+      state.target.cliToolId,
+      state.target.instanceId,
+      frameVariant(frame)
+    );
   }
 
   // Issue #2041, in the same position and for the same reason as the two reads

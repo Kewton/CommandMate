@@ -104,7 +104,13 @@ afterEach(() => {
 describe('migration v58 (Issue #2044)', () => {
   it('brings the schema to the pinned version', () => {
     expect(getCurrentVersion(db)).toBe(CURRENT_SCHEMA_VERSION);
-    expect(CURRENT_SCHEMA_VERSION).toBe(58);
+    // Issue #2048 relaxed an exact `toBe(58)` here to a lower bound. The
+    // property this file owns is "v58 has run"; that the newest migration in the
+    // repo happens to be v58 is a fact about the repo, and pinning it made every
+    // later migration edit a suite that has nothing to do with it. The exact
+    // value of CURRENT_SCHEMA_VERSION is asserted in `tests/unit/lib/db-migrations.test.ts`,
+    // which is the file whose subject it is.
+    expect(CURRENT_SCHEMA_VERSION).toBeGreaterThanOrEqual(58);
   });
 
   it('creates agent_session_costs with session_id as the key', () => {

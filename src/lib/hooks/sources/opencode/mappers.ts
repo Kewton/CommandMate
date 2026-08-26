@@ -109,6 +109,36 @@ export function frameModel(payload: Record<string, unknown>): string | null {
   return readNestedString(info, ['model', 'modelID']) ?? readNestedString(info, ['model', 'id']);
 }
 
+/**
+ * The model **variant** this frame reports, or null (Issue #2048).
+ *
+ * Two spellings, for the same reason {@link frameModel} has two: the value sits
+ * in a different place on the two frames that carry it, and both were measured
+ * on 1.18.22 in an isolated `HOME`
+ * (`docs/design/opencode-server-live-verification.md` §20.4).
+ *
+ *  - `session.updated` -> `properties.info.model.variant`, because
+ *    `Session.model` is a `ModelRef` (`{ id, providerID, variant? }`);
+ *  - `message.updated` -> `properties.info.variant`, because `AssistantMessage`
+ *    declares it as a flat field of its own.
+ *
+ * **Absent is the ordinary answer, not an error.** The `variant` key is missing
+ * altogether from both frames when the session is on a model's default, and from
+ * the assistant message a turn opens with. `agent-event-state` latches this
+ * rather than assigning it, which is what makes a frame without one mean
+ * "unchanged" instead of "cleared".
+ *
+ * opencode calls it a variant; CommandMate publishes it as the reasoning
+ * *effort*, which is what it is — the catalogue entry for `high` is literally
+ * `{ effort: "high" }` (§20.1) — and is the field every other tool's level is
+ * already shown in.
+ */
+export function frameVariant(payload: Record<string, unknown>): string | null {
+  const info = frameProperties(payload).info;
+  if (!isPlainObject(info)) return null;
+  return readNestedString(info, ['model', 'variant']) ?? readNestedString(info, ['variant']);
+}
+
 /** `properties.part.state.status` — `pending` / `running` / `completed` / `error`. */
 function partStatus(payload: Record<string, unknown>): string | null {
   return readNestedString(frameProperties(payload), ['part', 'state', 'status']);

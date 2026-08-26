@@ -33,8 +33,8 @@ describe('db-migrations', () => {
   });
 
   describe('CURRENT_SCHEMA_VERSION', () => {
-    it('should be 57 after Migration #57 (push defaults notice, #2056)', () => {
-      expect(CURRENT_SCHEMA_VERSION).toBe(58);
+    it('should be 59 after Migration #59 (opencode instance settings, #2048)', () => {
+      expect(CURRENT_SCHEMA_VERSION).toBe(59);
     });
   });
 

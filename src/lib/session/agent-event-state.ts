@@ -136,6 +136,8 @@ declare global {
   var __agentEventLastModel: Map<string, string> | undefined;
   // eslint-disable-next-line no-var
   var __agentCapturedModelInfo: Map<string, ModelInfo> | undefined;
+  // eslint-disable-next-line no-var
+  var __agentEventLastEffort: Map<string, string> | undefined;
 }
 
 /** compositeKey -> epoch ms of the most recent stop event. */
@@ -246,6 +248,35 @@ const lastAgentModel = globalThis.__agentEventLastModel ??
  */
 const capturedModelInfo = globalThis.__agentCapturedModelInfo ??
   (globalThis.__agentCapturedModelInfo = new Map<string, ModelInfo>());
+
+/**
+ * compositeKey -> the effort the *agent itself* last reported (Issue #2048).
+ *
+ * The third source, and until #2048 there was no such thing: #1784's whole
+ * premise was that "no hook payload of any tool carries an effort field", which
+ * was true of the five push tools and stayed true of opencode's own screen —
+ * `model-info-extractor` still records that opencode prints no effort anywhere
+ * in its pane, across 17 live frames.
+ *
+ * What changed is the *channel*, not the screen. opencode calls it a **variant**
+ * and publishes it on the frames CommandMate is subscribed to —
+ * `Session.model.variant` on `session.updated` and `info.variant` on
+ * `message.updated`, measured on 1.18.22 in an isolated `HOME`
+ * (`docs/design/opencode-server-live-verification.md` §20.4). The names in that
+ * catalogue are `low` / `medium` / `high` / `max` / `minimal` / `none` /
+ * `xhigh`, and each one's entry carries an `effort` (or `reasoningEffort`) equal
+ * to itself — so the value is an effort in opencode's own vocabulary as well as
+ * in this map's.
+ *
+ * Kept apart from {@link capturedModelInfo} for the reason that map is kept
+ * apart from {@link lastAgentModel}: there is a precedence between them
+ * ({@link getResolvedAgentModelInfo}), and merging on write would lose it.
+ * Latched the same way, and never written with null — a turn that reports no
+ * variant is opencode running the model's default, not the previous choice
+ * being withdrawn.
+ */
+const reportedEffort = globalThis.__agentEventLastEffort ??
+  (globalThis.__agentEventLastEffort = new Map<string, string>());
 
 /**
  * How long two identical events count as one delivery.
@@ -1541,8 +1572,56 @@ export function getResolvedAgentModelInfo(
   return mergeModelInfo(
     cliToolId,
     getLastKnownAgentModel(worktreeId, cliToolId, instanceId),
-    getLastCapturedModelInfo(worktreeId, cliToolId, instanceId)
+    getLastCapturedModelInfo(worktreeId, cliToolId, instanceId),
+    // Issue #2048: the third source. Null for every tool but opencode and for
+    // every opencode session running on a model's default, so every other
+    // surface's string is byte-identical to pre-#2048.
+    getLastReportedAgentEffort(worktreeId, cliToolId, instanceId)
   );
+}
+
+/**
+ * Latch the effort (opencode's *variant*) the agent named for itself (#2048).
+ *
+ * Latch, never clear — {@link latchAgentModel}'s rule, and for the same reason:
+ * `session.updated` omits `Session.model.variant` entirely when the session is
+ * on a model's default, and `message.updated` omits `info.variant` on the
+ * assistant message a turn opens with. Reading either absence as "the variant
+ * is now unknown" would blank the display between frames of the same turn.
+ *
+ * Called by the tool's own reader — `lib/hooks/sources/opencode/subscription` —
+ * rather than from the generic event path, because the value lives on frames
+ * that map to none of the seven event words.
+ *
+ * @param effort - The variant name, or null/empty to leave the latch alone
+ */
+export function recordAgentReportedEffort(
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  instanceId: string | undefined,
+  effort: string | null | undefined
+): void {
+  if (typeof effort !== 'string' || effort === '') return;
+  reportedEffort.set(
+    buildCompositeKey(worktreeId, cliToolId, instanceId),
+    effort.slice(0, MAX_EVENT_DETAIL_LENGTH)
+  );
+}
+
+/**
+ * The effort the agent last reported for this instance, or null (#2048).
+ *
+ * The raw latched value, before precedence — {@link getResolvedAgentModelInfo}
+ * is what callers publishing to the UI or the API want. Exported so a test can
+ * tell "the agent said" apart from "the screen said", the same way
+ * {@link getLastCapturedModelInfo} lets it.
+ */
+export function getLastReportedAgentEffort(
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  instanceId?: string
+): string | null {
+  return reportedEffort.get(buildCompositeKey(worktreeId, cliToolId, instanceId)) ?? null;
 }
 
 /**
@@ -1630,6 +1709,9 @@ export function beginAgentEventGeneration(
   // a relaunch would show the old process's effort with no frame left that
   // could contradict it. The next poll re-reads a live footer immediately.
   capturedModelInfo.delete(key);
+  // Issue #2048: and the variant the agent named, for exactly #1783's reason —
+  // the new process may have been launched with a different one, or with none.
+  reportedEffort.delete(key);
   // Issue #1899: the ids claimed for this key were issued by the process that
   // has just been replaced. Unlike the time-window keys, they never expire on
   // their own, so a generation is the only thing that retires them.
@@ -1676,6 +1758,8 @@ export function discardAgentEventState(
   lastAgentModel.delete(key);
   // Issue #1784: nor does the pane its footer was read from.
   capturedModelInfo.delete(key);
+  // Issue #2048: nor the variant that session was running at.
+  reportedEffort.delete(key);
   // Issue #1899: nor do the frame ids that session issued.
   recentEventIdentities.delete(key);
 }
@@ -2351,4 +2435,6 @@ export function clearAgentStopEvents(): void {
   lastAgentModel.clear();
   // Issue #1784: and the same for the scraped half.
   capturedModelInfo.clear();
+  // Issue #2048: and for the variant the agent reported.
+  reportedEffort.clear();
 }

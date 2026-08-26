@@ -1,0 +1,35 @@
+{
+  "id": "evt_03b9b0eaa001QxsQXNxiRRdHLP",
+  "type": "message.updated",
+  "properties": {
+    "sessionID": "ses_fc4662465ffe50IgIV21rnzYjG",
+    "info": {
+      "id": "msg_03b9b0eaa002m8KXcTW5ckVKBD",
+      "parentID": "msg_a5a9b9b0ba1fcf1031c191b778",
+      "role": "assistant",
+      "mode": "build",
+      "agent": "build",
+      "variant": "high",
+      "path": {
+        "cwd": "/private/tmp/claude-501/-Users-maenokota-share-work-github-kewton-commandmate-issue-2048/e3e35c18-0484-4997-8568-be4454f1f5fd/scratchpad/oc2048/work",
+        "root": "/private/tmp/claude-501/-Users-maenokota-share-work-github-kewton-commandmate-issue-2048/e3e35c18-0484-4997-8568-be4454f1f5fd/scratchpad/oc2048/work"
+      },
+      "cost": 0,
+      "tokens": {
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      },
+      "modelID": "claude-sonnet-4.6",
+      "providerID": "github-copilot",
+      "time": {
+        "created": 1787706412714
+      },
+      "sessionID": "ses_fc4662465ffe50IgIV21rnzYjG"
+    }
+  }
+}
