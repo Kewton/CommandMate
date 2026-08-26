@@ -239,6 +239,12 @@ describe('structuredEvents exposure (Issue #1722)', () => {
   const claudeSource = {
     cliToolId: 'claude',
     capabilities: getAgentEventSource('claude').capabilities,
+    // Issue #2054 adds these two additively. `hooks` and a null probe is what a
+    // push source publishes on every payload — the two fields only a
+    // subscription can fill in are absent, not null, which is what keeps a
+    // claude block the same shape it was.
+    kind: 'hooks',
+    probedActivity: null,
   };
 
   it('is all nulls for a session whose agent has reported nothing', async () => {

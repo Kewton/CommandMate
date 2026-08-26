@@ -39,6 +39,13 @@ import {
   recordCapturedModelInfo,
 } from '@/lib/session/agent-event-state';
 import { extractModelInfo } from '@/lib/detection/model-info-extractor';
+// Issue #2054: the event source is asked through the registry, exactly as
+// `current-output-builder` asks it. `describeAgentEventSource` is the single
+// fold both of them call, so the header chip's tooltip (driven by this object)
+// and the terminal payload cannot describe one pane two ways.
+import { getAgentEventSource } from '@/lib/hooks/sources/registry';
+import { describeAgentEventSource } from '@/lib/hooks/sources/define-source';
+import type { AgentEventSourceStatus } from '@/lib/hooks/sources/types';
 import type { getMessages as GetMessagesFn, markPendingPromptsAsAnswered as MarkPendingFn, getAgentInstances as GetAgentInstancesFn } from '@/lib/db';
 
 /** Per-CLI-tool session status */
@@ -158,6 +165,33 @@ export interface CliToolSessionStatus {
   lastKnownStatus?: string;
   /** Epoch ms of {@link lastKnownStatus}, absent when that is absent. */
   lastKnownStatusAt?: number;
+  /**
+   * Which machinery is speaking for this instance right now (Issue #2054).
+   *
+   * The half of the picture this object was missing: every field above is
+   * something the **screen** said, and this one says whether anything other than
+   * the screen is reading the pane at all. It is what turns "opencode looks idle"
+   * into "opencode looks idle *and its event stream has been gone for a minute*",
+   * which are different facts and were indistinguishable here before.
+   *
+   * **Present only for a source that can be degraded, and only while the session
+   * is running.** Concretely that is opencode and nothing else today: every push
+   * tool answers `{ state: 'unknown' }` from `definePushHookSource`, so
+   * {@link describeAgentEventSource} publishes no `liveness` / `degradedReason`
+   * for them and this key is omitted rather than set — which is the same
+   * key-omission rule {@link model} follows, for the same reason (`toEqual` in
+   * existing suites) and with the same consequence: claude / codex status objects
+   * are byte-identical to their pre-#2054 selves.
+   *
+   * A stopped session carries none either. The subscription is closed when the
+   * pane is killed, so "no stream" would be the answer for every stopped
+   * opencode instance in the app — true, and useless.
+   *
+   * Same per-instance rule as {@link model}: {@link mergeSessionStatus} drops it,
+   * because two instances of one tool can be on different sides of a
+   * disconnection and an aggregate would name one of them.
+   */
+  eventSource?: AgentEventSourceStatus;
 }
 
 /** Aggregated session status result for a worktree */
@@ -418,6 +452,14 @@ async function detectInstanceSessionStatus(
   if (!isRunning) forgetLastKnownStatus(evidenceKey);
   const lastKnown = isRunning ? getLastKnownStatus(evidenceKey) : null;
 
+  // Issue #2054: what is reading this pane besides the frame above. Cheap on
+  // every tool — the registry is a map and a push source's `liveness()` is a
+  // constant — and read only for a running session, so a stopped opencode
+  // instance does not report a stream it is not supposed to have.
+  const eventSource = isRunning
+    ? describeEventSourceFor(worktreeId, cliToolId, instanceId)
+    : null;
+
   return {
     isRunning,
     isWaitingForResponse,
@@ -434,7 +476,43 @@ async function detectInstanceSessionStatus(
     ...(lastKnown !== null
       ? { lastKnownStatus: lastKnown.status, lastKnownStatusAt: lastKnown.at }
       : {}),
+    ...(eventSource !== null ? { eventSource } : {}),
   };
+}
+
+/**
+ * The published event-source status for one instance, or null when there is
+ * nothing worth publishing (Issue #2054).
+ *
+ * Null — rather than `{ kind: 'hooks' }` — for every source that cannot be
+ * degraded. The `kind` alone is a property of the tool, not of the pane: it is
+ * the same on every poll of every worktree for the whole life of the build, and
+ * putting it on this object would add a key to the six status entries of every
+ * worktree in the sidebar to say something the tool id already says. What is
+ * worth a key is the pair that can change under the operator — see
+ * `AgentEventSourceStatus.degradedReason` / `.liveness` — so this publishes
+ * exactly when one of them is there.
+ *
+ * Never throws: a status poll that failed because a source misbehaved would take
+ * the sidebar down with it.
+ */
+function describeEventSourceFor(
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  instanceId: string,
+): AgentEventSourceStatus | null {
+  try {
+    const source = getAgentEventSource(cliToolId);
+    const status = describeAgentEventSource(
+      source,
+      source.liveness({ worktreeId, cliToolId, instanceId }),
+      Date.now(),
+    );
+    if (status.degradedReason === undefined && status.liveness === undefined) return null;
+    return status;
+  } catch {
+    return null;
+  }
 }
 
 /**

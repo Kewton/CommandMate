@@ -186,11 +186,63 @@ interface OpencodeSubscriptionState {
 declare global {
   // eslint-disable-next-line no-var
   var __opencodeSubscriptions: Map<string, OpencodeSubscriptionState> | undefined;
+  // eslint-disable-next-line no-var
+  var __opencodeDroppedLiveness: Map<string, SourceLiveness> | undefined;
+  // eslint-disable-next-line no-var
+  var __opencodeProbedActivity: Map<string, OpencodeProbedActivity> | undefined;
 }
 
 const subscriptions = (globalThis.__opencodeSubscriptions ??= new Map<
   string,
   OpencodeSubscriptionState
+>());
+
+/**
+ * The last liveness of a subscription that was **dropped rather than closed**
+ * (Issue #2054).
+ *
+ * Without this the one state Issue #2054 is written around is unobservable.
+ * {@link degradeToScraper} sets `liveness` to
+ * `{ state: 'lost', reason: 'port_identity_changed' }` and then deletes the
+ * entry from {@link subscriptions} in the next statement, so every later
+ * {@link getOpencodeLiveness} answered `unknown` — the same word an instance
+ * that was never subscribed answers, which is exactly the distinction the
+ * operator needs. The record is kept here instead, keyed the same way.
+ *
+ * **Only `lost` is ever written.** A tombstone is not a subscription: nothing
+ * reads it as permission to use the port, and every existing caller tests
+ * `state === 'live'` (`isOpencodeStructuredHistoryLive`, `abortOpencodeTurn`,
+ * the instances route's catalogue read), so promoting `unknown` to `lost`
+ * changes no decision anywhere — it only stops the reason being thrown away.
+ *
+ * Cleared when a new subscription opens on the key, and when the pane is closed:
+ * a process that is gone has no degradation left to report.
+ */
+const droppedLiveness = (globalThis.__opencodeDroppedLiveness ??= new Map<
+  string,
+  SourceLiveness
+>());
+
+/** One post-attach `probeActivity` answer (Issue #2054). */
+export interface OpencodeProbedActivity {
+  /** What the source answered, or null when it could not be asked. */
+  readonly activity: 'busy' | 'idle' | null;
+  /** Epoch ms the probe answered. */
+  readonly at: number;
+}
+
+/**
+ * What `AgentEventSource.probeActivity` said the last time a stream was
+ * (re-)attached for this instance (Issue #2054).
+ *
+ * See `runtime.attachOpencodeEventStream` for why the probe happens at all —
+ * the short version is that a stream which opens mid-turn delivers nothing until
+ * that turn ends, so "is this pane working right now?" has no answer on the
+ * stream and one `GET /session/status` is the whole of it.
+ */
+const probedActivity = (globalThis.__opencodeProbedActivity ??= new Map<
+  string,
+  OpencodeProbedActivity
 >());
 
 function keyOf(target: AgentInstanceRef): string {
@@ -205,12 +257,40 @@ export function isOpencodeSubscribed(target: AgentInstanceRef): boolean {
 /**
  * How the connection to this instance is doing (C6).
  *
- * `unknown` for an instance with no subscription, which is the honest answer:
- * a session started before this feature, or launched with structured events off,
- * is indistinguishable from one whose stream has not been opened.
+ * `unknown` for an instance with no subscription **and no dropped one**, which
+ * is the honest answer: a session started before this feature, or launched with
+ * structured events off, is indistinguishable from one whose stream has not been
+ * opened. An instance whose stream was taken away from it answers the `lost`
+ * that took it — see {@link droppedLiveness} (Issue #2054).
  */
 export function getOpencodeLiveness(target: AgentInstanceRef): SourceLiveness {
-  return subscriptions.get(keyOf(target))?.liveness ?? { state: 'unknown' };
+  const key = keyOf(target);
+  return subscriptions.get(key)?.liveness ?? droppedLiveness.get(key) ?? { state: 'unknown' };
+}
+
+/**
+ * Record what `probeActivity` answered right after a stream was attached
+ * (Issue #2054).
+ *
+ * Written by `./runtime`, which is the layer that owns the attach; kept here
+ * because this module already owns the per-instance keying and the lifecycle
+ * that has to forget it.
+ *
+ * @param target - The instance whose stream was just attached
+ * @param activity - The source's answer, null when it could not be asked
+ * @param at - Epoch ms; passed in so the caller and the record share one instant
+ */
+export function recordOpencodeProbedActivity(
+  target: AgentInstanceRef,
+  activity: 'busy' | 'idle' | null,
+  at: number
+): void {
+  probedActivity.set(keyOf(target), { activity, at });
+}
+
+/** The last post-attach probe for this instance, or null. Issue #2054. */
+export function getOpencodeProbedActivity(target: AgentInstanceRef): OpencodeProbedActivity | null {
+  return probedActivity.get(keyOf(target)) ?? null;
 }
 
 /**
@@ -393,6 +473,12 @@ export async function openOpencodeSubscription(
   const key = keyOf(target);
   const existing = subscriptions.get(key);
   if (existing) return handleFor(existing);
+  // Issue #2054: a new stream on this key supersedes whatever the last one died
+  // of. Cleared before the state is built rather than after, so a subscription
+  // that fails to open leaves no stale `lost` behind claiming a reason that
+  // belongs to a previous process.
+  droppedLiveness.delete(key);
+  probedActivity.delete(key);
 
   const resolvedPort = options.port ?? getAssignedOpencodePort(target);
   if (resolvedPort === null) {
@@ -453,6 +539,14 @@ function handleFor(state: OpencodeSubscriptionState): Subscription {
 /** Stop watching an instance. Idempotent. */
 export async function closeOpencodeSubscription(target: AgentInstanceRef): Promise<void> {
   const key = keyOf(target);
+  // Issue #2054, and **above the early return on purpose** — measured. The one
+  // instance that has a tombstone is the one {@link degradeToScraper} already
+  // removed from `subscriptions`, so a `close` that bailed out on "no state"
+  // would leave `port_identity_changed` describing a pane that has since been
+  // killed. Nothing else in this function is safe to run without a state, which
+  // is why the return stays where it is.
+  droppedLiveness.delete(key);
+  probedActivity.delete(key);
   const state = subscriptions.get(key);
   if (!state) return;
   state.closed = true;
@@ -495,6 +589,10 @@ export function resetOpencodeSubscriptions(): void {
     forgetOpencodeTranscripts(state.target);
   }
   subscriptions.clear();
+  // Issue #2054: a test seam that left tombstones behind would leak one case's
+  // `lost` into the next case's `unknown`.
+  droppedLiveness.clear();
+  probedActivity.clear();
 }
 
 function clearWatchdog(state: OpencodeSubscriptionState): void {
@@ -712,6 +810,11 @@ function degradeToScraper(state: OpencodeSubscriptionState, observedVersion: str
   state.lifetimeController.abort();
   state.liveness = { state: 'lost', since: Date.now(), reason: 'port_identity_changed' };
   subscriptions.delete(state.key);
+  // Issue #2054. The reason is the whole value of this branch and the delete
+  // above is what used to throw it away: with the entry gone, every reader saw
+  // `unknown` and could not tell a port that was stolen from a pane that never
+  // had a server. Written after the delete so the two cannot disagree.
+  droppedLiveness.set(state.key, state.liveness);
 }
 
 /**

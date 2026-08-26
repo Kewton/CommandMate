@@ -215,6 +215,12 @@ describe('[#1924] structuredEvents.source — the capabilities on the wire (§7)
     expect(payload.structuredEvents.source).toEqual({
       cliToolId: 'claude',
       capabilities: getAgentEventSource('claude').capabilities,
+      // Issue #2054 adds these two additively. The assertion stays exhaustive on
+      // purpose: what #1924 pinned is that the block is EXACTLY what the source
+      // declares, and a `toMatchObject` here would stop noticing a field that
+      // appeared by accident.
+      kind: 'hooks',
+      probedActivity: null,
     });
   });
 
