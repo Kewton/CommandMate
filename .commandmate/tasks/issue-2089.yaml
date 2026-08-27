@@ -1,0 +1,202 @@
+version: 1
+title: "Issue #2089: hooks-git-resolution.test.ts が並列フル test:unit でのみ stderr 診断を落とす"
+goal: |
+  /bug-fix https://github.com/Kewton/CommandMate/issues/2089 を実装してください。
+
+  ## 重要: 根本原因はオーケストレーターが特定済みで、決定的に再現できます
+
+  Issue 本文は「原因不明」「高負荷下で診断が出ない条件は何か」と書いていますが、
+  **2026-08-27 に develop `786e4765` で原因を確定し、3 回の観測すべてをバイト一致で
+  再現しました。負荷ともタイムアウトとも無関係です。**
+
+  Issue 本文と実測が食い違う場合は**実測を正**としてください。ただし下記の診断も
+  「オーケストレーターの調査結果」であって絶対ではありません。**自分で再現して確かめ、
+  違うと判断したら理由を報告してください。**
+
+  ### 機構
+
+  `.claude/skills/orchestrate-monitor/scripts/hooks-git.sh:54`:
+
+      MONITOR_HOOKS_STATE_DIR=${MONITOR_HOOKS_STATE_DIR:-${STATE_DIR:-${TMPDIR:-/tmp}/cm-monitor-hooks-$$}}
+
+  `mh_report_once()`（同 :79）は `$MONITOR_HOOKS_STATE_DIR/warned-<key>` が
+  **既に在れば黙って return 0** します。
+
+  テスト側（`monitor-exit-codes.test.ts:120` の `probeCounters()` /
+  `hooks-git-resolution.test.ts` の `inHooks()`）は `MONITOR_HOOKS_STATE_DIR` を渡さないので、
+  フォールバックの `$TMPDIR/cm-monitor-hooks-$$` が使われます。`$$` は spawn した
+  **bash の PID** です。
+
+  3 つの事実が噛み合って起きています:
+
+  1. **マーカーが永久に残る**。monitor.sh 経由なら自分の STATE_DIR が exit 時に消えますが、
+     テストの単独起動経路は誰も掃除しません。
+     実測: `$TMPDIR` に `cm-monitor-hooks-*` が **4094 ディレクトリ / マーカー 4155 個**堆積。
+  2. **キーがテスト固定値**。`monitor-exit-codes.test.ts:83` は `id: 'myrepo-feature-x'` を
+     ハードコードしています。実測のキー分布:
+     `nope-nope.no-checkout` 1376 / `myrepo-feature-x.log` 466 /
+     `commandmate-issue-1728.worktree-list` 465 / `shared-name.ambiguous-basename` 464 /
+     `commandmate-issue-1728.ambiguous-basename` 464 / `myrepo-feature-x.worktree-list` 461 /
+     `myrepo-feature-x.status` 459
+  3. **PID は再利用される**。macOS の PID 空間は約 10 万で周回します。
+     `warned-myrepo-feature-x.status` を持つディレクトリが 459 個あるので、
+     新しい bash がそのどれかの PID を引く確率は 1 回あたり **約 0.46%**。
+     フル run ごとに約 15 個ずつディレクトリが増えるので**確率は単調に悪化**します。
+
+  **「並列でだけ落ちる」理由**: 並列実行は PID の消費が速く、過去に使われた PID を
+  引き当てやすくなるためです。負荷でもタイムアウトでもありません。
+
+  ### 再現手順（オーケストレーターが実行済み。まず自分で再走させて確認すること）
+
+  ```bash
+  D=$(mktemp -d)
+
+  # 観測 2 回目・3 回目の再現
+  : > $D/warned-myrepo-feature-x.status
+  MONITOR_HOOKS_STATE_DIR=$D CI=true npx vitest run \
+    tests/unit/skills/orchestrate-monitor/monitor-exit-codes.test.ts
+  # → AssertionError: expected '' to contain 'status --porcelain\' failed (exit 130)'
+  # → AssertionError: expected [] to have a length of 1 but got +0
+  #   （後者は Issue 本文の観測 2 回目とバイト一致）
+
+  # 観測 1 回目の再現
+  rm -rf $D; mkdir -p $D; : > $D/warned-shared-name.ambiguous-basename
+  MONITOR_HOOKS_STATE_DIR=$D CI=true npx vitest run \
+    tests/unit/skills/orchestrate-monitor/hooks-git-resolution.test.ts
+  # → AssertionError: expected '' to contain 'monitor hooks WARN:'
+  #   （Issue 本文の観測 1 回目とバイト一致）
+
+  # 対照（env 無指定・既定）
+  CI=true npx vitest run tests/unit/skills/orchestrate-monitor/monitor-exit-codes.test.ts \
+    tests/unit/skills/orchestrate-monitor/hooks-git-resolution.test.ts
+  # → 29/29 緑（各 bash が別 PID を引くから緑なだけ）
+  ```
+
+  なお `MONITOR_HOOKS_STATE_DIR` を 1 つに固定して**空**で回すと
+  `prints the git failure a single time across a multi-poll run` が落ちます。
+  これは同一ファイル内の先行テストが `warned-myrepo-feature-x.status` を書くためで、
+  **テストどうしが既に干渉している**ことを示しています（既定では PID が別なので露見しない）。
+
+  ## 直してほしいこと（推奨。逸脱してよいが、逸脱したら理由を報告すること）
+
+  これは**テストだけの問題ではありません**。2 つの欠陥があります。
+
+  1. **本番側（standalone 経路）**: `monitor.sh` を介さず `hooks-git.sh` を source した
+     オペレーターも、`$TMPDIR` に残った他人の（あるいは過去の自分の）マーカーで
+     **本物の WARN / ERROR を失います**。#1728 がわざわざ級別トークンを入れて
+     「絶対に消えない診断」にしたはずのものが、静かに消える。
+     PID を鍵にした永続ディレクトリをやめる／掃除する、のどちらか（両方でもよい）。
+     **`$$` を使う設計意図はコメント :50-53 に書かれている**ので、それを読んでから決めること。
+  2. **テスト側**: `MONITOR_HOOKS_STATE_DIR` を渡していないので、緑であることが
+     **PID がぶつからなかったという偶然**に依存しています。テストごとに隔離した
+     state dir を渡すこと。ただし
+     `prints the git failure a single time across a multi-poll run` は
+     **複数ポーリング間で共有された state dir を必要とする**ので、
+     「1 呼び出しごとに隔離」ではなく「1 テストごとに隔離」が正しい粒度です。
+
+  さらに Issue 本文の依頼 3 は独立に有効です:
+
+  3. **「診断が出なかった」と「診断の内容が違う」を区別できる失敗メッセージにする**。
+     いまの `expected '' to contain '…'` は、毎回「diff に帰属するか」を人手で
+     裁定させます。stderr が空のときは「診断が 1 行も出ていない」と明示的に言うこと。
+
+  Issue 本文の依頼 2（`REAL_SHELL_CONCURRENT_FULL_RUNS = 2`
+  ＝ `tests/helpers/real-shell-budget.ts:201` のサイジング）については、
+  **今回の原因とは無関係**というのがオーケストレーターの結論です。
+  並列数を変えても直りません（PID 再利用の確率が変わるだけ）。
+  触らない判断でよいですが、**触らないと決めた理由を報告に書いてください**。
+
+  ## 掃除について（重要・順序を守ること）
+
+  `$TMPDIR/cm-monitor-hooks-*` の 4094 ディレクトリは**この不具合の証拠**です。
+
+  - **再現を自分の目で確認するまで消さないこと。** 先に消すと flake 率が下がり、
+    「直った」のか「証拠を消しただけ」なのか区別できなくなります。
+  - 修正が **`$TMPDIR` の状態に依存しないこと**を示してください
+    （堆積したままでも緑、消しても緑）。
+  - 掃除そのものを修正に含めるかは実装者判断です。含めるなら
+    **他プロセスが使用中のディレクトリを消さない**こと。
+
+  ## 受入条件
+
+  - 上記 3 つの再現コマンドのうち、**マーカーを置いた 2 つが緑になる**
+    （＝ stale マーカーがあっても診断が出る、またはテストが state dir を隔離している）
+  - 既定（env 無指定）の対照が緑のままである
+  - `MONITOR_HOOKS_STATE_DIR` を 1 つに固定して空で回しても緑になる
+    （＝テストどうしの干渉が消えている）
+  - standalone 経路の診断消失が塞がれている、または塞がない理由が書かれている
+  - stderr が空のときの失敗メッセージが「診断が 1 行も出ていない」と言う
+  - **変異注入で赤になることを確認する**（リポジトリ全体で判定し、赤になったファイルを列挙）
+
+  ## 変異注入について（#2103 の申し送り）
+
+  「変異が赤にならない ＝ 空振り」と即断しないこと。#2040 で、変異を入れても対象 Issue の
+  6 ファイルが全部緑なのに、リポジトリ全体を回すと別ファイルの 3 テストが捕まえていた事例がある。
+  変異は必ず byte-identical に復元し、復元したことを md5 で検証すること。
+  **構造を壊す変異（行やブロックの削除）は避け、構造を保つ変異**（値の入れ替え・境界のずらし・
+  条件の無効化）にすること。
+
+  ## 並行して動いているワーカーがあります
+
+  **#2103 のワーカーが同時に走っています。** あちらは 17 Issue 分の変異注入を回すので、
+  マシン負荷が上がります。フル `npm run test:unit` が赤になったら、
+  **落ちたファイルを単独で再実行してから裁定してください**（負荷起因と実際の回帰を混同しないこと）。
+  あちらの scope は `.claude/skills/orchestrate-monitor/**` /
+  `tests/unit/skills/orchestrate-monitor/**` / `tests/helpers/real-shell-budget.ts` を
+  **除外**してあるので、ファイル衝突はありません。
+
+  ## 作業ルール（厳守）
+
+  - **`CHANGELOG.md` と `docs/module-reference.md` を編集しないでください**（scope 外です）。
+    代わりに次の 2 ファイルを書いてください。どちらも `dev-reports/` 配下なので commit には入りません。
+    - `dev-reports/changelog/issue-2089.md` — `CHANGELOG.md` の `## [Unreleased]` にそのまま
+      貼れる **1 エントリ**（先頭は `- **<type>(<scope>): …** (#2089): …`）。どの節
+      （`### Added` / `### Changed` / `### Fixed`）に入るかを 1 行目にコメントで書く。
+      **形式は次の実例に合わせてください**（develop の `CHANGELOG.md` にある実エントリを丸ごと 1 本。
+      エントリは**ファイル中では 1 行**で、下で折り返して見えるのは表示上の都合です）:
+
+      ```markdown
+      <!-- ### Fixed -->
+      - **fix(cli): `send` 直後の `wait` が「まだ始まっていない」を完了と読む問題を修正** (#1975): `wait` が `sessionStatus==='ready'` を完了と判定する直前に、**「このインスタンスに最後に渡されたプロンプト」と「エージェント自身が最後に報告したターン終了（`lastStopEventAt`）」を突き合わせる**ゲートを追加。`send` 直後は最新の構造化イベントが直前ターンの `stop` のままなので #1839 の `adoptTurnStart()` が何も採用せず、`turnStartedAt === null` が「決着済み」と読まれてアイドル composer をそのまま完了にしていた（隔離サーバ実測 2026-08-22 / copilot 1.0.80: `send`→`wait` 5 回中 3 回が約 0.3 秒・`basis=scraper_ready`・成果物ゼロで exit 0）。ゲートは `GET /api/worktrees/:id/messages?limit=1&unit=pairs` を `--instance`（無指定ならサーバが解決した `cliToolId`）でスコープして読む。**hook を出さないツールは挙動不変** — `structuredEvents.source.capabilities.supportedEvents`（#1924 の宣言値）が `stop` とターン開始語の両方を宣言しているソースだけがこのゲートに入り、legacy-relay（`supportedEvents: []`）と #1924 以前のサーバは従来経路のまま台帳も引かない。保留は `PENDING_PROMPT_HOLD_MS`=60 秒で打ち切り（hooks は全経路 fail-open なので `Stop` の取りこぼしで `wait` が返らなくなってはいけない）、`--timeout` / `--stall-timeout` はそれより短ければ従来どおり優先される。完了行の `basis=` は、エージェントが最新プロンプトの終了を報告していれば `hook_stop` になる（`scraper_ready` は「画面しか言っていない」という文書どおりの意味に戻る）。
+      ```
+
+      - `- **` で始めること — 集計は `grep -cE '^- \*\*'` なので、外れるとエントリとして数えられません。
+      - `(#2089)` は要約の**外**（`**` を閉じた後）に置くこと。
+      - `<type>` は CLAUDE.md のコミットメッセージ規約と同じ語彙（`feat` / `fix` / `docs` / `refactor` / `test` / `chore` / `ci` / `style`）。
+      - 1 エントリ＝1 行（折らない）。
+    - `dev-reports/module-reference/issue-2089.md` — `docs/module-reference.md` の表に足す注記を
+      **行キー（`| \`path\` |`）ごと**に列挙する。既存行への追記なら「どの行に何を足すか」を書く。
+      **既存行に足すときは `grep -n '^| \`<path>\`' docs/module-reference.md` を実行し、その出力
+      （行番号つきの行キー）を断片に書き写してから**書くこと。0 件だった行への追記を指示しない
+      （新しい行を足すなら「新規行」と明記する）。足すものが無ければ「追記なし」の 1 行でよい。
+      **注記本文に `|` を含めるときは `\|` にエスケープすること**（表のセル区切りに化ける）。実例:
+
+      ```markdown
+      ## 既存行への追記
+      - `src/lib/session/worktree-status-helper.ts` — 実在確認: `docs/module-reference.md:103`（行番号は確認時点のもの）
+        追記内容: 「private `getStatusCaptureLines()` を削除し `resolveCaptureSpec(cliToolId).statusLines` に置換（Issue #1933）」
+
+      ## 新規行
+      追記なし
+      ```
+  - 断片が無いとリリースノートと module-reference に載らない。**実装と同じ commit の時点で書くこと。**
+  - **commit は 1 本にまとめること。PR は作らないこと**（オーケストレーターが作ります）。
+  - 作業ツリーをクリーンにして終えること（`dev-reports/` は gitignore 済み）。
+  - Issue 本文を書き換えないこと。
+  - 完了したら最終行に `IMPL_COMPLETED` と出力すること。
+scope:
+  allow:
+    - ".claude/skills/orchestrate-monitor/**"
+    - ".agents/skills/orchestrate-monitor/**"
+    - "tests/unit/skills/orchestrate-monitor/**"
+    - "tests/helpers/**"
+    - "tests/unit/config/**"
+    - "docs/design/**"
+  deny:
+    - "CHANGELOG.md"
+    - "docs/module-reference.md"
+    - "CLAUDE.md"
+verify: {}
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true
