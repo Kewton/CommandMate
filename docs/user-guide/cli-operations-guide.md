@@ -457,7 +457,7 @@ esac
 | `type` | 意味 | 応答方法 |
 |--------|------|----------|
 | `yes_no` / `multiple_choice` | プロンプトを検出・解析できた | `commandmate respond <id> <答え>` |
-| `selection_list` | 矢印キー選択 UI（Codex の pager / `/model`、antigravity の権限メニュー、**opencode の permission ダイアログ**（`Allow once / Allow always / Reject`、Issue #1893）等、Issue #1628）。選択肢としては解析できない | `commandmate respond` ではなく矢印キー相当の特殊キー送信 |
+| `selection_list` | 矢印キー選択 UI（Codex の pager / `/model`、antigravity の権限メニュー、**opencode の permission ダイアログ**（`Allow once / Allow always / Reject`、Issue #1893）、**opencode のダイアログ全般**（セッション一覧 `ctrl+x l` / エージェント一覧 `ctrl+x a` / タイムライン `ctrl+x g` / コマンドパレット `ctrl+p` / ピッカー。`sessionStatusReason` は `opencode_modal_overlay`、閉じるのは `Escape`、Issue #2112）等、Issue #1628）。選択肢としては解析できない | `commandmate respond` ではなく矢印キー相当の特殊キー送信 |
 | `unclassified` | **対話中の画面なのに検出層が分類できなかった**（Issue #1708）。`isUnclassifiedActive` が **60 秒連続**で立った場合のみ返る | 生ペインを見る: `commandmate capture <id> --pane` |
 
 > **`selection_list` に `commandmate respond <id> <番号>` を送らないこと（Issue #1893）。**

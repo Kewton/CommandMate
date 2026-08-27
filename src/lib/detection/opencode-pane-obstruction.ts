@@ -58,15 +58,17 @@
  * sidebar is off". Nothing reading this may report
  * `null` as an all-clear, for the same reason `upstream-faults.ts` says so.
  *
- * A leaf module by design: it imports {@link stripAnsi} and the excerpt bound and
- * nothing else, so the payload builder, the CLI types and the client components
- * that derive this from the frame they already hold can all share one rule.
+ * A leaf module by design: it imports {@link stripAnsi}, the excerpt bound and
+ * the column rule and nothing else, so the payload builder, the CLI types and the
+ * client components that derive this from the frame they already hold can all
+ * share one rule.
  *
  * @module lib/detection/opencode-pane-obstruction
  */
 
 import { stripAnsi } from './ansi';
 import { truncateToByteBudget } from './excerpt';
+import { indexAtColumn } from './terminal-columns';
 
 /**
  * Published `paneObstruction.id` for this signature.
@@ -124,52 +126,15 @@ const COMPOSER_BOTTOM_BORDER_ROW = /^([^\S\n]*)╹(▀{4,})/;
  */
 const COMPOSER_GUTTER_ROW = /^([^\S\n]*)[│┃]/;
 
-/** One code point that occupies no terminal column. See {@link indexAtColumn}. */
-const COMBINING_MARK = /^\p{M}$/u;
-
 /**
- * The UTF-16 index at which terminal column `column` begins.
+ * The column-to-index rule this module reads its geometry with.
  *
- * `String.prototype.slice` counts UTF-16 units and this rule is about terminal
- * COLUMNS. The two disagree in two ways, and only one of them can invent a
- * second column that is not there:
- *
- *  - **Combining marks are one code point and ZERO columns**, so a row of
- *    heavily-combining script — Thai, Devanagari, Hebrew with nikud, macOS's
- *    NFD Latin — is LONGER in units than in columns. Uncorrected, a box that
- *    owns the full pane width could slice to a non-empty tail and report a
- *    sidebar on a pane that has none. This skips them, which removes the case
- *    rather than making it unlikely. They are consumed greedily once the column
- *    is reached, too: a lone mark left in the tail would survive `trim()` and be
- *    counted as evidence.
- *  - **East Asian wide characters are one code point and TWO columns**, so a row
- *    of Japanese is SHORTER in units than in columns. That is NOT corrected
- *    here, deliberately: undercounting cuts LATER than the true column, which
- *    can only shorten the excerpt or miss a second column — never invent one.
- *    It is also exactly what a plain `slice` already did, so nothing regresses.
- *    Carrying a wcwidth table to buy back a few characters of excerpt would put
- *    a second source of truth about character widths in the repository for no
- *    verdict's benefit.
- *
- * Iterates code points, never UTF-16 units, so a surrogate pair is one step.
+ * Issue #2112 moved it, unchanged, into `terminal-columns.ts`: that Issue reads
+ * a second geometry off the same opencode frames (a painted rectangle's left and
+ * right edges) and has to agree with this one about where a column starts. The
+ * reasoning about combining marks and East Asian width lives on the function
+ * itself.
  */
-function indexAtColumn(line: string, column: number): number {
-  // Exact, not an approximation: counted columns can never exceed the unit
-  // count, so a line this short consumes whole in the loop below and returns
-  // the same answer. It is here because it is the case every full-width box row
-  // takes, on every poll and every render.
-  if (line.length <= column) return line.length;
-
-  let columns = 0;
-  let index = 0;
-  for (const char of line) {
-    const width = COMBINING_MARK.test(char) ? 0 : 1;
-    if (width === 1 && columns >= column) break;
-    columns += width;
-    index += char.length;
-  }
-  return index;
-}
 
 /** A second column found sharing rows with the transcript. */
 export interface OpenCodePaneObstruction {

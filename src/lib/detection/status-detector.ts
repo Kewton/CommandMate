@@ -119,6 +119,13 @@ export { STATUS_REASON } from './status-reason';
  */
 export const SELECTION_LIST_REASONS = new Set<string>([
   STATUS_REASON.OPENCODE_SELECTION_LIST,
+  // Issue #2112: opencode's session list / agent list / timeline / command
+  // palette, recognised from the rectangle they are painted as rather than from
+  // their headings. Like every other opencode overlay they are driven by ↑/↓ +
+  // Enter and dismissed with `esc`, which is what NavigationButtons sends —
+  // and, critically, they must never be read as a finished turn: the marker
+  // from the PREVIOUS turn is still on the pane behind them.
+  STATUS_REASON.OPENCODE_MODAL_OVERLAY,
   // Issue #1893: opencode's permission dialog is a horizontal button strip that
   // only ←/→ + Enter drive — typing an option number does nothing (measured on
   // 1.18.21), so it is a `menu`, not something `respond <id> N` can answer.
