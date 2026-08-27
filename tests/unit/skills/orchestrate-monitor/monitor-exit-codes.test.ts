@@ -6,6 +6,12 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import {
+  HOOKS_STATE_DIR_ENV,
+  expectDiagnostic,
+  expectDiagnosticLines,
+  useIsolatedHooksStateDir,
+} from '@tests/helpers/hooks-git-diagnostics';
+import {
   REAL_SHELL_SUBPROCESS_TIMEOUT_MS,
   assertSubprocessCompleted,
 } from '@tests/helpers/real-shell-budget';
@@ -23,6 +29,15 @@ import {
  *   2. monitor.sh — classify-state.sh / verify-completion.sh. An empty `state`
  *      is not inert: it reaches verify-completion.sh, is not recognised as a
  *      live signal, and lets a busy worker fall through to a COMPLETE.
+ *
+ * Issue #2089: every one of those reports is gated by a once-per-worker marker
+ * file, and this suite used to let `hooks-git.sh` pick the marker directory
+ * itself — `$TMPDIR/cm-monitor-hooks-$$`, keyed on a recycled pid and never
+ * cleaned up. A run that drew a pid some earlier run had used found the marker
+ * for `myrepo-feature-x.status` already present and printed nothing, and the
+ * assertions below then failed as `expected '' to contain '…'`. The suite was
+ * green by coincidence, not by construction. `useIsolatedHooksStateDir` makes
+ * the marker store per test; see tests/helpers/hooks-git-diagnostics.ts.
  */
 const SCRIPTS = path.join(process.cwd(), '.claude/skills/orchestrate-monitor/scripts');
 const HOOKS_GIT = path.join(SCRIPTS, 'hooks-git.sh');
@@ -38,6 +53,17 @@ const REAL_GIT = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8'
 // names nothing. The per-file values this replaced (15s / 20s / 25s) were all
 // UNDER the 5s default budget's reach, so none of them could ever fire.
 const HARD_TIMEOUT_MS = REAL_SHELL_SUBPROCESS_TIMEOUT_MS;
+
+/**
+ * One marker directory per test (Issue #2089).
+ *
+ * Per test, not per call: `mh_report_once` is *supposed* to stay silent on the
+ * second call for a key, which is what the multi-poll test at the bottom of this
+ * file measures. Per file would not do either — the tests here share hard-coded
+ * worktree ids, so a file-wide directory lets the first test that hits
+ * `myrepo-feature-x.*` silence the ones after it.
+ */
+const stateDir = useIsolatedHooksStateDir('monitor-exit-codes');
 
 function git(cwd: string, ...args: string[]): void {
   execFileSync(REAL_GIT, ['-c', 'user.email=t@t', '-c', 'user.name=t', ...args], {
@@ -123,6 +149,9 @@ function probeCounters(repo: Repo, opts: { shimDir?: string; id?: string } = {})
     ...process.env,
     MONITOR_HOOKS_REPO: repo.repo,
     MONITOR_HOOKS_BASE: repo.base,
+    // Last word on purpose: an inherited value would reintroduce exactly the
+    // cross-run marker sharing this pins shut (Issue #2089).
+    [HOOKS_STATE_DIR_ENV]: stateDir(),
   };
   if (opts.shimDir) {
     env.PATH = `${opts.shimDir}:${process.env.PATH ?? ''}`;
@@ -180,8 +209,12 @@ describe('hooks-git.sh separates a failed git from zero work (Issue #1614)', () 
     const probe = probeCounters(repo, { shimDir: gitShim('worktree') });
 
     expect(probe.counts).toBe('0 0');
-    expect(probe.stderr).toContain(`[${repo.id}] 'git -C ${repo.repo} worktree list --porcelain' failed (exit 128)`);
-    expect(probe.stderr).toContain('UNKNOWN and reported as 0');
+    expectDiagnostic(
+      probe.stderr,
+      `[${repo.id}] 'git -C ${repo.repo} worktree list --porcelain' failed (exit 128)`,
+      'failing `git worktree list`',
+    );
+    expectDiagnostic(probe.stderr, 'UNKNOWN and reported as 0', 'failing `git worktree list`');
   });
 
   it('reports a failing `git log` while the uncommitted counter still answers', () => {
@@ -191,9 +224,13 @@ describe('hooks-git.sh separates a failed git from zero work (Issue #1614)', () 
     const probe = probeCounters(repo, { shimDir: gitShim('log', 129) });
 
     expect(probe.counts).toBe('0 1');
-    expect(probe.stderr).toContain(`[${repo.id}] 'git -C `);
-    expect(probe.stderr).toContain(`log --oneline main..HEAD' failed (exit 129)`);
-    expect(probe.stderr).toContain('the commit count is UNKNOWN and reported as 0');
+    expectDiagnostic(probe.stderr, `[${repo.id}] 'git -C `, 'failing `git log`');
+    expectDiagnostic(probe.stderr, `log --oneline main..HEAD' failed (exit 129)`, 'failing `git log`');
+    expectDiagnostic(
+      probe.stderr,
+      'the commit count is UNKNOWN and reported as 0',
+      'failing `git log`',
+    );
   });
 
   it('reports a failing `git status` while the commit counter still answers', () => {
@@ -201,8 +238,12 @@ describe('hooks-git.sh separates a failed git from zero work (Issue #1614)', () 
     const probe = probeCounters(repo, { shimDir: gitShim('status', 130) });
 
     expect(probe.counts).toBe('2 0');
-    expect(probe.stderr).toContain(`status --porcelain' failed (exit 130)`);
-    expect(probe.stderr).toContain('the uncommitted-change count is UNKNOWN and reported as 0');
+    expectDiagnostic(probe.stderr, `status --porcelain' failed (exit 130)`, 'failing `git status`');
+    expectDiagnostic(
+      probe.stderr,
+      'the uncommitted-change count is UNKNOWN and reported as 0',
+      'failing `git status`',
+    );
   });
 
   it('reports an id that resolves to no checkout, which also sinks both counters', () => {
@@ -213,8 +254,8 @@ describe('hooks-git.sh separates a failed git from zero work (Issue #1614)', () 
     const probe = probeCounters(repo, { id: 'nope-nope' });
 
     expect(probe.counts).toBe('0 0');
-    expect(probe.stderr).toContain('[nope-nope] no checkout resolved');
-    expect(probe.stderr).toContain('not because the worker did nothing');
+    expectDiagnostic(probe.stderr, '[nope-nope] no checkout resolved', 'unresolvable id');
+    expectDiagnostic(probe.stderr, 'not because the worker did nothing', 'unresolvable id');
   });
 });
 
@@ -494,16 +535,70 @@ describe('hooks-git.sh warns once per worker, not once per poll (Issue #1614)', 
           CM: cmShim,
           MONITOR_HOOKS_REPO: repo.repo,
           MONITOR_HOOKS_BASE: repo.base,
+          // ONE directory for all four polls: the marker has to survive the
+          // `$(...)` subshell each counter is called in, which is the behaviour
+          // this test exists to measure. Isolating per call would assert the
+          // opposite. It is still this test's own directory, so the previous
+          // tests in this file cannot have written the key first (Issue #2089).
+          [HOOKS_STATE_DIR_ENV]: stateDir(),
         },
       },
     );
 
     assertSubprocessCompleted(proc, 'monitor-exit-codes.test.ts');
 
-    const warnings = (proc.stderr ?? '')
-      .split('\n')
-      .filter((line) => line.includes("worktree list --porcelain' failed"));
     expect(readFileSync(captureLog, 'utf8').split('\n').filter(Boolean)).toHaveLength(4);
-    expect(warnings).toHaveLength(1);
+    expectDiagnosticLines(
+      proc.stderr ?? '',
+      (line) => line.includes("worktree list --porcelain' failed"),
+      1,
+      'four polls, one warning',
+    );
+  });
+
+  it('reports the same key again in a separate test, so tests cannot silence each other', () => {
+    // The other half of the granularity, and the half that was broken: markers
+    // must NOT outlive the test that wrote them. `myrepo-feature-x.worktree-list`
+    // is the exact key the multi-poll test above just wrote — under one shared
+    // directory (a file-wide fixture, or the pid-keyed $TMPDIR fallback this
+    // replaced) this run finds it already there and prints nothing, which is
+    // Issue #2089 reproduced inside a single file.
+    const repo = makeRepo(2, 1);
+    const probe = probeCounters(repo, { shimDir: gitShim('worktree') });
+
+    expect(probe.counts).toBe('0 0');
+    expectDiagnostic(
+      probe.stderr,
+      `[${repo.id}] 'git -C ${repo.repo} worktree list --porcelain' failed (exit 128)`,
+      'same key, next test',
+    );
+  });
+
+  it('ignores a poisoned MONITOR_HOOKS_STATE_DIR inherited from the environment', () => {
+    // The field condition, reproduced deterministically: vitest inherits the
+    // developer's environment, and `hooks-git.sh` falls back to a pid-keyed
+    // directory in $TMPDIR that no one cleans up (4102 of them, holding 4163
+    // markers, measured 2026-08-27). A run that draws a recycled pid inherits
+    // markers it never wrote. Here the poison is explicit rather than lucky.
+    //
+    // Delete the `[HOOKS_STATE_DIR_ENV]` line from probeCounters() and this test
+    // goes red with the Issue's own message, `expected '' to contain '…'` — now
+    // rendered as "printed NO diagnostic at all".
+    const repo = makeRepo(2, 1);
+    const poisoned = mkdtempSync(path.join(os.tmpdir(), 'poisoned-hooks-state-'));
+    writeFileSync(path.join(poisoned, `warned-${repo.id}.worktree-list`), '');
+
+    const restore = process.env[HOOKS_STATE_DIR_ENV];
+    process.env[HOOKS_STATE_DIR_ENV] = poisoned;
+    try {
+      const probe = probeCounters(repo, { shimDir: gitShim('worktree') });
+      expectDiagnostic(
+        probe.stderr,
+        `[${repo.id}] 'git -C ${repo.repo} worktree list --porcelain' failed (exit 128)`,
+        'poisoned inherited state dir',
+      );
+    } finally {
+      process.env[HOOKS_STATE_DIR_ENV] = restore;
+    }
   });
 });

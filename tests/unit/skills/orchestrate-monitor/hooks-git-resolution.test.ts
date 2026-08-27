@@ -5,6 +5,12 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import {
+  HOOKS_STATE_DIR_ENV,
+  expectDiagnostic,
+  expectDiagnosticLines,
+  useIsolatedHooksStateDir,
+} from '@tests/helpers/hooks-git-diagnostics';
+import {
   REAL_SHELL_SUBPROCESS_TIMEOUT_MS,
   assertSubprocessCompleted,
 } from '@tests/helpers/real-shell-budget';
@@ -32,6 +38,17 @@ import {
  * `commits=0 && uncommitted=0` as "the task never left the composer", so the
  * STARTED guard — the thing standing between an unstarted worker and a COMPLETE
  * report — was adjudicating on numbers nobody had measured.
+ *
+ * Issue #2089 — and why this file's diagnostics tests were green by luck. Every
+ * WARN/ERROR asserted below is printed at most once per `<id>.<cause>` key, and
+ * the marker recording "already printed" is a FILE. Without an explicit
+ * `MONITOR_HOOKS_STATE_DIR`, `hooks-git.sh` puts those files in
+ * `$TMPDIR/cm-monitor-hooks-$$` — keyed on the spawned bash's pid, which the OS
+ * recycles, and which nothing ever deletes. The observed failure was this file's
+ * `shared-name.ambiguous-basename` marker surviving from some earlier run and
+ * silencing the line, reported as `expected '' to contain 'monitor hooks WARN:'`.
+ * `useIsolatedHooksStateDir` gives each test its own store, so the assertions
+ * measure `hooks-git.sh` rather than the pid the kernel happened to hand out.
  */
 const SCRIPTS = path.join(process.cwd(), '.claude/skills/orchestrate-monitor/scripts');
 const HOOKS_GIT = path.join(SCRIPTS, 'hooks-git.sh');
@@ -41,6 +58,9 @@ const HOOKS_GIT = path.join(SCRIPTS, 'hooks-git.sh');
 // names nothing. The per-file values this replaced (15s / 20s / 25s) were all
 // UNDER the 5s default budget's reach, so none of them could ever fire.
 const HARD_TIMEOUT_MS = REAL_SHELL_SUBPROCESS_TIMEOUT_MS;
+
+/** One once-per-worker marker store per test (Issue #2089). */
+const stateDir = useIsolatedHooksStateDir('hooks-git-resolution');
 
 /** Absolute, so a test never depends on how the runner's PATH is ordered. */
 const REAL_GIT = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
@@ -124,6 +144,11 @@ function inHooks(
       // value from the developer's shell would resolve the path for free.
       MONITOR_WORKTREE_ROOT: '',
       ...env,
+      // After `...env`, and deliberately not overridable by a caller: the same
+      // reasoning as MONITOR_WORKTREE_ROOT above, one layer down. An inherited
+      // marker store decides whether the diagnostics below print at all
+      // (Issue #2089).
+      [HOOKS_STATE_DIR_ENV]: stateDir(),
     },
   });
   assertSubprocessCompleted(proc, 'hooks-git-resolution.test.ts');
@@ -250,8 +275,12 @@ describe('hooks-git.sh diagnostics survive the operator filter (Issue #1728)', (
 
     expect(run.stdout.trim().split('\n')).toEqual(['0', '0']);
 
-    const reported = run.stderr.split('\n').filter((l) => l.includes('[nope-nope]'));
-    expect(reported).toHaveLength(1);
+    const reported = expectDiagnosticLines(
+      run.stderr,
+      (line) => line.includes('[nope-nope]'),
+      1,
+      'unresolvable id, reported once for two counters',
+    );
     expect(reported[0]).toContain('no checkout resolved');
     expect(reported[0]).toMatch(OPERATOR_FILTER);
     expect(reported[0]).toContain('monitor hooks ERROR:');
@@ -263,16 +292,20 @@ describe('hooks-git.sh diagnostics survive the operator filter (Issue #1728)', (
       'count_commits commandmate-issue-1728');
 
     expect(run.stdout.trim()).toBe('0');
+    expectDiagnostic(run.stderr, 'monitor hooks ERROR:', 'failing `git worktree list`');
     expect(run.stderr).toMatch(OPERATOR_FILTER);
-    expect(run.stderr).toContain('monitor hooks ERROR:');
   }, HARD_TIMEOUT_MS);
 
   it('reports an unresolvable base ref at source time with a WARN token', () => {
     const repo = makeRepo(1, 0);
     const run = inHooks({ main: repo.main, base: 'origin/nowhere' }, 'true');
 
-    expect(run.stderr).toContain('monitor hooks WARN:');
-    expect(run.stderr).toContain("base ref 'origin/nowhere' does not resolve");
+    expectDiagnostic(run.stderr, 'monitor hooks WARN:', 'unresolvable base ref');
+    expectDiagnostic(
+      run.stderr,
+      "base ref 'origin/nowhere' does not resolve",
+      'unresolvable base ref',
+    );
   }, HARD_TIMEOUT_MS);
 
   it('warns instead of silently picking one when two checkouts share a directory name', () => {
@@ -290,8 +323,45 @@ describe('hooks-git.sh diagnostics survive the operator filter (Issue #1728)', (
 
     const run = resolve(repo, 'shared-name');
     expect(run.path).toBe(realpathSync(a));
-    expect(run.stderr).toContain('monitor hooks WARN:');
-    expect(run.stderr).toContain('more than one worktree has this directory name');
+    expectDiagnostic(run.stderr, 'monitor hooks WARN:', 'ambiguous basename');
+    expectDiagnostic(
+      run.stderr,
+      'more than one worktree has this directory name',
+      'ambiguous basename',
+    );
+  }, HARD_TIMEOUT_MS);
+
+  it('still warns when a stale marker for the same key is inherited from the environment', () => {
+    // Issue #2089, reproduced deterministically instead of waiting for a pid
+    // collision. `warned-shared-name.ambiguous-basename` was one of the markers
+    // actually found in $TMPDIR (464 copies of it, 2026-08-27), and a run that
+    // drew a matching pid lost this WARN entirely — reported as
+    // `expected '' to contain 'monitor hooks WARN:'`, which is byte-identical to
+    // the first observation in the Issue.
+    const repo = makeRepo(0, 0);
+    const a = path.join(repo.root, 'nested-a', 'shared-name');
+    const b = path.join(repo.root, 'nested-b', 'shared-name');
+    mkdirSync(path.dirname(a));
+    mkdirSync(path.dirname(b));
+    git(repo.main, 'worktree', 'add', '--quiet', '-b', 'a', a);
+    git(repo.main, 'worktree', 'add', '--quiet', '-b', 'b', b);
+
+    const poisoned = mkdtempSync(path.join(os.tmpdir(), 'poisoned-hooks-state-'));
+    writeFileSync(path.join(poisoned, 'warned-shared-name.ambiguous-basename'), '');
+
+    const restore = process.env[HOOKS_STATE_DIR_ENV];
+    process.env[HOOKS_STATE_DIR_ENV] = poisoned;
+    try {
+      const run = resolve(repo, 'shared-name');
+      expect(run.path).toBe(realpathSync(a));
+      expectDiagnostic(
+        run.stderr,
+        'more than one worktree has this directory name',
+        'ambiguous basename with a poisoned inherited state dir',
+      );
+    } finally {
+      process.env[HOOKS_STATE_DIR_ENV] = restore;
+    }
   }, HARD_TIMEOUT_MS);
 
   it('still short-circuits on MONITOR_WORKTREE_ROOT, with no diagnostic', () => {
