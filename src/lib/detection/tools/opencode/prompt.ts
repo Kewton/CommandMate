@@ -45,6 +45,7 @@ import {
   OPENCODE_PERMISSION_PATTERN,
   OPENCODE_SELECTION_LIST_PATTERN,
 } from '../../cli-patterns';
+import { detectOpenCodeModalOverlay } from '../../opencode-modal-overlay';
 import type { DialogVerdict, NormalizedFrame } from '../types';
 
 /** What `detect.ts` measured about this frame before handing it over. */
@@ -93,6 +94,26 @@ export function detectOpenCodeDialog(
   }
 
   if (OPENCODE_SELECTION_LIST_PATTERN.test(context.contentWindow)) {
+    return { kind: 'picker', options: [], answerMode: 'keys' };
+  }
+
+  // Issue #2112: the five dialogs the allowlist above does not name — session
+  // list, agent list, timeline, command palette — recognised from the rectangle
+  // they are painted as. Reported here as well as in `detect.ts` branch C2 so
+  // this seam keeps the promise the branch-C comment makes: the dialog rule
+  // reports the dialog the status branch reports.
+  //
+  // `answerMode: 'keys'`, like every other opencode surface, for the reason the
+  // docblock above gives — a typed number is swallowed and the Enter after it
+  // confirms whatever is highlighted. `options` is empty because opencode draws
+  // no numbers to enumerate.
+  //
+  // On the Auto-Yes path this cannot match: that caller hands over a frame whose
+  // ANSI has already been removed (`captureAndCleanOutput`) and the rectangle IS
+  // the SGR. The gate outcome is identical either way — `null` and `keys` both
+  // mean "do not send" — which is the same trade the permission branch's gutter
+  // anchor makes two paragraphs up.
+  if (detectOpenCodeModalOverlay(frame.raw) !== null) {
     return { kind: 'picker', options: [], answerMode: 'keys' };
   }
 

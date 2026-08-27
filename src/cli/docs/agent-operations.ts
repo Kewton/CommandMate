@@ -155,6 +155,14 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
     publishes the same field. Press ctrl+x b in the pane to close it; Escape
     does not.
 
+    An opencode DIALOG is the other one, and it exits 10 as selection_list
+    rather than waiting out the dwell. Its session list (ctrl+x l), agent list
+    (ctrl+x a), timeline (ctrl+x g), command palette (ctrl+p) and pickers are
+    painted over the transcript, so the marker of the previous turn is still
+    on the pane behind them -- which is what used to make wait report a
+    blocked pane as Completed. sessionStatusReason is opencode_modal_overlay
+    and Escape closes all of them.
+
   --verify turns "the agent stopped" into "the work passes the repository's own
   checks". Verification only runs when completion was detected: a prompt (10) or
   a timeout (124) is reported as-is and never verified. With several worktrees,

@@ -1156,12 +1156,23 @@ export function stripOpenCodeGutter(row: string): string {
  * produce without touching the operator's real credentials), and the header's
  * own hatch is already the affordance.
  *
- * The header allowlist is deliberately unchanged. opencode 1.18 draws the same
- * chrome for its ctrl+p command palette (`Commands … esc`), which this pattern
- * therefore still does not match; that frame lands on `running` / `default`
- * (measured, `opencode-live-1896/command-palette.txt`) -- i.e. on the
- * "no evidence" side, which #1708's unclassified-frame guard already covers.
- * Widening the allowlist is a separate change with its own live frames.
+ * The header allowlist is deliberately unchanged, and Issue #2112 kept it that
+ * way rather than adding the five headings it found missing (`Select agent`,
+ * `Sessions`, `Timeline`, `Commands`, and the palette's). #1896 left the
+ * question as "a separate change with its own live frames"; #2046 supplied the
+ * frames and the answer they gave is that a WIDER WORD LIST is the wrong shape.
+ * Three of those dialogs published `ready` / `opencode_response_complete` — the
+ * marker of the previous turn, still on the pane behind the overlay — so the
+ * damage was a false COMPLETION, not a missing NavigationButtons row, and no
+ * heading added here would have changed that ordering. The fix is a gate ahead
+ * of the completion branch that reads the overlay's LAYOUT
+ * (`lib/detection/opencode-modal-overlay.ts`, branch C2 of
+ * `tools/opencode/detect.ts`), which is also what keeps the prose false
+ * positives this pattern was narrowed for from coming back through a longer
+ * list.
+ *
+ * This pattern still runs, and still first: it is the reading that survives ANSI
+ * stripping, where the layout rule cannot see anything at all.
  *
  * The whitespace runs are `[^\S\n]` (horizontal only) for the reason Issue #1883
  * documents: plain `\s` crosses newlines under the `m` flag, which would let a

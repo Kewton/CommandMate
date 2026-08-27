@@ -21,6 +21,26 @@ export const STATUS_REASON = {
   THINKING_INDICATOR: 'thinking_indicator',
   OPENCODE_PROCESSING_INDICATOR: 'opencode_processing_indicator',
   OPENCODE_SELECTION_LIST: 'opencode_selection_list',
+  /**
+   * Issue #2112: a background-painted rectangle with an `esc` hatch was drawn
+   * over the transcript — opencode's session list, agent list, timeline,
+   * command palette or picker.
+   *
+   * Distinct from {@link STATUS_REASON.OPENCODE_SELECTION_LIST} because the two
+   * are different READINGS of the same screen: that one is the allowlisted
+   * heading (`Select model` / `Select provider` / `Connect a provider`, #1896)
+   * found as text and survives ANSI stripping; this one is the layout and needs
+   * the SGR the capture was taken with. An operator reading `capture --json`
+   * can tell which one answered, which is the difference between "the heading is
+   * one we know" and "something modal is on the pane".
+   *
+   * The literal is restated from `OPENCODE_MODAL_OVERLAY_ID`
+   * (`lib/detection/opencode-modal-overlay.ts`) rather than imported, so this
+   * module keeps the no-imports property its docblock above depends on;
+   * `tests/unit/detection-opencode-modal-overlay-2112.test.ts` pins the two
+   * equal so the restatement cannot drift.
+   */
+  OPENCODE_MODAL_OVERLAY: 'opencode_modal_overlay',
   /** Issue #1893: opencode's permission dialog — an arrow-key button strip. */
   OPENCODE_PERMISSION_PROMPT: 'opencode_permission_prompt',
   CLAUDE_SELECTION_LIST: 'claude_selection_list',

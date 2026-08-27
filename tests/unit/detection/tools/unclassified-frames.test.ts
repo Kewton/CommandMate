@@ -129,19 +129,26 @@ function readCorpus(): CorpusFrame[] {
  * same session, and a change that made the flag `false` everywhere would satisfy
  * every one of those while breaking the hatch this row protects.
  *
- * The six opencode entries are on the `unknown_frame` floor: a composer holding
+ * The five opencode entries are on the `unknown_frame` floor: a composer holding
  * residual text with no finished-turn marker above it (#1883), an aborted turn
  * whose `▣ Build` row has no duration (#1893), the pane after the first of two
- * Escapes (#1894), the ctrl+p palette and a composer with a typed `1.` (#1896),
- * and a pending multi-line composer (#1906). Each is a frame opencode's own
- * rules looked at and could not read, which is what `unknown_frame` says.
+ * Escapes (#1894), a composer with a typed `1.` (#1896), and a pending
+ * multi-line composer (#1906). Each is a frame opencode's own rules looked at
+ * and could not read, which is what `unknown_frame` says.
+ *
+ * `opencode-live-1896/command-palette.txt` LEFT this table in Issue #2112. It is
+ * not that the frame became easier to read — it is that the palette is a dialog,
+ * and #2112 gave opencode a rule that recognises one structurally
+ * (`waiting` / `opencode_modal_overlay`). A frame leaving this table because a
+ * positive rule was written for it is the direction DR2-001 wants; a frame
+ * leaving it because a floor was widened would not be, which is why the list is
+ * pinned by equality either way.
  */
 const UNCLASSIFIED_LIVE_FRAMES: readonly string[] = [
   'claude-live-2011/help-overlay.txt',
   'opencode-live-1883/composer-residual.txt',
   'opencode-live-1893/turn-aborted-no-duration.txt',
   'opencode-live-1894/double-esc-interrupted.txt',
-  'opencode-live-1896/command-palette.txt',
   'opencode-live-1896/composer-typed-numbered.txt',
   'opencode-live-1906/composer-multiline-pending.txt',
 ];

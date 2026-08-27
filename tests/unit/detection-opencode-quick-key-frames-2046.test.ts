@@ -234,14 +234,39 @@ describe('Issue #2046: the dialogs the published chords open', () => {
     expect(stripAnsi(frame(name))).toContain(heading);
   });
 
-  it('leaves the session readable while a dialog is open, unlike the sidebar', () => {
-    // The dialogs pollute the saved reply while they are up — an overlay painted
-    // over the transcript, the same as #2047's `command-palette` frame — but the
-    // three that keep a `ready` verdict do not make a finished turn look
-    // unfinished, and Escape closes all four. That is the difference from
-    // `ctrl+x b`, which survives Escape.
+  it('is read as a dialog and never as a finished turn (Issue #2112)', () => {
+    // What this assertion said until #2112: that `dialog-agent-list`,
+    // `dialog-session-list` and `dialog-timeline` were `ready` /
+    // `turnComplete: true`, described as the dialogs being harmless because
+    // Escape closes them. The verdict was the harm. `ready` is positive
+    // evidence, so `commandmate wait` exited 0 on a pane blocked on a human and
+    // the unclassified escape hatch never opened — see #2112 and
+    // `detection-opencode-modal-overlay-2112.test.ts`.
+    //
+    // `turnComplete` is still true, and that is the point rather than a
+    // leftover: `isOpenCodeComplete` reads the marker of the turn that finished
+    // BEFORE the dialog was opened, and it is still on the pane behind the
+    // overlay. The gate is what stops that marker being read as this moment's
+    // verdict.
     for (const name of ['dialog-agent-list', 'dialog-session-list', 'dialog-timeline'] as const) {
-      expect(verdictOf(frame(name))).toMatchObject({ status: 'ready', turnComplete: true });
+      expect(verdictOf(frame(name)), name).toMatchObject({
+        status: 'waiting',
+        reason: 'opencode_modal_overlay',
+        hasActivePrompt: false,
+        turnComplete: true,
+      });
     }
+  });
+
+  it('reads the ctrl+p palette the same way, which the heading allowlist never did', () => {
+    // The palette was `running` / `unknown_frame` — the "no evidence" side,
+    // where #1708's dwell already stopped `wait`. It now joins the other three
+    // on the positive side, so all four dialogs answer with one reason instead
+    // of splitting on whether a heading happened to be allowlisted.
+    expect(verdictOf(frame('dialog-command-palette'))).toMatchObject({
+      status: 'waiting',
+      reason: 'opencode_modal_overlay',
+      hasActivePrompt: false,
+    });
   });
 });

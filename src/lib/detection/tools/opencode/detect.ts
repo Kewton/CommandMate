@@ -17,6 +17,7 @@ import {
   OPENCODE_SELECTION_LIST_PATTERN,
 } from '../../cli-patterns';
 import { STATUS_REASON } from '../../status-reason';
+import { detectOpenCodeModalOverlay } from '../../opencode-modal-overlay';
 import { detectOpenCodeDialog } from './prompt';
 import { STATUS_CHECK_LINE_COUNT } from '../frame';
 import { createToolStatusDetector } from '../run-detection';
@@ -100,6 +101,7 @@ export const opencodeStatusDetector = createToolStatusDetector({
     // A. "esc interrupt" in footer → actively processing (running)
     // B. Find footer boundary via "ctrl+t" keybinding line, extract content above it, check for thinking → running
     // C. Same content window, check for a selection list → waiting
+    // C2. A modal overlay painted over the transcript → waiting (Issue #2112)
     // D. Same content window, check for ▣ Build completion WITH a duration → ready
     // E. Idle composer placeholder inside the input box gutter → ready (Issue #1883)
 
@@ -180,6 +182,48 @@ export const opencodeStatusDetector = createToolStatusDetector({
         status: 'waiting',
         confidence: 'high',
         reason: STATUS_REASON.OPENCODE_SELECTION_LIST,
+        hasActivePrompt: false,
+        evidence: 'positive',
+      };
+    }
+
+    // C2. A modal overlay painted over the transcript (Issue #2112).
+    //
+    // Branch C above only recognises three ALLOWLISTED headings (`Select model`
+    // / `Select provider` / `Connect a provider`, narrowed there by #1896), and
+    // opencode has five more dialogs drawn in the same chrome. `Select agent`,
+    // `Sessions` and `Timeline` all fell through to branch D, which matched the
+    // `▣ Build · <model> · 2.8s` marker of the turn BEFORE the dialog was
+    // opened and published a pane blocked on a human as `ready` /
+    // `opencode_response_complete` — measured on the #2046 fixtures
+    // `dialog-{agent-list,session-list,timeline}.txt`.
+    //
+    // This has to be a GATE ahead of branch D and not a wider allowlist. A
+    // wider allowlist fixes only the missing NavigationButtons; the false
+    // completion is the `ready` itself, and `ready` is POSITIVE evidence, so
+    // the frame never reaches the unclassified path #1017 / #1494 built for
+    // unknown overlays. `claude`'s `/help` is the benign shape of the same
+    // thing — it lands on `running` / `default`, where the 60-second hatch
+    // opens; these landed on `ready`, where `commandmate wait` exits 0.
+    //
+    // The rule is the LAYOUT, never the heading: a background-painted rectangle
+    // whose rows share both edges and whose header carries opencode's own `esc`
+    // hatch right-aligned inside it. See `lib/detection/opencode-modal-overlay`
+    // for why a word list is not an option here (it is the inference #1883
+    // deleted) and for what a non-match does and does not mean.
+    //
+    // Ordered AFTER branches A0/A/B on purpose. A permission dialog, an `esc
+    // interrupt` footer and a spinner all already answer something that is not
+    // `ready`, and putting this first would only rename their verdicts.
+    //
+    // `frame.raw` rather than `frame.clean`: the rectangle is SGR, and every
+    // production caller of `detectSessionStatus` passes the `capture-pane -e`
+    // bytes (`lib/tmux/tmux.ts` always passes `-e`).
+    if (detectOpenCodeModalOverlay(frame.raw) !== null) {
+      return {
+        status: 'waiting',
+        confidence: 'high',
+        reason: STATUS_REASON.OPENCODE_MODAL_OVERLAY,
         hasActivePrompt: false,
         evidence: 'positive',
       };
