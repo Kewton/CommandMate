@@ -161,7 +161,9 @@ Node.js 22 以上が必要です。
 
 - `.env` が既にある場合、設定の質問はスキップされます
 - ブラウザを開きたくない場合は `commandmate --no-open`（CI・ヘッドレス環境では自動的にスキップ）
-- 手動でアクセスする場合は http://localhost:3000 を開いてください
+- 手動でアクセスする場合は http://127.0.0.1:3000 を開いてください。CommandMate は既定で
+  `127.0.0.1` に bind します。`localhost` は環境によって `::1`（IPv6）を先に解決しますが、
+  そこは CommandMate が listen していないアドレスで、別プロセスが掴んでいることがあります
 
 詳しくは [CLI セットアップガイド](../user-guide/cli-setup-guide.md) を参照してください。
 Windows の場合は [WSL2 セットアップガイド](../user-guide/wsl2-setup.md) を参照してください。CommandMate は tmux に依存するため、Windows では WSL2 上で動作します（ネイティブ Windows は非対応）。

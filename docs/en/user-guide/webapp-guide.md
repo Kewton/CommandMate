@@ -64,10 +64,14 @@ npm start
 Open your browser and navigate to:
 
 ```
-http://localhost:3000
+http://127.0.0.1:3000
 ```
 
 > **Port change**: Change the port with `commandmate start --port 3001` or set `CM_PORT=3001` in the `.env` file.
+
+> **`127.0.0.1`, not `localhost`**: CommandMate binds `127.0.0.1` by default (`CM_BIND`).
+> `localhost` can resolve to `::1` (IPv6) first, which CommandMate does not listen on — if
+> another process holds that address, your browser silently talks to it instead.
 
 ---
 

@@ -14,6 +14,10 @@ import { getPidFilePath, getEnvPath, getPidsDir } from '../utils/env-setup';
 import { readPackageVersion } from '../utils/package-info';
 import { validateIssueNoResult } from '../utils/input-validators';
 import { getDetectorFreshness } from '../../lib/detection/version-probes';
+import {
+  formatLocalhostConflictWarning,
+  readLocalhostConflict,
+} from '../../lib/server/localhost-self-check';
 
 const logger = new CLILogger();
 
@@ -35,6 +39,57 @@ function printVersionInfo(status: DaemonStatus): void {
       `Installed CLI is v${cliVersion} but the running server is v${status.version}. ` +
         'Restart the server ("commandmate stop && commandmate start") to run the current version.'
     );
+  }
+}
+
+/**
+ * Surface the startup self-check's verdict (Issue #2113).
+ *
+ * The server probes `http://localhost:<port>` after `listen` and, when something OTHER
+ * than itself answers, drops a record under `<configDir>/logs/self-check-<port>.json`. That
+ * is the only situation this prints in — the record is deleted on every clean check and
+ * on shutdown, so silence here means the advertised URL really does reach the server.
+ *
+ * Why a file rather than the PID file or a re-probe:
+ * - the PID file is written by the CLI parent with O_EXCL *before* the child binds, and
+ *   its hybrid layout is a forward-compatibility contract (#1632) — the server cannot
+ *   append to it without racing the parent and perturbing that format;
+ * - a re-probe from here cannot reproduce the verdict. Identity is established by the
+ *   server OBSERVING its own probe request in-process; a separate CLI process has no
+ *   way to tell "CommandMate answered" from "some other server answered", short of
+ *   platform-specific `lsof` parsing.
+ *
+ * Staleness is guarded on `startedAt`, NOT on the PID, and that distinction was measured
+ * rather than reasoned: `daemon.start()` spawns `npm run start`, so the state file holds
+ * the WRAPPER's PID while the record holds the PID of the `node dist/server/server.js`
+ * child that actually binds the port (2026-08-27, port 3902: state file 58882, listener
+ * 58937). A PID comparison here therefore never matched and the warning never reached
+ * `status` — the whole point of the Issue's "log AND status" acceptance condition.
+ * A record predating the current daemon's launch cannot be the current daemon's; one
+ * written after it can only have come from it, because the record is keyed by port and
+ * every startup either overwrites it or deletes it.
+ *
+ * A state file with no `startedAt` (written before #1354) leaves nothing to compare, so
+ * the record is reported: it is refreshed on every start, and hiding a real conflict is
+ * the worse failure.
+ *
+ * Never throws — a diagnostic must not be able to turn `status` into a failure.
+ */
+function printLocalhostConflict(status: DaemonStatus): void {
+  try {
+    if (status.port === undefined) return;
+
+    const record = readLocalhostConflict(status.port);
+    if (record === null) return;
+    if (status.startedAt !== undefined && record.detectedAt < status.startedAt) return;
+
+    console.log('');
+    logger.warn(`Startup self-check (${record.detectedAt}):`);
+    for (const line of formatLocalhostConflictWarning(record)) {
+      console.log(`  ${line}`);
+    }
+  } catch {
+    // Config dir unreadable, record unparsable: report the server, drop the hint.
   }
 }
 
@@ -118,6 +173,9 @@ async function showSingleStatus(issueNo?: number): Promise<void> {
   if (status.url) {
     console.log(`URL:     ${status.url}`);
   }
+
+  // Issue #2113: the advertised localhost URL may not reach this server at all
+  printLocalhostConflict(status);
 }
 
 /**
@@ -224,6 +282,9 @@ export async function statusCommand(options: StatusOptions = {}): Promise<void> 
     if (status.url) {
       console.log(`URL:     ${status.url}`);
     }
+
+    // Issue #2113: the advertised localhost URL may not reach this server at all
+    printLocalhostConflict(status);
 
     // Issue #332: Show IP restriction status
     // Issue #1266: read the env the server actually runs with. An exported CM_ALLOWED_IPS

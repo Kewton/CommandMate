@@ -161,10 +161,15 @@ commandmate stop --force
 After starting the server, open your browser at:
 
 ```
-http://localhost:3000
+http://127.0.0.1:3000
 ```
 
 > **Port change**: Use the port specified with the `--port` option.
+
+> **`127.0.0.1`, not `localhost`**: CommandMate binds `127.0.0.1` by default (`CM_BIND`).
+> On macOS and elsewhere `localhost` resolves to `::1` (IPv6) first, which CommandMate does
+> not listen on — if another process holds `::1:3000`, your browser silently talks to it
+> instead. The startup self-check reports this in the server log and in `commandmate status`.
 
 ---
 

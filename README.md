@@ -161,7 +161,9 @@ already running). Requires Node.js 22 or later.
 - Already have a `.env`? The setup questions are skipped.
 - Don't want the browser to open? Use `commandmate --no-open` (also skipped automatically
   on CI and headless sessions).
-- Otherwise, open http://localhost:3000 in your browser.
+- Otherwise, open http://127.0.0.1:3000 in your browser. CommandMate binds `127.0.0.1`
+  by default, and `localhost` can resolve to `::1` (IPv6) first — an address CommandMate
+  does not listen on, and another process may.
 
 See the [CLI Setup Guide](./docs/en/user-guide/cli-setup-guide.md) for details.
 For Windows users, see the [WSL2 Setup Guide](./docs/en/user-guide/wsl2-setup.md) — CommandMate depends on tmux, so it runs on Windows via WSL2 (native Windows is not supported).

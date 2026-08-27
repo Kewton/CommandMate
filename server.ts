@@ -464,6 +464,36 @@ app.prepare().then(() => {
     console.log(`> Ready on ${protocol}://${hostname}:${port}`);
     console.log(`> WebSocket server ready`);
 
+    // Issue #2113: verify that the URL the documentation advertises
+    // (`http://localhost:<port>`) actually reaches THIS process. It does not when
+    // another process holds `::1:<port>`: `localhost` resolves ::1 before 127.0.0.1
+    // on macOS, and neither a 127.0.0.1 nor a 0.0.0.0 bind covers ::1. The user's
+    // browser then talks to the squatter while we keep printing "Ready".
+    //
+    // Deliberately NOT awaited and wrapped in its own catch: a diagnostic must never
+    // delay or block a successful `listen`. `runLocalhostSelfCheck` is fail-open in
+    // its own right (it resolves `null` rather than throwing) and warns only on the
+    // one actionable verdict — see src/lib/server/localhost-self-check.ts.
+    //
+    // Dynamic import for the same reason as every reconciler below: adding a module
+    // graph to server.ts's eval-time graph perturbs Next's AsyncLocalStorage bootstrap
+    // under `tsx server.ts` and kills the first request that compiles middleware. Do
+    // not hoist this.
+    void (async () => {
+      try {
+        const selfCheck = await import('./src/lib/server/localhost-self-check');
+        clearStartupSelfCheckState = () => selfCheck.clearLocalhostConflict(port);
+        await selfCheck.runLocalhostSelfCheck({
+          server,
+          port,
+          bind: hostname,
+          protocol: protocol === 'https' ? 'https' : 'http',
+        });
+      } catch (error) {
+        console.error('Startup self-check failed:', error);
+      }
+    })();
+
     // Initialize worktrees after server starts
     await initializeWorktrees();
 
@@ -538,6 +568,13 @@ app.prepare().then(() => {
   // Graceful shutdown with timeout
   let isShuttingDown = false;
 
+  /**
+   * Issue #2113: drop this port's localhost-conflict record on the way out, so a
+   * resolved conflict cannot outlive the server that observed it. Assigned once the
+   * self-check module has loaded; null until then, and never awaited.
+   */
+  let clearStartupSelfCheckState: (() => void) | null = null;
+
   function gracefulShutdown(signal: string) {
     if (isShuttingDown) {
       console.log('Shutdown already in progress, forcing exit...');
@@ -546,6 +583,13 @@ app.prepare().then(() => {
     isShuttingDown = true;
 
     console.log(`${signal} received: shutting down...`);
+
+    // Issue #2113: best-effort, never fatal.
+    try {
+      clearStartupSelfCheckState?.();
+    } catch {
+      // A leftover record is harmless: `status` only reports one whose PID matches.
+    }
 
     // Stop polling first
     stopAllPolling();
