@@ -249,6 +249,9 @@ export class DaemonManager {
       version: state.version,
       protocol: state.protocol,
       auth: state.auth,
+      // Issue #2113: lets status tell a record written by THIS daemon from one left by an
+      // earlier daemon on the same port.
+      startedAt: state.startedAt,
     };
   }
 

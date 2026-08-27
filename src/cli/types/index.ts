@@ -124,6 +124,15 @@ export interface DaemonStatus {
   protocol?: 'http' | 'https';
   /** Whether the running server has token authentication enabled (Issue #1355) */
   auth?: boolean;
+  /**
+   * ISO timestamp the daemon was launched at, straight from the state file (Issue #2113).
+   *
+   * `status` uses it to date-stamp records the SERVER leaves behind — the PID cannot do
+   * that job: the state file records the PID of the `npm run start` wrapper, not of the
+   * `node dist/server/server.js` child that actually binds the port (measured 2026-08-27:
+   * state file 58882 = `npm run start`, listener 58937 = its child).
+   */
+  startedAt?: string;
 }
 
 /**
