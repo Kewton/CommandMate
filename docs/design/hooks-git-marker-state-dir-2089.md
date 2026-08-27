@@ -2,7 +2,7 @@
 
 - 対象: `.claude/skills/orchestrate-monitor/scripts/hooks-git.sh`
 - 実測日: 2026-08-27 / develop `786e4765` / macOS Darwin 25.6.0 / bash 3.2.57
-- 状態: **テスト側は本 Issue で修正済み。本番（standalone）側は未修正**（理由は §5）
+- 状態: **テスト側は #2089 で、本番（standalone）側は #2119 で修正済み**（#2089 で見送った理由は §4「なぜ本 Issue で入れなかったか」、着地の実測は §6）
 
 ---
 
@@ -85,7 +85,7 @@ assert することになる。ファイルごとでも足りない（§2 末尾
 「文言が変わった」ケースとは別の文面にする。文言そのものを
 `tests/unit/skills/orchestrate-monitor/hooks-git-diagnostics.test.ts` が pin している。
 
-## 4. 未修正: standalone 経路（本番側）
+## 4. standalone 経路（本番側）— #2089 時点では未修正、#2119 で着地
 
 `monitor.sh` を介さず `hooks-git.sh` を source したオペレーターは、いまも
 `$TMPDIR` に残った他人の（あるいは過去の自分の）マーカーで本物の WARN / ERROR を失う。
@@ -176,3 +176,56 @@ Issue 本文の依頼 2 だが、**今回の原因と無関係**なので触っ�
 別の理由で赤にしうるため。修正後は新たな堆積が起きないので、既存分は任意の
 静穏時に `find "$TMPDIR" -maxdepth 1 -name 'cm-monitor-hooks-*' -type d -mtime +1 -exec rm -rf {} +`
 で消してよい。
+
+---
+
+## 6. #2119 での着地（実測 2026-08-27 / bash 3.2.57 / macOS Darwin 25.6.0）
+
+§4 の案をほぼそのまま入れた。差分は `.claude/skills/orchestrate-monitor/scripts/hooks-git.sh`
+（`MONITOR_HOOKS_STATE_DIR` の決定と EXIT trap）・同 `SKILL.md`（挙動の記述）・
+`.claude/skills/sync-map.json`（`update` による pin 再生成と note 追記）の 3 ファイル。
+
+### 6-1. 入れたもの
+
+- 置き場の決定を 3 分岐にした。`MONITOR_HOOKS_STATE_DIR` 指定 → その値／`STATE_DIR` あり
+  （`monitor.sh` 配下）→ 相乗り／どちらも無い → `mktemp -d "${TMPDIR:-/tmp}/cm-monitor-hooks-XXXXXXXX"`。
+  `mktemp` が答えられなかったときだけ旧来の `-$$` へ落ちる（マーカーを諦めて毎ポール警告する方が悪い）。
+- 掃除は `MONITOR_HOOKS_STATE_DIR_OWNED=1`（＝自分で `mktemp` した）かつ
+  `trap -p EXIT` が空のときだけ EXIT trap を張る。bash の EXIT trap は 1 本しかなく、
+  source されたファイルが無条件に張るとオペレータの後始末を黙って潰す。
+  `rm -rf` の対象は `*/cm-monitor-hooks-*` にマッチする名前に限定した。
+- `monitor.sh` 配下は分岐に入らない（`STATE_DIR` があり、`trap cleanup EXIT` も
+  hooks を source する前に張られている）ので、相乗り・once-per-worker・exit 時の同時削除は不変。
+
+### 6-2. 対照実験（PID 衝突を確率でなく決定的に作る）
+
+PID は選べないので、**spawn した shell 自身に自分の `$$` でマーカーを書かせてから** hooks を
+source する。`$$` は旧フォールバックが次の行で計算する値そのものなので、これは再利用 PID の
+シミュレーションではなく再現である。同一サンドボックス・同一コマンド（`mh_resolve nope-nope`）で:
+
+| hooks-git.sh | `$TMPDIR` | stderr | 実行後の `$TMPDIR` |
+|---|---|---|---|
+| 修正前（`HEAD`） | 自 PID のマーカーあり | **空（＝欠陥）** | 残る |
+| 修正前（`HEAD`） | 空 | ERROR 1 行 | `cm-monitor-hooks-<pid>` が**残る**（litter の生産） |
+| 修正後 | 自 PID のマーカーあり | ERROR 1 行 | 他人のディレクトリだけ残る（触らない） |
+| 修正後 | 空 | ERROR 1 行 | **何も残らない** |
+
+`tests/unit/skills/orchestrate-monitor/hooks-git-state-dir.test.ts` がこの 4 象限と、
+「1 run で 3 回呼んでも 1 行」「与えられた置き場は消さない」「オペレータの EXIT trap を潰さない」
+「`STATE_DIR` 相乗り時は `mktemp` しない・trap も張らない」「実 `monitor.sh` の 4 ポールで 1 行、
+終了後に `$TMPDIR` が空」を固定する。各テストは自前の `$TMPDIR` を持つので、開発機に実在する
+堆積（4129 ディレクトリ / 4214 マーカー）は読みも消しもしない。
+
+### 6-3. 既存の堆積について
+
+**消していない。** 新規の堆積は止まったが、既存分を消すと「直った」のか「証拠を消しただけ」なのかが
+区別できなくなる（§5 と同じ理由）。使用中のディレクトリを消すと `mh_report_once` が再度出力して
+`warns once per worker` 系を別の理由で赤にしうるという危険も変わらない。静穏時に
+`find "$TMPDIR" -maxdepth 1 -name 'cm-monitor-hooks-*' -type d -mtime +1 -exec rm -rf {} +` で消してよい。
+
+### 6-4. counterpart
+
+`hooks-git.sh` / `SKILL.md` とも policy は `port-required`。`Kewton/commandmate-skills` の
+`skills/cmate-orchestrate-monitor` への移植は**未了**で、オーケストレーターが別途行う。
+逐語コピーではなく上記の挙動（3 分岐・所有時のみ掃除・既存 EXIT trap を尊重）を再表現すること。
+
