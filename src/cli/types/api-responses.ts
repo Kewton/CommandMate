@@ -752,6 +752,36 @@ export interface CurrentOutputResponse {
     at: number;
   } | null;
   /**
+   * Issue #2095: a second column sharing rows with the agent's transcript, or
+   * null when the frame's layout could not be read as two columns.
+   *
+   * Mirrors: src/lib/session/current-output-builder.ts
+   * CurrentOutputPayload.paneObstruction
+   *
+   * **null is not an all-clear**, for the same reason {@link upstreamFault}'s is
+   * not: an opencode permission dialog removes the border row the geometry is
+   * measured from, and no tool other than opencode is examined at all.
+   *
+   * The one value shipped is `opencode_sidebar` — opencode's own sidebar, turned
+   * on by `ctrl+x b` or by its `ctrl+p` palette, painted across the same rows as
+   * the transcript and the input box. It hides the marker that ends a turn, so
+   * the pane reads `running` / `unknown_frame` until it is closed. `wait` does
+   * not branch on this field; it names it in the message it already prints for
+   * an unclassified frame.
+   *
+   * Optional here for the same reason as every other field on this mirror: an
+   * older daemon sends nothing, and the CLI is routinely newer than the server
+   * it dials.
+   */
+  paneObstruction?: {
+    /** `opencode_sidebar`. */
+    id: string;
+    /** The second column's own text, trimmed and bounded to 200 UTF-8 bytes. */
+    matchedText: string;
+    /** Epoch ms the frame was captured. */
+    at: number;
+  } | null;
+  /**
    * Issue #1785: the model the session is running, or null when nothing knows.
    *
    * Mirrors: src/lib/session/current-output-builder.ts CurrentOutputPayload.model
