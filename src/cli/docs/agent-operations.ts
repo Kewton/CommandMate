@@ -147,6 +147,14 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
     needs the dwell: a capture taken mid-repaint can raise the flag once.
     --on-prompt human keeps waiting for it, same as the other two.
 
+    On opencode the commonest cause has a name and a one-key fix. If its
+    sidebar is on -- ctrl+x b, or "Show sidebar" in its ctrl+p palette -- it
+    shares screen rows with the transcript, covers the marker that ends a
+    turn, and every frame after that reads running/unknown_frame. wait says
+    so on stderr (paneObstruction=opencode_sidebar) and capture --json
+    publishes the same field. Press ctrl+x b in the pane to close it; Escape
+    does not.
+
   --verify turns "the agent stopped" into "the work passes the repository's own
   checks". Verification only runs when completion was detected: a prompt (10) or
   a timeout (124) is reported as-is and never verified. With several worktrees,

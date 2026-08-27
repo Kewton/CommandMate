@@ -12,6 +12,11 @@ import { getSessionState, createMessage } from '@/lib/db';
 import { observeUnclassifiedFrame } from '@/lib/detection/unclassified-frame-tracker';
 import { extractComposerText, type ComposerTextState } from '@/lib/detection/composer-text';
 import { matchUpstreamFault } from '@/lib/detection/upstream-faults';
+import {
+  detectOpenCodePaneObstruction,
+  OPENCODE_SIDEBAR_RECOVERY_CHORD,
+  type OpenCodePaneObstruction,
+} from '@/lib/detection/opencode-pane-obstruction';
 import { UNCLASSIFIED_PROMPT_TYPE, type UnclassifiedFrameRecord } from '@/types/models';
 import { createLogger } from '@/lib/logger';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
@@ -637,6 +642,42 @@ export interface CurrentOutputPayload {
     at: number;
   } | null;
   /**
+   * A second column sharing rows with the agent's transcript, or null
+   * (Issue #2095).
+   *
+   * **Always present, null when nothing matched.** Read
+   * `src/lib/detection/opencode-pane-obstruction.ts` before reading this field:
+   * null is "the frame's layout could not be read as two columns", NEVER "the
+   * screen is clean". A permission dialog removes the border row the geometry is
+   * measured from, and a tool other than opencode is not looked at at all.
+   *
+   * Deliberately shaped like {@link upstreamFault} — `{id, matchedText, at}`,
+   * judged on `realtimeSnippet`, published on every poll and read by nobody by
+   * default. The two answer the same kind of question ("something the detector
+   * cannot fix is on the screen, and here is the evidence"), and one shape means
+   * `capture --json | jq` reads them the same way.
+   *
+   * Where it deliberately parts company with `upstreamFault` is `wait`: there is
+   * no `--fail-on-pane-obstruction`. #1839 needed a verdict of its own because
+   * the faulted frame read `ready` and `wait` was about to exit 0 on a turn that
+   * never ran — the exit code was WRONG. Here the frame reads
+   * `running` / `unknown_frame`, so `isUnclassifiedActive` is already true and
+   * `wait` already stops on it (exit 10, `type: unclassified`) after its 60 s
+   * dwell. The verdict was never wrong; what was missing was the CAUSE, so this
+   * Issue adds the cause to that message and to the history row and leaves
+   * every exit code exactly where it was.
+   *
+   * opencode only. Every other tool publishes null here without being examined.
+   */
+  paneObstruction: {
+    /** {@link OpenCodePaneObstruction.id} — `opencode_sidebar`. */
+    id: string;
+    /** The second column's own text on the first row that carried it. */
+    matchedText: string;
+    /** Epoch ms the frame this was read from was captured. */
+    at: number;
+  } | null;
+  /**
    * Text the user has in the CLI's composer but has not sent, or null
    * (Issue #1879).
    *
@@ -744,6 +785,28 @@ const logger = createLogger('current-output-builder');
  * waiting on. The tracker has already marked the run as recorded, so a failure
  * costs this one row, not a retry storm.
  */
+/**
+ * The sentence that turns "nothing could read this frame" into "here is what is
+ * on it, and here is the key that removes it" (Issue #2095).
+ *
+ * Empty string when there is no obstruction, so every caller can concatenate it
+ * unconditionally and the #1708 wording is byte-identical on a frame that has
+ * none.
+ *
+ * English, like the rest of {@link recordUnclassifiedFrame}'s row and unlike the
+ * UI banner this pairs with. The row is read in `capture --prompts` as often as
+ * in the history pane, and `commandmate` has no locale to read it in.
+ */
+function describePaneObstruction(obstruction?: OpenCodePaneObstruction | null): string {
+  if (!obstruction) return '';
+  return (
+    ` Cause: opencode's sidebar is sharing rows with the transcript ` +
+    `(paneObstruction=${obstruction.id}, second column reads ` +
+    `${JSON.stringify(obstruction.matchedText)}), which covers the marker that ends a ` +
+    `turn. Press \`${OPENCODE_SIDEBAR_RECOVERY_CHORD}\` in the pane to close it.`
+  );
+}
+
 function recordUnclassifiedFrame(
   db: Database.Database,
   params: {
@@ -753,6 +816,8 @@ function recordUnclassifiedFrame(
     dwellMs: number;
     sessionStatus: string;
     sessionStatusReason: string;
+    /** Issue #2095: the second column that explains the frame, when there is one. */
+    obstruction?: OpenCodePaneObstruction | null;
   },
 ): void {
   const dwellSeconds = Math.round(params.dwellMs / 1000);
@@ -761,7 +826,12 @@ function recordUnclassifiedFrame(
     `Unclassified interactive frame (${statusReason}) held for ${dwellSeconds}s. ` +
     `The detection layer could not parse it, so no prompt was published and ` +
     `nothing could answer it. Inspect the raw pane with ` +
-    `\`commandmate capture ${params.worktreeId} --pane\`.`;
+    `\`commandmate capture ${params.worktreeId} --pane\`.` +
+    // Issue #2095: appended rather than substituted. Everything above is still
+    // true — the frame really was unreadable — and a caller matching on the
+    // #1708 wording keeps matching. What follows turns "we could not read it"
+    // into "here is why, and here is the key that fixes it".
+    describePaneObstruction(params.obstruction);
 
   const record: UnclassifiedFrameRecord = {
     type: UNCLASSIFIED_PROMPT_TYPE,
@@ -1292,6 +1362,9 @@ async function buildPayload(
       // is a claim about what is on screen right now, and a dead session has no
       // screen.
       upstreamFault: null,
+      // Issue #2095: same reasoning — a session that is not running has no pane
+      // to lay out in two columns.
+      paneObstruction: null,
       // Issue #1879: same reasoning as `upstreamFault` — there is no input box
       // on a session that is not running, so there is nothing to report and
       // nothing the UI could act on.
@@ -1571,6 +1644,22 @@ async function buildPayload(
     });
   }
 
+  // Issue #1839 defined this window and Issue #2095 reuses it, so it is computed
+  // once, here, above the first reader. The 100 rows are also what the payload
+  // publishes, which is the property both fields rest on: what they claim can be
+  // checked against the rows printed next to them in `capture --json`.
+  const realtimeSnippet = lines.slice(-100).join('\n');
+
+  // Issue #2095: gated on the tool because the anchors are opencode's own box
+  // drawing. Every other CLI's detection is untouched by construction — nothing
+  // here even looks at its frame. Computed before the unclassified-frame writer
+  // below because that row is where a user first meets this: the sidebar is
+  // exactly the reason the frame could not be classified, and a "detection
+  // failed" row that does not say so sends the reader to the raw pane to work it
+  // out again.
+  const paneObstruction: OpenCodePaneObstruction | null =
+    cliToolId === 'opencode' ? detectOpenCodePaneObstruction(realtimeSnippet) : null;
+
   // Issue #1708: a frame nothing could classify left no trace anywhere. Both
   // prompt-history writers (response-checker's pending row and
   // recordAnsweredPrompt) are gated on `promptDetection.isPrompt === true`, so
@@ -1595,6 +1684,9 @@ async function buildPayload(
       dwellMs: unclassifiedVerdict.dwellMs,
       sessionStatus: merged.status,
       sessionStatusReason: merged.reason,
+      // Issue #2095: the cause, when the frame carries one. Null leaves the row
+      // exactly as #1708 wrote it.
+      obstruction: paneObstruction,
     });
   }
 
@@ -1616,7 +1708,6 @@ async function buildPayload(
   // strength of what is in the box, never on the strength of a status verdict.
   const composer = extractComposerText(output, cliToolId);
 
-  const realtimeSnippet = lines.slice(-100).join('\n');
   // Issue #1839: judged on exactly what is published as `realtimeSnippet`, not
   // on `output`. The wider capture keeps a banner from an hour ago in scope, and
   // a fault the operator cannot see in the payload next to it is unverifiable.
@@ -1701,6 +1792,18 @@ async function buildPayload(
       ? {
           id: upstreamFaultMatch.fault.id,
           matchedText: upstreamFaultMatch.matchedText,
+          at: Date.now(),
+        }
+      : null,
+    // Issue #2095: the same three keys as `upstreamFault`, read from the same
+    // rows, so an operator comparing the two is comparing like with like. The
+    // detector's `boxRight` / `rows` stay off the wire — they are how the rule
+    // decided, not what a caller acts on, and the payload is already a published
+    // contract wide enough to be hard to change.
+    paneObstruction: paneObstruction
+      ? {
+          id: paneObstruction.id,
+          matchedText: paneObstruction.matchedText,
           at: Date.now(),
         }
       : null,

@@ -481,6 +481,38 @@ auto-yes も契約の `autoYes` ポリシーも exit 10 も一切発火しない
 > `--stall-timeout` / `--timeout` との優先関係・`capture --pane` への導線を `--help` の
 > `Unclassified frames` 節に置いています。
 
+#### opencode で `unclassified` になったら、まずサイドバーを疑う（Issue #2095）
+
+opencode のサイドバー（`ctrl+x b`、または `ctrl+p` パレットの `Show sidebar`）は、
+**キャプチャの行を transcript と共有します**。ON の間はターンの終了マーカーが隠れるため、
+**終わったターンが `running` / `unknown_frame` のまま**になり、60 秒後に `unclassified` で
+exit 10 します。既定の 80 桁でも起こります（Issue #2046 の実測）。
+
+`wait` はこのとき stderr に原因を出します。
+
+```
+Unclassified interactive frame on wt-1 for 60s (status=running/unknown_frame). …
+ Cause: paneObstruction=opencode_sidebar — a second column is sharing rows with the
+ transcript (it reads "/private/tmp/…"), which covers the marker that ends a turn.
+ Press `ctrl+x b` in the pane to close opencode's sidebar.
+```
+
+`commandmate capture <id> --json` の `paneObstruction` にも同じ判定が出ます。
+
+```bash
+commandmate capture wt-1 --json | jq '.paneObstruction'
+# { "id": "opencode_sidebar", "matchedText": "…", "at": 1756…  }
+```
+
+**復帰手段は opencode のペインで `ctrl+x b` をもう一度押すことだけです。Escape では戻りません**（実測）。
+CommandMate のクイックキー列からは送れません —— このキーは #2046 の実測を受けて意図的に外してあり、
+special-keys API も 400 を返します。Web UI の端末画面（PC / モバイル）には、
+この状態のあいだ `ctrl+x b` を案内する警告バーが出ます。
+
+`paneObstruction` が `null` なのは「サイドバーが無い」ではなく「レイアウトを読めなかった」です
+（permission ダイアログが出ていると入力ボックスの下辺ごと隠れます）。all-clear として扱わないでください。
+opencode 以外のツールでは常に `null` です（そもそも判定しません）。
+
 #### `ready` は必ずしも「完了」ではありません
 
 `isUnclassifiedActive` は次の 2 状態で立ちます。

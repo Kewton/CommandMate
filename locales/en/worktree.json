@@ -1100,6 +1100,11 @@
       "last": "Latest message"
     }
   },
+  "opencodeSidebar": {
+    "regionLabel": "opencode sidebar warning",
+    "label": "opencode sidebar is open",
+    "body": "It shares rows with the transcript, so the end of a turn cannot be detected. Close it from the opencode pane with:"
+  },
   "opencodeSession": {
     "new": "New opencode session",
     "list": "Open opencode session list",
