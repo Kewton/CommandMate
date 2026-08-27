@@ -41,6 +41,10 @@ import { NavigationButtons } from '@/components/worktree/NavigationButtons';
 import { TerminalEscapeHatch } from '@/components/worktree/TerminalEscapeHatch';
 import { OpencodeQuickKeys } from '@/components/worktree/OpencodeQuickKeys';
 import { UnsentComposerBar, hasUnsentComposerText } from '@/components/worktree/UnsentComposerBar';
+import {
+  OpencodeSidebarNotice,
+  hasOpenCodeSidebarObstruction,
+} from '@/components/worktree/OpencodeSidebarNotice';
 import { PromptPanel } from '@/components/worktree/PromptPanel';
 import { MessageInput } from '@/components/worktree/MessageInput';
 import { OpencodeTurnDiffPanel } from '@/components/worktree/OpencodeTurnDiffPanel';
@@ -386,6 +390,18 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   // no bar, so the "no Enter affordance when the box is empty" property holds.
   const showUnsentComposerBar = hasUnsentComposerText(terminal.composerText);
 
+  // Issue #2095: opencode's sidebar sharing rows with the transcript. Its own
+  // gate, on the frame's GEOMETRY and the tool, and deliberately not folded into
+  // `showEscapeHatch` even though the same frame usually raises both: the hatch
+  // offers arrow keys for an overlay nobody could parse, and this names a cause
+  // and a keystroke the hatch cannot send. Judged on `realtimeSnippet` — the
+  // same 100 rows the server judges `paneObstruction` on — so the notice and
+  // `capture --json` cannot disagree about one frame.
+  const showOpencodeSidebarNotice = hasOpenCodeSidebarObstruction(
+    cliToolId,
+    terminal.realtimeSnippet || terminal.output,
+  );
+
   // Issue #744: the embedded HistoryPane for THIS split. Receives this split's
   // own messages (useSplitMessages) and the per-split highlight namespace via
   // `splitIndex`. Insert routing targets this split (S3-005). No client-side
@@ -570,6 +586,12 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
             onActionSent={refresh}
           />
         ) : null}
+        {showOpencodeSidebarNotice ? (
+          <OpencodeSidebarNotice
+            cliToolId={cliToolId}
+            frame={terminal.realtimeSnippet || terminal.output}
+          />
+        ) : null}
         {showPrompt ? (
           <PromptPanel
             promptData={prompt.data}
@@ -651,6 +673,10 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       showPrompt,
       showEscapeHatch,
       showUnsentComposerBar,
+      // Issue #2095: the notice's gate, and the frame it re-reads to render.
+      showOpencodeSidebarNotice,
+      terminal.realtimeSnippet,
+      terminal.output,
       // Issue #2046: the opencode quick-key strip's session gate.
       agentSession.session,
       terminal.composerText,

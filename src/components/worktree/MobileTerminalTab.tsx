@@ -39,6 +39,10 @@ import { memo } from 'react';
 import { TerminalDisplay } from '@/components/worktree/TerminalDisplay';
 import { TerminalEscapeHatch } from '@/components/worktree/TerminalEscapeHatch';
 import { UnsentComposerBar, hasUnsentComposerText } from '@/components/worktree/UnsentComposerBar';
+import {
+  OpencodeSidebarNotice,
+  hasOpenCodeSidebarObstruction,
+} from '@/components/worktree/OpencodeSidebarNotice';
 import { OpencodeQuickKeys } from '@/components/worktree/OpencodeQuickKeys';
 import { useTerminalPanePolling } from '@/hooks/useTerminalPanePolling';
 import { getTerminalDisplayCompaction } from '@/config/terminal-display-compaction';
@@ -87,6 +91,13 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
   // holding unsent text are unrelated conditions.
   const showUnsentComposerBar = hasUnsentComposerText(terminal.composerText);
 
+  // Issue #2095: identical gate to PC, from one shared predicate — the sidebar
+  // is a property of the pane, not of the screen it is being watched on.
+  const showOpencodeSidebarNotice = hasOpenCodeSidebarObstruction(
+    cliToolId,
+    terminal.realtimeSnippet || terminal.output,
+  );
+
   return (
     <div className="flex flex-col h-full min-h-0">
       {/* Issue #2106: the measured surface. The wrapper is what the flex column
@@ -114,6 +125,14 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
             instanceId={instanceId}
             composerText={terminal.composerText}
             onActionSent={refresh}
+          />
+        </div>
+      ) : null}
+      {showOpencodeSidebarNotice ? (
+        <div className="shrink-0 px-2 pt-1">
+          <OpencodeSidebarNotice
+            cliToolId={cliToolId}
+            frame={terminal.realtimeSnippet || terminal.output}
           />
         </div>
       ) : null}

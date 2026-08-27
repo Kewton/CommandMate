@@ -3649,6 +3649,7 @@ mtime が検証開始前と同一であることを確認した。**ユーザー
   #2032 以来通るが、**実 TUI で押していない**（`Tab` のみ実測）。
 - **パレット経由でサイドバーを ON にした pane の検出** — §22.3.4 の残り。
   サイドバーが出ている frame を検出して警告する、という手当ては本 Issue では入れていない。
+  → **Issue #2095 で対応した（§29）。** 構造 signature で検出し、`ctrl+x b` を利用者に示す。
 - **121〜199 桁でのサイドバー列数** — #2047 の積み残しのまま。本 Issue は既定幅しか触らない。
 
 ### 22.9 この節が変えたもの
@@ -4970,3 +4971,213 @@ received { candidates: 1, reattached: 1, skipped: 0 }
 - `tests/unit/server-opencode-reattach-2108.test.ts` — `server.ts` の配線（#1804 と同じ「バイトを読んで
   ブロックを実行する」形。起動をブロックしないことを、後続文の実行順で検査する）
 - `docs/design/opencode-server-live-verification.md` — 本節
+
+---
+
+## 29. Issue 2095: サイドバーが出ているフレームを構造的に検出する（opencode 1.18.22 / 2026-08-27）
+
+Issue #2095 は §22.8 の積み残し —— 「`ctrl+p` パレット経由でサイドバーを ON にした pane を
+どう検出するか」—— への手当てである。#2046 が塞いだのは CommandMate 側のボタンと route だけで、
+**opencode 自身の `Show sidebar` コマンドは止められない**。よって本 Issue は
+**「起こさせない」ではなく「起きたと気づける」**を作る。
+
+### 29.1 本 Issue は新規の実機計測を**していない**（理由つき）
+
+**新しいフレームは 1 枚も採っていない。** 必要が無かったからである。判断の根拠は全部 develop に
+commit 済みの実測物であり、
+
+- `tests/fixtures/opencode-live-2046/w80/sidebar-{on,off}.txt` —— **同一セッションを
+  `ctrl+x b` 1 回はさんで撮った 2 枚**。差はサイドバーの有無だけ（#2046 §22.3）
+- `tests/fixtures/opencode-live-2047/{w80,w120,w200}/*.txt` —— 同一セッションの 3 幅（#2047 §21）
+
+この 2 セットは「サイドバーがある / ない」を、実機・実 TUI・production の幅で既に押さえている。
+同じ状態をもう一度撮っても**新しい事実は 1 つも出ない**一方、opencode の実機起動は
+`~/.local/share/opencode/opencode.db` への書き込みを伴う（§4）。**得るものが無く、
+壊せるものがある計測は撃たない**というのが判断である。
+
+代わりに **commit 済みバイトからの再導出を全件やり直した**（2026-08-27）。
+結果は 29.2 と 29.3。
+
+### 29.2 #2046 / #2047 の数値は再現した
+
+`stripAnsi()`（repo の実装）を通してから幾何を測り直した。
+
+| 出典 | 主張 | 再導出 |
+|---|---|---|
+| §22.3.2 | `sidebar-off` は `ready` / `opencode_response_complete`、`isOpenCodeComplete: true` | **一致** |
+| §22.3.2 | `sidebar-on` は `running` / `unknown_frame`、`isOpenCodeComplete: false` | **一致** |
+| §22.3.2 | `sidebar-on` の保存 reply はサイドバー本文 | **一致** |
+| §21 | サイドバーは 121 桁以上でのみ自動表示 | **一致**（w80 / w120 は 0 件、w200 で検出） |
+| §22.3.1 | 明示トグルには幅の閾値が無い | **一致**（w80 で検出） |
+
+### 29.3 Issue 本文と食い違った 1 点 —— **`commandmate wait` は返る**
+
+Issue 本文は「終わったターンが永久に `running` に見え、`commandmate wait` が返らない」と書き、
+§22.3.2 も「`commandmate wait` は返らない」と書いている。**実測はそうではない。**
+
+`running` / `unknown_frame` は `isUnclassifiedFrame()`（`src/lib/session/status-evidence.ts`）の
+3 reason のひとつなので `isUnclassifiedActive: true` が立つ。`wait` は **#1708 以来この状態で
+止まる**：60 秒の dwell のあと **exit 10 / `type: "unclassified"`**。
+
+実際に通して確認した（`tests/unit/cli/commands/wait-pane-obstruction-2095.test.ts`。
+sidebar-on の payload を 70 秒ぶん fake timer で回す）:
+
+```
+exit code            10 (WaitExitCode.PROMPT_DETECTED)
+stdout  {"worktreeId":"wt2095", … ,"type":"unclassified", …}
+stderr  Unclassified interactive frame on wt2095 for 60s (status=running/unknown_frame). …
+```
+
+**つまり verdict は最初から正しかった。欠けていたのは理由である。**
+オペレータが受け取っていたのは「読めないフレームがある」だけで、
+そこから「サイドバーが出ている」「`ctrl+x b` で閉じる」に到達する道が無かった。
+本 Issue が足すのは exit code ではなく**原因の一文**である（29.5）。
+
+### 29.4 signature —— 単語ではなく幾何
+
+`Context` / `LSP` / `tokens` はサイドバーにあるが、**エージェントが返答に書く普通の英語でもある**。
+単語一致では「LSP について説明したターン」が全部誤検出になる。使うのは幾何のほうである。
+
+opencode は入力ボックスの下辺を `╹` ＋ `▀` の連なりで**ボックス幅ぶんちょうど**描き、
+gutter（`┃`）行も同じ幅までスペースで埋める。よって**ボックスの右端はフレーム自身から測れる**。
+そして**ボックスに属する行の、その右端より右にある文字は第 2 の列**である ——
+ボックスが pane 全幅を持っているときには原理的に出得ない（本文はその端で折り返すから）。
+
+```
+  ┃                                     Context          ← gutter 行に第 2 列
+  ┃  Build · Claude Sonnet 4.6 GitHub   maenokota-share-…
+  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  commandmate-issue-2046/…
+                                      ↑ boxRight
+```
+
+**幅で分岐しない。** #2046 の実測どおり明示トグルには 121 桁の閾値が無いので、
+幅で分岐した規則はこの Issue の当事者フレーム（80 桁）を取り逃がす。
+
+実測値（`stripAnsi` 後、全 commit 済み opencode フレーム / 2026-08-27）:
+
+| フレーム群 | `boxRight` | 第 2 列を持つボックス行 | 判定 |
+|---|---|---|---|
+| 2046 w80 `sidebar-off` ほか 8 枚 | 78 | **0** | 検出せず |
+| 2046 w80 `sidebar-on` | **38** | **5**（100 行窓では 3） | **検出** |
+| 2047 w80 / w120（各 11 枚） | 78 / 118 | **0** | 検出せず |
+| 2047 w200 `boot-idle` / `composer-residual` | 138 | **0** | 検出せず（ホーム画面の中央寄せボックス。セッションが無いのでサイドバーも無い） |
+| 2047 w200 その他 9 枚 | 156 | **7〜11** | **検出** |
+| 2047 全幅 `permission-{bash,edit}` | —— | —— | **null**（下辺行が無い＝読めない） |
+
+最後の行が重要で、**`null` は「サイドバーが無い」ではなく「レイアウトが読めなかった」**である。
+`upstream-faults.ts` の docblock が同じことを言っているのと同じ理由で、
+読み手が `null` を all-clear と解釈してはならない。
+
+#### 29.4.1 桁での切り出し（UTF-16 単位ではなく）
+
+「右端より右」を `String.prototype.slice(boxRight)` で取ると **UTF-16 単位**で切ることになり、
+桁とは 2 通りにずれる。**片方だけが「無い列」を捏造できる。**
+
+- **結合文字は 1 コードポイント / 0 桁**。タイ語・デーヴァナーガリー・ニクダー付きヘブライ語・
+  macOS の NFD ラテンのような行は、**桁数より UTF-16 単位数のほうが長い**。無補正だと
+  pane 全幅を持つボックスでも tail が非空になり、サイドバーの無いペインを検出してしまう。
+  → `indexAtColumn()` が読み飛ばす（到達後の裸の結合文字も貪欲に食う。1 個でも tail に
+  残ると `trim()` を生き延びて証拠に数えられるため）。
+- **東アジアの全角は 1 コードポイント / 2 桁**。日本語の行は逆に**単位数のほうが短い**。
+  これは**補正していない** —— 過少計上は真の桁より**後ろ**を切るので、excerpt が短くなるか
+  第 2 列を取り逃がすかであって、**無い列を作ることはできない**。素の `slice` の挙動と同じなので
+  退行も無い。wcwidth 表を持ち込んで excerpt を数文字取り戻すのは、判定に何も足さずに
+  「文字幅の第 2 の真実」をリポジトリに増やすだけである。
+
+commit 済み fixture にはこの形が 1 枚も無い（実機でタイ語を打った人がまだ居ない、というだけの話）。
+よって合成フレームで固定した —— `e` ＋ 結合文字 2 個（1 桁 / 3 単位）を 40 桁ぶん並べた composer 行で、
+**行の単位長は 78 を超えるがボックスは全幅**。無補正だと第 2 列が立つ。陽性対照として、
+同じ行を 78 桁までスペースで埋めてから `Context` を置いたフレームも並べてある
+（`null` が「合成フレームが読めなかった」ではなく「結合文字を処理した」ことの証拠）。
+
+閾値は 2 行（`OPENCODE_SIDEBAR_MIN_ROWS`）。実測の最小が 3（publish 対象の 100 行窓）なので
+1 桁の余裕がある。チューニングした数値ではなく、幅広文字が端に跨る等の 1 セルの事故に対する保険である。
+
+### 29.5 `wait` の扱い —— **payload は #1839 に乗せる / exit code は足さない**
+
+Issue 本文は `upstreamFault`（`current-output-builder.ts`）を前例として挙げ、採否と理由を求めている。
+**半分採り、半分採らない。**
+
+**採った**: payload の形。`paneObstruction: {id, matchedText, at} | null`、判定入力は
+`realtimeSnippet`（末尾 100 行＝publish されるのと同じ行）、既定では誰も verdict に使わない。
+`capture --json | jq` が 2 つのフィールドを同じ形で読めることに価値がある。
+
+**採らなかった**: `wait --fail-on-pane-obstruction` と新しい exit code。理由は 29.3 である。
+
+| | #1839（upstream fault） | #2095（サイドバー） |
+|---|---|---|
+| フレームの verdict | `ready`（**誤り** —— ターンは走っていない） | `running` / `unknown_frame`（**正しい**） |
+| フラグを足さない場合の `wait` | **exit 0** でマージされる | 60 秒後に **exit 10 / unclassified** で止まる |
+| 足りなかったもの | **verdict** | **原因** |
+
+`isUnclassifiedActive` が既に立っている以上、同じフレームに 2 つ目の verdict 経路を足すと
+「どちらが先に発火するか」を利用者が知らないと読めない出力になる。よって
+**exit code は 1 つも動かさず**、既に出しているメッセージに原因を足す。
+後方互換の担保は `wait-pane-obstruction-2095.test.ts` の 2 本
+（サイドバー有りで 10 のまま／`paneObstruction` を publish しない旧サーバで #1708 の文面のまま）。
+
+### 29.6 利用者への出し方
+
+3 面すべてが同じ 1 つの規則から出る。
+
+| 面 | 何が出るか | どこで |
+|---|---|---|
+| UI（PC 分割フッタ / モバイル端末タブ） | 警告バー ＋ `ctrl+x b` のキーキャップ | `OpencodeSidebarNotice`。フレームからクライアント側で導出（#1879 と同じ理由 —— WS push と 15 秒 HTTP poll で表示がずれないため） |
+| 履歴（UI の会話ペイン ／ `capture --prompts`） | #1708 の行の末尾に原因文 | `recordUnclassifiedFrame()`（60 秒 dwell 後、1 run 1 回） |
+| CLI | `wait` の stderr に原因文、`capture --json` に `paneObstruction` | —— |
+
+**ボタンは出さない。** #2046 が `b` を `OPENCODE_LEADER_CHORD_VALUES` から外し、
+special-keys route も 400 を返すようにしたので、この面から送る手段が無い。
+持っていない手段をボタンで約束しないこと自体が仕様であり、
+`OpencodeSidebarNotice-2095.test.tsx` が「button が 0 個であること」を固定している。
+
+キー表記 `ctrl+x b` は opencode 自身のキーバインド表から採った
+（`tests/fixtures/opencode-live-2046/w80/dialog-command-palette.txt:70` の
+`Show sidebar   ctrl+x b`）。定数 `OPENCODE_SIDEBAR_RECOVERY_CHORD` 1 箇所から 3 面に配り、
+locale 側には**書かない**（`opencode-sidebar-keys-2095.test.ts` が en / ja 両方で不在を固定）。
+
+### 29.7 他ツールへの影響はゼロ（構造上）
+
+`detectOpenCodePaneObstruction()` は `cliToolId === 'opencode'` のときにしか呼ばれない。
+claude / codex / copilot / gemini / antigravity / vibe-local はフレームを**見られてすらいない**。
+`current-output-pane-obstruction-2095.test.ts` が「同じバイトを claude として通すと `null`」で固定している。
+
+### 29.7.1 border 行に第 2 列を必須にする案は**実測で棄却した**
+
+「入力ボックスの下辺行は ASCII と罫線しか含まないので単位数＝桁数が厳密に一致する。
+よって下辺行に第 2 列があることを必要条件にすれば全角/結合文字の影響を完全に排除できる」——
+という案を検討し、commit 済み fixture 全件で確かめた。**通らない。**
+`opencode-live-2047/w200/esc-again-window.txt` と `w200/turn-running.txt` は
+**第 2 列を 10 行持ちながら下辺行の tail は空**である（サイドバーのフッタ行がたまたま
+そこで途切れている）。陽性 10 枚のうち 2 枚を落とす条件は採れない。
+
+### 29.8 未計測・積み残し
+
+- **パレット経由（`ctrl+p` → `Show sidebar`）で ON にしたフレームは撮っていない。**
+  §22.7 の理由（パレット操作は破壊的になり得る）と 29.1 の理由で撃たなかった。
+  検出規則は**キーの由来を見ていない** —— 見ているのは結果の幾何だけ —— ので、
+  同じ状態になれば同じ signature が立つ。ただしこれは**推論であって実測ではない**。
+- **121〜199 桁**は #2047 / #2046 の積み残しのまま。本 Issue も触っていない。
+- **サイドバーを閉じさせる導線**は作っていない。#2046 の判断を維持している。
+
+### 29.9 この節が変えたもの
+
+- `src/lib/detection/opencode-pane-obstruction.ts` — 新規。構造 signature 本体（leaf）
+- `src/lib/detection/excerpt.ts` — 新規。byte 予算での切り詰めを #1839 と共有
+- `src/lib/detection/upstream-faults.ts` — 切り詰めを上記へ移譲（挙動は不変）
+- `src/lib/session/current-output-builder.ts` — `paneObstruction` の算出と publish、
+  `recordUnclassifiedFrame()` への原因文
+- `src/cli/types/api-responses.ts` — `paneObstruction` の mirror
+- `src/cli/commands/wait.ts` — unclassified メッセージへの原因文（**exit code は不変**）
+- `src/cli/docs/agent-operations.ts` — `unclassified` の項に opencode の最頻原因
+- `src/components/worktree/OpencodeSidebarNotice.tsx` — 新規。警告バー
+- `src/components/worktree/TerminalSplitPaneContent.tsx` / `MobileTerminalTab.tsx` — 配線
+- `locales/{en,ja}/worktree.json` — `opencodeSidebar`
+- `tests/unit/detection-opencode-pane-obstruction-2095.test.ts` — 規則本体（幾何 / 単語罠 / 3 幅 / 正直な null）
+- `tests/unit/lib/current-output-pane-obstruction-2095.test.ts` — payload と履歴行
+- `tests/unit/cli/commands/wait-pane-obstruction-2095.test.ts` — `wait` の文面と後方互換
+- `tests/unit/components/worktree/OpencodeSidebarNotice-2095.test.tsx` — バー単体
+- `tests/unit/components/worktree/opencode-sidebar-surfaces-2095.test.tsx` — PC / モバイル両面
+- `tests/unit/i18n/opencode-sidebar-keys-2095.test.ts` — 実辞書 guard
+- `docs/design/opencode-server-live-verification.md` — 本節と §22.8 の相互参照
+- `docs/user-guide/cli-operations-guide.md` — 運用者向けの 1 項

@@ -154,6 +154,42 @@ const TURN_ADOPTION_GRACE_MS = POLL_INTERVAL_MS;
 const UNCLASSIFIED_DWELL_MS = 60_000;
 
 /**
+ * The keystroke that closes opencode's sidebar, in opencode's own notation
+ * (Issue #2095).
+ *
+ * A local copy of `OPENCODE_SIDEBAR_RECOVERY_CHORD` from
+ * `src/lib/detection/opencode-pane-obstruction.ts` and not an import: the CLI
+ * builds with `"paths": {}` (tsconfig.cli.json) and cannot reach `@/lib` at all,
+ * which is why `api-responses.ts` mirrors payload shapes rather than importing
+ * them. Taken from opencode's own keybind table, which its `ctrl+p` palette
+ * prints as `Show sidebar   ctrl+x b`.
+ */
+const OPENCODE_SIDEBAR_RECOVERY_CHORD = 'ctrl+x b';
+
+/**
+ * The cause sentence to append when the frame carries a pane obstruction, or ''
+ * (Issue #2095).
+ *
+ * Appended rather than substituted, and no exit code moves: the frame is
+ * genuinely unclassified and `wait` was already right to stop on it. What it
+ * could not say before is WHY, which left an operator with `capture --pane` and
+ * a screenful of box drawing to work it out from.
+ *
+ * Empty for a server too old to publish the field, which is the same output
+ * `wait` produced before this Issue.
+ */
+function describePaneObstruction(data: CurrentOutputResponse): string {
+  const obstruction = data.paneObstruction;
+  if (!obstruction) return '';
+  return (
+    ` Cause: paneObstruction=${obstruction.id} — a second column is sharing rows with the ` +
+    `transcript (it reads ${JSON.stringify(obstruction.matchedText)}), which covers the marker ` +
+    `that ends a turn. Press \`${OPENCODE_SIDEBAR_RECOVERY_CHORD}\` in the pane to close ` +
+    `opencode's sidebar.`
+  );
+}
+
+/**
  * How recent `autoYes.lastSuppression` must be to be reported as the reason this
  * wait is blocked (Issue #1699).
  *
@@ -734,7 +770,12 @@ async function pollWorktree(
             `Unclassified interactive frame on ${worktreeId} for ${dwellSeconds}s ` +
             `(status=${data.sessionStatus ?? 'unknown'}/${data.sessionStatusReason ?? 'unknown'}). ` +
             `The detection layer could not parse it; inspect the raw pane with ` +
-            `\`commandmate capture ${worktreeId} --pane\`.`;
+            `\`commandmate capture ${worktreeId} --pane\`.` +
+            // Issue #2095: the sidebar is exactly this frame's reason, and the
+            // one recovery is a keystroke in the pane. Riding the message keeps
+            // the exit-code table (10, `type: unclassified`) unchanged for every
+            // caller that already branches on it.
+            describePaneObstruction(data);
 
           if (options.onPrompt === 'human') {
             console.error(question);

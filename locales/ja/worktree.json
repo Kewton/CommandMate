@@ -1100,6 +1100,11 @@
       "last": "最新メッセージ"
     }
   },
+  "opencodeSidebar": {
+    "regionLabel": "opencode サイドバーの警告",
+    "label": "opencode のサイドバーが開いています",
+    "body": "トランスクリプトと同じ行を占有するため、ターンの終了を検出できません。opencode のペインで次のキーを押して閉じてください:"
+  },
   "opencodeSession": {
     "new": "新規セッション",
     "list": "セッション一覧",

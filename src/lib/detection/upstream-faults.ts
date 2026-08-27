@@ -25,6 +25,7 @@
  */
 
 import { stripAnsi } from './ansi';
+import { truncateToByteBudget } from './excerpt';
 
 /**
  * An upstream condition that stalls an agent without saying anything about the
@@ -78,31 +79,19 @@ export const UPSTREAM_FAULT_EXCERPT_MAX_BYTES = 200;
 export const UPSTREAM_FAULT_TRUNCATION_MARKER = '…[truncated]';
 
 /**
- * Truncate to a UTF-8 byte budget on a code-point boundary.
+ * Truncate to this module's UTF-8 byte budget.
  *
- * A local copy rather than `truncateToUtf8Bytes` from `lib/auto-yes-state`: that
- * module reaches the database and the Auto-Yes state machine, and this one is a
- * leaf the canary imports from outside Next. Accumulating code points (never
- * UTF-16 units) is what keeps a surrogate pair whole.
+ * The arithmetic moved to `./excerpt` when Issue #2095 published a second
+ * screen-read excerpt under the same rules; still not `truncateToUtf8Bytes`
+ * from `lib/auto-yes-state`, which reaches the database and the Auto-Yes state
+ * machine, because this module is a leaf the canary imports from outside Next.
  */
 function truncateExcerpt(text: string): string {
-  const encoder = new TextEncoder();
-  if (encoder.encode(text).length <= UPSTREAM_FAULT_EXCERPT_MAX_BYTES) return text;
-
-  // The marker is inside the budget, not on top of it: the bound is a promise
-  // about the published field, and a caller sizing a log line by it must not be
-  // handed twelve more characters than it asked for.
-  const budget =
-    UPSTREAM_FAULT_EXCERPT_MAX_BYTES - encoder.encode(UPSTREAM_FAULT_TRUNCATION_MARKER).length;
-  let bytes = 0;
-  let out = '';
-  for (const char of text) {
-    const size = encoder.encode(char).length;
-    if (bytes + size > budget) break;
-    bytes += size;
-    out += char;
-  }
-  return `${out}${UPSTREAM_FAULT_TRUNCATION_MARKER}`;
+  return truncateToByteBudget(
+    text,
+    UPSTREAM_FAULT_EXCERPT_MAX_BYTES,
+    UPSTREAM_FAULT_TRUNCATION_MARKER,
+  );
 }
 
 /** A signature that was found, with the text that carried it. */
