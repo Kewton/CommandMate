@@ -64,10 +64,14 @@ npm start
 ブラウザで以下のURLにアクセスします:
 
 ```
-http://localhost:3000
+http://127.0.0.1:3000
 ```
 
 > **ポート変更**: `commandmate start --port 3001` または `.env` ファイルで `CM_PORT=3001` のように変更できます。
+
+> **`localhost` ではなく `127.0.0.1`**: CommandMate は既定で `127.0.0.1` に bind します（`CM_BIND`）。
+> `localhost` は環境によって `::1`（IPv6）を先に解決しますが、そこは CommandMate が listen していない
+> アドレスです。別プロセスが掴んでいると、ブラウザは黙ってそちらに繋がります。
 
 ---
 
