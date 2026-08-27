@@ -18,6 +18,14 @@
  * it belongs directly above the two switches it describes, inside the subscribed
  * branch. A browser with no Push API has no subscription to be owed a notice
  * about.
+ *
+ * Issue #2124 adds the delivery banner, and it sits OUTSIDE the subscribed /
+ * not-subscribed branch, because the case it exists for is precisely the one
+ * where those two disagree: a 410 deletes the server's row while the browser
+ * still holds a PushSubscription, so `endpoint !== null` alone reported "enabled
+ * on this device" for a device the server had already stopped sending to. The
+ * banner is the visible half of `lib/push/delivery-health`; `serverSubscribed`
+ * below is the corrective half.
  */
 
 'use client';
@@ -46,6 +54,21 @@ import {
 interface Prefs {
   prompt: boolean;
   completion: boolean;
+}
+
+/**
+ * What the push service last said about this device (Issue #2124).
+ *
+ * Mirrors `PushDeliveryHealth` in `@/lib/push/delivery-health`, redeclared rather
+ * than imported for the same reason `EscalationSettings` below is: that module is
+ * server-only (better-sqlite3), and this file is a client component.
+ */
+interface DeliveryHealth {
+  state: 'failing' | 'removed';
+  statusCode: number | null;
+  failureCount: number;
+  firstFailureAt: number;
+  lastFailureAt: number;
 }
 
 /**
@@ -91,8 +114,25 @@ export function NotificationsSettings() {
    * a placeholder true would flash a banner at every newly registered device.
    */
   const [defaultsNoticePending, setDefaultsNoticePending] = useState(false);
+  /**
+   * Issue #2124: the push service's verdict on this device, or null when it is
+   * healthy (which is also the state before the GET lands, so a working device
+   * never flashes a banner).
+   */
+  const [delivery, setDelivery] = useState<DeliveryHealth | null>(null);
+  /**
+   * Issue #2124: whether the SERVER still has a row for this endpoint. `null`
+   * means "not asked yet, or the request failed" — only an actual answer is
+   * allowed to contradict the browser, so a flaky network cannot make a
+   * subscribed device offer to subscribe again.
+   *
+   * This is what a 410 needs: the browser keeps its PushSubscription after the
+   * push service has expired it, so `endpoint !== null` stays true for a device
+   * the server deleted and stopped sending to.
+   */
+  const [serverSubscribed, setServerSubscribed] = useState<boolean | null>(null);
 
-  const subscribed = endpoint !== null;
+  const subscribed = endpoint !== null && serverSubscribed !== false;
 
   useEffect(() => {
     let cancelled = false;
@@ -130,7 +170,12 @@ export function NotificationsSettings() {
             const d = (await r.json()) as {
               subscribed: boolean;
               subscription?: { preferences: Prefs; defaultsNoticePending?: boolean };
+              delivery?: DeliveryHealth | null;
             };
+            if (!cancelled) {
+              setServerSubscribed(d.subscribed === true);
+              setDelivery(d.delivery ?? null);
+            }
             if (d.subscribed && d.subscription && !cancelled) {
               setPrefs(d.subscription.preferences);
               setDefaultsNoticePending(d.subscription.defaultsNoticePending === true);
@@ -186,6 +231,10 @@ export function NotificationsSettings() {
       };
 
       setEndpoint(sub.endpoint);
+      // Issue #2124: a fresh registration is the repair for both delivery states,
+      // so the banner and the server-side verdict are reset together with it.
+      setServerSubscribed(true);
+      setDelivery(null);
       if (data.subscription?.preferences) setPrefs(data.subscription.preferences);
       // A device registering now is created at the current defaults generation,
       // so the server says false here. Read it rather than assuming: an endpoint
@@ -216,6 +265,8 @@ export function NotificationsSettings() {
         });
       }
       setEndpoint(null);
+      setServerSubscribed(null);
+      setDelivery(null);
       showToast(t('toast.disabled'), 'info');
     } catch {
       showToast(t('toast.error'), 'error');
@@ -292,6 +343,70 @@ export function NotificationsSettings() {
     [endpoint, prefs, showToast, t]
   );
 
+  /**
+   * "This device is not receiving notifications" (Issue #2124).
+   *
+   * Rendered above the subscribe / unsubscribe branch because the two delivery
+   * states straddle it: a 403 leaves the device subscribed (a misconfigured
+   * `CM_VAPID_SUBJECT` must never cost the reader their subscription) while a 410
+   * has already deleted the server's row. Both are invisible without this — the
+   * sender's only output for either is a server log line.
+   *
+   * Silent when `delivery` is null, which is both "healthy" and "not asked yet",
+   * so a working device never flashes a banner (the negative control the Issue's
+   * acceptance conditions ask for on the startup check applies here too).
+   *
+   * The APNs hint is attached to 403 specifically, because that is the status the
+   * Epic #2002 device UAT measured against the old default subject; #2126 will add
+   * its own status to the same banner without needing a second surface.
+   */
+  const renderDeliveryBanner = () => {
+    if (delivery === null) return null;
+
+    const removed = delivery.state === 'removed';
+    const status = delivery.statusCode;
+    const body = removed
+      ? status === null
+        ? t('delivery.removedUnknownStatus')
+        : t('delivery.removed', { status: String(status) })
+      : status === null
+        ? t('delivery.failingUnknownStatus', { count: delivery.failureCount })
+        : t('delivery.failing', { count: delivery.failureCount, status: String(status) });
+
+    return (
+      <div
+        className={
+          removed
+            ? 'space-y-2 rounded-lg border border-danger-border bg-danger-subtle p-3'
+            : 'space-y-2 rounded-lg border border-warning-border bg-warning-subtle p-3'
+        }
+        data-testid="notifications-delivery-health"
+        data-delivery-state={delivery.state}
+      >
+        <p
+          className={
+            removed
+              ? 'text-sm font-semibold text-danger-foreground'
+              : 'text-sm font-semibold text-warning-foreground'
+          }
+        >
+          {t(removed ? 'delivery.headingRemoved' : 'delivery.headingFailing')}
+        </p>
+        <p className="text-xs text-foreground">{body}</p>
+        {status === 403 && (
+          <p className="text-xs text-muted-foreground" data-testid="notifications-delivery-apns-hint">
+            {t('delivery.apnsHint')}
+          </p>
+        )}
+        <p className="text-xs text-muted-foreground">
+          {t('delivery.since', {
+            timestamp: new Date(delivery.firstFailureAt).toLocaleString(),
+          })}
+        </p>
+      </div>
+    );
+  };
+
   const renderBody = () => {
     if (loading) {
       return (
@@ -326,6 +441,8 @@ export function NotificationsSettings() {
             {t('permission.denied')}
           </p>
         )}
+
+        {renderDeliveryBanner()}
 
         {!subscribed ? (
           <Button

@@ -90,6 +90,12 @@ CommandMate is a Progressive Web App. On a mobile browser, use **Add to Home Scr
 
 > **HTTPS is required for installation.** Browsers only register a Service Worker (and offer install) on `https://` or `http://localhost`. When accessing a self-hosted instance over plain HTTP on the LAN (e.g. `http://192.168.x.x:3000`), install and offline support are disabled by the browser — use a tunnel or an HTTPS reverse proxy (see Security above) to enable them. The app itself remains fully usable without the PWA layer.
 
+### Phone notifications (Web Push)
+
+Once installed, CommandMate can push a notification to your phone **while the app is closed** — an agent waiting for you, a verification gate that failed, a session that could not start.
+
+**It is off until you generate a VAPID key pair.** `commandmate init` generates one and writes `CM_VAPID_PUBLIC_KEY` / `CM_VAPID_PRIVATE_KEY` / `CM_VAPID_SUBJECT` into `.env`; when they are missing, the startup log and `commandmate status` say so in one line. iOS/iPadOS additionally require the Home Screen install above — a Safari tab cannot subscribe. Full setup, including the HTTPS requirement and what to do when nothing arrives: [Web App Guide -> Phone Notifications](docs/user-guide/webapp-guide.md#phone-notifications-web-push).
+
 ---
 
 ## Browser Support

@@ -1,7 +1,39 @@
 /** Web Push module barrel (Issue #1125). */
 
-export { getVapidConfig, isPushConfigured, getVapidPublicKey } from './vapid';
-export type { VapidConfig } from './vapid';
+export {
+  getVapidConfig,
+  isPushConfigured,
+  getVapidPublicKey,
+  // The startup self-check both #2123 and #2124 report through. `server.ts` and
+  // `src/cli/commands/status.ts` import it from './vapid' directly rather than
+  // through this barrel: that file must stay reachable from `tsconfig.cli.json`
+  // (`paths: {}`), and this barrel pulls in web-push and better-sqlite3.
+  inspectVapidConfig,
+  formatVapidReportLines,
+  runVapidSelfCheck,
+  classifyVapidSubject,
+  extractVapidSubjectHost,
+  VAPID_DEFAULT_SUBJECT,
+  VAPID_ENV_KEYS,
+} from './vapid';
+export type {
+  VapidConfig,
+  VapidEnv,
+  VapidInspection,
+  VapidStatus,
+  VapidSubjectIssue,
+} from './vapid';
+
+// Per-device delivery health (Issue #2124, extensible for #2126).
+export {
+  getPushDeliveryHealth,
+  recordPushDeliveryFailure,
+  clearPushDeliveryHealth,
+  clearAllPushDeliveryHealth,
+  PUSH_DELIVERY_HEALTH_KEY_PREFIX,
+  PUSH_DELIVERY_HEALTH_MAX_AGE_MS,
+} from './delivery-health';
+export type { PushDeliveryHealth, PushDeliveryState } from './delivery-health';
 export {
   notifyPushSubscribers,
   buildPushPayload,

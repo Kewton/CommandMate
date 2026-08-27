@@ -24,6 +24,7 @@ CommandMate のWebアプリを使った基本操作を説明します。
 11. [エージェント設定](#エージェント設定)
 12. [実行契約と検証結果](#実行契約と検証結果)
 13. [モバイルからのアクセス](#モバイルからのアクセス)
+14. [スマホ通知（プッシュ通知）](#スマホ通知プッシュ通知)
 
 ---
 
@@ -423,6 +424,146 @@ Cloudflare Tunnel などのトンネリングサービスを使用すること�
 
 ![モバイル表示](../images/screenshot-mobile.png)
 *モバイル: トップページ*
+
+---
+
+## スマホ通知（プッシュ通知）
+
+エージェントが応答待ちになったとき、検証ゲートが不合格になったとき、セッションが起動に失敗した
+ときに、**アプリを閉じていてもスマホに通知**を出せます（Web Push）。
+
+**この節の手順を最後まで済ませるまで、通知は 1 通も出ません。**
+既定では VAPID 鍵が無く、鍵が無い間は push 機能ごと無効です。
+
+### 0. 前提（先に確認してください）
+
+| 前提 | 理由 | 確認方法 |
+|------|------|----------|
+| **HTTPS でアクセスできること** | Service Worker / PushManager は secure context 必須。`127.0.0.1` は例外扱いですが、**スマホからのアクセスは該当しません**（別ホストなので）。同一LANの `http://<PCのIP>:3000` では購読ボタンが動きません | スマホのアドレスバーが `https://` になっているか |
+| **iOS / iPadOS はホーム画面に追加すること** | Safari のタブでは Web Push が使えません。**ホーム画面に追加し、そこから起動した状態**でのみ購読できます | 購読ボタンが出ず「ホーム画面に追加してください」の案内が出たらこれ |
+| **Android Chrome は通常のタブでよい** | ホーム画面への追加は不要です | — |
+
+HTTPS を用意する方法は 2 つあります。
+
+- **トンネル**（外出先からも使える。推奨）: Cloudflare Tunnel など。
+  [デプロイガイド](../DEPLOYMENT.md) を参照
+- **自己署名証明書**（同一LAN内のみ）:
+  ```bash
+  brew install mkcert && mkcert -install && mkcert <PCのIPアドレス>
+  commandmate start --cert ./<証明書>.pem --key ./<秘密鍵>.pem
+  ```
+
+### 1. VAPID 鍵を作る
+
+`commandmate init` が鍵ペアを生成し、`.env` に書き込みます。
+**`node -e "require('web-push')..."` のような手打ちは不要です。**
+
+```bash
+commandmate init
+```
+
+すでに `.env` がある場合は `--force` で作り直せます。
+**そのとき既存の鍵ペアはそのまま引き継がれます** —— 公開鍵は購読済み端末の
+`PushSubscription` に焼き込まれているため、鍵を作り直すと**購読済みの端末が全部無言で切れる**
+からです。
+
+```bash
+commandmate init --force
+```
+
+### 2. `.env` の 3 変数を確認する
+
+`init` が書き込むのは次の 3 つです。
+
+```bash
+CM_VAPID_PUBLIC_KEY=<base64url, 65 バイト>
+CM_VAPID_PRIVATE_KEY=<base64url, 32 バイト>
+CM_VAPID_SUBJECT=https://github.com/Kewton/CommandMate
+```
+
+`CM_VAPID_SUBJECT` は VAPID の `sub` クレーム（このサーバーからの通知に関する連絡先）です。
+RFC 8292 は `mailto:` と `https:` の両方を許容します。
+
+> **重要（Apple のみ検証します）**: **APNs は `sub` の妥当性を検証します。**
+> `localhost` / ドットを含まないホスト名 / `.local` のような予約 TLD を指定すると
+> **403 で拒否され、iPhone・iPad にだけ通知が届きません。**
+> Google（FCM）はここに寛容なので、**Android だけで確認すると気づけません。**
+> 自分の連絡先にしたい場合は `mailto:you@your-domain.example.org` のように、
+> **実在するドメイン**を指定してください。
+
+**`CM_VAPID_PRIVATE_KEY` は秘密鍵です。** `.env` は
+[`.gitignore`](../../.gitignore) で追跡外ですが、**コピーした先は追跡外ではありません。**
+commit にもチャットにも貼らないでください。
+
+### 3. サーバーを再起動する
+
+```bash
+commandmate stop && commandmate start
+```
+
+### 4. サーバー側の設定を確認する
+
+```bash
+curl -s http://127.0.0.1:3000/api/push/vapid
+```
+
+```json
+{"configured":true,"publicKey":"BN..."}
+```
+
+`"configured": false` なら鍵が読めていません。起動ログか `commandmate status` に理由が 1 行出ます。
+
+```bash
+commandmate status
+```
+
+```
+Push notifications are disabled: no VAPID keys are configured.
+  Set CM_VAPID_PUBLIC_KEY and CM_VAPID_PRIVATE_KEY to enable them.
+```
+
+**設定が正しいときは、この行は出ません**（正常時は無言です）。
+`CM_VAPID_SUBJECT` が APNs に拒否される値のときも、同じ場所に 1 行出ます。
+
+### 5. 端末で購読する
+
+1. スマホのブラウザで **HTTPS の URL** を開く
+2. **iOS / iPadOS のみ**: 共有メニュー →「ホーム画面に追加」→ **ホーム画面のアイコンから起動**
+3. **More 画面**（モバイルはタブバー、デスクトップはサイドバー）→ **通知**
+4. **「通知を有効にする」を押す**
+5. ブラウザの許可ダイアログで「許可」
+
+> **押すまで OS の通知設定にサイトは現れません。**
+> iOS の「設定 → 通知」や Android の「アプリと通知」を先に見に行っても、
+> **購読前は一覧に存在しません。**「許可済みのはず」と誤解しやすい箇所です。
+
+> **Android の注意**: 一度「ブロック」を選ぶと、許可ダイアログは二度と出ません。
+> ブラウザのサイト設定から手動で許可し直してください。
+
+購読後、More 画面の**通知**には次の 2 つのスイッチが出ます。
+
+| スイッチ | 内容 | 既定 |
+|---------|------|------|
+| 対応が必要なとき | 応答待ち・検証ゲートの不合格・上流APIの障害・セッションの起動失敗 | オン |
+| 完了も知らせる（任意） | 対応の要らない正常完了 | **オフ** |
+
+### 6. 届かないとき
+
+More 画面の**通知**に、**この端末に届いていない**ことを示すカードが出ます。
+
+| カード | 意味 | 対処 |
+|--------|------|------|
+| **この端末には通知が届いていません** | プッシュサービスが送信を拒否している（HTTP 403 など）。**購読は削除していません** | 403 が出ているなら、まず `CM_VAPID_SUBJECT` を疑ってください（上記「重要」） |
+| **この端末の購読はプッシュサービス側で失効しました** | 404 / 410。ブラウザ側の購読が失効したためサーバーが送信を停止した | 「通知を有効にする」を押し直すと再購読します |
+
+サーバー側では次のログが出ます（`CM_LOG_LEVEL=info`）。
+
+```
+[WARN] [push/sender] push-send-failed {"statusCode":403,"consecutiveFailures":4}
+[INFO] [push/sender] push-fanout-complete {"kind":"prompt","delivered":1,"failed":1}
+```
+
+`delivered` が 0 のまま増えないときは、購読が 0 台か、全端末で失敗しています。
 
 ---
 

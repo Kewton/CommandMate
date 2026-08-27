@@ -24,6 +24,16 @@
   "permission": {
     "denied": "ブラウザの設定で通知がブロックされています。このサイトの通知を許可してください。"
   },
+  "delivery": {
+    "headingFailing": "この端末には通知が届いていません",
+    "headingRemoved": "この端末の購読はプッシュサービス側で失効しました",
+    "failing": "直近 {count} 件の通知がプッシュサービスに拒否されました（HTTP {status}）。購読は削除されていません。",
+    "failingUnknownStatus": "直近 {count} 件の通知がプッシュサービスに拒否されました。購読は削除されていません。",
+    "removed": "プッシュサービスがこの購読を失効と報告したため（HTTP {status}）、送信を停止しました。下のボタンで通知を有効にし直すと再購読できます。",
+    "removedUnknownStatus": "プッシュサービスがこの購読を失効と報告したため、送信を停止しました。下のボタンで通知を有効にし直すと再購読できます。",
+    "apnsHint": "iPhone / iPad で HTTP 403 が出る場合、サーバーの CM_VAPID_SUBJECT が Apple の受け付けない値になっていることがほとんどです。docs/user-guide/webapp-guide.md を参照してください。",
+    "since": "最初の失敗: {timestamp}"
+  },
   "unsupported": "このブラウザはプッシュ通知に対応していません。",
   "notConfigured": "このサーバーではプッシュ通知が設定されていません。VAPID鍵を設定すると有効になります。",
   "ios": {
