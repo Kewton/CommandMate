@@ -144,7 +144,9 @@ describe('verification failure push (Issue #2000)', () => {
     expect(payloads()).toHaveLength(1);
     expect(payloads()[0]).toMatchObject({
       kind: 'failure',
-      title: 'feature-x',
+      // Issue #2125: a run that named no instance is labelled with the
+      // worktree's resolved default rather than losing the suffix entirely.
+      title: 'feature-x (worktree: claude)',
       body: 'Verification failed: lint, unit',
     });
   });
