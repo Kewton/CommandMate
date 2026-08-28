@@ -90,6 +90,12 @@ CommandMate は Progressive Web App です。モバイルブラウザの**ホー
 
 > **インストールには HTTPS が必要です。** ブラウザが Service Worker を登録する（＝インストールを提示する）のは `https://` か `http://localhost` の場合だけです。LAN 上の平文 HTTP（例: `http://192.168.x.x:3000`）でアクセスしている間は、ブラウザ側の制約でインストールとオフライン対応が無効になります。有効にするにはトンネルか HTTPS のリバースプロキシを使ってください（上のセキュリティ節を参照）。PWA レイヤーなしでもアプリ本体は完全に利用できます。
 
+### スマホ通知（プッシュ通知）
+
+インストール後は、**アプリを閉じていてもスマホに通知**を出せます（応答待ち・検証ゲートの不合格・セッションの起動失敗など）。
+
+**VAPID 鍵を作るまで通知は出ません。** `commandmate init` が鍵ペアを生成し、`CM_VAPID_PUBLIC_KEY` / `CM_VAPID_PRIVATE_KEY` / `CM_VAPID_SUBJECT` を `.env` に書き込みます。未設定のときは起動ログと `commandmate status` に 1 行出ます。iOS / iPadOS は上記のホーム画面追加も必須です（Safari のタブでは購読できません）。HTTPS 要件や「届かないとき」を含む手順は [Webアプリ基本操作ガイド → スマホ通知](user-guide/webapp-guide.md#スマホ通知プッシュ通知) を参照してください。
+
 ---
 
 ## ブラウザ対応

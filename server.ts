@@ -494,6 +494,30 @@ app.prepare().then(() => {
       }
     })();
 
+    // Issue #2123 / #2124: say, in one line, whether Web Push can work at all.
+    // Unconfigured VAPID keys disable push silently (correct fail-safe, wrong
+    // ergonomics: the reader observes only "no notifications ever arrive"), and
+    // a `CM_VAPID_SUBJECT` Apple will not accept silences iPhone/iPad while
+    // Android keeps working. ONE check reports both — see src/lib/push/vapid.ts.
+    //
+    // A healthy configuration prints NOTHING, which is what makes the presence
+    // of a line meaningful. Same contract as the localhost self-check above:
+    // fail-open, never blocks `listen`. `commandmate status` runs the same
+    // function over the env the daemon was started with, so the two surfaces
+    // cannot drift.
+    //
+    // Dynamic import for the same reason as every reconciler here: adding a
+    // module graph to server.ts's eval-time graph perturbs Next's
+    // AsyncLocalStorage bootstrap under `tsx server.ts`. Do not hoist this.
+    void (async () => {
+      try {
+        const { runVapidSelfCheck } = await import('./src/lib/push/vapid');
+        runVapidSelfCheck();
+      } catch (error) {
+        console.error('VAPID self-check failed:', error);
+      }
+    })();
+
     // Initialize worktrees after server starts
     await initializeWorktrees();
 

@@ -18,6 +18,13 @@ import {
   formatLocalhostConflictWarning,
   readLocalhostConflict,
 } from '../../lib/server/localhost-self-check';
+// Relative, NOT `@/lib/push/vapid`: tsconfig.cli.json resets `paths` to {}, so an alias
+// import here breaks `npm run build:cli`. The module file, not the '@/lib/push' barrel —
+// that barrel pulls in web-push and better-sqlite3, neither of which belongs in the CLI.
+import {
+  formatVapidReportLines,
+  inspectVapidConfig,
+} from '../../lib/push/vapid';
 
 const logger = new CLILogger();
 
@@ -90,6 +97,45 @@ function printLocalhostConflict(status: DaemonStatus): void {
     }
   } catch {
     // Config dir unreadable, record unparsable: report the server, drop the hint.
+  }
+}
+
+/**
+ * Report the server's Web Push configuration, or nothing when it is healthy
+ * (Issues #2123 / #2124).
+ *
+ * The Issues' acceptance condition is "the startup log OR `commandmate status`",
+ * and this is the half that is still readable a week later — a daemon started in
+ * the background writes its stdout wherever the launcher put it, and the reader
+ * who notices "my phone stopped buzzing" reaches for `status`.
+ *
+ * Read from the env the DAEMON runs with (`getEffectiveEnv()`), not from this
+ * process's own environment: `.env` outranks exported variables for the server
+ * child (Issue #1266), so `process.env` here would report this shell's idea of
+ * the configuration rather than the server's. Exactly what the `CM_ALLOWED_IPS`
+ * line below already does.
+ *
+ * The residual imprecision is the same one that line carries: a variable exported
+ * into the daemon's environment at launch and absent from `.env` is invisible
+ * here. `commandmate init` writes all three VAPID variables into `.env`, so the
+ * supported setup is covered; a hand-exported key pair would be reported as
+ * unconfigured, which is why the startup log carries the same lines.
+ *
+ * Silent on a healthy install — that silence is the negative control both Issues
+ * ask for. Never throws: a diagnostic must not turn `status` into a failure.
+ */
+function printVapidStatus(env: Readonly<Record<string, string | undefined>>): void {
+  try {
+    const lines = formatVapidReportLines(inspectVapidConfig(env));
+    if (lines.length === 0) return;
+
+    console.log('');
+    logger.warn(lines[0]);
+    for (const line of lines.slice(1)) {
+      console.log(line);
+    }
+  } catch {
+    // Unreadable .env, unparsable value: report the server, drop the hint.
   }
 }
 
@@ -176,6 +222,9 @@ async function showSingleStatus(issueNo?: number): Promise<void> {
 
   // Issue #2113: the advertised localhost URL may not reach this server at all
   printLocalhostConflict(status);
+
+  // Issue #2123 / #2124: whether Web Push can work at all on this server
+  printVapidStatus(daemonManager.getEffectiveEnv());
 }
 
 /**
@@ -285,6 +334,9 @@ export async function statusCommand(options: StatusOptions = {}): Promise<void> 
 
     // Issue #2113: the advertised localhost URL may not reach this server at all
     printLocalhostConflict(status);
+
+    // Issue #2123 / #2124: whether Web Push can work at all on this server
+    printVapidStatus(daemonManager.getEffectiveEnv());
 
     // Issue #332: Show IP restriction status
     // Issue #1266: read the env the server actually runs with. An exported CM_ALLOWED_IPS

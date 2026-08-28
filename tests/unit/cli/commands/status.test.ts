@@ -241,8 +241,15 @@ describe('statusCommand', () => {
 
       await statusCommand();
 
+      // Scoped to the version-skew warning this test is about. `status` gained a
+      // second, unrelated warning in Issue #2123 — "push notifications are
+      // disabled" on a server with no VAPID keys, which this fixture's empty
+      // `.env` is — and a bare "no [WARN] anywhere" assertion would make the two
+      // diagnostics mutually exclusive. The negative control for the push line
+      // lives in status-vapid-2123.test.ts.
       const warned = consoleSpy.mock.calls.some(
-        (call: unknown[]) => typeof call[0] === 'string' && call[0].includes('[WARN]')
+        (call: unknown[]) =>
+          typeof call[0] === 'string' && call[0].includes('[WARN]') && call[0].includes('0.10.3')
       );
       expect(warned).toBe(false);
 

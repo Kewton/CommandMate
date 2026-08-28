@@ -191,6 +191,18 @@ export interface EnvConfig {
   CM_DB_PATH: string;
   CM_LOG_LEVEL: string;
   CM_LOG_FORMAT: string;
+  /**
+   * Web Push application-server key pair and contact (Issue #2123).
+   *
+   * Written as a set or not at all: a public key without its private half
+   * disables push exactly as no keys do, so a half-written trio would only make
+   * `commandmate status` report a "partial" configuration nobody asked for.
+   * `CM_VAPID_SUBJECT` is emitted alongside them so the operator can see and
+   * edit the `sub` claim without having to learn that it exists (Issue #2124).
+   */
+  CM_VAPID_PUBLIC_KEY?: string;
+  CM_VAPID_PRIVATE_KEY?: string;
+  CM_VAPID_SUBJECT?: string;
 }
 
 /**

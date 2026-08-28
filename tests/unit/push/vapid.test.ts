@@ -5,7 +5,12 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { getVapidConfig, isPushConfigured, getVapidPublicKey } from '@/lib/push/vapid';
+import {
+  getVapidConfig,
+  isPushConfigured,
+  getVapidPublicKey,
+  VAPID_DEFAULT_SUBJECT,
+} from '@/lib/push/vapid';
 
 const KEYS = ['CM_VAPID_PUBLIC_KEY', 'CM_VAPID_PRIVATE_KEY', 'CM_VAPID_SUBJECT'] as const;
 
@@ -42,7 +47,15 @@ describe('vapid config', () => {
     process.env.CM_VAPID_PUBLIC_KEY = 'pub';
     process.env.CM_VAPID_PRIVATE_KEY = 'priv';
     const config = getVapidConfig();
-    expect(config).toEqual({ publicKey: 'pub', privateKey: 'priv', subject: 'mailto:commandmate@localhost' });
+    // Issue #2124 moved this off `mailto:commandmate@localhost`, which APNs
+    // rejects with 403; the constant is asserted through its export so this
+    // suite pins "the default is used" and not the value twice over. The value
+    // itself is pinned in vapid-self-check-2123-2124.test.ts.
+    expect(config).toEqual({
+      publicKey: 'pub',
+      privateKey: 'priv',
+      subject: VAPID_DEFAULT_SUBJECT,
+    });
     expect(isPushConfigured()).toBe(true);
     expect(getVapidPublicKey()).toBe('pub');
   });

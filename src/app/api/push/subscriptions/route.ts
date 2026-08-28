@@ -23,6 +23,7 @@ import {
   type PushSubscriptionPreferenceUpdate,
 } from '@/lib/db';
 import { createLogger } from '@/lib/logger';
+import { getPushDeliveryHealth, type PushDeliveryHealth } from '@/lib/push/delivery-health';
 import { LOCALE_COOKIE_NAME, resolveLocale } from '@/config/i18n-config';
 
 export const dynamic = 'force-dynamic';
@@ -74,17 +75,35 @@ function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
 }
 
+/**
+ * What the push service last said about this endpoint (Issue #2124).
+ *
+ * Reported on BOTH branches of the GET, and the `subscribed: false` branch is
+ * the one that matters most: a 410 deletes the subscription row, so without this
+ * the device that was just dropped gets an answer indistinguishable from a device
+ * that never subscribed. Measured during the Epic #2002 device UAT (2026-08-27):
+ * a 410 removed an Android subscription and the only trace was one INFO line in
+ * the server log — the reader's experience was "notifications stopped".
+ *
+ * `null` means healthy. Only the verdict crosses the wire; the endpoint is never
+ * echoed and the store never held it (see `lib/push/delivery-health`).
+ */
+function deliveryOf(endpoint: string): PushDeliveryHealth | null {
+  return getPushDeliveryHealth(endpoint);
+}
+
 export function GET(request: Request) {
   try {
     const endpoint = new URL(request.url).searchParams.get('endpoint');
     if (!isNonEmptyString(endpoint)) {
       return NextResponse.json({ error: 'endpoint is required' }, { status: 400 });
     }
+    const delivery = deliveryOf(endpoint);
     const record = getPushSubscriptionByEndpoint(getDbInstance(), endpoint);
     if (!record) {
-      return NextResponse.json({ subscribed: false });
+      return NextResponse.json({ subscribed: false, delivery });
     }
-    return NextResponse.json({ subscribed: true, subscription: serialize(record) });
+    return NextResponse.json({ subscribed: true, subscription: serialize(record), delivery });
   } catch (error) {
     logger.error('push-subscription-get-failed', {
       error: error instanceof Error ? error.message : String(error),

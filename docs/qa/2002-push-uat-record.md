@@ -24,9 +24,10 @@
 | 手順書 | 最新の実施 | 判定 |
 |---|---|---|
 | 2001（T-1 〜 T-8） | **未実施** | — |
-| 1999 / 2000（L-1 〜 L-4） | **未実施** | — |
+| 1999 / 2000（L-1 〜 L-4） | 2026-08-27（§3） | **L-1 / L-2 合格・L-3 / L-4 未実施** |
 
-**Epic #2002 の実機確認は、2026-08-25 時点で 1 度も実施されていない。**
+~~**Epic #2002 の実機確認は、2026-08-25 時点で 1 度も実施されていない。**~~
+→ 2026-08-27 に 1 回目を実施（§3）。#1999 の L-1 / L-2 のみ。
 #2001 / #1999 / #2000 / #2057 はいずれも unit テストと Service Worker テストのみで受け入れている。
 それが不足である、というのが #2057 の指摘であり、本書はその受け皿である。
 
@@ -89,3 +90,118 @@
 - 仕様として決め直すべき点
 - **合格だが気になった点**（合否表に入らないので、ここに書かないと消える）
 ```
+
+---
+
+## 3. 実施 1 回目（2026-08-27）
+
+### 3.1 実施環境
+
+| 項目 | 値 |
+|---|---|
+| 実施日 | 2026-08-27 23:20〜2026-08-28 00:09（JST） |
+| 実施者 | @Kewton（端末操作）／ Claude Code（サーバ操作・ログ判定） |
+| サーバ版 | `0.27.1`（`/api/app/update-check` の `currentVersion`）。develop `e8d09989` |
+| サーバ配置 | ローカル（`127.0.0.1:3000`）／ HTTPS 終端 Cloudflare Tunnel（`myweb-3000.kewton.org`、**Cloudflare Access 認証あり**） |
+| 端末 A | **iPad / iPadOS 18.7**（ホーム画面 PWA）。宛先 **APNs** |
+| 端末 B | **Android 10 / Chrome 151**（通常タブ）。宛先 **FCM** |
+| Service Worker | **§1.2 の方法では未確認。** 代わりに両端末で「解除 → 再度有効化」を実施し、購読 ID の入れ替わり（Android `af6e222f`→`0f3297e2` / iPad `f73da481`→`ada3e082`）で新 SW 取り込みを確認。サーバ側 `public/sw.js` に `replaceStaleNotifications` が 2 箇所あることは確認済み |
+| 対象 worktree | `commandmate-uat-push`（ブランチ `uat/push-2002`、使い捨て）／ claude。instance は primary `claude` と alias `claude-2` |
+
+**前提の整備**（実施前に必要だった作業。いずれも本 UAT の途中で判明）:
+
+- **VAPID が未設定だった**（`{"configured":false}`、購読 0 件）。`.env` に `CM_VAPID_PUBLIC_KEY` /
+  `CM_VAPID_PRIVATE_KEY` / `CM_VAPID_SUBJECT` を設定して再起動 → `{"configured":true}`。
+  手順は利用者向けドキュメントに存在しない（**#2123**）
+- **`CM_VAPID_SUBJECT` の既定値 `mailto:commandmate@localhost` が APNs に拒否され、iPad にだけ
+  届かなかった**（403）。`https://github.com/Kewton/CommandMate` に変更して解決（**#2124**）
+- `scripts/start.sh` は pm2 が無い環境でログをファイルに残さないため、判定に必要なログが取れない。
+  `scripts/build-and-start.sh --daemon` で起動し直した
+
+### 3.2 結果
+
+#### #2001 / #2057（手順書: 2001-cross-device-dismissal-uat.md）
+
+| # | ケース | 結果 | ログの reason | 備考 |
+|---|---|---|---|---|
+| T-1 | iPhone で応答 → Android | 未実施 | | |
+| T-2 | Android で応答 → iPhone | 未実施 | | |
+| T-3 | 通知に触れず応答 | 未実施 | | **参考観測あり**（下記 3.4） |
+| T-4 | Auto-Yes 下 | 未実施 | | |
+| T-8 | 再起動をまたぐ（#2057） | 未実施 | | |
+| T-5 | 購読 1 台 | 未実施 | | |
+| T-6 | 購読 0 台 | 未実施 | | |
+| T-7 | 片方が要対応 OFF | 未実施 | | |
+| §4 | 音・バイブ | 未実施 | — | |
+| §5 | 枚数（増えないこと） | 未実施 | — | |
+
+#### #1999 / #2000（手順書: 1999-2000-push-quieting-uat.md）
+
+| # | ケース | 結果 | ログの reason / instanceId | 備考 |
+|---|---|---|---|---|
+| L-1 | Auto-Yes（primary） | **合格** | `auto-yes-answering` / `worktreeId=commandmate-uat-push, cliToolId=claude, instanceId=claude` | 2 台とも未着を目視。抑止の 0.9 秒後に `poller:response-sent`（同じ 3 つ組）＝**空振りの抑止ではない** |
+| L-2 | Auto-Yes（alias） | **合格** | `auto-yes-answering` / `instanceId=claude-2`（`claude` に落ちていない） | ①2 台とも未着を目視 ②`instanceId` が alias のまま ③primary（Auto-Yes 無し）は**2 台とも受信**＝ worktree ごと黙っているのではない |
+| L-3 | 失敗の可読性 | 未実施 | — | |
+| L-4 | 同居と着地 | 未実施 | — | |
+
+**陽性対照**（判定の前提）: Auto-Yes 無しで同じ形の待機を作り、**2 台とも「応答待ち」を受信**することを
+先に確認した。これを取らずに L-1 を実施すると「抑止された」と「そもそも届かない」が区別できない。
+
+**#2000 の副次確認**: 購読 4 回（初回 2 台＋入れ直し 2 台）すべてで `enabled_completion = 0`。
+**新規登録端末で正常完了が既定 OFF** という #2000 の受入条件が、FCM / APNs の両方で成立している。
+
+### 3.3 不成立の記録
+
+なし。
+
+### 3.4 気づき（次の Issue の種）
+
+**A. 待機エッジの観測は機会的で、短い待機は観測すらされない（手順書が想定していない条件）**
+
+alias への L-2 は 3 回目でようやくゲートのログが出た。
+
+| 回 | 検出 → Auto-Yes 応答 | `prompt-push-suppressed` |
+|---|---|---|
+| 1 回目 | 244 ms | 出ない |
+| 2 回目 | 231 ms | 出ない |
+| 3 回目 | 1,665 ms | **出た** |
+
+`observeWaitingEdge` の呼び出し元はポーラーのティックか worktree 一覧 API のプローブだけで、
+Auto-Yes が 230 ms で答えるとその隙間を誰も見ていない。**利用者から見た結果（鳴らない）は同じだが、
+機構は「抑止された」ではなく「観測されなかった」**である。3 回目は `/api/worktrees` を
+タイトなループで叩いて窓に入れた。手順書に「短い待機では抑止ログが出ないことがある」旨の
+注記が要る。
+
+**B. 成功した送信はログに出ない — ログの沈黙を「送っていない」と読んではいけない**
+
+`waiting-push-notifier` は `waiting-push-failed` のみ、`push-sender` は `push-send-failed` /
+`push-subscription-removed` のみをログする。**成功は無言**。実施中に一度この推論を誤り、
+「送信ログ 0 行だから鳴っていない可能性」と判断しかけた。**判定は端末の目視が唯一の手段**である。
+手順書 §1.3 の期待ログ例は `resolution-push-sent`（成功をログする側）だけなので、
+待機通知側も同じだと読める。注記が要る。
+
+**C. リクエストログが無いため「届いていない」を切り分けられない**
+
+購読が成立しない間、`/api/push/subscriptions` への POST が到達したかを確かめようとしたが、
+**このサーバはリクエストをログしない**（陽性対照として自分で `/api/push/vapid` を叩いても 0 行）。
+`push-subscription-registered` / `post-failed` の 2 行しか手がかりが無く、
+**400（不正ペイロード）は無言**なので「呼ばれていない」と「弾かれた」が区別できない。
+
+**D. 端末側の前提がドキュメントに無い（#2123）**
+
+実施に必要だったのに、どこにも書かれていなかったもの: HTTPS が要ること／iOS はホーム画面 PWA が
+必須で Android は不要なこと／**アプリ内の More 画面のボタンを押すまで OS の通知一覧にサイトが
+現れないこと**（今回、OS 設定を先に見て「許可済みのはず」と誤認した）。
+
+**E. Cloudflare Access のセッションと通知タップの着地（未検証・L-4 で確認予定）**
+
+Web Push 自体は Access の影響を受けない（サーバ → FCM/APNs → 端末）。しかし通知をタップした
+あとの `/worktrees/<id>` は Access を通るため、セッションが切れていると**ログイン画面に着く**。
+実運用上「対応が必要なときにすぐ対応できない」ことになりうる。L-4 で確認する。
+
+**F. 合格だが気になった点 — roster の `AUTO_YES` 列**
+
+`commandmate auto-yes --instance claude-2 --enable` の直後、`commandmate instances` の
+`AUTO_YES` 列は `no` のままだった。セッション未起動のため `capture` の `autoYes` も `null`。
+セッション起動後は `{"enabled": true}` になり、ゲートも正しく効いたので**動作は正しい**が、
+**画面上は「有効にしたのに no」と読める**。表示と実体の乖離として記録する。

@@ -11,6 +11,7 @@ import {
   chmodSync,
   copyFileSync,
   mkdirSync,
+  readFileSync,
   realpathSync,
 } from 'fs';
 import { join, normalize } from 'path';
@@ -244,6 +245,61 @@ export function escapeEnvValue(value: string): string {
 }
 
 /**
+ * The VAPID variables already present in an `.env`, if any (Issue #2123).
+ *
+ * `init --force` rewrites the file from scratch. Regenerating the key pair there
+ * would be a data-loss bug wearing a helpful face: the public key is baked into
+ * every `PushSubscription` a browser has already created, so a new pair silently
+ * orphans every device that had subscribed — they stay in `push_subscriptions`,
+ * every send fails, and the reader is told nothing (which is the exact failure
+ * mode Issue #2124 was filed about). So an existing pair is carried across.
+ *
+ * Deliberately a minimal parser rather than `dotenv`: this reads a file that is
+ * about to be OVERWRITTEN, so it must not populate `process.env` as a side effect
+ * — `dotenv.config()` does, and would leak the old keys into the running CLI.
+ * It handles the shapes `escapeEnvValue()` writes (bare, or double-quoted with
+ * backslash escapes) and ignores everything else, because anything it cannot
+ * parse is safest treated as "not configured": the caller then generates a fresh
+ * pair, which is the same outcome as before this Issue.
+ *
+ * Never throws — an unreadable file means "no keys", not a failed `init`.
+ *
+ * @param envPath - The `.env` to read.
+ * @returns Only the keys that were found; missing ones are absent.
+ */
+export function readExistingVapidKeys(
+  envPath: string
+): Partial<Pick<EnvConfig, 'CM_VAPID_PUBLIC_KEY' | 'CM_VAPID_PRIVATE_KEY' | 'CM_VAPID_SUBJECT'>> {
+  const wanted = ['CM_VAPID_PUBLIC_KEY', 'CM_VAPID_PRIVATE_KEY', 'CM_VAPID_SUBJECT'] as const;
+  const found: Record<string, string> = {};
+
+  try {
+    if (!existsSync(envPath)) return {};
+    for (const rawLine of readFileSync(envPath, 'utf-8').split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (line.length === 0 || line.startsWith('#')) continue;
+
+      const eq = line.indexOf('=');
+      if (eq <= 0) continue;
+
+      const name = line.slice(0, eq).trim();
+      if (!(wanted as readonly string[]).includes(name)) continue;
+
+      const raw = line.slice(eq + 1).trim();
+      const value =
+        raw.startsWith('"') && raw.endsWith('"') && raw.length >= 2
+          ? raw.slice(1, -1).replace(/\\(["\\])/g, '$1')
+          : raw;
+      if (value.length > 0) found[name] = value;
+    }
+  } catch {
+    return {};
+  }
+
+  return found;
+}
+
+/**
  * Environment setup utility
  */
 export class EnvSetup {
@@ -282,6 +338,24 @@ export class EnvSetup {
     // browsing needs configuring — CM_ROOT_DIR is always browsable.
     if (config.CM_BROWSE_ROOTS) {
       lines.push(`CM_BROWSE_ROOTS=${escapeEnvValue(config.CM_BROWSE_ROOTS)}`);
+    }
+
+    // Issue #2123: the Web Push trio, written as a set or not at all (see
+    // EnvConfig). The comment above them is the only place a reader learns that
+    // the private key is a secret and that the file is not meant to be committed
+    // — `.gitignore` covers `.env`, but a copied file is not covered by anything.
+    if (config.CM_VAPID_PUBLIC_KEY && config.CM_VAPID_PRIVATE_KEY) {
+      lines.push('');
+      lines.push('# Web Push (phone notifications). Setup: docs/user-guide/webapp-guide.md');
+      lines.push('# CM_VAPID_PRIVATE_KEY is a secret: never commit it, never share it.');
+      lines.push('# Replacing this pair orphans every device that has already subscribed.');
+      lines.push(`CM_VAPID_PUBLIC_KEY=${escapeEnvValue(config.CM_VAPID_PUBLIC_KEY)}`);
+      lines.push(`CM_VAPID_PRIVATE_KEY=${escapeEnvValue(config.CM_VAPID_PRIVATE_KEY)}`);
+      if (config.CM_VAPID_SUBJECT) {
+        // Issue #2124: the `sub` claim Apple validates. Written explicitly rather
+        // than left to the built-in default so it is visible and editable.
+        lines.push(`CM_VAPID_SUBJECT=${escapeEnvValue(config.CM_VAPID_SUBJECT)}`);
+      }
     }
 
     lines.push('');

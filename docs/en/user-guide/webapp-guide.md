@@ -24,6 +24,7 @@ It's a step-by-step guide for first-time users.
 11. [Agent Settings](#agent-settings)
 12. [Execution Contract and Verification](#execution-contract-and-verification)
 13. [Mobile Access](#mobile-access)
+14. [Phone Notifications (Web Push)](#phone-notifications-web-push)
 
 ---
 
@@ -425,6 +426,144 @@ On mobile, a tab bar is displayed at the bottom:
 
 ![Mobile view](../../images/screenshot-mobile.png)
 *Mobile: Homepage*
+
+---
+
+## Phone Notifications (Web Push)
+
+CommandMate can push a notification to your phone **while the app is closed** — when an
+agent is waiting for you, when a verification gate fails, or when a session could not
+start.
+
+**No notification is sent until you finish every step in this section.** A fresh install
+has no VAPID keys, and without them the whole push feature is off.
+
+### 0. Prerequisites (check these first)
+
+| Prerequisite | Why | How to check |
+|---|---|---|
+| **You reach the app over HTTPS** | Service Worker and PushManager require a secure context. `127.0.0.1` is exempt, but **your phone is not** — it is a different host. The subscribe button does not work over `http://<your PC's IP>:3000` on the same LAN | The address bar on the phone says `https://` |
+| **iOS / iPadOS: add to Home Screen** | Web Push is unavailable in a Safari tab. You can only subscribe from an **installed** app, launched from the Home Screen icon | If you see "add this app to your Home Screen" instead of the subscribe button, this is why |
+| **Android Chrome works in a normal tab** | No Home Screen install needed | — |
+
+Two ways to get HTTPS:
+
+- **A tunnel** (also works away from home; recommended): Cloudflare Tunnel and friends —
+  see the [Deployment Guide](../../DEPLOYMENT.md)
+- **A self-signed certificate** (same LAN only):
+  ```bash
+  brew install mkcert && mkcert -install && mkcert <your PC's IP address>
+  commandmate start --cert ./<cert>.pem --key ./<key>.pem
+  ```
+
+### 1. Generate the VAPID keys
+
+`commandmate init` generates the key pair and writes it into `.env`.
+**You never have to type a `node -e "require('web-push')..."` one-liner.**
+
+```bash
+commandmate init
+```
+
+If `.env` already exists, `--force` rewrites it — and **an existing key pair is carried
+across**. The public key is baked into the `PushSubscription` every subscribed browser
+holds, so replacing the pair would silently cut off every device that had subscribed.
+
+```bash
+commandmate init --force
+```
+
+### 2. Check the three variables in `.env`
+
+```bash
+CM_VAPID_PUBLIC_KEY=<base64url, 65 bytes>
+CM_VAPID_PRIVATE_KEY=<base64url, 32 bytes>
+CM_VAPID_SUBJECT=https://github.com/Kewton/CommandMate
+```
+
+`CM_VAPID_SUBJECT` is the VAPID `sub` claim: who to contact about pushes from this server.
+RFC 8292 allows both a `mailto:` address and an `https:` URL.
+
+> **Important (only Apple checks this)**: **APNs validates `sub`.** A host that cannot
+> resolve — `localhost`, a bare hostname with no dot, a reserved TLD such as `.local` — is
+> answered with **403, and iPhone/iPad receive nothing.** Google (FCM) is permissive here,
+> so **testing on Android alone cannot see the problem.** If you want your own address,
+> use a **real domain**: `mailto:you@your-domain.example.org`.
+
+**`CM_VAPID_PRIVATE_KEY` is a secret.** `.env` is git-ignored via
+[`.gitignore`](../../../.gitignore), but **a copy of it is not.** Never paste it into a
+commit or a chat.
+
+### 3. Restart the server
+
+```bash
+commandmate stop && commandmate start
+```
+
+### 4. Verify the server side
+
+```bash
+curl -s http://127.0.0.1:3000/api/push/vapid
+```
+
+```json
+{"configured":true,"publicKey":"BN..."}
+```
+
+If it says `"configured": false`, the keys were not read. The startup log and
+`commandmate status` both name the reason in one line:
+
+```bash
+commandmate status
+```
+
+```
+Push notifications are disabled: no VAPID keys are configured.
+  Set CM_VAPID_PUBLIC_KEY and CM_VAPID_PRIVATE_KEY to enable them.
+```
+
+**A correctly configured server prints nothing here** — silence is the healthy state. A
+`CM_VAPID_SUBJECT` that APNs will reject produces a line in the same two places.
+
+### 5. Subscribe on the device
+
+1. Open the **HTTPS URL** in the phone's browser
+2. **iOS / iPadOS only**: Share menu -> "Add to Home Screen" -> **launch from that icon**
+3. **More screen** (tab bar on mobile, sidebar on desktop) -> **Notifications**
+4. Press **"Enable notifications"**
+5. Answer "Allow" in the browser's permission dialog
+
+> **The site does not appear in the OS notification list until you press that button.**
+> Looking at iOS Settings -> Notifications, or Android's Apps & notifications, **before
+> subscribing shows nothing** — it is easy to conclude "I already allowed it" from that.
+
+> **Android note**: once you choose "Block", the permission dialog never appears again.
+> Re-allow it from the browser's site settings.
+
+After subscribing, the **Notifications** section of the More screen shows two switches:
+
+| Switch | Covers | Default |
+|---|---|---|
+| When you need to act | Prompt waiting, failed verification gate, upstream API fault, session that could not start | On |
+| Also tell me about completions | Ordinary completions that need nothing from you | **Off** |
+
+### 6. When nothing arrives
+
+The **Notifications** section shows a card saying this device is not receiving.
+
+| Card | Meaning | What to do |
+|---|---|---|
+| **This device is not receiving notifications** | The push service is rejecting sends (HTTP 403 and similar). **Your subscription was not deleted** | On a 403, suspect `CM_VAPID_SUBJECT` first (see the Important note above) |
+| **This device was dropped by the push service** | 404 / 410. The browser's subscription expired, so the server stopped sending to it | Press "Enable notifications" again to re-subscribe |
+
+Server-side, with `CM_LOG_LEVEL=info`:
+
+```
+[WARN] [push/sender] push-send-failed {"statusCode":403,"consecutiveFailures":4}
+[INFO] [push/sender] push-fanout-complete {"kind":"prompt","delivered":1,"failed":1}
+```
+
+If `delivered` stays at 0, either no device is subscribed or every device is failing.
 
 ---
 
