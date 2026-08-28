@@ -18,8 +18,9 @@
  * via next-intl's `createTranslator`: this module is compiled to CommonJS for
  * `dist/server` (what `npm start` runs) and next-intl is ESM-only, so importing
  * it here would `require()` an ES module — fatal below Node 22.12, which our
- * `engines: ">=22.0.0"` still admits. These four strings only ever substitute
- * `{excerpt}`, so a dependency-free replace covers them.
+ * `engines: ">=22.0.0"` still admits. The bodies only ever substitute a handful
+ * of named placeholders — `{excerpt}`, `{minutes}` (#1790), `{agent}` /
+ * `{version}` (#2045) — so a dependency-free replace covers them.
  */
 
 import webpush from 'web-push';
@@ -36,6 +37,7 @@ import enNotifications from '../../../locales/en/notifications.json';
 import jaNotifications from '../../../locales/ja/notifications.json';
 import type { WaitingKind } from '@/lib/session/waiting-kind';
 import { getVapidConfig } from './vapid';
+import { clearPushDeliveryHealth, recordPushDeliveryFailure } from './delivery-health';
 import { shouldSendNotification, shouldSendWaitingPush } from './notification-dedup';
 import { markPromptCardShown } from './prompt-card-state';
 
@@ -82,7 +84,23 @@ export type FailurePushReason =
    * the remedy is different and the body has to say so: "install it", not "read
    * the pane".
    */
-  | 'session-start-unavailable';
+  | 'session-start-unavailable'
+  /**
+   * The agent's own server reported that a turn ended in an error
+   * (Issue #2045). Today only opencode publishes such a frame — `session.error`,
+   * raised from `sources/opencode/push`.
+   *
+   * Deliberately **not** folded into `upstream-fault`. That wording asserts an
+   * upstream cause, and this signal does not establish one: opencode 1.18.22's
+   * `session.error` carries any of eight error names (measured from its own
+   * `GET /doc`, `docs/design/opencode-server-live-verification.md` §17), and
+   * only `APIError` / `ProviderAuthError` are upstream. `UnknownError`,
+   * `MessageOutputLengthError`, `StructuredOutputError`, `ContextOverflowError`
+   * and `ContentFilterError` are local to the run, so the copy names the fact
+   * the frame does establish — the agent stopped — and lets the excerpt (the
+   * agent's own `error.data.message`) say which.
+   */
+  | 'agent-session-error';
 
 /** What a failure notification is about (Issue #2000). */
 export interface FailureContext {
@@ -139,6 +157,43 @@ export interface NotificationEvent {
    * resolution is a *displayed* notification and not a silent close.
    */
   resolved?: boolean;
+  /**
+   * A newer build of the agent CLI exists (Issue #2045).
+   *
+   * Rides on `kind: 'completion'` and is meaningless on the other two, which is
+   * the honest bucket for it: nothing is blocked and nobody has to act, so it
+   * belongs to the same opt-in toggle (`enabled_completion`) an ordinary
+   * completion does rather than to the "you need to act" one. Set, it replaces
+   * the completion body — "Done: …" would be a lie about a notice that reports
+   * no work at all.
+   *
+   * It shares the completion `tag`, so an update notice and a completion card
+   * replace each other on the device. Deliberate: both are informational, the
+   * notice is raised at most once per subscription, and giving it a tag of its
+   * own would let a stale "1.19.0 is available" outlive the update itself.
+   *
+   * Producers: `sources/opencode/push`, from `installation.update-available`.
+   */
+  updateAvailable?: {
+    /** The instance the notice is about — `opencode`, `opencode-2`, …. */
+    agent: string;
+    /** The version opencode says is available (`properties.version`). */
+    version: string;
+  };
+  /**
+   * Where tapping this notification goes (Issue #2022).
+   *
+   * Omitted — which is every caller that shipped before #2022 — the target is
+   * `/worktrees/<worktreeId>`, unchanged. It is set only by a producer whose
+   * subject is not a worktree row: Assistant Chat is scoped to a repository and
+   * lives at `/chat`, so the derived URL would point at a worktree page that
+   * does not exist.
+   *
+   * The `tag` is deliberately NOT derived from it. A tag groups the cards a
+   * Service Worker may replace, and that grouping is per subject
+   * (`worktreeId:kind`), not per destination.
+   */
+  url?: string;
 }
 
 /** The JSON payload delivered to the Service Worker. Minimal by design. */
@@ -245,6 +300,10 @@ const FAILURE_BODY_KEYS: Record<
     withExcerpt: 'failureSessionUnavailableWithExcerpt',
     plain: 'failureSessionUnavailable',
   },
+  'agent-session-error': {
+    withExcerpt: 'failureAgentSessionWithExcerpt',
+    plain: 'failureAgentSession',
+  },
 };
 
 function buildFailureBody(
@@ -286,16 +345,23 @@ export function buildPushPayload(
         : buildWaitingBody(event, messages, excerpt, now)
       : event.kind === 'failure'
         ? buildFailureBody(event, messages, excerpt)
-        : excerpt
-          ? messages.completionWithExcerpt.replace('{excerpt}', excerpt)
-          : messages.completion;
+        : // Issue #2045: an update notice is a completion by *bucket*, not by
+          // content, so it is the one completion whose body is not "Done".
+          event.updateAvailable
+          ? messages.updateAvailable
+              .replace('{agent}', event.updateAvailable.agent)
+              .replace('{version}', event.updateAvailable.version)
+          : excerpt
+            ? messages.completionWithExcerpt.replace('{excerpt}', excerpt)
+            : messages.completion;
 
   return {
     kind: event.kind,
     title,
     body,
     worktreeId: event.worktreeId,
-    url: `/worktrees/${event.worktreeId}`,
+    // Issue #2022: the worktree page is the default, not the only answer.
+    url: event.url ?? `/worktrees/${event.worktreeId}`,
     // Unchanged by #1790, and deliberately: the escalation carries the same tag
     // as the notification it follows up, so the Service Worker replaces the
     // stale one instead of stacking a second card for the same wait.
@@ -306,24 +372,56 @@ export function buildPushPayload(
   };
 }
 
+/**
+ * Send to one device, and record what happened where the reader can see it.
+ *
+ * The two failure handlings are UNCHANGED (Issue #2124 verifies that explicitly):
+ * 404/410 removes the subscription because the push service says the endpoint is
+ * gone, and every other status — 403 from APNs over a bad `sub`, the 4xx #2126 is
+ * about — leaves the subscription alone, because a configuration mistake must
+ * never delete a reader's subscription.
+ *
+ * What is new is that both outcomes now also land in `delivery-health`, keyed by
+ * a hash of the endpoint, so `GET /api/push/subscriptions` can tell the device
+ * "you are not receiving" instead of the failure ending in a server log the
+ * phone's owner never reads.
+ *
+ * @returns True when the payload was accepted by the push service.
+ */
 async function sendToOne(
   sub: PushSubscriptionRecord,
-  payload: string
-): Promise<void> {
+  payload: string,
+  now: number = Date.now()
+): Promise<boolean> {
   try {
     await webpush.sendNotification(
       { endpoint: sub.endpoint, keys: sub.keys },
       payload
     );
+    // Only the recovery edge is logged: a device that was failing and is now
+    // receiving again is the one success worth a line. Logging every success
+    // would put one line per device per notification into the log.
+    if (clearPushDeliveryHealth(sub.endpoint)) {
+      logger.info('push-delivery-recovered');
+    }
+    return true;
   } catch (err) {
     const statusCode = (err as { statusCode?: number }).statusCode;
     if (statusCode === 404 || statusCode === 410) {
       // Subscription expired / unsubscribed at the push service — auto-remove.
       deletePushSubscriptionByEndpoint(getDbInstance(), sub.endpoint);
+      recordPushDeliveryFailure(sub.endpoint, { statusCode, removed: true }, now);
       logger.info('push-subscription-removed', { statusCode });
-      return;
+      return false;
     }
-    logger.warn('push-send-failed', { statusCode: statusCode ?? 'unknown' });
+    const health = recordPushDeliveryFailure(sub.endpoint, { statusCode: statusCode ?? null }, now);
+    logger.warn('push-send-failed', {
+      statusCode: statusCode ?? 'unknown',
+      // Issue #2124: one 403 is a blip, a streak of them is a misconfigured
+      // `CM_VAPID_SUBJECT`. The count is what tells the two apart in a log.
+      consecutiveFailures: health.failureCount,
+    });
+    return false;
   }
 }
 
@@ -414,12 +512,22 @@ export async function notifyPushSubscribers(
       else byLocale.set(locale, [sub]);
     }
 
-    await Promise.all(
-      Array.from(byLocale, ([locale, subs]) => {
-        const payload = JSON.stringify(buildPushPayload(event, locale, now));
-        return Promise.all(subs.map((sub) => sendToOne(sub, payload)));
-      })
-    );
+    const outcomes = (
+      await Promise.all(
+        Array.from(byLocale, ([locale, subs]) => {
+          const payload = JSON.stringify(buildPushPayload(event, locale, now));
+          return Promise.all(subs.map((sub) => sendToOne(sub, payload, now)));
+        })
+      )
+    ).flat();
+
+    // Issue #2124: a fan-out that reached nobody used to be indistinguishable
+    // from one that was never attempted — `push-send-failed` is per device and
+    // sits below the default log level's attention, and success said nothing at
+    // all. One line per fan-out names both halves, and no endpoint.
+    const delivered = outcomes.filter(Boolean).length;
+    const failed = outcomes.length - delivered;
+    logger.info('push-fanout-complete', { kind: event.kind, delivered, failed });
   } catch (err) {
     logger.warn('push-fanout-error', {
       error: err instanceof Error ? err.message : String(err),

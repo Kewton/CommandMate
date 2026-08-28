@@ -1,0 +1,2176 @@
+[
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.updated",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "info": {
+        "id": "msg_user0000000000000000001",
+        "role": "user",
+        "sessionID": "ses_0000000000000000000000000",
+        "time": {
+          "created": 1787648517229
+        },
+        "agent": "build",
+        "model": {
+          "providerID": "github-copilot",
+          "modelID": "claude-sonnet-4.6"
+        }
+      }
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.updated",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "part": {
+        "type": "text",
+        "text": "Reply with EXACTLY this markdown and nothing else:\n\n## Heading A\n\n- item one\n- item two\n\n**bold** and `code`\n\nDo not use any tools.",
+        "messageID": "msg_user0000000000000000001",
+        "sessionID": "ses_0000000000000000000000000",
+        "id": "prt_0000000000000000000000001"
+      },
+      "time": 1787648518524
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.updated",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "info": {
+        "id": "msg_asst0000000000000000001",
+        "parentID": "msg_user0000000000000000001",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "<WORKTREE_PATH>",
+          "root": "<WORKTREE_PATH>"
+        },
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "modelID": "claude-sonnet-4.6",
+        "providerID": "github-copilot",
+        "time": {
+          "created": 1787648518532
+        },
+        "sessionID": "ses_0000000000000000000000000"
+      }
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.updated",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "info": {
+        "role": "user",
+        "time": {
+          "created": 1787648517229
+        },
+        "agent": "build",
+        "model": {
+          "providerID": "github-copilot",
+          "modelID": "claude-sonnet-4.6"
+        },
+        "id": "msg_user0000000000000000001",
+        "sessionID": "ses_0000000000000000000000000",
+        "summary": {
+          "diffs": []
+        }
+      }
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.updated",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "part": {
+        "id": "prt_0000000000000000000000002",
+        "messageID": "msg_asst0000000000000000001",
+        "sessionID": "ses_0000000000000000000000000",
+        "snapshot": "853694aae8816094a0d875fee7ea26278dbf5d0f",
+        "type": "step-start"
+      },
+      "time": 1787648522034
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.updated",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "part": {
+        "id": "prt_0000000000000000000000003",
+        "messageID": "msg_asst0000000000000000001",
+        "sessionID": "ses_0000000000000000000000000",
+        "type": "text",
+        "text": "",
+        "time": {
+          "start": 1787648522036
+        }
+      },
+      "time": 1787648522036
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000001",
+      "partID": "prt_0000000000000000000000003",
+      "field": "text",
+      "delta": "## Heading A\n\n- item one"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000001",
+      "partID": "prt_0000000000000000000000003",
+      "field": "text",
+      "delta": "\n- item two\n\n**bold**"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000001",
+      "partID": "prt_0000000000000000000000003",
+      "field": "text",
+      "delta": " and `code`"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.updated",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "part": {
+        "id": "prt_0000000000000000000000003",
+        "messageID": "msg_asst0000000000000000001",
+        "sessionID": "ses_0000000000000000000000000",
+        "type": "text",
+        "text": "## Heading A\n\n- item one\n- item two\n\n**bold** and `code`",
+        "time": {
+          "start": 1787648522036,
+          "end": 1787648522053
+        }
+      },
+      "time": 1787648522053
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.updated",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "part": {
+        "id": "prt_0000000000000000000000004",
+        "reason": "stop",
+        "snapshot": "853694aae8816094a0d875fee7ea26278dbf5d0f",
+        "messageID": "msg_asst0000000000000000001",
+        "sessionID": "ses_0000000000000000000000000",
+        "type": "step-finish",
+        "tokens": {
+          "total": 8533,
+          "input": 3,
+          "output": 23,
+          "reasoning": 0,
+          "cache": {
+            "write": 8507,
+            "read": 0
+          }
+        },
+        "cost": 0.03225525
+      },
+      "time": 1787648522085
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.updated",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "info": {
+        "id": "msg_asst0000000000000000001",
+        "parentID": "msg_user0000000000000000001",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "<WORKTREE_PATH>",
+          "root": "<WORKTREE_PATH>"
+        },
+        "cost": 0.03225525,
+        "tokens": {
+          "total": 8533,
+          "input": 3,
+          "output": 23,
+          "reasoning": 0,
+          "cache": {
+            "write": 8507,
+            "read": 0
+          }
+        },
+        "modelID": "claude-sonnet-4.6",
+        "providerID": "github-copilot",
+        "time": {
+          "created": 1787648518532
+        },
+        "sessionID": "ses_0000000000000000000000000",
+        "finish": "stop"
+      }
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.updated",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "info": {
+        "id": "msg_asst0000000000000000001",
+        "parentID": "msg_user0000000000000000001",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "<WORKTREE_PATH>",
+          "root": "<WORKTREE_PATH>"
+        },
+        "cost": 0.03225525,
+        "tokens": {
+          "total": 8533,
+          "input": 3,
+          "output": 23,
+          "reasoning": 0,
+          "cache": {
+            "write": 8507,
+            "read": 0
+          }
+        },
+        "modelID": "claude-sonnet-4.6",
+        "providerID": "github-copilot",
+        "time": {
+          "created": 1787648518532,
+          "completed": 1787648522109
+        },
+        "sessionID": "ses_0000000000000000000000000",
+        "finish": "stop"
+      }
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "session.idle",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.updated",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "info": {
+        "role": "user",
+        "time": {
+          "created": 1787648517229
+        },
+        "agent": "build",
+        "model": {
+          "providerID": "github-copilot",
+          "modelID": "claude-sonnet-4.6"
+        },
+        "summary": {
+          "diffs": []
+        },
+        "id": "msg_user0000000000000000001",
+        "sessionID": "ses_0000000000000000000000000"
+      }
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.updated",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "info": {
+        "id": "msg_user0000000000000000002",
+        "role": "user",
+        "sessionID": "ses_0000000000000000000000000",
+        "time": {
+          "created": 1787648589261
+        },
+        "agent": "build",
+        "model": {
+          "providerID": "github-copilot",
+          "modelID": "claude-sonnet-4.6"
+        }
+      }
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.updated",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "part": {
+        "type": "text",
+        "text": "Run the bash command `echo CMATE-2041-TOOL-MARKER` and then tell me in one short sentence what it printed.",
+        "messageID": "msg_user0000000000000000002",
+        "sessionID": "ses_0000000000000000000000000",
+        "id": "prt_0000000000000000000000005"
+      },
+      "time": 1787648589263
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.updated",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "info": {
+        "id": "msg_asst0000000000000000002",
+        "parentID": "msg_user0000000000000000002",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "<WORKTREE_PATH>",
+          "root": "<WORKTREE_PATH>"
+        },
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "modelID": "claude-sonnet-4.6",
+        "providerID": "github-copilot",
+        "time": {
+          "created": 1787648589267
+        },
+        "sessionID": "ses_0000000000000000000000000"
+      }
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.updated",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "info": {
+        "role": "user",
+        "time": {
+          "created": 1787648589261
+        },
+        "agent": "build",
+        "model": {
+          "providerID": "github-copilot",
+          "modelID": "claude-sonnet-4.6"
+        },
+        "id": "msg_user0000000000000000002",
+        "sessionID": "ses_0000000000000000000000000",
+        "summary": {
+          "diffs": []
+        }
+      }
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.updated",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "part": {
+        "id": "prt_0000000000000000000000006",
+        "messageID": "msg_asst0000000000000000002",
+        "sessionID": "ses_0000000000000000000000000",
+        "snapshot": "853694aae8816094a0d875fee7ea26278dbf5d0f",
+        "type": "step-start"
+      },
+      "time": 1787648590969
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.updated",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "part": {
+        "id": "prt_0000000000000000000000007",
+        "messageID": "msg_asst0000000000000000002",
+        "sessionID": "ses_0000000000000000000000000",
+        "type": "tool",
+        "tool": "bash",
+        "callID": "toolu_00000000000000000000001",
+        "state": {
+          "status": "pending",
+          "input": {},
+          "raw": ""
+        }
+      },
+      "time": 1787648590971
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.updated",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "part": {
+        "type": "tool",
+        "tool": "bash",
+        "callID": "toolu_00000000000000000000001",
+        "state": {
+          "status": "running",
+          "input": {
+            "command": "echo CMATE-2041-TOOL-MARKER"
+          },
+          "time": {
+            "start": 1787648591066
+          }
+        },
+        "id": "prt_0000000000000000000000007",
+        "sessionID": "ses_0000000000000000000000000",
+        "messageID": "msg_asst0000000000000000002"
+      },
+      "time": 1787648591066
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.updated",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "part": {
+        "type": "tool",
+        "tool": "bash",
+        "callID": "toolu_00000000000000000000001",
+        "state": {
+          "metadata": {
+            "output": ""
+          },
+          "status": "running",
+          "input": {
+            "command": "echo CMATE-2041-TOOL-MARKER"
+          },
+          "time": {
+            "start": 1787648591087
+          }
+        },
+        "id": "prt_0000000000000000000000007",
+        "sessionID": "ses_0000000000000000000000000",
+        "messageID": "msg_asst0000000000000000002"
+      },
+      "time": 1787648591087
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.updated",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "part": {
+        "type": "tool",
+        "tool": "bash",
+        "callID": "toolu_00000000000000000000001",
+        "state": {
+          "metadata": {
+            "output": "CMATE-2041-TOOL-MARKER\n"
+          },
+          "status": "running",
+          "input": {
+            "command": "echo CMATE-2041-TOOL-MARKER"
+          },
+          "time": {
+            "start": 1787648591093
+          }
+        },
+        "id": "prt_0000000000000000000000007",
+        "sessionID": "ses_0000000000000000000000000",
+        "messageID": "msg_asst0000000000000000002"
+      },
+      "time": 1787648591093
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.updated",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "part": {
+        "type": "tool",
+        "tool": "bash",
+        "callID": "toolu_00000000000000000000001",
+        "state": {
+          "status": "completed",
+          "input": {
+            "command": "echo CMATE-2041-TOOL-MARKER"
+          },
+          "output": "CMATE-2041-TOOL-MARKER\n",
+          "metadata": {
+            "output": "CMATE-2041-TOOL-MARKER\n",
+            "exit": 0,
+            "truncated": false
+          },
+          "title": "echo CMATE-2041-TOOL-MARKER",
+          "time": {
+            "start": 1787648591093,
+            "end": 1787648591096
+          }
+        },
+        "id": "prt_0000000000000000000000007",
+        "sessionID": "ses_0000000000000000000000000",
+        "messageID": "msg_asst0000000000000000002"
+      },
+      "time": 1787648591096
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.updated",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "part": {
+        "id": "prt_0000000000000000000000008",
+        "reason": "tool-calls",
+        "snapshot": "853694aae8816094a0d875fee7ea26278dbf5d0f",
+        "messageID": "msg_asst0000000000000000002",
+        "sessionID": "ses_0000000000000000000000000",
+        "type": "step-finish",
+        "tokens": {
+          "total": 8631,
+          "input": 3,
+          "output": 64,
+          "reasoning": 0,
+          "cache": {
+            "write": 57,
+            "read": 8507
+          }
+        },
+        "cost": 0.00373485
+      },
+      "time": 1787648591125
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.updated",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "info": {
+        "id": "msg_asst0000000000000000002",
+        "parentID": "msg_user0000000000000000002",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "<WORKTREE_PATH>",
+          "root": "<WORKTREE_PATH>"
+        },
+        "cost": 0.00373485,
+        "tokens": {
+          "total": 8631,
+          "input": 3,
+          "output": 64,
+          "reasoning": 0,
+          "cache": {
+            "write": 57,
+            "read": 8507
+          }
+        },
+        "modelID": "claude-sonnet-4.6",
+        "providerID": "github-copilot",
+        "time": {
+          "created": 1787648589267
+        },
+        "sessionID": "ses_0000000000000000000000000",
+        "finish": "tool-calls"
+      }
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.updated",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "info": {
+        "id": "msg_asst0000000000000000002",
+        "parentID": "msg_user0000000000000000002",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "<WORKTREE_PATH>",
+          "root": "<WORKTREE_PATH>"
+        },
+        "cost": 0.00373485,
+        "tokens": {
+          "total": 8631,
+          "input": 3,
+          "output": 64,
+          "reasoning": 0,
+          "cache": {
+            "write": 57,
+            "read": 8507
+          }
+        },
+        "modelID": "claude-sonnet-4.6",
+        "providerID": "github-copilot",
+        "time": {
+          "created": 1787648589267,
+          "completed": 1787648591148
+        },
+        "sessionID": "ses_0000000000000000000000000",
+        "finish": "tool-calls"
+      }
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.updated",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "info": {
+        "id": "msg_asst0000000000000000003",
+        "parentID": "msg_user0000000000000000002",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "<WORKTREE_PATH>",
+          "root": "<WORKTREE_PATH>"
+        },
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "modelID": "claude-sonnet-4.6",
+        "providerID": "github-copilot",
+        "time": {
+          "created": 1787648591149
+        },
+        "sessionID": "ses_0000000000000000000000000"
+      }
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.updated",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "info": {
+        "role": "user",
+        "time": {
+          "created": 1787648589261
+        },
+        "agent": "build",
+        "model": {
+          "providerID": "github-copilot",
+          "modelID": "claude-sonnet-4.6"
+        },
+        "summary": {
+          "diffs": []
+        },
+        "id": "msg_user0000000000000000002",
+        "sessionID": "ses_0000000000000000000000000"
+      }
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.updated",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "part": {
+        "id": "prt_0000000000000000000000009",
+        "messageID": "msg_asst0000000000000000003",
+        "sessionID": "ses_0000000000000000000000000",
+        "snapshot": "853694aae8816094a0d875fee7ea26278dbf5d0f",
+        "type": "step-start"
+      },
+      "time": 1787648592692
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.updated",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "part": {
+        "id": "prt_0000000000000000000000010",
+        "messageID": "msg_asst0000000000000000003",
+        "sessionID": "ses_0000000000000000000000000",
+        "type": "text",
+        "text": "",
+        "time": {
+          "start": 1787648592697
+        }
+      },
+      "time": 1787648592697
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000003",
+      "partID": "prt_0000000000000000000000010",
+      "field": "text",
+      "delta": "It"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000003",
+      "partID": "prt_0000000000000000000000010",
+      "field": "text",
+      "delta": " printed `"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000003",
+      "partID": "prt_0000000000000000000000010",
+      "field": "text",
+      "delta": "CMATE-2041-"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000003",
+      "partID": "prt_0000000000000000000000010",
+      "field": "text",
+      "delta": "TOOL-MARKER`."
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.updated",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "part": {
+        "id": "prt_0000000000000000000000010",
+        "messageID": "msg_asst0000000000000000003",
+        "sessionID": "ses_0000000000000000000000000",
+        "type": "text",
+        "text": "It printed `CMATE-2041-TOOL-MARKER`.",
+        "time": {
+          "start": 1787648592697,
+          "end": 1787648592768
+        }
+      },
+      "time": 1787648592768
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.updated",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "part": {
+        "id": "prt_0000000000000000000000011",
+        "reason": "stop",
+        "snapshot": "853694aae8816094a0d875fee7ea26278dbf5d0f",
+        "messageID": "msg_asst0000000000000000003",
+        "sessionID": "ses_0000000000000000000000000",
+        "type": "step-finish",
+        "tokens": {
+          "total": 8675,
+          "input": 1,
+          "output": 19,
+          "reasoning": 0,
+          "cache": {
+            "write": 91,
+            "read": 8564
+          }
+        },
+        "cost": 0.00319845
+      },
+      "time": 1787648592797
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.updated",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "info": {
+        "id": "msg_asst0000000000000000003",
+        "parentID": "msg_user0000000000000000002",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "<WORKTREE_PATH>",
+          "root": "<WORKTREE_PATH>"
+        },
+        "cost": 0.00319845,
+        "tokens": {
+          "total": 8675,
+          "input": 1,
+          "output": 19,
+          "reasoning": 0,
+          "cache": {
+            "write": 91,
+            "read": 8564
+          }
+        },
+        "modelID": "claude-sonnet-4.6",
+        "providerID": "github-copilot",
+        "time": {
+          "created": 1787648591149
+        },
+        "sessionID": "ses_0000000000000000000000000",
+        "finish": "stop"
+      }
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.updated",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "info": {
+        "id": "msg_asst0000000000000000003",
+        "parentID": "msg_user0000000000000000002",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "<WORKTREE_PATH>",
+          "root": "<WORKTREE_PATH>"
+        },
+        "cost": 0.00319845,
+        "tokens": {
+          "total": 8675,
+          "input": 1,
+          "output": 19,
+          "reasoning": 0,
+          "cache": {
+            "write": 91,
+            "read": 8564
+          }
+        },
+        "modelID": "claude-sonnet-4.6",
+        "providerID": "github-copilot",
+        "time": {
+          "created": 1787648591149,
+          "completed": 1787648592819
+        },
+        "sessionID": "ses_0000000000000000000000000",
+        "finish": "stop"
+      }
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "session.idle",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.updated",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "info": {
+        "role": "user",
+        "time": {
+          "created": 1787648589261
+        },
+        "agent": "build",
+        "model": {
+          "providerID": "github-copilot",
+          "modelID": "claude-sonnet-4.6"
+        },
+        "summary": {
+          "diffs": []
+        },
+        "id": "msg_user0000000000000000002",
+        "sessionID": "ses_0000000000000000000000000"
+      }
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.updated",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "info": {
+        "id": "msg_user0000000000000000003",
+        "role": "user",
+        "sessionID": "ses_0000000000000000000000000",
+        "time": {
+          "created": 1787648673653
+        },
+        "agent": "build",
+        "model": {
+          "providerID": "github-copilot",
+          "modelID": "claude-sonnet-4.6"
+        }
+      }
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.updated",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "part": {
+        "type": "text",
+        "text": "Write ONE single paragraph of at least 400 characters on a SINGLE line with no newlines inside it, about why deterministic build outputs matter. Do not use tools. Do not use lists or headings.",
+        "messageID": "msg_user0000000000000000003",
+        "sessionID": "ses_0000000000000000000000000",
+        "id": "prt_0000000000000000000000012"
+      },
+      "time": 1787648673655
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.updated",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "info": {
+        "id": "msg_asst0000000000000000004",
+        "parentID": "msg_user0000000000000000003",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "<WORKTREE_PATH>",
+          "root": "<WORKTREE_PATH>"
+        },
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "modelID": "claude-sonnet-4.6",
+        "providerID": "github-copilot",
+        "time": {
+          "created": 1787648673659
+        },
+        "sessionID": "ses_0000000000000000000000000"
+      }
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.updated",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "info": {
+        "role": "user",
+        "time": {
+          "created": 1787648673653
+        },
+        "agent": "build",
+        "model": {
+          "providerID": "github-copilot",
+          "modelID": "claude-sonnet-4.6"
+        },
+        "id": "msg_user0000000000000000003",
+        "sessionID": "ses_0000000000000000000000000",
+        "summary": {
+          "diffs": []
+        }
+      }
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.updated",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "part": {
+        "id": "prt_0000000000000000000000013",
+        "messageID": "msg_asst0000000000000000004",
+        "sessionID": "ses_0000000000000000000000000",
+        "snapshot": "853694aae8816094a0d875fee7ea26278dbf5d0f",
+        "type": "step-start"
+      },
+      "time": 1787648675434
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.updated",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "part": {
+        "id": "prt_0000000000000000000000014",
+        "messageID": "msg_asst0000000000000000004",
+        "sessionID": "ses_0000000000000000000000000",
+        "type": "text",
+        "text": "",
+        "time": {
+          "start": 1787648675435
+        }
+      },
+      "time": 1787648675435
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": "Deterministic build outputs matter because they ensure"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " that"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " given"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " the same source"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " code and"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " build"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " environment"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": ", the compiled"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " artifacts"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " are"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " always"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " byte"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": "-for-byte identical,"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " which"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " is critical"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " for security"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": ","
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " reproduc"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": "ibility, and trust"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " in software"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " distribution"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": "."
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " When"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " builds"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " are deterministic, teams"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " can verify"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " that a"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " distributed"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " binary"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " actually"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " corresponds"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " to the published"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " source code, making"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " it far"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " harder"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " for"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " malicious actors to inject"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " backd"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": "oors or tam"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": "pered"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " code into"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " the build"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " pipeline"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " without"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " detection."
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " This property"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " also"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " simpl"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": "ifies debugging and aud"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": "iting, since"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " engineers"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " can reli"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": "ably reproduce"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " a"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " specific"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " build state"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " from"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " any"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " point in history"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " without"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " wor"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": "rying about timestamps"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": ","
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " random"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " seeds, or environment"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": "-"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": "specific variables"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " poll"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": "uting the output."
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " Reproduc"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": "ible builds strengthen"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " the entire software supply chain by"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " allowing"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " independent"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " third"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " parties to verify artifacts"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": ", enabling"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " stronger"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " guarant"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": "ees for"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " end"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " users who"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " depend"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " on the integrity"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " of the software"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " they"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": " run"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.delta",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "messageID": "msg_asst0000000000000000004",
+      "partID": "prt_0000000000000000000000014",
+      "field": "text",
+      "delta": "."
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.updated",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "part": {
+        "id": "prt_0000000000000000000000014",
+        "messageID": "msg_asst0000000000000000004",
+        "sessionID": "ses_0000000000000000000000000",
+        "type": "text",
+        "text": "Deterministic build outputs matter because they ensure that given the same source code and build environment, the compiled artifacts are always byte-for-byte identical, which is critical for security, reproducibility, and trust in software distribution. When builds are deterministic, teams can verify that a distributed binary actually corresponds to the published source code, making it far harder for malicious actors to inject backdoors or tampered code into the build pipeline without detection. This property also simplifies debugging and auditing, since engineers can reliably reproduce a specific build state from any point in history without worrying about timestamps, random seeds, or environment-specific variables polluting the output. Reproducible builds strengthen the entire software supply chain by allowing independent third parties to verify artifacts, enabling stronger guarantees for end users who depend on the integrity of the software they run.",
+        "time": {
+          "start": 1787648675435,
+          "end": 1787648679699
+        }
+      },
+      "time": 1787648679699
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.part.updated",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "part": {
+        "id": "prt_0000000000000000000000015",
+        "reason": "stop",
+        "snapshot": "853694aae8816094a0d875fee7ea26278dbf5d0f",
+        "messageID": "msg_asst0000000000000000004",
+        "sessionID": "ses_0000000000000000000000000",
+        "type": "step-finish",
+        "tokens": {
+          "total": 8896,
+          "input": 3,
+          "output": 174,
+          "reasoning": 0,
+          "cache": {
+            "write": 64,
+            "read": 8655
+          }
+        },
+        "cost": 0.0054555
+      },
+      "time": 1787648679723
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.updated",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "info": {
+        "id": "msg_asst0000000000000000004",
+        "parentID": "msg_user0000000000000000003",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "<WORKTREE_PATH>",
+          "root": "<WORKTREE_PATH>"
+        },
+        "cost": 0.0054555,
+        "tokens": {
+          "total": 8896,
+          "input": 3,
+          "output": 174,
+          "reasoning": 0,
+          "cache": {
+            "write": 64,
+            "read": 8655
+          }
+        },
+        "modelID": "claude-sonnet-4.6",
+        "providerID": "github-copilot",
+        "time": {
+          "created": 1787648673659
+        },
+        "sessionID": "ses_0000000000000000000000000",
+        "finish": "stop"
+      }
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.updated",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "info": {
+        "id": "msg_asst0000000000000000004",
+        "parentID": "msg_user0000000000000000003",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "<WORKTREE_PATH>",
+          "root": "<WORKTREE_PATH>"
+        },
+        "cost": 0.0054555,
+        "tokens": {
+          "total": 8896,
+          "input": 3,
+          "output": 174,
+          "reasoning": 0,
+          "cache": {
+            "write": 64,
+            "read": 8655
+          }
+        },
+        "modelID": "claude-sonnet-4.6",
+        "providerID": "github-copilot",
+        "time": {
+          "created": 1787648673659,
+          "completed": 1787648679754
+        },
+        "sessionID": "ses_0000000000000000000000000",
+        "finish": "stop"
+      }
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "session.idle",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000"
+    }
+  },
+  {
+    "id": "evt_0000000000000000000000000",
+    "type": "message.updated",
+    "properties": {
+      "sessionID": "ses_0000000000000000000000000",
+      "info": {
+        "role": "user",
+        "time": {
+          "created": 1787648673653
+        },
+        "agent": "build",
+        "model": {
+          "providerID": "github-copilot",
+          "modelID": "claude-sonnet-4.6"
+        },
+        "summary": {
+          "diffs": []
+        },
+        "id": "msg_user0000000000000000003",
+        "sessionID": "ses_0000000000000000000000000"
+      }
+    }
+  }
+]

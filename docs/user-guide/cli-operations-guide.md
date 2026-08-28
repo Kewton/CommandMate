@@ -69,6 +69,7 @@ CM_PORT=3000 node bin/commandmate.js send abc123 "msg"
 | [`commandmate send`](#commandmate-send) | エージェントへのメッセージ送信 |
 | [`commandmate wait`](#commandmate-wait) | エージェント完了の待機 |
 | [`commandmate respond`](#commandmate-respond) | プロンプトへの応答 |
+| [`commandmate interrupt`](#commandmate-interrupt) | 生成中のターンの中断（GUI の中断ボタン相当） |
 | [`commandmate verify`](#commandmate-verify) | 検証ゲート（.commandmate/verify.yaml）の実行と検証履歴の参照 |
 | [`commandmate task`](#commandmate-task) | 実行契約（.commandmate/tasks/*.yaml）の一覧・詳細 |
 | [`commandmate capture`](#commandmate-capture) | ターミナル出力の取得 |
@@ -402,6 +403,15 @@ commandmate wait <worktree-id> --fail-on-upstream-fault  # 上流障害で compo
 - `--verify`: 全ゲート（work-evidence + `.commandmate/verify.yaml` の宣言ゲート）を実行
 - `--require-work`: work-evidence ゲートのみ実行。全ゲートを回す前の安価な事前確認に使う
 - 両方を同時指定してもエラーにはならない。work-evidence は常に全ゲートに含まれるため `--verify` が包含する
+- **opencode を名指しした run だけ、work-evidence に第 2 の証跡が加わる（Issue #2043）**。
+  git が「コミットも未コミット変更も無い」と判定した**その分岐でのみ**、opencode 自身の diff 台帳を参照し、
+  ファイルが挙がっていれば合格にする（log_tail に `opencode session diff: N file(s) changed` が出る）。
+  **`--instance` で opencode を名指ししたときだけ**参照する ―― work-evidence の git カウントは
+  worktree 単位なので、名指しの無い `wait --verify` が同じ worktree の opencode ペインの diff を
+  他ツールの判定に流用しないための制限。`requireCommit` は緩めない。
+  これが要るのは、worktree 詳細に付いた **「このターンを取り消す（revert）」が、
+  作業ツリーを git から見て「何もしていない」状態にしうる**ため。
+  なお opencode の台帳は git snapshot なので、`.gitignore` された作業は opencode 側も見えない（実測）。
 - 検証は**完了検知できたときだけ**走る。プロンプト検出（10）やタイムアウト（124）はそのまま返し、検証しない
 - 複数 worktree を指定した場合、完了検知は並行・検証は**直列**。サーバ側が同時実行数を制限しているため
 - 複数 worktree の終了コードは優先順位 **10 > 11 > 20 > 21 > 124** で集約される（Issue #1839 で 11 を追加）
@@ -447,7 +457,7 @@ esac
 | `type` | 意味 | 応答方法 |
 |--------|------|----------|
 | `yes_no` / `multiple_choice` | プロンプトを検出・解析できた | `commandmate respond <id> <答え>` |
-| `selection_list` | 矢印キー選択 UI（Codex の pager / `/model`、antigravity の権限メニュー、**opencode の permission ダイアログ**（`Allow once / Allow always / Reject`、Issue #1893）等、Issue #1628）。選択肢としては解析できない | `commandmate respond` ではなく矢印キー相当の特殊キー送信 |
+| `selection_list` | 矢印キー選択 UI（Codex の pager / `/model`、antigravity の権限メニュー、**opencode の permission ダイアログ**（`Allow once / Allow always / Reject`、Issue #1893）、**opencode のダイアログ全般**（セッション一覧 `ctrl+x l` / エージェント一覧 `ctrl+x a` / タイムライン `ctrl+x g` / コマンドパレット `ctrl+p` / ピッカー。`sessionStatusReason` は `opencode_modal_overlay`、閉じるのは `Escape`、Issue #2112）等、Issue #1628）。選択肢としては解析できない | `commandmate respond` ではなく矢印キー相当の特殊キー送信 |
 | `unclassified` | **対話中の画面なのに検出層が分類できなかった**（Issue #1708）。`isUnclassifiedActive` が **60 秒連続**で立った場合のみ返る | 生ペインを見る: `commandmate capture <id> --pane` |
 
 > **`selection_list` に `commandmate respond <id> <番号>` を送らないこと（Issue #1893）。**
@@ -470,6 +480,38 @@ auto-yes も契約の `autoYes` ポリシーも exit 10 も一切発火しない
 > 持たない停止事由なので、オプション一覧を読んだだけでは存在に気づけません。60 秒・exit 10・
 > `--stall-timeout` / `--timeout` との優先関係・`capture --pane` への導線を `--help` の
 > `Unclassified frames` 節に置いています。
+
+#### opencode で `unclassified` になったら、まずサイドバーを疑う（Issue #2095）
+
+opencode のサイドバー（`ctrl+x b`、または `ctrl+p` パレットの `Show sidebar`）は、
+**キャプチャの行を transcript と共有します**。ON の間はターンの終了マーカーが隠れるため、
+**終わったターンが `running` / `unknown_frame` のまま**になり、60 秒後に `unclassified` で
+exit 10 します。既定の 80 桁でも起こります（Issue #2046 の実測）。
+
+`wait` はこのとき stderr に原因を出します。
+
+```
+Unclassified interactive frame on wt-1 for 60s (status=running/unknown_frame). …
+ Cause: paneObstruction=opencode_sidebar — a second column is sharing rows with the
+ transcript (it reads "/private/tmp/…"), which covers the marker that ends a turn.
+ Press `ctrl+x b` in the pane to close opencode's sidebar.
+```
+
+`commandmate capture <id> --json` の `paneObstruction` にも同じ判定が出ます。
+
+```bash
+commandmate capture wt-1 --json | jq '.paneObstruction'
+# { "id": "opencode_sidebar", "matchedText": "…", "at": 1756…  }
+```
+
+**復帰手段は opencode のペインで `ctrl+x b` をもう一度押すことだけです。Escape では戻りません**（実測）。
+CommandMate のクイックキー列からは送れません —— このキーは #2046 の実測を受けて意図的に外してあり、
+special-keys API も 400 を返します。Web UI の端末画面（PC / モバイル）には、
+この状態のあいだ `ctrl+x b` を案内する警告バーが出ます。
+
+`paneObstruction` が `null` なのは「サイドバーが無い」ではなく「レイアウトを読めなかった」です
+（permission ダイアログが出ていると入力ボックスの下辺ごと隠れます）。all-clear として扱わないでください。
+opencode 以外のツールでは常に `null` です（そもそも判定しません）。
 
 #### `ready` は必ずしも「完了」ではありません
 
@@ -593,13 +635,139 @@ commandmate respond <worktree-id> "yes" --instance codex-2        # 追加イン
 - 解決結果は監査のため stdout に出力されます: `Resolved "no" to option 3: No, and tell Claude ...`
 - `--default` は default 選択肢（❯ ハイライト位置）を明示的に選びます（`<answer>` と排他）
 
+### 構造化 decision への番号写像（Issue #2040）
+
+**エージェントが decision ごとの ID を publish する場合**（`capture --json` の
+`structuredEvents.source.capabilities.eventIdentity` が `null` 以外。実装上は現在 opencode のみ）、
+`respond <worktree-id> <n>` は **pane にキーを送らず**、そのインスタンスが保持している
+decision へエージェント自身の API で回答します。
+
+- **承認（permission）** → `POST /permission/:id/reply`。番号は 3 つの verdict です:
+  `1` = Allow once / `2` = Allow always / `3` = Reject（`once` / `always` / `reject` / `yes` / `no` も同義語として解決）
+- **質問（question）** → `POST /question/:id/reply`。番号は**その質問が publish した選択肢の並び順**です。
+  ラベル（`Blue`）・自由入力（`neither, use green`）でも回答できます
+
+**回答されるのは「保持している decision がちょうど 1 件」のときだけです。**
+
+| 保持数 | 結果 | pane |
+|:------:|------|------|
+| 0 件 | exit 99（`decision_not_found`）| **何も送らない** |
+| 1 件 | 回答して exit 0 | **何も送らない** |
+| 2 件以上 | exit 99（`multiple_pending_decisions`）。開いている decision の ID / kind を stderr に列挙 | **何も送らない** |
+
+番号は「どれかの一覧の中の位置」であって、どの一覧かは呼び出し側が言っていません。2 件以上あるときに
+最も古いものへ当てにいくと、利用者が見てもいない承認に答えてしまうため、拒否します。個別に答えるには
+列挙された ID を使って `POST /api/worktrees/<id>/respond` に `{"decisionId": "...", "answer": "3"}` を
+送るか、ターミナルで直接答えてください。
+
+`eventIdentity: null` のエージェント（claude / codex / gemini / copilot / antigravity）は**従来どおり**
+`/prompt-response` 経由のキー送出です。`--default` も従来どおりで、これは意図的です:
+TUI にはハイライトされた選択肢がありますが、それがどれかは wire 上のどこにも書かれていないため、
+構造化経路は `--default` を拒否します（一方でキー送出経路の Enter は実際に答えになります）。
+
+判定に使うのはツール名ではなく**サーバが申告した capability** です。そのため `respond` は送信前に
+`GET /api/worktrees/<id>/current-output` を 1 回だけ読みます。この読み取りが失敗した場合
+（古い daemon・サーバ停止など）は**従来経路にフォールバック**します。
+
 ### 終了コード
 
 | コード | 意味 |
 |:------:|------|
 | 0 | 応答成功 |
-| 2 | 引数エラー（`<answer>` と `--default` の同時指定・両方欠落 等）|
-| 99 | プロンプトが既に消えている（`prompt_no_longer_active`）/ yes・no を選択肢に解決できない（`unresolvable_answer`）|
+| 2 | 引数エラー（`<answer>` と `--default` の同時指定・両方欠落 等）/ 選択肢に無い番号（`answer_out_of_range`）|
+| 99 | プロンプトが既に消えている（`prompt_no_longer_active`）/ yes・no を選択肢に解決できない（`unresolvable_answer`）/ 保持している decision が 0 件（`decision_not_found`）・2 件以上（`multiple_pending_decisions`、Issue #2040）|
+
+---
+
+### commandmate interrupt
+
+生成中のターンを中断します。GUI の中断ボタンと**同じ** `POST /api/worktrees/:id/interrupt` を呼びます。
+
+> **`stop` ではありません。** `commandmate stop` は CommandMate **サーバ**を止めるコマンドです。
+> エージェントの生成を止めるのはこの `interrupt` です。
+
+### 使用方法
+
+```bash
+commandmate interrupt <worktree-id>                     # 稼働中の全セッションを中断
+commandmate interrupt <worktree-id> --instance codex-2  # インスタンスを指定して中断
+commandmate interrupt <worktree-id> --json              # interrupted[] を JSON で取得
+```
+
+### オプション
+
+| オプション | 説明 |
+|-----------|------|
+| `--instance <id>` | 中断するインスタンス（`<agent>` または `<agent>-<n>`） |
+| `--json` | API レスポンスをそのまま JSON 出力（`success` / `message` / `interrupted[]`） |
+| `--token <token>` | 認証トークン（`CM_AUTH_TOKEN` 推奨） |
+
+`--instance` を**省略した場合は「既定エージェント」ではなく、その worktree で稼働中の全セッション**が
+対象になります（ルート側の仕様）。`send` / `respond` / `capture` の `--instance` 省略時とは既定が
+異なる点に注意してください。
+
+`--agent` はありません（`wait` と同じ理由 — Issue #1629。ツール名だけでは「どのセッションか」が
+決まらないため）。roster 登録済みインスタンスは `--instance` だけで CLI ツールまで解決されます。
+
+### JSON 出力
+
+```bash
+$ commandmate interrupt anvil-develop --json
+{
+  "success": true,
+  "message": "Interrupt sent to 1 session(s)",
+  "interrupted": [
+    {
+      "cliToolId": "opencode",
+      "instanceId": "opencode",
+      "sessionName": "mcbd-opencode-anvil-develop"
+    }
+  ]
+}
+```
+
+対象セッションが無い場合も `--json` は同じフィールド名で返します（`interrupted` は**空配列**であって
+欠落ではありません。呼び出し側が `.interrupted.length` を読めるようにするためです）。
+
+```bash
+$ commandmate interrupt anvil-develop --json ; echo "exit=$?"
+{
+  "success": false,
+  "message": "No active sessions found",
+  "interrupted": []
+}
+exit=30
+```
+
+### 終了コード
+
+| コード | 定数名 | 意味 |
+|:------:|--------|------|
+| 0 | SUCCESS | 1 つ以上のセッションを中断した |
+| 2 | CONFIG_ERROR | worktree ID / `--instance` の形式不正、インスタンスの CLI ツールを解決できない（400 passthrough）|
+| 30 | NO_ACTIVE_SESSIONS | worktree は存在するが稼働中セッションが無く、**何も中断していない** |
+| 99 | UNEXPECTED_ERROR | worktree が見つからない、その他の失敗 |
+
+30 は「既に止まっている（=目的の状態に到達済み）」、99 は「ID が違う」で、必要な復旧が逆になります。
+サーバはどちらも 404 で返すため（機械可読な `code` は付きません）、CLI 側でメッセージ
+`No active sessions found` を見て振り分けています。
+
+stderr は次の形です（`--instance` を指定したときはインスタンス名も入ります）:
+
+```
+Error: No active sessions found for worktree 'anvil-develop'. Nothing was interrupted.
+```
+
+### opencode での中断経路（Issue #2034 / #2101）
+
+opencode では、まず **opencode 自身のサーバへ `POST /session/:id/abort`** を投げます（一次経路）。
+これが適用できた場合はログに `opencode-interrupt-aborted-via-api` が出ます。適用できなかった場合のみ
+Esc ×2（`opencode-interrupt-sent`）にフォールバックします。Esc 1 回では opencode のターンは
+止まりません（実測。`src/lib/cli-tools/opencode.ts` の docblock 参照）。
+
+中断されたターンは `· interrupted` で終わり、`· 11.3s` のような duration 付き完了マーカーを残しません。
+そのため `sessionStatus` は「肯定的な完了検知」ではなく staleness フォールバック経由で `ready` に
+戻ります（Issue #1893 と同じ扱い）。
 
 ---
 
@@ -1161,8 +1329,13 @@ commandmate capture <worktree-id> --instance codex-2 # 追加インスタンス�
     "closedBy": null,
     "promptWaitingSince": null,
     "promptWaitingSource": null,
+    "pendingDecisions": [],
+    "session": null,
+    "sessionContext": null,
+    "sessionDiff": null,
     "source": {
       "cliToolId": "claude",
+      "kind": "hooks",
       "capabilities": {
         "supportedEvents": ["stop", "notification", "session_start", "user_prompt_submit", "session_end", "pre_tool_use", "post_tool_use"],
         "configScope": "per-instance",
@@ -1172,7 +1345,8 @@ commandmate capture <worktree-id> --instance codex-2 # 追加インスタンス�
         "permissionReplyReleasesPrompt": false,
         "eventIdentity": null,
         "resync": "none"
-      }
+      },
+      "probedActivity": null
     }
   },
   "model": "claude-opus-5[1m]",
@@ -1197,11 +1371,166 @@ commandmate capture <worktree-id> --instance codex-2 # 追加インスタンス�
 | `statusEvidence` / `lastKnownStatus` / `lastKnownStatusAt` | 判定が肯定的証拠に基づくか、と直前の確定状態（Issue #1926）。下記参照 |
 | `structuredEvents.turnId` / `openedAt` / `closedAt` / `closedBy` | ターンの暫定境界（Issue #1926）。**まだ安定した turn 同一性ではありません**。下記参照 |
 | `structuredEvents.source` | そのツールの構造化イベントソースの識別子と**宣言値**（Issue #1924）。セッションの状態ではなく**ソースの性質**なので、hooks が 1 件も来ていなくても・セッションが止まっていても必ず入る。ソース実装が無いツール（`vibe-local`）は互換ソースの「未計測」値（`supportedEvents: []`）を返す |
+| `structuredEvents.source.kind` / `liveness` / `degradedReason` / `probedActivity` | そのソースが**いま生きているか**（Issue #2054）。宣言値と違い**セッションの状態**。下記参照 |
+| `structuredEvents.sessionContext` | コンテキスト窓の使用率（Issue #2042）。publish しないツールでは常に `null`。下記参照 |
+| `structuredEvents.sessionDiff` | **このターンが触ったファイル**とその revert 状態（Issue #2043）。publish しないツールでは常に `null`。下記参照 |
+| `structuredEvents.pendingDecisions[]` | そのインスタンスが保持している dialog（Issue #1930、`kind` / `questionOptions` は Issue #2040）。下記参照 |
+| `structuredEvents.session` | エージェント自身が申告した「いま入っている会話」（Issue #2040）。publish しないツールでは常に `null`。下記参照 |
 | `upstreamFault` | 画面に上流障害の署名があれば `{id, matchedText, at}`、無ければ `null`（Issue #1839）。**`null` は「健全」ではなく「既知の署名が無かった」** |
 | `resolvedBy` / `conflict` | `cliToolId` を選んだ**解決段**と、roster と明示指定の矛盾（Issue #1884）。下記参照 |
 
 画面が空かどうかは `realtimeSnippet.trim() === ''` と `lineCount` で見る。
 `content` は差分なので単独では判断しない。
+
+#### `structuredEvents.pendingDecisions[]` の `kind` / `questionOptions`（Issue #2040）
+
+保持中の dialog が**承認待ちなのか質問待ちなのか**を分けて出します。両者はワーカーを同じように
+塞ぎますが、答え方がまったく違う（承認は 3 つの verdict、質問はエージェントが publish した選択肢）ため、
+`capture --json` を読むオーケストレーターは先にこれを見分けられる必要があります。
+
+```json
+"pendingDecisions": [
+  {
+    "id": "que_0000000000000000000000000",
+    "at": 1754296400000,
+    "source": "permission-request",
+    "toolName": "question",
+    "confirmedAt": null,
+    "scraperCorroborated": false,
+    "deliveryExpired": false,
+    "kind": "question",
+    "questionOptions": [
+      { "number": 1, "label": "Red" },
+      { "number": 2, "label": "Blue" }
+    ]
+  }
+]
+```
+
+- `kind`: `permission` / `question`。**必ず入ります**
+- `questionOptions`: `kind === "question"` かつエージェントの payload をまだ保持しているときだけ非 `null`。
+  番号は**その payload の並び順**で、`commandmate respond <id> <n>` が解決に使う番号と同一です
+- 承認の 3 verdict はここではなく `promptData.decisionOptions` に出ます（そのソースの性質であって、
+  この dialog の性質ではないため）
+- **追加は additive です。** `id` / `at` / `source` / `toolName` / `confirmedAt` /
+  `scraperCorroborated` / `deliveryExpired` の型・意味・有無は変わりません
+
+#### `structuredEvents.session`（Issue #2040）
+
+エージェント自身が申告した「いま入っている会話」です。ターミナルの画面からは読めない半分
+（どのセッション・どの persona・どのモデル・いくら使ったか）で、opencode の `session.updated`
+フレーム（既に購読済みのストリーム）から読むため**追加のリクエストもポーリングも発生しません**。
+
+```json
+"session": {
+  "id": "ses_0000000000000000000000000",
+  "title": "Fix the flaky test",
+  "agent": "build",
+  "model": "claude-sonnet-4.6",
+  "provider": "github-copilot",
+  "cost": 0.4213,
+  "tokens": {
+    "input": 120,
+    "output": 30,
+    "reasoning": 0,
+    "cacheRead": 4096,
+    "cacheWrite": 512,
+    "total": null
+  },
+  "at": 1754296400000
+}
+```
+
+- **必ずキーは存在し、判らないときは `null`** です。`null` になるのは opencode 以外の全ツール、
+  まだ `session.updated` が届いていない opencode ペイン、および kill 済みのペイン
+- 値は**そのまま**です。コストは丸めず、モデル名も整形しません（エージェント自身の申告と
+  突き合わせられることが目的なので、出口で整えると必要なときに比較できなくなります）
+- `tokens.cacheRead` / `cacheWrite` は opencode の `tokens.cache.read` / `.write` を平坦化したものです。
+  `total` はセッションではなく assistant message 側の宣言なので、現状は常に `null`（自前で合計しません）
+- サブエージェント（`parentID` を持つセッション）の `session.updated` は**無視します**。
+  そのコストはペインのものではなく、採ると会話とバックグラウンドジョブの間で値が往復するためです
+- `at` はこのレコードを書いた時刻です。古さの判断に使ってください
+
+#### `structuredEvents.sessionContext`（Issue #2042）
+
+コンテキスト窓をどれだけ使ったかです。`session` と同じく opencode の `session.updated` から読むので
+**追加のリクエストは発生しません**。
+
+```json
+"sessionContext": {
+  "tokens": 8510,
+  "limit": 1000000,
+  "percent": 1,
+  "sessionAt": 1787738184568,
+  "at": 1787738205025
+}
+```
+
+- **publish しないツールでは常に `null`** です（現状 opencode 以外の全ツール）
+- `percent` は `tokens / limit` をサーバが計算した整数です。`limit` が判らないときは `null`
+- `sessionAt` は**エージェントがその数字を申告した時刻**、`at` はこのレコードを書いた時刻です。
+  2 つが離れていれば「表示している使用率が古い」と判断できます
+
+```bash
+# コンテキストを 80% 以上使ったペインを拾う
+commandmate capture "$WT" --json | jq -r 'select(.structuredEvents.sessionContext.percent >= 80) | .structuredEvents.session.id'
+```
+
+#### `structuredEvents.sessionDiff`（Issue #2043）
+
+**このターンが触ったファイル**と、その revert 状態です。
+
+```json
+"sessionDiff": {
+  "sessionId": "ses_0000000000000000000000000",
+  "turnMessageId": "msg_0000000000000000000000000",
+  "files": [],
+  "filesAt": 1787738205026,
+  "revertedFiles": [],
+  "revertedMessageId": null,
+  "at": 1787738205026
+}
+```
+
+- **publish しないツールでは常に `null`** です（現状 opencode 以外の全ツール）
+- `files` は**そのターンの**変更で、worktree 全体の `git status` ではありません
+- `revertedMessageId` が非 `null` なら、そのターンは取り消されています。
+  このとき作業ツリーは git から見て「何もしていない」状態になりうるので、
+  `wait --verify` の work-evidence は opencode を名指しした run に限りこの台帳を参照します
+  （[--verify の節](#--verify----require-workissue-1544)）
+- opencode の台帳は git snapshot なので、`.gitignore` された作業は**ここにも出ません**（実測）
+
+#### `structuredEvents.source` の健全性フィールド（Issue #2054）
+
+`source.capabilities` が**ソースの性質**（宣言値）なのに対し、こちらは**いまそのソースが生きているか**です。
+
+| フィールド | 意味 |
+|---|---|
+| `kind` | `sse`（pull 型＝ opencode）/ `hooks`（push 型＝ claude / codex / copilot / gemini / antigravity）/ `scraper`（構造化ソースが無い＝ `vibe-local`）。**全ツールで必ず入ります** |
+| `liveness` | `live` / `stale`。**降格しうるソースでしか入りません**（現状 opencode のみ）。ハートビート断 30 秒で `stale` |
+| `degradedReason` | scraper へ降格した理由（`port_identity_changed` など）。降格していなければキーごと出ません |
+| `probedActivity` | 再接続直後に 1 回だけ問い合わせた活動状態 `{activity, at}`、または `null` |
+
+```json
+"source": {
+  "cliToolId": "opencode",
+  "kind": "sse",
+  "liveness": "live",
+  "probedActivity": { "activity": "idle", "at": 1787738180830 },
+  "capabilities": { "...": "..." }
+}
+```
+
+- **push 型のツールでは `kind` 以外は publish されません。**claude / codex の payload は
+  `kind` と `probedActivity: null` が増えるだけで、他は #2054 以前と同一です
+- `liveness` が `stale` / `degradedReason` が非 `null` のときは、**その worktree の状態は
+  構造化イベントではなく画面スクレイプ由来**になっています。`sessionStatusReason` が
+  `hook_*` から離れるのと同じ意味です
+
+```bash
+# 降格したペインだけ拾う
+commandmate capture "$WT" --json | jq -r 'select(.structuredEvents.source.degradedReason != null) | .structuredEvents.source.degradedReason'
+```
 
 #### `statusEvidence` / `lastKnownStatus`（Issue #1926）
 
@@ -1587,11 +1916,11 @@ commandmate instances <worktree-id> kill <instance-id>                 # 該当�
 `commandmate instances <worktree-id>`:
 
 ```
-INSTANCE_ID  ALIAS   CLI_TOOL  RUNNING  AUTO_YES  MODEL              EFFORT
------------  ------  --------  -------  --------  -----------------  ------
-claude       Claude  claude    yes      no        claude-opus-5[1m]        
-codex-2      レビュー用   codex     yes      yes       gpt-5.6-sol              
-gemini       Gemini  gemini    no       no                                 
+INSTANCE_ID  ALIAS   CLI_TOOL  RUNNING  AUTO_YES  MODEL              EFFORT  SESSION_ID  SESSION_TITLE
+-----------  ------  --------  -------  --------  -----------------  ------  ----------  -------------
+claude       Claude  claude    yes      no        claude-opus-5[1m]                                   
+codex-2      レビュー用   codex     yes      yes       gpt-5.6-sol                                        
+opencode     opencode opencode yes      no        claude-sonnet-4.6          ses_01H…    Fix the flaky test
 ```
 
 `commandmate instances <worktree-id> --json`:
@@ -1617,16 +1946,34 @@ gemini       Gemini  gemini    no       no
     "reasoningEffort": null
   },
   {
-    "instanceId": "gemini",
-    "alias": "Gemini",
-    "cliTool": "gemini",
-    "running": false,
+    "instanceId": "opencode",
+    "alias": "opencode",
+    "cliTool": "opencode",
+    "running": true,
     "autoYes": false,
-    "model": null,
-    "reasoningEffort": null
+    "model": "claude-sonnet-4.6",
+    "reasoningEffort": null,
+    "sessionId": "ses_01H0000000000000000000000",
+    "sessionTitle": "Fix the flaky test"
   }
 ]
 ```
+
+#### `SESSION_ID` / `SESSION_TITLE` 列（Issue #2038）
+
+opencode は、サポート対象エージェントの中で唯一**会話をコマンドラインから指定できる**ため
+（`opencode -s <id>`）、次に起動したときに再開されるセッションを列に出しています。
+
+| 状態 | 表示 |
+|------|------|
+| opencode で、CommandMate がセッションを記憶している | `ses…` とそのタイトル |
+| opencode 以外のエージェント | 空欄（`--json` では `null`）。他のどのエージェントの起動コマンドも会話を名指さないため、これは欠落ではなく正しい答えです |
+| CommandMate が一度もターン終了を見ていない opencode インスタンス | 空欄（`--json` では `null`） |
+
+- **`--json` のキー名は `sessionId` / `sessionTitle` です。** 表の列名（`SESSION_TITLE`）とは一致しますが、
+  `GET /api/worktrees/<id>/opencode/session` が返す同じ値のキーは `title` です。両者を取り違えないでください
+- 列は**末尾に追加**しています。`INSTANCE_ID` 〜 `EFFORT` を列位置で読んでいるスクリプトはそのまま動きます
+- 表のタイトルは 40 文字で切りますが、`--json` は全文を返します
 
 #### `MODEL` / `EFFORT` 列（Issue #1785）
 
@@ -1838,8 +2185,8 @@ commandmate report metrics --json                  # JSON出力
 | オプション | 説明 | デフォルト |
 |-----------|------|-----------|
 | `--date <date>` | 対象日（`YYYY-MM-DD`） | 当日 |
-| `--tool <tool>` | 使用するAIツール（claude, codex, copilot, antigravity） | claude |
-| `--model <model>` | モデル名（copilot 向け） | - |
+| `--tool <tool>` | 使用するAIツール（claude, codex, copilot, antigravity, opencode） | claude |
+| `--model <model>` | モデル名（copilot は `--model` の値、opencode は `provider/model`） | - |
 | `--template <id>` | テンプレートIDを指示文として使用 | - |
 | `--instruction <text>` | カスタム指示文（`--template` の代替） | - |
 | `--token <token>` | 認証トークン（`CM_AUTH_TOKEN` 環境変数を推奨） | - |
@@ -1854,7 +2201,35 @@ commandmate report metrics --json                  # JSON出力
 | `--token <token>` | 認証トークン（`CM_AUTH_TOKEN` 環境変数を推奨） | - |
 
 > **注意**: `--date` は `YYYY-MM-DD` 形式のみ受け付けます。不正な形式は `exit 2`（CONFIG_ERROR）になります。
-> `--tool` は claude / codex / copilot / antigravity のいずれか、`--days` は 1 以上を指定してください。
+> `--tool` は claude / codex / copilot / antigravity / opencode のいずれか、`--days` は 1 以上を指定してください。
+
+> **opencode（Issue #2044）**: `--tool opencode` は `opencode run --format json` で実行され、
+> JSON イベント列の**最後のアシスタントメッセージの text** が本文になります。
+> `--format default` の装飾を剥がしているわけではないので、ツール呼び出しを挟んだ実行でも
+> 「ツールを呼ぶと決めたメッセージ」ではなく答えの側が採用されます。
+> `--model` を渡すときは `provider/model`（例: `github-copilot/claude-sonnet-4.6`）で書いてください。
+
+### レポート末尾の「Agent session cost」節（Issue #2044）
+
+その日にエージェントが報告したコスト／トークンが台帳（`agent_session_costs`）にあると、
+生成された本文の**末尾に** worktree 別の表が追記されます。**AI には渡していません**
+（数字を要約させると `opencode stats` と突き合わせられなくなるため、生成後に決定的に付けています）。
+台帳が空の日は節ごと出ません＝ claude / codex の生成結果は従来どおりです。
+
+見出しは `## Agent session cost (YYYY-MM-DD)` で、その下に次の表が付きます。
+
+```markdown
+| Worktree | Sessions | Cost (USD) | Input | Output | Reasoning | Cache read | Cache write |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| feature/2044-opencode | 2 | 0.067939 | 6 | 181 | 0 | 8367 | 16719 |
+| **Total** | 2 | 0.067939 | 6 | 181 | 0 | 8367 | 16719 |
+```
+
+- 数字は**エージェント自身のセッション累計**をそのまま足したものです。opencode 1.18.22 で
+  `opencode stats --project "" ` の Total Cost / Input / Output / Cache Read / Cache Write と
+  一致することを実測しています（`docs/design/opencode-server-live-verification.md` §15.3）。
+- `-` は 0 ではなく「エージェントが値を報告しなかった」という意味です。
+- 突き合わせは `opencode stats --project <worktree のパス> --days 1` で行えます。
 
 ### list 出力例
 
@@ -2257,6 +2632,7 @@ commandmate ls --token your-token
 | 4 | STOP_FAILED | サーバーの停止に失敗（`stop` / `update`） |
 | 5 | UPDATE_FAILED | 更新に失敗（`update`: registry照会 / `npm install -g` / バージョン検証） |
 | 10 | PROMPT_DETECTED | wait中にプロンプトを検出 |
+| 30 | NO_ACTIVE_SESSIONS | interruptの対象となる稼働中セッションが無い |
 | 99 | UNEXPECTED_ERROR | 予期しないエラー / リソース未検出 |
 | 124 | TIMEOUT | waitのタイムアウト |
 

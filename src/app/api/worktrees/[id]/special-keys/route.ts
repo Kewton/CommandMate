@@ -6,6 +6,19 @@
  * Issue #473: Multi-layer defense following terminal/route.ts pattern.
  * [DR1-001] Validation structure mirrors terminal/route.ts.
  * [DR4-001] Rate limiting intentionally not implemented (auth + IP + MAX_KEYS_LENGTH sufficient).
+ * Issue #2032: `isAllowedSpecialKey()` now also requires the key to be deliverable by
+ * `sendSpecialKeys()`, so a vocabulary/transport divergence is answered 400 here
+ * instead of escaping as a thrown error and being reported as 500. Rationale in the
+ * `isAllowedSpecialKey` docblock (src/lib/tmux/tmux.ts).
+ *
+ * Issue #2046: the accepted vocabulary is now the REQUESTED TOOL'S, taken from
+ * `ICLITool.navigationKeys()`, not one global list every tool shares. opencode
+ * is driven by a `ctrl+x` leader followed by a bare letter, and a bare letter is
+ * a character: accepting `a` for every tool would mean `POST {cliToolId:
+ * "claude", keys:["a"]}` types an `a` into claude's composer. The tool lookup
+ * therefore moves ahead of key validation — it is a synchronous registry read,
+ * so nothing about the request's cost or its failure ordering changes for a
+ * request that was valid before.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -69,6 +82,10 @@ export async function POST(
     }
 
     // 3. keys content validation (isAllowedSpecialKey, MAX_KEYS_LENGTH) [DR2-004]
+    //    isAllowedSpecialKey covers the requested tool's published vocabulary
+    //    (Issue #2046) and the tmux transport allow-list (Issue #2032), so both a
+    //    key this tool does not publish and a key the transport cannot deliver
+    //    stop at 400 rather than reaching the send.
     if (keys.length > MAX_KEYS_LENGTH) {
       return NextResponse.json(
         { error: 'Invalid keys parameter' },
@@ -76,8 +93,12 @@ export async function POST(
       );
     }
 
+    const manager = CLIToolManager.getInstance();
+    const cliTool = manager.getTool(cliToolId);
+    const { keys: toolVocabulary } = cliTool.navigationKeys();
+
     for (const key of keys) {
-      if (!isAllowedSpecialKey(key)) {
+      if (!isAllowedSpecialKey(key, toolVocabulary)) {
         return NextResponse.json(
           { error: 'Invalid special key' },
           { status: 400 }
@@ -96,8 +117,6 @@ export async function POST(
     }
 
     // 5. Session existence check
-    const manager = CLIToolManager.getInstance();
-    const cliTool = manager.getTool(cliToolId);
     const sessionName = cliTool.getSessionName(id, instanceId);
 
     const sessionExists = await hasSession(sessionName);

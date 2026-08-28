@@ -15,9 +15,18 @@
 
 'use client';
 
-import React, { useState, useCallback, memo } from 'react';
+import React, { useState, useCallback, useEffect, memo } from 'react';
 import { useTranslations } from 'next-intl';
-import { GripVertical, ChevronUp, ChevronDown, Trash2, Plus, MoreVertical } from 'lucide-react';
+import {
+  GripVertical,
+  ChevronUp,
+  ChevronDown,
+  Trash2,
+  Plus,
+  MoreVertical,
+  AlertTriangle,
+  Radio,
+} from 'lucide-react';
 import {
   CLI_TOOL_IDS,
   getCliToolDisplayName,
@@ -38,6 +47,12 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/DropdownMenu';
+import {
+  formatAgentSourceLabel,
+  isAgentSourceDegraded,
+} from '@/components/worktree/WorktreeDetailSubComponents';
+import { AGENT_SOURCE_POLL_INTERVAL_MS } from '@/config/agent-source-config';
+import type { AgentEventSourceView, Worktree } from '@/types/models';
 
 // ============================================================================
 // Types
@@ -70,6 +85,17 @@ export interface AgentInstancesPaneProps {
    * *chosen* setting for one tool and is edited below.
    */
   modelByInstance?: Readonly<Partial<Record<string, string | null>>>;
+  /**
+   * Issue #2054: instanceId -> what is reading that instance besides the frame.
+   *
+   * Supplying it turns the pane's own read off entirely, which is why it exists:
+   * a parent that already polls `sessionStatusByInstance` (the detail shells do,
+   * for the header chip) can hand the same object down instead of paying for a
+   * second request, and a test can drive the row without a network at all. When
+   * it is absent the pane reads for itself — **only if its roster contains an
+   * opencode instance**; see {@link useAgentSourceByInstance}.
+   */
+  sourceByInstance?: Readonly<Partial<Record<string, AgentEventSourceView>>>;
 }
 
 // ============================================================================
@@ -98,6 +124,79 @@ function defaultAlias(cliTool: CLIToolType, id: string): string {
   return suffix ? `${name} ${suffix}` : name;
 }
 
+/**
+ * Which machinery is speaking for each roster row (Issue #2054).
+ *
+ * ## Why the pane reads this itself
+ *
+ * The warning row needs one field of `sessionStatusByInstance`, and the two
+ * shells that render this pane reach it through different parents — PC direct,
+ * mobile through `NotesAndLogsPane` — neither of which threads the status map
+ * down today. Reading it here keeps the wiring to one place instead of four, and
+ * costs nothing on the rosters that cannot use it: **the effect returns before
+ * touching the network unless an opencode instance is on the roster**, because
+ * opencode is the only tool whose source can be degraded (every push source
+ * answers "unknown" by construction — see `describeAgentEventSource`). A
+ * worktree of claude and codex panes issues zero requests, which is also what
+ * keeps this Issue's "claude / codex は不変" criterion true of the request log
+ * and not only of the pixels.
+ *
+ * `sourceByInstance` given by the caller wins outright and skips the read.
+ *
+ * @param worktreeId - The worktree whose status map to read
+ * @param instances - The roster, used only to decide whether to read at all
+ * @param provided - The caller's map, when it has one
+ */
+function useAgentSourceByInstance(
+  worktreeId: string,
+  instances: AgentInstance[],
+  provided?: Readonly<Partial<Record<string, AgentEventSourceView>>>,
+): Readonly<Partial<Record<string, AgentEventSourceView>>> {
+  const [fetched, setFetched] = useState<Partial<Record<string, AgentEventSourceView>>>({});
+  // A primitive, not the array: `instances` is a fresh array on every render of
+  // every parent, and depending on it directly would restart the interval each
+  // time. What the effect actually depends on is whether there is anything to
+  // ask about.
+  const hasSubscriptionSource = instances.some((inst) => inst.cliTool === 'opencode');
+
+  useEffect(() => {
+    if (provided) return;
+    if (!hasSubscriptionSource) {
+      setFetched({});
+      return;
+    }
+    let cancelled = false;
+    const read = async (): Promise<void> => {
+      try {
+        const response = await fetch(`/api/worktrees/${worktreeId}`);
+        if (!response.ok) return;
+        const body: Worktree = await response.json();
+        if (cancelled) return;
+        const next: Partial<Record<string, AgentEventSourceView>> = {};
+        for (const [instanceId, status] of Object.entries(body.sessionStatusByInstance ?? {})) {
+          // Absent is the ordinary answer and stays absent: the row's
+          // `{label && …}` guard is what renders nothing, and a null here would
+          // make the map full of keys that mean the same as no key.
+          if (status?.eventSource) next[instanceId] = status.eventSource;
+        }
+        setFetched(next);
+      } catch {
+        // A read that failed leaves the last answer on screen rather than
+        // blanking it: the pane is a roster editor, and a transient 500 must not
+        // look like a stream that just recovered.
+      }
+    };
+    void read();
+    const timer = setInterval(() => void read(), AGENT_SOURCE_POLL_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [worktreeId, hasSubscriptionSource, provided]);
+
+  return provided ?? fetched;
+}
+
 // ============================================================================
 // Component
 // ============================================================================
@@ -111,6 +210,7 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
   vibeLocalContextWindow,
   onVibeLocalContextWindowChange,
   modelByInstance,
+  sourceByInstance,
 }: AgentInstancesPaneProps) {
   const t = useTranslations('schedule');
   const tCommon = useTranslations('common');
@@ -127,6 +227,14 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
   const [addToolId, setAddToolId] = useState<CLIToolType>(CLI_TOOL_IDS[0]);
   // Index of the row currently being dragged (HTML5 reorder).
   const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
+
+  // Issue #2054: read before the first row is built so every row resolves from
+  // one snapshot rather than from a map that could change mid-render.
+  const sourceStatusByInstance = useAgentSourceByInstance(
+    worktreeId,
+    instances,
+    sourceByInstance,
+  );
 
   const atMax = instances.length >= MAX_AGENT_INSTANCES;
   const atMin = instances.length <= MIN_AGENT_INSTANCES;
@@ -240,6 +348,12 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
           const isDragging = draggingIndex === index;
           // Issue #1783: observed model for this instance, or null.
           const instanceModel = modelByInstance?.[inst.id] ?? null;
+          // Issue #2054: what is reading this instance besides the frame. Null
+          // — render nothing — for every tool whose source cannot be degraded,
+          // which is every tool but opencode today.
+          const instanceSource = sourceStatusByInstance?.[inst.id];
+          const sourceLabel = formatAgentSourceLabel(instanceSource, tWorktree);
+          const sourceDegraded = isAgentSourceDegraded(instanceSource);
           return (
             <div
               key={inst.id}
@@ -300,6 +414,31 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
                     className="mt-0.5 block truncate text-xs text-muted-foreground"
                   >
                     {instanceModel}
+                  </span>
+                )}
+                {/* Issue #2054: the warning row. Absent whenever the server had
+                    nothing to say, on exactly #1783's terms — a line reading
+                    "events fine" on every claude row would be noise, and the
+                    tools that cannot answer the question at all must not grow a
+                    line that implies they were asked. Styled as a warning only
+                    while something IS degraded; a healthy opencode stream is
+                    reported in the same muted grey the model line uses. */}
+                {sourceLabel && (
+                  <span
+                    data-testid={`agent-instance-source-${inst.id}`}
+                    title={tWorktree(
+                      sourceDegraded ? 'agentSource.degradedTitle' : 'agentSource.healthyTitle'
+                    )}
+                    className={`mt-0.5 flex items-center gap-1 truncate text-xs ${
+                      sourceDegraded ? 'text-warning' : 'text-muted-foreground'
+                    }`}
+                  >
+                    {sourceDegraded ? (
+                      <AlertTriangle className="w-3 h-3 shrink-0" aria-hidden="true" />
+                    ) : (
+                      <Radio className="w-3 h-3 shrink-0" aria-hidden="true" />
+                    )}
+                    <span className="truncate">{sourceLabel}</span>
                   </span>
                 )}
               </div>

@@ -288,7 +288,15 @@ describe('an approval a human answers in the terminal (#1898-2 release path)', (
       source: 'notification',
       confirmedAt: expect.any(Number),
       decisionId: PERMISSION_ID,
-      toolName: null,
+      // Issue #2031: `bash`, not null. The tool name is not in
+      // `permission.asked` at all (#1758 §5.4) — it is the `message.part.updated`
+      // frame pumped on the line above, correlated by `callID`. Until #2031 the
+      // notification path passed `toolName: null` unconditionally and threw the
+      // correlation away, so the browser was told a dialog was open and never
+      // what it was for. `patterns` is the same frame's `["/tmp/*"]`, retained
+      // because it is what answering `Allow always` would save.
+      toolName: 'bash',
+      patterns: ['/tmp/*'],
     });
     expect(vi.mocked(replyOpencodePermission)).not.toHaveBeenCalled();
 

@@ -11,11 +11,14 @@ import { reconcileSessionGeometry, sendSpecialKey, type SessionGeometryOptions }
 import { resolveComposerSpec } from './composer-spec';
 import { resolveCaptureSpec } from './capture-spec';
 import { resolveGracefulExitSpec } from './graceful-exit';
+import { reportSessionStartFailure } from './start-availability';
 import type {
   CaptureSpec,
   ComposerSpec,
   GracefulExitSpec,
+  NavigationKeySpec,
 } from '../../types/cli-tool-contracts';
+import { NAVIGATION_KEY_VALUES } from '../../types/terminal-keys';
 
 const execAsync = promisify(exec);
 
@@ -108,18 +111,15 @@ export abstract class BaseCLITool implements ICLITool {
    * nothing left to remember: implement {@link launchSession} and the reporting
    * is already wired.
    *
-   * ## Fire-and-forget, and a deferred import
+   * ## Where the reporting itself lives
    *
-   * The notification is NOT awaited. Web push fans out to every registered
-   * device, and holding a 503 open for that would make a failed start slower to
-   * report than a successful one. `notifySessionStartFailurePush` contains its
-   * own failures, and the `.catch` here is the belt for the import itself.
-   *
-   * `await import()` rather than a static import, for the reason Issue #1984
-   * gives on `CLIToolManager.stopPollers`: `push/failure-push-notifier` pulls
-   * the database and `web-push` behind it, and every one of the seven tool
-   * modules loads THIS file. Deferring it to the failure path keeps the
-   * cli-tools graph the size #1984 cut it down to.
+   * In `./start-availability` (Issue #2022), not inline here. It is still the
+   * only line in the repository that calls `notifySessionStartFailurePush`, and
+   * it is still fire-and-forget behind an `await import()` for the reasons that
+   * module's docblock spells out. It moved so that a caller which never creates
+   * a tmux session — Assistant Chat, which spawns `claude -p` directly and so
+   * never reaches this method — can report through the same one窓口 instead of
+   * opening a second.
    *
    * @param worktreeId - Worktree ID
    * @param worktreePath - Worktree path
@@ -136,17 +136,15 @@ export abstract class BaseCLITool implements ICLITool {
     try {
       await this.launchSession(worktreeId, worktreePath, instanceId, model);
     } catch (error: unknown) {
-      void import('../push/failure-push-notifier')
-        .then(({ notifySessionStartFailurePush }) =>
-          notifySessionStartFailurePush({
-            worktreeId,
-            cliToolId: this.id,
-            instanceId,
-            toolName: this.name,
-            error,
-          })
-        )
-        .catch(() => {});
+      reportSessionStartFailure(
+        {
+          worktreeId,
+          cliToolId: this.id,
+          instanceId,
+          toolName: this.name,
+        },
+        error
+      );
       throw error;
     }
   }
@@ -208,5 +206,27 @@ export abstract class BaseCLITool implements ICLITool {
    */
   captureSpec(): CaptureSpec {
     return resolveCaptureSpec(this.id);
+  }
+
+  /**
+   * Declare the keys this tool's terminal UI may send (Issue #2046).
+   *
+   * The default IS the pre-#2046 global list, verbatim: the twelve navigation
+   * keys plus the codex pager's `q` that `NAVIGATION_KEY_VALUES` has published
+   * since #1017, and no leader. claude / codex / copilot / gemini / antigravity
+   * / vibe-local all take it unchanged, which is the point of putting it here
+   * rather than copying a literal into six classes — there is no per-tool list
+   * to drift, so "the six existing tools' key sets did not change" is true by
+   * construction and not merely by review.
+   * `tests/unit/cli-tools/navigation-keys-declaration-2046.test.ts` asserts it
+   * against `NAVIGATION_KEY_VALUES` anyway, because a future edit could still
+   * add an override to one of the six.
+   *
+   * opencode overrides it. Nothing else does.
+   *
+   * @returns This tool's {@link NavigationKeySpec}
+   */
+  navigationKeys(): NavigationKeySpec {
+    return { keys: NAVIGATION_KEY_VALUES, leaderKey: null };
   }
 }

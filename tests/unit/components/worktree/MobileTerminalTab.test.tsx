@@ -55,6 +55,10 @@ function mockPaneState({
       autoScroll: true,
     },
     prompt: { visible: promptVisible, data: null, messageId: null, answering: false },
+    // Issue #2042: part of the hook's return. Kept here so the mock does
+    // not claim a shape the hook never returns — the panes read
+    // `agentSession.session` unconditionally.
+    agentSession: { session: null, context: null },
     setAutoScroll: vi.fn(),
     setPromptAnswering: vi.fn(),
     clearPrompt: vi.fn(),
@@ -183,5 +187,69 @@ describe('MobileTerminalTab unsent-input bar (Issue #1879)', () => {
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
     expect(fetchMock.mock.calls[0][0]).toBe('/api/worktrees/w-1/clear-composer');
+  });
+});
+
+describe('MobileTerminalTab opencode quick keys (Issue #2046, folded by #2106)', () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    // Issue #2106: the disclosure state is persisted device-wide, and jsdom
+    // shares one localStorage across the tests in this file — without this a
+    // test that opens the strip would leave the next one already open.
+    window.localStorage.clear();
+    fetchMock = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve({ success: true }) }));
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+  });
+
+  /** Issue #2106: the strip starts closed; reveal it the way a user would. */
+  function openQuickKeys(): void {
+    fireEvent.click(screen.getByTestId('opencode-quick-keys-toggle'));
+  }
+
+  it('renders the collapsed disclosure for opencode and nothing for another tool', () => {
+    mockPaneState({});
+    const { unmount } = render(<MobileTerminalTab worktreeId="w-1" cliToolId="opencode" />);
+    // Issue #2106: closed by default, so the toggle is present and the strip is not.
+    expect(screen.getByTestId('opencode-quick-keys-toggle')).toBeInTheDocument();
+    expect(screen.queryByTestId('opencode-quick-keys')).not.toBeInTheDocument();
+    openQuickKeys();
+    expect(screen.getByTestId('opencode-quick-keys')).toBeInTheDocument();
+    unmount();
+
+    mockPaneState({});
+    render(<MobileTerminalTab worktreeId="w-1" cliToolId="claude" />);
+    expect(screen.queryByTestId('opencode-quick-keys')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('opencode-quick-keys-toggle')).not.toBeInTheDocument();
+  });
+
+  it('disables the session-scoped chords while agentSession.session is null', () => {
+    // `mockPaneState` returns `{ session: null }` — a pane before its first
+    // turn, which is where opencode's leader stops consuming the letter.
+    mockPaneState({});
+    render(<MobileTerminalTab worktreeId="w-1" cliToolId="opencode" />);
+    openQuickKeys();
+
+    expect(screen.getByTestId('opencode-quick-key-undo')).toBeDisabled();
+    expect(screen.getByTestId('opencode-quick-key-commands')).toBeEnabled();
+  });
+
+  it('POSTs the two-step leader chord for an enabled button', async () => {
+    mockPaneState({});
+    render(<MobileTerminalTab worktreeId="w-1" cliToolId="opencode" />);
+    openQuickKeys();
+    fireEvent.click(screen.getByTestId('opencode-quick-key-agents'));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/worktrees/w-1/special-keys');
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1].body))).toEqual({
+      cliToolId: 'opencode',
+      keys: ['C-x', 'a'],
+    });
   });
 });

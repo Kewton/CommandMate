@@ -6,6 +6,7 @@
  *   - AutoYesToggle (Issue #740; per-split, keyed by this split's cliToolId so
  *     each CLI toggles auto-yes independently)
  *   - NavigationButtons (when CLI is in selection-list state, e.g. OpenCode)
+ *   - OpencodeQuickKeys (opencode only, Issue #2046)
  *   - PromptPanel (when /current-output reports isPromptWaiting)
  *   - MessageInput (always; carries draft persistence per splitIndex)
  *
@@ -22,18 +23,31 @@
 
 'use client';
 
-import React, { memo, useCallback, useMemo } from 'react';
+import React, { memo, useCallback, useEffect, useMemo } from 'react';
 import { X } from 'lucide-react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import type { AgentInstance, CLIToolType } from '@/lib/cli-tools/types';
 import { isAnswerablePromptData } from '@/types/models';
 import { TerminalSplitPane } from '@/components/worktree/TerminalSplitPane';
+import {
+  formatAgentModelLabel,
+  formatAgentSessionTooltip,
+  formatAgentSessionUsage,
+} from '@/components/worktree/WorktreeDetailSubComponents';
+import type { AgentSessionSnapshot } from '@/types/agent-session';
 import { TerminalDisplay } from '@/components/worktree/TerminalDisplay';
+import { getTerminalDisplayCompaction } from '@/config/terminal-display-compaction';
 import { NavigationButtons } from '@/components/worktree/NavigationButtons';
 import { TerminalEscapeHatch } from '@/components/worktree/TerminalEscapeHatch';
+import { OpencodeQuickKeys } from '@/components/worktree/OpencodeQuickKeys';
 import { UnsentComposerBar, hasUnsentComposerText } from '@/components/worktree/UnsentComposerBar';
+import {
+  OpencodeSidebarNotice,
+  hasOpenCodeSidebarObstruction,
+} from '@/components/worktree/OpencodeSidebarNotice';
 import { PromptPanel } from '@/components/worktree/PromptPanel';
 import { MessageInput } from '@/components/worktree/MessageInput';
+import { OpencodeTurnDiffPanel } from '@/components/worktree/OpencodeTurnDiffPanel';
 import { HistoryPane, splitHistorySlotId } from '@/components/worktree/HistoryPane';
 import { PaneResizer } from '@/components/worktree/PaneResizer';
 import { AutoYesToggle } from '@/components/worktree/AutoYesToggle';
@@ -110,6 +124,19 @@ export interface TerminalSplitPaneContentProps extends TerminalSplitPaneCoreProp
    * renders no model, which is the correct display for a tool that reports none.
    */
   agentModel?: string | null;
+  /**
+   * Issue #2042: published when this split's agent changes what it says about
+   * its own session (persona / cost / context), so the surfaces above — the
+   * desktop header's instance pills — can show it too.
+   *
+   * The pane's own `current-output` poll is the only path this data takes to the
+   * browser, so a header pill for an instance with no open split has nothing to
+   * show; that is why this is handed up rather than fetched again. Called only
+   * when a rendered value actually changed (`useTerminalPanePolling` holds the
+   * identity stable otherwise), so a parent may keep it in state without
+   * re-rendering every split twice a second.
+   */
+  onAgentSessionChange?: (instanceId: string, snapshot: AgentSessionSnapshot) => void;
 }
 
 export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
@@ -132,6 +159,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   draggedInstanceId,
   onRequestSessionEnd,
   agentModel,
+  onAgentSessionChange,
 }: TerminalSplitPaneContentProps) {
   // Issue #869: resolve the instance id this split targets. Defaults to the
   // primary instance (`=== cliToolId`) so pre-#869 single-instance behavior —
@@ -156,10 +184,12 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   const showToast = history?.showToast;
 
   const t = useTranslations('worktree');
+  const locale = useLocale();
 
   const {
     terminal,
     prompt,
+    agentSession,
     setAutoScroll,
     setPromptAnswering,
     clearPrompt,
@@ -232,9 +262,14 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   // would hide the menus at the top of the screen.
   const disableAutoFollow = cliToolId === 'opencode' || cliToolId === 'copilot';
 
-  // Issue #1172: Claude/Codex pin a 1000-row pane and pad the layout with
-  // hundreds of blank rows; compact them for display only (raw output untouched).
-  const compactTuiLayoutPadding = cliToolId === 'claude' || cliToolId === 'codex';
+  // Issue #1172 / #2049: several TUIs pin a tall pane and pad the layout with
+  // hundreds of blank rows; compact them for display only (raw output
+  // untouched). The policy lives in one config module so this PC declaration and
+  // the mobile one in `MobileTerminalTab` cannot drift apart.
+  const { compactTuiLayoutPadding, preservePaintedPanelRows } = useMemo(
+    () => getTerminalDisplayCompaction(cliToolId),
+    [cliToolId],
+  );
 
   const handleAutoScrollChange = useCallback(
     (enabled: boolean) => setAutoScroll(enabled),
@@ -355,6 +390,18 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   // no bar, so the "no Enter affordance when the box is empty" property holds.
   const showUnsentComposerBar = hasUnsentComposerText(terminal.composerText);
 
+  // Issue #2095: opencode's sidebar sharing rows with the transcript. Its own
+  // gate, on the frame's GEOMETRY and the tool, and deliberately not folded into
+  // `showEscapeHatch` even though the same frame usually raises both: the hatch
+  // offers arrow keys for an overlay nobody could parse, and this names a cause
+  // and a keystroke the hatch cannot send. Judged on `realtimeSnippet` — the
+  // same 100 rows the server judges `paneObstruction` on — so the notice and
+  // `capture --json` cannot disagree about one frame.
+  const showOpencodeSidebarNotice = hasOpenCodeSidebarObstruction(
+    cliToolId,
+    terminal.realtimeSnippet || terminal.output,
+  );
+
   // Issue #744: the embedded HistoryPane for THIS split. Receives this split's
   // own messages (useSplitMessages) and the per-split highlight namespace via
   // `splitIndex`. Insert routing targets this split (S3-005). No client-side
@@ -414,6 +461,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
         onScrollChange={handleAutoScrollChange}
         disableAutoFollow={disableAutoFollow}
         compactTuiLayoutPadding={compactTuiLayoutPadding}
+        preservePaintedPanelRows={preservePaintedPanelRows}
       />
     ),
     [
@@ -425,6 +473,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       handleAutoScrollChange,
       disableAutoFollow,
       compactTuiLayoutPadding,
+      preservePaintedPanelRows,
     ],
   );
 
@@ -537,6 +586,12 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
             onActionSent={refresh}
           />
         ) : null}
+        {showOpencodeSidebarNotice ? (
+          <OpencodeSidebarNotice
+            cliToolId={cliToolId}
+            frame={terminal.realtimeSnippet || terminal.output}
+          />
+        ) : null}
         {showPrompt ? (
           <PromptPanel
             promptData={prompt.data}
@@ -549,6 +604,36 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
             cliToolName={getCliToolDisplayName(cliToolId)}
           />
         ) : null}
+        {/* Issue #2046: opencode only. The chords opencode's TUI is driven by
+            (`tab` agents, `ctrl+p` commands, and the `ctrl+x` leader) have no
+            other way in, because this terminal is read-only. Rendered only while
+            the pane is live, since the special-keys route 404s otherwise. The
+            component itself decides which of its buttons a pane without an agent
+            session may press -- see its docblock, and §22 of
+            docs/design/opencode-server-live-verification.md for why `ctrl+x b`
+            is not among them. */}
+        {terminal.isRunning ? (
+          <OpencodeQuickKeys
+            worktreeId={worktreeId}
+            cliToolId={cliToolId}
+            instanceId={resolvedInstanceId}
+            hasAgentSession={agentSession.session !== null}
+            onKeysSent={refresh}
+          />
+        ) : null}
+        {/* Issue #2043: opencode only, and only when opencode has named files.
+            Renders nothing at all for every other tool -- see
+            OpencodeTurnDiffPanel / hasAgentSessionDiff. Placed directly above
+            the composer, beside OpencodeSessionControls, because both are
+            opencode-only affordances that act on the conversation in this
+            split. */}
+        <OpencodeTurnDiffPanel
+          worktreeId={worktreeId}
+          cliToolId={cliToolId}
+          instanceId={resolvedInstanceId}
+          diff={agentSession.diff}
+          disabled={!terminal.isRunning}
+        />
         <MessageInput
           worktreeId={worktreeId}
           onMessageSent={handleMessageSent}
@@ -588,6 +673,12 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       showPrompt,
       showEscapeHatch,
       showUnsentComposerBar,
+      // Issue #2095: the notice's gate, and the frame it re-reads to render.
+      showOpencodeSidebarNotice,
+      terminal.realtimeSnippet,
+      terminal.output,
+      // Issue #2046: the opencode quick-key strip's session gate.
+      agentSession.session,
       terminal.composerText,
       terminal.isPagerActive,
       worktreeId,
@@ -614,6 +705,10 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       onAutoYesToggle,
       // Issue #806: toast surface for the "queued (session busy)" hint.
       showToast,
+      // Issue #2043: the poll gives this a stable identity between turns (see
+      // `agentSessionSignature`), so it re-runs the memo when the file list
+      // actually changes and not on every 2s poll that repeats it.
+      agentSession.diff,
     ],
   );
 
@@ -655,6 +750,34 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
     );
   }, [onRequestSessionEnd, terminal.isRunning, t, endTargetLabel, handleRequestSessionEnd, splitIndex]);
 
+  // Issue #2042: hand this split's session facts up. In an effect rather than
+  // in render because it writes the parent's state, and only when the snapshot
+  // identity actually moved — the poller holds it stable across the polls that
+  // repeat the same numbers, so this fires roughly once a turn.
+  useEffect(() => {
+    onAgentSessionChange?.(resolvedInstanceId, agentSession);
+  }, [onAgentSessionChange, resolvedInstanceId, agentSession]);
+
+  // Issue #2042: `agentModel` arrives already composed (`model · effort`); this
+  // re-enters the shared formatter to put the persona in front of it, so the
+  // pane header and the header pill's tooltip cannot word it differently. Null
+  // agent (every tool but opencode) returns the string unchanged.
+  const paneAgentModel = formatAgentModelLabel(agentModel, null, agentSession.session?.agent);
+  // Issue #2042: `$0.03 · 8.5K (1%)` — the same three values, in the same order,
+  // that opencode's own footer prints for the session this pane is attached to.
+  const paneAgentUsage = formatAgentSessionUsage(
+    agentSession.session,
+    agentSession.context,
+    t,
+    locale
+  );
+  const paneAgentUsageDetail = formatAgentSessionTooltip(
+    agentSession.session,
+    agentSession.context,
+    t,
+    locale
+  );
+
   return (
     <TerminalSplitPane
       worktreeId={worktreeId}
@@ -669,7 +792,11 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       // the selector trigger (session title bar). BranchStatus ⊂ StatusDotStatus.
       status={cliStatus}
       // Issue #1783: the model the agent reported, shown beside the alias.
-      agentModel={agentModel}
+      // Issue #2042 prefixes the persona when the agent named one.
+      agentModel={paneAgentModel}
+      // Issue #2042: cost / context, as a second muted chip.
+      agentUsage={paneAgentUsage}
+      agentUsageDetail={paneAgentUsageDetail}
       onFocus={onFocus}
       attaching={terminal.attaching}
       terminal={terminalSlot}

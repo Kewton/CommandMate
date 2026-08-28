@@ -62,6 +62,32 @@ export const NEW_SUBSCRIPTION_DEFAULTS = {
   enabledCompletion: false,
 } as const;
 
+/**
+ * The generation of *defaults* a stored subscription was created under
+ * (Issue #2056).
+ *
+ * `NEW_SUBSCRIPTION_DEFAULTS` above only ever reaches an INSERT, and #2000
+ * decided — correctly — that existing rows must not move. The consequence is a
+ * population that Epic #2002 never spoke to: devices subscribed before the
+ * change still have completions ON, and the `failure` kind quietly joined their
+ * `enabled_prompt` bucket via {@link KIND_COLUMN}. Their notification volume
+ * went *up* under an Epic whose point was to bring it down, and nothing in the
+ * app said so.
+ *
+ * This counter is how a row remembers whether it has been told. It governs a
+ * one-off notice in the settings UI and nothing else — **no fan-out query reads
+ * it**, so bumping it neither starts nor stops a single notification.
+ *
+ *  - `0` — written by the v57 backfill: created before #2000, never told.
+ *  - `1` — created under the #2000 defaults, or told about them and given the
+ *    choice to adopt or keep (see {@link updatePushSubscriptionPreferences}).
+ *
+ * Raise this (and add a notice for the new step) the next time a *default*
+ * changes under readers who already subscribed. It is deliberately a version
+ * rather than a boolean for that reason.
+ */
+export const PUSH_DEFAULTS_VERSION = 1;
+
 /** A stored Web Push subscription (one device). */
 export interface PushSubscriptionRecord {
   id: string;
@@ -72,6 +98,11 @@ export interface PushSubscriptionRecord {
   enabledCompletion: boolean;
   /** Locale captured at registration. NULL for subscriptions predating v42. */
   locale: string | null;
+  /**
+   * Which defaults generation this row knows about (Issue #2056). 0 for rows
+   * the v57 backfill found in place — see {@link PUSH_DEFAULTS_VERSION}.
+   */
+  defaultsVersion: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -94,6 +125,7 @@ interface PushSubscriptionRow {
   enabled_prompt: number;
   enabled_completion: number;
   locale: string | null;
+  defaults_version: number;
   created_at: number;
   updated_at: number;
 }
@@ -107,6 +139,7 @@ function mapRow(row: PushSubscriptionRow): PushSubscriptionRecord {
     enabledPrompt: row.enabled_prompt === 1,
     enabledCompletion: row.enabled_completion === 1,
     locale: row.locale,
+    defaultsVersion: row.defaults_version,
     createdAt: new Date(row.created_at),
     updatedAt: new Date(row.updated_at),
   };
@@ -114,7 +147,7 @@ function mapRow(row: PushSubscriptionRow): PushSubscriptionRecord {
 
 const SELECT_COLUMNS = `
   id, endpoint, p256dh, auth, device_label,
-  enabled_prompt, enabled_completion, locale, created_at, updated_at
+  enabled_prompt, enabled_completion, locale, defaults_version, created_at, updated_at
 `;
 
 /**
@@ -125,6 +158,12 @@ const SELECT_COLUMNS = `
  * Locale follows the keys, not the preferences: a re-registration carries the
  * reader's current language, so a resolved locale overwrites the stored one.
  * An *unresolved* locale must not clobber a good stored value, hence COALESCE.
+ *
+ * `defaults_version` follows the preferences, not the keys (Issue #2056): the
+ * ON CONFLICT clause leaves it untouched on purpose. A device that subscribed
+ * before #2000 and merely re-registers (a rotated key, a new label) has still
+ * not been told the defaults changed, so marking it as told here would swallow
+ * the notice for exactly the readers it exists for.
  */
 export function upsertPushSubscription(
   db: Database.Database,
@@ -137,9 +176,9 @@ export function upsertPushSubscription(
   db.prepare(`
     INSERT INTO push_subscriptions (
       id, endpoint, p256dh, auth, device_label,
-      enabled_prompt, enabled_completion, locale, created_at, updated_at
+      enabled_prompt, enabled_completion, locale, defaults_version, created_at, updated_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(endpoint) DO UPDATE SET
       p256dh = excluded.p256dh,
       auth = excluded.auth,
@@ -155,6 +194,7 @@ export function upsertPushSubscription(
     NEW_SUBSCRIPTION_DEFAULTS.enabledPrompt ? 1 : 0,
     NEW_SUBSCRIPTION_DEFAULTS.enabledCompletion ? 1 : 0,
     locale,
+    PUSH_DEFAULTS_VERSION,
     now,
     now
   );
@@ -219,11 +259,40 @@ export function countPushSubscriptionsForKind(
   return row.total;
 }
 
+/**
+ * Whether this device is still owed the one-off "the defaults changed" notice
+ * (Issue #2056).
+ *
+ * Derived rather than stored as a flag so that raising
+ * {@link PUSH_DEFAULTS_VERSION} for a future change re-arms the notice for every
+ * row at once, including rows that acknowledged the previous one.
+ */
+export function pushSubscriptionNeedsDefaultsNotice(
+  record: PushSubscriptionRecord
+): boolean {
+  return record.defaultsVersion < PUSH_DEFAULTS_VERSION;
+}
+
+/**
+ * What a PATCH may change on a stored subscription.
+ *
+ * `acknowledgeDefaultsNotice` rides along with the two toggles (Issue #2056) so
+ * that "adopt the new default" is a single UPDATE: turning completions off and
+ * clearing the notice must not be able to half-apply, or a failed second write
+ * would show the reader a notice offering a change they have already made.
+ */
+export interface PushSubscriptionPreferenceUpdate {
+  enabledPrompt?: boolean;
+  enabledCompletion?: boolean;
+  /** Mark this device as told about the current defaults generation. */
+  acknowledgeDefaultsNotice?: boolean;
+}
+
 /** Update per-type preferences for a subscription. Returns the updated record or null. */
 export function updatePushSubscriptionPreferences(
   db: Database.Database,
   endpoint: string,
-  prefs: { enabledPrompt?: boolean; enabledCompletion?: boolean }
+  prefs: PushSubscriptionPreferenceUpdate
 ): PushSubscriptionRecord | null {
   const assignments: string[] = ['updated_at = ?'];
   const params: (string | number)[] = [Date.now()];
@@ -235,6 +304,13 @@ export function updatePushSubscriptionPreferences(
   if (prefs.enabledCompletion !== undefined) {
     assignments.push('enabled_completion = ?');
     params.push(prefs.enabledCompletion ? 1 : 0);
+  }
+  // One-way: acknowledging cannot un-acknowledge. Nothing in the product asks
+  // to replay the notice, and a `false` here would let a stale client payload
+  // reopen a decision the reader has already made.
+  if (prefs.acknowledgeDefaultsNotice) {
+    assignments.push('defaults_version = ?');
+    params.push(PUSH_DEFAULTS_VERSION);
   }
 
   params.push(endpoint);

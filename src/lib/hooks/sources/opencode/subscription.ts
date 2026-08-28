@@ -25,6 +25,11 @@
  *   is what stands between "the pane owns this port" and a squatter closing a
  *   `wait` with one frame (§4 D3, DR4-004).
  * - **Not report a turn twice.** See `./turn-gate`.
+ * - **Answer "did this session just go idle?" for somebody who is not the
+ *   status layer.** An abort sent over the API is confirmed by the frame, not
+ *   by its own reply (Issue #2034) — see {@link watchOpencodeSessionIdle},
+ *   which observes the frame without taking any of the publishing decision
+ *   away from the gate.
  * - **Not throw on an unknown frame.** `server.heartbeat` arrives every ten
  *   seconds and is not in the server's own OpenAPI `Event` union (#1758 D5), so
  *   a strict reader would fail six times a minute on a healthy connection. It is
@@ -49,6 +54,14 @@
 import { createLogger } from '@/lib/logger';
 import { buildCompositeKey } from '@/lib/auto-yes-state';
 import type { AgentEventType } from '@/lib/hooks/agent-event-types';
+import {
+  forgetAgentSessionTelemetry,
+  readOpencodeSessionFrame,
+  recordAgentSessionTelemetry,
+} from '@/lib/hooks/agent-session-telemetry';
+import { recordAgentReportedEffort } from '@/lib/session/agent-event-state';
+import { getRememberedOpencodeSession } from '@/lib/session/opencode-session-store';
+import { forgetOpencodeSessionDiff, recordOpencodeDiffFrame } from './diff';
 import { isPlainObject, readStringField } from '../event-mapper';
 import type {
   AgentInstanceRef,
@@ -66,8 +79,15 @@ import {
   probeOpencodeHealth,
   type OpencodeFrame,
 } from './client';
-import { partCallId, partToolName } from './mappers';
+import {
+  backfillOpencodeHistory,
+  flushOpencodeTurn,
+  forgetOpencodeTranscripts,
+  recordOpencodeTranscriptFrame,
+} from './history';
+import { frameVariant, partCallId, partToolName } from './mappers';
 import { rememberOpencodeToolCall } from './payloads';
+import { notifyOpencodeUpdateAvailablePush } from './push';
 import { getAssignedOpencodePort } from './ports';
 import { createTurnGate, type TurnGate, type TurnObservation } from './turn-gate';
 
@@ -112,6 +132,29 @@ interface OpencodeSubscriptionState {
   readonly resync: SourceResync;
   /** Ids already delivered, so a re-sync does not re-announce a live dialog. */
   readonly seenDecisions: Set<string>;
+  /**
+   * Who is waiting for a `session.idle`, by session id (Issue #2034).
+   *
+   * Fed from {@link deliver}, so a synthesised idle from a re-sync counts too.
+   * See {@link watchOpencodeSessionIdle} for why this observes the *frame*
+   * rather than the gate's verdict.
+   */
+  readonly idleWaiters: Map<string, Set<(seen: boolean) => void>>;
+  /**
+   * opencode versions this subscription has already announced (Issue #2045).
+   *
+   * The Issue asks for "once per session", and this is the only place that can
+   * answer it: `installation.update-available` carries `{ version }` and
+   * **nothing else** — no `sessionID` — measured against 1.18.22's own
+   * `GET /doc` (`docs/design/opencode-server-live-verification.md` §17). So the
+   * unit the notice can be scoped to is the connection, not an opencode chat
+   * session, and this set is the connection: it survives every reconnect (the
+   * state object outlives `runStream`'s retry loop) and dies with `close()`.
+   *
+   * Keyed by version rather than a boolean so a server that *does* update
+   * mid-connection can still say so once for the next version.
+   */
+  readonly announcedUpdates: Set<string>;
   /** Aborts the current attempt. Replaced on every reconnect. */
   streamController: AbortController;
   /**
@@ -143,11 +186,63 @@ interface OpencodeSubscriptionState {
 declare global {
   // eslint-disable-next-line no-var
   var __opencodeSubscriptions: Map<string, OpencodeSubscriptionState> | undefined;
+  // eslint-disable-next-line no-var
+  var __opencodeDroppedLiveness: Map<string, SourceLiveness> | undefined;
+  // eslint-disable-next-line no-var
+  var __opencodeProbedActivity: Map<string, OpencodeProbedActivity> | undefined;
 }
 
 const subscriptions = (globalThis.__opencodeSubscriptions ??= new Map<
   string,
   OpencodeSubscriptionState
+>());
+
+/**
+ * The last liveness of a subscription that was **dropped rather than closed**
+ * (Issue #2054).
+ *
+ * Without this the one state Issue #2054 is written around is unobservable.
+ * {@link degradeToScraper} sets `liveness` to
+ * `{ state: 'lost', reason: 'port_identity_changed' }` and then deletes the
+ * entry from {@link subscriptions} in the next statement, so every later
+ * {@link getOpencodeLiveness} answered `unknown` — the same word an instance
+ * that was never subscribed answers, which is exactly the distinction the
+ * operator needs. The record is kept here instead, keyed the same way.
+ *
+ * **Only `lost` is ever written.** A tombstone is not a subscription: nothing
+ * reads it as permission to use the port, and every existing caller tests
+ * `state === 'live'` (`isOpencodeStructuredHistoryLive`, `abortOpencodeTurn`,
+ * the instances route's catalogue read), so promoting `unknown` to `lost`
+ * changes no decision anywhere — it only stops the reason being thrown away.
+ *
+ * Cleared when a new subscription opens on the key, and when the pane is closed:
+ * a process that is gone has no degradation left to report.
+ */
+const droppedLiveness = (globalThis.__opencodeDroppedLiveness ??= new Map<
+  string,
+  SourceLiveness
+>());
+
+/** One post-attach `probeActivity` answer (Issue #2054). */
+export interface OpencodeProbedActivity {
+  /** What the source answered, or null when it could not be asked. */
+  readonly activity: 'busy' | 'idle' | null;
+  /** Epoch ms the probe answered. */
+  readonly at: number;
+}
+
+/**
+ * What `AgentEventSource.probeActivity` said the last time a stream was
+ * (re-)attached for this instance (Issue #2054).
+ *
+ * See `runtime.attachOpencodeEventStream` for why the probe happens at all —
+ * the short version is that a stream which opens mid-turn delivers nothing until
+ * that turn ends, so "is this pane working right now?" has no answer on the
+ * stream and one `GET /session/status` is the whole of it.
+ */
+const probedActivity = (globalThis.__opencodeProbedActivity ??= new Map<
+  string,
+  OpencodeProbedActivity
 >());
 
 function keyOf(target: AgentInstanceRef): string {
@@ -162,12 +257,173 @@ export function isOpencodeSubscribed(target: AgentInstanceRef): boolean {
 /**
  * How the connection to this instance is doing (C6).
  *
- * `unknown` for an instance with no subscription, which is the honest answer:
- * a session started before this feature, or launched with structured events off,
- * is indistinguishable from one whose stream has not been opened.
+ * `unknown` for an instance with no subscription **and no dropped one**, which
+ * is the honest answer: a session started before this feature, or launched with
+ * structured events off, is indistinguishable from one whose stream has not been
+ * opened. An instance whose stream was taken away from it answers the `lost`
+ * that took it — see {@link droppedLiveness} (Issue #2054).
  */
 export function getOpencodeLiveness(target: AgentInstanceRef): SourceLiveness {
-  return subscriptions.get(keyOf(target))?.liveness ?? { state: 'unknown' };
+  const key = keyOf(target);
+  return subscriptions.get(key)?.liveness ?? droppedLiveness.get(key) ?? { state: 'unknown' };
+}
+
+/**
+ * Record what `probeActivity` answered right after a stream was attached
+ * (Issue #2054).
+ *
+ * Written by `./runtime`, which is the layer that owns the attach; kept here
+ * because this module already owns the per-instance keying and the lifecycle
+ * that has to forget it.
+ *
+ * @param target - The instance whose stream was just attached
+ * @param activity - The source's answer, null when it could not be asked
+ * @param at - Epoch ms; passed in so the caller and the record share one instant
+ */
+export function recordOpencodeProbedActivity(
+  target: AgentInstanceRef,
+  activity: 'busy' | 'idle' | null,
+  at: number
+): void {
+  probedActivity.set(keyOf(target), { activity, at });
+}
+
+/** The last post-attach probe for this instance, or null. Issue #2054. */
+export function getOpencodeProbedActivity(target: AgentInstanceRef): OpencodeProbedActivity | null {
+  return probedActivity.get(keyOf(target)) ?? null;
+}
+
+/**
+ * Whether this instance's conversation history is being written from the server
+ * (Issue #2041).
+ *
+ * The screen scraper's stand-down test, and the one place the "port connected"
+ * of the Issue text is turned into something checkable. `lib/polling/response-
+ * checker` calls it before saving an opencode reply: true means `./history` has
+ * the agent's own Markdown and the pane's rendering of it must not be saved on
+ * top, false means nothing else is recording the turn and the scrape is the
+ * only record there will be.
+ *
+ * Deliberately **not** {@link isOpencodeSubscribed}. A subscription whose stream
+ * has dropped is `lost` — it delivers no `session.idle`, so it flushes no turn —
+ * and standing the scraper down for one would leave the reply recorded by
+ * nobody. `live` is the same word `cli-tools/opencode` requires before it will
+ * post a prompt over REST (#2034 / #2035), and for the same reason: it is the
+ * only state in which the port is known to still belong to this pane.
+ *
+ * The fallback direction is safe and the other is not, which is why the test is
+ * this way round: two writers produce a duplicated reply, no writer produces a
+ * turn that never happened.
+ *
+ * @param target - The instance
+ */
+export function isOpencodeStructuredHistoryLive(target: AgentInstanceRef): boolean {
+  return getOpencodeLiveness(target).state === 'live';
+}
+
+/**
+ * The session whose turn is this instance's turn, or null (Issue #2034).
+ *
+ * One server can carry several sessions and a sub-agent runs in one of its own,
+ * so "abort this instance" has to name a session — and the gate has already
+ * decided which one that is (see `./turn-gate`). Null when there is no
+ * subscription, or when no session has been seen busy on this connection yet:
+ * both mean CommandMate does not know whose turn to end, which the caller reads
+ * as "use the keyboard instead".
+ */
+export function getOpencodePrimarySession(target: AgentInstanceRef): string | null {
+  return subscriptions.get(keyOf(target))?.gate.primarySession() ?? null;
+}
+
+/** A registered interest in one session's next `session.idle`. */
+export interface OpencodeIdleWatch {
+  /** True if the frame arrived before the timeout, false otherwise. */
+  readonly seen: Promise<boolean>;
+  /** Stop waiting and resolve `seen` false. Idempotent. */
+  cancel(): void;
+}
+
+/**
+ * Watch for one session's next `session.idle` (Issue #2034).
+ *
+ * The confirmation half of an API abort: `POST /session/:id/abort` answers
+ * `200 true` even for a session that was already idle (measured on 1.18.22, see
+ * `./client`), so the reply says the request was taken and nothing about
+ * whether a turn ended. The frame is the only thing that does.
+ *
+ * **Armed before the request, not after.** The same measurement had the first
+ * idle emitted in the same millisecond the abort replied, so a caller that
+ * awaits the POST and only then starts watching is racing its own completion.
+ *
+ * ## Why this reads the frame and not the gate's verdict
+ *
+ * `session.idle` arrives **twice** for an abort — 23 ms apart on 1.18.22, 19 ms
+ * on 1.18.3 (#1758 §5.3.2) — and the gate is what stops the repeat from being
+ * published as a second `stop`. This watch does not second-guess that: it
+ * settles on the *first* frame and unregisters, so the duplicate lands on no
+ * waiter, which is the same idempotence by a different route. Publication stays
+ * the gate's decision alone.
+ *
+ * Reading the raw frame also keeps the watch working in the one case the gate
+ * deliberately says nothing about: an idle for a session the gate never saw
+ * arm — a stream that opened mid-turn — is `never-armed` and is not published,
+ * but it is still the answer to "did the turn this abort targeted end?".
+ *
+ * @param target - The instance
+ * @param sessionId - `ses_…`, from {@link getOpencodePrimarySession}
+ * @param timeoutMs - How long to wait before answering false
+ * @returns A handle whose `seen` resolves once, either way. `seen` is already
+ *   `false` when there is no subscription to watch
+ */
+export function watchOpencodeSessionIdle(
+  target: AgentInstanceRef,
+  sessionId: string,
+  timeoutMs: number
+): OpencodeIdleWatch {
+  const state = subscriptions.get(keyOf(target));
+  if (!state) return { seen: Promise.resolve(false), cancel: () => {} };
+
+  let resolveSeen: (seen: boolean) => void = () => {};
+  const seen = new Promise<boolean>((resolve) => {
+    resolveSeen = resolve;
+  });
+
+  const waiters = state.idleWaiters.get(sessionId) ?? new Set<(seen: boolean) => void>();
+  state.idleWaiters.set(sessionId, waiters);
+
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const settle = (value: boolean): void => {
+    // The delete is the guard: a waiter that is no longer registered has
+    // already answered, and the second idle must not resolve anything twice.
+    if (!waiters.delete(settle)) return;
+    if (waiters.size === 0) state.idleWaiters.delete(sessionId);
+    if (timer !== null) clearTimeout(timer);
+    resolveSeen(value);
+  };
+
+  waiters.add(settle);
+  timer = setTimeout(() => settle(false), timeoutMs);
+  // The turn is over whether or not this timer fires; it must never be the
+  // reason a CLI process stays up.
+  timer.unref?.();
+
+  return { seen, cancel: () => settle(false) };
+}
+
+/** Answer every outstanding watch false — the connection is going away. */
+function releaseIdleWaiters(state: OpencodeSubscriptionState): void {
+  for (const waiters of [...state.idleWaiters.values()]) {
+    for (const settle of [...waiters]) settle(false);
+  }
+  state.idleWaiters.clear();
+}
+
+/** Tell whoever asked that this session reached idle (Issue #2034). */
+function notifyIdleWaiters(state: OpencodeSubscriptionState, sessionId: string): void {
+  const waiters = state.idleWaiters.get(sessionId);
+  if (!waiters) return;
+  // A copy: each `settle` unregisters itself from the live set.
+  for (const settle of [...waiters]) settle(true);
 }
 
 /** A subscription handle for an instance that has no server to subscribe to. */
@@ -217,6 +473,12 @@ export async function openOpencodeSubscription(
   const key = keyOf(target);
   const existing = subscriptions.get(key);
   if (existing) return handleFor(existing);
+  // Issue #2054: a new stream on this key supersedes whatever the last one died
+  // of. Cleared before the state is built rather than after, so a subscription
+  // that fails to open leaves no stale `lost` behind claiming a reason that
+  // belongs to a previous process.
+  droppedLiveness.delete(key);
+  probedActivity.delete(key);
 
   const resolvedPort = options.port ?? getAssignedOpencodePort(target);
   if (resolvedPort === null) {
@@ -239,6 +501,8 @@ export async function openOpencodeSubscription(
     gate: createTurnGate(),
     resync: options.resync ?? 'none',
     seenDecisions: new Set<string>(),
+    idleWaiters: new Map<string, Set<(seen: boolean) => void>>(),
+    announcedUpdates: new Set<string>(),
     streamController: new AbortController(),
     lifetimeController: new AbortController(),
     serverVersion: null,
@@ -275,14 +539,38 @@ function handleFor(state: OpencodeSubscriptionState): Subscription {
 /** Stop watching an instance. Idempotent. */
 export async function closeOpencodeSubscription(target: AgentInstanceRef): Promise<void> {
   const key = keyOf(target);
+  // Issue #2054, and **above the early return on purpose** — measured. The one
+  // instance that has a tombstone is the one {@link degradeToScraper} already
+  // removed from `subscriptions`, so a `close` that bailed out on "no state"
+  // would leave `port_identity_changed` describing a pane that has since been
+  // killed. Nothing else in this function is safe to run without a state, which
+  // is why the return stays where it is.
+  droppedLiveness.delete(key);
+  probedActivity.delete(key);
   const state = subscriptions.get(key);
   if (!state) return;
   state.closed = true;
   clearWatchdog(state);
+  releaseIdleWaiters(state);
   state.streamController.abort();
   // Issue #1900: the only signal a backoff is listening to.
   state.lifetimeController.abort();
   subscriptions.delete(key);
+  // Issue #2040: the record describes the conversation a process was having,
+  // and this is the call that means the process is gone. Left behind, it would
+  // report the previous session's cost against the next pane started on the same
+  // instance id — the same argument `buildCurrentOutput` makes for blanking
+  // `model` on a session that is not running.
+  forgetAgentSessionTelemetry(target);
+  // Issue #2041, on the same terms: an accumulator holds a reply a process was
+  // in the middle of writing, and a process that is gone will not finish it.
+  // Whatever it had already produced is in `opencode.db` and comes back through
+  // `recoverHistory` on the next attach.
+  forgetOpencodeTranscripts(target);
+  // Issue #2043, on the same terms again: a revert this pane was holding is the
+  // previous process's business, and a file list left behind would be offered
+  // for "unrevert" against a session that no longer exists.
+  forgetOpencodeSessionDiff(target);
   logger.info('opencode-subscription-closed', {
     worktreeId: target.worktreeId,
     instanceId: target.instanceId ?? target.cliToolId,
@@ -295,10 +583,16 @@ export function resetOpencodeSubscriptions(): void {
   for (const state of subscriptions.values()) {
     state.closed = true;
     clearWatchdog(state);
+    releaseIdleWaiters(state);
     state.streamController.abort();
     state.lifetimeController.abort();
+    forgetOpencodeTranscripts(state.target);
   }
   subscriptions.clear();
+  // Issue #2054: a test seam that left tombstones behind would leak one case's
+  // `lost` into the next case's `unknown`.
+  droppedLiveness.clear();
+  probedActivity.clear();
 }
 
 function clearWatchdog(state: OpencodeSubscriptionState): void {
@@ -417,6 +711,13 @@ async function runStream(state: OpencodeSubscriptionState): Promise<void> {
         armWatchdog(state);
         await resyncPending(state);
         await recoverTurnState(state, armedBefore);
+        // Issue #2041. After `recoverTurnState`, so a session the status poll
+        // re-armed has already named itself to the gate and this can prefer it
+        // over the remembered id. Awaited rather than fired-and-forgotten: it
+        // must finish before the loop starts delivering frames, so a turn that
+        // completes on the new connection cannot be written by the stream and
+        // then written again by a backfill that had not read the row yet.
+        await recoverHistory(state);
         attempt = 0;
         for await (const frame of frames) {
           attempt = 0;
@@ -509,6 +810,11 @@ function degradeToScraper(state: OpencodeSubscriptionState, observedVersion: str
   state.lifetimeController.abort();
   state.liveness = { state: 'lost', since: Date.now(), reason: 'port_identity_changed' };
   subscriptions.delete(state.key);
+  // Issue #2054. The reason is the whole value of this branch and the delete
+  // above is what used to throw it away: with the entry gone, every reader saw
+  // `unknown` and could not tell a port that was stolen from a pane that never
+  // had a server. Written after the delete so the two cannot disagree.
+  droppedLiveness.set(state.key, state.liveness);
 }
 
 /**
@@ -643,6 +949,46 @@ async function recoverTurnState(
   }
 }
 
+/**
+ * Recover replies that were produced while nothing was listening (Issue #2041).
+ *
+ * The event stream cannot answer this. Measured on 1.18.22: a second
+ * subscription opened to `/event` after three completed turns received one
+ * `server.connected` frame and then nothing at all — there is no replay, with
+ * or without `?after=<seq>` (#1758 §5.2.2). So every turn that finished while
+ * CommandMate was down, or between the drop and the reconnect, exists only in
+ * `opencode.db`, and `GET /session/:id/message` is the only way to it.
+ *
+ * ## Which session
+ *
+ * The gate first, because after {@link recoverTurnState} it holds a session the
+ * server has just confirmed is this pane's. Then #2038's persisted memory,
+ * which is the only source that survives a CommandMate restart — and a restart
+ * is the case this whole function exists for.
+ *
+ * `GET /session/status` is deliberately not consulted as a third source. It was
+ * measured answering `{}` for a server whose session had completed three turns:
+ * the map lists what is *doing* something, so on the quiet server a restart
+ * finds, it names nothing.
+ *
+ * Nothing here throws, and a failure costs history rather than the connection.
+ */
+async function recoverHistory(state: OpencodeSubscriptionState): Promise<void> {
+  try {
+    const remembered = getRememberedOpencodeSession(state.target)?.sessionId ?? null;
+    const sessionId = state.gate.primarySession() ?? remembered;
+    if (!sessionId) return;
+    await backfillOpencodeHistory(state.target, state.port, sessionId);
+  } catch (error) {
+    logger.warn('opencode-history-recovery-failed', {
+      worktreeId: state.target.worktreeId,
+      instanceId: state.target.instanceId ?? state.target.cliToolId,
+      port: state.port,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
 /** Process one frame off the stream. */
 function handleFrame(state: OpencodeSubscriptionState, frame: OpencodeFrame): void {
   const type = readStringField(frame, 'type');
@@ -679,6 +1025,103 @@ function deliver(
     const callId = partCallId(frame);
     const toolName = partToolName(frame);
     if (callId && toolName) rememberOpencodeToolCall(callId, toolName);
+  }
+
+  // Issue #2040, recorded on the same terms and for the same reason as the tool
+  // name above: `session.updated` maps to none of the seven event words, so a
+  // fact that only this frame carries would be lost between `normalize` and the
+  // `return` two lines below it. What it carries is the whole `Session` — title,
+  // agent, model, cost, tokens (measured against 1.18.22's own `GET /doc`) — and
+  // it is the only place any of those reach this server without a request.
+  //
+  // Deliberately not gated on the turn gate's primary session: the frame's own
+  // `parentID` is the sub-agent marker and `readOpencodeSessionFrame` reads it,
+  // so this stays a frame-local rule with no ordering relationship to `observe`.
+  if (type === 'session.updated') {
+    const session = readOpencodeSessionFrame(frame, receivedAt);
+    if (session) recordAgentSessionTelemetry(state.target, session);
+  }
+
+  // Issue #2048, deliberately its own block rather than a line inside #2040's:
+  // the variant rides on **two** frame types and `AgentSessionRecord` has no
+  // field for it, so folding it into the branch above would have to widen a
+  // record that three other Issues publish. It goes to the model/effort latch
+  // instead, which is the map every surface already reads an effort out of.
+  //
+  // Both types are read because neither alone is enough: `session.updated`
+  // carries `Session.model.variant` and is the frame that arrives when the
+  // *session's* selection changes, while `message.updated` carries
+  // `info.variant` and is the only frame that states what **this turn** ran at —
+  // which is what the header has to agree with (§20.4).
+  if (type === 'session.updated' || type === 'message.updated') {
+    recordAgentReportedEffort(
+      state.target.worktreeId,
+      state.target.cliToolId,
+      state.target.instanceId,
+      frameVariant(frame)
+    );
+  }
+
+  // Issue #2041, in the same position and for the same reason as the two reads
+  // above: the agent's reply travels on `message.part.updated`, which maps to
+  // `pre_tool_use` / `post_tool_use` for its tool parts and to *nothing at all*
+  // for its text ones — the seven words have no place to put prose. So the only
+  // chance to keep the text is before `normalize` decides the frame is silent.
+  //
+  // `message.part.delta` is deliberately absent from this branch: the closing
+  // `message.part.updated` carries the whole part text, which makes the reader
+  // idempotent against a re-sent boundary frame instead of dependent on a dedup
+  // set. See `./transcript` for the measurement.
+  if (type === 'message.updated' || type === 'message.part.updated') {
+    recordOpencodeTranscriptFrame(state.target, frame, receivedAt);
+  }
+
+  // Issue #2043, a block of its own directly after #2041's and deliberately not
+  // merged into it: `session.diff` maps to none of the seven event words, and
+  // #2045 is adding a reader to this same function in parallel -- independent
+  // blocks are what makes "keep both" a mechanical merge rather than a rewrite.
+  //
+  // Three frame types, because the state needs all three and no single one
+  // carries it (measured on 1.18.22, see `./diff` and the design doc's §16):
+  //
+  //  - `session.diff` -- the files a revert is holding back. **Empty on every
+  //    frame of an ordinary turn**, which is why it is not read as "what this
+  //    turn changed";
+  //  - `session.updated` -- `Session.revert`, the only signal an *unrevert*
+  //    produces (a successful one emits no `session.diff` at all);
+  //  - `message.updated` (role `user`) -- the message id
+  //    `GET /session/:id/diff?messageID=...` needs, which is the only call
+  //    measured to answer the turn's files.
+  if (type === 'session.diff' || type === 'session.updated' || type === 'message.updated') {
+    recordOpencodeDiffFrame(state.target, frame, receivedAt);
+  }
+
+  // Issue #2045, an independent block for the same reason the three above are
+  // independent: `installation.update-available` maps to none of the seven
+  // words, so `normalize` returns null for it and the `return` below would drop
+  // the only frame that ever names a newer opencode. Not gated on the turn gate
+  // — the notice is about the installation, not about any turn — and not on a
+  // session id, because the frame carries none (measured, §17).
+  if (type === 'installation.update-available') {
+    announceOpencodeUpdate(state, frame, receivedAt);
+  }
+
+  // Issue #2034: before the gate, and independent of what it decides. An abort
+  // asked whether THIS session reached idle; whether the frame is also publishable
+  // as a `stop` is a separate question with its own — correct — answer below.
+  if (type === 'session.idle') {
+    const idleSession = readStringField(
+      isPlainObject(frame.properties) ? frame.properties : {},
+      'sessionID'
+    );
+    if (idleSession) {
+      notifyIdleWaiters(state, idleSession);
+      // Issue #2041: the turn is over, so the reply is complete. Not awaited —
+      // `deliver` is synchronous by contract (the SSE read loop calls it once
+      // per frame) and a database write must not hold the stream. Nothing here
+      // rejects; `flushOpencodeTurn` catches its own failures.
+      void flushOpencodeTurn(state.target, idleSession);
+    }
   }
 
   const observation = state.gate.observe(type, frame);
@@ -755,6 +1198,57 @@ function gateVerdict(event: AgentEventType, observation: TurnObservation): strin
     return observation.kind === 'suppressed' ? observation.reason : 'not-a-new-prompt';
   }
   return null;
+}
+
+/**
+ * Announce a newer opencode, at most once per connection per version
+ * (Issue #2045).
+ *
+ * The suppression lives here rather than inside `notifyPushSubscribers`
+ * because the two guards answer different questions and neither subsumes the
+ * other: the fan-out's own `passesDedup` collapses *identical content within
+ * 30 s*, which an update notice re-sent an hour later would sail straight
+ * through, while this one is "this connection has already said it". Running
+ * both is not double suppression — the outer one is the Issue's rule and the
+ * inner one is the fan-out's ordinary hygiene. The unit test proves they are
+ * independent by clearing the content window between two frames.
+ *
+ * Recorded before the send, and deliberately: the notice is advisory, and a
+ * fan-out that fails is not a reason to try again on every subsequent frame.
+ */
+function announceOpencodeUpdate(
+  state: OpencodeSubscriptionState,
+  frame: OpencodeFrame,
+  receivedAt: number
+): void {
+  const properties = isPlainObject(frame.properties) ? frame.properties : {};
+  const version = readStringField(properties, 'version');
+  if (!version) return;
+  if (state.announcedUpdates.has(version)) {
+    logger.info('opencode-update-available-repeat-dropped', {
+      worktreeId: state.target.worktreeId,
+      instanceId: state.target.instanceId ?? state.target.cliToolId,
+      version,
+    });
+    return;
+  }
+  state.announcedUpdates.add(version);
+
+  logger.info('opencode-update-available', {
+    worktreeId: state.target.worktreeId,
+    instanceId: state.target.instanceId ?? state.target.cliToolId,
+    version,
+  });
+
+  // Not awaited — `deliver` is synchronous by contract (the SSE read loop calls
+  // it once per frame) and a push fan-out must not hold the stream. The
+  // notifier contains its own failures.
+  void notifyOpencodeUpdateAvailablePush(
+    state.target,
+    state.target.instanceId ?? state.target.cliToolId,
+    version,
+    receivedAt
+  );
 }
 
 /** Note an approval / question id so a later re-sync does not repeat it. */

@@ -147,6 +147,22 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
     needs the dwell: a capture taken mid-repaint can raise the flag once.
     --on-prompt human keeps waiting for it, same as the other two.
 
+    On opencode the commonest cause has a name and a one-key fix. If its
+    sidebar is on -- ctrl+x b, or "Show sidebar" in its ctrl+p palette -- it
+    shares screen rows with the transcript, covers the marker that ends a
+    turn, and every frame after that reads running/unknown_frame. wait says
+    so on stderr (paneObstruction=opencode_sidebar) and capture --json
+    publishes the same field. Press ctrl+x b in the pane to close it; Escape
+    does not.
+
+    An opencode DIALOG is the other one, and it exits 10 as selection_list
+    rather than waiting out the dwell. Its session list (ctrl+x l), agent list
+    (ctrl+x a), timeline (ctrl+x g), command palette (ctrl+p) and pickers are
+    painted over the transcript, so the marker of the previous turn is still
+    on the pane behind them -- which is what used to make wait report a
+    blocked pane as Completed. sessionStatusReason is opencode_modal_overlay
+    and Escape closes all of them.
+
   --verify turns "the agent stopped" into "the work passes the repository's own
   checks". Verification only runs when completion was detected: a prompt (10) or
   a timeout (124) is reported as-is and never verified. With several worktrees,
@@ -218,6 +234,23 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
   Exit codes:
     0  - Response sent
     99 - Prompt already dismissed (prompt_no_longer_active)
+
+### commandmate interrupt <worktree-id>
+  Interrupt the turn an agent is generating (the GUI's interrupt button).
+  Not 'stop' -- that stops the CommandMate server.
+
+  commandmate interrupt <id>                    # Every running session of the worktree
+  commandmate interrupt <id> --instance codex-2 # Only that instance
+  commandmate interrupt <id> --json             # { success, message, interrupted[] }
+
+  Omitting --instance is a broadcast, not "the primary instance": the route
+  interrupts every session that is running. There is no --agent (wait's rule:
+  a tool name does not say which session).
+
+  Exit codes:
+    0  - At least one session was interrupted
+    30 - The worktree exists but nothing was running (nothing was interrupted)
+    99 - No such worktree
 
 ### commandmate capture <worktree-id>
   Get current terminal output.
@@ -336,6 +369,7 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
   10  PROMPT_DETECTED  - Prompt detected during wait
   20  VERIFY_FAILED    - A verification gate failed (verify, wait --verify)
   21  NOT_STARTED      - Nothing to verify: no commits, no uncommitted changes
+  30  NO_ACTIVE_SESSIONS - interrupt found no running session to interrupt
   99  UNEXPECTED_ERROR - Unexpected error / resource not found / no verdict
   124 TIMEOUT          - Wait or verification timeout exceeded
 

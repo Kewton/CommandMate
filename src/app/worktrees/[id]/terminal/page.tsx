@@ -51,6 +51,11 @@ export default function TerminalPage({
     { id: 'claude', name: 'Claude', Icon: Bot, color: 'bg-purple-600' },
     { id: 'codex', name: 'Codex', Icon: Zap, color: 'bg-blue-600' },
     { id: 'gemini', name: 'Gemini', Icon: Sparkles, color: 'bg-green-600' },
+    // Issue #2046: opencode was missing from this list even though it has been a
+    // first-class CLI tool since #1758. This page is unlinked, so the omission
+    // only showed up for someone typing the URL — which is exactly the operator
+    // most likely to want a raw pane on an opencode session.
+    { id: 'opencode', name: 'OpenCode', Icon: Code, color: 'bg-amber-600' },
     { id: 'bash', name: 'Bash', Icon: SquareTerminal, color: 'bg-gray-600' },
   ];
 

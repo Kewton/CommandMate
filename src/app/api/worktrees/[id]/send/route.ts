@@ -213,6 +213,17 @@ export async function POST(
     }
 
     // Issue #576/#588/#989: Validate model parameter via shared validator (DR1-003)
+    //
+    // Issue #2048 kept opencode OUT of this list on purpose, having measured
+    // what including it would have to mean. opencode's model is a *launch* flag
+    // (`-m provider/model`) and its variant is not a launch flag at all, so
+    // `--model` on a send could only be honoured by restarting the pane or by
+    // driving the TUI's own model picker — and that picker rewrites the
+    // operator's **global default model**, the same trap `/model` is for Claude
+    // (#1495). A per-instance setting is the channel instead
+    // (`PUT /api/worktrees/:id/instances/opencode`), which is durable, visible,
+    // and applies without touching anybody's defaults. Switching a *running*
+    // opencode session is Issue #2046's question.
     if (body.model) {
       // model is only supported for copilot and antigravity
       if (cliToolId !== 'copilot' && cliToolId !== 'antigravity') {

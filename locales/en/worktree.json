@@ -877,13 +877,30 @@
     "statusPill": "{label}: {status}",
     "subTabMessage": "Message",
     "subTabGit": "Git",
-    "statusPillWithModel": "{label}: {status} — model {model}"
+    "statusPillWithModel": "{label}: {status} — model {model}",
+    "statusPillWithUsage": "{base} — {usage}",
+    "statusPillWithSource": "{base} — {source}"
   },
   "detailStatus": {
     "idle": "Idle - No active session",
     "ready": "Ready - Waiting for input",
     "running": "Running - Processing",
     "waiting": "Waiting - User input required"
+  },
+  "agentSource": {
+    "line": "Events: {kind} ({state})",
+    "lineBare": "Events: {kind}",
+    "kindSse": "SSE",
+    "kindHooks": "hooks",
+    "kindScraper": "screen scrape",
+    "livenessLive": "connected",
+    "livenessStale": "stalled",
+    "reasonPortIdentityChanged": "another process took the port",
+    "reasonHeartbeatStale": "no heartbeat for over 30s",
+    "reasonNotSubscribed": "no event subscription",
+    "reasonOther": "reason: {reason}",
+    "degradedTitle": "Structured events are not arriving",
+    "healthyTitle": "Receiving structured events"
   },
   "agentModel": {
     "label": "Model",
@@ -1022,5 +1039,88 @@
       "tooLarge": "This file is too large to edit here.",
       "tooManyEntries": "This file defines too many variables to edit here."
     }
+  },
+  "agentSession": {
+    "context": "{tokens} ({percent}%)",
+    "chipLabel": "Session usage — {usage}",
+    "titleLabel": "Session: {title}",
+    "agentLabel": "Agent: {agent}",
+    "costLabel": "Cost so far: {cost}",
+    "spentLabel": "Spent this session: {tokens} tokens",
+    "contextLabel": "Context in use: {tokens} of {limit} tokens ({percent}%)",
+    "contextUnknownLabel": "Context in use: {tokens} tokens (window unknown)"
+  },
+  "opencodeDiff": {
+    "title": "Files this turn changed",
+    "subtitle": "{count} files",
+    "revertedTitle": "Changes held back by a revert",
+    "revertedSubtitle": "{count} files are reverted",
+    "openDiff": "Show the diff for {file}",
+    "unnamedFile": "(unnamed file)",
+    "status": {
+      "added": "added",
+      "deleted": "deleted",
+      "modified": "modified"
+    },
+    "revert": "Revert this turn",
+    "unrevert": "Restore",
+    "revertConfirmTitle": "Revert this turn?",
+    "revertConfirmBody": "opencode will roll back its changes to {count} files. Files it created are deleted, and committed changes are rolled back in the working tree too. Restore undoes this.",
+    "revertConfirmLabel": "Revert",
+    "unrevertConfirmTitle": "Restore the reverted changes?",
+    "unrevertConfirmBody": "opencode will put the reverted changes to {count} files back into the working tree.",
+    "unrevertConfirmLabel": "Restore",
+    "busy": "The agent is mid-turn. Try again once the turn finishes.",
+    "noop": "opencode changed nothing (it could not find that turn).",
+    "failed": "opencode refused the operation."
+  },
+  "opencodeQuickKeys": {
+    "toolbarLabel": "opencode quick keys",
+    "caption": "opencode",
+    "needsSession": "Available after this pane's first turn ({notation})",
+    "showKeys": "Show opencode quick keys",
+    "hideKeys": "Hide opencode quick keys",
+    "keys": {
+      "agentNext": "Next agent",
+      "agentPrev": "Previous agent",
+      "commands": "Commands",
+      "variant": "Variant",
+      "agents": "Agents",
+      "sessions": "Sessions",
+      "newSession": "New session",
+      "models": "Models",
+      "themes": "Themes",
+      "timeline": "Timeline",
+      "undo": "Undo",
+      "redo": "Redo",
+      "compact": "Compact",
+      "pageUp": "Page up",
+      "pageDown": "Page down",
+      "first": "First message",
+      "last": "Latest message"
+    }
+  },
+  "opencodeSidebar": {
+    "regionLabel": "opencode sidebar warning",
+    "label": "opencode sidebar is open",
+    "body": "It shares rows with the transcript, so the end of a turn cannot be detected. Close it from the opencode pane with:"
+  },
+  "opencodeSession": {
+    "new": "New opencode session",
+    "list": "Open opencode session list",
+    "fork": "Fork this opencode session",
+    "share": "Create a share link",
+    "unshare": "Revoke the share link",
+    "shareCopy": "Copy link",
+    "shareConfirmTitle": "Publish this conversation?",
+    "shareConfirmBody": "opencode will publish this session to its own hosting, where anyone with the link can read it. What goes out is the conversation itself — your prompts, the agent's replies, and the input and output of every tool it ran — together with the absolute path of the session's working directory. Nothing is redacted. You can take the page down afterwards with \"Revoke the share link\", but that cannot un-read anything already read.",
+    "shareConfirmLabel": "Publish",
+    "sharePublicNotice": "Anyone with this link can read it.",
+    "errorNoPort": "No opencode server is attached to this pane. Restart the pane and try again.",
+    "errorNoSessionFork": "There is no session to fork yet. Run one turn first, then try again.",
+    "errorNoSessionShare": "There is no session to share yet. Run one turn first, then try again.",
+    "errorRequestFailed": "The request could not be sent. The CommandMate server is unreachable.",
+    "errorUnknown": "The action failed. The server gave no reason.",
+    "errorCopyFailed": "Could not copy the link. Select the link shown here and copy it manually."
   }
 }

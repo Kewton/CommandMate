@@ -12,6 +12,20 @@
  * keys — and those are precisely the installs where the in-app toast is the only
  * notification the user can get. Putting its switch inside that body would hide
  * the control exactly where it matters most.
+ *
+ * Issue #2056 adds the one-off defaults notice, and it goes the other way for
+ * the mirror-image reason: it is about *this device's stored subscription*, so
+ * it belongs directly above the two switches it describes, inside the subscribed
+ * branch. A browser with no Push API has no subscription to be owed a notice
+ * about.
+ *
+ * Issue #2124 adds the delivery banner, and it sits OUTSIDE the subscribed /
+ * not-subscribed branch, because the case it exists for is precisely the one
+ * where those two disagree: a 410 deletes the server's row while the browser
+ * still holds a PushSubscription, so `endpoint !== null` alone reported "enabled
+ * on this device" for a device the server had already stopped sending to. The
+ * banner is the visible half of `lib/push/delivery-health`; `serverSubscribed`
+ * below is the corrective half.
  */
 
 'use client';
@@ -40,6 +54,21 @@ import {
 interface Prefs {
   prompt: boolean;
   completion: boolean;
+}
+
+/**
+ * What the push service last said about this device (Issue #2124).
+ *
+ * Mirrors `PushDeliveryHealth` in `@/lib/push/delivery-health`, redeclared rather
+ * than imported for the same reason `EscalationSettings` below is: that module is
+ * server-only (better-sqlite3), and this file is a client component.
+ */
+interface DeliveryHealth {
+  state: 'failing' | 'removed';
+  statusCode: number | null;
+  failureCount: number;
+  firstFailureAt: number;
+  lastFailureAt: number;
 }
 
 /**
@@ -75,8 +104,35 @@ export function NotificationsSettings() {
    * switch position on a device that has just registered.
    */
   const [prefs, setPrefs] = useState<Prefs>({ prompt: true, completion: false });
+  /**
+   * Issue #2056: whether this device is still owed the "the defaults changed"
+   * notice. Server-decided — the client never computes it from `prefs`, because
+   * a reader who deliberately turned completions back ON after acknowledging is
+   * indistinguishable from one who was never told.
+   *
+   * Starts false so the notice can only ever *appear* once the GET has spoken;
+   * a placeholder true would flash a banner at every newly registered device.
+   */
+  const [defaultsNoticePending, setDefaultsNoticePending] = useState(false);
+  /**
+   * Issue #2124: the push service's verdict on this device, or null when it is
+   * healthy (which is also the state before the GET lands, so a working device
+   * never flashes a banner).
+   */
+  const [delivery, setDelivery] = useState<DeliveryHealth | null>(null);
+  /**
+   * Issue #2124: whether the SERVER still has a row for this endpoint. `null`
+   * means "not asked yet, or the request failed" — only an actual answer is
+   * allowed to contradict the browser, so a flaky network cannot make a
+   * subscribed device offer to subscribe again.
+   *
+   * This is what a 410 needs: the browser keeps its PushSubscription after the
+   * push service has expired it, so `endpoint !== null` stays true for a device
+   * the server deleted and stopped sending to.
+   */
+  const [serverSubscribed, setServerSubscribed] = useState<boolean | null>(null);
 
-  const subscribed = endpoint !== null;
+  const subscribed = endpoint !== null && serverSubscribed !== false;
 
   useEffect(() => {
     let cancelled = false;
@@ -113,10 +169,16 @@ export function NotificationsSettings() {
             );
             const d = (await r.json()) as {
               subscribed: boolean;
-              subscription?: { preferences: Prefs };
+              subscription?: { preferences: Prefs; defaultsNoticePending?: boolean };
+              delivery?: DeliveryHealth | null;
             };
+            if (!cancelled) {
+              setServerSubscribed(d.subscribed === true);
+              setDelivery(d.delivery ?? null);
+            }
             if (d.subscribed && d.subscription && !cancelled) {
               setPrefs(d.subscription.preferences);
+              setDefaultsNoticePending(d.subscription.defaultsNoticePending === true);
             }
           }
         } catch {
@@ -164,10 +226,21 @@ export function NotificationsSettings() {
         }),
       });
       if (!res.ok) throw new Error('subscribe request failed');
-      const data = (await res.json()) as { subscription?: { preferences: Prefs } };
+      const data = (await res.json()) as {
+        subscription?: { preferences: Prefs; defaultsNoticePending?: boolean };
+      };
 
       setEndpoint(sub.endpoint);
+      // Issue #2124: a fresh registration is the repair for both delivery states,
+      // so the banner and the server-side verdict are reset together with it.
+      setServerSubscribed(true);
+      setDelivery(null);
       if (data.subscription?.preferences) setPrefs(data.subscription.preferences);
+      // A device registering now is created at the current defaults generation,
+      // so the server says false here. Read it rather than assuming: an endpoint
+      // that already existed comes back through the same ON CONFLICT path and
+      // may well still be owed the notice.
+      setDefaultsNoticePending(data.subscription?.defaultsNoticePending === true);
       setPermissionDenied(false);
       showToast(t('toast.enabled'), 'success');
     } catch {
@@ -192,6 +265,8 @@ export function NotificationsSettings() {
         });
       }
       setEndpoint(null);
+      setServerSubscribed(null);
+      setDelivery(null);
       showToast(t('toast.disabled'), 'info');
     } catch {
       showToast(t('toast.error'), 'error');
@@ -221,6 +296,116 @@ export function NotificationsSettings() {
     },
     [endpoint, prefs, showToast, t]
   );
+
+  /**
+   * Answer the one-off defaults notice (Issue #2056).
+   *
+   * Both answers clear the notice — that is what makes the change *consented to*
+   * rather than silent, which is the only way Epic #2002's criterion 3 ("ordinary
+   * completions are not notified by default") and criterion 6 ("no notification
+   * stops unintentionally") can both hold for a row that already existed.
+   *
+   * "Adopt" rides the completion toggle and the acknowledgement into one PATCH,
+   * so a half-applied write cannot leave the reader with completions still on
+   * and no notice left to offer turning them off.
+   */
+  const resolveDefaultsNotice = useCallback(
+    async (adopt: boolean) => {
+      if (!endpoint) return;
+      const previousPrefs = prefs;
+      const nextPrefs = adopt ? { ...prefs, completion: false } : prefs;
+
+      setDefaultsNoticePending(false);
+      if (adopt) setPrefs(nextPrefs);
+      setBusy(true);
+      try {
+        const res = await fetch('/api/push/subscriptions', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            endpoint,
+            // Declining sends no `preferences` at all: "keep this device as it
+            // is" must not rewrite toggles it is not changing.
+            ...(adopt ? { preferences: nextPrefs } : {}),
+            acknowledgeDefaultsNotice: true,
+          }),
+        });
+        if (!res.ok) throw new Error('acknowledge failed');
+        showToast(t(adopt ? 'defaultsNotice.adopted' : 'defaultsNotice.kept'), 'success');
+      } catch {
+        setPrefs(previousPrefs);
+        setDefaultsNoticePending(true);
+        showToast(t('toast.error'), 'error');
+      } finally {
+        setBusy(false);
+      }
+    },
+    [endpoint, prefs, showToast, t]
+  );
+
+  /**
+   * "This device is not receiving notifications" (Issue #2124).
+   *
+   * Rendered above the subscribe / unsubscribe branch because the two delivery
+   * states straddle it: a 403 leaves the device subscribed (a misconfigured
+   * `CM_VAPID_SUBJECT` must never cost the reader their subscription) while a 410
+   * has already deleted the server's row. Both are invisible without this — the
+   * sender's only output for either is a server log line.
+   *
+   * Silent when `delivery` is null, which is both "healthy" and "not asked yet",
+   * so a working device never flashes a banner (the negative control the Issue's
+   * acceptance conditions ask for on the startup check applies here too).
+   *
+   * The APNs hint is attached to 403 specifically, because that is the status the
+   * Epic #2002 device UAT measured against the old default subject; #2126 will add
+   * its own status to the same banner without needing a second surface.
+   */
+  const renderDeliveryBanner = () => {
+    if (delivery === null) return null;
+
+    const removed = delivery.state === 'removed';
+    const status = delivery.statusCode;
+    const body = removed
+      ? status === null
+        ? t('delivery.removedUnknownStatus')
+        : t('delivery.removed', { status: String(status) })
+      : status === null
+        ? t('delivery.failingUnknownStatus', { count: delivery.failureCount })
+        : t('delivery.failing', { count: delivery.failureCount, status: String(status) });
+
+    return (
+      <div
+        className={
+          removed
+            ? 'space-y-2 rounded-lg border border-danger-border bg-danger-subtle p-3'
+            : 'space-y-2 rounded-lg border border-warning-border bg-warning-subtle p-3'
+        }
+        data-testid="notifications-delivery-health"
+        data-delivery-state={delivery.state}
+      >
+        <p
+          className={
+            removed
+              ? 'text-sm font-semibold text-danger-foreground'
+              : 'text-sm font-semibold text-warning-foreground'
+          }
+        >
+          {t(removed ? 'delivery.headingRemoved' : 'delivery.headingFailing')}
+        </p>
+        <p className="text-xs text-foreground">{body}</p>
+        {status === 403 && (
+          <p className="text-xs text-muted-foreground" data-testid="notifications-delivery-apns-hint">
+            {t('delivery.apnsHint')}
+          </p>
+        )}
+        <p className="text-xs text-muted-foreground">
+          {t('delivery.since', {
+            timestamp: new Date(delivery.firstFailureAt).toLocaleString(),
+          })}
+        </p>
+      </div>
+    );
+  };
 
   const renderBody = () => {
     if (loading) {
@@ -257,6 +442,8 @@ export function NotificationsSettings() {
           </p>
         )}
 
+        {renderDeliveryBanner()}
+
         {!subscribed ? (
           <Button
             variant="primary"
@@ -270,6 +457,37 @@ export function NotificationsSettings() {
         ) : (
           <div className="space-y-4">
             <p className="text-sm font-medium text-foreground">{t('enabledOnThisDevice')}</p>
+
+            {defaultsNoticePending && (
+              <div
+                className="space-y-3 rounded-lg border border-info-border bg-info-subtle p-3"
+                data-testid="notifications-defaults-notice"
+              >
+                <p className="text-sm font-semibold text-info-foreground">
+                  {t('defaultsNotice.heading')}
+                </p>
+                <p className="text-xs text-foreground">{t('defaultsNotice.completionChanged')}</p>
+                <p className="text-xs text-foreground">{t('defaultsNotice.failuresAdded')}</p>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    variant="primary"
+                    onClick={() => resolveDefaultsNotice(true)}
+                    disabled={busy}
+                    data-testid="notifications-defaults-notice-adopt"
+                  >
+                    {t('defaultsNotice.adopt')}
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    onClick={() => resolveDefaultsNotice(false)}
+                    disabled={busy}
+                    data-testid="notifications-defaults-notice-keep"
+                  >
+                    {t('defaultsNotice.keep')}
+                  </Button>
+                </div>
+              </div>
+            )}
 
             <div className="space-y-3">
               <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">

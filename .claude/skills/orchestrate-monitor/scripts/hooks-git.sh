@@ -35,7 +35,8 @@
 #                            answer for a checkout outside `git worktree list`
 #                            or an id disambiguated with a path digest.
 #   MONITOR_HOOKS_STATE_DIR  where the once-per-worker warning markers are kept
-#                            (default: monitor.sh's STATE_DIR when sourced by it)
+#                            (default: monitor.sh's STATE_DIR when sourced by it;
+#                            standalone, a private `mktemp -d` removed on exit)
 #
 # bash 3.2 compatible and sourced into monitor.sh's shell under `set -u`, so every
 # local is prefixed `mh__` and no loop variable is named `path`
@@ -47,11 +48,65 @@ MONITOR_WORKTREE_ROOT=${MONITOR_WORKTREE_ROOT:-}
 # Warning markers live in a directory, not in a shell variable: monitor.sh calls
 # the counters through `$(...)`, i.e. in a subshell, so anything assigned in here
 # is discarded before the next poll and a variable-based guard would reprint the
-# same line every interval. A file survives the subshell. `$$` is the sourcing
-# shell's pid (bash 3.2 does not update it inside `$(...)`), so standalone use is
-# stable too; when monitor.sh sources this file its own STATE_DIR is used and the
-# markers are removed with it on exit.
-MONITOR_HOOKS_STATE_DIR=${MONITOR_HOOKS_STATE_DIR:-${STATE_DIR:-${TMPDIR:-/tmp}/cm-monitor-hooks-$$}}
+# same line every interval. A file survives the subshell, and the directory holding
+# those files is chosen once, here, so every call in one run agrees on it.
+#
+#   MONITOR_HOOKS_STATE_DIR set — the caller decides (a test pins one per test).
+#   STATE_DIR set               — sourced by monitor.sh: ride along in its store,
+#                                 which its own EXIT trap removes with everything
+#                                 else it kept there.
+#   neither                     — standalone: a private directory made here.
+#
+# The standalone name is drawn by `mktemp -d` and NOT from `$$` (Issue #2119).
+# `$$` is stable within a run — bash 3.2 does not update it inside `$(...)`, which
+# is what the pid was chosen for — but it is not unique ACROSS runs: pids recycle
+# (macOS wraps at ~100k) and nothing outside monitor.sh ever deleted these
+# directories, so a later `. hooks-git.sh` that drew a recycled pid opened a store
+# full of `warned-<key>` files it had never written and mh_report_once() returned
+# silently. The un-loseable report of #1614 / #1728 was then lost to a stranger's
+# leftovers — measured 2026-08-27: 4129 `cm-monitor-hooks-*` directories holding
+# 4214 markers, every key one a following run would want to print. `mktemp -d`
+# never hands back a name that already exists, so that suppression cannot happen;
+# what is left is a directory to remove, which the EXIT trap below does.
+MONITOR_HOOKS_STATE_DIR_OWNED=${MONITOR_HOOKS_STATE_DIR_OWNED:-}
+if [ -z "${MONITOR_HOOKS_STATE_DIR:-}" ]; then
+  if [ -n "${STATE_DIR:-}" ]; then
+    MONITOR_HOOKS_STATE_DIR=$STATE_DIR
+  else
+    # The fallback keeps the old pid-keyed name rather than giving up on markers:
+    # a `mktemp` that cannot answer must not turn every poll into a fresh warning.
+    MONITOR_HOOKS_STATE_DIR=$(mktemp -d "${TMPDIR:-/tmp}/cm-monitor-hooks-XXXXXXXX" 2>/dev/null) \
+      || MONITOR_HOOKS_STATE_DIR=${TMPDIR:-/tmp}/cm-monitor-hooks-$$
+    MONITOR_HOOKS_STATE_DIR_OWNED=1
+  fi
+fi
+
+# mh_cleanup_state_dir — remove the store, but only the one this file created.
+#
+# A directory handed in by the caller (MONITOR_HOOKS_STATE_DIR) or borrowed from
+# monitor.sh (STATE_DIR) belongs to someone else and is left alone; deleting a
+# store another process is still writing would let mh_report_once() print a second
+# copy of a line it has already printed, which is the once-per-worker rule broken
+# from the other side.
+mh_cleanup_state_dir() {
+  [ -n "${MONITOR_HOOKS_STATE_DIR_OWNED:-}" ] || return 0
+  # Belt and braces on an `rm -rf` of an interpolated path: only ever a name this
+  # file could have minted.
+  case "${MONITOR_HOOKS_STATE_DIR:-}" in
+    */cm-monitor-hooks-*) rm -rf "$MONITOR_HOOKS_STATE_DIR" 2>/dev/null || true ;;
+  esac
+  return 0
+}
+
+# Armed only when this file owns the directory AND the sourcing shell has no EXIT
+# trap of its own. bash keeps ONE EXIT trap, not a chain, so `trap ... EXIT` from a
+# sourced file silently replaces whatever the operator installed — losing their
+# cleanup to save an empty directory of ours is the worse trade. Under monitor.sh
+# both tests fail anyway: it owns STATE_DIR and installs `trap cleanup EXIT` before
+# it sources any hooks file, so its store and its trap are both untouched.
+if [ -n "$MONITOR_HOOKS_STATE_DIR_OWNED" ] && [ -z "$(trap -p EXIT 2>/dev/null)" ]; then
+  trap mh_cleanup_state_dir EXIT
+fi
 
 # mh_report_once <level> <key> <message>
 #

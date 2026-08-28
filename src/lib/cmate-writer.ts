@@ -34,7 +34,10 @@ import {
 import { isCliToolType } from '@/lib/cli-tools/types';
 import {
   TOOLS_WITH_MODEL_SUPPORT,
+  TOOLS_WITH_RUN_OPTIONS,
   validateCopilotModelName,
+  validateOpencodeRunName,
+  validateOpencodeTitle,
 } from '@/lib/cmate-cli-tool-parser';
 
 // =============================================================================
@@ -82,19 +85,51 @@ export function escapeTableCell(value: string): string {
 /**
  * Build the CLI Tool column value, embedding `--model <name>` when the tool
  * supports it and a model is provided.
+ *
+ * Issue #2044: also serializes opencode's run options, in the fixed order
+ * `--model --agent --variant --continue --title`. Fixed rather than
+ * input-ordered because the row is the file's record of the schedule and two
+ * saves of the same schedule must produce the same line — a diff that reorders
+ * flags reads as a change that is not one.
+ *
+ * A `--title` containing whitespace is quoted, which is the shape
+ * `tokenizeCliToolColumn()` reads back. `validateOpencodeTitle()` has already
+ * refused `|` and control characters by the time a value gets here, so the
+ * quoting has nothing left to escape.
+ *
+ * @param cliToolId - CLI tool identifier
+ * @param model - `--model` value, when the tool supports one
+ * @param options - opencode's run options (ignored for every other tool)
  */
-export function formatCliToolColumn(cliToolId: string, model?: string): string {
+export function formatCliToolColumn(
+  cliToolId: string,
+  model?: string,
+  options?: Pick<ScheduleWriteInput, 'agent' | 'variant' | 'continueSession' | 'title'>,
+): string {
+  const parts = [cliToolId];
+
   if (model && model.trim() && TOOLS_WITH_MODEL_SUPPORT.has(cliToolId)) {
-    return `${cliToolId} --model ${model.trim()}`;
+    parts.push('--model', model.trim());
   }
-  return cliToolId;
+
+  if (options && TOOLS_WITH_RUN_OPTIONS.has(cliToolId)) {
+    if (options.agent?.trim()) parts.push('--agent', options.agent.trim());
+    if (options.variant?.trim()) parts.push('--variant', options.variant.trim());
+    if (options.continueSession) parts.push('--continue');
+    if (options.title?.trim()) {
+      const title = options.title.trim();
+      parts.push('--title', /\s/.test(title) ? `"${title}"` : title);
+    }
+  }
+
+  return parts.join(' ');
 }
 
 /**
  * Serialize a schedule into a single Markdown table row.
  */
 export function serializeScheduleRow(schedule: ScheduleWriteInput): string {
-  const cliToolColumn = formatCliToolColumn(schedule.cliToolId, schedule.model);
+  const cliToolColumn = formatCliToolColumn(schedule.cliToolId, schedule.model, schedule);
   const permission = (schedule.permission ?? '').trim();
   const cells = [
     escapeTableCell(schedule.name.trim()),
@@ -352,6 +387,32 @@ export function validateScheduleInput(input: ScheduleWriteInput): ScheduleValida
         if (!modelResult.valid) {
           errors.push(modelResult.reason ?? 'invalid model name');
         }
+      }
+    }
+
+    // Issue #2044: opencode's run options. Refused rather than dropped for a
+    // tool that has no such flags — dropping would write a row that runs
+    // differently from the form that produced it, which is the exact failure
+    // `validateScheduleInput` exists to catch before the file is touched.
+    const runOptionsRequested =
+      Boolean(input.agent?.trim()) ||
+      Boolean(input.variant?.trim()) ||
+      Boolean(input.continueSession) ||
+      Boolean(input.title?.trim());
+    if (runOptionsRequested && !TOOLS_WITH_RUN_OPTIONS.has(input.cliToolId)) {
+      errors.push('run options are not supported for this CLI tool');
+    } else if (runOptionsRequested) {
+      if (input.agent?.trim()) {
+        const result = validateOpencodeRunName(input.agent.trim(), 'agent');
+        if (!result.valid) errors.push(result.reason ?? 'invalid agent');
+      }
+      if (input.variant?.trim()) {
+        const result = validateOpencodeRunName(input.variant.trim(), 'variant');
+        if (!result.valid) errors.push(result.reason ?? 'invalid variant');
+      }
+      if (input.title?.trim()) {
+        const result = validateOpencodeTitle(input.title.trim());
+        if (!result.valid) errors.push(result.reason ?? 'invalid title');
       }
     }
 

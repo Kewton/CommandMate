@@ -105,6 +105,27 @@ export const STRUCTURED_DECISION_OPTIONS: readonly StructuredDecisionOption[] = 
 export const MAX_STRUCTURED_PROMPT_MESSAGE_LENGTH = 500;
 
 /**
+ * Whether an approval id is one a verdict can actually be addressed to
+ * (Issue #2031).
+ *
+ * The reason this is a function and not an `if` at the one call site: the
+ * publication condition for {@link STRUCTURED_DECISION_OPTIONS} and the
+ * publication condition for `decisionId` have to be the SAME condition, and
+ * #1932 is the record of what happens when they are merely intended to be. The
+ * receiving end (`components/worktree/prompt-decision-id`) applies exactly this
+ * predicate, so a payload the panel would reject as unaddressable can never
+ * have been published with buttons in the first place.
+ *
+ * Deliberately identical to `readPromptDecisionId`'s test — a non-empty string
+ * — and no stricter: the id has already been through `acceptExternalId` by the
+ * time it reaches a payload, and a second, different notion of validity here
+ * would be a way for the two ends to disagree again.
+ */
+export function isAddressableDecision(value: unknown): value is string {
+  return typeof value === 'string' && value !== '';
+}
+
+/**
  * The question an `AskUserQuestion` call asked, for a dialog nobody parsed
  * (Issue #1726).
  *
@@ -148,6 +169,26 @@ export interface StructuredPromptFacts {
    * any (Issue #1898). Null everywhere else, which is every hook source.
    */
   decisionOptions?: readonly StructuredDecisionOption[] | null;
+  /**
+   * The agent's own id for this approval, or null (Issue #2031).
+   *
+   * The same value `StructuredPendingDecision.decisionId` holds, carried the
+   * last step to the browser. It is what makes {@link decisionOptions} mean a
+   * verdict rather than a keystroke, which is why `current-output-builder`
+   * derives the two from ONE expression — see `isAddressableDecision`.
+   */
+  decisionId?: string | null;
+  /**
+   * What answering `Allow always` would permit, already bounded (Issue #2031).
+   *
+   * opencode's `permission.asked` publishes the rules the approval would be
+   * saved as (`patterns`), and `Allow always` is the one verdict here whose
+   * effect outlives the dialog. A panel that offers that button without saying
+   * what it grants is asking for a decision the user cannot see the size of.
+   * Bounded where it is retained — `boundDecisionPatterns` — so a payload
+   * cannot grow this list without limit.
+   */
+  patterns?: readonly string[] | null;
 }
 
 /**
@@ -185,6 +226,31 @@ export interface StructuredPromptWaitingData {
    * field understands that answering means `respond`, not a keystroke.
    */
   decisionOptions?: readonly StructuredDecisionOption[];
+  /**
+   * The approval {@link StructuredPromptWaitingData.decisionOptions} address,
+   * or null when there is none (Issue #2031).
+   *
+   * The sending end of #1932, which shipped `readPromptDecisionId` against a
+   * field no builder wrote — so the panel's three buttons were unreachable and
+   * the browser's only way to answer an opencode approval was the arrow-keys
+   * safety net. Published as `null` rather than omitted: a reader has to be
+   * able to tell "this server looked and there is no addressable approval"
+   * from "this build does not publish the field".
+   *
+   * Always in step with {@link StructuredPromptWaitingData.decisionOptions} —
+   * see `isAddressableDecision`, which is the single expression
+   * `current-output-builder` derives both from. Options without an id is the
+   * state that falls back to the keystroke path (#1681 / #1725), so the two
+   * must not be able to drift apart.
+   */
+  decisionId?: string | null;
+  /**
+   * What `Allow always` would permit. See {@link StructuredPromptFacts.patterns}.
+   *
+   * Absent rather than empty when the approval named none, so a surface can
+   * render the list on presence alone.
+   */
+  patterns?: readonly string[];
 }
 
 /**
@@ -257,11 +323,32 @@ export function buildStructuredPromptQuestion(
   }
   if (facts.askUserQuestion) {
     const { question, labels, questionCount } = facts.askUserQuestion;
+    // Issue #2100: whether these numbers may be QUOTED is the same test the
+    // browser applies before drawing them as buttons — see
+    // `components/worktree/prompt-decision-id`'s `readPromptQuestionChoices`:
+    // an id to deliver an answer to, exactly one question, and no approval
+    // verdicts on the same payload. Claude satisfies none of it (its picker is
+    // read off the screen, renumbered, with entries the payload never
+    // mentioned), so its sentence is the unchanged warning.
+    //
+    // This is not a nicety. `promptData.question` is what PromptPanel renders
+    // ABOVE the choice buttons, so before this Issue an opencode question
+    // showed working numbered buttons under a line telling the reader not to
+    // count the list they were numbered from.
+    const answerable =
+      isAddressableDecision(facts.decisionId) &&
+      questionCount === 1 &&
+      !(facts.decisionOptions && facts.decisionOptions.length > 0);
     parts.push(
       `The agent asked${questionCount > 1 ? ` ${questionCount} questions, the first being` : ''}: ` +
         `"${question}" — offering: ${labels.join(' / ')}. ` +
-        `The picker renumbers and adds its own entries, so read the option NUMBER off the ` +
-        `terminal rather than counting this list.`,
+        (answerable
+          ? `Answer it with \`commandmate respond ${worktreeId} <number>\`: ` +
+            labels.map((label, index) => `${index + 1} = ${label}`).join(', ') +
+            `. The number is this list's own position and the reply goes to the agent's own ` +
+            `API, so no keys are sent to the terminal (the label works too).`
+          : `The picker renumbers and adds its own entries, so read the option NUMBER off the ` +
+            `terminal rather than counting this list.`),
     );
   }
   return parts.join(' ');
@@ -283,6 +370,16 @@ export function buildStructuredPromptData(
     ...(facts.askUserQuestion ? { askUserQuestion: facts.askUserQuestion } : {}),
     ...(facts.decisionOptions && facts.decisionOptions.length > 0
       ? { decisionOptions: facts.decisionOptions }
+      : {}),
+    // Issue #2031. Unconditional, unlike every field above it: those are prose
+    // whose absence and emptiness mean the same thing, while this one answers
+    // "is there an approval to address?" and `null` is a real answer. Dropping
+    // this line is the mutation `structured-prompt-decision-id-2031` fires at —
+    // it puts the payload back to #1932's half-built state, where the panel
+    // publishes three verdicts nothing can deliver.
+    decisionId: isAddressableDecision(facts.decisionId) ? facts.decisionId : null,
+    ...(facts.patterns && facts.patterns.length > 0
+      ? { patterns: [...facts.patterns] }
       : {}),
   };
 }

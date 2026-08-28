@@ -78,6 +78,10 @@ const NO_STRUCTURED_EVENTS = {
   source: {
     cliToolId: 'claude',
     capabilities: getAgentEventSource('claude').capabilities,
+    // Issue #2054: the same shape the builder publishes for a push source —
+    // `hooks`, and neither of the two fields only a subscription can fill in.
+    kind: 'hooks',
+    probedActivity: null,
   },
 } as const;
 
@@ -89,6 +93,9 @@ const NO_PROMPT_DEDUP = { promptDedup: { skippedCount: 0, lastSkippedAt: null } 
 
 /** No upstream API failure signature on the frame (Issue #1839). */
 const NO_UPSTREAM_FAULT = { upstreamFault: null } as const;
+
+/** No second column sharing rows with the transcript (Issue #2095). */
+const NO_PANE_OBSTRUCTION = { paneObstruction: null } as const;
 
 /** Nothing unsent in the composer (Issue #1879). */
 const NO_COMPOSER_TEXT = { composerText: null, composerState: 'empty' } as const;
@@ -129,6 +136,7 @@ beforeEach(() => {
     ...NO_MODEL_INFO,
     ...NO_PROMPT_DEDUP,
     ...NO_UPSTREAM_FAULT,
+    ...NO_PANE_OBSTRUCTION,
     ...NO_COMPOSER_TEXT,
     ...POSITIVE_EVIDENCE,
   });
@@ -187,6 +195,7 @@ describe('broadcastTerminalSnapshotAfterInteraction', () => {
         ...NO_MODEL_INFO,
         ...NO_PROMPT_DEDUP,
         ...NO_UPSTREAM_FAULT,
+        ...NO_PANE_OBSTRUCTION,
         ...NO_COMPOSER_TEXT,
     ...POSITIVE_EVIDENCE,
       })
@@ -204,6 +213,7 @@ describe('broadcastTerminalSnapshotAfterInteraction', () => {
         ...NO_MODEL_INFO,
         ...NO_PROMPT_DEDUP,
         ...NO_UPSTREAM_FAULT,
+        ...NO_PANE_OBSTRUCTION,
         ...NO_COMPOSER_TEXT,
     ...POSITIVE_EVIDENCE,
       });

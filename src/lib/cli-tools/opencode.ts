@@ -6,7 +6,8 @@
  * - startSession: launches `opencode` TUI in tmux
  * - sendMessage: sends text via tmux send-keys + Enter
  * - killSession: types `/exit` + a separate Enter, then falls back to tmux kill-session
- * - interrupt(): Escape TWICE, 300 ms apart -- one press does not abort (Issue #1894)
+ * - interrupt(): `POST /session/:id/abort` when the port is live (Issue #2034),
+ *   else Escape TWICE, 300 ms apart -- one press does not abort (Issue #1894)
  *
  * ## Structured events (Issue #1763, Epic #1720 Phase 4-5)
  *
@@ -24,6 +25,16 @@
  * starts without structured events is the pre-#1763 status quo, and the screen
  * scraper keeps deciding for it exactly as before.
  *
+ * ## Session continuity (Issue #2038)
+ *
+ * opencode is the one supported agent whose conversation is addressable from
+ * the command line (`-s` / `-c` / `--fork`, measured on 1.18.22). `killSession`
+ * writes the instance's session down while its server can still be asked
+ * (`@/lib/session/opencode-session-recall`), and the creation path appends
+ * `-s <id>` to the launch line when — and only when — the recorded
+ * `Session.directory` is this worktree. The flag is composed HERE rather than in
+ * `prepareOpencodeLaunch` so no other tool's launch plan can be reached by it.
+ *
  * ## Launch side effects (Issue #1908)
  *
  * Two things this file used to do on the way up are gone. The 15-second sleep
@@ -35,6 +46,11 @@
 
 import { BaseCLITool } from './base';
 import type { CLIToolType } from './types';
+import type { NavigationKeySpec } from '@/types/cli-tool-contracts';
+import {
+  OPENCODE_LEADER_KEY,
+  OPENCODE_NAVIGATION_KEY_VALUES,
+} from '@/types/terminal-keys';
 import {
   hasSession,
   createSession,
@@ -53,15 +69,24 @@ import {
 import { sendMessageWithSubmitVerification } from './submit-verified-sender';
 import { invalidateCache } from '../tmux/tmux-capture-cache';
 import { ensureOpencodeConfig } from './opencode-config';
-import { OPENCODE_PANE_HEIGHT } from '@/config/tmux-pane-config';
+import {
+  OPENCODE_PANE_HEIGHT,
+  OPENCODE_PANE_WIDTH,
+  OPENCODE_PANE_WIDTH_ENV,
+  OPENCODE_SIDEBAR_MIN_WIDTH,
+  resolveOpencodePaneWidth,
+} from '@/config/tmux-pane-config';
 import { execFile } from 'child_process';
+import { basename, extname } from 'path';
 import { promisify } from 'util';
 import { createLogger } from '@/lib/logger';
+import { getMimeTypeByExtension } from '@/config/image-extensions';
 import {
   beginAgentSession,
   buildAgentLaunchCommandLine,
 } from '@/lib/session/agent-session-lifecycle';
 import {
+  abortOpencodeTurn,
   attachOpencodeEventStream,
   opencodeTarget,
   releaseOpencodeEventStream,
@@ -69,7 +94,28 @@ import {
   resumeOpencodeEventStream,
 } from '@/lib/hooks/sources/opencode/runtime';
 import { getAssignedOpencodePort } from '@/lib/hooks/sources/opencode/ports';
-import { fetchOpencodeHealth } from '@/lib/hooks/sources/opencode/client';
+import {
+  getOpencodeLaunchSettings,
+  opencodePromptSelection,
+} from '@/lib/hooks/sources/opencode/launch-settings';
+import {
+  fetchOpencodeHealth,
+  newOpencodeMessageId,
+  opencodeFileUrl,
+  readOpencodeUserMessage,
+  sendOpencodePrompt,
+  type OpencodePromptPart,
+} from '@/lib/hooks/sources/opencode/client';
+import {
+  getOpencodeLiveness,
+  getOpencodePrimarySession,
+} from '@/lib/hooks/sources/opencode/subscription';
+import type { AgentInstanceRef } from '@/lib/hooks/sources/types';
+import { captureOpencodeSessionMemory } from '@/lib/session/opencode-session-recall';
+import {
+  recoverOpencodeSessionId,
+  withOpencodeResumedSession,
+} from '@/lib/session/opencode-session-store';
 import { verifyGracefulExit } from './graceful-exit';
 import {
   TUI_SESSION_CREATE_WAIT_MS,
@@ -108,6 +154,57 @@ export const OPENCODE_EXIT_COMMAND = '/exit';
 export { OPENCODE_PANE_HEIGHT };
 
 /**
+ * OpenCode tmux pane width (columns).
+ *
+ * Re-exported from `@/config/tmux-pane-config` alongside the height (Issue
+ * #2047) so a caller that needs the geometry gets both from one import.
+ */
+export { OPENCODE_PANE_WIDTH };
+
+/**
+ * {@link resolveOpencodePaneWidth}, plus the one-line operator feedback the
+ * pure config module deliberately cannot emit (Issue #2047).
+ *
+ * `tmux-pane-config.ts` has no imports at all — that is a documented property
+ * (#1906), and pulling the logger in there would make every consumer of a
+ * constant depend on the logging stack. So the resolver stays silent and the
+ * warning lives here, at the two call sites that actually resize a pane.
+ *
+ * Two things are worth telling the operator, and neither is an error:
+ *
+ * - the value was DROPPED (not an integer, or outside the accepted bounds), so
+ *   the pane they are about to look at is the 80-column default rather than
+ *   what they asked for;
+ * - the value was ACCEPTED but lands at or above
+ *   {@link OPENCODE_SIDEBAR_MIN_WIDTH}, where opencode 1.18.22 paints its
+ *   right-hand sidebar into the same rows as the transcript. #2047 measured
+ *   what that does to this repo's own readers — a saved "reply" made entirely
+ *   of sidebar chrome, a status flip on an aborted turn, and a false idle
+ *   composer off the session title. It is still allowed, because an operator
+ *   who only ever reads the pane in the browser may want it; it is not silent.
+ *
+ * @returns Pane width in columns, ready to hand to `resize-window`.
+ */
+function resolveOpencodePaneWidthChecked(): number {
+  const requested = process.env[OPENCODE_PANE_WIDTH_ENV];
+  const width = resolveOpencodePaneWidth();
+
+  if (requested !== undefined && String(width) !== requested.trim()) {
+    logger.warn('opencode-pane-width-rejected', {
+      requested,
+      applied: width,
+    });
+  } else if (width >= OPENCODE_SIDEBAR_MIN_WIDTH) {
+    logger.warn('opencode-pane-width-sidebar-visible', {
+      width,
+      sidebarMinWidth: OPENCODE_SIDEBAR_MIN_WIDTH,
+    });
+  }
+
+  return width;
+}
+
+/**
  * Interval between readiness polls while opencode paints its TUI (Issue #1908).
  *
  * Half of copilot's second (`COPILOT_POLL_INTERVAL_MS`) because the thing being
@@ -138,6 +235,47 @@ export const OPENCODE_READY_MAX_ATTEMPTS = 60;
 const OPENCODE_READY_CAPTURE_LINES = 50;
 
 /**
+ * Waits before each read-back of a message just posted to the server (#2035).
+ *
+ * Delays *before* each attempt, so the first costs nothing — which is the whole
+ * ladder in the ordinary case. Measured on 1.18.22 across five posts: the
+ * message was readable on the **first** `GET`, 8-23 ms after the POST began, so
+ * `prompt_async` answers `204` after the message exists rather than before.
+ *
+ * The three retries are for the race that measurement did not produce, and they
+ * are cheap because the alternative is expensive in one direction only: a
+ * `missing` verdict sends the body again over the keyboard, so calling a message
+ * missing while it is still being written would deliver it twice. Total worst
+ * case 350 ms, inside the HTTP request the operator's send is waiting on.
+ */
+export const OPENCODE_SEND_READBACK_DELAYS_MS: readonly number[] = [0, 50, 100, 200];
+
+/**
+ * The body a tool that cannot attach an image sends instead (Issue #474).
+ *
+ * Defined here, and imported by `@/lib/session/send-user-message`, because
+ * opencode is the one tool where the choice is made **at run time**: every other
+ * tool either attaches natively for every session or never does, and their
+ * branch is picked once by `isImageCapableCLITool`. opencode's native path needs
+ * a server that a given pane may not have (no `--port`, `CM_AGENT_HOOKS_INJECT=0`,
+ * a version too old), so {@link OpenCodeTool.sendMessageWithImage} has to be able
+ * to produce this degraded form itself. One definition rather than two: the
+ * string is what an operator reads in Message History, and a second copy of it
+ * here would drift from the one in the send service without anything noticing.
+ *
+ * @param content - The operator's message; may be empty
+ * @param absoluteImagePath - Absolute path to the attachment
+ */
+export function formatImagePathFallbackMessage(
+  content: string,
+  absoluteImagePath: string
+): string {
+  return content
+    ? `${content}\n\n[添付画像: ${absoluteImagePath}]`
+    : `[添付画像: ${absoluteImagePath}]`;
+}
+
+/**
  * OpenCode CLI tool implementation
  * Manages OpenCode interactive sessions using tmux
  */
@@ -145,6 +283,35 @@ export class OpenCodeTool extends BaseCLITool {
   readonly id: CLIToolType = 'opencode';
   readonly name = 'OpenCode';
   readonly command = 'opencode';
+
+  /**
+   * Declare opencode's key vocabulary (Issue #2046).
+   *
+   * The base pad plus opencode's own chords: the `C-x` leader, the letters that
+   * complete it, and the two control keys that need no leader (`C-p` palette,
+   * `C-t` variant cycle). Measured against a live opencode 1.18.22 on an
+   * isolated `HOME` and a private tmux socket; the defaults are also readable in
+   * the shipped binary (`leader: "ctrl+x"`, `leader_timeout: 2000`). Full run in
+   * `docs/design/opencode-server-live-verification.md` §22.
+   *
+   * **`b` (`sidebar_toggle`) is not here**, and that absence is the Issue's main
+   * finding rather than an oversight: at the 80 columns
+   * `resolveOpencodePaneWidth()` defaults to, an explicit `C-x` `b` turns the
+   * sidebar on *anyway* — it overrides the 121-column auto-gate #2047 measured —
+   * and in that state the same three readers #2047 documented at 200 columns
+   * break at 80 (§22.3). Before the first turn the binding is inert and the `b`
+   * lands in the composer as text instead. Neither branch has a width where it
+   * is safe, so the key is not published and the route will answer 400 for it.
+   *
+   * This method is the ONLY thing #2046 added to this file. Pane width and
+   * geometry stay where #2047 put them (`src/config/tmux-pane-config.ts`).
+   */
+  navigationKeys(): NavigationKeySpec {
+    return {
+      keys: OPENCODE_NAVIGATION_KEY_VALUES,
+      leaderKey: OPENCODE_LEADER_KEY,
+    };
+  }
 
   /**
    * Check if OpenCode session is running for a worktree
@@ -173,8 +340,13 @@ export class OpenCodeTool extends BaseCLITool {
 
     const exists = await hasSession(sessionName);
     if (exists) {
+      // Issue #2047: the SAME width as the creation path below. These two used
+      // to spell `80` independently, which is the shape where "new sessions are
+      // 200 wide, reconnected ones are 80" ships without anyone noticing —
+      // a reconnect would silently hand the detectors a geometry the creation
+      // path had been moved away from.
       await this.reconcileExistingSession(sessionName, {
-        windowWidth: 80,
+        windowWidth: resolveOpencodePaneWidthChecked(),
         windowHeight: OPENCODE_PANE_HEIGHT,
       });
       // Issue #1763: the pane outlived this process (a CommandMate restart), so
@@ -209,13 +381,16 @@ export class OpenCodeTool extends BaseCLITool {
       // Wait a moment for the session to be created
       await new Promise((resolve) => setTimeout(resolve, TUI_SESSION_CREATE_WAIT_MS));
 
-      // Resize tmux window to 80 columns (hide sidebar for clean capture-pane output)
+      // Resize tmux window so opencode's right-hand sidebar stays hidden and
+      // `capture-pane` returns transcript rows only. Issue #2047 measured the
+      // boundary this depends on (sidebar at >=121 columns, hidden at <=120) and
+      // moved the number to `OPENCODE_PANE_WIDTH` / `CM_OPENCODE_PANE_WIDTH`.
       // [SEC-001] Uses execFile (not exec) to prevent shell meta-character injection via sessionName
       try {
         await execFileAsync('tmux', [
           // Issue #1156: exact-match target so resize never leaks to a prefix-colliding instance
           'resize-window', '-t', exactTarget(sessionName),
-          '-x', '80', '-y', String(OPENCODE_PANE_HEIGHT),
+          '-x', String(resolveOpencodePaneWidthChecked()), '-y', String(OPENCODE_PANE_HEIGHT),
         ]);
       } catch {
         // Non-fatal: resize may fail in some environments
@@ -233,11 +408,35 @@ export class OpenCodeTool extends BaseCLITool {
       // `AgentEventSource` for the plan (S3/S4/S5) and never throws. opencode's
       // environment is empty — it is the one source with no correlation
       // variable, because CommandMate holds the connection (#1846).
-      const launchCommand = buildAgentLaunchCommandLine({
+      const plannedCommand = buildAgentLaunchCommandLine({
         target,
         executablePath: this.command,
         worktreePath,
       });
+
+      // Issue #2038: continue the conversation this instance was in before it
+      // was stopped. `-s <id>` is appended HERE rather than inside
+      // `prepareOpencodeLaunch` because the plan is a statement about the tool
+      // and this is a fact about one pane's history; keeping them apart is also
+      // what makes "claude / codex の起動引数は不変" a property of the code
+      // rather than of a test — no other tool's launcher can reach this line.
+      //
+      // Null whenever there is nothing to resume, and — the acceptance
+      // condition — whenever the remembered session belongs to a different
+      // worktree than the one being launched. See `./opencode-session-store`.
+      const resumeSessionId = recoverOpencodeSessionId(target, worktreePath);
+      const launchCommand =
+        resumeSessionId === null
+          ? plannedCommand
+          : withOpencodeResumedSession(plannedCommand, resumeSessionId);
+      if (resumeSessionId !== null) {
+        logger.info('opencode-session-resumed', {
+          worktreeId,
+          instanceId: instanceId ?? this.id,
+          sessionId: resumeSessionId,
+        });
+      }
+
       await sendKeys(sessionName, launchCommand, true);
 
       // Issue #1908: poll for opencode's own composer instead of sleeping 15 s.
@@ -332,8 +531,195 @@ export class OpenCodeTool extends BaseCLITool {
   }
 
   /**
+   * Post one prompt to this instance's server, and verify it landed (#2035).
+   *
+   * The primary half of `sendMessage` / `sendMessageWithImage`. Answers false
+   * for every way the server route can fail to apply, and the caller then types
+   * the body exactly as it did before this Issue.
+   *
+   * ## Why `prompt_async` and not `/tui/append-prompt` + `/tui/submit-prompt`
+   *
+   * Both were measured live on 1.18.22 (design doc §11). The `/tui/*` pair does
+   * work — the composer reflects the text, `/tui/clear-prompt` removes residue
+   * a keystroke left, and a three-line and a 266-character body both arrived
+   * byte-identical. But it drives the **composer**, so it inherits the
+   * composer's state, and the Issue's own example is where that shows: a body
+   * of `/exit` opens the command palette on append, and the palette then eats
+   * the submit. All three calls answered `200 true`; no message was created;
+   * the TUI did not exit either. `prompt_async` does not touch the composer, and
+   * the same `/exit` arrived as literal text — as did `--force …`,
+   * `$(whoami)`, three lines, and 266 characters.
+   *
+   * It also leaves an operator's half-typed draft alone, which `/tui/*` cannot:
+   * `append-prompt` concatenates (`AAA` + `BBB` = `AAABBB`), so sending through
+   * the composer means either splicing CommandMate's body onto the draft or
+   * clearing the draft away.
+   *
+   * ## Why the read-back
+   *
+   * `204` is "accepted", not "delivered", and the gap is not theoretical:
+   * a file part whose `url` is a bare path is accepted and then dropped
+   * *together with its text part* (see `opencodeFileUrl`), and a server sharing
+   * `HOME` and project with this one accepts a prompt for a session it can
+   * reach through `opencode.db` while the message appears on neither this
+   * server's stream nor this pane's screen. So the message id is chosen up
+   * front and read back afterwards — the same shape as #2034's idle watch, one
+   * request instead of a subscription.
+   *
+   * ## What a `missing` verdict costs, and why `unknown` is treated like it
+   *
+   * `missing` is a `404` on the id: nothing exists, so typing the body is free
+   * of duplication. `unknown` — the server stopped answering between the POST
+   * and the read-back — cannot say that, and is still treated as a failure,
+   * following #2034: the operator's message must not be silently dropped, and
+   * a pane whose server just died is one where the keystroke route is the only
+   * one left. The residual risk is one duplicate message inside that window,
+   * and it is logged as `opencode-send-unverified` so it is visible rather than
+   * inferred.
+   *
+   * @param target - The instance
+   * @param message - The body, sent verbatim
+   * @param imagePath - Absolute path to an attachment, if there is one
+   * @returns Whether the message was posted **and** read back
+   */
+  private async trySendViaServer(
+    target: AgentInstanceRef,
+    message: string,
+    imagePath?: string
+  ): Promise<boolean> {
+    const instanceId = target.instanceId ?? target.cliToolId;
+    try {
+      const port = getAssignedOpencodePort(target);
+      if (port === null) return false;
+
+      // The same three preconditions the abort path checks (#2034): a port with
+      // a live subscription behind it, and a session this instance owns. The
+      // liveness check is what keeps a squatter on a remembered port from being
+      // handed the operator's message.
+      const liveness = getOpencodeLiveness(target);
+      if (liveness.state !== 'live') {
+        logger.info('opencode-send-skipped-not-live', {
+          worktreeId: target.worktreeId,
+          instanceId,
+          port,
+          liveness: liveness.state,
+        });
+        return false;
+      }
+
+      // Null on a pane that has not run a turn yet — the gate learns the session
+      // from the first frame that names it. That first send goes over the
+      // keyboard, and every send after it takes this route.
+      const sessionId = getOpencodePrimarySession(target);
+      if (sessionId === null) {
+        logger.info('opencode-send-skipped-no-session', {
+          worktreeId: target.worktreeId,
+          instanceId,
+          port,
+        });
+        return false;
+      }
+
+      const parts: OpencodePromptPart[] = [{ type: 'text', text: message }];
+      if (imagePath !== undefined) {
+        parts.push({
+          type: 'file',
+          mime: getMimeTypeByExtension(extname(imagePath)),
+          filename: basename(imagePath),
+          url: opencodeFileUrl(imagePath),
+        });
+      }
+
+      const messageId = newOpencodeMessageId();
+      // Issue #2048: the instance's own persona / model / variant, when the
+      // operator configured any. Read on every send rather than once at launch,
+      // because a send can be the first thing this process does for a pane it
+      // did not start (a CommandMate restart reattaches an existing session) —
+      // and because an omitted `agent` is not a no-op: a `prompt_async` body
+      // with no `agent` runs the turn as `build` even on a pane launched
+      // `--agent plan` (`docs/design/opencode-server-live-verification.md`
+      // §20.5). Null when nothing is configured, and the request body is then
+      // byte-identical to the pre-#2048 one.
+      const selection = opencodePromptSelection(getOpencodeLaunchSettings(target));
+      if (!(await sendOpencodePrompt(port, sessionId, messageId, parts, selection))) return false;
+
+      const verified = await this.verifyPostedMessage(port, sessionId, messageId, message);
+      if (!verified) {
+        logger.warn('opencode-send-unverified', {
+          worktreeId: target.worktreeId,
+          instanceId,
+          port,
+          sessionId,
+          messageId,
+          hasImage: imagePath !== undefined,
+        });
+        return false;
+      }
+
+      logger.info('opencode-send-delivered-via-api', {
+        worktreeId: target.worktreeId,
+        instanceId,
+        port,
+        sessionId,
+        messageId,
+        hasImage: imagePath !== undefined,
+      });
+      return true;
+    } catch (error: unknown) {
+      // Nothing above is allowed to take the send down: the keystroke route is
+      // still there and is what runs when this answers false.
+      logger.warn('opencode-send-api-failed', {
+        worktreeId: target.worktreeId,
+        instanceId,
+        error: getErrorMessage(error),
+      });
+      return false;
+    }
+  }
+
+  /**
+   * Read the posted message back until it is there, or until it is not (#2035).
+   *
+   * The text is compared rather than merely counted, because the acceptance
+   * condition for this Issue is that the body is unchanged: a `/`-leading body,
+   * a three-line body and a 200-column body all have to come back identical to
+   * what was sent. An image send adds parts CommandMate did not write — 1.18.22
+   * synthesises a `Called the Read tool with …` text part beside the operator's
+   * — so the check is that the sent body is *among* the text parts, not that it
+   * is the only one.
+   *
+   * @returns True once the body was found; false on a `404` or after the ladder
+   */
+  private async verifyPostedMessage(
+    port: number,
+    sessionId: string,
+    messageId: string,
+    message: string
+  ): Promise<boolean> {
+    for (const waitMs of OPENCODE_SEND_READBACK_DELAYS_MS) {
+      if (waitMs > 0) await new Promise((resolve) => setTimeout(resolve, waitMs));
+      const readback = await readOpencodeUserMessage(port, sessionId, messageId);
+      if (readback.kind === 'found') return readback.texts.includes(message);
+      // A `404` is the server saying the message does not exist, which does not
+      // become truer by asking again — the measured cause is a part the server
+      // could not resolve, and it discards the whole message when that happens.
+      if (readback.kind === 'missing') return false;
+    }
+    return false;
+  }
+
+  /**
    * Send a message to OpenCode interactive session
    * [D1-004] Same pattern as Codex/Gemini/VibeLocal (future Template Method candidate)
+   *
+   * Issue #2035: the server first, the keyboard second. {@link trySendViaServer}
+   * documents the measurements behind the choice; what matters here is that
+   * every no it can answer — no port, a subscription that is not live, no
+   * session yet, a refused POST, a message that did not read back — lands on the
+   * `sendMessageWithSubmitVerification` call below, which is the send path
+   * exactly as it was before this Issue. A pane launched with
+   * `CM_AGENT_HOOKS_INJECT=0`, or on an opencode too old for `--port`, must not
+   * become a pane that cannot be sent to.
    *
    * @param worktreeId - Worktree ID
    * @param message - Message to send
@@ -346,6 +732,13 @@ export class OpenCodeTool extends BaseCLITool {
       throw new Error(
         `OpenCode session ${sessionName} does not exist. Start the session first.`
       );
+    }
+
+    if (await this.trySendViaServer(opencodeTarget(worktreeId, instanceId), message)) {
+      // Issue #405: the transcript grew, so the cached capture is stale — the
+      // same reason the keystroke path invalidates below.
+      invalidateCache(sessionName);
+      return;
     }
 
     try {
@@ -366,6 +759,74 @@ export class OpenCodeTool extends BaseCLITool {
       const errorMessage = getErrorMessage(error);
       throw new Error(`Failed to send message to OpenCode: ${errorMessage}`);
     }
+  }
+
+  /**
+   * opencode can attach an image — sometimes (Issue #2035).
+   *
+   * `IImageCapableCLITool` is a *static* declaration: `supportsImage()` takes no
+   * arguments, so it cannot answer per pane, and `send-user-message` picks the
+   * branch from it once. Saying `true` here therefore means
+   * {@link sendMessageWithImage} owns the degraded form as well — which it does.
+   *
+   * Measured on 1.18.22: `POST /session/:id/prompt_async` with a `file` part
+   * delivers a real image. The part came back on the stream re-encoded as
+   * `data:image/png;base64,…`, the TUI rendered it as `File  blue.png`, and the
+   * vision model answered the question that was asked about it. That is the
+   * whole of the claim being made here.
+   */
+  supportsImage(): true {
+    return true;
+  }
+
+  /**
+   * Send a message with an image attached (Issue #2035).
+   *
+   * Before this Issue opencode had no image path at all, so `send-user-message`
+   * took its `else` branch and appended `[添付画像: <path>]` to the text — the
+   * agent received a *path*, and whether it ever looked at the file was up to
+   * it. The server route sends the file itself.
+   *
+   * The fallback is that same degraded body, reached whenever the server route
+   * does not apply, and it is deliberately routed back through
+   * {@link sendMessage} rather than `sendMessageWithSubmitVerification`: the
+   * reason the image could not be attached is usually "no session yet", and by
+   * the time the text is sent that can already have changed. Going through
+   * `sendMessage` gives the text one honest attempt at the API before the
+   * keyboard, at the cost of one cheap re-check.
+   *
+   * @param worktreeId - Worktree ID
+   * @param message - Message text; may be empty
+   * @param imagePath - Absolute path to the image file
+   * @param instanceId - Agent instance ID (defaults to the primary instance)
+   */
+  async sendMessageWithImage(
+    worktreeId: string,
+    message: string,
+    imagePath: string,
+    instanceId?: string
+  ): Promise<void> {
+    const sessionName = this.getSessionName(worktreeId, instanceId);
+
+    const exists = await hasSession(sessionName);
+    if (!exists) {
+      throw new Error(
+        `OpenCode session ${sessionName} does not exist. Start the session first.`
+      );
+    }
+
+    const target = opencodeTarget(worktreeId, instanceId);
+    if (await this.trySendViaServer(target, message, imagePath)) {
+      invalidateCache(sessionName);
+      return;
+    }
+
+    logger.info('opencode-image-degraded-to-path', { worktreeId, instanceId: instanceId ?? this.id });
+    await this.sendMessage(
+      worktreeId,
+      formatImagePathFallbackMessage(message, imagePath),
+      instanceId
+    );
   }
 
   /**
@@ -404,6 +865,20 @@ export class OpenCodeTool extends BaseCLITool {
     // Null whenever structured events are off or no port was ever allocated, and
     // then the health probe is skipped entirely — there is nothing to orphan.
     const assignedPort = getAssignedOpencodePort(target);
+
+    // Issue #2038: the last moment the server that knows which session this
+    // instance is in is still answering. Verified against opencode's own
+    // `Session.directory` and followed up its `parentID` chain so a sub-agent's
+    // turn cannot be mistaken for the operator's conversation — see
+    // `@/lib/session/opencode-session-recall`. Never throws, and a skip costs
+    // the next launch its `-s <id>`, never the kill.
+    const captured = await captureOpencodeSessionMemory(target).catch(() => null);
+    if (captured && !captured.captured) {
+      logger.info('opencode-session-capture-skipped', {
+        sessionName,
+        reason: captured.skipped,
+      });
+    }
 
     // Issue #1763: stop watching before the pane goes, so the stream is not
     // reconnecting to a server that is being shut down. Also gives the port
@@ -472,7 +947,26 @@ export class OpenCodeTool extends BaseCLITool {
   }
 
   /**
-   * Abort the running turn: Escape, wait, Escape (Issue #1894).
+   * Abort the running turn: the server if there is one, Escape twice if not.
+   *
+   * ## The server route (Issue #2034)
+   *
+   * `POST /session/:id/abort` on the port this instance's TUI already serves,
+   * against the session `./turn-gate` calls this instance's own. It ends the
+   * turn outright — measured live on 1.18.22 with an isolated `opencode serve`:
+   * `200 true`, and `session.error MessageAbortedError` + `session.idle` on the
+   * stream in the same millisecond. The keystroke route below cannot claim that
+   * unconditionally: it depends on what the TUI has drawn, and a picker or a
+   * dialog on screen eats the presses.
+   *
+   * {@link abortOpencodeTurn} answers false for every way that can fail to
+   * apply — no port, a subscription that is not live, no session known, a
+   * refused request, a completion that never arrived — and then the Escapes go
+   * out exactly as they did before. An instance launched with
+   * `CM_AGENT_HOOKS_INJECT=0`, or on an opencode too old for `--port`, keeps
+   * the interrupt it has always had.
+   *
+   * ## The keyboard route (Issue #1894)
    *
    * `BaseCLITool.interrupt()` sends ONE Escape, and on opencode 1.18 that
    * aborts nothing. The first press is a confirmation prompt drawn in the
@@ -515,6 +1009,15 @@ export class OpenCodeTool extends BaseCLITool {
    */
   async interrupt(worktreeId: string, instanceId?: string): Promise<void> {
     const sessionName = this.getSessionName(worktreeId, instanceId);
+
+    // Issue #2034: the server first, and the keyboard only if it did not apply.
+    if (await abortOpencodeTurn(opencodeTarget(worktreeId, instanceId))) {
+      // Issue #405: the turn is over, so the cached capture is stale — the same
+      // reason the keystroke path invalidates below.
+      invalidateCache(sessionName);
+      logger.info('opencode-interrupt-aborted-via-api');
+      return;
+    }
 
     await sendSpecialKey(sessionName, 'Escape');
     await new Promise((resolve) =>

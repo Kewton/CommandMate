@@ -169,10 +169,14 @@ describe('SELECTION_LIST_REASONS Set', () => {
     // Issue #1893: opencode's permission dialog — a ←/→ button strip that a
     // typed option number does not drive.
     expect(SELECTION_LIST_REASONS.has(STATUS_REASON.OPENCODE_PERMISSION_PROMPT)).toBe(true);
+    // Issue #2112: opencode's session list / agent list / timeline / command
+    // palette, recognised from the rectangle they are painted as rather than
+    // from their headings. Same ↑/↓ + Enter, same `esc`, same NavigationButtons.
+    expect(SELECTION_LIST_REASONS.has(STATUS_REASON.OPENCODE_MODAL_OVERLAY)).toBe(true);
   });
 
-  it('should have exactly 8 entries', () => {
-    expect(SELECTION_LIST_REASONS.size).toBe(8);
+  it('should have exactly 9 entries', () => {
+    expect(SELECTION_LIST_REASONS.size).toBe(9);
   });
 
   it('should not contain unrelated reasons', () => {

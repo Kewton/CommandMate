@@ -20,10 +20,22 @@
  *
  * | layer                                   | read? | on a key collision |
  * |-----------------------------------------|-------|--------------------|
+ * | `$OPENCODE_CONFIG_CONTENT`              | yes   | **beats all four below** (#2053) |
  * | `<worktree>/opencode.jsonc`             | yes   | beats `opencode.json` |
  * | `<worktree>/opencode.json`              | yes   | beats both below   |
  * | `$OPENCODE_CONFIG`                      | yes   | **loses** to the worktree file |
  * | `$XDG_CONFIG_HOME/opencode/opencode.json(c)` | yes | loses to the worktree file |
+ *
+ * Issue #2053 re-measured the same way on 1.18.22 and added the top row: an
+ * inline JSON config handed over in `OPENCODE_CONFIG_CONTENT` outranks every
+ * file, `opencode.jsonc` included. It is not a write target either — #2053
+ * measured that injecting a `permission` block through it silently replaces the
+ * operator's own (a string `permission.bash` is *replaced*, not merged, by an
+ * object, turning `"ask"` into the default `allow`), and that rule order beats
+ * pattern specificity, so a broad glob from CommandMate defeats an exact-match
+ * rule the operator wrote. Details and the ruling:
+ * `docs/design/opencode-server-live-verification.md` §26 /
+ * `docs/design/agent-event-source-interface.md` §3.4.
  *
  * `provider` maps merge across the layers, so the generated file is additive
  * *until* the operator defines the same provider key somewhere else — at which

@@ -877,13 +877,30 @@
     "statusPill": "{label}: {status}",
     "subTabMessage": "メッセージ",
     "subTabGit": "Git",
-    "statusPillWithModel": "{label}: {status} — モデル {model}"
+    "statusPillWithModel": "{label}: {status} — モデル {model}",
+    "statusPillWithUsage": "{base} — {usage}",
+    "statusPillWithSource": "{base} — {source}"
   },
   "detailStatus": {
     "idle": "アイドル - セッションなし",
     "ready": "準備完了 - 入力待ち",
     "running": "実行中 - 処理しています",
     "waiting": "待機中 - ユーザー入力が必要です"
+  },
+  "agentSource": {
+    "line": "イベント源: {kind}（{state}）",
+    "lineBare": "イベント源: {kind}",
+    "kindSse": "SSE",
+    "kindHooks": "hooks",
+    "kindScraper": "画面スクレイプ",
+    "livenessLive": "接続中",
+    "livenessStale": "停止",
+    "reasonPortIdentityChanged": "ポートが別プロセスに変わりました",
+    "reasonHeartbeatStale": "ハートビートが30秒以上ありません",
+    "reasonNotSubscribed": "イベント購読なし",
+    "reasonOther": "理由: {reason}",
+    "degradedTitle": "構造化イベントが届いていません",
+    "healthyTitle": "構造化イベントを受信中"
   },
   "agentModel": {
     "label": "モデル",
@@ -1022,5 +1039,88 @@
       "tooLarge": "このファイルは大きすぎるため、ここでは編集できません。",
       "tooManyEntries": "このファイルは変数が多すぎるため、ここでは編集できません。"
     }
+  },
+  "agentSession": {
+    "context": "{tokens}（{percent}%）",
+    "chipLabel": "セッション使用量 — {usage}",
+    "titleLabel": "セッション: {title}",
+    "agentLabel": "エージェント: {agent}",
+    "costLabel": "現在までのコスト: {cost}",
+    "spentLabel": "このセッションの消費: {tokens} トークン",
+    "contextLabel": "コンテキスト使用量: {limit} トークン中 {tokens} トークン（{percent}%）",
+    "contextUnknownLabel": "コンテキスト使用量: {tokens} トークン（上限不明）"
+  },
+  "opencodeDiff": {
+    "title": "このターンの変更ファイル",
+    "subtitle": "{count} ファイル",
+    "revertedTitle": "取り消し中の変更",
+    "revertedSubtitle": "{count} ファイルが取り消されています",
+    "openDiff": "{file} の差分を表示",
+    "unnamedFile": "(ファイル名なし)",
+    "status": {
+      "added": "追加",
+      "deleted": "削除",
+      "modified": "変更"
+    },
+    "revert": "このターンを取り消す",
+    "unrevert": "やり直す",
+    "revertConfirmTitle": "このターンを取り消しますか？",
+    "revertConfirmBody": "opencode が {count} ファイルへの変更を巻き戻します。追加されたファイルは削除され、コミット済みの変更も作業ツリー上では巻き戻ります。この操作は「やり直す」で復元できます。",
+    "revertConfirmLabel": "取り消す",
+    "unrevertConfirmTitle": "取り消した変更をやり直しますか？",
+    "unrevertConfirmBody": "opencode が取り消し中の {count} ファイルへの変更をすべて作業ツリーに戻します。",
+    "unrevertConfirmLabel": "やり直す",
+    "busy": "エージェントが実行中のため実行できません。ターンの完了後に再試行してください。",
+    "noop": "opencode は変更しませんでした（対象のターンが見つかりません）。",
+    "failed": "opencode が操作を拒否しました。"
+  },
+  "opencodeQuickKeys": {
+    "toolbarLabel": "opencode クイックキー",
+    "caption": "opencode",
+    "needsSession": "このペインの最初のターン以降に使えます（{notation}）",
+    "showKeys": "opencode クイックキーを表示",
+    "hideKeys": "opencode クイックキーを隠す",
+    "keys": {
+      "agentNext": "次のエージェント",
+      "agentPrev": "前のエージェント",
+      "commands": "コマンド",
+      "variant": "バリアント",
+      "agents": "エージェント",
+      "sessions": "セッション",
+      "newSession": "新規セッション",
+      "models": "モデル",
+      "themes": "テーマ",
+      "timeline": "タイムライン",
+      "undo": "取り消し",
+      "redo": "やり直し",
+      "compact": "圧縮",
+      "pageUp": "1ページ上",
+      "pageDown": "1ページ下",
+      "first": "先頭メッセージ",
+      "last": "最新メッセージ"
+    }
+  },
+  "opencodeSidebar": {
+    "regionLabel": "opencode サイドバーの警告",
+    "label": "opencode のサイドバーが開いています",
+    "body": "トランスクリプトと同じ行を占有するため、ターンの終了を検出できません。opencode のペインで次のキーを押して閉じてください:"
+  },
+  "opencodeSession": {
+    "new": "新規セッション",
+    "list": "セッション一覧",
+    "fork": "セッションを fork",
+    "share": "共有リンクを発行",
+    "unshare": "共有を取り消す",
+    "shareCopy": "リンクをコピー",
+    "shareConfirmTitle": "この会話を外部に公開しますか？",
+    "shareConfirmBody": "opencode がこのセッションを opencode のホスティングに公開し、リンクを知っている人なら誰でも読める状態になります。公開されるのは会話そのもの（あなたのプロンプト・エージェントの応答・実行したツールの入出力）と、セッションの作業ディレクトリの絶対パスです。内容は伏せ字になりません。公開後は「共有を取り消す」でページを取り下げられますが、それまでに読まれた内容は取り消せません。",
+    "shareConfirmLabel": "公開する",
+    "sharePublicNotice": "このリンクは第三者が読めます。",
+    "errorNoPort": "このペインに opencode サーバが接続されていません。ペインを起動し直してから再度お試しください。",
+    "errorNoSessionFork": "まだ fork できるセッションがありません。1 ターン実行してから再度お試しください。",
+    "errorNoSessionShare": "まだ共有できるセッションがありません。1 ターン実行してから再度お試しください。",
+    "errorRequestFailed": "リクエストを送信できませんでした。CommandMate サーバに接続できません。",
+    "errorUnknown": "操作に失敗しました。原因はサーバから返されていません。",
+    "errorCopyFailed": "リンクをコピーできませんでした。表示されているリンクを選択して手動でコピーしてください。"
   }
 }

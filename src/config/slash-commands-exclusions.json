@@ -82,8 +82,8 @@
         "opencode"
       ],
       "kind": "phantom",
-      "reason": "Not in the opencode 1.18.21 slash palette (18 entries, agents..variants). Typing the full /compact only fuzzy-matches the /review description text, never a /compact row; /status matches its own row as a control.",
-      "issue": 1913
+      "reason": "Re-measured on 1.18.22 (Issue #2036) and it is worse than absent, so this stays. Typing the full /compact in the palette matches only the /review description text — and pressing Enter then SUBSTITUTES /review into the composer, i.e. offering /compact here would hand the operator a different command. Controls on the same session: /status matched its own row and executed; /zzzznotacommand matched nothing. /compact is also absent from `GET /command`, though that endpoint carries markdown commands and Skills only and so cannot by itself rule a TUI built-in in or out.",
+      "issue": 2036
     }
   ]
 }

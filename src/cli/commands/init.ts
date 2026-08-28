@@ -19,7 +19,12 @@ import {
   sanitizePath,
   getDefaultDbPath,
   normalizeBrowseRoots,
+  readExistingVapidKeys,
 } from '../utils/env-setup';
+import { generateVapidKeyPair } from '../utils/vapid-keygen';
+// Relative, NOT `@/lib/push/vapid`: tsconfig.cli.json resets `paths` to {}. The module
+// file rather than the '@/lib/push' barrel, which pulls in web-push and better-sqlite3.
+import { VAPID_DEFAULT_SUBJECT } from '../../lib/push/vapid';
 import {
   prompt,
   confirm,
@@ -139,6 +144,59 @@ async function promptForConfig(): Promise<EnvConfig> {
 }
 
 /**
+ * Settle the three Web Push variables for the `.env` `init` is about to write
+ * (Issue #2123; the subject is Issue #2124).
+ *
+ * Push is off until `CM_VAPID_PUBLIC_KEY` / `CM_VAPID_PRIVATE_KEY` exist, and
+ * before this Issue nothing in CommandMate could produce them — the only route
+ * was to know that the bundled `web-push` exports `generateVAPIDKeys()` and type
+ * a `node -e` one-liner. So `init` generates a pair, unconditionally and in both
+ * modes: a key pair costs nothing while no device has subscribed, and making it
+ * a question would put the feature back behind knowing it exists.
+ *
+ * **An existing pair is always reused.** The public key is baked into every
+ * `PushSubscription` a browser has already created, so regenerating on
+ * `init --force` would orphan every subscribed device — silently, which is the
+ * failure mode this Issue pair exists to end.
+ *
+ * Fail-open: if `web-push` cannot be loaded the miss is reported and `init`
+ * finishes normally with push left unconfigured. That is exactly the state every
+ * install was in before this change, and the startup self-check now names it.
+ *
+ * @param envPath - The `.env` about to be written, read for keys to carry over.
+ * @returns The trio to write, or `{}` when no pair could be settled.
+ */
+async function resolveVapidConfig(
+  envPath: string
+): Promise<Pick<EnvConfig, 'CM_VAPID_PUBLIC_KEY' | 'CM_VAPID_PRIVATE_KEY' | 'CM_VAPID_SUBJECT'>> {
+  const existing = readExistingVapidKeys(envPath);
+
+  if (existing.CM_VAPID_PUBLIC_KEY && existing.CM_VAPID_PRIVATE_KEY) {
+    logger.info('Web Push: keeping the existing VAPID key pair');
+    logger.info('  (replacing it would orphan every device that has already subscribed)');
+    return {
+      CM_VAPID_PUBLIC_KEY: existing.CM_VAPID_PUBLIC_KEY,
+      CM_VAPID_PRIVATE_KEY: existing.CM_VAPID_PRIVATE_KEY,
+      CM_VAPID_SUBJECT: existing.CM_VAPID_SUBJECT || VAPID_DEFAULT_SUBJECT,
+    };
+  }
+
+  const result = await generateVapidKeyPair();
+  if (!result.ok) {
+    logger.warn(`Web Push: could not generate VAPID keys (${result.error})`);
+    logger.info('  Push notifications stay disabled; see docs/user-guide/webapp-guide.md');
+    return {};
+  }
+
+  logger.success('Web Push: generated a VAPID key pair');
+  return {
+    CM_VAPID_PUBLIC_KEY: result.keys.publicKey,
+    CM_VAPID_PRIVATE_KEY: result.keys.privateKey,
+    CM_VAPID_SUBJECT: existing.CM_VAPID_SUBJECT || VAPID_DEFAULT_SUBJECT,
+  };
+}
+
+/**
  * Display configuration summary
  * Issue #119: Show settings after configuration
  */
@@ -155,6 +213,15 @@ function displayConfigSummary(config: EnvConfig, envPath: string): void {
   logger.info(`  CM_PORT:      ${config.CM_PORT}`);
   logger.info(`  CM_BIND:      ${config.CM_BIND}`);
   logger.info(`  CM_DB_PATH:   ${config.CM_DB_PATH}`);
+  // Issue #2123: the keys themselves are secrets, so the summary reports only
+  // whether push is configured — enough for the reader to know it is on.
+  logger.info(
+    `  Web Push:     ${
+      config.CM_VAPID_PUBLIC_KEY && config.CM_VAPID_PRIVATE_KEY
+        ? `configured (CM_VAPID_SUBJECT=${config.CM_VAPID_SUBJECT ?? VAPID_DEFAULT_SUBJECT})`
+        : 'not configured'
+    }`
+  );
   logger.blank();
   logger.info(`  Config file:  ${envPath}`);
   logger.blank();
@@ -266,6 +333,12 @@ export async function runInit(options: InitOptions): Promise<InitResult> {
     logger.blank();
     logger.info('--- Generating .env ---');
     logger.blank();
+
+    // Issue #2123 / #2124: settle the Web Push trio before the file is written.
+    // Reads `envPath` first, so `--force` carries an existing key pair across
+    // instead of orphaning every subscribed device.
+    Object.assign(config, await resolveVapidConfig(envPath));
+
     logger.info('Creating .env file...');
     await envSetup.createEnvFile(config, { force: options.force });
     logger.success('.env file created');
@@ -286,6 +359,12 @@ export async function runInit(options: InitOptions): Promise<InitResult> {
       logger.info('  2. Run "commandmate start" to start the server');
     } else {
       logger.info('  1. Run "commandmate start" to start the server');
+    }
+    if (config.CM_VAPID_PUBLIC_KEY && config.CM_VAPID_PRIVATE_KEY) {
+      // Issue #2123: keys alone are not the whole setup — a phone also needs
+      // HTTPS, and iOS needs the app installed to the Home Screen. Point at the
+      // one document that says so rather than repeating it here.
+      logger.info('  Phone notifications: docs/user-guide/webapp-guide.md');
     }
     logger.blank();
 

@@ -136,10 +136,17 @@ export async function POST(request: NextRequest) {
 
     // Validate tool
     if (!tool || !SUMMARY_ALLOWED_TOOLS.includes(tool)) {
-      return NextResponse.json({ error: 'Invalid tool. Allowed: claude, codex, copilot' }, { status: 400 });
+      // Issue #2044: the list is interpolated rather than spelled out. The
+      // literal said "claude, codex, copilot" long after antigravity had been
+      // added, so a caller was told the wrong answer by a message that could
+      // not go stale once it reads the constant it validates against.
+      return NextResponse.json(
+        { error: `Invalid tool. Allowed: ${SUMMARY_ALLOWED_TOOLS.join(', ')}` },
+        { status: 400 }
+      );
     }
 
-    // Validate model (optional, only for copilot)
+    // Validate model (optional; copilot's --model, opencode's provider/model)
     if (model !== undefined && model !== null && typeof model !== 'string') {
       return NextResponse.json({ error: 'Invalid model parameter' }, { status: 400 });
     }

@@ -1,0 +1,16 @@
+[
+    {
+        "file": "added.txt",
+        "patch": "Index: added.txt\n===================================================================\n--- added.txt\t\n+++ added.txt\t\n@@ -0,0 +1,1 @@\n+banana\n\\ No newline at end of file\n",
+        "additions": 1,
+        "deletions": 0,
+        "status": "added"
+    },
+    {
+        "file": "sample.txt",
+        "patch": "Index: sample.txt\n===================================================================\n--- sample.txt\t\n+++ sample.txt\t\n@@ -1,3 +1,3 @@\n line1\n-line2\n+LINE-TWO-EDITED\n line3\n",
+        "additions": 1,
+        "deletions": 1,
+        "status": "modified"
+    }
+]

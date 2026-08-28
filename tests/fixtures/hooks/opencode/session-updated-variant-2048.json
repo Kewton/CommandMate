@@ -1,0 +1,78 @@
+{
+  "withVariant": {
+    "id": "evt_03b9b0ea4001kfYsE8WwARR7Mp",
+    "type": "session.updated",
+    "properties": {
+      "sessionID": "ses_fc4662465ffe50IgIV21rnzYjG",
+      "info": {
+        "id": "ses_fc4662465ffe50IgIV21rnzYjG",
+        "slug": "tidy-nebula",
+        "projectID": "870fcbf3e638800a803d29cd336cc312d17effbb",
+        "directory": "/private/tmp/claude-501/-Users-maenokota-share-work-github-kewton-commandmate-issue-2048/e3e35c18-0484-4997-8568-be4454f1f5fd/scratchpad/oc2048/work",
+        "path": "",
+        "title": "cfgvariant-2048 response instructions",
+        "agent": "build",
+        "model": {
+          "id": "claude-sonnet-4.6",
+          "providerID": "github-copilot",
+          "variant": "high"
+        },
+        "version": "1.18.22",
+        "summary": {
+          "additions": 0,
+          "deletions": 0,
+          "files": 0
+        },
+        "cost": 0.0330885,
+        "tokens": {
+          "input": 2,
+          "output": 10,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 8782
+          }
+        },
+        "time": {
+          "created": 1787706334106,
+          "updated": 1787706412708
+        }
+      }
+    }
+  },
+  "withoutVariant": {
+    "id": "evt_03b99dbac001Qa7fOMkX3eEWvs",
+    "type": "session.updated",
+    "properties": {
+      "sessionID": "ses_fc4662465ffe50IgIV21rnzYjG",
+      "info": {
+        "id": "ses_fc4662465ffe50IgIV21rnzYjG",
+        "slug": "tidy-nebula",
+        "projectID": "870fcbf3e638800a803d29cd336cc312d17effbb",
+        "directory": "/private/tmp/claude-501/-Users-maenokota-share-work-github-kewton-commandmate-issue-2048/e3e35c18-0484-4997-8568-be4454f1f5fd/scratchpad/oc2048/work",
+        "path": "",
+        "title": "New session - 2026-08-26T01:05:34.106Z",
+        "agent": "plan",
+        "model": {
+          "id": "claude-sonnet-4.6",
+          "providerID": "github-copilot"
+        },
+        "version": "1.18.22",
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "time": {
+          "created": 1787706334106,
+          "updated": 1787706334124
+        }
+      }
+    }
+  }
+}

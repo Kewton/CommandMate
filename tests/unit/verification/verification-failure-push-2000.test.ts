@@ -195,7 +195,9 @@ describe('Issue #2000: verification failure notification', () => {
     await runToCompletion(['fail-gate']);
 
     expect(failurePayloads()).toHaveLength(1);
-    expect(failurePayloads()[0].title).toBe('feature/verify-push');
+    // Issue #2125: the run named no instance, so the title carries the
+    // worktree's resolved default, marked as worktree-wide.
+    expect(failurePayloads()[0].title).toBe('feature/verify-push (worktree: claude)');
     expect(failurePayloads()[0].body).toContain('Verification failed');
     expect(failurePayloads()[0].body).toContain('fail-gate');
   });

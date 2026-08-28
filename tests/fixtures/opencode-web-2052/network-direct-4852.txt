@@ -1,0 +1,34 @@
+# Chromium network log for GET http://127.0.0.1:4852/ (opencode 1.18.22 `opencode serve`)
+# Captured 2026-08-26 via Playwright, first paint of the Web UI, nothing clicked yet.
+# Every path is ABSOLUTE and rooted at `/`. There is no WebSocket in this list.
+
+ 1. [GET] /                                      => 200 text/html        (2884 B SPA shell)
+ 2. [GET] /assets/index-K3ryTWVK.js              => 200 text/javascript  (2,738,995 B)
+ 3. [GET] /assets/index-CMLUT3g5.css             => 200 text/css         (482,527 B)
+ 4. [GET] /site.webmanifest                      => 200 application/manifest+json
+ 5. [GET] /assets/ja-vqBZHfTW.js                 => 200   (locale chunk, lazily imported)
+ 6. [GET] /assets/ja-BaAAHI8J.js                 => 200   (locale chunk, lazily imported)
+ 7. [GET] /global/health                         => 200
+ 8. [GET] /api/health                            => 200
+ 9. [GET] /api/session?limit=5000&order=desc     => 200
+10. [GET] /global/config                         => 200
+11. [GET] /provider                              => 200
+12. [GET] /path                                  => 200
+13. [GET] /session/status                        => 200
+14. [GET] /project                               => 200
+15. [GET] /global/event                          => 200 text/event-stream   <-- the live stream
+16. [GET] /assets/Inter.ttf                      => 200
+17. [GET] /favicon-v3.ico                        => 200
+
+# Response headers of frame 15 (the only long-lived connection the UI opens):
+#   Content-Type: text/event-stream
+#   Cache-Control: no-cache, no-transform
+#   x-accel-buffering: no
+#   Transfer-Encoding: chunked
+# First frame on the wire:
+#   data: {"payload":{"id":"evt_...","type":"server.connected","properties":{}}}
+#
+# `new WebSocket` appears exactly once in index-K3ryTWVK.js and its call site is the
+# embedded PTY terminal (`/api/pty`, `terminal.connectTicket.*`, binaryType=arraybuffer).
+# `EventSource` appears zero times: SSE is read with fetch + a manual `text/event-stream`
+# reader, so `addEventListener("<type>", ...)` is not in play (matches §4.3 of the design doc).

@@ -90,6 +90,12 @@ CommandMate is a Progressive Web App. On a mobile browser, use **Add to Home Scr
 
 > **HTTPS is required for installation.** Browsers only register a Service Worker (and offer install) on `https://` or `http://localhost`. When accessing a self-hosted instance over plain HTTP on the LAN (e.g. `http://192.168.x.x:3000`), install and offline support are disabled by the browser — use a tunnel or an HTTPS reverse proxy (see Security above) to enable them. The app itself remains fully usable without the PWA layer.
 
+### Phone notifications (Web Push)
+
+Once installed, CommandMate can push a notification to your phone **while the app is closed** — an agent waiting for you, a verification gate that failed, a session that could not start.
+
+**It is off until you generate a VAPID key pair.** `commandmate init` generates one and writes `CM_VAPID_PUBLIC_KEY` / `CM_VAPID_PRIVATE_KEY` / `CM_VAPID_SUBJECT` into `.env`; when they are missing, the startup log and `commandmate status` say so in one line. iOS/iPadOS additionally require the Home Screen install above — a Safari tab cannot subscribe. Full setup, including the HTTPS requirement and what to do when nothing arrives: [Web App Guide -> Phone Notifications](docs/user-guide/webapp-guide.md#phone-notifications-web-push).
+
 ---
 
 ## Browser Support
@@ -161,7 +167,9 @@ already running). Requires Node.js 22 or later.
 - Already have a `.env`? The setup questions are skipped.
 - Don't want the browser to open? Use `commandmate --no-open` (also skipped automatically
   on CI and headless sessions).
-- Otherwise, open http://localhost:3000 in your browser.
+- Otherwise, open http://127.0.0.1:3000 in your browser. CommandMate binds `127.0.0.1`
+  by default, and `localhost` can resolve to `::1` (IPv6) first — an address CommandMate
+  does not listen on, and another process may.
 
 See the [CLI Setup Guide](./docs/en/user-guide/cli-setup-guide.md) for details.
 For Windows users, see the [WSL2 Setup Guide](./docs/en/user-guide/wsl2-setup.md) — CommandMate depends on tmux, so it runs on Windows via WSL2 (native Windows is not supported).

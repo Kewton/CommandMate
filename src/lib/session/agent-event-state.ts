@@ -46,7 +46,12 @@ import {
   type AgentEventType,
 } from '@/lib/hooks/agent-event-types';
 import type { AskUserQuestionSpec } from '@/lib/hooks/ask-user-question-payload';
-import { ASK_USER_QUESTION_TOOL } from '@/lib/hooks/permission-request-payload';
+// Issue #2100: the shared list of tool names that mean "a human is being asked
+// to CHOOSE". Pure — its own only import is `permission-request-payload`, which
+// this module already reached for `ASK_USER_QUESTION_TOOL` — and importing it
+// here rather than repeating `'question'` is what keeps the release rule below
+// and `pendingDecisionKind`'s reader from drifting apart.
+import { QUESTION_DECISION_TOOL_NAMES } from '@/lib/hooks/pending-decision-kind';
 // Issue #1899: type-only, so nothing in the source registry's module graph —
 // `better-sqlite3` included — is pulled into this module at runtime.
 import type { AgentSourceCapabilities } from '@/lib/hooks/sources/types';
@@ -65,6 +70,7 @@ import type { StructuredPromptSource } from '@/lib/session/structured-prompt';
 import {
   acceptExternalId,
   boundDecisionMessage,
+  boundDecisionPatterns,
   boundDecisionToolName,
   closesTurn,
   derivePublishedTurn,
@@ -135,6 +141,8 @@ declare global {
   var __agentEventLastModel: Map<string, string> | undefined;
   // eslint-disable-next-line no-var
   var __agentCapturedModelInfo: Map<string, ModelInfo> | undefined;
+  // eslint-disable-next-line no-var
+  var __agentEventLastEffort: Map<string, string> | undefined;
 }
 
 /** compositeKey -> epoch ms of the most recent stop event. */
@@ -245,6 +253,35 @@ const lastAgentModel = globalThis.__agentEventLastModel ??
  */
 const capturedModelInfo = globalThis.__agentCapturedModelInfo ??
   (globalThis.__agentCapturedModelInfo = new Map<string, ModelInfo>());
+
+/**
+ * compositeKey -> the effort the *agent itself* last reported (Issue #2048).
+ *
+ * The third source, and until #2048 there was no such thing: #1784's whole
+ * premise was that "no hook payload of any tool carries an effort field", which
+ * was true of the five push tools and stayed true of opencode's own screen —
+ * `model-info-extractor` still records that opencode prints no effort anywhere
+ * in its pane, across 17 live frames.
+ *
+ * What changed is the *channel*, not the screen. opencode calls it a **variant**
+ * and publishes it on the frames CommandMate is subscribed to —
+ * `Session.model.variant` on `session.updated` and `info.variant` on
+ * `message.updated`, measured on 1.18.22 in an isolated `HOME`
+ * (`docs/design/opencode-server-live-verification.md` §20.4). The names in that
+ * catalogue are `low` / `medium` / `high` / `max` / `minimal` / `none` /
+ * `xhigh`, and each one's entry carries an `effort` (or `reasoningEffort`) equal
+ * to itself — so the value is an effort in opencode's own vocabulary as well as
+ * in this map's.
+ *
+ * Kept apart from {@link capturedModelInfo} for the reason that map is kept
+ * apart from {@link lastAgentModel}: there is a precedence between them
+ * ({@link getResolvedAgentModelInfo}), and merging on write would lose it.
+ * Latched the same way, and never written with null — a turn that reports no
+ * variant is opencode running the model's default, not the previous choice
+ * being withdrawn.
+ */
+const reportedEffort = globalThis.__agentEventLastEffort ??
+  (globalThis.__agentEventLastEffort = new Map<string, string>());
 
 /**
  * How long two identical events count as one delivery.
@@ -592,6 +629,33 @@ export interface AgentEventRecord {
    * rather than refusing to act.
    */
   decisionId?: string | null;
+  /**
+   * The tool the dialog this event opens is about, or null/absent (Issue #2031).
+   *
+   * Only a source that can answer "which tool?" at the moment the dialog is
+   * reported may set it. opencode is the measured case and the reason the field
+   * exists: its `permission.asked` frame carries no tool name at all (#1758
+   * §5.4) — the name comes from the `message.part.updated` frame for the same
+   * `callID`, which the subscription correlates as it goes. Before this Issue
+   * the notification path passed `toolName: null` unconditionally, so an
+   * opencode approval reached the panel with no statement of what it was for.
+   *
+   * Absent leaves the record's existing `toolName` alone, which is what keeps a
+   * `Notification` from erasing the name a `PermissionRequest` already supplied.
+   */
+  toolName?: string | null;
+  /**
+   * What `Allow always` on this dialog would permit (Issue #2031).
+   *
+   * Typed `unknown[]` rather than `string[]`, and bounded by `openDecision`
+   * rather than by the caller, for the same reason `message` is: this record is
+   * retained for up to 30 minutes and served back over HTTP, so its footprint
+   * may not depend on what an agent chose to send — and neither may its
+   * element types, since the entries are rendered verbatim. See
+   * {@link boundDecisionPatterns}, which drops anything that is not a non-empty
+   * string.
+   */
+  decisionPatterns?: readonly unknown[] | null;
   /**
    * Whether the source states that no dialog is left open by this event
    * (Issue #1898).
@@ -1184,7 +1248,13 @@ function applyNotificationToTurn(
       source: 'notification',
       at: record.at,
       message: record.message ?? null,
-      toolName: null,
+      // Issue #2031. Was a hard `null`, which is what left an opencode approval
+      // reaching the browser with no statement of what it was for: the tool
+      // name is not in `permission.asked` and has to be carried on the record
+      // by whoever correlated it. Absent still means "this source had nothing
+      // to say", and `openDecision` leaves an earlier name in place for that.
+      toolName: record.toolName ?? null,
+      patterns: record.decisionPatterns ?? null,
       decisionId: record.decisionId ?? null,
       bootstrapDisplay: displayOf(record),
     });
@@ -1250,6 +1320,8 @@ function openDecision(
     message: string | null;
     toolName: string | null;
     decisionId: string | null;
+    /** Issue #2031. Bounded here, not by the caller. */
+    patterns: readonly unknown[] | null;
     bootstrapDisplay: TurnRecord['displayEvent'];
   }
 ): void {
@@ -1322,6 +1394,11 @@ function openDecision(
     // age bound are measured from — and take the confirmation.
     existing.message = boundDecisionMessage(input.message) ?? existing.message;
     existing.toolName = boundDecisionToolName(input.toolName) ?? existing.toolName;
+    // Issue #2031, same rule as the two lines above it: a second sighting that
+    // knows the rules fills them in, one that does not leaves the earlier
+    // answer alone. The measured pair is exactly this — the `PermissionRequest`
+    // forecast carries no patterns, the `Notification` that confirms it does.
+    existing.patterns = boundDecisionPatterns(input.patterns) ?? existing.patterns;
     existing.decisionId ??= decisionId;
     if (confirmed) {
       existing.source = 'notification';
@@ -1344,6 +1421,7 @@ function openDecision(
     source: input.source,
     message: boundDecisionMessage(input.message),
     toolName: boundDecisionToolName(input.toolName),
+    patterns: boundDecisionPatterns(input.patterns),
     confirmedAt: confirmed ? input.at : null,
     scraperCorroborated: false,
     recorded: false,
@@ -1499,8 +1577,56 @@ export function getResolvedAgentModelInfo(
   return mergeModelInfo(
     cliToolId,
     getLastKnownAgentModel(worktreeId, cliToolId, instanceId),
-    getLastCapturedModelInfo(worktreeId, cliToolId, instanceId)
+    getLastCapturedModelInfo(worktreeId, cliToolId, instanceId),
+    // Issue #2048: the third source. Null for every tool but opencode and for
+    // every opencode session running on a model's default, so every other
+    // surface's string is byte-identical to pre-#2048.
+    getLastReportedAgentEffort(worktreeId, cliToolId, instanceId)
   );
+}
+
+/**
+ * Latch the effort (opencode's *variant*) the agent named for itself (#2048).
+ *
+ * Latch, never clear — {@link latchAgentModel}'s rule, and for the same reason:
+ * `session.updated` omits `Session.model.variant` entirely when the session is
+ * on a model's default, and `message.updated` omits `info.variant` on the
+ * assistant message a turn opens with. Reading either absence as "the variant
+ * is now unknown" would blank the display between frames of the same turn.
+ *
+ * Called by the tool's own reader — `lib/hooks/sources/opencode/subscription` —
+ * rather than from the generic event path, because the value lives on frames
+ * that map to none of the seven event words.
+ *
+ * @param effort - The variant name, or null/empty to leave the latch alone
+ */
+export function recordAgentReportedEffort(
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  instanceId: string | undefined,
+  effort: string | null | undefined
+): void {
+  if (typeof effort !== 'string' || effort === '') return;
+  reportedEffort.set(
+    buildCompositeKey(worktreeId, cliToolId, instanceId),
+    effort.slice(0, MAX_EVENT_DETAIL_LENGTH)
+  );
+}
+
+/**
+ * The effort the agent last reported for this instance, or null (#2048).
+ *
+ * The raw latched value, before precedence — {@link getResolvedAgentModelInfo}
+ * is what callers publishing to the UI or the API want. Exported so a test can
+ * tell "the agent said" apart from "the screen said", the same way
+ * {@link getLastCapturedModelInfo} lets it.
+ */
+export function getLastReportedAgentEffort(
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  instanceId?: string
+): string | null {
+  return reportedEffort.get(buildCompositeKey(worktreeId, cliToolId, instanceId)) ?? null;
 }
 
 /**
@@ -1588,6 +1714,9 @@ export function beginAgentEventGeneration(
   // a relaunch would show the old process's effort with no frame left that
   // could contradict it. The next poll re-reads a live footer immediately.
   capturedModelInfo.delete(key);
+  // Issue #2048: and the variant the agent named, for exactly #1783's reason —
+  // the new process may have been launched with a different one, or with none.
+  reportedEffort.delete(key);
   // Issue #1899: the ids claimed for this key were issued by the process that
   // has just been replaced. Unlike the time-window keys, they never expire on
   // their own, so a generation is the only thing that retires them.
@@ -1634,6 +1763,8 @@ export function discardAgentEventState(
   lastAgentModel.delete(key);
   // Issue #1784: nor does the pane its footer was read from.
   capturedModelInfo.delete(key);
+  // Issue #2048: nor the variant that session was running at.
+  reportedEffort.delete(key);
   // Issue #1899: nor do the frame ids that session issued.
   recentEventIdentities.delete(key);
 }
@@ -1776,11 +1907,77 @@ export function reportPermissionRequestPending(
     at,
     message: null,
     toolName,
+    // A forecast has no payload behind it: the hook that fires it names the
+    // tool and nothing else, so there are no `Allow always` rules to state yet.
+    // The `Notification` that confirms this record supplies them (Issue #2031).
+    patterns: null,
     decisionId: null,
     // A forecast carries no event of its own, so the record it bootstraps is
     // described by the thing it is forecasting. `structuredEvents.lastEventType`
     // is unaffected — that reads `getLastAgentEvent`, which nothing here writes.
     bootstrapDisplay: { event: 'notification', at, detail: 'permission_prompt' },
+  });
+}
+
+/**
+ * Report that a QUESTION dialog is open, naming the decision it is answered by
+ * (Issue #2100).
+ *
+ * ## Why this is not {@link reportPermissionRequestPending}
+ *
+ * That function is a *forecast*: `source: 'permission-request'`, no id, no
+ * payload, and `confirmedAt: null`, which bounds the record at
+ * {@link DIALOG_PENDING_MAX_MS}`.predicted` — 20 seconds — until something
+ * corroborates it. It was the only exported way to say "a human is blocked", so
+ * opencode's ingest called it for `question.asked` too, and that one call cost
+ * three separate facts:
+ *
+ *  1. the `que_…` the frame carried was **discarded** (`decisionId: null`), so
+ *     `current-output-builder`'s addressable-decision gate could never pass and
+ *     `promptData.decisionId` was null while the server was holding the id;
+ *  2. `source` read `permission-request` — "a dialog is about to be drawn" — for
+ *     an event that is the agent's own proof that one **is** drawn;
+ *  3. the record **expired after 20 s**. Measured on 1.18.23: at t+20 s
+ *     `pendingDecisions` emptied, `dedupDropped.dialogTimedOut` incremented and
+ *     `sessionStatus` flipped from `waiting` back to `ready` with the question
+ *     still on screen and the agent still blocked — opencode publishes no
+ *     `session.idle` at all while a question is pending (§27.4).
+ *
+ * A question is proof, so it is opened as `'notification'`: confirmed on
+ * arrival, bounded by `DIALOG_PENDING_MAX_MS.confirmed`, and released by the
+ * `post_tool_use` the answer produces exactly as an approval is.
+ *
+ * Names no tool and no event word — both arrive as values, from the ingest that
+ * owns them — so this module keeps the property that it can be read without
+ * knowing which agent is on the other end.
+ *
+ * @param toolName - The marker `pendingDecisionKind` recovers the kind from
+ * @param decisionId - The agent's own id for the question, or null when the
+ *   payload named none (the record is then anonymous, as before)
+ * @param detail - The event detail a bootstrapped display record carries
+ * @param at - Epoch ms; defaults to now
+ */
+export function reportQuestionPending(
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  instanceId: string | undefined,
+  input: { toolName: string; decisionId: string | null; detail: string },
+  at: number = Date.now(),
+): void {
+  const key = buildCompositeKey(worktreeId, cliToolId, instanceId);
+  openDecision(key, currentGeneration(key), {
+    source: 'notification',
+    at,
+    // The question TEXT is not the dialog's `message`: it is published as
+    // `promptData.askUserQuestion`, from the episode `recordAskUserQuestion`
+    // holds, so that one parse feeds the summary and the answerable numbers.
+    message: null,
+    toolName: input.toolName,
+    // A question grants nothing that outlives it — there is no `Allow always`
+    // to state the size of.
+    patterns: null,
+    decisionId: input.decisionId,
+    bootstrapDisplay: { event: 'notification', at, detail: input.detail },
   });
 }
 
@@ -1940,7 +2137,24 @@ function applyAskUserQuestionTransition(key: string, record: AgentEventRecord): 
       // reachable when the operator's own settings.json registers a wider
       // matcher than the injected `AskUserQuestion` one — the two files are
       // concatenated, not substituted (#1722).
-      if (record.detail !== ASK_USER_QUESTION_TOOL) askUserQuestion.delete(key);
+      //
+      // Issue #2100: the exemption is the whole QUESTION vocabulary, not
+      // Claude's one spelling. opencode names its question tool `question`, and
+      // it publishes a tool part for the same call: measured on 1.18.23 in an
+      // isolated HOME, `question.asked` and
+      // `message.part.updated(tool=question, status=running)` arrive **in the
+      // same millisecond**, in that order (§27.3). Under the old test the
+      // second frame read as "the agent moved on to another tool" and deleted
+      // the episode 1 ms after the ingest recorded it, which is why
+      // `pendingDecisions[].questionOptions` and `promptData.askUserQuestion`
+      // were null for every opencode question. Claude is unaffected —
+      // `AskUserQuestion` is the first member of the same list — and the cost
+      // is that a hook tool literally named `question` no longer releases the
+      // episode, which is the same name `pendingDecisionKind` already reads as
+      // "this record is a question" for every tool.
+      if (!QUESTION_DECISION_TOOL_NAMES.includes(record.detail ?? '')) {
+        askUserQuestion.delete(key);
+      }
       return;
     case 'notification':
       if (record.detail === 'idle_prompt') askUserQuestion.delete(key);
@@ -2305,4 +2519,6 @@ export function clearAgentStopEvents(): void {
   lastAgentModel.clear();
   // Issue #1784: and the same for the scraped half.
   capturedModelInfo.clear();
+  // Issue #2048: and for the variant the agent reported.
+  reportedEffort.clear();
 }

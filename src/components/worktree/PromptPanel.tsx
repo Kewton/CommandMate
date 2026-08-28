@@ -16,6 +16,10 @@ import type {
   StructuredDecisionOption,
   StructuredPromptWaitingData,
 } from '@/lib/session/structured-prompt';
+import {
+  readPromptQuestionChoices,
+  type PromptQuestionChoices,
+} from '@/components/worktree/prompt-decision-id';
 import { ErrorBoundary } from '@/components/error/ErrorBoundary';
 import { RadioGroup, RadioGroupItem, Button, Spinner } from '@/components/ui';
 import { usePromptAnimation } from '@/hooks/usePromptAnimation';
@@ -321,6 +325,15 @@ function UnclassifiedPromptNotice({
   // be applied to. With options but no id there is nothing to address, and the
   // panel says what it said before — answer it in the terminal.
   const answerable = decisionId ? promptData.decisionOptions ?? null : null;
+  // Issue #2039: the same question asked of the OTHER kind of addressable
+  // decision. `readPromptQuestionChoices` returns non-null only when this
+  // payload names an id, published choices for exactly one question, and is NOT
+  // offering the three approval verdicts — so the two branches below are
+  // mutually exclusive by construction rather than by the order they are
+  // written in. Answering a question with `Allow once` is refused at the source
+  // (`question-needs-answer-verdict`), which is why the panel must not be able
+  // to draw both.
+  const questionChoices = readPromptQuestionChoices(promptData);
 
   return (
     <div className="space-y-2" data-testid="unclassified-prompt-notice">
@@ -330,27 +343,127 @@ function UnclassifiedPromptNotice({
       {/* Issue #1726: the agent told us what it asked even though nothing could
           read the screen. The labels are listed WITHOUT numbers — the picker
           renumbers and appends its own entries, and this branch exists precisely
-          because nobody here can see which screen is up. */}
+          because nobody here can see which screen is up.
+
+          Issue #2039: unless the numbers are REAL. When the payload names the
+          question by id, the choices go to `POST /question/:id/reply` by label
+          and no key is sent to any pane, so there is no screen to be renumbered
+          out from under them — and the list becomes a picker. */}
       {promptData.askUserQuestion && (
         <div className="space-y-1" data-testid="unclassified-ask-user-question">
           <p className="text-sm text-foreground">{promptData.askUserQuestion.question}</p>
-          <ul className="list-disc list-inside text-sm text-muted-foreground">
-            {promptData.askUserQuestion.labels.map((label) => (
-              <li key={label}>{label}</li>
-            ))}
-          </ul>
+          {questionChoices ? (
+            <StructuredQuestionActions
+              choices={questionChoices}
+              disabled={disabled}
+              onRespond={onRespond}
+            />
+          ) : (
+            <ul className="list-disc list-inside text-sm text-muted-foreground">
+              {promptData.askUserQuestion.labels.map((label) => (
+                <li key={label}>{label}</li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
-      {answerable && answerable.length > 0 ? (
-        <StructuredDecisionActions
-          options={answerable}
-          disabled={disabled}
-          onRespond={onRespond}
-        />
+      {/* Issue #2039: the picker above IS the answer affordance, so neither the
+          verdict buttons nor the "answer it in the terminal" line belongs under
+          it. The first arm is load-bearing for the second of those — with a
+          question drawn, `answerable` is null and the fallback text would
+          otherwise contradict the picker it sits below. */}
+      {questionChoices ? null : answerable && answerable.length > 0 ? (
+        <>
+          {/* Issue #2031: what these three buttons are about. Rendered only on
+              the addressable branch, so no other tool's panel changes: for
+              claude / codex / gemini / copilot / antigravity the payload
+              carries `decisionId: null`, `answerable` is null, and this whole
+              subtree is the same "answer it in the terminal" line it was. */}
+          <StructuredDecisionSubject
+            toolName={promptData.toolName ?? null}
+            patterns={promptData.patterns ?? null}
+            allowAlwaysLabel={
+              answerable.find((option) => option.reply === 'always')?.label ?? null
+            }
+          />
+          <StructuredDecisionActions
+            options={answerable}
+            disabled={disabled}
+            onRespond={onRespond}
+          />
+        </>
       ) : (
         <p className="text-sm text-foreground">
           {t('unclassifiedInstruction', { command: t('unclassifiedRespondCommand') })}
         </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * What the approval in front of the user is actually about (Issue #2031).
+ *
+ * Two facts the payload has been carrying and no surface was showing. The tool
+ * name is the `message.part.updated` correlation — `permission.asked` does not
+ * name the tool itself (#1758 §5.4) — and `patterns` is the rule answering
+ * `Allow always` would SAVE, which is the one verdict here whose effect
+ * outlives this dialog. Offering that button without showing its scope asks for
+ * a decision whose size the user cannot see.
+ *
+ * ## Why there is no translated label on any of this
+ *
+ * Every string rendered here is the agent's own: a tool name, a glob, and the
+ * `Allow always` label read straight off {@link STRUCTURED_DECISION_OPTIONS} —
+ * which is deliberately untranslated CLI answer vocabulary, for the reason its
+ * own comment gives. That is the same rule the rest of this notice already
+ * follows: `promptData.message` and the `askUserQuestion` labels above are
+ * printed verbatim too. Adding English chrome ("Tool:", "Allows:") would be the
+ * only untranslated *display* text in the panel, so the layout carries the
+ * relation instead — the label sits directly above the rules it grants.
+ */
+function StructuredDecisionSubject({
+  toolName,
+  patterns,
+  allowAlwaysLabel,
+}: {
+  toolName: string | null;
+  patterns: readonly string[] | null;
+  /** The `Allow always` verdict's own label, or null if it was not offered. */
+  allowAlwaysLabel: string | null;
+}) {
+  const hasPatterns = patterns !== null && patterns.length > 0;
+  if (!toolName && !hasPatterns) return null;
+
+  return (
+    <div className="space-y-1" data-testid="structured-decision-subject">
+      {toolName && (
+        <p
+          className="text-sm font-medium text-foreground font-mono break-all"
+          data-testid="structured-decision-tool"
+        >
+          {toolName}
+        </p>
+      )}
+      {hasPatterns && (
+        <div className="text-xs text-muted-foreground">
+          {allowAlwaysLabel && (
+            <span data-testid="structured-decision-patterns-label">{allowAlwaysLabel}</span>
+          )}
+          <ul
+            className="mt-0.5 flex flex-wrap gap-1"
+            data-testid="structured-decision-patterns"
+          >
+            {patterns.map((pattern) => (
+              <li
+                key={pattern}
+                className="font-mono break-all bg-muted border border-border rounded px-1.5 py-0.5"
+              >
+                {pattern}
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
     </div>
   );
@@ -399,6 +512,100 @@ function StructuredDecisionActions({
           {option.number}. {option.label}
         </Button>
       ))}
+    </div>
+  );
+}
+
+/**
+ * The choices a question published, as a picker (Issue #2039).
+ *
+ * ## Why this is a radio group and the verdicts next door are buttons
+ *
+ * {@link StructuredDecisionActions} is one button per verdict because there is
+ * no wrong click to protect against being made twice — three fixed options, no
+ * default, and a second click would only add a way to hit `Allow always` by
+ * momentum. A question is the other case: the list is the agent's own, of
+ * unbounded length, and the labels are prose rather than three words an operator
+ * has read a hundred times. Select-then-submit is what
+ * {@link MultipleChoicePromptActions} already does for exactly that content, so
+ * this looks the same on purpose — the Issue asks for the choices to be drawn
+ * "like multiple_choice", and a user should not have to learn that a picker
+ * behaves differently depending on which layer could see it.
+ *
+ * ## What is sent
+ *
+ * The option NUMBER, 1-based in payload order —
+ * `resolveStructuredQuestionAnswer` resolves it against the same list read from
+ * `listPending()`. Not the label: a label that happens to be a digit would be
+ * read as a number by that resolver, and a label sent verbatim would then be a
+ * choice the operator did not click. The number cannot collide with itself.
+ *
+ * Single-select only. `multiSelect` is on the agent's own payload but
+ * `summarizeAskUserQuestion` does not carry it to the browser, so the panel
+ * cannot know when several answers are allowed; the API accepts `1,3` for the
+ * questions that do. Widening the browser payload is a `lib/session` change and
+ * this Issue does not own that file.
+ */
+function StructuredQuestionActions({
+  choices,
+  disabled,
+  onRespond,
+}: {
+  choices: PromptQuestionChoices;
+  disabled: boolean;
+  onRespond: (answer: string) => void;
+}) {
+  const t = useTranslations('prompt');
+  const groupName = useId();
+  const [selected, setSelected] = useState<number | null>(null);
+
+  const getOptionClasses = useCallback(
+    (optionNumber: number) => {
+      const isSelected = selected === optionNumber;
+      const baseClasses = 'flex items-start gap-3 p-3 rounded-lg cursor-pointer transition-all';
+      const selectionClasses = isSelected
+        ? 'bg-accent-50 dark:bg-accent-900/30 border-2 border-accent-500'
+        : 'bg-surface border-2 border-border hover:border-input';
+      const disabledClasses = disabled ? 'opacity-50 cursor-not-allowed' : '';
+      return `${baseClasses} ${selectionClasses} ${disabledClasses}`;
+    },
+    [selected, disabled],
+  );
+
+  return (
+    <div className="space-y-3" data-testid="structured-question-actions">
+      <fieldset>
+        <legend className="sr-only">{t('selectAnOption')}</legend>
+        <RadioGroup
+          name={groupName}
+          value={selected != null ? String(selected) : ''}
+          onValueChange={(v) => setSelected(Number(v))}
+          disabled={disabled}
+          className="flex flex-col gap-2"
+        >
+          {choices.labels.map((label, index) => (
+            /* Index-keyed on purpose: the agent may offer the same label twice,
+               and the POSITION is what is being answered with. */
+            <label key={`${index + 1}-${label}`} className={getOptionClasses(index + 1)}>
+              <RadioGroupItem value={String(index + 1)} className="mt-1" />
+              <div className="flex-1">
+                <span className="font-medium">{index + 1}. {label}</span>
+              </div>
+            </label>
+          ))}
+        </RadioGroup>
+      </fieldset>
+      <button
+        type="button"
+        data-testid="structured-question-submit"
+        onClick={() => {
+          if (selected !== null) onRespond(String(selected));
+        }}
+        disabled={disabled || selected === null}
+        className={`w-full ${BUTTON_BASE_STYLES} ${BUTTON_PRIMARY_STYLES}`}
+      >
+        {t('submit')}
+      </button>
     </div>
   );
 }

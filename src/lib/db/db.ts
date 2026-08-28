@@ -56,6 +56,7 @@ export {
   getMessages,
   getLastUserMessage,
   getLastMessage,
+  findMessageByRequestId,
   deleteAllMessages,
   deleteMessageById,
   deleteMessagesByCliTool,
@@ -200,11 +201,16 @@ export {
   deletePushSubscriptionByEndpoint,
   // Issue #2000: the per-kind state a *new* subscription is created with.
   NEW_SUBSCRIPTION_DEFAULTS,
+  // Issue #2056: which defaults generation a row knows about, and whether it is
+  // still owed the one-off notice about the change.
+  PUSH_DEFAULTS_VERSION,
+  pushSubscriptionNeedsDefaultsNotice,
 } from './push-subscriptions-db';
 export type {
   PushSubscriptionRecord,
   UpsertPushSubscriptionInput,
   PushNotificationKind,
+  PushSubscriptionPreferenceUpdate,
 } from './push-subscriptions-db';
 
 // verification-db (verification gate runs, Issue #1542)

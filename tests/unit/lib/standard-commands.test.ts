@@ -271,8 +271,11 @@ describe('STANDARD_COMMANDS', () => {
   });
 
   // Issue #1913: /compact used to be listed here too. It is not in the opencode
-  // 1.18.21 palette — typing the full /compact matches nothing but the /review
+  // palette — typing the full /compact matches nothing but the /review
   // description text — so the opencode scope was dropped from that entry.
+  // Issue #2036 re-measured this on 1.18.22 and found it worse than absent:
+  // Enter on that fuzzy match substitutes /review into the composer, so the
+  // entry would offer one command and run another.
   it('should have commands shared between Claude and OpenCode', () => {
     const sharedCommands = ['help'];
     sharedCommands.forEach((name) => {
@@ -335,6 +338,9 @@ describe('STANDARD_COMMANDS', () => {
 
   // Issue #1913: reconciled against the opencode 1.18.21 palette (18 rows,
   // /agents … /variants). -1 phantom (/compact) +9 missing. 10 -> 18.
+  // Issue #2036: re-read on 1.18.22 against two sources that had to agree —
+  // `GET /command` (which carries /init and /review and nothing else here) and
+  // the palette scrolled end to end. Same 18 names, so the set does not move.
   it('should ship exactly the attested OpenCode command set', () => {
     expect(visibleTo('opencode')).toEqual(attestedFor('opencode'));
   });
@@ -976,7 +982,11 @@ describe('copilot / opencode catalog reconcile (Issue #1913)', () => {
     expect(ATTESTATION_INDEX.get('copilot')?.version).toBe(CATALOG_VERIFIED_AGAINST.copilot);
     expect(ATTESTATION_INDEX.get('opencode')?.version).toBe(CATALOG_VERIFIED_AGAINST.opencode);
     expect(ATTESTATION_INDEX.get('copilot')?.observedAt).toBe('2026-08-22');
-    expect(ATTESTATION_INDEX.get('opencode')?.observedAt).toBe('2026-08-22');
+    // Issue #2036 re-read the opencode source on 1.18.22 and the 18 names came
+    // back byte-identical, so only the date and version moved. The pin is the
+    // measured date, never a loosened one: a stale date is exactly the drift
+    // this record exists to catch.
+    expect(ATTESTATION_INDEX.get('opencode')?.observedAt).toBe('2026-08-25');
   });
 });
 

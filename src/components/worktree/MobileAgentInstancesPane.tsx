@@ -28,6 +28,7 @@ import {
 import { Checkbox } from '@/components/ui';
 import { MIN_VISIBLE_INSTANCES } from '@/hooks/useMobileSelectedInstances';
 import { AgentInstancesPane } from '@/components/worktree/AgentInstancesPane';
+import type { AgentEventSourceView } from '@/types/models';
 
 export interface MobileAgentInstancesPaneProps {
   /** Worktree ID for API calls */
@@ -55,6 +56,16 @@ export interface MobileAgentInstancesPaneProps {
    * Read-only; absent entries render nothing.
    */
   modelByInstance?: Readonly<Partial<Record<string, string | null>>>;
+  /**
+   * Issue #2054: instanceId -> what is reading that instance besides the frame.
+   *
+   * Forwarded to the shared {@link AgentInstancesPane}, which renders the
+   * warning row. Optional and normally absent: with nothing supplied the shared
+   * pane reads for itself, and only when the roster contains a tool whose source
+   * can be degraded. Passing it is how a caller that already holds
+   * `sessionStatusByInstance` avoids a second read.
+   */
+  sourceByInstance?: Readonly<Partial<Record<string, AgentEventSourceView>>>;
 }
 
 export const MobileAgentInstancesPane = memo(function MobileAgentInstancesPane({
@@ -68,6 +79,7 @@ export const MobileAgentInstancesPane = memo(function MobileAgentInstancesPane({
   visibleInstanceIds,
   onToggleInstanceVisible,
   modelByInstance,
+  sourceByInstance,
 }: MobileAgentInstancesPaneProps) {
   const t = useTranslations('schedule');
   // Issue #1783: model wording lives in the `worktree` namespace.
@@ -89,6 +101,10 @@ export const MobileAgentInstancesPane = memo(function MobileAgentInstancesPane({
         onVibeLocalContextWindowChange={onVibeLocalContextWindowChange}
         // Issue #1783: read-only observed model per roster row.
         modelByInstance={modelByInstance}
+        // Issue #2054: forwarded so the shared pane does not have to read twice
+        // when a caller already holds the map. Undefined leaves it reading for
+        // itself, which is the mobile shell's path today.
+        sourceByInstance={sourceByInstance}
       />
 
       {/* Per-device "show as tabs" selection (localStorage, never the DB). */}

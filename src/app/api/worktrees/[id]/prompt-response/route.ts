@@ -13,7 +13,7 @@ import { isCliToolType, isValidInstanceId, type CLIToolType } from '@/lib/cli-to
 import { captureSessionOutputFresh } from '@/lib/session/cli-session';
 import { detectPrompt, type PromptDetectionResult } from '@/lib/detection/prompt-detector';
 import { stripAnsi, stripBoxDrawing, buildDetectPromptOptions } from '@/lib/detection/cli-patterns';
-import { sendPromptAnswer } from '@/lib/prompt-answer-sender';
+import { sendPromptAnswer, PromptAnswerRejectedError } from '@/lib/prompt-answer-sender';
 import { resolvePromptAnswer, PromptAnswerResolutionError, type AnswerResolution } from '@/lib/prompt-answer-semantic';
 import { getAskUserQuestion } from '@/lib/session/agent-event-state';
 import { answerStructuredDecision } from '@/lib/hooks/structured-decision-response';
@@ -193,8 +193,13 @@ export async function POST(
     // detection (in current-output API) and sending (here), causing "1" to
     // be typed at the Claude user input prompt instead of a tool permission prompt.
     let promptCheck: PromptDetectionResult | null = null;
+    // Issue #2033: kept outside the try so the answerMode guard below judges the
+    // SAME frame this verification passed, rather than taking a second capture
+    // of a screen that may have moved on.
+    let verifiedFrame: string | null = null;
     try {
       const currentOutput = await captureSessionOutputFresh(id, cliToolId, undefined, instanceId);
+      verifiedFrame = currentOutput;
       const cleanOutput = stripAnsi(currentOutput);
       const promptOptions = buildDetectPromptOptions(cliToolId);
       promptCheck = detectPrompt(stripBoxDrawing(cleanOutput), promptOptions);
@@ -288,8 +293,31 @@ export async function POST(
         fallbackPromptType: bodyPromptType,
         fallbackDefaultOptionNumber: bodyDefaultOptionNumber,
         fallbackSubmitMode: validSubmitMode,
+        // Issue #2033: the frame the prompt was re-verified against, raw. Undefined
+        // only when that capture failed, where the sender reads the pane itself.
+        frame: verifiedFrame ?? undefined,
       });
     } catch (error: unknown) {
+      // Issue #2033: a refusal is not a transport failure. Nothing was typed and
+      // the dialog is untouched, so it is reported the same way this route's
+      // other pre-send refusals are — `success: false` with a reason code — and
+      // not as a 500 that would leave the operator unsure whether a key landed.
+      if (error instanceof PromptAnswerRejectedError) {
+        logger.info('prompt-response-refused', {
+          worktreeId: id,
+          cliToolId,
+          instanceId,
+          reason: error.reason,
+          dialogKind: error.dialogKind,
+          answerMode: error.answerMode,
+        });
+        return NextResponse.json({
+          success: false,
+          reason: error.reason,
+          message: error.message,
+          answer: answer ?? '',
+        });
+      }
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       return NextResponse.json(
         { error: `Failed to send answer to tmux: ${errorMessage}` },

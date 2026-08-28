@@ -12,8 +12,27 @@
     "completion": "完了も知らせる（任意）",
     "completionDesc": "対応の要らない正常完了。新しく登録した端末では既定でオフです（この端末の設定はここで変えられます）"
   },
+  "defaultsNotice": {
+    "heading": "通知の既定が変わりました",
+    "completionChanged": "対応の要らない正常完了は、新しく登録した端末では既定でオフになりました。この端末はオンのままなので、これまでどおり届きます。",
+    "failuresAdded": "「対応が必要なとき」に、検証ゲートの不合格・上流APIの障害・セッションの起動失敗の3種が加わりました。この端末はこれらも受け取ります。",
+    "adopt": "新しい既定にする（完了通知をオフ）",
+    "keep": "この端末の設定を保つ",
+    "adopted": "完了通知をこの端末でオフにしました",
+    "kept": "この端末の設定はそのままにしました"
+  },
   "permission": {
     "denied": "ブラウザの設定で通知がブロックされています。このサイトの通知を許可してください。"
+  },
+  "delivery": {
+    "headingFailing": "この端末には通知が届いていません",
+    "headingRemoved": "この端末の購読はプッシュサービス側で失効しました",
+    "failing": "直近 {count} 件の通知がプッシュサービスに拒否されました（HTTP {status}）。購読は削除されていません。",
+    "failingUnknownStatus": "直近 {count} 件の通知がプッシュサービスに拒否されました。購読は削除されていません。",
+    "removed": "プッシュサービスがこの購読を失効と報告したため（HTTP {status}）、送信を停止しました。下のボタンで通知を有効にし直すと再購読できます。",
+    "removedUnknownStatus": "プッシュサービスがこの購読を失効と報告したため、送信を停止しました。下のボタンで通知を有効にし直すと再購読できます。",
+    "apnsHint": "iPhone / iPad で HTTP 403 が出る場合、サーバーの CM_VAPID_SUBJECT が Apple の受け付けない値になっていることがほとんどです。docs/user-guide/webapp-guide.md を参照してください。",
+    "since": "最初の失敗: {timestamp}"
   },
   "unsupported": "このブラウザはプッシュ通知に対応していません。",
   "notConfigured": "このサーバーではプッシュ通知が設定されていません。VAPID鍵を設定すると有効になります。",
@@ -45,7 +64,10 @@
     "failureSessionUnavailable": "セッションを起動できませんでした: CLI ツールがインストールされていません",
     "failureWithExcerpt": "失敗しました: {excerpt}",
     "failure": "失敗しました",
-    "promptResolved": "対応済みです（他の端末で応答されました）"
+    "failureAgentSessionWithExcerpt": "エージェントがエラーで停止しました: {excerpt}",
+    "failureAgentSession": "エージェントがエラーで停止しました",
+    "promptResolved": "対応済みです（他の端末で応答されました）",
+    "updateAvailable": "{agent} の更新が利用できます: {version}"
   },
   "escalation": {
     "heading": "再通知",

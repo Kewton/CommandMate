@@ -110,6 +110,33 @@ export interface AgentInstance {
   order: number;
 }
 
+/**
+ * Mirrors: src/app/api/worktrees/[id]/opencode/session/route.ts GET response
+ * (Issue #2038).
+ *
+ * opencode-only. Every field is nullable because the interesting case is a
+ * **stopped** instance: the session id there is what the next launch will pass
+ * to `opencode -s <id>`, and nothing is running to describe it.
+ */
+export interface OpencodeInstanceSession {
+  instanceId: string;
+  /** opencode's `Session.id`, or null when nothing has been recorded yet. */
+  sessionId: string | null;
+  /** opencode's `Session.title`, or null. Display only. */
+  title: string | null;
+  /** The directory opencode reported the session belongs to, or null. */
+  worktreePath: string | null;
+  /** Epoch ms the memory was written, or null. */
+  updatedAt: number | null;
+  /** Whether an opencode server is currently attached to this instance. */
+  live: boolean;
+}
+
+/** Mirrors: the same route's GET body (Issue #2038). */
+export interface OpencodeSessionsResponse {
+  instances: OpencodeInstanceSession[];
+}
+
 // Mirrors: src/app/api/worktrees/[id]/route.ts GET response shape (subset used
 // by the CLI `instances` command; omits gitStatus/session fields not needed here)
 export interface WorktreeDetailResponse extends WorktreeItem {
@@ -371,6 +398,33 @@ export interface CurrentOutputResponse {
        * what has expired is the server's ability to answer it automatically.
        */
       deliveryExpired: boolean;
+      /**
+       * Whether a human is being asked to approve or to choose (Issue #2040).
+       *
+       * `permission` / `question`. The two block a worker identically and are
+       * answered completely differently — three fixed verdicts against the
+       * agent's own published choices — so a reader deciding whether to answer
+       * at all has to see this first.
+       *
+       * String-typed and optional for this file's two usual reasons: a newer
+       * server may name a third kind, and a server from before #2040 sends no
+       * such key. Absent means "this daemon predates the field", never
+       * "unknown".
+       */
+      kind?: string;
+      /**
+       * The choices a pending question offers, or null (Issue #2040).
+       *
+       * Null on every approval — an approval's three verdicts belong to the
+       * SOURCE and are published as `promptData.decisionOptions` — and null on a
+       * question whose payload is no longer held, because the numbers are the
+       * payload's own order and quoting them from anything else would number a
+       * list the agent never sent.
+       *
+       * These are the numbers `commandmate respond <worktree> <n>` resolves
+       * against on an agent that publishes decision ids.
+       */
+      questionOptions?: Array<{ number: number; label: string }> | null;
     }>;
     /**
      * What this instance has had dropped by the structured layer's own bounds,
@@ -509,10 +563,168 @@ export interface CurrentOutputResponse {
         permissionHookPredictsDialog: boolean;
         sessionStartMayArriveLate: boolean;
         permissionReplyReleasesPrompt: boolean;
+        /**
+         * Where a frame-unique id for this source comes from, or null.
+         *
+         * Non-null is what makes an option number a VERDICT the server can POST
+         * rather than a key it has to type, which is the gate `commandmate
+         * respond` reads before choosing an endpoint (Issue #2040).
+         */
         eventIdentity: string | null;
         resync: string;
       };
+      /**
+       * Which machinery is speaking for this pane right now (Issue #2054).
+       *
+       * `sse` / `hooks` / `scraper` — **string-typed, and optional, for the two
+       * reasons the block above already gives.** A server newer than this CLI
+       * can name a transport this build has never heard of, and a server older
+       * than #2054 sends no `kind` at all; narrowing to the union would turn
+       * both into a parse failure on a payload the reader could otherwise print.
+       */
+      kind?: string;
+      /**
+       * Why this pane is not on the machinery its tool declares (Issue #2054).
+       *
+       * A token — `port_identity_changed`, `heartbeat_stale`, `not_subscribed`,
+       * or whatever the transport recorded. Absent when nothing is degraded, and
+       * absent on every push tool.
+       */
+      degradedReason?: string;
+      /** `live` / `stale`, or absent. Issue #2054, string-typed as above. */
+      liveness?: string;
+      /**
+       * What the source said about this instance's activity when its stream was
+       * last attached, or null (Issue #2054).
+       *
+       * A record of one instant — `at` is when it was asked — and not a live
+       * reading: `capture --json | jq '.structuredEvents.source.probedActivity'`
+       * answers "was the pane mid-turn when CommandMate connected?", which is a
+       * question the stream itself cannot answer until the turn ends. Null for
+       * every tool that is not a subscription source.
+       */
+      probedActivity?: { activity: string | null; at: number } | null;
     };
+    /**
+     * What the agent says about the conversation this instance is in, or null
+     * (Issue #2040).
+     *
+     * Mirrors: src/lib/hooks/agent-session-telemetry.ts AgentSessionRecord.
+     *
+     * The half of a worker's state a terminal frame cannot show — which
+     * session, which persona, which model, what it has cost. Read off frames
+     * the server was already receiving, so it costs no request; null on every
+     * tool that publishes none (all but opencode today), on an opencode pane
+     * whose stream has not reported a session yet, and on one that has been
+     * killed since it did.
+     *
+     * Every value is the agent's own, unrounded and unformatted: a reader
+     * compares them against what the agent reports about itself, and tidying on
+     * the way out breaks that comparison exactly when it matters.
+     */
+    session?: {
+      /** The agent's own session id, or null. */
+      id: string | null;
+      /** The agent's own title for it, or null. Display only, bounded. */
+      title: string | null;
+      /** Which persona is driving (opencode's `build` / `plan` / …), or null. */
+      agent: string | null;
+      /** The model id, verbatim, or null. */
+      model: string | null;
+      /** The provider that model belongs to, verbatim, or null. */
+      provider: string | null;
+      /** What the session has cost so far, in the agent's own unit, or null. */
+      cost: number | null;
+      /**
+       * The tokens spent, as the agent counts them.
+       *
+       * Null members mean "the agent did not say", never zero. `cacheRead` /
+       * `cacheWrite` are opencode's `tokens.cache.read` / `.write`, flattened;
+       * `total` is declared on an assistant message rather than on a session, so
+       * it is null today and is NOT this server's own sum of the other five.
+       */
+      tokens: {
+        input: number | null;
+        output: number | null;
+        reasoning: number | null;
+        cacheRead: number | null;
+        cacheWrite: number | null;
+        total: number | null;
+      };
+      /** Epoch ms this record was written, so a reader can judge its age. */
+      at: number;
+    } | null;
+    /**
+     * How full this instance's context window is, or null (Issue #2042).
+     *
+     * Mirrors: src/lib/hooks/agent-session-telemetry.ts
+     * AgentSessionContextUsage.
+     *
+     * **Not derivable from `session.tokens`, which is why it is its own block.**
+     * Those counts are the session's *cumulative* spend — the figure `opencode
+     * stats` prints — while "how much of the window is in use" is the last
+     * finished assistant turn's footprint. Measured over two turns the session
+     * summed to 16,999 (`2%`) where opencode's own footer read 8,508 (`1%`), and
+     * the gap widens with every turn.
+     *
+     * Every member here is computed by the server from two reads of the agent's
+     * own API, so unlike `session` this block is *derived*: `percent` is
+     * opencode's own `round(tokens / limit.context * 100)`, transcribed from
+     * 1.18.22 rather than guessed.
+     *
+     * Optional, and null until the first measurement lands — it is refreshed off
+     * the poll path, so the poll that notices a turn ended publishes the
+     * previous numbers and the next one publishes the new. Null forever on every
+     * tool but opencode.
+     */
+    sessionContext?: {
+      /** The last finished assistant turn's token footprint, or null. */
+      tokens: number | null;
+      /** The model's declared context window (`limit.context`), or null. */
+      limit: number | null;
+      /** `round(tokens / limit * 100)`, or null when either input is null. */
+      percent: number | null;
+      /** The `session.at` these numbers were measured against. */
+      sessionAt: number;
+      /** Epoch ms this record was written. */
+      at: number;
+    } | null;
+    /**
+     * What the last opencode turn changed on disk (Issue #2043), or null.
+     *
+     * Mirrors: src/lib/hooks/sources/opencode/diff.ts
+     * OpencodeSessionDiffRecord.
+     *
+     * **`files` and `revertedFiles` are different questions.** `files` is what
+     * the turn named by `turnMessageId` changed, read from
+     * `GET /session/:id/diff?messageID=...` — the only call measured to answer
+     * it on 1.18.22. `revertedFiles` is what a revert is holding back right now,
+     * off the `session.diff` frame, and is empty whenever nothing is reverted.
+     *
+     * Issue #2043 assumed `session.diff` carried the first of these. It does
+     * not: every `session.diff` frame of two file-editing turns carried
+     * `diff: []`, including the one emitted alongside `session.idle`. See
+     * `docs/design/opencode-server-live-verification.md` §16.
+     *
+     * Optional and null for every tool but opencode, and for an opencode pane
+     * whose stream has not reported a turn yet.
+     */
+    sessionDiff?: {
+      /** The session these files belong to, or null. */
+      sessionId: string | null;
+      /** The user message whose turn `files` describes, or null. */
+      turnMessageId: string | null;
+      /** What that turn changed. Empty until the read has answered. */
+      files: AgentSessionDiffFile[];
+      /** Epoch ms `files` was read at, or null when it never was. */
+      filesAt: number | null;
+      /** What a revert is holding back. Empty when nothing is. */
+      revertedFiles: AgentSessionDiffFile[];
+      /** The message a revert is holding back to, or null. */
+      revertedMessageId: string | null;
+      /** Epoch ms the newest frame that touched this record arrived. */
+      at: number;
+    } | null;
   };
   /**
    * Issue #1839: the upstream (model API) fault visible on the live frame, or
@@ -535,6 +747,36 @@ export interface CurrentOutputResponse {
     /** `overloaded` / `retrying` / `limit-reached` / `api-error`. */
     id: string;
     /** The whole line that matched, trimmed and bounded to 200 UTF-8 bytes. */
+    matchedText: string;
+    /** Epoch ms the frame was captured. */
+    at: number;
+  } | null;
+  /**
+   * Issue #2095: a second column sharing rows with the agent's transcript, or
+   * null when the frame's layout could not be read as two columns.
+   *
+   * Mirrors: src/lib/session/current-output-builder.ts
+   * CurrentOutputPayload.paneObstruction
+   *
+   * **null is not an all-clear**, for the same reason {@link upstreamFault}'s is
+   * not: an opencode permission dialog removes the border row the geometry is
+   * measured from, and no tool other than opencode is examined at all.
+   *
+   * The one value shipped is `opencode_sidebar` — opencode's own sidebar, turned
+   * on by `ctrl+x b` or by its `ctrl+p` palette, painted across the same rows as
+   * the transcript and the input box. It hides the marker that ends a turn, so
+   * the pane reads `running` / `unknown_frame` until it is closed. `wait` does
+   * not branch on this field; it names it in the message it already prints for
+   * an unclassified frame.
+   *
+   * Optional here for the same reason as every other field on this mirror: an
+   * older daemon sends nothing, and the CLI is routinely newer than the server
+   * it dials.
+   */
+  paneObstruction?: {
+    /** `opencode_sidebar`. */
+    id: string;
+    /** The second column's own text, trimmed and bounded to 200 UTF-8 bytes. */
     matchedText: string;
     /** Epoch ms the frame was captured. */
     at: number;
@@ -689,6 +931,35 @@ export interface PromptData {
    * them on its exit-10 output so the caller is told what `respond` will take.
    */
   decisionOptions?: Array<{ number: number; label: string; reply: string }>;
+  /**
+   * The agent's own id for the decision this dialog is (Issue #1932 / #2100).
+   *
+   * Mirrors: src/lib/session/structured-prompt.ts
+   * StructuredPromptWaitingData.decisionId.
+   *
+   * `null` is a real answer — "this server looked and there is no addressable
+   * decision" — and is distinct from the field being absent, which means a
+   * daemon from before #2031 sent no such key at all. Present for BOTH kinds of
+   * addressable decision since #2100: an approval, whose replies are
+   * {@link decisionOptions}, and a question, whose replies are the numbered
+   * choices published on `structuredEvents.pendingDecisions[].questionOptions`.
+   * The two are never published together — see the note on
+   * `readPromptQuestionChoices`.
+   */
+  decisionId?: string | null;
+  /**
+   * What the agent asked, when this dialog is an `AskUserQuestion`-style call
+   * (Issue #1726).
+   *
+   * Mirrors: src/lib/session/structured-prompt.ts
+   * StructuredAskUserQuestionSummary.
+   *
+   * Whether the numbers here may be ANSWERED is not a property of this field:
+   * it is `decisionId` plus `questionCount === 1` plus the absence of
+   * {@link decisionOptions}. Claude publishes this summary for a picker only
+   * its pane can see, with no id to deliver an answer to.
+   */
+  askUserQuestion?: { question: string; labels: string[]; questionCount: number };
   [key: string]: unknown;
 }
 
@@ -739,6 +1010,51 @@ export interface PromptResponseResult {
     optionLabel: string;
     /** The approval that was answered (Issue #1898). Absent on the key paths. */
     decisionId?: string;
+  };
+}
+
+/**
+ * Mirrors: src/app/api/worktrees/[id]/respond/structured-decision.ts, the body
+ * of `POST /api/worktrees/[id]/respond` for the two id-less shapes
+ * (Issue #2040).
+ *
+ * A different route from {@link PromptResponseResult} and therefore a different
+ * mirror, even though `respond` reports both through the same lines. The
+ * difference that matters is `resolved.via`: this route answers a QUESTION as
+ * well as an approval, and a question's answer is a list of labels rather than
+ * one verdict — so `optionNumber` / `optionLabel` are absent on that branch and
+ * `answers` / `optionNumbers` / `optionLabels` / `freeText` take their place.
+ *
+ * Every field is optional for this file's usual reason: the CLI is routinely
+ * newer than the daemon it dials, and a server from before #2040 answers this
+ * body's shape only for the `{ decisionId, answer }` request.
+ */
+export interface StructuredDecisionResult {
+  /** False when the verdict was resolved but the POST to the agent did not land. */
+  success: boolean;
+  /** The option number for an approval; the chosen numbers, or the text, for a question. */
+  answer: string;
+  /** `decision_not_delivered` — the only reason this shape carries on a 200. */
+  reason?: string;
+  /** Detail accompanying a reason, when the server sent one. */
+  message?: string;
+  resolved?: {
+    /** `structured-decision` for an approval, `structured-question` for a question. */
+    via: 'structured-decision' | 'structured-question';
+    /** Approval only: 1 = Allow once, 2 = Allow always, 3 = Reject. */
+    optionNumber?: number;
+    /** Approval only: the verdict's label. */
+    optionLabel?: string;
+    /** The decision that was answered. */
+    decisionId?: string;
+    /** Question only: exactly what went on the wire — one array of labels per question. */
+    answers?: string[][];
+    /** Question only: the numbers the answer named, empty for free text. */
+    optionNumbers?: number[];
+    /** Question only: the labels those numbers named. */
+    optionLabels?: string[];
+    /** Question only: whether this was prose the agent never offered as a choice. */
+    freeText?: boolean;
   };
 }
 
@@ -1559,4 +1875,59 @@ export interface TaskListResponse {
 export interface TaskDetailResponse {
   task: TaskView;
   lastVerificationRun: VerificationRunView | null;
+}
+
+/**
+ * One file in `structuredEvents.sessionDiff` (Issue #2043).
+ *
+ * Mirrors: src/lib/hooks/sources/opencode/client.ts OpencodeFileDiff.
+ *
+ * `file`, `patch` and `status` are nullable because opencode's own OpenAPI
+ * marks only `additions` and `deletions` required on `SnapshotFileDiff`
+ * (1.18.22, `GET /doc`).
+ */
+export interface AgentSessionDiffFile {
+  /** Repository-relative path, or null when the agent did not name one. */
+  file: string | null;
+  /** Unified diff for this file, or null. */
+  patch: string | null;
+  additions: number;
+  deletions: number;
+  /** `added` | `deleted` | `modified`, or null. */
+  status: 'added' | 'deleted' | 'modified' | null;
+}
+
+/**
+ * One session an interrupt actually reached (Issue #2101).
+ *
+ * Mirrors: src/app/api/worktrees/[id]/interrupt/route.ts InterruptResult.
+ *
+ * `cliToolId` is `string` rather than a union for the same reason
+ * {@link WorktreeItem.cliToolId} is: the CLI bundle keeps its own copy of the
+ * API shapes, and a newer daemon naming a tool this build has never heard of
+ * must print through rather than fail to parse.
+ */
+export interface InterruptedSession {
+  cliToolId: string;
+  /** Primary instances carry `instanceId === cliToolId` (Issue #868). */
+  instanceId: string;
+  /** tmux session name, e.g. `mcbd-opencode-<worktree-id>`. */
+  sessionName: string;
+}
+
+/**
+ * Mirrors: src/app/api/worktrees/[id]/interrupt/route.ts POST 200 response
+ * (Issue #2101).
+ *
+ * The route answers 404 `{ error: 'No active sessions found' }` instead of a
+ * 200 with an empty list, so `interrupted` is never empty on this shape — see
+ * `src/cli/commands/interrupt.ts` for how that 404 becomes
+ * {@link InterruptExitCode.NO_ACTIVE_SESSIONS} rather than a generic
+ * "resource not found".
+ */
+export interface InterruptResponse {
+  success: boolean;
+  /** e.g. `Interrupt sent to 1 session(s)`. */
+  message: string;
+  interrupted: InterruptedSession[];
 }

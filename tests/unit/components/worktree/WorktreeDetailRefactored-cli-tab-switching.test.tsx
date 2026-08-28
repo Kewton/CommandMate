@@ -371,6 +371,10 @@ function makePaneState(cliToolId: string) {
       autoScroll: true,
     },
     prompt: { visible: false, data: null, messageId: null, answering: false },
+    // Issue #2042: part of the hook's return. Kept here so the mock does
+    // not claim a shape the hook never returns — the panes read
+    // `agentSession.session` unconditionally.
+    agentSession: { session: null, context: null },
     setAutoScroll: vi.fn(),
     setPromptAnswering: vi.fn(),
     clearPrompt: vi.fn(),

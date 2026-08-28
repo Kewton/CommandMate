@@ -19,7 +19,25 @@
  *   read this through `describeAbstain()` and owe the operator a visible signal.
  * - **`configScope: 'none'`** — nothing is written anywhere. No settings file,
  *   no hooks entry, no change to `~/.config/opencode/opencode.jsonc`. The whole
- *   integration is a `--port` argument and a subscription.
+ *   integration is a `--port` argument and a subscription. **#2053 re-opened
+ *   this and closed it again.** Handing opencode an inline config through
+ *   `OPENCODE_CONFIG_CONTENT` writes no file, and a `permission` `deny` declared
+ *   that way really does make the dialog disappear — measured on 1.18.22,
+ *   `permission.asked` went from 1 to 0 and the turn completed on `session.idle`
+ *   instead of blocking forever. It is still not adopted, because inline config
+ *   is the *top* of a five-layer precedence chain and therefore overwrites the
+ *   operator's own `permission` rules with no warning and no way for
+ *   CommandMate to see the collision: a string `permission.bash: "ask"` is
+ *   replaced wholesale by an injected object (silently downgrading every
+ *   unnamed command to the built-in `allow`), and within a merged object the
+ *   rule order beats pattern specificity, so a broad glob from CommandMate
+ *   defeats an exact-match rule the operator wrote. A malformed injection also
+ *   makes the TUI refuse to start and exit 0 with no port, while `serve` keeps
+ *   answering `GET /global/health` with `healthy` — a failure `liveness()`
+ *   reports as alive. Ruling and the alternative (read the merged `permission`
+ *   instead of writing one): `docs/design/agent-event-source-interface.md` §3.4;
+ *   measurements: `docs/design/opencode-server-live-verification.md` §26.
+ *   Pinned by `tests/unit/hooks/sources/opencode-config-scope-2053.test.ts`.
  * - **`decisionTimeoutSeconds: null`** — the honest encoding of "waits forever".
  *   Not zero, which would read as "answer instantly or lose the chance", and not
  *   a large number, which would read as a deadline that exists.
@@ -71,6 +89,10 @@ import {
   toOpencodePendingPermission,
   toOpencodePendingQuestion,
 } from './payloads';
+import {
+  getOpencodeLaunchSettings,
+  opencodeLaunchArguments,
+} from './launch-settings';
 import { getAssignedOpencodePort } from './ports';
 import {
   getOpencodeLiveness,
@@ -268,6 +290,22 @@ async function probeOpencodeActivity(
  * `--hostname` is passed explicitly even though `127.0.0.1` is the default,
  * because the default is the security property: the server is unauthenticated,
  * and `--mdns` (never passed) would move it to `0.0.0.0` (#1758 §5.8.3).
+ *
+ * ## The instance's own settings (Issue #2048)
+ *
+ * `--agent` and `--model` are appended when the operator configured them for
+ * this instance, from the cache `loadOpencodeLaunchSettings` filled immediately
+ * before this call — see `./launch-settings` for why the value arrives that way
+ * rather than on {@link AgentLaunchContext}. **The `bare` branches above stay
+ * bare**: a launch with no port has no structured events, and an operator who
+ * turned hook injection off asked for the pre-#1763 command line, so neither is
+ * a place to start adding flags.
+ *
+ * The variant is deliberately not here. `--variant` is a flag of `opencode run`
+ * and **not** of the TUI (measured on 1.18.22,
+ * `docs/design/opencode-server-live-verification.md` §20.3): passing it makes
+ * opencode print its usage and exit, leaving an empty pane. It travels on the
+ * prompt instead, which is the one channel measured to apply it.
  */
 export function prepareOpencodeLaunch({
   target,
@@ -280,11 +318,18 @@ export function prepareOpencodeLaunch({
   if (!isHookInjectionEnabled()) return bare;
   const port = getAssignedOpencodePort(target);
   if (port === null) return bare;
+  const settings = opencodeLaunchArguments(getOpencodeLaunchSettings(target));
   return {
-    command: `${shellQuote(executablePath)} --port ${port} --hostname ${OPENCODE_SERVER_HOST}`,
+    command:
+      `${shellQuote(executablePath)} --port ${port} --hostname ${OPENCODE_SERVER_HOST}` +
+      settings,
     // Nothing is written to disk. `configScope: 'none'` says the same thing to
     // a caller that asks the capabilities instead of the plan.
     settingsPath: null,
+    // `env` stays empty on purpose, and #2053 is the reason it is worth saying
+    // twice: `OPENCODE_CONFIG_CONTENT` would fit here and would work, but it is
+    // the top precedence layer, so anything CommandMate puts in it silently
+    // outranks the operator's own config. See the module doc.
     env: {},
   };
 }
@@ -303,6 +348,9 @@ export const opencodeAgentEventSource: AgentEventSource = definePullEventSource(
 
   capabilities: {
     supportedEvents: OPENCODE_SUPPORTED_EVENTS,
+    // #2053 measured the one candidate for changing this — an inline config in
+    // `OPENCODE_CONFIG_CONTENT` — and ruled against it. Read the module doc
+    // before flipping this value; the reason is not "it does not work".
     configScope: 'none',
     decisionTimeoutSeconds: null,
     // Issue #1924, §4 D3. Not hooks at all: CommandMate holds the SSE stream and

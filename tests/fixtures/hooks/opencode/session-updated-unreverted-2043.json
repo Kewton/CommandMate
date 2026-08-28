@@ -1,0 +1,41 @@
+{
+  "id": "evt_039b5f2c5001wMLGpb61W0Fu4V",
+  "type": "session.updated",
+  "properties": {
+    "sessionID": "ses_fc65b58b2ffe0kur0cUkuLmkrr",
+    "info": {
+      "id": "ses_fc65b58b2ffe0kur0cUkuLmkrr",
+      "slug": "lucky-canyon",
+      "projectID": "3a8e812fc52219ea0e9d31f999571c626186efd6",
+      "directory": "<WORKTREE_PATH>",
+      "path": "",
+      "title": "Editing sample.txt line2 and creating added.txt with banana",
+      "agent": "build",
+      "model": {
+        "id": "claude-sonnet-4.6",
+        "providerID": "github-copilot",
+        "variant": "default"
+      },
+      "version": "1.18.22",
+      "summary": {
+        "additions": 2,
+        "deletions": 0,
+        "files": 2
+      },
+      "cost": 0.0693171,
+      "tokens": {
+        "input": 14,
+        "output": 867,
+        "reasoning": 0,
+        "cache": {
+          "read": 64442,
+          "write": 9850
+        }
+      },
+      "time": {
+        "created": 1787673487181,
+        "updated": 1787674620613
+      }
+    }
+  }
+}

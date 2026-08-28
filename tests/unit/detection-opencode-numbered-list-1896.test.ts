@@ -278,13 +278,20 @@ describe('Issue #1896: opencode’s real dialogs are still detected', () => {
     expect(result.reason).toBe(STATUS_REASON.OPENCODE_RESPONSE_COMPLETE);
   });
 
-  it('records the ctrl+p command palette as an unclassified frame, not a completion', () => {
-    // A gap this Issue deliberately does not close: opencode draws the same
+  it('never reads the ctrl+p command palette as a completion', () => {
+    // A gap this Issue deliberately did not close: opencode draws the same
     // picker chrome under a `Commands` header, which the allowlist does not
-    // cover — before or after this change. It lands on the "no positive
-    // evidence" side, which #1708's unclassified path already handles (`wait`
-    // stops after the dwell), so it is safe to leave to a change that can bring
-    // its own live frames. If this ever flips to `ready`, that is a regression.
+    // cover — before or after #1896. It landed on the "no positive evidence"
+    // side, which #1708's unclassified path already handles (`wait` stops after
+    // the dwell), so it was safe to leave to a change that could bring its own
+    // live frames. Issue #2112 was that change: the palette is now
+    // `waiting` / `opencode_modal_overlay`, read off the rectangle it is painted
+    // as rather than off its heading.
+    //
+    // The assertion is deliberately unchanged. What it has always been about is
+    // that this frame must not be read as a finished turn, and that is true
+    // under both answers — which is what makes it a regression pin rather than a
+    // restatement of whichever rule happens to be answering.
     const result = statusOf(frame('command-palette'));
     expect(result.status).not.toBe('ready');
     expect(result.hasActivePrompt).toBe(false);

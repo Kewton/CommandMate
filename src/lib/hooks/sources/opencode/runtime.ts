@@ -1,5 +1,5 @@
 /**
- * The three calls `OpenCodeTool` makes (Issue #1763).
+ * The calls `OpenCodeTool` makes into the event pipeline (Issue #1763).
  *
  * `src/lib/cli-tools/opencode.ts` owns the tmux pane; this module owns the
  * event stream that runs beside it. Keeping them apart is what stops the
@@ -7,6 +7,11 @@
  * `../registry` statically imports `./source`, so anything `./source` reaches
  * is reached by every import of `@/lib/hooks/sources`, and the wiring below is
  * the only place that pulls `./ingest` in.
+ *
+ * Three of them are the lifecycle below. The fourth is {@link abortOpencodeTurn},
+ * which is not lifecycle at all: it is the interrupt path taking the server
+ * route when there is one (Issue #2034), and it fails open to the keyboard the
+ * same way everything else here fails open to the scraper.
  *
  * ## The lifecycle, and what it deliberately does not include
  *
@@ -28,7 +33,7 @@
 
 import { createLogger } from '@/lib/logger';
 import type { AgentInstanceRef } from '../types';
-import { probeOpencodeHealth, type OpencodeHealth } from './client';
+import { abortOpencodeSession, probeOpencodeHealth, type OpencodeHealth } from './client';
 import { ingestOpencodeEvent } from './ingest';
 import {
   allocateOpencodePort,
@@ -37,7 +42,14 @@ import {
   recoverOpencodePort,
 } from './ports';
 import { opencodeAgentEventSource } from './source';
-import { closeOpencodeSubscription, isOpencodeSubscribed } from './subscription';
+import {
+  closeOpencodeSubscription,
+  getOpencodeLiveness,
+  getOpencodePrimarySession,
+  isOpencodeSubscribed,
+  recordOpencodeProbedActivity,
+  watchOpencodeSessionIdle,
+} from './subscription';
 
 const logger = createLogger('lib/hooks/sources/opencode/runtime');
 
@@ -163,11 +175,13 @@ export async function attachOpencodeEventStream(target: AgentInstanceRef): Promi
     await opencodeAgentEventSource.subscribe(target, (event) => {
       void ingestOpencodeEvent(target, event);
     });
+    const activity = await probeAttachedActivity(target);
     logger.info('opencode-event-stream-attached', {
       worktreeId: target.worktreeId,
       instanceId: target.instanceId ?? target.cliToolId,
       port,
       version: health.version,
+      activity,
     });
     return true;
   } catch (error) {
@@ -177,6 +191,57 @@ export async function attachOpencodeEventStream(target: AgentInstanceRef): Promi
     });
     return false;
   }
+}
+
+/**
+ * Re-read whether the conversation is working, right after a stream attaches
+ * (Issue #2054).
+ *
+ * **The first production caller of `AgentEventSource.probeActivity`.** The
+ * method has existed since Phase 4-1 (#1759) with nothing but its own definition
+ * reading it, and this is the gap it was written for: a stream that opens in the
+ * middle of a turn delivers its first frame when that turn *ends*, so between
+ * {@link attachOpencodeEventStream} and the next `session.idle` — which on a
+ * long turn is minutes — CommandMate has no answer to "is this pane working
+ * right now?" except the screen. `GET /session/status` has the answer and this
+ * is the one call that asks it.
+ *
+ * Deliberately **through the source interface** rather than through
+ * `client.fetchOpencodeActivity`, which this module could import directly. Three
+ * call sites already read `getOpencodeLiveness` directly and Issue #2054's
+ * instruction was not to add a fourth of anything; going through the registered
+ * source also means the port lookup, the "no port assigned" null and the request
+ * timeout are the source's business rather than a second copy of them here.
+ *
+ * Not the same read as `subscription.recoverTurnState`, and it does not replace
+ * it: that one is per *session* and re-arms the turn gate, this one is the
+ * instance-level aggregate the surfaces can render. Both go through the single
+ * reader in `./client`.
+ *
+ * Never throws and never blocks the attach for long — one loopback request
+ * against a server whose health probe has just succeeded, capped by
+ * `OPENCODE_REQUEST_TIMEOUT_MS`.
+ *
+ * @param target - The instance whose stream has just been attached
+ * @returns The answer, or null when the source could not be asked
+ */
+async function probeAttachedActivity(
+  target: AgentInstanceRef
+): Promise<'busy' | 'idle' | null> {
+  let activity: 'busy' | 'idle' | null = null;
+  try {
+    activity = await opencodeAgentEventSource.probeActivity(target);
+  } catch (error) {
+    // A probe that throws is a probe that did not answer, which is what null
+    // already means. The attach itself succeeded and must not be undone by it.
+    logger.debug('opencode-activity-probe-failed', {
+      worktreeId: target.worktreeId,
+      instanceId: target.instanceId ?? target.cliToolId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+  recordOpencodeProbedActivity(target, activity, Date.now());
+  return activity;
 }
 
 /**
@@ -201,6 +266,117 @@ export async function resumeOpencodeEventStream(
   } catch (error) {
     logger.warn('opencode-event-stream-resume-failed', {
       worktreeId: target.worktreeId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return false;
+  }
+}
+
+/**
+ * How long to wait for the `session.idle` that confirms an abort (Issue #2034).
+ *
+ * Two seconds against a measured latency of roughly zero: on 1.18.22 the first
+ * `session.idle` was emitted in the same millisecond as the abort's `200 true`
+ * reply, and #1758 §5.3.2 measured the same on 1.18.3. The budget is not sized
+ * for the ordinary case, it is the point at which "the server took my request"
+ * stops being evidence that the turn ended — and it is spent inside the HTTP
+ * request the Interrupt button is waiting on, so it cannot be generous.
+ *
+ * Only the *failure* path pays it: a confirmed abort resolves as soon as the
+ * frame lands.
+ */
+export const OPENCODE_ABORT_IDLE_TIMEOUT_MS = 2_000;
+
+/**
+ * End the running turn through the server, if there is a server (Issue #2034).
+ *
+ * The primary path for `OpenCodeTool.interrupt`. `POST /session/:id/abort`
+ * ends the turn outright, where the keyboard route depends on the TUI's own
+ * draw state — two Escapes inside a five-second footer label (#1894) that a
+ * picker or a dialog on screen can swallow.
+ *
+ * **Every no is the same no.** No port assigned, a subscription that is not
+ * live, no session the gate calls this instance's, a request that was refused,
+ * a completion that never arrived: all of them answer `false`, and the caller
+ * presses Escape twice exactly as it did before this Issue. That is the whole
+ * safety property — an instance launched with `CM_AGENT_HOOKS_INJECT=0`, or on
+ * an opencode too old for `--port`, must not become an instance that cannot be
+ * interrupted. Nothing here throws, for the same reason.
+ *
+ * The order matters and is measured: the watch is armed **before** the request
+ * goes out, because the idle can be on the wire before the reply is
+ * (see {@link watchOpencodeSessionIdle}).
+ *
+ * @param target - The instance whose turn should stop
+ * @returns Whether the turn was aborted *and* confirmed idle
+ */
+export async function abortOpencodeTurn(target: AgentInstanceRef): Promise<boolean> {
+  const instanceId = target.instanceId ?? target.cliToolId;
+  try {
+    const port = getAssignedOpencodePort(target);
+    if (port === null) return false;
+
+    const liveness = getOpencodeLiveness(target);
+    if (liveness.state !== 'live') {
+      logger.info('opencode-abort-skipped-not-live', {
+        worktreeId: target.worktreeId,
+        instanceId,
+        port,
+        liveness: liveness.state,
+      });
+      return false;
+    }
+
+    const sessionId = getOpencodePrimarySession(target);
+    if (sessionId === null) {
+      logger.info('opencode-abort-skipped-no-session', {
+        worktreeId: target.worktreeId,
+        instanceId,
+        port,
+      });
+      return false;
+    }
+
+    const watch = watchOpencodeSessionIdle(target, sessionId, OPENCODE_ABORT_IDLE_TIMEOUT_MS);
+    const accepted = await abortOpencodeSession(port, sessionId);
+    if (!accepted) {
+      watch.cancel();
+      logger.warn('opencode-abort-rejected', {
+        worktreeId: target.worktreeId,
+        instanceId,
+        port,
+        sessionId,
+      });
+      return false;
+    }
+
+    const confirmed = await watch.seen;
+    if (!confirmed) {
+      // The server said yes and the turn did not end within the budget. Saying
+      // so out loud rather than reporting a success: the caller falls back to
+      // the keystrokes, and an operator seeing this repeatedly is looking at a
+      // server that accepts aborts it does not act on.
+      logger.warn('opencode-abort-unconfirmed', {
+        worktreeId: target.worktreeId,
+        instanceId,
+        port,
+        sessionId,
+        timeoutMs: OPENCODE_ABORT_IDLE_TIMEOUT_MS,
+      });
+      return false;
+    }
+
+    logger.info('opencode-abort-confirmed', {
+      worktreeId: target.worktreeId,
+      instanceId,
+      port,
+      sessionId,
+    });
+    return true;
+  } catch (error) {
+    logger.warn('opencode-abort-failed', {
+      worktreeId: target.worktreeId,
+      instanceId,
       error: error instanceof Error ? error.message : String(error),
     });
     return false;

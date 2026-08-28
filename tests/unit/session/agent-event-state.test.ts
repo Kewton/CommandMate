@@ -239,6 +239,12 @@ describe('structuredEvents exposure (Issue #1722)', () => {
   const claudeSource = {
     cliToolId: 'claude',
     capabilities: getAgentEventSource('claude').capabilities,
+    // Issue #2054 adds these two additively. `hooks` and a null probe is what a
+    // push source publishes on every payload — the two fields only a
+    // subscription can fill in are absent, not null, which is what keeps a
+    // claude block the same shape it was.
+    kind: 'hooks',
+    probedActivity: null,
   };
 
   it('is all nulls for a session whose agent has reported nothing', async () => {
@@ -278,6 +284,19 @@ describe('structuredEvents exposure (Issue #1722)', () => {
         confirmed: STRUCTURED_STATE_MAX_AGE_MS,
       },
       source: claudeSource,
+      // Issue #2040: what the agent says about the conversation it is in. Null
+      // for claude for the life of the session — it publishes none — and
+      // present-and-null rather than absent, for the reason `permissionDecision`
+      // above is.
+      session: null,
+      // Issue #2042: how full the context is. Derived from two reads of the
+      // agent's own API, so it is null wherever `session` is — there is no
+      // session to ask about — and null forever for claude.
+      sessionContext: null,
+      // Issue #2043: the third additive key. Named here because this assertion
+      // is a whole-shape one on purpose — a field that appeared without anyone
+      // deciding it should is exactly what it catches.
+      sessionDiff: null,
     });
   });
 
@@ -337,6 +356,13 @@ describe('structuredEvents exposure (Issue #1722)', () => {
         confirmed: STRUCTURED_STATE_MAX_AGE_MS,
       },
       source: claudeSource,
+      // Issue #2040: still null — a `notification` says nothing about the
+      // conversation's cost, and only opencode's `session.updated` fills this.
+      session: null,
+      // Issue #2042: and with no session there is nothing to measure.
+      sessionContext: null,
+      // Issue #2043: nor anything to have changed on disk.
+      sessionDiff: null,
     });
     expect({ ...after, structuredEvents: null }).toEqual({ ...before, structuredEvents: null });
   });

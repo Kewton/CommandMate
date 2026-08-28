@@ -1,0 +1,200 @@
+[38;2;255;255;255m[48;2;10;10;10m
+  [38;2;92;156;245m┃[38;2;255;255;255m[48;2;20;20;20m                                                                           [48;2;10;10;10m
+  [38;2;92;156;245m┃[38;2;255;255;255m[48;2;20;20;20m  [38;2;238;238;238mWithout using any tools, write about 300 words explaining how terminal [38;2;255;255;255m  [48;2;10;10;10m
+  [38;2;92;156;245m┃[38;2;255;255;255m[48;2;20;20;20m  [38;2;238;238;238mmultiplexers keep processes alive across disconnects.[38;2;255;255;255m                    [48;2;10;10;10m
+  [38;2;92;156;245m┃[38;2;255;255;255m[48;2;20;20;20m                                                                           [48;2;10;10;10m
+
+     [1;4m[38;2;157;124;216mHow Terminal Multiplexers Keep Processes Alive[0m[38;2;255;255;255m[48;2;10;10;10m
+
+     [38;2;238;238;238mWhen you connect to a remote server via SSH, the shell you get is a [38;2;255;255;255m
+     [38;2;238;238;238mchild process of the SSH daemon. Every process you launch from that [38;2;255;255;255m
+     [38;2;238;238;238mshell — compilers, servers, scripts — becomes a descendant in that [38;2;255;255;255m
+     [38;2;238;238;238mprocess tree. When the SSH connection drops, the kernel sends a [1m[38;2;245;167;66mSIGHUP[0m[38;2;238;238;238m[48;2;10;10;10m ([38;2;255;255;255m
+     [38;2;238;238;238mhangup signal) to the session leader, which cascades down the tree, [38;2;255;255;255m
+     [38;2;238;238;238mkilling all those child processes. Your work disappears.[38;2;255;255;255m
+
+     [38;2;238;238;238mTerminal multiplexers like [38;2;127;216;143mtmux[38;2;238;238;238m and [38;2;127;216;143mscreen[38;2;238;238;238m sidestep this by changing [3m[38;2;229;192;123mwho [0m[38;2;255;255;255m[48;2;10;10;10m
+     [3m[38;2;229;192;123mowns the session[0m[38;2;238;238;238m[48;2;10;10;10m.[38;2;255;255;255m
+
+     [1m[38;2;157;124;216mThe Key Trick: Detaching from the Terminal[0m[38;2;255;255;255m[48;2;10;10;10m
+
+     [38;2;238;238;238mWhen you start [38;2;127;216;143mtmux[38;2;238;238;238m, it launches a [1m[38;2;245;167;66mserver process[0m[38;2;238;238;238m[48;2;10;10;10m that runs [38;2;255;255;255m
+     [38;2;238;238;238mindependently of your SSH connection. This server is the true parent of [38;2;255;255;255m
+     [38;2;238;238;238myour shell and all programs within it. It does not belong to the SSH [38;2;255;255;255m
+     [38;2;238;238;238msession's process group — it was deliberately detached from the [38;2;255;255;255m
+     [38;2;238;238;238mcontrolling terminal early in its lifecycle using system calls like [38;2;255;255;255m
+     [38;2;127;216;143msetsid()[38;2;238;238;238m, which creates a new session with no controlling terminal.[38;2;255;255;255m
+
+     [38;2;238;238;238mYour SSH connection then runs a [1m[38;2;245;167;66mclient process[0m[38;2;238;238;238m[48;2;10;10;10m that simply attaches to [38;2;255;255;255m
+     [38;2;238;238;238mthe server over a local socket (typically in [38;2;127;216;143m/tmp[38;2;238;238;238m). What you see in your [38;2;255;255;255m
+     [38;2;238;238;238mterminal is just a rendering of the server's virtual terminal state, [38;2;255;255;255m
+     [38;2;238;238;238mstreamed through the client.[38;2;255;255;255m
+
+     [1m[38;2;157;124;216mWhat Happens on Disconnect[0m[38;2;255;255;255m[48;2;10;10;10m
+
+     [38;2;238;238;238mWhen your SSH session drops:[38;2;255;255;255m
+
+     [38;2;250;178;131m1. [38;2;238;238;238mThe SSH client process dies.[38;2;255;255;255m
+     [38;2;250;178;131m2. [38;2;238;238;238mSIGHUP is sent to the SSH session's process group.[38;2;255;255;255m
+     [38;2;250;178;131m3. [38;2;238;238;238mThe [38;2;127;216;143mtmux[38;2;238;238;238m [1m[38;2;245;167;66mclient[0m[38;2;238;238;238m[48;2;10;10;10m receives SIGHUP and exits — but it is just a thin [38;2;255;255;255m
+        [38;2;238;238;238mrendering layer.[38;2;255;255;255m
+     [38;2;250;178;131m4. [38;2;238;238;238mThe [38;2;127;216;143mtmux[38;2;238;238;238m [1m[38;2;245;167;66mserver[0m[38;2;238;238;238m[48;2;10;10;10m is in a completely separate session and receives [38;2;255;255;255m
+        [38;2;238;238;238mnothing. It keeps running.[38;2;255;255;255m
+     [38;2;250;178;131m5. [38;2;238;238;238mYour shell, editor, or long-running build inside [38;2;127;216;143mtmux[38;2;238;238;238m never knows [38;2;255;255;255m
+        [38;2;238;238;238manything happened.[38;2;255;255;255m
+
+     [38;2;238;238;238mWhen you reconnect, a new [38;2;127;216;143mtmux[38;2;238;238;238m client attaches to the still-running [38;2;255;255;255m
+     [38;2;238;238;238mserver socket, and your session is exactly as you left it.[38;2;255;255;255m
+
+     [38;2;92;156;245m▣ [38;2;255;255;255m [38;2;238;238;238mBuild[38;2;128;128;128m · Claude Sonnet 4.6 · 12.1s[38;2;255;255;255m
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  [38;2;92;156;245m┃[38;2;255;255;255m[48;2;30;30;30m                                                                           [48;2;10;10;10m
+  [38;2;92;156;245m┃[38;2;255;255;255m[48;2;30;30;30m                                                                           [48;2;10;10;10m
+  [38;2;92;156;245m┃[38;2;255;255;255m[48;2;30;30;30m                                                                           [48;2;10;10;10m
+  [38;2;92;156;245m┃[38;2;255;255;255m[48;2;30;30;30m  [38;2;92;156;245mBuild[38;2;255;255;255m [38;2;128;128;128m·[38;2;255;255;255m [38;2;238;238;238mClaude Sonnet 4.6[38;2;255;255;255m [38;2;128;128;128mGitHub Copilot[38;2;255;255;255m                                 [48;2;10;10;10m
+  [38;2;92;156;245m╹[38;2;30;30;30m▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀[38;2;255;255;255m
+   [38;2;128;128;128m/private/var/folders/07/[38;2;255;255;255m                            [38;2;128;128;128m8.9K (1%) · [38;2;255;255;255m [38;2;238;238;238mctrl+p [38;2;255;255;255m
+   [38;2;128;128;128mjbhw26n10nj_59d4yp7g5lx80000gn/T/cmate-canary-home-[38;2;255;255;255m              [38;2;128;128;128mcommands[38;2;255;255;255m
+   [38;2;128;128;128muwFr0l/work/opencode-turn-complete[38;2;255;255;255m
+

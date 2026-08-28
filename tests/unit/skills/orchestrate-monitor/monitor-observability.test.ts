@@ -6,6 +6,11 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import {
+  HOOKS_STATE_DIR_ENV,
+  expectDiagnostic,
+  useIsolatedHooksStateDir,
+} from '@tests/helpers/hooks-git-diagnostics';
+import {
   REAL_SHELL_SUBPROCESS_TIMEOUT_MS,
   assertSubprocessCompleted,
 } from '@tests/helpers/real-shell-budget';
@@ -17,6 +22,18 @@ const SCRIPTS = path.join(
 const MONITOR = path.join(SCRIPTS, 'monitor.sh');
 const HOOKS_GIT = path.join(SCRIPTS, 'hooks-git.sh');
 const FIXTURES = fileURLToPath(new URL('./fixtures', import.meta.url));
+
+/**
+ * One `hooks-git.sh` marker store per test (Issue #2089).
+ *
+ * This suite asserts `stderr: ''` for a healthy run, so a stale marker could
+ * only ever make it *pass*. It is isolated anyway because it is one of the three
+ * files that PRODUCED the litter: every `. hooks-git.sh` here used to mint
+ * `$TMPDIR/cm-monitor-hooks-$$` under the same hard-coded ids
+ * (`myrepo-feature-x`, `nope-nope`) and leave it behind, and those are the
+ * markers that silenced the diagnostics the other two suites assert on.
+ */
+const stateDir = useIsolatedHooksStateDir('monitor-observability');
 
 // Same loop parameters as monitor-resend.test.ts (Issue #1527): polls, not
 // seconds, drive every decision, so --interval 0 removes the wall clock and
@@ -110,7 +127,13 @@ function runLoop({ fixtures, polls, args = [], env = {}, id = 'w1' }: RunOptions
     {
       encoding: 'utf8',
       timeout: HARD_TIMEOUT_MS,
-      env: { ...process.env, PATH: `${dir}:${process.env.PATH ?? ''}`, CM: cmShim, ...env },
+      env: {
+        ...process.env,
+        PATH: `${dir}:${process.env.PATH ?? ''}`,
+        CM: cmShim,
+        ...env,
+        [HOOKS_STATE_DIR_ENV]: stateDir(),
+      },
     },
   );
 
@@ -366,7 +389,12 @@ describe('hooks-git.sh reference implementation (Issue #1533, scope B)', () => {
       ['-c', `. "${HOOKS_GIT}"; printf '%s %s\\n' "$(count_commits "${id}")" "$(count_uncommitted "${id}")"`],
       {
         encoding: 'utf8',
-        env: { ...process.env, MONITOR_HOOKS_REPO: repo, MONITOR_HOOKS_BASE: base },
+        env: {
+          ...process.env,
+          MONITOR_HOOKS_REPO: repo,
+          MONITOR_HOOKS_BASE: base,
+          [HOOKS_STATE_DIR_ENV]: stateDir(),
+        },
       },
     );
 
@@ -382,7 +410,12 @@ describe('hooks-git.sh reference implementation (Issue #1533, scope B)', () => {
       ['-c', `. "${HOOKS_GIT}"; printf '%s %s\\n' "$(count_commits nope-nope)" "$(count_uncommitted nope-nope)"`],
       {
         encoding: 'utf8',
-        env: { ...process.env, MONITOR_HOOKS_REPO: repo, MONITOR_HOOKS_BASE: base },
+        env: {
+          ...process.env,
+          MONITOR_HOOKS_REPO: repo,
+          MONITOR_HOOKS_BASE: base,
+          [HOOKS_STATE_DIR_ENV]: stateDir(),
+        },
       },
     );
 
@@ -416,9 +449,18 @@ describe('hooks-git.sh reference implementation (Issue #1533, scope B)', () => {
     const { repo } = makeRepo();
     const probe = spawnSync('bash', ['-c', `. "${HOOKS_GIT}"`], {
       encoding: 'utf8',
-      env: { ...process.env, MONITOR_HOOKS_REPO: repo, MONITOR_HOOKS_BASE: 'origin/nope' },
+      env: {
+        ...process.env,
+        MONITOR_HOOKS_REPO: repo,
+        MONITOR_HOOKS_BASE: 'origin/nope',
+        [HOOKS_STATE_DIR_ENV]: stateDir(),
+      },
     });
 
-    expect(probe.stderr).toContain("base ref 'origin/nope' does not resolve");
+    expectDiagnostic(
+      probe.stderr,
+      "base ref 'origin/nope' does not resolve",
+      'unresolvable base ref at source time',
+    );
   });
 });

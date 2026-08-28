@@ -621,6 +621,11 @@ describe('[#1930] S3: the received payload is not retained', () => {
       'confirmedAt',
       'decisionId',
       'message',
+      // Issue #2031: the one part of the payload that IS retained, and under
+      // the same discipline as `message` / `toolName` — see
+      // `boundDecisionPatterns` for why a display-only rule list is a different
+      // question from the agent's `tool_input`.
+      'patterns',
       'recorded',
       'scraperCorroborated',
       'source',

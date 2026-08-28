@@ -178,9 +178,13 @@ describe('the 2026-07-26 measurements are recorded as taken', () => {
     expect(codex && deriveMatrixAgentSupport(codex)).toBe('native');
   });
 
+  // Issue #2037 measured opencode on 1.18.22 and it left this list. The list is
+  // still asserted exactly rather than by count: an Agent silently dropping OUT
+  // of it is a claim that something was measured, and that is the direction that
+  // has to stay expensive.
   it('leaves every unmeasured Agent unknown', () => {
     expect(unmeasuredAgents().slice().sort()).toEqual(
-      ['antigravity', 'copilot', 'gemini', 'opencode', 'vibe-local'].sort()
+      ['antigravity', 'copilot', 'gemini', 'vibe-local'].sort()
     );
   });
 

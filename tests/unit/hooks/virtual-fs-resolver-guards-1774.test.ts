@@ -71,6 +71,7 @@ import { getHookSettingsDirectory } from '@/lib/hooks/hook-settings-generator';
 import { getCodexHome } from '@/lib/hooks/sources/codex/hooks-config';
 import { getCopilotHomeDirectory } from '@/lib/hooks/sources/copilot/hook-settings';
 import { getOpencodePortFilePath } from '@/lib/hooks/sources/opencode/ports';
+import { getOpencodeLaunchSettingsFilePath } from '@/lib/hooks/sources/opencode/launch-settings';
 import { writeJsonObjectFile } from '@/lib/hooks/sources/gemini/shared-config-tree';
 
 /** One row per setting that can reach a recursive mkdir. */
@@ -130,6 +131,18 @@ const ENV_SETTINGS: readonly GuardedSetting[] = [
       return getOpencodePortFilePath();
     },
     ordinary: () => join(tmpdir(), 'cmate-opencode-ports.json'),
+  },
+  // Issue #2048: the launcher's mirror of the opencode instance settings. Same
+  // shape and same hazard as the port file above — the write does a recursive
+  // mkdir on this path's directory.
+  {
+    name: 'CM_OPENCODE_LAUNCH_SETTINGS_FILE',
+    fallback: () => join(homedir(), '.commandmate', 'opencode-launch-settings.json'),
+    resolve: (value) => {
+      setEnv('CM_OPENCODE_LAUNCH_SETTINGS_FILE', value);
+      return getOpencodeLaunchSettingsFilePath();
+    },
+    ordinary: () => join(tmpdir(), 'cmate-opencode-launch-settings.json'),
   },
 ];
 

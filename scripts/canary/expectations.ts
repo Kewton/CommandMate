@@ -9,7 +9,9 @@
 
 import { STATUS_REASON } from '@/lib/detection/status-detector';
 import { stripAnsi } from '@/lib/detection/ansi';
-import type { Expectation, Observation } from './types';
+import type { Expectation, Observation, StartupOverlay } from './types';
+
+export type { StartupOverlay };
 
 /**
  * Claude's bottom task panel header, e.g. `  3 tasks (0 done, 3 open)`.
@@ -101,22 +103,15 @@ export const expectGenerating: Expectation = {
 };
 
 /**
- * Startup screens that eat keystrokes before the composer is usable.
+ * Claude's startup screens that eat keystrokes before the composer is usable.
  *
  * `isolated-home.ts` seeds `~/.claude.json` so none of these should appear, but
  * a new Claude version can add one back — and a swallowed first prompt looks
  * exactly like a detection regression. `session.ts` dismisses the answerable
- * ones and aborts on the fatal ones with an actionable message.
+ * ones and aborts on the fatal ones with an actionable message. opencode's
+ * equivalent list is `OPENCODE_STARTUP_OVERLAYS` (Issue #2050); the shared
+ * {@link StartupOverlay} shape lives in `types.ts`.
  */
-export interface StartupOverlay {
-  id: string;
-  pattern: RegExp;
-  /** Key to dismiss it, or `null` when the run cannot continue. */
-  dismissKey: 'Enter' | 'Escape' | null;
-  /** Explanation printed when `dismissKey` is null. */
-  fatalHint?: string;
-}
-
 export const STARTUP_OVERLAYS: readonly StartupOverlay[] = [
   {
     id: 'theme-picker',
@@ -148,10 +143,18 @@ export const STARTUP_OVERLAYS: readonly StartupOverlay[] = [
   },
 ];
 
-/** First startup overlay visible in the frame, if any. */
-export function findStartupOverlay(frame: string): StartupOverlay | null {
+/**
+ * First startup overlay visible in the frame, if any.
+ *
+ * @param overlays - the tool's own list; defaults to claude's so the #1727
+ *   call sites and their tests read unchanged (Issue #2050)
+ */
+export function findStartupOverlay(
+  frame: string,
+  overlays: readonly StartupOverlay[] = STARTUP_OVERLAYS
+): StartupOverlay | null {
   const clean = stripAnsi(frame);
-  return STARTUP_OVERLAYS.find(overlay => overlay.pattern.test(clean)) ?? null;
+  return overlays.find(overlay => overlay.pattern.test(clean)) ?? null;
 }
 
 /**

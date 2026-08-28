@@ -190,9 +190,12 @@ describe('claude-executor', () => {
       expect(args).toEqual(['-p', 'hello', '-y']);
     });
 
+    // Issue #2044: `--format json` is unconditional. `--format default` writes a
+    // decorated transcript whose layout is not a contract, so the executor asks
+    // for the machine format and extracts the answer from it.
     it('should build opencode args with run command', () => {
       const args = buildCliArgs('hello', 'opencode');
-      expect(args).toEqual(['run', 'hello']);
+      expect(args).toEqual(['run', '--format', 'json', 'hello']);
     });
 
     // Issue #1914: the value reaches `-m` verbatim. `opencode run --help`
@@ -205,7 +208,7 @@ describe('claude-executor', () => {
       'github-copilot/gpt-5',
     ])('should build opencode args with -m %s verbatim', (model) => {
       const args = buildCliArgs('hello', 'opencode', undefined, { model });
-      expect(args).toEqual(['run', '-m', model, 'hello']);
+      expect(args).toEqual(['run', '--format', 'json', '-m', model, 'hello']);
     });
 
     it('should not prefix an opencode model with ollama/', () => {
@@ -215,7 +218,7 @@ describe('claude-executor', () => {
 
     it('should build opencode args without -m when model is not specified', () => {
       const args = buildCliArgs('hello', 'opencode', undefined, {});
-      expect(args).toEqual(['run', 'hello']);
+      expect(args).toEqual(['run', '--format', 'json', 'hello']);
     });
 
     it('should default to claude args for unknown tools', () => {

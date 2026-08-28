@@ -95,6 +95,7 @@ import {
   rememberOpencodePort,
   resetOpencodePortAssignments,
 } from '@/lib/hooks/sources/opencode/ports';
+import { resetOpencodeLaunchSettings } from '@/lib/hooks/sources/opencode/launch-settings';
 
 let sandbox: string;
 
@@ -115,6 +116,12 @@ describe('OpenCodeTool', () => {
     resetOpencodePortAssignments();
     // Never the operator's home directory.
     vi.stubEnv('CM_OPENCODE_PORT_FILE', join(sandbox, 'opencode-ports.json'));
+    // Issue #2048: the launch line and the send body both read this mirror.
+    vi.stubEnv(
+      'CM_OPENCODE_LAUNCH_SETTINGS_FILE',
+      join(sandbox, 'opencode-launch-settings.json')
+    );
+    resetOpencodeLaunchSettings();
     vi.stubEnv('CM_AGENT_HOOKS_INJECT', '1');
     // `clearAllMocks` clears calls but keeps implementations, so the pipeline
     // stubs are re-stated here — a test that made one reserve a port would

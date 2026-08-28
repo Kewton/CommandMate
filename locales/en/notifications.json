@@ -12,8 +12,27 @@
     "completion": "Also tell me about completions (optional)",
     "completionDesc": "Ordinary completions that need nothing from you. Off by default on newly registered devices (change it for this device here)"
   },
+  "defaultsNotice": {
+    "heading": "What changed in notifications",
+    "completionChanged": "Ordinary completions that need nothing from you are now off by default on newly registered devices. This device is still on, so they keep arriving.",
+    "failuresAdded": "\"When you need to act\" now also covers a failed verification gate, an upstream API fault, and a session that could not start. This device receives those too.",
+    "adopt": "Use the new default (turn completions off)",
+    "keep": "Keep this device as it is",
+    "adopted": "Completions turned off on this device",
+    "kept": "Left this device's settings unchanged"
+  },
   "permission": {
     "denied": "Notifications are blocked in your browser settings. Allow them for this site to receive push notifications."
+  },
+  "delivery": {
+    "headingFailing": "This device is not receiving notifications",
+    "headingRemoved": "This device was dropped by the push service",
+    "failing": "The push service has rejected the last {count} notification(s) for this device (HTTP {status}). Your subscription is intact — nothing was deleted.",
+    "failingUnknownStatus": "The push service has rejected the last {count} notification(s) for this device. Your subscription is intact — nothing was deleted.",
+    "removed": "The push service reported this subscription as gone (HTTP {status}), so the server stopped sending to it. Turn notifications on again below to re-subscribe.",
+    "removedUnknownStatus": "The push service reported this subscription as gone, so the server stopped sending to it. Turn notifications on again below to re-subscribe.",
+    "apnsHint": "On iPhone/iPad an HTTP 403 usually means the server's CM_VAPID_SUBJECT is not a contact Apple accepts. See docs/user-guide/webapp-guide.md.",
+    "since": "First failure: {timestamp}"
   },
   "unsupported": "This browser does not support push notifications.",
   "notConfigured": "Push notifications are not configured on this server. Set the VAPID keys to enable them.",
@@ -45,7 +64,10 @@
     "failureSessionUnavailable": "Could not start the session: the CLI tool is not installed",
     "failureWithExcerpt": "Failed: {excerpt}",
     "failure": "Failed",
-    "promptResolved": "Handled — answered on another device"
+    "failureAgentSessionWithExcerpt": "The agent stopped with an error: {excerpt}",
+    "failureAgentSession": "The agent stopped with an error",
+    "promptResolved": "Handled — answered on another device",
+    "updateAvailable": "An update for {agent} is available: {version}"
   },
   "escalation": {
     "heading": "Reminder",

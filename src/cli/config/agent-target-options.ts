@@ -56,3 +56,19 @@ export const INSTANCE_OPTION_DESCRIPTION =
 export const WAIT_INSTANCE_OPTION_DESCRIPTION =
   `${INSTANCE_OPTION_DESCRIPTION} wait takes no --agent, so name the instance here `
   + '(e.g. --instance codex for the codex primary instance).';
+
+/**
+ * `--instance` description for `interrupt` (Issue #2101).
+ *
+ * `interrupt` takes no `--agent`, on the `wait` precedent and for the same
+ * reason #1629 gave: the flag would have to say *which* session, and a bare
+ * `--agent codex` does not. The default here is not "the primary instance"
+ * either — `POST /api/worktrees/:id/interrupt` with no `instanceId` stops EVERY
+ * running session of the worktree, so the flag is what narrows a multi-instance
+ * worktree to one, and its absence is a deliberate broadcast rather than a
+ * fallback.
+ */
+export const INTERRUPT_INSTANCE_OPTION_DESCRIPTION =
+  'Agent instance ID: <agent> or <agent>-<n> (e.g. claude-2). '
+  + 'interrupt takes no --agent, so name the instance here. '
+  + 'Omitted, every running session of the worktree is interrupted.';

@@ -12,6 +12,11 @@ import { getSessionState, createMessage } from '@/lib/db';
 import { observeUnclassifiedFrame } from '@/lib/detection/unclassified-frame-tracker';
 import { extractComposerText, type ComposerTextState } from '@/lib/detection/composer-text';
 import { matchUpstreamFault } from '@/lib/detection/upstream-faults';
+import {
+  detectOpenCodePaneObstruction,
+  OPENCODE_SIDEBAR_RECOVERY_CHORD,
+  type OpenCodePaneObstruction,
+} from '@/lib/detection/opencode-pane-obstruction';
 import { UNCLASSIFIED_PROMPT_TYPE, type UnclassifiedFrameRecord } from '@/types/models';
 import { createLogger } from '@/lib/logger';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
@@ -21,6 +26,8 @@ import type {
   SessionTargetResolvedBy,
 } from '@/lib/session/resolve-session-target';
 import { getAgentEventSource } from '@/lib/hooks/sources/registry';
+import { describeAgentEventSource } from '@/lib/hooks/sources/define-source';
+import { getOpencodeProbedActivity } from '@/lib/hooks/sources/opencode/subscription';
 import {
   getLastPermissionDecision,
   type PermissionDecisionRecord,
@@ -29,7 +36,25 @@ import {
   getLastToolInputNormalization,
   type ToolInputNormalizationRecord,
 } from '@/lib/hooks/tool-input-normalization-state';
-import type { AgentSourceCapabilities } from '@/lib/hooks/sources/types';
+import {
+  ensureAgentSessionContextUsage,
+  getAgentSessionTelemetry,
+  type AgentSessionContextUsage,
+  type AgentSessionRecord,
+} from '@/lib/hooks/agent-session-telemetry';
+import {
+  pendingDecisionKind,
+  type PendingDecisionKind,
+} from '@/lib/hooks/pending-decision-kind';
+import {
+  ensureOpencodeSessionDiff,
+  type OpencodeSessionDiffRecord,
+} from '@/lib/hooks/sources/opencode/diff';
+import { questionDecisionOptions } from '@/lib/hooks/structured-decision-response';
+import type {
+  AgentEventSourceStatus,
+  AgentSourceCapabilities,
+} from '@/lib/hooks/sources/types';
 import { captureSessionOutput } from '@/lib/session/cli-session';
 import {
   detectSessionStatus,
@@ -90,6 +115,7 @@ import { applyAskUserQuestion } from '@/lib/session/ask-user-question-prompt';
 import {
   buildStructuredPromptData,
   buildStructuredPromptHistoryRecord,
+  isAddressableDecision,
   STRUCTURED_DECISION_OPTIONS,
   type StructuredAskUserQuestionSummary,
   type StructuredPromptFacts,
@@ -197,6 +223,69 @@ export interface StructuredEventsPayload extends PublishedTurn {
    */
   source: StructuredSourcePayload;
   /**
+   * What the agent says about the conversation this instance is in, or null
+   * (Issue #2040).
+   *
+   * The half of a worker's state a terminal frame cannot show: which session,
+   * which persona, which model, what it has cost and how many tokens it has
+   * spent. Read off opencode's `session.updated` frames, which were already
+   * arriving and mapped to none of the seven event words — so this costs no
+   * request and no poll.
+   *
+   * **Sent on every payload this build produces, null when nothing knows** —
+   * which is every tool but opencode, every opencode pane whose stream has not
+   * reported a session yet, and every pane that has been killed since it did.
+   * See {@link AgentSessionRecord} for the field-by-field contract and for why
+   * the values are verbatim.
+   *
+   * Optional on the type for the reason `pendingDecisions` below is, stated
+   * once there: this shape is also *constructed* — by suites that stand in for
+   * the builder, and by the CLI's mirror in `api-responses.ts`, which has to
+   * describe a server older than the field as well as one newer. A reader takes
+   * `?? null`.
+   */
+  session?: AgentSessionRecord | null;
+  /**
+   * How full this instance's context window is, or null (Issue #2042).
+   *
+   * The one number {@link session} cannot answer. `Session.tokens` is the
+   * session's *cumulative* spend — the figure `opencode stats` prints — while
+   * "how much of the window is in use" is the last finished assistant turn's
+   * footprint, which is a different quantity and a smaller one. Summing the
+   * record would have published `2%` where opencode's own footer says `1%`, so
+   * this block is measured separately rather than derived from a field that
+   * looks like it should work.
+   *
+   * **Derived, and separated for that reason.** Everything on {@link session} is
+   * a value the agent published on a frame; everything here is this server
+   * asking the agent's own server two further questions
+   * (`GET /session/:id/message?limit=4` and `GET /config/providers`) and doing
+   * arithmetic on the answers. Folding the two together would make one object a
+   * mixture of quoted and computed values.
+   *
+   * **Always present, null while nothing has been measured.** The measurement
+   * is refreshed off the hot path — the poll that notices the session moved
+   * publishes the previous turn's numbers (or null on the first one) and the
+   * next poll publishes the new ones. Null forever for every tool but opencode.
+   *
+   * Optional on the type for the reason `pendingDecisions` below is.
+   */
+  sessionContext?: AgentSessionContextUsage | null;
+
+  /**
+   * What the last opencode turn changed on disk, and what a revert is holding
+   * back (Issue #2043). Omitted-as-null for every other tool.
+   *
+   * A third key beside {@link session} and {@link sessionContext} rather than a
+   * field on either, because it answers a different kind of question: those two
+   * describe the *conversation*, this one describes the **working tree**. It is
+   * also the only one of the three the operator can act on — the panel it feeds
+   * offers revert / unrevert.
+   *
+   * Mirrors: src/lib/hooks/sources/opencode/diff.ts OpencodeSessionDiffRecord.
+   */
+  sessionDiff?: OpencodeSessionDiffRecord | null;
+  /**
    * The approvals this instance is blocked on, oldest first (Issue #1930).
    *
    * Set on every payload this build produces, and empty on every session with
@@ -244,6 +333,14 @@ export interface StructuredEventsPayload extends PublishedTurn {
   dialogPendingMaxMs?: { predicted: number; confirmed: number };
 }
 
+/** One choice a pending question offers, as it is published (Issue #2040). */
+export interface PendingQuestionOptionPayload {
+  /** 1-based, in the order the agent's own payload listed the choices. */
+  number: number;
+  /** The choice's label, verbatim. This is also what answering it sends. */
+  label: string;
+}
+
 /** One approval, as it is published (Issue #1930). */
 export interface PendingDecisionPayload {
   /** The agent's own id for it, or null for a source that publishes none. */
@@ -267,6 +364,39 @@ export interface PendingDecisionPayload {
    * because copilot stopped listening would be the wrong half of the fact.
    */
   deliveryExpired: boolean;
+  /**
+   * Whether a human is being asked to approve or to choose (Issue #2040).
+   *
+   * The two block a worker identically and are answered completely differently,
+   * so an orchestrator reading `capture --json` has to be able to tell them
+   * apart before it decides whether a verdict is even meaningful. Recovered from
+   * what the writers already record rather than stored — see
+   * `lib/hooks/pending-decision-kind` for why, and for the one place that says
+   * how.
+   *
+   * **Always present.** Unlike the optional fields on
+   * {@link StructuredEventsPayload}, this one is per-entry: an entry that exists
+   * at all comes from this build, so there is no older-server case for a reader
+   * to interpret an absence as.
+   */
+  kind: PendingDecisionKind;
+  /**
+   * The choices this question offers, or null (Issue #2040).
+   *
+   * Null on every approval — an approval's three verdicts are the source's, not
+   * this dialog's, and they are published as `promptData.decisionOptions` where
+   * they belong. Null on a question too whenever the agent's own payload is no
+   * longer held: the numbers here are the payload's order, so publishing them
+   * from anything else would number a list the agent never sent.
+   *
+   * **One in-flight question per instance is all this can describe.** The
+   * payload is `getAskUserQuestion`'s single episode, so two concurrent
+   * questions on one instance would both quote it. Not observed — every
+   * captured `question.asked` carries one call, and an agent asks one thing at a
+   * time — and stated here rather than guarded, because the guard would have to
+   * invent which episode belongs to which record.
+   */
+  questionOptions: PendingQuestionOptionPayload[] | null;
 }
 
 /**
@@ -289,6 +419,39 @@ export interface StructuredSourcePayload {
   cliToolId: CLIToolType;
   /** The declared block, copied. See {@link AgentSourceCapabilities}. */
   capabilities: AgentSourceCapabilities;
+  /**
+   * Which machinery is speaking for THIS pane right now (Issue #2054).
+   *
+   * Additive, and the two fields above are untouched: #1924's readers keep
+   * reading exactly what they read. The difference between this and
+   * {@link capabilities} is instant versus declaration — capabilities say what
+   * opencode's source can do, `kind` says whether it is currently doing it, and
+   * on a pane whose port was taken over by another process the answer is
+   * `scraper` while every capability above still describes the SSE source.
+   *
+   * `degradedReason` and `liveness` are absent for every push tool, by
+   * construction rather than by omission — see {@link describeAgentEventSource}.
+   */
+  kind: AgentEventSourceStatus['kind'];
+  /** Issue #2054. Absent unless something is degraded. */
+  degradedReason?: string;
+  /** Issue #2054. Absent for a source with no heartbeat to miss. */
+  liveness?: AgentEventSourceStatus['liveness'];
+  /**
+   * What `AgentEventSource.probeActivity` answered when this instance's stream
+   * was last attached, or null (Issue #2054).
+   *
+   * **A record of one instant, not a live reading**, which is why it carries its
+   * own `at` and why nothing derives a status from it: a stream that opens in
+   * the middle of a turn delivers nothing until that turn ends, so this is the
+   * only answer to "was the pane already working when CommandMate connected?"
+   * that exists — and it stops being current the moment the next frame lands.
+   *
+   * Null for every tool but opencode (`probeActivity` answers null for a push
+   * source by construction: an event cannot be re-read) and for an opencode
+   * instance whose stream has never been attached in this process.
+   */
+  probedActivity: { activity: 'busy' | 'idle' | null; at: number } | null;
 }
 
 export interface CurrentOutputPayload {
@@ -479,6 +642,42 @@ export interface CurrentOutputPayload {
     at: number;
   } | null;
   /**
+   * A second column sharing rows with the agent's transcript, or null
+   * (Issue #2095).
+   *
+   * **Always present, null when nothing matched.** Read
+   * `src/lib/detection/opencode-pane-obstruction.ts` before reading this field:
+   * null is "the frame's layout could not be read as two columns", NEVER "the
+   * screen is clean". A permission dialog removes the border row the geometry is
+   * measured from, and a tool other than opencode is not looked at at all.
+   *
+   * Deliberately shaped like {@link upstreamFault} — `{id, matchedText, at}`,
+   * judged on `realtimeSnippet`, published on every poll and read by nobody by
+   * default. The two answer the same kind of question ("something the detector
+   * cannot fix is on the screen, and here is the evidence"), and one shape means
+   * `capture --json | jq` reads them the same way.
+   *
+   * Where it deliberately parts company with `upstreamFault` is `wait`: there is
+   * no `--fail-on-pane-obstruction`. #1839 needed a verdict of its own because
+   * the faulted frame read `ready` and `wait` was about to exit 0 on a turn that
+   * never ran — the exit code was WRONG. Here the frame reads
+   * `running` / `unknown_frame`, so `isUnclassifiedActive` is already true and
+   * `wait` already stops on it (exit 10, `type: unclassified`) after its 60 s
+   * dwell. The verdict was never wrong; what was missing was the CAUSE, so this
+   * Issue adds the cause to that message and to the history row and leaves
+   * every exit code exactly where it was.
+   *
+   * opencode only. Every other tool publishes null here without being examined.
+   */
+  paneObstruction: {
+    /** {@link OpenCodePaneObstruction.id} — `opencode_sidebar`. */
+    id: string;
+    /** The second column's own text on the first row that carried it. */
+    matchedText: string;
+    /** Epoch ms the frame this was read from was captured. */
+    at: number;
+  } | null;
+  /**
    * Text the user has in the CLI's composer but has not sent, or null
    * (Issue #1879).
    *
@@ -586,6 +785,28 @@ const logger = createLogger('current-output-builder');
  * waiting on. The tracker has already marked the run as recorded, so a failure
  * costs this one row, not a retry storm.
  */
+/**
+ * The sentence that turns "nothing could read this frame" into "here is what is
+ * on it, and here is the key that removes it" (Issue #2095).
+ *
+ * Empty string when there is no obstruction, so every caller can concatenate it
+ * unconditionally and the #1708 wording is byte-identical on a frame that has
+ * none.
+ *
+ * English, like the rest of {@link recordUnclassifiedFrame}'s row and unlike the
+ * UI banner this pairs with. The row is read in `capture --prompts` as often as
+ * in the history pane, and `commandmate` has no locale to read it in.
+ */
+function describePaneObstruction(obstruction?: OpenCodePaneObstruction | null): string {
+  if (!obstruction) return '';
+  return (
+    ` Cause: opencode's sidebar is sharing rows with the transcript ` +
+    `(paneObstruction=${obstruction.id}, second column reads ` +
+    `${JSON.stringify(obstruction.matchedText)}), which covers the marker that ends a ` +
+    `turn. Press \`${OPENCODE_SIDEBAR_RECOVERY_CHORD}\` in the pane to close it.`
+  );
+}
+
 function recordUnclassifiedFrame(
   db: Database.Database,
   params: {
@@ -595,6 +816,8 @@ function recordUnclassifiedFrame(
     dwellMs: number;
     sessionStatus: string;
     sessionStatusReason: string;
+    /** Issue #2095: the second column that explains the frame, when there is one. */
+    obstruction?: OpenCodePaneObstruction | null;
   },
 ): void {
   const dwellSeconds = Math.round(params.dwellMs / 1000);
@@ -603,7 +826,12 @@ function recordUnclassifiedFrame(
     `Unclassified interactive frame (${statusReason}) held for ${dwellSeconds}s. ` +
     `The detection layer could not parse it, so no prompt was published and ` +
     `nothing could answer it. Inspect the raw pane with ` +
-    `\`commandmate capture ${params.worktreeId} --pane\`.`;
+    `\`commandmate capture ${params.worktreeId} --pane\`.` +
+    // Issue #2095: appended rather than substituted. Everything above is still
+    // true — the frame really was unreadable — and a caller matching on the
+    // #1708 wording keeps matching. What follows turns "we could not read it"
+    // into "here is why, and here is the key that fixes it".
+    describePaneObstruction(params.obstruction);
 
   const record: UnclassifiedFrameRecord = {
     type: UNCLASSIFIED_PROMPT_TYPE,
@@ -984,6 +1212,15 @@ async function buildPayload(
   const eventSource = getAgentEventSource(cliToolId);
   const now = Date.now();
   const pendingDecisions = getPendingDecisions(worktreeId, cliToolId, instanceId, now);
+  // Issue #1726's episode, read once at the same `now` the decisions were read
+  // at. Issue #2040 needs it up here — a question's choices are published on the
+  // decision entry — and the degraded prompt below re-uses this read rather than
+  // taking a second one, so the two cannot describe different instants.
+  const askUserQuestion = getAskUserQuestion(worktreeId, cliToolId, instanceId, now);
+  // Issue #2040, read once: #2042's context measurement is keyed on this
+  // record's `at`, so reading it twice would risk keying the derived block to a
+  // different instant than the one it is published beside.
+  const agentSession = getAgentSessionTelemetry(worktreeId, cliToolId, instanceId);
   const structuredEvents: StructuredEventsPayload = {
     lastEventType: lastEvent?.event ?? null,
     lastEventAt: lastEvent?.at ?? null,
@@ -996,19 +1233,36 @@ async function buildPayload(
     // source's declared `decisionTimeoutSeconds`. `agent-event-state` cannot
     // reach the registry — its module graph pulls in `better-sqlite3` — which
     // is why every capability arrives there as a value a caller hands over.
-    pendingDecisions: pendingDecisions.map((decision) => ({
-      id: decision.decisionId,
-      at: decision.at,
-      source: decision.source,
-      toolName: decision.toolName,
-      confirmedAt: decision.confirmedAt,
-      scraperCorroborated: decision.scraperCorroborated,
-      deliveryExpired: isDeliveryExpired(
-        decision,
-        eventSource.capabilities.decisionTimeoutSeconds,
-        now
-      ),
-    })),
+    pendingDecisions: pendingDecisions.map((decision) => {
+      // Issue #2040. Recovered rather than stored — see `pending-decision-kind`.
+      const kind = pendingDecisionKind(decision.toolName);
+      return {
+        id: decision.decisionId,
+        at: decision.at,
+        source: decision.source,
+        toolName: decision.toolName,
+        confirmedAt: decision.confirmedAt,
+        scraperCorroborated: decision.scraperCorroborated,
+        deliveryExpired: isDeliveryExpired(
+          decision,
+          eventSource.capabilities.decisionTimeoutSeconds,
+          now
+        ),
+        kind,
+        // Issue #2040: the agent's own list, numbered the way `respond` numbers
+        // it — the same `questionDecisionOptions` the reply path resolves an
+        // answer against (#2039), so what is printed here and what a number
+        // means cannot come apart. Null for an approval and for a question whose
+        // payload is no longer held; never a screen's numbering.
+        questionOptions:
+          kind === 'question' && askUserQuestion
+            ? questionDecisionOptions(askUserQuestion.spec).map((option) => ({
+                number: option.number,
+                label: option.label,
+              }))
+            : null,
+      };
+    }),
     dedupDropped: getAgentEventDropCounts(worktreeId, cliToolId, instanceId),
     dialogPendingMaxMs: { ...DIALOG_PENDING_MAX_MS },
     promptWaitingSince: null,
@@ -1024,7 +1278,46 @@ async function buildPayload(
     source: {
       cliToolId: eventSource.cliToolId,
       capabilities: eventSource.capabilities,
+      // Issue #2054. Read through the source interface — `liveness(target)` —
+      // rather than through opencode's subscription map, so this layer keeps
+      // naming no tool: every push source answers `{ state: 'unknown' }` from
+      // `definePushHookSource` at no cost, and the fold that turns that into a
+      // published `kind` is the same one `worktree-status-helper` calls.
+      ...describeAgentEventSource(
+        eventSource,
+        eventSource.liveness({ worktreeId, cliToolId, instanceId: resolvedInstanceId }),
+        now
+      ),
+      // Issue #2054: opencode-only by construction, and read from the module
+      // that owns the attach. `./opencode/diff` is imported here for the same
+      // reason (#2043) — the alternative is a field that exists on the wire and
+      // is filled in by nothing.
+      probedActivity: getOpencodeProbedActivity({
+        worktreeId,
+        cliToolId,
+        instanceId: resolvedInstanceId,
+      }),
     },
+    // Issue #2040. Read here, before the `isRunning` branch, so both return
+    // paths carry the key — but the record itself is dropped when the
+    // subscription closes, so a pane that is not running answers null without
+    // this layer needing a rule of its own.
+    session: agentSession,
+    // Issue #2042. `ensure…` never awaits: it answers from the cache and starts
+    // a refresh only when the session record has moved since the last one, so
+    // the two HTTP round trips it needs happen once per *turn* rather than once
+    // per poll and never in front of this payload. See
+    // `ensureAgentSessionContextUsage` for why that trade is the right way
+    // round here.
+    sessionContext: ensureAgentSessionContextUsage(
+      { worktreeId, cliToolId, instanceId },
+      agentSession
+    ),
+    // Issue #2043, on exactly #2042's terms: `ensure...` answers from the store
+    // and starts at most one `GET /session/:id/diff` per *turn*, never in front
+    // of this payload. It answers null for every tool but opencode, so no other
+    // tool's status poll grows a field or a request.
+    sessionDiff: ensureOpencodeSessionDiff({ worktreeId, cliToolId, instanceId }),
   };
 
   const running = await cliTool.isRunning(worktreeId, instanceId);
@@ -1069,6 +1362,9 @@ async function buildPayload(
       // is a claim about what is on screen right now, and a dead session has no
       // screen.
       upstreamFault: null,
+      // Issue #2095: same reasoning — a session that is not running has no pane
+      // to lay out in two columns.
+      paneObstruction: null,
       // Issue #1879: same reasoning as `upstreamFault` — there is no input box
       // on a session that is not running, so there is nothing to report and
       // nothing the UI could act on.
@@ -1233,7 +1529,9 @@ async function buildPayload(
   // all while an AskUserQuestion picker is up (§5.6) and a record that asserted
   // `waiting` from the invocation would go on asserting it long after a human
   // answered in the terminal.
-  const askUserQuestion = getAskUserQuestion(worktreeId, cliToolId, instanceId);
+  // Issue #2040 moved the read to the top of this function (the decision entries
+  // publish the same episode's choices) and this line now re-uses it, so the two
+  // surfaces cannot describe different instants.
   const scraperPromptData = statusResult.promptDetection.promptData;
   const correctedPromptData =
     scraperPromptData && askUserQuestion
@@ -1252,12 +1550,40 @@ async function buildPayload(
   // it to a dialog the agent actually reported — a `permission-request` record
   // is a prediction, and a question is answered with a choice rather than with
   // one of these three verdicts.
-  const decisionOptions =
+  //
+  // Issue #2031 adds the fourth conjunct and folds the whole gate into ONE
+  // value. The three verdicts and the id they are delivered to are now derived
+  // from the same expression, so they cannot be published apart — and "apart"
+  // is not hypothetical, it is the state #1932 shipped: options were published
+  // on the capability alone while `decisionId` was published nowhere at all, so
+  // the panel drew no buttons and the only way out of an opencode approval in a
+  // browser was the arrow-key safety net. Options WITHOUT an id is the worse
+  // half of that pair — the numbers would reach the keystroke path, where a
+  // bare "1" selects whatever the picker happens to be highlighting (#1681).
+  const addressableDecisionId =
     promptWaiting !== null &&
     promptWaiting.source === 'notification' &&
-    eventSource.capabilities.eventIdentity === 'permission-id'
-      ? STRUCTURED_DECISION_OPTIONS
+    eventSource.capabilities.eventIdentity === 'permission-id' &&
+    isAddressableDecision(promptWaiting.decisionId)
+      ? promptWaiting.decisionId
       : null;
+  // Issue #2100 splits the two halves of #2031's single expression, because an
+  // addressable decision is now of two KINDS. The id is published for both — it
+  // is what `POST /respond` names, and a question needs it exactly as much as an
+  // approval does — but the three verdicts belong to an approval alone.
+  //
+  // Publishing both for a question is not a cosmetic error: it is precisely what
+  // #2039's third gate refuses. `readPromptQuestionChoices` returns null the
+  // moment `decisionOptions` is non-empty, so a question carrying them would
+  // draw `Allow once / Allow always / Reject` over the agent's own choices, and
+  // a verdict sent to a question is refused at the source
+  // (`question-needs-answer-verdict`). The kind is recovered from the record the
+  // same way `structuredEvents.pendingDecisions[].kind` is, through the one
+  // reader in `pending-decision-kind`.
+  const addressesQuestion =
+    promptWaiting !== null && pendingDecisionKind(promptWaiting.toolName) === 'question';
+  const decisionOptions =
+    addressableDecisionId !== null && !addressesQuestion ? STRUCTURED_DECISION_OPTIONS : null;
 
   const structuredFacts: StructuredPromptFacts | null =
     promptWaiting === null
@@ -1266,6 +1592,26 @@ async function buildPayload(
           ...promptWaiting,
           askUserQuestion: summarizeAskUserQuestion(askUserQuestion),
           decisionOptions,
+          // Explicit, though the spread above already carries a `decisionId`
+          // off the record: the spread's copy is the raw one, and what may be
+          // published is the GATED one. Letting the record's value through
+          // would put an id on a payload whose verdicts were withheld, which is
+          // the biconditional this Issue exists to hold.
+          decisionId: addressableDecisionId,
+          // Gated on the same value, for a reason of its own: `patterns` is
+          // what the `Allow always` BUTTON grants, so publishing it where no
+          // button is drawn adds a rule list to a panel that is telling the
+          // user to go and answer in the terminal. Every source but opencode
+          // therefore keeps the exact payload it had before this Issue, plus
+          // the one `decisionId: null`.
+          //
+          // Issue #2100 moves the gate onto `decisionOptions` rather than the
+          // id, which is the same value for every approval and the honest one
+          // for a question: a question draws no `Allow always`, so it may not
+          // carry the rules one would have saved. (`reportQuestionPending`
+          // records `patterns: null` anyway; the two agree by construction now
+          // instead of by coincidence.)
+          patterns: decisionOptions !== null ? promptWaiting.patterns : null,
         };
 
   const promptData: PromptData | StructuredPromptWaitingData | null = scraperPromptWaiting
@@ -1298,6 +1644,22 @@ async function buildPayload(
     });
   }
 
+  // Issue #1839 defined this window and Issue #2095 reuses it, so it is computed
+  // once, here, above the first reader. The 100 rows are also what the payload
+  // publishes, which is the property both fields rest on: what they claim can be
+  // checked against the rows printed next to them in `capture --json`.
+  const realtimeSnippet = lines.slice(-100).join('\n');
+
+  // Issue #2095: gated on the tool because the anchors are opencode's own box
+  // drawing. Every other CLI's detection is untouched by construction — nothing
+  // here even looks at its frame. Computed before the unclassified-frame writer
+  // below because that row is where a user first meets this: the sidebar is
+  // exactly the reason the frame could not be classified, and a "detection
+  // failed" row that does not say so sends the reader to the raw pane to work it
+  // out again.
+  const paneObstruction: OpenCodePaneObstruction | null =
+    cliToolId === 'opencode' ? detectOpenCodePaneObstruction(realtimeSnippet) : null;
+
   // Issue #1708: a frame nothing could classify left no trace anywhere. Both
   // prompt-history writers (response-checker's pending row and
   // recordAnsweredPrompt) are gated on `promptDetection.isPrompt === true`, so
@@ -1322,6 +1684,9 @@ async function buildPayload(
       dwellMs: unclassifiedVerdict.dwellMs,
       sessionStatus: merged.status,
       sessionStatusReason: merged.reason,
+      // Issue #2095: the cause, when the frame carries one. Null leaves the row
+      // exactly as #1708 wrote it.
+      obstruction: paneObstruction,
     });
   }
 
@@ -1343,7 +1708,6 @@ async function buildPayload(
   // strength of what is in the box, never on the strength of a status verdict.
   const composer = extractComposerText(output, cliToolId);
 
-  const realtimeSnippet = lines.slice(-100).join('\n');
   // Issue #1839: judged on exactly what is published as `realtimeSnippet`, not
   // on `output`. The wider capture keeps a banner from an hour ago in scope, and
   // a fault the operator cannot see in the payload next to it is unverifiable.
@@ -1428,6 +1792,18 @@ async function buildPayload(
       ? {
           id: upstreamFaultMatch.fault.id,
           matchedText: upstreamFaultMatch.matchedText,
+          at: Date.now(),
+        }
+      : null,
+    // Issue #2095: the same three keys as `upstreamFault`, read from the same
+    // rows, so an operator comparing the two is comparing like with like. The
+    // detector's `boxRight` / `rows` stay off the wire — they are how the rule
+    // decided, not what a caller acts on, and the payload is already a published
+    // contract wide enough to be hard to change.
+    paneObstruction: paneObstruction
+      ? {
+          id: paneObstruction.id,
+          matchedText: paneObstruction.matchedText,
           at: Date.now(),
         }
       : null,

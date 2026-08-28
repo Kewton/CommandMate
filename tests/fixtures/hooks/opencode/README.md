@@ -67,6 +67,55 @@
 | [`question-replied.json`](./question-replied.json) | `question.replied` | `POST /question/:id/reply` のエコー |
 | [`api-event-envelope-message-updated.json`](./api-event-envelope-message-updated.json) | `message.updated` | **`/api/event`（v2）側の envelope 比較用**。`properties` ではなく `data` |
 
+## Issue #2041 の追加分（opencode **1.18.22** / 2026-08-13 ではなく **2026-08-25** 採取）
+
+上の表とは**採取日もバージョンも違う**。§4 のハーネス（隔離 HOME・`--port 4881`）で 3 ターン
+（プレーン Markdown / tool 呼び出しあり / 967 文字 1 行の段落）を流して採った。
+詳細は設計書 [§13](../../../../docs/design/opencode-server-live-verification.md)。
+
+| ファイル | 中身 |
+|---|---|
+| [`history-turns-1-18-22.json`](./history-turns-1-18-22.json) | SSE tap から `message.updated` / `message.part.updated` / `message.part.delta` / `session.idle` の **142 フレーム**を到着順に。`server.heartbeat` 等は除いてある |
+| [`session-messages-1-18-22.json`](./session-messages-1-18-22.json) | 同じセッションの `GET /session/:id/message` 応答（7 メッセージ = user 3 + assistant 4） |
+
+**この 2 つは同じ 3 ターンの 2 つの見え方**なので、「保存された本文が REST の text と一致する」を
+テストで突き合わせられる。
+
+1.18.3 の fixture 群に無い、ここで初めて記録された事実:
+
+- **`message.part.delta` が存在する。** 142 フレーム中 95。text part の増分はこちらに乗る。
+- **text part の `message.part.updated` は必ず 2 回**（`text: ""` → 本文全体）。途中経過は来ない。
+- **`step-start` / `step-finish` も part** である（`message.part.updated` で届く）。
+- **1 ターンが assistant メッセージ 2 通になりうる**（`finish: "tool-calls"` → `finish: "stop"`）。
+  束ねるキーは assistant の `messageID` ではなく `parentID`。
+
+### プレースホルダ（追加分）
+
+| 元の値 | プレースホルダ |
+|---|---|
+| user メッセージ id | `msg_user000000000000000000N` |
+| assistant メッセージ id | `msg_asst00000000000000000NN` |
+| part id | `prt_00000000000000000000000NN` |
+| tool call id | `toolu_000000000000000000000NN` |
+
+`cost` / `tokens` / `time` / 本文は実測値のまま。
+
+## Issue #2045 の追加分（opencode **1.18.22** / 2026-08-25）
+
+push 通知の分岐に使う 2 本。**採取のしかたが 2 本で違うので、混ぜないこと。**
+
+| ファイル | 中身 | 出所 |
+|---|---|---|
+| [`session-error-aborted.json`](./session-error-aborted.json) | `session.error` の `MessageAbortedError`（`POST /session/:id/abort` の結果） | **実測**。設計書 §5.3.2 (b) の tap 行（`08:15:00.416 session.error {"name":"MessageAbortedError","data":{"message":"Aborted"}}`）をそのまま envelope に戻したもの |
+| [`installation-update-available.json`](./installation-update-available.json) | `installation.update-available` | **実測ではない。サーバ自身の `GET /doc` から起こした**（`EventInstallationUpdate-available`）。**発火は再現できていない**（保留中の更新を作れない。設計書 §6 / §17.4） |
+
+`installation-update-available.json` について **payload の形は一次情報**である
+（`properties` は `{ version: string }` のみで `required: ["version"]`、`additionalProperties: false`。
+**`sessionID` は無い**）。**無いのは「いつ飛ぶか」だけ**で、これは §17.4 に未計測として記録してある。
+
+`session-error.json`（1.18.3 採取）は 1.18.22 でも**バイト構造が変わっていないこと**を再確認した
+（LM Studio に model 未ロードで `APIError` を再現。設計書 §17.1）。`question-asked.json` も同様。
+
 ## プレースホルダ
 
 環境固有値はすべて置換済み（`grep` で実 ID・実パスが残っていないことを確認済み）。
@@ -93,3 +142,75 @@
 ```bash
 for f in tests/fixtures/hooks/opencode/*.json; do python3 -m json.tool "$f" > /dev/null || echo "NG: $f"; done
 ```
+
+---
+
+## コンテキスト使用率（Issue #2042 / opencode 1.18.22 / 2026-08-25）
+
+SSE ではなく **REST の応答**を 2 本追加した。`GET /event` のフレームではないので、
+上の envelope 規約（`{id,type,properties}`）は当てはまらない。
+
+| ファイル | 採取元 | 何のため |
+|---|---|---|
+| [`session-message-window-2042.json`](./session-message-window-2042.json) | `GET /session/<id>/message?limit=4` | 「いまコンテキストに何トークン載っているか」の一次情報 |
+| [`config-providers-2042.json`](./config-providers-2042.json) | `GET /config/providers` | モデルの context 上限（`limit.context`） |
+
+**この 2 本が必要な理由**は `session.updated` の `tokens` では足りないからである。
+`Session.tokens` は**セッション累計**（2 ターン後に `input 6 / output 11 / cache.read 8482 / cache.write 8500`）で、
+これは `opencode stats` が印字する値と一致する。いっぽう opencode 自身のフッタが出す `8.5K (1%)` は
+**直近の assistant メッセージ 1 通**の合計（8,508）であって別の量である。詳細と一次証拠は
+[設計書 §14](../../../../docs/design/opencode-server-live-verification.md) を参照。
+
+`config-providers-2042.json` は `github-copilot/claude-sonnet-4.6` 1 モデルだけに間引いてある
+（実応答は 4 provider・42,968 bytes）。`limit.context` = 1,000,000 と `limit.input` = 936,000 は
+**両方とも実値**で、分母がどちらなのかを取り違えないために両方残している。
+
+`session-message-window-2042.json` は 2 ターン分（user / assistant × 2）をそのまま収録した。
+1 通目の assistant が `total 8491`、2 通目が `total 8508` で、後者が「直近」である。
+
+---
+
+## ターンの変更ファイルと revert（Issue #2043 / opencode **1.18.22** / **2026-08-26** 採取）
+
+SSE フレーム 4 本と REST 応答 2 本。**冒頭の「採取日 2026-08-13 / 1.18.3」ではなく 1.18.22 / 08-26 のもの**。
+
+| ファイル | 採取元 | 何のため |
+|---|---|---|
+| [`session-diff-empty-2043.json`](./session-diff-empty-2043.json) | `GET /event` | **Issue 本文の前提を反証する 1 通。** `session.idle` と同一ミリ秒・`file.edited` 2 件の後なのに `diff: []` |
+| [`session-diff-reverted-2043.json`](./session-diff-reverted-2043.json) | `GET /event` | revert 直後の非空フレーム。`session.diff` が運ぶのは「revert がせき止めている変更」であることの証拠 |
+| [`session-updated-reverted-2043.json`](./session-updated-reverted-2043.json) | `GET /event` | `Session.revert = { messageID, snapshot, diff }` |
+| [`session-updated-unreverted-2043.json`](./session-updated-unreverted-2043.json) | `GET /event` | `revert: null`。**unrevert が出す唯一の信号**（`session.diff` は 1 通も出ない） |
+| [`message-updated-user-2043.json`](./message-updated-user-2043.json) | `GET /event` | `?messageID=` に渡す user メッセージ id の出どころ |
+| [`session-message-diff-2043.json`](./session-message-diff-2043.json) | `GET /session/<id>/diff?messageID=<msg>` | そのターンが変えたファイル。**`messageID` 無しの同ルートは常に `[]`** |
+| [`session-diff-no-message-id-2043.json`](./session-diff-no-message-id-2043.json) | `GET /session/<id>/diff` | ↑ の対照。ターン前後とも空であることの記録（中身は `[]`） |
+
+**この構成が要る理由**は、`session.diff` が Issue #2043 の想定と違うものを運んでいるからである。
+ファイル編集を伴う 2 ターンで観測した `session.diff` は 8 通あり、**8 通すべて空**だった。
+非空になるのは revert の直後だけで、そのときの内容は「revert がせき止めている変更」である。
+したがって「このターンの変更ファイル」は `?messageID=` から取るしかない。
+実測の全体は [設計書 §16](../../../../docs/design/opencode-server-live-verification.md) を参照。
+
+`SnapshotFileDiff` の required は **`additions` / `deletions` の 2 つだけ**（`GET /doc` 一次証拠）で、
+`file` / `patch` / `status` は optional である。fixture にはたまたま 3 つとも入っているが、
+読み手はそれを前提にしてはいけない。パスは `<WORKTREE_PATH>` に置換してある。
+
+## Issue #2100 の追加分（opencode **1.18.23** / 2026-08-26 採取）
+
+| ファイル | 採取元 | 何のため |
+|---|---|---|
+| [`message-part-updated-question-running-2100.json`](./message-part-updated-question-running-2100.json) | `GET /event` | **`question.asked` と同一ミリ秒で届く、同じ question 呼び出しの tool part。** `pre_tool_use` / detail `question` に写る |
+
+`question.asked` は単独では届かない。opencode の question は tool 呼び出しでもあるので、
+実測した 3 回すべてで次の順に並んだ（1.18.23・隔離 HOME・設計書 §27.3）。
+
+```
+message.part.updated  tool=question status=pending    → どの語にも写らない
+question.asked        id=que_… questions=[…]          → notification / question_prompt
+message.part.updated  tool=question status=running    → pre_tool_use / "question"   （0〜1 ms 後）
+```
+
+この 3 通目が `agent-event-state` の「別 tool に移った＝question は終わった」規則に当たって
+`recordAskUserQuestion` の記録を 1 ms で消していたのが Issue #2100 の欠陥の片方である
+（`tool: "question"` は Claude の `AskUserQuestion` と綴りが違う）。
+`state.input.questions` に選択肢がそのまま入っている点は記録のみ——CommandMate は
+`question.asked` 側を権威として読む（id が乗るのはそちらだけ）。

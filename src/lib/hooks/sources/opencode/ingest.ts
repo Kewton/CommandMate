@@ -24,6 +24,18 @@
  * then. (`./source` does not import this module at all; the runtime wires the
  * two together.)
  *
+ * ## Why the phone is notified from here (Issue #2045)
+ *
+ * For every other tool a prompt notification is raised from the waiting edge,
+ * which is only observed by a status probe — so a wait notifies when somebody
+ * is already looking. opencode cannot afford that: after `question.asked` the
+ * session stays `busy` forever and nothing in this process answers it, so the
+ * turn is stopped until a human acts. Two events therefore notify through
+ * `./push` directly, and only these two: `question.asked` and
+ * `session.error`. The call is closed to opencode by construction — the other
+ * five tools arrive through `POST /api/hooks/agent-event`, which does not
+ * import this module.
+ *
  * Nothing here throws. An event is a fact about a session that is still
  * running, and a failure to record it must cost the record, never the session.
  *
@@ -33,11 +45,12 @@
 import { createLogger } from '@/lib/logger';
 import { MAX_EVENT_DETAIL_LENGTH } from '@/lib/hooks/agent-event-types';
 import { adjudicatePendingPermission } from '@/lib/hooks/permission-adjudication';
+import { OPENCODE_QUESTION_TOOL_NAME } from '@/lib/hooks/pending-decision-kind';
 import {
   classifyAgentEventDelivery,
   recordAgentEvent,
   recordAskUserQuestion,
-  reportPermissionRequestPending,
+  reportQuestionPending,
   type AgentEventRecord,
 } from '@/lib/session/agent-event-state';
 import { MAX_STRUCTURED_PROMPT_MESSAGE_LENGTH } from '@/lib/session/structured-prompt';
@@ -51,7 +64,8 @@ import {
   OPENCODE_QUESTION_DETAIL,
   repliedPermissionId,
 } from './mappers';
-import { toOpencodePendingPermission } from './payloads';
+import { readOpencodePermissionSubject, toOpencodePendingPermission } from './payloads';
+import { notifyOpencodeQuestionPush, notifyOpencodeSessionErrorPush } from './push';
 import { OPENCODE_CLI_TOOL_ID } from './tool-id';
 
 const logger = createLogger('lib/hooks/sources/opencode/ingest');
@@ -166,12 +180,26 @@ function replyReleasesPrompt(target: AgentInstanceRef, instanceId: string): bool
  * be read off the screen (#1708), while opencode publishes the questions and
  * their choices as data (#1758 §5.2.4).
  *
- * `reportPermissionRequestPending` is called alongside because that is the only
- * exported way to tell the detection layer a human is blocked, and a question
- * blocks exactly as an approval does — the session reads `busy` and no
- * `session.idle` arrives until it is answered (§5.3.1). It is recorded as
- * provisional, so it expires unless the scraper corroborates it, which is the
- * same treatment Claude's pre-dialog prediction gets.
+ * `reportQuestionPending` is called alongside to tell the detection layer a
+ * human is blocked, because a question blocks exactly as an approval does — the
+ * session reads `busy` and no `session.idle` arrives until it is answered
+ * (§5.3.1, re-measured on 1.18.23 in §27.4).
+ *
+ * ## Issue #2100: the id goes ON the record
+ *
+ * This used to call `reportPermissionRequestPending`, which opens a *forecast*:
+ * anonymous, `source: 'permission-request'`, and bounded at 20 s. The `que_…`
+ * parsed one line above — `spec.promptId`, the very id
+ * `POST /question/:id/reply` takes — was thrown away, so the browser was told
+ * `decisionId: null` about a decision this server could name, and the record
+ * vanished 20 s into a wait that has no timeout at all. The choices went the
+ * same way for a different reason; see `agent-event-state`'s
+ * `applyAskUserQuestionTransition`.
+ *
+ * Nothing about the *reply* path changed: a question is still answered by
+ * `answerPendingQuestion` against `listPending()`, which reads the agent's own
+ * `GET /question` rather than this record. What the record now carries is the
+ * id that lets a surface address one without asking which of several is meant.
  */
 function recordQuestion(
   target: AgentInstanceRef,
@@ -189,16 +217,31 @@ function recordQuestion(
     spec,
     event.receivedAt
   );
-  reportPermissionRequestPending(
+  reportQuestionPending(
     target.worktreeId,
     OPENCODE_CLI_TOOL_ID,
     instanceId,
-    'question',
+    {
+      // Issue #2040: the marker `structuredEvents.pendingDecisions[].kind` is
+      // recovered from, named once in `pending-decision-kind` so the writer here
+      // and the reader in `current-output-builder` cannot drift apart.
+      toolName: OPENCODE_QUESTION_TOOL_NAME,
+      // Issue #2100. `parseOpencodeQuestion` refuses a payload with no `id`, so
+      // this is non-null for every question that got this far; the null branch
+      // exists because the type says it can be, not because a frame was seen
+      // without one.
+      decisionId: spec.promptId,
+      detail: OPENCODE_QUESTION_DETAIL,
+    },
     event.receivedAt
   );
   logger.info('opencode-question-recorded', {
     worktreeId: target.worktreeId,
     instanceId,
+    // Issue #2100: logged so a live run says whether the id reached the record.
+    // It was the missing half — the count and the option counts below were
+    // already right while `pendingDecisions[0].id` read null.
+    decisionId: spec.promptId,
     questionCount: spec.questions.length,
     optionCounts: spec.questions.map((question) => question.choices.length),
   });
@@ -329,6 +372,15 @@ export async function ingestOpencodeEvent(
         isPlainObject(event.raw.properties) ? event.raw.properties : {},
         'id'
       );
+      // Issue #2031: what the dialog is FOR, carried on the record because the
+      // frame itself cannot answer it. The tool name lives in the
+      // `message.part.updated` correlation this module's `payloads` holds, and
+      // `patterns` is the rule an `Allow always` would save — the one verdict
+      // whose effect outlives the dialog, and therefore the one the browser
+      // must be able to show the size of before it is pressed.
+      const subject = readOpencodePermissionSubject(event.raw, event.receivedAt);
+      record.toolName = subject?.toolName ?? null;
+      record.decisionPatterns = subject?.patterns ?? null;
       record.promptSettled = await adjudicatePermission(target, event, instanceId);
       recordAgentEvent(target.worktreeId, OPENCODE_CLI_TOOL_ID, instanceId, record, options);
       return;
@@ -354,12 +406,42 @@ export async function ingestOpencodeEvent(
 
     if (event.event === 'notification' && event.detail === OPENCODE_QUESTION_DETAIL) {
       recordQuestion(target, event, instanceId);
+      // Issue #2045: after the record, so the notification cannot describe a
+      // wait the rest of the process has not been told about yet — and after it
+      // for a second, load-bearing reason: `recordQuestion` is what makes the
+      // wait visible to `peekPromptWaiting`, whose `structured.at` is the very
+      // `receivedAt` passed below. The two producers name the wait identically
+      // only if both read the same record. See `./push`.
+      await notifyOpencodeQuestionPush(
+        target,
+        instanceId,
+        record.message ?? null,
+        event.receivedAt
+      );
       return;
     }
 
     if (event.event === 'stop') {
       await applyStop(target, instanceId);
       return;
+    }
+
+    if (event.event === 'notification' && event.detail === OPENCODE_ERROR_DETAIL) {
+      // Issue #2045. Deliberately not a generic `notification` / `error` hook:
+      // this is the opencode ingest, the other five tools reach
+      // `recordAgentEvent` through `POST /api/hooks/agent-event`, and nothing
+      // there imports this module — so their push counts cannot move.
+      await notifyOpencodeSessionErrorPush(
+        target,
+        instanceId,
+        readNestedString(isPlainObject(event.raw.properties) ? event.raw.properties : {}, [
+          'error',
+          'name',
+        ]),
+        record.message ?? null,
+        event.conversationId,
+        event.receivedAt
+      );
     }
 
     logger.info('opencode-event-received', {

@@ -10,7 +10,7 @@
  * |---------------------|--------------------------------------------|--------|
  * | verification failed | `lib/verification/gate-runner`              | event  |
  * | upstream API fault  | `lib/polling/response-checker` (#1839 match)| level  |
- * | session start failed| `lib/cli-tools/base` (all 7 tools, #2009)   | event  |
+ * | session start failed| `lib/cli-tools/start-availability` (#2009/#2022)| event |
  *
  * The shape column is the whole design. An **event** fires once by construction
  * — a run closes once, a start attempt throws once — so its only guard is the
@@ -27,6 +27,17 @@
  * carrying `reason`, the worktree and the instance. The single exception is
  * `no-fault` — a clean frame — which is the outcome of most polls of most
  * sessions and would drown the log it exists to make readable.
+ *
+ * ## The card has to say *which* instance (Issue #2125)
+ *
+ * `push-sender` builds the title as `<worktree>` plus ` (<agentName>)`, and
+ * omits the suffix when the producer has no agent to name. A bare
+ * `commandmate verify <id>` names none, so the failure card carried the branch
+ * name alone while the waiting card next to it said `(claude)` — and a worktree
+ * running `claude` / `claude-2` / `codex` in parallel could not be told which
+ * one had gone red. {@link formatWorktreeWideAgentLabel} is the answer: a run
+ * that named no instance is labelled with the worktree's resolved default
+ * *marked as such*, never substituted for a report that that instance ran.
  *
  * ## Why none of this goes through `prompt-push-gate`
  *
@@ -49,10 +60,12 @@ import { getDbInstance } from '@/lib/db/db-instance';
 import type { VerificationRunTerminalStatus, VerificationTrigger } from '@/lib/db/verification-db';
 import { getWorktreeById } from '@/lib/db/worktree-db';
 import { createLogger } from '@/lib/logger';
+import { resolveSessionTarget } from '@/lib/session/resolve-session-target';
 import {
   SESSION_START_FAILED_CODE,
   isSessionStartTimeoutError,
   isSessionStartUnavailableError,
+  type SessionStartSubject,
 } from '@/lib/session/session-start-error';
 import { observeUpstreamFaultEdge } from './failure-episode-state';
 import { notifyPushSubscribers, type FailurePushReason } from './push-sender';
@@ -100,17 +113,112 @@ function resolveWorktreeName(worktreeId: string): string {
   }
 }
 
+/**
+ * Prefix for the title suffix of a run that named no agent instance (#2125).
+ *
+ * Chosen so the label can never be read as an instance id: `isValidInstanceId`
+ * admits only `[A-Za-z0-9_-]{1,64}`, and both the colon and the space are
+ * outside it. A worktree whose operator really did register an instance called
+ * `worktree` therefore still renders differently from a worktree-wide run.
+ */
+const WORKTREE_WIDE_AGENT_PREFIX = 'worktree: ';
+
+/**
+ * What the label says when not even the worktree's default target can be named.
+ * A question mark rather than an omission, because "we could not tell" and
+ * "there was nothing to tell" are different facts and #2125 is about a title
+ * that dropped one of them silently.
+ */
+const UNKNOWN_AGENT_MARK = '?';
+
+/**
+ * Title suffix for a verification run that judged the worktree rather than a
+ * named instance (Issue #2125).
+ *
+ * Exported for the tests that pin the two spellings; producers go through
+ * {@link resolveVerificationAgentLabel}.
+ */
+export function formatWorktreeWideAgentLabel(instanceId?: string): string {
+  return `${WORKTREE_WIDE_AGENT_PREFIX}${instanceId ?? UNKNOWN_AGENT_MARK}`;
+}
+
+/**
+ * Decide what the failure card should call the agent (Issue #2125).
+ *
+ * ## Why a bare `commandmate verify` had no suffix at all
+ *
+ * `push-sender` renders ` (${agentName})` and omits it when `agentName` is
+ * empty, and `commandmate verify <id>` names no `--instance`, so the run
+ * carried `instanceId: null` all the way from `gate-runner` and the card said
+ * only the worktree name (measured by the orchestrator on 2026-08-27, iPadOS
+ * 18.7 / APNs: `uat/push-2002` with body `検証ゲート不合格：lint`). Silence is
+ * the one thing that could not be read: the reader cannot tell "this run was
+ * about the whole worktree" from "the instance was dropped on the way".
+ *
+ * ## Why the resolved target is labelled rather than substituted
+ *
+ * A run that named no instance is asked about here through
+ * `resolveSessionTarget` — the #1925 authority that `GET
+ * /api/worktrees/:id/resolve-target` is the HTTP face of — so the card can name
+ * the agent the worktree would send to. But the answer is a *default*, not a
+ * report that this agent ran the gates, so it is rendered with the
+ * {@link WORKTREE_WIDE_AGENT_PREFIX} rather than as a plain instance id. The
+ * distinction is what stops a two-instance worktree from blaming whichever one
+ * happens to be the default.
+ *
+ * The resolution deliberately stops here and never reaches
+ * `RunVerificationInput.instanceId`: #2043 rests on an unnamed instance
+ * answering `false` to `namesOpencodeInstance`, so writing a resolved id onto
+ * the run would move a *verdict* (an opencode worktree's work-evidence gate)
+ * for the sake of a title.
+ *
+ * `resolvedBy: 'fallback'` is not a fact about this worktree — it is
+ * `resolve-session-target`'s own last-resort literal, reached when the row is
+ * gone — so it degrades to {@link UNKNOWN_AGENT_MARK} instead of asserting
+ * `claude`.
+ */
+function resolveVerificationAgentLabel(
+  worktreeId: string,
+  instanceId: string | undefined
+): string {
+  if (instanceId !== undefined) return instanceId;
+  try {
+    const target = resolveSessionTarget(getDbInstance(), worktreeId);
+    return formatWorktreeWideAgentLabel(
+      target.resolvedBy === 'fallback' ? undefined : target.instanceId
+    );
+  } catch {
+    // A database that cannot answer is a reason for a vaguer title, never for
+    // dropping the notification — the position `resolveWorktreeName` takes.
+    return formatWorktreeWideAgentLabel();
+  }
+}
+
 interface RaiseFailurePushInput {
   reason: FailurePushReason;
   worktreeId: string;
   /** Instance the failure belongs to; also the title suffix. */
   instanceId?: string;
+  /**
+   * Title suffix, when it is not the instance id itself (Issue #2125).
+   *
+   * Display only: `instanceId` stays the truthful record of what the producer
+   * was told, so the log line and the event's own `instanceId` keep saying
+   * "nothing named an instance" while the card says which worktree-wide run it
+   * was about.
+   */
+  agentLabel?: string;
   /** Identity of this incident — the dedup key. Never rendered. */
   signature: string;
   /** Short human-readable detail for the body. */
   excerpt?: string;
   /** Extra fields for the log line only. Never sent to a device. */
   logContext?: Record<string, unknown>;
+  /**
+   * Title and tap target for a subject that is not a worktree row (#2022).
+   * Omitted, both are resolved from {@link worktreeId} exactly as before.
+   */
+  subject?: SessionStartSubject;
 }
 
 /**
@@ -123,6 +231,9 @@ async function raiseFailurePush(input: RaiseFailurePushInput): Promise<void> {
   const context = {
     worktreeId: input.worktreeId,
     instanceId: input.instanceId,
+    // Only the verification producer sets one (#2125); logging it unconditionally
+    // would repeat `instanceId` on every other line.
+    ...(input.agentLabel !== undefined ? { agentLabel: input.agentLabel } : {}),
     failureReason: input.reason,
     signature: input.signature,
     ...input.logContext,
@@ -141,12 +252,16 @@ async function raiseFailurePush(input: RaiseFailurePushInput): Promise<void> {
   try {
     await notifyPushSubscribers({
       worktreeId: input.worktreeId,
-      worktreeName: resolveWorktreeName(input.worktreeId),
+      // Issue #2022: a subject that is not a worktree row names itself. The
+      // worktree lookup is not merely redundant for one — it would answer with
+      // the raw id, which for Assistant Chat is a uuid nobody recognises.
+      worktreeName: input.subject?.name ?? resolveWorktreeName(input.worktreeId),
       kind: 'failure',
-      agentName: input.instanceId,
+      agentName: input.agentLabel ?? input.instanceId,
       instanceId: input.instanceId,
       excerpt: input.excerpt,
       failure: { reason: input.reason, signature: input.signature },
+      ...(input.subject ? { url: input.subject.url } : {}),
     });
   } catch (error) {
     // `notifyPushSubscribers` already contains its own failures; this is the
@@ -170,6 +285,11 @@ export interface VerificationFailurePushInput {
   taskId: string | null;
   status: VerificationRunTerminalStatus;
   trigger: VerificationTrigger;
+  /**
+   * Instance the caller attributed the run to, or null for the worktree-wide
+   * run `commandmate verify <id>` and the Web UI button both produce. Null is
+   * not a gap to be filled in silently — see {@link formatWorktreeWideAgentLabel}.
+   */
   instanceId?: string | null;
   /** Ids of the gates that did not pass, for the body. */
   failedGateIds?: string[];
@@ -245,6 +365,9 @@ export async function notifyVerificationFailurePush(
     reason: 'verification-failed',
     worktreeId: input.worktreeId,
     instanceId,
+    // Resolved here rather than at the suppression checks above: it reads the
+    // database, and a run nobody is going to be told about must not pay for it.
+    agentLabel: resolveVerificationAgentLabel(input.worktreeId, instanceId),
     // The run id, so two runs of the same worktree are two incidents even when
     // the same gates fail with the same wording inside the 30 s window.
     signature: `verification:${input.runId}`,
@@ -350,6 +473,13 @@ export interface SessionStartFailurePushInput {
    * {@link classifySessionStartFailure}.
    */
   error: unknown;
+  /**
+   * Title and tap target, for a start that does not belong to a worktree
+   * (Issue #2022) — Assistant Chat, which is repository-scoped and lives at
+   * `/chat`. Omitted by every tmux-session caller, which keeps the worktree
+   * title and the `/worktrees/<id>` link #2000 shipped.
+   */
+  subject?: SessionStartSubject;
 }
 
 /**
@@ -433,10 +563,14 @@ function readErrorCode(error: unknown): string | undefined {
 /**
  * Notify that a CLI session could not be started. Never throws.
  *
- * Called from exactly one place — `BaseCLITool.startSession`, the method all
- * seven tools inherit (Issue #2009). Before that it was called from
- * `claude-session`'s throw site, which is why six of the seven agents failed
- * silently: the other six never had a line to call it from.
+ * Called from exactly one place — `reportSessionStartFailure` in
+ * `lib/cli-tools/start-availability` (Issue #2009 / #2022). Before #2009 it was
+ * called from `claude-session`'s throw site, which is why six of the seven
+ * agents failed silently: the other six never had a line to call it from. #2009
+ * moved it to `BaseCLITool.startSession`, the method all seven tools inherit;
+ * #2022 moved the line itself one step further out, because Assistant Chat
+ * never reaches that method — it spawns `claude -p` rather than a tmux session —
+ * and the alternative was a second, private call site.
  *
  * No edge of its own, and deliberately: this is raised from a `throw`, so its
  * rate is bounded by how often something asks to start the session rather than
@@ -470,5 +604,6 @@ export async function notifySessionStartFailurePush(
     signature: verdict.signature,
     excerpt: verdict.excerpt,
     logContext: { cliToolId: input.cliToolId },
+    subject: input.subject,
   });
 }

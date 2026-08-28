@@ -464,8 +464,102 @@ app.prepare().then(() => {
     console.log(`> Ready on ${protocol}://${hostname}:${port}`);
     console.log(`> WebSocket server ready`);
 
+    // Issue #2113: verify that the URL the documentation advertises
+    // (`http://localhost:<port>`) actually reaches THIS process. It does not when
+    // another process holds `::1:<port>`: `localhost` resolves ::1 before 127.0.0.1
+    // on macOS, and neither a 127.0.0.1 nor a 0.0.0.0 bind covers ::1. The user's
+    // browser then talks to the squatter while we keep printing "Ready".
+    //
+    // Deliberately NOT awaited and wrapped in its own catch: a diagnostic must never
+    // delay or block a successful `listen`. `runLocalhostSelfCheck` is fail-open in
+    // its own right (it resolves `null` rather than throwing) and warns only on the
+    // one actionable verdict — see src/lib/server/localhost-self-check.ts.
+    //
+    // Dynamic import for the same reason as every reconciler below: adding a module
+    // graph to server.ts's eval-time graph perturbs Next's AsyncLocalStorage bootstrap
+    // under `tsx server.ts` and kills the first request that compiles middleware. Do
+    // not hoist this.
+    void (async () => {
+      try {
+        const selfCheck = await import('./src/lib/server/localhost-self-check');
+        clearStartupSelfCheckState = () => selfCheck.clearLocalhostConflict(port);
+        await selfCheck.runLocalhostSelfCheck({
+          server,
+          port,
+          bind: hostname,
+          protocol: protocol === 'https' ? 'https' : 'http',
+        });
+      } catch (error) {
+        console.error('Startup self-check failed:', error);
+      }
+    })();
+
+    // Issue #2123 / #2124: say, in one line, whether Web Push can work at all.
+    // Unconfigured VAPID keys disable push silently (correct fail-safe, wrong
+    // ergonomics: the reader observes only "no notifications ever arrive"), and
+    // a `CM_VAPID_SUBJECT` Apple will not accept silences iPhone/iPad while
+    // Android keeps working. ONE check reports both — see src/lib/push/vapid.ts.
+    //
+    // A healthy configuration prints NOTHING, which is what makes the presence
+    // of a line meaningful. Same contract as the localhost self-check above:
+    // fail-open, never blocks `listen`. `commandmate status` runs the same
+    // function over the env the daemon was started with, so the two surfaces
+    // cannot drift.
+    //
+    // Dynamic import for the same reason as every reconciler here: adding a
+    // module graph to server.ts's eval-time graph perturbs Next's
+    // AsyncLocalStorage bootstrap under `tsx server.ts`. Do not hoist this.
+    void (async () => {
+      try {
+        const { runVapidSelfCheck } = await import('./src/lib/push/vapid');
+        runVapidSelfCheck();
+      } catch (error) {
+        console.error('VAPID self-check failed:', error);
+      }
+    })();
+
     // Initialize worktrees after server starts
     await initializeWorktrees();
+
+    // Issue #2108: re-open the event streams of opencode panes that outlived
+    // the last process. The port each one's server listens on is in
+    // `~/.commandmate/opencode-ports.json`, and until this call nothing read it
+    // at startup: the only chain that reached `recoverOpencodePort` was a
+    // *launch*, and a restart does not launch anything — `POST /send` skips
+    // `startSession` while the pane is running. The result was a server that
+    // was alive and reachable while every HTTP surface answered
+    // `409 NO_OPENCODE_PORT`, with the terminal view still working because the
+    // screen scraper never needed the port.
+    //
+    // Deliberately NOT awaited. The sweep's cost is a health probe per live
+    // pane, and a pane whose server has died pays a timeout for it; the
+    // managers below must not queue behind that. It is fail-open in its own
+    // right (it never rejects) and the `try`/`catch` below is belt-and-braces.
+    //
+    // Runs after `initializeWorktrees()` because the ingest path this
+    // re-subscribes reaches `@/lib/db` at event time and the migrations above
+    // are what make that table set current.
+    //
+    // Dynamic import for the same reason as every reconciler above: adding this
+    // module graph to server.ts's eval-time graph perturbs Next's
+    // AsyncLocalStorage bootstrap under `tsx server.ts` and the first request
+    // that compiles middleware then dies. Do not hoist this.
+    void (async () => {
+      try {
+        const { reattachOpencodeEventStreams } = await import(
+          './src/lib/hooks/sources/opencode/reattach'
+        );
+        const report = await reattachOpencodeEventStreams();
+        if (report.candidates > 0) {
+          console.log(
+            `opencode streams reattached: ${report.reattached}/${report.candidates} ` +
+              `live pane(s) (persisted=${report.persisted} skipped=${report.skipped})`
+          );
+        }
+      } catch (error) {
+        console.error('Error reattaching opencode event streams:', error);
+      }
+    })();
 
     // Issue #1623: reconcile the `prefix+g` reading-mode binding on the user's
     // tmux server. Fail-open in its own try/catch — a convenience key must never
@@ -498,6 +592,13 @@ app.prepare().then(() => {
   // Graceful shutdown with timeout
   let isShuttingDown = false;
 
+  /**
+   * Issue #2113: drop this port's localhost-conflict record on the way out, so a
+   * resolved conflict cannot outlive the server that observed it. Assigned once the
+   * self-check module has loaded; null until then, and never awaited.
+   */
+  let clearStartupSelfCheckState: (() => void) | null = null;
+
   function gracefulShutdown(signal: string) {
     if (isShuttingDown) {
       console.log('Shutdown already in progress, forcing exit...');
@@ -506,6 +607,13 @@ app.prepare().then(() => {
     isShuttingDown = true;
 
     console.log(`${signal} received: shutting down...`);
+
+    // Issue #2113: best-effort, never fatal.
+    try {
+      clearStartupSelfCheckState?.();
+    } catch {
+      // A leftover record is harmless: `status` only reports one whose PID matches.
+    }
 
     // Stop polling first
     stopAllPolling();

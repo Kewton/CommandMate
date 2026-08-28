@@ -13,6 +13,12 @@
 
 import Database from 'better-sqlite3';
 import {
+  EMPTY_OPENCODE_INSTANCE_SETTINGS,
+  hasOpencodeInstanceSettings,
+  normalizeOpencodeInstanceSettings,
+  type OpencodeInstanceSettings,
+} from '@/types/opencode-instance-settings';
+import {
   type AgentInstance,
   type CLIToolType,
   MAX_AGENT_INSTANCES,
@@ -249,6 +255,10 @@ export function setAgentInstances(
   const now = Date.now();
   const replace = db.transaction(() => {
     db.prepare(`DELETE FROM agent_instances WHERE worktree_id = ?`).run(worktreeId);
+    // Issue #2048: the settings table is keyed on an instance id and this write
+    // is a full replace, so an instance dropped from the roster would otherwise
+    // leave its opencode settings behind for whoever next claimed that id.
+    pruneOpencodeInstanceSettings(db, worktreeId, instances.map((instance) => instance.id));
     const insertStmt = db.prepare(`
       INSERT INTO agent_instances
         (worktree_id, instance_id, cli_tool_id, alias, sort_order, created_at)
@@ -312,5 +322,172 @@ export function removeAgentInstance(
   const result = db.prepare(`
     DELETE FROM agent_instances WHERE worktree_id = ? AND instance_id = ?
   `).run(worktreeId, instanceId);
+  // Issue #2048: same rule as the replace above — the instance is gone, so what
+  // it was configured to launch opencode with is gone with it.
+  db.prepare(`
+    DELETE FROM opencode_instance_settings WHERE worktree_id = ? AND instance_id = ?
+  `).run(worktreeId, instanceId);
   return result.changes > 0;
+}
+
+// ============================================================================
+// opencode launch settings (Issue #2048). Appended at the end of the file on
+// purpose: everything below is additive and touches no export above it, so the
+// roster CRUD's behaviour — and the `agentInstances` API contract that rests on
+// it — is unchanged.
+// ============================================================================
+
+/** One row of `opencode_instance_settings`. */
+interface OpencodeInstanceSettingsRow {
+  agent: string | null;
+  provider_id: string | null;
+  model_id: string | null;
+  variant: string | null;
+}
+
+/**
+ * What this instance should launch and prompt opencode with (Issue #2048).
+ *
+ * Answers the all-unset settings for an instance with no row, which is every
+ * instance until the settings pane writes one — and for an instance backed by
+ * any other CLI tool, which never gets a row at all. The stored values are
+ * re-validated on the way out rather than trusted: the row may have been written
+ * by a build with a wider pattern, and the `agent` / `provider_id` / `model_id`
+ * columns end up on a **shell command line**.
+ *
+ * @param db - Database instance
+ * @param worktreeId - Worktree ID
+ * @param instanceId - Instance ID (the primary instance uses the CLI tool id)
+ */
+export function getOpencodeInstanceSettings(
+  db: Database.Database,
+  worktreeId: string,
+  instanceId: string
+): OpencodeInstanceSettings {
+  const row = db.prepare(`
+    SELECT agent, provider_id, model_id, variant
+    FROM opencode_instance_settings
+    WHERE worktree_id = ? AND instance_id = ?
+  `).get(worktreeId, instanceId) as OpencodeInstanceSettingsRow | undefined;
+
+  if (!row) return { ...EMPTY_OPENCODE_INSTANCE_SETTINGS };
+  return normalizeOpencodeInstanceSettings({
+    agent: row.agent,
+    providerId: row.provider_id,
+    modelId: row.model_id,
+    variant: row.variant,
+  });
+}
+
+/**
+ * Every opencode setting stored for a worktree, keyed by instance id.
+ *
+ * One statement rather than one per roster entry: the settings pane asks for the
+ * whole worktree at once, and an instance with no row is simply absent from the
+ * result — callers fill it with {@link EMPTY_OPENCODE_INSTANCE_SETTINGS}.
+ */
+export function getOpencodeInstanceSettingsByWorktree(
+  db: Database.Database,
+  worktreeId: string
+): Record<string, OpencodeInstanceSettings> {
+  const rows = db.prepare(`
+    SELECT instance_id, agent, provider_id, model_id, variant
+    FROM opencode_instance_settings
+    WHERE worktree_id = ?
+  `).all(worktreeId) as Array<OpencodeInstanceSettingsRow & { instance_id: string }>;
+
+  const settings: Record<string, OpencodeInstanceSettings> = {};
+  for (const row of rows) {
+    settings[row.instance_id] = normalizeOpencodeInstanceSettings({
+      agent: row.agent,
+      providerId: row.provider_id,
+      modelId: row.model_id,
+      variant: row.variant,
+    });
+  }
+  return settings;
+}
+
+/**
+ * Write one instance's opencode settings.
+ *
+ * Validated before the write as well as after the read — a value that would not
+ * survive {@link normalizeOpencodeInstanceSettings} is stored as null rather
+ * than kept, so nothing unusable ever reaches the launcher even if a later build
+ * loosens the reader.
+ *
+ * An all-unset write **deletes the row** instead of storing four nulls. The two
+ * states are indistinguishable to every reader, and the delete keeps the table
+ * to the instances somebody actually configured.
+ *
+ * @throws InvalidAgentInstanceError when the instance id is not a valid one
+ */
+export function setOpencodeInstanceSettings(
+  db: Database.Database,
+  worktreeId: string,
+  instanceId: string,
+  settings: OpencodeInstanceSettings,
+  at: number = Date.now()
+): OpencodeInstanceSettings {
+  if (!isValidInstanceId(instanceId)) {
+    throw new InvalidAgentInstanceError(`Invalid instance id: ${String(instanceId)}`);
+  }
+  const normalized = normalizeOpencodeInstanceSettings(settings);
+
+  if (!hasOpencodeInstanceSettings(normalized)) {
+    db.prepare(`
+      DELETE FROM opencode_instance_settings WHERE worktree_id = ? AND instance_id = ?
+    `).run(worktreeId, instanceId);
+    return normalized;
+  }
+
+  db.prepare(`
+    INSERT INTO opencode_instance_settings
+      (worktree_id, instance_id, agent, provider_id, model_id, variant, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(worktree_id, instance_id) DO UPDATE SET
+      agent = excluded.agent,
+      provider_id = excluded.provider_id,
+      model_id = excluded.model_id,
+      variant = excluded.variant,
+      updated_at = excluded.updated_at
+  `).run(
+    worktreeId,
+    instanceId,
+    normalized.agent,
+    normalized.providerId,
+    normalized.modelId,
+    normalized.variant,
+    at
+  );
+  return normalized;
+}
+
+/**
+ * Drop the settings of instances that are no longer in the roster.
+ *
+ * Called by {@link setAgentInstances} and {@link removeAgentInstance}, because
+ * `opencode_instance_settings` is keyed on an instance id and nothing else would
+ * ever remove a row for an instance the operator deleted. Re-adding an instance
+ * under the same id therefore starts from opencode's defaults rather than
+ * inheriting a setting from a roster entry that no longer exists.
+ *
+ * @param keepInstanceIds - The ids that survive; every other row is deleted
+ * @returns How many rows were removed
+ */
+export function pruneOpencodeInstanceSettings(
+  db: Database.Database,
+  worktreeId: string,
+  keepInstanceIds: readonly string[]
+): number {
+  if (keepInstanceIds.length === 0) {
+    return db.prepare(`
+      DELETE FROM opencode_instance_settings WHERE worktree_id = ?
+    `).run(worktreeId).changes;
+  }
+  const placeholders = keepInstanceIds.map(() => '?').join(', ');
+  return db.prepare(`
+    DELETE FROM opencode_instance_settings
+    WHERE worktree_id = ? AND instance_id NOT IN (${placeholders})
+  `).run(worktreeId, ...keepInstanceIds).changes;
 }
