@@ -114,6 +114,8 @@ describe('buildProgram', () => {
       'instances',
       // Issue #1237: Skill management (list/info/plan/install/uninstall/status)
       'skill',
+      // Issue #1937 (R9): expose the server to a phone and pair it with a QR code
+      'remote',
     ];
 
     it.each(expectedCommands)('should register the %s command', (name) => {
