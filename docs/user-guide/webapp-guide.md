@@ -383,9 +383,130 @@ Vibe-Localを選択した場合、使用するOllamaモデルを指定できま�
 
 スマートフォンから CommandMate にアクセスする方法です。
 
-### 同一LAN内からのアクセス
+経路は 2 つあります。**まず `commandmate remote` を試してください。**
+`cloudflared` を入れたくない、あるいは LAN 内で完結させたい場合に限り、
+[方法2: 同一 LAN 内から直接つなぐ](#方法2-同一-lan-内から直接つなぐcloudflared-を使わない場合) を使います。
 
-1. PCとスマートフォンを同じWi-Fiに接続
+| | 方法1: `commandmate remote` | 方法2: 同一 LAN 内から直接つなぐ |
+|---|---|---|
+| **認証** | あり（ペアリングしたスマホだけ） | **なし** |
+| **暗号化** | あり（外側が HTTPS） | **なし**（平文 HTTP） |
+| **届く範囲** | 外出先からも（インターネット経由） | 同じ Wi-Fi の中だけ |
+| **必要なもの** | `cloudflared` | なし |
+| **サーバの bind** | `127.0.0.1` のまま | `0.0.0.0`（全インターフェース） |
+
+### 方法1（推奨）: `commandmate remote` で QR ペアリング
+
+`commandmate remote` は **サーバの起動・外への公開・スマホとのペアリング**を 1 コマンドで
+行います。ターミナルに QR コードが表示されるので、スマホのカメラで読むだけです。
+
+```bash
+commandmate remote
+```
+
+やっていることは次の 4 つです。
+
+1. Provider（外へ出す口）を検出して選ぶ
+2. **公開 Tunnel を作る前に、あなたに確認を取る**（下記「公開前の確認」）
+3. 認証を有効にした CommandMate サーバを起動する
+4. 1 回限りのペアリングコードを埋めた URL `https://<公開URL>/login#code=<コード>` を
+   QR コードにして表示する
+
+スマホでその QR を読むとログインが完了します。**ペアリングコードは一度しか使えず、
+既定 10 分で失効します。** コードが表示されるのはこのときだけで、
+`commandmate remote status` は URL は見せてもコードは二度と見せません。
+
+#### 公開前の確認
+
+CommandMate が使う Provider は現在 **Cloudflare Quick Tunnel のみ**です。これは
+`https://<ランダム>.trycloudflare.com` という **インターネット上のアドレス**を一時的に作ります。
+そのため `commandmate remote` は、Tunnel を作る前に警告を出して y/n を尋ねます。
+
+非対話環境（スクリプトや CI）では**プロンプトを出せないので既定で拒否**し、
+`CONFIG_ERROR`（exit 2）で止まります。意図して公開する場合だけ `--yes` を付けてください。
+
+```bash
+commandmate remote --yes    # 確認をスキップして公開 Tunnel を作る
+```
+
+> **Tailscale はまだ使えません。** `--provider tailscale` は用意されていますが、
+> 中身は未実装のスタブで、実行すると `DEPENDENCY_ERROR`（exit 1）になります。
+> **使える Provider が 1 つも無いときも `DEPENDENCY_ERROR` で止まり、
+> 勝手に公開 Tunnel へ切り替わることはありません。**
+
+#### 状態の確認と撤収
+
+```bash
+commandmate remote status   # Provider / URL / 期限 / ペアリング状態
+commandmate remote stop     # 外への口を閉じる
+```
+
+`remote stop` が片付けるのは **CommandMate 自身が作った設定だけ**です。
+状態ファイルが読めないときは Provider を推測して片付けにいかず、
+「片付けるものが分からない」と言って正常終了します。
+
+**期限が切れたときに閉じるのは外への口だけで、サーバは落としません。**
+PC でのローカル利用まで巻き添えにしないためです。
+
+#### 主なオプション
+
+| オプション | 既定 | 説明 |
+|-----------|------|------|
+| `--provider <tailscale\|cloudflare>` | 自動選択 | Provider を明示指定 |
+| `--expires <duration>` | `8h` | remote セッションの TTL（`1h`〜`30d`） |
+| `--pairing-expires <duration>` | `10m` | ペアリングコードの TTL（`1m`〜`24h`） |
+| `-p, --port <number>` | 自動 | 公開するサーバのポート |
+| `--yes` | — | 公開 Tunnel の明示承認（非対話環境では必須） |
+| `--json` | — | JSON 出力 |
+
+終了コード: `0` 成功 / `1` DEPENDENCY_ERROR / `2` CONFIG_ERROR / `3` START_FAILED /
+`4` STOP_FAILED / `99` UNEXPECTED_ERROR。
+CLI としての詳細は [CLI 運用ガイド](./cli-operations-guide.md) を参照してください。
+
+#### 知っておくとよいこと
+
+- **`CM_BIND` は変わりません。** `remote` は `CM_BIND` を読みも書きもせず、サーバは
+  `127.0.0.1` に bind したままです。外へ出す口を 1 つ増やすだけです。
+- **Auto-Yes は既定で無効のまま**です。`remote` に Auto-Yes を有効化するフラグはありません。
+- **平文の長期トークンはどこにも保存されません。** サーバに渡すのは
+  `CM_AUTH_TOKEN_HASH` / `CM_AUTH_EXPIRE` / `CM_REMOTE_PAIRING_FILE` の 3 つだけで、
+  3 つ目は秘匿値ではなくファイルパスです。ペアリング用の受け渡しファイル
+  `~/.commandmate/remote-pairing.json` は mode 0600 で、**ペアリング成功と同時に削除**されます。
+- **Tunnel 経由でもログイン Cookie に `Secure` 属性は付きません。** これは正しい挙動です。
+  `Secure` を立てると `http://127.0.0.1:3000` でのローカル利用時に Cookie が拒まれ、
+  PC からの利用が壊れます。Tunnel の外側は HTTPS なので、通信経路上の盗聴リスクは
+  すでに下がっています。詳しくは [セキュリティガイド](../security-guide.md) を参照してください。
+
+#### OS 別の対応状況
+
+2026-08-29 時点の実測結果です。**「実測済み」と「未検証」を必ず読み分けてください。**
+実測の手順と生ログは `dev-reports/issue/1937/u8-os-matrix.md` にあります。
+
+| OS | Provider 検出 | 承認フロー | 公開 Tunnel の疎通 | 備考 |
+|----|--------------|-----------|------------------|------|
+| **macOS** (Darwin arm64) | ✅ 実測済み<br>`cloudflared` 導入済みなら `ready` | ✅ 実測済み<br>非対話は exit 2 で停止 | ⏭️ 未実施 | cloudflared 2025.4.0 で確認 |
+| **Linux** (Debian 12 / aarch64) | ✅ 実測済み<br>未導入時は `DEPENDENCY_ERROR` (exit 1)、導入後 `ready` | ✅ 実測済み<br>macOS と同一の挙動 | ⏭️ 未実施 | ⚠️ **docker コンテナでの実測であり、ベアメタル Linux とはネットワーク構成が異なりうる** |
+| **WSL2** | ❌ **未検証** | ❌ **未検証** | ❌ **未検証** | **検証環境が用意できなかったため未実施。** WSL2 は `localhost` 転送の構成差が大きく、**Tunnel のアップストリーム `127.0.0.1` が WSL2 内部を指すか Windows 側を指すかが構成依存**です |
+
+- ✅ **実測済み** ／ ⏭️ **未実施**（公開 Tunnel を新たに作らない方針のため意図的に見送り）
+  ／ ❌ **未検証**（検証環境が無い）
+- **公開 Tunnel の疎通そのもの（URL 払い出しからスマホでのペアリング成立まで）は、
+  全 OS とも実機受入テストで確認します。** 上表の「実測済み」は、
+  公開 Tunnel を作らずに確かめられる範囲（Provider 検出・承認ゲート・`status` / `stop`）です。
+- `--provider tailscale` はすべての OS で使えません（未実装のスタブのため）。OS 差ではありません。
+
+### 方法2: 同一 LAN 内から直接つなぐ（`cloudflared` を使わない場合）
+
+`cloudflared` を入れたくない場合や、LAN の外に一切出したくない場合はこちらを使います。
+
+> ⚠️ **この方法はサーバを認証なしで LAN に開きます。**
+> `CM_BIND=0.0.0.0` は CommandMate を PC の全ネットワークインターフェースで待ち受けさせます。
+> 同じ Wi-Fi にいる**誰でも**、ブラウザで `http://<PCのIPアドレス>:3000` を開けば
+> **認証を求められることなく**リポジトリ・ターミナル・エージェントを操作できます。
+> 共有 Wi-Fi（カフェ・コワーキング・社内ゲスト網）では使わないでください。
+> 認証と暗号化が要るなら [方法1](#方法1推奨-commandmate-remote-で-qr-ペアリング) を使ってください。
+
+1. PC とスマートフォンを同じ Wi-Fi に接続
 2. `.env` ファイルを編集:
    ```
    CM_BIND=0.0.0.0
@@ -393,9 +514,9 @@ Vibe-Localを選択した場合、使用するOllamaモデルを指定できま�
 3. サーバーを再起動
 4. スマートフォンのブラウザで `http://<PCのIPアドレス>:3000` にアクセス
 
-> **注意**: 外部ネットワークへの公開時はリバースプロキシでの認証を推奨します。詳細は [セキュリティガイド](../security-guide.md) を参照してください。
+終わったら `CM_BIND` を `127.0.0.1`（既定値）に戻し、サーバーを再起動してください。
 
-### PCのIPアドレスの確認方法
+#### PCのIPアドレスの確認方法
 
 ```bash
 # macOS
@@ -405,10 +526,11 @@ ifconfig | grep "inet " | grep -v 127.0.0.1
 ip addr | grep "inet " | grep -v 127.0.0.1
 ```
 
-### 外出先からのアクセス
+#### 外部ネットワークへ公開する場合
 
-Cloudflare Tunnel などのトンネリングサービスを使用することで、外出先からもアクセスできます。
-詳しくは [デプロイガイド](../DEPLOYMENT.md) を参照してください。
+`commandmate remote` を使わずに自分で公開する場合は、リバースプロキシでの認証を必ず併用して
+ください。詳細は [セキュリティガイド](../security-guide.md) と
+[デプロイガイド](../DEPLOYMENT.md) を参照してください。
 
 ### モバイルUI
 
@@ -443,9 +565,12 @@ Cloudflare Tunnel などのトンネリングサービスを使用すること�
 | **iOS / iPadOS はホーム画面に追加すること** | Safari のタブでは Web Push が使えません。**ホーム画面に追加し、そこから起動した状態**でのみ購読できます | 購読ボタンが出ず「ホーム画面に追加してください」の案内が出たらこれ |
 | **Android Chrome は通常のタブでよい** | ホーム画面への追加は不要です | — |
 
-HTTPS を用意する方法は 2 つあります。
+HTTPS を用意する方法は 3 つあります。
 
-- **トンネル**（外出先からも使える。推奨）: Cloudflare Tunnel など。
+- **`commandmate remote`**（いちばん簡単。推奨）: Cloudflare Quick Tunnel の外側が HTTPS なので、
+  そのまま secure context の要件を満たします。手順は
+  [モバイルからのアクセス](#方法1推奨-commandmate-remote-で-qr-ペアリング) を参照
+- **自分で用意するトンネル**（外出先からも使える）: Cloudflare Tunnel など。
   [デプロイガイド](../DEPLOYMENT.md) を参照
 - **自己署名証明書**（同一LAN内のみ）:
   ```bash
