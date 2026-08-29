@@ -32,6 +32,8 @@ import { createReportCommand } from './commands/report';
 import { createInstancesCommand } from './commands/instances';
 // Issue #1237: Skill management as a thin client over the Skill APIs
 import { createSkillCommand } from './commands/skill';
+// Issue #1937 (R9): expose the server to a phone and pair it with a QR code
+import { createRemoteCommand } from './commands/remote';
 // Issue #1195: Guided quickstart for bare `npx commandmate`
 import { quickstartCommand } from './commands/quickstart';
 import { isInteractive } from './utils/prompt';
@@ -250,6 +252,11 @@ export function buildProgram(): Command {
 
   // Issue #1237: Skill management (catalog / plan / install / uninstall / status)
   program.addCommand(createSkillCommand());
+
+  // Issue #1937 (R9): `remote` composes start + a Provider tunnel + pairing.
+  // Registered next to the server lifecycle commands it builds on rather than
+  // with the agent-orchestration group, which it has nothing to do with.
+  program.addCommand(createRemoteCommand());
 
   // Issue #264: AI Tool Integration help section
   program.addHelpText('after', `
