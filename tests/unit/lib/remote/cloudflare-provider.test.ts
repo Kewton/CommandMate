@@ -30,6 +30,14 @@
  *    and the pair of tests at the bottom shows the window is load-bearing: same
  *    inputs, different window, different source wins.
  *
+ * 4. **fd 2 is a file, and both of its readers still work.** Issue #2146: a
+ *    pipe on fd 2 dies with the parent and takes cloudflared with it. The
+ *    stderr fixtures below are therefore written to the **real log file** the
+ *    Provider opens, not into a `PassThrough`, so the second URL candidate and
+ *    the failure diagnostic are exercised through the code that actually reads
+ *    them back. Whether the child survives the parent is a different question
+ *    and needs real processes: `cloudflare-child-survival.test.ts`.
+ *
  * Every fixture in this file is copied from that live capture. The stderr
  * fixture keeps the two unrelated `https://…cloudflare.com` URLs cloudflared
  * really prints, so the banner parser is tested against the distractors it will
@@ -37,17 +45,27 @@
  *
  * @vitest-environment node
  */
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterAll } from 'vitest';
 import { spawn as realSpawn } from 'child_process';
 import type {
   SpawnOptions,
   SpawnSyncOptionsWithStringEncoding,
   SpawnSyncReturns,
 } from 'child_process';
-import { PassThrough } from 'stream';
+import {
+  appendFileSync,
+  fstatSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 
 import {
   buildQuickTunnelArgs,
+  CLOUDFLARED_LOG_NAME,
   CLOUDFLARED_PIDFILE_NAME,
   cloudflareProvider,
   createCloudflareProvider,
@@ -112,18 +130,19 @@ function spawnSyncResult(
 interface FakeCloudflared {
   child: QuickTunnelProcess;
   killed: NodeJS.Signals[];
+  /** How many times `start()` called `unref()` on this child. */
+  unrefCount: () => number;
   emitExit: (code: number | null, signal?: NodeJS.Signals | null) => void;
   writeStderr: (text: string) => void;
 }
 
 function fakeCloudflared(options: { pid?: number | undefined } = {}): FakeCloudflared {
-  const stderr = new PassThrough();
   const exitListeners: ((code: number | null, signal: NodeJS.Signals | null) => void)[] = [];
   const killed: NodeJS.Signals[] = [];
+  let unrefs = 0;
 
   const child: QuickTunnelProcess = {
     pid: 'pid' in options ? options.pid : 4242,
-    stderr: stderr as unknown as NodeJS.ReadableStream,
     once(_event: 'exit', listener) {
       exitListeners.push(listener);
       return child;
@@ -132,16 +151,24 @@ function fakeCloudflared(options: { pid?: number | undefined } = {}): FakeCloudf
       killed.push(signal);
       return true;
     },
+    unref() {
+      unrefs += 1;
+      return child;
+    },
   };
 
   return {
     child,
     killed,
+    unrefCount: () => unrefs,
     emitExit: (code, signal = null) => {
       for (const listener of exitListeners) listener(code, signal);
     },
+    // Appends to the log file the Provider opened, because that is where the
+    // real cloudflared's fd 2 now points. Writing into a stream instead would
+    // test a path the shipped code no longer has.
     writeStderr: (text) => {
-      stderr.write(text);
+      appendFileSync(TEST_LOG_PATH, text);
     },
   };
 }
@@ -165,11 +192,25 @@ function spawnDouble(
 
 const FAST_TIMING = { urlWaitMs: 200, metricsPreferenceMs: 0, pollIntervalMs: 1 };
 
+/**
+ * A private state directory per test process.
+ *
+ * `start()` now writes a real file here, so the fixed `/tmp/commandmate-remote-test`
+ * this used to name would be shared with every sibling git worktree running the
+ * same suite on this machine. That is how one run poisons another's log.
+ */
+const TEST_STATE_DIR = mkdtempSync(join(tmpdir(), 'cm-remote-cf-'));
+const TEST_LOG_PATH = join(TEST_STATE_DIR, CLOUDFLARED_LOG_NAME);
+
+afterAll(() => {
+  rmSync(TEST_STATE_DIR, { recursive: true, force: true });
+});
+
 function testDeps(overrides: Partial<CloudflareProviderDeps> = {}): Partial<CloudflareProviderDeps> {
   return {
     findFreePort: async () => 45678,
     fetchHostname: async () => null,
-    resolveStateDir: () => '/tmp/commandmate-remote-test',
+    resolveStateDir: () => TEST_STATE_DIR,
     timing: FAST_TIMING,
     ...overrides,
   };
@@ -480,10 +521,74 @@ describe('start() (design §6.4, §9.2)', () => {
     expect(loopbackViolations(args)).toEqual([]);
 
     expect(args[args.indexOf('--pidfile') + 1]).toBe(
-      `/tmp/commandmate-remote-test/${CLOUDFLARED_PIDFILE_NAME}`,
+      join(TEST_STATE_DIR, CLOUDFLARED_PIDFILE_NAME),
     );
-    // stderr must be piped or the second URL candidate has nothing to read.
-    expect(options.stdio).toEqual(['ignore', 'ignore', 'pipe']);
+
+    // Issue #2146. fd 2 is a descriptor on a file, never a pipe: a pipe's read
+    // end belongs to `commandmate remote`, which exits as soon as it has the
+    // URL, and cloudflared then dies of SIGPIPE on its next log line. What the
+    // shape does to a real process is measured in
+    // `cloudflare-child-survival.test.ts`; what is pinned here is that this is
+    // the shape.
+    const stdio = options.stdio as unknown[];
+    expect(stdio.slice(0, 2)).toEqual(['ignore', 'ignore']);
+    expect(typeof stdio[2]).toBe('number');
+    expect(stdio[2]).not.toBe('pipe');
+    expect(options.detached).toBe(true);
+    expect(fake.unrefCount()).toBe(1);
+  });
+
+  it('points fd 2 at the log file beside the pidfile, freshly truncated', async () => {
+    // Truncated rather than appended: `parseBannerUrl` takes the LAST URL in the
+    // buffer, so a previous session's banner would otherwise be readable as this
+    // session's URL — a QR code for a tunnel that no longer exists.
+    writeFileSync(TEST_LOG_PATH, `stale https://from-a-dead-session.trycloudflare.com\n`);
+
+    const fake = fakeCloudflared();
+    let stderrWasARegularFile = false;
+    const spawn = vi.fn((_c: string, _a: readonly string[], options: SpawnOptions) => {
+      // Checked inside `spawn`: the Provider closes its own copy of the
+      // descriptor as soon as this returns.
+      const slot = (options.stdio as unknown[])[2];
+      if (typeof slot === 'number') stderrWasARegularFile = fstatSync(slot).isFile();
+      return fake.child;
+    });
+
+    const provider = createCloudflareProvider(
+      testDeps({ spawn, fetchHostname: async () => MEASURED_HOSTNAME }),
+    );
+    const handle = await provider.start({ port: 3000, signal: liveSignal() });
+
+    expect(stderrWasARegularFile).toBe(true);
+    expect(handle.url).toBe(`https://${MEASURED_HOSTNAME}`);
+    expect(readFileSync(TEST_LOG_PATH, 'utf-8')).toBe('');
+  });
+
+  it('still starts when the log file cannot be opened at all', async () => {
+    // A state directory that cannot be created (its parent is a file, so
+    // mkdir fails with ENOTDIR). A missing diagnostic must not cost the user a
+    // working tunnel — fd 2 falls back to 'ignore' and `/quicktunnel`, the
+    // FIRST URL candidate, is untouched.
+    const blocker = join(TEST_STATE_DIR, 'not-a-directory');
+    writeFileSync(blocker, 'this is a file');
+
+    const fake = fakeCloudflared();
+    const spawn = spawnDouble(fake);
+    const provider = createCloudflareProvider(
+      testDeps({
+        spawn,
+        resolveStateDir: () => join(blocker, 'state'),
+        fetchHostname: async () => MEASURED_HOSTNAME,
+      }),
+    );
+
+    const handle = await provider.start({ port: 3000, signal: liveSignal() });
+
+    expect(handle.url).toBe(`https://${MEASURED_HOSTNAME}`);
+    expect((spawn.mock.calls[0][2].stdio as unknown[])[2]).toBe('ignore');
+    // Still never a pipe. 'ignore' loses the banner and the diagnostic; a pipe
+    // would lose the tunnel.
+    expect((spawn.mock.calls[0][2].stdio as unknown[])[2]).not.toBe('pipe');
   });
 
   it('returns a handle with owned.pid and preexisting null', async () => {
@@ -580,6 +685,56 @@ describe('start() (design §6.4, §9.2)', () => {
     await expect(provider.start({ port: 3000, signal: liveSignal() })).rejects.toThrow(
       /exit code 1 before a public URL appeared/,
     );
+  });
+
+  it('quotes what cloudflared printed, read back out of the log file', async () => {
+    // `stderrTail()` is the other consumer of fd 2, and the one a user actually
+    // sees. Issue #2146 moved fd 2 from a pipe to a file; this asserts the
+    // diagnostic survived the move rather than quietly becoming an empty tail.
+    const fake = fakeCloudflared();
+    const spawn = vi.fn((_c: string, _a: readonly string[], _o: SpawnOptions) => {
+      queueMicrotask(() => {
+        fake.writeStderr(
+          '2026-08-29T01:59:11Z ERR failed to request quick Tunnel: 503 Service Unavailable\n',
+        );
+        queueMicrotask(() => fake.emitExit(1));
+      });
+      return fake.child;
+    });
+    const provider = createCloudflareProvider(
+      testDeps({ spawn, timing: { urlWaitMs: 2000, metricsPreferenceMs: 0, pollIntervalMs: 1 } }),
+    );
+
+    const error = await provider
+      .start({ port: 3000, signal: liveSignal() })
+      .then(() => null)
+      .catch((caught: unknown) => caught as Error);
+
+    expect(error).toBeInstanceOf(Error);
+    expect(error?.message).toContain('last output:');
+    expect(error?.message).toContain('failed to request quick Tunnel: 503 Service Unavailable');
+  });
+
+  it('says so plainly when the URL never came, and still quotes the log', async () => {
+    const fake = fakeCloudflared();
+    const provider = createCloudflareProvider(
+      testDeps({
+        spawn: spawnDouble(fake, MEASURED_STDERR_WITHOUT_BANNER),
+        timing: { urlWaitMs: 60, metricsPreferenceMs: 0, pollIntervalMs: 1 },
+      }),
+    );
+
+    const error = await provider
+      .start({ port: 3000, signal: liveSignal() })
+      .then(() => null)
+      .catch((caught: unknown) => caught as Error);
+
+    expect(error?.message).toContain('no public URL after 60ms');
+    // `stderrTail()` keeps the last five lines and caps the join at 400 chars,
+    // so the assertion is on a line that is inside that budget rather than on
+    // the very last one.
+    expect(error?.message).toContain('last output:');
+    expect(error?.message).toContain('Requesting new quick Tunnel on trycloudflare.com');
   });
 
   describe('a URL is never returned for a process that has already exited', () => {
@@ -833,13 +988,20 @@ describe('stop() (design §6.3, §6.4)', () => {
     expect(kill).toHaveBeenCalledWith(50850, 'SIGTERM');
   });
 
-  it('really does signal a real process (default wiring)', async () => {
+  it('really does signal a real process, detached, in its own group', async () => {
     // Everything above goes through the `kill` seam. This one uses the shipped
     // Provider and a live child, so "the default is wired to process.kill" is
     // measured rather than assumed.
+    //
+    // Spawned `detached` because Issue #2146 made the real child detached, and
+    // detaching moves a process into its own group. `stop()` signals a POSITIVE
+    // pid, which is one process rather than a group, so teardown is unaffected —
+    // but that is the sort of claim that should be measured, not reasoned about.
     const child = realSpawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], {
+      detached: true,
       stdio: 'ignore',
     });
+    child.unref();
     const exitSignal = new Promise<NodeJS.Signals | null>((resolve) => {
       child.once('exit', (_code, signal) => resolve(signal));
     });
