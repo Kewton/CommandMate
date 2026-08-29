@@ -588,6 +588,29 @@ worktree 単位のログが要る。
 §5.4 G（解除→再購読で「常に許可」が戻るか）と同じ経路を通っているので、
 **#2126 Phase 2 はこの操作でも観測できる。**
 
+#### T-5. 購読が 1 台のとき、挙動が変わらない
+
+**全項目合格。**
+
+Android の購読を解除し、DB で **`push_subscriptions` 1 件（iPad のみ）** を実測してから実施。
+
+```
+00:14:43  push-fanout-complete {"kind":"prompt","delivered":1,"failed":0}
+00:15:2x  PC から respond "1"
+00:15:26  resolution-push-skipped {"reason":"single-device","deviceCount":1}
+          ★ resolution-push-sent は無い
+```
+
+| 期待 | 結果 |
+|---|---|
+| iPad に待機通知が届く（従来どおり） | **合格** |
+| 応答後に「対応済み」通知が来ない | **合格**（利用者の実見） |
+| `reason: single-device` / `deviceCount: 1` | **合格** |
+
+**T-7 と結果は同じだが経路が違う。** T-7 は購読 2 件のうち片方が要対応バケツ OFF、
+T-5 は**購読そのものが 1 件**。`deviceCount: 1` に至る道が別なので、
+**片方が通っても他方が通る保証はない** —— 手順書が両方を別項目にしているのはこのため。
+
 ### 5.3 不成立の記録
 
 **T-2 の「iPad の通知が 2 枚に増えていない」が不成立（2 枚）。** ただし追加測定で
