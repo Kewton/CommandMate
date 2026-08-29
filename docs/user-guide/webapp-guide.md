@@ -434,6 +434,19 @@ commandmate remote --yes    # 確認をスキップして公開 Tunnel を作る
 > **使える Provider が 1 つも無いときも `DEPENDENCY_ERROR` で止まり、
 > 勝手に公開 Tunnel へ切り替わることはありません。**
 
+> **修正済み — Cloudflare 経路が `commandmate remote` の終了と同時に死ぬ不具合
+> （[#2146](https://github.com/Kewton/CommandMate/issues/2146)、CLOSED）。**
+> 2026-08-29 の実測では、`cloudflared` が `remote` の返却と同時に終了し、払い出されたばかりの
+> URL が数秒で HTTP 530 になるため、QR を読む時間がありませんでした（不具合 **D-1**）。
+> 原因は spawn の形で、子の stderr を親と一緒に閉じるパイプに繋いだままだったことです。
+> [**#2148**](https://github.com/Kewton/CommandMate/pull/2148) **で fd 2 をパイプではなく
+> ファイル（`~/.commandmate/cloudflared.log`）へ向け、`detached: true` と `unref()` を併用**して
+> 解消し、[#2149](https://github.com/Kewton/CommandMate/pull/2149) が実物の `cloudflared`
+> 2025.4.0 で再確認しました。公開 URL は **`up` 返却後 t+22.6 ／ +56.7 ／ +60.3 秒のいずれでも
+> 530 ではなく**、**`remote stop` 後 2.3 秒で 530**（公開中は生きていて、撤収で失効する）。
+> 両方の実測は [`docs/qa/1937-remote-uat-record.md`](../qa/1937-remote-uat-record.md)
+> （D-1 は §3.6、解消は §6）にあります。
+
 #### 状態の確認と撤収
 
 ```bash
@@ -480,19 +493,22 @@ CLI としての詳細は [CLI 運用ガイド](./cli-operations-guide.md) を�
 #### OS 別の対応状況
 
 2026-08-29 時点の実測結果です。**「実測済み」と「未検証」を必ず読み分けてください。**
-実測の手順と生ログは `dev-reports/issue/1937/u8-os-matrix.md` にあります。
+実測の手順と生ログは `dev-reports/issue/1937/u8-os-matrix.md` に、実機受入テストの記録は
+[`docs/qa/1937-remote-uat-record.md`](../qa/1937-remote-uat-record.md) にあります。
 
 | OS | Provider 検出 | 承認フロー | 公開 Tunnel の疎通 | 備考 |
 |----|--------------|-----------|------------------|------|
-| **macOS** (Darwin arm64) | ✅ 実測済み<br>`cloudflared` 導入済みなら `ready` | ✅ 実測済み<br>非対話は exit 2 で停止 | ⏭️ 未実施 | cloudflared 2025.4.0 で確認 |
+| **macOS** (Darwin arm64) | ✅ 実測済み<br>`cloudflared` 導入済みなら `ready` | ✅ 実測済み<br>非対話は exit 2 で停止 | ✅ 実測済み<br>Cloudflare Quick Tunnel は当初 **D-1** で不合格。[#2148](https://github.com/Kewton/CommandMate/pull/2148) の修正後は合格で、[#2149](https://github.com/Kewton/CommandMate/pull/2149) が実物の `cloudflared` で再確認 | cloudflared 2025.4.0 で確認 |
 | **Linux** (Debian 12 / aarch64) | ✅ 実測済み<br>未導入時は `DEPENDENCY_ERROR` (exit 1)、導入後 `ready` | ✅ 実測済み<br>macOS と同一の挙動 | ⏭️ 未実施 | ⚠️ **docker コンテナでの実測であり、ベアメタル Linux とはネットワーク構成が異なりうる** |
 | **WSL2** | ❌ **未検証** | ❌ **未検証** | ❌ **未検証** | **検証環境が用意できなかったため未実施。** WSL2 は `localhost` 転送の構成差が大きく、**Tunnel のアップストリーム `127.0.0.1` が WSL2 内部を指すか Windows 側を指すかが構成依存**です |
 
 - ✅ **実測済み** ／ ⏭️ **未実施**（公開 Tunnel を新たに作らない方針のため意図的に見送り）
   ／ ❌ **未検証**（検証環境が無い）
-- **公開 Tunnel の疎通そのもの（URL 払い出しからスマホでのペアリング成立まで）は、
-  全 OS とも実機受入テストで確認します。** 上表の「実測済み」は、
-  公開 Tunnel を作らずに確かめられる範囲（Provider 検出・承認ゲート・`status` / `stop`）です。
+- 「Provider 検出」「承認フロー」列の「実測済み」は、**公開 Tunnel を作らずに確かめられる範囲**
+  （Provider 検出・承認ゲート・`status` / `stop`）です。
+- **スマホ実機での通し（QR 読取 → ペアリング → PWA → Push）は、どの OS でもまだ未実施です。**
+  実機受入テストが確認したのはサーバ側までで、スマホでの確認は
+  [#2152](https://github.com/Kewton/CommandMate/issues/2152) で追跡しています。
 - `--provider tailscale` はすべての OS で使えません（未実装のスタブのため）。OS 差ではありません。
 
 ### 方法2: 同一 LAN 内から直接つなぐ（`cloudflared` を使わない場合）
