@@ -144,8 +144,20 @@ describe('probing', () => {
       expect(typeof candidate.detection.available).toBe('boolean');
       expect(typeof candidate.detection.ready).toBe('boolean');
     }
-    // Tailscale is the one whose answer is still fixed, until R3 lands.
-    expect(candidates[0].detection).toMatchObject({ available: false, ready: false });
+    // Since R3 neither Provider has a fixed answer any more: Tailscale runs a
+    // real `tailscale version` plus a real `tailscale status --json`, so a
+    // laptop on a tailnet says `ready: true` where CI says `available: false`.
+    // The invariant that survives both machines is that readiness never
+    // outruns availability, and that an unusable Provider says why.
+    for (const candidate of candidates) {
+      if (!candidate.detection.ready) continue;
+      expect(candidate.detection.available).toBe(true);
+    }
+    for (const candidate of candidates) {
+      if (candidate.detection.available) continue;
+      expect(candidate.detection.ready).toBe(false);
+      expect(candidate.detection.reason).toBeTruthy();
+    }
   });
 });
 
