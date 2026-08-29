@@ -3,29 +3,26 @@
 /**
  * Login Page
  * Issue #331: Token authentication login form
- * Issue #383: QR code login for mobile access via ngrok
+ * Issue #1937 (R7): the #383 QR generator has been removed from this screen -
+ *   it minted a URL carrying the LONG-LIVED auth token in a fragment, which is
+ *   exactly what this Issue forbids. `commandmate remote` prints the pairing
+ *   URL instead. Acceptance of the old #token= link stays in useFragmentLogin
+ *   for one release (design §2.2); its removal is Phase 2.
  *
  * Features:
  * - Token input form (password type)
  * - Rate limit / lockout message display
  * - Redirect to / when auth is disabled (via AuthContext, no fetch needed)
  * - i18n support (useTranslations('auth'))
- * - Fragment-based auto-login for QR code scanned access:
+ * - Fragment-based auto-login for scanned access:
  *   #code=xxx (pairing, Issue #1937) / #token=xxx (deprecated, Issue #383)
- * - QR code generator (PC only, hidden md:block) for mobile access
  */
 
 import { useState, useEffect, FormEvent } from 'react';
-import dynamic from 'next/dynamic';
 import { useTranslations } from 'next-intl';
 import { useAuthEnabled } from '@/contexts/AuthContext';
 import { useFragmentLogin } from '@/hooks/useFragmentLogin';
 import { Button, Input } from '@/components/ui';
-
-const QrCodeGenerator = dynamic(
-  () => import('@/components/auth/QrCodeGenerator').then((m) => ({ default: m.QrCodeGenerator })),
-  { ssr: false }
-);
 
 export default function LoginPage() {
   const t = useTranslations('auth');
@@ -182,11 +179,6 @@ export default function LoginPage() {
             {t('login.submitButton')}
           </Button>
         </form>
-
-        {/* QR Code Generator - PC only (768px+), hidden on mobile */}
-        <div className="hidden md:block">
-          <QrCodeGenerator />
-        </div>
       </div>
     </div>
   );
