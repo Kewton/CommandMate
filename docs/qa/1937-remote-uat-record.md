@@ -23,7 +23,7 @@
 
 | 対象 | 最新の実施 | 判定 |
 |---|---|---|
-| A. Cloudflare Quick Tunnel | 2026-08-29（§3.3） | **公開 URL の疎通のみ不合格（D-1）**、承認ゲート・未認証遮断・WS・`status`・`stop` は合格 |
+| A. Cloudflare Quick Tunnel | 2026-08-29（§3.3）／再確認 2026-08-29（§6） | **全項目合格**。実施 1 回目は公開 URL の疎通が不合格（D-1）だったが、#2148 の修正を実物の cloudflared で再確認して解消（§6.5） |
 | B. Tailscale Serve | 2026-08-29（§3.4） | **全項目合格**（非破壊確認・パス占有時の拒否を含む） |
 | C. 終了時の後始末 | 2026-08-29（§3.5） | **合格** |
 | スマホ実機（QR 読取 → PWA → Push） | **未実施** | — （§4 のチェックリストを人間が実施する） |
@@ -34,6 +34,7 @@
   `cloudflared` が `commandmate remote` の終了と同時に死に、払い出された公開 URL が
   即座に HTTP 530 になる（**D-1**、§3.6）。原因は Provider 側の spawn 形（stderr を
   パイプに繋いだまま親が `process.exit()` する）で、変異実験で確定させた。
+  **→ #2148 で修正され、§6 の実機再確認で合格した**（`up` 返却後 t+22.6／+56.7／+60.3 秒で非 530、`stop` 後 2.3 秒で 530）。
 - **Tailscale Serve は実装も非破壊性も期待どおり動く。** 利用者自身の serve マッピングを
   1 本も壊さず、CommandMate が作った 1 本だけを撤去する。
 - **利用者ドキュメントが R3 の着地に追いついていない。** 4 ファイルが今も
@@ -475,6 +476,8 @@ $ tailscale serve status --json
 
 #### D-1（**不合格**）Cloudflare Quick Tunnel が `commandmate remote` の終了と同時に死ぬ
 
+→ 訂正: §6（**#2148 で修正済み。2026-08-29 に実物の cloudflared で再確認し合格**。以下は修正前の実測としてそのまま残す）
+
 - **事象**: `remote up` が払い出した公開 URL が、コマンドが返った直後にはもう HTTP 530
   （Cloudflare Tunnel error）。**QR を読む時間が無い。**
 - **実測 1（プロセスの寿命）**: `remote up` を長命な shell（私設 tmux セッション）の中で実行し、
@@ -666,6 +669,7 @@ Issue #1937 の受入条件 20 項目に対する、**本記録だけを根拠�
 **未充足のまま残るもの**:
 
 1. **D-1**（受入条件 1 / 16 の Cloudflare 側）— 修正が要る。**これが最優先。**
+   → 訂正: §6（#2148 で修正され、実機で合格。受入条件 1 は Cloudflare 側も満たすようになった）
 2. **D-5**（受入条件 19、および 20 の表の更新）— ドキュメント修正が要る。
 3. **受入条件 4 / 5 / 9 の実機部分**（§4 P-1〜P-12）— 人間がスマホで実施しないと閉じられない。
 4. **受入条件 20 の Linux（ベアメタル）／WSL2**（§4 O-1 / O-2）— 検証環境が要る。
@@ -673,3 +677,209 @@ Issue #1937 の受入条件 20 項目に対する、**本記録だけを根拠�
 
 **D-2 / D-3 / D-4 は受入条件の可否を左右しない**が、D-2 は実機の体験に効くので
 §4 の実施前に直しておくと P-3 以降が測りやすい。
+
+---
+
+## 6. 実施 2 回目（2026-08-29）— **#2146（PR #2148）の修正を実物の cloudflared で再確認**
+
+**この節が扱うのは §3.3 の A-2（公開 URL の疎通）＝ §3.6 の D-1 だけ。** 他の行は再測定していない
+（§3 の判定はそのまま生きている）。§4 のスマホチェックリストも未実施のまま。
+
+**なぜ 1 点だけを測り直したか**: PR #2148 は cloudflared の fd 2 をパイプではなく**ファイル記述子**へ
+向け、`detached: true` + `unref()` を併用する修正で、回帰テスト
+（`tests/unit/lib/remote/cloudflare-child-survival.test.ts`）は**stand-in プロセス**で
+「親の終了後も子が生きる」を固定している。**stand-in は cloudflared ではない。**
+D-1 は Go ランタイムの SIGPIPE 挙動に依存した不具合なので、実物で測らないと閉じられない。
+
+### 6.1 実施環境と隔離
+
+| 項目 | 値 |
+|---|---|
+| 実施日 | 2026-08-29 20:19〜20:26（JST） |
+| 実施者 | Claude Code（@Kewton の環境で実行）。スマホ操作は含まない |
+| OS / arch | macOS 26.6.2（25G83）/ arm64、Node v24.1.0 |
+| サーバ版 | **0.28.0**（隔離インスタンスの `/api/app/update-check` の `currentVersion`） |
+| ブランチ / commit | `docs/2146-live-verify`（`6b66e3b0` = develop の **#2148 着地直後**） |
+| `cloudflared` | 2025.4.0（`--version` 実測。§3 と同一） |
+| `tailscale` | **触っていない**（本確認に不要。コマンドを 1 度も実行していない） |
+
+**隔離インスタンス**（本番 3000 は worktree 70 本・tmux 29 セッションを抱えている。晒さない）:
+
+| 項目 | 値 |
+|---|---|
+| ポート | `3210`（本番は 3000） |
+| `CM_DB_PATH` | `<work>/home/.commandmate/data/uat.db`（新規作成。本番 DB には**一度も書いていない**） |
+| `HOME` | `<work>/home` |
+| cwd（＝`getConfigDir()`） | `<work>/inst`（`.env` / PID / `remote.json` はここ。`cloudflared.pid` と `cloudflared.log` は `resolveStateDir()` が `homedir()` を見るので `<work>/home/.commandmate/`） |
+| `WORKTREE_REPOS` | `<work>/repos/uat-sandbox`（使い捨ての空リポジトリ 1 本） |
+| ラッパ | `cd <work>/inst && env -u CM_PORT -u CM_BIND -u CM_DB_PATH -u CM_ROOT_DIR -u WORKTREE_REPOS HOME=<work>/home node <worktree>/bin/commandmate.js "$@"` |
+
+`<work>` は `/Users/maenokota/.commandmate-uat-2146v`。§3.1 と同じ理由で **scratchpad（`/private/tmp` 配下）は使えない**。
+
+**隔離が効いていることの確認（`remote up` を実行する前のゲート）**:
+
+```
+隔離 GET http://127.0.0.1:3210/api/worktrees → 200 / worktrees = 1
+    ["/Users/maenokota/.commandmate-uat-2146v/repos/uat-sandbox"]
+本番 GET http://127.0.0.1:3000/api/worktrees → 200 / worktrees = 70
+```
+
+**件数が一致したら `up` を実行しない**と決めて臨み、1 対 70 で不一致を確認してから公開した。
+公開後にも tunnel 越しの認証済み `GET /api/worktrees` が `worktrees = 1` / `uat-sandbox` を
+返すことを確認している（6.3 の A-2d）。**tunnel の向き先が隔離インスタンスであることの一番強い証拠はこれ。**
+
+### 6.2 開始時スナップショット（触ってはいけないものの控え）
+
+| 項目 | 開始時（20:19 JST） |
+|---|---|
+| 既存 named tunnel | `pid=819` / `etime=09-19:09:04`（launchd 常駐、利用者自身のサービス。**シグナルを送っていない**） |
+| `cloudflared` プロセス総数（`ps -o comm= -ax \| grep -c 'cloudflared$'`） | **1** |
+| 稼働 tmux `mcbd-*` セッション数 | **29** |
+| 本番 `http://127.0.0.1:3000/` | 200（worktrees 70） |
+
+プロセス数は `comm`（バイナリ名）で数えている。`pgrep -f 'cloudflared'` は**検査文字列を自分の argv に
+含むシェル自身にマッチする**ので使わない。
+
+### 6.3 A-2 の再測定 — **合格**
+
+実行した argv（1 回だけ）:
+
+```
+cd <work>/inst && env -u CM_PORT -u CM_BIND -u CM_DB_PATH -u CM_ROOT_DIR -u WORKTREE_REPOS \
+  HOME=<work>/home node <worktree>/bin/commandmate.js \
+  remote --provider cloudflare --yes --expires 1h --pairing-expires 20m -p 3210 --json
+```
+
+| 事象 | 時刻（JST） | 実測 |
+|---|---|---|
+| `remote up` 開始 | 20:24:08.988 | |
+| cloudflared が URL を払い出し | 20:24:13（`cloudflared.log`） | `https://percentage-weblogs-postcard-bin.trycloudflare.com` |
+| **`remote up` が返った** | **20:24:14.161** | exit 0 / 所要 5.17 秒 / `server = { pid: 61156, port: 3210 }` |
+
+**`server.port` が 3210（3000 でない）ことを、公開 URL に触る前に確認した。**
+
+#### A-2a `remote up` が返った**後**の公開 URL（本題）
+
+| # | 時刻（JST） | `up` 返却からの経過 | パス | HTTP |
+|---|---|---|---|---|
+| 1 | 20:24:36.776 | **t+22.62s** | `/` | **307** |
+| 2 | 20:24:37.0 | t+約22.8s | `/login` | **200** |
+| 3 | 20:25:10.865 | **t+56.70s** | `/` | **307** |
+| 4 | 20:25:10.941 | t+56.78s | `/login` | **200** |
+| 5 | 20:25:14.411 | **t+60.25s** | `/` | **307** |
+| 6 | 20:25:14.484 | t+60.32s | `/login` | **200** |
+
+**6 点すべてで 530 ではない。** `/` の 307 は未認証リダイレクト（既知の **D-2**、`location` が
+内部ホストになる件）で、`/login` の 200 は認証除外パス。**どちらも「tunnel が生きている」ことを示す。**
+§3.3 A-2 では**同じ `/` への curl が `up` 返却直後にすでに 530** だったので、
+これは D-1 の直接の反証にあたる。
+
+> **測定の但し書き（隠さず書く）**: 最初の probe は計画では「返却直後」だったが、実際は **t+22.62 秒**に
+> なった。ドライバスクリプトが `remote up` の stdout から JSON を抜くのに貪欲な `\{.*\}` を使っていて、
+> 先行する dotenv のヒント行（`{ path: ... }` を含む）に食いついて例外で落ち、URL を取り直してから
+> 手で撃ち直したため。**修正前は返却時点ですでに死んでいた**ので、t+22.6 秒での生存は
+> 「返却直後の生存」より弱い主張ではない。ただし t+0〜22 秒の間は測っていない。
+
+#### A-2b 子プロセスの生存
+
+| 項目 | 実測 |
+|---|---|
+| `remote.json` の `handle.owned.pid` | `61399` |
+| `ps -o pid=,etime=,comm= -p 61399`（t+約60s） | `61399 01:00 cloudflared` = **生存**（etime 1 分） |
+| `cloudflared` プロセス総数（公開中） | **2**（`819`＝利用者の named tunnel、`61399`＝Quick Tunnel） |
+
+#### A-2c fd 2 がファイルであることの直接証拠
+
+修正で新設された `<work>/home/.commandmate/cloudflared.log`（28 行、3414 バイト、mode 0600）:
+
+```
+2026-08-29T11:24:10Z INF Requesting new quick Tunnel on trycloudflare.com...
+2026-08-29T11:24:13Z INF |  https://percentage-weblogs-postcard-bin.trycloudflare.com  |
+2026-08-29T11:24:14Z INF Registered tunnel connection connIndex=0 … location=nrt16
+        ← ここで親（commandmate remote）が 20:24:14.161 に終了。以降 60 秒間ログは静か
+2026-08-29T11:25:14Z INF Initiating graceful shutdown due to signal terminated ...
+2026-08-29T11:25:14Z INF Tunnel server stopped
+2026-08-29T11:25:14Z INF Metrics server stopped
+```
+
+**親の終了から 60 秒後（`11:25:14Z` = 20:25:14 JST）に、同じ fd 2 へ書き込みが起きている。**
+出荷前の `stdio: ['ignore','ignore','pipe']` ではこの行は存在しえない
+（その時点でプロセスは SIGPIPE で死んでいる）。**ファイル化と detach が実物で効いている。**
+
+#### A-2d tunnel の向き先が隔離インスタンスであること（公開中に実測）
+
+| 実行 | 実測 |
+|---|---|
+| `POST <公開URL>/api/remote/pair`（`up` が出したコード） | **200**（`Set-Cookie` でトークン受領） |
+| Cookie つき `GET <公開URL>/api/worktrees` | **200** / `worktrees = 1` / `uat-sandbox` |
+
+**本番（70 本）ではない。** ペアリングコードとトークンは本書に書かない（生ログは
+`dev-reports/issue/2146/uat/evidence/` に伏字化して置いた）。
+
+#### A-2e `remote stop` 後の失効
+
+```
+$ commandmate remote stop --json     # 20:25:14.701
+{ "action": "stop", "cleaned": true, "provider": "cloudflare-quick",
+  "skipped": [], "warnings": [], "error": null }   exit 0
+```
+
+| 時刻（JST） | `stop` からの経過 | パス | HTTP |
+|---|---|---|---|
+| 20:25:16.956 | stop+2.26s | `/` | **530** |
+| 20:25:24.971 | stop+10.27s | `/` | **530** |
+| 20:25:34.783 | stop+20.08s | `/` | **530** |
+| 20:25:34.841 | stop+20.14s | `/login` | **530** |
+
+**修正は「消えない tunnel」を作っていない。** §3.3 A-6 が SIGTERM を手で撃って測った失効を、
+今回は `remote stop` そのもので測れた（D-1 が直ったので 2 段構えが要らなくなった）。
+`remote.json` と `remote-pairing.json` はどちらも消えている。
+
+**公開していた時間は約 61 秒**（URL 払い出し 20:24:13 → `stop` 20:25:14）。
+
+### 6.4 C. 終了時の後始末
+
+| 項目 | 開始時（20:19） | 終了時（20:26） | 一致 |
+|---|---|---|---|
+| `cloudflared` プロセス総数（comm ベース） | 1 | **1** | ✅ |
+| 既存 named tunnel | pid 819 / etime 09-19:09:04 | **pid 819 / etime 09-19:16:35**（同一プロセス、単調増加＝再起動していない） | ✅ |
+| 残留 Quick Tunnel | — | **NONE** | ✅ |
+| tmux `mcbd-*` セッション数 | 29 | **29** | ✅ |
+| 本番 `http://127.0.0.1:3000/` | 200 / worktrees 70 | **200 / worktrees 70** | ✅ |
+| ポート 3210 | 空き | **空き**（隔離サーバも停止済み） | ✅ |
+| 隔離インスタンス / 使い捨て DB・HOME | — | **削除済み**（`<work>` ごと `rm -rf`） | ✅ |
+
+本確認が本番インスタンスに対して行ったのは `GET /` と `GET /api/worktrees` のみ（読み取り専用）。
+`tailscale` 系コマンド・`tmux kill-server`・他の `mcbd-*` セッションには一度も触れていない。
+本番の `.next` / `dist` も上書きしていない（ビルドは worktree
+`commandmate-issue-2146v` 内で完結）。
+
+### 6.5 判定
+
+| # | 確認内容 | 判定 |
+|---|---|---|
+| A-2 | **`remote up` が返った後も公開 URL が応答する** | **合格**（t+22.6 / +56.7 / +60.3 秒の 3 時点 × 2 パスすべてで非 530） |
+| A-6 | `remote stop` 後に公開 URL が失効する | **合格**（stop+2.3 秒で 530、+20 秒でも 530） |
+| A-7 | 既存 named tunnel（pid 819）の生存 | **合格** |
+| — | 本番 3000 / `mcbd-*` の無傷 | **合格** |
+
+**総合: 合格。** §3.6 の **D-1 は #2148（`6b66e3b0`）で解消**していることを、stand-in ではなく
+**実物の cloudflared 2025.4.0** で確認した。
+
+### 6.6 気づき（次の Issue の種）
+
+- **`cloudflared.log` は `remote stop` で消えない。** 状態ファイル（`remote.json` /
+  `remote-pairing.json`）と `cloudflared.pid` は片付くのに、ログだけが `HOME/.commandmate/` に残る。
+  診断のために残すのは妥当だが、**次の `up` で追記なのか切り詰めなのかは本確認では測っていない**。
+  「1 セッションぶんだけ残る」ことを期待するなら明示が要る。
+- **`cloudflared.pid` も残る。** 中身は死んだ pid（`61399`）。`status` はこれを読まないので実害は無いが、
+  §3.7 の「`--pidfile` を読むようにすれば生存確認が安い」を実装するなら、**古い pidfile を掴まない
+  手当（`stop` での削除、または `remote.json` の pid との突合）が同時に要る**。
+- **状態ファイルの置き場が 2 つに割れている。** `remote.json` は `getConfigDir()`（＝ローカル導入では cwd）、
+  `cloudflared.pid` / `cloudflared.log` は `resolveStateDir()`（＝`homedir()/.commandmate`）。
+  同じ「1 つの remote セッションの状態」が cwd と HOME に分かれるので、
+  隔離環境を組むときに両方を差し替える必要がある（本確認でも一度探した）。
+- **`--json` は今も純 JSON ストリームではない**（§3.7 の再確認）。本確認のドライバは
+  貪欲な `\{.*\}` で dotenv のヒント行に食いついて落ちた（6.3 の但し書き）。
+  **`--json` を機械が食う前提なら `--quiet` か stderr への振り分けが要る**という §3.7 の指摘は、
+  実際に人を転ばせたので優先度を 1 段上げてよい。
