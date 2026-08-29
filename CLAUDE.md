@@ -275,10 +275,11 @@ commandmate update --yes      # 確認スキップ（非対話環境では必須
 commandmate remote                         # 既定 = up。サーバ起動 + 公開 + QR 表示
 commandmate remote status                  # Provider / URL / 期限 / ペアリング状態
 commandmate remote stop                    # 外への口を閉じる（サーバは止めない）
-commandmate remote --provider cloudflare   # Provider 指定（tailscale は未実装）
+commandmate remote --provider tailscale    # Provider 指定（tailnet 内に閉じる。承認不要）
+commandmate remote --provider cloudflare   # Provider 指定（公開 Tunnel。承認が要る）
 commandmate remote --expires 24h           # remote セッションTTL（既定 8h、1h〜30d）
 commandmate remote --pairing-expires 3m    # ペアリングコードTTL（既定 10m、1m〜24h）
-commandmate remote --yes                   # 公開Tunnelの明示承認（非対話環境では必須）
+commandmate remote --yes                   # 公開Tunnel（cloudflare）の明示承認（非対話環境では必須）
 
 # Worktree並列開発（Issue #136）
 commandmate start --issue 135 --auto-port  # Issue #135用サーバー起動（自動ポート割当）
