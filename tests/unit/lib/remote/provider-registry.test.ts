@@ -132,11 +132,20 @@ describe('probing', () => {
     expect(candidates[1].detection.ready).toBe(true);
   });
 
-  it('probes the shipped stubs without throwing', async () => {
+  it('probes the shipped Providers without throwing', async () => {
     const candidates = await detectRemoteProviders();
     expect(candidates.map((c) => c.provider.id)).toEqual([...REMOTE_PROVIDER_ORDER]);
-    expect(candidates.every((c) => c.detection.available === false)).toBe(true);
-    expect(candidates.every((c) => c.detection.ready === false)).toBe(true);
+    // Shape, not values. Since R2 the Cloudflare Provider runs a real
+    // `cloudflared --version`, and whether that binary exists differs between a
+    // developer laptop and CI — asserting `available === false` here would pin
+    // the laptop rather than the registry. What the registry owes the caller is
+    // that every Provider comes back with a usable answer.
+    for (const candidate of candidates) {
+      expect(typeof candidate.detection.available).toBe('boolean');
+      expect(typeof candidate.detection.ready).toBe('boolean');
+    }
+    // Tailscale is the one whose answer is still fixed, until R3 lands.
+    expect(candidates[0].detection).toMatchObject({ available: false, ready: false });
   });
 });
 
