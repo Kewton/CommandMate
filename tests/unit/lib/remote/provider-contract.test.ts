@@ -24,7 +24,11 @@ import fs from 'fs';
 import path from 'path';
 
 import { planStop, isPreexistingSnapshot, type RemoteHandle } from '@/lib/remote/types';
-import { tailscaleProvider, TAILSCALE_NOT_IMPLEMENTED_REASON } from '@/lib/remote/tailscale';
+import {
+  createTailscaleProvider,
+  tailscaleProvider,
+  type TailscaleProviderDeps,
+} from '@/lib/remote/tailscale';
 import { cloudflareProvider, createCloudflareProvider } from '@/lib/remote/cloudflare';
 
 const REPO_ROOT = path.resolve(__dirname, '../../../..');
@@ -175,20 +179,36 @@ describe('planStop: owned minus preexisting (design §6.3-2)', () => {
   });
 });
 
-describe('shipped Providers (cloudflare landed in R2; tailscale is still an R3 stub)', () => {
-  it('has the tailscale stub report unavailable and not ready, with a reason', async () => {
-    // `available: false` is the honest answer while nothing is implemented, and
-    // it keeps the orchestrator's selection rule exercised end to end.
-    await expect(tailscaleProvider.detect()).resolves.toEqual({
-      available: false,
-      ready: false,
-      reason: TAILSCALE_NOT_IMPLEMENTED_REASON,
-    });
+describe('shipped Providers (both landed: cloudflare in R2, tailscale in R3)', () => {
+  it('has tailscale answer available and ready from the machine, not from a constant', async () => {
+    // R3 deleted `TAILSCALE_NOT_IMPLEMENTED_REASON`. What replaces it is
+    // deliberately machine-independent: a laptop on a tailnet reports
+    // `ready: true`, CI reports `available: false`, and the invariant that
+    // holds on both is that readiness never outruns availability.
+    const detection = await tailscaleProvider.detect();
+    expect(typeof detection.available).toBe('boolean');
+    if (!detection.available) {
+      expect(detection.ready).toBe(false);
+      expect(detection.reason).toBeTruthy();
+    }
+    expect(detection.reason ?? '').not.toMatch(/not implemented/i);
   });
 
-  it('has the tailscale stub refuse to start rather than pretending to', async () => {
-    const opts = { port: 3000, signal: new AbortController().signal };
-    await expect(tailscaleProvider.start(opts)).rejects.toThrow(/not implemented/);
+  it('has tailscale refuse to start once the caller has aborted', async () => {
+    // Same posture as cloudflare below: the abort is honoured before anything
+    // is spawned, so no Serve handler can be left behind with no handle to
+    // remove it by.
+    const spawnSync = vi.fn();
+    const controller = new AbortController();
+    controller.abort();
+
+    const provider = createTailscaleProvider({
+      spawnSync: spawnSync as unknown as TailscaleProviderDeps['spawnSync'],
+    });
+    await expect(provider.start({ port: 3000, signal: controller.signal })).rejects.toThrow(
+      /aborted/,
+    );
+    expect(spawnSync).not.toHaveBeenCalled();
   });
 
   it('keeps cloudflare available and ready in lockstep', async () => {
@@ -217,22 +237,41 @@ describe('shipped Providers (cloudflare landed in R2; tailscale is still an R3 s
   });
 
   it('routes stop() through planStop, so preexisting entries land in skipped', async () => {
-    // Classification is R1's job; the Tailscale stub still cannot actuate a
-    // revert. A stub that reported an empty `skipped` would be
-    // indistinguishable from one that had quietly deleted the user's config.
+    // R1 could only assert the classification; R3 can assert the actuation.
+    // The user was already serving `/grafana` before `remote up` ran, so the
+    // only command that may be issued is the one that removes `/`.
+    const calls: string[][] = [];
+    const provider = createTailscaleProvider({
+      spawnSync: ((_command: string, args: readonly string[]) => {
+        calls.push([...args]);
+        return { pid: 1, output: [], stdout: '', stderr: '', status: 0, signal: null };
+      }) as unknown as TailscaleProviderDeps['spawnSync'],
+    });
+
     const handle: RemoteHandle = {
       provider: 'tailscale-serve',
       url: 'https://host.example.ts.net',
-      owned: { pid: null, revert: { '/': 'off', '/grafana': 'off' } },
-      preexisting: { keys: ['/grafana'], raw: { '/grafana': 'http://127.0.0.1:3001' } },
+      owned: {
+        pid: null,
+        revert: {
+          'host.example.ts.net:443/': 'http://127.0.0.1:3000',
+          'host.example.ts.net:443/grafana': 'http://127.0.0.1:3001',
+        },
+      },
+      preexisting: {
+        keys: ['host.example.ts.net:443/grafana'],
+        raw: { '/grafana': 'http://127.0.0.1:3001' },
+      },
     };
 
-    const outcome = await tailscaleProvider.stop(handle);
-    expect(outcome.skipped).toEqual(['/grafana']);
-    expect(outcome.reverted).toBe(false);
-    expect(outcome.warnings.join(' ')).toContain('/');
-    // The protected key must never appear as something the stub tried to undo.
-    expect(outcome.warnings.some((w) => w.includes('/grafana'))).toBe(false);
+    const outcome = await provider.stop(handle);
+    expect(outcome.skipped).toEqual(['host.example.ts.net:443/grafana']);
+    expect(outcome.reverted).toBe(true);
+    expect(outcome.warnings).toEqual([]);
+    // Exactly one command, scoped to our path by `--set-path`.
+    expect(calls).toEqual([['serve', '--https=443', '--set-path', '/', '--yes', 'off']]);
+    // The protected key must never appear in anything that was run.
+    expect(calls.flat().join(' ')).not.toContain('grafana');
   });
 
   it('reports a clean stop when there was nothing owned to undo', async () => {
