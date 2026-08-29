@@ -37,13 +37,13 @@ When `CM_BIND=0.0.0.0` is set, the server becomes accessible from external netwo
 
 The server keeps its `127.0.0.1` bind — `remote` neither reads nor writes `CM_BIND`, so a
 host on the default binding stays on the default binding. What `remote` adds is an
-*outward door*: a provider process that accepts connections from outside and forwards them
-to the loopback listener.
+*outward door*: a provider process (or, for Tailscale, a provider *configuration*) that
+accepts connections from outside and forwards them to the loopback listener.
 
 | Property | Value under `commandmate remote` |
 |----------|----------------------------------|
 | Listening socket | Still `127.0.0.1` only — nothing new listens on your LAN interface |
-| Reachability | The provider URL is reachable by anyone who learns it |
+| Reachability | The provider URL is reachable by anyone who learns it (a Cloudflare Quick Tunnel URL is public; a Tailscale Serve URL is reachable only from your tailnet) |
 | Authentication | Always on. `remote` starts the server with token authentication enabled |
 | Blast radius | The CommandMate server only, not other services on this machine |
 
@@ -257,7 +257,7 @@ commandmate remote stop     # close the outside door; the server keeps running
 | `--expires <duration>` | Remote session TTL (default `8h`, range `1h`-`30d`) |
 | `--pairing-expires <duration>` | Pairing code TTL (default `10m`, range `1m`-`24h`) |
 | `-p, --port <number>` | Port of the server to expose |
-| `--yes` | Approve creating a public tunnel without prompting (required when non-interactive) |
+| `--yes` | Approve creating a public tunnel without prompting (required when non-interactive). Not needed for `tailscale`, which stays inside your tailnet |
 | `--json` | JSON output |
 
 There is deliberately **no `--token` flag**: `remote` is the side that mints the token, so
@@ -275,14 +275,23 @@ authentication enabled that this session cannot pair with), `3` `START_FAILED`,
 
 | Provider | State |
 |----------|-------|
-| `cloudflare-quick` (Cloudflare Quick Tunnel) | **Implemented.** Selectable whenever `cloudflared` is installed |
-| `tailscale-serve` | **Not implemented.** A stub that always reports itself unavailable, so `remote` can never select it |
+| `tailscale-serve` (`--provider tailscale`) | **Implemented.** Ready when `tailscale` is installed, the node is logged in, and Serve/HTTPS is available on the tailnet. Tried first by auto-selection, because it publishes only to your own tailnet |
+| `cloudflare-quick` (`--provider cloudflare`) | **Implemented.** Selectable whenever `cloudflared` is installed. Publishes to the public internet, so it always asks for approval first |
 
-> **The `tailscale-serve` provider is not Option 3.** Option 3 above is *you* using
-> Tailscale yourself: it works today, it is a good choice, and it needs nothing from
-> CommandMate. The `tailscale-serve` **provider** — CommandMate driving `tailscale serve`
-> for you as part of `remote` — does not exist yet. Do not read Option 3's recommendation
-> as saying that `commandmate remote --provider tailscale` will work.
+> **The `tailscale-serve` provider is not Option 3, even though both work.** Option 3 above
+> is *you* using Tailscale yourself: you join the tailnet and browse to the node's Tailscale
+> IP, and CommandMate is not involved at all. The `tailscale-serve` **provider** is
+> CommandMate driving `tailscale serve` for you as part of `remote`, and it therefore writes
+> to configuration that belongs to `tailscaled` and that you may already be using. Because
+> that configuration has no undo, `remote` snapshots it before touching it, refuses to start
+> when the path it wants is already served, and on `stop` removes only the one handler it
+> created.
+
+> **Do not follow Tailscale's own teardown hint.** After a successful `tailscale serve`,
+> Tailscale prints a suggestion to disable the proxy by re-running `serve` with only the
+> port and the word "off" — with no path. That untargeted form removes **every** handler on
+> that port, including ones you set up yourself, with exit status 0 and no warning. Use
+> `commandmate remote stop`, which always passes the specific path it created.
 
 If no provider is ready, `remote` stops with `DEPENDENCY_ERROR` (exit code `1`). It does
 **not** fall through to a public tunnel on its own when Tailscale is unavailable: putting
@@ -309,6 +318,9 @@ A Quick Tunnel is convenient *and* disposable. Both halves matter:
   sent by an agent — there is nobody to ask, so the run fails with `CONFIG_ERROR`
   (exit code `2`) unless you passed `--yes`. `--yes` *is* the approval; do not add it to a
   wrapper script by reflex.
+
+Only the public-tunnel provider asks this question. `tailscale-serve` publishes to your own
+tailnet rather than to the internet, so it does not require `--yes`.
 
 #### Pairing code
 
@@ -434,6 +446,7 @@ When using `commandmate remote`:
 - [ ] `--pairing-expires` is short and the QR code is scanned promptly (default `10m`)
 - [ ] The pairing QR code / URL is not forwarded, screenshotted into a chat, or reused — it is single-use
 - [ ] `commandmate remote stop` is run when remote access is no longer needed (expiry closes the door, but only after the TTL elapses)
+- [ ] Teardown goes through `commandmate remote stop`, never through Tailscale's own untargeted `serve ... off` hint, which clears the whole port
 - [ ] You accept that over a tunnel the session cookie has no `Secure` attribute (see Option 4) — use built-in TLS if you need it
 
 ---

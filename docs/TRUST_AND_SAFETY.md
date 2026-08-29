@@ -30,31 +30,39 @@ CommandMate はローカルマシン上で動作します。
 - Cloudflare Tunnel は**任意**であり、ローカル利用のみであれば不要です
 - LAN 内アクセスの場合は `CM_BIND=0.0.0.0` の設定が必要です。リバースプロキシでの認証を推奨します
 
-#### `cloudflared` への依存（`commandmate remote`）
+#### Provider ツールへの依存（`commandmate remote`）
 
-`commandmate remote` は、外部ツール **`cloudflared`**（Cloudflare Tunnel クライアント）に依存します。
+`commandmate remote` は、選んだ Provider に応じて外部ツール **`cloudflared`**（Cloudflare Tunnel
+クライアント）または **`tailscale`** に依存します。
 
-- `cloudflared` は**任意の依存**です。インストールされていなければ `remote` は `DEPENDENCY_ERROR`
+- どちらも**任意の依存**です。どちらもインストールされていなければ `remote` は `DEPENDENCY_ERROR`
   で停止するだけで、CommandMate 本体のローカル利用には一切影響しません
-- CommandMate が `cloudflared` を自動でインストールすることはありません
+- CommandMate がこれらを自動でインストールすることはありません
 - `remote` は `cloudflared` を子プロセスとして起動します。トンネルの通信は Cloudflare を経由するため、
   **Cloudflare を経路として信頼できる場合にのみ**利用してください
-- Tailscale を CommandMate が代行して設定する Provider（`tailscale-serve`）は**未実装**です。
-  現時点で `remote` が実際に使える Provider は Cloudflare Quick Tunnel だけです
-  （利用者自身が Tailscale を導入して使う方法は従来どおり有効で、そちらは CommandMate に依存しません）
+- `tailscale-serve` Provider は常駐プロセスを起こしません。`tailscaled` が持つ設定に Serve ハンドラを
+  書き込みます。これは**利用者自身が既に使っているかもしれない設定**で、しかも undo がありません。
+  下の「片付けるのは『CommandMate が作ったものだけ』」は、そのために存在します
+- **`tailscale-serve` の公開先は自分の tailnet の中だけで、インターネットには出ません。**
+  そのため公開トンネルの明示承認（`--yes`）は要らず、`--provider` 無しの自動選択でも先に試されます
+  （利用者自身が Tailscale を導入して使う方法も従来どおり有効で、そちらは CommandMate に依存しません）
 
 #### 何が外部に出るのか
 
 - 外部に出るのは **CommandMate サーバーそのもの**です。127.0.0.1 で待ち受けているサーバーが、
-  ランダムな公開 URL（`https://<ランダム>.trycloudflare.com`）経由でインターネットから到達可能になります
+  Provider の URL 経由で到達可能になります。Cloudflare ならランダムな公開 URL
+  （`https://<ランダム>.trycloudflare.com`）でインターネットから、Tailscale Serve なら
+  **自分の tailnet の中からのみ**到達できるアドレスです
 - **待ち受けアドレスは変わりません。** `remote` は `CM_BIND` を読みも書きもせず、既定の `127.0.0.1`
   のままです。LAN 側に新しいポートが開くわけではありません
 - 公開対象はこの CommandMate サーバー 1 つだけで、同じマシン上の他のサービスは含まれません
-- 公開 URL は誰でも到達できるため、**CommandMate 側のトークン認証が必須**です。`remote` は常に認証を
+- URL を知った相手は到達できるため、**CommandMate 側のトークン認証が必須**です。`remote` は常に認証を
   有効にしてサーバーを起動し、ペアリングコード（一度限り・既定 10 分で失効）を使った端末だけが
   ログインできます
 - **公開トンネルの作成には利用者の明示承認が必要です。** 対話環境では警告を表示して確認を求め、
-  非対話環境では `--yes` が無ければ `CONFIG_ERROR` で停止します。黙って公開されることはありません
+  非対話環境では `--yes` が無ければ `CONFIG_ERROR` で停止します。黙って公開されることはありません。
+  この承認を求めるのは公開トンネルの Provider（Cloudflare）だけで、tailnet の中に閉じる
+  `tailscale-serve` には要りません
 - 公開 URL は起動のたびに変わり、アクセスポリシーも監査ログもありません。
   **長期利用・本番利用には Quick Tunnel を使わないでください**（詳細: `docs/security-guide.md`）
 
@@ -65,6 +73,10 @@ CommandMate はローカルマシン上で動作します。
   「片付けるべきものが分からない」と報告して正常終了します。推測で消すと、利用者が自分で設定した
   Provider 側の構成（例: 手動で設定した Tailscale Serve）まで壊す可能性があり、CommandMate には
   それを復元する手段が無いためです
+- 同じ理由で、`tailscale serve` の成功時に Tailscale 自身が案内する撤収方法には**従わないでください**。
+  パスを付けずにポートと `off` だけを指定して `serve` を再実行する形は、そのポートの**すべて**の
+  ハンドラ（あなた自身のものを含む）を消します。`commandmate remote stop` は必ず自分が作ったパスを
+  指定して撃ちます
 - `--expires`（既定 8 時間）が切れたときに閉じるのは**外部への口だけ**で、**サーバーは停止しません**。
   停止すると PC 上のローカル利用まで巻き添えになるためです
 

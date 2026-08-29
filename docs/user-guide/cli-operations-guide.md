@@ -2455,7 +2455,8 @@ commandmate remote          # 既定 = up。サーバを起動し、公開し、
 commandmate remote status   # Provider / URL / 期限 / ペアリング状態
 commandmate remote stop     # Provider を閉じる（サーバは止めない）
 
-commandmate remote --provider cloudflare        # Provider を明示指定
+commandmate remote --provider tailscale         # Provider を明示指定（tailnet 内に閉じる）
+commandmate remote --provider cloudflare        # Provider を明示指定（公開 Tunnel）
 commandmate remote --expires 24h                # remote セッションのTTL
 commandmate remote --pairing-expires 3m         # ペアリングコードのTTL
 commandmate remote --yes                        # 公開Tunnelを明示承認（非対話環境では必須）
@@ -2470,7 +2471,7 @@ commandmate remote status --json                # 機械可読出力
 | `--expires <duration>` | remote セッションのTTL（`1h`〜`30d`） | `8h` |
 | `--pairing-expires <duration>` | ペアリングコードのTTL（`1m`〜`24h`） | `10m` |
 | `-p, --port <number>` | 公開するサーバのポート | 未指定なら `commandmate start` と同じ解決順 |
-| `--yes` | 公開Tunnelの作成を明示承認する。非対話環境（TTYなし）では必須 | 無効（対話で確認する） |
+| `--yes` | 公開Tunnel（`cloudflare`）の作成を明示承認する。非対話環境（TTYなし）では必須。`tailscale` は tailnet 内に閉じるため不要 | 無効（対話で確認する） |
 | `--json` | JSON出力 | 無効 |
 
 > **`--token` と `--auto-yes` 系のフラグはありません。** トークンを鋳造するのは `remote` 自身の側なので、外から渡されたトークンには照合するハッシュがサーバに存在しません。Auto-Yes については上の注記のとおりです。
@@ -2492,10 +2493,10 @@ commandmate remote status --json                # 機械可読出力
 
 | Provider ID | `--provider` の値 | 状態 |
 |-------------|------------------|------|
-| `cloudflare-quick` | `cloudflare` | **実装済み**。`cloudflared` がインストールされていれば使えます（実測: `available: true` / `version: 2025.4.0` / `ready: true`） |
-| `tailscale-serve` | `tailscale` | **未実装のスタブ**。`detect()` は常に `available: false` を返し、`--provider tailscale` は exit 1 になります |
+| `tailscale-serve` | `tailscale` | **実装済み**（Issue #1937 R3）。`tailscale` がインストールされ、ノードがログイン済みで、Serve/HTTPS が使える状態なら `ready` になります。公開先は**自分の tailnet の中だけ**でインターネットには出ないため、公開Tunnel の承認（`--yes`）は要りません |
+| `cloudflare-quick` | `cloudflare` | **実装済み**。`cloudflared` がインストールされていれば使えます（実測: `available: true` / `version: 2025.4.0` / `ready: true`）。公開先は**インターネット**なので、承認が要ります |
 
-自動選択は優先順（tailscale → cloudflare）で最初に ready な Provider を選びます。現時点で ready になり得るのは `cloudflare-quick` だけです。ready な Provider が1つも無ければ `DEPENDENCY_ERROR`（exit 1）で停止します。
+自動選択は優先順（tailscale → cloudflare）で最初に ready な Provider を選びます。tailnet の中に閉じる `tailscale-serve` が先に試されるのはこのためです。ready な Provider が1つも無ければ `DEPENDENCY_ERROR`（exit 1）で停止します。
 
 #### 公開Tunnel には明示承認が必要
 
@@ -2504,6 +2505,7 @@ Cloudflare Quick Tunnel は `https://<ランダム>.trycloudflare.com` という
 - **対話環境**: 何が公開されるかを示す警告を表示し、yes/no を尋ねます（既定は **no**）
 - **非対話環境（TTYなし）**: `--yes` が無い限り**拒否**し、exit 2 で終了します。「誰も見ていなかったので公開された」が起きないようにするためです
 - **Tailscale が使えないことは、公開Tunnel へ切り替える理由になりません。** Provider の選択と公開の承認は別々の判断で、承認が無ければ公開されません
+- **この確認を求めるのは公開Tunnel の Provider だけです。** `tailscale-serve` の公開先は自分の tailnet の中に閉じていてインターネットには出ないため、`--yes` は要りません
 
 公開されるのは 127.0.0.1 で動く CommandMate サーバだけで、この PC の他のものは公開されません。CommandMate はトークン認証を有効にした状態で応答するため、ペアリングコードを持たない訪問者は拒否されますが、**リスナー自体は公開**です。あわせて[セキュリティガイド](../security-guide.md)も参照してください。
 
@@ -2543,6 +2545,8 @@ Server:          stopped
 - CommandMate は**自分が作ったものだけ**を取り消します。Provider が「このセッションより前から存在していた」と報告した設定は `Left alone (existed before this session):` として**報告されるだけで、削除されません**
 - 閉じきれなかった場合は exit 4（STOP_FAILED）で終了し、状態ファイルは残るので `commandmate remote stop` を再実行できます
 - 成功した場合も **CommandMate サーバは動いたまま**です
+
+> **Tailscale の撤収は `commandmate remote stop` で行ってください。** `tailscale serve` に成功すると、Tailscale 自身が「パスを付けずにポートと `off` だけを指定して `serve` を再実行する」撤収方法を案内します。このパス無しの形は、そのポートの**すべて**のハンドラ（あなた自身が設定したものを含む）を、警告も無く exit 0 で消します。`remote stop` は必ず自分が作ったパスを指定して撃ちます。
 
 #### サーバがすでに起動している場合
 

@@ -384,15 +384,15 @@ Vibe-Localを選択した場合、使用するOllamaモデルを指定できま�
 スマートフォンから CommandMate にアクセスする方法です。
 
 経路は 2 つあります。**まず `commandmate remote` を試してください。**
-`cloudflared` を入れたくない、あるいは LAN 内で完結させたい場合に限り、
+Provider のツール（`tailscale` / `cloudflared`）を入れたくない、あるいは LAN 内で完結させたい場合に限り、
 [方法2: 同一 LAN 内から直接つなぐ](#方法2-同一-lan-内から直接つなぐcloudflared-を使わない場合) を使います。
 
 | | 方法1: `commandmate remote` | 方法2: 同一 LAN 内から直接つなぐ |
 |---|---|---|
 | **認証** | あり（ペアリングしたスマホだけ） | **なし** |
 | **暗号化** | あり（外側が HTTPS） | **なし**（平文 HTTP） |
-| **届く範囲** | 外出先からも（インターネット経由） | 同じ Wi-Fi の中だけ |
-| **必要なもの** | `cloudflared` | なし |
+| **届く範囲** | 外出先からも（tailnet またはインターネット経由） | 同じ Wi-Fi の中だけ |
+| **必要なもの** | `tailscale` または `cloudflared` | なし |
 | **サーバの bind** | `127.0.0.1` のまま | `0.0.0.0`（全インターフェース） |
 
 ### 方法1（推奨）: `commandmate remote` で QR ペアリング
@@ -418,21 +418,27 @@ commandmate remote
 
 #### 公開前の確認
 
-CommandMate が使う Provider は現在 **Cloudflare Quick Tunnel のみ**です。これは
-`https://<ランダム>.trycloudflare.com` という **インターネット上のアドレス**を一時的に作ります。
-そのため `commandmate remote` は、Tunnel を作る前に警告を出して y/n を尋ねます。
+`commandmate remote` は 2 つの Provider のどちらかで公開できます。
 
-非対話環境（スクリプトや CI）では**プロンプトを出せないので既定で拒否**し、
-`CONFIG_ERROR`（exit 2）で止まります。意図して公開する場合だけ `--yes` を付けてください。
+| Provider | `--provider` | 公開先 |
+|---|---|---|
+| Tailscale Serve | `tailscale` | **自分の tailnet の中だけ**。インターネットには出ません。先に試されます |
+| Cloudflare Quick Tunnel | `cloudflare` | `https://<ランダム>.trycloudflare.com` という一時的な**インターネット上のアドレス** |
+
+Cloudflare 経路はこの PC をインターネット上に出すため、`commandmate remote` は
+Tunnel を作る前に警告を出して y/n を尋ねます。非対話環境（スクリプトや CI）では
+**プロンプトを出せないので既定で拒否**し、`CONFIG_ERROR`（exit 2）で止まります。
+意図して公開する場合だけ `--yes` を付けてください。
 
 ```bash
 commandmate remote --yes    # 確認をスキップして公開 Tunnel を作る
 ```
 
-> **Tailscale はまだ使えません。** `--provider tailscale` は用意されていますが、
-> 中身は未実装のスタブで、実行すると `DEPENDENCY_ERROR`（exit 1）になります。
-> **使える Provider が 1 つも無いときも `DEPENDENCY_ERROR` で止まり、
-> 勝手に公開 Tunnel へ切り替わることはありません。**
+> **この確認を求めるのは Cloudflare 経路だけです。** Tailscale Serve は自分の tailnet の
+> 中に閉じていてインターネットには出ないため、`--provider tailscale` に `--yes` は要りません。
+
+> **使える Provider が 1 つも無いときは `DEPENDENCY_ERROR`（exit 1）で止まります。**
+> Tailscale が使えなかったからといって、勝手に公開 Tunnel へ切り替わることはありません。
 
 > **修正済み — Cloudflare 経路が `commandmate remote` の終了と同時に死ぬ不具合
 > （[#2146](https://github.com/Kewton/CommandMate/issues/2146)、CLOSED）。**
@@ -461,6 +467,11 @@ commandmate remote stop     # 外への口を閉じる
 **期限が切れたときに閉じるのは外への口だけで、サーバは落としません。**
 PC でのローカル利用まで巻き添えにしないためです。
 
+> **Tailscale の撤収は必ず `commandmate remote stop` で行ってください。**
+> `tailscale serve` に成功すると Tailscale 自身が、パスを付けずにポートと `off` だけを
+> 指定して `serve` を再実行する撤収方法を案内します。この形はそのポートの**すべて**の
+> ハンドラ（あなた自身が設定したものを含む）を、警告も無く exit 0 で消します。
+
 #### 主なオプション
 
 | オプション | 既定 | 説明 |
@@ -469,7 +480,7 @@ PC でのローカル利用まで巻き添えにしないためです。
 | `--expires <duration>` | `8h` | remote セッションの TTL（`1h`〜`30d`） |
 | `--pairing-expires <duration>` | `10m` | ペアリングコードの TTL（`1m`〜`24h`） |
 | `-p, --port <number>` | 自動 | 公開するサーバのポート |
-| `--yes` | — | 公開 Tunnel の明示承認（非対話環境では必須） |
+| `--yes` | — | 公開 Tunnel（`cloudflare`）の明示承認（非対話環境では必須）。`tailscale` には不要 |
 | `--json` | — | JSON 出力 |
 
 終了コード: `0` 成功 / `1` DEPENDENCY_ERROR / `2` CONFIG_ERROR / `3` START_FAILED /
@@ -496,9 +507,9 @@ CLI としての詳細は [CLI 運用ガイド](./cli-operations-guide.md) を�
 実測の手順と生ログは `dev-reports/issue/1937/u8-os-matrix.md` に、実機受入テストの記録は
 [`docs/qa/1937-remote-uat-record.md`](../qa/1937-remote-uat-record.md) にあります。
 
-| OS | Provider 検出 | 承認フロー | 公開 Tunnel の疎通 | 備考 |
-|----|--------------|-----------|------------------|------|
-| **macOS** (Darwin arm64) | ✅ 実測済み<br>`cloudflared` 導入済みなら `ready` | ✅ 実測済み<br>非対話は exit 2 で停止 | ✅ 実測済み<br>Cloudflare Quick Tunnel は当初 **D-1** で不合格。[#2148](https://github.com/Kewton/CommandMate/pull/2148) の修正後は合格で、[#2149](https://github.com/Kewton/CommandMate/pull/2149) が実物の `cloudflared` で再確認 | cloudflared 2025.4.0 で確認 |
+| OS | Provider 検出 | 承認フロー | 公開経路の疎通 | 備考 |
+|----|--------------|-----------|--------------|------|
+| **macOS** (Darwin arm64) | ✅ 実測済み<br>Provider のツール導入済みなら `ready` | ✅ 実測済み<br>非対話は exit 2 で停止（Cloudflare のみ） | ✅ 実測済み<br>**Tailscale Serve は全項目合格**。Cloudflare Quick Tunnel は当初 **D-1** で不合格で、[#2148](https://github.com/Kewton/CommandMate/pull/2148) の修正後は合格。[#2149](https://github.com/Kewton/CommandMate/pull/2149) が実物の `cloudflared` で再確認 | cloudflared 2025.4.0 / Tailscale 1.102.3 で確認 |
 | **Linux** (Debian 12 / aarch64) | ✅ 実測済み<br>未導入時は `DEPENDENCY_ERROR` (exit 1)、導入後 `ready` | ✅ 実測済み<br>macOS と同一の挙動 | ⏭️ 未実施 | ⚠️ **docker コンテナでの実測であり、ベアメタル Linux とはネットワーク構成が異なりうる** |
 | **WSL2** | ❌ **未検証** | ❌ **未検証** | ❌ **未検証** | **検証環境が用意できなかったため未実施。** WSL2 は `localhost` 転送の構成差が大きく、**Tunnel のアップストリーム `127.0.0.1` が WSL2 内部を指すか Windows 側を指すかが構成依存**です |
 
@@ -509,7 +520,10 @@ CLI としての詳細は [CLI 運用ガイド](./cli-operations-guide.md) を�
 - **スマホ実機での通し（QR 読取 → ペアリング → PWA → Push）は、どの OS でもまだ未実施です。**
   実機受入テストが確認したのはサーバ側までで、スマホでの確認は
   [#2152](https://github.com/Kewton/CommandMate/issues/2152) で追跡しています。
-- `--provider tailscale` はすべての OS で使えません（未実装のスタブのため）。OS 差ではありません。
+- **`--provider tailscale` は実装済みで、macOS では実機受入テストの全項目に合格しています**
+  （[`docs/qa/1937-remote-uat-record.md`](../qa/1937-remote-uat-record.md) §3.4）。
+  Linux / WSL2 の行が「未実施 / 未検証」なのは **OS 対応の可否ではなく、その OS の検証環境を
+  用意できなかったため**です。上の 3 区分は、この違いを読み分けるためにあります。
 
 ### 方法2: 同一 LAN 内から直接つなぐ（`cloudflared` を使わない場合）
 
