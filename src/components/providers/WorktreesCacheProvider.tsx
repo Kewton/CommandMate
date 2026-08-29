@@ -63,9 +63,16 @@ export function WorktreesCacheProvider({ children }: WorktreesCacheProviderProps
 
   return (
     <WorktreesCacheContext.Provider value={contextValue}>
+      {/* Issue #2059: the cache owns the list's loading/error/refresh state, so
+          it is forwarded rather than re-derived. Without it the selection
+          context clears its own isLoading on the first (empty) sync and its
+          refreshWorktrees resolves without re-fetching. */}
       <WorktreeSelectionProvider
         externalWorktrees={worktrees}
         externalRepositories={repositories}
+        externalIsLoading={isLoading}
+        externalError={error}
+        externalRefresh={refresh}
       >
         {children}
       </WorktreeSelectionProvider>

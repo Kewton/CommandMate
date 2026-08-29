@@ -6,6 +6,10 @@
  * - List of available worktrees
  * - Optimistic UI updates
  * - Loading and error states
+ *
+ * Issue #2059: the list's loading/error state and the external refresh are now
+ * published, so consumers can tell "loading" and "failed" apart from "empty"
+ * and act on it.
  */
 
 'use client';
@@ -104,6 +108,17 @@ interface WorktreeSelectionContextValue {
   repositories: RepositorySummary[];
   /** Detailed data for selected worktree */
   selectedWorktreeDetail: Worktree | null;
+  /**
+   * Loading state for the worktree LIST (Issue #2059).
+   *
+   * Already tracked in the reducer since Issue #600 but never published, which
+   * left every consumer unable to tell "still loading" from "no branches".
+   * When the list comes from an external source (see `externalIsLoading`) this
+   * mirrors that source instead of the reducer, because the reducer's flag is
+   * cleared by the first `SET_WORKTREES` — including the empty one the cache
+   * provider emits before its own fetch resolves.
+   */
+  isLoading: boolean;
   /** Loading state for worktree detail */
   isLoadingDetail: boolean;
   /** Error message if any */
@@ -128,6 +143,29 @@ interface WorktreeSelectionProviderProps {
    * Surfaced via the `repositories` field on the context value.
    */
   externalRepositories?: RepositorySummary[];
+  /**
+   * Loading state of the external source (Issue #2059).
+   *
+   * Only meaningful together with `externalWorktrees`. The reducer's own
+   * `isLoading` cannot stand in for it: the sync effect dispatches
+   * `SET_WORKTREES` with the provider's initial empty array, which clears the
+   * flag before a single row has been fetched.
+   */
+  externalIsLoading?: boolean;
+  /**
+   * Last error from the external source (Issue #2059). Surfaced through the
+   * context's `error` field, taking precedence over a stale detail-fetch error.
+   */
+  externalError?: Error | null;
+  /**
+   * Re-fetch hook of the external source (Issue #2059).
+   *
+   * `refreshWorktrees` delegates to it when the list is externally owned.
+   * Without it the context's own `fetchWorktrees` early-returns on
+   * `useExternal`, so every consumer's refresh — the sidebar's Sync button and
+   * the new retry action alike — resolved without doing anything.
+   */
+  externalRefresh?: () => Promise<void>;
 }
 
 /** Reducer action types */
@@ -218,6 +256,9 @@ export function WorktreeSelectionProvider({
   children,
   externalWorktrees,
   externalRepositories,
+  externalIsLoading,
+  externalError,
+  externalRefresh,
 }: WorktreeSelectionProviderProps) {
   const useExternal = externalWorktrees !== undefined;
   const [state, dispatch] = useReducer(worktreeSelectionReducer, initialState);
@@ -281,10 +322,16 @@ export function WorktreeSelectionProvider({
     }
   }, []);
 
-  // Refresh worktree list
+  // Refresh worktree list. Issue #2059: with an external source the local
+  // fetch is a no-op, so delegate to the owner of the data when it provides a
+  // refresh; otherwise keep the legacy self-fetch.
   const refreshWorktrees = useCallback(async () => {
+    if (useExternal && externalRefresh) {
+      await externalRefresh();
+      return;
+    }
     await fetchWorktrees();
-  }, [fetchWorktrees]);
+  }, [useExternal, externalRefresh, fetchWorktrees]);
 
   // Initial fetch (only when not using external source)
   useEffect(() => {
@@ -340,13 +387,25 @@ export function WorktreeSelectionProvider({
     };
   }, [useExternal]);
 
+  // Issue #2059: publish the list's loading/error state so consumers can tell
+  // "still loading" and "load failed" apart from "no branches". With an
+  // external source those two facts live in useWorktreesCache, not in the
+  // reducer, so they are read from the props when one is supplied. The list
+  // error takes precedence over `state.error`, which also carries detail-fetch
+  // failures from selectWorktree().
+  const listIsLoading = useExternal && externalIsLoading !== undefined
+    ? externalIsLoading
+    : state.isLoading;
+  const listError = useExternal && externalError ? externalError.message : null;
+
   const value: WorktreeSelectionContextValue = {
     selectedWorktreeId: state.selectedWorktreeId,
     worktrees: state.worktrees,
     repositories: state.repositories,
     selectedWorktreeDetail: state.selectedWorktreeDetail,
+    isLoading: listIsLoading,
     isLoadingDetail: state.isLoadingDetail,
-    error: state.error,
+    error: listError ?? state.error,
     selectWorktree,
     refreshWorktrees,
   };

@@ -7,6 +7,11 @@
  *
  * Issue #651: Compact w-56 sidebar + tooltips.
  * DnD group reordering (drag-and-drop) with DB persistence via /api/sidebar/group-order.
+ *
+ * Issue #2058: the hover-freeze no longer snapshots an empty list, and its
+ * release re-renders instead of waiting for the next poll.
+ * Issue #2059: the branch list distinguishes first load, load failure and a
+ * genuinely empty list, instead of saying "No branches available" for all three.
  */
 
 'use client';
@@ -35,7 +40,7 @@ import { useWorktreeSelection } from '@/contexts/WorktreeSelectionContext';
 import { useSidebarContext } from '@/contexts/SidebarContext';
 import { BranchListItem } from '@/components/sidebar/BranchListItem';
 import { SortSelector } from '@/components/sidebar/SortSelector';
-import { Input } from '@/components/ui';
+import { Button, Input, Skeleton } from '@/components/ui';
 import { Tooltip } from '@/components/common/Tooltip';
 import { TruncationTooltip } from '@/components/common/TruncationTooltip';
 import { LocaleSwitcher } from '@/components/common/LocaleSwitcher';
@@ -171,6 +176,11 @@ export const Sidebar = memo(function Sidebar() {
     selectedWorktreeId,
     selectWorktree,
     refreshWorktrees,
+    // Issue #2059: without these two the branch list could only ever say
+    // "No branches available", whether the list was empty, still loading, or
+    // failed to load.
+    isLoading,
+    error,
   } = useWorktreeSelection();
   const { closeMobileDrawer, sortKey, sortDirection, viewMode, setViewMode } = useSidebarContext();
   const t = useTranslations('common');
@@ -252,15 +262,49 @@ export const Sidebar = memo(function Sidebar() {
   } | null>(null);
   const freezeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Issue #2058: bumped ONLY when a freeze is released, never when one is
+  // activated. Release is the transition the user is waiting to see, and
+  // nothing else re-renders the sidebar until the next poll (30s, or 60s with
+  // a live push connection) — so without this counter, moving the cursor out
+  // of the list left the frozen order on screen for up to a minute. Activation
+  // deliberately still forces no re-render (see the flash described above), so
+  // the failure mode this counter used to cause cannot come back.
+  //
+  // A `useState` counter rather than `useSyncExternalStore`: the freeze already
+  // lives in a component-local ref with exactly one writer, so there is no
+  // external store to subscribe to and no tearing to prevent — a version bump
+  // is the whole subscription.
+  const [freezeVersion, setFreezeVersion] = useState(0);
+
   useEffect(() => () => {
     if (freezeTimerRef.current !== null) clearTimeout(freezeTimerRef.current);
   }, []);
 
+  /** Drop the freeze without touching React state (no re-render on its own). */
+  const clearFreeze = useCallback(() => {
+    if (freezeTimerRef.current !== null) {
+      clearTimeout(freezeTimerRef.current);
+      freezeTimerRef.current = null;
+    }
+    frozenBranchItemsRef.current = null;
+  }, []);
+
   const effectiveBranchItems = useMemo(() => {
+    // `freezeVersion` carries no data — it is the invalidation key that makes
+    // this memo re-read the ref below when a freeze is released (Issue #2058).
+    void freezeVersion;
     const frozen = frozenBranchItemsRef.current;
-    if (!frozen || Date.now() >= frozen.expiresAt) return stableBranchItems;
+    if (!frozen) return stableBranchItems;
+    // Issue #2058: an empty snapshot never wins. A freeze taken while the list
+    // was still loading (or after a failed fetch) would otherwise hide the
+    // first payload behind `[]` until the next poll — the cursor merely resting
+    // over the sidebar was enough to keep the branch list blank. The snapshot
+    // itself is discarded in the layout effect below; returning the live items
+    // here is what paints them in the very render they arrive in.
+    if (frozen.items.length === 0) return stableBranchItems;
+    if (Date.now() >= frozen.expiresAt) return stableBranchItems;
     return frozen.items;
-  }, [stableBranchItems]);
+  }, [stableBranchItems, freezeVersion]);
 
   // Track the currently-rendered items (updated after each committed render,
   // before paint). handleListMouseEnter reads this to freeze exactly what
@@ -268,9 +312,22 @@ export const Sidebar = memo(function Sidebar() {
   const displayedItemsRef = useRef<SidebarBranchItem[]>(effectiveBranchItems);
   useLayoutEffect(() => {
     displayedItemsRef.current = effectiveBranchItems;
+    // Issue #2058: the first arrival of data is not a reorder, so it must not
+    // be suppressed. Discard the stale empty snapshot here (the memo above has
+    // already rendered the live items) so a later poll is free to re-freeze a
+    // real, non-empty order if the cursor is still inside the list.
+    const frozen = frozenBranchItemsRef.current;
+    if (frozen && frozen.items.length === 0 && stableBranchItems.length > 0) {
+      clearFreeze();
+    }
   });
 
   const handleListMouseEnter = useCallback(() => {
+    // Issue #2058: never freeze an empty list. The whole point of the freeze is
+    // to hold a visible ORDER still; `[]` has no order, and locking it in with
+    // `expiresAt: Infinity` only hides the data that is about to arrive.
+    if (displayedItemsRef.current.length === 0) return;
+
     if (freezeTimerRef.current !== null) {
       clearTimeout(freezeTimerRef.current);
       freezeTimerRef.current = null;
@@ -288,15 +345,19 @@ export const Sidebar = memo(function Sidebar() {
   }, []);
 
   // Hold freeze for 1s after cursor leaves (covers click + re-render settling),
-  // then silently release so the list reflects the live order on the next poll.
+  // then release so the list reflects the live order. Issue #2058: the release
+  // bumps freezeVersion, which is what actually re-renders the list — before
+  // that the ref was nulled silently and the stale order stayed on screen until
+  // some other update happened to arrive.
   const handleListMouseLeave = useCallback(() => {
     if (!frozenBranchItemsRef.current) return;
     frozenBranchItemsRef.current = { ...frozenBranchItemsRef.current, expiresAt: Date.now() + 1000 };
     if (freezeTimerRef.current !== null) clearTimeout(freezeTimerRef.current);
     freezeTimerRef.current = setTimeout(() => {
-      frozenBranchItemsRef.current = null;
+      clearFreeze();
+      setFreezeVersion((version) => version + 1);
     }, 1000);
-  }, []);
+  }, [clearFreeze]);
   // ---- end hover-freeze ----
 
   // Use shared useWorktreeList hook for sorting, filtering, and grouping (Issue #600 Task 3.8)
@@ -426,6 +487,23 @@ export const Sidebar = memo(function Sidebar() {
     ? flatBranches.length === 0
     : (groupedBranches?.length ?? 0) === 0;
 
+  // Issue #2059: "no branches" now means exactly that. The two states that used
+  // to be indistinguishable from it get their own rendering:
+  //
+  // - `isFirstLoad` — mirrors src/app/page.tsx: skeletons only while the very
+  //   first load is in flight. Once the cache holds data, a poll re-fetch never
+  //   replaces the rendered list with placeholders.
+  // - `showLoadError` — a failed fetch with nothing to fall back on. When the
+  //   cache still holds rows the stale list stays up (the poll and the retry
+  //   ladder in useWorktreesCache will heal it) rather than being replaced by
+  //   an error panel.
+  const isFirstLoad = isLoading && worktrees.length === 0;
+  const showLoadError = !isFirstLoad && !!error && worktrees.length === 0;
+
+  const handleRetryLoad = useCallback(() => {
+    void refreshWorktrees();
+  }, [refreshWorktrees]);
+
   return (
     <nav
       data-testid="sidebar"
@@ -491,7 +569,27 @@ export const Sidebar = memo(function Sidebar() {
         onMouseLeave={handleListMouseLeave}
         className="flex-1 overflow-y-auto overflow-x-hidden"
       >
-        {isEmpty ? (
+        {isFirstLoad ? (
+          <BranchListSkeleton label={t('sidebar.loadingBranches')} />
+        ) : showLoadError ? (
+          <div
+            data-testid="branch-list-error"
+            role="alert"
+            className="px-4 py-8 text-center text-sidebar-muted"
+          >
+            <p className="text-sm">{t('sidebar.branchesLoadFailed')}</p>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              className="mt-3"
+              data-testid="branch-list-retry"
+              onClick={handleRetryLoad}
+            >
+              {t('sidebar.retryLoadBranches')}
+            </Button>
+          </div>
+        ) : isEmpty ? (
           <div className="px-4 py-8 text-center text-sidebar-muted">
             {searchQuery ? t('sidebar.noBranchesFound') : t('sidebar.noBranchesAvailable')}
           </div>
@@ -546,6 +644,33 @@ export const Sidebar = memo(function Sidebar() {
         <LogoutButton />
       </div>
     </nav>
+  );
+});
+
+// ============================================================================
+// BranchListSkeleton
+// ============================================================================
+
+/**
+ * Placeholder rows shown while the very first worktree fetch is in flight
+ * (Issue #2059).
+ *
+ * The row count is fixed and arbitrary — the real count is exactly what is not
+ * known yet. `role="status"` with the visually-hidden label is what a screen
+ * reader gets, since the bars themselves are `aria-hidden` via the Skeleton
+ * primitive.
+ */
+const BranchListSkeleton = memo(function BranchListSkeleton({ label }: { label: string }) {
+  return (
+    <div data-testid="branch-list-skeleton" role="status" aria-live="polite" className="px-4 py-3 space-y-3">
+      <span className="sr-only">{label}</span>
+      {[0, 1, 2, 3, 4].map((row) => (
+        <div key={row} className="flex items-center gap-2">
+          <Skeleton className="h-2 w-2 rounded-full" />
+          <Skeleton className="h-3 flex-1" />
+        </div>
+      ))}
+    </div>
   );
 });
 

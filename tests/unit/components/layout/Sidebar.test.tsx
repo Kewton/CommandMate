@@ -326,6 +326,10 @@ describe('Sidebar', () => {
       expect(branchList || screen.getByTestId('sidebar')).toBeInTheDocument();
     });
 
+    // Issue #2059 narrowed this message to a list that is genuinely empty, so
+    // the precondition it now depends on is spelled out: the fetch has settled
+    // (isLoading=false) and it did not fail. Both hold here because the mocked
+    // getAll() resolves with an empty payload.
     it('should show empty state message when no branches available', async () => {
       (worktreeApi.getAll as ReturnType<typeof vi.fn>).mockResolvedValue({
         worktrees: [],
@@ -341,6 +345,8 @@ describe('Sidebar', () => {
       await waitFor(() => {
         expect(screen.getByText(/No branches available/i)).toBeInTheDocument();
       });
+      expect(screen.queryByTestId('branch-list-skeleton')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('branch-list-error')).not.toBeInTheDocument();
     });
   });
 
