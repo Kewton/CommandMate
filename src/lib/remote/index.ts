@@ -29,7 +29,9 @@ export {
 } from './provider-registry';
 export {
   buildQuickTunnelArgs,
+  buildQuickTunnelSpawnOptions,
   CLOUDFLARED_BIN,
+  CLOUDFLARED_LOG_NAME,
   CLOUDFLARED_PIDFILE_NAME,
   CLOUDFLARED_VERSION_ARG,
   cloudflareProvider,
@@ -40,13 +42,16 @@ export {
   findFreeLoopbackPort,
   isQuickTunnelHostname,
   LOOPBACK_HOST,
+  openStderrLog,
   parseBannerUrl,
   parseQuickTunnelHostname,
   QUICK_TUNNEL_SUFFIX,
   resolveCloudflareStateDir,
+  STDERR_CAPTURE_LIMIT,
   type CloudflareProviderDeps,
   type QuickTunnelProcess,
   type QuickTunnelTiming,
+  type StderrLog,
 } from './cloudflare';
 export {
   BACKEND_STATE_RUNNING,

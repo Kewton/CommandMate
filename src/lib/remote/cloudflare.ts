@@ -32,6 +32,33 @@
  *    keeps the first candidate actually first: for that long, only the metrics
  *    route is consulted.
  *
+ * 4. **The tunnel outlives the CLI that started it.** `commandmate remote up`
+ *    exits as soon as it has a URL — measured at about 6.5 seconds, taken from
+ *    the metrics API. cloudflared has to still be there afterwards, because the
+ *    whole point is a QR code someone reads with a phone a minute later. Two
+ *    things make that true, and Issue #2146 is what happens without them:
+ *    cloudflared's stderr goes to a **file descriptor, never a pipe**, and the
+ *    child is spawned `detached` and `unref`ed.
+ *
+ *    Measured (Issue #2146, `docs/qa/1937-remote-uat-record.md` D-1): with
+ *    `stdio: ['ignore', 'ignore', 'pipe']` the child was dead within two
+ *    seconds of the parent exiting, and the public URL answered HTTP 530 before
+ *    the QR code could be read. The parent's exit closes the read end of that
+ *    pipe; cloudflared is Go, does not ignore SIGPIPE, and dies on its next
+ *    write to fd 2 — which, at t+6.5s, is still mid log-burst. The same argv
+ *    with a parent kept alive for 70 seconds gave a child that lived 70
+ *    seconds, so this is the plumbing and not cloudflared giving up.
+ *
+ *    `'ignore'` would also have fixed it and is the wrong fix: it takes fd 2
+ *    away entirely, and fd 2 is where both the **second URL candidate**
+ *    (`parseBannerUrl`) and every failure diagnostic (`stderrTail`) come from.
+ *    A file keeps both — nothing closes when the CLI exits, and the parser and
+ *    the diagnostic read it back by path. `--logfile` was the other candidate:
+ *    it covers cloudflared's own log lines but not anything the Go runtime or
+ *    the loader writes straight to fd 2, so fd 2 would still have been a pipe.
+ *    `'ignore'` for fd 2 is what this falls back to only when the log file
+ *    cannot be opened at all: a diagnostic is worth less than a working tunnel.
+ *
  * Deliberately absent: the approval prompt. Creating a public URL is an
  * irreversible, user-facing decision, and §6.2 puts it in the orchestrator that
  * owns `src/cli/commands/remote.ts` — the same code that knows whether the
@@ -48,7 +75,7 @@ import {
   type SpawnSyncOptionsWithStringEncoding,
   type SpawnSyncReturns,
 } from 'child_process';
-import { mkdirSync } from 'fs';
+import { closeSync, fstatSync, mkdirSync, openSync, readSync } from 'fs';
 import { createServer } from 'net';
 import { get as httpGet } from 'http';
 import { homedir } from 'os';
@@ -83,6 +110,15 @@ export const QUICK_TUNNEL_SUFFIX = 'trycloudflare.com';
 /** Written next to the rest of CommandMate's state, for humans and for `ps`. */
 export const CLOUDFLARED_PIDFILE_NAME = 'cloudflared.pid';
 
+/**
+ * Where cloudflared's stderr goes. Beside the pidfile, and for the same reason:
+ * a human who wants to know what the tunnel is doing should be able to find it.
+ *
+ * A fixed name, like the pidfile, so one `remote` session at a time is the
+ * assumption in both places rather than in one of them.
+ */
+export const CLOUDFLARED_LOG_NAME = 'cloudflared.log';
+
 /** Same 5s budget `PreflightChecker` gives every other dependency probe. */
 export const DETECT_TIMEOUT_MS = 5_000;
 
@@ -111,18 +147,32 @@ export const DEFAULT_QUICK_TUNNEL_TIMING: QuickTunnelTiming = {
 /** Per-request budget for the loopback metrics call. */
 export const METRICS_REQUEST_TIMEOUT_MS = 1_000;
 
-/** Cap on retained stderr, so a chatty reconnect loop cannot grow unbounded. */
+/**
+ * How much of the stderr log is read back, so a chatty reconnect loop cannot
+ * make either consumer grow unbounded.
+ *
+ * The **tail**, not the head: `parseBannerUrl` takes the last match on purpose
+ * (a reconnect banner should win), and `stderrTail` wants the last few lines.
+ */
 export const STDERR_CAPTURE_LIMIT = 64 * 1024;
 
-/** The part of a spawned cloudflared this module uses, and nothing more. */
+/**
+ * The part of a spawned cloudflared this module uses, and nothing more.
+ *
+ * No `stderr`: as of Issue #2146 fd 2 is a file, so there is no stream to read
+ * and nothing here that could be tempted to hold one open. `unref` is required
+ * rather than optional because forgetting it is exactly the class of mistake
+ * this interface exists to make impossible.
+ */
 export interface QuickTunnelProcess {
   readonly pid?: number | undefined;
-  readonly stderr: NodeJS.ReadableStream | null;
   once(
     event: 'exit',
     listener: (code: number | null, signal: NodeJS.Signals | null) => void,
   ): unknown;
   kill(signal?: NodeJS.Signals): boolean;
+  /** Releases the parent's event-loop reference to this child. */
+  unref(): unknown;
 }
 
 export type SpawnQuickTunnel = (
@@ -180,6 +230,124 @@ export function buildQuickTunnelArgs(opts: {
     '--pidfile',
     opts.pidfile,
   ];
+}
+
+/**
+ * The spawn options for one Quick Tunnel. Issue #2146 is entirely about these.
+ *
+ * `stderr` is a **file descriptor**, or `'ignore'` when the log file could not
+ * be opened. It is never `'pipe'`: a pipe's read end belongs to `commandmate
+ * remote`, which exits as soon as it has the URL, and cloudflared then dies of
+ * SIGPIPE on its next write to fd 2. See the file header for the measurement.
+ *
+ * `detached: true` puts the child in its own session. Without it, a Ctrl-C in
+ * the terminal that launched the CLI reaches cloudflared too — the tunnel is
+ * supposed to outlive the command, so it must not share its process group.
+ * `stop()` is unaffected: it signals a **positive** pid, which is one process,
+ * not a group, so detaching changes nothing about teardown.
+ */
+export function buildQuickTunnelSpawnOptions(stderr: number | 'ignore'): SpawnOptions {
+  const stdio: ('ignore' | number)[] = ['ignore', 'ignore', stderr];
+  return { detached: true, stdio };
+}
+
+/**
+ * cloudflared's stderr, as this module hands it out and reads it back.
+ *
+ * Two consumers depend on it and both survive the change from a pipe to a file,
+ * because a file can be re-read by path at any time: `parseBannerUrl()` (the
+ * second URL candidate) and `stderrTail()` (the failure diagnostic).
+ */
+export interface StderrLog {
+  /** Goes in slot 2 of `stdio`. A descriptor, or `'ignore'`. Never `'pipe'`. */
+  readonly stdio: number | 'ignore';
+  /** The file being written to, or `null` when there is none. */
+  readonly path: string | null;
+  /** The tail of what cloudflared has written so far. Never throws. */
+  read(): string;
+  /** Closes this process's copy of the descriptor. The child keeps its own. */
+  close(): void;
+}
+
+/** What `openStderrLog()` falls back to: no log, and still a working tunnel. */
+const SILENT_STDERR_LOG: StderrLog = {
+  stdio: 'ignore',
+  path: null,
+  read: () => '',
+  close: () => {
+    // Nothing was opened, so there is nothing to close.
+  },
+};
+
+/**
+ * Reads the last `limit` bytes of a log file.
+ *
+ * The tail rather than the head, because both consumers want the end: the
+ * banner parser takes the last match so a reconnect wins, and the diagnostic
+ * wants the last few lines. Never throws — a log that cannot be read is a
+ * missing diagnostic, not a failed tunnel.
+ */
+function readLogTail(logPath: string, limit: number): string {
+  let fd: number | null = null;
+  try {
+    fd = openSync(logPath, 'r');
+    const { size } = fstatSync(fd);
+    const start = size > limit ? size - limit : 0;
+    const length = size - start;
+    if (length <= 0) return '';
+    const buffer = Buffer.alloc(length);
+    const bytes = readSync(fd, buffer, 0, length, start);
+    // A tail can start mid-codepoint. cloudflared logs ASCII, and at worst one
+    // leading character is mangled; neither consumer anchors on the first byte.
+    return buffer.subarray(0, bytes).toString('utf-8');
+  } catch {
+    return '';
+  } finally {
+    if (fd !== null) {
+      try {
+        closeSync(fd);
+      } catch {
+        // Already closed.
+      }
+    }
+  }
+}
+
+/**
+ * Opens the file cloudflared's stderr is redirected into.
+ *
+ * Truncating (`'w'`) rather than appending, because `parseBannerUrl()` takes the
+ * last URL in the buffer and a previous session's banner names a tunnel that no
+ * longer exists. Starting from empty means the only banner that can be read is
+ * this session's.
+ *
+ * Returns `SILENT_STDERR_LOG` rather than throwing when the file cannot be
+ * opened: `start()` still has `/quicktunnel` — the *first* URL candidate — and
+ * a tunnel with no diagnostics beats no tunnel.
+ */
+export function openStderrLog(logPath: string): StderrLog {
+  let fd: number;
+  try {
+    fd = openSync(logPath, 'w', 0o600);
+  } catch {
+    return SILENT_STDERR_LOG;
+  }
+
+  let open = true;
+  return {
+    stdio: fd,
+    path: logPath,
+    read: () => readLogTail(logPath, STDERR_CAPTURE_LIMIT),
+    close: () => {
+      if (!open) return;
+      open = false;
+      try {
+        closeSync(fd);
+      } catch {
+        // The child holds its own duplicate either way.
+      }
+    },
+  };
 }
 
 /** `QUICK_TUNNEL_SUFFIX` as a regex fragment, so the suffix has one definition. */
@@ -449,22 +617,27 @@ export function createCloudflareProvider(
       }
 
       const args = buildQuickTunnelArgs({ port, metricsPort, pidfile });
-      const child = deps.spawn(CLOUDFLARED_BIN, args, {
-        stdio: ['ignore', 'ignore', 'pipe'],
-      });
+      const stderrLog = openStderrLog(join(stateDir, CLOUDFLARED_LOG_NAME));
 
-      const state: { exit: ExitInfo | null; stderr: string } = { exit: null, stderr: '' };
+      let child: QuickTunnelProcess;
+      try {
+        child = deps.spawn(CLOUDFLARED_BIN, args, buildQuickTunnelSpawnOptions(stderrLog.stdio));
+      } finally {
+        // `spawn` duplicates the descriptor into the child before it returns, so
+        // this copy has no remaining job. Keeping it would tie fd 2's lifetime
+        // to the CLI's, which is the mistake Issue #2146 is about.
+        stderrLog.close();
+      }
+
+      // The tunnel has to outlive `commandmate remote`, which exits as soon as
+      // it has a URL. `unref()` means the CLI's event loop is not held open by a
+      // child it never intends to wait for.
+      child.unref();
+
+      const state: { exit: ExitInfo | null } = { exit: null };
       child.once('exit', (code, exitSignal) => {
         state.exit = { code, signal: exitSignal };
       });
-      const stream = child.stderr;
-      if (stream !== null) {
-        stream.setEncoding('utf-8');
-        stream.on('data', (chunk: string | Buffer) => {
-          if (state.stderr.length >= STDERR_CAPTURE_LIMIT) return;
-          state.stderr += typeof chunk === 'string' ? chunk : chunk.toString('utf-8');
-        });
-      }
 
       const pid = child.pid;
       if (pid === undefined) {
@@ -479,7 +652,7 @@ export function createCloudflareProvider(
           signal,
           timing: deps.timing,
           fetchHostname: deps.fetchHostname,
-          readStderr: () => state.stderr,
+          readStderr: () => stderrLog.read(),
           readExit: () => state.exit,
         });
       } catch (error) {
