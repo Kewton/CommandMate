@@ -19,13 +19,13 @@
  *
  * @vitest-environment node
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import fs from 'fs';
 import path from 'path';
 
 import { planStop, isPreexistingSnapshot, type RemoteHandle } from '@/lib/remote/types';
 import { tailscaleProvider, TAILSCALE_NOT_IMPLEMENTED_REASON } from '@/lib/remote/tailscale';
-import { cloudflareProvider, CLOUDFLARE_NOT_IMPLEMENTED_REASON } from '@/lib/remote/cloudflare';
+import { cloudflareProvider, createCloudflareProvider } from '@/lib/remote/cloudflare';
 
 const REPO_ROOT = path.resolve(__dirname, '../../../..');
 const TYPES_SOURCE = fs.readFileSync(
@@ -175,8 +175,8 @@ describe('planStop: owned minus preexisting (design §6.3-2)', () => {
   });
 });
 
-describe('stub Providers (R1; R2/R3 replace the bodies)', () => {
-  it('reports unavailable and not ready, with a reason', async () => {
+describe('shipped Providers (cloudflare landed in R2; tailscale is still an R3 stub)', () => {
+  it('has the tailscale stub report unavailable and not ready, with a reason', async () => {
     // `available: false` is the honest answer while nothing is implemented, and
     // it keeps the orchestrator's selection rule exercised end to end.
     await expect(tailscaleProvider.detect()).resolves.toEqual({
@@ -184,23 +184,42 @@ describe('stub Providers (R1; R2/R3 replace the bodies)', () => {
       ready: false,
       reason: TAILSCALE_NOT_IMPLEMENTED_REASON,
     });
-    await expect(cloudflareProvider.detect()).resolves.toEqual({
-      available: false,
-      ready: false,
-      reason: CLOUDFLARE_NOT_IMPLEMENTED_REASON,
-    });
   });
 
-  it('refuses to start rather than pretending to', async () => {
+  it('has the tailscale stub refuse to start rather than pretending to', async () => {
     const opts = { port: 3000, signal: new AbortController().signal };
     await expect(tailscaleProvider.start(opts)).rejects.toThrow(/not implemented/);
-    await expect(cloudflareProvider.start(opts)).rejects.toThrow(/not implemented/);
+  });
+
+  it('keeps cloudflare available and ready in lockstep', async () => {
+    // Deliberately machine-independent: whether `cloudflared` is installed
+    // differs between a developer laptop and CI. The invariant does not — a
+    // Quick Tunnel needs no account and no login, so "installed" and "usable
+    // right now" are the same question. Tailscale is the Provider that has to
+    // answer them separately, which is why `ProviderDetection` splits them.
+    const detection = await cloudflareProvider.detect();
+    expect(typeof detection.available).toBe('boolean');
+    expect(detection.ready).toBe(detection.available);
+  });
+
+  it('has cloudflare refuse to start once the caller has aborted', async () => {
+    // The abort is honoured before anything is spawned. An abort that raced a
+    // spawn would leave a public URL running with no handle to stop it by.
+    const spawn = vi.fn();
+    const controller = new AbortController();
+    controller.abort();
+
+    const provider = createCloudflareProvider({ spawn });
+    await expect(provider.start({ port: 3000, signal: controller.signal })).rejects.toThrow(
+      /aborted/,
+    );
+    expect(spawn).not.toHaveBeenCalled();
   });
 
   it('routes stop() through planStop, so preexisting entries land in skipped', async () => {
-    // Classification is R1's job and works today; actuation is R2/R3's and does
-    // not. A stub that reported an empty `skipped` would be indistinguishable
-    // from one that had quietly deleted the user's config.
+    // Classification is R1's job; the Tailscale stub still cannot actuate a
+    // revert. A stub that reported an empty `skipped` would be
+    // indistinguishable from one that had quietly deleted the user's config.
     const handle: RemoteHandle = {
       provider: 'tailscale-serve',
       url: 'https://host.example.ts.net',
