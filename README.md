@@ -366,16 +366,28 @@ Claude Code sets `CLAUDECODE=1` to prevent nesting. CommandMate removes this aut
 ### FAQ
 
 **Q: How do I use CommandMate from my phone?**
-A: CommandMate runs a web server on your PC. To access it from your phone, your phone and PC must be on the same network (Wi-Fi). Run `commandmate init` and enable external access — this sets `CM_BIND=0.0.0.0`. Then open `http://<your-PC-IP>:3000` in your phone's browser.
+A: Run `commandmate remote`. One command starts the server with authentication enabled, opens a tunnel, and prints a QR code in your terminal — scan it with your phone's camera and you are signed in. The pairing code inside that QR works **once** and expires after 10 minutes by default.
+
+```bash
+commandmate remote          # start + publish + pair (QR)
+commandmate remote status   # provider, URL, expiry, pairing state
+commandmate remote stop     # close the outside door (the server keeps running)
+```
+
+It needs [`cloudflared`](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/) installed. Because a Cloudflare Quick Tunnel puts a `https://<random>.trycloudflare.com` address on the public internet, `commandmate remote` warns you and asks before creating it; in a non-interactive shell it refuses instead of assuming yes, so pass `--yes` when you mean it. If no provider is usable it stops with a dependency error rather than falling back to something more exposed. Your `CM_BIND` setting is left alone — the server stays bound to `127.0.0.1`, and `remote` only adds a door in front of it.
+
+**If you would rather not install `cloudflared`**, you can stay inside your LAN: run `commandmate init` and enable external access — this sets `CM_BIND=0.0.0.0` — then open `http://<your-PC-IP>:3000` from a phone on the same Wi-Fi. **Be aware of what that does: it serves CommandMate with no authentication and no encryption.** Anyone on that network can open the URL and drive your repositories, terminals and agents without being asked for anything. Use it only on a network you trust, never on shared or guest Wi-Fi, and set `CM_BIND` back to `127.0.0.1` when you are done.
 
 **Q: Can I access it from outside my home network?**
-A: Yes. Use a tunneling service to securely expose your local server without opening router ports:
+A: Yes — `commandmate remote` (above) is the built-in way: the tunnel it creates is reachable from anywhere, and CommandMate answers it with token authentication on. The URL itself is public, so treat the pairing code, not the URL, as the thing that keeps other people out.
+
+If you would rather run the tunnel yourself, any of these work:
 
 - [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) — free, requires Cloudflare account
 - [ngrok](https://ngrok.com/) — free tier available, easy setup
 - [Pinggy](https://pinggy.io/) — no sign-up required, simple SSH-based tunnel
 
-Alternatively, a VPN or an authenticated reverse proxy (Basic Auth, OIDC, etc.) also works. **Do not** expose the server directly to the internet without authentication.
+Alternatively, a VPN or an authenticated reverse proxy (Basic Auth, OIDC, etc.) also works. **Do not** expose the server directly to the internet without authentication. See the [Security Guide](./docs/security-guide.md) for details.
 
 **Q: Does it work on iPhone / Android?**
 A: Yes. CommandMate's Web UI is responsive and works on any modern mobile browser (Safari, Chrome, etc.). No app install required.
