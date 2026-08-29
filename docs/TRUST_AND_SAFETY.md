@@ -12,6 +12,7 @@ CommandMate はローカルマシン上で動作します。
 
 - アプリケーション本体、SQLite データベース、tmux セッションはすべてローカルで完結
 - 外部への通信は各 CLI ツール（Claude Code / Codex CLI）自体の API 呼び出しのみ
+  （`commandmate remote` で外部公開した場合の例外は「外部アクセス時の依存（任意）」を参照）
 - ユーザーデータを外部サーバーに送信することはありません
 
 ### CLI ツールへの依存
@@ -29,6 +30,44 @@ CommandMate はローカルマシン上で動作します。
 - Cloudflare Tunnel は**任意**であり、ローカル利用のみであれば不要です
 - LAN 内アクセスの場合は `CM_BIND=0.0.0.0` の設定が必要です。リバースプロキシでの認証を推奨します
 
+#### `cloudflared` への依存（`commandmate remote`）
+
+`commandmate remote` は、外部ツール **`cloudflared`**（Cloudflare Tunnel クライアント）に依存します。
+
+- `cloudflared` は**任意の依存**です。インストールされていなければ `remote` は `DEPENDENCY_ERROR`
+  で停止するだけで、CommandMate 本体のローカル利用には一切影響しません
+- CommandMate が `cloudflared` を自動でインストールすることはありません
+- `remote` は `cloudflared` を子プロセスとして起動します。トンネルの通信は Cloudflare を経由するため、
+  **Cloudflare を経路として信頼できる場合にのみ**利用してください
+- Tailscale を CommandMate が代行して設定する Provider（`tailscale-serve`）は**未実装**です。
+  現時点で `remote` が実際に使える Provider は Cloudflare Quick Tunnel だけです
+  （利用者自身が Tailscale を導入して使う方法は従来どおり有効で、そちらは CommandMate に依存しません）
+
+#### 何が外部に出るのか
+
+- 外部に出るのは **CommandMate サーバーそのもの**です。127.0.0.1 で待ち受けているサーバーが、
+  ランダムな公開 URL（`https://<ランダム>.trycloudflare.com`）経由でインターネットから到達可能になります
+- **待ち受けアドレスは変わりません。** `remote` は `CM_BIND` を読みも書きもせず、既定の `127.0.0.1`
+  のままです。LAN 側に新しいポートが開くわけではありません
+- 公開対象はこの CommandMate サーバー 1 つだけで、同じマシン上の他のサービスは含まれません
+- 公開 URL は誰でも到達できるため、**CommandMate 側のトークン認証が必須**です。`remote` は常に認証を
+  有効にしてサーバーを起動し、ペアリングコード（一度限り・既定 10 分で失効）を使った端末だけが
+  ログインできます
+- **公開トンネルの作成には利用者の明示承認が必要です。** 対話環境では警告を表示して確認を求め、
+  非対話環境では `--yes` が無ければ `CONFIG_ERROR` で停止します。黙って公開されることはありません
+- 公開 URL は起動のたびに変わり、アクセスポリシーも監査ログもありません。
+  **長期利用・本番利用には Quick Tunnel を使わないでください**（詳細: `docs/security-guide.md`）
+
+#### 片付けるのは「CommandMate が作ったものだけ」
+
+- `commandmate remote stop` は、**CommandMate が作成したと記録しているものだけ**を片付けます
+- 記録（状態ファイル）が読めない場合、**Provider を推測して片付けにいきません。**
+  「片付けるべきものが分からない」と報告して正常終了します。推測で消すと、利用者が自分で設定した
+  Provider 側の構成（例: 手動で設定した Tailscale Serve）まで壊す可能性があり、CommandMate には
+  それを復元する手段が無いためです
+- `--expires`（既定 8 時間）が切れたときに閉じるのは**外部への口だけ**で、**サーバーは停止しません**。
+  停止すると PC 上のローカル利用まで巻き添えになるためです
+
 ## 最小権限ガイド
 
 ### 推奨設定
@@ -36,12 +75,16 @@ CommandMate はローカルマシン上で動作します。
 - `CM_ROOT_DIR` には git 管理された**特定のディレクトリのみ**を指定する
 - Claude Code の権限設定で、操作対象を対象リポジトリ内に限定する
 - 外部公開時はリバースプロキシでの認証を設定する（詳細: `docs/security-guide.md`）
+- 外出先から一時的にアクセスする場合は `commandmate remote` を使い、必要な時間だけ公開して
+  `commandmate remote stop` で閉じる（`--expires` は用が足りる最短の値にする）
 
 ### 非推奨設定
 
 - `CM_ROOT_DIR` にホームディレクトリ全体（`~`）を指定すること
 - リバースプロキシ認証を設定せずに `CM_BIND=0.0.0.0` でサーバーを公開すること
 - Claude Code に広範なファイル操作権限を与えた状態で Auto Yes モードを有効にすること
+- Cloudflare Quick Tunnel（`commandmate remote`）を、常設の公開経路として長期・本番用途で使い続けること
+- ペアリング用の QR コード / URL を転送・スクリーンショット共有・再利用すること（一度限りの認証情報です）
 
 ## 危険操作の防止
 
