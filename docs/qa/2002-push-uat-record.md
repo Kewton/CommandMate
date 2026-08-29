@@ -611,6 +611,24 @@ Android の購読を解除し、DB で **`push_subscriptions` 1 件（iPad の�
 T-5 は**購読そのものが 1 件**。`deviceCount: 1` に至る道が別なので、
 **片方が通っても他方が通る保証はない** —— 手順書が両方を別項目にしているのはこのため。
 
+#### T-6. 購読が 0 台のとき、例外が出ない
+
+**全項目合格。** DB で `push_subscriptions` **0 件**を実測してから、待機の発生 → 応答 → 解決まで一周させた。
+
+| 期待 | 結果 |
+|---|---|
+| サーバが落ちない・ポーリングが止まらない | **合格**（HTTP 200 / ログ最終行が現在時刻に追随） |
+| `push-fanout-error` / `resolution-push-failed` / `waiting-push-failed` が出ない | **0 件** |
+| 未捕捉例外（`[ERROR]` / `UnhandledPromiseRejection`）が出ない | **0 件** |
+| push が 1 通も出ない | **0 件** |
+
+「空配列に対してファンアウトする」経路が安全であることを確認した。
+**通知を一度も設定していない利用者が全員通る経路**である。
+
+> 手順書の「`reason: no-card` の debug 行だけが出る」は既定ログレベルでは確認できない
+> （`logger.debug`、Issue #2133）。手順書側は commit `5b66a85d` で
+> 「push が 0 通であることをもって合格とする」に差し替え済み。
+
 ### 5.3 不成立の記録
 
 **T-2 の「iPad の通知が 2 枚に増えていない」が不成立（2 枚）。** ただし追加測定で
@@ -802,3 +820,32 @@ T-7 の待機通知は iPad に **「端末の確認が必要です」**（`term
 push と分類確定の競走なので、**送信が速いほど外れる。**
 
 **#2155 と重なると悪化する**: iOS では後から正しい文言に置き換えることもできない。
+
+**K. `commandmate respond` が生きているプロンプトを `prompt_no_longer_active` で拒否する**
+
+T-6 の実施中、`commandmate respond commandmate-uat-push "1"` が **2 回とも**
+`Warning: Response may not have been applied. Reason: prompt_no_longer_active` を返し、
+待機が閉じなかった。
+
+だが同時刻の tmux ペインには**選択肢が生きたまま表示されていた**:
+
+```
+❯ 1. 了解
+  2. やり直す
+  3. Type something.
+Enter to select · ↑/↓ to navigate · Esc to cancel
+```
+
+`tmux send-keys -t 'mcbd-claude-commandmate-uat-push:' Enter` を撃つと**即座に通った**。
+
+**拒否の直前に `waitingKind` が `prompt` → `menu` へ変わっている**（実測）。
+Issue #2156 と同じ「分類が後から動く」性質が、**今度は応答経路を塞いでいる**可能性がある。
+
+**T-6 の判定には影響しない**（応答手段は論点ではない）が、**利用者から見れば
+「画面に選択肢が出ているのに CLI で答えられない」**という実害になる。
+**再現条件（AskUserQuestion で選択肢が menu と分類されたとき）を切り分けてから起票すること。**
+
+> なお、この直後に composer へ `❯ H-3 実機確認です。同じ形式で質問してください` が
+> 見えたが、これは **Claude Code のゴースト候補**（SGR dim）であって入力ではない。
+> `stripAnsi` 後は実残存と区別がつかないので、`capture-pane -e` で属性を見ること
+> （[[reference_claude_composer_ghost_is_dim_sgr]]）。
