@@ -48,6 +48,35 @@ import { describeAgentEventSource } from '@/lib/hooks/sources/define-source';
 import type { AgentEventSourceStatus } from '@/lib/hooks/sources/types';
 import type { getMessages as GetMessagesFn, markPendingPromptsAsAnswered as MarkPendingFn, getAgentInstances as GetAgentInstancesFn } from '@/lib/db';
 
+/**
+ * What one status pass actually cost, in tmux round-trips (Issue #2060).
+ *
+ * Counters, not timings: the wall clock is the caller's to measure, and what
+ * the caller cannot see from outside is how many `capture-pane` calls the pass
+ * decided to issue. That number is the one that matters, because it is NOT
+ * `worktreeCount × CLI_TOOL_IDS.length`. `detectInstanceSessionStatus` captures
+ * only for a probe whose session name is in the pre-queried `sessionNameSet`
+ * (and, for claude, only after `isSessionHealthy` agrees), so a worktree with
+ * nothing running costs zero captures however many tools exist.
+ *
+ * Passed in and mutated rather than returned, so that adding instrumentation
+ * does not change `WorktreeSessionStatus` — which is published verbatim to
+ * every client of `GET /api/worktrees`.
+ */
+export interface StatusDetectionMetrics {
+  /** Probes constructed: one per CLI tool primary, plus one per alias instance. */
+  probeCount: number;
+  /** `capture-pane` calls actually issued (throwing ones included). */
+  captureCount: number;
+  /** `isSessionHealthy` calls actually issued (claude primaries/aliases only). */
+  healthCheckCount: number;
+}
+
+/** A zeroed {@link StatusDetectionMetrics} accumulator (Issue #2060). */
+export function createStatusDetectionMetrics(): StatusDetectionMetrics {
+  return { probeCount: 0, captureCount: 0, healthCheckCount: 0 };
+}
+
 /** Per-CLI-tool session status */
 export interface CliToolSessionStatus {
   isRunning: boolean;
@@ -297,12 +326,14 @@ async function detectInstanceSessionStatus(
   db: ReturnType<typeof import('@/lib/db/db-instance').getDbInstance>,
   getMessages: typeof GetMessagesFn,
   markPendingPromptsAsAnswered: typeof MarkPendingFn,
+  metrics?: StatusDetectionMetrics,
 ): Promise<CliToolSessionStatus> {
   // Issue #405: Use Set.has() instead of individual hasSession() calls
   let isRunning = sessionNameSet.has(sessionName);
 
   // [DR1-005] Claude-only health check (other tools use simple session existence)
   if (isRunning && cliToolId === 'claude') {
+    if (metrics) metrics.healthCheckCount++;
     const healthResult = await isSessionHealthy(sessionName);
     if (!healthResult.healthy) {
       isRunning = false;
@@ -332,6 +363,9 @@ async function detectInstanceSessionStatus(
       // Read through the resolver rather than through `CLIToolManager` so the
       // status poll does not instantiate all seven tools for one number.
       const captureLines = resolveCaptureSpec(cliToolId).statusLines;
+      // Issue #2060: counted BEFORE the await, so a capture that throws is still
+      // counted as a tmux round-trip that was paid for.
+      if (metrics) metrics.captureCount++;
       const output = await captureSessionOutput(worktreeId, cliToolId, captureLines, instanceId);
       // Issue #501, #525, #896: Pass last server response timestamp using the
       // per-instance compositeKey. Auto-yes / last-response tracking is now
@@ -527,6 +561,9 @@ function describeEventSourceFor(
  * @param getMessages - DB function to get messages for a worktree
  * @param markPendingPromptsAsAnswered - DB function to mark stale prompts as answered
  * @param getAgentInstances - DB function returning the worktree's agent-instance roster (Issue #875)
+ * @param metrics - Optional accumulator for the tmux round-trips this pass issues
+ *   (Issue #2060). Mutated in place; safe to share across concurrent calls, which
+ *   is how the list route sums one number over every worktree.
  * @returns Aggregated session status for the worktree
  */
 export async function detectWorktreeSessionStatus(
@@ -536,6 +573,7 @@ export async function detectWorktreeSessionStatus(
   getMessages: typeof GetMessagesFn,
   markPendingPromptsAsAnswered: typeof MarkPendingFn,
   getAgentInstances: typeof GetAgentInstancesFn,
+  metrics?: StatusDetectionMetrics,
 ): Promise<WorktreeSessionStatus> {
   // Issue #649: Skip status detection for global assistant sessions.
   // Global sessions are not real worktrees and should not appear in the sidebar.
@@ -575,6 +613,8 @@ export async function detectWorktreeSessionStatus(
     });
   }
 
+  if (metrics) metrics.probeCount += probes.length;
+
   const results = await Promise.all(
     probes.map(async (probe): Promise<Probe & { status: CliToolSessionStatus }> => {
       const status = await detectInstanceSessionStatus(
@@ -586,6 +626,7 @@ export async function detectWorktreeSessionStatus(
         db,
         getMessages,
         markPendingPromptsAsAnswered,
+        metrics,
       );
       return { ...probe, status };
     })

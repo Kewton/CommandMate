@@ -36,3 +36,33 @@ export function parseIncludeParam(raw: string | null): Set<IncludeValue> {
 
   return validSet;
 }
+
+/**
+ * Query values that turn the tmux-derived status block OFF (Issue #2060).
+ *
+ * Deliberately an opt-OUT list rather than an opt-in one: `?includeStatus=` is
+ * additive, so every request that does not say one of these words — including
+ * every request written before #2060 existed, and a bare `?includeStatus`
+ * (which Next.js normalises to `includeStatus=`) — keeps the status block it
+ * has always had. An unrecognised value is not an error and is not logged, the
+ * same rule `parseIncludeParam` applies to `?include=`.
+ */
+export const STATUS_OFF_VALUES = ['0', 'false', 'no', 'off'] as const;
+
+/**
+ * Parse the `?includeStatus=` query parameter (Issue #2060).
+ *
+ * `true` means "compute the tmux-derived session status", which is what the
+ * route did unconditionally before this parameter existed. Only the words in
+ * {@link STATUS_OFF_VALUES} (trimmed, case-insensitive) turn it off, so the
+ * seven existing consumers of `GET /api/worktrees` are unaffected until one of
+ * them opts out on purpose.
+ *
+ * @param raw - Raw string from searchParams.get('includeStatus')
+ * @returns Whether the caller wants the status block
+ */
+export function parseIncludeStatusParam(raw: string | null | undefined): boolean {
+  if (raw === null || raw === undefined) return true;
+  const normalized = raw.trim().toLowerCase();
+  return !(STATUS_OFF_VALUES as readonly string[]).includes(normalized);
+}
