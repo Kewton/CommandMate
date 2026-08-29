@@ -560,6 +560,34 @@ worktree 単位のログが要る。
 **#2123 / #2124 の VAPID セルフチェックが 1 を検出した唯一の手段だった。**
 この 1 行が無ければ「iOS の置き換えが壊れている」という誤った Issue を起票していた。
 
+#### T-7. 片方が「対応が必要なとき」を OFF にしたとき
+
+**全項目合格。**
+
+購読設定を実測で確認してから実施（iPad `enabled_prompt=1` / Android `enabled_prompt=0`）。
+
+```
+00:08:39  push-fanout-complete {"kind":"prompt","delivered":1,"failed":0}   ← iPad のみ
+00:09:47  PC から respond "1"
+00:09:52  resolution-push-skipped {"reason":"single-device","deviceCount":1}
+          ★ resolution-push-sent は無い
+```
+
+| 期待 | 結果 |
+|---|---|
+| iPad にだけ待機通知が届く | **合格**（`delivered:1` ＋ 利用者の実見） |
+| Android には届かない | **合格**（利用者の実見） |
+| 応答後に「対応済み」通知が来ない | **合格**（利用者の実見） |
+| `reason: single-device` / `deviceCount: 1` | **合格** |
+
+**`single-device` は `logger.info` なので手順書どおりに検証できた** —— T-4 の `no-card`
+（`logger.debug` で見えない、Issue #2133）との違いがここで確認できている。
+
+**副次観測: 通知設定を変えると購読 ID が変わる。** Android の購読が
+`f6fde4c6` → `43c7bae6` に変わった。設定変更が**購読の作り直し**を伴っている。
+§5.4 G（解除→再購読で「常に許可」が戻るか）と同じ経路を通っているので、
+**#2126 Phase 2 はこの操作でも観測できる。**
+
 ### 5.3 不成立の記録
 
 **T-2 の「iPad の通知が 2 枚に増えていない」が不成立（2 枚）。** ただし追加測定で
@@ -720,3 +748,34 @@ T-4 の最中に `mycodebranchdesk` / `claude-3` の通知が 2 通混入した�
 **UAT では「通知が来ないこと」を確かめる項目（T-4 / T-6 / T-7）が複数あり、
 そこに他ワークツリーの通知が混ざると誤判定に直結する。**
 `push-fanout-complete` に `worktreeId` / `instanceId` を足すだけで解消する。
+
+**J. 待機通知の本文が「最初の分類」で固定され、実態と食い違う**
+
+T-7 の待機通知は iPad に **「端末の確認が必要です」**（`terminalAttention`）と表示された。
+だがサーバ側の `waitingKind` は **`prompt`** であり、本来は **「応答待ちです」**
+（`promptWaiting`）が正しい。
+
+```
+00:08:38.837  ask-user-question-recorded / pre_tool_use: AskUserQuestion
+00:08:39.704  push-fanout-complete            ← 0.9 秒後。まだ画面が確定していない
+00:08:44.863  notification: permission_prompt ← 約 5 秒後に分類が prompt へ落ち着く
+```
+
+`needsTerminal()` は `waitingKind` が `'menu'` か `'unclassified'` のとき true を返す
+（`push-sender.ts:239-241`）。**push は最初の観測＝まだ `unclassified` の時点で組まれる**ため、
+本文が terminal 側に倒れる。その後 `observeWaitingEdge` は
+`existing.kind = kind` で種類を更新するが **再 emit しない**ので、
+**カードの文言は誤ったまま固定される。**
+
+**これは文言の揺れではなく、読者が取る行動を逆に指示している。**
+`needsTerminal` の docblock 自身がそう書いている:
+
+> A `menu` … and an `unclassified` wait share the one fact the reader acts on:
+> **tapping the notification will not present anything to answer.**
+
+実際にはタップすれば答えられる。**「端末へ行け」と言われた読者は無駄足を踏む。**
+
+**間欠的である**: T-1 / T-8 では「応答待ちです」が正しく出ていた。
+push と分類確定の競走なので、**送信が速いほど外れる。**
+
+**#2155 と重なると悪化する**: iOS では後から正しい文言に置き換えることもできない。
