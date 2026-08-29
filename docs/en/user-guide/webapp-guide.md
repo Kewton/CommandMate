@@ -439,13 +439,20 @@ commandmate remote --yes    # skip the confirmation and create the public tunnel
 > **If no provider is ready, `remote` stops with `DEPENDENCY_ERROR` (exit 1).**
 > It never switches to a public tunnel on its own because Tailscale was unavailable.
 
-> **Known issue (measured 2026-08-29): the Cloudflare route does not currently survive the
-> command.** `cloudflared` exits at the moment `commandmate remote` returns, and the URL it
-> just printed starts answering HTTP 530 within seconds — there is no time to scan the QR
-> code. This is a defect in how the provider spawns the process, not something you can
-> configure around. **Until it is fixed, use `--provider tailscale`**, which is unaffected
-> because it writes configuration rather than running a process. The measured record is in
-> [`docs/qa/1937-remote-uat-record.md`](../../qa/1937-remote-uat-record.md) (defect D-1).
+> **Fixed — the Cloudflare route used to die together with the command
+> ([#2146](https://github.com/Kewton/CommandMate/issues/2146), now closed).** As measured on
+> 2026-08-29, `cloudflared` exited the moment `commandmate remote` returned and the URL it
+> had just printed started answering HTTP 530 within seconds, leaving no time to scan the QR
+> code (defect **D-1**). The cause was the shape of the spawn: the child's stderr stayed on a
+> pipe that closed with the parent.
+> [**#2148**](https://github.com/Kewton/CommandMate/pull/2148) **points fd 2 at a file
+> (`~/.commandmate/cloudflared.log`) instead of a pipe, together with `detached: true` and
+> `unref()`**, and [#2149](https://github.com/Kewton/CommandMate/pull/2149) re-ran the check
+> against the real `cloudflared` 2025.4.0: the published URL answered **non-530 at t+22.6 /
+> +56.7 / +60.3 seconds after `up` returned**, and went **530 within 2.3 seconds of
+> `remote stop`** — alive while published, revoked on teardown. Both measurements are in
+> [`docs/qa/1937-remote-uat-record.md`](../../qa/1937-remote-uat-record.md) (D-1 in §3.6, its
+> resolution in §6).
 
 #### Checking the state, and packing up
 
@@ -506,7 +513,7 @@ the live acceptance run is in
 
 | OS | Provider detection | Approval flow | Reaching the published tunnel | Notes |
 |----|--------------------|---------------|-------------------------------|-------|
-| **macOS** (Darwin arm64) | ✅ Measured<br>`ready` once the provider tool is installed | ✅ Measured<br>non-interactive stops with exit 2 | ⚠️ Measured, mixed<br>Tailscale Serve ✅ passed; Cloudflare Quick Tunnel ❌ failed (D-1) | cloudflared 2025.4.0, Tailscale 1.102.3 |
+| **macOS** (Darwin arm64) | ✅ Measured<br>`ready` once the provider tool is installed | ✅ Measured<br>non-interactive stops with exit 2 | ✅ Measured<br>Tailscale Serve passed; Cloudflare Quick Tunnel failed at first (**D-1**) and has passed since [#2148](https://github.com/Kewton/CommandMate/pull/2148), re-confirmed against the real `cloudflared` in [#2149](https://github.com/Kewton/CommandMate/pull/2149) | cloudflared 2025.4.0, Tailscale 1.102.3 |
 | **Linux** (Debian 12 / aarch64) | ✅ Measured<br>`DEPENDENCY_ERROR` (exit 1) before install, `ready` after | ✅ Measured<br>identical to macOS | ⏭️ Not attempted | ⚠️ **Measured in a docker container, whose network setup can differ from bare-metal Linux** |
 | **WSL2** | ❌ **Unverified** | ❌ **Unverified** | ❌ **Unverified** | **No test environment was available.** WSL2 varies widely in how `localhost` is forwarded, so **whether the tunnel's `127.0.0.1` upstream points inside WSL2 or at the Windows side is configuration-dependent** |
 
@@ -515,8 +522,10 @@ the live acceptance run is in
 - The "measured" entries in the detection and approval columns are the part that can be
   checked **without creating a public tunnel** (provider detection, the approval gate,
   `status` and `stop`).
-- **End-to-end use from a real phone (scanning the QR code, the PWA, push notifications) is
-  still outstanding on every OS.** The acceptance run covered the server side only.
+- **End-to-end use from a real phone (scanning the QR code, pairing, the PWA, push
+  notifications) is still outstanding on every OS.** The acceptance run covered the server
+  side only, and the phone pass is tracked in
+  [#2152](https://github.com/Kewton/CommandMate/issues/2152).
 
 ### Method 2: Connect directly on the same LAN (without `cloudflared`)
 
