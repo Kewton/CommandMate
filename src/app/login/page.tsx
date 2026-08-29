@@ -10,7 +10,8 @@
  * - Rate limit / lockout message display
  * - Redirect to / when auth is disabled (via AuthContext, no fetch needed)
  * - i18n support (useTranslations('auth'))
- * - Fragment-based auto-login (#token=xxx) for QR code scanned access
+ * - Fragment-based auto-login for QR code scanned access:
+ *   #code=xxx (pairing, Issue #1937) / #token=xxx (deprecated, Issue #383)
  * - QR code generator (PC only, hidden md:block) for mobile access
  */
 
@@ -34,13 +35,22 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [retryAfter, setRetryAfter] = useState<number | null>(null);
 
-  const { autoLoginErrorKey, retryAfterSeconds, clearError: clearAutoLoginError } = useFragmentLogin(authEnabled);
+  const {
+    autoLoginErrorKey,
+    retryAfterSeconds,
+    pairingInProgress,
+    clearError: clearAutoLoginError,
+  } = useFragmentLogin(authEnabled);
 
   // Map autoLoginErrorKey to localized message
   const autoLoginErrorMessages: Record<string, string> = {
     token_invalid: t('login.qr.tokenExpiredOrInvalid'),
     rate_limited: t('login.qr.rateLimited'),
     auto_login_failed: t('login.qr.autoLoginError'),
+    // Issue #1937 (R6): the pairing code says something different from a token -
+    // 410 means "spent or timed out", and the fix is to mint a new code.
+    pairing_invalid: t('login.pairing.invalidCode'),
+    pairing_expired: t('login.pairing.expired'),
   };
   const autoLoginError = autoLoginErrorKey ? autoLoginErrorMessages[autoLoginErrorKey] ?? null : null;
 
@@ -123,6 +133,14 @@ export default function LoginPage() {
         <h1 className="text-2xl font-bold mb-6 text-center text-foreground">
           {t('login.title')}
         </h1>
+
+        {/* Issue #1937 (R6): a scanned pairing URL logs in with no interaction,
+            so without this the screen looks like an idle login form. */}
+        {pairingInProgress && (
+          <p className="mb-4 text-center text-sm text-muted-foreground" role="status">
+            {t('login.pairing.inProgress')}
+          </p>
+        )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>

@@ -1,6 +1,8 @@
 /**
  * Unit tests for useFragmentLogin hook
  * Issue #383: QR code login for mobile access via ngrok
+ * Issue #1937 (R6): the same receiver now carries `commandmate remote` pairing
+ * codes, so the fragment decides which endpoint the credential is redeemed at
  *
  * Tests fragment-based auto-login flow with security validations
  * @vitest-environment jsdom
@@ -334,5 +336,180 @@ describe('useFragmentLogin', () => {
     await waitFor(() => {
       expect(replaceStateSpy).toHaveBeenCalledWith(null, '', '/login?lang=ja');
     });
+  });
+});
+
+/**
+ * Issue #1937 (R6). The routing decision is the whole feature: sending a
+ * pairing code to /api/auth/login would fail closed but silently, and sending a
+ * long-lived token to /api/remote/pair would too. Both directions are pinned.
+ */
+describe('useFragmentLogin - remote pairing (#code=)', () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+  let warnSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    fetchMock = vi.fn();
+    global.fetch = fetchMock as unknown as typeof fetch;
+    vi.spyOn(history, 'replaceState');
+    warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    setLocation({ hash: '' });
+  });
+
+  afterEach(() => {
+    resetLocation();
+    vi.restoreAllMocks();
+  });
+
+  it('sends a #code= fragment to /api/remote/pair', async () => {
+    setLocation({ hash: '#code=ABCDEFGHJKMNPQRSTVWXYZ0123' });
+
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 401, headers: new Headers() });
+
+    renderHook(() => useFragmentLogin(true));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('/api/remote/pair', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: 'ABCDEFGHJKMNPQRSTVWXYZ0123' }),
+      });
+    });
+  });
+
+  it('still sends a #token= fragment to /api/auth/login', async () => {
+    setLocation({ hash: '#token=legacytoken' });
+
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 401, headers: new Headers() });
+
+    renderHook(() => useFragmentLogin(true));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: 'legacytoken' }),
+      });
+    });
+  });
+
+  it('warns that #token= is deprecated without putting the token in the log', async () => {
+    setLocation({ hash: '#token=supersecrettokenvalue' });
+
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 401, headers: new Headers() });
+
+    renderHook(() => useFragmentLogin(true));
+
+    await waitFor(() => {
+      expect(warnSpy).toHaveBeenCalled();
+    });
+
+    const logged = JSON.stringify(warnSpy.mock.calls);
+    expect(logged).toContain('deprecated');
+    expect(logged).not.toContain('supersecrettokenvalue');
+  });
+
+  it('does not warn on the pairing path', async () => {
+    setLocation({ hash: '#code=ABCDEFGHJKMNPQRSTVWXYZ0123' });
+
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 401, headers: new Headers() });
+
+    renderHook(() => useFragmentLogin(true));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalled();
+    });
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it('prefers #code= when a fragment somehow carries both', async () => {
+    setLocation({ hash: '#token=legacytoken&code=ABCDEFGHJKMNPQRSTVWXYZ0123' });
+
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 401, headers: new Headers() });
+
+    renderHook(() => useFragmentLogin(true));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/remote/pair');
+  });
+
+  it('reports pairing_expired on 410 (code already used, or TTL passed)', async () => {
+    setLocation({ hash: '#code=ABCDEFGHJKMNPQRSTVWXYZ0123' });
+
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 410, headers: new Headers() });
+
+    const { result } = renderHook(() => useFragmentLogin(true));
+
+    await waitFor(() => {
+      expect(result.current.autoLoginErrorKey).toBe('pairing_expired');
+    });
+  });
+
+  it('reports pairing_invalid on 401 rather than the token wording', async () => {
+    setLocation({ hash: '#code=ABCDEFGHJKMNPQRSTVWXYZ0123' });
+
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 401, headers: new Headers() });
+
+    const { result } = renderHook(() => useFragmentLogin(true));
+
+    await waitFor(() => {
+      expect(result.current.autoLoginErrorKey).toBe('pairing_invalid');
+    });
+  });
+
+  it('reports pairing_invalid for an over-long code without calling the endpoint', async () => {
+    setLocation({ hash: `#code=${'A'.repeat(257)}` });
+
+    const { result } = renderHook(() => useFragmentLogin(true));
+
+    await waitFor(() => {
+      expect(result.current.autoLoginErrorKey).toBe('pairing_invalid');
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('drops the code-bearing hash from the address bar before the request (S002)', async () => {
+    setLocation({ hash: '#code=ABCDEFGHJKMNPQRSTVWXYZ0123', pathname: '/login', search: '?lang=ja' });
+
+    let replaceStateRanFirst = false;
+    vi.mocked(history.replaceState).mockImplementation(() => {
+      if (fetchMock.mock.calls.length === 0) {
+        replaceStateRanFirst = true;
+      }
+    });
+
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 401, headers: new Headers() });
+
+    renderHook(() => useFragmentLogin(true));
+
+    await waitFor(() => {
+      expect(history.replaceState).toHaveBeenCalledWith(null, '', '/login?lang=ja');
+    });
+    expect(replaceStateRanFirst).toBe(true);
+  });
+
+  it('clears pairingInProgress once the exchange settles', async () => {
+    setLocation({ hash: '#code=ABCDEFGHJKMNPQRSTVWXYZ0123' });
+
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 410, headers: new Headers() });
+
+    const { result } = renderHook(() => useFragmentLogin(true));
+
+    await waitFor(() => {
+      expect(result.current.autoLoginErrorKey).toBe('pairing_expired');
+    });
+    expect(result.current.pairingInProgress).toBe(false);
+  });
+
+  it('leaves pairingInProgress false when there is no fragment at all', () => {
+    setLocation({ hash: '' });
+
+    const { result } = renderHook(() => useFragmentLogin(true));
+
+    expect(result.current.pairingInProgress).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
