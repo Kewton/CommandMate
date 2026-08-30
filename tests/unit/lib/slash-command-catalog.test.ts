@@ -349,7 +349,14 @@ describe('getCatalogStaleness', () => {
       agy: { error: true }, // missing
     };
     const staleness = await getCatalogStaleness();
-    expect(staleness.claude).toEqual({ current: '2.5.0', verifiedAgainst: '2.1.218', stale: true });
+    // Issue #2158: read the stamp from CATALOG_VERIFIED_AGAINST like the codex
+    // arm below, so re-attesting claude does not turn this assertion red for a
+    // reason that has nothing to do with staleness.
+    expect(staleness.claude).toEqual({
+      current: '2.5.0',
+      verifiedAgainst: CATALOG_VERIFIED_AGAINST.claude,
+      stale: true,
+    });
     expect(staleness.codex).toEqual({
       current: codexVerified,
       verifiedAgainst: codexVerified,
@@ -490,7 +497,7 @@ describe('getCatalogStalenessSnapshot', () => {
 
     expect(getCatalogStalenessSnapshot().claude).toEqual({
       current: '9.9.9',
-      verifiedAgainst: '2.1.218',
+      verifiedAgainst: CATALOG_VERIFIED_AGAINST.claude,
       stale: true,
     });
   });
