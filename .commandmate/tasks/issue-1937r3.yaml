@@ -1,0 +1,191 @@
+version: 1
+title: "Issue #1937 R3: Tailscale Serve Provider を実装し U-2 を実測で確定する"
+goal: |
+  /pm-auto-issue2dev
+
+  https://github.com/Kewton/CommandMate/issues/1937 の **R3 だけ**を実装します。
+
+  ## 範囲
+
+  - `src/lib/remote/tailscale.ts` の stub（現在 `available:false`）を実装に差し替える
+  - `src/lib/remote/index.ts` の export を更新（`TAILSCALE_NOT_IMPLEMENTED_REASON` は削除。
+    R2 が `CLOUDFLARE_NOT_IMPLEMENTED_REASON` を消したのと同じ理由）
+  - **R4 のガードを拡張する**（下記。実測で守備範囲不足が判明した）
+  - テスト
+
+  **`src/lib/remote/types.ts` を変更しないでください。** R1 で確定済みで、
+  `tests/unit/lib/remote/provider-contract.test.ts` が member 一覧を完全一致で固定しています。
+  **`src/lib/remote/cloudflare.ts`（R2 実装済み）と `src/cli/**`（R9 実装済み）も触りません。**
+
+  ---
+
+  ## オーケストレーターが実機採取した U-2 の事実（2026-08-29 / Tailscale 1.102.3 / macOS）
+
+  **設計方針書 §6.4 の Tailscale 表は「想定」でしたが、以下は実測値です。想定より実測を優先してください。**
+
+  ### 環境
+  - `tailscale` は standalone(macsys) 版。CLI は `/usr/local/bin/tailscale`
+  - `tailscale status --json`: `BackendState: Running` / `MagicDNSSuffix` あり / `Self.DNSName` あり /
+    **`CertDomains` 設定あり**（＝ tailnet の HTTPS 証明書は既に有効。追加の有効化は不要）
+  - **`tailscale serve status --json` は実在し、現在の出力は `{}`**（人間向けは `No serve config`）。
+    **＝ 既存の serve マッピングはゼロ**
+
+  ### コマンド体系（`tailscale serve --help` の実物）
+  ```
+  USAGE
+    tailscale serve <target>
+    tailscale serve status [--json]
+    tailscale serve reset
+
+  SUBCOMMANDS
+    status      View current serve configuration
+    reset       Reset current serve config
+    drain       Drain a service from the current node
+    clear       Remove all config for a service
+    advertise   Advertise this node as a service proxy to the tailnet
+    get-config  Get service configuration to save to a file
+    set-config  Define service configuration from a file
+
+  FLAGS（抜粋）
+    --bg          Run the command as a background process (default false)
+    --http value  Expose an HTTP server at the specified port
+    --https value Expose an HTTPS server at the specified port (default mode)
+    --set-path    Appends the specified path to the base URL
+    --yes         Update without interactive prompts
+  ```
+  例: `tailscale serve --bg 3000`（127.0.0.1:3000 をバックグラウンドで公開）
+
+  ### 【最重要】`off` が help に 1 件も無い
+
+  設計方針書 §6.4 は stop を「CommandMate が張ったハンドラのみを **off** にする」としていますが、
+  **1.102.3 の help に `off` という語は 0 件**でした。旧版の `tailscale serve <port> off` が
+  未文書のまま動く可能性はありますが、**推測で実装しないでください。**
+
+  **あなたが最初に実測すべきはこれです**: 1 本だけ張ったハンドラを、他を壊さずに除去する方法。
+  候補は (a) 未文書の `off` 引数、(b) `get-config` でスナップショット → 該当分を除いて `set-config`、
+  (c) その他。**実測して決め、選んだ理由を記録**してください。
+
+  ### 【最重要】`tailscale serve` はインターネットに公開しない
+
+  help に明記があります: *"To share a local server on the internet, use `tailscale funnel`"*。
+  **`funnel` は絶対に使わないでください。** Serve は tailnet 内に閉じるので、R2 の Quick Tunnel と違い
+  公開 URL を作りません。これが R3 の実測が比較的安全な理由です。
+
+  ---
+
+  ## R4 ガードの拡張（実測で判明した不足）
+
+  `tests/unit/config/remote-destructive-command-guard.test.ts` は現在 **`serve reset` しか禁止していません**。
+  実測で、同等以上に破壊的なものが 3 つあることが分かりました。**すべて禁止に追加してください**:
+
+  | コマンド | help の説明 | なぜ危険か |
+  |---|---|---|
+  | `serve reset` | Reset current serve config | 全消し（既に禁止済み） |
+  | `serve clear` | **Remove all config for a service** | サービス単位の全消し |
+  | `serve drain` | Drain a service from the current node | ノードからサービスを外す |
+  | `serve set-config --all` | *"If `--all` is specified, all endpoint handlers for **all services** are **overwritten**"* | **全上書き**。reset と同じ破壊力 |
+
+  `set-config` 自体は復元手段として使ってよいですが、**`--all` は禁止**してください。
+  既存の陽性対照（禁止語を合成してチェッカに食わせ、検出されることを assert する）を
+  **追加した語すべてに対して**用意すること。0 件は「存在しない」の証明にならず、
+  「検査が壊れている」と区別できないためです。
+
+  ---
+
+  ## 実測の安全手順（厳守）
+
+  1. **開始前に必ず `tailscale serve status --json` を採取し、ファイルに保存**する
+     （現状は `{}`。これが復元先の正解）
+  2. 検証で作るマッピングは **2 本まで**:
+     - 「利用者の既存設定」役（あなたが意図的に作る。CommandMate は消してはいけない対象）
+     - 「CommandMate が作った」役（`stop()` が消すべき対象）
+  3. **`stop()` が (b) だけを消し (a) を残す**ことを実測で確認する。これが U-2 の本題
+  4. **終了時に必ず `{}` の状態へ戻す**。作ったマッピングを両方とも撤去し、
+     `serve status --json` が `{}` に戻ったことを確認してから完了とすること
+  5. `tailscale serve reset` / `clear` / `drain` / `set-config --all` を**実行しない**
+     （ガードで禁止する当のもの。手で撃っても同じく危険）
+  6. `tailscale funnel` を**実行しない**
+  7. `tailscale up` / `down` / `logout` を**実行しない**（利用者のログイン状態を壊す）
+
+  実測の生ログと判断を `dev-reports/issue/1937/u2-tailscale-serve.md` に残してください。
+
+  ## 実装（設計方針書 §6.1〜§6.3）
+
+  - `detect()`: `available`（実行ファイルがある）と `ready`（使える状態）を分ける。
+    `PreflightChecker.checkDependency()` と同じ `spawnSync(cmd, [versionArg], {timeout:5000})` で
+    **shell を挟まない**（`MF-SEC-1`）。ready の判定には `tailscale status --json` の
+    `BackendState` と MagicDNS 名の有無を使う（**実測で両方取れることを確認済み**）
+  - `start()`: `preexisting` に**起動前スナップショットを必ず載せて返す**（§6.3-2）。
+    アップストリームは常に `127.0.0.1`（`0.0.0.0` / `localhost` を禁止するテストを置く、§9.2）
+  - `stop()`: 入力は `RemoteHandle` のみ。`owned` に在り `preexisting` に無いものだけを戻し、
+    **両方に在るものは `skipped` に積む**（§6.3-2）。R1 の `planStop()` を使うこと
+  - **`reset()` / `cleanupAll()` に相当するメソッドを足さない**（§6.3-1）
+
+  ## 受入条件
+
+  - `detect()` が `available` / `ready` を分けて返し、この実機で `ready:true` になる。
+  - `start()` が `preexisting` を埋めた `RemoteHandle` を返す。
+  - **`stop()` が「利用者の既存設定」役を残し「CommandMate が作った」役だけを消す**ことが実測で確認され、
+    `dev-reports/issue/1937/u2-tailscale-serve.md` に記録されている。
+  - **ガードが `reset` / `clear` / `drain` / `set-config --all` を禁止し、全語に陽性対照がある**。
+  - アップストリームが常に `127.0.0.1` であることが argv の assert で固定されている。
+  - `TAILSCALE_NOT_IMPLEMENTED_REASON` の export が削除され、参照元も更新されている。
+  - **実測後に `serve status --json` が `{}` に戻っている**。
+  - `npm run build:cli` が通る（R2 と同じく `@/` エイリアスを避け、Node builtin と `./types` だけを import する）。
+
+  ## 作業ルール（厳守）
+
+  - **`CHANGELOG.md` と `docs/module-reference.md` を編集しないでください**（scope 外です）。
+    代わりに次の 2 ファイルを書いてください。どちらも `dev-reports/` 配下なので commit には入りません。
+
+    - `dev-reports/changelog/issue-1937r3.md` — `CHANGELOG.md` の `## [Unreleased]` にそのまま
+      貼れる **1 エントリ**（先頭は `- **<type>(<scope>): …** (#1937): …`）。どの節
+      （`### Added` / `### Changed` / `### Fixed`）に入るかを 1 行目にコメントで書く。
+      **形式は次の実例に合わせてください**（develop の `CHANGELOG.md` にある実エントリを丸ごと 1 本。
+      エントリは**ファイル中では 1 行**で、下で折り返して見えるのは表示上の都合です）:
+
+      ```markdown
+      <!-- ### Fixed -->
+      - **fix(cli): `send` 直後の `wait` が「まだ始まっていない」を完了と読む問題を修正** (#1975): `wait` が `sessionStatus==='ready'` を完了と判定する直前に、**「このインスタンスに最後に渡されたプロンプト」と「エージェント自身が最後に報告したターン終了（`lastStopEventAt`）」を突き合わせる**ゲートを追加。`send` 直後は最新の構造化イベントが直前ターンの `stop` のままなので #1839 の `adoptTurnStart()` が何も採用せず、`turnStartedAt === null` が「決着済み」と読まれてアイドル composer をそのまま完了にしていた（隔離サーバ実測 2026-08-22 / copilot 1.0.80: `send`→`wait` 5 回中 3 回が約 0.3 秒・`basis=scraper_ready`・成果物ゼロで exit 0）。保留は `PENDING_PROMPT_HOLD_MS`=60 秒で打ち切り、`--timeout` / `--stall-timeout` はそれより短ければ従来どおり優先される。
+      ```
+
+      - `- **` で始めること — 集計は `grep -cE '^- \*\*'` なので、外れるとエントリとして数えられません。
+      - `(#1937)` は要約の**外**（`**` を閉じた後）に置くこと — `（Issue #1937）` を要約の中に埋めると
+        機械的に取り出せません。
+      - `<type>` は CLAUDE.md のコミットメッセージ規約と同じ語彙
+        （`feat` / `fix` / `docs` / `refactor` / `test` / `chore` / `ci` / `style`）。
+      - 1 エントリ＝1 行（折らない）。本文がどれだけ長くても改行を入れません。
+
+    - `dev-reports/module-reference/issue-1937r3.md` — `docs/module-reference.md` の表に足す注記を
+      **行キー（`| \`path\` |`）ごと**に列挙する。既存行への追記なら「どの行に何を足すか」を書く。
+      **既存行に足すときは `grep -n '^| \`<path>\`' docs/module-reference.md` を実行し、その出力
+      （行番号つきの行キー）を断片に書き写してから**書くこと。0 件だった行への追記を指示しない
+      （新しい行を足すなら「新規行」と明記する）。足すものが無ければ「追記なし」の 1 行でよい。実例:
+
+      ```markdown
+      ## 既存行への追記
+      - `src/lib/session/worktree-status-helper.ts` — 実在確認: `docs/module-reference.md:103`（行番号は確認時点のもの）
+        追記内容: 「private `getStatusCaptureLines()` を削除し `resolveCaptureSpec(cliToolId).statusLines` に置換（Issue #1933）」
+
+      ## 新規行
+      追記なし
+      ```
+
+    断片が無いとリリースノートと module-reference に載りません。**実装と同じ commit の時点で書くこと。**
+
+  - **PR を作らないでください。** PR 作成とマージはオーケストレーターが行います。
+  - **commit は 1 本にまとめてください**（`<type>(<scope>): <subject>` 形式）。
+  - Issue 本文を書き換えないでください。訂正が要る場合は commit メッセージか PR 用のメモに書いてください。
+  - 実装が終わったら最後に `IMPL_COMPLETED` とだけ出力してください。
+
+scope:
+  allow:
+    - "src/lib/remote/tailscale.ts"
+    - "src/lib/remote/index.ts"
+    - "tests/unit/lib/remote/**"
+    - "tests/unit/config/**"
+    - "dev-reports/**"
+  deny: []
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true

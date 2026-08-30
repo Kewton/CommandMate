@@ -1,0 +1,172 @@
+version: 1
+title: "Issue #2058 + #2059: サイドバーの hover-freeze 空配列凍結を直し、ロード中／取得失敗の状態を導入する"
+goal: |
+  /bug-fix
+
+  https://github.com/Kewton/CommandMate/issues/2058 と
+  https://github.com/Kewton/CommandMate/issues/2059 を **1 つの PR** で実装してください。
+  どちらの Issue 本文にも「同 PR 可」と書かれており、両方が `Sidebar.tsx` の同じ描画経路
+  （`effectiveBranchItems` → `isEmpty` → 空メッセージ）を触るため、分割すると統合時に壊れます。
+
+  ## 事前に済んでいる実測（オーケストレーターが develop 6ab7f6f3 で確認済み。ここは裏取り不要）
+
+  Issue 本文の行番号はすべて現行 develop と一致しています。ただし本文の記述に
+  **2 点の誤り／欠落**があるので、そちらは下の記述を正としてください。
+
+  ### #2058（バグ）— 本文の主張はすべて VERIFIED
+  - `src/components/layout/Sidebar.tsx:273-288` `handleListMouseEnter`。新規凍結は 287 行目、
+    再入時の延長は 282 行目。
+  - `displayedItemsRef` 宣言は 268 行目、同期する `useLayoutEffect` は 269-271 行目。
+    **この useLayoutEffect には依存配列が無く毎コミットで再同期する**ので、`[]` の凍結が起きるのは
+    「本当にリストが空のあいだ（初回 fetch 中／fetch 失敗）」に限られます。そこに
+    `expiresAt: Infinity` が刺さるのが本件です。
+  - `effectiveBranchItems` は 259-263 行目。**memo の依存は `[stableBranchItems]` だけ**なので、
+    凍結の期限切れだけでは再計算されません。これが「解除が次のポーリングまで見えない」の機構です。
+  - `handleListMouseLeave` は 292-299 行目。294 行目でまず `expiresAt = Date.now() + 1000` を入れ、
+    296-298 行目の `setTimeout` で ref を null にします。**どちらのハンドラにも setState が無い**ので
+    再レンダーが起きません。アンマウント時の後片付けは 255-257 行目。
+  - 補助情報: `stableBranchItems = useDeferredValue(branchItems)` は 236 行目、`isEmpty` の導出は
+    425-427 行目、凍結ハンドラが付いているのは `data-testid="branch-list"` の div（486-492 行目）。
+
+  ### 【本文の誤り 1】既存の並び替え抑止テストは **存在しません**
+  #2058 の受入条件は「既存の並び替え抑止テスト（hover 中にポーリングで順序が変わらない）が
+  緑のまま」と書いていますが、**そのテストは 1 本も無い**ことを実測で確認しました
+  （凍結を入れた 4 commit `0b17c2da` / `b4672120` / `36b173bd` / `d8908b39` はいずれも
+  `Sidebar.tsx` しか触っておらず、`tests/` に `branch-list` へ `mouseEnter` / `mouseLeave` を
+  撃つテストは 1 つもありません）。
+  したがって **「hover 中はポーリングで順序が変わらない」テストをあなたが新規に書いてください。**
+  これが無いと、空配列を凍結しない修正が hover-freeze 機能そのものを殺していても誰も気づきません。
+
+  ### 【本文の誤り 2】#2059 の「デッドコード」の説明が不正確
+  - `WorktreeSelectionContext.tsx:324` は `console.warn` ではなく
+    `console.error('[WorktreeSelectionContext] Polling error:', err)` です。
+  - デッドである理由も本文より広く、**ポーリング effect 全体（296-341 行目）が到達不能**です
+    （299 行目の `if (useExternal) return;` で早期 return し、`WorktreesCacheProvider.tsx:66-71` が
+    常に `externalWorktrees` を渡すため）。
+  - `isLoading` は **reducer の state には既にあります**（interface 87 行目、初期値 `true` が 158 行目）。
+    無いのは公開だけで、`WorktreeSelectionContextValue`（95-115 行目）と `value`（343-352 行目）から
+    落ちています。`isLoadingDetail`（348）と `error`（349）は既に公開済みです。
+
+  ### #2059 のその他の実測（すべて VERIFIED）
+  - `Sidebar.tsx:494-497` が `t('sidebar.noBranchesAvailable')` を描画。文言は
+    `locales/ja/common.json:105` = 「ブランチがありません」/ `locales/en/common.json:105` =
+    "No branches available"。ゲートは 425-427 行目の `isEmpty`（リスト長だけで決まる）。
+  - `Sidebar.tsx:168-174` は `worktrees, repositories, selectedWorktreeId, selectWorktree,
+    refreshWorktrees` のみを分解代入している（`isLoading` も `error` も読んでいない）。
+  - `src/app/page.tsx:34` が `isLoading, error` を `useWorktreesCacheContext()` から取り、
+    37 行目で `const isFirstLoad = isLoading && worktrees.length === 0`。**この形に揃えてください。**
+  - `src/hooks/useWorktreesCache.ts:143-167` の `refresh` は 146 行目で生 `fetch('/api/worktrees')`。
+    catch（161-164）は `setError` のみ、`finally`（165）で `setIsLoading(false)`。リトライ無し。
+  - `src/lib/api-client.ts` の `fetchApi` は 103-108 行目で「`/login` へのリダイレクト → `ApiError(401)`」、
+    121-123 行目で「非 JSON → `ApiError('Unexpected response format')`」を持つ
+    （JSON パースは 63-88 行目の `safeParseJson`）。**これを再利用してください。新規に書かないこと。**
+  - 5 秒リトライの前例は `WorktreeSelectionContext.tsx` の catch（319-329）にあり、
+    326-328 行目が `setTimeout(poll, POLLING_INTERVALS.SESSION_RUNNING)`、
+    `SESSION_RUNNING: 5000` は 33 行目です。
+
+  ## 実装内容
+
+  ### #2058
+  1. 凍結の入口で空配列を凍結しない（`displayedItemsRef.current.length === 0` なら return）。
+  2. 凍結中に `stableBranchItems` が空 → 非空に変わったら凍結を破棄する
+     （初回データ到着を「並び替え」として扱わない）。
+  3. 解除（mouseleave の 1 秒後）で再レンダーを起こす。`useState` のバージョンカウンタでも
+     `useSyncExternalStore` でもよいが、**選んだ理由を PR 本文に 1 行書いてください。**
+     現状は次のポーリング（30 秒 / WS 接続中は 60 秒）まで解除が見えません。
+
+  ### #2059
+  4. `isLoading` / `error` を context から公開し、`isFirstLoad = isLoading && worktrees.length === 0`
+     でスケルトンを出す。`error` 時は「取得できませんでした（再試行）」を出す。
+     **「ブランチがありません」は本当に 0 件のときだけ**にする。
+     新しい文言は `locales/{ja,en}/common.json` にキーを足してください（既存 105 行目の近傍）。
+  5. 初回 fetch 失敗時の短期リトライ（2s → 5s → 10s、上限あり）を `useWorktreesCache.ts` に入れる。
+  6. `useWorktreesCache.ts:146` の生 `fetch('/api/worktrees')` を `fetchApi` に置換し、
+     リダイレクト／非 JSON 応答をエラーとして扱う。
+  7. 取得失敗をブラウザ console に 1 行出す（上記のとおり既存の 324 行目は到達不能なので、
+     **到達する場所に置くこと**）。
+
+  ## 受入条件（これを満たしたことをテストで示すこと）
+  - 「リストが空の状態で mouseenter → データ到着」を再現するテストで、到着した行が描画される。
+    **修正前のコードで赤になることを確認してから**修正してください（変異注入で空振りでないことを示す）。
+  - **新規**「hover 中はポーリングで順序が変わっても表示順が変わらない」テストが緑
+    （＝凍結機能を殺していないことの証明）。上記のとおり既存テストは無いので新規に書きます。
+  - fetch を 500 にモックした状態で「スケルトン → エラー表示 → リトライ成功で一覧」の遷移がテストで固定される。
+  - 一覧取得の平常時のスナップショットが不変。
+  - 既存の `tests/unit/components/layout/Sidebar.test.tsx` の `Empty state` describe（307-345 行目、
+    `/No branches available/i` を assert）が**意味を変えずに**通ること。0 件の意味が
+    「本当に 0 件」に狭まるので、必要ならテスト側の前提（isLoading=false）を明示的に足してください。
+
+  ## 参考テストファイル
+  - `tests/unit/components/layout/Sidebar.test.tsx`
+  - `tests/unit/components/layout/Sidebar-visibility.test.tsx`
+  - `tests/unit/hooks/useSidebar.test.ts`
+
+  ## 注意
+  - `src/app/api/worktrees/route.ts` は **別ワーカーが Issue #2060 で同時に触っています**。
+    このタスクでは API のレスポンス形を変えないでください（scope にも入れていません）。
+  - React 19 です。`act()` 外の更新は遅延するため、否定 assert（「まだ出ていない」）は
+    `await waitFor` の中に入れるか、明示的に flush してから書いてください。
+
+  ## 作業ルール（厳守）
+
+  - **`CHANGELOG.md` と `docs/module-reference.md` を編集しないでください**（scope 外です）。
+    代わりに次の 2 ファイルを書いてください。どちらも `dev-reports/` 配下なので commit には入りません。
+
+    - `dev-reports/changelog/issue-2058.md` — `CHANGELOG.md` の `## [Unreleased]` にそのまま
+      貼れる **1 エントリ**（先頭は `- **<type>(<scope>): …** (#2058): …`）。どの節
+      （`### Added` / `### Changed` / `### Fixed`）に入るかを 1 行目にコメントで書く。
+      **形式は次の実例に合わせてください**（develop の `CHANGELOG.md` にある実エントリを丸ごと 1 本。
+      エントリは**ファイル中では 1 行**で、下で折り返して見えるのは表示上の都合です）:
+
+      ```markdown
+      <!-- ### Fixed -->
+      - **fix(cli): `send` 直後の `wait` が「まだ始まっていない」を完了と読む問題を修正** (#1975): `wait` が `sessionStatus==='ready'` を完了と判定する直前に、**「このインスタンスに最後に渡されたプロンプト」と「エージェント自身が最後に報告したターン終了（`lastStopEventAt`）」を突き合わせる**ゲートを追加。`send` 直後は最新の構造化イベントが直前ターンの `stop` のままなので #1839 の `adoptTurnStart()` が何も採用せず、`turnStartedAt === null` が「決着済み」と読まれてアイドル composer をそのまま完了にしていた（隔離サーバ実測 2026-08-22 / copilot 1.0.80: `send`→`wait` 5 回中 3 回が約 0.3 秒・`basis=scraper_ready`・成果物ゼロで exit 0）。保留は `PENDING_PROMPT_HOLD_MS`=60 秒で打ち切り、`--timeout` / `--stall-timeout` はそれより短ければ従来どおり優先される。
+      ```
+
+      - `- **` で始めること — 集計は `grep -cE '^- \*\*'` なので、外れるとエントリとして数えられません。
+      - `(#2058)` は要約の**外**（`**` を閉じた後）に置くこと — `（Issue #2058）` を要約の中に埋めると
+        機械的に取り出せません。
+      - `<type>` は CLAUDE.md のコミットメッセージ規約と同じ語彙
+        （`feat` / `fix` / `docs` / `refactor` / `test` / `chore` / `ci` / `style`）。
+      - 1 エントリ＝1 行（折らない）。本文がどれだけ長くても改行を入れません。
+
+    - `dev-reports/module-reference/issue-2058.md` — `docs/module-reference.md` の表に足す注記を
+      **行キー（`| \`path\` |`）ごと**に列挙する。既存行への追記なら「どの行に何を足すか」を書く。
+      **既存行に足すときは `grep -n '^| \`<path>\`' docs/module-reference.md` を実行し、その出力
+      （行番号つきの行キー）を断片に書き写してから**書くこと。0 件だった行への追記を指示しない
+      （新しい行を足すなら「新規行」と明記する）。足すものが無ければ「追記なし」の 1 行でよい。実例:
+
+      ```markdown
+      ## 既存行への追記
+      - `src/lib/session/worktree-status-helper.ts` — 実在確認: `docs/module-reference.md:103`（行番号は確認時点のもの）
+        追記内容: 「private `getStatusCaptureLines()` を削除し `resolveCaptureSpec(cliToolId).statusLines` に置換（Issue #1933）」
+
+      ## 新規行
+      追記なし
+      ```
+
+    断片が無いとリリースノートと module-reference に載りません。**実装と同じ commit の時点で書くこと。**
+
+  - **PR を作らないでください。** PR 作成とマージはオーケストレーターが行います。
+  - **commit は 1 本にまとめてください**（`<type>(<scope>): <subject>` 形式）。
+  - Issue 本文を書き換えないでください。訂正が要る場合は commit メッセージか PR 用のメモに書いてください。
+  - 実装が終わったら最後に `IMPL_COMPLETED` とだけ出力してください。
+
+scope:
+  allow:
+    - "src/components/layout/Sidebar.tsx"
+    - "src/contexts/WorktreeSelectionContext.tsx"
+    - "src/hooks/useWorktreesCache.ts"
+    - "src/components/providers/**"
+    - "src/lib/api-client.ts"
+    - "src/app/page.tsx"
+    - "locales/**"
+    - "tests/unit/components/layout/**"
+    - "tests/unit/contexts/**"
+    - "tests/unit/hooks/**"
+    - "tests/unit/lib/api-client*"
+    - "dev-reports/**"
+  deny: []
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true

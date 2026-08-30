@@ -1,0 +1,202 @@
+version: 1
+title: "Issue #1937 R1+R4+R8: Provider 抽象・全消し禁止ガード・ターミナル QR レンダラ"
+goal: |
+  /pm-auto-issue2dev
+
+  https://github.com/Kewton/CommandMate/issues/1937 の **Phase 1 のうち R1・R4・R8 だけ**を実装してください。
+
+  ## 【最重要】これは Issue 全体ではありません。範囲を厳守してください
+
+  #1937 は epic 規模で、設計方針書 `docs/design/remote-qr-pairing-1937.md`（**PR #2030 で
+  develop にマージ済み。あなたの worktree に既にあります**）の §12 が Phase 1 を R1〜R12 に
+  割っています。今回あなたが担当するのは **R1・R4・R8 の 3 つだけ**です。
+
+  - **R2 / R3（Cloudflare / Tailscale の実 Provider 実装）は書かないでください。** stub のままにします。
+  - **R9（`commandmate remote` コマンド本体）は書かないでください。** 別 Issue です。
+    `src/cli/commands/remote.ts` を作らないこと。`src/cli/program.ts` にコマンドを登録しないこと。
+  - **R5・R6（ペアリングコード / login 受け口）は別ワーカーが同時に実装しています。**
+    `src/lib/security/**`・`src/app/api/remote/**`・`src/hooks/useFragmentLogin.ts`・
+    `src/app/login/page.tsx`・`locales/**` を**触らないでください**（scope にも入れていません）。
+
+  **設計方針書を必ず読んでから実装してください。** 特に §6（Provider 抽象）・§6.3（全消し禁止の
+  機械的保証）・§9.2（固定するテスト）・§11 の U-1。**設計方針書の決定が正**です。
+
+  ---
+
+  ## R1: Provider 抽象の型と registry
+
+  新規 `src/lib/remote/types.ts` と `src/lib/remote/provider-registry.ts`。
+  実装は **stub 2 本**（常に `available: false`）で、**選択規則とテストだけ先に確定させます。**
+
+  §6.1 の interface をそのまま使ってください:
+
+  ```ts
+  export interface RemoteHandle {
+    provider: RemoteProviderId;          // 'tailscale-serve' | 'cloudflare-quick'
+    url: string;
+    owned: {
+      pid: number | null;
+      revert: Record<string, string> | null;
+    };
+    preexisting: unknown;
+  }
+
+  export interface RemoteProvider {
+    readonly id: RemoteProviderId;
+    detect(): Promise<ProviderDetection>;   // { available, version?, ready, reason? }
+    start(opts: { port: number; signal: AbortSignal }): Promise<RemoteHandle>;
+    stop(handle: RemoteHandle): Promise<StopOutcome>;  // { reverted, skipped[], warnings[] }
+  }
+  ```
+
+  ### 設計上の要点（§6.1〜§6.3。守ること）
+  - `detect()` は **`available`（実行ファイルがある）と `ready`（使える状態にある）を分ける**。
+    Tailscale はインストール済みでもログインしていなければ Serve を張れないため。
+    Issue の Provider 選択ルール（Tailscale → cloudflared → 案内）が `ready` の判定でそのまま書けます。
+  - **Provider の選択は Provider の外**に置く（将来 `src/cli/commands/remote.ts` のオーケストレータが持つ）。
+    「Tailscale が駄目でも自動で公開 Tunnel へ切り替えない」は**選択の規則**であって Provider の性質では
+    ないからです。承認プロンプトを Provider の中に入れないでください。
+    今回は registry が「detect を回して候補を順序つきで返す」ところまでを提供し、
+    **最終選択と承認は呼び出し側に委ねる形**にしてください。
+  - `RemoteProvider` に **`reset()` / `cleanupAll()` の類のメソッドを置かないこと**（§6.3-1）。
+    `stop()` の入力は `RemoteHandle` **のみ**にし、「現在の Provider 設定を全部読んで消す」が
+    型の上で書けないようにします。
+  - `start()` は `preexisting` を**必ず埋めて返す**義務を interface が課す（§6.3-2）。
+    `stop()` は `owned` に在り、かつ `preexisting` に無いものだけを戻し、
+    両方に在るなら **skip して `StopOutcome.skipped` に積む**（＝人間に見えるようにする）。
+  - 状態ファイル `~/.commandmate/remote.json` の**場所と形は R9 の担当**です。
+    今回は `provider-registry` が状態ファイルを知らないこと（§6.2 の責務境界）だけ守ってください。
+
+  ### stub の書き方
+  `src/lib/remote/tailscale.ts` と `src/lib/remote/cloudflare.ts` を作り、
+  `detect()` が常に `{ available: false, ready: false, reason: 'not implemented (R2/R3)' }` を返す
+  形にしてください。`start()` は throw で構いません。**R2/R3 が後から中身だけ差し替えられる形**に
+  すること（registry 側のテストが stub に依存しすぎないように）。
+
+  ---
+
+  ## R4: 全消し禁止ガード（**陽性対照つき**）
+
+  `src/lib/remote/**` で `tailscale serve reset` / `cloudflared tunnel cleanup` に相当する
+  文字列を禁止する **ESLint ルールまたはガードテスト**を置いてください（§6.3-3）。
+
+  **陽性対照を必ず同じテストに入れてください** — 禁止語を 1 箇所に入れると赤くなることを、
+  そのテスト自身が確認する形にします。理由: このリポジトリでは過去に
+  「grep が 0 件 → 存在しない」と読んで 1 日に 3 回誤判定した実績があります。
+  **0 件は「存在しない」の証明にはならず、「検査が効いている」ことを別途示す必要があります。**
+  具体的には、禁止語を含む文字列をテスト内で合成してチェッカ関数に食わせ、**それが検出される**
+  ことを assert してください（実ファイルを汚さずに陽性対照が撃てる形にする）。
+
+  既存の同型テストとして `tests/unit/config/tmux-live-test-safety.test.ts` があります。参考にしてください。
+
+  ---
+
+  ## R8: ターミナル QR レンダラ（**U-1 の判定を含む**）
+
+  新規 `src/cli/utils/qr-terminal.ts`。URL を受け取って端末に表示できる文字列を返す関数。
+
+  §11 の **U-1 は未解決の論点で、あなたが実測して決める**ことになっています:
+
+  > `react-qr-code` は React 専用で CLI から使えない。推移依存に `qr.js@0.0.0` があるが
+  > **未保守の 0.0.0 を直接依存に昇格**するのは判断が要る。`qrcode` などの新規依存は
+  > CLI の起動時間とインストールサイズに効く。
+  > 候補: (a) `qr.js` を直接依存化、(b) `qrcode` を追加、(c) 自前エンコード。
+  > **判定軸は「バンドルサイズ」「`build:cli`（`tsconfig.cli.json`）で型が通るか」
+  > 「半角ブロック文字で 200 桁未満の端末に収まるか」**
+
+  3 軸で実測して決め、**選んだ理由と実測値を `dev-reports/issue/1937/u1-qr-dependency.md` に
+  記録してください。** 特に:
+  - `npm run build:cli` が通ること（`tsconfig.cli.json` のスコープに入ります）を実際に確認する。
+  - **幅の狭い端末での折返し**を含めてテストしてください（受入条件です）。
+    半角ブロック文字（`▀` `▄` 等）で 2 行を 1 行に畳む形が一般的です。
+    Tunnel の URL は長いので、実際に `https://` から始まる 60〜120 文字程度の URL で
+    QR の一辺が何文字になるかを実測し、80 桁端末に収まるかを判定してください。
+  - 新規依存を足す場合は `package.json` と `package-lock.json` の両方を commit に含めてください。
+
+  ---
+
+  ## 触ってはいけないもの（§9.1 の変更禁止リスト）
+
+  以下は `CM_BIND` の既定 `127.0.0.1` を壊さないための変更禁止リストです。**1 行も触らないでください**:
+
+  - `server.ts` の `const hostname = getEnvByKey('CM_BIND') || '127.0.0.1'`
+  - `src/cli/utils/env-setup.ts` の `ENV_DEFAULTS.CM_BIND` と `src/cli/commands/init.ts` の書き出し
+  - `src/middleware.ts` の検証ロジック
+  - `src/lib/security/auth.ts`（`verifyToken` / `storedTokenHash` / `expireAt`）
+  - `src/lib/ws-server.ts` の upgrade 認証
+  - `src/lib/security/env-sanitizer.ts` の `SENSITIVE_ENV_KEYS`
+  - `REVERSE_PROXY_WARNING` の内容と発火条件
+
+  ## 受入条件（今回の範囲ぶん）
+  - `RemoteProvider` / `RemoteHandle` / `ProviderDetection` / `StopOutcome` が §6.1 の形で定義され、
+    `reset()` / `cleanupAll()` に相当するメソッドが interface に**無い**ことがテストで固定されている。
+  - registry が `detect()` を回して Tailscale → Cloudflare の順で候補を返すことがテストで固定されている
+    （**自動フォールバックはしない**＝選択は呼び出し側、という責務境界がテストで表現されていること）。
+  - `stop()` が `preexisting` に在るものを skip して `StopOutcome.skipped` に積むことが、
+    stub を使ったテストで固定されている。
+  - 全消し禁止ガードが**陽性対照つき**で緑（禁止語を食わせると赤くなることを同テストが確認）。
+  - `qr-terminal.ts` が URL を QR 文字列に変換し、狭い端末での折返しがテストで固定されている。
+  - U-1 の判定根拠（3 軸の実測値）が `dev-reports/issue/1937/u1-qr-dependency.md` にある。
+  - `npm run build:cli` が通る。
+
+  ## 作業ルール（厳守）
+
+  - **`CHANGELOG.md` と `docs/module-reference.md` を編集しないでください**（scope 外です）。
+    代わりに次の 2 ファイルを書いてください。どちらも `dev-reports/` 配下なので commit には入りません。
+
+    - `dev-reports/changelog/issue-1937a.md` — `CHANGELOG.md` の `## [Unreleased]` にそのまま
+      貼れる **1 エントリ**（先頭は `- **<type>(<scope>): …** (#1937): …`）。どの節
+      （`### Added` / `### Changed` / `### Fixed`）に入るかを 1 行目にコメントで書く。
+      **形式は次の実例に合わせてください**（develop の `CHANGELOG.md` にある実エントリを丸ごと 1 本。
+      エントリは**ファイル中では 1 行**で、下で折り返して見えるのは表示上の都合です）:
+
+      ```markdown
+      <!-- ### Fixed -->
+      - **fix(cli): `send` 直後の `wait` が「まだ始まっていない」を完了と読む問題を修正** (#1975): `wait` が `sessionStatus==='ready'` を完了と判定する直前に、**「このインスタンスに最後に渡されたプロンプト」と「エージェント自身が最後に報告したターン終了（`lastStopEventAt`）」を突き合わせる**ゲートを追加。`send` 直後は最新の構造化イベントが直前ターンの `stop` のままなので #1839 の `adoptTurnStart()` が何も採用せず、`turnStartedAt === null` が「決着済み」と読まれてアイドル composer をそのまま完了にしていた（隔離サーバ実測 2026-08-22 / copilot 1.0.80: `send`→`wait` 5 回中 3 回が約 0.3 秒・`basis=scraper_ready`・成果物ゼロで exit 0）。保留は `PENDING_PROMPT_HOLD_MS`=60 秒で打ち切り、`--timeout` / `--stall-timeout` はそれより短ければ従来どおり優先される。
+      ```
+
+      - `- **` で始めること — 集計は `grep -cE '^- \*\*'` なので、外れるとエントリとして数えられません。
+      - `(#1937)` は要約の**外**（`**` を閉じた後）に置くこと — `（Issue #1937）` を要約の中に埋めると
+        機械的に取り出せません。
+      - `<type>` は CLAUDE.md のコミットメッセージ規約と同じ語彙
+        （`feat` / `fix` / `docs` / `refactor` / `test` / `chore` / `ci` / `style`）。
+      - 1 エントリ＝1 行（折らない）。本文がどれだけ長くても改行を入れません。
+
+    - `dev-reports/module-reference/issue-1937a.md` — `docs/module-reference.md` の表に足す注記を
+      **行キー（`| \`path\` |`）ごと**に列挙する。既存行への追記なら「どの行に何を足すか」を書く。
+      **既存行に足すときは `grep -n '^| \`<path>\`' docs/module-reference.md` を実行し、その出力
+      （行番号つきの行キー）を断片に書き写してから**書くこと。0 件だった行への追記を指示しない
+      （新しい行を足すなら「新規行」と明記する）。足すものが無ければ「追記なし」の 1 行でよい。実例:
+
+      ```markdown
+      ## 既存行への追記
+      - `src/lib/session/worktree-status-helper.ts` — 実在確認: `docs/module-reference.md:103`（行番号は確認時点のもの）
+        追記内容: 「private `getStatusCaptureLines()` を削除し `resolveCaptureSpec(cliToolId).statusLines` に置換（Issue #1933）」
+
+      ## 新規行
+      追記なし
+      ```
+
+    断片が無いとリリースノートと module-reference に載りません。**実装と同じ commit の時点で書くこと。**
+
+  - **PR を作らないでください。** PR 作成とマージはオーケストレーターが行います。
+  - **commit は 1 本にまとめてください**（`<type>(<scope>): <subject>` 形式）。
+  - Issue 本文を書き換えないでください。訂正が要る場合は commit メッセージか PR 用のメモに書いてください。
+  - 実装が終わったら最後に `IMPL_COMPLETED` とだけ出力してください。
+
+scope:
+  allow:
+    - "src/lib/remote/**"
+    - "src/cli/utils/qr-terminal.ts"
+    - "package.json"
+    - "package-lock.json"
+    - "tests/unit/lib/remote/**"
+    - "tests/unit/cli/utils/qr-terminal*"
+    - "tests/unit/config/**"
+    - "eslint.config.mjs"
+    - "eslint.config.js"
+    - "dev-reports/**"
+  deny: []
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true

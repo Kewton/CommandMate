@@ -1,0 +1,137 @@
+version: 1
+title: "Issue #1937 U-7/U-9: Edge の env スナップショットとモジュール分離を実機で確定する"
+goal: |
+  /uat
+
+  https://github.com/Kewton/CommandMate/issues/1937 の未解決論点 **U-7** と **U-9** を実測で確定します。
+  設計方針書 `docs/design/remote-qr-pairing-1937.md` §11。R1〜R11 は develop に着地済みです。
+
+  **公開 Tunnel を作りません。`commandmate remote`（= `up`）を実行しないでください。**
+  この 2 つは Next.js のランタイム挙動の確認であって、Tunnel も tailnet も必要ありません。
+
+  ## 成果物
+
+  **`docs/qa/1937-edge-env-probe.md`（追跡対象）** に記録してください。
+  `dev-reports/` は `.gitignore:59` で除外されており commit に入りません。
+
+  ---
+
+  ## U-7: Edge サンドボックスの env スナップショット（**決定 B の根拠**）
+
+  設計方針書 §11 の U-7:
+
+  > ソース（`buildEnvironmentVariablesFrom` / `moduleContexts`）からは「コピー＋キャッシュ」と読めるが、
+  > **production build の実機で 1 回確認していない**。
+  > 起動後に Node 側で `process.env.CM_AUTH_TOKEN_HASH` を書き換え、middleware の判定が変わらないことを
+  > 実機で 1 回確認する。**決定 B の根拠なので、ここが覆るなら §3 を書き直す**。
+
+  ### なぜこれが効くか
+
+  決定 B は「端末別認証を Phase 1 に入れない」でした。その根拠の一つが
+  「middleware（Edge ランタイム）は起動時の env スナップショットを見るので、
+  サーバ稼働中にトークンを差し替えられない＝端末ごとの credential を後付けできない」という理解です。
+
+  **もし middleware が `process.env` の変更を拾うなら、この前提は崩れます。**
+  その場合は設計方針書 §3 を書き直す必要があるので、**実測結果を正として率直に記録**してください。
+
+  ### 手順（例。実際の構成に合わせて調整可）
+
+  1. **隔離環境**で production build（`npm run build` + `npm run build:server`）を作る。
+     `CM_PORT` は 3000 以外、`CM_DB_PATH` は使い捨て、`HOME` も隔離
+     （`~/.commandmate/.env` が明示 env を上書きするため）
+  2. `CM_AUTH_TOKEN_HASH=<hash-A>` を与えて起動する
+  3. hash-A に対応するトークンで認証が通ることを確認
+  4. **サーバプロセスの Node 側で `process.env.CM_AUTH_TOKEN_HASH` を `<hash-B>` に書き換える**
+     （書き換え手段は実装依存。到達できないなら「到達できなかった」と記録してよい）
+  5. **middleware の判定が変わるか**を確認する:
+     - hash-A のトークンが**まだ通る** → env はスナップショットされている（**設計の前提どおり**）
+     - hash-B のトークンが通るようになる → **前提が崩れている。§3 の書き直しが必要**と明記
+
+  ---
+
+  ## U-9: `server.ts` と Next route handler のモジュール分離
+
+  設計方針書 §11 の U-9:
+
+  > §7.2 は「`server.ts` 側のモジュールレベル変数は route handler から見えない」
+  > （`tsconfig.server.json` でビルドされる側と Next の bundle は別インスタンス）という前提で、
+  > ファイル方式を選んでいる。**ソースの構成からはそう読めるが実測していない**。
+
+  route handler から `server.ts` 由来のモジュール状態が見えるかを 1 回確認してください。
+
+  **どちらの結果でも設計変更は不要です** — 見えるならファイル方式のままでも損は無く
+  （露出窓が縮む利点は残る）、見えないなら前提どおりです。
+  **「確認した」という事実を残すことが目的**なので、結果を率直に書いてください。
+
+  ---
+
+  ## 【厳守】禁止事項
+
+  - **本番インスタンス（ポート 3000）を停止しない・DB に書かない・公開しない**
+    （本番は worktree 66 本・稼働 tmux 25 セッションを抱えています）
+  - `commandmate remote` / `tailscale` / `cloudflared` を実行しない（この作業に不要です）
+  - `tmux kill-server` を実行しない。他の `mcbd-*` セッションを止めない
+  - **本番の `.next` / `dist` を上書きしない**。build は隔離した作業ディレクトリで行うこと
+    （稼働サーバの足元でビルドすると画面が壊れます。過去に 3 回発生しています）
+
+  ## 受入条件
+
+  - `docs/qa/1937-edge-env-probe.md` に U-7 の**実測手順と結果**がある
+  - U-7 の結論が「スナップショットされている / されていない / 確認できなかった」のいずれかで明示され、
+    **前提が崩れている場合はその旨と §3 への影響**が書かれている
+  - U-9 の確認結果がある
+  - 終了時に本番 3000 が HTTP 200 を返し、稼働 tmux セッション数が開始時から減っていない
+
+  ## 作業ルール（厳守）
+
+  - **`CHANGELOG.md` と `docs/module-reference.md` を編集しないでください**（scope 外です）。
+    代わりに次の 2 ファイルを書いてください。どちらも `dev-reports/` 配下なので commit には入りません。
+
+    - `dev-reports/changelog/issue-1937u7.md` — `CHANGELOG.md` の `## [Unreleased]` にそのまま
+      貼れる **1 エントリ**（先頭は `- **<type>(<scope>): …** (#1937): …`）。どの節
+      （`### Added` / `### Changed` / `### Fixed`）に入るかを 1 行目にコメントで書く。
+      **形式は次の実例に合わせてください**（develop の `CHANGELOG.md` にある実エントリを丸ごと 1 本。
+      エントリは**ファイル中では 1 行**で、下で折り返して見えるのは表示上の都合です）:
+
+      ```markdown
+      <!-- ### Fixed -->
+      - **fix(cli): `send` 直後の `wait` が「まだ始まっていない」を完了と読む問題を修正** (#1975): `wait` が `sessionStatus==='ready'` を完了と判定する直前に、**「このインスタンスに最後に渡されたプロンプト」と「エージェント自身が最後に報告したターン終了（`lastStopEventAt`）」を突き合わせる**ゲートを追加。`send` 直後は最新の構造化イベントが直前ターンの `stop` のままなので #1839 の `adoptTurnStart()` が何も採用せず、`turnStartedAt === null` が「決着済み」と読まれてアイドル composer をそのまま完了にしていた（隔離サーバ実測 2026-08-22 / copilot 1.0.80: `send`→`wait` 5 回中 3 回が約 0.3 秒・`basis=scraper_ready`・成果物ゼロで exit 0）。保留は `PENDING_PROMPT_HOLD_MS`=60 秒で打ち切り、`--timeout` / `--stall-timeout` はそれより短ければ従来どおり優先される。
+      ```
+
+      - `- **` で始めること — 集計は `grep -cE '^- \*\*'` なので、外れるとエントリとして数えられません。
+      - `(#1937)` は要約の**外**（`**` を閉じた後）に置くこと — `（Issue #1937）` を要約の中に埋めると
+        機械的に取り出せません。
+      - `<type>` は CLAUDE.md のコミットメッセージ規約と同じ語彙
+        （`feat` / `fix` / `docs` / `refactor` / `test` / `chore` / `ci` / `style`）。
+      - 1 エントリ＝1 行（折らない）。本文がどれだけ長くても改行を入れません。
+
+    - `dev-reports/module-reference/issue-1937u7.md` — `docs/module-reference.md` の表に足す注記を
+      **行キー（`| \`path\` |`）ごと**に列挙する。既存行への追記なら「どの行に何を足すか」を書く。
+      **既存行に足すときは `grep -n '^| \`<path>\`' docs/module-reference.md` を実行し、その出力
+      （行番号つきの行キー）を断片に書き写してから**書くこと。0 件だった行への追記を指示しない
+      （新しい行を足すなら「新規行」と明記する）。足すものが無ければ「追記なし」の 1 行でよい。実例:
+
+      ```markdown
+      ## 既存行への追記
+      - `src/lib/session/worktree-status-helper.ts` — 実在確認: `docs/module-reference.md:103`（行番号は確認時点のもの）
+        追記内容: 「private `getStatusCaptureLines()` を削除し `resolveCaptureSpec(cliToolId).statusLines` に置換（Issue #1933）」
+
+      ## 新規行
+      追記なし
+      ```
+
+    断片が無いとリリースノートと module-reference に載りません。**実装と同じ commit の時点で書くこと。**
+
+  - **PR を作らないでください。** PR 作成とマージはオーケストレーターが行います。
+  - **commit は 1 本にまとめてください**（`<type>(<scope>): <subject>` 形式）。
+  - Issue 本文を書き換えないでください。訂正が要る場合は commit メッセージか PR 用のメモに書いてください。
+  - 実装が終わったら最後に `IMPL_COMPLETED` とだけ出力してください。
+
+scope:
+  allow:
+    - "docs/qa/**"
+    - "dev-reports/**"
+  deny: []
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true

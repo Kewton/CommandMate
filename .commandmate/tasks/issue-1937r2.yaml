@@ -1,0 +1,147 @@
+version: 1
+title: "Issue #1937 R2: Cloudflare Quick Tunnel Provider を実装し U-3 を実測で確定する"
+goal: |
+  /pm-auto-issue2dev
+
+  https://github.com/Kewton/CommandMate/issues/1937 の **Phase 1 のうち R2 だけ**を実装してください。
+
+  ## 【最重要】範囲は R2 のみ
+
+  設計方針書 `docs/design/remote-qr-pairing-1937.md`（develop にあります）の §12 が Phase 1 を
+  R1〜R12 に割っています。R1・R4・R5・R6・R8 は**着地済み**（PR #2134 / #2135）。
+  今回あなたが担当するのは **R2 だけ**です。
+
+  - **`src/lib/remote/types.ts` を変更しないでください。** R1 で確定済みの interface です。
+    `RemoteProvider` / `RemoteHandle` / `ProviderDetection` / `StopOutcome` と `planStop()` は
+    そのまま使います。`tests/unit/lib/remote/provider-contract.test.ts` が member 一覧を
+    完全一致で固定しているので、interface を触ると赤くなります。
+  - **`src/lib/remote/tailscale.ts` を触らないでください。** R3 は U-2（実機実測）が前提で、
+    この開発機に tailscale が無いため**今回はスコープ外**です。stub のまま残します。
+  - **R9（`commandmate remote` 本体）は別ワーカーが同時に実装しています。** `src/cli/**` を
+    触らないでください。**承認プロンプトは R9 の責務**であって Provider の中には置きません（§6.2）。
+  - **R7 も別ワーカーが同時に実装中です。** `src/app/login/**`・`locales/**` を触らないでください。
+
+  ## 実装内容（§6.4 の Cloudflare 表がそのまま仕様です）
+
+  `src/lib/remote/cloudflare.ts` の stub（現在 `available:false` を返す）を実装で差し替えます。
+
+  | 局面 | 設計 |
+  |---|---|
+  | detect | `cloudflared --version`。`PreflightChecker.checkDependency()` と同じ `spawnSync(cmd, [versionArg], {timeout:5000})`。**shell を挟まない**（`MF-SEC-1`）。Quick Tunnel は常に ready |
+  | snapshot | **不要**。Quick Tunnel は永続設定を作らないので `preexisting: null` |
+  | start | `cloudflared tunnel --url http://127.0.0.1:<port> --no-autoupdate --metrics 127.0.0.1:<空きポート> --pidfile <state dir>/cloudflared.pid` |
+  | URL | **第 1 候補 = `--metrics` のローカル HTTP `/quicktunnel`**、第 2 候補 = stderr バナーの scraping |
+  | stop | 自分が起動した子プロセス（`owned.pid`）に SIGTERM。プロセスが死ねば URL は失効する |
+
+  ### 【厳守】`--metrics` は必ず `127.0.0.1:` を明示する
+
+  help の記述によれば metrics のアドレスは**仮想環境下で全インタフェースに bind することがあり得ます**。
+  CommandMate 本体の `CM_BIND` 既定 `127.0.0.1` を守っているのに Provider の metrics で穴を開けては
+  本末転倒です。**アップストリームも常に `127.0.0.1`** で、`0.0.0.0` / `localhost` を明示的に禁止する
+  テストを置いてください（§9.2）。
+
+  ### 【厳守】全消しコマンドを書かない
+
+  `cloudflared tunnel cleanup` に相当する文字列は
+  `tests/unit/config/remote-destructive-command-guard.test.ts`（R4 で着地済み）が禁止しています。
+  `stop()` の入力は `RemoteHandle` だけで、`owned.pid` 以外に触らないでください。
+
+  ---
+
+  ## U-3 の実測（**ユーザーの承認取得済み。実施してください**）
+
+  設計方針書 §11 の U-3 は未解決論点で、**あなたが実測して確定します**:
+
+  > バイナリに `/quicktunnel` の文字列があることは確認したが、**それが `--metrics` のサーバに
+  > 生えている HTTP ルートであることまでは未確認**。stderr バナーは文言変更で腐る。
+
+  この開発機には **cloudflared 2025.4.0** が入っています（`/opt/homebrew/bin/cloudflared`）。
+
+  ### 実測手順（安全側の制約つき）
+
+  1. **アップストリームは CommandMate 本番の 3000 番を使わないでください。** 実測用に
+     ローカルの使い捨て HTTP サーバ（例: `node -e` で 200 を返すだけのもの）を**空きポート**に立て、
+     そこへ向けてください。**本番サーバを公開 URL に晒さないこと。**
+  2. `cloudflared tunnel --url http://127.0.0.1:<使い捨てポート> --no-autoupdate --metrics 127.0.0.1:<空きポート2> --pidfile <tmp>/cloudflared.pid` を起動。
+  3. `GET http://127.0.0.1:<空きポート2>/quicktunnel` の**応答形（ステータス・Content-Type・ボディ）を採取**。
+     `/ready` `/healthcheck` も併せて見て構いません。
+  4. stderr バナー（`Your quick Tunnel has been created! Visit it at ...`）も採取し、
+     **第 2 候補のパーサをその実物に対して検証**してください。
+  5. **採取したらただちに SIGTERM で落とし**、URL が失効することを確認してください
+     （公開 URL を長時間放置しない）。
+  6. 使い捨てサーバも落として後片付けしてください。
+
+  ### 記録
+
+  実測結果を `dev-reports/issue/1937/u3-quicktunnel-url.md` に記録してください。
+  最低限: `/quicktunnel` が実在したか / 応答形 / どちらを第 1 候補にしたか / バナー文言の実物 /
+  SIGTERM 後に URL が失効したことの確認。**取れなかった場合は第 2 候補へ落とし、その旨を記録**してください
+  （設計方針書がそう指示しています）。
+
+  ## 受入条件
+
+  - `detect()` が `cloudflared` の有無を `spawnSync`（shell 無し）で判定し、`available` / `ready` を返す。
+  - `start()` が `preexisting: null` と `owned.pid` を持つ `RemoteHandle` を返す。
+  - **`--metrics` が `127.0.0.1:` で始まる**ことと、**アップストリームが常に `127.0.0.1`** であることが、
+    `start()` に渡るコマンド引数の assert でテストに固定されている（`0.0.0.0` / `localhost` を明示的に禁止）。
+  - `stop()` が `owned.pid` への SIGTERM だけを行い、全消しコマンドを撃たない。
+  - U-3 の実測結果が `dev-reports/issue/1937/u3-quicktunnel-url.md` にある。
+  - 第 1 候補が失敗したとき第 2 候補（stderr）へ落ちることがテストで固定されている。
+  - **既存の R4 ガードテストが緑のまま**（禁止語を入れていないこと）。
+
+  ## 作業ルール（厳守）
+
+  - **`CHANGELOG.md` と `docs/module-reference.md` を編集しないでください**（scope 外です）。
+    代わりに次の 2 ファイルを書いてください。どちらも `dev-reports/` 配下なので commit には入りません。
+
+    - `dev-reports/changelog/issue-1937r2.md` — `CHANGELOG.md` の `## [Unreleased]` にそのまま
+      貼れる **1 エントリ**（先頭は `- **<type>(<scope>): …** (#1937): …`）。どの節
+      （`### Added` / `### Changed` / `### Fixed`）に入るかを 1 行目にコメントで書く。
+      **形式は次の実例に合わせてください**（develop の `CHANGELOG.md` にある実エントリを丸ごと 1 本。
+      エントリは**ファイル中では 1 行**で、下で折り返して見えるのは表示上の都合です）:
+
+      ```markdown
+      <!-- ### Fixed -->
+      - **fix(cli): `send` 直後の `wait` が「まだ始まっていない」を完了と読む問題を修正** (#1975): `wait` が `sessionStatus==='ready'` を完了と判定する直前に、**「このインスタンスに最後に渡されたプロンプト」と「エージェント自身が最後に報告したターン終了（`lastStopEventAt`）」を突き合わせる**ゲートを追加。`send` 直後は最新の構造化イベントが直前ターンの `stop` のままなので #1839 の `adoptTurnStart()` が何も採用せず、`turnStartedAt === null` が「決着済み」と読まれてアイドル composer をそのまま完了にしていた（隔離サーバ実測 2026-08-22 / copilot 1.0.80: `send`→`wait` 5 回中 3 回が約 0.3 秒・`basis=scraper_ready`・成果物ゼロで exit 0）。保留は `PENDING_PROMPT_HOLD_MS`=60 秒で打ち切り、`--timeout` / `--stall-timeout` はそれより短ければ従来どおり優先される。
+      ```
+
+      - `- **` で始めること — 集計は `grep -cE '^- \*\*'` なので、外れるとエントリとして数えられません。
+      - `(#1937)` は要約の**外**（`**` を閉じた後）に置くこと — `（Issue #1937）` を要約の中に埋めると
+        機械的に取り出せません。
+      - `<type>` は CLAUDE.md のコミットメッセージ規約と同じ語彙
+        （`feat` / `fix` / `docs` / `refactor` / `test` / `chore` / `ci` / `style`）。
+      - 1 エントリ＝1 行（折らない）。本文がどれだけ長くても改行を入れません。
+
+    - `dev-reports/module-reference/issue-1937r2.md` — `docs/module-reference.md` の表に足す注記を
+      **行キー（`| \`path\` |`）ごと**に列挙する。既存行への追記なら「どの行に何を足すか」を書く。
+      **既存行に足すときは `grep -n '^| \`<path>\`' docs/module-reference.md` を実行し、その出力
+      （行番号つきの行キー）を断片に書き写してから**書くこと。0 件だった行への追記を指示しない
+      （新しい行を足すなら「新規行」と明記する）。足すものが無ければ「追記なし」の 1 行でよい。実例:
+
+      ```markdown
+      ## 既存行への追記
+      - `src/lib/session/worktree-status-helper.ts` — 実在確認: `docs/module-reference.md:103`（行番号は確認時点のもの）
+        追記内容: 「private `getStatusCaptureLines()` を削除し `resolveCaptureSpec(cliToolId).statusLines` に置換（Issue #1933）」
+
+      ## 新規行
+      追記なし
+      ```
+
+    断片が無いとリリースノートと module-reference に載りません。**実装と同じ commit の時点で書くこと。**
+
+  - **PR を作らないでください。** PR 作成とマージはオーケストレーターが行います。
+  - **commit は 1 本にまとめてください**（`<type>(<scope>): <subject>` 形式）。
+  - Issue 本文を書き換えないでください。訂正が要る場合は commit メッセージか PR 用のメモに書いてください。
+  - 実装が終わったら最後に `IMPL_COMPLETED` とだけ出力してください。
+
+scope:
+  allow:
+    - "src/lib/remote/cloudflare.ts"
+    - "src/lib/remote/index.ts"
+    - "tests/unit/lib/remote/**"
+    - "tests/unit/config/**"
+    - "dev-reports/**"
+  deny: []
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true

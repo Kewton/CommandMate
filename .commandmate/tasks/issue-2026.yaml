@@ -1,0 +1,139 @@
+version: 1
+title: "Issue #2026: カタログ pin を attestation から導出する"
+goal: |
+  https://github.com/Kewton/CommandMate/issues/2026 を実装してください。Issue 本文を先に読んでください。
+
+  ## 解きたい問題
+
+  `tests/unit/lib/standard-commands.test.ts` のカタログ pin は「旧集合の記述」を数値と配列で直書き
+  しています（`toBe(244)` / `toBe(56)` / `toBe(102)` / `toBe(18)` / `toBe(68)` / `toBe(13)`、および
+  #1503 の `/agents` は `['claude','codex','opencode']` という集合 pin）。
+
+  そのため `catalog:refresh` が **正しい追加提案**（例: codex 0.149.0 で実際に増えた `/agents` `/cd`
+  `/pwd`）を出したとき、適用すると pin が赤くなります。赤を消す唯一の手段が「人が数字を手で書き換える」
+  で、その根拠は commit message にしか残りません。次のリリースで同じ調査を最初からやり直すことになります。
+
+  `src/config/slash-commands-exclusions.json`（#1704）はこの穴を埋めません。あれは「載せない」判断しか
+  記録できず、「実在する新コマンドが来たので pin を動かすべき」を表現する場所がありません。
+
+  ## 提案（これは**推奨**であって命令ではありません）
+
+  **attestation レコード**を導入し、pin が数値を直書きする代わりにそれを読む形にします。
+
+  > 「版 V で、source S は tool T について **この集合** を列挙した」
+
+  ### pin が満たすべき 4 性質（これが設計の合否そのものです）
+
+  1. **attestation を更新せずカタログだけ増やす → 赤**（無審査の `--write` を止める。これが現行 pin の
+     唯一かつ本質的な役目で、`standard-commands.test.ts` 自身が
+     `"this number only pins that a refresh was reviewed rather than applied blind"` と書いています）
+  2. **カタログと attestation を両方更新 → 緑**（正しい追加が通る。今できないのはここ）
+  3. **attestation に無い名前がカタログに入る → 赤**（docs スタブ由来の幻 `/agents` 再侵入＝#1503 の原因）
+  4. **attestation にある名前がカタログから消える → 赤**（実在コマンドの取りこぼし）
+
+  つまり pin が守る不変条件は「カタログ ≡ attestation（exclusions を除く）」であり、**attestation の
+  更新という行為そのものが審査**になります。人がソースを読んで版と集合を書く手間は残り、
+  「数字だけ書き換えて根拠は commit message」という状態が消えます。
+
+  ### 絶対にやらないこと
+
+  - **pin を緩めること。** #2024 で明示的に却下済みです（判断の全文は
+    `src/config/slash-commands-exclusions.json` の `$comment` にあります。着手前に必ず読んでください）。
+  - **件数をカタログから導出すること。** 恒真になり、審査そのものが消えます。
+  - **#1503 の `/agents` 集合 pin から「増えてはいけない」半分を落とすこと。**
+
+  ## 設計上、必ず判断して結論を書いてほしい 3 点
+
+  1. **`verifiedAgainst` との責務整理。** 現行の `catalog.verifiedAgainst`（`src/lib/standard-commands.ts:55`
+     で `CATALOG_VERIFIED_AGAINST` として export）は「CLI の /help をカタログ内容と照合した版」です。
+     attestation は「その版で列挙された集合」を持ちます。**二重管理にしないこと** — 片方が他方から
+     導出できるなら、導出できる側は置かずに導出してください。どちらをどう残したかを書いてください。
+  2. **`exclusions.json` との関係。** exclusions は「ソースに在るが載せない」、attestation は
+     「ソースに在った集合そのもの」です。両方あると「attestation にあるが exclusions で落としたので
+     カタログに無い」がカタログ不在の**正当な理由**になります。この関係をテストで固定してください
+     （さもないと性質 4 が exclusions 済みコマンドで誤爆します）。
+  3. **レポート面をどこまでやるか。** 「attestation が陳腐化していることが `catalog:refresh --check` に
+     出る」までを必須とし、`check-report.ts` / `scripts/catalog-drift-report.ts` /
+     `.github/workflows/catalog-drift.yml` の本文整形まで踏み込むかは**あなたが決めて構いません**。
+     見送った範囲があれば commit message に「何を見送ったか・なぜか」を明記してください。
+
+  ## 先行実装を読んでから設計してください
+
+  `src/lib/slash-command-reconcile/exclusions.ts`（158 行）が**同型の先行実装**です。三分割
+  （intent はデータ `src/config/*.json` / enforcement は engine / verification はテスト）、不正行は
+  skip せず throw、判断は `$comment` に散文で置く、という形をそのまま踏襲できるか検討してください。
+
+  ## この Issue 本文は私（オーケストレーター）が書いたもので、誤りを含みます
+
+  - **本文の主張は必ずコードで裏取りし、食い違ったら実測を正としてください。** 直近 5 件の委任で
+    毎回、私の Issue 本文の前提が実測と食い違いました（#2024 では件数の推定値が実測とずれ、
+    「`description-conflict` で退行を検知できる」という私の検証項目が engine の early-continue により
+    成立しないことが判明しました）。
+  - **食い違いを見つけたら Issue 本文へ書き戻さないでください**（本文は私が管理します）。
+    commit message に「## 下調べとの食い違い（実測を正とした点）」の節を作ってそこへ書いてください。
+  - **attestation という形自体が誤りだと判断したら、実装せずに理由と代案を書いて構いません。**
+    ただし「pin を緩める」は代案として認めません。実装しない判断をする場合も、
+    上記 4 性質を満たす別の形を提示してください。
+  - **対になる経路も点検してください。** カタログを読む側は `standard-commands.ts` だけではありません
+    （`slash-command-catalog.ts` の staleness 判定が `CATALOG_VERIFIED_AGAINST` を読んでいます）。
+    attestation を足すことで壊れる／整合が要る読み手を**網羅的に洗ってから**設計してください。
+
+  ## 作業ルール（厳守）
+
+  - **単一 commit にまとめてください。** 追加修正が必要なら新しい commit を積まず amend してください。
+  - **PR は作らないでください。** PR 作成とマージはオーケストレーターが行います。
+  - **`CHANGELOG.md` と `docs/module-reference.md` を編集しないでください**（scope 外です）。
+    代わりに次の 2 ファイルを書いてください。どちらも `dev-reports/` 配下なので commit には入りません。
+    - `dev-reports/changelog/issue-2026.md` — `CHANGELOG.md` の `## [Unreleased]` にそのまま貼れる
+      **1 エントリ**。どの節（`### Added` / `### Changed` / `### Fixed`）に入るかを 1 行目にコメントで
+      書いてください。**形式は次の実例に合わせてください**（develop の実エントリ。**ファイル中では
+      1 行**で、下で折り返して見えるのは表示上の都合です）:
+
+      ```markdown
+      <!-- ### Fixed -->
+      - **fix(cli): `send` 直後の `wait` が「まだ始まっていない」を完了と読む問題を修正** (#1975): `wait` が `sessionStatus==='ready'` を完了と判定する直前に、**「このインスタンスに最後に渡されたプロンプト」と「エージェント自身が最後に報告したターン終了（`lastStopEventAt`）」を突き合わせる**ゲートを追加。`send` 直後は最新の構造化イベントが直前ターンの `stop` のままなので #1839 の `adoptTurnStart()` が何も採用せず、`turnStartedAt === null` が「決着済み」と読まれてアイドル composer をそのまま完了にしていた（隔離サーバ実測 2026-08-22 / copilot 1.0.80: `send`→`wait` 5 回中 3 回が約 0.3 秒・`basis=scraper_ready`・成果物ゼロで exit 0）。保留は `PENDING_PROMPT_HOLD_MS`=60 秒で打ち切り（hooks は全経路 fail-open なので `Stop` の取りこぼしで `wait` が返らなくなってはいけない）。完了行の `basis=` は、エージェントが最新プロンプトの終了を報告していれば `hook_stop` になる。
+      ```
+
+      - `- **` で始めること — 集計は `grep -cE '^- \*\*'` なので、外れるとエントリとして数えられません。
+      - `(#2026)` は要約の**外**（`**` を閉じた後）に置くこと。
+      - `<type>` は CLAUDE.md の規約語彙（`feat` / `fix` / `docs` / `refactor` / `test` / `chore` / `ci` / `style`）。
+      - 1 エントリ＝1 行（折らない）。
+    - `dev-reports/module-reference/issue-2026.md` — `docs/module-reference.md` の表に足す注記を
+      **行キー（`| \`path\` |`）ごと**に列挙してください。既存行への追記なら、
+      **`grep -n '^| \`<path>\`' docs/module-reference.md` を実行し、その出力（行番号つきの行キー）を
+      断片に書き写してから**書いてください。0 件だった行への追記を指示しないでください
+      （新しい行を足すなら「新規行」と明記）。実例:
+
+      ```markdown
+      ## 既存行への追記
+      - `src/lib/session/worktree-status-helper.ts` — 実在確認: `docs/module-reference.md:103`
+        追記内容: 「private `getStatusCaptureLines()` を削除し `resolveCaptureSpec(cliToolId).statusLines` に置換（Issue #1933）」
+
+      ## 新規行
+      追記なし
+      ```
+  - **変異注入で空振り緑を反証してください。** 上記 4 性質それぞれについて、変異を 1 つずつ入れて
+    対象テストのみ実行し、赤（性質 2 は緑）になることを確認して元に戻してください。結果を
+    commit message に表で書いてください。**「テストが通った」だけでは不十分です** — pin が
+    無審査 refresh を止められることを実際に示してください。
+  - 全宣言ゲート（11 本）を通してください。
+scope:
+  allow:
+    - "src/config/**"
+    - "src/lib/slash-command-reconcile/**"
+    - "src/lib/standard-commands.ts"
+    - "src/lib/slash-command-catalog.ts"
+    - "src/types/**"
+    - "scripts/**"
+    - "tests/unit/**"
+    - "tests/integration/**"
+    - ".github/workflows/catalog-drift.yml"
+    - "dev-reports/changelog/**"
+    - "dev-reports/module-reference/**"
+    - "docs/**"
+  deny: []
+verify:
+  gates: [token-discipline, control-chars, claudemd-size, route-exports, build-cli, build-server, lint, build, typecheck, integration, unit]
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true
