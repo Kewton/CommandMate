@@ -15,9 +15,26 @@
  * succeeds exits 0 even when it finds nothing.
  */
 
+import { resolve as resolvePath } from 'path';
 import { Command } from 'commander';
 import { ExitCode } from '../types';
-import type { VerifyOptions, VerifyHistoryOptions, VerifyShowOptions } from '../types';
+import type {
+  VerifyOptions,
+  VerifyHistoryOptions,
+  VerifyInitOptions,
+  VerifyShowOptions,
+} from '../types';
+// Relative, NOT `@/lib/...`: tsconfig.cli.json resets `paths` to {}, so an alias
+// import here breaks `npm run build:cli`. The drafter reads only fs/path/yaml,
+// which is what lets the CLI and the API route share one implementation of it
+// instead of each growing its own scanner (Issue #2061).
+import {
+  describeSource,
+  planVerifyConfigDraft,
+  writeVerifyConfigDraft,
+  type DraftWriteResult,
+  type VerifyDraft,
+} from '../../lib/verification/verify-draft';
 import type {
   VerificationGateResultView,
   VerificationRunHistoryResponse,
@@ -231,6 +248,7 @@ export function createVerifyCommand(): Command {
       }
     });
 
+  addInitCommand(cmd);
   addHistoryCommand(cmd);
   addShowCommand(cmd);
   return cmd;
@@ -386,4 +404,124 @@ function addShowCommand(parent: Command): void {
         handleCommandError(error);
       }
     });
+}
+
+/**
+ * `commandmate verify init [--cwd <path>] [--dry-run] [--json]`
+ *
+ * Drafts `.commandmate/verify.yaml` from the repository's own CI definitions
+ * (Issue #2061). Local and server-free on purpose: this is the command that
+ * runs *before* a repository has anything to verify, and requiring
+ * `commandmate start` first would put the bootstrap behind the thing it
+ * bootstraps. Every other `verify` subcommand talks to the API because it reads
+ * or writes run rows; this one only reads files.
+ *
+ * Never overwrites. An existing config is the repository's own judgement of
+ * what passing means — usually with the reasoning for each gate beside it — so
+ * it exits 2 and names the file rather than offering a `--force`.
+ */
+function addInitCommand(parent: Command): void {
+  parent
+    .command('init')
+    .description(
+      'Draft .commandmate/verify.yaml from this repository\'s CI definitions (never overwrites)'
+    )
+    .option('--cwd <path>', 'Repository to draft for (default: the current directory)')
+    .option('--dry-run', 'Print the proposal on stdout and write nothing')
+    .option('--json', 'Print the draft as JSON on stdout')
+    .action((options: VerifyInitOptions, command: Command) => {
+      try {
+        const json = inheritedFlag<boolean>(options.json, command, 'json');
+        const repoPath = resolvePath(options.cwd ?? process.cwd());
+
+        // `--dry-run` must not create the file even by accident, so it takes the
+        // read-only path rather than writing and rolling back.
+        const result: DraftWriteResult = options.dryRun
+          ? planVerifyConfigDraft(repoPath)
+          : writeVerifyConfigDraft(repoPath);
+
+        if (json) {
+          console.log(
+            JSON.stringify(
+              {
+                created: result.created,
+                path: result.relativePath,
+                refusedBecause: result.refusedBecause ?? null,
+                gates: result.draft.gates.map((gate) => ({
+                  id: gate.id,
+                  command: gate.command,
+                  timeoutSec: gate.timeoutSec,
+                  source: describeSource(gate.source),
+                })),
+                excluded: result.draft.excluded.map((item) => ({
+                  command: item.command,
+                  reason: item.reason,
+                  source: describeSource(item.source),
+                })),
+                scanned: result.draft.scanned,
+              },
+              null,
+              2
+            )
+          );
+        }
+
+        if (result.refusedBecause === 'exists') {
+          if (!json) {
+            console.error(
+              `Error: ${result.relativePath} already exists. Verification gates are never ` +
+                'overwritten — edit that file, or delete it first.'
+            );
+          }
+          process.exit(ExitCode.CONFIG_ERROR);
+          return;
+        }
+        if (result.refusedBecause === 'no-gates') {
+          if (!json) {
+            console.error(
+              'Error: no verification gates could be drafted. Nothing in ' +
+                `${result.draft.scanned.join(', ') || '.github/workflows/, package.json'} ` +
+                'was usable as a gate; write the file by hand ' +
+                '(docs/design/verification-config.md).'
+            );
+          }
+          process.exit(ExitCode.CONFIG_ERROR);
+          return;
+        }
+
+        if (!json) printDraft(result.created, result.relativePath, result.yaml, result.draft);
+        process.exit(ExitCode.SUCCESS);
+      } catch (error) {
+        handleCommandError(error);
+      }
+    });
+}
+
+/** Human report: what was drafted, from where, and what was refused. */
+function printDraft(created: boolean, relativePath: string, yaml: string, draft: VerifyDraft): void {
+  if (created) {
+    console.log(`Wrote ${relativePath} with ${draft.gates.length} gate(s).`);
+  } else {
+    console.log(`Proposed ${relativePath} (--dry-run; nothing was written):`);
+    console.log('');
+    console.log(yaml.trimEnd());
+    console.log('');
+  }
+
+  console.log(`Scanned: ${draft.scanned.join(', ') || '(nothing)'}`);
+  for (const gate of draft.gates) {
+    console.log(`  ${gate.id}  ${gate.command}  <- ${describeSource(gate.source)}`);
+  }
+  if (draft.excluded.length > 0) {
+    // On stderr: the refusals are the part a reader has to audit, and keeping
+    // them off stdout leaves `--dry-run` output pipeable into the file itself.
+    console.error(`Not drafted as gates (${draft.excluded.length}):`);
+    for (const item of draft.excluded) {
+      console.error(`  [${item.reason}] ${item.command.split('\n')[0]}`);
+    }
+  }
+  if (created) {
+    console.log('');
+    console.log('Review it, then run: commandmate verify <worktree-id>');
+  }
 }

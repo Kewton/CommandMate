@@ -13,9 +13,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act, waitFor } from '@testing-library/react';
 import {
+  resolveVerificationPhase,
   useWorktreeVerification,
   VERIFICATION_IDLE_REFRESH_MS,
 } from '@/hooks/useWorktreeVerification';
+import type { VerifyConfigResponse } from '@/lib/api/verification-api';
 
 const mockFetch = vi.fn();
 global.fetch = mockFetch as unknown as typeof fetch;
@@ -26,17 +28,48 @@ interface Fixture {
   run: unknown | null;
   /** Status/body for POST /verify. */
   verify: { status: number; body: unknown };
+  /** Status/body for GET /verify/config. */
+  config: { status: number; body: unknown };
+  /** Status/body for POST /verify/config (the CI drafter, Issue #2061). */
+  draft: { status: number; body: unknown };
 }
+
+const CONFIG_ABSENT: VerifyConfigResponse = {
+  exists: false,
+  path: '.commandmate/verify.yaml',
+  gates: [],
+  options: null,
+  plannedGateIds: [],
+  error: null,
+};
+
+const CONFIG_PRESENT: VerifyConfigResponse = {
+  ...CONFIG_ABSENT,
+  exists: true,
+  gates: [
+    {
+      id: 'lint',
+      command: 'npm run lint',
+      timeoutSec: 900,
+      mutex: null,
+      retryOnFail: null,
+      flakyIsPass: null,
+    },
+  ],
+  plannedGateIds: ['work-evidence', 'scope', 'lint'],
+};
 
 const fixture: Fixture = {
   tasks: [],
   runs: [],
   run: null,
   verify: { status: 202, body: { runId: 99 } },
+  config: { status: 200, body: CONFIG_ABSENT },
+  draft: { status: 201, body: { created: true, path: '.commandmate/verify.yaml', gates: [], excluded: [], scanned: [] } },
 };
 
 /** Counts, per endpoint kind, so throttling can be asserted without timers. */
-const calls = { tasks: 0, runs: 0, run: 0, verify: 0 };
+const calls = { tasks: 0, runs: 0, run: 0, verify: 0, config: 0, draft: 0 };
 
 function json(status: number, body: unknown): Response {
   return {
@@ -48,6 +81,15 @@ function json(status: number, body: unknown): Response {
 
 function install(): void {
   mockFetch.mockImplementation((url: string, init?: { method?: string }) => {
+    // Config first: both endpoints live under /verify, and both take a POST.
+    if (url.includes('/verify/config')) {
+      if (init?.method === 'POST') {
+        calls.draft += 1;
+        return Promise.resolve(json(fixture.draft.status, fixture.draft.body));
+      }
+      calls.config += 1;
+      return Promise.resolve(json(fixture.config.status, fixture.config.body));
+    }
     if (init?.method === 'POST') {
       calls.verify += 1;
       return Promise.resolve(json(fixture.verify.status, fixture.verify.body));
@@ -108,10 +150,17 @@ describe('useWorktreeVerification (Issue #1816)', () => {
     calls.runs = 0;
     calls.run = 0;
     calls.verify = 0;
+    calls.config = 0;
+    calls.draft = 0;
     fixture.tasks = [];
     fixture.runs = [];
     fixture.run = null;
     fixture.verify = { status: 202, body: { runId: 99 } };
+    fixture.config = { status: 200, body: CONFIG_ABSENT };
+    fixture.draft = {
+      status: 201,
+      body: { created: true, path: '.commandmate/verify.yaml', gates: [], excluded: [], scanned: [] },
+    };
     install();
   });
 
@@ -289,5 +338,141 @@ describe('useWorktreeVerification (Issue #1816)', () => {
     renderHook(() => useWorktreeVerification({ worktreeId: 'wt-1', enabled: false }));
     await waitFor(() => expect(calls.tasks).toBe(0));
     expect(calls.runs).toBe(0);
+  });
+
+  // ===========================================================================
+  // Declared config and the CI drafter (Issue #2061)
+  // ===========================================================================
+
+  it('reads the declared config once per branch, not on every poll tick', async () => {
+    fixture.config = { status: 200, body: CONFIG_PRESENT };
+
+    const { result, rerender } = renderHook(
+      ({ token }: { token: number }) =>
+        useWorktreeVerification({ worktreeId: 'wt-1', refreshToken: token }),
+      { initialProps: { token: 0 } }
+    );
+
+    await waitFor(() => expect(result.current.config?.exists).toBe(true));
+    expect(calls.config).toBe(1);
+
+    // Whether a file exists does not change every two seconds, so this read
+    // deliberately does not ride the owner's poll cadence the way the run list
+    // does. Three ticks, still one read.
+    rerender({ token: 1 });
+    rerender({ token: 2 });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(calls.config).toBe(1);
+  });
+
+  it('re-reads the config when Refresh is pressed', async () => {
+    const { result } = renderHook(() => useWorktreeVerification({ worktreeId: 'wt-1' }));
+    await waitFor(() => expect(calls.config).toBe(1));
+
+    // The one way the file can change from outside the app is someone writing
+    // it in an editor, and Refresh is how that gets noticed.
+    fixture.config = { status: 200, body: CONFIG_PRESENT };
+    act(() => result.current.refresh());
+
+    await waitFor(() => expect(calls.config).toBe(2));
+    await waitFor(() => expect(result.current.config?.exists).toBe(true));
+  });
+
+  it('resolves the four phases from the config and the run list', async () => {
+    const running = [{ status: 'running' as const }];
+    const finished = [{ status: 'failed' as const }];
+
+    expect(resolveVerificationPhase(null, [])).toBe('unknown');
+    expect(resolveVerificationPhase(CONFIG_ABSENT, [])).toBe('no-config');
+    expect(resolveVerificationPhase(CONFIG_PRESENT, [])).toBe('configured');
+    expect(resolveVerificationPhase(CONFIG_PRESENT, finished)).toBe('result');
+    expect(resolveVerificationPhase(CONFIG_PRESENT, running)).toBe('running');
+    // A run in flight outranks everything, including "the file has been deleted
+    // since": it is the only state that changes by itself.
+    expect(resolveVerificationPhase(CONFIG_ABSENT, running)).toBe('running');
+    // Past runs do not make a deleted config look declared: those runs cannot
+    // be repeated until the file is back.
+    expect(resolveVerificationPhase(CONFIG_ABSENT, finished)).toBe('no-config');
+  });
+
+  it('exposes the phase alongside the rows it was resolved from', async () => {
+    fixture.config = { status: 200, body: CONFIG_PRESENT };
+    const { result } = renderHook(() => useWorktreeVerification({ worktreeId: 'wt-1' }));
+
+    await waitFor(() => expect(result.current.phase).toBe('configured'));
+  });
+
+  it('drafting from CI re-reads the config, so the pane moves state', async () => {
+    const { result } = renderHook(() => useWorktreeVerification({ worktreeId: 'wt-1' }));
+    await waitFor(() => expect(result.current.phase).toBe('no-config'));
+
+    // What the POST reports is not what moves the UI: the file it wrote is.
+    fixture.draft = {
+      status: 201,
+      body: {
+        created: true,
+        path: '.commandmate/verify.yaml',
+        gates: CONFIG_PRESENT.gates,
+        excluded: [],
+        scanned: ['.github/workflows/ci.yml'],
+      },
+    };
+    fixture.config = { status: 200, body: CONFIG_PRESENT };
+
+    await act(async () => {
+      await result.current.draftConfig();
+    });
+
+    expect(calls.draft).toBe(1);
+    await waitFor(() => expect(calls.config).toBe(2));
+    await waitFor(() => expect(result.current.phase).toBe('configured'));
+    expect(result.current.draftResult?.created).toBe(true);
+    expect(result.current.draftFailure).toBeNull();
+  });
+
+  it('reports a 409 draft as a conflict and re-reads the file that is there', async () => {
+    const { result } = renderHook(() => useWorktreeVerification({ worktreeId: 'wt-1' }));
+    await waitFor(() => expect(result.current.phase).toBe('no-config'));
+
+    fixture.draft = { status: 409, body: { error: 'already exists', exists: true } };
+    fixture.config = { status: 200, body: CONFIG_PRESENT };
+
+    await act(async () => {
+      await result.current.draftConfig();
+    });
+
+    expect(result.current.draftFailure?.kind).toBe('conflict');
+    // The conflict means the file IS there; showing it beats showing the error.
+    await waitFor(() => expect(result.current.phase).toBe('configured'));
+  });
+
+  it('reports a 422 draft as "nothing draftable", not as a failure', async () => {
+    const { result } = renderHook(() => useWorktreeVerification({ worktreeId: 'wt-1' }));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    fixture.draft = { status: 422, body: { error: 'No verification gates could be drafted.' } };
+
+    await act(async () => {
+      await result.current.draftConfig();
+    });
+
+    expect(result.current.draftFailure?.kind).toBe('empty');
+    expect(result.current.phase).toBe('no-config');
+  });
+
+  it('surfaces a failed config read without claiming the file is missing', async () => {
+    fixture.config = { status: 500, body: { error: 'disk on fire' } };
+
+    const { result } = renderHook(() => useWorktreeVerification({ worktreeId: 'wt-1' }));
+
+    await waitFor(() => expect(result.current.configError).toBe('disk on fire'));
+    expect(result.current.config).toBeNull();
+    // `unknown`, not `no-config`: nothing was read, so nothing may be claimed.
+    expect(result.current.phase).toBe('unknown');
+  });
+
+  it('carries the worktree id, which the pane interpolates into CLI hints', async () => {
+    const { result } = renderHook(() => useWorktreeVerification({ worktreeId: 'wt-1' }));
+    expect(result.current.worktreeId).toBe('wt-1');
   });
 });

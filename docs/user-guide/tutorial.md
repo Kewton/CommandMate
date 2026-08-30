@@ -174,6 +174,12 @@ gates:
 
 これが「このリポジトリで完了とは何か」の宣言です。実行します。
 
+> **自分のリポジトリには何と書けばいいのか（Issue #2061）**: `commandmate verify init` が、
+> そのリポジトリの `.github/workflows/*.yml` と `package.json` の `scripts` を読んで草案を
+> 起案します（`--dry-run` で中身だけ見られます。**既存ファイルは上書きしません**）。
+> Web UI では Verification ペインの「CI から起案する」ボタンが同じことをします。
+> 判断基準は [コマンド利用ガイド](./cli-operations-guide.md#commandmate-verify-init--ci-定義から起案するissue-2061) を参照してください。
+
 ```bash
 commandmate verify commandmate-tutorial --gates unit
 ```

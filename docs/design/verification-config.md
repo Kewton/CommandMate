@@ -848,3 +848,124 @@ FLAKY は run の記録に残り、`commandmate verify show <run-id>` と run �
 `log_tail` を含まない — 500 run ぶんのログ本体を返さないための設計であり、
 FLAKY 専用の列を足すには DB マイグレーションが要る（#1772 の scope 外）。
 一覧で run を絞ってから `verify show` で FLAKY を読む、が現状の経路である。
+
+---
+
+## 11. 起案とオンボーディング（Issue #2061）
+
+### 11.1 なぜ起案が製品機能なのか
+
+v1 のこの仕様は「何が通れば合格か」の書き方を決めるだけで、**書き始める導線を
+持っていなかった**。棚卸し（2026-08-25）の実測では、Web の Verification ペインは
+`.commandmate/verify.yaml` を**読んでおらず**、宣言が 1 件も無いリポジトリと
+「宣言はあるが 1 度も走らせていない」リポジトリが**画面上で同一**だった。
+未作成のまま「再検証」を押した場合の唯一の手がかりは、失敗した run の
+`config` ゲートに入る英文 1 行（`.commandmate/verify.yaml not found in …`）である。
+
+Skill `cmate-verify` の手順 1（CI 定義からの起案）と `docs/user-guide/tutorial.md` は
+同じ手順を説明しているが、**製品内から到達できない**。
+
+### 11.2 単一の起案実装
+
+起案ロジックは `src/lib/verification/verify-draft.ts` の 1 本だけである。
+
+| 呼び出し元 | 経路 |
+|---|---|
+| `commandmate verify init` | 直接 import（`src/cli/commands/verify.ts` から相対パス） |
+| Web「CI から起案する」 | `POST /api/worktrees/:id/verify/config` |
+| Skill `cmate-verify` 手順 1 | 同じ優先順位を散文で記述（CommandMate の無い環境向け） |
+
+**2 実装を持たないことが要件である。** 起案結果が「どの画面から起案したか」で
+変わるリポジトリは、起案機能が無いリポジトリより悪い。
+
+`src/cli/**` は `tsconfig.cli.json` が `"paths": {}` を宣言するため `@/lib/...` を
+解決できない。ドラフタが `fs` / `path` / `yaml` しか触らないのは、この 1 本を
+CLI バンドルと Next のサーバ側の**両方**から読めるようにするためである。
+
+### 11.3 走査の優先順位と拒否
+
+1. `.github/workflows/*.yml|*.yaml` の各 job の各 step の `run:`（ファイル名昇順）
+2. `package.json` の `scripts`（1 で拾えなかった正準名のみ補助的に）
+
+**ゲートは「何度でも安全に再実行できるコマンド」に限る。** 拒否したものは
+黙って捨てず、理由つきで報告する（CI が他に 8 本走らせているのに「CI はこの 4 本
+しか見ていない」と読まれるため）。
+
+| reason | 例 |
+|---|---|
+| `setup` | `npm ci` / `npx playwright install` |
+| `network` | `npm audit` / `curl` |
+| `release` | `npm publish` / `gh release` / `git push` |
+| `container` | `docker …` |
+| `mutating` | `npm run lint:fix` / 引数なし `prettier` |
+| `long-running` | `playwright test` / `test:e2e` |
+| `multi-line` | 複数行の `run:` ブロック |
+| `multi-command` | クォート外に `&&` `\|` `;` `>` を含む |
+| `runner-specific` | `${{ }}` / `$RUNNER_*` / `::warning` |
+| `not-a-check` | `echo` / `printf` / `true` |
+| `interactive` | watch モード（`vitest` を `run` なしで起動する `npm test` など） |
+| `redundant` | `test:unit` / `test:integration` が既にゲートのときの `npm test` |
+| `unquotable` | `"` と `'` を両方含む（§6 の 1 行スカラーに載らない） |
+| `reserved-id` | 導出 id が組み込みゲート名と衝突 |
+
+ゲート id は **step の `name:` ではなくコマンドから**導出する。step 名は
+ワークフローを書いた人の散文（"Run ESLint" / "Build Next.js"）であり言語も自由だが、
+`npm run lint` はどのリポジトリでも同じゲートを指す。id は契約の `verify.gates` と
+`verify --gates` が綴るものなので、散文から作ってはいけない。
+
+`npm run test:unit` は `test-unit` ではなく **`unit`** になる。本仕様・契約・
+本リポジトリの verify.yaml が既にその語彙を使っている。
+
+並び順は category（`guard` → `lint` → `typecheck` → `build` → その他 → `test`）。
+失敗は打ち切られないので順序は**可読性のための選択**だが、0.3 秒のガードを
+30 分のスイートの後ろに置くと「秒で失敗を返す」設計意図が消える。
+
+### 11.4 既存ファイルは上書きしない
+
+`--force` は**用意しない**。既存の verify.yaml はそのリポジトリ自身の判断であり、
+たいていは各ゲートの根拠がコメントで併記されている。再生成はそれを推測で
+置き換えて根拠を破壊する。「捨てるつもりだった」はファイルを削除することで綴る。
+
+書き込みは `flag: 'wx'`。存在チェックは検査であって保証ではなく、CLI と Web の
+ボタンが競合したときに両方が「自分が作った」と信じてはならない。
+
+### 11.5 読み取り API
+
+```
+GET  /api/worktrees/:id/verify/config
+POST /api/worktrees/:id/verify/config
+```
+
+GET は `{ exists, path, gates[], options, plannedGateIds[], error }`。
+
+**`exists` と `error` は独立である。** ファイルが在って壊れている状態は
+`exists: true` ＋ `error` であり、**200 で返す**（500 ではない）。サーバは何も
+失敗していないし、「ゲートを宣言してください」と言われた操作者が 2 本目の
+ファイルを書きに行くのを防ぐ。
+
+`plannedGateIds` は**既定の全ゲート実行**が記録する id を実行順に並べたもの
+（`work-evidence` → `scope` → 宣言があるときだけ `env-clean` → 宣言ゲート）。
+ゲート行は各ゲートの開始時に作られるので、実行中の「3 件記録済み」は進捗であって
+分母ではない。分母はここから来る。
+
+POST は 201（起案して書いた）/ 409（既存ファイル。上書きしない）/
+422（ゲートにできるコマンドが 1 件も無い。何も書かない）。
+
+### 11.6 ペインの 4 状態
+
+| phase | 条件 | 次の一手 |
+|---|---|---|
+| `unknown` | config 読み取り未着 | 何も断定しない |
+| `no-config` | `exists: false` | 「CI から起案する」＋ 仕様へのリンク |
+| `configured` | 宣言あり・run 0 件 | 宣言ゲート一覧＋「検証を実行」 |
+| `running` | `running` の run が在る | N/M ゲート・経過時間 |
+| `result` | それ以外 | 直近判定＋最新 run のゲートへ |
+
+`unknown` は 4 状態に含まれない。**まだ訊いていないことを根拠に「このリポジトリは
+ゲートを宣言していません」と描かないため**にだけ在る。ここで誤ると、既に在る
+ファイルを書きに行かせることになる。
+
+優先順位は「実行中 > 未読 > 未作成 > 未実行 > 結果」。実行中が最優先なのは、
+それが**自分で変化する唯一の状態**であり、ボタンを押した人が見ている状態だからである。
+過去の run が在っても `exists: false` なら `no-config` が勝つ —— その run は
+ファイルが戻るまで再現できないので、次の一手は依然として「宣言する」である。

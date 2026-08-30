@@ -1796,6 +1796,73 @@ export interface VerificationRunHistoryResponse {
 }
 
 // =============================================================================
+// Declared verification config (Issue #2061)
+// =============================================================================
+
+/**
+ * Mirrors: src/lib/verification/verify-config.ts VerifyGate.
+ *
+ * The three optional fields arrive as explicit `null`s rather than absent keys.
+ * `mutex?: string` means "the file declared none", and over the wire an absent
+ * key cannot be told apart from a server that forgot to send it.
+ */
+export interface VerifyConfigGateView {
+  id: string;
+  command: string;
+  timeoutSec: number;
+  mutex: string | null;
+  retryOnFail: number | null;
+  flakyIsPass: boolean | null;
+}
+
+/** Mirrors: src/lib/verification/verify-config.ts VerifyOptions. */
+export interface VerifyConfigOptionsView {
+  baseRef: string | null;
+  skipInPrimaryCheckout: boolean;
+  maxLogTailBytes: number;
+  requireCommit: boolean;
+  requireEnvClean: boolean;
+}
+
+/**
+ * Mirrors: src/app/api/worktrees/[id]/verify/config/route.ts GET response.
+ *
+ * `exists` and `error` are independent: a file that is present but invalid is
+ * `exists: true` with `error` set, which is a different problem — and a
+ * different fix — from no file at all.
+ */
+export interface VerifyConfigResponse {
+  exists: boolean;
+  /** Repository-relative path of the config, present or not. */
+  path: string;
+  gates: VerifyConfigGateView[];
+  /** null when the file is absent or could not be read. */
+  options: VerifyConfigOptionsView | null;
+  /** Gate ids a default full run executes, in the runner's own order. */
+  plannedGateIds: string[];
+  error: string | null;
+}
+
+/** One command the drafter found in CI and declined to turn into a gate. */
+export interface VerifyConfigExclusionView {
+  command: string;
+  /** Mirrors DraftExclusionReason in src/lib/verification/verify-draft.ts. */
+  reason: string;
+  /** Human-readable provenance (`file (job: …, step: …)`). */
+  source: string;
+}
+
+/** Mirrors: src/app/api/worktrees/[id]/verify/config/route.ts POST 201 response. */
+export interface VerifyConfigDraftResponse {
+  created: boolean;
+  path: string;
+  gates: VerifyConfigGateView[];
+  excluded: VerifyConfigExclusionView[];
+  /** Repository-relative files the scan read. */
+  scanned: string[];
+}
+
+// =============================================================================
 // Task contracts (Issue #1545)
 // =============================================================================
 

@@ -11,13 +11,46 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent, within } from '@testing-library/react';
 import { VerificationPane } from '@/components/worktree/VerificationPane';
-import type { WorktreeVerificationState } from '@/hooks/useWorktreeVerification';
+import {
+  resolveVerificationPhase,
+  type WorktreeVerificationState,
+} from '@/hooks/useWorktreeVerification';
 import type {
   TaskView,
   VerificationGateResultView,
   VerificationRunListItem,
   VerificationRunView,
+  VerifyConfigResponse,
 } from '@/lib/api/verification-api';
+
+/** A repository that has declared its gates (the ordinary case). */
+const CONFIG_PRESENT: VerifyConfigResponse = {
+  exists: true,
+  path: '.commandmate/verify.yaml',
+  gates: [
+    { id: 'lint', command: 'npm run lint', timeoutSec: 900, mutex: null, retryOnFail: null, flakyIsPass: null },
+    { id: 'unit', command: 'npm run test:unit', timeoutSec: 1800, mutex: null, retryOnFail: null, flakyIsPass: null },
+  ],
+  options: {
+    baseRef: 'origin/develop',
+    skipInPrimaryCheckout: true,
+    maxLogTailBytes: 8192,
+    requireCommit: false,
+    requireEnvClean: false,
+  },
+  plannedGateIds: ['work-evidence', 'scope', 'lint', 'unit'],
+  error: null,
+};
+
+/** A repository with no `.commandmate/verify.yaml` at all. */
+const CONFIG_ABSENT: VerifyConfigResponse = {
+  exists: false,
+  path: '.commandmate/verify.yaml',
+  gates: [],
+  options: null,
+  plannedGateIds: [],
+  error: null,
+};
 
 vi.mock('next-intl', async () => {
   const { createRealIntlMock } = await import('@tests/helpers/real-intl');
@@ -97,7 +130,8 @@ const GATES: VerificationGateResultView[] = [
 const RUN_DETAIL: VerificationRunView = { ...RUN_9, gates: GATES };
 
 function buildState(overrides: Partial<WorktreeVerificationState> = {}): WorktreeVerificationState {
-  return {
+  const base: WorktreeVerificationState = {
+    worktreeId: 'wt-1',
     task: null,
     runs: [],
     latestRun: null,
@@ -109,11 +143,21 @@ function buildState(overrides: Partial<WorktreeVerificationState> = {}): Worktre
     detailLoading: false,
     rerunPending: false,
     rerunFailure: null,
+    config: CONFIG_PRESENT,
+    configError: null,
+    phase: 'result',
+    draftPending: false,
+    draftFailure: null,
+    draftResult: null,
     selectRun: vi.fn(),
     refresh: vi.fn(),
     rerun: vi.fn().mockResolvedValue(undefined),
+    draftConfig: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
+  // The phase is derived, never chosen: a fixture that says `no-config` while
+  // carrying a config would pin a rendering the product can never reach.
+  return { ...base, phase: overrides.phase ?? resolveVerificationPhase(base.config, base.runs) };
 }
 
 const LOADED = (overrides: Partial<WorktreeVerificationState> = {}) =>

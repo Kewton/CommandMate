@@ -21,6 +21,7 @@
  * @module lib/api/verification-api
  */
 
+import { GITHUB_REPO_BASE_URL } from '@/config/github-links';
 import type {
   TaskContractView,
   TaskStatus,
@@ -30,6 +31,11 @@ import type {
   VerificationGateStatus,
   VerificationRunStatus,
   VerificationRunView,
+  VerifyConfigDraftResponse,
+  VerifyConfigExclusionView,
+  VerifyConfigGateView,
+  VerifyConfigOptionsView,
+  VerifyConfigResponse,
 } from '@/cli/types/api-responses';
 
 export type {
@@ -41,7 +47,37 @@ export type {
   VerificationGateStatus,
   VerificationRunStatus,
   VerificationRunView,
+  VerifyConfigDraftResponse,
+  VerifyConfigExclusionView,
+  VerifyConfigGateView,
+  VerifyConfigOptionsView,
+  VerifyConfigResponse,
 };
+
+/**
+ * Canonical spec for `.commandmate/verify.yaml` (Issue #2061).
+ *
+ * The pane links it from the "no config yet" state. Composed from
+ * {@link GITHUB_REPO_BASE_URL} rather than written out, for the reason
+ * `config/github-links.ts` exists: one place decides where this repository
+ * lives. `blob/main` and not the running version's tag — a reader following a
+ * link out of a local install wants the current spec, and a tag that has not
+ * been pushed yet 404s.
+ */
+export const VERIFY_CONFIG_DOC_URL =
+  `${GITHUB_REPO_BASE_URL}/blob/main/docs/design/verification-config.md` as const;
+
+/**
+ * Where the declared gates live, repository-relative (Issue #2061).
+ *
+ * A second spelling of `VERIFY_CONFIG_RELATIVE_PATH` in
+ * `lib/verification/verify-config.ts`, which the browser cannot import: that
+ * module reads from disk. The server sends the path on every config response,
+ * so this is only the fallback for "the read has not landed yet" — but the pane
+ * names the file in its very first sentence, and a blank there is worse than a
+ * constant that has to be edited in two places once a decade.
+ */
+export const VERIFY_CONFIG_RELATIVE_PATH = '.commandmate/verify.yaml';
 
 /**
  * A run as `GET /verify/runs` returns it.
@@ -212,4 +248,61 @@ export async function startVerification(
     throw new VerificationApiError('Verification response carried no run id', res.status);
   }
   return data.runId;
+}
+
+/**
+ * The repository's declared verification gates, and whether the file exists at
+ * all (Issue #2061).
+ *
+ * The pane's state machine hangs off this: without it, "no gates declared" and
+ * "declared but never run" both look like an empty run list, and the operator's
+ * next move is completely different in the two cases.
+ */
+export async function fetchVerificationConfig(
+  worktreeId: string,
+  signal?: AbortSignal
+): Promise<VerifyConfigResponse> {
+  const res = await fetch(`${worktreePath(worktreeId)}/verify/config`, { signal });
+  if (!res.ok) {
+    return fail(res, 'Failed to load the verification config');
+  }
+  const data = (await res.json()) as Partial<VerifyConfigResponse>;
+  return {
+    exists: data.exists === true,
+    path: typeof data.path === 'string' ? data.path : VERIFY_CONFIG_RELATIVE_PATH,
+    gates: data.gates ?? [],
+    options: data.options ?? null,
+    plannedGateIds: data.plannedGateIds ?? [],
+    error: typeof data.error === 'string' ? data.error : null,
+  };
+}
+
+/**
+ * Draft `.commandmate/verify.yaml` from the repository's CI definitions.
+ *
+ * The Web half of `commandmate verify init`; both call the one drafter in
+ * `lib/verification/verify-draft.ts`. Never overwrites — an existing file makes
+ * the route answer 409, which surfaces here as a {@link VerificationApiError}
+ * whose status the caller can phrase as "someone else created it first" rather
+ * than as a failure.
+ */
+export async function draftVerificationConfig(
+  worktreeId: string
+): Promise<VerifyConfigDraftResponse> {
+  const res = await fetch(`${worktreePath(worktreeId)}/verify/config`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: '{}',
+  });
+  if (!res.ok) {
+    return fail(res, 'Failed to draft the verification config');
+  }
+  const data = (await res.json()) as Partial<VerifyConfigDraftResponse>;
+  return {
+    created: data.created === true,
+    path: typeof data.path === 'string' ? data.path : VERIFY_CONFIG_RELATIVE_PATH,
+    gates: data.gates ?? [],
+    excluded: data.excluded ?? [],
+    scanned: data.scanned ?? [],
+  };
 }

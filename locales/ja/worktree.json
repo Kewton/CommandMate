@@ -928,6 +928,40 @@
     "refresh": "再読み込み",
     "loading": "検証情報を読み込み中…",
     "loadError": "検証情報を取得できませんでした: {message}",
+    "onboarding": {
+      "what": "検証は、このリポジトリが `{path}` に宣言したゲートを、この worktree でそのまま実行します。",
+      "how": "合否は各ゲートの exit code で決まります。`commandmate verify` / `wait --verify` と同じゲートなので、ここが緑ならコマンドラインでも緑です。",
+      "loading": "宣言ゲートを読み込み中…",
+      "configError": "検証設定を読み込めませんでした: {message}",
+      "invalid": "`{path}` は存在しますが読み込めませんでした: {message}",
+      "noConfig": {
+        "body": "このリポジトリはまだ検証ゲートを宣言していません（`{path}` がありません）。実行できるゲートが 1 件もない状態です。",
+        "hint": "`.github/workflows/*.yml` と `package.json` の scripts を読んで草案を書き出します。既存ファイルは決して上書きしません。CLI では `commandmate verify init` が同じ処理です。",
+        "action": "CI から起案する",
+        "pending": "起案中…",
+        "docs": "verify.yaml の書き方（設計ドキュメント）",
+        "created": "`{path}` に {count} 件のゲートを起案しました。判定に使う前に内容を確認してください。",
+        "conflict": "`{path}` は既に存在します。上書きはしないので、読み直した内容を表示します。",
+        "empty": "CI 定義にも npm scripts にもゲートにできるコマンドが見つかりませんでした。`{path}` を手で書いてください。",
+        "error": "検証設定を起案できませんでした: {message}"
+      },
+      "configured": {
+        "body": "`{path}` に {count} 件のゲートが宣言されています。このブランチではまだ 1 度も実行されていません。",
+        "gatesHeading": "宣言ゲート",
+        "builtin": "組み込みゲートも併せて走ります: {gates}",
+        "action": "検証を実行"
+      },
+      "running": {
+        "progress": "実行中: {total} ゲート中 {done} 件が完了しました。",
+        "elapsed": "経過 {elapsed}",
+        "action": "今すぐ再読み込み",
+        "hint": "ゲートは 1 本ずつ順に走ります。完了したゲートから下の一覧に現れます。"
+      },
+      "result": {
+        "body": "このブランチの直近ラン #{runId} の判定は RESULT {verdict} です。",
+        "action": "最新ランのゲートを表示"
+      }
+    },
     "contract": {
       "heading": "実行契約",
       "empty": "このブランチには契約がありません。\n`commandmate send --contract <ファイル>` か Skill `cmate-task-contract` で作成してください。",
@@ -942,7 +976,7 @@
     },
     "runs": {
       "heading": "検証ラン",
-      "empty": "検証ランはまだありません。\n「再検証」を押すか、`commandmate verify <worktree-id>` を実行してください。",
+      "empty": "検証ランはまだありません。\n「再検証」を押すか、`commandmate verify {worktreeId}` を実行してください。",
       "rerun": "再検証",
       "rerunPending": "開始中…",
       "rerunConflict": "検証ランが既に実行中です（run {runId}）。",

@@ -29,17 +29,65 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   DEFAULT_RUN_LIST_LIMIT,
   VerificationApiError,
+  draftVerificationConfig,
   fetchLatestTask,
+  fetchVerificationConfig,
   fetchVerificationRun,
   fetchVerificationRuns,
   startVerification,
   type TaskView,
   type VerificationRunListItem,
   type VerificationRunView,
+  type VerifyConfigDraftResponse,
+  type VerifyConfigResponse,
 } from '@/lib/api/verification-api';
 
 /** Minimum gap between piggy-backed refreshes while nothing is in flight. */
 export const VERIFICATION_IDLE_REFRESH_MS = 15_000;
+
+/**
+ * Which of the four onboarding states the pane is in (Issue #2061).
+ *
+ * `unknown` is not one of the four: it is the gap before the config read lands,
+ * and it exists so the pane never renders "this repository declares no gates"
+ * on the strength of not having asked yet — the one wrong answer here that
+ * sends an operator off to write a file that is already there.
+ */
+export type VerificationPhase = 'unknown' | 'no-config' | 'configured' | 'running' | 'result';
+
+/**
+ * Resolve the pane's state from the two facts it rests on.
+ *
+ * Precedence, and why:
+ *  1. A `running` run wins over everything. It is the only state that changes
+ *     by itself, and it is what someone who just pressed the button is looking
+ *     at.
+ *  2. No config read yet -> `unknown` (see {@link VerificationPhase}).
+ *  3. No config file -> `no-config`, *even with past runs in the list*. Those
+ *     runs cannot be repeated until the file is back, so "declare your gates"
+ *     is still the next move; the history stays visible below.
+ *  4. A config and no runs -> `configured`; otherwise -> `result`.
+ */
+export function resolveVerificationPhase(
+  config: VerifyConfigResponse | null,
+  runs: readonly Pick<VerificationRunListItem, 'status'>[]
+): VerificationPhase {
+  if (runs.some((run) => run.status === 'running')) return 'running';
+  if (config === null) return 'unknown';
+  if (!config.exists) return 'no-config';
+  if (runs.length === 0) return 'configured';
+  return 'result';
+}
+
+/** Reason a "draft from CI" request was refused, for the UI to phrase. */
+export interface DraftFailure {
+  /**
+   * `conflict` = 409, the file appeared between the read and the write;
+   * `empty` = 422, nothing in CI was usable as a gate; `error` = anything else.
+   */
+  kind: 'conflict' | 'empty' | 'error';
+  message: string;
+}
 
 /** Reason a re-verify request was refused, for the UI to phrase. */
 export interface RerunFailure {
@@ -52,6 +100,8 @@ export interface RerunFailure {
 
 /** Everything the chip and the pane read. */
 export interface WorktreeVerificationState {
+  /** The branch this state is about. The pane interpolates it into CLI hints. */
+  worktreeId: string;
   /** Most recent task for this worktree; `null` when none was ever recorded. */
   task: TaskView | null;
   /** Recent runs, newest first. */
@@ -74,12 +124,29 @@ export interface WorktreeVerificationState {
   rerunPending: boolean;
   /** Why the last re-verify attempt was refused; `null` when it was not. */
   rerunFailure: RerunFailure | null;
+  /**
+   * `.commandmate/verify.yaml` as the server reads it; `null` until the first
+   * read lands, or when it failed (see {@link configError}).
+   */
+  config: VerifyConfigResponse | null;
+  /** Failure of the config read, already a display string. */
+  configError: string | null;
+  /** Which of the pane's four onboarding states this is (Issue #2061). */
+  phase: VerificationPhase;
+  /** True while a "draft from CI" POST is in flight. */
+  draftPending: boolean;
+  /** Why the last draft attempt was refused; `null` when it was not. */
+  draftFailure: DraftFailure | null;
+  /** What the last successful draft wrote; `null` before one succeeded. */
+  draftResult: VerifyConfigDraftResponse | null;
   /** Show a different run's gates. */
   selectRun: (runId: number) => void;
   /** Refetch now, ignoring the throttle. */
   refresh: () => void;
   /** `POST /verify`; selects the new run and refetches. */
   rerun: () => Promise<void>;
+  /** `POST /verify/config`; drafts verify.yaml from CI and re-reads it. */
+  draftConfig: () => Promise<void>;
 }
 
 export interface UseWorktreeVerificationOptions {
@@ -131,6 +198,11 @@ export function useWorktreeVerification({
   const [detailLoading, setDetailLoading] = useState(false);
   const [rerunPending, setRerunPending] = useState(false);
   const [rerunFailure, setRerunFailure] = useState<RerunFailure | null>(null);
+  const [config, setConfig] = useState<VerifyConfigResponse | null>(null);
+  const [configError, setConfigError] = useState<string | null>(null);
+  const [draftPending, setDraftPending] = useState(false);
+  const [draftFailure, setDraftFailure] = useState<DraftFailure | null>(null);
+  const [draftResult, setDraftResult] = useState<VerifyConfigDraftResponse | null>(null);
   /** Bumped by refresh()/rerun() to force a fetch between parent ticks. */
   const [nonce, setNonce] = useState(0);
 
@@ -140,6 +212,7 @@ export function useWorktreeVerification({
   const inFlightRef = useRef(false);
   const activeRef = useRef(false);
   const rerunPendingRef = useRef(false);
+  const draftPendingRef = useRef(false);
   const didMountRef = useRef(false);
 
   activeRef.current = isInFlight(task, runs);
@@ -164,7 +237,44 @@ export function useWorktreeVerification({
     setError(null);
     setDetailError(null);
     setRerunFailure(null);
+    setConfig(null);
+    setConfigError(null);
+    setDraftFailure(null);
+    setDraftResult(null);
   }, [worktreeId]);
+
+  /**
+   * Read `.commandmate/verify.yaml`.
+   *
+   * Deliberately NOT on `refreshToken`: the other two reads ride the owner's
+   * poll because run rows change every few seconds, and this one answers "does
+   * a file exist", which does not. It re-runs on the branch changing and on
+   * `nonce` — the Refresh button, a re-verify, a draft — which covers every way
+   * the answer can change from inside the app, and the Refresh button covers
+   * the one way it can change from outside (someone wrote the file in an
+   * editor).
+   */
+  useEffect(() => {
+    if (!enabled) return;
+    const controller = new AbortController();
+    let cancelled = false;
+    void (async () => {
+      try {
+        const next = await fetchVerificationConfig(worktreeId, controller.signal);
+        if (cancelled) return;
+        setConfig(next);
+        setConfigError(null);
+      } catch (err) {
+        if (cancelled || isAbort(err)) return;
+        setConfig(null);
+        setConfigError(messageOf(err, 'Failed to load the verification config'));
+      }
+    })();
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [worktreeId, enabled, nonce]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -287,7 +397,39 @@ export function useWorktreeVerification({
     }
   }, [worktreeId]);
 
+  const draftConfig = useCallback(async () => {
+    if (draftPendingRef.current) return;
+    draftPendingRef.current = true;
+    setDraftPending(true);
+    setDraftFailure(null);
+    try {
+      const result = await draftVerificationConfig(worktreeId);
+      setDraftResult(result);
+      // The POST reports what it wrote; the pane's state machine reads the file
+      // back, so nothing moves until the config read re-runs.
+      lastFetchAtRef.current = 0;
+      setNonce((value) => value + 1);
+    } catch (err) {
+      const status = err instanceof VerificationApiError ? err.status : 0;
+      setDraftFailure({
+        kind: status === 409 ? 'conflict' : status === 422 ? 'empty' : 'error',
+        message: messageOf(err, 'Failed to draft the verification config'),
+      });
+      // 409 means the file is there after all — someone else, or another tab,
+      // created it. Re-reading turns the error into the state the operator
+      // actually wanted.
+      if (status === 409) {
+        lastFetchAtRef.current = 0;
+        setNonce((value) => value + 1);
+      }
+    } finally {
+      draftPendingRef.current = false;
+      setDraftPending(false);
+    }
+  }, [worktreeId]);
+
   return {
+    worktreeId,
     task,
     runs,
     latestRun: runs[0] ?? null,
@@ -299,9 +441,16 @@ export function useWorktreeVerification({
     detailLoading,
     rerunPending,
     rerunFailure,
+    config,
+    configError,
+    phase: resolveVerificationPhase(config, runs),
+    draftPending,
+    draftFailure,
+    draftResult,
     selectRun,
     refresh,
     rerun,
+    draftConfig,
   };
 }
 
