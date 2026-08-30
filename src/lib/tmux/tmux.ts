@@ -196,6 +196,38 @@ export async function hasSession(sessionName: string): Promise<boolean> {
 }
 
 /**
+ * The directory a session was created in, or null (Issue #2070).
+ *
+ * `#{session_path}` rather than `#{pane_current_path}`: the two differ as soon
+ * as anything types `cd`, and only the first one is still the worktree root the
+ * session was opened on. Measured on tmux 3.5a — a session created with
+ * `-c /private/tmp` whose shell then `cd /usr`'d reported
+ * `session_path=/private/tmp`, `pane_current_path=/usr`.
+ *
+ * Read by `BaseCLITool.relaunchIfToolExited`, which needs the worktree path to
+ * rebuild a launch line for a pane whose agent has died. The pane itself is the
+ * right source for it: a worktree row could have been moved or deleted since,
+ * while the directory the pane is actually sitting in is the directory the
+ * relaunched agent will actually run in.
+ *
+ * @param sessionName - Target session name
+ * @returns The session's working directory, or null when tmux cannot say
+ */
+export async function getSessionWorkingDirectory(sessionName: string): Promise<string | null> {
+  try {
+    const { stdout } = await execFileAsync(
+      'tmux',
+      ['display-message', '-p', '-t', exactTarget(sessionName), '#{session_path}'],
+      { timeout: DEFAULT_TIMEOUT }
+    );
+    const dir = stdout.trim();
+    return dir === '' ? null : dir;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * List all tmux sessions
  *
  * @returns Array of tmux session information

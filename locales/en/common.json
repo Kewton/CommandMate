@@ -158,7 +158,8 @@
   },
   "branchItem": {
     "cliToolStatus": "CLI tool status",
-    "hasUnread": "Has unread messages"
+    "hasUnread": "Has unread messages",
+    "agentExited": "exited"
   },
   "connection": {
     "reconnecting": "Reconnecting",
