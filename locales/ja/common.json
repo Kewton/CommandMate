@@ -197,6 +197,7 @@
       "saving": "保存中...",
       "saved": "保存しました",
       "reset": "既定に戻す",
+      "builtIn": "既定値: {agents}",
       "configured": "設定済み",
       "usingBuiltIn": "既定値を使用中",
       "range": "エージェントは {min} 〜 {max} 個で選択してください。",

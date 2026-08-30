@@ -5,12 +5,12 @@
  *
  * Before #2065 the client's fallback for "this worktree has no `selectedAgents`"
  * was the imported constant `DEFAULT_SELECTED_AGENTS`, read from module scope at
- * seven sites — two of them inside `deriveSidebarCliStatus()`, a PURE function
- * that receives one `Worktree` and nothing else, and four inside `useState`
- * initializers that run before any fetch has resolved. Neither shape can consume
- * a React context or a prop without rewriting its callers, so the smallest
- * honest change is to keep the read at module scope and make the module scope
- * itself configurable.
+ * EIGHT sites (`grep -rn 'DEFAULT_SELECTED_AGENTS' src/`) — two of them inside
+ * `deriveSidebarCliStatus()`, a PURE function that receives one `Worktree` and
+ * nothing else, and four inside `useState` initializers that run before any
+ * fetch has resolved. Neither shape can consume a React context or a prop
+ * without rewriting its callers, so the smallest honest change is to keep the
+ * read at module scope and make the module scope itself configurable.
  *
  * The store starts at the compiled-in constant, so a page that never seeds it
  * behaves exactly as it did before this Issue.

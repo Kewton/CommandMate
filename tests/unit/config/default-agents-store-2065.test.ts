@@ -40,8 +40,27 @@ describe('client default-agents store (Issue #2065)', () => {
     resetClientDefaultSelectedAgents();
   });
 
+  /**
+   * Written as a LITERAL, not as `toEqual(DEFAULT_SELECTED_AGENTS)`.
+   *
+   * `resetClientDefaultSelectedAgents()` assigns that very binding, so
+   * comparing against the import is `expect(A).toEqual(A)` — true no matter
+   * what the store does. The literal is the only form that can fail.
+   */
   it('starts at the compiled-in constant', () => {
+    expect(getClientDefaultSelectedAgents()).toEqual(['claude', 'codex', 'antigravity']);
+    // Pinned to the import too, so changing the constant is a deliberate edit
+    // here rather than a silently stale literal.
     expect(getClientDefaultSelectedAgents()).toEqual(DEFAULT_SELECTED_AGENTS);
+  });
+
+  it('returns to the constant from a changed value, which is what reset means', () => {
+    setClientDefaultSelectedAgents(['codex', 'claude']);
+    expect(getClientDefaultSelectedAgents()).toEqual(['codex', 'claude']);
+
+    resetClientDefaultSelectedAgents();
+
+    expect(getClientDefaultSelectedAgents()).toEqual(['claude', 'codex', 'antigravity']);
   });
 
   it('adopts a valid server value, order intact', () => {

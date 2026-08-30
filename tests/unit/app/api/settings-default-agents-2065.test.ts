@@ -63,8 +63,12 @@ describe('GET/PUT /api/settings/default-agents (Issue #2065)', () => {
   it('reports the constant with configured=false before anything is stored', async () => {
     const body = await (await get()).json();
     expect(body.success).toBe(true);
-    expect(body.defaultSelectedAgents).toEqual(DEFAULT_SELECTED_AGENTS);
+    // Literals, not `toEqual(DEFAULT_SELECTED_AGENTS)`: the route assigns that
+    // same binding, so comparing against the import asserts nothing about the
+    // wire shape the client reads.
+    expect(body.defaultSelectedAgents).toEqual(['claude', 'codex', 'antigravity']);
     expect(body.configured).toBe(false);
+    expect(body.constantDefault).toEqual(['claude', 'codex', 'antigravity']);
     expect(body.constantDefault).toEqual(DEFAULT_SELECTED_AGENTS);
     expect(body.minAgents).toBe(2);
     expect(body.maxAgents).toBe(6);
@@ -93,6 +97,21 @@ describe('GET/PUT /api/settings/default-agents (Issue #2065)', () => {
     expect(body.configured).toBe(true);
     expect(getDefaultSelectedAgents(mocks.db!)).toEqual(['codex', 'claude']);
     expect((await (await get()).json()).defaultSelectedAgents).toEqual(['codex', 'claude']);
+  });
+
+  /**
+   * `constantDefault` is what "Reset to default" returns to, and the More
+   * screen renders it verbatim. It must keep naming the CONSTANT after a
+   * setting is stored — a version that echoed the stored list back would make
+   * the hint read "reset to the value you already have".
+   */
+  it('keeps constantDefault pointing at the constant after a save', async () => {
+    await put({ agents: ['codex', 'claude'] });
+    const body = await (await get()).json();
+
+    expect(body.defaultSelectedAgents).toEqual(['codex', 'claude']);
+    expect(body.constantDefault).toEqual(['claude', 'codex', 'antigravity']);
+    expect(body.constantDefault).not.toEqual(body.defaultSelectedAgents);
   });
 
   it('preserves the order the caller sent, so [0] stays the primary', async () => {

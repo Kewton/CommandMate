@@ -11,7 +11,6 @@ import {
   validateAgentsPair,
   DEFAULT_SELECTED_AGENTS,
   MAX_SELECTED_AGENTS,
-  MIN_SELECTED_AGENTS,
   SELECTED_AGENTS_LAYERS,
 } from '@/lib/selected-agents-validator';
 
@@ -116,9 +115,21 @@ describe('DEFAULT_SELECTED_AGENTS (Issue #1516) — the last layer', () => {
     expect(result.valid).toBe(true);
   });
 
-  it('is within the bounds the API validates against', () => {
-    expect(DEFAULT_SELECTED_AGENTS.length).toBeGreaterThanOrEqual(MIN_SELECTED_AGENTS);
-    expect(DEFAULT_SELECTED_AGENTS.length).toBeLessThanOrEqual(MAX_SELECTED_AGENTS);
+  /**
+   * Replaces an earlier `MIN <= length <= MAX` case. That one read as a bounds
+   * check but was `2 <= 3 <= 6` over three literals — true on develop, true
+   * under every mutation this Issue could introduce. What is actually worth
+   * pinning is that the constant survives a ROUND TRIP through the API's own
+   * validator: it is the value `PUT /api/settings/default-agents` hands back on
+   * a reset, so if it ever stopped validating, reset would store something the
+   * next read rejects.
+   */
+  it('round-trips through the API validator, which is what reset relies on', () => {
+    const result = validateSelectedAgentsInput([...DEFAULT_SELECTED_AGENTS]);
+    expect(result.valid).toBe(true);
+    expect(result.value).toEqual(DEFAULT_SELECTED_AGENTS);
+    expect(parseSelectedAgents(JSON.stringify(DEFAULT_SELECTED_AGENTS)))
+      .toEqual(DEFAULT_SELECTED_AGENTS);
   });
 });
 

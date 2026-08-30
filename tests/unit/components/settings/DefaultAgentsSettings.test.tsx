@@ -38,10 +38,28 @@ const GET_BODY = {
   installed: ['claude', 'codex'],
 };
 
+/**
+ * A STORED setting, deliberately different from `DEFAULT_SELECTED_AGENTS` in
+ * both membership and order.
+ *
+ * `GET_BODY` above is the unconfigured case, and its `defaultSelectedAgents` is
+ * the constant — so every assertion made against it alone is also satisfied by
+ * a component that ignores the response and renders the constant. This body is
+ * what makes the load path falsifiable.
+ */
+const CONFIGURED_BODY = {
+  ...GET_BODY,
+  defaultSelectedAgents: ['codex', 'claude'],
+  configured: true,
+};
+
 let putBodies: unknown[] = [];
 const originalFetch = globalThis.fetch;
 
-function installFetch(overrides: { put?: Record<string, unknown> } = {}) {
+function installFetch(
+  overrides: { put?: Record<string, unknown>; get?: Record<string, unknown> } = {}
+) {
+  const getBody = overrides.get ?? GET_BODY;
   globalThis.fetch = vi.fn(async (url: string, init?: RequestInit) => {
     if (init?.method === 'PUT') {
       putBodies.push(JSON.parse(String(init.body)));
@@ -49,7 +67,7 @@ function installFetch(overrides: { put?: Record<string, unknown> } = {}) {
       return {
         ok: true,
         json: async () => ({
-          ...GET_BODY,
+          ...getBody,
           defaultSelectedAgents: sent ?? GET_BODY.constantDefault,
           configured: sent !== null,
           ...overrides.put,
@@ -57,7 +75,7 @@ function installFetch(overrides: { put?: Record<string, unknown> } = {}) {
       } as Response;
     }
     expect(String(url)).toContain('include=installed');
-    return { ok: true, json: async () => GET_BODY } as Response;
+    return { ok: true, json: async () => getBody } as Response;
   }) as unknown as typeof fetch;
 }
 
@@ -83,6 +101,85 @@ describe('DefaultAgentsSettings (Issue #2065)', () => {
     cleanup();
     globalThis.fetch = originalFetch;
     resetClientDefaultSelectedAgents();
+  });
+
+  /**
+   * The load path, made falsifiable.
+   *
+   * Everything below uses `GET_BODY`, whose `defaultSelectedAgents` IS the
+   * compiled-in constant — so a component that threw the response away and
+   * rendered the constant would satisfy all of it. These cases serve a stored
+   * value that differs from the constant in membership and order, which is the
+   * only shape that can tell the two apart.
+   */
+  describe('reads the STORED setting, not the constant', () => {
+    beforeEach(() => {
+      installFetch({ get: CONFIGURED_BODY });
+    });
+
+    it('renders the stored list, in the stored order', async () => {
+      await renderCard();
+
+      expect(selectedOrder()).toEqual(['codex', 'claude']);
+      expect(selectedOrder()).not.toEqual(GET_BODY.constantDefault);
+    });
+
+    it('marks the stored primary, not the constant primary', async () => {
+      await renderCard();
+
+      expect(screen.getByTestId('default-agents-row-codex')).toContainElement(
+        screen.getByTestId('default-agents-primary-badge')
+      );
+      expect(screen.getByTestId('default-agents-row-claude')).not.toContainElement(
+        screen.getByTestId('default-agents-primary-badge')
+      );
+    });
+
+    it('offers the rest as additions, so antigravity is no longer selected', async () => {
+      await renderCard();
+
+      expect(screen.getByTestId('default-agents-add-antigravity')).toBeTruthy();
+      expect(screen.queryByTestId('default-agents-row-antigravity')).toBeNull();
+    });
+
+    /**
+     * The load-side store update (`setClientDefaultSelectedAgents` in `load()`).
+     * The save-side one is asserted further down; without this case, deleting
+     * the load-side call is invisible, because opening the More screen is the
+     * one place that learns the setting without saving anything.
+     */
+    it('seeds the client-side fallback store on LOAD, before any save', async () => {
+      await renderCard();
+
+      expect(getClientDefaultSelectedAgents()).toEqual(['codex', 'claude']);
+      expect(putBodies).toHaveLength(0);
+    });
+
+    it('says what "reset" returns to, using the constant the server sent', async () => {
+      await renderCard();
+
+      expect(screen.getByTestId('default-agents-builtin').textContent).toBe(
+        'Built-in default: Claude, Codex, Antigravity'
+      );
+      expect(screen.getByTestId('default-agents-reset')).toHaveProperty('disabled', false);
+      expect(screen.getByTestId('default-agents-state').textContent).toBe('Configured');
+    });
+
+    it('saves what the user reordered on top of the stored value', async () => {
+      await renderCard();
+
+      fireEvent.click(screen.getByTestId('default-agents-down-codex'));
+      expect(selectedOrder()).toEqual(['claude', 'codex']);
+
+      fireEvent.click(screen.getByTestId('default-agents-save'));
+      await waitFor(() => expect(putBodies).toHaveLength(1));
+      expect(putBodies[0]).toEqual({ agents: ['claude', 'codex'] });
+    });
+  });
+
+  it('hides the built-in hint while nothing is stored', async () => {
+    await renderCard();
+    expect(screen.queryByTestId('default-agents-builtin')).toBeNull();
   });
 
   it('renders the current default in order, with the first marked primary', async () => {

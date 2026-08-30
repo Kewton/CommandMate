@@ -62,7 +62,35 @@ afterEach(() => {
   resetClientDefaultSelectedAgents();
 });
 
+/**
+ * The agent chips the row actually renders, in order.
+ *
+ * `ReviewTab` draws one `<span>` per agent holding that CLI's display name, so
+ * reading the row's text in document order is reading the fallback's output.
+ * This is the assertion the file header always claimed and did not make: the
+ * store-level checks below pass even if the row still reads the constant.
+ */
+function chipsFor(id: string): string[] {
+  const row = screen.getByTestId(`review-item-${id}`);
+  return Array.from(row.querySelectorAll('span'))
+    .map((el) => el.textContent ?? '')
+    .filter((text) => AGENT_LABELS.includes(text));
+}
+
+const AGENT_LABELS = ['Claude', 'Codex', 'Gemini', 'Vibe Local', 'OpenCode', 'Copilot', 'Antigravity'];
+
 describe('ReviewTab adopts defaultSelectedAgents (Issue #2065)', () => {
+  it('renders the row chips from the payload default, in that order', async () => {
+    mockList(['codex', 'claude']);
+    render(React.createElement(ReviewTab));
+
+    await waitFor(() => expect(screen.getByTestId('review-item-wt-2065')).toBeTruthy());
+    await waitFor(() => expect(chipsFor('wt-2065')).toEqual(['Codex', 'Claude']));
+    // The constant is ['claude','codex','antigravity'] — a different set in a
+    // different order, so this cannot be satisfied by ignoring the payload.
+    expect(chipsFor('wt-2065')).not.toContain('Antigravity');
+  });
+
   it('seeds the client store from the list payload', async () => {
     mockList(['codex', 'claude']);
     render(React.createElement(ReviewTab));
@@ -71,11 +99,27 @@ describe('ReviewTab adopts defaultSelectedAgents (Issue #2065)', () => {
     expect(getClientDefaultSelectedAgents()).toEqual(['codex', 'claude']);
   });
 
-  it('keeps the constant when an older server omits the field', async () => {
+  it('keeps the constant, and renders it, when an older server omits the field', async () => {
     mockList(undefined);
     render(React.createElement(ReviewTab));
 
     await waitFor(() => expect(screen.getByTestId('review-item-wt-2065')).toBeTruthy());
     expect(getClientDefaultSelectedAgents()).toEqual(DEFAULT_SELECTED_AGENTS);
+    expect(chipsFor('wt-2065')).toEqual(['Claude', 'Codex', 'Antigravity']);
+  });
+
+  it('lets a row with its own selectedAgents ignore the default', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        worktrees: [{ ...ROW, selectedAgents: ['gemini', 'copilot'] }],
+        repositories: [],
+        defaultSelectedAgents: ['codex', 'claude'],
+      }),
+    }) as unknown as typeof fetch;
+    render(React.createElement(ReviewTab));
+
+    await waitFor(() => expect(screen.getByTestId('review-item-wt-2065')).toBeTruthy());
+    await waitFor(() => expect(chipsFor('wt-2065')).toEqual(['Gemini', 'Copilot']));
   });
 });

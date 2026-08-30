@@ -197,6 +197,7 @@
       "saving": "Saving...",
       "saved": "Saved",
       "reset": "Reset to default",
+      "builtIn": "Built-in default: {agents}",
       "configured": "Configured",
       "usingBuiltIn": "Using the built-in default",
       "range": "Select between {min} and {max} agents.",

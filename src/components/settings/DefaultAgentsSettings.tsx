@@ -342,6 +342,21 @@ export function DefaultAgentsSettings() {
                 : t('settings.defaultAgents.usingBuiltIn')}
           </span>
         </div>
+
+        {/*
+          * What "Reset to default" actually returns to. Shown only when
+          * something IS stored, because that is the only state in which the
+          * button is live and the only state in which the built-in list is not
+          * already the thing on screen. The server sends `constantDefault` so
+          * this never hardcodes the constant client-side.
+          */}
+        {payload.configured && (
+          <div className="text-xs text-muted-foreground" data-testid="default-agents-builtin">
+            {t('settings.defaultAgents.builtIn', {
+              agents: payload.constantDefault.map(getCliToolDisplayName).join(', '),
+            })}
+          </div>
+        )}
       </div>
     </Card>
   );
