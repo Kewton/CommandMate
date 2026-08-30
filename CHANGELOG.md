@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **fix(ui): Verification の入口を契約なしのブランチにも出し、理由をタッチで読めるようにした** (#2064): ヘッダの `VerificationStatusChip` が `if (!task) return null` で**契約を送っていないブランチでは丸ごと消えていた**ため、Verification を知らない人ほど入口に辿り着けなかった問題を修正。task 行が無いときはペイン名（`verification.title`）＋`RESULT` バッジ「未検証」を描き、クリックでこれまで通りペインを開く（run が無いときのバッジも従来の `—` から「未検証」に変更）。判定理由はこれまで `aria-label` / `title` にしか無く**タッチ端末からは読めなかった**ので、チップ右端に ⓘ トグルを足して同じ文言をポップオーバーに出す（Escape / 外側タップ / ペインを開く操作で閉じる。hover-reveal は使っていないのでマウスとタッチで見えるものが一致する）。不合格ゲート名は両シェルとも「ペインで選択中の run が最新 run と同じとき」だけ渡される値だったため**古い run を選ぶとヘッダから消えていた**が、チップ側で run id をキーに直前の行を保持するようにして解消（新しい run が最新になったら破棄するので、前 run の失敗を新 run の verdict の下に出すことはない）。あわせてモバイル Tools タブの `verification` サブタブが `verification` state 未指定時に消える条件を撤去し、`NotesAndLogsPane` / `MobileContent` の `verification` prop を必須化して、常時表示の PC Activity Bar と**到達可否が型で一致**するようにした。
+
 ## [0.29.1] - 2026-08-30
 
 > **Highlight**: スラッシュコマンドパレットの正確さと、PC のターミナル表示領域の 2 点を直すパッチリリース。パレット側は claude 2.1.251 / codex 0.151.0 を読み直して 3 コマンドを追加し（attestation も同じ版で採り直した）、さらに codex 0.149.1 由来のまま残っていた `/copy` の「Markdown として」という失効済みの説明を、3 claimant（claude / codex / copilot）の原文を突き合わせたうえでフラットキーのまま訂正した。ターミナル側は PC の opencode quick keys が常時展開で 17 個のキーが表示領域を潰していたのを、既定 OPEN のまま折りたためるようにした。
