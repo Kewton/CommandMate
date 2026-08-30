@@ -142,10 +142,11 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
           the keys, the gate and the omissions are identical to PC because they
           come from one component.
           Issue #2106: `collapsible` folds all seventeen behind one 44px toggle,
-          closed by default. The slot below renders for every tool while the
-          session is running, but OpencodeQuickKeys still returns null for
-          anything other than opencode -- so on claude / codex / copilot this is
-          an empty div exactly as it was before #2106. */}
+          closed by default on this screen (Issue #2131 gave PC its own key and
+          its own default; this one is unchanged). The slot below renders for
+          every tool while the session is running, but OpencodeQuickKeys still
+          returns null for anything other than opencode -- so on claude / codex /
+          copilot this is an empty div exactly as it was before #2106. */}
       {terminal.isRunning ? (
         <div className="shrink-0 px-2 pt-1" data-testid="mobile-quick-keys-slot">
           <OpencodeQuickKeys
@@ -156,6 +157,11 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
             onKeysSent={refresh}
             compact
             collapsible
+            // Issue #2131: name the screen explicitly. PC now folds too, and the
+            // two screens keep SEPARATE preferences (`commandmate:mobile:…` here,
+            // `commandmate:desktop:…` there) with opposite defaults -- closing
+            // the strip on a phone must not close it on a 1920px desktop.
+            layout="mobile"
           />
         </div>
       ) : null}

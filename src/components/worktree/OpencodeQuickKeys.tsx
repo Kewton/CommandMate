@@ -61,7 +61,7 @@
  * itself is read from `OPENCODE_LEADER_KEY` rather than written next to each
  * row, so a tool whose leader differs changes one declaration.
  *
- * ## The phone had to fold it away (Issue #2106)
+ * ## Both screens fold it away (Issue #2106 for the phone, #2131 for PC)
  *
  * Seventeen 44px targets do not fit beside a terminal on a phone. Measured in a
  * real browser at the two viewports #2106 names — see
@@ -72,11 +72,47 @@
  * strip and ~140px left for the terminal. The measurement is worse on both
  * counts and is what this component now records.)
  *
- * So the mobile caller passes `collapsible`, which folds the whole strip behind
- * one 44px toggle that is CLOSED by default. PC does not: `collapsible` defaults
- * to false and `TerminalSplitPaneContent` renders the same always-open toolbar
- * it rendered before, because a split pane has the width and nothing there is
- * being squeezed.
+ * #2106 then wrote here that PC did not need the same treatment "because a split
+ * pane has the width and nothing there is being squeezed". **That was wrong, and
+ * it was wrong because nobody had measured PC.** #2131 did:
+ *
+ *   | PC configuration      | quick keys        | TerminalDisplay |
+ *   |-----------------------|-------------------|-----------------|
+ *   | claude, 1 split       | none              | 670px           |
+ *   | opencode, 1 split     | 206px             | 456px  (-32%)   |
+ *   | opencode, 3 splits    | 578px / 11 rows   | **64px** (-90%) |
+ *
+ * The 3-split row carries its own control: splits 1 and 2 showed no strip and
+ * kept 650px of terminal in the SAME frame, so the only variable is the strip.
+ * A split pane does not have the width — it has a THIRD of it — and the terminal
+ * pays the entire bill, because the footer block is `flex-shrink-0` while
+ * `TerminalDisplay` is the sole `flex-1 min-h-0` sibling.
+ *
+ * So both callers pass `collapsible` now. What they do NOT share is the
+ * preference behind it: `layout` selects a per-screen localStorage key and a
+ * per-screen default (phone CLOSED, PC OPEN) — see
+ * {@link useOpencodeQuickKeysDisclosure}. PC's own measurements live in
+ * `tests/e2e/desktop-opencode-quick-keys-2131.spec.ts`, which is the regression
+ * guard #2106 did not have.
+ *
+ * ## Why the key notation disappears on a narrow pane (Issue #2131)
+ *
+ * The phone passes `compact`, which drops the `ctrl+x g` suffix beside each
+ * label; PC did not, so the same seventeen buttons are wider on PC than on a
+ * phone and wrap into MORE rows at the same width (378px / 7 rows on a phone
+ * against 578px / 11 rows in a 3-split PC pane). PC now drops the suffix too —
+ * but only while the strip is actually narrow, via a CSS container query
+ * ({@link OPENCODE_QUICK_KEYS_NOTATION_MIN_CONTAINER_PX}) rather than a measured
+ * breakpoint in JS. It is worth 150px in a 3-split pane (open strip 494px →
+ * 344px), all of which the terminal gets.
+ *
+ * A container query, not `ResizeObserver`: #2131 explicitly refused deciding
+ * anything from an observed width, the pane width is not knowable from the props
+ * this component is given (`TerminalSplitContainer` owns the split count and
+ * `PaneResizer` owns the widths, neither of which reaches here), and the browser
+ * already re-evaluates the query on every resize with no render of ours. The
+ * suffix stays in `title` and `aria-label` at every width, so nothing is lost
+ * from the accessible name — only the printed glyphs go.
  */
 
 import { memo, useCallback, useId, useState } from 'react';
@@ -86,7 +122,10 @@ import type { CLIToolType } from '@/lib/cli-tools/types';
 import { OPENCODE_LEADER_KEY } from '@/types/terminal-keys';
 import { useSpecialKeys } from '@/hooks/useSpecialKeys';
 import { KEY_PRESS_FEEDBACK_RESET_MS } from '@/config/ui-feedback-config';
-import { useOpencodeQuickKeysDisclosure } from '@/hooks/useOpencodeQuickKeysDisclosure';
+import {
+  useOpencodeQuickKeysDisclosure,
+  type OpencodeQuickKeysLayout,
+} from '@/hooks/useOpencodeQuickKeysDisclosure';
 
 export interface OpencodeQuickKeysProps {
   worktreeId: string;
@@ -106,16 +145,25 @@ export interface OpencodeQuickKeysProps {
   /** Phone rendering: drop the key-notation suffix, keep the touch targets. */
   compact?: boolean;
   /**
-   * Issue #2106: wrap the strip in a persisted disclosure (mobile only).
+   * Issue #2106: wrap the strip in a persisted disclosure.
    *
-   * Off by default, so PC (`TerminalSplitPaneContent`) keeps rendering the bare
-   * always-open toolbar it has rendered since #2046 — it has the width, and
-   * nothing there is being squeezed. When on, the component renders a single
-   * 44px toggle row and reveals the toolbar underneath only while open; the
-   * open/closed state is device-wide and survives reloads
-   * ({@link useOpencodeQuickKeysDisclosure}).
+   * When on, the component renders a single 44px toggle row and reveals the
+   * toolbar underneath only while open; the open/closed state is device-wide and
+   * survives reloads ({@link useOpencodeQuickKeysDisclosure}).
+   *
+   * Both real callers pass it since Issue #2131 (the phone since #2106). It
+   * still defaults to OFF, which is what an embedder that has already solved its
+   * own vertical budget gets, and what the always-open toolbar tests assert.
    */
   collapsible?: boolean;
+  /**
+   * Issue #2131: which screen's disclosure preference to read, and how wide the
+   * strip must be before it prints the key notation.
+   *
+   * Only meaningful together with `collapsible`. Defaults to `'mobile'` — the
+   * only caller that existed before #2131 — so nothing about the phone changes.
+   */
+  layout?: OpencodeQuickKeysLayout;
 }
 
 /** One button: a label, the keys it sends, and whether it needs a session. */
@@ -193,6 +241,26 @@ const GROUPS: ReadonlyArray<ReadonlyArray<QuickKeyDef>> = [
  */
 const QUICK_KEY_COUNT = GROUPS.reduce((total, group) => total + group.length, 0);
 
+/**
+ * Container width at or above which the key notation is printed (Issue #2131).
+ *
+ * Declared as a constant so the number is reviewable, but the Tailwind class
+ * below MUST spell the same value as a literal: Tailwind 4 scans source text for
+ * class names (`src/app/globals.css` limits `@source` to components / app /
+ * hooks), so an interpolated `@min-[${N}px]:inline` would generate no CSS at all
+ * and the suffix would be hidden at every width. `tests/unit/components/worktree/
+ * OpencodeQuickKeys-2131.test.tsx` asserts the literal and the constant agree.
+ *
+ * The value is where the suffix stops being free rather than a design token.
+ * Measured by `tests/e2e/desktop-opencode-quick-keys-2131.spec.ts` on a 1920px
+ * desktop: three splits give the strip **428px** of width and one split gives it
+ * **1329px**, so 640 is the only decision the two configurations disagree about.
+ * What the suffix costs at 428px was measured by putting `inline` back in place
+ * of this query and re-running the same spec: the open strip goes 344px → 494px
+ * (three extra wrapped rows) and the terminal 497px → 347px.
+ */
+export const OPENCODE_QUICK_KEYS_NOTATION_MIN_CONTAINER_PX = 640;
+
 export const OpencodeQuickKeys = memo(function OpencodeQuickKeys({
   worktreeId,
   cliToolId,
@@ -201,6 +269,7 @@ export const OpencodeQuickKeys = memo(function OpencodeQuickKeys({
   onKeysSent,
   compact = false,
   collapsible = false,
+  layout = 'mobile',
 }: OpencodeQuickKeysProps) {
   const t = useTranslations('worktree');
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -209,7 +278,8 @@ export const OpencodeQuickKeys = memo(function OpencodeQuickKeys({
   // is one localStorage read on a PC pane that then ignores the value — the
   // alternative was moving the `cliToolId !== 'opencode'` gate into the mobile
   // caller, i.e. a second copy of the one gate #2046 deliberately kept here.
-  const { open: disclosureOpen, toggle: toggleDisclosure } = useOpencodeQuickKeysDisclosure();
+  const { open: disclosureOpen, toggle: toggleDisclosure } =
+    useOpencodeQuickKeysDisclosure(layout);
   const panelId = useId();
 
   const handleClick = useCallback(
@@ -232,7 +302,12 @@ export const OpencodeQuickKeys = memo(function OpencodeQuickKeys({
       // Issue #2106: inside the disclosure the rounded muted panel belongs to the
       // wrapper, so the toolbar drops its own background and top padding and
       // becomes the panel's body.
-      className={`flex flex-wrap items-center gap-1.5 ${
+      // Issue #2131: `@container` makes THIS element the query container for the
+      // notation suffix below, so the suffix answers to the width the buttons
+      // actually wrap in (the split pane's) and not to the viewport's — a
+      // 3-split pane and a 1-split pane on the same 1920px desktop must not get
+      // the same answer.
+      className={`@container flex flex-wrap items-center gap-1.5 ${
         collapsible ? 'px-1.5 pb-1.5' : 'py-1.5 bg-muted rounded-lg'
       }`}
       id={collapsible ? panelId : undefined}
@@ -280,8 +355,16 @@ export const OpencodeQuickKeys = memo(function OpencodeQuickKeys({
                 onClick={() => handleClick(def)}
               >
                 {label}
+                {/* Issue #2131: `compact` (the phone) drops the suffix outright;
+                    everyone else keeps it in the DOM and lets the container
+                    query decide, so one resize of a split shows or hides it with
+                    no re-render. Keep the literal in sync with
+                    OPENCODE_QUICK_KEYS_NOTATION_MIN_CONTAINER_PX — Tailwind
+                    cannot read the constant. */}
                 {compact ? null : (
-                  <span className="ml-1.5 text-xs text-muted-foreground">{def.notation}</span>
+                  <span className="ml-1.5 text-xs text-muted-foreground hidden @min-[640px]:inline">
+                    {def.notation}
+                  </span>
                 )}
               </button>
             );
@@ -291,8 +374,9 @@ export const OpencodeQuickKeys = memo(function OpencodeQuickKeys({
     </div>
   );
 
-  // PC (`TerminalSplitPaneContent`) takes this branch and renders exactly what
-  // it rendered before #2106.
+  // The bare always-open toolbar. No caller takes this branch since Issue #2131
+  // put PC behind a disclosure too; it stays because `collapsible` is opt-in and
+  // an embedder with its own vertical budget should not be forced into a toggle.
   if (!collapsible) return toolbar;
 
   return (
