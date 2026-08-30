@@ -207,6 +207,8 @@ describe('the bundled catalog carries descriptionKey through verbatim', () => {
       'slashCommands.descriptions.memory.copilot',
       'slashCommands.descriptions.plugin.claude',
       'slashCommands.descriptions.plugin.copilot',
+      'slashCommands.descriptions.recap.claude',
+      'slashCommands.descriptions.recap.codex',
       'slashCommands.descriptions.skills.claude',
       'slashCommands.descriptions.skills.codex',
       'slashCommands.descriptions.skills.copilot',
@@ -225,6 +227,55 @@ describe('the bundled catalog carries descriptionKey through verbatim', () => {
           entry.descriptionKey
         );
         expect(text.length).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  // Issue #2162: the decision this file records is not always a split. All
+  // three claimants of /copy (claude, codex, copilot) were re-read against the
+  // sources their attestations name, and they mean the same action on the same
+  // object — put the model's latest output on the clipboard:
+  //
+  //   claude   docs `/copy [N]` — "Copy the last assistant response to clipboard"
+  //   codex    slash_command.rs @ rust-v0.151.0 — "copy the last response, code block, or quote"
+  //   copilot  `copilot help commands` 1.0.80 — "Copy the last response to the clipboard"
+  //
+  // What differs is only how far the selection may narrow (an [N] argument and a
+  // code-block picker on claude, code blocks and quotes on codex, neither on
+  // copilot) — the same kind of per-tool affordance the flat keys for /compact,
+  // /resume and /diff already absorb. So the fix was to correct the one shared
+  // sentence, not to split the key: it had been written from codex 0.149.1's
+  // "copy last response as markdown", which rust-v0.151.0 retracted and which
+  // neither claude nor copilot ever claimed. This pins both halves of that
+  // decision, so a refresh cannot quietly split /copy or restore the markdown
+  // claim without a human passing back through here.
+  it('keeps /copy on one shared key, with no single-tool claim in the sentence', () => {
+    const claimants = (catalogJson as SlashCommandsCatalog).commands.filter(
+      (entry) => entry.name === 'copy'
+    );
+    expect(claimants.map((entry) => (entry.cliTools ?? []).join(','))).toEqual([
+      'claude',
+      'codex',
+      'copilot',
+    ]);
+    expect([...new Set(claimants.map((entry) => entry.descriptionKey))]).toEqual([
+      'slashCommands.descriptions.copy',
+    ]);
+
+    for (const locale of ['en', 'ja'] as const) {
+      const dict = JSON.parse(
+        fs.readFileSync(path.resolve(__dirname, `../../../locales/${locale}/worktree.json`), 'utf8')
+      );
+      // Defined means it is still a flat string: lookupNestedValue returns
+      // undefined for an object, which is what a split would leave here.
+      const text = lookupNestedValue(dict, 'slashCommands.descriptions.copy');
+      expect(text, `${locale} lost the shared /copy string`).toBeDefined();
+      expect(text as string).not.toMatch(/markdown/i);
+      // And every claimant still renders it, rather than the raw key.
+      for (const entry of claimants) {
+        expect(
+          resolveCommandDescription(asSlashCommand(entry), (key) => lookupNestedValue(dict, key) ?? key)
+        ).toBe(text);
       }
     }
   });

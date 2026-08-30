@@ -1,0 +1,170 @@
+version: 1
+title: "Issue #2060: GET /api/worktrees の初回応答から tmux 状態判定を分離する"
+goal: |
+  /pm-auto-issue2dev
+
+  https://github.com/Kewton/CommandMate/issues/2060 を実装してください。
+
+  ## 【重要】Issue 本文に事実誤認が 2 件あります。実測を正としてください
+
+  オーケストレーターが develop 6ab7f6f3 で裏取りした結果、本文の前提が実際より
+  **重く書かれています**。ここを鵜呑みにして最適化すると、効かない場所を直すことになります。
+
+  ### 誤り 1: 「全 worktree × 7 ツールの capture-pane を fan-out」は正確ではない
+  実際は `src/app/api/worktrees/route.ts:38` で **バッチの `listSessions()` が先に 1 回走り**、
+  `capture-pane` は **そのセッション集合に名前が在る probe に対してのみ**発行されます
+  （`src/lib/session/worktree-status-helper.ts:302, 327, 335`）。
+  つまり**起動していないツールのコストはゼロ**です。`CLI_TOOL_IDS` が 7 件なのは事実ですが
+  （`src/lib/cli-tools/types.ts:17`）、7 倍の capture が飛ぶわけではありません。
+  `Promise.all` は `route.ts:41-87`（map コールバックは 42-86）、
+  各 worktree の `detectWorktreeSessionStatus` 呼び出しは 43-50 行目です。
+
+  ### 誤り 2: `worktree-status-helper.ts:487-514` は fan-out ヘルパではない
+  487-514 は `describeEventSourceFor`（宣言 499-516）の doc コメントと本体で、本件と無関係です。
+  **本当の fan-out は `detectWorktreeSessionStatus`（532-623 行目）**で、probe の `Promise.all` が
+  **578-592 行目**、probe の構築（7 primary ＋ alias インスタンス）が 553-576 行目です。
+  claude だけの健全性 probe は **304-310 行目**（`detectInstanceSessionStatus`、291-480 行目の中）で、
+  `src/lib/session/claude-session.ts:383` の `isSessionHealthy` を呼んでいます。
+
+  ### VERIFIED: 計測ログが無いのは本文どおり
+  `server.ts` の `requestHandler` は 166-245 行目で、その中のログは 239 行目の
+  `console.error('handleRequestImpl failed: ...')` だけです。`Date.now()` も `hrtime()` も
+  duration の計算も `server.ts` に 1 つもありません。
+
+  ## 実測済みの現行 JSON 契約（ここは調べ直さなくてよい）
+
+  `GET /api/worktrees` は `{ worktrees: [...], repositories: [...] }` を返す（`route.ts:92-98`）。
+  worktree オブジェクトの出所（`route.ts:56-85`）:
+
+  - **DB 由来**（`getWorktrees`、`src/lib/db/worktree-db.ts:94-102`）:
+    `id, name, path, repositoryPath, repositoryName, description, branch, favorite, status, link,
+    cliToolId, lastViewedAt, updatedAt, selectedAgents, vibeLocalModel, vibeLocalContextWindow`
+    ＋ last-message の集約値
+  - **DB 由来**（`resolveAgentInstances`、54 行目）: `agentInstances`
+  - **tmux 由来**（58 行目の `...status` 展開）: `sessionStatusByCli`, `sessionStatusByInstance`,
+    `isSessionRunning`, `isWaitingForResponse`, `isProcessing`、および capture から畳み込まれる
+    `model`, `reasoningEffort`, `waitingKind`, `waitingSince`, `statusEvidence`,
+    `sessionStatusReason`, `eventSource`
+  - **`?include=review` のときだけ導出**（63-83 行目）: `isStalled`, `nextAction`, `reviewStatus`
+  - `repositories`: DB 由来（`getRepositories`、90 行目）
+
+  ### 消費側（全数。ここも調べ直さなくてよい）
+  - `src/cli/commands/ls.ts:151`（CLI `ls`。`ApiClient.get` 経由）
+  - `src/hooks/useWorktreesCache.ts:146`（UI の唯一のポーラー → `WorktreesCacheProvider` →
+    Sidebar / Home / Sessions / attention count）
+  - `src/lib/api-client.ts:146`（`worktreeApi.getAll`。`externalWorktrees` が無いときの
+    `WorktreeSelectionContext` が使う）
+  - `src/components/review/ReviewTab.tsx:121`（`?include=review` の唯一の呼び出し元）
+  - `src/components/home/TodoWidget.tsx:65`
+  - `src/components/home/AssistantChatPanel.tsx:106`
+  - `src/components/skills/SkillTargetSelector.tsx:80`
+
+  ## 実装内容
+
+  ### ステップ 1（必須・先にやる）: 計測
+  `GET /api/worktrees` の所要時間を**構造化ログ**として出す。既存の `src/lib/logger.ts` を使い、
+  `console.log` を素で残さないこと。少なくとも次を 1 レコードに含める:
+  - 総所要時間（ms）
+  - DB 取得部分の所要時間と tmux 状態判定部分の所要時間の**内訳**
+  - worktree 数、`listSessions()` が返した tmux セッション数、実際に発行した capture 数
+
+  **内訳が取れる形にすることが本題です。** 誤り 1 のとおり capture は起動中セッション数に比例するので、
+  「worktree 数」ではなく「稼働セッション数」との相関を見られるようにしてください。
+
+  計測したら、**この開発機の実データ**（`commandmate ls` で見える worktree 数と稼働セッション数）で
+  1 回実測し、その数値を `dev-reports/issue/2060/measurement.md` に記録してください。
+  オーケストレーターが Issue コメントへ転記します。
+
+  ### ステップ 2: 分離
+  一覧（DB 行）と状態（tmux 由来）を分離し、初回は一覧だけを返せるようにする。
+
+  - **クエリパラメータは additive にすること。** `?includeStatus=0` を付けたときだけ tmux 判定を
+    省く形（＝**無指定は従来どおり状態込み**）にしてください。既定の挙動を変えると
+    上記 7 つの消費側が全部影響を受けます。既存の `?include=review` のパーサ
+    （`src/lib/api/worktrees-include-parser.ts`）と整合する形にしてください。
+  - `commandmate ls --json` の JSON 契約は **additive に保つ**（フィールドを消さない・型を変えない）。
+  - UI 側（`useWorktreesCache.ts`）を初回 `includeStatus=0` → 2 回目以降フル、に変えるかは
+    **ステップ 1 の計測結果で決めてください。** 内訳を見て tmux 部分が支配的でなければ、
+    UI を変えずに「エンドポイントに分離の口を用意した」までで止めて構いません。
+    **その判断と根拠の数値を PR 本文に書いてください。**
+
+  ## 受入条件
+  - 計測結果が `dev-reports/issue/2060/measurement.md` に記録されている（内訳つき）。
+  - 分離後の「一覧のみ」応答が **200ms 未満**（ローカル DB）であることをテストか実測で示す。
+  - `commandmate ls --json` と sidebar の状態表示が、分離後も**同じ値に収束する**ことをテストで固定する。
+  - 無指定（従来どおりの呼び出し）でのレスポンス形が**不変**であることをテストで固定する。
+
+  ## 注意（並列開発中です）
+  - `src/hooks/useWorktreesCache.ts` と `src/components/layout/Sidebar.tsx` と
+    `src/contexts/WorktreeSelectionContext.tsx` は **別ワーカーが Issue #2058/#2059 で同時に
+    編集しています**。scope にも入れていません。**これらのファイルを編集しないでください。**
+    UI 側の変更が必要だと判断した場合は、実装せずに **PR 本文と `dev-reports/issue/2060/measurement.md`
+    に「UI 側でやるべきこと」として書き残してください**（オーケストレーターが後続に回します）。
+  - `src/lib/api-client.ts` も #2058/#2059 側の scope です。触らないでください。
+    CLI 側（`src/cli/commands/ls.ts`）は必要なら触って構いません。
+
+  ## 作業ルール（厳守）
+
+  - **`CHANGELOG.md` と `docs/module-reference.md` を編集しないでください**（scope 外です）。
+    代わりに次の 2 ファイルを書いてください。どちらも `dev-reports/` 配下なので commit には入りません。
+
+    - `dev-reports/changelog/issue-2060.md` — `CHANGELOG.md` の `## [Unreleased]` にそのまま
+      貼れる **1 エントリ**（先頭は `- **<type>(<scope>): …** (#2060): …`）。どの節
+      （`### Added` / `### Changed` / `### Fixed`）に入るかを 1 行目にコメントで書く。
+      **形式は次の実例に合わせてください**（develop の `CHANGELOG.md` にある実エントリを丸ごと 1 本。
+      エントリは**ファイル中では 1 行**で、下で折り返して見えるのは表示上の都合です）:
+
+      ```markdown
+      <!-- ### Fixed -->
+      - **fix(cli): `send` 直後の `wait` が「まだ始まっていない」を完了と読む問題を修正** (#1975): `wait` が `sessionStatus==='ready'` を完了と判定する直前に、**「このインスタンスに最後に渡されたプロンプト」と「エージェント自身が最後に報告したターン終了（`lastStopEventAt`）」を突き合わせる**ゲートを追加。`send` 直後は最新の構造化イベントが直前ターンの `stop` のままなので #1839 の `adoptTurnStart()` が何も採用せず、`turnStartedAt === null` が「決着済み」と読まれてアイドル composer をそのまま完了にしていた（隔離サーバ実測 2026-08-22 / copilot 1.0.80: `send`→`wait` 5 回中 3 回が約 0.3 秒・`basis=scraper_ready`・成果物ゼロで exit 0）。保留は `PENDING_PROMPT_HOLD_MS`=60 秒で打ち切り、`--timeout` / `--stall-timeout` はそれより短ければ従来どおり優先される。
+      ```
+
+      - `- **` で始めること — 集計は `grep -cE '^- \*\*'` なので、外れるとエントリとして数えられません。
+      - `(#2060)` は要約の**外**（`**` を閉じた後）に置くこと — `（Issue #2060）` を要約の中に埋めると
+        機械的に取り出せません。
+      - `<type>` は CLAUDE.md のコミットメッセージ規約と同じ語彙
+        （`feat` / `fix` / `docs` / `refactor` / `test` / `chore` / `ci` / `style`）。
+      - 1 エントリ＝1 行（折らない）。本文がどれだけ長くても改行を入れません。
+
+    - `dev-reports/module-reference/issue-2060.md` — `docs/module-reference.md` の表に足す注記を
+      **行キー（`| \`path\` |`）ごと**に列挙する。既存行への追記なら「どの行に何を足すか」を書く。
+      **既存行に足すときは `grep -n '^| \`<path>\`' docs/module-reference.md` を実行し、その出力
+      （行番号つきの行キー）を断片に書き写してから**書くこと。0 件だった行への追記を指示しない
+      （新しい行を足すなら「新規行」と明記する）。足すものが無ければ「追記なし」の 1 行でよい。実例:
+
+      ```markdown
+      ## 既存行への追記
+      - `src/lib/session/worktree-status-helper.ts` — 実在確認: `docs/module-reference.md:103`（行番号は確認時点のもの）
+        追記内容: 「private `getStatusCaptureLines()` を削除し `resolveCaptureSpec(cliToolId).statusLines` に置換（Issue #1933）」
+
+      ## 新規行
+      追記なし
+      ```
+
+    断片が無いとリリースノートと module-reference に載りません。**実装と同じ commit の時点で書くこと。**
+
+  - **PR を作らないでください。** PR 作成とマージはオーケストレーターが行います。
+  - **commit は 1 本にまとめてください**（`<type>(<scope>): <subject>` 形式）。
+  - Issue 本文を書き換えないでください。訂正が要る場合は commit メッセージか PR 用のメモに書いてください。
+  - 実装が終わったら最後に `IMPL_COMPLETED` とだけ出力してください。
+
+scope:
+  allow:
+    - "src/app/api/worktrees/**"
+    - "src/lib/api/worktrees-include-parser.ts"
+    - "src/lib/session/worktree-status-helper.ts"
+    - "src/lib/session/claude-session.ts"
+    - "src/cli/commands/ls.ts"
+    - "src/types/models.ts"
+    - "server.ts"
+    - "tests/unit/api/**"
+    - "tests/unit/app/api/**"
+    - "tests/unit/lib/api/**"
+    - "tests/unit/lib/session/**"
+    - "tests/unit/cli/commands/ls*"
+    - "tests/integration/**"
+    - "dev-reports/**"
+  deny: []
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true

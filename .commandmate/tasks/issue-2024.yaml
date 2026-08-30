@@ -1,0 +1,114 @@
+version: 1
+title: "Issue #2024: catalog:refresh のツール別説明破壊を直し、codex /agent → /agents を反映する"
+goal: |
+  https://github.com/Kewton/CommandMate/issues/2024 を実装してください。
+  **判断は実機 probe で既に確定しています。** 本文の probe 結果表と陰性対照をそのまま前提にしてよい
+  （ただし下記「裏取り」は行うこと）。
+
+  ## 実装順序（この順を守ること）
+
+  ### 1. まず `catalog:refresh` のバグを直す（これを先にしないと `--write` が破壊的）
+
+  実装は `scripts/refresh-slash-command-catalog.ts` と `src/lib/slash-command-reconcile/**`
+  （`engine.ts` / `locale.ts` あたり）。
+
+  **症状**: 既にツール別説明（locale 値がオブジェクト）を持つ名前に新ツール行を足すとき、
+  `descriptionKey` を**フラット**（`slashCommands.descriptions.agents`）で書き、
+  locale のオブジェクトを新ツールの説明文で**上書きしたフラット文字列に潰す**。
+  結果 opencode / claude の説明が消える。
+
+  **規約（実測）**: ツール別なら行の `descriptionKey` に接尾辞を持たせる。
+  `…descriptions.agents.opencode` / `…descriptions.agents.claude` / `…descriptions.agent.codex`。
+
+  → **locale 値が既にオブジェクトなら、追加行は `…descriptions.<name>.<tool>` を吐く**。
+  既存のツール別エントリは潰さない。回帰テストを置いてください
+  （「オブジェクト形の名前に新ツールを足す」シナリオ）。
+
+  ### 2. カタログへ反映
+
+  - codex `/agent` 行と `slashCommands.descriptions.agent.codex` を **削除**
+    （**copilot の `/agent` は別行なので残す**）
+  - codex `/agents` を追加（`descriptionKey: …descriptions.agents.codex`、
+    説明は実測どおり `view and switch between all active agent sessions`）
+  - codex `/cd` `/pwd` を追加
+  - **`/cd` は codex 専用の説明**を与える。継承文 "Move this session to a new working directory" は
+    誤りで、実機は "change the current working directory"
+  - claude `/artifacts` `/auto-mode-setup` を追加
+  - `verifiedAgainst.codex` を **0.149.0** へ（照合した版を刻む原則。実機 probe は 0.149.0）
+  - **ja 訳を書く**（`[要レビュー]` プレースホルダを残さないこと）
+
+  ### 3. pin の更新
+
+  - `does not carry the Issue #1503 phantom commands`: `/agents` を `[claude, codex, opencode]` へ
+  - 件数 pin: 総数 240 → 244 / codex 53 → 55 / claude 100 → 102 を**推定値として渡します。
+    実数で必ず再確認してください**（合わなければ実数を正とし、食い違いを報告）
+  - `#1503` のコメントに「0.149.0 では `/clear` `/quit` `/subagents` は 3 つとも可視」を追記
+    （当時の 0.144.6 の観察が現行版では成り立たない。振る舞いの pin 自体は「消すな」なので有効）
+
+  ### 4. 構造的な穴（設計判断。結論を commit message に書くこと）
+
+  `exclusions.json` の docblock が予告した再演に当たりました。**exclusions.json は「載せない」判断
+  しか記録できず、「pin を更新すべき実在の新コマンド」を表現できない**ため、reconcile は毎リリース
+  `/agents` を再提案し、適用すると pin が赤くなります。
+
+  **どうするかを判断してください。** 案:
+  - 件数 pin を実数から導出する形へ変え、「カタログとソースの差分でしか赤にならない」ようにする
+  - `#1503` の pin を「削除してはいけない集合」に限定し、「増えてはいけない」を外す
+  - 保留する（その場合、理由をテストのコメントではなく **reconcile が読めるファイル**に置く）
+
+  **やり過ぎないこと。** 4 は「判断して結論を書く」までが必須で、大規模な作り替えが要ると判断したら
+  **実装せず別 Issue の提案として書いて構いません**（その旨を明記すること）。
+
+  ## 裏取り（必須）
+
+  - **私の probe 結果を鵜呑みにせず、コード側の事実を確認してください** —
+    `descriptionKey` の接尾辞規約が本当に上記の形か、orphan 検査が何を使用集合とするか、
+    `/agent` の copilot 行が別に在ること。食い違えば実測を正とし報告してください。
+  - **件数 pin は必ず実数で確認**すること（渡した数値は計算値です）。
+  - **codex の再 probe は不要です**（隔離環境で実施済み。再実行するとユーザーの環境に触ります）。
+    どうしても必要なら `tmux -L <専用socket>` と使い捨て `CODEX_HOME` を使い、
+    `kill-server` を `-L` 無しで書かないこと。
+
+  ## 検証
+
+  - **`npm run catalog:refresh -- --write` を 2 回流しても** locale のツール別説明が壊れないこと
+  - **変異注入**: (a) 修正を戻すと回帰テストが赤 / (b) `/agents` の codex を落とすと pin が赤 /
+    (c) `/cd` の codex 専用説明を消すと description-conflict の検査が赤
+  - 宣言ゲート 11 本すべて
+
+  ## 作業ルール（厳守）
+
+  - **ポート 3000 は本番サーバ（v0.27.0 稼働中）。触らないでください。**
+  - **フル `npm run test:unit` は 1 本までにしてください**（#1985 で同時 2 本までと宣言済み。
+    いま並列ワーカーは居ないので手で 1 回回すのは可）。
+  - **`CHANGELOG.md` と `docs/module-reference.md` を編集しないでください**（scope 外）。
+    `dev-reports/changelog/issue-2024.md`（1 行目に節コメント、2 行目に 1 エントリ 1 行で
+    `- **fix(catalog): <要約>** (#2024): <本文>`。`(#2024)` は太字の外側、改行なし）と
+    `dev-reports/module-reference/issue-2024.md`（行キーの実在を `grep -n` で確認し、
+    その出力を断片に書き写してから書く）に断片を置いてください。
+  - commit は単一。**PR は作らないでください**（私が作ります）。
+  - commit message に「意図的な逸脱」「下調べとの食い違い」「変異注入」「4 の結論」の節を入れる。
+  - 完了したら最後に `IMPL_COMPLETED` とだけ出力してください。
+scope:
+  allow:
+    - "scripts/**"
+    - "src/lib/slash-command-reconcile/**"
+    - "src/lib/slash-command-catalog.ts"
+    - "src/config/**"
+    - "locales/**"
+    - "src/types/**"
+    - "tests/unit/**"
+    - "tests/integration/**"
+    - "dev-reports/changelog/**"
+    - "dev-reports/module-reference/**"
+    - "docs/**"
+  deny: []
+verify:
+  gates: [token-discipline, control-chars, claudemd-size, route-exports, build-cli, build-server, lint, build, typecheck, integration, unit]
+autoYes:
+  mode: allow-listed
+  allowPromptTypes: [yes_no, multiple_choice]
+  denyPatterns: []
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true

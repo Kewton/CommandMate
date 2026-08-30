@@ -1,0 +1,209 @@
+version: 1
+title: "Issue #1937 R11-B: スマホ接続手順を QR 経路へ差し替え、U-8 の OS 対応可否表を作る"
+goal: |
+  /pm-auto-issue2dev
+
+  https://github.com/Kewton/CommandMate/issues/1937 の **R11 のうち利用者導線 2 ファイル ＋ U-8 の実測**を担当します。
+
+  ## 担当ファイル（これ以外は触らない）
+
+  - `docs/user-guide/webapp-guide.md` — `## モバイルからのアクセス`（382 行目あたり）を QR 経路に差し替え、
+    **U-8 の OS 対応可否表**をここに置く
+  - `README.md` — FAQ の `CM_BIND=0.0.0.0` 案内（369 行目あたり）を見直す
+
+  **並列で 2 人の docs ワーカーが動いています。次のファイルを触らないでください**（scope 外です）:
+  `docs/security-guide.md` / `docs/TRUST_AND_SAFETY.md` / `docs/user-guide/cli-operations-guide.md` / `CLAUDE.md`
+
+  **コードは 1 行も変更しません。**
+
+  ## 既存の記述（実測。ここは調べ直さなくてよい）
+
+  `webapp-guide.md:382` の `## モバイルからのアクセス` は現在こうなっています:
+  `### 同一LAN内からのアクセス`（`.env` に `CM_BIND=0.0.0.0` を書いて再起動 → `http://<PCのIP>:3000`）/
+  `### PCのIPアドレスの確認方法` / `### 外出先からのアクセス`（Cloudflare Tunnel を DEPLOYMENT.md に丸投げ）/
+  `### モバイルUI`（タブバーの表）
+
+  `README.md:369` の FAQ: 「Run `commandmate init` and enable external access — this sets
+  `CM_BIND=0.0.0.0`. Then open `http://<your-PC-IP>:3000`」
+
+  **`README.md` は英語、`webapp-guide.md` は日本語です。それぞれの言語に合わせてください。**
+
+  ## 書くべきこと
+
+  1. **`commandmate remote` を第一の推奨経路にする。** 現行の「`CM_BIND=0.0.0.0` ＋ LAN IP」は
+     **認証も暗号化も無いまま LAN に開く**手順なので、`remote` が使えるならそちらが安全です。
+     ただし **`CM_BIND=0.0.0.0` の手順を消さないでください** — LAN 内で完結したい人には今も有効で、
+     `cloudflared` を入れたくない人もいます。**「まず `remote`、それが使えないなら LAN 直結」**の
+     順序にし、LAN 直結側にはリスク（認証なしで LAN に開く）を明記します。
+  2. `### モバイルUI` のタブバー表は**そのまま残す**（QR とは無関係）。
+  3. `README.md` の FAQ は、`remote` の 1 行手順を先に置き、LAN 直結を代替として残す。
+
+  ---
+
+  ## U-8 の実測（**制約つき。逸脱しないこと**）
+
+  設計方針書 §11 の U-8 は「macOS / Linux / WSL2 で対応可否の表を書く」です。
+  オーケストレーターが環境を実測した結果、**この機は macOS (Darwin arm64) で、docker はありますが
+  WSL2 は用意できません**。ユーザーの判断で次の方針が決まっています:
+
+  ### 【厳守】公開 Tunnel を新たに作らないこと
+
+  U-3 の実測で 1 度だけ公開 Tunnel を作る承認を得ましたが、**それは消費済みです。**
+  **`commandmate remote`（= `up`）をフル実行しないでください。** 実行すると公開 URL が
+  インターネットに作られます。**承認を得ていない外向きの操作は行わないこと。**
+
+  計測してよいのは**公開 Tunnel を作らない範囲**: `cloudflared --version`（＝ `detect()` の可否）/
+  `remote status` / `remote stop`（状態ファイル無しの挙動）/ `remote --provider tailscale`
+  （未実装なので `DEPENDENCY_ERROR`）/ 非対話で `--yes` 無しが `CONFIG_ERROR` で止まること
+  （**承認前に止まる**ので Tunnel は作られない）。Linux は **docker コンテナ内**で実測し、
+  コンテナは使い終わったら破棄すること。
+
+  ### 表の書き方
+
+  `| OS | Provider 検出 | 承認フロー | 公開 Tunnel の疎通 | 備考 |` のような形で、
+  **「実測済み」と「未検証」を列または注記で必ず区別**してください。推測を実測に見せかけないこと:
+
+  - **macOS**: 上記範囲を実機で実測 → 実測値を書く
+  - **Linux**: docker で実測 → 実測値を書き、**「コンテナでの実測でありベアメタルとは
+    ネットワーク構成が異なりうる」**と注記
+  - **WSL2**: **「未検証」と明記**し、理由（検証環境が無い）と既知のリスク
+    （**WSL2 は `localhost` 転送の構成差が大きく、Tunnel のアップストリーム `127.0.0.1` が
+    WSL2 内部を指すか Windows 側を指すかが構成依存**）を書く
+  - **全 OS 共通**: 公開 Tunnel の疎通そのものは **R12（実機 UAT）へ送る**と明記する
+
+  実測の生ログと手順は `dev-reports/issue/1937/u8-os-matrix.md` に残してください。
+
+  ## 受入条件
+
+  - `webapp-guide.md` のモバイル節が `commandmate remote` を第一推奨にしている。
+  - **`CM_BIND=0.0.0.0` の手順が残っており**、認証なしで LAN に開くリスクが明記されている。
+  - **OS 対応可否表があり、「実測済み」と「未検証」が区別されている**。
+  - WSL2 が「未検証」として理由つきで書かれている。
+  - `README.md` の FAQ が `remote` を案内している（英語のまま）。
+  - `dev-reports/issue/1937/u8-os-matrix.md` に実測の手順と生ログがある。
+  - **公開 Tunnel を新たに作っていない**（作業ログでそれが分かること）。
+
+  ## 注意
+
+  - **リンク切れを作らないこと。** 相対パスは `ls` で実在を確かめてから書く。
+  - Tailscale Provider を「使える」と書かないこと（未実装の stub です）。
+
+  ## 正準ファクト（3 つの docs ワーカー共通。ここから外れて書かないこと）
+
+  `commandmate remote` は **develop に着地済み**です（PR #2134 / #2135 / #2138 / #2139 / #2140）。
+  以下はコードから確認済みの事実です。**推測で補わず、ここに無いことは書かないでください。**
+
+  ### コマンド
+  ```
+  commandmate remote          # 既定 = up（サーバ起動 + ペアリング）
+  commandmate remote status   # Provider / URL / 期限 / ペアリング状態
+  commandmate remote stop     # Provider を閉じ、CommandMate が作った設定だけを片付ける
+
+    --provider <tailscale|cloudflare>   # 自動選択を上書き
+    --expires <duration>                # remote セッション TTL（既定 8h、1h〜30d）
+    --pairing-expires <duration>        # ペアリングコード TTL（既定 10m、1m〜24h）
+    -p, --port <number>
+    --yes                               # Quick Tunnel の明示承認（非対話環境で必須）
+    --json
+  ```
+  **`--token` と `--auto-yes` 系フラグは存在しません。**
+
+  ### exit code（新規は追加していない）
+  `0` 成功 / `1` DEPENDENCY_ERROR（使える Provider が 1 つも無い）/ `2` CONFIG_ERROR（非対話で
+  承認なし、`--expires` 不正、既存サーバが auth 有効）/ `3` START_FAILED / `4` STOP_FAILED /
+  `99` UNEXPECTED_ERROR
+
+  ### Provider の現状
+  - **`cloudflare-quick`（Cloudflare Quick Tunnel）は実装済み**。`cloudflared` があれば動く
+    （実測: `available:true / version:2025.4.0 / ready:true`）
+  - **`tailscale-serve` は未実装の stub**（R3 が未着手。`available:false`）。
+    **「Tailscale が使える」と書かないでください。**
+  - Provider が 1 つも ready でなければ `DEPENDENCY_ERROR` で止まり、
+    **Tailscale が駄目でも自動で公開 Tunnel へ切り替えません**（利用者の明示承認が要る）
+
+  ### セキュリティ上の性質
+  - ペアリングコードは **一度限り**・既定 10 分で失効。Crockford Base32 26 文字（128 bit）で、
+    **平文はどこにも保存されません**
+  - ハンドオフファイル `~/.commandmate/remote-pairing.json` は **mode 0600**。
+    **消費済みフラグはファイルの不在そのもの**（ペアリング成功と同時に削除）
+  - 起動時にサーバへ渡す環境変数は **`CM_AUTH_TOKEN_HASH` / `CM_AUTH_EXPIRE` /
+    `CM_REMOTE_PAIRING_FILE` の 3 つだけ**。3 つ目は**秘匿値ではなくパス**です。
+    平文の長期トークンを env に置かないのは、`src/lib/tmux/**` が pane にサーバの環境変数を
+    そのまま継承させるため（env に置くと CommandMate が動かしているエージェント自身が読めてしまう）
+  - **`CM_BIND` は読みも書きもしません。** 既定 `127.0.0.1` は変わりません。
+    `remote` は「外へ出す口を増やす」だけで、本体の bind 設定を変えません
+  - **Auto-Yes は既定で無効**。`remote` に有効化フラグを作っていないことが構造的な保証です
+  - 期限切れ時に閉じるのは**外部への口だけ**で、**サーバは落としません**
+    （落とすと PC のローカル利用まで巻き添えになるため）
+  - `remote stop` は状態ファイルが読めないとき、**Provider を推測して片付けにいきません**
+    （「片付けるものが分からない」と言って成功終了。Tailscale Serve の利用者設定を消すと
+    復元手段が無いため）
+
+  ### 既存 QR ログイン（#383）の扱い
+  - **発行側（`QrCodeGenerator`）は撤去済み**。長期トークンを `#token=` に埋める URL を作る UI は
+    **リポジトリ内に存在しません**
+  - **受理側 `useFragmentLogin` の `#token=` は 1 リリース残ります**（deprecation 警告つき）。
+    撤去は Phase 2 です
+
+  ### U-6: Tunnel 越しの Cookie `Secure` 属性（**決定: 現状維持＋docs 明記**）
+  `buildAuthCookieOptions()` の `secure` は `CM_HTTPS_CERT` の有無で決まります。Tunnel 構成は
+  **外側が HTTPS でオリジンは平文 HTTP** なので `Secure` が付きません。**これは正しい挙動です** —
+  `Secure` を立てると `127.0.0.1` の HTTP アクセスで cookie が拒まれ、ローカル利用が壊れます。
+  Tunnel の外側は HTTPS なので、網線上の盗聴リスクは既に下がっています。
+  **コードは変更しません。** この事実と理由を docs に明記するのが今回の対応です。
+
+
+  ## 作業ルール（厳守）
+
+  - **`CHANGELOG.md` と `docs/module-reference.md` を編集しないでください**（scope 外です）。
+    代わりに次の 2 ファイルを書いてください。どちらも `dev-reports/` 配下なので commit には入りません。
+
+    - `dev-reports/changelog/issue-1937r11b.md` — `CHANGELOG.md` の `## [Unreleased]` にそのまま
+      貼れる **1 エントリ**（先頭は `- **<type>(<scope>): …** (#1937): …`）。どの節
+      （`### Added` / `### Changed` / `### Fixed`）に入るかを 1 行目にコメントで書く。
+      **形式は次の実例に合わせてください**（develop の `CHANGELOG.md` にある実エントリを丸ごと 1 本。
+      エントリは**ファイル中では 1 行**で、下で折り返して見えるのは表示上の都合です）:
+
+      ```markdown
+      <!-- ### Fixed -->
+      - **fix(cli): `send` 直後の `wait` が「まだ始まっていない」を完了と読む問題を修正** (#1975): `wait` が `sessionStatus==='ready'` を完了と判定する直前に、**「このインスタンスに最後に渡されたプロンプト」と「エージェント自身が最後に報告したターン終了（`lastStopEventAt`）」を突き合わせる**ゲートを追加。`send` 直後は最新の構造化イベントが直前ターンの `stop` のままなので #1839 の `adoptTurnStart()` が何も採用せず、`turnStartedAt === null` が「決着済み」と読まれてアイドル composer をそのまま完了にしていた（隔離サーバ実測 2026-08-22 / copilot 1.0.80: `send`→`wait` 5 回中 3 回が約 0.3 秒・`basis=scraper_ready`・成果物ゼロで exit 0）。保留は `PENDING_PROMPT_HOLD_MS`=60 秒で打ち切り、`--timeout` / `--stall-timeout` はそれより短ければ従来どおり優先される。
+      ```
+
+      - `- **` で始めること — 集計は `grep -cE '^- \*\*'` なので、外れるとエントリとして数えられません。
+      - `(#1937)` は要約の**外**（`**` を閉じた後）に置くこと — `（Issue #1937）` を要約の中に埋めると
+        機械的に取り出せません。
+      - `<type>` は CLAUDE.md のコミットメッセージ規約と同じ語彙
+        （`feat` / `fix` / `docs` / `refactor` / `test` / `chore` / `ci` / `style`）。
+      - 1 エントリ＝1 行（折らない）。本文がどれだけ長くても改行を入れません。
+
+    - `dev-reports/module-reference/issue-1937r11b.md` — `docs/module-reference.md` の表に足す注記を
+      **行キー（`| \`path\` |`）ごと**に列挙する。既存行への追記なら「どの行に何を足すか」を書く。
+      **既存行に足すときは `grep -n '^| \`<path>\`' docs/module-reference.md` を実行し、その出力
+      （行番号つきの行キー）を断片に書き写してから**書くこと。0 件だった行への追記を指示しない
+      （新しい行を足すなら「新規行」と明記する）。足すものが無ければ「追記なし」の 1 行でよい。実例:
+
+      ```markdown
+      ## 既存行への追記
+      - `src/lib/session/worktree-status-helper.ts` — 実在確認: `docs/module-reference.md:103`（行番号は確認時点のもの）
+        追記内容: 「private `getStatusCaptureLines()` を削除し `resolveCaptureSpec(cliToolId).statusLines` に置換（Issue #1933）」
+
+      ## 新規行
+      追記なし
+      ```
+
+    断片が無いとリリースノートと module-reference に載りません。**実装と同じ commit の時点で書くこと。**
+
+  - **PR を作らないでください。** PR 作成とマージはオーケストレーターが行います。
+  - **commit は 1 本にまとめてください**（`<type>(<scope>): <subject>` 形式）。
+  - Issue 本文を書き換えないでください。訂正が要る場合は commit メッセージか PR 用のメモに書いてください。
+  - 実装が終わったら最後に `IMPL_COMPLETED` とだけ出力してください。
+
+scope:
+  allow:
+    - "docs/user-guide/webapp-guide.md"
+    - "README.md"
+    - "dev-reports/**"
+  deny: []
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true

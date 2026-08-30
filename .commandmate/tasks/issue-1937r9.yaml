@@ -1,0 +1,201 @@
+version: 1
+title: "Issue #1937 R9+R10: commandmate remote 本体（結線の合流点）と秘匿値非漏洩の固定"
+goal: |
+  /pm-auto-issue2dev
+
+  https://github.com/Kewton/CommandMate/issues/1937 の **Phase 1 のうち R9 と R10** を実装してください。
+
+  ## 【最重要】範囲は R9 + R10
+
+  設計方針書 `docs/design/remote-qr-pairing-1937.md`（develop にあります）の §12 が Phase 1 を
+  R1〜R12 に割っています。**R1・R4・R5・R6・R8 は着地済み**（PR #2134 / #2135）なので、
+  あなたは**それらを呼ぶ側＝結線**を書きます。R10 はテストのみで R9 のキー名に依存するため同梱します。
+
+  - **R2（Cloudflare Provider の中身）は別ワーカーが同時に実装中**です。
+    `src/lib/remote/**` を**触らないでください**。§12.1 が「**R9 を R2/R3 の完了待ちにしない**」と
+    明記しており、**registry の stub のまま結線できます**。あなたが使うのは `RemoteProvider` interface だけです。
+  - **R3（Tailscale）は今回スコープ外**（U-2 の実機実測が前提で、この開発機に tailscale が無い）。
+    stub のまま残ります。`--provider tailscale` を指定されたときの経路は書いてよいですが、
+    detect が `available:false` を返す前提のテストにしてください。
+  - **R7（既存 QR ログイン撤去）も別ワーカーが同時に実装中**です。
+    `src/app/login/**`・`locales/**`・`src/components/auth/**` を触らないでください。
+
+  **設計方針書 §5 全体・§6.2・§9.1・§9.2 を必ず読んでから実装してください。** 決定が正です。
+
+  ---
+
+  ## R9: `commandmate remote`
+
+  ### サブコマンド構成（§5.1）
+
+  ```
+  commandmate remote                     # 既定動作 = up（起動 + ペアリング）
+  commandmate remote status              # Provider / URL / 期限 / ペアリング状態
+  commandmate remote stop                # Provider を閉じ、CommandMate が作った設定だけを片付ける
+
+    --provider <tailscale|cloudflare>    # 自動選択を上書き
+    --expires <duration>                 # remote セッション TTL（既定 8h。parseDuration の 1h〜30d 制約）
+    --pairing-expires <duration>         # ペアリングコード TTL（既定 10m）
+    -p, --port <number>                  # start へ委譲
+    --yes                                # Quick Tunnel の明示承認（非対話環境で必須）
+    --json                               # 機械可読出力（status / up 共通）
+  ```
+
+  `instances` と同じ「既定はリスト、動詞は任意引数」構造。`remote` は既定が `up` である点だけ違います。
+  **`--token` は持たせません**（`remote` は自分でトークンを生成する側です）。
+
+  ### 倣う先（§5.2。既存と一貫させること）
+
+  - commander 登録: `createSyncCommand()` / `createInstancesCommand()` の **factory + `addCommand()`**
+  - 副作用の分離: `start.ts` の **`runStart()`（exit しない）＋ `startCommand()`（exit する）** の 2 段構え
+  - 逐次表示: `quickstart.ts` / 依存検出: `PreflightChecker.checkDependency()`（shell を使わない）
+  - 状態の永続化: `PidManager` / `DaemonState` と同形式 / エラー処理: `handleCommandError()`
+  - 監査ログ: `logSecurityEvent({command:'remote', ...})`。**コード・トークンを details に入れない**
+
+  **exit code は新規に足さない**（§5.2）: Provider ゼロ→`DEPENDENCY_ERROR`(1) /
+  非対話で承認なし・`--expires` 不正→`CONFIG_ERROR`(2) / サーバ起動失敗→`START_FAILED`(3) /
+  片付け失敗→`STOP_FAILED`(4) / 想定外→`UNEXPECTED_ERROR`(99)。
+
+  ### `up` の手順（§5.3。この順序で実装してください）
+
+  ```
+  1. 依存検出（registry の detectRemoteProviders()）
+  2. 既存サーバの確認: DaemonManager.isRunning()
+       running かつ auth 無効 → 停止して張り直すか尋ねる（非対話なら CONFIG_ERROR）
+       running かつ auth 有効 → 平文トークンを持たないので再利用できない旨を告げて中断（U-4）
+       stopped → 次へ
+  3. token = generateToken();  hash = hashToken(token)
+  4. pairingCode = generatePairingCode();  pairingHash = hashToken(pairingCode)
+  5. runStart({daemon:true, port, ...}) を、次の env を追加して呼ぶ
+       CM_AUTH_TOKEN_HASH      = hash
+       CM_AUTH_EXPIRE          = --expires
+       CM_REMOTE_PAIRING_FILE  = <path>      ← **秘匿値ではなくパス**
+     併せて <path> に mode 0600 で { schemaVersion, pairingHash, expiresAt, sessionToken } を書く
+     （R5 の `src/lib/security/pairing-code.ts` に `createPairingHandoff()` /
+       `writePairingHandoff()` が既にあります。**再実装しないでください**）
+  6. waitForServer()
+  7. Provider.start({ port }) → URL
+  8. 状態ファイル書き出し（~/.commandmate/remote.json、schemaVersion つきの素の JSON）
+  9. QR 表示（URL + '/login#code=' + pairingCode）
+     ← R8 の `src/cli/utils/qr-terminal.ts` の `renderQrToTerminal()` / `formatQrForTerminal()` を使う。
+       **幅に収まらないと `fits:false` / `null` が返る**ので、その場合は URL をテキストで出す
+  ```
+
+  ### Provider の選択と承認は **R9 の責務**（§6.2）
+
+  registry（`detectRemoteProviders()`）は**候補を順序つきで返すだけ**で、選択も承認もしません。
+  「Tailscale が駄目でも**自動で公開 Tunnel へ切り替えない**」は選択の規則なので、あなたが実装します。
+
+  Quick Tunnel の起動前に**必ず明示承認**を取ってください。非対話なら `--yes` が無い限り
+  `CONFIG_ERROR`。**承認文言は `src/cli/config/security-messages.ts` に定数として置きます**
+  （`REVERSE_PROXY_WARNING` と同じ場所・同じ形）。
+
+  ### 期限の意味（§5.3）
+
+  `--expires` は 2 つを同時に決めます。**サーバ自体は落としません** — `remote` の期限切れで
+  `commandmate stop` 相当が走ると PC のローカル利用まで巻き添えで死にます。**外部への口だけ閉じる。**
+
+  認証トークンは `CM_AUTH_EXPIRE` → `computeExpireAt()` が起動時に固定し、サーバ自身が期限後は全て
+  401 にする。Provider は `remote` のタイマー（または `remote status` 実行時の期限判定）が閉じる。
+
+  ### `remote status` / `stop`（§5.4・§6.3-4）と Auto-Yes（§5.5）
+
+  status は Provider / URL / Remote expires / Pairing（`unused`・`consumed`・`expired`）/ Server を出す。
+  **URL は出すが、ペアリングコードもトークンも出しません。** `remote stop` は状態ファイルが読めないとき
+  Provider を推測して片付けにいかず「片付けるものが分からない」と言って SUCCESS で終わります。
+  Auto-Yes は (1) `--auto-yes` 系フラグを**作らない**、(2) 起動 env に有効化キーが無いことを固定、の 2 つだけ。
+
+  ---
+
+  ## R10: 秘匿値が漏れないことの固定（テストのみ）
+
+  **`src/lib/security/env-sanitizer.ts` は触らないでください。** §7.2 の決定により秘匿値を env に
+  置かないので `SENSITIVE_ENV_KEYS` の変更は不要です。**変更が必要になったなら §7.2 の前提が
+  崩れている**ので、実装せずに報告してください。
+
+  固定するもの（§9.2）:
+
+  - **起動 env のキー集合を完全一致で assert**。`CM_AUTH_TOKEN_HASH` / `CM_AUTH_EXPIRE` /
+    `CM_REMOTE_PAIRING_FILE`（＋ `start` 由来の既存キー）に**完全一致**すること。
+    `tests/unit/**/agent-launch-plan-secrets-1933.test.ts` が `prepareLaunch` の env キーを
+    完全一致で固定しているので、**同じ形に倣ってください**。
+  - `remote` が起動 env に **`CM_BIND` を含めない**（`remote` は `CM_BIND` を読まないし書かない）。
+  - `remote` が起動 env に **Auto-Yes 有効化キーを含めない**。
+  - ハンドオフファイルが **0600** で作られ、ペアリング成功後に消えている。
+
+  ## 触ってはいけないもの（§9.1）
+
+  `server.ts` の `CM_BIND` 解決 / `env-setup.ts` の `ENV_DEFAULTS.CM_BIND` / `init.ts` の書き出し /
+  `middleware.ts` / `auth.ts` の `verifyToken`・`storedTokenHash`・`expireAt` / `ws-server.ts` の
+  upgrade 認証 / `REVERSE_PROXY_WARNING`。
+
+  ## 受入条件
+
+  - `commandmate remote` / `remote status` / `remote stop` が動く（Provider は stub でよい）。
+  - **Provider が 1 つも使えないとき `DEPENDENCY_ERROR`(1)** で、公開 Tunnel へ自動フォールバックしない。
+  - **非対話で `--yes` 無しの Quick Tunnel 承認要求は `CONFIG_ERROR`(2)**。
+  - 起動 env のキー集合が完全一致で固定されている（R10）。
+  - `remote stop` が状態ファイル無しのとき、推測で片付けず SUCCESS で終わる。
+  - **`runStart()` を再実装していない**（既存を呼んでいること）。
+  - `npm run build:cli` が通る。
+
+  ## 作業ルール（厳守）
+
+  - **`CHANGELOG.md` と `docs/module-reference.md` を編集しないでください**（scope 外です）。
+    代わりに次の 2 ファイルを書いてください。どちらも `dev-reports/` 配下なので commit には入りません。
+
+    - `dev-reports/changelog/issue-1937r9.md` — `CHANGELOG.md` の `## [Unreleased]` にそのまま
+      貼れる **1 エントリ**（先頭は `- **<type>(<scope>): …** (#1937): …`）。どの節
+      （`### Added` / `### Changed` / `### Fixed`）に入るかを 1 行目にコメントで書く。
+      **形式は次の実例に合わせてください**（develop の `CHANGELOG.md` にある実エントリを丸ごと 1 本。
+      エントリは**ファイル中では 1 行**で、下で折り返して見えるのは表示上の都合です）:
+
+      ```markdown
+      <!-- ### Fixed -->
+      - **fix(cli): `send` 直後の `wait` が「まだ始まっていない」を完了と読む問題を修正** (#1975): `wait` が `sessionStatus==='ready'` を完了と判定する直前に、**「このインスタンスに最後に渡されたプロンプト」と「エージェント自身が最後に報告したターン終了（`lastStopEventAt`）」を突き合わせる**ゲートを追加。`send` 直後は最新の構造化イベントが直前ターンの `stop` のままなので #1839 の `adoptTurnStart()` が何も採用せず、`turnStartedAt === null` が「決着済み」と読まれてアイドル composer をそのまま完了にしていた（隔離サーバ実測 2026-08-22 / copilot 1.0.80: `send`→`wait` 5 回中 3 回が約 0.3 秒・`basis=scraper_ready`・成果物ゼロで exit 0）。保留は `PENDING_PROMPT_HOLD_MS`=60 秒で打ち切り、`--timeout` / `--stall-timeout` はそれより短ければ従来どおり優先される。
+      ```
+
+      - `- **` で始めること — 集計は `grep -cE '^- \*\*'` なので、外れるとエントリとして数えられません。
+      - `(#1937)` は要約の**外**（`**` を閉じた後）に置くこと — `（Issue #1937）` を要約の中に埋めると
+        機械的に取り出せません。
+      - `<type>` は CLAUDE.md のコミットメッセージ規約と同じ語彙
+        （`feat` / `fix` / `docs` / `refactor` / `test` / `chore` / `ci` / `style`）。
+      - 1 エントリ＝1 行（折らない）。本文がどれだけ長くても改行を入れません。
+
+    - `dev-reports/module-reference/issue-1937r9.md` — `docs/module-reference.md` の表に足す注記を
+      **行キー（`| \`path\` |`）ごと**に列挙する。既存行への追記なら「どの行に何を足すか」を書く。
+      **既存行に足すときは `grep -n '^| \`<path>\`' docs/module-reference.md` を実行し、その出力
+      （行番号つきの行キー）を断片に書き写してから**書くこと。0 件だった行への追記を指示しない
+      （新しい行を足すなら「新規行」と明記する）。足すものが無ければ「追記なし」の 1 行でよい。実例:
+
+      ```markdown
+      ## 既存行への追記
+      - `src/lib/session/worktree-status-helper.ts` — 実在確認: `docs/module-reference.md:103`（行番号は確認時点のもの）
+        追記内容: 「private `getStatusCaptureLines()` を削除し `resolveCaptureSpec(cliToolId).statusLines` に置換（Issue #1933）」
+
+      ## 新規行
+      追記なし
+      ```
+
+    断片が無いとリリースノートと module-reference に載りません。**実装と同じ commit の時点で書くこと。**
+
+  - **PR を作らないでください。** PR 作成とマージはオーケストレーターが行います。
+  - **commit は 1 本にまとめてください**（`<type>(<scope>): <subject>` 形式）。
+  - Issue 本文を書き換えないでください。訂正が要る場合は commit メッセージか PR 用のメモに書いてください。
+  - 実装が終わったら最後に `IMPL_COMPLETED` とだけ出力してください。
+
+scope:
+  allow:
+    - "src/cli/commands/remote.ts"
+    - "src/cli/utils/remote-state.ts"
+    - "src/cli/program.ts"
+    - "src/cli/index.ts"
+    - "src/cli/types/**"
+    - "src/cli/config/security-messages.ts"
+    - "src/cli/config/**"
+    - "tests/unit/cli/**"
+    - "dev-reports/**"
+  deny: []
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true

@@ -182,7 +182,7 @@
       "claude-api": "Load Claude API reference material for your project's language (Python, TypeScript, Java, Go, Ruby, C#, PHP, or cURL) and Managed Agents reference",
       "code-review": "Review the current diff for correctness bugs and cleanup opportunities",
       "color": "Set the prompt bar color for the current session",
-      "copy": "Copy the last response to the clipboard as markdown",
+      "copy": "Copy the last response to the clipboard",
       "dataviz": "Design guidance for charts, graphs, and dashboards",
       "debug": {
         "claude": "Enable debug logging for the current session and troubleshoot issues by reading the session debug log",
@@ -212,7 +212,10 @@
       "powerup": "Discover Claude Code features through quick interactive lessons with animated demos",
       "privacy-settings": "View and update your privacy settings",
       "radio": "Open Claude FM lo-fi radio in your browser",
-      "recap": "Generate a one-line summary of the current session on demand",
+      "recap": {
+        "claude": "Generate a one-line summary of the current session on demand",
+        "codex": "Summarize the current conversation now"
+      },
       "release-notes": "View the changelog in an interactive version picker",
       "reload-plugins": "Reload all active plugins to apply pending changes without restarting",
       "reload-skills": "Re-scan skill and command directories so skills added or changed on disk during the session become available without restarting",
@@ -305,7 +308,9 @@
       "variants": "Switch the model variant",
       "pwd": "show the current working directory",
       "artifacts": "List the artifacts you own or that are shared with you, then attach one to the session, open it in your browser, or copy its link",
-      "auto-mode-setup": "Draft autoMode.environment entries from your project and recent sessions, then review the draft and save it to your user settings"
+      "auto-mode-setup": "Draft autoMode.environment entries from your project and recent sessions, then review the draft and save it to your user settings",
+      "rate-limit-options": "Show ways to keep working when a claude.ai usage limit blocks a request: wait and continue automatically when the limit resets, add usage credits, or upgrade your plan",
+      "workflow-authoring": "Load the reference for writing dynamic workflow scripts: the script API, resume behavior, quality patterns, and worked examples"
     }
   },
   "session": {

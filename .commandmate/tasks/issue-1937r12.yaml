@@ -1,0 +1,153 @@
+version: 1
+title: "Issue #1937 R12: 隔離インスタンスで commandmate remote の実機 UAT を行う"
+goal: |
+  /uat
+
+  https://github.com/Kewton/CommandMate/issues/1937 の **R12（実機 UAT）**を実施します。
+  設計方針書 `docs/design/remote-qr-pairing-1937.md` §12。R1〜R11 は develop に着地済みです。
+
+  ## 成果物
+
+  **`docs/qa/1937-remote-uat-record.md`（追跡対象）** に記録してください。
+  `dev-reports/` は `.gitignore:59` で除外されており commit に入りません。
+  既存の `docs/qa/2002-push-uat-record.md` の構成（現況 → 実施記録テンプレート → 実施 N 回目）に倣ってください。
+
+  ---
+
+  ## 【最重要】隔離インスタンスを公開する。本番を晒さない
+
+  この機の**本番 CommandMate（ポート 3000）は worktree 66 本・稼働 tmux 25 セッション**を抱えています。
+  **絶対に本番インスタンスを公開しないでください。**
+
+  UAT 用に使い捨ての CommandMate を立てます:
+
+  - **別ポート**（3000 以外の空きポート。`CM_PORT` で指定）
+  - **別 DB**（`CM_DB_PATH` を scratchpad 配下の使い捨てファイルへ。**本番 DB に触らない**）
+  - **隔離 HOME**（`HOME` を使い捨てディレクトリへ。`~/.commandmate/.env` が明示 env を上書きするため、
+    HOME 隔離をしないと本番設定を拾います）
+  - worktree の走査源は `WORKTREE_REPOS`。**本番のリポジトリ群を登録しない**（空か、使い捨ての 1 本だけ）
+
+  隔離が効いていることを、**公開する前に**確認してください:
+  - 隔離インスタンスの `/api/worktrees` が返す worktree 数が**本番の 66 とは違う**こと
+  - 本番の 3000 が生きたままであること
+
+  ---
+
+  ## 実施項目（この順で。Cloudflare → Tailscale は必ず直列）
+
+  ### 共通の前提記録
+  開始時に次を採取して記録:
+  - `ps -eo pid,etime,comm -ax | awk '$3 ~ /cloudflared$/'` → **既存 named tunnel は pid=819**
+    （launchd 常駐・9 日以上稼働。**利用者自身のサービス。絶対に触らない**）
+  - `tailscale serve status --json` → **現在 `{}`**（これが復元先）
+  - `tmux ls | grep -c '^mcbd-'` → 稼働セッション数（**1 本も減らさないこと**）
+
+  ### A. Cloudflare Quick Tunnel
+  1. 隔離インスタンスに対して `commandmate remote --provider cloudflare --yes` を実行
+  2. **公開 URL の疎通**を curl で確認（HTTP 応答が返ること）
+  3. **未認証クライアントの遮断** — cookie 無しで API を叩き、**401/403 になること**。
+     **200 が返ったら受入条件違反として記録**すること
+  4. **WebSocket 疎通** — 認証済み cookie を持つクライアントで WS が張れること。
+     未認証では張れないこと
+  5. `commandmate remote status` の出力を記録（**ペアリングコードもトークンも出ていないこと**を確認）
+  6. `commandmate remote stop` → **公開 URL が失効すること**を curl で確認（530 等）
+  7. **既存 named tunnel（pid=819）が生きていること**を確認
+
+  ### B. Tailscale Serve
+  8. **検証用に「利用者の既存設定」役の serve マッピングを 1 本作る**
+     （`--set-path /r12-existing-user` など。R3 の実測どおり `--set-path` を必ず使う）
+  9. 隔離インスタンスに対して `commandmate remote --provider tailscale --yes` を実行
+  10. tailnet 内から URL の疎通を確認（**Serve は tailnet 内に閉じるのでインターネットには出ない**）
+  11. `commandmate remote stop` → **CommandMate が作った分だけ消え、8 で作った「利用者役」が残ること**を
+      `serve status --json` で確認。**これが非破壊確認の本体**
+  12. 8 で作った検証用マッピングを撤去し、**`serve status --json` が `{}` に戻ったことを確認**
+
+  ### C. 終了時の後始末（受入条件）
+  - `serve status --json` が **`{}`** に戻っている
+  - **既存 named tunnel（pid=819）が生存**している
+  - 稼働 tmux セッション数が開始時から**減っていない**
+  - 本番 3000 が HTTP 200 を返す
+  - 隔離インスタンスを停止し、使い捨て DB / HOME を削除
+
+  ---
+
+  ## 【厳守】禁止事項
+
+  - **本番インスタンス（ポート 3000）を公開しない・停止しない・DB に書かない**
+  - `tailscale serve reset` / `clear` / `drain` / `set-config --all` を実行しない
+  - **`tailscale funnel` を実行しない**（Serve と違いインターネットに公開されます）
+  - `tailscale up` / `down` / `logout` を実行しない（利用者のログイン状態を壊す）
+  - **既存 cloudflared プロセス（pid=819）に SIGTERM/SIGKILL を送らない**
+  - `tmux kill-server` を実行しない。他の `mcbd-*` セッションを止めない
+  - 公開 Tunnel を**必要以上に長く開いたままにしない**（確認が済んだら直ちに stop）
+
+  ## スマホ実機項目は**チェックリスト化して残す**（実施しない）
+
+  QR 読取 → ペアリング画面 → PWA 追加 → Push 通知 は実デバイスが要るため、
+  **あなたは実施しません**。代わりに `docs/qa/1937-remote-uat-record.md` に
+  **人間が実施するためのチェックリスト**（手順・期待結果・記録欄）を作ってください。
+  受入条件のどれが未充足のまま残るかを明記すること。
+
+  ## 受入条件
+
+  - `docs/qa/1937-remote-uat-record.md` に、上記 A〜C の**実測値**（コマンド・出力・判定）が記録されている
+  - **未認証クライアントが遮断される**ことが実測で確認されている
+  - **`remote stop` 後に公開 URL が失効する**ことが実測で確認されている
+  - **Tailscale で「利用者役」のマッピングが残る**ことが実測で確認されている
+  - 終了時に `serve status --json` が `{}`、既存 named tunnel が生存、tmux セッション数が不変
+  - スマホ実機項目がチェックリストとして残されている
+  - 判定が「合格 / 不合格 / 未実施」で明示され、**不合格があれば隠さず記録**されている
+
+  ## 作業ルール（厳守）
+
+  - **`CHANGELOG.md` と `docs/module-reference.md` を編集しないでください**（scope 外です）。
+    代わりに次の 2 ファイルを書いてください。どちらも `dev-reports/` 配下なので commit には入りません。
+
+    - `dev-reports/changelog/issue-1937r12.md` — `CHANGELOG.md` の `## [Unreleased]` にそのまま
+      貼れる **1 エントリ**（先頭は `- **<type>(<scope>): …** (#1937): …`）。どの節
+      （`### Added` / `### Changed` / `### Fixed`）に入るかを 1 行目にコメントで書く。
+      **形式は次の実例に合わせてください**（develop の `CHANGELOG.md` にある実エントリを丸ごと 1 本。
+      エントリは**ファイル中では 1 行**で、下で折り返して見えるのは表示上の都合です）:
+
+      ```markdown
+      <!-- ### Fixed -->
+      - **fix(cli): `send` 直後の `wait` が「まだ始まっていない」を完了と読む問題を修正** (#1975): `wait` が `sessionStatus==='ready'` を完了と判定する直前に、**「このインスタンスに最後に渡されたプロンプト」と「エージェント自身が最後に報告したターン終了（`lastStopEventAt`）」を突き合わせる**ゲートを追加。`send` 直後は最新の構造化イベントが直前ターンの `stop` のままなので #1839 の `adoptTurnStart()` が何も採用せず、`turnStartedAt === null` が「決着済み」と読まれてアイドル composer をそのまま完了にしていた（隔離サーバ実測 2026-08-22 / copilot 1.0.80: `send`→`wait` 5 回中 3 回が約 0.3 秒・`basis=scraper_ready`・成果物ゼロで exit 0）。保留は `PENDING_PROMPT_HOLD_MS`=60 秒で打ち切り、`--timeout` / `--stall-timeout` はそれより短ければ従来どおり優先される。
+      ```
+
+      - `- **` で始めること — 集計は `grep -cE '^- \*\*'` なので、外れるとエントリとして数えられません。
+      - `(#1937)` は要約の**外**（`**` を閉じた後）に置くこと — `（Issue #1937）` を要約の中に埋めると
+        機械的に取り出せません。
+      - `<type>` は CLAUDE.md のコミットメッセージ規約と同じ語彙
+        （`feat` / `fix` / `docs` / `refactor` / `test` / `chore` / `ci` / `style`）。
+      - 1 エントリ＝1 行（折らない）。本文がどれだけ長くても改行を入れません。
+
+    - `dev-reports/module-reference/issue-1937r12.md` — `docs/module-reference.md` の表に足す注記を
+      **行キー（`| \`path\` |`）ごと**に列挙する。既存行への追記なら「どの行に何を足すか」を書く。
+      **既存行に足すときは `grep -n '^| \`<path>\`' docs/module-reference.md` を実行し、その出力
+      （行番号つきの行キー）を断片に書き写してから**書くこと。0 件だった行への追記を指示しない
+      （新しい行を足すなら「新規行」と明記する）。足すものが無ければ「追記なし」の 1 行でよい。実例:
+
+      ```markdown
+      ## 既存行への追記
+      - `src/lib/session/worktree-status-helper.ts` — 実在確認: `docs/module-reference.md:103`（行番号は確認時点のもの）
+        追記内容: 「private `getStatusCaptureLines()` を削除し `resolveCaptureSpec(cliToolId).statusLines` に置換（Issue #1933）」
+
+      ## 新規行
+      追記なし
+      ```
+
+    断片が無いとリリースノートと module-reference に載りません。**実装と同じ commit の時点で書くこと。**
+
+  - **PR を作らないでください。** PR 作成とマージはオーケストレーターが行います。
+  - **commit は 1 本にまとめてください**（`<type>(<scope>): <subject>` 形式）。
+  - Issue 本文を書き換えないでください。訂正が要る場合は commit メッセージか PR 用のメモに書いてください。
+  - 実装が終わったら最後に `IMPL_COMPLETED` とだけ出力してください。
+
+scope:
+  allow:
+    - "docs/qa/**"
+    - "dev-reports/**"
+  deny: []
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true

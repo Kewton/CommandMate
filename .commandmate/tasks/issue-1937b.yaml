@@ -1,0 +1,204 @@
+version: 1
+title: "Issue #1937 R5+R6: ペアリングコードの生成・消費と /login 受け口の #code= 対応"
+goal: |
+  /pm-auto-issue2dev
+
+  https://github.com/Kewton/CommandMate/issues/1937 の **Phase 1 のうち R5・R6 だけ**を実装してください。
+
+  ## 【最重要】これは Issue 全体ではありません。範囲を厳守してください
+
+  #1937 は epic 規模で、設計方針書 `docs/design/remote-qr-pairing-1937.md`（**PR #2030 で
+  develop にマージ済み。あなたの worktree に既にあります**）の §12 が Phase 1 を R1〜R12 に
+  割っています。今回あなたが担当するのは **R5・R6 の 2 つだけ**です。
+
+  - **R7（既存 QR ログイン `QrCodeGenerator.tsx` の撤去）は今回やりません。**
+    設計方針書 §12.1 が「**R6 → R7 は直列必須**（`src/app/login/page.tsx` と
+    `locales/*/auth.json` を両方が触るため）」と明記しています。**削除しないでください。**
+  - **R9（`commandmate remote` コマンド本体）は書かないでください。**
+    `src/cli/commands/remote.ts` を作らないこと。
+  - **R1・R4・R8（Provider 抽象・ガード・QR レンダラ）は別ワーカーが同時に実装しています。**
+    `src/lib/remote/**`・`src/cli/utils/qr-terminal.ts`・`package.json` を**触らないでください**
+    （scope にも入れていません）。
+
+  **設計方針書を必ず読んでから実装してください。** 特に §2.3・§7 全体・§9.2。**設計方針書の決定が正**です。
+
+  ---
+
+  ## R5: ペアリングコードの生成・消費
+
+  新規 `src/lib/security/pairing-code.ts`（**Node ランタイム限定。Edge からは使わない**）と
+  新規 `src/app/api/remote/pair/route.ts`、`src/config/auth-config.ts` の `AUTH_EXCLUDED_PATHS` に
+  **1 要素だけ**追加（`/api/remote/pair`）。
+
+  ### 生成とエントロピー（§7.1）
+  - 生成は **`generateToken()` を再利用**（`src/lib/security/auth.ts`。`crypto.randomBytes(32)` の hex 64 文字）。
+  - **表示に使うのは先頭 128 bit を Crockford Base32 で 26 文字にしたもの。**
+    128 bit は「10 分 TTL・1 度限り・レート制限つき」の用途に十分過大です。
+  - `/api/remote/pair` の入力長上限は `/api/auth/login` の **256 文字**に倣う。
+
+  ### 保存先 —— 【設計上の決定。ここを勝手に変えないこと】（§7.2）
+  **秘匿値を env に置きません。** 素直な実装は `CM_REMOTE_SESSION_TOKEN` を起動 env に載せることですが、
+  **それは採りません。** 理由は実測です:
+
+  > `src/lib/tmux/**` は子プロセスに `env:` を渡さない。tmux の pane は**サーバの環境変数をそのまま
+  > 継承する**。`sanitizeEnvForChildProcess()` は `slash-command-catalog.ts` と
+  > `assistant/non-interactive-runner.ts` の 2 箇所でしか呼ばれておらず、エージェントの pane は
+  > そこを通らない。
+
+  つまり env に置いた瞬間、**CommandMate が動かしている Claude / Codex / OpenCode 自身がその値を
+  読めます。** 代わりに **1 度限りのハンドオフファイル**を使います:
+
+  | 何を | どこに |
+  |---|---|
+  | ペアリングコードの**平文** | **どこにも保存しない**（`remote` プロセスのメモリ上だけ） |
+  | ペアリングコードの**ハッシュ**、有効期限、**長期トークンの平文** | `~/.commandmate/remote-pairing.json`、mode **0600**。パスだけを env `CM_REMOTE_PAIRING_FILE` で渡す（パスは秘匿値ではない） |
+  | **消費済みフラグ** | **ファイルの不在そのもの**。ペアリング成功と同時に `unlinkSync` |
+
+  モジュールレベル変数を使わない理由（**重要**）: (1) `server.ts` の module registry と Next の
+  route handler の bundle は**別インスタンス**なので、`server.ts` 側で持っても route から見えない。
+  (2) ファイル削除なら**消費と同時に平文が消える**ので露出時間が初回ペアリングまでに縮む。
+
+  **ファイルは route handler が読みます。** 毎リクエストで `CM_REMOTE_PAIRING_FILE` を読み、
+  検証成功なら **cookie を作る前に unlink** します。
+
+  ### `POST /api/remote/pair` の処理順（§7.3。**この順序が一度限りの本体です**）
+
+  ```
+  POST /api/remote/pair   { code: string }
+
+    0. env CM_REMOTE_PAIRING_FILE が無ければ 404
+    1. createRequestRateLimiter() で固定キーのレート制限
+       （/api/auth/login の RATE_LIMIT_KEY = 'global' と同じ判断。X-Forwarded-For は信頼しない）
+    2. typeof code === 'string' && code.length <= 256
+    3. ハンドオフファイルを読む。無い／壊れている → 410 Gone   ← 消費済みはここに落ちる
+    4. Date.now() > expiresAt なら unlink して 410 Gone
+    5. hashToken(code) を timingSafeEqual で pairingHash と比較。不一致は 401
+    6. unlinkSync(file)          ← 比較成功の直後、cookie を作る前に消す
+    7. cookies.set(AUTH_COOKIE_NAME, sessionToken, buildAuthCookieOptions(getTokenMaxAge()))
+    8. 200 { success: true }     ← ボディにトークンを載せない
+  ```
+
+  - **6 を 7 より前に置くこと。** cookie 生成で例外が出てもファイルは消えている（fail-closed）。
+  - **`sessionToken` は 6 の前にメモリへ読み出しておく**（unlink 後に読めなくなるため）。
+    関数のローカル変数に留め、モジュールレベルに残さないこと。
+  - 成功／失敗は `logSecurityEvent` に記録するが、**コードもトークンも details に入れない**。
+
+  ### 再利用するもの（§7.5。**新規に書かないこと**）
+  `generateToken()` / `hashToken()` / `buildAuthCookieOptions()` / `getTokenMaxAge()` /
+  `parseDuration()` / `computeExpireAt()` / `createRequestRateLimiter()` / `logSecurityEvent()`。
+
+  ### 触ってはいけないもの（§7.5・§9.1）
+  - `verifyToken()` と `src/middleware.ts` の検証ロジック（ペアリングは excluded path なので通りません。
+    **触らないことが最大の安全策**です）
+  - `src/lib/security/env-sanitizer.ts` の `SENSITIVE_ENV_KEYS`、`log-export-sanitizer.ts`
+    （§7.2 の決定により秘匿値を env に置かないため**触る必要がありません**。
+    触る必要が出てきたなら §7.2 の前提が崩れているので、実装せずに報告してください）
+  - `src/lib/ws-server.ts` の upgrade 認証
+  - `server.ts` の `CM_BIND` 解決
+
+  ---
+
+  ## R6: 受け口の転用（**新規ルートを作らない**）
+
+  既存の `src/hooks/useFragmentLogin.ts` を `#code=` 対応に拡張します。**ペアリング画面を
+  新規ルートとして作らないでください。** 既存の `/login`（既に `AUTH_EXCLUDED_PATHS`）を流用するので、
+  excluded に足すのは API 1 本だけで済みます。
+
+  既存の受け口は欲しいものをほぼ持っています（§2.3）:
+  - `history.replaceState` で**アドレスバーと履歴から即座に落とす**
+  - React Strict Mode の二重実行を `processedRef` で防ぐ
+  - `decodeURIComponent` の try/catch、長さ上限 256
+
+  やること:
+  - `#token=` を `#code=` に一般化し、**`code` なら `POST /api/remote/pair`、
+    `token` なら従来どおり `/api/auth/login`** へ振り分ける。
+  - **`#token=` の受理は残す**（§2.2）。既に手元の QR を持っている人が 1 リリースだけ困らないため。
+    `#token=` 経路に **deprecation ログを 1 行**足す（**トークン本体は出さない**）。
+    撤去は Phase 2 です。
+  - `src/app/login/page.tsx` に「ペアリング中」の表示を足す。
+  - `locales/{en,ja}/auth.json` に**キーを追加**する（**削除はしない** — 削除は R7 の担当）。
+
+  ## 受入条件（今回の範囲ぶん）
+  - ペアリングコードが Crockford Base32 26 文字（128 bit）で生成される。
+  - **ペアリングコードは一度だけ使える**（2 回目は 410）ことがテストで固定されている。
+  - **TTL 超過で 410** になることがテストで固定されている。
+  - **ハンドオフファイルが 0600 で作られる**（`statSync().mode & 0o777 === 0o600`）ことと、
+    **200 応答後に `existsSync() === false`** になることがテストで固定されている（§9.2）。
+  - **`AUTH_EXCLUDED_PATHS` に増えたのが 1 本だけ**であることが、**配列の完全一致**で固定されている
+    （§9.2。増やすときにテストが必ず目に入る形にする）。
+  - コード不一致で 401、レート制限が効く、ボディにトークンが載らない、が固定されている。
+  - `useFragmentLogin` が `#code=` を `/api/remote/pair` へ、`#token=` を `/api/auth/login` へ
+    振り分けることがテストで固定されている（既存 `tests/unit/hooks/useFragmentLogin.test.tsx` を拡張）。
+  - `#token=` 経路に deprecation ログが出て、**トークン本体はログに出ない**ことが固定されている。
+  - `QrCodeGenerator.tsx` が**削除されていない**こと（R7 は別 Issue）。
+
+  ## 補足: `Secure` 属性（§7.5 / U-6）
+  `buildAuthCookieOptions()` の `secure` は `CM_HTTPS_CERT` の有無で決まり、Tunnel 越しは
+  オリジンが平文 HTTP なので付きません。これは正しい挙動です（`Secure` を立てると
+  127.0.0.1 の HTTP で cookie が落ちる）。**`buildAuthCookieOptions()` を変更しないでください。**
+  U-6 は R11/R12 で docs に明記する論点です。
+
+  ## 作業ルール（厳守）
+
+  - **`CHANGELOG.md` と `docs/module-reference.md` を編集しないでください**（scope 外です）。
+    代わりに次の 2 ファイルを書いてください。どちらも `dev-reports/` 配下なので commit には入りません。
+
+    - `dev-reports/changelog/issue-1937b.md` — `CHANGELOG.md` の `## [Unreleased]` にそのまま
+      貼れる **1 エントリ**（先頭は `- **<type>(<scope>): …** (#1937): …`）。どの節
+      （`### Added` / `### Changed` / `### Fixed`）に入るかを 1 行目にコメントで書く。
+      **形式は次の実例に合わせてください**（develop の `CHANGELOG.md` にある実エントリを丸ごと 1 本。
+      エントリは**ファイル中では 1 行**で、下で折り返して見えるのは表示上の都合です）:
+
+      ```markdown
+      <!-- ### Fixed -->
+      - **fix(cli): `send` 直後の `wait` が「まだ始まっていない」を完了と読む問題を修正** (#1975): `wait` が `sessionStatus==='ready'` を完了と判定する直前に、**「このインスタンスに最後に渡されたプロンプト」と「エージェント自身が最後に報告したターン終了（`lastStopEventAt`）」を突き合わせる**ゲートを追加。`send` 直後は最新の構造化イベントが直前ターンの `stop` のままなので #1839 の `adoptTurnStart()` が何も採用せず、`turnStartedAt === null` が「決着済み」と読まれてアイドル composer をそのまま完了にしていた（隔離サーバ実測 2026-08-22 / copilot 1.0.80: `send`→`wait` 5 回中 3 回が約 0.3 秒・`basis=scraper_ready`・成果物ゼロで exit 0）。保留は `PENDING_PROMPT_HOLD_MS`=60 秒で打ち切り、`--timeout` / `--stall-timeout` はそれより短ければ従来どおり優先される。
+      ```
+
+      - `- **` で始めること — 集計は `grep -cE '^- \*\*'` なので、外れるとエントリとして数えられません。
+      - `(#1937)` は要約の**外**（`**` を閉じた後）に置くこと — `（Issue #1937）` を要約の中に埋めると
+        機械的に取り出せません。
+      - `<type>` は CLAUDE.md のコミットメッセージ規約と同じ語彙
+        （`feat` / `fix` / `docs` / `refactor` / `test` / `chore` / `ci` / `style`）。
+      - 1 エントリ＝1 行（折らない）。本文がどれだけ長くても改行を入れません。
+
+    - `dev-reports/module-reference/issue-1937b.md` — `docs/module-reference.md` の表に足す注記を
+      **行キー（`| \`path\` |`）ごと**に列挙する。既存行への追記なら「どの行に何を足すか」を書く。
+      **既存行に足すときは `grep -n '^| \`<path>\`' docs/module-reference.md` を実行し、その出力
+      （行番号つきの行キー）を断片に書き写してから**書くこと。0 件だった行への追記を指示しない
+      （新しい行を足すなら「新規行」と明記する）。足すものが無ければ「追記なし」の 1 行でよい。実例:
+
+      ```markdown
+      ## 既存行への追記
+      - `src/lib/session/worktree-status-helper.ts` — 実在確認: `docs/module-reference.md:103`（行番号は確認時点のもの）
+        追記内容: 「private `getStatusCaptureLines()` を削除し `resolveCaptureSpec(cliToolId).statusLines` に置換（Issue #1933）」
+
+      ## 新規行
+      追記なし
+      ```
+
+    断片が無いとリリースノートと module-reference に載りません。**実装と同じ commit の時点で書くこと。**
+
+  - **PR を作らないでください。** PR 作成とマージはオーケストレーターが行います。
+  - **commit は 1 本にまとめてください**（`<type>(<scope>): <subject>` 形式）。
+  - Issue 本文を書き換えないでください。訂正が要る場合は commit メッセージか PR 用のメモに書いてください。
+  - 実装が終わったら最後に `IMPL_COMPLETED` とだけ出力してください。
+
+scope:
+  allow:
+    - "src/lib/security/pairing-code.ts"
+    - "src/app/api/remote/**"
+    - "src/config/auth-config.ts"
+    - "src/hooks/useFragmentLogin.ts"
+    - "src/app/login/page.tsx"
+    - "locales/en/auth.json"
+    - "locales/ja/auth.json"
+    - "tests/unit/lib/security/**"
+    - "tests/unit/app/api/remote/**"
+    - "tests/unit/api/**"
+    - "tests/unit/hooks/useFragmentLogin*"
+    - "tests/unit/config/**"
+    - "dev-reports/**"
+  deny: []
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true
