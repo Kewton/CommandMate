@@ -9,6 +9,7 @@ import Database from 'better-sqlite3';
 import type { Worktree } from '@/types/models';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { parseSelectedAgents } from '@/lib/selected-agents-validator';
+import { getDefaultSelectedAgents } from './app-settings-db';
 import { ACTIVE_FILTER } from './chat-db';
 import {
   deleteWorktreeChildRows,
@@ -141,6 +142,12 @@ export function getWorktrees(
   const worktreeIds = rows.map(row => row.id);
   const lastMessagesByCliMap = getLastMessagesByCliBatch(db, worktreeIds);
 
+  // Issue #2065: read the server-wide default ONCE. `upsertWorktree` never
+  // writes `selected_agents`, so on a scan/sync-populated install every row
+  // below takes the fallback path — resolving it per row would turn one point
+  // query into one per worktree on the sidebar's poll.
+  const appSettingsDefault = getDefaultSelectedAgents(db);
+
   return rows.map((row) => {
     const lastMessagesByCli = lastMessagesByCliMap.get(row.id) || {};
 
@@ -164,7 +171,7 @@ export function getWorktrees(
       status: (row.status as 'ready' | 'in_progress' | 'in_review' | 'done' | null) || null,
       link: row.link || undefined,
       cliToolId: (row.cli_tool_id as CLIToolType | null) ?? 'claude',
-      selectedAgents: parseSelectedAgents(row.selected_agents),
+      selectedAgents: parseSelectedAgents(row.selected_agents, appSettingsDefault),
       vibeLocalModel: row.vibe_local_model ?? null,
       vibeLocalContextWindow: row.vibe_local_context_window ?? null,
     };
@@ -295,7 +302,7 @@ export function getWorktreeById(
     status: (row.status as 'ready' | 'in_progress' | 'in_review' | 'done' | null) || null,
     link: row.link || undefined,
     cliToolId: (row.cli_tool_id as CLIToolType | null) ?? 'claude',
-    selectedAgents: parseSelectedAgents(row.selected_agents),
+    selectedAgents: parseSelectedAgents(row.selected_agents, getDefaultSelectedAgents(db)),
     vibeLocalModel: row.vibe_local_model ?? null,
     vibeLocalContextWindow: row.vibe_local_context_window ?? null,
   };
@@ -501,7 +508,7 @@ export function updateCliToolId(
  *
  * @param db - Database instance
  * @param id - Worktree ID
- * @param selectedAgents - Array of 2-4 CLIToolType values
+ * @param selectedAgents - Array of 2-6 CLIToolType values (MIN/MAX_SELECTED_AGENTS)
  */
 export function updateSelectedAgents(
   db: Database.Database,

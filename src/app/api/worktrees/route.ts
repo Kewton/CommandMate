@@ -27,6 +27,8 @@ import { parseIncludeParam, parseIncludeStatusParam } from '@/lib/api/worktrees-
 import { isWorktreeStalled } from '@/lib/detection/stalled-detector';
 import { getNextAction, getReviewStatus } from '@/lib/session/next-action-helper';
 import { resolveAgentInstances } from '@/lib/session/agent-instances-resolver';
+import { getDefaultSelectedAgents } from '@/lib/db/app-settings-db';
+import { resolveSelectedAgents } from '@/lib/selected-agents-validator';
 import { deriveSessionStatus } from '@/lib/session/status-mapping';
 import { createLogger } from '@/lib/logger';
 import type { PromptType } from '@/types/models';
@@ -79,6 +81,15 @@ export async function GET(request: NextRequest) {
         resolveAgentInstances(db, worktree.id, worktree.selectedAgents),
       ])
     );
+    // Issue #2065: the list is the payload every polling client already reads,
+    // so it is where the server-wide default rides along. Clients keep a
+    // module-scope mirror of it (`@/config/default-agents`) for the handful of
+    // fallbacks that run before — or without — a per-worktree payload. One more
+    // point query on a table with a handful of rows; it is inside the `dbMs`
+    // window on purpose, because that is what it is.
+    const defaultSelectedAgents = resolveSelectedAgents({
+      appSettings: getDefaultSelectedAgents(db),
+    });
     const dbMs = performance.now() - dbStartedAt;
 
     // ---- Phase 2: the status. Every tmux round-trip lives here. -----------
@@ -195,6 +206,10 @@ export async function GET(request: NextRequest) {
       {
         worktrees: worktreesWithStatus,
         repositories,
+        // Issue #2065: unconditional, unlike `statusIncluded` below. It costs
+        // nothing to compute, it is the same for every caller, and the clients
+        // that need it are exactly the ones that never pass a query string.
+        defaultSelectedAgents,
         // Only present when the caller opted out, so the default response shape
         // is byte-for-byte what it was before #2060.
         ...(includeStatus ? {} : { statusIncluded: false }),

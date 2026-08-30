@@ -22,7 +22,10 @@ import {
   parseReviewFilter,
   type ReviewFilter,
 } from '@/config/review-config';
-import { DEFAULT_SELECTED_AGENTS } from '@/lib/selected-agents-validator';
+import {
+  getClientDefaultSelectedAgents,
+  setClientDefaultSelectedAgents,
+} from '@/config/default-agents';
 import { deriveCliStatus } from '@/types/sidebar';
 import { getCliToolDisplayName } from '@/lib/cli-tools/types';
 import { SIDEBAR_STATUS_CONFIG } from '@/config/status-colors';
@@ -121,6 +124,9 @@ export default function ReviewTab() {
       const response = await fetch('/api/worktrees?include=review');
       if (response.ok) {
         const data = await response.json();
+        // Issue #2065: the list carries the server-wide default; adopt it so the
+        // fallback below agrees with the server instead of with the constant.
+        setClientDefaultSelectedAgents(data.defaultSelectedAgents);
         setWorktrees(data.worktrees ?? []);
       }
     } catch {
@@ -237,7 +243,7 @@ export default function ReviewTab() {
             </div>
           ) : (
             filteredWorktrees.map((wt) => {
-              const agents = wt.selectedAgents ?? DEFAULT_SELECTED_AGENTS;
+              const agents = wt.selectedAgents ?? getClientDefaultSelectedAgents();
               return (
                 <Link
                   key={wt.id}
