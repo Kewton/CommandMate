@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **feat(settings): 新規ブランチの既定エージェントを More 画面から設定できるようにした** (#2065): 新しく発見された worktree のタブは `DEFAULT_SELECTED_AGENTS = ['claude','codex','antigravity']` というコンパイル時定数からしか作られなかった（`upsertWorktree` は `selected_agents` を書かず、scan/sync は `agent_instances` も作らないので、新規 worktree は必ず定数の順序・定数の primary になる）。`app_settings.default_selected_agents`（2〜6 件・`CLI_TOOL_IDS` 内・重複なし・**先頭が primary**）と **`GET/PUT /api/settings/default-agents`** を新設し、More 画面に順序変更つきの設定カード（インストール済み CLI を併記。`isInstalled()` の子プロセス起動は `?include=installed` を付けたこの画面だけが払い、30 秒 TTL + single-flight でキャッシュする＝#1913 の「ホットパスで await しない」規約）を追加した。フォールバックの順序は `resolveSelectedAgents()` 1 箇所に集約し、`worktree -> repo -> app_settings -> 定数` の層を配列で宣言する（`repo` 層は #2066 が値を渡すだけで挿さるよう宣言だけ済ませ、本 Issue では実装しない）。サーバ側は `parseSelectedAgents(raw, appSettingsDefault)` と `resolveAgentInstances()` の 2 経路が、クライアント側は 8 箇所のフォールバック（`src/types/sidebar.ts` ×2 / `src/app/sessions/page.tsx` / `src/components/review/ReviewTab.tsx` / `src/hooks/useWorktreeDetailController.ts` ×4）が同じ解決関数を通る。設定が無い環境の挙動は定数のままで不変、既存 worktree の `agent_instances` 行も書き換えない（`agent_instances` があればそれが権威で、早期 return はそのまま）。`GET /api/worktrees` は `defaultSelectedAgents` を無条件で載せ、`/api/capabilities` には**トークン `default-selected-agents` のみ**を足す（値は載せない — この応答は認証前に読めうる面なので、#1925 / DR4-008 のとおりインストール構成を一切反映しないコンパイル時固定リストのまま）。
+
 ## [0.29.1] - 2026-08-30
 
 > **Highlight**: スラッシュコマンドパレットの正確さと、PC のターミナル表示領域の 2 点を直すパッチリリース。パレット側は claude 2.1.251 / codex 0.151.0 を読み直して 3 コマンドを追加し（attestation も同じ版で採り直した）、さらに codex 0.149.1 由来のまま残っていた `/copy` の「Markdown として」という失効済みの説明を、3 claimant（claude / codex / copilot）の原文を突き合わせたうえでフラットキーのまま訂正した。ターミナル側は PC の opencode quick keys が常時展開で 17 個のキーが表示領域を潰していたのを、既定 OPEN のまま折りたためるようにした。
