@@ -282,6 +282,10 @@ describe('VerificationPane onboarding (Issue #2061)', () => {
 
     it('does not offer the drafter once a config exists', () => {
       render(<VerificationPane state={STATES.configured()} />);
+      // Anchored on what this state DOES offer, not only on what it withholds:
+      // an absence assertion alone would also pass if the whole block stopped
+      // rendering, which is the opposite of what it is meant to prove.
+      expect(screen.getByTestId('verification-run-button')).toBeInTheDocument();
       expect(screen.queryByTestId('verification-draft-button')).toBeNull();
     });
   });
@@ -351,6 +355,15 @@ describe('VerificationPane onboarding (Issue #2061)', () => {
   describe('the config read itself', () => {
     it('says it is still reading rather than claiming no gates exist', () => {
       render(<VerificationPane state={buildState({ config: null })} />);
+
+      // The rendered sentence, not just the phase attribute: `data-phase` lives
+      // on the outer <section> and is set whatever the block below draws, so it
+      // stays correct even if the `unknown` branch renders nothing at all —
+      // which is the one outcome this state must not have. The pane has to SAY
+      // it is still reading; silence reads as "there is nothing here".
+      const reading = screen.getByTestId('verification-onboarding-unknown');
+      expect(reading).toHaveTextContent('Reading the declared gates');
+
       expect(screen.getByTestId('verification-onboarding')).toHaveAttribute('data-phase', 'unknown');
       expect(screen.queryByTestId('verification-onboarding-no-config')).toBeNull();
     });

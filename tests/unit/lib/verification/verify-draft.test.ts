@@ -82,11 +82,25 @@ describe('draftVerifyGates against this repository (Issue #2061)', () => {
 
   it('puts the fast checks before the slow ones', () => {
     const order = draft.gates.map((gate) => gate.id);
+
+    /**
+     * Position of a gate, or a failure.
+     *
+     * NOT `indexOf`: it answers -1 for a gate that is not there, and -1 is less
+     * than every real position, so `indexOf(a) < indexOf(b)` passes when `a` was
+     * never drafted at all. This assertion is about ORDER, and a claim about the
+     * order of something absent is not a weaker claim — it is a different one.
+     */
+    const rank = (id: string): number => {
+      expect(order, `${id} is not in the draft, so it has no position`).toContain(id);
+      return order.indexOf(id);
+    };
+
     // Not the exact list — CI changes — but the property that makes a failure
     // readable: a 0.3s guard must not sit behind a 30-minute suite.
-    expect(order.indexOf('lint')).toBeLessThan(order.indexOf('unit'));
-    expect(order.indexOf('typecheck')).toBeLessThan(order.indexOf('unit'));
-    expect(order.indexOf('token-discipline')).toBeLessThan(order.indexOf('lint'));
+    expect(rank('lint')).toBeLessThan(rank('unit'));
+    expect(rank('typecheck')).toBeLessThan(rank('unit'));
+    expect(rank('token-discipline')).toBeLessThan(rank('lint'));
   });
 
   it('refuses install, audit, publish and e2e steps, and says why', () => {
@@ -161,9 +175,20 @@ describe('command classification (Issue #2061)', () => {
   });
 
   it('lets a quoted composite through: the operators are inside an argument', () => {
-    // `sh -c 'CI=true npm test'` is the one spelling that lets a gate carry an
-    // environment variable, so the composition guard has to be quote-aware.
-    expect(refuse("sh -c 'CI=true npm run test:unit'")).toBeNull();
+    // `sh -c '…'` is the one spelling that lets a gate carry an environment
+    // variable or a redirect, so the composition guard has to be quote-aware.
+    //
+    // The fixtures must CONTAIN the operators, or this proves nothing: an
+    // earlier version of this test used `sh -c 'CI=true npm run test:unit'`,
+    // which holds no `&&`, `|`, `;` or `>` at all, and stayed green with the
+    // quote tracking ripped out of `hasShellComposition`.
+    expect(refuse("sh -c 'CI=true npm run test:unit && npm run lint'")).toBeNull();
+    expect(refuse("sh -c 'npm run lint > lint.log'")).toBeNull();
+
+    // The counter-example, so this is a claim about QUOTING and not a claim
+    // that the guard is off: the same operators unquoted are still refused.
+    expect(refuse('npm run test:unit && npm run lint')).toBe('multi-command');
+    expect(refuse('npm run lint > lint.log')).toBe('multi-command');
   });
 
   it('picks a quote character the command does not contain', () => {
