@@ -990,7 +990,12 @@
       "failingGates": "Gates that did not pass: {gates}",
       "gatesPassed": "All {count} gates passed",
       "openHint": "Open the Verification pane",
-      "dash": "—"
+      "dash": "—",
+      "unverified": "Not verified",
+      "noTask": "No execution contract has been sent to this branch",
+      "reasonHeading": "Why this verdict",
+      "showReason": "Show why",
+      "hideReason": "Hide why"
     }
   },
   "task": {

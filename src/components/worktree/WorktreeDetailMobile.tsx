@@ -204,8 +204,13 @@ interface MobileContentProps {
    * [Issue #1816] Task contract + verification runs for the Tools tab's
    * `Verification` sub-tab. Owned by `useWorktreeVerification` in the detail
    * controller — the same object the header chip reads.
+   *
+   * [Issue #2064] Required, mirroring `NotesAndLogsPane`: an optional state was
+   * what let the mobile Verification sub-tab disappear while the PC Activity
+   * Bar kept showing its icon. Every shell that mounts this already owns the
+   * hook's result, so nothing had to start supplying it.
    */
-  verification?: WorktreeVerificationState;
+  verification: WorktreeVerificationState;
   /** [Issue #1816] Jump the Tools tab to a sub-tab (the header chip). */
   toolsSubTabRequest?: SubTabRequest | null;
 }
