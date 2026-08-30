@@ -77,6 +77,7 @@ function getErrorMessage(error: unknown): string {
  * sat behind `cliToolId === 'claude'`. The values themselves are unchanged, and
  * `tests/unit/lib/claude-session.test.ts` still pins every verdict this
  * function reaches.
+ */
 
 // ----- Timeout and Polling Constants (OCP-001) -----
 // These constants are exported to allow configuration and testing.
