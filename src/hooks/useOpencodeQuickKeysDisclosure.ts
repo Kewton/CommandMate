@@ -1,8 +1,9 @@
 /**
- * useOpencodeQuickKeysDisclosure Hook (Issue #2106)
+ * useOpencodeQuickKeysDisclosure Hook (Issue #2106, split per screen in #2131)
  *
- * Owns the persisted open/closed state of the mobile opencode quick-keys strip
- * ({@link OpencodeQuickKeys} in `collapsible` mode).
+ * Owns the persisted open/closed state of the opencode quick-keys strip
+ * ({@link OpencodeQuickKeys} in `collapsible` mode) — one preference per SCREEN
+ * (`'mobile'` | `'desktop'`), never one shared between them.
  *
  * ## Why the strip needed a disclosure at all
  *
@@ -26,6 +27,24 @@
  * genuinely differs per worktree) would silently reset to closed on every new
  * worktree and make the user re-open it each time.
  *
+ * ## Why PC gets its OWN key and its OWN default (Issue #2131)
+ *
+ * #2131 measured the PC split pane and found the strip costs 206px at one split
+ * and **578px across eleven wrapped rows at three**, which left `TerminalDisplay`
+ * 64px — a 90% loss, because the footer block is `flex-shrink-0` and the terminal
+ * is the only `flex-1 min-h-0` sibling, so it absorbs the whole cost. So PC folds
+ * too. But it does not share the phone's preference:
+ *
+ *   - **Separate key.** The phone's key is literally named `…:mobile:…`. Sharing
+ *     it would mean closing the strip on a phone silently closes it on a desktop
+ *     that has room for it, and vice versa. The two screens are answering
+ *     different questions, so they get different answers.
+ *   - **Opposite default.** The phone starts CLOSED because at 360x640 the open
+ *     strip leaves the terminal ZERO pixels. A PC pane at one split keeps 456px
+ *     of terminal with the strip open, which is usable, and #2046's whole point
+ *     is that these chords have no other route in — so PC starts OPEN and the
+ *     user folds it when a third split squeezes the pane.
+ *
  * @module hooks/useOpencodeQuickKeysDisclosure
  */
 
@@ -34,9 +53,30 @@
 import { useCallback } from 'react';
 import { useLocalStorageState } from './useLocalStorageState';
 
-/** Device-wide localStorage key for the mobile quick-keys disclosure. */
+/**
+ * Which screen's disclosure preference a strip reads (Issue #2131).
+ *
+ * Not a viewport measurement — it is the CALLER naming itself.
+ * `MobileTerminalTab` is the mobile surface and `TerminalSplitPaneContent` is
+ * the desktop one; both are rendered by a layout that has already decided which
+ * screen it is (`useIsMobile`), so re-deriving it here would be a second,
+ * disagreeing source of the same fact.
+ */
+export type OpencodeQuickKeysLayout = 'mobile' | 'desktop';
+
+/** Device-wide localStorage key for the MOBILE quick-keys disclosure. */
 export const OPENCODE_QUICK_KEYS_OPEN_STORAGE_KEY =
   'commandmate:mobile:opencodeQuickKeysOpen';
+
+/**
+ * Device-wide localStorage key for the PC (split pane) disclosure (Issue #2131).
+ *
+ * Deliberately NOT the mobile key: see the module docblock. `desktop:` mirrors
+ * the `mobile:` segment that has been in the other key since #2106, so the pair
+ * reads as one namespace with two screens rather than two unrelated settings.
+ */
+export const OPENCODE_QUICK_KEYS_DESKTOP_OPEN_STORAGE_KEY =
+  'commandmate:desktop:opencodeQuickKeysOpen';
 
 /**
  * Closed by default (Issue #2106).
@@ -47,6 +87,35 @@ export const OPENCODE_QUICK_KEYS_OPEN_STORAGE_KEY =
  * constant itself and not merely the hook's first render.
  */
 export const OPENCODE_QUICK_KEYS_DEFAULT_OPEN = false;
+
+/**
+ * PC starts OPEN (Issue #2131).
+ *
+ * Also not a taste call, and deliberately the OPPOSITE of the phone's. #2131
+ * measured 206px of strip against a 800px-wide pane at one split — the terminal
+ * keeps 456px, which is a working terminal — so defaulting PC to closed would
+ * hide seventeen otherwise-unreachable chords to buy pixels that pane is not
+ * short of. The 3-split case (64px of terminal) is what the toggle is for.
+ *
+ * Asserted as a constant in `tests/unit/hooks/…-2131.test.ts` for the same
+ * reason {@link OPENCODE_QUICK_KEYS_DEFAULT_OPEN} is: a first-render check alone
+ * would stay green if this flipped and the hook negated it.
+ */
+export const OPENCODE_QUICK_KEYS_DESKTOP_DEFAULT_OPEN = true;
+
+/** The (key, default) pair each screen reads. One row per screen, no fallthrough. */
+export const OPENCODE_QUICK_KEYS_DISCLOSURE_BY_LAYOUT: Readonly<
+  Record<OpencodeQuickKeysLayout, { readonly storageKey: string; readonly defaultOpen: boolean }>
+> = {
+  mobile: {
+    storageKey: OPENCODE_QUICK_KEYS_OPEN_STORAGE_KEY,
+    defaultOpen: OPENCODE_QUICK_KEYS_DEFAULT_OPEN,
+  },
+  desktop: {
+    storageKey: OPENCODE_QUICK_KEYS_DESKTOP_OPEN_STORAGE_KEY,
+    defaultOpen: OPENCODE_QUICK_KEYS_DESKTOP_DEFAULT_OPEN,
+  },
+};
 
 const isBoolean = (value: unknown): value is boolean => typeof value === 'boolean';
 
@@ -61,15 +130,22 @@ export interface UseOpencodeQuickKeysDisclosureReturn {
 }
 
 /**
- * Read/write the persisted disclosure state of the mobile quick-keys strip.
+ * Read/write the persisted disclosure state of one screen's quick-keys strip.
  *
- * SSR-safe: starts at {@link OPENCODE_QUICK_KEYS_DEFAULT_OPEN} and hydrates from
- * localStorage on mount, exactly like {@link useGitPaneTabState}.
+ * SSR-safe: starts at that screen's default and hydrates from localStorage on
+ * mount, exactly like {@link useGitPaneTabState}.
+ *
+ * @param layout - Which screen is asking (Issue #2131). Defaults to `'mobile'`,
+ *   which is the only caller that existed before #2131 and keeps every
+ *   pre-#2131 call site reading the identical key and default.
  */
-export function useOpencodeQuickKeysDisclosure(): UseOpencodeQuickKeysDisclosureReturn {
+export function useOpencodeQuickKeysDisclosure(
+  layout: OpencodeQuickKeysLayout = 'mobile',
+): UseOpencodeQuickKeysDisclosureReturn {
+  const { storageKey, defaultOpen } = OPENCODE_QUICK_KEYS_DISCLOSURE_BY_LAYOUT[layout];
   const { value: open, setValue: setOpen, isAvailable } = useLocalStorageState<boolean>({
-    key: OPENCODE_QUICK_KEYS_OPEN_STORAGE_KEY,
-    defaultValue: OPENCODE_QUICK_KEYS_DEFAULT_OPEN,
+    key: storageKey,
+    defaultValue: defaultOpen,
     validate: isBoolean,
   });
 
