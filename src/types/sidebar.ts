@@ -43,6 +43,19 @@ export type BranchStatus = 'idle' | 'ready' | 'running' | 'waiting' | 'generatin
 export type BranchWaitingKind = 'prompt' | 'menu' | 'unclassified';
 
 /**
+ * The `sessionStatusReason` token that means "the pane is there, the agent is
+ * not" (Issue #2070).
+ *
+ * Restated rather than imported from `@/lib/detection/status-reason` for the
+ * same reason {@link BranchWaitingKind} is declared structurally: every sidebar
+ * client component pulls this module in, and it must keep no edge — not even a
+ * type-only one — into the detector's module graph.
+ * `tests/unit/detection/tool-liveness-2070.test.ts` pins the two equal, so the
+ * restatement cannot drift.
+ */
+export const EXITED_STATUS_REASON = 'exited';
+
+/**
  * `BranchStatus` → `SessionStatus`, so the sidebar can reuse `getNextAction`
  * (Issue #1787) instead of growing a second next-action table.
  *
@@ -100,18 +113,27 @@ export function aggregateCliStatus(
  * @param cliStatus - Per-instance status map, keyed by agent-instance id
  * @param labels - Optional instance-id → display-label map (Issue #878). When a
  *   key is absent, falls back to the CLI tool display name for that id.
+ * @param exitedSuffix - Optional annotation for an instance whose session is
+ *   still there and whose AGENT is not (Issue #2070). Returning a string
+ *   appends it in parentheses — `Codex: idle (exited)` — and returning null
+ *   leaves the row exactly as it was. A callback rather than a boolean map
+ *   because the word is user-facing and therefore localized, and this module
+ *   runs on the server where `t()` cannot be called (the same rule
+ *   `NEXT_ACTION_KEYS` follows).
  * @returns Comma-separated "Label: status" string ('' when empty/absent)
  */
 export function formatCliStatusBreakdown(
   cliStatus?: Partial<Record<string, BranchStatus>>,
-  labels?: Record<string, string>
+  labels?: Record<string, string>,
+  exitedSuffix?: (instanceId: string) => string | null
 ): string {
   if (!cliStatus) return '';
   return Object.entries(cliStatus)
-    .map(
-      ([instanceId, status]) =>
-        `${labels?.[instanceId] ?? getCliToolDisplayNameSafe(instanceId, instanceId)}: ${status ?? 'idle'}`
-    )
+    .map(([instanceId, status]) => {
+      const label = labels?.[instanceId] ?? getCliToolDisplayNameSafe(instanceId, instanceId);
+      const suffix = exitedSuffix?.(instanceId);
+      return `${label}: ${status ?? 'idle'}${suffix ? ` (${suffix})` : ''}`;
+    })
     .join(', ');
 }
 
@@ -213,6 +235,21 @@ export interface SidebarBranchItem {
    * `getNextAction`. Resolved with `useTranslations('worktree')` at render.
    */
   nextActionKey?: NextActionKey;
+  /**
+   * Agent-instance ids whose tmux session is still there and whose AGENT is
+   * gone (Issue #2070).
+   *
+   * The instance's `cliStatus` entry stays `idle` — that IS its status, and a
+   * sixth `BranchStatus` would ripple into the colours, the sort order and the
+   * dot's emphasis tiers for a distinction that is not about how urgent the row
+   * is. What the id buys is the sentence in the breakdown tooltip: `Codex: idle
+   * (exited)` tells the operator that something died under them, which plain
+   * `idle` — the same word a worktree nobody ever started shows — cannot.
+   *
+   * Empty for every payload that predates the server change, so a stale client
+   * annotates nothing and renders exactly what it rendered before.
+   */
+  exitedInstanceIds?: string[];
 }
 
 /**
@@ -276,9 +313,11 @@ function labelForUnknownInstance(instanceId: string): string {
 function deriveSidebarCliStatus(worktree: Worktree): {
   cliStatus: Partial<Record<string, BranchStatus>>;
   cliStatusLabels: Record<string, string>;
+  exitedInstanceIds: string[];
 } {
   const cliStatus: Partial<Record<string, BranchStatus>> = {};
   const cliStatusLabels: Record<string, string> = {};
+  const exitedInstanceIds: string[] = [];
 
   const byInstance = worktree.sessionStatusByInstance;
 
@@ -288,8 +327,11 @@ function deriveSidebarCliStatus(worktree: Worktree): {
     for (const agent of agents) {
       cliStatus[agent] = deriveCliStatus(worktree.sessionStatusByCli?.[agent]);
       cliStatusLabels[agent] = getCliToolDisplayName(agent);
+      if (worktree.sessionStatusByCli?.[agent]?.sessionStatusReason === EXITED_STATUS_REASON) {
+        exitedInstanceIds.push(agent);
+      }
     }
-    return { cliStatus, cliStatusLabels };
+    return { cliStatus, cliStatusLabels, exitedInstanceIds };
   }
 
   // Configured roster: explicit agentInstances, else primaries per selectedAgents.
@@ -303,6 +345,9 @@ function deriveSidebarCliStatus(worktree: Worktree): {
     rosterIds.add(instance.id);
     cliStatus[instance.id] = deriveCliStatus(byInstance[instance.id]);
     cliStatusLabels[instance.id] = getInstanceLabel(instance);
+    if (byInstance[instance.id]?.sessionStatusReason === EXITED_STATUS_REASON) {
+      exitedInstanceIds.push(instance.id);
+    }
   }
 
   // Surface any RUNNING instance missing from the roster (e.g. a `claude`
@@ -316,7 +361,7 @@ function deriveSidebarCliStatus(worktree: Worktree): {
     cliStatusLabels[instanceId] = labelForUnknownInstance(instanceId);
   }
 
-  return { cliStatus, cliStatusLabels };
+  return { cliStatus, cliStatusLabels, exitedInstanceIds };
 }
 
 /**
@@ -344,7 +389,7 @@ export function toBranchItem(worktree: Worktree): SidebarBranchItem {
   // agentInstances) so instances outside selectedAgents and alias instances are
   // reflected. Falls back to the legacy selectedAgents path when no per-instance
   // data is present.
-  const { cliStatus, cliStatusLabels } = deriveSidebarCliStatus(worktree);
+  const { cliStatus, cliStatusLabels, exitedInstanceIds } = deriveSidebarCliStatus(worktree);
 
   // Issue #1787: the row's emphasis and its "what do I do next" label both come
   // from the AGGREGATED status, matching the single dot the row renders.
@@ -361,6 +406,7 @@ export function toBranchItem(worktree: Worktree): SidebarBranchItem {
     description: worktree.description,
     cliStatus,
     cliStatusLabels,
+    exitedInstanceIds,
     worktreePath: worktree.path,
     waitingKind,
     awaitingInstruction,

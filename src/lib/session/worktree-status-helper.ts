@@ -7,7 +7,8 @@
  * Provides batch session status detection for all CLI tools of a given worktree,
  * including:
  * - Session existence check via pre-queried tmux session name Set
- * - Claude-only health check (other tools use simple session existence)
+ * - Per-tool liveness probe: "the session is there, but is the TOOL?"
+ *   (Issue #2070; claude-only before that, hence the bug it fixes)
  * - Terminal output capture and status detection
  * - Stale pending prompt cleanup
  */
@@ -16,9 +17,10 @@ import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { CLI_TOOL_IDS, type CLIToolType } from '@/lib/cli-tools/types';
 import { captureSessionOutput } from './cli-session';
 import { detectSessionStatus } from '@/lib/detection/status-detector';
+import { STATUS_REASON } from '@/lib/detection/status-reason';
 import { sessionStatusToActivityFlags } from './status-mapping';
 import { resolveCaptureSpec } from '@/lib/cli-tools/capture-spec';
-import { isSessionHealthy } from './claude-session';
+import { probeToolSessionLiveness } from '@/lib/cli-tools/session-liveness';
 import { getLastServerResponseTimestamp, buildCompositeKey } from '@/lib/polling/auto-yes-manager';
 import { GLOBAL_SESSION_WORKTREE_ID } from '@/lib/session/global-session-constants';
 import { peekPromptWaiting } from '@/lib/session/prompt-waiting-composition';
@@ -68,7 +70,15 @@ export interface StatusDetectionMetrics {
   probeCount: number;
   /** `capture-pane` calls actually issued (throwing ones included). */
   captureCount: number;
-  /** `isSessionHealthy` calls actually issued (claude primaries/aliases only). */
+  /**
+   * Liveness probes actually issued — one `capture-pane` each.
+   *
+   * Issue #2070 widened this from "claude primaries/aliases only": the check it
+   * counts is no longer claude's alone, so a worktree with a running codex now
+   * costs the same two round trips a running claude has always cost. It is
+   * still one probe per RUNNING session and zero for a worktree with nothing
+   * running, which is the property this counter exists to make visible.
+   */
   healthCheckCount: number;
 }
 
@@ -331,12 +341,28 @@ async function detectInstanceSessionStatus(
   // Issue #405: Use Set.has() instead of individual hasSession() calls
   let isRunning = sessionNameSet.has(sessionName);
 
-  // [DR1-005] Claude-only health check (other tools use simple session existence)
-  if (isRunning && cliToolId === 'claude') {
+  // Issue #2070: the liveness probe, for EVERY tool.
+  //
+  // This branch used to read `if (isRunning && cliToolId === 'claude')`, and
+  // that condition was the whole bug: a tmux session outlives its agent
+  // whenever the agent quits, updates itself or crashes, and `has-session`
+  // cannot tell the difference. So a codex pane that had fallen back to the
+  // login shell kept a green dot here, `isRunning` stayed true for the send
+  // route, and every subsequent `send` died in `waitForPrompt` with no recovery
+  // short of killing the session by hand.
+  //
+  // The rule is unchanged and so is claude's answer — `resolveLivenessSpec`
+  // hands claude exactly the patterns, thresholds and orderings
+  // `isSessionHealthy` has always applied (which is still the function the two
+  // claude-only call sites use, and it now delegates here). What is new is that
+  // six other specs exist to ask it with.
+  let exitedReason: string | null = null;
+  if (isRunning) {
     if (metrics) metrics.healthCheckCount++;
-    const healthResult = await isSessionHealthy(sessionName);
-    if (!healthResult.healthy) {
+    const liveness = await probeToolSessionLiveness(sessionName, cliToolId);
+    if (!liveness.alive) {
       isRunning = false;
+      exitedReason = liveness.reason;
     }
   }
 
@@ -507,6 +533,14 @@ async function detectInstanceSessionStatus(
     ...(effort !== null ? { reasoningEffort: effort } : {}),
     ...(statusEvidence !== null ? { statusEvidence } : {}),
     ...(sessionStatusReason !== null ? { sessionStatusReason } : {}),
+    // Issue #2070: the one reason published for a session that is NOT running.
+    // `statusEvidence: 'positive'` is not a formality — tmux was asked, the
+    // pane was read, and a shell prompt was found where the agent's composer
+    // should be. That is an observation, which is the distinction §4 D1 draws
+    // (and the same call `current-output-builder` makes for `session_not_running`).
+    ...(exitedReason !== null
+      ? { sessionStatusReason: STATUS_REASON.EXITED, statusEvidence: 'positive' as const }
+      : {}),
     ...(lastKnown !== null
       ? { lastKnownStatus: lastKnown.status, lastKnownStatusAt: lastKnown.at }
       : {}),

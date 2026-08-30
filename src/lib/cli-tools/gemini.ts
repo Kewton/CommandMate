@@ -106,8 +106,18 @@ export class GeminiTool extends BaseCLITool {
     const exists = await hasSession(sessionName);
     if (exists) {
       await this.reconcileExistingSession(sessionName);
-      logger.info('gemini-session-sessionname');
-      return;
+
+      // Issue #2070: this branch used to return unconditionally. A tmux session
+      // outlives the agent that was launched into it — a quit, a self-update, a
+      // crash — and the launch was then skipped for a pane holding nothing but a
+      // shell prompt, which left `kill-session` by hand as the only recovery.
+      // When the tool is gone we fall THROUGH and re-send the launch command
+      // into the same pane.
+      if (await this.isToolLive(sessionName, { confirm: true })) {
+        logger.info('gemini-session-sessionname');
+        return;
+      }
+      logger.warn('gemini-session-relaunch', { sessionName });
     }
 
     // Issue #1762: fence this instance's structured events off from the process
@@ -116,18 +126,27 @@ export class GeminiTool extends BaseCLITool {
     // pane exists, so no live pane is ever judged against a stale generation.
     // Bumped even if the launch below then fails: falling back to the screen
     // scraper is always safe, trusting a dead session's events is not.
+    //
+    // Issue #2070: reached on the RELAUNCH path too — the pane is the same one,
+    // but the process is not, and the dead process's events must not be read as
+    // the new one's.
     beginAgentSession({ worktreeId, cliToolId: GEMINI_CLI_TOOL_ID, instanceId });
 
     try {
-      // Create tmux session. Scrollback depth comes from the shared
-      // TMUX_HISTORY_LIMIT default (Issue #1624) — do not re-hardcode it here.
-      await createSession({
-        sessionName,
-        workingDirectory: worktreePath,
-      });
+      // Issue #2070: creation only. On the relaunch path the pane already
+      // exists and holds the transcript of the process that died in it; the
+      // launch command is re-sent into that same pane.
+      if (!exists) {
+        // Create tmux session. Scrollback depth comes from the shared
+        // TMUX_HISTORY_LIMIT default (Issue #1624) — do not re-hardcode it here.
+        await createSession({
+          sessionName,
+          workingDirectory: worktreePath,
+        });
 
-      // Wait a moment for the session to be created
-      await new Promise((resolve) => setTimeout(resolve, TUI_SESSION_CREATE_WAIT_MS));
+        // Wait a moment for the session to be created
+        await new Promise((resolve) => setTimeout(resolve, TUI_SESSION_CREATE_WAIT_MS));
+      }
 
       // Start Gemini CLI in interactive mode (no flags = interactive REPL).
       //
@@ -236,6 +255,13 @@ export class GeminiTool extends BaseCLITool {
         `Gemini session ${sessionName} does not exist. Start the session first.`
       );
     }
+
+    // Issue #2070: the pane exists, but does the AGENT? An agent that quit,
+    // updated itself or crashed leaves its tmux session behind, and the send
+    // that followed used to sit in the readiness wait until it timed out —
+    // leaving `kill-session` by hand as the only recovery. Relaunches into the
+    // same pane when the tool is gone; costs one `capture-pane` when it is not.
+    await this.relaunchIfToolExited(worktreeId, instanceId);
 
     try {
       // Verify Gemini is at prompt state before sending
