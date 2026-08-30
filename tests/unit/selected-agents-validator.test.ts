@@ -6,15 +6,104 @@
 import { describe, it, expect } from 'vitest';
 import {
   parseSelectedAgents,
+  resolveSelectedAgents,
   validateSelectedAgentsInput,
   validateAgentsPair,
   DEFAULT_SELECTED_AGENTS,
   MAX_SELECTED_AGENTS,
+  MIN_SELECTED_AGENTS,
+  SELECTED_AGENTS_LAYERS,
 } from '@/lib/selected-agents-validator';
 
 
-describe('DEFAULT_SELECTED_AGENTS (Issue #1516)', () => {
-  it('should default to 3 agents: claude/codex/antigravity', () => {
+/**
+ * Issue #2065 replaced the constant pin that used to live here.
+ *
+ * The old test asserted `DEFAULT_SELECTED_AGENTS === ['claude','codex','antigravity']`
+ * and nothing else, which was the right guard while the constant WAS the answer.
+ * It is not any more: the answer is the first layer of `resolveSelectedAgents()`
+ * that validates, and a test that only pins the constant stays green through the
+ * one mutation that matters — dropping a layer, or reading them in the wrong
+ * order. So the constant is now asserted as the LAST layer (the value a fresh
+ * install with no setting gets, which is the "unchanged behaviour" acceptance
+ * criterion), and the order itself is asserted layer by layer below.
+ */
+describe('resolveSelectedAgents(): setting -> constant (Issue #2065)', () => {
+  it('declares the layers highest-priority first, with repo reserved for #2066', () => {
+    expect([...SELECTED_AGENTS_LAYERS]).toEqual(['worktree', 'repo', 'appSettings']);
+  });
+
+  it('falls back to the constant when no layer answers', () => {
+    expect(resolveSelectedAgents()).toEqual(DEFAULT_SELECTED_AGENTS);
+    expect(resolveSelectedAgents({})).toEqual(DEFAULT_SELECTED_AGENTS);
+    expect(resolveSelectedAgents({ appSettings: null, worktree: undefined }))
+      .toEqual(DEFAULT_SELECTED_AGENTS);
+  });
+
+  it('prefers the app_settings layer over the constant', () => {
+    expect(resolveSelectedAgents({ appSettings: ['codex', 'claude'] }))
+      .toEqual(['codex', 'claude']);
+  });
+
+  it('prefers the worktree layer over app_settings', () => {
+    expect(
+      resolveSelectedAgents({
+        worktree: ['gemini', 'copilot'],
+        appSettings: ['codex', 'claude'],
+      })
+    ).toEqual(['gemini', 'copilot']);
+  });
+
+  /**
+   * The layer #2066 fills in. Asserted now so that Issue landing between the two
+   * populated layers is a one-line change here rather than a re-derivation: if
+   * someone reorders the array, this and the two cases above disagree.
+   */
+  it('sits the repo layer between worktree and app_settings', () => {
+    expect(
+      resolveSelectedAgents({
+        repo: ['gemini', 'copilot'],
+        appSettings: ['codex', 'claude'],
+      })
+    ).toEqual(['gemini', 'copilot']);
+
+    expect(
+      resolveSelectedAgents({
+        worktree: ['opencode', 'claude'],
+        repo: ['gemini', 'copilot'],
+        appSettings: ['codex', 'claude'],
+      })
+    ).toEqual(['opencode', 'claude']);
+  });
+
+  it('preserves order, so [0] is the primary', () => {
+    expect(resolveSelectedAgents({ appSettings: ['codex', 'claude', 'gemini'] })[0])
+      .toBe('codex');
+    expect(resolveSelectedAgents({ appSettings: ['claude', 'codex', 'gemini'] })[0])
+      .toBe('claude');
+  });
+
+  it('SKIPS an invalid layer rather than failing or returning it', () => {
+    // Too short, unknown id, duplicate: each must fall through to the next layer,
+    // never blank the roster and never propagate.
+    for (const bad of [['claude'], ['claude', 'nope'], ['claude', 'claude'], []]) {
+      expect(resolveSelectedAgents({ worktree: bad, appSettings: ['codex', 'claude'] }))
+        .toEqual(['codex', 'claude']);
+      expect(resolveSelectedAgents({ worktree: bad })).toEqual(DEFAULT_SELECTED_AGENTS);
+    }
+  });
+
+  it('does not hand back the caller\'s array, so a mutation cannot leak into the store', () => {
+    const stored: string[] = ['codex', 'claude'];
+    const resolved = resolveSelectedAgents({ appSettings: stored });
+    expect(resolved).not.toBe(stored);
+    resolved.push('gemini');
+    expect(stored).toEqual(['codex', 'claude']);
+  });
+});
+
+describe('DEFAULT_SELECTED_AGENTS (Issue #1516) — the last layer', () => {
+  it('is still claude/codex/antigravity, so an install with no setting is unchanged', () => {
     expect(DEFAULT_SELECTED_AGENTS).toEqual([
       'claude',
       'codex',
@@ -25,6 +114,11 @@ describe('DEFAULT_SELECTED_AGENTS (Issue #1516)', () => {
   it('should itself be a valid agents pair (2-6 unique valid IDs)', () => {
     const result = validateAgentsPair(DEFAULT_SELECTED_AGENTS);
     expect(result.valid).toBe(true);
+  });
+
+  it('is within the bounds the API validates against', () => {
+    expect(DEFAULT_SELECTED_AGENTS.length).toBeGreaterThanOrEqual(MIN_SELECTED_AGENTS);
+    expect(DEFAULT_SELECTED_AGENTS.length).toBeLessThanOrEqual(MAX_SELECTED_AGENTS);
   });
 });
 
@@ -174,6 +268,42 @@ describe('parseSelectedAgents()', () => {
     const maliciousRaw = '\x1b[31m' + 'a'.repeat(200) + '\n\rend';
     const result = parseSelectedAgents(maliciousRaw);
     expect(result).toEqual(DEFAULT_SELECTED_AGENTS);
+  });
+
+  /**
+   * Issue #2065. This is the path that gives a synced worktree its tabs:
+   * `upsertWorktree` never writes `selected_agents`, so every row scan/sync
+   * creates arrives here with `raw === null`.
+   */
+  describe('app_settings fallback (Issue #2065)', () => {
+    it('uses the setting when the row has no selected_agents', () => {
+      expect(parseSelectedAgents(null, ['codex', 'claude'])).toEqual(['codex', 'claude']);
+      expect(parseSelectedAgents('', ['codex', 'claude'])).toEqual(['codex', 'claude']);
+    });
+
+    it('keeps the primary the setting names first', () => {
+      expect(parseSelectedAgents(null, ['codex', 'claude'])[0]).toBe('codex');
+    });
+
+    it('lets the row win over the setting', () => {
+      expect(parseSelectedAgents('["gemini","copilot"]', ['codex', 'claude']))
+        .toEqual(['gemini', 'copilot']);
+    });
+
+    it('falls through a malformed row to the setting', () => {
+      for (const raw of ['not-json', '{"key":"value"}', '["claude"]', '["claude","claude"]']) {
+        expect(parseSelectedAgents(raw, ['codex', 'claude'])).toEqual(['codex', 'claude']);
+      }
+    });
+
+    it('is byte-for-byte the old behaviour when no setting is passed', () => {
+      // The acceptance criterion "an environment with no setting is unchanged".
+      for (const raw of [null, '', 'not-json', '{"a":1}', '["claude"]', '["claude","claude"]']) {
+        expect(parseSelectedAgents(raw)).toEqual(DEFAULT_SELECTED_AGENTS);
+        expect(parseSelectedAgents(raw, null)).toEqual(DEFAULT_SELECTED_AGENTS);
+      }
+      expect(parseSelectedAgents('["claude","codex"]')).toEqual(['claude', 'codex']);
+    });
   });
 });
 

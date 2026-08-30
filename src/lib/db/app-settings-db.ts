@@ -6,6 +6,8 @@
  */
 
 import type Database from 'better-sqlite3';
+import type { CLIToolType } from '@/lib/cli-tools/types';
+import { validateAgentsPair } from '@/lib/selected-agents-validator';
 
 // ============================================================================
 // Key constants
@@ -16,6 +18,16 @@ const KEY_SIDEBAR_GROUP_ORDER = 'sidebar_group_order';
 
 /** Storage key for directories recently chosen in the repository picker */
 const KEY_RECENT_BROWSE_PATHS = 'recent_browse_paths';
+
+/**
+ * Storage key for the agent list new worktrees start with (Issue #2065).
+ *
+ * Server-wide, ordered, and `[0]` is the primary. Absent means "no preference";
+ * it is NOT written with the compiled-in default at install time, because a
+ * stored copy of the constant would silently pin every install to whatever the
+ * constant was on the day it was written.
+ */
+const KEY_DEFAULT_SELECTED_AGENTS = 'default_selected_agents';
 
 /** How many recently used directories to remember (Issue #1517) */
 export const RECENT_BROWSE_PATHS_LIMIT = 5;
@@ -101,4 +113,53 @@ export function addRecentBrowsePath(
   const existing = getRecentBrowsePaths(db).filter((p) => p !== browsePath);
   const next = [browsePath, ...existing].slice(0, RECENT_BROWSE_PATHS_LIMIT);
   writeStringArray(db, KEY_RECENT_BROWSE_PATHS, next);
+}
+
+// ============================================================================
+// Default selected agents (Issue #2065)
+// ============================================================================
+
+/**
+ * Get the server-wide default agent list for new worktrees.
+ *
+ * Validated on read with the same `validateAgentsPair()` the API writes through,
+ * so a row hand-edited to `["claude"]` or `["bogus","claude"]` reads as "unset"
+ * rather than propagating an invalid roster into every worktree. The caller then
+ * falls through to the next layer (see `resolveSelectedAgents()`).
+ *
+ * Cheap enough to call per request: one prepared point-query on a table with a
+ * handful of rows. It is deliberately NOT called per worktree row — `getWorktrees()`
+ * resolves it once and passes it down — and it never probes the filesystem, so
+ * this stays clear of the `isInstalled()` hot-path rule (Issue #1913).
+ *
+ * @returns Ordered agents (`[0]` is the primary), or null when unset/invalid.
+ */
+export function getDefaultSelectedAgents(
+  db: Database.Database
+): CLIToolType[] | null {
+  const raw = readStringArray(db, KEY_DEFAULT_SELECTED_AGENTS);
+  if (!raw) return null;
+  const result = validateAgentsPair(raw);
+  return result.valid ? result.value! : null;
+}
+
+/**
+ * Save the server-wide default agent list for new worktrees.
+ *
+ * @param agents - Ordered, already-validated agents; `agents[0]` becomes the primary.
+ */
+export function setDefaultSelectedAgents(
+  db: Database.Database,
+  agents: CLIToolType[]
+): void {
+  writeStringArray(db, KEY_DEFAULT_SELECTED_AGENTS, agents);
+}
+
+/**
+ * Forget the server-wide default, returning the install to the compiled-in
+ * constant. Deletes the row rather than writing the constant into it, so a later
+ * change to `DEFAULT_SELECTED_AGENTS` still reaches an install that reset.
+ */
+export function clearDefaultSelectedAgents(db: Database.Database): void {
+  db.prepare('DELETE FROM app_settings WHERE key = ?').run(KEY_DEFAULT_SELECTED_AGENTS);
 }

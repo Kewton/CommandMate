@@ -10,6 +10,7 @@ import { PATCH as patchWorktreeById } from '@/app/api/worktrees/[id]/route';
 import Database from 'better-sqlite3';
 import { runMigrations } from '@/lib/db/db-migrations';
 import { upsertWorktree, createMessage } from '@/lib/db';
+import { DEFAULT_SELECTED_AGENTS } from '@/lib/selected-agents-validator';
 import type { Worktree } from '@/types/models';
 
 // Declare mock function type
@@ -66,7 +67,15 @@ describe('GET /api/worktrees', () => {
     expect(response.status).toBe(200);
 
     const data = await response.json();
-    expect(data).toEqual({ worktrees: [], repositories: [] });
+    // Issue #2065: the envelope also carries the server-wide default agent
+    // list. Nothing is stored here, so it is the compiled-in constant — which
+    // is the "an install with no setting is unchanged" criterion, asserted
+    // against a real database rather than a mock.
+    expect(data).toEqual({
+      worktrees: [],
+      repositories: [],
+      defaultSelectedAgents: DEFAULT_SELECTED_AGENTS,
+    });
   });
 
   it('should return all worktrees sorted by updatedAt DESC', async () => {

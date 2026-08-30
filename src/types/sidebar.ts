@@ -13,7 +13,7 @@ import {
   CLI_TOOL_IDS,
   type AgentInstance,
 } from '@/lib/cli-tools/types';
-import { DEFAULT_SELECTED_AGENTS } from '@/lib/selected-agents-validator';
+import { getClientDefaultSelectedAgents } from '@/config/default-agents';
 import { deriveCliStatus } from '@/lib/session/status-mapping';
 import { getNextAction, type NextActionKey } from '@/lib/session/next-action-helper';
 import type { SessionStatus } from '@/lib/detection/status-detector';
@@ -284,7 +284,7 @@ function deriveSidebarCliStatus(worktree: Worktree): {
 
   // Legacy fallback: no per-instance data → key by selectedAgents / CLI tool.
   if (!byInstance) {
-    const agents = worktree.selectedAgents ?? DEFAULT_SELECTED_AGENTS;
+    const agents = worktree.selectedAgents ?? getClientDefaultSelectedAgents();
     for (const agent of agents) {
       cliStatus[agent] = deriveCliStatus(worktree.sessionStatusByCli?.[agent]);
       cliStatusLabels[agent] = getCliToolDisplayName(agent);
@@ -296,7 +296,9 @@ function deriveSidebarCliStatus(worktree: Worktree): {
   const roster: AgentInstance[] =
     worktree.agentInstances && worktree.agentInstances.length > 0
       ? worktree.agentInstances
-      : agentInstancesFromSelectedAgents(worktree.selectedAgents ?? DEFAULT_SELECTED_AGENTS);
+      : agentInstancesFromSelectedAgents(
+          worktree.selectedAgents ?? getClientDefaultSelectedAgents(),
+        );
 
   const rosterIds = new Set<string>();
   for (const instance of roster) {
