@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **feat(verification): Verification ペインに 4 状態のオンボーディングと `verify.yaml` 起案導線を追加** (#2061): ペインは `.commandmate/verify.yaml` を**読んでいなかった**ため、ゲートを 1 件も宣言していないリポジトリと「宣言はあるが 1 度も走らせていない」リポジトリが画面上で同一で、未作成のまま「再検証」を押した唯一の手がかりは失敗した run の `config` ゲートに入る英文 1 行（`.commandmate/verify.yaml not found in …`）だけだった。読み取り API `GET /api/worktrees/:id/verify/config`（`exists` と `error` は独立 —— 在って壊れている状態は 200 ＋ `exists:true` ＋ `error` で返し、「宣言してください」と言われた操作者が 2 本目のファイルを書きに行くのを防ぐ）を新設し、ペイン先頭に 2 行の説明と **未作成 / 宣言済み・未実行 / 実行中 / 結果** の 4 状態（＋読み取り未着の `unknown`）を別の文言・別の CTA で描画する（`tests/unit/components/worktree/VerificationPaneOnboarding.test.tsx` がスナップショットで固定）。起案は `commandmate verify init`（`--dry-run` / `--json` / `--cwd`）と Web の「CI から起案する」ボタンが `src/lib/verification/verify-draft.ts` の**同一実装**を呼ぶ —— `.github/workflows/*.yml` の各 `run:` と `package.json` の `scripts` を読み、何度でも安全に再実行できるコマンドだけをゲートにして、拒否したものは 14 種の理由つきで報告する（本リポジトリの CI からは lint / typecheck / unit / build を含む 11 ゲートを起案し、`npm ci` / `npm audit` / `npm publish` / `test:e2e` / watch モードの `npm test` は拒否する）。**既存ファイルは決して上書きしない**（`--force` は用意せず、書き込みは `flag:'wx'`）。`verify init` は verify 系で唯一サーバを必要としない —— verify.yaml がまだ無い段階で走らせるコマンドなので、`commandmate start` を前提にすると起動の前提がその起動自身になる。空状態の CTA は `commandmate verify <worktree-id>` という**補間されない literal** だったので、実際の worktree id を補間するようにした。
+
 ## [0.29.1] - 2026-08-30
 
 > **Highlight**: スラッシュコマンドパレットの正確さと、PC のターミナル表示領域の 2 点を直すパッチリリース。パレット側は claude 2.1.251 / codex 0.151.0 を読み直して 3 コマンドを追加し（attestation も同じ版で採り直した）、さらに codex 0.149.1 由来のまま残っていた `/copy` の「Markdown として」という失効済みの説明を、3 claimant（claude / codex / copilot）の原文を突き合わせたうえでフラットキーのまま訂正した。ターミナル側は PC の opencode quick keys が常時展開で 17 個のキーが表示領域を潰していたのを、既定 OPEN のまま折りたためるようにした。
