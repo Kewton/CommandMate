@@ -118,10 +118,15 @@ describe('CodexTool first-launch dialog handling (Issue #890)', () => {
 
   it('reconciles geometry when reusing an existing Codex session', async () => {
     vi.mocked(hasSession).mockResolvedValue(true);
+    // Issue #2070: the reuse branch now asks whether codex is still the thing
+    // drawing the pane, so the frame has to say that it is. `PROMPT` is a real
+    // `› ` composer; without it the branch would relaunch.
+    vi.mocked(capturePane).mockResolvedValue(PROMPT);
 
     await tool.startSession(WORKTREE_ID, '/test/path', 'codex-2');
 
     expect(createSession).not.toHaveBeenCalled();
+    expect(sendKeys).not.toHaveBeenCalled();
     expect(reconcileSessionGeometry).toHaveBeenCalledWith(
       'mcbd-codex-test-worktree-2',
       undefined,

@@ -146,28 +146,47 @@ export class AntigravityTool extends BaseCLITool {
     const exists = await hasSession(sessionName);
     if (exists) {
       await this.reconcileExistingSession(sessionName);
-      logger.info('antigravity-session-exists');
-      return;
+
+      // Issue #2070: this branch used to return unconditionally. A tmux session
+      // outlives the agent that was launched into it — a quit, a self-update, a
+      // crash — and the launch was then skipped for a pane holding nothing but a
+      // shell prompt, which left `kill-session` by hand as the only recovery.
+      // When the tool is gone we fall THROUGH and re-send the launch command
+      // into the same pane.
+      if (await this.isToolLive(sessionName, { confirm: true })) {
+        logger.info('antigravity-session-exists');
+        return;
+      }
+      logger.warn('antigravity-session-relaunch', { sessionName });
     }
 
     // Issue #1762: fence this instance's structured events off from the process
     // that used to hold the same (worktree, tool, instance) key. Creation path
     // only — the reuse branch above has already returned — and before the pane
     // exists. Bumped even if the launch below then fails.
+    //
+    // Issue #2070: reached on the RELAUNCH path too — the pane is the same one,
+    // but the process is not, and the dead process's events must not be read as
+    // the new one's.
     beginAgentSession({ worktreeId, cliToolId: ANTIGRAVITY_CLI_TOOL_ID, instanceId });
 
     try {
-      // Create tmux session with large history buffer for agy output
-      // (agy is inline-rendered and retains scrollback, like Codex)
-      // Scrollback depth comes from the shared TMUX_HISTORY_LIMIT default
-      // (Issue #1624) — do not re-hardcode it here.
-      await createSession({
-        sessionName,
-        workingDirectory: worktreePath,
-      });
+      // Issue #2070: creation only. On the relaunch path the pane already
+      // exists and holds the transcript of the process that died in it; the
+      // launch command is re-sent into that same pane.
+      if (!exists) {
+        // Create tmux session with large history buffer for agy output
+        // (agy is inline-rendered and retains scrollback, like Codex)
+        // Scrollback depth comes from the shared TMUX_HISTORY_LIMIT default
+        // (Issue #1624) — do not re-hardcode it here.
+        await createSession({
+          sessionName,
+          workingDirectory: worktreePath,
+        });
 
-      // Wait a moment for the session to be created
-      await new Promise((resolve) => setTimeout(resolve, TUI_SESSION_CREATE_WAIT_MS));
+        // Wait a moment for the session to be created
+        await new Promise((resolve) => setTimeout(resolve, TUI_SESSION_CREATE_WAIT_MS));
+      }
 
       // Start agy in interactive mode, optionally pinned to a model.
       //
@@ -281,6 +300,13 @@ export class AntigravityTool extends BaseCLITool {
         `Antigravity session ${sessionName} does not exist. Start the session first.`
       );
     }
+
+    // Issue #2070: the pane exists, but does the AGENT? An agent that quit,
+    // updated itself or crashed leaves its tmux session behind, and the send
+    // that followed used to sit in the readiness wait until it timed out —
+    // leaving `kill-session` by hand as the only recovery. Relaunches into the
+    // same pane when the tool is gone; costs one `capture-pane` when it is not.
+    await this.relaunchIfToolExited(worktreeId, instanceId);
 
     try {
       // Verify agy is at a ready prompt before sending

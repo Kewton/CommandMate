@@ -55,8 +55,12 @@ vi.mock('@/lib/session/cli-session', () => ({
   captureSessionOutput: vi.fn().mockResolvedValue(''),
 }));
 
-vi.mock('@/lib/session/claude-session', () => ({
-  isSessionHealthy: vi.fn().mockResolvedValue({ healthy: true }),
+// Issue #2070: the health check is no longer claude's, so it is no longer
+// reached through `claude-session`. Every tool's session is probed through
+// `probeToolSessionLiveness`; `{ alive: true }` here is what the old
+// `{ healthy: true }` meant.
+vi.mock('@/lib/cli-tools/session-liveness', () => ({
+  probeToolSessionLiveness: vi.fn().mockResolvedValue({ alive: true }),
 }));
 
 vi.mock('@/lib/cli-tools/opencode', () => ({ OPENCODE_PANE_HEIGHT: 200 }));

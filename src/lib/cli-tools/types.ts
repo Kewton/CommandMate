@@ -7,6 +7,7 @@ import type {
   ComposerSpec,
   GracefulExitSpec,
   NavigationKeySpec,
+  ToolLivenessSpec,
 } from '../../types/cli-tool-contracts';
 
 /**
@@ -299,6 +300,21 @@ export interface ICLITool {
    * (Issue #1933, §10.12).
    */
   captureSpec(): CaptureSpec;
+
+  /**
+   * Describe how this tool's pane is read for "did the TOOL exit?"
+   * (Issue #2070).
+   *
+   * A tmux session outlives the process it was created for whenever the agent
+   * quits, updates itself or crashes, and `has-session` cannot tell the
+   * difference. Until this Issue only claude could — through one
+   * `cliToolId === 'claude'` branch in `worktree-status-helper` — so a codex
+   * session that had fallen back to the shell kept a green dot and failed every
+   * subsequent `send` in `waitForPrompt`.
+   *
+   * See {@link ToolLivenessSpec} for the rule the declaration fills in.
+   */
+  livenessSpec(): ToolLivenessSpec;
 
   /**
    * Declare the keys this tool's terminal UI may send (Issue #2046).

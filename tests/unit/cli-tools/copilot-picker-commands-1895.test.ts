@@ -93,13 +93,21 @@ const PICKER_FRAME = [
 ].join('\n');
 
 /**
- * capturePane as the real sequence delivers it: the composer is still up when
- * `waitForPrompt` looks, and the picker has replaced it by the time
- * `waitForSelectionList` does.
+ * capturePane as the real sequence delivers it: the composer is still up while
+ * the liveness probe and `waitForPrompt` look at it, and the picker has replaced
+ * it by the time `waitForSelectionList` does.
+ *
+ * Issue #2070 added the first of those reads — `relaunchIfToolExited`, asking
+ * whether copilot is still the thing drawing the pane, which the `❯ ` in
+ * IDLE_FRAME answers — so the composer is now delivered TWICE before the send.
  */
+const COMPOSER_READS_BEFORE_SEND = 2;
+
 function mockPaneSequence(capturePane: ReturnType<typeof vi.fn>): void {
   let calls = 0;
-  capturePane.mockImplementation(async () => (++calls === 1 ? IDLE_FRAME : PICKER_FRAME));
+  capturePane.mockImplementation(async () =>
+    ++calls <= COMPOSER_READS_BEFORE_SEND ? IDLE_FRAME : PICKER_FRAME
+  );
 }
 
 describe('Issue #1895: copilot picker slash commands', () => {
