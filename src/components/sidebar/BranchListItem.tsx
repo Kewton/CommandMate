@@ -7,7 +7,7 @@
 
 'use client';
 
-import React, { memo, useRef, useState, useEffect, useCallback } from 'react';
+import React, { memo, useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import ReactDOM from 'react-dom';
 import { useTranslations } from 'next-intl';
 import type { SidebarBranchItem } from '@/types/sidebar';
@@ -235,6 +235,14 @@ export const BranchListItem = memo(function BranchListItem({
   const isWaiting = aggregatedStatus === 'waiting';
   const awaitingInstruction = branch.awaitingInstruction === true;
   const nextActionLabel = branch.nextActionKey ? tWorktree(branch.nextActionKey) : null;
+
+  // Issue #2070: a Set so the per-instance lookup inside the breakdown stays
+  // O(1), and memoised so a row that has nothing exited (the ordinary case)
+  // does not rebuild one on every render.
+  const exitedInstanceIds = useMemo(
+    () => new Set(branch.exitedInstanceIds ?? []),
+    [branch.exitedInstanceIds]
+  );
   // The next action is rendered INLINE (never hover-only) for the two states
   // that need one, because a hover tooltip is permanently invisible on touch.
   // Every other status keeps it in the tooltip alone: "Running…" on every row
@@ -334,7 +342,19 @@ export const BranchListItem = memo(function BranchListItem({
           <div className="flex items-center justify-center flex-shrink-0 w-4" aria-label={t('branchItem.cliToolStatus')}>
             <BranchStatusIndicator
               status={aggregatedStatus}
-              label={formatCliStatusBreakdown(branch.cliStatus, branch.cliStatusLabels)}
+              label={formatCliStatusBreakdown(
+                branch.cliStatus,
+                branch.cliStatusLabels,
+                // Issue #2070: annotate the instances whose tmux session
+                // outlived their agent. The dot itself does not change — `idle`
+                // is the honest status — but the breakdown now distinguishes
+                // "never started" from "died under you", which is the
+                // difference between "start it" and "something went wrong".
+                exitedInstanceIds.size > 0
+                  ? (instanceId) =>
+                      exitedInstanceIds.has(instanceId) ? t('branchItem.agentExited') : null
+                  : undefined
+              )}
               waitingKind={branch.waitingKind}
             />
           </div>

@@ -118,12 +118,20 @@ describe('[#2060] GET /api/worktrees list/status split over a real DB', () => {
     expect(body.statusIncluded).toBe(false);
   });
 
-  it('leaves the default call exactly as it was: status computed, no new key', async () => {
+  it('leaves the default call exactly as it was: status computed, no status opt-out key', async () => {
     const { res, body } = await get();
 
     expect(res.status).toBe(200);
     expect(listSessions).toHaveBeenCalledTimes(1);
-    expect(Object.keys(body).sort()).toEqual(['repositories', 'worktrees']);
+    // `statusIncluded` stays absent: it describes what a request opted out of.
+    // `defaultSelectedAgents` (Issue #2065) is unconditional — same value for
+    // every caller, describing the server rather than the request.
+    expect(Object.keys(body).sort()).toEqual([
+      'defaultSelectedAgents',
+      'repositories',
+      'worktrees',
+    ]);
+    expect(body.statusIncluded).toBeUndefined();
     for (const key of STATUS_KEYS) expect(body.worktrees[0]).toHaveProperty(key);
   });
 

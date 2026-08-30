@@ -247,7 +247,12 @@ describe('waitForPrompt (sendMessage)', () => {
     // body's digits are option selections there: a message containing "2" would
     // pick "Yes, and remember this folder".
     vi.mocked(hasSession).mockResolvedValue(true);
-    vi.mocked(capturePane).mockResolvedValueOnce(TRUST_FRAME).mockResolvedValue(READY_FRAME);
+    // Twice: Issue #2070's liveness probe reads the pane before `waitForPrompt`
+    // does, and the dialog frame is one copilot is plainly still drawing.
+    vi.mocked(capturePane)
+      .mockResolvedValueOnce(TRUST_FRAME)
+      .mockResolvedValueOnce(TRUST_FRAME)
+      .mockResolvedValue(READY_FRAME);
 
     await runWithTimers(() => tool.sendMessage(WORKTREE_ID, 'compare option 2 with option 3'));
 

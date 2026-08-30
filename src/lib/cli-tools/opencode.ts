@@ -349,37 +349,79 @@ export class OpenCodeTool extends BaseCLITool {
         windowWidth: resolveOpencodePaneWidthChecked(),
         windowHeight: OPENCODE_PANE_HEIGHT,
       });
-      // Issue #1763: the pane outlived this process (a CommandMate restart), so
-      // the subscription that used to watch it is gone while its server is
-      // still listening. Recovered from the recorded port, health-checked, and
-      // skipped silently when there is nothing there. NOT a new generation —
-      // the pane is the same one, and fencing here would discard a still-valid
-      // verdict on every reconnect.
-      await resumeOpencodeEventStream(target, worktreePath);
-      logger.info('opencode-session-sessionname');
-      return;
+      // Issue #2070: is opencode still the thing drawing this pane? The two
+      // answers need DIFFERENT recovery, which is why the branch is here and
+      // not folded into the other tools' shape:
+      //
+      //  - **alive** — the pane outlived this CommandMate process (a restart),
+      //    the TUI's own HTTP server is still listening on the port it was
+      //    handed, and what is missing is only our subscription to it. Resume,
+      //    which recovers the RECORDED port.
+      //  - **exited** — the process that owned that port is gone, so the port
+      //    is not a thing to reconnect to; it is a number to hand out again.
+      //    Falling through takes the creation path's `reserveOpencodeServerPort`
+      //    → launch → `attachOpencodeEventStream`, which is the only sequence
+      //    that leaves the pane and the subscription agreeing about which
+      //    server they mean. Resuming here instead would attach to a port that
+      //    answers nothing — or, worse, to whatever process took it next, which
+      //    is the `port_identity_changed` hazard #1758 §5.9 exists for.
+      if (await this.isToolLive(sessionName, { confirm: true })) {
+        // Issue #1763: recovered from the recorded port, health-checked, and
+        // skipped silently when there is nothing there. NOT a new generation —
+        // the pane is the same one AND the process is the same process, so
+        // fencing here would discard a still-valid verdict on every reconnect.
+        await resumeOpencodeEventStream(target, worktreePath);
+        logger.info('opencode-session-sessionname');
+        return;
+      }
+      logger.warn('opencode-session-relaunch', { sessionName });
+
+      // Issue #2070: drop the dead process's stream and its port BEFORE the
+      // relaunch. Both are load-bearing, and neither is optional:
+      //
+      //  - `attachOpencodeEventStream` short-circuits on `isOpencodeSubscribed`,
+      //    so a subscription left over from the process that just died would
+      //    make the new one's attach a silent no-op and leave the pane on the
+      //    scraper for the rest of its life;
+      //  - `allocateOpencodePort` returns the IN-MEMORY assignment first, before
+      //    it checks anything, so without the release the relaunch would be
+      //    handed the dead server's number without ever asking whether it is
+      //    free. The persisted number is still preferred on re-allocation, so a
+      //    pane restarted in place keeps a stable port — see `ports.ts`.
+      //
+      // Never throws.
+      await releaseOpencodeEventStream(target);
     }
 
     // Issue #1759 (S8) / #1763: everything the previous opencode process
     // reported through this (worktreeId, instanceId) belongs to a session that
     // no longer exists, and the key is reused verbatim by the one about to be
-    // created. On the creation path only, before the pane exists, and even if
-    // the launch then fails — falling back to the scraper is always safe.
+    // created. Even if the launch then fails — falling back to the scraper is
+    // always safe.
+    //
+    // Issue #2070: reached on the RELAUNCH path too. The live-reuse branch above
+    // deliberately does NOT fence (same pane, same process); this one must
+    // (same pane, new process).
     beginAgentSession(target);
 
     try {
       // Generate opencode.json if not present (non-fatal on failure)
       await ensureOpencodeConfig(worktreePath);
 
-      // Create tmux session. Scrollback depth comes from the shared
-      // TMUX_HISTORY_LIMIT default (Issue #1624) — do not re-hardcode it here.
-      await createSession({
-        sessionName,
-        workingDirectory: worktreePath,
-      });
+      // Issue #2070: creation only. On the relaunch path the pane already
+      // exists; the resize below still runs, because a pane that was created
+      // before #2047 carries the geometry of its own era either way.
+      if (!exists) {
+        // Create tmux session. Scrollback depth comes from the shared
+        // TMUX_HISTORY_LIMIT default (Issue #1624) — do not re-hardcode it here.
+        await createSession({
+          sessionName,
+          workingDirectory: worktreePath,
+        });
 
-      // Wait a moment for the session to be created
-      await new Promise((resolve) => setTimeout(resolve, TUI_SESSION_CREATE_WAIT_MS));
+        // Wait a moment for the session to be created
+        await new Promise((resolve) => setTimeout(resolve, TUI_SESSION_CREATE_WAIT_MS));
+      }
 
       // Resize tmux window so opencode's right-hand sidebar stays hidden and
       // `capture-pane` returns transcript rows only. Issue #2047 measured the
@@ -733,6 +775,19 @@ export class OpenCodeTool extends BaseCLITool {
         `OpenCode session ${sessionName} does not exist. Start the session first.`
       );
     }
+
+    // Issue #2070: the pane exists, but does the AGENT? An agent that quit,
+    // updated itself or crashed leaves its tmux session behind, and the send
+    // that followed used to sit in the readiness wait until it timed out —
+    // leaving `kill-session` by hand as the only recovery. Relaunches into the
+    // same pane when the tool is gone; costs one `capture-pane` when it is not.
+    //
+    // Before `trySendViaServer`, deliberately: when the TUI is gone so is the
+    // HTTP server it was, so the server path would fail and fall through to
+    // typing the message into a shell prompt. The relaunch reserves a port and
+    // re-attaches, so the server path is available again by the time it is
+    // tried. `sendMessageWithImage` reaches this through its own fallback.
+    await this.relaunchIfToolExited(worktreeId, instanceId);
 
     if (await this.trySendViaServer(opencodeTarget(worktreeId, instanceId), message)) {
       // Issue #405: the transcript grew, so the cached capture is stale — the

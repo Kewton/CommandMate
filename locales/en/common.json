@@ -158,7 +158,8 @@
   },
   "branchItem": {
     "cliToolStatus": "CLI tool status",
-    "hasUnread": "Has unread messages"
+    "hasUnread": "Has unread messages",
+    "agentExited": "exited"
   },
   "connection": {
     "reconnecting": "Reconnecting",
@@ -178,5 +179,31 @@
   "attention": {
     "label": "Needs attention",
     "badgeLabel": "{count} worktrees need your attention"
+  },
+  "settings": {
+    "title": "Settings",
+    "defaultAgents": {
+      "title": "Default agents for new branches",
+      "description": "The agents a newly discovered branch opens with, in order. The first one is the primary — the tab that opens first and the default target for sends.",
+      "appliesToNew": "Existing branches are left alone. Their tabs stay exactly as they are.",
+      "primary": "primary",
+      "installed": "Installed",
+      "notInstalled": "Not installed",
+      "addLabel": "Available to add",
+      "add": "Add",
+      "remove": "Remove",
+      "moveUp": "Move up",
+      "moveDown": "Move down",
+      "save": "Save",
+      "saving": "Saving...",
+      "saved": "Saved",
+      "reset": "Reset to default",
+      "builtIn": "Built-in default: {agents}",
+      "configured": "Configured",
+      "usingBuiltIn": "Using the built-in default",
+      "range": "Select between {min} and {max} agents.",
+      "saveError": "Could not save.",
+      "loadError": "Could not load the setting."
+    }
   }
 }

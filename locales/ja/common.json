@@ -158,7 +158,8 @@
   },
   "branchItem": {
     "cliToolStatus": "CLI ツールのステータス",
-    "hasUnread": "未読メッセージあり"
+    "hasUnread": "未読メッセージあり",
+    "agentExited": "終了"
   },
   "connection": {
     "reconnecting": "再接続中",
@@ -178,5 +179,31 @@
   "attention": {
     "label": "要対応",
     "badgeLabel": "要対応のワークツリーが {count} 件あります"
+  },
+  "settings": {
+    "title": "設定",
+    "defaultAgents": {
+      "title": "新規ブランチの既定エージェント",
+      "description": "新しく見つかったブランチが最初に開くエージェントと、その並び順です。先頭が primary（最初に開くタブ / 送り先の既定）になります。",
+      "appliesToNew": "既存のブランチには適用されません。すでに開いているブランチのタブ構成はそのまま残ります。",
+      "primary": "primary",
+      "installed": "インストール済み",
+      "notInstalled": "未インストール",
+      "addLabel": "追加できるエージェント",
+      "add": "追加",
+      "remove": "削除",
+      "moveUp": "上へ",
+      "moveDown": "下へ",
+      "save": "保存",
+      "saving": "保存中...",
+      "saved": "保存しました",
+      "reset": "既定に戻す",
+      "builtIn": "既定値: {agents}",
+      "configured": "設定済み",
+      "usingBuiltIn": "既定値を使用中",
+      "range": "エージェントは {min} 〜 {max} 個で選択してください。",
+      "saveError": "保存に失敗しました。",
+      "loadError": "設定を読み込めませんでした。"
+    }
   }
 }

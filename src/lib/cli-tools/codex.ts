@@ -165,8 +165,20 @@ export class CodexTool extends BaseCLITool {
     const exists = await hasSession(sessionName);
     if (exists) {
       await this.reconcileExistingSession(sessionName);
-      logger.info('codex-session-sessionname');
-      return;
+
+      // Issue #2070: this branch used to return unconditionally, and that is
+      // the second half of the reported bug. codex's own "1. Update now"
+      // replaces codex with `npm install` and exits; `Ctrl+C` twice quits it; a
+      // crash does the same. The tmux session survives all three, so `exists`
+      // stays true and the launch was skipped for a pane that had nothing but a
+      // shell prompt in it — leaving `kill-session` by hand as the only
+      // recovery. When the tool is gone we fall THROUGH and re-send the launch
+      // command into the same pane.
+      if (await this.isToolLive(sessionName, { confirm: true })) {
+        logger.info('codex-session-sessionname');
+        return;
+      }
+      logger.warn('codex-session-relaunch', { sessionName });
     }
 
     // Issue #1760: everything the previous codex process reported through this
@@ -176,23 +188,26 @@ export class CodexTool extends BaseCLITool {
     // and a brand-new session publishes `running` before anyone has typed into
     // it (#1723).
     //
-    // Creation path only — the reuse branch above has already returned — and
-    // before `createSession`, so no live pane is ever matched against a stale
-    // generation. Bumped even when the launch then fails: falling back to the
-    // scraper is always safe, trusting a dead session's events is not.
+    // Issue #2070: also on the RELAUNCH path, and for exactly the same reason.
+    // The pane is the same pane, but the process is not the same process, and
+    // the events the dead one filed under this key must not be read as the new
+    // one's. (Contrast opencode's live-reuse branch, which deliberately does
+    // NOT fence: there the process is the same one.)
     beginAgentSession({ worktreeId, cliToolId: CODEX_CLI_TOOL_ID, instanceId });
 
     try {
-      // Create tmux session. Codex is inline-rendered, so its transcript lives in
-      // the pane scrollback — depth comes from the shared TMUX_HISTORY_LIMIT
-      // default (Issue #1624), do not re-hardcode it here.
-      await createSession({
-        sessionName,
-        workingDirectory: worktreePath,
-      });
+      if (!exists) {
+        // Create tmux session. Codex is inline-rendered, so its transcript lives in
+        // the pane scrollback — depth comes from the shared TMUX_HISTORY_LIMIT
+        // default (Issue #1624), do not re-hardcode it here.
+        await createSession({
+          sessionName,
+          workingDirectory: worktreePath,
+        });
 
-      // Wait a moment for the session to be created
-      await new Promise((resolve) => setTimeout(resolve, TUI_SESSION_CREATE_WAIT_MS));
+        // Wait a moment for the session to be created
+        await new Promise((resolve) => setTimeout(resolve, TUI_SESSION_CREATE_WAIT_MS));
+      }
 
       // Issue #1760: hand this session its correlation keys, writing codex's
       // hooks config first if it is not already there. codex has no
@@ -389,6 +404,14 @@ export class CodexTool extends BaseCLITool {
         `Codex session ${sessionName} does not exist. Start the session first.`
       );
     }
+
+    // Issue #2070: the pane exists, but does the AGENT? codex's "1. Update now"
+    // replaces it with `npm install` and exits, `Ctrl+C` twice quits it, a crash
+    // does the same — and the send that follows used to sit in the readiness
+    // wait until it timed out, leaving `kill-session` by hand as the only
+    // recovery. Relaunches into the same pane when the tool is gone; costs one
+    // `capture-pane` when it is not.
+    await this.relaunchIfToolExited(worktreeId, instanceId);
 
     try {
       // Verify Codex is at prompt state before sending

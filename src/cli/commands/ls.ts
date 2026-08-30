@@ -7,6 +7,9 @@ import { Command } from 'commander';
 import type { LsOptions } from '../types';
 import type { WorktreeListResponse, WorktreeItem } from '../types/api-responses';
 import { ApiClient } from '../utils/api-client';
+// The reason vocabulary itself, not a copy of one token of it: `commandmate ls`
+// and the server must not be able to disagree about what `exited` is spelled.
+import { STATUS_REASON } from '../../lib/detection/status-reason';
 import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
 
 /**
@@ -48,6 +51,12 @@ function pickStatusEntry(wt: WorktreeItem, status: string): CliStatusEntry | und
     if (status === 'waiting') return entry.isWaitingForResponse;
     if (status === 'running') return entry.isProcessing;
     if (status === 'ready') return entry.isRunning;
+    // Issue #2070: `idle` gets an explanation for the first time, and only for
+    // the one reason a stopped session can carry — `exited`. Everything else
+    // about an idle row is unchanged: no entry is picked, so the REASON cell is
+    // still `-`. That is what makes this additive rather than a fourth branch of
+    // `deriveStatus` (DR3-005 keeps the STATUS vocabulary at four words).
+    if (status === 'idle') return entry.sessionStatusReason === STATUS_REASON.EXITED;
     return false;
   };
 
@@ -69,6 +78,14 @@ function pickStatusEntry(wt: WorktreeItem, status: string): CliStatusEntry | und
  * rather than a reading. Today that is exactly the `default` and
  * `no_recent_output` reasons; design Phase 3 widens it per tool, and the marker
  * is what makes the widening visible here without the reason token changing.
+ *
+ * Issue #2070 adds one reason that appears beside `idle`: `exited`, meaning the
+ * tmux session is still there and the agent in it is not. Before it, a codex
+ * that had crashed or updated itself out from under its pane was reported
+ * `running` — and once the detection was fixed, it would have been reported
+ * `idle` with a bare `-`, indistinguishable from a worktree nobody has started.
+ * The distinction is the point: `idle` means "start it", `idle`/`exited` means
+ * "it died under you, and the next send will restart it".
  */
 function deriveReason(wt: WorktreeItem): string {
   const entry = pickStatusEntry(wt, deriveStatus(wt));

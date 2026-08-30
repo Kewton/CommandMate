@@ -15,6 +15,17 @@
 export const SERVER_CAPABILITIES = [
   /** GET /api/worktrees/:id/resolve-target answers with {cliToolId, instanceId, resolvedBy}. */
   'resolve-session-target',
+  /**
+   * GET/PUT /api/settings/default-agents exists, and `GET /api/worktrees`
+   * carries `defaultSelectedAgents` (Issue #2065).
+   *
+   * The TOKEN ships here; the VALUE deliberately does not. This response is the
+   * one a caller can read before establishing anything — `CM_AUTH_TOKEN_HASH`
+   * unset skips auth and `CM_BIND=0.0.0.0` is supported — so it stays a fixed
+   * list compiled into the build, with no reflection of how this install is
+   * configured. `tests/unit/api/capabilities.test.ts` pins that, key for key.
+   */
+  'default-selected-agents',
 ] as const;
 
 /** Exact response shape of GET /api/capabilities. Pinned key-for-key by tests. */

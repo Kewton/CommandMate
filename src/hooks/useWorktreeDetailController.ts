@@ -57,7 +57,10 @@ import {
 } from '@/lib/cli-tools/types';
 import { worktreeApi, ApiError } from '@/lib/api-client';
 import type { SessionKillTarget } from '@/types/terminal-split-pane';
-import { DEFAULT_SELECTED_AGENTS } from '@/lib/selected-agents-validator';
+import {
+  ensureClientDefaultSelectedAgents,
+  getClientDefaultSelectedAgents,
+} from '@/config/default-agents';
 import { useMobileSelectedInstances } from '@/hooks/useMobileSelectedInstances';
 import { useTranslations } from 'next-intl';
 import { useFileOperations } from '@/hooks/useFileOperations';
@@ -219,7 +222,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   // Stores the actual stopReason value to determine toast level (info vs warning)
   const [pendingStopReason, setPendingStopReason] = useState<AutoYesStopReason | null>(null);
   // Issue #368: Selected agents state (initialized from API, drives terminal header tabs)
-  const [selectedAgents, setSelectedAgents] = useState<CLIToolType[]>(DEFAULT_SELECTED_AGENTS);
+  const [selectedAgents, setSelectedAgents] = useState<CLIToolType[]>(getClientDefaultSelectedAgents);
   // Ref to access latest selectedAgents inside fetchWorktree without adding to useCallback deps
   const selectedAgentsRef = useRef(selectedAgents);
   selectedAgentsRef.current = selectedAgents;
@@ -227,7 +230,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   // selectors. Decoupled from selectedAgents server-side; seeded from the
   // default selection until the worktree's agentInstances arrive from the API.
   const [agentInstances, setAgentInstances] = useState<AgentInstance[]>(
-    () => agentInstancesFromSelectedAgents(DEFAULT_SELECTED_AGENTS),
+    () => agentInstancesFromSelectedAgents(getClientDefaultSelectedAgents()),
   );
   const agentInstancesRef = useRef(agentInstances);
   agentInstancesRef.current = agentInstances;
@@ -251,7 +254,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
         return saved;
       }
     } catch { /* localStorage unavailable (SSR) */ }
-    return DEFAULT_SELECTED_AGENTS[0];
+    return getClientDefaultSelectedAgents()[0];
   });
   // Wrapper: persist activeCliTab to localStorage on change
   const setActiveCliTab = useCallback((tool: CLIToolType) => {
@@ -278,7 +281,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
         return legacy;
       }
     } catch { /* localStorage unavailable (SSR) */ }
-    return DEFAULT_SELECTED_AGENTS[0];
+    return getClientDefaultSelectedAgents()[0];
   });
   // Wrapper: persist activeInstanceId AND sync activeCliTab from the instance's
   // CLI tool so cliTool-keyed concerns follow the active instance.
@@ -357,6 +360,17 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   useEffect(() => {
     historyDisplayLimitRef.current = historyDisplayLimit;
   }, [historyDisplayLimit]);
+
+  // Issue #2065: seed the client-side mirror of the server-wide default agent
+  // list. The four fallbacks above are `useState` initializers, so this cannot
+  // affect the mount that starts the fetch — that is what the seed is FOR: the
+  // module store outlives the component, so the next worktree opened in this tab
+  // seeds its tabs from the setting rather than from the constant. The worktree
+  // payload itself (`data.selectedAgents`, resolved server-side) still corrects
+  // this mount a moment later, so nothing here is load-bearing for correctness.
+  useEffect(() => {
+    void ensureClientDefaultSelectedAgents();
+  }, []);
 
   // [Issue #485 / #728 / #744] Pending insert text state (history/memo -> input).
   // Issue #755: extracted to the usePendingInsertText hook (former inline state +

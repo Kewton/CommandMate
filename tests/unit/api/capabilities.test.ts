@@ -50,7 +50,13 @@ describe('GET /api/capabilities', () => {
     expect(Object.keys(body).sort()).toEqual(['capabilities', 'serverVersion']);
     expect(body).toEqual({
       serverVersion: '9.9.9',
-      capabilities: ['resolve-session-target'],
+      // Issue #2065 added the second token. The TOKEN is additive and allowed
+      // here; the default agent list itself is NOT — it is served by
+      // /api/settings/default-agents and GET /api/worktrees, both behind the
+      // same auth as everything else, so this body stays a fixed compile-time
+      // list. The 'does not reflect the runtime environment' case below is what
+      // keeps that true.
+      capabilities: ['resolve-session-target', 'default-selected-agents'],
     });
   });
 
@@ -67,6 +73,7 @@ describe('GET /api/capabilities', () => {
    */
   it('still declares every token it has ever shipped', () => {
     expect(SERVER_CAPABILITIES).toContain('resolve-session-target');
+    expect(SERVER_CAPABILITIES).toContain('default-selected-agents');
   });
 
   it('declares only strings, so the CLI can compare without unwrapping', async () => {

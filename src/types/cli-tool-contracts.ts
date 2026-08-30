@@ -328,3 +328,125 @@ export type GracefulExitFailureReason = typeof GRACEFUL_EXIT_FAILURE_REASONS[num
 export type GracefulExitVerdict =
   | { readonly ok: true }
   | { readonly ok: false; readonly reason: GracefulExitFailureReason };
+
+// ---------------------------------------------------------------------------
+// Liveness — "did the tool itself exit and leave a bare shell?" (Issue #2070)
+// ---------------------------------------------------------------------------
+
+/**
+ * How one tool's pane is read for the question "is the TOOL still there?".
+ *
+ * ## Why this is a declaration and not one function per tool
+ *
+ * A tmux session outliving the process it was created for is not an exotic
+ * state: codex's own "1. Update now" replaces itself with `npm install` and
+ * exits, `Ctrl+C` twice quits it, and a crash does the same thing more
+ * abruptly. In every case the pane falls back to the login shell and
+ * `has-session` keeps answering yes — so `isRunning` stays true, the sidebar
+ * keeps a green dot, and the next `send` times out in `waitForPrompt` with no
+ * recovery but a manual `kill-session`.
+ *
+ * CommandMate has always had a check for this, and it was **claude's alone** —
+ * `isSessionHealthy`, reached from exactly one `cliToolId === 'claude'` branch
+ * in `worktree-status-helper`. The rule inside it is not claude-specific,
+ * though; what is claude-specific are the two patterns it is written in terms
+ * of. So the rule became shared code and the patterns became this declaration,
+ * one per tool, which is the same §4 D4 shape {@link ComposerSpec} /
+ * {@link CaptureSpec} / {@link GracefulExitSpec} already take.
+ *
+ * ## The rule the fields spell out
+ *
+ * "The tool exited" is the conjunction of a negative and a positive:
+ *
+ *   1. **none of {@link alivePatterns} matches** the bottom of the frame — the
+ *      tool's own composer, dialog chrome or working indicator is not there; and
+ *   2. **the last content row positively reads as a shell prompt** — either it
+ *      matches one of {@link shellPromptPatterns}, or it is short enough to be a
+ *      prompt ({@link maxShellPromptLength}) and ends with one of
+ *      {@link shellPromptEndings}.
+ *
+ * Both halves are load-bearing, and (1) alone is not enough: a tool that is
+ * mid-launch, painting, or showing a screen nobody has measured also matches no
+ * alive pattern, and relaunching into a live pane would type the launch command
+ * into the agent's composer. A verdict is only ever reached on evidence that the
+ * SHELL is what is drawing the row.
+ *
+ * @see `resolveLivenessSpec` in `lib/cli-tools/liveness-spec` for the table.
+ */
+export interface ToolLivenessSpec {
+  /**
+   * Rows of pane tail the liveness probe asks tmux for.
+   *
+   * Deliberately small. The probe is looking at the BOTTOM of the pane — what
+   * is on screen now — and a deep capture only drags more scrollback into
+   * range, which is the one thing {@link aliveTailLines} then has to undo.
+   */
+  readonly probeCaptureLines: number;
+  /**
+   * Patterns whose presence proves this tool's own TUI is drawing the pane:
+   * its prompt-ready rule, plus whatever else it draws while busy or while
+   * sitting on a dialog. Matching any one of them ends the probe with "alive".
+   */
+  readonly alivePatterns: readonly RegExp[];
+  /**
+   * How many content rows from the bottom {@link alivePatterns} may look at, or
+   * `null` for the whole frame.
+   *
+   * A window rather than the frame, because a tool's own chrome does not
+   * disappear when it quits — it scrolls up. Measured on codex 0.149.1: the
+   * pane of an exited session still holds `› 1. Yes, continue` from the trust
+   * dialog it was launched through, 1000 rows above the shell prompt. A
+   * whole-frame test therefore says "alive" forever, which is the same
+   * false-negative shape claude's own check has always had.
+   *
+   * `null` is claude's, and only claude's: `isSessionHealthy` has tested the
+   * whole frame since it was written, and Issue #2070's acceptance condition is
+   * that claude's verdicts do not move.
+   */
+  readonly aliveTailLines: number | null;
+  /**
+   * Whole-line patterns that positively identify a shell prompt, checked
+   * against the last content row BEFORE {@link maxShellPromptLength}.
+   *
+   * Empty for claude — its rule is the length gate and the endings alone, and
+   * that is what must not change. For every other tool this carries the
+   * `user@host … %` form, because the length gate alone is not enough: the
+   * zsh default prompt of the machine Issue #2070 was measured on renders as
+   * `maenokota@MAENOnoMac-Studio work-codex %` — exactly 40 characters, i.e.
+   * one character past claude's own cut-off.
+   */
+  readonly shellPromptPatterns: readonly RegExp[];
+  /** Trailing characters that make a short last row a shell prompt. */
+  readonly shellPromptEndings: readonly string[];
+  /**
+   * A last row this long or longer is never treated as a shell prompt by the
+   * endings rule. Guards TUI content that happens to end in `$` / `%` / `#`.
+   */
+  readonly maxShellPromptLength: number;
+  /** Literal strings in the frame's tail that condemn the session outright. */
+  readonly fatalPatterns: readonly string[];
+  /** Regexes in the frame's tail that condemn the session outright. */
+  readonly fatalRegexPatterns: readonly RegExp[];
+  /**
+   * Whether a frame nobody could read — an empty pane, or a capture that threw
+   * — counts as "the tool is gone".
+   *
+   * True for claude, which has judged both that way since it was written. False
+   * for every tool this Issue adds, and the asymmetry is deliberate: those two
+   * frames carry no evidence either way, and Issue #2070 puts a RELAUNCH behind
+   * this verdict. "No evidence" must not be able to fire it.
+   */
+  readonly unreadableIsExited: boolean;
+}
+
+/**
+ * What a liveness probe concluded (Issue #2070).
+ *
+ * `alive: true` carries no reason: there is nothing to say beyond "the tool is
+ * there". `alive: false` always carries one, and it is the string that reaches
+ * the operator — through `HealthCheckResult.reason`, the `exited` status reason
+ * the sidebar and `commandmate ls` publish, and the relaunch log line.
+ */
+export type ToolLivenessVerdict =
+  | { readonly alive: true }
+  | { readonly alive: false; readonly reason: string };

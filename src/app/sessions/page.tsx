@@ -13,7 +13,7 @@
 
 'use client';
 
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { ArrowDown, ArrowUp } from 'lucide-react';
@@ -24,7 +24,10 @@ import { useWorktreesCacheContext } from '@/components/providers/WorktreesCacheP
 import { deriveCliStatus } from '@/types/sidebar';
 import { isWorkingStatus } from '@/lib/agent-status-display';
 import { getCliToolDisplayName } from '@/lib/cli-tools/types';
-import { DEFAULT_SELECTED_AGENTS } from '@/lib/selected-agents-validator';
+import {
+  ensureClientDefaultSelectedAgents,
+  getClientDefaultSelectedAgents,
+} from '@/config/default-agents';
 import {
   Input,
   Select,
@@ -153,6 +156,14 @@ export default function SessionsPage() {
   const [filterText, setFilterText] = useState('');
   const [sortKey, setSortKey] = useState<SortKey>('lastSent');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+
+  // Issue #2065: this page reads worktrees through the shared cache, which hands
+  // back rows and not the envelope the default rides in, so it seeds the mirror
+  // itself. Single-flight and cached in the module, so mounting this page after
+  // /review or a worktree costs nothing.
+  useEffect(() => {
+    void ensureClientDefaultSelectedAgents();
+  }, []);
 
   const filteredAndSorted = useMemo(() => {
     let result = worktrees;
@@ -327,7 +338,7 @@ export default function SessionsPage() {
                 </div>
               ) : (
                 filteredAndSorted.map((wt: Worktree, index: number) => {
-                const agents = wt.selectedAgents ?? DEFAULT_SELECTED_AGENTS;
+                const agents = wt.selectedAgents ?? getClientDefaultSelectedAgents();
                 const sanitizedMessage = wt.lastUserMessage
                   ? sanitizePreview(wt.lastUserMessage)
                   : null;
