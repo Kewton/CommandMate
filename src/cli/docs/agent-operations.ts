@@ -195,6 +195,36 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
   options.skipInPrimaryCheckout, so a 'build' gate cannot replace the assets the
   live app is serving.
 
+### commandmate verify init
+  Draft .commandmate/verify.yaml from this repository's own CI definitions
+  (Issue #2061). Reads every 'run:' step in .github/workflows/*.yml plus the
+  canonical package.json scripts, and declares the ones that are safe to re-run.
+
+  Options:
+    --cwd <path>          Repository to draft for (default: current directory)
+    --dry-run             Print the proposal on stdout and write nothing
+    --json                Print gates, refusals and scanned files as JSON
+
+  Exit codes:
+    0   - Wrote (or, with --dry-run, proposed) the config
+    2   - The config already exists, or nothing draftable was found
+
+  NEVER overwrites. An existing verify.yaml is the repository's own judgement of
+  what passing means, usually with the reasoning for each gate beside it, so
+  there is no --force: "throw it away" is spelled by deleting the file.
+
+  The only verify subcommand that needs no server: it is what you run BEFORE the
+  repository has anything to verify.
+
+  Commands that are found and NOT declared are reported with a reason on stderr
+  (setup, network, release, container, mutating, long-running, multi-line,
+  multi-command, runner-specific, not-a-check, interactive, redundant,
+  unquotable, reserved-id). A gate must be safe to run any number of times, so
+  'npm ci', 'npm publish', 'npm audit' and e2e suites never become gates.
+
+  The draft is a draft: it mirrors what CI already runs, not what the repository
+  considers sufficient. Read it, then run it once and confirm RESULT passed.
+
 ### commandmate verify history / commandmate verify show <run-id>
   Read past verification runs. Both are read-only and never start a run, so
   neither returns 20 or 21 — those mean "this tree failed verification", and a

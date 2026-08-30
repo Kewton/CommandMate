@@ -108,10 +108,14 @@ function stderr(): string {
 }
 
 describe('verify subcommand registration', () => {
-  it('registers history and show without displacing the run action', async () => {
+  it('registers the read subcommands without displacing the run action', async () => {
     const cmd = await loadCommand();
 
-    expect(cmd.commands.map((sub) => sub.name()).sort()).toEqual(['history', 'show']);
+    // `init` joined in Issue #2061. Asserted as an exact list rather than a
+    // `toContain`, so a subcommand added by accident is still caught: `verify`
+    // takes `<worktree-id>` as an argument, and every name registered here is a
+    // worktree id nobody can verify any more.
+    expect(cmd.commands.map((sub) => sub.name()).sort()).toEqual(['history', 'init', 'show']);
   });
 
   it('declares the documented history options', async () => {

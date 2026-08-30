@@ -788,6 +788,10 @@ commandmate verify <worktree-id> --timeout 1800        # 超過で exit 124
 
 commandmate verify history                             # 過去の run 一覧（読み取り専用）
 commandmate verify show <run-id>                       # run の詳細（読み取り専用）
+
+commandmate verify init                                # CI 定義から verify.yaml を起案（Issue #2061）
+commandmate verify init --dry-run                      # 草案を表示するだけ（書き込まない）
+commandmate verify init --cwd <path> --json            # 対象リポジトリ指定 / 機械可読出力
 ```
 
 ### オプション
@@ -827,6 +831,49 @@ GATE unit FAIL (exit=1, 45.0s)
 # stdout:
 RESULT failed
 ```
+
+### commandmate verify init — CI 定義から起案する（Issue #2061）
+
+`.commandmate/verify.yaml` が無いリポジトリで、**そのリポジトリ自身の CI 定義**から草案を
+生成します。`.github/workflows/*.yml` の各 `run:` ステップと `package.json` の `scripts` を
+読み、ゲートにできるものだけを宣言します。
+
+```bash
+$ commandmate verify init --dry-run     # まず中身を見る
+$ commandmate verify init               # 納得したら書き出す
+Wrote .commandmate/verify.yaml with 11 gate(s).
+Scanned: .github/workflows/ci-pr.yml, package.json
+  token-discipline  node scripts/check-token-discipline.mjs  <- .github/workflows/ci-pr.yml (job: token-discipline, step: ...)
+  lint              npm run lint                             <- .github/workflows/ci-pr.yml (job: lint, step: Run ESLint)
+  ...
+```
+
+| オプション | 説明 | デフォルト |
+|-----------|------|-----------|
+| `--cwd <path>` | 起案対象のリポジトリ | カレントディレクトリ |
+| `--dry-run` | 草案を stdout に出すだけで書き込まない | 無効 |
+| `--json` | 草案（ゲート・拒否理由・走査したファイル）を JSON 出力 | 無効 |
+
+**この 1 本だけはサーバを必要としません。** verify.yaml がまだ無い段階で走らせるコマンドなので、
+`commandmate start` を前提にすると起動の前提がその起動自身になります。
+
+**既存ファイルは決して上書きしません**（`--force` は用意していません）。既存の verify.yaml は
+そのリポジトリ自身の判断であり、多くは各ゲートの根拠がコメントで併記されています。
+既にある場合は exit 2 で、そのパスを名指しして終了します。捨てるつもりならファイルを削除してください。
+
+ゲートにしなかったコマンドは**理由つきで stderr に出ます**（`setup` / `network` / `release` /
+`container` / `mutating` / `long-running` / `multi-line` / `multi-command` / `runner-specific` /
+`not-a-check` / `interactive` / `redundant` / `unquotable` / `reserved-id`）。
+`npm ci` や `npm publish`、`npm audit`、`test:e2e` はゲートになりません
+（ゲートは**何度でも安全に再実行できるコマンド**に限るため）。
+判定基準の一覧は [`docs/design/verification-config.md` §11](../design/verification-config.md) を参照。
+
+**草案は草案です。** CI が既に走らせているものを写しただけで、そのリポジトリが十分と
+考える集合ではありません。書き出したら中身を読み、1 回実行して `RESULT passed` を確認してください。
+
+Web UI では Verification ペインの「CI から起案する」ボタンが**同じ実装**を呼びます
+（`POST /api/worktrees/:id/verify/config`）。起案ロジックの実体は
+`src/lib/verification/verify-draft.ts` の 1 本だけです。
 
 ### CI と同じ検査を宣言する（Issue #1882）
 

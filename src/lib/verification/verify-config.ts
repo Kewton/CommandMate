@@ -134,6 +134,28 @@ export const RESERVED_GATE_IDS = [
 
 export const VERIFY_CONFIG_RELATIVE_PATH = '.commandmate/verify.yaml';
 
+/**
+ * Gate ids a default full run executes, in the order the runner records them
+ * (Issue #2061).
+ *
+ * The Verification pane needs a denominator while a run is in flight — gate
+ * rows are created as each gate starts, so "3 gates recorded" is progress, not
+ * a total. Declared here rather than in the pane because the composition is the
+ * runner's: `work-evidence`, then `scope`, then `env-clean` only when a
+ * declaration switched it on, then verify.yaml's own gates in file order.
+ *
+ * A *default* run, which is what the pane's "run verification" button starts.
+ * A run narrowed with `--gates` / `gateIds` executes a subset of this.
+ */
+export function defaultPlannedGateIds(config: VerifyConfig): string[] {
+  return [
+    WORK_EVIDENCE_GATE_ID,
+    SCOPE_GATE_ID,
+    ...(config.options.requireEnvClean ? [ENV_CLEAN_GATE_ID] : []),
+    ...config.gates.map((gate) => gate.id),
+  ];
+}
+
 export const DEFAULT_TIMEOUT_SEC = 600;
 export const DEFAULT_MAX_LOG_TAIL_BYTES = 8192;
 
