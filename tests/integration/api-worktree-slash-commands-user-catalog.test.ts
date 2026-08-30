@@ -11,6 +11,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { removeTempDir } from '@tests/helpers/temp-dir';
+import { CATALOG_VERIFIED_AGAINST } from '@/lib/standard-commands';
 
 vi.mock('@/lib/db/db-instance', () => ({
   getDbInstance: vi.fn(() => ({})),
@@ -184,7 +185,13 @@ describe('GET /api/worktrees/[id]/slash-commands (Issue #1476)', () => {
     expect(cold.catalogStaleness).toEqual({});
 
     const data = await (await runGet('claude', { warmStaleness: true })).json();
-    expect(data.catalogStaleness.claude).toEqual({ current: '9.9.9', verifiedAgainst: '2.1.218', stale: true });
+    // Issue #2158: the stamp moves when claude is re-attested; assert against
+    // the derived constant rather than a literal.
+    expect(data.catalogStaleness.claude).toEqual({
+      current: '9.9.9',
+      verifiedAgainst: CATALOG_VERIFIED_AGAINST.claude,
+      stale: true,
+    });
     // Undetectable tools are omitted.
     expect(data.catalogStaleness.antigravity).toBeUndefined();
   });

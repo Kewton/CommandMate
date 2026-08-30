@@ -207,6 +207,8 @@ describe('the bundled catalog carries descriptionKey through verbatim', () => {
       'slashCommands.descriptions.memory.copilot',
       'slashCommands.descriptions.plugin.claude',
       'slashCommands.descriptions.plugin.copilot',
+      'slashCommands.descriptions.recap.claude',
+      'slashCommands.descriptions.recap.codex',
       'slashCommands.descriptions.skills.claude',
       'slashCommands.descriptions.skills.codex',
       'slashCommands.descriptions.skills.copilot',

@@ -51,10 +51,10 @@
   "attestations": [
     {
       "tool": "claude",
-      "version": "2.1.218",
+      "version": "2.1.251",
       "source": "https://code.claude.com/docs/en/commands.md — the built-in slash command table, active canonical rows only (rows whose note says the command was removed, and \"Alias for /x\" rows, are not commands the CLI ships).",
-      "observedAt": "2026-08-24",
-      "issue": 2026,
+      "observedAt": "2026-08-30",
+      "issue": 2158,
       "commands": [
         "add-dir",
         "advisor",
@@ -120,6 +120,7 @@
         "powerup",
         "privacy-settings",
         "radio",
+        "rate-limit-options",
         "recap",
         "release-notes",
         "reload-plugins",
@@ -159,15 +160,16 @@
         "verify",
         "voice",
         "web-setup",
+        "workflow-authoring",
         "workflows"
       ]
     },
     {
       "tool": "codex",
-      "version": "0.149.1",
-      "source": "openai/codex, codex-rs/tui/src/slash_command.rs at tag rust-v0.149.1 — every `enum SlashCommand` variant except the ones whose description() is the internal \"DO NOT USE\" marker. Byte-identical to the rust-v0.149.0 enum #2024 read: the 0.149.1 release moved the version without moving the command set.",
-      "observedAt": "2026-08-24",
-      "issue": 2026,
+      "version": "0.151.0",
+      "source": "openai/codex, codex-rs/tui/src/slash_command.rs at tag rust-v0.151.0 — every `enum SlashCommand` variant except the ones whose description() is the internal \"DO NOT USE\" marker (MemoryDrop / MemoryUpdate). 59 variants, 57 active. The only command-set change since the rust-v0.149.1 enum #2026 read is the added `Recap` variant.",
+      "observedAt": "2026-08-30",
+      "issue": 2158,
       "commands": [
         "agents",
         "app",
@@ -208,6 +210,7 @@
         "pwd",
         "quit",
         "raw",
+        "recap",
         "rename",
         "resume",
         "review",
