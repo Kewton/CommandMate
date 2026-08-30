@@ -1,0 +1,185 @@
+version: 1
+title: "Issue #2158: カタログのドリフトを A（--write）まで進め、attestation は証拠付き草案として残す"
+goal: |
+  /pm-auto-issue2dev
+
+  https://github.com/Kewton/CommandMate/issues/2158 のうち **A だけ**を実装し、
+  **B は「証拠付きの草案」までにとどめてください。**
+
+  ## 【最重要】B（attestation の書き換え）を実施しないこと
+
+  `src/config/slash-commands-attestations.json` を**編集しないでください。** scope にも入れていません。
+
+  このファイルの `$comment` が設計意図を明記しています:
+
+  > It is **a human's signed reading of a source**, not a summary of the catalog. Nothing writes this file:
+  > `catalog:refresh --write` adds commands and locale strings and stops there, so **the only way to move an
+  > attestation is for a person to open the source, read it, and edit this file. That act IS the review.**
+
+  **署名は人が行います。** あなたの仕事は、その人が署名するために必要な**証拠を揃えること**です。
+
+  ---
+
+  ## やること 1: A（`--write` の適用と生成物のレビュー）
+
+  ```bash
+  npm run catalog:refresh -- --write
+  ```
+
+  書き換わるのは **`src/config/slash-commands-catalog.json` と `locales/{en,ja}/worktree.json`
+  の 2 種類だけ**です（`slash-commands-attestations.json` は書かれません）。
+
+  ### 生成された文字列は必ず人手でレビューすること
+
+  - **ja 訳は `[要レビュー]` プレフィックス付きプレースホルダ**です。**日本語として通る訳に直してください**
+  - **en も docs 由来の heuristic 抽出**なので、誤抽出や不要な内部コマンドの混入がないか確認してください
+  - これが安全ゲートです。生成されたまま通さないこと
+
+  ### 追加される 3 コマンド（`--check` の実測）
+
+  ```
+  + [claude] /rate-limit-options — Show ways to keep working when a claude.ai usage limit blocks
+                                  a request: wait and continue automatically when the limit resets,
+                                  add usage credits, or upgrade your plan
+  + [claude] /workflow-authoring — Load the reference for writing dynamic workflow scripts:
+                                  the script API, resume behavior, quality patterns, and worked examples
+  + [codex]  /recap             — summarize the current conversation now
+  ```
+
+  ### `/recap` の description conflict
+
+  `--check` が指摘しています:
+
+  > [codex] /recap: inherits the shipped description ("Generate a one-line summary of the current session
+  > on demand") but the source says "summarize the current conversation now"; give this tool its own
+  > `slashCommands.descriptions.recap.codex`
+
+  **codex 専用の description キーを立ててください。** 既存の共有 description を書き換えると
+  他ツールの `/recap` に波及します。
+
+  ---
+
+  ## やること 2: B の「証拠付き草案」を作る（**実ファイルは触らない**）
+
+  `dev-reports/issue/2158/attestation-draft.md` に次を書いてください。
+
+  ### 必須: ソースを実際に読み、読んだ内容を転記すること
+
+  **カタログからコピーしないでください。** それをやると「ソースがこう言っていた」という主張が
+  「カタログがこうなっている」の言い換えになり、審査そのものが消えます（#2026 の設計意図）。
+
+  `src/config/slash-commands-attestations.json` の各レコードの **`source` フィールドが
+  「どこを見ればこの測定を再現できるか」の指示**になっています。まずそれを読んでください。
+
+  対象は **claude と codex の 2 ツール**です（antigravity / copilot / opencode はドリフトなし）。
+
+  ### 草案に含めるもの（tool ごと）
+
+  1. **読んだソースの URL / タグ / コマンドと、読んだ日**
+  2. **そこから読み取ったコマンドの全集合**（`/` を除いた名前、ソート済み）
+  3. **現在の attestation との差分**（追加 / 削除 / 変更）
+  4. **`version` に何を書くべきか**とその根拠
+     - `--check` は `codex: 0.149.1 -> 0.151.0` と報告しています。**0.151.0 のソースを読んだのなら
+       0.151.0**、読んでいないなら**読んだ版を正直に書く**こと
+     - claude docs は**版で pin されていない生ページ**なので、`observedAt`（読んだ日）が
+       load-bearing です。`$comment` にその旨が書かれています
+  5. **ソースの該当箇所の引用**（人が突き合わせられる程度に）
+
+  ### 正直に書くこと
+
+  - **読めなかったソースは「読めなかった」と書く。** 推測で埋めないこと
+  - ソースが到達不能・体裁変更なら、その事実を書けば十分です
+
+  ---
+
+  ## テストが赤くなるのは想定内
+
+  A だけを適用すると `tests/unit/lib/standard-commands.test.ts` の
+  `ships exactly the attested command set for every tool` が
+  `[<tool>] /<name> is in the catalog but not attested` で落ちます。
+
+  **これは審査ゲートであって欠陥ではありません。** 直し方は 2 つとも禁止です:
+
+  - ❌ **テストの期待値を緩める**
+  - ❌ **attestation をカタログからコピーして緑にする**
+
+  **赤いまま提出してください。** 人が草案を検証して attestation に署名した時点で緑になります。
+  その旨を `dev-reports/issue/2158/attestation-draft.md` の冒頭に書いてください。
+
+  ## 参考
+
+  手順の詳細と各ツールの採取レシピは `.claude/skills/catalog-reconcile/SKILL.md` の Phase 5 にあります。
+  `src/config/slash-commands-exclusions.json` の `$comment` にも判断の背景があります。
+
+  ## 受入条件
+
+  - `npm run catalog:refresh -- --write` が適用され、**3 コマンドがカタログに入っている**
+  - **ja 訳が `[要レビュー]` のままでない**（日本語として通る訳になっている）
+  - **en の description が誤抽出でない**ことを確認した旨が記録されている
+  - `/recap` に **codex 専用の description キー**が立っている
+  - **`src/config/slash-commands-attestations.json` を変更していない**
+  - `dev-reports/issue/2158/attestation-draft.md` に、**実際に読んだソースの引用つきで**
+    claude / codex の草案がある
+  - `standard-commands.test.ts` が赤いこと、その理由、緑にする手順が草案の冒頭に書かれている
+
+  ## 作業ルール（厳守）
+
+  - **`CHANGELOG.md` と `docs/module-reference.md` を編集しないでください**（scope 外です）。
+    代わりに次の 2 ファイルを書いてください。どちらも `dev-reports/` 配下なので commit には入りません。
+
+    - `dev-reports/changelog/issue-2158.md` — `CHANGELOG.md` の `## [Unreleased]` にそのまま
+      貼れる **1 エントリ**（先頭は `- **<type>(<scope>): …** (#2158): …`）。どの節
+      （`### Added` / `### Changed` / `### Fixed`）に入るかを 1 行目にコメントで書く。
+      **形式は次の実例に合わせてください**（develop の `CHANGELOG.md` にある実エントリを丸ごと 1 本。
+      エントリは**ファイル中では 1 行**で、下で折り返して見えるのは表示上の都合です）:
+
+      ```markdown
+      <!-- ### Fixed -->
+      - **fix(cli): `send` 直後の `wait` が「まだ始まっていない」を完了と読む問題を修正** (#1975): `wait` が `sessionStatus==='ready'` を完了と判定する直前に、**「このインスタンスに最後に渡されたプロンプト」と「エージェント自身が最後に報告したターン終了（`lastStopEventAt`）」を突き合わせる**ゲートを追加。`send` 直後は最新の構造化イベントが直前ターンの `stop` のままなので #1839 の `adoptTurnStart()` が何も採用せず、`turnStartedAt === null` が「決着済み」と読まれてアイドル composer をそのまま完了にしていた（隔離サーバ実測 2026-08-22 / copilot 1.0.80: `send`→`wait` 5 回中 3 回が約 0.3 秒・`basis=scraper_ready`・成果物ゼロで exit 0）。保留は `PENDING_PROMPT_HOLD_MS`=60 秒で打ち切り、`--timeout` / `--stall-timeout` はそれより短ければ従来どおり優先される。
+      ```
+
+      - `- **` で始めること — 集計は `grep -cE '^- \*\*'` なので、外れるとエントリとして数えられません。
+      - `(#2158)` は要約の**外**（`**` を閉じた後）に置くこと — `（Issue #2158）` を要約の中に埋めると
+        機械的に取り出せません。
+      - `<type>` は CLAUDE.md のコミットメッセージ規約と同じ語彙
+        （`feat` / `fix` / `docs` / `refactor` / `test` / `chore` / `ci` / `style`）。
+      - 1 エントリ＝1 行（折らない）。本文がどれだけ長くても改行を入れません。
+
+    - `dev-reports/module-reference/issue-2158.md` — `docs/module-reference.md` の表に足す注記を
+      **行キー（`| \`path\` |`）ごと**に列挙する。既存行への追記なら「どの行に何を足すか」を書く。
+      **既存行に足すときは `grep -n '^| \`<path>\`' docs/module-reference.md` を実行し、その出力
+      （行番号つきの行キー）を断片に書き写してから**書くこと。0 件だった行への追記を指示しない
+      （新しい行を足すなら「新規行」と明記する）。足すものが無ければ「追記なし」の 1 行でよい。実例:
+
+      ```markdown
+      ## 既存行への追記
+      - `src/lib/session/worktree-status-helper.ts` — 実在確認: `docs/module-reference.md:103`（行番号は確認時点のもの）
+        追記内容: 「private `getStatusCaptureLines()` を削除し `resolveCaptureSpec(cliToolId).statusLines` に置換（Issue #1933）」
+
+      ## 新規行
+      追記なし
+      ```
+
+    断片が無いとリリースノートと module-reference に載りません。**実装と同じ commit の時点で書くこと。**
+
+  - **PR を作らないでください。** PR 作成とマージはオーケストレーターが行います。
+  - **commit は 1 本にまとめてください**（`<type>(<scope>): <subject>` 形式）。
+  - Issue 本文を書き換えないでください。訂正が要る場合は commit メッセージか PR 用のメモに書いてください。
+  - 実装が終わったら最後に `IMPL_COMPLETED` とだけ出力してください。
+
+verify:
+  # `standard-commands.test.ts` の attestation pin は **設計上ここで赤くなる**（審査ゲート）。
+  # unit を含めると裁定が常に exit 20 になり「本当に壊れた」と区別できないので、
+  # ここでは unit を外し、オーケストレーターが unit を別途回して
+  # 「落ちているのが attestation pin だけか」を自分で確認する。
+  gates: [lint, typecheck, build]
+scope:
+  allow:
+    - "src/config/slash-commands-catalog.json"
+    - "locales/en/worktree.json"
+    - "locales/ja/worktree.json"
+    - "dev-reports/**"
+  deny: []
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true

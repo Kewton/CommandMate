@@ -1,0 +1,169 @@
+version: 1
+title: "Issue #2131: PC の opencode quick keys を折りたためるようにする"
+goal: |
+  /bug-fix
+
+  https://github.com/Kewton/CommandMate/issues/2131 を修正してください。
+
+  ## 事象（Issue 本文の実測。裏取り不要）
+
+  PC で terminal split の agent に **opencode** を選ぶと `OpencodeQuickKeys`（17 ボタン）が
+  **常時展開のまま**描画され、ターミナル表示領域を圧迫します。
+
+  | 構成 | quick keys | ターミナル高 |
+  |---|---|---|
+  | claude・1 分割 | なし | **670px** |
+  | opencode・1 分割 | 206px | **456px**（−32%） |
+  | opencode・3 分割 | **578px / 11 行** | **64px**（−90%） |
+
+  **3 分割時は同一描画内に対照があります** — split 1・2 は opencode 未稼働で quick keys が出ず
+  ターミナル 650px。同じ viewport・同じ 800px ペインで**違いは quick keys の有無だけ**です。
+
+  機構: 下部ブロックが `flex-shrink-0`、ターミナルが `flex-1 min-h-0`。
+  **下部が縮まないので損失を 100% ターミナルが被ります。**
+
+  ## 原因（既に特定済み）
+
+  折りたたみ機構は **#2106 で実装済み**です。`collapsible` prop を渡すと 17 個のキーが 44px の
+  トグル 1 個の裏に畳まれ、開閉状態が localStorage に永続化されます
+  （`useOpencodeQuickKeysDisclosure`）。**モバイルは渡していて、PC は渡していません。**
+
+  ```tsx
+  src/components/worktree/MobileTerminalTab.tsx:151          <OpencodeQuickKeys ... compact collapsible />
+  src/components/worktree/TerminalSplitPaneContent.tsx:616   <OpencodeQuickKeys ... />   ← 畳めない
+  ```
+
+  `OpencodeQuickKeys` の docblock が理由を書いています:
+
+  > PC does not: `collapsible` defaults to false and `TerminalSplitPaneContent` renders the
+  > same always-open toolbar it rendered before, **because a split pane has the width and
+  > nothing there is being squeezed.**
+
+  **この前提が上記の実測で成立していません。** #2106 は当時モバイルだけを計測しており
+  （`tests/e2e/mobile-opencode-quick-keys-2106.spec.ts`）、**PC 側の高さを測る e2e が存在しません。**
+
+  ---
+
+  ## 【決定事項】採る案（オーケストレーターとユーザーで確定済み）
+
+  **案 A ＋ 案 C を実装します。** 案 B（`ResizeObserver` で幅に応じて既定を決める）は採りません。
+
+  ### 案 A: PC でも `collapsible` を渡す
+
+  `TerminalSplitPaneContent.tsx:616` に prop を足します。#2106 で実装・テスト済みの機構を
+  そのまま使ってください。**新しい折りたたみ機構を作らないこと。**
+
+  #### 【決定 1】localStorage キーは**分離する**
+
+  現在のキーは `commandmate:mobile:opencodeQuickKeysOpen` で、**`mobile:` が名前に入っています**。
+  共有すると「スマホで閉じたら PC でも閉じる」になります。**画面事情が別なので分離してください。**
+
+  #### 【決定 2】PC の既定は **OPEN**（モバイルは CLOSED のまま）
+
+  モバイルは既定 CLOSED（`OPENCODE_QUICK_KEYS_DEFAULT_OPEN = false`）ですが、
+  **PC は 1 分割なら 206px/800px なので常時 CLOSED は逆に不便**です。
+  PC は既定 OPEN とし、**圧迫されたら畳める**という形にします。
+
+  **モバイルの既定 CLOSED を変えないこと。** 受入条件です。
+
+  ### 案 C: PC でも狭いときは `compact` を渡す
+
+  PC は `compact` を渡していないため、各ボタンが `<ラベル> — ctrl+x g` と**キー表記付きで横に長く**、
+  **同じ幅ならモバイルより折り返し行数が増えます**（モバイル 378px / 7 行 に対し PC 3 分割は
+  578px / 11 行）。`compact` を渡すとキー表記の接尾辞が落ちて行数が減ります。
+
+  「狭いとき」の判定方法は実装者の裁量ですが、**案 B のような `ResizeObserver` による
+  既定値の動的決定はしないでください**（採らないと決めた案です）。分割数など既に持っている
+  情報で判定できるなら、そちらを優先してください。**選んだ判定方法と理由を PR 本文に書いてください。**
+
+  ---
+
+  ## 【必須】PC 側の高さを測る e2e を追加する
+
+  **これが受入条件に入っている理由**: #2106 の docblock 自身が「見積りより実測が悪かった」ことを
+  記録しており、**PC 側は誰も測っていなかったため今回の不具合が生まれました。** 回帰防止に実測が要ります。
+
+  `tests/e2e/mobile-opencode-quick-keys-2106.spec.ts` が**モバイル版の先例**です。同じ形で PC 版を作り、
+  **`getBoundingClientRect()` でターミナル高を実測**してください。
+
+  - **閉じた状態で 3 分割時のターミナル高が 64px から回復していること**を数値で示す
+  - 開いた状態との差も測れると、次に誰かが `collapsible` を外したときに気づけます
+
+  ## 触ってはいけないもの
+
+  - **モバイル経路**（`MobileTerminalTab.tsx`）の挙動。既定 CLOSED と `compact` を維持
+  - **`OpencodeQuickKeys` が `cliToolId !== 'opencode'` で `null` を返す既存挙動**。
+    claude / codex / copilot では何も描画されません
+  - 他の opencode 専用 UI（`OpencodeSidebarNotice` #2095 / `OpencodeTurnDiffPanel` #2043 /
+    `OpencodeSessionControls` #2038・#2051）。**案 D（全体を 1 つの開閉に）は別 Issue の規模**です
+
+  ## 受入条件
+
+  - PC（`TerminalSplitPaneContent`）の opencode quick keys が**トグルで開閉できる**
+  - 開閉状態が**リロード後も保持される**（localStorage キーはモバイルと分離）
+  - **PC の既定は OPEN**、**モバイルの既定は CLOSED のまま**
+  - **opencode 以外のツールでは何も描画されない**（既存挙動の維持）
+  - **閉じた状態で 3 分割時のターミナル高が 64px から回復**していることを e2e で実測
+  - **PC 側の高さを測る e2e が追加されている**
+  - `OpencodeQuickKeys` の docblock の「PC は幅があるから圧迫されない」という記述を**実態に訂正**する
+
+  ## 作業ルール（厳守）
+
+  - **`CHANGELOG.md` と `docs/module-reference.md` を編集しないでください**（scope 外です）。
+    代わりに次の 2 ファイルを書いてください。どちらも `dev-reports/` 配下なので commit には入りません。
+
+    - `dev-reports/changelog/issue-2131.md` — `CHANGELOG.md` の `## [Unreleased]` にそのまま
+      貼れる **1 エントリ**（先頭は `- **<type>(<scope>): …** (#2131): …`）。どの節
+      （`### Added` / `### Changed` / `### Fixed`）に入るかを 1 行目にコメントで書く。
+      **形式は次の実例に合わせてください**（develop の `CHANGELOG.md` にある実エントリを丸ごと 1 本。
+      エントリは**ファイル中では 1 行**で、下で折り返して見えるのは表示上の都合です）:
+
+      ```markdown
+      <!-- ### Fixed -->
+      - **fix(cli): `send` 直後の `wait` が「まだ始まっていない」を完了と読む問題を修正** (#1975): `wait` が `sessionStatus==='ready'` を完了と判定する直前に、**「このインスタンスに最後に渡されたプロンプト」と「エージェント自身が最後に報告したターン終了（`lastStopEventAt`）」を突き合わせる**ゲートを追加。`send` 直後は最新の構造化イベントが直前ターンの `stop` のままなので #1839 の `adoptTurnStart()` が何も採用せず、`turnStartedAt === null` が「決着済み」と読まれてアイドル composer をそのまま完了にしていた（隔離サーバ実測 2026-08-22 / copilot 1.0.80: `send`→`wait` 5 回中 3 回が約 0.3 秒・`basis=scraper_ready`・成果物ゼロで exit 0）。保留は `PENDING_PROMPT_HOLD_MS`=60 秒で打ち切り、`--timeout` / `--stall-timeout` はそれより短ければ従来どおり優先される。
+      ```
+
+      - `- **` で始めること — 集計は `grep -cE '^- \*\*'` なので、外れるとエントリとして数えられません。
+      - `(#2131)` は要約の**外**（`**` を閉じた後）に置くこと — `（Issue #2131）` を要約の中に埋めると
+        機械的に取り出せません。
+      - `<type>` は CLAUDE.md のコミットメッセージ規約と同じ語彙
+        （`feat` / `fix` / `docs` / `refactor` / `test` / `chore` / `ci` / `style`）。
+      - 1 エントリ＝1 行（折らない）。本文がどれだけ長くても改行を入れません。
+
+    - `dev-reports/module-reference/issue-2131.md` — `docs/module-reference.md` の表に足す注記を
+      **行キー（`| \`path\` |`）ごと**に列挙する。既存行への追記なら「どの行に何を足すか」を書く。
+      **既存行に足すときは `grep -n '^| \`<path>\`' docs/module-reference.md` を実行し、その出力
+      （行番号つきの行キー）を断片に書き写してから**書くこと。0 件だった行への追記を指示しない
+      （新しい行を足すなら「新規行」と明記する）。足すものが無ければ「追記なし」の 1 行でよい。実例:
+
+      ```markdown
+      ## 既存行への追記
+      - `src/lib/session/worktree-status-helper.ts` — 実在確認: `docs/module-reference.md:103`（行番号は確認時点のもの）
+        追記内容: 「private `getStatusCaptureLines()` を削除し `resolveCaptureSpec(cliToolId).statusLines` に置換（Issue #1933）」
+
+      ## 新規行
+      追記なし
+      ```
+
+    断片が無いとリリースノートと module-reference に載りません。**実装と同じ commit の時点で書くこと。**
+
+  - **PR を作らないでください。** PR 作成とマージはオーケストレーターが行います。
+  - **commit は 1 本にまとめてください**（`<type>(<scope>): <subject>` 形式）。
+  - Issue 本文を書き換えないでください。訂正が要る場合は commit メッセージか PR 用のメモに書いてください。
+  - 実装が終わったら最後に `IMPL_COMPLETED` とだけ出力してください。
+
+scope:
+  allow:
+    - "src/components/worktree/TerminalSplitPaneContent.tsx"
+    - "src/components/worktree/OpencodeQuickKeys.tsx"
+    - "src/components/worktree/MobileTerminalTab.tsx"
+    - "src/hooks/useOpencodeQuickKeysDisclosure.ts"
+    - "src/config/**"
+    - "tests/e2e/**"
+    - "tests/unit/components/worktree/**"
+    - "tests/unit/hooks/**"
+    - "dev-reports/**"
+  deny: []
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true
