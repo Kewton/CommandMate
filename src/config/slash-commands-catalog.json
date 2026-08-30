@@ -1007,7 +1007,7 @@
     },
     {
       "name": "recap",
-      "descriptionKey": "slashCommands.descriptions.recap",
+      "descriptionKey": "slashCommands.descriptions.recap.claude",
       "category": "standard-util",
       "cliTools": [
         "claude"
@@ -2471,6 +2471,36 @@
       "category": "standard-config",
       "cliTools": [
         "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "rate-limit-options",
+      "descriptionKey": "slashCommands.descriptions.rate-limit-options",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "workflow-authoring",
+      "descriptionKey": "slashCommands.descriptions.workflow-authoring",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "recap",
+      "descriptionKey": "slashCommands.descriptions.recap.codex",
+      "category": "standard-util",
+      "cliTools": [
+        "codex"
       ],
       "isStandard": true,
       "source": "standard"
