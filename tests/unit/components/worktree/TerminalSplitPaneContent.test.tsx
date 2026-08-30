@@ -16,6 +16,11 @@ import { render, screen, waitFor, act, fireEvent } from '@testing-library/react'
 import { TerminalSplitPaneContent } from '@/components/worktree/TerminalSplitPaneContent';
 import type { AgentInstance, CLIToolType } from '@/lib/cli-tools/types';
 import { installRadixJsdomPolyfills } from '@tests/helpers/radix-jsdom';
+// Issue #2131: the PC strip folds now, under its OWN localStorage key.
+import {
+  OPENCODE_QUICK_KEYS_OPEN_STORAGE_KEY,
+  OPENCODE_QUICK_KEYS_DESKTOP_OPEN_STORAGE_KEY,
+} from '@/hooks/useOpencodeQuickKeysDisclosure';
 
 // Issue #1079: TerminalSplitPane's instance selector is now a Radix DropdownMenu.
 beforeAll(() => installRadixJsdomPolyfills());
@@ -400,6 +405,125 @@ describe('TerminalSplitPaneContent', () => {
     expect(screen.getByTestId('opencode-quick-key-agents')).toBeEnabled();
     // The refused chord has no button on any code path.
     expect(screen.queryByTestId('opencode-quick-key-sidebar')).not.toBeInTheDocument();
+  });
+
+  /**
+   * Issue #2131: the PC strip is collapsible now.
+   *
+   * #2106 left this call site always-open on the written assumption that a split
+   * pane "has the width". It does not: with the strip open a 3-split pane keeps
+   * 64px of terminal, because this footer is `flex-shrink-0` and TerminalDisplay
+   * is the only `flex-1 min-h-0` sibling. The pixels are measured in
+   * `tests/e2e/desktop-opencode-quick-keys-2131.spec.ts` (jsdom has no layout);
+   * what is asserted here is that THIS caller passes the props that make the
+   * fold possible, and that it names the desktop screen rather than the phone's.
+   */
+  describe('opencode quick keys are collapsible on PC (Issue #2131)', () => {
+    beforeEach(() => {
+      window.localStorage.clear();
+      mockFetch.mockImplementation(() =>
+        okJson({
+          isRunning: true,
+          fullOutput: 'opencode body',
+          thinking: false,
+          structuredEvents: { session: { id: 'ses_1' } },
+        }),
+      );
+    });
+
+    function renderOpencodeSplit() {
+      return render(
+        <TerminalSplitPaneContent
+          worktreeId="w-1"
+          splitIndex={0}
+          cliToolId="opencode"
+          availableInstances={[inst('opencode')]}
+          onInstanceChange={vi.fn()}
+          onFocus={vi.fn()}
+          autoYes={{ onToggle: vi.fn() }}
+        />,
+      );
+    }
+
+    it('renders a toggle and starts OPEN — the split keeps its chords by default', async () => {
+      renderOpencodeSplit();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('opencode-quick-keys-toggle')).toBeInTheDocument();
+      });
+      expect(screen.getByTestId('opencode-quick-keys-toggle')).toHaveAttribute(
+        'aria-expanded',
+        'true',
+      );
+      expect(screen.getAllByTestId(/^opencode-quick-key-/)).toHaveLength(17);
+    });
+
+    it('folds all seventeen keys away on one click, leaving only the toggle row', async () => {
+      renderOpencodeSplit();
+      await waitFor(() => {
+        expect(screen.getByTestId('opencode-quick-keys-toggle')).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByTestId('opencode-quick-keys-toggle'));
+
+      expect(screen.queryByTestId('opencode-quick-keys')).not.toBeInTheDocument();
+      expect(screen.queryAllByTestId(/^opencode-quick-key-/)).toHaveLength(0);
+      expect(screen.getByTestId('opencode-quick-keys-toggle')).toBeInTheDocument();
+    });
+
+    it('stores the fold under the DESKTOP key, never the phone\'s', async () => {
+      renderOpencodeSplit();
+      await waitFor(() => {
+        expect(screen.getByTestId('opencode-quick-keys-toggle')).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByTestId('opencode-quick-keys-toggle'));
+
+      expect(
+        window.localStorage.getItem(OPENCODE_QUICK_KEYS_DESKTOP_OPEN_STORAGE_KEY),
+      ).toBe('false');
+      expect(window.localStorage.getItem(OPENCODE_QUICK_KEYS_OPEN_STORAGE_KEY)).toBeNull();
+    });
+
+    it('ignores a phone preference that says closed', async () => {
+      window.localStorage.setItem(OPENCODE_QUICK_KEYS_OPEN_STORAGE_KEY, 'false');
+      renderOpencodeSplit();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('opencode-quick-keys')).toBeInTheDocument();
+      });
+    });
+
+    it('exposes the measurable halves of the pane\'s flex column', async () => {
+      renderOpencodeSplit();
+
+      // The e2e spec measures exactly these two: whatever the footer grows by,
+      // the terminal slot loses. Without the ids there is nothing to measure.
+      await waitFor(() => {
+        expect(screen.getByTestId('split-terminal-slot-0')).toBeInTheDocument();
+      });
+      expect(screen.getByTestId('split-footer-0')).toBeInTheDocument();
+    });
+
+    it('renders no toggle for a non-opencode split', async () => {
+      render(
+        <TerminalSplitPaneContent
+          worktreeId="w-1"
+          splitIndex={1}
+          cliToolId="claude"
+          availableInstances={[inst('claude')]}
+          onInstanceChange={vi.fn()}
+          onFocus={vi.fn()}
+          autoYes={{ onToggle: vi.fn() }}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTestId('message-input-1')).toBeInTheDocument();
+      });
+      expect(screen.queryByTestId('opencode-quick-keys-toggle')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('opencode-quick-keys')).not.toBeInTheDocument();
+    });
   });
 
   it('renders the C-lite escape hatch for an unclassified running session (Issue #1017)', async () => {

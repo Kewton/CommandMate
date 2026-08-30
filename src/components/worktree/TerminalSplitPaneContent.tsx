@@ -6,7 +6,7 @@
  *   - AutoYesToggle (Issue #740; per-split, keyed by this split's cliToolId so
  *     each CLI toggles auto-yes independently)
  *   - NavigationButtons (when CLI is in selection-list state, e.g. OpenCode)
- *   - OpencodeQuickKeys (opencode only, Issue #2046)
+ *   - OpencodeQuickKeys (opencode only, Issue #2046; collapsible since #2131)
  *   - PromptPanel (when /current-output reports isPromptWaiting)
  *   - MessageInput (always; carries draft persistence per splitIndex)
  *
@@ -540,7 +540,13 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
             </button>
           </div>
         )}
-        <div className="flex-grow overflow-hidden min-w-0 min-h-0 relative">
+        <div
+          // Issue #2131: the measured half of the pair above. This is the box
+          // `TerminalDisplay` fills, so its `getBoundingClientRect().height` IS
+          // the "terminal height" the Issue's table reports.
+          data-testid={`split-terminal-slot-${splitIndex}`}
+          className="flex-grow overflow-hidden min-w-0 min-h-0 relative"
+        >
           {terminalDisplaySlot}
         </div>
       </div>
@@ -559,7 +565,10 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
 
   const footerSlot = useMemo(
     () => (
-      <div className="space-y-2">
+      // Issue #2131: `data-testid` so the PC height spec can measure what the
+      // footer costs the terminal. The footer is the `flex-shrink-0` half of the
+      // pane's flex column; whatever it grows by, TerminalDisplay loses.
+      <div className="space-y-2" data-testid={`split-footer-${splitIndex}`}>
         {showNav ? (
           <NavigationButtons
             worktreeId={worktreeId}
@@ -611,7 +620,17 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
             component itself decides which of its buttons a pane without an agent
             session may press -- see its docblock, and §22 of
             docs/design/opencode-server-live-verification.md for why `ctrl+x b`
-            is not among them. */}
+            is not among them.
+            Issue #2131: `collapsible`. This footer is `flex-shrink-0` and
+            `TerminalDisplay` is the only `flex-1 min-h-0` sibling, so every pixel
+            the strip takes comes out of the terminal and nothing else: 578px of
+            strip across eleven wrapped rows left 64px of terminal in a 3-split
+            pane, against 650px in the two splits of the SAME frame that had no
+            strip. `layout="desktop"` is what keeps that fold independent of the
+            phone's -- separate localStorage key, and OPEN by default here
+            because a 1-split pane still keeps 456px of terminal with the strip
+            showing. Measured in
+            `tests/e2e/desktop-opencode-quick-keys-2131.spec.ts`. */}
         {terminal.isRunning ? (
           <OpencodeQuickKeys
             worktreeId={worktreeId}
@@ -619,6 +638,8 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
             instanceId={resolvedInstanceId}
             hasAgentSession={agentSession.session !== null}
             onKeysSent={refresh}
+            collapsible
+            layout="desktop"
           />
         ) : null}
         {/* Issue #2043: opencode only, and only when opencode has named files.
