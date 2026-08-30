@@ -182,7 +182,7 @@
       "claude-api": "Load Claude API reference material for your project's language (Python, TypeScript, Java, Go, Ruby, C#, PHP, or cURL) and Managed Agents reference",
       "code-review": "Review the current diff for correctness bugs and cleanup opportunities",
       "color": "Set the prompt bar color for the current session",
-      "copy": "Copy the last response to the clipboard as markdown",
+      "copy": "Copy the last response to the clipboard",
       "dataviz": "Design guidance for charts, graphs, and dashboards",
       "debug": {
         "claude": "Enable debug logging for the current session and troubleshoot issues by reading the session debug log",
