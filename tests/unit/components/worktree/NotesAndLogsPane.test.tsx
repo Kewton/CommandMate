@@ -14,6 +14,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { NotesAndLogsPane } from '@/components/worktree/NotesAndLogsPane';
 import type { AgentInstance, CLIToolType } from '@/lib/cli-tools/types';
+import type { WorktreeVerificationState } from '@/hooks/useWorktreeVerification';
 
 // Mock child components
 vi.mock('@/components/worktree/MemoPane', () => ({
@@ -236,6 +237,23 @@ describe('NotesAndLogsPane', () => {
   describe('Verification sub-tab (Issue #1816 / #2064)', () => {
     it('is always offered, like the PC Activity Bar entry (Issue #2064)', () => {
       render(<NotesAndLogsPane {...defaultProps} />);
+      expect(screen.getByText('schedule.verificationTab')).toBeInTheDocument();
+    });
+
+    it('is offered even with NO verification state supplied (Issue #2064)', () => {
+      // The assertion above cannot see the fix: `defaultProps.verification` is
+      // `{}`, which is TRUTHY, so the deleted guard
+      // (`verification ? SUB_TABS : SUB_TABS.filter(t => t.id !== 'verification')`)
+      // returns the full row for it and the test passes on develop too. Only an
+      // absent state exercises the branch that used to hide the tab, so this is
+      // the render that pins #2064. The cast is what makes the now-required prop
+      // absent; restoring the guard must turn this red.
+      render(
+        <NotesAndLogsPane
+          {...defaultProps}
+          verification={undefined as unknown as WorktreeVerificationState}
+        />
+      );
       expect(screen.getByText('schedule.verificationTab')).toBeInTheDocument();
     });
 
