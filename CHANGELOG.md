@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **fix(session): tmux セッションだけが残りツールが終了した pane を「稼働中」と報告し、次の `send` が復旧不能になる問題を修正** (#2070): 「セッションは在るがツールが落ちた」検出は `worktree-status-helper.ts` の `cliToolId === 'claude'` 分岐 1 箇所に閉じていたため、codex の「Update now」（codex を `npm install` に置き換えて終了する）・`Ctrl+C` 二度押し・クラッシュで pane が素のシェルに戻っても `has-session` は yes を返し続け、サイドバーは緑のまま・`startSession` は既存セッションを見て何もせず・`send` は `waitForPrompt` がタイムアウトして手動 `kill-session` 以外に復旧手段が無かった。判定を `ICLITool.livenessSpec()`（`ToolLivenessSpec`：ツール自身の prompt-ready パターンの**否定**＋シェルプロンプトの**肯定**という連言）へ移し、共有ルール `judgeToolLiveness()` を claude / codex / copilot / opencode / gemini / antigravity / vibe-local の 7 ツールに広げた上で、各ツールの `launchSession()` 再利用経路が「ツールが動いていない」と 2 回続けて読めたときに**同じ pane へ起動コマンドを再送**し、`sendMessage()` 冒頭でも同じ復旧を行うようにした（opencode は死んだ port と subscription を `releaseOpencodeEventStream()` で手放してから再割当てする）。claude の既存判定は値・分岐順序・reason 文字列まで不変で、`isSessionHealthy()` はその spec への委譲になっている。`aliveTailLines`（末尾 12 行に限定）と `shellPromptPatterns`（`user@host … %` の肯定形）が両方必要なことは実測に基づく: codex 0.149.1 の終了済み pane には trust ダイアログの `› 1. Yes, continue` が約 1000 行上に残っており全画面検査では永久に alive になり、その zsh プロンプトはちょうど 40 文字＝claude の `MAX_SHELL_PROMPT_LENGTH` と同値で長さゲートも素通りする（2026-08-31 / 専用 tmux socket / 200x1000 実測、`tests/fixtures/tool-liveness-2070/`）。サイドバーと `commandmate ls` には理由コード `exited` を additive に追加し（既存 reason の値・意味は不変）、`idle`（起動していない）と `idle (exited)`（落ちた）を区別できるようにした。
+
 ## [0.29.1] - 2026-08-30
 
 > **Highlight**: スラッシュコマンドパレットの正確さと、PC のターミナル表示領域の 2 点を直すパッチリリース。パレット側は claude 2.1.251 / codex 0.151.0 を読み直して 3 コマンドを追加し（attestation も同じ版で採り直した）、さらに codex 0.149.1 由来のまま残っていた `/copy` の「Markdown として」という失効済みの説明を、3 claimant（claude / codex / copilot）の原文を突き合わせたうえでフラットキーのまま訂正した。ターミナル側は PC の opencode quick keys が常時展開で 17 個のキーが表示領域を潰していたのを、既定 OPEN のまま折りたためるようにした。
