@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.29.1] - 2026-08-30
+
+> **Highlight**: スラッシュコマンドパレットの正確さと、PC のターミナル表示領域の 2 点を直すパッチリリース。パレット側は claude 2.1.251 / codex 0.151.0 を読み直して 3 コマンドを追加し（attestation も同じ版で採り直した）、さらに codex 0.149.1 由来のまま残っていた `/copy` の「Markdown として」という失効済みの説明を、3 claimant（claude / codex / copilot）の原文を突き合わせたうえでフラットキーのまま訂正した。ターミナル側は PC の opencode quick keys が常時展開で 17 個のキーが表示領域を潰していたのを、既定 OPEN のまま折りたためるようにした。
+
 ### Added
 - **feat(catalog): claude `/rate-limit-options` `/workflow-authoring` と codex `/recap` をスラッシュコマンドカタログへ追加** (#2158): `npm run catalog:refresh -- --write` を適用し、claude docs（`code.claude.com/docs/en/commands.md`、2026-08-30 取得 / HTTP 200）と codex enum（`openai/codex` `codex-rs/tui/src/slash_command.rs` @ `rust-v0.151.0`、同日取得 / HTTP 200）が列挙する 3 コマンドをカタログに載せた。生成物は機械任せにせず人手でレビューしている: ja 訳は `[要レビュー]` プレースホルダを全件（残存 0 件）日本語へ置換し、en は docs / enum の原文と 1 対 1 で突き合わせて誤抽出・内部コマンド混入が無いことを確認した。`/recap` は claude の "Generate a one-line summary of the current session on demand" と codex の "summarize the current conversation now" が別物なので、`#2024` の `/cd` と同じ形でフラットな `slashCommands.descriptions.recap` を `recap.claude` / `recap.codex` へ分割し、claude 側エントリの `descriptionKey` も併せて書き換えた（フラット文字列と `<name>.<tool>` leaf は共存できず、旧キーに残すと説明が空欄で出荷されるため）。**`src/config/slash-commands-attestations.json` も同 Issue で採り直した**（Issue #2026 の設計どおり attestation は人がソースを読んで署名するものなので、`catalog:refresh --write` は一切書き込まない）。claude 2.1.218 → **2.1.251**（`claude --version` の実測。ページが名指しする最大版は 2.1.248）、codex 0.149.1 → **0.151.0**、いずれも `observedAt` は 2026-08-30。差分は上記 3 件の追加のみで削除ゼロ。読み取りの証拠（原文引用・全集合・差分・`version` の根拠）は `dev-reports/issue/2158/attestation-draft.md` に残した。あわせて `verifiedAgainst` をリテラル `'2.1.218'` で直書きしていた 3 箇所（`slash-command-catalog.test.ts` 2 / `api-worktree-slash-commands-user-catalog.test.ts` 1）を `CATALOG_VERIFIED_AGAINST.claude` 参照へ揃えた — この値は attestation の `version` から導出されるため、再 attestation のたびに staleness と無関係な assertion が赤くなっていた（codex 側は既に定数参照だった）。
 
