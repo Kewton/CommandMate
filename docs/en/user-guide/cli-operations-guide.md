@@ -69,6 +69,7 @@ node bin/commandmate.js ls
 | [`commandmate report`](#commandmate-report) | Generate, show, and list daily reports; aggregate Eval metrics |
 | [`commandmate skill`](#commandmate-skill) | Browse the Skill catalog; plan, install, update, uninstall, and inspect Skills |
 | [`commandmate update`](#commandmate-update) | Update CommandMate itself (stop, update, restart) |
+| [`commandmate remote`](#commandmate-remote) | Use CommandMate from your phone (publish over a provider tunnel and pair with a QR code) |
 
 ---
 
@@ -1580,6 +1581,139 @@ Each of these prints a message and exits 0 without changing anything.
 
 ---
 
+### commandmate remote
+
+Make this server reachable from outside and pair a phone with it over a QR code. Unlike the other commands here, **what it acts on is not a worktree — it is this machine's server and a provider (tunnel)**.
+
+> **All `remote` adds is an outward door.** It neither reads nor writes `CM_BIND`, so the default `127.0.0.1` bind does not change. There is no flag to enable Auto-Yes either, so on a server started by `remote` Auto-Yes stays off for every worktree.
+
+#### Usage
+
+```bash
+commandmate remote          # up (default): start the server, publish it, print the QR code
+commandmate remote status   # provider, URL, expiry, pairing state
+commandmate remote stop     # close the provider session (the server keeps running)
+
+commandmate remote --provider cloudflare        # force a provider
+commandmate remote --expires 24h                # remote session TTL
+commandmate remote --pairing-expires 3m         # pairing code TTL
+commandmate remote --yes                        # approve a public tunnel (required when non-interactive)
+commandmate remote status --json                # machine-readable output
+```
+
+#### Options
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--provider <name>` | Force a provider (`tailscale` / `cloudflare`). If the named provider is unusable this exits 1; it never falls back to another one | Auto-selects the first ready provider in preference order |
+| `--expires <duration>` | Remote session TTL (`1h`-`30d`) | `8h` |
+| `--pairing-expires <duration>` | Pairing code TTL (`1m`-`24h`) | `10m` |
+| `-p, --port <number>` | Port of the server to expose | Same resolution order as `commandmate start` |
+| `--yes` | Approve creating a public tunnel. Required without a TTY | Off (asks interactively) |
+| `--json` | JSON output | Off |
+
+> **There is no `--token` flag and no `--auto-yes` flag in any form.** `remote` is the side that mints the token, so one supplied from outside would have no matching hash on the server. For Auto-Yes, see the note above.
+
+#### Exit Codes
+
+| Code | Name | Meaning |
+|:----:|------|---------|
+| 0 | SUCCESS | Published, reported, or stopped successfully (including a `stop` that found nothing recorded to clean up) |
+| 1 | DEPENDENCY_ERROR | No provider is usable / the provider named by `--provider` is unusable on this machine |
+| 2 | CONFIG_ERROR | No TTY and no `--yes` for a public tunnel / an invalid `--expires`, `--pairing-expires` or `--provider` value / a server with authentication is already running / restarting the running server was not approved |
+| 3 | START_FAILED | The server or the provider failed to start (anything already opened is rolled back) |
+| 4 | STOP_FAILED | The provider session could not be closed (the state file is kept, so you can retry) |
+| 99 | UNEXPECTED_ERROR | Unexpected error |
+
+`remote` adds no new exit codes. The values mean the same as in [Exit Codes](#exit-codes).
+
+#### Provider status
+
+| Provider ID | `--provider` value | State |
+|-------------|--------------------|-------|
+| `tailscale-serve` | `tailscale` | **Implemented** (Issue #1937 R3). Ready when `tailscale` is installed, the node is logged in, and Serve/HTTPS is available. Publishes to your tailnet only, so it needs no public-tunnel approval |
+| `cloudflare-quick` | `cloudflare` | **Implemented.** Ready whenever `cloudflared` is installed (measured: `available: true` / `version: 2025.4.0` / `ready: true`). Publishes to the public internet. **See the known issue below** |
+
+Auto-selection walks the preference order (tailscale, then cloudflare) and takes the first provider that reports ready. If no provider is ready it stops with `DEPENDENCY_ERROR` (exit 1).
+
+> **Known issue (measured 2026-08-29): the Cloudflare Quick Tunnel does not outlive the command.** `cloudflared` exits at the moment `commandmate remote` returns, and the URL it just printed starts answering HTTP 530 within seconds — before there is time to scan the QR code. The cause is the provider's spawn shape (the child's stderr stays attached to a pipe that the exiting parent closes), so it is a defect rather than something to configure around. Until it is fixed, prefer `--provider tailscale`, whose provider holds configuration rather than a process and is unaffected. The measured record is in [`docs/qa/1937-remote-uat-record.md`](../../qa/1937-remote-uat-record.md) (defect D-1).
+
+#### A public tunnel needs explicit approval
+
+A Cloudflare Quick Tunnel creates `https://<random>.trycloudflare.com` — an address **on the public internet**. So approval is taken before it is created.
+
+- **Interactive**: a warning describing what is about to be published, then a yes/no question (the default is **no**)
+- **Non-interactive (no TTY)**: **refused** unless `--yes` was passed, exiting 2. This is what stops "it got published because nobody was watching"
+- **Tailscale being unavailable is not a reason to switch to a public tunnel.** Choosing a provider and approving publication are separate decisions, and nothing is published without the approval
+
+Only the CommandMate server running on 127.0.0.1 is published; nothing else on this machine is. CommandMate answers with token authentication enabled, so a visitor without the pairing code is refused — but **the listener itself is public**. See the [Security Guide](../security-guide.md) as well.
+
+#### Pairing code
+
+- **Single-use**, and expires after 10 minutes by default (`--pairing-expires`)
+- 26 Crockford Base32 characters (128 bits). **The plaintext is never stored anywhere**
+- The QR code is shown **once**, during `up`. Only when the terminal is too narrow to draw a scannable QR code is the URL printed as text instead (that URL contains the code, so it stays in your scrollback)
+- The handoff file `~/.commandmate/remote-pairing.json` is mode 0600. **"Already used" is the file's absence**, not a flag inside it — it is deleted the instant pairing succeeds
+
+#### remote status output
+
+```
+Provider:        cloudflare-quick
+URL:             https://<random>.trycloudflare.com
+Remote expires:  2026-08-29T21:00:00.000Z (in 6h 12m)
+Pairing:         unused
+Server:          running (pid 12345, http://localhost:3000, auth: on)
+```
+
+`Pairing:` is one of `unused` / `consumed` / `expired`. With no remote session recorded it looks like this:
+
+```
+Provider:        (none - no remote session recorded)
+Server:          stopped
+```
+
+**Neither the pairing code nor the session token ever appears in this output.** The URL does, because it is not a secret.
+
+> `status` reports what was recorded, not what is still alive: it does not probe the provider. If the URL stops answering while `status` still shows the session as valid, see the known issue above.
+
+#### Expiry closes the outward door only
+
+Running `commandmate remote status` after `--expires` (`8h` by default) has elapsed closes the provider session there and then. **The CommandMate server is not stopped** — stopping it would take your local use of the machine down with it. `up` starts the server as a daemon and returns, so no long-running process is left behind and the expiry is evaluated when `status` runs.
+
+#### remote stop does not guess
+
+- If the state file (`~/.commandmate/remote.json`, mode 0600) cannot be read, `remote stop` **does not guess which provider to tear down**. It says it does not know what to clean up and exits 0. Some providers — Tailscale Serve above all — hold configuration of yours that cannot be restored once deleted
+- CommandMate reverts **only what it created**. Anything the provider reports as having existed before this session is listed under `Left alone (existed before this session):` and is **reported, not removed**
+- If it cannot finish closing, it exits 4 (STOP_FAILED) and keeps the state file, so `commandmate remote stop` can be retried
+- On success the **CommandMate server is still running**
+
+> **With Tailscale, tear down through `commandmate remote stop`.** After a successful `tailscale serve`, Tailscale itself suggests disabling the proxy by re-running `serve` with only the port and the word "off" and no path. That untargeted form removes **every** handler on that port — including your own — with exit status 0 and no warning. `remote stop` always passes the specific path it created.
+
+#### When the server is already running
+
+- **Running without authentication**: it has to be restarted with authentication enabled, so you are asked to confirm a stop and restart. Without a TTY this is refused with exit 2 unless `--yes` was passed
+- **Running with authentication**: that server's token hash was fixed at start and the plaintext is not retained, so **this session cannot pair with it**. It stops with exit 2 — run `commandmate stop` first, then `commandmate remote`
+
+#### remote passes exactly three environment variables to the server
+
+`CM_AUTH_TOKEN_HASH`, `CM_AUTH_EXPIRE` and `CM_REMOTE_PAIRING_FILE`, and the third is a **path, not a secret**. No plaintext long-lived token goes into the environment, because a tmux pane inherits the server's environment wholesale — anything left there would be readable by the very agents CommandMate is driving. `CM_BIND` is neither read nor written, so your existing bind setting is untouched.
+
+#### Reading `--json`
+
+`status` and `stop` print JSON only, so they pipe directly. `up` mixes server start-up progress lines into stdout, so **the JSON is the last line of stdout**.
+
+```bash
+commandmate remote status --json | jq -r '.remote.url'
+```
+
+> **`up --json` puts the pairing code in `pairingUrl`.** Do not leave it in a log or a file. `status` does not emit that field — only `up` ever shows the code.
+
+#### No `Secure` attribute on the cookie over a tunnel
+
+The `Secure` attribute of the authentication cookie is decided by whether `CM_HTTPS_CERT` is set. A tunnel setup is **HTTPS on the outside and plain HTTP at the origin**, so `Secure` is not set. **This is correct behaviour**: setting it would make the browser refuse the cookie over HTTP to `127.0.0.1`, breaking local use. The outside of the tunnel is HTTPS, so the on-the-wire eavesdropping risk is already addressed.
+
+---
+
 ## Typical Workflows
 
 ### Basic: send, wait, capture
@@ -1736,10 +1870,10 @@ commandmate ls --token your-token
 | Code | Name | Meaning |
 |:----:|------|---------|
 | 0 | SUCCESS | Completed successfully |
-| 1 | DEPENDENCY_ERROR | Server not running |
+| 1 | DEPENDENCY_ERROR | Server not running / no usable remote provider (`remote`) |
 | 2 | CONFIG_ERROR | Validation error (invalid agent, duration, etc.) |
-| 3 | START_FAILED | Failed to start or verify the server (`start` / `update`) |
-| 4 | STOP_FAILED | Failed to stop the server (`stop` / `update`) |
+| 3 | START_FAILED | Failed to start or verify the server (`start` / `update` / `remote`) |
+| 4 | STOP_FAILED | Failed to stop the server (`stop` / `update`) / the provider session could not be closed (`remote stop`) |
 | 5 | UPDATE_FAILED | Update failed (`update`: registry query / `npm install -g` / version verification) |
 | 10 | PROMPT_DETECTED | Prompt detected during wait |
 | 99 | UNEXPECTED_ERROR | Unexpected error / resource not found |

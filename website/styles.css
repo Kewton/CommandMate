@@ -878,6 +878,27 @@ a {
   white-space: nowrap;
 }
 
+/* ---------- pairing a phone ---------- */
+
+/* `.cards` carries no margin of its own: it only gets one from the
+   `.section > h2 + .cards` rule above, which does not match here because the
+   copyable command sits between the heading and the grid. Without this the
+   cards butt straight against that box. */
+.remote-cards {
+  margin-top: 2rem;
+}
+
+/* The trailing docs line lives outside `.note` on purpose. `.note` paints
+   `--accent-subtle`, and the global link colour `--accent` measures 4.31:1
+   against that tint in the light theme -- under the 4.5:1 body-text floor. On
+   the page background the same link clears it, so anything with an `<a>` in it
+   stays out of the tinted box. Otherwise identical to `.tutorial-note`. */
+.remote-docs {
+  margin: 0.9rem 0 0;
+  color: var(--fg-muted);
+  font-size: 0.9rem;
+}
+
 /* ---------- closing ---------- */
 
 .closing {

@@ -385,7 +385,160 @@ run is already going, the pane says so and names it.
 
 How to access CommandMate from your smartphone.
 
-### Same LAN Access
+There are two routes. **Try `commandmate remote` first.** Use
+[Method 2: connect directly on the same LAN](#method-2-connect-directly-on-the-same-lan-without-cloudflared)
+only if you would rather not install a provider tool, or you want to stay inside the LAN.
+
+| | Method 1: `commandmate remote` | Method 2: direct on the same LAN |
+|---|---|---|
+| **Authentication** | Yes (only the paired phone) | **None** |
+| **Encryption** | Yes (HTTPS on the outside) | **None** (plain HTTP) |
+| **Reach** | Also from away (over the internet or your tailnet) | Only inside the same Wi-Fi |
+| **Requires** | `tailscale` or `cloudflared` | Nothing |
+| **Server bind** | Stays `127.0.0.1` | `0.0.0.0` (every interface) |
+
+### Method 1 (recommended): `commandmate remote` with QR pairing
+
+`commandmate remote` **starts the server, publishes it, and pairs your phone** in one
+command. A QR code is printed in the terminal; point your phone's camera at it.
+
+```bash
+commandmate remote
+```
+
+It does four things:
+
+1. Detects the providers (the ways out) and picks one
+2. **Asks you before creating a public tunnel** (see "Approval before publishing" below)
+3. Starts a CommandMate server with authentication enabled
+4. Prints a QR code for `https://<published URL>/login#code=<code>`, carrying a one-time
+   pairing code
+
+Scanning that QR code on the phone completes the sign-in. **The pairing code is single-use
+and expires after 10 minutes by default.** That is the only time the code is shown —
+`commandmate remote status` shows the URL but never shows the code again.
+
+#### Approval before publishing
+
+`commandmate remote` can publish through either of two providers:
+
+| Provider | `--provider` | What it publishes to |
+|---|---|---|
+| Tailscale Serve | `tailscale` | Your own tailnet — not the public internet. Tried first |
+| Cloudflare Quick Tunnel | `cloudflare` | A temporary **public internet** address, `https://<random>.trycloudflare.com` |
+
+Because the Cloudflare route puts this machine on the public internet, `commandmate remote`
+prints a warning and asks y/n before creating that tunnel. In a non-interactive environment
+(a script, CI) **there is no way to ask, so it refuses by default** and stops with
+`CONFIG_ERROR` (exit 2). Pass `--yes` only when you mean to publish.
+
+```bash
+commandmate remote --yes    # skip the confirmation and create the public tunnel
+```
+
+> **If no provider is ready, `remote` stops with `DEPENDENCY_ERROR` (exit 1).**
+> It never switches to a public tunnel on its own because Tailscale was unavailable.
+
+> **Fixed — the Cloudflare route used to die together with the command
+> ([#2146](https://github.com/Kewton/CommandMate/issues/2146), now closed).** As measured on
+> 2026-08-29, `cloudflared` exited the moment `commandmate remote` returned and the URL it
+> had just printed started answering HTTP 530 within seconds, leaving no time to scan the QR
+> code (defect **D-1**). The cause was the shape of the spawn: the child's stderr stayed on a
+> pipe that closed with the parent.
+> [**#2148**](https://github.com/Kewton/CommandMate/pull/2148) **points fd 2 at a file
+> (`~/.commandmate/cloudflared.log`) instead of a pipe, together with `detached: true` and
+> `unref()`**, and [#2149](https://github.com/Kewton/CommandMate/pull/2149) re-ran the check
+> against the real `cloudflared` 2025.4.0: the published URL answered **non-530 at t+22.6 /
+> +56.7 / +60.3 seconds after `up` returned**, and went **530 within 2.3 seconds of
+> `remote stop`** — alive while published, revoked on teardown. Both measurements are in
+> [`docs/qa/1937-remote-uat-record.md`](../../qa/1937-remote-uat-record.md) (D-1 in §3.6, its
+> resolution in §6).
+
+#### Checking the state, and packing up
+
+```bash
+commandmate remote status   # provider, URL, expiry, pairing state
+commandmate remote stop     # close the outward door
+```
+
+`remote stop` reverts **only the settings CommandMate itself created**. When the state file
+cannot be read it does not guess which provider to tear down — it says it does not know
+what to clean up and exits successfully.
+
+**When the session expires, only the outward door closes; the server is not stopped.**
+Stopping it would take your local use of the machine down with it.
+
+> **With Tailscale, always pack up with `commandmate remote stop`.** After a successful
+> `tailscale serve`, Tailscale itself suggests disabling the proxy by re-running `serve`
+> with only the port and the word "off" and no path. That form removes **every** handler on
+> that port, including mappings you set up yourself, silently and with exit status 0.
+
+#### Main options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--provider <tailscale\|cloudflare>` | Auto | Force a provider |
+| `--expires <duration>` | `8h` | Remote session TTL (`1h`-`30d`) |
+| `--pairing-expires <duration>` | `10m` | Pairing code TTL (`1m`-`24h`) |
+| `-p, --port <number>` | Auto | Port of the server to expose |
+| `--yes` | — | Approve a public tunnel (required when non-interactive) |
+| `--json` | — | JSON output |
+
+Exit codes: `0` success / `1` DEPENDENCY_ERROR / `2` CONFIG_ERROR / `3` START_FAILED /
+`4` STOP_FAILED / `99` UNEXPECTED_ERROR.
+For the CLI in full, see the [CLI Operations Guide](./cli-operations-guide.md#commandmate-remote).
+
+#### Worth knowing
+
+- **`CM_BIND` does not change.** `remote` neither reads nor writes it; the server stays
+  bound to `127.0.0.1`. All it adds is one door out.
+- **Auto-Yes stays off by default.** `remote` has no flag that enables Auto-Yes.
+- **No plaintext long-lived token is stored anywhere.** The server is handed only
+  `CM_AUTH_TOKEN_HASH`, `CM_AUTH_EXPIRE` and `CM_REMOTE_PAIRING_FILE`, and the third is a
+  file path rather than a secret. The pairing handoff file
+  `~/.commandmate/remote-pairing.json` is mode 0600 and is **deleted the instant pairing
+  succeeds**.
+- **The login cookie carries no `Secure` attribute over a tunnel, and that is correct.**
+  Setting `Secure` would make the browser refuse the cookie during local use over
+  `http://127.0.0.1:3000`, breaking access from the PC. The outside of the tunnel is HTTPS,
+  so the eavesdropping risk on the wire is already addressed. See the
+  [Security Guide](../security-guide.md) for details.
+
+#### OS support status
+
+Measured as of 2026-08-29. **Read "measured" and "unverified" as the different things they
+are.** The procedure and raw logs are under `dev-reports/issue/1937/u8-os-matrix.md`, and
+the live acceptance run is in
+[`docs/qa/1937-remote-uat-record.md`](../../qa/1937-remote-uat-record.md).
+
+| OS | Provider detection | Approval flow | Reaching the published tunnel | Notes |
+|----|--------------------|---------------|-------------------------------|-------|
+| **macOS** (Darwin arm64) | ✅ Measured<br>`ready` once the provider tool is installed | ✅ Measured<br>non-interactive stops with exit 2 | ✅ Measured<br>Tailscale Serve passed; Cloudflare Quick Tunnel failed at first (**D-1**) and has passed since [#2148](https://github.com/Kewton/CommandMate/pull/2148), re-confirmed against the real `cloudflared` in [#2149](https://github.com/Kewton/CommandMate/pull/2149) | cloudflared 2025.4.0, Tailscale 1.102.3 |
+| **Linux** (Debian 12 / aarch64) | ✅ Measured<br>`DEPENDENCY_ERROR` (exit 1) before install, `ready` after | ✅ Measured<br>identical to macOS | ⏭️ Not attempted | ⚠️ **Measured in a docker container, whose network setup can differ from bare-metal Linux** |
+| **WSL2** | ❌ **Unverified** | ❌ **Unverified** | ❌ **Unverified** | **No test environment was available.** WSL2 varies widely in how `localhost` is forwarded, so **whether the tunnel's `127.0.0.1` upstream points inside WSL2 or at the Windows side is configuration-dependent** |
+
+- ✅ **Measured** / ⏭️ **Not attempted** (deliberately skipped, to avoid creating a new
+  public tunnel) / ❌ **Unverified** (no environment to test in)
+- The "measured" entries in the detection and approval columns are the part that can be
+  checked **without creating a public tunnel** (provider detection, the approval gate,
+  `status` and `stop`).
+- **End-to-end use from a real phone (scanning the QR code, pairing, the PWA, push
+  notifications) is still outstanding on every OS.** The acceptance run covered the server
+  side only, and the phone pass is tracked in
+  [#2152](https://github.com/Kewton/CommandMate/issues/2152).
+
+### Method 2: Connect directly on the same LAN (without `cloudflared`)
+
+Use this if you would rather not install a provider tool, or you want nothing to leave the
+LAN at all.
+
+> ⚠️ **This method opens the server to the LAN with no authentication.**
+> `CM_BIND=0.0.0.0` makes CommandMate listen on every network interface of your PC.
+> **Anyone** on the same Wi-Fi who opens `http://<your PC's IP address>:3000` in a browser
+> can operate your repositories, terminals and agents **without being asked to authenticate**.
+> Do not use it on shared Wi-Fi (a cafe, a coworking space, a corporate guest network).
+> If you need authentication and encryption, use
+> [Method 1](#method-1-recommended-commandmate-remote-with-qr-pairing).
 
 1. Connect your PC and smartphone to the same Wi-Fi
 2. Edit the `.env` file:
@@ -395,9 +548,9 @@ How to access CommandMate from your smartphone.
 3. Restart the server
 4. Open `http://<your PC's IP address>:3000` in your smartphone's browser
 
-> **Note**: We recommend authentication via a reverse proxy for external network access. See the [Security Guide](../../security-guide.md) for details.
+When you are done, set `CM_BIND` back to `127.0.0.1` (the default) and restart the server.
 
-### Finding Your PC's IP Address
+#### Finding Your PC's IP Address
 
 ```bash
 # macOS
@@ -407,10 +560,11 @@ ifconfig | grep "inet " | grep -v 127.0.0.1
 ip addr | grep "inet " | grep -v 127.0.0.1
 ```
 
-### Remote Access
+#### Exposing to an external network
 
-Use tunneling services like Cloudflare Tunnel to access from outside your home.
-See the [Deployment Guide](../../DEPLOYMENT.md) for details.
+If you publish the server yourself rather than through `commandmate remote`, always pair it
+with authentication at a reverse proxy. See the [Security Guide](../security-guide.md) and
+the [Deployment Guide](../../DEPLOYMENT.md) for details.
 
 ### Mobile UI
 
@@ -446,10 +600,13 @@ has no VAPID keys, and without them the whole push feature is off.
 | **iOS / iPadOS: add to Home Screen** | Web Push is unavailable in a Safari tab. You can only subscribe from an **installed** app, launched from the Home Screen icon | If you see "add this app to your Home Screen" instead of the subscribe button, this is why |
 | **Android Chrome works in a normal tab** | No Home Screen install needed | — |
 
-Two ways to get HTTPS:
+Three ways to get HTTPS:
 
-- **A tunnel** (also works away from home; recommended): Cloudflare Tunnel and friends —
-  see the [Deployment Guide](../../DEPLOYMENT.md)
+- **`commandmate remote`** (simplest; recommended): the provider terminates TLS, so the
+  phone reaches the app over HTTPS and the secure-context requirement is met as-is. See
+  [Mobile Access](#method-1-recommended-commandmate-remote-with-qr-pairing)
+- **A tunnel you set up yourself** (also works away from home): Cloudflare Tunnel and
+  friends — see the [Deployment Guide](../../DEPLOYMENT.md)
 - **A self-signed certificate** (same LAN only):
   ```bash
   brew install mkcert && mkcert -install && mkcert <your PC's IP address>

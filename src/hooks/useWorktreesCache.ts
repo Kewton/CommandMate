@@ -6,13 +6,20 @@
  * Issue #1788: waiting edges arrive by push and are applied here. The polling
  *   cadences below are UNCHANGED and remain the fallback — a client with no
  *   WebSocket still learns about a wait exactly as fast as it did before.
+ * Issue #2059: a failed load is no longer silent or unrecoverable — it is
+ *   logged, guarded against HTML/redirect bodies, and retried on a short
+ *   bounded ladder while the cache is still empty.
  */
 
 'use client';
 
 import { useState, useEffect, useCallback, useRef, startTransition } from 'react';
 import type { Worktree } from '@/types/models';
-import type { RepositorySummary } from '@/lib/api-client';
+import {
+  detectAuthRedirect,
+  detectNonJsonBody,
+  type RepositorySummary,
+} from '@/lib/api-client';
 import { useRealtime } from '@/hooks/useRealtimeConnection';
 import type { RealtimeEvent } from '@/lib/realtime/types';
 
@@ -29,6 +36,21 @@ export const POLLING_INTERVAL_IDLE = 30000;
  */
 export const POLLING_INTERVAL_ACTIVE_WS = 20000;
 export const POLLING_INTERVAL_IDLE_WS = 60000;
+
+/**
+ * Issue #2059: short-retry ladder for a failed load while the cache is still
+ * empty.
+ *
+ * Without it the only recovery from a failed first fetch is the ordinary poll,
+ * which is 30s away (60s with a live push connection) — long enough that the
+ * sidebar reads as "this user has no branches" rather than "the list has not
+ * loaded". The ladder is bounded: three attempts, then the normal poll takes
+ * over, so a server that is genuinely down is not hammered.
+ *
+ * Only an *empty* cache retries. Once a list has been rendered a failed poll is
+ * a stale list, not a blank screen, and the next tick is soon enough.
+ */
+export const INITIAL_LOAD_RETRY_DELAYS_MS = [2000, 5000, 10000] as const;
 
 /**
  * Apply a waiting edge (Issue #1788) to one cached worktree.
@@ -133,6 +155,23 @@ export function useWorktreesCache(): UseWorktreesCacheReturn {
    */
   const currentIntervalRef = useRef<number | null>(null);
 
+  /**
+   * Issue #2059: state for the empty-cache retry ladder. `retryAttemptRef` is
+   * the index into INITIAL_LOAD_RETRY_DELAYS_MS for the *next* retry and resets
+   * on every success; `retryTimerRef` holds the pending timer so unmount and a
+   * subsequent success can both cancel it.
+   */
+  const retryAttemptRef = useRef(0);
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const refreshRef = useRef<() => Promise<void>>(async () => {});
+
+  const cancelRetry = useCallback(() => {
+    if (retryTimerRef.current !== null) {
+      clearTimeout(retryTimerRef.current);
+      retryTimerRef.current = null;
+    }
+  }, []);
+
   // Issue #1120: realtime push integration. When connected, session-status and
   // new-message events arrive via WebSocket and the poll is throttled to a
   // fallback cadence. On disconnect the normal cadence is restored automatically.
@@ -144,8 +183,21 @@ export function useWorktreesCache(): UseWorktreesCacheReturn {
     try {
       setError(null);
       const response = await fetch('/api/worktrees');
+      // Issue #2059: an unauthenticated request resolves as the /login HTML
+      // page with status 200, and a proxy interstitial resolves as HTML too.
+      // `response.json()` on either one throws a SyntaxError that reads as a
+      // parse bug; both guards come from api-client so this call site and
+      // `fetchApi` reject exactly the same responses.
+      const redirectError = detectAuthRedirect(response);
+      if (redirectError) {
+        throw redirectError;
+      }
       if (!response.ok) {
         throw new Error(`Failed to fetch worktrees: ${response.status}`);
+      }
+      const formatError = detectNonJsonBody(response);
+      if (formatError) {
+        throw formatError;
       }
       const data = await response.json();
       const wts = data.worktrees ?? [];
@@ -158,18 +210,45 @@ export function useWorktreesCache(): UseWorktreesCacheReturn {
         setRepositories(repos);
       });
       worktreesRef.current = wts;
+      // A success ends the ladder: cancel a scheduled retry and rearm the
+      // sequence for a future empty-cache failure.
+      retryAttemptRef.current = 0;
+      cancelRetry();
     } catch (err) {
       const fetchError = err instanceof Error ? err : new Error(String(err));
+      // Issue #2059: the only place a failed worktree load became visible was
+      // WorktreeSelectionContext's polling effect, which never runs in the app
+      // (WorktreesCacheProvider always supplies externalWorktrees, so that
+      // effect early-returns). This is the reachable call site.
+      console.error('[useWorktreesCache] Failed to fetch worktrees:', fetchError);
       setError(fetchError);
+
+      // Retry only while the cache is still empty — see the constant's doc.
+      const attempt = retryAttemptRef.current;
+      if (worktreesRef.current.length === 0 && attempt < INITIAL_LOAD_RETRY_DELAYS_MS.length) {
+        retryAttemptRef.current = attempt + 1;
+        cancelRetry();
+        retryTimerRef.current = setTimeout(() => {
+          retryTimerRef.current = null;
+          void refreshRef.current();
+        }, INITIAL_LOAD_RETRY_DELAYS_MS[attempt]);
+      }
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [cancelRetry]);
+
+  // The retry timer calls through a ref so the scheduled callback always runs
+  // the current `refresh` without making `refresh` depend on itself.
+  refreshRef.current = refresh;
 
   // Initial fetch
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  // Issue #2059: never leave a retry armed after unmount.
+  useEffect(() => cancelRetry, [cancelRetry]);
 
   /**
    * Returns true if any cached worktree is currently running a session.

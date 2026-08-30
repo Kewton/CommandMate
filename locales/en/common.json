@@ -103,6 +103,9 @@
     "searchBranches": "Search branches...",
     "noBranchesFound": "No branches found",
     "noBranchesAvailable": "No branches available",
+    "loadingBranches": "Loading branches...",
+    "branchesLoadFailed": "Failed to load branches",
+    "retryLoadBranches": "Retry",
     "dragToReorderGroup": "Drag to reorder group",
     "switchToFlatView": "Switch to flat view",
     "switchToGroupedView": "Switch to grouped view"

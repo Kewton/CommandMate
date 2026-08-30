@@ -78,6 +78,7 @@ CM_PORT=3000 node bin/commandmate.js send abc123 "msg"
 | [`commandmate report`](#commandmate-report) | 日次レポートの生成・表示・一覧、Eval メトリクス集計 |
 | [`commandmate skill`](#commandmate-skill) | 公式Skillのカタログ参照・Install/Update Plan・install・update・uninstall・status |
 | [`commandmate update`](#commandmate-update) | CommandMate本体の更新（停止 → 更新 → 再起動） |
+| [`commandmate remote`](#commandmate-remote) | スマホからの利用（Providerトンネルでの公開とQRペアリング） |
 
 ---
 
@@ -2441,6 +2442,137 @@ Update available: yes
 
 ---
 
+### commandmate remote
+
+このサーバを外から到達できるようにし、スマホと QR コードでペアリングします。他のコマンドと異なり、**操作対象は worktree ではなく、この PC のサーバと Provider（トンネル）**です。
+
+> **`remote` が増やすのは「外への口」だけです。** `CM_BIND` は読みも書きもしないため、既定の `127.0.0.1` バインドは変わりません。Auto-Yes を有効化するフラグもなく、`remote` が起動したサーバでは Auto-Yes はどの worktree でも無効のままです。
+
+#### 使用方法
+
+```bash
+commandmate remote          # 既定 = up。サーバを起動し、公開し、QR を表示する
+commandmate remote status   # Provider / URL / 期限 / ペアリング状態
+commandmate remote stop     # Provider を閉じる（サーバは止めない）
+
+commandmate remote --provider tailscale         # Provider を明示指定（tailnet 内に閉じる）
+commandmate remote --provider cloudflare        # Provider を明示指定（公開 Tunnel）
+commandmate remote --expires 24h                # remote セッションのTTL
+commandmate remote --pairing-expires 3m         # ペアリングコードのTTL
+commandmate remote --yes                        # 公開Tunnelを明示承認（非対話環境では必須）
+commandmate remote status --json                # 機械可読出力
+```
+
+#### オプション
+
+| オプション | 説明 | デフォルト |
+|-----------|------|-----------|
+| `--provider <name>` | Provider を指定（`tailscale` / `cloudflare`）。指定した Provider が使えない場合、他へフォールバックせず exit 1 | 使える Provider を優先順で自動選択 |
+| `--expires <duration>` | remote セッションのTTL（`1h`〜`30d`） | `8h` |
+| `--pairing-expires <duration>` | ペアリングコードのTTL（`1m`〜`24h`） | `10m` |
+| `-p, --port <number>` | 公開するサーバのポート | 未指定なら `commandmate start` と同じ解決順 |
+| `--yes` | 公開Tunnel（`cloudflare`）の作成を明示承認する。非対話環境（TTYなし）では必須。`tailscale` は tailnet 内に閉じるため不要 | 無効（対話で確認する） |
+| `--json` | JSON出力 | 無効 |
+
+> **`--token` と `--auto-yes` 系のフラグはありません。** トークンを鋳造するのは `remote` 自身の側なので、外から渡されたトークンには照合するハッシュがサーバに存在しません。Auto-Yes については上の注記のとおりです。
+
+#### 終了コード
+
+| コード | 定数名 | 意味 |
+|:------:|--------|------|
+| 0 | SUCCESS | 公開・状態表示・停止に成功（`stop` で片付ける記録が無かった場合も含む） |
+| 1 | DEPENDENCY_ERROR | 使える Provider が1つも無い／`--provider` で指定した Provider がこのマシンで使えない |
+| 2 | CONFIG_ERROR | 非対話環境で公開Tunnelの承認（`--yes`）が無い／`--expires`・`--pairing-expires`・`--provider` の値が不正／認証付きのサーバが既に稼働中／稼働中サーバの再起動が承認されなかった |
+| 3 | START_FAILED | サーバまたは Provider の起動に失敗（開きかけたものはロールバックされる） |
+| 4 | STOP_FAILED | Provider を閉じきれなかった（状態ファイルは残るので再実行できる） |
+| 99 | UNEXPECTED_ERROR | 予期しないエラー |
+
+`remote` は新しい終了コードを追加していません。値の意味は[全終了コード一覧](#全終了コード一覧)と同じです。
+
+#### Provider の現状
+
+| Provider ID | `--provider` の値 | 状態 |
+|-------------|------------------|------|
+| `tailscale-serve` | `tailscale` | **実装済み**（Issue #1937 R3）。`tailscale` がインストールされ、ノードがログイン済みで、Serve/HTTPS が使える状態なら `ready` になります。公開先は**自分の tailnet の中だけ**でインターネットには出ないため、公開Tunnel の承認（`--yes`）は要りません |
+| `cloudflare-quick` | `cloudflare` | **実装済み**。`cloudflared` がインストールされていれば使えます（実測: `available: true` / `version: 2025.4.0` / `ready: true`）。公開先は**インターネット**なので、承認が要ります |
+
+自動選択は優先順（tailscale → cloudflare）で最初に ready な Provider を選びます。tailnet の中に閉じる `tailscale-serve` が先に試されるのはこのためです。ready な Provider が1つも無ければ `DEPENDENCY_ERROR`（exit 1）で停止します。
+
+#### 公開Tunnel には明示承認が必要
+
+Cloudflare Quick Tunnel は `https://<ランダム>.trycloudflare.com` という**公開インターネット上の**アドレスを作ります。そのため作成前に承認を求めます。
+
+- **対話環境**: 何が公開されるかを示す警告を表示し、yes/no を尋ねます（既定は **no**）
+- **非対話環境（TTYなし）**: `--yes` が無い限り**拒否**し、exit 2 で終了します。「誰も見ていなかったので公開された」が起きないようにするためです
+- **Tailscale が使えないことは、公開Tunnel へ切り替える理由になりません。** Provider の選択と公開の承認は別々の判断で、承認が無ければ公開されません
+- **この確認を求めるのは公開Tunnel の Provider だけです。** `tailscale-serve` の公開先は自分の tailnet の中に閉じていてインターネットには出ないため、`--yes` は要りません
+
+公開されるのは 127.0.0.1 で動く CommandMate サーバだけで、この PC の他のものは公開されません。CommandMate はトークン認証を有効にした状態で応答するため、ペアリングコードを持たない訪問者は拒否されますが、**リスナー自体は公開**です。あわせて[セキュリティガイド](../security-guide.md)も参照してください。
+
+#### ペアリングコード
+
+- **一度限り**で、既定 10 分（`--pairing-expires`）で失効します
+- Crockford Base32 26 文字（128 bit）。**平文はどこにも保存されません**
+- QR は `up` のときに**一度だけ**表示されます。端末幅が足りず走査可能な QR を描けない場合に限り、URL がテキストで出力されます（この URL はコードを含むため、スクロールバックに残ります）
+- 受け渡しファイル `~/.commandmate/remote-pairing.json` は mode 0600 です。**消費済みフラグはファイルの不在そのもの**で、ペアリング成功と同時に削除されます
+
+#### remote status の出力
+
+```
+Provider:        cloudflare-quick
+URL:             https://<ランダム>.trycloudflare.com
+Remote expires:  2026-08-29T21:00:00.000Z (in 6h 12m)
+Pairing:         unused
+Server:          running (pid 12345, http://localhost:3000, auth: on)
+```
+
+`Pairing:` は `unused` / `consumed` / `expired` のいずれかです。記録された remote セッションが無い場合は次のようになります。
+
+```
+Provider:        (none - no remote session recorded)
+Server:          stopped
+```
+
+**ペアリングコードもセッショントークンも、この出力には現れません。** URL は公開情報なので表示されます。
+
+#### 期限切れで閉じるのは「外への口」だけ
+
+`--expires`（既定 8h）を過ぎたあとに `commandmate remote status` を実行すると、その場で Provider が閉じられます。**CommandMate サーバは止まりません** — 止めると PC でのローカル利用まで巻き添えになるためです。`up` はサーバをデーモンとして起動して戻るため常駐プロセスが残らず、期限の判定は `status` の実行時に行われます。
+
+#### remote stop は推測で片付けない
+
+- 状態ファイル（`~/.commandmate/remote.json`、mode 0600）が読めない場合、`remote stop` は **Provider を推測して片付けにいきません**。「片付けるものが分からない」と表示して exit 0 で終了します。Tailscale Serve のように、利用者自身の設定を消すと復元手段が無い Provider があるためです
+- CommandMate は**自分が作ったものだけ**を取り消します。Provider が「このセッションより前から存在していた」と報告した設定は `Left alone (existed before this session):` として**報告されるだけで、削除されません**
+- 閉じきれなかった場合は exit 4（STOP_FAILED）で終了し、状態ファイルは残るので `commandmate remote stop` を再実行できます
+- 成功した場合も **CommandMate サーバは動いたまま**です
+
+> **Tailscale の撤収は `commandmate remote stop` で行ってください。** `tailscale serve` に成功すると、Tailscale 自身が「パスを付けずにポートと `off` だけを指定して `serve` を再実行する」撤収方法を案内します。このパス無しの形は、そのポートの**すべて**のハンドラ（あなた自身が設定したものを含む）を、警告も無く exit 0 で消します。`remote stop` は必ず自分が作ったパスを指定して撃ちます。
+
+#### サーバがすでに起動している場合
+
+- **認証なしで起動中**: 認証を有効にして起動し直す必要があるため、確認のうえ停止・再起動します。非対話環境では `--yes` が無いと exit 2 で拒否されます
+- **認証ありで起動中**: そのサーバのトークンハッシュは起動時に確定していて平文は保持していないため、**このセッションからはペアリングできません**。exit 2 で停止するので、`commandmate stop` してから `commandmate remote` を実行してください
+
+#### remote がサーバへ渡す環境変数は3つだけ
+
+`CM_AUTH_TOKEN_HASH` / `CM_AUTH_EXPIRE` / `CM_REMOTE_PAIRING_FILE` の3つで、3つ目は**秘匿値ではなくパス**です。平文の長期トークンを環境変数に置かないのは、tmux のペインがサーバの環境変数をそのまま継承するため — 置けば CommandMate が動かしているエージェント自身が読めてしまいます。`CM_BIND` は読みも書きもしないため、既存のバインド設定は変わりません。
+
+#### `--json` の読み方
+
+`status` と `stop` は JSON だけを出力するのでそのままパイプできます。`up` はサーバ起動の進捗行が stdout に混ざるため、**JSON は stdout の最終行**です。
+
+```bash
+commandmate remote status --json | jq -r '.remote.url'
+```
+
+> **`up --json` の `pairingUrl` にはペアリングコードが含まれます。** ログやファイルに残さないでください。`status` はこのフィールドを出力しません（コードを示すのは `up` だけです）。
+
+#### Tunnel 越しの Cookie に `Secure` は付きません
+
+認証 Cookie の `Secure` 属性は `CM_HTTPS_CERT` の有無で決まります。Tunnel 構成は**外側が HTTPS でオリジンは平文 HTTP** なので `Secure` は付きません。**これは正しい挙動です**: `Secure` を立てると `127.0.0.1` への HTTP アクセスで Cookie が拒まれ、ローカル利用が壊れます。Tunnel の外側は HTTPS なので、網線上の盗聴リスクは既に下がっています。
+
+---
+
 ## 典型的なワークフロー
 
 ### 基本: send → wait → capture
@@ -2626,10 +2758,10 @@ commandmate ls --token your-token
 | コード | 定数名 | 意味 |
 |:------:|--------|------|
 | 0 | SUCCESS | 正常完了 |
-| 1 | DEPENDENCY_ERROR | サーバー未起動等のインフラエラー |
+| 1 | DEPENDENCY_ERROR | サーバー未起動等のインフラエラー／使える remote Provider が無い（`remote`） |
 | 2 | CONFIG_ERROR | バリデーションエラー（不正なagent, duration等） |
-| 3 | START_FAILED | サーバーの起動・起動後の確認に失敗（`start` / `update`） |
-| 4 | STOP_FAILED | サーバーの停止に失敗（`stop` / `update`） |
+| 3 | START_FAILED | サーバーの起動・起動後の確認に失敗（`start` / `update` / `remote`） |
+| 4 | STOP_FAILED | サーバーの停止に失敗（`stop` / `update`）／ Provider を閉じきれない（`remote stop`） |
 | 5 | UPDATE_FAILED | 更新に失敗（`update`: registry照会 / `npm install -g` / バージョン検証） |
 | 10 | PROMPT_DETECTED | wait中にプロンプトを検出 |
 | 30 | NO_ACTIVE_SESSIONS | interruptの対象となる稼働中セッションが無い |

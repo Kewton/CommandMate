@@ -330,6 +330,27 @@ export interface SyncOptions {
   token?: string;
 }
 
+/**
+ * remote command options [Issue #1937 R9]
+ *
+ * No `token` field, and no Auto-Yes field, in either case deliberately:
+ * `remote` mints its own token (§5.1) and offers no way to turn Auto-Yes on
+ * (§5.5). See the header of `src/cli/commands/remote.ts`.
+ */
+export interface RemoteOptions {
+  /** Force a provider: `tailscale` or `cloudflare` */
+  provider?: string;
+  /** Remote session TTL, 1h-30d (default 8h) */
+  expires?: string;
+  /** Pairing code TTL, 1m-24h (default 10m) */
+  pairingExpires?: string;
+  /** Port for the server that gets exposed; delegated to start */
+  port?: number;
+  /** Approve creating a public tunnel without prompting */
+  yes?: boolean;
+  json?: boolean;
+}
+
 /** send command options [Issue #518, #576] */
 export interface SendOptions {
   agent?: string;

@@ -31,6 +31,29 @@ When `CM_BIND=0.0.0.0` is set, the server becomes accessible from external netwo
 
 **You MUST configure reverse proxy authentication before exposing CommandMate externally.**
 
+### Provider Tunnel (`commandmate remote`)
+
+`commandmate remote` is a third shape, and neither of the two modes above describes it.
+
+The server keeps its `127.0.0.1` bind — `remote` neither reads nor writes `CM_BIND`, so a
+host on the default binding stays on the default binding. What `remote` adds is an
+*outward door*: a provider process (or, for Tailscale, a provider *configuration*) that
+accepts connections from outside and forwards them to the loopback listener.
+
+| Property | Value under `commandmate remote` |
+|----------|----------------------------------|
+| Listening socket | Still `127.0.0.1` only — nothing new listens on your LAN interface |
+| Reachability | The provider URL is reachable by anyone who learns it (a Cloudflare Quick Tunnel URL is public; a Tailscale Serve URL is reachable only from your tailnet) |
+| Authentication | Always on. `remote` starts the server with token authentication enabled |
+| Blast radius | The CommandMate server only, not other services on this machine |
+
+So the exposure is "one authenticated HTTP surface, reachable by anyone who learns the
+URL". It is neither the localhost case ("no authentication required") nor the
+`CM_BIND=0.0.0.0` case ("every client on the network reaches this port"). The risks in the
+table above still apply to anyone who *does* get past authentication.
+
+See *Option 4: `commandmate remote`* under Recommended Authentication Methods below.
+
 ---
 
 ## Quick Start: Built-in Token Authentication + HTTPS
@@ -211,6 +234,165 @@ Benefits:
 - Encrypted end-to-end
 - Works across NAT and firewalls
 
+### Option 4: `commandmate remote` (CommandMate performs the setup)
+
+Options 1-3 above are configurations **you build and own**: you install Nginx, you create
+the Cloudflare Tunnel, you join the Tailscale network. CommandMate is unaware of any of
+them and never touches them.
+
+`commandmate remote` is the opposite arrangement. **CommandMate performs the setup on your
+behalf** — it starts a server with authentication enabled, mints a session token, asks a
+provider to publish that server, and prints a QR code to pair a phone with. It records
+what it created so that it can later undo exactly that, and nothing else.
+
+```bash
+commandmate remote          # up (default): start the server, publish it, print a pairing QR code
+commandmate remote status   # provider, URL, expiry, pairing state
+commandmate remote stop     # close the outside door; the server keeps running
+```
+
+| Flag | Meaning |
+|------|---------|
+| `--provider <tailscale\|cloudflare>` | Override provider auto-selection |
+| `--expires <duration>` | Remote session TTL (default `8h`, range `1h`-`30d`) |
+| `--pairing-expires <duration>` | Pairing code TTL (default `10m`, range `1m`-`24h`) |
+| `-p, --port <number>` | Port of the server to expose |
+| `--yes` | Approve creating a public tunnel without prompting (required when non-interactive) |
+| `--json` | JSON output |
+
+There is deliberately **no `--token` flag**: `remote` is the side that mints the token, so
+one supplied from outside would have no matching hash on the server. There is **no
+`--auto-yes` flag in any form** either. Auto-Yes state is an in-memory map that is empty at
+server start, so a server `remote` has just started has Auto-Yes off for every worktree —
+not offering a flag to turn it on is the structural guarantee that it stays off.
+
+Exit codes: `0` success, `1` `DEPENDENCY_ERROR` (no usable provider), `2` `CONFIG_ERROR`
+(non-interactive without approval, an invalid `--expires`, or a server already running with
+authentication enabled that this session cannot pair with), `3` `START_FAILED`,
+`4` `STOP_FAILED`, `99` `UNEXPECTED_ERROR`.
+
+#### Provider availability
+
+| Provider | State |
+|----------|-------|
+| `tailscale-serve` (`--provider tailscale`) | **Implemented.** Ready when `tailscale` is installed, the node is logged in, and Serve/HTTPS is available on the tailnet. Tried first by auto-selection, because it publishes only to your own tailnet |
+| `cloudflare-quick` (`--provider cloudflare`) | **Implemented.** Selectable whenever `cloudflared` is installed. Publishes to the public internet, so it always asks for approval first. **See the known issue below before relying on it** |
+
+> **The `tailscale-serve` provider is not Option 3, even though both work.** Option 3 above
+> is *you* using Tailscale yourself: you join the tailnet and browse to the node's Tailscale
+> IP, and CommandMate is not involved at all. The `tailscale-serve` **provider** is
+> CommandMate driving `tailscale serve` for you as part of `remote`, and it therefore writes
+> to configuration that belongs to `tailscaled` and that you may already be using. Because
+> that configuration has no undo, `remote` snapshots it before touching it, refuses to start
+> when the path it wants is already served, and on `stop` removes only the one handler it
+> created (see *Expiry and cleanup* below).
+
+> **Do not follow Tailscale's own teardown hint.** After a successful `tailscale serve`,
+> Tailscale prints a suggestion to disable the proxy by re-running `serve` with only the
+> port and the word "off" — with no path. That untargeted form removes **every** handler on
+> that port, including ones you set up yourself, with exit status 0 and no warning. Use
+> `commandmate remote stop`, which always passes the specific path it created.
+
+If no provider is ready, `remote` stops with `DEPENDENCY_ERROR` (exit code `1`). It does
+**not** fall through to a public tunnel on its own when Tailscale is unavailable: putting
+this machine on the public internet always requires your explicit approval.
+
+> **Known issue (as of 2026-08-29): the Cloudflare Quick Tunnel does not outlive the
+> command.** In the live acceptance run, `cloudflared` exited at the same moment
+> `commandmate remote` returned, and the URL it had just printed began answering HTTP 530
+> within seconds — before there was time to scan the QR code. The cause is the provider's
+> spawn shape (the child's stderr stays attached to a pipe the exiting parent closes), and
+> it is a defect, not a configuration problem on your side. Until it is fixed, prefer
+> `--provider tailscale`. The measured record is in
+> [`docs/qa/1937-remote-uat-record.md`](../qa/1937-remote-uat-record.md) (defect D-1).
+
+#### Cloudflare Quick Tunnel: what you are approving
+
+A Quick Tunnel is convenient *and* disposable. Both halves matter:
+
+- **A random, publicly reachable URL is created on the internet.** `cloudflared` allocates
+  a `https://<random>.trycloudflare.com` address. Anyone who learns that address can reach
+  your CommandMate server, and the traffic passes through Cloudflare.
+- **The URL changes on every start.** It is not stable, so it cannot be bookmarked, put
+  behind a DNS record, or added to any allow-list.
+- **Do not use it for long-lived or production access.** A Quick Tunnel carries no access
+  policy of its own, no audit trail you control, and no availability guarantee. For
+  anything beyond an ad-hoc "reach my machine from my phone right now", use Option 2
+  (Cloudflare Access) or Option 3 (Tailscale) instead.
+- **CommandMate's own authentication is not optional here.** `remote` always starts the
+  server with token authentication enabled; a visitor who does not redeem the pairing code
+  is refused. The tunnel publishes an authenticated surface, never an open one.
+- **CommandMate never creates a public tunnel without explicit approval.** Interactively
+  you are shown a warning and must confirm. Non-interactively — CI, a script, a message
+  sent by an agent — there is nobody to ask, so the run fails with `CONFIG_ERROR`
+  (exit code `2`) unless you passed `--yes`. `--yes` *is* the approval; do not add it to a
+  wrapper script by reflex.
+
+Only the public-tunnel provider asks this question. `tailscale-serve` publishes to your own
+tailnet rather than to the internet, so it does not require `--yes`.
+
+#### Pairing code
+
+- **Single-use**, and expires after 10 minutes by default (`--pairing-expires`)
+- 26 Crockford Base32 characters, i.e. 128 bits of entropy
+- **The plaintext is never persisted.** It is handed to the server through
+  `~/.commandmate/remote-pairing.json`, mode `0600`, and that file is deleted the instant
+  the code is redeemed. "Already used" is represented by the file's *absence*, not by a
+  flag written inside it
+- `remote` contributes exactly three environment variables to the server it starts:
+  `CM_AUTH_TOKEN_HASH`, `CM_AUTH_EXPIRE`, and `CM_REMOTE_PAIRING_FILE`. The third is a
+  **path, not a secret**. No plaintext long-lived token is placed in the environment,
+  because a tmux pane CommandMate spawns inherits the server's environment wholesale —
+  anything left there would be readable by the very agents CommandMate is driving
+
+#### The session cookie carries no `Secure` attribute over a tunnel (expected)
+
+CommandMate issues its authentication cookie with `HttpOnly` and `SameSite=Strict` always,
+and with `Secure` **only when the server itself is serving HTTPS** — that is, when
+`CM_HTTPS_CERT` is set. A provider tunnel terminates TLS at the provider and forwards plain
+HTTP to the loopback origin, so `CM_HTTPS_CERT` is unset and the cookie is issued
+**without** `Secure`.
+
+**This is correct behaviour, not a defect**, for three reasons:
+
+1. **`Secure` describes the origin, and the origin really is plain HTTP.** Setting it
+   unconditionally would make browsers refuse the cookie over `http://localhost:3000`,
+   breaking ordinary local use — the primary way CommandMate is run — in order to annotate
+   a connection that is already encrypted.
+2. **The exposed leg is already HTTPS.** Between the browser and the provider the traffic
+   is encrypted, so the on-the-wire eavesdropping that `Secure` exists to prevent is
+   already addressed. What is left in the clear is the loopback hop inside your own
+   machine.
+3. **The other cookie protections do not depend on transport.** `HttpOnly` (no JavaScript
+   access) and `SameSite=Strict` (no cross-site submission) are set in every configuration.
+
+If you want `Secure` set, terminate TLS at the CommandMate server itself
+(`commandmate start --auth --cert ... --key ...`, see the Quick Start above) rather than
+relying on a tunnel for it.
+
+#### Expiry and cleanup
+
+- When `--expires` elapses, **only the outside door closes — the server keeps running.**
+  Shutting it down would take your local session with it, so an expiring remote session
+  never costs you your work on the machine itself.
+- `commandmate remote stop` closes the provider session and reverts **only what CommandMate
+  recorded creating.**
+- If the recorded state is missing or unreadable, `stop` does **not** guess which provider
+  to tear down. It reports that it has nothing it knows how to clean up and exits
+  successfully. Guessing would mean deleting provider configuration that belongs to you —
+  a Tailscale Serve mapping you set up by hand, say — which CommandMate has no way to
+  restore.
+
+#### Deprecated: long-lived tokens in the URL fragment
+
+The earlier QR sign-in flow put a long-lived token into the URL fragment
+(`.../login#token=...`). The generator for those links has been **removed** from
+CommandMate — nothing in the product produces such a URL any more. The receiving side still
+accepts `#token=` for one more release and logs a deprecation warning when it does; it will
+be removed after that. Use the pairing URL that `commandmate remote` prints instead, and
+treat any surviving `#token=` link as a live credential — it is a long-lived token
+sitting in a URL — rather than as a convenient bookmark.
+
 ---
 
 ## Migration from CM_AUTH_TOKEN
@@ -264,6 +446,18 @@ Before exposing CommandMate to external networks:
 - [ ] `CM_ROOT_DIR` points only to intended repositories
 - [ ] `CM_BROWSE_ROOTS` lists only directories whose folder names may be exposed to authenticated clients (unset is safest)
 
+When using `commandmate remote`:
+
+- [ ] You understand that a Cloudflare Quick Tunnel URL is reachable from the public internet
+- [ ] The tunnel is for ad-hoc access, not long-lived or production access
+- [ ] `--yes` is used only where you have consciously pre-approved creating a public tunnel, never as a default in a wrapper script
+- [ ] `--expires` is set to the shortest TTL the task needs (default `8h`, range `1h`-`30d`)
+- [ ] `--pairing-expires` is short and the QR code is scanned promptly (default `10m`)
+- [ ] The pairing QR code / URL is not forwarded, screenshotted into a chat, or reused — it is single-use
+- [ ] `commandmate remote stop` is run when remote access is no longer needed (expiry closes the door, but only after the TTL elapses)
+- [ ] Teardown goes through `commandmate remote stop`, never through Tailscale's own untargeted `serve ... off` hint, which clears the whole port
+- [ ] You accept that over a tunnel the session cookie has no `Secure` attribute (see Option 4) — use built-in TLS if you need it
+
 ---
 
 ## Additional Security Measures
@@ -304,4 +498,4 @@ rather than a public issue.
 
 ---
 
-*Last updated: 2026-02-21 (Issue #331: mkcert certificate generation, built-in token auth + HTTPS quick start)*
+*Last updated: 2026-08-29 (Issue #1937: `commandmate remote`, Quick Tunnel risks, cookie `Secure` over a tunnel)*

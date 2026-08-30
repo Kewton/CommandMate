@@ -88,6 +88,46 @@ async function safeParseJson<T>(
 }
 
 /**
+ * Auth-redirect guard used by {@link fetchApi} (Issue #573).
+ *
+ * `fetch` transparently follows the 307 that the auth middleware issues, so an
+ * unauthenticated request resolves as the `/login` HTML page with status 200.
+ * Returns the `ApiError` to throw, or `null` when the response is not a
+ * redirect to the login page.
+ *
+ * Issue #2059: exported so callers that keep their own `fetch()` call site
+ * (`useWorktreesCache`, whose polling tests pin the call shape) apply exactly
+ * this rule instead of re-deriving it.
+ */
+export function detectAuthRedirect(response: Response): ApiError | null {
+  if (response.redirected && (response.url ?? '').includes('/login')) {
+    return new ApiError('Authentication required', 401);
+  }
+  return null;
+}
+
+/**
+ * Non-JSON body guard used by {@link fetchApi} (Issue #573).
+ *
+ * Returns the `ApiError` to throw when the response advertises anything other
+ * than `application/json` (an HTML error page, a proxy interstitial), or `null`
+ * when the body can be parsed as JSON.
+ *
+ * A real `Response` always carries a `headers` object; when it is missing the
+ * check is skipped rather than guessed, so a caller can pass a stub through.
+ *
+ * Issue #2059: exported alongside {@link detectAuthRedirect} — see there.
+ */
+export function detectNonJsonBody(response: Response): ApiError | null {
+  if (!response.headers) return null;
+  const contentType = response.headers.get('content-type') || '';
+  if (!contentType.includes('application/json')) {
+    return new ApiError('Unexpected response format', response.status);
+  }
+  return null;
+}
+
+/**
  * Base fetch wrapper with error handling
  */
 async function fetchApi<T>(url: string, options?: RequestInit): Promise<T> {
@@ -102,9 +142,9 @@ async function fetchApi<T>(url: string, options?: RequestInit): Promise<T> {
 
     // Detect auth redirect: fetch follows 307 to /login, returning HTML with 200.
     // Check content-type to avoid parsing HTML as JSON.
-    const contentType = response.headers.get('content-type') || '';
-    if (response.redirected && response.url.includes('/login')) {
-      throw new ApiError('Authentication required', 401);
+    const redirectError = detectAuthRedirect(response);
+    if (redirectError) {
+      throw redirectError;
     }
 
     if (!response.ok) {
@@ -118,8 +158,9 @@ async function fetchApi<T>(url: string, options?: RequestInit): Promise<T> {
       );
     }
 
-    if (!contentType.includes('application/json')) {
-      throw new ApiError('Unexpected response format', response.status);
+    const formatError = detectNonJsonBody(response);
+    if (formatError) {
+      throw formatError;
     }
 
     return response.json();

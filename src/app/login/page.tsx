@@ -3,28 +3,26 @@
 /**
  * Login Page
  * Issue #331: Token authentication login form
- * Issue #383: QR code login for mobile access via ngrok
+ * Issue #1937 (R7): the #383 QR generator has been removed from this screen -
+ *   it minted a URL carrying the LONG-LIVED auth token in a fragment, which is
+ *   exactly what this Issue forbids. `commandmate remote` prints the pairing
+ *   URL instead. Acceptance of the old #token= link stays in useFragmentLogin
+ *   for one release (design §2.2); its removal is Phase 2.
  *
  * Features:
  * - Token input form (password type)
  * - Rate limit / lockout message display
  * - Redirect to / when auth is disabled (via AuthContext, no fetch needed)
  * - i18n support (useTranslations('auth'))
- * - Fragment-based auto-login (#token=xxx) for QR code scanned access
- * - QR code generator (PC only, hidden md:block) for mobile access
+ * - Fragment-based auto-login for scanned access:
+ *   #code=xxx (pairing, Issue #1937) / #token=xxx (deprecated, Issue #383)
  */
 
 import { useState, useEffect, FormEvent } from 'react';
-import dynamic from 'next/dynamic';
 import { useTranslations } from 'next-intl';
 import { useAuthEnabled } from '@/contexts/AuthContext';
 import { useFragmentLogin } from '@/hooks/useFragmentLogin';
 import { Button, Input } from '@/components/ui';
-
-const QrCodeGenerator = dynamic(
-  () => import('@/components/auth/QrCodeGenerator').then((m) => ({ default: m.QrCodeGenerator })),
-  { ssr: false }
-);
 
 export default function LoginPage() {
   const t = useTranslations('auth');
@@ -34,13 +32,22 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [retryAfter, setRetryAfter] = useState<number | null>(null);
 
-  const { autoLoginErrorKey, retryAfterSeconds, clearError: clearAutoLoginError } = useFragmentLogin(authEnabled);
+  const {
+    autoLoginErrorKey,
+    retryAfterSeconds,
+    pairingInProgress,
+    clearError: clearAutoLoginError,
+  } = useFragmentLogin(authEnabled);
 
   // Map autoLoginErrorKey to localized message
   const autoLoginErrorMessages: Record<string, string> = {
     token_invalid: t('login.qr.tokenExpiredOrInvalid'),
     rate_limited: t('login.qr.rateLimited'),
     auto_login_failed: t('login.qr.autoLoginError'),
+    // Issue #1937 (R6): the pairing code says something different from a token -
+    // 410 means "spent or timed out", and the fix is to mint a new code.
+    pairing_invalid: t('login.pairing.invalidCode'),
+    pairing_expired: t('login.pairing.expired'),
   };
   const autoLoginError = autoLoginErrorKey ? autoLoginErrorMessages[autoLoginErrorKey] ?? null : null;
 
@@ -124,6 +131,14 @@ export default function LoginPage() {
           {t('login.title')}
         </h1>
 
+        {/* Issue #1937 (R6): a scanned pairing URL logs in with no interaction,
+            so without this the screen looks like an idle login form. */}
+        {pairingInProgress && (
+          <p className="mb-4 text-center text-sm text-muted-foreground" role="status">
+            {t('login.pairing.inProgress')}
+          </p>
+        )}
+
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label
@@ -164,11 +179,6 @@ export default function LoginPage() {
             {t('login.submitButton')}
           </Button>
         </form>
-
-        {/* QR Code Generator - PC only (768px+), hidden on mobile */}
-        <div className="hidden md:block">
-          <QrCodeGenerator />
-        </div>
       </div>
     </div>
   );

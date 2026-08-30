@@ -33,6 +33,11 @@ export const AUTH_EXCLUDED_PATHS = [
   '/api/auth/login',
   '/api/auth/logout',
   '/api/auth/status',
+  // Issue #1937 (R5): one-shot pairing-code exchange for `commandmate remote`.
+  // The pairing SCREEN is '/login' above, driven by a '#code=' fragment, so
+  // this is the only entry the remote feature adds. Handler:
+  // src/app/api/remote/pair/route.ts (it authenticates the code itself).
+  '/api/remote/pair',
   // Issue #1124 (PWA): non-sensitive resources that must stay reachable before
   // auth so the app is installable and the offline fallback can be precached.
   // All carry no user data (app metadata / public SW code / static fallback).

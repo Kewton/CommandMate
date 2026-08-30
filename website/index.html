@@ -587,6 +587,82 @@ $ echo $?
         </div>
       </section>
 
+      <!-- Pairing a phone. The gallery above shows the phone screens without
+           ever saying how a phone reaches a server bound to 127.0.0.1, which is
+           the first question a reader has after seeing them. `commandmate remote`
+           is that answer, so it sits directly under them (Issue #1937).
+
+           Every claim here is scoped to what shipped: one of the two providers
+           has to be installed (src/lib/remote/provider-registry.ts; neither is a
+           DEPENDENCY_ERROR, never a fallback), the public route is approved
+           rather than assumed (selectProvider + approvePublicTunnel in
+           src/cli/commands/remote.ts), and the defaults quoted are the exported
+           DEFAULT_REMOTE_EXPIRES / DEFAULT_PAIRING_EXPIRES. `remote` has no
+           --token and no --auto-yes: do not write flags onto this page that the
+           command would reject. -->
+      <section class="section" id="remote" aria-labelledby="remote-h">
+        <h2 id="remote-h">Pair your phone with a QR code</h2>
+        <p class="section-lede">
+          One command opens a way in and prints a QR code carrying a one-time pairing code. There
+          is no LAN address to look up, no <code>CM_BIND</code> to widen, and no token to retype
+          on a phone keyboard.
+        </p>
+
+        <div class="install">
+          <code class="install-cmd" id="remote-cmd">commandmate remote</code>
+          <button type="button" class="copy-btn" data-copy-target="remote-cmd">
+            <span data-copy-label>Copy</span>
+          </button>
+        </div>
+
+        <div class="cards remote-cards">
+          <article class="card">
+            <h3>Bring one of two providers</h3>
+            <p>
+              Tailscale or <code>cloudflared</code> — one of them has to be installed and usable,
+              or <code>remote</code> stops on a dependency error. Tailscale Serve is the preferred
+              route, and stays inside your tailnet.
+            </p>
+          </article>
+          <article class="card">
+            <h3>Nothing public without a yes</h3>
+            <p>
+              A Cloudflare Quick Tunnel is a URL on the open internet, so it is created only after
+              you approve it — <code>--yes</code> when nobody is there to ask. Tailscale being
+              unusable never publishes you instead.
+            </p>
+          </article>
+          <article class="card">
+            <h3>A code that runs out</h3>
+            <p>
+              The pairing code works once and expires in ten minutes by default;
+              <code>--pairing-expires</code> sets that window. No long-lived token travels in the
+              QR code.
+            </p>
+          </article>
+          <article class="card">
+            <h3>One door, and you close it</h3>
+            <p>
+              <code>CM_BIND</code> keeps its <code>127.0.0.1</code> default — remote adds one way
+              in and changes nothing else. <code>commandmate remote stop</code> takes down what
+              CommandMate opened, and leaves the server up.
+            </p>
+          </article>
+        </div>
+
+        <p class="note">
+          Nothing is exposed until you run it, and the session closes itself — eight hours by
+          default, <code>--expires</code> to change it. <code>commandmate remote status</code>
+          reports the provider, the URL and what is left of both windows, and Auto-Yes stays off
+          unless you turn it on.
+        </p>
+        <p class="remote-docs">
+          The Quick Tunnel is a quick way in rather than a permanent address. Every flag, every
+          exit code and the longer-lived Tailscale route are in the
+          <a href="https://github.com/Kewton/CommandMate/blob/main/docs/en/user-guide/cli-operations-guide.md">CLI operations guide</a>.
+        </p>
+      </section>
+
       <!-- Closing CTA -->
       <section class="section closing">
         <h2>Start in one command</h2>

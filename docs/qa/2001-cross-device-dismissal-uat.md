@@ -97,6 +97,10 @@ tail -f <server log> | grep -E 'push/resolution|push/waiting-notifier|push/promp
 
 ### T-1. iPhone で応答 → Android のカードが置き換わる
 
+0. **両端末の通知を全消去する。** 枚数を数える項目がある以上、**開始点が 0 枚でないと
+   「増えた」のか「前ラウンドの残骸」なのかが判別できない（2026-08-29 に T-2 でこれが起き、
+   2 枚の原因を確定できなかった）。**タグは `${worktreeId}:${kind}` なので、`prompt` と
+   `terminalAttention` は別カードとして並ぶ** — 種類違いの残骸も消しておくこと。
 1. 両端末をロックし、画面を消す（バックグラウンド配送を確かめるため）
 2. PC から worktree に、承認プロンプトが出る作業を送る
 3. **両端末**に「`<worktree名>` (claude) / 応答待ち: …」が届くことを確認する
@@ -140,7 +144,10 @@ T-1 の 4 を「**Android でタップして応答**」に替えて繰り返す�
 
 - [ ] 待機通知が **来ない**（#1999 の挙動）
 - [ ] Auto-Yes が答えたあとも **「対応済み」通知が来ない**（消すカードが無いため）
-- [ ] サーバログに `resolution-push-skipped` / `reason: no-card`
+- [ ] **push が 1 通も出ていない**（`push-fanout-complete` がこの worktree 宛に 0 件）。
+      **`reason: no-card` のログは `logger.debug` なので既定設定では出力されない**
+      （`resolution-push-notifier.ts:229-230`。陽性対照: ログ全体の `[DEBUG]` 行が 0 件）。
+      **他ワークツリーの通知が混ざる**ため、`push-fanout-complete` だけを数えないこと — Issue #2133
 
 > ここで「対応済み」が鳴ったら、それは #1999 の削減を食い潰している状態＝不合格。
 
@@ -149,12 +156,25 @@ T-1 の 4 を「**Android でタップして応答**」に替えて繰り返す�
 #2057 で「鳴ったカードの印」が `app_settings` に永続化された。**印が消えて `no-card` になる**
 経路は unit テストで固定してあるので、ここで見るのは「実際の端末で置き換えが起きるか」だけでよい。
 
+0. **両端末の通知を全消去する**（T-1 の 0 と同じ理由）
 1. 両端末を購読した状態で、承認プロンプトが出る作業を送る（両端末にカードが出る）
-2. **カードを出したまま** `commandmate stop` → `commandmate start` でサーバを再起動する
-3. ブラウザで worktree 一覧を開き、待機が再観測されるのを待つ（数秒）
-4. `commandmate auto-yes <worktree-id> --enable` で Auto-Yes を有効にする
-   （＝再観測の通知が #1999 のゲートで抑止される。**これが #2057 が塞いだ経路**）
+2. **カードを出したまま**サーバを再起動する。
+   **`build-and-start.sh` / `/rebuild` を使わないこと** — ビルドが走って `BUILD_ID` が変わり、
+   端末で開いているタブが古い chunk を掴んで壊れる。**ビルド無しの再起動手段は Issue #2132 で整備中**。
+   再起動したら **`grep -a 'Push notifications are disabled' logs/server.log` を撃つこと**
+   （手で起動すると `.env` が落ちて push が全便無音で死ぬ。2026-08-29 に実際に踏んだ）
+3. **待機が再観測されるまで `/api/worktrees` を繰り返し叩く。**
+   **観測はバックグラウンドでは走らない** — `worktree-status-helper` が
+   `observeWaitingEdge` を呼ぶのは API を叩いた時だけなので、「ブラウザで一覧を開く」は
+   比喩ではなく必須手順である。**再観測できたことは待機通知の発火（`push-fanout-complete`）で確認する。**
+4. **3 が確認できてから** `commandmate auto-yes <worktree-id> --enable` で Auto-Yes を有効にする
 5. Auto-Yes に応答させる
+
+> **順序を守ること。** `observeWaitingEdge` の開くエッジは **in-memory** なので、
+> 再起動でメモリが空になった直後に応答されると**閉じるエッジ自体が起きず**、解決 push が飛ばない
+> （下の「塞いでいない経路」＝設計書 §6.2 の C に落ちる）。
+> **Auto-Yes は有効化から約 2 秒で応答する**（2026-08-29 実測、2 回とも）ので、
+> 3 を飛ばして 4 を先にやると **毎回 C に落ちて T-8 を測れない**。
 
 **期待**:
 
@@ -190,7 +210,8 @@ T-1 の 4 を「**Android でタップして応答**」に替えて繰り返す�
 
 - [ ] サーバが落ちない・ポーリングが止まらない（worktree の状態表示が更新され続ける）
 - [ ] ログに `push-fanout-error` / `resolution-push-failed` / 未捕捉例外が **出ない**
-- [ ] `reason: no-card` の debug 行だけが出る（購読 0 件ではカードのマークも付かないため）
+- [ ] `reason: no-card` は `logger.debug` なので **既定設定では出力されない**。
+      購読 0 件ではカードのマークも付かないので、**push が 0 通であることをもって合格とする**
 
 ### T-7. 片方が「対応が必要なとき」を OFF にしたとき
 
