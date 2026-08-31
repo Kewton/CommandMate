@@ -8,6 +8,30 @@ allowed-tools: Bash(./scripts/*), Bash(git worktree list)
 
 サーバーを停止し、ビルドしてバックグラウンドで再起動します。
 
+## ⚠️ 最初に決めること: ビルドは要るのか（Issue #2132）
+
+**ビルドは「アプリケーションのコードが変わったとき」だけ必要です。**
+`npm run build` は `.next/BUILD_ID` を書き換えるため、**開いているブラウザタブが chunk を取得できなくなって壊れます**
+（`.commandmate/verify.yaml` が `skipInPrimaryCheckout: true` でビルドを外しているのと同じ理由）。
+
+| 状況 | 使うもの | ビルド |
+|------|---------|--------|
+| `src/` などコードを変更した | このスキル（`build-and-start.sh --daemon`） | する |
+| `.env` / 設定だけ変えた | `./scripts/restart-nobuild.sh` | **しない** |
+| クラッシュしたサーバーを復帰させたい | `./scripts/restart-nobuild.sh` | **しない** |
+| 停止中のサーバーを起こすだけ | `./scripts/start.sh --daemon` | **しない** |
+
+ビルド不要と判断したら Step 2 の代わりに次を 1 回の Bash 呼び出しで実行し、完了報告形式はそのまま使う:
+
+```bash
+cd {TARGET_DIR} && ./scripts/restart-nobuild.sh
+cd {TARGET_DIR} && CM_PORT={port} ./scripts/restart-nobuild.sh   # ポート指定あり
+```
+
+**手製の `nohup npm start` を使わないこと。** その前に `source scripts/load-env.sh` を叩く形になりますが、
+このスクリプトは bash 専用で、zsh から source すると `.env` を 1 変数も読み込みません
+（Issue #2132 以降はエラーで失敗しますが、正しい手段は上記の 2 スクリプトです）。
+
 ## 使用方法
 
 ```bash
@@ -69,6 +93,7 @@ cd {TARGET_DIR} && CM_PORT={port} ./scripts/stop.sh && CM_PORT={port} ./scripts/
 ```
 
 **注意**:
-- `./scripts/stop.sh` と `./scripts/build-and-start.sh` はプロジェクトルートの `.env` ファイルを自動読み込みする（`CM_PORT`, `CM_DB_PATH` 等）。
+- `./scripts/stop.sh` / `./scripts/build-and-start.sh` / `./scripts/start.sh` / `./scripts/restart-nobuild.sh` はプロジェクトルートの `.env` ファイルを自動読み込みする（`CM_PORT`, `CM_DB_PATH` 等）。
 - `--port` オプションで `CM_PORT` を明示指定した場合、`.env` の値より優先される（環境変数が既にセットされている場合は `.env` で上書きされない仕様）。
 - 複数ポートで起動している場合、特定ポートだけ停止するには必ず `CM_PORT={port}` を付けること。
+- 起動ログに `[env] ...` の警告が出た場合、`.env` は存在するのに 1 変数も読み込めていない（Issue #2132）。その状態では Web Push・DB パス・worktree ルートがすべて既定値になっているので、報告して原因を潰すこと。

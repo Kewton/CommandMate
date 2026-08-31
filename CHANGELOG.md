@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **fix(scripts): ビルド無しの正規な再起動手段を用意し、`load-env.sh` が非 bash で無言成功するのをやめる** (#2132): `scripts/load-env.sh` に **bash ガード**を入れ、`${BASH_SOURCE+x}` が無いシェル（zsh / dash）から `source` されたら理由と代替手段を stderr に出して**非 0 で失敗**するようにした（develop f5903168 実測: `zsh -c '. scripts/load-env.sh'` は **rc=0 で 1 変数も export しない**。Epic #2002 実機 UAT 2026-08-29 はこれを踏んで CM_VAPID_* / CM_DB_PATH / CM_ROOT_DIR / CM_PORT / CM_BIND を全部落としたサーバを起動し、Web Push が全便無音で死んで UAT を 2 ラウンド失った）。あわせて `scripts/start.sh` に `--daemon` / `-d` / `--help` を追加し（`build-and-start.sh:145-200` の daemon ブロックからビルド段だけを抜いた移植。PID ファイルの `chmod 600` [S4-003]・ログの `chmod 640` [S4-005]・symlink 拒否 [S4-006]・PID/ポート二重起動チェック [D1-004] は保持）、停止＋起動を 1 コマンドにする `scripts/restart-nobuild.sh` を新設した。**どちらも `npm run build` を呼ばない**ので `.next/BUILD_ID` が変わらず、開いているタブが壊れない（コメント除外行の静的検査で固定。陽性対照＝`npm start` が在ること、陰性対照＝`build-and-start.sh` は依然ビルドすること）。さらに `server.ts` が VAPID セルフチェックの**直前**に `runDotenvSelfCheck()`（`src/lib/env.ts`）を呼び、「`.env` は在るのに宣言された変数が 1 つも `process.env` に無い」を起動ログの `[env] ...` 行として報告する（原因を症状より先に読ませるための順序。fail-open・正常時は完全に無言）。
+
 ## [0.29.2] - 2026-08-31
 
 > **Highlight**: 2026-08-25 の利用者報告 4 件（リロード時のサイドバー空表示・Verification の使い方が解らない・既定エージェントが固定・codex が更新できない）を Epic #2071 として一括で解消したリリース。あわせて、**全テスト green のまま `Unit Tests` を exit 1 にしていた未回収 `setTimeout` を 8 コンポーネントぶん回収**した（無関係な PR の CI を 2 回赤にした実績があり、押下フィードバックとコピー確認の両方を共有フックへ一本化して再発経路を塞いだ）。DB マイグレーションなし。
