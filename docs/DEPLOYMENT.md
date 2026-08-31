@@ -79,7 +79,9 @@ cd CommandMate
 3. 対話式環境設定（`setup-env.sh`）
 4. データベース初期化、ビルド、起動（`build-and-start.sh --daemon`）
 
-> **Note**: `build-and-start.sh` および `stop.sh` はプロジェクトルートの `.env` ファイルを自動読み込みします。カスタムサーバー（`node dist/server/server.js`）は Next.js の `.env` 自動読み込みが効かないため、スクリプト側で環境変数を export しています。環境変数が既に設定されている場合は `.env` の値で上書きされません。
+> **Note**: `build-and-start.sh` / `start.sh` / `restart-nobuild.sh` / `stop.sh` はプロジェクトルートの `.env` ファイルを自動読み込みします。カスタムサーバー（`node dist/server/server.js`）は Next.js の `.env` 自動読み込みが効かないため、スクリプト側で環境変数を export しています。環境変数が既に設定されている場合は `.env` の値で上書きされません。
+
+> **Warning**: 読み込み本体の `scripts/load-env.sh` は **bash 専用** です（`${BASH_SOURCE[0]}` と `[[ =~ ]]` を使います）。zsh などから `source` すると **1 変数も読まずに終了します**。Issue #2132 以降は無言で成功せずエラーを出して失敗しますが、`source` で手動起動するのではなく、下記の `./scripts/start.sh --daemon` / `./scripts/restart-nobuild.sh` を使ってください。
 
 ### 手動セットアップ
 
@@ -206,6 +208,37 @@ npm run build
 # ビルドの確認
 npm run start
 ```
+
+### 再起動：ビルドあり／なしの使い分け
+
+**再起動のたびにビルドしてはいけません。** `npm run build` は `.next/BUILD_ID` を書き換えるため、開いているブラウザタブが chunk を取得できなくなって壊れます（`.commandmate/verify.yaml` が `skipInPrimaryCheckout: true` でビルドを外しているのと同じ理由）。
+
+| やりたいこと | コマンド | ビルド |
+|-------------|---------|--------|
+| `.env` / 設定を変えた、クラッシュから復帰したい | `./scripts/restart-nobuild.sh` | **しない** |
+| 停止中のサーバーをバックグラウンドで起こしたい | `./scripts/start.sh --daemon` | **しない** |
+| アプリケーションのコードが変わった | `./scripts/stop-server.sh && ./scripts/build-and-start.sh --daemon` | する |
+
+```bash
+# ビルドせずに再起動（.env の変更を反映する標準手段）
+./scripts/restart-nobuild.sh
+
+# ポートを指定する場合（.env の CM_PORT より環境変数が優先される）
+CM_PORT=3011 ./scripts/restart-nobuild.sh
+
+# 停止中から起こすだけ（ビルドしない）
+./scripts/start.sh --daemon
+
+# ヘルプ
+./scripts/start.sh --help
+./scripts/restart-nobuild.sh --help
+```
+
+`--daemon` は `nohup npm start` をバックグラウンドで起動し、PID を `logs/server.pid`（`chmod 600`）に、ログを `logs/server.log` に書きます。停止は `./scripts/stop-server.sh` です。
+
+> **Note**: `./scripts/start.sh --daemon` はビルドしないため、`dist/server/server.js` が無い状態では起動せずエラーになります。初回だけ `./scripts/build-and-start.sh --daemon` を実行してください。
+
+> **Note**: 起動時に `.env` が存在するのに 1 変数も読み込めていない場合、サーバーは起動ログに `[env] ...` の警告を出します（Issue #2132）。この警告が出たら環境変数が全滅しているので、Web Push・DB パス・worktree ルートがすべて既定値になっています。
 
 ### プロセス管理（PM2推奨）
 
