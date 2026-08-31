@@ -6,7 +6,7 @@ exports[`VerificationPane onboarding (Issue #2061) > the four states render diff
     "Run verification",
   ],
   "phase": "configured",
-  "text": "Verification runs the gates this repository declares in \`.commandmate/verify.yaml\`, in this worktree, exactly as written.Each gate's exit code decides the verdict. They are the same gates \`commandmate verify\` and \`wait --verify\` use, so green here means green there.2 gates are declared in \`.commandmate/verify.yaml\`. None has run on this branch yet.Declared gateslintnpm run lintunitnpm run test:unitThe built-in gates run alongside them: work-evidence, scopeRun verification",
+  "text": "Verification runs the gates this repository declares in \`.commandmate/verify.yaml\`, in this worktree, exactly as written.Each gate's exit code decides the verdict. They are the same gates \`commandmate verify\` and \`wait --verify\` use, so green here means green there.2 gates are declared in \`.commandmate/verify.yaml\`. None has run on this branch yet.Declared gateslintnpm run lintunitnpm run test:unitThe built-in gates run alongside them: work-evidence, scopeThe built-in gates run on every verification without being declared in \`.commandmate/verify.yaml\`. Each gate row below says what its gate checks.Run verification",
 }
 `;
 
@@ -27,7 +27,7 @@ exports[`VerificationPane onboarding (Issue #2061) > the four states render diff
     "Show the latest run's gates",
   ],
   "phase": "result",
-  "text": "Verification runs the gates this repository declares in \`.commandmate/verify.yaml\`, in this worktree, exactly as written.Each gate's exit code decides the verdict. They are the same gates \`commandmate verify\` and \`wait --verify\` use, so green here means green there.The last run on this branch, #11, is RESULT failed.Show the latest run's gates",
+  "text": "Verification runs the gates this repository declares in \`.commandmate/verify.yaml\`, in this worktree, exactly as written.Each gate's exit code decides the verdict. They are the same gates \`commandmate verify\` and \`wait --verify\` use, so green here means green there.The last run on this branch, #11, is RESULT Failed.Show the latest run's gates",
 }
 `;
 

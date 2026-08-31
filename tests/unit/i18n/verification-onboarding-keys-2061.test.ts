@@ -50,6 +50,10 @@ const ONBOARDING_KEYS = [
   'verification.onboarding.configured.body',
   'verification.onboarding.configured.gatesHeading',
   'verification.onboarding.configured.builtin',
+  // Issue #2062: the built-in gates are listed by id here, which says nothing
+  // about what they are. This line points at the gate rows that now describe
+  // them, so the list is not the reader's only encounter with the four ids.
+  'verification.onboarding.configured.builtinHint',
   'verification.onboarding.configured.action',
   'verification.onboarding.running.progress',
   'verification.onboarding.running.elapsed',
@@ -137,16 +141,23 @@ describe('Verification onboarding i18n keys (Issue #2061)', () => {
     );
   });
 
-  it('leaves the #2062-owned vocabulary alone', () => {
-    // `verification.runStatus.*` / `verification.gateStatus.*` are Issue #2062's
-    // to translate. The onboarding block READS them (the result line prints the
-    // run verdict), so this Issue must not have changed their values.
-    const en = load('en');
-    expect(resolve(en, 'verification.runStatus.passed')).toBe('passed');
-    expect(resolve(en, 'verification.runStatus.failed')).toBe('failed');
-    expect(resolve(en, 'verification.gateStatus.passed')).toBe('PASS');
-    const ja = load('ja');
-    expect(resolve(ja, 'verification.runStatus.passed')).toBe('passed');
-    expect(resolve(ja, 'verification.gateStatus.passed')).toBe('PASS');
+  it('still reads the #2062-owned vocabulary through the same keys', () => {
+    // `verification.runStatus.*` / `verification.gateStatus.*` were Issue
+    // #2062's to translate, and it has: the values are now words, in each
+    // language, and the raw tokens they replaced are banned by
+    // `verification-vocabulary-2062.test.ts`. This assertion used to pin those
+    // values so #2061 could not move them; what it guards now is that the
+    // onboarding block's result line — which prints the run verdict through
+    // exactly these keys — still has keys to read.
+    for (const locale of ['en', 'ja'] as const) {
+      const dict = load(locale);
+      for (const key of [
+        'verification.runStatus.passed',
+        'verification.runStatus.failed',
+        'verification.gateStatus.passed',
+      ]) {
+        expect(typeof resolve(dict, key)).toBe('string');
+      }
+    }
   });
 });
