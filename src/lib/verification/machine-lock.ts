@@ -107,6 +107,17 @@ export type MachineLockResult =
       waitedMs: number;
       /** Human-readable owner (`pid 4211 on host`), or null when unreadable. */
       heldBy: string | null;
+      /**
+       * The waiter gave up on its own rather than running out of time
+       * (Issue #2063).
+       *
+       * The two are different events and the caller reports them differently: a
+       * timeout is a resource conflict worth naming the holder for, an
+       * abandoned wait is the operator having stopped the run. Optional so
+       * every existing `acquired: false` reader keeps compiling and keeps
+       * meaning "timed out".
+       */
+      abandoned?: boolean;
     };
 
 export interface AcquireMachineLockOptions {
@@ -114,6 +125,21 @@ export interface AcquireMachineLockOptions {
   timeoutMs: number;
   root?: string;
   pollIntervalMs?: number;
+  /**
+   * Give up waiting as soon as this answers true (Issue #2063).
+   *
+   * A gate's wait budget is its whole `timeoutSec`, which `.commandmate/verify.yaml`
+   * sets as high as 1800s for `build`. Without this hook a run cancelled while
+   * queued behind a mutex could not be stopped: nothing had been spawned, so
+   * the cancel switch had no process to signal, and the run row stayed
+   * `running` — blocking every further run for that worktree — until the lock
+   * came free. That is precisely the state the cancel endpoint exists to escape.
+   *
+   * Polled rather than an AbortSignal because the wait is already a poll loop
+   * with a 250ms interval; a predicate composes with the runner's latch without
+   * threading a controller through four call frames.
+   */
+  shouldAbandon?: () => boolean;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -209,6 +235,18 @@ export async function acquireMachineLock(
   const broken = new Set<string>();
 
   for (;;) {
+    // Issue #2063. Checked before the claim as well as after the sleep, so a
+    // caller that was already cancelled when it got here never takes a lock it
+    // is only going to release.
+    if (options.shouldAbandon?.()) {
+      return {
+        acquired: false,
+        waitedMs: Date.now() - startedAt,
+        heldBy: describeOwner(readOwner(lockPath)),
+        abandoned: true,
+      };
+    }
+
     const owner: LockOwner = { pid: process.pid, host: hostname(), token, acquiredAt: Date.now() };
     if (claim(lockPath, owner)) {
       return {

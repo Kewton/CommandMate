@@ -21,6 +21,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db/db-instance';
 import { getWorktreeById } from '@/lib/db';
+// Past the barrel, as `gate-runner` does: this selector answers "which task
+// would a verification run adopt", which is exactly the question the planned
+// gate list has to agree with.
+import { getVerifiableTask } from '@/lib/db/tasks-db';
+import { contractGateDefinitions } from '@/lib/tasks/contract-message';
 import { isValidWorktreeId } from '@/lib/security/path-validator';
 import {
   VERIFY_CONFIG_RELATIVE_PATH,
@@ -108,13 +113,20 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
 
     if (!config) return NextResponse.json(empty, { status: 200 });
 
+    // Issue #2063: the plan has to include the gates the worktree's contract
+    // carries (#1791), because a default run executes those too. Resolved with
+    // the same selector the runner uses, so the list the pane shows is the list
+    // that would actually run rather than verify.yaml's half of it.
+    const task = getVerifiableTask(getDbInstance(), resolved.id);
+    const contractGates = task ? contractGateDefinitions(task.contract) : [];
+
     return NextResponse.json(
       {
         exists: true,
         path: VERIFY_CONFIG_RELATIVE_PATH,
         gates: toGateViews(config),
         options: config.options,
-        plannedGateIds: defaultPlannedGateIds(config),
+        plannedGateIds: defaultPlannedGateIds(config, contractGates),
         error: null,
       } satisfies VerifyConfigResponse,
       { status: 200 }
