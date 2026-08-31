@@ -334,17 +334,34 @@ export class CodexTool extends BaseCLITool {
           return;
         }
 
-        // Issue #2068: codex answered `1. Update now` and quit.
+        // Issue #2068: the pane fell back to a shell after the update dialog.
         //
-        // Reached only after this launch has actually SEEN the update dialog,
-        // which is what makes reading a shell prompt here safe: the same row is
-        // on the pane for the whole window between `createSession` and the
-        // launch line landing, and that window is over by the time codex has
-        // painted a dialog. Whoever pressed `1` -- this method under the
-        // `update` policy, or the human under `ask` -- the pane now holds
-        // codex's three update rows and a live shell, so the launch line goes
-        // back into it. Once: a `1` that did not lead to a working codex must
-        // not turn into a relaunch loop.
+        // ## What the guard actually says, which is wider than `update`
+        //
+        // `updateDialogSeen` is set by the update branch below on EVERY policy,
+        // `skip` included -- so this reads: "this launch has had codex's update
+        // dialog in front of it, and the pane is now a bare shell". The case it
+        // exists for is the operator's own `1`: sent by this method under the
+        // `update` policy, or by a human in PromptPanel under `ask`, either way
+        // codex is replaced by `npm install` and exits, and the launch line has
+        // to go back in for the session start to mean anything.
+        //
+        // It is deliberately NOT narrowed to those two policies. Under `skip` or
+        // `skip-until-next-version` a shell can only appear here if codex died
+        // for some other reason inside the same 30 s window, and re-sending the
+        // launch line is the right answer to that too -- it is what Issue #2070's
+        // recovery does at the next `sendMessage`, done at the launch instead of
+        // a send later. Narrowing would buy nothing and would cost a second
+        // condition to keep correct.
+        //
+        // Two properties keep this safe, and neither of them is the policy:
+        //
+        //  - **position in the launch.** A pane shows a bare shell for the whole
+        //    window between `createSession` and the launch line landing, and no
+        //    frame in that window can have had a dialog painted on it yet, so
+        //    `updateDialogSeen` is still false there.
+        //  - **once.** A `1` that did not lead to a working codex must not turn
+        //    into a relaunch loop, so `relaunchIssued` spends the recovery.
         //
         // `findShellPromptTail` rather than {@link isToolLive}, and the
         // difference is measured: `npm install` prints three rows, so the dead
@@ -453,6 +470,17 @@ export class CodexTool extends BaseCLITool {
               // codex is about to become `npm install`. The prompt this method
               // is waiting for belongs to a process that does not exist yet.
               maxAttempts = Math.max(maxAttempts, i + 1 + CODEX_UPDATE_INSTALL_MAX_ATTEMPTS);
+
+              // TODO(#2069 マージ後): acquireAgentUpdateLock を取る。
+              //
+              // This `1` makes the pane a THIRD writer of `npm install -g
+              // @openai/codex`, alongside `POST /api/agents/update` and
+              // `commandmate agents update` (both Issue #2069's). Two npm
+              // installs of the same global package at once is the hazard the
+              // lock exists for, and it cannot be taken here yet: the module
+              // that owns it (`src/lib/updates/**`) does not exist on this
+              // branch. Wire it in a follow-up round once #2069 has merged and
+              // this branch has been refreshed.
             }
             logger.info('codex-update-dialog-answered', {
               sessionName,

@@ -62,7 +62,12 @@ vi.mock('util', async (importOriginal) => {
 
 import { CodexTool } from '@/lib/cli-tools/codex';
 import { hasSession, sendKeys, capturePane } from '@/lib/tmux/tmux';
-import { CODEX_UPDATE_DIALOG_ENV_VAR } from '@/config/codex-update-dialog-config';
+import {
+  CODEX_UPDATE_DIALOG_ENV_VAR,
+  CODEX_UPDATE_DIALOG_KEYS,
+  CODEX_UPDATE_DIALOG_POLICIES,
+  DEFAULT_CODEX_UPDATE_DIALOG_POLICY,
+} from '@/config/codex-update-dialog-config';
 
 const WORKTREE_ID = 'test-worktree';
 const SESSION = 'mcbd-codex-test-worktree';
@@ -128,6 +133,50 @@ describe('[#2068] the update dialog policy', () => {
     vi.useRealTimers();
     vi.unstubAllEnvs();
     vi.restoreAllMocks();
+  });
+
+  // The sweep, on the path that actually reads `CM_CODEX_UPDATE_DIALOG`.
+  //
+  // `CodexTool.waitForReady` is the ONLY reader of the variable — the Auto-Yes
+  // poller never consults it, so parameterising a poller test over the four
+  // policies is four copies of one test. Here the variable changes the observable
+  // (the digit the pane receives), so the loop earns its keep: it is what fails
+  // if the policy lookup is ever replaced by a literal digit again, whichever
+  // literal is chosen.
+  describe('every policy, over the live dialog', () => {
+    for (const policy of CODEX_UPDATE_DIALOG_POLICIES) {
+      const expected = CODEX_UPDATE_DIALOG_KEYS[policy];
+
+      it(`${policy} sends ${expected === null ? 'nothing' : `"${expected}"`}`, async () => {
+        vi.stubEnv(CODEX_UPDATE_DIALOG_ENV_VAR, policy);
+        vi.mocked(capturePane)
+          .mockResolvedValueOnce(UPDATE_DIALOG)
+          .mockResolvedValueOnce(UPDATE_DIALOG)
+          .mockResolvedValue(PROMPT);
+
+        await runStartSession(tool);
+
+        expect(digitsSent()).toEqual(expected === null ? [] : [expected]);
+        // Whatever the policy, never with a trailing Enter (Issue #890) — and
+        // never a digit the policy did not name.
+        for (const digit of ['1', '2', '3'] as const) {
+          expect(sendKeys).not.toHaveBeenCalledWith(SESSION, digit, true);
+          if (digit !== expected) {
+            expect(sendKeys).not.toHaveBeenCalledWith(SESSION, digit, false);
+          }
+        }
+      });
+    }
+
+    it('reads the variable rather than a literal: the four answers are distinct', () => {
+      // The mutation this whole describe block exists to catch is "put a digit
+      // back in `waitForReady`". Any single literal collapses the table above
+      // onto one value, so the table itself must be injective to be worth
+      // running — asserted here rather than assumed.
+      const answers = CODEX_UPDATE_DIALOG_POLICIES.map((p) => CODEX_UPDATE_DIALOG_KEYS[p]);
+      expect(new Set(answers).size).toBe(answers.length);
+      expect(CODEX_UPDATE_DIALOG_KEYS[DEFAULT_CODEX_UPDATE_DIALOG_POLICY]).toBe('3');
+    });
   });
 
   describe('the default', () => {

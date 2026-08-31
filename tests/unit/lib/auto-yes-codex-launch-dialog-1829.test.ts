@@ -40,11 +40,6 @@ import {
   CODEX_TRUST_DIALOG_PANE,
   CODEX_UPDATE_DIALOG_PANE,
 } from '../../fixtures/codex-hooks-review-0148';
-import {
-  CODEX_UPDATE_DIALOG_ENV_VAR,
-  CODEX_UPDATE_DIALOG_POLICIES,
-} from '@/config/codex-update-dialog-config';
-
 /**
  * The same dialog as `CODEX_UPDATE_DIALOG_PANE`, captured live from codex-cli
  * 0.149.1 rather than written out (Issue #2068). Kept alongside the synthetic
@@ -173,6 +168,15 @@ describe('the poller leaves codex launch dialogs to CodexTool', () => {
     // Issue #2068: the same guard against the frame a real launch produces —
     // two launches of scrollback above the dialog, and the option row for the
     // dialog codex is actually waiting on at the bottom.
+    //
+    // Deliberately NOT parameterised over `CM_CODEX_UPDATE_DIALOG`. This poller
+    // never reads that variable — `CodexTool.waitForReady` is its only reader —
+    // so a loop over the four policies here would be four copies of one test
+    // and would stay green through any change to what `waitForReady` sends. The
+    // policy-by-policy sweep belongs on the path that reads it, and lives in
+    // `tests/unit/cli-tools/codex-update-dialog-policy-2068.test.ts`. What this
+    // file owns is the invariant that holds WHATEVER that path decides: the
+    // poller does not answer this screen.
     const result = await detectAndRespondToPrompt(
       WORKTREE_ID,
       pollerState(),
@@ -181,27 +185,6 @@ describe('the poller leaves codex launch dialogs to CodexTool', () => {
     );
 
     expect(result).toBe('no_answer');
-    expect(sendPromptAnswer).not.toHaveBeenCalled();
-  });
-
-  it('holds under every update-dialog policy, `ask` above all (Issue #2068)', async () => {
-    // The acceptance condition of #2068: making the dialog answerable BY A
-    // HUMAN must not make it answerable by the poller. `ask` is the dangerous
-    // one — it is the policy under which the dialog is deliberately left up,
-    // which is exactly the window in which an unguarded poller would send "1".
-    for (const policy of CODEX_UPDATE_DIALOG_POLICIES) {
-      vi.stubEnv(CODEX_UPDATE_DIALOG_ENV_VAR, policy);
-      const result = await detectAndRespondToPrompt(
-        WORKTREE_ID,
-        pollerState(),
-        'codex',
-        CODEX_UPDATE_DIALOG_LIVE
-      );
-      expect(result).toBe('no_answer');
-    }
-    vi.unstubAllEnvs();
-
-    expect(answersSent()).toEqual([]);
     expect(sendPromptAnswer).not.toHaveBeenCalled();
   });
 

@@ -351,6 +351,17 @@ CommandMate がこれにどう答えるかは `CM_CODEX_UPDATE_DIALOG` で選べ
 値を認識できない場合（綴り間違いなど）は既定にフォールバックします。`updates` が
 `update` として解釈されることはありません。
 
+> **既定は `~/.codex/version.json` を書き換えます。**
+> `skip-until-next-version`（既定）が送る `3` は codex に
+> `dismissed_version: "<最新版>"` を書かせます。つまり **CommandMate が起動のたびに
+> あなたの代理でその版を「非表示」にしています。** codex を CommandMate の外から
+> 直接起動したときにも更新の告知が出なくなるのはこのためで、あなた自身が codex 側で
+> Skip を押した記録と区別はつきません。
+> 代理で書かれるのが困る場合は `CM_CODEX_UPDATE_DIALOG=skip`（何も書かない。ただし
+> 毎回ダイアログが出ます）か `=ask`（自分で選ぶ）にしてください。
+> 書き込み先は `$CODEX_HOME/version.json`（既定は `~/.codex/version.json`）だけで、
+> `config.toml` には触りません。
+
 ```bash
 # 既定を明示する
 CM_CODEX_UPDATE_DIALOG=skip-until-next-version commandmate start --daemon
@@ -376,6 +387,31 @@ codex-cli 0.149.1 で実測した結果です（隔離した `CODEX_HOME`、2026
 しかも毎回サーバーが勝手に閉じるので**利用者が更新を選べません**。これが Issue #2068 の
 報告内容です。
 
+#### pane の中で更新する経路と、外で更新する経路
+
+codex を最新版に上げる導線は **2 本**あり、pane が落ちるかどうかが違います。
+`CM_CODEX_UPDATE_DIALOG=update` は前者です。
+
+| 経路 | 走る場所 | pane | 自動再起動 |
+|---|---|---|---|
+| `CM_CODEX_UPDATE_DIALOG=update`（＝ codex 自身の `1. Update now`） | **エージェントの tmux pane の中** | **素のシェルに落ちる** | **する**（CommandMate が同じ pane へ起動コマンドを送り直す） |
+| `commandmate agents update` / More 画面のエージェント更新（Issue #2069） | CommandMate / CLI 自身の**子プロセス** | 落ちない | しない（そもそも落ちていないため） |
+
+使い分け:
+
+- **通常は後者（pane の外）を使ってください。** エージェントを走らせたまま更新でき、
+  セッションが作り直されないので会話コンテキストも失われません。
+- `CM_CODEX_UPDATE_DIALOG=update` は「起動時に見つかった更新をその場で当ててしまいたい」
+  ときの設定です。**セッション起動処理そのものが更新を挟むため、その 1 回だけ起動が
+  数十秒長くなります**（実測では 4.7 秒 → 10.3 秒）。作業中のセッションが
+  更新のために作り直されることはありません（このダイアログは起動時にしか出ません）。
+
+> **バージョン指定の違い。** pane の中で走るコマンドは codex 自身が組み立てるもので、
+> `npm install -g @openai/codex`（**版の指定なし**＝ npm の `latest` タグ）です。
+> CommandMate 側から変えることはできません。pane の外の経路（#2069）は
+> `@openai/codex@latest` を明示します。**解決先はどちらも同じ**ですが、
+> 文字列が違うのは「片方が codex のもので、片方が CommandMate のもの」だからです。
+
 #### `ask` を選んだときの注意
 
 - ダイアログが残っている間、その pane はプロンプト待ちです。`commandmate wait` は
@@ -385,6 +421,8 @@ codex-cli 0.149.1 で実測した結果です（隔離した `CODEX_HOME`、2026
 - パネルで `1`（Update now）を選ぶと codex は終了し、pane にシェルが残ります。
   セッション起動の待ち時間内であれば CommandMate が起動コマンドを送り直しますが、
   それより後に選んだ場合は **Stop → Start でセッションを起こし直してください**。
+  pane を落とさずに更新したいなら、`1` ではなく `3`（Skip until next version）を選んで
+  上表の「pane の外の経路」で更新するのが確実です。
 
 ---
 
