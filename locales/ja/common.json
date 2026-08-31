@@ -180,6 +180,25 @@
     "label": "要対応",
     "badgeLabel": "要対応のワークツリーが {count} 件あります"
   },
+  "agentUpdates": {
+    "title": "エージェント CLI のバージョン",
+    "description": "このマシンにインストールされているエージェント CLI のバージョンです。更新はエージェントの pane ではなく別プロセスで実行するため、開いているセッションは中断されません。",
+    "installed": "インストール済み {version}",
+    "notInstalled": "未インストール",
+    "available": "更新あり: {version}",
+    "dismissed": "codex 側で非表示にした更新です",
+    "update": "更新する",
+    "updating": "更新中...",
+    "running": "実行中: {command}",
+    "succeeded": "{from} から {to} に更新しました。",
+    "failed": "更新に失敗しました: {error}",
+    "restartWarning": "次のセッションは再起動するまで現在のバージョンのままです: {sessions}",
+    "restartNotice": "すでに起動しているセッションは、再起動するまで現在のバージョンのままです。",
+    "restart": "{alias} を再起動",
+    "restarted": "終了しました。次のメッセージ送信で新しいバージョンが起動します。",
+    "restartError": "セッションを再起動できませんでした。",
+    "loadError": "エージェント CLI のバージョンを読み取れませんでした。"
+  },
   "settings": {
     "title": "設定",
     "defaultAgents": {

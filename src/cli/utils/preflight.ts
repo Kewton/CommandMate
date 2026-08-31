@@ -122,6 +122,12 @@ export class PreflightChecker {
       git: 'Install with: brew install git (macOS) or apt install git (Linux)',
       'Claude CLI': 'Install with: npm install -g @anthropic-ai/claude-cli',
       'gh CLI': 'Install GitHub CLI: https://cli.github.com/ or brew install gh',
+      // Issue #2069: the three agent CLIs this list carries as optional. A
+      // reader who sees "Not found" next to one of them is being told to
+      // install it, so the line that follows should say how.
+      'Codex CLI': 'Install with: npm install -g @openai/codex',
+      'GitHub Copilot CLI': 'Install with: npm install -g @github/copilot',
+      'OpenCode CLI': 'Install with: npm install -g opencode-ai',
     };
 
     return hints[name] || `Please install ${name}`;

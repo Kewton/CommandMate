@@ -75,6 +75,7 @@ CM_PORT=3000 node bin/commandmate.js send abc123 "msg"
 | [`commandmate capture`](#commandmate-capture) | ターミナル出力の取得 |
 | [`commandmate auto-yes`](#commandmate-auto-yes) | Auto-Yesの制御 |
 | [`commandmate instances`](#commandmate-instances) | エージェントインスタンス（roster）の一覧・追加・削除・alias変更 |
+| [`commandmate agents`](#commandmate-agents) | エージェント CLI の版表示と更新（pane の外で `codex update` を実行） |
 | [`commandmate report`](#commandmate-report) | 日次レポートの生成・表示・一覧、Eval メトリクス集計 |
 | [`commandmate skill`](#commandmate-skill) | 公式Skillのカタログ参照・Install/Update Plan・install・update・uninstall・status |
 | [`commandmate update`](#commandmate-update) | CommandMate本体の更新（停止 → 更新 → 再起動） |
@@ -2620,6 +2621,90 @@ commandmate remote status --json | jq -r '.remote.url'
 
 ---
 
+### commandmate agents
+
+> **英語版について**: この節は `docs/en/user-guide/cli-operations-guide.md` へまだ反映されていません。
+> 見出しレベルが `###` なのはそのためです（en/ja の `##` 見出し数を突き合わせる
+> `tests/unit/docs/ja-en-heading-parity.test.ts` があり、片側だけに `##` を足せません）。
+
+CommandMate が動かす**エージェント CLI 側**のバージョンを表示し、更新します（Issue #2069）。
+
+> **`commandmate update` との違い**: `update` が更新するのは **CommandMate 本体**です。
+> `agents update` が更新するのは **codex などのエージェント CLI** で、npm registry 上の
+> パッケージも、再起動されるプロセスも別物です。
+
+#### 使用方法
+
+```bash
+commandmate agents                       # = agents versions
+commandmate agents versions              # インストール済みの版を一覧
+commandmate agents versions --json       # JSON 出力
+commandmate agents update codex          # 確認プロンプトつきで更新
+commandmate agents update codex --yes    # 確認スキップ（非対話環境では必須。無い場合 exit 2）
+commandmate agents update codex --check  # 実行するコマンドを表示するだけ（何も変更しない）
+```
+
+#### 出力例
+
+```
+TOOL         INSTALLED  LATEST   UPDATE
+-----------  ---------  -------  ---------
+antigravity  1.1.18
+claude       2.1.251
+codex        0.149.1    0.151.0  available
+copilot      1.0.82
+gemini       0.57.0
+opencode     1.18.25
+
+Update available for codex: 0.149.1 -> 0.151.0
+Run "commandmate agents update codex" to install it.
+```
+
+#### LATEST 列が codex にしか出ない理由
+
+**ネットワークを一切使わないため**です。INSTALLED はどのツールも `<cli> --version` の実測ですが、
+「もっと新しい版があるか」は codex だけが自分で調べて `~/.codex/version.json`
+（`latest_version` / `dismissed_version`）に書き出しており、CommandMate はそれを読んでいます。
+他のツールにはその置き場所が無いので、**インストール済みの版だけ**を表示します。
+
+- `$CODEX_HOME` が設定されていればそちらを見ます（絶対パスのときのみ）。
+- ファイルが無い・壊れている・codex が一度も起動していない場合は「更新情報なし」として扱い、
+  エラーにはなりません。
+- codex 側でバナーを非表示にした版（`dismissed_version`）は注記されるだけで、
+  更新ボタン／コマンドは塞ぎません。
+
+#### 更新は pane の外で実行されます
+
+codex の「Update now」は **codex プロセスを終了してから**インストーラを動かし、
+`Update ran successfully! Please restart Codex.` を出して終わります（自動再起動はしません）。
+これをエージェントの tmux pane の中で走らせると pane が素のシェルに落ちるため、
+`agents update` は **CommandMate / CLI 自身の子プロセス**として実行します。
+
+その結果として:
+
+- **稼働中のセッションは中断されません。** ただし**起動済みのプロセスは古いバイナリのまま**です。
+  新しい版で動かすには、そのセッションを一度終了してください（GUI の「再起動」ボタン、
+  あるいは `commandmate instances <worktree-id> kill <instance-id>`）。次の送信で新しい版が起動します。
+- 実行されるコマンドは codex 0.149.0 以降なら `codex update`（インストール方法を自動判別）、
+  それ未満または codex が PATH に無い場合は `npm install -g @openai/codex@latest` です。
+  `--check` でどちらになるかを事前に確認できます。
+
+#### 終了コード
+
+| コード | 意味 |
+|:------:|------|
+| 0 | 更新に成功、または `versions` / `--check` が正常終了 |
+| 2 | 更新フローの無いツール名／codex も npm も PATH に無い／非対話環境で `--yes` が無い |
+| 5 | 更新コマンド自体が失敗（`npm install -g` の権限エラーなど） |
+
+#### GUI からの導線
+
+同じ内容が **More 画面の「設定」**と、**worktree 詳細のエージェント一覧ペイン**（「エージェント CLI
+のバージョン」を開く）にあります。更新中は出力がそのまま流れ、対象ツールのセッションが稼働中なら
+「再起動が必要」の警告とインスタンス単位の再起動ボタンが出ます。
+
+---
+
 ## 典型的なワークフロー
 
 ### 基本: send → wait → capture
@@ -2806,10 +2891,10 @@ commandmate ls --token your-token
 |:------:|--------|------|
 | 0 | SUCCESS | 正常完了 |
 | 1 | DEPENDENCY_ERROR | サーバー未起動等のインフラエラー／使える remote Provider が無い（`remote`） |
-| 2 | CONFIG_ERROR | バリデーションエラー（不正なagent, duration等） |
+| 2 | CONFIG_ERROR | バリデーションエラー（不正なagent, duration等）／更新フローの無いツール（`agents update`） |
 | 3 | START_FAILED | サーバーの起動・起動後の確認に失敗（`start` / `update` / `remote`） |
 | 4 | STOP_FAILED | サーバーの停止に失敗（`stop` / `update`）／ Provider を閉じきれない（`remote stop`） |
-| 5 | UPDATE_FAILED | 更新に失敗（`update`: registry照会 / `npm install -g` / バージョン検証） |
+| 5 | UPDATE_FAILED | 更新に失敗（`update`: registry照会 / `npm install -g` / バージョン検証、`agents update`: エージェント CLI の更新コマンド） |
 | 10 | PROMPT_DETECTED | wait中にプロンプトを検出 |
 | 30 | NO_ACTIVE_SESSIONS | interruptの対象となる稼働中セッションが無い |
 | 99 | UNEXPECTED_ERROR | 予期しないエラー / リソース未検出 |
