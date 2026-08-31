@@ -46,15 +46,20 @@ export const RUN_STATUS_EXIT_CODE: Record<VerificationRunStatus, number | null> 
 /**
  * Verdicts the pane spells out in its `exit 0 / 20 / 21` legend, in that order.
  *
- * `running` is absent because it has no code, and `cancelled` because it shares
- * 99 with `error` and #2063 has not yet shipped anything that can produce it —
- * listing it would advertise a state the operator cannot currently reach.
+ * `running` is absent because it has no code. `cancelled` was absent for the
+ * same reason it was dead vocabulary in #2062 — nothing could produce one — and
+ * is listed from #2063 on, because the pane now has a Stop button and the
+ * operator who presses it is entitled to know what the CLI would have exited
+ * with. It shares 99 with `error`, which is a fact about the CLI worth stating
+ * rather than hiding: a caller branching on 20 must be able to trust that gates
+ * actually ran, and neither verdict can promise that.
  */
 export const LEGEND_RUN_STATUSES: readonly VerificationRunStatus[] = [
   'passed',
   'failed',
   'not_started',
   'error',
+  'cancelled',
 ];
 
 /**
@@ -102,6 +107,21 @@ export const PRIMARY_CHECKOUT_SKIP_LOG =
 export const WORK_EVIDENCE_SKIP_LOG = 'skipped: the work-evidence gate did not pass.';
 
 /**
+ * Marker every gate carries once a run was cancelled (Issue #2063).
+ *
+ * One marker for two situations — the gate that was executing when the signal
+ * arrived, and the gates the run never reached — because a reader's question is
+ * the same in both: *why is this row not a verdict?* The sentence that follows
+ * the marker in the log says which of the two it was; the classifier only needs
+ * to recognise that the cause was a cancel and not a declined check.
+ *
+ * Owned here rather than in `gate-runner.ts` so the producer and the pane read
+ * one string, exactly as {@link PRIMARY_CHECKOUT_SKIP_LOG} is. Pinned to its
+ * producer by `tests/unit/verification/gate-cancel-2063.test.ts`.
+ */
+export const CANCELLED_SKIP_LOG = 'skipped: the verification run was cancelled.';
+
+/**
  * Substrings that identify the remaining skip producers.
  *
  * Substrings and not whole strings: `scopeSkipDetachedContract` and
@@ -126,6 +146,7 @@ export const SKIP_LOG_MARKERS = {
 export type SkipReasonKey =
   | 'primaryCheckout'
   | 'workEvidence'
+  | 'cancelled'
   | 'mutex'
   | 'detachedContract'
   | 'noContract'
@@ -137,6 +158,7 @@ export function classifySkipReason(logTail: string | null | undefined): SkipReas
   const log = logTail ?? '';
   if (log.includes(PRIMARY_CHECKOUT_SKIP_LOG)) return 'primaryCheckout';
   if (log.includes(WORK_EVIDENCE_SKIP_LOG)) return 'workEvidence';
+  if (log.includes(CANCELLED_SKIP_LOG)) return 'cancelled';
   if (log.includes(SKIP_LOG_MARKERS.mutex)) return 'mutex';
   if (log.includes(SKIP_LOG_MARKERS.detachedContract)) return 'detachedContract';
   if (log.includes(SKIP_LOG_MARKERS.noContract)) return 'noContract';

@@ -242,7 +242,18 @@ describe('task resolution', () => {
     addWork();
 
     const run = getVerificationRun(db, await runToCompletion({ gateIds: ['fail-gate'] }));
-    expect(run?.gates.map((gate) => gate.gateId)).toEqual(['fail-gate']);
+    // Issue #2063: a narrowed run no longer drops the built-ins the CONTRACT
+    // declared. `work-evidence` and `scope` are forced back in because this
+    // task's contract carries the parser's defaults (`requireWorkEvidence` and
+    // `requireScopeClean`, both true) — narrowing the gate list may drop
+    // repository gates, never a criterion the delegation declared. What this
+    // test is about is unchanged: the named gate is the one that decides.
+    // `pass-gate` is absent, which is the override this test is named for.
+    expect(run?.gates.map((gate) => gate.gateId)).toEqual([
+      'work-evidence',
+      'scope',
+      'fail-gate',
+    ]);
     expect(run?.status).toBe('failed');
   });
 
@@ -386,12 +397,18 @@ describe('scope gate selection', () => {
     expect(run?.status).toBe('error');
   });
 
-  it('runs scope alone when asked for by name and a contract exists', async () => {
+  it('judges scope when asked for by name and a contract exists', async () => {
     seedTask({ allow: ['allowed/**'] });
     addWork();
 
     const run = getVerificationRun(db, await runToCompletion({ gateIds: ['scope'] }));
-    expect(run?.gates.map((gate) => gate.gateId)).toEqual(['scope']);
+    // Issue #2063: a narrowed run no longer drops the built-ins the CONTRACT
+    // declared. `work-evidence` and `scope` are forced back in because this
+    // task's contract carries the parser's defaults (`requireWorkEvidence` and
+    // `requireScopeClean`, both true) — narrowing the gate list may drop
+    // repository gates, never a criterion the delegation declared. What this
+    // test is about is unchanged: the named gate is the one that decides.
+    expect(run?.gates.map((gate) => gate.gateId)).toEqual(['work-evidence', 'scope']);
     expect(run?.status).toBe('failed');
   });
 

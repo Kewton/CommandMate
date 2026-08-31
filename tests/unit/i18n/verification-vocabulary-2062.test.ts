@@ -259,6 +259,9 @@ describe('Verification vocabulary is translated (Issue #2062)', () => {
       for (const key of [
         'primaryCheckout',
         'workEvidence',
+        // `cancelled` joined SkipReasonKey with the cancel endpoint (#2063);
+        // listed here so the classifier and the dictionary stay in step.
+        'cancelled',
         'mutex',
         'detachedContract',
         'noContract',

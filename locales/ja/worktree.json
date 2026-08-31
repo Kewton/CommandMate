@@ -988,7 +988,24 @@
       "trigger": "trigger={trigger}",
       "cliLegend": "CLI 相当の exit code: {items}",
       "cliLegendItem": "{label} = exit {code}",
-      "exitCode": "CLI 相当 exit={code}"
+      "exitCode": "CLI 相当 exit={code}",
+      "cancel": "検証を中止",
+      "cancelPending": "中止しています…",
+      "cancelHint": "中止すると、実行中のゲートのプロセスグループに終了シグナルを送り、残りのゲートは開始しません。ランは「中止」として閉じられます。",
+      "cancelGone": "このランは既に終了していました。一覧を読み直したので、最新の判定を確認してください。",
+      "cancelError": "検証を中止できませんでした: {message}",
+      "loadMore": "さらに {count} 件を読み込む",
+      "history": {
+        "open": "他のブランチを含む横断履歴を表示",
+        "close": "横断履歴を閉じる",
+        "hint": "このサーバが管理する全 worktree の直近の検証ランです。同じゲートが複数のブランチで落ちているなら、それは作業ではなくゲート側の問題である可能性が高いという読み方をします。",
+        "loading": "横断履歴を読み込み中…",
+        "empty": "対象期間に他のブランチの検証ランはありません。",
+        "error": "横断履歴を取得できませんでした: {message}",
+        "failingGates": "不合格ゲート: {gates}"
+      },
+      "partial": "部分実行: 計画されている {total} ゲートのうち {ran} 件だけが実行されました。未実行: {gates}。この判定は実行されたゲートについてのものです。",
+      "cancelSettling": "中止を要求しました。ゲートに終了シグナルを送り、プロセスが終わるのを待っています（応答しない場合は 5 秒後に強制終了します）。"
     },
     "gates": {
       "heading": "ゲート — run {runId}",
@@ -1021,8 +1038,16 @@
         "detachedContract": "このブランチには実行契約がありますが、このランが契約に紐づいていないためスコープを判定できませんでした。`wait --verify` で起動すると自動的に紐づきます。",
         "noContract": "このランには実行契約が紐づいていないため、判定するスコープが宣言されていません。",
         "notRequired": "実行契約が `success.requireScopeClean: false` を宣言しているため判定していません。",
-        "unknown": "このゲートは実行されていません。理由はログ末尾を参照してください。"
-      }
+        "unknown": "このゲートは実行されていません。理由はログ末尾を参照してください。",
+        "cancelled": "検証が中止されたため、このゲートは判定に至っていません。作業への判定ではなく、実行を止めた結果です。"
+      },
+      "showFullLog": "ログ全文を開く",
+      "fullLogTitle": "ログ全文 — {gateId}（run {runId}）",
+      "fullLogSize": "{lines} 行",
+      "fullLogStored": "サーバが保存しているのは各ゲートの末尾だけです（`options.maxLogTailBytes` で上限が決まります）。ここに出ているのがその全量で、これより前の出力はどこにも残っていません。",
+      "copyLog": "ログをコピー",
+      "copied": "コピーしました",
+      "copyFailed": "コピーできませんでした"
     },
     "runStatus": {
       "running": "実行中",
@@ -1070,6 +1095,20 @@
       "reasonHeading": "この判定の理由",
       "showReason": "理由を表示",
       "hideReason": "理由を隠す"
+    },
+    "selection": {
+      "heading": "実行するゲート",
+      "open": "ゲートを選ぶ",
+      "close": "選択を閉じる",
+      "all": "全 {count} 件を実行します（既定）",
+      "partial": "{total} 件中 {selected} 件を選択中: {gates}",
+      "gateLabel": "ゲート {gateId} を選ぶ",
+      "runAll": "全ゲートで検証",
+      "runSelected": "選んだ {count} 件で検証",
+      "hint": "選んだゲートだけを実行します。`lint` の 1 行修正を確かめるために `build` や `unit` を待つ必要はありません。判定は実行したゲートについてのものだけで、選択を狭めたランはゲート表に「部分実行」と出ます。実行契約が `success.requireWorkEvidence` / `requireScopeClean` を宣言している場合、`work-evidence` と `scope` は選択に関わらず必ず実行されます（契約が宣言した判定基準は、ゲートの絞り込みでは外せません）。",
+      "failedOnly": "不合格だったゲートだけ（{count} 件）",
+      "failedOnlyEmpty": "表示中のランに、再実行できる不合格ゲートはありません（未実行のゲートは、もう一度実行しても同じ理由で未実行になります）。",
+      "selectAll": "全ゲートに戻す"
     }
   },
   "task": {
