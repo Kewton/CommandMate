@@ -1245,5 +1245,43 @@
     "errorRequestFailed": "リクエストを送信できませんでした。CommandMate サーバに接続できません。",
     "errorUnknown": "操作に失敗しました。原因はサーバから返されていません。",
     "errorCopyFailed": "リンクをコピーできませんでした。表示されているリンクを選択して手動でコピーしてください。"
+  },
+  "cliCommands": {
+    "open": "CLI コマンド",
+    "title": "{alias} を操作する CLI コマンド",
+    "loading": "このセッションの宛先を問い合わせています…",
+    "loadError": "このセッションの宛先を取得できなかったため、コマンドは表示していません。推測で組み立てたコマンドは別のエージェントに届く可能性があります。CommandMate サーバに接続できるか確認してから再試行してください。",
+    "retry": "再試行",
+    "messagePlaceholder": "メッセージ",
+    "target": "サーバが解決した宛先: --instance {instance}（{tool} / {stage}）",
+    "resolvedBy": {
+      "explicit": "明示指定",
+      "roster": "roster の登録",
+      "primary": "そのツールの primary インスタンス",
+      "worktree-default": "この worktree の既定エージェント",
+      "fallback": "最終フォールバック（この worktree は既定エージェントを持っていません）",
+      "client-fallback": "旧サーバ向けに CLI 側で解決"
+    },
+    "conflict": "roster では {instance} は {roster} ですが、{requested} が要求されました。以下のコマンドは roster の答えである {roster} を使っています。",
+    "commandLabel": {
+      "send": "メッセージを送る",
+      "wait": "ターンの終了を待つ",
+      "capture": "ターミナルを読む",
+      "respond": "プロンプトに答える"
+    },
+    "commandDescription": {
+      "send": "プレースホルダを実際の本文に置き換えてください。本文をプレースホルダのままにしているのは意図的です。改行・引用符・日本語を含む本文をシェルに合わせて正しくクォートすることはこの画面からはできず、失敗しても静かに途中で切れるだけだからです。",
+      "wait": "エージェントがターンを終えるまでブロックします。",
+      "capture": "エージェントのペインの現在の表示を出力します。--json を付けると機械可読な形式になります。",
+      "respond": "開いているプロンプトに回答を送ります。1 は選びたい選択肢の番号に置き換えてください。"
+    },
+    "copy": "コピー",
+    "copied": "コピーしました",
+    "copyFailed": "コマンドをコピーできませんでした。表示されているコマンドを選択して手動でコピーしてください。",
+    "portHint": "このサーバはポート {port} で待ち受けているため、コマンドに CM_PORT= を前置しています。これらのコマンドに --port オプションはなく、既定以外のサーバへ 1 回の実行を向ける方法は環境変数です。",
+    "notesTitle": "貼り付ける前に",
+    "noteInstanceFlag": "送り先を指定するのは --instance です。--agent は roster に無いインスタンスをアドホックに起動するためのもので、wait には --agent 自体がありません。",
+    "noteWaitOnPrompt": "wait には --on-prompt human を付けてあります。付けないと既定の agent モードになり、プロンプトを検出した時点で exit 10 で即座に終了します。",
+    "noteRespondNumber": "respond は回答を意味解決しません。選択肢は番号で送ってください。「yes」は入力されたあと無視され、続く Enter がその時点の既定選択を選んでしまいます。"
   }
 }

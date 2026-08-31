@@ -28,6 +28,7 @@ import {
   AlertTriangle,
   Radio,
   Check,
+  Terminal,
 } from 'lucide-react';
 import {
   CLI_TOOL_IDS,
@@ -47,6 +48,11 @@ import {
 // file; see the hook's header for why.
 import { useAgentDefaults } from '@/hooks/useAgentDefaults';
 import { VibeLocalSettings } from '@/components/worktree/VibeLocalSettings';
+// Issue #2120: the CLI commands that address one roster row. In its own file
+// because it is the only part of this pane that reads the server for the SPELLING
+// of a command (binary name, port prefix) and for the RESOLVED target, and both
+// of those reads must stay out of the row's render path.
+import { InstanceCliCommandsModal } from '@/components/worktree/InstanceCliCommandsModal';
 // Issue #2069: the same card the More screen renders. Shared rather than
 // re-implemented so the pane cannot grow its own idea of what an update does to
 // a live session.
@@ -249,6 +255,10 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
   // default, and it reads NOTHING until it is opened — same rule as the updates
   // disclosure above it, for the same reason (#2054's zero-request criterion).
   const [showDefaults, setShowDefaults] = useState(false);
+  // Issue #2120: which row's CLI-commands panel is open (null = none). Held as
+  // an instance id rather than a boolean per row so at most one panel — and so
+  // at most one pair of reads — can ever be live.
+  const [cliCommandsFor, setCliCommandsFor] = useState<string | null>(null);
 
   // Issue #2054: read before the first row is built so every row resolves from
   // one snapshot rather than from a map that could change mid-render.
@@ -546,6 +556,30 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
                   </span>
                 )}
               </div>
+
+              {/* Issue #2120: how to drive THIS instance from a terminal. An icon
+                  of its own rather than a kebab item because the panel behind it
+                  is a reference the operator reads, not an action on the roster,
+                  and because the kebab's items all mutate the roster. */}
+              <button
+                type="button"
+                data-testid={`agent-instance-cli-${inst.id}`}
+                aria-label={tWorktree('cliCommands.open')}
+                title={tWorktree('cliCommands.open')}
+                onClick={() => setCliCommandsFor(inst.id)}
+                className="shrink-0 p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted"
+              >
+                <Terminal className="w-4 h-4" />
+              </button>
+
+              {cliCommandsFor === inst.id && (
+                <InstanceCliCommandsModal
+                  worktreeId={worktreeId}
+                  instance={inst}
+                  isOpen
+                  onClose={() => setCliCommandsFor(null)}
+                />
+              )}
 
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>

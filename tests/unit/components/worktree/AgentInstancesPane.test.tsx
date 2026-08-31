@@ -304,4 +304,231 @@ describe('AgentInstancesPane (Issue #869)', () => {
       expect(onInstancesChange).not.toHaveBeenCalled();
     });
   });
+  /**
+   * Issue #2120: the CLI commands that address one roster row.
+   *
+   * The row id and the resolved instance id are DELIBERATELY different in every
+   * test here (`codex` -> `codex-2`). A panel that composed `--instance` from
+   * the roster row it was opened from would print `--instance codex` and still
+   * look right on screen; the difference is what makes these assertions catch
+   * it. Issue #1925 is the record of what a second authority on that value cost.
+   */
+  describe('CLI commands panel (Issue #2120)', () => {
+    const CLI_REFERENCE = {
+      binary: 'commandmatedev',
+      worktreeId: 'w-1',
+      portPrefix: null as number | null,
+    };
+    const RESOLVED_TARGET = {
+      cliToolId: 'codex',
+      instanceId: 'codex-2',
+      resolvedBy: 'roster',
+      conflict: null as unknown,
+    };
+
+    /**
+     * Route by URL rather than by call order: the panel reads both endpoints in
+     * one `Promise.all`, so the order they are consumed in is not this test's to
+     * pin.
+     */
+    function stubReads(
+      overrides: {
+        reference?: Partial<typeof CLI_REFERENCE>;
+        target?: Partial<typeof RESOLVED_TARGET>;
+        referenceOk?: boolean;
+        targetOk?: boolean;
+      } = {},
+    ): void {
+      mockFetch.mockImplementation((url: string) => {
+        if (String(url).includes('/cli-reference')) {
+          return Promise.resolve({
+            ok: overrides.referenceOk ?? true,
+            json: () => Promise.resolve({ ...CLI_REFERENCE, ...overrides.reference }),
+          });
+        }
+        if (String(url).includes('/resolve-target')) {
+          return Promise.resolve({
+            ok: overrides.targetOk ?? true,
+            json: () => Promise.resolve({ ...RESOLVED_TARGET, ...overrides.target }),
+          });
+        }
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+      });
+    }
+
+    function writeText(): ReturnType<typeof vi.fn> {
+      const spy = vi.fn(async () => undefined);
+      vi.stubGlobal('navigator', { clipboard: { writeText: spy } });
+      return spy;
+    }
+
+    /** Render the pane and open the CLI panel of the `codex` row. */
+    async function openPanel(): Promise<void> {
+      render(
+        <AgentInstancesPane
+          {...baseProps}
+          instances={[primary('claude', 0), primary('codex', 1)]}
+        />,
+      );
+      fireEvent.click(screen.getByTestId('agent-instance-cli-codex'));
+      await screen.findByTestId('cli-commands-command-send');
+    }
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    it('reads nothing until the panel is opened', () => {
+      stubReads();
+      render(
+        <AgentInstancesPane
+          {...baseProps}
+          instances={[primary('claude', 0), primary('codex', 1)]}
+        />,
+      );
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it('asks resolve-target for the row it was opened from', async () => {
+      stubReads();
+      await openPanel();
+      const urls = mockFetch.mock.calls.map((call) => String(call[0]));
+      expect(urls).toContain('/api/worktrees/w-1/resolve-target?instance=codex');
+      expect(urls).toContain('/api/worktrees/w-1/cli-reference');
+    });
+
+    it('builds all four commands from the SERVER-resolved instance', async () => {
+      stubReads();
+      await openPanel();
+      expect(screen.getByTestId('cli-commands-command-send')).toHaveTextContent(
+        'commandmatedev send w-1 "worktree.cliCommands.messagePlaceholder" --instance codex-2',
+      );
+      expect(screen.getByTestId('cli-commands-command-wait')).toHaveTextContent(
+        'commandmatedev wait w-1 --instance codex-2 --on-prompt human',
+      );
+      expect(screen.getByTestId('cli-commands-command-capture')).toHaveTextContent(
+        'commandmatedev capture w-1 --instance codex-2',
+      );
+      expect(screen.getByTestId('cli-commands-command-respond')).toHaveTextContent(
+        'commandmatedev respond w-1 "1" --instance codex-2',
+      );
+    });
+
+    it('never prints the roster row id when the server resolved another one', async () => {
+      stubReads();
+      await openPanel();
+      for (const id of ['send', 'wait', 'capture', 'respond']) {
+        expect(screen.getByTestId(`cli-commands-command-${id}`).textContent).not.toContain(
+          '--instance codex ',
+        );
+        expect(screen.getByTestId(`cli-commands-command-${id}`).textContent).not.toMatch(
+          /--instance codex$/,
+        );
+      }
+    });
+
+    it('spells the commands with the binary the server reports (global install)', async () => {
+      stubReads({ reference: { binary: 'commandmate' } });
+      await openPanel();
+      expect(screen.getByTestId('cli-commands-command-send')).toHaveTextContent(
+        /^commandmate send /,
+      );
+    });
+
+    it('spells the commands with `commandmatedev` for a checkout', async () => {
+      stubReads({ reference: { binary: 'commandmatedev' } });
+      await openPanel();
+      expect(screen.getByTestId('cli-commands-command-send')).toHaveTextContent(
+        /^commandmatedev send /,
+      );
+    });
+
+    it('carries a CM_PORT= prefix when the server is not on the default port', async () => {
+      stubReads({ reference: { portPrefix: 3135 } });
+      await openPanel();
+      expect(screen.getByTestId('cli-commands-command-capture')).toHaveTextContent(
+        'CM_PORT=3135 commandmatedev capture w-1 --instance codex-2',
+      );
+      expect(screen.getByTestId('cli-commands-port-hint')).toBeInTheDocument();
+    });
+
+    it('renders the three notes the operator needs before pasting', async () => {
+      stubReads();
+      await openPanel();
+      expect(screen.getByTestId('cli-commands-noteInstanceFlag')).toBeInTheDocument();
+      expect(screen.getByTestId('cli-commands-noteWaitOnPrompt')).toBeInTheDocument();
+      expect(screen.getByTestId('cli-commands-noteRespondNumber')).toBeInTheDocument();
+    });
+
+    it('copies the exact command that is on screen', async () => {
+      const spy = writeText();
+      stubReads();
+      await openPanel();
+      fireEvent.click(screen.getByTestId('cli-commands-copy-wait'));
+      await waitFor(() =>
+        expect(spy).toHaveBeenCalledWith(
+          'commandmatedev wait w-1 --instance codex-2 --on-prompt human',
+        ),
+      );
+      expect(await screen.findByText('worktree.cliCommands.copied')).toBeInTheDocument();
+    });
+
+    it('says the command was not copied when the clipboard refuses', async () => {
+      // Plain HTTP from a phone on the LAN: `navigator.clipboard` is absent and
+      // the icon never changes. Silence there reads as success.
+      vi.stubGlobal('navigator', {
+        clipboard: {
+          writeText: vi.fn(async () => {
+            throw new Error('NotAllowedError');
+          }),
+        },
+      });
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      stubReads();
+      await openPanel();
+      fireEvent.click(screen.getByTestId('cli-commands-copy-send'));
+      expect(await screen.findByTestId('cli-commands-copy-error')).toBeInTheDocument();
+      expect(screen.queryByText('worktree.cliCommands.copied')).not.toBeInTheDocument();
+    });
+
+    it('shows the contradiction the roster reported instead of hiding it', async () => {
+      stubReads({
+        target: {
+          conflict: { instanceId: 'codex-2', rosterCliTool: 'codex', requestedCliTool: 'claude' },
+        },
+      });
+      await openPanel();
+      expect(screen.getByTestId('cli-commands-conflict')).toBeInTheDocument();
+    });
+
+    it('shows an error and NO command when the target cannot be resolved', async () => {
+      // A command built from a guess would be indistinguishable on screen from
+      // one the server confirmed, and would target the wrong agent.
+      stubReads({ targetOk: false });
+      render(
+        <AgentInstancesPane
+          {...baseProps}
+          instances={[primary('claude', 0), primary('codex', 1)]}
+        />,
+      );
+      fireEvent.click(screen.getByTestId('agent-instance-cli-codex'));
+      expect(await screen.findByTestId('cli-commands-error')).toBeInTheDocument();
+      expect(screen.queryByTestId('cli-commands-command-send')).not.toBeInTheDocument();
+    });
+
+    it('re-reads when the retry button is pressed', async () => {
+      stubReads({ targetOk: false });
+      render(
+        <AgentInstancesPane
+          {...baseProps}
+          instances={[primary('claude', 0), primary('codex', 1)]}
+        />,
+      );
+      fireEvent.click(screen.getByTestId('agent-instance-cli-codex'));
+      await screen.findByTestId('cli-commands-retry');
+      stubReads();
+      fireEvent.click(screen.getByTestId('cli-commands-retry'));
+      expect(await screen.findByTestId('cli-commands-command-send')).toBeInTheDocument();
+    });
+  });
 });
