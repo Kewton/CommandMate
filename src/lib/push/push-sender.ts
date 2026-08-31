@@ -525,9 +525,29 @@ export async function notifyPushSubscribers(
     // from one that was never attempted — `push-send-failed` is per device and
     // sits below the default log level's attention, and success said nothing at
     // all. One line per fan-out names both halves, and no endpoint.
+    //
+    // Issue #2133: it also names *whose* fan-out it was. Without the subject,
+    // two worktrees notifying in the same second print two identical lines, so
+    // the UAT steps that pass by counting zero notifications
+    // (`docs/qa/2001-cross-device-dismissal-uat.md` T-4 / T-6 / T-7) read a
+    // neighbour's push as their own — which is what the Epic #2002 run hit on
+    // 2026-08-29, and only the co-timed `resolution-push-sent` (which does carry
+    // `worktreeId`) rescued the reading. A waiting push has no such partner.
+    //
+    // The key names match `resolution-push-notifier`'s context on purpose, so
+    // both halves of one episode grep together. `instanceId` resolves exactly as
+    // the episode dedup key above does, and is left absent — `JSON.stringify`
+    // drops `undefined` — rather than logged as an empty string when no producer
+    // named an instance.
     const delivered = outcomes.filter(Boolean).length;
     const failed = outcomes.length - delivered;
-    logger.info('push-fanout-complete', { kind: event.kind, delivered, failed });
+    logger.info('push-fanout-complete', {
+      kind: event.kind,
+      worktreeId: event.worktreeId,
+      instanceId: event.instanceId ?? event.agentName,
+      delivered,
+      failed,
+    });
   } catch (err) {
     logger.warn('push-fanout-error', {
       error: err instanceof Error ? err.message : String(err),
