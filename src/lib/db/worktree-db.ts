@@ -9,6 +9,7 @@ import Database from 'better-sqlite3';
 import type { Worktree } from '@/types/models';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { parseSelectedAgents } from '@/lib/selected-agents-validator';
+import { getRepoDefaultSelectedAgents } from '@/lib/repo-config/agents-config';
 import { getDefaultSelectedAgents } from './app-settings-db';
 import { ACTIVE_FILTER } from './chat-db';
 import {
@@ -82,6 +83,47 @@ function getLastMessagesByCliBatch(
 }
 
 
+/** Shared empty set, so the common "no repository declares anything" path allocates nothing. */
+const EMPTY_ID_SET: ReadonlySet<string> = new Set<string>();
+
+/**
+ * IDs of every worktree that already owns an `agent_instances` roster.
+ *
+ * One query for the whole list rather than one per row (Issue #2066): the
+ * sidebar poll must not grow N point queries. `agent_instances` holds a handful
+ * of rows per registered worktree, and only the distinct worktree ids are read.
+ */
+function worktreeIdsWithAgentInstances(db: Database.Database): ReadonlySet<string> {
+  const rows = db
+    .prepare('SELECT DISTINCT worktree_id FROM agent_instances')
+    .all() as Array<{ worktree_id: string }>;
+  return new Set(rows.map((row) => row.worktree_id));
+}
+
+/** Whether one worktree already owns an `agent_instances` roster (Issue #2066). */
+function hasAgentInstances(db: Database.Database, worktreeId: string): boolean {
+  return (
+    db.prepare('SELECT 1 FROM agent_instances WHERE worktree_id = ? LIMIT 1').get(worktreeId) !==
+    undefined
+  );
+}
+
+/**
+ * The repository layer for ONE worktree, withheld when that worktree already
+ * owns a roster (Issue #2066). The single-row twin of the batch logic in
+ * `getWorktrees()`; see the long comment there for why the withholding exists
+ * and why it is narrowed to this layer.
+ */
+function repoDefaultWithheldFromRoster(
+  db: Database.Database,
+  worktreeId: string,
+  repositoryPath: string | null
+): CLIToolType[] | null {
+  const declared = getRepoDefaultSelectedAgents(repositoryPath);
+  if (declared === null) return null;
+  return hasAgentInstances(db, worktreeId) ? null : declared;
+}
+
 /**
  * Get all worktrees sorted by updated_at (desc)
  * Optionally filter by repository path
@@ -148,6 +190,47 @@ export function getWorktrees(
   // query into one per worktree on the sidebar's poll.
   const appSettingsDefault = getDefaultSelectedAgents(db);
 
+  // Issue #2066: the repository layer, resolved ONCE per distinct
+  // `repository_path` rather than per row. `getRepoDefaultSelectedAgents()` is
+  // itself served from a process-wide cache filled at sync — see its module
+  // header for why the read does not belong on this (polled) path.
+  const repoDefaults = new Map<string, CLIToolType[] | null>();
+  for (const repositoryPath of new Set(rows.map((row) => row.repository_path))) {
+    if (!repositoryPath) continue;
+    repoDefaults.set(repositoryPath, getRepoDefaultSelectedAgents(repositoryPath));
+  }
+
+  // Issue #2066: a worktree that ALREADY has an `agent_instances` roster is not
+  // offered the repository declaration.
+  //
+  // `resolveAgentInstances()` protects the roster itself with an early return,
+  // but `selectedAgents` is a SECOND channel: `/sessions` and the Review tab
+  // render `wt.selectedAgents ?? clientDefault` and never look at
+  // `agentInstances`. Without this, committing an `agents.yaml` would repaint
+  // the chips of a branch whose tabs it cannot and must not change — and the
+  // running agent would drop out of "active agents" because it is not in the
+  // declared list. `PATCH /api/worktrees/[id]` writes `agentInstances` and
+  // `selectedAgents` from independent branches, so "has a roster, column still
+  // NULL" is a state the product produces routinely, not an edge case.
+  //
+  // Deliberately narrowed to the repository layer. The `app_settings` layer has
+  // the same shape (#2065) and the same gap, but changing it is a change to
+  // #2065's behaviour; what #2066 has to answer for is that it widened the gap
+  // from "an admin who can reach server settings" to "anyone who can commit to
+  // the repository". See docs/design/repo-agents-config.md §2.
+  //
+  // The roster query runs only when some repository actually declares
+  // something, so an install with no `agents.yaml` anywhere issues exactly the
+  // queries it issued before this Issue.
+  const anyRepoDeclares = [...repoDefaults.values()].some((value) => value !== null);
+  const withRoster = anyRepoDeclares ? worktreeIdsWithAgentInstances(db) : EMPTY_ID_SET;
+
+  const repoDefaultFor = (row: { id: string; repository_path: string | null }): CLIToolType[] | null => {
+    if (!row.repository_path) return null;
+    if (withRoster.has(row.id)) return null;
+    return repoDefaults.get(row.repository_path) ?? null;
+  };
+
   return rows.map((row) => {
     const lastMessagesByCli = lastMessagesByCliMap.get(row.id) || {};
 
@@ -171,7 +254,11 @@ export function getWorktrees(
       status: (row.status as 'ready' | 'in_progress' | 'in_review' | 'done' | null) || null,
       link: row.link || undefined,
       cliToolId: (row.cli_tool_id as CLIToolType | null) ?? 'claude',
-      selectedAgents: parseSelectedAgents(row.selected_agents, appSettingsDefault),
+      selectedAgents: parseSelectedAgents(
+        row.selected_agents,
+        appSettingsDefault,
+        repoDefaultFor(row)
+      ),
       vibeLocalModel: row.vibe_local_model ?? null,
       vibeLocalContextWindow: row.vibe_local_context_window ?? null,
     };
@@ -302,7 +389,14 @@ export function getWorktreeById(
     status: (row.status as 'ready' | 'in_progress' | 'in_review' | 'done' | null) || null,
     link: row.link || undefined,
     cliToolId: (row.cli_tool_id as CLIToolType | null) ?? 'claude',
-    selectedAgents: parseSelectedAgents(row.selected_agents, getDefaultSelectedAgents(db)),
+    // Issue #2066: same layers, and the same withholding, as getWorktrees().
+    // The roster probe runs only when this repository actually declares
+    // something, so a tree with no `agents.yaml` issues no extra query.
+    selectedAgents: parseSelectedAgents(
+      row.selected_agents,
+      getDefaultSelectedAgents(db),
+      repoDefaultWithheldFromRoster(db, row.id, row.repository_path)
+    ),
     vibeLocalModel: row.vibe_local_model ?? null,
     vibeLocalContextWindow: row.vibe_local_context_window ?? null,
   };

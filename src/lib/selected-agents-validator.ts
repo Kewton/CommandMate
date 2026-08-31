@@ -60,10 +60,20 @@ export function validateAgentsPair(input: unknown[]): {
  *
  * This array IS the priority order — `resolveSelectedAgents()` walks it in
  * sequence and nothing else encodes it. The final shape the Epic is heading for
- * is `worktree -> repo file -> app_settings -> constant`; #2065 populates the
- * `worktree` and `appSettings` layers, and `repo` is declared here but never
- * passed a value, so Issue #2066 adds the repository-file layer by supplying
- * `repo` at the two call sites rather than by re-deriving an order.
+ * is `worktree -> repo file -> app_settings -> constant`; #2065 populated the
+ * `worktree` and `appSettings` layers and declared `repo` without ever passing
+ * it a value.
+ *
+ * Issue #2066 filled `repo` in, exactly as that comment foresaw: by supplying a
+ * value at the call sites, and NOT by re-deriving an order. This array is still
+ * the only place the order is written down, and the function below is unchanged.
+ *
+ * There are exactly TWO such call sites, both in `@/lib/db/worktree-db`:
+ * `getWorktrees()` and `getWorktreeById()`, each reading
+ * `getRepoDefaultSelectedAgents()` from `@/lib/repo-config/agents-config`.
+ * `resolveAgentInstances()` is NOT one of them — it receives the already
+ * resolved value as its `selectedAgents` argument, and giving it a second entry
+ * point would have been an argument no production caller passes.
  *
  * A layer whose value is absent, malformed, or fails `validateAgentsPair()` is
  * skipped rather than fatal: a hand-edited `app_settings` row must not be able
@@ -120,13 +130,23 @@ export function resolveSelectedAgents(
  * `appSettingsDefault`; callers that do not (unit fixtures, pure helpers) omit
  * it and get exactly the pre-#2065 behaviour.
  *
+ * Issue #2066 adds `repoDefault`, the repository's own `.commandmate/agents.yaml`
+ * declaration. It is LAST in the parameter list and SECOND in priority — the
+ * order the layers resolve in lives in {@link SELECTED_AGENTS_LAYERS} and
+ * nowhere else, so an argument position is free to be chosen for what it is
+ * good for: every existing two-argument call keeps its meaning unchanged, which
+ * is what makes "an environment with no file behaves exactly as before" a
+ * property of the signature rather than of a review.
+ *
  * @param raw - Raw JSON string from DB (or null)
  * @param appSettingsDefault - Server-wide default from `app_settings`, or null/undefined when unset
+ * @param repoDefault - Repository declaration from `.commandmate/agents.yaml`, or null/undefined when absent/invalid
  * @returns Validated array of 2-6 CLIToolType values
  */
 export function parseSelectedAgents(
   raw: string | null,
   appSettingsDefault?: CLIToolType[] | null,
+  repoDefault?: CLIToolType[] | null,
 ): CLIToolType[] {
   let fromRow: unknown[] | null = null;
   if (raw) {
@@ -139,7 +159,11 @@ export function parseSelectedAgents(
       // JSON parse error - fall through to the lower layers
     }
   }
-  return resolveSelectedAgents({ worktree: fromRow, appSettings: appSettingsDefault });
+  return resolveSelectedAgents({
+    worktree: fromRow,
+    repo: repoDefault,
+    appSettings: appSettingsDefault,
+  });
 }
 
 /**
