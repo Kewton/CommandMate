@@ -10,9 +10,10 @@
  *
  * `CodexTool.waitForReady` answers the same three screens deliberately and
  * differently — `'3'` declines the hooks review rather than trusting the
- * operator's `~/.codex/config.toml` (Issue #1760), `'2'` skips the update
- * rather than running `npm install -g @openai/codex` and killing the codex
- * process (Issue #890) — and it only watches during `startSession`. The poller
+ * operator's `~/.codex/config.toml` (Issue #1760), and it answers the update
+ * dialog by the operator's own policy rather than running `npm install -g
+ * @openai/codex` unasked (Issue #890, made configurable by Issue #2068) — and
+ * it only watches during `startSession`. The poller
  * runs on its own 2s phase forever, so whichever of the two sees the dialog
  * first decides. Both #1760 and #890 are undone whenever that is the poller.
  *
@@ -27,6 +28,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { runMigrations } from '@/lib/db/db-migrations';
+import fs from 'fs';
+import path from 'path';
 import {
   CODEX_APPROVAL_PANE,
   CODEX_HOOKS_DETAIL_PANE,
@@ -37,6 +40,16 @@ import {
   CODEX_TRUST_DIALOG_PANE,
   CODEX_UPDATE_DIALOG_PANE,
 } from '../../fixtures/codex-hooks-review-0148';
+/**
+ * The same dialog as `CODEX_UPDATE_DIALOG_PANE`, captured live from codex-cli
+ * 0.149.1 rather than written out (Issue #2068). Kept alongside the synthetic
+ * one because this guard's whole job is to hold on the frame a real session
+ * produces, scrollback and all.
+ */
+const CODEX_UPDATE_DIALOG_LIVE = fs.readFileSync(
+  path.join(process.cwd(), 'tests/fixtures/codex-update-dialog-2068/update-dialog-01491.txt'),
+  'utf-8'
+);
 
 let db: Database.Database;
 
@@ -137,8 +150,8 @@ describe('the poller leaves codex launch dialogs to CodexTool', () => {
 
   it('sends nothing to the update dialog — the #890 regression, restated', async () => {
     // "1" is `Update now`: npm install -g @openai/codex, which kills the codex
-    // process the session is running in. waitForReady's "2" is the only answer
-    // this dialog may receive, and it is not the poller's to send.
+    // process the session is running in. Whatever `waitForReady` sends under
+    // the operator's policy (Issue #2068), it is not the poller's to send.
     const result = await detectAndRespondToPrompt(
       WORKTREE_ID,
       pollerState(),
@@ -148,6 +161,30 @@ describe('the poller leaves codex launch dialogs to CodexTool', () => {
 
     expect(result).toBe('no_answer');
     expect(answersSent()).not.toContain('1');
+    expect(sendPromptAnswer).not.toHaveBeenCalled();
+  });
+
+  it('sends nothing to the LIVE 0.149.1 update dialog either', async () => {
+    // Issue #2068: the same guard against the frame a real launch produces —
+    // two launches of scrollback above the dialog, and the option row for the
+    // dialog codex is actually waiting on at the bottom.
+    //
+    // Deliberately NOT parameterised over `CM_CODEX_UPDATE_DIALOG`. This poller
+    // never reads that variable — `CodexTool.waitForReady` is its only reader —
+    // so a loop over the four policies here would be four copies of one test
+    // and would stay green through any change to what `waitForReady` sends. The
+    // policy-by-policy sweep belongs on the path that reads it, and lives in
+    // `tests/unit/cli-tools/codex-update-dialog-policy-2068.test.ts`. What this
+    // file owns is the invariant that holds WHATEVER that path decides: the
+    // poller does not answer this screen.
+    const result = await detectAndRespondToPrompt(
+      WORKTREE_ID,
+      pollerState(),
+      'codex',
+      CODEX_UPDATE_DIALOG_LIVE
+    );
+
+    expect(result).toBe('no_answer');
     expect(sendPromptAnswer).not.toHaveBeenCalled();
   });
 

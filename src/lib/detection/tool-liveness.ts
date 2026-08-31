@@ -131,6 +131,79 @@ function endsWithShellPromptChar(line: string, endings: readonly string[]): bool
 }
 
 /**
+ * How the bottom row of a frame was recognised as a shell prompt.
+ *
+ * `pattern` is a positive `user@host …` match, `ending` the length-gated
+ * `$` / `%` / `#` rule. The two are kept apart only so
+ * {@link judgeToolLiveness} can keep saying which one fired: its two reason
+ * strings are read back by `worktree-status-helper` and asserted verbatim in
+ * `claude-session.test.ts`.
+ */
+export interface ShellPromptTail {
+  /** The row itself, trimmed. */
+  line: string;
+  /** Which of the two rules recognised it. */
+  via: 'pattern' | 'ending';
+}
+
+/**
+ * The bottom row of `cleanOutput`, when it reads as a shell prompt.
+ *
+ * Steps 4-6 of {@link judgeToolLiveness}, lifted out verbatim so there is one
+ * definition of "this pane is a bare shell" rather than two. Note what is NOT
+ * here: the alive-pattern window of step 2. That is the difference between the
+ * two questions, and it is why this is exported (Issue #2068).
+ *
+ * `judgeToolLiveness` asks **"is the tool gone?"** and answers conservatively —
+ * any alive pattern anywhere in the bottom window vetoes the exit, because a
+ * relaunch hangs off its verdict. That veto is right for the general case and
+ * wrong for exactly one measured frame: the pane codex leaves behind after its
+ * own `1. Update now`. codex-cli 0.149.1 exits into `npm install -g
+ * @openai/codex`, which prints three rows and returns to the shell — so the
+ * dead `› 1. Update now` option row is still SEVEN content rows above the live
+ * shell prompt, inside `LIVENESS_ALIVE_TAIL_LINES`, and `CODEX_PROMPT_PATTERN`
+ * reads it as codex still drawing the pane (measured 2026-08-31, private tmux
+ * socket, 200x1000, isolated `CODEX_HOME`).
+ *
+ * `CodexTool.waitForReady` therefore asks this narrower question instead, and
+ * only about a pane it has just watched answer the update dialog — where the
+ * scrollback above the prompt is known to be spent and position is the whole
+ * story, exactly as it is for every other codex classifier since Issue #892.
+ * Widening `judgeToolLiveness` itself to agree would be a change to the shared
+ * rule every tool is judged by, and it is not made here.
+ *
+ * @param cleanOutput - ANSI-stripped pane output
+ * @param spec - The tool's liveness declaration
+ * @returns The prompt row and how it was recognised, or null
+ */
+export function findShellPromptTail(
+  cleanOutput: string,
+  spec: Pick<
+    ToolLivenessSpec,
+    'shellPromptPatterns' | 'maxShellPromptLength' | 'shellPromptEndings'
+  >
+): ShellPromptTail | null {
+  const rows = contentRows(cleanOutput.trim());
+  const lastLine = rows[rows.length - 1]?.trim() ?? '';
+
+  if (!/\d+%$/.test(lastLine) && spec.shellPromptPatterns.some((p) => p.test(lastLine))) {
+    return { line: lastLine, via: 'pattern' };
+  }
+
+  // The length gate is a NEGATIVE result, not a fall-through: a row this long is
+  // not a prompt, and the endings rule below must not get to claim it.
+  if (lastLine.length >= spec.maxShellPromptLength) {
+    return null;
+  }
+
+  if (endsWithShellPromptChar(lastLine, spec.shellPromptEndings)) {
+    return { line: lastLine, via: 'ending' };
+  }
+
+  return null;
+}
+
+/**
  * Decide whether the tool this spec describes is still drawing the pane.
  *
  * The rule, in the order the branches run — which is claude's order, because
@@ -182,18 +255,15 @@ export function judgeToolLiveness(
     return { alive: false, reason: `error pattern: ${fatal}` };
   }
 
-  const lastLine = rows[rows.length - 1]?.trim() ?? '';
-
-  if (!/\d+%$/.test(lastLine) && spec.shellPromptPatterns.some((p) => p.test(lastLine))) {
-    return { alive: false, reason: `shell prompt detected: ${lastLine}` };
-  }
-
-  if (lastLine.length >= spec.maxShellPromptLength) {
-    return { alive: true };
-  }
-
-  if (endsWithShellPromptChar(lastLine, spec.shellPromptEndings)) {
-    return { alive: false, reason: `shell prompt ending detected: ${lastLine}` };
+  // Steps 4-6, via the predicate they were lifted into (Issue #2068). The two
+  // reason strings are unchanged, and so is the verdict for every frame: a
+  // `null` here is the old "too long" and "nothing matched" branches, which both
+  // came out alive.
+  const shellTail = findShellPromptTail(trimmed, spec);
+  if (shellTail !== null) {
+    return shellTail.via === 'pattern'
+      ? { alive: false, reason: `shell prompt detected: ${shellTail.line}` }
+      : { alive: false, reason: `shell prompt ending detected: ${shellTail.line}` };
   }
 
   return { alive: true };

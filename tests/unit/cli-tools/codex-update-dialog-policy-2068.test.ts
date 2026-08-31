@@ -1,0 +1,496 @@
+/**
+ * Issue #2068 — what `CodexTool.waitForReady` does with codex's update dialog,
+ * under each of the four policies.
+ *
+ * The reported bug is not that the wrong key was sent; it is that the SAME key
+ * was sent every time and it persisted nothing. Measured on codex-cli 0.149.1
+ * in an isolated `CODEX_HOME` (2026-08-31):
+ *
+ * | key | `$CODEX_HOME/version.json` after | next launch |
+ * |-----|----------------------------------|-------------|
+ * | `'2'` | `dismissed_version: null` (unchanged) | dialog again |
+ * | `'3'` | `dismissed_version: "0.151.0"` | no dialog |
+ * | `'1'` | unchanged; codex exits into `npm install -g @openai/codex` | — |
+ *
+ * So the tests below are about which digit reaches the pane, and — for the two
+ * policies that can end with codex gone — whether the launch line goes back in.
+ *
+ * The frames are the ones captured live for this Issue
+ * (`tests/fixtures/codex-update-dialog-2068/`), not hand-written approximations:
+ * the post-update pane in particular has a property no synthetic frame would
+ * have reproduced, and the whole relaunch trigger turns on it.
+ *
+ * Separate file so `vi.mock` does not affect `codex.test.ts` (the precedent set
+ * by `codex-startup-dialog.test.ts`).
+ *
+ * @vitest-environment node
+ */
+
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import fs from 'fs';
+import path from 'path';
+
+vi.mock('@/lib/tmux/tmux', () => ({
+  hasSession: vi.fn(),
+  createSession: vi.fn(),
+  sendKeys: vi.fn(),
+  capturePane: vi.fn(),
+  killSession: vi.fn(),
+  sendSpecialKey: vi.fn(),
+  sendSpecialKeys: vi.fn(),
+  reconcileSessionGeometry: vi.fn().mockResolvedValue(false),
+  getSessionWorkingDirectory: vi.fn().mockResolvedValue('/test/path'),
+}));
+
+vi.mock('@/lib/cli-tools/submit-verified-sender', () => ({
+  sendMessageWithSubmitVerification: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock('@/lib/cli-tools/validation', () => ({
+  validateSessionName: vi.fn(),
+}));
+
+// BaseCLITool.isInstalled() uses promisify(exec); resolve it so isInstalled() === true
+vi.mock('child_process', () => ({ exec: vi.fn() }));
+vi.mock('util', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('util')>();
+  return {
+    ...actual,
+    promisify: () => vi.fn().mockResolvedValue(undefined),
+  };
+});
+
+import { CodexTool } from '@/lib/cli-tools/codex';
+import { hasSession, sendKeys, capturePane } from '@/lib/tmux/tmux';
+import {
+  CODEX_UPDATE_DIALOG_ENV_VAR,
+  CODEX_UPDATE_DIALOG_KEYS,
+  CODEX_UPDATE_DIALOG_POLICIES,
+  DEFAULT_CODEX_UPDATE_DIALOG_POLICY,
+} from '@/config/codex-update-dialog-config';
+import {
+  acquireAgentUpdateLock,
+  isAgentUpdateInProgress,
+  releaseAgentUpdateLock,
+} from '@/lib/updates';
+
+const WORKTREE_ID = 'test-worktree';
+const SESSION = 'mcbd-codex-test-worktree';
+
+const FIXTURES = path.join(process.cwd(), 'tests/fixtures/codex-update-dialog-2068');
+const frame = (name: string): string =>
+  fs.readFileSync(path.join(FIXTURES, `${name}-01491.txt`), 'utf-8');
+
+/** codex 0.149.1's interactive update dialog, bottom-most on the pane. */
+const UPDATE_DIALOG = frame('update-dialog');
+/** One second after `1`: `Updating Codex via …` and a spinner. */
+const UPDATING = frame('updating');
+/** `npm install` done, codex gone, a live shell prompt on the last row. */
+const UPDATED_SHELL = frame('updated-shell');
+/** A pane whose bottom-most element is the genuine composer. */
+const PROMPT = '› ';
+/** A pane with nothing on it but a shell prompt — no dialog anywhere above. */
+const BARE_SHELL = 'localuser@EXAMPLEMac-Studio wt %';
+
+/** The launch line, however Issue #1760's env prefix renders it. */
+const LAUNCH_LINE = expect.stringMatching(/(^codex$|'codex'$)/);
+
+/** Digits sent to the pane, in order, ignoring the launch line. */
+function digitsSent(): string[] {
+  return vi
+    .mocked(sendKeys)
+    .mock.calls.filter(([session, sent]) => session === SESSION && /^[0-9]$/.test(sent))
+    .map(([, sent]) => sent);
+}
+
+/** How many times the launch line was typed into the pane. */
+function launchCount(): number {
+  return vi
+    .mocked(sendKeys)
+    .mock.calls.filter(([session, sent, enter]) => session === SESSION && enter === true && /(^codex$|'codex'$)/.test(sent))
+    .length;
+}
+
+/** Drive a whole `startSession` under fake timers. */
+async function runStartSession(tool: CodexTool): Promise<void> {
+  vi.useFakeTimers();
+  try {
+    const promise = tool.startSession(WORKTREE_ID, '/test/path');
+    await vi.runAllTimersAsync();
+    await promise;
+  } finally {
+    vi.useRealTimers();
+  }
+}
+
+describe('[#2068] the update dialog policy', () => {
+  let tool: CodexTool;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubEnv(CODEX_UPDATE_DIALOG_ENV_VAR, undefined as unknown as string);
+    tool = new CodexTool();
+    vi.mocked(hasSession).mockResolvedValue(false);
+    vi.mocked(sendKeys).mockResolvedValue();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+    // #2069's lock is module state shared by the whole file. A test that left it
+    // held would make the NEXT test's `update` silently yield, which is the one
+    // failure mode that would look like a pass.
+    releaseAgentUpdateLock('codex');
+  });
+
+  // The sweep, on the path that actually reads `CM_CODEX_UPDATE_DIALOG`.
+  //
+  // `CodexTool.waitForReady` is the ONLY reader of the variable — the Auto-Yes
+  // poller never consults it, so parameterising a poller test over the four
+  // policies is four copies of one test. Here the variable changes the observable
+  // (the digit the pane receives), so the loop earns its keep: it is what fails
+  // if the policy lookup is ever replaced by a literal digit again, whichever
+  // literal is chosen.
+  describe('every policy, over the live dialog', () => {
+    for (const policy of CODEX_UPDATE_DIALOG_POLICIES) {
+      const expected = CODEX_UPDATE_DIALOG_KEYS[policy];
+
+      it(`${policy} sends ${expected === null ? 'nothing' : `"${expected}"`}`, async () => {
+        vi.stubEnv(CODEX_UPDATE_DIALOG_ENV_VAR, policy);
+        vi.mocked(capturePane)
+          .mockResolvedValueOnce(UPDATE_DIALOG)
+          .mockResolvedValueOnce(UPDATE_DIALOG)
+          .mockResolvedValue(PROMPT);
+
+        await runStartSession(tool);
+
+        expect(digitsSent()).toEqual(expected === null ? [] : [expected]);
+        // Whatever the policy, never with a trailing Enter (Issue #890) — and
+        // never a digit the policy did not name.
+        for (const digit of ['1', '2', '3'] as const) {
+          expect(sendKeys).not.toHaveBeenCalledWith(SESSION, digit, true);
+          if (digit !== expected) {
+            expect(sendKeys).not.toHaveBeenCalledWith(SESSION, digit, false);
+          }
+        }
+      });
+    }
+
+    it('reads the variable rather than a literal: the four answers are distinct', () => {
+      // The mutation this whole describe block exists to catch is "put a digit
+      // back in `waitForReady`". Any single literal collapses the table above
+      // onto one value, so the table itself must be injective to be worth
+      // running — asserted here rather than assumed.
+      const answers = CODEX_UPDATE_DIALOG_POLICIES.map((p) => CODEX_UPDATE_DIALOG_KEYS[p]);
+      expect(new Set(answers).size).toBe(answers.length);
+      expect(CODEX_UPDATE_DIALOG_KEYS[DEFAULT_CODEX_UPDATE_DIALOG_POLICY]).toBe('3');
+    });
+  });
+
+
+  // Issue #2068 x #2069: the pane's `1` is the third route to one
+  // `npm install -g @openai/codex`, and the only one that cannot go through
+  // `runAgentUpdate` (codex itself runs the install, inside tmux). It therefore
+  // takes #2069's in-flight lock by hand, which makes both halves of a hand-held
+  // lock this file's problem: taking it, and giving it back.
+  describe('#2069 の更新ロック', () => {
+    beforeEach(() => {
+      vi.stubEnv(CODEX_UPDATE_DIALOG_ENV_VAR, 'update');
+    });
+
+    it('holds the lock across the poll where the install is still running', async () => {
+      // Read on the `Updating Codex via …` frame — a LATER poll than the one
+      // that sent the digit — so this cannot pass merely because `acquire`
+      // returned true a line earlier. That frame is the window the lock exists
+      // to cover: codex is gone, npm is running, and a second install started
+      // now is the corruption the lock prevents.
+      const heldPerFrame: boolean[] = [];
+      vi.mocked(capturePane)
+        .mockResolvedValueOnce(UPDATE_DIALOG)
+        .mockImplementationOnce(async () => {
+          heldPerFrame.push(isAgentUpdateInProgress('codex'));
+          return UPDATING;
+        })
+        .mockImplementationOnce(async () => {
+          heldPerFrame.push(isAgentUpdateInProgress('codex'));
+          return UPDATING;
+        })
+        .mockResolvedValueOnce(UPDATED_SHELL)
+        .mockResolvedValue(PROMPT);
+
+      await runStartSession(tool);
+
+      expect(digitsSent()).toEqual(['1']);
+      expect(heldPerFrame).toEqual([true, true]);
+    });
+
+    it('does NOT send "1" when another process already holds the lock', async () => {
+      // `POST /api/agents/update` or `commandmate agents update` got there first.
+      expect(acquireAgentUpdateLock('codex')).toBe(true);
+
+      vi.mocked(capturePane)
+        .mockResolvedValueOnce(UPDATE_DIALOG)
+        .mockResolvedValueOnce(UPDATE_DIALOG)
+        .mockResolvedValue(PROMPT);
+
+      await runStartSession(tool);
+
+      // The whole point: no second `npm install -g` on the same global prefix.
+      expect(sendKeys).not.toHaveBeenCalledWith(SESSION, '1', false);
+      expect(sendKeys).not.toHaveBeenCalledWith(SESSION, '1', true);
+      // Yields to `3`, so the dialog is still answered and still persisted —
+      // the pane must not be left parked on it, and `2` is the answer #2068
+      // exists to stop sending.
+      expect(digitsSent()).toEqual(['3']);
+      // Somebody else's lock is not ours to give back.
+      expect(isAgentUpdateInProgress('codex')).toBe(true);
+    });
+
+    it('gives the lock back AT the relaunch, not merely by the time it returns', async () => {
+      // The distinction the `finally` backstop cannot make on its own, and the
+      // reason the relaunch branch releases too: read the lock on a poll that
+      // happens INSIDE `waitForReady`, one iteration after the relaunch. Under
+      // the backstop alone this frame still sees the lock held, and a concurrent
+      // `commandmate agents update` would be refused for the rest of a window
+      // that can run to two minutes — for an install that is already over.
+      let heldAfterRelaunch: boolean | null = null;
+      vi.mocked(capturePane)
+        .mockResolvedValueOnce(UPDATE_DIALOG) // -> "1", lock taken
+        .mockResolvedValueOnce(UPDATING) // install running
+        .mockResolvedValueOnce(UPDATED_SHELL) // shell back -> relaunch + release
+        .mockImplementationOnce(async () => {
+          heldAfterRelaunch = isAgentUpdateInProgress('codex');
+          return PROMPT;
+        })
+        .mockResolvedValue(PROMPT);
+
+      await runStartSession(tool);
+
+      expect(launchCount()).toBe(2);
+      expect(heldAfterRelaunch).toBe(false);
+    });
+
+    it('gives the lock back once the shell returns, so a SECOND update can run', async () => {
+      vi.mocked(capturePane)
+        .mockResolvedValueOnce(UPDATE_DIALOG)
+        .mockResolvedValueOnce(UPDATED_SHELL)
+        .mockResolvedValue(PROMPT);
+
+      await runStartSession(tool);
+
+      expect(digitsSent()).toEqual(['1']);
+      expect(isAgentUpdateInProgress('codex')).toBe(false);
+      // Stated as the consequence that matters rather than as the flag: a lock
+      // never given back blocks every later update from all three routes for the
+      // life of the server.
+      expect(acquireAgentUpdateLock('codex')).toBe(true);
+    });
+
+    it('gives the lock back even when the shell never returns', async () => {
+      // The install hangs, or codex died some other way: the relaunch signal
+      // never arrives and the window simply expires. The backstop is the only
+      // thing standing between that and a permanently blocked updater.
+      vi.mocked(capturePane).mockResolvedValue(UPDATING);
+
+      await runStartSession(tool);
+
+      expect(digitsSent()).toEqual(['1']);
+      expect(isAgentUpdateInProgress('codex')).toBe(false);
+      expect(acquireAgentUpdateLock('codex')).toBe(true);
+    });
+
+    it('gives the lock back when the capture throws for the whole window', async () => {
+      vi.mocked(capturePane)
+        .mockResolvedValueOnce(UPDATE_DIALOG)
+        .mockRejectedValue(new Error('tmux is gone'));
+
+      await runStartSession(tool);
+
+      expect(isAgentUpdateInProgress('codex')).toBe(false);
+    });
+
+    it('does not touch the lock for the policies that install nothing', async () => {
+      for (const policy of ['skip', 'skip-until-next-version', 'ask'] as const) {
+        vi.clearAllMocks();
+        vi.stubEnv(CODEX_UPDATE_DIALOG_ENV_VAR, policy);
+        vi.mocked(sendKeys).mockResolvedValue();
+        vi.mocked(capturePane).mockResolvedValueOnce(UPDATE_DIALOG).mockResolvedValue(PROMPT);
+
+        await runStartSession(tool);
+
+        // Holding it would block a concurrent `commandmate agents update` for no
+        // reason: answering `2` / `3` / nothing installs nothing.
+        expect(isAgentUpdateInProgress('codex')).toBe(false);
+      }
+    });
+  });
+
+  describe('the default', () => {
+    it('sends "3" (Skip until next version) — the only key that persists', async () => {
+      vi.mocked(capturePane).mockResolvedValueOnce(UPDATE_DIALOG).mockResolvedValue(PROMPT);
+
+      await runStartSession(tool);
+
+      expect(digitsSent()).toEqual(['3']);
+      // The regression the default replaces: '2' answered the dialog and wrote
+      // nothing, so the next launch met it again.
+      expect(sendKeys).not.toHaveBeenCalledWith(SESSION, '2', false);
+      // And never with a trailing Enter (Issue #890): the number confirms, so an
+      // Enter would land on the screen behind it.
+      expect(sendKeys).not.toHaveBeenCalledWith(SESSION, '3', true);
+    });
+
+    it('sends it exactly once however long the dialog stays in the capture', async () => {
+      vi.mocked(capturePane)
+        .mockResolvedValueOnce(UPDATE_DIALOG)
+        .mockResolvedValueOnce(UPDATE_DIALOG)
+        .mockResolvedValue(PROMPT);
+
+      await runStartSession(tool);
+
+      expect(digitsSent()).toEqual(['3']);
+    });
+
+    it('does not relaunch: the pane never became a shell', async () => {
+      vi.mocked(capturePane).mockResolvedValueOnce(UPDATE_DIALOG).mockResolvedValue(PROMPT);
+
+      await runStartSession(tool);
+
+      expect(launchCount()).toBe(1);
+    });
+  });
+
+  describe('CM_CODEX_UPDATE_DIALOG=skip', () => {
+    it('sends "2", the pre-#2068 behaviour, for operators who want it back', async () => {
+      vi.stubEnv(CODEX_UPDATE_DIALOG_ENV_VAR, 'skip');
+      vi.mocked(capturePane).mockResolvedValueOnce(UPDATE_DIALOG).mockResolvedValue(PROMPT);
+
+      await runStartSession(tool);
+
+      expect(digitsSent()).toEqual(['2']);
+    });
+  });
+
+  describe('CM_CODEX_UPDATE_DIALOG=update', () => {
+    beforeEach(() => {
+      vi.stubEnv(CODEX_UPDATE_DIALOG_ENV_VAR, 'update');
+    });
+
+    it('sends "1" and re-sends the launch line once the shell comes back', async () => {
+      vi.mocked(capturePane)
+        .mockResolvedValueOnce(UPDATE_DIALOG) // -> "1"
+        .mockResolvedValueOnce(UPDATING) // npm still running: do NOT relaunch
+        .mockResolvedValueOnce(UPDATED_SHELL) // codex gone, shell back: relaunch
+        .mockResolvedValue(PROMPT); // the new codex is ready
+
+      await runStartSession(tool);
+
+      expect(digitsSent()).toEqual(['1']);
+      // Two launch lines: the original and the one after the update.
+      expect(launchCount()).toBe(2);
+      expect(sendKeys).toHaveBeenLastCalledWith(SESSION, LAUNCH_LINE, true);
+    });
+
+    it('waits out the install rather than relaunching on top of it', async () => {
+      // Six polls of `npm install` still running, then the shell.
+      vi.mocked(capturePane)
+        .mockResolvedValueOnce(UPDATE_DIALOG)
+        .mockResolvedValueOnce(UPDATING)
+        .mockResolvedValueOnce(UPDATING)
+        .mockResolvedValueOnce(UPDATING)
+        .mockResolvedValueOnce(UPDATING)
+        .mockResolvedValueOnce(UPDATING)
+        .mockResolvedValueOnce(UPDATING)
+        .mockResolvedValueOnce(UPDATED_SHELL)
+        .mockResolvedValue(PROMPT);
+
+      await runStartSession(tool);
+
+      expect(launchCount()).toBe(2);
+    });
+
+    it('relaunches at most once, so a failed update cannot loop', async () => {
+      // The install failed: the relaunched codex is the old version and puts the
+      // identical dialog back. Answering "1" again would quit it a second time
+      // with the one relaunch already spent, so neither happens — the dialog is
+      // left on the pane where `detectPrompt` reports it to the human.
+      vi.mocked(capturePane)
+        .mockResolvedValueOnce(UPDATE_DIALOG)
+        .mockResolvedValueOnce(UPDATED_SHELL)
+        .mockResolvedValue(UPDATE_DIALOG);
+
+      await runStartSession(tool);
+
+      expect(digitsSent()).toEqual(['1']);
+      expect(launchCount()).toBe(2);
+    });
+
+    it('does not relaunch a pane that never met the dialog', async () => {
+      // A bare shell with no update dialog above it is not this Issue's frame —
+      // it is Issue #2070's, and `launchSession`'s own reuse branch owns it.
+      vi.mocked(capturePane).mockResolvedValue(BARE_SHELL);
+
+      await runStartSession(tool);
+
+      expect(digitsSent()).toEqual([]);
+      expect(launchCount()).toBe(1);
+    });
+  });
+
+  describe('CM_CODEX_UPDATE_DIALOG=ask', () => {
+    beforeEach(() => {
+      vi.stubEnv(CODEX_UPDATE_DIALOG_ENV_VAR, 'ask');
+    });
+
+    it('answers nothing at all — the human owns the screen', async () => {
+      vi.mocked(capturePane).mockResolvedValue(UPDATE_DIALOG);
+
+      await runStartSession(tool);
+
+      expect(digitsSent()).toEqual([]);
+      // Not an Enter either: "Press enter to continue" is this dialog's own
+      // footer, and Enter on it confirms the pre-selected "1. Update now".
+      expect(sendKeys).not.toHaveBeenCalledWith(SESSION, '', true);
+      expect(launchCount()).toBe(1);
+    });
+
+    it('still reaches the prompt when the human picks a skip', async () => {
+      vi.mocked(capturePane)
+        .mockResolvedValueOnce(UPDATE_DIALOG)
+        .mockResolvedValueOnce(UPDATE_DIALOG)
+        .mockResolvedValue(PROMPT);
+
+      await runStartSession(tool);
+
+      expect(digitsSent()).toEqual([]);
+      expect(launchCount()).toBe(1);
+    });
+
+    it('relaunches when the human picks "1" while the launch is still waiting', async () => {
+      vi.mocked(capturePane)
+        .mockResolvedValueOnce(UPDATE_DIALOG)
+        .mockResolvedValueOnce(UPDATING)
+        .mockResolvedValueOnce(UPDATED_SHELL)
+        .mockResolvedValue(PROMPT);
+
+      await runStartSession(tool);
+
+      // Nothing was answered by this server…
+      expect(digitsSent()).toEqual([]);
+      // …but the pane it was handed back is a shell, so the launch line goes in.
+      expect(launchCount()).toBe(2);
+    });
+  });
+
+  describe('an unrecognised CM_CODEX_UPDATE_DIALOG', () => {
+    it('falls back to the default rather than guessing at "update"', async () => {
+      vi.stubEnv(CODEX_UPDATE_DIALOG_ENV_VAR, 'updates');
+      vi.mocked(capturePane).mockResolvedValueOnce(UPDATE_DIALOG).mockResolvedValue(PROMPT);
+
+      await runStartSession(tool);
+
+      expect(digitsSent()).toEqual(['3']);
+    });
+  });
+});
