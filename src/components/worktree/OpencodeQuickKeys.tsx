@@ -113,9 +113,35 @@
  * already re-evaluates the query on every resize with no render of ours. The
  * suffix stays in `title` and `aria-label` at every width, so nothing is lost
  * from the accessible name — only the printed glyphs go.
+ *
+ * ## The press-feedback timer is owned, not fired and forgotten (Issue #2174)
+ *
+ * The highlight that follows a press is a `setTimeout` that clears `activeId`
+ * after {@link KEY_PRESS_FEEDBACK_RESET_MS}. It arrived with the strip itself in
+ * #2046 (`ceb1059d`) — not in #2131, which #2174's text names because
+ * `git log -1 -- <this file>` reports the file's LAST commit rather than the
+ * line's — and it arrived without a handle, so nothing could cancel it: a pane
+ * unmounted inside those 150 ms left a callback that still ran and still called
+ * `setActiveId(null)`. In a browser that is inert — React drops the update on a
+ * torn-down root. Under jsdom it is not: when the timer outlives the test that
+ * armed it, it fires against an environment whose `window` is already gone, and
+ * surfaces as an unhandled error attributed to whichever test happens to be
+ * running at the time.
+ *
+ * So the id lives in a ref and is cleared in both places that can invalidate it
+ * — the next press (which re-arms from zero rather than inheriting the previous
+ * press's remaining time) and unmount. That is the shape every other transient
+ * feedback timer in this tree already uses ({@link CopyButton},
+ * `TruncationTooltip`, `MemoCard`). Nothing observable moves: the highlight
+ * still appears synchronously on press and still clears exactly
+ * `KEY_PRESS_FEEDBACK_RESET_MS` later.
+ *
+ * The same uncollected pattern is still open in `TerminalEscapeHatch` and
+ * `NavigationButtons`, which share this component's `useSpecialKeys` transport
+ * but not its file; #2174's scope stops at this file.
  */
 
-import { memo, useCallback, useId, useState } from 'react';
+import { memo, useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { ChevronDown } from 'lucide-react';
 import type { CLIToolType } from '@/lib/cli-tools/types';
@@ -281,11 +307,32 @@ export const OpencodeQuickKeys = memo(function OpencodeQuickKeys({
   const { open: disclosureOpen, toggle: toggleDisclosure } =
     useOpencodeQuickKeysDisclosure(layout);
   const panelId = useId();
+  // Issue #2174: see the module docblock. The press highlight is the only thing
+  // this timer does, so dropping it on unmount costs nothing and keeps the
+  // callback from outliving the tree that owns the state it writes.
+  const feedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (feedbackTimerRef.current !== null) {
+        clearTimeout(feedbackTimerRef.current);
+        feedbackTimerRef.current = null;
+      }
+    };
+  }, []);
 
   const handleClick = useCallback(
     (def: QuickKeyDef) => {
       setActiveId(def.id);
-      setTimeout(() => setActiveId(null), KEY_PRESS_FEEDBACK_RESET_MS);
+      // Re-arm from zero: without this the previous press's timer would still be
+      // pending and would clear the CURRENT press's highlight early.
+      if (feedbackTimerRef.current !== null) {
+        clearTimeout(feedbackTimerRef.current);
+      }
+      feedbackTimerRef.current = setTimeout(() => {
+        feedbackTimerRef.current = null;
+        setActiveId(null);
+      }, KEY_PRESS_FEEDBACK_RESET_MS);
       send([...def.keys]);
     },
     [send],
