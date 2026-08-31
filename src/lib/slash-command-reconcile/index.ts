@@ -29,6 +29,7 @@ export * from './check-report';
 export * from './exclusions';
 export * from './attestations';
 export * from './locale';
+export * from './runner-args';
 export * from './engine';
 export * from './fetch';
 export {
@@ -85,6 +86,13 @@ export interface RunReconcileOptions extends ReconcileOptions {
    * read back from disk. `GET /command` also covers only part of the opencode
    * catalog — see the provider's docblock — so this enumerates the markdown
    * commands and leaves the 16 TUI built-ins to their palette attestation.
+   *
+   * Issue #2036: until `--opencode-port` landed this field had no caller at all,
+   * so the default was not a default but the only reachable value, and every run
+   * printed `opencode provider skipped: no loopback port given`. The runner now
+   * builds it from that flag (`runner-args.ts#opencodeOptionFromArgs`); a caller
+   * that passes nothing still gets the skip, which is what keeps the weekly
+   * catalog-drift workflow — which has no opencode server — unchanged.
    */
   opencode?: FetchOpencodeOptions | false;
 }

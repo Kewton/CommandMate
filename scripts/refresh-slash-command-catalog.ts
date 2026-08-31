@@ -13,18 +13,31 @@
  * run does instead is *say* how far each attestation has fallen behind, so the
  * work left over after `--write` is on screen rather than only in a red pin.
  *
- * Usage:
+ * Issue #2036: `--opencode-port <port>` reconciles the opencode catalog against
+ * `GET /command` on a loopback opencode server. Before it, `RunReconcileOptions
+ * .opencode` had no caller anywhere in the repository, so the option's `false`
+ * default was the only value it could ever hold and every run — the weekly
+ * catalog-drift workflow included — reported opencode as skipped. The flag is
+ * opt-in and stays opt-in: the workflow does not pass it (there is no opencode
+ * server on a CI runner), so its run is byte-for-byte what it was.
+ *
+ * Usage (`--help` prints the same list; it lives in
+ * src/lib/slash-command-reconcile/runner-args.ts so a test can read it):
  *   tsx scripts/refresh-slash-command-catalog.ts [--check | --write]
  *                                                [--codex-ref <tag>]
+ *                                                [--opencode-port <port>]
  *                                                [--skip-claude] [--skip-codex]
  *                                                [--skip-antigravity] [--json]
+ *                                                [-h | --help]
  *
- *   --check  (default) report the diff; write nothing.
- *   --write            apply changes to the catalog + en/ja locale dictionaries.
+ *   --check              (default) report the diff; write nothing.
+ *   --write              apply changes to the catalog + en/ja locale dictionaries.
+ *   --opencode-port <n>  enumerate opencode from http://127.0.0.1:<n>/command.
  *
  * Fail-soft: a source that is unreachable or has changed shape is skipped with a
  * warning; existing catalog entries are left intact. Exit code is 0 on a normal
- * run (including "all sources down") and non-zero only on an unexpected error.
+ * run (including "all sources down"), 2 on a malformed command line, and
+ * non-zero otherwise only on an unexpected error.
  */
 
 import * as fs from 'fs';
@@ -37,6 +50,12 @@ import {
   describeAttestationDrift,
   DEFAULT_ATTESTATIONS,
   DEFAULT_EXCLUSIONS,
+  parseRunnerArgs,
+  opencodeOptionFromArgs,
+  RunnerArgsError,
+  RUNNER_USAGE,
+  RUNNER_USAGE_EXIT_CODE,
+  type RunnerArgs,
   type LocaleAddition,
   type LocaleDictionary,
   type ReconcileResult,
@@ -50,52 +69,30 @@ const ATTESTATIONS_PATH = path.join(REPO_ROOT, 'src/config/slash-commands-attest
 const EN_LOCALE_PATH = path.join(REPO_ROOT, 'locales/en/worktree.json');
 const JA_LOCALE_PATH = path.join(REPO_ROOT, 'locales/ja/worktree.json');
 
-interface CliArgs {
-  write: boolean;
-  json: boolean;
-  codexRef?: string;
-  skipClaude: boolean;
-  skipCodex: boolean;
-  skipAntigravity: boolean;
-}
-
-function parseArgs(argv: string[]): CliArgs {
-  const args: CliArgs = {
-    write: false,
-    json: false,
-    skipClaude: false,
-    skipCodex: false,
-    skipAntigravity: false,
-  };
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
-    switch (arg) {
-      case '--write':
-        args.write = true;
-        break;
-      case '--check':
-        args.write = false;
-        break;
-      case '--json':
-        args.json = true;
-        break;
-      case '--codex-ref':
-        args.codexRef = argv[++i];
-        break;
-      case '--skip-claude':
-        args.skipClaude = true;
-        break;
-      case '--skip-codex':
-        args.skipCodex = true;
-        break;
-      case '--skip-antigravity':
-        args.skipAntigravity = true;
-        break;
-      default:
-        console.warn(`Ignoring unknown argument: ${arg}`);
+/**
+ * Parse argv, or print the usage and exit 2.
+ *
+ * A malformed command line is the one failure this runner refuses to be
+ * fail-soft about. Everything else here degrades to a warning because a source
+ * being down is a fact about the world; `--opencode-port banana` is a fact about
+ * the invocation, and continuing with it silently ignored would run a pass whose
+ * report says opencode was skipped for a reason the operator did not choose.
+ */
+function parseArgsOrExit(argv: string[]): RunnerArgs {
+  try {
+    const args = parseRunnerArgs(argv);
+    // Unknown arguments stay a warning, with the wording they have always had:
+    // the parser is pure and hands them back rather than printing them itself.
+    for (const unknown of args.unknownArgs) {
+      console.warn(`Ignoring unknown argument: ${unknown}`);
     }
+    return args;
+  } catch (error) {
+    if (!(error instanceof RunnerArgsError)) throw error;
+    console.error(`refresh-slash-command-catalog: ${error.message}`);
+    console.error(`\n${RUNNER_USAGE}`);
+    process.exit(RUNNER_USAGE_EXIT_CODE);
   }
-  return args;
 }
 
 function readJson<T>(filePath: string): T {
@@ -121,7 +118,7 @@ function writeLocaleAdditions(
   writeJson(filePath, applyLocaleAdditions(dict, additions, pick));
 }
 
-function printSummary(result: ReconcileResult, args: CliArgs): void {
+function printSummary(result: ReconcileResult, args: RunnerArgs): void {
   if (args.json) {
     console.log(
       JSON.stringify(
@@ -236,13 +233,24 @@ function printSummary(result: ReconcileResult, args: CliArgs): void {
 }
 
 async function main(): Promise<void> {
-  const args = parseArgs(process.argv.slice(2));
+  const args = parseArgsOrExit(process.argv.slice(2));
+  if (args.help) {
+    console.log(RUNNER_USAGE);
+    return;
+  }
+
   const catalog = readJson<SlashCommandsCatalog>(CATALOG_PATH);
 
   const result = await runReconcile(catalog, {
     claude: args.skipClaude ? false : {},
     codex: args.skipCodex ? false : args.codexRef ? { ref: args.codexRef } : {},
     antigravity: args.skipAntigravity ? false : {},
+    // Issue #2036: `false` unless --opencode-port was given, which is what keeps
+    // the weekly workflow's run identical to the one it made before this flag
+    // existed. Deliberately NOT printed in printSummary(): check-report.ts parses
+    // that report line by line and .github/workflows/catalog-drift.yml acts on
+    // the verdict, so the report's shape is an interface, not a scratch pad.
+    opencode: opencodeOptionFromArgs(args),
     // Issue #1704: lets the engine notice when a new entry would silently
     // inherit a description an earlier release wrote for a different tool.
     existingEnDescriptions: flattenDictionary(readJson<LocaleDictionary>(EN_LOCALE_PATH)),

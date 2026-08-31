@@ -45,7 +45,7 @@ import { initScheduleManager, stopAllSchedules } from './src/lib/schedule-manage
 import { initTimerManager, stopAllTimers } from './src/lib/timer-manager';
 import { initResourceCleanup, stopResourceCleanup } from './src/lib/resource-cleanup';
 import { runMigrations } from './src/lib/db/db-migrations';
-import { getEnvByKey } from './src/lib/env';
+import { getEnvByKey, runDotenvSelfCheck } from './src/lib/env';
 import { registerAndFilterRepositories, getAllRepositories } from './src/lib/db/db-repository';
 // Issue #1666: `resolveRepositoryPath`, `getWorktreeIdsByRepository`,
 // `deleteWorktreesByIds`, `cleanupMultipleWorktrees` and `killWorktreeSession`
@@ -493,6 +493,28 @@ app.prepare().then(() => {
         console.error('Startup self-check failed:', error);
       }
     })();
+
+    // Issue #2132: say, in one line, that `.env` is sitting right there and not
+    // one variable in it reached this process.
+    //
+    // This runs BEFORE the VAPID check on purpose: an empty environment is the
+    // CAUSE and "push is not configured" is one of its symptoms, so the reader
+    // has to meet them in that order. During the Epic #2002 device UAT
+    // (2026-08-29) only the symptom was printed, and reading it as "the iOS
+    // notification replacement is broken" cost two UAT rounds — the server had
+    // been started by hand after `source scripts/load-env.sh` from zsh, which
+    // exported nothing and returned 0.
+    //
+    // Same contract as the checks around it: fail-open, never blocks `listen`,
+    // and a healthy install prints NOTHING. No dynamic import here, unlike the
+    // reconcilers: `src/lib/env` is already in server.ts's eval-time graph two
+    // lines from the top (`getEnvByKey` decides the bind address and port), so
+    // deferring it would defer nothing.
+    try {
+      runDotenvSelfCheck();
+    } catch (error) {
+      console.error('.env self-check failed:', error);
+    }
 
     // Issue #2123 / #2124: say, in one line, whether Web Push can work at all.
     // Unconfigured VAPID keys disable push silently (correct fail-safe, wrong
