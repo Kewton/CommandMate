@@ -150,6 +150,11 @@ self.addEventListener('message', function (event) {
 // over, and this device may still be showing it. Close the stale cards carrying
 // that tag, then show ONE silent replacement in their place.
 //
+// Issue #2155 widened the caller: EVERY tagged payload comes through here now,
+// not only resolutions. The replacement is silent only for a resolution — a
+// waiting card is still allowed to alert — but the close-then-show sequence
+// below is identical for both, so nothing in this function had to change.
+//
 // THE ORDER IS LOAD-BEARING AND MUST NOT BE INVERTED. Every subscription in
 // this app is created with `userVisibleOnly: true` — the only value browsers
 // accept from a web page — and each engine enforces it by looking at what is
@@ -173,6 +178,7 @@ function replaceStaleNotifications(title, options) {
     closing = Promise.resolve();
   } else {
     closing = registration
+      // Correct either way: whether an engine hands back every card carrying the tag or only the newest one, the loop closes exactly what it was handed (iOS is still unmeasured on this point — Issue #2155).
       .getNotifications({ tag: tag })
       .then(function (stale) {
         for (var i = 0; i < stale.length; i++) {
@@ -225,8 +231,16 @@ self.addEventListener('push', function (event) {
   // different, louder instruction.
   if (resolved) options.silent = true;
 
+  // --- Issue #2155 ---------------------------------------------------------
+  // Every TAGGED push takes the close-then-show path, not just resolutions.
+  // Safari/iOS does not collapse same-tag cards on a plain `showNotification`,
+  // so waiting notifications — and every escalation re-notification behind them
+  // — stacked up there while Chrome folded them into one (measured 2026-08-30,
+  // iPad iOS 18.7 / Safari 26.5.2 vs Android 10 / Chrome 151). Closing the
+  // stale cards explicitly is the part iOS does honour. An untagged push has
+  // nothing to replace and goes straight to `showNotification`.
   event.waitUntil(
-    resolved
+    options.tag
       ? replaceStaleNotifications(title, options)
       : self.registration.showNotification(title, options)
   );
