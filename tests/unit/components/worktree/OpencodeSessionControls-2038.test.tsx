@@ -15,7 +15,9 @@
  * assertions look at the session `POST` rather than at call index 0 — otherwise
  * they would be reading the share probe. The labels moved to `next-intl` in the
  * same Issue, so what used to be a two-locale map assertion now lives in
- * `OpencodeSessionControls-share-2051.test.tsx` as a check on the dictionaries.
+ * `tests/unit/i18n/opencode-session-keys-2083.test.ts`, which reads the real
+ * dictionaries off disk. The `next-intl` stub below returns the key, so this
+ * file pins *which* key each surface asks for and nothing about its wording.
  *
  * @vitest-environment jsdom
  */
@@ -24,10 +26,7 @@ import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
-const locale = vi.hoisted(() => ({ value: 'en' }));
-
 vi.mock('next-intl', () => ({
-  useLocale: () => locale.value,
   useTranslations: () => (key: string) => key,
 }));
 
@@ -45,7 +44,6 @@ function sessionCalls(mock: ReturnType<typeof vi.fn>): [string, RequestInit][] {
 let fetchMock: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
-  locale.value = 'en';
   fetchMock = vi.fn(async (url: string) => {
     if (String(url).includes('/opencode/share')) {
       return {
