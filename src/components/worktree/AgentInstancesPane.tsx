@@ -21,6 +21,7 @@ import {
   GripVertical,
   ChevronUp,
   ChevronDown,
+  ChevronRight,
   Trash2,
   Plus,
   MoreVertical,
@@ -37,6 +38,10 @@ import {
 } from '@/lib/cli-tools/types';
 import { MIN_AGENT_INSTANCES } from '@/lib/agent-instances-validator';
 import { VibeLocalSettings } from '@/components/worktree/VibeLocalSettings';
+// Issue #2069: the same card the More screen renders. Shared rather than
+// re-implemented so the pane cannot grow its own idea of what an update does to
+// a live session.
+import { AgentUpdatesCard } from '@/components/settings';
 import { Spinner } from '@/components/ui/Spinner';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { TruncationTooltip } from '@/components/common/TruncationTooltip';
@@ -227,6 +232,10 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
   const [addToolId, setAddToolId] = useState<CLIToolType>(CLI_TOOL_IDS[0]);
   // Index of the row currently being dragged (HTML5 reorder).
   const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
+  // Issue #2069: whether the agent-CLI update section is open. Closed by
+  // default so the pane keeps issuing no requests of its own (see the note at
+  // the disclosure itself).
+  const [showUpdates, setShowUpdates] = useState(false);
 
   // Issue #2054: read before the first row is built so every row resolves from
   // one snapshot rather than from a map that could change mid-render.
@@ -557,6 +566,50 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
           onVibeLocalContextWindowChange={onVibeLocalContextWindowChange}
         />
       )}
+
+      {/* Issue #2069: agent CLI versions and the update button, APPENDED below
+          the roster editor rather than woven into a row. The roster's rows are
+          about which sessions exist; this is about the binaries underneath
+          them, and it is also where the "a running session keeps the old
+          binary" warning and the per-instance restart belong — which is why it
+          is handed the roster it is rendered next to.
+
+          Behind a disclosure, and that is not a styling choice: mounting the
+          card runs a `--version` fan-out plus a worktree read, and #2054's
+          criterion for this pane is that a roster of claude and codex panes
+          issues ZERO requests — true of the request log, not only of the
+          pixels. A closed disclosure fetches nothing, so opening the roster
+          editor still costs nothing and the user pays only when they ask what
+          version they are on. */}
+      <div className="mt-6 border-t border-border pt-4">
+        <button
+          type="button"
+          data-testid="agent-updates-toggle"
+          aria-expanded={showUpdates}
+          onClick={() => setShowUpdates((open) => !open)}
+          className="flex w-full items-center gap-1 text-left text-sm font-semibold text-foreground hover:text-accent-600 dark:hover:text-accent-400"
+        >
+          {showUpdates ? (
+            <ChevronDown className="h-4 w-4 shrink-0" aria-hidden="true" />
+          ) : (
+            <ChevronRight className="h-4 w-4 shrink-0" aria-hidden="true" />
+          )}
+          {tCommon('agentUpdates.title')}
+        </button>
+        {showUpdates && (
+          <div className="mt-2">
+            <AgentUpdatesCard
+              worktreeId={worktreeId}
+              instances={instances.map((inst) => ({
+                id: inst.id,
+                cliTool: inst.cliTool,
+                alias: inst.alias,
+              }))}
+              variant="plain"
+            />
+          </div>
+        )}
+      </div>
     </div>
   );
 });
