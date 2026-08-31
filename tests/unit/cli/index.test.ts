@@ -116,6 +116,9 @@ describe('buildProgram', () => {
       'skill',
       // Issue #1937 (R9): expose the server to a phone and pair it with a QR code
       'remote',
+      // Issue #2069: agent CLI versions, and running an agent's own updater in a
+      // process that is not an agent pane
+      'agents',
     ];
 
     it.each(expectedCommands)('should register the %s command', (name) => {
