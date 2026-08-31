@@ -8,14 +8,28 @@
  * Touch targets: minimum 44x44px for mobile accessibility.
  * Keyboard: Arrow keys intercepted only when component has focus.
  * [DR4-006] No dangerouslySetInnerHTML usage.
+ *
+ * Issue #2176: the press highlight used to be a bare `setTimeout(() =>
+ * setActiveKey(null), KEY_PRESS_FEEDBACK_RESET_MS)` with no id kept, so nothing
+ * could cancel it \u2014 a toolbar unmounted inside those 150 ms left a callback
+ * that still ran and still wrote state into a tree that was gone. Inert in a
+ * browser (React drops the update on a torn-down root), NOT inert under jsdom,
+ * where it fires after `window` is torn down and surfaces as an unhandled error
+ * charged to whichever unrelated test is running. The timer now lives in
+ * {@link useKeyPressFeedback}, which holds its id in a ref and clears it on both
+ * the next press and unmount. This toolbar arms it from TWO routes \u2014 click and
+ * the intercepted arrow keys of `handleKeyDown` \u2014 which is exactly why the
+ * re-arm clear matters here: holding an arrow key down re-arms rather than
+ * letting the first press's deadline cut the last press's highlight short.
+ * Nothing observable moves.
  */
 
-import { useCallback, useMemo, useState, type KeyboardEvent } from 'react';
+import { useCallback, useMemo, type KeyboardEvent } from 'react';
 import { useTranslations } from 'next-intl';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { NavigationKey } from '@/types/terminal-keys';
 import { useSpecialKeys } from '@/hooks/useSpecialKeys';
-import { KEY_PRESS_FEEDBACK_RESET_MS } from '@/config/ui-feedback-config';
+import { useKeyPressFeedback } from '@/hooks/useKeyPressFeedback';
 
 export interface NavigationButtonsProps {
   worktreeId: string;
@@ -88,16 +102,17 @@ const PAGER_BUTTONS: ReadonlyArray<NavButtonDef> = [
 
 export function NavigationButtons({ worktreeId, cliToolId, instanceId, onKeysSent, showPagerKeys = false }: NavigationButtonsProps) {
   const t = useTranslations('worktree');
-  const [activeKey, setActiveKey] = useState<string | null>(null);
+  // Issue #2176: the highlight timer is owned by the hook (ref-held id, cleared
+  // on the next press and on unmount) instead of being fired and forgotten here.
+  const { activeKey, markPressed } = useKeyPressFeedback();
 
   const send = useSpecialKeys(worktreeId, cliToolId, instanceId, onKeysSent);
 
   const sendKeys = useCallback((keys: string[]) => {
     // Show immediate visual feedback, then delegate to the shared sender.
-    setActiveKey(keys[0]);
-    setTimeout(() => setActiveKey(null), KEY_PRESS_FEEDBACK_RESET_MS);
+    markPressed(keys[0]);
     send(keys);
-  }, [send]);
+  }, [markPressed, send]);
 
   const buttons = useMemo(
     () => (showPagerKeys ? [...NAVIGATION_BUTTONS, ...PAGER_BUTTONS] : NAVIGATION_BUTTONS),
