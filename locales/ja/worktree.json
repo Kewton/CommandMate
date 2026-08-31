@@ -1024,7 +1024,12 @@
       "failingGates": "不合格ゲート: {gates}",
       "gatesPassed": "全 {count} ゲート合格",
       "openHint": "検証ペインを開く",
-      "dash": "—"
+      "dash": "—",
+      "unverified": "未検証",
+      "noTask": "このブランチには実行契約が送られていません",
+      "reasonHeading": "この判定の理由",
+      "showReason": "理由を表示",
+      "hideReason": "理由を隠す"
     }
   },
   "task": {
