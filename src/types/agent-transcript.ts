@@ -1,5 +1,6 @@
 /**
- * How a history row says it holds the agent's own words (Issue #2041).
+ * How a history row says it holds the agent's own words (Issue #2041, extended
+ * for Claude Code in Issue #2121).
  *
  * Every `chat_messages` row written before this Issue came off a terminal: the
  * poller captured a pane, cleaned the box drawing out of it and saved what was
@@ -38,7 +39,7 @@
  */
 
 /**
- * Prefix on `chat_messages.request_id` for a row whose `content` is the agent's
+ * Prefix on `chat_messages.request_id` for a row whose `content` is opencode's
  * own Markdown rather than a scrape of its terminal.
  *
  * The `:` is load-bearing — it cannot appear in a claude request id, so
@@ -47,16 +48,48 @@
 export const AGENT_MARKDOWN_REQUEST_ID_PREFIX = 'oc-turn:';
 
 /**
+ * The same, for a turn read out of Claude Code's transcript JSONL (Issue #2121).
+ *
+ * A prefix of its own rather than a second use of `oc-turn:` because the marker
+ * is also the idempotency key, and the two readers name their turns with ids
+ * from different namespaces — opencode's `msg_…` and Claude's record `uuid`.
+ * Sharing the prefix would make a collision between the two a silent "already
+ * saved", which is the one failure mode a key must not have.
+ *
+ * `claude-` and not `cc-`: the string is what an operator reads in the row when
+ * they ask why History shows Markdown, and the tool id is what they will search
+ * the codebase for.
+ */
+export const CLAUDE_MARKDOWN_REQUEST_ID_PREFIX = 'claude-turn:';
+
+/**
+ * Every prefix that means "this row holds source, not a rendering".
+ *
+ * One list rather than a chain of `startsWith` calls, so that adding the third
+ * tool is adding a constant here and nothing at the reader. The reader
+ * (`ConversationPairCard`) has never named a prefix and still does not — which
+ * is what let Issue #2121 put Claude's rows on the Markdown path without
+ * touching the component (#2121 受入条件).
+ */
+export const AGENT_MARKDOWN_REQUEST_ID_PREFIXES: readonly string[] = [
+  AGENT_MARKDOWN_REQUEST_ID_PREFIX,
+  CLAUDE_MARKDOWN_REQUEST_ID_PREFIX,
+];
+
+/**
  * Whether this row's `content` may be rendered as Markdown.
  *
  * Conservative by construction: an absent or unrecognised `requestId` answers
  * false, which is the pre-#2041 rendering. Nothing is ever *upgraded* to
- * Markdown by guessing at its content.
+ * Markdown by guessing at its content — in particular the `requestId` the
+ * scraper has always written for Claude (`req_…`, from `parseClaudeOutput`)
+ * matches no prefix and keeps its verbatim rendering.
  *
  * @param requestId - `ChatMessage.requestId`, which is usually absent
  */
 export function isAgentAuthoredMarkdown(requestId: string | undefined | null): boolean {
-  return typeof requestId === 'string' && requestId.startsWith(AGENT_MARKDOWN_REQUEST_ID_PREFIX);
+  if (typeof requestId !== 'string') return false;
+  return AGENT_MARKDOWN_REQUEST_ID_PREFIXES.some((prefix) => requestId.startsWith(prefix));
 }
 
 /**
@@ -75,4 +108,22 @@ export function isAgentAuthoredMarkdown(requestId: string | undefined | null): b
  */
 export function opencodeTurnRequestId(userMessageId: string): string {
   return `${AGENT_MARKDOWN_REQUEST_ID_PREFIX}${userMessageId}`;
+}
+
+/**
+ * The row id for one Claude Code turn (Issue #2121).
+ *
+ * The turn is named by the **prompt record it answers** — the `uuid` of the
+ * `type: "user"` line the operator's own text arrived on. Deliberately not the
+ * assistant record's `uuid` and not its `requestId`, because neither is one per
+ * turn: a live transcript sampled while a single prompt was still being
+ * answered (2026-08-31) already held **55 assistant records across 23 distinct
+ * `requestId`s**, so keying on either would have split one reply into dozens of
+ * History rows. The Issue measured the finished shape: 98 assistant records
+ * against the single `chat_messages` row the poller wrote.
+ *
+ * @param promptUuid - `uuid` of the user record that opened the turn
+ */
+export function claudeTurnRequestId(promptUuid: string): string {
+  return `${CLAUDE_MARKDOWN_REQUEST_ID_PREFIX}${promptUuid}`;
 }

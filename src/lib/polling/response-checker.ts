@@ -52,7 +52,7 @@ import {
 import { isDuplicatePrompt, normalizePromptForDedup } from './prompt-dedup';
 import { recordPromptDedupSkip } from './prompt-dedup-state';
 import { isDuplicateResponse } from './response-dedup';
-import { isStructuredHistoryWriterLive } from './structured-history-gate';
+import { captureStructuredHistoryTurn, isStructuredHistoryWriterLive } from './structured-history-gate';
 import { getPollerKey, stopPolling, GEMINI_LOADING_INDICATORS } from './response-poller-core';
 import { notifyPushSubscribers } from '@/lib/push';
 // Issue #1790: imported by deep path, not through `@/lib/push`. Suites that
@@ -990,7 +990,20 @@ export async function checkForResponse(
     // (the prompt row, Auto-Yes, the waiting episode, the push fan-out), and the
     // liveness answer is only allowed to suppress the two calls that RECORD THE
     // REPLY. See `./structured-history-gate` for the whole argument.
-    const structuredHistoryLive = isStructuredHistoryWriterLive(worktreeId, cliToolId, instanceId);
+    //
+    // Issue #2121 adds the second shape. Claude has no stream to be live on; it
+    // has a transcript file, and this is the moment to read it — the turn is
+    // finished (everything above this line established that) and the row is
+    // about to be written. `captureStructuredHistoryTurn` writes the agent's own
+    // Markdown and answers true, or answers false and leaves the scrape below to
+    // be the only record. `||` and not `&&`: the two are different tools'
+    // answers to the same question, and each one is false for the other's tool.
+    const structuredHistoryLive =
+      isStructuredHistoryWriterLive(worktreeId, cliToolId, instanceId) ||
+      (await captureStructuredHistoryTurn(worktreeId, cliToolId, instanceId, {
+        worktreePath: worktree.path,
+        transcriptPathHint: claudeMetadata?.logFilePath ?? null,
+      }));
 
     // Create Markdown log file for the conversation pair
     if (cleanedResponse && !structuredHistoryLive) {
