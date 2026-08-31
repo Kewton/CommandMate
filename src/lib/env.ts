@@ -7,8 +7,12 @@
  *
  * Issue #135: DB path resolution fix
  * Uses getDefaultDbPath() from db-path-resolver.ts for consistent DB path handling
+ *
+ * Issue #2132: startup self-check for ".env exists but nothing was loaded"
+ * See {@link runDotenvSelfCheck}.
  */
 
+import fs from 'fs';
 import path from 'path';
 import { getDefaultDbPath, validateDbPath } from './db/db-path-resolver';
 
@@ -80,6 +84,171 @@ export function getEnvWithFallback(newKey: string, oldKey: string): string | und
  */
 export function getEnvByKey(key: EnvKey): string | undefined {
   return getEnvWithFallback(key, ENV_MAPPING[key]);
+}
+
+// ============================================================
+// [Issue #2132] ".env is right there and none of it was loaded"
+// ============================================================
+
+/**
+ * The environment shape this module's self-check reads.
+ *
+ * Same escape hatch `lib/push/vapid.ts` gives `inspectVapidConfig`: tests vary
+ * the environment by passing one in, never by mutating `process.env`.
+ */
+export type DotenvCheckEnv = Record<string, string | undefined>;
+
+/** What {@link inspectDotenvLoad} found. */
+export interface DotenvLoadInspection {
+  /** Absolute path of the `.env` that was read. */
+  envPath: string;
+  /** Assignment keys declared by the file, first-seen order, deduplicated. */
+  declaredKeys: string[];
+  /** The subset of {@link declaredKeys} that reached this process. */
+  presentKeys: string[];
+  /**
+   * True when the file declares at least one key and NOT ONE of them is set.
+   *
+   * The all-or-nothing threshold is deliberate. A partially applied `.env` has
+   * ordinary explanations — a key commented out mid-edit, a value deliberately
+   * overridden on the command line — and warning about those would train the
+   * reader to skip the line. Zero out of N has only one explanation: the load
+   * never happened.
+   */
+  loadFailed: boolean;
+}
+
+/** `KEY`, `export KEY`, ` KEY ` — the assignment forms a `.env` line can take. */
+const DOTENV_ASSIGNMENT = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/;
+
+/**
+ * The variable names a `.env` file declares, in file order, without duplicates.
+ *
+ * Values are never returned. `CM_VAPID_PRIVATE_KEY` lives in this file, and the
+ * only reason to parse it here is to count how many of its NAMES arrived.
+ */
+export function parseDotenvKeys(contents: string): string[] {
+  const keys: string[] = [];
+  const seen = new Set<string>();
+  for (const line of contents.split(/\r?\n/)) {
+    const match = DOTENV_ASSIGNMENT.exec(line);
+    if (!match) continue;
+    const key = match[1];
+    if (seen.has(key)) continue;
+    seen.add(key);
+    keys.push(key);
+  }
+  return keys;
+}
+
+/** Options for {@link inspectDotenvLoad} and {@link runDotenvSelfCheck}. */
+export interface DotenvSelfCheckOptions {
+  /** Directory holding `.env` (default: `process.cwd()`). */
+  cwd?: string;
+  /** Environment to inspect (default: `process.env`). */
+  env?: DotenvCheckEnv;
+  /** Where the report goes (default: `console.warn`). */
+  warn?: (message: string) => void;
+}
+
+/**
+ * Compare the `.env` on disk against the environment this process actually got.
+ *
+ * @returns `null` when there is nothing to compare — no `.env`, an unreadable
+ *   one, or one that declares no variables. None of those is a fault worth a
+ *   line of startup output.
+ */
+export function inspectDotenvLoad(
+  options: DotenvSelfCheckOptions = {},
+): DotenvLoadInspection | null {
+  const { cwd = process.cwd(), env = process.env } = options;
+  const envPath = path.join(cwd, '.env');
+
+  let contents: string;
+  try {
+    if (!fs.existsSync(envPath)) return null;
+    contents = fs.readFileSync(envPath, 'utf8');
+  } catch {
+    // Unreadable is a permissions question, not a loading question.
+    return null;
+  }
+
+  const declaredKeys = parseDotenvKeys(contents);
+  if (declaredKeys.length === 0) return null;
+
+  const presentKeys = declaredKeys.filter((key) => env[key] !== undefined);
+
+  return {
+    envPath,
+    declaredKeys,
+    presentKeys,
+    loadFailed: presentKeys.length === 0,
+  };
+}
+
+/** How many key names the report is willing to print before it says "and N more". */
+const DOTENV_REPORT_KEY_LIMIT = 8;
+
+/**
+ * The lines {@link runDotenvSelfCheck} prints — empty when the load worked.
+ *
+ * Exported so the wording is pinned by a test rather than by a screenshot.
+ */
+export function formatDotenvReportLines(inspection: DotenvLoadInspection): string[] {
+  if (!inspection.loadFailed) return [];
+
+  const shown = inspection.declaredKeys.slice(0, DOTENV_REPORT_KEY_LIMIT);
+  const omitted = inspection.declaredKeys.length - shown.length;
+  const names = omitted > 0 ? `${shown.join(', ')}, and ${omitted} more` : shown.join(', ');
+
+  return [
+    `[env] ${inspection.envPath} declares ${inspection.declaredKeys.length} variable(s) `
+      + 'and NOT ONE of them is set in this process: '
+      + `${names}.`,
+    '[env] The server is running on defaults. Web Push, the database path and the '
+      + 'worktree root are all configured through those variables, so this is very '
+      + 'unlikely to be what you wanted.',
+    '[env] Most likely cause (Issue #2132): the server was started by hand after '
+      + '`source scripts/load-env.sh` from a shell that is not bash. That script now '
+      + 'refuses instead of exporting nothing, so re-run it and read what it says.',
+    '[env] Supported restart, no rebuild: ./scripts/restart-nobuild.sh  '
+      + '(or ./scripts/start.sh --daemon)',
+  ];
+}
+
+/**
+ * Report, in one place at startup, that `.env` exists and none of it arrived.
+ *
+ * Same contract as `runVapidSelfCheck` in `lib/push/vapid.ts`, deliberately:
+ * fail-open, never throws, never blocks `listen`, and a healthy install prints
+ * NOTHING — which is what makes the presence of a line meaningful.
+ *
+ * It exists because the failure it names is invisible from inside the process.
+ * Every consumer of these variables has a defensible default, so a server that
+ * received none of them starts, listens, and answers requests; what it does not
+ * do is send a single push notification, and it may open a different database
+ * than the one the operator believes they are looking at. During the Epic #2002
+ * device UAT the only signal was the VAPID warning, and reading it as "push is
+ * broken" rather than "the environment is empty" cost two UAT rounds.
+ *
+ * @returns The inspection, or `null` when there was nothing to check.
+ */
+export function runDotenvSelfCheck(
+  options: DotenvSelfCheckOptions = {},
+): DotenvLoadInspection | null {
+  const { warn = (message: string) => console.warn(message) } = options;
+
+  try {
+    const inspection = inspectDotenvLoad(options);
+    if (!inspection) return null;
+    for (const line of formatDotenvReportLines(inspection)) {
+      warn(line);
+    }
+    return inspection;
+  } catch {
+    // A diagnostic must never be the reason a server fails to start.
+    return null;
+  }
 }
 
 // ============================================================

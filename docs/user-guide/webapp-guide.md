@@ -747,10 +747,18 @@ More 画面の**通知**に、**この端末に届いていない**ことを示�
 
 ```
 [WARN] [push/sender] push-send-failed {"statusCode":403,"consecutiveFailures":4}
-[INFO] [push/sender] push-fanout-complete {"kind":"prompt","delivered":1,"failed":1}
+[INFO] [push/sender] push-fanout-complete {"kind":"prompt","worktreeId":"my-feature","instanceId":"claude-2","delivered":1,"failed":1}
 ```
 
 `delivered` が 0 のまま増えないときは、購読が 0 台か、全端末で失敗しています。
+
+`worktreeId` / `instanceId` は **どのワークツリーのどのインスタンス宛だったか**を示します
+（`instanceId` は送信元が名乗らなかったときは出ません）。複数のワークツリーを同時に動かしていると
+通知が同じ秒に混ざるので、**特定のワークツリーの通知を数えるときは必ず `worktreeId` で絞ってください**:
+
+```bash
+grep -a push-fanout-complete logs/server.log | grep -c '"worktreeId":"my-feature"'
+```
 
 ---
 
