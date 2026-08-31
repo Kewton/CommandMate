@@ -42,7 +42,9 @@ import {
 } from '@/lib/push/notification-dedup';
 import { setPushEscalationSettings } from '@/lib/push/escalation-settings';
 import {
+  CLASSIFICATION_GRACE_MS,
   ESCALATION_TICK_MS,
+  heldWaitCount,
   pendingEscalationCount,
   runEscalationTick,
   startWaitingPushNotifier,
@@ -254,10 +256,11 @@ describe('one wait produces one notification', () => {
 });
 
 describe('the body says what kind of attention is needed', () => {
+  // `unclassified` is not in this table because it is not decided on the edge
+  // any more — see the Issue #2156 block below, which pins both of its outcomes.
   it.each([
     ['prompt', 'Waiting for your reply', '応答待ちです'],
     ['menu', 'Needs attention in the terminal', '端末の確認が必要です'],
-    ['unclassified', 'Needs attention in the terminal', '端末の確認が必要です'],
   ] as const)('renders %s in both locales', async (kind, en, ja) => {
     subscribe('https://push.example/en', 'en');
     subscribe('https://push.example/ja', 'ja');
@@ -267,6 +270,115 @@ describe('the body says what kind of attention is needed', () => {
     await flush();
 
     expect(bodies().sort()).toEqual([en, ja].sort());
+  });
+});
+
+describe('a wait that has not named itself yet (Issue #2156)', () => {
+  /**
+   * The whole block runs on fake timers because the property under test *is*
+   * the delay: the classification the notification must quote only exists after
+   * a later probe has written it, and that write is deliberately not an edge.
+   */
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(T0);
+  });
+
+  /** One probe of an open wait. Refreshes the kind; emits nothing (#1786). */
+  function probe(kind: 'prompt' | 'menu' | 'unclassified', at: number): void {
+    vi.setSystemTime(at);
+    observeWaitingEdge({ worktreeId: WT, cliToolId: 'claude', waiting: true, kind, now: at });
+  }
+
+  it('says "waiting for your reply" once the probe classifies it', async () => {
+    // The AskUserQuestion session from the Issue: the episode opens before the
+    // dialog is on the pane, so the first verdict is `unclassified`, and the
+    // probe 6 s later reads it as an answerable prompt.
+    subscribe('https://push.example/en', 'en');
+    subscribe('https://push.example/ja', 'ja');
+    startWaitingPushNotifier();
+
+    probe('unclassified', T0);
+    // Nothing has left the process yet — this is the notification that used to
+    // go out saying "check the terminal".
+    expect(sendNotification).not.toHaveBeenCalled();
+    expect(heldWaitCount()).toBe(1);
+
+    probe('prompt', T0 + 6_000);
+
+    await vi.advanceTimersByTimeAsync(CLASSIFICATION_GRACE_MS);
+
+    expect(sendNotification).toHaveBeenCalledTimes(2);
+    expect(bodies().sort()).toEqual(['Waiting for your reply', '応答待ちです'].sort());
+    expect(payloads()[0]).toMatchObject({ waitingKind: 'prompt' });
+    // Held, not duplicated: the wait produced exactly one card per device.
+    expect(heldWaitCount()).toBe(0);
+    expect(pendingEscalationCount()).toBe(1);
+  });
+
+  it('still says "check the terminal" for a wait that never gets named', async () => {
+    // The regression guard for the other half of the acceptance criterion: the
+    // grace must not turn every unreadable frame into an answerable prompt.
+    subscribe('https://push.example/en', 'en');
+    subscribe('https://push.example/ja', 'ja');
+    startWaitingPushNotifier();
+
+    probe('unclassified', T0);
+    probe('unclassified', T0 + 6_000);
+
+    await vi.advanceTimersByTimeAsync(CLASSIFICATION_GRACE_MS);
+
+    expect(bodies().sort()).toEqual(
+      ['Needs attention in the terminal', '端末の確認が必要です'].sort()
+    );
+    expect(payloads()[0]).toMatchObject({ waitingKind: 'unclassified' });
+  });
+
+  it('does not hold a wait the probe already named', async () => {
+    // `menu` is a positive reading of the pane, not an absence of one, so it
+    // notifies on the edge with no delay at all.
+    subscribe('https://push.example/en', 'en');
+    startWaitingPushNotifier();
+
+    observeWaitingEdge({ worktreeId: WT, cliToolId: 'claude', waiting: true, kind: 'menu', now: T0 });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(bodies()).toEqual(['Needs attention in the terminal']);
+    expect(heldWaitCount()).toBe(0);
+  });
+
+  it('sends nothing at all when the wait ends inside the grace', async () => {
+    // Auto-Yes, or a human at the terminal. The notification would have been
+    // about something already over, so it is dropped rather than corrected.
+    subscribe('https://push.example/en', 'en');
+    startWaitingPushNotifier();
+
+    probe('unclassified', T0);
+    vi.setSystemTime(T0 + 2_000);
+    observeWaitingEdge({ worktreeId: WT, cliToolId: 'claude', waiting: false, now: T0 + 2_000 });
+
+    await vi.advanceTimersByTimeAsync(CLASSIFICATION_GRACE_MS * 2);
+
+    expect(bodies()).toEqual([]);
+    expect(heldWaitCount()).toBe(0);
+    expect(pendingEscalationCount()).toBe(0);
+  });
+
+  it('still earns its reminder after being held', async () => {
+    setPushEscalationSettings({ enabled: true, thresholdMinutes: 10 });
+    subscribe('https://push.example/en', 'en');
+    startWaitingPushNotifier();
+
+    probe('unclassified', T0);
+    probe('prompt', T0 + 6_000);
+    await vi.advanceTimersByTimeAsync(CLASSIFICATION_GRACE_MS);
+    expect(sendNotification).toHaveBeenCalledTimes(1);
+
+    runEscalationTick(T0 + 11 * MINUTE);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(sendNotification).toHaveBeenCalledTimes(2);
+    expect(bodies()[1]).toBe('Still waiting for your reply (11 min)');
   });
 });
 
