@@ -12,10 +12,11 @@ import { getCliToolDisplayName, CLI_TOOL_DISPLAY_NAMES } from '@/lib/cli-tools/t
 import { getAllRepositories, type Repository } from '@/lib/db/db-repository';
 import { getWorktrees } from '@/lib/db/worktree-db';
 import type Database from 'better-sqlite3';
-
-function resolveCommandMateBinary(): string {
-  return process.env.CM_LAUNCHED_BY === 'commandmate-cli' ? 'commandmate' : 'commandmatedev';
-}
+// Issue #2120: the binary-name rule used to live here as a module-private
+// function. It moved to `@/lib/cli/command-reference` when the GUI started
+// showing the same commands, so a development checkout cannot tell the
+// assistant `commandmatedev` and the operator `commandmate`.
+import { resolveCommandMateBinary } from '@/lib/cli/command-reference';
 
 /**
  * The CommandMate CLI surface an assistant session is told about.
