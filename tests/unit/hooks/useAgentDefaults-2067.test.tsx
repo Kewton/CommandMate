@@ -3,10 +3,12 @@
  * the default" actions (Issue #2067).
  *
  * The claims worth pinning here are about WHERE it writes and WHAT it believes
- * afterwards, and both are invisible to the component test: that the save goes
- * to #2065's endpoint (not a second one this Issue invented), that the client
- * mirror is updated from the RESPONSE rather than from what was sent, and that a
- * 200 carrying the wrong shape is treated as a failure rather than rendered.
+ * afterwards, and all of them are invisible to the component test: that BOTH
+ * requests carry the worktree that bounds them to one repository, that the save
+ * goes to #2065's endpoint (not a second one this Issue invented), that the
+ * client mirror is updated from the RESPONSE rather than from what was sent, and
+ * that a 200 carrying the wrong shape is treated as a failure rather than
+ * rendered.
  *
  * @vitest-environment jsdom
  */
@@ -27,6 +29,7 @@ import type { CLIToolType } from '@/lib/cli-tools/types';
 const mockFetch = vi.fn();
 global.fetch = mockFetch as unknown as typeof fetch;
 
+const WORKTREE_ID = 'wt/with space';
 const ROSTER: CLIToolType[] = ['codex', 'claude'];
 
 function jsonOk(body: unknown) {
@@ -49,15 +52,57 @@ describe('useAgentDefaults (Issue #2067)', () => {
 
   it('reads the eligible count from the worktrees apply route', async () => {
     mockFetch.mockResolvedValue(jsonOk({ success: true, eligible: 4 }));
-    const { result } = renderHook(() => useAgentDefaults(ROSTER));
+    const { result } = renderHook(() => useAgentDefaults(WORKTREE_ID, ROSTER));
 
     await act(async () => {
       expect(await result.current.refreshEligible()).toBe(4);
     });
 
-    expect(mockFetch).toHaveBeenCalledWith(APPLY_DEFAULT_AGENTS_ENDPOINT);
+    // The worktree is what bounds the answer to ONE repository, and it is
+    // encoded: a worktree id may contain characters a bare interpolation would
+    // turn into a second query parameter.
+    expect(mockFetch).toHaveBeenCalledWith(
+      `${APPLY_DEFAULT_AGENTS_ENDPOINT}?worktreeId=wt%2Fwith%20space`,
+    );
     expect(result.current.eligible).toBe(4);
     expect(result.current.error).toBeNull();
+  });
+
+  it('adopts the repository scope the server names', async () => {
+    mockFetch.mockResolvedValue(
+      jsonOk({
+        success: true,
+        eligible: 2,
+        repositoryName: 'CommandMate',
+        repoDeclaresAgents: false,
+      }),
+    );
+    const { result } = renderHook(() => useAgentDefaults(WORKTREE_ID, ROSTER));
+
+    await act(async () => {
+      await result.current.refreshEligible();
+    });
+
+    expect(result.current.repositoryName).toBe('CommandMate');
+    expect(result.current.repoDeclaresAgents).toBe(false);
+  });
+
+  it('reports a repository that declares its agents, so the panel can say why', async () => {
+    mockFetch.mockResolvedValue(
+      jsonOk({
+        success: true,
+        eligible: 0,
+        repositoryName: 'CommandMate',
+        repoDeclaresAgents: true,
+      }),
+    );
+    const { result } = renderHook(() => useAgentDefaults(WORKTREE_ID, ROSTER));
+
+    await act(async () => {
+      expect(await result.current.refreshEligible()).toBe(0);
+    });
+
+    expect(result.current.repoDeclaresAgents).toBe(true);
   });
 
   it('treats a 200 without a numeric count as a failure, not as zero', async () => {
@@ -65,7 +110,7 @@ describe('useAgentDefaults (Issue #2067)', () => {
     // is not this route's. Rendering `undefined` as a count would invite a
     // confirmation for an unknown number of branches.
     mockFetch.mockResolvedValue(jsonOk({ notThisRoute: true }));
-    const { result } = renderHook(() => useAgentDefaults(ROSTER));
+    const { result } = renderHook(() => useAgentDefaults(WORKTREE_ID, ROSTER));
 
     await act(async () => {
       expect(await result.current.refreshEligible()).toBeNull();
@@ -79,7 +124,7 @@ describe('useAgentDefaults (Issue #2067)', () => {
     mockFetch.mockResolvedValue(
       jsonOk({ success: true, defaultSelectedAgents: ['codex', 'claude'], configured: true })
     );
-    const { result } = renderHook(() => useAgentDefaults(ROSTER));
+    const { result } = renderHook(() => useAgentDefaults(WORKTREE_ID, ROSTER));
 
     await act(async () => {
       expect(await result.current.saveAsDefault()).toBe(true);
@@ -100,7 +145,7 @@ describe('useAgentDefaults (Issue #2067)', () => {
     mockFetch.mockResolvedValue(
       jsonOk({ success: true, defaultSelectedAgents: ['gemini', 'opencode'] })
     );
-    const { result } = renderHook(() => useAgentDefaults(ROSTER));
+    const { result } = renderHook(() => useAgentDefaults(WORKTREE_ID, ROSTER));
 
     await act(async () => {
       await result.current.saveAsDefault();
@@ -111,7 +156,7 @@ describe('useAgentDefaults (Issue #2067)', () => {
 
   it('surfaces a rejected save as error="save" and leaves the mirror alone', async () => {
     mockFetch.mockResolvedValue(jsonStatus(400, { success: false, error: 'Invalid CLI tool ID' }));
-    const { result } = renderHook(() => useAgentDefaults(ROSTER));
+    const { result } = renderHook(() => useAgentDefaults(WORKTREE_ID, ROSTER));
 
     await act(async () => {
       expect(await result.current.saveAsDefault()).toBe(false);
@@ -126,7 +171,7 @@ describe('useAgentDefaults (Issue #2067)', () => {
     mockFetch.mockResolvedValue(
       jsonOk({ success: true, updated: 3, updatedIds: ['a', 'b', 'c'], eligible: 0 })
     );
-    const { result } = renderHook(() => useAgentDefaults(ROSTER));
+    const { result } = renderHook(() => useAgentDefaults(WORKTREE_ID, ROSTER));
 
     await act(async () => {
       expect(await result.current.applyToUnchanged()).toBe(3);
@@ -136,6 +181,7 @@ describe('useAgentDefaults (Issue #2067)', () => {
     expect(url).toBe(APPLY_DEFAULT_AGENTS_ENDPOINT);
     expect((init as RequestInit).method).toBe('POST');
     expect(JSON.parse((init as RequestInit).body as string)).toEqual({
+      worktreeId: WORKTREE_ID,
       agents: ['codex', 'claude'],
     });
     expect(result.current.appliedCount).toBe(3);
@@ -147,7 +193,7 @@ describe('useAgentDefaults (Issue #2067)', () => {
     mockFetch
       .mockResolvedValueOnce(jsonOk({ success: true, eligible: 5 }))
       .mockResolvedValueOnce(jsonOk({ success: true, updated: 5 }));
-    const { result } = renderHook(() => useAgentDefaults(ROSTER));
+    const { result } = renderHook(() => useAgentDefaults(WORKTREE_ID, ROSTER));
 
     await act(async () => {
       await result.current.refreshEligible();
@@ -161,7 +207,7 @@ describe('useAgentDefaults (Issue #2067)', () => {
 
   it('surfaces a failed apply as error="apply" with no applied count', async () => {
     mockFetch.mockRejectedValue(new Error('offline'));
-    const { result } = renderHook(() => useAgentDefaults(ROSTER));
+    const { result } = renderHook(() => useAgentDefaults(WORKTREE_ID, ROSTER));
 
     await act(async () => {
       expect(await result.current.applyToUnchanged()).toBeNull();
@@ -175,7 +221,7 @@ describe('useAgentDefaults (Issue #2067)', () => {
     mockFetch.mockResolvedValue(
       jsonOk({ success: true, defaultSelectedAgents: ['codex', 'claude'] })
     );
-    const { result } = renderHook(() => useAgentDefaults(ROSTER));
+    const { result } = renderHook(() => useAgentDefaults(WORKTREE_ID, ROSTER));
     await act(async () => {
       await result.current.saveAsDefault();
     });

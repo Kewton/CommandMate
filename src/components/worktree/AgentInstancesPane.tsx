@@ -284,7 +284,7 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
     return order;
   }, [instances]);
 
-  const agentDefaults = useAgentDefaults(rosterToolOrder);
+  const agentDefaults = useAgentDefaults(worktreeId, rosterToolOrder);
 
   /**
    * A roster of six instances of one tool is a legal roster and an illegal
@@ -297,6 +297,19 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
     rosterToolOrder.length <= MAX_SELECTED_AGENTS;
 
   const defaultsBusy = saving || agentDefaults.busy;
+
+  /**
+   * The bulk apply is offered only when the panel knows a number greater than
+   * zero. `null` — the count has not been read, or the read failed — is not a
+   * number to act on: pressing through it used to re-read and then return with
+   * no dialog and no new message, which reads exactly like a dead button.
+   * The retry control below is what makes that state recoverable.
+   */
+  const canApplyToUnchanged =
+    canUseAsDefault &&
+    !agentDefaults.repoDeclaresAgents &&
+    agentDefaults.eligible !== null &&
+    agentDefaults.eligible > 0;
 
   const defaultsErrorMessage =
     agentDefaults.error === 'count'
@@ -315,7 +328,7 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
   }, [showDefaults, agentDefaults]);
 
   const handleApplyToUnchanged = useCallback(async () => {
-    if (!canUseAsDefault) return;
+    if (!canApplyToUnchanged) return;
     // Re-read immediately before asking. The number on the panel can be minutes
     // old — a sync may have discovered branches since it was read — and the
     // number in the dialog is the promise this action makes.
@@ -329,7 +342,7 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
     });
     if (!confirmed) return;
     await agentDefaults.applyToUnchanged();
-  }, [canUseAsDefault, agentDefaults, confirm, t, rosterToolOrder]);
+  }, [canApplyToUnchanged, agentDefaults, confirm, t, rosterToolOrder]);
 
   /** Normalize order to array index and PATCH the full roster. */
   const persist = useCallback(
@@ -710,23 +723,53 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
             </button>
 
             <div className="space-y-1">
+              {/* The repository the apply is bounded to, named by the server
+                  rather than assumed by the pane. It is the answer to "which
+                  branches?" that a bare count cannot give. */}
+              {agentDefaults.repositoryName && (
+                <p
+                  data-testid="agent-defaults-repository"
+                  data-repository={agentDefaults.repositoryName}
+                  className="text-xs text-muted-foreground"
+                >
+                  {t('agentDefaultsRepositoryLabel', {
+                    repository: agentDefaults.repositoryName,
+                  })}
+                </p>
+              )}
+
+              {/* Issue #2066's declaration outranks this button, permanently:
+                  writing `selected_agents` would retire a committed agents.yaml
+                  for those branches with no way back. Saying so beats showing a
+                  zero the user cannot account for. */}
+              {agentDefaults.repoDeclaresAgents && (
+                <p
+                  data-testid="agent-defaults-repo-declared"
+                  className="text-xs text-warning-foreground"
+                >
+                  {t('agentDefaultsRepoDeclared')}
+                </p>
+              )}
+
               {/* The count is shown BEFORE the confirmation, and it is also
                   re-read at the moment of the click — see handleApplyToUnchanged.
                   `data-count` carries the raw number so a test reads the number
                   and not a translated sentence. */}
-              <span
-                data-testid="agent-defaults-eligible"
-                data-count={agentDefaults.eligible ?? undefined}
-                className="block text-xs text-muted-foreground"
-              >
-                {agentDefaults.eligible === null
-                  ? t('agentDefaultsEligibleUnknown')
-                  : t('agentDefaultsEligible', { count: agentDefaults.eligible })}
-              </span>
+              {!agentDefaults.repoDeclaresAgents && (
+                <span
+                  data-testid="agent-defaults-eligible"
+                  data-count={agentDefaults.eligible ?? undefined}
+                  className="block text-xs text-muted-foreground"
+                >
+                  {agentDefaults.eligible === null
+                    ? t('agentDefaultsEligibleUnknown')
+                    : t('agentDefaultsEligible', { count: agentDefaults.eligible })}
+                </span>
+              )}
               <button
                 type="button"
                 data-testid="agent-defaults-apply"
-                disabled={defaultsBusy || !canUseAsDefault || agentDefaults.eligible === 0}
+                disabled={defaultsBusy || !canApplyToUnchanged}
                 onClick={() => {
                   void handleApplyToUnchanged();
                 }}
@@ -759,12 +802,30 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
             )}
 
             {defaultsErrorMessage && (
-              <p
-                data-testid="agent-defaults-error"
-                className="text-xs text-danger-foreground"
-              >
-                {defaultsErrorMessage}
-              </p>
+              <div className="space-y-1">
+                <p
+                  data-testid="agent-defaults-error"
+                  className="text-xs text-danger-foreground"
+                >
+                  {defaultsErrorMessage}
+                </p>
+                {/* Without this the panel is a dead end after a transient 500:
+                    the count stays unknown, the apply stays disabled, and the
+                    only way back is to collapse and reopen the disclosure. */}
+                {agentDefaults.error === 'count' && (
+                  <button
+                    type="button"
+                    data-testid="agent-defaults-retry"
+                    disabled={defaultsBusy}
+                    onClick={() => {
+                      void agentDefaults.refreshEligible();
+                    }}
+                    className="text-xs font-medium underline text-accent-700 dark:text-accent-300 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {t('agentDefaultsRetry')}
+                  </button>
+                )}
+              </div>
             )}
           </div>
         )}

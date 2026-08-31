@@ -66,11 +66,19 @@ async function openDefaults(): Promise<void> {
   );
 }
 
-/** The request bodies, by URL, in call order. */
+/**
+ * The request inits sent to `url`, in call order. Matched by PREFIX because the
+ * count read carries the calling worktree as a query parameter.
+ */
 function callsTo(url: string): RequestInit[] {
   return mockFetch.mock.calls
-    .filter((call) => call[0] === url)
+    .filter((call) => typeof call[0] === 'string' && (call[0] as string).startsWith(url))
     .map((call) => (call[1] ?? {}) as RequestInit);
+}
+
+/** The POSTs to the apply route — the requests that actually write. */
+function applyPosts(): RequestInit[] {
+  return callsTo(APPLY_DEFAULT_AGENTS_ENDPOINT).filter((init) => init.method === 'POST');
 }
 
 describe('AgentInstancesPane defaults panel (Issue #2067)', () => {
@@ -98,6 +106,10 @@ describe('AgentInstancesPane defaults panel (Issue #2067)', () => {
       await openDefaults();
 
       expect(callsTo(APPLY_DEFAULT_AGENTS_ENDPOINT)).toHaveLength(1);
+      // Bounded to the worktree the pane is rendered for, not to the install.
+      expect(mockFetch.mock.calls[0][0]).toBe(
+        `${APPLY_DEFAULT_AGENTS_ENDPOINT}?worktreeId=w-2067`,
+      );
       expect(screen.getByTestId('agent-defaults-eligible')).toHaveAttribute('data-count', '7');
     });
   });
@@ -155,35 +167,55 @@ describe('AgentInstancesPane defaults panel (Issue #2067)', () => {
   });
 
   describe('"apply to unchanged branches"', () => {
-    it('confirms first, then POSTs, and the applied count matches what was shown', async () => {
+    it('confirms first, then POSTs the roster for this worktree', async () => {
       mockFetch.mockResolvedValue(jsonOk({ success: true, eligible: 3 }));
       renderPane([primary('codex', 0), primary('claude', 1)]);
       await openDefaults();
 
-      const previewed = screen.getByTestId('agent-defaults-eligible').getAttribute('data-count');
-      expect(previewed).toBe('3');
+      expect(screen.getByTestId('agent-defaults-eligible')).toHaveAttribute('data-count', '3');
 
       fireEvent.click(screen.getByTestId('agent-defaults-apply'));
 
       // The dialog is the gate: nothing has been written yet.
       const confirmButton = await screen.findByTestId('confirm-dialog-confirm');
-      expect(
-        callsTo(APPLY_DEFAULT_AGENTS_ENDPOINT).filter((init) => init.method === 'POST'),
-      ).toHaveLength(0);
+      expect(applyPosts()).toHaveLength(0);
 
       mockFetch.mockResolvedValue(
         jsonOk({ success: true, updated: 3, updatedIds: ['a', 'b', 'c'], eligible: 0 }),
       );
       fireEvent.click(confirmButton);
 
-      const applied = await screen.findByTestId('agent-defaults-applied');
-      expect(applied).toHaveAttribute('data-count', previewed!);
+      await screen.findByTestId('agent-defaults-applied');
+      expect(applyPosts()).toHaveLength(1);
+      expect(JSON.parse(applyPosts()[0].body as string)).toEqual({
+        worktreeId: 'w-2067',
+        agents: ['codex', 'claude'],
+      });
+    });
 
-      const posts = callsTo(APPLY_DEFAULT_AGENTS_ENDPOINT).filter(
-        (init) => init.method === 'POST',
+    it('reports the rows the SERVER says it wrote, not the count it previewed', async () => {
+      // The badge has to survive a divergence: the preview is a separate HTTP
+      // request, so a sync landing between it and the confirmation makes the two
+      // numbers differ, and only the server's `updated` describes reality. An
+      // earlier version of this test mocked 3 and 3 and could not tell the two
+      // apart — nor could it tell either from the post-apply `eligible`.
+      mockFetch.mockResolvedValue(jsonOk({ success: true, eligible: 3 }));
+      renderPane([primary('codex', 0), primary('claude', 1)]);
+      await openDefaults();
+      expect(screen.getByTestId('agent-defaults-eligible')).toHaveAttribute('data-count', '3');
+
+      fireEvent.click(screen.getByTestId('agent-defaults-apply'));
+      const confirmButton = await screen.findByTestId('confirm-dialog-confirm');
+
+      mockFetch.mockResolvedValue(
+        jsonOk({ success: true, updated: 5, updatedIds: ['a', 'b', 'c', 'd', 'e'], eligible: 1 }),
       );
-      expect(posts).toHaveLength(1);
-      expect(JSON.parse(posts[0].body as string)).toEqual({ agents: ['codex', 'claude'] });
+      fireEvent.click(confirmButton);
+
+      const applied = await screen.findByTestId('agent-defaults-applied');
+      expect(applied).toHaveAttribute('data-count', '5');
+      // …and the remaining count is the server's, not the applied number.
+      expect(screen.getByTestId('agent-defaults-eligible')).toHaveAttribute('data-count', '1');
     });
 
     it('re-reads the count at the moment of the click, so the dialog is never stale', async () => {
@@ -208,9 +240,7 @@ describe('AgentInstancesPane defaults panel (Issue #2067)', () => {
       fireEvent.click(await screen.findByTestId('confirm-dialog-cancel'));
 
       await waitFor(() => expect(screen.queryByTestId('confirm-dialog')).toBeNull());
-      expect(
-        callsTo(APPLY_DEFAULT_AGENTS_ENDPOINT).filter((init) => init.method === 'POST'),
-      ).toHaveLength(0);
+      expect(applyPosts()).toHaveLength(0);
       expect(screen.queryByTestId('agent-defaults-applied')).toBeNull();
     });
 
@@ -223,13 +253,87 @@ describe('AgentInstancesPane defaults panel (Issue #2067)', () => {
       expect(screen.getByTestId('agent-defaults-apply')).toBeDisabled();
     });
 
-    it('shows an error and stays silent about a count when the read fails', async () => {
+    it('shows an error, disables the apply, and offers a retry when the read fails', async () => {
       mockFetch.mockResolvedValue({ ok: false, status: 500, json: () => Promise.resolve({}) });
       renderPane([primary('codex', 0), primary('claude', 1)]);
       fireEvent.click(screen.getByTestId('agent-defaults-toggle'));
 
       expect(await screen.findByTestId('agent-defaults-error')).toBeInTheDocument();
       expect(screen.getByTestId('agent-defaults-eligible')).not.toHaveAttribute('data-count');
+      // An unknown count is not a number to act on: the button used to stay
+      // enabled and then return with no dialog and no new message.
+      expect(screen.getByTestId('agent-defaults-apply')).toBeDisabled();
+    });
+
+    it('recovers from a failed read through the retry control', async () => {
+      mockFetch.mockResolvedValue({ ok: false, status: 500, json: () => Promise.resolve({}) });
+      renderPane([primary('codex', 0), primary('claude', 1)]);
+      fireEvent.click(screen.getByTestId('agent-defaults-toggle'));
+      await screen.findByTestId('agent-defaults-retry');
+
+      mockFetch.mockResolvedValue(jsonOk({ success: true, eligible: 2 }));
+      fireEvent.click(screen.getByTestId('agent-defaults-retry'));
+
+      await waitFor(() =>
+        expect(screen.getByTestId('agent-defaults-eligible')).toHaveAttribute('data-count', '2'),
+      );
+      expect(screen.queryByTestId('agent-defaults-error')).toBeNull();
+      expect(screen.getByTestId('agent-defaults-apply')).toBeEnabled();
+    });
+  });
+
+  describe('a repository that declares its agents (#2066)', () => {
+    it('explains why the apply is off instead of showing an unaccountable zero', async () => {
+      mockFetch.mockResolvedValue(
+        jsonOk({
+          success: true,
+          eligible: 0,
+          repositoryName: 'CommandMate',
+          repoDeclaresAgents: true,
+        }),
+      );
+      renderPane([primary('codex', 0), primary('claude', 1)]);
+      fireEvent.click(screen.getByTestId('agent-defaults-toggle'));
+
+      expect(await screen.findByTestId('agent-defaults-repo-declared')).toBeInTheDocument();
+      expect(screen.getByTestId('agent-defaults-apply')).toBeDisabled();
+      // The count line would say "0 branches" and mean something else entirely.
+      expect(screen.queryByTestId('agent-defaults-eligible')).toBeNull();
+    });
+
+    it('still allows saving the order as the server-wide default', async () => {
+      mockFetch.mockResolvedValue(
+        jsonOk({ success: true, eligible: 0, repoDeclaresAgents: true }),
+      );
+      renderPane([primary('codex', 0), primary('claude', 1)]);
+      fireEvent.click(screen.getByTestId('agent-defaults-toggle'));
+      await screen.findByTestId('agent-defaults-repo-declared');
+
+      // #2066 governs which agents this repository's branches OPEN with; the
+      // #2065 setting is about branches discovered anywhere later. Disabling the
+      // second because of the first would be a different, wrong rule.
+      expect(screen.getByTestId('agent-defaults-set-default')).toBeEnabled();
+    });
+
+    it('names the repository the action is bounded to', async () => {
+      mockFetch.mockResolvedValue(
+        jsonOk({
+          success: true,
+          eligible: 4,
+          repositoryName: 'CommandMate',
+          repoDeclaresAgents: false,
+        }),
+      );
+      renderPane([primary('codex', 0), primary('claude', 1)]);
+      await openDefaults();
+
+      // `data-repository`, not the rendered sentence: the global next-intl mock
+      // echoes the key and drops interpolated params, so a text assertion here
+      // would pass with the name missing.
+      expect(screen.getByTestId('agent-defaults-repository')).toHaveAttribute(
+        'data-repository',
+        'CommandMate',
+      );
     });
   });
 });

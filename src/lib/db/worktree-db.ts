@@ -619,40 +619,89 @@ export function updateSelectedAgents(
 }
 
 /**
- * IDs of every worktree whose agent list is still UNCHANGED by its user
+ * What a bulk "apply this agent order" would touch inside ONE repository
  * (Issue #2067).
  *
- * "Unchanged" is `selected_agents IS NULL` **and** no `agent_instances` row —
- * deliberately the same two facts #2066 checks before it lets a repository's
- * `.commandmate/agents.yaml` reach a worktree, and it is checked with the same
- * helper (`worktreeIdsWithAgentInstances`) rather than a second query that says
- * the same thing. The two channels are independent: `PATCH /api/worktrees/[id]`
- * writes `agentInstances` and `selectedAgents` from separate branches, so "has a
- * roster, column still NULL" and "column set, no roster" are both states the
- * product produces routinely, and a worktree in EITHER of them has been touched
- * by a human and must not be rewritten by a bulk apply.
- *
- * Note what this does NOT exclude: a worktree whose repository declares
- * `agents.yaml`. Such a worktree is "unchanged" by the definition above, so an
- * apply writes its `selected_agents` and the worktree layer then outranks the
- * repository layer for it from that point on (see `SELECTED_AGENTS_LAYERS`).
- * That is the definition this Issue specifies; it is called out here because it
- * is the one place a bulk apply can quietly outrank #2066's layer.
- *
- * @param db - Database instance
- * @returns Worktree IDs, ordered by ID so the count and the apply agree
+ * @see findUnchangedAgentWorktrees
  */
-export function getUnchangedAgentWorktreeIds(db: Database.Database): string[] {
-  const withRoster = worktreeIdsWithAgentInstances(db);
-  const rows = db
-    .prepare('SELECT id FROM worktrees WHERE selected_agents IS NULL ORDER BY id ASC')
-    .all() as Array<{ id: string }>;
-  return rows.map((row) => row.id).filter((id) => !withRoster.has(id));
+export interface UnchangedAgentWorktrees {
+  /** The repository this answer is scoped to. */
+  repositoryPath: string;
+  /**
+   * Whether `.commandmate/agents.yaml` governs this repository (Issue #2066).
+   * When true, {@link ids} is empty by construction.
+   */
+  repoDeclares: boolean;
+  /** Eligible worktree IDs, ordered by ID so a count and an apply agree. */
+  ids: string[];
 }
 
 /**
- * Write `selectedAgents` onto every worktree {@link getUnchangedAgentWorktreeIds}
- * reports, in one transaction (Issue #2067).
+ * The worktrees of ONE repository whose agent list is still UNCHANGED by its
+ * user (Issue #2067).
+ *
+ * ## The repository argument is not optional, and that is the point
+ *
+ * The action this serves lives in the agent pane of ONE worktree, so its blast
+ * radius has to be the repository that worktree belongs to. An earlier revision
+ * of this function took no repository and scanned `worktrees` whole: pressing
+ * "apply to unchanged branches" from a worktree of repository B rewrote the
+ * unchanged worktrees of repository A as well. Requiring the argument is what
+ * makes that impossible to reintroduce by omission.
+ *
+ * ## "Unchanged"
+ *
+ * `selected_agents IS NULL` **and** no `agent_instances` row — deliberately the
+ * same two facts #2066 checks before it lets a repository declaration reach a
+ * worktree, checked with the same helper (`worktreeIdsWithAgentInstances`)
+ * rather than a second query that says the same thing. The two channels are
+ * independent: `PATCH /api/worktrees/[id]` writes `agentInstances` and
+ * `selectedAgents` from separate branches, so "has a roster, column still NULL"
+ * and "column set, no roster" are both states the product produces routinely,
+ * and a worktree in EITHER of them has been touched by a human.
+ *
+ * ## Why a declaring repository yields nothing
+ *
+ * `SELECTED_AGENTS_LAYERS` puts the `worktree` column ABOVE the repository file,
+ * so writing `selected_agents` onto a worktree of a repository that ships
+ * `.commandmate/agents.yaml` does not merely win once — it retires the
+ * declaration for that branch permanently, and editing the file afterwards has
+ * no effect and no explanation. A committed declaration is a more deliberate
+ * answer to "which agents does this branch open with" than a button press in one
+ * branch's settings pane, so the declaration wins and the caller is told why
+ * (`repoDeclares`) instead of being handed a count of zero it cannot explain.
+ *
+ * @param db - Database instance
+ * @param repositoryPath - The repository to scope to (`worktrees.repository_path`)
+ * @returns The scope, whether the repository declares, and the eligible IDs
+ */
+export function findUnchangedAgentWorktrees(
+  db: Database.Database,
+  repositoryPath: string
+): UnchangedAgentWorktrees {
+  // Served from #2066's process-wide cache; see `agents-config.ts` for why this
+  // is not a filesystem probe on a hot path.
+  const repoDeclares = getRepoDefaultSelectedAgents(repositoryPath) !== null;
+  if (repoDeclares) {
+    return { repositoryPath, repoDeclares, ids: [] };
+  }
+
+  const withRoster = worktreeIdsWithAgentInstances(db);
+  const rows = db
+    .prepare(
+      'SELECT id FROM worktrees WHERE repository_path = ? AND selected_agents IS NULL ORDER BY id ASC'
+    )
+    .all(repositoryPath) as Array<{ id: string }>;
+  return {
+    repositoryPath,
+    repoDeclares,
+    ids: rows.map((row) => row.id).filter((id) => !withRoster.has(id)),
+  };
+}
+
+/**
+ * Write `selectedAgents` onto every worktree {@link findUnchangedAgentWorktrees}
+ * reports for `repositoryPath`, in ONE transaction (Issue #2067).
  *
  * The eligible set is recomputed INSIDE the transaction rather than taken as an
  * argument: the UI shows a count before it asks for confirmation, and the number
@@ -660,19 +709,27 @@ export function getUnchangedAgentWorktreeIds(db: Database.Database): string[] {
  * would make the caller's snapshot authoritative and turn a worktree created
  * between the count and the confirmation into a silent miss.
  *
+ * The transaction is not decoration. Without it, a write that fails partway —
+ * a locked database, a constraint, a trigger — leaves a repository split between
+ * branches that took the new order and branches that did not, with nothing on
+ * screen saying which. `tests/unit/db/apply-default-agents-2067.test.ts` pins
+ * this by aborting a middle row and asserting the earlier ones rolled back.
+ *
  * Rows are written through `updateSelectedAgents()` so the column's one writer
  * stays its one writer.
  *
  * @param db - Database instance
+ * @param repositoryPath - The repository to scope to; never server-wide
  * @param selectedAgents - Ordered, already-validated agents; `[0]` is the primary
  * @returns The IDs that were written, in the order they were written
  */
 export function applySelectedAgentsToUnchanged(
   db: Database.Database,
+  repositoryPath: string,
   selectedAgents: CLIToolType[]
 ): string[] {
   const apply = db.transaction((): string[] => {
-    const ids = getUnchangedAgentWorktreeIds(db);
+    const { ids } = findUnchangedAgentWorktrees(db, repositoryPath);
     for (const id of ids) {
       updateSelectedAgents(db, id, selectedAgents);
     }

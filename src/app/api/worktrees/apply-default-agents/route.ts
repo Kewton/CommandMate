@@ -1,5 +1,5 @@
 /**
- * GET  /api/worktrees/apply-default-agents — how many branches an apply would change
+ * GET  /api/worktrees/apply-default-agents?worktreeId=… — how many branches an apply would change
  * POST /api/worktrees/apply-default-agents — write one agent order onto exactly those
  *
  * Issue #2067. #2065 made the agent order for NEW branches configurable and
@@ -14,13 +14,26 @@
  * rows are different decisions with different blast radii, and the second one is
  * behind a confirmation in the UI. Saving the preference still touches nothing.
  *
+ * ## Both verbs take a `worktreeId`, and it is what bounds the blast radius
+ *
+ * The action lives in the agent pane of ONE worktree, so it may only reach that
+ * worktree's REPOSITORY. The client names the worktree it is acting from and the
+ * server derives `repository_path` from the row — rather than accepting a path,
+ * which would let any caller aim the write at any repository on the machine.
+ *
  * ## What "existing branch" means here
  *
- * Only branches the user has never touched — `selected_agents IS NULL` AND no
- * `agent_instances` roster. That is the same pair of facts #2066 checks before
- * it lets a repository declaration reach a worktree, checked by the same helper
- * (`getUnchangedAgentWorktreeIds`), because a second spelling of "unchanged" is
- * how the two features end up disagreeing about the same branch.
+ * Inside that repository: only branches the user has never touched —
+ * `selected_agents IS NULL` AND no `agent_instances` roster. That is the same
+ * pair of facts #2066 checks before it lets a repository declaration reach a
+ * worktree, checked by the same helper (`findUnchangedAgentWorktrees`), because
+ * a second spelling of "unchanged" is how the two features end up disagreeing
+ * about the same branch.
+ *
+ * A repository that ships `.commandmate/agents.yaml` is excluded outright and
+ * says so (`repoDeclaresAgents`): the column outranks the file permanently, so
+ * an apply there would retire a committed declaration with no way back and no
+ * explanation on screen. See `findUnchangedAgentWorktrees`.
  *
  * ## Why GET returns a count
  *
@@ -38,18 +51,82 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { getDbInstance } from '@/lib/db/db-instance';
 import {
   applySelectedAgentsToUnchanged,
-  getUnchangedAgentWorktreeIds,
+  findUnchangedAgentWorktrees,
+  getWorktreeById,
 } from '@/lib/db/worktree-db';
 import { validateSelectedAgentsInput } from '@/lib/selected-agents-validator';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('api/worktrees/apply-default-agents');
 
-export async function GET(): Promise<NextResponse> {
+/** The scope both verbs answer for, resolved from the calling worktree. */
+interface ApplyScope {
+  worktreeId: string;
+  repositoryPath: string | null;
+  repositoryName: string | null;
+}
+
+/**
+ * Resolve `worktreeId` to its repository, or to the response that explains why
+ * it could not be.
+ *
+ * A worktree with no `repository_path` is answered rather than rejected: it is
+ * a legal row, there is simply no repository to scope an apply to, so the honest
+ * answer is a scope with zero eligible branches and the UI disables the action.
+ */
+function resolveScope(
+  worktreeId: string | null
+): { error: NextResponse } | { scope: ApplyScope } {
+  if (!worktreeId) {
+    return {
+      error: NextResponse.json(
+        { success: false, error: 'Invalid request: "worktreeId" is required' },
+        { status: 400 }
+      ),
+    };
+  }
+  const worktree = getWorktreeById(getDbInstance(), worktreeId);
+  if (!worktree) {
+    return {
+      error: NextResponse.json({ success: false, error: 'Worktree not found' }, { status: 404 }),
+    };
+  }
+  return {
+    scope: {
+      worktreeId,
+      repositoryPath: worktree.repositoryPath || null,
+      repositoryName: worktree.repositoryName || null,
+    },
+  };
+}
+
+/** The shape both verbs share, so the client reads one contract. */
+function scopeBody(scope: ApplyScope, eligible: number, repoDeclaresAgents: boolean) {
+  return {
+    success: true as const,
+    worktreeId: scope.worktreeId,
+    repositoryPath: scope.repositoryPath,
+    repositoryName: scope.repositoryName,
+    /** Branches inside this repository a bulk apply would change. */
+    eligible,
+    /** True when `.commandmate/agents.yaml` governs this repository (#2066). */
+    repoDeclaresAgents,
+  };
+}
+
+export async function GET(request: NextRequest): Promise<NextResponse> {
   try {
-    const db = getDbInstance();
+    const resolved = resolveScope(request.nextUrl?.searchParams?.get('worktreeId') ?? null);
+    if ('error' in resolved) return resolved.error;
+    const { scope } = resolved;
+
+    if (!scope.repositoryPath) {
+      return NextResponse.json(scopeBody(scope, 0, false), { status: 200 });
+    }
+
+    const found = findUnchangedAgentWorktrees(getDbInstance(), scope.repositoryPath);
     return NextResponse.json(
-      { success: true, eligible: getUnchangedAgentWorktreeIds(db).length },
+      scopeBody(scope, found.ids.length, found.repoDeclares),
       { status: 200 }
     );
   } catch (error) {
@@ -73,6 +150,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       );
     }
 
+    const rawWorktreeId = (body as { worktreeId?: unknown }).worktreeId;
+    const resolved = resolveScope(
+      typeof rawWorktreeId === 'string' && rawWorktreeId.length > 0 ? rawWorktreeId : null
+    );
+    if ('error' in resolved) return resolved.error;
+    const { scope } = resolved;
+
     // The same validator the settings PUT uses: an apply must not be able to
     // write a roster into `worktrees.selected_agents` that the settings route
     // would have rejected.
@@ -84,23 +168,37 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       );
     }
 
+    if (!scope.repositoryPath) {
+      return NextResponse.json(
+        { ...scopeBody(scope, 0, false), agents: validation.value!, updated: 0, updatedIds: [] },
+        { status: 200 }
+      );
+    }
+
     const db = getDbInstance();
-    const updatedIds = applySelectedAgentsToUnchanged(db, validation.value!);
+    const updatedIds = applySelectedAgentsToUnchanged(
+      db,
+      scope.repositoryPath,
+      validation.value!
+    );
+    // What a second apply would still find. Zero right after a successful one,
+    // and the UI reads it so the panel does not keep offering to change branches
+    // it has just finished changing.
+    const remaining = findUnchangedAgentWorktrees(db, scope.repositoryPath);
+
     logger.info('applied-default-agents-to-unchanged', {
+      worktreeId: scope.worktreeId,
+      repositoryPath: scope.repositoryPath,
       agents: validation.value!,
       updated: updatedIds.length,
     });
 
     return NextResponse.json(
       {
-        success: true,
+        ...scopeBody(scope, remaining.ids.length, remaining.repoDeclares),
         agents: validation.value!,
         updated: updatedIds.length,
         updatedIds,
-        // What a second apply would still find. Zero right after a successful
-        // one, and the UI reads it so the panel does not keep offering to
-        // change branches it has just finished changing.
-        eligible: getUnchangedAgentWorktreeIds(db).length,
       },
       { status: 200 }
     );

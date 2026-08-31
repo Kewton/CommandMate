@@ -10,6 +10,13 @@
  * pane is already a 600-line roster editor; keeping it here also means the
  * behaviour can be tested without mounting Radix menus.
  *
+ * ## The blast radius belongs to the server
+ *
+ * Both requests carry the `worktreeId` the pane is rendered for, and the server
+ * derives the repository from that row. The hook never names a repository: a
+ * client that could would be a client that could aim the bulk write at any
+ * repository on the machine.
+ *
  * ## What it deliberately does not decide
  *
  * - **Confirmation.** `applyToUnchanged()` writes as soon as it is called. The
@@ -46,11 +53,21 @@ export type AgentDefaultsErrorKind = 'count' | 'save' | 'apply';
 
 export interface UseAgentDefaultsResult {
   /**
-   * Branches a bulk apply would change, or null when it has not been read yet
-   * (or the read failed). Null is NOT zero: "we do not know" and "there are
-   * none" lead to different buttons.
+   * Branches IN THIS WORKTREE'S REPOSITORY a bulk apply would change, or null
+   * when it has not been read yet (or the read failed). Null is NOT zero: "we do
+   * not know" and "there are none" lead to different buttons, and only the
+   * second one is safe to act on.
    */
   eligible: number | null;
+  /** The repository the action is scoped to, once the server has named it. */
+  repositoryName: string | null;
+  /**
+   * True when that repository declares its agents in `.commandmate/agents.yaml`
+   * (Issue #2066). The bulk apply is refused there — the column outranks the
+   * file permanently — and the panel explains that instead of showing a zero it
+   * cannot account for.
+   */
+  repoDeclaresAgents: boolean;
   /** A request is in flight; the pane disables both buttons. */
   busy: boolean;
   /** The last `saveAsDefault()` succeeded and nothing has happened since. */
@@ -68,21 +85,41 @@ export interface UseAgentDefaultsResult {
 }
 
 /**
+ * @param worktreeId - The worktree the pane is rendered for. The server turns it
+ *   into the repository the apply is scoped to.
  * @param agents - The tool order to save / apply, already deduplicated and
  *   within the validator's bounds. The hook does not validate it: the server
  *   does, on both routes, and a client-side copy of the rule is a second rule.
  */
-export function useAgentDefaults(agents: CLIToolType[]): UseAgentDefaultsResult {
+export function useAgentDefaults(
+  worktreeId: string,
+  agents: CLIToolType[]
+): UseAgentDefaultsResult {
   const [eligible, setEligible] = useState<number | null>(null);
+  const [repositoryName, setRepositoryName] = useState<string | null>(null);
+  const [repoDeclaresAgents, setRepoDeclaresAgents] = useState(false);
   const [busy, setBusy] = useState(false);
   const [savedDefault, setSavedDefault] = useState(false);
   const [appliedCount, setAppliedCount] = useState<number | null>(null);
   const [error, setError] = useState<AgentDefaultsErrorKind | null>(null);
 
+  /**
+   * Adopt the scope fields both verbs return. Kept in one place because the
+   * apply response carries them too: a repository whose `agents.yaml` landed
+   * between the count and the apply has to be able to say so on the way back.
+   */
+  const adoptScope = useCallback((body: unknown): void => {
+    const scope = body as { repositoryName?: unknown; repoDeclaresAgents?: unknown } | null;
+    setRepositoryName(typeof scope?.repositoryName === 'string' ? scope.repositoryName : null);
+    setRepoDeclaresAgents(scope?.repoDeclaresAgents === true);
+  }, []);
+
   const refreshEligible = useCallback(async (): Promise<number | null> => {
     setBusy(true);
     try {
-      const response = await fetch(APPLY_DEFAULT_AGENTS_ENDPOINT);
+      const response = await fetch(
+        `${APPLY_DEFAULT_AGENTS_ENDPOINT}?worktreeId=${encodeURIComponent(worktreeId)}`
+      );
       if (!response.ok) throw new Error(String(response.status));
       const body: unknown = await response.json();
       const count = (body as { eligible?: unknown } | null)?.eligible;
@@ -94,6 +131,7 @@ export function useAgentDefaults(agents: CLIToolType[]): UseAgentDefaultsResult 
         throw new Error('unexpected body');
       }
       setEligible(count);
+      adoptScope(body);
       setError(null);
       return count;
     } catch {
@@ -103,7 +141,7 @@ export function useAgentDefaults(agents: CLIToolType[]): UseAgentDefaultsResult 
     } finally {
       setBusy(false);
     }
-  }, []);
+  }, [worktreeId, adoptScope]);
 
   const saveAsDefault = useCallback(async (): Promise<boolean> => {
     setBusy(true);
@@ -141,7 +179,7 @@ export function useAgentDefaults(agents: CLIToolType[]): UseAgentDefaultsResult 
       const response = await fetch(APPLY_DEFAULT_AGENTS_ENDPOINT, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ agents }),
+        body: JSON.stringify({ worktreeId, agents }),
       });
       const body: unknown = await response.json().catch(() => null);
       const updated = (body as { updated?: unknown } | null)?.updated;
@@ -150,6 +188,7 @@ export function useAgentDefaults(agents: CLIToolType[]): UseAgentDefaultsResult 
         return null;
       }
       setAppliedCount(updated);
+      adoptScope(body);
       // The server reports what a SECOND apply would still find, so the panel
       // stops offering to change branches it has just finished changing. Only
       // adopted when the server sent it; a body without the field leaves the
@@ -165,10 +204,12 @@ export function useAgentDefaults(agents: CLIToolType[]): UseAgentDefaultsResult 
     } finally {
       setBusy(false);
     }
-  }, [agents]);
+  }, [worktreeId, agents, adoptScope]);
 
   return {
     eligible,
+    repositoryName,
+    repoDeclaresAgents,
     busy,
     savedDefault,
     appliedCount,
