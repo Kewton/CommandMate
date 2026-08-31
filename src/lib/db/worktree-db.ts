@@ -9,6 +9,7 @@ import Database from 'better-sqlite3';
 import type { Worktree } from '@/types/models';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { parseSelectedAgents } from '@/lib/selected-agents-validator';
+import { getRepoDefaultSelectedAgents } from '@/lib/repo-config/agents-config';
 import { getDefaultSelectedAgents } from './app-settings-db';
 import { ACTIVE_FILTER } from './chat-db';
 import {
@@ -148,6 +149,21 @@ export function getWorktrees(
   // query into one per worktree on the sidebar's poll.
   const appSettingsDefault = getDefaultSelectedAgents(db);
 
+  // Issue #2066: the repository layer, memoized per distinct `repository_path`
+  // for the length of this call. Two worktrees of the same repository must not
+  // ask twice, and `getRepoDefaultSelectedAgents()` is itself served from a
+  // process-wide cache filled at sync — see its module header for why the read
+  // does not belong on this (polled) path.
+  const repoDefaults = new Map<string, CLIToolType[] | null>();
+  const repoDefaultFor = (repositoryPath: string | null): CLIToolType[] | null => {
+    if (!repositoryPath) return null;
+    const cached = repoDefaults.get(repositoryPath);
+    if (cached !== undefined) return cached;
+    const resolved = getRepoDefaultSelectedAgents(repositoryPath);
+    repoDefaults.set(repositoryPath, resolved);
+    return resolved;
+  };
+
   return rows.map((row) => {
     const lastMessagesByCli = lastMessagesByCliMap.get(row.id) || {};
 
@@ -171,7 +187,11 @@ export function getWorktrees(
       status: (row.status as 'ready' | 'in_progress' | 'in_review' | 'done' | null) || null,
       link: row.link || undefined,
       cliToolId: (row.cli_tool_id as CLIToolType | null) ?? 'claude',
-      selectedAgents: parseSelectedAgents(row.selected_agents, appSettingsDefault),
+      selectedAgents: parseSelectedAgents(
+        row.selected_agents,
+        appSettingsDefault,
+        repoDefaultFor(row.repository_path)
+      ),
       vibeLocalModel: row.vibe_local_model ?? null,
       vibeLocalContextWindow: row.vibe_local_context_window ?? null,
     };
@@ -302,7 +322,12 @@ export function getWorktreeById(
     status: (row.status as 'ready' | 'in_progress' | 'in_review' | 'done' | null) || null,
     link: row.link || undefined,
     cliToolId: (row.cli_tool_id as CLIToolType | null) ?? 'claude',
-    selectedAgents: parseSelectedAgents(row.selected_agents, getDefaultSelectedAgents(db)),
+    // Issue #2066: same layer order as getWorktrees(); one row, so no memo.
+    selectedAgents: parseSelectedAgents(
+      row.selected_agents,
+      getDefaultSelectedAgents(db),
+      getRepoDefaultSelectedAgents(row.repository_path)
+    ),
     vibeLocalModel: row.vibe_local_model ?? null,
     vibeLocalContextWindow: row.vibe_local_context_window ?? null,
   };

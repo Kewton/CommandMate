@@ -322,6 +322,37 @@ Claude の詳細な出力をMarkdown形式で閲覧できます。
 - 常に**2つ**のエージェントを選択する必要があります
 - 選択したエージェントがターミナルヘッダーのタブとして表示されます
 
+### リポジトリ既定のエージェント（`.commandmate/agents.yaml`）
+
+リポジトリごとに「新しいブランチはこの並びで始める」を宣言できます（Issue #2066）。
+リポジトリのルートに次のファイルを置いてコミットしてください。
+
+```yaml
+# <repo>/.commandmate/agents.yaml
+agents: [opencode, codex]   # 2〜6 個。この並びがタブの並び
+primary: codex              # 任意。省略時は agents[0] が primary
+```
+
+- 反映されるのは **まだエージェント構成を持っていない worktree だけ** です。
+  すでにタブを開いた（= `agent_instances` がある）ブランチは何をしても変わりません。
+- ファイルは **同期のたびに読み直され**ます。GUI の同期ボタン（または `commandmate sync`）を
+  押せば即座に、押さなくても最大 1 分で反映されます。
+- **壊れている場合は無視され、警告ログが出るだけ**です（サーバログの `repo-agents:` 行）。
+  タブが空になることはありません。
+
+**優先順位**（上が強い）:
+
+| 順位 | 層 | 決め方 |
+|:---:|---|---|
+| 1 | worktree | その worktree の Agent 設定（この画面で選んだもの） |
+| 2 | **リポジトリ** | **`.commandmate/agents.yaml`** |
+| 3 | サーバ全体 | 設定画面の「新規ブランチの既定エージェント」（Issue #2065） |
+| 4 | 既定値 | `claude` / `codex` / `antigravity` |
+
+> **Note**: `.commandmate/` は既定で `.gitignore` されている運用が多いため、
+> チームで共有するときは `!/.commandmate/agents.yaml` の除外解除が必要かどうかを確認してください。
+> 詳細は [docs/design/repo-agents-config.md](../design/repo-agents-config.md)。
+
 ### Ollamaモデルの選択（Vibe-Local）
 
 Vibe-Localを選択した場合、使用するOllamaモデルを指定できます。
