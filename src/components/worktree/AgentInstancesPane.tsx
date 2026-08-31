@@ -15,7 +15,7 @@
 
 'use client';
 
-import React, { useState, useCallback, useEffect, memo } from 'react';
+import React, { useState, useCallback, useEffect, useMemo, memo } from 'react';
 import { useTranslations } from 'next-intl';
 import {
   GripVertical,
@@ -27,6 +27,7 @@ import {
   MoreVertical,
   AlertTriangle,
   Radio,
+  Check,
 } from 'lucide-react';
 import {
   CLI_TOOL_IDS,
@@ -37,6 +38,14 @@ import {
   type CLIToolType,
 } from '@/lib/cli-tools/types';
 import { MIN_AGENT_INSTANCES } from '@/lib/agent-instances-validator';
+import {
+  MAX_SELECTED_AGENTS,
+  MIN_SELECTED_AGENTS,
+} from '@/lib/selected-agents-validator';
+// Issue #2067: the two "make this the default" actions. Their state machine
+// (eligible count, saved/applied badges, three failure modes) lives outside this
+// file; see the hook's header for why.
+import { useAgentDefaults } from '@/hooks/useAgentDefaults';
 import { VibeLocalSettings } from '@/components/worktree/VibeLocalSettings';
 // Issue #2069: the same card the More screen renders. Shared rather than
 // re-implemented so the pane cannot grow its own idea of what an update does to
@@ -236,6 +245,10 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
   // default so the pane keeps issuing no requests of its own (see the note at
   // the disclosure itself).
   const [showUpdates, setShowUpdates] = useState(false);
+  // Issue #2067: whether the "make this the default" panel is open. Closed by
+  // default, and it reads NOTHING until it is opened — same rule as the updates
+  // disclosure above it, for the same reason (#2054's zero-request criterion).
+  const [showDefaults, setShowDefaults] = useState(false);
 
   // Issue #2054: read before the first row is built so every row resolves from
   // one snapshot rather than from a map that could change mid-render.
@@ -248,6 +261,88 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
   const atMax = instances.length >= MAX_AGENT_INSTANCES;
   const atMin = instances.length <= MIN_AGENT_INSTANCES;
   const hasVibeLocal = instances.some((inst) => inst.cliTool === 'vibe-local');
+
+  /**
+   * The roster's TOOL order (Issue #2067): one entry per distinct CLI tool, in
+   * roster order.
+   *
+   * Both destinations — `app_settings.default_selected_agents` and
+   * `worktrees.selected_agents` — are lists of TOOLS, not of instances, so a
+   * roster of "Claude" + "Claude (review)" + "Codex" is the default
+   * `['claude', 'codex']`. De-duplicating here rather than server-side keeps the
+   * number the buttons are labelled with and the number the server validates the
+   * same number.
+   */
+  const rosterToolOrder = useMemo(() => {
+    const seen = new Set<CLIToolType>();
+    const order: CLIToolType[] = [];
+    for (const inst of instances) {
+      if (seen.has(inst.cliTool)) continue;
+      seen.add(inst.cliTool);
+      order.push(inst.cliTool);
+    }
+    return order;
+  }, [instances]);
+
+  const agentDefaults = useAgentDefaults(worktreeId, rosterToolOrder);
+
+  /**
+   * A roster of six instances of one tool is a legal roster and an illegal
+   * default: `validateAgentsPair()` wants 2..6 DISTINCT tools. Caught here so
+   * the pane explains it instead of letting the user press a button that can
+   * only 400.
+   */
+  const canUseAsDefault =
+    rosterToolOrder.length >= MIN_SELECTED_AGENTS &&
+    rosterToolOrder.length <= MAX_SELECTED_AGENTS;
+
+  const defaultsBusy = saving || agentDefaults.busy;
+
+  /**
+   * The bulk apply is offered only when the panel knows a number greater than
+   * zero. `null` — the count has not been read, or the read failed — is not a
+   * number to act on: pressing through it used to re-read and then return with
+   * no dialog and no new message, which reads exactly like a dead button.
+   * The retry control below is what makes that state recoverable.
+   */
+  const canApplyToUnchanged =
+    canUseAsDefault &&
+    !agentDefaults.repoDeclaresAgents &&
+    agentDefaults.eligible !== null &&
+    agentDefaults.eligible > 0;
+
+  const defaultsErrorMessage =
+    agentDefaults.error === 'count'
+      ? t('agentDefaultsCountError')
+      : agentDefaults.error === 'save'
+        ? t('agentDefaultsSaveError')
+        : agentDefaults.error === 'apply'
+          ? t('agentDefaultsApplyError')
+          : null;
+
+  /** Open/close the defaults panel, reading the eligible count on the way open. */
+  const toggleDefaults = useCallback(() => {
+    const next = !showDefaults;
+    setShowDefaults(next);
+    if (next) void agentDefaults.refreshEligible();
+  }, [showDefaults, agentDefaults]);
+
+  const handleApplyToUnchanged = useCallback(async () => {
+    if (!canApplyToUnchanged) return;
+    // Re-read immediately before asking. The number on the panel can be minutes
+    // old — a sync may have discovered branches since it was read — and the
+    // number in the dialog is the promise this action makes.
+    const count = await agentDefaults.refreshEligible();
+    if (count === null || count === 0) return;
+    const confirmed = await confirm({
+      description: t('agentDefaultsApplyConfirm', {
+        count,
+        agents: rosterToolOrder.map((id) => getCliToolDisplayName(id)).join(', '),
+      }),
+    });
+    if (!confirmed) return;
+    await agentDefaults.applyToUnchanged();
+  }, [canApplyToUnchanged, agentDefaults, confirm, t, rosterToolOrder]);
 
   /** Normalize order to array index and PATCH the full roster. */
   const persist = useCallback(
@@ -566,6 +661,175 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
           onVibeLocalContextWindowChange={onVibeLocalContextWindowChange}
         />
       )}
+
+      {/* Issue #2067: the two actions #2065 and #2066 deliberately left out —
+          "make this the default" and "and the branches I already have".
+
+          Behind a disclosure that reads NOTHING until it is opened, exactly like
+          the update card below it: #2054's criterion for this pane is that a
+          roster of claude and codex panes issues ZERO requests, and a count
+          fetched on mount would break it for every worktree in the install. */}
+      <div className="mt-6 border-t border-border pt-4">
+        <button
+          type="button"
+          data-testid="agent-defaults-toggle"
+          aria-expanded={showDefaults}
+          onClick={toggleDefaults}
+          className="flex w-full items-center gap-1 text-left text-sm font-semibold text-foreground hover:text-accent-600 dark:hover:text-accent-400"
+        >
+          {showDefaults ? (
+            <ChevronDown className="h-4 w-4 shrink-0" aria-hidden="true" />
+          ) : (
+            <ChevronRight className="h-4 w-4 shrink-0" aria-hidden="true" />
+          )}
+          {t('agentDefaults')}
+        </button>
+
+        {showDefaults && (
+          <div className="mt-2 space-y-3" data-testid="agent-defaults-section">
+            <p className="text-xs text-muted-foreground">{t('agentDefaultsDescription')}</p>
+            {/* The exact list both buttons would write, spelled out. The roster
+                above is instances; this is tools, and they are not the same list
+                whenever a tool appears twice. */}
+            <p
+              data-testid="agent-defaults-roster"
+              className="text-xs font-medium text-foreground break-words"
+            >
+              {rosterToolOrder.map((id) => getCliToolDisplayName(id)).join(' → ')}
+            </p>
+
+            {!canUseAsDefault && (
+              <p
+                data-testid="agent-defaults-invalid"
+                className="text-xs text-warning-foreground"
+              >
+                {t('agentDefaultsInvalidRoster', {
+                  min: MIN_SELECTED_AGENTS,
+                  max: MAX_SELECTED_AGENTS,
+                })}
+              </p>
+            )}
+
+            <button
+              type="button"
+              data-testid="agent-defaults-set-default"
+              disabled={defaultsBusy || !canUseAsDefault}
+              onClick={() => {
+                void agentDefaults.saveAsDefault();
+              }}
+              className="w-full text-sm font-medium px-3 py-2 rounded-md border border-accent-200 dark:border-accent-700 bg-accent-50 dark:bg-accent-900/30 text-accent-700 dark:text-accent-300 hover:bg-accent-100 dark:hover:bg-accent-900/50 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {t('agentDefaultsSetDefault')}
+            </button>
+
+            <div className="space-y-1">
+              {/* The repository the apply is bounded to, named by the server
+                  rather than assumed by the pane. It is the answer to "which
+                  branches?" that a bare count cannot give. */}
+              {agentDefaults.repositoryName && (
+                <p
+                  data-testid="agent-defaults-repository"
+                  data-repository={agentDefaults.repositoryName}
+                  className="text-xs text-muted-foreground"
+                >
+                  {t('agentDefaultsRepositoryLabel', {
+                    repository: agentDefaults.repositoryName,
+                  })}
+                </p>
+              )}
+
+              {/* Issue #2066's declaration outranks this button, permanently:
+                  writing `selected_agents` would retire a committed agents.yaml
+                  for those branches with no way back. Saying so beats showing a
+                  zero the user cannot account for. */}
+              {agentDefaults.repoDeclaresAgents && (
+                <p
+                  data-testid="agent-defaults-repo-declared"
+                  className="text-xs text-warning-foreground"
+                >
+                  {t('agentDefaultsRepoDeclared')}
+                </p>
+              )}
+
+              {/* The count is shown BEFORE the confirmation, and it is also
+                  re-read at the moment of the click — see handleApplyToUnchanged.
+                  `data-count` carries the raw number so a test reads the number
+                  and not a translated sentence. */}
+              {!agentDefaults.repoDeclaresAgents && (
+                <span
+                  data-testid="agent-defaults-eligible"
+                  data-count={agentDefaults.eligible ?? undefined}
+                  className="block text-xs text-muted-foreground"
+                >
+                  {agentDefaults.eligible === null
+                    ? t('agentDefaultsEligibleUnknown')
+                    : t('agentDefaultsEligible', { count: agentDefaults.eligible })}
+                </span>
+              )}
+              <button
+                type="button"
+                data-testid="agent-defaults-apply"
+                disabled={defaultsBusy || !canApplyToUnchanged}
+                onClick={() => {
+                  void handleApplyToUnchanged();
+                }}
+                className="w-full text-sm font-medium px-3 py-2 rounded-md border border-border bg-surface text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {t('agentDefaultsApply')}
+              </button>
+              <p className="text-xs text-muted-foreground">{t('agentDefaultsApplyScope')}</p>
+            </div>
+
+            {agentDefaults.savedDefault && (
+              <p
+                data-testid="agent-defaults-saved"
+                className="flex items-center gap-1 text-xs text-success-foreground"
+              >
+                <Check className="h-3 w-3 shrink-0" aria-hidden="true" />
+                {t('agentDefaultsSaved')}
+              </p>
+            )}
+
+            {agentDefaults.appliedCount !== null && (
+              <p
+                data-testid="agent-defaults-applied"
+                data-count={agentDefaults.appliedCount}
+                className="flex items-center gap-1 text-xs text-success-foreground"
+              >
+                <Check className="h-3 w-3 shrink-0" aria-hidden="true" />
+                {t('agentDefaultsApplied', { count: agentDefaults.appliedCount })}
+              </p>
+            )}
+
+            {defaultsErrorMessage && (
+              <div className="space-y-1">
+                <p
+                  data-testid="agent-defaults-error"
+                  className="text-xs text-danger-foreground"
+                >
+                  {defaultsErrorMessage}
+                </p>
+                {/* Without this the panel is a dead end after a transient 500:
+                    the count stays unknown, the apply stays disabled, and the
+                    only way back is to collapse and reopen the disclosure. */}
+                {agentDefaults.error === 'count' && (
+                  <button
+                    type="button"
+                    data-testid="agent-defaults-retry"
+                    disabled={defaultsBusy}
+                    onClick={() => {
+                      void agentDefaults.refreshEligible();
+                    }}
+                    className="text-xs font-medium underline text-accent-700 dark:text-accent-300 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {t('agentDefaultsRetry')}
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* Issue #2069: agent CLI versions and the update button, APPENDED below
           the roster editor rather than woven into a row. The roster's rows are

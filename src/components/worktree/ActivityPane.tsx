@@ -7,7 +7,7 @@
  * Design note:
  *   The parent (WorktreeDetailRefactored) owns all of the data + callbacks
  *   needed by each activity child (FileTreeView, GitPane, MemoPane,
- *   ExecutionLogPane, AgentSettingsPane, TimerPane). To keep this component
+ *   ExecutionLogPane, AgentInstancesPane, TimerPane). To keep this component
  *   thin and decoupled, the parent constructs each child node and passes
  *   them in via the `activities` map. ActivityPane simply picks the right
  *   one and wraps it in an ErrorBoundary.
@@ -45,7 +45,12 @@ const ERROR_BOUNDARY_NAMES: Record<ActivityId, string> = {
   git: 'GitPane',
   notes: 'MemoPane',
   schedules: 'ExecutionLogPane',
-  agent: 'AgentSettingsPane',
+  // Issue #2067: the `agent` activity renders AgentInstancesPane (see
+  // WorktreeDetailDesktop's `activityContent`), not AgentSettingsPane — the
+  // mobile checkbox pane, which this map has never pointed at. The name is what
+  // an ErrorBoundary crash report is filed under, so the wrong one sends whoever
+  // reads the report to the wrong file.
+  agent: 'AgentInstancesPane',
   timer: 'TimerPane',
   todo: 'TodoPane',
   skills: 'WorktreeSkillsPane',
