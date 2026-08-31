@@ -38,6 +38,17 @@
  * closes — so an install with nothing waiting has no timer, and one that never
  * configured VAPID never even gets that far.
  *
+ * ## Holding a wait that has not named itself
+ *
+ * The edge fires once, and for a dialog drawn between two probes it fires
+ * before anything on the pane can be classified — so #2156's `AskUserQuestion`
+ * arrived here as `unclassified` and was announced as "check the terminal"
+ * although the app could answer it. The kind is refreshed in place afterwards
+ * and that refresh is deliberately not an edge, so the fix is on this side:
+ * an unnamed wait is held for {@link CLASSIFICATION_GRACE_MS} and then sent
+ * under whatever the episode is called at that point. One notification either
+ * way — no correction push, and nothing at all if the wait ended meanwhile.
+ *
  * Everything here is advisory: a failure must not disturb the status read that
  * observed the edge (`emit` contains listener throws) nor the poller.
  *
@@ -66,6 +77,29 @@ const logger = createLogger('push/waiting-notifier');
 /** How often outstanding waits are re-checked. Minute granularity is enough. */
 export const ESCALATION_TICK_MS = 60_000;
 
+/**
+ * How long a wait that has not named itself yet is held before it notifies
+ * (Issue #2156).
+ *
+ * `AskUserQuestion` opens the episode before the pane carries anything the
+ * screen scraper can read, so the *first* classification of that wait is
+ * `unclassified` and the body would say "check the terminal" about a dialog the
+ * app can answer. `waiting-episode-state` refreshes the kind in place on the
+ * next probe and deliberately emits nothing for it (a wait that changes
+ * character is still one wait), so the notifier only ever saw the provisional
+ * verdict.
+ *
+ * Measured on the session in the Issue: the edge opened at 00:08:38.837 with no
+ * usable classification and the next status probe refined it to `prompt` at
+ * 00:08:44.863 — 6.03 s later; 8 s is that measurement plus one probe's jitter
+ * and nothing more, because the hold is silence on the phone and it is meant to
+ * buy exactly one reclassification.
+ *
+ * Only an unnamed wait pays it: `prompt` and `menu` are positive verdicts and
+ * still notify on the edge itself.
+ */
+export const CLASSIFICATION_GRACE_MS = 8_000;
+
 /** A wait that has been notified once and may still earn its reminder. */
 interface PendingWait {
   worktreeId: string;
@@ -87,10 +121,16 @@ declare global {
   var __waitingPushPending: Map<string, PendingWait> | undefined;
   // eslint-disable-next-line no-var
   var __waitingPushEscalationTimer: ReturnType<typeof setInterval> | undefined;
+  // eslint-disable-next-line no-var
+  var __waitingPushGraceTimers: Map<string, ReturnType<typeof setTimeout>> | undefined;
 }
 
 const pending = globalThis.__waitingPushPending ??
   (globalThis.__waitingPushPending = new Map<string, PendingWait>());
+
+/** Composite key -> the timer holding that wait's first notification (#2156). */
+const graceTimers = globalThis.__waitingPushGraceTimers ??
+  (globalThis.__waitingPushGraceTimers = new Map<string, ReturnType<typeof setTimeout>>());
 
 /**
  * The worktree's display name, for the notification title.
@@ -140,6 +180,82 @@ async function sendWaitingPush(
   }
 }
 
+/**
+ * Whether this classification is still provisional (Issue #2156).
+ *
+ * `unclassified` is what `deriveWaitingKind` returns for a frame the scraper
+ * could not read at all, and a null kind is the same admission from a producer
+ * that passed none — both mean "waiting, but nobody has said what for" and both
+ * are the verdict that arrives first when a dialog is drawn between two probes.
+ * `prompt` and `menu` are positive readings of the pane and are taken at once.
+ */
+function isUnnamedWait(kind: WaitingKind | null | undefined): boolean {
+  return kind === null || kind === undefined || kind === 'unclassified';
+}
+
+/** Drop the hold on this wait without sending anything. */
+function cancelGrace(key: string): void {
+  const timer = graceTimers.get(key);
+  if (timer === undefined) return;
+  clearTimeout(timer);
+  graceTimers.delete(key);
+}
+
+/**
+ * The Auto-Yes gate, then the fan-out.
+ *
+ * In that order because `shouldSendWaitingPush` records the episode at the
+ * moment it decides to send, so a notification dropped after the fan-out began
+ * would still consume the episode's one slot — see `prompt-push-gate`.
+ */
+function gateAndSend(wait: PendingWait, now: number): void {
+  if (
+    isPromptPushSuppressed({
+      worktreeId: wait.worktreeId,
+      cliToolId: wait.cliToolId,
+      instanceId: wait.instanceId,
+      waitingSince: wait.since,
+    })
+  ) {
+    return;
+  }
+
+  void sendWaitingPush(wait, false, now);
+}
+
+/**
+ * The grace elapsed: send the held wait with whatever it is called *now*
+ * (Issue #2156).
+ *
+ * The episode store is the authority here for the same reason it is in
+ * {@link runEscalationTick}: it carries the classification every later probe
+ * refined, and its absence is the wait having ended. Nothing is sent in that
+ * case — a wait answered inside the grace never needed a notification, and
+ * dropping it is the direction #1999/#2000 asked for rather than a correction
+ * push chasing one that was already wrong.
+ */
+function releaseHeldWait(key: string): void {
+  graceTimers.delete(key);
+
+  const held = pending.get(key);
+  // Gone means the closing edge dropped it, or a reminder already claimed it.
+  if (held === undefined) return;
+
+  const episode = getWaitingEpisode(held.worktreeId, held.cliToolId, held.instanceId);
+  if (episode === null || episode.since !== held.since) {
+    pending.delete(key);
+    stopEscalationTimerIfIdle();
+    return;
+  }
+
+  // Written back so the reminder quotes the settled kind even if the episode is
+  // gone by the time it runs.
+  const settled: PendingWait = { ...held, kind: episode.kind };
+  pending.set(key, settled);
+
+  gateAndSend(settled, Date.now());
+}
+
 function startEscalationTimer(): void {
   if (globalThis.__waitingPushEscalationTimer !== undefined) return;
 
@@ -177,6 +293,8 @@ export function handleWaitingTransition(transition: WaitingTransition): void {
   const key = buildCompositeKey(transition.worktreeId, transition.cliToolId, transition.instanceId);
 
   if (!transition.waiting || transition.since === null) {
+    // Issue #2156: a wait still inside its grace is answered, not notified.
+    cancelGrace(key);
     pending.delete(key);
     stopEscalationTimerIfIdle();
     // Issue #2001: this is the moment the notification on every *other* device
@@ -217,18 +335,21 @@ export function handleWaitingTransition(transition: WaitingTransition): void {
   pending.set(key, wait);
   startEscalationTimer();
 
-  if (
-    isPromptPushSuppressed({
-      worktreeId: wait.worktreeId,
-      cliToolId: wait.cliToolId,
-      instanceId: wait.instanceId,
-      waitingSince: wait.since,
-    })
-  ) {
+  // Issue #2156: a wait nobody has named yet is held for one probe interval so
+  // it can notify under the kind it turns out to be, rather than under the
+  // placeholder it opened with. A named wait notifies on the edge, as before.
+  if (isUnnamedWait(wait.kind)) {
+    cancelGrace(key);
+    const timer = setTimeout(() => {
+      releaseHeldWait(key);
+    }, CLASSIFICATION_GRACE_MS);
+    // Same reasoning as the escalation interval: never hold the process open.
+    (timer as { unref?: () => void }).unref?.();
+    graceTimers.set(key, timer);
     return;
   }
 
-  void sendWaitingPush(wait, false, transition.at);
+  gateAndSend(wait, transition.at);
 }
 
 /**
@@ -318,6 +439,8 @@ export function stopWaitingPushNotifier(): void {
     existing();
     globalThis.__waitingPushUnsubscribe = undefined;
   }
+  for (const timer of graceTimers.values()) clearTimeout(timer);
+  graceTimers.clear();
   pending.clear();
   stopEscalationTimerIfIdle();
 }
@@ -330,4 +453,9 @@ export function isWaitingPushNotifierActive(): boolean {
 /** How many waits are awaiting their reminder. Test seam. */
 export function pendingEscalationCount(): number {
   return pending.size;
+}
+
+/** How many waits are held waiting to be classified (#2156). Test seam. */
+export function heldWaitCount(): number {
+  return graceTimers.size;
 }
