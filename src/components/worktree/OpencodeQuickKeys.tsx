@@ -136,18 +136,23 @@
  * still appears synchronously on press and still clears exactly
  * `KEY_PRESS_FEEDBACK_RESET_MS` later.
  *
- * The same uncollected pattern is still open in `TerminalEscapeHatch` and
- * `NavigationButtons`, which share this component's `useSpecialKeys` transport
- * but not its file; #2174's scope stops at this file.
+ * Issue #2176 found the identical uncollected timer still open in
+ * `TerminalEscapeHatch` and `NavigationButtons` — which share this component's
+ * `useSpecialKeys` transport but not its file, so #2174's fix never reached them
+ * — and moved the whole thing into {@link useKeyPressFeedback} rather than
+ * copying it twice more. This file now consumes that hook; the ref, both
+ * `clearTimeout` sites and the observable timing above are unchanged, they just
+ * live one level down. The one thing that stayed here is `send()`: the hook owns
+ * the highlight and nothing else.
  */
 
-import { memo, useCallback, useEffect, useId, useRef, useState } from 'react';
+import { memo, useCallback, useId } from 'react';
 import { useTranslations } from 'next-intl';
 import { ChevronDown } from 'lucide-react';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { OPENCODE_LEADER_KEY } from '@/types/terminal-keys';
 import { useSpecialKeys } from '@/hooks/useSpecialKeys';
-import { KEY_PRESS_FEEDBACK_RESET_MS } from '@/config/ui-feedback-config';
+import { useKeyPressFeedback } from '@/hooks/useKeyPressFeedback';
 import {
   useOpencodeQuickKeysDisclosure,
   type OpencodeQuickKeysLayout,
@@ -298,7 +303,9 @@ export const OpencodeQuickKeys = memo(function OpencodeQuickKeys({
   layout = 'mobile',
 }: OpencodeQuickKeysProps) {
   const t = useTranslations('worktree');
-  const [activeId, setActiveId] = useState<string | null>(null);
+  // Issue #2176: `activeId` and its timer now come from the shared hook — same
+  // ref-held id, same clear on the next press and on unmount as #2174 wrote here.
+  const { activeKey: activeId, markPressed } = useKeyPressFeedback();
   const send = useSpecialKeys(worktreeId, cliToolId, instanceId, onKeysSent);
   // Issue #2106. Called unconditionally (hooks rule) and for every tool, which
   // is one localStorage read on a PC pane that then ignores the value — the
@@ -307,35 +314,13 @@ export const OpencodeQuickKeys = memo(function OpencodeQuickKeys({
   const { open: disclosureOpen, toggle: toggleDisclosure } =
     useOpencodeQuickKeysDisclosure(layout);
   const panelId = useId();
-  // Issue #2174: see the module docblock. The press highlight is the only thing
-  // this timer does, so dropping it on unmount costs nothing and keeps the
-  // callback from outliving the tree that owns the state it writes.
-  const feedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    return () => {
-      if (feedbackTimerRef.current !== null) {
-        clearTimeout(feedbackTimerRef.current);
-        feedbackTimerRef.current = null;
-      }
-    };
-  }, []);
 
   const handleClick = useCallback(
     (def: QuickKeyDef) => {
-      setActiveId(def.id);
-      // Re-arm from zero: without this the previous press's timer would still be
-      // pending and would clear the CURRENT press's highlight early.
-      if (feedbackTimerRef.current !== null) {
-        clearTimeout(feedbackTimerRef.current);
-      }
-      feedbackTimerRef.current = setTimeout(() => {
-        feedbackTimerRef.current = null;
-        setActiveId(null);
-      }, KEY_PRESS_FEEDBACK_RESET_MS);
+      markPressed(def.id);
       send([...def.keys]);
     },
-    [send],
+    [markPressed, send],
   );
 
   // Not a feature flag: every binding on this strip belongs to opencode's TUI,
