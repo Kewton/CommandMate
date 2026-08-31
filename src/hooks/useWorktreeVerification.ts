@@ -26,17 +26,25 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { FAILING_GATE_STATUSES } from '@/config/verification-display';
 import {
+  DEFAULT_RUN_HISTORY_DAYS,
+  DEFAULT_RUN_HISTORY_LIMIT,
   DEFAULT_RUN_LIST_LIMIT,
+  MAX_RUN_LIST_LIMIT,
+  RUN_LIST_LIMIT_STEP,
   VerificationApiError,
+  cancelVerificationRun,
   draftVerificationConfig,
   fetchLatestTask,
   fetchVerificationConfig,
   fetchVerificationRun,
+  fetchVerificationRunHistory,
   fetchVerificationRuns,
   startVerification,
   type TaskView,
   type VerificationRunListItem,
+  type VerificationRunSummaryView,
   type VerificationRunView,
   type VerifyConfigDraftResponse,
   type VerifyConfigResponse,
@@ -98,6 +106,30 @@ export interface RerunFailure {
   runningRunId: number | null;
 }
 
+/** Reason a cancel request was refused, for the UI to phrase (Issue #2063). */
+export interface CancelFailure {
+  /**
+   * `gone` = 409: the run had already reached a verdict, or it is an orphan no
+   * signal in this process can reach. Not a fault — the list is one poll
+   * behind, and the refresh the hook forces resolves it.
+   */
+  kind: 'gone' | 'error';
+  message: string;
+}
+
+/**
+ * True when two gate-id lists name the same set.
+ *
+ * Order is deliberately ignored: the selection is rebuilt in the config's order
+ * on every toggle, and what this answers is "is the operator still asking for
+ * everything", which is a question about membership.
+ */
+function sameGateSet(a: readonly string[], b: readonly string[]): boolean {
+  if (a.length !== b.length) return false;
+  const set = new Set(a);
+  return b.every((id) => set.has(id));
+}
+
 /** Everything the chip and the pane read. */
 export interface WorktreeVerificationState {
   /** The branch this state is about. The pane interpolates it into CLI hints. */
@@ -139,12 +171,80 @@ export interface WorktreeVerificationState {
   draftFailure: DraftFailure | null;
   /** What the last successful draft wrote; `null` before one succeeded. */
   draftResult: VerifyConfigDraftResponse | null;
+
+  // --- Gate selection (Issue #2063) ------------------------------------------
+
+  /**
+   * Every gate a default run executes, in execution order.
+   *
+   * The server's `plannedGateIds` verbatim — built-ins first, then verify.yaml's
+   * — so the checkbox list is the runner's own answer to "what runs", not a
+   * composition the browser guessed at.
+   */
+  availableGateIds: string[];
+  /**
+   * Gates ticked for the next run; `null` means "all of them", the default.
+   *
+   * `null` is not the same value as a list naming every gate, and the difference
+   * is load-bearing: an omitted `gateIds` leaves the scope gate `implicit`,
+   * while naming `scope` explicitly makes a skip count against the run. So the
+   * selection collapses back to `null` the moment every box is ticked again, and
+   * {@link rerun} sends no `gateIds` at all for it.
+   */
+  selectedGateIds: string[] | null;
+  /** Gates that did not pass in the run currently shown; `[]` when none did. */
+  failedGateIds: string[];
+  /** Tick or untick one gate. */
+  toggleGate: (gateId: string) => void;
+  /** Replace the selection outright; `null` restores "all gates". */
+  setGateSelection: (gateIds: string[] | null) => void;
+  /** Tick exactly {@link failedGateIds} — the "re-run the red ones" shortcut. */
+  selectFailedGates: () => void;
+
+  // --- Cancel (Issue #2063) --------------------------------------------------
+
+  /** The run in flight for this worktree, or `null`. */
+  runningRun: VerificationRunListItem | null;
+  /** True while a cancel POST is in flight. */
+  cancelPending: boolean;
+  /** Why the last cancel was refused; `null` when it was not. */
+  cancelFailure: CancelFailure | null;
+
+  // --- History (Issue #2063) -------------------------------------------------
+
+  /** Runs currently requested from the worktree-scoped list endpoint. */
+  historyLimit: number;
+  /** True when raising {@link historyLimit} could still yield more rows. */
+  canLoadMore: boolean;
+  /** True while the repository-wide history block is expanded. */
+  repositoryHistoryOpen: boolean;
+  /** Runs across every worktree, newest first; `[]` until the block is opened. */
+  repositoryHistory: VerificationRunSummaryView[];
+  /** True while the repository-wide history request is in flight. */
+  repositoryHistoryLoading: boolean;
+  /** Failure of the repository-wide history read, already a display string. */
+  repositoryHistoryError: string | null;
+
+  // --- Actions ---------------------------------------------------------------
+
   /** Show a different run's gates. */
   selectRun: (runId: number) => void;
   /** Refetch now, ignoring the throttle. */
   refresh: () => void;
-  /** `POST /verify`; selects the new run and refetches. */
-  rerun: () => Promise<void>;
+  /**
+   * `POST /verify`; selects the new run and refetches.
+   *
+   * With no argument it sends {@link selectedGateIds}, which is what every
+   * button in the pane does. An explicit `null` forces the full run regardless
+   * of the selection; an explicit list overrides it for this one request.
+   */
+  rerun: (gateIds?: string[] | null) => Promise<void>;
+  /** `POST /verify/runs/:runId/cancel` for {@link runningRun}; then refetches. */
+  cancelRun: () => Promise<void>;
+  /** Ask the list endpoint for {@link RUN_LIST_LIMIT_STEP} more runs. */
+  loadMore: () => void;
+  /** Expand or collapse the repository-wide history block. */
+  toggleRepositoryHistory: () => void;
   /** `POST /verify/config`; drafts verify.yaml from CI and re-reads it. */
   draftConfig: () => Promise<void>;
 }
@@ -203,6 +303,14 @@ export function useWorktreeVerification({
   const [draftPending, setDraftPending] = useState(false);
   const [draftFailure, setDraftFailure] = useState<DraftFailure | null>(null);
   const [draftResult, setDraftResult] = useState<VerifyConfigDraftResponse | null>(null);
+  const [cancelPending, setCancelPending] = useState(false);
+  const [cancelFailure, setCancelFailure] = useState<CancelFailure | null>(null);
+  const [selectedGateIds, setSelectedGateIds] = useState<string[] | null>(null);
+  const [historyLimit, setHistoryLimit] = useState(limit);
+  const [repositoryHistoryOpen, setRepositoryHistoryOpen] = useState(false);
+  const [repositoryHistory, setRepositoryHistory] = useState<VerificationRunSummaryView[]>([]);
+  const [repositoryHistoryLoading, setRepositoryHistoryLoading] = useState(false);
+  const [repositoryHistoryError, setRepositoryHistoryError] = useState<string | null>(null);
   /** Bumped by refresh()/rerun() to force a fetch between parent ticks. */
   const [nonce, setNonce] = useState(0);
 
@@ -213,7 +321,17 @@ export function useWorktreeVerification({
   const activeRef = useRef(false);
   const rerunPendingRef = useRef(false);
   const draftPendingRef = useRef(false);
+  const cancelPendingRef = useRef(false);
   const didMountRef = useRef(false);
+  /**
+   * The selection `rerun()` reads when it is called with no argument.
+   *
+   * A ref and not a dependency so `rerun`'s identity stays tied to the worktree
+   * alone, as it was before #2063 — ticking a checkbox must not hand every
+   * consumer of this state a new callback.
+   */
+  const selectedGateIdsRef = useRef<string[] | null>(null);
+  selectedGateIdsRef.current = selectedGateIds;
 
   activeRef.current = isInFlight(task, runs);
 
@@ -241,6 +359,13 @@ export function useWorktreeVerification({
     setConfigError(null);
     setDraftFailure(null);
     setDraftResult(null);
+    setCancelFailure(null);
+    // Issue #2063. The selection names gate ids from the previous branch's
+    // verify.yaml, and "all gates" is the only selection that means the same
+    // thing in every repository.
+    setSelectedGateIds(null);
+    setHistoryLimit(limit);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [worktreeId]);
 
   /**
@@ -293,7 +418,7 @@ export function useWorktreeVerification({
       try {
         const [nextTask, nextRuns] = await Promise.all([
           fetchLatestTask(worktreeId),
-          fetchVerificationRuns(worktreeId, limit),
+          fetchVerificationRuns(worktreeId, historyLimit),
         ]);
         if (generation !== generationRef.current) return;
         setTask(nextTask);
@@ -307,7 +432,7 @@ export function useWorktreeVerification({
         if (generation === generationRef.current) setLoading(false);
       }
     })();
-  }, [worktreeId, refreshToken, nonce, enabled, limit]);
+  }, [worktreeId, refreshToken, nonce, enabled, historyLimit]);
 
   /** Selection falls back to the newest run so the pane opens on it. */
   const effectiveRunId = selectedRunId ?? runs[0]?.id ?? null;
@@ -357,6 +482,125 @@ export function useWorktreeVerification({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [worktreeId, enabled, detailKey]);
 
+  /**
+   * Verification history across every worktree (Issue #2063).
+   *
+   * Fetched only while the block is expanded: it is a supplementary answer —
+   * "is this gate red everywhere, or only here?" — and a pane that asked for it
+   * on every poll would triple this screen's verification traffic to render
+   * something usually collapsed.
+   *
+   * `nonce` is a dependency so the pane's Refresh reaches it too; `refreshToken`
+   * deliberately is not, for the reason above.
+   */
+  useEffect(() => {
+    if (!enabled || !repositoryHistoryOpen) return;
+    const controller = new AbortController();
+    let cancelled = false;
+    setRepositoryHistoryLoading(true);
+    void (async () => {
+      try {
+        const history = await fetchVerificationRunHistory(
+          { days: DEFAULT_RUN_HISTORY_DAYS, limit: DEFAULT_RUN_HISTORY_LIMIT },
+          controller.signal
+        );
+        if (cancelled) return;
+        setRepositoryHistory(history);
+        setRepositoryHistoryError(null);
+      } catch (err) {
+        if (cancelled || isAbort(err)) return;
+        setRepositoryHistoryError(messageOf(err, 'Failed to load the verification history'));
+      } finally {
+        if (!cancelled) setRepositoryHistoryLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [enabled, repositoryHistoryOpen, nonce]);
+
+  /**
+   * The gates a default run executes, straight from the server (Issue #2063).
+   *
+   * `plannedGateIds` and not `config.gates`: the built-ins (`work-evidence`,
+   * `scope`, and `env-clean` when a declaration switched it on) are gates the
+   * operator can name in `gateIds` too, and leaving them out of the checkbox
+   * list would make "re-run only the red ones" unable to include the red one.
+   */
+  const availableGateIds = useMemo(() => config?.plannedGateIds ?? [], [config]);
+
+  /**
+   * Gates that did not pass in the run on screen.
+   *
+   * Read from the *displayed* run, which defaults to the newest one — so the
+   * shortcut means "the gates that just failed" without the operator having to
+   * think about it, and means "the gates that failed in the run I am reading"
+   * once they have clicked back through the history.
+   *
+   * `skipped` is excluded (via `FAILING_GATE_STATUSES`): a gate the runner
+   * declined to run has no failure to reproduce, and re-running the primary
+   * checkout's skipped gates would just skip them again.
+   */
+  const failedGateIds = useMemo(
+    () =>
+      (selectedRun?.gates ?? [])
+        .filter((gate) => FAILING_GATE_STATUSES.includes(gate.status))
+        .map((gate) => gate.gateId),
+    [selectedRun]
+  );
+
+  const runningRun = useMemo(
+    () => runs.find((run) => run.status === 'running') ?? null,
+    [runs]
+  );
+
+  const setGateSelection = useCallback(
+    (gateIds: string[] | null) => {
+      setSelectedGateIds(
+        gateIds === null || sameGateSet(gateIds, availableGateIds) ? null : gateIds
+      );
+    },
+    [availableGateIds]
+  );
+
+  const toggleGate = useCallback(
+    (gateId: string) => {
+      setSelectedGateIds((current) => {
+        const base = current ?? availableGateIds;
+        const wanted = new Set(base);
+        if (wanted.has(gateId)) {
+          wanted.delete(gateId);
+        } else {
+          wanted.add(gateId);
+        }
+        // Rebuilt from availableGateIds rather than from the click order, so the
+        // request always lists gates in the order the runner will execute them.
+        const next = availableGateIds.filter((id) => wanted.has(id));
+        return sameGateSet(next, availableGateIds) ? null : next;
+      });
+    },
+    [availableGateIds]
+  );
+
+  const selectFailedGates = useCallback(() => {
+    // Intersected with what the config plans: a gate the run recorded may have
+    // been dropped from verify.yaml since, and asking for it answers 400.
+    const wanted = availableGateIds.filter((id) => failedGateIds.includes(id));
+    setSelectedGateIds(
+      wanted.length === 0 || sameGateSet(wanted, availableGateIds) ? null : wanted
+    );
+  }, [availableGateIds, failedGateIds]);
+
+  const loadMore = useCallback(() => {
+    lastFetchAtRef.current = 0;
+    setHistoryLimit((current) => Math.min(current + RUN_LIST_LIMIT_STEP, MAX_RUN_LIST_LIMIT));
+  }, []);
+
+  const toggleRepositoryHistory = useCallback(() => {
+    setRepositoryHistoryOpen((open) => !open);
+  }, []);
+
   const refresh = useCallback(() => {
     lastFetchAtRef.current = 0;
     setNonce((value) => value + 1);
@@ -366,13 +610,21 @@ export function useWorktreeVerification({
     setSelectedRunId(runId);
   }, []);
 
-  const rerun = useCallback(async () => {
+  const rerun = useCallback(async (gateIds?: string[] | null) => {
     if (rerunPendingRef.current) return;
     rerunPendingRef.current = true;
     setRerunPending(true);
     setRerunFailure(null);
+    setCancelFailure(null);
     try {
-      const runId = await startVerification(worktreeId);
+      // `undefined` means "use the pane's selection"; `null` — and a selection
+      // of `null` — means the full run, which is spelled by sending NO gateIds
+      // rather than by listing every gate. See StartVerificationOptions.
+      const requested = gateIds === undefined ? selectedGateIdsRef.current : gateIds;
+      const runId = await startVerification(
+        worktreeId,
+        requested !== null && requested.length > 0 ? { gateIds: requested } : {}
+      );
       setSelectedRunId(runId);
       // The 202 carries no verdict, so the list is what closes the loop: force
       // the next refresh instead of waiting out the idle throttle.
@@ -396,6 +648,37 @@ export function useWorktreeVerification({
       setRerunPending(false);
     }
   }, [worktreeId]);
+
+  /**
+   * Stop the run in flight (Issue #2063).
+   *
+   * The route kills the gate's process group before it closes the row, so this
+   * resolving means the `build` gate is gone — not merely relabelled. A refresh
+   * is forced either way: on success the list still holds the `running` row
+   * this call just ended, and on a 409 the run had already finished, which is
+   * exactly the state a re-read reveals.
+   */
+  const cancelRun = useCallback(async () => {
+    const target = runningRun;
+    if (cancelPendingRef.current || target === null) return;
+    cancelPendingRef.current = true;
+    setCancelPending(true);
+    setCancelFailure(null);
+    try {
+      await cancelVerificationRun(worktreeId, target.id);
+    } catch (err) {
+      const status = err instanceof VerificationApiError ? err.status : 0;
+      setCancelFailure({
+        kind: status === 409 ? 'gone' : 'error',
+        message: messageOf(err, 'Failed to cancel the verification run'),
+      });
+    } finally {
+      cancelPendingRef.current = false;
+      setCancelPending(false);
+      lastFetchAtRef.current = 0;
+      setNonce((value) => value + 1);
+    }
+  }, [worktreeId, runningRun]);
 
   const draftConfig = useCallback(async () => {
     if (draftPendingRef.current) return;
@@ -447,9 +730,30 @@ export function useWorktreeVerification({
     draftPending,
     draftFailure,
     draftResult,
+    availableGateIds,
+    selectedGateIds,
+    failedGateIds,
+    toggleGate,
+    setGateSelection,
+    selectFailedGates,
+    runningRun,
+    cancelPending,
+    cancelFailure,
+    historyLimit,
+    // A full page is the only evidence there may be another: the endpoint
+    // reports no total. Stopping at the route's own ceiling keeps the last
+    // press from turning into a 400 the operator has to interpret.
+    canLoadMore: runs.length >= historyLimit && historyLimit < MAX_RUN_LIST_LIMIT,
+    repositoryHistoryOpen,
+    repositoryHistory,
+    repositoryHistoryLoading,
+    repositoryHistoryError,
     selectRun,
     refresh,
     rerun,
+    cancelRun,
+    loadMore,
+    toggleRepositoryHistory,
     draftConfig,
   };
 }

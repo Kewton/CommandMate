@@ -988,7 +988,22 @@
       "trigger": "trigger={trigger}",
       "cliLegend": "Equivalent CLI exit codes: {items}",
       "cliLegendItem": "{label} = exit {code}",
-      "exitCode": "CLI exit={code}"
+      "exitCode": "CLI exit={code}",
+      "cancel": "Stop verification",
+      "cancelPending": "Stopping…",
+      "cancelHint": "Stopping signals the running gate’s process group to terminate and starts none of the remaining gates. The run is closed as stopped.",
+      "cancelGone": "That run had already finished. The list has been re-read — check the verdict it reached.",
+      "cancelError": "Could not stop the verification run: {message}",
+      "loadMore": "Load {count} more",
+      "history": {
+        "open": "Show history across other branches",
+        "close": "Hide the cross-branch history",
+        "hint": "Recent verification runs from every worktree this server manages. When one gate is red on several branches, that is usually a verdict about the gate rather than about the work.",
+        "loading": "Loading the cross-branch history…",
+        "empty": "No verification run from another branch in this window.",
+        "error": "Could not load the cross-branch history: {message}",
+        "failingGates": "Failing gates: {gates}"
+      }
     },
     "gates": {
       "heading": "Gates — run {runId}",
@@ -1021,8 +1036,16 @@
         "detachedContract": "This branch has an execution contract, but the run was not attached to it, so the declared scope went unjudged. Starting the run with `wait --verify` attaches it automatically.",
         "noContract": "No execution contract is attached to this run, so no scope is declared to check.",
         "notRequired": "The execution contract sets `success.requireScopeClean: false`, so the scope was not judged.",
-        "unknown": "This gate did not execute. Its log tail says why."
-      }
+        "unknown": "This gate did not execute. Its log tail says why.",
+        "cancelled": "The verification run was stopped, so this gate reached no verdict. That is the result of stopping the run, not a judgement about the work."
+      },
+      "showFullLog": "Open the full log",
+      "fullLogTitle": "Full log — {gateId} (run {runId})",
+      "fullLogSize": "{lines} lines",
+      "fullLogStored": "The server stores only the tail of each gate’s output, capped by `options.maxLogTailBytes`. What you see here is all of it — nothing earlier was kept anywhere.",
+      "copyLog": "Copy the log",
+      "copied": "Copied",
+      "copyFailed": "Could not copy"
     },
     "runStatus": {
       "running": "Running",
@@ -1070,6 +1093,20 @@
       "reasonHeading": "Why this verdict",
       "showReason": "Show why",
       "hideReason": "Hide why"
+    },
+    "selection": {
+      "heading": "Gates to run",
+      "open": "Choose gates",
+      "close": "Close the gate list",
+      "all": "All {count} gates will run (the default)",
+      "partial": "{selected} of {total} selected: {gates}",
+      "gateLabel": "Select gate {gateId}",
+      "runAll": "Verify with every gate",
+      "runSelected": "Verify with the {count} selected",
+      "hint": "Only the selected gates run, so confirming a one-line `lint` fix no longer means waiting for `build` and `unit`. Going back to all gates restores the default run, built-in gates included.",
+      "failedOnly": "Only the gates that failed ({count})",
+      "failedOnlyEmpty": "The run on screen has no failing gate to re-run. A gate that did not run would simply not run again for the same reason.",
+      "selectAll": "Back to all gates"
     }
   },
   "task": {

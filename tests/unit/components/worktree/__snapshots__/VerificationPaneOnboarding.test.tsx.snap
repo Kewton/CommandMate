@@ -35,8 +35,9 @@ exports[`VerificationPane onboarding (Issue #2061) > the four states render diff
 {
   "ctas": [
     "Refresh now",
+    "Stop verification",
   ],
   "phase": "running",
-  "text": "Verification runs the gates this repository declares in \`.commandmate/verify.yaml\`, in this worktree, exactly as written.Each gate's exit code decides the verdict. They are the same gates \`commandmate verify\` and \`wait --verify\` use, so green here means green there.Running: 1 of 4 gates have finished.Elapsed 2m 07sGates run one at a time; each appears in the list below as it finishes.Refresh now",
+  "text": "Verification runs the gates this repository declares in \`.commandmate/verify.yaml\`, in this worktree, exactly as written.Each gate's exit code decides the verdict. They are the same gates \`commandmate verify\` and \`wait --verify\` use, so green here means green there.Running: 1 of 4 gates have finished.Elapsed 2m 07sGates run one at a time; each appears in the list below as it finishes.Refresh nowStop verificationStopping signals the running gate’s process group to terminate and starts none of the remaining gates. The run is closed as stopped.",
 }
 `;

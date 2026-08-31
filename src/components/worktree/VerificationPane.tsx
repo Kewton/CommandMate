@@ -41,16 +41,28 @@
  * skipped gates states which gates were declined and why — see
  * {@link RunVerdictBanner} and `lib/verification/run-verdict-vocabulary.ts`.
  *
+ * Issue #2063 makes the pane something an operator can steer rather than only
+ * read. Four things it could not do: run a subset of the gates (the route has
+ * accepted `gateIds` since #1543 and this file posted `{}`, so a red `lint`
+ * could only be retried by re-running the 1800s `build` beside it), stop a run
+ * (there was no endpoint), see past the ten newest runs, or read a gate's log
+ * beyond its last 40 lines without leaving for a terminal. See
+ * {@link GateSelector}, the Stop button in {@link OnboardingSection}'s running
+ * state, {@link RepositoryHistory} and {@link GateLogModal}. The state machine
+ * and the vocabulary are #2061's and #2062's and are used as they stand.
+ *
  * @module components/worktree/VerificationPane
  */
 
 'use client';
 
-import React, { memo, useCallback, useState } from 'react';
+import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { ExternalLink, RefreshCw, ShieldCheck } from 'lucide-react';
+import { Copy, ExternalLink, RefreshCw, ShieldCheck } from 'lucide-react';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
+import { Checkbox } from '@/components/ui/Checkbox';
+import { Modal } from '@/components/ui/Modal';
 import {
   FAILING_GATE_STATUSES,
   GATE_STATUS_VARIANT,
@@ -59,13 +71,16 @@ import {
   excerptLogTail,
   formatGateDuration,
 } from '@/config/verification-display';
+import { copyToClipboard } from '@/lib/clipboard-utils';
 import {
   MAX_DISPLAYED_LOG_TAIL_LINES,
+  RUN_LIST_LIMIT_STEP,
   VERIFY_CONFIG_DOC_URL,
   VERIFY_CONFIG_RELATIVE_PATH,
   type TaskView,
   type VerificationGateResultView,
   type VerificationRunListItem,
+  type VerificationRunSummaryView,
   type VerificationRunView,
   type VerifyConfigGateView,
   type VerifyConfigResponse,
@@ -80,6 +95,9 @@ import type { WorktreeVerificationState } from '@/hooks/useWorktreeVerification'
 
 /** Characters of the contract goal shown before the "…" (the pane is not a reader). */
 const GOAL_EXCERPT_LENGTH = 240;
+
+/** How long the log modal's copy button says "Copied" before reverting. */
+const COPY_FEEDBACK_MS = 2000;
 
 export interface VerificationPaneProps {
   /** State owned by `useWorktreeVerification` in the detail controller. */
@@ -276,6 +294,9 @@ function OnboardingSection({ state }: { state: WorktreeVerificationState }) {
   const handleShowLatest = useCallback(() => {
     if (latestRun) state.selectRun(latestRun.id);
   }, [latestRun, state]);
+  const handleCancel = useCallback(() => {
+    void state.cancelRun();
+  }, [state]);
 
   const runningRun = runs.find((run) => run.status === 'running') ?? null;
   // Gate rows are created as each gate starts, so the run's own list is the
@@ -412,20 +433,44 @@ function OnboardingSection({ state }: { state: WorktreeVerificationState }) {
           </Note>
           <Note>{t('verification.onboarding.running.hint')}</Note>
           {/*
-            A labelled Refresh, not a Cancel: cancelling a run is Issue #2063's
-            surface. What this state can offer today is "stop waiting for the
-            poll tick", which the header's icon-only button also does — but the
-            operator watching a progress line should not have to know that.
+            Refresh and Stop, side by side (#2063). Refresh is "stop waiting for
+            the poll tick", which the header's icon-only button also does — but
+            the operator watching a progress line should not have to know that.
+            Stop is the one #2061 had to leave as a comment here: it kills the
+            gate's process group, so it is a `danger` button and not a third
+            grey one.
           */}
-          <Button
-            type="button"
-            size="sm"
-            variant="secondary"
-            onClick={state.refresh}
-            data-testid="verification-running-refresh-button"
-          >
-            {t('verification.onboarding.running.action')}
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              onClick={state.refresh}
+              data-testid="verification-running-refresh-button"
+            >
+              {t('verification.onboarding.running.action')}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="danger"
+              onClick={handleCancel}
+              disabled={state.cancelPending}
+              data-testid="verification-cancel-button"
+            >
+              {state.cancelPending
+                ? t('verification.runs.cancelPending')
+                : t('verification.runs.cancel')}
+            </Button>
+          </div>
+          <Note testId="verification-cancel-hint">{t('verification.runs.cancelHint')}</Note>
+          {state.cancelFailure && (
+            <Note tone="warning" testId="verification-cancel-failure">
+              {state.cancelFailure.kind === 'gone'
+                ? t('verification.runs.cancelGone')
+                : t('verification.runs.cancelError', { message: state.cancelFailure.message })}
+            </Note>
+          )}
         </div>
       )}
 
@@ -449,6 +494,384 @@ function OnboardingSection({ state }: { state: WorktreeVerificationState }) {
         </div>
       )}
     </section>
+  );
+}
+
+/**
+ * Pick which gates the next run executes (Issue #2063).
+ *
+ * The pane could only ask for everything. In this repository "everything"
+ * includes a 1800s `build` and mutex-held `unit` / `integration` gates, so the
+ * cost of confirming a one-line lint fix was the cost of the whole suite —
+ * which is how "re-verify" turned into something an operator avoided pressing.
+ *
+ * Two rules the UI has to keep, both from the runner:
+ *
+ *  1. **Ticking every box is not the same request as sending no `gateIds`.**
+ *     An omitted list leaves the scope gate `implicit`, so a contract-less
+ *     run's skip is forgiven; naming `scope` makes it `explicit` and the skip
+ *     then turns the run into `error`. The hook collapses a full selection back
+ *     to `null` for exactly this reason, and this block says "all gates" for
+ *     that state rather than showing five ticked boxes that mean something
+ *     slightly different.
+ *  2. **The list is the server's `plannedGateIds`.** Built-ins included: they
+ *     are selectable gate ids, and a `work-evidence` failure is one an operator
+ *     may well want to re-check on its own.
+ *
+ * Collapsed by default. The common case is still "run everything", and a
+ * checkbox list opened over it would push the run history below the fold of a
+ * ~230px pane.
+ */
+function GateSelector({ state }: { state: WorktreeVerificationState }) {
+  const t = useTranslations('worktree');
+  const [open, setOpen] = useState(false);
+  const { availableGateIds, selectedGateIds, failedGateIds, rerunPending } = state;
+
+  const handleToggleOpen = useCallback(() => setOpen((value) => !value), []);
+  const handleSelectAll = useCallback(() => state.setGateSelection(null), [state]);
+  const handleFailedOnly = useCallback(() => {
+    state.selectFailedGates();
+    // Opened on the operator's behalf: the shortcut changes what the button
+    // above will run, and a change nobody can see is a change nobody trusts.
+    setOpen(true);
+  }, [state]);
+  const handleRunSelected = useCallback(() => {
+    void state.rerun();
+  }, [state]);
+
+  // Nothing has told us what runs yet (the config read has not landed, or the
+  // repository declares nothing). A checkbox list of zero gates is furniture.
+  if (availableGateIds.length === 0) return null;
+
+  const selected = selectedGateIds ?? availableGateIds;
+  const isAll = selectedGateIds === null;
+  const reRunnableFailures = availableGateIds.filter((id) => failedGateIds.includes(id));
+
+  return (
+    <div
+      className="mb-2 rounded-md border border-border bg-surface-2 px-2 py-2"
+      data-testid="verification-gate-selector"
+      data-selection={isAll ? 'all' : selected.join(',')}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="text-xs font-semibold text-foreground">
+          {t('verification.selection.heading')}
+        </span>
+        <button
+          type="button"
+          onClick={handleToggleOpen}
+          aria-expanded={open}
+          data-testid="verification-gate-selector-toggle"
+          className="rounded text-[11px] font-medium text-accent-600 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:text-accent-400 touch-manipulation"
+        >
+          {open ? t('verification.selection.close') : t('verification.selection.open')}
+        </button>
+      </div>
+      <p
+        className="mt-0.5 break-words text-[11px] text-muted-foreground"
+        data-testid="verification-gate-selector-summary"
+      >
+        {isAll
+          ? t('verification.selection.all', { count: availableGateIds.length })
+          : t('verification.selection.partial', {
+              selected: selected.length,
+              total: availableGateIds.length,
+              gates: selected.join(', '),
+            })}
+      </p>
+
+      {open && (
+        <div className="mt-2 space-y-2" data-testid="verification-gate-selector-body">
+          <ul className="space-y-1" data-testid="verification-gate-checkboxes">
+            {availableGateIds.map((gateId) => {
+              const inputId = `verification-gate-select-${gateId}`;
+              const failing = failedGateIds.includes(gateId);
+              return (
+                <li key={gateId} className="flex items-center gap-2">
+                  <Checkbox
+                    id={inputId}
+                    checked={selected.includes(gateId)}
+                    onCheckedChange={() => state.toggleGate(gateId)}
+                    data-testid={inputId}
+                    aria-label={t('verification.selection.gateLabel', { gateId })}
+                  />
+                  <label
+                    htmlFor={inputId}
+                    className="min-w-0 flex-1 cursor-pointer break-all font-mono text-[11px] text-foreground touch-manipulation"
+                  >
+                    {gateId}
+                  </label>
+                  {failing && (
+                    <Badge variant="error" className="flex-shrink-0">
+                      {t('verification.gateStatus.failed')}
+                    </Badge>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+          <Button
+            type="button"
+            size="sm"
+            variant="primary"
+            onClick={handleRunSelected}
+            disabled={rerunPending}
+            data-testid="verification-run-selected-button"
+          >
+            {rerunPending
+              ? t('verification.runs.rerunPending')
+              : isAll
+                ? t('verification.selection.runAll')
+                : t('verification.selection.runSelected', { count: selected.length })}
+          </Button>
+          <p className="break-words text-[11px] text-muted-foreground">
+            {t('verification.selection.hint')}
+          </p>
+        </div>
+      )}
+
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <Button
+          type="button"
+          size="sm"
+          variant="secondary"
+          onClick={handleFailedOnly}
+          disabled={reRunnableFailures.length === 0}
+          data-testid="verification-failed-only-button"
+        >
+          {t('verification.selection.failedOnly', { count: reRunnableFailures.length })}
+        </Button>
+        {!isAll && (
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            onClick={handleSelectAll}
+            data-testid="verification-select-all-button"
+          >
+            {t('verification.selection.selectAll')}
+          </Button>
+        )}
+      </div>
+      {reRunnableFailures.length === 0 && (
+        <p
+          className="mt-1 break-words text-[11px] text-muted-foreground"
+          data-testid="verification-failed-only-empty"
+        >
+          {t('verification.selection.failedOnlyEmpty')}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Verification history across every worktree (Issue #2063).
+ *
+ * `GET /api/verification/runs` has existed since #1593 and no Web surface read
+ * it. The question it answers is the one `verify.yaml` tuning asks and the
+ * branch-scoped list cannot: a gate red on one branch is a verdict about the
+ * work, and the same gate red on six is a verdict about the gate.
+ *
+ * Read-only, and deliberately outside the run selection. Those runs belong to
+ * other worktrees, so clicking one cannot open the gate table below (that route
+ * is worktree-scoped and would 404), and the failing gate ids the summary
+ * already carries are the part worth comparing anyway.
+ */
+function RepositoryHistory({ state }: { state: WorktreeVerificationState }) {
+  const t = useTranslations('worktree');
+  const {
+    repositoryHistoryOpen,
+    repositoryHistory,
+    repositoryHistoryLoading,
+    repositoryHistoryError,
+  } = state;
+
+  const handleToggle = useCallback(() => {
+    state.toggleRepositoryHistory();
+  }, [state]);
+
+  return (
+    <div className="mt-2" data-testid="verification-repository-history">
+      <button
+        type="button"
+        onClick={handleToggle}
+        aria-expanded={repositoryHistoryOpen}
+        data-testid="verification-repository-history-toggle"
+        className="rounded text-[11px] font-medium text-accent-600 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:text-accent-400 touch-manipulation"
+      >
+        {repositoryHistoryOpen
+          ? t('verification.runs.history.close')
+          : t('verification.runs.history.open')}
+      </button>
+
+      {repositoryHistoryOpen && (
+        <div className="mt-1 space-y-1" data-testid="verification-repository-history-body">
+          <p className="break-words text-[11px] text-muted-foreground">
+            {t('verification.runs.history.hint')}
+          </p>
+          {repositoryHistoryError !== null ? (
+            <p
+              className="rounded border border-warning-border bg-warning-subtle px-2 py-1 text-[11px] text-warning-foreground"
+              data-testid="verification-repository-history-error"
+              role="alert"
+            >
+              {t('verification.runs.history.error', { message: repositoryHistoryError })}
+            </p>
+          ) : repositoryHistoryLoading && repositoryHistory.length === 0 ? (
+            <p className="text-[11px] text-muted-foreground">
+              {t('verification.runs.history.loading')}
+            </p>
+          ) : repositoryHistory.length === 0 ? (
+            <p
+              className="text-[11px] text-muted-foreground"
+              data-testid="verification-repository-history-empty"
+            >
+              {t('verification.runs.history.empty')}
+            </p>
+          ) : (
+            <ul className="space-y-1" data-testid="verification-repository-history-runs">
+              {repositoryHistory.map((run) => (
+                <RepositoryHistoryRow key={run.id} run={run} />
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** One cross-worktree run: which branch, what verdict, which gates were red. */
+function RepositoryHistoryRow({ run }: { run: VerificationRunSummaryView }) {
+  const t = useTranslations('worktree');
+  const status = run.status;
+  const failing = run.gates
+    .filter((gate) => FAILING_GATE_STATUSES.includes(gate.status))
+    .map((gate) => gate.gateId);
+
+  return (
+    <li
+      className="flex flex-col gap-0.5 rounded-md border border-border bg-surface px-2 py-1.5"
+      data-testid={`verification-history-run-${run.id}`}
+    >
+      <span className="flex items-center gap-2">
+        <Badge variant={RUN_STATUS_VARIANT[status]} className="flex-shrink-0">
+          {t(`verification.runStatus.${status}`)}
+        </Badge>
+        <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-foreground">
+          {run.worktreeId}
+        </span>
+      </span>
+      <span className="flex flex-wrap gap-x-2 font-mono text-[11px] text-muted-foreground">
+        <span>{t('verification.runs.runLabel', { runId: run.id })}</span>
+        <span>{formatTimestamp(run.startedAt)}</span>
+      </span>
+      {failing.length > 0 && (
+        <span className="break-words text-[11px] text-muted-foreground">
+          {t('verification.runs.history.failingGates', { gates: failing.join(', ') })}
+        </span>
+      )}
+    </li>
+  );
+}
+
+/**
+ * A gate's whole stored log, with a copy button (Issue #2063).
+ *
+ * The row shows the last {@link MAX_DISPLAYED_LOG_TAIL_LINES} lines and told
+ * the reader to run `commandmate verify show` for the rest — a hand-off to a
+ * terminal from a screen that exists so a phone can read a verdict. What is
+ * shown here is everything the server stored, which is the gate's tail capped
+ * by `options.maxLogTailBytes`; there is no fuller copy anywhere, and the
+ * modal says so rather than implying the whole build log is present.
+ *
+ * A modal rather than an inline expansion: this pane is ~230px wide, and a
+ * thousand-line stack trace wrapped into that column is not readable at any
+ * length.
+ */
+function GateLogModal({
+  gate,
+  onClose,
+}: {
+  gate: VerificationGateResultView;
+  onClose: () => void;
+}) {
+  const t = useTranslations('worktree');
+  const [copied, setCopied] = useState<'idle' | 'done' | 'failed'>('idle');
+  // Issue #2174's lesson: a feedback timer that outlives the component sets
+  // state on an unmounted tree. Held in a ref and cleared on unmount.
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(
+    () => () => {
+      if (copyTimerRef.current !== null) clearTimeout(copyTimerRef.current);
+    },
+    []
+  );
+
+  const log = gate.logTail ?? '';
+  const lineCount = log === '' ? 0 : log.replace(/\n+$/, '').split('\n').length;
+
+  const handleCopy = useCallback(() => {
+    void (async () => {
+      try {
+        await copyToClipboard(log);
+        setCopied('done');
+      } catch {
+        // `copyToClipboard` already falls back to execCommand for non-secure
+        // contexts; reaching here means neither path was available.
+        setCopied('failed');
+      }
+      if (copyTimerRef.current !== null) clearTimeout(copyTimerRef.current);
+      copyTimerRef.current = setTimeout(() => setCopied('idle'), COPY_FEEDBACK_MS);
+    })();
+  }, [log]);
+
+  return (
+    <Modal
+      isOpen
+      onClose={onClose}
+      size="xl"
+      title={t('verification.gates.fullLogTitle', { gateId: gate.gateId, runId: gate.runId })}
+    >
+      <div className="space-y-2" data-testid={`verification-gate-full-log-${gate.gateId}`}>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            onClick={handleCopy}
+            disabled={log === ''}
+            data-testid="verification-gate-log-copy-button"
+          >
+            <Copy size={12} aria-hidden="true" className="mr-1" />
+            {copied === 'done'
+              ? t('verification.gates.copied')
+              : copied === 'failed'
+                ? t('verification.gates.copyFailed')
+                : t('verification.gates.copyLog')}
+          </Button>
+          <span
+            className="font-mono text-[11px] text-muted-foreground"
+            data-testid="verification-gate-log-size"
+          >
+            {t('verification.gates.fullLogSize', { lines: lineCount })}
+          </span>
+        </div>
+        <p className="break-words text-[11px] text-muted-foreground">
+          {t('verification.gates.fullLogStored')}
+        </p>
+        {log === '' ? (
+          <p className="text-xs text-muted-foreground">{t('verification.gates.noLog')}</p>
+        ) : (
+          /* Terminal output surface: dark in BOTH themes, as the row's excerpt is. */
+          <pre className="max-h-[60vh] overflow-auto rounded bg-terminal-surface p-2 font-mono text-[11px] leading-relaxed text-terminal-foreground">
+            {log}
+          </pre>
+        )}
+      </div>
+    </Modal>
   );
 }
 
@@ -613,6 +1036,8 @@ function GateRow({ gate }: { gate: VerificationGateResultView }) {
   // Failing gates open with their log, matching what the CLI prints; a passing
   // gate's log is one click away rather than in the reader's face.
   const [override, setOverride] = useState<boolean | null>(null);
+  const [logModalOpen, setLogModalOpen] = useState(false);
+  const handleCloseLogModal = useCallback(() => setLogModalOpen(false), []);
   const open = override ?? failing;
   const excerpt = excerptLogTail(gate.logTail, MAX_DISPLAYED_LOG_TAIL_LINES);
   const duration = formatGateDuration(gate.durationMs);
@@ -670,15 +1095,31 @@ function GateRow({ gate }: { gate: VerificationGateResultView }) {
         {duration && <span>{t('verification.gates.duration', { duration })}</span>}
         {gate.command && <span className="break-all">{gate.command}</span>}
       </div>
-      <button
-        type="button"
-        onClick={() => setOverride(!open)}
-        aria-expanded={open}
-        data-testid={`verification-gate-log-toggle-${gate.gateId}`}
-        className="mt-1 rounded text-[11px] font-medium text-accent-600 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:text-accent-400 touch-manipulation"
-      >
-        {open ? t('verification.gates.hideLog') : t('verification.gates.showLog')}
-      </button>
+      <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+        <button
+          type="button"
+          onClick={() => setOverride(!open)}
+          aria-expanded={open}
+          data-testid={`verification-gate-log-toggle-${gate.gateId}`}
+          className="rounded text-[11px] font-medium text-accent-600 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:text-accent-400 touch-manipulation"
+        >
+          {open ? t('verification.gates.hideLog') : t('verification.gates.showLog')}
+        </button>
+        {/* Issue #2063. Offered whenever a log exists, not only when the excerpt
+            elided something: the copy button lives in the modal, and "give me
+            this log" is a reason to open it even for a short one. */}
+        {gate.logTail && (
+          <button
+            type="button"
+            onClick={() => setLogModalOpen(true)}
+            data-testid={`verification-gate-full-log-button-${gate.gateId}`}
+            className="rounded text-[11px] font-medium text-accent-600 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:text-accent-400 touch-manipulation"
+          >
+            {t('verification.gates.showFullLog')}
+          </button>
+        )}
+      </div>
+      {logModalOpen && <GateLogModal gate={gate} onClose={handleCloseLogModal} />}
       {open && (
         <div className="mt-1" data-testid={`verification-gate-log-${gate.gateId}`}>
           {excerpt.lines.length === 0 ? (
@@ -728,12 +1169,17 @@ export const VerificationPane = memo(function VerificationPane({
     detailLoading,
     rerunPending,
     rerunFailure,
+    cancelFailure,
+    canLoadMore,
     selectRun,
     refresh,
     rerun,
+    loadMore,
   } = state;
 
   const handleRerun = useCallback(() => {
+    // No argument: the selection the GateSelector holds is what runs, and "all
+    // gates" (its default) still sends no `gateIds` at all.
     void rerun();
   }, [rerun]);
 
@@ -821,6 +1267,21 @@ export const VerificationPane = memo(function VerificationPane({
                   : t('verification.runs.rerunError', { message: rerunFailure.message })}
               </p>
             )}
+            {/* The cancel banner also renders here, not only in the running
+                block above: a 409 means the run already finished, and by the
+                time the refresh it forces has landed the running block is gone. */}
+            {cancelFailure && (
+              <p
+                className="mb-2 rounded border border-warning-border bg-warning-subtle px-2 py-1 text-xs text-warning-foreground"
+                data-testid="verification-runs-cancel-failure"
+                role="alert"
+              >
+                {cancelFailure.kind === 'gone'
+                  ? t('verification.runs.cancelGone')
+                  : t('verification.runs.cancelError', { message: cancelFailure.message })}
+              </p>
+            )}
+            <GateSelector state={state} />
             <CliExitLegend />
             {runs.length === 0 ? (
               <p
@@ -841,6 +1302,19 @@ export const VerificationPane = memo(function VerificationPane({
                 ))}
               </ul>
             )}
+            {canLoadMore && (
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={loadMore}
+                className="mt-1"
+                data-testid="verification-load-more-button"
+              >
+                {t('verification.runs.loadMore', { count: RUN_LIST_LIMIT_STEP })}
+              </Button>
+            )}
+            <RepositoryHistory state={state} />
           </Section>
 
           {selectedRunId !== null && (

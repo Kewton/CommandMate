@@ -29,7 +29,9 @@ import type {
   VerificationGateResultView,
   VerificationGateSource,
   VerificationGateStatus,
+  VerificationGateSummaryView,
   VerificationRunStatus,
+  VerificationRunSummaryView,
   VerificationRunView,
   VerifyConfigDraftResponse,
   VerifyConfigExclusionView,
@@ -45,7 +47,9 @@ export type {
   VerificationGateResultView,
   VerificationGateSource,
   VerificationGateStatus,
+  VerificationGateSummaryView,
   VerificationRunStatus,
+  VerificationRunSummaryView,
   VerificationRunView,
   VerifyConfigDraftResponse,
   VerifyConfigExclusionView,
@@ -134,6 +138,31 @@ export const MAX_DISPLAYED_LOG_TAIL_LINES = 40;
 /** Runs requested for the pane's list; the route's own default is 20. */
 export const DEFAULT_RUN_LIST_LIMIT = 10;
 
+/**
+ * Ceiling the worktree-scoped runs route enforces (Issue #2063).
+ *
+ * Mirrors `MAX_LIMIT` in `app/api/worktrees/[id]/verify/runs/route.ts`, which
+ * answers 400 above it. Held here so "Load more" stops asking one step before
+ * the server starts refusing, rather than turning the last press into an error
+ * the operator has to interpret.
+ */
+export const MAX_RUN_LIST_LIMIT = 100;
+
+/** How many more runs each "Load more" asks for (Issue #2063). */
+export const RUN_LIST_LIMIT_STEP = DEFAULT_RUN_LIST_LIMIT;
+
+/**
+ * Runs requested for the repository-wide history block (Issue #2063).
+ *
+ * Smaller than the endpoint's own default of 50: this list is a supplementary
+ * block inside a ~230px pane, not a report. `MAX_RUN_HISTORY_LIMIT` on the
+ * route is 500, so nothing here approaches it.
+ */
+export const DEFAULT_RUN_HISTORY_LIMIT = 20;
+
+/** Days of repository-wide history the pane asks for (Issue #2063). */
+export const DEFAULT_RUN_HISTORY_DAYS = 7;
+
 /** An HTTP failure from one of the verification endpoints. */
 export class VerificationApiError extends Error {
   readonly status: number;
@@ -216,7 +245,18 @@ export async function fetchVerificationRun(
 
 /** Options accepted by {@link startVerification}. */
 export interface StartVerificationOptions {
-  /** Gate ids to run; omitted means work-evidence plus every declared gate. */
+  /**
+   * Gate ids to run; omitted means work-evidence plus every declared gate.
+   *
+   * Issue #2063 is what finally sends this. The route has accepted `gateIds`
+   * (1..32 non-empty strings) since #1543 and the Web UI posted `{}` regardless,
+   * so a red `lint` could only be retried by re-running the 1800s `build` gate
+   * and the mutex-held `unit` / `integration` gates beside it. Omitting the
+   * field is NOT the same request as naming every gate: an absent `gateIds`
+   * leaves the scope gate `implicit` (a contract-less run's skip is forgiven),
+   * while naming `scope` makes it `explicit` and a skip then counts. So the
+   * pane sends nothing at all when the whole set is selected.
+   */
   gateIds?: string[];
   /** Task the run judges; omitted lets the server resolve the worktree's own. */
   taskId?: string;
@@ -305,4 +345,90 @@ export async function draftVerificationConfig(
     excluded: data.excluded ?? [],
     scanned: data.scanned ?? [],
   };
+}
+
+/**
+ * The cancel route's 200 / 202 body (Issue #2063).
+ *
+ * Declared here rather than in `@/cli/types/api-responses`: that module mirrors
+ * the payloads the CLI reads, and no CLI command cancels a run — `commandmate
+ * verify` holds the run in its own process and a Ctrl-C ends it there.
+ */
+export interface CancelVerificationResponse {
+  runId: number;
+  /**
+   * `cancelled` when the run closed while the request waited, `running` when it
+   * was signalled and is still winding down (HTTP 202). Never a verdict the
+   * gates produced: a cancelled run has none.
+   */
+  status: VerificationRunStatus;
+}
+
+/**
+ * Stop a verification run that is still executing.
+ *
+ * The route kills the gate's process group before it closes the row, so a
+ * resolved promise here means the `build` gate is actually gone rather than
+ * merely relabelled. A 409 — already finished, or an orphan of a previous
+ * server process — arrives as a {@link VerificationApiError}, which the caller
+ * phrases as "it had already finished" rather than as a fault: the list is
+ * simply one poll behind.
+ */
+export async function cancelVerificationRun(
+  worktreeId: string,
+  runId: number
+): Promise<CancelVerificationResponse> {
+  const res = await fetch(`${worktreePath(worktreeId)}/verify/runs/${runId}/cancel`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: '{}',
+  });
+  if (!res.ok) {
+    return fail(res, 'Failed to cancel the verification run');
+  }
+  const data = (await res.json()) as Partial<CancelVerificationResponse>;
+  return {
+    runId: typeof data.runId === 'number' ? data.runId : runId,
+    status: (data.status as VerificationRunStatus | undefined) ?? 'cancelled',
+  };
+}
+
+/** Query accepted by {@link fetchVerificationRunHistory}. */
+export interface VerificationRunHistoryQuery {
+  /** Restrict to one worktree; omitted means every worktree on this server. */
+  worktreeId?: string;
+  /** Look back this many days; omitted means the route's own window. */
+  days?: number;
+  limit?: number;
+}
+
+/**
+ * Verification history across worktrees (Issue #1593's endpoint, reached from
+ * the Web for the first time in #2063).
+ *
+ * The worktree-scoped list answers "what happened on this branch". This one
+ * answers "what happened in this repository", which is the question
+ * `verify.yaml` tuning actually asks: a gate that is red on one branch is a
+ * verdict about the work, and a gate that is red on six is a verdict about the
+ * gate. Until now that comparison existed only behind `commandmate verify
+ * history`.
+ *
+ * Each run carries gate *summaries* — verdict, exit code, duration, no log
+ * bodies — which is what makes the cross-branch view affordable.
+ */
+export async function fetchVerificationRunHistory(
+  query: VerificationRunHistoryQuery = {},
+  signal?: AbortSignal
+): Promise<VerificationRunSummaryView[]> {
+  const params = new URLSearchParams();
+  if (query.worktreeId !== undefined) params.set('worktreeId', query.worktreeId);
+  if (query.days !== undefined) params.set('days', String(query.days));
+  if (query.limit !== undefined) params.set('limit', String(query.limit));
+  const suffix = params.toString();
+  const res = await fetch(`/api/verification/runs${suffix ? `?${suffix}` : ''}`, { signal });
+  if (!res.ok) {
+    return fail(res, 'Failed to load the verification history');
+  }
+  const data = (await res.json()) as { runs?: VerificationRunSummaryView[] };
+  return data.runs ?? [];
 }

@@ -77,6 +77,7 @@ import { resolveWorktreeIndex } from './worktree-index';
 // Issue #2062: the two skip logs the Web UI has to read back live beside the
 // exit-code table the pane prints, so the producer and the reader are one string.
 import {
+  CANCELLED_SKIP_LOG,
   PRIMARY_CHECKOUT_SKIP_LOG,
   WORK_EVIDENCE_SKIP_LOG,
 } from './run-verdict-vocabulary';
@@ -358,6 +359,122 @@ export function waitForVerification(
 }
 
 // =============================================================================
+// Cancellation (Issue #2063)
+// =============================================================================
+
+/**
+ * How long {@link cancelVerification} waits for a signalled run to close itself.
+ *
+ * Longer than {@link SIGKILL_GRACE_MS} because a gate that ignores SIGTERM is
+ * only SIGKILLed after that grace, and the run still has rows to write
+ * afterwards. When the budget runs out the caller is told the cancel was
+ * *requested* rather than completed; the alternative is an HTTP request held
+ * open for as long as the most stubborn child in the group.
+ */
+const CANCEL_SETTLE_TIMEOUT_MS = SIGKILL_GRACE_MS + 3000;
+
+/** The gate that was executing when the operator's cancel arrived. */
+const CANCELLED_RUNNING_GATE_LOG =
+  `${CANCELLED_SKIP_LOG} This gate was terminated before it reached a verdict.`;
+
+/** A gate the run had not started by the time it was cancelled. */
+const CANCELLED_NOT_REACHED_LOG =
+  `${CANCELLED_SKIP_LOG} The run stopped before this gate started.`;
+
+/**
+ * The cancel switch for one run.
+ *
+ * Two jobs, and both are load-bearing. It *signals* the process groups running
+ * right now — a status flip on its own would leave `npm run build` holding the
+ * worktree for another twenty minutes while the UI claimed the run was over,
+ * which is worse than having no cancel at all. And it *latches*, so the gates
+ * the run has not started yet are never spawned. A child registered after the
+ * latch is set is killed on registration rather than granted one free run.
+ */
+class RunCancellation {
+  private latched = false;
+  private readonly killers = new Set<() => void>();
+
+  get cancelled(): boolean {
+    return this.latched;
+  }
+
+  /**
+   * Put a live child under this switch.
+   *
+   * @returns the unregister callback, which the caller runs when the child exits
+   */
+  register(kill: () => void): () => void {
+    if (this.latched) {
+      kill();
+      return () => {};
+    }
+    this.killers.add(kill);
+    return () => {
+      this.killers.delete(kill);
+    };
+  }
+
+  cancel(): void {
+    this.latched = true;
+    // Copied before iterating: a killer may unregister itself synchronously.
+    for (const kill of [...this.killers]) kill();
+  }
+}
+
+/** Cancel switches for the runs this process is executing, keyed by run id. */
+const cancellations = new Map<number, RunCancellation>();
+
+/** What {@link cancelVerification} was able to do. */
+export type CancelVerificationOutcome =
+  /** The run closed while the caller waited; `status` is what it closed as. */
+  | { kind: 'cancelled'; status: VerificationRunTerminalStatus }
+  /** Signalled and latched, but still winding down when the budget ran out. */
+  | { kind: 'requested' }
+  /** No run with that id is executing in this process. */
+  | { kind: 'not-running' };
+
+/**
+ * Stop a run in flight: kill its gate's process group, then close it
+ * `cancelled` (Issue #2063).
+ *
+ * Killing is the whole point, and it is what a status-column rewrite would have
+ * skipped. Gates are spawned `detached` (see {@link runCommand}) precisely so a
+ * signal can reach the whole group — killing the shell alone leaves the
+ * `npm` / `vitest` grandchildren running.
+ *
+ * A run this process does not own answers `not-running`. After a restart
+ * {@link reconcileOrphanVerificationRuns} has already closed every orphan as
+ * `error`, so a `running` row with no switch behind it is not something a
+ * signal can reach, and saying so is more useful than pretending to have
+ * stopped something.
+ *
+ * A run cancelled while it is still queued behind
+ * {@link MAX_CONCURRENT_VERIFICATIONS} answers `requested`: the latch is set,
+ * so it will start nothing, but it closes its own row only once a slot reaches
+ * it. The caller polls, which it is doing anyway.
+ */
+export async function cancelVerification(runId: number): Promise<CancelVerificationOutcome> {
+  const cancellation = cancellations.get(runId);
+  const completion = inFlight.get(runId);
+  if (!cancellation || !completion) return { kind: 'not-running' };
+
+  cancellation.cancel();
+
+  let timer: NodeJS.Timeout | undefined;
+  const settled = await Promise.race<VerificationRunTerminalStatus | null>([
+    completion,
+    new Promise<null>((resolve) => {
+      timer = setTimeout(() => resolve(null), CANCEL_SETTLE_TIMEOUT_MS);
+      timer.unref?.();
+    }),
+  ]);
+  if (timer) clearTimeout(timer);
+
+  return settled === null ? { kind: 'requested' } : { kind: 'cancelled', status: settled };
+}
+
+// =============================================================================
 // Command execution
 // =============================================================================
 
@@ -444,21 +561,25 @@ function gateProcessEnv(gateEnv: Record<string, string>): NodeJS.ProcessEnv {
  * `shell: true` so a gate can be written the way a developer would type it
  * (`npm run lint`), and `detached: true` so the timeout can signal the whole
  * process group — killing only the shell leaves the `npm`/`vitest` grandchildren
- * running and holding the worktree.
+ * running and holding the worktree. Issue #2063 gives the operator's cancel the
+ * same reach through `cancellation`, for the same reason.
  */
 function runCommand(
   command: string,
   cwd: string,
   timeoutSec: number,
   maxLogTailBytes: number,
-  gateEnv: Record<string, string>
+  gateEnv: Record<string, string>,
+  cancellation?: RunCancellation
 ): Promise<GateOutcome> {
   return new Promise<GateOutcome>((resolve) => {
     const startedAt = Date.now();
     const tail = new TailBuffer(maxLogTailBytes);
     let settled = false;
     let timedOut = false;
+    let cancelled = false;
     let graceTimer: NodeJS.Timeout | undefined;
+    let cancelGraceTimer: NodeJS.Timeout | undefined;
 
     const child = spawn(command, {
       shell: true,
@@ -491,6 +612,18 @@ function runCommand(
       }
     };
 
+    /**
+     * Issue #2063. Registered after the spawn so `child.pid` exists; when the
+     * run was cancelled between the two, `register` fires this immediately and
+     * the group is signalled before it can do anything.
+     */
+    const unregisterCancel = cancellation?.register(() => {
+      cancelled = true;
+      signalGroup('SIGTERM');
+      cancelGraceTimer = setTimeout(() => signalGroup('SIGKILL'), SIGKILL_GRACE_MS);
+      cancelGraceTimer.unref?.();
+    });
+
     // Only ever called from an event handler, so the killTimer binding below is
     // initialised by the time this runs.
     const finish = (outcome: Omit<GateOutcome, 'durationMs' | 'startedAt'>): void => {
@@ -498,6 +631,8 @@ function runCommand(
       settled = true;
       clearTimeout(killTimer);
       if (graceTimer) clearTimeout(graceTimer);
+      if (cancelGraceTimer) clearTimeout(cancelGraceTimer);
+      unregisterCancel?.();
       resolve({ ...outcome, startedAt, durationMs: Date.now() - startedAt });
     };
 
@@ -526,6 +661,23 @@ function runCommand(
           exitCode: null,
           logTail:
             `${tail.toString()}\n[gate exceeded ${timeoutSec}s and was terminated (${signal ?? 'exited'})]`.trim(),
+        });
+        return;
+      }
+      // Checked after `timedOut` so a gate that had already blown its budget
+      // keeps reporting the budget as the cause: the cancel arrived second and
+      // did not decide anything the timeout had not already decided.
+      if (cancelled) {
+        finish({
+          // `skipped`, not `failed`: the command reached no verdict about the
+          // work. The run itself is closed as `cancelled` by executeRun, so
+          // aggregateRunStatus never sees this row and its skipped -> error
+          // rule is not involved.
+          status: 'skipped',
+          // Killed, so whatever the shell reported is the signal's doing.
+          exitCode: null,
+          logTail:
+            `${tail.toString()}\n${CANCELLED_RUNNING_GATE_LOG} (${signal ?? 'exited'})`.trim(),
         });
         return;
       }
@@ -594,11 +746,19 @@ async function runGateAttempt(
   gate: VerifyGate,
   worktreePath: string,
   maxLogTailBytes: number,
-  gateEnv: Record<string, string>
+  gateEnv: Record<string, string>,
+  cancellation: RunCancellation
 ): Promise<GateOutcome> {
   const mutex = gate.mutex;
   if (!mutex) {
-    return runCommand(gate.command, worktreePath, gate.timeoutSec, maxLogTailBytes, gateEnv);
+    return runCommand(
+      gate.command,
+      worktreePath,
+      gate.timeoutSec,
+      maxLogTailBytes,
+      gateEnv,
+      cancellation
+    );
   }
 
   // The gate's own timeout is the wait budget: a gate allowed 600s of execution
@@ -617,12 +777,28 @@ async function runGateAttempt(
   }
 
   try {
+    // Issue #2063: the lock wait is the one stretch a cancel cannot interrupt
+    // (`acquireMachineLock` has no signal of its own), so the latch is read the
+    // moment it comes free. Starting the command here would spawn a process the
+    // operator has already stopped waiting for.
+    if (cancellation.cancelled) {
+      const recordedAt = Date.now();
+      return {
+        status: 'skipped',
+        exitCode: null,
+        startedAt: recordedAt,
+        durationMs: 0,
+        logTail: CANCELLED_NOT_REACHED_LOG,
+      };
+    }
+
     const outcome = await runCommand(
       gate.command,
       worktreePath,
       gate.timeoutSec,
       maxLogTailBytes,
-      gateEnv
+      gateEnv,
+      cancellation
     );
     return {
       ...outcome,
@@ -653,12 +829,16 @@ async function runCommandGate(
   gate: VerifyGate,
   worktreePath: string,
   maxLogTailBytes: number,
-  gateEnv: Record<string, string>
+  gateEnv: Record<string, string>,
+  cancellation: RunCancellation
 ): Promise<GateOutcome> {
-  const first = await runGateAttempt(gate, worktreePath, maxLogTailBytes, gateEnv);
+  const first = await runGateAttempt(gate, worktreePath, maxLogTailBytes, gateEnv, cancellation);
+  // A cancelled attempt reports `skipped`, so the retry below is already ruled
+  // out by the status check: an operator's Stop must not buy a second run of
+  // the very command they stopped.
   if (gate.retryOnFail !== 1 || first.status !== 'failed') return first;
 
-  const second = await runGateAttempt(gate, worktreePath, maxLogTailBytes, gateEnv);
+  const second = await runGateAttempt(gate, worktreePath, maxLogTailBytes, gateEnv, cancellation);
   if (second.status !== 'passed' && second.status !== 'failed') {
     // The retry reached no verdict of its own, so there is nothing to compare
     // the first run against. The first run's FAIL stands unchanged — reporting
@@ -1123,7 +1303,9 @@ async function executeRun(
   baseRef: string | null,
   task: Task | null,
   detachedContract: Task | null,
-  envClean: EnvCleanContext
+  envClean: EnvCleanContext,
+  /** Issue #2063: the operator's Stop switch for this run. */
+  cancellation: RunCancellation
 ): Promise<VerificationRunTerminalStatus> {
   const { maxLogTailBytes, skipInPrimaryCheckout } = config.options;
   const { runWorkEvidence, gates } = selection;
@@ -1218,6 +1400,48 @@ async function executeRun(
 
   const statuses: VerificationGateTerminalStatus[] = [];
 
+  /**
+   * Write a row for every gate this run will not reach, and why.
+   *
+   * Shared by the two reasons a run stops early — the work-evidence gate found
+   * nothing to judge, and Issue #2063's cancel — because "the report must show
+   * what was NOT run" is the same requirement either way. A run that simply
+   * ended with rows missing is indistinguishable from one whose gates all
+   * passed, which is the inversion `skipped` exists to prevent.
+   */
+  const recordRemainder = (
+    reason: string,
+    remaining: { scope: boolean; envClean: boolean; gates: readonly ResolvedGate[] }
+  ): void => {
+    if (remaining.scope) {
+      recordNotRun(SCOPE_GATE_ID, SCOPE_GATE_COMMAND, 'builtin', reason);
+    }
+    if (remaining.envClean) {
+      recordNotRun(ENV_CLEAN_GATE_ID, ENV_CLEAN_GATE_COMMAND, 'builtin', reason);
+    }
+    for (const gate of remaining.gates) {
+      recordNotRun(gate.id, gate.command, gate.source, reason);
+    }
+  };
+
+  /**
+   * Close the run out as `cancelled`, recording what it never got to.
+   *
+   * Returns the verdict directly rather than going through
+   * {@link aggregateRunStatus}: those rows are `skipped`, and the aggregate
+   * would turn an operator's deliberate Stop into `error` — "we could not
+   * judge" — which reads as a fault in the runner rather than a choice a human
+   * made.
+   */
+  const cancelledHere = (remaining: {
+    scope: boolean;
+    envClean: boolean;
+    gates: readonly ResolvedGate[];
+  }): VerificationRunTerminalStatus => {
+    recordRemainder(CANCELLED_NOT_REACHED_LOG, remaining);
+    return 'cancelled';
+  };
+
   if (runWorkEvidence) {
     const outcome = await runGate(
       WORK_EVIDENCE_GATE_ID,
@@ -1229,19 +1453,21 @@ async function executeRun(
     if (outcome.status !== 'passed') {
       // Nothing was produced, so every command gate below would be judging the
       // base commit. Record them as skipped so the run shows what was not run.
-      const reason = WORK_EVIDENCE_SKIP_LOG;
-      if (selection.scope !== 'off') {
-        recordNotRun(SCOPE_GATE_ID, SCOPE_GATE_COMMAND, 'builtin', reason);
-      }
-      if (selection.runEnvClean) {
-        recordNotRun(ENV_CLEAN_GATE_ID, ENV_CLEAN_GATE_COMMAND, 'builtin', reason);
-      }
-      for (const gate of gates) {
-        recordNotRun(gate.id, gate.command, gate.source, reason);
-      }
+      recordRemainder(WORK_EVIDENCE_SKIP_LOG, {
+        scope: selection.scope !== 'off',
+        envClean: selection.runEnvClean,
+        gates,
+      });
       return outcome.status === 'failed' ? 'not_started' : 'error';
     }
     statuses.push(outcome.status);
+    if (cancellation.cancelled) {
+      return cancelledHere({
+        scope: selection.scope !== 'off',
+        envClean: selection.runEnvClean,
+        gates,
+      });
+    }
   }
 
   if (selection.scope !== 'off') {
@@ -1274,6 +1500,9 @@ async function executeRun(
     if (outcome.status !== 'skipped' || declined) {
       statuses.push(outcome.status);
     }
+    if (cancellation.cancelled) {
+      return cancelledHere({ scope: false, envClean: selection.runEnvClean, gates });
+    }
   }
 
   if (selection.runEnvClean) {
@@ -1291,11 +1520,20 @@ async function executeRun(
       })
     );
     statuses.push(outcome.status);
+    if (cancellation.cancelled) {
+      return cancelledHere({ scope: false, envClean: false, gates });
+    }
   }
 
   const isPrimaryCheckout = skipInPrimaryCheckout && sameRealPath(worktreePath, process.cwd());
 
-  for (const gate of gates) {
+  for (const [index, gate] of gates.entries()) {
+    // Read at the top of every iteration rather than only when a gate finishes:
+    // the switch may have been thrown while the previous gate was closing its
+    // row, and the next `npm run build` must not start regardless.
+    if (cancellation.cancelled) {
+      return cancelledHere({ scope: false, envClean: false, gates: gates.slice(index) });
+    }
     if (isPrimaryCheckout) {
       // The server process runs out of this directory. A `build` here replaces
       // the chunks the running app is serving mid-flight and breaks the live UI
@@ -1307,10 +1545,15 @@ async function executeRun(
     }
 
     const outcome = await runGate(gate.id, gate.command, gate.source, () =>
-      runCommandGate(gate, worktreePath, maxLogTailBytes, gateEnv())
+      runCommandGate(gate, worktreePath, maxLogTailBytes, gateEnv(), cancellation)
     );
     statuses.push(outcome.status);
   }
+
+  // The loop's own check cannot see a cancel that landed during the LAST gate:
+  // there is no next iteration to read it. Without this the run would be
+  // aggregated from a trailing `skipped` and reported as `error`.
+  if (cancellation.cancelled) return 'cancelled';
 
   return aggregateRunStatus(statuses);
 }
@@ -1581,6 +1824,13 @@ export async function startVerification(
     recordTaskTransition(db, trackedTask.id, 'verify_started', run.id);
   }
 
+  // Issue #2063. Registered before the background work is scheduled and after
+  // every early return above, so a `cancel` that arrives on the very next tick
+  // finds a switch to throw, and a run that closed synchronously never leaves
+  // one behind.
+  const cancellation = new RunCancellation();
+  cancellations.set(run.id, cancellation);
+
   const resolvedConfig = config;
   const resolvedSelection = selection;
   // Read once, up front: the baseline is a file, and a run that took minutes
@@ -1596,6 +1846,15 @@ export async function startVerification(
     await acquireSlot();
     let terminalStatus: VerificationRunTerminalStatus = 'error';
     try {
+      // Cancelled while queued behind MAX_CONCURRENT_VERIFICATIONS: nothing was
+      // ever spawned, so there is nothing to kill and no gate row to write —
+      // just the verdict the operator asked for.
+      if (cancellation.cancelled) {
+        terminalStatus = 'cancelled';
+        finishVerificationRun(db, run.id, 'cancelled');
+        return 'cancelled';
+      }
+
       const status = await executeRun(
         db,
         run.id,
@@ -1607,7 +1866,8 @@ export async function startVerification(
         baseRef,
         task,
         detachedContract,
-        envCleanContext
+        envCleanContext,
+        cancellation
       );
       terminalStatus = status;
       finishVerificationRun(db, run.id, status);
@@ -1634,6 +1894,7 @@ export async function startVerification(
       notifyRunFailure(db, input, run.id, taskId, terminalStatus);
       releaseSlot();
       inFlight.delete(run.id);
+      cancellations.delete(run.id);
     }
   })();
 
