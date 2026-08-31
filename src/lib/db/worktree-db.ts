@@ -619,6 +619,69 @@ export function updateSelectedAgents(
 }
 
 /**
+ * IDs of every worktree whose agent list is still UNCHANGED by its user
+ * (Issue #2067).
+ *
+ * "Unchanged" is `selected_agents IS NULL` **and** no `agent_instances` row —
+ * deliberately the same two facts #2066 checks before it lets a repository's
+ * `.commandmate/agents.yaml` reach a worktree, and it is checked with the same
+ * helper (`worktreeIdsWithAgentInstances`) rather than a second query that says
+ * the same thing. The two channels are independent: `PATCH /api/worktrees/[id]`
+ * writes `agentInstances` and `selectedAgents` from separate branches, so "has a
+ * roster, column still NULL" and "column set, no roster" are both states the
+ * product produces routinely, and a worktree in EITHER of them has been touched
+ * by a human and must not be rewritten by a bulk apply.
+ *
+ * Note what this does NOT exclude: a worktree whose repository declares
+ * `agents.yaml`. Such a worktree is "unchanged" by the definition above, so an
+ * apply writes its `selected_agents` and the worktree layer then outranks the
+ * repository layer for it from that point on (see `SELECTED_AGENTS_LAYERS`).
+ * That is the definition this Issue specifies; it is called out here because it
+ * is the one place a bulk apply can quietly outrank #2066's layer.
+ *
+ * @param db - Database instance
+ * @returns Worktree IDs, ordered by ID so the count and the apply agree
+ */
+export function getUnchangedAgentWorktreeIds(db: Database.Database): string[] {
+  const withRoster = worktreeIdsWithAgentInstances(db);
+  const rows = db
+    .prepare('SELECT id FROM worktrees WHERE selected_agents IS NULL ORDER BY id ASC')
+    .all() as Array<{ id: string }>;
+  return rows.map((row) => row.id).filter((id) => !withRoster.has(id));
+}
+
+/**
+ * Write `selectedAgents` onto every worktree {@link getUnchangedAgentWorktreeIds}
+ * reports, in one transaction (Issue #2067).
+ *
+ * The eligible set is recomputed INSIDE the transaction rather than taken as an
+ * argument: the UI shows a count before it asks for confirmation, and the number
+ * it shows has to be the number of rows this actually writes. Passing the ids in
+ * would make the caller's snapshot authoritative and turn a worktree created
+ * between the count and the confirmation into a silent miss.
+ *
+ * Rows are written through `updateSelectedAgents()` so the column's one writer
+ * stays its one writer.
+ *
+ * @param db - Database instance
+ * @param selectedAgents - Ordered, already-validated agents; `[0]` is the primary
+ * @returns The IDs that were written, in the order they were written
+ */
+export function applySelectedAgentsToUnchanged(
+  db: Database.Database,
+  selectedAgents: CLIToolType[]
+): string[] {
+  const apply = db.transaction((): string[] => {
+    const ids = getUnchangedAgentWorktreeIds(db);
+    for (const id of ids) {
+      updateSelectedAgents(db, id, selectedAgents);
+    }
+    return ids;
+  });
+  return apply();
+}
+
+/**
  * Update vibe_local_model for a worktree
  * Issue #368: Persists the user's Ollama model selection for vibe-local
  *
