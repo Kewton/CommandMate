@@ -3,9 +3,12 @@
  * TDD Approach: Write tests first (Red), then implement (Green), then refactor
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach, afterAll, afterEach } from 'vitest';
 import { exec } from 'child_process';
+import fs from 'fs';
+import path from 'path';
 import type { Worktree } from '@/types/models';
+import { makeTempDir, removeTempDir } from '@tests/helpers/temp-dir';
 
 // Mock child_process - use a factory so the mock function does NOT inherit
 // `util.promisify.custom` from the real exec. With auto-mock, that symbol is
@@ -25,6 +28,30 @@ import {
 } from '@/lib/git/worktrees';
 
 describe('Worktree Management', () => {
+  // Issue #2165: `scanWorktrees` now refuses to spawn into a directory it can
+  // confirm is absent, so every scan test needs a root that really exists. The
+  // sandbox is read-only fixture material — one per file, not one per test.
+  let sandbox: string;
+  /** An existing directory to hand `scanWorktrees` as its scan root. */
+  let repoRoot: string;
+
+  beforeAll(() => {
+    sandbox = makeTempDir('worktrees-scan-');
+    repoRoot = path.join(sandbox, 'root');
+    fs.mkdirSync(repoRoot, { recursive: true });
+  });
+
+  afterAll(() => {
+    removeTempDir(sandbox);
+  });
+
+  /** Create (once) and return an existing directory under the sandbox. */
+  function repoDir(name: string): string {
+    const dir = path.join(sandbox, name);
+    fs.mkdirSync(dir, { recursive: true });
+    return dir;
+  }
+
   beforeEach(() => {
     vi.clearAllMocks();
     // Set up default implementation that works with promisify
@@ -183,7 +210,7 @@ invalid line
         }) as any
       );
 
-      const result = await scanWorktrees('/path/to/root');
+      const result = await scanWorktrees(repoRoot);
 
       expect(result).toHaveLength(2);
       // Issue #1621: the provisional ID comes from the worktree DIRECTORY, not
@@ -204,7 +231,43 @@ invalid line
 
       expect(exec).toHaveBeenCalledWith(
         'git worktree list',
-        expect.objectContaining({ cwd: '/path/to/root' }),
+        expect.objectContaining({ cwd: repoRoot }),
+        expect.any(Function)
+      );
+    });
+
+    // Issue #2165: a repository whose directory has been deleted used to reach
+    // `exec` with a non-existent cwd, which Node reports as
+    // `spawn /bin/sh ENOENT` — an error about the shell, not about the missing
+    // directory — and `scanMultipleRepositories` logged it at ERROR forever.
+    it('should skip the scan without spawning when the directory is gone', async () => {
+      const gone = path.join(sandbox, 'never-existed');
+
+      const result = await scanWorktrees(gone);
+
+      expect(result).toEqual([]);
+      expect(exec).not.toHaveBeenCalled();
+    });
+
+    it('should still scan a directory that exists but is not a git repository', async () => {
+      // The guard above must not swallow the de-gitified case: that directory
+      // is present, so git still runs and its exit 128 is what returns [].
+      const notARepo = repoDir('not-a-repo');
+      vi.mocked(exec).mockImplementationOnce(
+        ((cmd: string, opts: any, callback: (err: Error | null, stdout: string, stderr: string) => void) => {
+          const error = new Error('not a git repository') as any;
+          error.code = 128;
+          callback(error, '', 'fatal: not a git repository');
+          return {} as any;
+        }) as any
+      );
+
+      const result = await scanWorktrees(notARepo);
+
+      expect(result).toEqual([]);
+      expect(exec).toHaveBeenCalledWith(
+        'git worktree list',
+        expect.objectContaining({ cwd: notARepo }),
         expect.any(Function)
       );
     });
@@ -234,7 +297,7 @@ invalid line
         }) as any
       );
 
-      await expect(scanWorktrees('/path/to/root')).rejects.toThrow(
+      await expect(scanWorktrees(repoRoot)).rejects.toThrow(
         'permission denied'
       );
     });
@@ -249,7 +312,7 @@ invalid line
         }) as any
       );
 
-      const result = await scanWorktrees('/path/to/root');
+      const result = await scanWorktrees(repoRoot);
 
       expect(result).toHaveLength(1);
       expect(result[0].path).toBe('/path/with spaces/main');
@@ -265,7 +328,7 @@ invalid line
         }) as any
       );
 
-      const result = await scanWorktrees('/path/to/root');
+      const result = await scanWorktrees(repoRoot);
 
       expect(result).toHaveLength(1);
       // Should be absolute path
@@ -285,6 +348,7 @@ invalid line
   // Issue #711: scanMultipleRepositories must run repository scans in parallel
   describe('scanMultipleRepositories', () => {
     it('should invoke git worktree list once per repository', async () => {
+      const repos = ['repo1', 'repo2', 'repo3'].map(repoDir);
       const observedCwds: string[] = [];
       vi.mocked(exec).mockImplementation(
         ((_cmd: string, opts: { cwd?: string }, callback: (err: Error | null, stdout: string, stderr: string) => void) => {
@@ -294,16 +358,19 @@ invalid line
         }) as never
       );
 
-      const result = await scanMultipleRepositories(['/repo1', '/repo2', '/repo3']);
+      const result = await scanMultipleRepositories(repos);
 
-      expect(observedCwds.sort()).toEqual(['/repo1', '/repo2', '/repo3']);
+      expect(observedCwds.sort()).toEqual([...repos].sort());
       expect(result).toEqual([]);
     });
 
     it('should continue when one repository scan rejects', async () => {
+      const good1 = repoDir('repo1');
+      const bad = repoDir('bad-repo');
+      const good2 = repoDir('repo3');
       vi.mocked(exec).mockImplementation(
         ((_cmd: string, opts: { cwd?: string }, callback: (err: Error | null, stdout: string, stderr: string) => void) => {
-          if (opts?.cwd === '/bad-repo') {
+          if (opts?.cwd === bad) {
             const error = Object.assign(new Error('permission denied'), { code: 1 });
             callback(error, '', 'permission denied');
           } else {
@@ -314,7 +381,7 @@ invalid line
       );
 
       await expect(
-        scanMultipleRepositories(['/repo1', '/bad-repo', '/repo3'])
+        scanMultipleRepositories([good1, bad, good2])
       ).resolves.toEqual([]);
     });
 
@@ -324,6 +391,7 @@ invalid line
     });
 
     it('should start all repository scans before any of them resolves (parallel)', async () => {
+      const repos = ['repo1', 'repo2', 'repo3'].map(repoDir);
       const started: string[] = [];
       const deferred = new Map<string, () => void>();
 
@@ -340,18 +408,18 @@ invalid line
         }) as never
       );
 
-      const promise = scanMultipleRepositories(['/repo1', '/repo2', '/repo3']);
+      const promise = scanMultipleRepositories(repos);
 
       // Let the synchronous .map(...) issue all three exec calls.
       await new Promise<void>((resolve) => setImmediate(resolve));
 
-      expect(started.sort()).toEqual(['/repo1', '/repo2', '/repo3']);
+      expect(started.sort()).toEqual([...repos].sort());
 
       // Release in reverse order to make sure ordering doesn't depend on
       // resolution order.
-      deferred.get('/repo3')!();
-      deferred.get('/repo2')!();
-      deferred.get('/repo1')!();
+      deferred.get(repos[2])!();
+      deferred.get(repos[1])!();
+      deferred.get(repos[0])!();
 
       await expect(promise).resolves.toEqual([]);
     });

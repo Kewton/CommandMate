@@ -1,0 +1,476 @@
+/**
+ * Writing Claude Code's own words into conversation history (Issue #2121).
+ *
+ * The second writer of `chat_messages` for a Claude turn, on the same terms
+ * `../opencode/history` established for opencode (#2041): the first writer is
+ * `lib/polling/response-checker`, which captures the pane and cleans it, and the
+ * two are mutually exclusive.
+ *
+ * ## Pull, where opencode is push
+ *
+ * That is the one structural difference, and it decides the shape of this file.
+ * opencode has a server CommandMate holds an SSE connection to, so its history
+ * writer is driven by frames and flushed by `session.idle`. Claude has no
+ * connection at all — its hooks are one-way HTTP posts that this process answers
+ * and forgets. What it has instead is a **file**: every record of a session is
+ * appended to `~/.claude/projects/<slug>/<session-id>.jsonl` as it happens.
+ *
+ * So there is nothing to subscribe to and nothing to flush, and the trigger has
+ * to come from whatever already knows a turn just ended. That is the poller —
+ * which is also the writer being replaced, so the handover happens in one place
+ * and cannot half-happen: `lib/polling/structured-history-gate` calls
+ * {@link captureClaudeTranscriptTurn} at the moment the scraped reply would be
+ * saved, and saves it only if this returns false.
+ *
+ * ## Which file is this instance's
+ *
+ * The Issue's own framing, kept: **the session id is not a key, it is a mutable
+ * pointer.** Identity stays the (worktree, tool, instance) triple that
+ * `buildCompositeKey` has always spelled; the session id is only the answer to
+ * "which transcript does that triple point at *right now*", and `/clear`
+ * changing it is correct rather than a problem, because the conversation really
+ * did change.
+ *
+ * The pointer is read from the structured events the agent already sends —
+ * `getLastAgentEvent(...).sessionId`, which the `/api/hooks/agent-event`
+ * receiver records for every hook — and latched here, because most events carry
+ * a session id but the record is replaced by whichever event was newest. Two
+ * consequences worth stating:
+ *
+ *  - **Two Claude instances in one worktree do not collide.** They share the
+ *    project directory (the slug is a function of `cwd`), but the hook URL
+ *    CommandMate injects carries `instanceId`, so each triple latches its own
+ *    session id and therefore its own file.
+ *  - **A session with no hooks has no pointer**, and this module returns false
+ *    for it. That is the fail-open the acceptance criteria ask for: no
+ *    transcript we can name means the scraper is still the only record there is.
+ *
+ * ## Nothing here throws
+ *
+ * Same contract as `../opencode/history`, for the same reason, and one more: a
+ * throw here would propagate into the poller's save path and could cost the
+ * scraped reply *as well as* the structured one. The database imports are
+ * dynamic so that `better-sqlite3` does not enter the module graph of everything
+ * that imports `@/lib/hooks/sources`.
+ *
+ * @module lib/hooks/sources/claude/history
+ */
+
+import { open, stat } from 'fs/promises';
+import { homedir } from 'os';
+import { join, resolve, sep } from 'path';
+import { buildCompositeKey } from '@/lib/auto-yes-state';
+import { createLogger } from '@/lib/logger';
+import { claudeTurnRequestId } from '@/types/agent-transcript';
+import type { AgentInstanceRef } from '../types';
+import {
+  buildClaudeTurns,
+  claudeProjectSlug,
+  CLAUDE_PROJECTS_DIR_SEGMENTS,
+  parseClaudeTranscript,
+  renderClaudeTurn,
+  type ClaudeRenderedTurn,
+} from './transcript';
+
+const logger = createLogger('lib/hooks/sources/claude/history');
+
+/**
+ * How much of the transcript's tail is read.
+ *
+ * The file grows for the life of the session and a long one is tens of
+ * megabytes — the largest on this machine on 2026-08-31 was 23 MB — so reading
+ * it whole on every finished turn would be the most expensive thing the poller
+ * does. Only the newest turn is ever written (see {@link captureClaudeTranscriptTurn}),
+ * so only the newest turn has to be in the window.
+ *
+ * 4 MiB is roughly two orders of magnitude above the measured size of a single
+ * turn and still small enough to read and parse in one tick. A turn that
+ * genuinely does not fit produces orphaned assistant records, which is detected
+ * and reported rather than written as a headless reply.
+ */
+export const CLAUDE_TRANSCRIPT_TAIL_BYTES = 4 * 1024 * 1024;
+
+/** `.jsonl`; the only extension this reader will open. */
+const CLAUDE_TRANSCRIPT_EXTENSION = '.jsonl';
+
+declare global {
+  // eslint-disable-next-line no-var
+  var __claudeTranscriptSessions: Map<string, string> | undefined;
+}
+
+/**
+ * The last session id seen for each instance.
+ *
+ * On `globalThis` for the reason every shared map in this subsystem is (#1736):
+ * under `next dev` the poller's bundle and the hook receiver's bundle would each
+ * get a private copy of a module-scoped map.
+ *
+ * A latch and not a cache: `getLastAgentEvent` holds only the newest event, and
+ * an event that carried no `session_id` would otherwise blank the pointer
+ * mid-session. Same reasoning as `getLastKnownAgentModel`, which latches for the
+ * same reason.
+ */
+const sessionPointers = (globalThis.__claudeTranscriptSessions ??= new Map<string, string>());
+
+function keyOf(target: AgentInstanceRef): string {
+  return buildCompositeKey(target.worktreeId, target.cliToolId, target.instanceId);
+}
+
+/** Forget every instance's pointer. Test seam. */
+export function resetClaudeTranscriptSessions(): void {
+  sessionPointers.clear();
+}
+
+/**
+ * The session id this instance's transcript is under, or null.
+ *
+ * Reads the structured event state first and falls back to the latched value.
+ * The import is dynamic so that `agent-event-state`'s module graph does not
+ * become a static dependency of the poller.
+ */
+export async function resolveClaudeSessionId(target: AgentInstanceRef): Promise<string | null> {
+  const key = keyOf(target);
+  try {
+    const { getLastAgentEvent } = await import('@/lib/session/agent-event-state');
+    const sessionId = getLastAgentEvent(
+      target.worktreeId,
+      target.cliToolId,
+      target.instanceId
+    )?.sessionId;
+    if (typeof sessionId === 'string' && sessionId.length > 0) {
+      sessionPointers.set(key, sessionId);
+      return sessionId;
+    }
+  } catch (error) {
+    // A state module that cannot be reached is one that knows no session id.
+    logger.debug('claude-transcript-session-lookup-failed', {
+      worktreeId: target.worktreeId,
+      instanceId: target.instanceId ?? target.cliToolId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+  return sessionPointers.get(key) ?? null;
+}
+
+/** `<home>/.claude/projects`. */
+export function claudeProjectsRoot(homeDir: string): string {
+  return join(homeDir, ...CLAUDE_PROJECTS_DIR_SEGMENTS);
+}
+
+/**
+ * Where this session's transcript is, from the worktree's own path.
+ *
+ * `cwd` is the agent's working directory, and CommandMate starts every pane at
+ * the worktree root, so the worktree path is the slug input. An agent the
+ * operator `cd`-ed somewhere else writes to a different directory and this
+ * answers a path that does not exist — read as "no transcript", which is the
+ * fail-open direction.
+ */
+export function claudeTranscriptPath(
+  homeDir: string,
+  worktreePath: string,
+  sessionId: string
+): string {
+  return join(
+    claudeProjectsRoot(homeDir),
+    claudeProjectSlug(worktreePath),
+    `${sessionId}${CLAUDE_TRANSCRIPT_EXTENSION}`
+  );
+}
+
+/**
+ * A path named by something other than this module, accepted only if it is
+ * really a transcript.
+ *
+ * The one caller is the `📄 Session log: …jsonl` line `lib/claude-output` reads
+ * off the pane, which is text the agent printed and therefore text an agent
+ * could print. Two conditions, both necessary: it must be under
+ * `~/.claude/projects`, so a crafted line cannot make this open
+ * `/etc/passwd`; and it must end in `.jsonl`.
+ *
+ * Containment is checked on the resolved path so that `..` cannot climb out,
+ * and `resolve` is safe to use here — unlike in `validateHookCwd`, where the
+ * value is echoed back — because the resolved string is the only thing that is
+ * ever used.
+ *
+ * @returns The resolved path, or null when it is not acceptable
+ */
+export function acceptClaudeTranscriptHint(homeDir: string, hint: string): string | null {
+  if (!hint.endsWith(CLAUDE_TRANSCRIPT_EXTENSION)) return null;
+  if (hint.includes('\0')) return null;
+  const root = resolve(claudeProjectsRoot(homeDir));
+  const resolved = resolve(hint);
+  if (resolved !== root && !resolved.startsWith(root + sep)) return null;
+  return resolved;
+}
+
+/** What {@link captureClaudeTranscriptTurn} needs from its caller. */
+export interface ClaudeTranscriptCapture {
+  /** The worktree's path on disk; the slug input. */
+  readonly worktreePath: string;
+  /**
+   * A transcript path the pane named, if any.
+   *
+   * Secondary to the session pointer, and present only because
+   * `lib/claude-output` has been reading `📄 Session log:` out of Claude's
+   * output since long before this Issue. It is what lets a session whose hooks
+   * are switched off still be read, when the pane happens to say where.
+   */
+  readonly transcriptPathHint?: string | null;
+  /** Test seam; defaults to the process's home directory. */
+  readonly homeDir?: string;
+}
+
+/**
+ * Read the newest turn out of this instance's transcript and write it.
+ *
+ * **Only the newest turn**, and that is the deliberate difference from
+ * opencode's backfill. Every earlier turn of this session already has a
+ * `chat_messages` row that the *scraper* wrote, and writing a Markdown row for
+ * it as well would put the same reply in History twice — once as prose and once
+ * as the pane drew it. The scraper wrote exactly one row per turn and this
+ * writes exactly one row per turn, so the swap is one-for-one and history is
+ * neither duplicated nor rewritten.
+ *
+ * The return value is the poller's instruction, so the two failure directions
+ * are worth stating plainly. **True** means this path has recorded the turn and
+ * the scrape must be dropped. **False** means it has not, for any reason at all
+ * — no session pointer, no file, an unreadable file, a turn with no assistant
+ * text yet — and the scrape must be saved. Everything that can go wrong answers
+ * false, which is the fail-open the acceptance criteria require: two writers
+ * duplicate a reply, no writer loses one.
+ *
+ * Never throws.
+ *
+ * @param target - The instance whose turn just ended
+ * @returns Whether History now holds this turn as the agent's own Markdown
+ */
+export async function captureClaudeTranscriptTurn(
+  target: AgentInstanceRef,
+  capture: ClaudeTranscriptCapture
+): Promise<boolean> {
+  const instanceId = target.instanceId ?? target.cliToolId;
+  try {
+    const homeDir = capture.homeDir ?? homedir();
+    if (typeof capture.worktreePath !== 'string' || capture.worktreePath.length === 0) {
+      return false;
+    }
+
+    const sessionId = await resolveClaudeSessionId(target);
+    const path = await locateClaudeTranscript(homeDir, capture, sessionId);
+    if (!path) {
+      logger.debug('claude-transcript-unavailable', {
+        worktreeId: target.worktreeId,
+        instanceId,
+        sessionId,
+        reason: sessionId ? 'no-file' : 'no-session-pointer',
+      });
+      return false;
+    }
+
+    const text = await readClaudeTranscriptTail(path);
+    if (text === null) return false;
+
+    const parsed = parseClaudeTranscript(text);
+    const built = buildClaudeTurns(parsed.records, sessionId ?? '');
+    const turn = built.turns.at(-1);
+    if (!turn) {
+      logger.info('claude-transcript-no-turn', {
+        worktreeId: target.worktreeId,
+        instanceId,
+        path,
+        records: parsed.records.length,
+        malformedLines: parsed.malformedLines,
+        orphanedAssistantRecords: built.orphanedAssistantRecords,
+      });
+      return false;
+    }
+
+    if (parsed.malformedLines > 0 || built.orphanedAssistantRecords > 0) {
+      // Both are expected in small numbers — a fragment at the tail of a file
+      // being appended to, and the head of the window landing mid-turn — and
+      // both are the kind of thing that must be visible when it stops being
+      // small.
+      logger.info('claude-transcript-partial-read', {
+        worktreeId: target.worktreeId,
+        instanceId,
+        path,
+        malformedLines: parsed.malformedLines,
+        orphanedAssistantRecords: built.orphanedAssistantRecords,
+        sidechainRecords: built.sidechainRecords,
+      });
+    }
+
+    return await writeClaudeTurn(target, renderClaudeTurn(turn), turn.startedAt, path);
+  } catch (error) {
+    logger.error('claude-transcript-capture-failed', {
+      worktreeId: target.worktreeId,
+      instanceId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return false;
+  }
+}
+
+/**
+ * The transcript file for this instance, or null.
+ *
+ * The session pointer first, the pane's own claim second. Both are checked
+ * against the filesystem rather than trusted, because "the path we would use"
+ * and "the path that exists" differ for every session the operator started
+ * outside CommandMate.
+ */
+async function locateClaudeTranscript(
+  homeDir: string,
+  capture: ClaudeTranscriptCapture,
+  sessionId: string | null
+): Promise<string | null> {
+  if (sessionId) {
+    const path = claudeTranscriptPath(homeDir, capture.worktreePath, sessionId);
+    if (await isReadableFile(path)) return path;
+  }
+
+  const hint = capture.transcriptPathHint;
+  if (typeof hint === 'string' && hint.length > 0) {
+    const accepted = acceptClaudeTranscriptHint(homeDir, hint);
+    if (accepted && (await isReadableFile(accepted))) return accepted;
+  }
+
+  return null;
+}
+
+async function isReadableFile(path: string): Promise<boolean> {
+  try {
+    return (await stat(path)).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The last {@link CLAUDE_TRANSCRIPT_TAIL_BYTES} of the file, as UTF-8.
+ *
+ * Read at an offset rather than whole, and the first line of a windowed read is
+ * dropped: starting mid-line would hand `parseClaudeTranscript` a fragment that
+ * it would count as malformed anyway, and dropping it deliberately keeps that
+ * counter meaning "the writer was mid-append", which is the thing worth seeing.
+ *
+ * @returns The text, or null when the file could not be read
+ */
+async function readClaudeTranscriptTail(path: string): Promise<string | null> {
+  let handle;
+  try {
+    handle = await open(path, 'r');
+    const { size } = await handle.stat();
+    const offset = Math.max(0, size - CLAUDE_TRANSCRIPT_TAIL_BYTES);
+    const length = size - offset;
+    if (length <= 0) return '';
+
+    const buffer = Buffer.alloc(length);
+    const { bytesRead } = await handle.read(buffer, 0, length, offset);
+    const text = buffer.subarray(0, bytesRead).toString('utf8');
+    if (offset === 0) return text;
+
+    const firstBreak = text.indexOf('\n');
+    return firstBreak === -1 ? '' : text.slice(firstBreak + 1);
+  } catch (error) {
+    logger.warn('claude-transcript-read-failed', {
+      path,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  } finally {
+    await handle?.close().catch(() => {});
+  }
+}
+
+/**
+ * Write one rendered turn, unless it is already there.
+ *
+ * `findMessageByRequestId` is both the idempotency check and the reason a
+ * repeat poll does not duplicate the row: the id is derived from the prompt
+ * record's `uuid`, which does not change between reads of the same file.
+ *
+ * Answering **true** for a turn that was already saved is deliberate. It means
+ * "History holds this turn as Markdown", which is exactly what the poller needs
+ * to know — a second poll of the same finished turn must not save the pane's
+ * copy on top of the row this path wrote for it.
+ *
+ * @returns Whether History holds this turn as the agent's own Markdown
+ */
+async function writeClaudeTurn(
+  target: AgentInstanceRef,
+  rendered: ClaudeRenderedTurn,
+  timestampMs: number,
+  path: string
+): Promise<boolean> {
+  const instanceId = target.instanceId ?? target.cliToolId;
+
+  if (rendered.body.length === 0) {
+    // The turn is open but the agent has not written anything to the file yet —
+    // the prompt record is there and the assistant records are not. Answering
+    // false hands the turn back to the scraper, which is the only correct
+    // answer: an empty row would show as a blank reply forever, and suppressing
+    // the scrape would lose the reply outright.
+    logger.info('claude-transcript-turn-empty', {
+      worktreeId: target.worktreeId,
+      instanceId,
+      sessionId: rendered.sessionId,
+      promptUuid: rendered.promptUuid,
+    });
+    return false;
+  }
+
+  if (rendered.unknownBlockTypes.length > 0) {
+    logger.info('claude-transcript-unknown-blocks', {
+      worktreeId: target.worktreeId,
+      instanceId,
+      sessionId: rendered.sessionId,
+      blockTypes: rendered.unknownBlockTypes,
+    });
+  }
+
+  const requestId = claudeTurnRequestId(rendered.promptUuid);
+  const [{ getDbInstance }, { createMessage, findMessageByRequestId }, { broadcastMessage }] =
+    await Promise.all([
+      import('@/lib/db/db-instance'),
+      import('@/lib/db'),
+      import('@/lib/ws-server'),
+    ]);
+
+  const db = getDbInstance();
+  if (findMessageByRequestId(db, target.worktreeId, requestId)) {
+    logger.debug('claude-transcript-turn-already-saved', {
+      worktreeId: target.worktreeId,
+      instanceId,
+      requestId,
+    });
+    return true;
+  }
+
+  const message = createMessage(db, {
+    worktreeId: target.worktreeId,
+    role: 'assistant',
+    content: rendered.body,
+    messageType: 'normal',
+    // The agent's own clock, from the prompt record's `timestamp`, so a row
+    // written a poll late still sorts where the conversation put it.
+    timestamp: new Date(timestampMs > 0 ? timestampMs : Date.now()),
+    cliToolId: target.cliToolId,
+    instanceId,
+    requestId,
+  });
+
+  broadcastMessage('message', { worktreeId: target.worktreeId, message });
+  logger.info('claude-transcript-turn-saved', {
+    worktreeId: target.worktreeId,
+    instanceId,
+    sessionId: rendered.sessionId,
+    requestId,
+    path,
+    bodyLength: rendered.body.length,
+    textBlocks: rendered.textBlocks,
+    toolBlocks: rendered.toolBlocks,
+  });
+  return true;
+}

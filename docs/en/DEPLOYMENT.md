@@ -79,7 +79,9 @@ cd CommandMate
 3. Interactive environment configuration (`setup-env.sh`)
 4. Database initialization, build, and start (`build-and-start.sh --daemon`)
 
-> **Note**: `build-and-start.sh` and `stop.sh` automatically load the `.env` file from the project root. Since the custom server (`node dist/server/server.js`) does not support Next.js automatic `.env` loading, the scripts export environment variables explicitly. Variables already set in the environment are not overwritten by `.env` values.
+> **Note**: `build-and-start.sh`, `start.sh`, `restart-nobuild.sh` and `stop.sh` automatically load the `.env` file from the project root. Since the custom server (`node dist/server/server.js`) does not support Next.js automatic `.env` loading, the scripts export environment variables explicitly. Variables already set in the environment are not overwritten by `.env` values.
+
+> **Warning**: The loader itself, `scripts/load-env.sh`, is **bash-only** (it uses `${BASH_SOURCE[0]}` and `[[ =~ ]]`). Sourcing it from zsh or any other shell loads **not a single variable**. Since Issue #2132 it fails loudly instead of succeeding in silence, but rather than sourcing it by hand, use `./scripts/start.sh --daemon` or `./scripts/restart-nobuild.sh` described below.
 
 ### Manual Setup
 
@@ -215,6 +217,37 @@ npm run build
 # Verify the build
 npm run start
 ```
+
+### Restarting: with a build, and without one
+
+**Do not build on every restart.** `npm run build` rewrites `.next/BUILD_ID`, so every browser tab that is already open can no longer fetch its chunks and breaks — the same reason `.commandmate/verify.yaml` sets `skipInPrimaryCheckout: true`.
+
+| What you want | Command | Builds |
+|---------------|---------|--------|
+| You changed `.env` or a setting, or the server crashed | `./scripts/restart-nobuild.sh` | **no** |
+| Start a stopped server in the background | `./scripts/start.sh --daemon` | **no** |
+| The application code changed | `./scripts/stop-server.sh && ./scripts/build-and-start.sh --daemon` | yes |
+
+```bash
+# Restart without building (the supported way to apply an .env change)
+./scripts/restart-nobuild.sh
+
+# On a specific port (an environment variable wins over .env's CM_PORT)
+CM_PORT=3011 ./scripts/restart-nobuild.sh
+
+# Just start a stopped server (no build)
+./scripts/start.sh --daemon
+
+# Help
+./scripts/start.sh --help
+./scripts/restart-nobuild.sh --help
+```
+
+`--daemon` starts `nohup npm start` in the background, writes the PID to `logs/server.pid` (`chmod 600`) and the output to `logs/server.log`. Stop it with `./scripts/stop-server.sh`.
+
+> **Note**: Because `./scripts/start.sh --daemon` never builds, it refuses to start when `dist/server/server.js` is missing. Run `./scripts/build-and-start.sh --daemon` once to produce it.
+
+> **Note**: If a `.env` exists at startup and not one of its variables reached the process, the server prints an `[env] ...` warning to the startup log (Issue #2132). That warning means the whole environment is missing, so Web Push, the database path and the worktree root are all on their defaults.
 
 ### Process Management (PM2 Recommended)
 

@@ -19,6 +19,9 @@ import {
   getAllWorktreePathIds,
   getAliasedWorktreeIds,
   getAllWorktreeAliases,
+  getAllRepositories,
+  countWorktreesByRepositoryPath,
+  setRepositoryEnabled,
 } from '@/lib/db';
 import { createLogger } from '@/lib/logger';
 import { refreshRepoAgentsConfig } from '@/lib/repo-config/agents-config';
@@ -209,6 +212,28 @@ export function getRepositoryPaths(): string[] {
  */
 export async function scanWorktrees(rootDir: string): Promise<Worktree[]> {
   const execAsync = promisify(exec);
+
+  // Issue #2165: a repository whose directory has been removed used to reach
+  // `execAsync` with a `cwd` that no longer exists, and Node reports that as
+  // `spawn /bin/sh ENOENT` — an error about the *shell*, not about the missing
+  // directory. It is neither `not a git repository` nor exit 128, so the catch
+  // below re-threw it and `scanMultipleRepositories` logged it at ERROR. Two
+  // costs: a wasted child process per repository per scan, and a permanent
+  // ERROR line whose text sends the reader after `/bin/sh` and `PATH` (that
+  // misdiagnosis actually happened — see the Issue).
+  //
+  // Deliberately {@link directoryIsConfirmedAbsent} rather than
+  // `fs.existsSync`: only a positively-confirmed absence is allowed to skip the
+  // scan. An unreadable or unreachable path (EACCES, EIO, a hung network mount)
+  // still goes to git, still fails, and is still reported at ERROR — that IS a
+  // real failure and must not be silently downgraded to "the directory is gone".
+  //
+  // A directory that exists but is no longer a git repository is untouched by
+  // this guard: it keeps taking the git exit-128 path below and returns [].
+  if (directoryIsConfirmedAbsent(rootDir)) {
+    logger.warn('repository:scan-skipped-missing-dir', { repoPath: rootDir });
+    return [];
+  }
 
   try {
     const { stdout } = await execAsync('git worktree list', {
@@ -563,6 +588,151 @@ export function repositoryExistsOnDisk(repoPath: string): boolean {
     // Inconclusive filesystem read (e.g. EACCES): be conservative and keep rows.
     return true;
   }
+}
+
+/**
+ * Whether a path is **positively confirmed** not to exist.
+ *
+ * Issue #2165. `fs.existsSync()` cannot answer this: it collapses "the entry is
+ * not there" and "I could not find out" into the same `false`. It is
+ * `accessSync(F_OK)` underneath, so an unreadable parent directory (EACCES), a
+ * hung or disconnected network mount (EIO / ETIMEDOUT / ESTALE / EHOSTDOWN) and
+ * a genuinely deleted directory are indistinguishable through it. That
+ * distinction is the whole safety question for {@link reclaimGhostRepositories}:
+ * a repository on an unreachable volume must never be treated as gone.
+ *
+ * `lstatSync` keeps the errno, so the answer can be narrowed to the two codes
+ * that mean the kernel walked the path successfully and the entry was not
+ * there:
+ *
+ * - `ENOENT` — a component of the path does not exist;
+ * - `ENOTDIR` — a component that must be a directory is a file, so no such
+ *   entry can exist under it either.
+ *
+ * Every other outcome — the path resolved, or the lookup failed for any other
+ * reason — answers `false`, i.e. "not confirmed absent, leave it alone".
+ * `lstat` rather than `stat` so a dangling symlink is reported as present: the
+ * link is a real entry that the user still has to remove.
+ *
+ * @param repoPath - Absolute path to test
+ * @returns `true` only when the path is confirmed to be absent
+ */
+export function directoryIsConfirmedAbsent(repoPath: string): boolean {
+  if (!repoPath) return false;
+  try {
+    fs.lstatSync(repoPath);
+    return false;
+  } catch (error: unknown) {
+    const code = (error as NodeJS.ErrnoException).code;
+    return code === 'ENOENT' || code === 'ENOTDIR';
+  }
+}
+
+/**
+ * One repository row taken out of the scan set by {@link reclaimGhostRepositories}.
+ */
+export interface ReclaimedGhostRepository {
+  /** `repositories.id` of the row that was demoted. */
+  id: string;
+  /** `repositories.path` — the directory that is gone. */
+  path: string;
+}
+
+/**
+ * Take ghost `repositories` rows out of the scan set (Issue #2165).
+ *
+ * A row whose directory has been deleted stays `enabled = 1` forever: nothing
+ * removes it, so every server start and every sync re-derives the scan set from
+ * it, spawns a shell into a `cwd` that does not exist and logs an ERROR. Rows
+ * registered under `/tmp` were still doing this seven months after the
+ * directory they name was collected by the OS.
+ *
+ * {@link pruneStaleRepositoryWorktrees} cannot reach them. It deletes *worktree*
+ * rows, and it iterates {@link getRepositories}, which is a `GROUP BY` over the
+ * `worktrees` table — a repository with no worktree rows is not in its result
+ * at all, and its `ids.length === 0` early-continue would skip it even if it
+ * were. This function is the missing half: it works the `repositories` table.
+ *
+ * ## What it does — demote, not delete
+ *
+ * The row is set to `enabled = 0`, exactly as the Repositories screen's Scan
+ * toggle does (#1658). It is NOT deleted. `enabled` is the flag that decides
+ * what gets scanned, so demotion is sufficient — the row leaves `allPaths` at
+ * the next startup and sync, and the ERROR stops for good. Choosing it over
+ * `deleteRepository()` buys three things:
+ *
+ * 1. **Reversibility.** No filesystem test can prove a directory is gone
+ *    *forever* — an unmounted volume looks exactly like a deleted one from
+ *    userspace. A demoted row keeps its id, display name, `visible` flag and
+ *    clone URL, is listed on the Repositories screen with a Disabled badge, and
+ *    is one click from coming back. A wrong delete is unrecoverable.
+ * 2. **Agreement with #1666.** That Issue settled that exclusion is where the
+ *    app *stops*, not where it deletes; startup used to purge excluded
+ *    repositories and that was the bug. Reclaiming by deletion would re-open
+ *    the same argument from the other end.
+ * 3. **No dangling references.** `clone_jobs.repository_id` points at this row.
+ *
+ * ## The line — what is NOT reclaimed
+ *
+ * Every guard fails toward keeping the row enabled:
+ *
+ * - **Already disabled** — nothing to fix; it is out of the scan set already,
+ *   and touching it would rewrite state the user owns.
+ * - **Still listed in `WORKTREE_REPOS`** — the environment is a live
+ *   declaration that the operator wants this path scanned. Same reasoning as
+ *   migration v43's guard 2 (#1339): never overrule a path the env still asks
+ *   for. Such a path is re-registered on every boot anyway.
+ * - **Not confirmed absent** — see {@link directoryIsConfirmedAbsent}. This is
+ *   the "temporarily invisible" line: a repository under an unreachable network
+ *   mount answers EIO / ETIMEDOUT / ESTALE / EACCES, not ENOENT, and is kept.
+ * - **Owns worktree rows** — the condition the Issue names, and the one that
+ *   makes this provably lossless. Chat history, memos, todos, timers,
+ *   schedules, tasks and verification runs all hang off `worktrees`, so a
+ *   repository with zero worktree rows has no history to lose by definition.
+ *   It is also good evidence that the directory was never successfully scanned:
+ *   a scan of a present repository always yields at least its main worktree.
+ *
+ * @param db - Database instance
+ * @param envRepositoryPaths - Paths the environment still declares
+ *   (`getRepositoryPaths()`); rows at these paths are never demoted
+ * @returns The rows that were demoted, in `getAllRepositories` order
+ */
+export function reclaimGhostRepositories(
+  db: Database.Database,
+  envRepositoryPaths: readonly string[] = []
+): ReclaimedGhostRepository[] {
+  const envPaths = new Set(
+    envRepositoryPaths.filter(p => !!p).map(p => path.resolve(p))
+  );
+
+  const reclaimed: ReclaimedGhostRepository[] = [];
+
+  for (const repo of getAllRepositories(db)) {
+    if (!repo.path) continue;
+    if (!repo.enabled) continue;
+    if (envPaths.has(repo.path)) continue;
+    if (!directoryIsConfirmedAbsent(repo.path)) continue;
+    if (countWorktreesByRepositoryPath(db, repo.path) > 0) continue;
+
+    try {
+      setRepositoryEnabled(db, repo.id, false);
+    } catch (error: unknown) {
+      // SEC-SF-004's disabled-row ceiling is the only expected failure. It
+      // guards against unbounded *growth* of the table, which this pass cannot
+      // cause — it creates no rows — so a refusal here just means one ghost
+      // keeps logging. Report it and move on rather than aborting startup.
+      logger.warn('repository:ghost-row-reclaim-failed', {
+        repoPath: repo.path,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      continue;
+    }
+
+    reclaimed.push({ id: repo.id, path: repo.path });
+    logger.info('repository:ghost-row-reclaimed', { repoPath: repo.path });
+  }
+
+  return reclaimed;
 }
 
 /**
