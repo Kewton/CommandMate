@@ -717,10 +717,19 @@ Server-side, with `CM_LOG_LEVEL=info`:
 
 ```
 [WARN] [push/sender] push-send-failed {"statusCode":403,"consecutiveFailures":4}
-[INFO] [push/sender] push-fanout-complete {"kind":"prompt","delivered":1,"failed":1}
+[INFO] [push/sender] push-fanout-complete {"kind":"prompt","worktreeId":"my-feature","instanceId":"claude-2","delivered":1,"failed":1}
 ```
 
 If `delivered` stays at 0, either no device is subscribed or every device is failing.
+
+`worktreeId` and `instanceId` say **which worktree and which instance the fan-out was for**
+(`instanceId` is omitted when the producer named no instance). With several worktrees running at
+once their notifications interleave in the same second, so **filter by `worktreeId` whenever you
+count one worktree's pushes**:
+
+```bash
+grep -a push-fanout-complete logs/server.log | grep -c '"worktreeId":"my-feature"'
+```
 
 ---
 

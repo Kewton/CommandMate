@@ -285,8 +285,12 @@ describe('push-sender wiring (Issue #2124)', () => {
 
     await notifyPushSubscribers(event, NOW);
 
+    // `worktreeId` joined the line in #2133 — see `fanout-attribution-2133` for
+    // why. It is asserted here too because this is the exact-shape assertion for
+    // the summary: a key added without updating this object is a silent drift.
     expect(mockLogger.info).toHaveBeenCalledWith('push-fanout-complete', {
       kind: 'prompt',
+      worktreeId: 'wt-2124',
       delivered: 2,
       failed: 1,
     });
