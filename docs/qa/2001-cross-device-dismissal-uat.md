@@ -91,6 +91,11 @@ tail -f <server log> | grep -E 'push/resolution|push/waiting-notifier|push/promp
 [DEBUG] [push/resolution] resolution-push-skipped {"worktreeId":"...","reason":"no-card"}
 ```
 
+> **3 行目は既定設定では出ません。** `no-card` / `still-waiting` は「構造上の既定」なので
+> `logger.debug` に落としてあり（`resolution-push-notifier.ts:229-230`。Issue #2133 で据え置くと決定）、
+> 見たいときだけ `CM_LOG_LEVEL=debug` で起動すること。**合否をこの行の有無で判定しないこと** —
+> 判定は `resolution-push-sent` の有無と、`worktreeId` で絞った `push-fanout-complete` の件数で行う。
+
 ---
 
 ## 2. 本体: 双方向の消し込み
@@ -144,10 +149,17 @@ T-1 の 4 を「**Android でタップして応答**」に替えて繰り返す�
 
 - [ ] 待機通知が **来ない**（#1999 の挙動）
 - [ ] Auto-Yes が答えたあとも **「対応済み」通知が来ない**（消すカードが無いため）
-- [ ] **push が 1 通も出ていない**（`push-fanout-complete` がこの worktree 宛に 0 件）。
-      **`reason: no-card` のログは `logger.debug` なので既定設定では出力されない**
-      （`resolution-push-notifier.ts:229-230`。陽性対照: ログ全体の `[DEBUG]` 行が 0 件）。
-      **他ワークツリーの通知が混ざる**ため、`push-fanout-complete` だけを数えないこと — Issue #2133
+- [ ] **push が 1 通も出ていない**。Issue #2133 以降 `push-fanout-complete` は
+      `worktreeId` / `instanceId` を持つので、**自分の worktree 宛だけを数えて判定する**:
+      `grep -a push-fanout-complete logs/server.log | grep -c '"worktreeId":"<worktree-id>"'`
+      が **0** であること。
+      **`worktreeId` で絞らずに数えないこと** — 並列オーケストレーション中は他ワークツリーの
+      通知が同じ秒に混ざり、そのまま誤判定になる（2026-08-29 に実際に踏んだ。Issue #2133）
+- [ ] **`reason: no-card` のログは探さないこと。合否の根拠にしない。**
+      `resolution-push-notifier.ts:229-230` のとおり `no-card` は `logger.debug` で、
+      **既定設定では構造的に出力されない**（陽性対照: ログ全体の `[DEBUG]` 行が 0 件）。
+      `no-card` / `still-waiting` は「構造上の既定」なので **debug のまま据え置く**と
+      Issue #2133 で決めた。合否は上の「push が 0 通」で判定する
 
 > ここで「対応済み」が鳴ったら、それは #1999 の削減を食い潰している状態＝不合格。
 
@@ -166,7 +178,8 @@ T-1 の 4 を「**Android でタップして応答**」に替えて繰り返す�
 3. **待機が再観測されるまで `/api/worktrees` を繰り返し叩く。**
    **観測はバックグラウンドでは走らない** — `worktree-status-helper` が
    `observeWaitingEdge` を呼ぶのは API を叩いた時だけなので、「ブラウザで一覧を開く」は
-   比喩ではなく必須手順である。**再観測できたことは待機通知の発火（`push-fanout-complete`）で確認する。**
+   比喩ではなく必須手順である。**再観測できたことは待機通知の発火で確認する** —
+   `push-fanout-complete` のうち **`worktreeId` がこの worktree のもの**を見ること（Issue #2133）。
 4. **3 が確認できてから** `commandmate auto-yes <worktree-id> --enable` で Auto-Yes を有効にする
 5. Auto-Yes に応答させる
 
@@ -179,8 +192,10 @@ T-1 の 4 を「**Android でタップして応答**」に替えて繰り返す�
 **期待**:
 
 - [ ] 両端末のカードが「対応済みです」に置き換わる（増えない）
-- [ ] サーバログに `resolution-push-sent` / `reason: cross-device-clear`
-      （`reason: no-card` なら **不合格** — 永続化が効いていない）
+- [ ] サーバログに `resolution-push-sent` / `reason: cross-device-clear`。
+      **この行が出ないなら不合格**（永続化が効かず `no-card` で skip されている）。
+      skip 側の `resolution-push-skipped` / `reason: no-card` は `logger.debug` なので
+      **既定設定では見えない** — 判定は `resolution-push-sent` の**有無**で行うこと（Issue #2133）
 
 > **塞いでいない経路**（不合格ではない・記録だけすること）: 手順 3 を飛ばし、
 > **一度も worktree を開かないまま**待機が解決した場合は、閉じるエッジ自体が起きないので
@@ -210,8 +225,11 @@ T-1 の 4 を「**Android でタップして応答**」に替えて繰り返す�
 
 - [ ] サーバが落ちない・ポーリングが止まらない（worktree の状態表示が更新され続ける）
 - [ ] ログに `push-fanout-error` / `resolution-push-failed` / 未捕捉例外が **出ない**
-- [ ] `reason: no-card` は `logger.debug` なので **既定設定では出力されない**。
-      購読 0 件ではカードのマークも付かないので、**push が 0 通であることをもって合格とする**
+- [ ] **`reason: no-card` のログは探さないこと。合否の根拠にしない。**
+      `logger.debug` なので **既定設定では出力されない**（Issue #2133 で debug のまま据え置くと決めた）。
+      購読 0 件ではカードのマークも付かないので、**push が 0 通であることをもって合格とする**:
+      `grep -a push-fanout-complete logs/server.log | grep -c '"worktreeId":"<worktree-id>"'`
+      が **0** であること（T-4 と同じく `worktreeId` で絞る。絞らないと他ワークツリーの通知を数える）
 
 ### T-7. 片方が「対応が必要なとき」を OFF にしたとき
 
@@ -325,9 +343,9 @@ iPhone を Mac に繋ぎ、Safari の **開発 → \<iPhone名\> → Service Wor
 | T-1 | iPhone で応答 → Android | カードが「対応済み」に**置き換わる**（増えない）、無音 |
 | T-2 | Android で応答 → iPhone | 同上（逆方向） |
 | T-3 | 通知に触れず応答 | **両端末**とも 1 枚 → 1 枚で置き換わる、無音 |
-| T-4 | Auto-Yes 下 | 待機通知も解決通知も**来ない**（`reason: no-card`） |
+| T-4 | Auto-Yes 下 | 待機通知も解決通知も**来ない**（この worktree 宛の `push-fanout-complete` が 0 件） |
 | T-5 | 購読 1 台 | 解決通知が **1 通も増えない**（`reason: single-device`） |
-| T-6 | 購読 0 台 | 例外なし・ポーリング継続 |
+| T-6 | 購読 0 台 | 例外なし・ポーリング継続（この worktree 宛の `push-fanout-complete` が 0 件） |
 | T-7 | 片方が要対応 OFF | 解決通知が来ない（`deviceCount: 1`） |
 | T-8 | 再起動をまたぐ（#2057） | 再起動後に Auto-Yes 下で解決しても置き換わる（`reason: cross-device-clear`） |
 | §4 | 音・バイブ | どの解決通知でも鳴らない・震えない |
