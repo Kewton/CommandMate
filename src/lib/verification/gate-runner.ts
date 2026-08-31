@@ -74,6 +74,12 @@ import {
   type MachineLockResult,
 } from './machine-lock';
 import { resolveWorktreeIndex } from './worktree-index';
+// Issue #2062: the two skip logs the Web UI has to read back live beside the
+// exit-code table the pane prints, so the producer and the reader are one string.
+import {
+  PRIMARY_CHECKOUT_SKIP_LOG,
+  WORK_EVIDENCE_SKIP_LOG,
+} from './run-verdict-vocabulary';
 import {
   CONTRACT_DIR_PREFIX,
   evaluateScope,
@@ -1223,7 +1229,7 @@ async function executeRun(
     if (outcome.status !== 'passed') {
       // Nothing was produced, so every command gate below would be judging the
       // base commit. Record them as skipped so the run shows what was not run.
-      const reason = `skipped: the ${WORK_EVIDENCE_GATE_ID} gate did not pass.`;
+      const reason = WORK_EVIDENCE_SKIP_LOG;
       if (selection.scope !== 'off') {
         recordNotRun(SCOPE_GATE_ID, SCOPE_GATE_COMMAND, 'builtin', reason);
       }
@@ -1295,13 +1301,7 @@ async function executeRun(
       // the chunks the running app is serving mid-flight and breaks the live UI
       // — observed twice before this guard existed.
       statuses.push(
-        recordNotRun(
-          gate.id,
-          gate.command,
-          gate.source,
-          'skipped: worktreePath is the server process working directory and ' +
-            'options.skipInPrimaryCheckout is true.'
-        ).status
+        recordNotRun(gate.id, gate.command, gate.source, PRIMARY_CHECKOUT_SKIP_LOG).status
       );
       continue;
     }

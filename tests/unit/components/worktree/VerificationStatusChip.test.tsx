@@ -95,7 +95,7 @@ describe('VerificationStatusChip (Issue #1816)', () => {
     expect(screen.getByTestId('verification-chip-task-status')).toHaveTextContent('verifying');
     // §3.4 vocabulary, keyword included: two bare `failed` badges side by side
     // would read as one status repeated.
-    expect(screen.getByTestId('verification-chip-run-status')).toHaveTextContent('RESULT failed');
+    expect(screen.getByTestId('verification-chip-run-status')).toHaveTextContent('RESULT Failed');
   });
 
   it('names the gates that did not pass in the accessible reason', () => {
@@ -110,7 +110,7 @@ describe('VerificationStatusChip (Issue #1816)', () => {
 
     const chip = screen.getByTestId('verification-status-chip');
     const reason = chip.getAttribute('aria-label') ?? '';
-    expect(reason).toContain('RESULT failed');
+    expect(reason).toContain('RESULT Failed');
     expect(reason).toContain('run 9');
     expect(reason).toContain('unit, build');
     // A passed gate is not a failure and must not be listed.
@@ -204,7 +204,7 @@ describe('VerificationStatusChip (Issue #1816)', () => {
       // The same clauses the accessible name carries — one channel cannot drift
       // from the other, and neither one is hover-gated.
       expect(popover).toHaveTextContent('Gates that did not pass: unit');
-      expect(popover).toHaveTextContent('RESULT failed');
+      expect(popover).toHaveTextContent('RESULT Failed');
     });
 
     it('is a toggle, and the toggle names its own state', () => {

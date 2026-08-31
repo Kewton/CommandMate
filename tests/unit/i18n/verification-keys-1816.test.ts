@@ -100,6 +100,17 @@ const STATIC_KEYS = [
   'verification.chip.reasonHeading',
   'verification.chip.showReason',
   'verification.chip.hideReason',
+  // Issue #2062: the CLI exit-code table, the built-in gate descriptions, the
+  // meaning of the `[contract]` marker, and the reason a gate did not run.
+  'verification.runs.cliLegend',
+  'verification.runs.cliLegendItem',
+  'verification.runs.exitCode',
+  'verification.gates.verdictHeading',
+  'verification.gates.contractSourceHint',
+  'verification.gates.builtinBadge',
+  'verification.gates.skipHeading',
+  'verification.gates.skipReasonFor',
+  'verification.onboarding.configured.builtinHint',
 ];
 
 /** Keys built by string concatenation from a status union. */
@@ -107,6 +118,9 @@ const DYNAMIC_KEYS = [
   ...TASK_STATUSES.map((status) => `task.status.${status}`),
   ...VERIFICATION_RUN_STATUSES.map((status) => `verification.runStatus.${status}`),
   ...VERIFICATION_GATE_STATUSES.map((status) => `verification.gateStatus.${status}`),
+  // Issue #2062: every badge has a one-line gloss resolved the same way.
+  ...VERIFICATION_RUN_STATUSES.map((status) => `verification.runStatusGloss.${status}`),
+  ...VERIFICATION_GATE_STATUSES.map((status) => `verification.gateStatusGloss.${status}`),
 ];
 
 describe('Verification i18n keys (Issue #1816)', () => {
@@ -146,17 +160,28 @@ describe('Verification i18n keys (Issue #1816)', () => {
     }
   });
 
-  it('keeps the en RESULT / GATE wording identical to the CLI vocabulary', () => {
-    // docs/design/verification-config.md §3.4. The Web UI is a second surface
-    // for the same verdicts, so a reader comparing them must not have to
-    // translate between two vocabularies.
-    const en = load('en', 'worktree');
-    expect(resolve(en, 'verification.runStatus.passed')).toBe('passed');
-    expect(resolve(en, 'verification.runStatus.failed')).toBe('failed');
-    expect(resolve(en, 'verification.runStatus.not_started')).toBe('not_started');
-    expect(resolve(en, 'verification.gateStatus.passed')).toBe('PASS');
-    expect(resolve(en, 'verification.gateStatus.failed')).toBe('FAIL');
-    expect(resolve(en, 'verification.gateStatus.timeout')).toBe('TIMEOUT');
-    expect(resolve(en, 'verification.gateStatus.skipped')).toBe('SKIP');
+  it('ties the verdicts to the CLI by exit code rather than by repeating its tokens', () => {
+    // Superseded by Issue #2062. This assertion used to pin the en badges to
+    // the CLI's own tokens (`passed`, `PASS`, `not_started`) so a reader
+    // comparing the two surfaces would not have to translate between two
+    // vocabularies. It cited docs/design/verification-config.md §3.4, which
+    // governs the CLI's *stdout* — `RESULT failed`, `GATE <id> SKIP` — and says
+    // nothing about the Web UI. That output is unchanged and still pinned by
+    // `tests/unit/cli/commands/verify.test.ts`; only the badges moved.
+    //
+    // What it actually produced was an untranslated screen in BOTH locales: ja
+    // inherited the same tokens verbatim, and neither language said what any of
+    // them meant. The correspondence is now stated explicitly instead of
+    // implied by spelling — the runs section prints the CLI's exit-code table
+    // (`verification.runs.cliLegend`) and every run row carries its own
+    // `exit=` — so the badges are free to be words. The raw-token ban is
+    // enforced in `verification-vocabulary-2062.test.ts`; what is checked here
+    // is that the correspondence did not go missing with the tokens.
+    for (const locale of LOCALES) {
+      const dict = load(locale, 'worktree');
+      expect(resolve(dict, 'verification.runs.cliLegend')).toContain('{items}');
+      expect(resolve(dict, 'verification.runs.cliLegendItem')).toContain('exit {code}');
+      expect(resolve(dict, 'verification.runs.exitCode')).toContain('{code}');
+    }
   });
 });

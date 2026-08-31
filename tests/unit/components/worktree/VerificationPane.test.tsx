@@ -234,9 +234,31 @@ describe('VerificationPane (Issue #1816)', () => {
 
       const list = screen.getByTestId('verification-runs');
       expect(within(list).getAllByRole('button')).toHaveLength(2);
-      expect(screen.getByTestId('verification-run-9')).toHaveTextContent('failed');
+      expect(screen.getByTestId('verification-run-9')).toHaveTextContent('Failed');
       expect(screen.getByTestId('verification-run-9')).toHaveTextContent('trigger=api');
-      expect(screen.getByTestId('verification-run-8')).toHaveTextContent('passed');
+      expect(screen.getByTestId('verification-run-8')).toHaveTextContent('Passed');
+    });
+
+    it('prints the CLI exit code each verdict corresponds to (Issue #2062)', () => {
+      // The whole point of the pane is that it is the same verdict the CLI
+      // reports; before #2062 nothing on screen said which code that is.
+      render(<VerificationPane state={LOADED()} />);
+
+      const legend = screen.getByTestId('verification-cli-exit-legend');
+      expect(legend).toHaveTextContent('exit 0');
+      expect(legend).toHaveTextContent('exit 20');
+      expect(legend).toHaveTextContent('exit 21');
+
+      expect(screen.getByTestId('verification-run-9')).toHaveTextContent('CLI exit=20');
+      expect(screen.getByTestId('verification-run-8')).toHaveTextContent('CLI exit=0');
+    });
+
+    it('carries the verdict gloss in the run row accessible name (Issue #2062)', () => {
+      render(<VerificationPane state={LOADED()} />);
+      expect(screen.getByTestId('verification-run-9')).toHaveAttribute(
+        'aria-label',
+        expect.stringContaining('At least one gate failed, timed out, or errored.')
+      );
     });
 
     it('marks the selected run and delegates selection to the owner', () => {
@@ -254,12 +276,12 @@ describe('VerificationPane (Issue #1816)', () => {
       render(<VerificationPane state={LOADED()} />);
 
       const lint = screen.getByTestId('verification-gate-lint');
-      expect(lint).toHaveTextContent('PASS');
+      expect(lint).toHaveTextContent('Passed');
       expect(lint).toHaveTextContent('exit=0');
       expect(lint).toHaveTextContent('duration=12s');
 
       const unit = screen.getByTestId('verification-gate-unit');
-      expect(unit).toHaveTextContent('FAIL');
+      expect(unit).toHaveTextContent('Failed');
       expect(unit).toHaveTextContent('exit=1');
     });
 

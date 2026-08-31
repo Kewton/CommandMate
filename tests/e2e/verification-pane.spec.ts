@@ -96,15 +96,17 @@ test.describe('Verification pane (Issue #1816)', () => {
     await expect(chip).toBeVisible();
     await expect(chip).toContainText('E2E contract');
     // The reason — not just the verdict — is reachable without opening anything.
-    await expect(chip).toHaveAttribute('aria-label', /RESULT failed/);
+    // Issue #2062: the verdict is a translated word now; `RESULT` stays because
+    // it is the CLI's own keyword.
+    await expect(chip).toHaveAttribute('aria-label', /RESULT Failed/);
 
     // Clicking the chip opens the Verification activity.
     await chip.click();
     await expect(page.getByTestId('activity-pane')).toHaveAttribute('data-active', 'verification');
 
     await expect(page.getByTestId('verification-contract')).toContainText('src/**');
-    await expect(page.getByTestId('verification-run-9')).toContainText('failed');
-    await expect(page.getByTestId('verification-gate-unit')).toContainText('FAIL');
+    await expect(page.getByTestId('verification-run-9')).toContainText('Failed');
+    await expect(page.getByTestId('verification-gate-unit')).toContainText('Failed');
     await expect(page.getByTestId('verification-gate-log-unit')).toContainText(
       'FAIL tests/unit/example.test.ts',
     );

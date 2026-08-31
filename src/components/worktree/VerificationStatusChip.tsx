@@ -22,6 +22,11 @@
  * a finger reaches the same text a pointer does. Nothing here is hover-revealed:
  * the chip, both badges and the toggle are always painted.
  *
+ * Issue #2062 replaces the raw status tokens the badges printed (`passed`,
+ * `not_started` — identical in both locales) with translated labels, and adds
+ * the verdict's one-line gloss to the reason list so the popover explains the
+ * badge instead of repeating it.
+ *
  * @module components/worktree/VerificationStatusChip
  */
 
@@ -135,6 +140,12 @@ export const VerificationStatusChip = memo(function VerificationStatusChip({
           runId: latestRun.id,
         })
       );
+      // Issue #2062: the verdict word alone is not the reason. `Not started` in
+      // particular reads as "nothing happened yet" when it actually means the
+      // branch holds no work at all — the verdict `commandmate verify` exits 21
+      // for. The gloss is one clause of the reason, so it goes in the same list
+      // the popover and the accessible name are both built from.
+      parts.push(t(`verification.runStatusGloss.${latestRun.status}`));
       if (gates && gates.length > 0) {
         const failing = gates.filter((gate) => FAILING_GATE_STATUSES.includes(gate.status));
         parts.push(

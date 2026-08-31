@@ -31,6 +31,16 @@
  * states with four different next moves; see {@link resolveVerificationPhase}
  * for the precedence and why.
  *
+ * Issue #2062 gives the vocabulary words. The run and gate badges used to print
+ * the raw database tokens — `passed`, `not_started`, `SKIP` — identically in
+ * both locales, and nothing on the screen said what any of them meant, which
+ * exit code the CLI reports for them, or why a gate that never ran turned the
+ * whole run into `error`. That last one made the primary-checkout guard read as
+ * a bug. The badges are now translated, every verdict carries a one-line gloss,
+ * the runs section prints the CLI's own exit-code table, and a run holding
+ * skipped gates states which gates were declined and why — see
+ * {@link RunVerdictBanner} and `lib/verification/run-verdict-vocabulary.ts`.
+ *
  * @module components/worktree/VerificationPane
  */
 
@@ -56,9 +66,16 @@ import {
   type TaskView,
   type VerificationGateResultView,
   type VerificationRunListItem,
+  type VerificationRunView,
   type VerifyConfigGateView,
   type VerifyConfigResponse,
 } from '@/lib/api/verification-api';
+import {
+  LEGEND_RUN_STATUSES,
+  RUN_STATUS_EXIT_CODE,
+  builtinGateDescriptionKey,
+  classifySkipReason,
+} from '@/lib/verification/run-verdict-vocabulary';
 import type { WorktreeVerificationState } from '@/hooks/useWorktreeVerification';
 
 /** Characters of the contract goal shown before the "…" (the pane is not a reader). */
@@ -367,6 +384,9 @@ function OnboardingSection({ state }: { state: WorktreeVerificationState }) {
               gates: builtinGateIds(config).join(', '),
             })}
           </Note>
+          <Note testId="verification-builtin-gates-hint">
+            {t('verification.onboarding.configured.builtinHint')}
+          </Note>
           <Button
             type="button"
             size="sm"
@@ -443,13 +463,19 @@ function RunRow({
 }) {
   const t = useTranslations('worktree');
   const verdict = t(`verification.runStatus.${run.status}`);
+  const gloss = t(`verification.runStatusGloss.${run.status}`);
+  const exitCode = RUN_STATUS_EXIT_CODE[run.status];
   return (
     <li>
       <button
         type="button"
         onClick={() => onSelect(run.id)}
         aria-current={selected ? 'true' : undefined}
-        aria-label={t('verification.runs.select', { runId: run.id, verdict })}
+        // The gloss rides in the accessible name rather than in a third line of
+        // the row: this pane is ~230px wide, and the verdict a screen reader
+        // announces is exactly the one that needed explaining.
+        aria-label={t('verification.runs.select', { runId: run.id, verdict, gloss })}
+        title={gloss}
         data-testid={`verification-run-${run.id}`}
         className={`flex w-full flex-col gap-0.5 rounded-md border px-2 py-2 text-left text-xs transition-colors touch-manipulation focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
           selected
@@ -460,7 +486,11 @@ function RunRow({
         {/* Two lines rather than one: this pane is ~230px wide on PC, and a
             single row pushed `trigger=` past the edge with no way to see it. */}
         <span className="flex items-center gap-2">
-          <Badge variant={RUN_STATUS_VARIANT[run.status]} className="flex-shrink-0 font-mono">
+          {/* Issue #2062 dropped `font-mono` here: the badge used to print the
+              database token, and a monospaced face is what told a reader it was
+              a literal. It is a word in the reader's language now — the literal
+              CLI facts (`run`, `trigger=`, `exit=`) keep the mono line below. */}
+          <Badge variant={RUN_STATUS_VARIANT[run.status]} className="flex-shrink-0">
             {verdict}
           </Badge>
           <span className="min-w-0 flex-1 truncate text-foreground">
@@ -470,9 +500,110 @@ function RunRow({
         <span className="flex flex-wrap gap-x-2 font-mono text-[11px] text-muted-foreground">
           <span>{t('verification.runs.runLabel', { runId: run.id })}</span>
           <span>{t('verification.runs.trigger', { trigger: run.trigger })}</span>
+          {exitCode !== null && <span>{t('verification.runs.exitCode', { code: exitCode })}</span>}
         </span>
       </button>
     </li>
+  );
+}
+
+/**
+ * The CLI's exit-code table, rendered from {@link RUN_STATUS_EXIT_CODE}
+ * (Issue #2062).
+ *
+ * Composed here rather than written into the dictionary as one sentence so the
+ * codes cannot drift from the mapping the CLI actually uses: a change to
+ * `exitCodeForRunStatus` fails
+ * `tests/unit/verification/run-verdict-vocabulary-2062.test.ts`, and this line
+ * follows it without anyone editing two locales.
+ *
+ * It answers the question the pane could not before: an operator reading a red
+ * badge here had no way to know it is the same verdict that exits 20 in
+ * `commandmate verify`, and that `Not started` — the one that exits 21 — is not
+ * a failure at all.
+ */
+function CliExitLegend() {
+  const t = useTranslations('worktree');
+  const items = LEGEND_RUN_STATUSES.map((status) =>
+    t('verification.runs.cliLegendItem', {
+      label: t(`verification.runStatus.${status}`),
+      // Non-null for every status in the legend; `running` is the only null and
+      // it is deliberately not listed.
+      code: RUN_STATUS_EXIT_CODE[status] ?? 0,
+    })
+  ).join(' / ');
+  return (
+    <p
+      className="mb-2 break-words text-[11px] text-muted-foreground"
+      data-testid="verification-cli-exit-legend"
+    >
+      {t('verification.runs.cliLegend', { items })}
+    </p>
+  );
+}
+
+/**
+ * The selected run's verdict, spelled out (Issue #2062).
+ *
+ * Three facts the pane used to leave to inference: what the verdict word means,
+ * which exit code `commandmate verify` reports for it, and — the one that made
+ * `skipInPrimaryCheckout` look like a defect — which gates were declined and
+ * why. A run holding a single skipped gate is aggregated to `error` by
+ * `aggregateRunStatus`, deliberately, because "we declined to check" must not
+ * read as "we checked and it was fine". Without the reason on screen, that
+ * shows up as a red run nobody can account for.
+ *
+ * Rendered for every terminal verdict, not only `error`: `not_started` needs
+ * the same treatment (its gloss is the definition of work evidence) and a
+ * `passed` run stating what it means costs one muted line.
+ */
+function RunVerdictBanner({ run }: { run: VerificationRunView }) {
+  const t = useTranslations('worktree');
+  const exitCode = RUN_STATUS_EXIT_CODE[run.status];
+  const skipped = run.gates.filter((gate) => gate.status === 'skipped');
+
+  return (
+    <div
+      className="mb-2 space-y-1 rounded-md border border-border bg-surface-2 px-2 py-2"
+      data-testid="verification-run-verdict"
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs font-semibold text-foreground">
+          {t('verification.gates.verdictHeading')}
+        </span>
+        <Badge variant={RUN_STATUS_VARIANT[run.status]} className="flex-shrink-0">
+          {t(`verification.runStatus.${run.status}`)}
+        </Badge>
+        {exitCode !== null && (
+          <span className="font-mono text-[11px] text-muted-foreground">
+            {t('verification.runs.exitCode', { code: exitCode })}
+          </span>
+        )}
+      </div>
+      <p
+        className="break-words text-xs text-muted-foreground"
+        data-testid="verification-run-verdict-gloss"
+      >
+        {t(`verification.runStatusGloss.${run.status}`)}
+      </p>
+      {skipped.length > 0 && (
+        <div className="space-y-0.5 pt-1" data-testid="verification-run-skip-reasons">
+          <p className="text-xs font-semibold text-foreground">
+            {t('verification.gates.skipHeading')}
+          </p>
+          <ul className="space-y-0.5">
+            {skipped.map((gate) => (
+              <li key={gate.id} className="break-words text-xs text-muted-foreground">
+                {t('verification.gates.skipReasonFor', {
+                  gateId: gate.gateId,
+                  reason: t(`verification.gates.skipReason.${classifySkipReason(gate.logTail)}`),
+                })}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -485,6 +616,10 @@ function GateRow({ gate }: { gate: VerificationGateResultView }) {
   const open = override ?? failing;
   const excerpt = excerptLogTail(gate.logTail, MAX_DISPLAYED_LOG_TAIL_LINES);
   const duration = formatGateDuration(gate.durationMs);
+  // Issue #2062: a built-in gate's id is the only thing the row used to say
+  // about it, and `work-evidence` / `scope` / `env-clean` / `config` are the
+  // four the operator never declared and cannot look up in verify.yaml.
+  const builtinKey = builtinGateDescriptionKey(gate.gateId);
 
   return (
     <li
@@ -492,18 +627,42 @@ function GateRow({ gate }: { gate: VerificationGateResultView }) {
       data-testid={`verification-gate-${gate.gateId}`}
     >
       <div className="flex flex-wrap items-center gap-2">
-        <Badge variant={GATE_STATUS_VARIANT[gate.status]} className="flex-shrink-0 font-mono">
+        <Badge variant={GATE_STATUS_VARIANT[gate.status]} className="flex-shrink-0">
           {t(`verification.gateStatus.${gate.status}`)}
         </Badge>
         <span className="min-w-0 break-all font-mono text-xs font-medium text-foreground">
           {gate.gateId}
         </span>
         {gate.source === 'contract' && (
-          <span className="font-mono text-[10px] text-muted-foreground">
+          <span
+            className="font-mono text-[10px] text-muted-foreground"
+            title={t('verification.gates.contractSourceHint')}
+          >
             {t('verification.gates.contractSource')}
           </span>
         )}
+        {builtinKey !== null && (
+          <span className="text-[10px] text-muted-foreground">
+            {t('verification.gates.builtinBadge')}
+          </span>
+        )}
       </div>
+      {builtinKey !== null && (
+        <p
+          className="mt-1 break-words text-[11px] text-muted-foreground"
+          data-testid={`verification-gate-about-${gate.gateId}`}
+        >
+          {t(`verification.gates.builtin.${builtinKey}`)}
+        </p>
+      )}
+      {gate.status === 'skipped' && (
+        <p
+          className="mt-1 break-words text-[11px] text-muted-foreground"
+          data-testid={`verification-gate-skipped-${gate.gateId}`}
+        >
+          {t('verification.gateStatus.skipped')} — {t('verification.gateStatusGloss.skipped')}
+        </p>
+      )}
       <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 font-mono text-[11px] text-muted-foreground">
         {gate.exitCode !== null && gate.exitCode !== undefined && (
           <span>{t('verification.gates.exitCode', { code: gate.exitCode })}</span>
@@ -662,6 +821,7 @@ export const VerificationPane = memo(function VerificationPane({
                   : t('verification.runs.rerunError', { message: rerunFailure.message })}
               </p>
             )}
+            <CliExitLegend />
             {runs.length === 0 ? (
               <p
                 className="whitespace-pre-line text-xs text-muted-foreground"
@@ -702,16 +862,35 @@ export const VerificationPane = memo(function VerificationPane({
                 <p className="text-xs text-muted-foreground" data-testid="verification-gates-loading">
                   {detailLoading ? t('verification.gates.loading') : t('verification.gates.empty')}
                 </p>
-              ) : selectedRun.gates.length === 0 ? (
-                <p className="text-xs text-muted-foreground" data-testid="verification-gates-empty">
-                  {t('verification.gates.empty')}
-                </p>
               ) : (
-                <ul className="space-y-1.5" data-testid="verification-gates">
-                  {selectedRun.gates.map((gate) => (
-                    <GateRow key={gate.id} gate={gate} />
-                  ))}
-                </ul>
+                <>
+                  {/* Above the branch on `gates.length`: a run that recorded no
+                      gate row at all still reached a verdict, and that verdict
+                      plus its gloss is the only thing there is to say about it. */}
+                  <RunVerdictBanner run={selectedRun} />
+                  {selectedRun.gates.length === 0 ? (
+                    <p
+                      className="text-xs text-muted-foreground"
+                      data-testid="verification-gates-empty"
+                    >
+                      {t('verification.gates.empty')}
+                    </p>
+                  ) : (
+                    <ul className="space-y-1.5" data-testid="verification-gates">
+                      {selectedRun.gates.map((gate) => (
+                        <GateRow key={gate.id} gate={gate} />
+                      ))}
+                    </ul>
+                  )}
+                  {selectedRun.gates.some((gate) => gate.source === 'contract') && (
+                    <p
+                      className="mt-2 break-words text-[11px] text-muted-foreground"
+                      data-testid="verification-contract-source-hint"
+                    >
+                      {t('verification.gates.contractSourceHint')}
+                    </p>
+                  )}
+                </>
               )}
             </Section>
           )}

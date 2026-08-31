@@ -949,6 +949,7 @@
         "body": "`{path}` に {count} 件のゲートが宣言されています。このブランチではまだ 1 度も実行されていません。",
         "gatesHeading": "宣言ゲート",
         "builtin": "組み込みゲートも併せて走ります: {gates}",
+      "builtinHint": "組み込みゲートは `.commandmate/verify.yaml` に書かなくても毎回走ります。それぞれの意味はゲート一覧の各行に表示されます。",
         "action": "検証を実行"
       },
       "running": {
@@ -982,9 +983,12 @@
       "rerunConflict": "検証ランが既に実行中です（run {runId}）。",
       "rerunConflictUnknown": "検証ランが既に実行中です。",
       "rerunError": "検証を開始できませんでした: {message}",
-      "select": "run {runId} のゲートを表示（RESULT {verdict}）",
+      "select": "run {runId} のゲートを表示（RESULT {verdict} — {gloss}）",
       "runLabel": "run {runId}",
-      "trigger": "trigger={trigger}"
+      "trigger": "trigger={trigger}",
+      "cliLegend": "CLI 相当の exit code: {items}",
+      "cliLegendItem": "{label} = exit {code}",
+      "exitCode": "CLI 相当 exit={code}"
     },
     "gates": {
       "heading": "ゲート — run {runId}",
@@ -998,23 +1002,59 @@
       "showLog": "ログ末尾を表示",
       "hideLog": "ログ末尾を隠す",
       "logOmitted": "… (+{count} 行省略。全文は `commandmate verify show {runId}`)",
-      "noLog": "ログ出力は記録されていません。"
+      "noLog": "ログ出力は記録されていません。",
+      "verdictHeading": "このランの判定",
+      "contractSourceHint": "`[contract]` は、このブランチに送られた実行契約が指定したゲートであることを表します（`.commandmate/verify.yaml` の宣言ではありません）。",
+      "builtinBadge": "組み込み",
+      "builtin": {
+        "workEvidence": "作業証跡ゲート（組み込み）。`options.baseRef` より先のコミット、または未コミットの変更があるかを見ます。どちらも無ければランは「未着手」になり、以降のゲートは実行されません。",
+        "scope": "スコープゲート（組み込み）。変更されたファイルを実行契約の `scope.allow` / `scope.deny` と突き合わせます。契約が無いランには判定するスコープが無いため未実行になります。",
+        "envClean": "環境クリーンゲート（組み込み）。タスク開始時のスナップショットと比べて、待ち受けサーバ・`mcbd-*` tmux セッション・`$HOME`・`~/.commandmate` に残留が無いかを見ます。",
+        "config": "設定ゲート（組み込み）。`.commandmate/verify.yaml` を読み込めなかったことをランに記録するための擬似ゲートです。実際のゲートは 1 件も実行されていません。"
+      },
+      "skipHeading": "実行されなかったゲート",
+      "skipReasonFor": "{gateId}: {reason}",
+      "skipReason": {
+        "primaryCheckout": "この worktree がサーバープロセスの作業ディレクトリそのものなので、`options.skipInPrimaryCheckout` により実行されませんでした。稼働中の画面を壊さないための保護であって、不具合ではありません。別の worktree で実行すれば走ります。",
+        "workEvidence": "`work-evidence` ゲートが合格しなかったため、判定する対象が無く実行されませんでした。",
+        "mutex": "同じ `mutex` を宣言した別の検証が終わらず、待ち時間の上限に達したため実行されませんでした。作業への判定ではなく資源の競合です。",
+        "detachedContract": "このブランチには実行契約がありますが、このランが契約に紐づいていないためスコープを判定できませんでした。`wait --verify` で起動すると自動的に紐づきます。",
+        "noContract": "このランには実行契約が紐づいていないため、判定するスコープが宣言されていません。",
+        "notRequired": "実行契約が `success.requireScopeClean: false` を宣言しているため判定していません。",
+        "unknown": "このゲートは実行されていません。理由はログ末尾を参照してください。"
+      }
     },
     "runStatus": {
-      "running": "running",
-      "passed": "passed",
-      "failed": "failed",
-      "not_started": "not_started",
-      "error": "error",
-      "cancelled": "cancelled"
+      "running": "実行中",
+      "passed": "合格",
+      "failed": "不合格",
+      "not_started": "未着手",
+      "error": "判定不能",
+      "cancelled": "中止"
+    },
+    "runStatusGloss": {
+      "running": "ゲートを実行中です。判定はまだ出ていません。",
+      "passed": "選択されたゲートがすべて合格しました。",
+      "failed": "1 つ以上のゲートが不合格・時間切れ・異常終了しました。",
+      "not_started": "作業証跡ゼロ: コミットも未コミット変更もありません。判定する対象が無いため、以降のゲートは実行されていません。",
+      "error": "判定に至りませんでした。実行されなかったゲートがあるか、検証設定を読み込めませんでした。不合格とは別物です。",
+      "cancelled": "検証が判定に達する前に中止されました。"
     },
     "gateStatus": {
-      "running": "RUNNING",
-      "passed": "PASS",
-      "failed": "FAIL",
-      "timeout": "TIMEOUT",
-      "skipped": "SKIP",
-      "error": "ERROR"
+      "running": "実行中",
+      "passed": "合格",
+      "failed": "不合格",
+      "timeout": "時間切れ",
+      "skipped": "未実行",
+      "error": "異常終了"
+    },
+    "gateStatusGloss": {
+      "running": "このゲートはまだ実行中です。",
+      "passed": "コマンドが exit 0 で終了しました。",
+      "failed": "コマンドが 0 以外の exit code で終了しました。",
+      "timeout": "timeoutSec 以内に終わらず打ち切られました。",
+      "skipped": "このゲートは実行されていません。合格ではありません。",
+      "error": "ゲートを起動できず、判定に至りませんでした。"
     },
     "chip": {
       "taskReason": "タスク「{title}」: {status}",
