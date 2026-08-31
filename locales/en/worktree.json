@@ -419,6 +419,15 @@
     "endSession": "End session",
     "endSessionFor": "End session for {name}"
   },
+  "surfaceMode": {
+    "groupLabel": "Output surface for {split}",
+    "groupLabelMobile": "Output surface",
+    "terminal": "Terminal",
+    "chat": "Chat",
+    "showTerminal": "Show terminal output",
+    "showChat": "Show conversation",
+    "chatSurfaceLabel": "Conversation"
+  },
   "unsentComposer": {
     "regionLabel": "Unsent input",
     "label": "Unsent input:",

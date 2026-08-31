@@ -40,6 +40,7 @@ export const SHORTCUT_SCOPES: readonly ShortcutScope[] = [
  * The registered shortcuts. Mirrors the bindings scattered across the app:
  *   - command palette toggle + Escape (CommandPalette.tsx)
  *   - terminal search (TerminalDisplay.tsx)
+ *   - output-surface toggle (TerminalSplitPaneContent.tsx, Issue #2193)
  *   - composer submit / newline (MessageInput.tsx)
  *   - file editor indent / outdent / save / fullscreen (MarkdownEditor.tsx)
  */
@@ -49,6 +50,12 @@ export const KEYBOARD_SHORTCUTS: readonly KeyboardShortcut[] = [
   { id: 'closeOverlay', keys: ['Esc'], scope: 'global' },
   { id: 'navigateList', keys: ['↑', '↓'], scope: 'global' },
   { id: 'terminalSearch', keys: [MOD_KEY_TOKEN, 'F'], scope: 'terminal' },
+  // Issue #2193: swap the split's output surface between the tmux frame and the
+  // conversation transcript. Shift is what keeps it clear of MarkdownEditor's
+  // bare Ctrl+M (Issue #1518) — the handler lives in
+  // `TerminalSplitPaneContent` and additionally declines the chord whenever
+  // focus is in a text field outside every split.
+  { id: 'toggleSurfaceMode', keys: [MOD_KEY_TOKEN, 'Shift', 'M'], scope: 'terminal' },
   { id: 'sendMessage', keys: ['↵'], scope: 'composer' },
   { id: 'composerNewline', keys: ['Shift', '↵'], scope: 'composer' },
   { id: 'editorIndent', keys: ['Tab'], scope: 'editor' },
