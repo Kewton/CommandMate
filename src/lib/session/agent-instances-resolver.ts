@@ -12,7 +12,16 @@
  * `upsertWorktree` writes no `selected_agents` and scan/sync writes no
  * `agent_instances`, so a worktree found by a sync has NEITHER and lands
  * squarely on this fallback. Worktrees that already have rows are untouched —
- * the early return below is still the first thing that happens.
+ * the early return below is still the first thing that happens, and it is what
+ * makes "a worktree with a roster never moves" true of #2066 as well.
+ *
+ * Issue #2066 (the repository layer) deliberately changed NOTHING here. Every
+ * caller hands in `worktree.selectedAgents` from `getWorktreeById` /
+ * `getWorktrees`, and those two are where `.commandmate/agents.yaml` enters —
+ * including the rule that a worktree which already owns a roster is not offered
+ * the declaration at all. Adding a `repositoryPath` argument here would have
+ * been a second entry point that no production call site passes, so the layer
+ * lives in exactly one place: `src/lib/db/worktree-db.ts`.
  */
 import type Database from 'better-sqlite3';
 import { getAgentInstances } from '@/lib/db';
@@ -29,9 +38,11 @@ import {
  *
  * @param db - Database instance
  * @param worktreeId - Worktree ID
- * @param selectedAgents - Worktree's selected agents (highest-priority layer)
+ * @param selectedAgents - Worktree's selected agents, already resolved by
+ *   `getWorktrees` / `getWorktreeById` (which is where the repository layer is
+ *   applied); `undefined` when the caller has none to offer
  * @returns Stored instances when present, otherwise primaries derived from the
- *   first layer that answers: worktree -> app_settings -> compiled-in constant
+ *   first layer that answers: worktree -> app_settings -> constant
  */
 export function resolveAgentInstances(
   db: Database.Database,
