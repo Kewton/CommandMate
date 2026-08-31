@@ -57,6 +57,10 @@ vi.mock('@/lib/realtime/terminal-broadcast', () => ({
 
 vi.mock('@/lib/polling/structured-history-gate', () => ({
   isStructuredHistoryWriterLive: vi.fn(() => false),
+  // Issue #2121: the pull-mode half of the same gate. Stubbed false here so
+  // these assertions keep measuring the push-mode (opencode) behaviour they were
+  // written for; the Claude side has its own suite.
+  captureStructuredHistoryTurn: vi.fn(async () => false),
 }));
 
 import { checkForResponse } from '@/lib/polling/response-checker';
