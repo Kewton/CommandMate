@@ -30,6 +30,8 @@ import { createTaskCommand } from './commands/task';
 import { createReportCommand } from './commands/report';
 // Issue #1000: Agent-instance roster management (discover/add/remove/alias/kill)
 import { createInstancesCommand } from './commands/instances';
+// Issue #2069: agent CLI versions, and running an agent's own updater off-pane
+import { createAgentsCommand } from './commands/agents';
 // Issue #1237: Skill management as a thin client over the Skill APIs
 import { createSkillCommand } from './commands/skill';
 // Issue #1937 (R9): expose the server to a phone and pair it with a QR code
@@ -249,6 +251,11 @@ export function buildProgram(): Command {
 
   // Issue #1000: Agent-instance roster management
   program.addCommand(createInstancesCommand());
+
+  // Issue #2069: `agents versions` / `agents update <tool>`. Registered next to
+  // `instances` because both are about the agent CLIs themselves rather than
+  // about a worktree's sessions; `update` above updates CommandMate, not them.
+  program.addCommand(createAgentsCommand());
 
   // Issue #1237: Skill management (catalog / plan / install / uninstall / status)
   program.addCommand(createSkillCommand());

@@ -21,6 +21,7 @@ import {
   getAllWorktreeAliases,
 } from '@/lib/db';
 import { createLogger } from '@/lib/logger';
+import { refreshRepoAgentsConfig } from '@/lib/repo-config/agents-config';
 
 const logger = createLogger('worktrees');
 
@@ -219,6 +220,16 @@ export async function scanWorktrees(rootDir: string): Promise<Worktree[]> {
     // Get repository name from path
     const repositoryPath = path.resolve(rootDir);
     const repositoryName = path.basename(repositoryPath);
+
+    // Issue #2066: this is the "read it at sync" the repository-level agent
+    // declaration is specified against. Doing it here rather than lazily in
+    // `getWorktrees()` is what keeps the file off the sidebar's polled path
+    // (#1913's no-filesystem-probe-on-a-hot-path rule), and it is also what
+    // makes a broken `.commandmate/agents.yaml` warn once per sync instead of
+    // once per poll — the refusal is cached alongside an accepted value.
+    // Deliberately after the `git worktree list` above succeeded: a directory
+    // that is not a repository has no declaration worth reading.
+    refreshRepoAgentsConfig(repositoryPath);
 
     // Filter and validate worktree paths
     return parsed
