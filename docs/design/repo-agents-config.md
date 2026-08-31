@@ -3,7 +3,7 @@
 - **関連 Issue**: [#2066](https://github.com/Kewton/CommandMate/issues/2066)（本書）／[#2065](https://github.com/Kewton/CommandMate/issues/2065)（サーバ全体の既定）
 - **実装**: `src/lib/repo-config/agents-config.ts`
 - **解決関数**: `src/lib/selected-agents-validator.ts` の `resolveSelectedAgents()`
-- **テスト**: `tests/unit/repo-config/agents-config-2066.test.ts` ／ `tests/unit/db/repo-agents-yaml-2066.test.ts` ／ `tests/unit/lib/worktrees-repo-agents-sync-2066.test.ts`
+- **テスト**: `tests/unit/repo-config/agents-config-2066.test.ts` ／ `tests/unit/db/repo-agents-yaml-2066.test.ts` ／ `tests/unit/lib/worktrees-repo-agents-sync-2066.test.ts` ／ `tests/unit/app/api/worktrees-repo-agents-roster-2066.test.ts`（§2.1 を `GET /api/worktrees` の応答で固定）
 
 ---
 
@@ -32,21 +32,56 @@
 `repo` は #2065 の時点で配列に**宣言だけされていて値が来ていなかった**。#2066 がやったのは
 **呼び出し側で値を渡すこと**だけで、`resolveSelectedAgents()` 本体も配列の順序も変えていない。
 
-値を渡す場所は 3 つ:
+値を渡す場所は **2 つだけ**で、どちらも `src/lib/db/worktree-db.ts` にある:
 
 | 呼び出し側 | 渡し方 |
 |---|---|
-| `getWorktrees()` (`src/lib/db/worktree-db.ts`) | `repository_path` ごとに 1 回だけ解決してメモ化 |
-| `getWorktreeById()` (同上) | 行の `repository_path` |
-| `resolveAgentInstances()` (`src/lib/session/agent-instances-resolver.ts`) | 省略可能な第 4 引数 `repositoryPath` |
+| `getWorktrees()` | `repository_path` ごとに 1 回だけ解決（行ごとではない） |
+| `getWorktreeById()` | 行の `repository_path` |
 
-`resolveAgentInstances()` の第 4 引数は**継ぎ目**であって本線ではない。本番の呼び出し側は全て
+`resolveAgentInstances()` は**この層を持たない**。本番の呼び出し側 6 箇所は全て
 `worktree.selectedAgents`（= 上の 2 関数が既にリポジトリ層まで解決した値）を渡すので、
-第 4 引数が要るのは `selectedAgents` を渡せない経路（`PATCH /api/worktrees/[id]` は
-`updatedWorktree?.selectedAgents` を渡すので行が消えていると `undefined`）だけである。
+そこに `repositoryPath` 引数を足しても**本番からは一度も渡されない引数**になる
+（#2066 の統合レビュー M5。初版には在ったが削除した）。層の入口は 1 箇所である。
 
-**`agent_instances` の行が既にある worktree は一切変わらない。** `resolveAgentInstances()` の
-先頭の early return が最初に走るためで、これは #2065 でも #2066 でも同じ。
+---
+
+### 2.1 `agent_instances` を持つ worktree にはリポジトリ宣言を渡さない
+
+**これは `selectedAgents` 側にも効かせる必要がある。**
+
+`resolveAgentInstances()` の early return はロスター（`agentInstances`）を守るが、
+`selectedAgents` は**同じクエリから出るもう 1 本の経路**で、その消費者はロスターを見ない:
+
+```
+src/app/sessions/page.tsx:341            wt.selectedAgents ?? getClientDefaultSelectedAgents()
+src/components/review/ReviewTab.tsx:246  （同じ行）
+```
+
+`PATCH /api/worktrees/[id]` は `agentInstances`（route.ts:208）と `selectedAgents`
+（route.ts:181）を**独立した分岐**で書くので、`AgentInstancesPane` でロスターを編集した
+worktree は「`agent_instances` はある・`selected_agents` は NULL」になる。scan で作られた
+worktree はそもそもこの状態で始まる。ここでリポジトリ層を通すと、**タブは変わらないのに
+/sessions と Review のチップだけが宣言どおりに描き変わり、実際に動いているエージェントが
+「稼働中エージェント」から消える**（#2066 の統合レビュー H1）。
+
+したがって `getWorktrees()` / `getWorktreeById()` は、**`agent_instances` の行を持つ
+worktree にはリポジトリ層を渡さない**。
+
+- **供給側で止めた**（消費側 2 箇所を直すのではなく）。`selectedAgents` の消費者は今後も
+  増えるので、増えるたびにこの規則を覚えていなければならない形にしない。
+  `SkillTargetSelector` のように `agentInstances` を優先する作法は既に在るが、それは
+  「正しく書けば正しい」であって不変条件ではない。
+- **リポジトリ層だけを止めている。** `appSettings` 層にも同じ穴があるが（#2065）、
+  そちらを変えるのは #2065 の挙動変更になる。#2066 が答えるべきなのは、この穴を
+  **「サーバ設定を触れる管理者」から「リポジトリにコミットできる全員」に広げた**ことである。
+- **コストは 0 か 1 クエリ。** ロスターの照会は「どこかのリポジトリが実際に宣言している」
+  ときにしか走らず、走るときも `getWorktrees()` 1 回につき
+  `SELECT DISTINCT worktree_id FROM agent_instances` **1 本**（行数に比例しない）。
+  宣言が無いインストールでは #2066 以前とクエリが完全に同一になる。
+
+結果として、**`agent_instances` の行が既にある worktree は `agentInstances` も
+`selectedAgents` も一切変わらない。**
 
 ---
 

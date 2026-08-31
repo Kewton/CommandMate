@@ -93,8 +93,18 @@ describe('scanWorktrees() refreshes the repository agent declaration (Issue #206
     expect(getRepoDefaultSelectedAgents(repo, T0 + 2)).toEqual(['claude', 'gemini']);
   });
 
-  it('picks a declaration up on the first scan, with no prior cache entry', async () => {
+  /**
+   * The naive form of this test — scan, then read the value — is VACUOUS: the
+   * lazy cold-miss read in `getRepoDefaultSelectedAgents()` returns the same
+   * answer with the scan-time refresh deleted (found by the #2066 integration
+   * review, L3). Deleting the file after the scan is what separates them: the
+   * value can only still be there if the scan put it there.
+   */
+  it('populates the cache during the scan, not on the later read', async () => {
     await scanWorktrees(repo);
+
+    rmSync(join(repo, REPO_AGENTS_CONFIG_RELATIVE_PATH));
+
     expect(getRepoDefaultSelectedAgents(repo, T0)).toEqual(['opencode', 'codex']);
   });
 

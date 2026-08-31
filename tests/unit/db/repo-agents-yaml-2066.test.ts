@@ -200,14 +200,15 @@ describe('the repository declaration reaches its own worktrees (Issue #2066 acce
     expect(before.map((i) => i.id)).toEqual(['claude', 'claude-2']);
     expect(before.map((i) => i.alias)).toEqual(['Claude', 'review']);
 
-    // The repository changes its mind, twice over. Neither reaches this worktree.
+    // The repository changes its mind. It does not reach this worktree — not
+    // through the roster, and (see the H1 suite below) not through
+    // `selectedAgents` either.
     declare(declaringRepo, 'agents: [gemini, copilot]\nprimary: copilot\n');
     clearRepoAgentsConfigCache();
-    expect(getWorktreeById(db, DECLARED)?.selectedAgents).toEqual(['copilot', 'gemini']);
 
     expect(resolveAgentInstances(db, DECLARED, getWorktreeById(db, DECLARED)?.selectedAgents))
       .toEqual(before);
-    expect(resolveAgentInstances(db, DECLARED, undefined, declaringRepo)).toEqual(before);
+    expect(resolveAgentInstances(db, DECLARED, undefined)).toEqual(before);
   });
 
   /**
@@ -249,17 +250,18 @@ describe('the repository declaration reaches its own worktrees (Issue #2066 acce
   });
 
   /**
-   * `resolveAgentInstances`'s own repository layer, exercised directly.
-   *
-   * Every production caller hands it `worktree.selectedAgents`, which the DB
-   * read has already resolved, so that path tests the DB layer twice and the
-   * resolver's layer not at all. `undefined` is the input that reaches it:
-   * `PATCH /api/worktrees/[id]` passes `updatedWorktree?.selectedAgents`.
+   * `resolveAgentInstances()` has NO repository layer of its own (Issue #2066
+   * review, M5). The layer lives in `getWorktrees` / `getWorktreeById`, and the
+   * resolver receives the result through `selectedAgents`. Pinned so that a
+   * later change cannot quietly add a second entry point that no production
+   * caller passes an argument to.
    */
-  it('answers from the repository declaration when the caller has no selectedAgents', () => {
-    expect(resolveAgentInstances(db, DECLARED, undefined, declaringRepo).map((i) => i.cliTool))
-      .toEqual(['opencode', 'codex']);
-    // ...and without the repository path it falls to the layers below, unchanged.
+  it('has no repository layer of its own — it receives the resolved value', () => {
+    expect(resolveAgentInstances.length).toBe(3);
+
+    // Handed the resolved value: the declaration is in force.
+    expect(rosterOf(DECLARED)).toEqual(['opencode', 'codex']);
+    // Handed nothing: the layers below answer, exactly as before #2066.
     expect(resolveAgentInstances(db, DECLARED, undefined).map((i) => i.cliTool))
       .toEqual(DEFAULT_SELECTED_AGENTS);
   });
@@ -292,5 +294,148 @@ describe('the repository declaration reaches its own worktrees (Issue #2066 acce
     expect(orphan?.selectedAgents).toEqual(DEFAULT_SELECTED_AGENTS);
     expect(vi.mocked(getRepoDefaultSelectedAgents).mock.calls.map((c) => c[0]))
       .not.toContain(null);
+  });
+});
+
+/**
+ * H1 (integration review of #2066): the declaration must not leak into
+ * `selectedAgents` for a worktree that already owns an `agent_instances`
+ * roster.
+ *
+ * `resolveAgentInstances()` protects the roster with an early return, and the
+ * user-facing documentation this Issue shipped promises that a branch which has
+ * already opened its tabs "never changes". But `selectedAgents` is a SECOND
+ * channel out of the same query, and its consumers do not look at
+ * `agentInstances` at all:
+ *
+ *   src/app/sessions/page.tsx:341            wt.selectedAgents ?? clientDefault
+ *   src/components/review/ReviewTab.tsx:246  (the same line)
+ *
+ * The state is not exotic. `PATCH /api/worktrees/[id]` writes `agentInstances`
+ * (route.ts:208) and `selectedAgents` (route.ts:181) from INDEPENDENT branches,
+ * so editing the roster in `AgentInstancesPane` leaves a row with
+ * `agent_instances` rows and `selected_agents` still NULL — and a scan-created
+ * worktree starts that way by construction. Before the fix, committing an
+ * `agents.yaml` repainted such a worktree's chips on /sessions and /review with
+ * agents it is not running, and dropped the agent it IS running out of the
+ * "active agents" list.
+ *
+ * Fixed on the SUPPLY side rather than in the two consumers: consumers of
+ * `selectedAgents` keep being added, and each new one would have to remember
+ * the rule.
+ */
+describe('a worktree that owns a roster is not offered the declaration (Issue #2066 H1)', () => {
+  const SIBLING = 'wt-sibling';
+
+  beforeEach(() => {
+    declaringRepo = makeTempDir('repo-agents-h1-declaring-2066-');
+    plainRepo = makeTempDir('repo-agents-h1-plain-2066-');
+    declare(declaringRepo, 'agents: [opencode, codex]\n');
+
+    clearRepoAgentsConfigCache();
+    mockLogger.warn.mockClear();
+    vi.mocked(getRepoDefaultSelectedAgents).mockClear();
+
+    db = new Database(':memory:');
+    runMigrations(db);
+    seedWorktree(DECLARED, declaringRepo);
+    // Same repository, no roster — the control that makes the assertions below
+    // about the ROSTER rather than about the repository.
+    seedWorktree(SIBLING, declaringRepo);
+    seedWorktree(PLAIN, plainRepo);
+  });
+
+  afterEach(() => {
+    db.close();
+    removeTempDir(declaringRepo);
+    removeTempDir(plainRepo);
+  });
+
+  /** Exactly what the `agentInstances` branch of PATCH leaves behind. */
+  function giveRoster(id: string, tool: string): void {
+    setAgentInstances(db, id, [
+      { id: tool, cliTool: tool as never, alias: '', order: 0 },
+    ]);
+    expect(
+      db.prepare('SELECT selected_agents FROM worktrees WHERE id = ?').get(id)
+    ).toEqual({ selected_agents: null });
+  }
+
+  it('leaves selectedAgents on the layer below for a worktree with agent_instances', () => {
+    setDefaultSelectedAgents(db, ['gemini', 'claude']);
+    giveRoster(DECLARED, 'codex');
+
+    expect(getWorktreeById(db, DECLARED)?.selectedAgents).toEqual(['gemini', 'claude']);
+
+    const byId = new Map(getWorktrees(db).map((w) => [w.id, w.selectedAgents]));
+    expect(byId.get(DECLARED)).toEqual(['gemini', 'claude']);
+    // Same repository, same call, no roster: the declaration still applies.
+    expect(byId.get(SIBLING)).toEqual(['opencode', 'codex']);
+  });
+
+  it('falls all the way to the constant when nothing is stored either', () => {
+    giveRoster(DECLARED, 'codex');
+
+    expect(getWorktreeById(db, DECLARED)?.selectedAgents).toEqual(DEFAULT_SELECTED_AGENTS);
+    expect(getWorktrees(db).find((w) => w.id === DECLARED)?.selectedAgents)
+      .toEqual(DEFAULT_SELECTED_AGENTS);
+  });
+
+  /**
+   * The concrete regression: the agent actually running in this worktree must
+   * stay in the list /sessions reads, and the declared agents must not appear.
+   */
+  it('keeps the running agent in selectedAgents rather than the declared ones', () => {
+    giveRoster(DECLARED, 'codex');
+    setDefaultSelectedAgents(db, ['codex', 'claude']);
+
+    const agents = getWorktrees(db).find((w) => w.id === DECLARED)?.selectedAgents ?? [];
+    expect(agents).toContain('codex');
+    expect(agents).not.toContain('opencode');
+  });
+
+  it('still lets the worktree own column win over everything', () => {
+    seedWorktree('wt-own-and-roster', declaringRepo, ['copilot', 'claude']);
+    setAgentInstances(db, 'wt-own-and-roster', [
+      { id: 'codex', cliTool: 'codex', alias: '', order: 0 },
+    ]);
+
+    expect(getWorktreeById(db, 'wt-own-and-roster')?.selectedAgents)
+      .toEqual(['copilot', 'claude']);
+  });
+
+  /**
+   * The withholding must not cost a query per row, and must cost nothing at all
+   * on an install where no repository declares anything — which is every
+   * install that has not adopted the feature.
+   */
+  it('probes the roster once per list, and not at all when nothing is declared', () => {
+    for (let i = 0; i < 5; i++) seedWorktree(`wt-more-${i}`, declaringRepo);
+
+    const realPrepare = db.prepare.bind(db);
+    let rosterProbes = 0;
+    db.prepare = ((sql: string) => {
+      if (sql.includes('agent_instances')) rosterProbes++;
+      return realPrepare(sql);
+    }) as typeof db.prepare;
+
+    try {
+      getWorktrees(db);
+      expect(rosterProbes).toBe(1);
+
+      // Remove the declaration: the probe is not needed and must not be made.
+      rosterProbes = 0;
+      declare(declaringRepo, '# nothing declared here\n');
+      clearRepoAgentsConfigCache();
+      getWorktrees(db);
+      expect(rosterProbes).toBe(0);
+
+      // Same for the single-row read.
+      rosterProbes = 0;
+      getWorktreeById(db, DECLARED);
+      expect(rosterProbes).toBe(0);
+    } finally {
+      db.prepare = realPrepare;
+    }
   });
 });

@@ -15,19 +15,17 @@
  * the early return below is still the first thing that happens, and it is what
  * makes "a worktree with a roster never moves" true of #2066 as well.
  *
- * Issue #2066 adds the repository layer. In practice every production caller
- * hands in `worktree.selectedAgents` from `getWorktreeById` / `getWorktrees`,
- * which have ALREADY resolved the repository file into that value, so the
- * `repositoryPath` argument is the seam rather than the main road: it exists so
- * that a caller which has no `selectedAgents` to offer (`PATCH
- * /api/worktrees/[id]` passes `updatedWorktree?.selectedAgents`, which is
- * `undefined` when the row is gone) can still be answered from the repository's
- * declaration instead of skipping straight to `app_settings`.
+ * Issue #2066 (the repository layer) deliberately changed NOTHING here. Every
+ * caller hands in `worktree.selectedAgents` from `getWorktreeById` /
+ * `getWorktrees`, and those two are where `.commandmate/agents.yaml` enters —
+ * including the rule that a worktree which already owns a roster is not offered
+ * the declaration at all. Adding a `repositoryPath` argument here would have
+ * been a second entry point that no production call site passes, so the layer
+ * lives in exactly one place: `src/lib/db/worktree-db.ts`.
  */
 import type Database from 'better-sqlite3';
 import { getAgentInstances } from '@/lib/db';
 import { getDefaultSelectedAgents } from '@/lib/db/app-settings-db';
-import { getRepoDefaultSelectedAgents } from '@/lib/repo-config/agents-config';
 import { resolveSelectedAgents } from '@/lib/selected-agents-validator';
 import {
   agentInstancesFromSelectedAgents,
@@ -40,17 +38,16 @@ import {
  *
  * @param db - Database instance
  * @param worktreeId - Worktree ID
- * @param selectedAgents - Worktree's selected agents (highest-priority layer)
- * @param repositoryPath - Repository root, when the caller knows it; omitted by
- *   callers whose `selectedAgents` already carries the repository layer
+ * @param selectedAgents - Worktree's selected agents, already resolved by
+ *   `getWorktrees` / `getWorktreeById` (which is where the repository layer is
+ *   applied); `undefined` when the caller has none to offer
  * @returns Stored instances when present, otherwise primaries derived from the
- *   first layer that answers: worktree -> repo file -> app_settings -> constant
+ *   first layer that answers: worktree -> app_settings -> constant
  */
 export function resolveAgentInstances(
   db: Database.Database,
   worktreeId: string,
   selectedAgents: CLIToolType[] | undefined,
-  repositoryPath?: string | null,
 ): AgentInstance[] {
   const stored = getAgentInstances(db, worktreeId);
   if (stored.length > 0) {
@@ -59,7 +56,6 @@ export function resolveAgentInstances(
   return agentInstancesFromSelectedAgents(
     resolveSelectedAgents({
       worktree: selectedAgents,
-      repo: getRepoDefaultSelectedAgents(repositoryPath),
       appSettings: getDefaultSelectedAgents(db),
     }),
   );

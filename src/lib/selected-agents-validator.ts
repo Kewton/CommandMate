@@ -65,11 +65,15 @@ export function validateAgentsPair(input: unknown[]): {
  * it a value.
  *
  * Issue #2066 filled `repo` in, exactly as that comment foresaw: by supplying a
- * value at the call sites (`getWorktrees` / `getWorktreeById` /
- * `resolveAgentInstances`, each from `getRepoDefaultSelectedAgents()` in
- * `@/lib/repo-config/agents-config`), and NOT by re-deriving an order. This
- * array is still the only place the order is written down, and the function
- * below is unchanged.
+ * value at the call sites, and NOT by re-deriving an order. This array is still
+ * the only place the order is written down, and the function below is unchanged.
+ *
+ * There are exactly TWO such call sites, both in `@/lib/db/worktree-db`:
+ * `getWorktrees()` and `getWorktreeById()`, each reading
+ * `getRepoDefaultSelectedAgents()` from `@/lib/repo-config/agents-config`.
+ * `resolveAgentInstances()` is NOT one of them — it receives the already
+ * resolved value as its `selectedAgents` argument, and giving it a second entry
+ * point would have been an argument no production caller passes.
  *
  * A layer whose value is absent, malformed, or fails `validateAgentsPair()` is
  * skipped rather than fatal: a hand-edited `app_settings` row must not be able
