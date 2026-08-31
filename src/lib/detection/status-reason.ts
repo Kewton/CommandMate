@@ -55,6 +55,23 @@ export const STATUS_REASON = {
   INPUT_PROMPT: 'input_prompt',
   NO_RECENT_OUTPUT: 'no_recent_output',
   /**
+   * Issue #2070: the tmux session is there, and the TOOL is not.
+   *
+   * Published by `worktree-status-helper` when the liveness probe reads a bare
+   * shell prompt at the bottom of a pane whose agent quit, updated itself or
+   * crashed (`judgeToolLiveness`). It is the ONE reason on this list that
+   * accompanies `isRunning: false` — every other one describes a frame a live
+   * agent drew — which is exactly why it is worth a token of its own: without
+   * it the sidebar and `commandmate ls` render such a session as plain `idle`,
+   * indistinguishable from one that was never started, and the operator has no
+   * way to tell "start it" from "it died under you".
+   *
+   * ADDITIVE, in the strict sense: no existing reason's value or meaning
+   * changes, and no surface that does not know the token behaves differently —
+   * a reader that does not recognise it sees the same `idle` it saw before.
+   */
+  EXITED: 'exited',
+  /**
    * A tool's own detector looked at this frame and recognised nothing
    * (Issue #1927, §6.1).
    *

@@ -23,6 +23,14 @@
  * every control is a button with a persistent label, so the pane behaves the
  * same under a finger as under a pointer.
  *
+ * Issue #2061 puts an onboarding block at the top. The pane used to say nothing
+ * at all about `.commandmate/verify.yaml` — it did not read it — so a repository
+ * that had never declared a gate looked exactly like one that had simply never
+ * been verified, and pressing Re-verify answered with an English sentence
+ * buried in a failed run's `config` gate. The block resolves that into four
+ * states with four different next moves; see {@link resolveVerificationPhase}
+ * for the precedence and why.
+ *
  * @module components/worktree/VerificationPane
  */
 
@@ -30,7 +38,7 @@
 
 import React, { memo, useCallback, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { RefreshCw, ShieldCheck } from 'lucide-react';
+import { ExternalLink, RefreshCw, ShieldCheck } from 'lucide-react';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import {
@@ -43,9 +51,13 @@ import {
 } from '@/config/verification-display';
 import {
   MAX_DISPLAYED_LOG_TAIL_LINES,
+  VERIFY_CONFIG_DOC_URL,
+  VERIFY_CONFIG_RELATIVE_PATH,
   type TaskView,
   type VerificationGateResultView,
   type VerificationRunListItem,
+  type VerifyConfigGateView,
+  type VerifyConfigResponse,
 } from '@/lib/api/verification-api';
 import type { WorktreeVerificationState } from '@/hooks/useWorktreeVerification';
 
@@ -154,6 +166,269 @@ function ContractSummary({ task }: { task: TaskView }) {
         <Field label={t('verification.contract.updated')}>{formatTimestamp(task.updatedAt)}</Field>
       </div>
     </div>
+  );
+}
+
+/**
+ * Elapsed wall-clock for the run in flight.
+ *
+ * Not {@link formatGateDuration}: that formats a *gate's* measured duration and
+ * rounds anything over ten seconds to whole seconds, so a five-minute run reads
+ * `312s`. A run is the thing a human is waiting on, so it is spelled the way a
+ * stopwatch does.
+ */
+export function formatElapsed(ms: number): string {
+  const seconds = Math.max(0, Math.floor(ms / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}m ${String(seconds % 60).padStart(2, '0')}s`;
+}
+
+/**
+ * The gates a run adds on top of the declared ones (`work-evidence`, `scope`,
+ * and `env-clean` when a declaration switched it on).
+ *
+ * Subtracted from the server's `plannedGateIds` rather than listed here: the
+ * composition is the runner's, it is conditional, and a copy in the browser
+ * would be a second answer to "what actually runs" that nothing keeps in step.
+ */
+function builtinGateIds(config: VerifyConfigResponse | null): string[] {
+  if (config === null) return [];
+  const declared = new Set(config.gates.map((gate) => gate.id));
+  return config.plannedGateIds.filter((id) => !declared.has(id));
+}
+
+/** One declared gate, as `verify.yaml` spells it. */
+function DeclaredGateRow({ gate }: { gate: VerifyConfigGateView }) {
+  return (
+    <li
+      className="flex flex-col gap-0.5 rounded-md border border-border bg-surface px-2 py-1.5"
+      data-testid={`verification-declared-gate-${gate.id}`}
+    >
+      <span className="break-all font-mono text-xs font-medium text-foreground">{gate.id}</span>
+      <span className="break-all font-mono text-[11px] text-muted-foreground">{gate.command}</span>
+    </li>
+  );
+}
+
+/** Small paragraph used throughout the onboarding block. */
+function Note({
+  children,
+  testId,
+  tone = 'muted',
+}: {
+  children: React.ReactNode;
+  testId?: string;
+  tone?: 'muted' | 'warning';
+}) {
+  const className =
+    tone === 'warning'
+      ? 'rounded border border-warning-border bg-warning-subtle px-2 py-1 text-xs text-warning-foreground'
+      : 'text-xs text-muted-foreground';
+  return (
+    <p
+      className={`whitespace-pre-line break-words ${className}`}
+      data-testid={testId}
+      role={tone === 'warning' ? 'alert' : undefined}
+    >
+      {children}
+    </p>
+  );
+}
+
+/**
+ * The pane's first block: what verification is, and what to do next here
+ * (Issue #2061).
+ *
+ * `data-phase` is on the section rather than only implied by which testid is
+ * present, because "these four states render differently" is the acceptance
+ * criterion and an attribute is the one place a snapshot can read the pane's
+ * own answer instead of a tester's inference.
+ */
+function OnboardingSection({ state }: { state: WorktreeVerificationState }) {
+  const t = useTranslations('worktree');
+  const { config, configError, phase, runs, selectedRun, latestRun } = state;
+  const path = config?.path ?? VERIFY_CONFIG_RELATIVE_PATH;
+
+  const handleDraft = useCallback(() => {
+    void state.draftConfig();
+  }, [state]);
+  const handleRun = useCallback(() => {
+    void state.rerun();
+  }, [state]);
+  const handleShowLatest = useCallback(() => {
+    if (latestRun) state.selectRun(latestRun.id);
+  }, [latestRun, state]);
+
+  const runningRun = runs.find((run) => run.status === 'running') ?? null;
+  // Gate rows are created as each gate starts, so the run's own list is the
+  // numerator; the denominator has to come from the config, which knows how
+  // many gates a default run will execute. `Math.max` keeps the total honest if
+  // a task contract added gates the file does not declare (#1791).
+  const recorded = selectedRun && runningRun && selectedRun.id === runningRun.id
+    ? selectedRun.gates
+    : [];
+  const done = recorded.filter((gate) => gate.status !== 'running').length;
+  const total = Math.max(config?.plannedGateIds.length ?? 0, recorded.length);
+  const elapsedMs = runningRun ? Date.now() - new Date(runningRun.startedAt).getTime() : 0;
+
+  return (
+    <section
+      className="space-y-2 border-b border-border px-3 py-3"
+      data-testid="verification-onboarding"
+      data-phase={phase}
+    >
+      <Note testId="verification-onboarding-what">{t('verification.onboarding.what', { path })}</Note>
+      <Note testId="verification-onboarding-how">{t('verification.onboarding.how')}</Note>
+
+      {configError !== null && (
+        <Note tone="warning" testId="verification-config-error">
+          {t('verification.onboarding.configError', { message: configError })}
+        </Note>
+      )}
+      {config?.error != null && (
+        <Note tone="warning" testId="verification-config-invalid">
+          {t('verification.onboarding.invalid', { path, message: config.error })}
+        </Note>
+      )}
+
+      {phase === 'unknown' && (
+        <Note testId="verification-onboarding-unknown">{t('verification.onboarding.loading')}</Note>
+      )}
+
+      {phase === 'no-config' && (
+        <div className="space-y-2" data-testid="verification-onboarding-no-config">
+          <Note>{t('verification.onboarding.noConfig.body', { path })}</Note>
+          <Note>{t('verification.onboarding.noConfig.hint')}</Note>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="primary"
+              onClick={handleDraft}
+              disabled={state.draftPending}
+              data-testid="verification-draft-button"
+            >
+              {state.draftPending
+                ? t('verification.onboarding.noConfig.pending')
+                : t('verification.onboarding.noConfig.action')}
+            </Button>
+            <a
+              href={VERIFY_CONFIG_DOC_URL}
+              target="_blank"
+              rel="noreferrer noopener"
+              data-testid="verification-docs-link"
+              className="inline-flex items-center gap-1 rounded text-xs font-medium text-accent-600 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:text-accent-400 touch-manipulation"
+            >
+              {t('verification.onboarding.noConfig.docs')}
+              <ExternalLink size={12} aria-hidden="true" />
+            </a>
+          </div>
+          {state.draftFailure && (
+            <Note tone="warning" testId="verification-draft-failure">
+              {state.draftFailure.kind === 'conflict'
+                ? t('verification.onboarding.noConfig.conflict', { path })
+                : state.draftFailure.kind === 'empty'
+                  ? t('verification.onboarding.noConfig.empty', { path })
+                  : t('verification.onboarding.noConfig.error', {
+                      message: state.draftFailure.message,
+                    })}
+            </Note>
+          )}
+        </div>
+      )}
+
+      {phase === 'configured' && (
+        <div className="space-y-2" data-testid="verification-onboarding-configured">
+          <Note>
+            {t('verification.onboarding.configured.body', {
+              path,
+              count: config?.gates.length ?? 0,
+            })}
+          </Note>
+          {state.draftResult?.created && (
+            <Note testId="verification-draft-created">
+              {t('verification.onboarding.noConfig.created', {
+                path: state.draftResult.path,
+                count: state.draftResult.gates.length,
+              })}
+            </Note>
+          )}
+          <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            {t('verification.onboarding.configured.gatesHeading')}
+          </h4>
+          <ul className="space-y-1" data-testid="verification-declared-gates">
+            {(config?.gates ?? []).map((gate) => (
+              <DeclaredGateRow key={gate.id} gate={gate} />
+            ))}
+          </ul>
+          <Note testId="verification-builtin-gates">
+            {t('verification.onboarding.configured.builtin', {
+              gates: builtinGateIds(config).join(', '),
+            })}
+          </Note>
+          <Button
+            type="button"
+            size="sm"
+            variant="primary"
+            onClick={handleRun}
+            disabled={state.rerunPending}
+            data-testid="verification-run-button"
+          >
+            {state.rerunPending
+              ? t('verification.runs.rerunPending')
+              : t('verification.onboarding.configured.action')}
+          </Button>
+        </div>
+      )}
+
+      {phase === 'running' && runningRun !== null && (
+        <div className="space-y-1" data-testid="verification-onboarding-running">
+          <Note testId="verification-running-progress">
+            {t('verification.onboarding.running.progress', { done, total })}
+          </Note>
+          <Note testId="verification-running-elapsed">
+            {t('verification.onboarding.running.elapsed', { elapsed: formatElapsed(elapsedMs) })}
+          </Note>
+          <Note>{t('verification.onboarding.running.hint')}</Note>
+          {/*
+            A labelled Refresh, not a Cancel: cancelling a run is Issue #2063's
+            surface. What this state can offer today is "stop waiting for the
+            poll tick", which the header's icon-only button also does — but the
+            operator watching a progress line should not have to know that.
+          */}
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            onClick={state.refresh}
+            data-testid="verification-running-refresh-button"
+          >
+            {t('verification.onboarding.running.action')}
+          </Button>
+        </div>
+      )}
+
+      {phase === 'result' && latestRun !== null && (
+        <div className="space-y-2" data-testid="verification-onboarding-result">
+          <Note testId="verification-result-body">
+            {t('verification.onboarding.result.body', {
+              runId: latestRun.id,
+              verdict: t(`verification.runStatus.${latestRun.status}`),
+            })}
+          </Note>
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            onClick={handleShowLatest}
+            data-testid="verification-show-latest-button"
+          >
+            {t('verification.onboarding.result.action')}
+          </Button>
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -283,6 +558,7 @@ export const VerificationPane = memo(function VerificationPane({
 }: VerificationPaneProps) {
   const t = useTranslations('worktree');
   const {
+    worktreeId,
     task,
     runs,
     selectedRunId,
@@ -342,6 +618,8 @@ export const VerificationPane = memo(function VerificationPane({
         </p>
       ) : (
         <>
+          <OnboardingSection state={state} />
+
           <Section heading={t('verification.contract.heading')} testId="verification-contract-section">
             {task ? (
               <ContractSummary task={task} />
@@ -389,7 +667,7 @@ export const VerificationPane = memo(function VerificationPane({
                 className="whitespace-pre-line text-xs text-muted-foreground"
                 data-testid="verification-runs-empty"
               >
-                {t('verification.runs.empty')}
+                {t('verification.runs.empty', { worktreeId })}
               </p>
             ) : (
               <ul className="space-y-1" data-testid="verification-runs">

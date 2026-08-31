@@ -147,3 +147,18 @@ export const CLAUDE_ENV_SANITIZE_WAIT_MS = 100;
  * Site: claude-session restartClaudeSession().
  */
 export const CLAUDE_RESTART_DELAY_MS = 1000;
+
+/**
+ * Wait (ms) between the two liveness readings that must agree before a reuse
+ * path re-sends a launch command (Issue #2070).
+ *
+ * There is a real window in which a pane shows a bare shell and nothing is
+ * wrong: between `createSession` and the launch line landing. Measured on the
+ * five tools this Issue captured (2026-08-31, private socket, 200x1000), the
+ * shell frame is the whole pane for 0.4-0.8 s after `new-session` and the
+ * tool's first paint follows within 1.3 s. One second between readings puts the
+ * second one past that paint, so a booting session is never mistaken for a dead
+ * one — the mistake that would type a launch command into a live composer.
+ * Site: BaseCLITool.isToolLive({ confirm: true }).
+ */
+export const LIVENESS_CONFIRM_DELAY_MS = 1000;

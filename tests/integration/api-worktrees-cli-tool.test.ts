@@ -13,8 +13,8 @@ import type { Worktree } from '@/types/models';
 
 // Issue #405/#875: the worktrees route no longer calls cliTool.isRunning().
 // Session-running status is derived from the batched tmux session list
-// (listSessions) plus, for claude, a health check (isSessionHealthy). Tests
-// drive those layers instead. Session name format is `mcbd-{cliToolId}-{worktreeId}`.
+// (listSessions) plus a per-tool liveness probe. Tests drive those layers
+// instead. Session name format is `mcbd-{cliToolId}-{worktreeId}`.
 const mockListSessions = vi.fn(
   (): Promise<Array<{ name: string; windows: number; attached: boolean }>> => Promise.resolve([])
 );
@@ -23,11 +23,12 @@ vi.mock('@/lib/tmux/tmux', async (importOriginal) => ({
   listSessions: () => mockListSessions(),
 }));
 
-// Claude's presence is gated by a health check; force healthy so a listed
-// claude session counts as running.
-vi.mock('@/lib/session/claude-session', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/lib/session/claude-session')>()),
-  isSessionHealthy: vi.fn(() => Promise.resolve({ healthy: true })),
+// Issue #2070: EVERY tool's presence is now gated on a liveness probe, not just
+// claude's (that `cliToolId === 'claude'` branch is the bug the Issue fixes).
+// Force it alive so a listed session counts as running.
+vi.mock('@/lib/cli-tools/session-liveness', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/cli-tools/session-liveness')>()),
+  probeToolSessionLiveness: vi.fn(() => Promise.resolve({ alive: true })),
 }));
 
 // Avoid real tmux capture for running sessions; status detection (waiting/

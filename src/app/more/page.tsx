@@ -4,6 +4,11 @@
  * Issue #600: UX refresh - Settings, External Apps, Help, Auth.
  * Contains ExternalAppsManager moved from Home page.
  * On mobile, Repositories is accessible from here.
+ *
+ * Issue #2065 adds the Settings section, and it goes ABOVE Notifications: it is
+ * the first setting that changes what a *new* branch looks like, so it belongs
+ * next to the quick links a user follows to create one, not below the
+ * per-device notification plumbing.
  */
 
 'use client';
@@ -14,6 +19,7 @@ import { AppShell } from '@/components/layout';
 import { Card } from '@/components/ui';
 import { ExternalAppsManager } from '@/components/external-apps';
 import { NotificationsSettings } from '@/components/notifications';
+import { DefaultAgentsSettings } from '@/components/settings';
 
 export default function MorePage() {
   const tNotifications = useTranslations('notifications');
@@ -56,6 +62,12 @@ export default function MorePage() {
               </Card>
             </Link>
           </div>
+        </div>
+
+        {/* Settings (Issue #2065) */}
+        <div className="mb-8">
+          <h2 className="text-lg font-semibold mb-4 text-foreground">{tCommon('settings.title')}</h2>
+          <DefaultAgentsSettings />
         </div>
 
         {/* Notifications */}

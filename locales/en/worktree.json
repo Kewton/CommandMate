@@ -928,6 +928,40 @@
     "refresh": "Refresh",
     "loading": "Loading verification data…",
     "loadError": "Could not load verification data: {message}",
+    "onboarding": {
+      "what": "Verification runs the gates this repository declares in `{path}`, in this worktree, exactly as written.",
+      "how": "Each gate's exit code decides the verdict. They are the same gates `commandmate verify` and `wait --verify` use, so green here means green there.",
+      "loading": "Reading the declared gates…",
+      "configError": "Could not read the verification config: {message}",
+      "invalid": "`{path}` exists but could not be read: {message}",
+      "noConfig": {
+        "body": "This repository has not declared any verification gates yet — `{path}` does not exist, so there is nothing to run.",
+        "hint": "Reads this repository's `.github/workflows/*.yml` and `package.json` scripts and writes a draft. An existing file is never overwritten. `commandmate verify init` does the same thing.",
+        "action": "Draft from CI",
+        "pending": "Drafting…",
+        "docs": "How to write verify.yaml (design doc)",
+        "created": "Drafted {count} gates into `{path}`. Review them before relying on the verdict.",
+        "conflict": "`{path}` already exists. Nothing was overwritten; the file that is there is shown instead.",
+        "empty": "Nothing in this repository's CI definitions or npm scripts could be drafted as a gate. Write `{path}` by hand.",
+        "error": "Could not draft the verification config: {message}"
+      },
+      "configured": {
+        "body": "{count} gates are declared in `{path}`. None has run on this branch yet.",
+        "gatesHeading": "Declared gates",
+        "builtin": "The built-in gates run alongside them: {gates}",
+        "action": "Run verification"
+      },
+      "running": {
+        "progress": "Running: {done} of {total} gates have finished.",
+        "elapsed": "Elapsed {elapsed}",
+        "action": "Refresh now",
+        "hint": "Gates run one at a time; each appears in the list below as it finishes."
+      },
+      "result": {
+        "body": "The last run on this branch, #{runId}, is RESULT {verdict}.",
+        "action": "Show the latest run's gates"
+      }
+    },
     "contract": {
       "heading": "Execution contract",
       "empty": "No contract on this branch.\nCreate one with `commandmate send --contract <file>`, or the `cmate-task-contract` Skill.",
@@ -942,7 +976,7 @@
     },
     "runs": {
       "heading": "Verification runs",
-      "empty": "No verification run yet.\nPress Re-verify, or run `commandmate verify <worktree-id>`.",
+      "empty": "No verification run yet.\nPress Re-verify, or run `commandmate verify {worktreeId}`.",
       "rerun": "Re-verify",
       "rerunPending": "Starting…",
       "rerunConflict": "A verification run is already in progress (run {runId}).",

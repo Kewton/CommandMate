@@ -7,20 +7,32 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import type { ICLITool, CLIToolType } from './types';
 import { resolveSessionName } from './session-name';
-import { reconcileSessionGeometry, sendSpecialKey, type SessionGeometryOptions } from '../tmux/tmux';
+import {
+  getSessionWorkingDirectory,
+  reconcileSessionGeometry,
+  sendSpecialKey,
+  type SessionGeometryOptions,
+} from '../tmux/tmux';
 import { resolveComposerSpec } from './composer-spec';
 import { resolveCaptureSpec } from './capture-spec';
 import { resolveGracefulExitSpec } from './graceful-exit';
+import { resolveLivenessSpec } from './liveness-spec';
+import { probeSessionLiveness } from './session-liveness';
 import { reportSessionStartFailure } from './start-availability';
+import { createLogger } from '../logger';
 import type {
   CaptureSpec,
   ComposerSpec,
   GracefulExitSpec,
   NavigationKeySpec,
+  ToolLivenessSpec,
 } from '../../types/cli-tool-contracts';
 import { NAVIGATION_KEY_VALUES } from '../../types/terminal-keys';
+import { LIVENESS_CONFIRM_DELAY_MS } from '../../config/cli-tool-timing-config';
 
 const execAsync = promisify(exec);
+
+const logger = createLogger('cli-tools/base');
 
 /**
  * Abstract base class for CLI tools
@@ -206,6 +218,138 @@ export abstract class BaseCLITool implements ICLITool {
    */
   captureSpec(): CaptureSpec {
     return resolveCaptureSpec(this.id);
+  }
+
+  /**
+   * Describe how this tool's pane is read for "did the TOOL exit?"
+   * (Issue #2070).
+   *
+   * Answered from `./liveness-spec`, the §4 D4 shape every other `describe…` /
+   * `…Spec` method on this class takes. A tool overrides it only if its pane
+   * needs a rule the table cannot express.
+   *
+   * @returns This tool's {@link ToolLivenessSpec}
+   */
+  livenessSpec(): ToolLivenessSpec {
+    return resolveLivenessSpec(this.id);
+  }
+
+  /**
+   * Whether this tool is still the thing drawing `sessionName`'s pane
+   * (Issue #2070).
+   *
+   * Two callers. The reuse branch of every `launchSession`, where a `false`
+   * means the launch command has to be re-sent into the pane instead of the
+   * branch returning as if nothing were wrong; and
+   * {@link relaunchIfToolExited}, which is how a `sendMessage` finds out that
+   * there is nothing to type into. Deliberately NOT `isRunning` — see that
+   * method's docblock for the three callers that read `isRunning` as "does the
+   * pane exist?".
+   *
+   * ## Why the reuse branch confirms twice
+   *
+   * `confirm: true` re-reads the pane after {@link LIVENESS_CONFIRM_DELAY_MS}
+   * and requires BOTH readings to say the tool is gone. There is a window in
+   * which a pane legitimately shows a bare shell and nothing else: between
+   * `createSession` and the launch line landing, i.e. exactly when a second
+   * `startSession` for the same worktree can arrive. One reading cannot tell
+   * that window from a dead session, and getting it wrong types a launch
+   * command into a live agent's composer. Two readings a second apart can: a
+   * booting pane has painted by the second one.
+   *
+   * The status poll (`worktree-status-helper`) does NOT confirm — it publishes a
+   * dot, and a dot that is briefly wrong during a launch is the pre-existing
+   * behaviour of claude's own health check. Nothing is relaunched off it.
+   *
+   * @param sessionName - tmux session name
+   * @param options.confirm - Re-read once before returning false
+   * @returns True when the tool is (or may still be) there
+   */
+  protected async isToolLive(
+    sessionName: string,
+    options?: { confirm?: boolean }
+  ): Promise<boolean> {
+    const spec = this.livenessSpec();
+    const first = await probeSessionLiveness(sessionName, spec);
+    if (first.alive) return true;
+    if (!options?.confirm) return false;
+
+    await new Promise((resolve) => setTimeout(resolve, LIVENESS_CONFIRM_DELAY_MS));
+    const second = await probeSessionLiveness(sessionName, spec);
+    if (second.alive) {
+      logger.info('session:liveness-confirm-recovered', {
+        cliToolId: this.id,
+        firstReason: first.reason,
+      });
+      return true;
+    }
+    logger.warn('session:tool-exited', { cliToolId: this.id, reason: second.reason });
+    return false;
+  }
+
+  /**
+   * Relaunch this tool if its pane has fallen back to the shell, so the send
+   * about to happen has an agent to reach (Issue #2070).
+   *
+   * ## Why this is in `sendMessage` and not in `isRunning`
+   *
+   * `isRunning` is the natural place — it is what `POST .../send` consults
+   * before deciding to start a session, and `isClaudeRunning` has folded a
+   * health check into it since MF-S3-001. Measured against the callers, though,
+   * `isRunning` is load-bearing as **"does the pane exist?"** for three of them,
+   * and narrowing it would break all three:
+   *
+   *   - `POST .../terminal` calls it and says so in a comment — "the ICLITool
+   *     spelling of the `hasSession` check this used to make directly". A false
+   *     there 404s the terminal view for the very pane the operator wants to
+   *     look at to see what happened;
+   *   - `POST .../kill-session` skips any target whose `isRunning` is false, so
+   *     Stop would silently do nothing on a dead-tool pane;
+   *   - `killWorktreeSession` (repository delete / sync cleanup) does the same,
+   *     leaking the tmux session.
+   *
+   * (All three are already true of claude, and have been since MF-S3-001. This
+   * Issue does not make them worse; a widened `isRunning` would have made them
+   * seven times as likely to be hit. Giving `ICLITool` a separate
+   * "does the pane exist?" verb and moving those three onto it is the right
+   * repair, and it is a change to `src/app/api/**` and `src/lib/session-cleanup.ts`,
+   * which is a different Issue's diff.)
+   *
+   * So the recovery hangs off the send instead, where the question really is
+   * "is there an agent to type into?" — and it reuses {@link startSession}, so
+   * the relaunch is the same one the explicit start path takes, including the
+   * two-reading confirmation and the event-generation fence.
+   *
+   * Fails open in every branch: a live tool costs one `capture-pane`, and a
+   * pane whose directory tmux cannot report falls through to the pre-#2070
+   * behaviour (the send proceeds and the tool's own readiness wait reports the
+   * failure). A tool that IS gone pays the confirmation delay once, inside
+   * `launchSession`.
+   *
+   * @param worktreeId - Worktree ID
+   * @param instanceId - Agent instance ID (defaults to the primary instance)
+   */
+  protected async relaunchIfToolExited(worktreeId: string, instanceId?: string): Promise<void> {
+    const sessionName = this.getSessionName(worktreeId, instanceId);
+    // One reading, not two. This is a cheap filter, not the decision: the
+    // authoritative gate is the confirmed check inside `launchSession`'s reuse
+    // branch, which runs a moment later and refuses to relaunch a pane that has
+    // painted in between. Confirming here as well would put two seconds in front
+    // of every recovery and buy nothing.
+    if (await this.isToolLive(sessionName)) return;
+
+    // The pane's own directory, not the worktree row's. `sendMessage` is not
+    // given a path, and asking tmux is both simpler than a DB lookup and more
+    // truthful: it is the directory the relaunched agent will actually run in,
+    // whatever the database now says about a worktree that may have moved.
+    const worktreePath = await getSessionWorkingDirectory(sessionName);
+    if (worktreePath === null) {
+      logger.warn('session:relaunch-skipped-no-path', { cliToolId: this.id, worktreeId });
+      return;
+    }
+
+    logger.info('session:relaunch-before-send', { cliToolId: this.id, sessionName });
+    await this.startSession(worktreeId, worktreePath, instanceId);
   }
 
   /**

@@ -314,6 +314,15 @@ export interface VerifyShowOptions {
   token?: string;
 }
 
+/** verify init subcommand options [Issue #2061] */
+export interface VerifyInitOptions {
+  /** Repository to draft for; defaults to the current directory. */
+  cwd?: string;
+  /** Print the proposal on stdout and write nothing. */
+  dryRun?: boolean;
+  json?: boolean;
+}
+
 /** ls command options [Issue #518] */
 export interface LsOptions {
   json?: boolean;

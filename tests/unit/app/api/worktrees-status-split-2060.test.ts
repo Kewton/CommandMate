@@ -110,11 +110,18 @@ describe('[#2060] default call: unchanged', () => {
     }
   });
 
-  it('keeps the top-level body shape to exactly { worktrees, repositories }', async () => {
-    // `statusIncluded` is deliberately NOT emitted here: an unconditional new
-    // key would change the response of a call no consumer has opted into.
+  it('keeps the top-level body shape to exactly { worktrees, repositories, defaultSelectedAgents }', async () => {
+    // `statusIncluded` is deliberately NOT emitted here: it describes what THIS
+    // call opted out of, so emitting it unconditionally would change the answer
+    // for callers that opted into nothing. `defaultSelectedAgents` (Issue #2065)
+    // is the opposite case and is unconditional: it is the same value for every
+    // caller and describes the server, not the request.
     const { body } = await get();
-    expect(Object.keys(body).sort()).toEqual(['repositories', 'worktrees']);
+    expect(Object.keys(body).sort()).toEqual([
+      'defaultSelectedAgents',
+      'repositories',
+      'worktrees',
+    ]);
     expect(body.repositories).toEqual(mockRepositories);
   });
 
@@ -126,7 +133,11 @@ describe('[#2060] default call: unchanged', () => {
 
   it('is unchanged by a query string that says nothing about status', async () => {
     const { body } = await get('?repository=/tmp/repo-1');
-    expect(Object.keys(body).sort()).toEqual(['repositories', 'worktrees']);
+    expect(Object.keys(body).sort()).toEqual([
+      'defaultSelectedAgents',
+      'repositories',
+      'worktrees',
+    ]);
     expect(detectWorktreeSessionStatus).toHaveBeenCalledTimes(2);
   });
 });

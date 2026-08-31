@@ -35,8 +35,11 @@ vi.mock('@/lib/session/cli-session', () => ({
   captureSessionOutput: vi.fn().mockResolvedValue(''),
 }));
 
-vi.mock('@/lib/session/claude-session', () => ({
-  isSessionHealthy: vi.fn().mockResolvedValue({ healthy: true }),
+// Issue #2070: the health check is no longer claude's and no longer reached
+// through `claude-session`. Every running session is probed through
+// `probeToolSessionLiveness`, which is what `healthCheckCount` now counts.
+vi.mock('@/lib/cli-tools/session-liveness', () => ({
+  probeToolSessionLiveness: vi.fn().mockResolvedValue({ alive: true }),
 }));
 
 vi.mock('@/lib/cli-tools/opencode', () => ({ OPENCODE_PANE_HEIGHT: 200 }));
@@ -55,7 +58,7 @@ import {
   detectWorktreeSessionStatus,
 } from '@/lib/session/worktree-status-helper';
 import { captureSessionOutput } from '@/lib/session/cli-session';
-import { isSessionHealthy } from '@/lib/session/claude-session';
+import { probeToolSessionLiveness } from '@/lib/cli-tools/session-liveness';
 import { CLI_TOOL_IDS } from '@/lib/cli-tools/types';
 
 const WT = 'wt-2060';
@@ -82,7 +85,7 @@ async function detect(sessionNames: string[]) {
 beforeEach(() => {
   roster = [];
   vi.mocked(captureSessionOutput).mockClear().mockResolvedValue('');
-  vi.mocked(isSessionHealthy).mockClear().mockResolvedValue({ healthy: true });
+  vi.mocked(probeToolSessionLiveness).mockClear().mockResolvedValue({ alive: true });
 });
 
 describe('[#2060] StatusDetectionMetrics', () => {
@@ -112,19 +115,24 @@ describe('[#2060] StatusDetectionMetrics', () => {
     expect(vi.mocked(captureSessionOutput).mock.calls).toHaveLength(3);
   });
 
-  it('counts the claude-only health check separately from the capture', async () => {
-    // A running claude session costs TWO tmux round-trips, not one: the health
-    // probe (`isSessionHealthy`, uncached) and then the status capture.
+  it('counts the liveness probe separately from the capture, for EVERY tool', async () => {
+    // A running session costs TWO tmux round-trips, not one: the liveness probe
+    // (uncached `capture-pane`) and then the status capture. Issue #2070: this
+    // used to be true of claude alone, because the probe was claude's alone —
+    // which is precisely why a dead codex kept its dot.
     const metrics = await detect([`claude-${WT}`, `codex-${WT}`]);
 
-    expect(metrics.healthCheckCount).toBe(1);
+    expect(metrics.healthCheckCount).toBe(2);
     expect(metrics.captureCount).toBe(2);
   });
 
-  it('does not capture for a claude session the health check condemned', async () => {
-    vi.mocked(isSessionHealthy).mockResolvedValue({ healthy: false, reason: 'empty output' });
+  it('does not capture for a session the liveness probe condemned', async () => {
+    vi.mocked(probeToolSessionLiveness).mockResolvedValue({
+      alive: false,
+      reason: 'shell prompt ending detected: host work %',
+    });
 
-    const metrics = await detect([`claude-${WT}`]);
+    const metrics = await detect([`codex-${WT}`]);
 
     expect(metrics.healthCheckCount).toBe(1);
     expect(metrics.captureCount).toBe(0);

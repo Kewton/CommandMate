@@ -301,6 +301,44 @@ describe('BranchListItem', () => {
       expect(indicator.getAttribute('aria-label')).toBe('Claude: running, Codex: idle');
       expect(indicator.getAttribute('title')).toBe('Claude: running, Codex: idle');
     });
+
+    // Issue #2070: an `idle` that means "its tmux session outlived its agent"
+    // must not read the same as an `idle` that means "nobody started it". The
+    // dot is unchanged — this is a sentence, not a colour.
+    it('annotates an instance whose agent exited, and only that one', () => {
+      render(
+        <BranchListItem
+          branch={{
+            ...defaultBranch,
+            cliStatus: { claude: 'running', codex: 'idle' },
+            exitedInstanceIds: ['codex'],
+          }}
+          isSelected={false}
+          onClick={() => {}}
+        />
+      );
+
+      const indicator = screen.getByTestId('status-indicator');
+      expect(indicator.getAttribute('aria-label')).toBe('Claude: running, Codex: idle (exited)');
+    });
+
+    it('leaves the breakdown untouched when nothing exited', () => {
+      render(
+        <BranchListItem
+          branch={{
+            ...defaultBranch,
+            cliStatus: { claude: 'running', codex: 'idle' },
+            exitedInstanceIds: [],
+          }}
+          isSelected={false}
+          onClick={() => {}}
+        />
+      );
+
+      expect(screen.getByTestId('status-indicator').getAttribute('aria-label')).toBe(
+        'Claude: running, Codex: idle'
+      );
+    });
   });
 
   describe('Unread indicator', () => {

@@ -109,6 +109,32 @@ export interface SessionWaitingDetail {
 }
 
 /**
+ * What the frame SAID, and how strongly (Issue #1926, extended by #2070).
+ *
+ * The server has published both fields inside `sessionStatusByCli` /
+ * `sessionStatusByInstance` since #1926 — `commandmate ls` prints the reason in
+ * its REASON column — but the client-side `Worktree` type never named them, so
+ * a browser surface could not read a value that was already on the wire.
+ *
+ * `sessionStatusReason` is a plain `string` rather than a union, exactly as it
+ * is in the CLI's mirror of this object: the detector's vocabulary grows, and a
+ * newer server naming a reason this build has never heard of must not be a
+ * parse error. Compare against `STATUS_REASON` where a specific token matters.
+ *
+ * Absent is ordinary: a server older than #1926 sends neither, a session that is
+ * not running had no frame to read, and an aggregate over two instances of one
+ * tool has no single reason (see `mergeSessionStatus` server-side).
+ * Issue #2070's `exited` is the one exception to the second of those — it is
+ * published precisely BECAUSE the session stopped running.
+ */
+export interface SessionStatusReadingDetail {
+  /** Whether the status rests on something positive, or on nothing matching. */
+  statusEvidence?: 'positive' | 'none';
+  /** The detector's reason token, e.g. `input_prompt` / `exited`. */
+  sessionStatusReason?: string;
+}
+
+/**
  * What is reading one agent pane besides the terminal frame (Issue #2054).
  *
  * Client mirror of `AgentEventSourceStatus` in `lib/hooks/sources/types.ts`.
@@ -193,7 +219,7 @@ export interface Worktree {
   /** Whether Claude is actively processing a request (last message from user) */
   isProcessing?: boolean;
   /** Session status per CLI tool */
-  sessionStatusByCli?: Partial<Record<CLIToolType, { isRunning: boolean; isWaitingForResponse: boolean; isProcessing: boolean } & SessionWaitingDetail>>;
+  sessionStatusByCli?: Partial<Record<CLIToolType, { isRunning: boolean; isWaitingForResponse: boolean; isProcessing: boolean } & SessionStatusReadingDetail & SessionWaitingDetail>>;
   /**
    * Session status per agent instance (Issue #875), keyed by instanceId.
    * Primary instances are keyed by their CLI tool id (instanceId === cliToolId);
@@ -231,7 +257,7 @@ export interface Worktree {
      * {@link AgentEventSourceView}.
      */
     eventSource?: AgentEventSourceView;
-  } & SessionWaitingDetail>>;
+  } & SessionStatusReadingDetail & SessionWaitingDetail>>;
   /** Whether this worktree is marked as favorite */
   favorite?: boolean;
   /** Worktree status: ready, in_progress, in_review, done, or null if not set */
