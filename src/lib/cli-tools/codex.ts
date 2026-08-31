@@ -28,6 +28,11 @@ import {
   codexUpdateDialogAnswerKey,
   resolveCodexUpdateDialogPolicy,
 } from '@/config/codex-update-dialog-config';
+import {
+  acquireAgentUpdateLock,
+  releaseAgentUpdateLock,
+  type UpdatableAgentTool,
+} from '@/lib/updates';
 import { createLogger } from '@/lib/logger';
 import { CODEX_CLI_TOOL_ID } from '@/lib/hooks/sources';
 import {
@@ -73,6 +78,17 @@ const CODEX_INIT_MAX_ATTEMPTS = 30;
  * any other policy.
  */
 const CODEX_UPDATE_INSTALL_MAX_ATTEMPTS = 120;
+
+/**
+ * The tool id this module takes {@link acquireAgentUpdateLock} for
+ * (Issue #2068 x #2069).
+ *
+ * Annotated rather than inferred so the compiler checks the one thing a literal
+ * could get wrong: that `'codex'` is still a member of #2069's
+ * `UpdatableAgentTool`. If that union is ever renamed or narrowed, this fails
+ * the build instead of silently taking a lock nothing else takes.
+ */
+const CODEX_UPDATE_LOCK_TOOL: UpdatableAgentTool = 'codex';
 
 /** Timeout for waiting for prompt before sending a message */
 const CODEX_PROMPT_WAIT_TIMEOUT_MS = 15000;
@@ -311,6 +327,18 @@ export class CodexTool extends BaseCLITool {
     /** Whether the post-update relaunch has already been issued (once only). */
     let relaunchIssued = false;
     /**
+     * Whether this launch holds #2069's in-flight update lock (Issue #2068).
+     *
+     * Taken only when the `update` policy actually sends `1`. Released in two
+     * places, and both are needed: at the relaunch below, which is the earliest
+     * point at which the install is OBSERVABLY over (the shell prompt came
+     * back), and in the `finally` around this whole loop, which is what makes
+     * "the lock is never left held" true rather than merely usual -- a hung
+     * install, a capture that throws, the window expiring, or an early return
+     * all leave through it.
+     */
+    let updateLockHeld = false;
+    /**
      * The poll budget, which the `update` policy is allowed to raise.
      *
      * Re-read every iteration, so raising it mid-loop extends the window rather
@@ -320,7 +348,8 @@ export class CodexTool extends BaseCLITool {
      */
     let maxAttempts = CODEX_INIT_MAX_ATTEMPTS;
 
-    for (let i = 0; i < maxAttempts; i++) {
+    try {
+      for (let i = 0; i < maxAttempts; i++) {
       try {
         const rawOutput = await capturePane(sessionName, 50);
         const output = stripAnsi(rawOutput);
@@ -388,6 +417,15 @@ export class CodexTool extends BaseCLITool {
           trustDialogHandled = false;
           hooksReviewHandled = false;
           hooksScreenEscapes = 0;
+          // Issue #2068 x #2069: the shell prompt IS the completion signal for
+          // an install this process cannot await, so release here rather than
+          // holding #2069's lock for the rest of the (up to two-minute) window
+          // and refusing an update nobody is running any more.
+          if (updateLockHeld) {
+            updateLockHeld = false;
+            releaseAgentUpdateLock(CODEX_UPDATE_LOCK_TOOL);
+            logger.info('codex-update-lock-released', { sessionName });
+          }
           logger.info('codex-relaunched-after-update', { sessionName, policy: updatePolicy });
           await options.relaunch();
           continue;
@@ -459,33 +497,67 @@ export class CodexTool extends BaseCLITool {
           }
 
           if (!updateDialogHandled) {
+            // Issue #2068 x #2069: `1` makes this pane a THIRD writer of one
+            // `npm install -g @openai/codex`, beside `POST /api/agents/update`
+            // and `commandmate agents update`. Take the in-flight lock BEFORE
+            // the key, because after it there is nothing to take it for -- codex
+            // has already replaced itself with the installer and this server
+            // cannot call it back.
+            //
+            // Not taken for `2` / `3`: those answer the dialog without
+            // installing anything, so a concurrent update is none of their
+            // business and holding the lock would block it for no reason.
+            let keyToSend = updateAnswerKey;
+            if (
+              keyToSend === CODEX_UPDATE_DIALOG_KEYS.update &&
+              !acquireAgentUpdateLock(CODEX_UPDATE_LOCK_TOOL)
+            ) {
+              // Somebody else is already installing this exact package.
+              //
+              // Falling back to `3` rather than sending nothing, and rather than
+              // sending `2`:
+              //
+              //  - **not `1`.** Two `npm install -g` runs on one global prefix
+              //    can leave a half-written `node_modules/@openai/codex`, and
+              //    the relaunch below would then type the launch line into a
+              //    pane where `codex` no longer resolves -- with the one
+              //    relaunch already spent, so nothing recovers it.
+              //  - **not "send nothing".** The pane would sit on the dialog for
+              //    the rest of the window and `startSession` would hand
+              //    `sendMessage` a session with no prompt in it. `ask` chooses
+              //    that deliberately; an operator who asked for `update` did not.
+              //  - **`3` rather than `2`.** The version this dialog offers is
+              //    the version the other process is installing, so recording it
+              //    as `dismissed_version` is true rather than merely quiet -- and
+              //    `2` is the answer Issue #2068 exists to stop sending, because
+              //    it persists nothing and the dialog returns next launch.
+              keyToSend = CODEX_UPDATE_DIALOG_KEYS['skip-until-next-version'];
+              logger.warn('codex-update-dialog-yielded-to-running-update', {
+                sessionName,
+                policy: updatePolicy,
+                requestedKey: updateAnswerKey,
+                key: keyToSend,
+              });
+            } else if (keyToSend === CODEX_UPDATE_DIALOG_KEYS.update) {
+              updateLockHeld = true;
+            }
+
             // Issue #890: Codex confirms a numbered selection instantly (no Enter).
             // Appending Enter (sendEnter=true) would land on the NEXT screen as a
             // stray keypress -- an empty submit on the main prompt, or worst case the
             // default "1. Update now" confirm if the key was dropped during a re-render.
             // Send the digit alone and let the next poll observe the result.
-            await sendKeys(sessionName, updateAnswerKey, false);
+            await sendKeys(sessionName, keyToSend, false);
             updateDialogHandled = true;
-            if (updateAnswerKey === CODEX_UPDATE_DIALOG_KEYS.update) {
+            if (keyToSend === CODEX_UPDATE_DIALOG_KEYS.update) {
               // codex is about to become `npm install`. The prompt this method
               // is waiting for belongs to a process that does not exist yet.
               maxAttempts = Math.max(maxAttempts, i + 1 + CODEX_UPDATE_INSTALL_MAX_ATTEMPTS);
-
-              // TODO(#2069 マージ後): acquireAgentUpdateLock を取る。
-              //
-              // This `1` makes the pane a THIRD writer of `npm install -g
-              // @openai/codex`, alongside `POST /api/agents/update` and
-              // `commandmate agents update` (both Issue #2069's). Two npm
-              // installs of the same global package at once is the hazard the
-              // lock exists for, and it cannot be taken here yet: the module
-              // that owns it (`src/lib/updates/**`) does not exist on this
-              // branch. Wire it in a follow-up round once #2069 has merged and
-              // this branch has been refreshed.
             }
             logger.info('codex-update-dialog-answered', {
               sessionName,
               policy: updatePolicy,
-              key: updateAnswerKey,
+              key: keyToSend,
             });
             await new Promise((resolve) => setTimeout(resolve, CODEX_DIALOG_SETTLE_MS));
             continue;
@@ -517,8 +589,21 @@ export class CodexTool extends BaseCLITool {
         // Capture may fail during initialization - continue polling
       }
       await new Promise((resolve) => setTimeout(resolve, CODEX_POLL_INTERVAL_MS));
+      }
+      logger.info('codex-prompt-detection');
+    } finally {
+      // Issue #2068 x #2069: the backstop. The install this lock covers runs
+      // inside tmux, so nothing here can await it -- the relaunch branch
+      // releases on the one signal that says it finished, and everything else
+      // arrives here. Without this, a codex that never comes back would leave
+      // the marker set for the life of the server and every later update, from
+      // any of the three routes, would be refused.
+      if (updateLockHeld) {
+        updateLockHeld = false;
+        releaseAgentUpdateLock(CODEX_UPDATE_LOCK_TOOL);
+        logger.warn('codex-update-lock-released-unfinished', { sessionName });
+      }
     }
-    logger.info('codex-prompt-detection');
   }
 
   /**

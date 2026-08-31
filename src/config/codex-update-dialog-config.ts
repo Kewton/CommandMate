@@ -79,19 +79,25 @@ export const CODEX_UPDATE_DIALOG_ENV_VAR = 'CM_CODEX_UPDATE_DIALOG';
 /**
  * The key each policy sends, or `null` when nobody may answer for the human.
  *
+ * `satisfies` rather than an annotation, so the table is exhaustive over
+ * {@link CodexUpdateDialogPolicy} (a policy added without an answer is a
+ * compile error) AND each entry keeps its literal type. The second half is load
+ * bearing: `CodexTool.waitForReady` reads
+ * `CODEX_UPDATE_DIALOG_KEYS['skip-until-next-version']` as its fallback when
+ * #2069's update lock is already held, and an annotation would widen that to
+ * include `null` — the one value that branch must never send.
+ *
  * The digits are codex's own option numbers and they are sent ALONE — codex
  * confirms a numbered selection instantly and a trailing Enter lands on the
  * next screen (Issue #890, re-measured for this Issue: `'3'` alone took the
  * pane straight to `› Ask Codex to do anything`).
  */
-export const CODEX_UPDATE_DIALOG_KEYS: Readonly<
-  Record<CodexUpdateDialogPolicy, '1' | '2' | '3' | null>
-> = Object.freeze({
+export const CODEX_UPDATE_DIALOG_KEYS = Object.freeze({
   update: '1',
   skip: '2',
   'skip-until-next-version': '3',
   ask: null,
-});
+} as const) satisfies Readonly<Record<CodexUpdateDialogPolicy, '1' | '2' | '3' | null>>;
 
 /**
  * Whether a value names a policy.

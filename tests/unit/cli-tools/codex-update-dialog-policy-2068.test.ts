@@ -68,6 +68,11 @@ import {
   CODEX_UPDATE_DIALOG_POLICIES,
   DEFAULT_CODEX_UPDATE_DIALOG_POLICY,
 } from '@/config/codex-update-dialog-config';
+import {
+  acquireAgentUpdateLock,
+  isAgentUpdateInProgress,
+  releaseAgentUpdateLock,
+} from '@/lib/updates';
 
 const WORKTREE_ID = 'test-worktree';
 const SESSION = 'mcbd-codex-test-worktree';
@@ -133,6 +138,10 @@ describe('[#2068] the update dialog policy', () => {
     vi.useRealTimers();
     vi.unstubAllEnvs();
     vi.restoreAllMocks();
+    // #2069's lock is module state shared by the whole file. A test that left it
+    // held would make the NEXT test's `update` silently yield, which is the one
+    // failure mode that would look like a pass.
+    releaseAgentUpdateLock('codex');
   });
 
   // The sweep, on the path that actually reads `CM_CODEX_UPDATE_DIALOG`.
@@ -176,6 +185,144 @@ describe('[#2068] the update dialog policy', () => {
       const answers = CODEX_UPDATE_DIALOG_POLICIES.map((p) => CODEX_UPDATE_DIALOG_KEYS[p]);
       expect(new Set(answers).size).toBe(answers.length);
       expect(CODEX_UPDATE_DIALOG_KEYS[DEFAULT_CODEX_UPDATE_DIALOG_POLICY]).toBe('3');
+    });
+  });
+
+
+  // Issue #2068 x #2069: the pane's `1` is the third route to one
+  // `npm install -g @openai/codex`, and the only one that cannot go through
+  // `runAgentUpdate` (codex itself runs the install, inside tmux). It therefore
+  // takes #2069's in-flight lock by hand, which makes both halves of a hand-held
+  // lock this file's problem: taking it, and giving it back.
+  describe('#2069 の更新ロック', () => {
+    beforeEach(() => {
+      vi.stubEnv(CODEX_UPDATE_DIALOG_ENV_VAR, 'update');
+    });
+
+    it('holds the lock across the poll where the install is still running', async () => {
+      // Read on the `Updating Codex via …` frame — a LATER poll than the one
+      // that sent the digit — so this cannot pass merely because `acquire`
+      // returned true a line earlier. That frame is the window the lock exists
+      // to cover: codex is gone, npm is running, and a second install started
+      // now is the corruption the lock prevents.
+      const heldPerFrame: boolean[] = [];
+      vi.mocked(capturePane)
+        .mockResolvedValueOnce(UPDATE_DIALOG)
+        .mockImplementationOnce(async () => {
+          heldPerFrame.push(isAgentUpdateInProgress('codex'));
+          return UPDATING;
+        })
+        .mockImplementationOnce(async () => {
+          heldPerFrame.push(isAgentUpdateInProgress('codex'));
+          return UPDATING;
+        })
+        .mockResolvedValueOnce(UPDATED_SHELL)
+        .mockResolvedValue(PROMPT);
+
+      await runStartSession(tool);
+
+      expect(digitsSent()).toEqual(['1']);
+      expect(heldPerFrame).toEqual([true, true]);
+    });
+
+    it('does NOT send "1" when another process already holds the lock', async () => {
+      // `POST /api/agents/update` or `commandmate agents update` got there first.
+      expect(acquireAgentUpdateLock('codex')).toBe(true);
+
+      vi.mocked(capturePane)
+        .mockResolvedValueOnce(UPDATE_DIALOG)
+        .mockResolvedValueOnce(UPDATE_DIALOG)
+        .mockResolvedValue(PROMPT);
+
+      await runStartSession(tool);
+
+      // The whole point: no second `npm install -g` on the same global prefix.
+      expect(sendKeys).not.toHaveBeenCalledWith(SESSION, '1', false);
+      expect(sendKeys).not.toHaveBeenCalledWith(SESSION, '1', true);
+      // Yields to `3`, so the dialog is still answered and still persisted —
+      // the pane must not be left parked on it, and `2` is the answer #2068
+      // exists to stop sending.
+      expect(digitsSent()).toEqual(['3']);
+      // Somebody else's lock is not ours to give back.
+      expect(isAgentUpdateInProgress('codex')).toBe(true);
+    });
+
+    it('gives the lock back AT the relaunch, not merely by the time it returns', async () => {
+      // The distinction the `finally` backstop cannot make on its own, and the
+      // reason the relaunch branch releases too: read the lock on a poll that
+      // happens INSIDE `waitForReady`, one iteration after the relaunch. Under
+      // the backstop alone this frame still sees the lock held, and a concurrent
+      // `commandmate agents update` would be refused for the rest of a window
+      // that can run to two minutes — for an install that is already over.
+      let heldAfterRelaunch: boolean | null = null;
+      vi.mocked(capturePane)
+        .mockResolvedValueOnce(UPDATE_DIALOG) // -> "1", lock taken
+        .mockResolvedValueOnce(UPDATING) // install running
+        .mockResolvedValueOnce(UPDATED_SHELL) // shell back -> relaunch + release
+        .mockImplementationOnce(async () => {
+          heldAfterRelaunch = isAgentUpdateInProgress('codex');
+          return PROMPT;
+        })
+        .mockResolvedValue(PROMPT);
+
+      await runStartSession(tool);
+
+      expect(launchCount()).toBe(2);
+      expect(heldAfterRelaunch).toBe(false);
+    });
+
+    it('gives the lock back once the shell returns, so a SECOND update can run', async () => {
+      vi.mocked(capturePane)
+        .mockResolvedValueOnce(UPDATE_DIALOG)
+        .mockResolvedValueOnce(UPDATED_SHELL)
+        .mockResolvedValue(PROMPT);
+
+      await runStartSession(tool);
+
+      expect(digitsSent()).toEqual(['1']);
+      expect(isAgentUpdateInProgress('codex')).toBe(false);
+      // Stated as the consequence that matters rather than as the flag: a lock
+      // never given back blocks every later update from all three routes for the
+      // life of the server.
+      expect(acquireAgentUpdateLock('codex')).toBe(true);
+    });
+
+    it('gives the lock back even when the shell never returns', async () => {
+      // The install hangs, or codex died some other way: the relaunch signal
+      // never arrives and the window simply expires. The backstop is the only
+      // thing standing between that and a permanently blocked updater.
+      vi.mocked(capturePane).mockResolvedValue(UPDATING);
+
+      await runStartSession(tool);
+
+      expect(digitsSent()).toEqual(['1']);
+      expect(isAgentUpdateInProgress('codex')).toBe(false);
+      expect(acquireAgentUpdateLock('codex')).toBe(true);
+    });
+
+    it('gives the lock back when the capture throws for the whole window', async () => {
+      vi.mocked(capturePane)
+        .mockResolvedValueOnce(UPDATE_DIALOG)
+        .mockRejectedValue(new Error('tmux is gone'));
+
+      await runStartSession(tool);
+
+      expect(isAgentUpdateInProgress('codex')).toBe(false);
+    });
+
+    it('does not touch the lock for the policies that install nothing', async () => {
+      for (const policy of ['skip', 'skip-until-next-version', 'ask'] as const) {
+        vi.clearAllMocks();
+        vi.stubEnv(CODEX_UPDATE_DIALOG_ENV_VAR, policy);
+        vi.mocked(sendKeys).mockResolvedValue();
+        vi.mocked(capturePane).mockResolvedValueOnce(UPDATE_DIALOG).mockResolvedValue(PROMPT);
+
+        await runStartSession(tool);
+
+        // Holding it would block a concurrent `commandmate agents update` for no
+        // reason: answering `2` / `3` / nothing installs nothing.
+        expect(isAgentUpdateInProgress('codex')).toBe(false);
+      }
     });
   });
 
