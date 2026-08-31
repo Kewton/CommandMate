@@ -186,7 +186,7 @@
     "installed": "インストール済み {version}",
     "notInstalled": "未インストール",
     "available": "更新あり: {version}",
-    "dismissed": "codex 側で非表示にした更新です",
+    "dismissed": "codex 側で「見送り」扱いになっています",
     "update": "更新する",
     "updating": "更新中...",
     "running": "実行中: {command}",

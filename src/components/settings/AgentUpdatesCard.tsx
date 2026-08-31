@@ -213,8 +213,16 @@ export function AgentUpdatesCard({ worktreeId, instances, variant = 'card' }: Ag
                       {t('agentUpdates.available', { version: row.latestVersion ?? '' })}
                     </span>
                   )}
+                  {/* Says the version is dismissed, never WHO dismissed it:
+                      on the default #2068 policy CommandMate answers codex's
+                      own update dialog with the digit that writes
+                      `dismissed_version`, so on a stock install this is the
+                      server's automatic answer rather than the user's. */}
                   {row.dismissedInCodex && (
-                    <span className="text-xs text-muted-foreground">
+                    <span
+                      className="text-xs text-muted-foreground"
+                      data-testid={`agent-updates-dismissed-${row.tool}`}
+                    >
                       {t('agentUpdates.dismissed')}
                     </span>
                   )}
@@ -248,8 +256,16 @@ export function AgentUpdatesCard({ worktreeId, instances, variant = 'card' }: Ag
                   </div>
                 )}
 
+                {/* The generic form of the warning above, for the surface that
+                    has no worktree to name (More). Carries a testid so its
+                    ABSENCE on the pane — where the named warning is the right
+                    one — is assertable; without it the guard could be deleted
+                    and no test could see the extra paragraph appear. */}
                 {canUpdate && liveInstances.length === 0 && worktreeId === undefined && (
-                  <p className="mt-2 text-xs text-muted-foreground">
+                  <p
+                    className="mt-2 text-xs text-muted-foreground"
+                    data-testid={`agent-updates-restart-notice-${row.tool}`}
+                  >
                     {t('agentUpdates.restartNotice')}
                   </p>
                 )}

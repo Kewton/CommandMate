@@ -28,7 +28,11 @@ vi.mock('@/lib/updates/codex-version', async (importOriginal) => {
 });
 
 import { DETECTOR_VERSION_PROBES } from '@/lib/detection/version-probes';
-import { clearAgentVersionsCache, getAgentVersions } from '@/lib/updates/agent-versions';
+import {
+  AGENT_VERSIONS_CACHE_TTL_MS,
+  clearAgentVersionsCache,
+  getAgentVersions,
+} from '@/lib/updates/agent-versions';
 
 /** codex's file says 0.151.0 is out; every probed tool answers `version`. */
 function machine(version: string | null, latest: string | null = '0.151.0') {
@@ -88,8 +92,51 @@ describe('[#2069] getAgentVersions', () => {
     machine('0.149.1');
     await getAgentVersions({ now: 1_000 });
     const afterFirst = runDetectorVersionProbe.mock.calls.length;
-    await getAgentVersions({ now: 2_000 });
+    await getAgentVersions({ now: 1_000 + AGENT_VERSIONS_CACHE_TTL_MS - 1 });
     expect(runDetectorVersionProbe.mock.calls.length).toBe(afterFirst);
+  });
+
+  it('RE-probes once the TTL has elapsed', async () => {
+    // The half that was missing, and the reason the whole TTL was untestable:
+    // the injected clock was honoured when COMPARING against `expiresAt` but
+    // ignored when WRITING it (`Date.now() + TTL`), so a test clock of 2_000
+    // was below a real-epoch expiry no matter what the constant said —
+    // `AGENT_VERSIONS_CACHE_TTL_MS = 0` passed. Crossing the boundary is the
+    // only assertion that can see the constant at all.
+    machine('0.149.1');
+    await getAgentVersions({ now: 1_000 });
+    const afterFirst = runDetectorVersionProbe.mock.calls.length;
+
+    await getAgentVersions({ now: 1_000 + AGENT_VERSIONS_CACHE_TTL_MS + 1 });
+    expect(runDetectorVersionProbe.mock.calls.length).toBeGreaterThan(afterFirst);
+  });
+
+  it('reuses the cache right up to the boundary and not past it', async () => {
+    machine('0.149.1');
+    await getAgentVersions({ now: 0 });
+    const perFanOut = runDetectorVersionProbe.mock.calls.length;
+
+    // Exactly at the boundary the entry has expired (`expiresAt > now` is the
+    // reuse test), so this is the first call that must re-probe.
+    await getAgentVersions({ now: AGENT_VERSIONS_CACHE_TTL_MS });
+    expect(runDetectorVersionProbe.mock.calls.length).toBe(perFanOut * 2);
+  });
+
+  it('stamps the expiry from the caller clock, not the wall clock', async () => {
+    // A wall-clock stamp would make the entry live ~30s into the real future,
+    // so a second read at a test clock of `TTL * 10` would still hit the cache.
+    machine('0.149.1');
+    await getAgentVersions({ now: 0 });
+    const afterFirst = runDetectorVersionProbe.mock.calls.length;
+
+    await getAgentVersions({ now: AGENT_VERSIONS_CACHE_TTL_MS * 10 });
+    expect(runDetectorVersionProbe.mock.calls.length).toBeGreaterThan(afterFirst);
+  });
+
+  it('has a TTL long enough to be worth having', async () => {
+    // Pinned so a mutation to 0 is a named failure rather than a silent
+    // doubling of the child processes every settings-screen render costs.
+    expect(AGENT_VERSIONS_CACHE_TTL_MS).toBeGreaterThanOrEqual(1_000);
   });
 
   it('re-probes when `force` is set — the post-update read', async () => {

@@ -91,7 +91,10 @@ async function showVersions(options: AgentsCommandOptions): Promise<void> {
     for (const row of stale) {
       console.log(
         `Update available for ${row.tool}: ${row.installed ?? 'unknown'} -> ${row.latestVersion ?? 'unknown'}` +
-          (row.dismissedInCodex ? ' (dismissed inside codex)' : '')
+          // Deliberately not "you dismissed this": on the default #2068
+          // policy CommandMate itself answers codex's dialog with the digit
+          // that writes `dismissed_version`.
+          (row.dismissedInCodex ? ' (marked dismissed in codex)' : '')
       );
     }
     console.log(`Run "commandmate agents update ${stale[0].tool}" to install it.`);

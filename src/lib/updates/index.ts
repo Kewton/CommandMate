@@ -11,7 +11,10 @@
  */
 
 export {
-  CODEX_HOME_ENV_VAR,
+  // `CODEX_HOME_ENV_VAR` is deliberately NOT re-exported here: the repository's
+  // single public spelling of that name lives in
+  // `lib/hooks/sources/codex/hooks-config`, and `codex-version` keeps a private
+  // copy only because importing that module would break `build:cli`.
   CODEX_VERSION_FILENAME,
   CODEX_VERSION_FILE_MAX_BYTES,
   EMPTY_CODEX_VERSION_FILE,

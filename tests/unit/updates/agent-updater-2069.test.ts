@@ -11,9 +11,17 @@
  *     assertable without spawning anything: an argv array whose members carry
  *     no shell metacharacters, and a command that is an absolute path rather
  *     than a name PATH gets to resolve at exec time.
+ *  3. **The lock.** After #2068 three paths reach one `npm install -g`. The
+ *     lock lives inside `runAgentUpdate` so that calling the function is what
+ *     takes it — a caller-side lock only protects the caller that remembered.
+ *
+ * Two assertions here were vacuous in the first cut and are called out where
+ * they are fixed: the absolute-path case asserted a value the test's own helper
+ * had hardcoded, and the version boundary compared the constant against itself.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { isAbsolute } from 'path';
 import {
   acquireAgentUpdateLock,
   CODEX_NATIVE_UPDATE_MIN_VERSION,
@@ -27,12 +35,23 @@ import {
   type AgentUpdatePlan,
 } from '@/lib/updates/agent-updater';
 
-/** A machine with codex at `version` on PATH, plus npm. */
-function machine(codexVersion: string | null, hasNpm: boolean = true) {
+/**
+ * A machine with codex at `version` on PATH, plus npm.
+ *
+ * `pathPrefix` is what a `PATH` entry looks like. The default is the ordinary
+ * absolute one; the relative spelling is what a `PATH` of `.:/usr/bin` (or a
+ * `node_modules/.bin` written without a leading slash) actually produces out of
+ * `findExecutableOnPath`, which joins the entry with the name and returns it.
+ */
+function machine(
+  codexVersion: string | null,
+  hasNpm: boolean = true,
+  pathPrefix: string = '/opt/isolated/bin'
+) {
   return {
     resolveExecutable: (name: string): string | null => {
-      if (name === 'codex') return codexVersion === null ? null : '/opt/isolated/bin/codex';
-      if (name === 'npm') return hasNpm ? '/opt/isolated/bin/npm' : null;
+      if (name === 'codex') return codexVersion === null ? null : `${pathPrefix}/codex`;
+      if (name === 'npm') return hasNpm ? `${pathPrefix}/npm` : null;
       return null;
     },
     probeInstalledVersion: async (): Promise<string | null> => codexVersion,
@@ -63,24 +82,42 @@ describe('[#2069] isUpdatableAgentTool', () => {
 });
 
 describe('[#2069] resolveAgentUpdatePlan — strategy choice', () => {
-  it('prefers `codex update` at the minimum version', async () => {
-    const result = await resolveAgentUpdatePlan('codex', machine(CODEX_NATIVE_UPDATE_MIN_VERSION));
+  it('puts the native boundary at 0.149.0, the release that added the subcommand', () => {
+    // Pinned as a LITERAL. Feeding the constant back into `machine()` — which
+    // the first cut of this file did — makes `installed >= MIN` true by
+    // construction, so the boundary could move by a whole minor release with
+    // every test still green while 0.149.x users all fell to the npm fallback
+    // this constant exists to avoid. Measured against codex-cli 0.149.1, whose
+    // `codex update --help` reads "Update Codex to the latest version".
+    expect(CODEX_NATIVE_UPDATE_MIN_VERSION).toBe('0.149.0');
+  });
+
+  it.each([
+    ['0.149.0', 'native'],
+    ['0.149.1', 'native'],
+    ['0.151.0', 'native'],
+    ['0.148.99', 'npm'],
+    ['0.148.0', 'npm'],
+    ['0.99.0', 'npm'],
+  ])('picks %s -> %s', async (installed, strategy) => {
+    const result = await resolveAgentUpdatePlan('codex', machine(installed));
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.plan.strategy).toBe('native');
+    expect(result.plan.strategy).toBe(strategy);
+  });
+
+  it('spells the native plan `codex update`', async () => {
+    const result = await resolveAgentUpdatePlan('codex', machine('0.149.0'));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
     expect(result.plan.args).toEqual(['update']);
     expect(result.plan.reason).toBe('native-subcommand');
   });
 
-  it('prefers `codex update` above the minimum version', async () => {
-    const result = await resolveAgentUpdatePlan('codex', machine('0.151.0'));
-    expect(result.ok && result.plan.strategy).toBe('native');
-  });
-
-  it('falls back to npm one patch BELOW the minimum version', async () => {
+  it('falls back to npm one patch BELOW the boundary', async () => {
     // 0.148 has no `update` subcommand; running it would be an error, not a
     // no-op, so this boundary is the whole reason the constant exists.
-    const result = await resolveAgentUpdatePlan('codex', machine('0.148.0'));
+    const result = await resolveAgentUpdatePlan('codex', machine('0.148.99'));
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.plan.strategy).toBe('npm');
@@ -121,13 +158,56 @@ describe('[#2069] resolveAgentUpdatePlan — strategy choice', () => {
 });
 
 describe('[#2069] resolveAgentUpdatePlan — the command shape (実装内容 4)', () => {
-  it('resolves the command to an ABSOLUTE path, never a bare name', async () => {
-    for (const version of [CODEX_NATIVE_UPDATE_MIN_VERSION, '0.148.0']) {
-      const result = await resolveAgentUpdatePlan('codex', machine(version));
-      expect(result.ok).toBe(true);
-      if (!result.ok) return;
-      expect(result.plan.command.startsWith('/')).toBe(true);
-    }
+  it.each([
+    ['native', '0.149.0'],
+    ['npm', '0.148.0'],
+  ])('REFUSES a %s plan whose executable resolved to a relative path', async (_s, version) => {
+    // The real case: `PATH=.:/usr/bin`, or a `node_modules/.bin` entry written
+    // without a leading slash. `findExecutableOnPath` joins the entry with the
+    // name and hands back `./codex`, which `execFile` then resolves against the
+    // CHILD's cwd — i.e. whichever directory the update happens to run in gets
+    // to supply the binary.
+    //
+    // The first cut of this test asserted `command.startsWith('/')` on a value
+    // `machine()` had hardcoded as '/opt/isolated/bin/codex', so it held no
+    // matter what the module did. This drives the module with a relative path
+    // and asserts the REFUSAL, which only the isAbsolute check can produce.
+    const result = await resolveAgentUpdatePlan('codex', machine(version, true, './bin'));
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.code).toBe('no-executable');
+  });
+
+  it('refuses a bare name (a resolver that just echoes back what it was asked)', async () => {
+    const result = await resolveAgentUpdatePlan('codex', {
+      resolveExecutable: (name: string) => name,
+      probeInstalledVersion: async () => '0.151.0',
+    });
+    expect(result.ok).toBe(false);
+  });
+
+  it('falls back to npm when only CODEX resolved relatively', async () => {
+    // Not an all-or-nothing gate: an unusable codex must still leave the npm
+    // route open, exactly as a missing codex does.
+    const result = await resolveAgentUpdatePlan('codex', {
+      resolveExecutable: (name: string) => (name === 'codex' ? './codex' : '/usr/bin/npm'),
+      probeInstalledVersion: async () => '0.151.0',
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.plan.strategy).toBe('npm');
+    expect(result.plan.command).toBe('/usr/bin/npm');
+  });
+
+  it('produces an absolute command on THIS machine, with no injected resolver', async () => {
+    // The default resolver is not covered by any test that injects one, so a
+    // default of `(name) => name` would slip through all of the above. npm is
+    // always present wherever this suite runs, so a plan is always produced.
+    const result = await resolveAgentUpdatePlan('codex');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(isAbsolute(result.plan.command)).toBe(true);
   });
 
   it('carries the arguments as an ARRAY with no shell metacharacters', async () => {
@@ -204,7 +284,7 @@ describe('[#2069] runAgentUpdate', () => {
   });
 });
 
-describe('[#2069] the in-flight lock', () => {
+describe('[#2069] the in-flight lock — the primitive', () => {
   afterEach(() => releaseAgentUpdateLock('codex'));
 
   beforeEach(() => releaseAgentUpdateLock('codex'));
@@ -224,5 +304,79 @@ describe('[#2069] the in-flight lock', () => {
 
   it('tolerates a release with nothing held', () => {
     expect(() => releaseAgentUpdateLock('codex')).not.toThrow();
+  });
+
+  it('stays exported from the barrel: the #2068 in-pane path takes it directly', async () => {
+    // That path cannot go through `runAgentUpdate` (codex itself runs the
+    // install; CommandMate only answers a dialog), so these three are the
+    // seam. Deleting them from `lib/updates` would silently leave the third
+    // caller unserialised.
+    const barrel = await import('@/lib/updates');
+    expect(typeof barrel.acquireAgentUpdateLock).toBe('function');
+    expect(typeof barrel.releaseAgentUpdateLock).toBe('function');
+    expect(typeof barrel.isAgentUpdateInProgress).toBe('function');
+  });
+});
+
+describe('[#2069] the in-flight lock lives INSIDE runAgentUpdate', () => {
+  const slow = (): AgentUpdatePlan => ({
+    tool: 'codex',
+    strategy: 'native',
+    command: process.execPath,
+    args: ['-e', 'setTimeout(() => process.stdout.write("done"), 120)'],
+    display: 'node -e ...',
+    installed: '0.149.0',
+    reason: 'native-subcommand',
+  });
+
+  beforeEach(() => releaseAgentUpdateLock('codex'));
+  afterEach(() => releaseAgentUpdateLock('codex'));
+
+  it('takes the lock without the caller doing anything', async () => {
+    const running = runAgentUpdate(slow());
+    // Synchronously after the call, before any await resolves: this is what
+    // lets the route read `isAgentUpdateInProgress` and answer 409 with no
+    // interleaving point in between.
+    expect(isAgentUpdateInProgress('codex')).toBe(true);
+    await running;
+  });
+
+  it('gives the lock back when the run finishes', async () => {
+    await runAgentUpdate(slow());
+    expect(isAgentUpdateInProgress('codex')).toBe(false);
+  });
+
+  it('gives the lock back when the run FAILS', async () => {
+    await runAgentUpdate({ ...slow(), command: '/nonexistent/definitely/not/here', args: [] });
+    expect(isAgentUpdateInProgress('codex')).toBe(false);
+  });
+
+  it('refuses a second concurrent run and spawns NOTHING for it', async () => {
+    // This is the protection every caller now gets for free — the CLI
+    // (`commandmate agents update`) never touches the lock itself.
+    const first = runAgentUpdate(slow());
+
+    const chunks: string[] = [];
+    const second = await runAgentUpdate(slow(), { onChunk: (c) => chunks.push(c.text) });
+
+    expect(second.ok).toBe(false);
+    expect(second.code).toBe('in_progress');
+    // Nothing ran: no output, and no exit status to report.
+    expect(chunks).toEqual([]);
+    expect(second.exitCode).toBeNull();
+
+    // And the refusal must not have stolen the running update's marker.
+    expect(isAgentUpdateInProgress('codex')).toBe(true);
+    await expect(first).resolves.toMatchObject({ ok: true });
+    expect(isAgentUpdateInProgress('codex')).toBe(false);
+  });
+
+  it('refuses when the lock was taken by the in-pane path (#2068)', async () => {
+    expect(acquireAgentUpdateLock('codex')).toBe(true);
+    const result = await runAgentUpdate(slow());
+    expect(result.code).toBe('in_progress');
+    // Still held by whoever took it — `runAgentUpdate` must not release a lock
+    // it never acquired.
+    expect(isAgentUpdateInProgress('codex')).toBe(true);
   });
 });

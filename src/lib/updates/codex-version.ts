@@ -32,17 +32,38 @@
  * 「`version.json` が無い / 壊れている環境で落ちない」— and
  * `tests/unit/updates/codex-version-2069.test.ts` pins it case by case.
  *
- * ## Why `$CODEX_HOME` is resolved here rather than imported
+ * ## `$CODEX_HOME`: why it is resolved here, and where the two rules diverge
  *
  * `lib/hooks/sources/codex/hooks-config.getCodexHome()` answers the same
- * question, and this module deliberately does not call it: that function reaches
- * `@/lib/logger` through `config/safe-directory`, and `tsconfig.cli.json` resets
- * `"paths"` to `{}` — so a single alias import anywhere in this module's
- * transitive closure breaks `npm run build:cli`, and `commandmate agents update`
- * is a CLI command. The guard the two share is the one that matters for a path
- * that came out of the environment ({@link isVirtualFilesystemPath}); the mkdir
- * hang #1774 defends against cannot arise here because this module only ever
- * reads.
+ * question, and this module cannot call it: that function reaches `@/lib/logger`
+ * through `config/safe-directory`, and `tsconfig.cli.json` resets `"paths"` to
+ * `{}` — so one alias import anywhere in this module's transitive closure breaks
+ * `npm run build:cli` with TS2307 (the #1933 defect PR #1991 fixed), and
+ * `commandmate agents update` puts this file in the CLI's closure. The variable
+ * NAME therefore exists in two files, and
+ * `tests/unit/updates/codex-home-parity-2069.test.ts` is the join: it imports
+ * both and fails if the spellings or the shared rules ever drift.
+ *
+ * The rules are deliberately identical except for one case, and that case is a
+ * correctness fix rather than a divergence for its own sake:
+ *
+ * | `$CODEX_HOME`            | hooks-config                        | here                |
+ * |--------------------------|-------------------------------------|---------------------|
+ * | unset                    | `~/.codex`                          | `~/.codex`          |
+ * | absolute                 | that path                           | that path           |
+ * | inside `/proc`/`/sys`/`/dev` | `~/.codex` (#1774)              | `~/.codex`          |
+ * | **relative**             | passed through **verbatim**         | **null = unknown**  |
+ *
+ * `resolveSafeDirectory` returns a relative candidate unchanged, and
+ * `hooks-config` puts that value on codex's own launch line — so codex resolves
+ * it against **the agent's worktree cwd**, and `CODEX_HOME=.codex-shared` means
+ * codex writes `<worktree>/.codex-shared/version.json`. This process is not in
+ * that worktree and, with several worktrees open, cannot say which one was
+ * meant. Falling back to `~/.codex` there is the one genuinely bad answer: it
+ * is not "no data", it is an unrelated install's version, reported with the
+ * same confidence as a real reading. So a relative value resolves to null and
+ * every surface renders "no update information", which is what they already
+ * render when codex has never run.
  *
  * @module lib/updates/codex-version
  */
@@ -63,8 +84,16 @@ import { compareCliVersions, parseCliVersion } from '../detection/version-probes
  */
 export type CodexVersionEnv = Readonly<Record<string, string | undefined>>;
 
-/** codex's own config-directory override. Same variable `hooks-config` honours. */
-export const CODEX_HOME_ENV_VAR = 'CODEX_HOME';
+/**
+ * codex's own config-directory override.
+ *
+ * NOT exported: `lib/hooks/sources/codex/hooks-config` already exports this name
+ * and that one is the repository's single public spelling. A second exported
+ * `CODEX_HOME_ENV_VAR` is how two modules end up disagreeing about it, and the
+ * `@/`-import rule above is the only reason the literal exists twice at all.
+ * `tests/unit/updates/codex-home-parity-2069.test.ts` pins the two together.
+ */
+const CODEX_HOME_ENV_VAR = 'CODEX_HOME';
 
 /** The file codex writes its release check into, inside `$CODEX_HOME`. */
 export const CODEX_VERSION_FILENAME = 'version.json';
@@ -86,8 +115,11 @@ export interface CodexVersionFile {
   dismissedVersion: string | null;
   /** `last_checked_at` verbatim — an opaque timestamp string, or null. */
   lastCheckedAt: string | null;
-  /** Absolute path that was read. Reported so an operator can go look. */
-  path: string;
+  /**
+   * Absolute path that was read, or null when `$CODEX_HOME` is relative and the
+   * file's location therefore depends on a worktree this process cannot name.
+   */
+  path: string | null;
   /** False when the file was missing, oversized, unreadable or malformed. */
   readable: boolean;
 }
@@ -101,29 +133,36 @@ export const EMPTY_CODEX_VERSION_FILE: Omit<CodexVersionFile, 'path'> = {
 };
 
 /**
- * `$CODEX_HOME`, or `~/.codex`.
+ * The directory codex keeps its state in, as seen from THIS process.
  *
- * A relative `$CODEX_HOME` is refused: codex resolves it against its own cwd,
- * which is the agent's worktree and not this process's, so honouring it here
- * would read a different machine's idea of the file. A virtual-filesystem path
- * is refused for the reason `config/safe-directory` gives.
+ * See the table in the module header for the four cases. The one that returns
+ * null is a relative `$CODEX_HOME`: `hooks-config` forwards such a value to
+ * codex verbatim, codex resolves it against the agent's worktree cwd, and this
+ * process has no worktree — so the honest answer is "cannot tell", not
+ * `~/.codex`.
  *
  * @param env - Environment to read. Injectable so tests need no `process.env`
  *   mutation.
- * @returns An absolute directory path.
+ * @returns An absolute directory path, or null when it cannot be determined.
  */
-export function getCodexHomeForVersionRead(env: CodexVersionEnv = process.env): string {
+export function getCodexHomeForVersionRead(env: CodexVersionEnv = process.env): string | null {
   const fallback = join(homedir(), '.codex');
   const configured = env[CODEX_HOME_ENV_VAR];
   if (!configured) return fallback;
-  if (!isAbsolute(configured)) return fallback;
+  // Matches `resolveSafeDirectory`: a /proc, /sys or /dev path is refused and
+  // the built-in default is used, on both sides of the join.
   if (isVirtualFilesystemPath(configured)) return fallback;
+  if (!isAbsolute(configured)) return null;
   return configured;
 }
 
-/** Absolute path of the file codex writes its release check into. */
-export function getCodexVersionFilePath(env: CodexVersionEnv = process.env): string {
-  return join(getCodexHomeForVersionRead(env), CODEX_VERSION_FILENAME);
+/**
+ * Absolute path of the file codex writes its release check into, or null when
+ * {@link getCodexHomeForVersionRead} cannot determine the directory.
+ */
+export function getCodexVersionFilePath(env: CodexVersionEnv = process.env): string | null {
+  const home = getCodexHomeForVersionRead(env);
+  return home === null ? null : join(home, CODEX_VERSION_FILENAME);
 }
 
 /** Read one field as a normalized version, tolerating null / wrong types. */
@@ -149,6 +188,10 @@ export function readCodexVersionFile(
 ): CodexVersionFile {
   const path = options.path ?? getCodexVersionFilePath(options.env);
   const empty: CodexVersionFile = { ...EMPTY_CODEX_VERSION_FILE, path };
+
+  // Unknown directory (a relative `$CODEX_HOME`): read nothing rather than read
+  // the wrong install's file. See the table in the module header.
+  if (path === null) return empty;
 
   try {
     const stat = statSync(path);
@@ -182,13 +225,21 @@ export interface CodexUpdateStatus {
   /** True only when BOTH versions are known AND latest is strictly newer. */
   updateAvailable: boolean;
   /**
-   * True when the available update is the one the user already dismissed inside
-   * codex's own banner.
+   * True when `dismissed_version` names the update that is available — i.e.
+   * **something** answered codex's update banner with "not this version".
    *
-   * Reported rather than acted on. A dismissal is a statement about codex's
-   * nag, not a statement that the update is unwanted, and hiding the button
-   * here would make CommandMate's answer disagree with `codex --version` for a
-   * reason the screen never showed. The UI annotates; it does not disable.
+   * **Not necessarily the user.** The digit that writes `dismissed_version` is
+   * the same one CommandMate can be configured to send for codex's in-pane
+   * update dialog (#2068, `CM_CODEX_UPDATE_DIALOG`), and on the default policy
+   * CommandMate sends it on every codex launch. So on a stock install this flag
+   * goes true without anybody having decided anything, and wording that says
+   * "you dismissed this" would be blaming the user for the server's own
+   * automatic answer.
+   *
+   * That is why it is reported and never acted on: it does not hide the update,
+   * it does not disable the button, and the copy beside it
+   * (`common.agentUpdates.dismissed`) says only that the version was dismissed
+   * in codex — without naming who did it.
    */
   dismissedInCodex: boolean;
   /** Where the "latest" half came from, or null when nothing was readable. */

@@ -123,16 +123,31 @@ describe('[#2069] getCodexHomeForVersionRead', () => {
     expect(getCodexHomeForVersionRead({})).toMatch(/\.codex$/);
   });
 
-  it('refuses a RELATIVE $CODEX_HOME', () => {
-    // codex resolves it against its own cwd, which is the agent's worktree and
-    // not this process's, so honouring it would read a different file entirely.
-    expect(getCodexHomeForVersionRead({ CODEX_HOME: '.codex' })).toMatch(/\.codex$/);
-    expect(getCodexHomeForVersionRead({ CODEX_HOME: '.codex' })).not.toBe('.codex');
+  it('answers UNKNOWN for a relative $CODEX_HOME, rather than falling back', () => {
+    // `hooks-config` forwards a relative value to codex verbatim, and codex
+    // resolves it against the AGENT's worktree cwd — so the file is at
+    // `<worktree>/.codex-shared/version.json` and this process cannot say which
+    // worktree. Falling back to ~/.codex would not be "no data": it would be an
+    // unrelated install's version reported with full confidence.
+    expect(getCodexHomeForVersionRead({ CODEX_HOME: '.codex-shared' })).toBeNull();
+    expect(getCodexHomeForVersionRead({ CODEX_HOME: '../shared/.codex' })).toBeNull();
+    expect(getCodexVersionFilePath({ CODEX_HOME: '.codex-shared' })).toBeNull();
   });
 
-  it('refuses a virtual-filesystem $CODEX_HOME (#1774)', () => {
+  it('reads nothing at all when the directory is unknown', () => {
+    const result = readCodexVersionFile({ env: { CODEX_HOME: '.codex-shared' } });
+    expect(result.readable).toBe(false);
+    expect(result.latestVersion).toBeNull();
+    expect(result.path).toBeNull();
+  });
+
+  it('refuses a virtual-filesystem $CODEX_HOME (#1774), matching hooks-config', () => {
+    // Here the fallback IS right: `resolveSafeDirectory` rejects the value and
+    // hands codex `~/.codex` on its launch line, so that is where codex writes.
     const resolved = getCodexHomeForVersionRead({ CODEX_HOME: '/proc/self/codex' });
+    expect(resolved).not.toBeNull();
     expect(resolved).not.toContain('/proc');
+    expect(resolved).toMatch(/\.codex$/);
   });
 
   it('builds the version path inside the resolved home', () => {

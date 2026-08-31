@@ -55,6 +55,21 @@ const VERSIONS = {
       updatable: false,
       source: null,
     },
+    {
+      // A tool CommandMate KNOWS how to update that is not installed here.
+      // Without this row `canUpdate = updatable && installed !== null` has an
+      // unobservable half: every other row fails both halves at once, so
+      // dropping the `installed !== null` test changed nothing visible and the
+      // card would offer to update a CLI that is not on the machine.
+      tool: 'gemini',
+      installed: null,
+      latestVersion: null,
+      dismissedVersion: null,
+      updateAvailable: false,
+      dismissedInCodex: false,
+      updatable: true,
+      source: null,
+    },
   ],
 };
 
@@ -81,6 +96,7 @@ function ndjson(lines: unknown[]): Response {
 function mockFetch(options: {
   update?: () => Response;
   running?: Record<string, { isRunning: boolean }>;
+  versions?: typeof VERSIONS;
   versionsAfter?: typeof VERSIONS;
 } = {}) {
   const killed: string[] = [];
@@ -91,7 +107,10 @@ function mockFetch(options: {
 
     if (url.startsWith('/api/agents/versions')) {
       versionsCalls += 1;
-      const body = versionsCalls > 1 && options.versionsAfter ? options.versionsAfter : VERSIONS;
+      const body =
+        versionsCalls > 1 && options.versionsAfter
+          ? options.versionsAfter
+          : (options.versions ?? VERSIONS);
       return new Response(JSON.stringify(body), { status: 200 });
     }
     if (url.startsWith('/api/agents/update')) {
@@ -160,7 +179,17 @@ describe('[#2069] AgentUpdatesCard — what it shows', () => {
     expect(screen.queryByTestId('agent-updates-update-opencode')).toBeNull();
   });
 
-  it('offers no Update button for a tool that is not installed', async () => {
+  it('offers no Update button for an UPDATABLE tool that is not installed', async () => {
+    // `gemini` in the fixture: `updatable: true`, `installed: null`. There is
+    // nothing on this machine to update, so a button here would run an
+    // installer for a CLI the user never asked for.
+    render(<AgentUpdatesCard />);
+    await waitFor(() => expect(screen.getByTestId('agent-updates-rows')).toBeInTheDocument());
+    expect(screen.getByTestId('agent-updates-row-gemini')).toBeInTheDocument();
+    expect(screen.queryByTestId('agent-updates-update-gemini')).toBeNull();
+  });
+
+  it('offers no Update button for a tool that is neither updatable nor installed', async () => {
     render(<AgentUpdatesCard />);
     await waitFor(() => expect(screen.getByTestId('agent-updates-rows')).toBeInTheDocument());
     expect(screen.queryByTestId('agent-updates-update-opencode')).toBeNull();
@@ -169,8 +198,68 @@ describe('[#2069] AgentUpdatesCard — what it shows', () => {
   it('shows the generic restart notice when there is no worktree to name', async () => {
     render(<AgentUpdatesCard />);
     await waitFor(() => {
-      expect(screen.getByText(/keeps its current version until it is restarted/)).toBeInTheDocument();
+      expect(screen.getByTestId('agent-updates-restart-notice-codex')).toHaveTextContent(
+        /keeps its current version until it is restarted/
+      );
     });
+  });
+
+  it.each([
+    ['with a live session', { codex: { isRunning: true } }],
+    ['with nothing running', {}],
+  ])('does NOT show the generic notice on a worktree surface, %s', async (_label, running) => {
+    // The pane has a worktree, so it either names its live sessions or says
+    // nothing. The `worktreeId === undefined` half of the guard is only
+    // observable in the SECOND row: with a session running the notice is
+    // suppressed by `liveInstances.length === 0` anyway, so a test that only
+    // covered that case would stay green with the worktree check deleted and
+    // the pane would grow a second, vaguer paragraph under every row.
+    mockFetch({ running });
+    render(<AgentUpdatesCard worktreeId="wt-1" instances={INSTANCES} />);
+
+    await waitFor(() =>
+      expect(screen.getByTestId('agent-updates-update-codex')).toBeInTheDocument()
+    );
+    expect(screen.queryByTestId('agent-updates-restart-notice-codex')).toBeNull();
+  });
+});
+
+describe('[#2069] AgentUpdatesCard — a dismissed version', () => {
+  const dismissed = {
+    ...VERSIONS,
+    tools: VERSIONS.tools.map((row) =>
+      row.tool === 'codex'
+        ? { ...row, dismissedVersion: '0.151.0', dismissedInCodex: true }
+        : row
+    ),
+  };
+
+  beforeEach(() => mockFetch({ versions: dismissed as typeof VERSIONS }));
+
+  it('marks the version dismissed WITHOUT saying the user did it', async () => {
+    // On the default #2068 policy CommandMate answers codex's update dialog
+    // itself with the digit that writes `dismissed_version`, so on a stock
+    // install this marker appears without anybody deciding anything. Copy that
+    // says "you dismissed this" would blame the user for the server's own
+    // automatic answer. Resolved through the real locales/en dictionary, so
+    // this reads the shipped wording rather than a key.
+    render(<AgentUpdatesCard />);
+
+    const badge = await screen.findByTestId('agent-updates-dismissed-codex');
+    expect(badge.textContent ?? '').toMatch(/dismissed/i);
+    expect(badge.textContent ?? '').not.toMatch(/\byou\b|\byour\b/i);
+  });
+
+  it('still offers the update, and still says one is available', async () => {
+    // A dismissal is a statement about codex's own banner, not a statement
+    // that the update is unwanted — and after #2068 it may not even be the
+    // user's statement. Hiding the button here would make CommandMate disagree
+    // with `codex --version` for a reason the screen never showed.
+    render(<AgentUpdatesCard />);
+    await waitFor(() =>
+      expect(screen.getByTestId('agent-updates-update-codex')).toBeInTheDocument()
+    );
+    expect(screen.getByTestId('agent-updates-available-codex')).toHaveTextContent('0.151.0');
   });
 });
 

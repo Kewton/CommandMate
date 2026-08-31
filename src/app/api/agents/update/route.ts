@@ -24,7 +24,13 @@
  *    selected by that id and resolved to an absolute path. No string from the
  *    request reaches `execFile`, and no shell is involved at any point.
  *  - **An in-flight lock** per tool, so a double-click cannot start two
- *    `npm install -g` against the same package.
+ *    `npm install -g` against the same package. The lock is taken **inside**
+ *    `runAgentUpdate`, not here: `commandmate agents update` reaches the same
+ *    installer without passing through this file, and after #2068 codex's own
+ *    in-pane `Update now` is a third way in. A lock only one of three callers
+ *    takes is not a lock. What this route still does is READ the marker before
+ *    it starts streaming — once a 200 and a body have been returned there is no
+ *    way to answer 409 any more — and report a lost race as a `done` event.
  *
  * ## Why NDJSON rather than JSON or SSE
  *
@@ -43,9 +49,8 @@ export const dynamic = 'force-dynamic';
 
 import { NextResponse, type NextRequest } from 'next/server';
 import {
-  acquireAgentUpdateLock,
+  isAgentUpdateInProgress,
   isUpdatableAgentTool,
-  releaseAgentUpdateLock,
   resolveAgentUpdatePlan,
   runAgentUpdate,
   UPDATABLE_AGENT_TOOLS,
@@ -125,7 +130,10 @@ export async function POST(request: NextRequest): Promise<Response> {
     );
   }
 
-  if (!acquireAgentUpdateLock(tool)) {
+  // A read, not an acquisition: `runAgentUpdate` owns the lock (see the module
+  // header). This is only how the route picks its status code, because a 409
+  // has to be decided before the stream exists.
+  if (isAgentUpdateInProgress(tool)) {
     return NextResponse.json(
       {
         status: 'error' as const,
@@ -202,7 +210,10 @@ export async function POST(request: NextRequest): Promise<Response> {
           error: message,
         });
       } finally {
-        releaseAgentUpdateLock(tool);
+        // No release here: `runAgentUpdate` takes the lock and gives it back,
+        // so releasing from this side would hand back a lock this route never
+        // held — and, on a lost race, would clear the marker belonging to the
+        // update that IS running.
         if (open) controller.close();
       }
     },

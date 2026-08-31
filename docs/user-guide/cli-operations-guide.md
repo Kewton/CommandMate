@@ -2689,6 +2689,31 @@ codex の「Update now」は **codex プロセスを終了してから**イン�
   それ未満または codex が PATH に無い場合は `npm install -g @openai/codex@latest` です。
   `--check` でどちらになるかを事前に確認できます。
 
+#### pane の中の update ダイアログとの関係
+
+pane の中で codex が update ダイアログを出すことは**今でもあります**（利用者が自分で
+`Update now` を押した場合など）。**その経路は塞がれておらず**、CommandMate が何と答えるかと
+落ちた pane をどう復旧するかは `CM_CODEX_UPDATE_DIALOG`（[CLI セットアップガイド](./cli-setup-guide.md)）が
+受け持ちます。インストール完了後に同じ pane へ起動コマンドを送り直すので、pane がシェルに
+落ちたままにはなりません。
+
+2 つの経路の違いはこうです:
+
+| | pane の中の更新 | `agents update`（この節） |
+|---|---|---|
+| きっかけ | codex が聞いてきたとき（受動的） | 利用者が CommandMate から実行（能動的） |
+| セッション | **一度落ちて再起動される** | **無傷のまま**（古いバイナリで動き続ける） |
+| 実行コマンド | codex 自身の `npm install -g @openai/codex` | `codex update` または `npm install -g @openai/codex@latest` |
+
+**同じグローバル install を撃つ経路が複数あるため**、CommandMate はツール単位の in-flight
+ロックを持ち、API・CLI・pane 内更新のいずれもそれを取ります（同時実行は 409 / エラーで拒否）。
+
+> **`@latest` の有無について**: codex 自身は `npm install -g @openai/codex` と書きます。
+> これは npm の既定 dist-tag（通常 `latest`）を使う形で、`npm config set tag` を設定して
+> いない環境では `@latest` 付きと同じ版になります。`agents update` のフォールバックが
+> `@latest` を明示するのは、実行する argv が「押した時点では誰も見ていない npm の設定」に
+> 依存しないようにするためです。
+
 #### 終了コード
 
 | コード | 意味 |

@@ -8,12 +8,22 @@
  *  - the in-flight lock;
  *  - no route-level auth, and no `AUTH_EXCLUDED_PATHS` entry.
  *
- * Plus the one that is specific to this Issue: the update must run OUTSIDE the
- * agent pane, which is assertable here as "the route never reaches tmux or a
- * CLI tool's session API" — it calls `runAgentUpdate` and nothing else.
+ * The Issue's central claim — the update must run OUTSIDE the agent pane — is
+ * NOT assertable from here: a route that also typed into the pane would emit
+ * the same `plan` / `output` / `done` stream and every test below would stay
+ * green. It is measured structurally instead, by walking this route's
+ * transitive import closure, in
+ * `tests/unit/updates/agent-update-not-in-pane-2069.test.ts`.
+ *
+ * The lock moved out of this file in review: `commandmate agents update` and
+ * (after #2068) codex's own in-pane `Update now` reach the same global install
+ * without passing through this route, so the acquisition lives inside
+ * `runAgentUpdate` and what remains here is the READ that picks the status code.
+ * That is why the 409 tests below take the lock through the real primitive
+ * rather than by starting a first request.
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 
 const { resolveAgentUpdatePlan, runAgentUpdate, getAgentVersions } = vi.hoisted(() => ({
   resolveAgentUpdatePlan: vi.fn(),
@@ -34,7 +44,11 @@ vi.mock('@/lib/updates/agent-versions', async (importOriginal) => {
 import { NextRequest } from 'next/server';
 import { POST, dynamic } from '@/app/api/agents/update/route';
 import { AUTH_EXCLUDED_PATHS } from '@/config/auth-config';
-import { isAgentUpdateInProgress, releaseAgentUpdateLock } from '@/lib/updates/agent-updater';
+import {
+  acquireAgentUpdateLock,
+  isAgentUpdateInProgress,
+  releaseAgentUpdateLock,
+} from '@/lib/updates/agent-updater';
 
 const PLAN = {
   tool: 'codex' as const,
@@ -173,33 +187,69 @@ describe('[#2069] POST /api/agents/update — the stream', () => {
 });
 
 describe('[#2069] POST /api/agents/update — the lock', () => {
-  it('refuses a second concurrent update with 409', async () => {
-    let release!: () => void;
-    runAgentUpdate.mockImplementation(
-      () => new Promise((resolve) => {
-        release = () => resolve({ ok: true, exitCode: 0, signal: null });
-      })
-    );
+  afterEach(() => releaseAgentUpdateLock('codex'));
 
-    const first = POST(request({ tool: 'codex' }));
-    // The lock is taken before the stream starts, so the second request sees it.
-    const firstResponse = await first;
-    const second = await POST(request({ tool: 'codex' }));
+  it('answers 409 while any holder has the marker', async () => {
+    // Taken through the primitive, which is how the two callers this route
+    // cannot see take it: `commandmate agents update` (via `runAgentUpdate`)
+    // and #2068's in-pane update path.
+    expect(acquireAgentUpdateLock('codex')).toBe(true);
 
-    expect(second.status).toBe(409);
-    expect((await second.json()).code).toBe('in_progress');
+    const response = await POST(request({ tool: 'codex' }));
 
-    release();
-    await firstResponse.text();
+    expect(response.status).toBe(409);
+    expect((await response.json()).code).toBe('in_progress');
+    // Refused before anything was started.
+    expect(runAgentUpdate).not.toHaveBeenCalled();
   });
 
-  it('releases the lock once the stream has finished', async () => {
-    await readEvents(await POST(request({ tool: 'codex' })));
-    expect(isAgentUpdateInProgress('codex')).toBe(false);
+  it('does not release a lock it never took (the lost-race path)', async () => {
+    // The shape this reproduces: the pre-check finds the marker free, and
+    // between that read and the run somebody else takes it — the CLI in another
+    // process, or #2068 answering codex's in-pane dialog. `runAgentUpdate`
+    // then refuses. If this route released in its `finally` it would clear the
+    // OTHER holder's marker, and the next double-click would start a second
+    // `npm install -g` on top of a running one.
+    runAgentUpdate.mockImplementation(async () => {
+      acquireAgentUpdateLock('codex'); // the interloper wins the race
+      return {
+        ok: false,
+        exitCode: null,
+        signal: null,
+        code: 'in_progress' as const,
+        error: 'An update for codex is already running.',
+      };
+    });
+
+    const events = await readEvents(await POST(request({ tool: 'codex' })));
+
+    expect(events.at(-1)).toMatchObject({ type: 'done', ok: false });
+    expect(
+      isAgentUpdateInProgress('codex'),
+      'the route must not release a marker it never acquired'
+    ).toBe(true);
   });
 
-  it('releases the lock even when the updater throws', async () => {
-    runAgentUpdate.mockRejectedValue(new Error('boom'));
+  it('reports a lost race as a done event rather than a broken stream', async () => {
+    runAgentUpdate.mockResolvedValue({
+      ok: false,
+      exitCode: null,
+      signal: null,
+      code: 'in_progress',
+      error: 'An update for codex is already running.',
+    });
+
+    const events = await readEvents(await POST(request({ tool: 'codex' })));
+    const done = events.at(-1);
+
+    expect(done).toMatchObject({ type: 'done', ok: false });
+    expect(done?.error).toContain('already running');
+    // No version was claimed for a run that never happened.
+    expect(done?.installed).toBe('0.149.0');
+    expect(getAgentVersions).not.toHaveBeenCalled();
+  });
+
+  it('leaves the marker clear when nothing held it', async () => {
     await readEvents(await POST(request({ tool: 'codex' })));
     expect(isAgentUpdateInProgress('codex')).toBe(false);
   });

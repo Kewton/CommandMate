@@ -108,6 +108,19 @@ async function computeRows(): Promise<AgentVersionRow[]> {
 }
 
 /**
+ * When a fan-out started at `startedAt` should stop being reused.
+ *
+ * Takes the caller's clock rather than reading `Date.now()` again, and that is
+ * the whole point of the helper: an injected `now` that is honoured on the READ
+ * side but ignored on the WRITE side makes every TTL assertion vacuous — the
+ * cache is stamped with a real epoch, a test's `now: 2_000` is smaller than it
+ * whatever the TTL is, and `AGENT_VERSIONS_CACHE_TTL_MS = 0` still passes.
+ */
+function expiryFrom(startedAt: number): number {
+  return startedAt + AGENT_VERSIONS_CACHE_TTL_MS;
+}
+
+/**
  * Every tool's version row, cached for {@link AGENT_VERSIONS_CACHE_TTL_MS}.
  *
  * Single-flight: two concurrent callers share one fan-out rather than doubling
@@ -115,7 +128,9 @@ async function computeRows(): Promise<AgentVersionRow[]> {
  *
  * @param options.force - Skip the cache and re-probe. What the UI passes right
  *   after an update, so the new version is visible without a 30s wait.
- * @param options.now - Injectable clock (tests).
+ * @param options.now - Injectable clock, used for BOTH the expiry comparison
+ *   and the expiry that is written. Honouring it on only one side would leave
+ *   the TTL untestable — see {@link expiryFrom}.
  */
 export async function getAgentVersions(
   options: { force?: boolean; now?: number } = {}
@@ -133,12 +148,12 @@ export async function getAgentVersions(
   inFlight = (async () => {
     try {
       const rows = await computeRows();
-      cache = { rows, expiresAt: Date.now() + AGENT_VERSIONS_CACHE_TTL_MS };
+      cache = { rows, expiresAt: expiryFrom(now) };
       return rows;
     } catch {
       // A probe fan-out that throws must not fail the surface that asked: the
       // versions are an annotation, and an empty list renders as "unknown".
-      cache = { rows: [], expiresAt: Date.now() + AGENT_VERSIONS_CACHE_TTL_MS };
+      cache = { rows: [], expiresAt: expiryFrom(now) };
       return [];
     } finally {
       inFlight = null;

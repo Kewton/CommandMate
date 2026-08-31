@@ -186,7 +186,7 @@
     "installed": "installed {version}",
     "notInstalled": "Not installed",
     "available": "Update available: {version}",
-    "dismissed": "Dismissed inside codex",
+    "dismissed": "Marked as dismissed in codex",
     "update": "Update",
     "updating": "Updating...",
     "running": "Running: {command}",
