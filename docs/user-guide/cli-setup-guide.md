@@ -13,9 +13,10 @@
 3. [初期設定](#初期設定)
 4. [サーバーの起動と停止](#サーバーの起動と停止)
 5. [CLIコマンドリファレンス](#cliコマンドリファレンス)
-6. [トラブルシューティング](#トラブルシューティング)
-7. [アップグレード](#アップグレード)
-8. [アンインストール](#アンインストール)
+6. [エージェント側の設定](#エージェント側の設定)
+7. [トラブルシューティング](#トラブルシューティング)
+8. [アップグレード](#アップグレード)
+9. [アンインストール](#アンインストール)
 
 ---
 
@@ -318,6 +319,72 @@ commandmate docs [options]
 | `--section <name>` | 指定セクションの内容を表示 |
 | `--search <query>` | ドキュメント内を検索 |
 | `--all` | 利用可能なセクション一覧を表示 |
+
+---
+
+## エージェント側の設定
+
+### Codex の更新ダイアログ（`CM_CODEX_UPDATE_DIALOG`、Issue #2068）
+
+codex は TUI を開く前に新しいリリースを確認し、`$CODEX_HOME/version.json` に
+`latest_version` がキャッシュされていると（＝ 2 回目以降の起動で）次のダイアログを出します。
+
+```
+  ✨ Update available! 0.149.1 -> 0.151.0
+  Release notes: https://github.com/openai/codex/releases/latest
+› 1. Update now (runs `npm install -g @openai/codex`)
+  2. Skip
+  3. Skip until next version
+  Press enter to continue
+```
+
+CommandMate がこれにどう答えるかは `CM_CODEX_UPDATE_DIALOG` で選べます。
+サーバー（`commandmate start`）の環境変数として設定してください。
+
+| 値 | 送るキー | 挙動 |
+|---|---|---|
+| `skip` | `2` | ダイアログを閉じるだけ。**何も記録されないので次回起動でまた出ます** |
+| `skip-until-next-version`（**既定**） | `3` | `version.json` に `dismissed_version` が書かれ、**次の版が出るまで二度と出ません** |
+| `update` | `1` | codex が `npm install -g @openai/codex` に置き換わって終了 → **インストール完了後に CommandMate が同じ pane へ起動コマンドを送り直します** |
+| `ask` | （送らない） | ダイアログをそのまま残し、**人がプロンプトパネルで選びます** |
+
+値を認識できない場合（綴り間違いなど）は既定にフォールバックします。`updates` が
+`update` として解釈されることはありません。
+
+```bash
+# 既定を明示する
+CM_CODEX_UPDATE_DIALOG=skip-until-next-version commandmate start --daemon
+
+# 起動のたびに最新へ上げる（npm のグローバル領域に書き込みます）
+CM_CODEX_UPDATE_DIALOG=update commandmate start --daemon
+
+# 自分で選ぶ
+CM_CODEX_UPDATE_DIALOG=ask commandmate start --daemon
+```
+
+#### 既定が `3` である理由
+
+codex-cli 0.149.1 で実測した結果です（隔離した `CODEX_HOME`、2026-08-31）。
+
+| キー | 実行後の `version.json` | 次回起動 |
+|---|---|---|
+| `2` | `dismissed_version: null`（変化なし） | **またダイアログが出る** |
+| `3` | `dismissed_version: "0.151.0"` | 出ない |
+| `1` | 変化なし。codex は `npm install` に置き換わって終了 | — |
+
+`2` は「閉じた」だけで何も覚えないため、CommandMate 経由では毎回ダイアログが出て、
+しかも毎回サーバーが勝手に閉じるので**利用者が更新を選べません**。これが Issue #2068 の
+報告内容です。
+
+#### `ask` を選んだときの注意
+
+- ダイアログが残っている間、その pane はプロンプト待ちです。`commandmate wait` は
+  exit 10（プロンプト検出）で返り、`commandmate send` は「まだ入力できない」として失敗します。
+- **Auto-Yes はこのダイアログには答えません**（Issue #1829 のガード）。`1` は codex を
+  終了させるため、機械が選んでよい選択肢ではないからです。
+- パネルで `1`（Update now）を選ぶと codex は終了し、pane にシェルが残ります。
+  セッション起動の待ち時間内であれば CommandMate が起動コマンドを送り直しますが、
+  それより後に選んだ場合は **Stop → Start でセッションを起こし直してください**。
 
 ---
 
