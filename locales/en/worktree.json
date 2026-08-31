@@ -928,6 +928,41 @@
     "refresh": "Refresh",
     "loading": "Loading verification data…",
     "loadError": "Could not load verification data: {message}",
+    "onboarding": {
+      "what": "Verification runs the gates this repository declares in `{path}`, in this worktree, exactly as written.",
+      "how": "Each gate's exit code decides the verdict. They are the same gates `commandmate verify` and `wait --verify` use, so green here means green there.",
+      "loading": "Reading the declared gates…",
+      "configError": "Could not read the verification config: {message}",
+      "invalid": "`{path}` exists but could not be read: {message}",
+      "noConfig": {
+        "body": "This repository has not declared any verification gates yet — `{path}` does not exist, so there is nothing to run.",
+        "hint": "Reads this repository's `.github/workflows/*.yml` and `package.json` scripts and writes a draft. An existing file is never overwritten. `commandmate verify init` does the same thing.",
+        "action": "Draft from CI",
+        "pending": "Drafting…",
+        "docs": "How to write verify.yaml (design doc)",
+        "created": "Drafted {count} gates into `{path}`. Review them before relying on the verdict.",
+        "conflict": "`{path}` already exists. Nothing was overwritten; the file that is there is shown instead.",
+        "empty": "Nothing in this repository's CI definitions or npm scripts could be drafted as a gate. Write `{path}` by hand.",
+        "error": "Could not draft the verification config: {message}"
+      },
+      "configured": {
+        "body": "{count} gates are declared in `{path}`. None has run on this branch yet.",
+        "gatesHeading": "Declared gates",
+        "builtin": "The built-in gates run alongside them: {gates}",
+        "builtinHint": "The built-in gates run on every verification without being declared in `.commandmate/verify.yaml`. Each gate row below says what its gate checks.",
+        "action": "Run verification"
+      },
+      "running": {
+        "progress": "Running: {done} of {total} gates have finished.",
+        "elapsed": "Elapsed {elapsed}",
+        "action": "Refresh now",
+        "hint": "Gates run one at a time; each appears in the list below as it finishes."
+      },
+      "result": {
+        "body": "The last run on this branch, #{runId}, is RESULT {verdict}.",
+        "action": "Show the latest run's gates"
+      }
+    },
     "contract": {
       "heading": "Execution contract",
       "empty": "No contract on this branch.\nCreate one with `commandmate send --contract <file>`, or the `cmate-task-contract` Skill.",
@@ -942,15 +977,35 @@
     },
     "runs": {
       "heading": "Verification runs",
-      "empty": "No verification run yet.\nPress Re-verify, or run `commandmate verify <worktree-id>`.",
+      "empty": "No verification run yet.\nPress Re-verify, or run `commandmate verify {worktreeId}`.",
       "rerun": "Re-verify",
       "rerunPending": "Starting…",
       "rerunConflict": "A verification run is already in progress (run {runId}).",
       "rerunConflictUnknown": "A verification run is already in progress.",
       "rerunError": "Could not start verification: {message}",
-      "select": "Show gates for run {runId} (RESULT {verdict})",
+      "select": "Show gates for run {runId} (RESULT {verdict} — {gloss})",
       "runLabel": "run {runId}",
-      "trigger": "trigger={trigger}"
+      "trigger": "trigger={trigger}",
+      "cliLegend": "Equivalent CLI exit codes: {items}",
+      "cliLegendItem": "{label} = exit {code}",
+      "exitCode": "CLI exit={code}",
+      "cancel": "Stop verification",
+      "cancelPending": "Stopping…",
+      "cancelHint": "Stopping signals the running gate’s process group to terminate and starts none of the remaining gates. The run is closed as stopped.",
+      "cancelGone": "That run had already finished. The list has been re-read — check the verdict it reached.",
+      "cancelError": "Could not stop the verification run: {message}",
+      "loadMore": "Load {count} more",
+      "history": {
+        "open": "Show history across other branches",
+        "close": "Hide the cross-branch history",
+        "hint": "Recent verification runs from every worktree this server manages. When one gate is red on several branches, that is usually a verdict about the gate rather than about the work.",
+        "loading": "Loading the cross-branch history…",
+        "empty": "No verification run from another branch in this window.",
+        "error": "Could not load the cross-branch history: {message}",
+        "failingGates": "Failing gates: {gates}"
+      },
+      "partial": "Partial run: {ran} of the {total} planned gates ran. Not run: {gates}. This verdict covers only the gates that ran.",
+      "cancelSettling": "Stop requested. The gate has been signalled and the run is closing; a process that ignores it is killed five seconds later."
     },
     "gates": {
       "heading": "Gates — run {runId}",
@@ -964,23 +1019,67 @@
       "showLog": "Show log tail",
       "hideLog": "Hide log tail",
       "logOmitted": "… (+{count} more lines; run `commandmate verify show {runId}` for the full log)",
-      "noLog": "No log output recorded."
+      "noLog": "No log output recorded.",
+      "verdictHeading": "This run's verdict",
+      "contractSourceHint": "`[contract]` marks a gate the execution contract sent to this branch asked for, rather than one `.commandmate/verify.yaml` declares.",
+      "builtinBadge": "built-in",
+      "builtin": {
+        "workEvidence": "Work-evidence gate (built-in). Looks for commits ahead of `options.baseRef` or an uncommitted change. With neither, the run is reported as Not started and the remaining gates never run.",
+        "scope": "Scope gate (built-in). Reconciles the changed files against the execution contract's `scope.allow` / `scope.deny`. A run with no contract has no scope to judge, so the gate does not run.",
+        "envClean": "Env-clean gate (built-in). Compares the machine against the snapshot taken when the task started: listening servers, `mcbd-*` tmux sessions, `$HOME` and `~/.commandmate`.",
+        "config": "Config gate (built-in). A pseudo-gate that records why `.commandmate/verify.yaml` could not be read. When it is present, no real gate ran at all."
+      },
+      "skipHeading": "Gates that did not run",
+      "skipReasonFor": "{gateId}: {reason}",
+      "skipReason": {
+        "primaryCheckout": "This worktree is the server process's own working directory, so `options.skipInPrimaryCheckout` declined the gate. That guard protects the running UI from a mid-flight rebuild — it is not a defect. The gate runs normally in any other worktree.",
+        "workEvidence": "The `work-evidence` gate did not pass, so there was nothing for this gate to judge.",
+        "mutex": "Another verification holding the same `mutex` did not finish within the wait budget, so the command was never started. That is a resource conflict, not a verdict on the work.",
+        "detachedContract": "This branch has an execution contract, but the run was not attached to it, so the declared scope went unjudged. Starting the run with `wait --verify` attaches it automatically.",
+        "noContract": "No execution contract is attached to this run, so no scope is declared to check.",
+        "notRequired": "The execution contract sets `success.requireScopeClean: false`, so the scope was not judged.",
+        "unknown": "This gate did not execute. Its log tail says why.",
+        "cancelled": "The verification run was stopped, so this gate reached no verdict. That is the result of stopping the run, not a judgement about the work."
+      },
+      "showFullLog": "Open the full log",
+      "fullLogTitle": "Full log — {gateId} (run {runId})",
+      "fullLogSize": "{lines} lines",
+      "fullLogStored": "The server stores only the tail of each gate’s output, capped by `options.maxLogTailBytes`. What you see here is all of it — nothing earlier was kept anywhere.",
+      "copyLog": "Copy the log",
+      "copied": "Copied",
+      "copyFailed": "Could not copy"
     },
     "runStatus": {
-      "running": "running",
-      "passed": "passed",
-      "failed": "failed",
-      "not_started": "not_started",
-      "error": "error",
-      "cancelled": "cancelled"
+      "running": "Running",
+      "passed": "Passed",
+      "failed": "Failed",
+      "not_started": "Not started",
+      "error": "Could not judge",
+      "cancelled": "Cancelled"
+    },
+    "runStatusGloss": {
+      "running": "Gates are still running; there is no verdict yet.",
+      "passed": "Every selected gate passed.",
+      "failed": "At least one gate failed, timed out, or errored.",
+      "not_started": "No work evidence: neither a commit nor an uncommitted change. There was nothing to judge, so the remaining gates never ran.",
+      "error": "No verdict was reached — gates were left unrun, or the verification config could not be read. This is not the same as failing.",
+      "cancelled": "The run was cancelled before it reached a verdict."
     },
     "gateStatus": {
-      "running": "RUNNING",
-      "passed": "PASS",
-      "failed": "FAIL",
-      "timeout": "TIMEOUT",
-      "skipped": "SKIP",
-      "error": "ERROR"
+      "running": "Running",
+      "passed": "Passed",
+      "failed": "Failed",
+      "timeout": "Timed out",
+      "skipped": "Not run",
+      "error": "Errored"
+    },
+    "gateStatusGloss": {
+      "running": "This gate is still running.",
+      "passed": "The command exited 0.",
+      "failed": "The command exited with a non-zero code.",
+      "timeout": "The command was cut off before it finished within timeoutSec.",
+      "skipped": "This gate never executed. That is not the same as passing.",
+      "error": "The gate could not be started, so it reached no verdict."
     },
     "chip": {
       "taskReason": "Task “{title}”: {status}",
@@ -990,7 +1089,26 @@
       "failingGates": "Gates that did not pass: {gates}",
       "gatesPassed": "All {count} gates passed",
       "openHint": "Open the Verification pane",
-      "dash": "—"
+      "dash": "—",
+      "unverified": "Not verified",
+      "noTask": "No execution contract has been sent to this branch",
+      "reasonHeading": "Why this verdict",
+      "showReason": "Show why",
+      "hideReason": "Hide why"
+    },
+    "selection": {
+      "heading": "Gates to run",
+      "open": "Choose gates",
+      "close": "Close the gate list",
+      "all": "All {count} gates will run (the default)",
+      "partial": "{selected} of {total} selected: {gates}",
+      "gateLabel": "Select gate {gateId}",
+      "runAll": "Verify with every gate",
+      "runSelected": "Verify with the {count} selected",
+      "hint": "Only the selected gates run, so confirming a one-line `lint` fix no longer means waiting for `build` and `unit`. The verdict then covers only the gates that ran, and a narrowed run is labelled as a partial run in the gate table. When the execution contract declares `success.requireWorkEvidence` / `requireScopeClean`, `work-evidence` and `scope` run regardless of the selection — narrowing the gate list cannot drop a criterion the contract declared.",
+      "failedOnly": "Only the gates that failed ({count})",
+      "failedOnlyEmpty": "The run on screen has no failing gate to re-run. A gate that did not run would simply not run again for the same reason.",
+      "selectAll": "Back to all gates"
     }
   },
   "task": {

@@ -81,7 +81,17 @@ ActivityBar 全高  ActivityPane  History (折りたたみ可)  FilePanel
 
 #### 2. ActivityBar (48px, 全高貫通)
 - VS Code 流の縦型 Activity Bar
-- 6 Activity: Files / Git / Notes / Schedules / Agent / Timer
+- 10 Activity。**唯一の出所は `src/config/activity-bar-config.ts` の `ACTIVITIES`** で、下記はその写しです。並び順は Activity Bar の表示順であり、ArrowUp/ArrowDown の移動順でもあります（新しい Activity は末尾に追加すること。挿入すると既存のキーボード順序が黙って繰り上がります）。`tests/unit/docs/ui-ux-guide-activities-2062.test.ts` がこの一覧と `ACTIVITIES` の一致を固定しているので、Activity を増やしたらここも直してください。
+  1. `files` — ファイル
+  2. `git` — Git
+  3. `notes` — メモ
+  4. `schedules` — スケジュール
+  5. `agent` — エージェント
+  6. `timer` — タイマー
+  7. `todo` — ToDo (Issue #1015)
+  8. `skills` — スキル (Issue #1441)
+  9. `verification` — 検証 (Issue #1816)
+  10. `env` — 環境変数 (Issue #1968)
 - Header の下から画面下端まで貫通 (Issue #730)
 - 各アイコンに即時 Tooltip (100ms, ダークテーマ, 右配置) (Issue #730)
 - キーボード操作: ArrowUp/Down/Home/End/Enter/Space

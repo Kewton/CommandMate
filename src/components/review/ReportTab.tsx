@@ -19,8 +19,8 @@ import { SUMMARY_ALLOWED_TOOLS, MAX_USER_INSTRUCTION_LENGTH } from '@/config/rev
 import { TOOLS_WITH_MODEL_SUPPORT } from '@/lib/cmate-cli-tool-parser';
 import { useReportGeneration } from '@/hooks/useReportGeneration';
 import { useGenerationStatus } from '@/hooks/useGenerationStatus';
+import { useCopyFeedback } from '@/hooks/useCopyFeedback';
 import { copyToClipboard } from '@/lib/clipboard-utils';
-import { COPY_FEEDBACK_RESET_MS } from '@/config/ui-feedback-config';
 import type { GenerationMode } from '@/hooks/useReportGeneration';
 
 /** Format Date to YYYY-MM-DD */
@@ -62,7 +62,9 @@ export default function ReportTab() {
   const [isLoading, setIsLoading] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [copied, setCopied] = useState(false);
+  // Copy confirmation. The timer lives in the hook so leaving the tab inside
+  // the 2s window does not leave a callback behind (Issue #2180).
+  const { copied, markCopied } = useCopyFeedback();
   const [error, setError] = useState<string | null>(null);
 
   /**
@@ -386,8 +388,7 @@ export default function ReportTab() {
                 size="sm"
                 onClick={async () => {
                   await copyToClipboard(report.content);
-                  setCopied(true);
-                  setTimeout(() => setCopied(false), COPY_FEEDBACK_RESET_MS);
+                  markCopied();
                 }}
                 data-testid="copy-report-button"
               >

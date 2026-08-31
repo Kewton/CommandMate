@@ -19,6 +19,7 @@ import type { FileTab } from '@/hooks/useFileTabs';
 import type { FileContent } from '@/types/models';
 import { useFileContentPolling } from '@/hooks/useFileContentPolling';
 import { useFileContentSearch } from '@/hooks/useFileContentSearch';
+import { useCopyFeedback } from '@/hooks/useCopyFeedback';
 import { FileSearchBar } from './FileSearchBar';
 import { ImageViewer } from './ImageViewer';
 import { VideoViewer } from './VideoViewer';
@@ -29,7 +30,6 @@ import { VIEWER_OVERSCAN_LINES, VIEWER_CHUNK_LINE_SIZE } from '@/config/file-vie
 import hljs from 'highlight.js';
 import 'highlight.js/styles/github-dark.css';
 import { Z_INDEX } from '@/config/z-index';
-import { COPY_FEEDBACK_RESET_MS } from '@/config/ui-feedback-config';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Spinner } from '@/components/ui/Spinner';
 
@@ -156,25 +156,16 @@ function ErrorDisplay({ error }: { error: string }) {
 /** Toolbar with path copy, content copy, search, and maximize/minimize buttons */
 function FileToolbar({ filePath, isMaximized, onToggleMaximize, copyableContent, onSearch }: { filePath: string; isMaximized: boolean; onToggleMaximize: () => void; copyableContent?: string; onSearch?: () => void }) {
   const t = useTranslations('worktree');
-  const [pathCopied, setPathCopied] = useState(false);
-  const [contentCopied, setContentCopied] = useState(false);
-  const pathTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const contentTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Cleanup timers on unmount
-  useEffect(() => {
-    return () => {
-      if (pathTimerRef.current) clearTimeout(pathTimerRef.current);
-      if (contentTimerRef.current) clearTimeout(contentTimerRef.current);
-    };
-  }, []);
+  // Two INDEPENDENT confirmations (Issue #2180, previously `pathTimerRef` /
+  // `contentTimerRef` here): one timer each, so copying the content does not
+  // cut the path confirmation short.
+  const { copied: pathCopied, markCopied: markPathCopied } = useCopyFeedback();
+  const { copied: contentCopied, markCopied: markContentCopied } = useCopyFeedback();
 
   const handleCopyPath = async () => {
     try {
       await copyToClipboard(filePath);
-      setPathCopied(true);
-      if (pathTimerRef.current) clearTimeout(pathTimerRef.current);
-      pathTimerRef.current = setTimeout(() => setPathCopied(false), COPY_FEEDBACK_RESET_MS);
+      markPathCopied();
     } catch {
       // Silent failure
     }
@@ -184,9 +175,7 @@ function FileToolbar({ filePath, isMaximized, onToggleMaximize, copyableContent,
     if (!copyableContent) return;
     try {
       await copyToClipboard(copyableContent);
-      setContentCopied(true);
-      if (contentTimerRef.current) clearTimeout(contentTimerRef.current);
-      contentTimerRef.current = setTimeout(() => setContentCopied(false), COPY_FEEDBACK_RESET_MS);
+      markContentCopied();
     } catch {
       // Silent failure
     }

@@ -17,13 +17,27 @@
  * quit key. The caller renders it only for a confirmed unclassified state, never at
  * a normal input prompt or over a detected prompt / selection-list UI, so Enter/q
  * can never reach the composer or a live input line.
+ *
+ * ## The press-feedback timer is owned, not fired and forgotten (Issue #2176)
+ *
+ * The press highlight used to be a bare `setTimeout(() => setActiveKey(null),
+ * KEY_PRESS_FEEDBACK_RESET_MS)` with no id kept, so nothing could cancel it: a
+ * hatch unmounted inside those 150 ms left a callback that still ran and still
+ * wrote state into a tree that was gone. Harmless in a browser, not under jsdom,
+ * where it fires after `window` is torn down and becomes an unhandled error
+ * charged to an unrelated test. The timer now lives in
+ * {@link useKeyPressFeedback}, which keeps its id in a ref and clears it on both
+ * the next press and unmount. This hatch is especially exposed to it: it is
+ * rendered only while a TUI overlay is unclassified, so the very key that
+ * dismisses the overlay is also the key that unmounts the hatch — press and
+ * unmount are the same gesture here. Nothing observable moves.
  */
 
-import { useCallback, useState } from 'react';
+import { useCallback } from 'react';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { NavigationKey } from '@/types/terminal-keys';
 import { useSpecialKeys } from '@/hooks/useSpecialKeys';
-import { KEY_PRESS_FEEDBACK_RESET_MS } from '@/config/ui-feedback-config';
+import { useKeyPressFeedback } from '@/hooks/useKeyPressFeedback';
 
 export interface TerminalEscapeHatchProps {
   worktreeId: string;
@@ -66,7 +80,9 @@ const CODEX_QUIT_KEY: HatchKeyDef = { key: 'q', label: 'q', ariaLabel: 'Send q (
 /* eslint-enable no-restricted-syntax */
 
 export function TerminalEscapeHatch({ worktreeId, cliToolId, instanceId, onKeysSent }: TerminalEscapeHatchProps) {
-  const [activeKey, setActiveKey] = useState<string | null>(null);
+  // Issue #2176: the highlight timer is owned by the hook (ref-held id, cleared
+  // on the next press and on unmount) instead of being fired and forgotten here.
+  const { activeKey, markPressed } = useKeyPressFeedback();
   const send = useSpecialKeys(worktreeId, cliToolId, instanceId, onKeysSent);
   // Base pad (arrows + Enter + Esc) for every CLI; Codex additionally gets the
   // pager 'q'. 'q' stays Codex-only so it can never insert a literal 'q' at
@@ -78,11 +94,10 @@ export function TerminalEscapeHatch({ worktreeId, cliToolId, instanceId, onKeysS
 
   const handleClick = useCallback(
     (key: NavigationKey) => {
-      setActiveKey(key);
-      setTimeout(() => setActiveKey(null), KEY_PRESS_FEEDBACK_RESET_MS);
+      markPressed(key);
       send([key]);
     },
-    [send],
+    [markPressed, send],
   );
 
   return (

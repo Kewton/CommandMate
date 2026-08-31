@@ -113,15 +113,46 @@
  * already re-evaluates the query on every resize with no render of ours. The
  * suffix stays in `title` and `aria-label` at every width, so nothing is lost
  * from the accessible name — only the printed glyphs go.
+ *
+ * ## The press-feedback timer is owned, not fired and forgotten (Issue #2174)
+ *
+ * The highlight that follows a press is a `setTimeout` that clears `activeId`
+ * after {@link KEY_PRESS_FEEDBACK_RESET_MS}. It arrived with the strip itself in
+ * #2046 (`ceb1059d`) — not in #2131, which #2174's text names because
+ * `git log -1 -- <this file>` reports the file's LAST commit rather than the
+ * line's — and it arrived without a handle, so nothing could cancel it: a pane
+ * unmounted inside those 150 ms left a callback that still ran and still called
+ * `setActiveId(null)`. In a browser that is inert — React drops the update on a
+ * torn-down root. Under jsdom it is not: when the timer outlives the test that
+ * armed it, it fires against an environment whose `window` is already gone, and
+ * surfaces as an unhandled error attributed to whichever test happens to be
+ * running at the time.
+ *
+ * So the id lives in a ref and is cleared in both places that can invalidate it
+ * — the next press (which re-arms from zero rather than inheriting the previous
+ * press's remaining time) and unmount. That is the shape every other transient
+ * feedback timer in this tree already uses ({@link CopyButton},
+ * `TruncationTooltip`, `MemoCard`). Nothing observable moves: the highlight
+ * still appears synchronously on press and still clears exactly
+ * `KEY_PRESS_FEEDBACK_RESET_MS` later.
+ *
+ * Issue #2176 found the identical uncollected timer still open in
+ * `TerminalEscapeHatch` and `NavigationButtons` — which share this component's
+ * `useSpecialKeys` transport but not its file, so #2174's fix never reached them
+ * — and moved the whole thing into {@link useKeyPressFeedback} rather than
+ * copying it twice more. This file now consumes that hook; the ref, both
+ * `clearTimeout` sites and the observable timing above are unchanged, they just
+ * live one level down. The one thing that stayed here is `send()`: the hook owns
+ * the highlight and nothing else.
  */
 
-import { memo, useCallback, useId, useState } from 'react';
+import { memo, useCallback, useId } from 'react';
 import { useTranslations } from 'next-intl';
 import { ChevronDown } from 'lucide-react';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { OPENCODE_LEADER_KEY } from '@/types/terminal-keys';
 import { useSpecialKeys } from '@/hooks/useSpecialKeys';
-import { KEY_PRESS_FEEDBACK_RESET_MS } from '@/config/ui-feedback-config';
+import { useKeyPressFeedback } from '@/hooks/useKeyPressFeedback';
 import {
   useOpencodeQuickKeysDisclosure,
   type OpencodeQuickKeysLayout,
@@ -272,7 +303,9 @@ export const OpencodeQuickKeys = memo(function OpencodeQuickKeys({
   layout = 'mobile',
 }: OpencodeQuickKeysProps) {
   const t = useTranslations('worktree');
-  const [activeId, setActiveId] = useState<string | null>(null);
+  // Issue #2176: `activeId` and its timer now come from the shared hook — same
+  // ref-held id, same clear on the next press and on unmount as #2174 wrote here.
+  const { activeKey: activeId, markPressed } = useKeyPressFeedback();
   const send = useSpecialKeys(worktreeId, cliToolId, instanceId, onKeysSent);
   // Issue #2106. Called unconditionally (hooks rule) and for every tool, which
   // is one localStorage read on a PC pane that then ignores the value — the
@@ -284,11 +317,10 @@ export const OpencodeQuickKeys = memo(function OpencodeQuickKeys({
 
   const handleClick = useCallback(
     (def: QuickKeyDef) => {
-      setActiveId(def.id);
-      setTimeout(() => setActiveId(null), KEY_PRESS_FEEDBACK_RESET_MS);
+      markPressed(def.id);
       send([...def.keys]);
     },
-    [send],
+    [markPressed, send],
   );
 
   // Not a feature flag: every binding on this strip belongs to opencode's TUI,

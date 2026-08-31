@@ -134,6 +134,42 @@ export const RESERVED_GATE_IDS = [
 
 export const VERIFY_CONFIG_RELATIVE_PATH = '.commandmate/verify.yaml';
 
+/**
+ * Gate ids a default full run executes, in the order the runner records them
+ * (Issue #2061).
+ *
+ * The Verification pane needs a denominator while a run is in flight — gate
+ * rows are created as each gate starts, so "3 gates recorded" is progress, not
+ * a total. Declared here rather than in the pane because the composition is the
+ * runner's: `work-evidence`, then `scope`, then `env-clean` only when a
+ * declaration switched it on, then verify.yaml's own gates in file order.
+ *
+ * A *default* run, which is what the pane's "run verification" button starts.
+ * A run narrowed with `--gates` / `gateIds` executes a subset of this.
+ *
+ * @param contractGates gate definitions the worktree's execution contract
+ *        carries (#1791). They run after verify.yaml's, exactly as
+ *        `declaredGates()` orders them, and leaving them out understated both
+ *        the pane's progress denominator and — since #2063 made the list
+ *        selectable — which gates an operator is allowed to re-run: a run whose
+ *        only failure was a contract gate offered nothing to re-run at all.
+ */
+export function defaultPlannedGateIds(
+  config: VerifyConfig,
+  contractGates: readonly VerifyGate[] = []
+): string[] {
+  return [
+    WORK_EVIDENCE_GATE_ID,
+    SCOPE_GATE_ID,
+    ...(config.options.requireEnvClean ? [ENV_CLEAN_GATE_ID] : []),
+    ...config.gates.map((gate) => gate.id),
+    // A contract gate whose id collides with verify.yaml is refused at send
+    // (#1791) and the runner refuses it again, so no de-duplication is needed
+    // here; a duplicate id would be a bug worth seeing rather than hiding.
+    ...contractGates.map((gate) => gate.id),
+  ];
+}
+
 export const DEFAULT_TIMEOUT_SEC = 600;
 export const DEFAULT_MAX_LOG_TAIL_BYTES = 8192;
 

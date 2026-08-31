@@ -11,13 +11,46 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent, within } from '@testing-library/react';
 import { VerificationPane } from '@/components/worktree/VerificationPane';
-import type { WorktreeVerificationState } from '@/hooks/useWorktreeVerification';
+import {
+  resolveVerificationPhase,
+  type WorktreeVerificationState,
+} from '@/hooks/useWorktreeVerification';
 import type {
   TaskView,
   VerificationGateResultView,
   VerificationRunListItem,
   VerificationRunView,
+  VerifyConfigResponse,
 } from '@/lib/api/verification-api';
+
+/** A repository that has declared its gates (the ordinary case). */
+const CONFIG_PRESENT: VerifyConfigResponse = {
+  exists: true,
+  path: '.commandmate/verify.yaml',
+  gates: [
+    { id: 'lint', command: 'npm run lint', timeoutSec: 900, mutex: null, retryOnFail: null, flakyIsPass: null },
+    { id: 'unit', command: 'npm run test:unit', timeoutSec: 1800, mutex: null, retryOnFail: null, flakyIsPass: null },
+  ],
+  options: {
+    baseRef: 'origin/develop',
+    skipInPrimaryCheckout: true,
+    maxLogTailBytes: 8192,
+    requireCommit: false,
+    requireEnvClean: false,
+  },
+  plannedGateIds: ['work-evidence', 'scope', 'lint', 'unit'],
+  error: null,
+};
+
+/** A repository with no `.commandmate/verify.yaml` at all. */
+const CONFIG_ABSENT: VerifyConfigResponse = {
+  exists: false,
+  path: '.commandmate/verify.yaml',
+  gates: [],
+  options: null,
+  plannedGateIds: [],
+  error: null,
+};
 
 vi.mock('next-intl', async () => {
   const { createRealIntlMock } = await import('@tests/helpers/real-intl');
@@ -97,7 +130,8 @@ const GATES: VerificationGateResultView[] = [
 const RUN_DETAIL: VerificationRunView = { ...RUN_9, gates: GATES };
 
 function buildState(overrides: Partial<WorktreeVerificationState> = {}): WorktreeVerificationState {
-  return {
+  const base: WorktreeVerificationState = {
+    worktreeId: 'wt-1',
     task: null,
     runs: [],
     latestRun: null,
@@ -109,11 +143,42 @@ function buildState(overrides: Partial<WorktreeVerificationState> = {}): Worktre
     detailLoading: false,
     rerunPending: false,
     rerunFailure: null,
+    config: CONFIG_PRESENT,
+    configError: null,
+    phase: 'result',
+    draftPending: false,
+    draftFailure: null,
+    draftResult: null,
+    // Issue #2063 additions. Spelled out rather than spread from a helper so a
+    // reader of this fixture can see every field the pane may read.
+    availableGateIds: [],
+    selectedGateIds: null,
+    failedGateIds: [],
+    toggleGate: vi.fn(),
+    setGateSelection: vi.fn(),
+    selectFailedGates: vi.fn(),
+    runningRun: null,
+    cancelPending: false,
+    cancelSettling: false,
+    cancelFailure: null,
+    historyLimit: 10,
+    canLoadMore: false,
+    repositoryHistoryOpen: false,
+    repositoryHistory: [],
+    repositoryHistoryLoading: false,
+    repositoryHistoryError: null,
+    cancelRun: vi.fn().mockResolvedValue(undefined),
+    loadMore: vi.fn(),
+    toggleRepositoryHistory: vi.fn(),
     selectRun: vi.fn(),
     refresh: vi.fn(),
     rerun: vi.fn().mockResolvedValue(undefined),
+    draftConfig: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
+  // The phase is derived, never chosen: a fixture that says `no-config` while
+  // carrying a config would pin a rendering the product can never reach.
+  return { ...base, phase: overrides.phase ?? resolveVerificationPhase(base.config, base.runs) };
 }
 
 const LOADED = (overrides: Partial<WorktreeVerificationState> = {}) =>
@@ -190,9 +255,31 @@ describe('VerificationPane (Issue #1816)', () => {
 
       const list = screen.getByTestId('verification-runs');
       expect(within(list).getAllByRole('button')).toHaveLength(2);
-      expect(screen.getByTestId('verification-run-9')).toHaveTextContent('failed');
+      expect(screen.getByTestId('verification-run-9')).toHaveTextContent('Failed');
       expect(screen.getByTestId('verification-run-9')).toHaveTextContent('trigger=api');
-      expect(screen.getByTestId('verification-run-8')).toHaveTextContent('passed');
+      expect(screen.getByTestId('verification-run-8')).toHaveTextContent('Passed');
+    });
+
+    it('prints the CLI exit code each verdict corresponds to (Issue #2062)', () => {
+      // The whole point of the pane is that it is the same verdict the CLI
+      // reports; before #2062 nothing on screen said which code that is.
+      render(<VerificationPane state={LOADED()} />);
+
+      const legend = screen.getByTestId('verification-cli-exit-legend');
+      expect(legend).toHaveTextContent('exit 0');
+      expect(legend).toHaveTextContent('exit 20');
+      expect(legend).toHaveTextContent('exit 21');
+
+      expect(screen.getByTestId('verification-run-9')).toHaveTextContent('CLI exit=20');
+      expect(screen.getByTestId('verification-run-8')).toHaveTextContent('CLI exit=0');
+    });
+
+    it('carries the verdict gloss in the run row accessible name (Issue #2062)', () => {
+      render(<VerificationPane state={LOADED()} />);
+      expect(screen.getByTestId('verification-run-9')).toHaveAttribute(
+        'aria-label',
+        expect.stringContaining('At least one gate failed, timed out, or errored.')
+      );
     });
 
     it('marks the selected run and delegates selection to the owner', () => {
@@ -210,12 +297,12 @@ describe('VerificationPane (Issue #1816)', () => {
       render(<VerificationPane state={LOADED()} />);
 
       const lint = screen.getByTestId('verification-gate-lint');
-      expect(lint).toHaveTextContent('PASS');
+      expect(lint).toHaveTextContent('Passed');
       expect(lint).toHaveTextContent('exit=0');
       expect(lint).toHaveTextContent('duration=12s');
 
       const unit = screen.getByTestId('verification-gate-unit');
-      expect(unit).toHaveTextContent('FAIL');
+      expect(unit).toHaveTextContent('Failed');
       expect(unit).toHaveTextContent('exit=1');
     });
 

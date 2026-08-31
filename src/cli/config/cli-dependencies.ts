@@ -63,6 +63,17 @@ export const DEPENDENCIES: DependencyCheck[] = [
     versionArg: '--version',
     required: false,
   },
+  // Issue #2069: codex was the one agent CLI CommandMate drives that this list
+  // never named, so `commandmate init` reported a version for claude, copilot
+  // and opencode and said nothing at all about the tool most of this
+  // repository's own sessions run. Optional for the same reason as its
+  // siblings: CommandMate drives codex, it does not require it.
+  {
+    name: 'Codex CLI',
+    command: 'codex',
+    versionArg: '--version',
+    required: false,
+  },
 ];
 
 /**

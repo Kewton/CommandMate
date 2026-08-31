@@ -96,28 +96,41 @@ test.describe('Verification pane (Issue #1816)', () => {
     await expect(chip).toBeVisible();
     await expect(chip).toContainText('E2E contract');
     // The reason — not just the verdict — is reachable without opening anything.
-    await expect(chip).toHaveAttribute('aria-label', /RESULT failed/);
+    // Issue #2062: the verdict is a translated word now; `RESULT` stays because
+    // it is the CLI's own keyword.
+    await expect(chip).toHaveAttribute('aria-label', /RESULT Failed/);
 
     // Clicking the chip opens the Verification activity.
     await chip.click();
     await expect(page.getByTestId('activity-pane')).toHaveAttribute('data-active', 'verification');
 
     await expect(page.getByTestId('verification-contract')).toContainText('src/**');
-    await expect(page.getByTestId('verification-run-9')).toContainText('failed');
-    await expect(page.getByTestId('verification-gate-unit')).toContainText('FAIL');
+    await expect(page.getByTestId('verification-run-9')).toContainText('Failed');
+    await expect(page.getByTestId('verification-gate-unit')).toContainText('Failed');
     await expect(page.getByTestId('verification-gate-log-unit')).toContainText(
       'FAIL tests/unit/example.test.ts',
     );
   });
 
-  test('shows no chip and an empty pane for a worktree with no contract', async ({ page }) => {
+  // Issue #2064: the chip used to be absent here, which hid the entry point
+  // from exactly the branches that have never been verified. It now shows the
+  // "not verified" verdict and still opens the pane.
+  test('shows a not-verified chip and an empty pane for a worktree with no contract', async ({
+    page,
+  }) => {
     await setupSplitTest(page, [E2E_WORKTREE_A]);
     await page.goto(`/worktrees/${E2E_WORKTREE_A}`);
 
     await expect(page.getByTestId('activity-bar-button-verification')).toBeVisible();
-    await expect(page.getByTestId('verification-status-chip')).toHaveCount(0);
+    const chip = page.getByTestId('verification-status-chip');
+    await expect(chip).toBeVisible();
+    // No task row, so no task-status badge — only the run verdict.
+    await expect(page.getByTestId('verification-chip-task-status')).toHaveCount(0);
+    await expect(page.getByTestId('verification-chip-run-status')).toBeVisible();
 
-    await page.getByTestId('activity-bar-button-verification').click();
+    // The chip is the entry point, not just an indicator.
+    await chip.click();
+    await expect(page.getByTestId('activity-pane')).toHaveAttribute('data-active', 'verification');
     await expect(page.getByTestId('verification-contract-empty')).toBeVisible();
     await expect(page.getByTestId('verification-runs-empty')).toBeVisible();
   });

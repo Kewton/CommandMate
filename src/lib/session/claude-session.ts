@@ -14,10 +14,11 @@ import {
 import {
   CLAUDE_PROMPT_PATTERN,
   CLAUDE_TRUST_DIALOG_PATTERN,
-  CLAUDE_SESSION_ERROR_PATTERNS,
-  CLAUDE_SESSION_ERROR_REGEX_PATTERNS,
   stripAnsi,
 } from '@/lib/detection/cli-patterns';
+import { findFatalPattern } from '@/lib/detection/tool-liveness';
+import { resolveLivenessSpec } from '@/lib/cli-tools/liveness-spec';
+import { probeSessionLiveness } from '@/lib/cli-tools/session-liveness';
 import {
   sanitizeSessionEnvironment,
   waitForPrompt as waitForPromptInternal,
@@ -63,22 +64,20 @@ function getErrorMessage(error: unknown): string {
 // ----- Shell Prompt Detection Constants -----
 
 /**
- * Shell prompt ending characters for detecting shell-only tmux sessions
- * Extensible array to support multiple shell types (MF-002: OCP)
- * Placed in claude-session.ts as private constant (SF-S2-002: ISP - used only by isSessionHealthy())
- * - '$': bash/sh default prompt
- * - '%': zsh default prompt
- * - '#': root prompt (bash/zsh)
+ * Issue #2070: the shell-prompt endings, the 40-character gate and the
+ * error-pattern tail this module used to declare privately are now
+ * `SHELL_PROMPT_ENDINGS` / `MAX_SHELL_PROMPT_LENGTH` / `FATAL_PATTERN_TAIL_LINES`
+ * in `lib/detection/tool-liveness`, and claude's use of them is
+ * `resolveLivenessSpec('claude')`.
  *
- * C-S2-002: False positive risk assessment:
- * These characters are checked only at the END of trimmed output. This limits false
- * positives to cases where Claude CLI output ends with one of these characters
- * (e.g., output containing "$" at end of a code block). The risk is acceptable because:
- * (1) Claude CLI output typically ends with a prompt (❯) or thinking indicator, not shell chars
- * (2) A false positive triggers session recreation, which is a safe recovery action
- * (3) The check is combined with error pattern detection for multiple signals
+ * They moved because the rule they describe was never claude-specific — only
+ * these values were. A tmux session that outlives its agent looks the same for
+ * codex, copilot, opencode and gemini, and every one of them reported `running`
+ * for a pane that had fallen back to the shell, because the only check for it
+ * sat behind `cliToolId === 'claude'`. The values themselves are unchanged, and
+ * `tests/unit/lib/claude-session.test.ts` still pins every verdict this
+ * function reaches.
  */
-const SHELL_PROMPT_ENDINGS: readonly string[] = ['$', '%', '#'] as const;
 
 // ----- Timeout and Polling Constants (OCP-001) -----
 // These constants are exported to allow configuration and testing.
@@ -186,28 +185,12 @@ export const CLAUDE_SEND_PROMPT_WAIT_TIMEOUT = 10000;
 export const CLAUDE_PROMPT_POLL_INTERVAL = 200;
 
 /**
- * Maximum expected length of a shell prompt line (characters)
- *
- * Shell prompts are typically under 40 characters (e.g., "user@host:~/project$" ~30 chars).
- * Lines at or above this threshold are not considered shell prompts, preventing
- * false positives from Claude CLI output that happens to end with $, %, or #.
- *
- * Used by isSessionHealthy() to distinguish shell prompts from CLI output.
- * 40 is an empirical threshold with safety margin.
+ * Issue #2070: `MAX_SHELL_PROMPT_LENGTH` and `HEALTH_CHECK_ERROR_TAIL_LINES`
+ * moved to `lib/detection/tool-liveness` with the rule that reads them. Their
+ * values are unchanged and claude reaches them through
+ * `resolveLivenessSpec('claude')`.
  */
-const MAX_SHELL_PROMPT_LENGTH = 40;
-
-/**
- * Number of tail lines used for error pattern detection in isSessionHealthy()
- *
- * Error patterns are only searched within the last N lines of pane output,
- * not the entire buffer. This prevents false negatives where historical
- * (already recovered) errors in the scrollback trigger unhealthy detection.
- *
- * 10 lines provides sufficient window to catch recent errors while ignoring
- * historical ones that have scrolled up.
- */
-const HEALTH_CHECK_ERROR_TAIL_LINES = 10;
+const CLAUDE_LIVENESS_SPEC = resolveLivenessSpec('claude');
 
 /**
  * Cached Claude CLI path
@@ -331,31 +314,17 @@ async function getCleanPaneOutput(sessionName: string, lines: number = 50): Prom
  * already printed "Claude Code cannot be launched inside another Claude Code
  * session" must not sit there burning the whole budget before saying so.
  *
- * Only the last {@link HEALTH_CHECK_ERROR_TAIL_LINES} lines are searched, so a
- * historical error that has scrolled up cannot condemn a session that recovered.
+ * Only the last `FATAL_PATTERN_TAIL_LINES` lines are searched, so a historical
+ * error that has scrolled up cannot condemn a session that recovered.
+ *
+ * Issue #2070: the search itself is `findFatalPattern`, shared with every other
+ * tool's liveness probe; claude's patterns ride in its `ToolLivenessSpec`.
  *
  * @param cleanOutput - ANSI-stripped pane output
  * @returns The matched pattern (or regex source) for the log, or null
  */
 function findSessionErrorPattern(cleanOutput: string): string | null {
-  const allLines = cleanOutput
-    .trim()
-    .split('\n')
-    .filter((line) => line.trim() !== '');
-  const tailText = allLines.slice(-HEALTH_CHECK_ERROR_TAIL_LINES).join('\n');
-
-  // MF-001: Check error patterns from cli-patterns.ts (SRP - pattern management centralized)
-  for (const pattern of CLAUDE_SESSION_ERROR_PATTERNS) {
-    if (tailText.includes(pattern)) {
-      return pattern;
-    }
-  }
-  for (const regex of CLAUDE_SESSION_ERROR_REGEX_PATTERNS) {
-    if (regex.test(tailText)) {
-      return regex.source;
-    }
-  }
-  return null;
+  return findFatalPattern(cleanOutput, CLAUDE_LIVENESS_SPEC);
 }
 
 // ----- Health Check Functions (Bug 2) -----
@@ -377,70 +346,22 @@ export interface HealthCheckResult {
  * Used by worktrees/route.ts and worktrees/[id]/route.ts for
  * health-aware session status with listSessions() batch optimization.
  *
+ * Issue #2070: the algorithm moved to `judgeToolLiveness`, which is the same
+ * rule read through claude's `ToolLivenessSpec`. Every branch, every reason
+ * string and every ordering decision this function used to spell inline is
+ * preserved there — the empty-output verdict, the whole-frame
+ * `CLAUDE_PROMPT_PATTERN` check BEFORE the error patterns (so a recovered
+ * session is not condemned by scrollback), the 40-character gate, and the
+ * `\d+%$` carve-out that keeps `Context left until auto-compact: 7%` from
+ * reading as a zsh prompt. What changed is that six other tools can now be
+ * asked the same question; see `lib/cli-tools/liveness-spec`.
+ *
  * @param sessionName - tmux session name
  * @returns HealthCheckResult with healthy status and optional reason
  */
 export async function isSessionHealthy(sessionName: string): Promise<HealthCheckResult> {
-  try {
-    // SF-001: Use shared helper instead of inline capturePane + stripAnsi
-    const cleanOutput = await getCleanPaneOutput(sessionName);
-
-    // MF-002: Check shell prompt endings from extensible array (OCP)
-    const trimmed = cleanOutput.trim();
-
-    // S2-F010: Empty output judgment (HealthCheckResult format)
-    // C-S2-001: Empty output means tmux session exists but Claude CLI has no output.
-    // This is treated as unhealthy because a properly running Claude CLI always
-    // produces output (prompt, spinner, or response). An empty pane indicates
-    // the CLI process has exited or failed to start.
-    if (trimmed === '') {
-      return { healthy: false, reason: 'empty output' };
-    }
-
-    // Active state detection: check for Claude prompt BEFORE error patterns.
-    // This prevents false negatives where historical (recovered) errors in
-    // the pane scrollback cause a currently-active session to be marked unhealthy.
-    if (CLAUDE_PROMPT_PATTERN.test(trimmed)) {
-      return { healthy: true };
-    }
-
-    // S2-F010: Error pattern detection - limited to tail lines only.
-    // Only the last HEALTH_CHECK_ERROR_TAIL_LINES lines are searched, so
-    // historical errors that have scrolled up do not trigger false negatives.
-    const allLines = trimmed.split('\n').filter(line => line.trim() !== '');
-
-    const errorPattern = findSessionErrorPattern(trimmed);
-    if (errorPattern !== null) {
-      return { healthy: false, reason: `error pattern: ${errorPattern}` };
-    }
-
-    // S2-F002: Extract last line after empty line filtering
-    const lastLine = allLines[allLines.length - 1]?.trim() ?? '';
-
-    // F006: Line length check BEFORE SHELL_PROMPT_ENDINGS check (early return)
-    if (lastLine.length >= MAX_SHELL_PROMPT_LENGTH) {
-      // Long lines are not shell prompts -> treat as healthy (early return)
-      return { healthy: true };
-    }
-
-    // F003: Individual pattern exclusions for SHELL_PROMPT_ENDINGS
-    // NOTE(F003): If new false positive patterns are found in the future,
-    // consider refactoring to a structure that associates exclusionPattern
-    // with each SHELL_PROMPT_ENDINGS entry. Currently only % needs exclusion (YAGNI).
-    if (SHELL_PROMPT_ENDINGS.some(ending => {
-      if (!lastLine.endsWith(ending)) return false;
-      // Exclude N% pattern (e.g., "Context left until auto-compact: 7%")
-      if (ending === '%' && /\d+%$/.test(lastLine)) return false;
-      return true;
-    })) {
-      return { healthy: false, reason: `shell prompt ending detected: ${lastLine}` };
-    }
-
-    return { healthy: true };
-  } catch {
-    // S3-F001: Catch block also returns HealthCheckResult format
-    return { healthy: false, reason: 'capture error' };
-  }
+  const verdict = await probeSessionLiveness(sessionName, CLAUDE_LIVENESS_SPEC);
+  return verdict.alive ? { healthy: true } : { healthy: false, reason: verdict.reason };
 }
 
 /**

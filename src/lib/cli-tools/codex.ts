@@ -22,6 +22,17 @@ import {
   CODEX_HOOKS_REVIEW_ANCHORS,
   stripAnsi,
 } from '../detection/cli-patterns';
+import { findShellPromptTail } from '../detection/tool-liveness';
+import {
+  CODEX_UPDATE_DIALOG_KEYS,
+  codexUpdateDialogAnswerKey,
+  resolveCodexUpdateDialogPolicy,
+} from '@/config/codex-update-dialog-config';
+import {
+  acquireAgentUpdateLock,
+  releaseAgentUpdateLock,
+  type UpdatableAgentTool,
+} from '@/lib/updates';
 import { createLogger } from '@/lib/logger';
 import { CODEX_CLI_TOOL_ID } from '@/lib/hooks/sources';
 import {
@@ -53,6 +64,31 @@ const CODEX_POLL_INTERVAL_MS = 1000;
 
 /** Max attempts for initialization polling (30 * 1000ms = 30s total window) */
 const CODEX_INIT_MAX_ATTEMPTS = 30;
+
+/**
+ * Extra polls `waitForReady` may spend waiting out `npm install -g
+ * @openai/codex` under the `update` policy (Issue #2068).
+ *
+ * Two minutes on top of the ordinary window, and only when the operator has
+ * asked for the update: the launch this budget belongs to is one the human
+ * requested, and the alternative to waiting is returning "not ready" while an
+ * install the server started is still running. The install itself took 2 s
+ * measured (codex-cli 0.149.1 -> 0.151.0, warm npm cache, 2026-08-31); the size
+ * of the budget is for a cold cache on a slow link, and it is never spent under
+ * any other policy.
+ */
+const CODEX_UPDATE_INSTALL_MAX_ATTEMPTS = 120;
+
+/**
+ * The tool id this module takes {@link acquireAgentUpdateLock} for
+ * (Issue #2068 x #2069).
+ *
+ * Annotated rather than inferred so the compiler checks the one thing a literal
+ * could get wrong: that `'codex'` is still a member of #2069's
+ * `UpdatableAgentTool`. If that union is ever renamed or narrowed, this fails
+ * the build instead of silently taking a lock nothing else takes.
+ */
+const CODEX_UPDATE_LOCK_TOOL: UpdatableAgentTool = 'codex';
 
 /** Timeout for waiting for prompt before sending a message */
 const CODEX_PROMPT_WAIT_TIMEOUT_MS = 15000;
@@ -165,8 +201,20 @@ export class CodexTool extends BaseCLITool {
     const exists = await hasSession(sessionName);
     if (exists) {
       await this.reconcileExistingSession(sessionName);
-      logger.info('codex-session-sessionname');
-      return;
+
+      // Issue #2070: this branch used to return unconditionally, and that is
+      // the second half of the reported bug. codex's own "1. Update now"
+      // replaces codex with `npm install` and exits; `Ctrl+C` twice quits it; a
+      // crash does the same. The tmux session survives all three, so `exists`
+      // stays true and the launch was skipped for a pane that had nothing but a
+      // shell prompt in it — leaving `kill-session` by hand as the only
+      // recovery. When the tool is gone we fall THROUGH and re-send the launch
+      // command into the same pane.
+      if (await this.isToolLive(sessionName, { confirm: true })) {
+        logger.info('codex-session-sessionname');
+        return;
+      }
+      logger.warn('codex-session-relaunch', { sessionName });
     }
 
     // Issue #1760: everything the previous codex process reported through this
@@ -176,23 +224,26 @@ export class CodexTool extends BaseCLITool {
     // and a brand-new session publishes `running` before anyone has typed into
     // it (#1723).
     //
-    // Creation path only — the reuse branch above has already returned — and
-    // before `createSession`, so no live pane is ever matched against a stale
-    // generation. Bumped even when the launch then fails: falling back to the
-    // scraper is always safe, trusting a dead session's events is not.
+    // Issue #2070: also on the RELAUNCH path, and for exactly the same reason.
+    // The pane is the same pane, but the process is not the same process, and
+    // the events the dead one filed under this key must not be read as the new
+    // one's. (Contrast opencode's live-reuse branch, which deliberately does
+    // NOT fence: there the process is the same one.)
     beginAgentSession({ worktreeId, cliToolId: CODEX_CLI_TOOL_ID, instanceId });
 
     try {
-      // Create tmux session. Codex is inline-rendered, so its transcript lives in
-      // the pane scrollback — depth comes from the shared TMUX_HISTORY_LIMIT
-      // default (Issue #1624), do not re-hardcode it here.
-      await createSession({
-        sessionName,
-        workingDirectory: worktreePath,
-      });
+      if (!exists) {
+        // Create tmux session. Codex is inline-rendered, so its transcript lives in
+        // the pane scrollback — depth comes from the shared TMUX_HISTORY_LIMIT
+        // default (Issue #1624), do not re-hardcode it here.
+        await createSession({
+          sessionName,
+          workingDirectory: worktreePath,
+        });
 
-      // Wait a moment for the session to be created
-      await new Promise((resolve) => setTimeout(resolve, TUI_SESSION_CREATE_WAIT_MS));
+        // Wait a moment for the session to be created
+        await new Promise((resolve) => setTimeout(resolve, TUI_SESSION_CREATE_WAIT_MS));
+      }
 
       // Issue #1760: hand this session its correlation keys, writing codex's
       // hooks config first if it is not already there. codex has no
@@ -209,6 +260,20 @@ export class CodexTool extends BaseCLITool {
         worktreePath,
       });
 
+      // Issue #2068: re-send the SAME launch line into the SAME pane, for the
+      // one case where a launch legitimately has to happen twice — codex's own
+      // `1. Update now` replaces codex with `npm install -g @openai/codex` and
+      // exits, so the session start has to survive its agent quitting halfway
+      // through it. The fence is re-applied for the reason #2070 gives on the
+      // relaunch path: the pane is the same pane, the process is not the same
+      // process, and events the dead one filed under this key must not be read
+      // as the new one's.
+      const relaunchIntoSamePane = async (): Promise<void> => {
+        beginAgentSession({ worktreeId, cliToolId: CODEX_CLI_TOOL_ID, instanceId });
+        await sendKeys(sessionName, launchCommand, true);
+        await new Promise((resolve) => setTimeout(resolve, CODEX_INIT_WAIT_MS));
+      };
+
       // Start Codex CLI in interactive mode
       await sendKeys(sessionName, launchCommand, true);
 
@@ -217,7 +282,7 @@ export class CodexTool extends BaseCLITool {
 
       // Poll until Codex interactive prompt is ready
       // Handles trust dialog and update notification automatically
-      await this.waitForReady(sessionName);
+      await this.waitForReady(sessionName, { relaunch: relaunchIntoSamePane });
 
       logger.info('started-codex-session:sessionname');
     } catch (error: unknown) {
@@ -231,8 +296,17 @@ export class CodexTool extends BaseCLITool {
    * Handles trust dialog ("Do you trust the contents of this directory?")
    * and update notification automatically by sending Enter/number keys.
    * Polls until a genuine interactive prompt is detected or max attempts reached.
+   *
+   * @param sessionName - tmux session name
+   * @param options.relaunch - Re-send the launch line into this same pane.
+   *   Supplied by {@link launchSession} and used only after the update dialog
+   *   has been answered with `1` — by this method under the `update` policy of
+   *   `config/codex-update-dialog-config`, or by a human under `ask`.
    */
-  private async waitForReady(sessionName: string): Promise<void> {
+  private async waitForReady(
+    sessionName: string,
+    options?: { relaunch?: () => Promise<void> }
+  ): Promise<void> {
     // Issue #892: one-shot guards. capturePane(50) keeps a dismissed dialog in
     // scrollback, so a key must be sent at most once per dialog -- otherwise the
     // update branch re-sends "2" every poll and the live prompt gets "222...".
@@ -240,7 +314,42 @@ export class CodexTool extends BaseCLITool {
     let trustDialogHandled = false;
     let hooksReviewHandled = false;
     let hooksScreenEscapes = 0;
-    for (let i = 0; i < CODEX_INIT_MAX_ATTEMPTS; i++) {
+
+    // Issue #2068. Resolved once per launch rather than per poll: the operator
+    // does not get to change their mind halfway through one session start, and
+    // one reading is one fewer thing that can differ between the frame that saw
+    // the dialog and the frame that answers it.
+    const updatePolicy = resolveCodexUpdateDialogPolicy();
+    const updateAnswerKey = codexUpdateDialogAnswerKey(updatePolicy);
+
+    /** Whether this launch has had codex's update dialog in front of it. */
+    let updateDialogSeen = false;
+    /** Whether the post-update relaunch has already been issued (once only). */
+    let relaunchIssued = false;
+    /**
+     * Whether this launch holds #2069's in-flight update lock (Issue #2068).
+     *
+     * Taken only when the `update` policy actually sends `1`. Released in two
+     * places, and both are needed: at the relaunch below, which is the earliest
+     * point at which the install is OBSERVABLY over (the shell prompt came
+     * back), and in the `finally` around this whole loop, which is what makes
+     * "the lock is never left held" true rather than merely usual -- a hung
+     * install, a capture that throws, the window expiring, or an early return
+     * all leave through it.
+     */
+    let updateLockHeld = false;
+    /**
+     * The poll budget, which the `update` policy is allowed to raise.
+     *
+     * Re-read every iteration, so raising it mid-loop extends the window rather
+     * than being ignored. `npm install -g @openai/codex` took 2 s on the machine
+     * this was measured on; the budget is sized for a slow network, and it is
+     * spent only when the operator has asked for the update.
+     */
+    let maxAttempts = CODEX_INIT_MAX_ATTEMPTS;
+
+    try {
+      for (let i = 0; i < maxAttempts; i++) {
       try {
         const rawOutput = await capturePane(sessionName, 50);
         const output = stripAnsi(rawOutput);
@@ -252,6 +361,74 @@ export class CodexTool extends BaseCLITool {
         if (isCodexPromptReady(output)) {
           logger.info('codex-prompt-detected');
           return;
+        }
+
+        // Issue #2068: the pane fell back to a shell after the update dialog.
+        //
+        // ## What the guard actually says, which is wider than `update`
+        //
+        // `updateDialogSeen` is set by the update branch below on EVERY policy,
+        // `skip` included -- so this reads: "this launch has had codex's update
+        // dialog in front of it, and the pane is now a bare shell". The case it
+        // exists for is the operator's own `1`: sent by this method under the
+        // `update` policy, or by a human in PromptPanel under `ask`, either way
+        // codex is replaced by `npm install` and exits, and the launch line has
+        // to go back in for the session start to mean anything.
+        //
+        // It is deliberately NOT narrowed to those two policies. Under `skip` or
+        // `skip-until-next-version` a shell can only appear here if codex died
+        // for some other reason inside the same 30 s window, and re-sending the
+        // launch line is the right answer to that too -- it is what Issue #2070's
+        // recovery does at the next `sendMessage`, done at the launch instead of
+        // a send later. Narrowing would buy nothing and would cost a second
+        // condition to keep correct.
+        //
+        // Two properties keep this safe, and neither of them is the policy:
+        //
+        //  - **position in the launch.** A pane shows a bare shell for the whole
+        //    window between `createSession` and the launch line landing, and no
+        //    frame in that window can have had a dialog painted on it yet, so
+        //    `updateDialogSeen` is still false there.
+        //  - **once.** A `1` that did not lead to a working codex must not turn
+        //    into a relaunch loop, so `relaunchIssued` spends the recovery.
+        //
+        // `findShellPromptTail` rather than {@link isToolLive}, and the
+        // difference is measured: `npm install` prints three rows, so the dead
+        // `› 1. Update now` option row is still inside the shared rule's
+        // 12-row alive window and vetoes the exit. See that function's docblock.
+        if (
+          updateDialogSeen &&
+          !relaunchIssued &&
+          options?.relaunch &&
+          findShellPromptTail(output, this.livenessSpec()) !== null
+        ) {
+          relaunchIssued = true;
+          maxAttempts = Math.max(maxAttempts, i + 1 + CODEX_INIT_MAX_ATTEMPTS);
+          // The relaunched codex meets its own trust / hooks screens, and they
+          // are new screens rather than the ones already answered.
+          //
+          // `updateDialogHandled` is deliberately NOT reset. A successful update
+          // means the relaunched codex is the latest version and shows no dialog
+          // at all; a FAILED one (no network, an npm prefix the operator cannot
+          // write) puts the identical dialog back, and answering `1` a second
+          // time would quit codex again with the one relaunch already spent.
+          // Left alone, the dialog simply stays on the pane where `detectPrompt`
+          // reports it and the human can answer it.
+          trustDialogHandled = false;
+          hooksReviewHandled = false;
+          hooksScreenEscapes = 0;
+          // Issue #2068 x #2069: the shell prompt IS the completion signal for
+          // an install this process cannot await, so release here rather than
+          // holding #2069's lock for the rest of the (up to two-minute) window
+          // and refusing an update nobody is running any more.
+          if (updateLockHeld) {
+            updateLockHeld = false;
+            releaseAgentUpdateLock(CODEX_UPDATE_LOCK_TOOL);
+            logger.info('codex-update-lock-released', { sessionName });
+          }
+          logger.info('codex-relaunched-after-update', { sessionName, policy: updatePolicy });
+          await options.relaunch();
+          continue;
         }
 
         // Issue #1760: "Hooks need review". Reached only when no genuine prompt
@@ -295,19 +472,96 @@ export class CodexTool extends BaseCLITool {
 
         // Handle update notification BEFORE trust dialog check.
         // Update notification shows: › 1. Update now / 2. Skip / 3. Skip until next version
-        // followed by "Press enter to continue". Must send "2" (Skip) to avoid
-        // triggering npm install which kills the Codex process.
-        if (activeDialog === 'update' && !updateDialogHandled) {
-          // Issue #890: Codex confirms a numbered selection instantly (no Enter).
-          // Appending Enter (sendEnter=true) would land on the NEXT screen as a
-          // stray keypress -- an empty submit on the main prompt, or worst case the
-          // default "1. Update now" confirm if "2" was dropped during a re-render.
-          // Send "2" alone and let the next poll observe the result.
-          await sendKeys(sessionName, '2', false);
-          updateDialogHandled = true;
-          logger.info('skipped-codex-update');
-          await new Promise((resolve) => setTimeout(resolve, CODEX_DIALOG_SETTLE_MS));
-          continue;
+        // followed by "Press enter to continue".
+        //
+        // Issue #2068: which key that is, is now the operator's to decide. It
+        // was '2' (Skip) from Issue #890 until this Issue measured what '2'
+        // actually does -- nothing, to `$CODEX_HOME/version.json` -- so the
+        // dialog came back on every single launch and the operator could never
+        // choose the update, because the server had always already chosen. The
+        // default is now '3' (Skip until next version), which persists.
+        // See `config/codex-update-dialog-config` for the measurement table.
+        if (activeDialog === 'update') {
+          updateDialogSeen = true;
+
+          if (updateAnswerKey === null) {
+            // `ask`. Send nothing and keep polling: the dialog stays on the
+            // pane, so `detectPrompt` reports it as the multiple-choice prompt
+            // it is and PromptPanel offers the human all three options. Falls
+            // through the remaining branches deliberately -- the dialog's own
+            // "Press enter to continue" footer must NOT be answered either,
+            // which is the pre-existing precedence this branch keeps by
+            // continuing before the `press-enter` check below.
+            await new Promise((resolve) => setTimeout(resolve, CODEX_POLL_INTERVAL_MS));
+            continue;
+          }
+
+          if (!updateDialogHandled) {
+            // Issue #2068 x #2069: `1` makes this pane a THIRD writer of one
+            // `npm install -g @openai/codex`, beside `POST /api/agents/update`
+            // and `commandmate agents update`. Take the in-flight lock BEFORE
+            // the key, because after it there is nothing to take it for -- codex
+            // has already replaced itself with the installer and this server
+            // cannot call it back.
+            //
+            // Not taken for `2` / `3`: those answer the dialog without
+            // installing anything, so a concurrent update is none of their
+            // business and holding the lock would block it for no reason.
+            let keyToSend = updateAnswerKey;
+            if (
+              keyToSend === CODEX_UPDATE_DIALOG_KEYS.update &&
+              !acquireAgentUpdateLock(CODEX_UPDATE_LOCK_TOOL)
+            ) {
+              // Somebody else is already installing this exact package.
+              //
+              // Falling back to `3` rather than sending nothing, and rather than
+              // sending `2`:
+              //
+              //  - **not `1`.** Two `npm install -g` runs on one global prefix
+              //    can leave a half-written `node_modules/@openai/codex`, and
+              //    the relaunch below would then type the launch line into a
+              //    pane where `codex` no longer resolves -- with the one
+              //    relaunch already spent, so nothing recovers it.
+              //  - **not "send nothing".** The pane would sit on the dialog for
+              //    the rest of the window and `startSession` would hand
+              //    `sendMessage` a session with no prompt in it. `ask` chooses
+              //    that deliberately; an operator who asked for `update` did not.
+              //  - **`3` rather than `2`.** The version this dialog offers is
+              //    the version the other process is installing, so recording it
+              //    as `dismissed_version` is true rather than merely quiet -- and
+              //    `2` is the answer Issue #2068 exists to stop sending, because
+              //    it persists nothing and the dialog returns next launch.
+              keyToSend = CODEX_UPDATE_DIALOG_KEYS['skip-until-next-version'];
+              logger.warn('codex-update-dialog-yielded-to-running-update', {
+                sessionName,
+                policy: updatePolicy,
+                requestedKey: updateAnswerKey,
+                key: keyToSend,
+              });
+            } else if (keyToSend === CODEX_UPDATE_DIALOG_KEYS.update) {
+              updateLockHeld = true;
+            }
+
+            // Issue #890: Codex confirms a numbered selection instantly (no Enter).
+            // Appending Enter (sendEnter=true) would land on the NEXT screen as a
+            // stray keypress -- an empty submit on the main prompt, or worst case the
+            // default "1. Update now" confirm if the key was dropped during a re-render.
+            // Send the digit alone and let the next poll observe the result.
+            await sendKeys(sessionName, keyToSend, false);
+            updateDialogHandled = true;
+            if (keyToSend === CODEX_UPDATE_DIALOG_KEYS.update) {
+              // codex is about to become `npm install`. The prompt this method
+              // is waiting for belongs to a process that does not exist yet.
+              maxAttempts = Math.max(maxAttempts, i + 1 + CODEX_UPDATE_INSTALL_MAX_ATTEMPTS);
+            }
+            logger.info('codex-update-dialog-answered', {
+              sessionName,
+              policy: updatePolicy,
+              key: keyToSend,
+            });
+            await new Promise((resolve) => setTimeout(resolve, CODEX_DIALOG_SETTLE_MS));
+            continue;
+          }
         }
 
         // Handle "Press enter to continue" (genuine press-enter screens only).
@@ -330,12 +584,26 @@ export class CodexTool extends BaseCLITool {
           await new Promise((resolve) => setTimeout(resolve, CODEX_DIALOG_SETTLE_MS));
           continue;
         }
+
       } catch {
         // Capture may fail during initialization - continue polling
       }
       await new Promise((resolve) => setTimeout(resolve, CODEX_POLL_INTERVAL_MS));
+      }
+      logger.info('codex-prompt-detection');
+    } finally {
+      // Issue #2068 x #2069: the backstop. The install this lock covers runs
+      // inside tmux, so nothing here can await it -- the relaunch branch
+      // releases on the one signal that says it finished, and everything else
+      // arrives here. Without this, a codex that never comes back would leave
+      // the marker set for the life of the server and every later update, from
+      // any of the three routes, would be refused.
+      if (updateLockHeld) {
+        updateLockHeld = false;
+        releaseAgentUpdateLock(CODEX_UPDATE_LOCK_TOOL);
+        logger.warn('codex-update-lock-released-unfinished', { sessionName });
+      }
     }
-    logger.info('codex-prompt-detection');
   }
 
   /**
@@ -389,6 +657,14 @@ export class CodexTool extends BaseCLITool {
         `Codex session ${sessionName} does not exist. Start the session first.`
       );
     }
+
+    // Issue #2070: the pane exists, but does the AGENT? codex's "1. Update now"
+    // replaces it with `npm install` and exits, `Ctrl+C` twice quits it, a crash
+    // does the same — and the send that follows used to sit in the readiness
+    // wait until it timed out, leaving `kill-session` by hand as the only
+    // recovery. Relaunches into the same pane when the tool is gone; costs one
+    // `capture-pane` when it is not.
+    await this.relaunchIfToolExited(worktreeId, instanceId);
 
     try {
       // Verify Codex is at prompt state before sending

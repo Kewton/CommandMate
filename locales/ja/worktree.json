@@ -928,6 +928,41 @@
     "refresh": "再読み込み",
     "loading": "検証情報を読み込み中…",
     "loadError": "検証情報を取得できませんでした: {message}",
+    "onboarding": {
+      "what": "検証は、このリポジトリが `{path}` に宣言したゲートを、この worktree でそのまま実行します。",
+      "how": "合否は各ゲートの exit code で決まります。`commandmate verify` / `wait --verify` と同じゲートなので、ここが緑ならコマンドラインでも緑です。",
+      "loading": "宣言ゲートを読み込み中…",
+      "configError": "検証設定を読み込めませんでした: {message}",
+      "invalid": "`{path}` は存在しますが読み込めませんでした: {message}",
+      "noConfig": {
+        "body": "このリポジトリはまだ検証ゲートを宣言していません（`{path}` がありません）。実行できるゲートが 1 件もない状態です。",
+        "hint": "`.github/workflows/*.yml` と `package.json` の scripts を読んで草案を書き出します。既存ファイルは決して上書きしません。CLI では `commandmate verify init` が同じ処理です。",
+        "action": "CI から起案する",
+        "pending": "起案中…",
+        "docs": "verify.yaml の書き方（設計ドキュメント）",
+        "created": "`{path}` に {count} 件のゲートを起案しました。判定に使う前に内容を確認してください。",
+        "conflict": "`{path}` は既に存在します。上書きはしないので、読み直した内容を表示します。",
+        "empty": "CI 定義にも npm scripts にもゲートにできるコマンドが見つかりませんでした。`{path}` を手で書いてください。",
+        "error": "検証設定を起案できませんでした: {message}"
+      },
+      "configured": {
+        "body": "`{path}` に {count} 件のゲートが宣言されています。このブランチではまだ 1 度も実行されていません。",
+        "gatesHeading": "宣言ゲート",
+        "builtin": "組み込みゲートも併せて走ります: {gates}",
+        "builtinHint": "組み込みゲートは `.commandmate/verify.yaml` に書かなくても毎回走ります。それぞれの意味はゲート一覧の各行に表示されます。",
+        "action": "検証を実行"
+      },
+      "running": {
+        "progress": "実行中: {total} ゲート中 {done} 件が完了しました。",
+        "elapsed": "経過 {elapsed}",
+        "action": "今すぐ再読み込み",
+        "hint": "ゲートは 1 本ずつ順に走ります。完了したゲートから下の一覧に現れます。"
+      },
+      "result": {
+        "body": "このブランチの直近ラン #{runId} の判定は RESULT {verdict} です。",
+        "action": "最新ランのゲートを表示"
+      }
+    },
     "contract": {
       "heading": "実行契約",
       "empty": "このブランチには契約がありません。\n`commandmate send --contract <ファイル>` か Skill `cmate-task-contract` で作成してください。",
@@ -942,15 +977,35 @@
     },
     "runs": {
       "heading": "検証ラン",
-      "empty": "検証ランはまだありません。\n「再検証」を押すか、`commandmate verify <worktree-id>` を実行してください。",
+      "empty": "検証ランはまだありません。\n「再検証」を押すか、`commandmate verify {worktreeId}` を実行してください。",
       "rerun": "再検証",
       "rerunPending": "開始中…",
       "rerunConflict": "検証ランが既に実行中です（run {runId}）。",
       "rerunConflictUnknown": "検証ランが既に実行中です。",
       "rerunError": "検証を開始できませんでした: {message}",
-      "select": "run {runId} のゲートを表示（RESULT {verdict}）",
+      "select": "run {runId} のゲートを表示（RESULT {verdict} — {gloss}）",
       "runLabel": "run {runId}",
-      "trigger": "trigger={trigger}"
+      "trigger": "trigger={trigger}",
+      "cliLegend": "CLI 相当の exit code: {items}",
+      "cliLegendItem": "{label} = exit {code}",
+      "exitCode": "CLI 相当 exit={code}",
+      "cancel": "検証を中止",
+      "cancelPending": "中止しています…",
+      "cancelHint": "中止すると、実行中のゲートのプロセスグループに終了シグナルを送り、残りのゲートは開始しません。ランは「中止」として閉じられます。",
+      "cancelGone": "このランは既に終了していました。一覧を読み直したので、最新の判定を確認してください。",
+      "cancelError": "検証を中止できませんでした: {message}",
+      "loadMore": "さらに {count} 件を読み込む",
+      "history": {
+        "open": "他のブランチを含む横断履歴を表示",
+        "close": "横断履歴を閉じる",
+        "hint": "このサーバが管理する全 worktree の直近の検証ランです。同じゲートが複数のブランチで落ちているなら、それは作業ではなくゲート側の問題である可能性が高いという読み方をします。",
+        "loading": "横断履歴を読み込み中…",
+        "empty": "対象期間に他のブランチの検証ランはありません。",
+        "error": "横断履歴を取得できませんでした: {message}",
+        "failingGates": "不合格ゲート: {gates}"
+      },
+      "partial": "部分実行: 計画されている {total} ゲートのうち {ran} 件だけが実行されました。未実行: {gates}。この判定は実行されたゲートについてのものです。",
+      "cancelSettling": "中止を要求しました。ゲートに終了シグナルを送り、プロセスが終わるのを待っています（応答しない場合は 5 秒後に強制終了します）。"
     },
     "gates": {
       "heading": "ゲート — run {runId}",
@@ -964,23 +1019,67 @@
       "showLog": "ログ末尾を表示",
       "hideLog": "ログ末尾を隠す",
       "logOmitted": "… (+{count} 行省略。全文は `commandmate verify show {runId}`)",
-      "noLog": "ログ出力は記録されていません。"
+      "noLog": "ログ出力は記録されていません。",
+      "verdictHeading": "このランの判定",
+      "contractSourceHint": "`[contract]` は、このブランチに送られた実行契約が指定したゲートであることを表します（`.commandmate/verify.yaml` の宣言ではありません）。",
+      "builtinBadge": "組み込み",
+      "builtin": {
+        "workEvidence": "作業証跡ゲート（組み込み）。`options.baseRef` より先のコミット、または未コミットの変更があるかを見ます。どちらも無ければランは「未着手」になり、以降のゲートは実行されません。",
+        "scope": "スコープゲート（組み込み）。変更されたファイルを実行契約の `scope.allow` / `scope.deny` と突き合わせます。契約が無いランには判定するスコープが無いため未実行になります。",
+        "envClean": "環境クリーンゲート（組み込み）。タスク開始時のスナップショットと比べて、待ち受けサーバ・`mcbd-*` tmux セッション・`$HOME`・`~/.commandmate` に残留が無いかを見ます。",
+        "config": "設定ゲート（組み込み）。`.commandmate/verify.yaml` を読み込めなかったことをランに記録するための擬似ゲートです。実際のゲートは 1 件も実行されていません。"
+      },
+      "skipHeading": "実行されなかったゲート",
+      "skipReasonFor": "{gateId}: {reason}",
+      "skipReason": {
+        "primaryCheckout": "この worktree がサーバープロセスの作業ディレクトリそのものなので、`options.skipInPrimaryCheckout` により実行されませんでした。稼働中の画面を壊さないための保護であって、不具合ではありません。別の worktree で実行すれば走ります。",
+        "workEvidence": "`work-evidence` ゲートが合格しなかったため、判定する対象が無く実行されませんでした。",
+        "mutex": "同じ `mutex` を宣言した別の検証が終わらず、待ち時間の上限に達したため実行されませんでした。作業への判定ではなく資源の競合です。",
+        "detachedContract": "このブランチには実行契約がありますが、このランが契約に紐づいていないためスコープを判定できませんでした。`wait --verify` で起動すると自動的に紐づきます。",
+        "noContract": "このランには実行契約が紐づいていないため、判定するスコープが宣言されていません。",
+        "notRequired": "実行契約が `success.requireScopeClean: false` を宣言しているため判定していません。",
+        "unknown": "このゲートは実行されていません。理由はログ末尾を参照してください。",
+        "cancelled": "検証が中止されたため、このゲートは判定に至っていません。作業への判定ではなく、実行を止めた結果です。"
+      },
+      "showFullLog": "ログ全文を開く",
+      "fullLogTitle": "ログ全文 — {gateId}（run {runId}）",
+      "fullLogSize": "{lines} 行",
+      "fullLogStored": "サーバが保存しているのは各ゲートの末尾だけです（`options.maxLogTailBytes` で上限が決まります）。ここに出ているのがその全量で、これより前の出力はどこにも残っていません。",
+      "copyLog": "ログをコピー",
+      "copied": "コピーしました",
+      "copyFailed": "コピーできませんでした"
     },
     "runStatus": {
-      "running": "running",
-      "passed": "passed",
-      "failed": "failed",
-      "not_started": "not_started",
-      "error": "error",
-      "cancelled": "cancelled"
+      "running": "実行中",
+      "passed": "合格",
+      "failed": "不合格",
+      "not_started": "未着手",
+      "error": "判定不能",
+      "cancelled": "中止"
+    },
+    "runStatusGloss": {
+      "running": "ゲートを実行中です。判定はまだ出ていません。",
+      "passed": "選択されたゲートがすべて合格しました。",
+      "failed": "1 つ以上のゲートが不合格・時間切れ・異常終了しました。",
+      "not_started": "作業証跡ゼロ: コミットも未コミット変更もありません。判定する対象が無いため、以降のゲートは実行されていません。",
+      "error": "判定に至りませんでした。実行されなかったゲートがあるか、検証設定を読み込めませんでした。不合格とは別物です。",
+      "cancelled": "検証が判定に達する前に中止されました。"
     },
     "gateStatus": {
-      "running": "RUNNING",
-      "passed": "PASS",
-      "failed": "FAIL",
-      "timeout": "TIMEOUT",
-      "skipped": "SKIP",
-      "error": "ERROR"
+      "running": "実行中",
+      "passed": "合格",
+      "failed": "不合格",
+      "timeout": "時間切れ",
+      "skipped": "未実行",
+      "error": "異常終了"
+    },
+    "gateStatusGloss": {
+      "running": "このゲートはまだ実行中です。",
+      "passed": "コマンドが exit 0 で終了しました。",
+      "failed": "コマンドが 0 以外の exit code で終了しました。",
+      "timeout": "timeoutSec 以内に終わらず打ち切られました。",
+      "skipped": "このゲートは実行されていません。合格ではありません。",
+      "error": "ゲートを起動できず、判定に至りませんでした。"
     },
     "chip": {
       "taskReason": "タスク「{title}」: {status}",
@@ -990,7 +1089,26 @@
       "failingGates": "不合格ゲート: {gates}",
       "gatesPassed": "全 {count} ゲート合格",
       "openHint": "検証ペインを開く",
-      "dash": "—"
+      "dash": "—",
+      "unverified": "未検証",
+      "noTask": "このブランチには実行契約が送られていません",
+      "reasonHeading": "この判定の理由",
+      "showReason": "理由を表示",
+      "hideReason": "理由を隠す"
+    },
+    "selection": {
+      "heading": "実行するゲート",
+      "open": "ゲートを選ぶ",
+      "close": "選択を閉じる",
+      "all": "全 {count} 件を実行します（既定）",
+      "partial": "{total} 件中 {selected} 件を選択中: {gates}",
+      "gateLabel": "ゲート {gateId} を選ぶ",
+      "runAll": "全ゲートで検証",
+      "runSelected": "選んだ {count} 件で検証",
+      "hint": "選んだゲートだけを実行します。`lint` の 1 行修正を確かめるために `build` や `unit` を待つ必要はありません。判定は実行したゲートについてのものだけで、選択を狭めたランはゲート表に「部分実行」と出ます。実行契約が `success.requireWorkEvidence` / `requireScopeClean` を宣言している場合、`work-evidence` と `scope` は選択に関わらず必ず実行されます（契約が宣言した判定基準は、ゲートの絞り込みでは外せません）。",
+      "failedOnly": "不合格だったゲートだけ（{count} 件）",
+      "failedOnlyEmpty": "表示中のランに、再実行できる不合格ゲートはありません（未実行のゲートは、もう一度実行しても同じ理由で未実行になります）。",
+      "selectAll": "全ゲートに戻す"
     }
   },
   "task": {

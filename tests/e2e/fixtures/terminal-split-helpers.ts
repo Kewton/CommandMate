@@ -101,6 +101,14 @@ export interface VerificationFixture {
   runs?: unknown[];
   /** Served by `GET /verify/runs/:runId`, keyed by run id. */
   runDetails?: Record<number, unknown>;
+  /**
+   * Served by `GET /verify/config` (Issue #2061).
+   *
+   * Defaults to a repository that HAS declared gates, because that is what the
+   * pre-#2061 specs assumed when they asserted on the contract and run
+   * sections. A spec that wants the onboarding state passes `exists: false`.
+   */
+  config?: unknown;
 }
 
 /**
@@ -122,6 +130,29 @@ export async function mockWorktreeApi(
   const tasks = verification.tasks ?? [];
   const runs = verification.runs ?? [];
   const runDetails = verification.runDetails ?? {};
+  const config = verification.config ?? {
+    exists: true,
+    path: '.commandmate/verify.yaml',
+    gates: [
+      {
+        id: 'unit',
+        command: 'npm run test:unit',
+        timeoutSec: 1800,
+        mutex: null,
+        retryOnFail: null,
+        flakyIsPass: null,
+      },
+    ],
+    options: {
+      baseRef: 'origin/develop',
+      skipInPrimaryCheckout: true,
+      maxLogTailBytes: 8192,
+      requireCommit: false,
+      requireEnvClean: false,
+    },
+    plannedGateIds: ['work-evidence', 'scope', 'unit'],
+    error: null,
+  };
 
   await page.route(
     url => url.pathname.startsWith('/api/'),
@@ -151,6 +182,9 @@ export async function mockWorktreeApi(
         // Issue #1816: execution contract + verification runs. Order matters —
         // `/verify/runs/<id>` must be matched before the `/verify/runs` list.
         if (sub.startsWith('/tasks')) return fulfillJson(route, { tasks });
+        // Issue #2061: matched before `/verify/runs`, and before the POST that
+        // shares this path, so the onboarding block has a config to read.
+        if (sub.startsWith('/verify/config')) return fulfillJson(route, config);
         const runDetailMatch = sub.match(/^\/verify\/runs\/(\d+)/);
         if (runDetailMatch) {
           const run = runDetails[Number(runDetailMatch[1])];

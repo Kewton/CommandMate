@@ -2,9 +2,16 @@
  * Unit tests for CodexTool first-launch dialog handling (Issue #890)
  *
  * Verifies:
- *  A) update-skip ('2') and trust ('1') number selections are sent WITHOUT a
+ *  A) the update answer and trust ('1') number selections are sent WITHOUT a
  *     trailing Enter (sendEnter=false), so no stray Enter lands on the next
  *     screen (empty submit / accidental "Update now" confirm).
+ *
+ *     Issue #2068 moved the update answer from '2' (Skip) to '3' (Skip until
+ *     next version) and made it a policy; the digit is read from
+ *     `CODEX_UPDATE_DIALOG_KEYS` here rather than written out, so this file
+ *     keeps testing what it is about -- the trailing Enter and the one-shot
+ *     guard -- and not the default's value. The default itself, and the other
+ *     three policies, are owned by `codex-update-dialog-policy-2068.test.ts`.
  *  B) waitForReady / waitForPrompt treat a residual update/trust dialog as
  *     "not ready" -- the dialog's "› 1." option line must not be mistaken for
  *     the input prompt -- so the first message is never typed into a dialog.
@@ -48,8 +55,16 @@ vi.mock('util', async (importOriginal) => {
 });
 
 import { CodexTool } from '@/lib/cli-tools/codex';
+import {
+  CODEX_UPDATE_DIALOG_ENV_VAR,
+  CODEX_UPDATE_DIALOG_KEYS,
+  DEFAULT_CODEX_UPDATE_DIALOG_POLICY,
+} from '@/config/codex-update-dialog-config';
 import { hasSession, createSession, sendKeys, sendSpecialKey, capturePane, reconcileSessionGeometry } from '@/lib/tmux/tmux';
 import { sendMessageWithSubmitVerification } from '@/lib/cli-tools/submit-verified-sender';
+
+/** What the DEFAULT policy answers the update dialog with (Issue #2068). */
+const UPDATE_KEY = CODEX_UPDATE_DIALOG_KEYS[DEFAULT_CODEX_UPDATE_DIALOG_POLICY];
 
 const WORKTREE_ID = 'test-worktree';
 const SESSION = 'mcbd-codex-test-worktree';
@@ -105,6 +120,9 @@ describe('CodexTool first-launch dialog handling (Issue #890)', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // Issue #2068: this file is about the DEFAULT, so an operator's own
+    // `CM_CODEX_UPDATE_DIALOG` export must not reach it.
+    vi.stubEnv(CODEX_UPDATE_DIALOG_ENV_VAR, undefined as unknown as string);
     tool = new CodexTool();
     vi.mocked(createSession).mockResolvedValue();
     vi.mocked(sendKeys).mockResolvedValue();
@@ -113,15 +131,21 @@ describe('CodexTool first-launch dialog handling (Issue #890)', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.unstubAllEnvs();
     vi.restoreAllMocks();
   });
 
   it('reconciles geometry when reusing an existing Codex session', async () => {
     vi.mocked(hasSession).mockResolvedValue(true);
+    // Issue #2070: the reuse branch now asks whether codex is still the thing
+    // drawing the pane, so the frame has to say that it is. `PROMPT` is a real
+    // `› ` composer; without it the branch would relaunch.
+    vi.mocked(capturePane).mockResolvedValue(PROMPT);
 
     await tool.startSession(WORKTREE_ID, '/test/path', 'codex-2');
 
     expect(createSession).not.toHaveBeenCalled();
+    expect(sendKeys).not.toHaveBeenCalled();
     expect(reconcileSessionGeometry).toHaveBeenCalledWith(
       'mcbd-codex-test-worktree-2',
       undefined,
@@ -129,7 +153,7 @@ describe('CodexTool first-launch dialog handling (Issue #890)', () => {
   });
 
   describe('waitForReady (A: no stray Enter on number selections)', () => {
-    it('untrusted dir: sends update-skip "2" and trust "1" WITHOUT trailing Enter, then reaches the prompt', async () => {
+    it('untrusted dir: sends the update answer and trust "1" WITHOUT trailing Enter, then reaches the prompt', async () => {
       vi.mocked(hasSession).mockResolvedValue(false);
       vi.mocked(capturePane)
         .mockResolvedValueOnce(UPDATE_DIALOG)
@@ -154,11 +178,11 @@ describe('CodexTool first-launch dialog handling (Issue #890)', () => {
         expect.stringMatching(/(^codex$|'codex'$)/),
         true
       );
-      expect(sendKeys).toHaveBeenCalledWith(SESSION, '2', false);
+      expect(sendKeys).toHaveBeenCalledWith(SESSION, UPDATE_KEY, false);
       expect(sendKeys).toHaveBeenCalledWith(SESSION, '1', false);
 
       // Regression guard: number selections must NEVER be sent with a trailing Enter.
-      expect(sendKeys).not.toHaveBeenCalledWith(SESSION, '2', true);
+      expect(sendKeys).not.toHaveBeenCalledWith(SESSION, UPDATE_KEY, true);
       expect(sendKeys).not.toHaveBeenCalledWith(SESSION, '1', true);
     });
 
@@ -177,7 +201,7 @@ describe('CodexTool first-launch dialog handling (Issue #890)', () => {
         vi.useRealTimers();
       }
 
-      expect(sendKeys).toHaveBeenCalledWith(SESSION, '2', false);
+      expect(sendKeys).toHaveBeenCalledWith(SESSION, UPDATE_KEY, false);
       // No trust dialog appeared, so '1' must never be sent.
       expect(sendKeys).not.toHaveBeenCalledWith(SESSION, '1', false);
       expect(sendKeys).not.toHaveBeenCalledWith(SESSION, '1', true);
@@ -232,7 +256,7 @@ describe('CodexTool first-launch dialog handling (Issue #890)', () => {
       // never be ready and capturePane would be called ~CODEX_INIT_MAX_ATTEMPTS times.
       expect(vi.mocked(capturePane).mock.calls.length).toBeLessThanOrEqual(2);
       // A ready banner frame is not a dialog: no skip/trust number keys are sent.
-      expect(sendKeys).not.toHaveBeenCalledWith(SESSION, '2', false);
+      expect(sendKeys).not.toHaveBeenCalledWith(SESSION, UPDATE_KEY, false);
       expect(sendKeys).not.toHaveBeenCalledWith(SESSION, '1', false);
     });
 
@@ -260,10 +284,10 @@ describe('CodexTool first-launch dialog handling (Issue #890)', () => {
 
   // Issue #892: scrollback retention of a dismissed dialog in the SAME capture.
   describe('residual dialog + genuine prompt coexist in one capture (Issue #892)', () => {
-    it('waitForReady: sends update "2" exactly ONCE and never re-sends on the residual dialog ("222..." guard)', async () => {
+    it('waitForReady: sends the update answer exactly ONCE and never re-sends on the residual dialog ("222..." guard)', async () => {
       vi.mocked(hasSession).mockResolvedValue(false);
       vi.mocked(capturePane)
-        .mockResolvedValueOnce(UPDATE_DIALOG)                // active dialog -> send "2"
+        .mockResolvedValueOnce(UPDATE_DIALOG)                // active dialog -> send the update answer
         .mockResolvedValueOnce(UPDATE_DIALOG)                // transient: dialog still bottom, must NOT re-send
         .mockResolvedValue(UPDATE_RESIDUAL_PLUS_PROMPT);     // dialog now residual above the live prompt -> ready
 
@@ -276,10 +300,11 @@ describe('CodexTool first-launch dialog handling (Issue #890)', () => {
         vi.useRealTimers();
       }
 
-      // The core "222..." regression: "2" must be sent exactly once even though the
-      // dialog text re-appears in later captures (transient + residual scrollback).
+      // The core "222..." regression: the answer must be sent exactly once even
+      // though the dialog text re-appears in later captures (transient +
+      // residual scrollback).
       const skipCalls = vi.mocked(sendKeys).mock.calls.filter(
-        (c) => c[0] === SESSION && c[1] === '2'
+        (c) => c[0] === SESSION && c[1] === UPDATE_KEY
       );
       expect(skipCalls).toHaveLength(1);
     });
@@ -299,7 +324,7 @@ describe('CodexTool first-launch dialog handling (Issue #890)', () => {
 
       // Genuine prompt is below the stale dialog -> ready on the first poll, no keys.
       expect(vi.mocked(capturePane).mock.calls.length).toBeLessThanOrEqual(2);
-      expect(sendKeys).not.toHaveBeenCalledWith(SESSION, '2', false);
+      expect(sendKeys).not.toHaveBeenCalledWith(SESSION, UPDATE_KEY, false);
       expect(sendKeys).not.toHaveBeenCalledWith(SESSION, '1', false);
     });
 
@@ -317,7 +342,7 @@ describe('CodexTool first-launch dialog handling (Issue #890)', () => {
       }
 
       // No "2" prefix is injected; the message is delegated cleanly to the sender.
-      expect(sendKeys).not.toHaveBeenCalledWith(SESSION, '2', false);
+      expect(sendKeys).not.toHaveBeenCalledWith(SESSION, UPDATE_KEY, false);
       expect(sendMessageWithSubmitVerification).toHaveBeenCalledWith(
         expect.objectContaining({ sessionName: SESSION, message: 'explain this branch', cliToolId: 'codex' })
       );

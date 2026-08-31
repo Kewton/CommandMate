@@ -55,8 +55,8 @@ import { useLocalStorageState } from '@/hooks/useLocalStorageState';
 import { useAutoSave } from '@/hooks/useAutoSave';
 import { useSwipeGesture } from '@/hooks/useSwipeGesture';
 import { useVirtualKeyboard } from '@/hooks/useVirtualKeyboard';
+import { useCopyFeedback } from '@/hooks/useCopyFeedback';
 import { Z_INDEX } from '@/config/z-index';
-import { COPY_FEEDBACK_RESET_MS } from '@/config/ui-feedback-config';
 import { applyIndent, applyOutdent, type IndentEdit } from '@/lib/editor/indent';
 import type { EditorProps, EditorFileType, ViewMode } from '@/types/markdown-editor';
 import {
@@ -280,8 +280,9 @@ export const MarkdownEditor = memo(function MarkdownEditor({
     () => isHostedContent && new Blob([seedContent]).size > FILE_SIZE_LIMITS.WARNING_THRESHOLD
   );
 
-  // Copy to clipboard state
-  const [copied, setCopied] = useState(false);
+  // Copy to clipboard confirmation. The timer lives in the hook so it is
+  // cleared on unmount instead of firing into a torn-down tree (Issue #2180).
+  const { copied, markCopied } = useCopyFeedback();
 
   // Mobile tab state (for portrait mode)
   const [mobileTab, setMobileTab] = useState<MobileTab>('editor');
@@ -589,12 +590,11 @@ export const MarkdownEditor = memo(function MarkdownEditor({
   const handleCopy = useCallback(async () => {
     try {
       await copyToClipboard(content);
-      setCopied(true);
-      setTimeout(() => setCopied(false), COPY_FEEDBACK_RESET_MS);
+      markCopied();
     } catch {
       // Silently fail - clipboard may not be available
     }
-  }, [content]);
+  }, [content, markCopied]);
 
   /**
    * Handle resize from PaneResizer (delta in pixels)

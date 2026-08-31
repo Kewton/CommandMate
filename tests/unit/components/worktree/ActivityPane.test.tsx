@@ -43,7 +43,9 @@ describe('ActivityPane', () => {
     ['git', 'GitPane'],
     ['notes', 'MemoPane'],
     ['schedules', 'ExecutionLogPane'],
-    ['agent', 'AgentSettingsPane'],
+    // Issue #2067: the `agent` activity renders AgentInstancesPane; the name
+    // used to say AgentSettingsPane, which is the mobile checkbox pane.
+    ['agent', 'AgentInstancesPane'],
     ['timer', 'TimerPane'],
   ])('wraps activity "%s" in an ErrorBoundary named "%s"', (id, name) => {
     render(<ActivityPane active={id as keyof ActivityContentMap} activities={fullActivities} />);

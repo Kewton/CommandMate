@@ -1,0 +1,247 @@
+version: 1
+title: "Issue #2123 + #2124: VAPID の設定手順と既定値・未設定/送信失敗の可視化"
+goal: |
+  /bug-fix 次の 2 件を **1 つの PR** で実装してください。
+
+  - https://github.com/Kewton/CommandMate/issues/2123 （docs: 設定方法が利用者向けに無い・未設定が無音）
+  - https://github.com/Kewton/CommandMate/issues/2124 （bug: `CM_VAPID_SUBJECT` の既定値が APNs に拒否される）
+
+  **2 件を分けないでください。** どちらも `src/lib/push/vapid.ts` と `server.ts` に
+  「起動時に VAPID を検査して 1 行出す」という**同じ種類の変更**を要求しており、
+  別々に実装すると同じ関数を 2 通りに書くことになります。オーケストレーターが
+  依存関係分析の結果まとめました。
+
+  ## 背景: これは 2026-08-27〜28 の実機 UAT（Epic #2002）で踏んだ実害です
+
+  記録は `docs/qa/2002-push-uat-record.md` §3 にあります。**まず読んでください。**
+
+  ### 実測 1: VAPID 未設定に気づけない
+
+  ```
+  $ curl -s http://127.0.0.1:3000/api/push/vapid
+  {"configured":false,"publicKey":null}
+  ```
+
+  未設定だと push は 1 通も出ませんが、**起動ログにも `commandmate status` にも何も出ません**
+  （`server.ts` に `push` / `vapid` の言及は 0 件）。設定方法も
+  README / user-guide / `.env.example` のどこにも書かれていません（`VAPID` の全文検索で確認済み）。
+  鍵を作る手段も提供されていません（`src/cli/commands/init.ts` に `VAPID` は 0 件、
+  `src/cli/utils/env-setup.ts` の既定 env にも無し、`scripts/` にヘルパ無し）。
+
+  ### 実測 2: 既定の subject が APNs に拒否される
+
+  同一の通知を 2 台へファンアウトした結果:
+
+  | 端末 | 宛先 | 既定 `mailto:commandmate@localhost` | `https://github.com/Kewton/CommandMate` に変更後 |
+  |---|---|---|---|
+  | Android 10 / Chrome 151 | FCM | 届く | 届く |
+  | iPad / iPadOS 18.7 | **APNs** | **403 で失敗** | **届く（目視確認済み）** |
+
+  ```
+  [2026-08-27T14:23:42.216Z] [WARN] [push/sender] push-send-failed {"statusCode":403}
+                                      ↓ CM_VAPID_SUBJECT を変更して再起動
+  [2026-08-27T14:28:02.063Z] [INFO] [push/resolution] resolution-push-sent {"deviceCount":2,...}
+  ```
+
+  ```ts
+  // src/lib/push/vapid.ts:15
+  const DEFAULT_SUBJECT = 'mailto:commandmate@localhost';
+  ```
+
+  VAPID の `sub` は送信元の連絡先で、**Apple は妥当性を検証**します。`localhost` は実在しない
+  ドメインなので拒否されます。**FCM は寛容なので Android だけで確認すると気づけません。**
+
+  ### 実測 3: 送信失敗が利用者に見えない
+
+  ```ts
+  // src/lib/push/push-sender.ts:384-392
+  if (statusCode === 404 || statusCode === 410) {
+    deletePushSubscriptionByEndpoint(...);        // 期限切れは自動削除（正しい）
+    logger.info('push-subscription-removed', { statusCode });
+    return;
+  }
+  logger.warn('push-send-failed', { statusCode: statusCode ?? 'unknown' });  // 403 はここ止まり
+  ```
+
+  - **403 は購読を削除しない**（正しい。設定ミスで購読を消してはいけない）
+  - **410 は削除する**（正しい）
+  - しかし**どちらも UI にも `commandmate status` にも出ない**
+  - **成功した送信はログに出ない**（`push-sender` も `waiting-push-notifier` も失敗のみログ）
+
+  UAT では 410 で Android の購読が消えたのに、**1 回目は失敗ログすら出ず 2 回目でようやく発覚**しました。
+  利用者には「いつのまにか通知が来なくなった」としか見えません。
+
+  ## 実装方針（推奨。逸脱してよいが、逸脱したら理由を報告すること）
+
+  ### 1. 既定 subject を APNs が受け付ける値にする（#2124 の最小対策）
+
+  VAPID 仕様は `mailto:` と `https:` の両方を許容します。実測で
+  `https://github.com/Kewton/CommandMate` が APNs で通ることを確認済みです。
+
+  ### 2. 起動時セルフチェックを **1 つだけ**入れる（#2123 と #2124 の共通部分）
+
+  **#2113 で入れた localhost セルフチェックと同じ発想**にしてください
+  （`src/lib/server/localhost-self-check.ts`。**先例として必ず読むこと**）。
+
+  - VAPID **未設定**なら「push は無効」と 1 行
+  - `CM_VAPID_SUBJECT` が**不正**（`localhost` / 非 FQDN の `mailto:` など）なら 1 行
+  - **正常なら何も出さない**（陰性対照）
+  - **fail-open。起動を止めない**
+  - `commandmate status` にも同じことが出ること
+
+  **2 つの Issue のために 2 つの検査を書かないでください。** 1 つの検査が 2 つの事実を報告する形にします。
+
+  ### 3. 鍵生成を CommandMate が提供する（#2123）
+
+  `commandmate init` に組み込むか、専用サブコマンドを足す。同梱の `web-push`（3.6.7）の
+  `generateVAPIDKeys()` が使えます。**利用者に `node -e "require('web-push')..."` を叩かせないこと。**
+
+  ### 4. `.env.example` に 3 変数（#2123）
+
+  `CM_VAPID_PUBLIC_KEY` / `CM_VAPID_PRIVATE_KEY` / `CM_VAPID_SUBJECT` をコメントつきで。
+
+  ### 5. 利用者向けドキュメント（#2123）
+
+  `docs/user-guide/webapp-guide.md` に「スマホ通知」の節を新設（現状「通知」の語が **0 件**）。
+  鍵生成 → 3 変数 → 再起動 → `GET /api/push/vapid` で `configured: true` を確認、まで一続きで。
+  **実機 UAT で必要だったのに書かれていなかった前提**も入れてください:
+
+  - **HTTPS が要る**（Service Worker / PushManager は secure context 必須。`localhost` は例外だがスマホは該当しない）
+  - **iOS は PWA としてホーム画面に追加し、そこから起動しないと購読ボタンが出ない**
+    （`src/lib/pwa/push-client.ts:52` の `isStandalonePWA()` 判定）
+  - **Android Chrome は通常のタブで動く**（ホーム画面追加は不要）
+  - **アプリ内の More 画面のボタンを押すまで、OS の通知一覧にサイトが現れない**
+    （UAT で OS 設定を先に見て「許可済みのはず」と誤認した）
+  - 秘密鍵の扱い（`.env` は `.gitignore:32` で追跡外）
+
+  en / ja のミラーがあれば揃えること。
+
+  ### 6. 送信失敗の可視化（#2124 の対策案 3）
+
+  403 が続く購読・410 で消えた購読を、**設定画面で「この端末には届いていない」と分かるように**する。
+  **403 では購読を消さない**現在の挙動は維持すること。
+
+  なお **#2126（Android Chrome が通知を suspicious 判定する）でも同じ可視化が必要**とされています。
+  **#2126 はいま着手していません**（実機での切り分けが受入条件のため）。
+  あなたの実装が 410 と 403 の両方を扱えるようにしておくと、#2126 が上に乗れます。
+
+  ## やってはいけないこと
+
+  - **ユーザーの `.env` を書き換えないこと。** リポジトリルートの `.env` には**稼働中サーバの
+    実鍵**が入っています（UAT のために設定したもの）。読むのも避けてください
+  - **ポート 3000 のサーバを停止・再起動しないこと。** 稼働中です
+  - 検証でサーバを起こす必要があれば `CM_PORT` で 3900〜3999 の空きを使い、
+    `CM_DB_PATH` を worktree 配下の一時 DB に向けること
+  - **実機での確認はできません。** 「iOS で届いた」等を実測として書かないこと。
+    APNs / FCM の実挙動は**オーケストレーターが UAT で採った上記の測定値を根拠として引用**し、
+    あなた自身が測っていないことは「未計測」と明記すること
+
+  ## 受入条件
+
+  ### #2123
+  - 通知を使ったことのない利用者が、user-guide だけを見て購読まで到達できる
+  - 鍵生成が CommandMate の提供する手段で完結する（外部コマンドの手打ちが不要）
+  - VAPID 未設定のとき、起動ログか `commandmate status` に**そうと分かる 1 行**が出る
+  - 設定済みのときはその行が出ない（**陰性対照**）
+  - `.env.example` に 3 変数がある
+
+  ### #2124
+  - `CM_VAPID_SUBJECT` を設定していない環境で、**APNs が受け付ける subject** が使われる
+  - 不正な subject（`localhost` など）を設定した場合、起動時に警告が出る
+  - 正しい subject では警告が出ない（**陰性対照**）
+  - 403 が起きても購読が削除されない（現状維持の確認）
+  - 403 / 410 が続く購読を利用者が画面で知れる
+
+  ### 共通
+  - **変異注入で赤になることを確認する**（リポジトリ全体で判定し、赤になったファイルを列挙）
+
+  ## 変異注入について
+
+  「変異が赤にならない ＝ 空振り」と即断しないこと。#2040 で、変異を入れても対象 Issue の
+  6 ファイルが全部緑なのに、リポジトリ全体を回すと別ファイルの 3 テストが捕まえていた事例がある。
+  変異は**構造を保つもの**（値の入れ替え・境界のずらし・条件の反転）にし、
+  byte-identical に復元して md5 で検証すること。
+
+  ## 並行して動いているワーカーがあります
+
+  **#2125 のワーカーが同時に走っています。** あちらの scope は
+  `src/lib/verification/gate-runner.ts` と `src/lib/push/failure-push-notifier.ts` です。
+  **この 2 ファイルはあなたの scope 外**にしてあるので触らないでください。
+  必要になったら止めて報告してください。
+
+  ## 作業ルール（厳守）
+
+  - **`CHANGELOG.md` と `docs/module-reference.md` を編集しないでください**（scope 外です）。
+    代わりに次の 2 ファイルを書いてください。どちらも `dev-reports/` 配下なので commit には入りません。
+    - `dev-reports/changelog/issue-2123.md` — `CHANGELOG.md` の `## [Unreleased]` にそのまま
+      貼れる **1 エントリ**（先頭は `- **<type>(<scope>): …** (#2123, #2124): …`）。どの節
+      （`### Added` / `### Changed` / `### Fixed`）に入るかを 1 行目にコメントで書く。
+      **形式は次の実例に合わせてください**（develop の `CHANGELOG.md` にある実エントリを丸ごと 1 本。
+      エントリは**ファイル中では 1 行**で、下で折り返して見えるのは表示上の都合です）:
+
+      ```markdown
+      <!-- ### Fixed -->
+      - **fix(cli): `send` 直後の `wait` が「まだ始まっていない」を完了と読む問題を修正** (#1975): `wait` が `sessionStatus==='ready'` を完了と判定する直前に、**「このインスタンスに最後に渡されたプロンプト」と「エージェント自身が最後に報告したターン終了（`lastStopEventAt`）」を突き合わせる**ゲートを追加。`send` 直後は最新の構造化イベントが直前ターンの `stop` のままなので #1839 の `adoptTurnStart()` が何も採用せず、`turnStartedAt === null` が「決着済み」と読まれてアイドル composer をそのまま完了にしていた（隔離サーバ実測 2026-08-22 / copilot 1.0.80: `send`→`wait` 5 回中 3 回が約 0.3 秒・`basis=scraper_ready`・成果物ゼロで exit 0）。ゲートは `GET /api/worktrees/:id/messages?limit=1&unit=pairs` を `--instance`（無指定ならサーバが解決した `cliToolId`）でスコープして読む。**hook を出さないツールは挙動不変** — `structuredEvents.source.capabilities.supportedEvents`（#1924 の宣言値）が `stop` とターン開始語の両方を宣言しているソースだけがこのゲートに入り、legacy-relay（`supportedEvents: []`）と #1924 以前のサーバは従来経路のまま台帳も引かない。保留は `PENDING_PROMPT_HOLD_MS`=60 秒で打ち切り（hooks は全経路 fail-open なので `Stop` の取りこぼしで `wait` が返らなくなってはいけない）、`--timeout` / `--stall-timeout` はそれより短ければ従来どおり優先される。完了行の `basis=` は、エージェントが最新プロンプトの終了を報告していれば `hook_stop` になる（`scraper_ready` は「画面しか言っていない」という文書どおりの意味に戻る）。
+      ```
+
+      - `- **` で始めること — 集計は `grep -cE '^- \*\*'` なので、外れるとエントリとして数えられません。
+      - `(#2123, #2124)` は要約の**外**（`**` を閉じた後）に置くこと。
+      - `<type>` は CLAUDE.md のコミットメッセージ規約と同じ語彙。
+      - 1 エントリ＝1 行（折らない）。
+    - `dev-reports/module-reference/issue-2123.md` — `docs/module-reference.md` の表に足す注記を
+      **行キー（`| \`path\` |`）ごと**に列挙する。既存行への追記なら「どの行に何を足すか」を書く。
+      **既存行に足すときは `grep -n '^| \`<path>\`' docs/module-reference.md` を実行し、その出力
+      （行番号つきの行キー）を断片に書き写してから**書くこと。0 件だった行への追記を指示しない
+      （新しい行を足すなら「新規行」と明記する）。足すものが無ければ「追記なし」の 1 行でよい。
+      **注記本文に `|` を含めるときは `\|` にエスケープすること**。実例:
+
+      ```markdown
+      ## 既存行への追記
+      - `src/lib/session/worktree-status-helper.ts` — 実在確認: `docs/module-reference.md:103`（行番号は確認時点のもの）
+        追記内容: 「private `getStatusCaptureLines()` を削除し `resolveCaptureSpec(cliToolId).statusLines` に置換（Issue #1933）」
+
+      ## 新規行
+      追記なし
+      ```
+  - **commit は 1 本にまとめること。PR は作らないこと**（オーケストレーターが作ります）。
+  - 作業ツリーをクリーンにして終えること。
+  - Issue 本文を書き換えないこと。実測と食い違ったら**実測を正とし**、食い違いを報告に書くこと。
+  - 完了したら最終行に `IMPL_COMPLETED` と出力すること。
+scope:
+  allow:
+    - "src/lib/push/**"
+    - "src/lib/server/**"
+    - "src/lib/env.ts"
+    - "src/lib/pwa/**"
+    - "server.ts"
+    - "src/cli/commands/init.ts"
+    - "src/cli/commands/status.ts"
+    - "src/cli/commands/quickstart.ts"
+    - "src/cli/utils/**"
+    - "src/cli/config/**"
+    - "src/cli/docs/**"
+    - "src/cli/types/**"
+    - "src/app/api/push/**"
+    - "src/components/notifications/**"
+    - "src/config/**"
+    - "locales/**"
+    - "tests/unit/**"
+    - "tests/integration/**"
+    - "docs/user-guide/**"
+    - "docs/en/**"
+    - "docs/ja/**"
+    - "docs/design/**"
+    - "README.md"
+    - ".env.example"
+    - "scripts/**"
+  deny:
+    - "CHANGELOG.md"
+    - "docs/module-reference.md"
+    - "CLAUDE.md"
+    - ".env"
+    - "src/lib/verification/gate-runner.ts"
+    - "src/lib/push/failure-push-notifier.ts"
+verify: {}
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true

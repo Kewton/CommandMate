@@ -158,7 +158,8 @@
   },
   "branchItem": {
     "cliToolStatus": "CLI tool status",
-    "hasUnread": "Has unread messages"
+    "hasUnread": "Has unread messages",
+    "agentExited": "exited"
   },
   "connection": {
     "reconnecting": "Reconnecting",
@@ -178,5 +179,50 @@
   "attention": {
     "label": "Needs attention",
     "badgeLabel": "{count} worktrees need your attention"
+  },
+  "agentUpdates": {
+    "title": "Agent CLI versions",
+    "description": "Installed versions of the agent CLIs on this machine. The update runs outside the agent pane, so a session that is already open is not interrupted.",
+    "installed": "installed {version}",
+    "notInstalled": "Not installed",
+    "available": "Update available: {version}",
+    "dismissed": "Marked as dismissed in codex",
+    "update": "Update",
+    "updating": "Updating...",
+    "running": "Running: {command}",
+    "succeeded": "Updated {from} to {to}.",
+    "failed": "Update failed: {error}",
+    "restartWarning": "These sessions keep the current version until they are restarted: {sessions}",
+    "restartNotice": "A session that is already running keeps its current version until it is restarted.",
+    "restart": "Restart {alias}",
+    "restarted": "Ended. The next message starts it on the new version.",
+    "restartError": "Could not restart the session.",
+    "loadError": "Could not read the agent CLI versions."
+  },
+  "settings": {
+    "title": "Settings",
+    "defaultAgents": {
+      "title": "Default agents for new branches",
+      "description": "The agents a newly discovered branch opens with, in order. The first one is the primary — the tab that opens first and the default target for sends.",
+      "appliesToNew": "Existing branches are left alone. Their tabs stay exactly as they are.",
+      "primary": "primary",
+      "installed": "Installed",
+      "notInstalled": "Not installed",
+      "addLabel": "Available to add",
+      "add": "Add",
+      "remove": "Remove",
+      "moveUp": "Move up",
+      "moveDown": "Move down",
+      "save": "Save",
+      "saving": "Saving...",
+      "saved": "Saved",
+      "reset": "Reset to default",
+      "builtIn": "Built-in default: {agents}",
+      "configured": "Configured",
+      "usingBuiltIn": "Using the built-in default",
+      "range": "Select between {min} and {max} agents.",
+      "saveError": "Could not save.",
+      "loadError": "Could not load the setting."
+    }
   }
 }

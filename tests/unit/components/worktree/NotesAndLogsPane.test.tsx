@@ -3,8 +3,10 @@
  * Issue #368: Adds 'agent' sub-tab for Agent settings
  * Issue #874: Adds instance-management mode (mobile) for the 'agent' sub-tab
  * Issue #1442: Adds 'skills' sub-tab (mobile) + horizontal-scroll tab row
- * Issue #1816: Adds the 'verification' sub-tab, offered only when the caller
- * supplies verification state, and reachable from outside via requestedSubTab
+ * Issue #1816: Adds the 'verification' sub-tab, reachable from outside via
+ * requestedSubTab
+ * Issue #2064: the sub-tab is unconditional — `verification` is a required prop,
+ * so mobile can no longer hide an entry point the PC Activity Bar always shows
  * @vitest-environment jsdom
  */
 
@@ -12,6 +14,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { NotesAndLogsPane } from '@/components/worktree/NotesAndLogsPane';
 import type { AgentInstance, CLIToolType } from '@/lib/cli-tools/types';
+import type { WorktreeVerificationState } from '@/hooks/useWorktreeVerification';
 
 // Mock child components
 vi.mock('@/components/worktree/MemoPane', () => ({
@@ -64,6 +67,10 @@ vi.mock('@/components/worktree/MobileAgentInstancesPane', () => ({
 }));
 
 describe('NotesAndLogsPane', () => {
+  // Only the identity of the object matters here — VerificationPane is stubbed,
+  // and the pane itself is covered by its own test.
+  const verification = {} as never;
+
   const defaultProps = {
     worktreeId: 'test-worktree',
     selectedAgents: ['claude', 'codex'] as CLIToolType[],
@@ -72,6 +79,8 @@ describe('NotesAndLogsPane', () => {
     onVibeLocalModelChange: vi.fn(),
     vibeLocalContextWindow: null as number | null,
     onVibeLocalContextWindowChange: vi.fn(),
+    // Issue #2064: required, so every render in this file supplies it.
+    verification,
   };
 
   beforeEach(() => {
@@ -225,14 +234,27 @@ describe('NotesAndLogsPane', () => {
     });
   });
 
-  describe('Verification sub-tab (Issue #1816)', () => {
-    // Only the identity of the object matters here — VerificationPane is
-    // stubbed, and the pane itself is covered by its own test.
-    const verification = {} as never;
-
-    it('is not offered when the caller supplies no verification state', () => {
+  describe('Verification sub-tab (Issue #1816 / #2064)', () => {
+    it('is always offered, like the PC Activity Bar entry (Issue #2064)', () => {
       render(<NotesAndLogsPane {...defaultProps} />);
-      expect(screen.queryByText('schedule.verificationTab')).not.toBeInTheDocument();
+      expect(screen.getByText('schedule.verificationTab')).toBeInTheDocument();
+    });
+
+    it('is offered even with NO verification state supplied (Issue #2064)', () => {
+      // The assertion above cannot see the fix: `defaultProps.verification` is
+      // `{}`, which is TRUTHY, so the deleted guard
+      // (`verification ? SUB_TABS : SUB_TABS.filter(t => t.id !== 'verification')`)
+      // returns the full row for it and the test passes on develop too. Only an
+      // absent state exercises the branch that used to hide the tab, so this is
+      // the render that pins #2064. The cast is what makes the now-required prop
+      // absent; restoring the guard must turn this red.
+      render(
+        <NotesAndLogsPane
+          {...defaultProps}
+          verification={undefined as unknown as WorktreeVerificationState}
+        />
+      );
+      expect(screen.getByText('schedule.verificationTab')).toBeInTheDocument();
     });
 
     it('renders VerificationPane when the tab is selected', () => {
