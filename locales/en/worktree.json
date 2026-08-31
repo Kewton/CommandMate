@@ -1003,7 +1003,9 @@
         "empty": "No verification run from another branch in this window.",
         "error": "Could not load the cross-branch history: {message}",
         "failingGates": "Failing gates: {gates}"
-      }
+      },
+      "partial": "Partial run: {ran} of the {total} planned gates ran. Not run: {gates}. This verdict covers only the gates that ran.",
+      "cancelSettling": "Stop requested. The gate has been signalled and the run is closing; a process that ignores it is killed five seconds later."
     },
     "gates": {
       "heading": "Gates — run {runId}",
@@ -1103,7 +1105,7 @@
       "gateLabel": "Select gate {gateId}",
       "runAll": "Verify with every gate",
       "runSelected": "Verify with the {count} selected",
-      "hint": "Only the selected gates run, so confirming a one-line `lint` fix no longer means waiting for `build` and `unit`. Going back to all gates restores the default run, built-in gates included.",
+      "hint": "Only the selected gates run, so confirming a one-line `lint` fix no longer means waiting for `build` and `unit`. The verdict then covers only the gates that ran, and a narrowed run is labelled as a partial run in the gate table. When the execution contract declares `success.requireWorkEvidence` / `requireScopeClean`, `work-evidence` and `scope` run regardless of the selection — narrowing the gate list cannot drop a criterion the contract declared.",
       "failedOnly": "Only the gates that failed ({count})",
       "failedOnlyEmpty": "The run on screen has no failing gate to re-run. A gate that did not run would simply not run again for the same reason.",
       "selectAll": "Back to all gates"

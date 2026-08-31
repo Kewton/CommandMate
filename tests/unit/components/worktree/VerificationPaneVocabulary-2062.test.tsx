@@ -136,6 +136,7 @@ function stateFor(detail: VerificationRunView): WorktreeVerificationState {
     selectFailedGates: vi.fn(),
     runningRun: null,
     cancelPending: false,
+    cancelSettling: false,
     cancelFailure: null,
     historyLimit: 10,
     canLoadMore: false,

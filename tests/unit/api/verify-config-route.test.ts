@@ -18,7 +18,8 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import type { NextRequest } from 'next/server';
 import { runMigrations } from '@/lib/db/db-migrations';
-import { upsertWorktree } from '@/lib/db';
+import { createTask, upsertWorktree } from '@/lib/db';
+import { parseTaskContract } from '@/lib/tasks/contract-parser';
 import { removeTempDir } from '@tests/helpers/temp-dir';
 
 declare module '@/lib/db/db-instance' {
@@ -205,6 +206,45 @@ describe('GET /api/worktrees/:id/verify/config (Issue #2061)', () => {
 
     const body = await (await getConfig(wtId)).json();
     expect(body.plannedGateIds).toEqual(['work-evidence', 'scope', 'env-clean', 'lint']);
+  });
+
+  it('plans the gates the contract carries too (Issue #2063)', async () => {
+    // A default run executes verify.yaml's gates AND the ones this delegation's
+    // contract declared (#1791), so a plan that listed only the file's half was
+    // wrong twice over: it understated the progress denominator while a run was
+    // in flight, and — since #2063 made the plan the selectable gate list — a
+    // run whose only failure was a contract gate offered nothing to re-run,
+    // with the "only the gates that failed" button disabled.
+    writeConfig('version: 1\ngates:\n  - id: lint\n    command: "npm run lint"\n');
+    createTask(db, {
+      worktreeId: wtId,
+      cliToolId: 'claude',
+      contractPath: '.commandmate/tasks/t.yaml',
+      contract: parseTaskContract(
+        [
+          'version: 1',
+          'title: contract with its own gate',
+          'goal: do the work',
+          'scope:',
+          '  allow: ["**"]',
+          'verify:',
+          '  gateDefinitions:',
+          '    - id: issue-repro',
+          '      command: "npm run repro"',
+          '      timeoutSec: 30',
+          '',
+        ].join('\n'),
+        'task.yaml'
+      ),
+      status: 'running',
+    });
+
+    const body = await (await getConfig(wtId)).json();
+    // Contract gates run last, exactly as `declaredGates()` orders them.
+    expect(body.plannedGateIds).toEqual(['work-evidence', 'scope', 'lint', 'issue-repro']);
+    // `gates` still describes verify.yaml alone: the file's own declarations
+    // are what the "Declared gates" list is about.
+    expect(body.gates.map((gate: { id: string }) => gate.id)).toEqual(['lint']);
   });
 
   it('separates "the file is broken" from "there is no file"', async () => {

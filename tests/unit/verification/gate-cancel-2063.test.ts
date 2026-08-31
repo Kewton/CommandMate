@@ -37,9 +37,22 @@ import {
   waitForVerification,
 } from '@/lib/verification/gate-runner';
 import {
+  acquireMachineLock,
+  MACHINE_LOCK_ROOT_ENV,
+  type MachineLockHandle,
+} from '@/lib/verification/machine-lock';
+import {
   CANCELLED_SKIP_LOG,
+  PRIMARY_CHECKOUT_SKIP_LOG,
+  SKIP_LOG_MARKERS,
+  WORK_EVIDENCE_SKIP_LOG,
   classifySkipReason,
 } from '@/lib/verification/run-verdict-vocabulary';
+import {
+  SCOPE_SKIP_NO_CONTRACT,
+  SCOPE_SKIP_NOT_REQUIRED,
+  scopeSkipDetachedContract,
+} from '@/lib/verification/scope-gate';
 import { removeTempDir } from '@tests/helpers/temp-dir';
 
 declare module '@/lib/db/db-instance' {
@@ -143,6 +156,7 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   vi.restoreAllMocks();
   db.close();
   while (tempDirs.length > 0) {
@@ -311,5 +325,119 @@ options:
     expect(run?.gates.some((gate) => (gate.logTail ?? '').includes(CANCELLED_SKIP_LOG))).toBe(
       false
     );
+  });
+});
+
+describe('cancelling a run queued behind a mutex (Issue #2063)', () => {
+  let heldLock: MachineLockHandle | null = null;
+
+  afterEach(() => {
+    heldLock?.release();
+    heldLock = null;
+  });
+
+  it('releases the worktree instead of waiting out the gate timeout', async () => {
+    // The lock root is redirected: `~/.commandmate/locks` is shared by every
+    // checkout on the machine, so a suite using it would serialize against —
+    // and be failed by — unrelated live runs.
+    const lockRoot = realpathSync(mkdtempSync(join(tmpdir(), 'gate-cancel-locks-')));
+    tempDirs.push(lockRoot);
+    vi.stubEnv(MACHINE_LOCK_ROOT_ENV, lockRoot);
+
+    const held = await acquireMachineLock('cancel-2063-heavy', {
+      timeoutMs: 0,
+      root: lockRoot,
+    });
+    expect(held.acquired).toBe(true);
+    if (!held.acquired) return;
+    heldLock = held.handle;
+
+    const repo = createRepo('version: 1\ngates: []\n');
+    writeFileSync(
+      join(repo, '.commandmate', 'verify.yaml'),
+      `
+version: 1
+gates:
+  - id: heavy
+    command: "sh -c 'touch ${repo}/started; exit 0'"
+    timeoutSec: 1800
+    mutex: cancel-2063-heavy
+options:
+  baseRef: main
+`
+    );
+    register(repo);
+
+    const { runId } = await startVerification({
+      worktreeId: WT_ID,
+      worktreePath: repo,
+      trigger: 'api',
+    });
+
+    // The gate's ROW is created before its evaluator is entered, so its
+    // appearance is the signal that the run has reached the lock wait. Nothing
+    // has been spawned — which is precisely why a kill-only cancel could not
+    // reach this state.
+    expect(
+      await until(() => (getVerificationRun(db, runId)?.gates ?? []).some((g) => g.gateId === 'heavy'))
+    ).toBe(true);
+    expect(existsSync(join(repo, 'started'))).toBe(false);
+
+    const startedAt = Date.now();
+    const outcome = await cancelVerification(runId);
+    const elapsedMs = Date.now() - startedAt;
+
+    // `cancelled`, not `requested`: the run closed while the caller waited. The
+    // gate declares 1800s, so anything that merely waited the lock out would
+    // blow this budget by three orders of magnitude.
+    expect(outcome).toEqual({ kind: 'cancelled', status: 'cancelled' });
+    expect(elapsedMs).toBeLessThan(5000);
+
+    const run = getVerificationRun(db, runId);
+    // The row is closed, so `getRunningVerificationRun` stops refusing new runs
+    // for this worktree — the state the endpoint exists to escape.
+    expect(run?.status).toBe('cancelled');
+    expect(run?.finishedAt).not.toBeNull();
+
+    const gate = run?.gates.find((g) => g.gateId === 'heavy');
+    expect(gate?.status).toBe('skipped');
+    // An abandoned wait is not a resource conflict: naming the holder would
+    // send the reader after a lock that had nothing to do with the outcome.
+    expect(gate?.logTail).toContain(CANCELLED_SKIP_LOG);
+    expect(gate?.logTail).not.toContain(SKIP_LOG_MARKERS.mutex);
+    // The command never started: the lock was never taken, so nothing ran.
+    expect(existsSync(join(repo, 'started'))).toBe(false);
+    // Longer than `CANCEL_SETTLE_TIMEOUT_MS` (8s) on purpose. A runner that
+    // cannot abandon the wait answers `requested` when that budget runs out,
+    // and this test has to survive long enough to ASSERT that rather than die
+    // on vitest's 5s default and report a timeout instead of the defect.
+  }, 20_000);
+});
+
+describe('CANCELLED_SKIP_LOG is specific enough to classify by (Issue #2063)', () => {
+  it('is the literal the runner writes', () => {
+    // Pinned by value, like WORK_EVIDENCE_SKIP_LOG in
+    // run-verdict-vocabulary-2062.test.ts. `classifySkipReason` matches on
+    // `includes`, so a marker shortened to something generic would keep every
+    // #2063 test green while silently swallowing its siblings — see below.
+    expect(CANCELLED_SKIP_LOG).toBe('skipped: the verification run was cancelled.');
+  });
+
+  it('appears in no other skip log the product can produce', () => {
+    // THE assertion. `PRIMARY_CHECKOUT_SKIP_LOG` and `WORK_EVIDENCE_SKIP_LOG`
+    // both start with `skipped: `, so a marker weakened to that prefix makes
+    // this list red — which is the failure a value-only pin cannot express.
+    const otherProducers = [
+      PRIMARY_CHECKOUT_SKIP_LOG,
+      WORK_EVIDENCE_SKIP_LOG,
+      SCOPE_SKIP_NO_CONTRACT,
+      SCOPE_SKIP_NOT_REQUIRED,
+      scopeSkipDetachedContract('task-1', 'succeeded'),
+      `${SKIP_LOG_MARKERS.mutex} waited=3s`,
+    ];
+    for (const log of otherProducers) {
+      expect(log).not.toContain(CANCELLED_SKIP_LOG);
+      expect(classifySkipReason(log)).not.toBe('cancelled');
+    }
   });
 });

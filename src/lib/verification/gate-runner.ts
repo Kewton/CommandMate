@@ -764,7 +764,15 @@ async function runGateAttempt(
   // The gate's own timeout is the wait budget: a gate allowed 600s of execution
   // has already declared how long this run may spend on it, and a second knob
   // would only let the two disagree.
-  const lock = await acquireMachineLock(mutex, { timeoutMs: gate.timeoutSec * 1000 });
+  //
+  // Issue #2063: the wait is abandonable. `build` declares 1800s here, so a run
+  // cancelled while queued behind the lock used to stay `running` for up to
+  // half an hour — holding the worktree against the very endpoint that exists
+  // to release it.
+  const lock = await acquireMachineLock(mutex, {
+    timeoutMs: gate.timeoutSec * 1000,
+    shouldAbandon: () => cancellation.cancelled,
+  });
   if (!lock.acquired) {
     const recordedAt = Date.now();
     return {
@@ -772,15 +780,15 @@ async function runGateAttempt(
       exitCode: null,
       startedAt: recordedAt,
       durationMs: 0,
-      logTail: mutexWaitTimeoutLog(gate, mutex, lock),
+      // A cancelled wait is not a resource conflict, and naming the holder
+      // would send the reader after a lock that had nothing to do with it.
+      logTail: lock.abandoned ? CANCELLED_NOT_REACHED_LOG : mutexWaitTimeoutLog(gate, mutex, lock),
     };
   }
 
   try {
-    // Issue #2063: the lock wait is the one stretch a cancel cannot interrupt
-    // (`acquireMachineLock` has no signal of its own), so the latch is read the
-    // moment it comes free. Starting the command here would spawn a process the
-    // operator has already stopped waiting for.
+    // The lock can still come free in the same tick the cancel arrives, so the
+    // latch is read once more before anything is spawned.
     if (cancellation.cancelled) {
       const recordedAt = Date.now();
       return {
@@ -1209,6 +1217,25 @@ function declaredGates(config: VerifyConfig, contractGates: VerifyGate[]): Resol
 }
 
 /**
+ * Built-in gates a declaration has made non-optional for this run (Issue #2063).
+ *
+ * `gateIds` narrows *which declared gates* execute. It must not be able to drop
+ * an assertion the execution contract made about the work — see
+ * {@link selectGates} for the failure that rule prevents.
+ */
+interface RequiredBuiltinGates {
+  /** The contract declared `success.requireWorkEvidence`. */
+  workEvidence: boolean;
+  /**
+   * The contract declared `success.requireScopeClean`, or there is a contract
+   * this run could not attach to that declared it (#1620's detached case).
+   */
+  scope: boolean;
+  /** A declaration switched env-clean on (#1740). */
+  envClean: boolean;
+}
+
+/**
  * Resolve `gateIds` against the declared gates.
  *
  * Returns a message instead of a selection when the request names a gate that
@@ -1216,24 +1243,45 @@ function declaredGates(config: VerifyConfig, contractGates: VerifyGate[]): Resol
  * with zero gate results, which {@link aggregateRunStatus} would have to call
  * `passed` — a green verdict from having checked nothing.
  *
+ * ## A narrowed run cannot drop the contract's own criteria (Issue #2063)
+ *
+ * Every field of `required` is ORed with the request rather than replaced by
+ * it. `runEnvClean` has worked this way since #1740, for the reason stated
+ * there: *a delegation that declared the requirement cannot lose it by naming a
+ * narrower gate list.* `runWorkEvidence` and `scope` did not, and the asymmetry
+ * became reachable in one click when #2063 added a "re-run only the failed
+ * gates" button, which by construction always sends a proper subset.
+ *
+ * The failure that closes: a run with `gateIds: ['unit']` executes `unit`
+ * alone, {@link aggregateRunStatus} sees one `passed`, the run is `passed` — and
+ * because a Web run carries no `taskId`, `getVerifiableTask` adopts the
+ * worktree's `failed` contract task and walks it `verify_started` ->
+ * `verify_passed` -> `succeeded`. A contract declaring `requireScopeClean: true`
+ * would have been closed as done with `scope.allow` never evaluated and no work
+ * evidence ever established. So the two gates that judge the *contract* (rather
+ * than the repository's own criteria) are forced back in whenever the contract
+ * asked for them.
+ *
+ * `scope` becomes `explicit`, not `implicit`: the caller did not name it, but a
+ * declaration did, and a skip of a gate somebody required has to count against
+ * the run (the same reading #1620 gave the detached-contract case).
+ *
  * @param declared verify.yaml's gates followed by the contract's (#1791); the
  *        selection preserves this order, never the order `gateIds` was typed in
- * @param requireEnvClean whether a declaration switched env-clean on. It is
- *        ORed with an explicit request rather than replacing it, so `--gates
- *        env-clean` still works with the switch off (and honestly reports
- *        UNKNOWN, because no baseline was recorded), and a delegation that
- *        declared the requirement cannot lose it by naming a narrower gate list.
+ * @param required built-ins a declaration has made non-optional; ORed with the
+ *        request so `--gates env-clean` still works with the switch off (and
+ *        honestly reports UNKNOWN, because no baseline was recorded)
  */
 function selectGates(
   declared: ResolvedGate[],
   gateIds: string[] | undefined,
-  requireEnvClean: boolean
+  required: RequiredBuiltinGates
 ): GateSelection | string {
   if (!gateIds) {
     return {
       runWorkEvidence: true,
       scope: 'implicit',
-      runEnvClean: requireEnvClean,
+      runEnvClean: required.envClean,
       gates: declared,
     };
   }
@@ -1251,9 +1299,9 @@ function selectGates(
 
   const requested = new Set(gateIds);
   const selection: GateSelection = {
-    runWorkEvidence: requested.has(WORK_EVIDENCE_GATE_ID),
-    scope: requested.has(SCOPE_GATE_ID) ? 'explicit' : 'off',
-    runEnvClean: requested.has(ENV_CLEAN_GATE_ID) || requireEnvClean,
+    runWorkEvidence: requested.has(WORK_EVIDENCE_GATE_ID) || required.workEvidence,
+    scope: requested.has(SCOPE_GATE_ID) || required.scope ? 'explicit' : 'off',
+    runEnvClean: requested.has(ENV_CLEAN_GATE_ID) || required.envClean,
     gates: declared.filter((gate) => requested.has(gate.id)),
   };
   if (
@@ -1748,6 +1796,22 @@ export async function startVerification(
   // Resolved before gate selection because it can add a gate to it (#1740).
   const envCleanDecision = resolveRequireEnvClean(task?.contract ?? null, config);
 
+  /**
+   * Built-ins a declaration has made non-optional for this run (Issue #2063).
+   *
+   * Read from the contract this run is actually attached to — the same rule
+   * `requireCommit` and the #1791 gate merge follow, because a run that could
+   * not attach to a contract is not a run about that contract. The exception is
+   * `scope`: a *detached* contract that asked for a clean scope still forces the
+   * gate, so the row #1620 records ("this contract was NOT judged") survives a
+   * narrowed run instead of vanishing with it.
+   */
+  const requiredBuiltins: RequiredBuiltinGates = {
+    workEvidence: task?.contract.success.requireWorkEvidence ?? false,
+    scope: (task?.contract.success.requireScopeClean ?? false) || detachedContract !== null,
+    envClean: envCleanDecision.required,
+  };
+
   let selection: GateSelection | null = null;
   if (config && !configFailure) {
     // Contract gates come from the task this run is actually about (#1791), so
@@ -1757,7 +1821,7 @@ export async function startVerification(
     if (typeof declared === 'string') {
       configFailure = declared;
     } else {
-      const selected = selectGates(declared, gateIds, envCleanDecision.required);
+      const selected = selectGates(declared, gateIds, requiredBuiltins);
       if (typeof selected === 'string') {
         configFailure = selected;
       } else {

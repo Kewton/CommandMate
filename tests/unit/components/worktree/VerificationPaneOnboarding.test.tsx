@@ -155,6 +155,7 @@ function buildState(overrides: Partial<WorktreeVerificationState> = {}): Worktre
     selectFailedGates: vi.fn(),
     runningRun: null,
     cancelPending: false,
+    cancelSettling: false,
     cancelFailure: null,
     historyLimit: 10,
     canLoadMore: false,

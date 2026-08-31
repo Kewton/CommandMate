@@ -72,6 +72,10 @@ import {
   formatGateDuration,
 } from '@/config/verification-display';
 import { copyToClipboard } from '@/lib/clipboard-utils';
+// Dependency-free leaf module (no logger / fs / db), which is why a client
+// component may import it. `copyToClipboard` strips the same sequences before
+// it writes, so stripping here is what makes the copy equal what is on screen.
+import { stripAnsi } from '@/lib/detection/ansi';
 import {
   MAX_DISPLAYED_LOG_TAIL_LINES,
   RUN_LIST_LIMIT_STEP,
@@ -464,6 +468,11 @@ function OnboardingSection({ state }: { state: WorktreeVerificationState }) {
             </Button>
           </div>
           <Note testId="verification-cancel-hint">{t('verification.runs.cancelHint')}</Note>
+          {state.cancelSettling && (
+            <Note testId="verification-cancel-settling">
+              {t('verification.runs.cancelSettling')}
+            </Note>
+          )}
           {state.cancelFailure && (
             <Note tone="warning" testId="verification-cancel-failure">
               {state.cancelFailure.kind === 'gone'
@@ -792,9 +801,20 @@ function RepositoryHistoryRow({ run }: { run: VerificationRunSummaryView }) {
  */
 function GateLogModal({
   gate,
+  log,
   onClose,
 }: {
   gate: VerificationGateResultView;
+  /**
+   * The log as it will be *shown*, already stripped of ANSI (Issue #2063).
+   *
+   * Passed in rather than read off `gate` so the row's excerpt and this modal
+   * render the same bytes, and so the string handed to `copyToClipboard` — which
+   * strips the same sequences itself — is the string on screen. Real gate logs
+   * are full of SGR colour codes; copying something the reader never saw is the
+   * kind of difference nobody notices until they paste it into an Issue.
+   */
+  log: string;
   onClose: () => void;
 }) {
   const t = useTranslations('worktree');
@@ -810,8 +830,10 @@ function GateLogModal({
     []
   );
 
-  const log = gate.logTail ?? '';
   const lineCount = log === '' ? 0 : log.replace(/\n+$/, '').split('\n').length;
+  // `copyToClipboard` returns silently for whitespace-only input, so a button
+  // enabled on `log !== ''` alone would answer "Copied" having written nothing.
+  const copyable = log.trim() !== '';
 
   const handleCopy = useCallback(() => {
     void (async () => {
@@ -842,7 +864,7 @@ function GateLogModal({
             size="sm"
             variant="secondary"
             onClick={handleCopy}
-            disabled={log === ''}
+            disabled={!copyable}
             data-testid="verification-gate-log-copy-button"
           >
             <Copy size={12} aria-hidden="true" className="mr-1" />
@@ -980,10 +1002,29 @@ function CliExitLegend() {
  * the same treatment (its gloss is the definition of work evidence) and a
  * `passed` run stating what it means costs one muted line.
  */
-function RunVerdictBanner({ run }: { run: VerificationRunView }) {
+function RunVerdictBanner({
+  run,
+  plannedGateIds,
+}: {
+  run: VerificationRunView;
+  plannedGateIds: readonly string[];
+}) {
   const t = useTranslations('worktree');
   const exitCode = RUN_STATUS_EXIT_CODE[run.status];
   const skipped = run.gates.filter((gate) => gate.status === 'skipped');
+  /**
+   * Gates a default run would have executed and this one has no row for
+   * (Issue #2063).
+   *
+   * Without this line a `gateIds` run is indistinguishable from a full one:
+   * `verification_runs` stores no gate selection, so the list row, the badge
+   * and `exit=0` are byte-identical whether twelve gates passed or one did.
+   * Derived from the config's plan rather than from a stored field because the
+   * schema has nowhere to put one — which also means it says nothing when the
+   * plan is unknown (an unreadable verify.yaml answers with an empty plan).
+   */
+  const recorded = new Set(run.gates.map((gate) => gate.gateId));
+  const notRun = plannedGateIds.filter((gateId) => !recorded.has(gateId));
 
   return (
     <div
@@ -1009,6 +1050,18 @@ function RunVerdictBanner({ run }: { run: VerificationRunView }) {
       >
         {t(`verification.runStatusGloss.${run.status}`)}
       </p>
+      {notRun.length > 0 && (
+        <p
+          className="rounded border border-warning-border bg-warning-subtle px-2 py-1 text-xs text-warning-foreground"
+          data-testid="verification-run-partial"
+        >
+          {t('verification.runs.partial', {
+            ran: recorded.size,
+            total: plannedGateIds.length,
+            gates: notRun.join(', '),
+          })}
+        </p>
+      )}
       {skipped.length > 0 && (
         <div className="space-y-0.5 pt-1" data-testid="verification-run-skip-reasons">
           <p className="text-xs font-semibold text-foreground">
@@ -1039,7 +1092,11 @@ function GateRow({ gate }: { gate: VerificationGateResultView }) {
   const [logModalOpen, setLogModalOpen] = useState(false);
   const handleCloseLogModal = useCallback(() => setLogModalOpen(false), []);
   const open = override ?? failing;
-  const excerpt = excerptLogTail(gate.logTail, MAX_DISPLAYED_LOG_TAIL_LINES);
+  // Issue #2063: stripped once, here, so the row excerpt, the full-log modal and
+  // the clipboard all carry the same bytes. A <pre> is not a terminal — the
+  // escape sequences rendered as literal `[0m` noise before this.
+  const log = stripAnsi(gate.logTail ?? '');
+  const excerpt = excerptLogTail(log, MAX_DISPLAYED_LOG_TAIL_LINES);
   const duration = formatGateDuration(gate.durationMs);
   // Issue #2062: a built-in gate's id is the only thing the row used to say
   // about it, and `work-evidence` / `scope` / `env-clean` / `config` are the
@@ -1108,7 +1165,7 @@ function GateRow({ gate }: { gate: VerificationGateResultView }) {
         {/* Issue #2063. Offered whenever a log exists, not only when the excerpt
             elided something: the copy button lives in the modal, and "give me
             this log" is a reason to open it even for a short one. */}
-        {gate.logTail && (
+        {log !== '' && (
           <button
             type="button"
             onClick={() => setLogModalOpen(true)}
@@ -1119,7 +1176,7 @@ function GateRow({ gate }: { gate: VerificationGateResultView }) {
           </button>
         )}
       </div>
-      {logModalOpen && <GateLogModal gate={gate} onClose={handleCloseLogModal} />}
+      {logModalOpen && <GateLogModal gate={gate} log={log} onClose={handleCloseLogModal} />}
       {open && (
         <div className="mt-1" data-testid={`verification-gate-log-${gate.gateId}`}>
           {excerpt.lines.length === 0 ? (
@@ -1341,7 +1398,10 @@ export const VerificationPane = memo(function VerificationPane({
                   {/* Above the branch on `gates.length`: a run that recorded no
                       gate row at all still reached a verdict, and that verdict
                       plus its gloss is the only thing there is to say about it. */}
-                  <RunVerdictBanner run={selectedRun} />
+                  <RunVerdictBanner
+                    run={selectedRun}
+                    plannedGateIds={state.config?.plannedGateIds ?? []}
+                  />
                   {selectedRun.gates.length === 0 ? (
                     <p
                       className="text-xs text-muted-foreground"

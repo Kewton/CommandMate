@@ -56,6 +56,12 @@ const RUN_9 = {
   finishedAt: '2026-08-31T00:02:00.000Z',
 };
 
+/**
+ * A gate id the run recorded but `plannedGateIds` no longer lists — a gate
+ * deleted from verify.yaml since the run, which the server would answer 400 for.
+ */
+const DROPPED_GATE_ID = 'gone-from-verify-yaml';
+
 /** run 9's gates: lint passed, unit failed, scope was declined. */
 const RUN_9_DETAIL = {
   ...RUN_9,
@@ -88,6 +94,18 @@ function json(status: number, body: unknown): Response {
   } as unknown as Response;
 }
 
+/**
+ * When true, the NEXT `/verify/runs?limit=` read parks until released.
+ *
+ * The only way to reproduce the hook's in-flight guard: a `loadMore()` pressed
+ * while a list read is already in the air used to be dropped with nothing to
+ * re-schedule it, so the rows arrived only on the owner's next poll tick.
+ */
+let holdRunsList = false;
+
+/** Completes the parked `/verify/runs` read; null when none is parked. */
+let heldRunsResolve: (() => void) | null = null;
+
 function install(): void {
   mockFetch.mockImplementation((url: string, init?: { method?: string; body?: string }) => {
     const method = init?.method ?? 'GET';
@@ -103,7 +121,15 @@ function install(): void {
     if (method === 'POST') return Promise.resolve(json(202, { runId: 99 }));
     if (url.includes('/tasks')) return Promise.resolve(json(200, { tasks: [] }));
     if (/\/verify\/runs\/\d+/.test(url)) return Promise.resolve(json(200, { run: fixture.run }));
-    if (url.includes('/verify/runs')) return Promise.resolve(json(200, { runs: fixture.runs }));
+    if (url.includes('/verify/runs')) {
+      if (holdRunsList) {
+        holdRunsList = false;
+        return new Promise<Response>((resolve) => {
+          heldRunsResolve = () => resolve(json(200, { runs: fixture.runs }));
+        });
+      }
+      return Promise.resolve(json(200, { runs: fixture.runs }));
+    }
     return Promise.resolve(json(200, {}));
   });
 }
@@ -119,6 +145,8 @@ function verifyPostBody(): unknown {
 beforeEach(() => {
   vi.clearAllMocks();
   recorded = [];
+  holdRunsList = false;
+  heldRunsResolve = null;
   fixture.runs = [RUN_9];
   fixture.run = RUN_9_DETAIL;
   fixture.history = [];
@@ -209,6 +237,54 @@ describe('gate selection (Issue #2063)', () => {
     expect(verifyPostBody()).toEqual({ gateIds: ['unit'] });
   });
 
+  it('drops a failed gate the config no longer plans, so the request cannot 400', async () => {
+    // The intersection this pins is invisible in every other fixture, because
+    // in all of them `failedGateIds` is already a subset of `availableGateIds`.
+    // Here a gate that failed has since been deleted from verify.yaml: naming
+    // it in `gateIds` makes the route answer 400 "Unknown gate id(s)", turning
+    // a one-click shortcut into an error the operator has to decode.
+    fixture.run = {
+      ...RUN_9_DETAIL,
+      gates: [
+        ...RUN_9_DETAIL.gates,
+        { id: 4, runId: 9, gateId: DROPPED_GATE_ID, command: 'npm run gone', status: 'failed', exitCode: 1, durationMs: 10, logTail: null, startedAt: RUN_9.startedAt, finishedAt: RUN_9.finishedAt, source: 'verify.yaml' },
+      ],
+    };
+    const { result } = renderHook(() => useWorktreeVerification({ worktreeId: 'wt-1' }));
+    await waitFor(() => expect(result.current.selectedRun).not.toBeNull());
+
+    // `failedGateIds` reports what actually failed, unfiltered — that is a fact
+    // about the run.
+    expect(result.current.failedGateIds).toEqual(['unit', DROPPED_GATE_ID]);
+
+    act(() => result.current.selectFailedGates());
+
+    // ...but what gets REQUESTED is only what the server still knows about.
+    expect(result.current.selectedGateIds).toEqual(['unit']);
+    await act(async () => {
+      await result.current.rerun();
+    });
+    expect(verifyPostBody()).toEqual({ gateIds: ['unit'] });
+  });
+
+  it('reads a full selection as "all gates" whatever order it arrives in', async () => {
+    const { result } = renderHook(() => useWorktreeVerification({ worktreeId: 'wt-1' }));
+    await waitFor(() => expect(result.current.availableGateIds.length).toBe(4));
+
+    // `setGateSelection` is public, and a caller naming every gate means the
+    // default run — which is spelled by sending NO gateIds, not by listing them
+    // (an explicit `scope` changes how the gate is aggregated). Comparing the
+    // two lists position by position would answer "no" here and quietly send a
+    // different request than the operator asked for.
+    act(() => result.current.setGateSelection([...CONFIG.plannedGateIds].reverse()));
+
+    expect(result.current.selectedGateIds).toBeNull();
+    await act(async () => {
+      await result.current.rerun();
+    });
+    expect(verifyPostBody()).toEqual({});
+  });
+
   it('lets an explicit null force the full run over a narrowed selection', async () => {
     const { result } = renderHook(() => useWorktreeVerification({ worktreeId: 'wt-1' }));
     await waitFor(() => expect(result.current.availableGateIds.length).toBe(4));
@@ -258,6 +334,54 @@ describe('cancel (Issue #2063)', () => {
     expect(recorded.some((c) => c.url.includes('/cancel'))).toBe(false);
   });
 
+  it('reports a 202 as still settling, so the Stop press is not silent', async () => {
+    fixture.runs = [RUNNING];
+    fixture.cancel = { status: 202, body: { runId: 11, status: 'running' } };
+    const { result } = renderHook(() => useWorktreeVerification({ worktreeId: 'wt-1' }));
+    await waitFor(() => expect(result.current.runningRun?.id).toBe(11));
+
+    await act(async () => {
+      await result.current.cancelRun();
+    });
+
+    // 202 means the signal is out and the gate has not exited. Without this the
+    // route's 200/202 distinction had no consumer at all, and a stubborn gate's
+    // five-second SIGKILL window looked like a button that did nothing.
+    expect(result.current.cancelSettling).toBe(true);
+    expect(result.current.cancelFailure).toBeNull();
+  });
+
+  it('does not claim to be settling when the run closed while we waited', async () => {
+    fixture.runs = [RUNNING];
+    fixture.cancel = { status: 200, body: { runId: 11, status: 'cancelled' } };
+    const { result } = renderHook(() => useWorktreeVerification({ worktreeId: 'wt-1' }));
+    await waitFor(() => expect(result.current.runningRun?.id).toBe(11));
+
+    await act(async () => {
+      await result.current.cancelRun();
+    });
+
+    expect(result.current.cancelSettling).toBe(false);
+  });
+
+  it('stops claiming to be settling once the run leaves the list as running', async () => {
+    fixture.runs = [RUNNING];
+    fixture.cancel = { status: 202, body: { runId: 11, status: 'running' } };
+    const { result } = renderHook(() => useWorktreeVerification({ worktreeId: 'wt-1' }));
+    await waitFor(() => expect(result.current.runningRun?.id).toBe(11));
+    await act(async () => {
+      await result.current.cancelRun();
+    });
+    expect(result.current.cancelSettling).toBe(true);
+
+    // The run closed. Nothing has to clear the note: it is derived from the
+    // list, so it goes away with the state it was describing.
+    fixture.runs = [{ ...RUNNING, status: 'cancelled', finishedAt: '2026-08-31T00:03:00.000Z' }];
+    act(() => result.current.refresh());
+
+    await waitFor(() => expect(result.current.cancelSettling).toBe(false));
+  });
+
   it('reports a 409 as gone rather than as a fault', async () => {
     fixture.runs = [RUNNING];
     fixture.cancel = { status: 409, body: { error: 'already finished', status: 'passed' } };
@@ -287,6 +411,32 @@ describe('history (Issue #2063)', () => {
       expect(recorded.some((c) => c.url.includes('/verify/runs?limit=20'))).toBe(true)
     );
     expect(result.current.historyLimit).toBe(20);
+  });
+
+  it('does not lose a "load more" pressed while a list read is in flight', async () => {
+    fixture.runs = Array.from({ length: 10 }, (_, i) => ({ ...RUN_9, id: 100 + i }));
+    const { result } = renderHook(() => useWorktreeVerification({ worktreeId: 'wt-1' }));
+    await waitFor(() => expect(result.current.runs.length).toBe(10));
+
+    // Park the next list read, then press "load more" underneath it. The hook's
+    // in-flight guard drops the effect this raise triggers.
+    holdRunsList = true;
+    act(() => result.current.refresh());
+    await waitFor(() => expect(heldRunsResolve).not.toBeNull());
+
+    act(() => result.current.loadMore());
+
+    // The button must not vanish while the rows it asked for are still coming:
+    // comparing `runs.length` against the REQUESTED limit made 10 >= 20 false
+    // and took the only way of asking away.
+    expect(result.current.canLoadMore).toBe(true);
+
+    act(() => heldRunsResolve?.());
+
+    // ...and the raise is re-armed rather than left for the owner's next poll.
+    await waitFor(() =>
+      expect(recorded.some((c) => c.url.includes('/verify/runs?limit=20'))).toBe(true)
+    );
   });
 
   it('offers no "load more" while the page is not even full', async () => {

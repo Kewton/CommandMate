@@ -28,9 +28,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FAILING_GATE_STATUSES } from '@/config/verification-display';
 import {
-  DEFAULT_RUN_HISTORY_DAYS,
-  DEFAULT_RUN_HISTORY_LIMIT,
   DEFAULT_RUN_LIST_LIMIT,
+  PANE_RUN_HISTORY_DAYS,
+  PANE_RUN_HISTORY_LIMIT,
   MAX_RUN_LIST_LIMIT,
   RUN_LIST_LIMIT_STEP,
   VerificationApiError,
@@ -207,6 +207,11 @@ export interface WorktreeVerificationState {
   runningRun: VerificationRunListItem | null;
   /** True while a cancel POST is in flight. */
   cancelPending: boolean;
+  /**
+   * True once a cancel was accepted (HTTP 202) and the run is still listed as
+   * running — the SIGTERM is out and the gate has not exited yet.
+   */
+  cancelSettling: boolean;
   /** Why the last cancel was refused; `null` when it was not. */
   cancelFailure: CancelFailure | null;
 
@@ -305,8 +310,27 @@ export function useWorktreeVerification({
   const [draftResult, setDraftResult] = useState<VerifyConfigDraftResponse | null>(null);
   const [cancelPending, setCancelPending] = useState(false);
   const [cancelFailure, setCancelFailure] = useState<CancelFailure | null>(null);
+  /**
+   * Run the server answered 202 for: signalled, not yet closed (Issue #2063).
+   *
+   * The route distinguishes 200 ("it closed while you waited") from 202 ("the
+   * signal is out, it is still winding down"), and the distinction is only
+   * worth having if somebody reports it. A gate that ignores SIGTERM is
+   * SIGKILLed five seconds later, so this is the window in which pressing Stop
+   * again would look like nothing happened.
+   */
+  const [cancelRequestedRunId, setCancelRequestedRunId] = useState<number | null>(null);
   const [selectedGateIds, setSelectedGateIds] = useState<string[] | null>(null);
   const [historyLimit, setHistoryLimit] = useState(limit);
+  /**
+   * The limit the runs on screen were actually fetched with (Issue #2063).
+   *
+   * `canLoadMore` compares against THIS, not against `historyLimit`. Raising
+   * the request to 20 while 10 rows are on screen would otherwise make
+   * `runs.length >= historyLimit` false and take the button away before the
+   * rows it asked for had arrived.
+   */
+  const [loadedLimit, setLoadedLimit] = useState(limit);
   const [repositoryHistoryOpen, setRepositoryHistoryOpen] = useState(false);
   const [repositoryHistory, setRepositoryHistory] = useState<VerificationRunSummaryView[]>([]);
   const [repositoryHistoryLoading, setRepositoryHistoryLoading] = useState(false);
@@ -332,6 +356,9 @@ export function useWorktreeVerification({
    */
   const selectedGateIdsRef = useRef<string[] | null>(null);
   selectedGateIdsRef.current = selectedGateIds;
+  /** Latest requested limit, read by the fetch's `finally` to detect a raise. */
+  const historyLimitRef = useRef(limit);
+  historyLimitRef.current = historyLimit;
 
   activeRef.current = isInFlight(task, runs);
 
@@ -365,6 +392,8 @@ export function useWorktreeVerification({
     // thing in every repository.
     setSelectedGateIds(null);
     setHistoryLimit(limit);
+    setLoadedLimit(limit);
+    setCancelRequestedRunId(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [worktreeId]);
 
@@ -414,22 +443,35 @@ export function useWorktreeVerification({
     inFlightRef.current = true;
     lastFetchAtRef.current = Date.now();
 
+    const limitUsed = historyLimit;
+
     void (async () => {
       try {
         const [nextTask, nextRuns] = await Promise.all([
           fetchLatestTask(worktreeId),
-          fetchVerificationRuns(worktreeId, historyLimit),
+          fetchVerificationRuns(worktreeId, limitUsed),
         ]);
         if (generation !== generationRef.current) return;
         setTask(nextTask);
         setRuns(nextRuns);
+        setLoadedLimit(limitUsed);
         setError(null);
       } catch (err) {
         if (generation !== generationRef.current || isAbort(err)) return;
         setError(messageOf(err, 'Failed to load verification data'));
       } finally {
         inFlightRef.current = false;
-        if (generation === generationRef.current) setLoading(false);
+        if (generation === generationRef.current) {
+          setLoading(false);
+          // Issue #2063: a "load more" pressed while this request was in the
+          // air was dropped by the in-flight guard above and nothing would have
+          // re-scheduled it — the rows only arrived on the owner's next poll
+          // tick, seconds later, with the button already gone. Re-arm here.
+          if (historyLimitRef.current !== limitUsed) {
+            lastFetchAtRef.current = 0;
+            setNonce((value) => value + 1);
+          }
+        }
       }
     })();
   }, [worktreeId, refreshToken, nonce, enabled, historyLimit]);
@@ -501,7 +543,7 @@ export function useWorktreeVerification({
     void (async () => {
       try {
         const history = await fetchVerificationRunHistory(
-          { days: DEFAULT_RUN_HISTORY_DAYS, limit: DEFAULT_RUN_HISTORY_LIMIT },
+          { days: PANE_RUN_HISTORY_DAYS, limit: PANE_RUN_HISTORY_LIMIT },
           controller.signal
         );
         if (cancelled) return;
@@ -665,7 +707,11 @@ export function useWorktreeVerification({
     setCancelPending(true);
     setCancelFailure(null);
     try {
-      await cancelVerificationRun(worktreeId, target.id);
+      const result = await cancelVerificationRun(worktreeId, target.id);
+      // 200 says the run closed while we waited; 202 says only the signal is
+      // out. Remembered so the pane can say which, instead of leaving a Stop
+      // button that appears to have done nothing.
+      setCancelRequestedRunId(result.status === 'running' ? target.id : null);
     } catch (err) {
       const status = err instanceof VerificationApiError ? err.status : 0;
       setCancelFailure({
@@ -738,12 +784,16 @@ export function useWorktreeVerification({
     selectFailedGates,
     runningRun,
     cancelPending,
+    // Derived rather than stored as a flag: the moment the run leaves the list
+    // as `running`, the settling window is over and the note goes away without
+    // anything having to clear it.
+    cancelSettling: cancelRequestedRunId !== null && runningRun?.id === cancelRequestedRunId,
     cancelFailure,
     historyLimit,
     // A full page is the only evidence there may be another: the endpoint
     // reports no total. Stopping at the route's own ceiling keeps the last
     // press from turning into a 400 the operator has to interpret.
-    canLoadMore: runs.length >= historyLimit && historyLimit < MAX_RUN_LIST_LIMIT,
+    canLoadMore: runs.length >= loadedLimit && loadedLimit < MAX_RUN_LIST_LIMIT,
     repositoryHistoryOpen,
     repositoryHistory,
     repositoryHistoryLoading,

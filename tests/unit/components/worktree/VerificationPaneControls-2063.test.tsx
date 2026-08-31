@@ -66,6 +66,10 @@ const RUNNING_RUN: VerificationRunListItem = {
 /** A log long enough that the row's 40-line excerpt cannot be the whole thing. */
 const LONG_LOG = Array.from({ length: 120 }, (_, i) => `line-${i + 1}`).join('\n');
 
+/** What a real gate log looks like: vitest and eslint both emit SGR colour. */
+const ANSI_LOG = '\u001b[31mFAIL\u001b[0m tests/unit/foo.test.ts\n\u001b[2m1 failed\u001b[22m';
+const ANSI_LOG_STRIPPED = 'FAIL tests/unit/foo.test.ts\n1 failed';
+
 const GATES: VerificationGateResultView[] = [
   {
     id: 2,
@@ -130,6 +134,7 @@ function buildState(overrides: Partial<WorktreeVerificationState> = {}): Worktre
     selectFailedGates: vi.fn(),
     runningRun: null,
     cancelPending: false,
+    cancelSettling: false,
     cancelFailure: null,
     historyLimit: 10,
     canLoadMore: false,
@@ -265,7 +270,10 @@ describe('cancelling a run (Issue #2063)', () => {
     );
   });
 
-  it('states that stopping kills the gate, not just the record', () => {
+  // Wording only. That the gate's process group actually dies is proven in
+  // tests/integration/verification-cancel-2063.test.ts, against real pids; a
+  // component test can only check that the pane says so.
+  it('spells out what stopping does, in the words the runner implements', () => {
     render(<VerificationPane state={RUNNING_STATE()} />);
     expect(screen.getByTestId('verification-cancel-hint')).toHaveTextContent(
       'process group to terminate'
@@ -278,6 +286,22 @@ describe('cancelling a run (Issue #2063)', () => {
     fireEvent.click(screen.getByTestId('verification-cancel-button'));
 
     expect(cancelRun).toHaveBeenCalledTimes(1);
+  });
+
+  it('says the signal is out while a stubborn gate is still exiting', () => {
+    // The route answers 202 for this, and until something reported it the
+    // five-second SIGTERM -> SIGKILL window looked like a button that did
+    // nothing.
+    render(<VerificationPane state={RUNNING_STATE({ cancelSettling: true })} />);
+
+    expect(screen.getByTestId('verification-cancel-settling')).toHaveTextContent(
+      'Stop requested'
+    );
+  });
+
+  it('says nothing about settling before a cancel has been accepted', () => {
+    render(<VerificationPane state={RUNNING_STATE()} />);
+    expect(screen.queryByTestId('verification-cancel-settling')).toBeNull();
   });
 
   it('disables the button while the cancel is in flight', () => {
@@ -304,6 +328,57 @@ describe('cancelling a run (Issue #2063)', () => {
     expect(screen.getByTestId('verification-runs-cancel-failure')).toHaveTextContent(
       'That run had already finished'
     );
+  });
+});
+
+describe('a narrowed run is visibly narrowed (Issue #2063)', () => {
+  it('says how much of the plan ran, and which gates did not', () => {
+    // `verification_runs` stores no gate selection, so without this line a run
+    // of one gate renders the identical green badge and `exit=0` as a run of
+    // twelve. Derived from the config's plan, which is the only place the
+    // difference is visible at all.
+    const partial: VerificationRunView = {
+      ...RUN_9,
+      status: 'passed',
+      gates: [{ ...GATES[0], gateId: 'unit', status: 'passed', exitCode: 0 }],
+    };
+    render(<VerificationPane state={buildState({ selectedRun: partial })} />);
+
+    const note = screen.getByTestId('verification-run-partial');
+    expect(note).toHaveTextContent('1 of the 4 planned gates ran');
+    expect(note).toHaveTextContent('Not run: work-evidence, scope, lint');
+    expect(note).toHaveTextContent('covers only the gates that ran');
+  });
+
+  it('says nothing when every planned gate has a row', () => {
+    const full: VerificationRunView = {
+      ...RUN_9,
+      gates: ['work-evidence', 'scope', 'lint', 'unit'].map((gateId, index) => ({
+        ...GATES[0],
+        id: index + 1,
+        gateId,
+        status: 'passed',
+        exitCode: 0,
+      })),
+    };
+    render(<VerificationPane state={buildState({ selectedRun: full })} />);
+
+    expect(screen.queryByTestId('verification-run-partial')).toBeNull();
+  });
+
+  it('claims nothing when the plan itself is unknown', () => {
+    // An unreadable verify.yaml answers with an empty plan. "0 of 0 gates ran"
+    // would be a statement about the reader's ignorance, not about the run.
+    render(
+      <VerificationPane
+        state={buildState({
+          config: { ...CONFIG, plannedGateIds: [] },
+          availableGateIds: [],
+        })}
+      />
+    );
+
+    expect(screen.queryByTestId('verification-run-partial')).toBeNull();
   });
 });
 
@@ -399,6 +474,47 @@ describe('full gate log (Issue #2063)', () => {
       expect(navigator.clipboard.writeText).toHaveBeenCalledWith(LONG_LOG)
     );
     expect(await screen.findByText('Copied')).toBeInTheDocument();
+  });
+
+  it('shows and copies the same bytes, with the ANSI colour codes gone', () => {
+    // `copyToClipboard` strips ANSI before it writes. The <pre> did not, so the
+    // reader saw `[31mFAIL[0m` and pasted `FAIL` — a difference nobody notices
+    // until it lands in an Issue. Real gate logs are full of these; the fixture
+    // above was not, which is why no test could see it.
+    const gate = { ...GATES[0], logTail: ANSI_LOG } as VerificationGateResultView;
+    render(
+      <VerificationPane state={buildState({ selectedRun: { ...RUN_DETAIL, gates: [gate] } })} />
+    );
+
+    const excerpt = screen.getByTestId('verification-gate-log-unit').querySelector('pre');
+    expect(excerpt?.textContent).toBe(ANSI_LOG_STRIPPED);
+    expect(excerpt?.textContent).not.toContain('\u001b');
+
+    fireEvent.click(screen.getByTestId('verification-gate-full-log-button-unit'));
+    const shown = screen
+      .getByTestId('verification-gate-full-log-unit')
+      .querySelector('pre')?.textContent;
+    expect(shown).toBe(ANSI_LOG_STRIPPED);
+
+    fireEvent.click(screen.getByTestId('verification-gate-log-copy-button'));
+    return vi
+      .waitFor(() => expect(navigator.clipboard.writeText).toHaveBeenCalled())
+      .then(() => {
+        // The bytes handed to the clipboard are the bytes on screen.
+        expect(navigator.clipboard.writeText).toHaveBeenCalledWith(shown);
+      });
+  });
+
+  it('will not offer to copy a log that is nothing but whitespace', () => {
+    // `copyToClipboard` returns silently for whitespace-only input, so an
+    // enabled button would answer "Copied" having written nothing at all.
+    const gate = { ...GATES[0], logTail: '   \n\n  ' } as VerificationGateResultView;
+    render(
+      <VerificationPane state={buildState({ selectedRun: { ...RUN_DETAIL, gates: [gate] } })} />
+    );
+
+    fireEvent.click(screen.getByTestId('verification-gate-full-log-button-unit'));
+    expect(screen.getByTestId('verification-gate-log-copy-button')).toBeDisabled();
   });
 
   it('offers no full-log button for a gate that recorded no output', () => {

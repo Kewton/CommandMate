@@ -157,11 +157,16 @@ export const RUN_LIST_LIMIT_STEP = DEFAULT_RUN_LIST_LIMIT;
  * Smaller than the endpoint's own default of 50: this list is a supplementary
  * block inside a ~230px pane, not a report. `MAX_RUN_HISTORY_LIMIT` on the
  * route is 500, so nothing here approaches it.
+ *
+ * `PANE_` and not `DEFAULT_`: `lib/db/verification-db.ts` exports a
+ * `DEFAULT_RUN_HISTORY_LIMIT` of its own (50, the route's default when the
+ * caller names none). Two different numbers under one name in two importable
+ * modules is a trap that compiles, so this one says whose default it is.
  */
-export const DEFAULT_RUN_HISTORY_LIMIT = 20;
+export const PANE_RUN_HISTORY_LIMIT = 20;
 
 /** Days of repository-wide history the pane asks for (Issue #2063). */
-export const DEFAULT_RUN_HISTORY_DAYS = 7;
+export const PANE_RUN_HISTORY_DAYS = 7;
 
 /** An HTTP failure from one of the verification endpoints. */
 export class VerificationApiError extends Error {

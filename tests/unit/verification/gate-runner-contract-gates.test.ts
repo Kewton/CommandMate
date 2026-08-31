@@ -250,7 +250,17 @@ describe('a gate the contract defines actually runs', () => {
     addWork();
 
     const run = getVerificationRun(db, await runToCompletion({ gateIds: ['issue-1791-repro'] }));
-    expect(run?.gates.map((gate) => gate.gateId)).toEqual(['issue-1791-repro']);
+    // Issue #2063: a narrowed run no longer drops the built-ins the CONTRACT
+    // declared. `work-evidence` and `scope` are forced back in because this
+    // task's contract carries the parser's defaults (`requireWorkEvidence` and
+    // `requireScopeClean`, both true) — narrowing the gate list may drop
+    // repository gates, never a criterion the delegation declared. What this
+    // test is about is unchanged: the named gate is the one that decides.
+    expect(run?.gates.map((gate) => gate.gateId)).toEqual([
+      'work-evidence',
+      'scope',
+      'issue-1791-repro',
+    ]);
     expect(run?.status).toBe('failed');
   });
 

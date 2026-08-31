@@ -302,14 +302,41 @@ describe('POST /api/worktrees/:id/verify with gateIds (Issue #2063)', () => {
   });
 
   it('still runs every gate when no gateIds is sent', async () => {
-    // The unchanged path. `parked` is excluded by naming the others rather than
-    // by omitting gateIds, so this asserts the DEFAULT selection composes
-    // work-evidence + scope + the declared gates exactly as it did before.
-    const { runId } = await (await postVerify(WT_ID, { gateIds: ['work-evidence', 'scope'] })).json();
+    // The path #2063 must not have touched. The fixture's gates are replaced
+    // with fast ones first: this test has to send NO gateIds — the previous
+    // version of it named two gates and asserted the two it named, which is a
+    // test of the narrowing path wearing this one's title, and stayed green
+    // under a `selectGates(declared, undefined, …)` that returned no gates at
+    // all.
+    writeFileSync(
+      join(repo, '.commandmate', 'verify.yaml'),
+      `
+version: 1
+gates:
+  - id: fast-a
+    command: "sh -c 'exit 0'"
+    timeoutSec: 30
+  - id: fast-b
+    command: "sh -c 'exit 0'"
+    timeoutSec: 30
+options:
+  baseRef: main
+`
+    );
+
+    const res = await postVerify(WT_ID);
+    expect(res.status).toBe(202);
+    const { runId } = await res.json();
     await waitForVerification(runId);
+
+    // work-evidence, then the implicit scope gate, then every declared gate in
+    // file order — the composition `defaultPlannedGateIds` promises.
     expect((getVerificationRun(db, runId)?.gates ?? []).map((g) => g.gateId)).toEqual([
       'work-evidence',
       'scope',
+      'fast-a',
+      'fast-b',
     ]);
+    expect(getVerificationRun(db, runId)?.status).toBe('passed');
   });
 });
