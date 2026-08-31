@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **test(i18n): opencode セッション操作のラベルが訳文で出ることを実辞書で検証するガードを追加** (#2083): `OpencodeSessionControls` のラベルは Issue #2051 / #2109 で `LABELS = { en, ja }` の直書きマップから `worktree.opencodeSession.*`（`next-intl`）へ移設済みだったが、**移設先が正しいことを検証するテストが 1 本も無かった**。当該コンポーネントの unit test はすべて `vi.mock('next-intl')` でキー文字列をそのまま返すスタブ越しに解決するため、辞書に訳文があっても・キーパスのコピーがあっても・**エントリが存在しなくても同じように緑になる**（受入条件 3 が警告していた罠そのもの）。`tests/unit/i18n/opencode-session-keys-2083.test.ts` を追加し、`next-intl` を一切 import / mock せずに `locales/{en,ja}/worktree.json` をディスクから読み、①コンポーネントが解決する 16 キーが両ロケールに揃うこと ②en / ja のキー集合が完全一致し、呼び出し元の無い余剰キーが無いこと ③値が `new` / `opencodeSession.new` / `worktree.opencodeSession.new` のいずれのキーパスとも一致しないこと ④画面に文字として出る `new` / `list` / `fork` / `share` の ja が英語のコピーでなく仮名または漢字を含むこと、を assert する。空振りでないことは変異注入で確認済み（ja の値をキーパスに置換 → 2 件赤 / 英語のコピーに置換 → 1 件赤 / ja からキー削除 → 3 件赤）。あわせて、コンポーネントが `useLocale()` を呼ばなくなったのに `OpencodeSessionControls-2038` / `-share-2051` / `-errors-2109` の 3 本に残っていた死んだ `useLocale` モック（と `-2038` の `locale` hoisted 変数）を削除した。
+
 ## [0.29.2] - 2026-08-31
 
 > **Highlight**: 2026-08-25 の利用者報告 4 件（リロード時のサイドバー空表示・Verification の使い方が解らない・既定エージェントが固定・codex が更新できない）を Epic #2071 として一括で解消したリリース。あわせて、**全テスト green のまま `Unit Tests` を exit 1 にしていた未回収 `setTimeout` を 8 コンポーネントぶん回収**した（無関係な PR の CI を 2 回赤にした実績があり、押下フィードバックとコピー確認の両方を共有フックへ一本化して再発経路を塞いだ）。DB マイグレーションなし。
