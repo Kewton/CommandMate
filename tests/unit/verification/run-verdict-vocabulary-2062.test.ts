@@ -15,7 +15,15 @@
 import { describe, expect, it } from 'vitest';
 import { VERIFICATION_RUN_STATUSES } from '@/lib/api/verification-api';
 import { exitCodeForRunStatus } from '@/cli/utils/verify-runner';
-import { MUTEX_WAIT_SKIP_REASON, WORK_EVIDENCE_GATE_ID } from '@/lib/verification/gate-runner';
+import { CONFIG_GATE_ID, MUTEX_WAIT_SKIP_REASON } from '@/lib/verification/gate-runner';
+// From their definition sites, not from gate-runner's re-export: the re-export
+// could itself be re-pointed, and what this file has to pin is the id the
+// runner writes into `verification_gate_results.gate_id`.
+import {
+  ENV_CLEAN_GATE_ID,
+  SCOPE_GATE_ID,
+  WORK_EVIDENCE_GATE_ID,
+} from '@/lib/verification/verify-config';
 import {
   SCOPE_SKIP_NO_CONTRACT,
   SCOPE_SKIP_NOT_REQUIRED,
@@ -90,11 +98,37 @@ describe('skip reasons (Issue #2062)', () => {
   });
 });
 
+/**
+ * Every id the runner can write with `source: 'builtin'`, read from the four
+ * constants that define them rather than spelled out here.
+ *
+ * A literal list is the shape this test shipped with, and it had a hole: only
+ * `WORK_EVIDENCE_GATE_ID` was actually reconciled, so renaming
+ * `ENV_CLEAN_GATE_ID` to `env_clean` left the runner recording `env_clean`
+ * rows, `builtinGateDescriptionKey` answering `null` for them, the pane
+ * silently dropping the description — and this test green.
+ */
+const RUNNER_BUILTIN_GATE_IDS = [
+  WORK_EVIDENCE_GATE_ID,
+  SCOPE_GATE_ID,
+  ENV_CLEAN_GATE_ID,
+  CONFIG_GATE_ID,
+] as const;
+
 describe('built-in gate descriptions (Issue #2062)', () => {
   it('covers every built-in gate id the runner can record', () => {
     expect(Object.keys(BUILTIN_GATE_DESCRIPTION_KEYS).sort()).toEqual(
-      ['config', 'env-clean', 'scope', 'work-evidence'].sort()
+      [...RUNNER_BUILTIN_GATE_IDS].sort()
     );
+  });
+
+  it('answers a description key for each of those ids', () => {
+    const unmapped = RUNNER_BUILTIN_GATE_IDS.filter(
+      (gateId) => builtinGateDescriptionKey(gateId) === null
+    );
+    expect(unmapped).toEqual([]);
+    // The mapping is id → dictionary key segment, and the two differ (the ids
+    // are hyphenated, the keys are not), so at least one pair is pinned by name.
     expect(builtinGateDescriptionKey(WORK_EVIDENCE_GATE_ID)).toBe('workEvidence');
   });
 

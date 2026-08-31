@@ -949,7 +949,7 @@
         "body": "`{path}` に {count} 件のゲートが宣言されています。このブランチではまだ 1 度も実行されていません。",
         "gatesHeading": "宣言ゲート",
         "builtin": "組み込みゲートも併せて走ります: {gates}",
-      "builtinHint": "組み込みゲートは `.commandmate/verify.yaml` に書かなくても毎回走ります。それぞれの意味はゲート一覧の各行に表示されます。",
+        "builtinHint": "組み込みゲートは `.commandmate/verify.yaml` に書かなくても毎回走ります。それぞれの意味はゲート一覧の各行に表示されます。",
         "action": "検証を実行"
       },
       "running": {

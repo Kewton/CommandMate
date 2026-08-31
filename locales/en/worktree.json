@@ -949,7 +949,7 @@
         "body": "{count} gates are declared in `{path}`. None has run on this branch yet.",
         "gatesHeading": "Declared gates",
         "builtin": "The built-in gates run alongside them: {gates}",
-      "builtinHint": "The built-in gates run on every verification without being declared in `.commandmate/verify.yaml`. Each gate row below says what its gate checks.",
+        "builtinHint": "The built-in gates run on every verification without being declared in `.commandmate/verify.yaml`. Each gate row below says what its gate checks.",
         "action": "Run verification"
       },
       "running": {
