@@ -43,7 +43,7 @@ import {
   type AgentSessionView,
 } from '@/types/agent-session';
 import { getInstanceLabel, type AgentInstance, type CLIToolType } from '@/lib/cli-tools/types';
-import { COPY_FEEDBACK_RESET_MS } from '@/config/ui-feedback-config';
+import { useCopyFeedback } from '@/hooks/useCopyFeedback';
 import { AGENT_INSTANCE_DND_MIME } from '@/components/worktree/TerminalSplitPane';
 import { PcDisplaySizeSelector } from '@/components/layout/PcDisplaySizeSelector';
 
@@ -519,39 +519,29 @@ export const WorktreeInfoFields = memo(function WorktreeInfoFields({
   const tWorktree = useTranslations('worktree');
   const tCommon = useTranslations('common');
 
-  const [pathCopied, setPathCopied] = useState(false);
-  const [repoPathCopied, setRepoPathCopied] = useState(false);
-  const pathTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const repoPathTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-
-  useEffect(() => {
-    return () => {
-      if (pathTimerRef.current) clearTimeout(pathTimerRef.current);
-      if (repoPathTimerRef.current) clearTimeout(repoPathTimerRef.current);
-    };
-  }, []);
+  // Two INDEPENDENT confirmations (Issue #2180, previously `pathTimerRef` /
+  // `repoPathTimerRef` here): one timer each, so copying the repository path
+  // does not cut the worktree path confirmation short.
+  const { copied: pathCopied, markCopied: markPathCopied } = useCopyFeedback();
+  const { copied: repoPathCopied, markCopied: markRepoPathCopied } = useCopyFeedback();
 
   const handleCopyPath = useCallback(async () => {
     try {
       await copyToClipboard(worktree.path);
-      setPathCopied(true);
-      if (pathTimerRef.current) clearTimeout(pathTimerRef.current);
-      pathTimerRef.current = setTimeout(() => setPathCopied(false), COPY_FEEDBACK_RESET_MS);
+      markPathCopied();
     } catch {
       // Silent failure
     }
-  }, [worktree.path]);
+  }, [worktree.path, markPathCopied]);
 
   const handleCopyRepoPath = useCallback(async () => {
     try {
       await copyToClipboard(worktree.repositoryPath);
-      setRepoPathCopied(true);
-      if (repoPathTimerRef.current) clearTimeout(repoPathTimerRef.current);
-      repoPathTimerRef.current = setTimeout(() => setRepoPathCopied(false), COPY_FEEDBACK_RESET_MS);
+      markRepoPathCopied();
     } catch {
       // Silent failure
     }
-  }, [worktree.repositoryPath]);
+  }, [worktree.repositoryPath, markRepoPathCopied]);
 
   return (
     <>

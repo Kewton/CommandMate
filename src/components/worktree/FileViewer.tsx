@@ -32,11 +32,11 @@ import { MobileFileActionsSheet } from '@/components/mobile/MobileFileActionsShe
 import type { SandboxLevel } from '@/config/html-extensions';
 import { SANDBOX_ATTRIBUTES } from '@/config/html-extensions';
 import { copyToClipboard } from '@/lib/clipboard-utils';
-import { COPY_FEEDBACK_RESET_MS } from '@/config/ui-feedback-config';
 import { Copy, Check, Maximize2, Minimize2, ClipboardCopy, Eye, Pencil, Search, X, Download, MoreHorizontal } from 'lucide-react';
 import { Z_INDEX } from '@/config/z-index';
 import { encodePathForUrl } from '@/lib/url-path-encoder';
 import { useFileContentSearch } from '@/hooks/useFileContentSearch';
+import { useCopyFeedback } from '@/hooks/useCopyFeedback';
 import hljs from 'highlight.js';
 import 'highlight.js/styles/github-dark.css';
 
@@ -330,8 +330,10 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
   const [content, setContent] = useState<FileContent | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
-  const [pathCopied, setPathCopied] = useState(false);
+  // Two INDEPENDENT confirmations (Issue #2180): content and path each own a
+  // timer, so copying the path does not cut the content confirmation short.
+  const { copied, markCopied: markContentCopied, reset: resetContentCopied } = useCopyFeedback();
+  const { copied: pathCopied, markCopied: markPathCopied } = useCopyFeedback();
   const [marpSlides, setMarpSlides] = useState<string[] | null>(null);
   const [marpCurrentSlide, setMarpCurrentSlide] = useState(0);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -389,23 +391,21 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
     if (!canCopy || !sourceText) return;
     try {
       await copyToClipboard(sourceText);
-      setCopied(true);
-      setTimeout(() => setCopied(false), COPY_FEEDBACK_RESET_MS);
+      markContentCopied();
     } catch {
       // Failure is indicated by icon not changing
     }
-  }, [canCopy, sourceText]);
+  }, [canCopy, sourceText, markContentCopied]);
 
   /** Copy file path to clipboard */
   const handleCopyPath = useCallback(async () => {
     try {
       await copyToClipboard(filePath);
-      setPathCopied(true);
-      setTimeout(() => setPathCopied(false), COPY_FEEDBACK_RESET_MS);
+      markPathCopied();
     } catch {
       // Silent failure
     }
-  }, [filePath]);
+  }, [filePath, markPathCopied]);
 
   /** Toggle fullscreen mode */
   const toggleFullscreen = useCallback(() => {
@@ -437,7 +437,7 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
     if (!isOpen || !filePath) {
       setContent(null);
       setError(null);
-      setCopied(false);
+      resetContentCopied();
       setMarkdownMode('viewer');
       setActionsOpen(false);
       setDraft(null);
@@ -478,7 +478,7 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
     };
 
     fetchFile();
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- closeSearch is stable (only resets state)
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- closeSearch and resetContentCopied are stable (they only reset state)
   }, [isOpen, worktreeId, filePath]);
 
   // Fetch MARP slides when content is a MARP markdown file

@@ -11,8 +11,10 @@
 /**
  * Duration (ms) a "copied!" confirmation icon stays before reverting to its
  * default state.
- * Sites: MarkdownEditor, WorktreeDetailSubComponents (path / repo path),
- * FilePanelContent (path / content), FileViewer (content / path), ReportTab.
+ * Site: useCopyFeedback, which owns the timer for every copy button that uses
+ * this duration — MarkdownEditor, ReportTab, FileViewer (content / path),
+ * WorktreeInfoFields (path / repo path) and FileToolbar (path / content) all
+ * render it rather than scheduling their own (Issue #2180).
  */
 export const COPY_FEEDBACK_RESET_MS = 2000;
 
@@ -30,16 +32,17 @@ export const COPY_FEEDBACK_RESET_SHORT_MS = 1500;
 export const NOTIFICATION_DISMISS_MS = 2000;
 
 /**
- * Duration (ms) a navigation button stays visually "active" after being pressed,
+ * Duration (ms) a key strip button stays visually "active" after being pressed,
  * providing immediate press feedback.
- * Site: NavigationButtons.
+ * Site: useKeyPressFeedback, the single owner of that timer since Issue #2176 —
+ * NavigationButtons, TerminalEscapeHatch and OpencodeQuickKeys render it.
  */
 export const KEY_PRESS_FEEDBACK_RESET_MS = 150;
 
 /**
  * Delay (ms) after sending a special key before triggering a terminal refresh,
  * allowing tmux to process the key first.
- * Site: NavigationButtons.
+ * Sites: useSpecialKeys, UnsentComposerBar.
  */
 export const NAV_KEY_REFRESH_DELAY_MS = 100;
 
