@@ -337,10 +337,13 @@ describe('VerificationPane onboarding (Issue #2061)', () => {
   });
 
   describe('results', () => {
-    it('reports the latest verdict in the CLI vocabulary', () => {
+    it('reports the latest verdict with the CLI keyword and a translated verdict', () => {
+      // Issue #2062 turned the verdict from the raw `failed` token into a word;
+      // `RESULT` stays, because that is the keyword the CLI prints and the one
+      // a reader is comparing against.
       render(<VerificationPane state={STATES.result()} />);
       expect(screen.getByTestId('verification-result-body')).toHaveTextContent(
-        'The last run on this branch, #11, is RESULT failed.'
+        'The last run on this branch, #11, is RESULT Failed.'
       );
     });
 
