@@ -828,7 +828,16 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
             // Issue #2042: cost / context for the pills' tooltips. Sparse — only
             // instances with an open split have an entry.
             agentSessionByInstance={agentSessionByInstance}
-            // Issue #1816: hidden entirely when the worktree has no task row.
+            // Issue #2064: always rendered. It used to hide itself on a
+            // worktree with no task row, which put the Verification entry point
+            // out of reach of exactly the people who have never sent a contract.
+            //
+            // `latestRunGates` is still gated on the pane's selection because
+            // that is the only run whose gate rows this state ever holds — the
+            // chip is what keeps them once the operator selects an older run
+            // (`useGatesOfLatestRun`), so the header stops depending on
+            // `selectedRun` without this expression having to lie about which
+            // run the rows came from.
             verificationChip={
               <VerificationStatusChip
                 task={verification.task}

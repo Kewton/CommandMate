@@ -93,6 +93,13 @@ const STATIC_KEYS = [
   'verification.chip.gatesPassed',
   'verification.chip.openHint',
   'verification.chip.dash',
+  // Issue #2064: the contract-less branch's wording, and the touch-reachable
+  // reason popover the chip grew when `title=` stopped being the only channel.
+  'verification.chip.unverified',
+  'verification.chip.noTask',
+  'verification.chip.reasonHeading',
+  'verification.chip.showReason',
+  'verification.chip.hideReason',
 ];
 
 /** Keys built by string concatenation from a status union. */

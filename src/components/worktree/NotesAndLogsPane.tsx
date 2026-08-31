@@ -5,6 +5,9 @@
  * Issue #874: The 'agent' sub-tab can switch to instance-management mode (mobile)
  * Issue #1816: Adds the 'verification' sub-tab (mobile Tools tab), mirroring the
  * PC Activity Bar's Verification pane
+ * Issue #2064: `verification` is REQUIRED, so that sub-tab is as unconditional
+ * as the PC Activity Bar's `verification` entry — the two surfaces can no
+ * longer disagree about whether Verification is reachable at all
  *
  * [S1-013] Props: { worktreeId: string; className?: string; }
  * Sub-tab state is managed internally (not exposed to parent)
@@ -102,11 +105,15 @@ export interface NotesAndLogsPaneProps {
   modelByInstance?: Readonly<Partial<Record<string, string | null>>>;
   /**
    * Issue #1816: task contract + verification runs, owned by
-   * `useWorktreeVerification` in the detail controller. The 'verification'
-   * sub-tab is offered only when this is supplied, so callers that have no such
-   * state (none today besides the mobile shell) keep the previous six tabs.
+   * `useWorktreeVerification` in the detail controller.
+   *
+   * Issue #2064: required. It used to be optional, and the 'verification'
+   * sub-tab was filtered out when it was missing — a hidden entry point on
+   * mobile against a PC Activity Bar that always shows the icon. The state is a
+   * plain hook result that every mounting surface already owns, so requiring it
+   * is what makes the two surfaces agree by construction rather than by review.
    */
-  verification?: WorktreeVerificationState;
+  verification: WorktreeVerificationState;
   /** Issue #1816: jump to a sub-tab from outside (the header chip). */
   requestedSubTab?: SubTabRequest | null;
 }
@@ -197,10 +204,6 @@ export const NotesAndLogsPane = memo(function NotesAndLogsPane({
     tabRefs.current[activeSubTab]?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
   }, [activeSubTab]);
 
-  const subTabs = verification
-    ? SUB_TABS
-    : SUB_TABS.filter((tab) => tab.id !== 'verification');
-
   return (
     <div className={`flex flex-col h-full ${className}`}>
       {/* Sub-tab switcher. Issue #1442: six tabs no longer fit a `flex-1`
@@ -212,7 +215,7 @@ export const NotesAndLogsPane = memo(function NotesAndLogsPane({
           Tabs use plain `onClick` with no hover-gated visibility, so every tab
           stays tappable on touch devices. */}
       <div className="flex overflow-x-auto scrollbar-hide border-b border-border bg-surface dark:bg-surface-2 flex-shrink-0">
-        {subTabs.map((tab) => (
+        {SUB_TABS.map((tab) => (
           <button
             key={tab.id}
             type="button"
@@ -289,8 +292,10 @@ export const NotesAndLogsPane = memo(function NotesAndLogsPane({
           <WorktreeSkillsPane worktreeId={worktreeId} className="h-full" />
         )}
         {/* Issue #1816: same pane the PC Activity Bar mounts; the state comes
-            from the one hook the detail controller owns. */}
-        {activeSubTab === 'verification' && verification && (
+            from the one hook the detail controller owns. Issue #2064: no
+            `&& verification` guard — the prop is required, so this pane is
+            offered exactly as unconditionally as the PC one. */}
+        {activeSubTab === 'verification' && (
           <VerificationPane state={verification} className="h-full" />
         )}
         {/* Issue #1968: same pane the PC Activity Bar mounts. Unlike
