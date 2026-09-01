@@ -1,5 +1,6 @@
 /**
- * The 6x5 table of declared source capabilities (Issue #1924, §4 D3 decision 1).
+ * The 6x6 table of declared source capabilities (Issue #1924, §4 D3 decision 1;
+ * the sixth column added by Issue #2197).
  *
  * `docs/design/multi-agent-state-architecture.md` §4 D3 states this table as the
  * decision, and DR3-006 states why it is pinned *by value* rather than by count:
@@ -44,6 +45,13 @@
  *   window that loses the `stop` of a short turn (#1899).
  * - `resync` — flipping opencode to `'none'` leaves a reconnect with no way to
  *   ask whether the conversation is still working (#1900).
+ * - `transcriptHistory` (Issue #2197) — the one column that is read by
+ *   something other than the state machine: `lib/polling/structured-history-gate`
+ *   branches on it, so this is the column with a second detector. Flipping codex
+ *   or claude to `null` puts that tool's replies back on the scraped pane, and
+ *   flipping any of the other four to `'pull'` sends the gate looking for a
+ *   reader that does not exist. Both are reddened by
+ *   `tests/unit/polling/structured-history-gate-2197.test.ts` as well as here.
  *
  * @vitest-environment node
  */
@@ -59,13 +67,17 @@ import { opencodeAgentEventSource } from '@/lib/hooks/sources/opencode/source';
 import { antigravityAgentEventSource } from '@/lib/hooks/sources/antigravity/source';
 import type { AgentEventSource, AgentSourceCapabilities } from '@/lib/hooks/sources/types';
 
-/** The five columns Issue #1924 adds. Order is the order of §4 D3's code block. */
+/**
+ * The five columns Issue #1924 adds, plus the one Issue #2197 does. Order is the
+ * order of §4 D3's code block, with the new column last.
+ */
 const DECLARED_KEYS = [
   'permissionHookPredictsDialog',
   'sessionStartMayArriveLate',
   'permissionReplyReleasesPrompt',
   'eventIdentity',
   'resync',
+  'transcriptHistory',
 ] as const;
 
 type DeclaredRow = Pick<AgentSourceCapabilities, (typeof DECLARED_KEYS)[number]>;
@@ -87,6 +99,7 @@ const ALL_CAPABILITY_KEYS = [
   'resync',
   'sessionStartMayArriveLate',
   'supportedEvents',
+  'transcriptHistory',
 ];
 
 /**
@@ -107,6 +120,7 @@ const TABLE: Record<string, DeclaredRow> = {
     permissionReplyReleasesPrompt: false,
     eventIdentity: null,
     resync: 'none',
+    transcriptHistory: 'pull',
   },
   codex: {
     permissionHookPredictsDialog: true,
@@ -114,6 +128,7 @@ const TABLE: Record<string, DeclaredRow> = {
     permissionReplyReleasesPrompt: false,
     eventIdentity: null,
     resync: 'none',
+    transcriptHistory: 'pull',
   },
   gemini: {
     permissionHookPredictsDialog: false,
@@ -121,6 +136,7 @@ const TABLE: Record<string, DeclaredRow> = {
     permissionReplyReleasesPrompt: false,
     eventIdentity: null,
     resync: 'none',
+    transcriptHistory: null,
   },
   copilot: {
     permissionHookPredictsDialog: false,
@@ -128,6 +144,7 @@ const TABLE: Record<string, DeclaredRow> = {
     permissionReplyReleasesPrompt: false,
     eventIdentity: null,
     resync: 'none',
+    transcriptHistory: null,
   },
   opencode: {
     permissionHookPredictsDialog: false,
@@ -135,6 +152,7 @@ const TABLE: Record<string, DeclaredRow> = {
     permissionReplyReleasesPrompt: true,
     eventIdentity: 'permission-id',
     resync: 'session-status-poll',
+    transcriptHistory: 'push',
   },
   antigravity: {
     permissionHookPredictsDialog: false,
@@ -142,6 +160,7 @@ const TABLE: Record<string, DeclaredRow> = {
     permissionReplyReleasesPrompt: false,
     eventIdentity: null,
     resync: 'none',
+    transcriptHistory: null,
   },
 };
 
@@ -161,10 +180,11 @@ function declaredRow(capabilities: AgentSourceCapabilities): DeclaredRow {
     permissionReplyReleasesPrompt: capabilities.permissionReplyReleasesPrompt,
     eventIdentity: capabilities.eventIdentity,
     resync: capabilities.resync,
+    transcriptHistory: capabilities.transcriptHistory,
   };
 }
 
-describe('[#1924] AgentSourceCapabilities — the 6x5 table of §4 D3', () => {
+describe('[#1924] AgentSourceCapabilities — the 6x6 table of §4 D3', () => {
   it.each(Object.keys(TABLE))('%s declares exactly the row the design policy states', (id) => {
     const source = SOURCES[id];
     expect(source.cliToolId).toBe(id);
@@ -226,5 +246,22 @@ describe('[#1924] AgentSourceCapabilities — the 6x5 table of §4 D3', () => {
 
     const resyncing = Object.keys(TABLE).filter((id) => TABLE[id].resync !== 'none');
     expect(resyncing).toEqual(['opencode']);
+  });
+
+  it('names exactly the three sources with a second writer, and which kind (#2197)', () => {
+    // The column-wise reading of Issue #2197's addition. Two departures from
+    // "nobody but the scraper", and they are different departures: opencode is
+    // pushed the reply over a connection, claude and codex keep a file that has
+    // to be read. `lib/polling/structured-history-gate` asks a different
+    // question of each, so a value in the wrong one of these two lists is not a
+    // near miss — it sends the gate down the other branch entirely.
+    const pull = Object.keys(TABLE).filter((id) => TABLE[id].transcriptHistory === 'pull');
+    expect(pull).toEqual(['claude', 'codex']);
+
+    const push = Object.keys(TABLE).filter((id) => TABLE[id].transcriptHistory === 'push');
+    expect(push).toEqual(['opencode']);
+
+    const scraperOnly = Object.keys(TABLE).filter((id) => TABLE[id].transcriptHistory === null);
+    expect(scraperOnly).toEqual(['gemini', 'copilot', 'antigravity']);
   });
 });

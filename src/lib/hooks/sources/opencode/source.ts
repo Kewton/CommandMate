@@ -371,6 +371,10 @@ export const opencodeAgentEventSource: AgentEventSource = definePullEventSource(
     // both back to the pre-#1900 behaviour, which is what the mutation case in
     // `tests/unit/hooks/sources/opencode-resilience-1900.test.ts` asserts.
     resync: 'session-status-poll',
+    // Issue #2197. opencode is the push half: `./history` is already writing
+    // the reply out of the SSE stream, so the gate asks whether the
+    // subscription is live rather than asking for the turn.
+    transcriptHistory: 'push',
   },
 
   // C4. Predicates, not a name table: see ./mappers.

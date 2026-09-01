@@ -208,6 +208,8 @@ export const antigravityAgentEventSource: AgentEventSource = definePushHookSourc
     permissionReplyReleasesPrompt: false,
     eventIdentity: null,
     resync: 'none',
+    // Issue #2197. Nobody but the screen scraper records antigravity replies.
+    transcriptHistory: null,
   },
 
   // Empty on purpose, and the only empty mapper list in the codebase. There is

@@ -48,13 +48,17 @@ describe('captureStructuredHistoryTurn', () => {
     expect(await captureStructuredHistoryTurn('wt-1', 'claude', 'claude', CAPTURE)).toBe(false);
   });
 
-  it.each(['opencode', 'codex', 'gemini', 'copilot', 'antigravity'] as const)(
-    'never asks about %s, which has no transcript this reader knows',
+  it.each(['opencode', 'gemini', 'copilot', 'antigravity'] as const)(
+    'never asks the claude reader about %s',
     async (cliToolId) => {
-      // The tool check is first for the same reason its sibling's is: a reader
-      // that answered for a tool it cannot read would suppress the only record
-      // that tool has. codex is on this list on purpose — see the commit
-      // message for why its reader is a separate piece of work.
+      // The capability check is first for the same reason its sibling's is: a
+      // reader that answered for a tool it cannot read would suppress the only
+      // record that tool has.
+      //
+      // codex used to be on this list and is not any more — Issue #2197 gave it
+      // a reader of its own, pinned in `./structured-history-gate-2197.test.ts`.
+      // What still holds for it, and is asserted there, is that it never reaches
+      // *claude's* reader.
       vi.mocked(captureClaudeTranscriptTurn).mockResolvedValue(true);
       expect(await captureStructuredHistoryTurn('wt-1', cliToolId, undefined, CAPTURE)).toBe(false);
       expect(vi.mocked(captureClaudeTranscriptTurn)).not.toHaveBeenCalled();
