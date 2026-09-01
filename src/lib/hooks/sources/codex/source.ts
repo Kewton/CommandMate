@@ -122,6 +122,10 @@ export const codexAgentEventSource: AgentEventSource = definePushHookSource({
     permissionReplyReleasesPrompt: false,
     eventIdentity: null,
     resync: 'none',
+    // Issue #2197. codex appends every record of a session to
+    // `$CODEX_HOME/sessions/**/rollout-*-<session_id>.jsonl`, and the hook
+    // payload names that file outright — see `./history`.
+    transcriptHistory: 'pull',
   },
 
   // Same CamelCase dialect as Claude and copilot (#1757 §8.1). The table is

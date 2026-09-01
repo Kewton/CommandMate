@@ -1,0 +1,326 @@
+[
+  {
+    "pane": "cx1",
+    "event": "SessionStart",
+    "payload": {
+      "session_id": "01a05a82-d71b-7bc3-8901-487b0db19d40",
+      "transcript_path": "/tmp/cmate-2197/codexhome/sessions/2026/09/01/rollout-2026-09-01T10-08-39-01a05a82-d71b-7bc3-8901-487b0db19d40.jsonl",
+      "cwd": "/tmp/cmate-2197/work/cx",
+      "hook_event_name": "SessionStart",
+      "model": "gpt-5.6-sol",
+      "permission_mode": "bypassPermissions",
+      "source": "startup"
+    }
+  },
+  {
+    "pane": "cx1",
+    "event": "UserPromptSubmit",
+    "payload": {
+      "session_id": "01a05a82-d71b-7bc3-8901-487b0db19d40",
+      "turn_id": "01a05a83-0933-7723-8eb2-2e459b5a1ebd",
+      "transcript_path": "/tmp/cmate-2197/codexhome/sessions/2026/09/01/rollout-2026-09-01T10-08-39-01a05a82-d71b-7bc3-8901-487b0db19d40.jsonl",
+      "cwd": "/tmp/cmate-2197/work/cx",
+      "hook_event_name": "UserPromptSubmit",
+      "model": "gpt-5.6-sol",
+      "permission_mode": "bypassPermissions",
+      "prompt": "Reply with exactly: PONG-1"
+    }
+  },
+  {
+    "pane": "cx1",
+    "event": "Stop",
+    "payload": {
+      "session_id": "01a05a82-d71b-7bc3-8901-487b0db19d40",
+      "turn_id": "01a05a83-0933-7723-8eb2-2e459b5a1ebd",
+      "transcript_path": "/tmp/cmate-2197/codexhome/sessions/2026/09/01/rollout-2026-09-01T10-08-39-01a05a82-d71b-7bc3-8901-487b0db19d40.jsonl",
+      "cwd": "/tmp/cmate-2197/work/cx",
+      "hook_event_name": "Stop",
+      "model": "gpt-5.6-sol",
+      "permission_mode": "bypassPermissions",
+      "stop_hook_active": false,
+      "last_assistant_message": "PONG-1"
+    }
+  },
+  {
+    "pane": "cx1",
+    "event": "UserPromptSubmit",
+    "payload": {
+      "session_id": "01a05a82-d71b-7bc3-8901-487b0db19d40",
+      "turn_id": "01a05a83-a87d-7362-80fe-027b7584e589",
+      "transcript_path": "/tmp/cmate-2197/codexhome/sessions/2026/09/01/rollout-2026-09-01T10-08-39-01a05a82-d71b-7bc3-8901-487b0db19d40.jsonl",
+      "cwd": "/tmp/cmate-2197/work/cx",
+      "hook_event_name": "UserPromptSubmit",
+      "model": "gpt-5.6-sol",
+      "permission_mode": "bypassPermissions",
+      "prompt": "Run the shell command: echo CMATE-2197 > marker.txt   then read marker.txt back and report its contents in one short sentence."
+    }
+  },
+  {
+    "pane": "cx1",
+    "event": "PreToolUse",
+    "payload": {
+      "session_id": "01a05a82-d71b-7bc3-8901-487b0db19d40",
+      "turn_id": "01a05a83-a87d-7362-80fe-027b7584e589",
+      "transcript_path": "/tmp/cmate-2197/codexhome/sessions/2026/09/01/rollout-2026-09-01T10-08-39-01a05a82-d71b-7bc3-8901-487b0db19d40.jsonl",
+      "cwd": "/tmp/cmate-2197/work/cx",
+      "hook_event_name": "PreToolUse",
+      "model": "gpt-5.6-sol",
+      "permission_mode": "bypassPermissions",
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "echo CMATE-2197 > marker.txt && sed -n '1p' marker.txt"
+      },
+      "tool_use_id": "exec-863406bf-6055-4e9a-ae58-40f7e7f90d9e"
+    }
+  },
+  {
+    "pane": "cx1",
+    "event": "PostToolUse",
+    "payload": {
+      "session_id": "01a05a82-d71b-7bc3-8901-487b0db19d40",
+      "turn_id": "01a05a83-a87d-7362-80fe-027b7584e589",
+      "transcript_path": "/tmp/cmate-2197/codexhome/sessions/2026/09/01/rollout-2026-09-01T10-08-39-01a05a82-d71b-7bc3-8901-487b0db19d40.jsonl",
+      "cwd": "/tmp/cmate-2197/work/cx",
+      "hook_event_name": "PostToolUse",
+      "model": "gpt-5.6-sol",
+      "permission_mode": "bypassPermissions",
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "echo CMATE-2197 > marker.txt && sed -n '1p' marker.txt"
+      },
+      "tool_response": "CMATE-2197\n",
+      "tool_use_id": "exec-863406bf-6055-4e9a-ae58-40f7e7f90d9e"
+    }
+  },
+  {
+    "pane": "cx1",
+    "event": "Stop",
+    "payload": {
+      "session_id": "01a05a82-d71b-7bc3-8901-487b0db19d40",
+      "turn_id": "01a05a83-a87d-7362-80fe-027b7584e589",
+      "transcript_path": "/tmp/cmate-2197/codexhome/sessions/2026/09/01/rollout-2026-09-01T10-08-39-01a05a82-d71b-7bc3-8901-487b0db19d40.jsonl",
+      "cwd": "/tmp/cmate-2197/work/cx",
+      "hook_event_name": "Stop",
+      "model": "gpt-5.6-sol",
+      "permission_mode": "bypassPermissions",
+      "stop_hook_active": false,
+      "last_assistant_message": "marker.txt contains `CMATE-2197`."
+    }
+  },
+  {
+    "pane": "cx1",
+    "event": "UserPromptSubmit",
+    "payload": {
+      "session_id": "01a05a82-d71b-7bc3-8901-487b0db19d40",
+      "turn_id": "01a05a84-76f2-7390-83f3-51ea1346a364",
+      "transcript_path": "/tmp/cmate-2197/codexhome/sessions/2026/09/01/rollout-2026-09-01T10-08-39-01a05a82-d71b-7bc3-8901-487b0db19d40.jsonl",
+      "cwd": "/tmp/cmate-2197/work/cx",
+      "hook_event_name": "UserPromptSubmit",
+      "model": "gpt-5.6-sol",
+      "permission_mode": "bypassPermissions",
+      "prompt": "Reply with exactly this markdown and nothing else: a level-2 heading \"## Result\", then a blank line, then a bullet list with two items \"alpha\" and \"beta\", then a blank line, then the sentence \"Done.\" in bold."
+    }
+  },
+  {
+    "pane": "cx1",
+    "event": "Stop",
+    "payload": {
+      "session_id": "01a05a82-d71b-7bc3-8901-487b0db19d40",
+      "turn_id": "01a05a84-76f2-7390-83f3-51ea1346a364",
+      "transcript_path": "/tmp/cmate-2197/codexhome/sessions/2026/09/01/rollout-2026-09-01T10-08-39-01a05a82-d71b-7bc3-8901-487b0db19d40.jsonl",
+      "cwd": "/tmp/cmate-2197/work/cx",
+      "hook_event_name": "Stop",
+      "model": "gpt-5.6-sol",
+      "permission_mode": "bypassPermissions",
+      "stop_hook_active": false,
+      "last_assistant_message": "## Result\n\n- alpha\n- beta\n\n**Done.**"
+    }
+  },
+  {
+    "pane": "cx1",
+    "event": "SessionStart",
+    "payload": {
+      "session_id": "01a05a85-f872-79d3-85c3-c1933dc86828",
+      "transcript_path": "/tmp/cmate-2197/codexhome/sessions/2026/09/01/rollout-2026-09-01T10-12-04-01a05a85-f872-79d3-85c3-c1933dc86828.jsonl",
+      "cwd": "/tmp/cmate-2197/work/cx",
+      "hook_event_name": "SessionStart",
+      "model": "gpt-5.6-sol",
+      "permission_mode": "bypassPermissions",
+      "source": "startup"
+    }
+  },
+  {
+    "pane": "cx1",
+    "event": "UserPromptSubmit",
+    "payload": {
+      "session_id": "01a05a85-f872-79d3-85c3-c1933dc86828",
+      "turn_id": "01a05a86-2930-7ac2-9765-1b799ca55259",
+      "transcript_path": "/tmp/cmate-2197/codexhome/sessions/2026/09/01/rollout-2026-09-01T10-12-04-01a05a85-f872-79d3-85c3-c1933dc86828.jsonl",
+      "cwd": "/tmp/cmate-2197/work/cx",
+      "hook_event_name": "UserPromptSubmit",
+      "model": "gpt-5.6-sol",
+      "permission_mode": "bypassPermissions",
+      "prompt": "Reply with exactly: PONG-AFTER-NEW"
+    }
+  },
+  {
+    "pane": "cx1",
+    "event": "Stop",
+    "payload": {
+      "session_id": "01a05a85-f872-79d3-85c3-c1933dc86828",
+      "turn_id": "01a05a86-2930-7ac2-9765-1b799ca55259",
+      "transcript_path": "/tmp/cmate-2197/codexhome/sessions/2026/09/01/rollout-2026-09-01T10-12-04-01a05a85-f872-79d3-85c3-c1933dc86828.jsonl",
+      "cwd": "/tmp/cmate-2197/work/cx",
+      "hook_event_name": "Stop",
+      "model": "gpt-5.6-sol",
+      "permission_mode": "bypassPermissions",
+      "stop_hook_active": false,
+      "last_assistant_message": "PONG-AFTER-NEW"
+    }
+  },
+  {
+    "pane": "cx1",
+    "event": "UserPromptSubmit",
+    "payload": {
+      "session_id": "01a05a85-f872-79d3-85c3-c1933dc86828",
+      "turn_id": "01a05a92-72d5-70c0-8937-922fb38b5d61",
+      "transcript_path": "/tmp/cmate-2197/codexhome/sessions/2026/09/01/rollout-2026-09-01T10-12-04-01a05a85-f872-79d3-85c3-c1933dc86828.jsonl",
+      "cwd": "/tmp/cmate-2197/work/cx",
+      "hook_event_name": "UserPromptSubmit",
+      "model": "gpt-5.6-sol",
+      "permission_mode": "bypassPermissions",
+      "prompt": "Add a line containing exactly \"hello 2197\" to the end of README.md by editing the file (use your patch/edit tool, not a shell redirect). Then reply with exactly: PATCHED"
+    }
+  },
+  {
+    "pane": "cx1",
+    "event": "PreToolUse",
+    "payload": {
+      "session_id": "01a05a85-f872-79d3-85c3-c1933dc86828",
+      "turn_id": "01a05a92-72d5-70c0-8937-922fb38b5d61",
+      "transcript_path": "/tmp/cmate-2197/codexhome/sessions/2026/09/01/rollout-2026-09-01T10-12-04-01a05a85-f872-79d3-85c3-c1933dc86828.jsonl",
+      "cwd": "/tmp/cmate-2197/work/cx",
+      "hook_event_name": "PreToolUse",
+      "model": "gpt-5.6-sol",
+      "permission_mode": "bypassPermissions",
+      "tool_name": "apply_patch",
+      "tool_input": {
+        "command": "*** Begin Patch\n*** Update File: README.md\n@@\n+hello 2197\n*** End Patch"
+      },
+      "tool_use_id": "exec-ca8a846e-47b1-4838-8472-d71e608a7493"
+    }
+  },
+  {
+    "pane": "cx1",
+    "event": "PostToolUse",
+    "payload": {
+      "session_id": "01a05a85-f872-79d3-85c3-c1933dc86828",
+      "turn_id": "01a05a92-72d5-70c0-8937-922fb38b5d61",
+      "transcript_path": "/tmp/cmate-2197/codexhome/sessions/2026/09/01/rollout-2026-09-01T10-12-04-01a05a85-f872-79d3-85c3-c1933dc86828.jsonl",
+      "cwd": "/tmp/cmate-2197/work/cx",
+      "hook_event_name": "PostToolUse",
+      "model": "gpt-5.6-sol",
+      "permission_mode": "bypassPermissions",
+      "tool_name": "apply_patch",
+      "tool_input": {
+        "command": "*** Begin Patch\n*** Update File: README.md\n@@\n+hello 2197\n*** End Patch"
+      },
+      "tool_response": "Exit code: 0\nWall time: 0.1 seconds\nOutput:\nSuccess. Updated the following files:\nM README.md\n",
+      "tool_use_id": "exec-ca8a846e-47b1-4838-8472-d71e608a7493"
+    }
+  },
+  {
+    "pane": "cx1",
+    "event": "PreToolUse",
+    "payload": {
+      "session_id": "01a05a85-f872-79d3-85c3-c1933dc86828",
+      "turn_id": "01a05a92-72d5-70c0-8937-922fb38b5d61",
+      "transcript_path": "/tmp/cmate-2197/codexhome/sessions/2026/09/01/rollout-2026-09-01T10-12-04-01a05a85-f872-79d3-85c3-c1933dc86828.jsonl",
+      "cwd": "/tmp/cmate-2197/work/cx",
+      "hook_event_name": "PreToolUse",
+      "model": "gpt-5.6-sol",
+      "permission_mode": "bypassPermissions",
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "tail -n 5 README.md"
+      },
+      "tool_use_id": "exec-495c1927-7f07-4be8-b9cb-51cd8abe527e"
+    }
+  },
+  {
+    "pane": "cx1",
+    "event": "PostToolUse",
+    "payload": {
+      "session_id": "01a05a85-f872-79d3-85c3-c1933dc86828",
+      "turn_id": "01a05a92-72d5-70c0-8937-922fb38b5d61",
+      "transcript_path": "/tmp/cmate-2197/codexhome/sessions/2026/09/01/rollout-2026-09-01T10-12-04-01a05a85-f872-79d3-85c3-c1933dc86828.jsonl",
+      "cwd": "/tmp/cmate-2197/work/cx",
+      "hook_event_name": "PostToolUse",
+      "model": "gpt-5.6-sol",
+      "permission_mode": "bypassPermissions",
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "tail -n 5 README.md"
+      },
+      "tool_response": "# codex fixture capture workspace\nhello 2197\n",
+      "tool_use_id": "exec-495c1927-7f07-4be8-b9cb-51cd8abe527e"
+    }
+  },
+  {
+    "pane": "cx1",
+    "event": "Stop",
+    "payload": {
+      "session_id": "01a05a85-f872-79d3-85c3-c1933dc86828",
+      "turn_id": "01a05a92-72d5-70c0-8937-922fb38b5d61",
+      "transcript_path": "/tmp/cmate-2197/codexhome/sessions/2026/09/01/rollout-2026-09-01T10-12-04-01a05a85-f872-79d3-85c3-c1933dc86828.jsonl",
+      "cwd": "/tmp/cmate-2197/work/cx",
+      "hook_event_name": "Stop",
+      "model": "gpt-5.6-sol",
+      "permission_mode": "bypassPermissions",
+      "stop_hook_active": false,
+      "last_assistant_message": "PATCHED"
+    }
+  },
+  {
+    "pane": "cx2",
+    "event": "SessionStart",
+    "payload": {
+      "session_id": "01a05a85-2e16-7253-96be-cd143be9049c",
+      "transcript_path": "/tmp/cmate-2197/codexhome/sessions/2026/09/01/rollout-2026-09-01T10-11-12-01a05a85-2e16-7253-96be-cd143be9049c.jsonl",
+      "cwd": "/tmp/cmate-2197/work/cx",
+      "hook_event_name": "SessionStart",
+      "model": "gpt-5.6-sol",
+      "permission_mode": "bypassPermissions",
+      "source": "startup"
+    }
+  },
+  {
+    "pane": "cx2",
+    "event": "UserPromptSubmit",
+    "payload": {
+      "session_id": "01a05a85-2e16-7253-96be-cd143be9049c",
+      "turn_id": "01a05a85-712d-7203-a1a2-cf171f2a6495",
+      "transcript_path": "/tmp/cmate-2197/codexhome/sessions/2026/09/01/rollout-2026-09-01T10-11-12-01a05a85-2e16-7253-96be-cd143be9049c.jsonl",
+      "cwd": "/tmp/cmate-2197/work/cx",
+      "hook_event_name": "UserPromptSubmit",
+      "model": "gpt-5.6-sol",
+      "permission_mode": "bypassPermissions",
+      "prompt": "Reply with exactly: PONG-FROM-SECOND-INSTANCE"
+    }
+  },
+  {
+    "pane": "cx2",
+    "event": "Stop",
+    "payload": {
+      "session_id": "01a05a85-2e16-7253-96be-cd143be9049c",
+      "turn_id": "01a05a85-712d-7203-a1a2-cf171f2a6495",
+      "transcript_path": "/tmp/cmate-2197/codexhome/sessions/2026/09/01/rollout-2026-09-01T10-11-12-01a05a85-2e16-7253-96be-cd143be9049c.jsonl",
+      "cwd": "/tmp/cmate-2197/work/cx",
+      "hook_event_name": "Stop",
+      "model": "gpt-5.6-sol",
+      "permission_mode": "bypassPermissions",
+      "stop_hook_active": false,
+      "last_assistant_message": "PONG-FROM-SECOND-INSTANCE"
+    }
+  }
+]

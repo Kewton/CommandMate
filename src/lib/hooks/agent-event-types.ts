@@ -70,3 +70,57 @@ export const MAX_EVENT_DETAIL_LENGTH = 128;
  * `AgentSourceCapabilities.permissionReplyReleasesPrompt` to declare.
  */
 export const PERMISSION_REPLIED_DETAIL = 'permission_replied';
+
+/**
+ * Who writes conversation history for a tool, besides the screen scraper
+ * (Issue #2197).
+ *
+ * The scraper in `lib/polling/response-checker` has always been the only writer
+ * of `chat_messages`, because for most tools the terminal is the only place the
+ * reply exists. Two tools now have a second, better-informed writer, and they
+ * differ in the one way that decides how the poller has to ask about them:
+ *
+ *  - `'push'` — the agent's own server is already streaming the reply into
+ *    History, so the only question is whether that connection is live.
+ *    opencode, since #2041.
+ *  - `'pull'` — the agent keeps its own transcript on disk and nothing reads it
+ *    until something asks, so the question is "record this turn now, and tell me
+ *    whether you did". claude since #2121, codex since this Issue.
+ *  - `null` — nobody but the scraper. The answer for a tool nobody has written a
+ *    reader for, and the answer the compatibility relay gives.
+ *
+ * A word rather than a boolean because the two shapes are asked *different
+ * questions* by `lib/polling/structured-history-gate`, and a boolean would make
+ * the gate guess which one from the tool id — which is the branch this word
+ * exists to delete.
+ */
+export type TranscriptHistoryMode = 'pull' | 'push' | null;
+
+declare module './sources/types' {
+  /**
+   * `transcriptHistory`, declared here rather than beside the other seven
+   * capabilities.
+   *
+   * The word and the field move together: a source that declares `'pull'` is
+   * promising that `structured-history-gate` has a reader to dispatch to, and
+   * the gate reads the word out of this module. Keeping the two in one file is
+   * what stops a later tool declaring a mode the gate has never heard of.
+   *
+   * Declaration merging rather than a plain field because `./sources/types`
+   * imports {@link AgentEventType} from here — the vocabulary is upstream of the
+   * source contract, and reversing that to put the word next to the field would
+   * make the tool-agnostic module depend on the source interface.
+   */
+  interface AgentSourceCapabilities {
+    /**
+     * Which writer, other than the scraper, records this tool's replies
+     * (Issue #2197).
+     *
+     * Pinned by value for every source in
+     * `tests/unit/hooks/sources/capabilities.test.ts`; flipping codex to `null`
+     * puts its replies back on the scraped pane, which is what the mutation
+     * check in that file's sibling asserts.
+     */
+    readonly transcriptHistory: TranscriptHistoryMode;
+  }
+}

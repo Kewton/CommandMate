@@ -75,6 +75,9 @@ export function createLegacyRelaySource(cliToolId: CLIToolType): AgentEventSourc
       permissionReplyReleasesPrompt: false,
       eventIdentity: null,
       resync: 'none',
+      // Issue #2197. A tool on the compatibility relay has no reader, which
+      // is the same "nobody has measured this" the empty event list states.
+      transcriptHistory: null,
     },
 
     mappers: fromNameTable(CAMEL_CASE_HOOK_EVENT_NAMES),
