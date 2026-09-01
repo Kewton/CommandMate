@@ -68,9 +68,13 @@ import {
   buildClaudeTurns,
   claudeProjectSlug,
   CLAUDE_PROJECTS_DIR_SEGMENTS,
+  isClaudePromptRecord,
+  MAX_CLAUDE_TURN_BLOCKS,
   parseClaudeTranscript,
   renderClaudeTurn,
+  type ClaudeContentBlock,
   type ClaudeRenderedTurn,
+  type ClaudeTranscriptRecord,
   type ClaudeTurnAccumulator,
 } from './transcript';
 
@@ -323,6 +327,194 @@ export async function captureClaudeTranscriptTurn(
       error: error instanceof Error ? error.message : String(error),
     });
     return false;
+  }
+}
+
+/** What {@link readClaudeTurnProgress} answers. */
+export interface ClaudeTurnProgress {
+  /**
+   * The id the live body is keyed on.
+   *
+   * Normally `claudeTurnRequestId(promptUuid)` — byte-identical to the
+   * `requestId` {@link captureClaudeTranscriptTurn} will write, which is what
+   * makes the client's swap a string comparison. The one exception is the
+   * headless read described on {@link partial}, whose key is derived from the
+   * session instead and is deliberately shaped so it can never collide with a
+   * prompt-derived one.
+   */
+  readonly turnKey: string;
+  /** The Markdown the agent has written so far. Never empty. */
+  readonly body: string;
+  /**
+   * True when the body does not start at the beginning of the turn.
+   *
+   * There is exactly one way this happens, and it is worth stating precisely
+   * because the obvious reading is wrong. `orphanedAssistantRecords > 0` alone
+   * does NOT mean the *newest* turn lost its head: a 4 MiB window over a long
+   * session almost always opens mid-turn, and the orphans that produces belong
+   * to a turn that has already been written. Whenever a prompt record appears
+   * anywhere in the window, the newest turn is the one it opened and its head is
+   * complete.
+   *
+   * The head is missing only when the window holds assistant records and no
+   * prompt record at all — a single turn whose own prompt has scrolled out of
+   * {@link CLAUDE_TRANSCRIPT_TAIL_BYTES}. #2121 leaves that turn unwritten (there
+   * is no `uuid` to key a row on) and this reader will not leave it invisible:
+   * the readable tail is published and marked, because a reply shown from the
+   * middle without saying so is worse than no reply at all.
+   */
+  readonly partial: boolean;
+}
+
+/**
+ * The key for a body read with no prompt record in the window.
+ *
+ * `partial:` cannot be the prefix of a UUID, so this can never collide with
+ * `claudeTurnRequestId(promptUuid)` — which matters because the two mean
+ * different things to the client. A prompt-derived key is a promise that a row
+ * with the same id is coming; this one is a promise that no such row exists, so
+ * the bubble it draws is cleared by the session going idle rather than by a swap.
+ */
+function headlessClaudeTurnKey(sessionId: string): string {
+  return claudeTurnRequestId(`partial:${sessionId}`);
+}
+
+/**
+ * Everything the window holds for a turn whose prompt record is outside it.
+ *
+ * Built here rather than in `buildClaudeTurns` on purpose: that function drops
+ * orphaned records for a stated reason — their text must never be attached to an
+ * invented turn key, because an invented key is a row no later run can recognise
+ * as already written. That argument is about **writing**, and this path writes
+ * nothing. So the records are gathered separately, into an accumulator that is
+ * rendered by the same `renderClaudeTurn` and never handed to a writer.
+ *
+ * Only the records before the first prompt record are taken, which is exactly
+ * the set `buildClaudeTurns` counted as orphaned.
+ */
+function collectHeadlessClaudeTurn(
+  records: readonly ClaudeTranscriptRecord[],
+  sessionId: string
+): ClaudeTurnAccumulator {
+  const blocks: ClaudeContentBlock[] = [];
+  let assistantRecords = 0;
+  let overflowed = false;
+
+  for (const record of records) {
+    if (isClaudePromptRecord(record)) break;
+    if (record.isSidechain || record.type !== 'assistant') continue;
+    assistantRecords += 1;
+    for (const block of record.blocks) {
+      if (blocks.length >= MAX_CLAUDE_TURN_BLOCKS) {
+        overflowed = true;
+        break;
+      }
+      blocks.push(block);
+    }
+  }
+
+  return {
+    sessionId,
+    promptUuid: `partial:${sessionId}`,
+    startedAt: 0,
+    promptText: '',
+    promptIsOperatorInput: false,
+    blocks,
+    assistantRecords,
+    overflowed,
+  };
+}
+
+/**
+ * Read the turn that is open right now, without writing anything (Issue #2199).
+ *
+ * The read half of {@link captureClaudeTranscriptTurn}, and *only* the read
+ * half: no `chat_messages` row, no user row, no `broadcastMessage`. That
+ * separation is the whole safety argument for this function. The write path is
+ * idempotent because `findMessageByRequestId` answers for a `requestId` derived
+ * from the prompt record's `uuid`; running it on every poll tick of an
+ * unfinished turn would mean writing the reply as it grows and then finding the
+ * row already there, so the row would freeze at whatever the first tick saw.
+ * This path never reaches that code at all.
+ *
+ * The two also cannot fight over the file: both open it read-only, and the
+ * writer is Claude.
+ *
+ * Deliberately **not** gated on whether the turn has ended. It cannot be — the
+ * transcript has no end-of-turn record this reader could trust, which is why
+ * #2121 put the trigger in the poller. The caller supplies that judgement (it
+ * asks only while the session is generating), and a body read from a turn that
+ * has just finished is harmless: the settled row carries the same
+ * {@link ClaudeTurnProgress.turnKey}, so the client replaces one with the other.
+ *
+ * Never throws.
+ *
+ * @param target - The instance whose turn is in flight
+ * @param capture - Where to look; the same {@link ClaudeTranscriptCapture} the writer takes
+ * @returns The open turn's body, or null when there is nothing to show yet
+ */
+export async function readClaudeTurnProgress(
+  target: AgentInstanceRef,
+  capture: ClaudeTranscriptCapture
+): Promise<ClaudeTurnProgress | null> {
+  const instanceId = target.instanceId ?? target.cliToolId;
+  try {
+    const homeDir = capture.homeDir ?? homedir();
+    if (typeof capture.worktreePath !== 'string' || capture.worktreePath.length === 0) {
+      return null;
+    }
+
+    const sessionId = await resolveClaudeSessionId(target);
+    const path = await locateClaudeTranscript(homeDir, capture, sessionId);
+    if (!path) return null;
+
+    const text = await readClaudeTranscriptTail(path);
+    if (text === null) return null;
+
+    // A fragment at the tail of a file being appended to is the normal case here
+    // — this reader runs *while* Claude is writing — and `parseClaudeTranscript`
+    // already counts it rather than throwing. Nothing extra is needed, and that
+    // is the property `claude-transcript-progress-2199` pins.
+    const parsed = parseClaudeTranscript(text);
+    const built = buildClaudeTurns(parsed.records, sessionId ?? '');
+    const turn = built.turns.at(-1);
+
+    if (turn) {
+      const rendered = renderClaudeTurn(turn);
+      if (rendered.body.length === 0) return null;
+      return {
+        turnKey: claudeTurnRequestId(rendered.promptUuid),
+        body: rendered.body,
+        partial: false,
+      };
+    }
+
+    // No prompt record anywhere in the window. See {@link ClaudeTurnProgress.partial}.
+    if (built.orphanedAssistantRecords === 0) return null;
+    const headless = collectHeadlessClaudeTurn(parsed.records, sessionId ?? '');
+    const rendered = renderClaudeTurn(headless);
+    if (rendered.body.length === 0) return null;
+
+    logger.info('claude-transcript-progress-headless', {
+      worktreeId: target.worktreeId,
+      instanceId,
+      path,
+      orphanedAssistantRecords: built.orphanedAssistantRecords,
+      malformedLines: parsed.malformedLines,
+    });
+
+    return {
+      turnKey: headlessClaudeTurnKey(sessionId ?? ''),
+      body: rendered.body,
+      partial: true,
+    };
+  } catch (error) {
+    logger.debug('claude-transcript-progress-failed', {
+      worktreeId: target.worktreeId,
+      instanceId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
   }
 }
 
