@@ -11,6 +11,7 @@ import {
   markPendingPromptsAsAnswered,
 } from '@/lib/db';
 import { broadcastMessage } from '@/lib/ws-server';
+import type { ChatMessage } from '@/types/models';
 import { detectPrompt } from '@/lib/detection/prompt-detector';
 import type { PromptDetectionResult } from '@/lib/detection/prompt-detector';
 import { recordClaudeConversation } from '@/lib/conversation-logger';
@@ -128,6 +129,35 @@ function observeUpstreamFaultForPush(
     faultId: match?.fault.id ?? null,
     matchedText: match?.matchedText,
   }).catch(() => {});
+}
+
+/**
+ * The `onUpdated` hook for `markPendingPromptsAsAnswered` (Issue #2195).
+ *
+ * The sweep stamps every still-pending prompt row of an instance the moment the
+ * agent is seen to have moved on, which flips a prompt card in the chat surface
+ * from "waiting for your answer" to answered. That was the one history mutation
+ * with no realtime frame behind it, so every open pane kept showing the stale
+ * card until its next `/messages` poll — and #2195 stretches that poll to 15s
+ * whenever a socket is up, so the omission had to be closed in the same change
+ * that introduced the longer interval.
+ *
+ * `message_updated`, never `message`: the row already existed and was already
+ * delivered when it was created, so a client that appended instead of replacing
+ * would show the question twice.
+ */
+function broadcastPromptSweptToAnswered(worktreeId: string): (message: ChatMessage) => void {
+  return (message: ChatMessage) => {
+    try {
+      broadcastMessage('message_updated', { worktreeId, message });
+    } catch (error) {
+      // The rows are already stamped; a socket write must not fail the poll.
+      logger.warn('prompt-sweep-broadcast-failed', {
+        worktreeId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  };
 }
 
 // Issue #1790: arm the waiting-edge push subscription.
@@ -750,7 +780,13 @@ export async function checkForResponse(
       const cleanOutput = stripAnsi(output);
       const tailLines = cleanOutput.split('\n').slice(-THINKING_TAIL_LINE_COUNT).join('\n');
       if (thinkingPattern.test(tailLines)) {
-        const answeredCount = markPendingPromptsAsAnswered(db, worktreeId, cliToolId, resolvedInstanceId);
+        const answeredCount = markPendingPromptsAsAnswered(
+          db,
+          worktreeId,
+          cliToolId,
+          resolvedInstanceId,
+          broadcastPromptSweptToAnswered(worktreeId),
+        );
         if (answeredCount > 0) {
           logger.info('marked-answeredcount-pending');
         }
@@ -1011,7 +1047,13 @@ export async function checkForResponse(
     }
 
     // Mark any pending prompts as answered
-    const answeredCount = markPendingPromptsAsAnswered(db, worktreeId, cliToolId, resolvedInstanceId);
+    const answeredCount = markPendingPromptsAsAnswered(
+      db,
+      worktreeId,
+      cliToolId,
+      resolvedInstanceId,
+      broadcastPromptSweptToAnswered(worktreeId),
+    );
     if (answeredCount > 0) {
       logger.info('marked-answeredcount-pending');
     }
