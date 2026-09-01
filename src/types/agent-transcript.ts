@@ -88,6 +88,37 @@ export const CLAUDE_MARKDOWN_REQUEST_ID_PREFIX = 'claude-turn:';
 export const CLAUDE_PROMPT_REQUEST_ID_PREFIX = 'claude-prompt:';
 
 /**
+ * The same, for a turn read out of codex's rollout JSONL (Issue #2197).
+ *
+ * A third namespace for the third reader, for the reason
+ * {@link CLAUDE_MARKDOWN_REQUEST_ID_PREFIX} gives: the value is an idempotency
+ * key as well as a marker, and codex names its turns with a `turn_id` of its
+ * own minting. Sharing a prefix with claude would make a collision between two
+ * tools' ids read as "already saved", which is the one failure a key must not
+ * have.
+ */
+export const CODEX_MARKDOWN_REQUEST_ID_PREFIX = 'codex-turn:';
+
+/**
+ * Prefix on a **user** row whose text was read out of codex's rollout JSONL
+ * (Issue #2197).
+ *
+ * Deliberately absent from {@link AGENT_MARKDOWN_REQUEST_ID_PREFIXES}, for the
+ * whole of the reason {@link CLAUDE_PROMPT_REQUEST_ID_PREFIX} states: the
+ * operator's own text is drawn verbatim and must not change shape because it
+ * happened to contain a `#` or a `|`.
+ *
+ * Unlike claude's, this one is **not** keyed on the same id as the turn's
+ * assistant row. codex folds a prompt sent while a turn is running into that
+ * same turn — measured on 23 of 326 turns in the corpus this Issue read — so a
+ * turn can carry more than one operator message, and keying the user row on the
+ * `turn_id` would collapse them into one row and then refuse the second as
+ * already recorded. The key is the **`UserMessage` item's own id** instead, so
+ * one prompt is one row however many share a turn. See {@link codexPromptRequestId}.
+ */
+export const CODEX_PROMPT_REQUEST_ID_PREFIX = 'codex-prompt:';
+
+/**
  * Every prefix that means "this row holds source, not a rendering".
  *
  * One list rather than a chain of `startsWith` calls, so that adding the third
@@ -99,6 +130,7 @@ export const CLAUDE_PROMPT_REQUEST_ID_PREFIX = 'claude-prompt:';
 export const AGENT_MARKDOWN_REQUEST_ID_PREFIXES: readonly string[] = [
   AGENT_MARKDOWN_REQUEST_ID_PREFIX,
   CLAUDE_MARKDOWN_REQUEST_ID_PREFIX,
+  CODEX_MARKDOWN_REQUEST_ID_PREFIX,
 ];
 
 /**
@@ -167,4 +199,38 @@ export function claudeTurnRequestId(promptUuid: string): string {
  */
 export function claudePromptRequestId(promptUuid: string): string {
   return `${CLAUDE_PROMPT_REQUEST_ID_PREFIX}${promptUuid}`;
+}
+
+/**
+ * The row id for one codex turn (Issue #2197).
+ *
+ * The turn is named by codex's own **`turn_id`**, which it stamps on
+ * `task_started`, on every `item_completed`, on `turn_context` and on
+ * `task_complete` — one value for everything one prompt produced. That is a
+ * stronger key than claude's equivalent rather than an analogous one: claude
+ * has to infer the boundary from record order because nothing in its transcript
+ * links a reply to its prompt, while codex writes the boundary down.
+ *
+ * Measured on codex-cli 0.151.0 and on 326 turns of the archived corpus
+ * (`docs/design/codex-transcript-reader.md` §2): every turn carried exactly one
+ * `turn_id`, and every one of the 326 was closed by a `task_complete` bearing
+ * it.
+ *
+ * @param turnId - `turn_id`, as codex writes it
+ */
+export function codexTurnRequestId(turnId: string): string {
+  return `${CODEX_MARKDOWN_REQUEST_ID_PREFIX}${turnId}`;
+}
+
+/**
+ * The row id for one **prompt** inside a codex turn (Issue #2197).
+ *
+ * The `UserMessage` item's own id, not the `turn_id` — see
+ * {@link CODEX_PROMPT_REQUEST_ID_PREFIX} for the measurement that forces the
+ * distinction.
+ *
+ * @param promptItemId - `item.id` of the `UserMessage` the text arrived on
+ */
+export function codexPromptRequestId(promptItemId: string): string {
+  return `${CODEX_PROMPT_REQUEST_ID_PREFIX}${promptItemId}`;
 }

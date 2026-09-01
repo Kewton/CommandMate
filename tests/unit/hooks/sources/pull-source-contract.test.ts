@@ -172,6 +172,8 @@ function buildOpencodeSource(server: FakeServer): AgentEventSource {
       permissionReplyReleasesPrompt: true,
       eventIdentity: 'permission-id',
       resync: 'session-status-poll',
+      // Issue #2197: the tool this fixture stands for has no transcript reader.
+      transcriptHistory: null,
     },
 
     mappers: OPENCODE_MAPPERS.map(withConversation),

@@ -231,6 +231,8 @@ export const copilotAgentEventSource: AgentEventSource = definePushHookSource({
     // measured. Default = Claude's fallback, the time window.
     eventIdentity: null,
     resync: 'none',
+    // Issue #2197. Nobody but the screen scraper records copilot replies.
+    transcriptHistory: null,
   },
 
   // The same CamelCase dialect as Claude and codex — measured against six

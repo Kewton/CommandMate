@@ -83,6 +83,8 @@ const codexSource: AgentEventSource = definePushHookSource({
     permissionReplyReleasesPrompt: false,
     eventIdentity: null,
     resync: 'none',
+    // Issue #2197: the tool this fixture stands for has no transcript reader.
+    transcriptHistory: null,
   },
 
   // Same CamelCase dialect as Claude — measured, not assumed (#1757 §8.1).
@@ -190,6 +192,8 @@ describe('copilot: same spellings, different order, shorter fuse', () => {
       permissionReplyReleasesPrompt: false,
       eventIdentity: null,
       resync: 'none',
+      // Issue #2197: the tool this fixture stands for has no transcript reader.
+      transcriptHistory: null,
     },
     mappers: fromNameTable(CAMEL_CASE_HOOK_EVENT_NAMES),
     conversationIdFields: SESSION_ID_FIELDS,
@@ -253,6 +257,8 @@ describe('gemini: four of the seven are spelled differently', () => {
       permissionReplyReleasesPrompt: false,
       eventIdentity: null,
       resync: 'none',
+      // Issue #2197: the tool this fixture stands for has no transcript reader.
+      transcriptHistory: null,
     },
     mappers: fromNameTable(GEMINI_EVENT_NAMES),
     conversationIdFields: SESSION_ID_FIELDS,
@@ -316,6 +322,8 @@ describe('antigravity: no event name, no cwd, camelCase, fail-closed', () => {
       permissionReplyReleasesPrompt: false,
       eventIdentity: null,
       resync: 'none',
+      // Issue #2197: the tool this fixture stands for has no transcript reader.
+      transcriptHistory: null,
     },
 
     mappers: [agyToolName],
