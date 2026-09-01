@@ -322,10 +322,17 @@ function recordAllowedPermission(
  * value taken from the resolved session, so what is published matches the row
  * that was written.
  *
- * Known limitation (#2214): under `next dev` a route bundle holds its own copy
- * of `ws-server`'s module-scope `rooms`, so a push from there reaches nobody.
- * Production runs one custom-server bundle and is unaffected; see
- * `tests/integration/ws-broadcast-module-instance-2214.test.ts`.
+ * #2214 recorded a limitation here — that a route bundle holds its own empty
+ * copy of `ws-server`'s `rooms` under `next dev`, while "production runs one
+ * custom-server bundle and is unaffected". **The second half was wrong, and the
+ * hook route this function serves was one of the paths it was wrong about.** A
+ * production build has two graphs: `dist/server/server.js` requires
+ * `./src/lib/ws-server` and calls `setupWebSocket`, while every
+ * `.next/server/app/api/**\/route.js` reaches a second copy in
+ * `.next/server/chunks/`, where `setupWebSocket` is exported and never called.
+ * This push therefore reached nobody in production either. #2220 fixed it with
+ * the publisher registry in `lib/realtime/publisher-registry`; `broadcastMessage`
+ * now routes to whichever instance owns the sockets, and no call site changed.
  */
 function broadcastAuditRow(session: PermissionRequestSession, message: ChatMessage): void {
   void import('@/lib/ws-server')

@@ -36,6 +36,18 @@ import {
   startWaitingStatusBroadcast,
   stopWaitingStatusBroadcast,
 } from '@/lib/realtime/waiting-broadcast';
+// Issue #2220: this module's `rooms` is per module instance, and a production
+// build has two instances of it (`dist/server` + a `.next/server/chunks` copy).
+// The registry is how a route handler's copy reaches the one holding sockets.
+import {
+  getRoomPublisher,
+  recordUnroutedPublish,
+  registerRoomPublisher,
+  type RoomMigrationResult,
+  type RoomPublisher,
+  type RoomPublisherHandle,
+  type RoomRename,
+} from '@/lib/realtime/publisher-registry';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('ws-server');
@@ -77,6 +89,14 @@ interface ClientInfo {
 let wss: WebSocketServer | null = null;
 const clients = new Map<WebSocket, ClientInfo>();
 const rooms = new Map<string, Set<WebSocket>>();
+/**
+ * This instance's claim on the process's rooms, or null when it never called
+ * `setupWebSocket` (every route bundle) or has already withdrawn.
+ *
+ * Issue #2220: held so `closeWebSocket` can present the token it was given. A
+ * bare "clear the registry" would let a torn-down instance silence a newer one.
+ */
+let publisherHandle: RoomPublisherHandle | null = null;
 const MAX_TERMINAL_INPUT_LENGTH = 4096;
 const MAX_TERMINAL_SUBSCRIBERS_PER_SESSION = 4;
 const TERMINAL_FALLBACK_CAPTURE_LINES = -200;
@@ -304,6 +324,14 @@ function isExpectedWebSocketError(error: Error & { code?: string }): boolean {
  */
 export function setupWebSocket(server: HTTPServer | HTTPSServer): void {
   wss = new WebSocketServer({ noServer: true });
+
+  // Issue #2220: this instance now owns the sockets, so publish the capability
+  // the other module instances have to borrow. Registered before anything can
+  // subscribe, and only from here — `setupWebSocket` is the one function that
+  // makes a `rooms` map real, so it is the one function allowed to claim the
+  // registry. Everything the registry hands out is a closure over the maps
+  // below; the maps themselves never leave this module.
+  publisherHandle = registerRoomPublisher(localRoomPublisher);
 
   // Issue #1788: publish the waiting edge to the worktree room. Started here
   // rather than at module scope so the listener's lifetime matches the server's
@@ -826,6 +854,71 @@ async function handleTerminalUnsubscribe(ws: WebSocket): Promise<void> {
   sendTerminalEvent(ws, { type: 'terminal_status', connected: false });
 }
 
+// ---------------------------------------------------------------------------
+// Issue #2220: cross-instance routing
+//
+// Everything below the line reads `rooms` / `clients`; everything above the
+// public API forwards to whichever module instance actually has them. The four
+// exported entry points (`broadcast`, `hasRoomSubscribers`, `cleanupRooms`,
+// `migrateWorktreeRooms`) keep their signatures, so no producer had to change:
+// a route handler importing `broadcastMessage` from this module now lands on
+// the custom server's sockets without knowing it crossed a bundle.
+//
+// (Spelling that import out as source text here would be a mistake: the cycle
+// guard in tests/unit/guards/no-ws-server-manager-cycle-1984.test.ts parses
+// comments too, and reads a specifier in one as a real edge.)
+// ---------------------------------------------------------------------------
+
+/** {@link hasRoomSubscribers} against *this* instance's maps. */
+function hasLocalRoomSubscribers(worktreeId: string): boolean {
+  const room = rooms.get(worktreeId);
+  return !!room && room.size > 0;
+}
+
+/**
+ * This instance's capability, as published to the registry.
+ *
+ * Identity matters, not just shape: {@link remoteRoomPublisher} compares
+ * against this exact object to tell "someone else owns the sockets" from "I do".
+ * Without that check the owner would forward to itself and recurse.
+ */
+const localRoomPublisher: RoomPublisher = {
+  publish: handleBroadcast,
+  hasSubscribers: hasLocalRoomSubscribers,
+  cleanupRooms: cleanupLocalRooms,
+  migrateRooms: migrateLocalWorktreeRooms,
+};
+
+/**
+ * The owning instance's publisher, when that instance is not this one.
+ *
+ * Returns null in the two cases where the local maps are already the right
+ * target: this instance is the owner, or nothing has claimed the rooms at all
+ * (a unit test that never stood a server up, or the CLI). The second case
+ * preserves the pre-#2220 behaviour exactly — an unowned publish still writes
+ * to whatever the caller's own `rooms` holds, rather than becoming a hard
+ * failure.
+ */
+function remoteRoomPublisher(): RoomPublisher | null {
+  const publisher = getRoomPublisher();
+  return publisher && publisher !== localRoomPublisher ? publisher : null;
+}
+
+/**
+ * Report the one state in which a frame is silently lost: nobody owns the rooms
+ * and this instance has none of its own.
+ *
+ * Deliberately not "the room was empty" — an empty room is the normal answer
+ * for a worktree nobody has open. This is narrower and always a defect: it says
+ * the process has no publisher, which is what #2220 looked like from the
+ * outside while every browser still reported its socket as `connected`.
+ */
+function noteIfUnroutable(operation: string, worktreeId: string): void {
+  if (getRoomPublisher() === null && rooms.size === 0) {
+    recordUnroutedPublish(operation, worktreeId);
+  }
+}
+
 /**
  * Broadcast message to a specific worktree room (for API use)
  *
@@ -838,6 +931,12 @@ async function handleTerminalUnsubscribe(ws: WebSocket): Promise<void> {
  * ```
  */
 export function broadcast(worktreeId: string, data: unknown): void {
+  const owner = remoteRoomPublisher();
+  if (owner) {
+    owner.publish(worktreeId, data);
+    return;
+  }
+  noteIfUnroutable('broadcast', worktreeId);
   handleBroadcast(worktreeId, data);
 }
 
@@ -847,11 +946,19 @@ export function broadcast(worktreeId: string, data: unknown): void {
  * Issue #1120: lets the server-side terminal streamer skip the (relatively
  * expensive) tmux capture + detection work when nobody is watching the room.
  *
+ * Issue #2220: bridged as well, and not as an afterthought.
+ * `broadcastTerminalSnapshot` and `emitChatTurnProgress` call this *first* and
+ * return early on `false`, so a caller reading its own empty `rooms` never
+ * reaches the publish at all — bridging only `broadcast` would have left the
+ * terminal snapshot and `chat_turn_progress` exactly as broken as before.
+ *
  * @param worktreeId - Worktree identifier
  */
 export function hasRoomSubscribers(worktreeId: string): boolean {
-  const room = rooms.get(worktreeId);
-  return !!room && room.size > 0;
+  const owner = remoteRoomPublisher();
+  if (owner) return owner.hasSubscribers(worktreeId);
+  noteIfUnroutable('hasRoomSubscribers', worktreeId);
+  return hasLocalRoomSubscribers(worktreeId);
 }
 
 /**
@@ -867,7 +974,10 @@ export function hasRoomSubscribers(worktreeId: string): boolean {
  */
 export function broadcastMessage(type: string, data: { worktreeId?: string; [key: string]: unknown }): void {
   if (data.worktreeId) {
-    handleBroadcast(data.worktreeId, { type, ...data });
+    // Issue #2220: through `broadcast`, not straight into `handleBroadcast` —
+    // this is the entry point every history producer uses, and it was the one
+    // reaching the caller's own empty `rooms`.
+    broadcast(data.worktreeId, { type, ...data });
   } else {
     logger.warn('broadcast:missing-worktree-id');
   }
@@ -907,12 +1017,26 @@ export const WORKTREE_RENAMED_EVENT_TYPE = 'worktree_renamed' as const;
  * already exists the two sets are merged rather than replaced — dropping the
  * incumbent subscribers would silence clients that did nothing wrong.
  *
+ * Issue #2220: bridged like the publish paths. A rename is applied from
+ * `/worktrees` and from the repository routes, i.e. from a bundle that owns no
+ * rooms; migrating only the caller's own empty map would leave the live
+ * subscribers stranded under the old key and silence them for good.
+ *
  * @param renames - Worktree ID pairs being applied
  * @returns The pairs that actually had room subscribers to move
  */
 export function migrateWorktreeRooms(
-  renames: ReadonlyArray<{ oldId: string; newId: string }>
-): Array<{ oldId: string; newId: string; subscribers: number }> {
+  renames: ReadonlyArray<RoomRename>
+): RoomMigrationResult[] {
+  const owner = remoteRoomPublisher();
+  if (owner) return owner.migrateRooms(renames);
+  return migrateLocalWorktreeRooms(renames);
+}
+
+/** {@link migrateWorktreeRooms} against *this* instance's maps. */
+function migrateLocalWorktreeRooms(
+  renames: ReadonlyArray<RoomRename>
+): RoomMigrationResult[] {
   const targets = new Map<string, string>();
   for (const { oldId, newId } of renames) {
     if (!oldId || !newId || oldId === newId) continue;
@@ -980,6 +1104,10 @@ export function migrateWorktreeRooms(
  * Clean up WebSocket rooms for deleted worktrees
  * Removes rooms from the rooms map (clients will naturally disconnect or resubscribe)
  *
+ * Issue #2220: bridged. `/repositories` DELETE is the main caller and runs in a
+ * route bundle, so before the bridge it swept a map that was empty anyway and
+ * the owner kept the rooms of deleted worktrees for the life of the process.
+ *
  * @param worktreeIds - Array of worktree IDs to clean up
  *
  * @example
@@ -988,6 +1116,16 @@ export function migrateWorktreeRooms(
  * ```
  */
 export function cleanupRooms(worktreeIds: string[]): void {
+  const owner = remoteRoomPublisher();
+  if (owner) {
+    owner.cleanupRooms(worktreeIds);
+    return;
+  }
+  cleanupLocalRooms(worktreeIds);
+}
+
+/** {@link cleanupRooms} against *this* instance's maps. */
+function cleanupLocalRooms(worktreeIds: string[]): void {
   for (const worktreeId of worktreeIds) {
     const room = rooms.get(worktreeId);
     if (room) {
@@ -1010,9 +1148,25 @@ export function cleanupRooms(worktreeIds: string[]): void {
  * Used for testing and graceful shutdown
  */
 export function closeWebSocket(): void {
-  // Issue #1788: drop the waiting-edge subscription first — it outlives `wss`
-  // otherwise, and CI shares one process across the whole suite.
-  stopWaitingStatusBroadcast();
+  // Issue #2220: hand back the token rather than clearing the registry, and read
+  // the answer. If a newer `setupWebSocket` has already taken over — HMR, or a
+  // suite standing a second server up — this instance is not the owner any more,
+  // the withdrawal is declined, and the live publisher stays in place.
+  const wasOwner = publisherHandle !== null && publisherHandle.unregister();
+  publisherHandle = null;
+
+  // Issue #1788: drop the waiting-edge subscription before `wss` goes, or it
+  // outlives the server and CI shares one process across the whole suite.
+  //
+  // Issue #2220: but only when this instance was the owner, or when nobody is.
+  // That subscription is a single `globalThis` slot by design, so a superseded
+  // instance closing down would otherwise take the *running* server's waiting
+  // edge with it — the same hazard the token guard above exists for. The
+  // "nobody owns it" arm keeps the defensive teardown that suites rely on when
+  // they start a subscription by hand and never call `setupWebSocket`.
+  if (wasOwner || getRoomPublisher() === null) {
+    stopWaitingStatusBroadcast();
+  }
 
   if (wss) {
     // Close all client connections
