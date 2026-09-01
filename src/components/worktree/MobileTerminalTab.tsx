@@ -28,6 +28,20 @@
  * visible was accurate, and the strip was the cause. Only this mobile surface
  * passes the flag; the PC split pane keeps the always-open strip.
  *
+ * Issue #2193: the tab's OUTPUT surface is switchable — a floating segmented
+ * control swaps `TerminalDisplay` for the conversation transcript. Epic #2192
+ * decided this rather than a fifth mobile tab: the composer is docked below the
+ * tab content (`WorktreeDetailRefactored`), so a chat surface inside THIS tab
+ * keeps the send box, the prompt sheet and Auto-Yes exactly where they were.
+ * The existing `history` tab and `MessageInput` are untouched.
+ *
+ * The control is an OVERLAY, not a row, and that is a hard constraint rather
+ * than a style choice: this tab's vertical budget is already spoken for by
+ * #2106, whose acceptance criterion is that the terminal keeps >250px at
+ * 360x640 with the quick-keys strip folded. The baseline there is ~284px, so
+ * anything in the flex flow has 33px to spend and #1127 requires 44. See the
+ * comment on the control itself.
+ *
  * Issue #1879: the unsent-input bar ({@link UnsentComposerBar}) is rendered here
  * for the same reason — the PC footer has it, and a phone is where a half-typed
  * composer is most likely to be discovered. Its gate is the composer text, not a
@@ -35,7 +49,9 @@
  * the other.
  */
 
-import { memo } from 'react';
+import { memo, useCallback, useEffect, useState } from 'react';
+import { MessageSquare, TerminalSquare } from 'lucide-react';
+import { useTranslations } from 'next-intl';
 import { TerminalDisplay } from '@/components/worktree/TerminalDisplay';
 import { TerminalEscapeHatch } from '@/components/worktree/TerminalEscapeHatch';
 import { UnsentComposerBar, hasUnsentComposerText } from '@/components/worktree/UnsentComposerBar';
@@ -44,8 +60,16 @@ import {
   hasOpenCodeSidebarObstruction,
 } from '@/components/worktree/OpencodeSidebarNotice';
 import { OpencodeQuickKeys } from '@/components/worktree/OpencodeQuickKeys';
+import { HistoryPane } from '@/components/worktree/HistoryPane';
 import { useTerminalPanePolling } from '@/hooks/useTerminalPanePolling';
+import { useSplitMessages } from '@/hooks/useSplitMessages';
 import { getTerminalDisplayCompaction } from '@/config/terminal-display-compaction';
+import {
+  getMobileSurfaceModeStorageKey,
+  resolveSurfaceMode,
+  writeSurfaceMode,
+} from '@/config/surface-mode-config';
+import { DEFAULT_SURFACE_MODE, type SurfaceMode } from '@/types/ui-state';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 
 export interface MobileTerminalTabProps {
@@ -55,6 +79,60 @@ export interface MobileTerminalTabProps {
   instanceId?: string;
   disableAutoFollow?: boolean;
 }
+
+/**
+ * Issue #2193: the two segments of the surface control, in render order. Same
+ * shape (and same reason for holding i18n KEYS rather than labels) as
+ * `SURFACE_MODE_SEGMENTS` in `TerminalSplitPane`; kept separate because the
+ * phone's control is a full-width labelled segmented control while PC's is a
+ * pair of icon buttons in a crowded header row.
+ */
+const MOBILE_SURFACE_SEGMENTS: readonly {
+  mode: SurfaceMode;
+  labelKey: string;
+  icon: typeof TerminalSquare;
+}[] = [
+  { mode: 'terminal', labelKey: 'surfaceMode.terminal', icon: TerminalSquare },
+  { mode: 'chat', labelKey: 'surfaceMode.chat', icon: MessageSquare },
+] as const;
+
+/**
+ * Issue #2193: the phone's chat output surface.
+ *
+ * Its own component so `useSplitMessages` mounts ONLY while chat is on screen —
+ * a hook cannot be called conditionally, and a terminal-mode tab must not start
+ * a second 5s history poll it never renders. That is also what keeps every
+ * pre-#2193 test of this tab (all of which stay in terminal mode) running the
+ * exact set of hooks they ran before.
+ *
+ * Messages come from `useSplitMessages`, the same instance-scoped fetch the PC
+ * split uses, so the transcript matches the instance whose terminal this tab is
+ * showing rather than the parent's active-CLI-scoped `messages`.
+ */
+const MobileChatSurface = memo(function MobileChatSurface({
+  worktreeId,
+  cliToolId,
+  instanceId,
+}: {
+  worktreeId: string;
+  cliToolId: CLIToolType;
+  instanceId?: string;
+}) {
+  const { messages, isLoading } = useSplitMessages({ worktreeId, cliToolId, instanceId });
+  return (
+    <HistoryPane
+      messages={messages}
+      worktreeId={worktreeId}
+      // Phase 1 ships the surface, not its affordances: file-path routing and
+      // the "open in terminal" trail belong to #2194, which owns the ChatSurface
+      // build-out. A no-op keeps the required prop honest until then.
+      onFilePathClick={() => {}}
+      isLoading={isLoading}
+      className="h-full"
+      cliToolId={cliToolId}
+    />
+  );
+});
 
 export const MobileTerminalTab = memo(function MobileTerminalTab({
   worktreeId,
@@ -78,6 +156,26 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
   const { compactTuiLayoutPadding, preservePaintedPanelRows, mobileWrapMode } =
     getTerminalDisplayCompaction(cliToolId);
 
+  const t = useTranslations('worktree');
+
+  // Issue #2193: one preference per worktree here (the phone shows one pane at
+  // a time), against one per split on PC. SSR-safe default first, then the
+  // `?view=` / localStorage resolution in an effect — same shape as
+  // `useActivityBarState`, so there is no hydration mismatch.
+  const surfaceStorageKey = getMobileSurfaceModeStorageKey(worktreeId);
+  const [surfaceMode, setSurfaceMode] = useState<SurfaceMode>(DEFAULT_SURFACE_MODE);
+  useEffect(() => {
+    setSurfaceMode(resolveSurfaceMode(surfaceStorageKey));
+  }, [surfaceStorageKey]);
+
+  const handleSurfaceModeChange = useCallback(
+    (mode: SurfaceMode) => {
+      setSurfaceMode(mode);
+      writeSurfaceMode(surfaceStorageKey, mode);
+    },
+    [surfaceStorageKey],
+  );
+
   // Issue #1494 / #1496: detection-independent navigation hatch on mobile.
   // `terminal.isUnclassifiedActive` is already false whenever a selection list /
   // pager / prompt is detected server-side, so this surfaces the pad only for an
@@ -99,23 +197,102 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
   );
 
   return (
-    <div className="flex flex-col h-full min-h-0">
+    <div className="relative flex flex-col h-full min-h-0">
+      {/* Issue #2193: the surface control, as a floating pill rather than a row.
+
+          It was a full-width row above the terminal in the first cut of #2193,
+          and that broke Issue #2106's acceptance criterion: the row cost the
+          flex column ~53px, which came out of `TerminalDisplay` and left it
+          231px at 360x640 against #2106's >250px floor (measured in
+          `tests/e2e/mobile-opencode-quick-keys-2106.spec.ts`). There is no
+          in-flow placement that satisfies both #2106 and #1127's >=44px tap
+          target -- the budget between the 284px baseline and the 250px floor is
+          33px -- and this tab has no header row to absorb it into, so the
+          control has to leave the flex flow entirely.
+
+          Overlaying the output is the established idiom in this very surface:
+          `TerminalDisplay` already floats its search bar (`absolute top-2
+          right-2`) and its scroll FAB (`absolute bottom-4 right-4`) over the
+          same box. Pinned to the OUTER column rather than inside the terminal
+          region so it survives the region collapsing to zero (the 360x640
+          strip-open case #2106 documents) -- losing the only way back from the
+          chat surface there would be worse than the overlap.
+
+          `pointer-events-none` on the pill with `pointer-events-auto` on the two
+          buttons: the terminal keeps every pixel for scrolling except the two
+          44px squares. Icon-only, so the pill is ~96px wide and the output it
+          covers is a corner rather than a band; the names live in `aria-label` /
+          `title` instead of visible text. Theme-following (`bg-surface-2`) --
+          the terminal underneath is a permanently dark island, but this is
+          chrome sitting on top of it, and it has to read on the chat surface
+          too. */}
+      <div
+        role="group"
+        aria-label={t('surfaceMode.groupLabelMobile')}
+        data-testid="mobile-surface-mode-toggle"
+        className="pointer-events-none absolute right-2 top-2 z-30 flex items-center gap-0.5 rounded-full border border-border bg-surface-2/95 p-0.5 shadow-lg backdrop-blur"
+      >
+        {MOBILE_SURFACE_SEGMENTS.map(({ mode, labelKey, icon: Icon }) => {
+          const active = surfaceMode === mode;
+          const label = t(labelKey);
+          return (
+            <button
+              key={mode}
+              type="button"
+              onClick={() => handleSurfaceModeChange(mode)}
+              aria-pressed={active}
+              aria-label={label}
+              title={label}
+              data-testid={`mobile-surface-mode-${mode}`}
+              className={`pointer-events-auto flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full transition-colors touch-manipulation ${
+                active
+                  ? 'bg-accent-500/20 text-accent-600 dark:text-accent-400'
+                  : 'text-muted-foreground'
+              }`}
+            >
+              <Icon size={18} aria-hidden="true" />
+            </button>
+          );
+        })}
+      </div>
       {/* Issue #2106: the measured surface. The wrapper is what the flex column
           hands to TerminalDisplay (which is `h-full`), so its rect IS the
-          terminal's visible height -- the number the collapse has to move. */}
-      <div className="flex-1 min-h-0" data-testid="mobile-terminal-region">
-        <TerminalDisplay
-          output={terminal.output}
-          isActive={terminal.isRunning}
-          isThinking={terminal.isThinking}
-          autoScroll={terminal.autoScroll}
-          onScrollChange={setAutoScroll}
-          disableAutoFollow={disableAutoFollow}
-          compactTuiLayoutPadding={compactTuiLayoutPadding}
-          preservePaintedPanelRows={preservePaintedPanelRows}
-          wrapMode={mobileWrapMode}
-          className="h-full"
-        />
+          terminal's visible height -- the number the collapse has to move.
+          Issue #2193: in chat mode the transcript takes the same box, so the
+          measurement and the layout below it are unchanged.
+
+          `overflow-hidden` (Issue #2193) closes a second way this row could
+          steal a click from the rows below it. `TerminalDisplay`'s `role="log"`
+          carries `p-4` and a border, and `box-sizing: border-box` cannot shrink
+          a box below its own padding + border -- so when this `flex-1 min-h-0`
+          region is squeezed to 0 (strip open on a small phone), the log still
+          PAINTED 34px, straight over the quick-keys toggle underneath, and
+          `opencode-quick-keys-toggle` became unclickable while reporting itself
+          visible and enabled. Clipping the region is the fix, and it is correct
+          independent of #2193: a zero-height region has no business drawing
+          outside itself. */}
+      <div className="flex-1 min-h-0 overflow-hidden" data-testid="mobile-terminal-region">
+        {surfaceMode === 'chat' ? (
+          <div className="h-full min-h-0" data-testid="mobile-chat-surface">
+            <MobileChatSurface
+              worktreeId={worktreeId}
+              cliToolId={cliToolId}
+              instanceId={instanceId}
+            />
+          </div>
+        ) : (
+          <TerminalDisplay
+            output={terminal.output}
+            isActive={terminal.isRunning}
+            isThinking={terminal.isThinking}
+            autoScroll={terminal.autoScroll}
+            onScrollChange={setAutoScroll}
+            disableAutoFollow={disableAutoFollow}
+            compactTuiLayoutPadding={compactTuiLayoutPadding}
+            preservePaintedPanelRows={preservePaintedPanelRows}
+            wrapMode={mobileWrapMode}
+          />
+        )}
       </div>
       {showUnsentComposerBar ? (
         <div className="shrink-0 px-2 pt-1">

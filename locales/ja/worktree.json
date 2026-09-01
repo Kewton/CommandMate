@@ -419,6 +419,15 @@
     "endSession": "セッションを終了",
     "endSessionFor": "{name}のセッションを終了"
   },
+  "surfaceMode": {
+    "groupLabel": "{split} の出力面",
+    "groupLabelMobile": "出力面",
+    "terminal": "ターミナル",
+    "chat": "チャット",
+    "showTerminal": "ターミナル出力を表示",
+    "showChat": "会話を表示",
+    "chatSurfaceLabel": "会話"
+  },
   "unsentComposer": {
     "regionLabel": "未送信の入力",
     "label": "未送信の入力:",
