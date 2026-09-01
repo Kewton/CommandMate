@@ -9,6 +9,9 @@
  * the first setting that changes what a *new* branch looks like, so it belongs
  * next to the quick links a user follows to create one, not below the
  * per-device notification plumbing.
+ *
+ * Issue #2201 adds the default output surface to that same section, for the
+ * same reason: it is the other thing a newly opened branch inherits.
  */
 
 'use client';
@@ -19,7 +22,11 @@ import { AppShell } from '@/components/layout';
 import { Card } from '@/components/ui';
 import { ExternalAppsManager } from '@/components/external-apps';
 import { NotificationsSettings } from '@/components/notifications';
-import { AgentUpdatesCard, DefaultAgentsSettings } from '@/components/settings';
+import {
+  AgentUpdatesCard,
+  DefaultAgentsSettings,
+  DefaultSurfaceModeSettings,
+} from '@/components/settings';
 
 export default function MorePage() {
   const tNotifications = useTranslations('notifications');
@@ -69,6 +76,11 @@ export default function MorePage() {
           <h2 className="text-lg font-semibold mb-4 text-foreground">{tCommon('settings.title')}</h2>
           <div className="space-y-4">
             <DefaultAgentsSettings />
+            {/* Issue #2201: below the agent roster, because it answers the next
+                question a new branch raises — "and what do I look at while it
+                works" — and it is also the only mount that seeds the browser's
+                copy of the setting (see surface-mode-config). */}
+            <DefaultSurfaceModeSettings />
             {/* Issue #2069: beside the default-agent list rather than in its own
                 section — both answer "which agent CLIs does this machine run",
                 and the roster above is where a user notices a tool at all. */}
