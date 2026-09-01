@@ -8,8 +8,8 @@
  * be; this wraps that pane in the four things a working surface needs and the
  * transcript alone does not give you:
  *
- *   1. a generating indicator, so a turn in flight is visible on a surface that
- *      by design shows no partial assistant text (#2199 owns that);
+ *   1. a generating indicator, so a turn in flight is visible — and, since Issue
+ *      #2199, the in-flight body itself for the two tools that can produce one;
  *   2. a live region that survives virtualization — it is a `shrink-0` sibling of
  *      the pane, NOT a row inside the virtual list, because a row inside the list
  *      is unmounted the moment the reader scrolls away from the end;
@@ -43,6 +43,10 @@
 import React, { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { ArrowDown, Loader2, TerminalSquare } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import rehypeSanitize from 'rehype-sanitize';
+import rehypeHighlight from 'rehype-highlight';
 import { HistoryPane } from '@/components/worktree/HistoryPane';
 import { isAnswerablePromptData, type ChatMessage, type LivePromptData } from '@/types/models';
 import type { CLIToolType } from '@/lib/cli-tools/types';
@@ -50,6 +54,10 @@ import type { SurfaceMode } from '@/types/ui-state';
 import type { HistoryDisplayLimit } from '@/config/history-display-config';
 import type { ShowToast } from '@/types/markdown-editor';
 import { isNearBottom } from '@/lib/history-virtualization';
+import {
+  useChatTurnProgress,
+  type ChatTurnProgressView,
+} from '@/hooks/useChatTurnProgress';
 
 // ============================================================================
 // Constants
@@ -224,6 +232,49 @@ export function isAwaitingReply(messages: ChatMessage[]): boolean {
 }
 
 /**
+ * Whether the settled row for this turn is already in the transcript (Issue #2199).
+ *
+ * The swap rule, in one line, and the reason `chat_turn_progress` needs no
+ * `done` frame: the row the tool's history writer saves carries the turn's
+ * `requestId`, and the progress frames for that same turn carry it as `turnKey`.
+ * When both are present the row wins — it is the same text, rendered by the same
+ * Markdown path, in the place the reader will scroll back to.
+ *
+ * Scanned from the END because the settled row is the newest thing in the array
+ * in every case this is asked about, and the array is the whole visible history.
+ */
+export function isTurnSettled(messages: readonly ChatMessage[], turnKey: string): boolean {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (messages[i].requestId === turnKey) return true;
+  }
+  return false;
+}
+
+/**
+ * The in-flight reply, rendered the way the settled row will be.
+ *
+ * Same plugin set as `ConversationPairCard`'s `AssistantMarkdown` — `remarkGfm`
+ * + `rehypeSanitize` + `rehypeHighlight`, and deliberately no `rehypeRaw` — so
+ * the paragraph does not reflow the moment the live body is replaced by the row.
+ * That component is not exported and this one does not need its file-path
+ * linkifier: a path in a body that is still being written is a path that may
+ * still gain characters, and the settled row a second later is where clicking it
+ * belongs.
+ *
+ * Memoised on `content` alone, so a re-render of the surface for any other
+ * reason does not rebuild the DOM tree of a body that has not changed.
+ */
+const ChatTurnProgressBody = memo(function ChatTurnProgressBody({ content }: { content: string }) {
+  const remarkPlugins = useMemo(() => [remarkGfm], []);
+  const rehypePlugins = useMemo(() => [rehypeSanitize, rehypeHighlight], []);
+  return (
+    <ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins}>
+      {content}
+    </ReactMarkdown>
+  );
+});
+
+/**
  * Why the chat surface cannot drive this frame, or `null` when it can.
  *
  * The four members are the states Epic #2192 decided are terminal-only: arrow-key
@@ -320,6 +371,46 @@ export const ChatSurface = memo(function ChatSurface({
   }, [visibleMessages.length, getScrollContainer]);
 
   // --------------------------------------------------------------------
+  // The in-flight reply (Issue #2199)
+  // --------------------------------------------------------------------
+  // Push-only, and gated on `live.isRunning` so a settled surface holds nothing:
+  // there is no `done` frame to clear it with, and the two things that DO end a
+  // turn — the settled row and the session stopping — are both visible here.
+  const pushedProgress = useChatTurnProgress({
+    worktreeId,
+    cliToolId,
+    instanceId,
+    enabled: live.isRunning === true,
+  });
+  // The swap. Held until the row for this exact turn is in the transcript, which
+  // is what keeps the reply from vanishing for the poll it takes the row to
+  // arrive, and what keeps it from being on screen twice once it has.
+  const progress: ChatTurnProgressView | null =
+    pushedProgress !== null && !isTurnSettled(visibleMessages, pushedProgress.turnKey)
+      ? pushedProgress
+      : null;
+
+  // The live body scrolls INSIDE its own capped box, never by moving the page.
+  // Its height is bounded (see the markup) precisely so a growing reply cannot
+  // eat the transcript, and the tail is the half worth showing: the reader is
+  // watching the model type.
+  const progressBodyRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const box = progressBodyRef.current;
+    if (box) box.scrollTop = box.scrollHeight;
+  }, [progress?.body]);
+
+  // The live region is a `shrink-0` sibling, so it appearing / disappearing /
+  // growing takes height from the transcript and leaves a pinned reader a few
+  // pixels short of the bottom. Re-pin — but only when they were pinned, which
+  // is the same rule every other follow in this component obeys.
+  useLayoutEffect(() => {
+    if (!isPinnedRef.current) return;
+    const container = getScrollContainer();
+    if (container) container.scrollTop = container.scrollHeight;
+  }, [progress?.body, getScrollContainer]);
+
+  // --------------------------------------------------------------------
   // Live region content
   // --------------------------------------------------------------------
   const blockedReason = resolveBlockedReason(live);
@@ -331,7 +422,9 @@ export const ChatSurface = memo(function ChatSurface({
   // the indicator on (an interrupt, a `/`-command turn, or a session whose user
   // row has not been written).
   const awaitingReply = isAwaitingReply(visibleMessages);
-  const showGeneratingRow = live.isRunning === true && !awaitingReply;
+  // Issue #2199: and not when the live body is on screen either — that bubble
+  // carries its own spinner and the same sentence, three lines lower.
+  const showGeneratingRow = live.isRunning === true && !awaitingReply && progress === null;
 
   // Nothing sent yet and nothing running. The line is a label only — `/send`
   // already starts a session on demand, and adding a second start path here is
@@ -386,13 +479,52 @@ export const ChatSurface = memo(function ChatSurface({
           "generating" row placed at the end of the transcript disappears the
           moment the reader scrolls up, which is the one moment they most need to
           know a turn is still running. */}
-      {(showGeneratingRow || blockedReason !== null || showEmptyHint) && (
+      {(progress !== null || showGeneratingRow || blockedReason !== null || showEmptyHint) && (
         <div
           data-testid="chat-surface-live"
           role="group"
           aria-label={t('chatSurface.liveRegionLabel')}
           className="shrink-0 space-y-1.5 border-t border-border bg-surface px-3 py-2"
         >
+          {progress !== null && (
+            <div
+              data-testid="chat-surface-progress"
+              data-turn-key={progress.turnKey}
+              data-version={String(progress.version)}
+              role="status"
+              aria-live="polite"
+              aria-label={t('chatSurface.progressLabel')}
+              className="rounded-lg border border-border bg-surface-2/50 px-2 py-1.5"
+            >
+              <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                <Loader2 size={14} className="animate-spin" aria-hidden="true" />
+                <span>
+                  {live.isThinking ? t('chatSurface.thinking') : t('chatSurface.generating')}
+                </span>
+                {progress.partial && (
+                  <span
+                    data-testid="chat-surface-progress-partial"
+                    className="rounded border border-warning-border bg-warning-subtle px-1 py-0.5 text-warning-foreground"
+                  >
+                    {t('chatSurface.progressPartial')}
+                  </span>
+                )}
+              </div>
+              {/* Capped and self-scrolling. An unbounded box would hand a long
+                  reply the whole surface and push the transcript out of it —
+                  the same vertical-budget rule Issue #2106 established for the
+                  phone, applied to the one element here that grows without
+                  limit. */}
+              <div
+                ref={progressBodyRef}
+                data-testid="chat-surface-progress-body"
+                className="assistant-md mt-1 max-h-[7.5rem] overflow-y-auto overflow-x-hidden break-words [word-break:break-word] text-xs text-foreground"
+              >
+                <ChatTurnProgressBody content={progress.body} />
+              </div>
+            </div>
+          )}
+
           {showGeneratingRow && (
             <div
               data-testid="chat-surface-generating"

@@ -439,7 +439,9 @@
     "reasonPromptUnreadable": "応答待ちですが選択肢を読み取れませんでした。ターミナル面で確認してください。",
     "openTerminal": "ターミナルで確認",
     "jumpToLatest": "新着へ",
-    "emptyHint": "送信するとセッションが起動します"
+    "emptyHint": "送信するとセッションが起動します",
+    "progressLabel": "生成中の返答",
+    "progressPartial": "途中から表示しています"
   },
   "unsentComposer": {
     "regionLabel": "未送信の入力",
