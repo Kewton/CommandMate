@@ -8,6 +8,7 @@
 import type Database from 'better-sqlite3';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { validateAgentsPair } from '@/lib/selected-agents-validator';
+import { isSurfaceMode, type SurfaceMode } from '@/types/ui-state';
 
 // ============================================================================
 // Key constants
@@ -28,6 +29,18 @@ const KEY_RECENT_BROWSE_PATHS = 'recent_browse_paths';
  * constant was on the day it was written.
  */
 const KEY_DEFAULT_SELECTED_AGENTS = 'default_selected_agents';
+
+/**
+ * Storage key for the output surface new sessions open in (Issue #2201).
+ *
+ * Server-wide, and stored as the bare mode string rather than JSON: it is a
+ * single enum value, and `readStringArray` exists for the two list-shaped
+ * settings above. Absent means "no preference" — exactly as for
+ * {@link KEY_DEFAULT_SELECTED_AGENTS}, the constant is never written into the
+ * row at install time, so a later change to `DEFAULT_SURFACE_MODE` still
+ * reaches an install that never chose.
+ */
+const KEY_DEFAULT_SURFACE_MODE = 'default_surface_mode';
 
 /** How many recently used directories to remember (Issue #1517) */
 export const RECENT_BROWSE_PATHS_LIMIT = 5;
@@ -68,6 +81,30 @@ function writeStringArray(
       value = excluded.value,
       updated_at = excluded.updated_at
   `).run(key, JSON.stringify(values), now, now);
+}
+
+function readScalar(db: Database.Database, key: string): string | null {
+  try {
+    const row = db
+      .prepare('SELECT value FROM app_settings WHERE key = ?')
+      .get(key) as { value: string } | undefined;
+
+    return row ? row.value : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeScalar(db: Database.Database, key: string, value: string): void {
+  const now = Date.now();
+
+  db.prepare(`
+    INSERT INTO app_settings (key, value, created_at, updated_at)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(key) DO UPDATE SET
+      value = excluded.value,
+      updated_at = excluded.updated_at
+  `).run(key, value, now, now);
 }
 
 /**
@@ -162,4 +199,35 @@ export function setDefaultSelectedAgents(
  */
 export function clearDefaultSelectedAgents(db: Database.Database): void {
   db.prepare('DELETE FROM app_settings WHERE key = ?').run(KEY_DEFAULT_SELECTED_AGENTS);
+}
+
+// ============================================================================
+// Default surface mode (Issue #2201)
+// ============================================================================
+
+/**
+ * Get the server-wide output surface new sessions open in.
+ *
+ * Validated on read with `isSurfaceMode()` — the same guard the route writes
+ * through and the same guard the browser applies to localStorage — so a row
+ * hand-edited to `xterm` (Epic #2192 keeps that value reserved but unshipped)
+ * reads as "unset" rather than reaching a component that would switch on it.
+ *
+ * @returns The stored mode, or null when unset or unparseable.
+ */
+export function getDefaultSurfaceMode(db: Database.Database): SurfaceMode | null {
+  const raw = readScalar(db, KEY_DEFAULT_SURFACE_MODE);
+  return isSurfaceMode(raw) ? raw : null;
+}
+
+/**
+ * Save the server-wide output surface new sessions open in.
+ *
+ * @param mode - Already-validated mode; callers must narrow with `isSurfaceMode()`.
+ */
+export function setDefaultSurfaceMode(
+  db: Database.Database,
+  mode: SurfaceMode
+): void {
+  writeScalar(db, KEY_DEFAULT_SURFACE_MODE, mode);
 }
