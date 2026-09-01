@@ -342,6 +342,114 @@ export function findMessageByRequestId(
   return row ? mapChatMessage(row) : null;
 }
 
+/** Which rows {@link findUnkeyedUserMessages} will consider. */
+export interface UnkeyedUserMessageQuery {
+  readonly worktreeId: string;
+  readonly cliToolId: CLIToolType;
+  /** The agent instance; the primary instance's id equals `cliToolId`. */
+  readonly instanceId: string;
+  /** Oldest `timestamp` accepted, inclusive, as epoch ms. */
+  readonly fromMs: number;
+  /** Newest `timestamp` accepted, inclusive, as epoch ms. */
+  readonly toMs: number;
+  /** Cap on rows returned. Defaults to {@link UNKEYED_USER_MESSAGE_LIMIT}. */
+  readonly limit?: number;
+}
+
+/**
+ * How many candidate rows {@link findUnkeyedUserMessages} returns.
+ *
+ * The caller compares content in JavaScript, so this bounds the work rather than
+ * the correctness. Twenty is far above the number of user rows one instance can
+ * accumulate inside the caller's few-minute window and still small enough that
+ * the query is never the expensive part of a poll.
+ */
+export const UNKEYED_USER_MESSAGE_LIMIT = 20;
+
+/**
+ * User rows for one instance that no producer has claimed yet (Issue #2196).
+ *
+ * The lookup behind "the operator's input is already in History — `/send` put it
+ * there". A row qualifies when it is this instance's, is a `user` row, sits in
+ * the caller's time window, and has **no `request_id`**: that last condition is
+ * what makes the query safe to answer a *claim* with, because a row that already
+ * carries a key belongs to whoever wrote it and must not be re-pointed at
+ * another turn.
+ *
+ * Content is deliberately not compared here. "The same text" is a normalisation
+ * question (trailing whitespace, `\r\n`, a composer that reflowed the body), and
+ * SQL is the wrong place to decide it — see `normalizeUserTurnContent` in
+ * `lib/history/user-turn-recorder`, which owns that rule and is the only thing
+ * that has to change when the rule does.
+ *
+ * `COALESCE` on both tool columns is not defensive noise: rows written before
+ * Issue #868 carry `instance_id IS NULL`, and `mapChatMessage` reads those as
+ * the primary instance. A bare `instance_id = ?` would make those rows
+ * invisible here while the UI still shows them, so the operator would see their
+ * `/send` row *and* a second row this Issue inserted.
+ *
+ * `ACTIVE_FILTER` applies: an archived row has been cleared out of History, and
+ * adopting one would key a turn to a row nobody can see.
+ *
+ * @returns Candidate rows, newest first
+ */
+export function findUnkeyedUserMessages(
+  db: Database.Database,
+  query: UnkeyedUserMessageQuery
+): ChatMessage[] {
+  const stmt = db.prepare(`
+    SELECT id, worktree_id, role, content, summary, timestamp, log_file_name, request_id, message_type, prompt_data, cli_tool_id, instance_id, archived
+    FROM chat_messages
+    WHERE worktree_id = ?
+      AND role = 'user'
+      AND request_id IS NULL
+      AND COALESCE(cli_tool_id, 'claude') = ?
+      AND COALESCE(instance_id, cli_tool_id, 'claude') = ?
+      AND timestamp >= ? AND timestamp <= ?
+      ${ACTIVE_FILTER}
+    ORDER BY timestamp DESC
+    LIMIT ?
+  `);
+
+  const rows = stmt.all(
+    query.worktreeId,
+    query.cliToolId,
+    query.instanceId,
+    query.fromMs,
+    query.toMs,
+    query.limit ?? UNKEYED_USER_MESSAGE_LIMIT
+  ) as ChatMessageRow[];
+
+  return rows.map(mapChatMessage);
+}
+
+/**
+ * Claim an unkeyed row for a producer, without touching anything else on it
+ * (Issue #2196).
+ *
+ * A compare-and-set and not an `UPDATE … WHERE id = ?`: the `request_id IS NULL`
+ * in the predicate is what makes two pollers racing on the same row safe, since
+ * the loser changes nothing and is told so. {@link updateMessageContent} could
+ * set the column too, but it also rewrites `content`, and rewriting the
+ * operator's own words as a side effect of keying their row is exactly the
+ * failure this Issue is trying not to introduce.
+ *
+ * @returns Whether this call is the one that claimed the row
+ */
+export function setMessageRequestId(
+  db: Database.Database,
+  messageId: string,
+  requestId: string
+): boolean {
+  const stmt = db.prepare(`
+    UPDATE chat_messages
+    SET request_id = ?
+    WHERE id = ? AND request_id IS NULL
+  `);
+
+  return stmt.run(requestId, messageId).changes > 0;
+}
+
 /**
  * Fetch the most recent message for a worktree (any role).
  * Used to determine if waiting for Claude's response.
