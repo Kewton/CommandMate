@@ -45,8 +45,11 @@
  * Issue #2194: that chat surface is now `ChatSurface` rather than a bare
  * `HistoryPane` — the tab hands it the state its own poller already holds, so the
  * phone gets the same generating row and the same one-tap trail back to the
- * terminal for frames chat cannot drive. See {@link MobileChatSurface} for why
- * the #1121 optimistic bubble is PC-only.
+ * terminal for frames chat cannot drive.
+ *
+ * Issue #2213: and the #1121 optimistic bubble, which #2194 had to leave to PC
+ * because the composer is docked outside this tab. See {@link MobileChatSurface}
+ * for how the send reaches it without a second send path.
  *
  * Issue #1879: the unsent-input bar ({@link UnsentComposerBar}) is rendered here
  * for the same reason — the PC footer has it, and a phone is where a half-typed
@@ -69,6 +72,12 @@ import { OpencodeQuickKeys } from '@/components/worktree/OpencodeQuickKeys';
 import { ChatSurface, type ChatSurfaceLiveState } from '@/components/worktree/ChatSurface';
 import { useTerminalPanePolling } from '@/hooks/useTerminalPanePolling';
 import { useSplitMessages } from '@/hooks/useSplitMessages';
+import { usePendingMessages, type OptimisticSendOptions } from '@/hooks/usePendingMessages';
+import {
+  useChatComposerInsert,
+  useRegisterChatOptimisticSend,
+} from '@/contexts/WorktreeChatSendContext';
+import { worktreeApi } from '@/lib/api-client';
 import { getTerminalDisplayCompaction } from '@/config/terminal-display-compaction';
 import {
   getMobileSurfaceModeStorageKey,
@@ -119,15 +128,19 @@ const MOBILE_SURFACE_SEGMENTS: readonly {
  * and the same "open the terminal" trail the PC split does — the flags come from
  * the tab's own `useTerminalPanePolling`, handed down rather than polled twice.
  *
- * There is deliberately NO #1121 optimistic bubble here, and that is a wiring
- * fact rather than a decision: on the phone the composer is docked *outside* this
- * tab (`WorktreeDetailRefactored` renders it below the tab content), so the send
- * and the transcript have no common owner to hold `usePendingMessages`. Since
- * #2195 the row arrives as a `message` push instead — one round trip rather than
- * a poll interval — and the moment it lands it is a `pending` pair, which
- * `ConversationPairCard` already draws its own waiting indicator for. Giving this
- * surface a bubble of its own would mean either a second send path or a global
- * send bus, and Epic #2192 asked for neither.
+ * Issue #2213: it also holds the #1121 optimistic bubble, which #2194 had to
+ * leave to PC. `usePendingMessages` has to live wherever the transcript array
+ * does — it merges the bubble into that array and reconciles it against the
+ * server echo — and on a phone the composer is docked *outside* this tab
+ * (`WorktreeDetailRefactored` renders it below the tab content). So the hook
+ * stays here, next to `useSplitMessages`, and the SEND travels up instead:
+ * `useRegisterChatOptimisticSend` publishes `sendOptimistic` on the screen's
+ * `WorktreeChatSendContext`, where the docked composer picks it up as its
+ * `onOptimisticSend`. No second send path (this is still
+ * `worktreeApi.sendMessage` → `POST /send`), no global bus (the provider wraps
+ * one screen), and the "chat-only" mounting of `useSplitMessages` is preserved —
+ * switching back to the terminal unmounts this component, which releases the
+ * registration and puts the composer back on its await-then-clear path.
  */
 const MobileChatSurface = memo(function MobileChatSurface({
   worktreeId,
@@ -142,7 +155,50 @@ const MobileChatSurface = memo(function MobileChatSurface({
   live: ChatSurfaceLiveState;
   onSurfaceModeChange: (mode: SurfaceMode) => void;
 }) {
-  const { messages, isLoading } = useSplitMessages({ worktreeId, cliToolId, instanceId });
+  const { messages: serverMessages, isLoading, refresh } = useSplitMessages({
+    worktreeId,
+    cliToolId,
+    instanceId,
+  });
+
+  // Issue #2213: the same optimistic layer PC has had since #1121, wired the same
+  // way (`TerminalSplitPaneContent`) — the send is `worktreeApi.sendMessage` and
+  // `onSent` refetches so the bubble reconciles promptly rather than waiting for
+  // the next poll. The push from #2195 usually beats that refetch; both land on
+  // the same row id, and `usePendingMessages` consumes one echo per bubble.
+  const sendMessageFn = useCallback(
+    (content: string, options: OptimisticSendOptions) =>
+      worktreeApi.sendMessage(worktreeId, content, options),
+    [worktreeId],
+  );
+  const {
+    messages,
+    sendOptimistic,
+    retry: retryPending,
+    discard: discardPending,
+  } = usePendingMessages({
+    worktreeId,
+    serverMessages,
+    sendFn: sendMessageFn,
+    onSent: refresh,
+  });
+
+  // Publish the send for the docked composer. Released on unmount, i.e. the
+  // moment this surface stops being the one the transcript is on.
+  useRegisterChatOptimisticSend({ cliToolId, instanceId, send: sendOptimistic });
+
+  // Discarding a failed send returns the text to the composer instead of
+  // dropping it — PC does this through `onHistoryInsertToMessage`; here the
+  // screen's own insert callback arrives over the same context.
+  const insertToComposer = useChatComposerInsert();
+  const handleDiscardPending = useCallback(
+    (tempId: string) => {
+      const content = discardPending(tempId);
+      if (content) insertToComposer(content);
+    },
+    [discardPending, insertToComposer],
+  );
+
   return (
     <ChatSurface
       messages={messages}
@@ -157,6 +213,8 @@ const MobileChatSurface = memo(function MobileChatSurface({
         // `MobileContent` to this tab. A no-op keeps the required prop honest.
         onFilePathClick: () => {},
         isLoading,
+        onRetryPending: retryPending,
+        onDiscardPending: handleDiscardPending,
       }}
     />
   );
