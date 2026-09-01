@@ -60,8 +60,9 @@ import { open, stat } from 'fs/promises';
 import { homedir } from 'os';
 import { join, resolve, sep } from 'path';
 import { buildCompositeKey } from '@/lib/auto-yes-state';
+import { recordUserTurn, type RecordedUserTurn } from '@/lib/history/user-turn-recorder';
 import { createLogger } from '@/lib/logger';
-import { claudeTurnRequestId } from '@/types/agent-transcript';
+import { claudePromptRequestId, claudeTurnRequestId } from '@/types/agent-transcript';
 import type { AgentInstanceRef } from '../types';
 import {
   buildClaudeTurns,
@@ -70,6 +71,7 @@ import {
   parseClaudeTranscript,
   renderClaudeTurn,
   type ClaudeRenderedTurn,
+  type ClaudeTurnAccumulator,
 } from './transcript';
 
 const logger = createLogger('lib/hooks/sources/claude/history');
@@ -291,6 +293,12 @@ export async function captureClaudeTranscriptTurn(
       // being appended to, and the head of the window landing mid-turn — and
       // both are the kind of thing that must be visible when it stops being
       // small.
+      //
+      // `orphanedAssistantRecords` is also the shape the Issue #2196 tail-window
+      // trap takes: a turn whose prompt record fell outside
+      // CLAUDE_TRANSCRIPT_TAIL_BYTES has assistant records and no prompt to
+      // record a user row from. It is reported here rather than dropped in
+      // silence, exactly as #2121 left it.
       logger.info('claude-transcript-partial-read', {
         worktreeId: target.worktreeId,
         instanceId,
@@ -301,7 +309,13 @@ export async function captureClaudeTranscriptTurn(
       });
     }
 
-    return await writeClaudeTurn(target, renderClaudeTurn(turn), turn.startedAt, path);
+    const userRow = await recordClaudeUserTurn(target, turn);
+    return await writeClaudeTurn(
+      target,
+      renderClaudeTurn(turn),
+      resolveAssistantTimestampMs(turn, userRow),
+      path
+    );
   } catch (error) {
     logger.error('claude-transcript-capture-failed', {
       worktreeId: target.worktreeId,
@@ -310,6 +324,80 @@ export async function captureClaudeTranscriptTurn(
     });
     return false;
   }
+}
+
+/**
+ * Record the prompt this turn answers, before the reply is written (Issue #2196).
+ *
+ * Ordering is the reason this is a separate call and not a branch inside
+ * {@link writeClaudeTurn}: the user row has to exist *before* the assistant row
+ * so that {@link resolveAssistantTimestampMs} can put the reply after it, and so
+ * that a browser watching the broadcast sees a prompt appear and then an answer
+ * rather than the other way round.
+ *
+ * A turn whose prompt was not the operator's — a `<task-notification>`, a
+ * compaction summary, a headless `sdk` run; see `isClaudeOperatorPromptRecord` —
+ * is skipped and said so in the log. The assistant row is still written: the
+ * agent really did reply, and #2121's behaviour for those turns is unchanged.
+ *
+ * Never throws; `recordUserTurn` reports its failures in the return value.
+ */
+async function recordClaudeUserTurn(
+  target: AgentInstanceRef,
+  turn: ClaudeTurnAccumulator
+): Promise<RecordedUserTurn> {
+  const instanceId = target.instanceId ?? target.cliToolId;
+
+  if (!turn.promptIsOperatorInput) {
+    logger.debug('claude-transcript-user-turn-skipped', {
+      worktreeId: target.worktreeId,
+      instanceId,
+      promptUuid: turn.promptUuid,
+      reason: 'not-operator-input',
+    });
+    return { outcome: 'skipped', messageId: null, timestampMs: null };
+  }
+
+  const recorded = await recordUserTurn(
+    target,
+    claudePromptRequestId(turn.promptUuid),
+    turn.promptText,
+    turn.startedAt
+  );
+
+  if (recorded.outcome === 'failed') {
+    logger.warn('claude-transcript-user-turn-failed', {
+      worktreeId: target.worktreeId,
+      instanceId,
+      sessionId: turn.sessionId,
+      promptUuid: turn.promptUuid,
+    });
+  }
+
+  return recorded;
+}
+
+/**
+ * When the assistant row for this turn is dated.
+ *
+ * #2121 dated it by the prompt record's clock so that a row written a poll late
+ * still sorts where the conversation put it, and that is still what happens for
+ * every turn that produced no user row.
+ *
+ * When there *is* a user row, it sits on that same instant — both come from the
+ * one prompt record — and `groupMessagesIntoPairs` orders by timestamp and
+ * nothing else. A tie there is decided by whichever row the database happened to
+ * return first, and the losing arrangement (assistant, then user) is exactly the
+ * `orphan` pair this Issue exists to remove. So the reply is moved to the first
+ * millisecond after the prompt: the smallest change that makes the order a
+ * property of the data rather than of the query plan.
+ */
+function resolveAssistantTimestampMs(
+  turn: ClaudeTurnAccumulator,
+  userRow: RecordedUserTurn
+): number {
+  if (userRow.timestampMs === null) return turn.startedAt;
+  return Math.max(turn.startedAt, userRow.timestampMs + 1);
 }
 
 /**

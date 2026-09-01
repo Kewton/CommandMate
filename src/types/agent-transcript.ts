@@ -63,6 +63,31 @@ export const AGENT_MARKDOWN_REQUEST_ID_PREFIX = 'oc-turn:';
 export const CLAUDE_MARKDOWN_REQUEST_ID_PREFIX = 'claude-turn:';
 
 /**
+ * Prefix on `chat_messages.request_id` for a **user** row whose text was read
+ * out of Claude Code's transcript rather than written by `/send` (Issue #2196).
+ *
+ * Deliberately *not* one of {@link AGENT_MARKDOWN_REQUEST_ID_PREFIXES}. The two
+ * jobs the `request_id` column does are separable, and this constant only does
+ * the first:
+ *
+ *  - **idempotency key** — the value is derived from the prompt record's `uuid`,
+ *    so the poller reading the same finished turn twice writes one row. That is
+ *    what this is for.
+ *  - **"render me as Markdown"** — that is what the list above means, and a user
+ *    row must not join it. The operator's own text has always been drawn
+ *    verbatim (`whitespace-pre-wrap`), and a prompt that happens to contain
+ *    `# ` or a `|` table row would change shape the moment it were rendered.
+ *    `ConversationPairCard` is untouched by #2196 precisely because this prefix
+ *    is absent from that list.
+ *
+ * `claude-prompt:` and not a second use of `claude-turn:`: the assistant row for
+ * the same turn is keyed on the *same* `uuid`, so sharing the prefix would make
+ * the two rows collide on `findMessageByRequestId` and the second writer would
+ * read "already saved" and stand down.
+ */
+export const CLAUDE_PROMPT_REQUEST_ID_PREFIX = 'claude-prompt:';
+
+/**
  * Every prefix that means "this row holds source, not a rendering".
  *
  * One list rather than a chain of `startsWith` calls, so that adding the third
@@ -126,4 +151,20 @@ export function opencodeTurnRequestId(userMessageId: string): string {
  */
 export function claudeTurnRequestId(promptUuid: string): string {
   return `${CLAUDE_MARKDOWN_REQUEST_ID_PREFIX}${promptUuid}`;
+}
+
+/**
+ * The row id for the **prompt** that opened one Claude Code turn (Issue #2196).
+ *
+ * Same `uuid`, different prefix, and therefore a different row: the turn's
+ * assistant row is {@link claudeTurnRequestId} of this same value. One `uuid`
+ * names one turn, and a turn is a user row plus an assistant row, so keying both
+ * on the record that opened it is what makes the pair reconstructible from the
+ * transcript alone — including on a re-read, where both halves must resolve to
+ * "already there" independently.
+ *
+ * @param promptUuid - `uuid` of the user record the operator's text arrived on
+ */
+export function claudePromptRequestId(promptUuid: string): string {
+  return `${CLAUDE_PROMPT_REQUEST_ID_PREFIX}${promptUuid}`;
 }
