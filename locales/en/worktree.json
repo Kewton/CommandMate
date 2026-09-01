@@ -428,6 +428,19 @@
     "showChat": "Show conversation",
     "chatSurfaceLabel": "Conversation"
   },
+  "chatSurface": {
+    "liveRegionLabel": "Session status",
+    "generating": "Responding…",
+    "thinking": "Thinking…",
+    "bannerLabel": "Needs the terminal",
+    "reasonPager": "A pager is open. Scroll it and quit from the terminal surface.",
+    "reasonSelectionList": "A selection list is open. Move and confirm from the terminal surface.",
+    "reasonUnclassified": "This screen can't be read from chat. Check it on the terminal surface.",
+    "reasonPromptUnreadable": "Waiting for an answer, but the options couldn't be read. Check it on the terminal surface.",
+    "openTerminal": "Open terminal",
+    "jumpToLatest": "Jump to latest",
+    "emptyHint": "Sending a message starts the session"
+  },
   "unsentComposer": {
     "regionLabel": "Unsent input",
     "label": "Unsent input:",

@@ -42,6 +42,12 @@
  * anything in the flex flow has 33px to spend and #1127 requires 44. See the
  * comment on the control itself.
  *
+ * Issue #2194: that chat surface is now `ChatSurface` rather than a bare
+ * `HistoryPane` — the tab hands it the state its own poller already holds, so the
+ * phone gets the same generating row and the same one-tap trail back to the
+ * terminal for frames chat cannot drive. See {@link MobileChatSurface} for why
+ * the #1121 optimistic bubble is PC-only.
+ *
  * Issue #1879: the unsent-input bar ({@link UnsentComposerBar}) is rendered here
  * for the same reason — the PC footer has it, and a phone is where a half-typed
  * composer is most likely to be discovered. Its gate is the composer text, not a
@@ -49,7 +55,7 @@
  * the other.
  */
 
-import { memo, useCallback, useEffect, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { MessageSquare, TerminalSquare } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { TerminalDisplay } from '@/components/worktree/TerminalDisplay';
@@ -60,7 +66,7 @@ import {
   hasOpenCodeSidebarObstruction,
 } from '@/components/worktree/OpencodeSidebarNotice';
 import { OpencodeQuickKeys } from '@/components/worktree/OpencodeQuickKeys';
-import { HistoryPane } from '@/components/worktree/HistoryPane';
+import { ChatSurface, type ChatSurfaceLiveState } from '@/components/worktree/ChatSurface';
 import { useTerminalPanePolling } from '@/hooks/useTerminalPanePolling';
 import { useSplitMessages } from '@/hooks/useSplitMessages';
 import { getTerminalDisplayCompaction } from '@/config/terminal-display-compaction';
@@ -108,28 +114,50 @@ const MOBILE_SURFACE_SEGMENTS: readonly {
  * Messages come from `useSplitMessages`, the same instance-scoped fetch the PC
  * split uses, so the transcript matches the instance whose terminal this tab is
  * showing rather than the parent's active-CLI-scoped `messages`.
+ *
+ * Issue #2194: the body is `ChatSurface`, so the phone gets the same live region
+ * and the same "open the terminal" trail the PC split does — the flags come from
+ * the tab's own `useTerminalPanePolling`, handed down rather than polled twice.
+ *
+ * There is deliberately NO #1121 optimistic bubble here, and that is a wiring
+ * fact rather than a decision: on the phone the composer is docked *outside* this
+ * tab (`WorktreeDetailRefactored` renders it below the tab content), so the send
+ * and the transcript have no common owner to hold `usePendingMessages`. Since
+ * #2195 the row arrives as a `message` push instead — one round trip rather than
+ * a poll interval — and the moment it lands it is a `pending` pair, which
+ * `ConversationPairCard` already draws its own waiting indicator for. Giving this
+ * surface a bubble of its own would mean either a second send path or a global
+ * send bus, and Epic #2192 asked for neither.
  */
 const MobileChatSurface = memo(function MobileChatSurface({
   worktreeId,
   cliToolId,
   instanceId,
+  live,
+  onSurfaceModeChange,
 }: {
   worktreeId: string;
   cliToolId: CLIToolType;
   instanceId?: string;
+  live: ChatSurfaceLiveState;
+  onSurfaceModeChange: (mode: SurfaceMode) => void;
 }) {
   const { messages, isLoading } = useSplitMessages({ worktreeId, cliToolId, instanceId });
   return (
-    <HistoryPane
+    <ChatSurface
       messages={messages}
       worktreeId={worktreeId}
-      // Phase 1 ships the surface, not its affordances: file-path routing and
-      // the "open in terminal" trail belong to #2194, which owns the ChatSurface
-      // build-out. A no-op keeps the required prop honest until then.
-      onFilePathClick={() => {}}
-      isLoading={isLoading}
-      className="h-full"
       cliToolId={cliToolId}
+      instanceId={instanceId}
+      live={live}
+      onSurfaceModeChange={onSurfaceModeChange}
+      history={{
+        // File-path routing still has no owner on this screen: `handleFilePathClick`
+        // lives in `WorktreeDetailRefactored` and is not threaded through
+        // `MobileContent` to this tab. A no-op keeps the required prop honest.
+        onFilePathClick: () => {},
+        isLoading,
+      }}
     />
   );
 });
@@ -194,6 +222,31 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
   const showOpencodeSidebarNotice = hasOpenCodeSidebarObstruction(
     cliToolId,
     terminal.realtimeSnippet || terminal.output,
+  );
+
+  // Issue #2194: the polled state the chat surface renders. Built from the same
+  // `prompt` object the mobile prompt sheet is driven by, so the banner's "a wait
+  // nobody could read" case and the sheet cannot disagree about one frame — see
+  // `ChatSurfaceLiveState` for why `isPromptWaiting` is `prompt.visible`.
+  const chatLiveState: ChatSurfaceLiveState = useMemo(
+    () => ({
+      isRunning: terminal.isRunning,
+      isThinking: terminal.isThinking,
+      isPromptWaiting: prompt.visible,
+      promptData: prompt.data,
+      isSelectionListActive: terminal.isSelectionListActive,
+      isPagerActive: terminal.isPagerActive,
+      isUnclassifiedActive: terminal.isUnclassifiedActive,
+    }),
+    [
+      terminal.isRunning,
+      terminal.isThinking,
+      terminal.isSelectionListActive,
+      terminal.isPagerActive,
+      terminal.isUnclassifiedActive,
+      prompt.visible,
+      prompt.data,
+    ],
   );
 
   return (
@@ -278,6 +331,8 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
               worktreeId={worktreeId}
               cliToolId={cliToolId}
               instanceId={instanceId}
+              live={chatLiveState}
+              onSurfaceModeChange={handleSurfaceModeChange}
             />
           </div>
         ) : (

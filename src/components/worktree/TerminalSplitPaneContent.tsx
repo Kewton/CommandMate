@@ -17,6 +17,12 @@
  * Auto-Yes — is identical in both modes, which is why a send, a prompt answer
  * and an interrupt all keep working from the chat surface.
  *
+ * Issue #2194: that chat body is now `ChatSurface` rather than a bare
+ * `HistoryPane` — same transcript, plus the live region (generating row, the
+ * "open the terminal" banner for frames chat cannot drive, the empty-state line)
+ * and follow-the-tail. The #1121 pending bubble it shows on send is the existing
+ * `usePendingMessages` merge below; nothing new sends from here.
+ *
  * This is the consumer that translates polled split state into UI on PC.
  * Mobile renders its own footer near the bottom of the screen and (since
  * Issue #736) drives the terminal display through the same
@@ -56,6 +62,7 @@ import { PromptPanel } from '@/components/worktree/PromptPanel';
 import { MessageInput } from '@/components/worktree/MessageInput';
 import { OpencodeTurnDiffPanel } from '@/components/worktree/OpencodeTurnDiffPanel';
 import { HistoryPane, splitHistorySlotId } from '@/components/worktree/HistoryPane';
+import { ChatSurface } from '@/components/worktree/ChatSurface';
 import { PaneResizer } from '@/components/worktree/PaneResizer';
 import { AutoYesToggle } from '@/components/worktree/AutoYesToggle';
 import {
@@ -567,6 +574,20 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   // because it mirrors a fixed xterm palette, and this surface is a transcript,
   // so it keeps HistoryPane's own token-driven light/dark behavior. No
   // light-on-dark is written here for that reason.
+  //
+  // Issue #2194: the pane is now wrapped by `ChatSurface`, which adds the live
+  // region (generating row / "open the terminal" banner / empty-state line) and
+  // the follow-the-tail chip. The transcript itself is still exactly the same
+  // `historyPaneProps` the collapsible History column is handed — that object is
+  // spread first inside ChatSurface and its identity fields re-applied after, so
+  // the two mounts cannot be given different messages or a different filter.
+  //
+  // `isPromptWaiting` is fed from `prompt.visible`, not from a raw payload flag:
+  // `useTerminalPanePolling` folds `isPromptWaiting && promptData` into
+  // `prompt.visible` and exposes no separate flag (see ChatSurfaceLiveState). The
+  // banner's "a wait nobody could read" case is therefore a visible prompt whose
+  // payload is #1708's / #1725's degraded record, which ChatSurface narrows
+  // itself with `isAnswerablePromptData`.
   const chatSurfaceSlot = useMemo(
     () => (
       <div
@@ -575,11 +596,42 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
         className="flex h-full min-h-0 w-full overflow-hidden bg-surface text-surface-foreground"
       >
         <div className="min-w-0 min-h-0 flex-1 overflow-hidden">
-          <HistoryPane {...historyPaneProps} />
+          <ChatSurface
+            messages={historyPaneProps.messages}
+            worktreeId={worktreeId}
+            cliToolId={cliToolId}
+            instanceId={resolvedInstanceId}
+            history={historyPaneProps}
+            live={{
+              isRunning: terminal.isRunning,
+              isThinking: terminal.isThinking,
+              isPromptWaiting: prompt.visible,
+              promptData: prompt.data,
+              isSelectionListActive: terminal.isSelectionListActive,
+              isPagerActive: terminal.isPagerActive,
+              isUnclassifiedActive: terminal.isUnclassifiedActive,
+            }}
+            onSurfaceModeChange={handleSurfaceModeChange}
+          />
         </div>
       </div>
     ),
-    [historyPaneProps, splitIndex, t],
+    [
+      historyPaneProps,
+      splitIndex,
+      t,
+      worktreeId,
+      cliToolId,
+      resolvedInstanceId,
+      terminal.isRunning,
+      terminal.isThinking,
+      terminal.isSelectionListActive,
+      terminal.isPagerActive,
+      terminal.isUnclassifiedActive,
+      prompt.visible,
+      prompt.data,
+      handleSurfaceModeChange,
+    ],
   );
 
   // Issue #744: compose [HistoryPane | PaneResizer | TerminalDisplay]. When the
