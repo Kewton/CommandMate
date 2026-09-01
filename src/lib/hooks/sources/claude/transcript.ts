@@ -146,6 +146,29 @@ export interface ClaudeTranscriptRecord {
   readonly isSidechain: boolean;
   /** True for a record Claude injected on the user's behalf. */
   readonly isMeta: boolean;
+  /**
+   * `origin.kind` — who this record came from (Issue #2196).
+   *
+   * Two values were observed on 744 live transcripts: `human` (528) and
+   * `task-notification` (279). See {@link isClaudeOperatorPromptRecord}.
+   */
+  readonly originKind: string | null;
+  /**
+   * `promptSource` — how the prompt reached the agent (Issue #2196).
+   *
+   * Observed: `typed`, `queued`, `system`, `sdk`.
+   */
+  readonly promptSource: string | null;
+  /** True for the summary Claude injects after `/compact` (Issue #2196). */
+  readonly isCompactSummary: boolean;
+  /**
+   * True for the `[Request interrupted by user…]` record (Issue #2196).
+   *
+   * Recognised by `interruptedMessageId`, which is the field the record carries
+   * and the text is not — the sentence itself is localised prose and matching on
+   * it would be matching on a translation.
+   */
+  readonly isInterruption: boolean;
   /** `timestamp` as epoch ms, or null when absent or unparseable. */
   readonly timestampMs: number | null;
   /** `message.content`, normalised; empty for records that carry no message. */
@@ -167,6 +190,19 @@ export interface ClaudeTurnAccumulator {
   readonly promptUuid: string;
   /** Epoch ms of the prompt record, so the row is dated by the agent's clock. */
   readonly startedAt: number;
+  /**
+   * The prompt record's own text (Issue #2196).
+   *
+   * Written to History as a `user` row — but only when
+   * {@link promptIsOperatorInput} says a person produced it. Note that #2121
+   * documents this text as "deliberately never written to History"; that held
+   * while the only row a turn produced was the *assistant* row, and the sentence
+   * it was defending — the prompt must never end up inside the reply — is still
+   * true and still asserted.
+   */
+  readonly promptText: string;
+  /** Whether {@link isClaudeOperatorPromptRecord} accepted the prompt record. */
+  readonly promptIsOperatorInput: boolean;
   /** Assistant content blocks, in the order the agent produced them. */
   readonly blocks: ClaudeContentBlock[];
   /** How many `type: "assistant"` records contributed. */
@@ -307,6 +343,7 @@ export function readClaudeTranscriptRecord(value: unknown): ClaudeTranscriptReco
 
   const timestamp = readStringField(value, 'timestamp');
   const parsed = timestamp ? Date.parse(timestamp) : NaN;
+  const origin = isPlainObject(value.origin) ? value.origin : null;
 
   return {
     type,
@@ -315,6 +352,10 @@ export function readClaudeTranscriptRecord(value: unknown): ClaudeTranscriptReco
     cwd: readStringField(value, 'cwd'),
     isSidechain: value.isSidechain === true,
     isMeta: value.isMeta === true,
+    originKind: origin ? readStringField(origin, 'kind') : null,
+    promptSource: readStringField(value, 'promptSource'),
+    isCompactSummary: value.isCompactSummary === true,
+    isInterruption: readStringField(value, 'interruptedMessageId') !== null,
     timestampMs: Number.isFinite(parsed) ? parsed : null,
     blocks,
     text,
@@ -379,16 +420,73 @@ export function isClaudePromptRecord(record: ClaudeTranscriptRecord): boolean {
   return !CLAUDE_SYNTHETIC_PROMPT_PREFIXES.some((prefix) => text.startsWith(prefix));
 }
 
+/**
+ * `origin.kind` for a record the person at the keyboard produced (Issue #2196).
+ */
+export const CLAUDE_HUMAN_ORIGIN_KIND = 'human';
+
+/**
+ * `promptSource` values that mean "the operator's own input" (Issue #2196).
+ *
+ * `typed` is the composer. `queued` is the composer too — text entered while the
+ * agent was still answering the previous prompt, which Claude holds and submits
+ * when the turn ends. The two that are excluded are excluded on measurement:
+ * `system` (always paired with `origin.kind = "task-notification"`) and `sdk`
+ * (a headless `claude -p` run, which has no chat pane to appear in).
+ */
+export const CLAUDE_HUMAN_PROMPT_SOURCES: readonly string[] = ['typed', 'queued'];
+
+/**
+ * Whether this record is text a human typed at the terminal (Issue #2196).
+ *
+ * Strictly narrower than {@link isClaudePromptRecord}, and the two are not
+ * interchangeable. That one answers "does a turn start here", which every
+ * prompt-shaped record does — a task notification really is answered, and the
+ * reply really does belong to it. This one answers "should this text appear in
+ * History as the operator's message", which is a different question with a
+ * different cost of being wrong: a wrong `true` puts machinery
+ * (`<task-notification>…`, a compaction summary, a skill's whole SKILL.md) in
+ * the chat pane as if the operator had said it.
+ *
+ * ## Positive evidence, not a deny list
+ *
+ * The rule is `origin.kind === "human"` **or** a `promptSource` on
+ * {@link CLAUDE_HUMAN_PROMPT_SOURCES} — a record that claims neither produces no
+ * row. That direction was chosen on a census rather than on taste: across all
+ * 744 transcripts under `~/.claude/projects` on 2026-09-01, of the 4,943
+ * `type: "user"` records that survive {@link isClaudePromptRecord}, **4,909
+ * carried one of the two markers and 34 did not — and all 34 were `/compact` or
+ * `[Request interrupted by user for tool use]`, not one of them a prompt.** The
+ * markers are present on every version in the sample (2.1.215 … 2.1.252).
+ *
+ * So the deny-list framing had nothing left to deny that the markers do not
+ * already exclude, and it fails the wrong way: a record shape a later Claude
+ * invents would default to *being shown*. This defaults to being skipped, which
+ * is the pre-#2196 behaviour — an orphaned assistant pair, which is untidy, and
+ * not a fabricated user message, which is wrong.
+ *
+ * `isCompactSummary` and `isInterruption` are then checked explicitly even
+ * though nothing observed carries a human marker *and* either flag. They are not
+ * redundant by construction: compaction and interruption are both things the
+ * operator initiates, so a later version stamping `origin.kind = "human"` on
+ * them would be defensible from Claude's side and wrong from this one's.
+ */
+export function isClaudeOperatorPromptRecord(record: ClaudeTranscriptRecord): boolean {
+  if (!isClaudePromptRecord(record)) return false;
+  if (record.isCompactSummary) return false;
+  if (record.isInterruption) return false;
+  if (record.originKind !== null) return record.originKind === CLAUDE_HUMAN_ORIGIN_KIND;
+  return record.promptSource !== null && CLAUDE_HUMAN_PROMPT_SOURCES.includes(record.promptSource);
+}
+
 /** A brand-new accumulator for one turn. */
-export function createClaudeTurn(
-  sessionId: string,
-  promptUuid: string,
-  startedAt: number
-): ClaudeTurnAccumulator {
+export function createClaudeTurn(record: ClaudeTranscriptRecord, sessionId: string): ClaudeTurnAccumulator {
   return {
-    sessionId,
-    promptUuid,
-    startedAt,
+    sessionId: record.sessionId ?? sessionId,
+    promptUuid: record.uuid as string,
+    startedAt: record.timestampMs ?? 0,
+    promptText: record.text,
+    promptIsOperatorInput: isClaudeOperatorPromptRecord(record),
     blocks: [],
     assistantRecords: 0,
     overflowed: false,
@@ -446,11 +544,7 @@ export function buildClaudeTurns(
     }
 
     if (isClaudePromptRecord(record)) {
-      current = createClaudeTurn(
-        record.sessionId ?? sessionId,
-        record.uuid as string,
-        record.timestampMs ?? 0
-      );
+      current = createClaudeTurn(record, sessionId);
       turns.push(current);
       continue;
     }
