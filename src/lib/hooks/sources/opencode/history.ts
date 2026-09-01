@@ -243,8 +243,71 @@ export function recordOpencodeTranscriptFrame(
         partType: part.type,
       });
     }
+
+    // Issue #2199: the chat surface's live body. Fire-and-forget — this function
+    // is on the SSE reader's hot path and its contract is that a frame is
+    // accounted for by the time it returns; awaiting a broadcast would make the
+    // accumulator's correctness depend on a WebSocket.
+    void publishOpencodeTurnProgress(target, turn);
   } catch (error) {
     logger.error('opencode-transcript-record-failed', {
+      worktreeId: target.worktreeId,
+      instanceId: target.instanceId ?? target.cliToolId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+/**
+ * Push the open turn's body to the chat surface (Issue #2199).
+ *
+ * The push half of the same fact `flushOpencodeTurn` eventually writes, and
+ * deliberately built from the SAME accumulator through the SAME
+ * `renderOpencodeTurn`: a live body rendered by a second, "cheaper" path would
+ * differ from the row that replaces it, and the replacement would read as the
+ * reply changing its mind at the moment it finished.
+ *
+ * `opencodeTurnRequestId(turn.userMessageId)` is the key on both sides, so the
+ * client's swap is a string comparison and needs no notion of ordering. Which is
+ * what makes the re-sent boundary frames harmless twice over: the accumulator
+ * overwrites a repeat into the same `prt_…` slot (see `./transcript`), so the
+ * rendered body is byte-identical and the shared builder's no-change rule drops
+ * it before it reaches the wire.
+ *
+ * The import is dynamic for the reason every database import in this file is:
+ * `current-output-builder` statically imports `@/lib/db`, and a static import
+ * here would put `better-sqlite3` into the graph of everything that imports
+ * `@/lib/hooks/sources`.
+ *
+ * Never throws.
+ */
+async function publishOpencodeTurnProgress(
+  target: AgentInstanceRef,
+  turn: OpencodeTurnAccumulator
+): Promise<void> {
+  try {
+    const { emitChatTurnProgress } = await import('@/lib/session/current-output-builder');
+    await emitChatTurnProgress(
+      {
+        worktreeId: target.worktreeId,
+        cliToolId: target.cliToolId,
+        instanceId: target.instanceId ?? target.cliToolId,
+      },
+      () => {
+        const rendered = renderOpencodeTurn(turn);
+        if (rendered.body.length === 0) return null;
+        return {
+          turnKey: opencodeTurnRequestId(rendered.userMessageId),
+          body: rendered.body,
+          // The stream carries the turn from its first part, so nothing is ever
+          // missing from the head. The only cut this body can take is the
+          // shared builder's size bound, which reports itself.
+          partial: false,
+        };
+      }
+    );
+  } catch (error) {
+    logger.debug('opencode-transcript-progress-failed', {
       worktreeId: target.worktreeId,
       instanceId: target.instanceId ?? target.cliToolId,
       error: error instanceof Error ? error.message : String(error),

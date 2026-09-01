@@ -17,6 +17,12 @@ import {
   OPENCODE_SIDEBAR_RECOVERY_CHORD,
   type OpenCodePaneObstruction,
 } from '@/lib/detection/opencode-pane-obstruction';
+import {
+  CHAT_TURN_PROGRESS_EVENT_TYPE,
+  CHAT_TURN_PROGRESS_MIN_INTERVAL_MS,
+  truncateChatTurnProgressBody,
+  type ChatTurnProgressEvent,
+} from '@/lib/realtime/types';
 import { UNCLASSIFIED_PROMPT_TYPE, type UnclassifiedFrameRecord } from '@/types/models';
 import { createLogger } from '@/lib/logger';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
@@ -1178,6 +1184,17 @@ export async function buildCurrentOutput(
   resolution?: SessionTargetResolution,
 ): Promise<CurrentOutputPayload> {
   const payload = await buildPayload(db, worktreeId, cliToolId, instanceId);
+  // Issue #2199. Fire-and-forget, and placed HERE rather than in the poller for
+  // one reason: this is the function both live paths run through. The WebSocket
+  // push calls it from `broadcastTerminalSnapshot` on every generating poller
+  // tick, and the HTTP `/current-output` poll calls it at the same cadence when
+  // the push is down — so the progress frames appear at whatever rate the
+  // surface is actually being watched at, which is exactly the property the
+  // terminal snapshot already has. Gated on the merged verdict (`'running'`, not
+  // the tmux-session-exists `isRunning`) so an idle pane reads no transcript.
+  if (payload.isRunning && payload.sessionStatus === 'running') {
+    void publishChatTurnProgress(db, worktreeId, cliToolId, instanceId);
+  }
   if (!resolution) return payload;
   return {
     ...payload,
@@ -1815,4 +1832,257 @@ async function buildPayload(
     composerText: composer.state === 'content' ? composer.text : null,
     composerState: composer.state,
   };
+}
+
+// ============================================================================
+// Chat turn progress (Issue #2199)
+// ============================================================================
+
+/**
+ * The instance one progress frame is about.
+ *
+ * `instanceId` is optional here and resolved on the way out, exactly as every
+ * other function in this file treats it, so a caller cannot key the throttle on
+ * `undefined` and the wire on `'claude'`.
+ */
+export interface ChatTurnProgressTarget {
+  readonly worktreeId: string;
+  readonly cliToolId: CLIToolType;
+  readonly instanceId?: string;
+}
+
+/** What a tool's reader hands over. See {@link ChatTurnProgressSource}. */
+export interface ChatTurnProgressDraft {
+  /** The `requestId` the settled row will carry. */
+  readonly turnKey: string;
+  /** Markdown, as the agent wrote it. */
+  readonly body: string;
+  /** True when the reader could not reach the beginning of the turn. */
+  readonly partial?: boolean;
+}
+
+/**
+ * How the shared builder gets a body, and why it is a callback.
+ *
+ * The claude reader costs a 4 MiB file read and a JSONL parse, and the opencode
+ * reader walks up to `MAX_OPENCODE_TURN_PARTS` parts through a Markdown
+ * renderer. Neither is something to do on every poll tick and every SSE frame,
+ * and passing a *value* would mean exactly that: the caller would have paid for
+ * it before the throttle got a chance to say no. A callback moves the whole cost
+ * behind {@link CHAT_TURN_PROGRESS_MIN_INTERVAL_MS}.
+ *
+ * Answering null means "nothing to show yet" — an open turn with no assistant
+ * text, a session with no transcript. It is not an error and is not logged here.
+ */
+export type ChatTurnProgressSource = () =>
+  | ChatTurnProgressDraft
+  | null
+  | Promise<ChatTurnProgressDraft | null>;
+
+/** One instance's progress bookkeeping. */
+interface ChatTurnProgressState {
+  /** Monotonic, and never reset by a new turn — see {@link buildChatTurnProgress}. */
+  version: number;
+  /** When the source was last *asked*, which is what the throttle bounds. */
+  askedAt: number;
+  /** The last published turn key, or null before the first frame. */
+  turnKey: string | null;
+  /** The last published body, for the "nothing changed" check. */
+  body: string | null;
+}
+
+declare global {
+  // eslint-disable-next-line no-var
+  var __chatTurnProgressState: Map<string, ChatTurnProgressState> | undefined;
+}
+
+/**
+ * On `globalThis` for the reason every shared map in this subsystem is (#1736):
+ * under `next dev` the poller's bundle and the opencode subscription's bundle
+ * would each get a private copy, and two producers throttling against two
+ * different maps is no throttle at all.
+ */
+const chatTurnProgressState = (globalThis.__chatTurnProgressState ??= new Map<
+  string,
+  ChatTurnProgressState
+>());
+
+function chatTurnProgressKey(target: ChatTurnProgressTarget): string {
+  return `${target.worktreeId}:${target.cliToolId}:${target.instanceId ?? target.cliToolId}`;
+}
+
+/** Forget every instance's progress bookkeeping. Test seam. */
+export function resetChatTurnProgressState(): void {
+  chatTurnProgressState.clear();
+}
+
+/**
+ * Decide whether this instance has a new progress frame, and build it.
+ *
+ * The single generator both tools go through, on the same argument
+ * {@link buildCurrentOutput} makes for the terminal payload: two producers of one
+ * wire shape drift, and the drift is invisible because each of them is
+ * individually correct. Three rules, in this order, and each of them is a way
+ * this feature goes wrong if it is missing:
+ *
+ *  1. **Throttle.** At most one *ask* per {@link CHAT_TURN_PROGRESS_MIN_INTERVAL_MS}
+ *     per instance. It gates the ask rather than the send because the source is
+ *     the expensive half (see {@link ChatTurnProgressSource}); a gate on the send
+ *     alone would re-read a 4 MiB transcript to discover it had not changed.
+ *  2. **No-change suppression.** Same turn, same body → no frame. A reply that
+ *     has stopped growing must not keep waking every subscribed browser.
+ *  3. **Monotonic version**, per instance and NOT per turn. A client drops
+ *     anything at or below what it has already rendered, and restarting the
+ *     counter on a new turn would make the first frame of turn N+1 look stale
+ *     against the last frame of turn N.
+ *
+ * The body is bounded by {@link truncateChatTurnProgressBody}, whose cut is
+ * folded into `partial` together with the reader's own — see
+ * {@link ChatTurnProgressEvent.partial} for why one flag answers both.
+ *
+ * Never throws: a source that throws is a turn with nothing to show, not a
+ * broken poll tick.
+ *
+ * @param target - The instance
+ * @param source - Asked only when the throttle allows it
+ * @param now - Epoch ms; injected by the tests
+ * @returns The frame to broadcast, or null when there is nothing new to say
+ */
+export async function buildChatTurnProgress(
+  target: ChatTurnProgressTarget,
+  source: ChatTurnProgressSource,
+  now: number = Date.now(),
+): Promise<ChatTurnProgressEvent | null> {
+  const key = chatTurnProgressKey(target);
+  const state = chatTurnProgressState.get(key) ?? {
+    version: 0,
+    askedAt: Number.NEGATIVE_INFINITY,
+    turnKey: null,
+    body: null,
+  };
+
+  if (now - state.askedAt < CHAT_TURN_PROGRESS_MIN_INTERVAL_MS) return null;
+  state.askedAt = now;
+  chatTurnProgressState.set(key, state);
+
+  let draft: ChatTurnProgressDraft | null;
+  try {
+    draft = await source();
+  } catch {
+    // The readers already promise never to throw; this is the belt for the
+    // dynamic import that reaches them.
+    return null;
+  }
+  if (!draft || draft.body.length === 0) return null;
+
+  const bounded = truncateChatTurnProgressBody(draft.body);
+  if (draft.turnKey === state.turnKey && bounded.body === state.body) return null;
+
+  state.turnKey = draft.turnKey;
+  state.body = bounded.body;
+  state.version += 1;
+
+  return {
+    type: CHAT_TURN_PROGRESS_EVENT_TYPE,
+    worktreeId: target.worktreeId,
+    cliToolId: target.cliToolId,
+    instanceId: target.instanceId ?? target.cliToolId,
+    turnKey: draft.turnKey,
+    body: bounded.body,
+    partial: bounded.truncated || draft.partial === true,
+    version: state.version,
+    done: false,
+  };
+}
+
+/**
+ * Build a progress frame and push it to the worktree room.
+ *
+ * Subscribers are checked FIRST, before the throttle state is touched and long
+ * before the source is asked, so a session nobody is watching costs one map
+ * lookup per tick — the same bargain `broadcastTerminalSnapshot` strikes, and
+ * the reason a 4 MiB transcript read does not happen for every claude session on
+ * the machine.
+ *
+ * The `ws-server` import is dynamic so this module's *other* callers — the
+ * `/current-output` route and `commandmate capture` — do not pull the WebSocket
+ * server into their graph just by building a payload.
+ *
+ * Never throws; a failed push is a moment of staleness on a surface that has the
+ * settled row coming anyway.
+ *
+ * @returns Whether a frame was broadcast
+ */
+export async function emitChatTurnProgress(
+  target: ChatTurnProgressTarget,
+  source: ChatTurnProgressSource,
+  now: number = Date.now(),
+): Promise<boolean> {
+  try {
+    const { broadcast, hasRoomSubscribers } = await import('@/lib/ws-server');
+    if (!hasRoomSubscribers(target.worktreeId)) return false;
+
+    const event = await buildChatTurnProgress(target, source, now);
+    if (!event) return false;
+
+    broadcast(target.worktreeId, event);
+    return true;
+  } catch (error) {
+    logger.debug('chat-turn-progress-failed', {
+      worktreeId: target.worktreeId,
+      cliToolId: target.cliToolId,
+      instanceId: target.instanceId ?? target.cliToolId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return false;
+  }
+}
+
+/**
+ * Ask the tool that has a transcript for the body of its open turn (Issue #2199).
+ *
+ * claude only, and that is a statement about which tools have a *pull* reader
+ * rather than a list to extend by hand. opencode's body arrives on its own SSE
+ * stream and is published from `sources/opencode/history` at the moment a part
+ * lands — polling for it here would be a second producer of the same frames.
+ * codex and antigravity have neither, and stay on the indicator (#2197 / #2198).
+ *
+ * The reader is imported dynamically so `sources/claude/history` — and through
+ * it `fs/promises`, the session-pointer latch and `user-turn-recorder` — stays
+ * out of the module graph of the `/current-output` route and of `commandmate
+ * capture`, both of which reach this file for a payload and nothing else.
+ *
+ * Never throws: `emitChatTurnProgress` swallows, and so does this.
+ */
+async function publishChatTurnProgress(
+  db: Database.Database,
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  instanceId?: string,
+): Promise<void> {
+  if (cliToolId !== 'claude') return;
+  try {
+    // The slug the transcript directory is named after is a function of the
+    // worktree's path, so the row is what makes the file findable at all. Read
+    // before the throttle only because it is a single indexed lookup against a
+    // connection this function was handed; everything expensive is behind the
+    // gate.
+    const { getWorktreeById } = await import('@/lib/db/worktree-db');
+    const worktreePath = getWorktreeById(db, worktreeId)?.path;
+    if (!worktreePath) return;
+
+    await emitChatTurnProgress({ worktreeId, cliToolId, instanceId }, async () => {
+      const { readClaudeTurnProgress } = await import('@/lib/hooks/sources/claude/history');
+      return readClaudeTurnProgress(
+        { worktreeId, cliToolId, instanceId: instanceId ?? cliToolId },
+        { worktreePath },
+      );
+    });
+  } catch (error) {
+    logger.debug('chat-turn-progress-claude-failed', {
+      worktreeId,
+      instanceId: instanceId ?? cliToolId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 }

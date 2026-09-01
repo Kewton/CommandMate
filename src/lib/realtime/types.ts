@@ -129,6 +129,121 @@ export interface TerminalSnapshotEvent {
   version: number;
 }
 
+/**
+ * The body of the turn that is being generated **right now** (Issue #2199).
+ *
+ * The chat surface has no partial assistant text of its own: a reply reaches
+ * `chat_messages` only once the turn is over, so a long turn leaves the surface
+ * saying "Responding…" for minutes while the terminal surface next to it is
+ * filling up. This frame is that missing text, and everything about its shape
+ * follows from one decision — **it is never persisted**.
+ *
+ * Not persisted means the row this becomes is written by somebody else: the
+ * existing `message` broadcast, from `sources/<tool>/history`, whose `requestId`
+ * is exactly {@link ChatTurnProgressEvent.turnKey}. So a client replaces the
+ * progress body with the confirmed row by matching that one string, and a
+ * missed frame costs a moment of staleness rather than a lost reply. It is also
+ * why there is no replay on reconnect and no `done: true` member: the settled
+ * state of a turn is a `chat_messages` row, and this event has nothing to say
+ * about it.
+ *
+ * `version` is monotonic per (worktreeId, cliToolId, instanceId) — the same
+ * discipline {@link TerminalSnapshotEvent} carries, and for a sharper reason
+ * here: opencode's SSE re-sends its boundary frames, so a client that trusted
+ * arrival order would redraw an older body over a newer one.
+ */
+export const CHAT_TURN_PROGRESS_EVENT_TYPE = 'chat_turn_progress' as const;
+
+/**
+ * Smallest gap between two progress frames for one instance.
+ *
+ * The producers are a 2 s poller tick (claude) and an SSE part stream that
+ * measured 88 delta frames for a single 967-character paragraph (opencode), so
+ * the second one needs a brake and the first one does not. One brake for both,
+ * because the expensive half of the claude path — a 4 MiB tail read and a parse
+ * — happens *behind* this gate too, and a surface polled over HTTP at ~1 s
+ * would otherwise pay for it on every request.
+ */
+export const CHAT_TURN_PROGRESS_MIN_INTERVAL_MS = 1000;
+
+/**
+ * Longest body one progress frame carries, in UTF-16 code units.
+ *
+ * Two orders of magnitude below `MAX_CLAUDE_TURN_BODY_LENGTH` /
+ * `MAX_OPENCODE_TURN_BODY_LENGTH`, which bound the body that gets *saved*. This
+ * one is re-sent every second while a turn runs, so its cost is per frame
+ * rather than per turn.
+ */
+export const MAX_CHAT_TURN_PROGRESS_BODY_LENGTH = 64 * 1024;
+
+/** What {@link truncateChatTurnProgressBody} answers. */
+export interface ChatTurnProgressBody {
+  readonly body: string;
+  /** True when the head of the body was dropped to fit. */
+  readonly truncated: boolean;
+}
+
+/**
+ * Cut an over-long progress body, **keeping the tail**.
+ *
+ * The head is what goes, and that is the opposite of what the two turn writers
+ * do. They are recording a reply and the reply reads from the top; this is
+ * showing a reply being written, and the interesting end is the one the model
+ * is still adding to. A reader who needs the head has the terminal surface and,
+ * a moment later, the settled row.
+ *
+ * The cut is reported rather than hidden — see `partial` on
+ * {@link ChatTurnProgressEvent}. Silently showing the middle of a reply as if it
+ * were the whole of one is the failure this signature exists to prevent.
+ */
+export function truncateChatTurnProgressBody(
+  body: string,
+  maxLength: number = MAX_CHAT_TURN_PROGRESS_BODY_LENGTH,
+): ChatTurnProgressBody {
+  if (maxLength <= 0) return { body: '', truncated: body.length > 0 };
+  if (body.length <= maxLength) return { body, truncated: false };
+  return { body: body.slice(body.length - maxLength), truncated: true };
+}
+
+/** The in-flight body of one turn. See {@link CHAT_TURN_PROGRESS_EVENT_TYPE}. */
+export interface ChatTurnProgressEvent {
+  type: typeof CHAT_TURN_PROGRESS_EVENT_TYPE;
+  worktreeId: string;
+  cliToolId: CLIToolType;
+  /** Always resolved (`instanceId ?? cliToolId`), as `terminal_snapshot` is. */
+  instanceId: string;
+  /**
+   * The `requestId` the settled row will carry — `claudeTurnRequestId(...)` or
+   * `opencodeTurnRequestId(...)`. The join key between this frame and the
+   * `message` that replaces it.
+   */
+  turnKey: string;
+  /** Markdown, as the agent wrote it. Never a screen scrape. */
+  body: string;
+  /**
+   * True when {@link body} does not start at the beginning of the turn.
+   *
+   * Two independent causes, one flag, because the reader's question is the same
+   * for both: the claude transcript is read through a 4 MiB tail window and a
+   * turn bigger than that has no head to read, and
+   * {@link truncateChatTurnProgressBody} drops the head of anything over
+   * {@link MAX_CHAT_TURN_PROGRESS_BODY_LENGTH}. The UI has to say so — a body
+   * that starts mid-sentence and does not admit it is worse than no body.
+   */
+  partial: boolean;
+  /** Monotonic per (worktreeId, cliToolId, instanceId). Older frames are dropped. */
+  version: number;
+  /**
+   * Always false.
+   *
+   * Kept as a literal member rather than dropped because it is the wire's own
+   * statement that this event never settles a turn — the settling frame is a
+   * `message`, and a client that learns to treat a `done: true` here as one
+   * would be writing the second history writer this Issue exists to avoid.
+   */
+  done: false;
+}
+
 export interface RepositoryDeletedEvent {
   type: 'repository_deleted';
   worktreeId?: string;
@@ -152,6 +267,7 @@ export type RealtimeEvent =
   | SessionStatusEvent
   | MessageBroadcastEvent
   | TerminalSnapshotEvent
+  | ChatTurnProgressEvent
   | RepositoryDeletedEvent
   | VersionMismatchEvent
   | { type: string; worktreeId?: string; [key: string]: unknown };
