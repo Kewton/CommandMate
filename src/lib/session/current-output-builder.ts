@@ -829,10 +829,16 @@ function describePaneObstruction(obstruction?: OpenCodePaneObstruction | null): 
  *    turn a written row into a failed one. The two record functions below are
  *    best-effort by contract and their callers are waiting on a payload.
  *
- * Known limitation (#2214): under `next dev` a route bundle holds its own copy
- * of `ws-server`'s module-scope `rooms`, so a push from there reaches nobody.
- * Production runs one custom-server bundle and is unaffected; see
- * `tests/integration/ws-broadcast-module-instance-2214.test.ts`.
+ * #2214 recorded a limitation here — a route bundle holding its own empty copy
+ * of `ws-server`'s `rooms` under `next dev` — and added that "production runs
+ * one custom-server bundle and is unaffected". **That last clause was wrong.**
+ * `npm run dev` and `npm start` run the *same* custom server (`tsx server.ts`
+ * vs `node dist/server/server.js`); what differs is only whether Next evaluates
+ * a route handler from a dev compilation or from `.next/server`. Either way the
+ * route handler's copy of this module and of `ws-server` is not the custom
+ * server's, so this push was silent in production too. #2220 bridged it: the
+ * `broadcastMessage` below now reaches the socket owner through
+ * `lib/realtime/publisher-registry` regardless of which graph called it.
  */
 function broadcastRecordedRow(worktreeId: string, message: ChatMessage): void {
   void import('@/lib/ws-server')

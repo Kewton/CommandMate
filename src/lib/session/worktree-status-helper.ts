@@ -347,15 +347,22 @@ function mergeSessionStatus(
  * and the send on a promise keeps every failure, including a throwing
  * `broadcastMessage`, inside the `.catch` below.
  *
- * Known limitation (#2214): `broadcastMessage` reaches the `rooms` map of *its
- * own* `ws-server` module instance, and only the custom server's instance owns
- * live sockets. Production serves both callers of this helper from that one
- * bundle. Under `next dev` each route is bundled separately, so a push from
- * here can land in an empty `rooms` and no-op; the pane still catches up on its
- * next history poll. Closing that would need a cross-bundle bridge (or a
- * `globalThis` home for `rooms`), which is deliberately out of scope for this
- * Issue. `tests/integration/ws-broadcast-module-instance-2214.test.ts` pins
- * both halves of that behaviour so a future bridge has a test to flip.
+ * `broadcastMessage` reaches the `rooms` map of *its own* `ws-server` module
+ * instance, and only the instance that called `setupWebSocket` owns live
+ * sockets. #2214 claimed "production serves both callers of this helper from
+ * that one bundle" and scoped the gap to `next dev`. **That was wrong.** Both
+ * callers of this helper are route handlers (`/worktrees` and `/worktrees/:id`),
+ * and a production build gives route handlers a second copy of `ws-server` in
+ * `.next/server/chunks/` whose `setupWebSocket` is never called — so this sweep
+ * published into an empty map on every production request, and the pane waited
+ * for its next history poll exactly as it did under `next dev`.
+ *
+ * #2220 closed it with a process-local publisher registry
+ * (`lib/realtime/publisher-registry`): `setupWebSocket` registers the owner's
+ * publish/subscriber-count/room-lifecycle closures on `globalThis`, and
+ * `broadcastMessage` routes there. The maps themselves stay inside `ws-server`.
+ * The call below is unchanged — that is the point of bridging inside
+ * `ws-server` rather than at each producer.
  */
 function broadcastPromptSweptToAnswered(worktreeId: string): (message: ChatMessage) => void {
   return (message: ChatMessage) => {

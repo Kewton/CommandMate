@@ -20,7 +20,26 @@ import { invalidateCache } from '@/lib/tmux/tmux-capture-cache';
 
 const logger = createLogger('terminal-broadcast');
 
-const versionCounters = new Map<string, number>();
+/**
+ * Reached through `globalThis` because #2220 made this counter reachable from
+ * more than one module instance.
+ *
+ * Before the publisher bridge only the custom server's copy of this module ever
+ * produced a frame that arrived, so a per-bundle counter was per-process by
+ * accident. Now a route bundle's `broadcastTerminalSnapshotAfterInteraction`
+ * really does reach a socket — and a second counter starting again at 1 would
+ * be read by the client's stale-frame guard as an out-of-order frame and
+ * dropped, leaving the pane on the pre-action screen. The sequence has to be
+ * one sequence per (worktreeId, cliToolId, instanceId) for the whole process,
+ * the way `__chatTurnProgressState` already is (#2199).
+ */
+declare global {
+  // eslint-disable-next-line no-var
+  var __terminalSnapshotVersions: Map<string, number> | undefined;
+}
+
+const versionCounters = globalThis.__terminalSnapshotVersions ??
+  (globalThis.__terminalSnapshotVersions = new Map<string, number>());
 
 export const INTERACTION_SNAPSHOT_RETRY_DELAYS_MS = [100, 250, 500, 750] as const;
 
