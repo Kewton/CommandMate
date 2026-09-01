@@ -52,7 +52,7 @@ import {
   recordAskUserQuestion,
   reportPermissionRequestPending,
 } from '@/lib/session/agent-event-state';
-import type { PromptType } from '@/types/models';
+import type { ChatMessage, PromptType } from '@/types/models';
 import { createLogger } from '@/lib/logger';
 import { parseAskUserQuestionPayload } from './ask-user-question-payload';
 import {
@@ -256,8 +256,9 @@ function recordAllowedPermission(
   const target = texts.join('\n').slice(0, MAX_DENY_MATCH_TEXT_LENGTH);
   const now = new Date();
 
+  let recorded: ChatMessage | null = null;
   try {
-    createMessage(getDbInstance(), {
+    recorded = createMessage(getDbInstance(), {
       worktreeId: session.worktreeId,
       role: 'assistant',
       content: `${payload.toolName}: ${target}`.slice(0, MAX_DENY_MATCH_TEXT_LENGTH),
@@ -293,6 +294,51 @@ function recordAllowedPermission(
       error: error instanceof Error ? error.message : String(error),
     });
   }
+
+  if (!recorded) return;
+  broadcastAuditRow(session, recorded);
+}
+
+/**
+ * Push the audit row this module just wrote to every pane watching the worktree
+ * (Issue #2214).
+ *
+ * `'message'`, never `'message_updated'`: `recordAllowedPermission` always
+ * INSERTs (see its own comment on why it does not reuse `recordAnsweredPrompt`),
+ * so the row has never been delivered before and a client has to append it.
+ *
+ * Separated from the write above rather than folded into its `try`, because the
+ * two failures are not the same failure: the row is committed by the time this
+ * runs, and a socket that cannot take it must cost this push and nothing else.
+ * That separation is also why the delivery is a detached promise — the caller is
+ * a hook handler with an agent blocked on its verdict, and neither a cold
+ * `ws-server` load nor a socket write belongs on that path. This mirrors how
+ * `auto-yes-poller` publishes the answered-prompt row it writes on the same
+ * Auto-Yes path.
+ *
+ * `instanceId` is carried through unchanged: `createMessage` returns the
+ * caller's own object rather than re-reading the row, and every field this
+ * module passes it — `cliToolId` and `instanceId` included — is an explicit
+ * value taken from the resolved session, so what is published matches the row
+ * that was written.
+ *
+ * Known limitation (#2214): under `next dev` a route bundle holds its own copy
+ * of `ws-server`'s module-scope `rooms`, so a push from there reaches nobody.
+ * Production runs one custom-server bundle and is unaffected; see
+ * `tests/integration/ws-broadcast-module-instance-2214.test.ts`.
+ */
+function broadcastAuditRow(session: PermissionRequestSession, message: ChatMessage): void {
+  void import('@/lib/ws-server')
+    .then(({ broadcastMessage }) => {
+      broadcastMessage('message', { worktreeId: session.worktreeId, message });
+    })
+    .catch((error: unknown) => {
+      logger.warn('permission-request:audit-broadcast-failed', {
+        worktreeId: session.worktreeId,
+        instanceId: session.instanceId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
 }
 
 /**

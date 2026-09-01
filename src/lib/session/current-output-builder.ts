@@ -23,7 +23,7 @@ import {
   truncateChatTurnProgressBody,
   type ChatTurnProgressEvent,
 } from '@/lib/realtime/types';
-import { UNCLASSIFIED_PROMPT_TYPE, type UnclassifiedFrameRecord } from '@/types/models';
+import { UNCLASSIFIED_PROMPT_TYPE, type ChatMessage, type UnclassifiedFrameRecord } from '@/types/models';
 import { createLogger } from '@/lib/logger';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { capturedLineCountIsCursor, type CLIToolType } from '@/lib/cli-tools/types';
@@ -813,6 +813,40 @@ function describePaneObstruction(obstruction?: OpenCodePaneObstruction | null): 
   );
 }
 
+/**
+ * Push a history row this module just wrote to the worktree room (Issue #2214).
+ *
+ * Always `'message'`: both callers INSERT a brand-new row, so nothing has been
+ * delivered for it before and the client appends rather than replaces.
+ *
+ * Detached on purpose, and for two reasons that both matter here:
+ *
+ *  - the `ws-server` import stays dynamic, which is the same bargain
+ *    {@link emitChatTurnProgress} strikes — this module's *other* callers (the
+ *    `/current-output` route and the terminal push) must not pull the WebSocket
+ *    server into their graph just by building a payload;
+ *  - the row is already committed when this runs, so a socket write can never
+ *    turn a written row into a failed one. The two record functions below are
+ *    best-effort by contract and their callers are waiting on a payload.
+ *
+ * Known limitation (#2214): under `next dev` a route bundle holds its own copy
+ * of `ws-server`'s module-scope `rooms`, so a push from there reaches nobody.
+ * Production runs one custom-server bundle and is unaffected; see
+ * `tests/integration/ws-broadcast-module-instance-2214.test.ts`.
+ */
+function broadcastRecordedRow(worktreeId: string, message: ChatMessage): void {
+  void import('@/lib/ws-server')
+    .then(({ broadcastMessage }) => {
+      broadcastMessage('message', { worktreeId, message });
+    })
+    .catch((error: unknown) => {
+      logger.warn('history-row-broadcast-failed', {
+        worktreeId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+}
+
 function recordUnclassifiedFrame(
   db: Database.Database,
   params: {
@@ -849,7 +883,7 @@ function recordUnclassifiedFrame(
   };
 
   try {
-    createMessage(db, {
+    const message = createMessage(db, {
       worktreeId: params.worktreeId,
       role: 'assistant',
       content: question,
@@ -868,6 +902,10 @@ function recordUnclassifiedFrame(
       dwellSeconds,
       statusReason,
     });
+    // `cliToolId` / `instanceId` are already the explicit values passed above —
+    // `createMessage` hands back the caller's own object — so the published row
+    // addresses the same instance the column does.
+    broadcastRecordedRow(params.worktreeId, message);
   } catch (error: unknown) {
     logger.warn('unclassified-frame-record-failed', {
       worktreeId: params.worktreeId,
@@ -911,7 +949,7 @@ function recordStructuredPrompt(
   const record = buildStructuredPromptHistoryRecord(params.worktreeId, params.facts);
 
   try {
-    createMessage(db, {
+    const message = createMessage(db, {
       worktreeId: params.worktreeId,
       role: 'assistant',
       content: record.question,
@@ -934,6 +972,7 @@ function recordStructuredPrompt(
       source: params.state.source,
       toolName: params.state.toolName,
     });
+    broadcastRecordedRow(params.worktreeId, message);
   } catch (error: unknown) {
     logger.warn('structured-prompt-record-failed', {
       worktreeId: params.worktreeId,
