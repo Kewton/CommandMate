@@ -33,9 +33,13 @@ vi.mock('@/lib/hooks/sources/claude/history', () => ({
 vi.mock('@/lib/hooks/sources/codex/history', () => ({
   captureCodexTranscriptTurn: vi.fn(async () => false),
 }));
+vi.mock('@/lib/hooks/sources/antigravity/history', () => ({
+  captureAntigravityTranscriptTurn: vi.fn(async () => false),
+}));
 
 import { captureClaudeTranscriptTurn } from '@/lib/hooks/sources/claude/history';
 import { captureCodexTranscriptTurn } from '@/lib/hooks/sources/codex/history';
+import { captureAntigravityTranscriptTurn } from '@/lib/hooks/sources/antigravity/history';
 import { isOpencodeStructuredHistoryLive } from '@/lib/hooks/sources/opencode/subscription';
 import { getAgentEventSource } from '@/lib/hooks/sources/registry';
 import type { AgentSourceCapabilities } from '@/lib/hooks/sources/types';
@@ -77,6 +81,7 @@ beforeEach(() => {
   vi.mocked(isOpencodeStructuredHistoryLive).mockReturnValue(false);
   vi.mocked(captureClaudeTranscriptTurn).mockResolvedValue(false);
   vi.mocked(captureCodexTranscriptTurn).mockResolvedValue(false);
+  vi.mocked(captureAntigravityTranscriptTurn).mockResolvedValue(false);
 });
 
 afterEach(() => {
@@ -129,14 +134,100 @@ describe('[#2197] the codex reader is wired into the gate', () => {
     expect(vi.mocked(captureCodexTranscriptTurn)).toHaveBeenCalledTimes(1);
   });
 
-  it('leaves the scraper as the only writer for the three tools with no reader', async () => {
+  it('leaves the scraper as the only writer for the two tools with no reader', async () => {
+    // gemini and copilot, since #2198 moved antigravity out of this list. The
+    // assertion is the fail-open: a tool with no second writer must never have
+    // its scrape suppressed.
     vi.mocked(captureClaudeTranscriptTurn).mockResolvedValue(true);
     vi.mocked(captureCodexTranscriptTurn).mockResolvedValue(true);
-    for (const tool of ['gemini', 'copilot', 'antigravity'] as const) {
+    vi.mocked(captureAntigravityTranscriptTurn).mockResolvedValue(true);
+    for (const tool of ['gemini', 'copilot'] as const) {
       expect(await captureStructuredHistoryTurn('wt-1', tool, undefined, CAPTURE)).toBe(false);
     }
     expect(vi.mocked(captureClaudeTranscriptTurn)).not.toHaveBeenCalled();
     expect(vi.mocked(captureCodexTranscriptTurn)).not.toHaveBeenCalled();
+    expect(vi.mocked(captureAntigravityTranscriptTurn)).not.toHaveBeenCalled();
+  });
+});
+
+describe('[#2198] the antigravity reader is wired into the gate', () => {
+  it('asks antigravity’s reader and reports what it answered', async () => {
+    vi.mocked(captureAntigravityTranscriptTurn).mockResolvedValue(true);
+    expect(await captureStructuredHistoryTurn('wt-1', 'antigravity', 'antigravity', CAPTURE)).toBe(
+      true
+    );
+    expect(vi.mocked(captureAntigravityTranscriptTurn)).toHaveBeenCalledWith(
+      { worktreeId: 'wt-1', cliToolId: 'antigravity', instanceId: 'antigravity' },
+      CAPTURE
+    );
+  });
+
+  it('is false when antigravity’s reader did not record the turn', async () => {
+    expect(await captureStructuredHistoryTurn('wt-1', 'antigravity', 'antigravity', CAPTURE)).toBe(
+      false
+    );
+  });
+
+  it('defaults the instance to the primary and carries a named one through', async () => {
+    await captureStructuredHistoryTurn('wt-1', 'antigravity', undefined, CAPTURE);
+    expect(vi.mocked(captureAntigravityTranscriptTurn).mock.calls[0][0]).toEqual({
+      worktreeId: 'wt-1',
+      cliToolId: 'antigravity',
+      instanceId: 'antigravity',
+    });
+
+    await captureStructuredHistoryTurn('wt-1', 'antigravity', 'antigravity-2', CAPTURE);
+    expect(vi.mocked(captureAntigravityTranscriptTurn).mock.calls[1][0]).toEqual({
+      worktreeId: 'wt-1',
+      cliToolId: 'antigravity',
+      instanceId: 'antigravity-2',
+    });
+  });
+
+  it('keeps the three pull readers apart', async () => {
+    // Three tools now share one branch, so "the right reader" is not free.
+    // Answering with the wrong tool's reader would file this turn against a
+    // transcript belonging to a different conversation — and for antigravity
+    // that is not even a near miss, because claude's reader derives its path
+    // from a worktree `cwd` that agy never reports.
+    vi.mocked(captureClaudeTranscriptTurn).mockResolvedValue(true);
+    vi.mocked(captureCodexTranscriptTurn).mockResolvedValue(true);
+    vi.mocked(captureAntigravityTranscriptTurn).mockResolvedValue(true);
+
+    await captureStructuredHistoryTurn('wt-1', 'antigravity', 'antigravity', CAPTURE);
+    expect(vi.mocked(captureClaudeTranscriptTurn)).not.toHaveBeenCalled();
+    expect(vi.mocked(captureCodexTranscriptTurn)).not.toHaveBeenCalled();
+
+    await captureStructuredHistoryTurn('wt-1', 'claude', 'claude', CAPTURE);
+    await captureStructuredHistoryTurn('wt-1', 'codex', 'codex', CAPTURE);
+    expect(vi.mocked(captureAntigravityTranscriptTurn)).toHaveBeenCalledTimes(1);
+  });
+
+  it('never asks antigravity about a subscription it does not have', async () => {
+    // `'pull'` and `'push'` are not two spellings of "somebody else has it".
+    vi.mocked(isOpencodeStructuredHistoryLive).mockReturnValue(true);
+    expect(isStructuredHistoryWriterLive('wt-1', 'antigravity', 'antigravity')).toBe(false);
+    expect(vi.mocked(isOpencodeStructuredHistoryLive)).not.toHaveBeenCalled();
+  });
+
+  it('stops asking antigravity the moment its declaration says `null`', async () => {
+    // The mutation the acceptance criteria name, for the source #2198 added. If
+    // this stayed green with the reader still being called, the capability would
+    // be decoration and the dispatch would be agreeing with it by coincidence.
+    vi.mocked(captureAntigravityTranscriptTurn).mockResolvedValue(true);
+    declareTranscriptHistory('antigravity', null);
+
+    expect(await captureStructuredHistoryTurn('wt-1', 'antigravity', 'antigravity', CAPTURE)).toBe(
+      false
+    );
+    expect(vi.mocked(captureAntigravityTranscriptTurn)).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the scraper when antigravity’s reader throws', async () => {
+    vi.mocked(captureAntigravityTranscriptTurn).mockRejectedValue(new Error('no home'));
+    expect(await captureStructuredHistoryTurn('wt-1', 'antigravity', 'antigravity', CAPTURE)).toBe(
+      false
+    );
   });
 });
 
@@ -219,7 +310,7 @@ describe('[#2197] the declarations the gate is reading', () => {
       opencode: 'push',
       gemini: null,
       copilot: null,
-      antigravity: null,
+      antigravity: 'pull',
     });
   });
 

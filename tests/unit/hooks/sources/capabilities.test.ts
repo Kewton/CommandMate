@@ -160,7 +160,7 @@ const TABLE: Record<string, DeclaredRow> = {
     permissionReplyReleasesPrompt: false,
     eventIdentity: null,
     resync: 'none',
-    transcriptHistory: null,
+    transcriptHistory: 'pull',
   },
 };
 
@@ -248,20 +248,21 @@ describe('[#1924] AgentSourceCapabilities — the 6x6 table of §4 D3', () => {
     expect(resyncing).toEqual(['opencode']);
   });
 
-  it('names exactly the three sources with a second writer, and which kind (#2197)', () => {
-    // The column-wise reading of Issue #2197's addition. Two departures from
-    // "nobody but the scraper", and they are different departures: opencode is
-    // pushed the reply over a connection, claude and codex keep a file that has
-    // to be read. `lib/polling/structured-history-gate` asks a different
-    // question of each, so a value in the wrong one of these two lists is not a
-    // near miss — it sends the gate down the other branch entirely.
+  it('names exactly the four sources with a second writer, and which kind (#2198)', () => {
+    // The column-wise reading of Issue #2197's addition, with #2198's fourth
+    // source in it. Two departures from "nobody but the scraper", and they are
+    // different departures: opencode is pushed the reply over a connection,
+    // while claude, codex and antigravity each keep a file that has to be read.
+    // `lib/polling/structured-history-gate` asks a different question of each,
+    // so a value in the wrong one of these two lists is not a near miss — it
+    // sends the gate down the other branch entirely.
     const pull = Object.keys(TABLE).filter((id) => TABLE[id].transcriptHistory === 'pull');
-    expect(pull).toEqual(['claude', 'codex']);
+    expect(pull).toEqual(['claude', 'codex', 'antigravity']);
 
     const push = Object.keys(TABLE).filter((id) => TABLE[id].transcriptHistory === 'push');
     expect(push).toEqual(['opencode']);
 
     const scraperOnly = Object.keys(TABLE).filter((id) => TABLE[id].transcriptHistory === null);
-    expect(scraperOnly).toEqual(['gemini', 'copilot', 'antigravity']);
+    expect(scraperOnly).toEqual(['gemini', 'copilot']);
   });
 });

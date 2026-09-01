@@ -119,6 +119,37 @@ export const CODEX_MARKDOWN_REQUEST_ID_PREFIX = 'codex-turn:';
 export const CODEX_PROMPT_REQUEST_ID_PREFIX = 'codex-prompt:';
 
 /**
+ * The same, for a turn read out of antigravity's transcript JSONL (Issue #2198).
+ *
+ * A fourth namespace for the fourth reader, for the reason
+ * {@link CLAUDE_MARKDOWN_REQUEST_ID_PREFIX} gives: the value is an idempotency
+ * key as well as a marker, and antigravity names its turns with a number —
+ * `step_index` — that is only unique *inside one conversation*. Sharing a prefix
+ * with another tool would make a collision between two tools' ids read as
+ * "already saved", which is the one failure a key must not have; and the id
+ * therefore has to carry the conversation as well as the step. See
+ * {@link antigravityTurnRequestId}.
+ */
+export const ANTIGRAVITY_MARKDOWN_REQUEST_ID_PREFIX = 'antigravity-turn:';
+
+/**
+ * Prefix on a **user** row whose text was read out of antigravity's transcript
+ * JSONL (Issue #2198).
+ *
+ * Deliberately absent from {@link AGENT_MARKDOWN_REQUEST_ID_PREFIXES}, for the
+ * whole of the reason {@link CLAUDE_PROMPT_REQUEST_ID_PREFIX} states: the
+ * operator's own text is drawn verbatim and must not change shape because it
+ * happened to contain a `#` or a `|`.
+ *
+ * Keyed on the same `(conversationId, stepIndex)` pair as the turn's assistant
+ * row, which is claude's arrangement rather than codex's. It is the right one
+ * here because agy opens a turn with exactly one `USER_INPUT` record — 63 of 63
+ * in the corpus #2198 measured — so a turn never carries a second prompt the way
+ * a codex turn can.
+ */
+export const ANTIGRAVITY_PROMPT_REQUEST_ID_PREFIX = 'antigravity-prompt:';
+
+/**
  * Every prefix that means "this row holds source, not a rendering".
  *
  * One list rather than a chain of `startsWith` calls, so that adding the third
@@ -131,6 +162,7 @@ export const AGENT_MARKDOWN_REQUEST_ID_PREFIXES: readonly string[] = [
   AGENT_MARKDOWN_REQUEST_ID_PREFIX,
   CLAUDE_MARKDOWN_REQUEST_ID_PREFIX,
   CODEX_MARKDOWN_REQUEST_ID_PREFIX,
+  ANTIGRAVITY_MARKDOWN_REQUEST_ID_PREFIX,
 ];
 
 /**
@@ -233,4 +265,57 @@ export function codexTurnRequestId(turnId: string): string {
  */
 export function codexPromptRequestId(promptItemId: string): string {
   return `${CODEX_PROMPT_REQUEST_ID_PREFIX}${promptItemId}`;
+}
+
+/**
+ * The turn part of an antigravity row id (Issue #2198).
+ *
+ * `<conversationId>#<stepIndex>`, and both halves are load-bearing. antigravity
+ * has no `turn_id` of codex's kind and no per-record uuid of claude's; what it
+ * has is `step_index`, the primary key of the row in its own `steps` table. That
+ * is unique inside one conversation — measured with no duplicate across all 41
+ * transcripts and 1,024 records on the capture machine — and unique nowhere
+ * else, so a bare `12` would collide with the twelfth step of every other
+ * conversation the moment two agy instances shared a worktree.
+ *
+ * The `#` is a separator agy's own ids cannot contain: a conversation id is a
+ * uuid and a step index is a non-negative integer.
+ *
+ * @param conversationId - `conversationId`, as every agy hook payload carries it
+ * @param stepIndex - `step_index` of the `USER_INPUT` record that opened the turn
+ */
+function antigravityTurnKey(conversationId: string, stepIndex: number): string {
+  return `${conversationId}#${stepIndex}`;
+}
+
+/**
+ * The row id for one antigravity turn (Issue #2198).
+ *
+ * The turn is named by the **prompt record it answers** — the `step_index` of
+ * the `USER_EXPLICIT` / `USER_INPUT` line the operator's text arrived on. That
+ * is claude's arrangement (#2121) rather than codex's, because agy writes
+ * nothing that closes a turn and nothing that links a reply back to its prompt;
+ * what opens the turn is the only boundary in the file.
+ *
+ * @param conversationId - The conversation the turn was read from
+ * @param stepIndex - `step_index` of the record that opened the turn
+ */
+export function antigravityTurnRequestId(conversationId: string, stepIndex: number): string {
+  return `${ANTIGRAVITY_MARKDOWN_REQUEST_ID_PREFIX}${antigravityTurnKey(conversationId, stepIndex)}`;
+}
+
+/**
+ * The row id for the **prompt** that opened one antigravity turn (Issue #2198).
+ *
+ * Same pair, different prefix, and therefore a different row — exactly the
+ * relationship {@link claudePromptRequestId} has with {@link claudeTurnRequestId},
+ * and for the same reason: one prompt record names one turn, and a turn is a
+ * user row plus an assistant row, so keying both on the record that opened it is
+ * what makes the pair reconstructible from the transcript alone.
+ *
+ * @param conversationId - The conversation the turn was read from
+ * @param stepIndex - `step_index` of the record the operator's text arrived on
+ */
+export function antigravityPromptRequestId(conversationId: string, stepIndex: number): string {
+  return `${ANTIGRAVITY_PROMPT_REQUEST_ID_PREFIX}${antigravityTurnKey(conversationId, stepIndex)}`;
 }

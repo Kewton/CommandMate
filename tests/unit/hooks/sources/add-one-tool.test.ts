@@ -322,7 +322,10 @@ describe('antigravity: no event name, no cwd, camelCase, fail-closed', () => {
       permissionReplyReleasesPrompt: false,
       eventIdentity: null,
       resync: 'none',
-      // Issue #2197: the tool this fixture stands for has no transcript reader.
+      // The double declares `null` on purpose. The shipped antigravity source
+      // declares `'pull'` since #2198; what is under test here is that the
+      // abstraction can express either, so this one stays on the value that
+      // exercises the "no second writer" path.
       transcriptHistory: null,
     },
 
