@@ -177,6 +177,27 @@ async function fetchApi<T>(url: string, options?: RequestInit): Promise<T> {
 }
 
 /**
+ * Revive a message's `timestamp` after the JSON round trip (Issue #2213).
+ *
+ * `ChatMessage.timestamp` is typed `Date`, but JSON has no date type, so a row
+ * that came off the wire carries an ISO string in that field — and every
+ * consumer of it (`usePendingMessages`' reconciliation ordering,
+ * `useSplitMessages`' sort and pair trim) calls `.getTime()` on it. The same
+ * `new Date(...)` `useSplitMessages.parseMessageTimestamps` applies to a fetched
+ * list, applied to a single created row so the two producers hand out the same
+ * shape.
+ *
+ * Tolerant of a body that is not an object: a caller has enough problems when
+ * the server answered 201 with something else, and a `TypeError` from here
+ * would hide it.
+ */
+export function reviveMessageTimestamp(message: ChatMessage): ChatMessage {
+  if (message === null || typeof message !== 'object') return message;
+  if (message.timestamp instanceof Date) return message;
+  return { ...message, timestamp: new Date(message.timestamp) };
+}
+
+/**
  * Worktree API client
  */
 export const worktreeApi = {
@@ -283,15 +304,23 @@ export const worktreeApi = {
    * Send a message to a worktree
    * Issue #474: [S1-M2] Changed 3rd argument to options object for type safety
    *
+   * Issue #2213: resolves with the row the server created. `/send` has always
+   * answered 201 with the saved {@link ChatMessage} (`NextResponse.json(
+   * result.message, { status: 201 })`); this client declared the response as
+   * `{ success: boolean }` and threw the body away in the type. Callers that
+   * only care whether the send resolved are unaffected — they already ignore
+   * the value.
+   *
    * @param id - Worktree ID
    * @param content - Message content
    * @param options - Optional settings (cliToolId, instanceId, imagePath)
+   * @returns The created message, with its `timestamp` revived to a `Date`
    */
   async sendMessage(
     id: string,
     content: string,
     options?: { cliToolId?: CLIToolType; instanceId?: string; imagePath?: string }
-  ): Promise<{ success: boolean }> {
+  ): Promise<ChatMessage> {
     const body: { content: string; cliToolId?: string; instanceId?: string; imagePath?: string } = { content };
     if (options?.cliToolId) {
       body.cliToolId = options.cliToolId;
@@ -303,10 +332,11 @@ export const worktreeApi = {
     if (options?.imagePath) {
       body.imagePath = options.imagePath;
     }
-    return fetchApi<{ success: boolean }>(`/api/worktrees/${id}/send`, {
+    const created = await fetchApi<ChatMessage>(`/api/worktrees/${id}/send`, {
       method: 'POST',
       body: JSON.stringify(body),
     });
+    return reviveMessageTimestamp(created);
   },
 
   /**

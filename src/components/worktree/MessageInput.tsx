@@ -9,6 +9,7 @@ import React, { memo, useState, useCallback, FormEvent, useRef, useEffect } from
 import { useTranslations } from 'next-intl';
 import { worktreeApi, handleApiError } from '@/lib/api-client';
 import type { CLIToolType } from '@/lib/cli-tools/types';
+import type { ChatMessage } from '@/types/models';
 import { Kbd } from '@/components/ui/Kbd';
 import { Button, Spinner } from '@/components/ui';
 import { SlashCommandSelector } from './SlashCommandSelector';
@@ -23,7 +24,17 @@ import type { ShowToast } from '@/types/markdown-editor';
 
 export interface MessageInputProps {
   worktreeId: string;
-  onMessageSent?: (cliToolId: CLIToolType) => void;
+  /**
+   * Fired after a send resolves.
+   *
+   * Issue #2213: the second argument is the row `/send` created, forwarded from
+   * `worktreeApi.sendMessage` so a caller without an optimistic history can adopt
+   * it instead of waiting for the echo. It is `undefined` on the
+   * {@link onOptimisticSend} path, where the API call is fired in the background
+   * and the row is reconciled into the transcript by `usePendingMessages`. Every
+   * pre-#2213 caller takes one parameter and is unaffected.
+   */
+  onMessageSent?: (cliToolId: CLIToolType, sentMessage?: ChatMessage) => void;
   cliToolId?: CLIToolType;
   /**
    * Issue #869: agent instance id to send to. Defaults to the primary instance
@@ -274,7 +285,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     try {
       setSending(true);
       setError(null);
-      await worktreeApi.sendMessage(worktreeId, trimmed, options);
+      const created = await worktreeApi.sendMessage(worktreeId, trimmed, options);
       setMessage('');
       setIsFreeInputMode(false);
       resetAfterSend();
@@ -285,7 +296,10 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       if (isProcessing) {
         showToast?.(QUEUED_BUSY_TOAST_MESSAGE, 'warning');
       }
-      onMessageSent?.(effectiveCliTool);
+      // Issue #2213: hand the created row on. `/send` returns it and this is the
+      // path with nothing else to reconcile against — the optimistic path above
+      // has `usePendingMessages` for that and passes nothing.
+      onMessageSent?.(effectiveCliTool, created);
     } catch (err) {
       setError(handleApiError(err));
     } finally {
