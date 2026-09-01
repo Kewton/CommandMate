@@ -3,7 +3,7 @@
  *
  * Single split within `TerminalSplitContainer`. Renders:
  *  - Header: agent-instance selector (with "other-split-uses" excluded) +
- *    terminal-search button (Issue #47).
+ *    output-surface toggle (Issue #2193) + terminal-search button (Issue #47).
  *  - Body: caller-supplied terminal content (TerminalDisplay).
  *  - Footer: caller-supplied navigation / prompt / message input.
  *
@@ -19,13 +19,14 @@
 'use client';
 
 import React, { memo, useCallback, useState } from 'react';
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown, MessageSquare, TerminalSquare } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import {
   getInstanceLabel,
   type AgentInstance,
   type CLIToolType,
 } from '@/lib/cli-tools/types';
+import { DEFAULT_SURFACE_MODE, type SurfaceMode } from '@/types/ui-state';
 import { StatusDot, type StatusDotStatus } from '@/components/ui/StatusDot';
 import {
   DropdownMenu,
@@ -41,6 +42,24 @@ import {
  * previously a bare CLI tool id).
  */
 export const AGENT_INSTANCE_DND_MIME = 'application/x-commandmate-agent-instance';
+
+/**
+ * Issue #2193: the two segments of the output-surface control, in render order.
+ *
+ * Declared at module scope with i18n KEYS rather than resolved labels, for the
+ * reason `ACTIVITIES` in `activity-bar-config.ts` gives: `t()` cannot be called
+ * outside a component, so the label is resolved at render time. A third entry
+ * (`xterm`) is expected here eventually — nothing in this file switches
+ * exhaustively on {@link SurfaceMode}, so adding one is a one-line change.
+ */
+const SURFACE_MODE_SEGMENTS: readonly {
+  mode: SurfaceMode;
+  labelKey: string;
+  icon: typeof TerminalSquare;
+}[] = [
+  { mode: 'terminal', labelKey: 'surfaceMode.showTerminal', icon: TerminalSquare },
+  { mode: 'chat', labelKey: 'surfaceMode.showChat', icon: MessageSquare },
+] as const;
 
 export interface TerminalSplitPaneProps {
   worktreeId: string;
@@ -110,7 +129,19 @@ export interface TerminalSplitPaneProps {
    * empty (`null`) when the split's session is not running.
    */
   headerExtras?: React.ReactNode;
-  /** Terminal output area (TerminalDisplay). */
+  /**
+   * Issue #2193: which surface this split's body is showing. Presentational
+   * only — the pane renders whatever `terminal` contains; this drives the
+   * header control's pressed state. Defaults to `'terminal'`.
+   */
+  surfaceMode?: SurfaceMode;
+  /**
+   * Issue #2193: called when the header's segmented control picks a surface.
+   * OMITTING IT HIDES THE CONTROL, which is what keeps every pre-#2193 caller
+   * (and its tests) rendering the header it rendered before.
+   */
+  onSurfaceModeChange?: (mode: SurfaceMode) => void;
+  /** Terminal output area (TerminalDisplay), or the chat surface (Issue #2193). */
   terminal: React.ReactNode;
   /** Navigation buttons + PromptPanel + MessageInput. */
   footer: React.ReactNode;
@@ -146,6 +177,8 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
   onFocus,
   attaching = false,
   headerExtras,
+  surfaceMode = DEFAULT_SURFACE_MODE,
+  onSurfaceModeChange,
   terminal,
   footer,
   style,
@@ -297,6 +330,47 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
             </DropdownMenuRadioGroup>
           </DropdownMenuContent>
         </DropdownMenu>
+
+        {/* Issue #2193: the output-surface control, directly beside the session
+            title so it reads as "what this session is showing" rather than a
+            global view switch -- each split owns its own mode. Rendered only
+            when the parent wired `onSurfaceModeChange`.
+
+            Always visible (never hover-revealed): a hover-only affordance is
+            invisible on a touch screen, and this is the only way back from the
+            chat surface. Both segments stay mounted so the control's width does
+            not change when the mode does. */}
+        {onSurfaceModeChange ? (
+          <div
+            role="group"
+            aria-label={t('surfaceMode.groupLabel', { split: splitLabel })}
+            data-testid={`surface-mode-toggle-${splitIndex}`}
+            className="flex flex-shrink-0 items-center gap-0.5 rounded border border-border bg-surface p-0.5"
+          >
+            {SURFACE_MODE_SEGMENTS.map(({ mode, labelKey, icon: Icon }) => {
+              const active = surfaceMode === mode;
+              const label = t(labelKey);
+              return (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => onSurfaceModeChange(mode)}
+                  aria-pressed={active}
+                  aria-label={label}
+                  title={label}
+                  data-testid={`surface-mode-${mode}-${splitIndex}`}
+                  className={`flex items-center justify-center rounded px-1.5 py-0.5 touch-manipulation transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                    active
+                      ? 'bg-accent-500/15 text-accent-600 dark:text-accent-400'
+                      : 'text-muted-foreground hover:bg-muted hover:text-surface-foreground'
+                  }`}
+                >
+                  <Icon size={14} aria-hidden="true" />
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
 
         {/* Issue #1783: the model the agent itself reported, as muted small
             text after the alias. A sibling of the selector rather than a child
