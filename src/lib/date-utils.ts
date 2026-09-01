@@ -96,9 +96,10 @@ export function formatRelativeTimeShort(isoString: string): string {
 /**
  * Format a message timestamp as a localized date + time string. (Issue #687)
  *
- * Uses date-fns `'PPp'` (long localized date + long localized time) to match
- * `MessageList.tsx` and `PromptMessage.tsx`, ensuring consistent timestamp
- * presentation across all chat-style UI surfaces. UI callers should pass a
+ * Uses date-fns `'PPp'` (long localized date + long localized time), ensuring
+ * consistent timestamp presentation across all chat-style UI surfaces. The
+ * callers are `ConversationPairCard` (the transcript rows behind `HistoryPane` /
+ * `ChatSurface`) and `TreeNode`'s file metadata. UI callers should pass a
  * resolved `Locale` from `getDateFnsLocale()`.
  *
  * Returns an empty string for invalid `Date` values (or non-`Date` runtime

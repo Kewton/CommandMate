@@ -31,7 +31,7 @@
 
 - **worktree**: git worktree として管理されるブランチディレクトリ
 - **worktreeId**: URL セーフな識別子（例: `feature-foo`）
-- **tmux session**: `cw_{worktreeId}` という名前の tmux セッション
+- **tmux session**: `mcbd-{cliToolId}-{worktreeId}` という名前の tmux セッション（§6.1。`cw_{worktreeId}` は Issue #4 以前の旧名）
 - **Stop フック**: Claude CLI の `CLAUDE_HOOKS_STOP` に設定する完了フック
 
 ---
@@ -40,9 +40,14 @@
 
 ### 1.1 ゴール
 
-- git worktree ごとに **独立した Claude CLI セッション**を管理する
-- スマホや PC のブラウザから、**ブランチ別のチャット UI**として利用できる
-- Stop フックを活用し、**ポーリング無しのイベント駆動**で最新の応答を反映する
+- git worktree ごとに **独立した CLI エージェントセッション**を管理する
+- スマホや PC のブラウザから、**ブランチ別の作業画面**として利用できる
+  - 出力面はセッションごとに **ターミナル（tmux の画面そのまま）／チャット（会話の履歴）**を
+    切り替えられる（Issue #2193 / #2194、既定値は Issue #2201）。入力面は両モード共通で、
+    コンポーザ＋`PromptPanel` が常に出ている
+- エージェントの **hooks による構造化イベント**を第一の完了シグナルとし、
+  hooks を出さないツール／未設定のセッションでは **tmux ペインのポーリング**で補う
+  （`src/lib/polling/`、`src/lib/hooks/sources/`）
 - 対話の履歴／詳細ログをローカルに安全に保存する
 
 ### 1.2 Non-goals
@@ -87,56 +92,90 @@
 
 ### 3.1 コンポーネント図
 
+画面構成の正本は §11（URL設計・画面遷移）。ここでは worktree 詳細画面と
+バックエンドの関係だけを示す。
+
 ```mermaid
 graph TD
     subgraph Browser["スマホ/PCブラウザ"]
-        UI_A[画面A: Worktree一覧]
-        UI_B[画面B: チャット画面]
-        UI_C[画面C: ログビューア]
+        UI_Nav["Home / Sessions / Repositories / Review / More"]
+        subgraph UI_WT["Worktree 詳細 /worktrees/:id"]
+            UI_Out["出力面（切替: ターミナル / チャット）"]
+            UI_In["入力面（コンポーザ + PromptPanel）"]
+        end
         UI_WS[WebSocketクライアント]
     end
 
     subgraph Next["Next.js / Node.js Application"]
         App["Next.js UI (App Router)"]
-        API_Send[/POST /api/worktrees/:id/send/]
-        API_WT[/GET /api/worktrees/ .../]
-        API_Hook[/POST /api/hooks/claude-done/]
-        API_Logs[/GET /api/worktrees/:id/logs/ .../]
+        API_Send[/"POST /api/worktrees/:id/send"/]
+        API_Out[/"GET /api/worktrees/:id/current-output"/]
+        API_Answer[/"POST /api/worktrees/:id/prompt-response ・ /respond"/]
+        API_WT[/"GET /api/worktrees/ ..."/]
+        API_Hook[/"POST /api/hooks/agent-event ・ /claude-done ・ /permission-request"/]
+        API_Logs[/"GET /api/worktrees/:id/logs/ ..."/]
+        Poll["ポーリング層 (lib/polling)"]
         WS_Server[WebSocket サーバ]
         DB[(SQLite db.sqlite)]
     end
 
-    subgraph TmuxClaude["tmux / Claude CLI"]
+    subgraph TmuxAgents["tmux / CLI エージェント"]
         T[(tmux server)]
-        S1[tmux session: cw_main]
-        S2[tmux session: cw_feature-foo]
-        CL1[Claude CLI プロセス]
+        S1["tmux session: mcbd-claude-main"]
+        S2["tmux session: mcbd-codex-feature-foo"]
+        CL1["CLI エージェントプロセス"]
     end
 
     subgraph FS["Local Filesystem"]
         Logs[".claude_logs/ (Markdownログ)"]
+        Trans["エージェント転写 JSONL<br/>($CODEX_HOME/sessions/.../rollout-*.jsonl<br/>~/.gemini/antigravity-cli/brain/.../transcript_full.jsonl)"]
     end
 
-    UI_A --> App
-    UI_B --> App
-    UI_C --> App
+    UI_Nav --> App
+    UI_Out --> App
+    UI_In --> App
     UI_WS <---> WS_Server
 
     App --> API_WT
     App --> API_Send
+    App --> API_Out
+    App --> API_Answer
     App --> API_Logs
 
     API_Send --> T
-    API_Hook --> T
+    API_Answer --> T
+    API_Out --> T
+    API_Send --> Poll
+    Poll --> T
+    Poll --> DB
+    Poll --> WS_Server
 
     API_WT --> DB
     API_Logs --> Logs
     API_Hook --> DB
     API_Hook --> Logs
     API_Hook --> WS_Server
+    Poll --> Trans
 
-    CL1 -->|"Stopフック"| API_Hook
+    T --> S1
+    T --> S2
+    S1 --> CL1
+    S2 --> CL1
+
+    CL1 -->|"hooks (Stop / UserPromptSubmit ほか)"| API_Hook
 ```
+
+- **出力面**は split（PC）／タブ（スマホ）ごとに `terminal` / `chat` を切り替えられる
+  （Issue #2193）。`chat` は `ChatSurface` → `HistoryPane` → `ConversationPairCard`、
+  `terminal` は `TerminalDisplay`。**入力面は両モード共通**で、待機中は同じ `PromptPanel` が
+  出る（Issue #2194 が出力面に応答 UI を置いていないのはこのため）
+- **完了シグナルは 2 系統**: エージェントの hooks（`/api/hooks/agent-event` ほか、構造化）と、
+  tmux ペインのポーリング（`lib/polling`、スクレイピング）。前者があればそちらが優先される
+  （`src/lib/session/agent-event-state.ts`）
+- **転写 JSONL** は codex / antigravity など、エージェント自身が Markdown 本文を書き出す
+  ツールの履歴取り込み元。リーダーは `src/lib/hooks/sources/{codex,antigravity}/history.ts` に
+  あるが、呼ぶのは hooks ルートではなく**ポーリング層の
+  `src/lib/polling/structured-history-gate.ts`**（Issue #2197 / #2198）
 
 ### 3.2 プロセス & ポート
 	•	Next.js / Node.js プロセス
@@ -148,7 +187,7 @@ graph TD
 	•	SQLite への接続
 	•	tmux server
 	•	システム上に既存の tmux サーバを利用
-	•	cw_{worktreeId} というセッション名で CLI ツールを起動
+	•	mcbd-{cliToolId}-{worktreeId} というセッション名で CLI ツールを起動
 	•	CLI ツールプロセス（Claude Code / Codex CLI）
 	•	各 tmux セッション内で選択された CLI ツールが起動
 	•	CLAUDE_HOOKS_STOP に設定されたコマンドで完了通知（Claude Code の場合）
@@ -179,25 +218,41 @@ interface Worktree {
 
 ### 4.2 ChatMessage
 
+正本は `src/types/models.ts`。要点のみ:
+
 ```
-type ChatRole = "user" | "claude";
+type ChatRole = "user" | "assistant";
 
 interface ChatMessage {
-  id: string;           // UUID
-  worktreeId: string;   // Worktree.id
+  id: string;                  // UUID
+  worktreeId: string;          // Worktree.id
   role: ChatRole;
-  content: string;      // UI表示用の全文
-  summary?: string;     // 任意の短い要約
+  content: string;             // UI表示用の全文
+  summary?: string;            // 任意の短い要約
   timestamp: Date;
-  logFileName?: string; // 対応する Markdown ログファイル名
-  requestId?: string;   // 将来の拡張用: 1送信=1 UUID
+  logFileName?: string;        // 対応する Markdown ログファイル名
+  requestId?: string;          // 1送信=1 UUID
+  messageType: MessageType;    // 'normal' | 'prompt' ほか
+  promptData?: StoredPromptData; // prompt 行のみ。読む前に isAnswerablePromptData() で絞る
+  cliToolId?: CLIToolType;     // どのエージェントの行か
+  instanceId?: string;         // どのインスタンスの行か（既定は primary === cliToolId）
+  archived: boolean;           // 過去セッションの行か
+  optimisticState?: OptimisticSendState; // 送信確定前のクライアント側 pending 行のみ
 }
 ```
 
+- role:
+`"claude"` ではなく **`"assistant"`**。ツール名は `cliToolId` が持つ。
 - content:
-チャット UI にそのまま表示するテキスト（プロンプト／応答）。
-- summary:
-Worktree 一覧の lastMessageSummary に反映するための要約（任意）。
+チャット面にそのまま表示するテキスト（プロンプト／応答）。
+**ANSI は保存前に落ちている**（`lib/response-cleaner` / `lib/response-extractor` が
+`stripAnsi()` を通す）ので、表示側は ANSI 変換を持たない。
+- promptData:
+`PromptData`（応答可能）と、#1708 / #1725 の劣化行（`type: 'unclassified'`）が
+同じカラムに同居する。`isAnswerablePromptData()` で絞ってから `options` / `answer` に触ること。
+- archived / optimisticState:
+`archived` は過去セッションの行（`HistoryPane` の「アーカイブも表示」で出る）。
+`optimisticState` はサーバ確定前の pending 行（Issue #1121）で、API が返す行には決して付かない。
 - logFileName:
 .claude_logs/ 内の詳細ログファイルへのリンク。
 
@@ -220,39 +275,50 @@ interface WorktreeSessionState {
 ### 5.1 起動 & Worktree スキャン
 1. アプリ起動時、CM_ROOT_DIR を基準として git worktree をスキャン。
 1. 取得した worktree 情報を基に Worktree レコードを DB に格納／更新。
-1. 既存の cw_{worktreeId} tmux セッションがあれば、Worktree と突き合わせて整合性をとる（任意）。
+1. 既存の mcbd-{cliToolId}-{worktreeId} tmux セッションがあれば、Worktree と突き合わせて整合性をとる（任意）。
 
-### 5.2 メッセージ送信フロー（UI → Claude）
+### 5.2 メッセージ送信フロー（UI → エージェント）
 
 概要
 
 ```mermaid
 sequenceDiagram
-    participant UI as UI (画面B)
-    participant API as API_Send
+    participant UI as UI (コンポーザ)
+    participant API as POST /api/worktrees/:id/send
+    participant SVC as sendUserMessage()
     participant T as tmux
-    participant CL as Claude CLI
+    participant CL as CLI エージェント
+    participant WS as WebSocket
 
-    UI->>API: POST /api/worktrees/:id/send { message }
-    API->>T: セッション存在チェック (cw_{worktreeId})
+    UI->>UI: pending 行を先に描く (Issue #1121)
+    UI->>API: POST { content, cliToolId?, instanceId? }
+    API->>API: 入力検証 / (tool, instance) 解決 / 待機ガード
+    API->>T: ICLITool.isRunning() で存在チェック
     alt セッション無し
-        API->>T: tmux new-session (cw_{worktreeId})
-        API->>T: export CLAUDE_HOOKS_STOP=...
-        API->>T: claude 起動
+        API->>T: startSession() → mcbd-{cliToolId}-{worktreeId}
     end
-    API->>T: tmux send-keys "message"
-    API-->>UI: 202 Accepted (送信完了)
-    Note over UI: 「送信中…」バブルを表示
+    API->>SVC: 検証済み入力を委譲
+    SVC->>T: ICLITool.sendMessage()
+    SVC->>SVC: chat_messages に user 行を INSERT
+    SVC->>WS: broadcastMessage('message') (Issue #2195)
+    SVC->>SVC: startPolling() で応答待ちに入る
+    API-->>UI: 201 Created (作成された user 行)
+    WS-->>UI: pending 行を確定行に差し替え
 ```
 
 詳細ステップ
-1. UI（画面B）が POST /api/worktrees/:id/send に { message } を送信。
-1. API:
-    - worktreeId から Worktree を取得し、path を参照。
-    - tmux has-session -t cw_{worktreeId} でセッション存在チェック。
-    - なければ UC-2（遅延起動フロー）を実行（後述）。
-1. tmux send-keys -t cw_{worktreeId} "＜message＞" C-m で Claude CLI へ送信。
-1. API は 202 (Accepted) などで UI に即時応答。UI では自分のメッセージ＋「送信中…」バブルを表示。
+1. UI（コンポーザ）が `POST /api/worktrees/:id/send` に `{ content, cliToolId?, instanceId? }`
+   を送る（`src/lib/api-client.ts`）。**キーは `message` ではなく `content`**。
+   送信前に楽観的な pending 行がその場に描かれる（Issue #1121）。
+1. ルート（HTTP 層）: 本文検証・サイズ上限・`imagePath` 検証・(tool, instance) 解決
+   （`resolve-session-target`）・CLI ツールの可用性確認・セッション起動。
+   ダイアログ待機中は **409 ＋ `code: PROMPT_WAITING`** で断る。
+1. `sendUserMessage()`（`src/lib/session/send-user-message.ts`）が
+   前回応答の確定 → 重複ガード → `ICLITool.sendMessage()` → `chat_messages` への
+   user 行 INSERT → `broadcastMessage('message')` → `startPolling()` を順に行う。
+   **タイマー実行（`lib/timer-manager.ts`）も同じ関数を通る**ので、履歴の作られ方は一つ。
+1. ルートは **201 Created** と作成された `ChatMessage` を返す。UI は WebSocket の
+   `message` イベントで pending 行を確定行に差し替える。
 
 ### 5.3 Stop フック処理フロー（Claude → API → ログ/DB）
 
@@ -286,7 +352,7 @@ export CLAUDE_HOOKS_STOP="${HOOK_COMMAND}"
 ```
 1. POST /api/hooks/claude-done を受け取った API_Hook は、
     - WorktreeSessionState.lastCapturedLine を読み込む（デフォルト 0）。
-    - tmux capture-pane -p -S -10000 -t cw_{worktreeId} などで scrollback を取得。
+    - tmux capture-pane -p -S -10000 -t mcbd-{cliToolId}-{worktreeId} などで scrollback を取得。
 1. 取得したテキストの行数をカウントし、
     - lastCapturedLine 以降の行だけを「新規出力」として抽出。
     - 将来的にマーカー (### REQUEST {id} START/END) が導入される場合は、その範囲のみ抽出する拡張も可能。
@@ -298,20 +364,47 @@ export CLAUDE_HOOKS_STOP="${HOOK_COMMAND}"
 ### 5.4 WebSocket フロー
 - クライアントは接続時に worktreeId を指定して subscribe。
 - サーバ側では worktreeId ごとに room / channel を管理。
-- 新しい ChatMessage が保存されると、
-- 該当 worktreeId を購読中のクライアントにブロードキャスト。
+- サーバは room 宛のフレームを `{ type: 'broadcast', worktreeId, data: {...} }` の
+  封筒で送り、クライアントは `parseRealtimeEvent()` で中身を取り出す
+  （封筒なしの生フレームも防御的に受ける）。
 
-メッセージ形式の例:
+**イベント一覧の正本は `src/lib/realtime/types.ts` の `RealtimeEvent`。**
+現在の内訳:
+
+| `type` | いつ出るか | 主なフィールド |
+|--------|-----------|---------------|
+| `session_status_changed` | セッションの起動／停止、および**待機の開始／終了エッジ**（Issue #1788） | `isRunning?` / `isWaitingForResponse?` / `waitingKind?` / `waitingSince?` / `cliTool?` / `instance?` |
+| `message` | user 行の INSERT（Issue #2195）、および応答が確定したとき | `message: ChatMessage` |
+| `message_updated` | 既存行の更新（プロンプトへの回答が入ったときなど） | `message: ChatMessage` |
+| `terminal_snapshot` | 生成中にポーラーが送るターミナル出力のスナップショット（`/current-output` と同じ形） | `output` / `isRunning` / `thinking` / `isPromptWaiting` / `promptData?` / `isSelectionListActive` / `isPagerActive` / `isUnclassifiedActive` / `version` |
+| `chat_turn_progress` | **生成中のアシスタント本文**をチャット面に逐次表示する（Issue #2199） | `turnKey` / `body`（エージェントが書いた Markdown） / `partial` / `version` / `done: false` |
+| `repository_deleted` | リポジトリが削除されたとき | `repositoryPath?` |
+| `version_mismatch` | サーバとクライアントの版が食い違ったとき | `serverVersion` / `clientVersion` |
+
+- `terminal_snapshot` と `chat_turn_progress` は `(worktreeId, cliToolId, instanceId)` ごとに
+  **単調増加する `version`** を持つ。順序が入れ替わって届いた古いフレームはクライアントが捨てる。
+- `chat_turn_progress` の `done` は**常に `false`**。ターンを確定させるのは `message` の方で、
+  履歴の書き手を二つにしないための取り決め。
+
+フレームの例:
 ```
 {
-  "type": "chat_message_created",
+  "type": "broadcast",
   "worktreeId": "feature-foo",
-  "message": {
-    "id": "uuid",
-    "role": "claude",
-    "content": "Claude の応答...",
-    "timestamp": "2025-11-16T03:00:00.000Z",
-    "logFileName": "20251116-030000-feature-foo-bd2f8c3d.md"
+  "data": {
+    "type": "message",
+    "worktreeId": "feature-foo",
+    "message": {
+      "id": "uuid",
+      "role": "assistant",
+      "content": "エージェントの応答...",
+      "timestamp": "2026-09-01T03:00:00.000Z",
+      "messageType": "normal",
+      "cliToolId": "codex",
+      "instanceId": "codex",
+      "archived": false,
+      "logFileName": "20260901-030000-feature-foo-bd2f8c3d.md"
+    }
   }
 }
 ```
@@ -382,7 +475,7 @@ tmux セッション / Claude プロセスが落ちた場合
 ### 6.2 UC-2: 遅延セッション起動フロー
 
 ```
-# {sessionName}   = cw_{worktreeId}
+# {sessionName}   = mcbd-{cliToolId}-{worktreeId}
 # {worktreePath}  = /path/to/root/feature/foo
 tmux new-session -d -s "{sessionName}" -c "{worktreePath}"
 

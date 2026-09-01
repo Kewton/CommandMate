@@ -66,14 +66,6 @@
     "openFile": "Open file: {path}",
     "conversationLabel": "Conversation: {preview}"
   },
-  "messages": {
-    "loading": "Loading messages...",
-    "empty": "No messages yet",
-    "you": "You",
-    "copy": "Copy",
-    "copyMessage": "Copy message",
-    "viewLogFile": "View log file →"
-  },
   "slashCommands": {
     "title": "Commands",
     "searchPlaceholder": "Search commands...",
@@ -317,21 +309,11 @@
     "confirmKill": "End session for \"{name}\"?\n\nAll message history will be deleted. Log files will be retained.",
     "failedToKill": "Failed to end session",
     "confirmEnd": "End {tool} session?",
-    "endWarning": "Ending the session will clear chat history.",
-    "running": "Session running",
-    "starting": "Starting session",
-    "startingEllipsis": "Starting session..."
+    "endWarning": "Ending the session will clear chat history."
   },
   "status": {
     "waitingForResponse": "Waiting for response",
-    "responseCompleted": "Response completed",
-    "thinking": "Thinking...",
-    "thinkingStatus": "Thinking",
-    "agentIsThinking": "{toolName} is thinking..."
-  },
-  "output": {
-    "latest": "Latest output",
-    "realtimeUpdate": "Real-time update"
+    "responseCompleted": "Response completed"
   },
   "errors": {
     "failedToUpdateFavorite": "Failed to update favorite",

@@ -150,8 +150,9 @@ export const SELECTION_LIST_REASONS = new Set<string>([
  * one: branch A of the opencode block answers `opencode_processing_indicator`
  * for the footer that reads `esc interrupt`, which is opencode's ONLY signal
  * while it is between the submitted prompt and the first transcript row. A
- * scraper-only session (no hooks) therefore showed no thinking indicator in
- * `MessageList` for exactly the stretch where one is wanted.
+ * scraper-only session (no hooks) therefore showed no thinking indicator on the
+ * chat surface for exactly the stretch where one is wanted. The consumer is
+ * `ChatSurface`, which reads this through `current-output`'s `thinking` flag.
  *
  * `DEFAULT` is deliberately absent: it is the "output changed recently" fallback
  * and says nothing about the agent having announced itself, so promoting it
