@@ -13,6 +13,9 @@
  *   3. copilot /model command        — Issue #576 (copilot only)
  *   4. send to CLI tool              — image branch / ICLITool.sendMessage
  *   5. createMessage (role: 'user')  — INSERT INTO chat_messages (History source)
+ *   5b. broadcastMessage('message')  — Issue #2195, push the user row to every
+ *                                      open pane (the send that produced it is
+ *                                      not necessarily on this device)
  *   6. orphan deletion               — remove prior duplicate after persist
  *   7. updateLastUserMessage
  *   8. clearInProgressMessageId
@@ -35,6 +38,7 @@ import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { isImageCapableCLITool, type CLIToolType } from '@/lib/cli-tools/types';
 import { startPolling } from '@/lib/polling/response-poller';
 import { savePendingAssistantResponse } from '@/lib/assistant-response-saver';
+import { broadcastMessage } from '@/lib/ws-server';
 import { createLogger } from '@/lib/logger';
 import { isPromptWaiting, promptWaitingMessage } from '@/lib/session/prompt-waiting-guard';
 import type { CopilotTool } from '@/lib/cli-tools/copilot';
@@ -226,6 +230,31 @@ export async function sendUserMessage(
     cliToolId,
     instanceId,
   });
+
+  // 5b. Broadcast the user row (Issue #2195).
+  //
+  // Every other history writer already does this; this one did not, so a second
+  // device (or a second pane on the same device) saw a message it did not send
+  // only on its next poll — and #2195 stretches that poll to 15s while a socket
+  // is up, which would have made the omission three times as visible.
+  //
+  // `createMessage` hands back the caller's own object rather than re-reading
+  // the row, so `instanceId` here would be `undefined` whenever the caller
+  // omitted it. It is resolved to the primary instance (=== cliToolId) exactly
+  // as `createMessage` resolves it for the column, so the client's
+  // (worktreeId, cliToolId, instanceId) match cannot miss.
+  //
+  // Wrapped because the message is already sent and already persisted by this
+  // point: a socket write that throws must not turn a successful send into a
+  // failure the caller reports to the user.
+  try {
+    broadcastMessage('message', {
+      worktreeId,
+      message: { ...message, cliToolId, instanceId: instanceId ?? cliToolId },
+    });
+  } catch (error) {
+    logger.warn('user-message-broadcast-failed', { error: getErrorMessage(error) });
+  }
 
   // 6. Remove the prior orphan only after the retry message is persisted.
   // This avoids data loss if send/create fails partway through.

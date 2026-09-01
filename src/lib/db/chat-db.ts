@@ -616,19 +616,33 @@ export function updatePromptData(
  * Mark all pending prompts as answered for a worktree/CLI tool
  * This is called when we detect Claude has started processing (new response detected)
  * which means any pending prompts must have been answered via terminal
+ *
+ * @param onUpdated - Issue #2195. Invoked once per row that was actually
+ *   stamped, with the row as it now reads. This sweep is the one prompt-status
+ *   writer that produced no realtime frame, so a prompt card stayed "pending"
+ *   in every open pane until the next history poll — up to 15s once #2195
+ *   demoted that poll to a fallback. The caller supplies the broadcast rather
+ *   than this module reaching for `ws-server`: the DB layer has no business
+ *   importing the socket, and the two sweep callers that are *not* a poller
+ *   (the worktree list/detail routes) have no room to broadcast into anyway.
+ *   Throwing from the callback is the caller's problem; it is not caught here.
  */
 export function markPendingPromptsAsAnswered(
   db: Database.Database,
   worktreeId: string,
   cliToolId: CLIToolType,
-  instanceId?: string
+  instanceId?: string,
+  onUpdated?: (message: ChatMessage) => void
 ): number {
   // Find all pending prompt messages for this worktree/CLI tool.
   // Issue #868: When instanceId is provided, scope to that instance only;
   // otherwise fall back to the legacy cli_tool_id scoping.
   const resolvedInstanceId = instanceId ?? cliToolId;
+  // Issue #2195: the full column set, not just (id, prompt_data) — `onUpdated`
+  // publishes a `ChatMessage`, and re-reading each row afterwards would be a
+  // second query per prompt for data this statement already has to visit.
   const selectStmt = db.prepare(`
-    SELECT id, prompt_data
+    SELECT id, worktree_id, role, content, summary, timestamp, log_file_name, request_id, message_type, prompt_data, cli_tool_id, instance_id, archived
     FROM chat_messages
     WHERE worktree_id = ?
       AND instance_id = ?
@@ -638,7 +652,7 @@ export function markPendingPromptsAsAnswered(
     ORDER BY timestamp DESC
   `);
 
-  const rows = selectStmt.all(worktreeId, resolvedInstanceId) as { id: string; prompt_data: string }[];
+  const rows = selectStmt.all(worktreeId, resolvedInstanceId) as ChatMessageRow[];
 
   if (rows.length === 0) {
     return 0;
@@ -652,9 +666,11 @@ export function markPendingPromptsAsAnswered(
   `);
 
   let updatedCount = 0;
+  const updated: ChatMessage[] = [];
   for (const row of rows) {
     try {
-      const promptData = JSON.parse(row.prompt_data);
+      const promptData = JSON.parse(row.prompt_data ?? 'null');
+      if (!promptData || typeof promptData !== 'object') continue;
       promptData.status = 'answered';
       promptData.answer = '(answered via terminal)';
       promptData.answeredAt = new Date().toISOString();
@@ -662,11 +678,21 @@ export function markPendingPromptsAsAnswered(
       // prompts nothing else claimed, so all that is known is that the agent
       // moved on — i.e. someone acted in the terminal.
       promptData.answeredBy = 'terminal';
-      updateStmt.run(JSON.stringify(promptData), row.id);
+      const serialized = JSON.stringify(promptData);
+      updateStmt.run(serialized, row.id);
       updatedCount++;
+      if (onUpdated) {
+        updated.push(mapChatMessage({ ...row, prompt_data: serialized }));
+      }
     } catch {
       // Skip if prompt_data is invalid JSON
     }
+  }
+
+  // Published after every write lands, so a listener that reacts by reading the
+  // table back cannot observe a half-swept instance.
+  for (const message of updated) {
+    onUpdated?.(message);
   }
 
   return updatedCount;
