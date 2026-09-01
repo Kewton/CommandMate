@@ -1,29 +1,37 @@
 /**
- * What a history producer's `broadcastMessage` actually reaches (Issue #2214).
+ * What a history producer's `broadcastMessage` actually reaches
+ * (Issue #2214, corrected by #2220).
  *
  * Every unit test around #2214 mocks `@/lib/ws-server`, which means all of them
  * are green whether or not a real socket ever sees the frame. This file removes
  * that mock: a real `WebSocketServer` on a real HTTP server, a real `ws` client
  * in a real room, and a producer driven end to end into a real SQLite row.
  *
- * It exists for one design fact that no mock can express. `broadcastMessage`
- * writes to `rooms`, a plain module-scope `Map` in `src/lib/ws-server.ts`, and
- * only the module instance the custom server called `setupWebSocket` on holds
- * live sockets — `setupWebSocket`'s own comment says the listener it registers
- * "must be the closure holding *this* bundle's `rooms` map".
+ * ## What #2214 claimed here, and why it was wrong
  *
- *  - **In production** there is one bundle: `server.ts` starts the custom server
- *    and every route handler shares its module registry, so a producer reached
- *    from a route publishes into the same `rooms` the sockets live in. That is
- *    the topology the first two tests pin, and #2214's acceptance is scoped to
- *    it.
- *  - **Under `next dev`** routes are bundled separately, so a producer reached
- *    from a route bundle can hold a *different* instance of this module, with an
- *    empty `rooms`, and its push is a silent no-op. The pane still catches up on
- *    its next history poll (15 s since #2195). The last test pins that too, so
- *    the limitation is a stated fact with a test behind it rather than a
- *    footnote — and so a future cross-bundle bridge (out of scope here; it needs
- *    its own Issue) has an assertion to flip rather than a comment to find.
+ * The first two cases used to be called "production topology", and the third
+ * "`next dev` topology". Both names overstated what a Vitest file can observe.
+ * Nothing here loads a Next route bundle; the instances below come from this
+ * process's module registry and `vi.resetModules()`. What they actually
+ * distinguish is **one module instance versus two** — and #2220 established that
+ * the two-instance case is not a `next dev` curiosity but the shape of
+ * production:
+ *
+ * ```
+ * dist/server/server.js             -> require("./src/lib/ws-server")  // calls setupWebSocket
+ * .next/server/app/api/**\/route.js  -> .next/server/chunks/<n>.js      // a second copy, never set up
+ * ```
+ *
+ * So the third case was reproducing the *production* failure while its name
+ * said `next dev`, and #2214's acceptance was scoped to a topology that does not
+ * exist. The cases are renamed to what they test and the third one's expectation
+ * is flipped: since #2220 a second instance's publish is carried to the socket
+ * owner by the registry in `lib/realtime/publisher-registry`.
+ *
+ * The bridge's own behaviour — subscriber counts, room lifecycle, ownership
+ * under re-registration, the version sequence — is covered in
+ * `ws-publisher-bridge-2220.test.ts`. This file stays what it was: proof that a
+ * *producer*, driven for real, lands on a socket.
  *
  * @vitest-environment node
  */
@@ -42,6 +50,7 @@ import {
   type PermissionRequestSession,
 } from '@/lib/hooks/permission-decision-service';
 import { setupWebSocket, closeWebSocket, broadcastMessage } from '@/lib/ws-server';
+import { __resetRoomPublisherRegistryForTest } from '@/lib/realtime/publisher-registry';
 import type { Worktree } from '@/types/models';
 
 /** The producer reaches its database through this; hand it the in-memory one. */
@@ -101,6 +110,10 @@ beforeEach(async () => {
   seedWorktree();
   clearAllAutoYesStates();
   clearAutoYesPolicyCache();
+  // Issue #2220: the registry lives on `globalThis`, so a leftover owner from an
+  // earlier file in the same worker would route this file's publishes into a
+  // dead server. Claim it from a clean slate.
+  __resetRoomPublisherRegistryForTest();
 
   httpServer = createServer();
   setupWebSocket(httpServer);
@@ -134,10 +147,11 @@ afterEach(async () => {
   });
   db.close();
   clearAllAutoYesStates();
+  __resetRoomPublisherRegistryForTest();
   vi.resetModules();
 });
 
-describe('production topology: one bundle, one `rooms`', () => {
+describe('a producer and the socket owner in one module instance', () => {
   it('delivers a producer-written row to a subscribed socket', async () => {
     setAutoYesEnabled(WORKTREE_ID, 'claude', true, ONE_HOUR_MS);
     const payload = parsePermissionRequestPayload({
@@ -179,12 +193,12 @@ describe('production topology: one bundle, one `rooms`', () => {
   });
 });
 
-describe('`next dev` topology: a second module instance', () => {
-  it('publishes into its own empty `rooms`, reaching nobody', async () => {
-    // A route bundle's copy of the module. `vi.resetModules()` gives the next
+describe('a producer in a second module instance', () => {
+  it('reaches the owner’s socket through the publisher registry, exactly once', async () => {
+    // A route handler's copy of the module. `vi.resetModules()` gives the next
     // import a fresh registry entry, which is the same thing a separate webpack
-    // bundle gives a route handler: same source, different module scope, and —
-    // crucially — a different `rooms`.
+    // chunk gives a route handler: same source, different module scope, and —
+    // before #2220 — a different, permanently empty `rooms`.
     vi.resetModules();
     const routeBundle = await import('@/lib/ws-server');
     expect(routeBundle.broadcastMessage).not.toBe(broadcastMessage);
@@ -202,12 +216,15 @@ describe('`next dev` topology: a second module instance', () => {
       message: { id: 'msg-from-server-bundle' },
     });
 
-    await waitForEnvelopes(1);
-    // Known limitation, deliberately pinned: only the server bundle's frame
-    // arrives. Closing the gap needs a cross-bundle bridge (or a `globalThis`
-    // home for `rooms`) — a change larger than #2214, and its own Issue. When
-    // that lands, this expectation becomes 2 and the `id` filter goes away.
-    expect(envelopes()).toHaveLength(1);
-    expect(envelopes()[0].data.message?.id).toBe('msg-from-server-bundle');
+    await waitForEnvelopes(2);
+    // Both arrive, in the order they were published — this is the assertion
+    // #2214 left at 1 and #2220 flipped. The length also pins the other half of
+    // the contract: the route bundle's frame is delivered *once*, not once by
+    // the bridge and again by a second publisher.
+    expect(envelopes()).toHaveLength(2);
+    expect(envelopes().map((e) => e.data.message?.id)).toEqual([
+      'msg-from-route-bundle',
+      'msg-from-server-bundle',
+    ]);
   });
 });
