@@ -428,6 +428,19 @@
     "showChat": "会話を表示",
     "chatSurfaceLabel": "会話"
   },
+  "chatSurface": {
+    "liveRegionLabel": "セッションの状態",
+    "generating": "応答中…",
+    "thinking": "考え中…",
+    "bannerLabel": "ターミナルでの操作が必要です",
+    "reasonPager": "ページャ表示中です。スクロールと終了はターミナル面で操作してください。",
+    "reasonSelectionList": "選択リストが開いています。項目の移動と決定はターミナル面で操作してください。",
+    "reasonUnclassified": "チャットでは読み取れない画面が出ています。ターミナル面で内容を確認してください。",
+    "reasonPromptUnreadable": "応答待ちですが選択肢を読み取れませんでした。ターミナル面で確認してください。",
+    "openTerminal": "ターミナルで確認",
+    "jumpToLatest": "新着へ",
+    "emptyHint": "送信するとセッションが起動します"
+  },
   "unsentComposer": {
     "regionLabel": "未送信の入力",
     "label": "未送信の入力:",
