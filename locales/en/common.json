@@ -84,9 +84,7 @@
     "duplicateRowDetail": "Same git repository as {paths}. Use the Scan toggle on one of these rows to exclude it from scans."
   },
   "cancel": "Cancel",
-  "send": "Send",
   "sending": "Sending...",
-  "sendMessagePlaceholder": "Send a message...",
   "end": "End",
   "ending": "Ending...",
   "retry": "Retry",

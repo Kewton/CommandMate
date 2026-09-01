@@ -138,6 +138,11 @@ const DECLARED: readonly Declared[] = [
     why: '§4 D3 決定 3 が新設する `releasedBy` の値。`agent-event-state.ts` のコメントが設計語として先に引いている（`releasedBy` 自体は未実装）',
   },
   {
+    text: 'generatingContent',
+    category: 'history',
+    why: '#2200 が削除した `MessageListProps` のフィールド。§9「統合判定（非影響）」行が、その props に状態フラグが無かったことの記録として名前を残している',
+  },
+  {
     text: 'getCaptureWindow()',
     category: 'planned',
     why: '§4 D4 が `src/lib/session/` に新設すると決めた `session` ファサードの片方。Phase 2',
@@ -173,6 +178,11 @@ const DECLARED: readonly Declared[] = [
     why: '§10.1 が「別名 `MAX_EVENT_ID_LENGTH` を置く場合も同じ定数を参照し、値を複製しない」と条件つきで書いた名前。§14 の 3 行はレビュー履歴が同じ名前を引いている',
   },
   {
+    text: 'MessageList',
+    category: 'history',
+    why: '#2200 が削除した旧チャット UI コンポーネント。§9 / §10.13 / §14.3 DR3-022 / §15.4 が「本設計の消費者ではない」という否定的実測の記録として名前を残している',
+  },
+  {
     text: 'OPENCODE_SERVER_PASSWORD',
     category: 'external',
     why: 'opencode CLI 自身の環境変数。§15.1 の未決事項（ポート identity の強化）で、採用するかどうかがまだ決まっていない',
@@ -181,6 +191,11 @@ const DECLARED: readonly Declared[] = [
     text: 'readBoundedId',
     category: 'planned',
     why: '§6.2 / DR4-001 が `src/lib/hooks/sources/event-mapper.ts` に新設すると決めた共通バリデータ',
+  },
+  {
+    text: 'realtimeOutput',
+    category: 'history',
+    why: '#2200 が削除した `MessageListProps` のフィールド。`generatingContent` と同じ §9 の否定的実測の記録で引かれている',
   },
   {
     text: 'tests/unit/hooks/sources/event-id-validation.test.ts',
@@ -285,7 +300,10 @@ describe('DECLARED is reviewable', () => {
        be visible in review rather than absorbed silently. */
     expect(byCategory).toEqual({
       planned: 11,
-      history: 2,
+      // Issue #2200 deleted the legacy chat UI the document measured in Stage 3
+      // (DR3-022's negative finding) and two of its props, so three more names
+      // are now history rather than code. Same shape as `getStatusCaptureLines`.
+      history: 5,
       external: 5,
       prose: 1,
       'test-only': 1,

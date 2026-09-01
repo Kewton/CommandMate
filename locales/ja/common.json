@@ -84,9 +84,7 @@
     "duplicateRowDetail": "{paths} と同じ git リポジトリです。どちらかの行の Scan トグルで走査対象から外せます。"
   },
   "cancel": "キャンセル",
-  "send": "送信",
   "sending": "送信中...",
-  "sendMessagePlaceholder": "メッセージを送信...",
   "end": "終了する",
   "ending": "終了中...",
   "retry": "再試行",

@@ -24,11 +24,19 @@
  *
  * What it deliberately does NOT do is call `sendUserMessage`, which is what the
  * Issue text proposed. That function also writes a `chat_messages` row and
- * starts the response poller, and this route's one caller
- * (`src/hooks/useSendMessage.ts`, the Review screen's input) already POSTs the
- * message to `/api/worktrees/:id/messages` immediately afterwards — so routing
- * through it would put every Review-screen message into History twice. The
- * guard is what was missing, and the guard is what was taken.
+ * starts the response poller, and the Review-screen composer this route was
+ * built for already POSTed the message to `/api/worktrees/:id/messages`
+ * immediately afterwards — so routing through it would have put every
+ * Review-screen message into History twice. The guard is what was missing, and
+ * the guard is what was taken.
+ *
+ * Issue #2200 retired that composer, so this route now has **no caller in this
+ * repository**: the worktree composer sends through
+ * `POST /api/worktrees/:id/send` (`lib/api-client.ts`) and `commandmate send`
+ * goes to the same place. It is kept as a published endpoint — the reason to
+ * revisit the `sendUserMessage` question is a new caller, not this comment.
+ * `tests/integration/api-send-prompt-waiting-1708.test.ts` pins both halves of
+ * the arrangement so neither can drift while the route sits unused.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
