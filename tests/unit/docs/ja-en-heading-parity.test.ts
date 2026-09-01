@@ -48,6 +48,14 @@ const PAIRS: ReadonlyArray<{ name: string; ja: string; en: string }> = [
     ja: 'docs/user-guide/tutorial.md',
     en: 'docs/en/user-guide/tutorial.md',
   },
+  {
+    // Issue #2211: the pair that this test did not cover while Epic #2192 added
+    // two output-surface sections to the JA guide, so the EN side fell two
+    // sections behind with nothing going red.
+    name: 'webapp-guide',
+    ja: 'docs/user-guide/webapp-guide.md',
+    en: 'docs/en/user-guide/webapp-guide.md',
+  },
 ];
 
 /** Placeholders a translation must never ship with. */
