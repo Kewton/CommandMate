@@ -1,15 +1,15 @@
 /**
  * Whether somebody better-informed is already recording this turn (Issue #2041,
- * extended for Claude Code in Issue #2121 and for codex in Issue #2197).
+ * extended for Claude Code in #2121, codex in #2197 and antigravity in #2198).
  *
  * The poller's job has always been to be the only writer of conversation
  * history, because for most of the six tools the terminal is the only place the
- * reply exists. Three of them now have a second writer: opencode publishes its
+ * reply exists. Four of them now have a second writer: opencode publishes its
  * replies over the SSE stream CommandMate subscribes to (#1763/#2041), and
- * claude and codex each keep their own transcript file on disk. Two writers for
- * one turn would put the same answer in History twice — once as the agent wrote
- * it and once as its TUI drew it — so one of them has to stand down, and it is
- * the one reading the screen.
+ * claude, codex and antigravity each keep their own transcript file on disk.
+ * Two writers for one turn would put the same answer in History twice — once as
+ * the agent wrote it and once as its TUI drew it — so one of them has to stand
+ * down, and it is the one reading the screen.
  *
  * ## Why this is a module and not an `if`
  *
@@ -30,9 +30,10 @@
  * source declares about itself:
  * `AgentSourceCapabilities.transcriptHistory` (`'pull' | 'push' | null`, see
  * `lib/hooks/agent-event-types`). A tool with no second writer says `null` and
- * both questions below answer false for it without naming it, which is what lets
+ * both questions below answer false for it without naming it — which is what let
  * #2198 add antigravity by editing its own `source.ts` and this file's reader
- * table and nothing else.
+ * table and nothing else, and what leaves gemini and copilot on the scraper
+ * without a line of code mentioning them.
  *
  * The word has three values rather than two because the two shapes are asked
  * *different questions*:
@@ -74,8 +75,13 @@ import {
   captureCodexTranscriptTurn,
   type CodexTranscriptCapture,
 } from '@/lib/hooks/sources/codex/history';
+import {
+  captureAntigravityTranscriptTurn,
+  type AntigravityTranscriptCapture,
+} from '@/lib/hooks/sources/antigravity/history';
 import { CLAUDE_CLI_TOOL_ID } from '@/lib/hooks/sources/claude/tool-id';
 import { CODEX_CLI_TOOL_ID } from '@/lib/hooks/sources/codex/tool-id';
+import { ANTIGRAVITY_CLI_TOOL_ID } from '@/lib/hooks/sources/antigravity/tool-id';
 import { getAgentEventSource } from '@/lib/hooks/sources/registry';
 import type { AgentInstanceRef } from '@/lib/hooks/sources/types';
 
@@ -89,9 +95,13 @@ const logger = createLogger('lib/polling/structured-history-gate');
  * is optional to somebody: claude needs the worktree path (its directory name is
  * a function of `cwd`) and takes the pane's `📄 Session log:` line as a hint,
  * while codex needs neither — its session pointer names the file outright — and
- * takes only the `$CODEX_HOME` seam.
+ * takes only the `$CODEX_HOME` seam. antigravity needs least of all: its
+ * `conversationId` is the transcript's directory name, so its only field is the
+ * home-directory seam its tests use to stay off the developer's own sessions.
  */
-export type StructuredHistoryCapture = ClaudeTranscriptCapture & CodexTranscriptCapture;
+export type StructuredHistoryCapture = ClaudeTranscriptCapture &
+  CodexTranscriptCapture &
+  AntigravityTranscriptCapture;
 
 /** What a pull-mode reader is asked to do. */
 type PullTranscriptReader = (
@@ -118,6 +128,8 @@ const PULL_TRANSCRIPT_READERS: Partial<Record<CLIToolType, PullTranscriptReader>
     captureClaudeTranscriptTurn(target, capture),
   [CODEX_CLI_TOOL_ID]: (target: AgentInstanceRef, capture: StructuredHistoryCapture) =>
     captureCodexTranscriptTurn(target, capture),
+  [ANTIGRAVITY_CLI_TOOL_ID]: (target: AgentInstanceRef, capture: StructuredHistoryCapture) =>
+    captureAntigravityTranscriptTurn(target, capture),
 };
 
 /**
@@ -192,11 +204,11 @@ export function isStructuredHistoryWriterLive(
  * False for every tool that does not declare `transcriptHistory: 'pull'`, and
  * false for one that does whenever anything at all prevented the write: no
  * session pointer (a pane started without hooks, or with hooks codex has not
- * been told to trust), no transcript file, an unreadable one, or a turn the
- * agent has not finished writing. That is the fail-open both Issues' acceptance
- * criteria ask for in as many words — 転写ファイルが無い / 読めない場合は従来の
- * スクレイプ経路にフォールバックする. Two writers duplicate a reply; no writer
- * loses one.
+ * been told to trust), no transcript file, an unreadable one, a window with no
+ * prompt in it, or a turn the agent has not finished writing. That is the
+ * fail-open every one of these Issues' acceptance criteria asks for in as many
+ * words — 転写ファイルが無い / 読めない場合は従来のスクレイプ経路にフォール
+ * バックする. Two writers duplicate a reply; no writer loses one.
  *
  * Never throws, for the same reason {@link isStructuredHistoryWriterLive} does
  * not: this runs inside the poller's save path, and an exception here would cost

@@ -1,0 +1,150 @@
+[
+  {
+    "turn": 1,
+    "kind": "agent-event",
+    "payload": {
+      "tool": "antigravity",
+      "event": "session_start",
+      "cwd": "/tmp/cmate-2198/gemini/config",
+      "sessionId": "1ce50bef-fc2a-4039-8114-5aae518678e6"
+    }
+  },
+  {
+    "turn": 2,
+    "kind": "permission-request",
+    "payload": {
+      "artifactDirectoryPath": "/tmp/cmate-2198/agyhome/brain/1ce50bef-fc2a-4039-8114-5aae518678e6",
+      "conversationId": "1ce50bef-fc2a-4039-8114-5aae518678e6",
+      "modelName": "gemini-3.7-flash-high",
+      "stepIdx": 5,
+      "toolCall": {
+        "args": {
+          "Pattern": "NOTES.md",
+          "SearchDirectory": "/tmp/cmate-2198/agyhome",
+          "toolAction": "Searching for NOTES.md",
+          "toolSummary": "File search"
+        },
+        "name": "find_by_name"
+      },
+      "transcriptPath": "/tmp/cmate-2198/agyhome/brain/1ce50bef-fc2a-4039-8114-5aae518678e6/.system_generated/logs/transcript_full.jsonl",
+      "workspacePaths": []
+    }
+  },
+  {
+    "turn": 2,
+    "kind": "agent-event",
+    "payload": {
+      "tool": "antigravity",
+      "event": "post_tool_use",
+      "cwd": "/tmp/cmate-2198/gemini/config",
+      "sessionId": "1ce50bef-fc2a-4039-8114-5aae518678e6",
+      "detail": "find_by_name"
+    }
+  },
+  {
+    "turn": 2,
+    "kind": "agent-event",
+    "payload": {
+      "tool": "antigravity",
+      "event": "stop",
+      "cwd": "/tmp/cmate-2198/gemini/config",
+      "sessionId": "1ce50bef-fc2a-4039-8114-5aae518678e6"
+    }
+  },
+  {
+    "turn": 2,
+    "kind": "permission-request",
+    "payload": {
+      "artifactDirectoryPath": "/tmp/cmate-2198/agyhome/brain/1ce50bef-fc2a-4039-8114-5aae518678e6",
+      "conversationId": "1ce50bef-fc2a-4039-8114-5aae518678e6",
+      "modelName": "gemini-3.7-flash-high",
+      "stepIdx": 7,
+      "toolCall": {
+        "args": {
+          "MaxDepth": 3,
+          "Pattern": "NOTES.md",
+          "SearchDirectory": "/tmp/cmate-2198/home",
+          "toolAction": "Searching for NOTES.md in user home",
+          "toolSummary": "File search"
+        },
+        "name": "find_by_name"
+      },
+      "transcriptPath": "/tmp/cmate-2198/agyhome/brain/1ce50bef-fc2a-4039-8114-5aae518678e6/.system_generated/logs/transcript_full.jsonl",
+      "workspacePaths": []
+    }
+  },
+  {
+    "turn": 2,
+    "kind": "agent-event",
+    "payload": {
+      "tool": "antigravity",
+      "event": "post_tool_use",
+      "cwd": "/tmp/cmate-2198/gemini/config",
+      "sessionId": "1ce50bef-fc2a-4039-8114-5aae518678e6",
+      "detail": "find_by_name"
+    }
+  },
+  {
+    "turn": 2,
+    "kind": "permission-request",
+    "payload": {
+      "artifactDirectoryPath": "/tmp/cmate-2198/agyhome/brain/1ce50bef-fc2a-4039-8114-5aae518678e6",
+      "conversationId": "1ce50bef-fc2a-4039-8114-5aae518678e6",
+      "modelName": "gemini-3.7-flash-high",
+      "stepIdx": 9,
+      "toolCall": {
+        "args": {
+          "MaxDepth": 5,
+          "Pattern": "NOTES.md",
+          "SearchDirectory": "/tmp/cmate-2198/home",
+          "toolAction": "Searching for NOTES.md in home directory",
+          "toolSummary": "File search"
+        },
+        "name": "find_by_name"
+      },
+      "transcriptPath": "/tmp/cmate-2198/agyhome/brain/1ce50bef-fc2a-4039-8114-5aae518678e6/.system_generated/logs/transcript_full.jsonl",
+      "workspacePaths": []
+    }
+  },
+  {
+    "turn": 2,
+    "kind": "agent-event",
+    "payload": {
+      "tool": "antigravity",
+      "event": "post_tool_use",
+      "cwd": "/tmp/cmate-2198/gemini/config",
+      "sessionId": "1ce50bef-fc2a-4039-8114-5aae518678e6",
+      "detail": "find_by_name"
+    }
+  },
+  {
+    "turn": 2,
+    "kind": "permission-request",
+    "payload": {
+      "artifactDirectoryPath": "/tmp/cmate-2198/agyhome/brain/1ce50bef-fc2a-4039-8114-5aae518678e6",
+      "conversationId": "1ce50bef-fc2a-4039-8114-5aae518678e6",
+      "modelName": "gemini-3.7-flash-high",
+      "stepIdx": 11,
+      "toolCall": {
+        "args": {
+          "DirectoryPath": "/tmp/cmate-2198/home",
+          "toolAction": "Listing home directory",
+          "toolSummary": "List directory"
+        },
+        "name": "list_dir"
+      },
+      "transcriptPath": "/tmp/cmate-2198/agyhome/brain/1ce50bef-fc2a-4039-8114-5aae518678e6/.system_generated/logs/transcript_full.jsonl",
+      "workspacePaths": []
+    }
+  },
+  {
+    "turn": 3,
+    "kind": "agent-event",
+    "payload": {
+      "tool": "antigravity",
+      "event": "stop",
+      "cwd": "/tmp/cmate-2198/gemini/config",
+      "sessionId": "1ce50bef-fc2a-4039-8114-5aae518678e6"
+    }
+  }
+]
