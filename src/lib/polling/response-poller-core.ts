@@ -99,11 +99,10 @@ interface PollerOwner {
  * are: under `next start` this module is evaluated **twice** — once in the
  * custom server's graph (`server.ts` → `timer-manager` → `sendUserMessage`,
  * and the Auto-Yes poller) and once per Next route bundle (`/send`,
- * `/respond`, `/prompt-response`, `/start-polling`). Module scope made
- * "the map of active pollers" one map *per graph*, so a poller started by a
- * restored timer and a poller started by the next `/send` were invisible to
- * each other: both ran, both captured the same pane, and both saved the same
- * reply.
+ * `/respond`, `/prompt-response`). Module scope made "the map of active
+ * pollers" one map *per graph*, so a poller started by a restored timer and a
+ * poller started by the next `/send` were invisible to each other: both ran,
+ * both captured the same pane, and both saved the same reply.
  *
  * `activePollers` / `pollingStartTimes` stay plain Maps under the same names
  * because `migrateResponsePollerWorktreeIds` and its tests write into them
