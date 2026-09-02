@@ -130,14 +130,13 @@ export interface PaneTerminalState {
    * because that is how `CurrentOutputPayload.sessionStatus` publishes it, and
    * narrowing here would claim a guarantee the wire does not make.
    *
-   * **Only the HTTP poll carries it.** `terminal_snapshot` (the WebSocket push)
-   * has no `sessionStatus` member at all, so a push leaves this field at
-   * whatever the last poll said rather than blanking it — see `applySnapshot`.
-   * The staleness that buys is bounded by the poll cadence: while push is
-   * healthy the fallback poll runs every {@link WS_CONNECTED_POLLING_INTERVAL_MS},
-   * and the push STOPS when the turn does (`broadcastTerminalSnapshot` is
-   * driven by the response poller tick), so {@link WS_PUSH_STALE_AFTER_MS} later
-   * the cadence effect re-runs and fetches immediately.
+   * **Both delivery paths carry it** since Issue #2240: `terminal_snapshot` (the
+   * WebSocket push) publishes the very `buildCurrentOutput` field the HTTP poll
+   * returns, so the pane's verdict no longer depends on a poll having landed
+   * first. Before that the push had no `sessionStatus` member and this field sat
+   * at whatever the last poll said — which, on a pane whose first frame arrives
+   * by push, meant `''` for up to a whole fallback-poll interval
+   * ({@link WS_CONNECTED_POLLING_INTERVAL_MS}) with a turn already running.
    */
   sessionStatus: string;
   isSelectionListActive: boolean;
@@ -334,11 +333,26 @@ export function useTerminalPanePolling({
       realtimeSnippet?: string;
       isRunning?: boolean;
       /**
-       * Issue #2238. Absent means "this delivery path carries none" — which is
-       * every WebSocket push — and the previous value is kept rather than
-       * cleared. Passing `''` is not the same thing and is never done: a caller
-       * that KNOWS the session is stopped passes `'idle'`, the value the server
-       * publishes for one.
+       * Issue #2238, and still optional after #2240 gave the push a
+       * `sessionStatus` of its own.
+       *
+       * Absent means "this delivery path carries none", and the previous value
+       * is kept rather than cleared. Passing `''` is not the same thing and is
+       * never done: a caller that KNOWS the session is stopped passes `'idle'`,
+       * the value the server publishes for one.
+       *
+       * Every caller in this build now passes a value — the poll from the route
+       * payload, the push from `TerminalSnapshotEvent` (where the member is
+       * *required*, so the emitter cannot omit it), the stop listener as an
+       * explicit `'idle'`. The retention is kept for the one case the type
+       * system does not reach: **an older server pushing to this bundle.** The
+       * wire is parsed, not validated (`parseRealtimeEvent` casts), and the
+       * version-drift banner only *nudges* a reload — it never auto-reloads,
+       * "that would discard whatever the user is typing" — so a tab held open
+       * across a downgrade keeps applying frames from a server that predates
+       * the field. Assigning `data.sessionStatus ?? ''` there would blank the
+       * verdict on every push and strobe the chat bubble through the whole
+       * turn: exactly the #2238 defect, re-entered through the back door.
        */
       sessionStatus?: string;
       thinking?: boolean;
@@ -549,6 +563,8 @@ export function useTerminalPanePolling({
         fullOutput: snap.output,
         realtimeSnippet,
         isRunning: snap.isRunning,
+        // Issue #2240: the push's own verdict, no longer the last poll's.
+        sessionStatus: snap.sessionStatus,
         thinking: snap.thinking,
         isSelectionListActive: snap.isSelectionListActive,
         isPagerActive: snap.isPagerActive,
