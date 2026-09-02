@@ -432,7 +432,19 @@
     "loading": "メッセージを読み込み中",
     "empty": "まだメッセージはありません",
     "emptyHint": "送信するとセッションが起動します",
-    "openSearch": "この会話を検索"
+    "openSearch": "この会話を検索",
+    "toolApproval": {
+      "summary": "ツール承認 {count} 件",
+      "expand": "ツール承認を開く",
+      "collapse": "ツール承認を閉じる",
+      "autoApproved": "自動承認",
+      "answeredByHuman": "この画面で応答",
+      "answeredInTerminal": "ターミナルで応答",
+      "awaitingAnswer": "応答待ち",
+      "unclassified": "判別できないダイアログ",
+      "resolved": "応答済み",
+      "unlabeled": "承認ダイアログ"
+    }
   },
   "unsentComposer": {
     "regionLabel": "未送信の入力",

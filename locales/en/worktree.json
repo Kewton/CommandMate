@@ -432,7 +432,19 @@
     "loading": "Loading messages",
     "empty": "No messages yet",
     "emptyHint": "Sending a message starts the session",
-    "openSearch": "Search this conversation"
+    "openSearch": "Search this conversation",
+    "toolApproval": {
+      "summary": "Tool approvals · {count}",
+      "expand": "Show the tool approvals",
+      "collapse": "Hide the tool approvals",
+      "autoApproved": "Auto-approved",
+      "answeredByHuman": "Answered here",
+      "answeredInTerminal": "Answered in the terminal",
+      "awaitingAnswer": "Awaiting an answer",
+      "unclassified": "Dialog not recognized",
+      "resolved": "Resolved",
+      "unlabeled": "Approval dialog"
+    }
   },
   "unsentComposer": {
     "regionLabel": "Unsent input",
