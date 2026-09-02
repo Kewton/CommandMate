@@ -37,6 +37,7 @@ import {
   renderOpencodeTurn,
   type OpencodeTurnAccumulator,
 } from '@/lib/hooks/sources/opencode/transcript';
+import { TURN_TOOL_LOG_LABEL } from '@/lib/hooks/sources/turn-body';
 
 const FIXTURES = join(process.cwd(), 'tests/fixtures/hooks/opencode');
 
@@ -149,9 +150,19 @@ describe('replaying the captured 1.18.22 stream', () => {
     // Measured: this ONE turn produced TWO assistant messages — `finish:
     // "tool-calls"` for the `bash` call and `finish: "stop"` for the sentence —
     // and they are one reply because they share a `parentID`.
+    //
+    // Issue #2234: the sentence now LEADS and the call is in the section at the
+    // end. This is real 1.18.22 data and it is the shape the Issue is about —
+    // before the change this body opened with `- \`bash\` — echo …`.
     const turn = replay(FRAMES).get('msg_user0000000000000000002');
     expect(renderOpencodeTurn(turn!).body).toBe(
-      '- `bash` — echo CMATE-2041-TOOL-MARKER\n\nIt printed `CMATE-2041-TOOL-MARKER`.'
+      [
+        'It printed `CMATE-2041-TOOL-MARKER`.',
+        '',
+        `> **${TURN_TOOL_LOG_LABEL} (1)**`,
+        '>',
+        '> - `bash` — echo CMATE-2041-TOOL-MARKER',
+      ].join('\n')
     );
   });
 
@@ -367,7 +378,9 @@ describe('the parts that are not prose', () => {
         state: { status: 'error', title: 'rm -rf /', error: 'rejected by the operator' },
       })
     );
-    expect(rendered.body).toBe('- `bash` — rm -rf / _(error: rejected by the operator)_');
+    expect(rendered.body).toBe(
+      `> **${TURN_TOOL_LOG_LABEL} (1)**\n>\n> - \`bash\` — rm -rf / _(error: rejected by the operator)_`
+    );
   });
 
   it('flattens a multi-line tool title so it stays one list item', () => {
@@ -381,7 +394,9 @@ describe('the parts that are not prose', () => {
         state: { status: 'completed', title: "cat <<'EOF'\nhello\nEOF" },
       })
     );
-    expect(rendered.body).toBe("- `bash` — cat <<'EOF' hello EOF");
+    expect(rendered.body).toBe(
+      `> **${TURN_TOOL_LOG_LABEL} (1)**\n>\n> - \`bash\` — cat <<'EOF' hello EOF`
+    );
   });
 
   it('runs consecutive tool calls together as one Markdown list', () => {
@@ -392,8 +407,16 @@ describe('the parts that are not prose', () => {
         { id: 'p3', type: 'text', text: 'Both files look fine.' }
       )
     );
+    // Issue #2234: one list still, in call order, but behind the prose.
     expect(rendered.body).toBe(
-      '- `read` — a.ts\n- `read` — b.ts\n\nBoth files look fine.'
+      [
+        'Both files look fine.',
+        '',
+        `> **${TURN_TOOL_LOG_LABEL} (2)**`,
+        '>',
+        '> - `read` — a.ts',
+        '> - `read` — b.ts',
+      ].join('\n')
     );
   });
 });

@@ -27,7 +27,7 @@
  * @vitest-environment node
  */
 
-import { mkdtemp, mkdir, rm, writeFile } from 'fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -139,6 +139,28 @@ describe('[#2199] the open turn', () => {
     expect(first?.body).toBe('First paragraph.');
     expect(second?.body).toBe('First paragraph.\n\nSecond paragraph.');
     expect(second?.turnKey).toBe(first?.turnKey);
+  });
+
+  it('shows the same body the settled row will hold, tool log and all', async () => {
+    // Issue #2234's 既知の罠: the live bubble and the settled row are two
+    // producers of one text, so the separation has to be in the shared renderer
+    // or the bubble's opening would change the moment the row landed. Both
+    // paths reach `renderClaudeTurn`, and this pins that they agree on the real
+    // captured turn — byte for byte, against the fixture the settled-row test
+    // asserts on.
+    const fixtureDir = join(process.cwd(), 'tests/fixtures/turn-separation-2234');
+    await writeTranscript(
+      await readFile(join(fixtureDir, 'claude-tool-first-turn.jsonl'), 'utf8'),
+    );
+    const expected = (
+      await readFile(join(fixtureDir, 'claude-tool-first-turn.after.md'), 'utf8')
+    ).replace(/\n$/, '');
+
+    const progress = await read();
+
+    expect(progress?.body).toBe(expected);
+    expect(progress?.body.startsWith('Batch 1: ')).toBe(true);
+    expect(createMessage).not.toHaveBeenCalled();
   });
 
   it('keys the body on the id the settled row will carry', async () => {

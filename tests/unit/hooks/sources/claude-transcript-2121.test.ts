@@ -35,6 +35,7 @@ import {
   renderClaudeTurn,
   type ClaudeTranscriptRecord,
 } from '@/lib/hooks/sources/claude/transcript';
+import { TURN_TOOL_LOG_LABEL } from '@/lib/hooks/sources/turn-body';
 
 const SESSION = '0572eeb1-f7f8-4b39-8be5-e71ef93958ef';
 
@@ -372,17 +373,21 @@ describe('renderClaudeTurn', () => {
       ),
     ].join('\n');
     expect(renderClaudeTurn(onlyTurn(text).turn).body).toBe(
-      '- `Bash` — cat <<EOF line one line two EOF'
+      `> **${TURN_TOOL_LOG_LABEL} (1)**\n>\n> - \`Bash\` — cat <<EOF line one line two EOF`
     );
   });
 
-  it('joins consecutive tool lines into one list', () => {
+  it('joins consecutive tool lines into one list inside the folded section', () => {
     const text = [
       line(userRecord('u-1', 'go')),
       line(assistantRecord('a-1', [{ type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'ls' } }])),
       line(assistantRecord('a-2', [{ type: 'tool_use', id: 't2', name: 'Bash', input: { command: 'pwd' } }])),
     ].join('\n');
-    expect(renderClaudeTurn(onlyTurn(text).turn).body).toBe('- `Bash` — ls\n- `Bash` — pwd');
+    // Issue #2234: still one Markdown list, still in call order — inside the
+    // quote now, because a turn that only ran tools is all tool log.
+    expect(renderClaudeTurn(onlyTurn(text).turn).body).toBe(
+      `> **${TURN_TOOL_LOG_LABEL} (2)**\n>\n> - \`Bash\` — ls\n> - \`Bash\` — pwd`
+    );
   });
 
   it('folds thinking behind a quote', () => {
