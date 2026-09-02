@@ -54,6 +54,7 @@
  */
 
 import { isPlainObject, readNestedString, readStringField } from '../event-mapper';
+import { separateTurnBody, type TurnRenderBlock } from '../turn-body';
 
 /**
  * The field that groups assistant messages into one turn.
@@ -319,15 +320,16 @@ export interface OpencodeRenderedTurn {
 /**
  * Render one turn to Markdown.
  *
- * Stream order throughout — a tool line sits where the agent called it and
- * reasoning sits where the agent thought it. Reordering to put prose first
- * would read better in the two-line collapsed preview and is not done: the
- * order is the only record of what happened when, and this row is the record.
+ * Stream order within each kind — reasoning sits where the agent thought it and
+ * the calls are in the order they were made. #2041 kept one stream for all of
+ * them and #2234 split the tool calls out into a section of their own; the
+ * layout is `../turn-body`'s, shared with the other three readers, and
+ * {@link separateTurnBody} carries the reasoning for both halves of that.
  *
  * @param turn - The accumulator, live or rebuilt from REST
  */
 export function renderOpencodeTurn(turn: OpencodeTurnAccumulator): OpencodeRenderedTurn {
-  const blocks: string[] = [];
+  const blocks: TurnRenderBlock[] = [];
   const unknown = new Set<string>();
   let textParts = 0;
   let toolParts = 0;
@@ -338,14 +340,14 @@ export function renderOpencodeTurn(turn: OpencodeTurnAccumulator): OpencodeRende
       // then emptied. Counted as nothing rather than as a blank paragraph.
       const text = part.text?.trim() ?? '';
       if (text.length === 0) continue;
-      blocks.push(text);
+      blocks.push({ kind: 'prose', text });
       textParts += 1;
       continue;
     }
     if (part.type === 'reasoning') {
       const text = part.text?.trim() ?? '';
       if (text.length === 0) continue;
-      blocks.push(renderReasoningPart(text));
+      blocks.push({ kind: 'aside', text: renderReasoningPart(text) });
       continue;
     }
     if (part.type === 'tool') {
@@ -353,14 +355,14 @@ export function renderOpencodeTurn(turn: OpencodeTurnAccumulator): OpencodeRende
       // as the `completed` one that overwrites it, and a turn that ended while
       // a call was still running has nothing to summarise but its name.
       if (part.status === 'pending') continue;
-      blocks.push(renderToolPart(part));
+      blocks.push({ kind: 'tool', text: renderToolPart(part) });
       toolParts += 1;
       continue;
     }
     if (!OPENCODE_SILENT_PART_TYPES.has(part.type)) unknown.add(part.type);
   }
 
-  let body = joinTurnBlocks(blocks);
+  let body = separateTurnBody(blocks).body;
   if (body.length > MAX_OPENCODE_TURN_BODY_LENGTH) {
     body =
       body.slice(0, MAX_OPENCODE_TURN_BODY_LENGTH - OPENCODE_TURN_TRUNCATION_MARKER.length) +
@@ -377,26 +379,6 @@ export function renderOpencodeTurn(turn: OpencodeTurnAccumulator): OpencodeRende
   };
 }
 
-/**
- * Join the rendered blocks.
- *
- * Consecutive tool lines are joined with a single newline so they stay one
- * Markdown list; everything else is separated by a blank line, which is what
- * makes a paragraph a paragraph and stops a heading being absorbed into the
- * text above it.
- */
-function joinTurnBlocks(blocks: readonly string[]): string {
-  let out = '';
-  for (let i = 0; i < blocks.length; i += 1) {
-    if (i === 0) {
-      out = blocks[i];
-      continue;
-    }
-    const bothToolLines = blocks[i].startsWith('- `') && blocks[i - 1].startsWith('- `');
-    out += bothToolLines ? `\n${blocks[i]}` : `\n\n${blocks[i]}`;
-  }
-  return out;
-}
 
 /**
  * Rebuild every turn of a session from `GET /session/:id/message`.

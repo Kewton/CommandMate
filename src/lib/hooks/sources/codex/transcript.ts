@@ -63,6 +63,7 @@
  */
 
 import { isPlainObject, readStringField } from '../event-mapper';
+import { separateTurnBody, type TurnRenderBlock } from '../turn-body';
 
 /** `$CODEX_HOME/sessions` — where codex keeps one machine's rollout files. */
 export const CODEX_SESSIONS_DIR_SEGMENTS: readonly string[] = ['sessions'];
@@ -526,15 +527,17 @@ function renderReasoningItem(text: string): string {
 /**
  * Render one turn to Markdown.
  *
- * Transcript order throughout, so a tool line sits where the agent called it and
- * the closing prose sits where the agent wrote it — the same decision #2041 and
- * #2121 took, and for the same reason: the order is the only record of what
- * happened when, and this row is the record. Both `commentary` and `final_answer`
- * messages are kept; codex's TUI shows both, and dropping the commentary would
- * remove the sentence that explains what the tool line underneath it is for.
+ * Transcript order within each kind — the same decision #2041 and #2121 took,
+ * and for the same reason: the order is the only record of what happened when,
+ * and this row is the record. Both `commentary` and `final_answer` messages are
+ * kept; codex's TUI shows both, and dropping the commentary would remove the
+ * sentence that explains what the tool line underneath it is for.
+ *
+ * The layout — prose first, the calls folded into one labelled section — is
+ * `../turn-body`'s and is shared with the other three readers (#2234).
  */
 export function renderCodexTurn(turn: CodexTurnAccumulator): CodexRenderedTurn {
-  const rendered: string[] = [];
+  const rendered: TurnRenderBlock[] = [];
   const unknown = new Set<string>();
   let textBlocks = 0;
   let toolBlocks = 0;
@@ -543,25 +546,25 @@ export function renderCodexTurn(turn: CodexTurnAccumulator): CodexRenderedTurn {
     if (item.type === 'AgentMessage') {
       const text = item.text?.trim() ?? '';
       if (text.length === 0) continue;
-      rendered.push(text);
+      rendered.push({ kind: 'prose', text });
       textBlocks += 1;
       continue;
     }
     if (item.type === 'Reasoning') {
       const text = item.text?.trim() ?? '';
       if (text.length === 0) continue;
-      rendered.push(renderReasoningItem(text));
+      rendered.push({ kind: 'aside', text: renderReasoningItem(text) });
       continue;
     }
     if (item.type in CODEX_TOOL_LABELS) {
-      rendered.push(renderToolItem(item));
+      rendered.push({ kind: 'tool', text: renderToolItem(item) });
       toolBlocks += 1;
       continue;
     }
     if (!CODEX_SILENT_ITEM_TYPES.has(item.type)) unknown.add(item.type);
   }
 
-  let body = joinTurnBlocks(rendered);
+  let body = separateTurnBody(rendered).body;
   if (body.length > MAX_CODEX_TURN_BODY_LENGTH) {
     body =
       body.slice(0, MAX_CODEX_TURN_BODY_LENGTH - CODEX_TURN_TRUNCATION_MARKER.length) +
@@ -576,25 +579,4 @@ export function renderCodexTurn(turn: CodexTurnAccumulator): CodexRenderedTurn {
     toolBlocks,
     unknownBlockTypes: [...unknown],
   };
-}
-
-/**
- * Join the rendered blocks.
- *
- * Consecutive tool lines are joined with a single newline so they stay one
- * Markdown list; everything else is separated by a blank line, which is what
- * keeps a paragraph a paragraph and stops a heading being absorbed into the text
- * above it.
- */
-function joinTurnBlocks(blocks: readonly string[]): string {
-  let out = '';
-  for (let i = 0; i < blocks.length; i += 1) {
-    if (i === 0) {
-      out = blocks[i];
-      continue;
-    }
-    const bothToolLines = blocks[i].startsWith('- `') && blocks[i - 1].startsWith('- `');
-    out += bothToolLines ? `\n${blocks[i]}` : `\n\n${blocks[i]}`;
-  }
-  return out;
 }

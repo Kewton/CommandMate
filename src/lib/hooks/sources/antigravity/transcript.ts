@@ -66,6 +66,7 @@
  */
 
 import { isPlainObject, readStringField } from '../event-mapper';
+import { separateTurnBody, type TurnRenderBlock } from '../turn-body';
 
 /**
  * `brain` — the directory agy keeps one conversation's working state under.
@@ -489,20 +490,22 @@ function boundDetailText(value: string): string {
 /**
  * Render one turn to Markdown.
  *
- * Transcript order throughout, so a tool line sits where the agent called it and
- * the closing prose sits where the agent wrote it — the same decision #2041,
- * #2121 and #2197 took, and for the same reason: the order is the only record of
- * what happened when, and this row is the record.
+ * Transcript order within each kind — the same decision #2041, #2121 and #2197
+ * took, and for the same reason: the order is the only record of what happened
+ * when, and this row is the record.
  *
- * Within one `PLANNER_RESPONSE` the order is thinking, then prose, then the
+ * Within one `PLANNER_RESPONSE` the order read is thinking, then prose, then the
  * calls it made. That is agy's own causal order — it reasons, says what it is
  * about to do, and then does it — and 39 of the corpus's records carry prose and
  * `tool_calls` together, so the pairing is the common case rather than an edge.
+ * What reaches the body is that order with the calls lifted into one labelled
+ * section at the end; the layout is `../turn-body`'s (#2234), shared with the
+ * other three readers.
  */
 export function renderAntigravityTurn(
   turn: AntigravityTurnAccumulator
 ): AntigravityRenderedTurn {
-  const rendered: string[] = [];
+  const rendered: TurnRenderBlock[] = [];
   const unknown = new Set<string>();
   let textBlocks = 0;
   let toolBlocks = 0;
@@ -510,16 +513,16 @@ export function renderAntigravityTurn(
   for (const record of turn.records) {
     if (record.source === ANTIGRAVITY_MODEL_SOURCE && record.type === ANTIGRAVITY_PLANNER_TYPE) {
       const thinking = record.thinking?.trim() ?? '';
-      if (thinking.length > 0) rendered.push(renderThinking(thinking));
+      if (thinking.length > 0) rendered.push({ kind: 'aside', text: renderThinking(thinking) });
 
       const text = record.content?.trim() ?? '';
       if (text.length > 0) {
-        rendered.push(text);
+        rendered.push({ kind: 'prose', text });
         textBlocks += 1;
       }
 
       for (const call of record.toolCalls) {
-        rendered.push(renderToolCall(call));
+        rendered.push({ kind: 'tool', text: renderToolCall(call) });
         toolBlocks += 1;
       }
       continue;
@@ -533,7 +536,7 @@ export function renderAntigravityTurn(
     if (!ANTIGRAVITY_SYSTEM_TYPES.has(record.type)) unknown.add(record.type);
   }
 
-  let body = joinTurnBlocks(rendered);
+  let body = separateTurnBody(rendered).body;
   if (body.length > MAX_ANTIGRAVITY_TURN_BODY_LENGTH) {
     body =
       body.slice(0, MAX_ANTIGRAVITY_TURN_BODY_LENGTH - ANTIGRAVITY_TURN_TRUNCATION_MARKER.length) +
@@ -548,25 +551,4 @@ export function renderAntigravityTurn(
     toolBlocks,
     unknownRecordTypes: [...unknown],
   };
-}
-
-/**
- * Join the rendered blocks.
- *
- * Consecutive tool lines are joined with a single newline so they stay one
- * Markdown list; everything else is separated by a blank line, which is what
- * keeps a paragraph a paragraph and stops a heading being absorbed into the text
- * above it.
- */
-function joinTurnBlocks(blocks: readonly string[]): string {
-  let out = '';
-  for (let i = 0; i < blocks.length; i += 1) {
-    if (i === 0) {
-      out = blocks[i];
-      continue;
-    }
-    const bothToolLines = blocks[i].startsWith('- `') && blocks[i - 1].startsWith('- `');
-    out += bothToolLines ? `\n${blocks[i]}` : `\n\n${blocks[i]}`;
-  }
-  return out;
 }
