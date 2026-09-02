@@ -10,21 +10,28 @@
  *     end for that state — which is why every flag is exercised ALONE below, and
  *     why removing `isPagerActive` from `resolveBlockedReason` has to turn one of
  *     these red (Issue #2194's mutation-injection criterion).
- *  2. **No duplicated waiting indicator.** `ConversationPairCard` already draws a
- *     pending indicator inside the newest card when its pair has no reply yet, so
- *     a standalone "responding" row on top of it is the same fact twice.
+ *  2. **The generating row is drawn whenever a turn is running.** It used to be
+ *     suppressed while the newest row was a user message, because
+ *     `ConversationPairCard` drew its own "Waiting for response…" inside that
+ *     pair. Issue #2232 replaced the body with `ChatTranscript`, which groups
+ *     nothing into pairs and draws no such indicator — so the old gate would now
+ *     delete the indicator for the commonest case there is (you sent a message
+ *     and it is being answered). The remaining exclusion is #2199's live body,
+ *     which carries the same spinner and sentence itself.
  *  3. **No duplicated prompt UI.** An answerable wait is answered by the
  *     composer's own `PromptPanel` / `MobilePromptSheet`, which #2193 left
  *     rendering in chat mode. This surface must add nothing for that case — not
  *     even a banner.
- *  4. **Follow-the-tail.** Following on the MESSAGE count rather than the pair
- *     count is deliberate: an assistant reply joining the existing last pair grows
- *     the card without adding a row, so `HistoryPane`'s own pair-count follow
- *     (#1123) does not fire for the single most common arrival on this surface.
+ *  4. **Follow-the-tail.** Following on the MESSAGE count is what this surface
+ *     needs and what a pair-count follow (`HistoryPane`'s, #1123) could not give
+ *     it: an assistant reply joining the existing last pair grew that card
+ *     without adding a row. Since Issue #2232 a row IS a message, so the two
+ *     counts agree — the follow stays here because it also works with the
+ *     transcript stubbed, and because the jump-to-latest chip is derived from it.
  *
- * `HistoryPane` is stubbed with a scroll container carrying the real testid. The
- * stub is what makes the scroll metrics controllable in a layout-less DOM; that
- * the selector still matches the REAL pane is pinned separately in
+ * `ChatTranscript` is stubbed with a scroll container carrying the real testid.
+ * The stub is what makes the scroll metrics controllable in a layout-less DOM;
+ * that the selector still matches the REAL transcript is pinned separately in
  * `ChatSurface-history-seam-2194.test.tsx`, because a stub cannot prove a seam.
  *
  * @vitest-environment jsdom
@@ -37,25 +44,24 @@ import type { ChatMessage, PromptData } from '@/types/models';
 import { UNCLASSIFIED_PROMPT_TYPE } from '@/types/models';
 import type { StructuredPromptWaitingData } from '@/lib/session/structured-prompt';
 
-vi.mock('@/components/worktree/HistoryPane', () => ({
-  HistoryPane: ({ messages }: { messages: Array<{ id: string }> }) => (
-    <div data-testid="history-pane" data-message-count={String(messages.length)}>
-      {/* Same testid the real pane puts on its scroll region — ChatSurface finds
-          the element to follow through exactly this selector. */}
-      <div data-testid="history-scroll-container">
+vi.mock('@/components/worktree/ChatTranscript', () => ({
+  ChatTranscript: ({ messages }: { messages: Array<{ id: string }> }) => (
+    <div data-testid="chat-transcript" data-message-count={String(messages.length)}>
+      {/* Same testid the real transcript puts on its scroll region — ChatSurface
+          finds the element to follow through exactly this selector. */}
+      <div data-testid="chat-transcript-scroll-container">
         {messages.map((m) => (
           <div key={m.id} data-message-id={m.id} />
         ))}
       </div>
     </div>
   ),
-  splitHistorySlotId: (idx: number) => `split-history-slot-${idx}`,
+  CHAT_TRANSCRIPT_SCROLL_CONTAINER_TESTID: 'chat-transcript-scroll-container',
 }));
 
 import {
   ChatSurface,
   dedupeById,
-  isAwaitingReply,
   resolveBlockedReason,
   type ChatSurfaceLiveState,
 } from '@/components/worktree/ChatSurface';
@@ -171,7 +177,7 @@ describe('[#2194] ChatSurface helpers', () => {
   describe('dedupeById', () => {
     it('returns the very same array when there is nothing to collapse', () => {
       // Identity matters: a fresh array on every poll re-renders the memoized
-      // HistoryPane (and re-runs its virtualizer) for no reason.
+      // ChatTranscript (and re-runs its virtualizer) for no reason.
       const input = [msg('a', 'user'), msg('b', 'assistant', 1)];
       expect(dedupeById(input)).toBe(input);
     });
@@ -182,24 +188,6 @@ describe('[#2194] ChatSurface helpers', () => {
       const out = dedupeById([first, msg('other', 'assistant', 1), later]);
       expect(out.map((m) => m.id)).toEqual(['dup', 'other']);
       expect(out[0].content).toBe('confirmed');
-    });
-  });
-
-  describe('isAwaitingReply', () => {
-    it('is true when the newest turn is a user message', () => {
-      expect(isAwaitingReply([msg('a', 'assistant'), msg('u', 'user', 1)])).toBe(true);
-    });
-
-    it('is false once an assistant reply follows it', () => {
-      expect(isAwaitingReply([msg('u', 'user'), msg('a', 'assistant', 1)])).toBe(false);
-    });
-
-    it('is false for an empty transcript', () => {
-      expect(isAwaitingReply([])).toBe(false);
-    });
-
-    it('is true for a lone user turn (the optimistic bubble case)', () => {
-      expect(isAwaitingReply([msg('u', 'user')])).toBe(true);
     });
   });
 
@@ -316,14 +304,17 @@ describe('[#2194] ChatSurface "open the terminal" banner', () => {
 // ---------------------------------------------------------------------------
 
 describe('[#2194] ChatSurface generating indicator', () => {
-  it('draws no standalone row while the newest turn is still pending', () => {
-    // The pending pair's own indicator (ConversationPairCard) is already saying
-    // this; a second line three pixels below it is noise.
+  it('draws the row while the newest message is the user turn being answered', () => {
+    // Issue #2232: this is the case the old `!isAwaitingReply` gate suppressed.
+    // It was correct only while `ConversationPairCard` drew a pending indicator
+    // of its own inside the last card; `ChatTranscript` draws none, so suppressing
+    // it here would leave "you sent a message and it is being answered" with no
+    // indicator anywhere on the surface.
     renderSurface({ isRunning: true }, [msg('a1', 'assistant'), msg('u1', 'user', 1000)]);
-    expect(screen.queryByTestId('chat-surface-generating')).not.toBeInTheDocument();
+    expect(screen.getByTestId('chat-surface-generating')).toBeInTheDocument();
   });
 
-  it('draws the standalone row when there is no pending pair to hang it on', () => {
+  it('draws the row when the newest message is already an assistant reply', () => {
     renderSurface({ isRunning: true }, [msg('u1', 'user'), msg('a1', 'assistant', 1000)]);
     expect(screen.getByTestId('chat-surface-generating')).toBeInTheDocument();
   });
@@ -354,19 +345,14 @@ describe('[#2194] ChatSurface generating indicator', () => {
 // ---------------------------------------------------------------------------
 
 describe('[#2194] ChatSurface empty state', () => {
-  it('says a send will start the session when there is nothing yet', () => {
+  it('draws no empty-state line of its own (Issue #2232 moved it into the transcript)', () => {
+    // Two empty states were on screen at once before: HistoryPane's and this
+    // one. `ChatTranscript` owns the single remaining one; this surface must not
+    // re-add a second, which is what this asserts in the state that used to
+    // produce it.
     renderSurface({}, []);
-    expect(screen.getByTestId('chat-surface-empty-hint')).toBeInTheDocument();
-  });
-
-  it('says nothing once the session is running', () => {
-    renderSurface({ isRunning: true }, []);
     expect(screen.queryByTestId('chat-surface-empty-hint')).not.toBeInTheDocument();
-  });
-
-  it('says nothing once there is history', () => {
-    renderSurface({}, [msg('u1', 'user')]);
-    expect(screen.queryByTestId('chat-surface-empty-hint')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('chat-surface-live')).not.toBeInTheDocument();
   });
 
   it('renders no live region at all when there is nothing live to say', () => {
@@ -386,7 +372,7 @@ describe('[#2194] ChatSurface optimistic rows', () => {
   it('does not grow the transcript when the same id arrives again', () => {
     const optimistic = msg('same-id', 'user', 0, 'hello');
     const { rerender } = renderSurface({}, [optimistic]);
-    expect(screen.getByTestId('history-pane').getAttribute('data-message-count')).toBe('1');
+    expect(screen.getByTestId('chat-transcript').getAttribute('data-message-count')).toBe('1');
 
     // The confirmed row carries the same id (#2195's `upsertMessage` matches on
     // it), so the pane must still be handed exactly one row.
@@ -399,15 +385,18 @@ describe('[#2194] ChatSurface optimistic rows', () => {
         onSurfaceModeChange={vi.fn()}
       />,
     );
-    expect(screen.getByTestId('history-pane').getAttribute('data-message-count')).toBe('1');
+    expect(screen.getByTestId('chat-transcript').getAttribute('data-message-count')).toBe('1');
     expect(document.querySelectorAll('[data-message-id="same-id"]')).toHaveLength(1);
   });
 
-  it('keeps a pending user row out of the standalone generating row', () => {
-    // The optimistic bubble IS the newest turn, so it makes the pair pending and
-    // `ConversationPairCard` owns the indicator from that moment on.
+  it('still shows the generating row while a pending user row is the newest turn', () => {
+    // This assertion is INVERTED from #2194's, deliberately. Back then the
+    // optimistic bubble made its pair pending and `ConversationPairCard` drew
+    // the indicator, so a second one here was noise. `ChatTranscript` draws no
+    // pending indicator (Issue #2232), so the surface's row is now the only
+    // thing telling the reader their message is being answered.
     renderSurface({ isRunning: true }, [msg('pending-0', 'user', 5000)]);
-    expect(screen.queryByTestId('chat-surface-generating')).not.toBeInTheDocument();
+    expect(screen.getByTestId('chat-surface-generating')).toBeInTheDocument();
   });
 });
 
@@ -427,7 +416,7 @@ describe('[#2194] ChatSurface follow-the-tail', () => {
         onSurfaceModeChange={vi.fn()}
       />,
     );
-    const container = screen.getByTestId('history-scroll-container');
+    const container = screen.getByTestId('chat-transcript-scroll-container');
     const scroll = stubScroll(container, metrics);
     // Publish the stubbed metrics through the same event the component listens
     // to, so its pinned/unpinned state is derived rather than assumed.
@@ -520,7 +509,7 @@ describe('[#2194] ChatSurface follow-the-tail', () => {
         onSurfaceModeChange={vi.fn()}
       />,
     );
-    const container = screen.getByTestId('history-scroll-container');
+    const container = screen.getByTestId('chat-transcript-scroll-container');
     container.remove();
     expect(() =>
       view.rerender(
@@ -547,7 +536,7 @@ describe('[#2194] ChatSurface structure', () => {
     renderSurface({ isRunning: true }, [msg('u1', 'user'), msg('a1', 'assistant', 1000)]);
     const live = screen.getByTestId('chat-surface-live');
     expect(live.className).toContain('shrink-0');
-    expect(screen.getByTestId('history-pane').contains(live)).toBe(false);
+    expect(screen.getByTestId('chat-transcript').contains(live)).toBe(false);
   });
 
   it('names the instance it is showing', () => {
@@ -573,7 +562,7 @@ describe('[#2194] ChatSurface structure', () => {
         onSurfaceModeChange={vi.fn()}
       />,
     );
-    const container = screen.getByTestId('history-scroll-container');
+    const container = screen.getByTestId('chat-transcript-scroll-container');
     stubScroll(container, { scrollHeight: 1000, clientHeight: 200, scrollTop: 0 });
     fireEvent.scroll(container);
     view.rerender(

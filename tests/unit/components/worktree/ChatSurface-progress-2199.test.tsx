@@ -20,7 +20,7 @@
  *  5. **One indicator, not two.** The bubble carries its own spinner and the same
  *     sentence, so the standalone generating row stands down while it is up.
  *
- * `HistoryPane` is stubbed the way `ChatSurface-2194.test.tsx` stubs it — the
+ * `ChatTranscript` is stubbed the way `ChatSurface-2194.test.tsx` stubs it — the
  * transcript is not what is under test here, and the stub is what makes the
  * scroll container present at all in a layout-less DOM.
  *
@@ -32,17 +32,17 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { act, render, screen } from '@testing-library/react';
 import type { ChatMessage } from '@/types/models';
 
-vi.mock('@/components/worktree/HistoryPane', () => ({
-  HistoryPane: ({ messages }: { messages: Array<{ id: string }> }) => (
-    <div data-testid="history-pane" data-message-count={String(messages.length)}>
-      <div data-testid="history-scroll-container">
+vi.mock('@/components/worktree/ChatTranscript', () => ({
+  ChatTranscript: ({ messages }: { messages: Array<{ id: string }> }) => (
+    <div data-testid="chat-transcript" data-message-count={String(messages.length)}>
+      <div data-testid="chat-transcript-scroll-container">
         {messages.map((m) => (
           <div key={m.id} data-message-id={m.id} />
         ))}
       </div>
     </div>
   ),
-  splitHistorySlotId: (idx: number) => `split-history-slot-${idx}`,
+  CHAT_TRANSCRIPT_SCROLL_CONTAINER_TESTID: 'chat-transcript-scroll-container',
 }));
 
 /** The realtime seam, driven by hand. */
@@ -153,7 +153,7 @@ describe('[#2199] showing the in-flight reply', () => {
     expect(screen.getByTestId('chat-surface-progress-body').textContent).toContain('Two.');
   });
 
-  it('keeps the live region a sibling of the pane, not a row inside it', () => {
+  it('keeps the live region a sibling of the transcript, not a row inside it', () => {
     // The whole reason #2194 built the region: a row inside the virtual list is
     // unmounted the moment the reader scrolls away from the end.
     renderSurface();
@@ -162,7 +162,7 @@ describe('[#2199] showing the in-flight reply', () => {
     const region = screen.getByTestId('chat-surface-live');
     expect(region.className).toContain('shrink-0');
     expect(region.contains(screen.getByTestId('chat-surface-progress'))).toBe(true);
-    expect(region.contains(screen.getByTestId('history-pane'))).toBe(false);
+    expect(region.contains(screen.getByTestId('chat-transcript'))).toBe(false);
   });
 
   it('says so when the body does not start at the beginning of the turn', () => {
@@ -199,7 +199,7 @@ describe('[#2199] the swap', () => {
 
     expect(screen.queryByTestId('chat-surface-progress')).toBeNull();
     // ...and the row is in the transcript exactly once.
-    expect(screen.getByTestId('history-pane')).toHaveAttribute('data-message-count', '2');
+    expect(screen.getByTestId('chat-transcript')).toHaveAttribute('data-message-count', '2');
   });
 
   it('keeps the bubble when a DIFFERENT turn settles', () => {

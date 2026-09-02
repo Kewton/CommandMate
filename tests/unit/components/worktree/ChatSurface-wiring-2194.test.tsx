@@ -30,6 +30,15 @@ vi.mock('@/components/worktree/TerminalDisplay', () => ({
   TerminalDisplay: () => <div data-testid="terminal-display" />,
 }));
 
+vi.mock('@/components/worktree/ChatTranscript', () => ({
+  ChatTranscript: ({ messages }: { messages: Array<{ id: string }> }) => (
+    <div data-testid="chat-transcript" data-message-count={String(messages.length)}>
+      <div data-testid="chat-transcript-scroll-container" />
+    </div>
+  ),
+  CHAT_TRANSCRIPT_SCROLL_CONTAINER_TESTID: 'chat-transcript-scroll-container',
+}));
+
 vi.mock('@/components/worktree/HistoryPane', () => ({
   HistoryPane: ({ messages }: { messages: Array<{ id: string }> }) => (
     <div data-testid="history-pane" data-message-count={String(messages.length)}>

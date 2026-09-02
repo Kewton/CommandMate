@@ -421,9 +421,15 @@
     "reasonPromptUnreadable": "応答待ちですが選択肢を読み取れませんでした。ターミナル面で確認してください。",
     "openTerminal": "ターミナルで確認",
     "jumpToLatest": "新着へ",
-    "emptyHint": "送信するとセッションが起動します",
     "progressLabel": "生成中の返答",
     "progressPartial": "途中から表示しています"
+  },
+  "chatTranscript": {
+    "regionLabel": "チャット履歴",
+    "loading": "メッセージを読み込み中",
+    "empty": "まだメッセージはありません",
+    "emptyHint": "送信するとセッションが起動します",
+    "openSearch": "この会話を検索"
   },
   "unsentComposer": {
     "regionLabel": "未送信の入力",

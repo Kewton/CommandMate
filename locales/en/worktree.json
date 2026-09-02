@@ -421,9 +421,15 @@
     "reasonPromptUnreadable": "Waiting for an answer, but the options couldn't be read. Check it on the terminal surface.",
     "openTerminal": "Open terminal",
     "jumpToLatest": "Jump to latest",
-    "emptyHint": "Sending a message starts the session",
     "progressLabel": "Reply being written",
     "progressPartial": "Showing the latest part only"
+  },
+  "chatTranscript": {
+    "regionLabel": "Chat transcript",
+    "loading": "Loading messages",
+    "empty": "No messages yet",
+    "emptyHint": "Sending a message starts the session",
+    "openSearch": "Search this conversation"
   },
   "unsentComposer": {
     "regionLabel": "Unsent input",

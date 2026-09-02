@@ -1,0 +1,195 @@
+version: 1
+title: "Issue #2232: チャット面に専用のフラットな吹き出し列（ChatTranscript）を実装する【案B】"
+goal: |
+  /pm-auto-issue2dev 2232
+
+  https://github.com/Kewton/CommandMate/issues/2232 を TDD で実装してください。
+  要点を下に転記しますが、**Issue 本文（gh issue view 2232）も必ず読んでください**。
+  **Issue のレビューと本文の書き戻しは不要です**（本文は orchestrator が管理）。食い違いを
+  見つけたら Issue を編集せず、実測を正としてコミットメッセージに書いてください。
+
+  ## ⚠️ 先行決定の撤回（撤回理由を知らずに元へ戻さないこと）
+
+  「チャット面の本体は `HistoryPane` をそのまま使う」（Epic #2192 決定 1 / #2193 §3）と
+  「トランスクリプト実装を二重に持たない」（#2194 §1、`ChatSurface.tsx` の doc コメント）は
+  **撤回済み**です。実機で「History と同じでチャットに見えない」ことが確認され、履歴ブラウザと
+  会話面は必要な情報密度が正反対で 1 実装では両立しないと判断されました。
+  `ChatSurface.tsx` のコメントに従って `HistoryPane` を使い続けず、**コメント自体を更新**してください。
+  二重実装を許す代償の規律が、次の scope 制約です。
+
+  ## 【重要】orchestrator が裁定したスコープ制約
+
+  次の 3 ファイルは **scope.deny**。1 バイトも変更できません（触ると scope ゲートで不合格）:
+  `src/components/worktree/HistoryPane.tsx` / `src/components/worktree/ConversationPairCard.tsx` /
+  `src/lib/history-virtualization.ts`
+
+  `src/app/globals.css` は allow ですが、`.assistant-md` 系ルールは**変更禁止**（History 列と
+  `/chat` の `AssistantMessageList` が共有）。**追加のみ**にし、バブル用は `.chat-md` など
+  **別の名前空間**を切ってください。
+
+  **Issue #2234（転写本文のツールログ分離）が `src/lib/hooks/sources/**` で並行実装中**です。
+  あちらはデータ層のみ・こちらは UI 層のみで接触ファイルは 0 件。`src/lib/hooks/**` は触らないこと。
+
+  ## 現状（develop 362b6814 で実測、実機スクリーンショット確認済み）
+
+  - `ChatSurface.tsx:456` が `HistoryPane` をそのまま描画。`TerminalSplitPaneContent.tsx:498-536` の
+    **同一 props オブジェクト**を History 列（:539）とチャット面（:604）の両方に渡している
+  - `HistoryPane.tsx:651` の「メッセージ履歴」タイトル、:653-709 の表示件数セレクト・アーカイブ表示・
+    user-only トグル・検索アイコン、:239-248 の `rounded-lg border bg-surface-2` パネル枠が
+    チャットでもそのまま出る
+  - `ConversationPairCard.tsx:712-722` は 1 ターン = 1 枚の枠付きカード。左右振り分け・吹き出し形状・
+    アバターは**いずれも無い**（`max-w-[…%]` / `rounded-2xl` は 0 件）
+  - 既定で全ペア折りたたみ（`useConversationHistory.ts:65` が空 Set）、`COLLAPSED_MAX_CHARS = 100` /
+    `COLLAPSED_MAX_LINES = 2`（`ConversationPairCard.tsx:86,94,220`）
+  - **実測**: assistant 本文は中央値 **2,478 文字**、100 文字超が 26 件中 25 件（96%）。
+    ほぼ全ての返答が 4% しか見えていない
+  - assistant は `text-xs`（:554,:567）、user は `text-sm`（:449）。返答のほうが小さい
+  - 操作は `opacity-0 group-hover:opacity-100`（:419,:518）のホバー前提
+  - スマホでは chat 面と History タブが**同一コンポーネント**
+    （`MobileTerminalTab.tsx:203-219` / `WorktreeDetailMobile.tsx:317-334`）
+
+  ## 実装内容
+
+  ### 1. `src/components/worktree/ChatTranscript.tsx`（新規）
+
+  - 入力は `ChatMessage[]`。**ペアに束ねない**（`groupMessagesIntoPairs` を使わない）
+  - user: 右寄せ（`ml-auto`）、`max-w-[85%] sm:max-w-[75%]`、accent tint、角丸
+  - assistant: 左寄せ、広め（`max-w-[92%]` 目安）、`bg-surface-2`、**常時全文**（折りたたみを持たない）
+  - 本文の出し分けは既存判定をそのまま使う: `isAgentAuthoredMarkdown(message.requestId)` が真なら
+    Markdown（ReactMarkdown + remark-gfm + rehype-sanitize + rehype-highlight）、
+    偽なら `whitespace-pre-wrap`
+  - タイポは user / assistant とも `text-sm` に揃える
+  - 役割ラベルと時刻は控えめに。**連続する同一 role のメッセージはヘッダを省略**する
+  - 仮想化は `@tanstack/react-virtual` + `measureElement`（可変高さ）。
+    **`#1123` のゼロ計測フォールバック（`HISTORY_FALLBACK_RENDER_COUNT` 相当）を必ず踏襲する**
+  - 空状態・ローディングは ChatTranscript が 1 つだけ持つ（現状は HistoryPane と ChatSurface で二重）
+
+  ### 2. 機能パリティ（欠けると今より劣化する。必須）
+
+  | 項目 | 移植元 | 備考 |
+  |---|---|---|
+  | pending の表示・再送・破棄 | `ConversationPairCard.tsx:296-317,390,403` | `onRetryPending(tempId)` / `onDiscardPending(tempId)` は**すでにメッセージ単位**の署名 |
+  | ファイルパスリンク | `onFilePathClick` | |
+  | コピー | 同上 | **ホバー前提をやめ常時表示** |
+  | composer への挿入 | `onInsertToMessage` | |
+  | アーカイブ行の減光 | `HistoryPane.tsx` の `opacity-60` | |
+  | 検索 | `useHistorySearch` をそのまま利用 | `HistoryMatch { messageId, ranges }` は既にメッセージ単位。二段変換が一段になる |
+
+  ### 3. `ChatSurface` の body 差し替え
+
+  `HistoryPane` → `ChatTranscript`。live 領域（生成中表示・「ターミナルで確認」バナー）と
+  jump-to-latest チップは**現状維持**。
+
+  ### 4. chrome
+
+  チャットでは「メッセージ履歴」タイトル・表示件数セレクト・アーカイブ表示・user-only トグルを出さない。
+  検索は ChatTranscript 側の控えめな導線（アイコンまたはショートカット）で提供する
+  （現在チャットから検索できるので、**単純に消すと機能後退**）。
+
+  ## ターミナル・History への影響を出さない制約
+
+  `TerminalDisplay.tsx` は History / Chat 系を一切 import していない。差し替えはスロット単位
+  （`TerminalSplitPaneContent.tsx:983` / `MobileTerminalTab.tsx:386-395`）。残るリスクは共有物だけ:
+
+  1. 上記 deny 3 ファイルと `.assistant-md` 系ルールを変更しない（追加のみ）。
+     `git diff --stat` をコミットメッセージに貼り 0 変更を示す
+  2. バブル用スタイルは `.assistant-md` を再利用せず別名前空間を切る
+  3. `TerminalSplitPaneContent` / `MobileTerminalTab` の変更は**スロットの中身と props 組み立てに限定**
+  4. `useTerminalPanePolling` は 1 ペイン 1 インスタンスで両面に配給されている
+     （`TerminalSplitPaneContent.tsx:280` / `MobileTerminalTab.tsx:229`）。
+     **ポーリング間隔・購読条件を変えない**（読み取りのみ）
+
+  ## スコープ外
+
+  ストリーミングの in-place 化（後続 Issue）／ ツールログ分離（#2234 で並行実装中）／
+  ターミナルモードの History 列・スマホの History タブ（いずれも無変更）
+
+  ## 受入基準（自動検証可能）
+
+  - ChatTranscript unit: user 右寄せ / assistant 左寄せ・**100 文字クランプが存在しない**（長文が全文描画）・
+    Markdown と verbatim の出し分け・連続 role のヘッダ省略・空状態とローディングが 1 つだけ
+  - パリティ unit: pending の再送 / 破棄、ファイルパスリンク、コピー、composer 挿入、
+    アーカイブ減光、検索ヒットのハイライトと前後移動
+  - 仮想化 unit: ゼロ計測環境（jsdom）で先頭 N 件が素の flow で描画される（`#1123` 相当の回帰ガード）
+  - **共有物の 0 変更**: deny 3 ファイルの `git diff --stat` が 0 変更
+  - `HistoryPane` / `ConversationPairCard` を参照する既存テストが**無変更で緑**（後方互換の証明）
+  - **変異注入**: バブルの `max-w` と左右振り分けを外すと該当テストが赤になることを**実際に確認**する
+    （修正後の緑は「効いた」と「空振り」の両方と整合します。赤を見るまで証明になりません）
+  - `npm run lint` / `npx tsc --noEmit` / `npm run test:unit` / `npm run build` が exit 0
+    （`cmd > log; echo $?` で実測。**grep に pipe しない**。pipe すると偽 PASS になります）
+
+  ## 既知の罠
+
+  - `#1123` のゼロ計測フォールバック: 仮想化は初回描画 / jsdom で行を 0 個 materialize する。
+    踏襲しないとテストと初回描画で本文が消える
+  - チャットでは**ホバー前提の操作をやめる**（`[@media(hover:none)]:opacity-100` は延命策であって正解ではない）
+  - `min-h-0` / `overflow` の取り違えで高さ潰れが再発する。実例コメントが `MobileTerminalTab.tsx:380-385` にある
+  - **常時ダーク島を新設しない**（`docs/design-system.md:179-196`）。ダークにしてよいのは
+    コードブロック（`.chat-md pre`）のみ。吹き出し本体はテーマ追従。**両テーマで検証**すること
+    （テーマ追従の親に light-on-dark を直書きした子があると light で不可視になります）
+  - i18n の新規文字列は `locales/en/common.json` と `locales/ja/common.json` の**両方**に入れる
+  - #2106 のモバイル縦予算（360x640 でターミナル 284px、下限 250px）を壊さない
+  - `git log` はファイルの履歴であって行の由来ではない。既存行の出所は `git blame`
+
+  ## 作業ルール（厳守）
+
+  - **PR を作らない**（PR は orchestrator が作ります）。**GitHub Issue を編集しない**。
+    コミットは可能な限り **1 本**にまとめる。`dev-reports/` と `workspace/` は .gitignore 済み。
+  - **`CHANGELOG.md` と `docs/module-reference.md` を編集しない**（scope.deny）。代わりに断片を書く:
+
+    - `dev-reports/changelog/issue-2232.md` — `## [Unreleased]` にそのまま貼れる **1 エントリ**。
+      1 行目にどの節（`### Added` / `### Changed` / `### Fixed`）かをコメントで書く。
+      **形式は次の実例に合わせること**（develop の `CHANGELOG.md` にある実エントリ 1 本。
+      **ファイル中では 1 行**で、下で折り返して見えるのは表示上の都合です）:
+
+          <!-- ### Added -->
+          - **feat(polling): プロンプト dedup のスキップを `capture --json` に露出する** (#1695): 重複抑止で落としたプロンプトの累積回数と最終スキップ時刻を `promptDedup`（`skippedCount` / `lastSkippedAt`）として公開し、「プロンプトが出たはずなのに保存されていない」ときに dedup が原因か検出漏れ（#1676）かを CLI から判別できるようにした。あわせて response 側 dedup（`isDuplicateResponse`、#1268）に `duplicate-response-skipped` ログを追加（従来ログすら無かった）
+
+      - `- **` で始める（集計は `grep -cE '^- \*\*'`。外れると数えられません）
+      - `(#2232)` は要約の**外**（`**` を閉じた後）に置く
+      - `<type>` は CLAUDE.md のコミット規約と同じ語彙（`feat` / `fix` / `docs` / `refactor` / `test` / `chore` / `ci` / `style`）
+      - **1 エントリ = 1 行**（本文がどれだけ長くても改行を入れない）
+
+    - `dev-reports/module-reference/issue-2232.md` — `docs/module-reference.md` の表に足す注記を
+      **行キー（`| \`path\` |`）ごと**に列挙する。**既存行に足すときは
+      `grep -n '^| \`<path>\`' docs/module-reference.md` を実行し、その出力（行番号つきの行キー）を
+      断片に書き写してから**書くこと。0 件だった行への追記を指示しない（新規なら「新規行」と明記）。実例:
+
+          ## 既存行への追記
+          - `src/components/worktree/ChatSurface.tsx` — 実在確認: `docs/module-reference.md:NNN`
+            追記内容: 「…（Issue #2232）」
+
+          ## 新規行
+          - `src/components/worktree/ChatTranscript.tsx` — 新規行。「…（Issue #2232）」
+
+    - 断片が無いとリリースノートと module-reference に載りません。**実装と同じ commit の時点で書くこと。**
+
+  - 完了したら `IMPL_COMPLETED` と出力してください。
+scope:
+  allow:
+    - "src/components/worktree/**"
+    - "src/components/ui/**"
+    - "src/hooks/**"
+    - "src/config/**"
+    - "src/contexts/**"
+    - "src/app/globals.css"
+    - "src/lib/chat/**"
+    - "locales/en/**"
+    - "locales/ja/**"
+    - "tests/unit/components/**"
+    - "tests/unit/hooks/**"
+    - "tests/unit/i18n/**"
+    - "tests/unit/config/**"
+    - "tests/unit/contexts/**"
+    - "tests/integration/**"
+    - "dev-reports/**"
+  deny:
+    - "src/components/worktree/HistoryPane.tsx"
+    - "src/components/worktree/ConversationPairCard.tsx"
+    - "src/lib/history-virtualization.ts"
+    - "src/lib/hooks/**"
+    - "CHANGELOG.md"
+    - "docs/module-reference.md"
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true

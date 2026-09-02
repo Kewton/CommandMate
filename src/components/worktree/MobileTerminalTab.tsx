@@ -215,6 +215,12 @@ const MobileChatSurface = memo(function MobileChatSurface({
         isLoading,
         onRetryPending: retryPending,
         onDiscardPending: handleDiscardPending,
+        // Issue #2232: the same composer callback the discard path above already
+        // uses. The phone's transcript had no insert action at all before —
+        // `HistoryPane` was mounted here without `onInsertToMessage` — and the
+        // chat surface is where re-sending a previous prompt is most useful,
+        // because the terminal is not on screen to scroll back through.
+        onInsertToMessage: insertToComposer,
       }}
     />
   );

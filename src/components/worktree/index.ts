@@ -19,3 +19,9 @@ export type {
   ChatSurfaceHistoryProps,
   ChatSurfaceBlockedReason,
 } from './ChatSurface';
+
+export { ChatTranscript } from './ChatTranscript';
+export type { ChatTranscriptProps } from './ChatTranscript';
+
+export { ChatMessageBubble } from './ChatMessageBubble';
+export type { ChatMessageBubbleProps } from './ChatMessageBubble';
