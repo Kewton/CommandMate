@@ -1,0 +1,106 @@
+version: 1
+title: "Issue #2241: docs/architecture.md の出力面 chat 構成を実装に合わせる"
+goal: |
+  https://github.com/Kewton/CommandMate/issues/2241 を修正してください。
+  **Issue 本文を `gh issue view 2241` で必ず読んでください。**
+  **Issue のレビューと本文の書き戻しは不要**です（orchestrator が管理）。
+
+  ドキュメント 1 箇所の事実誤りの修正です。**コードは変更しません。**
+
+  ## 直すもの
+
+  `docs/architecture.md:168-171`（着手時に行番号を再確認すること）:
+
+      - **出力面**は split（PC）／タブ（スマホ）ごとに `terminal` / `chat` を切り替えられる
+        （Issue #2193）。`chat` は `ChatSurface` → `HistoryPane` → `ConversationPairCard`、
+        `terminal` は `TerminalDisplay`。…
+
+  `chat` の構成が**事実と違います**。#2232（PR #2236）が Epic #2192 の決定 1
+  「チャット面の本体は `HistoryPane` をそのまま使う」を**撤回**し、専用実装へ差し替えました。
+  現在は:
+
+      ChatSurface → ChatTranscript → ChatMessageBubble
+                                   └ ChatLiveTurnBubble（生成中、#2233）
+
+  **実装を必ず自分で確認してから書いてください**（本文より実測を正とする）。
+  最低限 `src/components/worktree/ChatSurface.tsx` が何を描画しているかを読むこと。
+
+  ## 書くべき内容
+
+  単に名前を置換するだけでは不十分です。次を含めてください:
+
+  1. `chat` の構成を現在の実装に直す
+  2. **決定 1 が #2232 で撤回された事実と理由**を 1 行残す
+     （履歴ブラウザと会話面は必要な情報密度が正反対で 1 実装では両立しない）。
+     置換だけだと「なぜ二重実装なのか」が失われ、次に読む人が撤回済みの案へ戻る
+  3. 二重実装を許した代償の規律: `HistoryPane` / `ConversationPairCard` /
+     `lib/history-virtualization` を変更しない、Markdown は `.chat-md` /`.assistant-md` で
+     名前空間を分ける
+  4. #2238 の結果 — 生成中判定は `sessionStatus === 'running'`
+     （`isRunning` は「健全な tmux セッションが在るか」であって生成中ではない）
+
+  ## 【重要】書き換えてはいけないもの
+
+  次は**当時の記録**であって現在のコードの説明ではありません。**触らないでください**:
+
+  - `docs/implementation-history.md` の #725 / #716 の行（当時の実装内容の記録）
+  - `docs/design/multi-agent-state-architecture.md:1212` — **本文に「書き換えない」と明記されている**
+  - `docs/module-reference.md` — #2232 / #2233 / #2238 の追記で既に訂正済み。
+    かつ本契約の **scope.deny**
+
+  機械的な一括置換（`sed -i` で `HistoryPane` を全置換する等）を**しないでください**。
+  記録が壊れます。`docs/architecture.md` の該当箇所だけを手で直すこと。
+
+  ## スコープ外
+
+  `docs/en/architecture.md` には出力面（surfaceMode）の節が**そもそも存在しません**
+  （`grep -c 'surfaceMode\|Output surface' docs/en/architecture.md` = 0）。
+  `tests/unit/docs/ja-en-heading-parity.test.ts` の `PAIRS` にも `architecture` は
+  入っていないため、EN 追従は**本 Issue のスコープ外**です。触らないでください。
+
+  ## 受入基準
+
+  - [ ] `docs/architecture.md` の出力面の記述が現在の実装と一致する
+  - [ ] 決定 1 の撤回が文書に残っている（単なる置換で履歴が消えていない）
+  - [ ] `grep -n 'ChatSurface.*HistoryPane' docs/architecture.md` が **0 件**
+  - [ ] 上記「書き換えてはいけないもの」が `git diff` に**現れていない**
+  - [ ] `npm run lint` / `npx tsc --noEmit` / `npm run test:unit` / `npm run build` が exit 0
+        （docs のみの変更でもゲートは通す。`cmd > log; echo $?` で実測。**grep に pipe しない**）
+
+  ## 作業ルール（厳守）
+
+  - **PR を作らない**（PR は orchestrator が作ります）。**GitHub Issue を編集しない**。
+    コミットは **1 本**。`dev-reports/` と `workspace/` は .gitignore 済み。
+  - **`CHANGELOG.md` と `docs/module-reference.md` を編集しない**（scope.deny）。代わりに断片を書く:
+
+    - `dev-reports/changelog/issue-2241.md` — `## [Unreleased]` にそのまま貼れる **1 エントリ**。
+      1 行目にどの節かをコメントで書く（本件は `### Fixed` が妥当）。
+      **形式は次の実例に合わせること**（develop の実エントリ 1 本。**ファイル中では 1 行**）:
+
+          <!-- ### Added -->
+          - **feat(polling): プロンプト dedup のスキップを `capture --json` に露出する** (#1695): 重複抑止で落としたプロンプトの累積回数と最終スキップ時刻を `promptDedup`（`skippedCount` / `lastSkippedAt`）として公開し、「プロンプトが出たはずなのに保存されていない」ときに dedup が原因か検出漏れ（#1676）かを CLI から判別できるようにした。あわせて response 側 dedup（`isDuplicateResponse`、#1268）に `duplicate-response-skipped` ログを追加（従来ログすら無かった）
+
+      - `- **` で始める／`(#2241)` は要約の**外**（`**` を閉じた後）／**1 エントリ = 1 行**
+      - `<type>` は CLAUDE.md のコミット規約と同じ語彙（本件は `docs`）
+
+    - `dev-reports/module-reference/issue-2241.md` — `docs/architecture.md` のみの変更なら
+      **「追記なし」の 1 行でよい**（module-reference に architecture.md の行キーがあるかを
+      `grep -n '^| \`docs/architecture.md\`' docs/module-reference.md` で確認し、
+      **その出力を断片に書き写してから**判断すること。0 件なら「追記なし」）。
+      表のセルに生の `|` を入れないこと
+
+  - 完了したら `IMPL_COMPLETED` と出力してください。
+scope:
+  allow:
+    - "docs/architecture.md"
+    - "dev-reports/**"
+  deny:
+    - "docs/implementation-history.md"
+    - "docs/design/multi-agent-state-architecture.md"
+    - "docs/en/**"
+    - "src/**"
+    - "CHANGELOG.md"
+    - "docs/module-reference.md"
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true
