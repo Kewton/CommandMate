@@ -62,7 +62,11 @@ import { homedir } from 'os';
 import { join, resolve, sep } from 'path';
 import { buildCompositeKey } from '@/lib/auto-yes-state';
 import { readTranscriptTail, TRANSCRIPT_TAIL_BYTES } from '@/lib/history/transcript-tail';
-import { recordUserTurn, type RecordedUserTurn } from '@/lib/history/user-turn-recorder';
+import {
+  recordUserTurn,
+  type RecordedUserTurn,
+  type RecordUserTurnOptions,
+} from '@/lib/history/user-turn-recorder';
 import { createLogger } from '@/lib/logger';
 import { antigravityPromptRequestId, antigravityTurnRequestId } from '@/types/agent-transcript';
 import type { AgentInstanceRef } from '../types';
@@ -269,15 +273,21 @@ export interface AntigravityTranscriptCapture {
 }
 
 /**
- * Read the newest turn out of this instance's transcript and write it.
+ * Read this instance's unwritten turns out of its transcript and write them.
  *
- * **Only the newest turn**, and that is the same deliberate difference from
- * opencode's backfill that #2121 documents: every earlier turn already has a
- * `chat_messages` row the *scraper* wrote, and writing a Markdown row for it too
- * would put the same reply in History twice. One row per turn from the scraper,
- * one row per turn from here, so the swap is one-for-one.
+ * **Every turn in the window that is not already a row**, oldest first, which is
+ * the shape Issue #2246 gave all three pull readers and the reasoning for it is
+ * written out once on `../claude/history`'s
+ * {@link captureClaudeTranscriptTurn}. The short version: this reader only runs
+ * when the poller judges a turn finished, so a missed judgement used to lose a
+ * turn permanently — by the next judgement "the newest turn" had moved on.
  *
- * The return value is the poller's instruction. **True** means History holds
+ * #2121's one-row-per-turn argument is preserved by the **anchor**: the newest
+ * turn in the window this reader has already written is where the backfill
+ * starts, and a window with no anchor falls back to the newest turn alone.
+ *
+ * The return value is the poller's instruction, and it is about the **newest**
+ * turn whatever else was written on the way. **True** means History holds
  * this turn as the agent's own Markdown and the scrape must be dropped. **False**
  * means it does not, for any reason at all — no conversation pointer, no file, an
  * unreadable file, a window with no prompt in it — and the scrape must be saved.
@@ -332,8 +342,7 @@ export async function captureAntigravityTranscriptTurn(
 
     const parsed = parseAntigravityTranscript(text);
     const built = buildAntigravityTurns(parsed.records, conversationId);
-    const turn = built.turns.at(-1);
-    if (!turn) {
+    if (built.turns.length === 0) {
       // No `USER_INPUT` in the window. Two ordinary causes, both fail-open: the
       // 4 MiB window cut mid-conversation, and `transcript_full.jsonl` can hold
       // less than the whole history — one of the 41 files in the corpus held a
@@ -362,14 +371,42 @@ export async function captureAntigravityTranscriptTurn(
       });
     }
 
-    const userRow = await recordAntigravityUserTurn(target, turn);
-    return await writeAntigravityTurn(
-      target,
-      turn,
-      renderAntigravityTurn(turn),
-      resolveAssistantTimestampMs(turn, userRow),
-      path
-    );
+    const pending = await selectUnwrittenAntigravityTurns(target, built.turns);
+    if (pending.turns.length === 0) {
+      logger.debug('antigravity-transcript-turns-already-saved', {
+        worktreeId: target.worktreeId,
+        instanceId,
+        turnsInWindow: built.turns.length,
+      });
+      return true;
+    }
+
+    if (pending.turns.length > 1) {
+      logger.info('antigravity-transcript-backfilling-turns', {
+        worktreeId: target.worktreeId,
+        instanceId,
+        path,
+        pendingTurns: pending.turns.length,
+        turnsInWindow: built.turns.length,
+        anchored: pending.anchored,
+      });
+    }
+
+    let captured = false;
+    for (let index = 0; index < pending.turns.length; index += 1) {
+      const turn = pending.turns[index];
+      const previousStartedAt =
+        index === 0 ? pending.previousStartedAt : pending.turns[index - 1].startedAt;
+      const userRow = await recordAntigravityUserTurn(target, turn, previousStartedAt);
+      captured = await writeAntigravityTurn(
+        target,
+        turn,
+        renderAntigravityTurn(turn),
+        resolveAssistantTimestampMs(turn, userRow),
+        path
+      );
+    }
+    return captured;
   } catch (error) {
     logger.error('antigravity-transcript-capture-failed', {
       worktreeId: target.worktreeId,
@@ -378,6 +415,79 @@ export async function captureAntigravityTranscriptTurn(
     });
     return false;
   }
+}
+
+/**
+ * The transcript file this instance would be read from, or null (Issue #2246).
+ *
+ * The same two steps {@link captureAntigravityTranscriptTurn} opens with, asked
+ * without reading or writing anything; see `../claude/history`'s
+ * {@link resolveClaudeTranscriptPath} for what the Stop receiver does with it.
+ *
+ * Never throws.
+ */
+export async function resolveAntigravityTranscriptPath(
+  target: AgentInstanceRef,
+  capture: AntigravityTranscriptCapture = {}
+): Promise<string | null> {
+  try {
+    const conversationId = await resolveAntigravityConversationId(target);
+    if (!conversationId) return null;
+    return await locateAntigravityTranscript(
+      capture.antigravityHome ?? resolveAntigravityHome(),
+      conversationId
+    );
+  } catch {
+    return null;
+  }
+}
+
+/** What {@link selectUnwrittenAntigravityTurns} answers. */
+interface PendingAntigravityTurns {
+  /** The turns to write, oldest first. Empty when the newest one is a row. */
+  readonly turns: readonly AntigravityTurnAccumulator[];
+  /** `startedAt` of the turn before the first pending one, or 0. */
+  readonly previousStartedAt: number;
+  /** Whether a written turn was found in the window. Logged, never branched on. */
+  readonly anchored: boolean;
+}
+
+/**
+ * The turns {@link captureAntigravityTranscriptTurn} still has to write (#2246).
+ *
+ * The same rule as `../claude/history`'s, on agy's own key: search backwards
+ * from the newest turn for one that is already a row, and take everything after
+ * it. Record order and never a timestamp — agy stamps `created_at` at
+ * second resolution, so a turn and its own reply routinely share an instant.
+ *
+ * @param turns - Every turn in the window, oldest first
+ */
+async function selectUnwrittenAntigravityTurns(
+  target: AgentInstanceRef,
+  turns: readonly AntigravityTurnAccumulator[]
+): Promise<PendingAntigravityTurns> {
+  const [{ getDbInstance }, { findMessageByRequestId }] = await Promise.all([
+    import('@/lib/db/db-instance'),
+    import('@/lib/db'),
+  ]);
+  const db = getDbInstance();
+
+  for (let index = turns.length - 1; index >= 0; index -= 1) {
+    const turn = turns[index];
+    const requestId = antigravityTurnRequestId(turn.conversationId, turn.stepIndex);
+    if (!findMessageByRequestId(db, target.worktreeId, requestId)) continue;
+    return {
+      turns: turns.slice(index + 1),
+      previousStartedAt: turn.startedAt,
+      anchored: true,
+    };
+  }
+
+  return {
+    turns: turns.slice(-1),
+    previousStartedAt: turns.length > 1 ? turns[turns.length - 2].startedAt : 0,
+    anchored: false,
+  };
 }
 
 /**
@@ -425,17 +535,25 @@ async function isReadableFile(path: string): Promise<boolean> {
  */
 async function recordAntigravityUserTurn(
   target: AgentInstanceRef,
-  turn: AntigravityTurnAccumulator
+  turn: AntigravityTurnAccumulator,
+  previousStartedAt = 0
 ): Promise<RecordedUserTurn> {
   const skipped: RecordedUserTurn = { outcome: 'skipped', messageId: null, timestampMs: null };
   const prompt = turn.prompt;
   if (!prompt) return skipped;
 
+  // Issue #2246: a turn read late is a turn whose `/send` row may be older than
+  // #2196's symmetric window reaches. The previous turn's start is the tightest
+  // honest bound, and it only ever widens the search.
+  const adoption: RecordUserTurnOptions =
+    previousStartedAt > 0 ? { adoptionFromMs: previousStartedAt } : {};
+
   const recorded = await recordUserTurn(
     target,
     antigravityPromptRequestId(turn.conversationId, prompt.stepIndex),
     prompt.text,
-    prompt.timestampMs
+    prompt.timestampMs,
+    adoption
   );
   if (recorded.outcome === 'failed') {
     logger.warn('antigravity-transcript-user-turn-failed', {

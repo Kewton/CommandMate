@@ -60,7 +60,11 @@ import { open, stat } from 'fs/promises';
 import { homedir } from 'os';
 import { join, resolve, sep } from 'path';
 import { buildCompositeKey } from '@/lib/auto-yes-state';
-import { recordUserTurn, type RecordedUserTurn } from '@/lib/history/user-turn-recorder';
+import {
+  recordUserTurn,
+  type RecordedUserTurn,
+  type RecordUserTurnOptions,
+} from '@/lib/history/user-turn-recorder';
 import { createLogger } from '@/lib/logger';
 import { claudePromptRequestId, claudeTurnRequestId } from '@/types/agent-transcript';
 import type { AgentInstanceRef } from '../types';
@@ -86,8 +90,9 @@ const logger = createLogger('lib/hooks/sources/claude/history');
  * The file grows for the life of the session and a long one is tens of
  * megabytes — the largest on this machine on 2026-08-31 was 23 MB — so reading
  * it whole on every finished turn would be the most expensive thing the poller
- * does. Only the newest turn is ever written (see {@link captureClaudeTranscriptTurn}),
- * so only the newest turn has to be in the window.
+ * does. Only turns whose prompt record is inside the window are ever written
+ * (see {@link captureClaudeTranscriptTurn}), which is also what stops a turn the
+ * window opened halfway through being written from its middle.
  *
  * 4 MiB is roughly two orders of magnitude above the measured size of a single
  * turn and still small enough to read and parse in one tick. A turn that
@@ -228,15 +233,38 @@ export interface ClaudeTranscriptCapture {
 }
 
 /**
- * Read the newest turn out of this instance's transcript and write it.
+ * Read this instance's unwritten turns out of its transcript and write them.
  *
- * **Only the newest turn**, and that is the deliberate difference from
- * opencode's backfill. Every earlier turn of this session already has a
- * `chat_messages` row that the *scraper* wrote, and writing a Markdown row for
- * it as well would put the same reply in History twice — once as prose and once
- * as the pane drew it. The scraper wrote exactly one row per turn and this
- * writes exactly one row per turn, so the swap is one-for-one and history is
- * neither duplicated nor rewritten.
+ * ## Why this is no longer "only the newest turn" (Issue #2246)
+ *
+ * #2121 wrote `built.turns.at(-1)` and nothing else, for a reason that was
+ * sound and is still half true: every earlier turn of this session already has
+ * a `chat_messages` row that the *scraper* wrote, and writing a Markdown row
+ * for it as well would put the same reply in History twice — once as prose and
+ * once as the pane drew it.
+ *
+ * What that argument did not cover is a turn **no writer recorded at all**. The
+ * trigger for this reader is the poller deciding a turn finished, so a poll that
+ * misjudges one completion (#2247's launch-banner heuristic, measured on
+ * 2026-09-02) does not merely delay the turn: by the time the next completion is
+ * judged, "the newest turn" is the *next* one, and the missed turn is nobody's.
+ * One dropped completion cost one turn permanently.
+ *
+ * So the unit of work is now "every turn in the window that is not already a
+ * row", written oldest first, and what preserves #2121's argument is the
+ * **anchor**: the newest turn in the window that this reader has already written
+ * is where the backfill starts. Turns after it are turns this reader was live
+ * for, so a scraper row for them exists only in the case the anchor cannot see
+ * — the reader answering false once for a transient reason (an empty body) and
+ * the scraper saving that turn's pane copy. That trade is deliberate and in the
+ * direction every Issue in this subsystem picks: two writers duplicate a reply,
+ * no writer loses one.
+ *
+ * When the window holds **no** anchor — a session the reader has never written
+ * for, and equally the first read after a `/clear` — this falls back to #2121's
+ * behaviour exactly: the newest turn, and nothing before it. That is the case
+ * where the earlier turns really are the scraper's, and there is no evidence in
+ * the window that says otherwise.
  *
  * The return value is the poller's instruction, so the two failure directions
  * are worth stating plainly. **True** means this path has recorded the turn and
@@ -246,10 +274,15 @@ export interface ClaudeTranscriptCapture {
  * false, which is the fail-open the acceptance criteria require: two writers
  * duplicate a reply, no writer loses one.
  *
+ * **It is the newest turn the answer is about**, backfill or not. A run that
+ * wrote three missed turns and then found the newest one still empty answers
+ * false, because the scrape the poller is holding is the pane's copy of *that*
+ * turn and dropping it would lose it.
+ *
  * Never throws.
  *
  * @param target - The instance whose turn just ended
- * @returns Whether History now holds this turn as the agent's own Markdown
+ * @returns Whether History now holds this instance's newest turn as Markdown
  */
 export async function captureClaudeTranscriptTurn(
   target: AgentInstanceRef,
@@ -279,8 +312,7 @@ export async function captureClaudeTranscriptTurn(
 
     const parsed = parseClaudeTranscript(text);
     const built = buildClaudeTurns(parsed.records, sessionId ?? '');
-    const turn = built.turns.at(-1);
-    if (!turn) {
+    if (built.turns.length === 0) {
       logger.info('claude-transcript-no-turn', {
         worktreeId: target.worktreeId,
         instanceId,
@@ -313,13 +345,51 @@ export async function captureClaudeTranscriptTurn(
       });
     }
 
-    const userRow = await recordClaudeUserTurn(target, turn);
-    return await writeClaudeTurn(
-      target,
-      renderClaudeTurn(turn),
-      resolveAssistantTimestampMs(turn, userRow),
-      path
-    );
+    const pending = await selectUnwrittenClaudeTurns(target, built.turns);
+    if (pending.turns.length === 0) {
+      // The anchor is the newest turn in the window, so there is nothing to
+      // write and the newest turn is a row. True, for the reason
+      // {@link writeClaudeTurn} answers true to an already-saved turn: a second
+      // poll of one finished turn must not put the pane's copy on top of it.
+      logger.debug('claude-transcript-turns-already-saved', {
+        worktreeId: target.worktreeId,
+        instanceId,
+        turnsInWindow: built.turns.length,
+      });
+      return true;
+    }
+
+    if (pending.turns.length > 1) {
+      // The #2246 case, and the one worth a line in the log: more than one turn
+      // was unwritten, so a completion went unnoticed at the time.
+      logger.info('claude-transcript-backfilling-turns', {
+        worktreeId: target.worktreeId,
+        instanceId,
+        path,
+        pendingTurns: pending.turns.length,
+        turnsInWindow: built.turns.length,
+        anchored: pending.anchored,
+      });
+    }
+
+    // Oldest first, and the ordering is load-bearing twice over: History sorts
+    // by timestamp, and each turn's `/send` row is adopted against the previous
+    // turn's start, so a later turn must not get to claim a row an earlier one
+    // is about to ask for.
+    let captured = false;
+    for (let index = 0; index < pending.turns.length; index += 1) {
+      const turn = pending.turns[index];
+      const previousStartedAt =
+        index === 0 ? pending.previousStartedAt : pending.turns[index - 1].startedAt;
+      const userRow = await recordClaudeUserTurn(target, turn, previousStartedAt);
+      captured = await writeClaudeTurn(
+        target,
+        renderClaudeTurn(turn),
+        resolveAssistantTimestampMs(turn, userRow),
+        path
+      );
+    }
+    return captured;
   } catch (error) {
     logger.error('claude-transcript-capture-failed', {
       worktreeId: target.worktreeId,
@@ -327,6 +397,101 @@ export async function captureClaudeTranscriptTurn(
       error: error instanceof Error ? error.message : String(error),
     });
     return false;
+  }
+}
+
+/**
+ * The turns {@link captureClaudeTranscriptTurn} still has to write (Issue #2246).
+ *
+ * The search runs **backwards from the newest turn** and stops at the first one
+ * that is already a row. That turn is the *anchor*, and everything after it is
+ * pending — by construction, since the anchor is the newest written turn in the
+ * window.
+ *
+ * Two properties of that rule are worth stating because both were required:
+ *
+ *  - **Order, not time.** The comparison is the transcript's own record order
+ *    and never a timestamp. A turn's assistant row is dated one millisecond
+ *    after its user row (`resolveAssistantTimestampMs`), so the rows do not
+ *    carry an ordering that could be trusted for this.
+ *  - **The window bounds it.** `buildClaudeTurns` only opens a turn on a prompt
+ *    record, so a turn whose prompt fell outside
+ *    {@link CLAUDE_TRANSCRIPT_TAIL_BYTES} is not in `turns` at all and cannot be
+ *    backfilled from its middle. Its records are counted as
+ *    `orphanedAssistantRecords` instead, which is what the caller reports.
+ *
+ * A window with no anchor answers with the newest turn alone. See
+ * {@link captureClaudeTranscriptTurn} for why that is #2121's behaviour rather
+ * than a degraded one.
+ *
+ * @param turns - Every turn in the window, oldest first
+ */
+async function selectUnwrittenClaudeTurns(
+  target: AgentInstanceRef,
+  turns: readonly ClaudeTurnAccumulator[]
+): Promise<PendingClaudeTurns> {
+  const [{ getDbInstance }, { findMessageByRequestId }] = await Promise.all([
+    import('@/lib/db/db-instance'),
+    import('@/lib/db'),
+  ]);
+  const db = getDbInstance();
+
+  for (let index = turns.length - 1; index >= 0; index -= 1) {
+    const requestId = claudeTurnRequestId(turns[index].promptUuid);
+    if (!findMessageByRequestId(db, target.worktreeId, requestId)) continue;
+    return {
+      turns: turns.slice(index + 1),
+      previousStartedAt: turns[index].startedAt,
+      anchored: true,
+    };
+  }
+
+  return {
+    turns: turns.slice(-1),
+    previousStartedAt: turns.length > 1 ? turns[turns.length - 2].startedAt : 0,
+    anchored: false,
+  };
+}
+
+/** What {@link selectUnwrittenClaudeTurns} answers. */
+interface PendingClaudeTurns {
+  /** The turns to write, oldest first. Empty when the newest one is a row. */
+  readonly turns: readonly ClaudeTurnAccumulator[];
+  /**
+   * `startedAt` of the turn immediately before the first pending one, or 0.
+   *
+   * The lower bound on `/send` row adoption for that turn; see
+   * {@link RecordUserTurnOptions}.
+   */
+  readonly previousStartedAt: number;
+  /** Whether a written turn was found in the window. Logged, never branched on. */
+  readonly anchored: boolean;
+}
+
+/**
+ * The transcript file this instance would be read from, or null (Issue #2246).
+ *
+ * The same two steps {@link captureClaudeTranscriptTurn} opens with — resolve
+ * the session pointer, then check the filesystem — asked without reading or
+ * writing anything. The Stop receiver uses it to decide whether waiting half a
+ * second and asking again could possibly help: a session with no transcript to
+ * name will not have grown one by then, and a hook handler that sleeps for
+ * nothing is a hook handler that slows every turn of every tool.
+ *
+ * Never throws.
+ */
+export async function resolveClaudeTranscriptPath(
+  target: AgentInstanceRef,
+  capture: ClaudeTranscriptCapture
+): Promise<string | null> {
+  try {
+    const homeDir = capture.homeDir ?? homedir();
+    if (typeof capture.worktreePath !== 'string' || capture.worktreePath.length === 0) {
+      return null;
+    }
+    return await locateClaudeTranscript(homeDir, capture, await resolveClaudeSessionId(target));
+  } catch {
+    return null;
   }
 }
 
@@ -533,10 +698,17 @@ export async function readClaudeTurnProgress(
  * agent really did reply, and #2121's behaviour for those turns is unchanged.
  *
  * Never throws; `recordUserTurn` reports its failures in the return value.
+ *
+ * @param previousStartedAt - When the turn before this one opened, or 0. Widens
+ *   `/send` adoption backwards to that instant (Issue #2246): a prompt the agent
+ *   queued for eleven minutes is still the row CommandMate wrote when it sent
+ *   the text, and #2196's symmetric two-minute window cannot reach it. Never
+ *   narrows — see {@link RecordUserTurnOptions}.
  */
 async function recordClaudeUserTurn(
   target: AgentInstanceRef,
-  turn: ClaudeTurnAccumulator
+  turn: ClaudeTurnAccumulator,
+  previousStartedAt = 0
 ): Promise<RecordedUserTurn> {
   const instanceId = target.instanceId ?? target.cliToolId;
 
@@ -550,11 +722,15 @@ async function recordClaudeUserTurn(
     return { outcome: 'skipped', messageId: null, timestampMs: null };
   }
 
+  const adoption: RecordUserTurnOptions =
+    previousStartedAt > 0 ? { adoptionFromMs: previousStartedAt } : {};
+
   const recorded = await recordUserTurn(
     target,
     claudePromptRequestId(turn.promptUuid),
     turn.promptText,
-    turn.startedAt
+    turn.startedAt,
+    adoption
   );
 
   if (recorded.outcome === 'failed') {
