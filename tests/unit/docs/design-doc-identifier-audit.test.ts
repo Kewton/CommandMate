@@ -87,6 +87,10 @@ const DOC = 'docs/design/multi-agent-state-architecture.md';
  *
  * - `planned`   — the document is asking for it. Not built yet, correctly named.
  * - `history`   — a name kept as the record of a retraction, rename or deletion.
+ *                 The document has to *say* so where it uses the name. A row
+ *                 whose document still reads as if the code were there is a
+ *                 claim nothing keeps — that is what #2200 left and #2212
+ *                 closed (see the three `MessageList` rows).
  * - `external`  — vocabulary that belongs to something outside this repository.
  * - `prose`     — a name the document gave a mechanism whose code spelling differs.
  * - `test-only` — real, and correctly living only under `tests/`.
@@ -138,6 +142,11 @@ const DECLARED: readonly Declared[] = [
     why: '§4 D3 決定 3 が新設する `releasedBy` の値。`agent-event-state.ts` のコメントが設計語として先に引いている（`releasedBy` 自体は未実装）',
   },
   {
+    text: 'generatingContent',
+    category: 'history',
+    why: '#2200 が削除した `MessageListProps` のフィールド。§9「統合判定（非影響）」行が、当時の props に状態フラグが無かったことの実測記録として引いており、同行に「#2200 で削除済み」を注記した（#2212）',
+  },
+  {
     text: 'getCaptureWindow()',
     category: 'planned',
     why: '§4 D4 が `src/lib/session/` に新設すると決めた `session` ファサードの片方。Phase 2',
@@ -173,6 +182,11 @@ const DECLARED: readonly Declared[] = [
     why: '§10.1 が「別名 `MAX_EVENT_ID_LENGTH` を置く場合も同じ定数を参照し、値を複製しない」と条件つきで書いた名前。§14 の 3 行はレビュー履歴が同じ名前を引いている',
   },
   {
+    text: 'MessageList',
+    category: 'history',
+    why: '#2200 が削除した旧チャット UI コンポーネント。§9 / §10.13 / §15.3 DR3-022 / §15.4 が「本設計の消費者ではない」という 2026-08-21 時点の否定的実測の記録として引いている。削除の事実は §15.4 の「後日の更新」に書き、各所からそこを指した（#2212。#2200 が書いた §14.3 は誤りで、DR3-022 は §15.3 にある）',
+  },
+  {
     text: 'OPENCODE_SERVER_PASSWORD',
     category: 'external',
     why: 'opencode CLI 自身の環境変数。§15.1 の未決事項（ポート identity の強化）で、採用するかどうかがまだ決まっていない',
@@ -181,6 +195,11 @@ const DECLARED: readonly Declared[] = [
     text: 'readBoundedId',
     category: 'planned',
     why: '§6.2 / DR4-001 が `src/lib/hooks/sources/event-mapper.ts` に新設すると決めた共通バリデータ',
+  },
+  {
+    text: 'realtimeOutput',
+    category: 'history',
+    why: '#2200 が削除した `MessageListProps` のフィールド。`generatingContent` と同じ §9 の否定的実測の記録で引かれており、同行の「#2200 で削除済み」注記が両方を覆う（#2212）',
   },
   {
     text: 'tests/unit/hooks/sources/event-id-validation.test.ts',
@@ -285,7 +304,14 @@ describe('DECLARED is reviewable', () => {
        be visible in review rather than absorbed silently. */
     expect(byCategory).toEqual({
       planned: 11,
-      history: 2,
+      // Issue #2200 deleted the legacy chat UI the document measured in Stage 3
+      // (DR3-022's negative finding) and two of its props, so three more names
+      // are now history rather than code. #2200 could not touch `docs/design/**`
+      // and said so; #2212 finished the pairing that makes the three rows the
+      // same shape as `getStatusCaptureLines` — §9 / §10.13 / §15.3 / §15.4 now
+      // state the deletion, so `history` describes what the document says rather
+      // than what a reader would have to already know. The split is unchanged.
+      history: 5,
       external: 5,
       prose: 1,
       'test-only': 1,

@@ -6,8 +6,9 @@
  * block in `status-detector` answers `opencode_processing_indicator` for the
  * `esc interrupt` footer, and that footer is opencode's ONLY signal between the
  * submitted prompt and the first transcript row. On a scraper-only session (no
- * hooks — the state #1891 L1 leaves behind) `MessageList` therefore showed no
- * thinking indicator at all for that stretch.
+ * hooks — the state #1891 L1 leaves behind) the chat surface therefore showed no
+ * thinking indicator at all for that stretch. The consumer is `ChatSurface`,
+ * which reads the `thinking` flag off this route.
  *
  * Driven through the route rather than asserted on the helper alone, because
  * the defect was in the wiring: `detectSessionStatus` was already right.

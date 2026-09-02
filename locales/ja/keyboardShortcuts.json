@@ -12,6 +12,7 @@
     "closeOverlay": "オーバーレイ・ダイアログを閉じる",
     "navigateList": "選択を上下に移動",
     "terminalSearch": "ターミナル出力を検索",
+    "toggleSurfaceMode": "出力面をターミナル / チャットで切り替え",
     "sendMessage": "メッセージを送信",
     "composerNewline": "改行を挿入",
     "editorIndent": "行・選択範囲をインデント",

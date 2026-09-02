@@ -20,7 +20,26 @@ import { invalidateCache } from '@/lib/tmux/tmux-capture-cache';
 
 const logger = createLogger('terminal-broadcast');
 
-const versionCounters = new Map<string, number>();
+/**
+ * Reached through `globalThis` because #2220 made this counter reachable from
+ * more than one module instance.
+ *
+ * Before the publisher bridge only the custom server's copy of this module ever
+ * produced a frame that arrived, so a per-bundle counter was per-process by
+ * accident. Now a route bundle's `broadcastTerminalSnapshotAfterInteraction`
+ * really does reach a socket — and a second counter starting again at 1 would
+ * be read by the client's stale-frame guard as an out-of-order frame and
+ * dropped, leaving the pane on the pre-action screen. The sequence has to be
+ * one sequence per (worktreeId, cliToolId, instanceId) for the whole process,
+ * the way `__chatTurnProgressState` already is (#2199).
+ */
+declare global {
+  // eslint-disable-next-line no-var
+  var __terminalSnapshotVersions: Map<string, number> | undefined;
+}
+
+const versionCounters = globalThis.__terminalSnapshotVersions ??
+  (globalThis.__terminalSnapshotVersions = new Map<string, number>());
 
 export const INTERACTION_SNAPSHOT_RETRY_DELAYS_MS = [100, 250, 500, 750] as const;
 
@@ -58,6 +77,12 @@ function snapshotFingerprint(payload: Awaited<ReturnType<typeof buildCurrentOutp
   return JSON.stringify([
     payload.fullOutput ?? '',
     payload.isRunning,
+    // Issue #2240: part of the frame since the snapshot started carrying it, so
+    // a redraw whose only change is the verdict (`waiting` -> `running` on an
+    // answered dialog, say) is still published. Leaving it out would put the
+    // field back in the position this issue took it out of — present on the
+    // wire, but not deliverable by the path that actually feeds a live turn.
+    payload.sessionStatus,
     payload.thinking ?? false,
     payload.isPromptWaiting ?? false,
     payload.isSelectionListActive ?? false,
@@ -91,6 +116,12 @@ function emitTerminalSnapshot(
     instanceId: resolvedInstanceId,
     output: payload.fullOutput ?? '',
     isRunning: payload.isRunning,
+    // Issue #2240: straight through, so push and poll answer the same question
+    // with the same value. `/current-output` returns this very payload, so the
+    // two paths differ only in transport. Not `?? something` — the builder
+    // types it as a required `string` and publishes `'idle'` for a session that
+    // is not running, so there is no absent case to invent a default for.
+    sessionStatus: payload.sessionStatus,
     thinking: payload.thinking ?? false,
     isPromptWaiting: payload.isPromptWaiting ?? false,
     promptData: payload.promptData ?? null,

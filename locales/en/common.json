@@ -84,9 +84,7 @@
     "duplicateRowDetail": "Same git repository as {paths}. Use the Scan toggle on one of these rows to exclude it from scans."
   },
   "cancel": "Cancel",
-  "send": "Send",
   "sending": "Sending...",
-  "sendMessagePlaceholder": "Send a message...",
   "end": "End",
   "ending": "Ending...",
   "retry": "Retry",
@@ -201,6 +199,25 @@
   },
   "settings": {
     "title": "Settings",
+    "defaultSurfaceMode": {
+      "title": "Default output surface",
+      "description": "Which surface a session's output half opens in: the live terminal, or the conversation transcript. You can still switch either way from the session header.",
+      "appliesToNew": "Only affects surfaces you have not switched yet. A split or phone tab you already toggled keeps the mode you left it in.",
+      "mode": {
+        "terminal": "Terminal",
+        "chat": "Chat"
+      },
+      "hint": {
+        "terminal": "The agent's terminal, exactly as it is drawn in tmux.",
+        "chat": "The conversation transcript, as a message list."
+      },
+      "saving": "Saving...",
+      "saved": "Saved",
+      "configured": "Configured",
+      "usingBuiltIn": "Using the built-in default",
+      "saveError": "Could not save.",
+      "loadError": "Could not load the setting."
+    },
     "defaultAgents": {
       "title": "Default agents for new branches",
       "description": "The agents a newly discovered branch opens with, in order. The first one is the primary — the tab that opens first and the default target for sends.",

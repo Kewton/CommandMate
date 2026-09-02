@@ -13,7 +13,13 @@
  *   3. copilot /model command        — Issue #576 (copilot only)
  *   4. send to CLI tool              — image branch / ICLITool.sendMessage
  *   5. createMessage (role: 'user')  — INSERT INTO chat_messages (History source)
+ *   5b. broadcastMessage('message')  — Issue #2195, push the user row to every
+ *                                      open pane (the send that produced it is
+ *                                      not necessarily on this device)
  *   6. orphan deletion               — remove prior duplicate after persist
+ *   6b. broadcastMessage(              — Issue #2219, tell every open pane for
+ *         'messages_invalidated')        this instance to re-read its history:
+ *                                        a delete has no row to publish
  *   7. updateLastUserMessage
  *   8. clearInProgressMessageId
  *   9. startPolling                  — record the assistant response afterwards
@@ -35,6 +41,8 @@ import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { isImageCapableCLITool, type CLIToolType } from '@/lib/cli-tools/types';
 import { startPolling } from '@/lib/polling/response-poller';
 import { savePendingAssistantResponse } from '@/lib/assistant-response-saver';
+import { broadcastMessage } from '@/lib/ws-server';
+import { MESSAGES_INVALIDATED_EVENT_TYPE } from '@/lib/realtime/types';
 import { createLogger } from '@/lib/logger';
 import { isPromptWaiting, promptWaitingMessage } from '@/lib/session/prompt-waiting-guard';
 import type { CopilotTool } from '@/lib/cli-tools/copilot';
@@ -96,6 +104,14 @@ export async function sendUserMessage(
 ): Promise<SendUserMessageResult> {
   const { worktreeId, content, cliToolId, instanceId, absoluteImagePath, copilotModel } = params;
   const messageType: MessageType = params.messageType ?? 'normal';
+  /**
+   * The instance this send belongs to, resolved the way `createMessage` and
+   * `mapChatMessage` resolve it (Issue #868: the primary instance's id *is* the
+   * tool's id). Callers omit `instanceId` for the primary instance — the UI and
+   * the send API both do — so every scope decision below has to resolve it
+   * first or it is not scoped at all.
+   */
+  const resolvedInstanceId = instanceId ?? cliToolId;
 
   const cliTool = CLIToolManager.getInstance().getTool(cliToolId);
 
@@ -147,12 +163,31 @@ export async function sendUserMessage(
   }
 
   // 2. Clean up orphaned user messages (Issue #379: duplicate message prevention).
-  // If the most recent message for this cliToolId is a user message with the same
+  // If the most recent message for THIS INSTANCE is a user message with the same
   // content, the assistant never responded and the user is retrying. Remove it
   // (only after the retry message is persisted) to prevent duplicates.
+  //
+  // Issue #2219: the scope is `resolvedInstanceId`, not the caller's raw
+  // `instanceId`. `getMessages` filters on the instance *or* the tool, never
+  // both, so passing an omitted `instanceId` through fell back to the tool
+  // filter and made this search read the newest row of **every instance of that
+  // tool**. A primary-instance re-send whose text matched `claude-2`'s last user
+  // row therefore deleted a row belonging to another session — data loss, not a
+  // display delay, and invisible because the delete is best-effort and silent.
+  //
+  // `matchResolvedInstance` is what makes the fix safe rather than merely
+  // narrow: a bare `instance_id = ?` would hide every pre-#868 row (they carry
+  // NULL and read back as the primary instance), so the orphan they are would
+  // survive as a visible duplicate. Same expression as #2196's
+  // `findUnkeyedUserMessages`.
   let orphanedMessageIdToDelete: string | null = null;
   try {
-    const recentMessages = getMessages(db, worktreeId, { limit: 1, cliToolId, instanceId });
+    const recentMessages = getMessages(db, worktreeId, {
+      limit: 1,
+      cliToolId,
+      instanceId: resolvedInstanceId,
+      matchResolvedInstance: true,
+    });
     if (
       recentMessages.length > 0 &&
       recentMessages[0].role === 'user' &&
@@ -227,6 +262,31 @@ export async function sendUserMessage(
     instanceId,
   });
 
+  // 5b. Broadcast the user row (Issue #2195).
+  //
+  // Every other history writer already does this; this one did not, so a second
+  // device (or a second pane on the same device) saw a message it did not send
+  // only on its next poll — and #2195 stretches that poll to 15s while a socket
+  // is up, which would have made the omission three times as visible.
+  //
+  // `createMessage` hands back the caller's own object rather than re-reading
+  // the row, so `instanceId` here would be `undefined` whenever the caller
+  // omitted it. It is resolved to the primary instance (=== cliToolId) exactly
+  // as `createMessage` resolves it for the column, so the client's
+  // (worktreeId, cliToolId, instanceId) match cannot miss.
+  //
+  // Wrapped because the message is already sent and already persisted by this
+  // point: a socket write that throws must not turn a successful send into a
+  // failure the caller reports to the user.
+  try {
+    broadcastMessage('message', {
+      worktreeId,
+      message: { ...message, cliToolId, instanceId: resolvedInstanceId },
+    });
+  } catch (error) {
+    logger.warn('user-message-broadcast-failed', { error: getErrorMessage(error) });
+  }
+
   // 6. Remove the prior orphan only after the retry message is persisted.
   // This avoids data loss if send/create fails partway through.
   if (orphanedMessageIdToDelete) {
@@ -234,6 +294,33 @@ export async function sendUserMessage(
       const deleted = deleteMessageById(db, orphanedMessageIdToDelete);
       if (deleted) {
         logger.info('cleaned-up-orphaned-user');
+        // 6b. Issue #2219: publish the delete.
+        //
+        // The `message` frame above told every pane about the row that was
+        // added; nothing told them about the row that went away, because the
+        // event contract has no shape for a deletion — `message_updated` can
+        // only say what a row now looks like. A second device therefore kept
+        // showing the old copy next to the new one until its own poll, which
+        // #2195 demoted to a 15s fallback while a socket is up.
+        //
+        // A scope rather than an id: the receiver re-reads its history, so it
+        // lands on the settled DB state and a `message` frame that was dropped
+        // on the way is repaired by the same round trip. See
+        // MESSAGES_INVALIDATED_EVENT_TYPE.
+        //
+        // Wrapped separately from the delete: the row is already gone by now,
+        // and #379's cleanup has always been best-effort — a socket write that
+        // throws must not turn a completed send into a reported failure.
+        try {
+          broadcastMessage(MESSAGES_INVALIDATED_EVENT_TYPE, {
+            worktreeId,
+            cliToolId,
+            instanceId: resolvedInstanceId,
+            reason: 'orphan_cleanup',
+          });
+        } catch (error) {
+          logger.warn('orphan-cleanup-broadcast-failed', { error: getErrorMessage(error) });
+        }
       }
     } catch (error) {
       // Log but don't fail - cleanup is best-effort

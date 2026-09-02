@@ -7,7 +7,7 @@
  * a raw key string from reaching the UI — the blind spot #1197 and #1273 both hit.
  *
  * Scope: the keys HistoryPane / HistorySearchBar / ConversationPairCard /
- * MessageList / MessageInput / SlashCommand* / InterruptButton resolve at runtime.
+ * MessageInput / SlashCommand* / InterruptButton resolve at runtime.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -84,16 +84,6 @@ const REQUIRED: Record<string, string[]> = {
     'conversation.systemMessageLabel',
     'conversation.openFile',
     'conversation.conversationLabel',
-    // MessageList
-    'messages.loading',
-    'messages.empty',
-    'messages.you',
-    'messages.copy',
-    'messages.copyMessage',
-    'messages.viewLogFile',
-    // Issue #1914: the thinking placeholder is per-tool now, not "Claude is
-    // thinking..." for every CLI. Listed here so the key cannot vanish silently.
-    'status.agentIsThinking',
     // MessageInput
     'composer.removeAttachment',
     'composer.showSlashCommands',
@@ -157,9 +147,6 @@ describe('worktree session/message i18n keys (Issue #1276)', () => {
     ['worktree', 'conversation.openFile', ['{path}']],
     ['worktree', 'conversation.conversationLabel', ['{preview}']],
     ['worktree', 'history.search.countAtMax', ['{current}', '{max}']],
-    // Issue #1914: without `{toolName}` the message renders a tool-agnostic
-    // sentence, which is the bug — a codex session reported "Claude".
-    ['worktree', 'status.agentIsThinking', ['{toolName}']],
   ])('%s.%s keeps its placeholders in every locale', (namespace, key, placeholders) => {
     for (const locale of LOCALES) {
       const value = resolve(load(locale, namespace), key) as string;

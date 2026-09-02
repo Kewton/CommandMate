@@ -84,9 +84,7 @@
     "duplicateRowDetail": "{paths} と同じ git リポジトリです。どちらかの行の Scan トグルで走査対象から外せます。"
   },
   "cancel": "キャンセル",
-  "send": "送信",
   "sending": "送信中...",
-  "sendMessagePlaceholder": "メッセージを送信...",
   "end": "終了する",
   "ending": "終了中...",
   "retry": "再試行",
@@ -201,6 +199,25 @@
   },
   "settings": {
     "title": "設定",
+    "defaultSurfaceMode": {
+      "title": "出力面の既定",
+      "description": "セッションの出力側を最初に何で開くかです。ターミナル（tmux の画面そのまま）か、チャット（会話の履歴）を選べます。開いたあとはセッションのヘッダーからいつでも切り替えられます。",
+      "appliesToNew": "まだ切り替えていない出力面にだけ効きます。すでに手で切り替えた split やスマホのタブは、そのときのモードのままです。",
+      "mode": {
+        "terminal": "ターミナル",
+        "chat": "チャット"
+      },
+      "hint": {
+        "terminal": "エージェントのターミナルを tmux の描画のまま表示します。",
+        "chat": "会話の履歴をメッセージ一覧として表示します。"
+      },
+      "saving": "保存中...",
+      "saved": "保存しました",
+      "configured": "設定済み",
+      "usingBuiltIn": "既定値を使用中",
+      "saveError": "保存に失敗しました。",
+      "loadError": "設定を読み込めませんでした。"
+    },
     "defaultAgents": {
       "title": "新規ブランチの既定エージェント",
       "description": "新しく見つかったブランチが最初に開くエージェントと、その並び順です。先頭が primary（最初に開くタブ / 送り先の既定）になります。",

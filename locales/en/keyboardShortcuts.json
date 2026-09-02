@@ -12,6 +12,7 @@
     "closeOverlay": "Close overlay or dialog",
     "navigateList": "Move selection up / down",
     "terminalSearch": "Search terminal output",
+    "toggleSurfaceMode": "Switch output between terminal and chat",
     "sendMessage": "Send message",
     "composerNewline": "Insert a new line",
     "editorIndent": "Indent line or selection",

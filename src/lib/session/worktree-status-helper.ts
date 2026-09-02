@@ -49,6 +49,10 @@ import { getAgentEventSource } from '@/lib/hooks/sources/registry';
 import { describeAgentEventSource } from '@/lib/hooks/sources/define-source';
 import type { AgentEventSourceStatus } from '@/lib/hooks/sources/types';
 import type { getMessages as GetMessagesFn, markPendingPromptsAsAnswered as MarkPendingFn, getAgentInstances as GetAgentInstancesFn } from '@/lib/db';
+import type { ChatMessage } from '@/types/models';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('lib/session/worktree-status-helper');
 
 /**
  * What one status pass actually cost, in tmux round-trips (Issue #2060).
@@ -320,6 +324,64 @@ function mergeSessionStatus(
 }
 
 /**
+ * The `onUpdated` hook for `markPendingPromptsAsAnswered` (Issue #2214,
+ * completing #2195).
+ *
+ * The sweep below stamps every still-pending prompt row of an instance the
+ * moment the agent is seen to have moved on. #2195 gave the DB function this
+ * callback and wired the poller's two sweeps to it, but not this one — so the
+ * `ChatMessage` cache in every open pane kept the row as `pending` until its
+ * next `/messages` poll, which #2195 itself demoted to a 15 s fallback.
+ *
+ * `'message_updated'`, never `'message'`: the row already existed and was
+ * already delivered when it was created, so a client that appended instead of
+ * replacing would show the same question twice. This is the same call
+ * `response-checker` makes for the same DB function.
+ *
+ * **The push is detached, and that is load-bearing here rather than merely
+ * tidy.** The sweep runs inside `detectInstanceSessionStatus`'s `try`, whose
+ * `catch` means "the capture failed, assume the session is processing". A
+ * callback that threw into it would therefore not just lose a frame — it would
+ * publish a wrong status to the worktree list and detail APIs, i.e. to the
+ * sidebar, Home, Sessions, Review and the command palette. Resolving the import
+ * and the send on a promise keeps every failure, including a throwing
+ * `broadcastMessage`, inside the `.catch` below.
+ *
+ * `broadcastMessage` reaches the `rooms` map of *its own* `ws-server` module
+ * instance, and only the instance that called `setupWebSocket` owns live
+ * sockets. #2214 claimed "production serves both callers of this helper from
+ * that one bundle" and scoped the gap to `next dev`. **That was wrong.** Both
+ * callers of this helper are route handlers (`/worktrees` and `/worktrees/:id`),
+ * and a production build gives route handlers a second copy of `ws-server` in
+ * `.next/server/chunks/` whose `setupWebSocket` is never called — so this sweep
+ * published into an empty map on every production request, and the pane waited
+ * for its next history poll exactly as it did under `next dev`.
+ *
+ * #2220 closed it with a process-local publisher registry
+ * (`lib/realtime/publisher-registry`): `setupWebSocket` registers the owner's
+ * publish/subscriber-count/room-lifecycle closures on `globalThis`, and
+ * `broadcastMessage` routes there. The maps themselves stay inside `ws-server`.
+ * The call below is unchanged — that is the point of bridging inside
+ * `ws-server` rather than at each producer.
+ */
+function broadcastPromptSweptToAnswered(worktreeId: string): (message: ChatMessage) => void {
+  return (message: ChatMessage) => {
+    void import('@/lib/ws-server')
+      .then(({ broadcastMessage }) => {
+        broadcastMessage('message_updated', { worktreeId, message });
+      })
+      .catch((error: unknown) => {
+        // The rows are already stamped; a socket write must not colour the
+        // status this pass is about to publish.
+        logger.warn('prompt-sweep-broadcast-failed', {
+          worktreeId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+  };
+}
+
+/**
  * Detect the session status of a single (cliTool, instance) session.
  *
  * Issue #875: extracted from the per-CLI loop so both primary instances
@@ -474,7 +536,13 @@ async function detectInstanceSessionStatus(
           msg => msg.messageType === 'prompt' && msg.promptData?.status !== 'answered'
         );
         if (hasPendingPrompt) {
-          markPendingPromptsAsAnswered(db, worktreeId, cliToolId, instanceId);
+          markPendingPromptsAsAnswered(
+            db,
+            worktreeId,
+            cliToolId,
+            instanceId,
+            broadcastPromptSweptToAnswered(worktreeId),
+          );
         }
       }
     } catch {

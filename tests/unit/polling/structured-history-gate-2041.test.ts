@@ -44,6 +44,10 @@ describe('isStructuredHistoryWriterLive', () => {
     (cliToolId) => {
       // The tool check is first on purpose: the other five have no port, so a
       // liveness answer for them could only ever come from a stale map entry.
+      // Three of the five now declare `transcriptHistory: 'pull'` (#2121/#2197/
+      // #2198), which is why this stays a list of five rather than shrinking:
+      // `'pull'` is not `'push'`, and a pull tool must never be asked about a
+      // subscription it does not have.
       vi.mocked(isOpencodeStructuredHistoryLive).mockReturnValue(true);
       expect(isStructuredHistoryWriterLive('wt-1', cliToolId)).toBe(false);
       expect(vi.mocked(isOpencodeStructuredHistoryLive)).not.toHaveBeenCalled();

@@ -23,6 +23,25 @@ export interface GetMessagesOptions {
   cliToolId?: CLIToolType;
   /** Issue #868: scope to a single agent instance (overrides cliToolId filtering when set). */
   instanceId?: string;
+  /**
+   * Issue #2219: match {@link instanceId} against the instance a row *reads as*
+   * rather than against the raw column.
+   *
+   * Off by default, so no existing caller changes behaviour. On, the filter
+   * becomes `COALESCE(instance_id, cli_tool_id, 'claude') = ?` — the same
+   * expression {@link findUnkeyedUserMessages} uses (#2196) and the same
+   * default `mapChatMessage` applies when it reads a row back. Rows written
+   * before #868 carry `instance_id IS NULL` and are the primary instance's; a
+   * bare `instance_id = ?` makes them invisible while the UI still shows them.
+   *
+   * The `cliToolId` filter is *also* applied when both are given (again as
+   * #2196 does), because a resolved instance id is only unique inside its
+   * tool — `instanceId` alone would let a row belonging to another tool match.
+   *
+   * The caller must pass an already-resolved id (`instanceId ?? cliToolId`):
+   * this option changes how the column is read, not what "omitted" means.
+   */
+  matchResolvedInstance?: boolean;
   includeArchived?: boolean;
   /**
    * Issue #1685: restrict results to a single message_type. Used with 'prompt'
@@ -213,7 +232,7 @@ export function getMessages(
   worktreeId: string,
   options: GetMessagesOptions = {}
 ): ChatMessage[] {
-  const { before, limit = 50, cliToolId, instanceId, includeArchived = false, messageType, limitUnit = 'messages' } = options;
+  const { before, limit = 50, cliToolId, instanceId, includeArchived = false, messageType, limitUnit = 'messages', matchResolvedInstance = false } = options;
 
   // Build the shared scope clause (worktree + before cursor + archived + instance/cli
   // filter) and its bound params. Used for both the message-unit and pair-unit paths
@@ -229,7 +248,18 @@ export function getMessages(
     }
 
     // Issue #868: instance filter takes precedence; otherwise fall back to CLI tool filter.
-    if (instanceId) {
+    // Issue #2219: `matchResolvedInstance` reads both columns through the same
+    // COALESCE defaults `mapChatMessage` applies, so pre-#868 rows
+    // (`instance_id IS NULL`) count as the primary instance instead of
+    // vanishing. See the option's doc comment for why the tool filter joins in.
+    if (instanceId && matchResolvedInstance) {
+      if (cliToolId) {
+        clause += ` AND COALESCE(cli_tool_id, 'claude') = ?`;
+        params.push(cliToolId);
+      }
+      clause += ` AND COALESCE(instance_id, cli_tool_id, 'claude') = ?`;
+      params.push(instanceId);
+    } else if (instanceId) {
       clause += ` AND instance_id = ?`;
       params.push(instanceId);
     } else if (cliToolId) {
@@ -340,6 +370,114 @@ export function findMessageByRequestId(
   const row = stmt.get(worktreeId, requestId) as ChatMessageRow | undefined;
 
   return row ? mapChatMessage(row) : null;
+}
+
+/** Which rows {@link findUnkeyedUserMessages} will consider. */
+export interface UnkeyedUserMessageQuery {
+  readonly worktreeId: string;
+  readonly cliToolId: CLIToolType;
+  /** The agent instance; the primary instance's id equals `cliToolId`. */
+  readonly instanceId: string;
+  /** Oldest `timestamp` accepted, inclusive, as epoch ms. */
+  readonly fromMs: number;
+  /** Newest `timestamp` accepted, inclusive, as epoch ms. */
+  readonly toMs: number;
+  /** Cap on rows returned. Defaults to {@link UNKEYED_USER_MESSAGE_LIMIT}. */
+  readonly limit?: number;
+}
+
+/**
+ * How many candidate rows {@link findUnkeyedUserMessages} returns.
+ *
+ * The caller compares content in JavaScript, so this bounds the work rather than
+ * the correctness. Twenty is far above the number of user rows one instance can
+ * accumulate inside the caller's few-minute window and still small enough that
+ * the query is never the expensive part of a poll.
+ */
+export const UNKEYED_USER_MESSAGE_LIMIT = 20;
+
+/**
+ * User rows for one instance that no producer has claimed yet (Issue #2196).
+ *
+ * The lookup behind "the operator's input is already in History — `/send` put it
+ * there". A row qualifies when it is this instance's, is a `user` row, sits in
+ * the caller's time window, and has **no `request_id`**: that last condition is
+ * what makes the query safe to answer a *claim* with, because a row that already
+ * carries a key belongs to whoever wrote it and must not be re-pointed at
+ * another turn.
+ *
+ * Content is deliberately not compared here. "The same text" is a normalisation
+ * question (trailing whitespace, `\r\n`, a composer that reflowed the body), and
+ * SQL is the wrong place to decide it — see `normalizeUserTurnContent` in
+ * `lib/history/user-turn-recorder`, which owns that rule and is the only thing
+ * that has to change when the rule does.
+ *
+ * `COALESCE` on both tool columns is not defensive noise: rows written before
+ * Issue #868 carry `instance_id IS NULL`, and `mapChatMessage` reads those as
+ * the primary instance. A bare `instance_id = ?` would make those rows
+ * invisible here while the UI still shows them, so the operator would see their
+ * `/send` row *and* a second row this Issue inserted.
+ *
+ * `ACTIVE_FILTER` applies: an archived row has been cleared out of History, and
+ * adopting one would key a turn to a row nobody can see.
+ *
+ * @returns Candidate rows, newest first
+ */
+export function findUnkeyedUserMessages(
+  db: Database.Database,
+  query: UnkeyedUserMessageQuery
+): ChatMessage[] {
+  const stmt = db.prepare(`
+    SELECT id, worktree_id, role, content, summary, timestamp, log_file_name, request_id, message_type, prompt_data, cli_tool_id, instance_id, archived
+    FROM chat_messages
+    WHERE worktree_id = ?
+      AND role = 'user'
+      AND request_id IS NULL
+      AND COALESCE(cli_tool_id, 'claude') = ?
+      AND COALESCE(instance_id, cli_tool_id, 'claude') = ?
+      AND timestamp >= ? AND timestamp <= ?
+      ${ACTIVE_FILTER}
+    ORDER BY timestamp DESC
+    LIMIT ?
+  `);
+
+  const rows = stmt.all(
+    query.worktreeId,
+    query.cliToolId,
+    query.instanceId,
+    query.fromMs,
+    query.toMs,
+    query.limit ?? UNKEYED_USER_MESSAGE_LIMIT
+  ) as ChatMessageRow[];
+
+  return rows.map(mapChatMessage);
+}
+
+/**
+ * Claim an unkeyed row for a producer, without touching anything else on it
+ * (Issue #2196).
+ *
+ * A compare-and-set and not an `UPDATE … WHERE id = ?`: the `request_id IS NULL`
+ * in the predicate is what makes two pollers racing on the same row safe, since
+ * the loser changes nothing and is told so. {@link updateMessageContent} could
+ * set the column too, but it also rewrites `content`, and rewriting the
+ * operator's own words as a side effect of keying their row is exactly the
+ * failure this Issue is trying not to introduce.
+ *
+ * @returns Whether this call is the one that claimed the row
+ */
+export function setMessageRequestId(
+  db: Database.Database,
+  messageId: string,
+  requestId: string
+): boolean {
+  const stmt = db.prepare(`
+    UPDATE chat_messages
+    SET request_id = ?
+    WHERE id = ? AND request_id IS NULL
+  `);
+
+  return stmt.run(requestId, messageId).changes > 0;
 }
 
 /**
@@ -616,19 +754,33 @@ export function updatePromptData(
  * Mark all pending prompts as answered for a worktree/CLI tool
  * This is called when we detect Claude has started processing (new response detected)
  * which means any pending prompts must have been answered via terminal
+ *
+ * @param onUpdated - Issue #2195. Invoked once per row that was actually
+ *   stamped, with the row as it now reads. This sweep is the one prompt-status
+ *   writer that produced no realtime frame, so a prompt card stayed "pending"
+ *   in every open pane until the next history poll — up to 15s once #2195
+ *   demoted that poll to a fallback. The caller supplies the broadcast rather
+ *   than this module reaching for `ws-server`: the DB layer has no business
+ *   importing the socket, and the two sweep callers that are *not* a poller
+ *   (the worktree list/detail routes) have no room to broadcast into anyway.
+ *   Throwing from the callback is the caller's problem; it is not caught here.
  */
 export function markPendingPromptsAsAnswered(
   db: Database.Database,
   worktreeId: string,
   cliToolId: CLIToolType,
-  instanceId?: string
+  instanceId?: string,
+  onUpdated?: (message: ChatMessage) => void
 ): number {
   // Find all pending prompt messages for this worktree/CLI tool.
   // Issue #868: When instanceId is provided, scope to that instance only;
   // otherwise fall back to the legacy cli_tool_id scoping.
   const resolvedInstanceId = instanceId ?? cliToolId;
+  // Issue #2195: the full column set, not just (id, prompt_data) — `onUpdated`
+  // publishes a `ChatMessage`, and re-reading each row afterwards would be a
+  // second query per prompt for data this statement already has to visit.
   const selectStmt = db.prepare(`
-    SELECT id, prompt_data
+    SELECT id, worktree_id, role, content, summary, timestamp, log_file_name, request_id, message_type, prompt_data, cli_tool_id, instance_id, archived
     FROM chat_messages
     WHERE worktree_id = ?
       AND instance_id = ?
@@ -638,7 +790,7 @@ export function markPendingPromptsAsAnswered(
     ORDER BY timestamp DESC
   `);
 
-  const rows = selectStmt.all(worktreeId, resolvedInstanceId) as { id: string; prompt_data: string }[];
+  const rows = selectStmt.all(worktreeId, resolvedInstanceId) as ChatMessageRow[];
 
   if (rows.length === 0) {
     return 0;
@@ -652,9 +804,11 @@ export function markPendingPromptsAsAnswered(
   `);
 
   let updatedCount = 0;
+  const updated: ChatMessage[] = [];
   for (const row of rows) {
     try {
-      const promptData = JSON.parse(row.prompt_data);
+      const promptData = JSON.parse(row.prompt_data ?? 'null');
+      if (!promptData || typeof promptData !== 'object') continue;
       promptData.status = 'answered';
       promptData.answer = '(answered via terminal)';
       promptData.answeredAt = new Date().toISOString();
@@ -662,11 +816,21 @@ export function markPendingPromptsAsAnswered(
       // prompts nothing else claimed, so all that is known is that the agent
       // moved on — i.e. someone acted in the terminal.
       promptData.answeredBy = 'terminal';
-      updateStmt.run(JSON.stringify(promptData), row.id);
+      const serialized = JSON.stringify(promptData);
+      updateStmt.run(serialized, row.id);
       updatedCount++;
+      if (onUpdated) {
+        updated.push(mapChatMessage({ ...row, prompt_data: serialized }));
+      }
     } catch {
       // Skip if prompt_data is invalid JSON
     }
+  }
+
+  // Published after every write lands, so a listener that reacts by reading the
+  // table back cannot observe a half-swept instance.
+  for (const message of updated) {
+    onUpdated?.(message);
   }
 
   return updatedCount;

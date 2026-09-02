@@ -3,6 +3,8 @@
  *
  * Issue #600: UX refresh - manages ?pane= searchParam for deep linking.
  * Validates pane values using isDeepLinkPane() type guard [DR4-010].
+ * Issue #2193: also manages ?view= (the output SurfaceMode), validated by
+ * isSurfaceMode(). The two parameters are independent and compose.
  * Provides conversion to LeftPaneTab, MobileActivePane, and HistorySubTab.
  *
  * Security: Only validated pane values (via isDeepLinkPane()) are used internally.
@@ -14,7 +16,15 @@
 import { useCallback, useMemo } from 'react';
 import { useSearchParams, useRouter, usePathname } from 'next/navigation';
 import { normalizeDeepLinkPane } from '@/lib/deep-link-validator';
-import type { DeepLinkPane, MobileActivePane, LeftPaneTab, HistorySubTab } from '@/types/ui-state';
+import { DEFAULT_SURFACE_MODE, isSurfaceMode } from '@/types/ui-state';
+import type {
+  DeepLinkPane,
+  MobileActivePane,
+  LeftPaneTab,
+  HistorySubTab,
+  SurfaceMode,
+} from '@/types/ui-state';
+import { SURFACE_MODE_VIEW_PARAM } from '@/config/surface-mode-config';
 import type { ActivityId } from '@/config/activity-bar-config';
 
 /**
@@ -36,6 +46,14 @@ export interface UseWorktreeTabStateReturn {
   activityId: ActivityId | null;
   /** Update the active pane via router.replace (scroll:false) */
   setPane: (pane: DeepLinkPane) => void;
+  /**
+   * Issue #2193: the output surface requested by `?view=`, validated with
+   * `isSurfaceMode()`. Falls back to `'terminal'` for a missing or invalid
+   * value, exactly as `activePane` does for `?pane=`.
+   */
+  surfaceMode: SurfaceMode;
+  /** Update `?view=` via router.replace (scroll:false). */
+  setSurfaceMode: (mode: SurfaceMode) => void;
 }
 
 /**
@@ -163,6 +181,14 @@ export function useWorktreeTabState(): UseWorktreeTabStateReturn {
   const historySubTab = useMemo(() => toHistorySubTab(activePane), [activePane]);
   const activityId = useMemo(() => toActivityId(activePane), [activePane]);
 
+  // Issue #2193: validate `?view=` at the SAME boundary `?pane=` is validated
+  // at. The raw searchParams value never leaves this hook — an unknown mode is
+  // dropped here rather than handed to a component to switch on.
+  const surfaceMode = useMemo<SurfaceMode>(() => {
+    const raw = searchParams.get(SURFACE_MODE_VIEW_PARAM);
+    return isSurfaceMode(raw) ? raw : DEFAULT_SURFACE_MODE;
+  }, [searchParams]);
+
   const setPane = useCallback(
     (pane: DeepLinkPane) => {
       if (pane === activePane) return;
@@ -173,6 +199,18 @@ export function useWorktreeTabState(): UseWorktreeTabStateReturn {
     [activePane, pathname, router, searchParams]
   );
 
+  // Issue #2193: `?pane=` and `?view=` compose — both writers copy the existing
+  // query string first, so setting one never drops the other.
+  const setSurfaceMode = useCallback(
+    (mode: SurfaceMode) => {
+      if (mode === surfaceMode) return;
+      const params = new URLSearchParams(searchParams.toString());
+      params.set(SURFACE_MODE_VIEW_PARAM, mode);
+      router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+    },
+    [surfaceMode, pathname, router, searchParams]
+  );
+
   return {
     activePane,
     leftPaneTab,
@@ -180,5 +218,7 @@ export function useWorktreeTabState(): UseWorktreeTabStateReturn {
     historySubTab,
     activityId,
     setPane,
+    surfaceMode,
+    setSurfaceMode,
   };
 }

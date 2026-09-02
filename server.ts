@@ -37,6 +37,7 @@ import { setupWebSocket, closeWebSocket } from './src/lib/ws-server';
 import {
   getRepositoryPaths,
   scanMultipleRepositories,
+  reclaimGhostRepositories,
 } from './src/lib/git/worktrees';
 import { getDbInstance } from './src/lib/db/db-instance';
 import { stopAllPolling } from './src/lib/polling/response-poller';
@@ -45,7 +46,7 @@ import { initScheduleManager, stopAllSchedules } from './src/lib/schedule-manage
 import { initTimerManager, stopAllTimers } from './src/lib/timer-manager';
 import { initResourceCleanup, stopResourceCleanup } from './src/lib/resource-cleanup';
 import { runMigrations } from './src/lib/db/db-migrations';
-import { getEnvByKey } from './src/lib/env';
+import { getEnvByKey, runDotenvSelfCheck } from './src/lib/env';
 import { registerAndFilterRepositories, getAllRepositories } from './src/lib/db/db-repository';
 // Issue #1666: `resolveRepositoryPath`, `getWorktreeIdsByRepository`,
 // `deleteWorktreesByIds`, `cleanupMultipleWorktrees` and `killWorktreeSession`
@@ -369,6 +370,44 @@ app.prepare().then(() => {
       // Get repository paths from environment variables
       const repositoryPaths = getRepositoryPaths();
 
+      // Issue #2165: reclaim ghost `repositories` rows — enabled, no worktree
+      // rows, directory confirmed gone — by demoting them to `enabled = 0`.
+      // Without this they stay in the scan set forever and every boot spawns a
+      // shell into a `cwd` that does not exist, logging `spawn /bin/sh ENOENT`
+      // at ERROR. `pruneStaleRepositoryWorktrees` cannot reach them: it deletes
+      // worktree rows and skips any repository that has none.
+      //
+      // Startup, not just the sync route, for two reasons. It is a full-scan
+      // caller — it builds its path set from `WORKTREE_REPOS` plus every
+      // enabled repository, exactly as `POST /api/repositories/sync` does — so
+      // it satisfies the "global sync only" restriction that
+      // `pruneStaleRepositoryWorktrees` documents; single-repository callers
+      // (scan / restore) still must not run it. And startup is where the
+      // symptom is: the reported ERROR lines are boot lines, and a server that
+      // is only ever restarted would never reach a sync-only fix. It belongs
+      // beside the four reconcilers above, which converge exactly this kind of
+      // state left behind by a previous run.
+      //
+      // Placed BEFORE the scan set is built, so the very first boot after this
+      // lands is already quiet rather than logging the ERROR one last time.
+      //
+      // Fail-open in its own try/catch, like the three reconcilers above.
+      // Leaning on `initializeWorktrees()`'s outer catch instead would let a
+      // throw here take the repository scan and the worktree sync down with
+      // it — a tidy-up pass must never cost the cycle its actual work.
+      try {
+        const reclaimedGhosts = reclaimGhostRepositories(db, repositoryPaths);
+        if (reclaimedGhosts.length > 0) {
+          console.log(
+            `Reclaimed ${reclaimedGhosts.length} ghost repository row(s) — directory gone, no worktrees; ` +
+              `disabled (restorable from the Repositories screen): ` +
+              reclaimedGhosts.map(r => r.path).join(', ')
+          );
+        }
+      } catch (error) {
+        console.error('Error reclaiming ghost repository rows:', error);
+      }
+
       // Issue #490: Also include DB-registered repositories (e.g. cloned repos)
       const dbRepositories = getAllRepositories(db);
       const dbEnabledPaths = dbRepositories
@@ -493,6 +532,28 @@ app.prepare().then(() => {
         console.error('Startup self-check failed:', error);
       }
     })();
+
+    // Issue #2132: say, in one line, that `.env` is sitting right there and not
+    // one variable in it reached this process.
+    //
+    // This runs BEFORE the VAPID check on purpose: an empty environment is the
+    // CAUSE and "push is not configured" is one of its symptoms, so the reader
+    // has to meet them in that order. During the Epic #2002 device UAT
+    // (2026-08-29) only the symptom was printed, and reading it as "the iOS
+    // notification replacement is broken" cost two UAT rounds — the server had
+    // been started by hand after `source scripts/load-env.sh` from zsh, which
+    // exported nothing and returned 0.
+    //
+    // Same contract as the checks around it: fail-open, never blocks `listen`,
+    // and a healthy install prints NOTHING. No dynamic import here, unlike the
+    // reconcilers: `src/lib/env` is already in server.ts's eval-time graph two
+    // lines from the top (`getEnvByKey` decides the bind address and port), so
+    // deferring it would defer nothing.
+    try {
+      runDotenvSelfCheck();
+    } catch (error) {
+      console.error('.env self-check failed:', error);
+    }
 
     // Issue #2123 / #2124: say, in one line, whether Web Push can work at all.
     // Unconfigured VAPID keys disable push silently (correct fail-safe, wrong

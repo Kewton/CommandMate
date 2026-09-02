@@ -22,9 +22,11 @@ It's a step-by-step guide for first-time users.
 9. [Markdown Log Viewer](#markdown-log-viewer)
 10. [Notes Feature](#notes-feature)
 11. [Agent Settings](#agent-settings)
-12. [Execution Contract and Verification](#execution-contract-and-verification)
-13. [Mobile Access](#mobile-access)
-14. [Phone Notifications (Web Push)](#phone-notifications-web-push)
+12. [Switching the Output Surface (Terminal / Chat)](#switching-the-output-surface-terminal--chat)
+13. [The Default Output Surface (Terminal / Chat)](#the-default-output-surface-terminal--chat)
+14. [Execution Contract and Verification](#execution-contract-and-verification)
+15. [Mobile Access](#mobile-access)
+16. [Phone Notifications (Web Push)](#phone-notifications-web-push)
 
 ---
 
@@ -333,6 +335,86 @@ When Vibe-Local is selected, you can specify which Ollama model to use.
 
 ---
 
+## Switching the Output Surface (Terminal / Chat)
+
+A session's screen is split into an **output surface** (where you watch what the agent is
+doing) and an **input surface** (the composer and the answer buttons). Only the **output
+surface** switches — the input surface stays exactly the same in either mode
+(Issue #2193 / #2194).
+
+| Mode | What you see | When it helps |
+|------|--------------|---------------|
+| **Terminal** | The tmux screen as it is drawn (TUI borders, cursor and pagers included) | Working a dialog, TUI-specific screens, reading output in detail |
+| **Chat** | The conversation transcript (your messages paired with the agent's replies) | Following what was exchanged, watching progress from a phone |
+
+### How to switch
+
+| Screen | Action |
+|--------|--------|
+| **Desktop** | Click the **Terminal / Chat toggle** in each split's header |
+| **Mobile** | Tap the **round toggle** floating over the top-right corner of the output area |
+| **Keyboard** | **`Cmd/Ctrl + Shift + M`** (press `?` for the shortcut list) |
+
+`Cmd/Ctrl + Shift + M` acts on the **split that holds focus**. With focus outside every
+split, the first split switches — except while you are typing in a field elsewhere on the
+page, where the chord is left alone.
+
+A switch is remembered **per split on desktop, and per tab on the phone**. Which surface a
+session *opens* in is set in
+[The Default Output Surface](#the-default-output-surface-terminal--chat).
+
+You can also deep-link a surface with **`?view=terminal`** / **`?view=chat`** (for example
+`/worktrees/<id>?pane=terminal&view=chat`). It is independent of `?pane=`, and the value is
+written back to that surface's stored preference, so a shared `?view=chat` link does not
+quietly revert on the next visit.
+
+### What the chat surface shows
+
+- **A generating indicator** — "Responding…" / "Thinking…" while the agent is working
+- **The reply as it is written** — on agents that support it, the in-progress answer streams
+  in place (Issue #2199). When it is too long and the head had to be dropped, it says
+  "Showing the latest part only"
+- **"Jump to latest"** — appears when a new line arrives while you are reading back through
+  the history. Pressing it returns you to the newest one
+- **"Show archived"** — a toggle for reading rows from past sessions as well
+
+### When "Open terminal" appears
+
+It is the signal that something the chat surface **cannot drive** is on screen on the
+terminal side. Pressing it switches that surface to terminal on the spot. There are exactly
+four conditions.
+
+| Message | What is actually happening |
+|---------|----------------------------|
+| A pager is open. | A pager such as `less` is open (scroll and quit it from the terminal) |
+| A selection list is open. | A list you move through with the arrow keys is showing |
+| This screen can't be read from chat. | A screen the detectors could not classify is showing |
+| Waiting for an answer, but the options couldn't be read. | The agent is waiting, but its options could not be read |
+
+**An ordinary yes/no or numbered prompt raises no banner.** The answer buttons on the input
+surface work as they are — the answer UI lives on the input surface rather than the output
+one, so you can reply without leaving chat.
+
+---
+
+## The Default Output Surface (Terminal / Chat)
+
+A session's **output** half switches between the terminal (the tmux screen as it is drawn)
+and chat (the conversation transcript) from the header toggle (Issue #2193). A switch is
+remembered per split and per phone tab, but that is "how you last left it", not "what it
+opens as". If you want to **always start in chat**, pick `Terminal` or `Chat` under
+**More screen → Settings → "Default output surface"** (Issue #2201). The setting is stored
+server-wide, and it applies **only to surfaces you have not switched yet**: a split or phone
+tab you already toggled by hand keeps the mode you left it in, and saving the setting never
+pulls it back.
+
+Each browser picks the value up in the background the first time it opens any session
+surface, and what that request buys is the **next** surface opened — including, after a
+reload, the first one. Opening the More screen seeds it immediately on that device. A
+browser that has never reached the server starts on `Terminal`.
+
+---
+
 ## Execution Contract and Verification
 
 The **execution contract** handed to an agent with `commandmate send --contract`, and the
@@ -351,7 +433,7 @@ the task title, its `TaskStatus`, and the `RESULT` of the most recent verificati
 
 ### The Verification pane
 
-| Surface | How to open |
+| Screen  | How to open |
 |---------|-------------|
 | Desktop | The shield icon (Verification) in the left Activity Bar |
 | Mobile  | **Tools** tab in the bottom bar → **Verification** sub-tab |
@@ -717,10 +799,19 @@ Server-side, with `CM_LOG_LEVEL=info`:
 
 ```
 [WARN] [push/sender] push-send-failed {"statusCode":403,"consecutiveFailures":4}
-[INFO] [push/sender] push-fanout-complete {"kind":"prompt","delivered":1,"failed":1}
+[INFO] [push/sender] push-fanout-complete {"kind":"prompt","worktreeId":"my-feature","instanceId":"claude-2","delivered":1,"failed":1}
 ```
 
 If `delivered` stays at 0, either no device is subscribed or every device is failing.
+
+`worktreeId` and `instanceId` say **which worktree and which instance the fan-out was for**
+(`instanceId` is omitted when the producer named no instance). With several worktrees running at
+once their notifications interleave in the same second, so **filter by `worktreeId` whenever you
+count one worktree's pushes**:
+
+```bash
+grep -a push-fanout-complete logs/server.log | grep -c '"worktreeId":"my-feature"'
+```
 
 ---
 

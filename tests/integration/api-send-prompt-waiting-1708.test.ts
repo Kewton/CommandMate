@@ -244,16 +244,17 @@ describe('the guard covers every message-send path and no answer path (Issue #17
   //     route because the timer manager calls the service directly, and a guard
   //     placed in the route would have let scheduled sends fire into open
   //     dialogs on their own timetable with nobody watching.
-  //   - directly, in `POST /terminal` (Issue #1906). That route is the Review
-  //     screen's message composer — its one caller is
-  //     `src/hooks/useSendMessage.ts` via `components/review/SimpleMessageInput`
-  //     — so it types a message and belongs under invariant 1. It cannot reach
-  //     the guard the first way: `useSendMessage` already POSTs the message to
-  //     `/messages` right after the terminal call, so routing it through
-  //     `sendUserMessage` would record every Review-screen message in History
-  //     twice and start the response poller twice. It therefore calls
-  //     `isPromptWaiting` itself, and the assertions below pin BOTH halves of
-  //     that arrangement so it cannot quietly become one or the other.
+  //   - directly, in `POST /terminal` (Issue #1906). That route types a message
+  //     and so belongs under invariant 1, but it cannot reach the guard the
+  //     first way: the caller it had then (the Review screen's composer) already
+  //     POSTed the message to `/messages` right after the terminal call, so
+  //     routing it through `sendUserMessage` would have recorded every
+  //     Review-screen message in History twice and started the response poller
+  //     twice. It therefore calls `isPromptWaiting` itself, and the assertions
+  //     below pin BOTH halves of that arrangement so it cannot quietly become
+  //     one or the other. Issue #2200 deleted that composer, so the route has no
+  //     caller in this repository today — which is exactly why the arrangement
+  //     is pinned here rather than left to be re-derived from its call sites.
   //
   // Deliberately NOT in scope: `app/api/assistant/**`. Those routes drive the
   // Assistant Chat conversation sessions, a different session family; the guard

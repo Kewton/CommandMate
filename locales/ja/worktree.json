@@ -66,14 +66,6 @@
     "openFile": "ファイルを開く: {path}",
     "conversationLabel": "会話: {preview}"
   },
-  "messages": {
-    "loading": "メッセージを読み込み中...",
-    "empty": "メッセージはまだありません",
-    "you": "あなた",
-    "copy": "コピー",
-    "copyMessage": "メッセージをコピー",
-    "viewLogFile": "ログファイルを表示 →"
-  },
   "slashCommands": {
     "title": "コマンド",
     "searchPlaceholder": "コマンドを検索...",
@@ -317,21 +309,11 @@
     "confirmKill": "「{name}」のセッションを終了しますか？\n\n※全てのメッセージ履歴が削除されます。ログファイルは保持されます。",
     "failedToKill": "セッションの終了に失敗しました",
     "confirmEnd": "{tool} セッションを終了しますか？",
-    "endWarning": "セッションを終了すると、チャット履歴がクリアされます。",
-    "running": "セッション実行中",
-    "starting": "セッション起動中",
-    "startingEllipsis": "セッション起動中..."
+    "endWarning": "セッションを終了すると、チャット履歴がクリアされます。"
   },
   "status": {
     "waitingForResponse": "レスポンス待ち",
-    "responseCompleted": "レスポンス完了",
-    "thinking": "考え中...",
-    "thinkingStatus": "思考中",
-    "agentIsThinking": "{toolName} が考え中です..."
-  },
-  "output": {
-    "latest": "最新の出力",
-    "realtimeUpdate": "リアルタイム更新"
+    "responseCompleted": "レスポンス完了"
   },
   "errors": {
     "failedToUpdateFavorite": "お気に入りの更新に失敗しました",
@@ -418,6 +400,37 @@
     "searchTerminal": "ターミナル内を検索",
     "endSession": "セッションを終了",
     "endSessionFor": "{name}のセッションを終了"
+  },
+  "surfaceMode": {
+    "groupLabel": "{split} の出力面",
+    "groupLabelMobile": "出力面",
+    "terminal": "ターミナル",
+    "chat": "チャット",
+    "showTerminal": "ターミナル出力を表示",
+    "showChat": "会話を表示",
+    "chatSurfaceLabel": "会話"
+  },
+  "chatSurface": {
+    "liveRegionLabel": "セッションの状態",
+    "generating": "応答中…",
+    "thinking": "考え中…",
+    "bannerLabel": "ターミナルでの操作が必要です",
+    "reasonPager": "ページャ表示中です。スクロールと終了はターミナル面で操作してください。",
+    "reasonSelectionList": "選択リストが開いています。項目の移動と決定はターミナル面で操作してください。",
+    "reasonUnclassified": "チャットでは読み取れない画面が出ています。ターミナル面で内容を確認してください。",
+    "reasonPromptUnreadable": "応答待ちですが選択肢を読み取れませんでした。ターミナル面で確認してください。",
+    "openTerminal": "ターミナルで確認",
+    "jumpToLatest": "新着へ",
+    "jumpToLatestGenerating": "新着へ（応答中）",
+    "progressLabel": "生成中の返答",
+    "progressPartial": "途中から表示しています"
+  },
+  "chatTranscript": {
+    "regionLabel": "チャット履歴",
+    "loading": "メッセージを読み込み中",
+    "empty": "まだメッセージはありません",
+    "emptyHint": "送信するとセッションが起動します",
+    "openSearch": "この会話を検索"
   },
   "unsentComposer": {
     "regionLabel": "未送信の入力",
@@ -1245,5 +1258,43 @@
     "errorRequestFailed": "リクエストを送信できませんでした。CommandMate サーバに接続できません。",
     "errorUnknown": "操作に失敗しました。原因はサーバから返されていません。",
     "errorCopyFailed": "リンクをコピーできませんでした。表示されているリンクを選択して手動でコピーしてください。"
+  },
+  "cliCommands": {
+    "open": "CLI コマンド",
+    "title": "{alias} を操作する CLI コマンド",
+    "loading": "このセッションの宛先を問い合わせています…",
+    "loadError": "このセッションの宛先を取得できなかったため、コマンドは表示していません。推測で組み立てたコマンドは別のエージェントに届く可能性があります。CommandMate サーバに接続できるか確認してから再試行してください。",
+    "retry": "再試行",
+    "messagePlaceholder": "メッセージ",
+    "target": "サーバが解決した宛先: --instance {instance}（{tool} / {stage}）",
+    "resolvedBy": {
+      "explicit": "明示指定",
+      "roster": "roster の登録",
+      "primary": "そのツールの primary インスタンス",
+      "worktree-default": "この worktree の既定エージェント",
+      "fallback": "最終フォールバック（この worktree は既定エージェントを持っていません）",
+      "client-fallback": "旧サーバ向けに CLI 側で解決"
+    },
+    "conflict": "roster では {instance} は {roster} ですが、{requested} が要求されました。以下のコマンドは roster の答えである {roster} を使っています。",
+    "commandLabel": {
+      "send": "メッセージを送る",
+      "wait": "ターンの終了を待つ",
+      "capture": "ターミナルを読む",
+      "respond": "プロンプトに答える"
+    },
+    "commandDescription": {
+      "send": "プレースホルダを実際の本文に置き換えてください。本文をプレースホルダのままにしているのは意図的です。改行・引用符・日本語を含む本文をシェルに合わせて正しくクォートすることはこの画面からはできず、失敗しても静かに途中で切れるだけだからです。",
+      "wait": "エージェントがターンを終えるまでブロックします。",
+      "capture": "エージェントのペインの現在の表示を出力します。--json を付けると機械可読な形式になります。",
+      "respond": "開いているプロンプトに回答を送ります。1 は選びたい選択肢の番号に置き換えてください。"
+    },
+    "copy": "コピー",
+    "copied": "コピーしました",
+    "copyFailed": "コマンドをコピーできませんでした。表示されているコマンドを選択して手動でコピーしてください。",
+    "portHint": "このサーバはポート {port} で待ち受けているため、コマンドに CM_PORT= を前置しています。これらのコマンドに --port オプションはなく、既定以外のサーバへ 1 回の実行を向ける方法は環境変数です。",
+    "notesTitle": "貼り付ける前に",
+    "noteInstanceFlag": "送り先を指定するのは --instance です。--agent は roster に無いインスタンスをアドホックに起動するためのもので、wait には --agent 自体がありません。",
+    "noteWaitOnPrompt": "wait には --on-prompt human を付けてあります。付けないと既定の agent モードになり、プロンプトを検出した時点で exit 10 で即座に終了します。",
+    "noteRespondNumber": "respond は回答を意味解決しません。選択肢は番号で送ってください。「yes」は入力されたあと無視され、続く Enter がその時点の既定選択を選んでしまいます。"
   }
 }

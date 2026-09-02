@@ -135,6 +135,10 @@ export const claudeAgentEventSource: AgentEventSource = definePushHookSource({
     eventIdentity: null,
     // push. There is no connection to lose and nothing to re-read.
     resync: 'none',
+    // Issue #2197. `lib/hooks/sources/claude/history` reads the transcript
+    // JSONL when the poller asks (#2121); the gate dispatches on this word
+    // rather than on the tool id.
+    transcriptHistory: 'pull',
   },
 
   // S1. A plain name table is enough *for this tool* — one native name, one

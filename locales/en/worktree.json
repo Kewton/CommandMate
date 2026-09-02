@@ -66,14 +66,6 @@
     "openFile": "Open file: {path}",
     "conversationLabel": "Conversation: {preview}"
   },
-  "messages": {
-    "loading": "Loading messages...",
-    "empty": "No messages yet",
-    "you": "You",
-    "copy": "Copy",
-    "copyMessage": "Copy message",
-    "viewLogFile": "View log file →"
-  },
   "slashCommands": {
     "title": "Commands",
     "searchPlaceholder": "Search commands...",
@@ -317,21 +309,11 @@
     "confirmKill": "End session for \"{name}\"?\n\nAll message history will be deleted. Log files will be retained.",
     "failedToKill": "Failed to end session",
     "confirmEnd": "End {tool} session?",
-    "endWarning": "Ending the session will clear chat history.",
-    "running": "Session running",
-    "starting": "Starting session",
-    "startingEllipsis": "Starting session..."
+    "endWarning": "Ending the session will clear chat history."
   },
   "status": {
     "waitingForResponse": "Waiting for response",
-    "responseCompleted": "Response completed",
-    "thinking": "Thinking...",
-    "thinkingStatus": "Thinking",
-    "agentIsThinking": "{toolName} is thinking..."
-  },
-  "output": {
-    "latest": "Latest output",
-    "realtimeUpdate": "Real-time update"
+    "responseCompleted": "Response completed"
   },
   "errors": {
     "failedToUpdateFavorite": "Failed to update favorite",
@@ -418,6 +400,37 @@
     "searchTerminal": "Search terminal",
     "endSession": "End session",
     "endSessionFor": "End session for {name}"
+  },
+  "surfaceMode": {
+    "groupLabel": "Output surface for {split}",
+    "groupLabelMobile": "Output surface",
+    "terminal": "Terminal",
+    "chat": "Chat",
+    "showTerminal": "Show terminal output",
+    "showChat": "Show conversation",
+    "chatSurfaceLabel": "Conversation"
+  },
+  "chatSurface": {
+    "liveRegionLabel": "Session status",
+    "generating": "Responding…",
+    "thinking": "Thinking…",
+    "bannerLabel": "Needs the terminal",
+    "reasonPager": "A pager is open. Scroll it and quit from the terminal surface.",
+    "reasonSelectionList": "A selection list is open. Move and confirm from the terminal surface.",
+    "reasonUnclassified": "This screen can't be read from chat. Check it on the terminal surface.",
+    "reasonPromptUnreadable": "Waiting for an answer, but the options couldn't be read. Check it on the terminal surface.",
+    "openTerminal": "Open terminal",
+    "jumpToLatest": "Jump to latest",
+    "jumpToLatestGenerating": "Jump to latest (still responding)",
+    "progressLabel": "Reply being written",
+    "progressPartial": "Showing the latest part only"
+  },
+  "chatTranscript": {
+    "regionLabel": "Chat transcript",
+    "loading": "Loading messages",
+    "empty": "No messages yet",
+    "emptyHint": "Sending a message starts the session",
+    "openSearch": "Search this conversation"
   },
   "unsentComposer": {
     "regionLabel": "Unsent input",
@@ -1245,5 +1258,43 @@
     "errorRequestFailed": "The request could not be sent. The CommandMate server is unreachable.",
     "errorUnknown": "The action failed. The server gave no reason.",
     "errorCopyFailed": "Could not copy the link. Select the link shown here and copy it manually."
+  },
+  "cliCommands": {
+    "open": "CLI commands",
+    "title": "CLI commands for {alias}",
+    "loading": "Reading how this session is addressed…",
+    "loadError": "Could not read how this session is addressed, so no command is shown — one built from a guess could target the wrong agent. Check that the CommandMate server is reachable and try again.",
+    "retry": "Try again",
+    "messagePlaceholder": "message",
+    "target": "Target resolved by the server: --instance {instance} ({tool}, {stage})",
+    "resolvedBy": {
+      "explicit": "named explicitly",
+      "roster": "from the roster",
+      "primary": "primary instance of the tool",
+      "worktree-default": "the worktree's default agent",
+      "fallback": "last-resort default — this worktree names no agent of its own",
+      "client-fallback": "resolved by the CLI against an older server"
+    },
+    "conflict": "The roster says {instance} is {roster}, but {requested} was requested. The commands below use the roster's answer, {roster}.",
+    "commandLabel": {
+      "send": "Send a message",
+      "wait": "Wait for the turn to end",
+      "capture": "Read the terminal",
+      "respond": "Answer a prompt"
+    },
+    "commandDescription": {
+      "send": "Replace the placeholder with your own text. It is left as a placeholder on purpose: quoting a real body — newlines, quotes, non-ASCII — correctly for your shell is not something this page can do without silently truncating it.",
+      "wait": "Blocks until the agent finishes its turn.",
+      "capture": "Prints what the agent's pane shows right now. Add --json for a machine-readable form.",
+      "respond": "Sends the answer to an open prompt. Replace 1 with the number of the option you want."
+    },
+    "copy": "Copy",
+    "copied": "Copied",
+    "copyFailed": "Could not copy the command. Select the command shown here and copy it manually.",
+    "portHint": "This server listens on port {port}, so the commands carry a CM_PORT= prefix. These commands have no --port flag; the environment variable is how one invocation is aimed at a non-default server.",
+    "notesTitle": "Before you paste these",
+    "noteInstanceFlag": "--instance is how a command names its target. --agent is only for starting an ad-hoc session the roster does not know, and wait has no --agent at all.",
+    "noteWaitOnPrompt": "wait carries --on-prompt human so it keeps waiting when the agent asks something. Without it the default (agent) exits 10 the moment a prompt is detected.",
+    "noteRespondNumber": "respond does not interpret its answer. Send the NUMBER of the option: \"yes\" is typed, ignored, and followed by Enter, which picks whatever the default option happens to be."
   }
 }

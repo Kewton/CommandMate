@@ -47,10 +47,27 @@ const OVERLAP_FINGERPRINT_SIZE = 10;
  * Per-session TUI response accumulator storage.
  * Key: pollerKey ("worktreeId:cliToolId")
  *
- * Module-scope variable (not globalThis). Node.js module cache ensures
- * singleton behavior. See D3-004 in design policy for details.
+ * Reached through `globalThis`, **not** module scope (Issue #2223). The
+ * previous note here — "Node.js module cache ensures singleton behavior" — does
+ * not hold in the topology CommandMate actually runs: under `next start` this
+ * module is evaluated once in the custom server's graph and again in each Next
+ * route bundle that reaches it, so the module cache gives one accumulator *per
+ * graph*, not one per process.
+ *
+ * It has to share the response poller's lifecycle exactly, because that is who
+ * writes it: `initTuiAccumulator` on `startPolling`, `accumulateTuiContent` on
+ * every tick, `clearTuiAccumulator` on `stopPolling`. A per-graph map means a
+ * stop raised in one bundle clears *that bundle's* buffer while the buffer the
+ * timer owner is filling survives — so the next turn on the same session
+ * resumes on top of the previous turn's accumulated lines.
  */
-const tuiResponseAccumulator = new Map<string, TuiAccumulatorState>();
+declare global {
+  // eslint-disable-next-line no-var
+  var __tuiResponseAccumulator: Map<string, TuiAccumulatorState> | undefined;
+}
+
+const tuiResponseAccumulator = globalThis.__tuiResponseAccumulator ??
+  (globalThis.__tuiResponseAccumulator = new Map<string, TuiAccumulatorState>());
 
 /**
  * Normalize a single OpenCode TUI line by removing ANSI codes and border glyphs.

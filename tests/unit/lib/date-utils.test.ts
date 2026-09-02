@@ -117,7 +117,7 @@ describe('formatMessageTimestamp [SF-001]', () => {
 
       expect(typeof result).toBe('string');
       expect(result.length).toBeGreaterThan(0);
-      // Must equal the canonical date-fns format used by MessageList/PromptMessage.
+      // Must equal the canonical date-fns format used by the transcript rows.
       expect(result).toBe(format(fixedDate, 'PPp', { locale: ja }));
     });
 
@@ -168,7 +168,7 @@ describe('formatMessageTimestamp [SF-001]', () => {
 
   describe('output consistency', () => {
     it('should produce same output as format(date, PPp, { locale })', () => {
-      // Guarantees the helper does not deviate from MessageList/PromptMessage.
+      // Guarantees the helper does not deviate from the transcript rows.
       const dates = [
         new Date('2026-01-01T00:00:00Z'),
         new Date('2026-06-15T13:45:30Z'),

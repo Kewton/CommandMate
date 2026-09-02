@@ -6,7 +6,7 @@
  * (Codex) fetch their own /current-output independently.
  *
  * What it owns:
- *  - terminal output / realtimeSnippet / isRunning / isThinking
+ *  - terminal output / realtimeSnippet / isRunning / isThinking / sessionStatus
  *  - prompt state (visible / data / answering / messageId)
  *  - isSelectionListActive (Issue #473 navigation buttons)
  *  - attaching flag (R3-006): true until first successful fetch resolves
@@ -110,8 +110,35 @@ function diffFileSignature(file: AgentSessionDiffFileView): string {
 export interface PaneTerminalState {
   output: string;
   realtimeSnippet: string;
+  /**
+   * A tmux session exists for this pane and is healthy — NOT "the agent is
+   * generating" (Issue #2238).
+   *
+   * The chain is `/current-output` -> `cliTool.isRunning()` ->
+   * `isClaudeRunning()` -> `hasSession()` + `isSessionHealthy()`, and every one
+   * of those links is a question about the session rather than about the turn.
+   * Read {@link sessionStatus} for the generating verdict.
+   */
   isRunning: boolean;
   isThinking: boolean;
+  /**
+   * The merged status verdict this pane's session last published, or `''`
+   * before the first poll resolves (Issue #2238).
+   *
+   * Value domain is `SessionStatus` from `@/lib/detection/status-detector` —
+   * `'idle' | 'ready' | 'running' | 'waiting'` — typed as a plain `string`
+   * because that is how `CurrentOutputPayload.sessionStatus` publishes it, and
+   * narrowing here would claim a guarantee the wire does not make.
+   *
+   * **Both delivery paths carry it** since Issue #2240: `terminal_snapshot` (the
+   * WebSocket push) publishes the very `buildCurrentOutput` field the HTTP poll
+   * returns, so the pane's verdict no longer depends on a poll having landed
+   * first. Before that the push had no `sessionStatus` member and this field sat
+   * at whatever the last poll said — which, on a pane whose first frame arrives
+   * by push, meant `''` for up to a whole fallback-poll interval
+   * ({@link WS_CONNECTED_POLLING_INTERVAL_MS}) with a turn already running.
+   */
+  sessionStatus: string;
   isSelectionListActive: boolean;
   /**
    * Issue #1017: Codex pager / edit-previous mode (a subset of
@@ -159,6 +186,8 @@ export interface PanePromptState {
 interface CurrentOutputResponse {
   isRunning?: boolean;
   cliToolId?: CLIToolType;
+  /** Issue #2238: the merged generating verdict. See {@link PaneTerminalState.sessionStatus}. */
+  sessionStatus?: string;
   isGenerating?: boolean;
   isPromptWaiting?: boolean;
   promptData?: LivePromptData;
@@ -230,6 +259,7 @@ export function useTerminalPanePolling({
     realtimeSnippet: '',
     isRunning: false,
     isThinking: false,
+    sessionStatus: '',
     isSelectionListActive: false,
     isPagerActive: false,
     isUnclassifiedActive: false,
@@ -302,6 +332,29 @@ export function useTerminalPanePolling({
       fullOutput?: string;
       realtimeSnippet?: string;
       isRunning?: boolean;
+      /**
+       * Issue #2238, and still optional after #2240 gave the push a
+       * `sessionStatus` of its own.
+       *
+       * Absent means "this delivery path carries none", and the previous value
+       * is kept rather than cleared. Passing `''` is not the same thing and is
+       * never done: a caller that KNOWS the session is stopped passes `'idle'`,
+       * the value the server publishes for one.
+       *
+       * Every caller in this build now passes a value — the poll from the route
+       * payload, the push from `TerminalSnapshotEvent` (where the member is
+       * *required*, so the emitter cannot omit it), the stop listener as an
+       * explicit `'idle'`. The retention is kept for the one case the type
+       * system does not reach: **an older server pushing to this bundle.** The
+       * wire is parsed, not validated (`parseRealtimeEvent` casts), and the
+       * version-drift banner only *nudges* a reload — it never auto-reloads,
+       * "that would discard whatever the user is typing" — so a tab held open
+       * across a downgrade keeps applying frames from a server that predates
+       * the field. Assigning `data.sessionStatus ?? ''` there would blank the
+       * verdict on every push and strobe the chat bubble through the whole
+       * turn: exactly the #2238 defect, re-entered through the back door.
+       */
+      sessionStatus?: string;
       thinking?: boolean;
       isSelectionListActive?: boolean;
       isPagerActive?: boolean;
@@ -348,6 +401,7 @@ export function useTerminalPanePolling({
           realtimeSnippet: data.realtimeSnippet ?? '',
           isRunning: data.isRunning ?? false,
           isThinking: data.thinking ?? false,
+          sessionStatus: data.sessionStatus ?? prev.sessionStatus,
           isSelectionListActive: data.isSelectionListActive ?? false,
           isPagerActive: data.isPagerActive ?? false,
           isUnclassifiedActive: confirmedUnclassified,
@@ -447,6 +501,7 @@ export function useTerminalPanePolling({
       realtimeSnippet: '',
       isRunning: false,
       isThinking: false,
+      sessionStatus: '',
       isSelectionListActive: false,
       isPagerActive: false,
       isUnclassifiedActive: false,
@@ -508,6 +563,8 @@ export function useTerminalPanePolling({
         fullOutput: snap.output,
         realtimeSnippet,
         isRunning: snap.isRunning,
+        // Issue #2240: the push's own verdict, no longer the last poll's.
+        sessionStatus: snap.sessionStatus,
         thinking: snap.thinking,
         isSelectionListActive: snap.isSelectionListActive,
         isPagerActive: snap.isPagerActive,
@@ -542,6 +599,12 @@ export function useTerminalPanePolling({
         fullOutput: '',
         realtimeSnippet: '',
         isRunning: false,
+        // Issue #2238: explicit, not omitted. This event IS the knowledge that
+        // the session stopped, and `buildCurrentOutput` publishes exactly this
+        // pair (`'idle'` / `'session_not_running'`) for a stopped session — so
+        // leaving the last polled `'running'` in place would keep the chat
+        // surface claiming a turn that a kill just ended.
+        sessionStatus: 'idle',
         thinking: false,
         isSelectionListActive: false,
         isPagerActive: false,

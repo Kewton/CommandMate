@@ -208,6 +208,13 @@ export const antigravityAgentEventSource: AgentEventSource = definePushHookSourc
     permissionReplyReleasesPrompt: false,
     eventIdentity: null,
     resync: 'none',
+    // Issue #2198. agy keeps a plain-JSONL transcript per conversation at
+    // `brain/<conversationId>/.system_generated/logs/transcript_full.jsonl`, and
+    // the `conversationId` above is the directory name — so the file is computed
+    // from the pointer rather than searched for. `'pull'` and not `'push'`:
+    // nothing streams it, `../../../polling/structured-history-gate` reads it
+    // when the `Stop` hook says a turn ended. See `./history`.
+    transcriptHistory: 'pull',
   },
 
   // Empty on purpose, and the only empty mapper list in the codebase. There is

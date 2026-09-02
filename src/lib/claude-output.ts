@@ -11,6 +11,16 @@ export interface ParsedClaudeOutput {
   summary?: string;
   /** Filename of the JSONL log referenced in the output */
   logFileName?: string;
+  /**
+   * Full path of that JSONL log, as the pane printed it (Issue #2121).
+   *
+   * The same match as {@link logFileName}, which has always kept only the
+   * basename. The path is what `lib/hooks/sources/claude/history` needs to read
+   * the transcript, and it is a *hint* there rather than a source of truth: it
+   * is text the agent printed, so it is accepted only after being checked into
+   * `~/.claude/projects`.
+   */
+  logFilePath?: string;
   /** Request identifier emitted by Claude CLI */
   requestId?: string;
 }
@@ -32,6 +42,7 @@ export function parseClaudeOutput(output: string): ParsedClaudeOutput {
   const logFileMatch = LOG_FILE_REGEX.exec(output);
   if (logFileMatch) {
     result.logFileName = logFileMatch[2];
+    result.logFilePath = logFileMatch[1];
   }
 
   const requestIdMatch = REQUEST_ID_REGEX.exec(output);

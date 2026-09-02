@@ -10,6 +10,19 @@
  *   - PromptPanel (when /current-output reports isPromptWaiting)
  *   - MessageInput (always; carries draft persistence per splitIndex)
  *
+ * Issue #2193: the pane's OUTPUT half is switchable. `surfaceMode === 'chat'`
+ * puts the split's own `HistoryPane` where `TerminalDisplay` would be and drops
+ * the collapsible History column (the same transcript, twice, is not a layout).
+ * Everything below the output — nav / hatch / prompt / quick keys / composer /
+ * Auto-Yes — is identical in both modes, which is why a send, a prompt answer
+ * and an interrupt all keep working from the chat surface.
+ *
+ * Issue #2194: that chat body is now `ChatSurface` rather than a bare
+ * `HistoryPane` — same transcript, plus the live region (generating row, the
+ * "open the terminal" banner for frames chat cannot drive, the empty-state line)
+ * and follow-the-tail. The #1121 pending bubble it shows on send is the existing
+ * `usePendingMessages` merge below; nothing new sends from here.
+ *
  * This is the consumer that translates polled split state into UI on PC.
  * Mobile renders its own footer near the bottom of the screen and (since
  * Issue #736) drives the terminal display through the same
@@ -23,7 +36,7 @@
 
 'use client';
 
-import React, { memo, useCallback, useEffect, useMemo } from 'react';
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { X } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
 import type { AgentInstance, CLIToolType } from '@/lib/cli-tools/types';
@@ -49,6 +62,7 @@ import { PromptPanel } from '@/components/worktree/PromptPanel';
 import { MessageInput } from '@/components/worktree/MessageInput';
 import { OpencodeTurnDiffPanel } from '@/components/worktree/OpencodeTurnDiffPanel';
 import { HistoryPane, splitHistorySlotId } from '@/components/worktree/HistoryPane';
+import { ChatSurface } from '@/components/worktree/ChatSurface';
 import { PaneResizer } from '@/components/worktree/PaneResizer';
 import { AutoYesToggle } from '@/components/worktree/AutoYesToggle';
 import {
@@ -68,6 +82,12 @@ import type {
   HistoryPaneProps,
   SessionKillTarget,
 } from '@/types/terminal-split-pane';
+import { DEFAULT_SURFACE_MODE, type SurfaceMode } from '@/types/ui-state';
+import {
+  getSplitSurfaceModeStorageKey,
+  resolveSurfaceMode,
+  writeSurfaceMode,
+} from '@/config/surface-mode-config';
 
 /**
  * Issue #756: props are grouped into domain types. `TerminalSplitPaneContent`
@@ -185,6 +205,69 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
 
   const t = useTranslations('worktree');
   const locale = useLocale();
+
+  // Issue #2193: this split's output surface. Per split, not per worktree —
+  // watching one agent's transcript while the other's TUI is on screen is the
+  // whole point of a split.
+  const surfaceStorageKey = useMemo(
+    () => getSplitSurfaceModeStorageKey(worktreeId, splitIndex),
+    [worktreeId, splitIndex],
+  );
+  // SSR-safe first render: the deterministic default, replaced by the effect
+  // below once `?view=` / localStorage can actually be read (same shape as
+  // `useActivityBarState`, so there is no hydration mismatch to chase).
+  const [surfaceMode, setSurfaceModeState] = useState<SurfaceMode>(DEFAULT_SURFACE_MODE);
+  useEffect(() => {
+    setSurfaceModeState(resolveSurfaceMode(surfaceStorageKey));
+  }, [surfaceStorageKey]);
+
+  const handleSurfaceModeChange = useCallback(
+    (mode: SurfaceMode) => {
+      setSurfaceModeState(mode);
+      writeSurfaceMode(surfaceStorageKey, mode);
+    },
+    [surfaceStorageKey],
+  );
+
+  // Read by the keydown listener so the listener itself never has to be torn
+  // down and rebuilt on a mode change.
+  const surfaceModeRef = useRef(surfaceMode);
+  surfaceModeRef.current = surfaceMode;
+
+  // Issue #2193: Mod+Shift+M toggles the surface, registered in
+  // `src/config/keyboard-shortcuts.ts` so the `?` overlay lists it.
+  //
+  // Every split listens, and the one that owns the focused element answers —
+  // resolved from the DOM (`[data-split-index]`, on the pane root since #786)
+  // rather than from a "which split is active" prop, because the composer and
+  // the terminal both live inside the pane and either may hold focus.
+  //
+  // With focus outside every split, the FIRST split answers, but only when the
+  // user is not typing somewhere else: `MarkdownEditor` binds a bare Ctrl+M
+  // (Issue #1518) without checking Shift, so on Windows / Linux the same chord
+  // reaches its textarea. That guard is what keeps the two from both firing.
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (!event.shiftKey || event.altKey) return;
+      if (!event.metaKey && !event.ctrlKey) return;
+      if (event.key.toLowerCase() !== 'm') return;
+
+      const target = event.target instanceof Element ? event.target : null;
+      const owner = target?.closest('[data-split-index]');
+      if (owner) {
+        if (Number(owner.getAttribute('data-split-index')) !== splitIndex) return;
+      } else {
+        if (splitIndex !== 0) return;
+        if (target?.closest('input, textarea, select, [contenteditable="true"]')) return;
+      }
+
+      event.preventDefault();
+      handleSurfaceModeChange(surfaceModeRef.current === 'chat' ? 'terminal' : 'chat');
+    }
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [splitIndex, handleSurfaceModeChange]);
 
   const {
     terminal,
@@ -406,29 +489,32 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   // own messages (useSplitMessages) and the per-split highlight namespace via
   // `splitIndex`. Insert routing targets this split (S3-005). No client-side
   // cliToolId filter — messages are pre-filtered by the fetch (S1-008).
-  const historyPaneSlot = useMemo(
-    () => (
-      <HistoryPane
-        messages={mergedMessages}
-        worktreeId={worktreeId}
-        onFilePathClick={onFilePathClick ?? (() => {})}
-        isLoading={splitMessagesLoading}
-        className="h-full"
-        showToast={showToast}
-        onInsertToMessage={onHistoryInsertToMessage}
-        onRetryPending={retryPending}
-        onDiscardPending={handleDiscardPending}
-        showArchived={showArchived}
-        onShowArchivedChange={onShowArchivedChange}
-        historyDisplayLimit={historyDisplayLimit}
-        onHistoryDisplayLimitChange={onHistoryDisplayLimitChange}
-        historyUserOnly={historyUserOnly}
-        onHistoryUserOnlyChange={onHistoryUserOnlyChange}
-        onCollapse={toggleHistory}
-        splitIndex={splitIndex}
-        cliToolId={cliToolId}
-      />
-    ),
+  // Issue #744 / #2193: ONE prop list, two possible mounts. The collapsible
+  // History column and the chat output surface are the same pane over the same
+  // messages; the only difference is the collapse affordance, which the chat
+  // surface must not have — collapsing the OUTPUT would leave the split showing
+  // nothing at all. Kept as a props object rather than two JSX copies so the
+  // two can never be handed different messages or a different filter.
+  const historyPaneProps = useMemo(
+    () => ({
+      messages: mergedMessages,
+      worktreeId,
+      onFilePathClick: onFilePathClick ?? (() => {}),
+      isLoading: splitMessagesLoading,
+      className: 'h-full',
+      showToast,
+      onInsertToMessage: onHistoryInsertToMessage,
+      onRetryPending: retryPending,
+      onDiscardPending: handleDiscardPending,
+      showArchived,
+      onShowArchivedChange,
+      historyDisplayLimit,
+      onHistoryDisplayLimitChange,
+      historyUserOnly,
+      onHistoryUserOnlyChange,
+      splitIndex,
+      cliToolId,
+    }),
     [
       mergedMessages,
       retryPending,
@@ -444,10 +530,14 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       onHistoryDisplayLimitChange,
       historyUserOnly,
       onHistoryUserOnlyChange,
-      toggleHistory,
       splitIndex,
       cliToolId,
     ],
+  );
+
+  const historyPaneSlot = useMemo(
+    () => <HistoryPane {...historyPaneProps} onCollapse={toggleHistory} />,
+    [historyPaneProps, toggleHistory],
   );
 
   const terminalDisplaySlot = useMemo(
@@ -474,6 +564,79 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       disableAutoFollow,
       compactTuiLayoutPadding,
       preservePaintedPanelRows,
+    ],
+  );
+
+  // Issue #2193: the chat output surface. The split's own HistoryPane, full
+  // width, with no collapse button and NO second copy of itself beside it.
+  //
+  // Theme-following on purpose: the terminal is a permanently dark island
+  // because it mirrors a fixed xterm palette, and this surface is a transcript,
+  // so it keeps HistoryPane's own token-driven light/dark behavior. No
+  // light-on-dark is written here for that reason.
+  //
+  // Issue #2194: the pane is now wrapped by `ChatSurface`, which adds the live
+  // region (generating row / "open the terminal" banner / empty-state line) and
+  // the follow-the-tail chip. The transcript itself is still exactly the same
+  // `historyPaneProps` the collapsible History column is handed — that object is
+  // spread first inside ChatSurface and its identity fields re-applied after, so
+  // the two mounts cannot be given different messages or a different filter.
+  //
+  // `isPromptWaiting` is fed from `prompt.visible`, not from a raw payload flag:
+  // `useTerminalPanePolling` folds `isPromptWaiting && promptData` into
+  // `prompt.visible` and exposes no separate flag (see ChatSurfaceLiveState). The
+  // banner's "a wait nobody could read" case is therefore a visible prompt whose
+  // payload is #1708's / #1725's degraded record, which ChatSurface narrows
+  // itself with `isAnswerablePromptData`.
+  const chatSurfaceSlot = useMemo(
+    () => (
+      <div
+        data-testid={`split-chat-slot-${splitIndex}`}
+        aria-label={t('surfaceMode.chatSurfaceLabel')}
+        className="flex h-full min-h-0 w-full overflow-hidden bg-surface text-surface-foreground"
+      >
+        <div className="min-w-0 min-h-0 flex-1 overflow-hidden">
+          <ChatSurface
+            messages={historyPaneProps.messages}
+            worktreeId={worktreeId}
+            cliToolId={cliToolId}
+            instanceId={resolvedInstanceId}
+            history={historyPaneProps}
+            live={{
+              isRunning: terminal.isRunning,
+              // Issue #2238: the generating verdict the surface actually gates
+              // its in-flight bubble on. `isRunning` above stays because the
+              // surface still reports on the session; it is no longer mistaken
+              // for the turn.
+              sessionStatus: terminal.sessionStatus,
+              isThinking: terminal.isThinking,
+              isPromptWaiting: prompt.visible,
+              promptData: prompt.data,
+              isSelectionListActive: terminal.isSelectionListActive,
+              isPagerActive: terminal.isPagerActive,
+              isUnclassifiedActive: terminal.isUnclassifiedActive,
+            }}
+            onSurfaceModeChange={handleSurfaceModeChange}
+          />
+        </div>
+      </div>
+    ),
+    [
+      historyPaneProps,
+      splitIndex,
+      t,
+      worktreeId,
+      cliToolId,
+      resolvedInstanceId,
+      terminal.isRunning,
+      terminal.sessionStatus,
+      terminal.isThinking,
+      terminal.isSelectionListActive,
+      terminal.isPagerActive,
+      terminal.isUnclassifiedActive,
+      prompt.visible,
+      prompt.data,
+      handleSurfaceModeChange,
     ],
   );
 
@@ -820,7 +983,10 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       agentUsageDetail={paneAgentUsageDetail}
       onFocus={onFocus}
       attaching={terminal.attaching}
-      terminal={terminalSlot}
+      // Issue #2193: the header control's pressed state, and the body it names.
+      surfaceMode={surfaceMode}
+      onSurfaceModeChange={handleSurfaceModeChange}
+      terminal={surfaceMode === 'chat' ? chatSurfaceSlot : terminalSlot}
       footer={footerSlot}
       // Issue #786 / #869: drag-drop pass-through (optional; inert when omitted).
       onDropInstance={onDropInstance}

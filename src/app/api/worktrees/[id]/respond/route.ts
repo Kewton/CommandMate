@@ -253,9 +253,12 @@ export async function POST(
       );
     }
 
-    // Issue #1548: a person answered. This route is reached only from the chat
-    // prompt buttons (MessageList) and needs a stored messageId, so unlike
-    // /prompt-response it has no automated caller to be confused with.
+    // Issue #1548: a person answered. This branch needs a stored messageId, so
+    // unlike /prompt-response it has no automated caller to be confused with.
+    // Issue #2200 retired the legacy chat prompt buttons that were its only
+    // caller: the composer's `PromptPanel` reaches this route on the
+    // `decisionId` shape and `commandmate respond` on the id-less one, and
+    // neither comes through here.
     applyEventToActiveTask(db, id, cliToolId, instanceId, 'prompt_answered_human', {
       promptType: promptData.type,
     });
