@@ -48,6 +48,26 @@
  * regression; it is a single icon floating over the top-right of the column,
  * which is also why it costs the transcript no height (the phone's vertical
  * budget, Issue #2106).
+ *
+ * ## The live tail (Issue #2233)
+ *
+ * `liveTurn` is the reply currently being written. It is rendered INSIDE the
+ * scroll container and OUTSIDE the virtualizer, and both halves are the point:
+ *
+ *  - inside the scroll container, so the in-flight body and the settled row that
+ *    replaces it occupy the same place in the same column. Issue #2199 drew it
+ *    in a footer strip, so completing a turn moved the paragraph to a different
+ *    part of the screen in a different typeface;
+ *  - outside the virtual list, because `@tanstack/react-virtual` unmounts every
+ *    row beyond the visible window. A "generating" row at index `n-1` vanishes
+ *    the moment the reader scrolls up — which is exactly why Issue #2194 put it
+ *    in a footer in the first place, and that reason has not expired. It is
+ *    a plain sibling after the sizer, so no `virtualItems` entry ever describes
+ *    it and no scroll position can unmount it.
+ *
+ * What it costs: scrolling up moves the bubble off screen, because it is in the
+ * flow rather than pinned to the viewport. `ChatSurface` answers that by putting
+ * the spinner on its jump-to-latest chip while a turn is live.
  */
 
 import React, { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
@@ -66,10 +86,12 @@ import {
   CHAT_ESTIMATED_MESSAGE_HEIGHT_PX,
   CHAT_FALLBACK_RENDER_COUNT,
   CHAT_VIRTUAL_OVERSCAN,
+  shouldShowLiveRoleHeader,
   shouldShowRoleHeader,
 } from '@/lib/chat/chat-transcript-view';
 import { resolveChatSearchNamespace } from '@/lib/chat/chat-search-namespace';
 import { ChatMessageBubble } from './ChatMessageBubble';
+import { ChatLiveTurnBubble } from './ChatLiveTurnBubble';
 import { HistorySearchBar } from './HistorySearchBar';
 
 // ============================================================================
@@ -89,6 +111,29 @@ export const CHAT_TRANSCRIPT_SCROLL_CONTAINER_TESTID = 'chat-transcript-scroll-c
 // ============================================================================
 // Types
 // ============================================================================
+
+/**
+ * The turn being generated right now (Issue #2233).
+ *
+ * A description of a state rather than a rendered node, so the transcript owns
+ * the bubble's markup and cannot be handed something shaped differently from the
+ * settled rows around it. Every field is optional because the weakest case is
+ * real: `live.isRunning` with no progress body at all is what codex,
+ * antigravity and vibe-local produce, and it still has to say "responding" in
+ * this exact position.
+ */
+export interface ChatTranscriptLiveTurn {
+  /** The `requestId` the settled row will carry; published as `data-turn-key`. */
+  turnKey?: string;
+  /** The progress frame counter behind `body`; published as `data-version`. */
+  version?: number;
+  /** The reply so far. Absent / empty renders the indicator alone. */
+  body?: string;
+  /** True when `body` does not start at the beginning of the turn (#2199). */
+  partial?: boolean;
+  /** The CLI is painting a thinking indicator rather than a plain "generating". */
+  isThinking?: boolean;
+}
 
 export interface ChatTranscriptProps {
   /** The transcript, chronologically ordered. NOT grouped into pairs. */
@@ -110,6 +155,12 @@ export interface ChatTranscriptProps {
    * Omit on the phone / a single mount.
    */
   splitIndex?: number;
+  /**
+   * Issue #2233: the turn being generated, drawn as the last bubble in the
+   * column. `null` / omitted means nothing is running. See the file header for
+   * why it is neither a virtualized row nor a footer.
+   */
+  liveTurn?: ChatTranscriptLiveTurn | null;
 }
 
 // ============================================================================
@@ -169,6 +220,7 @@ export const ChatTranscript = memo(function ChatTranscript({
   onRetryPending,
   onDiscardPending,
   splitIndex,
+  liveTurn = null,
 }: ChatTranscriptProps) {
   const t = useTranslations('worktree');
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -367,7 +419,9 @@ export const ChatTranscript = memo(function ChatTranscript({
 
   const renderContent = () => {
     if (isLoading) return <ChatTranscriptLoading />;
-    if (messages.length === 0) return <ChatTranscriptEmpty />;
+    // "No messages yet" under a bubble that is visibly being written is a lie
+    // the reader can see. The live tail below is the content in that case.
+    if (messages.length === 0) return liveTurn ? null : <ChatTranscriptEmpty />;
 
     // [#1123] Zero-measurement fallback. See the file header: without this the
     // transcript is empty on the first paint and in every jsdom test.
@@ -420,6 +474,21 @@ export const ChatTranscript = memo(function ChatTranscript({
         className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-3 py-3"
       >
         {renderContent()}
+
+        {/* [#2233] The live tail. A plain sibling of the list — never an entry
+            in `virtualItems` — so no scroll position can unmount it, and inside
+            the scroll region so it sits exactly where its settled row will. */}
+        {liveTurn && (
+          <ChatLiveTurnBubble
+            turnKey={liveTurn.turnKey}
+            version={liveTurn.version}
+            body={liveTurn.body}
+            partial={liveTurn.partial}
+            isThinking={liveTurn.isThinking}
+            showHeader={shouldShowLiveRoleHeader(messages[messages.length - 1])}
+            onFilePathClick={handleFilePathClick}
+          />
+        )}
       </div>
 
       {/* Search: one icon, or the bar once it is open. Absolutely positioned so

@@ -71,6 +71,45 @@ export const CHAT_BUBBLE_MAX_WIDTH_ASSISTANT = 'max-w-[92%]';
 export const CHAT_BUBBLE_ALIGN_USER = 'ml-auto';
 export const CHAT_BUBBLE_ALIGN_ASSISTANT = 'mr-auto';
 
+/**
+ * What every bubble looks like regardless of who is speaking (Issue #2233).
+ *
+ * Split out of the component because the settled row is no longer the only
+ * thing wearing it: the in-flight reply is now a bubble at the tail of the same
+ * column, and the whole point of that Issue is that the reader sees no change
+ * when one becomes the other. Two hand-written copies of "rounded-2xl border
+ * px-3 py-2 text-sm" would drift the first time either is touched, and the
+ * symptom would be a paragraph that visibly re-typesets at the exact moment the
+ * turn completes.
+ */
+export const CHAT_BUBBLE_BASE_CLASS = 'w-fit rounded-2xl border px-3 py-2 text-sm text-foreground';
+
+/** The bubble an assistant message wears — base plus the assistant's side, cap and ground. */
+export const CHAT_BUBBLE_ASSISTANT_CLASS = [
+  CHAT_BUBBLE_BASE_CLASS,
+  CHAT_BUBBLE_ALIGN_ASSISTANT,
+  CHAT_BUBBLE_MAX_WIDTH_ASSISTANT,
+  'rounded-bl-md border-border bg-surface-2',
+].join(' ');
+
+/** The row a bubble sits in. Alignment is the bubble's own `ml-auto` / `mr-auto`. */
+export const CHAT_BUBBLE_ROW_CLASS = 'flex w-full flex-col gap-1 pb-3';
+
+/** Wrapping rules every body obeys, Markdown or not. */
+export const CHAT_BUBBLE_BODY_BASE_CLASS =
+  'max-w-full overflow-x-hidden break-words [word-break:break-word]';
+
+/**
+ * A Markdown body's classes, `.chat-md` included.
+ *
+ * `.chat-md` and NOT `.assistant-md`: the shared namespace styles History and
+ * `/chat`'s `AssistantMessageList` too (see the file header). Issue #2233 moved
+ * the last chat-surface consumer of `.assistant-md` — #2199's footer body — onto
+ * this constant, which is what makes the live and settled bodies the same size,
+ * the same measure and the same namespace.
+ */
+export const CHAT_BUBBLE_MARKDOWN_BODY_CLASS = `${CHAT_BUBBLE_BODY_BASE_CLASS} chat-md`;
+
 // ============================================================================
 // Body renderers
 // ============================================================================
@@ -129,7 +168,7 @@ const ChatPlainBody = memo(function ChatPlainBody({
  * left alone, since a path inside a fence is part of a command and a `<button>`
  * there would break selection and copy.
  */
-const ChatMarkdownBody = memo(function ChatMarkdownBody({
+export const ChatMarkdownBody = memo(function ChatMarkdownBody({
   content,
   onFilePathClick,
 }: {
@@ -211,13 +250,13 @@ export const ChatMessageBubble = memo(function ChatMessageBubble({
   // The bubble. `rounded-2xl` with one squared-off corner on the speaker's side
   // is what makes the two columns read as a dialogue rather than two lists.
   const bubbleClassName = [
-    'w-fit rounded-2xl border px-3 py-2 text-sm text-foreground',
     // Same size for both roles (Issue #2232): History renders assistant bodies
     // at `text-xs` and user bodies at `text-sm`, which makes the ANSWER look
-    // like metadata attached to the question.
+    // like metadata attached to the question. The assistant half is the shared
+    // constant (Issue #2233), because the in-flight bubble wears it too.
     isUser
-      ? `${CHAT_BUBBLE_ALIGN_USER} ${CHAT_BUBBLE_MAX_WIDTH_USER} rounded-br-md`
-      : `${CHAT_BUBBLE_ALIGN_ASSISTANT} ${CHAT_BUBBLE_MAX_WIDTH_ASSISTANT} rounded-bl-md border-border bg-surface-2`,
+      ? `${CHAT_BUBBLE_BASE_CLASS} ${CHAT_BUBBLE_ALIGN_USER} ${CHAT_BUBBLE_MAX_WIDTH_USER} rounded-br-md`
+      : CHAT_BUBBLE_ASSISTANT_CLASS,
     isUser && sendState === 'error' ? 'border-danger-border bg-danger-subtle' : '',
     isUser && sendState !== 'error' ? 'border-accent-500/30 bg-accent-500/10' : '',
     sendState === 'sending' ? 'opacity-70' : '',
@@ -225,11 +264,10 @@ export const ChatMessageBubble = memo(function ChatMessageBubble({
     .filter(Boolean)
     .join(' ');
 
-  const bodyClassName = [
-    'max-w-full overflow-x-hidden break-words [word-break:break-word]',
-    // No clamp, no expand toggle, no "..." — a reply is read here, not previewed.
-    isMarkdown ? 'chat-md' : 'whitespace-pre-wrap',
-  ].join(' ');
+  // No clamp, no expand toggle, no "..." — a reply is read here, not previewed.
+  const bodyClassName = isMarkdown
+    ? CHAT_BUBBLE_MARKDOWN_BODY_CLASS
+    : `${CHAT_BUBBLE_BODY_BASE_CLASS} whitespace-pre-wrap`;
 
   return (
     <div
@@ -241,7 +279,7 @@ export const ChatMessageBubble = memo(function ChatMessageBubble({
         // `ml-auto` / `mr-auto` is the ONLY thing that places it, so deleting
         // that class actually breaks the layout instead of being masked by a
         // second alignment mechanism saying the same thing.
-        'flex w-full flex-col gap-1 pb-3',
+        CHAT_BUBBLE_ROW_CLASS,
         // Issue #168's archived dimming, carried over from HistoryPane's row
         // wrapper. The row is still readable; it is just visibly not this
         // session.

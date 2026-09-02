@@ -31,9 +31,18 @@ vi.mock('@/components/worktree/TerminalDisplay', () => ({
 }));
 
 vi.mock('@/components/worktree/ChatTranscript', () => ({
-  ChatTranscript: ({ messages }: { messages: Array<{ id: string }> }) => (
+  ChatTranscript: ({
+    messages,
+    liveTurn,
+  }: {
+    messages: Array<{ id: string }>;
+    liveTurn?: { isThinking?: boolean } | null;
+  }) => (
     <div data-testid="chat-transcript" data-message-count={String(messages.length)}>
       <div data-testid="chat-transcript-scroll-container" />
+      {/* Issue #2233: the running turn reaches the screen through this prop, so
+          a pane that fails to wire `isRunning` is only visible here. */}
+      {liveTurn && <div data-testid="chat-transcript-live-turn" />}
     </div>
   ),
   CHAT_TRANSCRIPT_SCROLL_CONTAINER_TESTID: 'chat-transcript-scroll-container',
@@ -246,12 +255,14 @@ describe('[#2194] PC split feeds the chat surface', () => {
     expect(screen.queryByTestId('chat-surface-terminal-banner')).not.toBeInTheDocument();
   });
 
-  it('shows the generating row while a turn runs with no pending pair', async () => {
+  it('publishes a live turn to the transcript while a turn runs', async () => {
     mockPane({ isRunning: true });
     renderSplitInChat();
-    // The mocked history is a single row with no role, so there is no pending
-    // pair for `ConversationPairCard` to own the indicator for.
-    await waitFor(() => expect(screen.getByTestId('chat-surface-generating')).toBeInTheDocument());
+    // Issue #2233: the pane's `isRunning` has to reach `ChatTranscript` as
+    // `liveTurn`, because that is now the only path to a visible indicator.
+    await waitFor(() =>
+      expect(screen.getByTestId('chat-transcript-live-turn')).toBeInTheDocument(),
+    );
   });
 
   it('adds nothing to the terminal surface', async () => {

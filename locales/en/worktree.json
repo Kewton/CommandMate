@@ -421,6 +421,7 @@
     "reasonPromptUnreadable": "Waiting for an answer, but the options couldn't be read. Check it on the terminal surface.",
     "openTerminal": "Open terminal",
     "jumpToLatest": "Jump to latest",
+    "jumpToLatestGenerating": "Jump to latest (still responding)",
     "progressLabel": "Reply being written",
     "progressPartial": "Showing the latest part only"
   },
