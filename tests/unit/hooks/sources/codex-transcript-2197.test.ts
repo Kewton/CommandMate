@@ -28,6 +28,7 @@ import {
   MAX_CODEX_TURN_ITEMS,
   type CodexTurnAccumulator,
 } from '@/lib/hooks/sources/codex/transcript';
+import { TURN_TOOL_LOG_LABEL } from '@/lib/hooks/sources/turn-body';
 
 const FIXTURES = join(process.cwd(), 'tests/fixtures/transcripts/codex');
 
@@ -193,22 +194,26 @@ describe('[#2197] the Markdown body', () => {
     }
   });
 
-  it('puts commentary, the tool line and the answer in the order they happened', () => {
+  it('leads with both prose blocks and puts the call in the folded section', () => {
+    // Issue #2234: the commentary and the answer keep their order and lead; the
+    // `exec` line that used to sit between them is in the section at the end.
     const bodies = bodiesOf(THREE_TURNS, THREE_TURNS_SESSION);
     expect(bodies[1]).toBe(
       [
         'I’ll create the marker file and verify its contents.',
         '',
-        "- `exec` — echo CMATE-2197 > marker.txt && sed -n '1p' marker.txt",
-        '',
         'marker.txt contains `CMATE-2197`.',
+        '',
+        `> **${TURN_TOOL_LOG_LABEL} (1)**`,
+        '>',
+        "> - `exec` — echo CMATE-2197 > marker.txt && sed -n '1p' marker.txt",
       ].join('\n')
     );
   });
 
   it('summarises a file edit by its path, not by its diff', () => {
     const bodies = bodiesOf(AFTER_NEW, AFTER_NEW_SESSION);
-    expect(bodies[1]).toContain('- `edit` — /tmp/cmate-2197/work/cx/README.md');
+    expect(bodies[1]).toContain('> - `edit` — /tmp/cmate-2197/work/cx/README.md');
     // The unified diff is in the record and must not reach the row.
     expect(AFTER_NEW).toContain('unified_diff');
     expect(bodies[1]).not.toContain('unified_diff');

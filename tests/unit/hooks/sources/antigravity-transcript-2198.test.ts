@@ -45,6 +45,7 @@ import {
   type AntigravityTranscriptRecord,
   type AntigravityTurnAccumulator,
 } from '@/lib/hooks/sources/antigravity/transcript';
+import { TURN_TOOL_LOG_LABEL } from '@/lib/hooks/sources/turn-body';
 
 const FIXTURES = join(process.cwd(), 'tests/fixtures/transcripts/antigravity');
 
@@ -270,12 +271,16 @@ describe('[#2198] rendering the captured turns', () => {
   });
 
   it('summarises each tool call on its own line, in the order agy made them', () => {
+    // Issue #2234 folded the calls into one labelled section. The turn said
+    // nothing else, so the section is the whole body.
     expect(bodiesOf(THREE_TURNS)[1]).toBe(
       [
-        '- `find_by_name` — Searching for NOTES.md',
-        '- `find_by_name` — Searching for NOTES.md in user home',
-        '- `find_by_name` — Searching for NOTES.md in home directory',
-        '- `list_dir` — Listing home directory',
+        `> **${TURN_TOOL_LOG_LABEL} (4)**`,
+        '>',
+        '> - `find_by_name` — Searching for NOTES.md',
+        '> - `find_by_name` — Searching for NOTES.md in user home',
+        '> - `find_by_name` — Searching for NOTES.md in home directory',
+        '> - `list_dir` — Listing home directory',
       ].join('\n')
     );
   });

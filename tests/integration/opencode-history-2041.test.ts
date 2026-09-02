@@ -60,6 +60,7 @@ import {
 } from '@/lib/hooks/sources/opencode/history';
 import { opencodeTurnRequestId } from '@/types/agent-transcript';
 import type { Worktree } from '@/types/models';
+import { TURN_TOOL_LOG_LABEL } from '@/lib/hooks/sources/turn-body';
 
 const FIXTURES = join(process.cwd(), 'tests/fixtures/hooks/opencode');
 
@@ -182,9 +183,19 @@ describe('the three measured turns, written from the stream', () => {
   });
 
   it('summarises the tool call and keeps the reply about it in the same row', async () => {
+    // Issue #2234 moved the call behind the sentence: the row still holds both,
+    // and the row now *opens* with the agent's words. This is the end-to-end
+    // half of `tests/unit/hooks/sources/turn-separation-2234.test.ts` — the
+    // string here is what reaches `chat_messages.content`.
     await playStream(FRAMES);
     expect(savedAssistantRows()[1].content).toBe(
-      '- `bash` — echo CMATE-2041-TOOL-MARKER\n\nIt printed `CMATE-2041-TOOL-MARKER`.'
+      [
+        'It printed `CMATE-2041-TOOL-MARKER`.',
+        '',
+        `> **${TURN_TOOL_LOG_LABEL} (1)**`,
+        '>',
+        '> - `bash` — echo CMATE-2041-TOOL-MARKER',
+      ].join('\n')
     );
   });
 

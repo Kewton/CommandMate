@@ -53,6 +53,7 @@
  */
 
 import { isPlainObject, readStringField } from '../event-mapper';
+import { separateTurnBody, type TurnRenderBlock } from '../turn-body';
 
 /**
  * `~/.claude/projects/<slug>` — the directory Claude keeps one project's
@@ -603,18 +604,20 @@ function renderThinkingBlock(text: string): string {
 /**
  * Render one turn to Markdown.
  *
- * Transcript order throughout, so a tool line sits where the agent called it and
- * the closing prose sits where the agent wrote it. The Issue asks for a decision
- * between "show every block as a process" and "show only the final block"; this
- * is the first, for the reason the opencode renderer gives — the order is the
- * only record of what happened when, and this row is the record. What makes it
- * readable rather than the run-on paragraph the Issue warns about is that the
- * blocks are *separated*: prose blocks are paragraphs, tool calls are list items
- * and thinking is a quote, so "作業中の独り言" and "回答" are never the same
- * paragraph even though they are in the same row.
+ * Every block is kept — #2121 asked for a decision between "show every block as
+ * a process" and "show only the final block" and this is the first, because the
+ * order is the only record of what happened when and this row is the record.
+ * What makes it readable rather than a run-on paragraph is that the blocks are
+ * *separated*: prose blocks are paragraphs, thinking is a quote, and tool calls
+ * are list items folded into one labelled section at the end.
+ *
+ * The layout itself belongs to `../turn-body` (#2234), which is what stops this
+ * turn's body opening with a run of `- \`Bash\` — …` lines; see
+ * {@link separateTurnBody} for why the interleaving between prose and tool calls
+ * is the one thing given up.
  */
 export function renderClaudeTurn(turn: ClaudeTurnAccumulator): ClaudeRenderedTurn {
-  const rendered: string[] = [];
+  const rendered: TurnRenderBlock[] = [];
   const unknown = new Set<string>();
   let textBlocks = 0;
   let toolBlocks = 0;
@@ -623,7 +626,7 @@ export function renderClaudeTurn(turn: ClaudeTurnAccumulator): ClaudeRenderedTur
     if (block.type === 'text') {
       const text = block.text?.trim() ?? '';
       if (text.length === 0) continue;
-      rendered.push(text);
+      rendered.push({ kind: 'prose', text });
       textBlocks += 1;
       continue;
     }
@@ -632,18 +635,18 @@ export function renderClaudeTurn(turn: ClaudeTurnAccumulator): ClaudeRenderedTur
       // `signature` and no text when the thinking is not retained.
       const text = block.text?.trim() ?? '';
       if (text.length === 0) continue;
-      rendered.push(renderThinkingBlock(text));
+      rendered.push({ kind: 'aside', text: renderThinkingBlock(text) });
       continue;
     }
     if (block.type === 'tool_use') {
-      rendered.push(renderToolBlock(block));
+      rendered.push({ kind: 'tool', text: renderToolBlock(block) });
       toolBlocks += 1;
       continue;
     }
     if (!CLAUDE_SILENT_BLOCK_TYPES.has(block.type)) unknown.add(block.type);
   }
 
-  let body = joinTurnBlocks(rendered);
+  let body = separateTurnBody(rendered).body;
   if (body.length > MAX_CLAUDE_TURN_BODY_LENGTH) {
     body =
       body.slice(0, MAX_CLAUDE_TURN_BODY_LENGTH - CLAUDE_TURN_TRUNCATION_MARKER.length) +
@@ -658,25 +661,4 @@ export function renderClaudeTurn(turn: ClaudeTurnAccumulator): ClaudeRenderedTur
     toolBlocks,
     unknownBlockTypes: [...unknown],
   };
-}
-
-/**
- * Join the rendered blocks.
- *
- * Consecutive tool lines are joined with a single newline so they stay one
- * Markdown list; everything else is separated by a blank line, which is what
- * keeps a paragraph a paragraph and stops a heading being absorbed into the text
- * above it.
- */
-function joinTurnBlocks(blocks: readonly string[]): string {
-  let out = '';
-  for (let i = 0; i < blocks.length; i += 1) {
-    if (i === 0) {
-      out = blocks[i];
-      continue;
-    }
-    const bothToolLines = blocks[i].startsWith('- `') && blocks[i - 1].startsWith('- `');
-    out += bothToolLines ? `\n${blocks[i]}` : `\n\n${blocks[i]}`;
-  }
-  return out;
 }

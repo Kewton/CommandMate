@@ -1,0 +1,157 @@
+version: 1
+title: "Issue #2234: assistant 本文の冒頭に出るツール呼び出しログを prose から分離する"
+goal: |
+  /pm-auto-issue2dev 2234
+
+  https://github.com/Kewton/CommandMate/issues/2234 を TDD で実装してください。
+  Issue 本文は下に全文転記してあります。**Issue のレビューと本文の書き戻しは不要です**
+  （本文は orchestrator が管理しています。食い違いを見つけたら Issue を編集せず、
+  実測を正としてコミットメッセージに書いてください）。
+
+  ## 【重要】orchestrator が裁定したスコープ制約（Issue 本文より優先）
+
+  Issue の「実装方針」には (a) 生成側 / (b) 描画側 の 2 択がありますが、**(a) 生成側に限定します**。
+  理由: (b) の描画先である `src/components/worktree/ChatTranscript.tsx` は develop に存在せず、
+  **並行して走っている Issue #2232 が新規に作っているファイル**です。ここを触ると衝突し、
+  さらに #2232 の受入基準「`HistoryPane.tsx` / `ConversationPairCard.tsx` が 0 変更」を壊します。
+
+  したがって:
+  - `src/components/**` と `src/app/globals.css` は **scope.deny** です。1 バイトも変更しないでください。
+  - 既存行（分離前の形で保存済み）の救済は、**純粋関数として export し、転写リーダー自身がその関数を
+    呼ぶ**形にしてください。呼び出し元 0 件の export を残さないでください（後続で誰も配線せず宙に浮きます）。
+  - 分離の表現（`<details>` 相当のマーカー等）は **Markdown 本文の中で完結する形**にしてください。
+    CSS クラスの追加や React コンポーネントの改造を前提にしないでください。
+    描画側は既存の `remark-gfm` + `rehype-sanitize` + `rehype-highlight` 経路をそのまま通ります。
+    **rehype-sanitize が落とすタグを使うと本文が消えます**。使う前に sanitize schema を実測で確認してください。
+
+  ## 実測を先に行う（Issue の指示。省略しないこと）
+
+  実測結果は `docs/design/` に残してください。
+
+  - `renderClaudeTurn`（`src/lib/hooks/sources/claude/transcript.ts:616`、型は同ファイル :215 の
+    `ClaudeRenderedTurn`）が prose と tool_use ブロックをどう連結しているかを確認する。
+    `ClaudeRenderedTurn` は `textBlocks` / `toolBlocks` / `unknownBlockTypes` の件数を持っているので、
+    **分離できる情報は既にある可能性が高い**。
+  - `renderOpencodeTurn`（`src/lib/hooks/sources/opencode/transcript.ts:329`）、
+    `src/lib/hooks/sources/codex/transcript.ts`、`src/lib/hooks/sources/antigravity/transcript.ts`
+    の同等箇所も確認する。
+  - fixture を `tests/fixtures/` に採取してから型と描画を書く。
+  - **grep の 0 件は「存在しない」の証明ではありません。** 「無い」と結論する前に必ず陽性対照
+    （在ると分かっているものが同じ grep で引けること）を撃ってください。
+
+  ## Issue 本文（全文）
+
+  親 Issue: #2192 ／ Phase: 4（案 B の前提となる別件） ／ 依存: なし（#2232 と並列可） ／ サイズ: M（1 日）
+
+  ### 目的
+
+  会話履歴に保存される assistant 本文が、**冒頭にツール呼び出しのログを持っている**。
+  チャット面で全文表示にすると、吹き出しの書き出しが毎回ツールの羅列になる。
+  prose（エージェントの言葉）とツール実行を区別できるようにする。
+
+  ### 現状（実測 2026-09-02、本リポジトリの `chat_messages` 実データ）
+
+  転写リーダー（#2121）由来の行は、本文の先頭がツール呼び出しの列になっている:
+
+      - `Bash` — grep -n "import" src/components/worktree/MobileTerminalTab.tsx | head -20; …
+      - `Bash` — sed -n 1,40p docs/design/1623-tmux-reading-mode.md | grep -v "^\s*$"; …
+      - `Skill`
+      - `Skill`
+      - `Bash` — gh label list --limit 50 --json name,description …
+
+  scraper 由来の行も同様に `Ran 3 shell commands \n⏺ <本文>` という形で、ツールの要約が先頭に来る。
+
+  影響:
+  - 現在（折りたたみ 2 行 / 100 文字）: プレビューに出るのは**返答ではなくツールログ**
+  - #2232 着地後（全文表示）: 吹き出しの書き出しが毎回ツールログになり、**より目立つ**
+
+  ### スコープ外
+
+  - チャット面のレイアウト（#2232）
+  - ターミナル面の表示（無変更）
+
+  ### 受入基準（自動検証可能）
+
+  - fixture 駆動 unit: claude / opencode の実データから prose とツール実行が分離できる
+    （件数ではなく**本文の一致**で pin）
+  - 既存行（分離前の形で保存済み）が壊れずに表示される
+  - scraper 由来の `Ran N shell commands` 形式も同じ規則で扱える、または**扱わない理由が明記**されている
+  - **変異注入**: 分離規則を無効化すると該当テストが赤になることを実際に確認する
+    （修正後の緑は「効いた」と「空振り」の両方と整合します。変異を入れて赤を見るまで証明になりません）
+  - `npm run lint` / `npx tsc --noEmit` / `npm run test:unit` / `npm run build` が exit 0
+
+  ### 既知の罠
+
+  - `chat_messages.content` の形を変えると、**すでに保存済みの行との一貫性が崩れる**。
+    移行するのか新規行だけ変えるのかをコミットメッセージに明記すること。
+  - `request_id` の prefix（`claude-turn:` / `oc-turn:` 等）は Markdown 描画のマーカー兼冪等キー
+    （`src/types/agent-transcript.ts`）。**ここに新しい意味を載せない**。
+  - 転写は末尾 4 MiB しか読まない（`CLAUDE_TRANSCRIPT_TAIL_BYTES`）。分離処理でこの窓を広げない。
+  - #2199 の `chat_turn_progress`（生成中の live バブル）も同じ本文を出しています。
+    分離を入れるなら live 側と確定行で**書き出しが食い違わないか**を確認してください。
+
+  ## 作業ルール（厳守）
+
+  - **PR を作らないでください。** ブランチへのコミットまでで止めてください（PR は orchestrator が作ります）。
+  - **GitHub Issue を編集しないでください。**
+  - コミットは可能な限り **1 本**にまとめてください。
+  - `dev-reports/` と `workspace/` は .gitignore 済みです。commit に入りません。
+
+  - **`CHANGELOG.md` と `docs/module-reference.md` を編集しないでください**（scope.deny です）。
+    代わりに次の 2 ファイルを書いてください。
+
+    - `dev-reports/changelog/issue-2234.md` — `CHANGELOG.md` の `## [Unreleased]` にそのまま
+      貼れる **1 エントリ**。1 行目にどの節（`### Added` / `### Changed` / `### Fixed`）かをコメントで書く。
+      **形式は次の実例に合わせてください**（develop の `CHANGELOG.md` にある実エントリを丸ごと 1 本。
+      エントリは**ファイル中では 1 行**で、下で折り返して見えるのは表示上の都合です）:
+
+          <!-- ### Fixed -->
+          - **docs(user-guide): 出力面の既定値をブラウザが受け取る時点の記述を実装に合わせて修正** (#2221): 日本語版 `docs/user-guide/webapp-guide.md` が「この既定値をブラウザが知るのは **More 画面を一度開いたあと**」と書いていたが、実装はそうではない。`src/config/surface-mode-config.ts` の `readSurfaceMode()`（:148）は先頭で `scheduleClientDefaultSurfaceModeSeed()`（:322）を呼び、`ensureClientDefaultSurfaceMode()`（:341）で `/api/settings/default-surface-mode` を**ページセッションごとに 1 回だけ背景取得**する。この経路は PC の `TerminalSplitPaneContent.tsx:221` とスマホの `MobileTerminalTab.tsx:254` がどちらも `resolveSurfaceMode()` 経由で通るため、**どの出力面を開いても**既定値は取得され、More 画面は「その端末に即座に反映させる」だけの経路にすぎない。#2211 で入った英語版の記述が正しく、JA だけが食い違っていたため JA を EN に合わせた（EN は無変更）。
+
+      - `- **` で始めること（集計は `grep -cE '^- \*\*'`。外れるとエントリとして数えられません）
+      - `(#2234)` は要約の**外**（`**` を閉じた後）に置くこと
+      - `<type>` は CLAUDE.md のコミット規約と同じ語彙（`feat` / `fix` / `docs` / `refactor` / `test` / `chore` / `ci` / `style`）
+      - **1 エントリ = 1 行**（本文がどれだけ長くても改行を入れない）
+
+    - `dev-reports/module-reference/issue-2234.md` — `docs/module-reference.md` の表に足す注記を
+      **行キー（`| \`path\` |`）ごと**に列挙する。
+      **既存行に足すときは `grep -n '^| \`<path>\`' docs/module-reference.md` を実行し、
+      その出力（行番号つきの行キー）を断片に書き写してから**書くこと。
+      0 件だった行への追記を指示しないでください（新しい行を足すなら「新規行」と明記）。実例:
+
+          ## 既存行への追記
+          - `src/lib/hooks/sources/claude/transcript.ts` — 実在確認: `docs/module-reference.md:NNN`
+            追記内容: 「…（Issue #2234）」
+
+          ## 新規行
+          追記なし
+
+    - 断片が無いとリリースノートと module-reference に載りません。**実装と同じ commit の時点で書いてください。**
+
+  - 品質ゲートの結果は `grep` に pipe せず、`cmd > log; echo $?` で **exit code を実測**してください
+    （`grep` に pipe すると偽 PASS になります）。
+  - 完了したら `IMPL_COMPLETED` と出力してください。
+scope:
+  allow:
+    - "src/lib/hooks/**"
+    - "src/lib/history/**"
+    - "src/lib/session/current-output-builder.ts"
+    - "src/types/agent-transcript.ts"
+    - "tests/unit/hooks/**"
+    - "tests/unit/lib/**"
+    - "tests/unit/polling/**"
+    - "tests/unit/types/**"
+    - "tests/integration/**"
+    - "tests/fixtures/**"
+    - "tests/helpers/**"
+    - "docs/design/**"
+    - "dev-reports/**"
+  deny:
+    - "src/components/**"
+    - "src/app/globals.css"
+    - "src/lib/history-virtualization.ts"
+    - "CHANGELOG.md"
+    - "docs/module-reference.md"
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true
