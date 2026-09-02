@@ -1,0 +1,148 @@
+version: 1
+title: "Issue #2238: チャット面の「Responding…」がエージェント停止後も消えない"
+goal: |
+  /bug-fix 2238
+
+  https://github.com/Kewton/CommandMate/issues/2238 を修正してください。
+  **Issue 本文を `gh issue view 2238` で必ず全文読んでください**（原因・修正方針・受入基準が
+  すべて書いてあります）。**Issue のレビューと本文の書き戻しは不要**です（orchestrator が管理）。
+
+  ## ⚠️ 最初にやること: 根本原因の裏取り（省略禁止）
+
+  この Issue の原因分析は **orchestrator（私）が UAT 中に書いたもの**で、独立した検証を
+  受けていません。しかも私はこの分析を**一度間違えています**（当初「API が isRunning:true と
+  sessionStatus:'ready' を返すのは自己矛盾」と報告し、後に `isRunning` の意味を取り違えていたと
+  判明して訂正しました）。
+
+  したがって**実装の前に、次の 3 点をコードで裏取りしてください**:
+
+  1. `live.isRunning` に実際に渡る値の出所と意味
+     （`TerminalSplitPaneContent.tsx:606` / `MobileTerminalTab.tsx:297` → `/current-output` →
+     `cliTool.isRunning()` → `isClaudeRunning()` → `hasSession()` + `isSessionHealthy()`）
+  2. `src/lib/session/current-output-builder.ts:1240` が progress 配信を
+     `payload.isRunning && payload.sessionStatus === 'running'` でゲートしていること
+  3. `src/hooks/useTerminalPanePolling.ts` が `sessionStatus` を**一度も読んでいない**こと
+     （`grep -n sessionStatus src/hooks/useTerminalPanePolling.ts` が 0 件）
+
+  **食い違いを見つけたら実測を正とし、Issue 本文の誤りとしてコミットメッセージに明記**してから
+  実測どおりに実装してください。私の分析をそのまま信じないでください。
+
+  なお **grep の 0 件は「存在しない」の証明ではありません**。上記 3 を確認するときは、
+  在ると分かっているシンボルで同じ grep が引けること（陽性対照）を先に撃ってください。
+
+  ## 修正方針（Issue 本文より。実測が優先）
+
+  1. `PaneTerminalState`（`src/hooks/useTerminalPanePolling.ts:110` 付近）に `sessionStatus` を追加。
+     `/current-output` は既に返しているのでサーバ変更は不要なはず（要確認）
+  2. `ChatSurfaceLiveState`（`ChatSurface.tsx:154` 付近）に `sessionStatus`
+     （または派生した `isGenerating`）を渡す
+  3. 生成中バブルの表示条件（`ChatSurface.tsx:412-423`）と `useChatTurnProgress` の
+     `enabled`（同 :384）を **`sessionStatus === 'running'`** に切り替える
+  4. `ChatSurfaceLiveState.isRunning` の doc コメント `/** The session is generating. */` を
+     実体（＝ tmux セッションが存在して健全か）に合わせて直す。**取り違えの入口はこのコメント**
+
+  ## 【重要】`isRunning` の意味そのものは変えないこと
+
+  `cliTool.isRunning()` / `isClaudeRunning()` の意味を変えてはいけません。ターミナル面の他の
+  消費者（`TerminalSplitPaneContent.tsx:547` の `isActive`、`:813` の `disabled`、
+  `:823` の `isSessionRunning`）は「セッションが在るか」として**正しく**使っています。
+  そのため `src/lib/cli-tools/**` と `src/lib/session/**` は **scope.deny** にしてあります。
+
+  ## 併走している他 Issue との関係
+
+  直前に #2232（ChatTranscript）/ #2233（生成中バブル）/ #2234（ツールログ分離）が着地しています。
+  **#2233 の挙動を壊さないこと**が受入基準です:
+  - 生成中は従来どおり末尾の吹き出しに出る
+  - 上へスクロールしても live バブルは unmount されず、jump-to-latest チップが
+    `chatSurface.jumpToLatestGenerating`（スピナー付き）で生成中を告げる
+  - live バブルと確定バブルの提示（`.chat-md` / `text-sm` / `max-w-[92%]` / 角丸）が一致し続ける
+
+  ## 受入基準
+
+  ### 🤖 自動検証可能
+  - [ ] `sessionStatus !== 'running'` かつ `isRunning === true`（セッションは在るがアイドル）のとき
+        生成中バブルが**描画されない** unit テスト
+  - [ ] `sessionStatus === 'running'` のときは従来どおり描画される
+  - [ ] `useChatTurnProgress` の購読が `sessionStatus === 'running'` でのみ有効
+  - [ ] **変異注入**: 条件を `isRunning` に戻すと上記テストが赤になることを**実際に確認**する
+        （修正後の緑は「効いた」と「空振り」の両方と整合します。赤を見るまで証明になりません）
+  - [ ] #2233 の既存テスト（`ChatTranscript-live-turn-2233` / `ChatSurface-live-chip-2233`）が
+        **無変更で緑**、または変更が必要なら理由をコミットメッセージに明記
+  - [ ] `npm run lint` / `npx tsc --noEmit` / `npm run test:unit` / `npm run build` が exit 0
+        （`cmd > log; echo $?` で実測。**grep に pipe しない**。pipe すると偽 PASS になります）
+
+  ### 👤 手動検証（可能なら）
+  - [ ] ターンを 1 本完走させた後、チャット面から「Responding…」が消える
+  - [ ] ターミナル面の挙動が変わらない
+
+  ## 既知の罠
+
+  - `sessionStatus` の値域を先に実測すること（`'ready' | 'running' | …`）。憶測で
+    union type を書かない
+  - `useTerminalPanePolling` は **1 ペイン 1 インスタンスでターミナルとチャットに配給**されている。
+    **ポーリング間隔・購読条件を変えない**（読み取りフィールドの追加のみ）
+  - 両テーマで確認すること。**常時ダーク島を新設しない**
+  - i18n の新規文字列は `locales/en/worktree.json` と `locales/ja/worktree.json` の**両方**
+  - `git log` はファイルの履歴であって行の由来ではない。既存行の出所は `git blame`
+
+  ## 作業ルール（厳守）
+
+  - **PR を作らない**（PR は orchestrator が作ります）。**GitHub Issue を編集しない**。
+    コミットは可能な限り **1 本**。`dev-reports/` と `workspace/` は .gitignore 済み。
+  - **`CHANGELOG.md` と `docs/module-reference.md` を編集しない**（scope.deny）。代わりに断片を書く:
+
+    - `dev-reports/changelog/issue-2238.md` — `## [Unreleased]` にそのまま貼れる **1 エントリ**。
+      1 行目にどの節（`### Added` / `### Changed` / `### Fixed`）かをコメントで書く。
+      **形式は次の実例に合わせること**（develop の `CHANGELOG.md` の実エントリ 1 本。
+      **ファイル中では 1 行**で、下で折り返して見えるのは表示上の都合です）:
+
+          <!-- ### Added -->
+          - **feat(polling): プロンプト dedup のスキップを `capture --json` に露出する** (#1695): 重複抑止で落としたプロンプトの累積回数と最終スキップ時刻を `promptDedup`（`skippedCount` / `lastSkippedAt`）として公開し、「プロンプトが出たはずなのに保存されていない」ときに dedup が原因か検出漏れ（#1676）かを CLI から判別できるようにした。あわせて response 側 dedup（`isDuplicateResponse`、#1268）に `duplicate-response-skipped` ログを追加（従来ログすら無かった）
+
+      - `- **` で始める（集計は `grep -cE '^- \*\*'`）／`(#2238)` は要約の**外**（`**` を閉じた後）
+      - `<type>` は CLAUDE.md のコミット規約と同じ語彙／**1 エントリ = 1 行**（改行を入れない）
+
+    - `dev-reports/module-reference/issue-2238.md` — 行キー（`| \`path\` |`）ごとに列挙。
+      **既存行に足すときは `grep -n '^| \`<path>\`' docs/module-reference.md` を実行し、
+      その出力（行番号つきの行キー）を断片に書き写してから**書くこと。
+      0 件だった行への追記を指示しない（新規なら「新規行」と明記）。
+      **表のセルに生の `|` を入れないこと**（セルが割れて表が壊れます。`A | B` のような型表記は
+      「A の B 許容」等に言い換える。このファイルに `\|` エスケープの前例は 0 件です）。実例:
+
+          ## 既存行への追記
+          - `src/components/worktree/ChatSurface.tsx` — 実在確認: `docs/module-reference.md:NNN`
+            追記内容: 「…（Issue #2238）」
+
+          ## 新規行
+          追記なし
+
+    - 断片が無いとリリースノートと module-reference に載りません。**実装と同じ commit で書くこと。**
+
+  - 完了したら `IMPL_COMPLETED` と出力してください。
+scope:
+  allow:
+    - "src/components/worktree/**"
+    - "src/hooks/**"
+    - "src/lib/chat/**"
+    - "src/config/**"
+    - "src/types/**"
+    - "locales/en/**"
+    - "locales/ja/**"
+    - "tests/unit/components/**"
+    - "tests/unit/hooks/**"
+    - "tests/unit/i18n/**"
+    - "tests/unit/lib/**"
+    - "tests/integration/**"
+    - "dev-reports/**"
+  deny:
+    - "src/components/worktree/HistoryPane.tsx"
+    - "src/components/worktree/ConversationPairCard.tsx"
+    - "src/lib/history-virtualization.ts"
+    - "src/lib/cli-tools/**"
+    - "src/lib/session/**"
+    - "src/lib/tmux/**"
+    - "CHANGELOG.md"
+    - "docs/module-reference.md"
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true
