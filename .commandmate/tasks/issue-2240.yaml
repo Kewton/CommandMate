@@ -1,0 +1,118 @@
+version: 1
+title: "Issue #2240: terminal_snapshot に sessionStatus を載せる（#2239 の回避策の根本対応）"
+goal: |
+  /bug-fix 2240
+
+  https://github.com/Kewton/CommandMate/issues/2240 を修正してください。
+  **Issue 本文を `gh issue view 2240` で必ず全文読んでください。**
+  **Issue のレビューと本文の書き戻しは不要**です（orchestrator が管理）。
+
+  ## 最初にやること: 前提の裏取り
+
+  この Issue は orchestrator が #2239 のレビュー中に書いたもので、独立検証を受けていません。
+  **実装の前に次を実測してください**（食い違えば実測を正とし、コミットメッセージに明記）:
+
+  1. `src/lib/realtime/types.ts` の `terminal_snapshot` が運ぶフィールド一覧。
+     **`sessionStatus` が本当に無いこと**
+  2. emitter（`src/lib/realtime/terminal-broadcast.ts` の `type: 'terminal_snapshot'` 付近）が
+     `buildCurrentOutput` のペイロードをどう流しているか
+  3. `/api/worktrees/:id/current-output` が `sessionStatus` を返していること
+  4. `src/hooks/useTerminalPanePolling.ts` の `data.sessionStatus ?? prev.sessionStatus`
+     （#2238 が入れた回避策）の位置と意図
+
+  **grep の 0 件は「存在しない」の証明ではありません。** 「無い」と言う前に、
+  在ると分かっているフィールド（例 `isRunning`）が同じ grep 形でヒットすることを先に確認してください。
+  リテラル文字列を探すときは `grep -F` を使うこと（正規表現の層を 1 つ減らせます）。
+
+  ## 実装内容
+
+  1. `terminal_snapshot` に `sessionStatus` を追加（`src/lib/realtime/types.ts`）
+  2. emitter で `buildCurrentOutput` の `payload.sessionStatus` を載せる。
+     **HTTP poll と同じ値**にすること（別経路で別の意味になると #2238 と同型の取り違えが起きる）
+  3. `useTerminalPanePolling` の `data.sessionStatus ?? prev.sessionStatus` を
+     素直な代入に戻せるかを**判断し、判断の理由を PR に書く**。
+     - 戻す場合: 「push は必ず `sessionStatus` を持つ」ことをテストで固定する
+     - 残す場合: 古いサーバ → 新しいクライアントの組み合わせが起こりうるなら保持が正しい。
+       **どちらを選んだかと理由を明記**すること（黙って片方にしない）
+
+  ## 【重要】変えてはいけないもの
+
+  - **`isRunning` の意味**（= `hasSession()` + `isSessionHealthy()` ＝「健全な tmux セッションが
+    在るか」）。#2238 で確定済み。`src/lib/cli-tools/**` と `src/lib/session/**` は **scope.deny**
+  - **チャット面の表示条件**（#2238 で `sessionStatus === 'running'` に確定済み）。
+    `ChatSurface` のゲート条件そのものは変えない
+
+  ## 受入基準
+
+  ### 🤖 自動検証可能
+  - [ ] `terminal_snapshot` が `sessionStatus` を運ぶことの型・emitter テスト
+  - [ ] **push のみで（poll を一度も通さずに）生成中判定が立つ**ことのテスト
+        — 現状の回避策では初期値のまま立たない。ここが本 Issue の実質
+  - [ ] push と poll が同じ worktree/instance について**同じ `sessionStatus`** を報告するテスト
+  - [ ] #2238 の既存テスト（`ChatSurface-generating-2238` /
+        `useTerminalPanePolling-session-status-2238`）が緑
+  - [ ] **変異注入**: emitter から `sessionStatus` を落とすと上記テストが赤になることを
+        **実際に確認**する（修正後の緑は「効いた」と「空振り」の両方と整合します）
+  - [ ] `npm run lint` / `npx tsc --noEmit` / `npm run test:unit` / `npm run build` が exit 0
+        （`cmd > log; echo $?` で実測。**grep に pipe しない**。pipe すると偽 PASS になります）
+
+  ### 👤 手動検証（可能なら）
+  - [ ] 長いターンの最中にバブルが明滅しない
+  - [ ] ターン完了後に「Responding…」が消える（#2238 の回帰ガード）
+
+  ## 既知の罠
+
+  - `terminal_snapshot` は emitter が `buildCurrentOutput` のペイロードをそのまま流す形。
+    `types.ts` の `promptData` に付いている **#1738 の注記**（catch-all メンバーが
+    オブジェクトリテラルを吸収して型の不一致が表面化しなかった事例）を読んでから触ること
+  - `versionCounters` は #2220 で `globalThis` 化されている。broadcast 側を触るときは
+    複数インスタンスの採番前提（クライアントの stale guard）を壊さないこと
+  - `useTerminalPanePolling` は **1 ペイン 1 インスタンスでターミナルとチャットに配給**されている。
+    **ポーリング間隔・購読条件を変えない**
+  - i18n の新規文字列があれば `locales/en/worktree.json` と `locales/ja/worktree.json` の**両方**
+
+  ## 作業ルール（厳守）
+
+  - **PR を作らない**（PR は orchestrator が作ります）。**GitHub Issue を編集しない**。
+    コミットは可能な限り **1 本**。`dev-reports/` と `workspace/` は .gitignore 済み。
+  - **`CHANGELOG.md` と `docs/module-reference.md` を編集しない**（scope.deny）。代わりに断片を書く:
+
+    - `dev-reports/changelog/issue-2240.md` — `## [Unreleased]` にそのまま貼れる **1 エントリ**。
+      1 行目にどの節かをコメントで書く。
+      **形式は次の実例に合わせること**（develop の実エントリ 1 本。**ファイル中では 1 行**）:
+
+          <!-- ### Added -->
+          - **feat(polling): プロンプト dedup のスキップを `capture --json` に露出する** (#1695): 重複抑止で落としたプロンプトの累積回数と最終スキップ時刻を `promptDedup`（`skippedCount` / `lastSkippedAt`）として公開し、「プロンプトが出たはずなのに保存されていない」ときに dedup が原因か検出漏れ（#1676）かを CLI から判別できるようにした。あわせて response 側 dedup（`isDuplicateResponse`、#1268）に `duplicate-response-skipped` ログを追加（従来ログすら無かった）
+
+      - `- **` で始める／`(#2240)` は要約の**外**／**1 エントリ = 1 行**／`<type>` は CLAUDE.md の語彙
+
+    - `dev-reports/module-reference/issue-2240.md` — 行キーごとに列挙。
+      **既存行に足すときは `grep -n '^| \`<path>\`' docs/module-reference.md` を実行し、
+      その出力（行番号つきの行キー）を断片に書き写してから**書くこと。
+      0 件だった行への追記を指示しない（新規なら「新規行」と明記）。
+      **表のセルに生の `|` を入れないこと**（セルが割れます。`A | B` のような型表記は
+      「A の B 許容」等に言い換える）
+
+  - 完了したら `IMPL_COMPLETED` と出力してください。
+scope:
+  allow:
+    - "src/lib/realtime/**"
+    - "src/hooks/**"
+    - "src/components/worktree/**"
+    - "src/types/**"
+    - "locales/en/**"
+    - "locales/ja/**"
+    - "tests/unit/**"
+    - "tests/integration/**"
+    - "dev-reports/**"
+  deny:
+    - "src/lib/cli-tools/**"
+    - "src/lib/session/**"
+    - "src/lib/tmux/**"
+    - "src/components/worktree/HistoryPane.tsx"
+    - "src/components/worktree/ConversationPairCard.tsx"
+    - "CHANGELOG.md"
+    - "docs/module-reference.md"
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true
