@@ -69,14 +69,17 @@ import { createLogger } from '@/lib/logger';
 import { isOpencodeStructuredHistoryLive } from '@/lib/hooks/sources/opencode/subscription';
 import {
   captureClaudeTranscriptTurn,
+  resolveClaudeTranscriptPath,
   type ClaudeTranscriptCapture,
 } from '@/lib/hooks/sources/claude/history';
 import {
   captureCodexTranscriptTurn,
+  resolveCodexTranscriptPath,
   type CodexTranscriptCapture,
 } from '@/lib/hooks/sources/codex/history';
 import {
   captureAntigravityTranscriptTurn,
+  resolveAntigravityTranscriptPath,
   type AntigravityTranscriptCapture,
 } from '@/lib/hooks/sources/antigravity/history';
 import { CLAUDE_CLI_TOOL_ID } from '@/lib/hooks/sources/claude/tool-id';
@@ -86,6 +89,82 @@ import { getAgentEventSource } from '@/lib/hooks/sources/registry';
 import type { AgentInstanceRef } from '@/lib/hooks/sources/types';
 
 const logger = createLogger('lib/polling/structured-history-gate');
+
+declare global {
+  // eslint-disable-next-line no-var
+  var __structuredHistoryCaptureQueue: Map<string, Promise<void>> | undefined;
+}
+
+/**
+ * One in-flight capture per instance (Issue #2246).
+ *
+ * Until this Issue there was one caller — the poller's save path, whose ticks do
+ * not overlap — and the Stop hook receiver is now a second one, arriving at
+ * exactly the moment the poller is most likely to be inside the same turn. Two
+ * things follow, and it is worth separating them because #2246's own text runs
+ * them together.
+ *
+ * **The duplicate-row race it describes is not open today, and this is what
+ * keeps it shut.** The readers are idempotent through `findMessageByRequestId`,
+ * which is a check-then-write over a *non-unique* index — but the check and the
+ * write are adjacent and synchronous (`better-sqlite3` is), and the only `await`
+ * in that stretch is the dynamic import *before* the check. So there is no point
+ * for a second caller to interleave at, and two concurrent captures of one turn
+ * already end in one row. That is a property of two adjacent statements, which
+ * is exactly the kind of property a later refactor removes without noticing: an
+ * `await` inserted between them re-opens the window silently, and the row it
+ * costs is a duplicated reply nobody sees until an operator reports it.
+ *
+ * **What it saves today is the work.** Both triggers otherwise read, parse and
+ * render the same 4 MiB tail at the same time, and the second one throws all of
+ * it away.
+ *
+ * A queue rather than a shared result: the second caller runs the read again
+ * after the first finishes, because it may be asking about a newer turn and
+ * because the answer it needs is about the file as it is *now*. Re-running is
+ * cheap and, after the first call, finds the row and answers true.
+ *
+ * On `globalThis` for the reason every shared map in this subsystem is (#1736):
+ * under `next dev` the poller's bundle and the hook receiver's bundle would each
+ * get a private copy of a module-scoped map, and a lock only one of two bundles
+ * can see is not a lock.
+ */
+const captureQueue = (globalThis.__structuredHistoryCaptureQueue ??= new Map<
+  string,
+  Promise<void>
+>());
+
+/** Forget every instance's in-flight capture. Test seam. */
+export function resetStructuredHistoryCaptureQueue(): void {
+  captureQueue.clear();
+}
+
+/** The queue key; the same triple `buildCompositeKey` spells everywhere else. */
+function captureKeyOf(worktreeId: string, cliToolId: CLIToolType, instanceId: string): string {
+  return `${worktreeId}\u0000${cliToolId}\u0000${instanceId}`;
+}
+
+/**
+ * Run `work` after whatever is already running for this instance.
+ *
+ * The stored promise is a settled-only shadow of the real one, so a caller that
+ * throws cannot reject the next caller's chain, and the entry is removed only by
+ * whoever put it there — a later call that has already replaced it must not have
+ * its own lock deleted underneath it.
+ */
+function serializePerInstance<T>(key: string, work: () => Promise<T>): Promise<T> {
+  const previous = captureQueue.get(key) ?? Promise.resolve();
+  const result = previous.then(work, work);
+  const settled = result.then(
+    () => undefined,
+    () => undefined
+  );
+  captureQueue.set(key, settled);
+  void settled.then(() => {
+    if (captureQueue.get(key) === settled) captureQueue.delete(key);
+  });
+  return result;
+}
 
 /**
  * Everything the pull readers may be told about where to look.
@@ -104,10 +183,25 @@ export type StructuredHistoryCapture = ClaudeTranscriptCapture &
   AntigravityTranscriptCapture;
 
 /** What a pull-mode reader is asked to do. */
-type PullTranscriptReader = (
-  target: AgentInstanceRef,
-  capture: StructuredHistoryCapture
-) => Promise<boolean>;
+interface PullTranscriptReader {
+  /** Record every turn this instance has not had written yet. */
+  readonly capture: (
+    target: AgentInstanceRef,
+    capture: StructuredHistoryCapture
+  ) => Promise<boolean>;
+  /**
+   * Name the file {@link PullTranscriptReader.capture} would read, without
+   * reading it (Issue #2246).
+   *
+   * The second member exists for the Stop receiver, which retries a failed
+   * capture after a short delay and must not spend that delay on an instance
+   * with no transcript at all. See {@link hasStructuredHistoryTranscript}.
+   */
+  readonly locate: (
+    target: AgentInstanceRef,
+    capture: StructuredHistoryCapture
+  ) => Promise<string | null>;
+}
 
 /**
  * Which reader answers for which tool.
@@ -124,12 +218,24 @@ type PullTranscriptReader = (
  * {@link captureStructuredHistoryTurn} logs it and falls back to the scraper.
  */
 const PULL_TRANSCRIPT_READERS: Partial<Record<CLIToolType, PullTranscriptReader>> = {
-  [CLAUDE_CLI_TOOL_ID]: (target: AgentInstanceRef, capture: StructuredHistoryCapture) =>
-    captureClaudeTranscriptTurn(target, capture),
-  [CODEX_CLI_TOOL_ID]: (target: AgentInstanceRef, capture: StructuredHistoryCapture) =>
-    captureCodexTranscriptTurn(target, capture),
-  [ANTIGRAVITY_CLI_TOOL_ID]: (target: AgentInstanceRef, capture: StructuredHistoryCapture) =>
-    captureAntigravityTranscriptTurn(target, capture),
+  [CLAUDE_CLI_TOOL_ID]: {
+    capture: (target: AgentInstanceRef, capture: StructuredHistoryCapture) =>
+      captureClaudeTranscriptTurn(target, capture),
+    locate: (target: AgentInstanceRef, capture: StructuredHistoryCapture) =>
+      resolveClaudeTranscriptPath(target, capture),
+  },
+  [CODEX_CLI_TOOL_ID]: {
+    capture: (target: AgentInstanceRef, capture: StructuredHistoryCapture) =>
+      captureCodexTranscriptTurn(target, capture),
+    locate: (target: AgentInstanceRef, capture: StructuredHistoryCapture) =>
+      resolveCodexTranscriptPath(target, capture),
+  },
+  [ANTIGRAVITY_CLI_TOOL_ID]: {
+    capture: (target: AgentInstanceRef, capture: StructuredHistoryCapture) =>
+      captureAntigravityTranscriptTurn(target, capture),
+    locate: (target: AgentInstanceRef, capture: StructuredHistoryCapture) =>
+      resolveAntigravityTranscriptPath(target, capture),
+  },
 };
 
 /**
@@ -149,6 +255,18 @@ function transcriptHistoryModeOf(cliToolId: CLIToolType): TranscriptHistoryMode 
     });
     return null;
   }
+}
+
+/**
+ * Whether this tool keeps a transcript a reader can be asked to pull from.
+ *
+ * Exported for the Stop receiver (Issue #2246), which has to decide whether the
+ * *retry* below is worth waiting for before it answers the agent's hook. It is
+ * the same question {@link captureStructuredHistoryTurn} opens with, asked
+ * without doing the read — never a tool id comparison, here or there.
+ */
+export function isPullTranscriptHistory(cliToolId: CLIToolType): boolean {
+  return transcriptHistoryModeOf(cliToolId) === 'pull';
 }
 
 /**
@@ -225,7 +343,7 @@ export async function captureStructuredHistoryTurn(
   instanceId: string | undefined,
   capture: StructuredHistoryCapture
 ): Promise<boolean> {
-  if (transcriptHistoryModeOf(cliToolId) !== 'pull') return false;
+  if (!isPullTranscriptHistory(cliToolId)) return false;
 
   const reader = PULL_TRANSCRIPT_READERS[cliToolId];
   if (!reader) {
@@ -237,10 +355,64 @@ export async function captureStructuredHistoryTurn(
     return false;
   }
 
+  const resolvedInstanceId = instanceId ?? cliToolId;
+  return serializePerInstance(
+    captureKeyOf(worktreeId, cliToolId, resolvedInstanceId),
+    async (): Promise<boolean> => {
+      try {
+        return await reader.capture(
+          { worktreeId, cliToolId, instanceId: resolvedInstanceId },
+          capture
+        );
+      } catch (error) {
+        logger.warn('structured-history-capture-unavailable', {
+          worktreeId,
+          cliToolId,
+          instanceId: resolvedInstanceId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return false;
+      }
+    }
+  );
+}
+
+/**
+ * Whether a pull reader can name a transcript for this instance (Issue #2246).
+ *
+ * Not "is there a turn to write" and not "did anything get written" — only
+ * whether the file the reader would open exists right now. The one caller is
+ * `lib/hooks/stop-history-capture`, which asks it after a capture answered
+ * false, to decide whether waiting half a second and asking again could help.
+ * An instance with no transcript will not have one in half a second, and the
+ * delay would be paid on every `stop` of every session without hooks.
+ *
+ * False for every tool that does not declare `transcriptHistory: 'pull'`, and
+ * never throws — an unanswerable question is one whose answer is "no file",
+ * which costs the retry and nothing else.
+ *
+ * @param worktreeId - The worktree
+ * @param cliToolId - The tool driving the pane
+ * @param instanceId - The agent instance; defaults to the primary
+ * @param capture - Where to look; see {@link StructuredHistoryCapture}
+ */
+export async function hasStructuredHistoryTranscript(
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  instanceId: string | undefined,
+  capture: StructuredHistoryCapture
+): Promise<boolean> {
+  const reader = isPullTranscriptHistory(cliToolId) ? PULL_TRANSCRIPT_READERS[cliToolId] : undefined;
+  if (!reader) return false;
+
   try {
-    return await reader({ worktreeId, cliToolId, instanceId: instanceId ?? cliToolId }, capture);
+    const path = await reader.locate(
+      { worktreeId, cliToolId, instanceId: instanceId ?? cliToolId },
+      capture
+    );
+    return path !== null;
   } catch (error) {
-    logger.warn('structured-history-capture-unavailable', {
+    logger.warn('structured-history-locate-unavailable', {
       worktreeId,
       cliToolId,
       instanceId: instanceId ?? cliToolId,
