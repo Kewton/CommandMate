@@ -12,8 +12,23 @@ import type { CLIToolType } from '@/lib/cli-tools/types';
 
 /**
  * In-memory cache: pollerKey -> SHA-256 hash of last saved prompt content.
+ *
+ * On `globalThis` because it shares the response poller's lifecycle (Issue
+ * #2223): written by `checkForResponse` inside the poller tick, cleared by
+ * `stopPolling`/`session-cleanup`, re-keyed by
+ * `migrateResponsePollerWorktreeIds`. Those callers do not all live in the same
+ * module graph — `next start` evaluates the poller once per route bundle and
+ * once in the custom server — so a module-scope map let a stop clear the
+ * *caller's* copy while the entry the timer owner is deduplicating against
+ * stayed behind, and a rename move a hash the poller never reads.
  */
-const promptHashCache = new Map<string, string>();
+declare global {
+  // eslint-disable-next-line no-var
+  var __promptHashCache: Map<string, string> | undefined;
+}
+
+const promptHashCache = globalThis.__promptHashCache ??
+  (globalThis.__promptHashCache = new Map<string, string>());
 
 /**
  * Check if the given prompt content is a duplicate of the last saved prompt

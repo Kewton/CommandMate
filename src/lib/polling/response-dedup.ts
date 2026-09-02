@@ -22,8 +22,21 @@ import { createHash } from 'crypto';
 
 /**
  * In-memory cache: pollerKey -> SHA-256 hash of the last saved response content.
+ *
+ * On `globalThis` for the same reason `promptHashCache` is (Issue #2223): the
+ * cache is owned by one polling cycle, and the poller module is evaluated once
+ * per Next route bundle plus once in the custom server's graph. Per-graph
+ * copies meant the guard that stops an alternate-screen reply being saved twice
+ * was cleared by whichever bundle happened to call `stopPolling` — not the one
+ * whose tick had populated it.
  */
-const responseHashCache = new Map<string, string>();
+declare global {
+  // eslint-disable-next-line no-var
+  var __responseHashCache: Map<string, string> | undefined;
+}
+
+const responseHashCache = globalThis.__responseHashCache ??
+  (globalThis.__responseHashCache = new Map<string, string>());
 
 /**
  * Check whether the given response content was already saved during the current
