@@ -423,7 +423,9 @@
     "jumpToLatest": "新着へ",
     "jumpToLatestGenerating": "新着へ（応答中）",
     "progressLabel": "生成中の返答",
-    "progressPartial": "途中から表示しています"
+    "progressPartial": "途中から表示しています",
+    "settling": "まだ履歴に確定していません",
+    "settlingLabel": "確定待ちの返答"
   },
   "chatTranscript": {
     "regionLabel": "チャット履歴",

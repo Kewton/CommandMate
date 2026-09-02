@@ -90,8 +90,14 @@ import {
   shouldShowRoleHeader,
 } from '@/lib/chat/chat-transcript-view';
 import { resolveChatSearchNamespace } from '@/lib/chat/chat-search-namespace';
-import { ChatMessageBubble } from './ChatMessageBubble';
-import { ChatLiveTurnBubble } from './ChatLiveTurnBubble';
+import {
+  CHAT_BUBBLE_ASSISTANT_CLASS,
+  CHAT_BUBBLE_MARKDOWN_BODY_CLASS,
+  CHAT_BUBBLE_ROW_CLASS,
+  ChatMarkdownBody,
+  ChatMessageBubble,
+} from './ChatMessageBubble';
+import { CHAT_LIVE_TURN_TESTID, ChatLiveTurnBubble } from './ChatLiveTurnBubble';
 import { HistorySearchBar } from './HistorySearchBar';
 
 // ============================================================================
@@ -133,6 +139,12 @@ export interface ChatTranscriptLiveTurn {
   partial?: boolean;
   /** The CLI is painting a thinking indicator rather than a plain "generating". */
   isThinking?: boolean;
+  /**
+   * Issue #2248: the turn has stopped and this body is being held until its
+   * saved row arrives. Drawn by {@link ChatSettlingTurnBubble} instead of
+   * {@link ChatLiveTurnBubble} — same bubble, no spinner, no "Responding…".
+   */
+  settling?: boolean;
 }
 
 export interface ChatTranscriptProps {
@@ -185,6 +197,107 @@ function ChatTranscriptLoading() {
           <Skeleton className={`h-14 rounded-2xl ${i % 2 === 0 ? 'w-2/3' : 'w-11/12'}`} />
         </div>
       ))}
+    </div>
+  );
+}
+
+/**
+ * A body that has stopped growing and has no saved row yet (Issue #2248).
+ *
+ * ## Why this is a second component and not a flag on `ChatLiveTurnBubble`
+ *
+ * The two states differ in exactly one row of markup — the live bubble's
+ * spinner-and-"Responding…" line is replaced by a single quiet label — and in
+ * nothing else. Everything the reader looks at is the SAME: the same
+ * {@link CHAT_BUBBLE_ROW_CLASS} row, the same {@link CHAT_BUBBLE_ASSISTANT_CLASS}
+ * bubble, the same {@link CHAT_BUBBLE_MARKDOWN_BODY_CLASS} body through the same
+ * Markdown renderer, in the same place in the same column. That is Issue #2233's
+ * rule and this Issue inherits it: a turn ending must not move a paragraph or
+ * change its typeface, and neither must its row finally landing.
+ *
+ * Because the class strings are shared constants rather than copies, the drift
+ * that a duplicated bubble would normally invite cannot happen silently — and
+ * `ChatTranscript-settling-2248.test.tsx` compares the two rendered class
+ * strings to each other anyway.
+ *
+ * ## What it must not say
+ *
+ * No spinner and no `chatSurface.generating`. Issue #2238's defect was a surface
+ * that claimed to be responding when nothing was running, and a hold is exactly
+ * the state where that claim would be false. `data-settling="true"` is on the
+ * row so the real screen and an E2E run can tell the two apart without reading
+ * prose (`data-turn-key` / `data-version` were already there).
+ */
+function ChatSettlingTurnBubble({
+  turnKey,
+  version,
+  body,
+  partial = false,
+  showHeader = false,
+  onFilePathClick,
+}: {
+  turnKey?: string;
+  version?: number;
+  body?: string;
+  partial?: boolean;
+  showHeader?: boolean;
+  onFilePathClick: (path: string) => void;
+}) {
+  const t = useTranslations('worktree');
+  const hasBody = typeof body === 'string' && body.length > 0;
+
+  return (
+    <div
+      data-testid={CHAT_LIVE_TURN_TESTID}
+      data-role="assistant"
+      data-settling="true"
+      data-turn-key={turnKey}
+      data-version={version === undefined ? undefined : String(version)}
+      data-has-body={hasBody ? 'true' : 'false'}
+      role="group"
+      aria-label={t('chatSurface.settlingLabel')}
+      className={CHAT_BUBBLE_ROW_CLASS}
+    >
+      {showHeader && (
+        <div className="flex items-center gap-2 px-1 text-xs text-muted-foreground">
+          <span className="font-medium">{t('conversation.assistant')}</span>
+        </div>
+      )}
+
+      <div className={CHAT_BUBBLE_ASSISTANT_CLASS}>
+        {hasBody && (
+          <div
+            data-testid="chat-live-turn-body"
+            data-markdown="true"
+            className={CHAT_BUBBLE_MARKDOWN_BODY_CLASS}
+          >
+            <ChatMarkdownBody content={body as string} onFilePathClick={onFilePathClick} />
+          </div>
+        )}
+
+        {/* Under the body, in the live bubble's place, so the label swapping for
+            the spinner moves nothing above it. Not an `aria-live` region: the
+            turn is over, and there is nothing left to announce. */}
+        <div
+          data-testid="chat-settling-turn-note"
+          className={[
+            'flex flex-wrap items-center gap-2 text-xs text-muted-foreground',
+            hasBody ? 'mt-1.5' : '',
+          ]
+            .filter(Boolean)
+            .join(' ')}
+        >
+          <span>{t('chatSurface.settling')}</span>
+          {partial && (
+            <span
+              data-testid="chat-live-turn-partial"
+              className="rounded border border-warning-border bg-warning-subtle px-1 py-0.5 text-warning-foreground"
+            >
+              {t('chatSurface.progressPartial')}
+            </span>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -477,18 +590,33 @@ export const ChatTranscript = memo(function ChatTranscript({
 
         {/* [#2233] The live tail. A plain sibling of the list — never an entry
             in `virtualItems` — so no scroll position can unmount it, and inside
-            the scroll region so it sits exactly where its settled row will. */}
-        {liveTurn && (
-          <ChatLiveTurnBubble
-            turnKey={liveTurn.turnKey}
-            version={liveTurn.version}
-            body={liveTurn.body}
-            partial={liveTurn.partial}
-            isThinking={liveTurn.isThinking}
-            showHeader={shouldShowLiveRoleHeader(messages[messages.length - 1])}
-            onFilePathClick={handleFilePathClick}
-          />
-        )}
+            the scroll region so it sits exactly where its settled row will.
+
+            [#2248] Two bubbles, one position: while the turn is generating, and
+            then while its body is HELD waiting for the saved row. The second
+            wears the same classes with the spinner and "Responding…" taken off,
+            so the turn ending changes nothing on screen but that one line. */}
+        {liveTurn &&
+          (liveTurn.settling ? (
+            <ChatSettlingTurnBubble
+              turnKey={liveTurn.turnKey}
+              version={liveTurn.version}
+              body={liveTurn.body}
+              partial={liveTurn.partial}
+              showHeader={shouldShowLiveRoleHeader(messages[messages.length - 1])}
+              onFilePathClick={handleFilePathClick}
+            />
+          ) : (
+            <ChatLiveTurnBubble
+              turnKey={liveTurn.turnKey}
+              version={liveTurn.version}
+              body={liveTurn.body}
+              partial={liveTurn.partial}
+              isThinking={liveTurn.isThinking}
+              showHeader={shouldShowLiveRoleHeader(messages[messages.length - 1])}
+              onFilePathClick={handleFilePathClick}
+            />
+          ))}
       </div>
 
       {/* Search: one icon, or the bar once it is open. Absolutely positioned so

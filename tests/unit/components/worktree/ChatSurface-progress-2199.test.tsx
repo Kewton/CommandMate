@@ -364,9 +364,36 @@ describe('[#2199] falling back', () => {
     expect(liveTurn().textContent).toBe('');
   });
 
-  it('clears the bubble when the session stops running', () => {
+  it('holds the body when the session stops running (superseded by Issue #2248)', () => {
+    // This assertion is the one property of #2199 that Issue #2248 reversed, and
+    // the reversal is the whole of that Issue: the body used to be DROPPED here,
+    // which is correct only if the settled row is guaranteed to arrive. It is
+    // not — #2246's Stop-triggered write and #2247's missed turns are two ways
+    // it never does — so a paragraph the reader had watched being written
+    // disappeared for good. It is now held, flagged, and released by the rules
+    // in `ChatSurface-settling-2248.test.tsx`.
+    //
+    // What #2199 asserted here and #2248 does NOT weaken: nothing is held that
+    // was never pushed, which is the case below.
     const { rerender } = renderSurface();
     push(progressFrame());
+
+    rerender(
+      <ChatSurface
+        messages={[msg('m-1', 'assistant')]}
+        worktreeId={WORKTREE_ID}
+        cliToolId="claude"
+        instanceId="claude"
+        live={{ isRunning: false, sessionStatus: 'idle' }}
+        onSurfaceModeChange={() => {}}
+      />,
+    );
+
+    expect(liveTurn().textContent).toContain('The reply so far.');
+  });
+
+  it('leaves nothing at all when the session stops with no body pushed', () => {
+    const { rerender } = renderSurface();
 
     rerender(
       <ChatSurface
