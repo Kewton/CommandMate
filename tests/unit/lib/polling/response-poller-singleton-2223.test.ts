@@ -8,9 +8,9 @@
  * 1. **Two module graphs, two registries.** `next start` evaluates
  *    `response-poller-core` once inside the custom server's graph (the restored
  *    timers and the Auto-Yes poller reach it that way) and again inside each
- *    Next route bundle (`/send`, `/respond`, `/prompt-response`,
- *    `/start-polling`). A module-scope `activePollers` is therefore one map per
- *    graph: `startPolling` from a route could not see — let alone stop — the
+ *    Next route bundle (`/send`, `/respond`, `/prompt-response`). A
+ *    module-scope `activePollers` is therefore one map per graph:
+ *    `startPolling` from a route could not see — let alone stop — the
  *    poller the server's timer had started, so both ran, both captured the same
  *    pane, and both saved the reply.
  *
