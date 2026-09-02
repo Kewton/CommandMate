@@ -20,6 +20,12 @@
  * leaves the surface saying nothing at all about the turn, which is the exact
  * failure #2194 built the footer to prevent.
  *
+ * Issue #2238 changed what "a turn is running" is read from — `sessionStatus`
+ * rather than `isRunning`, which only ever meant "a healthy tmux session
+ * exists" — so the states below now name both fields. Nothing this file asserts
+ * changed; what changed is that the running state it sets up is now the one the
+ * server actually publishes while generating.
+ *
  * @vitest-environment jsdom
  */
 
@@ -122,14 +128,17 @@ function push(frame: Record<string, unknown> = {}): void {
   });
 }
 
-function renderSurface(isRunning: boolean) {
+function renderSurface(generating: boolean) {
   return render(
     <ChatSurface
       messages={[msg('u1', 'user'), msg('a1', 'assistant')]}
       worktreeId={WORKTREE_ID}
       cliToolId="claude"
       instanceId="claude"
-      live={{ isRunning }}
+      // Issue #2238: a generating pane and an idle one BOTH have a live tmux
+      // session — `isRunning` is true in either — so the two states differ only
+      // in `sessionStatus`.
+      live={{ isRunning: true, sessionStatus: generating ? 'running' : 'ready' }}
       onSurfaceModeChange={vi.fn()}
     />,
   );
@@ -203,7 +212,7 @@ describe('[#2233] the jump-to-latest chip while a turn is live', () => {
         worktreeId={WORKTREE_ID}
         cliToolId="claude"
         instanceId="claude"
-        live={{ isRunning: false }}
+        live={{ isRunning: false, sessionStatus: 'idle' }}
         onSurfaceModeChange={vi.fn()}
       />,
     );

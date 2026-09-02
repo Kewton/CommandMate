@@ -161,7 +161,7 @@ function renderSurface(props: Partial<React.ComponentProps<typeof ChatSurface>> 
       worktreeId={WORKTREE_ID}
       cliToolId="claude"
       instanceId="claude"
-      live={{ isRunning: true, ...(props.live ?? {}) }}
+      live={{ isRunning: true, sessionStatus: 'running', ...(props.live ?? {}) }}
       onSurfaceModeChange={() => {}}
       {...props}
     />,
@@ -226,7 +226,7 @@ describe('[#2199] showing the in-flight reply', () => {
   });
 
   it('forwards the thinking wording the CLI reports', () => {
-    renderSurface({ live: { isRunning: true, isThinking: true } });
+    renderSurface({ live: { isRunning: true, sessionStatus: 'running', isThinking: true } });
     push(progressFrame());
 
     expect(liveTurn()).toHaveAttribute('data-thinking', 'true');
@@ -245,14 +245,15 @@ describe('[#2199] the swap', () => {
         worktreeId={WORKTREE_ID}
         cliToolId="claude"
         instanceId="claude"
-        live={{ isRunning: true }}
+        live={{ isRunning: true, sessionStatus: 'running' }}
         onSurfaceModeChange={() => {}}
       />,
     );
 
-    // The body is gone from the live bubble — and because `isRunning` is still
-    // true the bubble itself stays, now carrying nothing but the indicator, so
-    // the reply is on screen exactly once.
+    // The body is gone from the live bubble — and because the turn is still
+    // generating (`sessionStatus === 'running'`, Issue #2238) the bubble itself
+    // stays, now carrying nothing but the indicator, so the reply is on screen
+    // exactly once.
     expect(liveTurn().textContent).toBe('');
     expect(liveTurn()).toHaveAttribute('data-turn-key', '');
     expect(screen.getByTestId('chat-transcript')).toHaveAttribute('data-message-count', '2');
@@ -268,7 +269,7 @@ describe('[#2199] the swap', () => {
         worktreeId={WORKTREE_ID}
         cliToolId="claude"
         instanceId="claude"
-        live={{ isRunning: false }}
+        live={{ isRunning: false, sessionStatus: 'idle' }}
         onSurfaceModeChange={() => {}}
       />,
     );
@@ -373,7 +374,7 @@ describe('[#2199] falling back', () => {
         worktreeId={WORKTREE_ID}
         cliToolId="claude"
         instanceId="claude"
-        live={{ isRunning: false }}
+        live={{ isRunning: false, sessionStatus: 'idle' }}
         onSurfaceModeChange={() => {}}
       />,
     );
@@ -391,7 +392,7 @@ describe('[#2199] falling back', () => {
         worktreeId={WORKTREE_ID}
         cliToolId="claude"
         instanceId="claude"
-        live={{ isRunning: false }}
+        live={{ isRunning: false, sessionStatus: 'idle' }}
         onSurfaceModeChange={() => {}}
       />
     );
@@ -402,7 +403,7 @@ describe('[#2199] falling back', () => {
         worktreeId={WORKTREE_ID}
         cliToolId="claude"
         instanceId="claude"
-        live={{ isRunning: true }}
+        live={{ isRunning: true, sessionStatus: 'running' }}
         onSurfaceModeChange={() => {}}
       />,
     );
@@ -428,7 +429,7 @@ describe('[#2199] one indicator, not two', () => {
   it('still raises the terminal banner beside the bubble', () => {
     // A pager over a generating turn is still a state chat cannot drive, and the
     // bubble must not be the reason the way out disappears.
-    renderSurface({ live: { isRunning: true, isPagerActive: true } });
+    renderSurface({ live: { isRunning: true, sessionStatus: 'running', isPagerActive: true } });
     push(progressFrame());
 
     expect(liveTurn().textContent).toContain('The reply so far.');

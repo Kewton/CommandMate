@@ -604,6 +604,11 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
             history={historyPaneProps}
             live={{
               isRunning: terminal.isRunning,
+              // Issue #2238: the generating verdict the surface actually gates
+              // its in-flight bubble on. `isRunning` above stays because the
+              // surface still reports on the session; it is no longer mistaken
+              // for the turn.
+              sessionStatus: terminal.sessionStatus,
               isThinking: terminal.isThinking,
               isPromptWaiting: prompt.visible,
               promptData: prompt.data,
@@ -624,6 +629,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       cliToolId,
       resolvedInstanceId,
       terminal.isRunning,
+      terminal.sessionStatus,
       terminal.isThinking,
       terminal.isSelectionListActive,
       terminal.isPagerActive,

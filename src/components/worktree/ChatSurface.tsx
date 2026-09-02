@@ -151,8 +151,35 @@ const BLOCKED_REASON_KEY: Record<ChatSurfaceBlockedReason, string> = {
  * one.
  */
 export interface ChatSurfaceLiveState {
-  /** The session is generating. */
+  /**
+   * A tmux session exists for this pane and is healthy. **Not** "the session is
+   * generating" — that is {@link sessionStatus} (Issue #2238).
+   *
+   * This comment used to say "The session is generating", and that sentence is
+   * the whole of #2238: the surface believed it, gated the in-flight bubble on
+   * it, and so said "Responding…" for as long as a healthy session existed —
+   * forever, on an idle pane, across a full reload. The value comes from
+   * `hasSession() + isSessionHealthy()` and has never meant anything else; the
+   * terminal surface next to this one reads it correctly, as `isActive` /
+   * `disabled` / `isSessionRunning`.
+   *
+   * Kept on this type because {@link resolveBlockedReason}'s neighbours and the
+   * pane's own wiring still describe the session, and because deleting it would
+   * hide the distinction rather than record it.
+   */
   isRunning?: boolean;
+  /**
+   * The merged status verdict, or `undefined` when the caller has none yet
+   * (Issue #2238). `'running'` is this surface's ONLY generating signal.
+   *
+   * Same value, and the same `'idle' | 'ready' | 'running' | 'waiting'` domain,
+   * as `PaneTerminalState.sessionStatus`. It is deliberately the same field the
+   * server gates the progress publisher on
+   * (`current-output-builder.ts`: `payload.isRunning && payload.sessionStatus === 'running'`),
+   * so the subscription this surface opens is live exactly while frames are
+   * being produced for it.
+   */
+  sessionStatus?: string;
   /** The CLI is painting a thinking indicator (a narrower wording than isRunning). */
   isThinking?: boolean;
   /** A wait is on screen. See the note above: this is `prompt.visible`. */
@@ -374,14 +401,27 @@ export const ChatSurface = memo(function ChatSurface({
   // --------------------------------------------------------------------
   // The in-flight reply (Issue #2199)
   // --------------------------------------------------------------------
-  // Push-only, and gated on `live.isRunning` so a settled surface holds nothing:
-  // there is no `done` frame to clear it with, and the two things that DO end a
-  // turn — the settled row and the session stopping — are both visible here.
+  // Push-only, and gated on the generating verdict so a settled surface holds
+  // nothing: there is no `done` frame to clear it with, and the two things that
+  // DO end a turn — the settled row and the turn finishing — are both visible
+  // here.
+  //
+  // Issue #2238 moved this gate off `live.isRunning`. `isRunning` is
+  // "a healthy tmux session exists", so the subscription was open on every idle
+  // pane forever; worse, the same flag gated the bubble below, which is why an
+  // idle pane said "Responding…" indefinitely. `'running'` is the verdict the
+  // server itself gates `publishChatTurnProgress` on, so this is now open
+  // exactly while frames are being produced for it.
+  //
+  // `live.isRunning` is deliberately NOT ANDed in. It would be redundant — a
+  // stopped session publishes `sessionStatus: 'idle'` — and re-admitting it to
+  // the generating decision is the exact confusion this Issue exists to remove.
+  const isGenerating = live.sessionStatus === 'running';
   const pushedProgress = useChatTurnProgress({
     worktreeId,
     cliToolId,
     instanceId,
-    enabled: live.isRunning === true,
+    enabled: isGenerating,
   });
   // The swap. Held until the row for this exact turn is in the transcript, which
   // is what keeps the reply from vanishing for the poll it takes the row to
@@ -419,8 +459,12 @@ export const ChatSurface = memo(function ChatSurface({
         isThinking: live.isThinking === true,
       };
     }
-    return live.isRunning === true ? { isThinking: live.isThinking === true } : null;
-  }, [progress, live.isRunning, live.isThinking]);
+    // Issue #2238: the generating verdict, not the session-exists flag. This is
+    // the branch the bug was reported against — no tool publishes progress on
+    // an idle pane, so the surface fell through to here and drew the bare
+    // "Responding…" bubble on top of a finished conversation.
+    return isGenerating ? { isThinking: live.isThinking === true } : null;
+  }, [progress, isGenerating, live.isThinking]);
 
   const isLiveTurn = liveTurn !== null;
 

@@ -141,6 +141,10 @@ const UNREADABLE_PROMPT: StructuredPromptWaitingData = {
 
 const IDLE: ChatSurfaceLiveState = {
   isRunning: false,
+  // Issue #2238: the generating verdict is its own field now. A session that
+  // exists but is not generating is `isRunning: true, sessionStatus: 'running'` with `'ready'` here, and
+  // that pair — not this one — is the state the bug was reported in.
+  sessionStatus: 'ready',
   isThinking: false,
   isPromptWaiting: false,
   promptData: null,
@@ -337,17 +341,17 @@ describe('[#2194] ChatSurface generating indicator', () => {
     // of its own inside the last card; `ChatTranscript` draws none, so suppressing
     // it here would leave "you sent a message and it is being answered" with no
     // indicator anywhere on the surface.
-    renderSurface({ isRunning: true }, [msg('a1', 'assistant'), msg('u1', 'user', 1000)]);
+    renderSurface({ isRunning: true, sessionStatus: 'running' }, [msg('a1', 'assistant'), msg('u1', 'user', 1000)]);
     expect(screen.getByTestId('chat-transcript-live-turn')).toBeInTheDocument();
   });
 
   it('publishes it when the newest message is already an assistant reply', () => {
-    renderSurface({ isRunning: true }, [msg('u1', 'user'), msg('a1', 'assistant', 1000)]);
+    renderSurface({ isRunning: true, sessionStatus: 'running' }, [msg('u1', 'user'), msg('a1', 'assistant', 1000)]);
     expect(screen.getByTestId('chat-transcript-live-turn')).toBeInTheDocument();
   });
 
   it('publishes it for a running session with no history yet', () => {
-    renderSurface({ isRunning: true }, []);
+    renderSurface({ isRunning: true, sessionStatus: 'running' }, []);
     expect(screen.getByTestId('chat-transcript-live-turn')).toBeInTheDocument();
   });
 
@@ -358,14 +362,14 @@ describe('[#2194] ChatSurface generating indicator', () => {
 
   it('forwards the thinking wording the CLI reports', () => {
     const history = [msg('u1', 'user'), msg('a1', 'assistant', 1000)];
-    const { unmount } = renderSurface({ isRunning: true, isThinking: false }, history);
+    const { unmount } = renderSurface({ isRunning: true, sessionStatus: 'running', isThinking: false }, history);
     expect(screen.getByTestId('chat-transcript-live-turn')).toHaveAttribute(
       'data-thinking',
       'false',
     );
     unmount();
 
-    renderSurface({ isRunning: true, isThinking: true }, history);
+    renderSurface({ isRunning: true, sessionStatus: 'running', isThinking: true }, history);
     expect(screen.getByTestId('chat-transcript-live-turn')).toHaveAttribute(
       'data-thinking',
       'true',
@@ -401,7 +405,7 @@ describe('[#2194] ChatSurface empty state', () => {
     // from the transcript on a screen that has ~33px to spare. The turn is a
     // bubble in the transcript now, so the strip stays down unless there is a
     // banner to raise.
-    renderSurface({ isRunning: true }, [msg('u1', 'user')]);
+    renderSurface({ isRunning: true, sessionStatus: 'running' }, [msg('u1', 'user')]);
     expect(screen.queryByTestId('chat-surface-live')).not.toBeInTheDocument();
     expect(screen.getByTestId('chat-transcript-live-turn')).toBeInTheDocument();
   });
@@ -438,7 +442,7 @@ describe('[#2194] ChatSurface optimistic rows', () => {
     // the indicator, so a second one here was noise. `ChatTranscript` draws no
     // pending indicator (Issue #2232), so this is the only thing telling the
     // reader their message is being answered.
-    renderSurface({ isRunning: true }, [msg('pending-0', 'user', 5000)]);
+    renderSurface({ isRunning: true, sessionStatus: 'running' }, [msg('pending-0', 'user', 5000)]);
     expect(screen.getByTestId('chat-transcript-live-turn')).toBeInTheDocument();
   });
 });
@@ -577,7 +581,7 @@ describe('[#2194] ChatSurface structure', () => {
     // What is left of #2194's live region after Issue #2233: the banner alone.
     // It must stay a sibling — a banner inside the virtual list would be
     // unmounted by scrolling, and it is the only way out of a stuck frame.
-    renderSurface({ isRunning: true, isPagerActive: true }, [
+    renderSurface({ isRunning: true, sessionStatus: 'running', isPagerActive: true }, [
       msg('u1', 'user'),
       msg('a1', 'assistant', 1000),
     ]);
@@ -591,7 +595,7 @@ describe('[#2194] ChatSurface structure', () => {
     // Issue #2233's core move. A "responding" element owned by this component is
     // in a different place on the screen from the settled row that replaces it,
     // which is the jump the Issue exists to remove.
-    renderSurface({ isRunning: true }, [msg('u1', 'user'), msg('a1', 'assistant', 1000)]);
+    renderSurface({ isRunning: true, sessionStatus: 'running' }, [msg('u1', 'user'), msg('a1', 'assistant', 1000)]);
     const live = screen.getByTestId('chat-transcript-live-turn');
     expect(screen.getByTestId('chat-transcript').contains(live)).toBe(true);
     expect(screen.queryByTestId('chat-surface-live')).not.toBeInTheDocument();
@@ -605,7 +609,7 @@ describe('[#2194] ChatSurface structure', () => {
   it('writes no raw palette colour into the shared surface', () => {
     // The transcript follows the theme (the terminal is the dark island, not
     // this). A light-on-dark literal here would be invisible in one of the two.
-    renderSurface({ isSelectionListActive: true, isRunning: true }, []);
+    renderSurface({ isSelectionListActive: true, isRunning: true, sessionStatus: 'running' }, []);
     const html = screen.getByTestId('chat-surface').outerHTML;
     expect(html).not.toMatch(/(bg|text|border|ring)-(gray|slate|zinc|neutral|stone|red|green|yellow|amber|orange|purple|violet|sky|blue)-[0-9]/);
   });
