@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **fix(polling): claude の起動バナー除外が 2000 字未満の返答を飲み込み、ターンが保存されなくなる問題を修正** (#2247): `extractResponse` の Claude 起動バナー除外（`787f7401` 以来）は、抽出結果が 2000 字未満で 4 つの anchor のいずれかに一致すると無条件に「未完了」を返していたが、その anchor のうち 2 つは返答も同じくらい普通に含む形だった（`hasVersionInfo` の素の `v\d+\.\d+` は返答が挙げるあらゆるバージョン文字列に、`hasBannerArt` の `│` は Claude Code が markdown 表を描く罫線に一致する）。実際に 2026-09-02 の実機で「GitHub Release v0.30.0 を公開しました …」（148 字）の完了済みターンが 2 秒ごとのポーリングで 11 分間ずっと `isComplete: false` と判定され続け、しかもこの分岐は何もログを出さないため `response-poller` は無音のまま、そのターンは保存されずに失われた。#1897 が copilot に与えたのと同じ形へ揃え、anchor は「そのペインにまだ 1 ターンも無い」ときだけ証拠として読むようにした（Claude は全プロンプトを `❯ <text>` として転写にエコーし、起動画面にはそれが 1 つも無い。判定には抽出と同じ `findRecentUserPromptIndex` を使う — footer の composer が描く dim なゴースト候補は stripAnsi 後に実エコーと同形なので、`contentEnd` で切る境界が不可欠である、#1879）。あわせて anchor 自体もバナー固有へ絞り、除外したときは info ログを 1 回出して無音を解消した。回帰防止に Claude Code v2.1.258 の実ペイン 5 フレーム（200x1000、ANSI 付き生キャプチャ）を `tests/fixtures/claude-live-2247` に追加した
+
 ## [0.30.0] - 2026-09-02
 
 > **Highlight**: セッション画面に**ターミナルと切り替えられるチャット出力面**を新設した（Epic #2192、子 Issue 12 件）。当初は履歴ペインを流用する設計だったが、実機で「History と同じでチャットに見えない」ことが判明したため決定を撤回し、専用のフラットな吹き出し列（`ChatTranscript`）へ差し替えている。従来は 100 文字クランプにより assistant 本文（中央値 2,478 文字）の約 4% しか読めていなかったものが全文表示になり、生成中の返答も末尾の吹き出しの中でその場に伸びるようになった。あわせて WebSocket push が届かない・履歴が二重化するといった realtime 層の不具合を複数修正している。
