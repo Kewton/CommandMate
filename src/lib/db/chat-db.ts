@@ -23,6 +23,25 @@ export interface GetMessagesOptions {
   cliToolId?: CLIToolType;
   /** Issue #868: scope to a single agent instance (overrides cliToolId filtering when set). */
   instanceId?: string;
+  /**
+   * Issue #2219: match {@link instanceId} against the instance a row *reads as*
+   * rather than against the raw column.
+   *
+   * Off by default, so no existing caller changes behaviour. On, the filter
+   * becomes `COALESCE(instance_id, cli_tool_id, 'claude') = ?` — the same
+   * expression {@link findUnkeyedUserMessages} uses (#2196) and the same
+   * default `mapChatMessage` applies when it reads a row back. Rows written
+   * before #868 carry `instance_id IS NULL` and are the primary instance's; a
+   * bare `instance_id = ?` makes them invisible while the UI still shows them.
+   *
+   * The `cliToolId` filter is *also* applied when both are given (again as
+   * #2196 does), because a resolved instance id is only unique inside its
+   * tool — `instanceId` alone would let a row belonging to another tool match.
+   *
+   * The caller must pass an already-resolved id (`instanceId ?? cliToolId`):
+   * this option changes how the column is read, not what "omitted" means.
+   */
+  matchResolvedInstance?: boolean;
   includeArchived?: boolean;
   /**
    * Issue #1685: restrict results to a single message_type. Used with 'prompt'
@@ -213,7 +232,7 @@ export function getMessages(
   worktreeId: string,
   options: GetMessagesOptions = {}
 ): ChatMessage[] {
-  const { before, limit = 50, cliToolId, instanceId, includeArchived = false, messageType, limitUnit = 'messages' } = options;
+  const { before, limit = 50, cliToolId, instanceId, includeArchived = false, messageType, limitUnit = 'messages', matchResolvedInstance = false } = options;
 
   // Build the shared scope clause (worktree + before cursor + archived + instance/cli
   // filter) and its bound params. Used for both the message-unit and pair-unit paths
@@ -229,7 +248,18 @@ export function getMessages(
     }
 
     // Issue #868: instance filter takes precedence; otherwise fall back to CLI tool filter.
-    if (instanceId) {
+    // Issue #2219: `matchResolvedInstance` reads both columns through the same
+    // COALESCE defaults `mapChatMessage` applies, so pre-#868 rows
+    // (`instance_id IS NULL`) count as the primary instance instead of
+    // vanishing. See the option's doc comment for why the tool filter joins in.
+    if (instanceId && matchResolvedInstance) {
+      if (cliToolId) {
+        clause += ` AND COALESCE(cli_tool_id, 'claude') = ?`;
+        params.push(cliToolId);
+      }
+      clause += ` AND COALESCE(instance_id, cli_tool_id, 'claude') = ?`;
+      params.push(instanceId);
+    } else if (instanceId) {
       clause += ` AND instance_id = ?`;
       params.push(instanceId);
     } else if (cliToolId) {

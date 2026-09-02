@@ -15,6 +15,11 @@
  * fallback that runs at {@link WS_CONNECTED_SPLIT_MESSAGES_POLL_INTERVAL_MS}
  * while a live socket is up, and at the original cadence when it is not.
  *
+ * Issue #2219: an upsert cannot express a **removal**, and one producer removes
+ * rows — `sendUserMessage` deletes the previous identical user row when a send
+ * is retried (#379). `messages_invalidated` is that missing signal: it names a
+ * scope, not a row, and this hook answers it by re-reading its history.
+ *
  * Mirrors `useTerminalPanePolling` (Issue #728 / #1120):
  *  - request-id + in-flight CLI stale-guard (drop out-of-order / wrong-CLI responses)
  *  - polling pauses when document.visibilityState === 'hidden'
@@ -36,9 +41,11 @@ import type { ChatMessage } from '@/types/models';
 import { useRealtime } from '@/hooks/useRealtimeConnection';
 import type {
   MessageBroadcastEvent,
+  MessagesInvalidatedEvent,
   RealtimeEvent,
   SessionStatusEvent,
 } from '@/lib/realtime/types';
+import { MESSAGES_INVALIDATED_EVENT_TYPE } from '@/lib/realtime/types';
 
 /** Polling cadence for per-split message history (ms). */
 export const SPLIT_MESSAGES_POLL_INTERVAL_MS = 5000;
@@ -337,6 +344,13 @@ export function useSplitMessages({
   // instanceId) all match, so a second instance of the same tool — the whole
   // point of #869/#1000 — cannot bleed its turns into this pane.
   //
+  // Issue #2219: `messages_invalidated` re-fetches instead, under the same
+  // three-way scope match. It is the one frame that cannot carry its own
+  // answer — a deleted row has nothing to upsert — so the settled state has to
+  // come from the server. The re-fetch also bumps `requestIdRef`, which retires
+  // any poll that left before the delete and would otherwise resolve with the
+  // removed row still in its body.
+  //
   // Nothing here is gated on `document.visibilityState`: applying a frame is a
   // state update, not work, and while the tab is hidden the socket is the only
   // thing still running (the poll above is paused, and `useWebSocket.ts:182`
@@ -373,6 +387,24 @@ export function useSplitMessages({
         };
         inFlightPushesRef.current.set(normalized.id, normalized);
         setMessages((prev) => upsertMessage(prev, normalized, limitRef.current));
+        return;
+      }
+
+      if (event.type === MESSAGES_INVALIDATED_EVENT_TYPE) {
+        const evt = event as Partial<MessagesInvalidatedEvent>;
+        if (evt.worktreeId !== worktreeId) return;
+        // Normalized exactly as the row path above normalizes a pushed
+        // `ChatMessage`, so a producer that resolved its scope and one that
+        // left the primary instance implicit address the same pane.
+        const eventCliToolId = evt.cliToolId ?? DEFAULT_PUSHED_CLI_TOOL_ID;
+        const eventInstanceId = evt.instanceId ?? eventCliToolId;
+        if (eventCliToolId !== inFlightCliToolRef.current) return;
+        if (eventInstanceId !== inFlightInstanceRef.current) return;
+        // Deliberately not gated on `document.visibilityState`: this fires only
+        // when a re-send actually removed a row, and a hidden tab that skipped
+        // it would keep the duplicate on screen until its own visibility
+        // re-fetch — which is the delay this Issue exists to remove.
+        void fetchMessages();
         return;
       }
 

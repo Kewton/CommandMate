@@ -244,6 +244,51 @@ export interface ChatTurnProgressEvent {
   done: false;
 }
 
+/**
+ * "This instance's history changed in a way no row-level frame can express —
+ * re-read it" (Issue #2219).
+ *
+ * The one mutation that has no row to publish is a **delete**:
+ * `sendUserMessage` removes the previous, identical user row after the retry is
+ * persisted (#379's duplicate guard), and `message` / `message_updated` can only
+ * ever say "this row now looks like this". A second device therefore kept the
+ * deleted row until its own poll came round — 15s while a socket is up, since
+ * #2195 demoted that poll to a fallback — showing the same sentence twice.
+ *
+ * It carries a **scope, not a payload**, and that is the whole design:
+ *
+ *  - the receiver re-fetches, so it lands on the DB's settled state rather than
+ *    on a diff it has to merge — a `message` frame that was dropped on the way
+ *    is repaired by the same round trip;
+ *  - the re-fetch bumps `useSplitMessages`' request id, which retires any fetch
+ *    that started *before* the delete and would otherwise resolve with the row
+ *    still in it;
+ *  - no tombstone has to be kept anywhere, and `archived` — which means "a
+ *    previous session's history" — keeps meaning only that.
+ *
+ * The cost is one extra GET per orphan cleanup, on an event that fires only when
+ * someone re-sends the exact text of their last unanswered message.
+ *
+ * {@link instanceId} is always resolved (`instanceId ?? cliToolId`), like
+ * {@link TerminalSnapshotEvent}'s: a client matches it against its own pane and
+ * an omitted field would simply never match.
+ */
+export const MESSAGES_INVALIDATED_EVENT_TYPE = 'messages_invalidated' as const;
+
+/** Why a {@link MessagesInvalidatedEvent} was emitted. Diagnostics only — a
+ * receiver re-fetches regardless, and must not branch on this. */
+export type MessagesInvalidatedReason = 'orphan_cleanup';
+
+/** See {@link MESSAGES_INVALIDATED_EVENT_TYPE}. */
+export interface MessagesInvalidatedEvent {
+  type: typeof MESSAGES_INVALIDATED_EVENT_TYPE;
+  worktreeId: string;
+  cliToolId: CLIToolType;
+  /** Always resolved (`instanceId ?? cliToolId`). */
+  instanceId: string;
+  reason: MessagesInvalidatedReason;
+}
+
 export interface RepositoryDeletedEvent {
   type: 'repository_deleted';
   worktreeId?: string;
@@ -266,6 +311,7 @@ export interface VersionMismatchEvent {
 export type RealtimeEvent =
   | SessionStatusEvent
   | MessageBroadcastEvent
+  | MessagesInvalidatedEvent
   | TerminalSnapshotEvent
   | ChatTurnProgressEvent
   | RepositoryDeletedEvent
