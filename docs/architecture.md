@@ -166,9 +166,24 @@ graph TD
 ```
 
 - **出力面**は split（PC）／タブ（スマホ）ごとに `terminal` / `chat` を切り替えられる
-  （Issue #2193）。`chat` は `ChatSurface` → `HistoryPane` → `ConversationPairCard`、
-  `terminal` は `TerminalDisplay`。**入力面は両モード共通**で、待機中は同じ `PromptPanel` が
+  （Issue #2193）。`chat` は `ChatSurface` → `ChatTranscript` → `ChatMessageBubble`
+  （生成中の本文は列末尾の `ChatLiveTurnBubble`、Issue #2233）、`terminal` は
+  `TerminalDisplay`。**入力面は両モード共通**で、待機中は同じ `PromptPanel` が
   出る（Issue #2194 が出力面に応答 UI を置いていないのはこのため）
+- **「チャット面の本体は `HistoryPane` をそのまま使う」という Epic #2192 の決定 1 は
+  Issue #2232 で撤回された**。履歴ブラウザは 1 画面に多くのターンを俯瞰させたい、会話面は
+  返信そのものを読ませたい、と必要な情報密度が正反対で 1 実装では両立しないため
+  （`ConversationPairCard` の `COLLAPSED_MAX_CHARS = 100` により、本リポジトリの直近 26 件の
+  assistant 行のうち 25 件が本文の約 4% しか出ていなかった）。以後チャット面は専用実装で、
+  `HistoryPane` / `ConversationPairCard` を経由しない
+- **その二重実装の代償として次の規律が課される**: `HistoryPane` / `ConversationPairCard` /
+  `lib/history-virtualization` は変更しない（History カラムとスマホの History タブの描画を
+  変えないため）。Markdown は History / `/chat` と共有の `.assistant-md` ではなくチャット専用の
+  `.chat-md` で名前空間を分ける。仮想化定数と検索ハイライト namespace も同じ理由で
+  `src/lib/chat/{chat-transcript-view,chat-search-namespace}.ts` にチャット専用のものを持つ
+- **チャット面の「生成中」判定は `sessionStatus === 'running'` のみ**（Issue #2238）。
+  `isRunning` は「健全な tmux セッションが在るか」であって生成中ではなく、これを生成中と
+  読んだためにアイドルのペインが「応答中…」を出し続けていた
 - **完了シグナルは 2 系統**: エージェントの hooks（`/api/hooks/agent-event` ほか、構造化）と、
   tmux ペインのポーリング（`lib/polling`、スクレイピング）。前者があればそちらが優先される
   （`src/lib/session/agent-event-state.ts`）
