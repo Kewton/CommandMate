@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.30.1] - 2026-09-03
+
+> **Highlight**: v0.30.0 で新設したチャット出力面を、実機で見つかった 4 件の欠陥について修正した。**返答でない行が Assistant の吹き出しとして全文描画される**問題（実測で直近 50 行のうち antigravity 41 行 / codex 43 行）をツール承認チップへ畳み、**ターンが履歴から永久に失われる**経路を 2 つ（転写リーダーが最新 1 件しか書かない・起動バナー除外が 2000 字未満の返答を飲み込む）塞ぎ、確定行が届かないターンでも生成中の本文が消えないようにした。
+
 ### Added
 
 - **feat(ui): 生成中バブルを確定行が届くまで保持し、progress 送出を観測可能にする** (#2248): 生成中の本文を流す仕組み（#2199）は、`sessionStatus` が `running` でなくなった瞬間に `useChatTurnProgress` が本文を捨てる設計で、「running でなくなる」と「確定行が届く」の間に本文の置き場が無かった。確定行が書かれないターン（#2246 の Stop 起点書き込み、#2247 の取りこぼし、hooks 無しの環境）ではその間隔が無限大になり、一度画面に出て読者が読んでいた文章が二度と見えなくなっていたため、最後の frame を**確定待ち**として保持するようにした（`ChatTurnProgressView.settling`）。保持中はスピナーも `chatSurface.generating` も出さず（#2238 の「Responding… が消えない」を再発させないため、保持は「生成中」ではなく「確定待ち」で `isGenerating` の値には触らない）、本文の class と位置は生成中とまったく同じまま（#2233 の規律）「まだ履歴に確定していません」の 1 行だけを差し替える。解除は (a) 同じ `turnKey` の確定行が届く、(b) 同じインスタンスで新しいターンが始まる（`sessionStatus` が再び running／transcript に新しい行が積まれる）、(c) 猶予 10 分の経過、のいずれか早いもの。保持はインスタンス単位で、split の切替や別インスタンスへの再指定では表示しない。WS 切断の扱いは live と held で分けた: live な本文は従来どおり切断で消す（#2199 の規則 2 は「live を騙る古い段落」を防ぐためのもの）が、held な本文は「まだ確定していない」と自ら宣言しているうえ、replay の無い push で切断こそ最後の 1 部が失われる瞬間なので保持し続ける。あわせて送出を観測可能にした: 全て `logger.debug` だった送出結果を `chat-turn-progress-published`（`turnKey` / `version` / 本文長）・`chat-turn-progress-no-subscribers`・`chat-turn-progress-failed` として `logger.info` に上げ、`(outcome, turnKey)` を同一性にターンごと 1 行へ畳んだ（poller の毎 tick が 1 行になると info が使い物にならなくなる）。クライアント側は保持状態を `data-settling="true"` で公開する。`publishChatTurnProgress()` は「安い前半（worktree 行と `hasRoomSubscribers`）を caller が await し、高い後半（4 MiB の transcript 読みと broadcast）は従来どおり detach」に分割した。`void` が守っていたのは後半のコストであって、送出結果のログはそれを生んだ tick の隣に残らなければ読み返せないため
