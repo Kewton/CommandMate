@@ -558,10 +558,37 @@ export function extractResponse(
     if (cliToolId === 'claude') {
       const cleanResponse = stripAnsi(response);
 
-      const hasBannerArt = /[╭╮╰╯│]/.test(cleanResponse) || /░{3,}/.test(cleanResponse) || /▓{3,}/.test(cleanResponse);
-      const hasVersionInfo = /Claude Code|claude\/|v\d+\.\d+/.test(cleanResponse);
+      // Issue #2247: `│` is what Claude Code draws markdown TABLES with -- the
+      // live frame in `tests/fixtures/claude-live-2247/turn-table.txt` is a
+      // two-row table and nothing else -- so it identified a reply, not a banner.
+      // The banner's own frame glyphs are the rounded corners and the block
+      // shading; those stay.
+      const hasBannerArt = /[╭╮╰╯]/.test(cleanResponse) || /░{3,}/.test(cleanResponse) || /▓{3,}/.test(cleanResponse);
+      // Issue #2247: the bare `v\d+\.\d+` alternative matched any version string a
+      // reply happens to mention. The frame that lost a turn on 2026-09-02 was
+      // "GitHub Release v0.30.0 を公開しました" (148 chars, well under the 2000
+      // below). What the banner actually prints is the tool's own name and
+      // version on one row -- `Claude Code v2.1.258` -- so that is what is
+      // matched now, plus the `claude/` form older banners used.
+      const hasVersionInfo = /Claude Code v\d+\.\d+|claude\//.test(cleanResponse);
       const hasStartupTips = /Tip:|for shortcuts|\?\s*for help/.test(cleanResponse);
       const hasProjectInit = /^\s*\/Users\/.*$/m.test(cleanResponse) && cleanResponse.split('\n').length < 30;
+
+      // Issue #2247: the anchors above are only evidence of a banner on a pane
+      // that has not had a single turn yet -- the same shape as the #1897 copilot
+      // fix below. Claude echoes every prompt into the transcript as `❯ <text>`,
+      // and the startup screen has none, so an echo anywhere in the transcript
+      // rules the banner out no matter what the reply quotes.
+      //
+      // The search is `findRecentUserPromptIndex`, deliberately: it is the same
+      // `/^[>❯]\s+\S/` this file already anchors extraction on, and it stops at
+      // `contentEnd`. That bound is load-bearing rather than incidental -- the
+      // footer's composer draws a DIM ghost suggestion (`❯ Try "write a test for
+      // <filepath>"`, see `boot-banner.txt`) whose stripped bytes are identical
+      // to a real echo (#1879), so a scan over the whole pane would read the
+      // startup screen as "already had a turn" and put the banner back in
+      // History.
+      const hasTurnEcho = findRecentUserPromptIndex(totalLines) >= 0;
 
       const userPromptMatch = cleanResponse.match(/^[>❯]\s+(\S.*)$/m);
 
@@ -579,7 +606,23 @@ export function extractResponse(
         if (contentLines.length === 0) {
           return incompleteResult(totalLines);
         }
-      } else if ((hasBannerArt || hasVersionInfo || hasStartupTips || hasProjectInit) && response.length < 2000) {
+      } else if (
+        !hasTurnEcho &&
+        (hasBannerArt || hasVersionInfo || hasStartupTips || hasProjectInit) &&
+        response.length < 2000
+      ) {
+        // Issue #2247: this branch used to swallow the turn in silence -- the
+        // poller kept ticking every 2s and `response-poller` logged nothing at
+        // all, so the only way to tell a lost turn from an idle session was to
+        // re-run `extractResponse` on a saved pane by hand. It is reached only
+        // before the first echo lands, so it cannot become a per-tick flood.
+        logger.info('Claude startup banner suppressed, response not saved', {
+          responseLength: response.length,
+          hasBannerArt,
+          hasVersionInfo,
+          hasStartupTips,
+          hasProjectInit,
+        });
         return incompleteResult(totalLines);
       }
     }
