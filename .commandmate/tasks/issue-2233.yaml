@@ -1,0 +1,167 @@
+version: 1
+title: "Issue #2233: 生成中の本文を末尾の吹き出しでその場に流す（フッタ帯の廃止）【案B】"
+goal: |
+  /pm-auto-issue2dev 2233
+
+  https://github.com/Kewton/CommandMate/issues/2233 を TDD で実装してください。
+  **Issue 本文も `gh issue view 2233` で必ず読んでください。**
+  **Issue のレビューと本文の書き戻しは不要です**（本文は orchestrator が管理）。
+
+  ## ⚠️ Issue 本文の行番号は #2232 着地前のもの（実測で置き換え済み）
+
+  Issue は #2232（PR #2236、develop `4e090b1d`）の**マージ前**に書かれています。本文の
+  `ChatSurface.tsx:489-526` / `:388-391` / `:379-384` は**すべてずれています**。
+  orchestrator が develop `4e090b1d` で実測した現在値:
+
+  - フッタ帯（live 領域）= `ChatSurface.tsx:479-530` の `shrink-0` 兄弟（`:489` が外枠 className）
+  - `isTurnSettled()` = `ChatSurface.tsx:251`
+  - progress 取得と `live.isRunning` ゲート = `ChatSurface.tsx:381-394`
+  - 「応答中…」のみを出す分岐 = `showGeneratingRow`（`ChatSurface.tsx:435`）
+  - 進行中本文の実際の className = `ChatSurface.tsx:523`
+
+  行番号は着手時にもう一度自分で確認してください（本文より実測を正とする）。
+
+  ## 【最重要】#2232 が作った見た目の差（Issue 本文に書かれていない実測事実）
+
+  「確定時に位置が飛ばない・同じ見た目」が本 Issue の核ですが、**現状の live 本文と確定バブルは
+  別物のスタイル**です。orchestrator の実測:
+
+  | | 進行中（`ChatSurface.tsx:523`） | 確定（`ChatMessageBubble.tsx:214,231`） |
+  |---|---|---|
+  | Markdown 名前空間 | `assistant-md` | **`chat-md`** |
+  | 文字サイズ | `text-xs` | **`text-sm`** |
+  | 角丸・枠 | `rounded-lg border bg-surface-2/50` | **`rounded-2xl ... rounded-bl-md bg-surface-2`** |
+  | 幅 | 帯いっぱい | **`CHAT_BUBBLE_MAX_WIDTH_ASSISTANT`（`max-w-[92%]`）** |
+  | 高さ | `max-h-[7.5rem]` の自前スクロール | クランプ無し（全文） |
+
+  **フッタのマークアップを移動するだけでは受入基準を満たしません。** 確定バブルと同じ提示を
+  使ってください。`ChatMessageBubble.tsx` は `CHAT_BUBBLE_MAX_WIDTH_ASSISTANT` /
+  `CHAT_BUBBLE_ALIGN_ASSISTANT` を export しているので再利用できます。
+  コンポーネント自体を再利用するか提示部分を切り出すかは実測で決めてよいですが、
+  **2 箇所に同じ見た目を別々に書かない**でください（片方だけ変わって静かに乖離します）。
+
+  あわせて `assistant-md` → `chat-md` への移行で、チャット面に残っていた最後の
+  `.assistant-md` 依存（History 列と `/chat` の `AssistantMessageList` が共有するクラス）が
+  消えます。#2232 の名前空間分離の意図どおりです。
+
+  ## 【orchestrator の裁定】「上へスクロールしても見え続ける」の解釈
+
+  Issue には 2 つの要求が併記されていますが、**1 つの要素では両立しません**:
+  (a) 確定時にジャンプしない → 進行中バブルはスクロールコンテンツの**末尾**に無ければならない
+  (b) 上へスクロールしても見え続ける → 画面に固定された要素でなければならない
+
+  裁定: **(a) を優先**します。理由は #2194 がフッタを選んだ本当の根拠が
+  「仮想リストは可視範囲外の行を **unmount する**」＝ DOM から消えることであって、
+  「スクロールで画面外に出ること」ではないからです。自動受入基準も
+  「仮想リストの外にあり、上へスクロールしても **unmount されない**」と書かれています。
+
+  したがって:
+  - 進行中バブルは**スクロールコンテナの内側・仮想化の外**（`virtualItems` の map に入れない）に置く
+  - 上へスクロール中に画面外へ出るのは**許容**。ただし生成中であることは
+    **既存の jump-to-latest チップ側に出して**（例: チップに生成中インジケータを添える）
+    「最も知りたい場面で手掛かりが消える」状態にはしないこと
+  - これが劣ると実測で判断したら**逸脱してよい**が、その場合は理由と実測をコミットメッセージに書くこと
+
+  ## 実装内容（Issue 本文より）
+
+  - `ChatTranscript` に「末尾の進行中バブル」を持たせる。現状 `ChatTranscriptProps`
+    （`ChatTranscript.tsx:93`）に live 用の口は無いので追加が要る。仮想リストの外に置き、
+    見た目だけ最後の assistant バブルと連続して見えるようにする
+  - 本文は `useChatTurnProgress` の `ChatTurnProgressView` をそのまま流す。
+    `partial`（末尾窓に収まらなかった）バッジは維持する
+  - 確定時（`isTurnSettled`）に進行中バブルを消し、リストの最終行に置き換える。**行が二重にならない**
+  - 古い `version` の progress を無視する（#2199 の規律を維持）
+  - `live.isRunning` だが progress 本文がまだ無いツール（codex / antigravity / vibe-local）では、
+    従来どおり「応答中…」のインジケータのみを**同じ位置**に出す（現 `showGeneratingRow` 相当）
+
+  ## スコープ外
+
+  progress の永続化・再接続時の replay（#2199 のスコープ外のまま）／ツール呼び出しログの分離（#2234 で着地済み）
+
+  ## 受入基準（自動検証可能）
+
+  - 進行中バブルが**仮想リストの外**にあり、上へスクロールしても unmount されない
+    （#2194 の理由が守られている回帰ガード）
+  - 確定時に進行中バブルが消え、同 `turnKey`（= `requestId`）の確定行に置き換わる。行が二重にならない
+  - 古い `version` の progress を無視する
+  - progress を持たないツールでは「応答中…」のみが同じ位置に出る
+  - **確定前後で本文の提示（Markdown 名前空間・文字サイズ・最大幅）が一致する**（上表の差が消えたこと）
+  - **変異注入**: 進行中バブルを仮想リストの行として置くと、スクロール時の unmount テストが赤になる
+    ことを**実際に確認**する（修正後の緑は「効いた」と「空振り」の両方と整合します）
+  - `npm run lint` / `npx tsc --noEmit` / `npm run test:unit` / `npm run build` が exit 0
+    （`cmd > log; echo $?` で実測。**grep に pipe しない**。pipe すると偽 PASS になります）
+
+  ## 既知の罠
+
+  - **`#1123` のゼロ計測フォールバック**（`CHAT_FALLBACK_RENDER_COUNT`、`ChatTranscript.tsx:374`）:
+    jsdom では `virtualItems.length === 0` になり素の flow へ落ちる。進行中バブルが
+    このフォールバック経路でも描かれることをテストで確かめること
+  - `min-h-0` / `overflow` の取り違えで高さ潰れが再発する。スマホで進行中バブルが composer と
+    重ならないこと（#2106 の縦予算: 360x640 でターミナル 284px、下限 250px）
+  - **常時ダーク島を新設しない**（`docs/design-system.md`）。ダークにしてよいのは
+    コードブロック（`.chat-md pre`）のみ。**両テーマで検証**すること
+  - `useTerminalPanePolling` は 1 ペイン 1 インスタンスで両面に配給されている。
+    **ポーリング間隔・購読条件を変えない**（読み取りのみ）
+  - i18n の新規文字列は `locales/en/worktree.json` と `locales/ja/worktree.json` の**両方**に入れる
+  - `git log` はファイルの履歴であって行の由来ではない。既存行の出所は `git blame`
+
+  ## 作業ルール（厳守）
+
+  - **PR を作らない**（PR は orchestrator が作ります）。**GitHub Issue を編集しない**。
+    コミットは可能な限り **1 本**。`dev-reports/` と `workspace/` は .gitignore 済み。
+  - **`HistoryPane.tsx` / `ConversationPairCard.tsx` / `lib/history-virtualization.ts` は
+    scope.deny**（#2232 が置いた規律を維持）。1 バイトも変更できません。
+  - **`CHANGELOG.md` と `docs/module-reference.md` を編集しない**（scope.deny）。代わりに断片を書く:
+
+    - `dev-reports/changelog/issue-2233.md` — `## [Unreleased]` にそのまま貼れる **1 エントリ**。
+      1 行目にどの節（`### Added` / `### Changed` / `### Fixed`）かをコメントで書く。
+      **形式は次の実例に合わせること**（develop の `CHANGELOG.md` の実エントリ 1 本。
+      **ファイル中では 1 行**で、下で折り返して見えるのは表示上の都合です）:
+
+          <!-- ### Added -->
+          - **feat(polling): プロンプト dedup のスキップを `capture --json` に露出する** (#1695): 重複抑止で落としたプロンプトの累積回数と最終スキップ時刻を `promptDedup`（`skippedCount` / `lastSkippedAt`）として公開し、「プロンプトが出たはずなのに保存されていない」ときに dedup が原因か検出漏れ（#1676）かを CLI から判別できるようにした。あわせて response 側 dedup（`isDuplicateResponse`、#1268）に `duplicate-response-skipped` ログを追加（従来ログすら無かった）
+
+      - `- **` で始める（集計は `grep -cE '^- \*\*'`）／`(#2233)` は要約の**外**（`**` を閉じた後）
+      - `<type>` は CLAUDE.md のコミット規約と同じ語彙／**1 エントリ = 1 行**（改行を入れない）
+
+    - `dev-reports/module-reference/issue-2233.md` — 行キー（`| \`path\` |`）ごとに列挙。
+      **既存行に足すときは `grep -n '^| \`<path>\`' docs/module-reference.md` を実行し、
+      その出力（行番号つきの行キー）を断片に書き写してから**書くこと。
+      0 件だった行への追記を指示しない（新規なら「新規行」と明記）。実例:
+
+          ## 既存行への追記
+          - `src/components/worktree/ChatSurface.tsx` — 実在確認: `docs/module-reference.md:NNN`
+            追記内容: 「…（Issue #2233）」
+
+          ## 新規行
+          追記なし
+
+    - 断片が無いとリリースノートと module-reference に載りません。**実装と同じ commit で書くこと。**
+
+  - 完了したら `IMPL_COMPLETED` と出力してください。
+scope:
+  allow:
+    - "src/components/worktree/**"
+    - "src/components/ui/**"
+    - "src/hooks/**"
+    - "src/lib/chat/**"
+    - "src/config/**"
+    - "src/app/globals.css"
+    - "locales/en/**"
+    - "locales/ja/**"
+    - "tests/unit/components/**"
+    - "tests/unit/hooks/**"
+    - "tests/unit/i18n/**"
+    - "tests/unit/lib/**"
+    - "tests/integration/**"
+    - "dev-reports/**"
+  deny:
+    - "src/components/worktree/HistoryPane.tsx"
+    - "src/components/worktree/ConversationPairCard.tsx"
+    - "src/lib/history-virtualization.ts"
+    - "src/lib/hooks/**"
+    - "CHANGELOG.md"
+    - "docs/module-reference.md"
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true
