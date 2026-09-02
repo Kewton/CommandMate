@@ -318,6 +318,10 @@ export async function POST(request: NextRequest) {
       taskId: outcome.taskId,
       taskEventApplied: outcome.taskEventApplied,
       verificationRunId: outcome.verificationRunId,
+      // Issue #2246: the stop event is now the transcript reader's second
+      // trigger. Logged so that "the reply never reached History" can be told
+      // apart from "the reader was never asked".
+      structuredHistoryCaptured: outcome.structuredHistoryCaptured,
     });
 
     return NextResponse.json(ACCEPTED, { status: 202 });

@@ -90,6 +90,34 @@ export type UserTurnOutcome =
   /** The database could not be reached or refused the write. */
   | 'failed';
 
+/**
+ * How far back a `/send` row may sit and still be this prompt's (Issue #2246).
+ *
+ * {@link USER_TURN_ADOPTION_WINDOW_MS} is symmetric around the agent's clock and
+ * that is right for the ordinary case, where the transcript is read within
+ * seconds of the turn ending. Reading a turn the poller *missed* breaks the
+ * assumption the symmetry rests on: the row being adopted was written when
+ * CommandMate handed the text to the pane, and the turn that answers it may have
+ * been accepted long after — a queued prompt waits for the previous turn to
+ * finish, and the measured incident behind this Issue had eleven minutes between
+ * the two.
+ *
+ * The bound the caller supplies instead is the **previous turn's own start**,
+ * which is the tightest honest one: a `/send` row for turn N cannot have been
+ * written before turn N-1 opened, because it had not been sent yet. Only the
+ * lower bound moves, and only outwards — see {@link recordUserTurn}, which takes
+ * the wider of this and the standard window so that a caller can never *narrow*
+ * adoption by supplying one.
+ */
+export interface RecordUserTurnOptions {
+  /**
+   * Earliest `timestamp`, as epoch ms, a row may carry and still be adopted.
+   *
+   * Ignored when it is later than the standard window's lower edge.
+   */
+  readonly adoptionFromMs?: number;
+}
+
 /** The result of one {@link recordUserTurn} call. */
 export interface RecordedUserTurn {
   readonly outcome: UserTurnOutcome;
@@ -146,12 +174,14 @@ function describe(target: AgentInstanceRef): Record<string, string> {
  *   re-read of the log and a `/clear`.
  * @param content - The prompt, as the agent recorded it
  * @param timestampMs - When the agent says it was prompted, epoch ms
+ * @param options - See {@link RecordUserTurnOptions}; the defaults are #2196's
  */
 export async function recordUserTurn(
   target: AgentInstanceRef,
   key: string,
   content: string,
-  timestampMs: number
+  timestampMs: number,
+  options: RecordUserTurnOptions = {}
 ): Promise<RecordedUserTurn> {
   const instanceId = target.instanceId ?? target.cliToolId;
   const normalized = normalizeUserTurnContent(content);
@@ -179,7 +209,7 @@ export async function recordUserTurn(
     }
 
     const at = timestampMs > 0 ? timestampMs : Date.now();
-    const adopted = adoptExistingRow(chatDb, db, target, instanceId, key, normalized, at);
+    const adopted = adoptExistingRow(chatDb, db, target, instanceId, key, normalized, at, options);
     if (adopted) return adopted;
 
     const message = chatDb.createMessage(db, {
@@ -239,14 +269,23 @@ function adoptExistingRow(
   instanceId: string,
   key: string,
   normalized: string,
-  at: number
+  at: number,
+  options: RecordUserTurnOptions
 ): RecordedUserTurn | null {
+  // `Math.min` and not a replacement: {@link RecordUserTurnOptions} may widen
+  // the search backwards and may never narrow it, so a caller that supplies a
+  // bound *inside* the standard window changes nothing.
+  const fromMs = Math.min(
+    at - USER_TURN_ADOPTION_WINDOW_MS,
+    options.adoptionFromMs ?? Number.POSITIVE_INFINITY
+  );
+
   const candidates = chatDb
     .findUnkeyedUserMessages(db, {
       worktreeId: target.worktreeId,
       cliToolId: target.cliToolId,
       instanceId,
-      fromMs: at - USER_TURN_ADOPTION_WINDOW_MS,
+      fromMs,
       toMs: at + USER_TURN_ADOPTION_WINDOW_MS,
     })
     .filter((row) => normalizeUserTurnContent(row.content) === normalized)

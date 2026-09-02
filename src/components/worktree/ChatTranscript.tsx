@@ -68,6 +68,18 @@
  * What it costs: scrolling up moves the bubble off screen, because it is in the
  * flow rather than pinned to the viewport. `ChatSurface` answers that by putting
  * the spinner on its jump-to-latest chip while a turn is live.
+ *
+ * ## A ROW is no longer a MESSAGE (Issue #2245)
+ *
+ * `messageType === 'prompt'` rows are approval dialogs written by the poller,
+ * Auto-Yes and the permission hook — 41 of the last 50 rows on one live worktree,
+ * 43 on another — and this component used to draw each of them as an assistant
+ * reply carrying the whole pane. They are now chips, and a RUN of them is one
+ * collapsed row. So the virtualizer counts `rows`, not `messages`, and
+ * `buildChatTranscriptRows` is the only place that mapping exists.
+ *
+ * The live tail is deliberately not part of that: it is still keyed off
+ * `messages`, because a chip row has no in-flight form.
  */
 
 import React, { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
@@ -83,15 +95,23 @@ import { copyToClipboard } from '@/lib/clipboard-utils';
 import { applyHistoryHighlights, clearHistoryHighlights } from '@/lib/terminal-highlight';
 import { isNearBottom } from '@/lib/history-virtualization';
 import {
+  buildChatTranscriptRows,
   CHAT_ESTIMATED_MESSAGE_HEIGHT_PX,
   CHAT_FALLBACK_RENDER_COUNT,
   CHAT_VIRTUAL_OVERSCAN,
   shouldShowLiveRoleHeader,
-  shouldShowRoleHeader,
 } from '@/lib/chat/chat-transcript-view';
+import { isToolApprovalMessage } from '@/lib/chat/chat-tool-approvals';
 import { resolveChatSearchNamespace } from '@/lib/chat/chat-search-namespace';
-import { ChatMessageBubble } from './ChatMessageBubble';
-import { ChatLiveTurnBubble } from './ChatLiveTurnBubble';
+import {
+  CHAT_BUBBLE_ASSISTANT_CLASS,
+  CHAT_BUBBLE_MARKDOWN_BODY_CLASS,
+  CHAT_BUBBLE_ROW_CLASS,
+  ChatMarkdownBody,
+  ChatMessageBubble,
+  ChatToolApprovalGroup,
+} from './ChatMessageBubble';
+import { CHAT_LIVE_TURN_TESTID, ChatLiveTurnBubble } from './ChatLiveTurnBubble';
 import { HistorySearchBar } from './HistorySearchBar';
 
 // ============================================================================
@@ -133,6 +153,12 @@ export interface ChatTranscriptLiveTurn {
   partial?: boolean;
   /** The CLI is painting a thinking indicator rather than a plain "generating". */
   isThinking?: boolean;
+  /**
+   * Issue #2248: the turn has stopped and this body is being held until its
+   * saved row arrives. Drawn by {@link ChatSettlingTurnBubble} instead of
+   * {@link ChatLiveTurnBubble} — same bubble, no spinner, no "Responding…".
+   */
+  settling?: boolean;
 }
 
 export interface ChatTranscriptProps {
@@ -189,6 +215,107 @@ function ChatTranscriptLoading() {
   );
 }
 
+/**
+ * A body that has stopped growing and has no saved row yet (Issue #2248).
+ *
+ * ## Why this is a second component and not a flag on `ChatLiveTurnBubble`
+ *
+ * The two states differ in exactly one row of markup — the live bubble's
+ * spinner-and-"Responding…" line is replaced by a single quiet label — and in
+ * nothing else. Everything the reader looks at is the SAME: the same
+ * {@link CHAT_BUBBLE_ROW_CLASS} row, the same {@link CHAT_BUBBLE_ASSISTANT_CLASS}
+ * bubble, the same {@link CHAT_BUBBLE_MARKDOWN_BODY_CLASS} body through the same
+ * Markdown renderer, in the same place in the same column. That is Issue #2233's
+ * rule and this Issue inherits it: a turn ending must not move a paragraph or
+ * change its typeface, and neither must its row finally landing.
+ *
+ * Because the class strings are shared constants rather than copies, the drift
+ * that a duplicated bubble would normally invite cannot happen silently — and
+ * `ChatTranscript-settling-2248.test.tsx` compares the two rendered class
+ * strings to each other anyway.
+ *
+ * ## What it must not say
+ *
+ * No spinner and no `chatSurface.generating`. Issue #2238's defect was a surface
+ * that claimed to be responding when nothing was running, and a hold is exactly
+ * the state where that claim would be false. `data-settling="true"` is on the
+ * row so the real screen and an E2E run can tell the two apart without reading
+ * prose (`data-turn-key` / `data-version` were already there).
+ */
+function ChatSettlingTurnBubble({
+  turnKey,
+  version,
+  body,
+  partial = false,
+  showHeader = false,
+  onFilePathClick,
+}: {
+  turnKey?: string;
+  version?: number;
+  body?: string;
+  partial?: boolean;
+  showHeader?: boolean;
+  onFilePathClick: (path: string) => void;
+}) {
+  const t = useTranslations('worktree');
+  const hasBody = typeof body === 'string' && body.length > 0;
+
+  return (
+    <div
+      data-testid={CHAT_LIVE_TURN_TESTID}
+      data-role="assistant"
+      data-settling="true"
+      data-turn-key={turnKey}
+      data-version={version === undefined ? undefined : String(version)}
+      data-has-body={hasBody ? 'true' : 'false'}
+      role="group"
+      aria-label={t('chatSurface.settlingLabel')}
+      className={CHAT_BUBBLE_ROW_CLASS}
+    >
+      {showHeader && (
+        <div className="flex items-center gap-2 px-1 text-xs text-muted-foreground">
+          <span className="font-medium">{t('conversation.assistant')}</span>
+        </div>
+      )}
+
+      <div className={CHAT_BUBBLE_ASSISTANT_CLASS}>
+        {hasBody && (
+          <div
+            data-testid="chat-live-turn-body"
+            data-markdown="true"
+            className={CHAT_BUBBLE_MARKDOWN_BODY_CLASS}
+          >
+            <ChatMarkdownBody content={body as string} onFilePathClick={onFilePathClick} />
+          </div>
+        )}
+
+        {/* Under the body, in the live bubble's place, so the label swapping for
+            the spinner moves nothing above it. Not an `aria-live` region: the
+            turn is over, and there is nothing left to announce. */}
+        <div
+          data-testid="chat-settling-turn-note"
+          className={[
+            'flex flex-wrap items-center gap-2 text-xs text-muted-foreground',
+            hasBody ? 'mt-1.5' : '',
+          ]
+            .filter(Boolean)
+            .join(' ')}
+        >
+          <span>{t('chatSurface.settling')}</span>
+          {partial && (
+            <span
+              data-testid="chat-live-turn-partial"
+              className="rounded border border-warning-border bg-warning-subtle px-1 py-0.5 text-warning-foreground"
+            >
+              {t('chatSurface.progressPartial')}
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /** The transcript's ONE empty state. */
 function ChatTranscriptEmpty() {
   const t = useTranslations('worktree');
@@ -241,10 +368,20 @@ export const ChatTranscript = memo(function ChatTranscript({
   // `HistoryMatch` was always keyed by messageId; History had to translate
   // messageId → pairId → row index because its rows are pairs. Here a row IS a
   // message, so the translation is a single map.
+  //
+  // [#2245] Approval rows are excluded. Their `content` is the pane dump this
+  // Issue stopped rendering, so a hit inside one could not be highlighted (there
+  // is no `data-message-id` element to mark) and every search for a command name
+  // would land on dozens of invisible rows before reaching the reply that
+  // mentions it.
   const searchableMessages = useMemo(
     () =>
       messages.filter(
-        (m) => !m.archived && typeof m.content === 'string' && m.content.length > 0,
+        (m) =>
+          !m.archived &&
+          !isToolApprovalMessage(m) &&
+          typeof m.content === 'string' &&
+          m.content.length > 0,
       ),
     [messages],
   );
@@ -276,14 +413,22 @@ export const ChatTranscript = memo(function ChatTranscript({
   }, [worktreeId]);
 
   // ---------------------------------------------------------------
+  // Rows (Issue #2245)
+  // ---------------------------------------------------------------
+  // Bubbles and folded approval groups, in transcript order. Also the only
+  // place `showHeader` is decided, so a chip group cannot change how many
+  // "Assistant" labels the column carries.
+  const rows = useMemo(() => buildChatTranscriptRows(messages), [messages]);
+
+  // ---------------------------------------------------------------
   // Virtualization
   // ---------------------------------------------------------------
   const rowVirtualizer = useVirtualizer({
-    count: messages.length,
+    count: rows.length,
     getScrollElement: () => scrollContainerRef.current,
     estimateSize: () => CHAT_ESTIMATED_MESSAGE_HEIGHT_PX,
     overscan: CHAT_VIRTUAL_OVERSCAN,
-    getItemKey: (index) => messages[index]?.id ?? index,
+    getItemKey: (index) => rows[index]?.key ?? index,
   });
 
   const virtualItems = rowVirtualizer.getVirtualItems();
@@ -294,11 +439,16 @@ export const ChatTranscript = memo(function ChatTranscript({
       ? `${virtualItems[0].index}-${virtualItems[virtualItems.length - 1].index}`
       : '';
 
+  // messageId → ROW index. A search match names a message; the virtualizer
+  // scrolls to a row, and since #2245 those are no longer the same number.
   const messageRowIndexById = useMemo(() => {
     const map = new Map<string, number>();
-    messages.forEach((message, index) => map.set(message.id, index));
+    rows.forEach((row, index) => {
+      if (row.kind === 'message') map.set(row.message.id, index);
+      else for (const entry of row.entries) for (const id of entry.messageIds) map.set(id, index);
+    });
     return map;
-  }, [messages]);
+  }, [rows]);
 
   const handleScroll = useCallback(() => {
     const container = scrollContainerRef.current;
@@ -320,10 +470,13 @@ export const ChatTranscript = memo(function ChatTranscript({
     const current = messages.length;
     prevRowCountRef.current = current;
     if (previous === -1) return; // first render establishes the baseline
-    if (current > previous && current > 0 && isPinnedToBottomRef.current && !isSearchActive) {
-      rowVirtualizer.scrollToIndex(current - 1, { align: 'end' });
+    // Triggered by a new MESSAGE and aimed at the last ROW: an approval that
+    // folds into an existing group adds no row, and the tail to follow is
+    // whatever the row list ends with.
+    if (current > previous && rows.length > 0 && isPinnedToBottomRef.current && !isSearchActive) {
+      rowVirtualizer.scrollToIndex(rows.length - 1, { align: 'end' });
     }
-  }, [messages.length, isSearchActive, rowVirtualizer]);
+  }, [messages.length, rows.length, isSearchActive, rowVirtualizer]);
 
   // Materialize the current match's row before the highlight effect goes
   // looking for its DOM node: an off-screen row is unmounted and cannot be
@@ -400,12 +553,15 @@ export const ChatTranscript = memo(function ChatTranscript({
 
   const renderRow = useCallback(
     (index: number) => {
-      const message = messages[index];
-      if (!message) return null;
+      const row = rows[index];
+      if (!row) return null;
+      if (row.kind === 'approvals') {
+        return <ChatToolApprovalGroup entries={row.entries} />;
+      }
       return (
         <ChatMessageBubble
-          message={message}
-          showHeader={shouldShowRoleHeader(messages[index - 1], message)}
+          message={row.message}
+          showHeader={row.showHeader}
           onFilePathClick={handleFilePathClick}
           onCopy={handleCopy}
           onInsertToMessage={onInsertToMessage}
@@ -414,22 +570,22 @@ export const ChatTranscript = memo(function ChatTranscript({
         />
       );
     },
-    [messages, handleFilePathClick, handleCopy, onInsertToMessage, onRetryPending, onDiscardPending],
+    [rows, handleFilePathClick, handleCopy, onInsertToMessage, onRetryPending, onDiscardPending],
   );
 
   const renderContent = () => {
     if (isLoading) return <ChatTranscriptLoading />;
     // "No messages yet" under a bubble that is visibly being written is a lie
     // the reader can see. The live tail below is the content in that case.
-    if (messages.length === 0) return liveTurn ? null : <ChatTranscriptEmpty />;
+    if (rows.length === 0) return liveTurn ? null : <ChatTranscriptEmpty />;
 
     // [#1123] Zero-measurement fallback. See the file header: without this the
     // transcript is empty on the first paint and in every jsdom test.
     if (virtualItems.length === 0) {
       return (
         <div data-testid="chat-transcript-fallback-list">
-          {messages.slice(0, CHAT_FALLBACK_RENDER_COUNT).map((message, index) => (
-            <div key={message.id}>{renderRow(index)}</div>
+          {rows.slice(0, CHAT_FALLBACK_RENDER_COUNT).map((row, index) => (
+            <div key={row.key}>{renderRow(index)}</div>
           ))}
         </div>
       );
@@ -477,18 +633,33 @@ export const ChatTranscript = memo(function ChatTranscript({
 
         {/* [#2233] The live tail. A plain sibling of the list — never an entry
             in `virtualItems` — so no scroll position can unmount it, and inside
-            the scroll region so it sits exactly where its settled row will. */}
-        {liveTurn && (
-          <ChatLiveTurnBubble
-            turnKey={liveTurn.turnKey}
-            version={liveTurn.version}
-            body={liveTurn.body}
-            partial={liveTurn.partial}
-            isThinking={liveTurn.isThinking}
-            showHeader={shouldShowLiveRoleHeader(messages[messages.length - 1])}
-            onFilePathClick={handleFilePathClick}
-          />
-        )}
+            the scroll region so it sits exactly where its settled row will.
+
+            [#2248] Two bubbles, one position: while the turn is generating, and
+            then while its body is HELD waiting for the saved row. The second
+            wears the same classes with the spinner and "Responding…" taken off,
+            so the turn ending changes nothing on screen but that one line. */}
+        {liveTurn &&
+          (liveTurn.settling ? (
+            <ChatSettlingTurnBubble
+              turnKey={liveTurn.turnKey}
+              version={liveTurn.version}
+              body={liveTurn.body}
+              partial={liveTurn.partial}
+              showHeader={shouldShowLiveRoleHeader(messages[messages.length - 1])}
+              onFilePathClick={handleFilePathClick}
+            />
+          ) : (
+            <ChatLiveTurnBubble
+              turnKey={liveTurn.turnKey}
+              version={liveTurn.version}
+              body={liveTurn.body}
+              partial={liveTurn.partial}
+              isThinking={liveTurn.isThinking}
+              showHeader={shouldShowLiveRoleHeader(messages[messages.length - 1])}
+              onFilePathClick={handleFilePathClick}
+            />
+          ))}
       </div>
 
       {/* Search: one icon, or the bar once it is open. Absolutely positioned so

@@ -423,11 +423,56 @@ export const ChatSurface = memo(function ChatSurface({
     instanceId,
     enabled: isGenerating,
   });
+
+  // --------------------------------------------------------------------
+  // Ending the hold when the next turn starts (Issue #2248)
+  // --------------------------------------------------------------------
+  // The hook holds the last body after the turn stops generating, and owns two
+  // of the three release conditions itself (`enabled` rising, and the grace
+  // period). This is the third: **a row appended to the transcript while a body
+  // is held ends the hold.**
+  //
+  // Two shapes arrive that way and both have to end it. The settled row for the
+  // same turn is one, and the swap below already answers it. The other is the
+  // user's NEXT message — the reason this exists — because `sessionStatus` does
+  // not flip to `running` until the poller's next tick, and until it does the
+  // previous turn's paragraph would be sitting UNDERNEATH the message the user
+  // just sent, reading as an answer to it.
+  //
+  // Anchored on the last row's id rather than on the array length: a message
+  // being replaced in place (#1121's optimistic row settling into its saved one)
+  // is a new row for this purpose, and a re-fetch that returns the same tail is
+  // not.
+  const lastMessageId = visibleMessages.length
+    ? visibleMessages[visibleMessages.length - 1].id
+    : null;
+  const isHolding = pushedProgress?.settling === true;
+  const holdAnchorRef = useRef<{ id: string | null } | null>(null);
+  const [isHoldReleased, setIsHoldReleased] = useState(false);
+
+  useEffect(() => {
+    if (!isHolding) {
+      // Nothing held: re-arm for the next hold rather than leaving a release
+      // from the previous turn latched on.
+      holdAnchorRef.current = null;
+      setIsHoldReleased(false);
+      return;
+    }
+    if (holdAnchorRef.current === null) {
+      holdAnchorRef.current = { id: lastMessageId };
+      return;
+    }
+    if (holdAnchorRef.current.id !== lastMessageId) setIsHoldReleased(true);
+  }, [isHolding, lastMessageId]);
+
   // The swap. Held until the row for this exact turn is in the transcript, which
   // is what keeps the reply from vanishing for the poll it takes the row to
-  // arrive, and what keeps it from being on screen twice once it has.
+  // arrive, and what keeps it from being on screen twice once it has. Issue
+  // #2248 added the third clause: a hold the transcript has moved past.
   const progress: ChatTurnProgressView | null =
-    pushedProgress !== null && !isTurnSettled(visibleMessages, pushedProgress.turnKey)
+    pushedProgress !== null &&
+    !isTurnSettled(visibleMessages, pushedProgress.turnKey) &&
+    !(pushedProgress.settling && isHoldReleased)
       ? pushedProgress
       : null;
 
@@ -456,7 +501,12 @@ export const ChatSurface = memo(function ChatSurface({
         version: progress.version,
         body: progress.body,
         partial: progress.partial,
-        isThinking: live.isThinking === true,
+        // Issue #2248. A held body is NOT generating, so it carries neither the
+        // thinking wording nor — via `settling` — the spinner and "Responding…"
+        // that the transcript would otherwise draw under it. Re-creating #2238's
+        // "Responding… that never stops" is the specific failure this avoids.
+        isThinking: !progress.settling && live.isThinking === true,
+        settling: progress.settling,
       };
     }
     // Issue #2238: the generating verdict, not the session-exists flag. This is
@@ -467,6 +517,10 @@ export const ChatSurface = memo(function ChatSurface({
   }, [progress, isGenerating, live.isThinking]);
 
   const isLiveTurn = liveTurn !== null;
+  // Issue #2248: what the jump-to-latest chip is allowed to claim. A held body
+  // is below the reader exactly as a live one is, so the chip still appears —
+  // but "still responding" would be a lie about a turn that has stopped.
+  const isGeneratingTurn = isLiveTurn && liveTurn.settling !== true;
 
   // The bubble grows inside the scroll region now, so following it is the same
   // `scrollTop = scrollHeight` every other follow here uses — and only while the
@@ -517,17 +571,21 @@ export const ChatSurface = memo(function ChatSurface({
             screen. While a turn is live and the reader is not at the end, the
             chip wears the spinner and says so in its accessible name, which is
             the one place "still running, below you" can be stated without
-            pinning a second copy of the reply to the viewport. */}
+            pinning a second copy of the reply to the viewport.
+
+            Issue #2248: a HELD body is below the reader in the same way, so the
+            chip still offers the way back — with the plain arrow, because the
+            turn it belongs to has already stopped. */}
         {(hasNewBelow || (isLiveTurn && !isAtBottom)) && (
           <button
             type="button"
             data-testid="chat-surface-new-messages"
-            data-generating={isLiveTurn ? 'true' : undefined}
+            data-generating={isGeneratingTurn ? 'true' : undefined}
             onClick={scrollToLatest}
-            aria-label={isLiveTurn ? t('chatSurface.jumpToLatestGenerating') : undefined}
+            aria-label={isGeneratingTurn ? t('chatSurface.jumpToLatestGenerating') : undefined}
             className="absolute bottom-3 left-1/2 z-10 flex min-h-[36px] -translate-x-1/2 items-center gap-1.5 rounded-full border border-border bg-surface-2 px-3 py-1.5 text-xs font-medium text-foreground shadow-lg transition-colors hover:bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-ring touch-manipulation"
           >
-            {isLiveTurn ? (
+            {isGeneratingTurn ? (
               <Loader2 size={14} className="animate-spin" aria-hidden="true" />
             ) : (
               <ArrowDown size={14} aria-hidden="true" />

@@ -28,6 +28,7 @@ import { applyTaskEvent } from '@/lib/tasks/task-transition-service';
 import { startVerification, VerificationConflictError } from '@/lib/verification/gate-runner';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { recordAgentStopEvent } from '@/lib/session/agent-event-state';
+import { captureTranscriptTurnOnStop } from '@/lib/hooks/stop-history-capture';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('lib/hooks/agent-event-service');
@@ -168,14 +169,40 @@ export interface AgentStopOutcome {
   taskEventApplied: boolean;
   /** Verification run started by `success.autoVerifyOnStop`, or null. */
   verificationRunId: number | null;
+  /**
+   * Whether the transcript reader recorded this instance's newest turn (#2246).
+   *
+   * False for every tool without a transcript to pull from, and for one that has
+   * it whenever the reader could not write — no session pointer, no file, a turn
+   * whose body has not been flushed even after the retry. Never a failure on its
+   * own: the poller's own trigger is still behind it.
+   */
+  structuredHistoryCaptured: boolean;
 }
 
 /**
  * Apply a `stop` event to whatever the worktree is currently doing.
  *
  * The no-op is the load-bearing case. Sessions with no contract, and therefore
- * no task, are the overwhelming majority; for them this records the timestamp
- * and returns. Nothing about the existing completion path changes.
+ * no task, are the overwhelming majority; for them this records the timestamp,
+ * asks the transcript reader for the turn, and returns.
+ *
+ * ## Why the history read is here (Issue #2246)
+ *
+ * Because it must happen for *every* stop event and not only for the ones that
+ * govern a task — the majority case above is exactly the session whose replies
+ * this is trying not to lose — and because both callers of this function are
+ * stop receivers (`/api/hooks/agent-event` and the compatibility
+ * `/api/hooks/claude-done`). Putting it in one of the routes would have left the
+ * other one on the old behaviour.
+ *
+ * It runs **before** the task lookup so that the two early returns below cannot
+ * skip it, and after `recordAgentStopEvent` because the reader resolves its
+ * transcript through the session pointer that call refreshes.
+ *
+ * It is awaited rather than detached. The turn has already ended, so the cost is
+ * paid by nobody who is waiting for an answer, and a detached promise here would
+ * be one whose failures nothing observes.
  *
  * Never throws. A hook is fire-and-forget from a CLI's stop handler, and a
  * failure here must not become the agent's problem.
@@ -188,6 +215,12 @@ export async function applyAgentStopEvent(
 ): Promise<AgentStopOutcome> {
   recordAgentStopEvent(worktree.id, cliToolId, instanceId);
 
+  const structuredHistoryCaptured = await captureTranscriptTurnOnStop(
+    worktree,
+    cliToolId,
+    instanceId
+  );
+
   let task;
   try {
     task = getActiveTaskForInstance(db, worktree.id, cliToolId, instanceId);
@@ -196,11 +229,21 @@ export async function applyAgentStopEvent(
       worktreeId: worktree.id,
       error: error instanceof Error ? error.message : String(error),
     });
-    return { taskId: null, taskEventApplied: false, verificationRunId: null };
+    return {
+      taskId: null,
+      taskEventApplied: false,
+      verificationRunId: null,
+      structuredHistoryCaptured,
+    };
   }
 
   if (!task) {
-    return { taskId: null, taskEventApplied: false, verificationRunId: null };
+    return {
+      taskId: null,
+      taskEventApplied: false,
+      verificationRunId: null,
+      structuredHistoryCaptured,
+    };
   }
 
   let taskEventApplied = false;
@@ -215,7 +258,12 @@ export async function applyAgentStopEvent(
   }
 
   if (!task.contract.success.autoVerifyOnStop) {
-    return { taskId: task.id, taskEventApplied, verificationRunId: null };
+    return {
+      taskId: task.id,
+      taskEventApplied,
+      verificationRunId: null,
+      structuredHistoryCaptured,
+    };
   }
 
   let verificationRunId: number | null = null;
@@ -239,5 +287,5 @@ export async function applyAgentStopEvent(
     }
   }
 
-  return { taskId: task.id, taskEventApplied, verificationRunId };
+  return { taskId: task.id, taskEventApplied, verificationRunId, structuredHistoryCaptured };
 }

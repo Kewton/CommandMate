@@ -35,9 +35,19 @@
  * tokens that are unreadable on a light ground. Nothing else here may be dark.
  */
 
-import React, { memo, useCallback, useMemo } from 'react';
+import React, { memo, useCallback, useMemo, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
-import { AlertCircle, ArrowDownToLine, Copy, Loader2, RotateCcw, X } from 'lucide-react';
+import {
+  AlertCircle,
+  ArrowDownToLine,
+  ChevronDown,
+  ChevronRight,
+  Copy,
+  Loader2,
+  RotateCcw,
+  ShieldCheck,
+  X,
+} from 'lucide-react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeSanitize from 'rehype-sanitize';
@@ -46,7 +56,12 @@ import type { ChatMessage } from '@/types/models';
 import { isAgentAuthoredMarkdown } from '@/types/agent-transcript';
 import { getDateFnsLocale } from '@/lib/date-locale';
 import { formatMessageTimestamp } from '@/lib/date-utils';
+import { stripAnsi } from '@/lib/detection/ansi';
 import { splitFilePathParts } from '@/lib/chat/chat-transcript-view';
+import type {
+  ToolApprovalEntry,
+  ToolApprovalOutcome,
+} from '@/lib/chat/chat-tool-approvals';
 
 // ============================================================================
 // Bubble geometry
@@ -109,6 +124,29 @@ export const CHAT_BUBBLE_BODY_BASE_CLASS =
  * the same measure and the same namespace.
  */
 export const CHAT_BUBBLE_MARKDOWN_BODY_CLASS = `${CHAT_BUBBLE_BODY_BASE_CLASS} chat-md`;
+
+// ============================================================================
+// Body text (Issue #2245)
+// ============================================================================
+
+/**
+ * What a non-Markdown body actually shows, and what copying it yields.
+ *
+ * Everything that is not agent-authored Markdown is a scrape of a terminal, and
+ * two of the producers writing those rows have no cleaner for the tool they are
+ * scraping (codex and antigravity), so the escape sequences arrive intact and
+ * render as literal `[32m●[39m` in the middle of the sentence. `stripAnsi` is
+ * the same pattern the terminal display normalizer and `VerificationPane` use.
+ *
+ * Applied HERE rather than inside {@link ChatPlainBody} on purpose: that
+ * component is also the linkifier for Markdown text nodes, so stripping inside
+ * it would silently reach the Markdown path too — which Issue #2245 requires to
+ * stay untouched, since a transcript-reader body is authored text and an `ESC`
+ * in it is content.
+ */
+export function toPlainBodyText(content: unknown): string {
+  return typeof content === 'string' ? stripAnsi(content) : '';
+}
 
 // ============================================================================
 // Body renderers
@@ -209,6 +247,107 @@ export const ChatMarkdownBody = memo(function ChatMarkdownBody({
 });
 
 // ============================================================================
+// Tool approvals (Issue #2245)
+// ============================================================================
+
+/** The collapsible row a run of approval dialogs is drawn as. */
+export const CHAT_TOOL_APPROVAL_GROUP_TESTID = 'chat-tool-approval-group';
+/** The disclosure control on that row. */
+export const CHAT_TOOL_APPROVAL_TOGGLE_TESTID = 'chat-tool-approval-toggle';
+/** One chip inside an opened group. */
+export const CHAT_TOOL_APPROVAL_ENTRY_TESTID = 'chat-tool-approval-entry';
+
+/** The `chatTranscript.toolApproval.*` key describing each outcome. */
+const OUTCOME_LABEL_KEY: Record<ToolApprovalOutcome, string> = {
+  human: 'chatTranscript.toolApproval.answeredByHuman',
+  auto: 'chatTranscript.toolApproval.autoApproved',
+  terminal: 'chatTranscript.toolApproval.answeredInTerminal',
+  pending: 'chatTranscript.toolApproval.awaitingAnswer',
+  unclassified: 'chatTranscript.toolApproval.unclassified',
+  unknown: 'chatTranscript.toolApproval.resolved',
+};
+
+/**
+ * A run of tool-approval dialogs, as one collapsed row.
+ *
+ * ## Why a group rather than one chip per row
+ *
+ * Chips are an improvement over 2 KB bubbles even one at a time, but the shape
+ * of the data is runs: 41 consecutive `Approve Bash?` rows between two sentences
+ * on the codex worktree, 13 on the antigravity one. Forty-one one-line chips is
+ * still forty-one rows of scrolling between a question and its answer. Closed by
+ * default, therefore — and openable, because the information is not deleted,
+ * only folded.
+ *
+ * ## Why the state lives here and nothing else does
+ *
+ * Open/closed is the reader's, so it is local state. Everything else is derived
+ * from `entries` on every render, with nothing cached: `promptData.status` flips
+ * pending → answered through a `message_updated` push, and a chip that
+ * remembered its own outcome would keep saying "awaiting answer" after the
+ * dialog was answered.
+ */
+export const ChatToolApprovalGroup = memo(function ChatToolApprovalGroup({
+  entries,
+}: {
+  entries: ToolApprovalEntry[];
+}) {
+  const t = useTranslations('worktree');
+  const [isOpen, setIsOpen] = useState(false);
+  const toggle = useCallback(() => setIsOpen((open) => !open), []);
+
+  if (entries.length === 0) return null;
+
+  const Chevron = isOpen ? ChevronDown : ChevronRight;
+
+  return (
+    <div
+      data-testid={CHAT_TOOL_APPROVAL_GROUP_TESTID}
+      data-approval-count={entries.length}
+      className={`${CHAT_BUBBLE_ROW_CLASS} items-start`}
+    >
+      <button
+        type="button"
+        data-testid={CHAT_TOOL_APPROVAL_TOGGLE_TESTID}
+        onClick={toggle}
+        aria-expanded={isOpen}
+        aria-label={isOpen ? t('chatTranscript.toolApproval.collapse') : t('chatTranscript.toolApproval.expand')}
+        className="mr-auto flex w-fit max-w-full items-center gap-1.5 rounded-full border border-border bg-surface-2 px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <ShieldCheck size={12} aria-hidden="true" />
+        <span>{t('chatTranscript.toolApproval.summary', { count: entries.length })}</span>
+        <Chevron size={12} aria-hidden="true" />
+      </button>
+
+      {isOpen && (
+        <ul
+          data-testid="chat-tool-approval-list"
+          className="mr-auto flex w-full max-w-full flex-col gap-1 pl-1"
+        >
+          {entries.map((entry) => (
+            <li
+              key={entry.id}
+              data-testid={CHAT_TOOL_APPROVAL_ENTRY_TESTID}
+              data-approval-outcome={entry.outcome}
+              data-approval-audit={entry.isPermissionAudit ? 'true' : undefined}
+              data-approval-merged={entry.messageIds.length}
+              className="flex max-w-full flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs text-muted-foreground"
+            >
+              <span className="min-w-0 break-words [word-break:break-word] font-mono text-foreground">
+                {entry.label || t('chatTranscript.toolApproval.unlabeled')}
+              </span>
+              <span data-testid="chat-tool-approval-outcome">
+                {t(OUTCOME_LABEL_KEY[entry.outcome])}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+});
+
+// ============================================================================
 // Bubble
 // ============================================================================
 
@@ -246,6 +385,11 @@ export const ChatMessageBubble = memo(function ChatMessageBubble({
   const sendState = message.optimisticState;
   const isMarkdown = isAgentAuthoredMarkdown(message.requestId);
   const formattedTime = formatMessageTimestamp(message.timestamp, getDateFnsLocale(locale));
+
+  // [#2245] What the reader sees, and therefore what copy has to hand them. The
+  // Markdown path keeps `message.content` verbatim — see `toPlainBodyText`.
+  const plainBody = useMemo(() => toPlainBodyText(message.content), [message.content]);
+  const displayContent = isMarkdown ? message.content : plainBody;
 
   // The bubble. `rounded-2xl` with one squared-off corner on the speaker's side
   // is what makes the two columns read as a dialogue rather than two lists.
@@ -309,7 +453,7 @@ export const ChatMessageBubble = memo(function ChatMessageBubble({
           {isMarkdown ? (
             <ChatMarkdownBody content={message.content} onFilePathClick={onFilePathClick} />
           ) : (
-            <ChatPlainBody content={message.content} onFilePathClick={onFilePathClick} />
+            <ChatPlainBody content={plainBody} onFilePathClick={onFilePathClick} />
           )}
         </div>
       </div>
@@ -376,7 +520,7 @@ export const ChatMessageBubble = memo(function ChatMessageBubble({
               <button
                 type="button"
                 data-testid="chat-copy-message"
-                onClick={() => onCopy(message.content)}
+                onClick={() => onCopy(displayContent)}
                 className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                 aria-label={t('conversation.copyMessage')}
                 title={t('conversation.copy')}
@@ -388,7 +532,7 @@ export const ChatMessageBubble = memo(function ChatMessageBubble({
               <button
                 type="button"
                 data-testid="chat-insert-user-message"
-                onClick={() => onInsertToMessage(message.content)}
+                onClick={() => onInsertToMessage(displayContent)}
                 className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-accent-600 dark:hover:text-accent-400"
                 aria-label={t('conversation.insertToMessage')}
                 title={t('conversation.insertToMessage')}
