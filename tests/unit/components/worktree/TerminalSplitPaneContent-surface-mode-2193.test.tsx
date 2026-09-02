@@ -2,8 +2,8 @@
  * PC output-surface switching (Issue #2193).
  *
  * The split's output half swaps between `TerminalDisplay` and the split's own
- * `HistoryPane`. Three properties are load-bearing and each has a way of
- * quietly regressing:
+ * transcript — `ChatTranscript` since Issue #2232, `HistoryPane` before it.
+ * Three properties are load-bearing and each has a way of quietly regressing:
  *
  *  1. In chat mode the transcript must appear ONCE. The pane already embeds a
  *     collapsible History column, so the obvious implementation shows the same
@@ -91,6 +91,30 @@ vi.mock('@/components/worktree/HistoryPane', () => ({
     />
   ),
   splitHistorySlotId: (idx: number) => `split-history-slot-${idx}`,
+}));
+
+// Issue #2232: the chat surface's body is `ChatTranscript`, not `HistoryPane`.
+// Both mocks are needed here because this file drives BOTH modes — the History
+// column in terminal mode, the transcript in chat mode — and the property under
+// test is that exactly one transcript is on screen in each.
+vi.mock('@/components/worktree/ChatTranscript', () => ({
+  ChatTranscript: ({
+    splitIndex,
+    cliToolId,
+    messages,
+  }: {
+    splitIndex?: number;
+    cliToolId?: string;
+    messages: Array<{ id: string }>;
+  }) => (
+    <div
+      data-testid="chat-transcript"
+      data-split-index={String(splitIndex)}
+      data-cli-tool-id={cliToolId}
+      data-message-count={String(messages.length)}
+    />
+  ),
+  CHAT_TRANSCRIPT_SCROLL_CONTAINER_TESTID: 'chat-transcript-scroll-container',
 }));
 
 vi.mock('@/hooks/useSplitMessages', () => ({
@@ -186,10 +210,9 @@ describe('[#2193] TerminalSplitPaneContent output surface', () => {
     expect(screen.queryByTestId('terminal-display')).not.toBeInTheDocument();
     // The collapsible History column is gone, so the transcript is not doubled.
     expect(screen.queryByTestId('split-history-slot-0')).not.toBeInTheDocument();
-    const panes = screen.getAllByTestId('history-pane');
+    expect(screen.queryByTestId('history-pane')).not.toBeInTheDocument();
+    const panes = screen.getAllByTestId('chat-transcript');
     expect(panes).toHaveLength(1);
-    // ...and the one that remains is the output surface: no collapse button.
-    expect(panes[0].getAttribute('data-collapsible')).toBe('false');
     // Same instance-scoped fetch as the column it replaced.
     expect(panes[0].getAttribute('data-cli-tool-id')).toBe('claude');
     expect(panes[0].getAttribute('data-message-count')).toBe('1');

@@ -559,6 +559,38 @@
   color: white;
 }
 
+/*
+ * [Issue #2232] Chat transcript search highlights.
+ * `ChatTranscript` is a second surface that highlights text, and `CSS.highlights`
+ * is ONE global registry keyed by name — sharing `history-search*` would make a
+ * chat search erase a History search's marks (and vice versa) whenever both are
+ * mounted. Names come from `src/lib/chat/chat-search-namespace.ts`; the split
+ * suffixes stop at 2 for the same reason #744's do (MAX_SPLITS = 3, see
+ * src/config/terminal-split-config.ts). Same blue as History on purpose: it is
+ * the same act, in a different pane.
+ */
+::highlight(chat-search),
+::highlight(chat-search-0),
+::highlight(chat-search-1),
+::highlight(chat-search-2) {
+  background-color: rgb(var(--info) / 0.4);
+  color: inherit;
+}
+
+::highlight(chat-search-current),
+::highlight(chat-search-current-0),
+::highlight(chat-search-current-1),
+::highlight(chat-search-current-2) {
+  background-color: rgb(var(--info) / 0.8);
+  color: white;
+}
+
+#chat-search-fallback-overlay {
+  background-color: rgb(var(--info) / 0.6);
+  border-radius: 2px;
+  pointer-events: none;
+}
+
 @layer utilities {
   .pt-safe {
     padding-top: env(safe-area-inset-top, 0px);
@@ -705,6 +737,119 @@
     border: none;
     border-top: 1px solid rgb(var(--border));
     margin: 0.8em 0;
+  }
+
+  /*
+   * [Issue #2232] Markdown inside a chat bubble.
+   *
+   * A namespace of its own, NOT a second consumer of `.assistant-md`. That class
+   * is shared by History's conversation cards and `/chat`'s
+   * `AssistantMessageList`, so every value below would have landed on two other
+   * surfaces this Issue is required not to touch. The rules are deliberately
+   * close to `.assistant-md` — same structure, same tokens — because the
+   * difference between the two surfaces is DENSITY, not typography: a bubble
+   * renders at `text-sm` with no height clamp, so its blocks get a little more
+   * air and its headings do not need to shrink as hard.
+   *
+   * Theme-following throughout (docs/design-system.md §"常時ダーク領域"), with
+   * exactly one always-dark element: `.chat-md pre`, which carries
+   * rehype-highlight's github-dark tokens and is the documented exception —
+   * the same #0d1117 `.prose pre` and `.assistant-md pre` already use.
+   */
+  .chat-md > *:first-child {
+    margin-top: 0;
+  }
+  .chat-md > *:last-child {
+    margin-bottom: 0;
+  }
+  .chat-md p {
+    margin: 0.5em 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .chat-md h1,
+  .chat-md h2,
+  .chat-md h3,
+  .chat-md h4 {
+    font-weight: 600;
+    margin: 0.9em 0 0.35em;
+    line-height: 1.3;
+  }
+  .chat-md h1 { font-size: 1.15rem; }
+  .chat-md h2 { font-size: 1.1rem; }
+  .chat-md h3 { font-size: 1.02rem; }
+  .chat-md ul,
+  .chat-md ol {
+    margin: 0.5em 0;
+    padding-left: 1.4em;
+  }
+  .chat-md ul { list-style: disc; }
+  .chat-md ol { list-style: decimal; }
+  .chat-md li {
+    margin: 0.2em 0;
+  }
+  /* Accent tokens are identical in both themes, so a link needs an explicit
+     `.dark` override rather than a token swap: accent-700 clears AA on the light
+     bubble, accent-300 on the dark one. */
+  .chat-md a {
+    color: rgb(var(--accent-700));
+    text-decoration: underline;
+    word-break: break-all;
+  }
+  .dark .chat-md a {
+    color: rgb(var(--accent-300));
+  }
+  .chat-md code {
+    background-color: rgb(var(--muted));
+    color: rgb(var(--foreground));
+    padding: 0.08em 0.35em;
+    border-radius: 4px;
+    font-size: 0.9em;
+    font-family: var(--font-mono);
+  }
+  .chat-md pre {
+    background-color: #0d1117;
+    color: rgb(201 209 217);
+    border: 1px solid rgb(var(--border));
+    border-radius: 6px;
+    padding: 0.6em 0.8em;
+    margin: 0.55em 0;
+    overflow-x: auto;
+    font-size: 0.85em;
+    line-height: 1.5;
+  }
+  .chat-md pre code {
+    background: transparent;
+    color: inherit;
+    padding: 0;
+    font-size: inherit;
+  }
+  .chat-md blockquote {
+    margin: 0.55em 0;
+    padding-left: 0.8em;
+    border-left: 3px solid rgb(var(--border));
+    color: rgb(var(--muted-foreground));
+  }
+  .chat-md table {
+    border-collapse: collapse;
+    margin: 0.6em 0;
+    font-size: 0.88em;
+    display: block;
+    overflow-x: auto;
+  }
+  .chat-md th,
+  .chat-md td {
+    border: 1px solid rgb(var(--border));
+    padding: 0.3em 0.6em;
+    text-align: left;
+  }
+  .chat-md th {
+    background-color: rgb(var(--muted));
+  }
+  .chat-md hr {
+    border: none;
+    border-top: 1px solid rgb(var(--border));
+    margin: 0.9em 0;
   }
 }
 

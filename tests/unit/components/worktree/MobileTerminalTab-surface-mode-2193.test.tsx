@@ -32,8 +32,11 @@ vi.mock('@/components/worktree/TerminalDisplay', () => ({
   TerminalDisplay: () => <div data-testid="terminal-display" />,
 }));
 
-vi.mock('@/components/worktree/HistoryPane', () => ({
-  HistoryPane: ({
+// Issue #2232: the chat surface's body is `ChatTranscript` now. This screen
+// never mounts `HistoryPane` at all — the phone's History tab lives in
+// `WorktreeDetailMobile` — so this is the only transcript stub the file needs.
+vi.mock('@/components/worktree/ChatTranscript', () => ({
+  ChatTranscript: ({
     messages,
     cliToolId,
     worktreeId,
@@ -43,13 +46,13 @@ vi.mock('@/components/worktree/HistoryPane', () => ({
     worktreeId: string;
   }) => (
     <div
-      data-testid="history-pane"
+      data-testid="chat-transcript"
       data-cli-tool-id={cliToolId}
       data-worktree-id={worktreeId}
       data-message-count={String(messages.length)}
     />
   ),
-  splitHistorySlotId: (idx: number) => `split-history-slot-${idx}`,
+  CHAT_TRANSCRIPT_SCROLL_CONTAINER_TESTID: 'chat-transcript-scroll-container',
 }));
 
 const { useTerminalPanePollingMock, useSplitMessagesMock } = vi.hoisted(() => ({
@@ -152,7 +155,7 @@ describe('[#2193] MobileTerminalTab output surface', () => {
       expect(screen.getByTestId('mobile-chat-surface')).toBeInTheDocument();
     });
     expect(screen.queryByTestId('terminal-display')).not.toBeInTheDocument();
-    const pane = screen.getByTestId('history-pane');
+    const pane = screen.getByTestId('chat-transcript');
     expect(pane.getAttribute('data-message-count')).toBe('2');
     expect(pane.getAttribute('data-cli-tool-id')).toBe('claude');
     expect(screen.getByTestId('mobile-surface-mode-chat')).toHaveAttribute(

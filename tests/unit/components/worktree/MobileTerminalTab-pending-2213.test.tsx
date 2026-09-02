@@ -34,9 +34,12 @@ vi.mock('@/components/worktree/TerminalDisplay', () => ({
 }));
 
 // Exposes exactly what these tests reason about: how many rows reached the
-// pane, in what order, and the #1121 send state of each.
-vi.mock('@/components/worktree/HistoryPane', () => ({
-  HistoryPane: ({
+// transcript, in what order, and the #1121 send state of each. (Issue #2232
+// swapped the chat surface's body from `HistoryPane` to `ChatTranscript`; the
+// callbacks this stub exercises were message-level on both, which is why the
+// screen's own behavior is unchanged.)
+vi.mock('@/components/worktree/ChatTranscript', () => ({
+  ChatTranscript: ({
     messages,
     onRetryPending,
     onDiscardPending,
@@ -45,7 +48,7 @@ vi.mock('@/components/worktree/HistoryPane', () => ({
     onRetryPending?: (tempId: string) => void;
     onDiscardPending?: (tempId: string) => void;
   }) => (
-    <div data-testid="history-pane" data-message-count={String(messages.length)}>
+    <div data-testid="chat-transcript" data-message-count={String(messages.length)}>
       {messages.map((m) => (
         <div
           key={m.id}
@@ -68,7 +71,7 @@ vi.mock('@/components/worktree/HistoryPane', () => ({
       />
     </div>
   ),
-  splitHistorySlotId: (idx: number) => `split-history-slot-${idx}`,
+  CHAT_TRANSCRIPT_SCROLL_CONTAINER_TESTID: 'chat-transcript-scroll-container',
 }));
 
 const { useTerminalPanePollingMock, useSplitMessagesMock, sendMessageMock } = vi.hoisted(() => ({
@@ -172,7 +175,7 @@ async function showChat(): Promise<void> {
 }
 
 function rowCount(): number {
-  return Number(screen.getByTestId('history-pane').getAttribute('data-message-count'));
+  return Number(screen.getByTestId('chat-transcript').getAttribute('data-message-count'));
 }
 
 describe('[#2213] mobile chat surface optimistic send', () => {

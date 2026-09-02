@@ -110,6 +110,23 @@ vi.mock('@/components/worktree/HistoryPane', () => ({
   splitHistorySlotId: (idx: number) => `split-history-slot-${idx}`,
 }));
 
+// Issue #2232: the chat surface's body is `ChatTranscript`. The `HistoryPane`
+// stub above stays because this screen also owns the phone's History TAB, which
+// this Issue left on the old component — keeping both is what lets the terminal-
+// mode case below assert that neither transcript is mounted.
+vi.mock('@/components/worktree/ChatTranscript', () => ({
+  ChatTranscript: ({ messages }: { messages: ChatMessage[] }) => (
+    <div data-testid="chat-transcript" data-message-count={String(messages.length)}>
+      {messages.map((m) => (
+        <div key={m.id} data-testid={`row-${m.id}`} data-optimistic={m.optimisticState ?? ''}>
+          {m.content}
+        </div>
+      ))}
+    </div>
+  ),
+  CHAT_TRANSCRIPT_SCROLL_CONTAINER_TESTID: 'chat-transcript-scroll-container',
+}));
+
 const { useTerminalPanePollingMock, useSplitMessagesMock } = vi.hoisted(() => ({
   useTerminalPanePollingMock: vi.fn(),
   useSplitMessagesMock: vi.fn(),
@@ -244,12 +261,12 @@ describe('[#2213] mobile screen: composer send → pending row on the chat surfa
 
   it('renders the sent line as a pending row while the API is still in flight', async () => {
     await showChatSurface();
-    expect(screen.getByTestId('history-pane')).toHaveAttribute('data-message-count', '0');
+    expect(screen.getByTestId('chat-transcript')).toHaveAttribute('data-message-count', '0');
 
     sendFromComposer('deploy please');
 
     await waitFor(() => {
-      expect(screen.getByTestId('history-pane')).toHaveAttribute('data-message-count', '1');
+      expect(screen.getByTestId('chat-transcript')).toHaveAttribute('data-message-count', '1');
     });
     expect(screen.getByText('deploy please')).toHaveAttribute('data-optimistic', 'sending');
 
@@ -277,6 +294,7 @@ describe('[#2213] mobile screen: composer send → pending row on the chat surfa
     });
     // No transcript is mounted, so there is nothing to hold a bubble — and the
     // history poll the chat surface owns has not been started either.
+    expect(screen.queryByTestId('chat-transcript')).not.toBeInTheDocument();
     expect(screen.queryByTestId('history-pane')).not.toBeInTheDocument();
     expect(useSplitMessagesMock).not.toHaveBeenCalled();
 

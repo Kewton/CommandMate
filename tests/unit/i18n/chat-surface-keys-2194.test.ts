@@ -28,7 +28,15 @@ function loadChatSurface(locale: string): Record<string, string> {
   return dict.chatSurface as Record<string, string>;
 }
 
-/** Every `chatSurface.*` key ChatSurface requests at runtime. */
+/**
+ * Every `chatSurface.*` key ChatSurface requests at runtime.
+ *
+ * `emptyHint` left this list in Issue #2232: the surface had its own
+ * empty-state line on top of the transcript's, and the duplicate was folded into
+ * `ChatTranscript`. The string itself did not move namespaces for free — it is
+ * `worktree.chatTranscript.emptyHint` now, guarded by
+ * `chat-transcript-keys-2232.test.ts`.
+ */
 const CHAT_SURFACE_KEYS = [
   'liveRegionLabel',
   'generating',
@@ -40,7 +48,6 @@ const CHAT_SURFACE_KEYS = [
   'reasonPromptUnreadable',
   'openTerminal',
   'jumpToLatest',
-  'emptyHint',
 ];
 
 /** The four banner sentences, which must not collapse into one another. */
