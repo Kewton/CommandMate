@@ -15,6 +15,11 @@
  */
 
 import type { ChatMessage } from '@/types/models';
+import {
+  buildToolApprovalEntries,
+  isToolApprovalMessage,
+  type ToolApprovalEntry,
+} from './chat-tool-approvals';
 
 // ============================================================================
 // Virtualization tuning
@@ -76,6 +81,86 @@ export function shouldShowRoleHeader(
 ): boolean {
   if (!previous) return true;
   return previous.role !== current.role;
+}
+
+// ============================================================================
+// Rows (Issue #2245)
+// ============================================================================
+
+/**
+ * One row of the transcript.
+ *
+ * A row stopped being a message here. `messageType === 'prompt'` rows are
+ * approval dialogs, not replies (see `chat-tool-approvals` for the measurement),
+ * and a run of them collapses into ONE row carrying every chip — which is what
+ * turns codex's 41 consecutive `Bash: git worktree remove …` bubbles into a
+ * single line the reader can open if they want it.
+ */
+export type ChatTranscriptRow =
+  | {
+      kind: 'message';
+      /** Virtualizer key. The message id, which is already unique per row. */
+      key: string;
+      message: ChatMessage;
+      showHeader: boolean;
+    }
+  | {
+      kind: 'approvals';
+      /** Virtualizer key, namespaced so it can never collide with a message id. */
+      key: string;
+      entries: ToolApprovalEntry[];
+    };
+
+/**
+ * Turn a message list into the rows the transcript renders.
+ *
+ * Two things happen here and both are load-bearing:
+ *
+ *  1. consecutive approval rows fold into one `approvals` row;
+ *  2. `showHeader` is computed against the previous NON-approval message.
+ *
+ * (2) is what keeps the role labels honest. A chip group is not an assistant
+ * turn, so it must not be able to add or remove an "Assistant" header:
+ * `[user, assistant]` and `[user, prompt, prompt, assistant]` render the same
+ * one header, and `[assistant, prompt, assistant]` still renders exactly one.
+ * Asking {@link shouldShowRoleHeader} about the chip row instead — which is
+ * what the pre-#2245 code did, since a chip row was an assistant bubble — gives
+ * the second list ZERO assistant headers, because the reply is reading itself as
+ * a continuation of an audit row.
+ */
+export function buildChatTranscriptRows(messages: ChatMessage[]): ChatTranscriptRow[] {
+  const rows: ChatTranscriptRow[] = [];
+  /** The last row that speaks: approval chips are skipped over. */
+  let previousSpoken: ChatMessage | undefined;
+  let run: ChatMessage[] = [];
+
+  const flushRun = (): void => {
+    if (run.length === 0) return;
+    rows.push({
+      kind: 'approvals',
+      key: `approvals:${run[0].id}`,
+      entries: buildToolApprovalEntries(run),
+    });
+    run = [];
+  };
+
+  for (const message of messages) {
+    if (isToolApprovalMessage(message)) {
+      run.push(message);
+      continue;
+    }
+    flushRun();
+    rows.push({
+      kind: 'message',
+      key: message.id,
+      message,
+      showHeader: shouldShowRoleHeader(previousSpoken, message),
+    });
+    previousSpoken = message;
+  }
+  flushRun();
+
+  return rows;
 }
 
 // ============================================================================
