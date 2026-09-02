@@ -295,6 +295,9 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
   const chatLiveState: ChatSurfaceLiveState = useMemo(
     () => ({
       isRunning: terminal.isRunning,
+      // Issue #2238: same pair, same reason as the PC split — this is the field
+      // the in-flight bubble is gated on, and `isRunning` is not.
+      sessionStatus: terminal.sessionStatus,
       isThinking: terminal.isThinking,
       isPromptWaiting: prompt.visible,
       promptData: prompt.data,
@@ -304,6 +307,7 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
     }),
     [
       terminal.isRunning,
+      terminal.sessionStatus,
       terminal.isThinking,
       terminal.isSelectionListActive,
       terminal.isPagerActive,

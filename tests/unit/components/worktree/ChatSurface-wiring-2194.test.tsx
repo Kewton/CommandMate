@@ -112,6 +112,13 @@ const WORKTREE_ID = 'wt-2194-wiring';
 
 interface PaneOverrides {
   isRunning?: boolean;
+  /**
+   * Issue #2238. Defaulted to `'ready'` rather than derived from `isRunning`,
+   * on purpose: a pane that wires one and not the other is exactly the defect
+   * this file exists to catch, and a default that tracked `isRunning` would
+   * make the two indistinguishable again.
+   */
+  sessionStatus?: string;
   isThinking?: boolean;
   isSelectionListActive?: boolean;
   isPagerActive?: boolean;
@@ -126,6 +133,7 @@ function mockPane(overrides: PaneOverrides = {}): void {
       output: 'frame',
       realtimeSnippet: 'frame',
       isRunning: overrides.isRunning ?? false,
+      sessionStatus: overrides.sessionStatus ?? 'ready',
       isThinking: overrides.isThinking ?? false,
       isSelectionListActive: overrides.isSelectionListActive ?? false,
       isPagerActive: overrides.isPagerActive ?? false,
@@ -256,13 +264,27 @@ describe('[#2194] PC split feeds the chat surface', () => {
   });
 
   it('publishes a live turn to the transcript while a turn runs', async () => {
-    mockPane({ isRunning: true });
+    mockPane({ isRunning: true, sessionStatus: 'running' });
     renderSplitInChat();
-    // Issue #2233: the pane's `isRunning` has to reach `ChatTranscript` as
-    // `liveTurn`, because that is now the only path to a visible indicator.
+    // Issue #2233: the pane's generating verdict has to reach `ChatTranscript`
+    // as `liveTurn`, because that is now the only path to a visible indicator.
+    // Issue #2238 moved which field carries it — `sessionStatus`, not
+    // `isRunning` — so a pane that forwards only the latter fails here.
     await waitFor(() =>
       expect(screen.getByTestId('chat-transcript-live-turn')).toBeInTheDocument(),
     );
+  });
+
+  it('publishes no live turn for a live session that is not generating', async () => {
+    // Issue #2238, the reported bug, at the seam it actually failed at: a
+    // healthy tmux session with the agent idle at its prompt is
+    // `isRunning: true` + `'ready'`, and it drew "Responding…" indefinitely —
+    // through a full page reload, because nothing about the state was transient.
+    mockPane({ isRunning: true, sessionStatus: 'ready' });
+    renderSplitInChat();
+
+    await waitFor(() => expect(screen.getByTestId('chat-surface')).toBeInTheDocument());
+    expect(screen.queryByTestId('chat-transcript-live-turn')).toBeNull();
   });
 
   it('adds nothing to the terminal surface', async () => {
@@ -328,6 +350,22 @@ describe('[#2194] mobile terminal tab feeds the chat surface', () => {
         'unclassified',
       );
     });
+  });
+
+  it('publishes a live turn while a turn runs, and none while the pane is idle', async () => {
+    // Issue #2238 on the phone. The mobile tab builds its own `live` object, so
+    // forwarding `sessionStatus` on the PC split proves nothing about here.
+    mockPane({ isRunning: true, sessionStatus: 'running' });
+    const { unmount } = renderMobileInChat();
+    await waitFor(() =>
+      expect(screen.getByTestId('chat-transcript-live-turn')).toBeInTheDocument(),
+    );
+    unmount();
+
+    mockPane({ isRunning: true, sessionStatus: 'ready' });
+    renderMobileInChat();
+    await waitFor(() => expect(screen.getByTestId('chat-surface')).toBeInTheDocument());
+    expect(screen.queryByTestId('chat-transcript-live-turn')).toBeNull();
   });
 
   it('adds nothing to the terminal surface', async () => {

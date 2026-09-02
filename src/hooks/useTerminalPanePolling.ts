@@ -6,7 +6,7 @@
  * (Codex) fetch their own /current-output independently.
  *
  * What it owns:
- *  - terminal output / realtimeSnippet / isRunning / isThinking
+ *  - terminal output / realtimeSnippet / isRunning / isThinking / sessionStatus
  *  - prompt state (visible / data / answering / messageId)
  *  - isSelectionListActive (Issue #473 navigation buttons)
  *  - attaching flag (R3-006): true until first successful fetch resolves
@@ -110,8 +110,36 @@ function diffFileSignature(file: AgentSessionDiffFileView): string {
 export interface PaneTerminalState {
   output: string;
   realtimeSnippet: string;
+  /**
+   * A tmux session exists for this pane and is healthy — NOT "the agent is
+   * generating" (Issue #2238).
+   *
+   * The chain is `/current-output` -> `cliTool.isRunning()` ->
+   * `isClaudeRunning()` -> `hasSession()` + `isSessionHealthy()`, and every one
+   * of those links is a question about the session rather than about the turn.
+   * Read {@link sessionStatus} for the generating verdict.
+   */
   isRunning: boolean;
   isThinking: boolean;
+  /**
+   * The merged status verdict this pane's session last published, or `''`
+   * before the first poll resolves (Issue #2238).
+   *
+   * Value domain is `SessionStatus` from `@/lib/detection/status-detector` —
+   * `'idle' | 'ready' | 'running' | 'waiting'` — typed as a plain `string`
+   * because that is how `CurrentOutputPayload.sessionStatus` publishes it, and
+   * narrowing here would claim a guarantee the wire does not make.
+   *
+   * **Only the HTTP poll carries it.** `terminal_snapshot` (the WebSocket push)
+   * has no `sessionStatus` member at all, so a push leaves this field at
+   * whatever the last poll said rather than blanking it — see `applySnapshot`.
+   * The staleness that buys is bounded by the poll cadence: while push is
+   * healthy the fallback poll runs every {@link WS_CONNECTED_POLLING_INTERVAL_MS},
+   * and the push STOPS when the turn does (`broadcastTerminalSnapshot` is
+   * driven by the response poller tick), so {@link WS_PUSH_STALE_AFTER_MS} later
+   * the cadence effect re-runs and fetches immediately.
+   */
+  sessionStatus: string;
   isSelectionListActive: boolean;
   /**
    * Issue #1017: Codex pager / edit-previous mode (a subset of
@@ -159,6 +187,8 @@ export interface PanePromptState {
 interface CurrentOutputResponse {
   isRunning?: boolean;
   cliToolId?: CLIToolType;
+  /** Issue #2238: the merged generating verdict. See {@link PaneTerminalState.sessionStatus}. */
+  sessionStatus?: string;
   isGenerating?: boolean;
   isPromptWaiting?: boolean;
   promptData?: LivePromptData;
@@ -230,6 +260,7 @@ export function useTerminalPanePolling({
     realtimeSnippet: '',
     isRunning: false,
     isThinking: false,
+    sessionStatus: '',
     isSelectionListActive: false,
     isPagerActive: false,
     isUnclassifiedActive: false,
@@ -302,6 +333,14 @@ export function useTerminalPanePolling({
       fullOutput?: string;
       realtimeSnippet?: string;
       isRunning?: boolean;
+      /**
+       * Issue #2238. Absent means "this delivery path carries none" — which is
+       * every WebSocket push — and the previous value is kept rather than
+       * cleared. Passing `''` is not the same thing and is never done: a caller
+       * that KNOWS the session is stopped passes `'idle'`, the value the server
+       * publishes for one.
+       */
+      sessionStatus?: string;
       thinking?: boolean;
       isSelectionListActive?: boolean;
       isPagerActive?: boolean;
@@ -348,6 +387,7 @@ export function useTerminalPanePolling({
           realtimeSnippet: data.realtimeSnippet ?? '',
           isRunning: data.isRunning ?? false,
           isThinking: data.thinking ?? false,
+          sessionStatus: data.sessionStatus ?? prev.sessionStatus,
           isSelectionListActive: data.isSelectionListActive ?? false,
           isPagerActive: data.isPagerActive ?? false,
           isUnclassifiedActive: confirmedUnclassified,
@@ -447,6 +487,7 @@ export function useTerminalPanePolling({
       realtimeSnippet: '',
       isRunning: false,
       isThinking: false,
+      sessionStatus: '',
       isSelectionListActive: false,
       isPagerActive: false,
       isUnclassifiedActive: false,
@@ -542,6 +583,12 @@ export function useTerminalPanePolling({
         fullOutput: '',
         realtimeSnippet: '',
         isRunning: false,
+        // Issue #2238: explicit, not omitted. This event IS the knowledge that
+        // the session stopped, and `buildCurrentOutput` publishes exactly this
+        // pair (`'idle'` / `'session_not_running'`) for a stopped session — so
+        // leaving the last polled `'running'` in place would keep the chat
+        // surface claiming a turn that a kill just ended.
+        sessionStatus: 'idle',
         thinking: false,
         isSelectionListActive: false,
         isPagerActive: false,
