@@ -113,33 +113,42 @@ const POSITIVE_EVIDENCE = {
   lastKnownStatusAt: null,
 } as const;
 
+/**
+ * A live generating frame, as `buildCurrentOutput` publishes one.
+ *
+ * Named so a test can vary one field against a fixed rest — Issue #2240 needs
+ * `sessionStatus` to move while `isRunning` / `thinking` / `fullOutput` stay put,
+ * which is what makes "passed through" distinguishable from "re-derived".
+ */
+const BASE_PAYLOAD = {
+  isRunning: true,
+  cliToolId: 'claude',
+  sessionStatus: 'running',
+  sessionStatusReason: 'thinking_indicator',
+  content: '',
+  fullOutput: 'terminal out',
+  thinking: true,
+  isPromptWaiting: false,
+  promptData: null,
+  isSelectionListActive: false,
+  isPagerActive: false,
+  isUnclassifiedActive: false,
+  lineCount: 1,
+  lastStopEventAt: null,
+  structuredEvents: NO_STRUCTURED_EVENTS,
+  ...NO_MODEL_INFO,
+  ...NO_PROMPT_DEDUP,
+  ...NO_UPSTREAM_FAULT,
+  ...NO_PANE_OBSTRUCTION,
+  ...NO_COMPOSER_TEXT,
+  ...POSITIVE_EVIDENCE,
+} as const;
+
 beforeEach(() => {
   vi.clearAllMocks();
   __resetTerminalBroadcastState();
   mockHasSubscribers.mockReturnValue(true);
-  vi.mocked(buildCurrentOutput).mockResolvedValue({
-    isRunning: true,
-    cliToolId: 'claude',
-    sessionStatus: 'running',
-    sessionStatusReason: 'thinking_indicator',
-    content: '',
-    fullOutput: 'terminal out',
-    thinking: true,
-    isPromptWaiting: false,
-    promptData: null,
-    isSelectionListActive: false,
-    isPagerActive: false,
-    isUnclassifiedActive: false,
-    lineCount: 1,
-    lastStopEventAt: null,
-    structuredEvents: NO_STRUCTURED_EVENTS,
-    ...NO_MODEL_INFO,
-    ...NO_PROMPT_DEDUP,
-    ...NO_UPSTREAM_FAULT,
-    ...NO_PANE_OBSTRUCTION,
-    ...NO_COMPOSER_TEXT,
-    ...POSITIVE_EVIDENCE,
-  });
+  vi.mocked(buildCurrentOutput).mockResolvedValue({ ...BASE_PAYLOAD });
 });
 
 afterEach(() => vi.useRealTimers());
@@ -164,11 +173,37 @@ describe('broadcastTerminalSnapshot', () => {
       instanceId: 'claude',
       output: 'terminal out',
       isRunning: true,
+      // Issue #2240: the frame carries the merged verdict too, not just the
+      // session flag. `isRunning` says a healthy tmux session exists;
+      // `sessionStatus` is the one the chat surface gates a turn on (#2238).
+      sessionStatus: 'running',
       thinking: true,
       version: 1,
     });
     expect(mockBroadcast.mock.calls[1][1]).toMatchObject({ version: 2 });
   });
+
+  it.each(['running', 'ready', 'waiting', 'idle'])(
+    'passes the payload sessionStatus %s through unchanged (Issue #2240)',
+    async (sessionStatus) => {
+      // Verbatim, over the whole value domain — not derived from `isRunning` or
+      // `thinking`, both of which are held fixed here precisely so a re-derived
+      // verdict could not reproduce these four answers.
+      vi.mocked(buildCurrentOutput).mockResolvedValue({
+        ...BASE_PAYLOAD,
+        sessionStatus,
+        sessionStatusReason: 'fixture',
+      });
+
+      await broadcastTerminalSnapshot('wt-1', 'claude');
+
+      expect(mockBroadcast.mock.calls[0][1]).toMatchObject({
+        isRunning: true,
+        thinking: true,
+        sessionStatus,
+      });
+    },
+  );
 
   it('tracks versions independently per instance', async () => {
     await broadcastTerminalSnapshot('wt-1', 'claude');
@@ -233,13 +268,36 @@ describe('broadcastTerminalSnapshotAfterInteraction', () => {
     expect(mockBroadcast.mock.calls[0][1]).toMatchObject({
       instanceId: 'claude-2',
       output: 'old frame',
+      sessionStatus: 'waiting',
       version: 1,
     });
     expect(mockBroadcast.mock.calls[1][1]).toMatchObject({
       instanceId: 'claude-2',
       output: 'redrawn frame',
+      sessionStatus: 'running',
       version: 2,
     });
+  });
+
+  it('publishes a redraw whose only change is the verdict (Issue #2240)', async () => {
+    // The interaction path suppresses an unchanged redraw by fingerprint, and
+    // the fingerprint is what decides whether a frame counts as "changed". With
+    // `sessionStatus` left out of it, answering a dialog — same screen, verdict
+    // moving `waiting` -> `running` — would be swallowed, and the surface would
+    // sit on the pre-answer verdict until the fallback poll. That is the field
+    // back in the position this issue took it out of.
+    vi.useFakeTimers();
+    vi.mocked(buildCurrentOutput)
+      .mockResolvedValueOnce({ ...BASE_PAYLOAD, sessionStatus: 'waiting', sessionStatusReason: 'prompt_detected' })
+      .mockResolvedValueOnce({ ...BASE_PAYLOAD, sessionStatus: 'running', sessionStatusReason: 'thinking_indicator' });
+
+    const pending = broadcastTerminalSnapshotAfterInteraction('wt-1', 'claude', undefined, [10]);
+    await vi.advanceTimersByTimeAsync(10);
+    await pending;
+
+    expect(mockBroadcast).toHaveBeenCalledTimes(2);
+    expect(mockBroadcast.mock.calls[0][1]).toMatchObject({ sessionStatus: 'waiting' });
+    expect(mockBroadcast.mock.calls[1][1]).toMatchObject({ sessionStatus: 'running' });
   });
 
   it('does not duplicate the initial snapshot when retry frames are unchanged', async () => {

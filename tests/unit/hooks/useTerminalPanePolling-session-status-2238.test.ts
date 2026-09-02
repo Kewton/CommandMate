@@ -7,13 +7,19 @@
  * said "Responding…" on every live pane forever.
  *
  * Reading one more field would be a one-line change with nothing to test, if it
- * were not for the seam this file exists for: **the two delivery paths are not
+ * were not for the seam this file exists for: **the two delivery paths were not
  * equal here.** `terminal_snapshot` — the WebSocket push, which is what actually
- * feeds a pane while a turn runs — has no `sessionStatus` member at all
- * (`src/lib/realtime/types.ts`), and it shares `applySnapshot` with the HTTP
- * poll. Blank it on every push and the bubble strobes through the whole turn;
- * hold it on every path and a kill leaves a dead pane claiming to generate.
- * Both of those are asserted below.
+ * feeds a pane while a turn runs — had no `sessionStatus` member at all, and it
+ * shares `applySnapshot` with the HTTP poll. Blank it on every push and the
+ * bubble strobes through the whole turn; hold it on every path and a kill leaves
+ * a dead pane claiming to generate. Both of those are asserted below.
+ *
+ * Issue #2240 has since put `sessionStatus` on the push, so the frames in this
+ * file — which deliberately omit it — are now the OLD server's shape rather than
+ * the current one. They are kept exactly as they are: that combination is why
+ * the retention in `applySnapshot` survived #2240, and this file is where it is
+ * pinned. The frames a current server sends are asserted in
+ * `useTerminalPanePolling-push-session-status-2240`.
  *
  * @vitest-environment jsdom
  */
@@ -71,7 +77,8 @@ function freezePoll(
 }
 
 /** One `terminal_snapshot` for the pane under test. Carries no `sessionStatus`
- *  — that is the point, and it is the shape the server really broadcasts. */
+ *  — that is the point: it is the shape a server older than #2240 broadcasts,
+ *  and the client still has to keep its verdict when one arrives. */
 function snapshot(version: number, overrides: Record<string, unknown> = {}) {
   return {
     type: 'terminal_snapshot',
@@ -141,7 +148,7 @@ describe('[#2238] useTerminalPanePolling exposes sessionStatus', () => {
     expect(result.current.terminal.isRunning).toBe(true);
   });
 
-  it('keeps the last polled verdict across a WebSocket push, which carries none', async () => {
+  it('keeps the last polled verdict across a pre-#2240 push, which carries none', async () => {
     // While push is healthy the HTTP poll drops to a 15s fallback, so a push
     // that blanked this field would take the bubble down for most of the turn.
     mockFetch.mockImplementation(() =>

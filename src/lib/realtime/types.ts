@@ -113,6 +113,21 @@ export interface TerminalSnapshotEvent {
   instanceId: string;
   output: string;
   isRunning: boolean;
+  /**
+   * The merged status verdict (`SessionStatus`: `'idle' | 'ready' | 'running' |
+   * 'waiting'`), carried since Issue #2240 — the same value, from the same
+   * `buildCurrentOutput` call, that `/current-output` publishes to the HTTP
+   * poll. Typed `string` to match `CurrentOutputPayload.sessionStatus`.
+   *
+   * Required rather than optional on purpose. This frame already carried
+   * `isRunning` — "a healthy tmux session exists" — and not the verdict that
+   * says whether a turn is running, so the one field the chat surface gates on
+   * (#2238) was the one field only the poll could deliver. Requiring it here is
+   * the compile-time half of the fix: within a build, `emitTerminalSnapshot`
+   * cannot forget it. The wire is not typechecked, so the client still treats
+   * an absent value as "this frame says nothing" — see `applySnapshot`.
+   */
+  sessionStatus: string;
   thinking: boolean;
   isPromptWaiting: boolean;
   /**

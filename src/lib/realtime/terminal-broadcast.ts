@@ -77,6 +77,12 @@ function snapshotFingerprint(payload: Awaited<ReturnType<typeof buildCurrentOutp
   return JSON.stringify([
     payload.fullOutput ?? '',
     payload.isRunning,
+    // Issue #2240: part of the frame since the snapshot started carrying it, so
+    // a redraw whose only change is the verdict (`waiting` -> `running` on an
+    // answered dialog, say) is still published. Leaving it out would put the
+    // field back in the position this issue took it out of — present on the
+    // wire, but not deliverable by the path that actually feeds a live turn.
+    payload.sessionStatus,
     payload.thinking ?? false,
     payload.isPromptWaiting ?? false,
     payload.isSelectionListActive ?? false,
@@ -110,6 +116,12 @@ function emitTerminalSnapshot(
     instanceId: resolvedInstanceId,
     output: payload.fullOutput ?? '',
     isRunning: payload.isRunning,
+    // Issue #2240: straight through, so push and poll answer the same question
+    // with the same value. `/current-output` returns this very payload, so the
+    // two paths differ only in transport. Not `?? something` — the builder
+    // types it as a required `string` and publishes `'idle'` for a session that
+    // is not running, so there is no absent case to invent a default for.
+    sessionStatus: payload.sessionStatus,
     thinking: payload.thinking ?? false,
     isPromptWaiting: payload.isPromptWaiting ?? false,
     promptData: payload.promptData ?? null,
