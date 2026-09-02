@@ -21,7 +21,10 @@ export type {
 } from './ChatSurface';
 
 export { ChatTranscript } from './ChatTranscript';
-export type { ChatTranscriptProps } from './ChatTranscript';
+export type { ChatTranscriptProps, ChatTranscriptLiveTurn } from './ChatTranscript';
+
+export { ChatLiveTurnBubble } from './ChatLiveTurnBubble';
+export type { ChatLiveTurnBubbleProps } from './ChatLiveTurnBubble';
 
 export { ChatMessageBubble } from './ChatMessageBubble';
 export type { ChatMessageBubbleProps } from './ChatMessageBubble';

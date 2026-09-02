@@ -421,6 +421,7 @@
     "reasonPromptUnreadable": "応答待ちですが選択肢を読み取れませんでした。ターミナル面で確認してください。",
     "openTerminal": "ターミナルで確認",
     "jumpToLatest": "新着へ",
+    "jumpToLatestGenerating": "新着へ（応答中）",
     "progressLabel": "生成中の返答",
     "progressPartial": "途中から表示しています"
   },

@@ -10,14 +10,15 @@
  *     end for that state — which is why every flag is exercised ALONE below, and
  *     why removing `isPagerActive` from `resolveBlockedReason` has to turn one of
  *     these red (Issue #2194's mutation-injection criterion).
- *  2. **The generating row is drawn whenever a turn is running.** It used to be
+ *  2. **The live turn is published whenever a turn is running.** It used to be
  *     suppressed while the newest row was a user message, because
  *     `ConversationPairCard` drew its own "Waiting for response…" inside that
  *     pair. Issue #2232 replaced the body with `ChatTranscript`, which groups
  *     nothing into pairs and draws no such indicator — so the old gate would now
  *     delete the indicator for the commonest case there is (you sent a message
- *     and it is being answered). The remaining exclusion is #2199's live body,
- *     which carries the same spinner and sentence itself.
+ *     and it is being answered). Issue #2233 folded #2199's live body into the
+ *     same object: one `liveTurn`, with or without a body, handed to the
+ *     transcript, which draws it as the last bubble in the column.
  *  3. **No duplicated prompt UI.** An answerable wait is answered by the
  *     composer's own `PromptPanel` / `MobilePromptSheet`, which #2193 left
  *     rendering in chat mode. This surface must add nothing for that case — not
@@ -44,8 +45,22 @@ import type { ChatMessage, PromptData } from '@/types/models';
 import { UNCLASSIFIED_PROMPT_TYPE } from '@/types/models';
 import type { StructuredPromptWaitingData } from '@/lib/session/structured-prompt';
 
+interface StubLiveTurn {
+  turnKey?: string;
+  version?: number;
+  body?: string;
+  partial?: boolean;
+  isThinking?: boolean;
+}
+
 vi.mock('@/components/worktree/ChatTranscript', () => ({
-  ChatTranscript: ({ messages }: { messages: Array<{ id: string }> }) => (
+  ChatTranscript: ({
+    messages,
+    liveTurn,
+  }: {
+    messages: Array<{ id: string }>;
+    liveTurn?: StubLiveTurn | null;
+  }) => (
     <div data-testid="chat-transcript" data-message-count={String(messages.length)}>
       {/* Same testid the real transcript puts on its scroll region — ChatSurface
           finds the element to follow through exactly this selector. */}
@@ -53,6 +68,18 @@ vi.mock('@/components/worktree/ChatTranscript', () => ({
         {messages.map((m) => (
           <div key={m.id} data-message-id={m.id} />
         ))}
+        {/* Issue #2233: the live turn is the transcript's tail now, so the stub
+            has to publish what it was handed or the surface's decision is
+            invisible to this suite. */}
+        {liveTurn && (
+          <div
+            data-testid="chat-transcript-live-turn"
+            data-turn-key={liveTurn.turnKey ?? ''}
+            data-thinking={liveTurn.isThinking ? 'true' : 'false'}
+          >
+            {liveTurn.body ?? ''}
+          </div>
+        )}
       </div>
     </div>
   ),
@@ -304,39 +331,45 @@ describe('[#2194] ChatSurface "open the terminal" banner', () => {
 // ---------------------------------------------------------------------------
 
 describe('[#2194] ChatSurface generating indicator', () => {
-  it('draws the row while the newest message is the user turn being answered', () => {
+  it('publishes a live turn while the newest message is the user turn being answered', () => {
     // Issue #2232: this is the case the old `!isAwaitingReply` gate suppressed.
     // It was correct only while `ConversationPairCard` drew a pending indicator
     // of its own inside the last card; `ChatTranscript` draws none, so suppressing
     // it here would leave "you sent a message and it is being answered" with no
     // indicator anywhere on the surface.
     renderSurface({ isRunning: true }, [msg('a1', 'assistant'), msg('u1', 'user', 1000)]);
-    expect(screen.getByTestId('chat-surface-generating')).toBeInTheDocument();
+    expect(screen.getByTestId('chat-transcript-live-turn')).toBeInTheDocument();
   });
 
-  it('draws the row when the newest message is already an assistant reply', () => {
+  it('publishes it when the newest message is already an assistant reply', () => {
     renderSurface({ isRunning: true }, [msg('u1', 'user'), msg('a1', 'assistant', 1000)]);
-    expect(screen.getByTestId('chat-surface-generating')).toBeInTheDocument();
+    expect(screen.getByTestId('chat-transcript-live-turn')).toBeInTheDocument();
   });
 
-  it('draws the standalone row for a running session with no history yet', () => {
+  it('publishes it for a running session with no history yet', () => {
     renderSurface({ isRunning: true }, []);
-    expect(screen.getByTestId('chat-surface-generating')).toBeInTheDocument();
+    expect(screen.getByTestId('chat-transcript-live-turn')).toBeInTheDocument();
   });
 
-  it('draws nothing at all when the session is idle', () => {
+  it('publishes nothing at all when the session is idle', () => {
     renderSurface({ isRunning: false }, [msg('u1', 'user')]);
-    expect(screen.queryByTestId('chat-surface-generating')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('chat-transcript-live-turn')).not.toBeInTheDocument();
   });
 
-  it('changes its wording when the CLI reports thinking', () => {
+  it('forwards the thinking wording the CLI reports', () => {
     const history = [msg('u1', 'user'), msg('a1', 'assistant', 1000)];
     const { unmount } = renderSurface({ isRunning: true, isThinking: false }, history);
-    const running = screen.getByTestId('chat-surface-generating').textContent;
+    expect(screen.getByTestId('chat-transcript-live-turn')).toHaveAttribute(
+      'data-thinking',
+      'false',
+    );
     unmount();
 
     renderSurface({ isRunning: true, isThinking: true }, history);
-    expect(screen.getByTestId('chat-surface-generating').textContent).not.toBe(running);
+    expect(screen.getByTestId('chat-transcript-live-turn')).toHaveAttribute(
+      'data-thinking',
+      'true',
+    );
   });
 });
 
@@ -361,6 +394,16 @@ describe('[#2194] ChatSurface empty state', () => {
     // a real cost.
     renderSurface({}, [msg('u1', 'user'), msg('a1', 'assistant', 1000)]);
     expect(screen.queryByTestId('chat-surface-live')).not.toBeInTheDocument();
+  });
+
+  it('spends no footer height on a running turn either (Issue #2233)', () => {
+    // The strip used to appear the moment `isRunning` went true, taking height
+    // from the transcript on a screen that has ~33px to spare. The turn is a
+    // bubble in the transcript now, so the strip stays down unless there is a
+    // banner to raise.
+    renderSurface({ isRunning: true }, [msg('u1', 'user')]);
+    expect(screen.queryByTestId('chat-surface-live')).not.toBeInTheDocument();
+    expect(screen.getByTestId('chat-transcript-live-turn')).toBeInTheDocument();
   });
 });
 
@@ -389,14 +432,14 @@ describe('[#2194] ChatSurface optimistic rows', () => {
     expect(document.querySelectorAll('[data-message-id="same-id"]')).toHaveLength(1);
   });
 
-  it('still shows the generating row while a pending user row is the newest turn', () => {
+  it('still publishes a live turn while a pending user row is the newest turn', () => {
     // This assertion is INVERTED from #2194's, deliberately. Back then the
     // optimistic bubble made its pair pending and `ConversationPairCard` drew
     // the indicator, so a second one here was noise. `ChatTranscript` draws no
-    // pending indicator (Issue #2232), so the surface's row is now the only
-    // thing telling the reader their message is being answered.
+    // pending indicator (Issue #2232), so this is the only thing telling the
+    // reader their message is being answered.
     renderSurface({ isRunning: true }, [msg('pending-0', 'user', 5000)]);
-    expect(screen.getByTestId('chat-surface-generating')).toBeInTheDocument();
+    expect(screen.getByTestId('chat-transcript-live-turn')).toBeInTheDocument();
   });
 });
 
@@ -530,13 +573,28 @@ describe('[#2194] ChatSurface follow-the-tail', () => {
 // ---------------------------------------------------------------------------
 
 describe('[#2194] ChatSurface structure', () => {
-  it('keeps the live region OUTSIDE the transcript, as a shrink-0 sibling', () => {
-    // A "responding" row placed inside the virtual list is unmounted the moment
-    // the reader scrolls away from the end — exactly when they most need it.
-    renderSurface({ isRunning: true }, [msg('u1', 'user'), msg('a1', 'assistant', 1000)]);
+  it('keeps the banner region OUTSIDE the transcript, as a shrink-0 sibling', () => {
+    // What is left of #2194's live region after Issue #2233: the banner alone.
+    // It must stay a sibling — a banner inside the virtual list would be
+    // unmounted by scrolling, and it is the only way out of a stuck frame.
+    renderSurface({ isRunning: true, isPagerActive: true }, [
+      msg('u1', 'user'),
+      msg('a1', 'assistant', 1000),
+    ]);
     const live = screen.getByTestId('chat-surface-live');
     expect(live.className).toContain('shrink-0');
     expect(screen.getByTestId('chat-transcript').contains(live)).toBe(false);
+    expect(live.contains(screen.getByTestId('chat-surface-terminal-banner'))).toBe(true);
+  });
+
+  it('hands the running turn to the transcript rather than drawing it here', () => {
+    // Issue #2233's core move. A "responding" element owned by this component is
+    // in a different place on the screen from the settled row that replaces it,
+    // which is the jump the Issue exists to remove.
+    renderSurface({ isRunning: true }, [msg('u1', 'user'), msg('a1', 'assistant', 1000)]);
+    const live = screen.getByTestId('chat-transcript-live-turn');
+    expect(screen.getByTestId('chat-transcript').contains(live)).toBe(true);
+    expect(screen.queryByTestId('chat-surface-live')).not.toBeInTheDocument();
   });
 
   it('names the instance it is showing', () => {

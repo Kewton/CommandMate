@@ -135,3 +135,23 @@ export function splitFilePathParts(content: string): ChatContentPart[] {
 
   return parts;
 }
+
+// ============================================================================
+// The in-flight turn (Issue #2233)
+// ============================================================================
+
+/**
+ * Whether the live bubble at the tail needs an "Assistant" header.
+ *
+ * The same rule {@link shouldShowRoleHeader} applies to a settled row, asked
+ * about a row that does not exist yet: the in-flight reply IS an assistant
+ * message, it is simply not saved. Deriving it here rather than inlining
+ * `previous?.role !== 'assistant'` at the call site is what guarantees the
+ * header does not appear or disappear at the moment the turn settles — the two
+ * answers are computed from the same `previous` by the same predicate, so a
+ * change to one is a change to both.
+ */
+export function shouldShowLiveRoleHeader(previous: ChatMessage | undefined): boolean {
+  if (!previous) return true;
+  return previous.role !== 'assistant';
+}

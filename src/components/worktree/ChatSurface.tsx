@@ -10,13 +10,30 @@
  *
  *   1. a generating indicator, so a turn in flight is visible — and, since Issue
  *      #2199, the in-flight body itself for the two tools that can produce one;
- *   2. a live region that survives virtualization — it is a `shrink-0` sibling of
- *      the transcript, NOT a row inside the virtual list, because a row inside it
- *      is unmounted the moment the reader scrolls away from the end;
+ *   2. a live region that survives virtualization;
  *   3. an "open the terminal" banner for the states chat cannot drive at all
  *      (selection list / pager / unreadable frame / a wait nobody could parse);
  *   4. follow-the-tail with a "jump to latest" chip when the reader has scrolled
  *      up, on the same discipline `TerminalDisplay` follows output on.
+ *
+ * ## Where the in-flight reply lives (Issue #2233 moved it)
+ *
+ * (1) and (2) used to be one footer strip below the transcript. That kept the
+ * body mounted while the reader scrolled, which was the whole point, but it also
+ * meant the reply grew in one place — `.assistant-md`, `text-xs`, full pane
+ * width, clamped to `max-h-[7.5rem]` — and then vanished and reappeared as a
+ * settled bubble somewhere else, in `.chat-md` at `text-sm`. Issue #2233 hands
+ * the state to `ChatTranscript` as `liveTurn`, which draws it as the last bubble
+ * in the column: inside the scroll region, outside the virtual list. Nothing can
+ * unmount it — #2194's reason is preserved — and completing the turn changes
+ * nothing on screen but the spinner going away.
+ *
+ * What this surface keeps is the consequence of that move: the live bubble is in
+ * the flow, so scrolling up carries it off screen. The jump-to-latest chip
+ * therefore wears the spinner whenever a turn is live and the reader is not at
+ * the end, so "still running, and it is below you" never disappears.
+ *
+ * The `shrink-0` live region that remains holds the terminal banner alone.
  *
  * ## The transcript it wraps (Issue #2232)
  *
@@ -59,13 +76,10 @@
 import React, { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { ArrowDown, Loader2, TerminalSquare } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import rehypeSanitize from 'rehype-sanitize';
-import rehypeHighlight from 'rehype-highlight';
 import {
   ChatTranscript,
   CHAT_TRANSCRIPT_SCROLL_CONTAINER_TESTID,
+  type ChatTranscriptLiveTurn,
 } from '@/components/worktree/ChatTranscript';
 import { isAnswerablePromptData, type ChatMessage, type LivePromptData } from '@/types/models';
 import type { CLIToolType } from '@/lib/cli-tools/types';
@@ -256,30 +270,6 @@ export function isTurnSettled(messages: readonly ChatMessage[], turnKey: string)
 }
 
 /**
- * The in-flight reply, rendered the way the settled row will be.
- *
- * Same plugin set as `ConversationPairCard`'s `AssistantMarkdown` — `remarkGfm`
- * + `rehypeSanitize` + `rehypeHighlight`, and deliberately no `rehypeRaw` — so
- * the paragraph does not reflow the moment the live body is replaced by the row.
- * That component is not exported and this one does not need its file-path
- * linkifier: a path in a body that is still being written is a path that may
- * still gain characters, and the settled row a second later is where clicking it
- * belongs.
- *
- * Memoised on `content` alone, so a re-render of the surface for any other
- * reason does not rebuild the DOM tree of a body that has not changed.
- */
-const ChatTurnProgressBody = memo(function ChatTurnProgressBody({ content }: { content: string }) {
-  const remarkPlugins = useMemo(() => [remarkGfm], []);
-  const rehypePlugins = useMemo(() => [rehypeSanitize, rehypeHighlight], []);
-  return (
-    <ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins}>
-      {content}
-    </ReactMarkdown>
-  );
-});
-
-/**
  * Why the chat surface cannot drive this frame, or `null` when it can.
  *
  * The four members are the states Epic #2192 decided are terminal-only: arrow-key
@@ -329,6 +319,10 @@ export const ChatSurface = memo(function ChatSurface({
   const isPinnedRef = useRef(true);
   const prevMessageCountRef = useRef(-1);
   const [hasNewBelow, setHasNewBelow] = useState(false);
+  // Issue #2233: the same fact as `isPinnedRef`, in state, because the chip has
+  // to re-render on it. The ref stays the one the layout effects read — they run
+  // before React has committed a state change made in the same scroll event.
+  const [isAtBottom, setIsAtBottom] = useState(true);
 
   const getScrollContainer = useCallback((): HTMLElement | null => {
     return rootRef.current?.querySelector<HTMLElement>(CHAT_SCROLL_CONTAINER_SELECTOR) ?? null;
@@ -338,6 +332,7 @@ export const ChatSurface = memo(function ChatSurface({
     const container = getScrollContainer();
     if (container) container.scrollTop = container.scrollHeight;
     isPinnedRef.current = true;
+    setIsAtBottom(true);
     setHasNewBelow(false);
   }, [getScrollContainer]);
 
@@ -354,6 +349,7 @@ export const ChatSurface = memo(function ChatSurface({
         clientHeight: container.clientHeight,
       });
       isPinnedRef.current = pinned;
+      setIsAtBottom(pinned);
       if (pinned) setHasNewBelow(false);
     };
     container.addEventListener('scroll', onScroll);
@@ -395,44 +391,52 @@ export const ChatSurface = memo(function ChatSurface({
       ? pushedProgress
       : null;
 
-  // The live body scrolls INSIDE its own capped box, never by moving the page.
-  // Its height is bounded (see the markup) precisely so a growing reply cannot
-  // eat the transcript, and the tail is the half worth showing: the reader is
-  // watching the model type.
-  const progressBodyRef = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => {
-    const box = progressBodyRef.current;
-    if (box) box.scrollTop = box.scrollHeight;
-  }, [progress?.body]);
+  // --------------------------------------------------------------------
+  // The live tail (Issue #2233)
+  // --------------------------------------------------------------------
+  // One object covers both cases the surface used to draw separately, because
+  // they are one bubble now: a tool that publishes progress fills `body`, and a
+  // tool that publishes none (codex / antigravity / vibe-local) supplies only
+  // `isThinking` and gets the indicator alone — in the same place, so the
+  // stronger case is a superset of the weaker one rather than a second layout.
+  //
+  // Issue #2232 removed the old `!isAwaitingReply(...)` gate on the indicator,
+  // and the reason still holds: `ConversationPairCard` drew its own "Waiting for
+  // response…" inside the last pending card and `ChatTranscript` draws none, so
+  // gating here would delete the indicator for the commonest case there is —
+  // the user sent a message and the agent is answering it.
+  //
+  // Memoised on the scalars it is built from, not rebuilt per render: a fresh
+  // object identity on every poll would re-render the memoized `ChatTranscript`
+  // — and re-run its virtualizer — for a turn whose body has not changed.
+  const liveTurn = useMemo<ChatTranscriptLiveTurn | null>(() => {
+    if (progress !== null) {
+      return {
+        turnKey: progress.turnKey,
+        version: progress.version,
+        body: progress.body,
+        partial: progress.partial,
+        isThinking: live.isThinking === true,
+      };
+    }
+    return live.isRunning === true ? { isThinking: live.isThinking === true } : null;
+  }, [progress, live.isRunning, live.isThinking]);
 
-  // The live region is a `shrink-0` sibling, so it appearing / disappearing /
-  // growing takes height from the transcript and leaves a pinned reader a few
-  // pixels short of the bottom. Re-pin — but only when they were pinned, which
-  // is the same rule every other follow in this component obeys.
+  const isLiveTurn = liveTurn !== null;
+
+  // The bubble grows inside the scroll region now, so following it is the same
+  // `scrollTop = scrollHeight` every other follow here uses — and only while the
+  // reader was already pinned, which is the rule none of them break.
   useLayoutEffect(() => {
     if (!isPinnedRef.current) return;
     const container = getScrollContainer();
     if (container) container.scrollTop = container.scrollHeight;
-  }, [progress?.body, getScrollContainer]);
+  }, [progress?.body, isLiveTurn, getScrollContainer]);
 
   // --------------------------------------------------------------------
   // Live region content
   // --------------------------------------------------------------------
   const blockedReason = resolveBlockedReason(live);
-
-  // Issue #2232 removed this row's `!isAwaitingReply(...)` gate, and the reason is
-  // the whole point of that Issue. The gate existed because
-  // `ConversationPairCard` drew its own "Waiting for response…" inside the last
-  // card whenever that pair had no reply yet, so a standalone row on top of it
-  // said the same thing twice. `ChatTranscript` groups nothing into pairs and
-  // draws no such indicator, so keeping the gate would have deleted the
-  // indicator outright for the single most common case there is: the user sent a
-  // message and the agent is answering it.
-  //
-  // Issue #2199's exclusion stands: not while the live body is on screen either,
-  // because that bubble carries its own spinner and the same sentence three
-  // lines lower.
-  const showGeneratingRow = live.isRunning === true && progress === null;
 
   const handleOpenTerminal = useCallback(() => {
     onSurfaceModeChange('terminal');
@@ -461,107 +465,67 @@ export const ChatSurface = memo(function ChatSurface({
           messages={visibleMessages}
           worktreeId={worktreeId}
           cliToolId={cliToolId}
+          liveTurn={liveTurn}
           className="h-full"
         />
-        {hasNewBelow && (
+        {/* The chip. It is also the answer to what Issue #2233 gave up: the live
+            bubble is in the transcript's flow, so scrolling up carries it off
+            screen. While a turn is live and the reader is not at the end, the
+            chip wears the spinner and says so in its accessible name, which is
+            the one place "still running, below you" can be stated without
+            pinning a second copy of the reply to the viewport. */}
+        {(hasNewBelow || (isLiveTurn && !isAtBottom)) && (
           <button
             type="button"
             data-testid="chat-surface-new-messages"
+            data-generating={isLiveTurn ? 'true' : undefined}
             onClick={scrollToLatest}
+            aria-label={isLiveTurn ? t('chatSurface.jumpToLatestGenerating') : undefined}
             className="absolute bottom-3 left-1/2 z-10 flex min-h-[36px] -translate-x-1/2 items-center gap-1.5 rounded-full border border-border bg-surface-2 px-3 py-1.5 text-xs font-medium text-foreground shadow-lg transition-colors hover:bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-ring touch-manipulation"
           >
-            <ArrowDown size={14} aria-hidden="true" />
+            {isLiveTurn ? (
+              <Loader2 size={14} className="animate-spin" aria-hidden="true" />
+            ) : (
+              <ArrowDown size={14} aria-hidden="true" />
+            )}
             {t('chatSurface.jumpToLatest')}
           </button>
         )}
       </div>
 
-      {/* Live region — a `shrink-0` SIBLING of the transcript, never a row in it.
-          The virtual list unmounts every row outside the visible window, so a
-          "generating" row placed at the end of the transcript disappears the
-          moment the reader scrolls up, which is the one moment they most need to
-          know a turn is still running. */}
-      {(progress !== null || showGeneratingRow || blockedReason !== null) && (
+      {/* What is left of the footer live region (Issue #2233): the terminal
+          banner, and nothing else. The generating indicator and the in-flight
+          body moved into the transcript's tail — same reason as ever, opposite
+          implementation. This strip is `shrink-0`, so on the phone every pixel
+          it takes comes out of the transcript (Issue #2106's budget); it is not
+          rendered at all when there is no banner to raise. */}
+      {blockedReason !== null && (
         <div
           data-testid="chat-surface-live"
           role="group"
           aria-label={t('chatSurface.liveRegionLabel')}
-          className="shrink-0 space-y-1.5 border-t border-border bg-surface px-3 py-2"
+          className="shrink-0 border-t border-border bg-surface px-3 py-2"
         >
-          {progress !== null && (
-            <div
-              data-testid="chat-surface-progress"
-              data-turn-key={progress.turnKey}
-              data-version={String(progress.version)}
-              role="status"
-              aria-live="polite"
-              aria-label={t('chatSurface.progressLabel')}
-              className="rounded-lg border border-border bg-surface-2/50 px-2 py-1.5"
+          <div
+            data-testid="chat-surface-terminal-banner"
+            data-reason={blockedReason}
+            role="status"
+            aria-label={t('chatSurface.bannerLabel')}
+            className="flex flex-wrap items-center gap-2 rounded-lg border border-warning-border bg-warning-subtle px-2 py-1.5"
+          >
+            <span className="min-w-0 flex-1 text-xs text-foreground">
+              {t(BLOCKED_REASON_KEY[blockedReason])}
+            </span>
+            <button
+              type="button"
+              data-testid="chat-surface-open-terminal"
+              onClick={handleOpenTerminal}
+              className="flex min-h-[32px] shrink-0 items-center gap-1 rounded-md border border-warning-border bg-surface px-2 py-1 text-xs font-medium text-warning-foreground transition-colors hover:bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-ring touch-manipulation"
             >
-              <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                <Loader2 size={14} className="animate-spin" aria-hidden="true" />
-                <span>
-                  {live.isThinking ? t('chatSurface.thinking') : t('chatSurface.generating')}
-                </span>
-                {progress.partial && (
-                  <span
-                    data-testid="chat-surface-progress-partial"
-                    className="rounded border border-warning-border bg-warning-subtle px-1 py-0.5 text-warning-foreground"
-                  >
-                    {t('chatSurface.progressPartial')}
-                  </span>
-                )}
-              </div>
-              {/* Capped and self-scrolling. An unbounded box would hand a long
-                  reply the whole surface and push the transcript out of it —
-                  the same vertical-budget rule Issue #2106 established for the
-                  phone, applied to the one element here that grows without
-                  limit. */}
-              <div
-                ref={progressBodyRef}
-                data-testid="chat-surface-progress-body"
-                className="assistant-md mt-1 max-h-[7.5rem] overflow-y-auto overflow-x-hidden break-words [word-break:break-word] text-xs text-foreground"
-              >
-                <ChatTurnProgressBody content={progress.body} />
-              </div>
-            </div>
-          )}
-
-          {showGeneratingRow && (
-            <div
-              data-testid="chat-surface-generating"
-              role="status"
-              className="flex items-center gap-2 text-xs text-muted-foreground"
-            >
-              <Loader2 size={14} className="animate-spin" aria-hidden="true" />
-              <span>
-                {live.isThinking ? t('chatSurface.thinking') : t('chatSurface.generating')}
-              </span>
-            </div>
-          )}
-
-          {blockedReason !== null && (
-            <div
-              data-testid="chat-surface-terminal-banner"
-              data-reason={blockedReason}
-              role="status"
-              aria-label={t('chatSurface.bannerLabel')}
-              className="flex flex-wrap items-center gap-2 rounded-lg border border-warning-border bg-warning-subtle px-2 py-1.5"
-            >
-              <span className="min-w-0 flex-1 text-xs text-foreground">
-                {t(BLOCKED_REASON_KEY[blockedReason])}
-              </span>
-              <button
-                type="button"
-                data-testid="chat-surface-open-terminal"
-                onClick={handleOpenTerminal}
-                className="flex min-h-[32px] shrink-0 items-center gap-1 rounded-md border border-warning-border bg-surface px-2 py-1 text-xs font-medium text-warning-foreground transition-colors hover:bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-ring touch-manipulation"
-              >
-                <TerminalSquare size={14} aria-hidden="true" />
-                {t('chatSurface.openTerminal')}
-              </button>
-            </div>
-          )}
+              <TerminalSquare size={14} aria-hidden="true" />
+              {t('chatSurface.openTerminal')}
+            </button>
+          </div>
         </div>
       )}
     </div>
