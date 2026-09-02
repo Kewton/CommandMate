@@ -1238,7 +1238,12 @@ export async function buildCurrentOutput(
   // terminal snapshot already has. Gated on the merged verdict (`'running'`, not
   // the tmux-session-exists `isRunning`) so an idle pane reads no transcript.
   if (payload.isRunning && payload.sessionStatus === 'running') {
-    void publishChatTurnProgress(db, worktreeId, cliToolId, instanceId);
+    // Issue #2248 made this an `await`, and it buys less than it looks like: the
+    // expensive half — the transcript read and the broadcast — is detached
+    // inside, so what is waited for is a worktree row and a Map lookup. What it
+    // buys is that the frame's outcome is logged against the tick that produced
+    // it rather than whenever the event loop got round to the detached tail.
+    await publishChatTurnProgress(db, worktreeId, cliToolId, instanceId);
   }
   if (!resolution) return payload;
   return {
@@ -1934,6 +1939,24 @@ interface ChatTurnProgressState {
   turnKey: string | null;
   /** The last published body, for the "nothing changed" check. */
   body: string | null;
+  /** Issue #2248: the outcome already reported at info for this instance. */
+  loggedOutcome: ChatTurnProgressOutcome | null;
+  /** Issue #2248: the turn that outcome was reported for; null when unknown. */
+  loggedTurnKey: string | null;
+}
+
+/** Issue #2248: what one tick of the progress publisher did. */
+type ChatTurnProgressOutcome = 'published' | 'no-subscribers' | 'failed';
+
+function newChatTurnProgressState(): ChatTurnProgressState {
+  return {
+    version: 0,
+    askedAt: Number.NEGATIVE_INFINITY,
+    turnKey: null,
+    body: null,
+    loggedOutcome: null,
+    loggedTurnKey: null,
+  };
 }
 
 declare global {
@@ -1959,6 +1982,71 @@ function chatTurnProgressKey(target: ChatTurnProgressTarget): string {
 /** Forget every instance's progress bookkeeping. Test seam. */
 export function resetChatTurnProgressState(): void {
   chatTurnProgressState.clear();
+}
+
+/**
+ * Say once, at info, what happened to this instance's progress frames (Issue #2248).
+ *
+ * ## Why info, and why this file had none
+ *
+ * Every outcome here was `logger.debug`, including the two that mean the reader
+ * is watching a blank space: a push that threw, and a room with no subscribers.
+ * Issue #2248 was opened after a live session where the body reached the browser
+ * — or did not — and the server logs could not answer which, because debug is
+ * off in the builds people run. An unobservable push is a feature that can only
+ * be debugged by reproducing it.
+ *
+ * ## Why once
+ *
+ * The publisher runs on EVERY poll tick of a generating session. Logging each
+ * tick at info would put a line per second per agent into the operator's log and
+ * make the level useless, so this collapses a run of identical ticks into its
+ * first: the outcome and the turn it happened on are the identity, and a repeat
+ * of the pair says nothing the first line did not.
+ *
+ * The consequences of that identity, both deliberate:
+ *
+ *  - **a new turn always logs**, because `turnKey` is part of the pair. That is
+ *    the acceptance criterion — one info line per turn — and the reason
+ *    `loggedTurnKey` exists at all rather than a bare boolean;
+ *  - **a CHANGE of outcome always logs**, so "the subscriber left" and "it
+ *    started failing" are both visible the tick they happen, without the
+ *    steady state that follows repeating them.
+ *
+ * `no-subscribers` and `failed` carry no turn key — neither knows one; the first
+ * returns before the source is asked and the second is why there is no frame —
+ * so for them the pair is `(outcome, null)` and the run collapses to one line
+ * until something else happens.
+ */
+function logChatTurnProgressOutcome(
+  target: ChatTurnProgressTarget,
+  outcome: ChatTurnProgressOutcome,
+  turnKey: string | null,
+  extra: Record<string, unknown> = {},
+): void {
+  const key = chatTurnProgressKey(target);
+  const state = chatTurnProgressState.get(key) ?? newChatTurnProgressState();
+  chatTurnProgressState.set(key, state);
+  if (state.loggedOutcome === outcome && state.loggedTurnKey === turnKey) return;
+  state.loggedOutcome = outcome;
+  state.loggedTurnKey = turnKey;
+
+  // Written out rather than interpolated: these strings are what an operator
+  // greps the log for, and an interpolated name cannot be found in the source.
+  const message =
+    outcome === 'published'
+      ? 'chat-turn-progress-published'
+      : outcome === 'no-subscribers'
+        ? 'chat-turn-progress-no-subscribers'
+        : 'chat-turn-progress-failed';
+
+  logger.info(message, {
+    worktreeId: target.worktreeId,
+    cliToolId: target.cliToolId,
+    instanceId: target.instanceId ?? target.cliToolId,
+    turnKey,
+    ...extra,
+  });
 }
 
 /**
@@ -1999,12 +2087,7 @@ export async function buildChatTurnProgress(
   now: number = Date.now(),
 ): Promise<ChatTurnProgressEvent | null> {
   const key = chatTurnProgressKey(target);
-  const state = chatTurnProgressState.get(key) ?? {
-    version: 0,
-    askedAt: Number.NEGATIVE_INFINITY,
-    turnKey: null,
-    body: null,
-  };
+  const state = chatTurnProgressState.get(key) ?? newChatTurnProgressState();
 
   if (now - state.askedAt < CHAT_TURN_PROGRESS_MIN_INTERVAL_MS) return null;
   state.askedAt = now;
@@ -2065,18 +2148,28 @@ export async function emitChatTurnProgress(
 ): Promise<boolean> {
   try {
     const { broadcast, hasRoomSubscribers } = await import('@/lib/ws-server');
-    if (!hasRoomSubscribers(target.worktreeId)) return false;
+    if (!hasRoomSubscribers(target.worktreeId)) {
+      // Issue #2248. Reported, not silent: "the body never reached the browser"
+      // and "nobody was listening" look identical from a screenshot, and this is
+      // the only place that can tell them apart.
+      logChatTurnProgressOutcome(target, 'no-subscribers', null);
+      return false;
+    }
 
     const event = await buildChatTurnProgress(target, source, now);
+    // Not logged: null is the throttle, an unchanged body, or a turn with no
+    // text yet — the quiet, correct majority of ticks.
     if (!event) return false;
 
     broadcast(target.worktreeId, event);
+    logChatTurnProgressOutcome(target, 'published', event.turnKey, {
+      version: event.version,
+      bodyLength: event.body.length,
+      partial: event.partial,
+    });
     return true;
   } catch (error) {
-    logger.debug('chat-turn-progress-failed', {
-      worktreeId: target.worktreeId,
-      cliToolId: target.cliToolId,
-      instanceId: target.instanceId ?? target.cliToolId,
+    logChatTurnProgressOutcome(target, 'failed', null, {
       error: error instanceof Error ? error.message : String(error),
     });
     return false;
@@ -2097,6 +2190,20 @@ export async function emitChatTurnProgress(
  * out of the module graph of the `/current-output` route and of `commandmate
  * capture`, both of which reach this file for a payload and nothing else.
  *
+ * ## Which half the caller waits for (Issue #2248)
+ *
+ * The caller awaits the CHEAP half — the worktree row and "is anybody watching"
+ * — and not the expensive one. That split is what `void` was protecting in the
+ * first place: the 4 MiB transcript read, the JSONL parse, the render and the
+ * broadcast still run detached, so no poll tick and no WebSocket snapshot waits
+ * on them.
+ *
+ * What awaiting the prelude buys is the reason this Issue exists: the line that
+ * says whether anybody received the frame is written while the tick it belongs
+ * to is still the tick in progress. Left inside the detached half it landed
+ * wherever the event loop happened to get to it, next to some unrelated
+ * request's output, which is not a log an operator can read backwards.
+ *
  * Never throws: `emitChatTurnProgress` swallows, and so does this.
  */
 async function publishChatTurnProgress(
@@ -2106,6 +2213,7 @@ async function publishChatTurnProgress(
   instanceId?: string,
 ): Promise<void> {
   if (cliToolId !== 'claude') return;
+  const target: ChatTurnProgressTarget = { worktreeId, cliToolId, instanceId };
   try {
     // The slug the transcript directory is named after is a function of the
     // worktree's path, so the row is what makes the file findable at all. Read
@@ -2116,7 +2224,19 @@ async function publishChatTurnProgress(
     const worktreePath = getWorktreeById(db, worktreeId)?.path;
     if (!worktreePath) return;
 
-    await emitChatTurnProgress({ worktreeId, cliToolId, instanceId }, async () => {
+    // Issue #2248. Hoisted out of `emitChatTurnProgress` — which still makes the
+    // same check for its other caller — so the answer, and the line that reports
+    // it, are settled before this function returns. Costs one Map lookup on the
+    // sessions nobody is watching, which is the bargain that was already being
+    // struck one frame later.
+    const { hasRoomSubscribers } = await import('@/lib/ws-server');
+    if (!hasRoomSubscribers(worktreeId)) {
+      logChatTurnProgressOutcome(target, 'no-subscribers', null);
+      return;
+    }
+
+    // Detached on purpose: everything past this point is the transcript read.
+    void emitChatTurnProgress(target, async () => {
       const { readClaudeTurnProgress } = await import('@/lib/hooks/sources/claude/history');
       return readClaudeTurnProgress(
         { worktreeId, cliToolId, instanceId: instanceId ?? cliToolId },
@@ -2124,9 +2244,9 @@ async function publishChatTurnProgress(
       );
     });
   } catch (error) {
-    logger.debug('chat-turn-progress-claude-failed', {
-      worktreeId,
-      instanceId: instanceId ?? cliToolId,
+    // Issue #2248: the reader's half of the same failure — the worktree row or
+    // one of the dynamic imports — on the same once-per-run gate as the push's.
+    logChatTurnProgressOutcome(target, 'failed', null, {
       error: error instanceof Error ? error.message : String(error),
     });
   }

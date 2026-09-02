@@ -423,7 +423,9 @@
     "jumpToLatest": "Jump to latest",
     "jumpToLatestGenerating": "Jump to latest (still responding)",
     "progressLabel": "Reply being written",
-    "progressPartial": "Showing the latest part only"
+    "progressPartial": "Showing the latest part only",
+    "settling": "Not saved to the conversation yet",
+    "settlingLabel": "Reply waiting to be saved"
   },
   "chatTranscript": {
     "regionLabel": "Chat transcript",
