@@ -4,12 +4,22 @@
  * Four properties are load-bearing here, and each of them has a specific way of
  * quietly regressing:
  *
- *  1. **The banner's gate.** It exists for the frames chat cannot drive at all
+ *  1. **The banner's gate.** It exists for the frames the composer cannot drive
  *     (selection list / pager / unreadable frame / a wait nobody could parse).
  *     Drop one flag from the condition and the surface silently becomes a dead
  *     end for that state — which is why every flag is exercised ALONE below, and
  *     why removing `isPagerActive` from `resolveBlockedReason` has to turn one of
- *     these red (Issue #2194's mutation-injection criterion).
+ *     these red (Issue #2194's mutation-injection criterion, kept by #2254).
+ *
+ *     What the gate now decides is bigger than a sentence. Issue #2254 withdrew
+ *     Epic #2192's decision 5 — those four frames are no longer terminal-only —
+ *     so `resolveBlockedReason` returning non-null is what puts the DIALOG CARD
+ *     and its key pads on screen. Dropping a flag used to cost the user a
+ *     sentence; it now costs them the only way to answer that dialog without
+ *     leaving the surface. The banner tests below therefore assert the card
+ *     alongside the banner, and the card's own behaviour (which rows, which
+ *     controls, where the keys go) is pinned in
+ *     `ChatSurface-dialog-card-2254.test.tsx`.
  *  2. **The live turn is published whenever a turn is running.** It used to be
  *     suppressed while the newest row was a user message, because
  *     `ConversationPairCard` drew its own "Waiting for response…" inside that
@@ -22,7 +32,7 @@
  *  3. **No duplicated prompt UI.** An answerable wait is answered by the
  *     composer's own `PromptPanel` / `MobilePromptSheet`, which #2193 left
  *     rendering in chat mode. This surface must add nothing for that case — not
- *     even a banner.
+ *     a banner, and (since #2254) not a card and not a key pad either.
  *  4. **Follow-the-tail.** Following on the MESSAGE count is what this surface
  *     needs and what a pair-count follow (`HistoryPane`'s, #1123) could not give
  *     it: an assistant reply joining the existing last pair grew that card
@@ -153,6 +163,16 @@ const IDLE: ChatSurfaceLiveState = {
   isUnclassifiedActive: false,
 };
 
+/**
+ * A pane frame for the Issue #2254 dialog card.
+ *
+ * Every banner state in this file now also draws a card, so the surface is given
+ * a frame by default rather than each test opting in. Deliberately trivial — the
+ * card's own rules (tail extraction, row budget, ANSI) are the subject of
+ * `dialog-frame-2254.test.ts` and `ChatSurface-dialog-card-2254.test.tsx`.
+ */
+const FRAME = ['Select model', '❯ 1. Default', '  2. Opus', 'Esc to cancel'].join('\n');
+
 function renderSurface(
   live: Partial<ChatSurfaceLiveState> = {},
   messages: ChatMessage[] = [msg('u1', 'user'), msg('a1', 'assistant', 1000)],
@@ -166,6 +186,7 @@ function renderSurface(
       instanceId="claude-2"
       live={{ ...IDLE, ...live }}
       onSurfaceModeChange={onSurfaceModeChange}
+      frame={FRAME}
     />,
   );
   return { ...result, onSurfaceModeChange };
@@ -237,7 +258,7 @@ describe('[#2194] ChatSurface helpers', () => {
 // Banner
 // ---------------------------------------------------------------------------
 
-describe('[#2194] ChatSurface "open the terminal" banner', () => {
+describe('[#2194] ChatSurface blocked-frame banner (rewritten for Issue #2254)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -245,6 +266,7 @@ describe('[#2194] ChatSurface "open the terminal" banner', () => {
   it('stays hidden while every flag is false', () => {
     renderSurface();
     expect(screen.queryByTestId('chat-surface-terminal-banner')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('chat-dialog-card')).not.toBeInTheDocument();
   });
 
   it('shows for a selection list alone', () => {
@@ -253,16 +275,24 @@ describe('[#2194] ChatSurface "open the terminal" banner', () => {
       'data-reason',
       'selectionList',
     );
+    expect(screen.getByTestId('chat-dialog-card')).toHaveAttribute(
+      'data-reason',
+      'selectionList',
+    );
   });
 
   it('shows for a pager alone', () => {
-    // Mutation-injection target (Issue #2194): drop `isPagerActive` from
-    // `resolveBlockedReason` and this is the test that must go red.
+    // Mutation-injection target (Issue #2194, kept by #2254): drop
+    // `isPagerActive` from `resolveBlockedReason` and this is the test that must
+    // go red. Since #2254 the stake is higher than a sentence — losing this flag
+    // loses the pager's scroll keys too, which is why the card is asserted
+    // alongside the banner rather than instead of it.
     renderSurface({ isPagerActive: true });
     expect(screen.getByTestId('chat-surface-terminal-banner')).toHaveAttribute(
       'data-reason',
       'pager',
     );
+    expect(screen.getByTestId('chat-dialog-card')).toHaveAttribute('data-reason', 'pager');
   });
 
   it('shows for an unclassified frame alone', () => {
@@ -271,11 +301,19 @@ describe('[#2194] ChatSurface "open the terminal" banner', () => {
       'data-reason',
       'unclassified',
     );
+    expect(screen.getByTestId('chat-dialog-card')).toHaveAttribute(
+      'data-reason',
+      'unclassified',
+    );
   });
 
   it('shows for a wait whose payload nobody could parse', () => {
     renderSurface({ isPromptWaiting: true, promptData: UNREADABLE_PROMPT });
     expect(screen.getByTestId('chat-surface-terminal-banner')).toHaveAttribute(
+      'data-reason',
+      'promptUnreadable',
+    );
+    expect(screen.getByTestId('chat-dialog-card')).toHaveAttribute(
       'data-reason',
       'promptUnreadable',
     );
@@ -291,10 +329,13 @@ describe('[#2194] ChatSurface "open the terminal" banner', () => {
 
   it('stays hidden for an ANSWERABLE wait — the composer already has that', () => {
     // `PromptPanel` (PC) / `MobilePromptSheet` (phone) are still rendered in chat
-    // mode by #2193. A banner here would send the user to the terminal for a
-    // dialog they can answer where they are.
+    // mode by #2193. Issue #2254 did not change this branch: a card here would
+    // be a SECOND control for a dialog the composer can already answer, and its
+    // number keys would race the panel's own response.
     renderSurface({ isPromptWaiting: true, promptData: ANSWERABLE_PROMPT });
     expect(screen.queryByTestId('chat-surface-terminal-banner')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('chat-dialog-card')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('prompt-answer-keys')).not.toBeInTheDocument();
   });
 
   it('never renders a prompt panel of its own', () => {
@@ -303,7 +344,9 @@ describe('[#2194] ChatSurface "open the terminal" banner', () => {
     expect(screen.queryByTestId('mobile-prompt-sheet')).not.toBeInTheDocument();
   });
 
-  it('gives the user exactly one button, and it switches the surface once', () => {
+  it('keeps the way to the terminal as a single secondary button', () => {
+    // Issue #2254 demoted it: the dialog is answerable in the card above, and
+    // this is the way to the whole pane. Still exactly one, still one call.
     const { onSurfaceModeChange } = renderSurface({ isSelectionListActive: true });
     const buttons = screen.getAllByTestId('chat-surface-open-terminal');
     expect(buttons).toHaveLength(1);

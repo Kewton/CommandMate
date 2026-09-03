@@ -170,6 +170,25 @@ graph TD
   （生成中の本文は列末尾の `ChatLiveTurnBubble`、Issue #2233）、`terminal` は
   `TerminalDisplay`。**入力面は両モード共通**で、待機中は同じ `PromptPanel` が
   出る（Issue #2194 が出力面に応答 UI を置いていないのはこのため）
+- **「TUI 外ダイアログ・選択リスト・pager はチャット面で操作しない」という Epic #2192 の
+  決定 5 は Issue #2254 で撤回された**。チャット面は `resolveBlockedReason` が非 null の
+  4 状態（pager / selectionList / unclassified / promptUnreadable）で、live 領域に
+  **ペイン末尾を描いた `ChatDialogCard`**（切り出しは `lib/chat/dialog-frame.ts`）と
+  状態別の操作（`NavigationButtons` / `TerminalEscapeHatch` / `PromptAnswerKeys`）を出す。
+  切り出しは**空行圧縮 → 末尾 12〜20 行**の順で、逆順にすると codex のように内容がペイン
+  上端に来るツールでカードが空になる（`capture-pane` は `TUI_PANE_HEIGHT` = 1000 行を
+  そのまま返す。実測は `tests/fixtures/chat-dialog-card-2254/README.md`）。
+  `frame` に渡すのは `PaneTerminalState.output` で、`realtimeSnippet`（末尾 100 行）は
+  同じ理由で使えない
+- **答えが「方向」でなく「文字」の待ちのために `NAVIGATION_KEY_VALUES` へ `1`〜`9` / `y` / `n`
+  を追加**（Issue #2254、`ANSWER_KEY_VALUES`）。`/special-keys` は宣言したツールの語彙で
+  検証するので（Issue #2046）全ツールが受け付ける。自由文字列は通さず、`/send` の
+  `prompt_waiting` ガードも触っていない
+- **同じ操作 UI を 2 か所に出さない**。チャット面表示中は PC footer の `showNav` /
+  `showEscapeHatch`（`TerminalSplitPaneContent`）と、スマホの docked `NavigationButtons`
+  （`WorktreeDetailRefactored`）を落としてカード側へ寄せる。後者はタブ外にあるため
+  `MobileTerminalTab` が `onSurfaceModeChange` で mount 時にもモードを上へ報告する。
+  `PromptPanel` / `MobilePromptSheet` は対象外（答えられる待ちにカードを出さないため）
 - **「チャット面の本体は `HistoryPane` をそのまま使う」という Epic #2192 の決定 1 は
   Issue #2232 で撤回された**。履歴ブラウザは 1 画面に多くのターンを俯瞰させたい、会話面は
   返信そのものを読ませたい、と必要な情報密度が正反対で 1 実装では両立しないため

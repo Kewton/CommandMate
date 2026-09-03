@@ -17,15 +17,24 @@
  * Auto-Yes — is identical in both modes, which is why a send, a prompt answer
  * and an interrupt all keep working from the chat surface.
  *
+ * Issue #2254 made TWO of those footer members mode-dependent, and only two:
+ * `NavigationButtons` and `TerminalEscapeHatch` drive the TUI FRAME rather than
+ * the composer, and the chat surface now draws its own copy of each inside the
+ * dialog card, directly under the frame it acts on. So `showNav` /
+ * `showEscapeHatch` are false in chat mode. The composer, Auto-Yes, the
+ * quick-key strip and `PromptPanel` are unchanged — `PromptPanel` most
+ * deliberately, because it answers the one wait the chat surface draws nothing
+ * for (see `resolveBlockedReason`).
+ *
  * Issue #2261: the pane also carries the temporary "maximize this split"
  * toggle. The state itself lives in `useTerminalSplits` (container-owned); what
  * is here is the `Mod+Shift+Enter` listener, which resolves split ownership
  * through `[data-split-index]` exactly as the #2193 chord below does.
  *
  * Issue #2194: that chat body is now `ChatSurface` rather than a bare
- * `HistoryPane` — same transcript, plus the live region (generating row, the
- * "open the terminal" banner for frames chat cannot drive, the empty-state line)
- * and follow-the-tail. The #1121 pending bubble it shows on send is the existing
+ * `HistoryPane` — same transcript, plus the live region (a banner for frames the
+ * composer cannot drive, and since #2254 the dialog card under it) and
+ * follow-the-tail. The #1121 pending bubble it shows on send is the existing
  * `usePendingMessages` merge below; nothing new sends from here.
  *
  * This is the consumer that translates polled split state into UI on PC.
@@ -514,7 +523,24 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
     clearPrompt();
   }, [clearPrompt]);
 
-  const showNav = terminal.isSelectionListActive;
+  // Issue #2254: the chat surface draws its own copy of these two, inside the
+  // dialog card and directly under the frame they act on. Before this Issue the
+  // footer was rendered in BOTH modes (`footer={footerSlot}` below is
+  // unconditional) and neither gate looked at `surfaceMode`, so switching to
+  // chat left `NavigationButtons` under the composer, twelve rows away from a
+  // selection list the surface was simultaneously telling the user it could not
+  // show. `PromptPanel` is deliberately NOT gated: it is the composer's own
+  // control for an answerable wait, the chat surface never draws one (see
+  // `ChatSurface`'s "What this deliberately does NOT do"), and hiding it in chat
+  // mode would take away the only way to answer an ordinary yes/no.
+  const isChatSurface = surfaceMode === 'chat';
+
+  // The frame-level facts, independent of which surface is showing. Kept apart
+  // from the render gates below so the `!isSelectionListFrame` term in the
+  // escape-hatch condition keeps meaning "a selection list is on screen" rather
+  // than becoming "the footer happens to be drawing the nav pad".
+  const isSelectionListFrame = terminal.isSelectionListActive;
+  const showNav = isSelectionListFrame && !isChatSurface;
   const showPrompt = prompt.visible && !autoYesEnabled;
   // Issue #1932: the approval this pane's dialog addresses, when the payload
   // names one. Null for every scraper-read prompt and for every source that
@@ -528,10 +554,12 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   // not rendered — and no selection list / prompt panel is already driving it. Stays
   // hidden during normal generation ('thinking_indicator') and at an idle input prompt
   // ('ready'), so Enter/'q' can never reach the composer.
+  // Issue #2254 added the `!isChatSurface` term; the other three are unchanged.
   const showEscapeHatch =
     terminal.isUnclassifiedActive &&
-    !showNav &&
-    !prompt.visible;
+    !isSelectionListFrame &&
+    !prompt.visible &&
+    !isChatSurface;
 
   // Issue #1879: the unsent-input bar. Its gate is the composer's CONTENTS and
   // nothing else — not isUnclassifiedActive, not isSelectionListActive, not
@@ -687,6 +715,13 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
               isUnclassifiedActive: terminal.isUnclassifiedActive,
             }}
             onSurfaceModeChange={handleSurfaceModeChange}
+            // Issue #2254: the dialog card's frame. `terminal.output`, not
+            // `terminal.realtimeSnippet` — see `ChatSurfaceProps.frame` for the
+            // measurement behind that choice (a codex pane's last 100 rows are
+            // blank). `refresh` is the same immediate re-poll the footer's key
+            // strips are given, so the card redraws right after a key lands.
+            frame={terminal.output}
+            onKeysSent={refresh}
           />
         </div>
       </div>
@@ -704,6 +739,8 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       terminal.isSelectionListActive,
       terminal.isPagerActive,
       terminal.isUnclassifiedActive,
+      terminal.output,
+      refresh,
       prompt.visible,
       prompt.data,
       handleSurfaceModeChange,

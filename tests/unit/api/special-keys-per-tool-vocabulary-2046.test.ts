@@ -121,6 +121,43 @@ describe('another tool cannot be sent an opencode chord (Issue #2046)', () => {
   });
 });
 
+describe('the Issue #2254 answer characters reach the transport for EVERY tool', () => {
+  // The state these exist for is "a wait is on screen and nothing could read
+  // it", which by construction says nothing about which tool drew the dialog —
+  // so unlike #2046's chords these are in the BASE vocabulary and every tool
+  // publishes them. Asserted through the REAL registry, because the route
+  // resolves the vocabulary from `ICLITool.navigationKeys()`.
+  it.each(['claude', 'codex', 'gemini', 'copilot', 'vibe-local', 'antigravity', 'opencode'])(
+    'accepts every number and y/n for %s',
+    async (cliToolId) => {
+      for (const key of ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'y', 'n']) {
+        const res = await post({ cliToolId, keys: [key] });
+        expect(res.status, `${cliToolId} + ${key}`).toBe(200);
+      }
+    }
+  );
+
+  it('delivers the key verbatim rather than a name the transport would reject', async () => {
+    await post({ cliToolId: 'claude', keys: ['3'] });
+    expect(sendSpecialKeysAndInvalidate).toHaveBeenCalledWith(
+      expect.stringContaining('claude'),
+      ['3']
+    );
+  });
+
+  it('still answers 400 for what #2254 deliberately left out', async () => {
+    // `0` (no measured dialog offers it), a two-character number (the route
+    // delivers one key per array entry and no chord handling exists for `10`),
+    // the upper-case verdicts, and the neighbouring letters. Widening any of
+    // these would be a new way to type into a composer.
+    for (const key of ['0', '10', 'Y', 'N', 'z', 'x']) {
+      const res = await post({ cliToolId: 'claude', keys: [key] });
+      expect(res.status, `claude + ${key}`).toBe(400);
+    }
+    expect(sendSpecialKeysAndInvalidate).not.toHaveBeenCalled();
+  });
+});
+
 describe('the keys #2046 measured and refused stay refused (Issue #2046)', () => {
   it('answers 400 for the sidebar chord `ctrl+x b`, for opencode itself', async () => {
     // Not an oversight: §22.3 of docs/design/opencode-server-live-verification.md.
