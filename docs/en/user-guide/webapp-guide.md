@@ -24,9 +24,10 @@ It's a step-by-step guide for first-time users.
 11. [Agent Settings](#agent-settings)
 12. [Switching the Output Surface (Terminal / Chat)](#switching-the-output-surface-terminal--chat)
 13. [The Default Output Surface (Terminal / Chat)](#the-default-output-surface-terminal--chat)
-14. [Execution Contract and Verification](#execution-contract-and-verification)
-15. [Mobile Access](#mobile-access)
-16. [Phone Notifications (Web Push)](#phone-notifications-web-push)
+14. [Temporarily Maximizing One Split (Desktop)](#temporarily-maximizing-one-split-desktop)
+15. [Execution Contract and Verification](#execution-contract-and-verification)
+16. [Mobile Access](#mobile-access)
+17. [Phone Notifications (Web Push)](#phone-notifications-web-push)
 
 ---
 
@@ -432,6 +433,39 @@ Each browser picks the value up in the background the first time it opens any se
 surface, and what that request buys is the **next** surface opened — including, after a
 reload, the first one. Opening the More screen seeds it immediately on that device. A
 browser that has never reached the server starts on `Terminal`.
+
+---
+
+## Temporarily Maximizing One Split (Desktop)
+
+Two or three splits side by side means each one is narrow. When you only need the room
+while reading a long dialog or a diff, you can **blow one split up to the full width and
+put it back with the same gesture** (Issue #2261).
+
+| Action | Where |
+|--------|-------|
+| **Maximize / restore** | The button at the right end of each split's title bar (⤢ / ⤡) |
+| **Maximize / restore** | The button in the action bar above the splits (acts on the focused split) |
+| **Maximize / restore** | `Cmd/Ctrl + Shift + Enter` |
+
+`Cmd/Ctrl + Shift + Enter` follows the same rule as `Cmd/Ctrl + Shift + M` (the output
+surface switch): it acts on the **split that holds focus**. With focus outside every split,
+the first split answers — except while you are typing in a field outside the splits.
+
+The hidden splits **keep their sessions and keep polling** while they are off screen, so
+restoring shows the output that arrived in the meantime. The action bar's `2 / 3 splits`
+label reads "Split 2 maximized" while one is maximized.
+
+Because it is **temporary**, the layout comes back on its own when you:
+
+- add or remove a split,
+- press the equalize-widths button in the action bar,
+- switch to another worktree, or
+- reload the page (the maximized state is not persisted; the width ratios you dragged are,
+  so restoring returns the exact proportions you had).
+
+The file panel on the right is not part of this. Hide it with **[Open Files]** in the
+action bar instead.
 
 ---
 

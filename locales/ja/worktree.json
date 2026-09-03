@@ -430,7 +430,12 @@
     "endSessionFor": "{name}のセッションを終了",
     "filesEmptyHint": "ファイルを開くと有効になります",
     "historyAllSplitsHint": "すべての split に適用",
-    "historyChatOnlyHint": "すべての split がチャット表示のため、履歴列はありません"
+    "historyChatOnlyHint": "すべての split がチャット表示のため、履歴列はありません",
+    "maximizeSplit": "{split} を最大化",
+    "maximizeFocusedSplit": "フォーカス中の split を最大化",
+    "restoreSplits": "分割表示に戻す",
+    "maximizeShortcutHint": "⌘ / Ctrl + Shift + Enter",
+    "maximizedStatus": "{split} を最大化中"
   },
   "surfaceMode": {
     "groupLabel": "{split} の出力面",

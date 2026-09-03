@@ -10,6 +10,9 @@
  *    are gone), reading the persisted state in useHistoryPaneState /
  *    useFilePanelState and disabled when the panel they name cannot appear
  *  - PaneResizer widget(s) between splits, with width persistence
+ *  - the temporary "maximize one split" state (Issue #2261): the Action bar's
+ *    restore button, and the `display: none` that hides the other splits
+ *    WITHOUT unmounting them, so their sessions and polling keep running
  *  - delegating each split's body to a parent-supplied `renderPane`
  *
  * Does NOT include HistoryPane (HISTORY_PANE_ID uniqueness is owned by
@@ -31,7 +34,15 @@ import React, {
   type ReactNode,
 } from 'react';
 import { useTranslations } from 'next-intl';
-import { History, Files, AlignHorizontalDistributeCenter, Plus, Minus } from 'lucide-react';
+import {
+  History,
+  Files,
+  AlignHorizontalDistributeCenter,
+  Plus,
+  Minus,
+  Maximize2,
+  Minimize2,
+} from 'lucide-react';
 import { getInstanceLabel, type AgentInstance, type CLIToolType } from '@/lib/cli-tools/types';
 import type { ShowToast } from '@/types/markdown-editor';
 import { MAX_SPLITS, MIN_SPLITS } from '@/config/terminal-split-config';
@@ -70,6 +81,16 @@ export interface RenderTerminalSplitPaneArgs {
    * Stable per-index reference.
    */
   onDropInstance: (instanceId: string) => void;
+  /**
+   * Issue #2261: whether THIS split is the one currently filling the terminal
+   * row. Drives the pressed state of the pane's own maximize/restore toggle.
+   */
+  isMaximized: boolean;
+  /**
+   * Issue #2261: maximize this split, or restore the split layout when it is
+   * already maximized. Stable per-index reference.
+   */
+  onToggleMaximize: () => void;
 }
 
 export interface TerminalSplitContainerProps {
@@ -146,6 +167,8 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
     availableInstanceIds,
     focusedSplitIndex,
     setFocusedSplitIndex,
+    maximizedIndex,
+    toggleMaximize,
   } = useTerminalSplits(worktreeId, instances, rosterReady);
 
   // Stable lookup from instanceId → AgentInstance for label / availability.
@@ -284,6 +307,28 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
   const canEqualize = splits.length > MIN_SPLITS || historyVisible;
 
   /*
+   * Issue #2261: the Action bar's half of the maximize toggle.
+   *
+   * The per-split button lives in each pane's title bar, which is exactly the
+   * thing that is off screen while another split is maximized — so the restore
+   * gesture has to exist somewhere that is always visible. It is the SAME
+   * toggle, not a separate "restore" command: while nothing is maximized it
+   * blows up the focused split, and while something is it restores the layout,
+   * so `aria-pressed` here and in the title bar always report the same fact.
+   *
+   * Disabled at a single split: there is no other split for it to take room
+   * from, so flipping the state would render identically.
+   */
+  const isMaximized = maximizedIndex !== null;
+  const canMaximize = splits.length > MIN_SPLITS;
+  const handleToggleMaximize = useCallback(() => {
+    toggleMaximize(maximizedIndex ?? focusedSplitIndex);
+  }, [toggleMaximize, maximizedIndex, focusedSplitIndex]);
+  const maximizeLabel = isMaximized
+    ? t('terminal.restoreSplits')
+    : t('terminal.maximizeFocusedSplit');
+
+  /*
    * Issue #2259: the two toggles are disabled when the thing they show cannot
    * appear, instead of flipping a state with no visible effect.
    *
@@ -322,6 +367,13 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
     () =>
       splits.map((_, idx) => (instanceId: string) => setSplitInstance(idx, instanceId)),
     [splits, setSplitInstance],
+  );
+
+  // Issue #2261: per-split maximize toggles, memoized for the same reason the
+  // focus / drop handlers are — they cross `renderPane` into memoized panes.
+  const maximizeHandlers = useMemo(
+    () => splits.map((_, idx) => () => toggleMaximize(idx)),
+    [splits, toggleMaximize],
   );
 
   /**
@@ -377,8 +429,16 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
     >
       {/* Action bar */}
       <div className="flex items-center gap-1 px-2 py-1 bg-surface border-b border-border flex-shrink-0">
-        <span className="text-xs text-muted-foreground tabular-nums mr-1 truncate">
-          {splits.length} / {MAX_SPLITS} splits
+        {/* Issue #2261: while a split is maximized the split count is no longer
+            what the row is showing, so the label says which split is filling it
+            instead — the one line that explains why the other panes vanished. */}
+        <span
+          data-testid="split-count-label"
+          className="text-xs text-muted-foreground tabular-nums mr-1 truncate"
+        >
+          {isMaximized
+            ? t('terminal.maximizedStatus', { split: (maximizedIndex ?? 0) + 1 })
+            : `${splits.length} / ${MAX_SPLITS} splits`}
         </span>
 
         {/*
@@ -431,6 +491,25 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
             className="w-4 h-4 flex-shrink-0"
             aria-hidden="true"
           />
+        </button>
+
+        {/* Issue #2261: maximize the focused split / restore the layout. */}
+        <button
+          type="button"
+          onClick={handleToggleMaximize}
+          disabled={!canMaximize}
+          aria-disabled={!canMaximize}
+          aria-pressed={isMaximized}
+          aria-label={maximizeLabel}
+          title={`${maximizeLabel} — ${t('terminal.maximizeShortcutHint')}`}
+          data-testid="toggle-maximize-split"
+          className="flex items-center justify-center h-7 w-7 rounded text-muted-foreground hover:text-surface-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors"
+        >
+          {isMaximized ? (
+            <Minimize2 className="w-4 h-4 flex-shrink-0" aria-hidden="true" />
+          ) : (
+            <Maximize2 className="w-4 h-4 flex-shrink-0" aria-hidden="true" />
+          )}
         </button>
 
         {/* Issue #1079: separator dividing layout ops (left) from panel toggles
@@ -517,14 +596,29 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
       <div ref={containerRef} className="flex flex-1 min-h-0 w-full">
         {splits.map((split, idx) => {
           const isLast = idx === splits.length - 1;
+          /*
+           * Issue #2261: `display: none`, NOT `flexGrow: 0`.
+           *
+           * A zero-grow flex child is still laid out (at width 0) and still
+           * reports a zero-height/zero-width box to every `measureElement` the
+           * virtualized transcript inside it runs, which corrupts the measured
+           * cache it restores from on the way back. `display: none` takes the
+           * subtree out of layout entirely, and — crucially — leaves it MOUNTED:
+           * the hidden splits' sessions, polling and scroll positions survive,
+           * so restoring shows output that kept arriving.
+           */
+          const hidden = maximizedIndex !== null && maximizedIndex !== idx;
           return (
             <React.Fragment key={`split-${idx}`}>
               <div
+                data-testid={`split-wrapper-${idx}`}
+                data-hidden={hidden ? 'true' : undefined}
                 style={{
-                  flexGrow: widths[idx] ?? 1,
+                  flexGrow: maximizedIndex === idx ? 1 : (widths[idx] ?? 1),
                   flexShrink: 1,
                   flexBasis: 0,
                   minWidth: 0,
+                  ...(hidden ? { display: 'none' } : null),
                 }}
                 className="h-full"
               >
@@ -540,11 +634,16 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
                   onFocus: focusHandlers[idx],
                   isFocused: focusedSplitIndex === idx,
                   onDropInstance: dropHandlers[idx],
+                  isMaximized: maximizedIndex === idx,
+                  onToggleMaximize: maximizeHandlers[idx],
                 })}
               </div>
               {!isLast ? (
                 <PaneResizerWrapper
                   resizerIdx={idx}
+                  // Issue #2261: there is no boundary to drag while one split
+                  // owns the whole row; the handle comes back on restore.
+                  hidden={maximizedIndex !== null}
                   ariaValueNow={
                     widths.length
                       ? (widths[idx] / widths.reduce((s, x) => s + x, 0)) * 100
@@ -576,6 +675,7 @@ function PaneResizerWrapper({
   onStart,
   onEnd,
   onDoubleClick,
+  hidden = false,
 }: {
   resizerIdx: number;
   ariaValueNow: number;
@@ -584,6 +684,8 @@ function PaneResizerWrapper({
   onEnd: () => void;
   /** Issue #861: double-clicking the resizer equalizes terminal split widths. */
   onDoubleClick?: () => void;
+  /** Issue #2261: hidden (but mounted) while a split is maximized. */
+  hidden?: boolean;
 }) {
   const handleResize = useCallback(
     (delta: number) => onResize(resizerIdx, delta),
@@ -592,6 +694,7 @@ function PaneResizerWrapper({
   return (
     <div
       data-testid={`split-resizer-${resizerIdx}`}
+      style={hidden ? { display: 'none' } : undefined}
       onMouseDownCapture={onStart}
       onTouchStartCapture={onStart}
       onMouseUpCapture={onEnd}

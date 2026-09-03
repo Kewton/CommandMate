@@ -14,6 +14,11 @@
  * by instanceId. For the primary instance `instanceId === cliToolId`, so the
  * pre-#869 single-instance behavior is byte-for-byte unchanged.
  *
+ * Issue #2261: the hook also owns `maximizedIndex` — which single split is
+ * temporarily filling the terminal row. It sits BESIDE the persisted
+ * `TerminalSplitConfig` rather than inside it precisely so it is not written to
+ * localStorage: a reload is supposed to come back to the user's split layout.
+ *
  * Intentionally NOT folded into `useWorktreeUIState` / `LayoutState` to keep
  * the reducer scoped to VS Code-style layout (activityBar / historyPane /
  * leftPaneTab) and avoid action explosion (S3-006).
@@ -60,6 +65,22 @@ export interface UseTerminalSplitsReturn {
   availableInstanceIds: (idx: number) => string[];
   focusedSplitIndex: number;
   setFocusedSplitIndex: (idx: number) => void;
+  /**
+   * Issue #2261: the split currently blown up to the whole terminal row, or
+   * `null` when every split shares the row as usual.
+   *
+   * Deliberately NOT part of {@link TerminalSplitConfig} and therefore NOT
+   * persisted: "temporarily" is the requirement, so a reload comes back to the
+   * split layout the user actually built. `widths` is left untouched while a
+   * split is maximized, which is what makes restoring exact rather than
+   * approximate — the container simply stops reading it for one render pass.
+   */
+  maximizedIndex: number | null;
+  /**
+   * Issue #2261: maximize `idx`, or restore the split layout when `idx` is
+   * already the maximized split. Out-of-range indexes are ignored.
+   */
+  toggleMaximize: (idx: number) => void;
 }
 
 function cloneDefault(): TerminalSplitConfig {
@@ -237,6 +258,9 @@ export function useTerminalSplits(
     readInitialState(worktreeId, instances, rosterReady),
   );
   const [focusedSplitIndex, setFocusedSplitIndexRaw] = useState(0);
+  // Issue #2261: transient, in-memory only — see `maximizedIndex` on the return
+  // type for why it never reaches localStorage.
+  const [maximizedIndex, setMaximizedIndex] = useState<number | null>(null);
 
   // Issue #786: mirror the latest config + roster in refs so `setSplitInstance`
   // / `addSplit` can decide synchronously without depending on `config` /
@@ -258,6 +282,9 @@ export function useTerminalSplits(
     prevWorktreeIdRef.current = worktreeId;
     setConfig(readInitialState(worktreeId, instancesRef.current, rosterReadyRef.current));
     setFocusedSplitIndexRaw(0);
+    // Issue #2261: a different worktree is a different set of sessions; carrying
+    // "split 2 is maximized" across the switch would blow up an unrelated pane.
+    setMaximizedIndex(null);
   }, [worktreeId]);
 
   // Issue #869: reconcile against the roster when it changes (instances added /
@@ -302,6 +329,8 @@ export function useTerminalSplits(
   }, [config, worktreeId]);
 
   const addSplit = useCallback(() => {
+    // Issue #2261: a new split the user cannot see is not a new split.
+    setMaximizedIndex(null);
     setConfig(prev => {
       if (prev.splits.length >= MAX_SPLITS) return prev;
       const used = new Set(prev.splits.map(s => s.instanceId));
@@ -321,6 +350,10 @@ export function useTerminalSplits(
   }, []);
 
   const removeSplit = useCallback(() => {
+    // Issue #2261: unconditional, so closing the LAST split while an EARLIER one
+    // is maximized still restores the layout — the clamp below only catches the
+    // case where the maximized index itself stopped existing.
+    setMaximizedIndex(null);
     setConfig(prev => {
       if (prev.splits.length <= MIN_SPLITS) return prev;
       const splits = prev.splits.slice(0, -1);
@@ -337,6 +370,13 @@ export function useTerminalSplits(
       if (prev < 0) return 0;
       return prev;
     });
+    // Issue #2261: the maximized split can also stop existing without anyone
+    // pressing "remove" — the roster reconcile (#869 / #898) trims the split
+    // count too. A `maximizedIndex` pointing past the end would hide EVERY
+    // remaining split, so it is dropped rather than clamped to a neighbour.
+    setMaximizedIndex(prev =>
+      prev !== null && prev > config.splits.length - 1 ? null : prev,
+    );
   }, [config.splits.length]);
 
   const setSplitInstance = useCallback((idx: number, instanceId: string): boolean => {
@@ -374,6 +414,9 @@ export function useTerminalSplits(
   }, []);
 
   const resetWidths = useCallback(() => {
+    // Issue #2261: "equalize" is the user asking to see every split at the same
+    // width, which is the opposite of one split filling the row.
+    setMaximizedIndex(null);
     setConfig(prev => {
       const n = prev.splits.length;
       if (n === 0) return prev; // defensive; MIN_SPLITS=1 makes this unreachable
@@ -396,6 +439,14 @@ export function useTerminalSplits(
     setFocusedSplitIndexRaw(idx);
   }, []);
 
+  // Issue #2261: same button in the split title bar and in the Action bar, so
+  // one toggle rather than a maximize()/restore() pair. Reads the live split
+  // count through `configRef` (not `config`) to stay referentially stable.
+  const toggleMaximize = useCallback((idx: number) => {
+    if (idx < 0 || idx >= configRef.current.splits.length) return;
+    setMaximizedIndex(prev => (prev === idx ? null : idx));
+  }, []);
+
   return {
     splits: config.splits,
     widths: config.widths,
@@ -407,5 +458,7 @@ export function useTerminalSplits(
     availableInstanceIds,
     focusedSplitIndex,
     setFocusedSplitIndex,
+    maximizedIndex,
+    toggleMaximize,
   };
 }
