@@ -13,10 +13,11 @@
 import React, { useMemo, useCallback, memo, useRef, useLayoutEffect, useState, useEffect } from 'react';
 import { useTranslations } from 'next-intl';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { Search, User, UserCheck, ChevronRight } from 'lucide-react';
+import { Search, User, UserCheck, ChevronLeft } from 'lucide-react';
 import { Checkbox, Skeleton } from '@/components/ui';
 import type { ChatMessage } from '@/types/models';
 import { useConversationHistory } from '@/hooks/useConversationHistory';
+import { splitHistorySlotId } from '@/hooks/useHistoryPaneState';
 import { useHistorySearch } from '@/hooks/useHistorySearch';
 import { ConversationPairCard } from './ConversationPairCard';
 import { HistorySearchBar } from './HistorySearchBar';
@@ -53,11 +54,13 @@ import {
  * HistoryPane. `TerminalSplitPaneContent` renders the wrapping `<div>` with this
  * exact `id` so the split-embedded collapse button's `aria-controls` resolves to
  * a real region (instead of dangling at the PC-unrendered HISTORY_PANE_ID).
- * Keep this format in sync with `TerminalSplitPaneContent`.
+ *
+ * Issue #2259 moved the definition to `@/hooks/useHistoryPaneState` — the
+ * Action-bar History toggle now names every split's region in `aria-controls`
+ * and must not import this module to do it — and re-exports it here so every
+ * existing importer (and every test that mocks this module) is unaffected.
  */
-export function splitHistorySlotId(splitIndex: number): string {
-  return `split-history-slot-${splitIndex}`;
-}
+export { splitHistorySlotId };
 
 /**
  * Issue #744: data-testid for the collapse button. Legacy (no splitIndex) keeps
@@ -718,7 +721,12 @@ export const HistoryPane = memo(function HistoryPane({
               title={t('terminal.hideHistory')}
               data-testid={collapseTestId}
             >
-              <ChevronRight size={14} aria-hidden="true" />
+              {/* Issue #2259: the column sits on the LEFT of the split, so the
+                  arrow points the way it folds. Before this it was a
+                  ChevronRight — the same glyph the (now removed) collapsed
+                  strip used to REOPEN it, so neither control read as a
+                  direction. */}
+              <ChevronLeft size={14} aria-hidden="true" />
             </button>
           )}
         </div>

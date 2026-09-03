@@ -414,11 +414,11 @@
   },
   "terminal": {
     "historyLabel": "履歴",
-    "filesLabel": "ファイル",
+    "filesLabel": "開いているファイル",
     "showHistory": "履歴を表示",
     "hideHistory": "履歴を非表示",
-    "showFiles": "ファイルを表示",
-    "hideFiles": "ファイルを非表示",
+    "showFiles": "開いているファイルを表示",
+    "hideFiles": "開いているファイルを非表示",
     "equalizeWidths": "均等幅",
     "equalizeWidthsHint": "ターミナル幅を均等にし、履歴幅を初期値に戻す",
     "addSplit": "分割を追加",
@@ -427,7 +427,10 @@
     "moreActions": "その他の操作",
     "searchTerminal": "ターミナル内を検索",
     "endSession": "セッションを終了",
-    "endSessionFor": "{name}のセッションを終了"
+    "endSessionFor": "{name}のセッションを終了",
+    "filesEmptyHint": "ファイルを開くと有効になります",
+    "historyAllSplitsHint": "すべての split に適用",
+    "historyChatOnlyHint": "すべての split がチャット表示のため、履歴列はありません"
   },
   "surfaceMode": {
     "groupLabel": "{split} の出力面",
@@ -856,7 +859,7 @@
   "activityBar": {
     "toggleSidebar": "サイドバーを切り替え",
     "label": "アクティビティバー",
-    "files": "ファイル",
+    "files": "ファイルツリー",
     "git": "Git",
     "notes": "メモ",
     "schedules": "スケジュール",

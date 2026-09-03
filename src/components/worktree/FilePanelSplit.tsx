@@ -10,11 +10,15 @@
 'use client';
 
 import React, { memo, useState, useCallback, useRef, useMemo } from 'react';
-import { useTranslations } from 'next-intl';
 import { PaneResizer } from './PaneResizer';
 import { FilePanelTabs } from './FilePanelTabs';
 import { DiffViewer } from './DiffViewer';
-import { useFilePanelState } from '@/hooks/useFilePanelState';
+import {
+  useFilePanelState,
+  FILE_PANEL_PANE_ID,
+  OpenFilesContext,
+  type OpenFilesSnapshot,
+} from '@/hooks/useFilePanelState';
 import type { FileTabsState } from '@/hooks/useFileTabs';
 import type { FileContent } from '@/types/models';
 
@@ -70,11 +74,14 @@ const MIN_TERMINAL_WIDTH = 20;
 /** Maximum terminal width as percentage */
 const MAX_TERMINAL_WIDTH = 80;
 
-/**
- * Width of the collapsed file-panel bar (px). Issue #840: widened 24 → 36 so
- * the vertical "Files" label is legible and the bar is easier to notice/hit.
+/*
+ * Issue #2259 removed `FILE_PANEL_BAR_WIDTH_PX` (the 36px collapsed strip) and
+ * the 20px in-panel collapse column. Both drove the same
+ * `useFilePanelState.toggle` the Action bar's "Open Files" button drives, so
+ * they were two extra places to look for one switch — and the collapsed strip
+ * charged 36px of terminal width for the privilege. The Action bar is now the
+ * only control; the panel is either fully open or fully gone.
  */
-const FILE_PANEL_BAR_WIDTH_PX = 36;
 
 // ============================================================================
 // Main Component
@@ -104,13 +111,13 @@ export const FilePanelSplit = memo(function FilePanelSplit({
   onMoveToFront,
   onOpenFile,
 }: FilePanelSplitProps) {
-  const t = useTranslations('worktree');
   const containerRef = useRef<HTMLDivElement>(null);
   const [terminalWidth, setTerminalWidth] = useState(INITIAL_TERMINAL_WIDTH);
   // Issue #840: collapsed state is persisted to localStorage so it survives
   // reload / re-mount (previously a local useState that reset to default).
-  const { collapsed: filePanelCollapsed, toggle: toggleFilePanel } =
-    useFilePanelState();
+  // Issue #2259: read-only here. The toggle moved entirely to the Action bar
+  // (`TerminalSplitContainer`); this component no longer renders a control.
+  const { collapsed: filePanelCollapsed } = useFilePanelState();
 
   const handleResize = useCallback((delta: number) => {
     const container = containerRef.current;
@@ -131,6 +138,20 @@ export const FilePanelSplit = memo(function FilePanelSplit({
   const terminalStyle = useMemo(() => ({ width: `${terminalWidth}%` }), [terminalWidth]);
   const filePanelStyle = useMemo(() => ({ width: `${100 - terminalWidth}%` }), [terminalWidth]);
 
+  /**
+   * Issue #2259: publish what the panel holds to the Action bar living inside
+   * `terminal`. The bar's "Open Files" toggle is disabled — and its badge
+   * empty — while there is nothing to show, because before this it toggled a
+   * panel that renders nothing and looked broken.
+   */
+  const openFiles = useMemo<OpenFilesSnapshot>(
+    () => ({
+      tabCount: fileTabs.tabs.length,
+      hasDiff: Boolean(diffContent && diffFilePath),
+    }),
+    [fileTabs.tabs.length, diffContent, diffFilePath],
+  );
+
   /** Terminal with optional header */
   const terminalWithHeader = (
     <div className="h-full flex flex-col">
@@ -145,114 +166,88 @@ export const FilePanelSplit = memo(function FilePanelSplit({
   // No tabs and no diff: terminal at full width
   if (!hasRightPanel) {
     return (
-      <div className="h-full">
-        {terminalWithHeader}
-      </div>
+      <OpenFilesContext.Provider value={openFiles}>
+        <div className="h-full">
+          {terminalWithHeader}
+        </div>
+      </OpenFilesContext.Provider>
     );
   }
 
-  // File panel collapsed: terminal fills width, narrow expand bar on the right
+  // File panel hidden: the terminal takes the full width, with nothing beside
+  // it (Issue #2259 — the 36px expand strip that used to live here is gone).
   if (filePanelCollapsed) {
     return (
-      <div ref={containerRef} className="flex h-full min-h-0">
-        <div
-          data-testid="terminal-pane"
-          style={{ width: `calc(100% - ${FILE_PANEL_BAR_WIDTH_PX}px)` }}
-          className="flex-shrink-0 overflow-hidden"
-        >
-          {terminalWithHeader}
-        </div>
-        <div
-          data-testid="file-panel-expand-bar"
-          style={{ width: `${FILE_PANEL_BAR_WIDTH_PX}px` }}
-          className="flex-shrink-0 flex items-start justify-center bg-muted border-l border-border"
-        >
-          <button
-            type="button"
-            aria-label={t('terminal.showFiles')}
-            title={t('terminal.showFiles')}
-            onClick={toggleFilePanel}
-            className="flex flex-col items-center gap-2 w-full pt-2 text-muted-foreground hover:text-accent-600 dark:hover:text-accent-400 focus:outline-none focus:ring-2 focus:ring-ring"
+      <OpenFilesContext.Provider value={openFiles}>
+        <div ref={containerRef} className="flex h-full min-h-0">
+          <div
+            data-testid="terminal-pane"
+            style={{ width: '100%' }}
+            className="flex-shrink-0 overflow-hidden"
           >
-            <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-            </svg>
-            <span
-              className="text-xs font-medium tracking-wide select-none"
-              style={{ writingMode: 'vertical-rl' }}
-              aria-hidden="true"
-            >
-              {t('terminal.filesLabel')}
-            </span>
-          </button>
+            {terminalWithHeader}
+          </div>
         </div>
-      </div>
+      </OpenFilesContext.Provider>
     );
   }
 
   return (
-    <div ref={containerRef} className="flex h-full min-h-0">
-      {/* Terminal pane */}
-      <div
-        data-testid="terminal-pane"
-        style={terminalStyle}
-        className="flex-shrink-0 overflow-hidden"
-      >
-        {terminalWithHeader}
-      </div>
-
-      {/* Resizer */}
-      <PaneResizer
-        onResize={handleResize}
-        orientation="horizontal"
-        ariaValueNow={terminalWidth}
-      />
-
-      {/* File panel pane */}
-      <div
-        data-testid="file-panel-pane"
-        style={filePanelStyle}
-        className="flex-grow overflow-hidden flex"
-      >
-        {/* Collapse button strip — always visible at the left edge of the file panel */}
-        <button
-          type="button"
-          aria-label={t('terminal.hideFiles')}
-          title={t('terminal.hideFiles')}
-          onClick={toggleFilePanel}
-          className="flex-shrink-0 flex items-center justify-center w-5 h-full bg-muted border-r border-border text-muted-foreground hover:text-accent-600 dark:hover:text-accent-400 focus:outline-none focus:ring-2 focus:ring-ring"
+    <OpenFilesContext.Provider value={openFiles}>
+      <div ref={containerRef} className="flex h-full min-h-0">
+        {/* Terminal pane */}
+        <div
+          data-testid="terminal-pane"
+          style={terminalStyle}
+          className="flex-shrink-0 overflow-hidden"
         >
-          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-          </svg>
-        </button>
-        {/* File panel content */}
-        <div className="flex-1 min-w-0 overflow-hidden">
-          {/* Diff view takes priority when active (Issue #447) */}
-          {diffContent && diffFilePath && onCloseDiff ? (
-            <DiffViewer
-              diff={diffContent}
-              filePath={diffFilePath}
-              onClose={onCloseDiff}
-            />
-          ) : (
-            <FilePanelTabs
-              tabs={fileTabs.tabs}
-              activeIndex={fileTabs.activeIndex}
-              worktreeId={worktreeId}
-              onClose={onCloseTab}
-              onActivate={onActivateTab}
-              onLoadContent={onLoadContent}
-              onLoadError={onLoadError}
-              onSetLoading={onSetLoading}
-              onFileSaved={onFileSaved}
-              onDirtyChange={onDirtyChange}
-              onMoveToFront={onMoveToFront}
-              onOpenFile={onOpenFile}
-            />
-          )}
+          {terminalWithHeader}
+        </div>
+
+        {/* Resizer */}
+        <PaneResizer
+          onResize={handleResize}
+          orientation="horizontal"
+          ariaValueNow={terminalWidth}
+        />
+
+        {/* File panel pane. `id` so the Action bar's "Open Files" toggle — the
+            only control for this panel since Issue #2259 — can name the region it
+            controls in `aria-controls`. */}
+        <div
+          id={FILE_PANEL_PANE_ID}
+          data-testid="file-panel-pane"
+          style={filePanelStyle}
+          className="flex-grow overflow-hidden flex"
+        >
+          {/* File panel content */}
+          <div className="flex-1 min-w-0 overflow-hidden">
+            {/* Diff view takes priority when active (Issue #447) */}
+            {diffContent && diffFilePath && onCloseDiff ? (
+              <DiffViewer
+                diff={diffContent}
+                filePath={diffFilePath}
+                onClose={onCloseDiff}
+              />
+            ) : (
+              <FilePanelTabs
+                tabs={fileTabs.tabs}
+                activeIndex={fileTabs.activeIndex}
+                worktreeId={worktreeId}
+                onClose={onCloseTab}
+                onActivate={onActivateTab}
+                onLoadContent={onLoadContent}
+                onLoadError={onLoadError}
+                onSetLoading={onSetLoading}
+                onFileSaved={onFileSaved}
+                onDirtyChange={onDirtyChange}
+                onMoveToFront={onMoveToFront}
+                onOpenFile={onOpenFile}
+              />
+            )}
+          </div>
         </div>
       </div>
-    </div>
+    </OpenFilesContext.Provider>
   );
 });
