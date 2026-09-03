@@ -414,11 +414,11 @@
   },
   "terminal": {
     "historyLabel": "History",
-    "filesLabel": "Files",
+    "filesLabel": "Open Files",
     "showHistory": "Show history",
     "hideHistory": "Hide history",
-    "showFiles": "Show files",
-    "hideFiles": "Hide files",
+    "showFiles": "Show open files",
+    "hideFiles": "Hide open files",
     "equalizeWidths": "Equal widths",
     "equalizeWidthsHint": "Equalize terminal widths and reset History width",
     "addSplit": "Add split",
@@ -427,7 +427,10 @@
     "moreActions": "More actions",
     "searchTerminal": "Search terminal",
     "endSession": "End session",
-    "endSessionFor": "End session for {name}"
+    "endSessionFor": "End session for {name}",
+    "filesEmptyHint": "Open a file to enable this",
+    "historyAllSplitsHint": "Applies to all splits",
+    "historyChatOnlyHint": "Every split shows Chat, which has no history column"
   },
   "surfaceMode": {
     "groupLabel": "Output surface for {split}",
@@ -847,7 +850,7 @@
   "activityBar": {
     "toggleSidebar": "Toggle sidebar",
     "label": "Activity Bar",
-    "files": "Files",
+    "files": "File Tree",
     "git": "Git",
     "notes": "Notes",
     "schedules": "Schedules",

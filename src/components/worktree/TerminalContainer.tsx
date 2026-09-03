@@ -8,14 +8,19 @@
  * messages. The top-level History column is therefore no longer rendered on PC:
  * the parent stops passing the `history` prop and TerminalContainer renders the
  * terminal area only. The `history` prop is kept (optional) for backward
- * compatibility — when provided, the legacy History column + resizer + expand
- * bar render exactly as before (Issue #730 behavior).
+ * compatibility — when provided, the legacy History column + resizer render as
+ * before (Issue #730 behavior).
+ *
+ * Issue #2259 removed the collapsed expand bar. It was the same 36px vertical
+ * strip the splits carried, offering a second place to reopen a column the
+ * Action-bar toggle already owns, and — since #744 stopped passing `history` —
+ * it had no production caller left at all. Hiding the column now simply gives
+ * the whole row to the terminal.
  *
  * Responsibilities (when `history` is provided):
  *   - Read History pane visibility / width from `useHistoryPaneState`.
  *   - When visible, render History (with `id={HISTORY_PANE_ID}`) + PaneResizer.
- *   - When collapsed, render a compact expand bar with `aria-controls`
- *     pointing at the same `id`.
+ *   - When hidden, render nothing on the left.
  *   - Always render the terminal area on the right (flex-grow).
  *   - Wrap each side in its own ErrorBoundary for fault isolation.
  */
@@ -23,26 +28,16 @@
 'use client';
 
 import React, { memo, useCallback, useRef, type ReactNode } from 'react';
-import { useTranslations } from 'next-intl';
 import { ErrorBoundary } from '@/components/error/ErrorBoundary';
 import { useHistoryPaneState } from '@/hooks/useHistoryPaneState';
 import { PaneResizer } from './PaneResizer';
 
 /**
- * Public id used by:
- *  - HistoryPane internal collapse button → `aria-controls`
- *  - TerminalContainer collapsed expand bar → `aria-controls`
- *
- * Both references must stay in sync so screen readers can announce the same
- * region when toggling.
+ * Public id of the legacy single-column History region, named by the
+ * `HistoryPane` collapse button's `aria-controls` when the pane is rendered
+ * outside a split (mobile / the Issue #730 layout).
  */
 export const HISTORY_PANE_ID = 'worktree-history-pane';
-
-/**
- * Width of the collapsed History bar (px). Issue #840: widened 24 → 36 so the
- * vertical "History" label is legible and the bar is easier to notice/hit.
- */
-const EXPAND_BAR_WIDTH_PX = 36;
 
 export interface TerminalContainerProps {
   /**
@@ -57,54 +52,6 @@ export interface TerminalContainerProps {
   terminal: ReactNode;
 }
 
-const HistoryExpandBar = memo(function HistoryExpandBar({
-  onToggle,
-}: {
-  onToggle: () => void;
-}) {
-  const t = useTranslations('worktree');
-  return (
-    <div
-      data-testid="terminal-container-expand-bar"
-      style={{ width: `${EXPAND_BAR_WIDTH_PX}px` }}
-      className="flex-shrink-0 flex items-start justify-center bg-gray-100 dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700"
-    >
-      <button
-        type="button"
-        data-testid="history-pane-expand"
-        aria-label={t('terminal.showHistory')}
-        title={t('terminal.showHistory')}
-        aria-expanded="false"
-        aria-controls={HISTORY_PANE_ID}
-        onClick={onToggle}
-        className="flex flex-col items-center gap-2 w-full pt-2 text-gray-500 dark:text-gray-400 hover:text-accent-600 dark:hover:text-accent-400 focus:outline-none focus:ring-2 focus:ring-ring"
-      >
-        <svg
-          className="w-4 h-4 flex-shrink-0"
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-          aria-hidden="true"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M9 5l7 7-7 7"
-          />
-        </svg>
-        <span
-          className="text-xs font-medium tracking-wide select-none"
-          style={{ writingMode: 'vertical-rl' }}
-          aria-hidden="true"
-        >
-          {t('terminal.historyLabel')}
-        </span>
-      </button>
-    </div>
-  );
-});
-
 /**
  * Layout wrapper that combines History pane + Terminal / FilePanel into a
  * single flex container. Used as the `rightPane` of `WorktreeDesktopLayout`.
@@ -113,7 +60,7 @@ export const TerminalContainer = memo(function TerminalContainer({
   history,
   terminal,
 }: TerminalContainerProps) {
-  const { visible, width, toggle, setWidth } = useHistoryPaneState();
+  const { visible, width, setWidth } = useHistoryPaneState();
   const containerRef = useRef<HTMLDivElement>(null);
 
   const handleResize = useCallback(
@@ -152,9 +99,7 @@ export const TerminalContainer = memo(function TerminalContainer({
               ariaValueNow={width}
             />
           </>
-        ) : (
-          <HistoryExpandBar onToggle={toggle} />
-        ))}
+        ) : null)}
       <div
         data-testid="terminal-container-terminal-slot"
         aria-label="Terminal pane"

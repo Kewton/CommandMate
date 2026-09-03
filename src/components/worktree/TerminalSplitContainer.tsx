@@ -5,9 +5,10 @@
  *  - split configuration via `useTerminalSplits` (worktreeId-scoped)
  *  - add / remove buttons (disabled at the MIN / MAX boundary and while
  *    a PaneResizer drag is in progress)
- *  - History / Files visibility toggles in the Action bar (Issue #841): a
- *    second entry point alongside the existing vertical collapse strips, both
- *    reading the same persisted state (useHistoryPaneState / useFilePanelState)
+ *  - History / "Open Files" visibility toggles in the Action bar (Issue #841,
+ *    made the SOLE entry point by Issue #2259 — the vertical collapse strips
+ *    are gone), reading the persisted state in useHistoryPaneState /
+ *    useFilePanelState and disabled when the panel they name cannot appear
  *  - PaneResizer widget(s) between splits, with width persistence
  *  - delegating each split's body to a parent-supplied `renderPane`
  *
@@ -38,8 +39,14 @@ import { useTerminalSplits } from '@/hooks/useTerminalSplits';
 import {
   useHistoryPaneState,
   DEFAULT_HISTORY_WIDTH,
+  splitHistorySlotId,
 } from '@/hooks/useHistoryPaneState';
-import { useFilePanelState } from '@/hooks/useFilePanelState';
+import {
+  useFilePanelState,
+  useOpenFiles,
+  FILE_PANEL_PANE_ID,
+} from '@/hooks/useFilePanelState';
+import { useSplitSurfaceModes } from '@/hooks/useSplitSurfaceModes';
 import { PaneResizer } from './PaneResizer';
 
 /** Render-prop signature: each pane is supplied externally so the
@@ -152,8 +159,12 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
 
   // Issue #841 (Phase 2): the Action bar hosts History / Files visibility
   // toggles. These hooks broadcast across instances (useHistoryPaneState /
-  // useFilePanelState), so toggling here is the single source of truth shared
-  // with the existing vertical collapse strips — both stay in sync.
+  // useFilePanelState), so toggling here reaches every mount of the state.
+  //
+  // Issue #2259: they are now the ONLY toggles. The vertical collapse strips in
+  // `TerminalSplitPaneContent` / `FilePanelSplit` / `TerminalContainer` are
+  // gone, so there is one place to look for each switch and hiding a panel
+  // returns its full width to the terminal.
   const {
     visible: historyVisible,
     toggle: toggleHistory,
@@ -272,6 +283,35 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
   // Nothing to equalize when there is a single split AND History is hidden.
   const canEqualize = splits.length > MIN_SPLITS || historyVisible;
 
+  /*
+   * Issue #2259: the two toggles are disabled when the thing they show cannot
+   * appear, instead of flipping a state with no visible effect.
+   *
+   * History — the column lives in the TERMINAL surface only. The chat surface
+   * (#2193) renders the transcript alone on purpose (#2232: chat is not the
+   * History column), so with every split in chat mode this button changed
+   * nothing while still rendering as pressed. On the SSR pass and the first
+   * client render `surfaceModes` is all-`terminal` (what the panes themselves
+   * render before their own effect resolves), so the toggle starts enabled and
+   * settles rather than flickering disabled. The `length > 0` guard is there
+   * because `[].every(...)` is `true` — an empty array must not read as "all
+   * chat".
+   *
+   * Open Files — `FilePanelSplit` renders no panel at all with no tabs and no
+   * diff, so the button had nothing to toggle. The count also rides along as a
+   * badge, which is what tells the two "Files" apart at a glance: the Activity
+   * Bar's file TREE, and this panel of files you opened from it.
+   */
+  const surfaceModes = useSplitSurfaceModes(worktreeId, splits.length);
+  const historyUnavailable =
+    surfaceModes.length > 0 && surfaceModes.every((mode) => mode === 'chat');
+  const { tabCount: openFileCount, hasDiff } = useOpenFiles();
+  const filesUnavailable = openFileCount === 0 && !hasDiff;
+  const historySlotIds = useMemo(
+    () => splits.map((_, idx) => splitHistorySlotId(idx)).join(' '),
+    [splits],
+  );
+
   // Memoize per-split onFocus handlers so prop identity is stable.
   const focusHandlers = useMemo(
     () => splits.map((_, idx) => () => setFocusedSplitIndex(idx)),
@@ -337,7 +377,7 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
     >
       {/* Action bar */}
       <div className="flex items-center gap-1 px-2 py-1 bg-surface border-b border-border flex-shrink-0">
-        <span className="text-xs text-muted-foreground tabular-nums mr-1">
+        <span className="text-xs text-muted-foreground tabular-nums mr-1 truncate">
           {splits.length} / {MAX_SPLITS} splits
         </span>
 
@@ -406,19 +446,27 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
         <button
           type="button"
           onClick={toggleHistory}
+          disabled={historyUnavailable}
+          aria-disabled={historyUnavailable}
           aria-pressed={historyVisible}
+          aria-expanded={historyVisible}
+          aria-controls={historySlotIds}
           aria-label={
             historyVisible
               ? t('terminal.hideHistory')
               : t('terminal.showHistory')
           }
           title={
-            historyVisible
-              ? t('terminal.hideHistory')
-              : t('terminal.showHistory')
+            historyUnavailable
+              ? t('terminal.historyChatOnlyHint')
+              : `${
+                  historyVisible
+                    ? t('terminal.hideHistory')
+                    : t('terminal.showHistory')
+                } — ${t('terminal.historyAllSplitsHint')}`
           }
           data-testid="toggle-history-pane"
-          className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded border transition-colors ${
+          className={`flex flex-shrink-0 items-center gap-1 whitespace-nowrap text-xs px-2 py-0.5 rounded border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
             historyVisible
               ? 'border-accent-300 dark:border-accent-700 bg-accent-50 dark:bg-accent-900/30 text-accent-700 dark:text-accent-300'
               : 'border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
@@ -430,15 +478,23 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
         <button
           type="button"
           onClick={toggleFilePanel}
+          disabled={filesUnavailable}
+          aria-disabled={filesUnavailable}
           aria-pressed={filesVisible}
+          aria-expanded={filesVisible}
+          aria-controls={FILE_PANEL_PANE_ID}
           aria-label={
             filesVisible ? t('terminal.hideFiles') : t('terminal.showFiles')
           }
           title={
-            filesVisible ? t('terminal.hideFiles') : t('terminal.showFiles')
+            filesUnavailable
+              ? t('terminal.filesEmptyHint')
+              : filesVisible
+                ? t('terminal.hideFiles')
+                : t('terminal.showFiles')
           }
           data-testid="toggle-file-panel"
-          className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded border transition-colors ${
+          className={`flex flex-shrink-0 items-center gap-1 whitespace-nowrap text-xs px-2 py-0.5 rounded border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
             filesVisible
               ? 'border-accent-300 dark:border-accent-700 bg-accent-50 dark:bg-accent-900/30 text-accent-700 dark:text-accent-300'
               : 'border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
@@ -446,6 +502,14 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
         >
           <Files className="w-3.5 h-3.5 flex-shrink-0" aria-hidden="true" />
           <span>{t('terminal.filesLabel')}</span>
+          {openFileCount > 0 && (
+            <span
+              data-testid="open-files-count"
+              className="ml-0.5 min-w-[1.25rem] px-1 rounded-full bg-muted text-[10px] leading-4 text-muted-foreground tabular-nums text-center"
+            >
+              {openFileCount}
+            </span>
+          )}
         </button>
       </div>
 
