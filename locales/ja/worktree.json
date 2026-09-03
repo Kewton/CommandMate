@@ -589,7 +589,16 @@
   },
   "fileTabs": {
     "unsavedChanges": "未保存の変更",
-    "closeTab": "{name} を閉じる"
+    "closeTab": "{name} を閉じる",
+    "tabActions": "タブの操作",
+    "closeAll": "すべて閉じる",
+    "closeOthers": "他を閉じる",
+    "closeToRight": "右側を閉じる",
+    "confirmCloseTitle": "未保存の変更があります",
+    "confirmCloseBody": "閉じようとしているタブのうち {count} 件に未保存の変更があります。閉じると編集内容は失われます。",
+    "confirmKeepUnsaved": "未保存を残して閉じる",
+    "confirmDiscard": "すべて閉じる",
+    "confirmCancel": "キャンセル"
   },
   "markdownPreview": {
     "loadingImage": "[画像を読み込み中...]",
