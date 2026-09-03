@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **feat(agent): Command Code の slash カタログと headless 実行を追加する** (#2253): 権威ソース（commandcode.ai の Slash Commands ページ、1.40.1、2026-09-03 読み取り）を attestation に署名し、canonical 56 コマンドを `slash-commands-catalog.json` へ追加（locale は en/ja 同時、新規フラットキー 19・`<name>.command-code` leaf 9）。`buildCliArgs()` に `command-code` を追加し `-p <message> --output-format json` ＋ `--yolo` / `--permission-mode <5値>` の排他を実装、NDJSON の最終 `{"type":"result"}` 行から `finalText` と `subtype` を取り出して `PRINT_EXIT_CODE`（0/1/3/4/5/6/7/8/9/10/130）と対にした失敗理由を実行ログへ写す。fixture は 1.40.1 の実出力 4 本。README / architecture / webapp-guide / tutorial / cli-operations-guide の対応ツール一覧も 8 ツールへ更新。
 - **feat(agent): Command Code を対話エージェントとして起動・送受信・ステータス検出できるようにする** (#2250): `CLI_TOOL_IDS` に `command-code` を追加（8 ツール）し、`CommandCodeTool`（起動コマンド `commandcode --trust --skip-onboarding --no-auto-update`、`/exit` での graceful exit、送信時の capture キャッシュ無効化）と専用検出モジュール `detection/tools/command-code/detect.ts` を新設。claude 系定数を流用せず `COMMAND_CODE_*` パターン一式（プロンプト・区切り・thinking・応答マーカー `⠶`・バナー・hooks 通知・モード表示）と構造的な composer 境界 `findCommandCodeChromeStart()` を実測 200x1000 フレームから起こし、起動画面をユーザエコー不在で除外することで #2247 型の「バージョン文字列を含む短い返答が保存されない」退行を持ち込まずに完了判定を実装。権限モードは実バイナリの `.choices()` から `default` / `standard` / `plan` / `auto-accept` / `dont-ask` の 5 種を採用した。
 
 ## [0.30.2] - 2026-09-03
