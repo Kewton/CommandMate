@@ -7,7 +7,7 @@ Installing hooks adds the **structured events** the agent CLI emits itself as a 
 information (Issue #1549).
 
 **CommandMate injects these hooks automatically** (Issue #1722, Epic #1720 Phase 4), for
-**six tools: claude / copilot / gemini / antigravity / codex / opencode**.
+**seven tools: claude / copilot / gemini / antigravity / codex / opencode / command-code**.
 Manual configuration is no longer needed (§0). An existing manual configuration keeps working — see §0.4.
 
 > **Text parsing is not going away.** Hooks are a *second opinion*, and as of today they have not
@@ -20,8 +20,8 @@ Manual configuration is no longer needed (§0). An existing manual configuration
 When CommandMate **creates a new** agent session, it prepares that tool's hook configuration and puts
 it on the launch command. The authority on which tools are covered is the list of
 `registerAgentEventSource(...)` calls at the bottom of `src/lib/hooks/sources/registry.ts`; today it
-is **six tools: claude / copilot / gemini / antigravity / codex / opencode** (`vibe-local` is the one
-that is not registered). A tool with no source falls back to the `legacy-relay` compatibility source,
+is **seven tools: claude / copilot / gemini / antigravity / codex / opencode / command-code**
+(`vibe-local` is the one that is not registered). A tool with no source falls back to the `legacy-relay` compatibility source,
 which behaves exactly as the hand-configured hooks of #1549 did.
 
 ### 0.0 Per-tool summary
@@ -38,6 +38,7 @@ and every one of those differences **fails silently**.
 | **gemini** | merges into `<worktree>/.gemini/settings.json` | per-worktree | `CM_HOOK_URL` (the instance rides in the URL) | `command` | **none** (no event whose reply is a verdict is registered) | — |
 | **antigravity** | `~/.gemini/config/hooks.json` (machine-wide; shares gemini's tree) | global-singleton | environment variables `CM_HOOK_URL` / `CM_PERMISSION_HOOK_URL` | `command` | `PreToolUse` | 5 s |
 | **opencode** | **nothing at all** | none | the `--port <N>` assigned at launch | **not a push** — CommandMate is the one **subscribing** over SSE | `POST /permission/:id/reply` | **none (waits forever)** |
+| **command-code** | merges into `<worktree>/.commandcode/settings.local.json` | per-worktree | `CM_HOOK_URL` (the instance rides in the URL) | `command` (`matcher` **must be the empty string**; §0.8) | **none** (`PreToolUse` fires after approval, so no reply can be a verdict) | — |
 
 How to read it:
 
@@ -46,12 +47,12 @@ How to read it:
   `capabilities.decisionTimeoutSeconds`, so callers read that instead of re-deriving a constant.
 - **`type: "http"` works for claude only.** Not a single request arrived from a copilot `http`
   handler (and nothing was printed), and codex discards the whole of `hooks.json` if one `http`
-  handler is present. For the other four tools `scripts/hooks/cmate-agent-event.sh` (§2) is the only
+  handler is present. For the other five tools `scripts/hooks/cmate-agent-event.sh` (§2) is the only
   delivery path.
 - **gemini's `timeout` is in milliseconds.** Writing `5` — the seconds figure every other tool takes —
   kills the hook after 5 ms, producing a state where the hook is registered, disclosed in the banner,
   runs, and **loses every event while looking correctly configured**.
-- **Abstaining (no-decision) is unsafe on opencode only.** On the other five it costs an approval
+- **Abstaining (no-decision) is unsafe on opencode only.** On the other six it costs an approval
   dialog; on opencode it **costs the session** (measured: still pending after 10 minutes 19 seconds).
   See §0.8.
 
@@ -59,13 +60,13 @@ Properties shared by every tool:
 
 | Item | Detail |
 |---|---|
-| opt-out | **`CM_AGENT_HOOKS_INJECT=0`** skips injection for all six and restores the bare pre-#1722 launch command (§0.3) |
-| Where the generated file goes | claude's generated file lives under `~/.commandmate/hooks` (`CM_AGENT_HOOKS_DIR` overrides it). **The tools whose own settings files are rewritten are copilot / codex / gemini / antigravity, and all four are merges** — only CommandMate's own marked entries are replaced; every other key and handler is copied through. A file that cannot be parsed is **left alone** and the session starts without hooks |
+| opt-out | **`CM_AGENT_HOOKS_INJECT=0`** skips injection for all seven and restores the bare pre-#1722 launch command (§0.3) |
+| Where the generated file goes | claude's generated file lives under `~/.commandmate/hooks` (`CM_AGENT_HOOKS_DIR` overrides it). **The tools whose own settings files are rewritten are copilot / codex / gemini / antigravity / command-code, and all five are merges** — only CommandMate's own marked entries are replaced; every other key and handler is copied through. A file that cannot be parsed is **left alone** and the session starts without hooks |
 | fail-open | neither a timeout, a connection failure nor a failed settings write stops the agent. **It falls back to a launch with no hooks** |
 | Existing sessions | a healthy existing session is **reused without injection** (§0.5); the next newly created one picks it up |
 | Startup signal | **a hook arriving is not "startup finished"** (§0.5) |
 
-**§0.1 through §0.7 below are claude's details.** What is specific to the other five tools is
+**§0.1 through §0.7 below are claude's details.** What is specific to the other six tools is
 collected in §0.8.
 
 ### claude's injected file
@@ -176,7 +177,8 @@ The decision table:
 - **Screen-based Auto-Yes still exists.** It works as before wherever hooks cannot be injected
   (`CM_AGENT_HOOKS_INJECT=0`, a failed settings write, codex hooks the user has not trusted yet) and
   for `vibe-local`. On the five tools that do have an adjudicating hook (claude / codex / copilot /
-  antigravity / opencode), the hook decides first.
+  antigravity / opencode), the hook decides first. **`command-code` also stays on the screen path** —
+  its `PreToolUse` fires *after* the approval dialog, so no adjudicating hook can be built (§0.8).
 
 ### 0.7 `permissions.deny` — no pattern-based mass kill (Issue #1739)
 
@@ -256,7 +258,7 @@ There is **no switch that removes only the deny rules**. Losing the structured e
 makes an accident easier to spot than a state where "the mechanism is installed, but somebody quietly
 disabled part of it".
 
-### 0.8 The other five tools
+### 0.8 The other six tools
 
 What each row of the §0.0 table means in the implementation. **All of it is measured** (the sources
 are `docs/design/agent-hooks-phase4-live-verification.md` and each source's module comment).
@@ -310,8 +312,8 @@ whole machine.** copilot has no equivalent of `--settings`, so there is no per-l
 
 #### gemini — `.gemini/settings.json` inside the worktree, and a `timeout` in milliseconds
 
-- Of the five, this is the only tool whose hook configuration is naturally worktree-scoped; the
-  user's `~/.gemini/settings.json` is never opened. Because **it writes a file inside the user's
+- gemini and command-code are the two tools whose hook configuration is naturally worktree-scoped;
+  the user's `~/.gemini/settings.json` is never opened. Because **it writes a file inside the user's
   repository**, both properties matter: it merges, and the command string it writes does not vary per
   launch (gemini records the exact command strings it has been trusted with and re-shows the
   disclosure banner when they change).
@@ -335,7 +337,7 @@ whole machine.** copilot has no equivalent of `--settings`, so there is no per-l
 #### opencode — writes nothing; CommandMate subscribes
 
 - **Not one byte of configuration is written** (`configScope: 'none'`). The whole integration is a
-  `--port <N>` argument on the launch command and a subscription to that port. Where the other five
+  `--port <N>` argument on the launch command and a subscription to that port. Where the other six
   push (agent → CommandMate), this one runs the other way round.
 - **CommandMate assigns the port explicitly** (range 4200-4299). `--port 0` does not mean "ask the OS
   for a free port": the first server takes 4096 and only the second falls through to an ephemeral
@@ -349,6 +351,38 @@ whole machine.** copilot has no equivalent of `--settings`, so there is no per-l
 - Every degraded path is fail-open (an exhausted port range, an unreachable server, a dropped SSE
   stream all fall back to the scraper). `CM_AGENT_HOOKS_INJECT=0` restores the bare `opencode`
   launch.
+
+#### command-code — `.commandcode/settings.local.json` in the worktree, and an EMPTY `matcher`
+
+- **CommandMate writes `settings.local.json` (the machine-local layer), not `settings.json` (the
+  shared one).** Command Code reads three layers — `<cwd>/.commandcode/settings.local.json`, then
+  `<cwd>/.commandcode/settings.json`, then `~/.commandcode/settings.json` — and **unions every
+  handler from all three** rather than letting one override another (the only deduplication is an
+  exact `event:matcher:command` match). Measured: two layers registering different commands both ran,
+  and the pane printed `◼ Ran 2 session start hooks`. Because they are unioned, occupying the local
+  layer cannot cost the operator a single hook in the shared one — and the shared file is the one a
+  team commits, so CommandMate keeps its machine-local absolute paths out of it.
+- **The `matcher` must be the empty string. `"*"` silently removes `SessionStart` and `Stop`.**
+  Handler selection reads `if (handler.matcher) { if (!toolName) continue; … }`, and those two events
+  are invoked with `toolName: ""`. `"*"` *loads* fine — it is special-cased to a match-everything
+  regex, so no warning is printed — and then never fires. Measured: `""` gives
+  `Ran 2 session start hooks`, `"*"` gives `Ran 1 session start hook`.
+- **Four events exist, and that is all of them** (`SessionStart` / `PreToolUse` / `PostToolUse` /
+  `Stop`). `UserPromptSubmit` / `Notification` / `SessionEnd` are not merely unobserved — they are
+  **rejected at load** (`unknown hook event "…" — skipped`).
+- **`PreToolUse` fires *after* the approval dialog** (measured: drawn 00:11:37, answered 00:11:46,
+  hook 00:11:46). No adjudicating hook can be built from it, so CommandMate points the event at the
+  ordinary event receiver and records it as an observation. Auto-Yes stays on the TUI's numbered
+  responder.
+- `timeout` is in **seconds**, and anything outside `(0, 600]` is dropped with a warning (default 30).
+- **Replying `{}` continues on all four events** (measured). The only things that block are
+  `decision: "block"`, `block: true`, `hookSpecificOutput.permissionDecision: "deny"`, and
+  **exit code 2 on `PreToolUse` / `Stop`**. The relay script prints nothing to stdout and exits 0 even
+  when the POST fails, so a server that is down cannot stop a turn.
+- **`.commandcode/` is not git-ignored** (`git status` reports `?? .commandcode/`). This is not
+  something CommandMate introduces: Command Code writes `.commandcode/taste/taste.md` itself on the
+  first launch. Add `.commandcode/` to `.gitignore` if it is in the way — the same treatment
+  gemini's `.gemini/` gets.
 
 ---
 
@@ -548,9 +582,9 @@ Issue (#1723), once the agreement rate between the two has been observed.
   `--instance-id` applies, as before, to the **primary instance**'s task. Running `codex` and
   `codex-2` side by side in one worktree, a `codex-2` hook without `--instance-id codex-2` will drive
   `codex`'s task. In an automatically injected session this is filled in for you (claude carries it in the URL, the
-  other four in the environment).
-- **Automatic injection covers six tools**: claude / copilot / gemini / antigravity / codex /
-  opencode (`src/lib/hooks/sources/registry.ts` is the authority). **Only `vibe-local` is not
+  other five in the environment).
+- **Automatic injection covers seven tools**: claude / copilot / gemini / antigravity / codex /
+  opencode / command-code (`src/lib/hooks/sources/registry.ts` is the authority). **Only `vibe-local` is not
   covered** and is still judged by text parsing alone. The endpoint takes any existing CLI tool id in
   `tool`, so events can still be sent for an uncovered tool by changing `--tool`.
 - **The premises differ per tool**: where the configuration file lives, how correlation keys travel,

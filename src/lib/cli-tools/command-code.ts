@@ -26,10 +26,13 @@
  *
  * ## The launch line lives in one place
  *
- * {@link buildCommandCodeLaunchCommand} is the only thing that renders it. Phase
- * B (#2251) replaces its body with `buildAgentLaunchCommandLine` so hooks and
- * `CM_HOOK_URL` are prefixed the way agy's and copilot's are; keeping the string
- * in one function is what makes that a one-line change instead of a hunt.
+ * {@link buildCommandCodeLaunchCommand} is the only thing that renders it, and
+ * since Phase B (#2251) its body is `buildAgentLaunchCommandLine` — so the line
+ * carries `CM_HOOK_URL` and the worktree's `.commandcode/settings.local.json`
+ * has been written by the time the pane sees it. The flags stay here rather than
+ * moving into the source, because which flags Command Code is launched with is
+ * this module's decision (Epic #2249 決定 2) and the hook source's business is
+ * only the correlation.
  */
 
 import { BaseCLITool } from './base';
@@ -51,6 +54,12 @@ import {
 } from '../detection/cli-patterns';
 import { getErrorMessage } from '@/lib/errors';
 import { createLogger } from '@/lib/logger';
+import type { AgentLaunchContext } from '@/lib/hooks/sources';
+import { COMMAND_CODE_CLI_TOOL_ID } from '@/lib/hooks/sources/command-code/tool-id';
+import {
+  beginAgentSession,
+  buildAgentLaunchCommandLine,
+} from '@/lib/session/agent-session-lifecycle';
 import {
   TUI_SESSION_CREATE_WAIT_MS,
   TUI_TEXT_INPUT_WAIT_MS,
@@ -86,22 +95,31 @@ export const COMMAND_CODE_LAUNCH_FLAGS: readonly string[] = [
 export const COMMAND_CODE_EXIT_COMMAND = '/exit';
 
 /**
- * Render the shell line that starts Command Code in a pane.
+ * Render the shell line that starts Command Code in a pane (Issue #2251).
  *
- * The single seam Phase B (#2251) replaces: today it is the bare executable plus
- * {@link COMMAND_CODE_LAUNCH_FLAGS}, and the hooks Issue swaps the body for
- * `buildAgentLaunchCommandLine({ target, executablePath, worktreePath })` so the
- * `CM_HOOK_URL` assignment lands in front of the command. Callers — the launch
- * path here and `tests/unit/cli-tools/command-code.test.ts` — go through this
- * function so neither has to be edited when that happens.
+ * Two things happen here, in this order, and the order is the point:
  *
- * @param executablePath - The `commandcode` binary (overridable for tests)
+ *  1. `buildAgentLaunchCommandLine` asks the tool's own {@link AgentEventSource}
+ *     to write `<worktree>/.commandcode/settings.local.json` and to declare the
+ *     environment the hooks need, then renders `CM_HOOK_URL='…' 'commandcode'`.
+ *     Going through the shared helper rather than through
+ *     `prepareAgentLaunch(...).command` is what keeps `env` from being silently
+ *     dropped (#1846): the plan's environment is *data*, and this is the one
+ *     function that turns it into shell assignments.
+ *  2. {@link COMMAND_CODE_LAUNCH_FLAGS} are appended **after** the rendered
+ *     line, the shape `AntigravityTool` uses for `--model`. Appending keeps the
+ *     assignments in front of the executable by construction instead of by the
+ *     caller remembering to put them there.
+ *
+ * With `CM_AGENT_HOOKS_INJECT=0` the source returns the bare executable and an
+ * empty environment, so this renders the byte-identical Phase A line
+ * `commandcode --trust --skip-onboarding --no-auto-update`.
+ *
+ * @param context - The instance being started, its executable, and its worktree
  * @returns The command line to type at the pane's shell prompt
  */
-export function buildCommandCodeLaunchCommand(
-  executablePath: string = COMMAND_CODE_COMMAND
-): string {
-  return [executablePath, ...COMMAND_CODE_LAUNCH_FLAGS].join(' ');
+export function buildCommandCodeLaunchCommand(context: AgentLaunchContext): string {
+  return [buildAgentLaunchCommandLine(context), ...COMMAND_CODE_LAUNCH_FLAGS].join(' ');
 }
 
 /** Interval for polling composer readiness. */
@@ -198,6 +216,15 @@ export class CommandCodeTool extends BaseCLITool {
       logger.warn('command-code-session-relaunch', { sessionName });
     }
 
+    // Issue #2251, seam S8: fence this instance's structured events off from the
+    // process that used to hold the same (worktree, tool, instance) key. On the
+    // creation path and on #2070's relaunch path — the reuse branch above has
+    // already returned — and before the pane exists, so there is no window in
+    // which a live pane is judged against a stale generation. Bumped even if the
+    // launch below then fails: falling back to the screen scraper is always safe
+    // and trusting a dead session's events is not.
+    beginAgentSession({ worktreeId, cliToolId: COMMAND_CODE_CLI_TOOL_ID, instanceId });
+
     try {
       if (!exists) {
         // Inline-rendered, so the pane keeps scrollback; depth comes from the
@@ -209,7 +236,15 @@ export class CommandCodeTool extends BaseCLITool {
         await new Promise((resolve) => setTimeout(resolve, TUI_SESSION_CREATE_WAIT_MS));
       }
 
-      await sendKeys(sessionName, buildCommandCodeLaunchCommand(this.command), true);
+      await sendKeys(
+        sessionName,
+        buildCommandCodeLaunchCommand({
+          target: { worktreeId, cliToolId: COMMAND_CODE_CLI_TOOL_ID, instanceId },
+          executablePath: this.command,
+          worktreePath,
+        }),
+        true
+      );
 
       await new Promise((resolve) => setTimeout(resolve, COMMAND_CODE_INIT_WAIT_MS));
 
