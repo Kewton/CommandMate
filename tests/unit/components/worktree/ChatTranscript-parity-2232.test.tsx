@@ -25,7 +25,7 @@
  */
 
 import React from 'react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import type { ChatMessage } from '@/types/models';
 
@@ -142,17 +142,33 @@ describe('[#2232] ChatTranscript keeps the #1121 pending states', () => {
 // ---------------------------------------------------------------------------
 
 describe('[#2232] ChatTranscript keeps the row actions', () => {
-  it('turns a file path into a control that reports the path', () => {
+  // Issue #2274 put a `HEAD` probe between the click and the open, so these two
+  // now assert the same parity property one await later. `fileProbe` stands in
+  // for the server saying the file is here; the probe's own behaviour — what it
+  // requests, and what it does when the answer is no — is
+  // `ChatTranscript-file-path-2274.test.tsx`.
+  const fileProbe = vi.fn(async () => ({ ok: true, status: 200 }));
+
+  beforeEach(() => {
+    fileProbe.mockClear();
+    vi.stubGlobal('fetch', fileProbe);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('turns a file path into a control that reports the path', async () => {
     const onFilePathClick = vi.fn();
     renderTranscript([msg('a1', 'assistant', 'edited /src/app/page.tsx just now')], {
       onFilePathClick,
     });
 
     fireEvent.click(screen.getByText('/src/app/page.tsx'));
-    expect(onFilePathClick).toHaveBeenCalledWith('/src/app/page.tsx');
+    await waitFor(() => expect(onFilePathClick).toHaveBeenCalledWith('/src/app/page.tsx'));
   });
 
-  it('links paths inside an agent-authored Markdown body too', () => {
+  it('links paths inside an agent-authored Markdown body too', async () => {
     const onFilePathClick = vi.fn();
     renderTranscript(
       [msg('a1', 'assistant', 'see /src/lib/chat/x.ts for it', { requestId: 'oc-turn:m1' })],
@@ -160,7 +176,7 @@ describe('[#2232] ChatTranscript keeps the row actions', () => {
     );
 
     fireEvent.click(screen.getByText('/src/lib/chat/x.ts'));
-    expect(onFilePathClick).toHaveBeenCalledWith('/src/lib/chat/x.ts');
+    await waitFor(() => expect(onFilePathClick).toHaveBeenCalledWith('/src/lib/chat/x.ts'));
   });
 
   it('copies a body and says so', async () => {

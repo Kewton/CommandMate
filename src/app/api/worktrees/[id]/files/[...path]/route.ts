@@ -4,6 +4,7 @@
  *
  * Methods:
  * - GET: Read file content (existing)
+ * - HEAD: Existence probe — status only, no body ([Issue #2274])
  * - PUT: Update file content
  * - POST: Create new file or directory
  * - DELETE: Delete file or directory
@@ -514,6 +515,76 @@ export async function GET(
   } catch (error: unknown) {
     logger.error('error-reading-file:', { error: error instanceof Error ? error.message : String(error) });
     return createErrorResponse('INTERNAL_ERROR', 'Failed to read file');
+  }
+}
+
+/**
+ * HEAD /api/worktrees/:id/files/:path
+ * Answer whether a regular file exists at this path — status only, no body.
+ *
+ * [Issue #2274] A file path in a chat reply became a button without anyone
+ * asking whether the file was there, so clicking `/docs/uat/report.md` (a path
+ * belonging to a DIFFERENT repository, which the linkifier had sliced out of the
+ * middle of a relative path) opened an empty tab that could only fail. The chat
+ * surface now probes with this method first and shows a toast instead when the
+ * answer is no.
+ *
+ * Why a dedicated handler rather than leaning on Next's implicit HEAD, which
+ * runs GET and drops the body: GET base64-encodes images, videos and PDFs and
+ * reads whole files off disk to produce a body that would then be thrown away.
+ * This asks `stat` and nothing else.
+ *
+ * The guarantees a caller may rely on:
+ *
+ *  - path validation is IDENTICAL to every other method here, because it is the
+ *    same {@link getWorktreeAndValidatePath} call: outside the worktree is 400,
+ *    a deny-tier path ([Issue #2014] `.env*` / `*.pem` / `*.key` / `.git`) is
+ *    403, and neither answer says whether anything is there;
+ *  - 200 means a REGULAR FILE. A directory answers 404, because the resource
+ *    this route addresses is a file and GET on a directory fails too; the probe
+ *    exists to predict whether opening will work, so it must not say yes where
+ *    opening says no;
+ *  - the response has no body and no `Last-Modified`. It is not a cheaper GET
+ *    and callers must not treat it as a freshness check.
+ */
+export async function HEAD(
+  _request: NextRequest,
+  { params }: { params: Promise<{ id: string; path: string[] }> }
+) {
+  try {
+    const { id: requestedWorktreeId, path } = await params;
+    const id = canonicalWorktreeId(requestedWorktreeId);
+    const result = await getWorktreeAndValidatePath(id, path);
+    if ('error' in result) {
+      // The validation helper builds JSON error bodies for the other methods; a
+      // HEAD response carries no body, so only the status survives.
+      return new NextResponse(null, { status: result.error.status });
+    }
+
+    const { worktree, relativePath } = result;
+
+    try {
+      const fileStat = await stat(join(worktree.path, relativePath));
+      if (!fileStat.isFile()) {
+        return new NextResponse(null, { status: 404 });
+      }
+      return new NextResponse(null, {
+        status: 200,
+        headers: { 'Cache-Control': 'no-store, private' },
+      });
+    } catch (err: unknown) {
+      const code = (err as NodeJS.ErrnoException).code;
+      // ENOTDIR is the answer for `a.txt/b.txt`, where a path SEGMENT is a file.
+      if (code === 'ENOENT' || code === 'ENOTDIR' || code === 'ENAMETOOLONG') {
+        return new NextResponse(null, { status: 404 });
+      }
+      throw err;
+    }
+  } catch (error: unknown) {
+    logger.error('error-probing-file:', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return new NextResponse(null, { status: 500 });
   }
 }
 
