@@ -244,11 +244,13 @@ export const commandCodeAgentEventSource: AgentEventSource = definePushHookSourc
     eventIdentity: null,
     // push. There is no connection to lose and nothing to re-read.
     resync: 'none',
-    // Phase C (#2252) flips this to `'pull'` when the reader for
-    // `~/.commandcode/projects/<slug>/<session_id>.jsonl` lands. Until then the
-    // scraped pane is the only record, and `structured-history-gate` must not be
-    // sent looking for a reader that does not exist.
-    transcriptHistory: null,
+    // pull, since Phase C (#2252). `./history` reads
+    // `~/.commandcode/projects/<slug>/<session_id>.jsonl` and writes the agent's
+    // own Markdown; `structured-history-gate` drops the scrape when it answers
+    // true and keeps it when it answers false, which is every failure there is.
+    // The `<slug>` is `slugify(cwd)` and is deliberately not computed — the
+    // reader finds the file by session id instead (Epic #2249 決定 4).
+    transcriptHistory: 'pull',
   },
 
   // The four-row private table. See COMMAND_CODE_HOOK_EVENT_NAMES.
