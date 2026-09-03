@@ -104,6 +104,22 @@ type VersionProbe =
  *
  * The remaining four names are still resolved by `execFile` off the server's
  * PATH; see probeCliVersion for why absolute-path resolution lands with Phase 3.
+ *
+ * **command-code is deliberately absent** (Issue #2253). It has an attestation
+ * like the other five, so `CATALOG_VERIFIED_AGAINST['command-code']` exists and a
+ * probe row would work — but `commandcode --version` is not a read. Run against
+ * a scratch `HOME` on 2026-09-03 (1.40.1) it created
+ * `$HOME/.commandcode/telemetry-install-id`, i.e. it mints a telemetry identity
+ * for whoever runs it, and it took 0.41–0.47s against `codex --version`'s 0.04s.
+ * That is the same bar copilot was moved off `gh` for: a staleness hint is a
+ * convenience, and it must not have side effects on a machine whose owner has
+ * the binary on PATH but has never chosen to use the tool here. The cost of
+ * leaving it out is bounded and visible — computeCatalogStaleness skips a tool
+ * with no probe, so the palette shows no staleness banner for Command Code and
+ * nothing else changes. The shape that would make it safe is a `delegated`
+ * probe that reads the installed package's own `package.json` rather than
+ * executing the binary; that is a separate build, not something to smuggle in
+ * with a catalog addition.
  */
 const VERSION_PROBES: Record<string, VersionProbe> = {
   claude: { kind: 'execFile', command: 'claude', args: ['--version'] },

@@ -320,6 +320,10 @@ Claude の詳細な出力をMarkdown形式で閲覧できます。
 | **Codex** | OpenAI Codex CLI |
 | **Gemini** | Google Gemini CLI |
 | **Vibe-Local** | Ollama ローカルLLM |
+| **OpenCode** | OpenCode CLI |
+| **Copilot** | GitHub Copilot CLI |
+| **Antigravity** | Antigravity CLI（`agy`） |
+| **Command Code** | Command Code CLI（`commandcode`、Issue #2250） |
 
 - 常に**2つ**のエージェントを選択する必要があります
 - 選択したエージェントがターミナルヘッダーのタブとして表示されます

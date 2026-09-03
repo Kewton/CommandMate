@@ -104,13 +104,15 @@
       "tasks": "バックグラウンドタスクを表示・管理",
       "memory": {
         "claude": "CLAUDE.md メモリファイルを編集し auto-memory を管理",
-        "copilot": "メモリの状態表示と、セッション間メモリの有効・無効切り替え"
+        "copilot": "メモリの状態表示と、セッション間メモリの有効・無効切り替え",
+        "command-code": "Command Code のメモリを管理"
       },
       "new": "新しい会話を開始",
       "logout": {
         "codex": "Codex からサインアウト",
         "claude": "Anthropic アカウントからサインアウト",
-        "copilot": "現在の OAuth ログインセッションからログアウト"
+        "copilot": "現在の OAuth ログインセッションからログアウト",
+        "command-code": "Command Code またはプロバイダーからログアウト"
       },
       "quit": "Codex CLI を終了",
       "diff": "Git の差分を表示（未追跡ファイルを含む）",
@@ -120,12 +122,14 @@
         "codex": "カレントディレクトリに AGENTS.md テンプレートを生成",
         "claude": "リポジトリ向けの CLAUDE.md ガイドを生成",
         "copilot": "このリポジトリ向けの Copilot 指示ファイルを初期化",
-        "opencode": "AGENTS.md のガイド付きセットアップを実行"
+        "opencode": "AGENTS.md のガイド付きセットアップを実行",
+        "command-code": "このプロジェクト向けの AGENTS.md を生成"
       },
       "feedback": {
         "codex": "Codex チームにフィードバックを送信",
         "claude": "Claude Code についてのフィードバックを送信",
-        "copilot": "CLI についてのフィードバックを送信"
+        "copilot": "CLI についてのフィードバックを送信",
+        "command-code": "GitHub にバグ報告・フィードバックを送信"
       },
       "plan": "プランモードを切り替え",
       "goal": "現在のセッションの目標を設定",
@@ -139,7 +143,8 @@
         "codex": "Codex のスキルを管理",
         "claude": "Claude Code のスキルを管理",
         "copilot": "機能を拡張するスキルを管理",
-        "opencode": "利用可能なスキルを一覧・実行"
+        "opencode": "利用可能なスキルを一覧・実行",
+        "command-code": "エージェントスキルを一覧・表示"
       },
       "hooks": "フック設定を確認・管理",
       "sessions": "会話履歴を閲覧",
@@ -148,13 +153,15 @@
         "opencode": "OpenCode TUI を終了",
         "claude": "CLI を終了",
         "codex": "CLI を終了",
-        "copilot": "CLI を終了"
+        "copilot": "CLI を終了",
+        "command-code": "Command Code を終了"
       },
       "models": "AI モデルを切り替え",
       "agents": {
         "opencode": "利用可能なエージェントを一覧・管理",
         "claude": "サブエージェントの作成・管理を Claude に依頼するか .claude/agents/ を直接編集するよう促す案内を表示",
-        "codex": "稼働中のすべてのエージェントセッションを一覧・切り替え"
+        "codex": "稼働中のすべてのエージェントセッションを一覧・切り替え",
+        "command-code": "エージェント構成を管理"
       },
       "themes": "TUI のテーマを変更",
       "editor": "長文メッセージ用のエディタを開く",
@@ -193,7 +200,8 @@
       "keybindings": "キーボードショートカットの設定ファイルを開く",
       "login": {
         "claude": "Anthropic アカウントにサインイン",
-        "copilot": "Copilot にログイン"
+        "copilot": "Copilot にログイン",
+        "command-code": "Command Code またはプロバイダーにログイン"
       },
       "mobile": "Claude モバイルアプリのダウンロード用 QR コードを表示",
       "passes": "Claude Code の 1 週間無料パスを友人に共有",
@@ -244,7 +252,8 @@
       "approve": "直近の自動レビュー拒否に対する再試行を 1 回承認",
       "import": {
         "codex": "Claude Code から設定・プロジェクト・最近のチャットを取り込み",
-        "claude": "OpenAI Codex / Google Gemini CLI の設定（指示ファイル・MCP サーバー・コマンド・サブエージェント・スキル）を Claude Code に取り込み"
+        "claude": "OpenAI Codex / Google Gemini CLI の設定（指示ファイル・MCP サーバー・コマンド・サブエージェント・スキル）を Claude Code に取り込み",
+        "command-code": "他のコーディングエージェント（Claude Code / Codex / Cursor / pi / OpenCode / Gemini）から設定を取り込み"
       },
       "archive": "このセッションをアーカイブして終了",
       "delete": "このセッションを完全に削除して終了",
@@ -302,7 +311,26 @@
       "artifacts": "自分が所有または共有されている Artifact を一覧し、セッションへの添付・ブラウザで開く・リンクのコピーを行う",
       "auto-mode-setup": "プロジェクトと最近のセッションから autoMode.environment の下書きを作成し、内容を確認してユーザー設定に保存する",
       "rate-limit-options": "claude.ai の使用量上限でリクエストがブロックされたときに作業を続ける方法を表示（上限リセット時の自動継続・使用クレジットの追加・プランのアップグレード）",
-      "workflow-authoring": "動的ワークフロースクリプトを書くためのリファレンスを読み込み（スクリプト API・レジューム挙動・品質パターン・実例）"
+      "workflow-authoring": "動的ワークフロースクリプトを書くためのリファレンスを読み込み（スクリプト API・レジューム挙動・品質パターン・実例）",
+      "clone": "現在のブランチを新しいセッションに複製して切り替え",
+      "compact-mode": "セッション圧縮に使うコンパクトモードを選択",
+      "design": "UI の監査・構築・合成・出荷を支援するデザインパートナー",
+      "extra": "オンデマンドクレジットを購入する請求ページを開く",
+      "hotkeys": "すべてのキーボードショートカットを表示",
+      "learn": "学習ハブをブラウザで開く",
+      "learn-taste": "他のコーディングエージェントのセッションからコーディングの好みを学習",
+      "mode": "権限モードを表示・切り替え",
+      "plan-review": "このセッションの最新プランをレビュー表示で開く",
+      "plans": "保存済みプランの閲覧・レビュー・注釈",
+      "pr-comments": "現在のブランチの PR コメントをすべて取得",
+      "reload": "CLI を再起動してこのセッションを再開し、保留中の更新を適用",
+      "session-file": "現在のセッション ID とセッションファイルのパスを表示",
+      "taste": "taste 学習と利用状況を管理",
+      "todos": "セッションの TODO リストを管理",
+      "trace": "サポート調査用に現在のトレース ID をコピー",
+      "tree": "セッションツリーを辿って任意の地点へジャンプ",
+      "unshare": "会話の共有を停止",
+      "worktree": "git worktree の作成・一覧・切り替え"
     }
   },
   "session": {

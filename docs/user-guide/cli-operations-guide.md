@@ -219,7 +219,7 @@ commandmate send <worktree-id> "<message>" --auto-yes --stop-pattern "FAILED"
 | オプション | 説明 | デフォルト |
 |-----------|------|-----------|
 | `--instance <id>` | **送り先の推奨指定方法**。インスタンスID（`<agent>` または `<agent>-<n>`、例: `codex` / `claude-2`）。未起動なら自動起動 | エージェントのプライマリインスタンス |
-| `--agent <id>` | roster に無いインスタンスをアドホック起動するときの補助（claude, codex, gemini, vibe-local, opencode, copilot, antigravity） | roster の値・worktree既定 |
+| `--agent <id>` | roster に無いインスタンスをアドホック起動するときの補助（claude, codex, gemini, vibe-local, opencode, copilot, antigravity, command-code） | roster の値・worktree既定 |
 | `--register` | `--instance` で指定したセッションをroster（エージェントインスタンス一覧）に登録 | - |
 | `--auto-yes` | 送信前にAuto-Yesを有効化 | - |
 | `--duration <d>` | Auto-Yesの有効期間（1h, 3h, 8h） | 1h |
@@ -2890,7 +2890,7 @@ Error: Invalid duration. Must be one of: 1h, 3h, 8h
 ### 不正なagentエラー
 
 ```
-Error: Invalid agent. Must be one of: claude, codex, gemini, vibe-local, opencode, copilot, antigravity
+Error: Invalid agent. Must be one of: claude, codex, gemini, vibe-local, opencode, copilot, antigravity, command-code
 ```
 
 **対処**: `--agent` には上記のいずれかを指定してください。

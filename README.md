@@ -50,7 +50,7 @@ If this is the kind of AI development workflow you want, [give the repo a star](
 | **Skills Catalog** | Install and update official Skills per worktree, from the web UI or `commandmate skill` | The method is installed for the agent to read, not kept in someone's head |
 | **Never miss a waiting agent** | A waiting agent shows up as a badge, a toast, the tab title, the PWA app badge and a push notification | You find out the moment an agent needs you, even away from the desk |
 | **Git Worktree Sessions** | One session per worktree, parallel execution | Multiple issues progress simultaneously without interference |
-| **Multi-Agent Support** | Choose Claude Code, Codex, Gemini CLI, Copilot, OpenCode, Antigravity or local models per worktree | Pick the right agent for each task |
+| **Multi-Agent Support** | Choose Claude Code, Codex, Gemini CLI, Copilot, OpenCode, Antigravity, Command Code or local models per worktree | Pick the right agent for each task |
 | **Auto Yes Mode** | Agent runs without stopping for confirmations | Optional unattended mode for trusted workflows — review the Security section before enabling |
 | **Web UI (Desktop & Mobile)** | Full session control from any browser | Monitor and steer from your desk or your phone |
 | **File Viewer & Markdown Editor** | Browse and edit worktree files in the browser | Review changes and update AI instructions without opening an IDE |
@@ -446,7 +446,7 @@ The comparison that matters is not against other products; it is against the way
 | Evidence | A chat transcript | Commits, gate logs, `verify history`, `report metrics` |
 | Parallel work | Terminal tabs | One worktree and one contract per task |
 | When it stops | You notice, eventually | Waiting is surfaced: badge, toast, tab title, push |
-| Which agent | Locked to one | Claude Code, Codex, Gemini CLI, Copilot, OpenCode, Antigravity, local models |
+| Which agent | Locked to one | Claude Code, Codex, Gemini CLI, Copilot, OpenCode, Antigravity, Command Code, local models |
 
 </details>
 
