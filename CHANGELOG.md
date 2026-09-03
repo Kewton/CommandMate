@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **fix(detection): antigravity の番号つき権限ダイアログを選択リストではなくプロンプトとして検出** (#2270): `Do you want to proceed?` と `N.` 行を持つフレームでは `beforePrompt` の選択リスト判定をスキップして priority 1 の prompt 検出に渡すようにし、`hasActivePrompt: true` / `promptData`（`multiple_choice` 4択）/ `isSelectionListActive: false` を publish するようにした。チャット面に PromptPanel が出て 2〜4 を番号で選べるようになり、poller が保存する `prompt` 行・push 通知の `kind: 'prompt'` と状態検出の答えが一致する。`Switch Model` ピッカー（#995）は従来どおり `antigravity_selection_list`
+- **fix(ui): チャット面を開いた直後に最新のやり取りが見えるようにし、先頭/末尾へのジャンプを 1 つの FAB に集約** (#2283): ターミナル→チャット切替時・再読み込み時・ローディング解除時のいずれでも `ChatTranscript` が仮想リストの最終行へアンカーし、行の実測で総高が伸びても末尾に留まるようにした（`scrollToIndex(last, 'end')` を総高が動く間だけ再照準。最大 12 フレーム / 600ms）。`ChatSurface` のマウント時 `scrollTop = scrollHeight` を撤去。右下に円形 FAB を追加し、末尾では先頭へ（↑）、それ以外では末尾へ（↓、生成中はスピナー＋`chatSurface.jumpToLatestGenerating`）ジャンプする。ジャンプは両方向とも virtualizer 経由で `scrollTop` 直接代入を使わない（実測で 7,770px 手前に止まっていた）。スクロール領域を `tabIndex={0}` にして Home/End を効かせ、先頭へ飛んだあとは新着で末尾へ引き戻さない。`ChatTranscript` が scroll controls を publish している間は `ChatSurface` の「新着へ」チップを引っ込め、ジャンプ手段が同時に 2 つ出ないようにした。
 - **fix(ui): 版ズレバナーと SW 更新トーストが消えない／footer を塞ぐ問題を解消** (#2271): 版ズレ判定の比較対象を実行時 package.json から `.next` に焼かれた bundle の版（`resolveBundleDrift()` / `getServedBundleVersion()`）へ変え、bump だけでは発火せず再ビルドで bundle が入れ替わったときだけ発火するようにした。あわせて Service Worker の更新トーストをバナー表示中は抑止し、コンテナを `pointer-events-none`（カードのみ `pointer-events-auto`）にして右下へ寄せ、composer 下の Auto Yes スイッチを塞がないようにした
 
 ## [0.30.2] - 2026-09-03
