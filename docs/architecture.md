@@ -58,7 +58,7 @@
 ### 1.3 実装済み機能
 
 - **CLI ツールのサポート** (Issue #4で実装完了、Issue #368/#379/#545/#988 で拡張)
-  - Claude Code, Codex CLI, Gemini CLI, Vibe-Local (Ollama), OpenCode, GitHub Copilot, Antigravity の 7 ツール対応（正本は `src/lib/cli-tools/types.ts` の `CLI_TOOL_IDS`）
+  - Claude Code, Codex CLI, Gemini CLI, Vibe-Local (Ollama), OpenCode, GitHub Copilot, Antigravity, Command Code の 8 ツール対応（正本は `src/lib/cli-tools/types.ts` の `CLI_TOOL_IDS`）
   - Strategy パターンによる拡張可能な設計
   - worktree毎に2〜4エージェントを選択可能（`selected_agents`カラム）
   - Vibe-LocalはOllamaモデルを指定可能（`vibe_local_model`カラム）
@@ -477,6 +477,8 @@ tmux セッション / Claude プロセスが落ちた場合
 - `VibeLocalTool` - Vibe-Local / Ollama (Issue #368)
 - `OpenCodeTool` - OpenCode (Issue #379)
 - `CopilotTool` - GitHub Copilot CLI (Issue #545)
+- `AntigravityTool` - Antigravity CLI / `agy` (Issue #988)
+- `CommandCodeTool` - Command Code CLI / `commandcode` (Issue #2250)
 
 **管理:**
 - `CLIToolManager` シングルトンクラスで各ツールインスタンスを管理
@@ -518,7 +520,7 @@ tmux send-keys -t "{sessionName}" "claude" C-m
 - テーブル（イメージ）:
 - worktrees:
 - id, name, path, last_message_summary, updated_at
-- **cli_tool_id** (追加: Issue #4、#379/#545/#988 で拡張) - 使用するCLI tool ('claude' | 'codex' | 'gemini' | 'vibe-local' | 'opencode' | 'copilot' | 'antigravity')
+- **cli_tool_id** (追加: Issue #4、#379/#545/#988/#2250 で拡張) - 使用するCLI tool ('claude' | 'codex' | 'gemini' | 'vibe-local' | 'opencode' | 'copilot' | 'antigravity' | 'command-code')
 - **selected_agents** (追加: Issue #368) - 選択中の2〜4エージェント (JSON配列, 例: '["claude","vibe-local"]')
 - **vibe_local_model** (追加: Issue #368) - Vibe-Local用Ollamaモデル名 (nullable)
 - repository_path, repository_name, description
@@ -603,14 +605,14 @@ feature/foo
 
 - ChatMessage.requestId とログ名に埋め込むことで、「どのリクエストの応答か」をより厳密にトレース可能。
 
-### 10.2 マルチ LLM / マルチセッション ✅ 実装済み (Issue #4、#368/#379/#545/#988 で拡張)
+### 10.2 マルチ LLM / マルチセッション ✅ 実装済み (Issue #4、#368/#379/#545/#988/#2250 で拡張)
 
 **実装内容:**
-- Claude Code / Codex / Gemini / Vibe-Local / OpenCode / GitHub Copilot / Antigravity の 7 ツールに対応
+- Claude Code / Codex / Gemini / Vibe-Local / OpenCode / GitHub Copilot / Antigravity / Command Code の 8 ツールに対応
 - ワークツリーごとに `cliToolId` フィールドで使用するCLIツールを管理
 - Strategy パターンによる抽象化:
   - `BaseCLITool` 抽象クラス
-  - `ClaudeTool` / `CodexTool` / `GeminiTool` / `VibeLocalTool` / `OpenCodeTool` / `CopilotTool` / `AntigravityTool` 実装クラス
+  - `ClaudeTool` / `CodexTool` / `GeminiTool` / `VibeLocalTool` / `OpenCodeTool` / `CopilotTool` / `AntigravityTool` / `CommandCodeTool` 実装クラス
   - `CLIToolManager` シングルトンでツールインスタンスを管理
 - データベーススキーマ: `worktrees.cli_tool_id` カラム（デフォルト: 'claude'）
 - 対応API:

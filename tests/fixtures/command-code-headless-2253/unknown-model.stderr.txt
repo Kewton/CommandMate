@@ -1,0 +1,2 @@
+Error: unknown model "definitely-not-a-real-model".
+Run "cmd --list-models" to see all available models

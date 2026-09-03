@@ -423,6 +423,11 @@ describe('getCatalogStaleness', () => {
 
       // copilot is absent: its probe is delegated, so it never reaches execFile
       // from this module (the resolver applies the same rules on its own side).
+      //
+      // command-code is absent for a different reason (Issue #2253): it has an
+      // attestation but no probe row at all, because `commandcode --version`
+      // writes `$HOME/.commandcode/telemetry-install-id`. See the VERSION_PROBES
+      // docblock — this list is where that decision becomes enforceable.
       expect(execCalls.map((call) => call.command).sort()).toEqual([
         'agy',
         'claude',

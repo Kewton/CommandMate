@@ -6,6 +6,11 @@
  * This module manages the DB logging lifecycle (create/update execution logs)
  * and delegates actual command execution to claude-executor.
  *
+ * Scheduled tools: claude, codex, gemini, vibe-local, opencode, copilot,
+ * antigravity, command-code (Issue #2253). Which flags each one is launched
+ * with, and how its stdout is decoded back into an answer, is claude-executor's
+ * business — this module only records the verdict.
+ *
  * Trust boundary: All inputs are DB-derived from schedule-manager.ts (trusted).
  */
 
@@ -251,6 +256,13 @@ export async function executeSchedule(state: ScheduleState): Promise<void> {
       options
     );
 
+    // Issue #2253: `result.status` is not always "did the process exit 0".
+    // command-code writes a `{"type":"result","subtype":…}` line even on a
+    // non-zero exit and can pair `subtype: "success"` with exit 9, so
+    // claude-executor reads both halves and folds the verdict into `status` and
+    // into the head of `output` (a `Reason: command-code exit N (…)` line).
+    // This row is therefore the failure reason as well as the transcript, and
+    // must keep writing `result.output` verbatim rather than a summary of it.
     updateExecutionLog(logId, result.status, result.output, result.exitCode);
     updateScheduleLastExecuted(state.scheduleId);
 

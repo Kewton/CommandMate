@@ -54,7 +54,7 @@ Targeting an agent:
 
 - \`--instance <id>\` is the way to name the target (\`<agent>\` or \`<agent>-<n>\`, e.g. \`codex-2\`). It is accepted by \`send\` / \`wait\` / \`respond\` / \`capture\` / \`auto-yes\` / \`verify\`, and omitting it means the worktree's primary instance.
 - \`--agent <tool>\` is **not** the normal way to select a target (Issue #1638). It only declares the CLI tool for an *ad-hoc* instance the roster does not know — pair it with \`--instance\` (plus \`--register\` on \`send\` to add the instance to the roster). \`wait\` has no \`--agent\` at all.
-- Valid CLI tools: \`claude\`, \`codex\`, \`gemini\`, \`vibe-local\`, \`opencode\`, \`copilot\`, \`antigravity\`.
+- Valid CLI tools: \`claude\`, \`codex\`, \`gemini\`, \`vibe-local\`, \`opencode\`, \`copilot\`, \`antigravity\`, \`command-code\`.
 
 Other notes:
 
