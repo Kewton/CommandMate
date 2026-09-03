@@ -32,6 +32,7 @@ import type { ShowToast } from '@/types/markdown-editor';
 import type { HistoryDisplayLimit } from '@/config/history-display-config';
 import type { WorktreeVerificationState } from '@/hooks/useWorktreeVerification';
 import type { SubTabRequest } from '@/components/worktree/NotesAndLogsPane';
+import type { SurfaceMode } from '@/types/ui-state';
 import {
   buildModelByInstance,
   WorktreeInfoFields,
@@ -213,6 +214,15 @@ interface MobileContentProps {
   verification: WorktreeVerificationState;
   /** [Issue #1816] Jump the Tools tab to a sub-tab (the header chip). */
   toolsSubTabRequest?: SubTabRequest | null;
+  /**
+   * [Issue #2254] Which output surface the terminal tab is showing.
+   *
+   * Pure pass-through to {@link MobileTerminalTab}. The screen needs it because
+   * the docked `NavigationButtons` live ABOVE the composer, outside this
+   * switch's subtree, and must stand down while the chat surface is drawing its
+   * own pad inside the dialog card.
+   */
+  onSurfaceModeChange?: (mode: SurfaceMode) => void;
 }
 
 // Issue #1494 / #1496: MobileTerminalTab moved to its own module so the mobile
@@ -267,6 +277,7 @@ export const MobileContent = memo(function MobileContent({
   onToggleInstanceVisible,
   verification,
   toolsSubTabRequest,
+  onSurfaceModeChange,
 }: MobileContentProps) {
   // Unconditional hook call — must stay above the `activeTab` switch below.
   const tWorktree = useTranslations('worktree');
@@ -280,6 +291,7 @@ export const MobileContent = memo(function MobileContent({
             cliToolId={cliToolId}
             instanceId={instanceId}
             disableAutoFollow={disableAutoFollow}
+            onSurfaceModeChange={onSurfaceModeChange}
           />
         </ErrorBoundary>
       );

@@ -19,6 +19,43 @@
  */
 
 /**
+ * The characters a dialog is answered WITH rather than navigated by (Issue #2254).
+ *
+ * `1`–`9` are the option numbers every numbered TUI dialog in this repository
+ * offers (codex's trust / `/model` pickers, claude's `PermissionRequest`
+ * screens, the hooks-review flow), and `y` / `n` are the two letters a bare
+ * `[y/n]` accepts. They are LITERAL characters on the wire, exactly like the
+ * codex pager's `q` has been since #1017 and opencode's chord letters since
+ * #2046 — `tmux send-keys -- 1` types a `1`.
+ *
+ * WHY THEY ARE IN THE BASE VOCABULARY, i.e. offered to every tool
+ * ---------------------------------------------------------------
+ * The state this exists for is "a wait is on screen and nothing could read it"
+ * (`ChatSurface`'s `promptUnreadable`). By construction nobody knows which tool
+ * drew that dialog *shape*, so there is no per-tool declaration to hang these
+ * off; what IS known is that the dialog is waiting for an answer, and that the
+ * chat surface had no way to send one before this Issue — the `/send` route
+ * refuses with `prompt_waiting`, and `/special-keys` published only arrows.
+ *
+ * The cost is the same one #2046 weighed for opencode's letters: a caller may
+ * POST `{cliToolId:"claude", keys:["y"]}` at an IDLE pane and type a `y` into
+ * the composer. That is a typo, not an escalation — the route has always been
+ * able to type `q` into any composer, sending a character is what the route is
+ * FOR, and the UI only draws these buttons while a wait is unreadable. What is
+ * deliberately still refused is a free string: `/send`'s `prompt_waiting` guard
+ * is untouched, `MAX_KEYS_LENGTH` is 10, and every other letter stays a 400.
+ *
+ * Note the overlap with {@link OPENCODE_LEADER_CHORD_VALUES}: `n` is in both,
+ * and `tests/unit/cli-tools/navigation-keys-declaration-2046.test.ts` pins the
+ * intersection to exactly `['n']` so a future widening of either list cannot
+ * quietly hand another tool an opencode chord letter.
+ */
+export const ANSWER_KEY_VALUES = [
+  '1', '2', '3', '4', '5', '6', '7', '8', '9',
+  'y', 'n',
+] as const;
+
+/**
  * Navigation keys accepted by the special-keys API and the terminal UI.
  *
  * Separate from `SPECIAL_KEY_VALUES` (the `sendSpecialKey()` control keys) and
@@ -32,6 +69,9 @@ export const NAVIGATION_KEY_VALUES = [
   // Issue #1017: Codex pager / edit-previous mode keys surfaced by NavigationButtons.
   // 'q' is the pager quit key (literal char). PageUp/PageDown/Home/End are tmux named keys.
   'PageUp', 'PageDown', 'Home', 'End', 'q',
+  // Issue #2254: the answer characters. Appended rather than interleaved so the
+  // pre-#2254 prefix of this list is still readable as one line in a diff.
+  ...ANSWER_KEY_VALUES,
 ] as const;
 
 /**
@@ -83,6 +123,26 @@ export const OPENCODE_LEADER_CHORD_VALUES = [
 export const OPENCODE_DIRECT_KEY_VALUES = ['C-p', 'C-t'] as const;
 
 /**
+ * {@link OPENCODE_LEADER_CHORD_VALUES} minus what the base pad already carries.
+ *
+ * Issue #2254 moved `n` into {@link ANSWER_KEY_VALUES}, and therefore into
+ * {@link NAVIGATION_KEY_VALUES}, which every tool's declaration starts from —
+ * so spreading the full chord list into the two unions below would list `n`
+ * twice. A duplicate is harmless to `Array.prototype.includes`, which is all the
+ * route does with these, and that is exactly why it needs its own guard: the
+ * only thing that would notice is the "no duplicate entries" assertion in
+ * `tests/unit/cli-tools/navigation-keys-declaration-2046.test.ts`.
+ *
+ * Written out rather than filtered at runtime because both unions are `as const`
+ * tuples whose LITERAL member types are the `TerminalKey` union — a
+ * `.filter()` would collapse them to `string[]` and take the compile-time check
+ * with it. The same suite pins this list to
+ * `OPENCODE_LEADER_CHORD_VALUES \ NAVIGATION_KEY_VALUES` so it cannot drift out
+ * of step with either side.
+ */
+const OPENCODE_CHORD_ONLY_VALUES = ['a', 'l', 't', 'm', 'g', 'u', 'r', 'c'] as const;
+
+/**
  * Everything an opencode pane may be sent — the base navigation pad plus this
  * tool's own chords. Returned by `OpenCodeTool.navigationKeys()`.
  */
@@ -90,7 +150,7 @@ export const OPENCODE_NAVIGATION_KEY_VALUES = [
   ...NAVIGATION_KEY_VALUES,
   OPENCODE_LEADER_KEY,
   ...OPENCODE_DIRECT_KEY_VALUES,
-  ...OPENCODE_LEADER_CHORD_VALUES,
+  ...OPENCODE_CHORD_ONLY_VALUES,
 ] as const;
 
 /**
@@ -110,7 +170,8 @@ export const TERMINAL_KEY_VALUES = [
   ...NAVIGATION_KEY_VALUES,
   OPENCODE_LEADER_KEY,
   ...OPENCODE_DIRECT_KEY_VALUES,
-  ...OPENCODE_LEADER_CHORD_VALUES,
+  // Issue #2254: `n` is in the base pad now — see OPENCODE_CHORD_ONLY_VALUES.
+  ...OPENCODE_CHORD_ONLY_VALUES,
 ] as const;
 
 /** Any key name a tool may declare in its {@link NavigationKeySpec}. */

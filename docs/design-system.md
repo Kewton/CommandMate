@@ -219,6 +219,19 @@ UI の配色方針は次の 2 分類のみ。曖昧な「暗いまま」の島�
 - ガードの `*Terminal*` 除外は**据え置き**（`TerminalDisplay` 等は xterm 側の固定テーマと対で
   生ダークユーティリティを使っており、本 Issue では触らない）。
 
+**先例に従った新設: `ChatDialogCard` の画面枠（#2254）**
+
+チャット面のダイアログカードは、TUI ペインの末尾数行を ANSI ごとそのまま描く。#1075 の分類 (a) —
+固定 xterm パレット前提の出力面 — なので**両テーマでダークのまま**とし、色は
+`bg-terminal-surface` / `text-terminal-foreground` で表す。ファイル名は `ChatDialogCard` であって
+`ChatTerminalDialogCard` ではない: 上の「ファイル名規約に寄せない理由」がそのまま当てはまり、
+`*Terminal*` 除外に新しい島を足さない（トークンで表せば綴りに依存しない）。
+
+- カードの**中身だけ**がダーク島。枠線・ラベル・下の操作ボタン行はテーマ追従（`border-border` /
+  `bg-muted` / `text-muted-foreground`）で、チャット面の他の要素と同じ慣例に載る。
+- 操作ボタンは `hover` 表示にしない（タッチでは `@media (hover:none)` により不可視になる）。
+  常時表示＋ `min-h/min-w-[44px]`（#1127）。
+
 ---
 
 ## フォーカス表現 (Issue #1082)

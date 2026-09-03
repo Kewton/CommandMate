@@ -87,6 +87,7 @@ import {
 import type { MobileTab } from '@/components/mobile/MobileTabBar';
 import { VerificationStatusChip } from '@/components/worktree/VerificationStatusChip';
 import type { SubTabRequest } from '@/components/worktree/NotesAndLogsPane';
+import { DEFAULT_SURFACE_MODE, type SurfaceMode } from '@/types/ui-state';
 
 // ============================================================================
 // Types
@@ -320,6 +321,23 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   // shell unmounts that pane whenever another tab is active, so the request has
   // to survive the tab switch that the chip itself causes.
   const [toolsSubTabRequest, setToolsSubTabRequest] = useState<SubTabRequest | null>(null);
+
+  // Issue #2254: which output surface the mobile terminal tab is showing.
+  //
+  // The docked `NavigationButtons` below sit above the composer, OUTSIDE
+  // `MobileContent`, so they cannot see the per-worktree mode `MobileTerminalTab`
+  // owns. Since #2254 the chat surface draws its own pad inside the dialog card,
+  // directly under the frame it acts on, and two pads for one selection list is
+  // worse than either — so the tab reports its mode up (on mount and on every
+  // change) and the docked copy stands down while chat is showing.
+  //
+  // Defaults to `terminal`, which is what a screen whose tab has not mounted (or
+  // has not reported yet) should assume: it reproduces the pre-#2254 behaviour
+  // rather than hiding a control nothing has replaced.
+  const [mobileSurfaceMode, setMobileSurfaceMode] = useState<SurfaceMode>(DEFAULT_SURFACE_MODE);
+
+  /** The terminal tab is open AND it is showing chat. See the docked pad below. */
+  const isMobileChatSurface = activeTab === 'terminal' && mobileSurfaceMode === 'chat';
 
   /** Leaving the Tools tab drops the request so a later visit opens on Notes. */
   const handleMobileTabSelect = useCallback(
@@ -718,6 +736,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
               onHistoryUserOnlyChange={handleHistoryUserOnlyChange}
               verification={verification}
               toolsSubTabRequest={toolsSubTabRequest}
+              onSurfaceModeChange={setMobileSurfaceMode}
             />
           </main>
 
@@ -725,8 +744,15 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
               The viewport-height shell keeps this docked above the software
               keyboard, so it no longer needs `position: fixed` + a translateY lift. */}
           <div className="flex-shrink-0 border-t border-border bg-surface z-30">
-            {/* Issue #473: Navigation buttons for OpenCode TUI selection list (mobile) */}
-            {isSelectionListActive && (
+            {/* Issue #473: Navigation buttons for OpenCode TUI selection list (mobile).
+                Issue #2254: not while the terminal tab is showing the CHAT
+                surface — that surface draws its own pad inside the dialog card,
+                directly under the frame, and this docked copy would be a second
+                one twelve rows away from the list it drives. Both terms are
+                required: `activeTab` because the mode only describes the
+                terminal tab (History / Files / Tools keep the docked pad), and
+                `mobileSurfaceMode` because that is which half of it is on. */}
+            {isSelectionListActive && !isMobileChatSurface && (
               <div className="px-2 pt-1 border-b border-border">
                 <NavigationButtons
                   worktreeId={worktreeId}

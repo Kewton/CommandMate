@@ -11,10 +11,34 @@
  *   1. a generating indicator, so a turn in flight is visible — and, since Issue
  *      #2199, the in-flight body itself for the two tools that can produce one;
  *   2. a live region that survives virtualization;
- *   3. an "open the terminal" banner for the states chat cannot drive at all
+ *   3. a dialog card for the states chat used to be unable to drive at all
  *      (selection list / pager / unreadable frame / a wait nobody could parse);
  *   4. follow-the-tail with a "jump to latest" chip when the reader has scrolled
  *      up, on the same discipline `TerminalDisplay` follows output on.
+ *
+ * ## (3) was a dead end until Issue #2254
+ *
+ * Epic #2192's decision 5 said those four states were terminal-only, so what
+ * this surface drew for them was a banner and one button: "open the terminal".
+ * **That decision is withdrawn by Issue #2254.** The banner told the user what
+ * was happening and then took the screen away from them — and on a phone the
+ * terminal is a different tab, so answering a dialog meant abandoning the
+ * transcript they were reading.
+ *
+ * The live region now carries {@link ChatDialogCard}: the pane's own last rows
+ * (`frame`, clipped by `lib/chat/dialog-frame`), with the state's own controls
+ * directly underneath — `NavigationButtons` for a selection list or a pager,
+ * `TerminalEscapeHatch` for a frame nobody classified, and `PromptAnswerKeys`
+ * (the `1`–`9` / `y` / `n` characters #2254 added to the special-keys
+ * vocabulary) wherever the answer is a character rather than a direction. The
+ * banner survives, reworded from "go to the terminal" to "you can do this here",
+ * and its button stays as a secondary way out.
+ *
+ * Because those controls are HERE, the PC footer must not draw them too:
+ * `TerminalSplitPaneContent` gates its `showNav` / `showEscapeHatch` on
+ * `surfaceMode`, and the phone's docked `NavigationButtons`
+ * (`WorktreeDetailRefactored`) is gated the same way. `PromptPanel` /
+ * `MobilePromptSheet` are NOT — see "What this deliberately does NOT do".
  *
  * ## Where the in-flight reply lives (Issue #2233 moved it)
  *
@@ -54,10 +78,15 @@
  *
  * ## What this deliberately does NOT do
  *
- * - **No prompt UI.** When a wait carries an answerable payload, the composer's
- *   own `PromptPanel` (PC) / `MobilePromptSheet` (phone) is already on screen in
- *   chat mode — #2193 left the whole input half untouched precisely so it would
- *   be. A second copy here would be two controls answering one dialog.
+ * - **No prompt UI for an ANSWERABLE wait.** When a wait carries options, the
+ *   composer's own `PromptPanel` (PC) / `MobilePromptSheet` (phone) is already
+ *   on screen in chat mode — #2193 left the whole input half untouched precisely
+ *   so it would be. A second copy here would be two controls answering one
+ *   dialog, which is why {@link resolveBlockedReason} still returns `null` for
+ *   it and Issue #2254 changed nothing about that branch. The card appears only
+ *   where the composer has nothing to offer.
+ * - **No free text.** The card sends fixed key names through `/special-keys`.
+ *   `/send`'s `prompt_waiting` guard is untouched (Issue #2254 scope).
  * - **No prompt auto-answering.** Auto-Yes calls `detectPrompt` directly and does
  *   not pass through anything this component can see; nothing here may touch it.
  * - **No new session-start path.** The empty state (now `ChatTranscript`'s, and
@@ -70,7 +99,10 @@
  * Theme-following, like the transcript it wraps. The terminal is a permanently dark
  * island because it mirrors a fixed xterm palette; a transcript is not, so every
  * color here is a semantic token and no light-on-dark is written into a shared
- * child.
+ * child. The ONE exception is the dialog card's frame, which reproduces a pane's
+ * own SGR colours and is therefore dark in both themes — expressed with the
+ * `terminal-surface` / `terminal-foreground` tokens rather than raw `gray-*`,
+ * see `ChatDialogCard`.
  */
 
 import React, { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -81,6 +113,10 @@ import {
   CHAT_TRANSCRIPT_SCROLL_CONTAINER_TESTID,
   type ChatTranscriptLiveTurn,
 } from '@/components/worktree/ChatTranscript';
+import { ChatDialogCard } from '@/components/worktree/ChatDialogCard';
+import { NavigationButtons } from '@/components/worktree/NavigationButtons';
+import { TerminalEscapeHatch } from '@/components/worktree/TerminalEscapeHatch';
+import { PromptAnswerKeys } from '@/components/worktree/PromptAnswerKeys';
 import { isAnswerablePromptData, type ChatMessage, type LivePromptData } from '@/types/models';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { SurfaceMode } from '@/types/ui-state';
@@ -242,8 +278,33 @@ export interface ChatSurfaceProps {
   /** The agent instance this surface is showing. Published as `data-instance-id`. */
   instanceId?: string;
   live: ChatSurfaceLiveState;
-  /** Switches the pane's output half. The banner's single button calls this with 'terminal'. */
+  /** Switches the pane's output half. The banner's secondary button calls this with 'terminal'. */
   onSurfaceModeChange: (mode: SurfaceMode) => void;
+  /**
+   * The pane's raw frame, for the dialog card (Issue #2254).
+   *
+   * **`PaneTerminalState.output`, not `realtimeSnippet`.** Both are already in
+   * the caller's hand — the polling hook publishes them side by side — and the
+   * snippet is the wrong one: it is `lines.slice(-100)` of a 200x1000 pane, and
+   * for a codex session that has not yet filled the pane the content sits at the
+   * TOP with hundreds of blank rows below it, so the last 100 rows are empty.
+   * Measured on the live captures in `tests/fixtures/chat-dialog-card-2254/`;
+   * `extractDialogFrameTail` trims the trailing blank run for the same reason.
+   *
+   * Omitting it is legal and simply means no card — the banner still appears, so
+   * a caller that has not been updated degrades to the pre-#2254 behaviour.
+   */
+  frame?: string;
+  /**
+   * Refresh the pane after a key is sent, so the card redraws promptly instead
+   * of waiting for the next poll. Same callback the footer's key strips take.
+   */
+  onKeysSent?: () => void;
+  /**
+   * Phone layout (Issue #2106's vertical budget): a shorter card, scrolling
+   * inside itself, so the transcript keeps its rows.
+   */
+  compact?: boolean;
   history?: ChatSurfaceHistoryProps;
   className?: string;
 }
@@ -297,13 +358,16 @@ export function isTurnSettled(messages: readonly ChatMessage[], turnKey: string)
 }
 
 /**
- * Why the chat surface cannot drive this frame, or `null` when it can.
+ * Why this frame needs the dialog card, or `null` when it needs nothing.
  *
- * The four members are the states Epic #2192 decided are terminal-only: arrow-key
+ * The four members are the states Epic #2192 decided were terminal-only: arrow-key
  * navigation, a pager, a frame no detector could classify, and a wait whose
- * payload carries no options for the composer's prompt panel to render. Anything
- * else — including a normal answerable prompt — is workable from chat and must
- * NOT raise a banner, because the prompt panel is already on screen for it.
+ * payload carries no options for the composer's prompt panel to render. Issue
+ * #2254 withdrew the "terminal-only" half of that decision — they are now driven
+ * from the card this returns the reason for — but the SET is unchanged, and so
+ * is the exclusion that matters most: anything else, including a normal
+ * answerable prompt, is workable from the composer and must NOT raise a card,
+ * because `PromptPanel` / `MobilePromptSheet` are already on screen for it.
  */
 export function resolveBlockedReason(live: ChatSurfaceLiveState): ChatSurfaceBlockedReason | null {
   if (live.isPagerActive) return 'pager';
@@ -324,6 +388,9 @@ export const ChatSurface = memo(function ChatSurface({
   instanceId,
   live,
   onSurfaceModeChange,
+  frame,
+  onKeysSent,
+  compact = false,
   history,
   className = '',
 }: ChatSurfaceProps) {
@@ -540,6 +607,66 @@ export const ChatSurface = memo(function ChatSurface({
     onSurfaceModeChange('terminal');
   }, [onSurfaceModeChange]);
 
+  // --------------------------------------------------------------------
+  // The dialog card's controls (Issue #2254)
+  // --------------------------------------------------------------------
+  // One switch on the SAME reason the banner is worded from, so the sentence the
+  // user reads and the buttons they are given can never describe different
+  // states. `cliToolId` gates the whole row rather than each control: every one
+  // of them posts to `/special-keys`, which needs a tool to resolve the session
+  // name and to validate the key against that tool's vocabulary (Issue #2046).
+  // A caller with no tool still gets the frame — seeing the dialog is worth
+  // something on its own — and no buttons that could not be delivered.
+  const dialogActions = useMemo<React.ReactNode>(() => {
+    if (blockedReason === null || !cliToolId) return null;
+    const keyProps = {
+      worktreeId,
+      cliToolId,
+      instanceId,
+      onKeysSent,
+    };
+    switch (blockedReason) {
+      // A pager and a selection list are both driven by a MOVING HIGHLIGHT, so
+      // the verb is a direction and the control is the arrow pad. `showPagerKeys`
+      // adds PgUp/PgDn/Home/End/q for the pager, exactly as the footer does.
+      case 'pager':
+        return <NavigationButtons {...keyProps} showPagerKeys />;
+      case 'selectionList':
+        return <NavigationButtons {...keyProps} />;
+      // Nobody could classify the frame, so nobody can promise it has a
+      // highlight to move OR a numbered list to answer. Both pads are offered:
+      // the hatch for an overlay that navigates (claude's `/help` tabs), the
+      // answer keys for one that asks (#2254 §B's "the yes/no in an unclassified
+      // frame"). Deliberately NOT folded into `TerminalEscapeHatch` itself,
+      // which is also mounted in the PC footer and on the phone's terminal tab
+      // where the vertical budget (#2131 / #2106) is already spoken for.
+      case 'unclassified':
+        return (
+          <div className="space-y-2">
+            <TerminalEscapeHatch {...keyProps} />
+            <PromptAnswerKeys {...keyProps} />
+          </div>
+        );
+      // A wait IS on screen and its payload carried no options (#1708 / #1725).
+      // The answer is a character, and the card above shows which one — the
+      // pairing is the point, because `respond <id> yes` is not resolved
+      // semantically on a numbered dialog (#1681): Enter takes whatever the CLI
+      // highlighted, so a "no" can land as an approval.
+      case 'promptUnreadable':
+        return (
+          <div className="space-y-2">
+            <p
+              data-testid="chat-surface-unreadable-hint"
+              className="text-xs text-muted-foreground"
+            >
+              {t('chatSurface.unreadableHint')}
+            </p>
+            <PromptAnswerKeys {...keyProps} />
+          </div>
+        );
+    }
+  }, [blockedReason, cliToolId, worktreeId, instanceId, onKeysSent, t]);
+
   const historyProps = history ?? {};
 
   return (
@@ -595,18 +722,26 @@ export const ChatSurface = memo(function ChatSurface({
         )}
       </div>
 
-      {/* What is left of the footer live region (Issue #2233): the terminal
-          banner, and nothing else. The generating indicator and the in-flight
-          body moved into the transcript's tail — same reason as ever, opposite
-          implementation. This strip is `shrink-0`, so on the phone every pixel
-          it takes comes out of the transcript (Issue #2106's budget); it is not
-          rendered at all when there is no banner to raise. */}
+      {/* The footer live region (Issue #2233): the banner, and — since Issue
+          #2254 — the dialog card under it. The generating indicator and the
+          in-flight body are NOT here; they moved into the transcript's tail.
+
+          This strip is `shrink-0`, so on the phone every pixel it takes comes out
+          of the transcript (Issue #2106's budget); it is not rendered at all when
+          there is no reason to raise, and the card inside it caps its own height
+          and scrolls rather than growing with the frame.
+
+          It is also OUTSIDE the transcript's scroll region, which is what keeps
+          #2233's follow-the-tail and the jump-to-latest chip untouched: the chip
+          floats `absolute … z-10` inside the `relative` transcript box above,
+          and this is a flex sibling below that box, so the two cannot overlap
+          however tall the card gets. */}
       {blockedReason !== null && (
         <div
           data-testid="chat-surface-live"
           role="group"
           aria-label={t('chatSurface.liveRegionLabel')}
-          className="shrink-0 border-t border-border bg-surface px-3 py-2"
+          className="flex shrink-0 flex-col gap-2 border-t border-border bg-surface px-3 py-2"
         >
           <div
             data-testid="chat-surface-terminal-banner"
@@ -618,6 +753,10 @@ export const ChatSurface = memo(function ChatSurface({
             <span className="min-w-0 flex-1 text-xs text-foreground">
               {t(BLOCKED_REASON_KEY[blockedReason])}
             </span>
+            {/* Issue #2254 demoted this from "the only thing you can do" to a
+                secondary way out: the dialog is answerable right here now, and
+                the terminal is still there for anyone who wants the whole pane
+                (scrollback, search, a frame the card's 12–20 rows cut off). */}
             <button
               type="button"
               data-testid="chat-surface-open-terminal"
@@ -628,6 +767,17 @@ export const ChatSurface = memo(function ChatSurface({
               {t('chatSurface.openTerminal')}
             </button>
           </div>
+          {frame ? (
+            <ChatDialogCard
+              frame={frame}
+              reason={blockedReason}
+              // Issue #2106: the phone gets the low end of the Issue's 12–20 row
+              // window and a shorter box, so the card cannot eat the transcript.
+              maxLines={compact ? 12 : undefined}
+              maxHeightClassName={compact ? 'max-h-32' : 'max-h-64'}
+              actions={dialogActions}
+            />
+          ) : null}
         </div>
       )}
     </div>

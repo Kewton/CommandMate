@@ -29,6 +29,7 @@ import {
   sendSpecialKeys,
 } from '@/lib/tmux/tmux';
 import {
+  ANSWER_KEY_VALUES,
   OPENCODE_NAVIGATION_KEY_VALUES,
   type TerminalKey,
 } from '@/types/terminal-keys';
@@ -39,12 +40,40 @@ describe('NAVIGATION_KEY_VALUES', () => {
     expect(Array.isArray(NAVIGATION_KEY_VALUES)).toBe(true);
   });
 
-  it('should contain the base navigation keys plus the Issue #1017 pager keys', () => {
+  it('should contain the base navigation keys plus the Issue #1017 pager keys and the Issue #2254 answer keys', () => {
     expect(NAVIGATION_KEY_VALUES).toEqual([
       'Up', 'Down', 'Left', 'Right', 'Enter', 'Escape', 'Tab', 'BTab',
       // Issue #1017: Codex pager / edit-previous mode keys.
       'PageUp', 'PageDown', 'Home', 'End', 'q',
+      // Issue #2254: the characters a dialog is answered WITH. The chat
+      // surface's dialog card sends these; before them the only thing chat
+      // could send at an unreadable wait was a direction, and Enter on a
+      // numbered dialog takes whatever the CLI highlighted (#1681).
+      '1', '2', '3', '4', '5', '6', '7', '8', '9', 'y', 'n',
     ]);
+  });
+
+  it('publishes the Issue #2254 answer keys as their own list, in the same order', () => {
+    // The base list is composed from this one, so a widening that forgets to
+    // update the pin above is caught here rather than only there.
+    expect(ANSWER_KEY_VALUES).toEqual([
+      '1', '2', '3', '4', '5', '6', '7', '8', '9', 'y', 'n',
+    ]);
+    for (const key of ANSWER_KEY_VALUES) {
+      expect(NAVIGATION_KEY_VALUES as readonly string[]).toContain(key);
+    }
+  });
+
+  it('accepts every Issue #2254 answer key at the route and still refuses its neighbours', () => {
+    for (const key of ANSWER_KEY_VALUES) {
+      expect(isAllowedSpecialKey(key), `answer key ${key}`).toBe(true);
+    }
+    // `0` is deliberately absent (no dialog measured for #2254 offers option 0),
+    // and the letters around y/n stay outside the vocabulary for every tool but
+    // opencode — a widened answer list would type them into a composer.
+    for (const key of ['0', '10', 'z', 'x', 'Y', 'N']) {
+      expect(isAllowedSpecialKey(key), `must stay refused: ${key}`).toBe(false);
+    }
   });
 
   it('should include the Codex pager keys (Issue #1017)', () => {

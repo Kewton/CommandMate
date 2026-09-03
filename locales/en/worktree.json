@@ -442,18 +442,20 @@
     "liveRegionLabel": "Session status",
     "generating": "Responding…",
     "thinking": "Thinking…",
-    "bannerLabel": "Needs the terminal",
-    "reasonPager": "A pager is open. Scroll it and quit from the terminal surface.",
-    "reasonSelectionList": "A selection list is open. Move and confirm from the terminal surface.",
-    "reasonUnclassified": "This screen can't be read from chat. Check it on the terminal surface.",
-    "reasonPromptUnreadable": "Waiting for an answer, but the options couldn't be read. Check it on the terminal surface.",
+    "bannerLabel": "You can act on this here",
+    "reasonPager": "A pager is open. Scroll it and quit it from here, with the screen below in view.",
+    "reasonSelectionList": "A selection list is open. Move and confirm from here, with the screen below in view.",
+    "reasonUnclassified": "Chat can't tell what this screen is. It is shown as-is below, so you can drive it with the keys here.",
+    "reasonPromptUnreadable": "Waiting for an answer, and the options couldn't be read. Read the screen below and answer with a number or y/n.",
     "openTerminal": "Open terminal",
     "jumpToLatest": "Jump to latest",
     "jumpToLatestGenerating": "Jump to latest (still responding)",
     "progressLabel": "Reply being written",
     "progressPartial": "Showing the latest part only",
     "settling": "Not saved to the conversation yet",
-    "settlingLabel": "Reply waiting to be saved"
+    "settlingLabel": "Reply waiting to be saved",
+    "dialogCardLabel": "Terminal screen",
+    "unreadableHint": "Answer with the number shown on screen (1-9) or y/n. Enter confirms whatever the CLI has highlighted."
   },
   "chatTranscript": {
     "regionLabel": "Chat transcript",
@@ -874,6 +876,10 @@
     "toolbarLabel": "TUI Navigation",
     "caption": "Nav",
     "quitPager": "Quit pager"
+  },
+  "promptAnswerKeys": {
+    "toolbarLabel": "Dialog answer keys",
+    "caption": "Answer"
   },
   "newFileDialog": {
     "title": "New File",

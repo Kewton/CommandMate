@@ -442,18 +442,20 @@
     "liveRegionLabel": "セッションの状態",
     "generating": "応答中…",
     "thinking": "考え中…",
-    "bannerLabel": "ターミナルでの操作が必要です",
-    "reasonPager": "ページャ表示中です。スクロールと終了はターミナル面で操作してください。",
-    "reasonSelectionList": "選択リストが開いています。項目の移動と決定はターミナル面で操作してください。",
-    "reasonUnclassified": "チャットでは読み取れない画面が出ています。ターミナル面で内容を確認してください。",
-    "reasonPromptUnreadable": "応答待ちですが選択肢を読み取れませんでした。ターミナル面で確認してください。",
+    "bannerLabel": "ここで操作できます",
+    "reasonPager": "ページャ表示中です。下の画面を見ながら、ここでスクロールと終了ができます。",
+    "reasonSelectionList": "選択リストが開いています。下の画面を見ながら、ここで項目の移動と決定ができます。",
+    "reasonUnclassified": "チャットでは種類を判別できない画面です。下にそのまま表示しているので、ここでキーを送って操作できます。",
+    "reasonPromptUnreadable": "応答待ちですが選択肢を読み取れませんでした。下の画面を見て、番号か y／n で答えられます。",
     "openTerminal": "ターミナルで確認",
     "jumpToLatest": "新着へ",
     "jumpToLatestGenerating": "新着へ（応答中）",
     "progressLabel": "生成中の返答",
     "progressPartial": "途中から表示しています",
     "settling": "まだ履歴に確定していません",
-    "settlingLabel": "確定待ちの返答"
+    "settlingLabel": "確定待ちの返答",
+    "dialogCardLabel": "ターミナルの画面",
+    "unreadableHint": "画面に出ている番号（1〜9）か y／n で答えてください。Enter は選択中の項目をそのまま確定します。"
   },
   "chatTranscript": {
     "regionLabel": "チャット履歴",
@@ -874,6 +876,10 @@
     "toolbarLabel": "TUI ナビゲーション",
     "caption": "ナビ",
     "quitPager": "ページャーを終了"
+  },
+  "promptAnswerKeys": {
+    "toolbarLabel": "ダイアログへの回答キー",
+    "caption": "回答"
   },
   "newFileDialog": {
     "title": "新規ファイル",
