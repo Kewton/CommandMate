@@ -26,11 +26,10 @@ import { getControlModeTmuxTransport } from './tmux/control-mode-tmux-transport'
 import { isTmuxControlModeEnabled } from './tmux/tmux-control-mode-flags';
 import { getExternalAppCache } from './external-apps/cache';
 import type { ExternalApp } from '@/types/external-apps';
-import { getServerVersion } from '@/lib/version-checker';
+import { resolveBundleDrift } from '@/lib/version-checker';
 import {
   CLIENT_VERSION_MESSAGE_TYPE,
   VERSION_MISMATCH_EVENT_TYPE,
-  isVersionMismatch,
 } from '@/lib/realtime/types';
 import {
   startWaitingStatusBroadcast,
@@ -522,28 +521,34 @@ function handleMessage(ws: WebSocket, message: WebSocketMessage): void {
 }
 
 /**
- * Handle a client-version hello (#1338/#1356).
+ * Handle a client-version hello (#1338/#1356/#2271).
  *
- * The client announces its baked bundle version on every (re)connect. If the
- * server's actually-running version (runtime package.json, resolved by
- * getServerVersion) has drifted from it, reply with a version_mismatch event so
- * the tab can surface a reload nudge. Stays silent when the versions match or
- * either side is an unknown/fallback version (受入条件: 誤検知しない).
+ * The client announces the version its bundle was built from on every
+ * (re)connect. `resolveBundleDrift` compares that against the version of the
+ * bundle **this server is serving** and answers null unless the two builds
+ * really differ; on drift, reply with a version_mismatch event so the tab can
+ * surface a reload nudge.
+ *
+ * Issue #2271: this used to ask `getServerVersion()`, i.e. the installed
+ * package.json. Releases bump that file without rebuilding the running server's
+ * `.next` — by design — so the comparison was permanently unequal and every tab
+ * carried an undismissable banner. The resolver, not this handler, is where
+ * "what counts as drift" is defined; keep it that way.
  */
 function handleClientVersion(ws: WebSocket, message: WebSocketMessage): void {
   const clientVersion = typeof message.version === 'string' ? message.version : '';
   if (!clientVersion) return;
 
-  const serverVersion = getServerVersion();
-  if (!isVersionMismatch(serverVersion, clientVersion)) return;
+  const drift = resolveBundleDrift(clientVersion);
+  if (!drift) return;
 
   if (ws.readyState !== WebSocket.OPEN) return;
   try {
     ws.send(
       JSON.stringify({
         type: VERSION_MISMATCH_EVENT_TYPE,
-        serverVersion,
-        clientVersion,
+        serverVersion: drift.serverVersion,
+        clientVersion: drift.clientVersion,
       }),
     );
   } catch (error) {
