@@ -393,17 +393,32 @@ export async function captureAntigravityTranscriptTurn(
       });
     }
 
+    // Every prompt row first, then every reply (Issue #2273). The two passes are
+    // what let a reply be dated at its turn's END without overtaking the NEXT
+    // turn's prompt: a queued `/send` row is written while this turn is still
+    // running, so its instant is only knowable once that row has been recorded.
+    // With one turn pending — the ordinary case — this is the single call it
+    // always was.
+    const userRows: RecordedUserTurn[] = [];
+    for (let index = 0; index < pending.turns.length; index += 1) {
+      const previousStartedAt =
+        index === 0 ? pending.previousStartedAt : pending.turns[index - 1].startedAt;
+      userRows.push(await recordAntigravityUserTurn(target, pending.turns[index], previousStartedAt));
+    }
+
     let captured = false;
     for (let index = 0; index < pending.turns.length; index += 1) {
       const turn = pending.turns[index];
-      const previousStartedAt =
-        index === 0 ? pending.previousStartedAt : pending.turns[index - 1].startedAt;
-      const userRow = await recordAntigravityUserTurn(target, turn, previousStartedAt);
       captured = await writeAntigravityTurn(
         target,
         turn,
         renderAntigravityTurn(turn),
-        resolveAssistantTimestampMs(turn, userRow),
+        resolveAssistantTimestampMs(
+          turn,
+          userRows[index],
+          lastAntigravityRecordAt(turn),
+          nextTurnOpensAt(pending.turns, userRows, index)
+        ),
         path
       );
     }
@@ -571,23 +586,83 @@ async function recordAntigravityUserTurn(
 /**
  * When the assistant row for this turn is dated.
  *
- * The turn's own clock, from the `USER_INPUT` record that opened it, so a row
- * written a poll late still sorts where the conversation put it.
+ * **The turn's LAST record, not its first (Issue #2273).** #2196 dated the reply
+ * one millisecond after the prompt so that `groupMessagesIntoPairs` — which
+ * orders by timestamp and nothing else — could never put the answer above the
+ * question. That is still guaranteed, by `earliest` below, and it is still
+ * necessary: agy stamps the prompt and the first reply of a fast turn with the
+ * *same second* (measured — `created_at` is second-resolution, and turn 1 of the
+ * captured session has `02:12:41Z` on both).
  *
- * When there is a user row the reply is moved to the first millisecond after it:
- * `groupMessagesIntoPairs` orders by timestamp and nothing else, and agy stamps
- * both the prompt and the first reply of a fast turn with the *same second*
- * (measured — `created_at` is second-resolution, and turn 1 of the captured
- * session has `02:12:41Z` on both). A tie is then decided by whichever row the
- * database returned first, and the losing arrangement — assistant, then user —
- * is exactly the `orphan` pair #2196 exists to remove.
+ * What #2196 did not account for is the row that lands BETWEEN the two. A tool
+ * approval is written when the dialog appears, seconds into the turn, and the
+ * chat surface orders its rows by timestamp: a reply dated at the turn's start
+ * therefore draws above an approval that really happened before it. The measured
+ * case is in the Issue — prompt `04:49:50.989Z`, reply `04:49:54.000Z`, approval
+ * `04:49:57.513Z` — and the reply's own last record is later than all three. So
+ * the last record's instant is what the row is dated by: it is the moment the
+ * turn actually ended, and everything the turn produced sorts before it.
+ *
+ * Two bounds keep the move honest:
+ *
+ *  - `earliest` is a floor, never overridden. A turn with no timestamped
+ *    record (`lastRecordAt === 0`) is dated exactly where #2196 put it.
+ *  - `nextTurnOpensAt` is a ceiling. The next turn's prompt row may be a `/send`
+ *    row written while THIS turn was still running — a queued prompt — and a
+ *    reply that overtook it would be paired with the wrong question.
+ *
+ * @param lastRecordAt - Epoch ms of the turn's last record, or 0 when unknown
+ * @param nextTurnOpensAt - Epoch ms of the next turn's user row, or null when
+ *   this is the newest turn in the window
  */
 function resolveAssistantTimestampMs(
   turn: AntigravityTurnAccumulator,
-  userRow: RecordedUserTurn
+  userRow: RecordedUserTurn,
+  lastRecordAt = 0,
+  nextTurnOpensAt: number | null = null
 ): number {
-  if (userRow.timestampMs === null) return turn.startedAt;
-  return Math.max(turn.startedAt, userRow.timestampMs + 1);
+  const earliest =
+    userRow.timestampMs === null
+      ? turn.startedAt
+      : Math.max(turn.startedAt, userRow.timestampMs + 1);
+  const latest = nextTurnOpensAt === null ? Number.POSITIVE_INFINITY : nextTurnOpensAt - 1;
+  return Math.max(earliest, Math.min(lastRecordAt, latest));
+}
+
+/**
+ * When the last record agy wrote for this turn was made (Issue #2273).
+ *
+ * The maximum rather than `records.at(-1)`: `created_at` is agy's own field and
+ * a record that carries none reads as null, so the last record in file order is
+ * not always the last one with a clock on it.
+ *
+ * @returns Epoch ms, or 0 when the turn has no timestamped record
+ */
+function lastAntigravityRecordAt(turn: AntigravityTurnAccumulator): number {
+  let at = 0;
+  for (const record of turn.records) {
+    if (record.timestampMs !== null && record.timestampMs > at) at = record.timestampMs;
+  }
+  return at;
+}
+
+/**
+ * The instant the next pending turn's prompt row carries, or null (Issue #2273).
+ *
+ * The user row's own timestamp when there is one, because that is what History
+ * sorts on and it can be EARLIER than the turn's start — an adopted `/send` row
+ * was written when CommandMate handed the text to the pane, which for a queued
+ * prompt is while the previous turn was still running. The turn's start is the
+ * fallback for a turn that produced no row at all.
+ */
+function nextTurnOpensAt(
+  turns: readonly AntigravityTurnAccumulator[],
+  userRows: readonly RecordedUserTurn[],
+  index: number
+): number | null {
+  const next = turns[index + 1];
+  if (!next) return null;
+  return userRows[index + 1]?.timestampMs ?? next.startedAt;
 }
 
 /**

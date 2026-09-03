@@ -301,13 +301,25 @@ describe('[#2245] buildChatTranscriptRows', () => {
     expect(group.key).toBe('approvals:p1');
   });
 
-  it('starts a new group after a message interrupts the run', () => {
+  it('starts a new group after a turn boundary interrupts the run', () => {
+    // A `user` row is what separates two groups. Issue #2273 made a reply stop
+    // separating them: approvals are lifted to the head of their own turn, so
+    // `[p1, a1, p2]` — one turn — is one group with the reply below it, and only
+    // a new question can open a second group.
     const rows = buildChatTranscriptRows([
       approval('p1', 'Approve A?'),
-      assistant('a1'),
+      user('u1'),
       approval('p2', 'Approve B?'),
     ]);
     expect(rows.map((r) => r.kind)).toEqual(['approvals', 'message', 'approvals']);
+
+    expect(
+      buildChatTranscriptRows([
+        approval('p1', 'Approve A?'),
+        assistant('a1'),
+        approval('p2', 'Approve B?'),
+      ]).map((r) => r.kind)
+    ).toEqual(['approvals', 'message']);
   });
 
   it('gives every row a key that cannot collide with a message id', () => {
