@@ -179,17 +179,28 @@ describe('the turn the poller missed', () => {
   });
 
   it('writes each turn’s user row before its own reply', async () => {
+    // Issue #2273 split the loop in two — every prompt row, then every reply —
+    // so that a reply dated at its turn's END can be held below the NEXT turn's
+    // prompt row, whose instant is only known once that row has been recorded.
+    // The property this test is named for is unchanged and is asserted below on
+    // the pair rather than on the interleaving.
     await writeTranscript(threeTurns);
     pretendSaved(A);
 
     await capture();
 
-    expect(writtenKeys()).toEqual([
+    const keys = writtenKeys();
+    expect(keys).toEqual([
       claudePromptRequestId(B),
-      claudeTurnRequestId(B),
       claudePromptRequestId(C),
+      claudeTurnRequestId(B),
       claudeTurnRequestId(C),
     ]);
+    for (const turn of [B, C]) {
+      expect(keys.indexOf(claudePromptRequestId(turn))).toBeLessThan(
+        keys.indexOf(claudeTurnRequestId(turn))
+      );
+    }
   });
 
   it('dates every backfilled row by the agent’s clock, not by the read', async () => {
@@ -201,12 +212,14 @@ describe('the turn the poller missed', () => {
     const at = (key: string) =>
       (createMessage.mock.calls.find(([, m]) => m.requestId === key)?.[1].timestamp as Date)
         .toISOString();
-    // The prompt record's own instant, and the reply one millisecond after it —
-    // `groupMessagesIntoPairs` orders by timestamp and nothing else.
+    // The prompt record's own instant, and the reply on the turn's LAST
+    // assistant record (Issue #2273) — `groupMessagesIntoPairs` orders by
+    // timestamp and nothing else, and every one of these is the agent's clock
+    // rather than the poll's.
     expect(at(claudePromptRequestId(B))).toBe('2026-09-02T14:38:24.117Z');
-    expect(at(claudeTurnRequestId(B))).toBe('2026-09-02T14:38:24.118Z');
+    expect(at(claudeTurnRequestId(B))).toBe('2026-09-02T14:39:16.203Z');
     expect(at(claudePromptRequestId(C))).toBe('2026-09-02T14:49:26.559Z');
-    expect(at(claudeTurnRequestId(C))).toBe('2026-09-02T14:49:26.560Z');
+    expect(at(claudeTurnRequestId(C))).toBe('2026-09-02T14:50:18.905Z');
   });
 
   it('writes each reply’s own text, and never the next turn’s', async () => {

@@ -190,13 +190,36 @@ describe('[#2245] a run of approvals is one collapsed row', () => {
     expect(screen.queryAllByTestId('chat-tool-approval-entry')).toHaveLength(0);
   });
 
-  it('does not merge two runs separated by a reply', () => {
+  it('does not merge two runs separated by a turn boundary', () => {
+    // A `user` row is what separates two groups. Issue #2273 made a reply stop
+    // separating them: a turn's approvals are lifted to the head of that turn,
+    // so `[p1, a1, p2]` is ONE turn and reads as one chip group with the reply
+    // below it. Only a new question opens a second group.
     renderTranscript([
       msg('p1', 'assistant', 'pane', { messageType: 'prompt' }),
-      msg('a1', 'assistant', 'a reply'),
+      msg('u1', 'user', 'the next question'),
       msg('p2', 'assistant', 'pane', { messageType: 'prompt' }),
     ]);
     expect(screen.getAllByTestId('chat-tool-approval-group')).toHaveLength(2);
+  });
+
+  it('draws one turn’s approvals above the reply they preceded (Issue #2273)', () => {
+    // The defect: a reply dated at the turn's START sorted above an approval the
+    // agent raised on the way to writing it, so the column read question →
+    // answer → chips for a turn that went question → approval → answer.
+    renderTranscript([
+      msg('u1', 'user', 'the question'),
+      msg('a1', 'assistant', 'a reply'),
+      msg('p1', 'assistant', 'pane', { messageType: 'prompt' }),
+    ]);
+
+    const groups = screen.getAllByTestId('chat-tool-approval-group');
+    expect(groups).toHaveLength(1);
+    const reply = screen.getByText('a reply');
+    // `DOCUMENT_POSITION_FOLLOWING` on the group means the reply comes AFTER it.
+    expect(
+      groups[0].compareDocumentPosition(reply) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 });
 

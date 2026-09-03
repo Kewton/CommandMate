@@ -112,14 +112,98 @@ export type ChatTranscriptRow =
     };
 
 /**
+ * Move each turn's approval rows ahead of its replies (Issue #2273).
+ *
+ * ## The defect
+ *
+ * A turn really goes **question → approval → answer**, and the chat surface drew
+ * it as question → answer → approval. Measured on antigravity: prompt
+ * `04:49:50.989Z`, reply `04:49:54.000Z`, approval dialog `04:49:57.513Z`. The
+ * transcript readers dated a reply by the instant the TURN OPENED, so the reply
+ * sorted three seconds before an approval that the agent had asked for on the
+ * way to writing it. The readers now date a reply at its turn's END, which fixes
+ * every row written from here on — and fixes nothing already in the database,
+ * because a row's timestamp is never rewritten (#2264 replaces bodies, not
+ * clocks).
+ *
+ * ## Why the display layer carries it too
+ *
+ * Two reasons, and either one alone would justify it:
+ *
+ *  - **the rows already there.** They keep the timestamp they were written with,
+ *    so the only place their order can be corrected is here.
+ *  - **the producers that are still late.** An approval is written by three
+ *    different paths (see `./chat-tool-approvals`) and the Auto-Yes one lands
+ *    1–2 seconds after the sweep's row — measured — so an approval row arriving
+ *    *after* a reply that was correctly dated is a shape that still occurs.
+ *
+ * ## The rule, and what it gives up
+ *
+ * A turn is one `role: 'user'` row and everything until the next one. Inside a
+ * turn, every approval row is emitted first, in its own order, and everything
+ * else follows in its own order. Nothing crosses a turn boundary, so no approval
+ * can be lifted onto the wrong question.
+ *
+ * What this gives up is the INTERLEAVING between approvals and replies inside
+ * one turn: a scraped turn saved as `[a1, p1, a2]` renders as `p1, a1, a2`. That
+ * is a deliberate trade and the cheap direction — a chip group is one line
+ * standing for rows #2245 measured at 41–43 of every 50, and its position within
+ * a turn carries far less than the turn's own shape does. The alternative, a
+ * per-row rule that guessed which replies a given approval preceded, would be
+ * guessing from the timestamps that are the thing at fault.
+ *
+ * Pure, and returns the argument itself when nothing has to move — which is
+ * every turn whose rows were written after this Issue landed.
+ */
+export function hoistTurnApprovals(messages: ChatMessage[]): ChatMessage[] {
+  const ordered: ChatMessage[] = [];
+  /** This turn's approval rows, and its other rows, both in arrival order. */
+  let approvals: ChatMessage[] = [];
+  let spoken: ChatMessage[] = [];
+  let moved = false;
+
+  const flushTurn = (): void => {
+    ordered.push(...approvals, ...spoken);
+    approvals = [];
+    spoken = [];
+  };
+
+  for (const message of messages) {
+    // A `user` row opens a turn and stays at its head: it is the question the
+    // approvals below it were asked on the way to answering.
+    if (message.role === 'user' && !isToolApprovalMessage(message)) {
+      flushTurn();
+      ordered.push(message);
+      continue;
+    }
+    if (!isToolApprovalMessage(message)) {
+      spoken.push(message);
+      continue;
+    }
+    // An approval with a reply already ahead of it in this turn is the defect:
+    // it has to jump, and only then has anything actually moved.
+    if (spoken.length > 0) moved = true;
+    approvals.push(message);
+  }
+  flushTurn();
+
+  // Returning the argument when nothing jumped keeps `buildChatTranscriptRows`
+  // allocation-free on the path every row written after this Issue takes, and
+  // keeps the `useMemo` that calls it honest.
+  return moved ? ordered : messages;
+}
+
+/**
  * Turn a message list into the rows the transcript renders.
  *
- * Two things happen here and both are load-bearing:
+ * Three things happen here and all three are load-bearing:
  *
- *  1. consecutive approval rows fold into one `approvals` row;
- *  2. `showHeader` is computed against the previous NON-approval message.
+ *  1. each turn's approval rows are lifted ahead of its replies
+ *     ({@link hoistTurnApprovals}, Issue #2273);
+ *  2. consecutive approval rows fold into one `approvals` row;
+ *  3. `showHeader` is computed against the previous NON-approval message.
  *
- * (2) is what keeps the role labels honest. A chip group is not an assistant
+ * (3) is what keeps the role labels honest. A chip group is not an assistant
  * turn, so it must not be able to add or remove an "Assistant" header:
  * `[user, assistant]` and `[user, prompt, prompt, assistant]` render the same
  * one header, and `[assistant, prompt, assistant]` still renders exactly one.
@@ -127,6 +211,10 @@ export type ChatTranscriptRow =
  * what the pre-#2245 code did, since a chip row was an assistant bubble — gives
  * the second list ZERO assistant headers, because the reply is reading itself as
  * a continuation of an audit row.
+ *
+ * (1) cannot disturb (3) for the same reason: the header of a reply is decided
+ * against the last row that SPEAKS, and lifting chips over it changes neither
+ * which rows speak nor their order among themselves.
  */
 export function buildChatTranscriptRows(messages: ChatMessage[]): ChatTranscriptRow[] {
   const rows: ChatTranscriptRow[] = [];
@@ -144,7 +232,7 @@ export function buildChatTranscriptRows(messages: ChatMessage[]): ChatTranscript
     run = [];
   };
 
-  for (const message of messages) {
+  for (const message of hoistTurnApprovals(messages)) {
     if (isToolApprovalMessage(message)) {
       run.push(message);
       continue;

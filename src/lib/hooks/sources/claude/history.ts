@@ -390,17 +390,34 @@ export async function captureClaudeTranscriptTurn(
     // by timestamp, and each turn's `/send` row is adopted against the previous
     // turn's start, so a later turn must not get to claim a row an earlier one
     // is about to ask for.
+    //
+    // Every prompt row is recorded before any reply is written (Issue #2273).
+    // That is what lets a reply be dated at its turn's END without overtaking
+    // the NEXT turn's prompt: a queued `/send` row is written while this turn is
+    // still running, so its instant is only knowable once that row has been
+    // recorded. With one turn pending — the ordinary case — this is the single
+    // call it always was.
+    const userRows: RecordedUserTurn[] = [];
+    for (let index = 0; index < pending.turns.length; index += 1) {
+      const previousStartedAt =
+        index === 0 ? pending.previousStartedAt : pending.turns[index - 1].startedAt;
+      userRows.push(await recordClaudeUserTurn(target, pending.turns[index], previousStartedAt));
+    }
+
+    const lastRecordAt = lastClaudeAssistantRecordAt(parsed.records);
     let captured = false;
     for (let index = 0; index < pending.turns.length; index += 1) {
       const turn = pending.turns[index];
-      const previousStartedAt =
-        index === 0 ? pending.previousStartedAt : pending.turns[index - 1].startedAt;
-      const userRow = await recordClaudeUserTurn(target, turn, previousStartedAt);
       captured = await writeClaudeTurn(
         target,
         turn,
         renderClaudeTurn(turn),
-        resolveAssistantTimestampMs(turn, userRow),
+        resolveAssistantTimestampMs(
+          turn,
+          userRows[index],
+          lastRecordAt.get(turn.promptUuid) ?? 0,
+          nextTurnOpensAt(pending.turns, userRows, index)
+        ),
         path
       );
     }
@@ -768,24 +785,99 @@ async function recordClaudeUserTurn(
 /**
  * When the assistant row for this turn is dated.
  *
- * #2121 dated it by the prompt record's clock so that a row written a poll late
- * still sorts where the conversation put it, and that is still what happens for
- * every turn that produced no user row.
+ * **The turn's LAST assistant record, not its prompt (Issue #2273).** #2121
+ * dated the reply by the prompt record's clock so that a row written a poll late
+ * still sorted where the conversation put it, and #2196 moved it one millisecond
+ * on so that `groupMessagesIntoPairs` — which orders by timestamp and nothing
+ * else — could never return the answer above the question. Both properties
+ * survive: `earliest` is a floor this never goes under.
  *
- * When there *is* a user row, it sits on that same instant — both come from the
- * one prompt record — and `groupMessagesIntoPairs` orders by timestamp and
- * nothing else. A tie there is decided by whichever row the database happened to
- * return first, and the losing arrangement (assistant, then user) is exactly the
- * `orphan` pair this Issue exists to remove. So the reply is moved to the first
- * millisecond after the prompt: the smallest change that makes the order a
- * property of the data rather than of the query plan.
+ * What neither accounted for is the row that lands BETWEEN the prompt and the
+ * reply. A tool approval is written when the dialog appears, seconds into the
+ * turn, and the chat surface orders its rows by timestamp — so a reply dated at
+ * the turn's start draws ABOVE an approval that really happened before it. The
+ * measured case is in the Issue: prompt `04:49:50.989Z`, reply `04:49:54.000Z`,
+ * approval `04:49:57.513Z`, rendered as question → answer → approval.
+ *
+ * The turn's last assistant record is the moment the reply was finished, so
+ * everything the turn produced on the way sorts before it. `lastRecordAt` is 0
+ * when the window held no timestamped assistant record for the turn, and the row
+ * is then dated exactly where #2196 put it.
+ *
+ * `nextTurnOpensAt` is the ceiling. The next turn's prompt row may be a `/send`
+ * row written while THIS turn was still running — a queued prompt — and a reply
+ * that overtook it would be paired with the wrong question.
+ *
+ * @param lastRecordAt - Epoch ms of the turn's last assistant record, or 0
+ * @param nextTurnOpensAt - Epoch ms of the next turn's user row, or null when
+ *   this is the newest turn in the window
  */
 function resolveAssistantTimestampMs(
   turn: ClaudeTurnAccumulator,
-  userRow: RecordedUserTurn
+  userRow: RecordedUserTurn,
+  lastRecordAt = 0,
+  nextTurnOpensAt: number | null = null
 ): number {
-  if (userRow.timestampMs === null) return turn.startedAt;
-  return Math.max(turn.startedAt, userRow.timestampMs + 1);
+  const earliest =
+    userRow.timestampMs === null
+      ? turn.startedAt
+      : Math.max(turn.startedAt, userRow.timestampMs + 1);
+  const latest = nextTurnOpensAt === null ? Number.POSITIVE_INFINITY : nextTurnOpensAt - 1;
+  return Math.max(earliest, Math.min(lastRecordAt, latest));
+}
+
+/**
+ * When each turn's last assistant record was written (Issue #2273).
+ *
+ * Keyed by `promptUuid`, which is the turn key {@link buildClaudeTurns} uses, and
+ * walked over the same records with the same two rules — sidechains skipped, a
+ * prompt record opening a turn — so the two passes cannot disagree about which
+ * turn a record belongs to. It is a second pass rather than a field on the
+ * accumulator because `./transcript` is not this Issue's to change.
+ *
+ * Only `assistant` records count. A turn's `user` records are its tool RESULTS,
+ * and the last of those is a step the agent took before it had finished
+ * answering; the reply is dated by the agent's last word.
+ *
+ * @returns `promptUuid` → epoch ms; absent for a turn with no timestamped
+ *   assistant record
+ */
+function lastClaudeAssistantRecordAt(
+  records: readonly ClaudeTranscriptRecord[]
+): Map<string, number> {
+  const at = new Map<string, number>();
+  let key: string | null = null;
+
+  for (const record of records) {
+    if (record.isSidechain) continue;
+    if (isClaudePromptRecord(record)) {
+      key = record.uuid;
+      continue;
+    }
+    if (record.type !== 'assistant' || key === null || record.timestampMs === null) continue;
+    if (record.timestampMs > (at.get(key) ?? 0)) at.set(key, record.timestampMs);
+  }
+
+  return at;
+}
+
+/**
+ * The instant the next pending turn's prompt row carries, or null (Issue #2273).
+ *
+ * The user row's own timestamp when there is one, because that is what History
+ * sorts on and it can be EARLIER than the turn's start — an adopted `/send` row
+ * was written when CommandMate handed the text to the pane, which for a queued
+ * prompt is while the previous turn was still running. The turn's start is the
+ * fallback for a turn that produced no row at all.
+ */
+function nextTurnOpensAt(
+  turns: readonly ClaudeTurnAccumulator[],
+  userRows: readonly RecordedUserTurn[],
+  index: number
+): number | null {
+  const next = turns[index + 1];
+  if (!next) return null;
+  return userRows[index + 1]?.timestampMs ?? next.startedAt;
 }
 
 /**
