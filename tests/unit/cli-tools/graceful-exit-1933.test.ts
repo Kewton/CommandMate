@@ -123,6 +123,24 @@ describe('gracefulExitSequence (Issue #1933 S10)', () => {
     });
   });
 
+  /**
+   * Command Code takes the same separated form for the same measured reason:
+   * `/` opens its slash-command menu, so an Enter batched into the same
+   * `send-keys` belongs to the menu rather than to the composer. Measured on
+   * 1.40.1 — typed and submitted separately, the agent exits and the pane falls
+   * back to its shell (Issue #2250).
+   */
+  it('is a separately submitted /exit for command-code, on the generic window', () => {
+    expect(resolveGracefulExitSpec('command-code')).toEqual({
+      keys: [
+        { kind: 'literal', text: '/exit', delayAfterMs: TUI_TEXT_INPUT_WAIT_MS },
+        { kind: 'key', name: 'Enter' },
+      ],
+      exitWaitMs: TUI_EXIT_WAIT_MS,
+      ownsLoopbackServer: false,
+    });
+  });
+
   it('is the only tool that owns a loopback server', () => {
     const owners = CLI_TOOL_IDS.filter((id) => resolveGracefulExitSpec(id).ownsLoopbackServer);
     expect(owners).toEqual(['opencode']);

@@ -32,6 +32,7 @@ receipt の `install_roots` に両方が記録される。`install_roots` を持
 | Vibe Local | — | — | ❔ 未計測 | ❔ 未計測 | 実測なし | — |
 | Copilot | — | — | ❔ 未計測 | ❔ 未計測 | 実測なし | — |
 | Antigravity | — | — | ❔ 未計測 | ❔ 未計測 | 実測なし | — |
+| Command Code | — | — | ❔ 未計測 | ❔ 未計測 | 実測なし | — |
 
 計測環境（Claude / Codex 行）: 専用 port・専用 DB・skills 未導入の新規 git repository / CommandMate 0.15.0 / macOS 26.5.2 / Node v24.1.0。
 証跡: <https://github.com/Kewton/CommandMate/issues/1513#issuecomment-5083878264>

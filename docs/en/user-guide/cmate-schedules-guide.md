@@ -67,7 +67,7 @@ Create a `## Schedules` section in your `CMATE.md` and define entries using Mark
 | **Name** | Yes | Schedule name. 1-100 characters. Alphanumeric, Japanese, hyphens, and spaces allowed | - |
 | **Cron** | Yes | Cron expression (5-6 fields). Defines execution timing | - |
 | **Message** | Yes | Prompt sent to `claude -p`. Max 10,000 characters | - |
-| **CLI Tool** | No | CLI tool to use (`claude` / `codex` / `gemini` / `vibe-local` / `opencode` / `copilot` / `antigravity`; the authority is `CLI_TOOL_IDS` in `src/lib/cli-tools/types.ts`). **Only copilot and opencode accept `--model <model-name>`** — writing it for another tool is a syntax error and the whole row is skipped | `claude` |
+| **CLI Tool** | No | CLI tool to use (`claude` / `codex` / `gemini` / `vibe-local` / `opencode` / `copilot` / `antigravity` / `command-code`; the authority is `CLI_TOOL_IDS` in `src/lib/cli-tools/types.ts`). **Only copilot and opencode accept `--model <model-name>`** — writing it for another tool is a syntax error and the whole row is skipped | `claude` |
 | **Enabled** | No | Enable/disable the schedule (`true` / `false`) | `true` |
 | **Permission** | No | Execution permission level. See Permission Reference below | Tool-specific default |
 
@@ -137,6 +137,22 @@ Model names may contain alphanumeric characters, hyphens, dots, slashes and colo
 | `--dangerously-skip-permissions` | Auto-approves tool use (**default**; no other value is accepted) |
 
 > **Warning:** note that this is the only permitted value, and scheduled execution is an unattended batch.
+
+### command-code (--permission-mode)
+
+| Value | Description |
+|-------|-------------|
+| `default` | Prompt for permission (**default**; the value Command Code reports in its own hook payloads) |
+| `standard` | An alias for `default` (the spelling `--help` advertises) |
+| `plan` | Read and plan only |
+| `auto-accept` | Apply edits without prompting |
+| `dont-ask` | Never prompt for permission |
+
+> **Note:** the list is read off the shipped bundle's
+> `.choices(["default","standard","plan","auto-accept","dont-ask"])`, not off `commandcode --help`,
+> which advertises only three of them (Issue #2250). `--yolo`
+> (= `--dangerously-skip-permissions`) is a separate boolean flag rather than a `--permission-mode`
+> value, so it cannot appear in the Permission column.
 
 ### opencode
 
@@ -241,7 +257,7 @@ CommandMate automatically validates the contents of CMATE.md.
 | Name | 1-100 characters, alphanumeric/Japanese/hyphens/spaces only |
 | Cron | Valid cron expression with 5-6 fields |
 | Message | Must not be empty. Max 10,000 characters |
-| CLI Tool | Must be `claude`, `codex`, `gemini`, `vibe-local`, `opencode`, `copilot`, or `antigravity` |
+| CLI Tool | Must be `claude`, `codex`, `gemini`, `vibe-local`, `opencode`, `copilot`, `antigravity`, or `command-code` |
 | Permission | Must match an allowed value for the selected tool |
 
 Invalid entries are skipped with a warning log. Other valid entries are processed normally.

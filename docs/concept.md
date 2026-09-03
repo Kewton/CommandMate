@@ -91,7 +91,7 @@ CommandMate はこれを否定しません。**出発点として扱います。
 | **Task Contract** | `.commandmate/tasks/*.yaml` ・ `commandmate send --contract` ・ `commandmate task list` / `task show`（[設計](./design/task-contract.md)） |
 | **Issue 駆動** | 公式 Catalog の Skill `cmate-issue-authoring` / `cmate-issue-refinement` / `cmate-task-contract` |
 | **Skills** | 公式 Catalog からの install / update（`commandmate skill list` / `install` / `update`、[ガイド](./user-guide/skills.md)） |
-| **並列実行** | worktree ごとの独立セッションと複数 CLI（claude / codex / gemini / vibe-local / opencode / copilot / antigravity） |
+| **並列実行** | worktree ごとの独立セッションと複数 CLI（claude / codex / gemini / vibe-local / opencode / copilot / antigravity / command-code） |
 | **独立検証** | `.commandmate/verify.yaml` ・ `commandmate verify` / `wait --verify` ・ exit 0 / 20 / 21（[設計](./design/verification-config.md)） |
 | **Evidence** | work-evidence / scope ゲート ・ `commandmate verify history` / `task show` ・ `commandmate report metrics` |
 | **PR workflow** | Skill `cmate-orchestrate` / `cmate-acceptance-test` ・ `/create-pr` |

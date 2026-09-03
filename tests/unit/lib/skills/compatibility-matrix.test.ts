@@ -184,7 +184,9 @@ describe('the 2026-07-26 measurements are recorded as taken', () => {
   // has to stay expensive.
   it('leaves every unmeasured Agent unknown', () => {
     expect(unmeasuredAgents().slice().sort()).toEqual(
-      ['antigravity', 'copilot', 'gemini', 'vibe-local'].sort()
+      // Issue #2250: Command Code joins the unmeasured set. Nobody has driven a
+      // Skill through it, and `unknown` is not `unsupported`.
+      ['antigravity', 'command-code', 'copilot', 'gemini', 'vibe-local'].sort()
     );
   });
 

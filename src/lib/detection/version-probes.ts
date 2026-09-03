@@ -188,6 +188,7 @@ export const DETECTOR_VERSION_PROBES: Readonly<Record<string, DetectorVersionPro
   claude: { kind: 'execFile', command: 'claude', args: ['--version'] },
   codex: { kind: 'execFile', command: 'codex', args: ['--version'] },
   antigravity: { kind: 'execFile', command: 'agy', args: ['--version'] },
+  'command-code': { kind: 'execFile', command: 'commandcode', args: ['--version'] },
   opencode: { kind: 'execFile', command: 'opencode', args: ['--version'] },
   gemini: { kind: 'execFile', command: 'gemini', args: ['--version'] },
   copilot: {

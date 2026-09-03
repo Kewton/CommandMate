@@ -107,6 +107,12 @@ export const AUTO_YES_DIALOG_GATE_DEFAULT_MODE: Readonly<
   gemini: 'legacy',
   antigravity: 'legacy',
   'vibe-local': 'legacy',
+  // Issue #2250 / Epic #2249 決定 3: Command Code's Auto-Yes stays on the legacy
+  // numbered-response path. Its `PreToolUse` hook fires AFTER the permission
+  // dialog is answered (measured: dialog 00:11:37, answer 00:11:46, hook
+  // 00:11:46), so a `permissionDecision` cannot dismiss the dialog and there is
+  // no measured dialog rule to gate on.
+  'command-code': 'legacy',
 };
 
 /**

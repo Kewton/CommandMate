@@ -70,6 +70,13 @@ const COMPOSER_SPECS: Record<CLIToolType, ComposerSpec> = {
   copilot: { ...DEFAULT_COMPOSER_SPEC, clearBeforeSend: false },
   antigravity: { ...DEFAULT_COMPOSER_SPEC, clearBeforeSend: false },
 
+  // Issue #2250. `input-line-marker` is right: Command Code draws a `❯` composer
+  // at the bottom of the pane, the shape the reader looks for. `clearBeforeSend`
+  // stays false because #1880's `C-e`+`C-u` was measured on claude's box and
+  // nobody has measured Command Code's -- the same reason gemini, copilot and
+  // agy carry the flag off.
+  'command-code': { ...DEFAULT_COMPOSER_SPEC, clearBeforeSend: false },
+
   // vibe-local's IME mode makes the first Enter insert a newline, so the
   // initial submit is two presses (see VIBE_LOCAL_DOUBLE_ENTER_WAIT_MS).
   'vibe-local': { ...DEFAULT_COMPOSER_SPEC, clearBeforeSend: false, submitEnterCount: 2 },

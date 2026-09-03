@@ -63,6 +63,9 @@ export const COPILOT_EXIT_COMMAND_TEXT = '/exit';
 /** The graceful exit command opencode's TUI accepts. */
 export const OPENCODE_EXIT_COMMAND_TEXT = '/exit';
 
+/** Command Code's own quit command (Issue #2250). */
+export const COMMAND_CODE_EXIT_COMMAND_TEXT = '/exit';
+
 /** The graceful exit command gemini's TUI accepts. */
 export const GEMINI_EXIT_COMMAND_TEXT = '/quit';
 
@@ -129,6 +132,20 @@ const GRACEFUL_EXIT_SPECS: Record<CLIToolType, GracefulExitSpec> = {
       keyStep('Enter'),
     ],
     exitWaitMs: COPILOT_EXIT_WAIT_MS,
+    ownsLoopbackServer: false,
+  },
+
+  // `/exit` typed and submitted separately, the same shape as opencode's below
+  // and for the same measured reason: `/` opens Command Code's slash-command
+  // menu, so an Enter batched into the same `send-keys` is the menu's, not the
+  // composer's. The separated form exits 1.40.1 and returns the pane to its
+  // shell (Issue #2250).
+  'command-code': {
+    keys: [
+      literalStep(COMMAND_CODE_EXIT_COMMAND_TEXT, TUI_TEXT_INPUT_WAIT_MS),
+      keyStep('Enter'),
+    ],
+    exitWaitMs: TUI_EXIT_WAIT_MS,
     ownsLoopbackServer: false,
   },
 

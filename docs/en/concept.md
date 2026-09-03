@@ -93,7 +93,7 @@ All seven implementation items map to features that actually exist.
 | **Task Contract** | `.commandmate/tasks/*.yaml`, `commandmate send --contract`, `commandmate task list` / `task show` ([design](../design/task-contract.md), Japanese) |
 | **Issue-driven work** | Catalog Skills `cmate-issue-authoring` / `cmate-issue-refinement` / `cmate-task-contract` |
 | **Skills** | Install and update from the official Catalog (`commandmate skill list` / `install` / `update`, [guide](../user-guide/skills.md), Japanese) |
-| **Parallel execution** | An independent session per worktree, across several CLIs (claude / codex / gemini / vibe-local / opencode / copilot / antigravity) |
+| **Parallel execution** | An independent session per worktree, across several CLIs (claude / codex / gemini / vibe-local / opencode / copilot / antigravity / command-code) |
 | **Independent verification** | `.commandmate/verify.yaml`, `commandmate verify` / `wait --verify`, exit 0 / 20 / 21 ([design](../design/verification-config.md), Japanese) |
 | **Evidence** | work-evidence and scope gates, `commandmate verify history` / `task show`, `commandmate report metrics` |
 | **PR workflow** | Skills `cmate-orchestrate` / `cmate-acceptance-test`, `/create-pr` |

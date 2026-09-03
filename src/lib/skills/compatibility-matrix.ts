@@ -301,6 +301,10 @@ const AGENT_DISCOVERY_MATRIX: readonly SkillAgentMatrixEntry[] = [
   // antigravity sessions (#1504). That is CommandMate injecting a command, not
   // the Agent discovering a Skill, so it is not evidence for this table.
   unmeasuredEntry('antigravity'),
+  // Issue #2250: Command Code was added as an interactive agent in Epic #2249
+  // Phase A; nobody has driven a Skill through it, so it is `unknown`, not
+  // `unsupported`.
+  unmeasuredEntry('command-code'),
 ];
 
 /** The measured matrix, in CLI-tool declaration order. */

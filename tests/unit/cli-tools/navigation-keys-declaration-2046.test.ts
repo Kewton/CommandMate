@@ -36,12 +36,12 @@ import {
   TERMINAL_KEY_VALUES,
 } from '@/types/terminal-keys';
 
-/** Every tool but opencode — the six whose key set this Issue must not move. */
+/** Every tool but opencode — the ones whose key set this Issue must not move. */
 const UNCHANGED_TOOLS: readonly CLIToolType[] = CLI_TOOL_IDS.filter((id) => id !== 'opencode');
 
 const manager = CLIToolManager.getInstance();
 
-describe('Issue #2046: the six pre-existing tools declare the pre-#2046 set, unchanged', () => {
+describe('Issue #2046: every tool but opencode declares the pre-#2046 set, unchanged', () => {
   it.each(UNCHANGED_TOOLS)('%s publishes exactly NAVIGATION_KEY_VALUES', (id) => {
     const spec = manager.getTool(id).navigationKeys();
 
@@ -51,11 +51,14 @@ describe('Issue #2046: the six pre-existing tools declare the pre-#2046 set, unc
     expect(spec.leaderKey).toBeNull();
   });
 
-  it('names the six explicitly, so deleting one from the registry cannot silently shrink this suite', () => {
+  it('names them explicitly, so deleting one from the registry cannot silently shrink this suite', () => {
     expect([...UNCHANGED_TOOLS].sort()).toEqual([
       'antigravity',
       'claude',
       'codex',
+      // Issue #2250: Command Code takes the shared set. Its TUI is driven by
+      // arrows, Enter and Esc like the rest; only opencode has chords.
+      'command-code',
       'copilot',
       'gemini',
       'vibe-local',

@@ -136,6 +136,18 @@ export const COPILOT_EXIT_WAIT_MS = 3000;
 export const VIBE_LOCAL_DOUBLE_ENTER_WAIT_MS = 200;
 
 /**
+ * How long Command Code needs before its composer is worth polling for
+ * (Issue #2250).
+ *
+ * The same 3000 ms agy's launch uses, and for the same reason: the readiness
+ * poll below it is what actually decides, so this only keeps the first
+ * `capture-pane` from firing at a pane that still holds a shell prompt. Measured
+ * launches of 1.40.1 drew the composer at ~2.5 s (block-art logo, three banner
+ * rows, then the rules).
+ */
+export const COMMAND_CODE_INIT_WAIT_MS = 3000;
+
+/**
  * Wait (ms) for the `unset CLAUDECODE` command to reach the shell while
  * sanitizing the session environment (empirically determined).
  * Site: session-key-sender sanitizeSessionEnvironment().

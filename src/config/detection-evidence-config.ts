@@ -86,6 +86,11 @@ export const IDLE_EVIDENCE_DEFAULT_MODE: Readonly<Record<CLIToolType, IdleEviden
   gemini: 'legacy',
   antigravity: 'legacy',
   'vibe-local': 'legacy',
+  // Issue #2250: Command Code ships `legacy` for the reason D1 決定 1 gives --
+  // its module declares no `readIdleEvidence`, so the chain answers `'positive'`
+  // whatever this row says, and claiming `enforce` would state a rollout that
+  // does not exist. Epic #2249 決定 3 pins the same value from the other side.
+  'command-code': 'legacy',
 };
 
 /**
