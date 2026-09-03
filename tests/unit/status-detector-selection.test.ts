@@ -4,8 +4,12 @@
  * @vitest-environment node
  */
 
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import { detectSessionStatus, STATUS_REASON, SELECTION_LIST_REASONS } from '@/lib/detection/status-detector';
+import {
+  ANTIGRAVITY_SELECTION_LIST_PATTERN,
+  isAntigravityNumberedDialog,
+} from '@/lib/detection/cli-patterns';
 
 // Helper: Build OpenCode TUI output with content area + footer
 // OpenCode TUI layout: content area (top) | empty padding | footer (ctrl+t/ctrl+p line)
@@ -696,8 +700,15 @@ describe('detectSessionStatus - Antigravity selection_list detection (Issue #995
 // Actual agy "Do you want to proceed?" permission-approval menu from Issue #997.
 // Its footer is "↑/↓ Navigate · tab Amend · ctrl+g … · ctrl+r Review" — note there
 // is NO "enter Select" hint, so the #995 pattern missed it and the "esc to cancel"
-// footer misreported the screen as running/thinking. #997 broadens the pattern to
+// footer misreported the screen as running/thinking. #997 broadened the pattern to
 // the "↑/↓ Navigate" footer alone.
+//
+// Issue #2270 keeps that widening and changes what it CONCLUDES. The frame is a
+// numbered dialog, so `beforePrompt` steps aside and priority 1 reads it as the
+// 4-option `multiple_choice` prompt that the poller and the push notification had
+// been calling it all along. What the widening still buys is the thing #997 was
+// actually for: the "esc to cancel" footer no longer wins, so the menu is never
+// reported as `running`/`thinking_indicator`.
 const AGY_PERMISSION_MENU_OUTPUT = [
   '  Requesting permission for:',
   '     git status',
@@ -710,32 +721,303 @@ const AGY_PERMISSION_MENU_OUTPUT = [
   'esc to cancel                                                          Gemini 3.5 Flash (Medium)',
 ].join('\n');
 
-describe('detectSessionStatus - Antigravity permission-approval menu detection (Issue #997)', () => {
-  it('should detect the "Do you want to proceed?" menu and return waiting status', () => {
+describe('detectSessionStatus - Antigravity permission-approval menu detection (Issue #997 / #2270)', () => {
+  it('should detect the "Do you want to proceed?" menu as an ANSWERABLE prompt', () => {
     const result = detectSessionStatus(AGY_PERMISSION_MENU_OUTPUT, 'antigravity');
     expect(result.status).toBe('waiting');
     expect(result.confidence).toBe('high');
-    expect(result.reason).toBe(STATUS_REASON.ANTIGRAVITY_SELECTION_LIST);
-    expect(result.hasActivePrompt).toBe(false);
+    // Issue #2270: this was ANTIGRAVITY_SELECTION_LIST + hasActivePrompt:false,
+    // which is what stripped the chat surface of a way to pick 2-4.
+    expect(result.reason).toBe(STATUS_REASON.PROMPT_DETECTED);
+    expect(result.hasActivePrompt).toBe(true);
   });
 
-  it('should prioritize the selection list over the "esc to cancel" thinking footer', () => {
-    // Root-cause regression guard: the "esc to cancel" footer matches
-    // ANTIGRAVITY_THINKING_PATTERN, so without priority-0.9 ordering the
-    // permission menu would be misreported as running/thinking_indicator.
+  it('should prioritize the dialog over the "esc to cancel" thinking footer', () => {
+    // Root-cause regression guard for #997: the "esc to cancel" footer matches
+    // ANTIGRAVITY_THINKING_PATTERN, and the permission menu must never be
+    // misreported as running/thinking_indicator. #2270 changes which branch
+    // answers, not this guarantee.
     const result = detectSessionStatus(AGY_PERMISSION_MENU_OUTPUT, 'antigravity');
     expect(result.reason).not.toBe(STATUS_REASON.THINKING_INDICATOR);
     expect(result.status).not.toBe('running');
   });
 
-  it('should mark the reason as a selection-list reason (NavigationButtons shown)', () => {
+  it('should NOT mark the reason as a selection-list reason (Issue #2270)', () => {
+    // `isSelectionListActive` is derived from this Set, and it is the flag that
+    // put "選択リストが開いています" + arrow buttons on the chat surface.
     const result = detectSessionStatus(AGY_PERMISSION_MENU_OUTPUT, 'antigravity');
-    expect(SELECTION_LIST_REASONS.has(result.reason)).toBe(true);
+    expect(SELECTION_LIST_REASONS.has(result.reason)).toBe(false);
+  });
+
+  it('should carry the four numbered options as promptData', () => {
+    const result = detectSessionStatus(AGY_PERMISSION_MENU_OUTPUT, 'antigravity');
+    const promptData = result.promptDetection?.promptData;
+    expect(promptData?.type).toBe('multiple_choice');
+    if (promptData?.type !== 'multiple_choice') throw new Error('expected multiple_choice');
+    expect(promptData.options.map((o) => o.number)).toEqual([1, 2, 3, 4]);
+    expect(promptData.options[0].label).toBe('Yes');
+    expect(promptData.options[3].label).toBe('No');
   });
 
   it('should NOT trigger antigravity_selection_list for non-antigravity tools', () => {
     const result = detectSessionStatus(AGY_PERMISSION_MENU_OUTPUT, 'claude');
     expect(result.reason).not.toBe(STATUS_REASON.ANTIGRAVITY_SELECTION_LIST);
+  });
+});
+
+// ===========================================================================
+// Issue #2270: the LIVE panes, captured off agy 1.1.25 at the production pane
+// geometry (200x1000, 2026-09-04) rather than retyped from the Issue.
+//
+// Geometry matters twice here. agy is top-anchored — its content sits in rows
+// 1-28 and the remaining ~970 rows are blank padding (see
+// `reference_tui_pane_anchoring_top_vs_bottom`) — so a fixture that omits the
+// padding is not exercising the same `contentLines` / `lastLines` slicing the
+// server does. And the dialog's own rows must land inside the 15-line tail that
+// `beforePrompt` and priority 1 both read; a fixture built from the dialog alone
+// would pass even if that windowing were wrong.
+//
+// The banner rows carry a shell prompt, an account e-mail and an absolute path
+// in the real capture; those three are replaced with placeholders. They sit in
+// rows 2/5/7, far outside the 15-line tail, so no rule reads them.
+// ===========================================================================
+
+/** Restore the 1000-row pane the capture came from. */
+const withPanePadding = (contentLines: readonly string[]): string =>
+  [...contentLines, ...Array(1000 - contentLines.length).fill('')].join('\n');
+
+/**
+ * agy 1.1.25 asking to run `git rev-parse --show-toplevel`.
+ *
+ * Note the footer: `↑/↓ Navigate · tab Amend · ctrl+g edit/expand command`, with
+ * no `ctrl+r Review` — the 1.1.25 dialog drops it, which is one more reason the
+ * rule cannot key off the footer's exact wording.
+ */
+const AGY_1125_PERMISSION_PANE = withPanePadding([
+  '',
+  'user@host agyprobe % agy',
+  '',
+  '      ▄▀▀▄        Antigravity CLI 1.1.25',
+  '     ▀▀▀▀▀▀       agy-user@example.com (Google AI Pro)',
+  '    ▀▀▀▀▀▀▀▀      Gemini 3.8 Flash (Medium)',
+  '   ▄▀▀    ▀▀▄     /tmp/agyprobe',
+  '  ▄▀▀      ▀▀▄',
+  '',
+  '────────────────────────────────────────────────────────────',
+  '> Run the shell command: git rev-parse --show-toplevel',
+  '',
+  '● Bash(git rev-parse --show-toplevel) (ctrl+o to expand)',
+  '',
+  'Command',
+  '────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────',
+  '',
+  'Requesting permission for:',
+  '   git rev-parse --show-toplevel',
+  '',
+  'Do you want to proceed?',
+  '> 1. Yes',
+  "  2. Yes, and always allow in this conversation for commands that start with 'git rev-parse'",
+  "  3. Yes, and always allow for commands that start with 'git rev-parse' (Persist to settings.json)",
+  '  4. No',
+  '',
+  '  ↑/↓ Navigate · tab Amend · ctrl+g edit/expand command',
+  'esc to cancel                                                                                                                                                                  Gemini 3.8 Flash · mediu',
+]);
+
+/** agy 1.1.25's `/model` picker: unnumbered rows under a `Switch Model` header. */
+const AGY_1125_SWITCH_MODEL_PANE = withPanePadding([
+  '',
+  'user@host agyprobe % agy',
+  '',
+  '      ▄▀▀▄        Antigravity CLI 1.1.25',
+  '     ▀▀▀▀▀▀       agy-user@example.com (Google AI Pro)',
+  '    ▀▀▀▀▀▀▀▀      Gemini 3.8 Flash (Medium)',
+  '   ▄▀▀    ▀▀▄     /tmp/agyprobe',
+  '  ▄▀▀      ▀▀▄',
+  '',
+  '────────────────────────────────────────────────────────────',
+  '> Run the shell command: git rev-parse --show-toplevel',
+  '',
+  '● Bash(git rev-parse --show-toplevel) (ctrl+o to expand)',
+  '',
+  '────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────',
+  '>',
+  '────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────',
+  'Switch Model',
+  '',
+  '> Gemini 3.8 Flash             (current)',
+  '  Gemini 3.7 Flash',
+  '  Gemini 3.6 Flash',
+  '  Gemini 3.1 Pro',
+  '  Claude Sonnet 4.6 (Thinking)',
+  '  Claude Opus 4.6 (Thinking)',
+  '  GPT-OSS 120B (Medium)',
+  '',
+  '  Effort  ◂        ●━━━━━━━━━━━━━━◉──────────────○        ▸',
+  '                  low          medium          high',
+  '            Balanced speed and reasoning quality for most tasks',
+  '',
+  'Keyboard: ↑/↓ Navigate  ←/→ Effort  enter Select  esc Go Back',
+  '',
+  '                                                                                                                                                                               Gemini 3.8 Flash · mediu',
+]);
+
+describe('detectSessionStatus - live agy 1.1.25 permission pane (Issue #2270)', () => {
+  it('reads the real 4-option pane as an answerable prompt, not a selection list', () => {
+    const result = detectSessionStatus(AGY_1125_PERMISSION_PANE, 'antigravity');
+
+    expect(result.status).toBe('waiting');
+    expect(result.hasActivePrompt).toBe(true);
+    expect(SELECTION_LIST_REASONS.has(result.reason)).toBe(false);
+    expect(result.reason).toBe(STATUS_REASON.PROMPT_DETECTED);
+  });
+
+  it('publishes the four options the pane draws', () => {
+    const result = detectSessionStatus(AGY_1125_PERMISSION_PANE, 'antigravity');
+    const promptData = result.promptDetection?.promptData;
+
+    expect(promptData?.type).toBe('multiple_choice');
+    if (promptData?.type !== 'multiple_choice') throw new Error('expected multiple_choice');
+    expect(promptData.options).toHaveLength(4);
+    expect(promptData.options.map((o) => o.number)).toEqual([1, 2, 3, 4]);
+    expect(promptData.options[3].label).toBe('No');
+  });
+
+  it('keeps the real Switch Model picker on the #995 path', () => {
+    // The other half of the fix: `↑/↓ Navigate` alone still means "selection
+    // list". This pane has a `Switch Model` header, unnumbered model rows and no
+    // "Do you want to proceed?", so nothing about it looks like a numbered dialog.
+    const result = detectSessionStatus(AGY_1125_SWITCH_MODEL_PANE, 'antigravity');
+
+    expect(result.status).toBe('waiting');
+    expect(result.reason).toBe(STATUS_REASON.ANTIGRAVITY_SELECTION_LIST);
+    expect(result.hasActivePrompt).toBe(false);
+    expect(SELECTION_LIST_REASONS.has(result.reason)).toBe(true);
+  });
+
+  it('separates the two panes on the discriminator, not on the footer', () => {
+    // Both panes match ANTIGRAVITY_SELECTION_LIST_PATTERN — that is the whole
+    // problem — so the assertion that matters is that the numbered-dialog
+    // predicate, and only it, tells them apart. Delete the `isAntigravityNumberedDialog`
+    // guard in `tools/antigravity/detect.ts` and the first expectation below
+    // flips to true, taking the permission pane back to a selection list.
+    expect(ANTIGRAVITY_SELECTION_LIST_PATTERN.test(AGY_1125_PERMISSION_PANE)).toBe(true);
+    expect(ANTIGRAVITY_SELECTION_LIST_PATTERN.test(AGY_1125_SWITCH_MODEL_PANE)).toBe(true);
+
+    expect(isAntigravityNumberedDialog(AGY_1125_PERMISSION_PANE)).toBe(true);
+    expect(isAntigravityNumberedDialog(AGY_1125_SWITCH_MODEL_PANE)).toBe(false);
+  });
+
+  it('does not fire the predicate on prose that merely quotes the question', () => {
+    // The question is anchored to its own line, so a model narrating the dialog
+    // ("I will ask: Do you want to proceed? — option 1. Yes") is not a dialog.
+    const prose = [
+      'I was about to ask "Do you want to proceed?" and offer 1. Yes / 4. No,',
+      'but the command is safe so I ran it directly.',
+      '────────────────────────────',
+      '> ',
+      '  ↑/↓ Navigate · tab Amend · ctrl+g edit/expand command',
+    ].join('\n');
+
+    expect(isAntigravityNumberedDialog(prose)).toBe(false);
+  });
+
+  it('requires a numbered row, not just the question line', () => {
+    // A "Do you want to proceed?" that draws no numbers is not something a
+    // number can answer, so it stays with NavigationButtons.
+    const unnumbered = [
+      'Do you want to proceed?',
+      '> Yes',
+      '  No',
+      '  ↑/↓ Navigate · tab Amend · ctrl+g edit/expand command',
+    ].join('\n');
+
+    expect(isAntigravityNumberedDialog(unnumbered)).toBe(false);
+
+    const result = detectSessionStatus(unnumbered, 'antigravity');
+    expect(result.reason).toBe(STATUS_REASON.ANTIGRAVITY_SELECTION_LIST);
+  });
+});
+
+// ===========================================================================
+// Issue #2270, the payload half.
+//
+// The detector verdict above is not the bug the Issue reports — the bug is what
+// `/current-output` published off it. `isSelectionListActive` is
+// `SELECTION_LIST_REASONS.has(reason)`, `isPromptWaiting` comes from
+// `hasActivePrompt`, and `promptData` from `promptDetection.promptData`: three
+// separate reads of one verdict, all of which have to move together or the chat
+// surface still gets a banner instead of a PromptPanel. So this asserts the
+// assembled payload, running the real builder over the real pane.
+//
+// The mocks are scoped to this block through `vi.doMock` + a dynamic import, so
+// the 60-odd pure detection tests in this file keep their untouched module graph.
+// ===========================================================================
+describe('/current-output payload for the live agy permission pane (Issue #2270)', () => {
+  afterEach(() => {
+    vi.doUnmock('@/lib/db');
+    vi.doUnmock('@/lib/cli-tools/manager');
+    vi.doUnmock('@/lib/session/cli-session');
+    vi.doUnmock('@/lib/polling/auto-yes-manager');
+    vi.resetModules();
+  });
+
+  const buildPayload = async (pane: string) => {
+    vi.resetModules();
+    vi.doMock('@/lib/db', () => ({
+      getSessionState: vi.fn(() => null),
+      createMessage: vi.fn(),
+    }));
+    vi.doMock('@/lib/cli-tools/manager', () => ({
+      CLIToolManager: { getInstance: () => ({ getTool: () => ({ isRunning: async () => true }) }) },
+    }));
+    vi.doMock('@/lib/session/cli-session', () => ({
+      captureSessionOutput: vi.fn(async () => pane),
+    }));
+    vi.doMock('@/lib/polling/auto-yes-manager', () => ({
+      getAutoYesState: vi.fn(() => null),
+      buildCompositeKey: (worktreeId: string, cliToolId: string, instanceId?: string) =>
+        `${worktreeId}:${cliToolId}:${instanceId ?? cliToolId}`,
+      getLastServerResponseTimestamp: vi.fn(() => null),
+      isPollerActive: vi.fn(() => false),
+    }));
+
+    const { buildCurrentOutput } = await import('@/lib/session/current-output-builder');
+    return buildCurrentOutput({} as never, 'wt-2270', 'antigravity');
+  };
+
+  it('publishes an answerable prompt, not an open selection list', async () => {
+    const payload = await buildPayload(AGY_1125_PERMISSION_PANE);
+
+    expect(payload.sessionStatus).toBe('waiting');
+    expect(payload.sessionStatusReason).toBe(STATUS_REASON.PROMPT_DETECTED);
+    // The three fields the Issue measured as inconsistent with the poller's
+    // stored `prompt` row and the `kind: 'prompt'` push notification.
+    expect(payload.isPromptWaiting).toBe(true);
+    expect(payload.isSelectionListActive).toBe(false);
+    expect(payload.promptData).not.toBeNull();
+  });
+
+  it('publishes all four options so 2-4 are reachable from the chat surface', async () => {
+    const payload = await buildPayload(AGY_1125_PERMISSION_PANE);
+    const promptData = payload.promptData;
+
+    expect(promptData?.type).toBe('multiple_choice');
+    if (promptData?.type !== 'multiple_choice') throw new Error('expected multiple_choice');
+    expect(promptData.options).toHaveLength(4);
+    expect(promptData.options.map((o) => o.number)).toEqual([1, 2, 3, 4]);
+    // "No" is the option the arrow buttons could never reach: they could only
+    // Enter the highlighted row, which is option 1.
+    expect(promptData.options[3].label).toBe('No');
+  });
+
+  it('still publishes an open selection list for the Switch Model picker', async () => {
+    const payload = await buildPayload(AGY_1125_SWITCH_MODEL_PANE);
+
+    expect(payload.sessionStatus).toBe('waiting');
+    expect(payload.sessionStatusReason).toBe(STATUS_REASON.ANTIGRAVITY_SELECTION_LIST);
+    expect(payload.isSelectionListActive).toBe(true);
+    expect(payload.isPromptWaiting).toBe(false);
   });
 });
 
