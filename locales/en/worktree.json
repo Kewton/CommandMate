@@ -471,6 +471,7 @@
     "empty": "No messages yet",
     "emptyHint": "Sending a message starts the session",
     "openSearch": "Search this conversation",
+    "filePathMissing": "That path is not in this worktree",
     "toolApproval": {
       "summary": "Tool approvals · {count}",
       "expand": "Show the tool approvals",

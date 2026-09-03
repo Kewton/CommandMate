@@ -19,6 +19,7 @@ import type { ChatMessage } from '@/types/models';
 import { isAgentAuthoredMarkdown } from '@/types/agent-transcript';
 import { getDateFnsLocale } from '@/lib/date-locale';
 import { formatMessageTimestamp } from '@/lib/date-utils';
+import { splitFilePathParts } from '@/lib/chat/chat-transcript-view';
 
 // ============================================================================
 // Types
@@ -61,21 +62,9 @@ export interface ConversationPairCardProps {
   onDiscardPending?: (tempId: string) => void;
 }
 
-/** Parsed content part type */
-interface ContentPart {
-  type: 'text' | 'path';
-  content: string;
-}
-
 // ============================================================================
 // Constants
 // ============================================================================
-
-/**
- * Regular expression to match file paths.
- * Matches paths like /path/to/file.ts, ./relative/path.js, etc.
- */
-const FILE_PATH_REGEX = /(\/[^\s\n<>"']+\.[a-zA-Z0-9]+)/g;
 
 /**
  * Maximum characters to show in collapsed state.
@@ -96,39 +85,6 @@ const COLLAPSED_MAX_LINES = 2;
 // ============================================================================
 // Helper Functions
 // ============================================================================
-
-/**
- * Parses content string into text and file path parts.
- * Detects file paths matching the FILE_PATH_REGEX pattern and splits
- * the content into alternating text and path segments.
- *
- * @param content - The raw message content to parse
- * @returns Array of content parts, each marked as 'text' or 'path'
- */
-function parseContentParts(content: string): ContentPart[] {
-  const matches = content.match(FILE_PATH_REGEX);
-  if (!matches || matches.length === 0) {
-    return [{ type: 'text', content }];
-  }
-
-  const result: ContentPart[] = [];
-  let lastIndex = 0;
-
-  matches.forEach((match) => {
-    const index = content.indexOf(match, lastIndex);
-    if (index > lastIndex) {
-      result.push({ type: 'text', content: content.slice(lastIndex, index) });
-    }
-    result.push({ type: 'path', content: match });
-    lastIndex = index + match.length;
-  });
-
-  if (lastIndex < content.length) {
-    result.push({ type: 'text', content: content.slice(lastIndex) });
-  }
-
-  return result;
-}
 
 /**
  * Get truncated content for collapsed view.
@@ -160,7 +116,16 @@ function getTruncatedContent(
 
 /**
  * Renders message content with clickable file paths.
- * File paths matching the FILE_PATH_REGEX are converted to clickable buttons.
+ *
+ * The text is split by {@link splitFilePathParts}, the chat surface's splitter.
+ * Issue #2274: this file used to carry its OWN copy of the file-path regex,
+ * frozen apart from chat's by Issue #2232 so History would keep rendering
+ * byte-identically. The copy was wrong in the same way the original was — it
+ * began a match at any `/`, so `commandmate-skills/docs/x.md` turned only its
+ * tail into a button naming a file this worktree does not have — and two copies
+ * of a wrong rule get fixed once. #2232's freeze is about how this card LOOKS;
+ * which characters are a button, and which file that button names, is not a
+ * look, so the freeze does not reach it.
  *
  * @param props.content - The message content to render
  * @param props.onFilePathClick - Callback invoked when a file path is clicked
@@ -173,7 +138,7 @@ const MessageContent = memo(function MessageContent({
   onFilePathClick: (path: string) => void;
 }) {
   const t = useTranslations('worktree');
-  const parts = useMemo(() => parseContentParts(content), [content]);
+  const parts = useMemo(() => splitFilePathParts(content), [content]);
 
   const handlePathClick = useCallback(
     (path: string) => () => onFilePathClick(path),

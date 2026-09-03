@@ -471,6 +471,7 @@
     "empty": "まだメッセージはありません",
     "emptyHint": "送信するとセッションが起動します",
     "openSearch": "この会話を検索",
+    "filePathMissing": "このパスは worktree にありません",
     "toolApproval": {
       "summary": "ツール承認 {count} 件",
       "expand": "ツール承認を開く",

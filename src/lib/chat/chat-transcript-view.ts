@@ -174,18 +174,56 @@ export interface ChatContentPart {
 }
 
 /**
- * Absolute-looking paths with an extension. Same shape `ConversationPairCard`
- * matches on, and intentionally not shared with it: that file is frozen by this
- * Issue's scope, and a regex copied WITH the reason for its shape is a smaller
- * liability than an import that cannot be made.
+ * Absolute-looking paths with an extension, anchored on their LEFT edge.
+ *
+ * Issue #2274: without the boundary group this pattern was
+ * `/(\/[^\s\n<>"']+\.[a-zA-Z0-9]+)/g`, which starts a match at ANY `/` — so
+ * `commandmate-skills/docs/uat/report-template.md` in a reply linkified its
+ * tail, `/docs/uat/report-template.md`, and only its tail. One path rendered in
+ * two colors, and the half that became a button named a file this worktree does
+ * not have. Group 1 is that boundary and it is CONSUMED rather than looked
+ * behind (see {@link splitFilePathParts} for what that costs, which is nothing):
+ * a match may only begin at the start of the body or right after whitespace, a
+ * backtick, a quote or an opening bracket.
+ *
+ * Two consequences worth stating, because both are behaviour changes:
+ *
+ *  - a RELATIVE path is not a link. `docs/uat/x.md` stays plain text, and that
+ *    is the decision this Issue makes rather than a gap in it: `a/b.md` is not
+ *    distinguishable, from the text alone, from this worktree's `a/b.md`,
+ *    another repository's, or prose about a ratio. The defect being fixed here
+ *    is exactly a false positive of that kind, so adding a relative branch back
+ *    would re-open it under a different name.
+ *  - a URL is not a link either. `https://example.com/a/b.js` offers no
+ *    boundary before either slash of `//` (`:` and `/` are deliberately absent
+ *    from the boundary class), so it is no longer split into prose plus a
+ *    fictional file. It was, before this Issue.
+ *
+ * `ConversationPairCard` renders History's copy of the same bodies and now
+ * imports {@link splitFilePathParts} instead of carrying its own copy of this
+ * pattern. Issue #2232 froze that file to keep History pixel-identical; a
+ * clickable range that names the wrong file is not a look, so the freeze does
+ * not reach it. One regex, one behaviour, asserted from both surfaces against
+ * the same fixtures.
  */
-const FILE_PATH_REGEX = /(\/[^\s\n<>"']+\.[a-zA-Z0-9]+)/g;
+const FILE_PATH_REGEX = /(^|[\s`"'(\[<（「『【])(\/[^\s\n<>"']+\.[a-zA-Z0-9]+)/g;
 
 /**
  * Split a body into alternating text and path runs.
  *
  * Returns a single text part when there is nothing to link, so the caller can
  * render the common case without allocating a list of one-character spans.
+ *
+ * Issue #2274 replaced `String.prototype.match` + `indexOf` with `matchAll`:
+ * the old loop re-FOUND each matched string by searching for it, which the
+ * boundary group would have made ambiguous, and which could already land on the
+ * wrong occurrence of a repeated path. `match.index` is the position the engine
+ * actually matched at, so the offsets are no longer a second guess at it.
+ *
+ * Consuming the boundary character cannot hide a second path: the boundary sits
+ * BEFORE a run, a run always ends on `[a-zA-Z0-9]`, and therefore the character
+ * that terminates one path is never the character another path needs as its
+ * boundary. `a /x.ts /y.ts` yields both.
  */
 export function splitFilePathParts(content: string): ChatContentPart[] {
   // A row whose `content` is not a string is a data defect somewhere upstream,
@@ -196,22 +234,25 @@ export function splitFilePathParts(content: string): ChatContentPart[] {
     return [{ type: 'text', content: '' }];
   }
 
-  const matches = content.match(FILE_PATH_REGEX);
-  if (!matches || matches.length === 0) {
-    return [{ type: 'text', content }];
-  }
-
   const parts: ChatContentPart[] = [];
   let lastIndex = 0;
 
-  for (const match of matches) {
-    const index = content.indexOf(match, lastIndex);
-    if (index === -1) continue;
+  // `matchAll` copies the pattern and its `lastIndex`, so this module-level
+  // `/g` regex is safe to share across calls (an `exec` loop would not be).
+  for (const match of content.matchAll(FILE_PATH_REGEX)) {
+    const boundary = match[1] ?? '';
+    const filePath = match[2];
+    if (!filePath) continue;
+    const index = (match.index ?? 0) + boundary.length;
     if (index > lastIndex) {
       parts.push({ type: 'text', content: content.slice(lastIndex, index) });
     }
-    parts.push({ type: 'path', content: match });
-    lastIndex = index + match.length;
+    parts.push({ type: 'path', content: filePath });
+    lastIndex = index + filePath.length;
+  }
+
+  if (parts.length === 0) {
+    return [{ type: 'text', content }];
   }
 
   if (lastIndex < content.length) {

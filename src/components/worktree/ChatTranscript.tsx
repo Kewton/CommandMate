@@ -92,6 +92,7 @@ import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { ShowToast } from '@/types/markdown-editor';
 import { useHistorySearch } from '@/hooks/useHistorySearch';
 import { copyToClipboard } from '@/lib/clipboard-utils';
+import { encodePathForUrl } from '@/lib/url-path-encoder';
 import { applyHistoryHighlights, clearHistoryHighlights } from '@/lib/terminal-highlight';
 import { isNearBottom } from '@/lib/history-virtualization';
 import {
@@ -127,6 +128,55 @@ import { HistorySearchBar } from './HistorySearchBar';
  * pinned by a seam test rather than written twice.
  */
 export const CHAT_TRANSCRIPT_SCROLL_CONTAINER_TESTID = 'chat-transcript-scroll-container';
+
+/**
+ * What asking the server about a path in a message body established.
+ *
+ * `'unknown'` is a third state on purpose. A probe that could not be performed
+ * is not evidence the file is absent, and Issue #2274's toast SAYS the file is
+ * absent — so only a definite answer from the server is allowed to produce it.
+ */
+type ChatFilePathProbe = 'present' | 'missing' | 'unknown';
+
+/**
+ * Ask whether `filePath` is a file this worktree actually has (Issue #2274).
+ *
+ * ## Why the URL is built exactly the way the file panel builds it
+ *
+ * `FilePanelContent`, `FileViewer` and `useFileContentPolling` all request
+ * `/api/worktrees/<id>/files/<encodePathForUrl(path)>`, and so does this. That
+ * is the one property that makes the probe worth having: it has to be as
+ * capable as the OPEN it is gating, or it becomes a second, differently-wrong
+ * opinion about which paths work. An absolute path inside the worktree is
+ * encoded here the same way the panel encodes it, so whatever the routing layer
+ * makes of it, the probe and the panel agree.
+ *
+ * ## Which statuses mean "no"
+ *
+ * 404 (nothing there, or a directory), 400 (outside the worktree — the shape of
+ * this Issue's defect, a path belonging to a different repository) and 403
+ * ([Issue #2014] a deny-tier path, which the panel could not show either).
+ * Everything else — 5xx, an aborted request, an offline browser — is
+ * `'unknown'`, and the caller opens the panel and lets it report its own error.
+ */
+async function probeChatFilePath(
+  worktreeId: string,
+  filePath: string,
+): Promise<ChatFilePathProbe> {
+  try {
+    const response = await fetch(
+      `/api/worktrees/${encodeURIComponent(worktreeId)}/files/${encodePathForUrl(filePath)}`,
+      { method: 'HEAD', cache: 'no-store' },
+    );
+    if (response.ok) return 'present';
+    if (response.status === 404 || response.status === 400 || response.status === 403) {
+      return 'missing';
+    }
+    return 'unknown';
+  } catch {
+    return 'unknown';
+  }
+}
 
 // ============================================================================
 // Types
@@ -528,16 +578,41 @@ export const ChatTranscript = memo(function ChatTranscript({
   // ---------------------------------------------------------------
   // Row rendering
   // ---------------------------------------------------------------
-  const handleFilePathClick = useCallback(
-    (path: string) => onFilePathClick?.(path),
-    [onFilePathClick],
-  );
 
-  // `t` churns identity on every render (#1219 / #1032) and this callback is
+  // `t` churns identity on every render (#1219 / #1032) and these callbacks are
   // handed to a memoized bubble for every mounted row, so it is read through a
   // ref: stable identity, toast text still resolved fresh at click time.
   const tRef = useRef(t);
   tRef.current = t;
+
+  /**
+   * Open a path from a message body — but only after asking whether it is here.
+   *
+   * Issue #2274: the linkifier used to hand this callback paths it had sliced
+   * out of the middle of somebody else's relative path, and the file panel
+   * opened a tab for each one and then failed inside it. A body is prose written
+   * by a language model, so even a correctly detected path is only a CLAIM about
+   * this worktree; {@link probeChatFilePath} is what turns it into an answer.
+   *
+   * Only a definite "no" from the server stops the open (see the probe): a
+   * network failure leaves the panel to report its own error rather than this
+   * surface asserting the file is absent when it does not know.
+   */
+  const handleFilePathClick = useCallback(
+    (path: string) => {
+      const open = onFilePathClick;
+      if (!open) return;
+      void (async () => {
+        const probe = await probeChatFilePath(worktreeId, path);
+        if (probe === 'missing') {
+          showToast?.(tRef.current('chatTranscript.filePathMissing'), 'error');
+          return;
+        }
+        open(path);
+      })();
+    },
+    [onFilePathClick, worktreeId, showToast],
+  );
 
   const handleCopy = useCallback(
     async (content: string) => {
