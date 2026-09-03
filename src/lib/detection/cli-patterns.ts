@@ -1967,6 +1967,55 @@ export const ANTIGRAVITY_SEPARATOR_PATTERN = /^─{3,}$/m;
 export const ANTIGRAVITY_SELECTION_LIST_PATTERN = /Switch Model|↑\/↓\s*Navigate/m;
 
 /**
+ * The question line agy draws above its numbered permission dialog
+ * (Issue #2270; measured on agy 1.1.25, pane 200x1000, 2026-09-04).
+ *
+ * Anchored to the whole line so a model's prose that merely quotes the phrase
+ * inside a sentence cannot match it.
+ */
+export const ANTIGRAVITY_NUMBERED_DIALOG_QUESTION_PATTERN = /^\s*Do you want to proceed\?\s*$/m;
+
+/**
+ * One numbered option row of that dialog: `> 1. Yes`, `  4. No`.
+ *
+ * The `>` gutter marks the highlighted row and is optional, because only one of
+ * the four rows carries it.
+ */
+export const ANTIGRAVITY_NUMBERED_OPTION_PATTERN = /^\s*>?\s*\d+\.\s+\S/m;
+
+/**
+ * Is this frame agy's NUMBERED permission dialog rather than one of its
+ * arrow-key-only pickers? (Issue #2270)
+ *
+ * Both agy screens share the `↑/↓ Navigate` footer that
+ * {@link ANTIGRAVITY_SELECTION_LIST_PATTERN} matches, which is why #997 could
+ * widen that pattern to cover the permission menu — and why the menu then
+ * resolved as `antigravity_selection_list`, `hasActivePrompt: false`. On the
+ * chat surface that reads as "a selection list is open, drive it from the
+ * terminal": the arrow buttons can only Enter the highlighted option 1, so
+ * options 2-4 became unreachable, while the poller and the push notification
+ * described the very same frame as a `multiple_choice` prompt.
+ *
+ * The discriminator is the pair below, not the footer:
+ *
+ *  - `Do you want to proceed?` on its own line, and
+ *  - at least one `N. label` row.
+ *
+ * The Switch Model picker has neither (its rows are unnumbered model names and
+ * its header is `Switch Model`), so it keeps the #995 reading. Every other agy
+ * arrow-key TUI keeps it too — this is deliberately a rule about the ONE dialog
+ * whose frames were measured, not a general "numbers mean prompt" inference.
+ *
+ * Callers pass the same text they hand {@link ANTIGRAVITY_SELECTION_LIST_PATTERN}.
+ */
+export function isAntigravityNumberedDialog(text: string): boolean {
+  return (
+    ANTIGRAVITY_NUMBERED_DIALOG_QUESTION_PATTERN.test(text) &&
+    ANTIGRAVITY_NUMBERED_OPTION_PATTERN.test(text)
+  );
+}
+
+/**
  * Antigravity (agy) skip patterns for response cleaning (Issue #988)
  * Filters turn/input-box separators, the bare ">" input prompt, the idle status
  * bar ("? for shortcuts ... <model>"), the thinking footer/spinner, banner block

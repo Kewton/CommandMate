@@ -320,6 +320,9 @@ describe('the parts that are not prose', () => {
   }
 
   it('folds reasoning behind a blockquote instead of a raw-HTML details', () => {
+    // [#2272] The quote is still a quote and still labelled `Thinking` — what
+    // changed is that it sits BEHIND the answer and carries its own count, so
+    // the bubble opens with the reply rather than with the deliberation.
     const rendered = renderOpencodeTurn(
       turnWith(
         { id: 'p1', type: 'reasoning', text: 'first\n\nsecond' },
@@ -327,8 +330,76 @@ describe('the parts that are not prose', () => {
       )
     );
     expect(rendered.body).toBe(
-      `> **${OPENCODE_REASONING_LABEL}**\n>\n> first\n>\n> second\n\nThe answer.`
+      `The answer.\n\n> **${OPENCODE_REASONING_LABEL} (1)**\n>\n> first\n>\n> second`
     );
+    expect(rendered.reasoningParts).toBe(1);
+  });
+
+  it('puts every reasoning block under ONE heading, in the order it was thought', () => {
+    // [#2272] The shape the Issue reports: opencode emits a `reasoning` part in
+    // front of every text part, so a long reply carried four separate
+    // `> **Thinking**` quotes interleaved through the prose.
+    const rendered = renderOpencodeTurn(
+      turnWith(
+        { id: 'p1', type: 'reasoning', text: 'weigh it' },
+        { id: 'p2', type: 'text', text: 'First paragraph.' },
+        { id: 'p3', type: 'reasoning', text: 'weigh it again' },
+        { id: 'p4', type: 'text', text: 'Second paragraph.' }
+      )
+    );
+    expect(rendered.body).toBe(
+      [
+        'First paragraph.',
+        '',
+        'Second paragraph.',
+        '',
+        `> **${OPENCODE_REASONING_LABEL} (2)**`,
+        '>',
+        '> weigh it',
+        '>',
+        '> weigh it again',
+      ].join('\n')
+    );
+    expect(rendered.reasoningParts).toBe(2);
+    expect(rendered.textParts).toBe(2);
+  });
+
+  it('keeps the reasoning in front of the tool log', () => {
+    // [#2272] Two folded sections, and the tool log stays last: #2234 put it
+    // there and History's rows are matched on `request_id`, never rewritten.
+    const rendered = renderOpencodeTurn(
+      turnWith(
+        { id: 'p1', type: 'reasoning', text: 'plan the patch' },
+        { id: 'p2', type: 'text', text: 'Wrote the file.' },
+        {
+          id: 'p3',
+          type: 'tool',
+          tool: 'apply_patch',
+          state: { status: 'completed', title: 'probe.txt' },
+        }
+      )
+    );
+    expect(rendered.body).toBe(
+      [
+        'Wrote the file.',
+        '',
+        `> **${OPENCODE_REASONING_LABEL} (1)**`,
+        '>',
+        '> plan the patch',
+        '',
+        `> **${TURN_TOOL_LOG_LABEL} (1)**`,
+        '>',
+        '> - `apply_patch` — probe.txt',
+      ].join('\n')
+    );
+  });
+
+  it('says nothing at all when the turn only reasoned', () => {
+    // A section on its own is still a section: there is no prose to lead with,
+    // so the heading is the first line and the count is still there.
+    const rendered = renderOpencodeTurn(turnWith({ id: 'p1', type: 'reasoning', text: 'hmm' }));
+    expect(rendered.body).toBe(`> **${OPENCODE_REASONING_LABEL} (1)**\n>\n> hmm`);
+    expect(rendered.textParts).toBe(0);
   });
 
   it('says nothing at all about step-start / step-finish / snapshot / patch', () => {
@@ -486,6 +557,36 @@ describe('bounds', () => {
     const body = renderOpencodeTurn(turn).body;
     expect(body).toHaveLength(MAX_OPENCODE_TURN_BODY_LENGTH);
     expect(body.endsWith(OPENCODE_TURN_TRUNCATION_MARKER)).toBe(true);
+  });
+
+  it('spends the cap on the answer before it spends it on the reasoning', () => {
+    // [#2272] The cap still counts the whole body — that did not change. What
+    // changed is what falls off the end: the reasoning now sits behind the
+    // prose, so an over-long turn loses the tail of its thinking and keeps the
+    // reply. Before this Issue the same turn kept the deliberation and cut the
+    // answer off mid-sentence.
+    const turn = createOpencodeTurn(SESSION, 'msg_user1', 0);
+    const part = (id: string, type: string, text: string) =>
+      addOpencodePart(turn, {
+        id,
+        messageId: 'msg_a',
+        type,
+        text,
+        tool: null,
+        status: null,
+        title: null,
+        error: null,
+      });
+    part('prt_1', 'reasoning', 'r'.repeat(MAX_OPENCODE_TURN_BODY_LENGTH));
+    part('prt_2', 'text', 'THE ANSWER SURVIVES.');
+
+    const body = renderOpencodeTurn(turn).body;
+    expect(body).toHaveLength(MAX_OPENCODE_TURN_BODY_LENGTH);
+    expect(body.startsWith('THE ANSWER SURVIVES.\n\n')).toBe(true);
+    expect(body.endsWith(OPENCODE_TURN_TRUNCATION_MARKER)).toBe(true);
+    // The marker lands inside the reasoning quote, which is the half that was
+    // over budget — not in the middle of the sentence the operator asked for.
+    expect(body).toContain(`> **${OPENCODE_REASONING_LABEL} (1)**`);
   });
 });
 
