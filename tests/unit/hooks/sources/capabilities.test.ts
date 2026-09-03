@@ -168,17 +168,17 @@ const TABLE: Record<string, DeclaredRow> = {
   // Command Code registers no permission hook, because its `PreToolUse` fires
   // AFTER the approval dialog has been answered (measured — dialog 00:11:37,
   // answered 00:11:46, hook 00:11:46), so a non-allow reply on it forecasts
-  // nothing. `transcriptHistory` is null until Phase C (#2252) lands the reader
-  // for `~/.commandcode/projects/<slug>/<session_id>.jsonl`; flipping it to
-  // 'pull' now sends `structured-history-gate` looking for a module that does
-  // not exist.
+  // nothing. `transcriptHistory` became 'pull' in Phase C (#2252), which landed
+  // the reader for `~/.commandcode/projects/<slug>/<session_id>.jsonl`; flipping
+  // it back to null puts this tool's replies on the scraped pane, which is the
+  // duplicated-then-lost shape #2121 measured on claude.
   'command-code': {
     permissionHookPredictsDialog: false,
     sessionStartMayArriveLate: false,
     permissionReplyReleasesPrompt: false,
     eventIdentity: null,
     resync: 'none',
-    transcriptHistory: null,
+    transcriptHistory: 'pull',
   },
 };
 
@@ -267,21 +267,22 @@ describe('[#1924] AgentSourceCapabilities — the table of §4 D3', () => {
     expect(resyncing).toEqual(['opencode']);
   });
 
-  it('names exactly the four sources with a second writer, and which kind (#2198)', () => {
+  it('names exactly the five sources with a second writer, and which kind (#2252)', () => {
     // The column-wise reading of Issue #2197's addition, with #2198's fourth
-    // source in it. Two departures from "nobody but the scraper", and they are
-    // different departures: opencode is pushed the reply over a connection,
-    // while claude, codex and antigravity each keep a file that has to be read.
+    // source and #2252's fifth in it. Two departures from "nobody but the
+    // scraper", and they are different departures: opencode is pushed the reply
+    // over a connection, while claude, codex, antigravity and command-code each
+    // keep a file that has to be read.
     // `lib/polling/structured-history-gate` asks a different question of each,
     // so a value in the wrong one of these two lists is not a near miss — it
     // sends the gate down the other branch entirely.
     const pull = Object.keys(TABLE).filter((id) => TABLE[id].transcriptHistory === 'pull');
-    expect(pull).toEqual(['claude', 'codex', 'antigravity']);
+    expect(pull).toEqual(['claude', 'codex', 'antigravity', 'command-code']);
 
     const push = Object.keys(TABLE).filter((id) => TABLE[id].transcriptHistory === 'push');
     expect(push).toEqual(['opencode']);
 
     const scraperOnly = Object.keys(TABLE).filter((id) => TABLE[id].transcriptHistory === null);
-    expect(scraperOnly).toEqual(['gemini', 'copilot', 'command-code']);
+    expect(scraperOnly).toEqual(['gemini', 'copilot']);
   });
 });
