@@ -592,7 +592,16 @@
   },
   "fileTabs": {
     "unsavedChanges": "Unsaved changes",
-    "closeTab": "Close {name}"
+    "closeTab": "Close {name}",
+    "tabActions": "Tab actions",
+    "closeAll": "Close All",
+    "closeOthers": "Close Others",
+    "closeToRight": "Close to the Right",
+    "confirmCloseTitle": "Unsaved changes",
+    "confirmCloseBody": "{count} of the tabs being closed have unsaved changes. Closing them discards those edits.",
+    "confirmKeepUnsaved": "Keep unsaved",
+    "confirmDiscard": "Close all",
+    "confirmCancel": "Cancel"
   },
   "markdownPreview": {
     "loadingImage": "[loading image...]",
