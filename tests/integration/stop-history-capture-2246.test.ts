@@ -10,6 +10,13 @@
  * misjudges one completion no longer loses a turn, because the agent's own stop
  * event asks for the same turn — and when both ask, the row is still one row.
  *
+ * The last section is Issue #2264's, and it is the other side of the same
+ * trigger: the `stop` post and the transcript's last append have no ordering
+ * between them, so the second trigger can arrive at a turn the agent has
+ * finished and the *file* has not. What lands in `chat_messages` then — nothing,
+ * and later the whole reply — is what that section drives, against the real
+ * table rather than a stand-in.
+ *
  * @vitest-environment node
  */
 
@@ -32,7 +39,10 @@ vi.mock('@/lib/db/db-instance', () => {
   };
 });
 
-vi.mock('@/lib/ws-server', () => ({ broadcastMessage: vi.fn() }));
+const broadcastMessage = vi.fn();
+vi.mock('@/lib/ws-server', () => ({
+  broadcastMessage: (...a: unknown[]) => broadcastMessage(...a),
+}));
 
 const getLastAgentEvent = vi.fn<(...a: unknown[]) => { sessionId: string | null } | null>();
 const recordAgentStopEvent = vi.fn();
@@ -42,7 +52,7 @@ vi.mock('@/lib/session/agent-event-state', () => ({
 }));
 
 import { runMigrations } from '@/lib/db/db-migrations';
-import { getMessages, upsertWorktree } from '@/lib/db';
+import { createMessage, getMessages, upsertWorktree } from '@/lib/db';
 import { applyAgentStopEvent } from '@/lib/hooks/agent-event-service';
 import { captureTranscriptTurnOnStop } from '@/lib/hooks/stop-history-capture';
 import {
@@ -58,6 +68,7 @@ import { claudePromptRequestId, claudeTurnRequestId } from '@/types/agent-transc
 import type { Worktree } from '@/types/models';
 
 const FIXTURE_DIR = join(process.cwd(), 'tests/fixtures/claude-transcript-2246');
+const FIXTURE_DIR_2264 = join(process.cwd(), 'tests/fixtures/claude-transcript-2264');
 const WORKTREE_ID = 'wt-2246';
 const WORKTREE_PATH = '/Users/operator/repos/commandmate-issue-2196';
 const SESSION = '5f3a1c00-2246-4a00-9000-0000000000aa';
@@ -68,6 +79,8 @@ const C = '00000000-0000-4000-8000-000000000011';
 
 let threeTurns: string;
 let threeTurnsOpen: string;
+let toolOpen: string;
+let toolClosed: string;
 let db: Database.Database;
 let home: string;
 let worktree: Worktree;
@@ -85,6 +98,11 @@ async function writeTranscript(body: string): Promise<void> {
     recursive: true,
   });
   await writeFile(path, body, 'utf8');
+}
+
+function contentOf(requestId: string): string | undefined {
+  return getMessages(db, WORKTREE_ID, { limit: 200 }).find((row) => row.requestId === requestId)
+    ?.content;
 }
 
 function keys(): string[] {
@@ -113,6 +131,8 @@ function stopCapture(retryDelayMs?: number): Promise<boolean> {
 beforeAll(async () => {
   threeTurns = await readFile(join(FIXTURE_DIR, 'three-turns.jsonl'), 'utf8');
   threeTurnsOpen = await readFile(join(FIXTURE_DIR, 'three-turns-open.jsonl'), 'utf8');
+  toolOpen = await readFile(join(FIXTURE_DIR_2264, 'turn-open.jsonl'), 'utf8');
+  toolClosed = await readFile(join(FIXTURE_DIR_2264, 'turn-closed.jsonl'), 'utf8');
 });
 
 beforeEach(async () => {
@@ -269,5 +289,66 @@ describe('both triggers on one turn', () => {
       claudeTurnRequestId(B),
       claudeTurnRequestId(C),
     ]);
+  });
+});
+
+describe('[#2264] the transcript the stop hook beat, with the tool calls already in it', () => {
+  it('writes no assistant row for a turn that stopped on a tool call', async () => {
+    // The measured failure. The body is *not* empty — the tool section is in it
+    // — so #2121's emptiness guard passes it, and before #2264 this wrote a
+    // 236-character row with none of the answer in it, permanently.
+    await writeTranscript(toolOpen);
+
+    await expect(stopCapture(0)).resolves.toBe(false);
+
+    expect(keys()).not.toContain(claudeTurnRequestId(C));
+  });
+
+  it('writes the whole reply once the last record lands', async () => {
+    await writeTranscript(toolClosed);
+
+    await expect(stopCapture(0)).resolves.toBe(true);
+
+    expect(contentOf(claudeTurnRequestId(C))).toContain('npm publish が完走しました。');
+  });
+
+  it('repairs a row an earlier build left short, and says so on the socket', async () => {
+    // The nine rows the incident left behind. They are keyed, so nothing was
+    // ever going to replace them — the reader answered "already saved" and the
+    // scrape was suppressed two seconds later by that same answer.
+    createMessage(db, {
+      worktreeId: WORKTREE_ID,
+      role: 'assistant',
+      content: '> **Tool calls (1)**\n>\n> - `Bash` — npm run test:unit',
+      messageType: 'normal',
+      timestamp: new Date(Date.parse('2026-09-02T14:49:26.560Z')),
+      cliToolId: 'claude',
+      instanceId: 'claude',
+      requestId: claudeTurnRequestId(C),
+    });
+    await writeTranscript(toolClosed);
+    broadcastMessage.mockClear();
+
+    await expect(stopCapture(0)).resolves.toBe(true);
+
+    expect(contentOf(claudeTurnRequestId(C))).toContain('npm publish が完走しました。');
+    // One row, replaced — not a second one appended next to the short one.
+    expect(keys().filter((key) => key === claudeTurnRequestId(C))).toHaveLength(1);
+    expect(broadcastMessage).toHaveBeenCalledWith(
+      'message_updated',
+      expect.objectContaining({ worktreeId: WORKTREE_ID })
+    );
+  });
+
+  it('leaves the row alone when the transcript says nothing new', async () => {
+    await writeTranscript(toolClosed);
+    await stopCapture(0);
+    const written = contentOf(claudeTurnRequestId(C));
+    broadcastMessage.mockClear();
+
+    await expect(stopCapture(0)).resolves.toBe(true);
+
+    expect(contentOf(claudeTurnRequestId(C))).toBe(written);
+    expect(broadcastMessage).not.toHaveBeenCalledWith('message_updated', expect.anything());
   });
 });

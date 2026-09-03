@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **fix(history): Stop 起点の転写キャプチャが flush 前の転写を書き、最後の本文を欠いた行が冪等キーで固定される問題を修正** (#2264): claude / antigravity の転写リーダーが「エージェントがターンを閉じた」ことを確認してから行を書くようになりました。`stop` hook の発火と転写ファイルへの最終追記には順序保証が無く、間に到着したリーダーはツール呼び出しまでしか無い転写を読みます。ツール呼び出しは本文末尾の引用ブロックとして描画されるので本文は**空ではなく**、従来の空ガードは素通りし、書かれた行は `claude-turn:<prompt uuid>` で冪等化されているため以後どの読み直しも「保存済み」と答え、2 秒後の完全な転写も scrape も反映されませんでした（2026-09-03 実測: 1 インスタンス 20 ターン中 9 ターンが `> **Tool calls (1)**` だけの 236 字で保存）。`ClaudeTranscriptRecord` に `stopReason` を追加し（実測: `~/.claude/projects` 直近 40 本の assistant レコード 7,147 件が全件 `stop_reason` を保持）、最後の assistant 記録が `end_turn` かつ text ブロックを持つターンだけを「閉じた」と判定します（`thinking` だけの `end_turn` は閉じ扱いにしません）。閉じていなくても**後続のプロンプトがあるターンは書きます** — エージェントが次に進んだ以上それ以上追記されないためで、これが無いと割り込まれたターン（実測 231 ターン中 2 件、agy の実機 fixture では 3 ターン中 1 件）を永久に失って #2246 の backfill が退行します。あわせて、既に保存済みの行でも窓内の最新 3 ターンについては閉じたターンを描き直し、本文が伸びていれば `updateMessageContent` で置き換えて `message_updated` で配信するため、修正前に短く保存された行は次の poll で自動修復されます（短くする方向には決して更新しません）。`captureTranscriptTurnOnStop` の再試行は 500 ms 間隔で最大 3 回に増やし、閉じないまま上限に達したターンは従来どおり poller と scraper に渡します。観測用に `claude-transcript-turn-open` / `claude-transcript-turn-updated` / `antigravity-transcript-turn-open` を info で出します
+
 ## [0.30.1] - 2026-09-03
 
 > **Highlight**: v0.30.0 で新設したチャット出力面を、実機で見つかった 4 件の欠陥について修正した。**返答でない行が Assistant の吹き出しとして全文描画される**問題（実測で直近 50 行のうち antigravity 41 行 / codex 43 行）をツール承認チップへ畳み、**ターンが履歴から永久に失われる**経路を 2 つ（転写リーダーが最新 1 件しか書かない・起動バナー除外が 2000 字未満の返答を飲み込む）塞ぎ、確定行が届かないターンでも生成中の本文が消えないようにした。

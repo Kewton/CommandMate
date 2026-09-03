@@ -46,10 +46,12 @@ const findMessageByRequestId = vi.fn(
     rows.get(`${worktreeId}::${requestId}`) ?? null
 );
 const findUnkeyedUserMessages = vi.fn(() => [] as Array<Record<string, unknown>>);
+const updateMessageContent = vi.fn();
 
 vi.mock('@/lib/db', () => ({
   createMessage: (...a: [unknown, Record<string, unknown>]) => createMessage(...a),
   findMessageByRequestId: (...a: [unknown, string, string]) => findMessageByRequestId(...a),
+  updateMessageContent: (...a: [unknown, string, string]) => updateMessageContent(...a),
 }));
 vi.mock('@/lib/db/chat-db', () => ({
   createMessage: (...a: [unknown, Record<string, unknown>]) => createMessage(...a),
@@ -66,7 +68,12 @@ import {
   resetClaudeTranscriptSessions,
   resolveClaudeTranscriptPath,
 } from '@/lib/hooks/sources/claude/history';
-import { claudeProjectSlug } from '@/lib/hooks/sources/claude/transcript';
+import {
+  buildClaudeTurns,
+  claudeProjectSlug,
+  parseClaudeTranscript,
+  renderClaudeTurn,
+} from '@/lib/hooks/sources/claude/transcript';
 import { claudePromptRequestId, claudeTurnRequestId } from '@/types/agent-transcript';
 
 const FIXTURE_DIR = join(process.cwd(), 'tests/fixtures/claude-transcript-2246');
@@ -97,9 +104,32 @@ function capture(): Promise<boolean> {
   return captureClaudeTranscriptTurn(TARGET, { worktreePath: WORKTREE_PATH, homeDir: home });
 }
 
-/** Pretend an earlier run already wrote this turn's assistant row. */
-function pretendSaved(promptUuid: string): void {
-  rows.set(`${WORKTREE_ID}::${claudeTurnRequestId(promptUuid)}`, { id: `pre-${promptUuid}` });
+/** The body a reader would write for this turn of the complete transcript. */
+function bodyOf(promptUuid: string): string {
+  const turn = buildClaudeTurns(parseClaudeTranscript(threeTurns).records, SESSION).turns.find(
+    (candidate) => candidate.promptUuid === promptUuid
+  );
+  if (!turn) throw new Error(`no turn for ${promptUuid}`);
+  return renderClaudeTurn(turn).body;
+}
+
+/**
+ * Pretend an earlier run already wrote this turn's assistant row.
+ *
+ * The row carries the body the reader would render for it, rather than a bare
+ * id, because #2264 gave the reader a second thing to do with an already-written
+ * row: re-render the turn and replace the row if it has grown. A stub with no
+ * `content` would make every one of these tests exercise that path instead of
+ * the anchor rule they are about.
+ */
+function pretendSaved(promptUuid: string, content: string = bodyOf(promptUuid)): void {
+  rows.set(`${WORKTREE_ID}::${claudeTurnRequestId(promptUuid)}`, {
+    id: `pre-${promptUuid}`,
+    worktreeId: WORKTREE_ID,
+    role: 'assistant',
+    content,
+    requestId: claudeTurnRequestId(promptUuid),
+  });
 }
 
 /** Every `request_id` this run wrote, in the order it wrote them. */
@@ -121,6 +151,7 @@ beforeAll(async () => {
 beforeEach(async () => {
   vi.clearAllMocks();
   rows.clear();
+  updateMessageContent.mockReset();
   createMessage.mockImplementation(defaultCreateMessage);
   findUnkeyedUserMessages.mockReturnValue([]);
   resetClaudeTranscriptSessions();
@@ -250,6 +281,18 @@ describe('the duplicate guard', () => {
 });
 
 describe('reading the same transcript twice', () => {
+  it('leaves the anchor’s row alone when it already holds the whole turn', async () => {
+    // #2264 re-renders the newest already-written turns and replaces a row whose
+    // body has grown. "Has not grown" has to cost nothing, or every poll of an
+    // idle session would rewrite the same rows.
+    await writeTranscript(threeTurns);
+    pretendSaved(A);
+
+    await capture();
+
+    expect(updateMessageContent).not.toHaveBeenCalled();
+  });
+
   it('adds no rows the second time', async () => {
     await writeTranscript(threeTurns);
     pretendSaved(A);

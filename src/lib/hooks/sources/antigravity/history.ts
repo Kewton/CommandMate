@@ -75,6 +75,7 @@ import {
   ANTIGRAVITY_TRANSCRIPT_EXTENSION,
   ANTIGRAVITY_TRANSCRIPT_PATH_SEGMENTS,
   buildAntigravityTurns,
+  isAntigravityTurnWritable,
   parseAntigravityTranscript,
   renderAntigravityTurn,
   type AntigravityRenderedTurn,
@@ -612,12 +613,32 @@ async function writeAntigravityTurn(
 ): Promise<boolean> {
   const instanceId = target.instanceId ?? target.cliToolId;
 
+  if (!isAntigravityTurnWritable(turn)) {
+    // agy has not finished this answer and no later prompt has taken over, so
+    // what is in the file is a turn in progress. Writing it would put a reply
+    // with its last paragraph missing into History permanently — the row is
+    // keyed on `(conversationId, step_index)`, so every later read finds it and
+    // answers "already saved". That is Issue #2264, reported against claude and
+    // structurally identical here: a turn cut off after its `tool_calls` renders
+    // a *non-empty* body, so the emptiness guard below cannot see it.
+    logger.info('antigravity-transcript-turn-open', {
+      worktreeId: target.worktreeId,
+      instanceId,
+      conversationId: rendered.conversationId,
+      stepIndex: rendered.stepIndex,
+      records: turn.records.length,
+      textBlocks: rendered.textBlocks,
+      toolBlocks: rendered.toolBlocks,
+    });
+    return false;
+  }
+
   if (rendered.body.length === 0) {
-    // A turn that said nothing yet. Unlike codex there is no `task_complete` to
-    // tell an unfinished turn from a silent one, so the body is the only
-    // evidence there is — and answering false is right for both readings: the
-    // scraper keeps the reply if there was one, and an empty row that would show
-    // as a blank answer forever is never written.
+    // A turn that said nothing. agy has no `task_complete`, so a closed turn
+    // that rendered to nothing and an interrupted one look alike here — and
+    // answering false is right for both readings: the scraper keeps the reply if
+    // there was one, and an empty row that would show as a blank answer forever
+    // is never written.
     logger.info('antigravity-transcript-turn-empty', {
       worktreeId: target.worktreeId,
       instanceId,
