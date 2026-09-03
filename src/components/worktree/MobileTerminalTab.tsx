@@ -93,6 +93,20 @@ export interface MobileTerminalTabProps {
   /** Issue #874: agent instance id for this tab (defaults to primary === cliToolId). */
   instanceId?: string;
   disableAutoFollow?: boolean;
+  /**
+   * Issue #2254: report which output surface this tab is showing.
+   *
+   * The phone's `NavigationButtons` are NOT in this tab — they are docked above
+   * the composer in `WorktreeDetailRefactored`, outside the tab content, so they
+   * cannot see the mode this component owns. Since the chat surface now draws
+   * its own pad inside the dialog card, the docked copy has to stand down while
+   * chat is showing, and this is how it learns to.
+   *
+   * Fired on mount as well as on change (the mode is resolved from localStorage
+   * in an effect, so the parent's first render cannot know it), and optional so
+   * the seventeen existing suites that mount this tab need no new prop.
+   */
+  onSurfaceModeChange?: (mode: SurfaceMode) => void;
 }
 
 /**
@@ -147,12 +161,18 @@ const MobileChatSurface = memo(function MobileChatSurface({
   cliToolId,
   instanceId,
   live,
+  frame,
+  onKeysSent,
   onSurfaceModeChange,
 }: {
   worktreeId: string;
   cliToolId: CLIToolType;
   instanceId?: string;
   live: ChatSurfaceLiveState;
+  /** Issue #2254: the raw pane the dialog card draws. */
+  frame: string;
+  /** Issue #2254: re-poll after a card key lands. */
+  onKeysSent: () => void;
   onSurfaceModeChange: (mode: SurfaceMode) => void;
 }) {
   const { messages: serverMessages, isLoading, refresh } = useSplitMessages({
@@ -207,6 +227,13 @@ const MobileChatSurface = memo(function MobileChatSurface({
       instanceId={instanceId}
       live={live}
       onSurfaceModeChange={onSurfaceModeChange}
+      // Issue #2254: the dialog card, at the phone's budget. `compact` is what
+      // holds it to the low end of the Issue's 12–20 row window and caps the box
+      // so it scrolls inside itself instead of taking rows from the transcript
+      // (Issue #2106).
+      frame={frame}
+      onKeysSent={onKeysSent}
+      compact
       history={{
         // File-path routing still has no owner on this screen: `handleFilePathClick`
         // lives in `WorktreeDetailRefactored` and is not threaded through
@@ -231,6 +258,7 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
   cliToolId,
   instanceId,
   disableAutoFollow,
+  onSurfaceModeChange,
 }: MobileTerminalTabProps) {
   const { terminal, prompt, agentSession, setAutoScroll, refresh } = useTerminalPanePolling({
     worktreeId,
@@ -268,13 +296,27 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
     [surfaceStorageKey],
   );
 
+  // Issue #2254: publish the mode to the screen that owns the docked controls.
+  // In an effect keyed on the resolved value rather than inside
+  // `handleSurfaceModeChange`, because the mode ALSO arrives from localStorage
+  // in the effect above — a tab reopened in chat mode has to stand the docked
+  // pad down without anybody touching the toggle. Writes the parent's state, so
+  // it must not run during render.
+  useEffect(() => {
+    onSurfaceModeChange?.(surfaceMode);
+  }, [onSurfaceModeChange, surfaceMode]);
+
   // Issue #1494 / #1496: detection-independent navigation hatch on mobile.
   // `terminal.isUnclassifiedActive` is already false whenever a selection list /
   // pager / prompt is detected server-side, so this surfaces the pad only for an
   // otherwise-unreachable TUI overlay. `!prompt.visible` mirrors the PC
   // `showEscapeHatch` gate so it stays hidden while a prompt panel is driving the
   // session (e.g. the `/model` misdetection tracked in #1495).
-  const showEscapeHatch = terminal.isUnclassifiedActive && !prompt.visible;
+  // Issue #2254 added the `surfaceMode` term. The chat surface renders its own
+  // hatch inside the dialog card, directly under the frame it acts on; this one
+  // sits below the tab content and would be the second copy.
+  const showEscapeHatch =
+    terminal.isUnclassifiedActive && !prompt.visible && surfaceMode !== 'chat';
 
   // Issue #1879: contents-only gate, identical to the PC one. Deliberately not
   // combined with `showEscapeHatch` — an unclassified overlay and a composer
@@ -400,6 +442,8 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
               cliToolId={cliToolId}
               instanceId={instanceId}
               live={chatLiveState}
+              frame={terminal.output}
+              onKeysSent={refresh}
               onSurfaceModeChange={handleSurfaceModeChange}
             />
           </div>

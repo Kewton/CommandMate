@@ -23,6 +23,12 @@ export type {
 export { ChatTranscript } from './ChatTranscript';
 export type { ChatTranscriptProps, ChatTranscriptLiveTurn } from './ChatTranscript';
 
+export { ChatDialogCard } from './ChatDialogCard';
+export type { ChatDialogCardProps } from './ChatDialogCard';
+
+export { PromptAnswerKeys, PROMPT_ANSWER_KEYS } from './PromptAnswerKeys';
+export type { PromptAnswerKeysProps } from './PromptAnswerKeys';
+
 export { ChatLiveTurnBubble } from './ChatLiveTurnBubble';
 export type { ChatLiveTurnBubbleProps } from './ChatLiveTurnBubble';
 

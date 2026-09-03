@@ -41,6 +41,16 @@ const UNCHANGED_TOOLS: readonly CLIToolType[] = CLI_TOOL_IDS.filter((id) => id !
 
 const manager = CLIToolManager.getInstance();
 
+/**
+ * The base pad as a set, for the Issue #2254 overlap.
+ *
+ * `n` is both an opencode leader chord (`ctrl+x n`, #2046) and one of the two
+ * letters a bare `[y/n]` accepts (#2254), so it is in BOTH lists and the
+ * "no tool but opencode gets a chord letter" rule has to be stated as
+ * "no tool but opencode gets a chord letter the base pad does not already have".
+ */
+const BASE_KEYS = new Set<string>(NAVIGATION_KEY_VALUES);
+
 describe('Issue #2046: every tool but opencode declares the pre-#2046 set, unchanged', () => {
   it.each(UNCHANGED_TOOLS)('%s publishes exactly NAVIGATION_KEY_VALUES', (id) => {
     const spec = manager.getTool(id).navigationKeys();
@@ -65,17 +75,47 @@ describe('Issue #2046: every tool but opencode declares the pre-#2046 set, uncha
     ]);
   });
 
-  it('gives none of them a leader key or any opencode chord letter', () => {
+  it('gives none of them a leader key or any opencode-ONLY chord letter', () => {
     for (const id of UNCHANGED_TOOLS) {
       const { keys, leaderKey } = manager.getTool(id).navigationKeys();
       expect(leaderKey).toBeNull();
       expect(keys).not.toContain(OPENCODE_LEADER_KEY);
       for (const letter of OPENCODE_LEADER_CHORD_VALUES) {
-        // `q` is in the base set (#1017's codex pager quit) and is not a chord
-        // letter, so no exclusion here can collide with it.
+        // Issue #2254: `n` is now in the base set as an ANSWER key, exactly as
+        // `q` has been since #1017's codex pager quit, so it is not an
+        // opencode-only letter any more and excluding it here would fail on
+        // every tool. The intersection is pinned to exactly `['n']` in the test
+        // below, so this skip cannot quietly grow to cover a letter that really
+        // is opencode's alone.
+        if ((BASE_KEYS as ReadonlySet<string>).has(letter)) continue;
         expect(keys, `${id} must not accept the bare letter ${letter}`).not.toContain(letter);
       }
     }
+  });
+
+  it('shares exactly one chord letter with the base pad — `n`, from Issue #2254', () => {
+    // This is the guard the skip above rests on. Widen ANSWER_KEY_VALUES with
+    // another chord letter (say `a`, opencode's agent list) and this goes red
+    // BEFORE the skip can silently stop excluding it for claude.
+    const shared = OPENCODE_LEADER_CHORD_VALUES.filter((letter) =>
+      (BASE_KEYS as ReadonlySet<string>).has(letter)
+    );
+    expect(shared).toEqual(['n']);
+  });
+
+  it('derives opencode-only chords by subtracting the base pad, with nothing lost', () => {
+    // `OPENCODE_CHORD_ONLY_VALUES` is written out by hand in
+    // `src/types/terminal-keys.ts` (an `as const` tuple cannot be `.filter()`ed
+    // without losing its literal member types), so the subtraction it stands for
+    // is asserted here instead. Both directions: nothing dropped, nothing added.
+    const spec = manager.getTool('opencode').navigationKeys();
+    const declared = new Set<string>(spec.keys);
+    for (const letter of OPENCODE_LEADER_CHORD_VALUES) {
+      expect(declared.has(letter), `opencode must still publish ${letter}`).toBe(true);
+    }
+    // And no key is listed twice, which is what a stale hand-written list would
+    // produce the moment ANSWER_KEY_VALUES and the chord letters overlap again.
+    expect(new Set(spec.keys).size).toBe(spec.keys.length);
   });
 });
 

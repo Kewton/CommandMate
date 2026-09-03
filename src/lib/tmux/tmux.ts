@@ -550,6 +550,11 @@ const ALLOWED_SPECIAL_KEYS = new Set([
   // are tmux named keys; 'q' is the pager's literal "quit" character (sent verbatim by
   // `tmux send-keys`, no injection risk — single fixed char via execFile, not a shell).
   'PageUp', 'PageDown', 'Home', 'End', 'q',
+  // Issue #2254: the answer characters `1`-`9` / `y` / `n`, so a dialog nobody
+  // could parse can be answered from the chat surface's dialog card instead of
+  // only from the terminal. Literal characters on the wire like `q` above.
+  // `n` was already deliverable as an opencode chord letter and is not repeated.
+  '1', '2', '3', '4', '5', '6', '7', '8', '9', 'y',
   // Issue #2046: opencode's own chords. `C-x` is its leader prefix (measured
   // default of 1.18.22, 2000 ms window), `C-p` opens the command palette and
   // `C-t` cycles the model variant. The lower-case letters complete a leader

@@ -397,23 +397,41 @@ quietly revert on the next visit.
 - **"Jump to latest"** — appears when a new line arrives while you are reading back through
   the history. Pressing it returns you to the newest one
 - **"Show archived"** — a toggle for reading rows from past sessions as well
+- **The dialog card** — when a dialog or a selection list is up on the TUI side, a card that
+  shows the **tail of the terminal screen** as-is with the controls for it underneath
+  (Issue #2254). See the next section
 
-### When "Open terminal" appears
+### The dialog card — answering a TUI without leaving chat
 
-It is the signal that something the chat surface **cannot drive** is on screen on the
-terminal side. Pressing it switches that surface to terminal on the spot. There are exactly
-four conditions.
+When something the chat surface **cannot drive** is on screen on the terminal side, this
+surface used to raise an "Open terminal" banner and send you to the terminal. **That
+behaviour was withdrawn by Issue #2254.** Below the banner there is now a card showing the
+**tail of the terminal screen as it is** (12-20 rows; 12 on a phone), with the controls for
+that kind of screen directly under it. You answer it without leaving chat.
 
-| Message | What is actually happening |
-|---------|----------------------------|
-| A pager is open. | A pager such as `less` is open (scroll and quit it from the terminal) |
-| A selection list is open. | A list you move through with the arrow keys is showing |
-| This screen can't be read from chat. | A screen the detectors could not classify is showing |
-| Waiting for an answer, but the options couldn't be read. | The agent is waiting, but its options could not be read |
+| Kind of screen | What appears under the card |
+|------|--------------------|
+| A pager is open | Arrow keys plus PgUp / PgDn / Home / End / q |
+| A selection list is open | Arrow keys plus Enter / Esc |
+| A screen nothing could classify | Arrows and Esc (Navigate) plus the digits 1-9, y / n and Enter |
+| Waiting, with options nobody could read | The digits 1-9, y / n and Enter |
 
-**An ordinary yes/no or numbered prompt raises no banner.** The answer buttons on the input
-surface work as they are — the answer UI lives on the input surface rather than the output
-one, so you can reply without leaving chat.
+**Press the number or y/n while reading the card.** Enter confirms whatever the CLI has
+currently highlighted, so on a numbered dialog an Enter meant as "no" can land as an
+approval (Issue #1681).
+
+The "Open terminal" button **remains, as a secondary way out**. The card shows only the last
+few rows, so switch to the terminal surface from here when you need scrollback or search.
+
+While the card is up, **no control is duplicated**. The navigation buttons / Navigate pad
+above the composer on desktop, and the navigation buttons docked above the composer on a
+phone, defer to the card's copies while the chat surface is showing (on the terminal surface
+they behave exactly as before).
+
+**An ordinary yes/no or numbered prompt raises neither a card nor a banner.** The answer
+panel on the input surface works as it is — the answer UI lives on the input surface rather
+than the output one, so you can reply without leaving chat. Drawing a card there would put
+two answer UIs on one dialog, so that one case is deliberately left alone.
 
 ---
 
