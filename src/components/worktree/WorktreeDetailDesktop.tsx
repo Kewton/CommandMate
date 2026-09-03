@@ -415,6 +415,8 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
       onInstanceChange,
       onFocus: onPaneFocus,
       onDropInstance,
+      isMaximized: paneIsMaximized,
+      onToggleMaximize,
     }: {
       splitIndex: number;
       cliToolId: CLIToolType;
@@ -425,6 +427,9 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
       onFocus: () => void;
       isFocused: boolean;
       onDropInstance: (instanceId: string) => void;
+      /** Issue #2261: container-owned maximize state + toggle for this split. */
+      isMaximized: boolean;
+      onToggleMaximize: () => void;
     }) => {
       const panePendingInsert = pendingInsertTextMap.get(splitIndex) ?? null;
       // Issue #525 / #740 / #896: auto-yes state is per-INSTANCE in
@@ -511,6 +516,10 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
           // the dragOver ring (D-2). The hover ring state stays child-local (D-3).
           onDropInstance={onDropInstance}
           draggedInstanceId={draggedInstanceId}
+          // Issue #2261: the container owns "which split is maximized"; the pane
+          // renders the title-bar toggle and owns the keyboard chord.
+          isMaximized={paneIsMaximized}
+          onToggleMaximize={onToggleMaximize}
           // Issue #1171: the split builds its own kill-target snapshot and calls
           // this to open the confirm dialog for exactly the session it shows.
           onRequestSessionEnd={onRequestSessionEnd}

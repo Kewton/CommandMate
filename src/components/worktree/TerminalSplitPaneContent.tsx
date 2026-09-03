@@ -26,6 +26,11 @@
  * deliberately, because it answers the one wait the chat surface draws nothing
  * for (see `resolveBlockedReason`).
  *
+ * Issue #2261: the pane also carries the temporary "maximize this split"
+ * toggle. The state itself lives in `useTerminalSplits` (container-owned); what
+ * is here is the `Mod+Shift+Enter` listener, which resolves split ownership
+ * through `[data-split-index]` exactly as the #2193 chord below does.
+ *
  * Issue #2194: that chat body is now `ChatSurface` rather than a bare
  * `HistoryPane` — same transcript, plus the live region (a banner for frames the
  * composer cannot drive, and since #2254 the dialog card under it) and
@@ -167,6 +172,18 @@ export interface TerminalSplitPaneContentProps extends TerminalSplitPaneCoreProp
    * re-rendering every split twice a second.
    */
   onAgentSessionChange?: (instanceId: string, snapshot: AgentSessionSnapshot) => void;
+  /**
+   * Issue #2261: whether this split is the one currently filling the terminal
+   * row. Passed straight through to `TerminalSplitPane` for the toggle's
+   * pressed state; the container owns the state and the layout.
+   */
+  isMaximized?: boolean;
+  /**
+   * Issue #2261: maximize this split / restore the split layout. Optional —
+   * omitting it hides the title-bar toggle AND makes the keyboard chord inert
+   * here, so a pre-#2261 caller keeps the composer's Shift+Enter untouched.
+   */
+  onToggleMaximize?: () => void;
 }
 
 export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
@@ -190,6 +207,8 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   onRequestSessionEnd,
   agentModel,
   onAgentSessionChange,
+  isMaximized = false,
+  onToggleMaximize,
 }: TerminalSplitPaneContentProps) {
   // Issue #869: resolve the instance id this split targets. Defaults to the
   // primary instance (`=== cliToolId`) so pre-#869 single-instance behavior —
@@ -283,6 +302,51 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [splitIndex, handleSurfaceModeChange]);
+
+  // Read by the maximize listener below for the same reason `surfaceModeRef`
+  // exists: the listener must not be torn down and rebuilt when the parent hands
+  // down a fresh callback identity on every container render.
+  const onToggleMaximizeRef = useRef(onToggleMaximize);
+  onToggleMaximizeRef.current = onToggleMaximize;
+
+  // Issue #2261: Mod+Shift+Enter maximizes / restores this split.
+  //
+  // Ownership is resolved exactly the way #2193 resolves it — the split that
+  // contains the focused element answers, found through `[data-split-index]` on
+  // the pane root — so the two chords cannot disagree about which split the user
+  // means. With focus outside every split the FIRST split answers, and only when
+  // the user is not typing in some other text field.
+  //
+  // `preventDefault` matters here in a way it does not for Mod+Shift+M:
+  // `MessageInput` treats Shift+Enter as "insert a newline" and does NOT
+  // preventDefault it, so without this the composer would gain a blank line
+  // every time the split was maximized from the keyboard. It runs only once the
+  // chord is confirmed to belong to this split AND a handler is actually wired,
+  // so a pre-#2261 caller's Shift+Enter is untouched.
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (!event.shiftKey || event.altKey) return;
+      if (!event.metaKey && !event.ctrlKey) return;
+      if (event.key !== 'Enter') return;
+
+      const target = event.target instanceof Element ? event.target : null;
+      const owner = target?.closest('[data-split-index]');
+      if (owner) {
+        if (Number(owner.getAttribute('data-split-index')) !== splitIndex) return;
+      } else {
+        if (splitIndex !== 0) return;
+        if (target?.closest('input, textarea, select, [contenteditable="true"]')) return;
+      }
+
+      const toggle = onToggleMaximizeRef.current;
+      if (!toggle) return;
+      event.preventDefault();
+      toggle();
+    }
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [splitIndex]);
 
   const {
     terminal,
@@ -1000,6 +1064,9 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       // Issue #2193: the header control's pressed state, and the body it names.
       surfaceMode={surfaceMode}
       onSurfaceModeChange={handleSurfaceModeChange}
+      // Issue #2261: the title bar's half of the maximize toggle.
+      isMaximized={isMaximized}
+      onToggleMaximize={onToggleMaximize}
       terminal={surfaceMode === 'chat' ? chatSurfaceSlot : terminalSlot}
       footer={footerSlot}
       // Issue #786 / #869: drag-drop pass-through (optional; inert when omitted).

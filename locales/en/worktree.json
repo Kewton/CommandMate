@@ -430,7 +430,12 @@
     "endSessionFor": "End session for {name}",
     "filesEmptyHint": "Open a file to enable this",
     "historyAllSplitsHint": "Applies to all splits",
-    "historyChatOnlyHint": "Every split shows Chat, which has no history column"
+    "historyChatOnlyHint": "Every split shows Chat, which has no history column",
+    "maximizeSplit": "Maximize {split}",
+    "maximizeFocusedSplit": "Maximize the focused split",
+    "restoreSplits": "Restore the split layout",
+    "maximizeShortcutHint": "⌘ / Ctrl + Shift + Enter",
+    "maximizedStatus": "Split {split} maximized"
   },
   "surfaceMode": {
     "groupLabel": "Output surface for {split}",
