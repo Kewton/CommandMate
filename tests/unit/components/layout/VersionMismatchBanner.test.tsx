@@ -1,5 +1,5 @@
 /**
- * Unit tests for VersionMismatchBanner (#1338 / #1356).
+ * Unit tests for VersionMismatchBanner (#1338 / #1356 / #2271).
  * @vitest-environment jsdom
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -33,7 +33,10 @@ vi.mock('next-intl', () => ({
   },
 }));
 
-import { VersionMismatchBanner } from '@/components/layout/VersionMismatchBanner';
+import {
+  VersionMismatchBanner,
+  useVersionMismatchBannerVisible,
+} from '@/components/layout/VersionMismatchBanner';
 
 const mismatchEvent = (serverVersion: string, clientVersion: string): RealtimeEvent => ({
   type: 'version_mismatch',
@@ -128,5 +131,59 @@ describe('VersionMismatchBanner', () => {
 
     emit(mismatchEvent('0.10.4', '0.10.0'));
     expect(screen.getByTestId('version-mismatch-banner')).toBeInTheDocument();
+  });
+
+  // ==========================================================================
+  // Visibility broadcast (Issue #2271)
+  // ==========================================================================
+  //
+  // `ServiceWorkerRegistrar` hides its own "reload" toast while this banner is
+  // up, so the two never say the same thing twice. That makes the published
+  // flag a contract rather than an implementation detail — in particular, a
+  // count that leaks on unmount would suppress the SW toast for the rest of
+  // the session with no banner on screen to explain why.
+  describe('visibility broadcast', () => {
+    /** Renders the published flag so assertions read it out of the DOM. */
+    function VisibilityProbe() {
+      return <span data-testid="probe">{String(useVersionMismatchBannerVisible())}</span>;
+    }
+
+    const probe = () => screen.getByTestId('probe').textContent;
+
+    it('publishes false until the banner is rendered', () => {
+      render(
+        <>
+          <VersionMismatchBanner />
+          <VisibilityProbe />
+        </>,
+      );
+      expect(probe()).toBe('false');
+    });
+
+    it('publishes true while the banner is on screen and false after dismiss', () => {
+      render(
+        <>
+          <VersionMismatchBanner />
+          <VisibilityProbe />
+        </>,
+      );
+
+      emit(mismatchEvent('0.10.3', '0.10.0'));
+      expect(probe()).toBe('true');
+
+      fireEvent.click(screen.getByTestId('version-mismatch-dismiss'));
+      expect(probe()).toBe('false');
+    });
+
+    it('releases the flag when the banner unmounts while still showing', () => {
+      const { unmount } = render(<VersionMismatchBanner />);
+      emit(mismatchEvent('0.10.3', '0.10.0'));
+      expect(screen.getByTestId('version-mismatch-banner')).toBeInTheDocument();
+
+      unmount();
+
+      render(<VisibilityProbe />);
+      expect(probe()).toBe('false');
+    });
   });
 });

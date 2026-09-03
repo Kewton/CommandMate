@@ -17,6 +17,8 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
 
+import { isVersionMismatch } from '@/lib/realtime/types';
+
 // =============================================================================
 // Constants
 // =============================================================================
@@ -59,6 +61,18 @@ const FETCH_TIMEOUT_MS = 5000;
  * project directory) leaking a foreign version.
  */
 const PACKAGE_NAME = 'commandmate';
+
+/**
+ * The manifest `next build` writes beside the client bundle, relative to the
+ * package root. [Issue #2271]
+ *
+ * It snapshots the *resolved* next.config — the `env` block included — so
+ * `config.env.NEXT_PUBLIC_APP_VERSION` is literally the string that build
+ * inlined into every browser bundle it emitted. That makes it the only file on
+ * disk that can answer "which version is the bundle we are serving?" without
+ * asking the bundle itself.
+ */
+const NEXT_BUILD_MANIFEST_PATH = ['.next', 'required-server-files.json'] as const;
 
 // =============================================================================
 // Types
@@ -209,6 +223,109 @@ export function getCurrentVersion(): string {
   return getServerVersion();
 }
 
+// =============================================================================
+// Served bundle identity (Issue #2271)
+// =============================================================================
+
+/**
+ * Memoised answer of {@link getServedBundleVersion}, resolved on first use and
+ * then frozen for the life of the process. [Issue #2271]
+ *
+ * Frozen on purpose. The question is "which build is this process serving?",
+ * and a running Next production server answers that once — at startup, from the
+ * `.next` it opened. Re-reading the manifest on every call would let a
+ * `next build` performed *underneath* the running server rename the served
+ * build without the server having reloaded a single byte of it, which is the
+ * false positive this Issue exists to remove, in a new disguise.
+ */
+let servedBundleVersion: string | null = null;
+
+/**
+ * Read the version `next build` inlined into the client bundle, from the build
+ * manifest it left on disk. [Issue #2271]
+ *
+ * @returns The baked version, or null when the manifest is absent, unreadable,
+ *   malformed, or predates the `env` block.
+ */
+function readServedBundleVersionFromBuild(): string | null {
+  try {
+    const raw = readFileSync(join(process.cwd(), ...NEXT_BUILD_MANIFEST_PATH), 'utf-8');
+    const parsed = JSON.parse(raw) as { config?: { env?: Record<string, unknown> } };
+    const baked = parsed.config?.env?.NEXT_PUBLIC_APP_VERSION;
+    if (typeof baked === 'string' && baked.length > 0) return baked;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/** First-use resolution behind {@link getServedBundleVersion}'s memo. */
+function resolveServedBundleVersion(): string {
+  // `next dev` compiles on demand and never writes the build manifest, but a
+  // stale one left by an earlier `npm run build` is still sitting in `.next` —
+  // and it names a version the dev bundle was never built from. Under dev the
+  // live next.config populates `process.env` for the server too, so the baked
+  // value already *is* the honest answer and the manifest must not be consulted.
+  if (process.env.NODE_ENV === 'production') {
+    const built = readServedBundleVersionFromBuild();
+    if (built) return built;
+  }
+  return getClientVersion();
+}
+
+/**
+ * The version of the **client bundle this server is serving**. [Issue #2271]
+ *
+ * Deliberately *not* {@link getServerVersion}. That one reads package.json at
+ * runtime, which is the right answer for "is there a newer release on GitHub?"
+ * and the wrong one for "should this tab reload?": the release procedure bumps
+ * package.json on `develop` and never rebuilds the primary checkout (doing so
+ * would swap `.next` out from under the running server — see the release
+ * skill's Phase 2-3), so `package.json > bundle` is the steady state after
+ * every release. Comparing against it therefore told **every** tab, forever,
+ * that it was out of date.
+ *
+ * The honest comparand is the build the bundle came from, so this reads the
+ * `next build` manifest and falls back — never to package.json — to the baked
+ * `NEXT_PUBLIC_APP_VERSION`, and finally to `'0.0.0'`, which
+ * {@link isVersionMismatch} treats as "unknown" and never reports as drift.
+ *
+ * @returns Served bundle version string (e.g., "0.2.3"), or "0.0.0" as fallback
+ */
+export function getServedBundleVersion(): string {
+  servedBundleVersion ??= resolveServedBundleVersion();
+  return servedBundleVersion;
+}
+
+/** The two build identities that drifted apart. See {@link resolveBundleDrift}. */
+export interface BundleDrift {
+  /** The version of the bundle the server now serves. */
+  serverVersion: string;
+  /** The version of the bundle the reporting tab is running. */
+  clientVersion: string;
+}
+
+/**
+ * Decide whether a tab running `clientBundleVersion` is on a stale build.
+ * [Issue #2271]
+ *
+ * The single seam the WebSocket version handshake calls, so "what counts as
+ * drift" has exactly one definition and one place to test it. Both sides are
+ * build identities: the client sends the `NEXT_PUBLIC_APP_VERSION` its bundle
+ * was compiled with, and this compares it against the version of the bundle
+ * being served — so a bare `package.json` bump moves neither side, and only a
+ * rebuild does.
+ *
+ * @param clientBundleVersion - The version the tab's bundle was built from
+ * @returns The drifted pair, or null when the two builds agree or either side
+ *   is an unknown/fallback version
+ */
+export function resolveBundleDrift(clientBundleVersion: string): BundleDrift | null {
+  const serverVersion = getServedBundleVersion();
+  if (!isVersionMismatch(serverVersion, clientBundleVersion)) return null;
+  return { serverVersion, clientVersion: clientBundleVersion };
+}
+
 /**
  * Validate that a URL is a legitimate GitHub Releases URL.
  * [SEC-SF-001] OWASP A03:2021 - Prevents injection via DNS pollution/MITM.
@@ -317,6 +434,9 @@ export function resetCacheForTesting(): void {
   cache.result = null;
   cache.fetchedAt = 0;
   cache.rateLimitResetAt = null;
+  // Issue #2271: the served-bundle memo is frozen for the life of a process, so
+  // a suite that moves process.cwd() between cases must be able to thaw it.
+  servedBundleVersion = null;
 }
 
 // =============================================================================

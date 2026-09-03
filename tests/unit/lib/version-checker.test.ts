@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, writeFileSync } from 'fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import {
@@ -20,6 +20,8 @@ import {
   getCurrentVersion,
   getServerVersion,
   getClientVersion,
+  getServedBundleVersion,
+  resolveBundleDrift,
   validateReleaseUrl,
   sanitizeReleaseName,
   checkForUpdate,
@@ -228,6 +230,182 @@ describe('version-checker', () => {
         delete process.env.NEXT_PUBLIC_APP_VERSION;
         // cwd defaults to NO_PKG_DIR (no package.json)
         expect(getCurrentVersion()).toBe('0.0.0');
+      });
+    });
+  });
+
+  // =========================================================================
+  // Served bundle identity (Issue #2271)
+  // =========================================================================
+  //
+  // The regression this suite exists for: the reload banner compared the
+  // *installed* package.json version against the tab's *bundle* version. The
+  // release procedure bumps package.json on develop and deliberately never
+  // rebuilds the running server's `.next` (that would swap the bundle out from
+  // under every open tab), so after v0.30.2 shipped, every tab in the world
+  // was told forever that it was one version behind — and reloading, clearing
+  // the cache and unregistering the Service Worker all changed nothing,
+  // because the tab was never the stale side.
+  describe('served bundle identity (Issue #2271)', () => {
+    const originalEnv = process.env.NEXT_PUBLIC_APP_VERSION;
+    let tmpDir: string;
+    let cwdSpy: ReturnType<typeof vi.spyOn>;
+
+    /** Write the package.json a release bump would have produced. */
+    const withInstalledVersion = (version: string): void => {
+      writeFileSync(
+        join(tmpDir, 'package.json'),
+        JSON.stringify({ name: 'commandmate', version }),
+        'utf-8',
+      );
+    };
+
+    /**
+     * Write the manifest `next build` leaves in `.next`, carrying the version it
+     * inlined into the client bundle. Shaped like the real file (verified
+     * against a production build: `config.env.NEXT_PUBLIC_APP_VERSION`).
+     */
+    const withBuiltBundleVersion = (version: string): void => {
+      mkdirSync(join(tmpDir, '.next'), { recursive: true });
+      writeFileSync(
+        join(tmpDir, '.next', 'required-server-files.json'),
+        JSON.stringify({
+          version: 1,
+          config: { env: { NEXT_PUBLIC_APP_VERSION: version } },
+          files: [],
+        }),
+        'utf-8',
+      );
+    };
+
+    beforeEach(() => {
+      tmpDir = mkdtempSync(join(tmpdir(), 'cm-served-bundle-'));
+      cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(tmpDir);
+      // The server resolves its build from `.next`, which only exists in a
+      // production run. Every case below is therefore a production server.
+      vi.stubEnv('NODE_ENV', 'production');
+      delete process.env.NEXT_PUBLIC_APP_VERSION;
+      // The served-bundle answer is memoised for the life of the process.
+      resetCacheForTesting();
+    });
+
+    afterEach(() => {
+      cwdSpy.mockRestore();
+      removeTempDir(tmpDir);
+      vi.unstubAllEnvs();
+      if (originalEnv !== undefined) {
+        process.env.NEXT_PUBLIC_APP_VERSION = originalEnv;
+      } else {
+        delete process.env.NEXT_PUBLIC_APP_VERSION;
+      }
+      resetCacheForTesting();
+    });
+
+    describe('getServedBundleVersion', () => {
+      it('reports the version baked into the built bundle, not the installed one', () => {
+        withBuiltBundleVersion('0.30.1');
+        withInstalledVersion('0.30.2'); // the release bump
+        expect(getServedBundleVersion()).toBe('0.30.1');
+        // The installed version is still readable — it is simply not the answer.
+        expect(getServerVersion()).toBe('0.30.2');
+      });
+
+      it('follows the bundle when a rebuild lands', () => {
+        withBuiltBundleVersion('0.30.2');
+        withInstalledVersion('0.30.2');
+        expect(getServedBundleVersion()).toBe('0.30.2');
+      });
+
+      it('falls back to the baked env — never package.json — when the build manifest is missing', () => {
+        process.env.NEXT_PUBLIC_APP_VERSION = '0.30.1';
+        withInstalledVersion('0.30.2');
+        expect(getServedBundleVersion()).toBe('0.30.1');
+      });
+
+      it('falls back to the baked env when the manifest is malformed', () => {
+        mkdirSync(join(tmpDir, '.next'), { recursive: true });
+        writeFileSync(join(tmpDir, '.next', 'required-server-files.json'), '{ not json', 'utf-8');
+        process.env.NEXT_PUBLIC_APP_VERSION = '0.30.1';
+        withInstalledVersion('0.30.2');
+        expect(getServedBundleVersion()).toBe('0.30.1');
+      });
+
+      it('falls back to the baked env when the manifest predates the env block', () => {
+        mkdirSync(join(tmpDir, '.next'), { recursive: true });
+        writeFileSync(
+          join(tmpDir, '.next', 'required-server-files.json'),
+          JSON.stringify({ version: 1, config: {}, files: [] }),
+          'utf-8',
+        );
+        process.env.NEXT_PUBLIC_APP_VERSION = '0.30.1';
+        expect(getServedBundleVersion()).toBe('0.30.1');
+      });
+
+      it('reports the unknown fallback rather than the installed version when nothing is baked', () => {
+        withInstalledVersion('0.30.2');
+        expect(getServedBundleVersion()).toBe('0.0.0');
+      });
+
+      it('ignores a stale production manifest under next dev', () => {
+        // A leftover `.next` from an earlier `npm run build` names a version the
+        // dev bundle was never compiled from; dev must read the live config.
+        vi.stubEnv('NODE_ENV', 'development');
+        withBuiltBundleVersion('0.29.0');
+        process.env.NEXT_PUBLIC_APP_VERSION = '0.30.2';
+        expect(getServedBundleVersion()).toBe('0.30.2');
+      });
+
+      it('freezes its answer for the life of the process', () => {
+        withBuiltBundleVersion('0.30.1');
+        expect(getServedBundleVersion()).toBe('0.30.1');
+        // A `next build` performed underneath a running server rewrites the
+        // manifest, but the process is still serving the bundle it opened.
+        withBuiltBundleVersion('0.30.2');
+        expect(getServedBundleVersion()).toBe('0.30.1');
+      });
+    });
+
+    describe('resolveBundleDrift', () => {
+      it('reports no drift after a release bump that was never rebuilt', () => {
+        // The exact state of the machine in Issue #2271: package.json at
+        // 0.30.2, `.next` still the 0.30.1 build, tabs running 0.30.1.
+        withBuiltBundleVersion('0.30.1');
+        withInstalledVersion('0.30.2');
+        expect(resolveBundleDrift('0.30.1')).toBeNull();
+      });
+
+      it('reports drift once the rebuild swaps the bundle out', () => {
+        withBuiltBundleVersion('0.30.2');
+        withInstalledVersion('0.30.2');
+        expect(resolveBundleDrift('0.30.1')).toEqual({
+          serverVersion: '0.30.2',
+          clientVersion: '0.30.1',
+        });
+      });
+
+      it('reports drift for a rebuild that moved the version backwards', () => {
+        // Direction is irrelevant: the tab is on a bundle that is no longer served.
+        withBuiltBundleVersion('0.30.1');
+        expect(resolveBundleDrift('0.30.2')).toEqual({
+          serverVersion: '0.30.1',
+          clientVersion: '0.30.2',
+        });
+      });
+
+      it('stays silent when the tab is on the served build', () => {
+        withBuiltBundleVersion('0.30.2');
+        expect(resolveBundleDrift('0.30.2')).toBeNull();
+      });
+
+      it('stays silent when the server cannot identify its own build', () => {
+        withInstalledVersion('0.30.2'); // resolves to the 0.0.0 unknown fallback
+        expect(resolveBundleDrift('0.30.1')).toBeNull();
+      });
+
+      it('stays silent when the tab cannot identify its own build', () => {
+        withBuiltBundleVersion('0.30.2');
+        expect(resolveBundleDrift('0.0.0')).toBeNull();
+        expect(resolveBundleDrift('')).toBeNull();
       });
     });
   });
