@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **fix(detection): antigravity の番号つき権限ダイアログを選択リストではなくプロンプトとして検出** (#2270): `Do you want to proceed?` と `N.` 行を持つフレームでは `beforePrompt` の選択リスト判定をスキップして priority 1 の prompt 検出に渡すようにし、`hasActivePrompt: true` / `promptData`（`multiple_choice` 4択）/ `isSelectionListActive: false` を publish するようにした。チャット面に PromptPanel が出て 2〜4 を番号で選べるようになり、poller が保存する `prompt` 行・push 通知の `kind: 'prompt'` と状態検出の答えが一致する。`Switch Model` ピッカー（#995）は従来どおり `antigravity_selection_list`
+- **fix(ui): チャット面を開いた直後に最新のやり取りが見えるようにし、先頭/末尾へのジャンプを 1 つの FAB に集約** (#2283): ターミナル→チャット切替時・再読み込み時・ローディング解除時のいずれでも `ChatTranscript` が仮想リストの最終行へアンカーし、行の実測で総高が伸びても末尾に留まるようにした（`scrollToIndex(last, 'end')` を総高が動く間だけ再照準。最大 12 フレーム / 600ms）。`ChatSurface` のマウント時 `scrollTop = scrollHeight` を撤去。右下に円形 FAB を追加し、末尾では先頭へ（↑）、それ以外では末尾へ（↓、生成中はスピナー＋`chatSurface.jumpToLatestGenerating`）ジャンプする。ジャンプは両方向とも virtualizer 経由で `scrollTop` 直接代入を使わない（実測で 7,770px 手前に止まっていた）。スクロール領域を `tabIndex={0}` にして Home/End を効かせ、先頭へ飛んだあとは新着で末尾へ引き戻さない。`ChatTranscript` が scroll controls を publish している間は `ChatSurface` の「新着へ」チップを引っ込め、ジャンプ手段が同時に 2 つ出ないようにした。
 - **fix(history): 返答行をターン終了時刻で記録し、チャット面で承認チップを返答の前に描く** (#2273): 転写リーダー 5 種（claude / codex / antigravity / command-code / opencode）が assistant 行をターン開始ではなく**そのターンの最後の記録**の時刻で書くようにし、`buildChatTranscriptRows` に「同じターンの prompt 行を返答より前へ寄せる」規則を足した。ツール承認のチップが返答の後ろに落ちて「質問→返答→Tool approvals」と並んでいたのが「質問→承認→返答」になる。user 行より前に出ないこと（#2196）と、次ターンの queued な `/send` 行を追い越さないことは上下限で保証する
 
 ## [0.30.2] - 2026-09-03
