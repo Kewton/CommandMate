@@ -6,7 +6,7 @@
     "reconnect": "Reconnect"
   },
   "update": {
-    "available": "A new version is available.",
+    "available": "An updated app is ready to install.",
     "reload": "Reload"
   }
 }
