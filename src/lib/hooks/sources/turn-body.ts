@@ -12,13 +12,32 @@
  * body in full, so those 141 bubbles opened with a tool log instead of a reply.
  *
  * This module is the one place that decides the layout, and every reader goes
- * through it. Two rules:
+ * through it. Three rules:
  *
- *  1. **Prose leads.** Text the agent wrote — and the folded `Thinking` quotes
- *     that sit between the sentences — keep their transcript order and come
+ *  1. **Prose leads.** Text the agent wrote keeps its transcript order and comes
  *     first.
  *  2. **The tool log is one section, at the end**, in transcript order, folded
  *     into a blockquote under a labelled heading.
+ *  3. **Reasoning is one section too** (Issue #2272), between the two, on the
+ *     same shape — see {@link TURN_REASONING_LABEL}.
+ *
+ * ## Why reasoning became a section of its own (Issue #2272)
+ *
+ * #2234 moved the tool calls and deliberately left the folded `Thinking` quotes
+ * where they sat, on the argument that they are the agent's own words about the
+ * reply. Measured against opencode 1.18.22 that argument does not survive
+ * contact: opencode emits a `reasoning` part before *every* text part, so the
+ * body opens with `> **Thinking**` on a one-line answer and carries four such
+ * quotes on a long one — which is exactly the failure #2234 set out to fix, from
+ * the other producer.
+ *
+ * The distinction is therefore drawn on the **block kind**, not on the reader:
+ * `reasoning` carries the raw text and is folded into the trailing section,
+ * `aside` carries text a reader already folded itself and stays with the prose.
+ * The four readers that push `aside` (claude, codex, antigravity, command-code)
+ * are untouched by this Issue because none of them has been measured the way
+ * opencode has; they can move a block at a time by switching kind, with no
+ * change here.
  *
  * ## Why the order claim from #2041 / #2121 is narrowed rather than dropped
  *
@@ -55,12 +74,37 @@
  */
 export const TURN_TOOL_LOG_LABEL = 'Tool calls';
 
+/**
+ * The bold first line of the folded reasoning section (Issue #2272).
+ *
+ * The same string the five readers already used for their own inline quotes, on
+ * purpose: it is baked into `chat_messages.content` at read time, so the rows
+ * written before this Issue carry `> **Thinking**` and the rows written after it
+ * carry `> **Thinking (N)**`. Keeping the label identical is what lets one
+ * reader on the chat surface fold both shapes — see `splitChatThinking` in
+ * `components/worktree/ChatMessageBubble`.
+ */
+export const TURN_REASONING_LABEL = 'Thinking';
+
 /** What one already-rendered piece of a turn is. */
 export type TurnBlockKind =
   /** Text the agent wrote for the operator to read. */
   | 'prose'
-  /** Already-folded subordinate prose — the `Thinking` / reasoning quotes. */
+  /**
+   * Already-folded subordinate prose the reader quoted itself.
+   *
+   * Stays with the prose, in transcript order. A reader that wants its
+   * reasoning folded into the trailing section passes `reasoning` instead.
+   */
   | 'aside'
+  /**
+   * RAW reasoning text, to be folded into the trailing section (Issue #2272).
+   *
+   * Raw and not pre-quoted because the section owns the quoting: N blocks go
+   * under ONE `Thinking (N)` heading, so a block that arrived already wearing a
+   * heading of its own would nest one label inside another.
+   */
+  | 'reasoning'
   /** One tool call, rendered as a single Markdown list item. */
   | 'tool';
 
@@ -73,10 +117,14 @@ export interface TurnRenderBlock {
 
 /** What {@link separateTurnBody} answers. */
 export interface SeparatedTurnBody {
-  /** {@link prose} and {@link toolLog}, joined; what the row stores. */
+  /** {@link prose}, {@link reasoningLog} and {@link toolLog}, joined; what the row stores. */
   readonly body: string;
   /** The `prose` and `aside` blocks, in order. Empty when the turn only ran tools. */
   readonly prose: string;
+  /** The folded reasoning section, or an empty string when the turn showed none. */
+  readonly reasoningLog: string;
+  /** How many `reasoning` blocks that section holds. */
+  readonly reasoningBlocks: number;
   /** The folded tool section, or an empty string when the turn called nothing. */
   readonly toolLog: string;
   /** How many `tool` blocks the section holds. */
@@ -84,15 +132,20 @@ export interface SeparatedTurnBody {
 }
 
 /**
- * Quote one already-rendered tool line.
+ * Put one block inside a blockquote, line by line.
  *
- * The four readers all render a call as a **single-line** list item — their
- * detail readers collapse whitespace precisely so a heredoc in a shell command
- * cannot put a newline here — so one prefix per line is enough and the split is
- * a guard rather than a case that is expected to fire.
+ * Every line gets its own `> ` because a blockquote ends at the first line that
+ * has none — a lazy continuation would work in CommonMark for a paragraph and
+ * would NOT for the list items the tool log is made of.
+ *
+ * For a tool line the split is a guard rather than a case that is expected to
+ * fire: the five readers all render a call as a single-line list item and
+ * collapse whitespace precisely so a heredoc in a shell command cannot put a
+ * newline here. For a reasoning block it is the normal path — that text is
+ * paragraphs.
  */
-function quoteToolLine(line: string): string {
-  return line
+function quoteBlock(text: string): string {
+  return text
     .split('\n')
     .map((part) => (part.length > 0 ? `> ${part}` : '>'))
     .join('\n');
@@ -107,20 +160,23 @@ function quoteToolLine(line: string): string {
  * (#2199) agree — both reach this function through the same renderer, so the
  * text a reader watches being written is the text that settles.
  *
- * A turn with no tool calls comes out **byte-identical** to what the readers
- * produced before this Issue: the whole change is the section this adds.
+ * A turn with neither a tool call nor a `reasoning` block comes out
+ * **byte-identical** to what the readers produced before #2234 / #2272: the
+ * whole change is the sections this adds.
  *
  * @param blocks - Rendered pieces in transcript order; empty text is the
  *   caller's to drop
- * @returns The body and the two halves it was built from
+ * @returns The body and the three parts it was built from
  */
 export function separateTurnBody(blocks: readonly TurnRenderBlock[]): SeparatedTurnBody {
   const prose: string[] = [];
+  const reasoning: string[] = [];
   const tools: string[] = [];
 
   for (const block of blocks) {
     if (block.text.length === 0) continue;
     if (block.kind === 'tool') tools.push(block.text);
+    else if (block.kind === 'reasoning') reasoning.push(block.text);
     else prose.push(block.text);
   }
 
@@ -131,19 +187,39 @@ export function separateTurnBody(blocks: readonly TurnRenderBlock[]): SeparatedT
   // list any more.
   const proseText = prose.join('\n\n');
 
+  // One heading for the whole run, and a bare `>` between the blocks so two
+  // consecutive thoughts stay two paragraphs inside the quote rather than
+  // running into one another.
+  const reasoningLog =
+    reasoning.length === 0
+      ? ''
+      : [
+          `> **${TURN_REASONING_LABEL} (${reasoning.length})**`,
+          '>',
+          reasoning.map(quoteBlock).join('\n>\n'),
+        ].join('\n');
+
   const toolLog =
     tools.length === 0
       ? ''
       : [
           `> **${TURN_TOOL_LOG_LABEL} (${tools.length})**`,
           '>',
-          ...tools.map(quoteToolLine),
+          ...tools.map(quoteBlock),
         ].join('\n');
 
-  const body =
-    proseText.length > 0 && toolLog.length > 0
-      ? `${proseText}\n\n${toolLog}`
-      : `${proseText}${toolLog}`;
+  // Prose, then reasoning, then the tool log. The tool log stays last because
+  // #2234 put it there and the readers' rows are matched on `request_id` rather
+  // than rewritten, so moving it would split History into two layouts for no
+  // gain.
+  const body = [proseText, reasoningLog, toolLog].filter((part) => part.length > 0).join('\n\n');
 
-  return { body, prose: proseText, toolLog, toolCalls: tools.length };
+  return {
+    body,
+    prose: proseText,
+    reasoningLog,
+    reasoningBlocks: reasoning.length,
+    toolLog,
+    toolCalls: tools.length,
+  };
 }
