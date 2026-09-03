@@ -1,0 +1,25 @@
+{"type":"event","event":{"type":"run_start","sessionId":"fd00783c-4053-4d07-bc35-a62f9188ebc1"}}
+{"type":"event","event":{"type":"turn_start","turnNumber":1}}
+{"type":"event","event":{"type":"message_start"}}
+{"type":"event","event":{"type":"model_request_start","model":"deepseek/deepseek-v4-flash"}}
+{"type":"event","event":{"type":"model_trace","traceId":"77208d144c4116442b666e208b8eefd9"}}
+{"type":"event","event":{"type":"thinking_start"}}
+{"type":"event","event":{"type":"thinking_delta","delta":"The"}}
+{"type":"event","event":{"type":"thinking_delta","delta":" user"}}
+{"type":"event","event":{"type":"thinking_delta","delta":" just"}}
+{"type":"event","event":{"type":"thinking_delta","delta":" wants"}}
+{"type":"event","event":{"type":"thinking_delta","delta":" an"}}
+{"type":"event","event":{"type":"thinking_delta","delta":" exact"}}
+{"type":"event","event":{"type":"thinking_delta","delta":" reply"}}
+{"type":"event","event":{"type":"thinking_delta","delta":" of"}}
+{"type":"event","event":{"type":"thinking_delta","delta":" \""}}
+{"type":"event","event":{"type":"thinking_delta","delta":"OK"}}
+{"type":"event","event":{"type":"thinking_delta","delta":"\"."}}
+{"type":"event","event":{"type":"thinking_end","text":"The user just wants an exact reply of \"OK\"."}}
+{"type":"event","event":{"type":"text_delta","delta":"OK"}}
+{"type":"event","event":{"type":"message_update","content":[{"type":"thinking","thinking":"The user just wants an exact reply of \"OK\".","signature":""},{"type":"text","text":"OK"}]}}
+{"type":"event","event":{"type":"model_request_end","model":"deepseek/deepseek-v4-flash","usage":{"inputTokens":14888,"outputTokens":13,"cacheReadTokens":6912,"cacheWriteTokens":0},"stopReason":"stop"}}
+{"type":"event","event":{"type":"message_end","content":[{"type":"thinking","thinking":"The user just wants an exact reply of \"OK\".","signature":""},{"type":"text","text":"OK"}]}}
+{"type":"event","event":{"type":"turn_end","turnNumber":1,"hadToolCalls":false,"usage":{"inputTokens":14888,"outputTokens":13,"cacheReadTokens":6912,"cacheWriteTokens":0}}}
+{"type":"event","event":{"type":"run_end","result":{"finalText":"OK","stopReason":"end_turn","turnCount":1,"usage":{"inputTokens":14888,"outputTokens":13,"cacheReadTokens":6912,"cacheWriteTokens":0},"systemPromptTokens":null,"nextState":{"sessionId":"fd00783c-4053-4d07-bc35-a62f9188ebc1","messages":[{"role":"user","content":[{"type":"text","text":"Reply with exactly: OK"}],"meta":{"source":"user","createdAt":1788415032736,"messageId":"0b5d1b60-edea-4cfb-b32a-a82800c7e954"}},{"role":"assistant","content":[{"type":"thinking","thinking":"The user just wants an exact reply of \"OK\".","signature":""},{"type":"text","text":"OK"}],"meta":{"source":"model","createdAt":1788415034643,"messageId":"511f5d67-5091-491b-8a27-9c114288909d"}}],"interrupted":false,"modState":{"workspace":{"cwd":"/private/tmp/claude-501/-Users-maenokota-share-work-github-kewton-commandmate-issue-2253/bba4041d-6eae-4899-a831-fece0d04fc2f/scratchpad/ccprobe","platform":"darwin","branch":null,"gitStatus":null,"recentCommits":[],"additionalDirectories":[]},"compaction":14888}}}}}
+{"type":"result","subtype":"success","sessionId":"fd00783c-4053-4d07-bc35-a62f9188ebc1","stopReason":"end_turn","usage":{"inputTokens":14888,"outputTokens":13,"cacheReadTokens":6912,"cacheWriteTokens":0},"durationMs":1957,"finalText":"OK"}

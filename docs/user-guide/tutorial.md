@@ -46,7 +46,7 @@
 - **CommandMate 0.24.0 以上**が起動していること（まだなら `npx commandmate@latest`）
   サンプルリポジトリの契約は自前のゲート定義（`gateDefinitions`）を持っており、これは 0.24.0 以降の機能です
 - **Node.js 22 以上**
-- **エージェント CLI がいずれか 1 つ**使えること（Claude Code / Codex / Antigravity）
+- **エージェント CLI がいずれか 1 つ**使えること（Claude Code / Codex / Antigravity / Command Code）
 - **GitHub アカウント**（サンプルリポジトリを fork するために使います）
 - **`gh`（GitHub CLI）が認証済み**であること — Step 0 の **Fork & Add** を使う場合のみ
 

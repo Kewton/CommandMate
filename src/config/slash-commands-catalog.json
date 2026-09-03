@@ -34,6 +34,13 @@
       "diff",
       "review",
       "compact"
+    ],
+    "command-code": [
+      "clear",
+      "mode",
+      "model",
+      "status",
+      "help"
     ]
   },
   "commands": [
@@ -2501,6 +2508,566 @@
       "category": "standard-util",
       "cliTools": [
         "codex"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "add-dir",
+      "descriptionKey": "slashCommands.descriptions.add-dir",
+      "category": "standard-util",
+      "cliTools": [
+        "command-code"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "agents",
+      "descriptionKey": "slashCommands.descriptions.agents.command-code",
+      "category": "standard-config",
+      "cliTools": [
+        "command-code"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "changelog",
+      "descriptionKey": "slashCommands.descriptions.changelog",
+      "category": "standard-util",
+      "cliTools": [
+        "command-code"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "clear",
+      "descriptionKey": "slashCommands.descriptions.clear",
+      "category": "standard-session",
+      "cliTools": [
+        "command-code"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "clone",
+      "descriptionKey": "slashCommands.descriptions.clone",
+      "category": "standard-session",
+      "cliTools": [
+        "command-code"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "compact",
+      "descriptionKey": "slashCommands.descriptions.compact",
+      "category": "standard-session",
+      "cliTools": [
+        "command-code"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "compact-mode",
+      "descriptionKey": "slashCommands.descriptions.compact-mode",
+      "category": "standard-session",
+      "cliTools": [
+        "command-code"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "config",
+      "descriptionKey": "slashCommands.descriptions.config",
+      "category": "standard-config",
+      "cliTools": [
+        "command-code"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "connect",
+      "descriptionKey": "slashCommands.descriptions.connect",
+      "category": "standard-config",
+      "cliTools": [
+        "command-code"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "context",
+      "descriptionKey": "slashCommands.descriptions.context",
+      "category": "standard-monitor",
+      "cliTools": [
+        "command-code"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "copy",
+      "descriptionKey": "slashCommands.descriptions.copy",
+      "category": "standard-util",
+      "cliTools": [
+        "command-code"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "design",
+      "descriptionKey": "slashCommands.descriptions.design",
+      "category": "standard-util",
+      "cliTools": [
+        "command-code"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "effort",
+      "descriptionKey": "slashCommands.descriptions.effort",
+      "category": "standard-config",
+      "cliTools": [
+        "command-code"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "exit",
+      "descriptionKey": "slashCommands.descriptions.exit.command-code",
+      "category": "standard-session",
+      "cliTools": [
+        "command-code"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "export",
+      "descriptionKey": "slashCommands.descriptions.export",
+      "category": "standard-util",
+      "cliTools": [
+        "command-code"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "extra",
+      "descriptionKey": "slashCommands.descriptions.extra",
+      "category": "standard-util",
+      "cliTools": [
+        "command-code"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "feedback",
+      "descriptionKey": "slashCommands.descriptions.feedback.command-code",
+      "category": "standard-util",
+      "cliTools": [
+        "command-code"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "fork",
+      "descriptionKey": "slashCommands.descriptions.fork",
+      "category": "standard-session",
+      "cliTools": [
+        "command-code"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "goal",
+      "descriptionKey": "slashCommands.descriptions.goal",
+      "category": "standard-session",
+      "cliTools": [
+        "command-code"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "help",
+      "descriptionKey": "slashCommands.descriptions.help",
+      "category": "standard-util",
+      "cliTools": [
+        "command-code"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "hotkeys",
+      "descriptionKey": "slashCommands.descriptions.hotkeys",
+      "category": "standard-util",
+      "cliTools": [
+        "command-code"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "ide",
+      "descriptionKey": "slashCommands.descriptions.ide",
+      "category": "standard-util",
+      "cliTools": [
+        "command-code"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "import",
+      "descriptionKey": "slashCommands.descriptions.import.command-code",
+      "category": "standard-util",
+      "cliTools": [
+        "command-code"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "init",
+      "descriptionKey": "slashCommands.descriptions.init.command-code",
+      "category": "standard-util",
+      "cliTools": [
+        "command-code"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "learn",
+      "descriptionKey": "slashCommands.descriptions.learn",
+      "category": "standard-util",
+      "cliTools": [
+        "command-code"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "learn-taste",
+      "descriptionKey": "slashCommands.descriptions.learn-taste",
+      "category": "standard-util",
+      "cliTools": [
+        "command-code"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "login",
+      "descriptionKey": "slashCommands.descriptions.login.command-code",
+      "category": "standard-util",
+      "cliTools": [
+        "command-code"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "logout",
+      "descriptionKey": "slashCommands.descriptions.logout.command-code",
+      "category": "standard-util",
+      "cliTools": [
+        "command-code"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "mcp",
+      "descriptionKey": "slashCommands.descriptions.mcp",
+      "category": "standard-util",
+      "cliTools": [
+        "command-code"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "memory",
+      "descriptionKey": "slashCommands.descriptions.memory.command-code",
+      "category": "standard-config",
+      "cliTools": [
+        "command-code"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "mode",
+      "descriptionKey": "slashCommands.descriptions.mode",
+      "category": "standard-config",
+      "cliTools": [
+        "command-code"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "model",
+      "descriptionKey": "slashCommands.descriptions.model",
+      "category": "standard-config",
+      "cliTools": [
+        "command-code"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "plan",
+      "descriptionKey": "slashCommands.descriptions.plan",
+      "category": "standard-session",
+      "cliTools": [
+        "command-code"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "plan-review",
+      "descriptionKey": "slashCommands.descriptions.plan-review",
+      "category": "standard-session",
+      "cliTools": [
+        "command-code"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "plans",
+      "descriptionKey": "slashCommands.descriptions.plans",
+      "category": "standard-session",
+      "cliTools": [
+        "command-code"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "pr-comments",
+      "descriptionKey": "slashCommands.descriptions.pr-comments",
+      "category": "standard-git",
+      "cliTools": [
+        "command-code"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "reload",
+      "descriptionKey": "slashCommands.descriptions.reload",
+      "category": "standard-session",
+      "cliTools": [
+        "command-code"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "rename",
+      "descriptionKey": "slashCommands.descriptions.rename",
+      "category": "standard-session",
+      "cliTools": [
+        "command-code"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "resume",
+      "descriptionKey": "slashCommands.descriptions.resume",
+      "category": "standard-session",
+      "cliTools": [
+        "command-code"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "review",
+      "descriptionKey": "slashCommands.descriptions.review",
+      "category": "standard-git",
+      "cliTools": [
+        "command-code"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "rewind",
+      "descriptionKey": "slashCommands.descriptions.rewind",
+      "category": "standard-session",
+      "cliTools": [
+        "command-code"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "session-file",
+      "descriptionKey": "slashCommands.descriptions.session-file",
+      "category": "standard-session",
+      "cliTools": [
+        "command-code"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "share",
+      "descriptionKey": "slashCommands.descriptions.share",
+      "category": "standard-util",
+      "cliTools": [
+        "command-code"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "skills",
+      "descriptionKey": "slashCommands.descriptions.skills.command-code",
+      "category": "standard-config",
+      "cliTools": [
+        "command-code"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "status",
+      "descriptionKey": "slashCommands.descriptions.status",
+      "category": "standard-monitor",
+      "cliTools": [
+        "command-code"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "taste",
+      "descriptionKey": "slashCommands.descriptions.taste",
+      "category": "standard-config",
+      "cliTools": [
+        "command-code"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "terminal-setup",
+      "descriptionKey": "slashCommands.descriptions.terminal-setup",
+      "category": "standard-config",
+      "cliTools": [
+        "command-code"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "theme",
+      "descriptionKey": "slashCommands.descriptions.theme",
+      "category": "standard-config",
+      "cliTools": [
+        "command-code"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "todos",
+      "descriptionKey": "slashCommands.descriptions.todos",
+      "category": "standard-session",
+      "cliTools": [
+        "command-code"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "trace",
+      "descriptionKey": "slashCommands.descriptions.trace",
+      "category": "standard-monitor",
+      "cliTools": [
+        "command-code"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "tree",
+      "descriptionKey": "slashCommands.descriptions.tree",
+      "category": "standard-session",
+      "cliTools": [
+        "command-code"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "unshare",
+      "descriptionKey": "slashCommands.descriptions.unshare",
+      "category": "standard-util",
+      "cliTools": [
+        "command-code"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "update",
+      "descriptionKey": "slashCommands.descriptions.update",
+      "category": "standard-util",
+      "cliTools": [
+        "command-code"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "upgrade",
+      "descriptionKey": "slashCommands.descriptions.upgrade",
+      "category": "standard-util",
+      "cliTools": [
+        "command-code"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "usage",
+      "descriptionKey": "slashCommands.descriptions.usage",
+      "category": "standard-monitor",
+      "cliTools": [
+        "command-code"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "worktree",
+      "descriptionKey": "slashCommands.descriptions.worktree",
+      "category": "standard-git",
+      "cliTools": [
+        "command-code"
       ],
       "isStandard": true,
       "source": "standard"

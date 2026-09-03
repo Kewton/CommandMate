@@ -174,10 +174,17 @@ describe('the bundled catalog carries descriptionKey through verbatim', () => {
     // meaning differs from claude's — the first split this file records that a
     // *human* had to perform, because the engine refuses to split a key an
     // earlier release already translated.
+    // Issue #2253: command-code claims a leaf on the nine names that were
+    // already split (/agents /exit /feedback /import /init /login /logout
+    // /memory /skills). Each is a name it means something of its own by —
+    // "Exit Command Code", "Manage Command Code memory", "Log in to Command
+    // Code or a provider" — and a split key cannot be re-flattened, so joining
+    // is the only way in for a tool that arrives after the split.
     expect(overridden.map((e) => e.descriptionKey).sort()).toEqual([
       'slashCommands.descriptions.agent.copilot',
       'slashCommands.descriptions.agents.claude',
       'slashCommands.descriptions.agents.codex',
+      'slashCommands.descriptions.agents.command-code',
       'slashCommands.descriptions.agents.opencode',
       'slashCommands.descriptions.app.codex',
       'slashCommands.descriptions.app.copilot',
@@ -187,23 +194,30 @@ describe('the bundled catalog carries descriptionKey through verbatim', () => {
       'slashCommands.descriptions.debug.opencode',
       'slashCommands.descriptions.exit.claude',
       'slashCommands.descriptions.exit.codex',
+      'slashCommands.descriptions.exit.command-code',
       'slashCommands.descriptions.exit.copilot',
       'slashCommands.descriptions.exit.opencode',
       'slashCommands.descriptions.feedback.claude',
       'slashCommands.descriptions.feedback.codex',
+      'slashCommands.descriptions.feedback.command-code',
       'slashCommands.descriptions.feedback.copilot',
       'slashCommands.descriptions.import.claude',
       'slashCommands.descriptions.import.codex',
+      'slashCommands.descriptions.import.command-code',
       'slashCommands.descriptions.init.claude',
       'slashCommands.descriptions.init.codex',
+      'slashCommands.descriptions.init.command-code',
       'slashCommands.descriptions.init.copilot',
       'slashCommands.descriptions.init.opencode',
       'slashCommands.descriptions.login.claude',
+      'slashCommands.descriptions.login.command-code',
       'slashCommands.descriptions.login.copilot',
       'slashCommands.descriptions.logout.claude',
       'slashCommands.descriptions.logout.codex',
+      'slashCommands.descriptions.logout.command-code',
       'slashCommands.descriptions.logout.copilot',
       'slashCommands.descriptions.memory.claude',
+      'slashCommands.descriptions.memory.command-code',
       'slashCommands.descriptions.memory.copilot',
       'slashCommands.descriptions.plugin.claude',
       'slashCommands.descriptions.plugin.copilot',
@@ -211,6 +225,7 @@ describe('the bundled catalog carries descriptionKey through verbatim', () => {
       'slashCommands.descriptions.recap.codex',
       'slashCommands.descriptions.skills.claude',
       'slashCommands.descriptions.skills.codex',
+      'slashCommands.descriptions.skills.command-code',
       'slashCommands.descriptions.skills.copilot',
       'slashCommands.descriptions.skills.opencode',
     ]);
@@ -249,6 +264,10 @@ describe('the bundled catalog carries descriptionKey through verbatim', () => {
   // neither claude nor copilot ever claimed. This pins both halves of that
   // decision, so a refresh cannot quietly split /copy or restore the markdown
   // claim without a human passing back through here.
+  //
+  // Issue #2253 adds a fourth claimant and leaves the decision standing:
+  // command-code 1.40.1's own menu row reads "Copy the last response to the
+  // clipboard", which is the shared sentence word for word.
   it('keeps /copy on one shared key, with no single-tool claim in the sentence', () => {
     const claimants = (catalogJson as SlashCommandsCatalog).commands.filter(
       (entry) => entry.name === 'copy'
@@ -257,6 +276,7 @@ describe('the bundled catalog carries descriptionKey through verbatim', () => {
       'claude',
       'codex',
       'copilot',
+      'command-code',
     ]);
     expect([...new Set(claimants.map((entry) => entry.descriptionKey))]).toEqual([
       'slashCommands.descriptions.copy',

@@ -1,0 +1,46 @@
+{"type":"event","event":{"type":"run_start","sessionId":"7cae6196-b7fd-42f8-8387-b49cfe0c2e12"}}
+{"type":"event","event":{"type":"turn_start","turnNumber":1}}
+{"type":"event","event":{"type":"message_start"}}
+{"type":"event","event":{"type":"model_request_start","model":"deepseek/deepseek-v4-flash"}}
+{"type":"event","event":{"type":"model_trace","traceId":"7775c40dcf90d9647e9b878c7453418a"}}
+{"type":"event","event":{"type":"thinking_start"}}
+{"type":"event","event":{"type":"thinking_delta","delta":"The"}}
+{"type":"event","event":{"type":"thinking_delta","delta":" user"}}
+{"type":"event","event":{"type":"thinking_delta","delta":" wants"}}
+{"type":"event","event":{"type":"thinking_delta","delta":" me"}}
+{"type":"event","event":{"type":"thinking_delta","delta":" to"}}
+{"type":"event","event":{"type":"thinking_delta","delta":" list"}}
+{"type":"event","event":{"type":"thinking_delta","delta":" files"}}
+{"type":"event","event":{"type":"thinking_delta","delta":" in"}}
+{"type":"event","event":{"type":"thinking_delta","delta":" the"}}
+{"type":"event","event":{"type":"thinking_delta","delta":" current"}}
+{"type":"event","event":{"type":"thinking_delta","delta":" directory"}}
+{"type":"event","event":{"type":"thinking_delta","delta":" using"}}
+{"type":"event","event":{"type":"thinking_delta","delta":" the"}}
+{"type":"event","event":{"type":"thinking_delta","delta":" shell"}}
+{"type":"event","event":{"type":"thinking_delta","delta":" tool"}}
+{"type":"event","event":{"type":"thinking_delta","delta":","}}
+{"type":"event","event":{"type":"thinking_delta","delta":" then"}}
+{"type":"event","event":{"type":"thinking_delta","delta":" say"}}
+{"type":"event","event":{"type":"thinking_delta","delta":" D"}}
+{"type":"event","event":{"type":"thinking_delta","delta":"ONE"}}
+{"type":"event","event":{"type":"thinking_delta","delta":"."}}
+{"type":"event","event":{"type":"thinking_delta","delta":" Let"}}
+{"type":"event","event":{"type":"thinking_delta","delta":" me"}}
+{"type":"event","event":{"type":"thinking_delta","delta":" use"}}
+{"type":"event","event":{"type":"thinking_delta","delta":" ls"}}
+{"type":"event","event":{"type":"thinking_delta","delta":" via"}}
+{"type":"event","event":{"type":"thinking_delta","delta":" shell"}}
+{"type":"event","event":{"type":"thinking_delta","delta":"_command"}}
+{"type":"event","event":{"type":"thinking_delta","delta":"."}}
+{"type":"event","event":{"type":"thinking_end","text":"The user wants me to list files in the current directory using the shell tool, then say DONE. Let me use ls via shell_command."}}
+{"type":"event","event":{"type":"message_update","content":[{"type":"thinking","thinking":"The user wants me to list files in the current directory using the shell tool, then say DONE. Let me use ls via shell_command.","signature":""},{"type":"tool_use","id":"call_00_nvl1eBVxTGRcqESyI8Pn5509","name":"shell_command","input":{"command":"ls -la","description":"List files in current directory"}}]}}
+{"type":"event","event":{"type":"model_request_end","model":"deepseek/deepseek-v4-flash","usage":{"inputTokens":14921,"outputTokens":95,"cacheReadTokens":6912,"cacheWriteTokens":0},"stopReason":"tool_calls"}}
+{"type":"event","event":{"type":"message_end","content":[{"type":"thinking","thinking":"The user wants me to list files in the current directory using the shell tool, then say DONE. Let me use ls via shell_command.","signature":""},{"type":"tool_use","id":"call_00_nvl1eBVxTGRcqESyI8Pn5509","name":"shell_command","input":{"command":"ls -la","description":"List files in current directory"}}]}}
+{"type":"event","event":{"type":"tool_queued","toolCallId":"call_00_nvl1eBVxTGRcqESyI8Pn5509","toolName":"shell_command","input":{"command":"ls -la","description":"List files in current directory"}}}
+{"type":"event","event":{"type":"tool_running","toolCallId":"call_00_nvl1eBVxTGRcqESyI8Pn5509","toolName":"shell_command","description":null}}
+{"type":"event","event":{"type":"tool_update","toolCallId":"call_00_nvl1eBVxTGRcqESyI8Pn5509","toolName":"shell_command","partial":[{"type":"text","text":"total 24\ndrwxr-xr-x@ 7 maenokota  wheel   224  9月  3 14:57 .\ndrwx------@ 9 maenokota  wheel   288  9月  3 14:57 ..\n-rw-r--r--@ 1 maenokota  wheel     0  9月  3 14:57 cc-headless-maxturns.err\n-rw-r--r--@ 1 maenokota  wheel  3900  9月  3 14:57 cc-headless-maxturns.ndjson\n-rw-r--r--@ 1 maenokota  wheel     0  9月  3 14:57 cc-headless-success.err\n-rw-r--r--@ 1 maenokota  wheel  3378  9月  3 14:57 cc-headless-success.ndjson\n-rw-r--r--@ 1 maenokota  wheel     6  9月  3 14:57 probe.txt\n"}]}}
+{"type":"event","event":{"type":"tool_completed","toolCallId":"call_00_nvl1eBVxTGRcqESyI8Pn5509","toolName":"shell_command","result":[{"type":"text","text":"total 24\ndrwxr-xr-x@ 7 maenokota  wheel   224  9月  3 14:57 .\ndrwx------@ 9 maenokota  wheel   288  9月  3 14:57 ..\n-rw-r--r--@ 1 maenokota  wheel     0  9月  3 14:57 cc-headless-maxturns.err\n-rw-r--r--@ 1 maenokota  wheel  3900  9月  3 14:57 cc-headless-maxturns.ndjson\n-rw-r--r--@ 1 maenokota  wheel     0  9月  3 14:57 cc-headless-success.err\n-rw-r--r--@ 1 maenokota  wheel  3378  9月  3 14:57 cc-headless-success.ndjson\n-rw-r--r--@ 1 maenokota  wheel     6  9月  3 14:57 probe.txt\n"}],"deferred":false}}
+{"type":"event","event":{"type":"turn_end","turnNumber":1,"hadToolCalls":true,"usage":{"inputTokens":14921,"outputTokens":95,"cacheReadTokens":6912,"cacheWriteTokens":0}}}
+{"type":"event","event":{"type":"run_end","result":{"finalText":"","stopReason":"max_turns","turnCount":1,"usage":{"inputTokens":14921,"outputTokens":95,"cacheReadTokens":6912,"cacheWriteTokens":0},"systemPromptTokens":null,"nextState":{"sessionId":"7cae6196-b7fd-42f8-8387-b49cfe0c2e12","messages":[{"role":"user","content":[{"type":"text","text":"List the files in this directory using the shell tool, then say DONE."}],"meta":{"source":"user","createdAt":1788415045066,"messageId":"c5d822b2-01fb-4fce-8a6e-8fde74fb74de"}},{"role":"assistant","content":[{"type":"thinking","thinking":"The user wants me to list files in the current directory using the shell tool, then say DONE. Let me use ls via shell_command.","signature":""},{"type":"tool_use","id":"call_00_nvl1eBVxTGRcqESyI8Pn5509","name":"shell_command","input":{"command":"ls -la","description":"List files in current directory"}}],"meta":{"source":"model","createdAt":1788415047559,"messageId":"212b3a74-d412-4b5d-b1c7-394000d5d4de"}},{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_00_nvl1eBVxTGRcqESyI8Pn5509","content":[{"type":"text","text":"total 24\ndrwxr-xr-x@ 7 maenokota  wheel   224  9月  3 14:57 .\ndrwx------@ 9 maenokota  wheel   288  9月  3 14:57 ..\n-rw-r--r--@ 1 maenokota  wheel     0  9月  3 14:57 cc-headless-maxturns.err\n-rw-r--r--@ 1 maenokota  wheel  3900  9月  3 14:57 cc-headless-maxturns.ndjson\n-rw-r--r--@ 1 maenokota  wheel     0  9月  3 14:57 cc-headless-success.err\n-rw-r--r--@ 1 maenokota  wheel  3378  9月  3 14:57 cc-headless-success.ndjson\n-rw-r--r--@ 1 maenokota  wheel     6  9月  3 14:57 probe.txt\n"}]}],"meta":{"source":"tool","messageId":"967da428-b37c-4c92-b436-7c81e4b63bad"}}],"interrupted":false,"modState":{"workspace":{"cwd":"/private/tmp/claude-501/-Users-maenokota-share-work-github-kewton-commandmate-issue-2253/bba4041d-6eae-4899-a831-fece0d04fc2f/scratchpad/ccprobe","platform":"darwin","branch":null,"gitStatus":null,"recentCommits":[],"additionalDirectories":[]},"compaction":14921}}}}}
+{"type":"result","subtype":"max_turns","sessionId":"7cae6196-b7fd-42f8-8387-b49cfe0c2e12","stopReason":"max_turns","usage":{"inputTokens":14921,"outputTokens":95,"cacheReadTokens":6912,"cacheWriteTokens":0},"durationMs":2546,"finalText":""}
