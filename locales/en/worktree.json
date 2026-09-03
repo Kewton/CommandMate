@@ -476,6 +476,7 @@
       "expand": "Show the reasoning",
       "collapse": "Hide the reasoning"
     },
+    "jumpToTop": "Jump to the beginning",
     "toolApproval": {
       "summary": "Tool approvals · {count}",
       "expand": "Show the tool approvals",

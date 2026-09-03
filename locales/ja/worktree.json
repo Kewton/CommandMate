@@ -476,6 +476,7 @@
       "expand": "思考を開く",
       "collapse": "思考を閉じる"
     },
+    "jumpToTop": "会話の先頭へ",
     "toolApproval": {
       "summary": "ツール承認 {count} 件",
       "expand": "ツール承認を開く",
