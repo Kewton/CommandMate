@@ -19,6 +19,15 @@
  * The agent itself knows the boundary exactly, and has been telling us: the
  * `stop` hook. This module is that second trigger.
  *
+ * ## Knowing the boundary is not the same as the file having reached it
+ *
+ * The `stop` post and the transcript's last append are two events with no
+ * ordering between them, and Issue #2264 is what happens when the reader is
+ * asked in the gap. The reader now refuses a turn it cannot prove is closed, so
+ * the cost of asking too early is a `false` rather than a truncated row — and
+ * this module's answer to a `false` is to ask again, up to
+ * {@link STOP_TRANSCRIPT_MAX_ATTEMPTS} times, before handing the turn back.
+ *
  * ## What it does not do
  *
  * **It does not replace the poller's call.** A session with no hooks — or with
@@ -42,22 +51,38 @@ import { createLogger } from '@/lib/logger';
 const logger = createLogger('lib/hooks/stop-history-capture');
 
 /**
- * How long to wait before asking a second time.
+ * How long to wait before asking again.
  *
  * The `stop` hook fires when the agent considers the turn over, and the last
  * assistant record is appended to the transcript around — not necessarily
- * before — that instant. A reader that arrives in the gap sees the prompt
- * record and no body, answers false (correctly: an empty row would be a blank
- * reply forever) and, without a retry, hands a turn the agent has definitely
- * finished back to the scraper.
+ * before — that instant. A reader that arrives in the gap sees a turn that is
+ * not closed, answers false (correctly: the row it would write is a reply with
+ * its last paragraph missing, frozen under the turn key forever) and, without a
+ * retry, hands a turn the agent has definitely finished back to the scraper.
  *
  * Half a second is chosen against what the gap actually is — a file append that
- * has already been issued — rather than against a timeout. One retry and not a
- * loop, because the poller's own trigger is still behind this: if the file is
- * still empty after the retry, the next poll is the right place to notice, and
- * a hook handler that waits on a file is a hook handler that can hang a turn.
+ * has already been issued — rather than against a timeout.
  */
 export const STOP_TRANSCRIPT_RETRY_DELAY_MS = 500;
+
+/**
+ * How many times the reader is asked in total (Issue #2264).
+ *
+ * #2246 asked twice, on the reading that the only thing a retry waits for is one
+ * append that has already been issued. The incident #2264 was reported for says
+ * that is not always one append: the measured gap between the `stop` post and
+ * the last `text` record was around 100 ms in the fast case, but the turns that
+ * were saved short had *tool* records still arriving, and a single 500 ms retry
+ * lands inside that run rather than after it.
+ *
+ * Three and not a loop, because the poller's own trigger is still behind this:
+ * if the turn is still open after the third ask, the next poll is the right
+ * place to notice — it runs when the pane returns to the composer, by which time
+ * the transcript is written — and a hook handler that waits on a file is a hook
+ * handler that can hang a turn. The worst case this bounds is 1 s of the agent's
+ * stop path, spent only on an instance that has a transcript and an open turn.
+ */
+export const STOP_TRANSCRIPT_MAX_ATTEMPTS = 3;
 
 /** The worktree fields this module needs; a narrowing of `Worktree`. */
 export interface StopCaptureWorktree {
@@ -67,8 +92,10 @@ export interface StopCaptureWorktree {
 
 /** Test seams for {@link captureTranscriptTurnOnStop}. */
 export interface StopHistoryCaptureOptions {
-  /** Defaults to {@link STOP_TRANSCRIPT_RETRY_DELAY_MS}. 0 skips the retry. */
+  /** Defaults to {@link STOP_TRANSCRIPT_RETRY_DELAY_MS}. 0 skips every retry. */
   readonly retryDelayMs?: number;
+  /** Defaults to {@link STOP_TRANSCRIPT_MAX_ATTEMPTS}; counts the first ask. */
+  readonly maxAttempts?: number;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -119,30 +146,38 @@ export async function captureTranscriptTurnOnStop(
     const retryDelayMs = options.retryDelayMs ?? STOP_TRANSCRIPT_RETRY_DELAY_MS;
     if (retryDelayMs <= 0) return false;
 
-    // The retry is for one failure and one only: the turn's last assistant
-    // record had not been appended yet. Every other reason the capture answers
-    // false — no session pointer, no transcript, the operator never wired hooks
-    // for this tool — is a reason waiting cannot fix, and this handler is on the
-    // agent's own stop path, so half a second spent for nothing is half a second
-    // added to every turn it is spent on.
+    // The retry is for one failure and one only: the turn is not closed yet
+    // because its remaining assistant records have not been appended. Every
+    // other reason the capture answers false — no session pointer, no
+    // transcript, the operator never wired hooks for this tool — is a reason
+    // waiting cannot fix, and this handler is on the agent's own stop path, so
+    // half a second spent for nothing is half a second added to every turn it is
+    // spent on. Asked once, before the first sleep: a transcript that exists
+    // does not stop existing between attempts.
     if (!(await hasStructuredHistoryTranscript(worktree.id, cliToolId, instanceId, capture))) {
       return false;
     }
 
-    await sleep(retryDelayMs);
-    const captured = await captureStructuredHistoryTurn(
-      worktree.id,
-      cliToolId,
-      instanceId,
-      capture
-    );
-    logger.debug('stop-history-capture-retried', {
-      worktreeId: worktree.id,
-      cliToolId,
-      instanceId,
-      captured,
-    });
-    return captured;
+    const maxAttempts = Math.max(1, options.maxAttempts ?? STOP_TRANSCRIPT_MAX_ATTEMPTS);
+    for (let attempt = 2; attempt <= maxAttempts; attempt += 1) {
+      await sleep(retryDelayMs);
+      const captured = await captureStructuredHistoryTurn(
+        worktree.id,
+        cliToolId,
+        instanceId,
+        capture
+      );
+      logger.debug('stop-history-capture-retried', {
+        worktreeId: worktree.id,
+        cliToolId,
+        instanceId,
+        attempt,
+        maxAttempts,
+        captured,
+      });
+      if (captured) return true;
+    }
+    return false;
   } catch (error) {
     logger.warn('stop-history-capture-failed', {
       worktreeId: worktree.id,

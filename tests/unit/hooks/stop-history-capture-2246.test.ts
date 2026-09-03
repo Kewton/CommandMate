@@ -11,8 +11,10 @@
  *
  *  - it goes through the **same gate** as the poller, so the two entry points
  *    cannot drift and so the serialisation applies to both;
- *  - it **retries once**, because the last assistant record is appended to the
- *    transcript around — not necessarily before — the `stop` fires;
+ *  - it **retries**, because the last assistant record is appended to the
+ *    transcript around — not necessarily before — the `stop` fires (how many
+ *    many asks there are, and why #2264 raised it from two to three, is
+ *    `./stop-history-capture-2264.test.ts`);
  *  - it retries **only when a retry could help**, because this runs on the
  *    agent's stop path and half a second spent for nothing is half a second
  *    added to a turn.
@@ -35,6 +37,7 @@ vi.mock('@/lib/polling/structured-history-gate', () => ({
 
 import {
   captureTranscriptTurnOnStop,
+  STOP_TRANSCRIPT_MAX_ATTEMPTS,
   STOP_TRANSCRIPT_RETRY_DELAY_MS,
 } from '@/lib/hooks/stop-history-capture';
 
@@ -75,7 +78,7 @@ describe('the happy path', () => {
 });
 
 describe('the retry', () => {
-  it('asks a second time when the first answer was false', async () => {
+  it('asks again when the first answer was false', async () => {
     // The Stop-hook race: the prompt record is in the file and the reply is not.
     captureStructuredHistoryTurn.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
 
@@ -95,14 +98,15 @@ describe('the retry', () => {
     expect(Date.now() - started).toBeGreaterThanOrEqual(30);
   });
 
-  it('asks exactly twice and then gives the turn back to the poller', async () => {
-    // One retry and not a loop: the poller's own trigger is still behind this,
-    // and a hook handler that waits on a file is one that can hang a turn.
+  it('asks a bounded number of times and then gives the turn back to the poller', async () => {
+    // Bounded and not a loop: the poller's own trigger is still behind this, and
+    // a hook handler that waits on a file is one that can hang a turn. The
+    // ceiling itself is #2264's and is pinned in that file.
     await expect(
       captureTranscriptTurnOnStop(WORKTREE, 'claude', 'claude', { retryDelayMs: RETRY_MS })
     ).resolves.toBe(false);
 
-    expect(captureStructuredHistoryTurn).toHaveBeenCalledTimes(2);
+    expect(captureStructuredHistoryTurn).toHaveBeenCalledTimes(STOP_TRANSCRIPT_MAX_ATTEMPTS);
   });
 
   it('is skipped when there is no transcript for the retry to re-read', async () => {

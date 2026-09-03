@@ -229,6 +229,35 @@ export interface AntigravityTurnAccumulator {
   readonly prompt: AntigravityPrompt | null;
   /** Everything after the prompt, in the order agy appended it. */
   readonly records: AntigravityTranscriptRecord[];
+  /**
+   * True when agy's last word in this turn was a finished answer (Issue #2264).
+   *
+   * agy has **no record that closes a turn** — the corpus of 41 files and 1,024
+   * records has nothing corresponding to codex's `task_complete`, and that is
+   * fact 4 of `tests/fixtures/transcripts/antigravity/README.md`. So the
+   * evidence has to be the shape of the last thing it wrote, and
+   * {@link isAntigravityTurnClosingRecord} is that: a `PLANNER_RESPONSE` with
+   * prose and **no `tool_calls` on it**.
+   *
+   * The `tool_calls` half is not a detail. agy writes prose and the call it is
+   * about to make onto the *same* record (39 records in the corpus carry both),
+   * so "it said something" is not evidence the turn ended — "it said something
+   * and then did not reach for a tool" is.
+   *
+   * Assigned per `MODEL` record, so a tool's own output record — `RUN_COMMAND`,
+   * `GENERIC`, … — reopens the turn, which is what it means: agy is mid-loop.
+   */
+  closed: boolean;
+  /**
+   * True when a later `USER_INPUT` opened another turn (Issue #2264).
+   *
+   * The same second proof `../claude/transcript` documents, and agy is where it
+   * was found to be necessary. Turn B of the captured three-turn transcript ends
+   * on a `list_dir` call with no reply after it — the operator typed the next
+   * prompt while agy was still hunting — and it is a finished turn with a reply
+   * worth keeping that {@link closed} alone would have refused forever.
+   */
+  superseded: boolean;
   /** True once a record had to be dropped for {@link MAX_ANTIGRAVITY_TURN_RECORDS}. */
   overflowed: boolean;
 }
@@ -430,6 +459,8 @@ export function buildAntigravityTurns(
           ? { stepIndex: record.stepIndex, text, timestampMs: record.timestampMs ?? startedAt }
           : null,
         records: [],
+        closed: false,
+        superseded: false,
         overflowed: false,
       });
       continue;
@@ -441,6 +472,13 @@ export function buildAntigravityTurns(
       continue;
     }
 
+    // Assigned rather than or-ed, so what survives is the last `MODEL` record's
+    // answer. `SYSTEM` records are ignored here for the same reason they render
+    // to nothing: agy injected them, they are not agy speaking.
+    if (record.source === ANTIGRAVITY_MODEL_SOURCE) {
+      turn.closed = isAntigravityTurnClosingRecord(record);
+    }
+
     if (turn.records.length >= MAX_ANTIGRAVITY_TURN_RECORDS) {
       turn.overflowed = true;
       continue;
@@ -448,7 +486,36 @@ export function buildAntigravityTurns(
     turn.records.push(record);
   }
 
+  // Every turn but the last has a later prompt behind it, and a prompt is proof
+  // agy moved on. See {@link AntigravityTurnAccumulator.superseded}.
+  for (let index = 0; index < turns.length - 1; index += 1) {
+    turns[index].superseded = true;
+  }
+
   return { turns, preludeRecords };
+}
+
+/**
+ * Whether this `MODEL` record is agy finishing its answer (Issue #2264).
+ *
+ * See {@link AntigravityTurnAccumulator.closed} for the argument; the emptiness
+ * test is the one {@link renderAntigravityTurn} applies to `content`, so a
+ * record that renders to nothing cannot be what makes a turn look finished.
+ */
+export function isAntigravityTurnClosingRecord(record: AntigravityTranscriptRecord): boolean {
+  if (record.source !== ANTIGRAVITY_MODEL_SOURCE) return false;
+  if (record.type !== ANTIGRAVITY_PLANNER_TYPE) return false;
+  if (record.toolCalls.length > 0) return false;
+  return (record.content ?? '').trim().length > 0;
+}
+
+/**
+ * Whether a writer may record this turn (Issue #2264).
+ *
+ * Either proof that nothing more is coming — agy answered, or it moved on.
+ */
+export function isAntigravityTurnWritable(turn: AntigravityTurnAccumulator): boolean {
+  return turn.closed || turn.superseded;
 }
 
 /** Whether this record is the one the operator's own text arrived on. */

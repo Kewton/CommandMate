@@ -35,9 +35,12 @@
  *     is therefore keyed on the *prompt* record, never on a `requestId`.
  *  3. **`type: "user"` is mostly not the user.** Of 19 user records in the
  *     sampled session, 18 were `tool_result` payloads. Tool results, `isMeta`
- *     placeholders (`[Image: original 1440x2170…]`), and the slash-command
+ *     placeholders (`[Image: original 1440x2170…]`), and the built-in command
  *     bookkeeping records (`<command-name>`, `<local-command-stdout>`) all have
- *     `type: "user"` and none of them is a prompt. See {@link isClaudePromptRecord}.
+ *     `type: "user"` and none of them is a prompt. The one `<command-…>` shape
+ *     that *is* a prompt — a project command, recorded `<command-message>` first
+ *     — is Issue #2265; see {@link CLAUDE_SLASH_COMMAND_PREFIX} and
+ *     {@link isClaudePromptRecord}.
  *  4. **`thinking` blocks can be empty.** The block arrives with a `signature`
  *     and `thinking: ""` when the text is not retained, so an empty one is
  *     skipped rather than rendered as a blank quote.
@@ -108,18 +111,101 @@ export const CLAUDE_THINKING_LABEL = 'Thinking';
 /**
  * Prefixes that mark a `type: "user"` record as bookkeeping rather than a prompt.
  *
- * All four were observed on real transcripts. `<local-command-caveat>` and the
- * `<command-…>` trio are how a slash command is recorded; `<local-command-stdout>`
- * is its output. Treating any of them as a prompt would open a turn that the
- * operator never typed, and the reply to the *next* real prompt would be filed
- * under it.
+ * Three since Issue #2265, which took `<command-message>` off the list — see
+ * {@link CLAUDE_SLASH_COMMAND_PREFIX} for the census that separated the two
+ * shapes the `<command-…>` trio is written in. What is left is the bookkeeping
+ * of a **built-in** command: `<command-name>` first is how Claude records
+ * `/model`, `/compact`, `/clear`, `/login` and `/plan`, `<local-command-stdout>`
+ * is that command's output, and `<local-command-caveat>` is the preamble in
+ * front of it. Treating any of them as a prompt would open a turn that the agent
+ * never answers, and the reply to the *next* real prompt would be filed under it.
  */
 const CLAUDE_SYNTHETIC_PROMPT_PREFIXES: readonly string[] = [
   '<local-command-caveat>',
   '<local-command-stdout>',
   '<command-name>',
-  '<command-message>',
 ];
+
+/**
+ * The tag a slash command the operator typed opens with (Issue #2265).
+ *
+ * ## The two shapes, and why the leading tag is the discriminator
+ *
+ * Claude writes the same three tags for two quite different events, and it
+ * writes them in a different **order** for each. Measured over every
+ * `type: "user"` record under `~/.claude/projects` on 2026-09-03 whose text
+ * opens with one of the `<command-…>` tags — 222 records:
+ *
+ * | leading tag | count | `<command-name>` values |
+ * |---|---|---|
+ * | `<command-message>` | 118 | `/orchestrate`, `/release`, `/uat`, `/worktree-cleanup`, `/worktree-new`, `/multi-stage-design-review`, `/cmate-*` |
+ * | `<command-name>` | 104 | `/model`, `/compact`, `/clear`, `/login`, `/plan` |
+ *
+ * The split is exact and it is the split that matters here. The 118 are
+ * *project and user commands* — a `.claude/commands/*.md` or a skill, expanded
+ * into instructions the agent then works through, which is a turn with a reply
+ * in it. The 104 are commands Claude Code executes itself; their whole output is
+ * the `<local-command-stdout>` record that follows and the agent never answers
+ * them.
+ *
+ * Before #2265 both were excluded, on the reading that a slash command is not
+ * "the operator's text". That cost the 118 their entire turn: the reply was
+ * folded into whichever turn came before — already saved, so
+ * `selectUnwrittenClaudeTurns` answered "nothing to write", and the answer *this*
+ * reader gives is also what suppresses the scraper's copy. The measured loss was
+ * a `/release v0.30.1` turn of 7 text blocks and an `/orchestrate` turn of 8,
+ * neither of which reached History by any path at all.
+ *
+ * ## `origin`, and the versions that carry it
+ *
+ * The 118 also answer {@link isClaudeOperatorPromptRecord}, but only on recent
+ * Claude Code: of them, every record from 2.1.238 onwards (46) carries
+ * `origin: {"kind": "human"}` and every record before it (72, versions 2.1.220
+ * … 2.1.235) carries neither marker — those predate the field. On an old
+ * version the turn is still opened and its reply still written; only the `user`
+ * row is skipped, which is #2196's stated degradation and not a new one.
+ */
+export const CLAUDE_SLASH_COMMAND_PREFIX = '<command-message>';
+
+/** `<command-name>/release</command-name>` — the command itself. */
+const CLAUDE_COMMAND_NAME_PATTERN = /<command-name>([\s\S]*?)<\/command-name>/;
+
+/** `<command-args>v0.30.1</command-args>` — absent on a bare invocation. */
+const CLAUDE_COMMAND_ARGS_PATTERN = /<command-args>([\s\S]*?)<\/command-args>/;
+
+/**
+ * The line the operator typed, rebuilt from a slash-command record (Issue #2265).
+ *
+ * `<command-name>` and `<command-args>` back into `/release v0.30.1`, which is
+ * the string that was in the composer and — for a command CommandMate sent — the
+ * string `sendUserMessage` already wrote to `chat_messages`. That equality is
+ * what makes the `/send` row *adoptable* instead of duplicated: `recordUserTurn`
+ * compares on normalised content, and the raw record text
+ * (`<command-message>release</command-message>\n<command-name>…`) matches nothing
+ * a person ever sent.
+ *
+ * Returns null for anything that is not this shape, including a
+ * `<command-message>` record with no `<command-name>` in it. Null is what keeps
+ * {@link isClaudePromptRecord} from opening a turn it could not name: a record
+ * whose command cannot be read would otherwise reach History as its own XML,
+ * which is exactly the class of mistake #2196's positive-evidence rule exists to
+ * avoid. No such record was observed — all 118 carried both tags.
+ *
+ * @param text - The record's text, as {@link ClaudeTranscriptRecord.text} holds it
+ * @returns `/name args`, `/name` when there are no arguments, or null
+ */
+export function claudeSlashCommandPrompt(text: string): string | null {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith(CLAUDE_SLASH_COMMAND_PREFIX)) return null;
+
+  const name = CLAUDE_COMMAND_NAME_PATTERN.exec(trimmed)?.[1].trim() ?? '';
+  if (name.length === 0) return null;
+
+  // Absent on a bare invocation, and empty on a command invoked with no
+  // arguments; both mean the prompt is the command name on its own.
+  const args = CLAUDE_COMMAND_ARGS_PATTERN.exec(trimmed)?.[1].trim() ?? '';
+  return args.length === 0 ? name : `${name} ${args}`;
+}
 
 /** One content block of one record, reduced to what a reader needs. */
 export interface ClaudeContentBlock {
@@ -172,6 +258,27 @@ export interface ClaudeTranscriptRecord {
   readonly isInterruption: boolean;
   /** `timestamp` as epoch ms, or null when absent or unparseable. */
   readonly timestampMs: number | null;
+  /**
+   * `message.stop_reason` — why the agent stopped producing this record (#2264).
+   *
+   * Present on `assistant` records and null everywhere else. Two values carry
+   * the whole of what this reader needs, and the census behind them is in the
+   * Issue: across the transcript the incident was measured on, **170 assistant
+   * records carried a `stop_reason`, 79 of them `end_turn` and 16 `tool_use`**,
+   * and the correspondence was exact — a record that ends the reply says
+   * `end_turn`, one that hands over to a tool says `tool_use`.
+   *
+   * This is the field #2264 exists because nobody read: without it the reader
+   * cannot tell "the agent has finished" from "the agent is between tool calls",
+   * and a Stop hook that arrives in the gap writes the second as if it were the
+   * first. Re-measured on 2026-09-03 over the 40 most recently written
+   * transcripts under `~/.claude/projects`: **7,147 assistant records, all 7,147
+   * carrying the field** — 6,899 `tool_use` and 248 `end_turn`, none absent and
+   * none null.
+   *
+   * See {@link ClaudeTurnAccumulator.closed}.
+   */
+  readonly stopReason: string | null;
   /** `message.content`, normalised; empty for records that carry no message. */
   readonly blocks: readonly ClaudeContentBlock[];
   /**
@@ -192,7 +299,12 @@ export interface ClaudeTurnAccumulator {
   /** Epoch ms of the prompt record, so the row is dated by the agent's clock. */
   readonly startedAt: number;
   /**
-   * The prompt record's own text (Issue #2196).
+   * The prompt, as it would have looked in the composer (Issue #2196).
+   *
+   * The prompt record's own text, except for a slash command: there the record
+   * is the `<command-…>` XML and this is the line the operator typed, rebuilt by
+   * {@link claudeSlashCommandPrompt} (Issue #2265). The two are the same string
+   * for every other prompt.
    *
    * Written to History as a `user` row — but only when
    * {@link promptIsOperatorInput} says a person produced it. Note that #2121
@@ -208,6 +320,67 @@ export interface ClaudeTurnAccumulator {
   readonly blocks: ClaudeContentBlock[];
   /** How many `type: "assistant"` records contributed. */
   assistantRecords: number;
+  /**
+   * True when the agent said this turn was over (Issue #2264).
+   *
+   * The rule is {@link isClaudeTurnClosingRecord} applied to the turn's **last**
+   * assistant record: `stop_reason === "end_turn"` *and* a non-empty `text`
+   * block on the same record. Both halves are load-bearing and both come off the
+   * incident:
+   *
+   *  - `end_turn` alone is not enough. The sampled transcript held an `end_turn`
+   *    record whose only block was `thinking`, and a turn that stops after
+   *    thinking is one Claude Code resumes.
+   *  - the text block alone is not enough either, and this is the failure that
+   *    was measured: a turn cut off after its `tool_use` records still renders a
+   *    non-empty body — `renderClaudeTurn` draws the calls as a trailing tool
+   *    section — so the emptiness guard on the writer never fires and a reply
+   *    with **no prose in it at all** was written and frozen under the turn key.
+   *
+   * False is therefore the honest answer for a turn in flight, and
+   * `./history`'s writer treats it as "hand this back to the scraper", exactly
+   * as `../codex/history` treats a `turn_id` with no `task_complete`.
+   */
+  closed: boolean;
+  /**
+   * True when a later prompt record opened another turn (Issue #2264).
+   *
+   * The second, independent proof that nothing more will be appended here, and
+   * the reason {@link closed} did not have to be made a *precondition of
+   * writing* — which would have regressed #2246's backfill.
+   *
+   * A turn is superseded exactly when it is not the last one in the window, and
+   * an agent that has moved on to another prompt will never add a record to the
+   * one before it. That covers the case `closed` cannot: a turn the operator
+   * **interrupted** ends on a `tool_use` record and never gets its `end_turn`,
+   * and it is still a finished turn whose reply nobody else is going to write.
+   * The real antigravity capture in `tests/fixtures/transcripts/antigravity`
+   * contains exactly that shape, which is how the omission was noticed.
+   *
+   * So the writable predicate is `closed || superseded`
+   * ({@link isClaudeTurnWritable}), and the gate #2264 adds bites on precisely
+   * the turn the incident was about: the newest one, still open.
+   */
+  superseded: boolean;
+  /**
+   * True once an assistant record of this turn carried a `stop_reason` (#2264).
+   *
+   * The evidence check behind {@link closed}, and the reason a Claude release
+   * that stopped writing the field would degrade rather than break. Measured on
+   * 2026-09-03 over the 40 most recently written transcripts under
+   * `~/.claude/projects`: **7,147 assistant records, 7,147 with a `stop_reason`**
+   * (6,899 `tool_use`, 248 `end_turn`) and not one without. So in production this
+   * is true for every turn that has an assistant record at all, and the branch it
+   * guards is unreachable.
+   *
+   * It is here for the shape that measurement cannot rule out — a later Claude
+   * that drops or renames the field. `closed` would then be false on every turn
+   * forever, and a writer that refuses every turn forever is a transcript reader
+   * that has silently switched itself off. Falling back to the pre-#2264
+   * behaviour instead loses the #2264 guarantee and nothing else; see
+   * {@link isClaudeTurnWritable}.
+   */
+  stopReasonObserved: boolean;
   /** True once a block had to be dropped for {@link MAX_CLAUDE_TURN_BLOCKS}. */
   overflowed: boolean;
 }
@@ -358,6 +531,7 @@ export function readClaudeTranscriptRecord(value: unknown): ClaudeTranscriptReco
     isCompactSummary: value.isCompactSummary === true,
     isInterruption: readStringField(value, 'interruptedMessageId') !== null,
     timestampMs: Number.isFinite(parsed) ? parsed : null,
+    stopReason: message ? readStringField(message, 'stop_reason') : null,
     blocks,
     text,
   };
@@ -402,10 +576,18 @@ export function parseClaudeTranscript(text: string): ClaudeTranscriptParse {
  *
  *  - it carries a `tool_result` block — 18 of the 19 user records in the sampled
  *    session were these;
- *  - `isMeta` is true — the image placeholders and the local-command caveat;
- *  - its text opens with one of {@link CLAUDE_SYNTHETIC_PROMPT_PREFIXES} — the
- *    slash-command bookkeeping;
+ *  - `isMeta` is true — the image placeholders, the local-command caveat, and
+ *    the body of the `.claude/commands/*.md` or skill a slash command expands
+ *    to, which arrives on its own record right behind the one below;
+ *  - its text opens with one of {@link CLAUDE_SYNTHETIC_PROMPT_PREFIXES} — a
+ *    built-in command and its output;
  *  - it has no text at all, or no `uuid` to name the turn with.
+ *
+ * A record opening with {@link CLAUDE_SLASH_COMMAND_PREFIX} is the fifth case
+ * and the one Issue #2265 changed: it **is** a prompt, because the operator
+ * typed `/release v0.30.1` and the agent answers it at length. It qualifies only
+ * when {@link claudeSlashCommandPrompt} can actually read the command out of it,
+ * so a shape this reader could not name never opens a turn.
  *
  * Everything else is treated as a prompt, including `[Request interrupted by
  * user]`. That is deliberate: an interruption really does end the turn, and the
@@ -418,6 +600,7 @@ export function isClaudePromptRecord(record: ClaudeTranscriptRecord): boolean {
   if (record.blocks.some((block) => block.type === 'tool_result')) return false;
   const text = record.text.trim();
   if (text.length === 0) return false;
+  if (text.startsWith(CLAUDE_SLASH_COMMAND_PREFIX)) return claudeSlashCommandPrompt(text) !== null;
   return !CLAUDE_SYNTHETIC_PROMPT_PREFIXES.some((prefix) => text.startsWith(prefix));
 }
 
@@ -466,6 +649,14 @@ export const CLAUDE_HUMAN_PROMPT_SOURCES: readonly string[] = ['typed', 'queued'
  * is the pre-#2196 behaviour — an orphaned assistant pair, which is untidy, and
  * not a fabricated user message, which is wrong.
  *
+ * Issue #2265 widened what reaches here by one shape — the project-command
+ * record `isClaudePromptRecord` now accepts — and the rule holds on it without
+ * change: of the 118 such records under `~/.claude/projects` on 2026-09-03, the
+ * 46 written by Claude Code 2.1.238 and later carry `origin: {"kind": "human"}`
+ * and answer true, and the 72 written before the field existed carry no marker
+ * and answer false. The second group loses its `user` row and keeps its reply,
+ * which is this function's designed degradation rather than a new gap.
+ *
  * `isCompactSummary` and `isInterruption` are then checked explicitly even
  * though nothing observed carries a human marker *and* either flag. They are not
  * redundant by construction: compaction and interruption are both things the
@@ -480,16 +671,64 @@ export function isClaudeOperatorPromptRecord(record: ClaudeTranscriptRecord): bo
   return record.promptSource !== null && CLAUDE_HUMAN_PROMPT_SOURCES.includes(record.promptSource);
 }
 
+/**
+ * `message.stop_reason` on the record that ends a reply (Issue #2264).
+ *
+ * The other value this reader cares about is `tool_use`, which is not named as
+ * a constant because nothing branches on it: everything that is not `end_turn`
+ * leaves the turn open.
+ */
+export const CLAUDE_END_TURN_STOP_REASON = 'end_turn';
+
+/**
+ * Whether this assistant record is the one that ended the reply (Issue #2264).
+ *
+ * `end_turn` **and** prose on the same record. See
+ * {@link ClaudeTurnAccumulator.closed} for why neither half alone is the rule,
+ * and note that the emptiness test here is the one `renderClaudeTurn` applies to
+ * a text block — a block whose `text` trims to nothing is not rendered, so it
+ * cannot be what makes a turn look finished either.
+ */
+export function isClaudeTurnClosingRecord(record: ClaudeTranscriptRecord): boolean {
+  if (record.type !== 'assistant') return false;
+  if (record.stopReason !== CLAUDE_END_TURN_STOP_REASON) return false;
+  return record.blocks.some(
+    (block) => block.type === 'text' && (block.text ?? '').trim().length > 0
+  );
+}
+
+/**
+ * Whether a writer may record this turn (Issue #2264).
+ *
+ * Either proof that nothing more is coming: the agent said so
+ * ({@link ClaudeTurnAccumulator.closed}), or it has moved on to another prompt
+ * ({@link ClaudeTurnAccumulator.superseded}).
+ */
+export function isClaudeTurnWritable(turn: ClaudeTurnAccumulator): boolean {
+  if (turn.closed || turn.superseded) return true;
+  // No record of this turn said why it stopped, so there is no evidence to
+  // refuse it on. See {@link ClaudeTurnAccumulator.stopReasonObserved}: this is
+  // unreachable against every Claude version measured, and it is what keeps a
+  // version that stops writing the field from silently disabling the reader.
+  return !turn.stopReasonObserved;
+}
+
 /** A brand-new accumulator for one turn. */
 export function createClaudeTurn(record: ClaudeTranscriptRecord, sessionId: string): ClaudeTurnAccumulator {
   return {
     sessionId: record.sessionId ?? sessionId,
     promptUuid: record.uuid as string,
     startedAt: record.timestampMs ?? 0,
-    promptText: record.text,
+    // A slash command's record is XML and the operator typed a line; #2265 puts
+    // the line on the turn so that the `user` row reads `/release v0.30.1` and
+    // the `/send` row holding those same bytes is adopted rather than doubled.
+    promptText: claudeSlashCommandPrompt(record.text) ?? record.text,
     promptIsOperatorInput: isClaudeOperatorPromptRecord(record),
     blocks: [],
     assistantRecords: 0,
+    closed: false,
+    superseded: false,
+    stopReasonObserved: false,
     overflowed: false,
   };
 }
@@ -557,6 +796,12 @@ export function buildClaudeTurns(
     }
 
     current.assistantRecords += 1;
+    // Assigned rather than or-ed, so the value left standing is the *last*
+    // assistant record's answer. A turn that ends on a `tool_use` record after
+    // an earlier `end_turn` — which is what a turn Claude resumed looks like —
+    // is open again, and that is the reading the Issue's census supports.
+    current.closed = isClaudeTurnClosingRecord(record);
+    if (record.stopReason !== null) current.stopReasonObserved = true;
     for (const block of record.blocks) {
       if (current.blocks.length >= MAX_CLAUDE_TURN_BLOCKS) {
         current.overflowed = true;
@@ -564,6 +809,12 @@ export function buildClaudeTurns(
       }
       current.blocks.push(block);
     }
+  }
+
+  // Every turn but the last one has a later prompt behind it, and a prompt is
+  // proof the agent moved on. See {@link ClaudeTurnAccumulator.superseded}.
+  for (let index = 0; index < turns.length - 1; index += 1) {
+    turns[index].superseded = true;
   }
 
   return { turns, orphanedAssistantRecords, sidechainRecords };
