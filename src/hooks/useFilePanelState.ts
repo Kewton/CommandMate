@@ -19,12 +19,59 @@
 
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 
 export const FILE_PANEL_COLLAPSED_STORAGE_KEY =
   'commandmate.worktree.filePanelCollapsed';
 
 export const DEFAULT_FILE_PANEL_COLLAPSED = false;
+
+/**
+ * DOM id of the file-panel region (Issue #2259).
+ *
+ * `FilePanelSplit` stamps it on the pane it renders and the Action-bar toggle
+ * names it in `aria-controls`, so the one remaining control for this panel
+ * points at a region that actually exists. Declared here rather than in
+ * `FilePanelSplit` so `TerminalSplitContainer` can reference it without pulling
+ * the tabs/diff component tree into its own module graph.
+ */
+export const FILE_PANEL_PANE_ID = 'worktree-file-panel';
+
+/**
+ * What the file panel currently holds, as seen by controls OUTSIDE it
+ * (Issue #2259).
+ *
+ * The Action bar's "Open Files" toggle has to be disabled — and carry a count
+ * badge — while nothing is open, because toggling a panel that renders nothing
+ * is the "press it and nothing happens" complaint the Issue opens with. The
+ * numbers live in `useFileTabs`, several components above the Action bar, and
+ * `FilePanelSplit` is the nearest common ancestor of the panel and the bar
+ * (the bar is inside its `terminal` slot), so it publishes them here rather
+ * than a new prop being threaded down from `WorktreeDetailDesktop`.
+ */
+export interface OpenFilesSnapshot {
+  /** Number of open file tabs. */
+  tabCount: number;
+  /** Whether a diff is being shown in the panel (Issue #447). */
+  hasDiff: boolean;
+}
+
+/** Snapshot used when no `FilePanelSplit` is above the consumer (tests, mobile). */
+export const EMPTY_OPEN_FILES: OpenFilesSnapshot = { tabCount: 0, hasDiff: false };
+
+export const OpenFilesContext = createContext<OpenFilesSnapshot>(EMPTY_OPEN_FILES);
+
+/** Read the enclosing `FilePanelSplit`'s open-files snapshot. */
+export function useOpenFiles(): OpenFilesSnapshot {
+  return useContext(OpenFilesContext);
+}
 
 export interface UseFilePanelStateReturn {
   /** Whether the file panel is collapsed (true = hidden). */

@@ -5,6 +5,7 @@
  * Uses useReducer for predictable state transitions.
  *
  * Issue #438: PC file display panel with tabs
+ * Issue #2260: bulk close (all / others / to the right)
  */
 
 'use client';
@@ -69,7 +70,12 @@ export type FileTabsAction =
   | { type: 'RESTORE'; paths: string[]; activePath: string | null }
   | { type: 'SET_DIRTY'; path: string; isDirty: boolean }
   | { type: 'MOVE_TO_FRONT'; path: string }
-  | { type: 'CLOSE_ALL' };
+  | { type: 'CLOSE_ALL' }
+  | { type: 'CLOSE_OTHERS'; path: string }
+  | { type: 'CLOSE_TO_RIGHT'; path: string };
+
+/** Which tabs a bulk close targets, relative to an anchor tab (Issue #2260) */
+export type BulkCloseMode = 'all' | 'others' | 'right';
 
 // ============================================================================
 // Helper Functions
@@ -117,6 +123,61 @@ function computeActiveIndexAfterRemoval(
     return Math.min(removedIndex, remainingCount - 1);
   }
   return currentActive;
+}
+
+/**
+ * Paths a bulk close removes, in tab-bar order.
+ *
+ * [Issue #2260] Single source of truth for the three bulk-close commands. Both
+ * the reducer (CLOSE_ALL / CLOSE_OTHERS / CLOSE_TO_RIGHT) and the tab bar's
+ * "close" menu read the selection from here, so the menu can never preview,
+ * enable or confirm a different set of tabs than the one actually closed.
+ *
+ * Returns `[]` when `anchorPath` is not open, and for `'right'` when the anchor
+ * is already the last tab.
+ */
+export function selectTabsToClose(
+  tabs: FileTab[],
+  anchorPath: string,
+  mode: BulkCloseMode,
+): string[] {
+  if (mode === 'all') return tabs.map((t) => t.path);
+
+  const anchorIndex = tabs.findIndex((t) => t.path === anchorPath);
+  if (anchorIndex === -1) return [];
+
+  if (mode === 'others') {
+    return tabs.filter((_, i) => i !== anchorIndex).map((t) => t.path);
+  }
+  // 'right': everything strictly after the anchor. The `+ 1` is the boundary —
+  // without it the anchor tab itself would be closed.
+  return tabs.slice(anchorIndex + 1).map((t) => t.path);
+}
+
+/**
+ * Compute `activeIndex` after a bulk removal that keeps `anchorPath` open.
+ *
+ * [Issue #2260] The anchor survives both bulk modes, so when the active tab is
+ * one of the closed ones the anchor is its nearest surviving neighbour — the
+ * same tab that closing the set one at a time from the right would leave
+ * selected.
+ */
+function computeActiveIndexAfterBulkRemoval(
+  state: FileTabsState,
+  remaining: FileTab[],
+  anchorPath: string,
+): number | null {
+  if (remaining.length === 0) return null;
+
+  const activePath =
+    state.activeIndex !== null ? state.tabs[state.activeIndex]?.path : undefined;
+  if (activePath !== undefined) {
+    const stillOpen = remaining.findIndex((t) => t.path === activePath);
+    if (stillOpen !== -1) return stillOpen;
+  }
+
+  const anchor = remaining.findIndex((t) => t.path === anchorPath);
+  return anchor !== -1 ? anchor : 0;
 }
 
 // ============================================================================
@@ -264,6 +325,22 @@ export function fileTabsReducer(state: FileTabsState, action: FileTabsAction): F
       return initialState;
     }
 
+    case 'CLOSE_OTHERS':
+    case 'CLOSE_TO_RIGHT': {
+      // [Issue #2260] Bulk close anchored at action.path, which always stays
+      // open. Short-circuit when nothing matches (unknown anchor, or the anchor
+      // is the last tab) so upstream useReducer skips a needless re-render.
+      const mode: BulkCloseMode = action.type === 'CLOSE_OTHERS' ? 'others' : 'right';
+      const closing = new Set(selectTabsToClose(state.tabs, action.path, mode));
+      if (closing.size === 0) return state;
+
+      const remaining = state.tabs.filter((t) => !closing.has(t.path));
+      return {
+        tabs: remaining,
+        activeIndex: computeActiveIndexAfterBulkRemoval(state, remaining, action.path),
+      };
+    }
+
     default:
       return state;
   }
@@ -285,6 +362,19 @@ export interface FileTabsActions {
   moveToFront: (path: string) => void;
   /** Close every open tab (Issue #1108 full view reset). */
   closeAllTabs: () => void;
+  /**
+   * Close every tab except `path` in one dispatch (Issue #2260).
+   *
+   * The tab bar reaches the same outcome by issuing one CLOSE_TAB per path
+   * (see FilePanelTabs' `closePaths`), because the props between it and this
+   * hook are threaded through `WorktreeDetailDesktop`, which Issue #2260's
+   * scope does not cover. Both routes select the tabs with
+   * {@link selectTabsToClose} and land on the same `activeIndex`, so swapping
+   * the tab bar onto these dispatchers is a pure prop change.
+   */
+  closeOtherTabs: (path: string) => void;
+  /** Close every tab to the right of `path` in one dispatch (Issue #2260). */
+  closeTabsToRight: (path: string) => void;
 }
 
 /** Read persisted tab data from localStorage */
@@ -399,9 +489,23 @@ export function useFileTabs(worktreeId: string): readonly [FileTabsState, FileTa
     dispatch({ type: 'CLOSE_ALL' });
   }, []);
 
+  const closeOtherTabs = useCallback((path: string) => {
+    dispatch({ type: 'CLOSE_OTHERS', path });
+  }, []);
+
+  const closeTabsToRight = useCallback((path: string) => {
+    dispatch({ type: 'CLOSE_TO_RIGHT', path });
+  }, []);
+
   const actions = useMemo<FileTabsActions>(
-    () => ({ dispatch, openFile, closeTab, activateTab, onFileRenamed, onFileDeleted, moveToFront, closeAllTabs }),
-    [dispatch, openFile, closeTab, activateTab, onFileRenamed, onFileDeleted, moveToFront, closeAllTabs],
+    () => ({
+      dispatch, openFile, closeTab, activateTab, onFileRenamed, onFileDeleted,
+      moveToFront, closeAllTabs, closeOtherTabs, closeTabsToRight,
+    }),
+    [
+      dispatch, openFile, closeTab, activateTab, onFileRenamed, onFileDeleted,
+      moveToFront, closeAllTabs, closeOtherTabs, closeTabsToRight,
+    ],
   );
 
   return [state, actions] as const;

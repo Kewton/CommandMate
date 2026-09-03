@@ -269,3 +269,193 @@ describe('FilePanelTabs overflow dropdown clamping (Issue #1365)', () => {
     expect(openDropdown().style.transform).toBe('translate(-84px, 0px)');
   });
 });
+
+/**
+ * [Issue #2260] Bulk close: the "⋯" button and a tab right-click open the same
+ * menu (close all / others / to the right); a middle click closes one tab. When
+ * the set being closed holds unsaved edits the command is held behind a
+ * three-way confirmation.
+ */
+describe('FilePanelTabs bulk close (Issue #2260)', () => {
+  const defaultProps = {
+    worktreeId: 'test-wt',
+    onClose: vi.fn(),
+    onActivate: vi.fn(),
+    onLoadContent: vi.fn(),
+    onLoadError: vi.fn(),
+    onSetLoading: vi.fn(),
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const fourTabs = ['a.ts', 'b.ts', 'c.ts', 'd.ts'].map((p) => createTab(p));
+
+  /** Paths handed to onClose, in call order. */
+  function closedPaths(): string[] {
+    return defaultProps.onClose.mock.calls.map((call) => call[0] as string);
+  }
+
+  /** Raise a real `auxclick` (this @testing-library/dom has no auxClick alias). */
+  function auxClick(element: Element, button: number): void {
+    fireEvent(
+      element,
+      new MouseEvent('auxclick', { bubbles: true, cancelable: true, button }),
+    );
+  }
+
+  /**
+   * The confirmation is a Modal, and Modal stays mounted for its 200 ms exit
+   * window — so "dismissed" is the panel carrying data-state="closed", not the
+   * panel being gone.
+   */
+  function expectConfirmDismissed(): void {
+    expect(screen.getByTestId('modal-panel')).toHaveAttribute('data-state', 'closed');
+  }
+
+  it('always renders the tab-actions button while tabs are open', () => {
+    // Not hover-revealed: a hover-only affordance is invisible on touch.
+    const { unmount } = render(
+      <FilePanelTabs tabs={fourTabs} activeIndex={1} {...defaultProps} />,
+    );
+    const button = screen.getByTestId('tab-actions-button');
+    expect(button).toBeInTheDocument();
+    expect(button.className).not.toContain('opacity-0');
+    expect(button.className).not.toContain('group-hover');
+    unmount();
+
+    render(<FilePanelTabs tabs={[]} activeIndex={null} {...defaultProps} />);
+    expect(screen.queryByTestId('tab-actions-button')).not.toBeInTheDocument();
+  });
+
+  it('offers exactly the three bulk-close commands', () => {
+    render(<FilePanelTabs tabs={fourTabs} activeIndex={1} {...defaultProps} />);
+    fireEvent.click(screen.getByTestId('tab-actions-button'));
+
+    const menu = screen.getByTestId('context-menu');
+    expect(
+      Array.from(menu.querySelectorAll('[role="menuitem"]')).map((el) => el.textContent),
+    ).toEqual(['Close All', 'Close Others', 'Close to the Right']);
+  });
+
+  it('"Close All" closes every open tab exactly once', () => {
+    render(<FilePanelTabs tabs={fourTabs} activeIndex={1} {...defaultProps} />);
+    fireEvent.click(screen.getByTestId('tab-actions-button'));
+    fireEvent.click(screen.getByTestId('context-menu-close-all-tabs'));
+
+    expect(closedPaths().sort()).toEqual(['a.ts', 'b.ts', 'c.ts', 'd.ts']);
+    expect(defaultProps.onClose).toHaveBeenCalledTimes(4);
+  });
+
+  it('"Close Others" keeps the active tab and closes the rest exactly once', () => {
+    render(<FilePanelTabs tabs={fourTabs} activeIndex={1} {...defaultProps} />);
+    fireEvent.click(screen.getByTestId('tab-actions-button'));
+    fireEvent.click(screen.getByTestId('context-menu-close-other-tabs'));
+
+    expect(closedPaths().sort()).toEqual(['a.ts', 'c.ts', 'd.ts']);
+    expect(closedPaths()).not.toContain('b.ts');
+    expect(defaultProps.onClose).toHaveBeenCalledTimes(3);
+  });
+
+  it('"Close to the Right" closes only what follows the active tab', () => {
+    render(<FilePanelTabs tabs={fourTabs} activeIndex={1} {...defaultProps} />);
+    fireEvent.click(screen.getByTestId('tab-actions-button'));
+    fireEvent.click(screen.getByTestId('context-menu-close-tabs-to-right'));
+
+    // Rightmost first, so each close leaves the selection on the anchor's side.
+    expect(closedPaths()).toEqual(['d.ts', 'c.ts']);
+    expect(defaultProps.onClose).toHaveBeenCalledTimes(2);
+  });
+
+  it('a tab right-click opens the same menu anchored at that tab', () => {
+    render(<FilePanelTabs tabs={fourTabs} activeIndex={1} {...defaultProps} />);
+    fireEvent.contextMenu(screen.getByTestId('file-tab-c.ts'), { clientX: 40, clientY: 60 });
+
+    expect(screen.getByTestId('context-menu')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('context-menu-close-tabs-to-right'));
+
+    // Anchored at c.ts, not at the active tab.
+    expect(closedPaths()).toEqual(['d.ts']);
+  });
+
+  it('disables commands that would close nothing', () => {
+    render(<FilePanelTabs tabs={fourTabs} activeIndex={1} {...defaultProps} />);
+    fireEvent.contextMenu(screen.getByTestId('file-tab-d.ts'), { clientX: 40, clientY: 60 });
+
+    expect(screen.getByTestId('context-menu-close-tabs-to-right')).toBeDisabled();
+    expect(screen.getByTestId('context-menu-close-other-tabs')).not.toBeDisabled();
+  });
+
+  it('middle-clicking a tab closes it, and other buttons do not', () => {
+    render(<FilePanelTabs tabs={fourTabs} activeIndex={1} {...defaultProps} />);
+
+    auxClick(screen.getByTestId('file-tab-c.ts'), 1);
+    expect(defaultProps.onClose).toHaveBeenCalledTimes(1);
+    expect(defaultProps.onClose).toHaveBeenCalledWith('c.ts');
+    expect(defaultProps.onActivate).not.toHaveBeenCalled();
+
+    // The secondary button also raises auxclick; it must not close the tab it
+    // just opened the context menu on.
+    auxClick(screen.getByTestId('file-tab-a.ts'), 2);
+    expect(defaultProps.onClose).toHaveBeenCalledTimes(1);
+  });
+
+  // --------------------------------------------------------------------------
+  // Unsaved-changes confirmation
+  // --------------------------------------------------------------------------
+
+  /** a.ts and c.ts carry unsaved edits. */
+  const dirtyTabs = [
+    createTab('a.ts', { isDirty: true }),
+    createTab('b.ts'),
+    createTab('c.ts', { isDirty: true }),
+    createTab('d.ts'),
+  ];
+
+  function closeAllWithDirty(): void {
+    render(<FilePanelTabs tabs={dirtyTabs} activeIndex={1} {...defaultProps} />);
+    fireEvent.click(screen.getByTestId('tab-actions-button'));
+    fireEvent.click(screen.getByTestId('context-menu-close-all-tabs'));
+  }
+
+  it('holds the command behind a confirmation when the set has unsaved tabs', () => {
+    closeAllWithDirty();
+
+    expect(screen.getByTestId('file-tabs-close-confirm-body').textContent).toContain('2');
+    expect(defaultProps.onClose).not.toHaveBeenCalled();
+  });
+
+  it('does not confirm when the unsaved tabs are outside the set', () => {
+    render(<FilePanelTabs tabs={dirtyTabs} activeIndex={2} {...defaultProps} />);
+    // Anchored at c.ts: only d.ts is closed, and d.ts is clean.
+    fireEvent.click(screen.getByTestId('tab-actions-button'));
+    fireEvent.click(screen.getByTestId('context-menu-close-tabs-to-right'));
+
+    expect(screen.queryByTestId('file-tabs-close-confirm-body')).not.toBeInTheDocument();
+    expect(closedPaths()).toEqual(['d.ts']);
+  });
+
+  it('"Keep unsaved" closes only the tabs without unsaved edits', () => {
+    closeAllWithDirty();
+    fireEvent.click(screen.getByTestId('file-tabs-close-keep-unsaved'));
+
+    expect(closedPaths().sort()).toEqual(['b.ts', 'd.ts']);
+    expectConfirmDismissed();
+  });
+
+  it('"Close all" discards the unsaved tabs too', () => {
+    closeAllWithDirty();
+    fireEvent.click(screen.getByTestId('file-tabs-close-discard'));
+
+    expect(closedPaths().sort()).toEqual(['a.ts', 'b.ts', 'c.ts', 'd.ts']);
+  });
+
+  it('"Cancel" closes nothing', () => {
+    closeAllWithDirty();
+    fireEvent.click(screen.getByTestId('file-tabs-close-cancel'));
+
+    expect(defaultProps.onClose).not.toHaveBeenCalled();
+    expectConfirmDismissed();
+  });
+});

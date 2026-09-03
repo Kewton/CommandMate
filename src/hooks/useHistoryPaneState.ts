@@ -177,4 +177,20 @@ export function useHistoryPaneState(): UseHistoryPaneStateReturn {
   return { visible, width, toggle, setWidth };
 }
 
+/**
+ * DOM id of the History column rendered inside PC split `splitIndex`
+ * (Issue #744, moved here by Issue #2259).
+ *
+ * Lives beside the visibility state rather than inside `HistoryPane` because
+ * #2259 made the Action-bar toggle the single control for this column, and that
+ * toggle needs the region ids for `aria-controls` without importing the whole
+ * `HistoryPane` module (and its transcript/virtualizer dependency tree) into
+ * `TerminalSplitContainer`. `HistoryPane` re-exports it, so every existing
+ * importer — and every test that mocks `@/components/worktree/HistoryPane` —
+ * keeps working unchanged.
+ */
+export function splitHistorySlotId(splitIndex: number): string {
+  return `split-history-slot-${splitIndex}`;
+}
+
 export default useHistoryPaneState;

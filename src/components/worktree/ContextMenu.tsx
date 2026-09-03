@@ -4,6 +4,9 @@
  * Right-click context menu for FileTreeView operations.
  * Supports file/directory creation, rename, and delete.
  *
+ * [Issue #2260] Also serves as the generic menu shell: pass `items` to replace
+ * the built-in commands with caller-supplied ones (used by the file tab bar).
+ *
  * Features:
  * - Different menu items based on target type (file vs directory)
  * - Keyboard navigation
@@ -28,6 +31,29 @@ import { FilePlus, FolderPlus, Pencil, Trash2, Upload, FolderInput } from 'lucid
 import { Z_INDEX } from '@/config/z-index';
 import { CONTEXT_MENU_EXIT_DURATION_MS } from '@/config/ui-feedback-config';
 import { useExitAnimation } from '@/hooks/useExitAnimation';
+
+/**
+ * One entry of a caller-supplied menu (Issue #2260).
+ *
+ * Supplying `items` replaces the built-in file-tree commands wholesale, so a
+ * second surface (the file tab bar) can reuse this component's viewport
+ * clamping, roving-focus keyboard navigation and enter/exit animation without
+ * FileTreeView's target-type vocabulary leaking into it.
+ */
+export interface ContextMenuItemSpec {
+  /** Stable id — also the `data-testid` suffix, so keep it locale-independent */
+  id: string;
+  /** Translated label */
+  label: string;
+  /** Optional leading icon */
+  icon?: React.ReactNode;
+  /** Invoked on activation; the menu closes afterwards */
+  onSelect: () => void;
+  variant?: 'default' | 'danger';
+  showDividerAfter?: boolean;
+  /** Render the row inert (e.g. a command with nothing to act on) */
+  disabled?: boolean;
+}
 
 /**
  * Props for ContextMenu component
@@ -56,6 +82,14 @@ export interface ContextMenuProps {
   onUpload?: (targetPath: string) => void;
   /** Move file/directory callback [Issue #162] */
   onMove?: (path: string, type: 'file' | 'directory') => void;
+  /**
+   * Caller-supplied menu entries (Issue #2260). When present the built-in
+   * file-tree commands are not rendered and `targetPath` no longer gates
+   * enablement — each entry carries its own `disabled`.
+   */
+  items?: ContextMenuItemSpec[];
+  /** Override the menu's accessible name (defaults to `contextMenu.label`) */
+  ariaLabel?: string;
 }
 
 /** Gap kept between the menu and the viewport edge (px) */
@@ -100,6 +134,8 @@ interface MenuItem {
   showDividerAfter?: boolean;
   /** Show only for certain target types */
   showFor?: ('file' | 'directory')[];
+  /** Explicit enablement; when absent the `targetPath` gate applies */
+  disabled?: boolean;
 }
 
 /**
@@ -131,6 +167,8 @@ export const ContextMenu = memo(function ContextMenu({
   onDelete,
   onUpload,
   onMove,
+  items,
+  ariaLabel,
 }: ContextMenuProps) {
   const t = useTranslations('worktree');
   const menuRef = useRef<HTMLDivElement>(null);
@@ -144,7 +182,10 @@ export const ContextMenu = memo(function ContextMenu({
 
   // [Issue #1362] Placement measured for the current anchor. The item set
   // depends on targetType, so the size must be re-measured when it changes.
-  const placementKey = `${position.x}:${position.y}:${targetType}`;
+  // [Issue #2260] Caller-supplied entries change the menu's height the same way
+  // targetType does, so their identity belongs in the key too.
+  const itemsKey = items ? items.map((i) => i.id).join(',') : 'builtin';
+  const placementKey = `${position.x}:${position.y}:${targetType}:${itemsKey}`;
   const [placement, setPlacement] = useState<Placement | null>(null);
   const placed = placement?.key === placementKey ? placement : null;
 
@@ -238,12 +279,25 @@ export const ContextMenu = memo(function ContextMenu({
   ];
 
   /**
-   * Filter items based on target type
+   * Filter items based on target type, or use the caller's own entries.
    */
-  const visibleItems = menuItems.filter((item) => {
-    if (!item.showFor) return true;
-    return targetType && item.showFor.includes(targetType);
-  });
+  const visibleItems: MenuItem[] = items
+    ? items.map((item) => ({
+        id: item.id,
+        label: item.label,
+        icon: item.icon ?? null,
+        onClick: () => {
+          item.onSelect();
+          onClose();
+        },
+        variant: item.variant,
+        showDividerAfter: item.showDividerAfter,
+        disabled: item.disabled ?? false,
+      }))
+    : menuItems.filter((item) => {
+        if (!item.showFor) return true;
+        return targetType && item.showFor.includes(targetType);
+      });
 
   /**
    * Handle keyboard navigation
@@ -308,7 +362,7 @@ export const ContextMenu = memo(function ContextMenu({
       ref={menuRef}
       data-testid="context-menu"
       role="menu"
-      aria-label={t('contextMenu.label')}
+      aria-label={ariaLabel ?? t('contextMenu.label')}
       className={`fixed min-w-[160px] py-1 bg-surface rounded-lg shadow-lg border border-border ${animationClasses}`}
       style={{
         zIndex: Z_INDEX.CONTEXT_MENU,
@@ -318,7 +372,11 @@ export const ContextMenu = memo(function ContextMenu({
         top: `${placed ? placed.top : 0}px`,
       }}
     >
-      {visibleItems.map((item, index) => (
+      {visibleItems.map((item, index) => {
+        // [Issue #2260] Built-in commands all act on `targetPath`, so an absent
+        // target disables the lot; caller-supplied entries decide for themselves.
+        const isDisabled = item.disabled ?? !targetPath;
+        return (
         <React.Fragment key={item.id}>
           <button
             role="menuitem"
@@ -326,12 +384,12 @@ export const ContextMenu = memo(function ContextMenu({
             // translated, so text selectors would break under a non-en locale.
             data-testid={`context-menu-${item.id}`}
             onClick={item.onClick}
-            disabled={!targetPath}
+            disabled={isDisabled}
             className={`w-full flex items-center gap-3 px-3 py-2 text-sm transition-colors focus:outline-none focus:bg-muted ${
               item.variant === 'danger'
                 ? 'text-danger hover:bg-danger-subtle focus:bg-danger-subtle'
                 : 'text-foreground hover:bg-muted'
-            } ${!targetPath ? 'opacity-50 cursor-not-allowed' : ''}`}
+            } ${isDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
           >
             {item.icon}
             <span>{item.label}</span>
@@ -343,7 +401,8 @@ export const ContextMenu = memo(function ContextMenu({
             />
           )}
         </React.Fragment>
-      ))}
+        );
+      })}
     </div>
   );
 });

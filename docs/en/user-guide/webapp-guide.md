@@ -234,9 +234,29 @@ View past message history.
 
 ### Desktop
 
-History is displayed in the **History Pane** on the left.
+History is displayed in the **History column** on the left of each split.
 - User messages and Claude's responses are shown chronologically
 - Scroll to view past history
+
+### Showing and hiding it (desktop)
+
+The **[History]** and **[Open Files]** buttons on the right of the action bar
+above the splits are the ONLY switches for their column / panel (Issue #2259).
+Hiding the column used to leave a 36px vertical strip carrying a second copy of
+the same button; that strip is **gone**, and the terminal takes the width back
+(108px at three splits).
+
+| Button | What it shows/hides | When it is disabled |
+|--------|--------------------|---------------------|
+| **[History]** | Each split's History column. **Applies to every split at once** | While every split shows the Chat surface (chat has no History column) |
+| **[Open Files]** | The file panel on the right; the badge is the open tab count | With no tab open and no diff showing |
+
+The arrow in the History column's header points the way it **folds** (left).
+Bring it back with [History] in the action bar.
+
+Note that the Activity Bar's **"File Tree"** (the icon column on the far left)
+is for browsing the worktree, and is a different thing from the action bar's
+**"Open Files"** (the panel showing files you opened).
 
 ### Mobile
 

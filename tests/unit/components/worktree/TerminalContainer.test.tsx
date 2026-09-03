@@ -96,7 +96,10 @@ describe('TerminalContainer (Issue #730)', () => {
     expect(screen.getByRole('separator')).toBeInTheDocument();
   });
 
-  it('does not render history wrapper when visible=false; shows expand bar with aria-controls', () => {
+  // Issue #2259: hiding the column used to leave a 36px vertical strip carrying
+  // a second "show history" button. It is gone — the Action-bar toggle is the
+  // only control — so the terminal is the whole row.
+  it('renders nothing beside the terminal when visible=false', () => {
     hookReturn.visible = false;
     render(
       <TerminalContainer
@@ -106,15 +109,14 @@ describe('TerminalContainer (Issue #730)', () => {
     );
     expect(document.getElementById('worktree-history-pane')).toBeNull();
     expect(screen.queryByTestId('history-content')).not.toBeInTheDocument();
-    const expandBar = screen.getByTestId('terminal-container-expand-bar');
-    expect(expandBar).toBeInTheDocument();
-    // Issue #840: aria-label is now driven by i18n (worktree.terminal.showHistory).
-    const btn = screen.getByTestId('history-pane-expand');
-    expect(btn).toHaveAttribute('aria-controls', 'worktree-history-pane');
-    expect(btn).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByTestId('terminal-container-expand-bar')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('history-pane-expand')).not.toBeInTheDocument();
+    // The terminal slot is the row's only child, so it occupies 100% of it.
+    const row = screen.getByTestId('terminal-container-terminal-slot').parentElement;
+    expect(row?.children).toHaveLength(1);
   });
 
-  it('expand bar onClick calls toggle()', () => {
+  it('offers no toggle of its own while the column is hidden', () => {
     hookReturn.visible = false;
     render(
       <TerminalContainer
@@ -122,8 +124,8 @@ describe('TerminalContainer (Issue #730)', () => {
         terminal={<div data-testid="terminal-content">T</div>}
       />
     );
-    fireEvent.click(screen.getByTestId('history-pane-expand'));
-    expect(mockToggle).toHaveBeenCalledTimes(1);
+    expect(screen.queryAllByRole('button')).toHaveLength(0);
+    expect(mockToggle).not.toHaveBeenCalled();
   });
 
   it('terminal is rendered regardless of visible state', () => {

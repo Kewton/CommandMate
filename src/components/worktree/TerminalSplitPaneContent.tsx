@@ -81,6 +81,7 @@ import {
 import { useSplitMessages } from '@/hooks/useSplitMessages';
 import { usePendingMessages, type OptimisticSendOptions } from '@/hooks/usePendingMessages';
 import { useHistoryPaneState } from '@/hooks/useHistoryPaneState';
+import { emitSurfaceModeChange } from '@/hooks/useSplitSurfaceModes';
 import { worktreeApi } from '@/lib/api-client';
 import { buildPromptResponseBody } from '@/lib/prompt-response-body-builder';
 import { readPromptDecisionId } from '@/components/worktree/prompt-decision-id';
@@ -234,8 +235,13 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
     (mode: SurfaceMode) => {
       setSurfaceModeState(mode);
       writeSurfaceMode(surfaceStorageKey, mode);
+      // Issue #2259: the Action bar disables its History toggle while EVERY
+      // split shows chat (the chat surface has no History column). It reads the
+      // modes out of the same storage, but a same-window write fires no
+      // `storage` event, so the change is announced explicitly.
+      emitSurfaceModeChange({ worktreeId, splitIndex, mode });
     },
-    [surfaceStorageKey],
+    [surfaceStorageKey, worktreeId, splitIndex],
   );
 
   // Read by the keydown listener so the listener itself never has to be torn
@@ -678,10 +684,16 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   );
 
   // Issue #744: compose [HistoryPane | PaneResizer | TerminalDisplay]. When the
-  // history is collapsed, a compact expand bar replaces it.
+  // history is hidden, nothing replaces it and the terminal takes the whole
+  // row: Issue #2259 removed the 36px expand strip, which cost 36px per split
+  // (108px at 3 splits) to duplicate a toggle the Action bar already owns.
   const terminalSlot = useMemo(
     () => (
-      <div ref={historyContainerRef} className="flex h-full min-h-0 w-full">
+      <div
+        ref={historyContainerRef}
+        data-testid={`split-terminal-row-${splitIndex}`}
+        className="flex h-full min-h-0 w-full"
+      >
         {historyVisible ? (
           <>
             <div
@@ -702,49 +714,16 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
               ariaValueNow={historyWidth}
             />
           </>
-        ) : (
-          <div
-            data-testid={`split-history-expand-bar-${splitIndex}`}
-            className="flex-shrink-0 flex items-start justify-center w-9 bg-gray-50 dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700"
-          >
-            <button
-              type="button"
-              data-testid={`split-history-expand-${splitIndex}`}
-              aria-label={t('terminal.showHistory')}
-              title={t('terminal.showHistory')}
-              aria-expanded="false"
-              onClick={toggleHistory}
-              className="flex flex-col items-center gap-2 w-full pt-2 text-gray-500 dark:text-gray-400 hover:text-accent-600 dark:hover:text-accent-400 focus:outline-none focus:ring-2 focus:ring-ring"
-            >
-              <svg
-                className="w-4 h-4 flex-shrink-0"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-                aria-hidden="true"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M9 5l7 7-7 7"
-                />
-              </svg>
-              <span
-                className="text-xs font-medium tracking-wide select-none"
-                style={{ writingMode: 'vertical-rl' }}
-                aria-hidden="true"
-              >
-                {t('terminal.historyLabel')}
-              </span>
-            </button>
-          </div>
-        )}
+        ) : null}
         <div
           // Issue #2131: the measured half of the pair above. This is the box
           // `TerminalDisplay` fills, so its `getBoundingClientRect().height` IS
           // the "terminal height" the Issue's table reports.
           data-testid={`split-terminal-slot-${splitIndex}`}
+          // Issue #2259: hiding the column leaves NOTHING beside the terminal —
+          // the 36px `w-9` strip that used to sit here is gone, so the width is
+          // written as an explicit 100% rather than left to `flex-grow` alone.
+          style={historyVisible ? undefined : { width: '100%' }}
           className="flex-grow overflow-hidden min-w-0 min-h-0 relative"
         >
           {terminalDisplaySlot}
@@ -756,10 +735,8 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       historyWidth,
       historyPaneSlot,
       handleHistoryResize,
-      toggleHistory,
       terminalDisplaySlot,
       splitIndex,
-      t,
     ],
   );
 

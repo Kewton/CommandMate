@@ -6,8 +6,15 @@
 
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, act } from '@testing-library/react';
 import { TerminalSplitContainer } from '@/components/worktree/TerminalSplitContainer';
+import {
+  OpenFilesContext,
+  FILE_PANEL_PANE_ID,
+  type OpenFilesSnapshot,
+} from '@/hooks/useFilePanelState';
+import { SURFACE_MODE_CHANGE_EVENT } from '@/hooks/useSplitSurfaceModes';
+import { getSplitSurfaceModeStorageKey } from '@/config/surface-mode-config';
 import { clearTerminalSplitsLocalStorage } from '@tests/helpers/terminal-splits';
 import {
   CLI_TOOL_IDS,
@@ -45,6 +52,33 @@ function setup(renderImpl?: () => React.ReactNode, instances: AgentInstance[] = 
       instances={instances}
       renderPane={renderPane}
     />,
+  );
+  return { renderPane, ...utils };
+}
+
+/**
+ * Issue #2259: the Action bar's "Open Files" toggle is disabled while the file
+ * panel has nothing to show, and the count it badges comes from the enclosing
+ * `FilePanelSplit` through context. Tests that drive that button therefore have
+ * to declare what is open.
+ */
+function setupWithOpenFiles(
+  openFiles: OpenFilesSnapshot,
+  instances: AgentInstance[] = ROSTER,
+) {
+  const renderPane = vi.fn(({ splitIndex, cliToolId }) => (
+    <div data-split-index={splitIndex} data-cli-tool={cliToolId}>
+      <span data-testid={`pane-cli-${splitIndex}`}>{cliToolId}</span>
+    </div>
+  ));
+  const utils = render(
+    <OpenFilesContext.Provider value={openFiles}>
+      <TerminalSplitContainer
+        worktreeId="w-1"
+        instances={instances}
+        renderPane={renderPane}
+      />
+    </OpenFilesContext.Provider>,
   );
   return { renderPane, ...utils };
 }
@@ -192,7 +226,7 @@ describe('TerminalSplitContainer History/Files toggles (Issue #841)', () => {
   });
 
   it('Files toggle defaults to pressed (visible) and flips on click', () => {
-    setup();
+    setupWithOpenFiles({ tabCount: 1, hasDiff: false });
     const btn = screen.getByTestId('toggle-file-panel');
     // collapsed=false → visible → pressed
     expect(btn).toHaveAttribute('aria-pressed', 'true');
@@ -209,18 +243,23 @@ describe('TerminalSplitContainer History/Files toggles (Issue #841)', () => {
   });
 
   it('Files toggle persists collapsed state to localStorage', () => {
-    setup();
+    setupWithOpenFiles({ tabCount: 1, hasDiff: false });
     fireEvent.click(screen.getByTestId('toggle-file-panel'));
     // Files hidden → file panel collapsed=true
     expect(window.localStorage.getItem(FILE_PANEL_KEY)).toBe('true');
   });
 
   it('aria-label / title reflect show vs hide depending on state', () => {
-    setup();
+    setupWithOpenFiles({ tabCount: 1, hasDiff: false });
     const history = screen.getByTestId('toggle-history-pane');
     // default visible → "hide" wording
     expect(history).toHaveAttribute('aria-label', 'worktree.terminal.hideHistory');
-    expect(history).toHaveAttribute('title', 'worktree.terminal.hideHistory');
+    // Issue #2259: the title also carries the scope of the switch, because one
+    // History state drives every split.
+    expect(history.getAttribute('title')).toContain('worktree.terminal.hideHistory');
+    expect(history.getAttribute('title')).toContain(
+      'worktree.terminal.historyAllSplitsHint',
+    );
     fireEvent.click(history);
     expect(history).toHaveAttribute('aria-label', 'worktree.terminal.showHistory');
 
@@ -652,5 +691,155 @@ describe('TerminalSplitContainer header→split wiring (Issue #1152)', () => {
     fireEvent.click(screen.getByTestId('hdr-select-claude-2'));
     fireEvent.click(screen.getByTestId('hdr-select-claude-2'));
     expect(screen.getByTestId('pane-inst-0').textContent).toBe('claude-2');
+  });
+});
+
+// ===========================================================================
+// Issue #2259: the Action bar is now the ONLY place either panel is toggled,
+// so each toggle has to say when its panel cannot appear at all instead of
+// flipping a state with no visible effect.
+//
+//  - History lives in the TERMINAL surface. The chat surface (#2193) shows the
+//    transcript alone by design (#2232), so with every split in chat mode the
+//    button changed nothing while still rendering as pressed — the screenshot
+//    in #2232's UAT.
+//  - The file panel is not rendered at all with no tabs and no diff, which is
+//    the "press Files and nothing happens" complaint the Issue opens with.
+// ===========================================================================
+describe('TerminalSplitContainer panel toggle availability (Issue #2259)', () => {
+  const WORKTREE_ID = 'w-1';
+
+  beforeEach(() => {
+    window.localStorage.clear();
+    clearTerminalSplitsLocalStorage();
+  });
+  afterEach(() => {
+    window.localStorage.clear();
+    clearTerminalSplitsLocalStorage();
+  });
+
+  function setSurface(splitIndex: number, mode: 'terminal' | 'chat') {
+    window.localStorage.setItem(
+      getSplitSurfaceModeStorageKey(WORKTREE_ID, splitIndex),
+      mode,
+    );
+  }
+
+  describe('History toggle', () => {
+    it('is enabled while the only split shows the terminal surface', () => {
+      setSurface(0, 'terminal');
+      setup();
+      const btn = screen.getByTestId('toggle-history-pane');
+      expect(btn).not.toBeDisabled();
+      expect(btn).toHaveAttribute('aria-disabled', 'false');
+    });
+
+    it('is disabled when every split shows chat', () => {
+      setSurface(0, 'chat');
+      setup();
+      const btn = screen.getByTestId('toggle-history-pane');
+      expect(btn).toBeDisabled();
+      expect(btn).toHaveAttribute('aria-disabled', 'true');
+      expect(btn).toHaveAttribute('title', 'worktree.terminal.historyChatOnlyHint');
+    });
+
+    it('does not toggle the persisted state while disabled', () => {
+      setSurface(0, 'chat');
+      setup();
+      fireEvent.click(screen.getByTestId('toggle-history-pane'));
+      expect(
+        window.localStorage.getItem('commandmate.worktree.historyVisible'),
+      ).toBeNull();
+    });
+
+    it('is enabled again as soon as ONE split shows the terminal', () => {
+      setSurface(0, 'chat');
+      setSurface(1, 'terminal');
+      setup();
+      expect(screen.getByTestId('toggle-history-pane')).toBeDisabled();
+      // Adding split 1 brings a terminal surface back onto the screen.
+      fireEvent.click(screen.getByTestId('add-terminal-split'));
+      expect(screen.getByTestId('toggle-history-pane')).not.toBeDisabled();
+    });
+
+    it('re-enables live when a split switches back to the terminal', () => {
+      setSurface(0, 'chat');
+      setup();
+      expect(screen.getByTestId('toggle-history-pane')).toBeDisabled();
+
+      // The panes broadcast their mode changes; the bar listens (a same-window
+      // localStorage write fires no `storage` event).
+      act(() => {
+        window.dispatchEvent(
+          new CustomEvent(SURFACE_MODE_CHANGE_EVENT, {
+            detail: { worktreeId: WORKTREE_ID, splitIndex: 0, mode: 'terminal' },
+          }),
+        );
+      });
+      expect(screen.getByTestId('toggle-history-pane')).not.toBeDisabled();
+    });
+
+    it('names every split history region in aria-controls', () => {
+      setup();
+      expect(screen.getByTestId('toggle-history-pane')).toHaveAttribute(
+        'aria-controls',
+        'split-history-slot-0',
+      );
+      fireEvent.click(screen.getByTestId('add-terminal-split'));
+      expect(screen.getByTestId('toggle-history-pane')).toHaveAttribute(
+        'aria-controls',
+        'split-history-slot-0 split-history-slot-1',
+      );
+    });
+
+    it('reports its expanded state, not just its pressed state', () => {
+      setup();
+      const btn = screen.getByTestId('toggle-history-pane');
+      expect(btn).toHaveAttribute('aria-expanded', 'true');
+      fireEvent.click(btn);
+      expect(btn).toHaveAttribute('aria-expanded', 'false');
+    });
+  });
+
+  describe('"Open Files" toggle', () => {
+    it('is disabled with no tabs and no diff', () => {
+      setupWithOpenFiles({ tabCount: 0, hasDiff: false });
+      const btn = screen.getByTestId('toggle-file-panel');
+      expect(btn).toBeDisabled();
+      expect(btn).toHaveAttribute('aria-disabled', 'true');
+      expect(btn).toHaveAttribute('title', 'worktree.terminal.filesEmptyHint');
+      expect(screen.queryByTestId('open-files-count')).not.toBeInTheDocument();
+    });
+
+    it('is enabled by a diff even with no tabs open (Issue #447 path)', () => {
+      setupWithOpenFiles({ tabCount: 0, hasDiff: true });
+      expect(screen.getByTestId('toggle-file-panel')).not.toBeDisabled();
+      // A diff is not a tab, so there is no count to badge.
+      expect(screen.queryByTestId('open-files-count')).not.toBeInTheDocument();
+    });
+
+    it('badges the open tab count', () => {
+      setupWithOpenFiles({ tabCount: 3, hasDiff: false });
+      const btn = screen.getByTestId('toggle-file-panel');
+      expect(btn).not.toBeDisabled();
+      expect(screen.getByTestId('open-files-count')).toHaveTextContent('3');
+    });
+
+    it('does not toggle the persisted state while disabled', () => {
+      setupWithOpenFiles({ tabCount: 0, hasDiff: false });
+      fireEvent.click(screen.getByTestId('toggle-file-panel'));
+      expect(
+        window.localStorage.getItem('commandmate.worktree.filePanelCollapsed'),
+      ).toBeNull();
+    });
+
+    it('points aria-controls / aria-expanded at the file panel region', () => {
+      setupWithOpenFiles({ tabCount: 1, hasDiff: false });
+      const btn = screen.getByTestId('toggle-file-panel');
+      expect(btn).toHaveAttribute('aria-controls', FILE_PANEL_PANE_ID);
+      expect(btn).toHaveAttribute('aria-expanded', 'true');
+      fireEvent.click(btn);
+      expect(btn).toHaveAttribute('aria-expanded', 'false');
+    });
   });
 });
