@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **feat(agent): Command Code を対話エージェントとして起動・送受信・ステータス検出できるようにする** (#2250): `CLI_TOOL_IDS` に `command-code` を追加（8 ツール）し、`CommandCodeTool`（起動コマンド `commandcode --trust --skip-onboarding --no-auto-update`、`/exit` での graceful exit、送信時の capture キャッシュ無効化）と専用検出モジュール `detection/tools/command-code/detect.ts` を新設。claude 系定数を流用せず `COMMAND_CODE_*` パターン一式（プロンプト・区切り・thinking・応答マーカー `⠶`・バナー・hooks 通知・モード表示）と構造的な composer 境界 `findCommandCodeChromeStart()` を実測 200x1000 フレームから起こし、起動画面をユーザエコー不在で除外することで #2247 型の「バージョン文字列を含む短い返答が保存されない」退行を持ち込まずに完了判定を実装。権限モードは実バイナリの `.choices()` から `default` / `standard` / `plan` / `auto-accept` / `dont-ask` の 5 種を採用した。
+
 ## [0.30.2] - 2026-09-03
 
 > **Highlight**: v0.30.1 で新設したチャット出力面に残っていた、**返答が履歴に残らない／欠けたまま固定される** 2 経路を塞いだ。`stop` hook の発火と転写ファイルへの最終追記に順序保証が無いため、ツール呼び出しまでしか無い転写が「非空」と判定されて書かれ、冪等キーで固定されていた（実測 2026-09-03: 1 インスタンス 20 ターン中 9 ターンが `> **Tool calls (1)**` だけの 236 字）。あわせて `/orchestrate` や `/release` のような slash コマンドで始まるターンが**そもそも開かれず**、返答が履歴にもスクレイプにも残らなかった問題を、`<command-…>` 記録 222 件の全数調査（先頭タグが例外ゼロの判別子）にもとづいて修正した。**既に短く保存されていた行は、更新後の起動で次の poll から自動修復される**（手動 backfill は不要）。
