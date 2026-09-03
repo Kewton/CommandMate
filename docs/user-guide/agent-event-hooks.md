@@ -5,7 +5,7 @@ hook を入れると、エージェント CLI 自身が発する**構造化イ�
 加わる（Issue #1549）。
 
 **この hook は CommandMate が自動注入する**（Issue #1722、Epic #1720 Phase 4）。
-対応は **claude / copilot / gemini / antigravity / codex / opencode の 6 ツール**で、
+対応は **claude / copilot / gemini / antigravity / codex / opencode / command-code の 7 ツール**で、
 手動設定は不要になった（§0）。手動設定を残していても壊れない — §0.4 を参照。
 
 > **文字列解析は廃止しない**。hook は「二つ目の意見」であり、
@@ -18,7 +18,7 @@ hook を入れると、エージェント CLI 自身が発する**構造化イ�
 CommandMate がエージェントセッションを**新規作成**するとき、そのツール用の hook 設定を
 自動で用意し、起動コマンドに載せる。対応ツールの正本は
 `src/lib/hooks/sources/registry.ts` 末尾の `registerAgentEventSource(...)` 呼び出しで、
-現在は **claude / copilot / gemini / antigravity / codex / opencode の 6 ツール**である
+現在は **claude / copilot / gemini / antigravity / codex / opencode / command-code の 7 ツール**である
 （`vibe-local` だけが未登録。登録の無いツールは `legacy-relay` の互換ソースに落ち、
 #1549 時点の手動設定と同じ挙動になる）。
 
@@ -35,6 +35,7 @@ CommandMate がエージェントセッションを**新規作成**するとき�
 | **gemini** | `<worktree>/.gemini/settings.json` へ merge | per-worktree | `CM_HOOK_URL`（instance は URL 側） | `command` | **なし**（応答が裁定になるイベントを登録しない） | — |
 | **antigravity** | `~/.gemini/config/hooks.json`（マシン共通。gemini と同じツリーに同居） | global-singleton | 環境変数 `CM_HOOK_URL` / `CM_PERMISSION_HOOK_URL` | `command` | `PreToolUse` | 5 秒 |
 | **opencode** | **何も書かない** | none | 起動時に割り当てた `--port <N>` | **push ではない** — CommandMate が SSE を**購読する側** | `POST /permission/:id/reply` | **なし（無期限に待つ）** |
+| **command-code** | `<worktree>/.commandcode/settings.local.json` へ merge | per-worktree | `CM_HOOK_URL`（instance は URL 側） | `command`（`matcher` は**空文字必須**。§0.8） | **なし**（`PreToolUse` は承認の後に発火するので裁定に使えない） | — |
 
 読み方の注意:
 
@@ -44,11 +45,11 @@ CommandMate がエージェントセッションを**新規作成**するとき�
   読み直さずここを見る。
 - **`type:"http"` が使えるのは claude だけ。** copilot は `http` handler から 1 件も
   リクエストが届かず（エラーも出ない）、codex は `http` handler が 1 つあるだけで
-  `hooks.json` 全体を破棄する。他 4 ツールでは
+  `hooks.json` 全体を破棄する。他 5 ツールでは
   `scripts/hooks/cmate-agent-event.sh`（§2）が唯一の配送路である。
 - **`gemini` の `timeout` はミリ秒**。他ツールのつもりで `5` と書くと 5ms で殺され、
   「登録もされ、開示バナーにも出て、実行もされたのに全イベントが失われる」状態になる。
-- **裁定の見送り（no-decision）が安全でないのは opencode だけ。** 他 5 ツールは
+- **裁定の見送り（no-decision）が安全でないのは opencode だけ。** 他 6 ツールは
   見送っても承認ダイアログが出るだけだが、opencode は**セッションが止まる**
   （実測 10 分 19 秒無応答で pending のまま）。§0.8 を参照。
 
@@ -56,13 +57,13 @@ CommandMate がエージェントセッションを**新規作成**するとき�
 
 | 事項 | 内容 |
 |---|---|
-| opt-out | **`CM_AGENT_HOOKS_INJECT=0`** で 6 ツールとも注入をスキップし、Issue #1722 以前と同じ素の起動コマンドに戻る（§0.3） |
-| 生成物の置き場所 | claude の生成ファイルは `~/.commandmate/hooks`（`CM_AGENT_HOOKS_DIR` で差替可）。**ユーザー自身の設定ファイルを書き換えるのは copilot / codex / gemini / antigravity で、いずれも merge** — 自分の marker つきエントリだけを差し替え、他のキーとハンドラは素通しする。解釈できないファイルは**触らず**、hook 無しで起動する |
+| opt-out | **`CM_AGENT_HOOKS_INJECT=0`** で 7 ツールとも注入をスキップし、Issue #1722 以前と同じ素の起動コマンドに戻る（§0.3） |
+| 生成物の置き場所 | claude の生成ファイルは `~/.commandmate/hooks`（`CM_AGENT_HOOKS_DIR` で差替可）。**ユーザー自身の設定ファイルを書き換えるのは copilot / codex / gemini / antigravity / command-code で、いずれも merge** — 自分の marker つきエントリだけを差し替え、他のキーとハンドラは素通しする。解釈できないファイルは**触らず**、hook 無しで起動する |
 | fail-open | timeout も接続失敗も設定書き込み失敗もエージェントを止めない。**hook の無い素の起動に落ちるだけ**である |
 | 既存セッション | healthy な既存セッションの**再利用時は注入しない**（§0.5）。次の新規作成から効く |
 | 起動完了の signal | **hook の到着を起動完了の判定に使わない**（§0.5） |
 
-**以下 §0.1〜§0.7 は claude の詳細**である。claude 以外の 5 ツール固有の注意は §0.8 にまとめた。
+**以下 §0.1〜§0.7 は claude の詳細**である。claude 以外の 6 ツール固有の注意は §0.8 にまとめた。
 
 ### claude の注入ファイル
 
@@ -166,7 +167,8 @@ Claude は承認ダイアログを**描く前に**この hook を叩き、Comman
 - **画面ベースの Auto-Yes は残っている。** hooks を注入できない環境（`CM_AGENT_HOOKS_INJECT=0`、
   設定ファイルの書き込みに失敗した場合、codex の hook trust 未承認など）と `vibe-local` では
   従来どおり画面解析で動く。裁定 hook を持つ 5 ツール（claude / codex / copilot / antigravity /
-  opencode）では、hook 側が先に裁定する。
+  opencode）では、hook 側が先に裁定する。**`command-code` も画面ベースのまま**である —
+  このツールの `PreToolUse` は承認ダイアログの**後**に発火するので裁定 hook を作れない（§0.8）。
 
 > **この 2 つの挙動は実 TUI で継続的に確認されている**（Issue #1847）。
 > `npm run canary` の `permission-hook-allow`（allow → ダイアログが出ずにツールが走る）と
@@ -247,7 +249,7 @@ CM_AGENT_HOOKS_INJECT=0 commandmate start
 deny ルールだけを外すスイッチは**用意していない**。構造化イベントごと失う方が、
 「機構は入っているが誰かが黙って外している」状態より事故を見つけやすい。
 
-### 0.8 claude 以外の 5 ツール
+### 0.8 claude 以外の 6 ツール
 
 §0.0 の表の各行が、実装のどこで何を意味しているか。**どれも実測に基づく**（出典は
 `docs/design/agent-hooks-phase4-live-verification.md` と各ソースのモジュールコメント）。
@@ -299,7 +301,7 @@ deny ルールだけを外すスイッチは**用意していない**。構造�
 
 #### gemini — worktree 内の `.gemini/settings.json`、`timeout` はミリ秒
 
-- 5 ツール中このツールだけ hook 設定が worktree スコープで、`~/.gemini/settings.json` は
+- worktree スコープの hook 設定を持つのは gemini と command-code の 2 つで、`~/.gemini/settings.json` は
   一切開かない。**利用者のリポジトリ内のファイルを書き換える**ので、merge であることと、
   書き込む command 文字列が起動ごとに変わらないことの両方が要件になる
   （gemini は trust した command 文字列を記録しており、変わると開示バナーを出し直す）。
@@ -322,7 +324,7 @@ deny ルールだけを外すスイッチは**用意していない**。構造�
 
 - **設定ファイルを 1 バイトも書かない**（`configScope: 'none'`）。統合の実体は
   起動コマンドに付ける `--port <N>` と、そのポートへの SSE 購読だけである。
-  他 5 ツールが「エージェント → CommandMate へ POST」なのに対し、これだけが逆向きになる。
+  他 6 ツールが「エージェント → CommandMate へ POST」なのに対し、これだけが逆向きになる。
 - **ポートは CommandMate が明示的に割り当てる**（範囲 4200-4299）。`--port 0` は
   「OS に空きを訊く」ではなく「まず 4096、埋まっていれば ephemeral」で、実ポートを
   読み戻す手段が stdout か `lsof` しか無い。割当は `~/.commandmate/opencode-ports.json`
@@ -333,6 +335,37 @@ deny ルールだけを外すスイッチは**用意していない**。構造�
   「判断できないときは黙る」が唯一成立しないソースである。
 - 縮退は全経路 fail-open（ポート枯渇・サーバ不達・SSE 断のいずれも画面解析に落ちる）。
   `CM_AGENT_HOOKS_INJECT=0` は起動を素の `opencode` に戻す。
+
+#### command-code — worktree 内の `.commandcode/settings.local.json`、`matcher` は空文字
+
+- **書くのは `settings.local.json`（machine-local 層）で、`settings.json`（共有層）ではない。**
+  Command Code は `<cwd>/.commandcode/settings.local.json` → `<cwd>/.commandcode/settings.json` →
+  `~/.commandcode/settings.json` の 3 層を読み、**上書きではなく全ハンドラを合併**する
+  （重複除去は `event:matcher:command` の一致のみ）。実測: 2 層に別コマンドを登録すると
+  画面に `◼ Ran 2 session start hooks` と出る。合併されるので、CommandMate が
+  local 層を占有してもユーザーの共有層は 1 件も失われない。共有層は
+  チームがコミットする側なので、CommandMate 固有の絶対パスを書き込まない。
+- **`matcher` は空文字でなければならない。`"*"` は `SessionStart` と `Stop` を無言で消す。**
+  ハンドラ選択が `if (handler.matcher) { if (!toolName) continue; … }` という形で、
+  この 2 event は `toolName: ""` で呼ばれる。`"*"` は「全一致」としてロードは通り
+  警告も出ないので、**登録されているのに一度も発火しない**状態になる。
+  実測: `""` で `Ran 2 session start hooks`、`"*"` で `Ran 1 session start hook`。
+- **登録できる event は 4 つで全部**（`SessionStart` / `PreToolUse` / `PostToolUse` / `Stop`）。
+  `UserPromptSubmit` / `Notification` / `SessionEnd` は「観測されない」のではなく
+  **ロード時に拒否される**（`unknown hook event "…" — skipped`）。
+- **`PreToolUse` は承認ダイアログの「後」に発火する**（実測: 表示 00:11:37 → 承認 00:11:46 →
+  hook 00:11:46）。したがって**裁定 hook を作れない** — CommandMate はこの event を
+  `/api/hooks/permission-request` へ向けず、ただの観測として記録する。Auto-Yes は
+  TUI の番号応答（画面ベース）のままである。
+- `timeout` の単位は**秒**で、`(0, 600]` の範囲外は警告つきで捨てられる（既定 30）。
+- **応答 `{}` で全 event が続行する**（実測）。ブロックになるのは `decision: "block"` /
+  `block: true` / `hookSpecificOutput.permissionDecision: "deny"` と、
+  **`PreToolUse` / `Stop` での exit code 2** だけ。中継スクリプトは stdout に何も書かず、
+  POST 失敗でも exit 0 で終わるので、サーバが落ちていてもターンは止まらない。
+- **`.commandcode/` は git の管理外にならない**（`git status` に `?? .commandcode/` と出る）。
+  ただし Command Code 自身が初回起動で `.commandcode/taste/taste.md` を書くため、
+  この状況は CommandMate が作るものではない。気になる場合は利用者側で
+  `.commandcode/` を `.gitignore` に足す（gemini の `.gemini/` と同じ扱い）。
 
 ---
 
@@ -532,8 +565,8 @@ hook が届いているかを確認したいときはこれを見る。
   リクエストは従来どおり**プライマリインスタンス**の task に適用される。
   1 worktree で `codex` と `codex-2` を併走させている場合、`codex-2` の hook に
   `--instance-id codex-2` を足さないと `codex` の task を動かす。
-  自動注入したセッションではこれは自動で入る（claude は URL、他 4 ツールは環境変数）。
-- **自動注入の対象は 6 ツール**: claude / copilot / gemini / antigravity / codex / opencode
+  自動注入したセッションではこれは自動で入る（claude は URL、他 5 ツールは環境変数）。
+- **自動注入の対象は 7 ツール**: claude / copilot / gemini / antigravity / codex / opencode / command-code
   （`src/lib/hooks/sources/registry.ts` が正本）。**`vibe-local` だけが未対応**で、
   従来どおり画面解析のみで判定する。受け口は `tool` に既存 CLI ツール id を取れるので、
   未対応ツールでも同じスクリプトで `--tool` を変えれば手動で送信できる。
