@@ -471,6 +471,11 @@
     "empty": "まだメッセージはありません",
     "emptyHint": "送信するとセッションが起動します",
     "openSearch": "この会話を検索",
+    "thinking": {
+      "summary": "思考 {count} 件",
+      "expand": "思考を開く",
+      "collapse": "思考を閉じる"
+    },
     "jumpToTop": "会話の先頭へ",
     "toolApproval": {
       "summary": "ツール承認 {count} 件",

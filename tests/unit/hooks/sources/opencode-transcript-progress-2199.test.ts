@@ -67,6 +67,14 @@ function textPart(id: string, text: string): OpencodeFrame {
   });
 }
 
+/** [#2272] A reasoning part, which 1.18.22 emits in front of every text part. */
+function reasoningPart(id: string, text: string): OpencodeFrame {
+  return frame('message.part.updated', {
+    sessionID: SESSION,
+    part: { id, messageID: 'msg_a', type: 'reasoning', text },
+  });
+}
+
 /** Every progress frame broadcast so far, in order. */
 function frames(): ChatTurnProgressEvent[] {
   return broadcast.mock.calls
@@ -142,6 +150,26 @@ describe('[#2199] the live body', () => {
     await deliver(textPart('prt_3', 'Three.'), 1_000 + 2 * CHAT_TURN_PROGRESS_MIN_INTERVAL_MS);
 
     expect(frames().map((f) => f.version)).toEqual([1, 2, 3]);
+  });
+});
+
+describe('[#2272] the live body folds its reasoning too', () => {
+  it('leads with the answer the moment the text part arrives', async () => {
+    // The live bubble and the settled row go through ONE renderer, which is
+    // what #2199 bought. This is that property carrying #2272 for free: the
+    // reader watches the answer appear at the top rather than watching a
+    // `Thinking` quote appear and the answer arrive underneath it.
+    await deliver(OPEN_TURN, 1_000);
+    await deliver(reasoningPart('prt_1', 'weigh the options'), 1_000);
+    await deliver(textPart('prt_2', 'The answer.'), 1_000 + CHAT_TURN_PROGRESS_MIN_INTERVAL_MS);
+
+    const published = frames();
+    // The reasoning-only frame is the whole body while it is all there is …
+    expect(published[0].body).toBe('> **Thinking (1)**\n>\n> weigh the options');
+    // … and steps behind the answer as soon as there is one.
+    expect(published[published.length - 1].body).toBe(
+      'The answer.\n\n> **Thinking (1)**\n>\n> weigh the options'
+    );
   });
 });
 
