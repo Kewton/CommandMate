@@ -13,13 +13,17 @@
  * persistent reload nudge. It never auto-reloads — that would discard whatever
  * the user is typing — and never shows while the versions agree.
  *
+ * Both sides of that handshake are **build identities** since #2271: a release
+ * that bumps package.json without rebuilding the served `.next` moves neither,
+ * so this banner stays silent until a rebuild actually swaps the bundle out.
+ *
  * Mounted at the app shell level so it is present on every screen (the #1337
  * lesson: worktree-scoped update UI never mounts on the sidebar/home routes).
  */
 
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import { useTranslations } from 'next-intl';
 import { AlertTriangle, RefreshCw, X } from 'lucide-react';
 import { Z_INDEX } from '@/config/z-index';
@@ -33,6 +37,61 @@ import {
 interface Mismatch {
   serverVersion: string;
   clientVersion: string;
+}
+
+// ---------------------------------------------------------------------------
+// Banner visibility store (Issue #2271)
+// ---------------------------------------------------------------------------
+//
+// The Service Worker's "an update is ready" toast and this banner are two
+// different signals that both resolve to "reload the page", and #2271 had them
+// on screen together saying it twice — the toast at the bottom, over the
+// composer's Auto-Yes switch. Rather than move one of them behind the other,
+// the toast now yields while the banner is up.
+//
+// The banner owns the answer because only it knows whether it is *rendered*:
+// the raw `version_mismatch` event keeps arriving on every reconnect, so a
+// listener in the toast would stay suppressed forever once the user dismissed
+// the banner. A count rather than a boolean because React StrictMode
+// (`reactStrictMode: true`) runs the publishing effect setup → cleanup → setup,
+// and AppShell mounts the banner from either its mobile or its desktop branch.
+
+/** How many mounted banners are currently showing the nudge. */
+let visibleBannerCount = 0;
+const bannerVisibilityListeners = new Set<() => void>();
+
+function notifyBannerVisibility(): void {
+  for (const listener of bannerVisibilityListeners) listener();
+}
+
+function subscribeBannerVisibility(listener: () => void): () => void {
+  bannerVisibilityListeners.add(listener);
+  return () => {
+    bannerVisibilityListeners.delete(listener);
+  };
+}
+
+function getBannerVisibleSnapshot(): boolean {
+  return visibleBannerCount > 0;
+}
+
+/** Server render has no banner yet, so nothing may be suppressed on its account. */
+function getBannerVisibleServerSnapshot(): boolean {
+  return false;
+}
+
+/**
+ * Whether a {@link VersionMismatchBanner} is on screen right now (Issue #2271).
+ *
+ * Consumed by `ServiceWorkerRegistrar` so the two reload prompts are never
+ * shown at the same time. Returns false on the server and before hydration.
+ */
+export function useVersionMismatchBannerVisible(): boolean {
+  return useSyncExternalStore(
+    subscribeBannerVisibility,
+    getBannerVisibleSnapshot,
+    getBannerVisibleServerSnapshot,
+  );
 }
 
 export function VersionMismatchBanner() {
@@ -56,6 +115,19 @@ export function VersionMismatchBanner() {
   );
 
   useRealtimeListener(onEvent);
+
+  // Publish this banner's visibility so the Service Worker toast can stand down
+  // while it is up (Issue #2271).
+  const isShowing = mismatch !== null;
+  useEffect(() => {
+    if (!isShowing) return;
+    visibleBannerCount += 1;
+    notifyBannerVisibility();
+    return () => {
+      visibleBannerCount -= 1;
+      notifyBannerVisibility();
+    };
+  }, [isShowing]);
 
   const handleReload = useCallback(() => {
     window.location.reload();

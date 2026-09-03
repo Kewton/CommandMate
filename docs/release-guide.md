@@ -306,6 +306,31 @@ cd $(mktemp -d) && npx --yes commandmate@latest --version
 
 ---
 
+## リリースしても稼働サーバは旧版のまま（Issue #2271）
+
+リリース手順は **primary checkout で `npm run build` を回さない**。稼働中サーバの `.next` を
+作り替えると `BUILD_ID` が変わり、開いているタブの chunk が 404 になるためである
+（[リリーススキル](../.claude/skills/release/SKILL.md) Phase 2-3）。
+
+その結果、リリース直後は 3 つの「版」が食い違う。**これは正常な状態である。**
+
+| 見えるもの | 出どころ | リリース直後の値 |
+|---|---|---|
+| `commandmate --version` | グローバル CLI のパッケージ | 更新していれば新版 |
+| `/api/app/update-check` の `currentVersion` | package.json を実行時に読む | **新版** |
+| 画面が動かしている bundle | `.next` に焼かれた `NEXT_PUBLIC_APP_VERSION` | **旧版** |
+
+版ズレバナー（「新しいバージョンが起動しています」）はこの食い違いでは出ない。判定を担う
+`resolveBundleDrift()`（`src/lib/version-checker.ts`）は package.json ではなく
+`.next/required-server-files.json` に焼かれた版を読むので、**bump だけでは発火せず、再ビルドで
+bundle が入れ替わったときだけ発火する**。#2271 以前は package.json と突き合わせていたため、
+リリースのたびに全利用者へ消えないバナーが出ていた。
+
+**稼働サーバを新版で動かすには、リリース完了後に別途リビルド＋再起動する**（`/rebuild` スキル）。
+そのとき初めて、開いたままの古いタブにバナーが出る — これが本来の用途である。
+
+---
+
 ## Claude Code Skillを使用したリリース
 
 [`/release`](../.claude/skills/release/SKILL.md) スキルを使用すると、上記の手順を実行できます。
