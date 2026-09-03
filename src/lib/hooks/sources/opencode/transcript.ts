@@ -54,7 +54,7 @@
  */
 
 import { isPlainObject, readNestedString, readStringField } from '../event-mapper';
-import { separateTurnBody, type TurnRenderBlock } from '../turn-body';
+import { separateTurnBody, TURN_REASONING_LABEL, type TurnRenderBlock } from '../turn-body';
 
 /**
  * The field that groups assistant messages into one turn.
@@ -247,8 +247,14 @@ const OPENCODE_SILENT_PART_TYPES: ReadonlySet<string> = new Set([
   'patch',
 ]);
 
-/** The label a reasoning block is folded behind. */
-export const OPENCODE_REASONING_LABEL = 'Thinking';
+/**
+ * The label a reasoning block is folded behind.
+ *
+ * An alias of `../turn-body`'s constant since #2272 rather than a second copy
+ * of the string: the section heading and this name have to stay equal or the
+ * chat surface's reader stops recognising the section it is meant to fold.
+ */
+export const OPENCODE_REASONING_LABEL = TURN_REASONING_LABEL;
 
 /**
  * One tool call as a single Markdown line.
@@ -281,26 +287,6 @@ function collapseToLine(value: string): string {
   return value.replace(/\s+/g, ' ').trim();
 }
 
-/**
- * Reasoning, folded.
- *
- * A blockquote rather than `<details>`, and the reason is a rendering decision
- * that belongs here because it decides what is *stored*: showing `<details>`
- * would mean running `rehype-raw` over agent output in `ConversationPairCard`,
- * and that costs every unfenced `<T>` in ordinary prose — the HTML parser eats
- * it as a tag. A blockquote is Markdown's own way of saying "subordinate", it
- * survives the sanitiser with no raw-HTML pass, and the card's existing
- * two-line collapse already keeps it out of the way.
- */
-function renderReasoningPart(text: string): string {
-  const quoted = text
-    .trim()
-    .split('\n')
-    .map((line) => (line.length > 0 ? `> ${line}` : '>'))
-    .join('\n');
-  return `> **${OPENCODE_REASONING_LABEL}**\n>\n${quoted}`;
-}
-
 /** What one rendered turn is. */
 export interface OpencodeRenderedTurn {
   /** `ses_…`. */
@@ -313,6 +299,8 @@ export interface OpencodeRenderedTurn {
   readonly textParts: number;
   /** How many tool calls were summarised. */
   readonly toolParts: number;
+  /** How many reasoning blocks the folded `Thinking` section holds (Issue #2272). */
+  readonly reasoningParts: number;
   /** Part types that were neither rendered nor on the silent list. */
   readonly unknownPartTypes: readonly string[];
 }
@@ -320,11 +308,13 @@ export interface OpencodeRenderedTurn {
 /**
  * Render one turn to Markdown.
  *
- * Stream order within each kind — reasoning sits where the agent thought it and
- * the calls are in the order they were made. #2041 kept one stream for all of
- * them and #2234 split the tool calls out into a section of their own; the
- * layout is `../turn-body`'s, shared with the other three readers, and
- * {@link separateTurnBody} carries the reasoning for both halves of that.
+ * Stream order within each kind — the thoughts are in the order they were
+ * thought and the calls in the order they were made. #2041 kept one stream for
+ * all of them, #2234 split the tool calls out into a section of their own, and
+ * #2272 did the same for the reasoning: measured against 1.18.22, opencode
+ * emits a `reasoning` part in front of *every* text part, so leaving them
+ * inline meant a one-line answer whose bubble opened with `> **Thinking**` and a
+ * long one with four such quotes buried in it. The layout is `../turn-body`'s.
  *
  * @param turn - The accumulator, live or rebuilt from REST
  */
@@ -347,7 +337,9 @@ export function renderOpencodeTurn(turn: OpencodeTurnAccumulator): OpencodeRende
     if (part.type === 'reasoning') {
       const text = part.text?.trim() ?? '';
       if (text.length === 0) continue;
-      blocks.push({ kind: 'aside', text: renderReasoningPart(text) });
+      // Raw, not pre-quoted: `separateTurnBody` folds the whole run under one
+      // `Thinking (N)` heading and owns the quoting (Issue #2272).
+      blocks.push({ kind: 'reasoning', text });
       continue;
     }
     if (part.type === 'tool') {
@@ -362,7 +354,11 @@ export function renderOpencodeTurn(turn: OpencodeTurnAccumulator): OpencodeRende
     if (!OPENCODE_SILENT_PART_TYPES.has(part.type)) unknown.add(part.type);
   }
 
-  let body = separateTurnBody(blocks).body;
+  const separated = separateTurnBody(blocks);
+  // The cap still counts the whole body, reasoning included — but the reasoning
+  // now sits behind the prose, so what a 200 kB turn loses is the tail of its
+  // thinking rather than the answer (Issue #2272).
+  let body = separated.body;
   if (body.length > MAX_OPENCODE_TURN_BODY_LENGTH) {
     body =
       body.slice(0, MAX_OPENCODE_TURN_BODY_LENGTH - OPENCODE_TURN_TRUNCATION_MARKER.length) +
@@ -375,6 +371,7 @@ export function renderOpencodeTurn(turn: OpencodeTurnAccumulator): OpencodeRende
     body,
     textParts,
     toolParts,
+    reasoningParts: separated.reasoningBlocks,
     unknownPartTypes: [...unknown],
   };
 }
