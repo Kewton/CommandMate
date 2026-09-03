@@ -145,12 +145,17 @@ describe('the happy path', () => {
     expect(message.instanceId).toBe('claude');
   });
 
-  it('dates the row by the prompt record’s clock, not by the read', async () => {
+  it('dates the row by the transcript’s own clock, not by the read', async () => {
+    // Issue #2273 moved the instant from the turn's start to its LAST assistant
+    // record. What #2121 asserted here is untouched and is what the title says:
+    // the row carries a time out of the transcript, not the time of the poll —
+    // both values below are the agent's, and neither is `Date.now()`.
     await writeTranscript(SESSION, transcript());
     await captureClaudeTranscriptTurn(TARGET, { worktreePath: WORKTREE_PATH, homeDir: home });
 
     const [, message] = createMessage.mock.calls[0];
-    expect((message.timestamp as Date).toISOString()).toBe('2026-08-31T10:00:00.000Z');
+    expect((message.timestamp as Date).toISOString()).toBe('2026-08-31T10:00:05.000Z');
+    expect((message.timestamp as Date).getTime()).toBeLessThan(Date.now() - 60_000);
   });
 
   it('broadcasts the row so an open browser sees it without a reload', async () => {
