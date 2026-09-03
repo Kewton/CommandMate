@@ -75,11 +75,37 @@ export const OPENCODE_VERIFIED_AGAINST = {
   paneGeometry: '80x200',
 } as const;
 
-/** agy these rules were read off (#988 / #995). */
+/**
+ * agy these rules were read off (#988 / #995 footer + selection rules, re-read
+ * against the #2270 live panes).
+ *
+ * Bumped from `0.4.x` / `2026-07-30` / `inline` because the frames were
+ * RE-CAPTURED, not because the binary moved: #2270 drove agy 1.1.25 on a private
+ * tmux socket at the production geometry and kept both panes inline in
+ * `tests/unit/status-detector-selection.test.ts`
+ * (`AGY_1125_PERMISSION_PANE`, `AGY_1125_SWITCH_MODEL_PANE`) under the banner
+ * `Antigravity CLI 1.1.25`, trailing pane padding included. The
+ * `Do you want to proceed?` + `N. label` rules were measured off those frames,
+ * and `ANTIGRAVITY_SELECTION_LIST_PATTERN` (#995 / #997) was re-checked against
+ * them and left unchanged.
+ *
+ * `paneGeometry` leaves `inline` because the 1.1.25 permission dialog draws no
+ * composer row at all — it reproduces only at the 200x1000 pane the server
+ * captures, and a fixture without the ~970 blank padding rows exercises a
+ * different `lastLines` slice than production does. That is a statement about
+ * the capture condition, not about agy: the scrollback-retained rendering the
+ * `afterThinking` footer rules rest on (#988) is unchanged, and the 1.1.25
+ * dialog still ends on `esc to cancel`.
+ *
+ * What this stamp does NOT claim: #2270 captured `waiting` frames only, so the
+ * idle (`? for shortcuts`) and generating (spinner) branches are carried over
+ * from the 0.4 captures rather than re-measured. A live IDLE 1.1.25 frame is
+ * still uncaptured — see the `readIdleEvidence` note in `antigravity/detect.ts`.
+ */
 export const ANTIGRAVITY_VERIFIED_AGAINST = {
-  version: '0.4.x',
-  capturedAt: '2026-07-30',
-  paneGeometry: 'inline',
+  version: '1.1.25',
+  capturedAt: '2026-09-04',
+  paneGeometry: '200x1000',
 } as const;
 
 /**
