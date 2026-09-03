@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **fix(detection): antigravity の番号つき権限ダイアログを選択リストではなくプロンプトとして検出** (#2270): `Do you want to proceed?` と `N.` 行を持つフレームでは `beforePrompt` の選択リスト判定をスキップして priority 1 の prompt 検出に渡すようにし、`hasActivePrompt: true` / `promptData`（`multiple_choice` 4択）/ `isSelectionListActive: false` を publish するようにした。チャット面に PromptPanel が出て 2〜4 を番号で選べるようになり、poller が保存する `prompt` 行・push 通知の `kind: 'prompt'` と状態検出の答えが一致する。`Switch Model` ピッカー（#995）は従来どおり `antigravity_selection_list`
 - **fix(ui): チャット面のファイルパス検出に左境界を入れ、クリック時に存在確認する** (#2274): `FILE_PATH_REGEX` が語境界なしに `/` から一致していたため `commandmate-skills/docs/uat/x.md` の後半 `/docs/uat/x.md` だけがリンク化され、1 つのパスが 2 色に割れて存在しないファイルを開こうとしていた。行頭・空白・バッククォート・引用符・開き括弧の直後だけを一致開始位置とし（相対パスと URL はリンク化しない）、`ConversationPairCard` の正規表現コピーを廃して `splitFilePathParts` を共有、クリック時は `HEAD /api/worktrees/:id/files/:path`（新設・本文なしの存在プローブ）で確かめ、404/400/403 のときはファイルパネルを開かずトーストを出す
 
 ## [0.30.2] - 2026-09-03

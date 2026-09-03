@@ -131,16 +131,32 @@ describe('Issue #1628: the rest of the same live run keeps its old verdicts', ()
 });
 
 /**
- * Issue #1628, paired paths. Of the non-alternate-screen tools, only Codex and
- * antigravity have a branch that answers `hasActivePrompt: false` for a frame the
- * agent is blocked on. Codex's is fixed above. Antigravity's is deliberate —
- * #997 widened ANTIGRAVITY_SELECTION_LIST_PATTERN to cover the permission menu so
- * NavigationButtons render for its arrow-key UI — so the same hole is closed on
- * the `wait` side instead (isSelectionListActive ⇒ exit 10), leaving the UI alone.
+ * Issue #1628, paired paths — and Issue #2270's reversal of the pairing.
+ *
+ * Of the non-alternate-screen tools, only Codex and antigravity had a branch that
+ * answered `hasActivePrompt: false` for a frame the agent is blocked on. Codex's
+ * is fixed above. Antigravity's was left in place on purpose: #997 had widened
+ * ANTIGRAVITY_SELECTION_LIST_PATTERN to cover the permission menu so
+ * NavigationButtons would render for its arrow-key UI, so #1628 closed the hole on
+ * the `wait` side instead (isSelectionListActive ⇒ exit 10) and left the UI alone.
+ *
+ * Issue #2270 measured what that left the UI with. On the chat surface those
+ * NavigationButtons are two arrows and an Enter, and Enter only ever confirms the
+ * highlighted row — option 1. Options 2-4 of "Do you want to proceed?" had no way
+ * to be picked at all, while the poller stored the same frame as a
+ * `multiple_choice` prompt row and the push notification sent `kind: 'prompt'`.
+ * So the antigravity numbered dialog now reaches priority 1 like every other
+ * numbered prompt, and `hasActivePrompt` is true for it.
+ *
+ * `wait`'s guarantee is unchanged, which is why this file only needs its
+ * expectations updated and not its subject: the prompt branch in
+ * src/cli/commands/wait.ts sits ABOVE the `isSelectionListActive` branch and
+ * returns the same exit 10 — now with the four options attached.
+ *
  * gemini and vibe-local have no selection-list branch at all: their prompts reach
  * priority 1 and surface as prompt_detected.
  */
-describe('Issue #1628: the antigravity permission menu is the paired blocked state', () => {
+describe('Issue #1628 / #2270: the antigravity permission menu is the paired blocked state', () => {
   // Verbatim agy pane text from the Issue #997 fixture (tests/unit/prompt-detector.test.ts).
   const AGY_PERMISSION_MENU = [
     '  Requesting permission for:',
@@ -154,15 +170,25 @@ describe('Issue #1628: the antigravity permission menu is the paired blocked sta
     'esc to cancel                                                          Gemini 3.5 Flash (Medium)',
   ].join('\n');
 
-  it('is a selection list, not an active prompt — which is why `wait` reads that field', () => {
+  it('is an active prompt, which is the field `wait` reads first (Issue #2270)', () => {
     const result = detectSessionStatus(AGY_PERMISSION_MENU, 'antigravity');
 
     expect(result.status).toBe('waiting');
-    expect(result.reason).toBe(STATUS_REASON.ANTIGRAVITY_SELECTION_LIST);
-    // Intentionally false (Issue #997 keeps NavigationButtons); `wait` covers it
-    // through isSelectionListActive instead. See wait.test.ts.
-    expect(result.hasActivePrompt).toBe(false);
-    expect(SELECTION_LIST_REASONS.has(result.reason)).toBe(true);
+    expect(result.reason).toBe(STATUS_REASON.PROMPT_DETECTED);
+    expect(result.hasActivePrompt).toBe(true);
+    // And NOT a selection list any more: that Set is what `isSelectionListActive`
+    // is derived from, and it is the flag that hid PromptPanel from the chat
+    // surface. `wait` still exits 10 — through the prompt branch above it.
+    expect(SELECTION_LIST_REASONS.has(result.reason)).toBe(false);
+  });
+
+  it('carries the four options the menu draws, so 2-4 are answerable', () => {
+    const result = detectSessionStatus(AGY_PERMISSION_MENU, 'antigravity');
+    const promptData = result.promptDetection?.promptData;
+
+    expect(promptData?.type).toBe('multiple_choice');
+    if (promptData?.type !== 'multiple_choice') throw new Error('expected multiple_choice');
+    expect(promptData.options.map((o) => o.number)).toEqual([1, 2, 3, 4]);
   });
 });
 
