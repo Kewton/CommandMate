@@ -20,6 +20,15 @@
  * still survives the card's Markdown pipeline — which is done below by running
  * the real pipeline over it.
  *
+ * ## Issue #2272 extends this file rather than opening another
+ *
+ * The reasoning became a second folded section on the same mechanism, so its
+ * assertions belong next to the tool log's. Its fixture is built inline from the
+ * parts the Issue quotes, because the captured opencode tap has no `reasoning`
+ * part in it at all — 1.18.22 emitted none for those three prompts — and the
+ * `aside` path it contrasts against is the layout the code produced before the
+ * change, run as a positive control rather than described.
+ *
  * @vitest-environment node
  */
 
@@ -34,6 +43,7 @@ import rehypeHighlight from 'rehype-highlight';
 import { describe, expect, it } from 'vitest';
 import {
   separateTurnBody,
+  TURN_REASONING_LABEL,
   TURN_TOOL_LOG_LABEL,
   type TurnRenderBlock,
 } from '@/lib/hooks/sources/turn-body';
@@ -149,8 +159,10 @@ describe('separateTurnBody', () => {
   });
 
   it('keeps a folded aside with the prose rather than with the tool log', () => {
-    // `Thinking` is the agent's own words about the reply and is already folded;
-    // it is not a tool log and does not move.
+    // An `aside` is text a reader already quoted itself, and it does not move.
+    // #2272 left this kind alone precisely so the four readers that still use it
+    // — claude, codex, antigravity, command-code — write the same bytes they
+    // wrote before; the opencode reader moved to `reasoning` instead.
     const separated = separateTurnBody(
       blocks(
         { kind: 'tool', text: '- `Bash` — ls' },
@@ -160,6 +172,8 @@ describe('separateTurnBody', () => {
     );
     expect(separated.prose).toBe('> **Thinking**\n>\n> weigh it up\n\nDone.');
     expect(separated.body.startsWith('> **Thinking**')).toBe(true);
+    expect(separated.reasoningLog).toBe('');
+    expect(separated.reasoningBlocks).toBe(0);
   });
 
   it('emits the section alone when the turn only ran tools', () => {
@@ -184,6 +198,90 @@ describe('separateTurnBody', () => {
     // of the blockquote and read as prose.
     const separated = separateTurnBody([{ kind: 'tool', text: '- `Bash` — a\n  continued' }]);
     expect(separated.toolLog.split('\n').every((line) => line.startsWith('>'))).toBe(true);
+  });
+});
+
+describe('[#2272] separateTurnBody and the reasoning section', () => {
+  const blocks = (...items: TurnRenderBlock[]): readonly TurnRenderBlock[] => items;
+
+  it('lifts every reasoning block out of the prose into one trailing section', () => {
+    const separated = separateTurnBody(
+      blocks(
+        { kind: 'reasoning', text: 'weigh it up' },
+        { kind: 'prose', text: 'The answer.' },
+        { kind: 'reasoning', text: 'weigh it again' }
+      )
+    );
+    expect(separated.prose).toBe('The answer.');
+    expect(separated.reasoningLog).toBe(
+      `> **${TURN_REASONING_LABEL} (2)**\n>\n> weigh it up\n>\n> weigh it again`
+    );
+    expect(separated.reasoningBlocks).toBe(2);
+    expect(separated.body).toBe(`The answer.\n\n${separated.reasoningLog}`);
+  });
+
+  it('orders the body prose, then reasoning, then the tool log', () => {
+    const separated = separateTurnBody(
+      blocks(
+        { kind: 'reasoning', text: 'plan it' },
+        { kind: 'tool', text: '- `Bash` — ls' },
+        { kind: 'prose', text: 'Listed it.' }
+      )
+    );
+    expect(separated.body).toBe(
+      [
+        'Listed it.',
+        '',
+        `> **${TURN_REASONING_LABEL} (1)**`,
+        '>',
+        '> plan it',
+        '',
+        `> **${TURN_TOOL_LOG_LABEL} (1)**`,
+        '>',
+        '> - `Bash` — ls',
+      ].join('\n')
+    );
+  });
+
+  it('keeps a blank quote line between two thoughts so they stay two paragraphs', () => {
+    // Without the `>` separator the two blocks would run into one Markdown
+    // paragraph and the reader would lose the boundary between two thoughts.
+    const separated = separateTurnBody(
+      blocks({ kind: 'reasoning', text: 'one' }, { kind: 'reasoning', text: 'two' })
+    );
+    expect(separated.reasoningLog.split('\n')).toEqual([
+      `> **${TURN_REASONING_LABEL} (2)**`,
+      '>',
+      '> one',
+      '>',
+      '> two',
+    ]);
+  });
+
+  it('quotes a multi-paragraph thought line by line, blank lines included', () => {
+    const separated = separateTurnBody([{ kind: 'reasoning', text: 'first\n\nsecond' }]);
+    expect(separated.reasoningLog.split('\n').every((line) => line.startsWith('>'))).toBe(true);
+    expect(separated.reasoningLog).toContain('> first\n>\n> second');
+  });
+
+  it('leaves a turn with no reasoning byte-identical to what #2234 produced', () => {
+    // The regression guard for the four readers this Issue does not touch.
+    const separated = separateTurnBody(
+      blocks(
+        { kind: 'prose', text: 'Done.' },
+        { kind: 'tool', text: '- `Bash` — ls' }
+      )
+    );
+    expect(separated.body).toBe(`Done.\n\n> **${TURN_TOOL_LOG_LABEL} (1)**\n>\n> - \`Bash\` — ls`);
+    expect(separated.reasoningLog).toBe('');
+  });
+
+  it('drops an empty reasoning block rather than counting it', () => {
+    const separated = separateTurnBody(
+      blocks({ kind: 'reasoning', text: '' }, { kind: 'prose', text: 'x' })
+    );
+    expect(separated.body).toBe('x');
+    expect(separated.reasoningBlocks).toBe(0);
   });
 });
 
@@ -291,6 +389,136 @@ describe('the captured opencode turn', () => {
         '> - `bash` — echo CMATE-2041-TOOL-MARKER',
       ].join('\n')
     );
+  });
+});
+
+/**
+ * The shape Issue #2272 reports, through the production opencode renderer.
+ *
+ * Not a captured file, because `tests/fixtures/hooks/opencode`'s three-turn tap
+ * has no `reasoning` part in it at all — opencode 1.18.22 emitted none for those
+ * prompts. The parts below are the ones the Issue quotes verbatim from a live
+ * session (four reasoning blocks around one sentence and one `apply_patch`), fed
+ * through `readOpencodePart` so they arrive by the same route a frame does.
+ */
+describe('[#2272] an opencode turn with four reasoning blocks', () => {
+  const REASONING = [
+    '**Preparing for patch application**\n\nI think I need to edit the patch application process. First, I must verify the file does not already exist.',
+    'The write succeeded. Now check the content is exactly one line.',
+    'Reading it back confirms `hello` with a trailing newline.',
+    'Nothing else to do — report what was written.',
+  ];
+  const PROSE = 'カレントディレクトリに `probe.txt` を作成し、`hello` の1行を書き込みました。';
+
+  /** The turn, with the parts in the order the server produced them. */
+  function fixtureTurn(): OpencodeTurnAccumulator {
+    const turn = createOpencodeTurn('ses_2272', 'msg_user2272', 0);
+    claimOpencodeMessage(turn, 'msg_a');
+    const raw: Record<string, unknown>[] = [
+      { id: 'prt_1', type: 'reasoning', text: REASONING[0] },
+      {
+        id: 'prt_2',
+        type: 'tool',
+        tool: 'apply_patch',
+        state: { status: 'completed', title: 'probe.txt' },
+      },
+      { id: 'prt_3', type: 'reasoning', text: REASONING[1] },
+      { id: 'prt_4', type: 'reasoning', text: REASONING[2] },
+      { id: 'prt_5', type: 'text', text: PROSE },
+      { id: 'prt_6', type: 'reasoning', text: REASONING[3] },
+    ];
+    for (const entry of raw) {
+      const part = readOpencodePart({ messageID: 'msg_a', ...entry });
+      expect(part).not.toBeNull();
+      addOpencodePart(turn, part!);
+    }
+    return turn;
+  }
+
+  /** The pre-#2272 layout of the same turn: each thought quoted where it sat. */
+  function beforeBody(): string {
+    const quote = (text: string): string =>
+      `> **${TURN_REASONING_LABEL}**\n>\n${text
+        .split('\n')
+        .map((line) => (line.length > 0 ? `> ${line}` : '>'))
+        .join('\n')}`;
+    return separateTurnBody([
+      { kind: 'aside', text: quote(REASONING[0]) },
+      { kind: 'tool', text: '- `apply_patch` — probe.txt' },
+      { kind: 'aside', text: quote(REASONING[1]) },
+      { kind: 'aside', text: quote(REASONING[2]) },
+      { kind: 'prose', text: PROSE },
+      { kind: 'aside', text: quote(REASONING[3]) },
+    ]).body;
+  }
+
+  it('opened with a Thinking quote before this Issue', () => {
+    // Non-vacuity, the same way the claude fixture above earns its assertions:
+    // without this the claims below would pass on a turn that never had the
+    // defect. `beforeBody` is the OLD code path — `aside` blocks, which
+    // `separateTurnBody` still leaves inline — so this is the mutation the
+    // Issue asks for, run as a positive control rather than by hand.
+    const before = beforeBody();
+    expect(before.split('\n')[0]).toBe(`> **${TURN_REASONING_LABEL}**`);
+    expect(before.indexOf('Preparing for patch application')).toBeLessThan(
+      before.indexOf(PROSE)
+    );
+    // Four separate labelled quotes, which is what "reasoning が 4 ブロック挟まる"
+    // means on the screen.
+    expect(before.split(`> **${TURN_REASONING_LABEL}**`)).toHaveLength(5);
+  });
+
+  it('now leads with the answer and folds both sections behind it', () => {
+    const rendered = renderOpencodeTurn(fixtureTurn());
+    expect(rendered.reasoningParts).toBe(4);
+    expect(rendered.toolParts).toBe(1);
+    expect(rendered.body).toBe(
+      [
+        PROSE,
+        '',
+        `> **${TURN_REASONING_LABEL} (4)**`,
+        '>',
+        '> **Preparing for patch application**',
+        '>',
+        '> I think I need to edit the patch application process. First, I must verify the file does not already exist.',
+        '>',
+        '> The write succeeded. Now check the content is exactly one line.',
+        '>',
+        '> Reading it back confirms `hello` with a trailing newline.',
+        '>',
+        '> Nothing else to do — report what was written.',
+        '',
+        `> **${TURN_TOOL_LOG_LABEL} (1)**`,
+        '>',
+        '> - `apply_patch` — probe.txt',
+      ].join('\n')
+    );
+  });
+
+  it('loses not one line of what the old layout held', () => {
+    // Re-ordered and re-labelled, never dropped: the reasoning is folded, not
+    // discarded, which is the Issue's own scope note.
+    const strip = (body: string): string[] =>
+      body
+        .split('\n')
+        .map((line) => line.replace(/^> ?/, ''))
+        .filter(
+          (line) =>
+            line.length > 0 &&
+            !line.startsWith(`**${TURN_TOOL_LOG_LABEL}`) &&
+            !line.startsWith(`**${TURN_REASONING_LABEL}`)
+        );
+    expect([...strip(renderOpencodeTurn(fixtureTurn()).body)].sort()).toEqual(
+      [...strip(beforeBody())].sort()
+    );
+  });
+
+  it('renders as one paragraph and two quoted sections, answer first', () => {
+    const html = renderMarkdown(renderOpencodeTurn(fixtureTurn()).body);
+    expect(html.match(/<blockquote>/g)).toHaveLength(2);
+    expect(html).toContain(`<strong>${TURN_REASONING_LABEL} (4)</strong>`);
+    expect(html).toContain(`<strong>${TURN_TOOL_LOG_LABEL} (1)</strong>`);
+    expect(html.indexOf('probe.txt')).toBeLessThan(html.indexOf('<blockquote>'));
   });
 });
 
