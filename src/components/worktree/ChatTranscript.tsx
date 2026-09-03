@@ -66,8 +66,9 @@
  *    it and no scroll position can unmount it.
  *
  * What it costs: scrolling up moves the bubble off screen, because it is in the
- * flow rather than pinned to the viewport. `ChatSurface` answers that by putting
- * the spinner on its jump-to-latest chip while a turn is live.
+ * flow rather than pinned to the viewport. That is answered by putting the
+ * spinner on the jump control — `ChatSurface`'s chip until Issue #2283, and the
+ * FAB below since.
  *
  * ## A ROW is no longer a MESSAGE (Issue #2245)
  *
@@ -80,12 +81,43 @@
  *
  * The live tail is deliberately not part of that: it is still keyed off
  * `messages`, because a chip row has no in-flight form.
+ *
+ * ## Where the reader lands, and how they get to either end (Issue #2283)
+ *
+ * Two facts about this transcript make "scroll to the bottom" a hard problem
+ * rather than a one-liner:
+ *
+ *  - a row is not 120px. `CHAT_ESTIMATED_MESSAGE_HEIGHT_PX` is what the
+ *    virtualizer assumes before anything is measured, and on the worktree this
+ *    Issue was filed against 13 of 208 rows were over 200 lines, the tallest
+ *    33,476px. Any `scrollTop = scrollHeight` therefore aims at a height that
+ *    is still mostly ESTIMATED, and is left behind — 7,770px short, measured —
+ *    the moment the real tail is measured;
+ *  - the rows that carry those measurements only mount once a previous aim
+ *    brought them into the window, so the correction arrives AFTER
+ *    `@tanstack/virtual-core` 3.16 has finished reconciling the scroll it was
+ *    given (its `reconcileScroll` gives up after one stable frame).
+ *
+ * So the tail is not a position to jump to but a place to be HELD: see
+ * `anchorToTail`. And because holding the tail is only possible from inside the
+ * component that owns the virtualizer, this is also where the jump control
+ * lives (the FAB, following the terminal surface's #1079 button) and where the
+ * two ends are published from, for a parent that would otherwise write
+ * `scrollTop` (see {@link ChatTranscriptScrollControls}).
  */
 
-import React, { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
+import React, {
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { useTranslations } from 'next-intl';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { MessageSquare, Search } from 'lucide-react';
+import { ArrowDown, ArrowUp, Loader2, MessageSquare, Search } from 'lucide-react';
 import { Skeleton } from '@/components/ui';
 import type { ChatMessage } from '@/types/models';
 import type { CLIToolType } from '@/lib/cli-tools/types';
@@ -178,6 +210,50 @@ async function probeChatFilePath(
   }
 }
 
+/**
+ * The scroll-to-either-end FAB's testid (Issue #2283).
+ *
+ * One button, two states — see the file header. Exported because both this
+ * component's suite and the surface above it need to assert that exactly ONE
+ * jump control is on screen at a time.
+ */
+export const CHAT_TRANSCRIPT_JUMP_FAB_TESTID = 'chat-transcript-jump-fab';
+
+/**
+ * Animation-frame ceiling for the tail anchor (Issue #2283).
+ *
+ * The real transcript converged in six frames. Twelve leaves room for a longer
+ * measurement cascade without letting a pathological one hold the scroll
+ * position hostage; {@link CHAT_TAIL_ANCHOR_MAX_MS} is the second, independent
+ * ceiling, because frames stop arriving in a background tab.
+ */
+const CHAT_TAIL_ANCHOR_MAX_FRAMES = 12;
+
+/**
+ * Consecutive frames with an unchanged total height that end the anchor. Two
+ * would be enough for the measurements themselves; three absorbs the frame
+ * `reconcileScroll` spends on its own stability check.
+ */
+const CHAT_TAIL_ANCHOR_STABLE_FRAMES = 3;
+
+/** Wall-clock ceiling for one anchor run, in ms. */
+const CHAT_TAIL_ANCHOR_MAX_MS = 600;
+
+/**
+ * The jump FAB's classes (Issue #2283).
+ *
+ * 36px square, so it clears the phone's tap-target floor with
+ * `touch-manipulation`; `absolute`, so — like the search toggle it sits under —
+ * it spends none of the transcript's height, which is what Issue #2106's
+ * vertical budget requires of everything on this surface.
+ */
+const CHAT_JUMP_FAB_CLASS = [
+  'absolute bottom-3 right-3 z-10 flex h-9 w-9 items-center justify-center rounded-full',
+  'border border-border bg-surface-2/80 text-muted-foreground shadow-lg backdrop-blur',
+  'transition-colors hover:bg-muted hover:text-foreground',
+  'focus:outline-none focus-visible:ring-2 focus-visible:ring-ring touch-manipulation',
+].join(' ');
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -211,6 +287,37 @@ export interface ChatTranscriptLiveTurn {
   settling?: boolean;
 }
 
+/**
+ * The two ends of the transcript, reachable through the virtualizer (#2283).
+ *
+ * `ChatSurface` holds no ref into this component and resolves the scroll
+ * element by selector, so its own way back to the tail was
+ * `scrollTop = scrollHeight` — which lands short for exactly the reason the
+ * file header describes. These callbacks are how it borrows the virtualizer
+ * instead, leaving ONE implementation of "the tail" in the one component that
+ * can measure it.
+ */
+export interface ChatTranscriptScrollControls {
+  /** Land on the last row and hold there while its height is measured. */
+  scrollToLatest: () => void;
+  /** Land on the first row and release the tail anchor. */
+  scrollToTop: () => void;
+}
+
+/** One in-flight run of the tail anchor (Issue #2283). */
+interface TailAnchorRun {
+  /** The pending `requestAnimationFrame` handle, or null between frames. */
+  frame: number | null;
+  /** Frames elapsed, against {@link CHAT_TAIL_ANCHOR_MAX_FRAMES}. */
+  frames: number;
+  /** Frames with an unchanged total height, against the stable-frame ceiling. */
+  stableFrames: number;
+  /** The total height the last aim was taken against. */
+  totalSize: number;
+  /** `Date.now()` past which the run ends however the frames are going. */
+  deadline: number;
+}
+
 export interface ChatTranscriptProps {
   /** The transcript, chronologically ordered. NOT grouped into pairs. */
   messages: ChatMessage[];
@@ -237,6 +344,12 @@ export interface ChatTranscriptProps {
    * why it is neither a virtualized row nor a footer.
    */
   liveTurn?: ChatTranscriptLiveTurn | null;
+  /**
+   * Issue #2283: published on mount and withdrawn on unmount, so a parent can
+   * jump this transcript through the VIRTUALIZER rather than by writing
+   * `scrollTop`. See {@link ChatTranscriptScrollControls}.
+   */
+  onScrollControlsChange?: (controls: ChatTranscriptScrollControls | null) => void;
 }
 
 // ============================================================================
@@ -398,6 +511,7 @@ export const ChatTranscript = memo(function ChatTranscript({
   onDiscardPending,
   splitIndex,
   liveTurn = null,
+  onScrollControlsChange,
 }: ChatTranscriptProps) {
   const t = useTranslations('worktree');
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -411,6 +525,23 @@ export const ChatTranscript = memo(function ChatTranscript({
   const isPinnedToBottomRef = useRef(true);
   /** Previous rendered row count, to detect appended messages. */
   const prevRowCountRef = useRef(-1);
+  /**
+   * Previous `isLoading` (Issue #2283). The skeleton being replaced by the list
+   * changes no message count, so without this the commonest way of arriving at
+   * a full transcript — a fetch resolving — looks like "nothing happened".
+   */
+  const prevIsLoadingRef = useRef(isLoading);
+  /**
+   * The row count, readable from inside an animation frame (Issue #2283), where
+   * the `rows` closure belongs to whichever render scheduled the frame.
+   */
+  const rowCountRef = useRef(0);
+  /**
+   * Which end the FAB offers. In STATE, unlike `isPinnedToBottomRef`, because
+   * the button has to re-render on it; the ref stays the one the layout effects
+   * and animation frames read, since they run before React commits.
+   */
+  const [isAtTail, setIsAtTail] = useState(true);
 
   // ---------------------------------------------------------------
   // Search (Issue #716's hook, one stage shorter)
@@ -469,6 +600,7 @@ export const ChatTranscript = memo(function ChatTranscript({
   // place `showHeader` is decided, so a chip group cannot change how many
   // "Assistant" labels the column carries.
   const rows = useMemo(() => buildChatTranscriptRows(messages), [messages]);
+  rowCountRef.current = rows.length;
 
   // ---------------------------------------------------------------
   // Virtualization
@@ -500,33 +632,181 @@ export const ChatTranscript = memo(function ChatTranscript({
     return map;
   }, [rows]);
 
+  // ---------------------------------------------------------------
+  // Holding the tail (Issue #2283)
+  // ---------------------------------------------------------------
+  // A single `scrollToIndex(last, 'end')` does not land on the last row of a
+  // transcript whose rows have never been measured — see the file header. So
+  // the aim is REPEATED while the total height keeps moving under it, and the
+  // run ends on the first of three things: three frames with an unchanged
+  // total, {@link CHAT_TAIL_ANCHOR_MAX_FRAMES} frames, or
+  // {@link CHAT_TAIL_ANCHOR_MAX_MS} of wall clock. The real transcript
+  // converged in six frames.
+  //
+  // `scrollToIndex`, never `scrollTop = scrollHeight`: only the virtualizer
+  // knows where an unmeasured row ENDS, and the direct assignment is what
+  // stopped 7,770px short.
+  const tailAnchorRef = useRef<TailAnchorRun | null>(null);
+
+  const stopTailAnchor = useCallback(() => {
+    const run = tailAnchorRef.current;
+    tailAnchorRef.current = null;
+    if (run && run.frame !== null) cancelAnimationFrame(run.frame);
+  }, []);
+
+  const anchorToTail = useCallback(() => {
+    stopTailAnchor();
+    const lastIndex = rowCountRef.current - 1;
+    if (lastIndex < 0) return;
+    rowVirtualizer.scrollToIndex(lastIndex, { align: 'end' });
+    // SSR / a jsdom environment without frames still gets the aim above; only
+    // the correction needs a frame loop.
+    if (typeof requestAnimationFrame !== 'function') return;
+
+    const run: TailAnchorRun = {
+      frame: null,
+      frames: 0,
+      stableFrames: 0,
+      totalSize: rowVirtualizer.getTotalSize(),
+      deadline: Date.now() + CHAT_TAIL_ANCHOR_MAX_MS,
+    };
+    const step = () => {
+      run.frame = null;
+      // A newer run, or an unmount, has taken over.
+      if (tailAnchorRef.current !== run) return;
+      run.frames += 1;
+      const index = rowCountRef.current - 1;
+      if (
+        index < 0 ||
+        !isPinnedToBottomRef.current ||
+        run.frames > CHAT_TAIL_ANCHOR_MAX_FRAMES ||
+        Date.now() > run.deadline
+      ) {
+        tailAnchorRef.current = null;
+        return;
+      }
+      const totalSize = rowVirtualizer.getTotalSize();
+      if (totalSize === run.totalSize) {
+        run.stableFrames += 1;
+        if (run.stableFrames >= CHAT_TAIL_ANCHOR_STABLE_FRAMES) {
+          tailAnchorRef.current = null;
+          return;
+        }
+      } else {
+        run.stableFrames = 0;
+        run.totalSize = totalSize;
+        rowVirtualizer.scrollToIndex(index, { align: 'end' });
+      }
+      run.frame = requestAnimationFrame(step);
+    };
+    tailAnchorRef.current = run;
+    run.frame = requestAnimationFrame(step);
+  }, [rowVirtualizer, stopTailAnchor]);
+
+  useEffect(() => stopTailAnchor, [stopTailAnchor]);
+
+  const scrollToLatest = useCallback(() => {
+    isPinnedToBottomRef.current = true;
+    setIsAtTail(true);
+    anchorToTail();
+  }, [anchorToTail]);
+
+  const scrollToTop = useCallback(() => {
+    // Explicitly UNPINNED: the reader asked for the beginning of the
+    // conversation, and the next message arriving must not drag them back down
+    // (Issue #2283). The anchor is cancelled rather than left to notice, so it
+    // cannot re-aim between here and the reader's next scroll.
+    stopTailAnchor();
+    isPinnedToBottomRef.current = false;
+    setIsAtTail(false);
+    if (rowCountRef.current > 0) rowVirtualizer.scrollToIndex(0, { align: 'start' });
+  }, [rowVirtualizer, stopTailAnchor]);
+
   const handleScroll = useCallback(() => {
     const container = scrollContainerRef.current;
     if (!container) return;
-    isPinnedToBottomRef.current = isNearBottom({
+    const pinned = isNearBottom({
       scrollTop: container.scrollTop,
       scrollHeight: container.scrollHeight,
       clientHeight: container.clientHeight,
     });
+    // [#2283] While an anchor run is in flight the only scrolls are its own,
+    // and its intermediate frames are BY CONSTRUCTION short of the bottom —
+    // that gap is what it exists to close. Reading one of them as "the reader
+    // scrolled up" is how the run would cancel itself one frame in and leave
+    // the view exactly where the bug report found it.
+    if (!pinned && tailAnchorRef.current !== null) return;
+    isPinnedToBottomRef.current = pinned;
+    setIsAtTail(pinned);
   }, []);
 
-  // Follow appended messages while pinned. Skipped during an active search so
-  // the match's own scrollToIndex is not overridden — the same rule #1123 gave
-  // HistoryPane, and the reason it is here rather than left entirely to
-  // ChatSurface: only the virtualizer can land on a row whose height has not
-  // been measured yet.
+  // Land on the tail, and stay there while the rows are measured.
+  //
+  // [#2283] THREE things put the tail in front of the reader, and only the
+  // third was handled before this Issue:
+  //
+  //  1. the transcript MOUNTING onto a history that is already there — which is
+  //     what the terminal → chat toggle does. The `previous === -1` baseline
+  //     return this replaced meant that path aimed at nothing at all, so the
+  //     toggle landed wherever the estimated-height sizer happened to put it:
+  //     scrollTop 33,060 of 59,044, around the third of 208 rows;
+  //  2. the loading skeleton being replaced by the list. No message count
+  //     changes across that swap, so an append-shaped condition cannot see it;
+  //  3. messages being appended, which is what the effect already followed.
+  //
+  // Skipped during an active search so the match's own `scrollToIndex` is not
+  // overridden — #1123's rule, inherited from `HistoryPane`.
   useLayoutEffect(() => {
-    const previous = prevRowCountRef.current;
+    const previousCount = prevRowCountRef.current;
+    const wasLoading = prevIsLoadingRef.current;
     const current = messages.length;
     prevRowCountRef.current = current;
-    if (previous === -1) return; // first render establishes the baseline
+    prevIsLoadingRef.current = isLoading;
+
+    if (isLoading || isSearchActive || rows.length === 0) return;
+    if (!isPinnedToBottomRef.current) return;
     // Triggered by a new MESSAGE and aimed at the last ROW: an approval that
     // folds into an existing group adds no row, and the tail to follow is
     // whatever the row list ends with.
-    if (current > previous && rows.length > 0 && isPinnedToBottomRef.current && !isSearchActive) {
-      rowVirtualizer.scrollToIndex(rows.length - 1, { align: 'end' });
-    }
-  }, [messages.length, rows.length, isSearchActive, rowVirtualizer]);
+    const isFirstRenderableList = previousCount === -1 || wasLoading;
+    if (!isFirstRenderableList && current <= previousCount) return;
+    anchorToTail();
+  }, [messages.length, rows.length, isLoading, isSearchActive, anchorToTail]);
+
+  // Publish the two ends, so the surface above can borrow the virtualizer
+  // instead of writing `scrollTop` (Issue #2283). Withdrawn on unmount, so a
+  // parent cannot hold a closure over a dead virtualizer — and so a parent that
+  // renders something else in this slot (every `ChatSurface` suite that stubs
+  // this component) is told it has no controls and keeps its own fallback.
+  useEffect(() => {
+    if (!onScrollControlsChange) return;
+    onScrollControlsChange({ scrollToLatest, scrollToTop });
+    return () => onScrollControlsChange(null);
+  }, [onScrollControlsChange, scrollToLatest, scrollToTop]);
+
+  // Home / End on the transcript itself (Issue #2283). `tabIndex={0}` below is
+  // what makes the scroll region focusable at all — without it the browser
+  // routes these keys to the document and the transcript never sees them.
+  // Neither key is in `KEYBOARD_SHORTCUTS`, so nothing else is claiming them; a
+  // typing target is still left alone, where Home/End mean start/end of the
+  // text.
+  const handleKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLDivElement>) => {
+      if (event.key !== 'Home' && event.key !== 'End') return;
+      const target = event.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
+      ) {
+        return;
+      }
+      if (rowCountRef.current === 0) return;
+      event.preventDefault();
+      if (event.key === 'End') scrollToLatest();
+      else scrollToTop();
+    },
+    [scrollToLatest, scrollToTop],
+  );
 
   // Materialize the current match's row before the highlight effect goes
   // looking for its DOM node: an off-screen row is unmounted and cannot be
@@ -648,6 +928,12 @@ export const ChatTranscript = memo(function ChatTranscript({
     [rows, handleFilePathClick, handleCopy, onInsertToMessage, onRetryPending, onDiscardPending],
   );
 
+  // Issue #2248: a HELD body is below the reader exactly as a live one is, so
+  // the way back is still offered — but "still responding" would be a lie about
+  // a turn that has already stopped, so only a non-settling tail earns the
+  // spinner. Issue #2283 moved this verdict here with the control it dresses.
+  const isGeneratingTurn = liveTurn !== null && liveTurn.settling !== true;
+
   const renderContent = () => {
     if (isLoading) return <ChatTranscriptLoading />;
     // "No messages yet" under a bubble that is visibly being written is a lie
@@ -702,6 +988,11 @@ export const ChatTranscript = memo(function ChatTranscript({
         ref={scrollContainerRef}
         data-testid={CHAT_TRANSCRIPT_SCROLL_CONTAINER_TESTID}
         onScroll={handleScroll}
+        onKeyDown={handleKeyDown}
+        // [#2283] Focusable, which is the whole reason Home/End can reach the
+        // handler above. `TerminalDisplay` has carried the same `tabIndex={0}`
+        // on its own scroll region since #1079.
+        tabIndex={0}
         className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-3 py-3"
       >
         {renderContent()}
@@ -736,6 +1027,60 @@ export const ChatTranscript = memo(function ChatTranscript({
             />
           ))}
       </div>
+
+      {/* [#2283] One circular button for both ends of the conversation,
+          following the terminal surface's #1079 FAB: at the tail it offers the
+          BEGINNING, anywhere else it offers the end. Never a `scrollTop`
+          assignment — both directions go through the virtualizer, and the down
+          direction goes through the anchor, because the tail of an unmeasured
+          list is not a number this component can name yet.
+
+          It is also where Issue #2233's "still responding, below you" lands
+          while this transcript is the one on screen. The live bubble sits in
+          the flow, so scrolling up carries it off; the spinner here is the one
+          place that fact can be stated without pinning a second copy of the
+          reply to the viewport. `ChatSurface` withdraws its own chip as soon as
+          this component publishes its scroll controls, so the reader is never
+          offered two ways back at once. */}
+      {rows.length > 0 &&
+        (isAtTail ? (
+          <button
+            type="button"
+            data-testid={CHAT_TRANSCRIPT_JUMP_FAB_TESTID}
+            data-direction="top"
+            onClick={scrollToTop}
+            aria-label={t('chatTranscript.jumpToTop')}
+            title={t('chatTranscript.jumpToTop')}
+            className={CHAT_JUMP_FAB_CLASS}
+          >
+            <ArrowUp size={16} aria-hidden="true" />
+          </button>
+        ) : (
+          <button
+            type="button"
+            data-testid={CHAT_TRANSCRIPT_JUMP_FAB_TESTID}
+            data-direction="latest"
+            data-generating={isGeneratingTurn ? 'true' : undefined}
+            onClick={scrollToLatest}
+            aria-label={
+              isGeneratingTurn
+                ? t('chatSurface.jumpToLatestGenerating')
+                : t('chatSurface.jumpToLatest')
+            }
+            title={
+              isGeneratingTurn
+                ? t('chatSurface.jumpToLatestGenerating')
+                : t('chatSurface.jumpToLatest')
+            }
+            className={CHAT_JUMP_FAB_CLASS}
+          >
+            {isGeneratingTurn ? (
+              <Loader2 size={16} className="animate-spin" aria-hidden="true" />
+            ) : (
+              <ArrowDown size={16} aria-hidden="true" />
+            )}
+          </button>
+        ))}
 
       {/* Search: one icon, or the bar once it is open. Absolutely positioned so
           opening it never reflows the transcript under the reader. */}

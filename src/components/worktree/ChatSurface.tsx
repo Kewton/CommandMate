@@ -53,9 +53,28 @@
  * nothing on screen but the spinner going away.
  *
  * What this surface keeps is the consequence of that move: the live bubble is in
- * the flow, so scrolling up carries it off screen. The jump-to-latest chip
- * therefore wears the spinner whenever a turn is live and the reader is not at
- * the end, so "still running, and it is below you" never disappears.
+ * the flow, so scrolling up carries it off screen. Something must therefore say
+ * "still running, and it is below you" — the jump-to-latest chip below did,
+ * until Issue #2283 moved the whole job to the transcript's own FAB.
+ *
+ * ## Who owns the way back to the tail (Issue #2283)
+ *
+ * `ChatTranscript`, now. Two follows aimed at the same place from here, and both
+ * of them were `scrollTop = scrollHeight` — which, against a virtual list whose
+ * tail rows have never been measured, lands 7,770px short and then falls further
+ * behind with every measurement that arrives. The transcript publishes
+ * {@link ChatTranscriptScrollControls} on mount, and:
+ *
+ *  - the chip's jump uses them when they are there, so it reaches the real end;
+ *  - the chip itself is WITHDRAWN when they are there, because the transcript is
+ *    drawing its own FAB and two ways back is one too many. It stays for a
+ *    caller whose transcript publishes nothing — every suite in this directory
+ *    that stubs `ChatTranscript`, and any future slot filled with something
+ *    else;
+ *  - the mount-time follow is gone. It fired before the virtual list had
+ *    replaced the #1123 fallback, so it moved a DOM that was about to be thrown
+ *    away and nothing re-aimed afterwards. The transcript's own anchor is what
+ *    lands the first paint now.
  *
  * The `shrink-0` live region that remains holds the terminal banner alone.
  *
@@ -112,6 +131,7 @@ import {
   ChatTranscript,
   CHAT_TRANSCRIPT_SCROLL_CONTAINER_TESTID,
   type ChatTranscriptLiveTurn,
+  type ChatTranscriptScrollControls,
 } from '@/components/worktree/ChatTranscript';
 import { ChatDialogCard } from '@/components/worktree/ChatDialogCard';
 import { NavigationButtons } from '@/components/worktree/NavigationButtons';
@@ -422,7 +442,25 @@ export const ChatSurface = memo(function ChatSurface({
     return rootRef.current?.querySelector<HTMLElement>(CHAT_SCROLL_CONTAINER_SELECTOR) ?? null;
   }, []);
 
+  // [#2283] Whether the transcript has published scroll controls — i.e. whether
+  // it is drawing a jump FAB of its own. State, not a ref: withdrawing the chip
+  // below is a render.
+  //
+  // The controls themselves are deliberately NOT stored. The only thing this
+  // surface would use them for is the chip's jump, and the chip is gone by the
+  // time they exist; keeping a copy would be a second, unreachable
+  // implementation of "the tail" — which is the duplication this Issue removed.
+  const [hasTranscriptControls, setHasTranscriptControls] = useState(false);
+  const handleScrollControlsChange = useCallback((controls: ChatTranscriptScrollControls | null) => {
+    setHasTranscriptControls(controls !== null);
+  }, []);
+
   const scrollToLatest = useCallback(() => {
+    // `scrollTop = scrollHeight` lands short of a virtual list's last row, which
+    // is why the FAB that replaced this control jumps through the virtualizer
+    // instead (Issue #2283). It is still the right thing HERE: this runs only
+    // when the transcript published no controls, so there is no virtualizer to
+    // ask and the scroll region's own height is all there is to aim at.
     const container = getScrollContainer();
     if (container) container.scrollTop = container.scrollHeight;
     isPinnedRef.current = true;
@@ -592,7 +630,20 @@ export const ChatSurface = memo(function ChatSurface({
   // The bubble grows inside the scroll region now, so following it is the same
   // `scrollTop = scrollHeight` every other follow here uses — and only while the
   // reader was already pinned, which is the rule none of them break.
+  //
+  // [#2283] Except on the FIRST run, which is a MOUNT and not a frame of a live
+  // turn. `isPinnedRef` starts true, so this used to fire a write on every
+  // mount — against the #1123 fallback or the estimated-height sizer, i.e. a
+  // DOM about to be replaced by the virtual list, with nothing re-aiming after
+  // the replacement. That write is one half of why the terminal → chat toggle
+  // landed near the top of a 208-row transcript; `ChatTranscript`'s tail anchor
+  // is what lands the first paint now.
+  const hasFollowedLiveTurnRef = useRef(false);
   useLayoutEffect(() => {
+    if (!hasFollowedLiveTurnRef.current) {
+      hasFollowedLiveTurnRef.current = true;
+      return;
+    }
     if (!isPinnedRef.current) return;
     const container = getScrollContainer();
     if (container) container.scrollTop = container.scrollHeight;
@@ -691,6 +742,7 @@ export const ChatSurface = memo(function ChatSurface({
           worktreeId={worktreeId}
           cliToolId={cliToolId}
           liveTurn={liveTurn}
+          onScrollControlsChange={handleScrollControlsChange}
           className="h-full"
         />
         {/* The chip. It is also the answer to what Issue #2233 gave up: the live
@@ -703,7 +755,11 @@ export const ChatSurface = memo(function ChatSurface({
             Issue #2248: a HELD body is below the reader in the same way, so the
             chip still offers the way back — with the plain arrow, because the
             turn it belongs to has already stopped. */}
-        {(hasNewBelow || (isLiveTurn && !isAtBottom)) && (
+        {/* [#2283] Withdrawn as soon as the transcript publishes scroll
+            controls: it is drawing its own FAB then, and it can put the reader
+            on the last ROW rather than at an estimated height. What is left
+            here is the way back for a transcript that publishes nothing. */}
+        {!hasTranscriptControls && (hasNewBelow || (isLiveTurn && !isAtBottom)) && (
           <button
             type="button"
             data-testid="chat-surface-new-messages"
