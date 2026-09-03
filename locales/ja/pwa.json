@@ -6,7 +6,7 @@
     "reconnect": "再接続"
   },
   "update": {
-    "available": "新しいバージョンがあります",
+    "available": "アプリの更新を適用できます",
     "reload": "リロード"
   }
 }

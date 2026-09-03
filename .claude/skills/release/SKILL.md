@@ -54,6 +54,7 @@ develop <──merge -s ours── main      （祖先復元。squash で切れ�
 | マージバックは `-s ours` | squash 後は main の tree が develop と同一なので、内容ではなく**祖先関係だけを復元**する |
 | Release ノートは CHANGELOG 転記 | v0.10.0 以降の実績。`--generate-notes` は v0.9.1 までの形式 |
 | npm publish しない | `publish.yml` が Release 契機で自動実行する（OIDC / provenance 付き） |
+| リリース後も稼働サーバは旧 bundle のまま | primary checkout で build しないので `.next` は据え置き。**これは正常**（Phase 4-7 参照） |
 
 ---
 
@@ -496,6 +497,25 @@ git merge-base --is-ancestor origin/main origin/develop \
   && echo "祖先切れ解消 OK" || echo "まだ切れている"
 ```
 
+### 4-7. 稼働サーバの版は「まだ上がっていない」（Issue #2271）
+
+**ここまでで稼働サーバが新版になることはない。** 2-3 の通り primary checkout では build しないので、
+`.next` はリリース前のままである。つまり:
+
+| 見えるもの | 実測の出どころ |
+|---|---|
+| `commandmate --version` | グローバル CLI の版。**稼働サーバの版ではない** |
+| `/api/app/update-check` の `currentVersion` | package.json を実行時に読む＝**bump 済みの新版**を返す |
+| 画面が実際に動かしている bundle | `.next` に焼かれた版＝**旧版** |
+
+この 3 つが食い違うのは手順上の定常状態であって不具合ではない。#2271 以前は版ズレバナー
+（`VersionMismatchBanner`）が package.json と bundle を突き合わせていたため、**リリースのたびに
+全利用者へ恒久的にバナーが出ていた**。現在の判定は `resolveBundleDrift()`（`src/lib/version-checker.ts`）
+が `.next/required-server-files.json` に焼かれた版を読むので、**bump だけではバナーは出ない**。
+
+**稼働サーバを実際に新版で動かしたい場合は、リリース完了後に `/rebuild` スキルを使う**
+（再ビルド＋再起動）。そのときだけ、開いたままの古いタブにバナーが出る — これが本来の用途である。
+
 ---
 
 ## 完了報告
@@ -529,6 +549,8 @@ Release v${NEXT_VERSION} completed!
 
 - **main 直 push は行わない**（hook が拒否する。PR が唯一の経路）
 - **primary checkout で `npm run build` を回さない**（稼働サーバの `.next` を壊す。2-3 参照）
+- **リリース完了 = 稼働サーバが新版になった、ではない**（`.next` は据え置き。新版で動かすなら
+  `/rebuild` スキル。4-7 参照）
 - **PR のマージはユーザーに委ねる**（main 向けは承認必須）
 - **GitHub Release の作成 = npm publish の実行 = point of no return**。ユーザーの明示的合意を得てから行う
 - **`npm publish` をローカル実行しない**（OIDC / provenance が CI 前提）
