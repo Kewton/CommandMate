@@ -67,12 +67,14 @@ import {
 } from '@/lib/history/user-turn-recorder';
 import { createLogger } from '@/lib/logger';
 import { claudePromptRequestId, claudeTurnRequestId } from '@/types/agent-transcript';
+import type { ChatMessage } from '@/types/models';
 import type { AgentInstanceRef } from '../types';
 import {
   buildClaudeTurns,
   claudeProjectSlug,
   CLAUDE_PROJECTS_DIR_SEGMENTS,
   isClaudePromptRecord,
+  isClaudeTurnWritable,
   MAX_CLAUDE_TURN_BLOCKS,
   parseClaudeTranscript,
   renderClaudeTurn,
@@ -346,6 +348,18 @@ export async function captureClaudeTranscriptTurn(
     }
 
     const pending = await selectUnwrittenClaudeTurns(target, built.turns);
+
+    // Before anything is written: the rows that are already there (#2264). This
+    // is deliberately ahead of the early return below, because "the newest turn
+    // is already a row" is the state the nine short rows the Issue measured were
+    // stuck in — the reader answered true and did nothing while the transcript
+    // beside it held the missing paragraph.
+    await refreshClaudeTurnRows(
+      target,
+      built.turns.slice(0, built.turns.length - pending.turns.length).slice(-CLAUDE_TURN_RECHECK_LIMIT),
+      path
+    );
+
     if (pending.turns.length === 0) {
       // The anchor is the newest turn in the window, so there is nothing to
       // write and the newest turn is a row. True, for the reason
@@ -384,6 +398,7 @@ export async function captureClaudeTranscriptTurn(
       const userRow = await recordClaudeUserTurn(target, turn, previousStartedAt);
       captured = await writeClaudeTurn(
         target,
+        turn,
         renderClaudeTurn(turn),
         resolveAssistantTimestampMs(turn, userRow),
         path
@@ -586,6 +601,11 @@ function collectHeadlessClaudeTurn(
     promptIsOperatorInput: false,
     blocks,
     assistantRecords,
+    // Never handed to a writer, so neither flag can be read off it; false is the
+    // value that would refuse the write if one were ever attempted.
+    closed: false,
+    superseded: false,
+    stopReasonObserved: false,
     overflowed,
   };
 }
@@ -841,6 +861,128 @@ async function readClaudeTranscriptTail(path: string): Promise<string | null> {
 }
 
 /**
+ * How many already-written turns are re-rendered and compared (Issue #2264).
+ *
+ * The repair half of #2264 has to look at rows the reader has **already**
+ * written, which is the one thing the anchor rule deliberately does not do — so
+ * it is bounded here rather than by the window. Three, because the poller runs
+ * every two seconds and re-rendering the whole 4 MiB window on every tick would
+ * turn a repair into the most expensive thing the poll does, while a row that is
+ * going to grow grows within a second of being written.
+ *
+ * The cost of the bound is only paid by rows the old code left short: those are
+ * repaired on the next read that still has the turn among its newest three, and
+ * a session that has moved four turns past one of them keeps it. The Issue's own
+ * nine rows were all the newest turn at the time, so all nine are inside it.
+ */
+export const CLAUDE_TURN_RECHECK_LIMIT = 3;
+
+/**
+ * Replace a saved row whose body has since grown (Issue #2264).
+ *
+ * The second half of the fix, and the half that repairs what the first half
+ * only stops happening again. A row keyed `claude-turn:<uuid>` is written once
+ * and every later read answers "already saved" — so the nine short rows the
+ * Issue measured were frozen, and the scrape that could have replaced them was
+ * suppressed two seconds later by that same idempotency answer.
+ *
+ * **Strictly longer, never merely different.** Equality is the ordinary case and
+ * must cost nothing, and a body that got *shorter* between two reads is not a
+ * turn that grew — it is a window that slid, or a truncation marker, and
+ * overwriting a full reply with a shorter one is the one outcome worse than the
+ * bug. Longer implies different, so one comparison covers both halves of the
+ * Issue's "differs and is longer".
+ *
+ * `message_updated`, never `message`: the row already existed and was already
+ * delivered when it was created (#2195), so a client that appended instead of
+ * replacing would show the reply twice.
+ *
+ * @param existing - The row `findMessageByRequestId` answered with
+ * @returns Whether the row was replaced
+ */
+async function growClaudeTurnRow(
+  target: AgentInstanceRef,
+  existing: ChatMessage,
+  rendered: ClaudeRenderedTurn,
+  path: string
+): Promise<boolean> {
+  const instanceId = target.instanceId ?? target.cliToolId;
+  const previousLength = existing.content.length;
+  if (rendered.body.length <= previousLength) return false;
+
+  const [{ getDbInstance }, { updateMessageContent }, { broadcastMessage }] = await Promise.all([
+    import('@/lib/db/db-instance'),
+    import('@/lib/db'),
+    import('@/lib/ws-server'),
+  ]);
+
+  updateMessageContent(getDbInstance(), existing.id, rendered.body);
+  broadcastMessage('message_updated', {
+    worktreeId: target.worktreeId,
+    message: { ...existing, content: rendered.body },
+  });
+  logger.info('claude-transcript-turn-updated', {
+    worktreeId: target.worktreeId,
+    instanceId,
+    sessionId: rendered.sessionId,
+    requestId: existing.requestId,
+    path,
+    previousLength,
+    bodyLength: rendered.body.length,
+    textBlocks: rendered.textBlocks,
+    toolBlocks: rendered.toolBlocks,
+  });
+  return true;
+}
+
+/**
+ * Re-read the newest already-written turns and grow the short ones (#2264).
+ *
+ * Runs before the pending turns are written and independently of whether there
+ * are any — the case it exists for is precisely the one
+ * {@link captureClaudeTranscriptTurn} used to return `true` from without doing
+ * anything: the newest turn already has a row, and that row is missing its last
+ * paragraph.
+ *
+ * Turns that are still open are skipped rather than compared. Their body is by
+ * definition not the final one, and a repair that raced the agent would rewrite
+ * the row on every poll of a long turn.
+ *
+ * The database is asked before the turn is rendered, so a candidate with no row
+ * — every candidate, in a session this reader has never written to — costs one
+ * indexed lookup and no Markdown.
+ *
+ * @param candidates - Already-written turns, oldest first, at most {@link CLAUDE_TURN_RECHECK_LIMIT}
+ * @returns How many rows were replaced
+ */
+async function refreshClaudeTurnRows(
+  target: AgentInstanceRef,
+  candidates: readonly ClaudeTurnAccumulator[],
+  path: string
+): Promise<number> {
+  if (candidates.length === 0) return 0;
+
+  const [{ getDbInstance }, { findMessageByRequestId }] = await Promise.all([
+    import('@/lib/db/db-instance'),
+    import('@/lib/db'),
+  ]);
+  const db = getDbInstance();
+
+  let updated = 0;
+  for (const turn of candidates) {
+    if (!isClaudeTurnWritable(turn)) continue;
+    const existing = findMessageByRequestId(
+      db,
+      target.worktreeId,
+      claudeTurnRequestId(turn.promptUuid)
+    );
+    if (!existing) continue;
+    if (await growClaudeTurnRow(target, existing, renderClaudeTurn(turn), path)) updated += 1;
+  }
+  return updated;
+}
+
+/**
  * Write one rendered turn, unless it is already there.
  *
  * `findMessageByRequestId` is both the idempotency check and the reason a
@@ -856,11 +998,38 @@ async function readClaudeTranscriptTail(path: string): Promise<string | null> {
  */
 async function writeClaudeTurn(
   target: AgentInstanceRef,
+  turn: ClaudeTurnAccumulator,
   rendered: ClaudeRenderedTurn,
   timestampMs: number,
   path: string
 ): Promise<boolean> {
   const instanceId = target.instanceId ?? target.cliToolId;
+
+  if (!isClaudeTurnWritable(turn)) {
+    // The agent has not said `end_turn` for this prompt and no later prompt has
+    // taken over, so what is in the file is a turn in progress. Writing it would
+    // put a reply with its last paragraph missing into History **permanently** —
+    // the row is keyed on the prompt's `uuid`, so every later read finds it and
+    // answers "already saved". That is Issue #2264 exactly: 9 of `claude-2`'s 20
+    // turns on 2026-09-03 were saved as a bare `> **Tool calls (1)**` with not
+    // one character of prose, because the Stop hook beat the last append and the
+    // emptiness guard below cannot see the difference — a turn cut off after its
+    // tool calls renders a *non-empty* body.
+    //
+    // Handing it back to the scraper costs the Markdown rendering for this turn
+    // and nothing else: the Stop receiver asks again after a short delay, and
+    // the poller asks again when the pane returns to the composer.
+    logger.info('claude-transcript-turn-open', {
+      worktreeId: target.worktreeId,
+      instanceId,
+      sessionId: rendered.sessionId,
+      promptUuid: rendered.promptUuid,
+      assistantRecords: turn.assistantRecords,
+      textBlocks: rendered.textBlocks,
+      toolBlocks: rendered.toolBlocks,
+    });
+    return false;
+  }
 
   if (rendered.body.length === 0) {
     // The turn is open but the agent has not written anything to the file yet —
@@ -895,12 +1064,17 @@ async function writeClaudeTurn(
     ]);
 
   const db = getDbInstance();
-  if (findMessageByRequestId(db, target.worktreeId, requestId)) {
+  const existing = findMessageByRequestId(db, target.worktreeId, requestId);
+  if (existing) {
     logger.debug('claude-transcript-turn-already-saved', {
       worktreeId: target.worktreeId,
       instanceId,
       requestId,
     });
+    // The row may still be one of the short ones #2264 was reported for, and
+    // this is the one place that knows both the row and the turn. See
+    // {@link growClaudeTurnRow}.
+    await growClaudeTurnRow(target, existing, rendered, path);
     return true;
   }
 

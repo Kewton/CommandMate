@@ -172,6 +172,27 @@ export interface ClaudeTranscriptRecord {
   readonly isInterruption: boolean;
   /** `timestamp` as epoch ms, or null when absent or unparseable. */
   readonly timestampMs: number | null;
+  /**
+   * `message.stop_reason` — why the agent stopped producing this record (#2264).
+   *
+   * Present on `assistant` records and null everywhere else. Two values carry
+   * the whole of what this reader needs, and the census behind them is in the
+   * Issue: across the transcript the incident was measured on, **170 assistant
+   * records carried a `stop_reason`, 79 of them `end_turn` and 16 `tool_use`**,
+   * and the correspondence was exact — a record that ends the reply says
+   * `end_turn`, one that hands over to a tool says `tool_use`.
+   *
+   * This is the field #2264 exists because nobody read: without it the reader
+   * cannot tell "the agent has finished" from "the agent is between tool calls",
+   * and a Stop hook that arrives in the gap writes the second as if it were the
+   * first. Re-measured on 2026-09-03 over the 40 most recently written
+   * transcripts under `~/.claude/projects`: **7,147 assistant records, all 7,147
+   * carrying the field** — 6,899 `tool_use` and 248 `end_turn`, none absent and
+   * none null.
+   *
+   * See {@link ClaudeTurnAccumulator.closed}.
+   */
+  readonly stopReason: string | null;
   /** `message.content`, normalised; empty for records that carry no message. */
   readonly blocks: readonly ClaudeContentBlock[];
   /**
@@ -208,6 +229,67 @@ export interface ClaudeTurnAccumulator {
   readonly blocks: ClaudeContentBlock[];
   /** How many `type: "assistant"` records contributed. */
   assistantRecords: number;
+  /**
+   * True when the agent said this turn was over (Issue #2264).
+   *
+   * The rule is {@link isClaudeTurnClosingRecord} applied to the turn's **last**
+   * assistant record: `stop_reason === "end_turn"` *and* a non-empty `text`
+   * block on the same record. Both halves are load-bearing and both come off the
+   * incident:
+   *
+   *  - `end_turn` alone is not enough. The sampled transcript held an `end_turn`
+   *    record whose only block was `thinking`, and a turn that stops after
+   *    thinking is one Claude Code resumes.
+   *  - the text block alone is not enough either, and this is the failure that
+   *    was measured: a turn cut off after its `tool_use` records still renders a
+   *    non-empty body — `renderClaudeTurn` draws the calls as a trailing tool
+   *    section — so the emptiness guard on the writer never fires and a reply
+   *    with **no prose in it at all** was written and frozen under the turn key.
+   *
+   * False is therefore the honest answer for a turn in flight, and
+   * `./history`'s writer treats it as "hand this back to the scraper", exactly
+   * as `../codex/history` treats a `turn_id` with no `task_complete`.
+   */
+  closed: boolean;
+  /**
+   * True when a later prompt record opened another turn (Issue #2264).
+   *
+   * The second, independent proof that nothing more will be appended here, and
+   * the reason {@link closed} did not have to be made a *precondition of
+   * writing* — which would have regressed #2246's backfill.
+   *
+   * A turn is superseded exactly when it is not the last one in the window, and
+   * an agent that has moved on to another prompt will never add a record to the
+   * one before it. That covers the case `closed` cannot: a turn the operator
+   * **interrupted** ends on a `tool_use` record and never gets its `end_turn`,
+   * and it is still a finished turn whose reply nobody else is going to write.
+   * The real antigravity capture in `tests/fixtures/transcripts/antigravity`
+   * contains exactly that shape, which is how the omission was noticed.
+   *
+   * So the writable predicate is `closed || superseded`
+   * ({@link isClaudeTurnWritable}), and the gate #2264 adds bites on precisely
+   * the turn the incident was about: the newest one, still open.
+   */
+  superseded: boolean;
+  /**
+   * True once an assistant record of this turn carried a `stop_reason` (#2264).
+   *
+   * The evidence check behind {@link closed}, and the reason a Claude release
+   * that stopped writing the field would degrade rather than break. Measured on
+   * 2026-09-03 over the 40 most recently written transcripts under
+   * `~/.claude/projects`: **7,147 assistant records, 7,147 with a `stop_reason`**
+   * (6,899 `tool_use`, 248 `end_turn`) and not one without. So in production this
+   * is true for every turn that has an assistant record at all, and the branch it
+   * guards is unreachable.
+   *
+   * It is here for the shape that measurement cannot rule out — a later Claude
+   * that drops or renames the field. `closed` would then be false on every turn
+   * forever, and a writer that refuses every turn forever is a transcript reader
+   * that has silently switched itself off. Falling back to the pre-#2264
+   * behaviour instead loses the #2264 guarantee and nothing else; see
+   * {@link isClaudeTurnWritable}.
+   */
+  stopReasonObserved: boolean;
   /** True once a block had to be dropped for {@link MAX_CLAUDE_TURN_BLOCKS}. */
   overflowed: boolean;
 }
@@ -358,6 +440,7 @@ export function readClaudeTranscriptRecord(value: unknown): ClaudeTranscriptReco
     isCompactSummary: value.isCompactSummary === true,
     isInterruption: readStringField(value, 'interruptedMessageId') !== null,
     timestampMs: Number.isFinite(parsed) ? parsed : null,
+    stopReason: message ? readStringField(message, 'stop_reason') : null,
     blocks,
     text,
   };
@@ -480,6 +563,48 @@ export function isClaudeOperatorPromptRecord(record: ClaudeTranscriptRecord): bo
   return record.promptSource !== null && CLAUDE_HUMAN_PROMPT_SOURCES.includes(record.promptSource);
 }
 
+/**
+ * `message.stop_reason` on the record that ends a reply (Issue #2264).
+ *
+ * The other value this reader cares about is `tool_use`, which is not named as
+ * a constant because nothing branches on it: everything that is not `end_turn`
+ * leaves the turn open.
+ */
+export const CLAUDE_END_TURN_STOP_REASON = 'end_turn';
+
+/**
+ * Whether this assistant record is the one that ended the reply (Issue #2264).
+ *
+ * `end_turn` **and** prose on the same record. See
+ * {@link ClaudeTurnAccumulator.closed} for why neither half alone is the rule,
+ * and note that the emptiness test here is the one `renderClaudeTurn` applies to
+ * a text block — a block whose `text` trims to nothing is not rendered, so it
+ * cannot be what makes a turn look finished either.
+ */
+export function isClaudeTurnClosingRecord(record: ClaudeTranscriptRecord): boolean {
+  if (record.type !== 'assistant') return false;
+  if (record.stopReason !== CLAUDE_END_TURN_STOP_REASON) return false;
+  return record.blocks.some(
+    (block) => block.type === 'text' && (block.text ?? '').trim().length > 0
+  );
+}
+
+/**
+ * Whether a writer may record this turn (Issue #2264).
+ *
+ * Either proof that nothing more is coming: the agent said so
+ * ({@link ClaudeTurnAccumulator.closed}), or it has moved on to another prompt
+ * ({@link ClaudeTurnAccumulator.superseded}).
+ */
+export function isClaudeTurnWritable(turn: ClaudeTurnAccumulator): boolean {
+  if (turn.closed || turn.superseded) return true;
+  // No record of this turn said why it stopped, so there is no evidence to
+  // refuse it on. See {@link ClaudeTurnAccumulator.stopReasonObserved}: this is
+  // unreachable against every Claude version measured, and it is what keeps a
+  // version that stops writing the field from silently disabling the reader.
+  return !turn.stopReasonObserved;
+}
+
 /** A brand-new accumulator for one turn. */
 export function createClaudeTurn(record: ClaudeTranscriptRecord, sessionId: string): ClaudeTurnAccumulator {
   return {
@@ -490,6 +615,9 @@ export function createClaudeTurn(record: ClaudeTranscriptRecord, sessionId: stri
     promptIsOperatorInput: isClaudeOperatorPromptRecord(record),
     blocks: [],
     assistantRecords: 0,
+    closed: false,
+    superseded: false,
+    stopReasonObserved: false,
     overflowed: false,
   };
 }
@@ -557,6 +685,12 @@ export function buildClaudeTurns(
     }
 
     current.assistantRecords += 1;
+    // Assigned rather than or-ed, so the value left standing is the *last*
+    // assistant record's answer. A turn that ends on a `tool_use` record after
+    // an earlier `end_turn` — which is what a turn Claude resumed looks like —
+    // is open again, and that is the reading the Issue's census supports.
+    current.closed = isClaudeTurnClosingRecord(record);
+    if (record.stopReason !== null) current.stopReasonObserved = true;
     for (const block of record.blocks) {
       if (current.blocks.length >= MAX_CLAUDE_TURN_BLOCKS) {
         current.overflowed = true;
@@ -564,6 +698,12 @@ export function buildClaudeTurns(
       }
       current.blocks.push(block);
     }
+  }
+
+  // Every turn but the last one has a later prompt behind it, and a prompt is
+  // proof the agent moved on. See {@link ClaudeTurnAccumulator.superseded}.
+  for (let index = 0; index < turns.length - 1; index += 1) {
+    turns[index].superseded = true;
   }
 
   return { turns, orphanedAssistantRecords, sidechainRecords };

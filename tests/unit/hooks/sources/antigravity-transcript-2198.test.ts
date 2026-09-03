@@ -396,6 +396,8 @@ describe('[#2198] bounds', () => {
           toolCalls: [],
         } satisfies AntigravityTranscriptRecord,
       ],
+      closed: true,
+      superseded: false,
       overflowed: false,
     };
     const body = renderAntigravityTurn(turn).body;
