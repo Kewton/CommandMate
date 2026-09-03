@@ -9,13 +9,19 @@
  * Issue #2199 put the in-flight body in a footer strip below the transcript:
  * `.assistant-md`, `text-xs`, a `rounded-lg` box the full width of the pane,
  * self-scrolling inside `max-h-[7.5rem]`. The settled row that replaced it a
- * second later is `.chat-md`, `text-sm`, `rounded-2xl`, capped at
- * {@link CHAT_BUBBLE_MAX_WIDTH_ASSISTANT} and never clamped. So the reader
- * watched a paragraph grow in one place, in one typeface, and then watched it
- * vanish and reappear somewhere else in another. This component is the same
- * bubble the settled row wears — literally the same constants and the same
- * Markdown renderer — so the swap changes nothing on screen except that the
- * spinner stops.
+ * second later was `.chat-md`, `text-sm`, `rounded-2xl`, capped at 92 % and
+ * never clamped. So the reader watched a paragraph grow in one place, in one
+ * typeface, and then watched it vanish and reappear somewhere else in another.
+ * This component is the same bubble the settled row wears — literally the same
+ * constants and the same Markdown renderer — so the swap changes nothing on
+ * screen except that the spinner stops.
+ *
+ * Issue #2284 moved that shared shape again: the settled assistant row is now
+ * the row's full width with no box ({@link CHAT_BUBBLE_ASSISTANT_CLASS}), and
+ * because this component wears the constant rather than a copy of it, so is
+ * this one. The same sharing carries the tool-log fold: the body goes through
+ * `ChatMarkdownBody`, so a `> **Tool calls (N)**` section growing inside an
+ * in-flight body is a chip here exactly as it will be once the row lands.
  *
  * ## The spinner is UNDER the body, not over it
  *
@@ -54,6 +60,7 @@ import {
   CHAT_BUBBLE_ASSISTANT_CLASS,
   CHAT_BUBBLE_MARKDOWN_BODY_CLASS,
   CHAT_BUBBLE_ROW_CLASS,
+  CHAT_BUBBLE_TESTID,
   ChatMarkdownBody,
 } from './ChatMessageBubble';
 
@@ -113,7 +120,7 @@ export const ChatLiveTurnBubble = memo(function ChatLiveTurnBubble({
         </div>
       )}
 
-      <div className={CHAT_BUBBLE_ASSISTANT_CLASS}>
+      <div data-testid={CHAT_BUBBLE_TESTID} className={CHAT_BUBBLE_ASSISTANT_CLASS}>
         {hasBody && (
           <div
             data-testid="chat-live-turn-body"

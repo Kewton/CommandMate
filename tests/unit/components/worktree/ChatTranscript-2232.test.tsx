@@ -7,11 +7,18 @@
  * What that leaves behind is a set of properties whose regression would put the
  * screen straight back:
  *
- *  1. **Two columns.** A user bubble is pushed right and an assistant bubble
- *     left, and both are width-capped. Delete either the cap or the push and the
- *     surface is two stacked full-width paragraphs again — which is a log, not a
- *     conversation, whatever color it is painted. Issue #2232 asks for exactly
- *     this mutation to be caught, so the classes are asserted BY VALUE.
+ *  1. **Two columns.** A user bubble is pushed right and capped; the assistant's
+ *     reply is pushed left. Delete the cap or the push and the surface is two
+ *     stacked full-width paragraphs again — which is a log, not a conversation,
+ *     whatever color it is painted. Issue #2232 asks for exactly this mutation
+ *     to be caught, so the classes are asserted BY VALUE.
+ *
+ *     Issue #2284 moved ONE of the two halves: the assistant's cap and bubble
+ *     are gone, because the reply is the thing being read and a fenced code
+ *     block wants every column the pane has. The user's cap did not move, and
+ *     these assertions are what says so — the asymmetry IS the layout, so a
+ *     later change that "tidies up" by capping the reply again, or by
+ *     un-capping the prompt, fails here.
  *  2. **No clamp.** `ConversationPairCard` shows 100 characters of a collapsed
  *     reply; measured on this repository, that hid ~96% of the assistant rows
  *     (median 2,478 characters). A reply is rendered whole here, with no expand
@@ -45,8 +52,8 @@ import { ChatTranscript } from '@/components/worktree/ChatTranscript';
 import {
   CHAT_BUBBLE_ALIGN_ASSISTANT,
   CHAT_BUBBLE_ALIGN_USER,
-  CHAT_BUBBLE_MAX_WIDTH_ASSISTANT,
   CHAT_BUBBLE_MAX_WIDTH_USER,
+  CHAT_BUBBLE_WIDTH_ASSISTANT,
 } from '@/components/worktree/ChatMessageBubble';
 
 const WORKTREE_ID = 'wt-2232';
@@ -117,14 +124,38 @@ describe('[#2232] ChatTranscript bubble geometry', () => {
     expect(CHAT_BUBBLE_MAX_WIDTH_USER).toBe('max-w-[85%] sm:max-w-[75%]');
   });
 
-  it('keeps the assistant bubble left and caps it wider', () => {
+  it('keeps the assistant body left and gives it the whole row [#2284]', () => {
     renderTranscript([msg('a1', 'assistant')]);
     const bubble = bubbleOf(rowFor('a1'));
 
     expect(bubble.className).toContain('mr-auto');
-    expect(bubble.className).toContain('max-w-[92%]');
     expect(CHAT_BUBBLE_ALIGN_ASSISTANT).toBe('mr-auto');
-    expect(CHAT_BUBBLE_MAX_WIDTH_ASSISTANT).toBe('max-w-[92%]');
+
+    // The full-width claim, by literal value on both the DOM and the constant:
+    // re-introducing a cap is the mutation #2284 exists to catch, and a test
+    // that only compared the DOM against the constant it came from would stay
+    // green through it.
+    expect(bubble.className).toContain('w-full');
+    expect(bubble.className).toContain('max-w-full');
+    expect(CHAT_BUBBLE_WIDTH_ASSISTANT).toBe('w-full max-w-full');
+
+    // And the box is gone: no percentage cap, no border, no ground, no `w-fit`.
+    expect(bubble.className).not.toContain('max-w-[');
+    expect(bubble.className).not.toContain('w-fit');
+    expect(bubble.className).not.toContain('border');
+    expect(bubble.className).not.toContain('bg-surface-2');
+    expect(bubble.className).not.toContain('rounded');
+  });
+
+  it('leaves the user bubble a bubble [#2284]', () => {
+    // The other half of the asymmetry: taking the reply out of a box must not
+    // take the prompt out of one, or the column loses its right-hand axis.
+    renderTranscript([msg('u1', 'user')]);
+    const bubble = bubbleOf(rowFor('u1'));
+
+    expect(bubble.className).toContain('rounded-2xl');
+    expect(bubble.className).toContain('border');
+    expect(bubble.className).toContain('w-fit');
   });
 
   it('never gives the two roles the same side', () => {

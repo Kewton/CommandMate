@@ -14,6 +14,11 @@
  *   | width          | the whole pane             | `max-w-[92%]`               |
  *   | height         | `max-h-[7.5rem]`, scrolled | unclamped                   |
  *
+ * Issue #2284 moved the right-hand column again — the settled assistant row is
+ * no longer a bubble at all, but the row's full width with no box. What this
+ * file asserts is unchanged in kind: whatever the settled row wears, the live
+ * one wears the same string.
+ *
  * So this file asserts two things that pull in opposite directions and both
  * have to hold at once:
  *
@@ -45,7 +50,8 @@ import { ChatTranscript, type ChatTranscriptLiveTurn } from '@/components/worktr
 import {
   CHAT_BUBBLE_ASSISTANT_CLASS,
   CHAT_BUBBLE_MARKDOWN_BODY_CLASS,
-  CHAT_BUBBLE_MAX_WIDTH_ASSISTANT,
+  CHAT_BUBBLE_TESTID,
+  CHAT_BUBBLE_WIDTH_ASSISTANT,
 } from '@/components/worktree/ChatMessageBubble';
 import {
   CHAT_FALLBACK_RENDER_COUNT,
@@ -115,7 +121,10 @@ function liveRow(): HTMLElement {
 
 /** The bubble box inside a live-turn row or a settled row. */
 function bubbleIn(row: HTMLElement): HTMLElement {
-  const bubble = row.querySelector<HTMLElement>('[class*="rounded-2xl"]');
+  // [#2284] Found by testid, not by `[class*="rounded-2xl"]`: the assistant's
+  // half is no longer a rounded box, and what this probe wants is the element
+  // wearing the role's presentation whatever that presentation currently is.
+  const bubble = row.querySelector<HTMLElement>(`[data-testid="${CHAT_BUBBLE_TESTID}"]`);
   expect(bubble, 'row has a bubble').not.toBeNull();
   return bubble!;
 }
@@ -291,9 +300,12 @@ describe('[#2233] the live bubble looks like the row that replaces it', () => {
     // By literal value too: a comparison against the constant the markup came
     // from stays green when the constant itself is emptied.
     expect(live.className).toContain('text-sm');
-    expect(live.className).toContain('rounded-2xl');
-    expect(live.className).toContain(CHAT_BUBBLE_MAX_WIDTH_ASSISTANT);
-    expect(CHAT_BUBBLE_MAX_WIDTH_ASSISTANT).toBe('max-w-[92%]');
+    // [#2284] The claim used to be `max-w-[92%]`; it is now full width, and
+    // the live bubble has to make the same claim or a reply visibly re-wraps
+    // the instant its turn ends.
+    expect(live.className).toContain(CHAT_BUBBLE_WIDTH_ASSISTANT);
+    expect(CHAT_BUBBLE_WIDTH_ASSISTANT).toBe('w-full max-w-full');
+    expect(live.className).not.toContain('max-w-[');
   });
 
   it('wears byte-identical body classes, `.chat-md` included', () => {
