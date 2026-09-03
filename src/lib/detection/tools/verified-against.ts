@@ -72,6 +72,20 @@ export const ANTIGRAVITY_VERIFIED_AGAINST = {
 } as const;
 
 /**
+ * Command Code these rules were read off (#2250 fixtures).
+ *
+ * The frames are `tests/fixtures/command-code-live-2250/`, captured on a private
+ * tmux socket at the production geometry — the default pane size does not
+ * reproduce the 200-column rules that fence the composer, and the status row
+ * drops its `esc to interrupt` tail below 72 columns.
+ */
+export const COMMAND_CODE_VERIFIED_AGAINST = {
+  version: '1.40.1',
+  capturedAt: '2026-09-03',
+  paneGeometry: '200x1000',
+} as const;
+
+/**
  * The stamp for a tool whose frames nobody has captured yet.
  *
  * Not a version, on purpose. `parseCliVersion` cannot read `'unmeasured'`, so a
@@ -105,6 +119,7 @@ export const DETECTOR_VERIFIED_AGAINST: Readonly<Record<string, VerifiedAgainstS
   copilot: COPILOT_VERIFIED_AGAINST,
   opencode: OPENCODE_VERIFIED_AGAINST,
   antigravity: ANTIGRAVITY_VERIFIED_AGAINST,
+  'command-code': COMMAND_CODE_VERIFIED_AGAINST,
   gemini: UNMEASURED_VERIFIED_AGAINST,
   'vibe-local': UNMEASURED_VERIFIED_AGAINST,
 };

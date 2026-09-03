@@ -182,7 +182,7 @@ ml_has_prompt_marker() {
 # list silently stops resolving the agent of a `<worktree-id>@<instance-id>` spec,
 # which puts the capture on the wrong pane — the same class of silent miss as
 # #1601 itself.
-ML_CLI_TOOL_IDS="claude codex gemini vibe-local opencode copilot antigravity"
+ML_CLI_TOOL_IDS="claude codex gemini vibe-local opencode copilot antigravity command-code"
 
 # ml_agent_from_instance <instance-id> -> the CLI tool the instance belongs to,
 # empty (and exit 1) when the id matches no known tool.

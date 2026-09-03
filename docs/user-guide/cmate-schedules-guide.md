@@ -67,7 +67,7 @@ your-project/          ← worktreeルート
 | **Name** | はい | スケジュール名。1〜100文字。英数字・日本語・ハイフン・スペースが使用可能 | - |
 | **Cron** | はい | cron式（5〜6フィールド）。実行タイミングを指定 | - |
 | **Message** | はい | `claude -p`に送信するプロンプト。最大10,000文字 | - |
-| **CLI Tool** | いいえ | 使用するCLIツール（`claude` / `codex` / `gemini` / `vibe-local` / `opencode` / `copilot` / `antigravity`。正本は `src/lib/cli-tools/types.ts` の `CLI_TOOL_IDS`）。**`--model <model-name>` を書けるのは copilot と opencode のみ**で、他のツールに書くと構文エラーとして行ごとスキップされる。opencode だけは `--agent` / `--variant` / `--continue` / `--title` も書ける（Issue #2044） | `claude` |
+| **CLI Tool** | いいえ | 使用するCLIツール（`claude` / `codex` / `gemini` / `vibe-local` / `opencode` / `copilot` / `antigravity` / `command-code`。正本は `src/lib/cli-tools/types.ts` の `CLI_TOOL_IDS`）。**`--model <model-name>` を書けるのは copilot と opencode のみ**で、他のツールに書くと構文エラーとして行ごとスキップされる。opencode だけは `--agent` / `--variant` / `--continue` / `--title` も書ける（Issue #2044） | `claude` |
 | **Enabled** | いいえ | スケジュールの有効/無効（`true` / `false`） | `true` |
 | **Permission** | いいえ | 実行時の許可レベル。下記のPermission一覧を参照 | ツール別のデフォルト値 |
 
@@ -137,6 +137,21 @@ CLI Tool列で `copilot --model <model-name>` と記述すると、スケジュ�
 | `--dangerously-skip-permissions` | ツール使用を自動承認（**デフォルト**。他の値は指定できません） |
 
 > **Warning:** 無人バッチであるスケジュール実行では、これが唯一の許可値である点に注意してください。
+
+### command-code（--permission-mode）
+
+| 値 | 説明 |
+|----|------|
+| `default` | 権限プロンプトを出す（**デフォルト**。Command Code 自身が hook payload で報告する値） |
+| `standard` | `default` と同じ扱いの別名（`--help` が案内するのはこの綴り） |
+| `plan` | 読み取りと計画のみ |
+| `auto-accept` | 編集を確認なしで適用 |
+| `dont-ask` | 権限プロンプトを出さない |
+
+> **Note:** 値は `commandcode --help`（3 種のみ表示）ではなく、同梱バンドルの
+> `.choices(["default","standard","plan","auto-accept","dont-ask"])` を実測した 5 種です（Issue #2250）。
+> `--yolo`（= `--dangerously-skip-permissions`）は `--permission-mode` の値ではなく別軸の boolean なので
+> Permission 列には書けません。
 
 ### opencode
 
@@ -271,7 +286,7 @@ CMATE.mdの内容はCommandMateが自動的にバリデーションします。
 | Name | 1〜100文字、英数字・日本語・ハイフン・スペースのみ |
 | Cron | 5〜6フィールドの有効なcron式 |
 | Message | 空でないこと。最大10,000文字 |
-| CLI Tool | `claude`、`codex`、`gemini`、`vibe-local`、`opencode`、`copilot`、`antigravity` のいずれか。opencode のみ `--model` / `--agent` / `--variant` / `--continue` / `--title` を後置できる |
+| CLI Tool | `claude`、`codex`、`gemini`、`vibe-local`、`opencode`、`copilot`、`antigravity`、`command-code` のいずれか。opencode のみ `--model` / `--agent` / `--variant` / `--continue` / `--title` を後置できる |
 | Permission | ツールごとの許可値一覧に一致すること |
 
 無効なエントリは警告ログとともにスキップされます。他の有効なエントリは正常に処理されます。

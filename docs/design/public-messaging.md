@@ -221,7 +221,7 @@ LP / README / チュートリアルは各面の Issue（#1812 / #1814 / #1813）
 | `report metrics` | `commandmate report metrics` サブコマンド | `src/cli/commands/report.ts` |
 | worktree 1 つと契約 1 つ | worktree ごとの独立セッション + 契約ファイル | `src/lib/session/` ・ `.commandmate/tasks/` |
 | 入力待ちが届く（バッジ / トースト / タブタイトル / 通知） | App Badge ・ Toast ・ `document.title` ・ Web Push | `src/hooks/useAttentionBadge.ts` ・ `src/lib/pwa/attention-badge.ts` ・ `src/components/common/Toast.tsx` ・ `src/lib/push/waiting-push-notifier.ts` |
-| 7 種のエージェント CLI とローカルモデル | `CLI_TOOL_IDS`（claude / codex / gemini / vibe-local / opencode / copilot / antigravity） | `src/lib/cli-tools/types.ts` の `CLI_TOOL_IDS` |
+| 8 種のエージェント CLI とローカルモデル | `CLI_TOOL_IDS`（claude / codex / gemini / vibe-local / opencode / copilot / antigravity / command-code） | `src/lib/cli-tools/types.ts` の `CLI_TOOL_IDS` |
 | `wait --verify` | `commandmate wait --verify` オプション | `src/cli/commands/wait.ts` |
 
 ---

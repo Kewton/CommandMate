@@ -121,6 +121,7 @@ import { GeminiTool } from '@/lib/cli-tools/gemini';
 import { VibeLocalTool } from '@/lib/cli-tools/vibe-local';
 import { CopilotTool } from '@/lib/cli-tools/copilot';
 import { AntigravityTool } from '@/lib/cli-tools/antigravity';
+import { CommandCodeTool } from '@/lib/cli-tools/command-code';
 import { OpenCodeTool } from '@/lib/cli-tools/opencode';
 import { ClaudeTool } from '@/lib/cli-tools/claude';
 import { stopSession } from '@/lib/session-key-sender';
@@ -192,6 +193,10 @@ describe('graceful exit: declaration == implementation (Issue #1933)', () => {
     (() => {
       const tool = new AntigravityTool();
       return { label: 'antigravity', tool, run: () => tool.killSession(WORKTREE) };
+    })(),
+    (() => {
+      const tool = new CommandCodeTool();
+      return { label: 'command-code', tool, run: () => tool.killSession(WORKTREE) };
     })(),
     (() => {
       const tool = new OpenCodeTool();

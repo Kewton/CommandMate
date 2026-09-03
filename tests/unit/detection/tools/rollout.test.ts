@@ -60,6 +60,9 @@ describe('[#1927] the rollout table', () => {
       gemini: 'legacy',
       antigravity: 'legacy',
       'vibe-local': 'legacy',
+      // Issue #2250: Command Code's module declares no `readIdleEvidence`
+      // either, so `enforce` here would state a rollout that does not exist.
+      'command-code': 'legacy',
     });
   });
 

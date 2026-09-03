@@ -11,6 +11,7 @@
 import { antigravityStatusDetector } from './antigravity/detect';
 import { claudeStatusDetector } from './claude/detect';
 import { codexStatusDetector } from './codex/detect';
+import { commandCodeStatusDetector } from './command-code/detect';
 import { copilotStatusDetector } from './copilot/detect';
 import { opencodeStatusDetector } from './opencode/detect';
 import { createToolStatusDetector } from './run-detection';
@@ -42,6 +43,7 @@ const DETECTORS: Readonly<Record<CLIToolType, ToolStatusDetector>> = {
   copilot: copilotStatusDetector,
   opencode: opencodeStatusDetector,
   antigravity: antigravityStatusDetector,
+  'command-code': commandCodeStatusDetector,
   gemini: geminiStatusDetector,
   'vibe-local': vibeLocalStatusDetector,
 };

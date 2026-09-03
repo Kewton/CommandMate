@@ -58,6 +58,7 @@ const TOOL_ORDER: CLIToolType[] = [
   'opencode',
   'copilot',
   'antigravity',
+  'command-code',
 ];
 
 /** 偽の `which` が見つけるコマンド集合 */
@@ -226,9 +227,9 @@ describe('CLIToolManager', () => {
   });
 
   describe('getAllTools', () => {
-    it('should return all seven tools', () => {
+    it('should return all eight tools', () => {
       const tools = manager.getAllTools();
-      expect(tools).toHaveLength(7);
+      expect(tools).toHaveLength(8);
       expect(tools.map((t) => t.id)).toEqual(TOOL_ORDER);
     });
 
@@ -316,8 +317,8 @@ describe('CLIToolManager', () => {
   });
 
   describe('getAllToolsInfo', () => {
-    it('should return per-tool installation status for all seven tools', async () => {
-      installedCommands = new Set(['claude', 'gemini', 'agy']);
+    it('should return per-tool installation status for all eight tools', async () => {
+      installedCommands = new Set(['claude', 'gemini', 'agy', 'commandcode']);
       copilotResolved = { path: '/usr/local/bin/copilot', version: '1.0.80', source: 'path' };
 
       const allInfo = await manager.getAllToolsInfo();
@@ -330,6 +331,7 @@ describe('CLIToolManager', () => {
         { id: 'opencode', name: 'OpenCode', command: 'opencode', installed: false },
         { id: 'copilot', name: 'Copilot', command: 'copilot', installed: true },
         { id: 'antigravity', name: 'Antigravity CLI', command: 'agy', installed: true },
+        { id: 'command-code', name: 'Command Code CLI', command: 'commandcode', installed: true },
       ]);
     });
 
@@ -338,6 +340,7 @@ describe('CLIToolManager', () => {
 
       expect(allInfo.map((info) => info.id)).toEqual(TOOL_ORDER);
       expect(allInfo.map((info) => info.installed)).toEqual([
+        false,
         false,
         false,
         false,
@@ -356,6 +359,7 @@ describe('CLIToolManager', () => {
         'vibe-local',
         'opencode',
         'agy',
+        'commandcode',
       ]);
       copilotResolved = { path: '/usr/local/bin/copilot', version: '1.0.80', source: 'path' };
       holdCallbacks = true;
@@ -363,7 +367,7 @@ describe('CLIToolManager', () => {
       const pending = manager.getAllToolsInfo();
 
       // 直列化されていればこの時点で発行済みの probe は先頭 1 本だけになる。
-      // 7 ツール分がすべて in-flight であることが、Promise.all を使っている証拠。
+      // 8 ツール分がすべて in-flight であることが、Promise.all を使っている証拠。
       expect(execCommands).toEqual([
         'which claude',
         'which codex',
@@ -371,6 +375,7 @@ describe('CLIToolManager', () => {
         'which vibe-local',
         'which opencode',
         'which agy',
+        'which commandcode',
       ]);
       expect(copilotProbeIssued).toBe(true);
 
@@ -378,6 +383,7 @@ describe('CLIToolManager', () => {
 
       const allInfo = await pending;
       expect(allInfo.map((info) => info.installed)).toEqual([
+        true,
         true,
         true,
         true,

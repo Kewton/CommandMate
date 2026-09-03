@@ -30,6 +30,8 @@ describe('CLI_TOOL_DISPLAY_NAMES', () => {
     expect(CLI_TOOL_DISPLAY_NAMES.opencode).toBe('OpenCode');
     expect(CLI_TOOL_DISPLAY_NAMES.copilot).toBe('Copilot');
     expect(CLI_TOOL_DISPLAY_NAMES.antigravity).toBe('Antigravity');
+    // Issue #2250: two words, matching the product's own spelling.
+    expect(CLI_TOOL_DISPLAY_NAMES['command-code']).toBe('Command Code');
   });
 });
 
@@ -60,6 +62,10 @@ describe('getCliToolDisplayName()', () => {
 
   it('should return correct display name for antigravity', () => {
     expect(getCliToolDisplayName('antigravity')).toBe('Antigravity');
+  });
+
+  it('should return correct display name for command-code (hyphenated ID)', () => {
+    expect(getCliToolDisplayName('command-code')).toBe('Command Code');
   });
 
   it('should return a non-empty string for all CLI tool IDs', () => {

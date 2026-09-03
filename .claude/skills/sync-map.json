@@ -345,7 +345,7 @@
         {
           "path": "scripts/monitor-lib.sh",
           "policy": "port-required",
-          "sha256": "1c203ba4a2c25f8a03f356ed8937801e935b23f70c5260b0ad5d3483a105cf5d"
+          "sha256": "79b468a2d112419aa4f5b6b4e1655d0a25844655c42ee83ad21e244764144c13"
         },
         {
           "path": "scripts/monitor.sh",

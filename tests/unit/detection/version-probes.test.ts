@@ -119,6 +119,7 @@ describe('[#1929] DETECTOR_VERSION_PROBES', () => {
       'antigravity',
       'claude',
       'codex',
+      'command-code',
       'copilot',
       'gemini',
       'opencode',

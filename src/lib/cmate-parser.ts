@@ -22,6 +22,7 @@ import {
   CODEX_SANDBOXES,
   COPILOT_PERMISSIONS,
   ANTIGRAVITY_PERMISSIONS,
+  COMMAND_CODE_PERMISSIONS,
   DEFAULT_PERMISSIONS,
 } from '@/config/schedule-config';
 import {
@@ -273,6 +274,12 @@ export function parseSchedulesSection(rows: string[][]): ScheduleEntry[] {
         break;
       case 'antigravity':
         allowedValues = ANTIGRAVITY_PERMISSIONS;
+        break;
+      // Issue #2250: its own case, not a fall-through. #1914's rule is that a
+      // tool with a permission vocabulary names itself here; inheriting the
+      // no-flag branch would silently blank a valid `plan` / `auto-accept` cell.
+      case 'command-code':
+        allowedValues = COMMAND_CODE_PERMISSIONS;
         break;
       case 'gemini':
       case 'vibe-local':

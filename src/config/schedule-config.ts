@@ -47,6 +47,32 @@ export const ANTIGRAVITY_PERMISSIONS = [
 ] as const;
 export type AntigravityPermission = (typeof ANTIGRAVITY_PERMISSIONS)[number];
 
+/**
+ * Allowed permission values for Command Code CLI (`--permission-mode`),
+ * Issue #2250.
+ *
+ * Read off the shipped bundle rather than off `--help`, and the two disagree:
+ * `commandcode --help` advertises `(standard, plan, auto-accept)`, while the
+ * option is declared
+ * `.addOption(new Be("--permission-mode <mode>", …).choices(["default",
+ * "standard","plan","auto-accept","dont-ask"]))` in
+ * `command-code@1.40.1/dist/cli.mjs`. `.choices()` is what actually validates,
+ * so all five are accepted and `default` is the one the tool reports back in its
+ * own hook payloads (`"permission_mode":"default"`).
+ *
+ * `--yolo` / `--dangerously-skip-permissions` is a separate boolean flag rather
+ * than a `--permission-mode` value, so it is not on this list — the same axis
+ * distinction `OPENCODE_PERMISSIONS` records for `--auto`.
+ */
+export const COMMAND_CODE_PERMISSIONS = [
+  'default',
+  'standard',
+  'plan',
+  'auto-accept',
+  'dont-ask',
+] as const;
+export type CommandCodePermission = (typeof COMMAND_CODE_PERMISSIONS)[number];
+
 /** Allowed permission values for gemini CLI (no permission flags) */
 export const GEMINI_PERMISSIONS = [] as const;
 
@@ -97,6 +123,7 @@ export const DEFAULT_PERMISSIONS: Record<string, string> = {
   opencode: '',
   copilot: 'allow-all-tools',
   antigravity: '--dangerously-skip-permissions',
+  'command-code': 'default',
 };
 
 /**
@@ -132,6 +159,8 @@ export function getPermissionOptionsForTool(cliToolId: string): readonly string[
       return COPILOT_PERMISSIONS;
     case 'antigravity':
       return ANTIGRAVITY_PERMISSIONS;
+    case 'command-code':
+      return COMMAND_CODE_PERMISSIONS;
     case 'gemini':
       return GEMINI_PERMISSIONS;
     case 'vibe-local':

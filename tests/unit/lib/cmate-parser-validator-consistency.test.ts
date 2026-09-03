@@ -22,7 +22,7 @@ vi.mock('@/lib/logger', () => ({
 
 import { parseSchedulesSection } from '@/lib/cmate-parser';
 import { validateSchedulesSection } from '@/lib/cmate-validator';
-import { COPILOT_PERMISSIONS, ANTIGRAVITY_PERMISSIONS, CLAUDE_PERMISSIONS } from '@/config/schedule-config';
+import { COPILOT_PERMISSIONS, ANTIGRAVITY_PERMISSIONS, COMMAND_CODE_PERMISSIONS, CLAUDE_PERMISSIONS } from '@/config/schedule-config';
 
 describe('cmate-parser / cmate-validator consistency (SEC4-004)', () => {
   for (const permission of COPILOT_PERMISSIONS) {
@@ -94,6 +94,36 @@ describe('cmate-parser / cmate-validator consistency (SEC4-004)', () => {
       expect(errors).toEqual([]);
     });
   }
+
+  // Issue #2250: Command Code permission consistency. Its own `case` in the
+  // parser and its own ternary arm in the validator -- inheriting #1914's
+  // no-flag fallback would silently blank a valid `plan` / `auto-accept` cell.
+  for (const permission of COMMAND_CODE_PERMISSIONS) {
+    it(`should accept command-code permission "${permission}" in both parser and validator`, () => {
+      const row = ['cc-task', '0 9 * * *', 'Do something', 'command-code', 'true', permission];
+
+      const entries = parseSchedulesSection([row]);
+      expect(entries).toHaveLength(1);
+      expect(entries[0].permission).toBe(permission);
+
+      const errors = validateSchedulesSection([row]);
+      expect(errors).toEqual([]);
+    });
+  }
+
+  it('should reject an invalid command-code permission in both parser and validator', () => {
+    // `acceptEdits` is claude's vocabulary. Before #1914 the shared fallback was
+    // CLAUDE_PERMISSIONS, so a tool with no case of its own accepted it.
+    const row = ['cc-task', '0 9 * * *', 'Do something', 'command-code', 'true', 'acceptEdits'];
+
+    const entries = parseSchedulesSection([row]);
+    expect(entries).toHaveLength(1);
+    expect(entries[0].permission).not.toBe('acceptEdits');
+
+    const errors = validateSchedulesSection([row]);
+    expect(errors).toHaveLength(1);
+    expect(errors[0].field).toBe('permission');
+  });
 
   it('should reject the same invalid antigravity permission in both parser and validator', () => {
     const row = ['antigravity-task', '0 9 * * *', 'Do something', 'antigravity', 'true', 'invalid-perm'];

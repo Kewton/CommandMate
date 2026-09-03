@@ -245,6 +245,18 @@ export function resolveExtractionStartIndex(
     return foundUserPrompt >= 0 ? foundUserPrompt + 1 : Math.max(0, lastCapturedLine);
   }
 
+  // Branch 2a''' (Command Code, Issue #2250): same reasoning as agy's above.
+  // Command Code is inline-rendered (`#{alternate_on}` = 0, scrollback kept), so
+  // `lastCapturedLine` is a real cursor and stays the fallback; but the echo
+  // `❯ <message>` is present in every captured turn and is the cleaner boundary,
+  // and the caller has already excluded the composer from the search window by
+  // trimming the chrome, so the echo this finds is a transcript row rather than
+  // the placeholder in the input box.
+  if (cliToolId === 'command-code') {
+    const foundUserPrompt = findRecentUserPromptIndex(totalLines);
+    return foundUserPrompt >= 0 ? foundUserPrompt + 1 : Math.max(0, lastCapturedLine);
+  }
+
   // Compute bufferWasReset internally (MF-001: responsibility boundary)
   const bufferWasReset = lastCapturedLine >= totalLines || bufferReset;
 

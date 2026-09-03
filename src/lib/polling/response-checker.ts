@@ -28,6 +28,7 @@ import {
   OPENCODE_PROMPT_AFTER_RESPONSE,
   OPENCODE_RESPONSE_COMPLETE,
   OPENCODE_SKIP_PATTERNS,
+  findCommandCodeChromeStart,
   findCopilotChromeStart,
   readCopilotStatusBar,
   COPILOT_BOOT_BANNER_ANCHORS,
@@ -339,13 +340,22 @@ export function extractResponse(
   // silently delete another tool's boundary, and a boundary that stops existing
   // does not fail loudly: it puts terminal furniture back into History.
   const openCodeCleanLines = cliToolId === 'opencode' ? lines.map(stripAnsi) : null;
+
+  // Issue #2250: Command Code is the fourth. Its landmark is its own — the
+  // `❯ Ask your question...` composer fenced by two full-pane rules, with the
+  // permission-mode row underneath — and it is load-bearing rather than tidy:
+  // that placeholder is drawn with the same `❯ <text>` shape as a transcript
+  // echo, so without the boundary `findRecentUserPromptIndex` anchors the turn
+  // on the FOOTER and every reply extracts as empty (#1289's defect, verbatim).
   const chromeStart = cliToolId === 'claude'
     ? findClaudeChromeStart(lines)
     : cliToolId === 'copilot'
       ? findCopilotChromeStart(lines)
-      : openCodeCleanLines
-        ? findOpenCodeChromeStart(openCodeCleanLines)
-        : -1;
+      : cliToolId === 'command-code'
+        ? findCommandCodeChromeStart(lines)
+        : openCodeCleanLines
+          ? findOpenCodeChromeStart(openCodeCleanLines)
+          : -1;
   const contentEnd = chromeStart >= 0 ? chromeStart : totalLines;
 
   const BUFFER_RESET_TOLERANCE = 25;
@@ -429,7 +439,18 @@ export function extractResponse(
   };
 
   // Early check for interactive prompts (before extraction logic)
-  if (cliToolId === 'claude' || cliToolId === 'codex' || cliToolId === 'copilot') {
+  //
+  // Issue #2250: `command-code` must be here. Its permission dialog draws its
+  // highlighted option as `❯ 1. Yes` and keeps a full-pane rule above the block,
+  // so `hasPrompt && hasSeparator && !isThinking` below is TRUE while the dialog
+  // is waiting for an answer — the turn would be declared finished and the
+  // dialog saved as the reply.
+  if (
+    cliToolId === 'claude' ||
+    cliToolId === 'codex' ||
+    cliToolId === 'copilot' ||
+    cliToolId === 'command-code'
+  ) {
     const fullOutput = lines.join('\n');
     const promptDetection = detectPromptWithOptions(fullOutput, cliToolId);
 
@@ -481,9 +502,17 @@ export function extractResponse(
     ? copilotStatusBar === 'idle'
     : (cliToolId === 'codex' || cliToolId === 'gemini' || cliToolId === 'vibe-local' || cliToolId === 'antigravity') && hasPrompt && !isThinking;
   const isClaudeComplete = cliToolId === 'claude' && hasPrompt && hasSeparator && !isThinking;
+  // Issue #2250: claude's shape, because Command Code's layout is claude's — the
+  // composer sits between two full-pane rules and is drawn only when the agent
+  // will accept input. Deliberately NOT keyed on `✻ Worked for`: that row is the
+  // live turn's, not the transcript's (it is present in `turn-version.txt` and
+  // gone from `dialog-create-file.txt`, the same pane one prompt later) and
+  // `WorkedDurationNote` omits it entirely for a turn under 1000 ms.
+  const isCommandCodeComplete =
+    cliToolId === 'command-code' && hasPrompt && hasSeparator && !isThinking;
   const isOpenCodeDone = cliToolId === 'opencode' && isOpenCodeComplete(cleanOutputToCheck);
 
-  if (isPromptBasedComplete || isClaudeComplete || isOpenCodeDone) {
+  if (isPromptBasedComplete || isClaudeComplete || isCommandCodeComplete || isOpenCodeDone) {
     const responseLines: string[] = [];
 
     const startIndex = resolveExtractionStartIndex(
@@ -645,6 +674,31 @@ export function extractResponse(
       if (!hasUserEcho && COPILOT_BOOT_BANNER_ANCHORS.some(anchor => anchor.test(cleanResponse))) {
         return incompleteResult(totalLines);
       }
+    }
+
+    // Issue #2250: Command Code's launch screen is a complete, idle frame --
+    // block-art logo, three `#` banner rows, composer drawn between its two
+    // rules -- so every check above accepts it, and History would open with
+    // `# Command Code v1.40.1 / # models: … / # <cwd>` saved as the agent's
+    // first reply before the operator has said anything.
+    //
+    // The rule is ONE condition and it is a positive one: Command Code echoes
+    // every prompt into the transcript as `❯ <text>`, and the launch screen has
+    // none. That is the shape #1897 and #2247 both converged on; the anchor
+    // heuristics claude carries above (`hasBannerArt` / `hasVersionInfo` /
+    // `hasStartupTips`) are deliberately NOT reproduced here, because they are
+    // what #2247 had to take back -- a bare version string in a reply is a
+    // normal reply, and Command Code prints its own version on every launch.
+    //
+    // `findRecentUserPromptIndex` is the same `/^[>❯]\s+\S/` scan the extraction
+    // anchors on, and it stops at `contentEnd`, so the composer's own dim
+    // `❯ Ask your question...` placeholder cannot be mistaken for an echo
+    // (#1879's trap).
+    if (cliToolId === 'command-code' && findRecentUserPromptIndex(totalLines) < 0) {
+      logger.info('Command Code launch screen suppressed, response not saved', {
+        responseLength: response.length,
+      });
+      return incompleteResult(totalLines);
     }
 
     // Gemini-specific check
