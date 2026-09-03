@@ -43,8 +43,23 @@ import { copilotAgentEventSource } from '@/lib/hooks/sources/copilot/source';
 import { opencodeAgentEventSource } from '@/lib/hooks/sources/opencode/source';
 import { rememberOpencodePort } from '@/lib/hooks/sources/opencode/ports';
 
-/** The six tools that have a real source, in registration order. */
-const TOOLS = ['claude', 'codex', 'copilot', 'gemini', 'antigravity', 'opencode'] as const;
+/**
+ * The tools that have a real source, in registration order.
+ *
+ * Seven since Issue #2251: Command Code is the seventh, and it is the case the
+ * declined item 2 was written against — a per-worktree config file that cannot
+ * hold the instance id, so the correlation URL has to be `env` rather than a
+ * prefix on `command`.
+ */
+const TOOLS = [
+  'claude',
+  'codex',
+  'copilot',
+  'gemini',
+  'antigravity',
+  'opencode',
+  'command-code',
+] as const;
 
 const dirs: string[] = [];
 let home: string;
@@ -149,11 +164,13 @@ describe('2. the plan declares its environment (adopted)', () => {
   });
 
   it('puts the correlation keys somewhere for every source whose config cannot hold them', () => {
-    // The four tools with a machine-global or per-worktree config file. If any
+    // The five tools with a machine-global or per-worktree config file. If any
     // of these ever declares an empty environment, its hooks fire and cannot be
     // attributed — events land on the primary instance of the wrong pane, with
-    // no error anywhere.
-    for (const tool of ['codex', 'copilot', 'gemini', 'antigravity'] as const) {
+    // no error anywhere. Command Code (#2251) is the fifth, for gemini's reason:
+    // one `.commandcode/settings.local.json` serves `command-code` and
+    // `command-code-2`, so the instance cannot live in the file.
+    for (const tool of ['codex', 'copilot', 'gemini', 'antigravity', 'command-code'] as const) {
       const plan = getAgentEventSource(tool).prepareLaunch(context(tool));
       expect(Object.keys(plan.env).length, `${tool} declared no correlation env`).toBeGreaterThan(0);
     }

@@ -1,6 +1,6 @@
 /**
- * The 6x6 table of declared source capabilities (Issue #1924, §4 D3 decision 1;
- * the sixth column added by Issue #2197).
+ * The table of declared source capabilities (Issue #1924, §4 D3 decision 1; the
+ * sixth column added by Issue #2197, the seventh row by Issue #2251).
  *
  * `docs/design/multi-agent-state-architecture.md` §4 D3 states this table as the
  * decision, and DR3-006 states why it is pinned *by value* rather than by count:
@@ -65,6 +65,7 @@ import { geminiAgentEventSource } from '@/lib/hooks/sources/gemini/source';
 import { copilotAgentEventSource } from '@/lib/hooks/sources/copilot/source';
 import { opencodeAgentEventSource } from '@/lib/hooks/sources/opencode/source';
 import { antigravityAgentEventSource } from '@/lib/hooks/sources/antigravity/source';
+import { commandCodeAgentEventSource } from '@/lib/hooks/sources/command-code/source';
 import type { AgentEventSource, AgentSourceCapabilities } from '@/lib/hooks/sources/types';
 
 /**
@@ -162,6 +163,23 @@ const TABLE: Record<string, DeclaredRow> = {
     resync: 'none',
     transcriptHistory: 'pull',
   },
+  // Issue #2251 (Epic #2249 Phase B). The seventh row, and it is gemini's rather
+  // than claude's on the column that usually splits Claude-shaped tools:
+  // Command Code registers no permission hook, because its `PreToolUse` fires
+  // AFTER the approval dialog has been answered (measured — dialog 00:11:37,
+  // answered 00:11:46, hook 00:11:46), so a non-allow reply on it forecasts
+  // nothing. `transcriptHistory` is null until Phase C (#2252) lands the reader
+  // for `~/.commandcode/projects/<slug>/<session_id>.jsonl`; flipping it to
+  // 'pull' now sends `structured-history-gate` looking for a module that does
+  // not exist.
+  'command-code': {
+    permissionHookPredictsDialog: false,
+    sessionStartMayArriveLate: false,
+    permissionReplyReleasesPrompt: false,
+    eventIdentity: null,
+    resync: 'none',
+    transcriptHistory: null,
+  },
 };
 
 const SOURCES: Record<string, AgentEventSource> = {
@@ -171,6 +189,7 @@ const SOURCES: Record<string, AgentEventSource> = {
   copilot: copilotAgentEventSource,
   opencode: opencodeAgentEventSource,
   antigravity: antigravityAgentEventSource,
+  'command-code': commandCodeAgentEventSource,
 };
 
 function declaredRow(capabilities: AgentSourceCapabilities): DeclaredRow {
@@ -184,7 +203,7 @@ function declaredRow(capabilities: AgentSourceCapabilities): DeclaredRow {
   };
 }
 
-describe('[#1924] AgentSourceCapabilities — the 6x6 table of §4 D3', () => {
+describe('[#1924] AgentSourceCapabilities — the table of §4 D3', () => {
   it.each(Object.keys(TABLE))('%s declares exactly the row the design policy states', (id) => {
     const source = SOURCES[id];
     expect(source.cliToolId).toBe(id);
@@ -263,6 +282,6 @@ describe('[#1924] AgentSourceCapabilities — the 6x6 table of §4 D3', () => {
     expect(push).toEqual(['opencode']);
 
     const scraperOnly = Object.keys(TABLE).filter((id) => TABLE[id].transcriptHistory === null);
-    expect(scraperOnly).toEqual(['gemini', 'copilot']);
+    expect(scraperOnly).toEqual(['gemini', 'copilot', 'command-code']);
   });
 });

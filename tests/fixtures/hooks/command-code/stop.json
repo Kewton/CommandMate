@@ -1,0 +1,8 @@
+{
+  "session_id": "33333333-3333-4333-8333-333333333333",
+  "transcript_path": "/Users/example/.commandcode/projects/private-tmp-my-code-branch-desk-probe/33333333-3333-4333-8333-333333333333.jsonl",
+  "cwd": "/private/tmp/MyCodeBranchDesk/probe",
+  "hook_event_name": "Stop",
+  "permission_mode": "default",
+  "stop_hook_active": false
+}

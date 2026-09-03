@@ -87,3 +87,4 @@ export { GEMINI_CLI_TOOL_ID } from './gemini/tool-id';
 export { ANTIGRAVITY_CLI_TOOL_ID } from './antigravity/tool-id';
 export { CODEX_CLI_TOOL_ID } from './codex/tool-id';
 export { OPENCODE_CLI_TOOL_ID } from './opencode/tool-id';
+export { COMMAND_CODE_CLI_TOOL_ID } from './command-code/tool-id';
