@@ -39,10 +39,21 @@ export const CODEX_VERIFIED_AGAINST = {
   paneGeometry: '200x1000',
 } as const;
 
-/** copilot-cli these rules were read off (#1885 / #1895 fixtures). */
+/**
+ * copilot-cli these rules were read off (#1885 / #1895 / #2269 fixtures).
+ *
+ * Bumped from 1.0.80 because the frames were RE-CAPTURED and the rules CHANGED:
+ * 1.0.82 redrew the composer's fence (`─` rules became a `╻▄` / `╹▀` half-block
+ * frame), dropped the `❯` from the composer in favour of the frame's own `┃`
+ * edge, boxed the transcript's echoed prompt between two more half-block
+ * dividers, and put a file-type badge in front of most tool rows' verbs. The
+ * frames are `tests/unit/lib/detection/fixtures/copilot-live-2269/`, captured on
+ * a private tmux socket at the production geometry; the 1.0.80 frames stay where
+ * they are and the rules still answer for both builds.
+ */
 export const COPILOT_VERIFIED_AGAINST = {
-  version: '1.0.80',
-  capturedAt: '2026-08-21',
+  version: '1.0.82',
+  capturedAt: '2026-09-04',
   paneGeometry: '200x1000',
 } as const;
 

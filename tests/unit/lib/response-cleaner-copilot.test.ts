@@ -432,3 +432,113 @@ describe('truncateMessage', () => {
     expect(result.startsWith(MARKER + '\n')).toBe(true);
   });
 });
+
+/**
+ * copilot 1.0.82 rows, as measured (Issue #2269).
+ *
+ * Synthetic strings on purpose: these pin the row-level vocabulary, and the live
+ * frames they were read off are exercised end to end by
+ * `tests/unit/lib/polling/response-checker-copilot-1082-2269.test.ts`.
+ */
+describe('[#2269] cleanCopilotResponse on copilot 1.0.82 rows', () => {
+  const DIVIDER_DOWN = '\u2584'.repeat(199);
+  const DIVIDER_UP = '\u2580'.repeat(199);
+
+  it('drops the half-block divider under the echoed prompt', () => {
+    const input = [
+      ` ${DIVIDER_DOWN}`,
+      '  \u276f Reply with exactly the word: uat-run1',
+      ` ${DIVIDER_UP}`,
+      ' \u25cf uat-run1',
+    ].join('\n');
+
+    expect(cleanCopilotResponse(input)).toBe('uat-run1');
+  });
+
+  it('drops the badge-marked tool rows 1.0.82 introduced', () => {
+    const input = [
+      '  \u276f note.md の1行目をそのまま返して',
+      ` ${DIVIDER_UP}`,
+      ' / Search "note.md" 1 file found',
+      '',
+      ' MD Read note.md L1:1 (1 line read)',
+      '',
+      ' \u25cf hello-2269',
+    ].join('\n');
+
+    expect(cleanCopilotResponse(input)).toBe('hello-2269');
+  });
+
+  it.each([
+    ' TS Read a.ts 1 line read',
+    ' {} Read b.json 1 line read',
+    ' PY Read c.py 1 line read',
+    ' \u25cf Read d.txt 1 line read',
+  ])('drops the file-type badge row %j', (row) => {
+    const input = ['  \u276f 4つ読んで', ` ${DIVIDER_UP}`, row, '', ' \u25cf done'].join('\n');
+
+    expect(cleanCopilotResponse(input)).toBe('done');
+  });
+
+  it('drops the ask-user row a nudge produces', () => {
+    const input = [
+      '  \u276f a',
+      ` ${DIVIDER_UP}`,
+      ' \u25cf Asked user Hi \u2014 what would you like to work on?',
+      '   \u2514 User cancelled the request.',
+    ].join('\n');
+
+    expect(cleanCopilotResponse(input)).toBe('');
+  });
+
+  it('keeps copilot\'s own `\u25cf` prose, which shares the ask-user marker', () => {
+    const input = [
+      '  \u276f 何をした?',
+      ` ${DIVIDER_UP}`,
+      ' \u25cf 対象ファイルを確認して内容を読み込みます。',
+      '',
+      ' \u25cf done',
+    ].join('\n');
+
+    expect(cleanCopilotResponse(input)).toBe('対象ファイルを確認して内容を読み込みます。\ndone');
+  });
+
+  it('cleans the 1.0.82 launch screen to nothing', () => {
+    const input = [
+      '  Current   Sessions   Issues   Pull requests   Gists ',
+      '',
+      '  \u256d\u2500\u256e\u256d\u2500\u256e',
+      '  \u2570\u2500\u256f\u2570\u2500\u256f  Copilot v1.0.82 uses AI.',
+      '  \u2588 \u2598\u259d \u2588  Check for mistakes.',
+      '   \u2594\u2594\u2594\u2594 ',
+      '',
+      ' \u25cf Tip: /allow-all',
+      '   \u2514 Enable all permissions (tools, paths, and URLs)',
+    ].join('\n');
+
+    expect(cleanCopilotResponse(input)).toBe('');
+  });
+
+  it('never lets the 1.0.82 chrome through when the whole pane is passed', () => {
+    // The five bottom rows, with the transcript above them and the padding
+    // between, i.e. the shape `cleanCopilotResponse` receives from the poller
+    // when the Layer 2 accumulator is empty.
+    const pane = [
+      '  \u276f 1+12 の答えだけを返して',
+      ` ${DIVIDER_UP}`,
+      ' \u25cf 13',
+      ...Array<string>(20).fill(''),
+      ' /repo                                        Session: 5.26 AIC used',
+      `\u257b${DIVIDER_DOWN}`,
+      '\u2503',
+      `\u2579${DIVIDER_UP}`,
+      ' \u2190 open sidebar \u00b7 / commands \u00b7 ? help \u00b7 tab next tab      GPT-5.6 Terra',
+    ].join('\n');
+
+    const cleaned = cleanCopilotResponse(pane);
+
+    expect(cleaned).toBe('13');
+    expect(cleaned).not.toContain('open sidebar');
+    expect(cleaned).not.toContain('AIC used');
+  });
+});

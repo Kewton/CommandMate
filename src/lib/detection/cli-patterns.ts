@@ -1385,11 +1385,39 @@ const COPILOT_STATUS_BAR_MAX_ROWS = 2;
 /** How many rows copilot's composer may span before the block stops looking like chrome. */
 const COPILOT_COMPOSER_MAX_ROWS = 40;
 
-/** A full-width horizontal rule, with or without the pane's leading padding. */
-const COPILOT_RULE_ROW = /^─{10,}$/;
+/**
+ * One of the two rows that fence copilot's composer.
+ *
+ * Two renderings of one thing, because copilot redrew its composer between the
+ * builds this file is measured against (Issue #2269):
+ *
+ *  - **1.0.80** fences it with a full-width horizontal rule, `─` to the pane's
+ *    width, above and below.
+ *  - **1.0.82** fences it with a half-block frame instead: `╻` (U+257B) followed
+ *    by `▄` to the pane's width above, `╹` (U+2579) followed by `▀` below.
+ *
+ * The corner glyph is REQUIRED on the 1.0.82 forms and that is load-bearing, not
+ * decoration. 1.0.82 also boxes the echoed user prompt in the transcript between
+ * two dividers of the same half blocks — `tests/unit/lib/detection/fixtures/
+ * copilot-live-2269/turn-complete.txt` rows 10 and 12 — and those carry no
+ * corner. Accepting a bare `▄`/`▀` run here would let the newest echo's box be
+ * read as the composer, which would put `findCopilotChromeStart` ~985 rows too
+ * high and delete the reply along with the chrome.
+ */
+const COPILOT_RULE_ROW = /^(?:─{10,}|╻▄{10,}|╹▀{10,})$/;
 
-/** copilot's composer glyph: legacy `>` and current `❯`, at the pane's own indent. */
-const COPILOT_COMPOSER_GLYPH = /^ {0,2}[>❯]/;
+/**
+ * copilot's composer glyph, at the pane's own indent.
+ *
+ * `>` is the legacy spelling, `❯` is 1.0.80's. 1.0.82 draws no prompt glyph in
+ * the composer at all: the row is the frame's left edge, `┃` (U+2503), and the
+ * operator's text follows it (`copilot-live-2269/boot-idle.txt` row 998 is the
+ * bare glyph on an empty composer). `┃` is safe to accept here even though the
+ * reasoning block's rows also start with a vertical — that one is `│` (U+2502,
+ * {@link COPILOT_BOX_ROW_PATTERN}) — and in any case this test is only ever
+ * applied to the single row between two fence rows, never to a window.
+ */
+const COPILOT_COMPOSER_GLYPH = /^ {0,2}[>❯┃]/;
 
 /**
  * Locate the start of copilot CLI's bottom-pinned chrome within a captured pane
@@ -1405,6 +1433,21 @@ const COPILOT_COMPOSER_GLYPH = /^ {0,2}[>❯]/;
  *     ❯ <composer>
  *     ────────────────────  ← closing rule
  *      ◉ Working · 1.5 KiB esc interrupt          GPT-5.6 Terra  ← status bar
+ *
+ * Issue #2269 re-measured the same five rows on 1.0.82, where the fence and the
+ * composer are drawn differently but the layout is unchanged:
+ *
+ *     <cwd>                                          Session: N AIC used
+ *     ╻▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄  ← opening frame
+ *     ┃<composer>
+ *     ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  ← closing frame
+ *      ← open sidebar · / commands · ? help · tab next tab   GPT-5.6 Terra
+ *
+ * Both spellings live in {@link COPILOT_RULE_ROW} and
+ * {@link COPILOT_COMPOSER_GLYPH}; the search below is unchanged. Until they were
+ * added this function returned -1 on every 1.0.82 frame, `contentEnd` fell back
+ * to the whole pane, and the saved reply opened with 199 `▀` and ended with the
+ * `← open sidebar …` footer -- #2269's headline symptom.
  *
  * The boundary is found structurally -- closing rule, opening rule, composer
  * glyph -- and never by matching the status bar's wording. That is the same
@@ -1506,6 +1549,85 @@ export const COPILOT_REASONING_HEADER_PATTERN = /^\s*⌄\s/;
 export const COPILOT_USER_ECHO_PATTERN = /^ {0,2}[>❯]\s+\S/;
 
 /**
+ * One of the half-block dividers copilot 1.0.82 boxes a transcript row with
+ * (Issue #2269).
+ *
+ * 1.0.80 drew the echoed prompt as a single bare ` ❯ <text>` row. 1.0.82 draws
+ * a full-width `▄` run above it and a full-width `▀` run below it
+ * (`copilot-live-2269/turn-complete.txt` rows 10 and 12):
+ *
+ *      ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+ *       ❯ Reply with exactly the word: uat-run1   00:27
+ *      ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+ *      ● uat-run1
+ *
+ * {@link COPILOT_SKIP_PATTERNS}' `/[█▘▝▖▗▔▄▌▐]/` rule already dropped the `▄`
+ * row. `▀` (U+2580) was not in that class, so the row BELOW the echo survived --
+ * and extraction starts one row past the echo, which made a wall of 199 `▀` the
+ * first line of every saved 1.0.82 reply.
+ *
+ * Deliberately not "add `▀` to that character class": this requires a run of ten
+ * or more and nothing else on the row, so a reply that happens to use a single
+ * half block as a glyph is untouched. The optional leading corner accepts the
+ * composer's own fence rows (`╻▄…` / `╹▀…`) as well, which is defence in depth
+ * only -- {@link findCopilotChromeStart} cuts those structurally, and this rule
+ * is what stops them reaching History if a future build moves the fence again.
+ */
+export const COPILOT_TRANSCRIPT_DIVIDER_PATTERN = /^\s*[╻╹]?[▀▄]{10,}\s*$/;
+
+/**
+ * The verbs copilot prints on a tool row, as a regex alternation source.
+ *
+ * One list, shared by {@link COPILOT_TOOL_ROW_PATTERN} here and by
+ * `COPILOT_TOOL_ACTION_PATTERN` in `response-cleaner.ts`: the two match the same
+ * vocabulary behind different markers, and a verb added to one and not the other
+ * is a leak nothing fails on.
+ *
+ * `Asked user` / `Asking user` are Issue #2269's addition. copilot answers a
+ * prompt it cannot act on by calling its ask-user tool, and the row it leaves in
+ * the transcript (`● Asked user What would you like me to help with?`, measured
+ * in `copilot-live-2269/turn-oneword-echo-askuser.txt`) was being saved as the
+ * agent's reply -- the "launch screen as the answer" the Issue reports.
+ */
+export const COPILOT_TOOL_VERBS =
+  'Get|Read|Run|Search|Write|Edit|Delete|List|Create|Fetch|Explore|Execute|Install|Asked user|Asking user|Model changed to:';
+
+/**
+ * copilot 1.0.82's tool row, whose marker is a file-type badge (Issue #2269).
+ *
+ * 1.0.80 drew every tool row as `● <Verb> …` and `COPILOT_TOOL_ACTION_PATTERN`
+ * reads exactly that. 1.0.82 puts a short badge for the file the tool touched in
+ * front of the verb instead, and only falls back to `●` for a type it has no
+ * badge for. Measured verbatim over
+ * `copilot-live-2269/turn-tool-badges.txt` and `turn-tool-rows.txt`:
+ *
+ *     / Search "a.ts" 1 file found
+ *     MD Read note.md L1:1 (1 line read)
+ *     TS Read a.ts 1 line read
+ *     PY Read c.py 1 line read
+ *     {} Read b.json 1 line read
+ *     ● Read d.txt 1 line read          ← plain text keeps the 1.0.80 marker
+ *
+ * So the badge is `/`, `{}`, or two to four upper-case characters. Two is the
+ * floor on purpose: a one-character class would also match the pronoun in an
+ * English sentence ("I Read the file"), and no measured badge is one character.
+ * `●` is left to `COPILOT_TOOL_ACTION_PATTERN`, which is the rule that already
+ * owns it -- copilot's own prose is `● <text>` too (`● done`, `● 対象ファイルを
+ * 確認して内容を読み込みます。`), and only the verb list separates the two.
+ *
+ * The `$` badge is absent for the same reason: `$ Shell Print requested text 2
+ * lines…` opens a BLOCK whose command rows follow, which is
+ * `COPILOT_TOOL_INVOCATION_PATTERN`'s job, and `Shell` is not in the verb list
+ * anyway.
+ *
+ * No /g flag (S4-5: would make test() stateful). No quantifier nested inside
+ * another (SEC4-001: ReDoS safe).
+ */
+export const COPILOT_TOOL_ROW_PATTERN = new RegExp(
+  `^\\s*(?:\\/|\\{\\}|[A-Z][A-Z0-9+#]{1,3})\\s+(?:${COPILOT_TOOL_VERBS})[\\s:]`,
+);
+
+/**
  * A wrapped continuation of the copilot transcript row above it (Issue #1897).
  *
  * Marker rows (` ❯ `, ` ● `, ` $ `, ` ⌄ `) carry one leading space; the rows they
@@ -1536,6 +1658,12 @@ export const COPILOT_BOOT_BANNER_ANCHORS: readonly RegExp[] = [
   /^\s*(?:●\s+)?Tip:\s*\//m,
   /Describe a task to get started/,
   /Prefer a visual workspace\?/,
+  // Issue #2269: copilot's greeting for a prompt it cannot act on. It arrives
+  // through the ask-user tool, so the row that reaches the transcript is
+  // `● Asked user Hi — what would you like to work on?` and the dialog's own
+  // body repeats the question. Both are chrome for a turn that produced no
+  // answer, and the operator saw the greeting saved as the agent's reply.
+  /what would you like to work on\?/i,
 ] as const;
 
 /**
@@ -1727,6 +1855,20 @@ export const COPILOT_SKIP_PATTERNS: readonly RegExp[] = [
   COPILOT_SELECTION_FOOTER_PATTERN,
   // Collapsed reasoning header (Issue #1897): "⌄ Thinking…" / "⌄ Thought for 41s"
   COPILOT_REASONING_HEADER_PATTERN,
+  // 1.0.82's transcript dividers and badge-marked tool rows (Issue #2269)
+  COPILOT_TRANSCRIPT_DIVIDER_PATTERN,
+  COPILOT_TOOL_ROW_PATTERN,
+  // Issue #2269: the anchored box-row rule, so the raw-row consumer agrees with
+  // the accumulator. `[╭╮╰╯│]` below is unanchored and omits `└`, which is the
+  // glyph copilot opens a detail row with (`   └ Enable all permissions (tools,
+  // paths, and URLs)` under the launch screen's tip). `normalizeCopilotLine`
+  // deletes every U+2500..U+257F glyph, so by the time the skip patterns run in
+  // `cleanCopilotResponse` that row reads as prose -- which is how the ONE row
+  // of the 1.0.82 launch screen that no other rule caught became the agent's
+  // first reply. `extractCopilotContentLines` already tests this pattern before
+  // normalising (#1897); adding it here is what gives `extractResponse`, which
+  // never normalises, the same answer.
+  COPILOT_BOX_ROW_PATTERN,
   // Logo/banner lines
   /^GitHub Copilot\s+v/,
   /[█▘▝▖▗▔▄▌▐]/,
@@ -1739,8 +1881,19 @@ export const COPILOT_SKIP_PATTERNS: readonly RegExp[] = [
   /^ctrl\+[a-z]\s+\w/,
   // Prompt lines
   /^[❯>]\s*(Type\s+@|$)/,
-  // Tip/hint lines
-  /^Tip:\s+\//,
+  // Tip/hint lines. Issue #2269 added the `●` marker: 1.0.82 draws the launch
+  // screen's tip as `● Tip: /allow-all`, and `cleanCopilotResponse` strips the
+  // bullet only AFTER the skip patterns have run, so the bare form never
+  // matched and the tip was the one banner row that reached History.
+  /^\s*(?:●\s+)?Tip:\s*\//,
+  // Issue #2269: copilot's own tab bar, the top row of every 1.0.82 frame. It is
+  // the second banner row the launch screen leaked (the logo, the disclaimer and
+  // the tip's `└ …` detail row are all caught by the glyph rules above), and
+  // between them they are the whole difference between "the launch screen cleans
+  // to nothing and cannot be saved" and "History opens with the banner". Spelled
+  // out in full rather than as a keyword so a reply that mentions one of these
+  // words is untouched.
+  /^\s*Current\s+Sessions\s+Issues\s+Pull requests\s+Gists\s*$/,
   // Initial display text
   /^Describe a task to get started/,
   // Issue #571: Disclaimer, initialization message, environment info

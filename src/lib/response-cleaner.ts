@@ -14,6 +14,8 @@ import {
   OPENCODE_RESPONSE_COMPLETE,
   COPILOT_SKIP_PATTERNS,
   COPILOT_TRANSCRIPT_CONTINUATION_PATTERN,
+  COPILOT_TOOL_VERBS,
+  COPILOT_BOX_ROW_PATTERN,
   findCopilotChromeStart,
 } from './detection/cli-patterns';
 import { normalizeOpenCodeLine, normalizeCopilotLine } from './tui-accumulator';
@@ -183,8 +185,15 @@ export function cleanGeminiResponse(response: string): string {
  * their own by {@link COPILOT_FOLD_MARKER_PATTERN} and
  * {@link COPILOT_COMMAND_OUTPUT_PATTERN}, so nothing needs a block that can run
  * away over a whole message.
+ *
+ * Issue #2269: the verb list moved to {@link COPILOT_TOOL_VERBS}, which
+ * `COPILOT_TOOL_ROW_PATTERN` reads as well. 1.0.82 marks most tool rows with a
+ * file-type badge rather than `●` and that pattern owns those; `●` is still the
+ * marker for a tool row whose file type has no badge (`● Read d.txt 1 line
+ * read`, measured) and for the ask-user row (`● Asked user …`), so both markers
+ * have to answer to one vocabulary.
  */
-const COPILOT_TOOL_ACTION_PATTERN = /^●\s+(?:Get |Read |Run |Search |Write |Edit |Delete |List |Create |Fetch |Explore |Execute |Install |Model changed to:)/;
+const COPILOT_TOOL_ACTION_PATTERN = new RegExp(`^●\\s+(?:${COPILOT_TOOL_VERBS})[\\s:]`);
 
 /**
  * copilot 1.0.80's tool invocation row (Issue #1897).
@@ -298,6 +307,22 @@ export function cleanCopilotResponse(response: string): string {
   let inToolOutputBlock = false;
 
   for (const line of responseLines) {
+    // Issue #2269: tested BEFORE normalisation, for the reason #1897 records at
+    // COPILOT_BOX_ROW_PATTERN and then only acted on in the accumulator:
+    // `normalizeCopilotLine` deletes every U+2500..U+257F glyph, so by the time
+    // COPILOT_SKIP_PATTERNS runs below, every glyph-anchored rule in it is dead
+    // in THIS function. That is what let two rows of copilot's launch screen
+    // through -- `  ╰─╯╰─╯  Copilot v1.0.82 uses AI.` cleans to a bare version
+    // string (1.0.82 split the one-line disclaimer the exact-match rule was
+    // written for), and `   └ Enable all permissions …` cleans to prose -- on
+    // every call that receives a raw frame rather than accumulated content.
+    //
+    // Deliberately not resetting the block flags: the reasoning block's own rows
+    // are `│ <chain of thought>`, so a box row is the middle of a block far more
+    // often than the end of one. That is the behaviour the dead `/^[│└]/` rule
+    // below was written with, and this is the live version of it.
+    if (COPILOT_BOX_ROW_PATTERN.test(line)) continue;
+
     // Normalize using the same function as TUI accumulator (DRY)
     const normalized = normalizeCopilotLine(line);
     if (!normalized) {
