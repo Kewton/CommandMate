@@ -71,12 +71,50 @@
  * and left the highlight out of view on all five sampled keypresses of a live
  * `/model` card. The scroll effect below now measures the row where it really
  * is; the arithmetic and its padding term are documented there.
+ *
+ * ## Issue #2323: the arithmetic was right and its INPUT was wrong
+ *
+ * #2318 fixed WHERE row `i` is. It could not fix WHICH row `i` is, and for
+ * Command Code that was never the highlighted one: its `/model` picker marks
+ * the arrow-selected row with a BACKGROUND COLOUR and draws no selection caret
+ * at all, so {@link HIGHLIGHT_CARET_PATTERN} fell through the list and matched
+ * the filter row `› Type to search models...` — a row that never moves. Every
+ * keypress then recomputed a correct pixel offset for the same wrong row, so
+ * the card sat still while the selection walked off the bottom of it (UAT
+ * 2026-09-04: rows at 704px and 825px of a 231..677 band, `scrollTop` 231
+ * throughout). A caret-only rule fails SILENTLY in the one direction that is
+ * not safe: a missing caret returns -1 and switches the follow off, which is
+ * fine, but a caret on the WRONG row leaves it on and aimed at nothing.
+ *
+ * {@link findHighlightLineIndex} therefore reads the frame with its ANSI
+ * intact and takes the last row carrying EITHER mark — a caret, or a
+ * background the row is painted in and its neighbours are not. Both halves
+ * already took the LAST match for the same documented reason; asking for the
+ * last mark of either kind is that one rule over a two-glyph alphabet, not a
+ * priority order between two rules.
+ *
+ * That is a correction to this Issue's own write-up, which proposed "the caret
+ * if there is one, the paint otherwise". Measured on the committed capture
+ * `tests/fixtures/chat-dialog-card-2254/command-code-model-1-40-1.txt`, that
+ * order changes nothing at all: the filter row's `›` IS a caret (U+203A, the
+ * glyph codex uses) and it is the only caret-shaped row on the whole frame, so
+ * a caret-first rule keeps picking it.
+ *
+ * Re-derived across every ANSI capture committed to `tests/fixtures` (103
+ * files): the paint outranks a caret on exactly one of them, this Issue's. So
+ * claude, codex, copilot and gemini answer with the same index #2309 and #2318
+ * measured, and every frame that had no mark at all still has none.
  */
 
 import { useLayoutEffect, useMemo, useRef } from 'react';
 import { useTranslations } from 'next-intl';
 import { sanitizeTerminalOutput } from '@/lib/security/sanitize';
 import { stripAnsi } from '@/lib/detection/ansi';
+import {
+  backgroundValues,
+  dominantBackground,
+  scanRowBackgrounds,
+} from '@/lib/detection/sgr-background';
 import {
   DIALOG_FRAME_DEFAULT_LINES,
   extractDialogFrameTail,
@@ -95,21 +133,107 @@ import {
 const HIGHLIGHT_CARET_PATTERN = /^[^\S\n]*[❯›●][^\S\n]/;
 
 /**
- * Index of the LAST line carrying a selection caret, or -1.
+ * Columns a background must cover before it can be a selected ROW (Issue #2323).
+ *
+ * A row highlight spans the row's label; a decoration spans a glyph or two.
+ * Measured on the committed captures: Command Code's selected `/model` row
+ * paints 72 columns and opencode's selected palette row 58, while the painted
+ * cells inside claude's own boot logo paint 5 and 6
+ * (`claude-model-2-1-259.txt`, rows 0–1). Eight sits between them, nearer the
+ * decoration than the row, because the two mistakes do not cost the same:
+ * following a logo is a card aimed at the wrong thing, which is the defect
+ * this Issue exists to remove, while missing a very narrow highlight only
+ * returns -1 and leaves the follow off.
+ */
+const HIGHLIGHT_MIN_PAINTED_COLUMNS = 8;
+
+/**
+ * Index of the LAST line marked as the current selection, or -1.
+ *
+ * Takes the frame with its ANSI **intact** (Issue #2323) — a background is the
+ * only mark a tool that draws no caret leaves, and it exists only in the raw
+ * bytes. A caller handing over a stripped frame still gets the caret rule,
+ * i.e. every tool that draws one, so this degrades rather than breaks.
+ *
+ * Two marks, and the last one on the screen wins whichever kind it is:
+ *
+ *  - **a caret** ({@link HIGHLIGHT_CARET_PATTERN}) — claude, codex, copilot,
+ *    gemini;
+ *  - **a painted row** ({@link findPaintedHighlightLineIndex}) — Command Code's
+ *    `/model` picker, which paints its selection and carets nothing.
  *
  * Last, not first: a TUI redraws the whole list on every keypress, so if more
- * than one row happened to start with a caret-shaped glyph (unlikely, but the
- * fixtures are real terminal output and not a controlled vocabulary) the
+ * than one row carries a mark (unlikely for one kind, routine across two — a
+ * search-type picker carets its filter box AND paints its selection) the
  * bottom-most one is the one nearest the footer, which is where the measured
- * dialogs place the currently highlighted row relative to the rest of a long
- * list scrolled into view.
+ * dialogs put the currently highlighted row relative to the rest of a long
+ * list scrolled into view. `Math.max` also carries the -1: a frame with
+ * neither mark still switches the follow off.
  *
  * Exported for the unit suite; not part of the render loop's public surface.
  */
-export function findHighlightLineIndex(plainText: string): number {
-  const lines = plainText.split('\n');
+export function findHighlightLineIndex(frame: string): number {
+  const lines = frame.split('\n');
+
+  let caret = -1;
   for (let i = lines.length - 1; i >= 0; i -= 1) {
-    if (HIGHLIGHT_CARET_PATTERN.test(lines[i])) return i;
+    if (HIGHLIGHT_CARET_PATTERN.test(stripAnsi(lines[i]))) {
+      caret = i;
+      break;
+    }
+  }
+
+  return Math.max(caret, findPaintedHighlightLineIndex(lines));
+}
+
+/**
+ * Index of the last row painted in a background its NEIGHBOURS do not use, or
+ * -1.
+ *
+ * "That its neighbours do not use" is the whole rule, and it is what separates
+ * the two things a `capture-pane -e` frame paints (Issue #2323's known trap
+ * — "command-code paints only the selected row, opencode's overlay paints the
+ * whole rectangle, and one rule may not cover both"):
+ *
+ *  - a **selection** is ONE row. Command Code's `/model` picker paints the
+ *    arrow-selected row `48;2;45;43;85` and leaves its sixty-odd siblings bare;
+ *    opencode's command palette paints its own selected row `48;2;250;178;131`
+ *    INSIDE a panel every row of which is `48;2;20;20;20`;
+ *  - a **panel** is a BLOCK of rows sharing one background — Command Code's
+ *    boot banner is seven consecutive rows of `48;2;43;39;88` on that same
+ *    capture, and the pane background some opencode themes paint is every row
+ *    there is.
+ *
+ * So a row qualifies when the background it is MOSTLY painted in appears
+ * nowhere on the row above or the row below. Two halves, both load-bearing:
+ *
+ *  - *mostly* ({@link dominantBackground}) rather than *anywhere*, because a
+ *    panel's own chrome — a bottom border, a footer, a diff gutter — is an
+ *    isolated colour too, and on the opencode palette a bare "some colour of
+ *    its own" rule picks the `╹▀▀▀▀` border 46 rows below the selection;
+ *  - *nowhere on the neighbours* ({@link backgroundValues}) rather than *not
+ *    their dominant one*, because a highlight sits INSIDE its panel and the
+ *    panel's colour is on the rows around it whether or not it dominates them.
+ *
+ * The measured limit of this: where a theme paints the whole pane edge to edge
+ * and centres a narrower overlay on it — opencode at the 200 columns
+ * `TUI_PANE_WIDTH` captures at — the pane's own background dominates every
+ * row, including the selected one, and this returns -1. That is the answer
+ * such a frame gave before this Issue too, so nothing regressed there; it is
+ * simply not fixed, and Issue #2255's structured picker is what would fix it
+ * properly, by giving the card an element to `scrollIntoView`.
+ */
+function findPaintedHighlightLineIndex(lines: readonly string[]): number {
+  const rows = lines.map(scanRowBackgrounds);
+  const dominant = rows.map(dominantBackground);
+  const values = rows.map(backgroundValues);
+
+  for (let i = rows.length - 1; i >= 0; i -= 1) {
+    const { bg, columns } = dominant[i];
+    if (bg === null || columns < HIGHLIGHT_MIN_PAINTED_COLUMNS) continue;
+    if (i > 0 && values[i - 1].has(bg)) continue;
+    if (i + 1 < rows.length && values[i + 1].has(bg)) continue;
+    return i;
   }
   return -1;
 }
@@ -161,7 +285,7 @@ export function ChatDialogCard({
   const html = useMemo(() => (tail ? sanitizeTerminalOutput(tail) : ''), [tail]);
 
   // --------------------------------------------------------------------
-  // Highlight follow (Issue #2309, corrected by Issue #2318)
+  // Highlight follow (Issue #2309; arithmetic corrected by #2318, input by #2323)
   // --------------------------------------------------------------------
   // A selection list this long only makes sense with the highlighted row kept
   // in view as the arrows move it — otherwise "scrollable" is not the same as
@@ -173,7 +297,7 @@ export function ChatDialogCard({
   // for the two ways #2309 got it wrong.
   const frameRef = useRef<HTMLDivElement>(null);
   const highlightLineIndex = useMemo(
-    () => (isSelectionList && tail ? findHighlightLineIndex(stripAnsi(tail)) : -1),
+    () => (isSelectionList && tail ? findHighlightLineIndex(tail) : -1),
     [isSelectionList, tail],
   );
   useLayoutEffect(() => {
