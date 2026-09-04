@@ -298,8 +298,21 @@ jobs:
         # step in the run sample above, and a cold-cache `npm ci` of this
         # lockfile (572 packages, empty --cache dir, lifecycle scripts included)
         # measured 7s locally. 5 is ~13x the observed CI worst case.
+        #
+        # [Issue #2313] `--no-audit`. By default `npm ci` ends with a POST to the
+        # registry's audit endpoint and blocks on it for npm's own
+        # `fetch-timeout` (300000ms = exactly 5 minutes) before giving up. On
+        # 2026-09-04 that endpoint accepted TCP and never answered (measured
+        # 3/3 from the host: HTTP 000 at 60s, while a plain metadata GET took
+        # 0.5s), so every install here sat at the audit call until npm's 5m
+        # gave up — the same instant this step's 5m cap killed it. 15 jobs died
+        # that way in one day, always at 312s, with the real work still
+        # `skipped`. Installing does not need the audit; the `Security Audit`
+        # job runs `npm audit` explicitly and is the one place that should
+        # depend on that endpoint. Measured with the flag: 10s, exit 0, during
+        # the same outage.
         timeout-minutes: 5
-        run: npm ci
+        run: npm ci --no-audit
 
       - name: Run ESLint
         run: npm run lint
@@ -333,8 +346,21 @@ jobs:
         # step in the run sample above, and a cold-cache `npm ci` of this
         # lockfile (572 packages, empty --cache dir, lifecycle scripts included)
         # measured 7s locally. 5 is ~13x the observed CI worst case.
+        #
+        # [Issue #2313] `--no-audit`. By default `npm ci` ends with a POST to the
+        # registry's audit endpoint and blocks on it for npm's own
+        # `fetch-timeout` (300000ms = exactly 5 minutes) before giving up. On
+        # 2026-09-04 that endpoint accepted TCP and never answered (measured
+        # 3/3 from the host: HTTP 000 at 60s, while a plain metadata GET took
+        # 0.5s), so every install here sat at the audit call until npm's 5m
+        # gave up — the same instant this step's 5m cap killed it. 15 jobs died
+        # that way in one day, always at 312s, with the real work still
+        # `skipped`. Installing does not need the audit; the `Security Audit`
+        # job runs `npm audit` explicitly and is the one place that should
+        # depend on that endpoint. Measured with the flag: 10s, exit 0, during
+        # the same outage.
         timeout-minutes: 5
-        run: npm ci
+        run: npm ci --no-audit
 
       - name: Run TypeScript type check
         run: npx tsc --noEmit
@@ -369,8 +395,21 @@ jobs:
         # step in the run sample above, and a cold-cache `npm ci` of this
         # lockfile (572 packages, empty --cache dir, lifecycle scripts included)
         # measured 7s locally. 5 is ~13x the observed CI worst case.
+        #
+        # [Issue #2313] `--no-audit`. By default `npm ci` ends with a POST to the
+        # registry's audit endpoint and blocks on it for npm's own
+        # `fetch-timeout` (300000ms = exactly 5 minutes) before giving up. On
+        # 2026-09-04 that endpoint accepted TCP and never answered (measured
+        # 3/3 from the host: HTTP 000 at 60s, while a plain metadata GET took
+        # 0.5s), so every install here sat at the audit call until npm's 5m
+        # gave up — the same instant this step's 5m cap killed it. 15 jobs died
+        # that way in one day, always at 312s, with the real work still
+        # `skipped`. Installing does not need the audit; the `Security Audit`
+        # job runs `npm audit` explicitly and is the one place that should
+        # depend on that endpoint. Measured with the flag: 10s, exit 0, during
+        # the same outage.
         timeout-minutes: 5
-        run: npm ci
+        run: npm ci --no-audit
 
       - name: Run unit tests
         run: npm run test:unit
@@ -405,8 +444,21 @@ jobs:
         # step in the run sample above, and a cold-cache `npm ci` of this
         # lockfile (572 packages, empty --cache dir, lifecycle scripts included)
         # measured 7s locally. 5 is ~13x the observed CI worst case.
+        #
+        # [Issue #2313] `--no-audit`. By default `npm ci` ends with a POST to the
+        # registry's audit endpoint and blocks on it for npm's own
+        # `fetch-timeout` (300000ms = exactly 5 minutes) before giving up. On
+        # 2026-09-04 that endpoint accepted TCP and never answered (measured
+        # 3/3 from the host: HTTP 000 at 60s, while a plain metadata GET took
+        # 0.5s), so every install here sat at the audit call until npm's 5m
+        # gave up — the same instant this step's 5m cap killed it. 15 jobs died
+        # that way in one day, always at 312s, with the real work still
+        # `skipped`. Installing does not need the audit; the `Security Audit`
+        # job runs `npm audit` explicitly and is the one place that should
+        # depend on that endpoint. Measured with the flag: 10s, exit 0, during
+        # the same outage.
         timeout-minutes: 5
-        run: npm ci
+        run: npm ci --no-audit
 
       # Issue #1102: the integration suite was drifting because it never ran in
       # CI. It is self-contained (in-memory SQLite + mocked fetch/tmux, no external
@@ -449,8 +501,21 @@ jobs:
         # step in the run sample above, and a cold-cache `npm ci` of this
         # lockfile (572 packages, empty --cache dir, lifecycle scripts included)
         # measured 7s locally. 5 is ~13x the observed CI worst case.
+        #
+        # [Issue #2313] `--no-audit`. By default `npm ci` ends with a POST to the
+        # registry's audit endpoint and blocks on it for npm's own
+        # `fetch-timeout` (300000ms = exactly 5 minutes) before giving up. On
+        # 2026-09-04 that endpoint accepted TCP and never answered (measured
+        # 3/3 from the host: HTTP 000 at 60s, while a plain metadata GET took
+        # 0.5s), so every install here sat at the audit call until npm's 5m
+        # gave up — the same instant this step's 5m cap killed it. 15 jobs died
+        # that way in one day, always at 312s, with the real work still
+        # `skipped`. Installing does not need the audit; the `Security Audit`
+        # job runs `npm audit` explicitly and is the one place that should
+        # depend on that endpoint. Measured with the flag: 10s, exit 0, during
+        # the same outage.
         timeout-minutes: 5
-        run: npm ci
+        run: npm ci --no-audit
 
       # Issue #1180: the E2E suite drifted for months because it never ran in CI
       # — same failure mode as the integration suite in #1102. Only chromium is
@@ -621,8 +686,21 @@ jobs:
         # step in the run sample above, and a cold-cache `npm ci` of this
         # lockfile (572 packages, empty --cache dir, lifecycle scripts included)
         # measured 7s locally. 5 is ~13x the observed CI worst case.
+        #
+        # [Issue #2313] `--no-audit`. By default `npm ci` ends with a POST to the
+        # registry's audit endpoint and blocks on it for npm's own
+        # `fetch-timeout` (300000ms = exactly 5 minutes) before giving up. On
+        # 2026-09-04 that endpoint accepted TCP and never answered (measured
+        # 3/3 from the host: HTTP 000 at 60s, while a plain metadata GET took
+        # 0.5s), so every install here sat at the audit call until npm's 5m
+        # gave up — the same instant this step's 5m cap killed it. 15 jobs died
+        # that way in one day, always at 312s, with the real work still
+        # `skipped`. Installing does not need the audit; the `Security Audit`
+        # job runs `npm audit` explicitly and is the one place that should
+        # depend on that endpoint. Measured with the flag: 10s, exit 0, during
+        # the same outage.
         timeout-minutes: 5
-        run: npm ci
+        run: npm ci --no-audit
 
       - name: Build Next.js
         run: npm run build
@@ -662,10 +740,46 @@ jobs:
         # step in the run sample above, and a cold-cache `npm ci` of this
         # lockfile (572 packages, empty --cache dir, lifecycle scripts included)
         # measured 7s locally. 5 is ~13x the observed CI worst case.
+        #
+        # [Issue #2313] `--no-audit`. By default `npm ci` ends with a POST to the
+        # registry's audit endpoint and blocks on it for npm's own
+        # `fetch-timeout` (300000ms = exactly 5 minutes) before giving up. On
+        # 2026-09-04 that endpoint accepted TCP and never answered (measured
+        # 3/3 from the host: HTTP 000 at 60s, while a plain metadata GET took
+        # 0.5s), so every install here sat at the audit call until npm's 5m
+        # gave up — the same instant this step's 5m cap killed it. 15 jobs died
+        # that way in one day, always at 312s, with the real work still
+        # `skipped`. Installing does not need the audit; the `Security Audit`
+        # job runs `npm audit` explicitly and is the one place that should
+        # depend on that endpoint. Measured with the flag: 10s, exit 0, during
+        # the same outage.
         timeout-minutes: 5
-        run: npm ci
+        run: npm ci --no-audit
 
       - name: Run security audit
         # `npm audit` posts the tree to the registry; measured 0.03m max (n=12).
+        #
+        # [Issue #2313] `npm audit` exits 1 both for a critical finding and for
+        # "the registry did not answer", and on 2026-09-04 the audit endpoint
+        # did exactly that for most of a day while status.npmjs.org reported
+        # every component operational. A bare `npm audit` here turned that
+        # outage into a red Security Audit on every PR, indistinguishable on
+        # the PR page from a real CVE. So the verdict is read from the JSON
+        # shape instead (scripts/check-npm-audit.mjs): a report with anything
+        # at or above the gate fails; npm's error envelope — no report at all —
+        # is a `::warning` and exit 0 that says in so many words the tree was
+        # NOT audited on this run. That is narrower than `continue-on-error`
+        # on the job, which would also wave through a real finding.
+        #
+        # `--fetch-timeout` / `--fetch-retries`: npm's default fetch-timeout is
+        # 300000ms — the same 5 minutes as this step's cap — so a hanging
+        # endpoint used to be killed by the runner before npm could emit the
+        # envelope the script needs. 60s x 2 attempts stays well inside 5m;
+        # measured 60s end-to-end against the live outage.
         timeout-minutes: 5
-        run: npm audit --audit-level=critical
+        run: |
+          set +e
+          npm audit --audit-level=critical --json --fetch-timeout=60000 --fetch-retries=1 > "$RUNNER_TEMP/npm-audit.json"
+          rc=$?
+          set -e
+          node scripts/check-npm-audit.mjs "$RUNNER_TEMP/npm-audit.json" "$rc" --level=critical
