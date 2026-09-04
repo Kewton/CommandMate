@@ -74,14 +74,22 @@
  * of `detectSessionStatus` passes the raw `capture-pane -e` output
  * (`lib/tmux/tmux.ts` always passes `-e`).
  *
- * A leaf module by design: it imports the ANSI primitives, the column rule and
- * the excerpt bound and nothing else.
+ * A leaf module by design: it imports the SGR background scan, the column rule
+ * and the excerpt bound and nothing else.
+ *
+ * The scan itself moved to `sgr-background.ts` in Issue #2323, which needed the
+ * same reading for a card's scroll-follow; that move also repaired a
+ * foreground/background confusion in the walk (`38;2;r;g;b` channels were read
+ * as 16-colour background codes), so a syntax-highlighted transcript row now
+ * produces fewer spurious edges here than it did. It cannot produce more, so no
+ * rectangle this module used to read can have stopped being one.
  *
  * @module lib/detection/opencode-modal-overlay
  */
 
 import { truncateToByteBudget } from './excerpt';
-import { sliceColumns, visibleWidth } from './terminal-columns';
+import { backgroundAt, scanRowBackgrounds, type ScannedRow } from './sgr-background';
+import { sliceColumns } from './terminal-columns';
 
 /**
  * Published `sessionStatusReason` for this signature.
@@ -192,63 +200,6 @@ const OVERLAY_ESCAPE_HATCH = /\S[^\S\n]{2,}esc[^\S\n]*$/;
 /** Cheap pre-filter for the rows worth measuring at all. */
 const ESCAPE_HATCH_WORD = 'esc';
 
-/**
- * One of opencode's own box gutters: the composer, the permission dialog, or an
- * echoed user prompt.
- *
- * Same character class as `OPENCODE_GUTTER_ROW_PATTERN` (Issue #1893) plus the
- * bottom border's `╹`. Those boxes are painted rectangles too — the composer is
- * one at columns 3–78 on every 80-column frame here — and a user whose prompt
- * happened to end in `…  esc` would otherwise be drawing an overlay in the
- * transcript. That is not hypothetical: it is `words-in-response.txt`, this
- * Issue's negative control, whose echoed prompt says all four dialog headings
- * and ends in a hatch.
- *
- * Tested at the column immediately LEFT of the rectangle, because that is where
- * opencode puts the glyph: the gutter is drawn first and the background is
- * switched on after it, so the box's painted interior starts one column to its
- * right (measured — `[(null, 0, 3), ('48;2;30;30;30', 3, 78)]` on every gutter
- * row of `sidebar-off.txt`). The rectangle's own first column is tested too, so
- * a theme that paints the gutter itself is covered by the same rule.
- */
-const BOX_GUTTER = /^[│┃╹]/;
-
-/**
- * Every ANSI sequence, in the repository's own spelling.
- *
- * Restated from `ANSI_PATTERN` (`ansi.ts`) rather than imported because this
- * module needs to walk the sequences IN ORDER while counting columns, and that
- * one is a shared `g`-flagged instance whose `lastIndex` a caller must not
- * disturb. `tests/unit/detection-opencode-modal-overlay-2112.test.ts` asserts
- * the text this scan produces is byte-identical to `stripAnsi`'s, so the
- * restatement cannot drift silently.
- */
-const ANSI_SEQUENCE = /\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\[[0-9;]*m/g;
-
-/** An SGR sequence, with its parameters. Only these can change the background. */
-const SGR_PARAMETERS = /^(?:\x1b\[|\[)([0-9;]*)m$/;
-
-/** A run of columns painted with one background. `null` is the terminal default. */
-interface BackgroundSegment {
-  readonly bg: string | null;
-  /** First column of the run, 0-based inclusive. */
-  readonly start: number;
-  /** One past the last column of the run. */
-  readonly end: number;
-}
-
-/** One captured row, measured once. */
-interface ScannedRow {
-  /** The row with every ANSI sequence removed — identical to `stripAnsi(row)`. */
-  readonly text: string;
-  /** Background runs across the row, adjacent runs of equal value merged. */
-  readonly segments: readonly BackgroundSegment[];
-  /** Columns a background boundary sits at, plus the row's own right edge. */
-  readonly edges: ReadonlySet<number>;
-  /** How many columns the row paints. */
-  readonly width: number;
-}
-
 /** A background-painted rectangle offering an `esc` hatch. */
 export interface OpenCodeModalOverlay {
   /** {@link OPENCODE_MODAL_OVERLAY_ID}. */
@@ -275,82 +226,25 @@ export interface OpenCodeModalOverlay {
 }
 
 /**
- * Fold one SGR sequence's parameters into the current background.
+ * One of opencode's own box gutters: the composer, the permission dialog, or an
+ * echoed user prompt.
  *
- * Handles the three forms tmux emits: the 16-colour codes (`40`–`47`,
- * `100`–`107`), the 256-colour and 24-bit extended forms (`48;5;n`,
- * `48;2;r;g;b`), and the two resets (`0`, `49`). Foreground and attribute codes
- * leave the background alone, which is what keeps a syntax-highlighted
- * transcript row from producing dozens of spurious edges.
+ * Same character class as `OPENCODE_GUTTER_ROW_PATTERN` (Issue #1893) plus the
+ * bottom border's `╹`. Those boxes are painted rectangles too — the composer is
+ * one at columns 3–78 on every 80-column frame here — and a user whose prompt
+ * happened to end in `…  esc` would otherwise be drawing an overlay in the
+ * transcript. That is not hypothetical: it is `words-in-response.txt`, this
+ * Issue's negative control, whose echoed prompt says all four dialog headings
+ * and ends in a hatch.
+ *
+ * Tested at the column immediately LEFT of the rectangle, because that is where
+ * opencode puts the glyph: the gutter is drawn first and the background is
+ * switched on after it, so the box's painted interior starts one column to its
+ * right (measured — `[(null, 0, 3), ('48;2;30;30;30', 3, 78)]` on every gutter
+ * row of `sidebar-off.txt`). The rectangle's own first column is tested too, so
+ * a theme that paints the gutter itself is covered by the same rule.
  */
-function applySgr(current: string | null, parameters: string): string | null {
-  const parts = (parameters === '' ? '0' : parameters).split(';');
-  let bg = current;
-  for (let i = 0; i < parts.length; i++) {
-    const code = Number(parts[i] === '' ? '0' : parts[i]);
-    if (!Number.isFinite(code)) continue;
-    if (code === 0 || code === 49) {
-      bg = null;
-    } else if ((code >= 40 && code <= 47) || (code >= 100 && code <= 107)) {
-      bg = parts[i];
-    } else if (code === 48) {
-      if (parts[i + 1] === '2') {
-        bg = parts.slice(i, i + 5).join(';');
-        i += 4;
-      } else if (parts[i + 1] === '5') {
-        bg = parts.slice(i, i + 3).join(';');
-        i += 2;
-      }
-    }
-  }
-  return bg;
-}
-
-/** Measure one captured row: its text, its background runs and their edges. */
-function scanRow(line: string): ScannedRow {
-  ANSI_SEQUENCE.lastIndex = 0;
-
-  const segments: BackgroundSegment[] = [];
-  let text = '';
-  let bg: string | null = null;
-  let columns = 0;
-  let segmentStart = 0;
-  let cursor = 0;
-
-  let match: RegExpExecArray | null;
-  while ((match = ANSI_SEQUENCE.exec(line)) !== null) {
-    const chunk = line.slice(cursor, match.index);
-    text += chunk;
-    columns += visibleWidth(chunk);
-    cursor = match.index + match[0].length;
-
-    const sgr = SGR_PARAMETERS.exec(match[0]);
-    if (sgr === null) continue;
-    const next = applySgr(bg, sgr[1]);
-    if (next === bg) continue;
-    if (columns > segmentStart) segments.push({ bg, start: segmentStart, end: columns });
-    bg = next;
-    segmentStart = columns;
-  }
-
-  const tail = line.slice(cursor);
-  text += tail;
-  columns += visibleWidth(tail);
-  if (columns > segmentStart) segments.push({ bg, start: segmentStart, end: columns });
-
-  const edges = new Set<number>(segments.map(segment => segment.start));
-  if (segments.length > 0) edges.add(segments[segments.length - 1].end);
-
-  return { text, segments, edges, width: columns };
-}
-
-/** The background painted at one column, or `null` for the terminal default. */
-function backgroundAt(row: ScannedRow, column: number): string | null {
-  for (const segment of row.segments) {
-    if (segment.start <= column && column < segment.end) return segment.bg;
-  }
-  return null;
-}
+const BOX_GUTTER = /^[│┃╹]/;
 
 /**
  * Does this row carry the rectangle `[left, right)`?
@@ -416,7 +310,7 @@ interface OpenCodeModalOverlayMatch extends OpenCodeModalOverlay {
  * @param frame - The capture with its ANSI intact (`capture-pane -e`)
  */
 function findOpenCodeModalOverlay(frame: string): OpenCodeModalOverlayMatch | null {
-  const rows = frame.split('\n').map(scanRow);
+  const rows = frame.split('\n').map(scanRowBackgrounds);
   const examined = new Set<string>();
   let best: OpenCodeModalOverlayMatch | null = null;
 
