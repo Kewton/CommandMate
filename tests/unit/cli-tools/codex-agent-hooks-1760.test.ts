@@ -182,9 +182,13 @@ describe('the hooks review dialog', () => {
     expect(isCodexHooksReviewDialog('  Hooks need review')).toBe(false);
   });
 
-  it('is declined, so the session reaches its prompt without trusting anything', async () => {
-    // Trusting would write `[hooks.state…]` into the operator's own
-    // ~/.codex/config.toml — the file that also carries their `notify` command.
+  it('is answered, so the session reaches its prompt', async () => {
+    // Issue #2315 flipped WHICH answer. `3` (Continue without trusting) is what
+    // #1760 sent, and codex records only a grant — so it bought one launch, the
+    // dialog returned on the next, and the hooks this file writes the config for
+    // never ran. `2` (Trust all and continue) is remembered.
+    // `tests/unit/hooks/codex-hook-trust-policy-2315.test.ts` owns the one case
+    // that still declines: a worktree shipping its own `.codex/hooks.json`.
     vi.mocked(capturePane)
       .mockResolvedValueOnce(HOOKS_REVIEW_PANE)
       .mockResolvedValue(READY_PANE);
@@ -194,13 +198,15 @@ describe('the hooks review dialog', () => {
     const keys = vi.mocked(sendKeys).mock.calls.map(([, sent, enter]) => [sent, enter]);
     // Sent alone: codex confirms a numbered selection instantly, and a trailing
     // Enter would land on the next screen (Issue #890).
-    expect(keys).toContainEqual(['3', false]);
-    expect(keys).not.toContainEqual(['2', false]);
+    expect(keys).toContainEqual(['2', false]);
   });
 
-  it('is answered once, however long it stays on screen', async () => {
-    // capturePane(50) keeps a dismissed dialog in scrollback; without the
-    // one-shot guard the live prompt would collect "333…".
+  it('never sends the same key twice at one screen', async () => {
+    // capturePane(50) keeps a dismissed dialog in scrollback; the guard #892 put
+    // here exists so a live prompt does not collect "222…". Issue #2315 replaced
+    // the one-shot latch with a per-screen budget, and the property that matters
+    // survives: a second attempt at the SAME screen sends a DIFFERENT key —
+    // option 1, which descends into the list whose footer names its own exit.
     vi.mocked(capturePane)
       .mockResolvedValueOnce(HOOKS_REVIEW_PANE)
       .mockResolvedValueOnce(HOOKS_REVIEW_PANE)
@@ -208,7 +214,11 @@ describe('the hooks review dialog', () => {
 
     await new CodexTool().startSession(WORKTREE_ID, WORKTREE_PATH);
 
-    const threes = vi.mocked(sendKeys).mock.calls.filter(([, sent]) => sent === '3');
-    expect(threes).toHaveLength(1);
+    const dialogKeys = vi
+      .mocked(sendKeys)
+      .mock.calls.filter(([, , enter]) => enter === false)
+      .map(([, sent]) => String(sent));
+    expect(dialogKeys).toEqual(['2', '1']);
+    expect(new Set(dialogKeys).size).toBe(dialogKeys.length);
   });
 });
