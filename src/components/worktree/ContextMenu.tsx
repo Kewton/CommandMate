@@ -26,6 +26,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
+import { createPortal } from 'react-dom';
 import { useTranslations } from 'next-intl';
 import { FilePlus, FolderPlus, Pencil, Trash2, Upload, FolderInput } from 'lucide-react';
 import { Z_INDEX } from '@/config/z-index';
@@ -357,7 +358,13 @@ export const ContextMenu = memo(function ContextMenu({
     ? 'animate-out fade-out-0 zoom-out-95 duration-100 fill-mode-forwards pointer-events-none'
     : 'animate-in fade-in-0 zoom-in-95 duration-100';
 
-  return (
+  // [Issue #2294] Portalled to document.body. Drawn inline the menu stays
+  // inside `main[role="main"]`, whose `view-transition-name: cm-content`
+  // (Issue #1122) opens a stacking context — `Z_INDEX.CONTEXT_MENU` is then
+  // only compared against main's own children, so a menu opened near the left
+  // edge slides under the desktop sidebar. `position: fixed` measures against
+  // the viewport either way, so the Issue #1362 clamping is unaffected.
+  const menu = (
     <div
       ref={menuRef}
       data-testid="context-menu"
@@ -405,6 +412,14 @@ export const ContextMenu = memo(function ContextMenu({
       })}
     </div>
   );
+
+  // No portal target during SSR — render inline until the client takes over
+  // (same guard shape as components/ui/Modal.tsx).
+  if (typeof document === 'undefined') {
+    return menu;
+  }
+
+  return createPortal(menu, document.body);
 });
 
 export default ContextMenu;

@@ -834,9 +834,14 @@ export const MarkdownEditor = memo(function MarkdownEditor({
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Issue #104: Create/cleanup portal container for maximized mode
-  // Portal is needed because Modal's transform property creates a new stacking context
-  // which prevents fixed positioning from covering the viewport
+  // Issue #104: Create/cleanup portal container for maximized mode.
+  // Portal is needed because a `fixed` element only covers the viewport when it
+  // is not trapped in an ancestor stacking context — Modal's `transform` was the
+  // original case, and [Issue #2294] added a second one that bites on PC: the
+  // AppShell `main[role="main"]` carries `view-transition-name: cm-content`
+  // (Issue #1122), so an inline fallback fullscreen would render *under* the
+  // desktop sidebar (Z_INDEX.SIDEBAR). The container hangs off document.body so
+  // Z_INDEX.MAXIMIZED_EDITOR is compared against the sidebar, as intended.
   useEffect(() => {
     if (typeof document === 'undefined') return;
 
@@ -913,7 +918,9 @@ export const MarkdownEditor = memo(function MarkdownEditor({
     const base = 'flex flex-col bg-surface';
 
     if (isMaximized && isFallbackMode) {
-      // CSS fallback for fullscreen (iOS Safari, etc.)
+      // CSS fallback for fullscreen (iOS Safari, iPadOS — useFullscreen forces
+      // it there). Only escapes the sidebar because the tree is portalled to
+      // document.body below (Issue #104 / #2294).
       return `${base} fixed inset-0`;
     }
 
@@ -1131,8 +1138,13 @@ export const MarkdownEditor = memo(function MarkdownEditor({
     </div>
   );
 
-  // Issue #104: Use Portal for maximized mode in CSS fallback
-  // This breaks out of Modal's transform stacking context
+  // Issue #104 / #2294: Use Portal for maximized mode in CSS fallback. This
+  // breaks out of Modal's transform stacking context AND out of the
+  // view-transition stacking context on AppShell's <main>. The native
+  // Fullscreen API path is deliberately NOT portalled: the browser promotes the
+  // element to the top layer in place, and moving it would drop it out of
+  // fullscreen. `portalContainer` is null only until the mount effect above
+  // runs, i.e. never while maximized (maximizing needs a user gesture).
   if (isMaximized && isFallbackMode && portalContainer) {
     return createPortal(editorContent, portalContainer);
   }

@@ -19,6 +19,19 @@
  * 6. Toast notifications (60)
  * 7. Radix overlay popovers - Select/DropdownMenu/Tooltip (65)
  * 8. Context menus (70)
+ *
+ * [Issue #2294] These numbers only order elements that share a stacking
+ * context. `main[role="main"]` in AppShell carries `view-transition-name:
+ * cm-content` (globals.css, Issue #1122), and any value other than `none`
+ * opens a stacking context — so a `fixed` element rendered *inline* inside
+ * main is compared against main's siblings as if it were main itself
+ * (`position: static; z-index: auto` = 0), not at the value below. The Sidebar
+ * (30) is one of those siblings, so an inline overlay at 55 still renders
+ * underneath it. Anything at Modal level or above must therefore be drawn
+ * through `createPortal(..., document.body)` — as Modal, Toast,
+ * FullScreenModal, CommandPalette, the maximized file overlay
+ * (FilePanelContent), the MarkdownEditor CSS-fallback fullscreen and
+ * ContextMenu all do.
  */
 export const Z_INDEX = {
   /** Dropdown menus and select options */
@@ -33,7 +46,11 @@ export const Z_INDEX = {
   /** Modal dialogs and overlays */
   MODAL: 50,
 
-  /** Maximized editor overlay - above Modal for iPad fullscreen support */
+  /**
+   * Maximized editor overlay - above Modal for iPad fullscreen support.
+   * Issue #2294: only effective when the overlay is portalled to document.body
+   * (see the stacking-context note above).
+   */
   MAXIMIZED_EDITOR: 55,
 
   /** Toast notifications */

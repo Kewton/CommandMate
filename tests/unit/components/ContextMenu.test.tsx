@@ -89,6 +89,26 @@ describe('ContextMenu', () => {
       const menu = screen.getByTestId('context-menu');
       expect(menu).toHaveClass('fixed');
     });
+
+    // [Issue #2294] `fixed` + a high z-index is not enough: rendered inline the
+    // menu sits inside AppShell's `main[role="main"]`, whose
+    // `view-transition-name: cm-content` (Issue #1122) opens a stacking
+    // context, so a menu opened near the left edge slides under the desktop
+    // sidebar. The portal moves it out of that context.
+    it('should render into document.body, outside main (Issue #2294)', () => {
+      // A real <main> host — without it the assertion is vacuous, because RTL's
+      // default container is a plain div under document.body.
+      const main = document.createElement('main');
+      main.setAttribute('role', 'main');
+      document.body.appendChild(main);
+
+      render(<ContextMenu {...defaultProps} />, { container: main });
+
+      const menu = screen.getByTestId('context-menu');
+      expect(menu.closest('main')).toBeNull();
+      expect(main.contains(menu)).toBe(false);
+      expect(menu.parentElement).toBe(document.body);
+    });
   });
 
   // [Issue #1362] A right-click / long press near a viewport edge must not push
