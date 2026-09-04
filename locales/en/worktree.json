@@ -914,6 +914,18 @@
     "toolbarLabel": "Dialog answer keys",
     "caption": "Answer"
   },
+  "selectionKeys": {
+    "numbersToolbarLabel": "Option number keys",
+    "numbersCaption": "Pick",
+    "commitToolbarLabel": "Apply the highlighted choice",
+    "sessionOnly": "This session only",
+    "sessionOnlyAria": "Use the highlighted choice for this session only (s)",
+    "setDefault": "Set as default",
+    "setDefaultAria": "Set the highlighted choice as the default (Enter)",
+    "defaultWarning": "Enter saves this choice as the default for new sessions. Use \u201cThis session only\u201d to leave your default unchanged.",
+    "opencodeToolbarLabel": "opencode model keys",
+    "opencodeCaption": "Model"
+  },
   "newFileDialog": {
     "title": "New File",
     "fileNameLabel": "File name",

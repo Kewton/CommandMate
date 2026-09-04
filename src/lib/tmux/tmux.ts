@@ -555,6 +555,15 @@ const ALLOWED_SPECIAL_KEYS = new Set([
   // only from the terminal. Literal characters on the wire like `q` above.
   // `n` was already deliverable as an opencode chord letter and is not repeated.
   '1', '2', '3', '4', '5', '6', '7', '8', '9', 'y',
+  // Issue #2297: claude's "use this session only" key. Its `/model` footer reads
+  // `Enter to set as default · s to use this session only · Esc to cancel`, and
+  // `Enter` there rewrites `model` in ~/.claude/settings.json (#1495) — so
+  // without this the chat surface could deliver the destructive half of that
+  // footer and not the safe half. A literal character like `q` / `y` above.
+  // Deliverable here for every session; only claude and Command Code DECLARE it
+  // (`CLAUDE_NAVIGATION_KEY_VALUES`), so the route answers 400 for anyone else —
+  // which matters, because `s` is `sort:relevance` on copilot's session picker.
+  's',
   // Issue #2046: opencode's own chords. `C-x` is its leader prefix (measured
   // default of 1.18.22, 2000 ms window), `C-p` opens the command palette and
   // `C-t` cycles the model variant. The lower-case letters complete a leader
@@ -1003,6 +1012,38 @@ export function isAllowedSpecialKey(
 }
 
 /**
+ * How long after a key lands the TUI is still allowed to be repainting
+ * (Issue #2297).
+ *
+ * `invalidateCache()` fires the instant `tmux send-keys` returns, which is
+ * BEFORE the CLI has drawn the consequence of the key. The next capture — the
+ * chat surface's own `onKeysSent` refresh, or any of the pollers that share this
+ * cache (the sidebar status probe, the global session poller) — therefore has a
+ * good chance of storing the PRE-repaint frame, and {@link CACHE_TTL_MS} then
+ * serves that stale frame for five seconds. That is the "the highlight does not
+ * move" report in Issue #2297: the send worked, the cache was invalidated, and
+ * the surface still drew the old dialog.
+ *
+ * 250 ms is comfortably past an ink/bubbletea repaint (`SPECIAL_KEY_DELAY_MS`,
+ * the gap this transport already leaves BETWEEN keys of one chord, is 100 ms)
+ * and comfortably inside the 1-second budget the Issue sets for seeing the
+ * highlight move.
+ */
+export const REPAINT_INVALIDATE_DELAY_MS = 250;
+
+/**
+ * Drop the cached frame again once the TUI has had time to repaint.
+ *
+ * Fire-and-forget on purpose: the route must not wait 250 ms to answer, and the
+ * work is one `Map.delete`. The timer is `unref()`ed where the runtime supports
+ * it so a pending invalidation can never hold a process (or a test runner) open.
+ */
+function scheduleRepaintInvalidation(sessionName: string): void {
+  const timer = setTimeout(() => invalidateCache(sessionName), REPAINT_INVALIDATE_DELAY_MS);
+  (timer as unknown as { unref?: () => void }).unref?.();
+}
+
+/**
  * Send special keys to a tmux session and invalidate the capture cache.
  * Wrapper combining sendSpecialKeys() + invalidateCache() for DRY (DR1-003).
  *
@@ -1015,4 +1056,5 @@ export async function sendSpecialKeysAndInvalidate(
 ): Promise<void> {
   await sendSpecialKeys(sessionName, keys);
   invalidateCache(sessionName);
+  scheduleRepaintInvalidation(sessionName);
 }

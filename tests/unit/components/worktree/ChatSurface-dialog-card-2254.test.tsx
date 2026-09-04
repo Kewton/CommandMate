@@ -264,14 +264,22 @@ describe('[#2254] the controls match the reason', () => {
   it('gives a selection list the arrow pad and no pager keys', () => {
     renderSurface({ isSelectionListActive: true });
     const actions = screen.getByTestId('chat-dialog-card-actions');
-    expect(within(actions).getByRole('toolbar')).toBeInTheDocument();
+    expect(within(actions).getAllByRole('toolbar').length).toBeGreaterThan(0);
     expect(within(actions).getByLabelText('Up')).toBeInTheDocument();
     expect(within(actions).getByLabelText('Escape')).toBeInTheDocument();
     // `showPagerKeys` is off, so no PgUp and no pager quit.
     expect(within(actions).queryByLabelText('Page Up')).not.toBeInTheDocument();
-    // …and no answer characters: a selection list HAS a highlight, so the verb
-    // is a direction and a stray `2` would type into whatever is behind it.
+    // …and no `PromptAnswerKeys`: that strip is the fixed 1-9 / y / n pad for a
+    // dialog NOBODY could read, and a selection list has a highlight the
+    // detectors DID read. Issue #2297 puts a different control here for a
+    // numbered list — `SelectionNumberKeys`, sized to the options the frame is
+    // actually offering — and this FRAME is claude's `/model`, whose footer
+    // names a session-scoped key, so it gets the two labelled commits instead
+    // of numbers (a number key on that overlay commits AND rewrites
+    // ~/.claude/settings.json in one press; measured on 2.1.260).
     expect(within(actions).queryByTestId('prompt-answer-keys')).not.toBeInTheDocument();
+    expect(within(actions).queryByTestId('selection-number-keys')).not.toBeInTheDocument();
+    expect(within(actions).getByTestId('selection-commit-keys')).toBeInTheDocument();
   });
 
   it('gives a pager the arrow pad WITH the pager keys', () => {

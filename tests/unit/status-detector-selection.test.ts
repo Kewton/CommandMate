@@ -177,10 +177,16 @@ describe('SELECTION_LIST_REASONS Set', () => {
     // palette, recognised from the rectangle they are painted as rather than
     // from their headings. Same ↑/↓ + Enter, same `esc`, same NavigationButtons.
     expect(SELECTION_LIST_REASONS.has(STATUS_REASON.OPENCODE_MODAL_OVERLAY)).toBe(true);
+    // Issue #2297: Command Code's picker. Its footer is a lower-case hint bar
+    // (`enter to select · esc to cancel`) that no other tool's rule matches, and
+    // without a branch of its own the frame reached the `default` floor — i.e.
+    // the chat surface's UNCLASSIFIED card, whose 1-9 / y / n keys are typed
+    // into the picker's `Type to search models...` box.
+    expect(SELECTION_LIST_REASONS.has(STATUS_REASON.COMMAND_CODE_SELECTION_LIST)).toBe(true);
   });
 
-  it('should have exactly 9 entries', () => {
-    expect(SELECTION_LIST_REASONS.size).toBe(9);
+  it('should have exactly 10 entries', () => {
+    expect(SELECTION_LIST_REASONS.size).toBe(10);
   });
 
   it('should not contain unrelated reasons', () => {

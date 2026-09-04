@@ -136,7 +136,17 @@ import {
 import { ChatDialogCard } from '@/components/worktree/ChatDialogCard';
 import { NavigationButtons } from '@/components/worktree/NavigationButtons';
 import { TerminalEscapeHatch } from '@/components/worktree/TerminalEscapeHatch';
-import { PromptAnswerKeys } from '@/components/worktree/PromptAnswerKeys';
+import {
+  PromptAnswerKeys,
+  SelectionCommitKeys,
+  SelectionNumberKeys,
+} from '@/components/worktree/PromptAnswerKeys';
+import { OpencodeModelKeys } from '@/components/worktree/OpencodeQuickKeys';
+import {
+  readSelectionListShape,
+  shouldOfferOptionNumbers,
+} from '@/lib/detection/selection-shape';
+import { SESSION_SCOPE_KEY_TOOL_IDS } from '@/types/terminal-keys';
 import { isAnswerablePromptData, type ChatMessage, type LivePromptData } from '@/types/models';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { SurfaceMode } from '@/types/ui-state';
@@ -166,6 +176,30 @@ import {
  * follow behavior — never a crash.
  */
 export const CHAT_SCROLL_CONTAINER_SELECTOR = `[data-testid="${CHAT_TRANSCRIPT_SCROLL_CONTAINER_TESTID}"]`;
+
+/**
+ * How long after a key is sent the dialog card asks for the pane a SECOND time
+ * (Issue #2297).
+ *
+ * `useSpecialKeys` already fires `onKeysSent` `NAV_KEY_REFRESH_DELAY_MS` (100 ms)
+ * after the POST resolves, and the route already dropped this session's capture
+ * cache entry before answering. Neither is enough on its own, and the reason is
+ * the shared cache rather than either of them: the entry is dropped BEFORE the
+ * TUI has repainted, so whichever reader captures first — this refresh, the
+ * sidebar status probe, the global session poller — stores the PRE-repaint frame
+ * and `CACHE_TTL_MS` (5 s) then serves it to everyone. The user sees the
+ * highlight fail to move and presses the key again.
+ *
+ * The server half of the fix is `REPAINT_INVALIDATE_DELAY_MS`, which drops the
+ * entry a second time once the repaint has had 250 ms. This is the client half:
+ * one more refresh, after that second drop, so the card actually re-reads the
+ * pane instead of waiting for the next poll. 400 ms leaves 150 ms of slack over
+ * the server's timer and stays inside the Issue's 1-second budget.
+ *
+ * Only the DIALOG CARD pays it — the footer strips keep their single refresh,
+ * because they sit next to a terminal that is polling on its own.
+ */
+export const DIALOG_REPAINT_REFRESH_MS = 400;
 
 /**
  * Why the banner exists, in the order the reason is chosen.
@@ -659,6 +693,45 @@ export const ChatSurface = memo(function ChatSurface({
   }, [onSurfaceModeChange]);
 
   // --------------------------------------------------------------------
+  // Seeing the key land (Issue #2297)
+  // --------------------------------------------------------------------
+  // Every control on the card takes `onKeysSent`; this is the one the card
+  // actually gets. It calls the caller's refresh twice — once on the hook's own
+  // 100 ms tick, and once more after {@link DIALOG_REPAINT_REFRESH_MS}, past the
+  // server's second cache drop — because the first capture can beat the TUI's
+  // repaint and then sit in the shared 5-second cache for everybody.
+  //
+  // The timer id is held in a ref and cleared on the next press and on unmount,
+  // the same discipline `useKeyPressFeedback` follows and for the same reason:
+  // answering the dialog is what unmounts the card that answered it, and a
+  // callback that outlives the tree fires against a torn-down jsdom window.
+  const repaintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (repaintTimerRef.current !== null) clearTimeout(repaintTimerRef.current);
+  }, []);
+  const handleDialogKeysSent = useCallback(() => {
+    onKeysSent?.();
+    if (repaintTimerRef.current !== null) clearTimeout(repaintTimerRef.current);
+    repaintTimerRef.current = setTimeout(() => {
+      repaintTimerRef.current = null;
+      onKeysSent?.();
+    }, DIALOG_REPAINT_REFRESH_MS);
+  }, [onKeysSent]);
+
+  // --------------------------------------------------------------------
+  // What the selection list on screen is OFFERING (Issue #2297)
+  // --------------------------------------------------------------------
+  // Read off the very frame the card is drawing, never off `cliToolId`: the six
+  // tools disagree about what confirms, and two of them disagree with THEMSELVES
+  // between screens (claude's `/model` writes a global default where its other
+  // dialogs merely confirm). Computed only for a selection list, so a pager or
+  // an unclassified frame pays nothing.
+  const selectionShape = useMemo(
+    () => (blockedReason === 'selectionList' ? readSelectionListShape(frame) : null),
+    [blockedReason, frame],
+  );
+
+  // --------------------------------------------------------------------
   // The dialog card's controls (Issue #2254)
   // --------------------------------------------------------------------
   // One switch on the SAME reason the banner is worded from, so the sentence the
@@ -674,7 +747,8 @@ export const ChatSurface = memo(function ChatSurface({
       worktreeId,
       cliToolId,
       instanceId,
-      onKeysSent,
+      // Issue #2297: the card's refresh, not the caller's raw one.
+      onKeysSent: handleDialogKeysSent,
     };
     switch (blockedReason) {
       // A pager and a selection list are both driven by a MOVING HIGHLIGHT, so
@@ -682,8 +756,45 @@ export const ChatSurface = memo(function ChatSurface({
       // adds PgUp/PgDn/Home/End/q for the pager, exactly as the footer does.
       case 'pager':
         return <NavigationButtons {...keyProps} showPagerKeys />;
-      case 'selectionList':
-        return <NavigationButtons {...keyProps} />;
+      // Issue #2297. The arrow pad stays FIRST and unconditional — it is the one
+      // control every measured selection list answers to — and what goes under
+      // it is whatever this particular frame offers. Nothing here is chosen from
+      // the tool id except opencode's chords, because a tool id cannot tell
+      // claude's `/model` (Enter writes ~/.claude/settings.json) from claude's
+      // trust dialog (Enter confirms).
+      case 'selectionList': {
+        const shape = selectionShape;
+        // The two labelled commits, for a footer that names a session-scoped
+        // key — claude's `/model`, and any future screen that grows the same
+        // sentence. Gated on the tool DECLARING `s` as well, so the button can
+        // never be the 400 the route would answer for a tool that does not.
+        const showCommitKeys =
+          shape?.offersSessionScope === true &&
+          (SESSION_SCOPE_KEY_TOOL_IDS as readonly string[]).includes(cliToolId);
+        return (
+          <div className="space-y-2">
+            <NavigationButtons {...keyProps} />
+            {shape && shouldOfferOptionNumbers(shape) ? (
+              <SelectionNumberKeys {...keyProps} optionCount={shape.optionCount} />
+            ) : null}
+            {showCommitKeys && shape ? (
+              <SelectionCommitKeys
+                {...keyProps}
+                commitsDefaultOnEnter={shape.commitsDefaultOnEnter}
+              />
+            ) : null}
+            {/* opencode has no numbered `/model` at all — switching models is
+                `ctrl+t` or a `ctrl+x` chord, and neither was reachable from
+                chat. Rendered for opencode only; the component itself re-checks. */}
+            <OpencodeModelKeys
+              worktreeId={worktreeId}
+              cliToolId={cliToolId}
+              instanceId={instanceId}
+              onKeysSent={handleDialogKeysSent}
+            />
+          </div>
+        );
+      }
       // Nobody could classify the frame, so nobody can promise it has a
       // highlight to move OR a numbered list to answer. Both pads are offered:
       // the hatch for an overlay that navigates (claude's `/help` tabs), the
@@ -716,7 +827,7 @@ export const ChatSurface = memo(function ChatSurface({
           </div>
         );
     }
-  }, [blockedReason, cliToolId, worktreeId, instanceId, onKeysSent, t]);
+  }, [blockedReason, cliToolId, worktreeId, instanceId, handleDialogKeysSent, selectionShape, t]);
 
   const historyProps = history ?? {};
 

@@ -33,6 +33,10 @@ vi.mock('util', () => ({
 }));
 
 import {
+  CLAUDE_NAVIGATION_KEY_VALUES,
+  SESSION_SCOPE_KEY,
+} from '@/types/terminal-keys';
+import {
   NAVIGATION_KEY_VALUES,
   isAllowedSpecialKey,
   isSendableSpecialKey,
@@ -71,6 +75,39 @@ describe('NAVIGATION_KEY_VALUES ⊆ ALLOWED_SPECIAL_KEYS (Issue #2032)', () => {
   });
 });
 
+describe('the session-scope key `s` is deliverable but not universal (Issue #2297)', () => {
+  it('is in the transport allow-list — red the moment `s` is dropped from it', () => {
+    // The mutation this pins: delete `'s'` from ALLOWED_SPECIAL_KEYS and the
+    // chat surface's "This session only" button becomes a 400, silently, with
+    // the button still on screen. Exactly #2032's shape, for a new key.
+    expect(isSendableSpecialKey(SESSION_SCOPE_KEY)).toBe(true);
+  });
+
+  it('leaves an empty difference set for the claude-family vocabulary too', () => {
+    const undeliverable = CLAUDE_NAVIGATION_KEY_VALUES.filter((key) => !isSendableSpecialKey(key));
+
+    expect(undeliverable).toEqual([]);
+  });
+
+  it('is accepted for a tool that declares it and refused for one that does not', () => {
+    // `isAllowedSpecialKey` is the route's check: vocabulary ∩ transport. Both
+    // directions matter — `s` is `sort:relevance` on copilot's session picker,
+    // so handing it to every tool would be a button that does something else.
+    expect(isAllowedSpecialKey(SESSION_SCOPE_KEY, CLAUDE_NAVIGATION_KEY_VALUES)).toBe(true);
+    expect(isAllowedSpecialKey(SESSION_SCOPE_KEY, NAVIGATION_KEY_VALUES)).toBe(false);
+    // …and the default vocabulary IS the base pad, so an unqualified call
+    // refuses it as well.
+    expect(isAllowedSpecialKey(SESSION_SCOPE_KEY)).toBe(false);
+  });
+
+  it('does not smuggle `s`s neighbours in with it', () => {
+    for (const key of ['S', 'sort', 'so']) {
+      expect(isSendableSpecialKey(key), key).toBe(false);
+      expect(isAllowedSpecialKey(key, CLAUDE_NAVIGATION_KEY_VALUES), key).toBe(false);
+    }
+  });
+});
+
 describe('sendSpecialKeys delivery of BTab (Issue #2032)', () => {
   beforeEach(() => {
     execFileAsyncMock.mockClear();
@@ -94,6 +131,21 @@ describe('sendSpecialKeys delivery of BTab (Issue #2032)', () => {
     expect(execFileAsyncMock).toHaveBeenCalledWith(
       'tmux',
       ['send-keys', '-t', exactTarget('mcbd-codex-wt-9'), 'BTab'],
+      expect.objectContaining({ timeout: expect.any(Number) })
+    );
+  });
+
+  it('delivers `s` verbatim, the way `q` has been delivered since #1017', async () => {
+    // Issue #2297. A literal character on the wire: `tmux send-keys -- s` types
+    // an `s`, which is what claude's `/model` overlay reads as "this session
+    // only". Asserted through the route's own entry point.
+    await expect(
+      sendSpecialKeysAndInvalidate('mcbd-claude-wt-1', [SESSION_SCOPE_KEY])
+    ).resolves.toBeUndefined();
+
+    expect(execFileAsyncMock).toHaveBeenCalledWith(
+      'tmux',
+      ['send-keys', '-t', exactTarget('mcbd-claude-wt-1'), 's'],
       expect.objectContaining({ timeout: expect.any(Number) })
     );
   });

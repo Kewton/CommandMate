@@ -357,16 +357,21 @@ export abstract class BaseCLITool implements ICLITool {
    *
    * The default IS the pre-#2046 global list, verbatim: the twelve navigation
    * keys plus the codex pager's `q` that `NAVIGATION_KEY_VALUES` has published
-   * since #1017, and no leader. claude / codex / copilot / gemini / antigravity
-   * / vibe-local all take it unchanged, which is the point of putting it here
-   * rather than copying a literal into six classes — there is no per-tool list
-   * to drift, so "the six existing tools' key sets did not change" is true by
-   * construction and not merely by review.
+   * since #1017, and no leader. codex / copilot / gemini / antigravity /
+   * vibe-local all take it unchanged, which is the point of putting it here
+   * rather than copying a literal into five classes — there is no per-tool list
+   * to drift, so "those tools' key sets did not change" is true by construction
+   * and not merely by review.
    * `tests/unit/cli-tools/navigation-keys-declaration-2046.test.ts` asserts it
    * against `NAVIGATION_KEY_VALUES` anyway, because a future edit could still
-   * add an override to one of the six.
+   * add an override to one of them.
    *
-   * opencode overrides it. Nothing else does.
+   * THREE tools override it now:
+   *  - opencode, with its `ctrl+x` leader and chord letters (#2046);
+   *  - claude and Command Code, with `CLAUDE_NAVIGATION_KEY_VALUES` — the base
+   *    pad plus `s`, the key claude's `/model` footer offers for "use this
+   *    session only" while `Enter` on the same overlay rewrites the user's
+   *    global default (#2297 / #1495).
    *
    * @returns This tool's {@link NavigationKeySpec}
    */

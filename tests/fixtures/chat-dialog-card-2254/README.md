@@ -1,7 +1,12 @@
 # chat-dialog-card-2254 — raw TUI dialog panes for the chat surface's dialog card
 
 Live `tmux capture-pane -p -e` captures used by
-`tests/unit/lib/chat/dialog-frame-2254.test.ts` (Issue #2254).
+`tests/unit/lib/chat/dialog-frame-2254.test.ts` (Issue #2254) and, since Issue
+#2297, by `tests/unit/lib/detection/selection-shape-2297.test.ts`,
+`tests/unit/lib/detection/command-code-selection-list-2297.test.ts` and
+`tests/unit/components/worktree/ChatSurface-selection-keys-2297.test.tsx` —
+which read the same bytes for what the dialog OFFERS rather than for where the
+blank rows are.
 
 **These files are raw on purpose. Do not strip ANSI, do not trim the blank rows,
 and do not "tidy" the box drawing or the trailing spaces out of them.** The blank
@@ -16,7 +21,7 @@ and fails loudly if someone normalises them.
 
 | | |
 |---|---|
-| Captured | 2026-09-03 |
+| Captured | 2026-09-03; the two Issue #2297 rows on 2026-09-04 (`tmux -L cm2297`) |
 | Pane geometry | **200x1000** — `TUI_PANE_WIDTH` x `TUI_PANE_HEIGHT` from `src/config/tmux-pane-config.ts`, i.e. the production layout. Issue #2254's "known traps" calls this out: at a default 80x24 the blank-padding shapes below do not appear at all. |
 | Isolation | private tmux socket (`tmux -L cmate-2254`), one throwaway `git init` directory under the session scratchpad, `kill-server` afterwards |
 | Command | `tmux -L cmate-2254 capture-pane -p -e -t '=dlg:0.0' -S -0 -E -` |
@@ -36,6 +41,8 @@ the trap recorded in `docs/design/`-adjacent notes and in Issue #1495 is that
 | `codex-model-0-151-0.txt` | codex-cli 0.151.0 | `Select Model and Effort` picker, 7 numbered options | 1000 | 25 | rows **1–32** |
 | `codex-trust-0-151-0.txt` | codex-cli 0.151.0 | directory-trust dialog (`› 1. Yes, continue` / `2. No, quit`) | 1000 | 6 | rows **1–9** |
 | `opencode-agent-overlay-1-18-27.txt` | opencode 1.18.27 | `ctrl+x a` agent-list overlay over a two-turn transcript, sidebar ON | 200 | 200 | everywhere |
+| `claude-model-2-1-260.txt` | claude 2.1.260 | the same `/model` picker one build later (Issue #2297) — identical shape, and the build the "a number key commits AND saves the default" measurement was taken on | 1000 | 14 | rows 2–4, then **986–1000** |
+| `command-code-model-1-40-1.txt` | Command Code 1.40.1 | `/model` picker (Issue #2297): provider-grouped model NAMES with no option numbers, a `› Type to search models...` filter row, footer `type to search · ↑/↓ navigate · shift+↑/↓ jump provider · enter to select · esc to cancel` | 1000 | 89 | rows **1–89** |
 
 ### Both ends of the pane are represented, and that is the point
 
@@ -76,6 +83,30 @@ The sidebar is ON (the pane is 200 columns, well past opencode's 121-column
 auto-gate), so the overlay shares its rows with the session/cost column. Issue
 #2095 named that; Issue #2254 **accepts** it — the card's job is "you can see the
 dialog", and pulling the overlay out of a two-column frame is Issue #2255.
+
+## What Issue #2297 added, and what it could not get
+
+`claude-model-2-1-260.txt` and `command-code-model-1-40-1.txt` were captured the
+same way, on a private socket (`tmux -L cm2297`, `kill-session -t '=<name>:'`
+afterwards, the user's default server never touched).
+
+**Neither picker was confirmed with `Enter`**, and both were closed with
+`Escape`. One thing DID change on the host and is recorded here rather than
+hidden: while measuring whether a number key moves claude's highlight, `4` was
+sent to the 2.1.260 `/model` overlay and claude answered `Set model to Sonnet 5
+and saved as your default for new sessions`, writing `~/.claude/settings.json`.
+That is the measurement design B rests on — **on claude's `/model` a number key
+is the commit, and the commit is the global write** — and it is why the chat
+surface refuses to draw number buttons on a frame whose footer offers a session
+scope.
+
+**No gemini capture.** Gemini CLI v0.57.0 is installed on the machine these were
+taken on and could not reach a session: after the folder-trust dialog it stops on
+`Failed to sign in. Message: This client is no longer supported for Gemini Code
+Assist for individuals. To continue using Gemini, please migrate to the
+Antigravity suite of products`, so `/model` never opens. Nothing about gemini's
+picker is claimed anywhere in Issue #2297's implementation as a result; it keeps
+the base vocabulary and the pre-#2297 controls.
 
 ## Not here
 
