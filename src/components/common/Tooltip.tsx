@@ -136,6 +136,15 @@ export interface TooltipProps {
   delay?: number;
   /** Trigger element (typically a `<button>`). */
   children: React.ReactNode;
+  /**
+   * [Issue #2307] Extra classes merged onto the wrapper `<span>`, appended
+   * after `relative inline-flex`. The wrapper — not the wrapped button —
+   * is the flex item once a trigger is wrapped, so a caller relying on the
+   * child's own `flex-shrink-0` / `ml-auto` inside a tight flex row (e.g. a
+   * terminal split's toolbar) must repeat that utility here or the row can
+   * shrink/reflow the trigger differently than it did with a native `title`.
+   */
+  className?: string;
 }
 
 /**
@@ -153,6 +162,7 @@ export function Tooltip({
   placement = 'right',
   delay = TOOLTIP_DELAY_MS,
   children,
+  className,
 }: TooltipProps): React.ReactElement {
   const [visible, setVisible] = useState(false);
   const [coords, setCoords] = useState<TooltipCoords | null>(null);
@@ -230,7 +240,7 @@ export function Tooltip({
     <span
       ref={wrapperRef}
       data-testid="tooltip-wrapper"
-      className="relative inline-flex"
+      className={className ? `relative inline-flex ${className}` : 'relative inline-flex'}
       tabIndex={-1}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}

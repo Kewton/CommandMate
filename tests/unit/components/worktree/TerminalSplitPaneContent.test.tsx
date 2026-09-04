@@ -16,6 +16,7 @@ import { render, screen, waitFor, act, fireEvent } from '@testing-library/react'
 import { TerminalSplitPaneContent } from '@/components/worktree/TerminalSplitPaneContent';
 import type { AgentInstance, CLIToolType } from '@/lib/cli-tools/types';
 import { installRadixJsdomPolyfills } from '@tests/helpers/radix-jsdom';
+import { TOOLTIP_DELAY_MS } from '@/components/common/Tooltip';
 // Issue #2131: the PC strip folds now, under its OWN localStorage key.
 import {
   OPENCODE_QUICK_KEYS_OPEN_STORAGE_KEY,
@@ -1084,6 +1085,41 @@ describe('TerminalSplitPaneContent', () => {
         />,
       );
       expect(await screen.findByTestId('terminal-end-session-button-0')).toBeInTheDocument();
+    });
+
+    // Issue #2307: the End button hover hint moved from a native `title` to
+    // common/Tooltip (the ActivityBar mechanism, Issue #730) so it appears
+    // faster and is reachable by keyboard.
+    it('wraps the End button in a Tooltip instead of a native title', async () => {
+      mockFetch.mockImplementation(() =>
+        okJson({ isRunning: true, fullOutput: 'live', thinking: false }),
+      );
+      render(
+        <TerminalSplitPaneContent
+          worktreeId="w-1"
+          splitIndex={0}
+          cliToolId="claude"
+          instanceId="claude"
+          instance={inst('claude')}
+          availableInstances={[inst('claude')]}
+          onInstanceChange={vi.fn()}
+          onFocus={vi.fn()}
+          autoYes={{ onToggle: vi.fn() }}
+          onRequestSessionEnd={vi.fn()}
+        />,
+      );
+      const btn = await screen.findByTestId('terminal-end-session-button-0');
+      expect(btn.getAttribute('title')).toBeNull();
+      expect(btn.parentElement).toHaveAttribute('data-testid', 'tooltip-wrapper');
+
+      vi.useFakeTimers();
+      fireEvent.mouseEnter(btn);
+      act(() => {
+        vi.advanceTimersByTime(TOOLTIP_DELAY_MS);
+      });
+      const tooltip = screen.getByRole('tooltip', { hidden: true });
+      expect(tooltip.textContent).toBe(btn.getAttribute('aria-label'));
+      vi.useRealTimers();
     });
 
     it('hides the End button when the split session is not running', async () => {

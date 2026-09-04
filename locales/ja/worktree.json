@@ -426,6 +426,7 @@
     "selectInstance": "{split} のエージェントインスタンスを選択",
     "moreActions": "その他の操作",
     "searchTerminal": "ターミナル内を検索",
+    "searchOutput": "{split} のターミナル出力を検索",
     "endSession": "セッションを終了",
     "endSessionFor": "{name}のセッションを終了",
     "filesEmptyHint": "ファイルを開くと有効になります",

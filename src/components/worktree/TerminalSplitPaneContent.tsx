@@ -103,6 +103,7 @@ import {
   resolveSurfaceMode,
   writeSurfaceMode,
 } from '@/config/surface-mode-config';
+import { Tooltip } from '@/components/common/Tooltip';
 
 /**
  * Issue #756: props are grouped into domain types. `TerminalSplitPaneContent`
@@ -999,16 +1000,17 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
     if (!onRequestSessionEnd || !terminal.isRunning) return null;
     const label = t('terminal.endSessionFor', { name: endTargetLabel });
     return (
-      <button
-        type="button"
-        onClick={handleRequestSessionEnd}
-        aria-label={label}
-        title={label}
-        data-testid={`terminal-end-session-button-${splitIndex}`}
-        className="flex items-center justify-center p-0.5 rounded text-muted-foreground hover:text-danger focus:text-danger hover:bg-danger/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-danger/50 transition-colors"
-      >
-        <X size={14} aria-hidden="true" />
-      </button>
+      <Tooltip content={label} placement="bottom">
+        <button
+          type="button"
+          onClick={handleRequestSessionEnd}
+          aria-label={label}
+          data-testid={`terminal-end-session-button-${splitIndex}`}
+          className="flex items-center justify-center p-0.5 rounded text-muted-foreground hover:text-danger focus:text-danger hover:bg-danger/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-danger/50 transition-colors"
+        >
+          <X size={14} aria-hidden="true" />
+        </button>
+      </Tooltip>
     );
   }, [onRequestSessionEnd, terminal.isRunning, t, endTargetLabel, handleRequestSessionEnd, splitIndex]);
 

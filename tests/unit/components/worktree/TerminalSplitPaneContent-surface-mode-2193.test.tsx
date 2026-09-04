@@ -19,11 +19,12 @@
 
 import React from 'react';
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, act } from '@testing-library/react';
 import { TerminalSplitPaneContent } from '@/components/worktree/TerminalSplitPaneContent';
 import { getSplitSurfaceModeStorageKey } from '@/config/surface-mode-config';
 import type { AgentInstance, CLIToolType } from '@/lib/cli-tools/types';
 import { installRadixJsdomPolyfills } from '@tests/helpers/radix-jsdom';
+import { TOOLTIP_DELAY_MS } from '@/components/common/Tooltip';
 
 beforeAll(() => installRadixJsdomPolyfills());
 
@@ -187,6 +188,7 @@ describe('[#2193] TerminalSplitPaneContent output surface', () => {
   });
 
   it('renders the toggle with the active segment pressed', () => {
+    vi.useFakeTimers();
     render(renderSplit(0));
 
     const terminalBtn = screen.getByTestId('surface-mode-terminal-0');
@@ -194,9 +196,16 @@ describe('[#2193] TerminalSplitPaneContent output surface', () => {
     expect(terminalBtn).toHaveAttribute('aria-pressed', 'true');
     expect(chatBtn).toHaveAttribute('aria-pressed', 'false');
     // Discoverability: both segments name themselves for screen readers AND
-    // hover, since the icons carry no text.
+    // hover, since the icons carry no text. Issue #2307: the hover affordance
+    // is now common/Tooltip, not a native `title`.
     expect(chatBtn).toHaveAttribute('aria-label');
-    expect(chatBtn).toHaveAttribute('title');
+    expect(chatBtn.getAttribute('title')).toBeNull();
+    fireEvent.mouseEnter(chatBtn);
+    act(() => {
+      vi.advanceTimersByTime(TOOLTIP_DELAY_MS);
+    });
+    expect(screen.getByRole('tooltip', { hidden: true })).toBeInTheDocument();
+    vi.useRealTimers();
   });
 
   it('swaps the terminal for the transcript — shown exactly once', async () => {

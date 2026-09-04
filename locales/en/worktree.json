@@ -426,6 +426,7 @@
     "selectInstance": "Select agent instance for {split}",
     "moreActions": "More actions",
     "searchTerminal": "Search terminal",
+    "searchOutput": "Search terminal output for {split}",
     "endSession": "End session",
     "endSessionFor": "End session for {name}",
     "filesEmptyHint": "Open a file to enable this",
