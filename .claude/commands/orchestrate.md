@@ -604,12 +604,22 @@ git push
 上記が通れば**フル CI の完走を待たずにマージしてよい**。develop 側の CI（12〜25 分）が安全網に
 なる。**最後の 1 本だけ**はフル CI を待つ。
 
-### 6-3. マージ前に全チェックが pass であることを機械的に確認する
+マージ（または close）すると、**その PR の `pull_request` run は
+`.github/workflows/cancel-pr-runs-on-close.yml` が自動で止める**（Issue #2330）。**手でキャンセル
+しないこと。** マージ後に PR のチェックが `cancelled` と表示されるのは**正常であって失敗の証拠では
+ない** — 裁定を出すのは develop 側の push run のほうである。この自動キャンセルは
+`--event pull_request` と PR の head ref で絞るので、**develop / main の push run には構造的に
+届かない**（＝安全網は止まらない）。
 
-`gh pr checks <PR> --json name,bucket` を読み、**`bucket` が 1 つでも `pass` 以外なら
-マージしない**。2026-08-22 に「10 pass / 1 fail（Build）」の PR を、fail を目視で見落として
-マージし develop のビルドを壊した。判定は目視ではなくスクリプトで行うこと（`pending` は待ち、
-`fail` / `cancel` は拒否）。
+### 6-3. マージ前に `fail` / `cancel` が無いことを機械的に確認する
+
+`gh pr checks <PR> --json name,bucket` を読み、**`bucket` に `fail` / `cancel` が 1 つでも
+あればマージしない**。2026-08-22 に「10 pass / 1 fail（Build）」の PR を、fail を目視で見落として
+マージし develop のビルドを壊した。判定は目視ではなくスクリプトで行うこと。
+
+`pending` の扱いは 6-2 に従う: **6-2 のローカルゲート（refresh → マーカー走査 → `tsc` →
+影響テスト）を通していれば `pending` は待たなくてよい**。develop 側の CI が安全網になるからで、
+待つと 1 issue あたり 12〜25 分が消える。**最後の 1 本だけ**は全 `pass` を待つ。
 
 ### 6-4. 断片を本体へ一本化する（オーケストレーターの仕事）
 
