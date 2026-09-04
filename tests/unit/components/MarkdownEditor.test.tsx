@@ -11,6 +11,7 @@
  * @vitest-environment jsdom
  */
 
+import type { ReactElement } from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
 import { render, screen, fireEvent, waitFor, act, createEvent } from '@testing-library/react';
 import { MarkdownEditor } from '@/components/worktree/MarkdownEditor';
@@ -913,6 +914,124 @@ describe('MarkdownEditor', () => {
       // When not maximized, z-index should not be inline styled
       // Check that the style attribute does not contain z-index
       expect(editor.style.zIndex).toBe('');
+    });
+  });
+
+  // [Issue #2294] The CSS-fallback fullscreen is a `fixed inset-0` element.
+  // Rendered inline it would live inside AppShell's `main[role="main"]`, whose
+  // `view-transition-name: cm-content` (Issue #1122) opens a stacking context —
+  // and the desktop sidebar, a sibling of main at Z_INDEX.SIDEBAR, would then
+  // cover its left edge whatever Z_INDEX.MAXIMIZED_EDITOR says. iOS/iPadOS
+  // always take this path (useFullscreen forces the fallback there), so an iPad
+  // in landscape gets the PC layout *and* the fallback at once. The portal
+  // introduced for Issue #104 is what keeps that working; these tests pin it.
+  describe('CSS-fallback fullscreen portal (Issue #2294)', () => {
+    /**
+     * Render into a real `<main>` the way AppShell does. Without this host the
+     * assertions are vacuous: RTL's default container is itself a plain div
+     * under document.body, so un-portalled markup would also report
+     * `closest('main') === null`.
+     */
+    function renderInMain(ui: ReactElement) {
+      const main = document.createElement('main');
+      main.setAttribute('role', 'main');
+      document.body.appendChild(main);
+      return { main, ...render(ui, { container: main }) };
+    }
+
+    it('should render the fallback fullscreen outside main, under document.body', async () => {
+      // jsdom exposes no Fullscreen API, so useFullscreen takes the CSS fallback.
+      const { main } = renderInMain(<MarkdownEditor {...defaultProps} />);
+
+      await waitForEditorReady();
+      fireEvent.click(screen.getByTestId('maximize-button'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('maximize-hint')).toBeInTheDocument();
+      });
+
+      const editor = screen.getByTestId('markdown-editor');
+      expect(editor).toHaveClass('fixed');
+      expect(editor.closest('main')).toBeNull();
+      expect(main.contains(editor)).toBe(false);
+      // Portalled into the dedicated host, which itself hangs off document.body.
+      const host = editor.closest('#markdown-editor-portal');
+      expect(host).not.toBeNull();
+      expect(host?.parentElement).toBe(document.body);
+    });
+
+    it('should keep the editor inline inside main while not maximized', async () => {
+      const { main } = renderInMain(<MarkdownEditor {...defaultProps} />);
+
+      await waitForEditorReady();
+
+      const editor = screen.getByTestId('markdown-editor');
+      expect(main.contains(editor)).toBe(true);
+      expect(editor.closest('#markdown-editor-portal')).toBeNull();
+    });
+
+    it('should return the editor to main when the fallback fullscreen is exited', async () => {
+      const { main } = renderInMain(<MarkdownEditor {...defaultProps} />);
+
+      await waitForEditorReady();
+      fireEvent.click(screen.getByTestId('maximize-button'));
+      await waitFor(() => {
+        expect(screen.getByTestId('markdown-editor').closest('main')).toBeNull();
+      });
+
+      fireEvent.keyDown(document, { key: 'Escape' });
+
+      await waitFor(() => {
+        expect(screen.queryByTestId('maximize-hint')).not.toBeInTheDocument();
+      });
+      expect(main.contains(screen.getByTestId('markdown-editor'))).toBe(true);
+    });
+
+    // The native path is untouched: the browser promotes the element to the top
+    // layer itself, so it must stay where it is (moving it would drop it out of
+    // fullscreen).
+    it('should leave the editor inline when the Fullscreen API succeeds', async () => {
+      const originalFullscreenEnabled = Object.getOwnPropertyDescriptor(document, 'fullscreenEnabled');
+      const originalRequestFullscreen = Element.prototype.requestFullscreen;
+      const originalFullscreenElement = Object.getOwnPropertyDescriptor(document, 'fullscreenElement');
+
+      Object.defineProperty(document, 'fullscreenEnabled', { value: true, configurable: true });
+      let isInFullscreen = false;
+      Object.defineProperty(document, 'fullscreenElement', {
+        get: () => (isInFullscreen ? document.body : null),
+        configurable: true,
+      });
+      Element.prototype.requestFullscreen = vi.fn().mockImplementation(() => {
+        isInFullscreen = true;
+        return Promise.resolve();
+      });
+
+      try {
+        const { main } = renderInMain(<MarkdownEditor {...defaultProps} />);
+
+        await waitForEditorReady();
+        fireEvent.click(screen.getByTestId('maximize-button'));
+
+        await waitFor(() => {
+          expect(screen.getByTestId('maximize-hint')).toBeInTheDocument();
+        });
+
+        const editor = screen.getByTestId('markdown-editor');
+        expect(main.contains(editor)).toBe(true);
+        expect(editor.closest('#markdown-editor-portal')).toBeNull();
+        expect(editor).not.toHaveClass('fixed');
+      } finally {
+        if (originalFullscreenEnabled) {
+          Object.defineProperty(document, 'fullscreenEnabled', originalFullscreenEnabled);
+        } else {
+          // @ts-expect-error - delete property for cleanup
+          delete document.fullscreenEnabled;
+        }
+        Element.prototype.requestFullscreen = originalRequestFullscreen;
+        if (originalFullscreenElement) {
+          Object.defineProperty(document, 'fullscreenElement', originalFullscreenElement);
+        }
+      }
     });
   });
 
