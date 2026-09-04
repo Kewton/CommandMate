@@ -52,8 +52,24 @@ name: CI
 # internally, they run against GitHub's own infrastructure, and none of them has
 # ever been the step that hung.
 #
+# [Issue #2313] THE 2026-08-19 SAMPLE NO LONGER BOUNDS `npm ci`. The job numbers
+# above were measured when `Install dependencies` took ~14s. On 2026-09-04 the
+# same step was measured at 10s on a quiet machine and at 312s — killed at its
+# 5m cap — on the same job and the same commit minutes later. Fifteen CI runs
+# died there in one day, every one of them with the real work still `skipped`,
+# so the PR page said "Lint failed" about a job where ESLint never started.
+#
+# The step cap is now 15m and the caps of the seven jobs that install now carry
+# that headroom (lint / type-check / integration / build / security-audit 10 -> 25,
+# unit / e2e 30 -> 45). The `max x 2` policy still describes the WORK; what
+# changed is that the work is no longer the whole job when the runner is busy.
+# These numbers are sized off the observed kill, not off a healthy median — the
+# true worst case is unknown because 312s is where the cap stopped the clock.
+# Re-measure and bring them back down once the runner contention is addressed.
+#
 # tests/unit/guards/workflow-timeouts.test.ts fails if a job in any workflow
-# under .github/workflows/ is added without a `timeout-minutes`.
+# under .github/workflows/ is added without a `timeout-minutes`, and if any
+# step cap is >= its job cap (which would make the step cap unreachable).
 
 on:
   push:
@@ -280,7 +296,7 @@ jobs:
     # ever running them on our machines. See the identical change in
     # Kewton/commandmate-skills#226.
     runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'self-hosted' || 'ubuntu-latest' }}
-    timeout-minutes: 10 # measured 0.7m median / 0.9m max (n=12); floor of the policy
+    timeout-minutes: 25 # measured 0.7m median / 0.9m max (n=12); floor of the policy
     # TODO: Remove continue-on-error after fixing existing lint issues
     continue-on-error: true
     steps:
@@ -294,11 +310,22 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        # Registry fetch: 0.32m median / 0.37m max across the 84 samples of this
-        # step in the run sample above, and a cold-cache `npm ci` of this
-        # lockfile (572 packages, empty --cache dir, lifecycle scripts included)
-        # measured 7s locally. 5 is ~13x the observed CI worst case.
-        timeout-minutes: 5
+        # Registry fetch was 0.32m median / 0.37m max across the 84 samples of
+        # this step when Issue #1830 sized it, and 5 was ~13x that worst case.
+        #
+        # [Issue #2313] That ratio no longer holds. On 2026-09-04 this step was
+        # measured at 10s when the machine was quiet and at 312s (killed at the
+        # 5m cap) on the SAME job and the SAME commit minutes later — a 31x
+        # spread driven by contention on the single self-hosted runner, not by
+        # anything in the diff. 15 CI runs died here in one day, always with the
+        # real work (`npm run lint`, `next build`, playwright) still `skipped`,
+        # which reads as a code failure on the PR page and is not one.
+        #
+        # 15 is sized off the observed kill, not off the healthy median: the true
+        # worst case is unknown because 312s is where we stopped measuring. The
+        # job caps below carry the same headroom so this step, not the job, is
+        # what names the stall in the log.
+        timeout-minutes: 15
         run: npm ci
 
       - name: Run ESLint
@@ -315,7 +342,7 @@ jobs:
     # ever running them on our machines. See the identical change in
     # Kewton/commandmate-skills#226.
     runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'self-hosted' || 'ubuntu-latest' }}
-    timeout-minutes: 10 # measured 1.0m median / 1.1m max (n=12); floor of the policy
+    timeout-minutes: 25 # measured 1.0m median / 1.1m max (n=12); floor of the policy
     # TODO: Remove continue-on-error after fixing existing type errors
     continue-on-error: true
     steps:
@@ -329,11 +356,22 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        # Registry fetch: 0.32m median / 0.37m max across the 84 samples of this
-        # step in the run sample above, and a cold-cache `npm ci` of this
-        # lockfile (572 packages, empty --cache dir, lifecycle scripts included)
-        # measured 7s locally. 5 is ~13x the observed CI worst case.
-        timeout-minutes: 5
+        # Registry fetch was 0.32m median / 0.37m max across the 84 samples of
+        # this step when Issue #1830 sized it, and 5 was ~13x that worst case.
+        #
+        # [Issue #2313] That ratio no longer holds. On 2026-09-04 this step was
+        # measured at 10s when the machine was quiet and at 312s (killed at the
+        # 5m cap) on the SAME job and the SAME commit minutes later — a 31x
+        # spread driven by contention on the single self-hosted runner, not by
+        # anything in the diff. 15 CI runs died here in one day, always with the
+        # real work (`npm run lint`, `next build`, playwright) still `skipped`,
+        # which reads as a code failure on the PR page and is not one.
+        #
+        # 15 is sized off the observed kill, not off the healthy median: the true
+        # worst case is unknown because 312s is where we stopped measuring. The
+        # job caps below carry the same headroom so this step, not the job, is
+        # what names the stall in the log.
+        timeout-minutes: 15
         run: npm ci
 
       - name: Run TypeScript type check
@@ -353,7 +391,7 @@ jobs:
     # measured 12.3m median / 13.2m max (n=12). 30 rather than the ~26 that
     # `max x 2` gives, because this suite grows with the test count and 13.2m
     # is already the slowest thing in the workflow after E2E.
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -365,11 +403,22 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        # Registry fetch: 0.32m median / 0.37m max across the 84 samples of this
-        # step in the run sample above, and a cold-cache `npm ci` of this
-        # lockfile (572 packages, empty --cache dir, lifecycle scripts included)
-        # measured 7s locally. 5 is ~13x the observed CI worst case.
-        timeout-minutes: 5
+        # Registry fetch was 0.32m median / 0.37m max across the 84 samples of
+        # this step when Issue #1830 sized it, and 5 was ~13x that worst case.
+        #
+        # [Issue #2313] That ratio no longer holds. On 2026-09-04 this step was
+        # measured at 10s when the machine was quiet and at 312s (killed at the
+        # 5m cap) on the SAME job and the SAME commit minutes later — a 31x
+        # spread driven by contention on the single self-hosted runner, not by
+        # anything in the diff. 15 CI runs died here in one day, always with the
+        # real work (`npm run lint`, `next build`, playwright) still `skipped`,
+        # which reads as a code failure on the PR page and is not one.
+        #
+        # 15 is sized off the observed kill, not off the healthy median: the true
+        # worst case is unknown because 312s is where we stopped measuring. The
+        # job caps below carry the same headroom so this step, not the job, is
+        # what names the stall in the log.
+        timeout-minutes: 15
         run: npm ci
 
       - name: Run unit tests
@@ -389,7 +438,7 @@ jobs:
     # ever running them on our machines. See the identical change in
     # Kewton/commandmate-skills#226.
     runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'self-hosted' || 'ubuntu-latest' }}
-    timeout-minutes: 10 # measured 2.1m median / 2.4m max (n=12); floor of the policy
+    timeout-minutes: 25 # measured 2.1m median / 2.4m max (n=12); floor of the policy
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -401,11 +450,22 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        # Registry fetch: 0.32m median / 0.37m max across the 84 samples of this
-        # step in the run sample above, and a cold-cache `npm ci` of this
-        # lockfile (572 packages, empty --cache dir, lifecycle scripts included)
-        # measured 7s locally. 5 is ~13x the observed CI worst case.
-        timeout-minutes: 5
+        # Registry fetch was 0.32m median / 0.37m max across the 84 samples of
+        # this step when Issue #1830 sized it, and 5 was ~13x that worst case.
+        #
+        # [Issue #2313] That ratio no longer holds. On 2026-09-04 this step was
+        # measured at 10s when the machine was quiet and at 312s (killed at the
+        # 5m cap) on the SAME job and the SAME commit minutes later — a 31x
+        # spread driven by contention on the single self-hosted runner, not by
+        # anything in the diff. 15 CI runs died here in one day, always with the
+        # real work (`npm run lint`, `next build`, playwright) still `skipped`,
+        # which reads as a code failure on the PR page and is not one.
+        #
+        # 15 is sized off the observed kill, not off the healthy median: the true
+        # worst case is unknown because 312s is where we stopped measuring. The
+        # job caps below carry the same headroom so this step, not the job, is
+        # what names the stall in the log.
+        timeout-minutes: 15
         run: npm ci
 
       # Issue #1102: the integration suite was drifting because it never ran in
@@ -433,7 +493,7 @@ jobs:
     runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'self-hosted' || 'ubuntu-latest' }}
     # measured 6.2m median / 16.2m max (n=12) — this is the job that hung for
     # 88 minutes in run 32218070769. 30 = ~2x the worst healthy run.
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -445,11 +505,22 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        # Registry fetch: 0.32m median / 0.37m max across the 84 samples of this
-        # step in the run sample above, and a cold-cache `npm ci` of this
-        # lockfile (572 packages, empty --cache dir, lifecycle scripts included)
-        # measured 7s locally. 5 is ~13x the observed CI worst case.
-        timeout-minutes: 5
+        # Registry fetch was 0.32m median / 0.37m max across the 84 samples of
+        # this step when Issue #1830 sized it, and 5 was ~13x that worst case.
+        #
+        # [Issue #2313] That ratio no longer holds. On 2026-09-04 this step was
+        # measured at 10s when the machine was quiet and at 312s (killed at the
+        # 5m cap) on the SAME job and the SAME commit minutes later — a 31x
+        # spread driven by contention on the single self-hosted runner, not by
+        # anything in the diff. 15 CI runs died here in one day, always with the
+        # real work (`npm run lint`, `next build`, playwright) still `skipped`,
+        # which reads as a code failure on the PR page and is not one.
+        #
+        # 15 is sized off the observed kill, not off the healthy median: the true
+        # worst case is unknown because 312s is where we stopped measuring. The
+        # job caps below carry the same headroom so this step, not the job, is
+        # what names the stall in the log.
+        timeout-minutes: 15
         run: npm ci
 
       # Issue #1180: the E2E suite drifted for months because it never ran in CI
@@ -605,7 +676,7 @@ jobs:
     # ever running them on our machines. See the identical change in
     # Kewton/commandmate-skills#226.
     runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'self-hosted' || 'ubuntu-latest' }}
-    timeout-minutes: 10 # measured 2.3m median / 2.5m max (n=12); floor of the policy
+    timeout-minutes: 25 # measured 2.3m median / 2.5m max (n=12); floor of the policy
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -617,11 +688,22 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        # Registry fetch: 0.32m median / 0.37m max across the 84 samples of this
-        # step in the run sample above, and a cold-cache `npm ci` of this
-        # lockfile (572 packages, empty --cache dir, lifecycle scripts included)
-        # measured 7s locally. 5 is ~13x the observed CI worst case.
-        timeout-minutes: 5
+        # Registry fetch was 0.32m median / 0.37m max across the 84 samples of
+        # this step when Issue #1830 sized it, and 5 was ~13x that worst case.
+        #
+        # [Issue #2313] That ratio no longer holds. On 2026-09-04 this step was
+        # measured at 10s when the machine was quiet and at 312s (killed at the
+        # 5m cap) on the SAME job and the SAME commit minutes later — a 31x
+        # spread driven by contention on the single self-hosted runner, not by
+        # anything in the diff. 15 CI runs died here in one day, always with the
+        # real work (`npm run lint`, `next build`, playwright) still `skipped`,
+        # which reads as a code failure on the PR page and is not one.
+        #
+        # 15 is sized off the observed kill, not off the healthy median: the true
+        # worst case is unknown because 312s is where we stopped measuring. The
+        # job caps below carry the same headroom so this step, not the job, is
+        # what names the stall in the log.
+        timeout-minutes: 15
         run: npm ci
 
       - name: Build Next.js
@@ -646,7 +728,7 @@ jobs:
     # ever running them on our machines. See the identical change in
     # Kewton/commandmate-skills#226.
     runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'self-hosted' || 'ubuntu-latest' }}
-    timeout-minutes: 10 # measured 0.5m median / 0.8m max (n=12); floor of the policy
+    timeout-minutes: 25 # measured 0.5m median / 0.8m max (n=12); floor of the policy
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -658,11 +740,22 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        # Registry fetch: 0.32m median / 0.37m max across the 84 samples of this
-        # step in the run sample above, and a cold-cache `npm ci` of this
-        # lockfile (572 packages, empty --cache dir, lifecycle scripts included)
-        # measured 7s locally. 5 is ~13x the observed CI worst case.
-        timeout-minutes: 5
+        # Registry fetch was 0.32m median / 0.37m max across the 84 samples of
+        # this step when Issue #1830 sized it, and 5 was ~13x that worst case.
+        #
+        # [Issue #2313] That ratio no longer holds. On 2026-09-04 this step was
+        # measured at 10s when the machine was quiet and at 312s (killed at the
+        # 5m cap) on the SAME job and the SAME commit minutes later — a 31x
+        # spread driven by contention on the single self-hosted runner, not by
+        # anything in the diff. 15 CI runs died here in one day, always with the
+        # real work (`npm run lint`, `next build`, playwright) still `skipped`,
+        # which reads as a code failure on the PR page and is not one.
+        #
+        # 15 is sized off the observed kill, not off the healthy median: the true
+        # worst case is unknown because 312s is where we stopped measuring. The
+        # job caps below carry the same headroom so this step, not the job, is
+        # what names the stall in the log.
+        timeout-minutes: 15
         run: npm ci
 
       - name: Run security audit
