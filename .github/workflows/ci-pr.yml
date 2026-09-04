@@ -758,5 +758,28 @@ jobs:
 
       - name: Run security audit
         # `npm audit` posts the tree to the registry; measured 0.03m max (n=12).
+        #
+        # [Issue #2313] `npm audit` exits 1 both for a critical finding and for
+        # "the registry did not answer", and on 2026-09-04 the audit endpoint
+        # did exactly that for most of a day while status.npmjs.org reported
+        # every component operational. A bare `npm audit` here turned that
+        # outage into a red Security Audit on every PR, indistinguishable on
+        # the PR page from a real CVE. So the verdict is read from the JSON
+        # shape instead (scripts/check-npm-audit.mjs): a report with anything
+        # at or above the gate fails; npm's error envelope — no report at all —
+        # is a `::warning` and exit 0 that says in so many words the tree was
+        # NOT audited on this run. That is narrower than `continue-on-error`
+        # on the job, which would also wave through a real finding.
+        #
+        # `--fetch-timeout` / `--fetch-retries`: npm's default fetch-timeout is
+        # 300000ms — the same 5 minutes as this step's cap — so a hanging
+        # endpoint used to be killed by the runner before npm could emit the
+        # envelope the script needs. 60s x 2 attempts stays well inside 5m;
+        # measured 60s end-to-end against the live outage.
         timeout-minutes: 5
-        run: npm audit --audit-level=critical
+        run: |
+          set +e
+          npm audit --audit-level=critical --json --fetch-timeout=60000 --fetch-retries=1 > "$RUNNER_TEMP/npm-audit.json"
+          rc=$?
+          set -e
+          node scripts/check-npm-audit.mjs "$RUNNER_TEMP/npm-audit.json" "$rc" --level=critical
