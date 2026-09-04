@@ -54,12 +54,53 @@ name: CI
 #
 # tests/unit/guards/workflow-timeouts.test.ts fails if a job in any workflow
 # under .github/workflows/ is added without a `timeout-minutes`.
+#
+# ---------------------------------------------------------------------------
+# [Issue #2329] RUNNER-DEPENDENT CACHING
+# ---------------------------------------------------------------------------
+# The table above was measured on GitHub-hosted x64. After the move to
+# self-hosted ARM64 (#1863) `Setup Node.js` went from 0.08m to 0.77m in every one
+# of the seven jobs that install dependencies, while `Install dependencies`
+# barely moved (0.29m -> 0.22m). Two causes, same direction: the ARM64 image has
+# no Node 22 toolcache (`Attempting to download 22...` instead of `Found in cache
+# @ /opt/hostedtoolcache/...`), and the 287 MB npm cache entry restores at
+# ~8 MB/s there — about 36s — where the hosted images restore at 130-180 MB/s.
+#
+# Measured inside the runner image (`my-ephemeral-runner:latest`, 2026-09-05):
+# the Node 22 linux-arm64 tarball downloads in 2.2s (13.5 MB/s), and a cold
+# `npm ci --no-audit` — empty npm cache, lifecycle scripts, 1.1 GB of
+# node_modules — takes 27s, the same 27s it takes with the cache warm, because
+# unpack and link dominate. So the restore was buying nothing and costing more
+# than the install it was meant to accelerate.
+#
+# `cache:` is therefore conditioned on `runner.environment` at all seven sites:
+# `Setup Node.js` 0.77m -> under 0.2m per job, ~3.5 runner-minutes per run.
+# `setup-node` itself stays, because downloading Node is the cheap half.
+# `Cache Playwright browsers` in the E2E job is deliberately NOT changed; the
+# reason is at that step.
 
 on:
   push:
     branches: [main, develop]
   pull_request:
     branches: [main, develop]
+
+# [Issue #2329] A push to a PR supersedes the run of its previous head, so cancel
+# the older run rather than let it hold self-hosted runners to a verdict nobody
+# will read. Measured over W35-W36: 32 of 285 PR runs (~11%, ~160 self-hosted
+# jobs a week) were still executing when their branch was pushed again, and W36
+# created 109 of its 228 runs within 10 minutes of the previous one — the queue
+# jams in bursts, which is exactly when a superseded run costs the most.
+#
+# Pushes to develop / main are NEVER cancelled. The post-merge run is the only
+# place two independently-green PRs are tested together, and that is where this
+# repository's integration breakages actually surface; cancelling one because
+# the next merge landed would delete the only signal. `github.run_id` is unique
+# per run, so the fallback puts every push run in a group of its own and they
+# cannot cancel each other even if `cancel-in-progress` were ever flipped on.
+concurrency:
+  group: ci-pr-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   claudemd-size:
@@ -291,7 +332,15 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: 'npm'
+          # [Issue #2329] npm cache only where restoring it is faster than not
+          # restoring it. On the self-hosted runners the 287 MB entry comes back
+          # at ~8 MB/s (36s), longer than the whole cold `npm ci` below (27s
+          # measured in the runner image); GitHub-hosted runners restore at
+          # 130-180 MB/s, so fork PRs — which fall back to `ubuntu-latest` —
+          # keep it. An empty string makes setup-node skip the restore AND the
+          # post-job save (`if (cache && ...)` in its main.ts, and an unset
+          # `CachePackageManager` state in its post step). See the header.
+          cache: ${{ runner.environment == 'github-hosted' && 'npm' || '' }}
 
       - name: Install dependencies
         # Registry fetch: 0.32m median / 0.37m max across the 84 samples of this
@@ -339,7 +388,15 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: 'npm'
+          # [Issue #2329] npm cache only where restoring it is faster than not
+          # restoring it. On the self-hosted runners the 287 MB entry comes back
+          # at ~8 MB/s (36s), longer than the whole cold `npm ci` below (27s
+          # measured in the runner image); GitHub-hosted runners restore at
+          # 130-180 MB/s, so fork PRs — which fall back to `ubuntu-latest` —
+          # keep it. An empty string makes setup-node skip the restore AND the
+          # post-job save (`if (cache && ...)` in its main.ts, and an unset
+          # `CachePackageManager` state in its post step). See the header.
+          cache: ${{ runner.environment == 'github-hosted' && 'npm' || '' }}
 
       - name: Install dependencies
         # Registry fetch: 0.32m median / 0.37m max across the 84 samples of this
@@ -388,7 +445,15 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: 'npm'
+          # [Issue #2329] npm cache only where restoring it is faster than not
+          # restoring it. On the self-hosted runners the 287 MB entry comes back
+          # at ~8 MB/s (36s), longer than the whole cold `npm ci` below (27s
+          # measured in the runner image); GitHub-hosted runners restore at
+          # 130-180 MB/s, so fork PRs — which fall back to `ubuntu-latest` —
+          # keep it. An empty string makes setup-node skip the restore AND the
+          # post-job save (`if (cache && ...)` in its main.ts, and an unset
+          # `CachePackageManager` state in its post step). See the header.
+          cache: ${{ runner.environment == 'github-hosted' && 'npm' || '' }}
 
       - name: Install dependencies
         # Registry fetch: 0.32m median / 0.37m max across the 84 samples of this
@@ -437,7 +502,15 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: 'npm'
+          # [Issue #2329] npm cache only where restoring it is faster than not
+          # restoring it. On the self-hosted runners the 287 MB entry comes back
+          # at ~8 MB/s (36s), longer than the whole cold `npm ci` below (27s
+          # measured in the runner image); GitHub-hosted runners restore at
+          # 130-180 MB/s, so fork PRs — which fall back to `ubuntu-latest` —
+          # keep it. An empty string makes setup-node skip the restore AND the
+          # post-job save (`if (cache && ...)` in its main.ts, and an unset
+          # `CachePackageManager` state in its post step). See the header.
+          cache: ${{ runner.environment == 'github-hosted' && 'npm' || '' }}
 
       - name: Install dependencies
         # Registry fetch: 0.32m median / 0.37m max across the 84 samples of this
@@ -494,7 +567,15 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: 'npm'
+          # [Issue #2329] npm cache only where restoring it is faster than not
+          # restoring it. On the self-hosted runners the 287 MB entry comes back
+          # at ~8 MB/s (36s), longer than the whole cold `npm ci` below (27s
+          # measured in the runner image); GitHub-hosted runners restore at
+          # 130-180 MB/s, so fork PRs — which fall back to `ubuntu-latest` —
+          # keep it. An empty string makes setup-node skip the restore AND the
+          # post-job save (`if (cache && ...)` in its main.ts, and an unset
+          # `CachePackageManager` state in its post step). See the header.
+          cache: ${{ runner.environment == 'github-hosted' && 'npm' || '' }}
 
       - name: Install dependencies
         # Registry fetch: 0.32m median / 0.37m max across the 84 samples of this
@@ -580,6 +661,15 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Playwright (resolved): $VERSION"
 
+      # [Issue #2329] Left ON, self-hosted included, even though this restore
+      # measures 0.73m there — the same GitHub cache service that made the npm
+      # cache a net loss on those runners. The npm case was decided by measuring
+      # the ALTERNATIVE (a cold `npm ci` inside the runner image), and the
+      # equivalent number here — `npx playwright install chromium` from
+      # cdn.playwright.dev on an ARM64 runner — has not been taken. Every browser
+      # timing in the block above is GitHub-hosted x64, so it does not answer the
+      # question. Take that measurement before putting this step behind the same
+      # `runner.environment` condition.
       - name: Cache Playwright browsers
         id: playwright-cache
         uses: actions/cache@v4
@@ -679,7 +769,15 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: 'npm'
+          # [Issue #2329] npm cache only where restoring it is faster than not
+          # restoring it. On the self-hosted runners the 287 MB entry comes back
+          # at ~8 MB/s (36s), longer than the whole cold `npm ci` below (27s
+          # measured in the runner image); GitHub-hosted runners restore at
+          # 130-180 MB/s, so fork PRs — which fall back to `ubuntu-latest` —
+          # keep it. An empty string makes setup-node skip the restore AND the
+          # post-job save (`if (cache && ...)` in its main.ts, and an unset
+          # `CachePackageManager` state in its post step). See the header.
+          cache: ${{ runner.environment == 'github-hosted' && 'npm' || '' }}
 
       - name: Install dependencies
         # Registry fetch: 0.32m median / 0.37m max across the 84 samples of this
@@ -733,7 +831,15 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: 'npm'
+          # [Issue #2329] npm cache only where restoring it is faster than not
+          # restoring it. On the self-hosted runners the 287 MB entry comes back
+          # at ~8 MB/s (36s), longer than the whole cold `npm ci` below (27s
+          # measured in the runner image); GitHub-hosted runners restore at
+          # 130-180 MB/s, so fork PRs — which fall back to `ubuntu-latest` —
+          # keep it. An empty string makes setup-node skip the restore AND the
+          # post-job save (`if (cache && ...)` in its main.ts, and an unset
+          # `CachePackageManager` state in its post step). See the header.
+          cache: ${{ runner.environment == 'github-hosted' && 'npm' || '' }}
 
       - name: Install dependencies
         # Registry fetch: 0.32m median / 0.37m max across the 84 samples of this
