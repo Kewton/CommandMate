@@ -1,0 +1,112 @@
+name: Cancel PR runs on close
+
+# [Issue #2330] Stop a PR's own CI run the moment the PR is merged or closed.
+#
+# WHY. `/orchestrate` 6-2 says the orchestrator may merge a PR **before its own
+# CI run finishes** — the develop push run is the safety net, and the local gate
+# (refresh -> conflict-marker sweep -> `tsc` -> affected tests) is what actually
+# guards the merge. That is a deliberate design choice, and its cost is that the
+# PR run keeps going after the merge to produce a verdict nobody reads.
+#
+# MEASURED 2026-09-05, re-run on this branch against the last 200 merged PRs and
+# the last 900 `pull_request` runs of ci-pr.yml (`gh pr list --state merged
+# --limit 200 --json number,mergedAt,headRefName,headRefOid` joined by head SHA
+# against `gh run list --workflow ci-pr.yml --event pull_request --limit 900`;
+# "in flight" = run created before `mergedAt` and still updating 30s after it):
+#
+#   merged with the FINAL head's run still in flight   44 / 200 = 22.0%
+#   merged with a superseded head's run still in flight            11
+#   how long past the merge it kept running   median 23.3m, and the tail is far
+#                                             worse than 25m — #2202..#2209 sat
+#                                             queued for 9-14 HOURS after their
+#                                             merge before a human cancelled
+#                                             them by hand
+#   what those 44 runs concluded              success 33 / cancelled 10 (by
+#                                             hand) / failure 1
+#
+# One ci-pr.yml run is 12 jobs, 11 of them on our self-hosted runners, ~33
+# runner-minutes total (measured on run 33745109236, the run for PR #2280).
+#
+# WHY NOT `concurrency`. Per-PR `concurrency` (#2329) cancels the previous run
+# when a NEW PUSH lands on the same PR. Merging is not a push to the PR, and
+# closing is not a push at all, so nothing there fires on either. It handles the
+# 11 superseded runs above; the 44 final-head runs are this workflow's job.
+#
+# SCOPE IS DELIBERATELY NARROW. `--event pull_request` plus `--branch <head ref>`
+# means the develop / main **push** runs are structurally out of reach: they
+# carry `event: push`, so they cannot appear in the list this cancels from. That
+# matters because those runs are the safety net 6-2 relies on, and they are the
+# only evidence of WHICH merge broke develop. This must never touch them, and it
+# still holds for a release PR whose head ref *is* `develop` — the event filter,
+# not the branch filter, is what makes that safe.
+#
+# tests/unit/guards/cancel-pr-runs-on-close.test.ts pins every one of those
+# properties, because they are the difference between this workflow and one that
+# quietly cancels the safety net.
+
+on:
+  pull_request:
+    # No `branches:` filter on purpose. ci-pr.yml only runs for PRs into
+    # main / develop, so a PR closed against any other base simply finds nothing
+    # to cancel — a no-op costs ~15s on a hosted runner, while a stale filter
+    # would silently stop covering a base added later.
+    types: [closed]
+
+permissions:
+  actions: write # gh run list / gh run cancel
+  contents: read
+
+jobs:
+  cancel:
+    name: Cancel in-flight CI runs of the closed PR
+    # A fork PR gets a read-only GITHUB_TOKEN, so `gh run cancel` would 403; and
+    # a fork PR's ci-pr.yml jobs fall back to `ubuntu-latest` anyway (see the
+    # `runs-on` expression there), so there is no self-hosted capacity to
+    # reclaim. Skipping is the honest outcome, not a failure.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    # [Issue #1830] No checkout, no npm, two API calls per run. Measured at a
+    # handful of seconds; 5 is ~20x that and still 72x below GitHub's 6-hour
+    # default. tests/unit/guards/workflow-timeouts.test.ts requires this.
+    timeout-minutes: 5
+    steps:
+      - name: Cancel queued / in-progress pull_request runs for the head branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Passed through the environment, never interpolated into the script
+          # body: a branch name is attacker-controlled text on a fork PR and may
+          # contain `$`, a backtick or a `;`. `${{ }}` inside `run:` is textual
+          # substitution and would execute it.
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+
+          # `gh run list --status` takes exactly one value, so each state is its
+          # own query. `waiting` / `pending` / `requested` are not padding: the
+          # 9-14 hour tail above was runs stuck in a pre-`in_progress` state
+          # because no runner picked them up.
+          ids=$(
+            for status in queued in_progress waiting pending requested; do
+              gh run list --repo "$GITHUB_REPOSITORY" --workflow ci-pr.yml \
+                --event pull_request --branch "$HEAD_REF" --status "$status" \
+                --limit 100 --json databaseId --jq '.[].databaseId'
+            done | sort -u
+          )
+
+          if [ -z "$ids" ]; then
+            echo "No in-flight ci-pr.yml pull_request run for $HEAD_REF (PR #$PR_NUMBER)."
+            exit 0
+          fi
+
+          for id in $ids; do
+            # A run can finish between the list and the cancel, and `gh run
+            # cancel` calls that an error. It is not one — the goal is "no run is
+            # still burning runners", and a finished run meets it. Letting `set
+            # -e` abort here would skip every remaining id.
+            if gh run cancel --repo "$GITHUB_REPOSITORY" "$id"; then
+              echo "cancelled run $id (PR #$PR_NUMBER, $HEAD_REF)"
+            else
+              echo "::notice::run $id could not be cancelled (already finished, most likely) — PR #$PR_NUMBER"
+            fi
+          done
