@@ -33,7 +33,7 @@ import {
   TUI_INTERRUPT_SETTLE_MS,
   TUI_EXIT_WAIT_MS,
 } from '@/config/cli-tool-timing-config';
-import { SessionStartUnavailableError } from '../session/session-start-error';
+import { missingToolError } from './install-hints';
 
 const logger = createLogger('cli-tools/gemini');
 
@@ -97,7 +97,7 @@ export class GeminiTool extends BaseCLITool {
     // Check if Gemini is installed
     const geminiAvailable = await this.isInstalled();
     if (!geminiAvailable) {
-      throw new SessionStartUnavailableError(this.name, 'Gemini CLI is not installed or not in PATH');
+      throw missingToolError(this);
     }
 
     const sessionName = this.getSessionName(worktreeId, instanceId);

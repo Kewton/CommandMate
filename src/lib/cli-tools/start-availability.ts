@@ -28,10 +28,8 @@
  */
 
 import type { CLIToolType, ICLITool } from './types';
-import {
-  SessionStartUnavailableError,
-  type SessionStartSubject,
-} from '../session/session-start-error';
+import { missingToolError } from './install-hints';
+import type { SessionStartSubject } from '../session/session-start-error';
 
 /** Who failed to start, for the notification's title and dedup key. */
 export interface SessionStartFailureReport {
@@ -97,11 +95,16 @@ export interface StartTarget {
  * the route reports `status: 'ready'`, and the honest place for that answer is
  * the tool object rather than a hand-rolled check at the HTTP layer.
  *
- * The wording is {@link SessionStartUnavailableError}'s class default — the
- * sentence that error was built to replace the HTTP layer's copy with. A tool
- * whose launch path has something more useful to say (copilot ships an install
- * hint) still says it there; this function is reached only by callers that never
- * get that far.
+ * The wording is {@link missingToolError}'s — the same sentence the tool's own
+ * launch path throws. It used to be `SessionStartUnavailableError`'s class
+ * default instead, on the reasoning that "a tool whose launch path has
+ * something more useful to say (copilot ships an install hint) still says it
+ * there". That reasoning held only while copilot was the sole tool with a hint:
+ * for the other seven the caller that never reaches `launchSession` got a
+ * strictly worse sentence than the caller that does, for no reason a reader of
+ * the message could see. Issue #2301 gave all eight a hint and pointed both
+ * paths at the one builder, so which path found the missing binary no longer
+ * changes what the operator is told.
  *
  * @param tool - The tool being asked to start
  * @param target - Who the refusal belongs to, and how to address it
@@ -113,7 +116,7 @@ export async function assertToolStartable(
 ): Promise<void> {
   if (await tool.isInstalled()) return;
 
-  const error = new SessionStartUnavailableError(tool.name);
+  const error = missingToolError(tool);
   reportSessionStartFailure(
     {
       worktreeId: target.worktreeId,
@@ -135,7 +138,9 @@ export async function assertToolStartable(
  * label `CLI_TOOL_DISPLAY_NAMES` carries ("Claude"). Both are legitimate
  * spellings and the repository uses each in its own place, but ONE missing
  * binary must not read differently depending on which of the two paths found
- * it, and the start gate above reads the tool object. So this one does too.
+ * it, and the start gate above reads the tool object. So this one does too —
+ * and since Issue #2301 the whole sentence, install hint included, comes from
+ * {@link missingToolError} for the same reason.
  *
  * `await import('./manager')` because a static import would be a module-scope
  * cycle: the manager constructs all seven tools, every one of them extends
@@ -153,16 +158,16 @@ export async function assertToolStartable(
 export function reportToolUnavailable(cliToolId: CLIToolType, target: StartTarget): void {
   void import('./manager')
     .then(({ CLIToolManager }) => {
-      const toolName = CLIToolManager.getInstance().getTool(cliToolId).name;
+      const tool = CLIToolManager.getInstance().getTool(cliToolId);
       reportSessionStartFailure(
         {
           worktreeId: target.worktreeId,
           cliToolId,
           instanceId: target.instanceId,
-          toolName,
+          toolName: tool.name,
           subject: target.subject,
         },
-        new SessionStartUnavailableError(toolName)
+        missingToolError(tool)
       );
     })
     .catch(() => {});

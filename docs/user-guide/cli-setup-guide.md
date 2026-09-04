@@ -30,8 +30,21 @@ CommandMate を使用するには、以下のツールが必要です。
 | npm | - | ✓ | `npm -v` |
 | Git | - | ✓ | `git --version` |
 | tmux | - | ✓ | `tmux -V` |
-| Claude CLI | - | △（オプション） | `claude --version` |
 | gh CLI | - | △（オプション） | `gh --version` |
+| Claude Code | - | △（オプション） | `claude --version` |
+| Codex CLI | - | △（オプション） | `codex --version` |
+| Gemini CLI | - | △（オプション） | `gemini --version` |
+| GitHub Copilot CLI | - | △（オプション） | `copilot --version` |
+| OpenCode | - | △（オプション） | `opencode --version` |
+| Antigravity CLI | - | △（オプション） | `agy --version` |
+| Command Code CLI | - | △（オプション） | `commandcode --version` |
+
+エージェント CLI はすべて任意です。1 つも入っていなくても CommandMate は起動しますが、
+worktree に割り当てたエージェントの CLI が無いとそのセッションは開始できません。
+`commandmate init` が上表のすべてについてバージョン（または未検出）を表示します。
+
+> **Note**: `vibe-local` はローカルの Ollama を叩く自作スクリプトを想定した口で、
+> 配布物がないため `init` の確認対象には含まれません。
 
 ### 前提条件の確認
 
@@ -54,6 +67,34 @@ brew install node git tmux
 ```bash
 sudo apt update
 sudo apt install nodejs npm git tmux
+```
+
+#### エージェント CLI
+
+使いたいエージェントの CLI だけを入れてください（1 行 = 1 エージェント）。
+
+```bash
+npm install -g @anthropic-ai/claude-code   # Claude Code (claude)
+npm install -g @openai/codex               # Codex CLI (codex)
+npm install -g @google/gemini-cli          # Gemini CLI (gemini)
+npm install -g opencode-ai                 # OpenCode (opencode)
+npm install -g command-code                # Command Code CLI (commandcode)
+brew install copilot-cli                   # GitHub Copilot CLI (copilot)
+                                           # npm i -g @github/copilot でも可
+```
+
+Antigravity CLI（`agy`）は npm では配布されていません。入手方法は
+[公式ドキュメント](https://antigravity.google/docs/cli/reference)を参照してください。
+
+> **Note**: `command-code` パッケージは `cmd` / `cmdc` / `command-code` /
+> `commandcode` の 4 つの実行ファイルを入れます。CommandMate が起動するのは
+> `commandcode` です（`cmd` は Windows のシェルと衝突するため）。
+
+未インストールのエージェントで起動しようとすると、CommandMate は「入っていない」ことと
+**その入れ方**を 1 文で返します。例:
+
+```text
+Command Code CLI (commandcode) is not installed or not in PATH. Install with: npm install -g command-code
 ```
 
 > **注意**: ネイティブ Windows は tmux 依存のためサポートしていません。Windows では WSL2 上で CommandMate を実行してください（[WSL2 セットアップガイド](./wsl2-setup.md) を参照）。

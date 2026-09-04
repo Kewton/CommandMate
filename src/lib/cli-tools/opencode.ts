@@ -123,7 +123,7 @@ import {
   OPENCODE_EXIT_WAIT_MS,
   OPENCODE_INTERRUPT_SECOND_ESCAPE_DELAY_MS,
 } from '@/config/cli-tool-timing-config';
-import { SessionStartUnavailableError } from '../session/session-start-error';
+import { missingToolError } from './install-hints';
 
 const logger = createLogger('cli-tools/opencode');
 
@@ -331,7 +331,7 @@ export class OpenCodeTool extends BaseCLITool {
   protected async launchSession(worktreeId: string, worktreePath: string, instanceId?: string): Promise<void> {
     const opencodeAvailable = await this.isInstalled();
     if (!opencodeAvailable) {
-      throw new SessionStartUnavailableError(this.name, 'OpenCode is not installed or not in PATH');
+      throw missingToolError(this);
     }
 
     const sessionName = this.getSessionName(worktreeId, instanceId);
