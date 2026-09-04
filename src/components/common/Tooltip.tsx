@@ -1,5 +1,5 @@
 /**
- * Tooltip Component (Issue #730, #1341, #1364)
+ * Tooltip Component (Issue #730, #1341, #1364, #2319)
  *
  * Lightweight hover-delayed tooltip used by ActivityBar icons (replacing the
  * native `title` attribute which is browser-styled and unreliable).
@@ -9,6 +9,14 @@
  *     keyboard Tab cycle (the child button is the only focusable target).
  *   - We do NOT clone the child element. The wrapper intercepts mouse events
  *     on its own so ref / onClick / onKeyDown on the child stay transparent.
+ *   - [Issue #2319] Keyboard focus opens the tooltip too, not just hover.
+ *     Hover and focus are two INDEPENDENT channels (`hoverVisible` /
+ *     `focusVisible`) OR-ed into one `visible`: when a pointer click leaves the
+ *     button both hovered and focused, releasing one channel must not tear down
+ *     the bubble the other channel is still holding open. `onFocus`/`onBlur`
+ *     (React delegates these as `focusin`/`focusout`, which bubble — the raw
+ *     `focus`/`blur` events do not) let the child button's focus reach the
+ *     wrapper without cloning the child, preserving the design above.
  *   - The tooltip element has `role="tooltip"` + `aria-hidden="true"`. We
  *     intentionally do NOT wire `aria-describedby` on the child because the
  *     ActivityBar buttons already expose `aria-label` with the same text;
@@ -24,7 +32,15 @@
  *     the child and break the a11y design above.
  *   - The visibility timer is tracked in a ref so a cleanup effect can call
  *     `clearTimeout` on unmount and avoid setting state on an unmounted
- *     component when the user hovers and quickly navigates away.
+ *     component when the user hovers and quickly navigates away. The timer
+ *     guards the HOVER channel only — see `handleFocus` for why focus is
+ *     immediate.
+ *   - [Issue #2319] `Escape` dismisses a visible bubble (WAI-ARIA tooltip
+ *     pattern). The listener sits on `window` while visible so it also covers
+ *     the pointer-hover case, where focus is elsewhere and a wrapper-level
+ *     `onKeyDown` would never see the key. It neither `preventDefault`s nor
+ *     `stopPropagation`s, so a consumer's own Escape handling (closing a modal,
+ *     leaving a terminal mode) still runs.
  */
 
 'use client';
@@ -132,7 +148,12 @@ export interface TooltipProps {
   content: string;
   /** Placement relative to the trigger (default: `right`). */
   placement?: TooltipPlacement;
-  /** Hover delay in milliseconds (default: `TOOLTIP_DELAY_MS`). */
+  /**
+   * Hover delay in milliseconds (default: `TOOLTIP_DELAY_MS`).
+   *
+   * [Issue #2319] Applies to the pointer path only — keyboard focus always
+   * opens the tooltip immediately.
+   */
   delay?: number;
   /** Trigger element (typically a `<button>`). */
   children: React.ReactNode;
@@ -148,7 +169,7 @@ export interface TooltipProps {
 }
 
 /**
- * Hover-delayed tooltip used by ActivityBar.
+ * Hover-delayed (and focus-immediate, Issue #2319) tooltip used by ActivityBar.
  *
  * @example
  * ```tsx
@@ -164,7 +185,12 @@ export function Tooltip({
   children,
   className,
 }: TooltipProps): React.ReactElement {
-  const [visible, setVisible] = useState(false);
+  // [Issue #2319] Two independent channels. Hover releases must not close a
+  // bubble that focus is still holding open, and vice versa (a pointer click
+  // leaves a button both hovered AND focused).
+  const [hoverVisible, setHoverVisible] = useState(false);
+  const [focusVisible, setFocusVisible] = useState(false);
+  const visible = hoverVisible || focusVisible;
   const [coords, setCoords] = useState<TooltipCoords | null>(null);
   const wrapperRef = useRef<HTMLSpanElement>(null);
   const bubbleRef = useRef<HTMLSpanElement>(null);
@@ -180,15 +206,38 @@ export function Tooltip({
   const handleMouseEnter = useCallback(() => {
     clearTimer();
     timerRef.current = setTimeout(() => {
-      setVisible(true);
+      setHoverVisible(true);
       timerRef.current = null;
     }, delay);
   }, [delay, clearTimer]);
 
   const handleMouseLeave = useCallback(() => {
     clearTimer();
-    setVisible(false);
-    setCoords(null);
+    setHoverVisible(false);
+  }, [clearTimer]);
+
+  /**
+   * [Issue #2319] Focus opens the tooltip with NO delay, unlike hover.
+   *
+   * The hover delay exists to swallow a pointer merely transiting the icon on
+   * its way somewhere else — an accident the user never intended. Focus has no
+   * such failure mode: it only lands here because the user tabbed to this
+   * control deliberately, so making a keyboard user wait for the same 100ms
+   * would be latency with nothing to buy.
+   */
+  const handleFocus = useCallback(() => {
+    setFocusVisible(true);
+  }, []);
+
+  const handleBlur = useCallback(() => {
+    setFocusVisible(false);
+  }, []);
+
+  /** Close both channels; a re-open needs a fresh mouse-enter or focus. */
+  const dismiss = useCallback(() => {
+    clearTimer();
+    setHoverVisible(false);
+    setFocusVisible(false);
   }, [clearTimer]);
 
   const updatePosition = useCallback(() => {
@@ -217,7 +266,15 @@ export function Tooltip({
   // any ancestor (capture phase) and viewport resizes — `position: fixed` does
   // not follow the trigger the way the old `absolute` child did.
   useLayoutEffect(() => {
-    if (!visible) return;
+    // [Issue #2319] Dropping the stale coords belongs here, not in the mouse
+    // handler it used to live in: with two channels, `handleMouseLeave` no
+    // longer means "hidden", and clearing coords while focus keeps the bubble
+    // up would strand it at OFFSCREEN_COORDS (nothing re-measures it because
+    // `visible` never flipped). Seeding `null` is a no-op re-render on mount.
+    if (!visible) {
+      setCoords(null);
+      return;
+    }
     updatePosition();
     window.addEventListener('resize', updatePosition);
     window.addEventListener('scroll', updatePosition, true);
@@ -226,6 +283,20 @@ export function Tooltip({
       window.removeEventListener('scroll', updatePosition, true);
     };
   }, [visible, updatePosition]);
+
+  // [Issue #2319] Escape dismisses a visible bubble (WAI-ARIA tooltip pattern).
+  // Bound on `window` rather than the wrapper so it also fires in the hover
+  // case, where focus is on some other element entirely.
+  useEffect(() => {
+    if (!visible) return;
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') dismiss();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [visible, dismiss]);
 
   // Cleanup on unmount: guarantee no stray setTimeout fires after we go away.
   // (eslint react-hooks/exhaustive-deps): we intentionally close over the
@@ -244,6 +315,8 @@ export function Tooltip({
       tabIndex={-1}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
+      onFocus={handleFocus}
+      onBlur={handleBlur}
     >
       {children}
       {visible &&
