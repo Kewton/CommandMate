@@ -409,10 +409,14 @@ describe('[#1929] staleness readings', () => {
     expect(toDetectorStaleness(rows).gemini).toBeUndefined();
   });
 
-  it('reads antigravity’s `0.4.x` minor-series stamp as 0.4.0', async () => {
-    // Without this the one tool whose rules are furthest behind is the one tool
-    // that can never be reported, because `0.4.x` is not a version.
-    expect(DETECTOR_VERIFIED_AGAINST.antigravity.version).toBe('0.4.x');
+  it('reads a minor-series stamp as its `.0`, though no tool carries one now', async () => {
+    // Was antigravity's `0.4.x`. Issue #2292 re-stamped it to the 1.1.25 build
+    // #2270 actually read the rules off, so the table holds no wildcard today
+    // and the branch is exercised on the format instead of through a tool. It
+    // stays because the format is still legal in a hand-written stamp, and
+    // without it such a stamp would parse as null and be filed with
+    // `unmeasured` — silently never stale. See the function's own docstring.
+    expect(DETECTOR_VERIFIED_AGAINST.antigravity.version).toBe('1.1.25');
     expect(parseCliVersion('0.4.x')).toBeNull();
     expect(parseVerifiedAgainstVersion('0.4.x')).toBe('0.4.0');
     expect(parseVerifiedAgainstVersion('unmeasured')).toBeNull();
@@ -422,7 +426,10 @@ describe('[#1929] staleness readings', () => {
 
     const staleness = toDetectorStaleness(await getDetectorFreshness());
 
-    expect(staleness.antigravity).toEqual({ installed: '1.1.18', verifiedAgainst: '0.4.x' });
+    // 1.1.18 is BEHIND the build the rules were read off, which is not the skew
+    // this warning is about — the newer-install direction is pinned in
+    // `tests/unit/lib/detection/detector-freshness-2292.test.ts`.
+    expect(staleness.antigravity).toBeUndefined();
   });
 });
 
