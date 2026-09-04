@@ -52,6 +52,29 @@
  *     {@link isCommandCodeTurnClosingRecord}, and it is the same rule
  *     `../antigravity/transcript` arrived at for the same reason.
  *
+ * ## Re-measured on v1.49.0 (Issue #2304)
+ *
+ * All five facts above still hold, unchanged, nine minor versions later: same
+ * `version: 3` header, same `type: session` / `type: message` split, same
+ * `message.meta` fields, same `thinking` / `text` / `tool_use` / `tool_result`
+ * content blocks, still no `stop_reason` anywhere. The capture is
+ * `hook-session-1490.jsonl` in the fixtures directory, taken from the same live
+ * run whose hook payloads are `hook-payloads-1490.json`, and no change to this
+ * module was needed for it.
+ *
+ * What *did* change is the directory around the file: 1.49.0 writes
+ * `<session_id>.meta.json` and `<session_id>.checkpoints.jsonl` beside the
+ * transcript, and 1.40.1 wrote neither. Neither is this module's problem —
+ * `./history`'s scan matches `<session_id>.jsonl` exactly — but the checkpoints
+ * file is worth one sentence here because it is the one that could reach this
+ * parser: its rows are `{id, messageId, turnNumber, createdAt, prompt,
+ * messageCount, files}` with **no `type` field at all**, so
+ * {@link readCommandCodeTranscriptRecord} declines every one of them and
+ * {@link parseCommandCodeTranscript} answers zero records. Measured, not
+ * assumed. That is what makes the fail-open hold without a fourth condition on
+ * `acceptCommandCodeTranscriptHint`, which the file's `.jsonl` suffix would
+ * otherwise satisfy.
+ *
  * ## Pure on purpose
  *
  * No filesystem, no database, no `globalThis` — `./history` owns all three. The

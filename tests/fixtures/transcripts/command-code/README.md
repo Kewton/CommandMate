@@ -3,6 +3,11 @@
 Command Code **v1.40.1** の転写 JSONL を実機で採取したもの。Issue #2252 / Epic #2249 Phase C。
 読み手は `src/lib/hooks/sources/command-code/transcript.ts` と `.../history.ts`。
 
+Issue #2304 で **v1.49.0** の 1 セッションと、その同じ実行が配ってきた hook payload 4 件を
+足した（`hook-*-1490.*`）。狙いは 2 つで、**転写の record 形が 9 マイナーバージョン後も
+同じであること**と、**転写のパスは hook の `transcript_path` から来ていて cwd 計算に
+依存しないこと**を、実機の値で固定すること。
+
 ## 採取方法
 
 隔離した作業ディレクトリで、`commandcode --trust --skip-onboarding --no-auto-update [--yolo]
@@ -20,6 +25,9 @@ Command Code **v1.40.1** の転写 JSONL を実機で採取したもの。Issue 
 | `three-turns-1401.turn-b.md` | 2 ターン目の本文 | 同上 |
 | `open-turn-1401.jsonl` | header + closed 1 ターン + **`tool_use` で終わっている 2 ターン目** | #2264 の「閉じていないターンを書かない」 |
 | `open-turn-1401.turn-b.md` | その 2 ターン目を描画したもの | **空ではない**ことの証拠（下記） |
+| `hook-payloads-1490.json` | v1.49.0 の hook payload 4 件（`SessionStart` / `PreToolUse` / `PostToolUse` / `Stop`）を観測時刻つきで並べたもの | `transcript_path` が全イベントに乗り、セッション中で 1 値であること／`PreToolUse` がダイアログ承認**後**であること |
+| `hook-session-1490.jsonl` | その payload が指していた転写そのもの（header + 1 ターン、`thinking` / `text` / `tool_use` / `tool_result`） | 1.49.0 の record 形が 1.40.1 と同じであること |
+| `hook-session-1490.turn.md` | そのターンを描画したもの | `renderCommandCodeTurn` の本文一致 pin |
 
 `.jsonl` の各 record は実機が書いたものそのまま。**手で変えたのは 3 箇所だけ**で、いずれも
 機械が生成した識別子である:
@@ -66,6 +74,31 @@ Command Code **v1.40.1** の転写 JSONL を実機で採取したもの。Issue 
    （append が enqueue されたままプロセスが終了する）。`open-turn-1401.jsonl` はまさにこの形で、
    **閉じていないターンを書いてしまう欠陥（#2264）が実機で起こりうる**ことの証拠になっている。
 
+## 実測（Issue #2304、v1.49.0）
+
+7. **`transcript_path` は 4 イベント全部に乗り、セッション中は同じ値。** だから受け側は
+   最初に見たイベントから latch してよい（#2251 の主張の裏取り）。`cwd` も全イベントに
+   乗っている — つまり slug を「計算できてしまう」誘惑は payload 側にある。やらないこと。
+8. **slug は 1.49.0 でも camelCase を分解する。** 実測した cwd
+   `…/scratchpad/cwd/MyCodeBranchDesk/probe` に対して、ディレクトリ名は
+   `…-scratchpad-cwd-my-code-branch-desk-probe`。claude の規則（`[^A-Za-z0-9] → -`）なら
+   `-…-scratchpad-cwd-MyCodeBranchDesk-probe` になる。**先頭の `-` の有無**と
+   **camel 分解**の 2 点で違う。`command-code-transcript-path-2304.test.ts` はこの 2 点を
+   名指しで固定している（「なんとなく違う」では通らないように）。
+9. **1.49.0 は転写の隣に 2 つファイルを増やした。** `<session_id>.meta.json`（`traceIds` の配列）と
+   `<session_id>.checkpoints.jsonl`（`turnNumber` / `prompt` / `files` を持つターン単位の
+   チェックポイント）。1.40.1 はどちらも書かなかった。
+   `findCommandCodeTranscriptPath` は `<session_id>.jsonl` を**完全一致**で探すので、
+   どちらも候補にならない — `endsWith('.jsonl')` で走査していたら
+   `.checkpoints.jsonl` を拾っていた。
+   なお `.checkpoints.jsonl` は `acceptCommandCodeTranscriptHint` を**通る**（絶対パスで
+   root 配下で `.jsonl`）。それでも安全なのは、その各行に `type` が無く
+   `readCommandCodeTranscriptRecord` が全行を落とすから — 実測で records 0 / turns 0、
+   つまり fail-open に落ちる。accept に 4 つ目の条件を足す必要はない。
+10. **record 形は 1.40.1 と同一。** `version: 3`、`type: session` / `type: message`、
+   `message.meta.source` / `createdAt` / `messageId`、content block は
+   `thinking` / `text` / `tool_use` / `tool_result`。reader 側の変更は不要だった。
+
 ## 使うときの注意
 
 - **`open-turn-1401.turn-b.md` は空ではない。** これが #2264 の核心で、書き手の「本文が空なら
@@ -76,3 +109,9 @@ Command Code **v1.40.1** の転写 JSONL を実機で採取したもの。Issue 
   claude の `[^A-Za-z0-9] → -` とは別の関数である。reader は session id でファイルを**探す**。
 - **fork / clone は範囲外。** header に `parentSession`（別セッションの `.jsonl` パス）が付くことがあり、
   reader はそれを読んで**ログに出すだけ**で、木構造の再構成はしない（Issue #2252 スコープ外）。
+- **hook payload の redaction は「HOME と cwd と slug」の 3 点セットで整合している。**
+  `hook-payloads-1490.json` / `hook-session-1490.jsonl` は採取時の HOME を
+  `/private/tmp/cc2304-home`、cwd を `/private/tmp/cc2304-probe/MyCodeBranchDesk/probe` に
+  置換し、slug をその cwd から Command Code の規則で引き直してある。**session id と slug の
+  「形」は実機のまま。** テストは HOME の前置だけを一時ディレクトリに差し替えて使う
+  （slug とファイル名は payload のものを一切組み立て直さない）。

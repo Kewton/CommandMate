@@ -26,6 +26,30 @@
  * interrupt) a completion rule has to survive. `detection-evidence-config` ships
  * `legacy` to match.
  *
+ * **Issue #2304 captured both of those idle states, and pinned the cost of not
+ * having the rule.** `tests/unit/detection/tools/command-code/fixtures.test.ts`
+ * defuses the busy vocabulary on a running frame and measures the answer:
+ * `ready` / `input_prompt` / `evidence: 'positive'` — a completion declared on
+ * the *absence* of a busy marker, which is exactly what D1 forbids. It costs
+ * nothing in production while the rollout says `legacy`, because
+ * `resolveIdleEvidence` short-circuits before a tool rule is consulted; what it
+ * costs is the rollout itself. The two frames a rule needs are now in
+ * `tests/fixtures/command-code-live-2250/`:
+ *
+ *  - after `/clear` — `boot-idle-1490.txt`, because the pane after `/clear` is
+ *    **byte-identical** to the launch screen. Unlike claude, which leaves
+ *    `new task? /clear to save …` behind and is the reason its own rule went
+ *    back to `observe` (#2011), Command Code repaints the banner;
+ *  - after an Esc interrupt — `idle-after-interrupt-1490.txt`, where Esc landed
+ *    before the agent had written anything, so the newest turn is a prompt echo
+ *    followed straight by `✻ Worked for 4s` with no `⠶` reply row at all.
+ *
+ * Building the rule, and measuring its `observe` rate before it enforces
+ * anything, is deliberately a separate Issue: the table it would have to move
+ * lives in `@/config/detection-evidence-config`, and `afterThinking`'s idle
+ * branch below publishes `'positive'` outright rather than through
+ * `resolveIdleEvidence`, so a rule added without changing that would never run.
+ *
  * No `detectDialog` either: Epic #2249 決定 3 keeps Auto-Yes on the legacy
  * numbered-response path, because Command Code fires `PreToolUse` AFTER the
  * dialog is answered, so a hook-driven permission decision cannot dismiss it.
@@ -39,6 +63,34 @@
  * floor and the chat surface offered it the answer characters — into the search
  * box. Measured live on v1.40.1 at the production 200x1000 geometry; the capture
  * is `tests/fixtures/chat-dialog-card-2254/command-code-model-1-40-1.txt`.
+ *
+ * ## What #2304 re-measured, and what it did not change
+ *
+ * Nothing here changed, and that is the finding. Seven frames were captured
+ * live on **1.49.0** — nine minor versions past the build these rules were read
+ * off — at the same 200x1000 geometry, and every rule answers identically,
+ * state for state. `verifiedAgainst` therefore still records 1.40.1: that is
+ * the build the rules were *read off*, and
+ * `tests/unit/detection/tools/command-code/fixtures.test.ts` is the receipt that
+ * they still hold. It also pins the picker's verdict for the three 1.47.1
+ * captures, which had none before — `afterPrompt` reading one build's picker was
+ * an assumption about the next.
+ *
+ * Two 1.49.0 observations are worth carrying here because they bound what the
+ * rules rest on:
+ *
+ *  - **A status verb can be three words with no `…`.** ` ✧ Shell command
+ *    allowed  esc to interrupt • 19s • ↓ 1.7k` is not read by
+ *    `COMMAND_CODE_THINKING_PATTERN`'s spinner branch, which wants
+ *    `[spinner] <one word>…`. Only the third alternative — the `esc to
+ *    interrupt` tail — reads it, and the tool drops that tail below 42 columns.
+ *    CommandMate panes are 200 wide, so it holds; a narrower pane would not.
+ *    The capture is `turn-shell-running-1490.txt`.
+ *  - **Evidence can be layered.** That same frame carries ` ✻ Thinking… (72
+ *    lines) [ctrl+o to expand]` two rows above the status row, so it stays
+ *    `running` when the status row alone is defused. The single-marker frames
+ *    (`turn-thinking.txt`, `turn-thinking-1490.txt`) do not, which is the D1 gap
+ *    described above.
  */
 
 import { detectThinking, getCliToolPatterns } from '../../cli-patterns';
