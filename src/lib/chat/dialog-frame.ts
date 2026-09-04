@@ -42,11 +42,25 @@
  * (#2095) and the sidebar comes along — accepted, because the card's job is
  * "you can see it", not "it is parsed".
  *
+ * ## Issue #2309: a selection list is not given a tail at all
+ *
+ * The 12–20 row budget above assumes the dialog itself is short. command-code's
+ * `/model` and opencode's pickers are search-type lists tens of rows long with
+ * no number keys to jump by (#2297's `shouldOfferOptionNumbers` correctly
+ * refuses them one), so arrows plus a 16-row window meant walking blind past
+ * whatever the tail slice had already thrown away. `{ selectionList: true }`
+ * skips the slice — the card scrolls instead ({@link ChatDialogCard}) — with one
+ * carve-out: opencode paints its overlay mid-transcript rather than clearing the
+ * pane, so "everything left after compaction" would still be the conversation on
+ * both sides of it. That case is cropped to
+ * {@link extractOpenCodeModalOverlayFrame}'s own rectangle first.
+ *
  * Pure, synchronous and free of React / DOM, so the rule is testable against raw
  * captures with no renderer.
  */
 
 import { compactBlankRuns, isPaintedPanelRow } from '@/lib/terminal-display-normalize';
+import { extractOpenCodeModalOverlayFrame } from '@/lib/detection/opencode-modal-overlay';
 
 /**
  * Fewest rows the card may be asked for.
@@ -78,9 +92,32 @@ export interface DialogFrameTailOptions {
    *
    * Clamped rather than validated because the value comes from a component prop
    * on a surface that must never fail to render: an out-of-range number is a
-   * caller bug worth bounding, not worth throwing over.
+   * caller bug worth bounding, not worth throwing over. Ignored when
+   * {@link DialogFrameTailOptions.selectionList} is set — see there.
    */
   maxLines?: number;
+  /**
+   * This frame is a selection list (Issue #2309): skip the tail slice and
+   * return every compacted content row instead of the last `maxLines`.
+   *
+   * The row budget this module was built around assumes the dialog is a few
+   * lines of question-plus-options sitting in an otherwise blank pane. A
+   * search-type picker breaks that assumption outright — command-code's
+   * `/model` is 89 rows of provider-grouped model names with no numbers to
+   * jump by (`tests/fixtures/chat-dialog-card-2254/command-code-model-1-40-1.txt`)
+   * — and slicing it to 12–20 rows before the card ever renders threw away
+   * everything past the last screenful, leaving the arrow keys to walk blind
+   * past rows the card had already discarded. The card scrolls the box
+   * instead ({@link ChatDialogCard}), so there is no row budget left to keep.
+   *
+   * opencode is the exception within the exception: it paints its overlay
+   * mid-transcript rather than clearing the pane, so "everything left after
+   * compaction" would still drag the conversation on both sides of the
+   * dialog along with it. When {@link extractOpenCodeModalOverlayFrame} finds
+   * a rectangle on the frame, its own row span is used instead of the whole
+   * compacted frame.
+   */
+  selectionList?: boolean;
 }
 
 /** Clamp into the [MIN, MAX] window, mapping a non-finite value to the default. */
@@ -118,12 +155,31 @@ export function extractDialogFrameTail(
   // make a row that is blank apart from the CR count as content.
   const normalized = frame.replace(/\r\n/g, '\n');
 
+  // Issue #2309: an opencode overlay is cropped to its own rectangle BEFORE
+  // compaction runs, on the un-compacted frame — the row span
+  // `extractOpenCodeModalOverlayFrame` returns is measured against the
+  // original line numbers, and compacting first would shift rows elsewhere in
+  // the pane out from under that measurement. Detection needs the SGR the
+  // capture was taken with (never a stripped frame), which `normalized` still
+  // is at this point.
+  if (options.selectionList) {
+    const overlayFrame = extractOpenCodeModalOverlayFrame(normalized);
+    if (overlayFrame !== null) {
+      const compactedOverlay = compactBlankRuns(overlayFrame, { isStructuralRow: isPaintedPanelRow });
+      if (compactedOverlay !== '') return compactedOverlay;
+    }
+  }
+
   // Issue #2049's predicate, not #1172's bare rule: opencode paints its overlay
   // panel with background-only rows that carry no glyphs, and collapsing those
   // deletes the panel's top band and its section separators — the exact rows
   // that make the card legible as a dialog.
   const compacted = compactBlankRuns(normalized, { isStructuralRow: isPaintedPanelRow });
   if (compacted === '') return '';
+
+  // Issue #2309: a selection list keeps every compacted row — see
+  // {@link DialogFrameTailOptions.selectionList}.
+  if (options.selectionList) return compacted;
 
   const lines = compacted.split('\n');
   const maxLines = resolveMaxLines(options.maxLines);

@@ -47,6 +47,7 @@ import path from 'path';
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   detectOpenCodeModalOverlay,
+  extractOpenCodeModalOverlayFrame,
   OPENCODE_MODAL_OVERLAY_ID,
   OPENCODE_MODAL_OVERLAY_RECOVERY_KEY,
   OPENCODE_OVERLAY_HEADER_ROW_LIMIT,
@@ -491,5 +492,69 @@ describe('Issue #2112: every guard is load-bearing', () => {
     // rectangle, with opencode's `┃` in the column to its left.
     expect(detectOpenCodeModalOverlay(dialog({ gutter: '' }))).not.toBeNull();
     expect(detectOpenCodeModalOverlay(dialog({ gutter: '┃' }))).toBeNull();
+  });
+});
+
+describe('Issue #2309: extractOpenCodeModalOverlayFrame crops to the rectangle', () => {
+  it('keeps `detectOpenCodeModalOverlay`’s own public shape unchanged', () => {
+    // The row-range fields this Issue adds internally must never leak onto the
+    // detector's own return value — every existing caller (`tools/opencode/
+    // detect.ts`, `tools/opencode/prompt.ts`) destructures a fixed field list,
+    // and the `toEqual` above pins the exact shape.
+    const overlay = detectOpenCodeModalOverlay(frame2046('dialog-session-list'));
+    expect(overlay && Object.keys(overlay).sort()).toEqual(
+      ['headerRow', 'headerText', 'id', 'left', 'right', 'rows'].sort(),
+    );
+  });
+
+  it('crops a real dialog to exactly its painted rows, no blank padding left over', () => {
+    // `dialog-timeline` is the shortest of the four #2046 captures (8 rows).
+    // Every one of them carries the overlay's own background — some are text
+    // rows, some are the panel's blank-but-painted spacer rows — and the crop
+    // must keep exactly that span, no more.
+    const cropped = extractOpenCodeModalOverlayFrame(frame2046('dialog-timeline'));
+    expect(cropped).not.toBeNull();
+    expect(cropped!.split('\n')).toHaveLength(8);
+    expect(stripAnsi(cropped!)).toContain('Timeline');
+    expect(stripAnsi(cropped!)).toContain('esc');
+    // The pane rows outside the panel — the ones an un-cropped frame would
+    // still carry — are not painted and so cannot be part of this span.
+    expect(cropped).not.toBe(frame2046('dialog-timeline'));
+  });
+
+  it('reads the real four #2046 dialogs at the geometry their own test pins', () => {
+    for (const [name, , , rows] of [
+      ['dialog-session-list', 1, 79, 10],
+      ['dialog-agent-list', 10, 70, 9],
+      ['dialog-timeline', 1, 79, 8],
+      ['dialog-command-palette', 10, 70, 72],
+    ] as const) {
+      const cropped = extractOpenCodeModalOverlayFrame(frame2046(name));
+      expect(cropped, name).not.toBeNull();
+      expect(cropped!.split('\n'), name).toHaveLength(rows);
+    }
+  });
+
+  it('is null wherever detectOpenCodeModalOverlay is null', () => {
+    for (const name of DIALOGS) {
+      expect(extractOpenCodeModalOverlayFrame(stripAnsi(frame2046(name))), name).toBeNull();
+    }
+    expect(extractOpenCodeModalOverlayFrame('no overlay here at all')).toBeNull();
+  });
+
+  it('crops a busy transcript to the overlay rather than the conversation around it', () => {
+    // The case #2309 exists for: a palette painted mid-transcript, prose on
+    // both sides of it on the SAME rows. `w200/command-palette.txt` is the
+    // 2047 fixture measured above at 60 columns wide.
+    const raw = fs.readFileSync(path.join(DIR_2047, 'w200', 'command-palette.txt'), 'utf-8');
+    const cropped = extractOpenCodeModalOverlayFrame(raw);
+    expect(cropped).not.toBeNull();
+    const plain = stripAnsi(cropped!);
+    expect(plain).toContain('Commands');
+    expect(plain).toContain('Switch model');
+    // Full-width rows, not a column crop: the transcript sharing a row WITH
+    // the overlay rides along on purpose (Issue #2095's sidebar precedent) —
+    // only rows the rectangle never reaches are dropped.
+    expect(plain).not.toContain('uname -a');
   });
 });
