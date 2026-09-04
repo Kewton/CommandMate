@@ -62,6 +62,15 @@
  * rest into a scroll. {@link findHighlightLineIndex} then keeps the arrow-moved
  * highlight inside that scroll, because a list that is merely scrollable but
  * whose current row can drift out of view is not "reachable".
+ *
+ * ## Issue #2318: the follow was computed against the wrong height
+ *
+ * #2309 shipped that follow with the row's offset taken as a fraction of the
+ * SCROLLABLE distance (`scrollHeight - clientHeight`) rather than of the rows
+ * themselves, which compressed every position by `scrollable / scrollHeight`
+ * and left the highlight out of view on all five sampled keypresses of a live
+ * `/model` card. The scroll effect below now measures the row where it really
+ * is; the arithmetic and its padding term are documented there.
  */
 
 import { useLayoutEffect, useMemo, useRef } from 'react';
@@ -152,15 +161,16 @@ export function ChatDialogCard({
   const html = useMemo(() => (tail ? sanitizeTerminalOutput(tail) : ''), [tail]);
 
   // --------------------------------------------------------------------
-  // Highlight follow (Issue #2309)
+  // Highlight follow (Issue #2309, corrected by Issue #2318)
   // --------------------------------------------------------------------
   // A selection list this long only makes sense with the highlighted row kept
   // in view as the arrows move it — otherwise "scrollable" is not the same as
   // "reachable". The rows are one blob of HTML rather than one element per
   // line (see the docblock for why `TerminalDisplay`'s per-line diffing is not
   // reused here), so there is no element to `scrollIntoView`; the frame is
-  // monospace with a fixed line height, so the highlighted row's fraction of
-  // the total line count is used to place it instead.
+  // monospace with a fixed line height, so the row's own pixel offset is
+  // computed from the line count instead — see the effect for the geometry and
+  // for the two ways #2309 got it wrong.
   const frameRef = useRef<HTMLDivElement>(null);
   const highlightLineIndex = useMemo(
     () => (isSelectionList && tail ? findHighlightLineIndex(stripAnsi(tail)) : -1),
@@ -174,8 +184,35 @@ export function ChatDialogCard({
     if (totalLines <= 1) return;
     const scrollable = el.scrollHeight - el.clientHeight;
     if (scrollable <= 0) return;
-    const target = (highlightLineIndex / (totalLines - 1)) * scrollable;
-    el.scrollTop = Math.min(scrollable, Math.max(0, target - el.clientHeight / 2));
+
+    // Issue #2318: row `i` lives at a fraction of the CONTENT height, not of
+    // the SCROLLABLE distance. #2309 divided `highlightLineIndex` by
+    // `totalLines - 1` and multiplied by `scrollHeight - clientHeight`, which
+    // compresses every offset by `scrollable / scrollHeight` — measured on the
+    // live `/model` card that is 765/1211 = 0.63, so the computed position ran
+    // 155px short of the real row and the further down the list the arrows
+    // went the worse it got. The denominator is `totalLines` (row `i` starts
+    // `i` rows down, and there are `totalLines` rows), and the multiplicand is
+    // the height the rows actually occupy.
+    //
+    // `scrollHeight` spans the scroller's padding box, so the rows are
+    // `scrollHeight` minus this element's own vertical padding, and row 0
+    // starts `paddingTop` below `scrollTop === 0`. Read via `getComputedStyle`
+    // rather than hard-coded as 8 because the padding is the `p-2` class right
+    // below and a later `p-3` must not silently push the highlight back out of
+    // view; a box that reports no padding (jsdom lays nothing out) falls back
+    // to an unpadded one, which is exactly what such a box is.
+    const style = window.getComputedStyle(el);
+    const paddingTop = Number.parseFloat(style.paddingTop) || 0;
+    const paddingBottom = Number.parseFloat(style.paddingBottom) || 0;
+    const contentHeight = Math.max(0, el.scrollHeight - paddingTop - paddingBottom);
+    const lineHeight = contentHeight / totalLines;
+    const lineTop = paddingTop + highlightLineIndex * lineHeight;
+    // Centre the ROW in the box, not the row's top edge — with a 15px row in a
+    // 446px box the difference is half a line, but it is what keeps the last
+    // row fully inside the viewport once the clamp below bites.
+    const target = lineTop - (el.clientHeight - lineHeight) / 2;
+    el.scrollTop = Math.min(scrollable, Math.max(0, target));
   }, [highlightLineIndex, tail]);
 
   if (!tail) return null;
