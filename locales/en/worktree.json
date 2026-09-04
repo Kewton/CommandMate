@@ -478,6 +478,15 @@
       "collapse": "Hide the reasoning"
     },
     "jumpToTop": "Jump to the beginning",
+    "toolLog": {
+      "summary": "Tool calls \u00b7 {count}",
+      "expand": "Show the tool calls",
+      "collapse": "Hide the tool calls"
+    },
+    "toolActivity": {
+      "show": "Show tool activity",
+      "hide": "Hide tool activity"
+    },
     "toolApproval": {
       "summary": "Tool approvals · {count}",
       "expand": "Show the tool approvals",

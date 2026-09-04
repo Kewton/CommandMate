@@ -14,8 +14,9 @@
  * repository's last 26 assistant rows (median 2,478 characters) were shown at
  * roughly 4% of their length.
  *
- * So this renders MESSAGES, not pairs: one bubble each, user right, assistant
- * left, both at `text-sm`, assistant bodies in full with no expand toggle.
+ * So this renders MESSAGES, not pairs: one row each, at `text-sm`, assistant
+ * bodies in full with no expand toggle. Since Issue #2284 only the user's half
+ * is a bubble — the reply is the page, at the row's full width.
  *
  * ## What the second implementation costs, and what it is not allowed to cost
  *
@@ -47,7 +48,19 @@
  * Search survives, because chat can search today and removing it would be a
  * regression; it is a single icon floating over the top-right of the column,
  * which is also why it costs the transcript no height (the phone's vertical
- * budget, Issue #2106).
+ * budget, Issue #2106). Issue #2284 put ONE more icon beside it — the
+ * tool-activity toggle — under the same rule: absolutely positioned, no height,
+ * and it stands down while the search bar has the strip.
+ *
+ * ## The three folds answer to one toggle (Issue #2284)
+ *
+ * The tool section (`lib/chat/chat-tool-log`), the reasoning (#2272) and the
+ * approval run (#2245) are the same kind of thing to a reader, so they are one
+ * chip design and one control. The verdict is published down the tree through
+ * `ChatToolActivityProvider`; a chip may be opened by hand and keeps that
+ * position until the toggle moves again, at which point the whole column agrees
+ * once more. A row holding a search hit gets its own provider, because a search
+ * that reports a match inside a folded log has to show it.
  *
  * ## The live tail (Issue #2233)
  *
@@ -117,7 +130,7 @@ import React, {
 } from 'react';
 import { useTranslations } from 'next-intl';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { ArrowDown, ArrowUp, Loader2, MessageSquare, Search } from 'lucide-react';
+import { ArrowDown, ArrowUp, Loader2, MessageSquare, Search, Wrench } from 'lucide-react';
 import { Skeleton } from '@/components/ui';
 import type { ChatMessage } from '@/types/models';
 import type { CLIToolType } from '@/lib/cli-tools/types';
@@ -137,12 +150,20 @@ import {
 import { isToolApprovalMessage } from '@/lib/chat/chat-tool-approvals';
 import { resolveChatSearchNamespace } from '@/lib/chat/chat-search-namespace';
 import {
+  readChatToolActivityPreference,
+  writeChatToolActivityPreference,
+} from '@/lib/chat/chat-tool-activity';
+import {
   CHAT_BUBBLE_ASSISTANT_CLASS,
   CHAT_BUBBLE_MARKDOWN_BODY_CLASS,
   CHAT_BUBBLE_ROW_CLASS,
+  CHAT_BUBBLE_TESTID,
+  CHAT_TOOL_ACTIVITY_OPEN,
   ChatMarkdownBody,
   ChatMessageBubble,
+  ChatToolActivityProvider,
   ChatToolApprovalGroup,
+  type ChatToolActivityState,
 } from './ChatMessageBubble';
 import { CHAT_LIVE_TURN_TESTID, ChatLiveTurnBubble } from './ChatLiveTurnBubble';
 import { HistorySearchBar } from './HistorySearchBar';
@@ -218,6 +239,17 @@ async function probeChatFilePath(
  * jump control is on screen at a time.
  */
 export const CHAT_TRANSCRIPT_JUMP_FAB_TESTID = 'chat-transcript-jump-fab';
+
+/**
+ * The tool-activity toggle's testid (Issue #2284).
+ *
+ * ONE control for the three folded logs on this surface — the tool section
+ * (#2234 / #2284), the reasoning (#2272) and the approval run (#2245). They are
+ * the same kind of thing to a reader, so three toggles would be three ways of
+ * asking the same question, and the answer belongs to the column rather than to
+ * whichever row happens to be on screen.
+ */
+export const CHAT_TRANSCRIPT_TOOL_ACTIVITY_TESTID = 'chat-transcript-tool-activity-toggle';
 
 /**
  * Animation-frame ceiling for the tail anchor (Issue #2283).
@@ -441,7 +473,7 @@ function ChatSettlingTurnBubble({
         </div>
       )}
 
-      <div className={CHAT_BUBBLE_ASSISTANT_CLASS}>
+      <div data-testid={CHAT_BUBBLE_TESTID} className={CHAT_BUBBLE_ASSISTANT_CLASS}>
         {hasBody && (
           <div
             data-testid="chat-live-turn-body"
@@ -585,6 +617,43 @@ export const ChatTranscript = memo(function ChatTranscript({
   } = useHistorySearch({ messages: searchableMessages });
 
   const isSearchActive = isSearchOpen && matchPositions.length > 0;
+
+  // ---------------------------------------------------------------
+  // Tool activity (Issue #2284)
+  // ---------------------------------------------------------------
+  // One verdict for the whole column, remembered per browser. Read lazily on
+  // first render rather than in an effect, which is `useHistoryFilters`'
+  // pattern for `commandmate:showArchived`: an effect would paint every chip
+  // closed and then open them, and the reader's own preference is not a thing
+  // to flicker through.
+  const [showToolActivity, setShowToolActivity] = useState<boolean>(
+    readChatToolActivityPreference,
+  );
+
+  const toggleToolActivity = useCallback(() => {
+    const next = !showToolActivity;
+    setShowToolActivity(next);
+    writeChatToolActivityPreference(next);
+  }, [showToolActivity]);
+
+  const toolActivityValue = useMemo<ChatToolActivityState>(
+    () => ({ showAll: showToolActivity }),
+    [showToolActivity],
+  );
+
+  // Rows holding a search hit open their chips regardless of the toggle.
+  //
+  // The alternative — leave them shut — is a search that reports N matches and
+  // then shows the reader a row with no visible match in it, because the words
+  // it hit are inside a folded log. `content` is searched WHOLE (see
+  // `searchableMessages`), so the tool section is inside the haystack whether
+  // or not it is on screen; this is what puts it back on screen. Every matched
+  // row, not just the current one, because the highlight pass below marks every
+  // mounted match and cannot mark what is unmounted.
+  const searchHitMessageIds = useMemo(() => {
+    if (!isSearchOpen || matchPositions.length === 0) return null;
+    return new Set(matchPositions.map((match) => match.messageId));
+  }, [isSearchOpen, matchPositions]);
 
   // Reset search when the worktree context changes.
   useEffect(() => {
@@ -913,7 +982,7 @@ export const ChatTranscript = memo(function ChatTranscript({
       if (row.kind === 'approvals') {
         return <ChatToolApprovalGroup entries={row.entries} />;
       }
-      return (
+      const bubble = (
         <ChatMessageBubble
           message={row.message}
           showHeader={row.showHeader}
@@ -924,8 +993,27 @@ export const ChatTranscript = memo(function ChatTranscript({
           onDiscardPending={onDiscardPending}
         />
       );
+      // [#2284] A nested provider, so the override is scoped to the one row and
+      // ends when the search does — the toggle's own value is untouched, and
+      // closing the search folds the row back up without asking the reader.
+      if (searchHitMessageIds?.has(row.message.id)) {
+        return (
+          <ChatToolActivityProvider value={CHAT_TOOL_ACTIVITY_OPEN}>
+            {bubble}
+          </ChatToolActivityProvider>
+        );
+      }
+      return bubble;
     },
-    [rows, handleFilePathClick, handleCopy, onInsertToMessage, onRetryPending, onDiscardPending],
+    [
+      rows,
+      handleFilePathClick,
+      handleCopy,
+      onInsertToMessage,
+      onRetryPending,
+      onDiscardPending,
+      searchHitMessageIds,
+    ],
   );
 
   // Issue #2248: a HELD body is below the reader exactly as a live one is, so
@@ -974,6 +1062,7 @@ export const ChatTranscript = memo(function ChatTranscript({
   return (
     <div
       data-testid="chat-transcript"
+      data-tool-activity={showToolActivity ? 'shown' : 'folded'}
       role="log"
       aria-label={t('chatTranscript.regionLabel')}
       className={['relative flex h-full min-h-0 w-full flex-col overflow-hidden bg-surface', className]
@@ -995,37 +1084,43 @@ export const ChatTranscript = memo(function ChatTranscript({
         tabIndex={0}
         className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-3 py-3"
       >
-        {renderContent()}
+        {/* [#2284] Everything that can be folded is inside here, so the
+            provider wraps the scroll region rather than the whole surface —
+            the toggle above is the thing that WRITES the verdict and has no
+            business reading it back through a context. */}
+        <ChatToolActivityProvider value={toolActivityValue}>
+          {renderContent()}
 
-        {/* [#2233] The live tail. A plain sibling of the list — never an entry
-            in `virtualItems` — so no scroll position can unmount it, and inside
-            the scroll region so it sits exactly where its settled row will.
+          {/* [#2233] The live tail. A plain sibling of the list — never an entry
+              in `virtualItems` — so no scroll position can unmount it, and inside
+              the scroll region so it sits exactly where its settled row will.
 
-            [#2248] Two bubbles, one position: while the turn is generating, and
-            then while its body is HELD waiting for the saved row. The second
-            wears the same classes with the spinner and "Responding…" taken off,
-            so the turn ending changes nothing on screen but that one line. */}
-        {liveTurn &&
-          (liveTurn.settling ? (
-            <ChatSettlingTurnBubble
-              turnKey={liveTurn.turnKey}
-              version={liveTurn.version}
-              body={liveTurn.body}
-              partial={liveTurn.partial}
-              showHeader={shouldShowLiveRoleHeader(messages[messages.length - 1])}
-              onFilePathClick={handleFilePathClick}
-            />
-          ) : (
-            <ChatLiveTurnBubble
-              turnKey={liveTurn.turnKey}
-              version={liveTurn.version}
-              body={liveTurn.body}
-              partial={liveTurn.partial}
-              isThinking={liveTurn.isThinking}
-              showHeader={shouldShowLiveRoleHeader(messages[messages.length - 1])}
-              onFilePathClick={handleFilePathClick}
-            />
-          ))}
+              [#2248] Two bubbles, one position: while the turn is generating, and
+              then while its body is HELD waiting for the saved row. The second
+              wears the same classes with the spinner and "Responding…" taken off,
+              so the turn ending changes nothing on screen but that one line. */}
+          {liveTurn &&
+            (liveTurn.settling ? (
+              <ChatSettlingTurnBubble
+                turnKey={liveTurn.turnKey}
+                version={liveTurn.version}
+                body={liveTurn.body}
+                partial={liveTurn.partial}
+                showHeader={shouldShowLiveRoleHeader(messages[messages.length - 1])}
+                onFilePathClick={handleFilePathClick}
+              />
+            ) : (
+              <ChatLiveTurnBubble
+                turnKey={liveTurn.turnKey}
+                version={liveTurn.version}
+                body={liveTurn.body}
+                partial={liveTurn.partial}
+                isThinking={liveTurn.isThinking}
+                showHeader={shouldShowLiveRoleHeader(messages[messages.length - 1])}
+                onFilePathClick={handleFilePathClick}
+              />
+            ))}
+        </ChatToolActivityProvider>
       </div>
 
       {/* [#2283] One circular button for both ends of the conversation,
@@ -1082,9 +1177,47 @@ export const ChatTranscript = memo(function ChatTranscript({
           </button>
         ))}
 
-      {/* Search: one icon, or the bar once it is open. Absolutely positioned so
-          opening it never reflows the transcript under the reader. */}
-      <div className="pointer-events-none absolute right-2 top-2 z-10 flex justify-end">
+      {/* Search, and the tool-activity toggle beside it. One icon each, or the
+          search bar once it is open. Absolutely positioned so neither costs the
+          transcript any height (Issue #2106's vertical budget) and so opening
+          the bar never reflows the transcript under the reader.
+
+          [#2284] The toggle stands down while the bar is open: this strip has
+          no left edge to grow into, and on a 360px phone a 28px button beside
+          the bar is what pushes it off the pane. Nothing is lost by yielding —
+          a search hit opens the chips in its own row anyway (see
+          `searchHitMessageIds`), which is the only reason to want them open
+          while searching. */}
+      <div className="pointer-events-none absolute right-2 top-2 z-10 flex items-start justify-end gap-1">
+        {!isSearchOpen && (
+          <div className="pointer-events-auto">
+            <button
+              type="button"
+              data-testid={CHAT_TRANSCRIPT_TOOL_ACTIVITY_TESTID}
+              onClick={toggleToolActivity}
+              aria-pressed={showToolActivity}
+              aria-label={
+                showToolActivity
+                  ? t('chatTranscript.toolActivity.hide')
+                  : t('chatTranscript.toolActivity.show')
+              }
+              title={
+                showToolActivity
+                  ? t('chatTranscript.toolActivity.hide')
+                  : t('chatTranscript.toolActivity.show')
+              }
+              className={[
+                'rounded-full border border-border p-1.5 shadow-sm backdrop-blur transition-colors',
+                'focus:outline-none focus-visible:ring-2 focus-visible:ring-ring touch-manipulation',
+                showToolActivity
+                  ? 'bg-accent-500/15 text-accent-700 hover:bg-accent-500/25 dark:text-accent-400'
+                  : 'bg-surface-2/80 text-muted-foreground hover:bg-muted hover:text-foreground',
+              ].join(' ')}
+            >
+              <Wrench size={14} aria-hidden="true" />
+            </button>
+          </div>
+        )}
         <div className="pointer-events-auto">
           {isSearchOpen ? (
             <HistorySearchBar

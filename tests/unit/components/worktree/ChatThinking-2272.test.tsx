@@ -44,6 +44,9 @@ import {
   CHAT_THINKING_GROUP_TESTID,
   CHAT_THINKING_LABEL,
   CHAT_THINKING_TOGGLE_TESTID,
+  CHAT_TOOL_LOG_BODY_TESTID,
+  CHAT_TOOL_LOG_GROUP_TESTID,
+  CHAT_TOOL_LOG_TOGGLE_TESTID,
   splitChatThinking,
 } from '@/components/worktree/ChatMessageBubble';
 import { ConversationPairCard } from '@/components/worktree/ConversationPairCard';
@@ -297,10 +300,27 @@ describe('[#2272] the bubble', () => {
     expect(screen.queryByTestId(CHAT_THINKING_GROUP_TESTID)).toBeNull();
   });
 
-  it('leaves the tool log where it was', () => {
+  it('folds the tool log into its own chip [#2284]', () => {
+    // This assertion is the inverse of the one #2272 shipped. That Issue left
+    // the `Tool calls (N)` section in the body deliberately — it was fixing the
+    // reasoning quote and nothing else — and #2284 folded it, for the same
+    // reason and behind the same chip. Positive control first, so this cannot
+    // pass on a fixture that never carried a tool log.
+    expect(NEW_SHAPE).toContain(`> **${TURN_TOOL_LOG_LABEL} (1)**`);
+
     renderBubble(NEW_SHAPE);
-    expect(bodyOf().textContent).toContain(`${TURN_TOOL_LOG_LABEL} (1)`);
-    expect(bodyOf().textContent).toContain('apply_patch');
+
+    // The chip is there and says how many calls it stands for. Asserted on the
+    // attribute rather than the label: the harness stubs next-intl with the key
+    // itself, so the interpolated count never reaches the text node.
+    const group = screen.getByTestId(CHAT_TOOL_LOG_GROUP_TESTID);
+    expect(group.getAttribute('data-tool-calls')).toBe('1');
+
+    // And the calls themselves are not in the body while it is shut.
+    expect(bodyOf().textContent).not.toContain('apply_patch');
+
+    fireEvent.click(screen.getByTestId(CHAT_TOOL_LOG_TOGGLE_TESTID));
+    expect(screen.getByTestId(CHAT_TOOL_LOG_BODY_TESTID).textContent).toContain('apply_patch');
   });
 
   it('copies the whole row, reasoning included', () => {
