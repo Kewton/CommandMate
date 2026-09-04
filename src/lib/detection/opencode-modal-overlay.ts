@@ -381,8 +381,17 @@ function carriesRectangle(row: ScannedRow, left: number, right: number): boolean
   return !BOX_GUTTER.test(sliceColumns(row.text, left, right));
 }
 
+/** {@link findOpenCodeModalOverlay}'s match, with the frame rows it spans. */
+interface OpenCodeModalOverlayMatch extends OpenCodeModalOverlay {
+  /** First frame row (0-based, inclusive) that carries the rectangle. */
+  readonly frameRowStart: number;
+  /** Last frame row (0-based, inclusive) that carries the rectangle. */
+  readonly frameRowEnd: number;
+}
+
 /**
- * The modal overlay painted over an opencode transcript, or null.
+ * The modal overlay painted over an opencode transcript, plus the frame rows it
+ * spans — or null.
  *
  * Call it only for opencode: the rule is about opencode's own dialog chrome, and
  * every other tool is left exactly as it was (Issue #2112 changes no other
@@ -400,14 +409,16 @@ function carriesRectangle(row: ScannedRow, left: number, right: number): boolean
  *
  * A caveat the seeding makes easy to miss: two identical rows are two entries in
  * `carrying`, so the title-bar check below compares object identity rather than
- * value.
+ * value — and `frameRowStart` / `frameRowEnd` are read the same way, by asking
+ * `rows.indexOf(...)` for the first and last object in `carrying` rather than by
+ * re-matching text.
  *
  * @param frame - The capture with its ANSI intact (`capture-pane -e`)
  */
-export function detectOpenCodeModalOverlay(frame: string): OpenCodeModalOverlay | null {
+function findOpenCodeModalOverlay(frame: string): OpenCodeModalOverlayMatch | null {
   const rows = frame.split('\n').map(scanRow);
   const examined = new Set<string>();
-  let best: OpenCodeModalOverlay | null = null;
+  let best: OpenCodeModalOverlayMatch | null = null;
 
   for (const row of rows) {
     if (!row.text.includes(ESCAPE_HATCH_WORD)) continue;
@@ -447,6 +458,8 @@ export function detectOpenCodeModalOverlay(frame: string): OpenCodeModalOverlay 
             right,
             rows: carrying.length,
             headerRow,
+            frameRowStart: rows.indexOf(carrying[0]),
+            frameRowEnd: rows.indexOf(carrying[carrying.length - 1]),
           };
         }
       }
@@ -454,4 +467,48 @@ export function detectOpenCodeModalOverlay(frame: string): OpenCodeModalOverlay 
   }
 
   return best;
+}
+
+/**
+ * The modal overlay painted over an opencode transcript, or null.
+ *
+ * @param frame - The capture with its ANSI intact (`capture-pane -e`)
+ * @see findOpenCodeModalOverlay
+ */
+export function detectOpenCodeModalOverlay(frame: string): OpenCodeModalOverlay | null {
+  const match = findOpenCodeModalOverlay(frame);
+  if (match === null) return null;
+  return {
+    id: match.id,
+    headerText: match.headerText,
+    left: match.left,
+    right: match.right,
+    rows: match.rows,
+    headerRow: match.headerRow,
+  };
+}
+
+/**
+ * The rows of `frame` covered by opencode's modal overlay, full width and with
+ * ANSI intact — or `null` when no overlay is found (Issue #2309).
+ *
+ * opencode paints its overlay mid-transcript rather than clearing the pane for
+ * it (measured: `tests/fixtures/opencode-live-2047/w200/command-palette.txt`
+ * shows the conversation on both sides of a centred 60-column box). A dialog
+ * card that just took "the whole frame minus blank runs" would drag that
+ * transcript in with it and render the overlay as a smear across a page of
+ * unrelated text; cropping to the rectangle's own row span is what makes the
+ * card show the dialog and nothing else.
+ *
+ * Column-crop is deliberately NOT done here: the card already scrolls
+ * sideways for a 200-column frame (`ChatDialogCard`'s `overflow-auto`), and
+ * slicing columns would cut an open SGR sequence started to the rectangle's
+ * left, losing the colour state the row depends on.
+ *
+ * @param frame - The capture with its ANSI intact (`capture-pane -e`)
+ */
+export function extractOpenCodeModalOverlayFrame(frame: string): string | null {
+  const match = findOpenCodeModalOverlay(frame);
+  if (match === null) return null;
+  return frame.split('\n').slice(match.frameRowStart, match.frameRowEnd + 1).join('\n');
 }

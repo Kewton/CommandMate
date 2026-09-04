@@ -33,6 +33,7 @@ import {
   hasDialogFrame,
 } from '@/lib/chat/dialog-frame';
 import { stripAnsi } from '@/lib/detection/ansi';
+import { detectOpenCodeModalOverlay } from '@/lib/detection/opencode-modal-overlay';
 
 const FIXTURE_DIR = path.resolve(__dirname, '../../../fixtures/chat-dialog-card-2254');
 
@@ -45,6 +46,23 @@ const CLAUDE_TRUST = 'claude-trust-2-1-259.txt';
 const CODEX_MODEL = 'codex-model-0-151-0.txt';
 const CODEX_TRUST = 'codex-trust-0-151-0.txt';
 const OPENCODE_OVERLAY = 'opencode-agent-overlay-1-18-27.txt';
+const COMMAND_CODE_MODEL = 'command-code-model-1-40-1.txt';
+
+/**
+ * opencode's `ctrl+p` command palette painted OVER a live two-turn transcript,
+ * at 200 columns — captured for Issue #2112 (`detectOpenCodeModalOverlay`'s own
+ * suite reads the same bytes for the rectangle's geometry). Reused rather than
+ * re-captured: it is already the exact shape Issue #2309 needs — the overlay
+ * shares its rows with real conversation on BOTH sides, which the 2254
+ * fixtures never exercise (their one opencode capture is a sidebar, not
+ * interleaved prose) — and it is genuine live output, not a synthetic stand-in.
+ */
+function opencodeMidPaneOverlayFixture(): string {
+  return fs.readFileSync(
+    path.resolve(__dirname, '../../../fixtures/opencode-live-2047/w200/command-palette.txt'),
+    'utf8',
+  );
+}
 
 const ALL_FIXTURES = [
   CLAUDE_MODEL,
@@ -261,5 +279,94 @@ describe('[#2254] nothing to draw', () => {
 
   it('normalises CRLF so a Windows-style frame has no stray carriage returns', () => {
     expect(extractDialogFrameTail('a\r\nb\r\n')).toBe('a\nb');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Issue #2309: a selection list gets no tail at all
+// ---------------------------------------------------------------------------
+
+describe('[#2309] `selectionList: true` skips the tail slice', () => {
+  it('keeps every one of the 89 rows of a search-type picker, not the tail 16', () => {
+    // command-code's `/model` (Issue #2297's fixture): provider-grouped model
+    // NAMES with no numbers to jump by, so #2297 correctly leaves it on the
+    // arrow pad — and the old tail slice left everything but the last 16 of
+    // its 89 content rows unreachable before the card ever rendered.
+    const full = extractDialogFrameTail(fixture(COMMAND_CODE_MODEL), { selectionList: true });
+    const plain = stripAnsi(full);
+    expect(full.split('\n')).toHaveLength(89);
+    expect(plain).toContain('# Command Code v1.40.1');
+    // A model dozens of rows above the footer that a 16-row tail could never
+    // have reached.
+    expect(plain).toContain('GPT-5.4');
+    expect(plain).toContain('type to search · ↑/↓ navigate · shift+↑/↓ jump provider');
+  });
+
+  it('is the mutation this pins: omit the option and the same fixture is cut to 16', () => {
+    // Stated directly so a change that deletes the `selectionList` branch is
+    // red HERE, on the exact fixture the row-count assertion above depends on,
+    // rather than only visible as "fewer rows than expected".
+    const withoutTheOption = extractDialogFrameTail(fixture(COMMAND_CODE_MODEL));
+    expect(withoutTheOption.split('\n')).toHaveLength(DIALOG_FRAME_DEFAULT_LINES);
+    expect(stripAnsi(withoutTheOption)).not.toContain('# Command Code v1.40.1');
+  });
+
+  it('leaves a non-selection-list frame tail-sliced exactly as before', () => {
+    for (const name of ALL_FIXTURES) {
+      const sliced = extractDialogFrameTail(fixture(name), { selectionList: false });
+      expect(sliced.split('\n').length, name).toBeLessThanOrEqual(DIALOG_FRAME_DEFAULT_LINES);
+    }
+  });
+
+  it('is still "" for a frame with nothing to draw', () => {
+    expect(extractDialogFrameTail('', { selectionList: true })).toBe('');
+    expect(extractDialogFrameTail('   \n\n\t\n', { selectionList: true })).toBe('');
+  });
+});
+
+describe('[#2309] an opencode overlay is cropped to its rectangle, not the tail', () => {
+  it('keeps the overlay’s own rows and drops the transcript further away', () => {
+    const withOverlay = extractDialogFrameTail(opencodeMidPaneOverlayFixture(), {
+      selectionList: true,
+    });
+    const plain = stripAnsi(withOverlay);
+    expect(plain.split('\n')).toHaveLength(72);
+    expect(plain).toContain('Commands');
+    expect(plain).toContain('Switch model');
+    expect(plain).toContain('esc');
+    // Measured (see `opencodeMidPaneOverlayFixture`'s docblock): the shell
+    // command opencode's session opened with sits ten-plus rows above the
+    // overlay's own top edge and a "whole compacted frame" would drag it in —
+    // the crop to the rectangle's row span is what leaves it out.
+    expect(plain).not.toContain('uname -a');
+  });
+
+  it('agrees with `detectOpenCodeModalOverlay`’s own header text', () => {
+    const raw = opencodeMidPaneOverlayFixture();
+    const overlay = detectOpenCodeModalOverlay(raw);
+    expect(overlay).not.toBeNull();
+    const plain = stripAnsi(extractDialogFrameTail(raw, { selectionList: true }));
+    expect(plain).toContain(overlay!.headerText);
+  });
+
+  it('does not crop a selection list that carries no opencode rectangle', () => {
+    // command-code's picker is a selection list with nothing for
+    // `extractOpenCodeModalOverlayFrame` to find; it must fall back to the
+    // whole compacted frame rather than cropping to something incidental.
+    expect(detectOpenCodeModalOverlay(fixture(COMMAND_CODE_MODEL))).toBeNull();
+    const full = extractDialogFrameTail(fixture(COMMAND_CODE_MODEL), { selectionList: true });
+    expect(full.split('\n')).toHaveLength(89);
+  });
+
+  it('is not reached for the old sidebar-only opencode fixture (no hatch on it)', () => {
+    // `OPENCODE_OVERLAY` predates Issue #2112's detector and is trimmed to its
+    // last 200 rows (see the fixture README), which cuts the hatch row off —
+    // `detectOpenCodeModalOverlay` correctly reports null on it, and this
+    // module must still fall back to the whole-compacted-frame behaviour
+    // rather than returning nothing.
+    expect(detectOpenCodeModalOverlay(fixture(OPENCODE_OVERLAY))).toBeNull();
+    const full = extractDialogFrameTail(fixture(OPENCODE_OVERLAY), { selectionList: true });
+    expect(full).not.toBe('');
+    expect(stripAnsi(full)).toContain('OpenCode 1.18.27');
   });
 });
