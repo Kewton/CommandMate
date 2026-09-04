@@ -35,12 +35,14 @@
  *
  * ## What it does not do
  *
- * No per-tool "where does this dialog start" detection. Issue #2254 is explicit
- * that the first cut is N rows off the end and nothing cleverer; extracting the
- * OPTIONS out of a selection list is Issue #2255. The consequence is visible on
- * the opencode fixture, where the overlay shares its rows with the sidebar
- * (#2095) and the sidebar comes along — accepted, because the card's job is
- * "you can see it", not "it is parsed".
+ * Extracting the OPTIONS out of a selection list — turning the picker into rows
+ * the surface can render as controls — is Issue #2255, not this module. What it
+ * does do, since #2309 and #2326, is decide WHERE a selection list starts on a
+ * pane it shares with a transcript, and that reading is delegated per tool (see
+ * {@link SELECTION_LIST_FRAME_CROPPERS}) rather than written here. The
+ * consequence is still visible on the opencode fixture, where the overlay
+ * shares its rows with the sidebar (#2095) and the sidebar comes along —
+ * accepted, because the card's job is "you can see it", not "it is parsed".
  *
  * ## Issue #2309: a selection list is not given a tail at all
  *
@@ -49,11 +51,20 @@
  * no number keys to jump by (#2297's `shouldOfferOptionNumbers` correctly
  * refuses them one), so arrows plus a 16-row window meant walking blind past
  * whatever the tail slice had already thrown away. `{ selectionList: true }`
- * skips the slice — the card scrolls instead ({@link ChatDialogCard}) — with one
- * carve-out: opencode paints its overlay mid-transcript rather than clearing the
- * pane, so "everything left after compaction" would still be the conversation on
- * both sides of it. That case is cropped to
- * {@link extractOpenCodeModalOverlayFrame}'s own rectangle first.
+ * skips the slice — the card scrolls instead ({@link ChatDialogCard}).
+ *
+ * ## Issue #2326: "no tail" is not "the whole pane" for an INLINE tool
+ *
+ * #2309 shipped that with one carve-out, opencode, whose overlay is painted
+ * mid-transcript rather than onto a cleared screen. Command Code turned out to
+ * be the same shape and was not covered: measured on 2026-09-05 (v1.47.1,
+ * 200x1000), a five-turn session with `/model` open gives a 333-row frame of
+ * which **256 rows are banner and transcript** and 77 are the picker, so the
+ * card drew the conversation and put the picker below the fold. Both tools are
+ * now cropped to the dialog's own rows first, by
+ * {@link SELECTION_LIST_FRAME_CROPPERS}; a tool that clears its screen
+ * (claude), or one whose dialog no cropper recognises, still gets every
+ * compacted row exactly as #2309 left it.
  *
  * Pure, synchronous and free of React / DOM, so the rule is testable against raw
  * captures with no renderer.
@@ -61,6 +72,7 @@
 
 import { compactBlankRuns, isPaintedPanelRow } from '@/lib/terminal-display-normalize';
 import { extractOpenCodeModalOverlayFrame } from '@/lib/detection/opencode-modal-overlay';
+import { extractCommandCodeSelectionListFrame } from '@/lib/detection/selection-shape';
 
 /**
  * Fewest rows the card may be asked for.
@@ -110,15 +122,49 @@ export interface DialogFrameTailOptions {
    * past rows the card had already discarded. The card scrolls the box
    * instead ({@link ChatDialogCard}), so there is no row budget left to keep.
    *
-   * opencode is the exception within the exception: it paints its overlay
-   * mid-transcript rather than clearing the pane, so "everything left after
-   * compaction" would still drag the conversation on both sides of the
-   * dialog along with it. When {@link extractOpenCodeModalOverlayFrame} finds
-   * a rectangle on the frame, its own row span is used instead of the whole
-   * compacted frame.
+   * An INLINE tool is the exception within the exception (Issue #2326): it
+   * paints the dialog over the transcript rather than clearing the pane, so
+   * "everything left after compaction" would still drag the conversation
+   * along with it — 256 of 333 rows on the Command Code capture, and the
+   * conversation on both sides of the dialog on opencode's. When one of
+   * {@link SELECTION_LIST_FRAME_CROPPERS} recognises the frame, its row span
+   * is used instead of the whole compacted frame.
    */
   selectionList?: boolean;
 }
+
+/**
+ * The per-tool "where does this dialog start" readings, tried in order.
+ *
+ * ## Why a list and not two `if`s (Issue #2326)
+ *
+ * #2309 shipped one carve-out — opencode, which paints its overlay over the
+ * transcript rather than clearing the pane — as a single inline branch, on the
+ * reading that it was the exception. Issue #2326 measured the second one:
+ * Command Code is inline too (`alternate_on=0`), so a five-turn session with
+ * `/model` open gives the card a 333-row frame of which 256 rows are banner and
+ * transcript. Two exceptions with the same shape are a rule, and a third `if`
+ * inside {@link extractDialogFrameTail} would put the tool-specific reading in
+ * the module whose docblock says it does no per-tool detection.
+ *
+ * So the tool-specific part lives in `lib/detection` — {@link
+ * extractOpenCodeModalOverlayFrame} reads opencode's painted rectangle,
+ * {@link extractCommandCodeSelectionListFrame} reads Command Code's rule-to-
+ * footer seam — and what stays here is the policy: try each, take the first
+ * that yields rows, otherwise keep every compacted row exactly as before.
+ *
+ * Order is not load-bearing today and is not free to ignore either: the two
+ * signatures are disjoint on every capture in `tests/fixtures` (opencode's
+ * needs a background-painted rectangle with an `esc` hatch inside it, which
+ * Command Code never draws; Command Code's needs a full-width rule row above
+ * its footer, which opencode's box borders are not), and
+ * `dialog-frame-2326.test.ts` re-derives that across all of them so a future
+ * cropper cannot quietly start shadowing an earlier one.
+ */
+const SELECTION_LIST_FRAME_CROPPERS: readonly ((frame: string) => string | null)[] = [
+  extractOpenCodeModalOverlayFrame,
+  extractCommandCodeSelectionListFrame,
+];
 
 /** Clamp into the [MIN, MAX] window, mapping a non-finite value to the default. */
 function resolveMaxLines(requested: number | undefined): number {
@@ -155,18 +201,23 @@ export function extractDialogFrameTail(
   // make a row that is blank apart from the CR count as content.
   const normalized = frame.replace(/\r\n/g, '\n');
 
-  // Issue #2309: an opencode overlay is cropped to its own rectangle BEFORE
-  // compaction runs, on the un-compacted frame — the row span
-  // `extractOpenCodeModalOverlayFrame` returns is measured against the
-  // original line numbers, and compacting first would shift rows elsewhere in
-  // the pane out from under that measurement. Detection needs the SGR the
-  // capture was taken with (never a stripped frame), which `normalized` still
-  // is at this point.
+  // Issues #2309 / #2326: an inline tool's dialog is cropped to its own rows
+  // BEFORE compaction runs, on the un-compacted frame — the row spans the
+  // croppers return are measured against the original line numbers, and
+  // compacting first would shift rows elsewhere in the pane out from under
+  // that measurement. Detection needs the SGR the capture was taken with
+  // (never a stripped frame), which `normalized` still is at this point.
+  //
+  // A cropper that returns `null`, or one whose crop compacts away to nothing,
+  // hands the frame to the next one and finally to the whole-frame path below:
+  // a card showing too much is Issue #2326's defect, and a card showing
+  // nothing is worse than the defect.
   if (options.selectionList) {
-    const overlayFrame = extractOpenCodeModalOverlayFrame(normalized);
-    if (overlayFrame !== null) {
-      const compactedOverlay = compactBlankRuns(overlayFrame, { isStructuralRow: isPaintedPanelRow });
-      if (compactedOverlay !== '') return compactedOverlay;
+    for (const crop of SELECTION_LIST_FRAME_CROPPERS) {
+      const cropped = crop(normalized);
+      if (cropped === null) continue;
+      const compactedCrop = compactBlankRuns(cropped, { isStructuralRow: isPaintedPanelRow });
+      if (compactedCrop !== '') return compactedCrop;
     }
   }
 

@@ -155,6 +155,113 @@ const FILTER_INPUT_PATTERN =
 export const COMMAND_CODE_SELECTION_LIST_FOOTER =
   /\benter\s+to\s+select\b\s*[·•]\s*esc\s+to\s+cancel\b/i;
 
+/**
+ * The horizontal rule Command Code draws directly above a full-screen dialog.
+ *
+ * Command Code is an INLINE tool (`alternate_on=0`): opening `/model` does not
+ * clear the pane, it paints the picker under whatever the session has already
+ * printed. On the capture taken for Issue #2326 that is 256 rows of banner and
+ * transcript followed by a 77-row picker, and this rule row is the seam between
+ * them — 200 columns of U+2500 at the production `TUI_PANE_WIDTH`, the only
+ * such row anywhere on the frame while the picker is open (the composer's own
+ * two rules are not drawn while a dialog has the screen).
+ *
+ * Matched as "nothing but the rule glyph", not as "contains one", because a box
+ * border (`╭──…──╮`, which is how copilot draws ITS pickers) carries corners and
+ * must NOT be read as this seam — see
+ * {@link extractCommandCodeSelectionListFrame} for why that non-match is the
+ * safe answer rather than a missed case.
+ */
+const COMMAND_CODE_RULE_ROW_PATTERN = /^\u2500+$/;
+
+/**
+ * How wide a rule row must be before it counts as the dialog seam.
+ *
+ * The measured row is the full pane width (200 columns), and a pure function
+ * cannot know that width, so this is a floor rather than an equality: it only
+ * has to reject a short dash run inside a reply. Forty columns is a quarter of
+ * the production pane and wider than any decorative rule measured in
+ * `tests/fixtures/`.
+ */
+const COMMAND_CODE_RULE_MIN_COLUMNS = 40;
+
+/**
+ * The rows of a Command Code dialog, cut out of the pane it is painted on
+ * (Issue #2326).
+ *
+ * ## Why the dialog card needs a rectangle here at all
+ *
+ * Issue #2309 gave a selection list every compacted row of the frame instead of
+ * a 12–20 row tail, because a search-type picker is tens of rows long and a
+ * tail slice threw away rows the arrows could still reach. That is right for a
+ * tool that clears the screen. Command Code does not: measured on 2026-09-05
+ * (v1.47.1, private socket, 200x1000), a five-turn session with `/model` open
+ * gives a 333-row frame of which **256 rows are banner and transcript** and 77
+ * are the picker. The card drew all 333, so the picker sat below the fold and
+ * the arrow-moved highlight — which {@link findHighlightLineIndex} does now
+ * locate correctly, Issue #2323 — was scrolled to inside a box whose visible
+ * thirty rows were somebody's earlier conversation.
+ *
+ * `extractOpenCodeModalOverlayFrame` solves the same problem for opencode by
+ * reading its painted rectangle. Command Code paints no rectangle (only the
+ * selected ROW carries a background, which is exactly what #2323 turned into
+ * the highlight rule), so the seam is read from the two things the picker draws
+ * that the transcript does not: the rule above it, and the footer below it.
+ *
+ * ## The cut
+ *
+ * Bottom edge: the LAST row matching {@link COMMAND_CODE_SELECTION_LIST_FOOTER}
+ * — the same pattern the command-code detector already classifies the screen
+ * with, so the card cannot disagree with the detector about whether a picker is
+ * up. Top edge: the row AFTER the nearest {@link COMMAND_CODE_RULE_ROW_PATTERN}
+ * above that footer (the rule itself is the transcript's boundary, not the
+ * dialog's first row; the blank that usually follows it is dropped by the
+ * caller's blank-run compaction).
+ *
+ * ## Both non-matches are the safe answer
+ *
+ * `null` means "do not crop", and the caller then behaves exactly as it did
+ * before this Issue. Two frames take that path deliberately:
+ *
+ *  - **no footer** — the picker was closed between the flags being read and the
+ *    pane being captured, or the frame is some other dialog. Cropping on a
+ *    guess would blank the card, which Issue #2326 calls out as worse than
+ *    showing too much;
+ *  - **a footer but no rule above it** — copilot's `/model` footer is
+ *    `↑/↓ to navigate · … · enter to select · esc to cancel` and matches the
+ *    same pattern, but copilot draws its picker in a corner-bordered box, so no
+ *    row is nothing-but-rule and copilot's card is returned untouched. Verified
+ *    on every committed fixture by `dialog-frame-2326.test.ts`.
+ *
+ * The one degradation this accepts: if the picker's own rule has scrolled off
+ * the top of the capture, the nearest rule above the footer is an older one and
+ * the crop keeps some transcript. That is strictly less than the whole pane,
+ * which is what the frame would otherwise be.
+ *
+ * @param frame - a raw `capture-pane -p -e` frame, ANSI intact
+ * @returns the dialog's own rows, ANSI intact, or `null` to crop nothing
+ */
+export function extractCommandCodeSelectionListFrame(frame: string): string | null {
+  const lines = frame.replace(/\r\n/g, '\n').split('\n');
+
+  let footer = -1;
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    if (COMMAND_CODE_SELECTION_LIST_FOOTER.test(stripAnsi(lines[i]))) {
+      footer = i;
+      break;
+    }
+  }
+  if (footer < 0) return null;
+
+  for (let i = footer - 1; i >= 0; i -= 1) {
+    const row = stripAnsi(lines[i]).trim();
+    if (row.length < COMMAND_CODE_RULE_MIN_COLUMNS) continue;
+    if (!COMMAND_CODE_RULE_ROW_PATTERN.test(row)) continue;
+    return lines.slice(i + 1, footer + 1).join('\n');
+  }
+  return null;
+}
+
 /** What the dialog card can offer for this frame. */
 export interface SelectionListShape {
   /**

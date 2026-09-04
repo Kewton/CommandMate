@@ -68,17 +68,26 @@ function highlightedRow(frame: string): string | null {
 // ---------------------------------------------------------------------------
 
 describe('[#2323] the live Command Code /model capture', () => {
+  // Issue #2326 cropped this frame to the picker's own rows, so every index
+  // below moved down by the 18 rows of shell line and boot banner the card
+  // used to draw above the dialog. Nothing about the RULE changed: the same
+  // row is still picked, the same filter row is still refused, and the crop is
+  // what `dialog-frame-2326.test.ts` pins. The pre-crop frame is measured too,
+  // three cases down, so the paint-over-caret rule is still exercised against
+  // a banner it has to ignore.
   const frame = cardFrame('chat-dialog-card-2254/command-code-model-1-40-1.txt');
+  const FILTER_ROW = 3;
+  const PAINTED_ROW = 8;
 
   it('finds the row Command Code painted', () => {
-    expect(findHighlightLineIndex(frame)).toBe(26);
+    expect(findHighlightLineIndex(frame)).toBe(PAINTED_ROW);
     expect(highlightedRow(frame)).toMatch(/^DeepSeek V4 Flash \(latest\) \(default\)/);
   });
 
   it('does NOT pick the filter row — the row this Issue was stuck on', () => {
-    // The regression test. Row 21 is `› Type to search models...`: it is where
-    // the caret-only rule landed, and it is a row the arrow keys never move.
-    expect(findHighlightLineIndex(frame)).not.toBe(21);
+    // The regression test. `› Type to search models...` is where the
+    // caret-only rule landed, and it is a row the arrow keys never move.
+    expect(findHighlightLineIndex(frame)).not.toBe(FILTER_ROW);
     expect(highlightedRow(frame)).not.toMatch(/Type to search models/);
   });
 
@@ -88,16 +97,16 @@ describe('[#2323] the live Command Code /model capture', () => {
     // is the only caret-shaped row on the whole frame, which is why "caret if
     // there is one, paint otherwise" would not have fixed anything.
     const rows = stripAnsi(frame).split('\n');
-    expect(rows[21]).toBe('› Type to search models...');
-    expect(rows[21].codePointAt(0)).toBe(0x203a);
+    expect(rows[FILTER_ROW]).toBe('› Type to search models...');
+    expect(rows[FILTER_ROW].codePointAt(0)).toBe(0x203a);
     const caretRows = rows.flatMap((row, i) => (/^[^\S\n]*[❯›●][^\S\n]/.test(row) ? [i] : []));
-    expect(caretRows).toEqual([21]);
+    expect(caretRows).toEqual([FILTER_ROW]);
   });
 
   it('sees nothing at all once the frame is stripped of its ANSI', () => {
     // The mark is a colour, so a frame captured without `-e` has no mark. -1
     // switches the follow off, which is the safe way to be wrong.
-    expect(findHighlightLineIndex(stripAnsi(frame))).toBe(21);
+    expect(findHighlightLineIndex(stripAnsi(frame))).toBe(FILTER_ROW);
     expect(findHighlightLineIndex(stripAnsi(frame).replace(/›/g, ' '))).toBe(-1);
   });
 });
@@ -151,11 +160,23 @@ describe('[#2323] the caret tools answer exactly as they did', () => {
 
 describe('[#2323] a panel is not a selection', () => {
   it('ignores Command Code’s seven-row boot banner on the same capture', () => {
-    // The banner is rows 3–9 of the picker frame, all `48;2;43;39;88`, and it
+    // The banner is rows 3–9 of the RAW capture, all `48;2;43;39;88`, and it
     // is the reason the rule is about a row whose neighbours DON'T share its
     // colour rather than about any painted row at all.
-    const frame = cardFrame('chat-dialog-card-2254/command-code-model-1-40-1.txt');
-    expect(findHighlightLineIndex(frame)).toBeGreaterThan(9);
+    //
+    // Read off the raw pane rather than the card's frame since Issue #2326:
+    // the card no longer draws the banner at all, so taking the cropped frame
+    // here would leave nothing for the rule to ignore and the case would pass
+    // for a reason that is not the one it claims.
+    const raw = fs.readFileSync(
+      path.join(process.cwd(), 'tests/fixtures/chat-dialog-card-2254/command-code-model-1-40-1.txt'),
+      'utf8',
+    );
+    const bannerRows = raw
+      .split('\n')
+      .flatMap((row, i) => (row.includes('48;2;43;39;88') ? [i] : []));
+    expect(bannerRows).toEqual([3, 4, 5, 6, 7, 8, 9]);
+    expect(findHighlightLineIndex(raw)).toBe(26);
   });
 
   it('ignores a block of rows sharing one background', () => {
