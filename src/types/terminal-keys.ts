@@ -56,6 +56,38 @@ export const ANSWER_KEY_VALUES = [
 ] as const;
 
 /**
+ * claude's "use this session only" key (Issue #2297).
+ *
+ * MEASURED on claude 2.1.259 / 2.1.260 (`tests/fixtures/chat-dialog-card-2254/
+ * claude-model-2-1-259.txt`, and a live 200x1000 probe re-run for #2297): the
+ * `/model` overlay's footer reads
+ *
+ *     Enter to set as default · s to use this session only · Esc to cancel
+ *
+ * so on that ONE screen `Enter` is not "confirm" — it rewrites `model` in
+ * `~/.claude/settings.json` (Issue #1495), and `s` is the only key that takes
+ * the highlighted model for the current session and leaves the file alone.
+ * Neither the shared pad nor the transport carried `s`, so the chat surface
+ * could offer the destructive half of that footer and not the safe half.
+ *
+ * A LITERAL character on the wire, exactly like the codex pager's `q` (#1017),
+ * opencode's chord letters (#2046) and the answer characters (#2254):
+ * `tmux send-keys -- s` types an `s`.
+ *
+ * WHY IT IS **NOT** IN {@link NAVIGATION_KEY_VALUES}
+ * -------------------------------------------------
+ * Unlike #2254's answer characters, this one has a named owner. `s` is a live
+ * binding on other tools' screens — copilot's session picker footer reads
+ * `s sort:relevance` (measured on 1.0.82), and opencode types a bare letter
+ * into its composer whenever a leader chord is not in flight. Publishing `s` to
+ * every tool would hand those screens a button that does something else. So it
+ * is declared by the claude-family tools alone, through
+ * {@link CLAUDE_NAVIGATION_KEY_VALUES}, and the route's per-tool check
+ * (Issue #2046) answers 400 for everyone else.
+ */
+export const SESSION_SCOPE_KEY = 's';
+
+/**
  * Navigation keys accepted by the special-keys API and the terminal UI.
  *
  * Separate from `SPECIAL_KEY_VALUES` (the `sendSpecialKey()` control keys) and
@@ -78,6 +110,44 @@ export const NAVIGATION_KEY_VALUES = [
  * Navigation key type derived from NAVIGATION_KEY_VALUES.
  */
 export type NavigationKey = typeof NAVIGATION_KEY_VALUES[number];
+
+/**
+ * What a claude-family pane may be sent: the base pad plus
+ * {@link SESSION_SCOPE_KEY} (Issue #2297).
+ *
+ * Returned by `ClaudeTool.navigationKeys()` and `CommandCodeTool.navigationKeys()`
+ * — the two tools whose TUI is claude's inline overlay renderer. Command Code
+ * takes it for kinship rather than for a measured `/model` footer of its own:
+ * its own picker (v1.40.1, measured for this Issue) is a name list with a search
+ * box and an `enter to select · esc to cancel` footer and offers no session
+ * scope at all, so nothing DRAWS the `s` button there — see
+ * `readSelectionListShape()`, which gates the button on the footer being on
+ * screen rather than on the tool id. Declaring the key for both keeps the two
+ * halves of the claude family from drifting apart the day Command Code grows the
+ * footer, and costs nothing while it has not: an undrawn button sends nothing.
+ *
+ * `tests/unit/lib/cli-tools/session-scope-key-2297.test.ts` pins the membership
+ * in both directions, and the #2046 suite still pins every OTHER tool to the
+ * base pad exactly.
+ */
+export const CLAUDE_NAVIGATION_KEY_VALUES = [
+  ...NAVIGATION_KEY_VALUES,
+  SESSION_SCOPE_KEY,
+] as const;
+
+/**
+ * The tool ids whose `navigationKeys()` carry {@link SESSION_SCOPE_KEY}.
+ *
+ * Read by the chat surface, which cannot call `navigationKeys()` — that lives
+ * behind the CLITool gateway on the server — but must not draw a button whose
+ * key the route would answer 400 for. Pinned against the real registry by
+ * `tests/unit/lib/cli-tools/session-scope-key-2297.test.ts`, so this list and
+ * the declarations cannot disagree.
+ *
+ * Typed as a plain string tuple rather than `CLIToolType[]` so this module keeps
+ * the "values only, safe from any layer" property its header depends on.
+ */
+export const SESSION_SCOPE_KEY_TOOL_IDS = ['claude', 'command-code'] as const;
 
 // ---------------------------------------------------------------------------
 // Per-tool vocabularies (Issue #2046)
@@ -168,6 +238,8 @@ export const OPENCODE_NAVIGATION_KEY_VALUES = [
  */
 export const TERMINAL_KEY_VALUES = [
   ...NAVIGATION_KEY_VALUES,
+  // Issue #2297: claude / Command Code declare it; nothing else does.
+  SESSION_SCOPE_KEY,
   OPENCODE_LEADER_KEY,
   ...OPENCODE_DIRECT_KEY_VALUES,
   // Issue #2254: `n` is in the base pad now — see OPENCODE_CHORD_ONLY_VALUES.

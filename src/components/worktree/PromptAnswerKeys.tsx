@@ -33,12 +33,37 @@
  * arrows are the correct verb. The card is directly above these buttons, so the
  * user can see which number they are pressing — that is the whole reason the
  * keys and the frame ship in the same Issue.
+ *
+ * ## The two selection-list toolbars this file also owns (Issue #2297)
+ *
+ * {@link SelectionNumberKeys} and {@link SelectionCommitKeys} are NOT this
+ * toolbar under another name, and the difference is the point of #2297:
+ *
+ *  - this one is the fixed `1`–`9` / `y` / `n` pad for a dialog nobody could
+ *    read, so it publishes every key it might need and lets the user match them
+ *    against the frame;
+ *  - `SelectionNumberKeys` renders exactly as many numbers as the dialog is
+ *    OFFERING, counted off the frame by `readSelectionListShape()`. A tenth
+ *    button on a seven-model picker is a key that does nothing;
+ *  - `SelectionCommitKeys` is not a number row at all. It is the two LABELLED
+ *    commits claude's `/model` footer offers, and it exists because on that one
+ *    screen `Enter` rewrites the user's global default (Issue #1495) — a
+ *    distinction no unlabelled key cap can carry.
+ *
+ * They live here rather than in files of their own because they are the same
+ * control: a `useSpecialKeys` sender, a `useKeyPressFeedback` highlight, a 44px
+ * tap target, no free text.
  */
 
-import { useCallback } from 'react';
+import { useCallback, useMemo } from 'react';
 import { useTranslations } from 'next-intl';
 import type { CLIToolType } from '@/lib/cli-tools/types';
-import type { NavigationKey } from '@/types/terminal-keys';
+import {
+  SESSION_SCOPE_KEY,
+  type NavigationKey,
+  type TerminalKey,
+} from '@/types/terminal-keys';
+import { MAX_OPTION_NUMBER } from '@/lib/detection/selection-shape';
 import { useSpecialKeys } from '@/hooks/useSpecialKeys';
 import { useKeyPressFeedback } from '@/hooks/useKeyPressFeedback';
 
@@ -149,6 +174,202 @@ export function PromptAnswerKeys({
           {label}
         </button>
       ))}
+    </div>
+  );
+}
+
+// ===========================================================================
+// Issue #2297: the two toolbars a SELECTION LIST gets
+// ===========================================================================
+
+/** Props every key strip in this file takes. */
+export interface SelectionKeysProps {
+  worktreeId: string;
+  cliToolId: CLIToolType;
+  /** Issue #869: agent instance to target (defaults to the primary when omitted). */
+  instanceId?: string;
+  /** Trigger an immediate terminal refresh after the key is sent. */
+  onKeysSent?: () => void;
+}
+
+export interface SelectionNumberKeysProps extends SelectionKeysProps {
+  /**
+   * How many options the dialog is offering, from
+   * `readSelectionListShape(frame).optionCount`.
+   *
+   * Clamped into `[1, MAX_OPTION_NUMBER]` and rendered as nothing at all below
+   * 1, so a caller that has not measured the frame gets the pre-#2297 surface
+   * (arrows only) rather than a row of keys that do nothing.
+   */
+  optionCount: number;
+}
+
+/**
+ * `1`…`N` for a numbered selection list (Issue #2297).
+ *
+ * The saving is real and not cosmetic: codex's `/model` picker offers seven
+ * models and the only way to reach the seventh was six taps on ▼ followed by
+ * Enter, each one a round trip through `/special-keys` and a 5-second capture
+ * cache. One tap replaces the walk.
+ *
+ * **Where it is NOT drawn** is the measured half of this control — see
+ * `shouldOfferOptionNumbers()`. A number key is not a cursor move on every
+ * screen: on claude's `/model` it commits AND rewrites `~/.claude/settings.json`
+ * in one press (probed live on 2.1.260), and on copilot's `/model` and Command
+ * Code's picker it is typed into a search box. Both are refused there, in the
+ * detection layer, so this component never has to know which tool it is under.
+ */
+export function SelectionNumberKeys({
+  worktreeId,
+  cliToolId,
+  instanceId,
+  onKeysSent,
+  optionCount,
+}: SelectionNumberKeysProps) {
+  const t = useTranslations('worktree');
+  const { activeKey, markPressed } = useKeyPressFeedback();
+  const send = useSpecialKeys(worktreeId, cliToolId, instanceId, onKeysSent);
+
+  const keys = useMemo(() => {
+    const count = Math.min(Math.trunc(optionCount), MAX_OPTION_NUMBER);
+    if (!Number.isFinite(count) || count < 1) return [];
+    return NUMBER_KEYS.slice(0, count);
+  }, [optionCount]);
+
+  const handleClick = useCallback(
+    (key: NavigationKey) => {
+      markPressed(key);
+      send([key]);
+    },
+    [markPressed, send],
+  );
+
+  if (keys.length === 0) return null;
+
+  return (
+    <div
+      data-testid="selection-number-keys"
+      data-option-count={String(keys.length)}
+      role="toolbar"
+      aria-label={t('selectionKeys.numbersToolbarLabel')}
+      className="flex flex-wrap items-center gap-1.5 rounded-lg bg-muted px-2 py-1.5"
+    >
+      <span className="text-xs text-muted-foreground">{t('selectionKeys.numbersCaption')}</span>
+      {keys.map(({ key, label, ariaLabel }) => (
+        <button
+          key={key}
+          type="button"
+          data-testid={`selection-number-key-${key}`}
+          aria-label={ariaLabel}
+          onClick={() => handleClick(key)}
+          className={`min-h-[44px] min-w-[44px] rounded-md border border-border px-3 py-2 text-sm font-medium transition-colors duration-75 touch-manipulation focus:outline-none focus:ring-2 focus:ring-ring ${
+            activeKey === key
+              ? 'border-accent-500 bg-accent-500 text-white scale-95'
+              : 'bg-surface hover:bg-muted active:bg-muted dark:bg-surface-2'
+          }`}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+export interface SelectionCommitKeysProps extends SelectionKeysProps {
+  /**
+   * Whether the frame's footer says `Enter` writes a default rather than merely
+   * confirming (`readSelectionListShape(frame).commitsDefaultOnEnter`).
+   *
+   * Only the WORDING depends on it. Both buttons are drawn either way, because a
+   * screen that offers a session scope at all has, by definition, a second
+   * meaning for `Enter` worth naming.
+   */
+  commitsDefaultOnEnter: boolean;
+}
+
+/**
+ * "This session only" (`s`) beside "Set as default" (`Enter`) — Issue #2297.
+ *
+ * The failure this replaces: claude's `/model` overlay footer reads
+ * `Enter to set as default · s to use this session only · Esc to cancel`, and
+ * the chat surface published `Enter` and not `s`. Every model change made from
+ * chat therefore rewrote `model` in `~/.claude/settings.json` (Issue #1495) —
+ * for every future session, from a button whose cap said `↵`.
+ *
+ * Two buttons rather than one toggle, and PROSE labels rather than key caps,
+ * because the thing the user has to tell apart is not which key is sent but what
+ * it does. The key notation rides along in the accessible name and the tooltip,
+ * where it costs no width.
+ *
+ * The session button is FIRST and carries the accent, which is the one piece of
+ * opinion in this component: it is the non-destructive half, and the destructive
+ * half already has a footer telling the user it is the default.
+ */
+export function SelectionCommitKeys({
+  worktreeId,
+  cliToolId,
+  instanceId,
+  onKeysSent,
+  commitsDefaultOnEnter,
+}: SelectionCommitKeysProps) {
+  const t = useTranslations('worktree');
+  const { activeKey, markPressed } = useKeyPressFeedback();
+  const send = useSpecialKeys(worktreeId, cliToolId, instanceId, onKeysSent);
+
+  // `TerminalKey`, not `NavigationKey`: `s` is declared by the claude family
+  // alone (`CLAUDE_NAVIGATION_KEY_VALUES`) and is deliberately outside the
+  // shared pad, so the narrower type would not admit it.
+  const handleClick = useCallback(
+    (key: TerminalKey) => {
+      markPressed(key);
+      send([key]);
+    },
+    [markPressed, send],
+  );
+
+  return (
+    <div
+      data-testid="selection-commit-keys"
+      role="toolbar"
+      aria-label={t('selectionKeys.commitToolbarLabel')}
+      className="flex flex-wrap items-center gap-1.5 rounded-lg bg-muted px-2 py-1.5"
+    >
+      <button
+        type="button"
+        data-testid="selection-commit-session"
+        aria-label={t('selectionKeys.sessionOnlyAria')}
+        title={t('selectionKeys.sessionOnlyAria')}
+        onClick={() => handleClick(SESSION_SCOPE_KEY)}
+        className={`min-h-[44px] rounded-md border px-3 py-2 text-sm font-medium transition-colors duration-75 touch-manipulation focus:outline-none focus:ring-2 focus:ring-ring ${
+          activeKey === SESSION_SCOPE_KEY
+            ? 'border-accent-500 bg-accent-500 text-white scale-95'
+            : 'border-accent-500 bg-surface text-accent-600 hover:bg-muted active:bg-muted dark:bg-surface-2 dark:text-accent-400'
+        }`}
+      >
+        {t('selectionKeys.sessionOnly')}
+      </button>
+      <button
+        type="button"
+        data-testid="selection-commit-default"
+        aria-label={t('selectionKeys.setDefaultAria')}
+        title={t('selectionKeys.setDefaultAria')}
+        onClick={() => handleClick('Enter')}
+        className={`min-h-[44px] rounded-md border border-border px-3 py-2 text-sm font-medium transition-colors duration-75 touch-manipulation focus:outline-none focus:ring-2 focus:ring-ring ${
+          activeKey === 'Enter'
+            ? 'border-accent-500 bg-accent-500 text-white scale-95'
+            : 'bg-surface hover:bg-muted active:bg-muted dark:bg-surface-2'
+        }`}
+      >
+        {t('selectionKeys.setDefault')}
+      </button>
+      {commitsDefaultOnEnter ? (
+        <p
+          data-testid="selection-commit-warning"
+          className="w-full text-xs text-muted-foreground"
+        >
+          {t('selectionKeys.defaultWarning')}
+        </p>
+      ) : null}
     </div>
   );
 }

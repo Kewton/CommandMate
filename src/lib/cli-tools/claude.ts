@@ -5,6 +5,8 @@
 
 import { BaseCLITool } from './base';
 import type { CLIToolType, IImageCapableCLITool } from './types';
+import type { NavigationKeySpec } from '@/types/cli-tool-contracts';
+import { CLAUDE_NAVIGATION_KEY_VALUES } from '@/types/terminal-keys';
 import {
   isClaudeInstalled,
   isClaudeRunning,
@@ -22,6 +24,26 @@ export class ClaudeTool extends BaseCLITool implements IImageCapableCLITool {
   readonly id: CLIToolType = 'claude';
   readonly name = 'Claude Code';
   readonly command = 'claude';
+
+  /**
+   * Declare the base pad plus `s` (Issue #2297).
+   *
+   * The one screen that needs it is `/model`, whose footer reads
+   * `Enter to set as default · s to use this session only · Esc to cancel`
+   * (measured on 2.1.259 and 2.1.260 at the production 200x1000 geometry). On
+   * that overlay `Enter` rewrites `model` in `~/.claude/settings.json`
+   * (Issue #1495), so before this Issue the chat surface's dialog card could
+   * send the key that changes the user's global default and had no way at all to
+   * send the key that does not.
+   *
+   * The rest of the declaration is `NAVIGATION_KEY_VALUES`, untouched — see
+   * {@link CLAUDE_NAVIGATION_KEY_VALUES} for why `s` is not simply added to the
+   * shared pad (it is a live binding on copilot's session picker, and a bare
+   * letter in opencode's composer).
+   */
+  navigationKeys(): NavigationKeySpec {
+    return { keys: CLAUDE_NAVIGATION_KEY_VALUES, leaderKey: null };
+  }
 
   /**
    * Check if Claude CLI is installed

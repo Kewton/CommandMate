@@ -29,9 +29,20 @@
  * No `detectDialog` either: Epic #2249 決定 3 keeps Auto-Yes on the legacy
  * numbered-response path, because Command Code fires `PreToolUse` AFTER the
  * dialog is answered, so a hook-driven permission decision cannot dismiss it.
+ *
+ * `afterPrompt` arrived with Issue #2297, for the one screen the shared chain
+ * genuinely could not read: the picker `/model` opens. It is a provider-grouped
+ * list of model NAMES — no option numbers — over a `› Type to search models...`
+ * row, closed by `type to search · ↑/↓ navigate · shift+↑/↓ jump provider ·
+ * enter to select · esc to cancel`. None of `detectPrompt`, `detectThinking` or
+ * the composer check matches any of that, so the frame reached the `default`
+ * floor and the chat surface offered it the answer characters — into the search
+ * box. Measured live on v1.40.1 at the production 200x1000 geometry; the capture
+ * is `tests/fixtures/chat-dialog-card-2254/command-code-model-1-40-1.txt`.
  */
 
 import { detectThinking, getCliToolPatterns } from '../../cli-patterns';
+import { COMMAND_CODE_SELECTION_LIST_FOOTER } from '../../selection-shape';
 import { STATUS_REASON } from '../../status-reason';
 import { createToolStatusDetector } from '../run-detection';
 import { COMMAND_CODE_VERIFIED_AGAINST } from '../verified-against';
@@ -43,6 +54,30 @@ export const VERIFIED_AGAINST = COMMAND_CODE_VERIFIED_AGAINST;
 export const commandCodeStatusDetector = createToolStatusDetector({
   tool: 'command-code',
   verifiedAgainst: VERIFIED_AGAINST,
+
+  afterPrompt(frame): ToolStatusVerdict | null {
+    // Issue #2297. Command Code's pickers (`/model` measured live on v1.40.1 at
+    // 200x1000) are arrow-driven overlays with a search box and a lower-case
+    // hint-bar footer. Nothing in the shared chain reads that footer, so before
+    // this branch the frame fell through to the `default` floor — which the chat
+    // surface renders as `unclassified`, i.e. with the `1`-`9` / `y` / `n`
+    // answer keys, and every one of those characters is typed into the picker's
+    // `Type to search models...` box rather than selecting anything.
+    //
+    // `waiting` + `positive`, exactly as claude's selection-list branch reports:
+    // a human has to move the highlight and press enter, and the frame says so
+    // in as many words.
+    if (COMMAND_CODE_SELECTION_LIST_FOOTER.test(frame.lastLines)) {
+      return {
+        status: 'waiting',
+        confidence: 'high',
+        reason: STATUS_REASON.COMMAND_CODE_SELECTION_LIST,
+        hasActivePrompt: false,
+        evidence: 'positive',
+      };
+    }
+    return null;
+  },
 
   afterThinking(frame): ToolStatusVerdict | null {
     // The composer is drawn throughout a turn, so "running" has to be resolved

@@ -445,4 +445,117 @@ export const OpencodeQuickKeys = memo(function OpencodeQuickKeys({
   );
 });
 
+
+// ===========================================================================
+// Issue #2297: the model chords, on the chat surface's dialog card
+// ===========================================================================
+
+/**
+ * The subset of this strip that changes the MODEL, in render order.
+ *
+ * `variant` (`ctrl+t`) cycles the active model's variant with no dialog, and
+ * `models` (`ctrl+x m`) opens the model picker. `commands` (`ctrl+p`) comes
+ * along because opencode's own footer advertises it as the way to anything the
+ * two above do not reach, and because it is the one key on this list that is
+ * safe from every state.
+ *
+ * Read out of {@link DIRECT_KEYS} / {@link GLOBAL_CHORDS} rather than rewritten,
+ * so the notation, the leader and the "one request, two entries" chord discipline
+ * cannot drift between the terminal footer and the chat card.
+ * `f2` (`model_cycle_recent`) is still absent for #2046's reason: it switches
+ * models with no confirmation and could not be measured.
+ */
+const MODEL_KEY_IDS: ReadonlyArray<string> = ['variant', 'models', 'commands'];
+
+const MODEL_KEYS: ReadonlyArray<QuickKeyDef> = MODEL_KEY_IDS.map((id) => {
+  const def = [...DIRECT_KEYS, ...GLOBAL_CHORDS].find((entry) => entry.id === id);
+  // Unreachable while MODEL_KEY_IDS names entries of those two groups; throwing
+  // rather than filtering makes a rename a build-time failure instead of a strip
+  // that quietly loses a button.
+  if (!def) throw new Error(`OpencodeQuickKeys: unknown model key id ${id}`);
+  return def;
+});
+
+export interface OpencodeModelKeysProps {
+  worktreeId: string;
+  /** Rendered only for `'opencode'`; anything else renders nothing at all. */
+  cliToolId: CLIToolType;
+  /** Agent instance id. Defaults to the primary instance (`=== cliToolId`). */
+  instanceId?: string;
+  /** Trigger an immediate terminal refresh after the keys are sent. */
+  onKeysSent?: () => void;
+}
+
+/**
+ * opencode's model keys, for the chat surface's dialog card (Issue #2297).
+ *
+ * opencode is the one tool with no numbered `/model` at all: switching models is
+ * `ctrl+t` or a `ctrl+x` leader chord, and the chat surface published neither —
+ * a selection list there got ▲▼ Enter Esc like every other tool, which navigates
+ * the overlay that is open and cannot open the one the user wants. This is the
+ * three keys that can, on the card, next to the frame they act on.
+ *
+ * NOT the full seventeen-key strip. That one is a terminal-footer control with a
+ * disclosure and a measured 378px phone footprint (#2106 / #2131); this is three
+ * buttons inside a card that is already `shrink-0` on a phone. The session-scoped
+ * chords are deliberately not among them — they are the ones opencode ignores
+ * before its first turn, and this card has no `hasAgentSession` to gate on.
+ *
+ * The chord discipline is `OpencodeQuickKeys`': `['C-x', 'm']` is ONE request
+ * with TWO entries, which `sendSpecialKeys()` delivers 100 ms apart, inside
+ * opencode's 2000 ms `leader_timeout`.
+ */
+export const OpencodeModelKeys = memo(function OpencodeModelKeys({
+  worktreeId,
+  cliToolId,
+  instanceId,
+  onKeysSent,
+}: OpencodeModelKeysProps) {
+  const t = useTranslations('worktree');
+  const { activeKey: activeId, markPressed } = useKeyPressFeedback();
+  const send = useSpecialKeys(worktreeId, cliToolId, instanceId, onKeysSent);
+
+  const handleClick = useCallback(
+    (def: QuickKeyDef) => {
+      markPressed(def.id);
+      send([...def.keys]);
+    },
+    [markPressed, send],
+  );
+
+  if (cliToolId !== 'opencode') return null;
+
+  return (
+    <div
+      data-testid="opencode-model-keys"
+      role="toolbar"
+      aria-label={t('selectionKeys.opencodeToolbarLabel')}
+      className="flex flex-wrap items-center gap-1.5 rounded-lg bg-muted px-2 py-1.5"
+    >
+      <span className="text-xs text-muted-foreground">{t('selectionKeys.opencodeCaption')}</span>
+      {MODEL_KEYS.map((def) => {
+        const label = t(`opencodeQuickKeys.keys.${def.id}`);
+        return (
+          <button
+            key={def.id}
+            type="button"
+            data-testid={`opencode-model-key-${def.id}`}
+            aria-label={`${label} (${def.notation})`}
+            title={`${label} — ${def.notation}`}
+            onClick={() => handleClick(def)}
+            className={`min-h-[44px] rounded-md border border-border px-3 py-2 text-sm font-medium transition-colors duration-75 touch-manipulation focus:outline-none focus:ring-2 focus:ring-ring ${
+              activeId === def.id
+                ? 'border-accent-500 bg-accent-500 text-white scale-95'
+                : 'bg-surface hover:bg-muted active:bg-muted dark:bg-surface-2'
+            }`}
+          >
+            {label}
+            <span className="ml-1.5 text-xs text-muted-foreground">{def.notation}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+});
+
 export default OpencodeQuickKeys;

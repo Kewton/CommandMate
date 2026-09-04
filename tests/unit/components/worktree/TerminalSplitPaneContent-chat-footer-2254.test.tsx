@@ -73,6 +73,15 @@ vi.mock('@/components/worktree/TerminalEscapeHatch', () => ({
 vi.mock('@/components/worktree/PromptAnswerKeys', () => ({
   PromptAnswerKeys: () => <div data-testid="prompt-answer-keys" />,
   PROMPT_ANSWER_KEYS: [],
+  // Issue #2297 put two more selection-list toolbars in this module, and
+  // `ChatSurface` renders them from the same import. A module mock replaces the
+  // WHOLE module, so leaving them out makes this suite throw
+  // "No SelectionNumberKeys export is defined on the mock" the moment a
+  // selection list is on screen — which is what half of these tests set up.
+  SelectionNumberKeys: ({ optionCount }: { optionCount: number }) => (
+    <div data-testid="selection-number-keys" data-option-count={String(optionCount)} />
+  ),
+  SelectionCommitKeys: () => <div data-testid="selection-commit-keys" />,
 }));
 
 vi.mock('@/components/worktree/PromptPanel', () => ({

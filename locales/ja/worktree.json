@@ -914,6 +914,18 @@
     "toolbarLabel": "ダイアログへの回答キー",
     "caption": "回答"
   },
+  "selectionKeys": {
+    "numbersToolbarLabel": "選択肢の番号キー",
+    "numbersCaption": "選択",
+    "commitToolbarLabel": "選択中の項目を適用",
+    "sessionOnly": "このセッションのみ",
+    "sessionOnlyAria": "選択中の項目をこのセッションのみに適用 (s)",
+    "setDefault": "既定に設定",
+    "setDefaultAria": "選択中の項目を既定に設定 (Enter)",
+    "defaultWarning": "Enter はこの選択を新規セッションの既定として保存します。既定を変えずに切り替えるなら「このセッションのみ」を使ってください。",
+    "opencodeToolbarLabel": "opencode のモデルキー",
+    "opencodeCaption": "モデル"
+  },
   "newFileDialog": {
     "title": "新規ファイル",
     "fileNameLabel": "ファイル名",

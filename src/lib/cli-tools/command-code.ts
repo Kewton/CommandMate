@@ -37,6 +37,8 @@
 
 import { BaseCLITool } from './base';
 import type { CLIToolType } from './types';
+import type { NavigationKeySpec } from '@/types/cli-tool-contracts';
+import { CLAUDE_NAVIGATION_KEY_VALUES } from '@/types/terminal-keys';
 import {
   hasSession,
   createSession,
@@ -167,6 +169,27 @@ export class CommandCodeTool extends BaseCLITool {
   readonly id: CLIToolType = 'command-code';
   readonly name = 'Command Code CLI';
   readonly command = COMMAND_CODE_COMMAND;
+
+  /**
+   * Declare the claude-family pad (Issue #2297).
+   *
+   * Command Code renders claude's inline overlay TUI, so it takes the same
+   * declaration rather than a copy of the base list — see
+   * {@link CLAUDE_NAVIGATION_KEY_VALUES}.
+   *
+   * **Its own `/model` picker does NOT use `s`.** Measured on v1.40.1 at
+   * 200x1000 for this Issue: a provider-grouped list of model NAMES with no
+   * option numbers, a `› Type to search models...` filter row, and the footer
+   * `type to search · ↑/↓ navigate · shift+↑/↓ jump provider · enter to select ·
+   * esc to cancel`. Nothing on it offers a session scope, so the chat surface
+   * draws no `s` button there: the button is gated on the footer being on
+   * screen (`readSelectionListShape`), not on the tool id. The key is declared
+   * anyway so the two halves of the claude family cannot drift apart, and
+   * declaring a key nobody draws sends nothing.
+   */
+  navigationKeys(): NavigationKeySpec {
+    return { keys: CLAUDE_NAVIGATION_KEY_VALUES, leaderKey: null };
+  }
 
   /**
    * Check if a Command Code session is running for a worktree.
