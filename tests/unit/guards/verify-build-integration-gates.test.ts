@@ -118,7 +118,9 @@ const jobCommands = (jobId: string): string[] =>
   (workflow.jobs[jobId]?.steps ?? [])
     .map((step) => step.run)
     .filter((run): run is string => typeof run === 'string')
-    .filter((run) => run.trim() !== 'npm ci');
+    // [Issue #2313] `npm ci --no-audit`: match the command, not the exact
+    // string, so the install stays excluded when it carries flags.
+    .filter((run) => !/^npm ci(\s|$)/.test(run.trim()));
 
 const gate = (id: string) => config?.gates.find((candidate) => candidate.id === id);
 
