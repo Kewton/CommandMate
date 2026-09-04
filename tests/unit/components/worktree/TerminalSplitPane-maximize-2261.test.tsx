@@ -11,10 +11,11 @@
 
 import React from 'react';
 import { describe, it, expect, vi, beforeAll } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, act } from '@testing-library/react';
 import { TerminalSplitPane } from '@/components/worktree/TerminalSplitPane';
 import type { AgentInstance, CLIToolType } from '@/lib/cli-tools/types';
 import { installRadixJsdomPolyfills } from '@tests/helpers/radix-jsdom';
+import { TOOLTIP_DELAY_MS } from '@/components/common/Tooltip';
 
 beforeAll(() => installRadixJsdomPolyfills());
 
@@ -48,13 +49,23 @@ describe('[#2261] TerminalSplitPane maximize toggle', () => {
   });
 
   it('renders unpressed with a Maximize label when the split shares the row', () => {
+    vi.useFakeTimers();
     renderPane({ splitIndex: 1, onToggleMaximize: vi.fn() });
     const button = screen.getByTestId('toggle-maximize-1');
     expect(button).toHaveAttribute('aria-pressed', 'false');
     // Icon-only, so the accessible name and the tooltip are the ONLY thing
     // naming it — and the tooltip carries the chord for discoverability.
     expect(button).toHaveAttribute('aria-label', 'worktree.terminal.maximizeSplit');
-    expect(button.getAttribute('title')).toContain('worktree.terminal.maximizeShortcutHint');
+    // Issue #2307: native `title` replaced by common/Tooltip.
+    expect(button.getAttribute('title')).toBeNull();
+    fireEvent.mouseEnter(button);
+    act(() => {
+      vi.advanceTimersByTime(TOOLTIP_DELAY_MS);
+    });
+    expect(screen.getByRole('tooltip', { hidden: true }).textContent).toContain(
+      'worktree.terminal.maximizeShortcutHint',
+    );
+    vi.useRealTimers();
   });
 
   it('renders pressed with a Restore label while the split fills the row', () => {

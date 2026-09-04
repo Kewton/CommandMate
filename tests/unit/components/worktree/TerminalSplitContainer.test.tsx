@@ -16,6 +16,7 @@ import {
 import { SURFACE_MODE_CHANGE_EVENT } from '@/hooks/useSplitSurfaceModes';
 import { getSplitSurfaceModeStorageKey } from '@/config/surface-mode-config';
 import { clearTerminalSplitsLocalStorage } from '@tests/helpers/terminal-splits';
+import { TOOLTIP_DELAY_MS } from '@/components/common/Tooltip';
 import {
   CLI_TOOL_IDS,
   getCliToolDisplayName,
@@ -54,6 +55,21 @@ function setup(renderImpl?: () => React.ReactNode, instances: AgentInstance[] = 
     />,
   );
   return { renderPane, ...utils };
+}
+
+/**
+ * Issue #2307: the layout-ops / panel-toggle buttons no longer carry a native
+ * `title` — they are wrapped in `common/Tooltip` (Issue #730's ActivityBar
+ * mechanism). Reveal the bubble the same way ActivityBar.test.tsx does:
+ * hover the trigger, advance past `TOOLTIP_DELAY_MS`, and read the portalled
+ * `role="tooltip"` text. Caller must wrap in `vi.useFakeTimers()`.
+ */
+function revealTooltip(trigger: HTMLElement): string {
+  fireEvent.mouseEnter(trigger);
+  act(() => {
+    vi.advanceTimersByTime(TOOLTIP_DELAY_MS);
+  });
+  return screen.getByRole('tooltip', { hidden: true }).textContent ?? '';
 }
 
 /**
@@ -249,17 +265,20 @@ describe('TerminalSplitContainer History/Files toggles (Issue #841)', () => {
     expect(window.localStorage.getItem(FILE_PANEL_KEY)).toBe('true');
   });
 
-  it('aria-label / title reflect show vs hide depending on state', () => {
+  it('aria-label / Tooltip reflect show vs hide depending on state', () => {
+    vi.useFakeTimers();
     setupWithOpenFiles({ tabCount: 1, hasDiff: false });
     const history = screen.getByTestId('toggle-history-pane');
     // default visible → "hide" wording
     expect(history).toHaveAttribute('aria-label', 'worktree.terminal.hideHistory');
-    // Issue #2259: the title also carries the scope of the switch, because one
-    // History state drives every split.
-    expect(history.getAttribute('title')).toContain('worktree.terminal.hideHistory');
-    expect(history.getAttribute('title')).toContain(
-      'worktree.terminal.historyAllSplitsHint',
-    );
+    // No native title (Issue #2307: replaced by common/Tooltip).
+    expect(history.getAttribute('title')).toBeNull();
+    // Issue #2259: the Tooltip also carries the scope of the switch, because
+    // one History state drives every split.
+    const tooltipText = revealTooltip(history);
+    expect(tooltipText).toContain('worktree.terminal.hideHistory');
+    expect(tooltipText).toContain('worktree.terminal.historyAllSplitsHint');
+    vi.useRealTimers();
     fireEvent.click(history);
     expect(history).toHaveAttribute('aria-label', 'worktree.terminal.showHistory');
 
@@ -361,11 +380,14 @@ describe('TerminalSplitContainer equalize widths (Issue #861)', () => {
     expect(window.localStorage.getItem(HISTORY_WIDTH_KEY)).toBe('40');
   });
 
-  it('has a descriptive aria-label / title', () => {
+  it('has a descriptive aria-label / Tooltip', () => {
+    vi.useFakeTimers();
     setup();
     const btn = screen.getByTestId('equalize-split-widths');
     expect(btn).toHaveAttribute('aria-label', 'worktree.terminal.equalizeWidthsHint');
-    expect(btn).toHaveAttribute('title', 'worktree.terminal.equalizeWidthsHint');
+    expect(btn.getAttribute('title')).toBeNull();
+    expect(revealTooltip(btn)).toBe('worktree.terminal.equalizeWidthsHint');
+    vi.useRealTimers();
   });
 
   it('double-clicking a terminal resizer equalizes widths but leaves History width', () => {
@@ -735,12 +757,15 @@ describe('TerminalSplitContainer panel toggle availability (Issue #2259)', () =>
     });
 
     it('is disabled when every split shows chat', () => {
+      vi.useFakeTimers();
       setSurface(0, 'chat');
       setup();
       const btn = screen.getByTestId('toggle-history-pane');
       expect(btn).toBeDisabled();
       expect(btn).toHaveAttribute('aria-disabled', 'true');
-      expect(btn).toHaveAttribute('title', 'worktree.terminal.historyChatOnlyHint');
+      expect(btn.getAttribute('title')).toBeNull();
+      expect(revealTooltip(btn)).toBe('worktree.terminal.historyChatOnlyHint');
+      vi.useRealTimers();
     });
 
     it('does not toggle the persisted state while disabled', () => {
@@ -803,12 +828,15 @@ describe('TerminalSplitContainer panel toggle availability (Issue #2259)', () =>
 
   describe('"Open Files" toggle', () => {
     it('is disabled with no tabs and no diff', () => {
+      vi.useFakeTimers();
       setupWithOpenFiles({ tabCount: 0, hasDiff: false });
       const btn = screen.getByTestId('toggle-file-panel');
       expect(btn).toBeDisabled();
       expect(btn).toHaveAttribute('aria-disabled', 'true');
-      expect(btn).toHaveAttribute('title', 'worktree.terminal.filesEmptyHint');
+      expect(btn.getAttribute('title')).toBeNull();
+      expect(revealTooltip(btn)).toBe('worktree.terminal.filesEmptyHint');
       expect(screen.queryByTestId('open-files-count')).not.toBeInTheDocument();
+      vi.useRealTimers();
     });
 
     it('is enabled by a diff even with no tabs open (Issue #447 path)', () => {

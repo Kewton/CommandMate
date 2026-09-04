@@ -58,6 +58,7 @@ import {
   FILE_PANEL_PANE_ID,
 } from '@/hooks/useFilePanelState';
 import { useSplitSurfaceModes } from '@/hooks/useSplitSurfaceModes';
+import { Tooltip } from '@/components/common/Tooltip';
 import { PaneResizer } from './PaneResizer';
 
 /** Render-prop signature: each pane is supplied externally so the
@@ -327,6 +328,9 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
   const maximizeLabel = isMaximized
     ? t('terminal.restoreSplits')
     : t('terminal.maximizeFocusedSplit');
+  // [Issue #2307] Tooltip content mirrors the former native `title` text
+  // (label + shortcut hint) — only the delivery mechanism changed.
+  const maximizeTooltip = `${maximizeLabel} — ${t('terminal.maximizeShortcutHint')}`;
 
   /*
    * Issue #2259: the two toggles are disabled when the thing they show cannot
@@ -352,6 +356,17 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
     surfaceModes.length > 0 && surfaceModes.every((mode) => mode === 'chat');
   const { tabCount: openFileCount, hasDiff } = useOpenFiles();
   const filesUnavailable = openFileCount === 0 && !hasDiff;
+  // [Issue #2307] Tooltip content mirrors the former native `title` text.
+  const historyTooltip = historyUnavailable
+    ? t('terminal.historyChatOnlyHint')
+    : `${
+        historyVisible ? t('terminal.hideHistory') : t('terminal.showHistory')
+      } — ${t('terminal.historyAllSplitsHint')}`;
+  const filesTooltip = filesUnavailable
+    ? t('terminal.filesEmptyHint')
+    : filesVisible
+      ? t('terminal.hideFiles')
+      : t('terminal.showFiles');
   const historySlotIds = useMemo(
     () => splits.map((_, idx) => splitHistorySlotId(idx)).join(' '),
     [splits],
@@ -447,70 +462,74 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
           an `ml-auto` hairline separator pushes the History / Files panel
           toggles to the RIGHT group ("layout ops | panel visibility").
         */}
-        <button
-          type="button"
-          onClick={addSplit}
-          disabled={!canAdd}
-          aria-disabled={!canAdd}
-          aria-label={t('terminal.addSplit')}
-          title={t('terminal.addSplit')}
-          data-testid="add-terminal-split"
-          className="flex items-center justify-center h-7 w-7 rounded text-muted-foreground hover:text-surface-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors"
-        >
-          <Plus className="w-4 h-4" aria-hidden="true" />
-        </button>
-        <button
-          type="button"
-          onClick={removeSplit}
-          disabled={!canRemove}
-          aria-disabled={!canRemove}
-          aria-label={t('terminal.removeSplit')}
-          title={t('terminal.removeSplit')}
-          data-testid="remove-terminal-split"
-          className="flex items-center justify-center h-7 w-7 rounded text-muted-foreground hover:text-surface-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors"
-        >
-          <Minus className="w-4 h-4" aria-hidden="true" />
-        </button>
+        <Tooltip content={t('terminal.addSplit')} placement="bottom">
+          <button
+            type="button"
+            onClick={addSplit}
+            disabled={!canAdd}
+            aria-disabled={!canAdd}
+            aria-label={t('terminal.addSplit')}
+            data-testid="add-terminal-split"
+            className="flex items-center justify-center h-7 w-7 rounded text-muted-foreground hover:text-surface-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors"
+          >
+            <Plus className="w-4 h-4" aria-hidden="true" />
+          </button>
+        </Tooltip>
+        <Tooltip content={t('terminal.removeSplit')} placement="bottom">
+          <button
+            type="button"
+            onClick={removeSplit}
+            disabled={!canRemove}
+            aria-disabled={!canRemove}
+            aria-label={t('terminal.removeSplit')}
+            data-testid="remove-terminal-split"
+            className="flex items-center justify-center h-7 w-7 rounded text-muted-foreground hover:text-surface-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors"
+          >
+            <Minus className="w-4 h-4" aria-hidden="true" />
+          </button>
+        </Tooltip>
 
         {/*
           Issue #861: equalize terminal split widths (each → 1/n) and reset the
           Message History width to default in one action. Disabled only when
           there is nothing to equalize (single split AND History hidden).
         */}
-        <button
-          type="button"
-          onClick={handleEqualizeWidths}
-          disabled={!canEqualize}
-          aria-disabled={!canEqualize}
-          aria-label={t('terminal.equalizeWidthsHint')}
-          title={t('terminal.equalizeWidthsHint')}
-          data-testid="equalize-split-widths"
-          className="flex items-center justify-center h-7 w-7 rounded text-muted-foreground hover:text-surface-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors"
-        >
-          <AlignHorizontalDistributeCenter
-            className="w-4 h-4 flex-shrink-0"
-            aria-hidden="true"
-          />
-        </button>
+        <Tooltip content={t('terminal.equalizeWidthsHint')} placement="bottom">
+          <button
+            type="button"
+            onClick={handleEqualizeWidths}
+            disabled={!canEqualize}
+            aria-disabled={!canEqualize}
+            aria-label={t('terminal.equalizeWidthsHint')}
+            data-testid="equalize-split-widths"
+            className="flex items-center justify-center h-7 w-7 rounded text-muted-foreground hover:text-surface-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors"
+          >
+            <AlignHorizontalDistributeCenter
+              className="w-4 h-4 flex-shrink-0"
+              aria-hidden="true"
+            />
+          </button>
+        </Tooltip>
 
         {/* Issue #2261: maximize the focused split / restore the layout. */}
-        <button
-          type="button"
-          onClick={handleToggleMaximize}
-          disabled={!canMaximize}
-          aria-disabled={!canMaximize}
-          aria-pressed={isMaximized}
-          aria-label={maximizeLabel}
-          title={`${maximizeLabel} — ${t('terminal.maximizeShortcutHint')}`}
-          data-testid="toggle-maximize-split"
-          className="flex items-center justify-center h-7 w-7 rounded text-muted-foreground hover:text-surface-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors"
-        >
-          {isMaximized ? (
-            <Minimize2 className="w-4 h-4 flex-shrink-0" aria-hidden="true" />
-          ) : (
-            <Maximize2 className="w-4 h-4 flex-shrink-0" aria-hidden="true" />
-          )}
-        </button>
+        <Tooltip content={maximizeTooltip} placement="bottom">
+          <button
+            type="button"
+            onClick={handleToggleMaximize}
+            disabled={!canMaximize}
+            aria-disabled={!canMaximize}
+            aria-pressed={isMaximized}
+            aria-label={maximizeLabel}
+            data-testid="toggle-maximize-split"
+            className="flex items-center justify-center h-7 w-7 rounded text-muted-foreground hover:text-surface-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors"
+          >
+            {isMaximized ? (
+              <Minimize2 className="w-4 h-4 flex-shrink-0" aria-hidden="true" />
+            ) : (
+              <Maximize2 className="w-4 h-4 flex-shrink-0" aria-hidden="true" />
+            )}
+          </button>
+        </Tooltip>
 
         {/* Issue #1079: separator dividing layout ops (left) from panel toggles
             (right). `ml-auto` pushes the History / Files group to the far right. */}
@@ -522,74 +541,62 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
           gray. `aria-pressed` reflects current visibility. The existing
           vertical collapse strips remain and share this state (SSOT).
         */}
-        <button
-          type="button"
-          onClick={toggleHistory}
-          disabled={historyUnavailable}
-          aria-disabled={historyUnavailable}
-          aria-pressed={historyVisible}
-          aria-expanded={historyVisible}
-          aria-controls={historySlotIds}
-          aria-label={
-            historyVisible
-              ? t('terminal.hideHistory')
-              : t('terminal.showHistory')
-          }
-          title={
-            historyUnavailable
-              ? t('terminal.historyChatOnlyHint')
-              : `${
-                  historyVisible
-                    ? t('terminal.hideHistory')
-                    : t('terminal.showHistory')
-                } — ${t('terminal.historyAllSplitsHint')}`
-          }
-          data-testid="toggle-history-pane"
-          className={`flex flex-shrink-0 items-center gap-1 whitespace-nowrap text-xs px-2 py-0.5 rounded border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
-            historyVisible
-              ? 'border-accent-300 dark:border-accent-700 bg-accent-50 dark:bg-accent-900/30 text-accent-700 dark:text-accent-300'
-              : 'border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
-          }`}
-        >
-          <History className="w-3.5 h-3.5 flex-shrink-0" aria-hidden="true" />
-          <span>{t('terminal.historyLabel')}</span>
-        </button>
-        <button
-          type="button"
-          onClick={toggleFilePanel}
-          disabled={filesUnavailable}
-          aria-disabled={filesUnavailable}
-          aria-pressed={filesVisible}
-          aria-expanded={filesVisible}
-          aria-controls={FILE_PANEL_PANE_ID}
-          aria-label={
-            filesVisible ? t('terminal.hideFiles') : t('terminal.showFiles')
-          }
-          title={
-            filesUnavailable
-              ? t('terminal.filesEmptyHint')
-              : filesVisible
-                ? t('terminal.hideFiles')
-                : t('terminal.showFiles')
-          }
-          data-testid="toggle-file-panel"
-          className={`flex flex-shrink-0 items-center gap-1 whitespace-nowrap text-xs px-2 py-0.5 rounded border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
-            filesVisible
-              ? 'border-accent-300 dark:border-accent-700 bg-accent-50 dark:bg-accent-900/30 text-accent-700 dark:text-accent-300'
-              : 'border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
-          }`}
-        >
-          <Files className="w-3.5 h-3.5 flex-shrink-0" aria-hidden="true" />
-          <span>{t('terminal.filesLabel')}</span>
-          {openFileCount > 0 && (
-            <span
-              data-testid="open-files-count"
-              className="ml-0.5 min-w-[1.25rem] px-1 rounded-full bg-muted text-[10px] leading-4 text-muted-foreground tabular-nums text-center"
-            >
-              {openFileCount}
-            </span>
-          )}
-        </button>
+        <Tooltip content={historyTooltip} placement="bottom" className="flex-shrink-0">
+          <button
+            type="button"
+            onClick={toggleHistory}
+            disabled={historyUnavailable}
+            aria-disabled={historyUnavailable}
+            aria-pressed={historyVisible}
+            aria-expanded={historyVisible}
+            aria-controls={historySlotIds}
+            aria-label={
+              historyVisible
+                ? t('terminal.hideHistory')
+                : t('terminal.showHistory')
+            }
+            data-testid="toggle-history-pane"
+            className={`flex flex-shrink-0 items-center gap-1 whitespace-nowrap text-xs px-2 py-0.5 rounded border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+              historyVisible
+                ? 'border-accent-300 dark:border-accent-700 bg-accent-50 dark:bg-accent-900/30 text-accent-700 dark:text-accent-300'
+                : 'border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+            }`}
+          >
+            <History className="w-3.5 h-3.5 flex-shrink-0" aria-hidden="true" />
+            <span>{t('terminal.historyLabel')}</span>
+          </button>
+        </Tooltip>
+        <Tooltip content={filesTooltip} placement="bottom" className="flex-shrink-0">
+          <button
+            type="button"
+            onClick={toggleFilePanel}
+            disabled={filesUnavailable}
+            aria-disabled={filesUnavailable}
+            aria-pressed={filesVisible}
+            aria-expanded={filesVisible}
+            aria-controls={FILE_PANEL_PANE_ID}
+            aria-label={
+              filesVisible ? t('terminal.hideFiles') : t('terminal.showFiles')
+            }
+            data-testid="toggle-file-panel"
+            className={`flex flex-shrink-0 items-center gap-1 whitespace-nowrap text-xs px-2 py-0.5 rounded border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+              filesVisible
+                ? 'border-accent-300 dark:border-accent-700 bg-accent-50 dark:bg-accent-900/30 text-accent-700 dark:text-accent-300'
+                : 'border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+            }`}
+          >
+            <Files className="w-3.5 h-3.5 flex-shrink-0" aria-hidden="true" />
+            <span>{t('terminal.filesLabel')}</span>
+            {openFileCount > 0 && (
+              <span
+                data-testid="open-files-count"
+                className="ml-0.5 min-w-[1.25rem] px-1 rounded-full bg-muted text-[10px] leading-4 text-muted-foreground tabular-nums text-center"
+              >
+                {openFileCount}
+              </span>
+            )}
+          </button>
+        </Tooltip>
       </div>
 
       {/* Splits row */}
