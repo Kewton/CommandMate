@@ -26,12 +26,26 @@
  *     launch line, so `codex` and `codex-2` in one worktree report as
  *     themselves. Verified live — a session launched with
  *     `CM_AGENT_INSTANCE_ID=codex-2` posted `instanceId: "codex-2"`.
- *  4. **Hooks do not run until a human trusts them.** Trust is recorded in the
+ *  4. **Hooks do not run until they are trusted.** Trust is recorded in the
  *     user's own `~/.codex/config.toml` as
  *     `[hooks.state."<file>:<event>:0:0"] trusted_hash`, and an untrusted hook
- *     is skipped in complete silence (#1757 P4). CommandMate does not write
- *     that file — see {@link isCodexHookTrustBypassEnabled} for the whole of
- *     the reasoning, and `docs/design/agent-event-source-interface.md`.
+ *     is skipped in complete silence (#1757 P4). Issue #1760 declined that
+ *     dialog on every launch; Issue #2315 measured what that cost — the decline
+ *     is not remembered, so the dialog returned forever and the hooks never ran
+ *     — and now answers it with *trust* for a worktree that ships no
+ *     `.codex/hooks.json` of its own. codex writes the hash; this server only
+ *     presses the key. See {@link shouldTrustCodexHooks} for the security
+ *     argument, {@link isCodexHookTrustBypassEnabled} for the flag that is
+ *     still off, and `docs/design/agent-event-source-interface.md`.
+ *
+ * ## What keeps the trust once it is granted (Issue #2315)
+ *
+ * codex keys trust by the hash of the handler, so the generated file has to be
+ * byte-identical whoever wrote it. It was not: the hook command named
+ * `process.cwd()/scripts/hooks/cmate-agent-event.sh`, so each of the machine's
+ * worktree servers rewrote the one shared file with its own checkout and undid
+ * the last one's grant. `./relay-install` is the fix — the command now names a
+ * copy under `$CODEX_HOME`, and the file is a function of `$CODEX_HOME` alone.
  *
  * ## Why `$CODEX_HOME/hooks.json` and not `<worktree>/.codex/hooks.json`
  *
@@ -75,6 +89,7 @@ import { createLogger } from '@/lib/logger';
 import { isValidWorktreeId } from '@/lib/security/path-validator';
 import { isPlainObject } from '../event-mapper';
 import type { AgentInstanceRef, AgentLaunchPlan } from '../types';
+import { getInstalledCodexRelayPath, installCodexRelayScript } from './relay-install';
 import { CODEX_CLI_TOOL_ID } from './tool-id';
 
 const logger = createLogger('lib/hooks/sources/codex/hooks-config');
@@ -118,7 +133,12 @@ export const CODEX_EVENT_URL_ENV_VAR = 'CM_HOOK_URL';
 /** Auto-Yes v2 receiver URL, with the correlation keys already in its query. */
 export const CODEX_PERMISSION_URL_ENV_VAR = 'CM_PERMISSION_HOOK_URL';
 
-/** Opt-in switch for {@link CODEX_HOOK_TRUST_BYPASS_FLAG}; `bypass` is the only value that acts. */
+/**
+ * How this server answers codex's hook trust question.
+ *
+ * See {@link resolveCodexHookTrustPolicy} for what each value does; anything
+ * else, including unset, is {@link CODEX_HOOK_TRUST_POLICY_DEFAULT}.
+ */
 export const CODEX_HOOK_TRUST_ENV_VAR = 'CM_CODEX_HOOK_TRUST';
 
 /** codex's own flag for running unreviewed hooks, for one invocation. */
@@ -197,6 +217,33 @@ export interface CodexHookOptions {
 }
 
 /**
+ * What this server may do about codex's hook trust review.
+ *
+ *  - **`auto`** (the default) — answer the review dialog with *Trust all and
+ *    continue*, but ONLY for a worktree that ships no `.codex/hooks.json` of
+ *    its own. See {@link shouldTrustCodexHooks} for why that condition is the
+ *    whole of the security argument.
+ *  - **`never`** — send no trust key anywhere. `cli-tools/codex` declines the
+ *    dialog and escapes out of the screens it leads to, hooks stay inert, and
+ *    the screen scraper keeps doing what it did before Issue #1760. This is the
+ *    pre-#2315 behaviour, kept as an escape hatch rather than as the default.
+ *  - **`bypass`** — launch with {@link CODEX_HOOK_TRUST_BYPASS_FLAG}, which
+ *    disables review for every hook the invocation can see, `<cwd>/.codex/hooks.json`
+ *    included. Unchanged from Issue #1760, and still nobody's default.
+ */
+export type CodexHookTrustPolicy = 'auto' | 'never' | 'bypass';
+
+/** What an unset or unrecognised {@link CODEX_HOOK_TRUST_ENV_VAR} means. */
+export const CODEX_HOOK_TRUST_POLICY_DEFAULT: CodexHookTrustPolicy = 'auto';
+
+/** Read {@link CODEX_HOOK_TRUST_ENV_VAR}, defaulting anything unrecognised. */
+export function resolveCodexHookTrustPolicy(): CodexHookTrustPolicy {
+  const raw = process.env[CODEX_HOOK_TRUST_ENV_VAR];
+  if (raw === 'bypass' || raw === 'never' || raw === 'auto') return raw;
+  return CODEX_HOOK_TRUST_POLICY_DEFAULT;
+}
+
+/**
  * Whether to launch codex with {@link CODEX_HOOK_TRUST_BYPASS_FLAG}.
  *
  * **Off by default, and the default is the security decision.** The flag
@@ -207,19 +254,71 @@ export interface CodexHookOptions {
  * `.codex/hooks.json`, with no dialog, defeating the exact mechanism codex
  * built to prevent it. A structured `Stop` event is not worth that.
  *
- * So the default posture is: CommandMate writes the config and never grants the
- * trust. The human grants it once, through codex's own review screen, which is
- * also the only thing that may write `~/.codex/config.toml` — a file this
- * server never touches (it holds, among other things, the `notify` entry a
- * user's Computer Use integration depends on). Until then the hooks are inert,
- * the screen scraper keeps doing what it did before this Issue, and
- * `cli-tools/codex` dismisses the review dialog so a session still starts.
- *
  * `CM_CODEX_HOOK_TRUST=bypass` exists for headless and CI operators who have
- * weighed that trade for themselves.
+ * weighed that trade for themselves. It is NOT what {@link shouldTrustCodexHooks}
+ * does — that answers one dialog, about hooks it has checked the provenance of.
  */
 export function isCodexHookTrustBypassEnabled(): boolean {
-  return process.env[CODEX_HOOK_TRUST_ENV_VAR] === 'bypass';
+  return resolveCodexHookTrustPolicy() === 'bypass';
+}
+
+/**
+ * Whether the server may answer codex's review dialog with *trust* for a
+ * session about to start in `worktreePath` (Issue #2315).
+ *
+ * ## Why this reverses Issue #1760's answer
+ *
+ * #1760 declined the dialog on the operator's behalf — option 3, *Continue
+ * without trusting* — because granting trust writes `[hooks.state…]` into their
+ * own `~/.codex/config.toml`. Two years of that measured badly, and the Issue
+ * this function exists for is the bill:
+ *
+ *  - **Declining is not remembered.** codex records a *grant*; there is no
+ *    "asked and refused" state. So the dialog came back on every single launch,
+ *    which is what made `waitForReady`'s one-shot handling the only thing
+ *    standing between a session and a pane parked three screens deep.
+ *  - **The hooks never ran.** CommandMate writes `hooks.json` in order to
+ *    receive `session_start` / `stop` — the structured events the whole of
+ *    #1760 exists for. Declining every launch meant the default installation
+ *    got the dialog and none of the benefit; the means and the end pointed in
+ *    opposite directions.
+ *
+ * ## Why this is not `--dangerously-bypass-hook-trust` by another name
+ *
+ * The objection #1760 raised is real and this function answers it rather than
+ * dropping it: a hostile repository can ship `.codex/hooks.json`, codex reads
+ * it from `<cwd>`, and *Trust all and continue* would trust that too. So the
+ * grant is withheld from exactly that case — a worktree carrying its own
+ * `.codex/hooks.json` gets the pre-#2315 decline-and-escape path, and the human
+ * answers its dialog themselves.
+ *
+ * What remains trustable is `$CODEX_HOME/hooks.json`: the operator's own file,
+ * holding the operator's own hooks plus the ones this server wrote and marked.
+ * Trusting a file the human already owns is a materially different act from
+ * trusting one that arrived with a `git clone`.
+ *
+ * The grant is still a write to `~/.codex/config.toml`, which this server
+ * otherwise never touches — it is a documented consequence of the default, not
+ * a hidden one, and `CM_CODEX_HOOK_TRUST=never` restores the old behaviour.
+ *
+ * @param worktreePath - Working directory of the session about to start
+ * @returns True when the dialog may be answered with trust
+ */
+export function shouldTrustCodexHooks(worktreePath: string): boolean {
+  if (resolveCodexHookTrustPolicy() === 'never') return false;
+  try {
+    // codex reads `<cwd>/.codex/hooks.json` as well as the home one, and a
+    // review that includes a hook from the repository is a review this server
+    // must not answer.
+    if (existsSync(join(worktreePath, '.codex', 'hooks.json'))) {
+      logger.info('codex-hooks-trust-withheld-repo-hooks', { worktreePath });
+      return false;
+    }
+  } catch {
+    // An unreadable worktree is not one to grant trust for.
+    return false;
+  }
+  return true;
 }
 
 /**
@@ -256,6 +355,25 @@ function fallbackUrlExpression(path: string, query: string): string {
 }
 
 /**
+ * The relay path `hooks.json` may name — never a checkout (Issue #2315).
+ *
+ * `resolveRelayScriptPath()` answers with `process.cwd()/scripts/hooks/…`, which
+ * is the checkout of whichever server wrote the file. On a machine running
+ * several worktree servers against one `$CODEX_HOME/hooks.json` that value is
+ * the only part of the generated file that moves, and every time it moves codex
+ * throws away the trust the human granted and opens on
+ * `Modified since last trusted - review required`. See `./relay-install`.
+ *
+ * So the auto path is the INSTALLED copy, which is a function of `$CODEX_HOME`
+ * alone. An explicit `relayScriptPath` (including `null`) is still honoured
+ * verbatim — that is how the suites drive the two command shapes.
+ */
+export function resolveCodexRelayCommandPath(options: CodexHookOptions = {}): string | null {
+  if (options.relayScriptPath !== undefined) return options.relayScriptPath;
+  return getInstalledCodexRelayPath(getCodexHome(options));
+}
+
+/**
  * The command for one lifecycle event.
  *
  * Prefers the shipped relay, which already reads codex's payload from stdin,
@@ -268,8 +386,7 @@ export function buildCodexEventHookCommand(
   options: CodexHookOptions = {}
 ): string {
   const marker = ` # ${CODEX_HOOK_MARKER}`;
-  const relay =
-    options.relayScriptPath === undefined ? resolveRelayScriptPath() : options.relayScriptPath;
+  const relay = resolveCodexRelayCommandPath(options);
 
   if (relay) {
     return (
@@ -444,6 +561,16 @@ export function mergeCodexHookSettings(
  */
 export function writeCodexHookSettings(options: CodexHookOptions = {}): string | null {
   const settingsPath = getCodexHooksPath(options);
+
+  // Issue #2315: put the relay where the generated file can name it without
+  // naming a checkout, BEFORE the content is built — `buildCodexHookSettings`
+  // only reads what is installed, so an install that had not happened yet would
+  // emit the inline `curl` shape and give the shared file a third form to drift
+  // between. Best-effort by construction: the installer never throws, and a
+  // machine where it cannot write simply keeps whatever copy is already there.
+  if (options.relayScriptPath === undefined) {
+    installCodexRelayScript(getCodexHome(options), resolveRelayScriptPath());
+  }
 
   let existing: unknown = null;
   let previous: string | null = null;
