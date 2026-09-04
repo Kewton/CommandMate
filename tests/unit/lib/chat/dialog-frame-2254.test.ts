@@ -287,15 +287,24 @@ describe('[#2254] nothing to draw', () => {
 // ---------------------------------------------------------------------------
 
 describe('[#2309] `selectionList: true` skips the tail slice', () => {
-  it('keeps every one of the 89 rows of a search-type picker, not the tail 16', () => {
+  it('keeps the whole search-type picker, not the tail 16', () => {
     // command-code's `/model` (Issue #2297's fixture): provider-grouped model
     // NAMES with no numbers to jump by, so #2297 correctly leaves it on the
     // arrow pad — and the old tail slice left everything but the last 16 of
-    // its 89 content rows unreachable before the card ever rendered.
+    // its content rows unreachable before the card ever rendered.
+    //
+    // **Corrected by Issue #2326.** This case originally asserted all 89
+    // compacted rows, banner included, because "no tail" was then implemented
+    // as "the whole pane". #2326 crops the pane to the picker's own rows, so
+    // the number is 71 and the banner is gone — see `dialog-frame-2326
+    // .test.ts` for why, and for the 353-row frame that made it necessary.
+    // What #2309 pinned is unchanged and is what is asserted here: every row
+    // of the LIST survives, so the arrows cannot walk past a row the card
+    // discarded.
     const full = extractDialogFrameTail(fixture(COMMAND_CODE_MODEL), { selectionList: true });
     const plain = stripAnsi(full);
-    expect(full.split('\n')).toHaveLength(89);
-    expect(plain).toContain('# Command Code v1.40.1');
+    expect(full.split('\n')).toHaveLength(71);
+    expect(full.split('\n').length).toBeGreaterThan(DIALOG_FRAME_MAX_LINES);
     // A model dozens of rows above the footer that a 16-row tail could never
     // have reached.
     expect(plain).toContain('GPT-5.4');
@@ -349,13 +358,39 @@ describe('[#2309] an opencode overlay is cropped to its rectangle, not the tail'
     expect(plain).toContain(overlay!.headerText);
   });
 
-  it('does not crop a selection list that carries no opencode rectangle', () => {
+  it('does not read an opencode rectangle off a frame that has none', () => {
     // command-code's picker is a selection list with nothing for
-    // `extractOpenCodeModalOverlayFrame` to find; it must fall back to the
-    // whole compacted frame rather than cropping to something incidental.
+    // `extractOpenCodeModalOverlayFrame` to find, which is what this case was
+    // written to pin and still is. **Corrected by Issue #2326**: the row count
+    // that used to follow — "so it falls back to the whole compacted frame" —
+    // is no longer what happens, because command-code now has a cropper of its
+    // own. The opencode reader answering `null` is the half that matters here.
     expect(detectOpenCodeModalOverlay(fixture(COMMAND_CODE_MODEL))).toBeNull();
     const full = extractDialogFrameTail(fixture(COMMAND_CODE_MODEL), { selectionList: true });
-    expect(full.split('\n')).toHaveLength(89);
+    expect(stripAnsi(full)).not.toContain('Commands');
+  });
+
+  it('falls back to the whole compacted frame when NO cropper recognises it', () => {
+    // Issue #2326: the fallback is still there and this is where it is
+    // measured — claude and codex clear their screens, so neither cropper has
+    // anything to read and neither needs one. Every compacted row is kept,
+    // exactly as #2309 left it.
+    for (const [name, rows] of [
+      [CLAUDE_MODEL, 19],
+      [CODEX_MODEL, 32],
+    ] as const) {
+      const full = extractDialogFrameTail(fixture(name), { selectionList: true });
+      expect(full.split('\n').length, name).toBe(rows);
+    }
+    // Not just a row count: the claude capture's first three content rows are
+    // its boot banner, three rows further up than the 16-row tail reaches.
+    // Their presence here — and their absence from the tail beside it — is
+    // what "the WHOLE compacted frame, uncropped" means.
+    const banner = 'Claude Code v2.1.259';
+    expect(
+      stripAnsi(extractDialogFrameTail(fixture(CLAUDE_MODEL), { selectionList: true })),
+    ).toContain(banner);
+    expect(stripAnsi(extractDialogFrameTail(fixture(CLAUDE_MODEL)))).not.toContain(banner);
   });
 
   it('is not reached for the old sidebar-only opencode fixture (no hatch on it)', () => {

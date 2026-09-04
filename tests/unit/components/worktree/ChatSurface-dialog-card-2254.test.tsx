@@ -388,7 +388,11 @@ describe('[#2254] the phone gets a shorter card, not a different one', () => {
   it('caps the frame’s height so it scrolls instead of eating the transcript', () => {
     // Issue #2106: the live region is `shrink-0`, so an uncapped card takes its
     // rows straight out of the transcript. The class is the cap.
-    renderSurface({ isSelectionListActive: true }, { compact: true });
+    //
+    // Issue #2326 moved a SELECTION LIST off this cap — see the case it added
+    // below — so the state measured here is a pager, which keeps #2106's
+    // budget exactly as this case pinned it.
+    renderSurface({ isPagerActive: true }, { compact: true });
     expect(screen.getByTestId('chat-dialog-card-frame').className).toContain('max-h-32');
   });
 
@@ -424,8 +428,29 @@ describe('[#2309] a selection list keeps everything, and gets room to show it', 
   });
 
   it('raises the PC height cap so the extra content is real scrollable space', () => {
+    // Issue #2326 replaced #2309's `max-h-[28rem]` with a viewport fraction:
+    // 448px of an 800px split left the transcript about 60px once the banner
+    // and the arrow pad were counted, which is no readable chat at all. The
+    // cap still has to be a REAL cap — bigger than the 12–20 row card's and
+    // small enough that the picker scrolls rather than pushing the transcript
+    // out — which is what the two neighbours of this assertion check.
     renderSurface({ isSelectionListActive: true });
-    expect(screen.getByTestId('chat-dialog-card-frame').className).toContain('max-h-[28rem]');
+    const className = screen.getByTestId('chat-dialog-card-frame').className;
+    expect(className).toContain('max-h-[35vh]');
+    expect(className).not.toContain('max-h-[28rem]');
+    expect(className).not.toContain('max-h-64');
+  });
+
+  it('gives the phone the same room, not #2106’s eight rows', () => {
+    // Issue #2326: `max-h-32` is 128px, about eight rows, and a search-type
+    // picker with a filter box and no number keys cannot be worked in eight
+    // rows. #2106's vertical budget is conceded ONLY while a selection list is
+    // up — the case above in "the phone's budget" holds the line for every
+    // other state.
+    renderSurface({ isSelectionListActive: true }, { compact: true });
+    const className = screen.getByTestId('chat-dialog-card-frame').className;
+    expect(className).toContain('max-h-[35vh]');
+    expect(className).not.toContain('max-h-32');
   });
 
   it('does not raise the cap for the other three states, which are still tail-sliced', () => {

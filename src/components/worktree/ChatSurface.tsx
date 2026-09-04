@@ -134,6 +134,7 @@ import {
   type ChatTranscriptScrollControls,
 } from '@/components/worktree/ChatTranscript';
 import { ChatDialogCard } from '@/components/worktree/ChatDialogCard';
+import { extractDialogFrameTail } from '@/lib/chat/dialog-frame';
 import { NavigationButtons } from '@/components/worktree/NavigationButtons';
 import { TerminalEscapeHatch } from '@/components/worktree/TerminalEscapeHatch';
 import {
@@ -200,6 +201,31 @@ export const CHAT_SCROLL_CONTAINER_SELECTOR = `[data-testid="${CHAT_TRANSCRIPT_S
  * because they sit next to a terminal that is polling on its own.
  */
 export const DIALOG_REPAINT_REFRESH_MS = 400;
+
+/**
+ * Rows a selection list needs before the card is given a taller box.
+ *
+ * ## The two mistakes this number sits between (Issue #2326)
+ *
+ * Issue #2309 raised the card's height cap for every `selectionList`, and both
+ * halves of that turned out to be wrong on real frames:
+ *
+ *  - **too tall for a short list.** claude's folder-trust dialog is two
+ *    options, and the frame the phone's own suite renders is four rows. A
+ *    four-row dialog in a 315px box is 187px of transcript spent on
+ *    whitespace, which is Issue #2106's vertical budget given away for
+ *    nothing;
+ *  - **too short for a long one.** Command Code's `/model` is 76 rows after
+ *    Issue #2326's crop, walked with arrows because #2297 correctly refuses it
+ *    number keys, and the phone's `max-h-32` shows eight of them.
+ *
+ * 24 rows is the smallest list that does not fit the taller of the two default
+ * caps: `max-h-64` is 256px, which at the card's `text-[11px] leading-snug`
+ * (15.125px measured) holds 16 rows plus the `p-2` padding. A list past that is
+ * one the reader would otherwise have to scroll a small box to see, which is
+ * the situation the concession is for; anything shorter keeps the budget.
+ */
+export const SELECTION_LIST_TALL_CARD_MIN_ROWS = 24;
 
 /**
  * Why the banner exists, in the order the reason is chosen.
@@ -731,6 +757,27 @@ export const ChatSurface = memo(function ChatSurface({
     [blockedReason, frame],
   );
 
+  // How tall the selection list actually is (Issue #2326).
+  //
+  // The card's height cap is the only thing standing between the picker and
+  // the transcript, and #2309 raised it for EVERY selection list. Most of them
+  // do not need it: claude's folder-trust list is two options and the phone's
+  // own captures are four rows, and a four-row dialog in a 315px box is 187px
+  // of transcript spent on whitespace — #2106's budget given away for nothing.
+  // So the concession is made on the CONTENT, not on the reason: a list longer
+  // than the default cap can show gets the taller box, and one that fits keeps
+  // the caps #2106 and #2254 set.
+  //
+  // The same pure function the card runs, memoised on the same input, so the
+  // two cannot disagree about how many rows there are.
+  const dialogRowCount = useMemo(
+    () =>
+      blockedReason === 'selectionList' && frame
+        ? extractDialogFrameTail(frame, { selectionList: true }).split('\n').length
+        : 0,
+    [blockedReason, frame],
+  );
+
   // --------------------------------------------------------------------
   // The dialog card's controls (Issue #2254)
   // --------------------------------------------------------------------
@@ -943,13 +990,37 @@ export const ChatSurface = memo(function ChatSurface({
               // Issue #2309: a selection list ignores this on both platforms — see
               // `ChatDialogCard` / `DialogFrameTailOptions.selectionList`.
               maxLines={compact ? 12 : undefined}
-              // Issue #2309: a selection list is real scrollable content now, not
-              // a dozen rows that fit whole, so the PC box grows to give it room.
-              // The phone's box is left at #2106's budget on purpose — the reader
-              // scrolls inside the same footprint rather than the card eating more
-              // of the transcript.
+              // Issue #2309: a selection list is real scrollable content, not a
+              // dozen rows that fit whole, so its box is not the 12–20 row one.
+              //
+              // Issue #2326 measured what #2309's fixed caps cost the surface,
+              // and corrected BOTH of them:
+              //
+              //  - the PC's `max-h-[28rem]` is 448px of an 800px split, and with
+              //    the banner and the arrow pad around it the live region took
+              //    ~560px — the transcript underneath was left about 60px, i.e.
+              //    no readable chat at all while a picker was open;
+              //  - the phone's `max-h-32` is 128px, about eight rows, well
+              //    below what a 76-row picker walked with arrows needs.
+              //    #2106's vertical budget is conceded here, and only for a
+              //    list long enough to need it.
+              //
+              // `vh` rather than `rem` because the thing the card competes with
+              // is the viewport-tall split, which a fixed cap cannot see. 35vh
+              // is 315px on the UAT's 1440x900 window: 21 rows of picker, which
+              // the highlight follow scrolls within, and about nine rows of
+              // chat still under it once the 112px of live-region chrome and
+              // the composer are counted.
+              //
+              // Gated on `dialogRowCount` rather than on the reason, so the
+              // budget is conceded only where it buys something — see that
+              // memo. Everything else keeps the caps #2106 and #2254 set.
               maxHeightClassName={
-                compact ? 'max-h-32' : blockedReason === 'selectionList' ? 'max-h-[28rem]' : 'max-h-64'
+                dialogRowCount > SELECTION_LIST_TALL_CARD_MIN_ROWS
+                  ? 'max-h-[35vh]'
+                  : compact
+                    ? 'max-h-32'
+                    : 'max-h-64'
               }
               actions={dialogActions}
             />

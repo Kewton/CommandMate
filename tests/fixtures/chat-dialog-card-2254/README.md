@@ -21,7 +21,7 @@ and fails loudly if someone normalises them.
 
 | | |
 |---|---|
-| Captured | 2026-09-03; the two Issue #2297 rows on 2026-09-04 (`tmux -L cm2297`) |
+| Captured | 2026-09-03; the two Issue #2297 rows on 2026-09-04 (`tmux -L cm2297`); the four Issue #2326 rows on 2026-09-05 (`tmux -L cm2326`) |
 | Pane geometry | **200x1000** — `TUI_PANE_WIDTH` x `TUI_PANE_HEIGHT` from `src/config/tmux-pane-config.ts`, i.e. the production layout. Issue #2254's "known traps" calls this out: at a default 80x24 the blank-padding shapes below do not appear at all. |
 | Isolation | private tmux socket (`tmux -L cmate-2254`), one throwaway `git init` directory under the session scratchpad, `kill-server` afterwards |
 | Command | `tmux -L cmate-2254 capture-pane -p -e -t '=dlg:0.0' -S -0 -E -` |
@@ -43,6 +43,10 @@ the trap recorded in `docs/design/`-adjacent notes and in Issue #1495 is that
 | `opencode-agent-overlay-1-18-27.txt` | opencode 1.18.27 | `ctrl+x a` agent-list overlay over a two-turn transcript, sidebar ON | 200 | 200 | everywhere |
 | `claude-model-2-1-260.txt` | claude 2.1.260 | the same `/model` picker one build later (Issue #2297) — identical shape, and the build the "a number key commits AND saves the default" measurement was taken on | 1000 | 14 | rows 2–4, then **986–1000** |
 | `command-code-model-1-40-1.txt` | Command Code 1.40.1 | `/model` picker (Issue #2297): provider-grouped model NAMES with no option numbers, a `› Type to search models...` filter row, footer `type to search · ↑/↓ navigate · shift+↑/↓ jump provider · enter to select · esc to cancel` | 1000 | 89 | rows **1–89** |
+| `command-code-model-1-47-1-open.txt` | Command Code 1.47.1 | the same picker over a FIVE-TURN session (Issue #2326), as it opens — arrows on the default `DeepSeek V4 Flash (latest)` | 1000 | 333 | rows **1–333**: 256 of session, 77 of picker |
+| `command-code-model-1-47-1-middle.txt` | Command Code 1.47.1 | the same frame after 32 ▼ — arrows on `Tencent Hy4 Preview` | 1000 | 333 | as above |
+| `command-code-model-1-47-1-bottom.txt` | Command Code 1.47.1 | the same frame after 72 ▼ — arrows on the last row, `Grok 4.6` | 1000 | 333 | as above |
+| `command-code-model-1-47-1-closed.txt` | Command Code 1.47.1 | the same pane immediately after `Escape` closed the picker: no footer, so nothing to crop to | 1000 | 258 | rows **1–258** |
 
 ### Both ends of the pane are represented, and that is the point
 
@@ -107,6 +111,43 @@ Assist for individuals. To continue using Gemini, please migrate to the
 Antigravity suite of products`, so `/model` never opens. Nothing about gemini's
 picker is claimed anywhere in Issue #2297's implementation as a result; it keeps
 the base vocabulary and the pre-#2297 controls.
+
+## What Issue #2326 added: a picker that is NOT alone on its pane
+
+The four `command-code-model-1-47-1-*` rows above were captured on 2026-09-05,
+the same way as everything else here — private socket (`tmux -L cm2326`), a
+throwaway directory under the session scratchpad, pane at the production
+200x1000, `kill-server` afterwards. **The picker was never confirmed**: it was
+closed with `Escape`, and the fourth file is that pane. The host's default model
+is unchanged.
+
+What is different about them is the 256 rows ABOVE the dialog. Command Code is
+an inline tool (`alternate_on=0`), so `/model` paints the picker under whatever
+the session has already printed rather than clearing the screen, and the
+existing `command-code-model-1-40-1.txt` could not show that: it was captured on
+a session with no turns behind it, so its "transcript" is nine rows of boot
+banner. These four were driven through five real turns first — four of them
+asking for a list of numbers, which is what makes 256 rows cheaply — and then
+`/model`.
+
+That gap is exactly the Issue: `extractDialogFrameTail`'s `selectionList` path
+returned **every** compacted row, so the card drew 333 rows of which the picker
+was the last 77, and the arrow-moved highlight was scrolled to below the fold.
+
+Three of the four are the same session with the arrows in three different
+places, so the frames differ **only** in which row carries the selection
+background `48;2;45;43;85`. That is deliberate: it lets
+`ChatDialogCard-2326.test.tsx` measure the follow at the top, the middle and the
+bottom of the same list without any other variable moving.
+
+### The trap these carry that the 1.40.1 capture does not
+
+`48;2;45;43;85` is not only the picker's selection. Command Code paints the
+same background on every past USER INPUT row (`❯ List the numbers …`), so the
+open capture has six painted rows — five of them transcript — and the five are
+caret-shaped as well. Issue #2323's "last mark on the screen wins" reads through
+that correctly, and the crop removes the question by removing the rows; both are
+asserted, so neither can quietly stop being true.
 
 ## Not here
 
