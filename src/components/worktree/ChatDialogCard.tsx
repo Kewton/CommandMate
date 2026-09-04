@@ -50,15 +50,60 @@
  * preserving chunk diffing, auto-follow, search) exists for a streaming
  * thousand-row log; this card is a dozen rows that change when the user presses
  * a key.
+ *
+ * ## Issue #2309: a search-type picker is not a dozen rows
+ *
+ * command-code's `/model` and opencode's pickers are tens of rows long with no
+ * number keys to answer them (Issue #2297 correctly refuses those a `1`–`9` row
+ * — a typed digit there is a search character, not a choice). For those, `frame`
+ * is not clipped to the tail at all (`extractDialogFrameTail`'s `selectionList`
+ * option, driven off `reason === 'selectionList'`); the caller raises
+ * `maxHeightClassName` instead, and this card's own `overflow-auto` turns the
+ * rest into a scroll. {@link findHighlightLineIndex} then keeps the arrow-moved
+ * highlight inside that scroll, because a list that is merely scrollable but
+ * whose current row can drift out of view is not "reachable".
  */
 
-import { useMemo } from 'react';
+import { useLayoutEffect, useMemo, useRef } from 'react';
 import { useTranslations } from 'next-intl';
 import { sanitizeTerminalOutput } from '@/lib/security/sanitize';
+import { stripAnsi } from '@/lib/detection/ansi';
 import {
   DIALOG_FRAME_DEFAULT_LINES,
   extractDialogFrameTail,
 } from '@/lib/chat/dialog-frame';
+
+/**
+ * A TUI's own selection caret, at the start of a line (Issue #2309).
+ *
+ * The three glyphs `selection-shape.ts` documents as measured across the
+ * fixtures this card renders: `❯` (claude / copilot), `›` (codex), `●`
+ * (gemini). Matched with leading whitespace and a trailing space rather than
+ * bare — a caret glyph appearing mid-sentence in an agent's own reply must not
+ * be read as a highlight, and every measured dialog puts it flush left with a
+ * space before the label.
+ */
+const HIGHLIGHT_CARET_PATTERN = /^[^\S\n]*[❯›●][^\S\n]/;
+
+/**
+ * Index of the LAST line carrying a selection caret, or -1.
+ *
+ * Last, not first: a TUI redraws the whole list on every keypress, so if more
+ * than one row happened to start with a caret-shaped glyph (unlikely, but the
+ * fixtures are real terminal output and not a controlled vocabulary) the
+ * bottom-most one is the one nearest the footer, which is where the measured
+ * dialogs place the currently highlighted row relative to the rest of a long
+ * list scrolled into view.
+ *
+ * Exported for the unit suite; not part of the render loop's public surface.
+ */
+export function findHighlightLineIndex(plainText: string): number {
+  const lines = plainText.split('\n');
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    if (HIGHLIGHT_CARET_PATTERN.test(lines[i])) return i;
+  }
+  return -1;
+}
 
 export interface ChatDialogCardProps {
   /** A raw `capture-pane -p -e` frame — `PaneTerminalState.output`. */
@@ -93,10 +138,45 @@ export function ChatDialogCard({
 }: ChatDialogCardProps) {
   const t = useTranslations('worktree');
 
+  // Issue #2309: a selection list is never tail-sliced — see
+  // `DialogFrameTailOptions.selectionList`. `maxLines` still applies to a
+  // pager / unclassified / promptUnreadable card, exactly as before.
+  const isSelectionList = reason === 'selectionList';
+
   // Both steps memoised on the frame: the pane polls every couple of seconds and
   // usually returns the same bytes, and `sanitizeTerminalOutput` runs DOMPurify.
-  const tail = useMemo(() => extractDialogFrameTail(frame, { maxLines }), [frame, maxLines]);
+  const tail = useMemo(
+    () => extractDialogFrameTail(frame, { maxLines, selectionList: isSelectionList }),
+    [frame, maxLines, isSelectionList],
+  );
   const html = useMemo(() => (tail ? sanitizeTerminalOutput(tail) : ''), [tail]);
+
+  // --------------------------------------------------------------------
+  // Highlight follow (Issue #2309)
+  // --------------------------------------------------------------------
+  // A selection list this long only makes sense with the highlighted row kept
+  // in view as the arrows move it — otherwise "scrollable" is not the same as
+  // "reachable". The rows are one blob of HTML rather than one element per
+  // line (see the docblock for why `TerminalDisplay`'s per-line diffing is not
+  // reused here), so there is no element to `scrollIntoView`; the frame is
+  // monospace with a fixed line height, so the highlighted row's fraction of
+  // the total line count is used to place it instead.
+  const frameRef = useRef<HTMLDivElement>(null);
+  const highlightLineIndex = useMemo(
+    () => (isSelectionList && tail ? findHighlightLineIndex(stripAnsi(tail)) : -1),
+    [isSelectionList, tail],
+  );
+  useLayoutEffect(() => {
+    if (highlightLineIndex < 0) return;
+    const el = frameRef.current;
+    if (!el) return;
+    const totalLines = stripAnsi(tail).split('\n').length;
+    if (totalLines <= 1) return;
+    const scrollable = el.scrollHeight - el.clientHeight;
+    if (scrollable <= 0) return;
+    const target = (highlightLineIndex / (totalLines - 1)) * scrollable;
+    el.scrollTop = Math.min(scrollable, Math.max(0, target - el.clientHeight / 2));
+  }, [highlightLineIndex, tail]);
 
   if (!tail) return null;
 
@@ -111,8 +191,13 @@ export function ChatDialogCard({
       {/* The dark island. `overflow-auto` in both axes: rows are captured at
           `TUI_PANE_WIDTH` (200 columns) and re-wrapping a box-drawn dialog at a
           phone's width would break every border it draws, so the card scrolls
-          sideways the way `TerminalDisplay`'s `wrapMode: 'frame'` does. */}
+          sideways the way `TerminalDisplay`'s `wrapMode: 'frame'` does.
+
+          Issue #2309: for a selection list this is real, scrollable content —
+          `maxHeightClassName` is raised by the caller and this box no longer
+          shows the whole thing at once, on purpose. */}
       <div
+        ref={frameRef}
         data-testid="chat-dialog-card-frame"
         // `role="log"` would claim this is a live region; it is a still frame the
         // reader is being shown, and the surface already owns one live region.

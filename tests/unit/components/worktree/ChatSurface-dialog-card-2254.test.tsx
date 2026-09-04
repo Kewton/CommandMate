@@ -192,7 +192,12 @@ describe('[#2254] the dialog card appears for every state chat used to refuse', 
     // The specific failure a "first content row onwards" implementation has, and
     // the reason `extractDialogFrameTail` drops leading blank runs rather than
     // slicing from the first non-blank row.
-    renderSurface({ isSelectionListActive: true });
+    //
+    // A pager, not a selection list: Issue #2309 stops tail-slicing a selection
+    // list altogether (see the describe block below), so this frame's actual
+    // top row would legitimately survive there. The pager keeps the original
+    // tail behaviour this test pins.
+    renderSurface({ isPagerActive: true });
     const frame = screen.getByTestId('chat-dialog-card-frame');
     expect(frame).toHaveTextContent('❯ 2. Opus (1M context)');
     expect(frame).not.toHaveTextContent('a-line-from-far-above');
@@ -388,12 +393,46 @@ describe('[#2254] the phone gets a shorter card, not a different one', () => {
   });
 
   it('uses the taller cap on PC', () => {
-    renderSurface({ isSelectionListActive: true });
+    // Not a selection list: Issue #2309 raises the PC cap specifically for
+    // selectionList (see the describe block below), so a pager stays at the
+    // original default this test pins.
+    renderSurface({ isPagerActive: true });
     expect(screen.getByTestId('chat-dialog-card-frame').className).toContain('max-h-64');
   });
 
   it('still shows the dialog’s last row at the phone’s row budget', () => {
     renderSurface({ isSelectionListActive: true }, { compact: true });
     expect(screen.getByTestId('chat-dialog-card-frame')).toHaveTextContent(FRAME_LAST_ROW);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// (5) Issue #2309: a selection list is not given a tail at all
+// ---------------------------------------------------------------------------
+
+describe('[#2309] a selection list keeps everything, and gets room to show it', () => {
+  it('keeps content the tail window would have cut, instead of dropping it', () => {
+    // The exact row `[#2254] shows the dialog rows…` above proves is EXCLUDED
+    // for a pager. For a selection list #2309 reverses that: a search-type
+    // picker (command-code's 89-row `/model`, opencode's pickers) is content
+    // the user needs, not padding around a short dialog, so nothing before the
+    // dialog's own footer may be thrown away before the card can scroll to it.
+    renderSurface({ isSelectionListActive: true });
+    const frameEl = screen.getByTestId('chat-dialog-card-frame');
+    expect(frameEl).toHaveTextContent('a-line-from-far-above-that-must-not-be-in-the-card');
+    expect(frameEl).toHaveTextContent(FRAME_LAST_ROW);
+  });
+
+  it('raises the PC height cap so the extra content is real scrollable space', () => {
+    renderSurface({ isSelectionListActive: true });
+    expect(screen.getByTestId('chat-dialog-card-frame').className).toContain('max-h-[28rem]');
+  });
+
+  it('does not raise the cap for the other three states, which are still tail-sliced', () => {
+    for (const live of [{ isPagerActive: true }, { isUnclassifiedActive: true }]) {
+      const { unmount } = renderSurface(live);
+      expect(screen.getByTestId('chat-dialog-card-frame').className).toContain('max-h-64');
+      unmount();
+    }
   });
 });

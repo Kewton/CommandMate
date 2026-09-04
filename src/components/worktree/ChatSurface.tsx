@@ -940,8 +940,17 @@ export const ChatSurface = memo(function ChatSurface({
               reason={blockedReason}
               // Issue #2106: the phone gets the low end of the Issue's 12–20 row
               // window and a shorter box, so the card cannot eat the transcript.
+              // Issue #2309: a selection list ignores this on both platforms — see
+              // `ChatDialogCard` / `DialogFrameTailOptions.selectionList`.
               maxLines={compact ? 12 : undefined}
-              maxHeightClassName={compact ? 'max-h-32' : 'max-h-64'}
+              // Issue #2309: a selection list is real scrollable content now, not
+              // a dozen rows that fit whole, so the PC box grows to give it room.
+              // The phone's box is left at #2106's budget on purpose — the reader
+              // scrolls inside the same footprint rather than the card eating more
+              // of the transcript.
+              maxHeightClassName={
+                compact ? 'max-h-32' : blockedReason === 'selectionList' ? 'max-h-[28rem]' : 'max-h-64'
+              }
               actions={dialogActions}
             />
           ) : null}
