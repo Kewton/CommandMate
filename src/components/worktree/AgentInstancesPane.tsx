@@ -116,6 +116,27 @@ export interface AgentInstancesPaneProps {
    * opencode instance**; see {@link useAgentSourceByInstance}.
    */
   sourceByInstance?: Readonly<Partial<Record<string, AgentEventSourceView>>>;
+  /**
+   * Issue #2316: root class, the same className-driven convention the other
+   * activity panes follow (TodoPane, VerificationPane, EnvManagerPane, ...).
+   *
+   * Absent by default, and that default is the MOBILE contract: MobileAgentInstancesPane
+   * renders this pane at CONTENT height inside its own scrolling tab and stacks
+   * more UI (the "show as tabs" picker) underneath it, so a height or an
+   * overflow of our own here would mean a nested scroller and a collapsed pane
+   * (#874).
+   *
+   * A caller that CONSTRAINS our height passes it here — the PC activity column
+   * passes `h-full` — and that also makes this pane the scroll owner. It has to
+   * be both: ActivityPane is `h-full flex flex-col min-h-0` and the activity
+   * column above it is `overflow-hidden`, so a height without an
+   * `overflow-y-auto` INSIDE the pane merely clips — which is exactly how the
+   * two bottom disclosures ("use this layout as the default", "agent CLI
+   * versions") became unreachable once opened. Hence `overflow-y-auto` is added
+   * precisely when a class is supplied; on the auto-height mobile box it would
+   * be inert anyway, and leaving it off keeps that box a plain block.
+   */
+  className?: string;
 }
 
 // ============================================================================
@@ -231,6 +252,7 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
   onVibeLocalContextWindowChange,
   modelByInstance,
   sourceByInstance,
+  className = '',
 }: AgentInstancesPaneProps) {
   const t = useTranslations('schedule');
   const tCommon = useTranslations('common');
@@ -447,8 +469,15 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
     [instances, persist]
   );
 
+  // Issue #2316: see the `className` prop's doc. A caller-supplied class means a
+  // caller-constrained height, and a constrained height is what makes an inner
+  // `overflow-y-auto` the difference between scrolling and clipping.
+  const rootClassName = ['flex flex-col p-4', className ? 'overflow-y-auto' : '', className]
+    .filter(Boolean)
+    .join(' ');
+
   return (
-    <div className="p-4" data-testid="agent-instances-pane">
+    <div className={rootClassName} data-testid="agent-instances-pane">
       <h3 className="text-sm font-semibold text-foreground mb-1">
         {t('agentInstances')}
       </h3>
