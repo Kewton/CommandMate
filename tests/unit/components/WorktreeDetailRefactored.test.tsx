@@ -410,6 +410,41 @@ describe('WorktreeDetailRefactored', () => {
       expect(primaryContainer).toHaveClass('flex', 'flex-col', 'flex-1', 'min-h-0', 'min-w-0');
     });
 
+    // Issue #2316: the activity column is `overflow-hidden` and ActivityPane is
+    // `h-full flex flex-col min-h-0`, so a pane that owns no scroller is clipped
+    // rather than scrolled. Every other pane in the activity map is mounted with
+    // `className="h-full"`; AgentInstancesPane was the one mount that passed
+    // nothing, which is why its two bottom disclosures ("use this layout as the
+    // default", "agent CLI versions") ran off the bottom when opened. This
+    // asserts the real mount — the pane rendered here is the real
+    // AgentInstancesPane, only ActivityPane is stubbed.
+    describe('agent activity mount (Issue #2316)', () => {
+      // useActivityBarState persists the active activity per worktree in
+      // localStorage, so switching to `agent` here would otherwise change the
+      // STARTING activity of every test that runs after this one in this file
+      // (they assume the 'files' default and look for file-tree-view).
+      afterEach(() => {
+        window.localStorage.clear();
+      });
+
+      it('mounts AgentInstancesPane with h-full so it scrolls instead of clipping', async () => {
+        render(
+          <ConfirmProvider>
+            <WorktreeDetailRefactored worktreeId="test-worktree-123" />
+          </ConfirmProvider>
+        );
+
+        fireEvent.click(await screen.findByTestId('activity-bar-button-agent'));
+
+        const pane = await screen.findByTestId('agent-instances-pane');
+        expect(pane).toHaveClass('h-full');
+        expect(pane).toHaveClass('overflow-y-auto');
+        // The clipped sections are inside the element that now scrolls.
+        expect(pane).toContainElement(screen.getByTestId('agent-defaults-toggle'));
+        expect(pane).toContainElement(screen.getByTestId('agent-updates-toggle'));
+      });
+    });
+
     it('shows PromptPanel when prompt is active', async () => {
       mockFetch.mockImplementation((url: string) => {
         if (url.includes('/current-output')) {
