@@ -548,3 +548,5 @@ Bug reports, feature suggestions, and documentation improvements are welcome. Se
 ## License
 
 [MIT License](./LICENSE) - Copyright (c) 2026 Kewton
+
+<!-- UAT probe for #2330 (2026-09-05). This PR is closed without merging. -->
