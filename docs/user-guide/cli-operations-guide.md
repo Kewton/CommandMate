@@ -1935,6 +1935,55 @@ npm スクリプトがクリーンアップで `rm -rf dist` をログに出し�
 （[docs/design/task-contract.md](../design/task-contract.md)）を使ってください。こちらは
 確認プロンプトの**質問文・選択肢**に照合し、マッチしたら自動応答せず人間へエスカレートします。
 
+### 承認の経路はエージェントで 2 つに分かれる（command-code は画面ベースのみ）
+
+Auto-Yes が「自動で答える」やり方は 1 つではありません。**どちらの経路になるかはエージェントで
+決まり**、`--enable` の書き方では変わりません。
+
+| 経路 | 何が起きるか | エージェント |
+|------|-------------|-------------|
+| **hooks 承認** | エージェントがツールを実行する**前**に CommandMate へ問い合わせ、CommandMate が裁定する。承認された場合ダイアログは**描かれないまま**先へ進む | claude / codex / copilot / antigravity（opencode は hooks ではなく SSE で同じことをする） |
+| **画面ベース（TUI 番号応答）** | ダイアログが**実際に描かれてから**、CommandMate がターミナルを読み取り、選択肢の番号キーを送り返す | **command-code** / gemini / vibe-local |
+
+**command-code は構造上 hooks 承認を選べません。** このツールの `PreToolUse` hook は権限ダイアログが
+**承認された後**に発火するため、hook の応答ではダイアログを消せないからです（Command Code v1.49.0
+実測: ダイアログ検出 `23:02:19.398Z` → 番号送信 `23:02:19.919Z` → `PreToolUse` 到達
+`23:02:20.120Z`）。そのため command-code の `PreToolUse` は `/api/hooks/agent-event` に
+**観測用のイベント**として登録されており、承認の裁定には使われません。経路ごとの詳細は
+[エージェントイベント hooks](./agent-event-hooks.md) を参照してください。
+
+CLI から見える違いは次の 3 点です。
+
+- **ダイアログは一度ターミナルに描かれます。** 描かれてから消えるまで実測 3〜4 秒（うち検出から
+  番号送信までが 0.1〜0.6 秒）かかります。hooks 承認の 4 ツールでは、承認される限りダイアログ
+  そのものが出ません
+- **ターミナルを読めない状況では答えられません。** 画面ベースの経路はペインのキャプチャが唯一の
+  入力なので、キャプチャできないフレームや検出をすり抜けたフレームは無応答のまま残ります
+  （`wait` の `unclassified` と同じ穴です）
+- **`auto-yes --enable` の 2 行目（保留承認の再裁定）は出ません。** あれは `resync` capability を
+  持つ opencode だけの機能で、画面ベースの 3 ツールにも hooks 承認の 4 ツールにもありません
+
+どちらの経路であっても、**答えたのが誰かは `capture --prompts` で確認できます**
+（`answeredBy` が `auto` ならサーバの Auto-Yes、`human` なら `respond` / チャット UI からの応答）。
+
+```console
+$ commandmate capture <worktree-id> --instance command-code --prompts --json
+{
+  "prompts": [
+    {
+      "question": "… Execute Shell Command Command Code needs to execute rm -f probe.txt. …",
+      "options": [{ "number": 1, "label": "Yes", "isDefault": true }, …],
+      "status": "answered", "answer": "1", "answeredBy": "auto"
+    }
+  ]
+}
+```
+
+> **これは「command-code では Auto-Yes が弱い」という意味ではありません。** 隔離環境の実機確認では、
+> `Create File` と `Execute Shell Command` のどちらのダイアログも Auto-Yes 有効時は `answeredBy: auto`
+> で自動応答され、無効時は 45 秒放置してもダイアログが残りました（対照実験）。違うのは**経路**と、
+> 「ダイアログが一度描かれる」ことに由来する上記 3 点だけです。
+
 ---
 
 ## commandmate instances
