@@ -98,6 +98,48 @@ describe('AgentInstancesPane (Issue #869)', () => {
     });
   });
 
+  // Issue #2316: the PC activity column is `overflow-hidden` and ActivityPane is
+  // `h-full flex flex-col min-h-0`, so a pane with no scroller of its own is
+  // simply CLIPPED — which is how the two bottom disclosures ("use this layout as
+  // the default", "agent CLI versions") became unreachable when opened. The pane
+  // follows the same className-driven convention as the other activity panes:
+  // constrained height comes from the caller, and it is that class which also
+  // turns the pane into the scroll owner. Mobile (#874) embeds this SAME pane in
+  // its own scrolling tab with more UI stacked underneath, so it passes no class
+  // and must stay a content-height block — a scroller here would nest.
+  describe('scroll ownership (Issue #2316)', () => {
+    const roster = [primary('claude', 0), primary('codex', 1)];
+
+    it('applies the caller className to the root and scrolls internally (PC mount)', () => {
+      render(<AgentInstancesPane {...baseProps} instances={roster} className="h-full" />);
+
+      const pane = screen.getByTestId('agent-instances-pane');
+      expect(pane).toHaveClass('h-full');
+      expect(pane).toHaveClass('overflow-y-auto');
+      expect(pane).toHaveClass('flex', 'flex-col', 'p-4');
+    });
+
+    it('stays a content-height block with no scroller when no className is given (mobile mount)', () => {
+      render(<AgentInstancesPane {...baseProps} instances={roster} />);
+
+      const pane = screen.getByTestId('agent-instances-pane');
+      expect(pane.className).not.toContain('overflow-y-auto');
+      expect(pane.className).not.toContain('h-full');
+      expect(pane).toHaveClass('flex', 'flex-col', 'p-4');
+    });
+
+    it('keeps the scroller on the root that owns BOTH bottom disclosures', () => {
+      render(<AgentInstancesPane {...baseProps} instances={roster} className="h-full" />);
+
+      const pane = screen.getByTestId('agent-instances-pane');
+      // The two sections the bug clipped. `toContainElement` (not merely
+      // "is in the document") is the point: a scroller on some other wrapper
+      // would not bring these into reach.
+      expect(pane).toContainElement(screen.getByTestId('agent-defaults-toggle'));
+      expect(pane).toContainElement(screen.getByTestId('agent-updates-toggle'));
+    });
+  });
+
   describe('add instance', () => {
     it('PATCHes the roster with the new instance and reports it via onInstancesChange', async () => {
       const onInstancesChange = vi.fn();

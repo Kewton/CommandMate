@@ -720,6 +720,13 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
           // the per-instance status map itself — the pane reads `[id]?.model`
           // — so no extra derivation and no extra memo dependency.
           modelByInstance={agentModelByInstance}
+          // Issue #2316: the pane is otherwise laid out at content height (the
+          // mobile shell embeds the same component in its own scroller), so the
+          // activity column's fixed height would just clip its two bottom
+          // disclosures. Handing it `h-full` — the same class git / notes /
+          // schedules / todo / skills / verification / env are mounted with —
+          // makes it the scroll owner inside ActivityPane's `min-h-0` column.
+          className="h-full"
         />
       ),
       timer: <TimerPane worktreeId={worktreeId} instances={instances} />,
