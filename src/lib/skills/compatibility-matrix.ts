@@ -168,6 +168,26 @@ const OPENCODE_EVIDENCE_SOURCE =
 
 const MEASURED_DATE_2026_08_25 = '2026-08-25';
 
+/**
+ * Evidence reference for the Command Code 1.49.0 measurement (Issue #2302).
+ *
+ * The reference doc carries the harness, both controls and the raw CLI output,
+ * which is the half of a row a reader can actually check.
+ */
+const COMMAND_CODE_EVIDENCE_SOURCE =
+  'https://github.com/Kewton/CommandMate/blob/main/docs/reference/skill-agent-compatibility.md#8-command-code-probe-log-issue-2302';
+
+const MEASURED_DATE_2026_09_05 = '2026-09-05';
+
+/**
+ * Evidence reference for the Copilot 1.0.83 measurement (Issue #2302).
+ *
+ * The same probe log also carries a Gemini 0.58.0 discovery measurement that is
+ * deliberately *not* recorded as a row — see the `gemini` entry below.
+ */
+const OTHER_AGENTS_EVIDENCE_SOURCE =
+  'https://github.com/Kewton/CommandMate/blob/main/docs/reference/skill-agent-compatibility.md#9-gemini--copilot-probe-log-issue-2302';
+
 function unmeasuredEntry(agent: CLIToolType): SkillAgentMatrixEntry {
   return {
     agent,
@@ -252,6 +272,16 @@ const AGENT_DISCOVERY_MATRIX: readonly SkillAgentMatrixEntry[] = [
     reloadKey: AGENT_RELOAD_MESSAGE_KEYS.SESSION_RESTART_NO_SLASH,
     skipReasonKey: null,
   },
+  // Issue #2302 *did* measure gemini 0.58.0 — `gemini skills list --all`
+  // returns `.agents/skills` with an absolute path, and `.claude/skills`
+  // planted at the same moment does not appear. It is still recorded as
+  // unmeasured here, on purpose: the invocation axis could not be measured at
+  // all (sign-in fails with "This client is no longer supported for Gemini Code
+  // Assist for individuals", so the TUI never reaches a composer), and landing
+  // the half-row is a change to `tests/integration/skills-agent-discovery-probe.test.ts`,
+  // which pins gemini as its example of an Agent with no measurement. The
+  // probe log is kept so the next pass starts from evidence rather than zero:
+  // `docs/reference/skill-agent-compatibility.md` §9.1.
   unmeasuredEntry('gemini'),
   unmeasuredEntry('vibe-local'),
   {
@@ -296,15 +326,102 @@ const AGENT_DISCOVERY_MATRIX: readonly SkillAgentMatrixEntry[] = [
     reloadKey: AGENT_RELOAD_MESSAGE_KEYS.SESSION_RESTART,
     skipReasonKey: null,
   },
-  unmeasuredEntry('copilot'),
+  {
+    agent: 'copilot',
+    // Issue #2302, GitHub Copilot CLI 1.0.83. The only Agent so far measured to
+    // read *both* CommandMate install roots from one listing: `copilot skill
+    // list` returns `.github/skills` (positive control), `.agents/skills` and
+    // `.claude/skills`, and the byte-identical dual-root install appears once
+    // rather than twice.
+    //
+    // `copilot skill --help` claims those roots too. That claim is not the
+    // evidence — the probe Skills are, one per root with its own token.
+    discoveryRoots: [SKILL_INSTALL_ROOT_PREFIX, SKILL_CLAUDE_INSTALL_ROOT_PREFIX],
+    discovery: {
+      outcome: 'verified',
+      evidenceKind: 'mechanical',
+      labelKey: AGENT_AXIS_OUTCOME_LABEL_KEYS.verified,
+      evidenceKindKey: AGENT_EVIDENCE_KIND_LABEL_KEYS.mechanical,
+      limitationKey: null,
+    },
+    invocation: {
+      // Typing `/probe` in Copilot's own composer offers all four planted
+      // Skills, `.claude/skills` included. Controls: `/zzzznotacommand` matched
+      // nothing and `/hel` matched the built-in commands, so the palette was
+      // filtering rather than listing everything.
+      //
+      // Measured at the palette, which is what this axis is — the same standard
+      // the Claude row was measured to. The model was not signed in during the
+      // probe, so a Skill actually running end to end is *not* claimed here.
+      outcome: 'verified',
+      evidenceKind: 'mechanical',
+      labelKey: AGENT_AXIS_OUTCOME_LABEL_KEYS.verified,
+      evidenceKindKey: AGENT_EVIDENCE_KIND_LABEL_KEYS.mechanical,
+      limitationKey: null,
+    },
+    testedVersion: '1.0.83',
+    testedDate: MEASURED_DATE_2026_09_05,
+    evidenceSource: OTHER_AGENTS_EVIDENCE_SOURCE,
+    // Whether a Skill added mid-session is picked up was not measured.
+    reloadKey: AGENT_RELOAD_MESSAGE_KEYS.UNKNOWN,
+    skipReasonKey: null,
+  },
   // CommandMate's own slash palette serves `.agents/skills` entries to
   // antigravity sessions (#1504). That is CommandMate injecting a command, not
   // the Agent discovering a Skill, so it is not evidence for this table.
   unmeasuredEntry('antigravity'),
-  // Issue #2250: Command Code was added as an interactive agent in Epic #2249
-  // Phase A; nobody has driven a Skill through it, so it is `unknown`, not
-  // `unsupported`.
-  unmeasuredEntry('command-code'),
+  {
+    agent: 'command-code',
+    // Issue #2250 left this row unmeasured; Issue #2302 measured it on 1.49.0.
+    //
+    // Of CommandMate's two install roots, Command Code reads `.agents/skills`
+    // and does not read `.claude/skills`. `cmd skills list -d` names the roots
+    // it looks in — project `.commandcode/skills` and `.agents/skills`, the same
+    // pair under `$HOME` — and `.claude/skills` is not among them. A probe Skill
+    // was planted in each root at the same moment, so the split is the Agent's
+    // and not the install's: `.commandcode/skills` is the positive control and
+    // came back listed, `.claude/skills` is the negative control and did not.
+    //
+    // The dual-root install (#1460) is therefore half-read and still correct:
+    // one byte-identical payload in both roots is listed exactly once, from
+    // `.agents/skills`. Naming the unread root here would render as "installed
+    // and invisible" for anyone reading the table to decide where to look.
+    discoveryRoots: [SKILL_INSTALL_ROOT_PREFIX],
+    discovery: {
+      outcome: 'verified',
+      evidenceKind: 'mechanical',
+      labelKey: AGENT_AXIS_OUTCOME_LABEL_KEYS.verified,
+      evidenceKindKey: AGENT_EVIDENCE_KIND_LABEL_KEYS.mechanical,
+      limitationKey: null,
+    },
+    invocation: {
+      // The axis codex and opencode both fail, and Command Code passes: typing
+      // `/probe` in its own composer offers the installed Skills as `[skill]`
+      // rows, and `/skills` lists them under "Project skills" with an
+      // `[.agents]` badge. So no limitation is attached here — CommandMate's
+      // palette is a convenience for this Agent, not the only route in.
+      //
+      // Headless is where it was machine-checked: `cmd -p "/<name>"` emits
+      // `{"type":"skill_loaded","name":"<name>"}` before the run starts and the
+      // model then answers the Skill's token. `--no-skills` is the control that
+      // makes that event mean discovery rather than prompt text — same prompt,
+      // no event.
+      outcome: 'verified',
+      evidenceKind: 'mechanical',
+      labelKey: AGENT_AXIS_OUTCOME_LABEL_KEYS.verified,
+      evidenceKindKey: AGENT_EVIDENCE_KIND_LABEL_KEYS.mechanical,
+      limitationKey: null,
+    },
+    testedVersion: '1.49.0',
+    testedDate: MEASURED_DATE_2026_09_05,
+    evidenceSource: COMMAND_CODE_EVIDENCE_SOURCE,
+    // Also measured: a Skill planted into a *running* session shows up in the
+    // `/skills` picker, which rescans when opened, but not in the composer's
+    // slash completion, which is built once at session start. A restart is what
+    // makes both agree, so that is the instruction.
+    reloadKey: AGENT_RELOAD_MESSAGE_KEYS.SESSION_RESTART,
+    skipReasonKey: null,
+  },
 ];
 
 /** The measured matrix, in CLI-tool declaration order. */
