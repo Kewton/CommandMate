@@ -58,6 +58,15 @@ If this is the kind of AI development workflow you want, [give the repo a star](
 | **Scheduled Execution** | Cron-based auto-run via CMATE.md | Daily reviews, nightly tests — agents work on a schedule |
 | **Token Authentication** | SHA-256 hashed token + HTTPS + rate limiting | Secure remote access — no credentials leaked, brute-force protected |
 
+### Supported agents
+
+All eight are first-class. Each one gets the same treatment inside CommandMate — its own launch path, its own hook source and its own status detection — so the worktree session, the task contract, the verification gates and the evidence trail behave the same way whichever agent you pick.
+
+- **Claude Code**, **Codex**, **Gemini CLI**, **Copilot**, **Antigravity** — choose per worktree, per task.
+- **OpenCode** — the open-source terminal agent, driven through the same contract-and-gate path as the rest.
+- **Command Code** — driven the same way, its hooks and its transcript included.
+- **Local models** (`vibe-local`) — run the same loop against a model you host yourself.
+
 ---
 
 ## Use Cases

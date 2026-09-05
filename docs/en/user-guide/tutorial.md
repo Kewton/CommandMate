@@ -40,6 +40,7 @@ Every block of output on this page is **measured from one real pass through this
 | 5 | One session per worktree, one gate per contract | Parallel is safe only with isolation and separate gates |
 | 6 | `verify history` / `task show` / the Review screen / `report metrics` | The record outlives the chat |
 | 7 | (Optional) Open a pull request | — |
+| Appendix | The same loop with OpenCode or Command Code | That the verdict does not depend on which agent did the work |
 
 ---
 
@@ -48,7 +49,8 @@ Every block of output on this page is **measured from one real pass through this
 - **CommandMate 0.24.0 or newer**, running. If not: `npx commandmate@latest`
   The contracts in the sample repository carry their own gate definitions (`gateDefinitions`), which needs 0.24.0 or newer
 - **Node.js 22+**
-- **One agent CLI**: Claude Code, Codex, or Antigravity
+- **One agent CLI**: Claude Code, Codex, Antigravity, OpenCode, or Command Code
+  Every measurement on this page was taken with Claude Code; the [appendix](#appendix-run-the-same-loop-with-opencode-or-command-code) runs the same round with OpenCode and Command Code
 - **A GitHub account** — you will fork the sample repository
 - **An authenticated `gh` (GitHub CLI)** — only if you use **Fork & Add** in Step 0
 
@@ -257,6 +259,10 @@ Message sent.
 
 CommandMate records a task and hands the agent the contract's goal along with its scope.
 
+> **Using something other than Claude Code?** Name the target with `--instance` and everything
+> after that is the same — neither the contract nor the gates branch on the agent. See
+> [Appendix: run the same loop with OpenCode or Command Code](#appendix-run-the-same-loop-with-opencode-or-command-code).
+
 ![Reading the contract and the verification config, then sending it and taking the verdict](../../images/tutorial/cm-t4-contract-verify.en.gif)
 
 **What you see**: the verification config (`verify.yaml`) and the contract file shown one card at a time, then a terminal running `commandmate ls`, `commandmate send <id> --contract <path>`, and a `commandmate wait <id> --verify` that returns `exit 10` because the agent is asking; after `commandmate respond <id> 1` the second `wait` prints `GATE work-evidence PASS` / `GATE scope PASS` / `GATE unit PASS` / `RESULT passed` and `echo $?` returns `0`.
@@ -315,7 +321,7 @@ CommandMate runs **one session per git worktree**, side by side. It does not *cr
 /worktree-new fix/shout
 ```
 
-**Antigravity** — `worktree-new` is verified with Claude Code (`.claude/skills/`) and Codex (`.agents/skills/`) but **not with Antigravity**. Paste this instead:
+**Antigravity / OpenCode / Command Code** — `worktree-new` is verified with Claude Code (`.claude/skills/`) and Codex (`.agents/skills/`) but **not with these three**. Paste this instead — it goes through no Skill, so any agent reads it the same way:
 
 > Create a git worktree for a new branch `fix/shout`.
 > Put it next to this repository, as a sibling directory named
@@ -462,6 +468,98 @@ gh pr create --fill
 ```
 
 If you want the acceptance criteria themselves installed as a Skill, add `cmate-acceptance-test` from the official Catalog exactly as in Step 2.
+
+---
+
+## Appendix: run the same loop with OpenCode or Command Code
+
+> **What an engineer would care about here**: if the verdict depends on which agent produced the work, it is not a verdict — it is a compatibility accident.
+
+Every measurement in this page was taken with Claude Code, but the loop itself — **contract in,
+send, verification gate out** — does not depend on the agent. The only thing that changes is **how
+you name the target**. This appendix runs the same Step 3 → Step 4 → Step 6 round with OpenCode and
+with Command Code.
+
+### A-1. Why it does not depend on the agent
+
+- **The contract is YAML, and what reaches the agent is plain text.** CommandMate composes the
+  preamble (`## 実行契約` / `## タスク`) from the contract and sends it to the session. Nothing in
+  that composition branches on the agent (`composeContractMessage()`,
+  `src/lib/tasks/contract-message.ts`)
+- **A gate is a shell command run in the worktree's working directory.** Pass or fail comes from
+  that process's exit code, and the agent takes no part in the judgement. `command: npm test` in
+  `.commandmate/verify.yaml` runs the same way over anyone's code
+
+So Step 3 (`commandmate verify`) and Step 6 (`verify history` / `task show` / `report metrics`)
+work with **exactly the commands in the body of this page**. The only commands that need a target
+are the two that touch an agent session: `send` and `wait`.
+
+### A-2. Name the target
+
+Pass **a CLI tool id itself** to `--instance` and it resolves to that tool's **primary instance**.
+No roster entry is needed up front, and `send` starts the session if it is not running.
+
+```bash
+# one round with OpenCode
+commandmate send commandmate-tutorial --contract .commandmate/tasks/fix-greet.yaml --instance opencode
+commandmate wait commandmate-tutorial --instance opencode --verify
+echo $?
+```
+
+```bash
+# one round with Command Code
+commandmate send commandmate-tutorial --contract .commandmate/tasks/fix-greet.yaml --instance command-code
+commandmate wait commandmate-tutorial --instance command-code --verify
+echo $?
+```
+
+What comes back has the same shape as Step 4-4 (`GATE` lines → `RESULT` → an exit code), and the
+gate that judges it is still `issue-greet`. The contract did not change, so there is nothing for it
+to change into.
+
+> **Write `--instance` on `wait` too.** `wait` has no `--agent`. Name the target only on `send` and
+> call a bare `wait`, and what you are waiting on is the worktree's **default agent** — so you can
+> "detect completion" of Claude Code while the OpenCode session you actually sent to is still
+> running, and nothing errors out
+> ([CLI Operations Guide](./cli-operations-guide.md#commandmate-wait)).
+
+### A-3. Check that the target took
+
+You can read back where the target actually resolved:
+
+```bash
+commandmate capture commandmate-tutorial --instance opencode --json | jq -r '.cliTool, .instanceId, .resolvedBy'
+```
+
+Expect `opencode` / `opencode` / `primary`. If `resolvedBy` comes back `worktree-default`, that
+`--instance` matched neither a roster entry nor a CLI tool id, and it fell through to the
+worktree's **default agent**.
+
+To put it on the roster so the same instance is also managed from the Agent pane in the browser UI
+(optional; `--agent` declares the CLI tool of the new roster row and is required by `add`):
+
+```bash
+commandmate instances commandmate-tutorial add --agent opencode
+commandmate instances commandmate-tutorial
+```
+
+See the [CLI Operations Guide](./cli-operations-guide.md#commandmate-instances) for the details.
+
+### A-4. What does change per agent
+
+The loop is shared; these three are not. They are listed separately so that nothing shared gets
+claimed for something that is not.
+
+| What changes | What happens |
+|---|---|
+| Skill discovery in Step 2 | Which agent reads which root, and how it can then be invoked, is tracked as measured evidence. The install procedure itself is the same for every agent. For the current state see [Agent Skills Distribution](./skills.md) and [skill-agent-compatibility.md](../../reference/skill-agent-compatibility.md), which are updated as measurements land |
+| `/worktree-new` in Step 5-1 | Verified with Claude Code and Codex. Not verified with OpenCode or Command Code, so use the **paste-in instruction** in Step 5-1 instead. It goes through no Skill, so nothing on the judging side changes |
+| Completion detection | The part where `wait` decides "the agent has stopped" rests on a per-agent detection layer. The contract and the verdict are shared; this is not. When it does not look like it stopped, read the screen with `commandmate capture <worktree-id> --instance <instance-id>` |
+
+> **A run that names OpenCode gets a second source of work evidence (Issue #2043)**. Only on the
+> branch where git found neither a commit nor an uncommitted change does the gate consult OpenCode's
+> own diff ledger. It is a narrow path, and it applies only when you named `--instance opencode`
+> ([CLI Operations Guide](./cli-operations-guide.md#commandmate-wait)).
 
 ---
 

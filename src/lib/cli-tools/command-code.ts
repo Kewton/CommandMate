@@ -68,7 +68,7 @@ import {
   TUI_EXIT_WAIT_MS,
   COMMAND_CODE_INIT_WAIT_MS,
 } from '@/config/cli-tool-timing-config';
-import { SessionStartUnavailableError } from '../session/session-start-error';
+import { missingToolError } from './install-hints';
 
 const logger = createLogger('cli-tools/command-code');
 
@@ -217,10 +217,7 @@ export class CommandCodeTool extends BaseCLITool {
   ): Promise<void> {
     const available = await this.isInstalled();
     if (!available) {
-      throw new SessionStartUnavailableError(
-        this.name,
-        'Command Code CLI (commandcode) is not installed or not in PATH'
-      );
+      throw missingToolError(this);
     }
 
     const sessionName = this.getSessionName(worktreeId, instanceId);
