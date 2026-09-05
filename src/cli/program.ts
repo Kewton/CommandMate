@@ -23,6 +23,8 @@ import { createRespondCommand } from './commands/respond';
 // Issue #2101: CLI face of POST /api/worktrees/:id/interrupt
 import { createInterruptCommand } from './commands/interrupt';
 import { createCaptureCommand } from './commands/capture';
+// Issue #2317: `attach` opens a worktree's tmux session in this terminal
+import { createAttachCommand } from './commands/attach';
 import { createAutoYesCommand } from './commands/auto-yes';
 import { createVerifyCommand } from './commands/verify';
 import { createTaskCommand } from './commands/task';
@@ -238,6 +240,9 @@ export function buildProgram(): Command {
   // above stops the CommandMate server and is not related.
   program.addCommand(createInterruptCommand());
   program.addCommand(createCaptureCommand());
+  // Issue #2317: registered next to `capture` because the two are the pair that
+  // let an operator READ a session — `capture` without attaching, `attach` with.
+  program.addCommand(createAttachCommand());
   program.addCommand(createAutoYesCommand());
 
   // Issue #1544: verification gates (.commandmate/verify.yaml)

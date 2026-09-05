@@ -64,6 +64,7 @@ node bin/commandmate.js ls
 | [`commandmate verify`](#commandmate-verify) | Run the verification gates (`.commandmate/verify.yaml`) and read the run history |
 | [`commandmate task`](#commandmate-task) | List and inspect execution contracts (`.commandmate/tasks/*.yaml`) |
 | [`commandmate capture`](#commandmate-capture) | Get terminal output |
+| [`commandmate attach`](#commandmate-attach) | Attach this terminal to an agent's tmux session |
 | [`commandmate auto-yes`](#commandmate-auto-yes) | Control auto-yes |
 | [`commandmate instances`](#commandmate-instances) | List, add, remove, and rename agent instances (the roster) |
 | [`commandmate report`](#commandmate-report) | Generate, show, and list daily reports; aggregate Eval metrics |
@@ -84,6 +85,15 @@ commandmate ls --quiet                  # IDs only (one per line)
 commandmate ls --branch feature/        # Filter by branch prefix
 commandmate ls --id anvil-             # Filter by worktree id prefix
 ```
+
+> **`--json` carries `tmuxSession`** (Issue #2317): the tmux session name of the worktree's **default
+> agent's primary instance** — the session `commandmate attach <id>` opens. It is derived CLI-side
+> from `id` and `cliToolId`, and is `null` for a row with no default agent or one naming an agent this
+> CLI does not know. For the per-instance list, use `commandmate instances <id>` (`TMUX_SESSION`).
+>
+> ```bash
+> commandmate ls --json | jq -r '.[] | "\(.id)\t\(.tmuxSession)"'
+> ```
 
 > **About `--id`**: A worktree ID is a slug derived from the **worktree directory name** (e.g. `commandmate-issue-1644`, Issue #1621; a `-<8-hex-path-hash>` suffix is added only when several repositories hold a directory of the same name). `--id` front-matches on that ID. `--branch` and `--id` are applied independently; specifying both applies both (AND). When the same branch name (e.g. `develop`) exists across multiple repositories, an ID prefix such as `--id anvil-` narrows the result to a single repository's worktree. The front-match is case-sensitive and does not guarantee uniqueness (`--id anvil-develop` may also match `anvil-develop-2`). To pin down exactly one worktree, pipe `--quiet` output through `grep -x` or pass a prefix that is already unique.
 
@@ -855,12 +865,20 @@ commandmate capture <worktree-id> --json | jq -r '.model // "unknown"'
 columns (and as `model` / `reasoningEffort` with `--json`):
 
 ```
-INSTANCE_ID  ALIAS   CLI_TOOL  RUNNING  AUTO_YES  MODEL              EFFORT
------------  ------  --------  -------  --------  -----------------  ------
-claude       Claude  claude    yes      no        claude-opus-5[1m]        
-codex-2      Review  codex     yes      yes       gpt-5.6-sol              
-gemini       Gemini  gemini    no       no                                 
+INSTANCE_ID  ALIAS   CLI_TOOL  RUNNING  AUTO_YES  MODEL              EFFORT  TMUX_SESSION
+-----------  ------  --------  -------  --------  -----------------  ------  ---------------------
+claude       Claude  claude    yes      no        claude-opus-5[1m]          mcbd-claude-myrepo-x
+codex-2      Review  codex     yes      yes       gpt-5.6-sol                mcbd-codex-myrepo-x-2
+gemini       Gemini  gemini    no       no                                   mcbd-gemini-myrepo-x
 ```
+
+> `TMUX_SESSION` (Issue #2317) is the tmux session that instance runs in — the one
+> `commandmate attach <id> --instance <instance-id>` opens, and usable directly as
+> `tmux attach -t '=<name>:'`. It is **derived** from the roster row (no extra request), by the same
+> function `BaseCLITool.getSessionName()` delegates to, so a name printed here is never a name the
+> server would not open. The rule is `mcbd-<tool>-<worktree>[-<suffix>]`: a primary instance has no
+> suffix, an additional one carries its instance ID with the tool prefix removed (`codex-2` → `-2`).
+> The column is appended, so anything reading this table by column position keeps working.
 
 ---
 
@@ -909,6 +927,7 @@ commandmate capture <worktree-id> --pane --tail 40    # Only the last 40 lines
 commandmate capture <worktree-id> --pane --raw        # The raw pane, uncompressed
 commandmate capture <worktree-id> --pane --json       # JSON with line counts before and after compression
 commandmate capture <worktree-id> --pane --instance codex-2
+commandmate capture <worktree-id> --pane --follow     # Follow along (Ctrl-C to stop, Issue #2317)
 ```
 
 - **`--tail N` counts the last N lines *after* compression.** A TUI session is drawn on a 200x1000
@@ -921,6 +940,26 @@ commandmate capture <worktree-id> --pane --instance codex-2
   detection layer asks for, so the server does not behave differently just because a human is reading
 - **Neither an attach nor tmux 3.2+ is required**, which makes this the fallback where `prefix + g`
   (below) is unavailable
+
+### `--pane --follow`: Following a Reply as It Is Generated (Issue #2317)
+
+`--pane` is a snapshot. Add `--follow` to **watch** a reply being generated: the screen is cleared and
+redrawn on an interval, and `Ctrl-C` ends it.
+
+```bash
+commandmate capture <worktree-id> --pane --follow                  # 2000ms interval by default
+commandmate capture <worktree-id> --pane --follow --interval 1000  # 250-60000ms
+commandmate capture <worktree-id> --pane --follow --tail 40        # Follow only the compressed last 40 lines
+```
+
+- **No tmux client and no key binding are needed.** That is what makes this the answer under
+  `tmux attach -r` (read-only), where `prefix + g` does **not** work: tmux delivers no keys but the
+  detach one to a read-only client, so the popup cannot open (measured)
+- Anywhere that is not a terminal (a pipe, a redirect) it errors out. Loop over `--pane --tail N`
+  there instead
+- It cannot be combined with `--json` or `--raw` — both mean "give me the bytes", which has no meaning
+  for a screen overwritten every two seconds
+- **The session's geometry never changes.** Nothing about reading touches the window
 
 ### `--prompts`: The Audit Trail of Resolved Prompts (Issue #1685)
 
@@ -993,6 +1032,121 @@ blends in with detected prompts**:
 
 ---
 
+## commandmate attach
+
+Attach **this terminal** to the tmux session a worktree's agent is running in (Issue #2317).
+
+### Usage
+
+```bash
+commandmate attach <worktree-id>                      # the worktree's default agent
+commandmate attach <worktree-id> --instance codex-2   # a specific instance's session
+commandmate attach <worktree-id> --read-only          # look without sending any input
+commandmate attach <worktree-id> --live               # re-lay out to this terminal (claude only)
+```
+
+### Why this and not a bare `tmux attach`
+
+Three separate things go wrong when you attach by hand, and this command absorbs each of them.
+
+| Attaching by hand | This command |
+|---|---|
+| The session name `mcbd-<tool>-<worktree>[-<suffix>]` has to be assembled yourself from the naming rule and the instance roster (`instances`) | The server resolves the target and the name is built from it, suffix rule included |
+| `tmux attach -t =mcbd-…:` is **eaten by zsh's equals expansion and fails with `not found`** (measured). The `'=mcbd-…:'` quoting is mandatory | The target is passed as argv with no shell in the path, so the quoting problem cannot arise |
+| For an alternate-screen agent (claude / opencode / copilot) you see **nothing but blank space and the input box**. It looks broken; it is the 1000-row canvas | A hint on stderr before attaching says why, and names three ways to read anyway |
+
+When the session does not exist it exits non-zero and points at `commandmate ls` /
+`commandmate instances <id>`.
+
+When `$TMUX` is set (you called it from inside tmux) it uses `switch-client` instead. If the current
+client is on a **different tmux server** and cannot switch, it prints the quoted
+`tmux attach -t '=mcbd-…:'` and exits non-zero.
+
+### Finding the session name
+
+```bash
+commandmate ls --json | jq -r '.[] | "\(.id)\t\(.tmuxSession)"'   # the worktree's default agent
+commandmate instances <worktree-id>                                # every instance (TMUX_SESSION column)
+```
+
+### `--live`: borrow this terminal's size while attached (claude only)
+
+With `--live` the window **follows this terminal's size** for as long as you are attached
+(`window-size latest`). The TUI re-lays out, so **a plain attach shows the transcript**. On detach it
+goes back to 200x1000 and `manual`.
+
+```bash
+commandmate attach <worktree-id> --live
+# From another terminal:
+tmux display-message -p -t '=mcbd-claude-<worktree-id>:' '#{window_width}x#{window_height}'
+tmux show-window-options -t '=mcbd-claude-<worktree-id>:' -v window-size
+```
+
+- **claude only.** Any other agent is refused. Two reasons — where the reply text comes from, and
+  the width the detection rules were measured at: claude writes History from its transcript JSONL, so
+  a smaller frame during delegation loses no reply text. copilot / gemini / vibe-local have no source
+  for a reply except the pane; codex / antigravity / command-code have detection rules measured only
+  at 200x1000; and opencode paints a sidebar into the transcript rows at 121 columns and wider (#2047)
+- While delegated the session carries `@cm_delegated=1`, and the server **does not save a reply
+  scraped off the pane** for the duration (History is written from the transcript instead).
+  `send` / `wait` / Auto-Yes keep working as usual
+- There are three ways back: the CLI, when it returns from the attach; the server's status poll, when
+  it finds a session delegated with zero human clients; and by hand
+  (`sh ~/.commandmate/bin/cm-live-restore.sh <session>`). **A control-mode client — CommandMate's own
+  connection — does not count as a human**, so your detach restores the canvas even while one is
+  still attached
+- While delegated, the browser's terminal view shows the smaller frame too
+
+> **No `client-detached` hook is used.** Measured on tmux 3.5a: a session-scoped `client-detached`
+> hook **never fires** (a global one does, but `#{session_name}` then names a different session and
+> `#{client_control_mode}` is empty). The restore runs from the server's poll instead, which also
+> covers the CLI being killed, the terminal window being closed, and a detach from another client.
+
+### Delegating on a hand-rolled attach (opt-in)
+
+Start the server with `CM_LIVE_ATTACH_HOOK=on` and a session-scoped `client-attached` hook is
+installed on claude sessions, so **a plain `tmux attach` delegates too**. Off by default: a bare
+`tmux attach` silently changing a session's geometry is the behaviour #2317 決定事項 1 forbids.
+
+### Reading the State From tmux (Issue #2317 Phase B)
+
+The server writes a session's state onto that session whenever it **changes**, so running / waiting /
+ready / idle can be read from `tmux ls` without attaching at all.
+
+```bash
+# Every CommandMate session and its state
+tmux ls -F '#{session_name} #{@cm_status} #{@cm_tool}/#{@cm_instance} #{@cm_worktree}'
+
+# Just one session
+tmux show-options -v -t '=mcbd-claude-<worktree-id>:' @cm_status
+```
+
+| User option | Meaning |
+|---|---|
+| `@cm_status` | `idle` / `ready` / `running` / `waiting`. **The same vocabulary as `commandmate ls`'s STATUS column** (it comes from the same function) |
+| `@cm_worktree` | Worktree ID |
+| `@cm_tool` | Agent (`claude`, …) |
+| `@cm_instance` | Instance ID |
+| `@cm_updated` | When it was last written (ISO 8601) |
+| `@cm_delegated` | `1` only while `--live` has delegated the geometry |
+
+While attached it also shows on the right of the status line:
+`[CommandMate claude/claude waiting] 200x1000`.
+
+- **Written on a transition only.** No `set-option` is issued per poll
+- **Everything is session-scoped** (`set-option -t`). The global `status-right` / `status-left` / key
+  table do not change. #1623's `bind-key` remains the one and only global intervention
+- **A `status-right` you set on that session yourself is never overwritten** (if a session-scoped
+  value comes back, nothing is written)
+- `@cm_status` never says `exited`. In `ls` too, `exited` is a REASON and not a STATUS — the STATUS
+  beside it is `idle` (#2070). Matching `ls`'s vocabulary is the requirement that wins here
+
+To turn it off, set `CM_TMUX_STATUS=off` and restart. **The next poll then REMOVES the `@cm_*`
+options and CommandMate's `status-right` from each session** — it uninstalls rather than merely
+stopping.
+
+---
+
 ## Read Mode: Reading the Transcript While Attached (Issue #1623)
 
 A CommandMate session is pinned to a canvas of 200 columns x **1000 rows** (#1163). tmux keeps the
@@ -1032,8 +1186,34 @@ cases (your tmux is left untouched).
 |----------------------|---------|-------------|
 | `CM_READ_MODE` | (enabled) | `off` / `0` / `false` disables it. **On the next server start, the previously installed binding is removed** |
 | `CM_READ_MODE_KEY` | `g` | The key that follows the prefix. One alphanumeric character or `F1`–`F12`, optionally with a `C-` / `M-` / `S-` modifier |
+| `CM_READ_MODE_FOLLOW` | (off) | `on` makes `prefix + <key>` open the **following** popup (Issue #2317, below) |
+| `CM_READ_MODE_AUTO_POPUP` | (off) | `on` opens the following popup **automatically when a human attaches** (Issue #2317, below) |
 | `CM_READ_LINES` | `1000` | How many lines the popup looks back (script side) |
-| `CM_READ_PAGER` | `less -R +G` | The pager used inside the popup (script side) |
+| `CM_READ_FOLLOW_INTERVAL` | `2` | Redraw interval of the following popup, in seconds (script side) |
+| `CM_READ_PAGER` | `less -R +G` | The pager used inside the popup (script side, snapshot mode only) |
+
+### The Following Popup (Issue #2317 Phase C)
+
+Start the server with `CM_READ_MODE_FOLLOW=on` and `prefix + g` opens a **following** popup: a redraw
+loop instead of `less`, closed with `q`. The composer is typeable the instant it closes.
+
+- **No second key was added.** Issue #2317 allows either a separate key (default `G`) or a switch;
+  `bind-key` writes the tmux server's **global** key table, so a second binding would double the one
+  global intervention 決定事項 2 exists to minimise. An environment variable costs no key table at all
+- **The window is not resized.** A popup is per-client and leaves nothing behind when it closes
+- It can be run by hand too:
+  `sh ~/.commandmate/bin/cm-read-pane.sh --follow mcbd-claude-<worktree-id>`
+
+### Opening It Automatically on Attach (opt-in, Issue #2317 Phase C)
+
+Start the server with `CM_READ_MODE_AUTO_POPUP=on` and a session-scoped `client-attached` hook is
+installed on CommandMate sessions, **opening the following popup when a human client attaches**.
+
+- **Off by default.** The popup owns the keyboard until `q` is pressed, so opening it unasked turns
+  "I attached" into "I cannot type"
+- **It never opens for a control-mode client** (CommandMate's own connection). Measured: a
+  session-scoped `client-attached` hook does not fire for a control-mode client at all, and the script
+  checks `#{client_control_mode}` on top of that
 
 > **Stopping the server does not remove the binding.** `commandmate start --issue N` lets several
 > servers share one tmux server, so removing on one server's shutdown would steal the other's key.

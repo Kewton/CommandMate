@@ -66,6 +66,10 @@ describe('instances command: list (default action)', () => {
       // instance by construction, because no other agent's launch command names
       // a conversation. Their behaviour is pinned in instances-model-1785.test.ts
       // and instances-opencode-session-2038.test.ts.
+      //
+      // `tmuxSession` was added by Issue #2317. Unlike the others it is never
+      // null here: it is derived from the roster row rather than fetched, so a
+      // stub server that sends nothing still produces it.
       {
         instanceId: 'claude',
         alias: 'Claude',
@@ -76,6 +80,7 @@ describe('instances command: list (default action)', () => {
         reasoningEffort: null,
         sessionId: null,
         sessionTitle: null,
+        tmuxSession: 'mcbd-claude-wt1',
       },
     ]);
   });

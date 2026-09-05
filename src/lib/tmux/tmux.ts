@@ -6,6 +6,7 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { invalidateCache } from './tmux-capture-cache';
+import { hasHumanClientAttached } from './geometry-delegation';
 import { validateSessionName } from '@/lib/cli-tools/validation';
 import { TMUX_HISTORY_LIMIT, TUI_PANE_HEIGHT, TUI_PANE_WIDTH } from '@/config/tmux-pane-config';
 import { createLogger } from '@/lib/logger';
@@ -81,12 +82,40 @@ export interface CreateSessionOptions {
 export interface SessionGeometryOptions {
   windowWidth?: number;
   windowHeight?: number;
+  /**
+   * Whether an attached human client vetoes the resize (Issue #2317, Phase D).
+   *
+   * Defaults to true, so every path that reconciles an EXISTING session — the
+   * one a `--live` reader can be sitting in — stands down for them.
+   * {@link createSession} passes false, and that is a fact rather than a
+   * shortcut: the session is being created by this very call, so no client can
+   * be attached to it yet and the probe could only ever answer "nobody".
+   */
+  respectAttachedClient?: boolean;
 }
 
 /**
  * Reconcile a session's window geometry without disrupting the running process.
  * Failures are intentionally non-fatal: geometry improves capture fidelity but
  * must never make an otherwise healthy CLI session unusable.
+ *
+ * ## It stands down while a human is attached (Issue #2317, Phase D)
+ *
+ * `commandmate attach --live` hands the window to the terminal looking at it so
+ * the transcript is readable at all; every `send` to a running session reaches
+ * here through `reconcileExistingSession()`, and snapping the canvas back to
+ * 200x1000 mid-read would undo that under the reader's hands. So when the
+ * geometry does NOT already match, this asks whether a NON-control-mode client
+ * is attached and leaves the window alone if one is.
+ *
+ * Two properties of that ordering are load-bearing:
+ *
+ *  - the question is asked only on the path that would actually resize, so the
+ *    overwhelmingly common "already correct" call still costs exactly the two
+ *    tmux round-trips it always has;
+ *  - it keys off a live client rather than off `@cm_delegated`, so a flag left
+ *    behind by a CLI that was killed can never pin a window open forever — the
+ *    next reconcile with nobody attached repairs it.
  *
  * @returns true when at least one tmux option was changed.
  */
@@ -125,6 +154,14 @@ export async function reconcileSessionGeometry(
   const modeMatches = currentMode === 'manual';
   const sizeMatches = currentWidth === windowWidth && currentHeight === windowHeight;
   if (modeMatches && sizeMatches) return false;
+
+  // Issue #2317: a human is reading this pane at their terminal's size. See the
+  // docblock — asked here, after the cheap match, so the ordinary call is
+  // unchanged.
+  if ((options.respectAttachedClient ?? true) && (await hasHumanClientAttached(sessionName))) {
+    logger.info('session-geometry:delegated-to-client', { sessionName });
+    return false;
+  }
 
   try {
     if (!modeMatches) {
@@ -398,7 +435,13 @@ export async function createSession(
     // replaced (verified: `show-window-options -v window-size` came back empty),
     // so reconciling first would have the setting thrown away and leave the pane
     // tracking the latest client again.
-    await reconcileSessionGeometry(sessionName, { windowWidth, windowHeight });
+    await reconcileSessionGeometry(sessionName, {
+      windowWidth,
+      windowHeight,
+      // Nothing can be attached to a session this call is still creating, so the
+      // Phase D client probe would be a round-trip with one possible answer.
+      respectAttachedClient: false,
+    });
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     throw new Error(`Failed to create tmux session: ${errorMessage}`);

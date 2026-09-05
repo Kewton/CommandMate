@@ -55,6 +55,12 @@ import { isDuplicatePrompt, normalizePromptForDedup } from './prompt-dedup';
 import { recordPromptDedupSkip } from './prompt-dedup-state';
 import { isDuplicateResponse } from './response-dedup';
 import { captureStructuredHistoryTurn, isStructuredHistoryWriterLive } from './structured-history-gate';
+// Issue #2317 Phase D: while a human holds the pane's geometry, the frame is
+// their terminal (44 rows), not the 1000-row canvas every rule below was
+// measured against. See the block in `checkForResponse` for what that changes.
+import { resolveSessionName } from '@/lib/cli-tools/session-name';
+import { probeGeometryDelegation } from '@/lib/tmux/geometry-delegation';
+import { isLiveAttachEligibleSession } from '@/lib/session/tmux-session-surface';
 import { getPollerKey, stopPolling, GEMINI_LOADING_INDICATORS } from './response-poller-core';
 import { notifyPushSubscribers } from '@/lib/push';
 // Issue #1790: imported by deep path, not through `@/lib/push`. Suites that
@@ -841,6 +847,38 @@ export async function checkForResponse(
       return false;
     }
 
+    // Issue #2317 Phase D: is a human reading this pane at their own terminal
+    // size right now, and did they just stop?
+    //
+    // Asked only for the tools `attach --live` accepts — no other session can be
+    // delegated, so asking about one would be a tmux round-trip per poll with a
+    // single possible answer. The read itself is memoised for a second
+    // (`DELEGATION_TTL_MS`), which is under one poll interval.
+    const sessionName = resolveSessionName(cliToolId, worktreeId, instanceId);
+    const delegation = isLiveAttachEligibleSession(sessionName)
+      ? await probeGeometryDelegation(sessionName)
+      : { delegated: false, released: false };
+
+    if (delegation.released) {
+      // The canvas is 1000 rows again, so a cursor recorded against a 44-row
+      // frame indexes into a pane that no longer exists. Zero is the only value
+      // that cannot be wrong in either direction: too low re-saves a turn, too
+      // high suppresses every future one. Done BEFORE the state is read below so
+      // this poll already sees the reset.
+      //
+      // A no-op for claude in practice — it renders in the alternate screen, so
+      // `lineCountIsCursor` is false and the cursor is not consulted — and that
+      // is exactly why it is written here rather than left implicit: the guard
+      // has to already be right on the day a scrollback tool is added to
+      // `LIVE_ATTACH_TOOLS`.
+      updateSessionState(db, worktreeId, cliToolId, 0, resolvedInstanceId);
+      logger.info('geometry-delegation-released', {
+        worktreeId,
+        cliToolId,
+        instanceId: resolvedInstanceId,
+      });
+    }
+
     // Get session state (last captured line count)
     const sessionState = getSessionState(db, worktreeId, resolvedInstanceId);
     const lastCapturedLine = sessionState?.lastCapturedLine || 0;
@@ -1138,8 +1176,26 @@ export async function checkForResponse(
         transcriptPathHint: claudeMetadata?.logFilePath ?? null,
       }));
 
+    // Issue #2317 Phase D: the scrape is dropped while the geometry is
+    // delegated, and the transcript capture above is what makes that safe.
+    //
+    // ORDER IS LOAD-BEARING. The delegation test is folded in AFTER the two
+    // calls above rather than short-circuiting them: `captureStructuredHistoryTurn`
+    // is a WRITE, not a query — it is the moment claude's own transcript becomes
+    // a History row — so an `||` that put the delegation first would suppress
+    // the scrape and the real reply together, and the turn would vanish. Read as
+    // it stands: record the turn from the agent's own file, then drop the pane's
+    // copy of it, which at 44 rows is a fraction of the answer hard-wrapped at
+    // the reader's terminal width.
+    //
+    // When the transcript capture answers false (an unreadable or absent file)
+    // the turn goes UNRECORDED for as long as the delegation lasts. That is the
+    // deliberate trade: a missing row is recoverable, a truncated reply saved as
+    // the agent's answer is not.
+    const suppressScrapedHistory = structuredHistoryLive || delegation.delegated;
+
     // Create Markdown log file for the conversation pair
-    if (cleanedResponse && !structuredHistoryLive) {
+    if (cleanedResponse && !suppressScrapedHistory) {
       await recordClaudeConversation(db, worktreeId, cleanedResponse, cliToolId);
     }
 
@@ -1169,7 +1225,7 @@ export async function checkForResponse(
     // are not byte-comparable — the pane's copy is hard-wrapped at the pane
     // width and gutter-prefixed, so no content check could ever recognise them
     // as the same reply.
-    if (!structuredHistoryLive) {
+    if (!suppressScrapedHistory) {
       // Create new CLI tool message in database
       const message = createMessage(db, {
         worktreeId,
@@ -1192,6 +1248,10 @@ export async function checkForResponse(
         cliToolId,
         instanceId: resolvedInstanceId,
         scrapedLength: cleanedResponse.length,
+        // Which of the two reasons suppressed it. Without this the Phase D case
+        // and the ordinary #2041/#2121 handover are one indistinguishable log
+        // line, and "History is missing a turn" has two very different causes.
+        reason: structuredHistoryLive ? 'structured-history' : 'geometry-delegated',
       });
     }
 

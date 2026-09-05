@@ -27,6 +27,10 @@ import {
 } from '../utils/agent-instances';
 import { resolveSessionTarget, describeSessionTargetConflict } from '../utils/session-target';
 import type { CurrentOutputResponse, OpencodeSessionsResponse } from '../types/api-responses';
+// Issue #2317: the tmux session name each instance runs in, so `commandmate
+// attach` / `tmux attach` need no hand-assembly of `mcbd-<tool>-<wt>[-<suffix>]`.
+import { resolveSessionName } from '../../lib/cli-tools/session-name';
+import type { CLIToolType } from '../../lib/cli-tools/types';
 
 type InstanceRow = {
   instanceId: string;
@@ -56,7 +60,31 @@ type InstanceRow = {
   sessionId: string | null;
   /** Issue #2038: opencode's own title for {@link sessionId}, or null. */
   sessionTitle: string | null;
+  /**
+   * Issue #2317: the tmux session this instance runs in, or null.
+   *
+   * Derived, not fetched — {@link resolveSessionName} is the same function
+   * `BaseCLITool.getSessionName()` delegates to, so this cannot name a different
+   * session than the server opens. Null only when the roster row would not
+   * survive `validateSessionName`, i.e. when there is no name to give rather
+   * than a wrong one.
+   */
+  tmuxSession: string | null;
 };
+
+/**
+ * The tmux session name for one roster row, or null.
+ *
+ * @param worktreeId - Worktree ID
+ * @param inst - Roster entry
+ */
+function deriveInstanceSession(worktreeId: string, inst: AgentInstance): string | null {
+  try {
+    return resolveSessionName(inst.cliTool as CLIToolType, worktreeId, inst.id);
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Longest session title printed in the table (Issue #2038).
@@ -79,8 +107,8 @@ function formatInstancesTable(rows: InstanceRow[]): string {
   const headers = [
     'INSTANCE_ID', 'ALIAS', 'CLI_TOOL', 'RUNNING', 'AUTO_YES', 'MODEL', 'EFFORT',
     // Issue #2038 appends, exactly as #1785 did, so anything reading this table
-    // by column position keeps working.
-    'SESSION_ID', 'SESSION_TITLE',
+    // by column position keeps working. Issue #2317 appends for the same reason.
+    'SESSION_ID', 'SESSION_TITLE', 'TMUX_SESSION',
   ];
   const dataRows = rows.map(r => [
     r.instanceId,
@@ -95,6 +123,7 @@ function formatInstancesTable(rows: InstanceRow[]): string {
     r.reasoningEffort ?? '',
     r.sessionId ?? '',
     (r.sessionTitle ?? '').slice(0, MAX_SESSION_TITLE_COLUMN),
+    r.tmuxSession ?? '',
   ]);
 
   const colWidths = headers.map((h, i) =>
@@ -239,6 +268,9 @@ async function listInstances(worktreeId: string, options: InstancesOptions): Pro
         // Issue #2038: additive, and absent for every tool that is not opencode.
         sessionId: opencodeSessions.get(inst.id)?.sessionId ?? null,
         sessionTitle: opencodeSessions.get(inst.id)?.title ?? null,
+        // Issue #2317: additive, and in both the table and `--json` — the table
+        // is where somebody who does not know the naming rule will see it.
+        tmuxSession: deriveInstanceSession(worktreeId, inst),
       };
     })
   );
