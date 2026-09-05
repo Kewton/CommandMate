@@ -24,9 +24,10 @@ It's a step-by-step guide for first-time users.
 11. [Agent Settings](#agent-settings)
 12. [Switching the Output Surface (Terminal / Chat)](#switching-the-output-surface-terminal--chat)
 13. [The Default Output Surface (Terminal / Chat)](#the-default-output-surface-terminal--chat)
-14. [Execution Contract and Verification](#execution-contract-and-verification)
-15. [Mobile Access](#mobile-access)
-16. [Phone Notifications (Web Push)](#phone-notifications-web-push)
+14. [Temporarily Maximizing One Split (Desktop)](#temporarily-maximizing-one-split-desktop)
+15. [Execution Contract and Verification](#execution-contract-and-verification)
+16. [Mobile Access](#mobile-access)
+17. [Phone Notifications (Web Push)](#phone-notifications-web-push)
 
 ---
 
@@ -214,6 +215,37 @@ POST /api/worktrees/:id/auto-yes
 - **Invalid duration value**: Returns 400 error
 - **Security**: 5-layer defense with worktreeId format validation -> JSON parse validation -> type validation -> whitelist validation
 
+### Approval Routes Differ by Agent
+
+There are two routes by which Auto Yes answers a confirmation, and **which one you get is a property
+of the agent**, not of how you set the toggle.
+
+| Route | What you see on screen | Agents |
+|-------|------------------------|--------|
+| **Hook approval** | The confirmation dialog **never appears**. The agent asks CommandMate before it runs the tool and proceeds straight away once allowed | Claude / Codex / Copilot / Antigravity (OpenCode does the same thing over SSE rather than hooks) |
+| **Screen-based (TUI numbered response)** | The confirmation dialog **is drawn on the terminal surface**, then a few seconds later it is answered automatically and disappears | **Command Code** / Gemini / Vibe-Local |
+
+**Command Code cannot use hook approval, structurally.** It tells CommandMate that it is about to run
+a tool only **after** the permission dialog has been answered — by then the dialog is gone, so the
+reply cannot be an approval. Command Code's Auto Yes therefore runs entirely on the route that reads
+the terminal surface and sends back the option's number key.
+
+This does not mean Auto Yes is broken on Command Code: in a live check both a file-creation
+confirmation and a shell-command confirmation were answered automatically. What differs is how it
+looks and what it depends on.
+
+- **The dialog is visible for a few seconds** (measured: 3–4 seconds before it is answered and
+  disappears). On the four hook-approval tools no dialog appears at all as long as the request is
+  allowed
+- **Nothing is answered while the terminal cannot be read.** Reading the terminal surface is this
+  route's only input, so a frame that cannot be read — or that slips past detection — leaves the
+  dialog standing. Click the option manually when that happens
+- **Who answered is recorded.** In the prompt history on the terminal surface (or
+  `commandmate capture <worktree-id> --prompts` from the CLI), `answeredBy` is `auto` for the
+  server-side Auto Yes and `human` for a manual answer
+
+See [Agent event hooks](./agent-event-hooks.md) for the per-route technical detail.
+
 ### Important Notes
 
 - While Auto Yes is active, all confirmations are automatically answered with "Yes"
@@ -234,9 +266,29 @@ View past message history.
 
 ### Desktop
 
-History is displayed in the **History Pane** on the left.
+History is displayed in the **History column** on the left of each split.
 - User messages and Claude's responses are shown chronologically
 - Scroll to view past history
+
+### Showing and hiding it (desktop)
+
+The **[History]** and **[Open Files]** buttons on the right of the action bar
+above the splits are the ONLY switches for their column / panel (Issue #2259).
+Hiding the column used to leave a 36px vertical strip carrying a second copy of
+the same button; that strip is **gone**, and the terminal takes the width back
+(108px at three splits).
+
+| Button | What it shows/hides | When it is disabled |
+|--------|--------------------|---------------------|
+| **[History]** | Each split's History column. **Applies to every split at once** | While every split shows the Chat surface (chat has no History column) |
+| **[Open Files]** | The file panel on the right; the badge is the open tab count | With no tab open and no diff showing |
+
+The arrow in the History column's header points the way it **folds** (left).
+Bring it back with [History] in the action bar.
+
+Note that the Activity Bar's **"File Tree"** (the icon column on the far left)
+is for browsing the worktree, and is a different thing from the action bar's
+**"Open Files"** (the panel showing files you opened).
 
 ### Mobile
 
@@ -320,8 +372,15 @@ Select which CLI agents to use for each worktree.
 | **Codex** | OpenAI Codex CLI |
 | **Gemini** | Google Gemini CLI |
 | **Vibe-Local** | Ollama local LLM |
+| **OpenCode** | OpenCode CLI |
+| **Copilot** | GitHub Copilot CLI |
+| **Antigravity** | Antigravity CLI (`agy`) |
+| **Command Code** | Command Code CLI (`commandcode`, Issue #2250) |
 
 - You must always select exactly **2** agents
+- **Auto Yes behaves differently per agent.** Command Code / Gemini / Vibe-Local only have
+  the screen-based route (the dialog is drawn once, then answered automatically). See
+  [Approval Routes Differ by Agent](#approval-routes-differ-by-agent)
 - The selected agents appear as tabs in the terminal header
 
 ### Ollama Model Selection (Vibe-Local)
@@ -345,7 +404,7 @@ surface** switches — the input surface stays exactly the same in either mode
 | Mode | What you see | When it helps |
 |------|--------------|---------------|
 | **Terminal** | The tmux screen as it is drawn (TUI borders, cursor and pagers included) | Working a dialog, TUI-specific screens, reading output in detail |
-| **Chat** | The conversation transcript (your messages paired with the agent's replies) | Following what was exchanged, watching progress from a phone |
+| **Chat** | A flat column of bubbles (one message per row; your messages as bubbles on the right, the agent's replies in full across the row) | Following what was exchanged, watching progress from a phone |
 
 ### How to switch
 
@@ -370,30 +429,66 @@ quietly revert on the next visit.
 
 ### What the chat surface shows
 
+The chat surface is **its own column of bubbles, separate from the History column**
+(Issue #2232). One message is one row: **your messages are bubbles on the right**, and
+**the agent's replies take the full width of the row** and are shown **in full**. There is
+no 100-character clamp and no "show more" here — that is the History column's shape.
+
 - **A generating indicator** — "Responding…" / "Thinking…" while the agent is working
 - **The reply as it is written** — on agents that support it, the in-progress answer streams
-  in place (Issue #2199). When it is too long and the head had to be dropped, it says
-  "Showing the latest part only"
-- **"Jump to latest"** — appears when a new line arrives while you are reading back through
-  the history. Pressing it returns you to the newest one
-- **"Show archived"** — a toggle for reading rows from past sessions as well
+  **in place at the end of the column** (Issue #2199 / #2233). When it is too long and the
+  head had to be dropped, it says "Showing the latest part only"
+- **In-flight becomes settled without moving** — when the reply is finished, the body stays
+  in the **same place, in the same type**; the only thing that changes is the spinner going
+  away (Issue #2233). Until the settled row reaches the transcript, the body is held with
+  "Not saved to the conversation yet" beside it, so it never blinks out (Issue #2248)
+- **Chips for tool calls, reasoning and approvals** — tool calls, the reasoning section and
+  approval dialogs are taken out of the reply body and become **one-line chips that are
+  folded by default** ("Tool calls · 3", "Tool approvals · 5"). Pressing a chip opens it in
+  place (Issue #2245 / #2272 / #2284). The **"Show / Hide tool activity"** toggle at the top
+  right of the column folds and unfolds the whole column at once
+- **"Jump to latest"** — press it to return to the newest row while you are reading back
+  through the transcript; it reads "Jump to latest (still responding)" while a reply is
+  being written. At the tail it offers "Jump to the beginning" instead (Issue #2283)
+- **The dialog card** — when a dialog or a selection list is up on the TUI side, a card that
+  shows the **tail of the terminal screen** as-is with the controls for it underneath
+  (Issue #2254). See the next section
 
-### When "Open terminal" appears
+> **Note**: the controls that **narrow the transcript** — the display-count select, "Show
+> archived" and "User only" — **are not on the chat surface**. They belong to the History
+> column; search is the only one of them chat keeps.
 
-It is the signal that something the chat surface **cannot drive** is on screen on the
-terminal side. Pressing it switches that surface to terminal on the spot. There are exactly
-four conditions.
+### The dialog card — answering a TUI without leaving chat
 
-| Message | What is actually happening |
-|---------|----------------------------|
-| A pager is open. | A pager such as `less` is open (scroll and quit it from the terminal) |
-| A selection list is open. | A list you move through with the arrow keys is showing |
-| This screen can't be read from chat. | A screen the detectors could not classify is showing |
-| Waiting for an answer, but the options couldn't be read. | The agent is waiting, but its options could not be read |
+When something the chat surface **cannot drive** is on screen on the terminal side, this
+surface used to raise an "Open terminal" banner and send you to the terminal. **That
+behaviour was withdrawn by Issue #2254.** Below the banner there is now a card showing the
+**tail of the terminal screen as it is** (12-20 rows; 12 on a phone), with the controls for
+that kind of screen directly under it. You answer it without leaving chat.
 
-**An ordinary yes/no or numbered prompt raises no banner.** The answer buttons on the input
-surface work as they are — the answer UI lives on the input surface rather than the output
-one, so you can reply without leaving chat.
+| Kind of screen | What appears under the card |
+|------|--------------------|
+| A pager is open | Arrow keys plus PgUp / PgDn / Home / End / q |
+| A selection list is open | Arrow keys plus Enter / Esc |
+| A screen nothing could classify | Arrows and Esc (Navigate) plus the digits 1-9, y / n and Enter |
+| Waiting, with options nobody could read | The digits 1-9, y / n and Enter |
+
+**Press the number or y/n while reading the card.** Enter confirms whatever the CLI has
+currently highlighted, so on a numbered dialog an Enter meant as "no" can land as an
+approval (Issue #1681).
+
+The "Open terminal" button **remains, as a secondary way out**. The card shows only the last
+few rows, so switch to the terminal surface from here when you need scrollback or search.
+
+While the card is up, **no control is duplicated**. The navigation buttons / Navigate pad
+above the composer on desktop, and the navigation buttons docked above the composer on a
+phone, defer to the card's copies while the chat surface is showing (on the terminal surface
+they behave exactly as before).
+
+**An ordinary yes/no or numbered prompt raises neither a card nor a banner.** The answer
+panel on the input surface works as it is — the answer UI lives on the input surface rather
+than the output one, so you can reply without leaving chat. Drawing a card there would put
+two answer UIs on one dialog, so that one case is deliberately left alone.
 
 ---
 
@@ -412,6 +507,39 @@ Each browser picks the value up in the background the first time it opens any se
 surface, and what that request buys is the **next** surface opened — including, after a
 reload, the first one. Opening the More screen seeds it immediately on that device. A
 browser that has never reached the server starts on `Terminal`.
+
+---
+
+## Temporarily Maximizing One Split (Desktop)
+
+Two or three splits side by side means each one is narrow. When you only need the room
+while reading a long dialog or a diff, you can **blow one split up to the full width and
+put it back with the same gesture** (Issue #2261).
+
+| Action | Where |
+|--------|-------|
+| **Maximize / restore** | The button at the right end of each split's title bar (⤢ / ⤡) |
+| **Maximize / restore** | The button in the action bar above the splits (acts on the focused split) |
+| **Maximize / restore** | `Cmd/Ctrl + Shift + Enter` |
+
+`Cmd/Ctrl + Shift + Enter` follows the same rule as `Cmd/Ctrl + Shift + M` (the output
+surface switch): it acts on the **split that holds focus**. With focus outside every split,
+the first split answers — except while you are typing in a field outside the splits.
+
+The hidden splits **keep their sessions and keep polling** while they are off screen, so
+restoring shows the output that arrived in the meantime. The action bar's `2 / 3 splits`
+label reads "Split 2 maximized" while one is maximized.
+
+Because it is **temporary**, the layout comes back on its own when you:
+
+- add or remove a split,
+- press the equalize-widths button in the action bar,
+- switch to another worktree, or
+- reload the page (the maximized state is not persisted; the width ratios you dragged are,
+  so restoring returns the exact proportions you had).
+
+The file panel on the right is not part of this. Hide it with **[Open Files]** in the
+action bar instead.
 
 ---
 

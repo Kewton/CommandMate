@@ -40,6 +40,14 @@ export interface UseContextMenuReturn {
   menuState: ContextMenuState;
   /** Open menu at specified position for target (supports mouse and touch events) */
   openMenu: (e: React.MouseEvent | React.TouchEvent, path: string, type: 'file' | 'directory') => void;
+  /**
+   * Open the menu at explicit viewport coordinates (Issue #2260).
+   *
+   * A menu opened from a toolbar button has to be anchored to the button's box
+   * rather than the pointer: a keyboard activation (Enter / Space) reports
+   * clientX/clientY of 0, which `openMenu` would place in the top-left corner.
+   */
+  openMenuAt: (position: { x: number; y: number }, path: string, type: 'file' | 'directory') => void;
   /** Close menu (preserves target info) */
   closeMenu: () => void;
   /** Reset menu to initial state */
@@ -83,6 +91,24 @@ export function useContextMenu(): UseContextMenuReturn {
   const [menuState, setMenuState] = useState<ContextMenuState>(INITIAL_STATE);
 
   /**
+   * Open the context menu at explicit viewport coordinates
+   *
+   * [Issue #2260] Callers that anchor to an element's box (a toolbar button)
+   * use this directly; `openMenu` below derives the coordinates from an event.
+   */
+  const openMenuAt = useCallback(
+    (position: { x: number; y: number }, path: string, type: 'file' | 'directory') => {
+      setMenuState({
+        isOpen: true,
+        position,
+        targetPath: path,
+        targetType: type,
+      });
+    },
+    []
+  );
+
+  /**
    * Open context menu at event position
    *
    * [Issue #123] Supports both MouseEvent and TouchEvent.
@@ -117,14 +143,9 @@ export function useContextMenu(): UseContextMenuReturn {
         return;
       }
 
-      setMenuState({
-        isOpen: true,
-        position: { x, y },
-        targetPath: path,
-        targetType: type,
-      });
+      openMenuAt({ x, y }, path, type);
     },
-    []
+    [openMenuAt]
   );
 
   /**
@@ -192,6 +213,7 @@ export function useContextMenu(): UseContextMenuReturn {
   return {
     menuState,
     openMenu,
+    openMenuAt,
     closeMenu,
     resetMenu,
   };

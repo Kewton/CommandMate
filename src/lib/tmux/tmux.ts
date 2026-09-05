@@ -6,6 +6,7 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { invalidateCache } from './tmux-capture-cache';
+import { hasHumanClientAttached } from './geometry-delegation';
 import { validateSessionName } from '@/lib/cli-tools/validation';
 import { TMUX_HISTORY_LIMIT, TUI_PANE_HEIGHT, TUI_PANE_WIDTH } from '@/config/tmux-pane-config';
 import { createLogger } from '@/lib/logger';
@@ -81,12 +82,40 @@ export interface CreateSessionOptions {
 export interface SessionGeometryOptions {
   windowWidth?: number;
   windowHeight?: number;
+  /**
+   * Whether an attached human client vetoes the resize (Issue #2317, Phase D).
+   *
+   * Defaults to true, so every path that reconciles an EXISTING session — the
+   * one a `--live` reader can be sitting in — stands down for them.
+   * {@link createSession} passes false, and that is a fact rather than a
+   * shortcut: the session is being created by this very call, so no client can
+   * be attached to it yet and the probe could only ever answer "nobody".
+   */
+  respectAttachedClient?: boolean;
 }
 
 /**
  * Reconcile a session's window geometry without disrupting the running process.
  * Failures are intentionally non-fatal: geometry improves capture fidelity but
  * must never make an otherwise healthy CLI session unusable.
+ *
+ * ## It stands down while a human is attached (Issue #2317, Phase D)
+ *
+ * `commandmate attach --live` hands the window to the terminal looking at it so
+ * the transcript is readable at all; every `send` to a running session reaches
+ * here through `reconcileExistingSession()`, and snapping the canvas back to
+ * 200x1000 mid-read would undo that under the reader's hands. So when the
+ * geometry does NOT already match, this asks whether a NON-control-mode client
+ * is attached and leaves the window alone if one is.
+ *
+ * Two properties of that ordering are load-bearing:
+ *
+ *  - the question is asked only on the path that would actually resize, so the
+ *    overwhelmingly common "already correct" call still costs exactly the two
+ *    tmux round-trips it always has;
+ *  - it keys off a live client rather than off `@cm_delegated`, so a flag left
+ *    behind by a CLI that was killed can never pin a window open forever — the
+ *    next reconcile with nobody attached repairs it.
  *
  * @returns true when at least one tmux option was changed.
  */
@@ -125,6 +154,14 @@ export async function reconcileSessionGeometry(
   const modeMatches = currentMode === 'manual';
   const sizeMatches = currentWidth === windowWidth && currentHeight === windowHeight;
   if (modeMatches && sizeMatches) return false;
+
+  // Issue #2317: a human is reading this pane at their terminal's size. See the
+  // docblock — asked here, after the cheap match, so the ordinary call is
+  // unchanged.
+  if ((options.respectAttachedClient ?? true) && (await hasHumanClientAttached(sessionName))) {
+    logger.info('session-geometry:delegated-to-client', { sessionName });
+    return false;
+  }
 
   try {
     if (!modeMatches) {
@@ -398,7 +435,13 @@ export async function createSession(
     // replaced (verified: `show-window-options -v window-size` came back empty),
     // so reconciling first would have the setting thrown away and leave the pane
     // tracking the latest client again.
-    await reconcileSessionGeometry(sessionName, { windowWidth, windowHeight });
+    await reconcileSessionGeometry(sessionName, {
+      windowWidth,
+      windowHeight,
+      // Nothing can be attached to a session this call is still creating, so the
+      // Phase D client probe would be a round-trip with one possible answer.
+      respectAttachedClient: false,
+    });
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     throw new Error(`Failed to create tmux session: ${errorMessage}`);
@@ -550,6 +593,20 @@ const ALLOWED_SPECIAL_KEYS = new Set([
   // are tmux named keys; 'q' is the pager's literal "quit" character (sent verbatim by
   // `tmux send-keys`, no injection risk — single fixed char via execFile, not a shell).
   'PageUp', 'PageDown', 'Home', 'End', 'q',
+  // Issue #2254: the answer characters `1`-`9` / `y` / `n`, so a dialog nobody
+  // could parse can be answered from the chat surface's dialog card instead of
+  // only from the terminal. Literal characters on the wire like `q` above.
+  // `n` was already deliverable as an opencode chord letter and is not repeated.
+  '1', '2', '3', '4', '5', '6', '7', '8', '9', 'y',
+  // Issue #2297: claude's "use this session only" key. Its `/model` footer reads
+  // `Enter to set as default · s to use this session only · Esc to cancel`, and
+  // `Enter` there rewrites `model` in ~/.claude/settings.json (#1495) — so
+  // without this the chat surface could deliver the destructive half of that
+  // footer and not the safe half. A literal character like `q` / `y` above.
+  // Deliverable here for every session; only claude and Command Code DECLARE it
+  // (`CLAUDE_NAVIGATION_KEY_VALUES`), so the route answers 400 for anyone else —
+  // which matters, because `s` is `sort:relevance` on copilot's session picker.
+  's',
   // Issue #2046: opencode's own chords. `C-x` is its leader prefix (measured
   // default of 1.18.22, 2000 ms window), `C-p` opens the command palette and
   // `C-t` cycles the model variant. The lower-case letters complete a leader
@@ -998,6 +1055,38 @@ export function isAllowedSpecialKey(
 }
 
 /**
+ * How long after a key lands the TUI is still allowed to be repainting
+ * (Issue #2297).
+ *
+ * `invalidateCache()` fires the instant `tmux send-keys` returns, which is
+ * BEFORE the CLI has drawn the consequence of the key. The next capture — the
+ * chat surface's own `onKeysSent` refresh, or any of the pollers that share this
+ * cache (the sidebar status probe, the global session poller) — therefore has a
+ * good chance of storing the PRE-repaint frame, and {@link CACHE_TTL_MS} then
+ * serves that stale frame for five seconds. That is the "the highlight does not
+ * move" report in Issue #2297: the send worked, the cache was invalidated, and
+ * the surface still drew the old dialog.
+ *
+ * 250 ms is comfortably past an ink/bubbletea repaint (`SPECIAL_KEY_DELAY_MS`,
+ * the gap this transport already leaves BETWEEN keys of one chord, is 100 ms)
+ * and comfortably inside the 1-second budget the Issue sets for seeing the
+ * highlight move.
+ */
+export const REPAINT_INVALIDATE_DELAY_MS = 250;
+
+/**
+ * Drop the cached frame again once the TUI has had time to repaint.
+ *
+ * Fire-and-forget on purpose: the route must not wait 250 ms to answer, and the
+ * work is one `Map.delete`. The timer is `unref()`ed where the runtime supports
+ * it so a pending invalidation can never hold a process (or a test runner) open.
+ */
+function scheduleRepaintInvalidation(sessionName: string): void {
+  const timer = setTimeout(() => invalidateCache(sessionName), REPAINT_INVALIDATE_DELAY_MS);
+  (timer as unknown as { unref?: () => void }).unref?.();
+}
+
+/**
  * Send special keys to a tmux session and invalidate the capture cache.
  * Wrapper combining sendSpecialKeys() + invalidateCache() for DRY (DR1-003).
  *
@@ -1010,4 +1099,5 @@ export async function sendSpecialKeysAndInvalidate(
 ): Promise<void> {
   await sendSpecialKeys(sessionName, keys);
   invalidateCache(sessionName);
+  scheduleRepaintInvalidation(sessionName);
 }

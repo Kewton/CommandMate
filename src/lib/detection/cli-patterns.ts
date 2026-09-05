@@ -1385,11 +1385,39 @@ const COPILOT_STATUS_BAR_MAX_ROWS = 2;
 /** How many rows copilot's composer may span before the block stops looking like chrome. */
 const COPILOT_COMPOSER_MAX_ROWS = 40;
 
-/** A full-width horizontal rule, with or without the pane's leading padding. */
-const COPILOT_RULE_ROW = /^─{10,}$/;
+/**
+ * One of the two rows that fence copilot's composer.
+ *
+ * Two renderings of one thing, because copilot redrew its composer between the
+ * builds this file is measured against (Issue #2269):
+ *
+ *  - **1.0.80** fences it with a full-width horizontal rule, `─` to the pane's
+ *    width, above and below.
+ *  - **1.0.82** fences it with a half-block frame instead: `╻` (U+257B) followed
+ *    by `▄` to the pane's width above, `╹` (U+2579) followed by `▀` below.
+ *
+ * The corner glyph is REQUIRED on the 1.0.82 forms and that is load-bearing, not
+ * decoration. 1.0.82 also boxes the echoed user prompt in the transcript between
+ * two dividers of the same half blocks — `tests/unit/lib/detection/fixtures/
+ * copilot-live-2269/turn-complete.txt` rows 10 and 12 — and those carry no
+ * corner. Accepting a bare `▄`/`▀` run here would let the newest echo's box be
+ * read as the composer, which would put `findCopilotChromeStart` ~985 rows too
+ * high and delete the reply along with the chrome.
+ */
+const COPILOT_RULE_ROW = /^(?:─{10,}|╻▄{10,}|╹▀{10,})$/;
 
-/** copilot's composer glyph: legacy `>` and current `❯`, at the pane's own indent. */
-const COPILOT_COMPOSER_GLYPH = /^ {0,2}[>❯]/;
+/**
+ * copilot's composer glyph, at the pane's own indent.
+ *
+ * `>` is the legacy spelling, `❯` is 1.0.80's. 1.0.82 draws no prompt glyph in
+ * the composer at all: the row is the frame's left edge, `┃` (U+2503), and the
+ * operator's text follows it (`copilot-live-2269/boot-idle.txt` row 998 is the
+ * bare glyph on an empty composer). `┃` is safe to accept here even though the
+ * reasoning block's rows also start with a vertical — that one is `│` (U+2502,
+ * {@link COPILOT_BOX_ROW_PATTERN}) — and in any case this test is only ever
+ * applied to the single row between two fence rows, never to a window.
+ */
+const COPILOT_COMPOSER_GLYPH = /^ {0,2}[>❯┃]/;
 
 /**
  * Locate the start of copilot CLI's bottom-pinned chrome within a captured pane
@@ -1405,6 +1433,21 @@ const COPILOT_COMPOSER_GLYPH = /^ {0,2}[>❯]/;
  *     ❯ <composer>
  *     ────────────────────  ← closing rule
  *      ◉ Working · 1.5 KiB esc interrupt          GPT-5.6 Terra  ← status bar
+ *
+ * Issue #2269 re-measured the same five rows on 1.0.82, where the fence and the
+ * composer are drawn differently but the layout is unchanged:
+ *
+ *     <cwd>                                          Session: N AIC used
+ *     ╻▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄  ← opening frame
+ *     ┃<composer>
+ *     ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  ← closing frame
+ *      ← open sidebar · / commands · ? help · tab next tab   GPT-5.6 Terra
+ *
+ * Both spellings live in {@link COPILOT_RULE_ROW} and
+ * {@link COPILOT_COMPOSER_GLYPH}; the search below is unchanged. Until they were
+ * added this function returned -1 on every 1.0.82 frame, `contentEnd` fell back
+ * to the whole pane, and the saved reply opened with 199 `▀` and ended with the
+ * `← open sidebar …` footer -- #2269's headline symptom.
  *
  * The boundary is found structurally -- closing rule, opening rule, composer
  * glyph -- and never by matching the status bar's wording. That is the same
@@ -1506,6 +1549,85 @@ export const COPILOT_REASONING_HEADER_PATTERN = /^\s*⌄\s/;
 export const COPILOT_USER_ECHO_PATTERN = /^ {0,2}[>❯]\s+\S/;
 
 /**
+ * One of the half-block dividers copilot 1.0.82 boxes a transcript row with
+ * (Issue #2269).
+ *
+ * 1.0.80 drew the echoed prompt as a single bare ` ❯ <text>` row. 1.0.82 draws
+ * a full-width `▄` run above it and a full-width `▀` run below it
+ * (`copilot-live-2269/turn-complete.txt` rows 10 and 12):
+ *
+ *      ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+ *       ❯ Reply with exactly the word: uat-run1   00:27
+ *      ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+ *      ● uat-run1
+ *
+ * {@link COPILOT_SKIP_PATTERNS}' `/[█▘▝▖▗▔▄▌▐]/` rule already dropped the `▄`
+ * row. `▀` (U+2580) was not in that class, so the row BELOW the echo survived --
+ * and extraction starts one row past the echo, which made a wall of 199 `▀` the
+ * first line of every saved 1.0.82 reply.
+ *
+ * Deliberately not "add `▀` to that character class": this requires a run of ten
+ * or more and nothing else on the row, so a reply that happens to use a single
+ * half block as a glyph is untouched. The optional leading corner accepts the
+ * composer's own fence rows (`╻▄…` / `╹▀…`) as well, which is defence in depth
+ * only -- {@link findCopilotChromeStart} cuts those structurally, and this rule
+ * is what stops them reaching History if a future build moves the fence again.
+ */
+export const COPILOT_TRANSCRIPT_DIVIDER_PATTERN = /^\s*[╻╹]?[▀▄]{10,}\s*$/;
+
+/**
+ * The verbs copilot prints on a tool row, as a regex alternation source.
+ *
+ * One list, shared by {@link COPILOT_TOOL_ROW_PATTERN} here and by
+ * `COPILOT_TOOL_ACTION_PATTERN` in `response-cleaner.ts`: the two match the same
+ * vocabulary behind different markers, and a verb added to one and not the other
+ * is a leak nothing fails on.
+ *
+ * `Asked user` / `Asking user` are Issue #2269's addition. copilot answers a
+ * prompt it cannot act on by calling its ask-user tool, and the row it leaves in
+ * the transcript (`● Asked user What would you like me to help with?`, measured
+ * in `copilot-live-2269/turn-oneword-echo-askuser.txt`) was being saved as the
+ * agent's reply -- the "launch screen as the answer" the Issue reports.
+ */
+export const COPILOT_TOOL_VERBS =
+  'Get|Read|Run|Search|Write|Edit|Delete|List|Create|Fetch|Explore|Execute|Install|Asked user|Asking user|Model changed to:';
+
+/**
+ * copilot 1.0.82's tool row, whose marker is a file-type badge (Issue #2269).
+ *
+ * 1.0.80 drew every tool row as `● <Verb> …` and `COPILOT_TOOL_ACTION_PATTERN`
+ * reads exactly that. 1.0.82 puts a short badge for the file the tool touched in
+ * front of the verb instead, and only falls back to `●` for a type it has no
+ * badge for. Measured verbatim over
+ * `copilot-live-2269/turn-tool-badges.txt` and `turn-tool-rows.txt`:
+ *
+ *     / Search "a.ts" 1 file found
+ *     MD Read note.md L1:1 (1 line read)
+ *     TS Read a.ts 1 line read
+ *     PY Read c.py 1 line read
+ *     {} Read b.json 1 line read
+ *     ● Read d.txt 1 line read          ← plain text keeps the 1.0.80 marker
+ *
+ * So the badge is `/`, `{}`, or two to four upper-case characters. Two is the
+ * floor on purpose: a one-character class would also match the pronoun in an
+ * English sentence ("I Read the file"), and no measured badge is one character.
+ * `●` is left to `COPILOT_TOOL_ACTION_PATTERN`, which is the rule that already
+ * owns it -- copilot's own prose is `● <text>` too (`● done`, `● 対象ファイルを
+ * 確認して内容を読み込みます。`), and only the verb list separates the two.
+ *
+ * The `$` badge is absent for the same reason: `$ Shell Print requested text 2
+ * lines…` opens a BLOCK whose command rows follow, which is
+ * `COPILOT_TOOL_INVOCATION_PATTERN`'s job, and `Shell` is not in the verb list
+ * anyway.
+ *
+ * No /g flag (S4-5: would make test() stateful). No quantifier nested inside
+ * another (SEC4-001: ReDoS safe).
+ */
+export const COPILOT_TOOL_ROW_PATTERN = new RegExp(
+  `^\\s*(?:\\/|\\{\\}|[A-Z][A-Z0-9+#]{1,3})\\s+(?:${COPILOT_TOOL_VERBS})[\\s:]`,
+);
+
+/**
  * A wrapped continuation of the copilot transcript row above it (Issue #1897).
  *
  * Marker rows (` ❯ `, ` ● `, ` $ `, ` ⌄ `) carry one leading space; the rows they
@@ -1536,6 +1658,12 @@ export const COPILOT_BOOT_BANNER_ANCHORS: readonly RegExp[] = [
   /^\s*(?:●\s+)?Tip:\s*\//m,
   /Describe a task to get started/,
   /Prefer a visual workspace\?/,
+  // Issue #2269: copilot's greeting for a prompt it cannot act on. It arrives
+  // through the ask-user tool, so the row that reaches the transcript is
+  // `● Asked user Hi — what would you like to work on?` and the dialog's own
+  // body repeats the question. Both are chrome for a turn that produced no
+  // answer, and the operator saw the greeting saved as the agent's reply.
+  /what would you like to work on\?/i,
 ] as const;
 
 /**
@@ -1727,6 +1855,20 @@ export const COPILOT_SKIP_PATTERNS: readonly RegExp[] = [
   COPILOT_SELECTION_FOOTER_PATTERN,
   // Collapsed reasoning header (Issue #1897): "⌄ Thinking…" / "⌄ Thought for 41s"
   COPILOT_REASONING_HEADER_PATTERN,
+  // 1.0.82's transcript dividers and badge-marked tool rows (Issue #2269)
+  COPILOT_TRANSCRIPT_DIVIDER_PATTERN,
+  COPILOT_TOOL_ROW_PATTERN,
+  // Issue #2269: the anchored box-row rule, so the raw-row consumer agrees with
+  // the accumulator. `[╭╮╰╯│]` below is unanchored and omits `└`, which is the
+  // glyph copilot opens a detail row with (`   └ Enable all permissions (tools,
+  // paths, and URLs)` under the launch screen's tip). `normalizeCopilotLine`
+  // deletes every U+2500..U+257F glyph, so by the time the skip patterns run in
+  // `cleanCopilotResponse` that row reads as prose -- which is how the ONE row
+  // of the 1.0.82 launch screen that no other rule caught became the agent's
+  // first reply. `extractCopilotContentLines` already tests this pattern before
+  // normalising (#1897); adding it here is what gives `extractResponse`, which
+  // never normalises, the same answer.
+  COPILOT_BOX_ROW_PATTERN,
   // Logo/banner lines
   /^GitHub Copilot\s+v/,
   /[█▘▝▖▗▔▄▌▐]/,
@@ -1739,8 +1881,19 @@ export const COPILOT_SKIP_PATTERNS: readonly RegExp[] = [
   /^ctrl\+[a-z]\s+\w/,
   // Prompt lines
   /^[❯>]\s*(Type\s+@|$)/,
-  // Tip/hint lines
-  /^Tip:\s+\//,
+  // Tip/hint lines. Issue #2269 added the `●` marker: 1.0.82 draws the launch
+  // screen's tip as `● Tip: /allow-all`, and `cleanCopilotResponse` strips the
+  // bullet only AFTER the skip patterns have run, so the bare form never
+  // matched and the tip was the one banner row that reached History.
+  /^\s*(?:●\s+)?Tip:\s*\//,
+  // Issue #2269: copilot's own tab bar, the top row of every 1.0.82 frame. It is
+  // the second banner row the launch screen leaked (the logo, the disclaimer and
+  // the tip's `└ …` detail row are all caught by the glyph rules above), and
+  // between them they are the whole difference between "the launch screen cleans
+  // to nothing and cannot be saved" and "History opens with the banner". Spelled
+  // out in full rather than as a keyword so a reply that mentions one of these
+  // words is untouched.
+  /^\s*Current\s+Sessions\s+Issues\s+Pull requests\s+Gists\s*$/,
   // Initial display text
   /^Describe a task to get started/,
   // Issue #571: Disclaimer, initialization message, environment info
@@ -1814,6 +1967,55 @@ export const ANTIGRAVITY_SEPARATOR_PATTERN = /^─{3,}$/m;
 export const ANTIGRAVITY_SELECTION_LIST_PATTERN = /Switch Model|↑\/↓\s*Navigate/m;
 
 /**
+ * The question line agy draws above its numbered permission dialog
+ * (Issue #2270; measured on agy 1.1.25, pane 200x1000, 2026-09-04).
+ *
+ * Anchored to the whole line so a model's prose that merely quotes the phrase
+ * inside a sentence cannot match it.
+ */
+export const ANTIGRAVITY_NUMBERED_DIALOG_QUESTION_PATTERN = /^\s*Do you want to proceed\?\s*$/m;
+
+/**
+ * One numbered option row of that dialog: `> 1. Yes`, `  4. No`.
+ *
+ * The `>` gutter marks the highlighted row and is optional, because only one of
+ * the four rows carries it.
+ */
+export const ANTIGRAVITY_NUMBERED_OPTION_PATTERN = /^\s*>?\s*\d+\.\s+\S/m;
+
+/**
+ * Is this frame agy's NUMBERED permission dialog rather than one of its
+ * arrow-key-only pickers? (Issue #2270)
+ *
+ * Both agy screens share the `↑/↓ Navigate` footer that
+ * {@link ANTIGRAVITY_SELECTION_LIST_PATTERN} matches, which is why #997 could
+ * widen that pattern to cover the permission menu — and why the menu then
+ * resolved as `antigravity_selection_list`, `hasActivePrompt: false`. On the
+ * chat surface that reads as "a selection list is open, drive it from the
+ * terminal": the arrow buttons can only Enter the highlighted option 1, so
+ * options 2-4 became unreachable, while the poller and the push notification
+ * described the very same frame as a `multiple_choice` prompt.
+ *
+ * The discriminator is the pair below, not the footer:
+ *
+ *  - `Do you want to proceed?` on its own line, and
+ *  - at least one `N. label` row.
+ *
+ * The Switch Model picker has neither (its rows are unnumbered model names and
+ * its header is `Switch Model`), so it keeps the #995 reading. Every other agy
+ * arrow-key TUI keeps it too — this is deliberately a rule about the ONE dialog
+ * whose frames were measured, not a general "numbers mean prompt" inference.
+ *
+ * Callers pass the same text they hand {@link ANTIGRAVITY_SELECTION_LIST_PATTERN}.
+ */
+export function isAntigravityNumberedDialog(text: string): boolean {
+  return (
+    ANTIGRAVITY_NUMBERED_DIALOG_QUESTION_PATTERN.test(text) &&
+    ANTIGRAVITY_NUMBERED_OPTION_PATTERN.test(text)
+  );
+}
+
+/**
  * Antigravity (agy) skip patterns for response cleaning (Issue #988)
  * Filters turn/input-box separators, the bare ">" input prompt, the idle status
  * bar ("? for shortcuts ... <model>"), the thinking footer/spinner, banner block
@@ -1825,6 +2027,249 @@ export const ANTIGRAVITY_SKIP_PATTERNS: readonly RegExp[] = [
   /^\?\s+for\s+shortcuts/, // Idle status bar (model name follows on the same line)
   ANTIGRAVITY_THINKING_PATTERN, // Spinner / Generating / "esc to cancel" footer
   /[▄▀█▌▐]/, // Banner block art (defensive; normally above the user-prompt anchor)
+  PASTED_TEXT_PATTERN, // [Pasted text #N +XX lines]
+] as const;
+
+/**
+ * Command Code status-line spinner glyphs (Issue #2250).
+ *
+ * The complete `getWaveSymbol` frame set, read off the shipped bundle
+ * (`command-code@1.40.1`, `dist/cli.mjs`):
+ * `["·","○","◇","☆","✧","☆","◇","○","⌘"]` — six distinct glyphs, cycled.
+ *
+ * Deliberately NOT folded into {@link CLAUDE_SPINNER_CHARS}. Command Code marks
+ * every assistant message with `⠶` (U+2836, see
+ * {@link COMMAND_CODE_RESPONSE_MARKER_PATTERN}); adding that braille glyph to a
+ * shared spinner class would make each reply's own first row read as "still
+ * generating", and adding these glyphs to claude's class would do the same to
+ * any claude reply that opens with `·`.
+ */
+export const COMMAND_CODE_SPINNER_CHARS = ['·', '○', '◇', '☆', '✧', '⌘'] as const;
+
+/**
+ * Command Code composer / dialog-cursor prompt pattern (Issue #2250).
+ *
+ * `❯` (U+276F) only — the ASCII `>` claude also accepts is not a glyph Command
+ * Code 1.40.1 draws, and accepting it here would make every shell prompt and
+ * every quoted diff line in a reply look like a composer.
+ *
+ * The row is drawn in two places, which is why prompt presence alone is not
+ * "ready": the bottom-pinned composer (`❯ Ask your question...` between two
+ * full-width rules) and the highlighted option of a permission dialog
+ * (`❯ 1. Yes`). Completion is resolved structurally instead — see
+ * {@link findCommandCodeChromeStart}.
+ */
+export const COMMAND_CODE_PROMPT_PATTERN = /^❯(\s*$|\s+\S)/m;
+
+/**
+ * Command Code separator pattern (Issue #2250).
+ *
+ * Full-pane runs of U+2500 fence the composer above and below, and one more is
+ * drawn above a permission dialog. Measured at 200 columns on every fixture in
+ * `tests/fixtures/command-code-live-2250/`.
+ */
+export const COMMAND_CODE_SEPARATOR_PATTERN = /^─{10,}$/m;
+
+/**
+ * Command Code status-line "esc to interrupt" hint (Issue #2250).
+ *
+ * The `Status` component renders `esc  to interrupt  •  <elapsed>  •  ↓ <tokens>`
+ * only in its `"all"` layout, i.e. at a terminal width of 72 columns or more
+ * (read off the bundle's `layoutMode` ladder; CommandMate panes are 200 wide, so
+ * production always takes that branch). Below 42 columns the whole tail is
+ * dropped and only the spinner + verb remain — which is why
+ * {@link COMMAND_CODE_THINKING_PATTERN} keeps the spinner branch as well.
+ */
+export const COMMAND_CODE_INTERRUPT_HINT_PATTERN = /esc to interrupt/;
+
+/**
+ * Command Code thinking/processing pattern (Issue #2250).
+ *
+ * Three measured alternatives:
+ *
+ *  1. the status row — a spinner glyph, then a single word ending in `…`
+ *     (`⌘ Planning…`, `· Synthesizing…`; the bundle's verb table is 74
+ *     single-word entries, all capitalised, but the class is left case-agnostic
+ *     because the `status` prop is not restricted to that table). Anchored at
+ *     the start of the line with only leading spaces allowed, so the `·` in the
+ *     banner's
+ *     `# models: … · taste-1` row and in the idle footer's
+ *     `? for shortcuts · taste on` cannot reach it;
+ *  2. `✻ Thinking…` — the reasoning block's header WHILE it streams. It becomes
+ *     `✻ Thought for 1 second [ctrl+o to expand]` once the block is closed, and
+ *     that past-tense form must NOT match: it sits in the transcript of every
+ *     finished turn (`turn-version.txt`);
+ *  3. {@link COMMAND_CODE_INTERRUPT_HINT_PATTERN}, unanchored, for the same
+ *     reason claude's pattern carries it.
+ */
+export const COMMAND_CODE_THINKING_PATTERN = new RegExp(
+  `^[^\\S\\n]*[${COMMAND_CODE_SPINNER_CHARS.join('')}][^\\S\\n]+[A-Za-z]+…` +
+    `|^[^\\S\\n]*✻ Thinking…` +
+    `|${COMMAND_CODE_INTERRUPT_HINT_PATTERN.source}`,
+  'm'
+);
+
+/**
+ * Command Code assistant-message marker (Issue #2250).
+ *
+ * `⠶` (U+2836) at column 0, one space, then the reply. Fixed, not a spinner
+ * frame: the bundle declares it as `Ct() ? "⠶" : "#"`, i.e. one constant with an
+ * ASCII fallback for terminals without unicode support. That answers 親 Issue
+ * #2249's 未確定事項 1 — the glyph does not rotate — and it is also why the `#`
+ * fallback is deliberately NOT matched here: on such a terminal it is
+ * indistinguishable from the `# Command Code v1.40.1` banner rows.
+ *
+ * Continuation rows of a multi-line reply are indented by two spaces (the marker
+ * is one column wide and the body box carries `marginLeft: 1`).
+ */
+export const COMMAND_CODE_RESPONSE_MARKER_PATTERN = /^⠶(?:\s|$)/;
+
+/**
+ * Command Code turn-completion marker (Issue #2250).
+ *
+ * **Advisory only — never require it to declare a turn finished.** Two measured
+ * reasons: `WorkedDurationNote` renders nothing for a turn under 1000 ms, and
+ * the row belongs to the live turn's UI rather than to the transcript — it is
+ * present in `turn-version.txt` and GONE from `dialog-create-file.txt`, which is
+ * the same pane one prompt later.
+ */
+export const COMMAND_CODE_COMPLETION_PATTERN = /^[^\S\n]*✻ Worked for /m;
+
+/**
+ * Command Code footer mode indicator (Issue #2250).
+ *
+ * The row under the composer's closing rule. `? for shortcuts` is only the
+ * DEFAULT-mode spelling: the bundle's `ModeIndicator` swaps it for a mode banner
+ * in the other four permission modes, so a rule that keys on `? for shortcuts`
+ * alone would stop recognising an idle pane the moment the operator pressed
+ * shift+tab. All five spellings are listed.
+ */
+export const COMMAND_CODE_MODE_INDICATOR_PATTERN =
+  /\?\s+for\s+shortcuts|»\s+accept edits on|»\s+permission bypass on|»\s+don't-ask on|^[^\S\n]*plan mode\s/m;
+
+/**
+ * Command Code startup banner rows (Issue #2250).
+ *
+ * The three-row header under the block-art logo — `# Command Code v1.40.1`,
+ * `# models: …`, `# <cwd>` — plus the logo itself.
+ *
+ * The version row matches the tool's own NAME and version together, which is the
+ * shape #2247 had to retreat to on claude: a bare `v\d+\.\d+` matched any reply
+ * that mentioned a release, and the turn was silently dropped. Nothing here
+ * matches a bare version string, a `│` table glyph, or a `Tip:` line.
+ */
+export const COMMAND_CODE_BANNER_PATTERNS: readonly RegExp[] = [
+  /^#\s+Command Code v\d/, // Name + version, together
+  /^#\s+models:\s/, // Model line
+  /^#\s+[~/]/, // Working-directory line
+  /^[^\S\n]*[█▀▄▌▐]{3,}/, // Block-art logo rows
+] as const;
+
+/**
+ * Command Code hook notice row (Issue #2250).
+ *
+ * `◼ Ran 1 session start hook` — emitted into the transcript when SessionStart
+ * hooks fire, so it lands ABOVE the first user echo and is chrome, not a reply.
+ * Measured on a hooks-enabled 1.40.1 pane while capturing #2249's evidence.
+ * Command Code's hook wiring itself is Phase B (#2251); this row only has to be
+ * kept out of History.
+ */
+export const COMMAND_CODE_HOOK_NOTICE_PATTERN = /^[^\S\n]*◼\s+Ran\s+\d+\s+.*hooks?\b/;
+
+/** How far above the last row Command Code's footer row may sit. */
+const COMMAND_CODE_FOOTER_MAX_ROWS = 4;
+
+/** How many rows the composer may span before the block stops looking like chrome. */
+const COMMAND_CODE_INPUT_BOX_MAX_ROWS = 40;
+
+/**
+ * Locate the start of Command Code's bottom-pinned chrome within a captured pane.
+ *
+ * Command Code is inline-rendered, so its transcript grows downwards and the
+ * last four rows of a settled pane are always the same four (measured on
+ * `boot-idle.txt`, `turn-version.txt` and `turn-tool-write.txt`):
+ *
+ * ```text
+ * ────────────────────  ← opening rule
+ * ❯ Ask your question…  ← composer (one row per wrapped line)
+ * ────────────────────  ← closing rule
+ *   ? for shortcuts · taste on
+ * ```
+ *
+ * Everything from the opening rule down is terminal furniture. Two things go
+ * wrong if it reaches the extractor, and both are regressions this repository
+ * has already paid for once: the composer's placeholder is drawn with the same
+ * `❯ <text>` shape as a transcript echo, so the turn anchor lands on the FOOTER
+ * and the reply extracts as empty (#1289); and the footer row is repainted while
+ * the pane sits idle, so keeping it re-hashes the saved response on every poll
+ * tick (#1268 / #1289).
+ *
+ * Structural, like the three readers next to it, and for the reason spelled out
+ * on `findClaudeChromeStart`: the hint strings belong to Command Code and a rule
+ * that matches them stops working the moment they are reworded. `-1` is the
+ * honest answer for a frame with no composer at all — while a permission dialog
+ * is up the whole block is replaced by the dialog, which the caller resolves on
+ * the prompt path instead.
+ *
+ * @param lines - Captured pane lines, ANSI-bearing or not; trailing blanks tolerated
+ * @returns Index of the opening rule, or -1 when no composer block is present
+ */
+export function findCommandCodeChromeStart(lines: string[]): number {
+  const isSeparator = (line: string | undefined): boolean =>
+    /^─{10,}$/.test(stripAnsi(line ?? '').trimEnd());
+
+  let lastRow = lines.length - 1;
+  while (lastRow >= 0 && lines[lastRow].trim() === '') lastRow--;
+  if (lastRow < 0) return -1;
+
+  // The closing rule sits just above the mode-indicator row.
+  let closingSeparator = -1;
+  for (let i = lastRow; i >= Math.max(0, lastRow - COMMAND_CODE_FOOTER_MAX_ROWS); i--) {
+    if (isSeparator(lines[i])) {
+      closingSeparator = i;
+      break;
+    }
+  }
+  if (closingSeparator < 0) return -1;
+
+  // Walk up over the composer rows to the opening rule.
+  let openingSeparator = -1;
+  for (let i = closingSeparator - 1; i >= Math.max(0, closingSeparator - COMMAND_CODE_INPUT_BOX_MAX_ROWS); i--) {
+    if (isSeparator(lines[i])) {
+      openingSeparator = i;
+      break;
+    }
+  }
+  if (openingSeparator < 0) return -1;
+
+  // Confirm the fenced rows are the composer and not a reply that happens to
+  // contain two horizontal rules.
+  if (!/^❯/.test(stripAnsi(lines[openingSeparator + 1] ?? ''))) return -1;
+
+  return openingSeparator;
+}
+
+/**
+ * Command Code skip patterns for response cleaning (Issue #2250).
+ *
+ * The dedicated cleaner Issue #2250 item 8 asks for: the startup banner, the
+ * hook notice, the reasoning and turn summaries (`✻ Thought for` / `✻ Worked
+ * for`), the composer, the rules and the footer.
+ *
+ * Nothing here touches the reply body or a tool block: `⠶ <text>`, ` WRITE
+ * [probe.txt]`, ` └  Created probe.txt (1 line)` and `     1 │ hello` all
+ * survive (`turn-tool-write.txt`). In particular there is no `^\s*│` rule — the
+ * one codex carries — because Command Code renders file previews with it.
+ */
+export const COMMAND_CODE_SKIP_PATTERNS: readonly RegExp[] = [
+  /^─{10,}$/, // Composer rules and the dialog's rule
+  /^❯\s*$/, // Bare composer row
+  /^❯\s+Ask your question\.\.\./, // Composer placeholder
+  COMMAND_CODE_MODE_INDICATOR_PATTERN, // Footer mode indicator
+  COMMAND_CODE_THINKING_PATTERN, // Status row
+  /^[^\S\n]*✻\s+(?:Worked|Thought)\s+for\b/, // Turn / reasoning summaries
+  COMMAND_CODE_HOOK_NOTICE_PATTERN, // "◼ Ran N session start hook"
+  ...COMMAND_CODE_BANNER_PATTERNS, // Startup banner
   PASTED_TEXT_PATTERN, // [Pasted text #N +XX lines]
 ] as const;
 
@@ -1857,6 +2302,9 @@ export function detectThinking(cliToolId: CLIToolType, content: string): boolean
       break;
     case 'antigravity':
       result = ANTIGRAVITY_THINKING_PATTERN.test(content);
+      break;
+    case 'command-code':
+      result = COMMAND_CODE_THINKING_PATTERN.test(content);
       break;
     default:
       result = CLAUDE_THINKING_PATTERN.test(content);
@@ -1975,6 +2423,20 @@ export function getCliToolPatterns(cliToolId: CLIToolType): {
         separatorPattern: ANTIGRAVITY_SEPARATOR_PATTERN,
         thinkingPattern: ANTIGRAVITY_THINKING_PATTERN,
         skipPatterns: [...ANTIGRAVITY_SKIP_PATTERNS],
+      };
+
+    // Issue #2250: Command Code's layout is claude-shaped (inline transcript,
+    // `❯` composer fenced by two full-width rules) but the constants are its
+    // own. Sharing claude's would import the exact defect #2247 had to undo --
+    // claude's rules carry a startup-banner reading that keys on `v\d+\.\d+`
+    // and `|`, and Command Code prints its version into a `# Command Code
+    // v1.40.1` row on every launch.
+    case 'command-code':
+      return {
+        promptPattern: COMMAND_CODE_PROMPT_PATTERN,
+        separatorPattern: COMMAND_CODE_SEPARATOR_PATTERN,
+        thinkingPattern: COMMAND_CODE_THINKING_PATTERN,
+        skipPatterns: [...COMMAND_CODE_SKIP_PATTERNS],
       };
 
     default:

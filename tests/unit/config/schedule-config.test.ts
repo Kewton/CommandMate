@@ -14,6 +14,7 @@ import {
   CODEX_SANDBOXES,
   COPILOT_PERMISSIONS,
   ANTIGRAVITY_PERMISSIONS,
+  COMMAND_CODE_PERMISSIONS,
   GEMINI_PERMISSIONS,
   VIBE_LOCAL_PERMISSIONS,
   OPENCODE_PERMISSIONS,
@@ -126,7 +127,40 @@ describe('schedule-config', () => {
     });
   });
 
-  describe('getPermissionOptionsForTool() antigravity (Issue #989)', () => {
+  /**
+ * Issue #2250: the five values Command Code's `--permission-mode` actually
+ * accepts, read off the shipped bundle rather than off `--help`.
+ *
+ * `commandcode --help` advertises three (`standard, plan, auto-accept`); the
+ * option is declared with `.choices(["default","standard","plan","auto-accept",
+ * "dont-ask"])` in `command-code@1.40.1/dist/cli.mjs`, and `.choices()` is what
+ * validates. `default` is also what the tool reports in its own hook payloads.
+ */
+describe('COMMAND_CODE_PERMISSIONS (Issue #2250)', () => {
+  it('is the five modes the CLI accepts', () => {
+    expect([...COMMAND_CODE_PERMISSIONS]).toEqual([
+      'default',
+      'standard',
+      'plan',
+      'auto-accept',
+      'dont-ask',
+    ]);
+  });
+
+  it('excludes --yolo, which is a separate boolean flag rather than a mode', () => {
+    expect(COMMAND_CODE_PERMISSIONS as readonly string[]).not.toContain('yolo');
+    expect(COMMAND_CODE_PERMISSIONS as readonly string[]).not.toContain(
+      '--dangerously-skip-permissions',
+    );
+  });
+
+  it('defaults to the mode the tool itself reports', () => {
+    expect(DEFAULT_PERMISSIONS['command-code']).toBe('default');
+    expect(COMMAND_CODE_PERMISSIONS as readonly string[]).toContain('default');
+  });
+});
+
+describe('getPermissionOptionsForTool() antigravity (Issue #989)', () => {
     it('should return ANTIGRAVITY_PERMISSIONS for antigravity', () => {
       expect(getPermissionOptionsForTool('antigravity')).toBe(ANTIGRAVITY_PERMISSIONS);
     });
@@ -149,6 +183,7 @@ describe('getPermissionOptionsForTool() resolves through the tool\'s own case (I
     ['codex', CODEX_SANDBOXES],
     ['copilot', COPILOT_PERMISSIONS],
     ['antigravity', ANTIGRAVITY_PERMISSIONS],
+    ['command-code', COMMAND_CODE_PERMISSIONS],
     ['gemini', GEMINI_PERMISSIONS],
     ['vibe-local', VIBE_LOCAL_PERMISSIONS],
     ['opencode', OPENCODE_PERMISSIONS],
@@ -158,7 +193,7 @@ describe('getPermissionOptionsForTool() resolves through the tool\'s own case (I
 
   it('every CLI_TOOL_IDS member has its own case (none falls through to default)', () => {
     // Guards the guard: an empty or truncated CLI_TOOL_IDS would make this vacuous.
-    expect(CLI_TOOL_IDS.length).toBeGreaterThanOrEqual(7);
+    expect(CLI_TOOL_IDS.length).toBeGreaterThanOrEqual(8);
     for (const cliToolId of CLI_TOOL_IDS) {
       expect(
         getPermissionOptionsForTool(cliToolId),

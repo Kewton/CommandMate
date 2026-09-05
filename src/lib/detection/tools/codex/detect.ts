@@ -26,6 +26,11 @@ import {
 } from '../../cli-patterns';
 import { detectPrompt } from '../../prompt-detector';
 import { STATUS_REASON } from '../../status-reason';
+import {
+  readCodexDialogFrame,
+  findCodexBottomGlyphRow,
+  reportCodexDialogFooterDrift,
+} from './cli-patterns';
 import { detectCodexDialog } from './prompt';
 import { STATUS_CHECK_LINE_COUNT } from '../frame';
 import { createToolStatusDetector } from '../run-detection';
@@ -159,6 +164,20 @@ function isCodexApprovalRequest(
   return question.endsWith('?') || CODEX_APPROVAL_FOOTER_PATTERN.test(selectionWindow);
 }
 
+/**
+ * Issue #2310: does the RAW frame positively show that its bottom-most `›` row
+ * is a dialog's highlighted row rather than the composer?
+ *
+ * The one question the ANSI-stripped `contentLines` cannot answer, asked in the
+ * two places that would otherwise publish `ready` off `CODEX_PROMPT_PATTERN`
+ * alone. False only means "not shown to be a dialog" — a stripped capture, a
+ * transcript echo and a genuine composer all answer false — so this can withhold
+ * an `ready` but never create one.
+ */
+function isCodexDialogGlyphTail(raw: string): boolean {
+  return findCodexBottomGlyphRow(raw)?.kind === 'option';
+}
+
 export const codexStatusDetector = createToolStatusDetector({
   tool: 'codex',
   verifiedAgainst: VERIFIED_AGAINST,
@@ -277,6 +296,65 @@ export const codexStatusDetector = createToolStatusDetector({
       }
     }
 
+    // 0.85. Codex: every OTHER dialog — recognised by structure (Issue #2310)
+    //
+    // Branch 0.8 above is a footer whitelist, and a dialog codex closes with any
+    // other sentence walks straight past it into the two branches that read `^›`
+    // as the idle composer (branch B below, and the shared chain's step 3), both
+    // of which publish `ready`. Measured on codex-cli 0.153.2 at 200x1000:
+    // `/experimental` ends on "Press space to select or enter to save for next
+    // conversation" and `/keymap` on "left/right group · enter edit shortcut · …
+    // · esc close"; both were reported `ready` while blocked on a keypress, which
+    // is what makes Auto-Yes see nothing to answer, the sidebar dot go green and
+    // `commandmate wait` close on `scraper_ready` mid-task.
+    //
+    // So this branch does not read the footer at all — `readCodexDialogFrame`
+    // judges the shape: the bottom-most `›` row of the RAW frame carrying a
+    // dialog's attributes rather than the composer's, or a `›`-selected numbered
+    // block at the foot of the content region (the reading that still answers
+    // once ANSI has been stripped). Neither of the two live leaks is numbered,
+    // which is why the attribute rule is the primary one.
+    //
+    // The verdict deliberately mirrors what the chain would have said one step
+    // later, so no frame that already resolved changes: a dialog `detectPrompt`
+    // can parse is still `PROMPT_DETECTED` with `hasActivePrompt` (step 1's
+    // answer — the trust dialog and any reworded approval keep exit 10 for
+    // `wait --on-prompt agent`), and everything else is a navigable selection
+    // list. The #1160 staleness guard applies as it does in 0.8: an answered
+    // block with codex working below it is scrollback, not a dialog — and the
+    // glyph rule agrees independently, because the bottom-most `›` on such a
+    // frame is the composer codex draws while it works.
+    const codexDialogFrame = readCodexDialogFrame(frame.raw, contentLines, findCodexContentEnd(contentLines));
+    if (codexDialogFrame && !isCodexStalePrompt(contentLines)) {
+      // The footer is not consulted for the verdict; an unrecognised one means
+      // codex reworded a screen, which is worth saying out loud exactly once.
+      if (!codexDialogFrame.footerRecognised) {
+        reportCodexDialogFooterDrift(codexDialogFrame.footer);
+      }
+      const codexPromptDetection = detectPrompt(
+        stripBoxDrawing(frame.clean),
+        buildDetectPromptOptions('codex'),
+      );
+      if (codexPromptDetection.isPrompt) {
+        return {
+          status: 'waiting',
+          confidence: 'high',
+          reason: STATUS_REASON.PROMPT_DETECTED,
+          hasActivePrompt: true,
+          evidence: 'positive',
+          promptDetection: codexPromptDetection,
+        };
+      }
+      return {
+        status: 'waiting',
+        confidence: 'high',
+        reason: STATUS_REASON.CODEX_SELECTION_LIST,
+        hasActivePrompt: false,
+        evidence: 'positive',
+        promptDetection: codexPromptDetection,
+      };
+    }
+
     return null;
   },
 
@@ -333,7 +411,19 @@ export const codexStatusDetector = createToolStatusDetector({
         //
         // The evidence stays `positive` here: codex has no measured idle rule yet
         // (see the module docstring), so DR2-002 keeps its pre-#1927 reading.
-        if (CODEX_PROMPT_PATTERN.test(contentLines[lastContentIdx].trim())) {
+        //
+        // Issue #2310: `^›` alone does not say "composer". codex draws the same
+        // glyph on a dialog's highlighted row, and reading one as the input line
+        // is what published `ready` for a session blocked on a keypress. Branch
+        // 0.85 already turns those frames back before the chain reaches here, so
+        // this is the second reading of the same fact rather than the only one —
+        // and it is written as a veto, not a test: only a RAW frame that
+        // positively shows a dialog row withholds `ready`, so a capture whose
+        // ANSI has been stripped still reports idle exactly as it did before.
+        if (
+          CODEX_PROMPT_PATTERN.test(contentLines[lastContentIdx].trim()) &&
+          !isCodexDialogGlyphTail(frame.raw)
+        ) {
           return {
             status: 'ready',
             confidence: 'high',
@@ -369,7 +459,9 @@ export const codexStatusDetector = createToolStatusDetector({
         codexTailIdx--;
       }
       const codexTailIsIdlePrompt =
-        codexTailIdx >= 0 && CODEX_PROMPT_PATTERN.test(contentLines[codexTailIdx].trim());
+        codexTailIdx >= 0 &&
+        CODEX_PROMPT_PATTERN.test(contentLines[codexTailIdx].trim()) &&
+        !isCodexDialogGlyphTail(frame.raw);
       if (!codexTailIsIdlePrompt && detectThinking('codex', frame.lastLines)) {
         return {
           status: 'running',

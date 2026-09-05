@@ -106,6 +106,8 @@ describe('instances table: SESSION_ID / SESSION_TITLE columns', () => {
       'EFFORT',
       'SESSION_ID',
       'SESSION_TITLE',
+      // Issue #2317 appended one more, for the same reason.
+      'TMUX_SESSION',
     ]);
   });
 });

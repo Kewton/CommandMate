@@ -113,18 +113,31 @@ export const PAGER_SCRIPT_FILENAME = 'cm-read-pane.sh';
  * stopped.
  */
 export const PAGER_SCRIPT = `#!/bin/sh
-# CommandMate reading mode (Issue #1623) — generated file, edits are overwritten.
+# CommandMate reading mode (Issue #1623; --follow added by #2317) — generated file, edits are overwritten.
 #
 # Renders the transcript of a CommandMate tmux session with layout-only blank rows
 # squeezed away, so a pager lands on the composer instead of hundreds of rows of
 # padding. Invoked by \`prefix+g\` through \`display-popup -E\`; also runnable by hand:
 #
 #   sh ~/.commandmate/bin/${PAGER_SCRIPT_FILENAME} mcbd-claude-my-worktree
+#   sh ~/.commandmate/bin/${PAGER_SCRIPT_FILENAME} --follow mcbd-claude-my-worktree
 #
-# The popup is a SNAPSHOT. Press the key again to refresh it.
+# Without --follow the popup is a SNAPSHOT. Press the key again to refresh it.
+# With --follow (Issue #2317 Phase C) it redraws every CM_READ_FOLLOW_INTERVAL
+# seconds and closes on \`q\`. Neither mode alters the pane, the window or the
+# session — the popup is per-client and leaves nothing behind when it closes.
 set -u
 
-SESSION="\${1:-}"
+FOLLOW=0
+SESSION=""
+for arg in "$@"; do
+  case "$arg" in
+    --follow|-f) FOLLOW=1 ;;
+    -*) ;;
+    *) if [ -z "$SESSION" ]; then SESSION="$arg"; fi ;;
+  esac
+done
+
 if [ -z "$SESSION" ]; then
   SESSION=$(tmux display-message -p '#{session_name}' 2>/dev/null) || SESSION=""
 fi
@@ -138,6 +151,65 @@ case "$LINES_BACK" in
   ''|*[!0-9]*) LINES_BACK=1000 ;;
 esac
 
+# LC_ALL is pinned for awk ONLY (not for less, which still renders UTF-8 box
+# drawing in the user's locale). Under gawk in a UTF-8 locale, sprintf("%c",194)
+# yields U+00C2 rather than the byte 0xC2 and the NBSP fold below silently stops
+# matching. See SQUEEZE_AWK_LOCALE in read-mode-pager.ts.
+cm_read_render() {
+  tmux capture-pane -pe -t "=$SESSION:" -S "-$LINES_BACK" -E - \\
+    | LC_ALL=${SQUEEZE_AWK_LOCALE} awk '${SQUEEZE_AWK_PROGRAM}'
+}
+
+if [ "$FOLLOW" = "1" ]; then
+  INTERVAL="\${CM_READ_FOLLOW_INTERVAL:-2}"
+  case "$INTERVAL" in
+    ''|*[!0-9]*) INTERVAL=2 ;;
+  esac
+  if [ "$INTERVAL" -lt 1 ]; then INTERVAL=1; fi
+  # The key check below waits 0.2s per tick (stty \`time 2\`), so one tick is a
+  # fifth of a second and the key is answered long before the next redraw.
+  TICKS=$((INTERVAL * 5))
+
+  OLD_STTY=$(stty -g 2>/dev/null) || OLD_STTY=""
+  cm_read_restore_tty() {
+    if [ -n "$OLD_STTY" ]; then stty "$OLD_STTY" 2>/dev/null || true; fi
+    printf '\\033[?25h'
+  }
+  trap 'cm_read_restore_tty' EXIT
+  trap 'cm_read_restore_tty; exit 0' INT TERM
+  # \`min 0 time 2\` is what makes a single-byte read non-blocking-with-a-deadline:
+  # it returns after 0.2s with nothing when no key was pressed. Without it the
+  # loop would either block forever on the key or busy-spin between redraws.
+  if [ -n "$OLD_STTY" ]; then stty -icanon -echo min 0 time 2 2>/dev/null || true; fi
+  printf '\\033[?25l'
+
+  ROWS=$(tput lines 2>/dev/null) || ROWS=40
+  case "$ROWS" in
+    ''|*[!0-9]*) ROWS=40 ;;
+  esac
+  BODY_ROWS=$((ROWS - 2))
+  if [ "$BODY_ROWS" -lt 1 ]; then BODY_ROWS=1; fi
+
+  while :; do
+    FRAME=$(cm_read_render | tail -n "$BODY_ROWS")
+    printf '\\033[H\\033[2J%s\\n' "$FRAME"
+    printf '\\033[7m[CommandMate] following %s — press q to close\\033[0m' "$SESSION"
+    TICK=0
+    while [ "$TICK" -lt "$TICKS" ]; do
+      if [ -n "$OLD_STTY" ]; then
+        KEY=$(dd bs=1 count=1 2>/dev/null)
+        case "$KEY" in
+          q|Q) exit 0 ;;
+        esac
+      else
+        sleep 1
+        TICK="$TICKS"
+      fi
+      TICK=$((TICK + 1))
+    done
+  done
+fi
+
 if [ -n "\${CM_READ_PAGER:-}" ]; then
   PAGER_CMD="$CM_READ_PAGER"
 elif command -v less >/dev/null 2>&1; then
@@ -146,13 +218,7 @@ else
   PAGER_CMD="cat"
 fi
 
-# LC_ALL is pinned for awk ONLY (not for less, which still renders UTF-8 box
-# drawing in the user's locale). Under gawk in a UTF-8 locale, sprintf("%c",194)
-# yields U+00C2 rather than the byte 0xC2 and the NBSP fold below silently stops
-# matching. See SQUEEZE_AWK_LOCALE in read-mode-pager.ts.
-tmux capture-pane -pe -t "=$SESSION:" -S "-$LINES_BACK" -E - \\
-  | LC_ALL=${SQUEEZE_AWK_LOCALE} awk '${SQUEEZE_AWK_PROGRAM}' \\
-  | $PAGER_CMD
+cm_read_render | $PAGER_CMD
 
 # Without a pager the popup would close before anything could be read.
 if [ "$PAGER_CMD" = "cat" ]; then

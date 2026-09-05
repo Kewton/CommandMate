@@ -17,10 +17,24 @@
  * Auto-Yes — is identical in both modes, which is why a send, a prompt answer
  * and an interrupt all keep working from the chat surface.
  *
+ * Issue #2254 made TWO of those footer members mode-dependent, and only two:
+ * `NavigationButtons` and `TerminalEscapeHatch` drive the TUI FRAME rather than
+ * the composer, and the chat surface now draws its own copy of each inside the
+ * dialog card, directly under the frame it acts on. So `showNav` /
+ * `showEscapeHatch` are false in chat mode. The composer, Auto-Yes, the
+ * quick-key strip and `PromptPanel` are unchanged — `PromptPanel` most
+ * deliberately, because it answers the one wait the chat surface draws nothing
+ * for (see `resolveBlockedReason`).
+ *
+ * Issue #2261: the pane also carries the temporary "maximize this split"
+ * toggle. The state itself lives in `useTerminalSplits` (container-owned); what
+ * is here is the `Mod+Shift+Enter` listener, which resolves split ownership
+ * through `[data-split-index]` exactly as the #2193 chord below does.
+ *
  * Issue #2194: that chat body is now `ChatSurface` rather than a bare
- * `HistoryPane` — same transcript, plus the live region (generating row, the
- * "open the terminal" banner for frames chat cannot drive, the empty-state line)
- * and follow-the-tail. The #1121 pending bubble it shows on send is the existing
+ * `HistoryPane` — same transcript, plus the live region (a banner for frames the
+ * composer cannot drive, and since #2254 the dialog card under it) and
+ * follow-the-tail. The #1121 pending bubble it shows on send is the existing
  * `usePendingMessages` merge below; nothing new sends from here.
  *
  * This is the consumer that translates polled split state into UI on PC.
@@ -72,6 +86,7 @@ import {
 import { useSplitMessages } from '@/hooks/useSplitMessages';
 import { usePendingMessages, type OptimisticSendOptions } from '@/hooks/usePendingMessages';
 import { useHistoryPaneState } from '@/hooks/useHistoryPaneState';
+import { emitSurfaceModeChange } from '@/hooks/useSplitSurfaceModes';
 import { worktreeApi } from '@/lib/api-client';
 import { buildPromptResponseBody } from '@/lib/prompt-response-body-builder';
 import { readPromptDecisionId } from '@/components/worktree/prompt-decision-id';
@@ -88,6 +103,7 @@ import {
   resolveSurfaceMode,
   writeSurfaceMode,
 } from '@/config/surface-mode-config';
+import { Tooltip } from '@/components/common/Tooltip';
 
 /**
  * Issue #756: props are grouped into domain types. `TerminalSplitPaneContent`
@@ -157,6 +173,18 @@ export interface TerminalSplitPaneContentProps extends TerminalSplitPaneCoreProp
    * re-rendering every split twice a second.
    */
   onAgentSessionChange?: (instanceId: string, snapshot: AgentSessionSnapshot) => void;
+  /**
+   * Issue #2261: whether this split is the one currently filling the terminal
+   * row. Passed straight through to `TerminalSplitPane` for the toggle's
+   * pressed state; the container owns the state and the layout.
+   */
+  isMaximized?: boolean;
+  /**
+   * Issue #2261: maximize this split / restore the split layout. Optional —
+   * omitting it hides the title-bar toggle AND makes the keyboard chord inert
+   * here, so a pre-#2261 caller keeps the composer's Shift+Enter untouched.
+   */
+  onToggleMaximize?: () => void;
 }
 
 export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
@@ -180,6 +208,8 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   onRequestSessionEnd,
   agentModel,
   onAgentSessionChange,
+  isMaximized = false,
+  onToggleMaximize,
 }: TerminalSplitPaneContentProps) {
   // Issue #869: resolve the instance id this split targets. Defaults to the
   // primary instance (`=== cliToolId`) so pre-#869 single-instance behavior —
@@ -225,8 +255,13 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
     (mode: SurfaceMode) => {
       setSurfaceModeState(mode);
       writeSurfaceMode(surfaceStorageKey, mode);
+      // Issue #2259: the Action bar disables its History toggle while EVERY
+      // split shows chat (the chat surface has no History column). It reads the
+      // modes out of the same storage, but a same-window write fires no
+      // `storage` event, so the change is announced explicitly.
+      emitSurfaceModeChange({ worktreeId, splitIndex, mode });
     },
-    [surfaceStorageKey],
+    [surfaceStorageKey, worktreeId, splitIndex],
   );
 
   // Read by the keydown listener so the listener itself never has to be torn
@@ -268,6 +303,51 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [splitIndex, handleSurfaceModeChange]);
+
+  // Read by the maximize listener below for the same reason `surfaceModeRef`
+  // exists: the listener must not be torn down and rebuilt when the parent hands
+  // down a fresh callback identity on every container render.
+  const onToggleMaximizeRef = useRef(onToggleMaximize);
+  onToggleMaximizeRef.current = onToggleMaximize;
+
+  // Issue #2261: Mod+Shift+Enter maximizes / restores this split.
+  //
+  // Ownership is resolved exactly the way #2193 resolves it — the split that
+  // contains the focused element answers, found through `[data-split-index]` on
+  // the pane root — so the two chords cannot disagree about which split the user
+  // means. With focus outside every split the FIRST split answers, and only when
+  // the user is not typing in some other text field.
+  //
+  // `preventDefault` matters here in a way it does not for Mod+Shift+M:
+  // `MessageInput` treats Shift+Enter as "insert a newline" and does NOT
+  // preventDefault it, so without this the composer would gain a blank line
+  // every time the split was maximized from the keyboard. It runs only once the
+  // chord is confirmed to belong to this split AND a handler is actually wired,
+  // so a pre-#2261 caller's Shift+Enter is untouched.
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (!event.shiftKey || event.altKey) return;
+      if (!event.metaKey && !event.ctrlKey) return;
+      if (event.key !== 'Enter') return;
+
+      const target = event.target instanceof Element ? event.target : null;
+      const owner = target?.closest('[data-split-index]');
+      if (owner) {
+        if (Number(owner.getAttribute('data-split-index')) !== splitIndex) return;
+      } else {
+        if (splitIndex !== 0) return;
+        if (target?.closest('input, textarea, select, [contenteditable="true"]')) return;
+      }
+
+      const toggle = onToggleMaximizeRef.current;
+      if (!toggle) return;
+      event.preventDefault();
+      toggle();
+    }
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [splitIndex]);
 
   const {
     terminal,
@@ -444,7 +524,24 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
     clearPrompt();
   }, [clearPrompt]);
 
-  const showNav = terminal.isSelectionListActive;
+  // Issue #2254: the chat surface draws its own copy of these two, inside the
+  // dialog card and directly under the frame they act on. Before this Issue the
+  // footer was rendered in BOTH modes (`footer={footerSlot}` below is
+  // unconditional) and neither gate looked at `surfaceMode`, so switching to
+  // chat left `NavigationButtons` under the composer, twelve rows away from a
+  // selection list the surface was simultaneously telling the user it could not
+  // show. `PromptPanel` is deliberately NOT gated: it is the composer's own
+  // control for an answerable wait, the chat surface never draws one (see
+  // `ChatSurface`'s "What this deliberately does NOT do"), and hiding it in chat
+  // mode would take away the only way to answer an ordinary yes/no.
+  const isChatSurface = surfaceMode === 'chat';
+
+  // The frame-level facts, independent of which surface is showing. Kept apart
+  // from the render gates below so the `!isSelectionListFrame` term in the
+  // escape-hatch condition keeps meaning "a selection list is on screen" rather
+  // than becoming "the footer happens to be drawing the nav pad".
+  const isSelectionListFrame = terminal.isSelectionListActive;
+  const showNav = isSelectionListFrame && !isChatSurface;
   const showPrompt = prompt.visible && !autoYesEnabled;
   // Issue #1932: the approval this pane's dialog addresses, when the payload
   // names one. Null for every scraper-read prompt and for every source that
@@ -458,10 +555,12 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   // not rendered — and no selection list / prompt panel is already driving it. Stays
   // hidden during normal generation ('thinking_indicator') and at an idle input prompt
   // ('ready'), so Enter/'q' can never reach the composer.
+  // Issue #2254 added the `!isChatSurface` term; the other three are unchanged.
   const showEscapeHatch =
     terminal.isUnclassifiedActive &&
-    !showNav &&
-    !prompt.visible;
+    !isSelectionListFrame &&
+    !prompt.visible &&
+    !isChatSurface;
 
   // Issue #1879: the unsent-input bar. Its gate is the composer's CONTENTS and
   // nothing else — not isUnclassifiedActive, not isSelectionListActive, not
@@ -617,6 +716,13 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
               isUnclassifiedActive: terminal.isUnclassifiedActive,
             }}
             onSurfaceModeChange={handleSurfaceModeChange}
+            // Issue #2254: the dialog card's frame. `terminal.output`, not
+            // `terminal.realtimeSnippet` — see `ChatSurfaceProps.frame` for the
+            // measurement behind that choice (a codex pane's last 100 rows are
+            // blank). `refresh` is the same immediate re-poll the footer's key
+            // strips are given, so the card redraws right after a key lands.
+            frame={terminal.output}
+            onKeysSent={refresh}
           />
         </div>
       </div>
@@ -634,6 +740,8 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       terminal.isSelectionListActive,
       terminal.isPagerActive,
       terminal.isUnclassifiedActive,
+      terminal.output,
+      refresh,
       prompt.visible,
       prompt.data,
       handleSurfaceModeChange,
@@ -641,10 +749,16 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   );
 
   // Issue #744: compose [HistoryPane | PaneResizer | TerminalDisplay]. When the
-  // history is collapsed, a compact expand bar replaces it.
+  // history is hidden, nothing replaces it and the terminal takes the whole
+  // row: Issue #2259 removed the 36px expand strip, which cost 36px per split
+  // (108px at 3 splits) to duplicate a toggle the Action bar already owns.
   const terminalSlot = useMemo(
     () => (
-      <div ref={historyContainerRef} className="flex h-full min-h-0 w-full">
+      <div
+        ref={historyContainerRef}
+        data-testid={`split-terminal-row-${splitIndex}`}
+        className="flex h-full min-h-0 w-full"
+      >
         {historyVisible ? (
           <>
             <div
@@ -665,49 +779,16 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
               ariaValueNow={historyWidth}
             />
           </>
-        ) : (
-          <div
-            data-testid={`split-history-expand-bar-${splitIndex}`}
-            className="flex-shrink-0 flex items-start justify-center w-9 bg-gray-50 dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700"
-          >
-            <button
-              type="button"
-              data-testid={`split-history-expand-${splitIndex}`}
-              aria-label={t('terminal.showHistory')}
-              title={t('terminal.showHistory')}
-              aria-expanded="false"
-              onClick={toggleHistory}
-              className="flex flex-col items-center gap-2 w-full pt-2 text-gray-500 dark:text-gray-400 hover:text-accent-600 dark:hover:text-accent-400 focus:outline-none focus:ring-2 focus:ring-ring"
-            >
-              <svg
-                className="w-4 h-4 flex-shrink-0"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-                aria-hidden="true"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M9 5l7 7-7 7"
-                />
-              </svg>
-              <span
-                className="text-xs font-medium tracking-wide select-none"
-                style={{ writingMode: 'vertical-rl' }}
-                aria-hidden="true"
-              >
-                {t('terminal.historyLabel')}
-              </span>
-            </button>
-          </div>
-        )}
+        ) : null}
         <div
           // Issue #2131: the measured half of the pair above. This is the box
           // `TerminalDisplay` fills, so its `getBoundingClientRect().height` IS
           // the "terminal height" the Issue's table reports.
           data-testid={`split-terminal-slot-${splitIndex}`}
+          // Issue #2259: hiding the column leaves NOTHING beside the terminal —
+          // the 36px `w-9` strip that used to sit here is gone, so the width is
+          // written as an explicit 100% rather than left to `flex-grow` alone.
+          style={historyVisible ? undefined : { width: '100%' }}
           className="flex-grow overflow-hidden min-w-0 min-h-0 relative"
         >
           {terminalDisplaySlot}
@@ -719,10 +800,8 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       historyWidth,
       historyPaneSlot,
       handleHistoryResize,
-      toggleHistory,
       terminalDisplaySlot,
       splitIndex,
-      t,
     ],
   );
 
@@ -921,16 +1000,17 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
     if (!onRequestSessionEnd || !terminal.isRunning) return null;
     const label = t('terminal.endSessionFor', { name: endTargetLabel });
     return (
-      <button
-        type="button"
-        onClick={handleRequestSessionEnd}
-        aria-label={label}
-        title={label}
-        data-testid={`terminal-end-session-button-${splitIndex}`}
-        className="flex items-center justify-center p-0.5 rounded text-muted-foreground hover:text-danger focus:text-danger hover:bg-danger/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-danger/50 transition-colors"
-      >
-        <X size={14} aria-hidden="true" />
-      </button>
+      <Tooltip content={label} placement="bottom">
+        <button
+          type="button"
+          onClick={handleRequestSessionEnd}
+          aria-label={label}
+          data-testid={`terminal-end-session-button-${splitIndex}`}
+          className="flex items-center justify-center p-0.5 rounded text-muted-foreground hover:text-danger focus:text-danger hover:bg-danger/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-danger/50 transition-colors"
+        >
+          <X size={14} aria-hidden="true" />
+        </button>
+      </Tooltip>
     );
   }, [onRequestSessionEnd, terminal.isRunning, t, endTargetLabel, handleRequestSessionEnd, splitIndex]);
 
@@ -986,6 +1066,9 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       // Issue #2193: the header control's pressed state, and the body it names.
       surfaceMode={surfaceMode}
       onSurfaceModeChange={handleSurfaceModeChange}
+      // Issue #2261: the title bar's half of the maximize toggle.
+      isMaximized={isMaximized}
+      onToggleMaximize={onToggleMaximize}
       terminal={surfaceMode === 'chat' ? chatSurfaceSlot : terminalSlot}
       footer={footerSlot}
       // Issue #786 / #869: drag-drop pass-through (optional; inert when omitted).

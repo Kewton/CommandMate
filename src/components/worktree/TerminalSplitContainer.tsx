@@ -5,10 +5,14 @@
  *  - split configuration via `useTerminalSplits` (worktreeId-scoped)
  *  - add / remove buttons (disabled at the MIN / MAX boundary and while
  *    a PaneResizer drag is in progress)
- *  - History / Files visibility toggles in the Action bar (Issue #841): a
- *    second entry point alongside the existing vertical collapse strips, both
- *    reading the same persisted state (useHistoryPaneState / useFilePanelState)
+ *  - History / "Open Files" visibility toggles in the Action bar (Issue #841,
+ *    made the SOLE entry point by Issue #2259 — the vertical collapse strips
+ *    are gone), reading the persisted state in useHistoryPaneState /
+ *    useFilePanelState and disabled when the panel they name cannot appear
  *  - PaneResizer widget(s) between splits, with width persistence
+ *  - the temporary "maximize one split" state (Issue #2261): the Action bar's
+ *    restore button, and the `display: none` that hides the other splits
+ *    WITHOUT unmounting them, so their sessions and polling keep running
  *  - delegating each split's body to a parent-supplied `renderPane`
  *
  * Does NOT include HistoryPane (HISTORY_PANE_ID uniqueness is owned by
@@ -30,7 +34,15 @@ import React, {
   type ReactNode,
 } from 'react';
 import { useTranslations } from 'next-intl';
-import { History, Files, AlignHorizontalDistributeCenter, Plus, Minus } from 'lucide-react';
+import {
+  History,
+  Files,
+  AlignHorizontalDistributeCenter,
+  Plus,
+  Minus,
+  Maximize2,
+  Minimize2,
+} from 'lucide-react';
 import { getInstanceLabel, type AgentInstance, type CLIToolType } from '@/lib/cli-tools/types';
 import type { ShowToast } from '@/types/markdown-editor';
 import { MAX_SPLITS, MIN_SPLITS } from '@/config/terminal-split-config';
@@ -38,8 +50,15 @@ import { useTerminalSplits } from '@/hooks/useTerminalSplits';
 import {
   useHistoryPaneState,
   DEFAULT_HISTORY_WIDTH,
+  splitHistorySlotId,
 } from '@/hooks/useHistoryPaneState';
-import { useFilePanelState } from '@/hooks/useFilePanelState';
+import {
+  useFilePanelState,
+  useOpenFiles,
+  FILE_PANEL_PANE_ID,
+} from '@/hooks/useFilePanelState';
+import { useSplitSurfaceModes } from '@/hooks/useSplitSurfaceModes';
+import { Tooltip } from '@/components/common/Tooltip';
 import { PaneResizer } from './PaneResizer';
 
 /** Render-prop signature: each pane is supplied externally so the
@@ -63,6 +82,16 @@ export interface RenderTerminalSplitPaneArgs {
    * Stable per-index reference.
    */
   onDropInstance: (instanceId: string) => void;
+  /**
+   * Issue #2261: whether THIS split is the one currently filling the terminal
+   * row. Drives the pressed state of the pane's own maximize/restore toggle.
+   */
+  isMaximized: boolean;
+  /**
+   * Issue #2261: maximize this split, or restore the split layout when it is
+   * already maximized. Stable per-index reference.
+   */
+  onToggleMaximize: () => void;
 }
 
 export interface TerminalSplitContainerProps {
@@ -139,6 +168,8 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
     availableInstanceIds,
     focusedSplitIndex,
     setFocusedSplitIndex,
+    maximizedIndex,
+    toggleMaximize,
   } = useTerminalSplits(worktreeId, instances, rosterReady);
 
   // Stable lookup from instanceId → AgentInstance for label / availability.
@@ -152,8 +183,12 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
 
   // Issue #841 (Phase 2): the Action bar hosts History / Files visibility
   // toggles. These hooks broadcast across instances (useHistoryPaneState /
-  // useFilePanelState), so toggling here is the single source of truth shared
-  // with the existing vertical collapse strips — both stay in sync.
+  // useFilePanelState), so toggling here reaches every mount of the state.
+  //
+  // Issue #2259: they are now the ONLY toggles. The vertical collapse strips in
+  // `TerminalSplitPaneContent` / `FilePanelSplit` / `TerminalContainer` are
+  // gone, so there is one place to look for each switch and hiding a panel
+  // returns its full width to the terminal.
   const {
     visible: historyVisible,
     toggle: toggleHistory,
@@ -272,6 +307,71 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
   // Nothing to equalize when there is a single split AND History is hidden.
   const canEqualize = splits.length > MIN_SPLITS || historyVisible;
 
+  /*
+   * Issue #2261: the Action bar's half of the maximize toggle.
+   *
+   * The per-split button lives in each pane's title bar, which is exactly the
+   * thing that is off screen while another split is maximized — so the restore
+   * gesture has to exist somewhere that is always visible. It is the SAME
+   * toggle, not a separate "restore" command: while nothing is maximized it
+   * blows up the focused split, and while something is it restores the layout,
+   * so `aria-pressed` here and in the title bar always report the same fact.
+   *
+   * Disabled at a single split: there is no other split for it to take room
+   * from, so flipping the state would render identically.
+   */
+  const isMaximized = maximizedIndex !== null;
+  const canMaximize = splits.length > MIN_SPLITS;
+  const handleToggleMaximize = useCallback(() => {
+    toggleMaximize(maximizedIndex ?? focusedSplitIndex);
+  }, [toggleMaximize, maximizedIndex, focusedSplitIndex]);
+  const maximizeLabel = isMaximized
+    ? t('terminal.restoreSplits')
+    : t('terminal.maximizeFocusedSplit');
+  // [Issue #2307] Tooltip content mirrors the former native `title` text
+  // (label + shortcut hint) — only the delivery mechanism changed.
+  const maximizeTooltip = `${maximizeLabel} — ${t('terminal.maximizeShortcutHint')}`;
+
+  /*
+   * Issue #2259: the two toggles are disabled when the thing they show cannot
+   * appear, instead of flipping a state with no visible effect.
+   *
+   * History — the column lives in the TERMINAL surface only. The chat surface
+   * (#2193) renders the transcript alone on purpose (#2232: chat is not the
+   * History column), so with every split in chat mode this button changed
+   * nothing while still rendering as pressed. On the SSR pass and the first
+   * client render `surfaceModes` is all-`terminal` (what the panes themselves
+   * render before their own effect resolves), so the toggle starts enabled and
+   * settles rather than flickering disabled. The `length > 0` guard is there
+   * because `[].every(...)` is `true` — an empty array must not read as "all
+   * chat".
+   *
+   * Open Files — `FilePanelSplit` renders no panel at all with no tabs and no
+   * diff, so the button had nothing to toggle. The count also rides along as a
+   * badge, which is what tells the two "Files" apart at a glance: the Activity
+   * Bar's file TREE, and this panel of files you opened from it.
+   */
+  const surfaceModes = useSplitSurfaceModes(worktreeId, splits.length);
+  const historyUnavailable =
+    surfaceModes.length > 0 && surfaceModes.every((mode) => mode === 'chat');
+  const { tabCount: openFileCount, hasDiff } = useOpenFiles();
+  const filesUnavailable = openFileCount === 0 && !hasDiff;
+  // [Issue #2307] Tooltip content mirrors the former native `title` text.
+  const historyTooltip = historyUnavailable
+    ? t('terminal.historyChatOnlyHint')
+    : `${
+        historyVisible ? t('terminal.hideHistory') : t('terminal.showHistory')
+      } — ${t('terminal.historyAllSplitsHint')}`;
+  const filesTooltip = filesUnavailable
+    ? t('terminal.filesEmptyHint')
+    : filesVisible
+      ? t('terminal.hideFiles')
+      : t('terminal.showFiles');
+  const historySlotIds = useMemo(
+    () => splits.map((_, idx) => splitHistorySlotId(idx)).join(' '),
+    [splits],
+  );
+
   // Memoize per-split onFocus handlers so prop identity is stable.
   const focusHandlers = useMemo(
     () => splits.map((_, idx) => () => setFocusedSplitIndex(idx)),
@@ -282,6 +382,13 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
     () =>
       splits.map((_, idx) => (instanceId: string) => setSplitInstance(idx, instanceId)),
     [splits, setSplitInstance],
+  );
+
+  // Issue #2261: per-split maximize toggles, memoized for the same reason the
+  // focus / drop handlers are — they cross `renderPane` into memoized panes.
+  const maximizeHandlers = useMemo(
+    () => splits.map((_, idx) => () => toggleMaximize(idx)),
+    [splits, toggleMaximize],
   );
 
   /**
@@ -337,8 +444,16 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
     >
       {/* Action bar */}
       <div className="flex items-center gap-1 px-2 py-1 bg-surface border-b border-border flex-shrink-0">
-        <span className="text-xs text-muted-foreground tabular-nums mr-1">
-          {splits.length} / {MAX_SPLITS} splits
+        {/* Issue #2261: while a split is maximized the split count is no longer
+            what the row is showing, so the label says which split is filling it
+            instead — the one line that explains why the other panes vanished. */}
+        <span
+          data-testid="split-count-label"
+          className="text-xs text-muted-foreground tabular-nums mr-1 truncate"
+        >
+          {isMaximized
+            ? t('terminal.maximizedStatus', { split: (maximizedIndex ?? 0) + 1 })
+            : `${splits.length} / ${MAX_SPLITS} splits`}
         </span>
 
         {/*
@@ -347,51 +462,74 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
           an `ml-auto` hairline separator pushes the History / Files panel
           toggles to the RIGHT group ("layout ops | panel visibility").
         */}
-        <button
-          type="button"
-          onClick={addSplit}
-          disabled={!canAdd}
-          aria-disabled={!canAdd}
-          aria-label={t('terminal.addSplit')}
-          title={t('terminal.addSplit')}
-          data-testid="add-terminal-split"
-          className="flex items-center justify-center h-7 w-7 rounded text-muted-foreground hover:text-surface-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors"
-        >
-          <Plus className="w-4 h-4" aria-hidden="true" />
-        </button>
-        <button
-          type="button"
-          onClick={removeSplit}
-          disabled={!canRemove}
-          aria-disabled={!canRemove}
-          aria-label={t('terminal.removeSplit')}
-          title={t('terminal.removeSplit')}
-          data-testid="remove-terminal-split"
-          className="flex items-center justify-center h-7 w-7 rounded text-muted-foreground hover:text-surface-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors"
-        >
-          <Minus className="w-4 h-4" aria-hidden="true" />
-        </button>
+        <Tooltip content={t('terminal.addSplit')} placement="bottom">
+          <button
+            type="button"
+            onClick={addSplit}
+            disabled={!canAdd}
+            aria-disabled={!canAdd}
+            aria-label={t('terminal.addSplit')}
+            data-testid="add-terminal-split"
+            className="flex items-center justify-center h-7 w-7 rounded text-muted-foreground hover:text-surface-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors"
+          >
+            <Plus className="w-4 h-4" aria-hidden="true" />
+          </button>
+        </Tooltip>
+        <Tooltip content={t('terminal.removeSplit')} placement="bottom">
+          <button
+            type="button"
+            onClick={removeSplit}
+            disabled={!canRemove}
+            aria-disabled={!canRemove}
+            aria-label={t('terminal.removeSplit')}
+            data-testid="remove-terminal-split"
+            className="flex items-center justify-center h-7 w-7 rounded text-muted-foreground hover:text-surface-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors"
+          >
+            <Minus className="w-4 h-4" aria-hidden="true" />
+          </button>
+        </Tooltip>
 
         {/*
           Issue #861: equalize terminal split widths (each → 1/n) and reset the
           Message History width to default in one action. Disabled only when
           there is nothing to equalize (single split AND History hidden).
         */}
-        <button
-          type="button"
-          onClick={handleEqualizeWidths}
-          disabled={!canEqualize}
-          aria-disabled={!canEqualize}
-          aria-label={t('terminal.equalizeWidthsHint')}
-          title={t('terminal.equalizeWidthsHint')}
-          data-testid="equalize-split-widths"
-          className="flex items-center justify-center h-7 w-7 rounded text-muted-foreground hover:text-surface-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors"
-        >
-          <AlignHorizontalDistributeCenter
-            className="w-4 h-4 flex-shrink-0"
-            aria-hidden="true"
-          />
-        </button>
+        <Tooltip content={t('terminal.equalizeWidthsHint')} placement="bottom">
+          <button
+            type="button"
+            onClick={handleEqualizeWidths}
+            disabled={!canEqualize}
+            aria-disabled={!canEqualize}
+            aria-label={t('terminal.equalizeWidthsHint')}
+            data-testid="equalize-split-widths"
+            className="flex items-center justify-center h-7 w-7 rounded text-muted-foreground hover:text-surface-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors"
+          >
+            <AlignHorizontalDistributeCenter
+              className="w-4 h-4 flex-shrink-0"
+              aria-hidden="true"
+            />
+          </button>
+        </Tooltip>
+
+        {/* Issue #2261: maximize the focused split / restore the layout. */}
+        <Tooltip content={maximizeTooltip} placement="bottom">
+          <button
+            type="button"
+            onClick={handleToggleMaximize}
+            disabled={!canMaximize}
+            aria-disabled={!canMaximize}
+            aria-pressed={isMaximized}
+            aria-label={maximizeLabel}
+            data-testid="toggle-maximize-split"
+            className="flex items-center justify-center h-7 w-7 rounded text-muted-foreground hover:text-surface-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors"
+          >
+            {isMaximized ? (
+              <Minimize2 className="w-4 h-4 flex-shrink-0" aria-hidden="true" />
+            ) : (
+              <Maximize2 className="w-4 h-4 flex-shrink-0" aria-hidden="true" />
+            )}
+          </button>
+        </Tooltip>
 
         {/* Issue #1079: separator dividing layout ops (left) from panel toggles
             (right). `ml-auto` pushes the History / Files group to the far right. */}
@@ -403,64 +541,91 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
           gray. `aria-pressed` reflects current visibility. The existing
           vertical collapse strips remain and share this state (SSOT).
         */}
-        <button
-          type="button"
-          onClick={toggleHistory}
-          aria-pressed={historyVisible}
-          aria-label={
-            historyVisible
-              ? t('terminal.hideHistory')
-              : t('terminal.showHistory')
-          }
-          title={
-            historyVisible
-              ? t('terminal.hideHistory')
-              : t('terminal.showHistory')
-          }
-          data-testid="toggle-history-pane"
-          className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded border transition-colors ${
-            historyVisible
-              ? 'border-accent-300 dark:border-accent-700 bg-accent-50 dark:bg-accent-900/30 text-accent-700 dark:text-accent-300'
-              : 'border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
-          }`}
-        >
-          <History className="w-3.5 h-3.5 flex-shrink-0" aria-hidden="true" />
-          <span>{t('terminal.historyLabel')}</span>
-        </button>
-        <button
-          type="button"
-          onClick={toggleFilePanel}
-          aria-pressed={filesVisible}
-          aria-label={
-            filesVisible ? t('terminal.hideFiles') : t('terminal.showFiles')
-          }
-          title={
-            filesVisible ? t('terminal.hideFiles') : t('terminal.showFiles')
-          }
-          data-testid="toggle-file-panel"
-          className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded border transition-colors ${
-            filesVisible
-              ? 'border-accent-300 dark:border-accent-700 bg-accent-50 dark:bg-accent-900/30 text-accent-700 dark:text-accent-300'
-              : 'border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
-          }`}
-        >
-          <Files className="w-3.5 h-3.5 flex-shrink-0" aria-hidden="true" />
-          <span>{t('terminal.filesLabel')}</span>
-        </button>
+        <Tooltip content={historyTooltip} placement="bottom" className="flex-shrink-0">
+          <button
+            type="button"
+            onClick={toggleHistory}
+            disabled={historyUnavailable}
+            aria-disabled={historyUnavailable}
+            aria-pressed={historyVisible}
+            aria-expanded={historyVisible}
+            aria-controls={historySlotIds}
+            aria-label={
+              historyVisible
+                ? t('terminal.hideHistory')
+                : t('terminal.showHistory')
+            }
+            data-testid="toggle-history-pane"
+            className={`flex flex-shrink-0 items-center gap-1 whitespace-nowrap text-xs px-2 py-0.5 rounded border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+              historyVisible
+                ? 'border-accent-300 dark:border-accent-700 bg-accent-50 dark:bg-accent-900/30 text-accent-700 dark:text-accent-300'
+                : 'border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+            }`}
+          >
+            <History className="w-3.5 h-3.5 flex-shrink-0" aria-hidden="true" />
+            <span>{t('terminal.historyLabel')}</span>
+          </button>
+        </Tooltip>
+        <Tooltip content={filesTooltip} placement="bottom" className="flex-shrink-0">
+          <button
+            type="button"
+            onClick={toggleFilePanel}
+            disabled={filesUnavailable}
+            aria-disabled={filesUnavailable}
+            aria-pressed={filesVisible}
+            aria-expanded={filesVisible}
+            aria-controls={FILE_PANEL_PANE_ID}
+            aria-label={
+              filesVisible ? t('terminal.hideFiles') : t('terminal.showFiles')
+            }
+            data-testid="toggle-file-panel"
+            className={`flex flex-shrink-0 items-center gap-1 whitespace-nowrap text-xs px-2 py-0.5 rounded border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+              filesVisible
+                ? 'border-accent-300 dark:border-accent-700 bg-accent-50 dark:bg-accent-900/30 text-accent-700 dark:text-accent-300'
+                : 'border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+            }`}
+          >
+            <Files className="w-3.5 h-3.5 flex-shrink-0" aria-hidden="true" />
+            <span>{t('terminal.filesLabel')}</span>
+            {openFileCount > 0 && (
+              <span
+                data-testid="open-files-count"
+                className="ml-0.5 min-w-[1.25rem] px-1 rounded-full bg-muted text-[10px] leading-4 text-muted-foreground tabular-nums text-center"
+              >
+                {openFileCount}
+              </span>
+            )}
+          </button>
+        </Tooltip>
       </div>
 
       {/* Splits row */}
       <div ref={containerRef} className="flex flex-1 min-h-0 w-full">
         {splits.map((split, idx) => {
           const isLast = idx === splits.length - 1;
+          /*
+           * Issue #2261: `display: none`, NOT `flexGrow: 0`.
+           *
+           * A zero-grow flex child is still laid out (at width 0) and still
+           * reports a zero-height/zero-width box to every `measureElement` the
+           * virtualized transcript inside it runs, which corrupts the measured
+           * cache it restores from on the way back. `display: none` takes the
+           * subtree out of layout entirely, and — crucially — leaves it MOUNTED:
+           * the hidden splits' sessions, polling and scroll positions survive,
+           * so restoring shows output that kept arriving.
+           */
+          const hidden = maximizedIndex !== null && maximizedIndex !== idx;
           return (
             <React.Fragment key={`split-${idx}`}>
               <div
+                data-testid={`split-wrapper-${idx}`}
+                data-hidden={hidden ? 'true' : undefined}
                 style={{
-                  flexGrow: widths[idx] ?? 1,
+                  flexGrow: maximizedIndex === idx ? 1 : (widths[idx] ?? 1),
                   flexShrink: 1,
                   flexBasis: 0,
                   minWidth: 0,
+                  ...(hidden ? { display: 'none' } : null),
                 }}
                 className="h-full"
               >
@@ -476,11 +641,16 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
                   onFocus: focusHandlers[idx],
                   isFocused: focusedSplitIndex === idx,
                   onDropInstance: dropHandlers[idx],
+                  isMaximized: maximizedIndex === idx,
+                  onToggleMaximize: maximizeHandlers[idx],
                 })}
               </div>
               {!isLast ? (
                 <PaneResizerWrapper
                   resizerIdx={idx}
+                  // Issue #2261: there is no boundary to drag while one split
+                  // owns the whole row; the handle comes back on restore.
+                  hidden={maximizedIndex !== null}
                   ariaValueNow={
                     widths.length
                       ? (widths[idx] / widths.reduce((s, x) => s + x, 0)) * 100
@@ -512,6 +682,7 @@ function PaneResizerWrapper({
   onStart,
   onEnd,
   onDoubleClick,
+  hidden = false,
 }: {
   resizerIdx: number;
   ariaValueNow: number;
@@ -520,6 +691,8 @@ function PaneResizerWrapper({
   onEnd: () => void;
   /** Issue #861: double-clicking the resizer equalizes terminal split widths. */
   onDoubleClick?: () => void;
+  /** Issue #2261: hidden (but mounted) while a split is maximized. */
+  hidden?: boolean;
 }) {
   const handleResize = useCallback(
     (delta: number) => onResize(resizerIdx, delta),
@@ -528,6 +701,7 @@ function PaneResizerWrapper({
   return (
     <div
       data-testid={`split-resizer-${resizerIdx}`}
+      style={hidden ? { display: 'none' } : undefined}
       onMouseDownCapture={onStart}
       onTouchStartCapture={onStart}
       onMouseUpCapture={onEnd}

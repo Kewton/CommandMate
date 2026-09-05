@@ -415,6 +415,8 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
       onInstanceChange,
       onFocus: onPaneFocus,
       onDropInstance,
+      isMaximized: paneIsMaximized,
+      onToggleMaximize,
     }: {
       splitIndex: number;
       cliToolId: CLIToolType;
@@ -425,6 +427,9 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
       onFocus: () => void;
       isFocused: boolean;
       onDropInstance: (instanceId: string) => void;
+      /** Issue #2261: container-owned maximize state + toggle for this split. */
+      isMaximized: boolean;
+      onToggleMaximize: () => void;
     }) => {
       const panePendingInsert = pendingInsertTextMap.get(splitIndex) ?? null;
       // Issue #525 / #740 / #896: auto-yes state is per-INSTANCE in
@@ -511,6 +516,10 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
           // the dragOver ring (D-2). The hover ring state stays child-local (D-3).
           onDropInstance={onDropInstance}
           draggedInstanceId={draggedInstanceId}
+          // Issue #2261: the container owns "which split is maximized"; the pane
+          // renders the title-bar toggle and owns the keyboard chord.
+          isMaximized={paneIsMaximized}
+          onToggleMaximize={onToggleMaximize}
           // Issue #1171: the split builds its own kill-target snapshot and calls
           // this to open the confirm dialog for exactly the session it shows.
           onRequestSessionEnd={onRequestSessionEnd}
@@ -711,6 +720,13 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
           // the per-instance status map itself — the pane reads `[id]?.model`
           // — so no extra derivation and no extra memo dependency.
           modelByInstance={agentModelByInstance}
+          // Issue #2316: the pane is otherwise laid out at content height (the
+          // mobile shell embeds the same component in its own scroller), so the
+          // activity column's fixed height would just clip its two bottom
+          // disclosures. Handing it `h-full` — the same class git / notes /
+          // schedules / todo / skills / verification / env are mounted with —
+          // makes it the scroll owner inside ActivityPane's `min-h-0` column.
+          className="h-full"
         />
       ),
       timer: <TimerPane worktreeId={worktreeId} instances={instances} />,

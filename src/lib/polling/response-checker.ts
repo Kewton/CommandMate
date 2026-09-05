@@ -28,6 +28,7 @@ import {
   OPENCODE_PROMPT_AFTER_RESPONSE,
   OPENCODE_RESPONSE_COMPLETE,
   OPENCODE_SKIP_PATTERNS,
+  findCommandCodeChromeStart,
   findCopilotChromeStart,
   readCopilotStatusBar,
   COPILOT_BOOT_BANNER_ANCHORS,
@@ -54,6 +55,12 @@ import { isDuplicatePrompt, normalizePromptForDedup } from './prompt-dedup';
 import { recordPromptDedupSkip } from './prompt-dedup-state';
 import { isDuplicateResponse } from './response-dedup';
 import { captureStructuredHistoryTurn, isStructuredHistoryWriterLive } from './structured-history-gate';
+// Issue #2317 Phase D: while a human holds the pane's geometry, the frame is
+// their terminal (44 rows), not the 1000-row canvas every rule below was
+// measured against. See the block in `checkForResponse` for what that changes.
+import { resolveSessionName } from '@/lib/cli-tools/session-name';
+import { probeGeometryDelegation } from '@/lib/tmux/geometry-delegation';
+import { isLiveAttachEligibleSession } from '@/lib/session/tmux-session-surface';
 import { getPollerKey, stopPolling, GEMINI_LOADING_INDICATORS } from './response-poller-core';
 import { notifyPushSubscribers } from '@/lib/push';
 // Issue #1790: imported by deep path, not through `@/lib/push`. Suites that
@@ -339,13 +346,22 @@ export function extractResponse(
   // silently delete another tool's boundary, and a boundary that stops existing
   // does not fail loudly: it puts terminal furniture back into History.
   const openCodeCleanLines = cliToolId === 'opencode' ? lines.map(stripAnsi) : null;
+
+  // Issue #2250: Command Code is the fourth. Its landmark is its own — the
+  // `❯ Ask your question...` composer fenced by two full-pane rules, with the
+  // permission-mode row underneath — and it is load-bearing rather than tidy:
+  // that placeholder is drawn with the same `❯ <text>` shape as a transcript
+  // echo, so without the boundary `findRecentUserPromptIndex` anchors the turn
+  // on the FOOTER and every reply extracts as empty (#1289's defect, verbatim).
   const chromeStart = cliToolId === 'claude'
     ? findClaudeChromeStart(lines)
     : cliToolId === 'copilot'
       ? findCopilotChromeStart(lines)
-      : openCodeCleanLines
-        ? findOpenCodeChromeStart(openCodeCleanLines)
-        : -1;
+      : cliToolId === 'command-code'
+        ? findCommandCodeChromeStart(lines)
+        : openCodeCleanLines
+          ? findOpenCodeChromeStart(openCodeCleanLines)
+          : -1;
   const contentEnd = chromeStart >= 0 ? chromeStart : totalLines;
 
   const BUFFER_RESET_TOLERANCE = 25;
@@ -429,7 +445,18 @@ export function extractResponse(
   };
 
   // Early check for interactive prompts (before extraction logic)
-  if (cliToolId === 'claude' || cliToolId === 'codex' || cliToolId === 'copilot') {
+  //
+  // Issue #2250: `command-code` must be here. Its permission dialog draws its
+  // highlighted option as `❯ 1. Yes` and keeps a full-pane rule above the block,
+  // so `hasPrompt && hasSeparator && !isThinking` below is TRUE while the dialog
+  // is waiting for an answer — the turn would be declared finished and the
+  // dialog saved as the reply.
+  if (
+    cliToolId === 'claude' ||
+    cliToolId === 'codex' ||
+    cliToolId === 'copilot' ||
+    cliToolId === 'command-code'
+  ) {
     const fullOutput = lines.join('\n');
     const promptDetection = detectPromptWithOptions(fullOutput, cliToolId);
 
@@ -481,9 +508,17 @@ export function extractResponse(
     ? copilotStatusBar === 'idle'
     : (cliToolId === 'codex' || cliToolId === 'gemini' || cliToolId === 'vibe-local' || cliToolId === 'antigravity') && hasPrompt && !isThinking;
   const isClaudeComplete = cliToolId === 'claude' && hasPrompt && hasSeparator && !isThinking;
+  // Issue #2250: claude's shape, because Command Code's layout is claude's — the
+  // composer sits between two full-pane rules and is drawn only when the agent
+  // will accept input. Deliberately NOT keyed on `✻ Worked for`: that row is the
+  // live turn's, not the transcript's (it is present in `turn-version.txt` and
+  // gone from `dialog-create-file.txt`, the same pane one prompt later) and
+  // `WorkedDurationNote` omits it entirely for a turn under 1000 ms.
+  const isCommandCodeComplete =
+    cliToolId === 'command-code' && hasPrompt && hasSeparator && !isThinking;
   const isOpenCodeDone = cliToolId === 'opencode' && isOpenCodeComplete(cleanOutputToCheck);
 
-  if (isPromptBasedComplete || isClaudeComplete || isOpenCodeDone) {
+  if (isPromptBasedComplete || isClaudeComplete || isCommandCodeComplete || isOpenCodeDone) {
     const responseLines: string[] = [];
 
     const startIndex = resolveExtractionStartIndex(
@@ -647,6 +682,31 @@ export function extractResponse(
       }
     }
 
+    // Issue #2250: Command Code's launch screen is a complete, idle frame --
+    // block-art logo, three `#` banner rows, composer drawn between its two
+    // rules -- so every check above accepts it, and History would open with
+    // `# Command Code v1.40.1 / # models: … / # <cwd>` saved as the agent's
+    // first reply before the operator has said anything.
+    //
+    // The rule is ONE condition and it is a positive one: Command Code echoes
+    // every prompt into the transcript as `❯ <text>`, and the launch screen has
+    // none. That is the shape #1897 and #2247 both converged on; the anchor
+    // heuristics claude carries above (`hasBannerArt` / `hasVersionInfo` /
+    // `hasStartupTips`) are deliberately NOT reproduced here, because they are
+    // what #2247 had to take back -- a bare version string in a reply is a
+    // normal reply, and Command Code prints its own version on every launch.
+    //
+    // `findRecentUserPromptIndex` is the same `/^[>❯]\s+\S/` scan the extraction
+    // anchors on, and it stops at `contentEnd`, so the composer's own dim
+    // `❯ Ask your question...` placeholder cannot be mistaken for an echo
+    // (#1879's trap).
+    if (cliToolId === 'command-code' && findRecentUserPromptIndex(totalLines) < 0) {
+      logger.info('Command Code launch screen suppressed, response not saved', {
+        responseLength: response.length,
+      });
+      return incompleteResult(totalLines);
+    }
+
     // Gemini-specific check
     if (cliToolId === 'gemini') {
       const bannerCharCount = (response.match(/[░███]/g) || []).length;
@@ -785,6 +845,38 @@ export async function checkForResponse(
       logger.info('session-not-running');
       stopPolling(worktreeId, cliToolId, instanceId);
       return false;
+    }
+
+    // Issue #2317 Phase D: is a human reading this pane at their own terminal
+    // size right now, and did they just stop?
+    //
+    // Asked only for the tools `attach --live` accepts — no other session can be
+    // delegated, so asking about one would be a tmux round-trip per poll with a
+    // single possible answer. The read itself is memoised for a second
+    // (`DELEGATION_TTL_MS`), which is under one poll interval.
+    const sessionName = resolveSessionName(cliToolId, worktreeId, instanceId);
+    const delegation = isLiveAttachEligibleSession(sessionName)
+      ? await probeGeometryDelegation(sessionName)
+      : { delegated: false, released: false };
+
+    if (delegation.released) {
+      // The canvas is 1000 rows again, so a cursor recorded against a 44-row
+      // frame indexes into a pane that no longer exists. Zero is the only value
+      // that cannot be wrong in either direction: too low re-saves a turn, too
+      // high suppresses every future one. Done BEFORE the state is read below so
+      // this poll already sees the reset.
+      //
+      // A no-op for claude in practice — it renders in the alternate screen, so
+      // `lineCountIsCursor` is false and the cursor is not consulted — and that
+      // is exactly why it is written here rather than left implicit: the guard
+      // has to already be right on the day a scrollback tool is added to
+      // `LIVE_ATTACH_TOOLS`.
+      updateSessionState(db, worktreeId, cliToolId, 0, resolvedInstanceId);
+      logger.info('geometry-delegation-released', {
+        worktreeId,
+        cliToolId,
+        instanceId: resolvedInstanceId,
+      });
     }
 
     // Get session state (last captured line count)
@@ -1084,8 +1176,26 @@ export async function checkForResponse(
         transcriptPathHint: claudeMetadata?.logFilePath ?? null,
       }));
 
+    // Issue #2317 Phase D: the scrape is dropped while the geometry is
+    // delegated, and the transcript capture above is what makes that safe.
+    //
+    // ORDER IS LOAD-BEARING. The delegation test is folded in AFTER the two
+    // calls above rather than short-circuiting them: `captureStructuredHistoryTurn`
+    // is a WRITE, not a query — it is the moment claude's own transcript becomes
+    // a History row — so an `||` that put the delegation first would suppress
+    // the scrape and the real reply together, and the turn would vanish. Read as
+    // it stands: record the turn from the agent's own file, then drop the pane's
+    // copy of it, which at 44 rows is a fraction of the answer hard-wrapped at
+    // the reader's terminal width.
+    //
+    // When the transcript capture answers false (an unreadable or absent file)
+    // the turn goes UNRECORDED for as long as the delegation lasts. That is the
+    // deliberate trade: a missing row is recoverable, a truncated reply saved as
+    // the agent's answer is not.
+    const suppressScrapedHistory = structuredHistoryLive || delegation.delegated;
+
     // Create Markdown log file for the conversation pair
-    if (cleanedResponse && !structuredHistoryLive) {
+    if (cleanedResponse && !suppressScrapedHistory) {
       await recordClaudeConversation(db, worktreeId, cleanedResponse, cliToolId);
     }
 
@@ -1115,7 +1225,7 @@ export async function checkForResponse(
     // are not byte-comparable — the pane's copy is hard-wrapped at the pane
     // width and gutter-prefixed, so no content check could ever recognise them
     // as the same reply.
-    if (!structuredHistoryLive) {
+    if (!suppressScrapedHistory) {
       // Create new CLI tool message in database
       const message = createMessage(db, {
         worktreeId,
@@ -1138,6 +1248,10 @@ export async function checkForResponse(
         cliToolId,
         instanceId: resolvedInstanceId,
         scrapedLength: cleanedResponse.length,
+        // Which of the two reasons suppressed it. Without this the Phase D case
+        // and the ordinary #2041/#2121 handover are one indistinguishable log
+        // line, and "History is missing a turn" has two very different causes.
+        reason: structuredHistoryLive ? 'structured-history' : 'geometry-delegated',
       });
     }
 

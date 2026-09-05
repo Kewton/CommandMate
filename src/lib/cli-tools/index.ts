@@ -36,6 +36,7 @@ export { ClaudeTool } from './claude';
 export { CodexTool } from './codex';
 export { GeminiTool } from './gemini';
 export { AntigravityTool } from './antigravity';
+export { CommandCodeTool, buildCommandCodeLaunchCommand } from './command-code';
 
 // Export CLI tool manager
 export { CLIToolManager } from './manager';

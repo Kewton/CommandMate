@@ -43,7 +43,6 @@ import {
   COPILOT_TEXT_INPUT_DELAY_MS,
   COPILOT_SEND_ENTER_DELAY_MS,
   COPILOT_MODEL_SWITCH_TIMEOUT_MS,
-  COPILOT_INSTALL_HINT,
 } from '@/config/copilot-constants';
 import { TUI_SESSION_CREATE_WAIT_MS, TUI_INTERRUPT_SETTLE_MS, COPILOT_EXIT_WAIT_MS } from '@/config/cli-tool-timing-config';
 import {
@@ -54,7 +53,7 @@ import { COPILOT_LAUNCH_COMMAND } from '@/lib/hooks/sources/copilot/hook-setting
 import { COPILOT_CLI_TOOL_ID } from '@/lib/hooks/sources/copilot/tool-id';
 import { getErrorMessage } from '@/lib/errors';
 import { createLogger } from '@/lib/logger';
-import { SessionStartUnavailableError } from '../session/session-start-error';
+import { missingToolError } from './install-hints';
 
 const logger = createLogger('cli-tools/copilot');
 
@@ -203,7 +202,7 @@ export class CopilotTool extends BaseCLITool {
     // no copilot: the answer and the action have to come from one measurement.
     const resolved = await resolveCopilotExecutable();
     if (!resolved) {
-      throw new SessionStartUnavailableError(this.name, `GitHub Copilot CLI is not installed. ${COPILOT_INSTALL_HINT}`);
+      throw missingToolError(this);
     }
 
     const sessionName = this.getSessionName(worktreeId, instanceId);

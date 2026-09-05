@@ -1,0 +1,1000 @@
+echo boot-ok
+maenokota@MAENOnoMac-Studio work % echo boot-ok
+boot-ok
+maenokota@MAENOnoMac-Studio work % command-code
+[32mUpdated 1.47.0 → 1.47.1[39m
+[38;2;43;39;88m[48;2;43;39;88m                                                                      [39m[49m
+[38;2;43;39;88m[48;2;43;39;88m   [38;2;177;186;249m███████[38;2;43;39;88m [38;2;177;186;249m███████[38;2;43;39;88m [38;2;177;186;249m███████████[38;2;43;39;88m [38;2;177;186;249m███████████[38;2;43;39;88m [38;2;177;186;249m███████[38;2;43;39;88m [38;2;177;186;249m████████[38;2;43;39;88m    [38;2;177;186;249m████[38;2;43;39;88m   [39m[49m
+[38;2;43;39;88m[48;2;43;39;88m   [38;2;177;186;249m███[38;2;43;39;88m [38;2;177;186;249m███[38;2;43;39;88m [38;2;177;186;249m██[38;2;43;39;88m  [38;2;177;186;249m███[38;2;43;39;88m [38;2;177;186;249m███[38;2;43;39;88m [38;2;177;186;249m███[38;2;43;39;88m [38;2;177;186;249m███[38;2;43;39;88m [38;2;177;186;249m███[38;2;43;39;88m [38;2;177;186;249m███[38;2;43;39;88m [38;2;177;186;249m███[38;2;43;39;88m [38;2;177;186;249m███[38;2;43;39;88m [38;2;177;186;249m███[38;2;43;39;88m [38;2;177;186;249m███[38;2;43;39;88m  [38;2;177;186;249m███[38;2;43;39;88m [38;2;177;186;249m███████[38;2;43;39;88m   [39m[49m
+[38;2;43;39;88m[48;2;43;39;88m   [38;2;177;186;249m███[38;2;43;39;88m     [38;2;177;186;249m██[38;2;43;39;88m  [38;2;177;186;249m███[38;2;43;39;88m [38;2;177;186;249m███[38;2;43;39;88m [38;2;177;186;249m███[38;2;43;39;88m [38;2;177;186;249m███[38;2;43;39;88m [38;2;177;186;249m███[38;2;43;39;88m [38;2;177;186;249m███[38;2;43;39;88m [38;2;177;186;249m███[38;2;43;39;88m [38;2;177;186;249m███████[38;2;43;39;88m [38;2;177;186;249m███[38;2;43;39;88m  [38;2;177;186;249m███[38;2;43;39;88m [38;2;177;186;249m███[38;2;43;39;88m [38;2;177;186;249m███[38;2;43;39;88m   [39m[49m
+[38;2;43;39;88m[48;2;43;39;88m   [38;2;177;186;249m███[38;2;43;39;88m [38;2;177;186;249m███[38;2;43;39;88m [38;2;177;186;249m██[38;2;43;39;88m  [38;2;177;186;249m███[38;2;43;39;88m [38;2;177;186;249m███[38;2;43;39;88m [38;2;177;186;249m███[38;2;43;39;88m [38;2;177;186;249m███[38;2;43;39;88m [38;2;177;186;249m███[38;2;43;39;88m [38;2;177;186;249m███[38;2;43;39;88m [38;2;177;186;249m███[38;2;43;39;88m [38;2;177;186;249m███████[38;2;43;39;88m [38;2;177;186;249m███[38;2;43;39;88m  [38;2;177;186;249m███[38;2;43;39;88m [38;2;177;186;249m███[38;2;43;39;88m [38;2;177;186;249m███[38;2;43;39;88m   [39m[49m
+[38;2;43;39;88m[48;2;43;39;88m   [38;2;177;186;249m███████[38;2;43;39;88m [38;2;177;186;249m███████[38;2;43;39;88m [38;2;177;186;249m███[38;2;43;39;88m [38;2;177;186;249m███[38;2;43;39;88m [38;2;177;186;249m███[38;2;43;39;88m [38;2;177;186;249m███[38;2;43;39;88m [38;2;177;186;249m███[38;2;43;39;88m [38;2;177;186;249m███[38;2;43;39;88m [38;2;177;186;249m███[38;2;43;39;88m [38;2;177;186;249m███[38;2;43;39;88m [38;2;177;186;249m███[38;2;43;39;88m  [38;2;177;186;249m███[38;2;43;39;88m [38;2;177;186;249m███████[38;2;43;39;88m   [39m[49m
+[38;2;43;39;88m[48;2;43;39;88m                                                                      [39m[49m
+
+[38;2;138;148;168m# [1m[39mCommand Code[0m[38;2;138;148;168m v1.47.1[39m
+[38;2;138;148;168m# models: deepseek-v4-flash-(latest) · taste-1[39m
+[38;2;138;148;168m# /private/tmp/claude-501/-Users-maenokota-share-work-github-kewton-commandmate-issue-2326/4e8cef48-158e-4afd-9623-47bb59ad6c04/scratchpad/probe/work[39m
+
+[1m[38;2;165;153;233m[48;2;45;43;85m❯[0m[48;2;45;43;85m [38;2;229;229;229mList the numbers 1 to 50, one per line, nothing else.[39m [49m
+
+[38;2;228;204;255m✻ Thought for 1 second [38;2;53;61;80m[[38;2;138;148;168mctrl+o to expand[38;2;53;61;80m][39m
+
+[38;2;165;153;233m⠶[39m 1
+  2
+  3
+  4
+  5
+  6
+  7
+  8
+  9
+  10
+  11
+  12
+  13
+  14
+  15
+  16
+  17
+  18
+  19
+  20
+  21
+  22
+  23
+  24
+  25
+  26
+  27
+  28
+  29
+  30
+  31
+  32
+  33
+  34
+  35
+  36
+  37
+  38
+  39
+  40
+  41
+  42
+  43
+  44
+  45
+  46
+  47
+  48
+  49
+  50
+
+[1m[38;2;165;153;233m[48;2;45;43;85m❯[0m[48;2;45;43;85m [38;2;229;229;229mList the numbers 101 to 160, one per line, nothing else.[39m [49m
+
+[38;2;228;204;255m✻ Thought for 1 second [38;2;53;61;80m[[38;2;138;148;168mctrl+o to expand[38;2;53;61;80m][39m
+
+[38;2;165;153;233m⠶[39m 101
+  102
+  103
+  104
+  105
+  106
+  107
+  108
+  109
+  110
+  111
+  112
+  113
+  114
+  115
+  116
+  117
+  118
+  119
+  120
+  121
+  122
+  123
+  124
+  125
+  126
+  127
+  128
+  129
+  130
+  131
+  132
+  133
+  134
+  135
+  136
+  137
+  138
+  139
+  140
+  141
+  142
+  143
+  144
+  145
+  146
+  147
+  148
+  149
+  150
+  151
+  152
+  153
+  154
+  155
+  156
+  157
+  158
+  159
+  160
+
+[1m[38;2;165;153;233m[48;2;45;43;85m❯[0m[48;2;45;43;85m [38;2;229;229;229mList the numbers 201 to 260, one per line, nothing else.[39m [49m
+
+[38;2;165;153;233m⠶[39m 201
+  202
+  203
+  204
+  205
+  206
+  207
+  208
+  209
+  210
+  211
+  212
+  213
+  214
+  215
+  216
+  217
+  218
+  219
+  220
+  221
+  222
+  223
+  224
+  225
+  226
+  227
+  228
+  229
+  230
+  231
+  232
+  233
+  234
+  235
+  236
+  237
+  238
+  239
+  240
+  241
+  242
+  243
+  244
+  245
+  246
+  247
+  248
+  249
+  250
+  251
+  252
+  253
+  254
+  255
+  256
+  257
+  258
+  259
+  260
+
+[1m[38;2;165;153;233m[48;2;45;43;85m❯[0m[48;2;45;43;85m [38;2;229;229;229mName 3 primary colors, one per line.[39m [49m
+
+[38;2;165;153;233m⠶[39m Red
+  Green
+  Blue
+
+[1m[38;2;165;153;233m[48;2;45;43;85m❯[0m[48;2;45;43;85m [38;2;229;229;229mList the numbers 301 to 345, one per line, nothing else.[39m [49m
+
+[38;2;165;153;233m⠶[39m 301
+  302
+  303
+  304
+  305
+  306
+  307
+  308
+  309
+  310
+  311
+  312
+  313
+  314
+  315
+  316
+  317
+  318
+  319
+  320
+  321
+  322
+  323
+  324
+  325
+  326
+  327
+  328
+  329
+  330
+  331
+  332
+  333
+  334
+  335
+  336
+  337
+  338
+  339
+  340
+  341
+  342
+  343
+  344
+  345
+
+
+[38;2;76;85;106m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+[1m[38;2;228;204;255mSelect model[0m
+[38;2;138;148;168mSwitch between the available models. Sets the default for new sessions; other open sessions are unaffected.[39m
+
+[38;2;138;148;168m› Type to search models...[39m
+
+
+[1;2mCommand Code[0m
+[38;2;229;229;229mDeepSeek V4 Pro (latest)[39m              [38;2;138;148;168mhybrid-attention long-context reasoning[38;2;46;189;142m [39m
+[1m[38;2;46;189;142m[48;2;45;43;85mDeepSeek V4 Flash (latest) (default)[0m[48;2;45;43;85m  [38;2;138;148;168mfast hybrid-attention reasoning[38;2;46;189;142m ✔ [39m[49m
+[38;2;229;229;229mDeepSeek V4 Flash Vision (exp)[39m        [38;2;138;148;168mfast hybrid-attention reasoning with vision[38;2;46;189;142m [39m
+[38;2;229;229;229mDeepSeek V4 Flash Fast[39m                [38;2;138;148;168mlow-latency V4 Flash deployment[38;2;46;189;142m [39m
+[38;2;229;229;229mKimi K3[39m                               [38;2;138;148;168mlong-horizon coding & knowledge work with 1M context[38;2;46;189;142m [39m
+[38;2;229;229;229mKimi K2.7 Code[39m                        [38;2;138;148;168mimproved long-horizon coding with vision[38;2;46;189;142m [39m
+[38;2;229;229;229mKimi K2.7 Code HighSpeed[39m              [38;2;138;148;168mhigh-speed long-horizon coding with vision[38;2;46;189;142m [39m
+[38;2;229;229;229mKimi K2.6[39m                             [38;2;138;148;168mlong-horizon coding with vision[38;2;46;189;142m [39m
+[38;2;229;229;229mKimi K2.5[39m                             [38;2;138;148;168mmultimodal frontend coding[38;2;46;189;142m [39m
+[38;2;229;229;229mGLM-5.3 Flash[39m                         [38;2;138;148;168mfast, affordable GLM coding with 1M context[38;2;46;189;142m [39m
+[38;2;229;229;229mGLM-5.3[39m                               [38;2;138;148;168mfrontier coding with emergent cyber capabilities[38;2;46;189;142m [39m
+[38;2;229;229;229mGLM-5.2[39m                               [38;2;138;148;168mpowerful coding with 1M context and long-horizon tasks[38;2;46;189;142m [39m
+[38;2;229;229;229mGLM-5.2 Fast[39m                          [38;2;138;148;168mhigh-throughput GLM-5.2 with 1M context[38;2;46;189;142m [39m
+[38;2;229;229;229mGLM-5.1[39m                               [38;2;138;148;168mlong-horizon autonomous coding agent[38;2;46;189;142m [39m
+[38;2;229;229;229mGLM-5[39m                                 [38;2;138;148;168mmulti-mode thinking & long-range planning[38;2;46;189;142m [39m
+[38;2;229;229;229mMiniMax M3[39m                            [38;2;138;148;168mfrontier coding, agents & native multimodality[38;2;46;189;142m [39m
+[38;2;229;229;229mMiniMax M2.7[39m                          [38;2;138;148;168mend-to-end software engineering agent[38;2;46;189;142m [39m
+[38;2;229;229;229mMiniMax M2.5[39m                          [38;2;138;148;168mcross-platform full-stack agentic dev[38;2;46;189;142m [39m
+[38;2;229;229;229mMiMo V2.5 Pro[39m                         [38;2;138;148;168mhigh-capability long-context agentic coding[38;2;46;189;142m [39m
+[38;2;229;229;229mMiMo V2.5[39m                             [38;2;138;148;168mefficient long-context agentic coding[38;2;46;189;142m [39m
+[38;2;229;229;229mQwen 3.8 Max 0902[39m                     [38;2;138;148;168mupgraded Qwen 3.8 Max: stronger coding & agentic tool use[38;2;46;189;142m [39m
+[38;2;229;229;229mQwen 3.8 Max[39m                          [38;2;138;148;168mautonomous long-horizon coding & professional work[38;2;46;189;142m [39m
+[38;2;229;229;229mQwen 3.8 27B[39m                          [38;2;138;148;168mcompact vision-language coding & agentic work[38;2;46;189;142m [39m
+[38;2;229;229;229mQwen 3.8 Flash[39m                        [38;2;138;148;168mfast low-cost agentic coding & reasoning[38;2;46;189;142m [39m
+[38;2;229;229;229mQwen 3.7 Max[39m                          [38;2;138;148;168mfrontier coding & long-horizon agent execution[38;2;46;189;142m [39m
+[38;2;229;229;229mQwen 3.7 Plus[39m                         [38;2;138;148;168magentic coding & reasoning at lower cost[38;2;46;189;142m [39m
+[38;2;229;229;229mQwen 3.7 Flash[39m                        [38;2;138;148;168mfast low-cost agentic coding & reasoning[38;2;46;189;142m [39m
+[38;2;229;229;229mQwen 3.6 Max Preview[39m                  [38;2;138;148;168mvibe coding & efficient agent execution[38;2;46;189;142m [39m
+[38;2;229;229;229mQwen 3.6 Plus[39m                         [38;2;138;148;168magentic coding & reasoning[38;2;46;189;142m [39m
+[38;2;229;229;229mLongCat 2.0[1m[38;2;46;189;142m (FREE)[0m                    [38;2;138;148;168mtrillion-parameter agentic coding with 1M context[38;2;46;189;142m [39m
+[38;2;229;229;229mStep 3.7 Flash[39m                        [38;2;138;148;168mmultimodal sparse-MoE reasoning[38;2;46;189;142m [39m
+[38;2;229;229;229mStep 3.5 Flash[39m                        [38;2;138;148;168mfast sparse-MoE agentic reasoning[38;2;46;189;142m [39m
+[38;2;229;229;229mTencent Hy3[39m                           [38;2;138;148;168msparse-MoE reasoning & agentic tool use[38;2;46;189;142m [39m
+[38;2;229;229;229mTencent Hy4 Preview[39m                   [38;2;138;148;168magentic coding & sustained multi-step tool use[38;2;46;189;142m [39m
+[38;2;229;229;229mNemotron 3 Ultra[39m                      [38;2;138;148;168mopen reasoning model for long-horizon autonomous agents[38;2;46;189;142m [39m
+[38;2;229;229;229mInkling[39m                               [38;2;138;148;168mmultimodal MoE reasoning[38;2;46;189;142m [39m
+[38;2;229;229;229mInkling Small[39m                         [38;2;138;148;168mlightweight MoE reasoning at lower cost and latency[38;2;46;189;142m [39m
+[38;2;229;229;229mLaguna S 2.1[1m[38;2;46;189;142m (FREE)[0m                   [38;2;138;148;168mopen-weight agentic coding and long-horizon work[38;2;46;189;142m [39m
+[38;2;229;229;229mClaude Sonnet 5[39m                       [38;2;138;148;168mbest combo of speed & intelligence (recommended)[38;2;46;189;142m [39m
+[38;2;229;229;229mClaude Sonnet 4.6[39m                     [38;2;138;148;168mprev Sonnet, still fast & capable[38;2;46;189;142m [39m
+[38;2;229;229;229mClaude Fable 5.1[39m                      [38;2;138;148;168mmost capable for demanding reasoning & long-horizon agents[38;2;46;189;142m [39m
+[38;2;229;229;229mClaude Fable 5[39m                        [38;2;138;148;168mprev Fable, still strong for deep reasoning & agents[38;2;46;189;142m [39m
+[38;2;229;229;229mClaude Opus 5[39m                         [38;2;138;148;168mmost intelligent Opus for agents and coding[38;2;46;189;142m [39m
+[38;2;229;229;229mClaude Opus 4.8[39m                       [38;2;138;148;168mprev flagship, still strong for agents and coding[38;2;46;189;142m [39m
+[38;2;229;229;229mClaude Opus 4.7[39m                       [38;2;138;148;168molder Opus, still strong for agents and coding[38;2;46;189;142m [39m
+[38;2;229;229;229mClaude Haiku 4.5[39m                      [38;2;138;148;168mfastest & most compact, great for quick tasks[38;2;46;189;142m [39m
+[38;2;229;229;229mGPT-5.6 Sol[39m                           [38;2;138;148;168mfrontier model for complex professional work[38;2;46;189;142m [39m
+[38;2;229;229;229mGPT-5.6 Terra[39m                         [38;2;138;148;168mbalances intelligence and cost[38;2;46;189;142m [39m
+[38;2;229;229;229mGPT-5.6 Luna[39m                          [38;2;138;148;168moptimized for cost-sensitive workloads[38;2;46;189;142m [39m
+[38;2;229;229;229mGPT-5.5[39m                               [38;2;138;148;168mlatest frontier model for general complex work[38;2;46;189;142m [39m
+[38;2;229;229;229mGPT-5.4[39m                               [38;2;138;148;168mfrontier model for general complex work[38;2;46;189;142m [39m
+[38;2;229;229;229mGPT-5.3 Codex[39m                         [38;2;138;148;168mfrontier coding model[38;2;46;189;142m [39m
+[38;2;229;229;229mGPT-5.4 Mini[39m                          [38;2;138;148;168mfast, cost-effective model for everyday tasks[38;2;46;189;142m [39m
+[38;2;229;229;229mGemini 3.8 Flash[39m                      [38;2;138;148;168mnewest Gemini Flash, improved core reasoning[38;2;46;189;142m [39m
+[38;2;229;229;229mGemini 3.7 Flash[39m                      [38;2;138;148;168mhigher-quality coding & agentic workflows, fewer tokens[38;2;46;189;142m [39m
+[38;2;229;229;229mGemini 3.6 Flash[39m                      [38;2;138;148;168mprevious Gemini Flash, still fast & capable[38;2;46;189;142m [39m
+[38;2;229;229;229mGemini 3.5 Flash[39m                      [38;2;138;148;168mPro-level coding proficiency, parallel agentic execution[38;2;46;189;142m [39m
+[38;2;229;229;229mGemini 3.5 Flash Lite[39m                 [38;2;138;148;168mupgraded agentic capabilities, ideal for subagents[38;2;46;189;142m [39m
+[38;2;229;229;229mGemini 3.1 Flash Lite[39m                 [38;2;138;148;168mhigh-volume workhorse model with implicit caching[38;2;46;189;142m [39m
+[38;2;229;229;229mFugu Ultra[39m                            [38;2;138;148;168mmulti-agent orchestration across frontier models[38;2;46;189;142m [39m
+[38;2;229;229;229mMuse Spark 1.1[39m                        [38;2;138;148;168magentic performance, tool use, and computer use[38;2;46;189;142m [39m
+[38;2;229;229;229mMuse Spark 1.2[39m                        [38;2;138;148;168mcoding-optimized for agentic workflows and large codebases[38;2;46;189;142m [39m
+[38;2;229;229;229mMuse Spark 1.2 Contributor[39m            [38;2;138;148;168mMuse Spark 1.2 at ~95% off[38;2;46;189;142m [39m
+[38;2;229;229;229mMuse Spark 1.3[39m                        [38;2;138;148;168mmultimodal reasoning for long-horizon agentic and coding workflows[38;2;46;189;142m [39m
+[38;2;229;229;229mMuse Spark 1.3 Contributor[39m            [38;2;138;148;168mMuse Spark 1.3 at up to 95% off[38;2;46;189;142m [39m
+[38;2;229;229;229mGrok 4.5[39m                              [38;2;138;148;168msmartest model for coding, agentic tasks, knowledge work[38;2;46;189;142m [39m
+[38;2;229;229;229mGrok 4.6[39m                              [38;2;138;148;168mfrontier performance on coding, knowledge work, and STEM[38;2;46;189;142m [39m
+
+[3m[38;2;138;148;168mtype to search · ↑/↓ navigate · shift+↑/↓ jump provider · enter to select · esc to cancel[0m
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

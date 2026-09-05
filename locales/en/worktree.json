@@ -104,13 +104,15 @@
       "tasks": "View and manage background tasks",
       "memory": {
         "claude": "Edit CLAUDE.md memory files and manage auto-memory",
-        "copilot": "Show memory status, or enable and disable memory across sessions"
+        "copilot": "Show memory status, or enable and disable memory across sessions",
+        "command-code": "Manage Command Code memory"
       },
       "new": "Start a new conversation",
       "logout": {
         "codex": "Sign out from Codex",
         "claude": "Sign out of your Anthropic account",
-        "copilot": "Log out of the current OAuth session"
+        "copilot": "Log out of the current OAuth session",
+        "command-code": "Log out of Command Code or a provider"
       },
       "quit": "Exit Codex CLI",
       "diff": "Show Git diff (including untracked files)",
@@ -120,12 +122,14 @@
         "codex": "Generate AGENTS.md template in current directory",
         "claude": "Generate a CLAUDE.md guide for the repository",
         "copilot": "Initialize Copilot instructions for this repository",
-        "opencode": "Run guided AGENTS.md setup"
+        "opencode": "Run guided AGENTS.md setup",
+        "command-code": "Initialize AGENTS.md for this project"
       },
       "feedback": {
         "codex": "Send feedback to Codex team",
         "claude": "Send feedback about Claude Code",
-        "copilot": "Provide feedback about the CLI"
+        "copilot": "Provide feedback about the CLI",
+        "command-code": "Report a bug or share feedback on GitHub"
       },
       "plan": "Toggle plan mode",
       "goal": "Set goal for current session",
@@ -139,7 +143,8 @@
         "codex": "Manage Codex skills",
         "claude": "Manage Claude Code skills",
         "copilot": "Manage skills for enhanced capabilities",
-        "opencode": "Browse and run available skills"
+        "opencode": "Browse and run available skills",
+        "command-code": "Browse and open agent skills"
       },
       "hooks": "View or manage hook configurations",
       "sessions": "Browse conversation history",
@@ -148,13 +153,15 @@
         "opencode": "Exit OpenCode TUI",
         "claude": "Exit the CLI",
         "codex": "Exit the CLI",
-        "copilot": "Exit the CLI"
+        "copilot": "Exit the CLI",
+        "command-code": "Exit Command Code"
       },
       "models": "Switch AI model",
       "agents": {
         "opencode": "List and manage available agents",
         "claude": "Show a reminder to ask Claude to create or manage subagents, or to edit .claude/agents/ directly",
-        "codex": "view and switch between all active agent sessions"
+        "codex": "view and switch between all active agent sessions",
+        "command-code": "Manage agent configurations"
       },
       "themes": "Change TUI theme",
       "editor": "Open editor for long messages",
@@ -193,7 +200,8 @@
       "keybindings": "Open your keyboard shortcuts file",
       "login": {
         "claude": "Sign in to your Anthropic account",
-        "copilot": "Log in to Copilot"
+        "copilot": "Log in to Copilot",
+        "command-code": "Log in to Command Code or a provider"
       },
       "mobile": "Show QR code to download the Claude mobile app",
       "passes": "Share a free week of Claude Code with friends",
@@ -244,7 +252,8 @@
       "approve": "Approve one retry of a recent auto-review denial",
       "import": {
         "codex": "Import setup, this project, and recent chats from Claude Code",
-        "claude": "Bring configuration from OpenAI Codex or Google Gemini CLI into Claude Code, including instruction files, MCP servers, commands, subagents, and skills"
+        "claude": "Bring configuration from OpenAI Codex or Google Gemini CLI into Claude Code, including instruction files, MCP servers, commands, subagents, and skills",
+        "command-code": "Import your setup from another coding agent (Claude Code, Codex, Cursor, pi, OpenCode, Gemini)"
       },
       "archive": "Archive this session and exit",
       "delete": "Permanently delete this session and exit",
@@ -302,7 +311,26 @@
       "artifacts": "List the artifacts you own or that are shared with you, then attach one to the session, open it in your browser, or copy its link",
       "auto-mode-setup": "Draft autoMode.environment entries from your project and recent sessions, then review the draft and save it to your user settings",
       "rate-limit-options": "Show ways to keep working when a claude.ai usage limit blocks a request: wait and continue automatically when the limit resets, add usage credits, or upgrade your plan",
-      "workflow-authoring": "Load the reference for writing dynamic workflow scripts: the script API, resume behavior, quality patterns, and worked examples"
+      "workflow-authoring": "Load the reference for writing dynamic workflow scripts: the script API, resume behavior, quality patterns, and worked examples",
+      "clone": "Clone the current branch into a new session and switch to it",
+      "compact-mode": "Select the compaction mode used when compacting a session",
+      "design": "Design partner for auditing, building, composing, and shipping UI",
+      "extra": "Open the billing page to buy on-demand credits",
+      "hotkeys": "Show all keyboard shortcuts",
+      "learn": "Open the learn hub in your browser",
+      "learn-taste": "Learn coding taste from sessions with other coding agents",
+      "mode": "Show or switch the permission mode",
+      "plan-review": "Open this session's latest plan in review",
+      "plans": "Browse, review, and annotate saved plans",
+      "pr-comments": "Fetch all PR comments for the current branch",
+      "reload": "Restart the CLI and resume this session, applying a staged update",
+      "session-file": "Show the current session id and session file path",
+      "taste": "Manage taste learning and usage",
+      "todos": "Manage the session todo list",
+      "trace": "Copy the current trace id for support debugging",
+      "tree": "Browse the session tree and jump to any point in it",
+      "unshare": "Stop sharing the conversation",
+      "worktree": "Create, list, or switch git worktrees"
     }
   },
   "session": {
@@ -386,11 +414,11 @@
   },
   "terminal": {
     "historyLabel": "History",
-    "filesLabel": "Files",
+    "filesLabel": "Open Files",
     "showHistory": "Show history",
     "hideHistory": "Hide history",
-    "showFiles": "Show files",
-    "hideFiles": "Hide files",
+    "showFiles": "Show open files",
+    "hideFiles": "Hide open files",
     "equalizeWidths": "Equal widths",
     "equalizeWidthsHint": "Equalize terminal widths and reset History width",
     "addSplit": "Add split",
@@ -398,8 +426,17 @@
     "selectInstance": "Select agent instance for {split}",
     "moreActions": "More actions",
     "searchTerminal": "Search terminal",
+    "searchOutput": "Search terminal output for {split}",
     "endSession": "End session",
-    "endSessionFor": "End session for {name}"
+    "endSessionFor": "End session for {name}",
+    "filesEmptyHint": "Open a file to enable this",
+    "historyAllSplitsHint": "Applies to all splits",
+    "historyChatOnlyHint": "Every split shows Chat, which has no history column",
+    "maximizeSplit": "Maximize {split}",
+    "maximizeFocusedSplit": "Maximize the focused split",
+    "restoreSplits": "Restore the split layout",
+    "maximizeShortcutHint": "⌘ / Ctrl + Shift + Enter",
+    "maximizedStatus": "Split {split} maximized"
   },
   "surfaceMode": {
     "groupLabel": "Output surface for {split}",
@@ -414,18 +451,20 @@
     "liveRegionLabel": "Session status",
     "generating": "Responding…",
     "thinking": "Thinking…",
-    "bannerLabel": "Needs the terminal",
-    "reasonPager": "A pager is open. Scroll it and quit from the terminal surface.",
-    "reasonSelectionList": "A selection list is open. Move and confirm from the terminal surface.",
-    "reasonUnclassified": "This screen can't be read from chat. Check it on the terminal surface.",
-    "reasonPromptUnreadable": "Waiting for an answer, but the options couldn't be read. Check it on the terminal surface.",
+    "bannerLabel": "You can act on this here",
+    "reasonPager": "A pager is open. Scroll it and quit it from here, with the screen below in view.",
+    "reasonSelectionList": "A selection list is open. Move and confirm from here, with the screen below in view.",
+    "reasonUnclassified": "Chat can't tell what this screen is. It is shown as-is below, so you can drive it with the keys here.",
+    "reasonPromptUnreadable": "Waiting for an answer, and the options couldn't be read. Read the screen below and answer with a number or y/n.",
     "openTerminal": "Open terminal",
     "jumpToLatest": "Jump to latest",
     "jumpToLatestGenerating": "Jump to latest (still responding)",
     "progressLabel": "Reply being written",
     "progressPartial": "Showing the latest part only",
     "settling": "Not saved to the conversation yet",
-    "settlingLabel": "Reply waiting to be saved"
+    "settlingLabel": "Reply waiting to be saved",
+    "dialogCardLabel": "Terminal screen",
+    "unreadableHint": "Answer with the number shown on screen (1-9) or y/n. Enter confirms whatever the CLI has highlighted."
   },
   "chatTranscript": {
     "regionLabel": "Chat transcript",
@@ -433,6 +472,22 @@
     "empty": "No messages yet",
     "emptyHint": "Sending a message starts the session",
     "openSearch": "Search this conversation",
+    "filePathMissing": "That path is not in this worktree",
+    "thinking": {
+      "summary": "Thinking · {count}",
+      "expand": "Show the reasoning",
+      "collapse": "Hide the reasoning"
+    },
+    "jumpToTop": "Jump to the beginning",
+    "toolLog": {
+      "summary": "Tool calls \u00b7 {count}",
+      "expand": "Show the tool calls",
+      "collapse": "Hide the tool calls"
+    },
+    "toolActivity": {
+      "show": "Show tool activity",
+      "hide": "Hide tool activity"
+    },
     "toolApproval": {
       "summary": "Tool approvals · {count}",
       "expand": "Show the tool approvals",
@@ -561,7 +616,16 @@
   },
   "fileTabs": {
     "unsavedChanges": "Unsaved changes",
-    "closeTab": "Close {name}"
+    "closeTab": "Close {name}",
+    "tabActions": "Tab actions",
+    "closeAll": "Close All",
+    "closeOthers": "Close Others",
+    "closeToRight": "Close to the Right",
+    "confirmCloseTitle": "Unsaved changes",
+    "confirmCloseBody": "{count} of the tabs being closed have unsaved changes. Closing them discards those edits.",
+    "confirmKeepUnsaved": "Keep unsaved",
+    "confirmDiscard": "Close all",
+    "confirmCancel": "Cancel"
   },
   "markdownPreview": {
     "loadingImage": "[loading image...]",
@@ -819,7 +883,7 @@
   "activityBar": {
     "toggleSidebar": "Toggle sidebar",
     "label": "Activity Bar",
-    "files": "Files",
+    "files": "File Tree",
     "git": "Git",
     "notes": "Notes",
     "schedules": "Schedules",
@@ -846,6 +910,22 @@
     "toolbarLabel": "TUI Navigation",
     "caption": "Nav",
     "quitPager": "Quit pager"
+  },
+  "promptAnswerKeys": {
+    "toolbarLabel": "Dialog answer keys",
+    "caption": "Answer"
+  },
+  "selectionKeys": {
+    "numbersToolbarLabel": "Option number keys",
+    "numbersCaption": "Pick",
+    "commitToolbarLabel": "Apply the highlighted choice",
+    "sessionOnly": "This session only",
+    "sessionOnlyAria": "Use the highlighted choice for this session only (s)",
+    "setDefault": "Set as default",
+    "setDefaultAria": "Set the highlighted choice as the default (Enter)",
+    "defaultWarning": "Enter saves this choice as the default for new sessions. Use \u201cThis session only\u201d to leave your default unchanged.",
+    "opencodeToolbarLabel": "opencode model keys",
+    "opencodeCaption": "Model"
   },
   "newFileDialog": {
     "title": "New File",

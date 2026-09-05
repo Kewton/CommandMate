@@ -11,10 +11,34 @@
  *   1. a generating indicator, so a turn in flight is visible — and, since Issue
  *      #2199, the in-flight body itself for the two tools that can produce one;
  *   2. a live region that survives virtualization;
- *   3. an "open the terminal" banner for the states chat cannot drive at all
+ *   3. a dialog card for the states chat used to be unable to drive at all
  *      (selection list / pager / unreadable frame / a wait nobody could parse);
  *   4. follow-the-tail with a "jump to latest" chip when the reader has scrolled
  *      up, on the same discipline `TerminalDisplay` follows output on.
+ *
+ * ## (3) was a dead end until Issue #2254
+ *
+ * Epic #2192's decision 5 said those four states were terminal-only, so what
+ * this surface drew for them was a banner and one button: "open the terminal".
+ * **That decision is withdrawn by Issue #2254.** The banner told the user what
+ * was happening and then took the screen away from them — and on a phone the
+ * terminal is a different tab, so answering a dialog meant abandoning the
+ * transcript they were reading.
+ *
+ * The live region now carries {@link ChatDialogCard}: the pane's own last rows
+ * (`frame`, clipped by `lib/chat/dialog-frame`), with the state's own controls
+ * directly underneath — `NavigationButtons` for a selection list or a pager,
+ * `TerminalEscapeHatch` for a frame nobody classified, and `PromptAnswerKeys`
+ * (the `1`–`9` / `y` / `n` characters #2254 added to the special-keys
+ * vocabulary) wherever the answer is a character rather than a direction. The
+ * banner survives, reworded from "go to the terminal" to "you can do this here",
+ * and its button stays as a secondary way out.
+ *
+ * Because those controls are HERE, the PC footer must not draw them too:
+ * `TerminalSplitPaneContent` gates its `showNav` / `showEscapeHatch` on
+ * `surfaceMode`, and the phone's docked `NavigationButtons`
+ * (`WorktreeDetailRefactored`) is gated the same way. `PromptPanel` /
+ * `MobilePromptSheet` are NOT — see "What this deliberately does NOT do".
  *
  * ## Where the in-flight reply lives (Issue #2233 moved it)
  *
@@ -29,9 +53,28 @@
  * nothing on screen but the spinner going away.
  *
  * What this surface keeps is the consequence of that move: the live bubble is in
- * the flow, so scrolling up carries it off screen. The jump-to-latest chip
- * therefore wears the spinner whenever a turn is live and the reader is not at
- * the end, so "still running, and it is below you" never disappears.
+ * the flow, so scrolling up carries it off screen. Something must therefore say
+ * "still running, and it is below you" — the jump-to-latest chip below did,
+ * until Issue #2283 moved the whole job to the transcript's own FAB.
+ *
+ * ## Who owns the way back to the tail (Issue #2283)
+ *
+ * `ChatTranscript`, now. Two follows aimed at the same place from here, and both
+ * of them were `scrollTop = scrollHeight` — which, against a virtual list whose
+ * tail rows have never been measured, lands 7,770px short and then falls further
+ * behind with every measurement that arrives. The transcript publishes
+ * {@link ChatTranscriptScrollControls} on mount, and:
+ *
+ *  - the chip's jump uses them when they are there, so it reaches the real end;
+ *  - the chip itself is WITHDRAWN when they are there, because the transcript is
+ *    drawing its own FAB and two ways back is one too many. It stays for a
+ *    caller whose transcript publishes nothing — every suite in this directory
+ *    that stubs `ChatTranscript`, and any future slot filled with something
+ *    else;
+ *  - the mount-time follow is gone. It fired before the virtual list had
+ *    replaced the #1123 fallback, so it moved a DOM that was about to be thrown
+ *    away and nothing re-aimed afterwards. The transcript's own anchor is what
+ *    lands the first paint now.
  *
  * The `shrink-0` live region that remains holds the terminal banner alone.
  *
@@ -54,10 +97,15 @@
  *
  * ## What this deliberately does NOT do
  *
- * - **No prompt UI.** When a wait carries an answerable payload, the composer's
- *   own `PromptPanel` (PC) / `MobilePromptSheet` (phone) is already on screen in
- *   chat mode — #2193 left the whole input half untouched precisely so it would
- *   be. A second copy here would be two controls answering one dialog.
+ * - **No prompt UI for an ANSWERABLE wait.** When a wait carries options, the
+ *   composer's own `PromptPanel` (PC) / `MobilePromptSheet` (phone) is already
+ *   on screen in chat mode — #2193 left the whole input half untouched precisely
+ *   so it would be. A second copy here would be two controls answering one
+ *   dialog, which is why {@link resolveBlockedReason} still returns `null` for
+ *   it and Issue #2254 changed nothing about that branch. The card appears only
+ *   where the composer has nothing to offer.
+ * - **No free text.** The card sends fixed key names through `/special-keys`.
+ *   `/send`'s `prompt_waiting` guard is untouched (Issue #2254 scope).
  * - **No prompt auto-answering.** Auto-Yes calls `detectPrompt` directly and does
  *   not pass through anything this component can see; nothing here may touch it.
  * - **No new session-start path.** The empty state (now `ChatTranscript`'s, and
@@ -70,7 +118,10 @@
  * Theme-following, like the transcript it wraps. The terminal is a permanently dark
  * island because it mirrors a fixed xterm palette; a transcript is not, so every
  * color here is a semantic token and no light-on-dark is written into a shared
- * child.
+ * child. The ONE exception is the dialog card's frame, which reproduces a pane's
+ * own SGR colours and is therefore dark in both themes — expressed with the
+ * `terminal-surface` / `terminal-foreground` tokens rather than raw `gray-*`,
+ * see `ChatDialogCard`.
  */
 
 import React, { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -80,7 +131,23 @@ import {
   ChatTranscript,
   CHAT_TRANSCRIPT_SCROLL_CONTAINER_TESTID,
   type ChatTranscriptLiveTurn,
+  type ChatTranscriptScrollControls,
 } from '@/components/worktree/ChatTranscript';
+import { ChatDialogCard } from '@/components/worktree/ChatDialogCard';
+import { extractDialogFrameTail } from '@/lib/chat/dialog-frame';
+import { NavigationButtons } from '@/components/worktree/NavigationButtons';
+import { TerminalEscapeHatch } from '@/components/worktree/TerminalEscapeHatch';
+import {
+  PromptAnswerKeys,
+  SelectionCommitKeys,
+  SelectionNumberKeys,
+} from '@/components/worktree/PromptAnswerKeys';
+import { OpencodeModelKeys } from '@/components/worktree/OpencodeQuickKeys';
+import {
+  readSelectionListShape,
+  shouldOfferOptionNumbers,
+} from '@/lib/detection/selection-shape';
+import { SESSION_SCOPE_KEY_TOOL_IDS } from '@/types/terminal-keys';
 import { isAnswerablePromptData, type ChatMessage, type LivePromptData } from '@/types/models';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { SurfaceMode } from '@/types/ui-state';
@@ -110,6 +177,55 @@ import {
  * follow behavior — never a crash.
  */
 export const CHAT_SCROLL_CONTAINER_SELECTOR = `[data-testid="${CHAT_TRANSCRIPT_SCROLL_CONTAINER_TESTID}"]`;
+
+/**
+ * How long after a key is sent the dialog card asks for the pane a SECOND time
+ * (Issue #2297).
+ *
+ * `useSpecialKeys` already fires `onKeysSent` `NAV_KEY_REFRESH_DELAY_MS` (100 ms)
+ * after the POST resolves, and the route already dropped this session's capture
+ * cache entry before answering. Neither is enough on its own, and the reason is
+ * the shared cache rather than either of them: the entry is dropped BEFORE the
+ * TUI has repainted, so whichever reader captures first — this refresh, the
+ * sidebar status probe, the global session poller — stores the PRE-repaint frame
+ * and `CACHE_TTL_MS` (5 s) then serves it to everyone. The user sees the
+ * highlight fail to move and presses the key again.
+ *
+ * The server half of the fix is `REPAINT_INVALIDATE_DELAY_MS`, which drops the
+ * entry a second time once the repaint has had 250 ms. This is the client half:
+ * one more refresh, after that second drop, so the card actually re-reads the
+ * pane instead of waiting for the next poll. 400 ms leaves 150 ms of slack over
+ * the server's timer and stays inside the Issue's 1-second budget.
+ *
+ * Only the DIALOG CARD pays it — the footer strips keep their single refresh,
+ * because they sit next to a terminal that is polling on its own.
+ */
+export const DIALOG_REPAINT_REFRESH_MS = 400;
+
+/**
+ * Rows a selection list needs before the card is given a taller box.
+ *
+ * ## The two mistakes this number sits between (Issue #2326)
+ *
+ * Issue #2309 raised the card's height cap for every `selectionList`, and both
+ * halves of that turned out to be wrong on real frames:
+ *
+ *  - **too tall for a short list.** claude's folder-trust dialog is two
+ *    options, and the frame the phone's own suite renders is four rows. A
+ *    four-row dialog in a 315px box is 187px of transcript spent on
+ *    whitespace, which is Issue #2106's vertical budget given away for
+ *    nothing;
+ *  - **too short for a long one.** Command Code's `/model` is 76 rows after
+ *    Issue #2326's crop, walked with arrows because #2297 correctly refuses it
+ *    number keys, and the phone's `max-h-32` shows eight of them.
+ *
+ * 24 rows is the smallest list that does not fit the taller of the two default
+ * caps: `max-h-64` is 256px, which at the card's `text-[11px] leading-snug`
+ * (15.125px measured) holds 16 rows plus the `p-2` padding. A list past that is
+ * one the reader would otherwise have to scroll a small box to see, which is
+ * the situation the concession is for; anything shorter keeps the budget.
+ */
+export const SELECTION_LIST_TALL_CARD_MIN_ROWS = 24;
 
 /**
  * Why the banner exists, in the order the reason is chosen.
@@ -242,8 +358,33 @@ export interface ChatSurfaceProps {
   /** The agent instance this surface is showing. Published as `data-instance-id`. */
   instanceId?: string;
   live: ChatSurfaceLiveState;
-  /** Switches the pane's output half. The banner's single button calls this with 'terminal'. */
+  /** Switches the pane's output half. The banner's secondary button calls this with 'terminal'. */
   onSurfaceModeChange: (mode: SurfaceMode) => void;
+  /**
+   * The pane's raw frame, for the dialog card (Issue #2254).
+   *
+   * **`PaneTerminalState.output`, not `realtimeSnippet`.** Both are already in
+   * the caller's hand — the polling hook publishes them side by side — and the
+   * snippet is the wrong one: it is `lines.slice(-100)` of a 200x1000 pane, and
+   * for a codex session that has not yet filled the pane the content sits at the
+   * TOP with hundreds of blank rows below it, so the last 100 rows are empty.
+   * Measured on the live captures in `tests/fixtures/chat-dialog-card-2254/`;
+   * `extractDialogFrameTail` trims the trailing blank run for the same reason.
+   *
+   * Omitting it is legal and simply means no card — the banner still appears, so
+   * a caller that has not been updated degrades to the pre-#2254 behaviour.
+   */
+  frame?: string;
+  /**
+   * Refresh the pane after a key is sent, so the card redraws promptly instead
+   * of waiting for the next poll. Same callback the footer's key strips take.
+   */
+  onKeysSent?: () => void;
+  /**
+   * Phone layout (Issue #2106's vertical budget): a shorter card, scrolling
+   * inside itself, so the transcript keeps its rows.
+   */
+  compact?: boolean;
   history?: ChatSurfaceHistoryProps;
   className?: string;
 }
@@ -297,13 +438,16 @@ export function isTurnSettled(messages: readonly ChatMessage[], turnKey: string)
 }
 
 /**
- * Why the chat surface cannot drive this frame, or `null` when it can.
+ * Why this frame needs the dialog card, or `null` when it needs nothing.
  *
- * The four members are the states Epic #2192 decided are terminal-only: arrow-key
+ * The four members are the states Epic #2192 decided were terminal-only: arrow-key
  * navigation, a pager, a frame no detector could classify, and a wait whose
- * payload carries no options for the composer's prompt panel to render. Anything
- * else — including a normal answerable prompt — is workable from chat and must
- * NOT raise a banner, because the prompt panel is already on screen for it.
+ * payload carries no options for the composer's prompt panel to render. Issue
+ * #2254 withdrew the "terminal-only" half of that decision — they are now driven
+ * from the card this returns the reason for — but the SET is unchanged, and so
+ * is the exclusion that matters most: anything else, including a normal
+ * answerable prompt, is workable from the composer and must NOT raise a card,
+ * because `PromptPanel` / `MobilePromptSheet` are already on screen for it.
  */
 export function resolveBlockedReason(live: ChatSurfaceLiveState): ChatSurfaceBlockedReason | null {
   if (live.isPagerActive) return 'pager';
@@ -324,6 +468,9 @@ export const ChatSurface = memo(function ChatSurface({
   instanceId,
   live,
   onSurfaceModeChange,
+  frame,
+  onKeysSent,
+  compact = false,
   history,
   className = '',
 }: ChatSurfaceProps) {
@@ -355,7 +502,25 @@ export const ChatSurface = memo(function ChatSurface({
     return rootRef.current?.querySelector<HTMLElement>(CHAT_SCROLL_CONTAINER_SELECTOR) ?? null;
   }, []);
 
+  // [#2283] Whether the transcript has published scroll controls — i.e. whether
+  // it is drawing a jump FAB of its own. State, not a ref: withdrawing the chip
+  // below is a render.
+  //
+  // The controls themselves are deliberately NOT stored. The only thing this
+  // surface would use them for is the chip's jump, and the chip is gone by the
+  // time they exist; keeping a copy would be a second, unreachable
+  // implementation of "the tail" — which is the duplication this Issue removed.
+  const [hasTranscriptControls, setHasTranscriptControls] = useState(false);
+  const handleScrollControlsChange = useCallback((controls: ChatTranscriptScrollControls | null) => {
+    setHasTranscriptControls(controls !== null);
+  }, []);
+
   const scrollToLatest = useCallback(() => {
+    // `scrollTop = scrollHeight` lands short of a virtual list's last row, which
+    // is why the FAB that replaced this control jumps through the virtualizer
+    // instead (Issue #2283). It is still the right thing HERE: this runs only
+    // when the transcript published no controls, so there is no virtualizer to
+    // ask and the scroll region's own height is all there is to aim at.
     const container = getScrollContainer();
     if (container) container.scrollTop = container.scrollHeight;
     isPinnedRef.current = true;
@@ -525,7 +690,20 @@ export const ChatSurface = memo(function ChatSurface({
   // The bubble grows inside the scroll region now, so following it is the same
   // `scrollTop = scrollHeight` every other follow here uses — and only while the
   // reader was already pinned, which is the rule none of them break.
+  //
+  // [#2283] Except on the FIRST run, which is a MOUNT and not a frame of a live
+  // turn. `isPinnedRef` starts true, so this used to fire a write on every
+  // mount — against the #1123 fallback or the estimated-height sizer, i.e. a
+  // DOM about to be replaced by the virtual list, with nothing re-aiming after
+  // the replacement. That write is one half of why the terminal → chat toggle
+  // landed near the top of a 208-row transcript; `ChatTranscript`'s tail anchor
+  // is what lands the first paint now.
+  const hasFollowedLiveTurnRef = useRef(false);
   useLayoutEffect(() => {
+    if (!hasFollowedLiveTurnRef.current) {
+      hasFollowedLiveTurnRef.current = true;
+      return;
+    }
     if (!isPinnedRef.current) return;
     const container = getScrollContainer();
     if (container) container.scrollTop = container.scrollHeight;
@@ -539,6 +717,164 @@ export const ChatSurface = memo(function ChatSurface({
   const handleOpenTerminal = useCallback(() => {
     onSurfaceModeChange('terminal');
   }, [onSurfaceModeChange]);
+
+  // --------------------------------------------------------------------
+  // Seeing the key land (Issue #2297)
+  // --------------------------------------------------------------------
+  // Every control on the card takes `onKeysSent`; this is the one the card
+  // actually gets. It calls the caller's refresh twice — once on the hook's own
+  // 100 ms tick, and once more after {@link DIALOG_REPAINT_REFRESH_MS}, past the
+  // server's second cache drop — because the first capture can beat the TUI's
+  // repaint and then sit in the shared 5-second cache for everybody.
+  //
+  // The timer id is held in a ref and cleared on the next press and on unmount,
+  // the same discipline `useKeyPressFeedback` follows and for the same reason:
+  // answering the dialog is what unmounts the card that answered it, and a
+  // callback that outlives the tree fires against a torn-down jsdom window.
+  const repaintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (repaintTimerRef.current !== null) clearTimeout(repaintTimerRef.current);
+  }, []);
+  const handleDialogKeysSent = useCallback(() => {
+    onKeysSent?.();
+    if (repaintTimerRef.current !== null) clearTimeout(repaintTimerRef.current);
+    repaintTimerRef.current = setTimeout(() => {
+      repaintTimerRef.current = null;
+      onKeysSent?.();
+    }, DIALOG_REPAINT_REFRESH_MS);
+  }, [onKeysSent]);
+
+  // --------------------------------------------------------------------
+  // What the selection list on screen is OFFERING (Issue #2297)
+  // --------------------------------------------------------------------
+  // Read off the very frame the card is drawing, never off `cliToolId`: the six
+  // tools disagree about what confirms, and two of them disagree with THEMSELVES
+  // between screens (claude's `/model` writes a global default where its other
+  // dialogs merely confirm). Computed only for a selection list, so a pager or
+  // an unclassified frame pays nothing.
+  const selectionShape = useMemo(
+    () => (blockedReason === 'selectionList' ? readSelectionListShape(frame) : null),
+    [blockedReason, frame],
+  );
+
+  // How tall the selection list actually is (Issue #2326).
+  //
+  // The card's height cap is the only thing standing between the picker and
+  // the transcript, and #2309 raised it for EVERY selection list. Most of them
+  // do not need it: claude's folder-trust list is two options and the phone's
+  // own captures are four rows, and a four-row dialog in a 315px box is 187px
+  // of transcript spent on whitespace — #2106's budget given away for nothing.
+  // So the concession is made on the CONTENT, not on the reason: a list longer
+  // than the default cap can show gets the taller box, and one that fits keeps
+  // the caps #2106 and #2254 set.
+  //
+  // The same pure function the card runs, memoised on the same input, so the
+  // two cannot disagree about how many rows there are.
+  const dialogRowCount = useMemo(
+    () =>
+      blockedReason === 'selectionList' && frame
+        ? extractDialogFrameTail(frame, { selectionList: true }).split('\n').length
+        : 0,
+    [blockedReason, frame],
+  );
+
+  // --------------------------------------------------------------------
+  // The dialog card's controls (Issue #2254)
+  // --------------------------------------------------------------------
+  // One switch on the SAME reason the banner is worded from, so the sentence the
+  // user reads and the buttons they are given can never describe different
+  // states. `cliToolId` gates the whole row rather than each control: every one
+  // of them posts to `/special-keys`, which needs a tool to resolve the session
+  // name and to validate the key against that tool's vocabulary (Issue #2046).
+  // A caller with no tool still gets the frame — seeing the dialog is worth
+  // something on its own — and no buttons that could not be delivered.
+  const dialogActions = useMemo<React.ReactNode>(() => {
+    if (blockedReason === null || !cliToolId) return null;
+    const keyProps = {
+      worktreeId,
+      cliToolId,
+      instanceId,
+      // Issue #2297: the card's refresh, not the caller's raw one.
+      onKeysSent: handleDialogKeysSent,
+    };
+    switch (blockedReason) {
+      // A pager and a selection list are both driven by a MOVING HIGHLIGHT, so
+      // the verb is a direction and the control is the arrow pad. `showPagerKeys`
+      // adds PgUp/PgDn/Home/End/q for the pager, exactly as the footer does.
+      case 'pager':
+        return <NavigationButtons {...keyProps} showPagerKeys />;
+      // Issue #2297. The arrow pad stays FIRST and unconditional — it is the one
+      // control every measured selection list answers to — and what goes under
+      // it is whatever this particular frame offers. Nothing here is chosen from
+      // the tool id except opencode's chords, because a tool id cannot tell
+      // claude's `/model` (Enter writes ~/.claude/settings.json) from claude's
+      // trust dialog (Enter confirms).
+      case 'selectionList': {
+        const shape = selectionShape;
+        // The two labelled commits, for a footer that names a session-scoped
+        // key — claude's `/model`, and any future screen that grows the same
+        // sentence. Gated on the tool DECLARING `s` as well, so the button can
+        // never be the 400 the route would answer for a tool that does not.
+        const showCommitKeys =
+          shape?.offersSessionScope === true &&
+          (SESSION_SCOPE_KEY_TOOL_IDS as readonly string[]).includes(cliToolId);
+        return (
+          <div className="space-y-2">
+            <NavigationButtons {...keyProps} />
+            {shape && shouldOfferOptionNumbers(shape) ? (
+              <SelectionNumberKeys {...keyProps} optionCount={shape.optionCount} />
+            ) : null}
+            {showCommitKeys && shape ? (
+              <SelectionCommitKeys
+                {...keyProps}
+                commitsDefaultOnEnter={shape.commitsDefaultOnEnter}
+              />
+            ) : null}
+            {/* opencode has no numbered `/model` at all — switching models is
+                `ctrl+t` or a `ctrl+x` chord, and neither was reachable from
+                chat. Rendered for opencode only; the component itself re-checks. */}
+            <OpencodeModelKeys
+              worktreeId={worktreeId}
+              cliToolId={cliToolId}
+              instanceId={instanceId}
+              onKeysSent={handleDialogKeysSent}
+            />
+          </div>
+        );
+      }
+      // Nobody could classify the frame, so nobody can promise it has a
+      // highlight to move OR a numbered list to answer. Both pads are offered:
+      // the hatch for an overlay that navigates (claude's `/help` tabs), the
+      // answer keys for one that asks (#2254 §B's "the yes/no in an unclassified
+      // frame"). Deliberately NOT folded into `TerminalEscapeHatch` itself,
+      // which is also mounted in the PC footer and on the phone's terminal tab
+      // where the vertical budget (#2131 / #2106) is already spoken for.
+      case 'unclassified':
+        return (
+          <div className="space-y-2">
+            <TerminalEscapeHatch {...keyProps} />
+            <PromptAnswerKeys {...keyProps} />
+          </div>
+        );
+      // A wait IS on screen and its payload carried no options (#1708 / #1725).
+      // The answer is a character, and the card above shows which one — the
+      // pairing is the point, because `respond <id> yes` is not resolved
+      // semantically on a numbered dialog (#1681): Enter takes whatever the CLI
+      // highlighted, so a "no" can land as an approval.
+      case 'promptUnreadable':
+        return (
+          <div className="space-y-2">
+            <p
+              data-testid="chat-surface-unreadable-hint"
+              className="text-xs text-muted-foreground"
+            >
+              {t('chatSurface.unreadableHint')}
+            </p>
+            <PromptAnswerKeys {...keyProps} />
+          </div>
+        );
+    }
+  }, [blockedReason, cliToolId, worktreeId, instanceId, handleDialogKeysSent, selectionShape, t]);
 
   const historyProps = history ?? {};
 
@@ -564,6 +900,7 @@ export const ChatSurface = memo(function ChatSurface({
           worktreeId={worktreeId}
           cliToolId={cliToolId}
           liveTurn={liveTurn}
+          onScrollControlsChange={handleScrollControlsChange}
           className="h-full"
         />
         {/* The chip. It is also the answer to what Issue #2233 gave up: the live
@@ -576,7 +913,11 @@ export const ChatSurface = memo(function ChatSurface({
             Issue #2248: a HELD body is below the reader in the same way, so the
             chip still offers the way back — with the plain arrow, because the
             turn it belongs to has already stopped. */}
-        {(hasNewBelow || (isLiveTurn && !isAtBottom)) && (
+        {/* [#2283] Withdrawn as soon as the transcript publishes scroll
+            controls: it is drawing its own FAB then, and it can put the reader
+            on the last ROW rather than at an estimated height. What is left
+            here is the way back for a transcript that publishes nothing. */}
+        {!hasTranscriptControls && (hasNewBelow || (isLiveTurn && !isAtBottom)) && (
           <button
             type="button"
             data-testid="chat-surface-new-messages"
@@ -595,18 +936,26 @@ export const ChatSurface = memo(function ChatSurface({
         )}
       </div>
 
-      {/* What is left of the footer live region (Issue #2233): the terminal
-          banner, and nothing else. The generating indicator and the in-flight
-          body moved into the transcript's tail — same reason as ever, opposite
-          implementation. This strip is `shrink-0`, so on the phone every pixel
-          it takes comes out of the transcript (Issue #2106's budget); it is not
-          rendered at all when there is no banner to raise. */}
+      {/* The footer live region (Issue #2233): the banner, and — since Issue
+          #2254 — the dialog card under it. The generating indicator and the
+          in-flight body are NOT here; they moved into the transcript's tail.
+
+          This strip is `shrink-0`, so on the phone every pixel it takes comes out
+          of the transcript (Issue #2106's budget); it is not rendered at all when
+          there is no reason to raise, and the card inside it caps its own height
+          and scrolls rather than growing with the frame.
+
+          It is also OUTSIDE the transcript's scroll region, which is what keeps
+          #2233's follow-the-tail and the jump-to-latest chip untouched: the chip
+          floats `absolute … z-10` inside the `relative` transcript box above,
+          and this is a flex sibling below that box, so the two cannot overlap
+          however tall the card gets. */}
       {blockedReason !== null && (
         <div
           data-testid="chat-surface-live"
           role="group"
           aria-label={t('chatSurface.liveRegionLabel')}
-          className="shrink-0 border-t border-border bg-surface px-3 py-2"
+          className="flex shrink-0 flex-col gap-2 border-t border-border bg-surface px-3 py-2"
         >
           <div
             data-testid="chat-surface-terminal-banner"
@@ -618,6 +967,10 @@ export const ChatSurface = memo(function ChatSurface({
             <span className="min-w-0 flex-1 text-xs text-foreground">
               {t(BLOCKED_REASON_KEY[blockedReason])}
             </span>
+            {/* Issue #2254 demoted this from "the only thing you can do" to a
+                secondary way out: the dialog is answerable right here now, and
+                the terminal is still there for anyone who wants the whole pane
+                (scrollback, search, a frame the card's 12–20 rows cut off). */}
             <button
               type="button"
               data-testid="chat-surface-open-terminal"
@@ -628,6 +981,50 @@ export const ChatSurface = memo(function ChatSurface({
               {t('chatSurface.openTerminal')}
             </button>
           </div>
+          {frame ? (
+            <ChatDialogCard
+              frame={frame}
+              reason={blockedReason}
+              // Issue #2106: the phone gets the low end of the Issue's 12–20 row
+              // window and a shorter box, so the card cannot eat the transcript.
+              // Issue #2309: a selection list ignores this on both platforms — see
+              // `ChatDialogCard` / `DialogFrameTailOptions.selectionList`.
+              maxLines={compact ? 12 : undefined}
+              // Issue #2309: a selection list is real scrollable content, not a
+              // dozen rows that fit whole, so its box is not the 12–20 row one.
+              //
+              // Issue #2326 measured what #2309's fixed caps cost the surface,
+              // and corrected BOTH of them:
+              //
+              //  - the PC's `max-h-[28rem]` is 448px of an 800px split, and with
+              //    the banner and the arrow pad around it the live region took
+              //    ~560px — the transcript underneath was left about 60px, i.e.
+              //    no readable chat at all while a picker was open;
+              //  - the phone's `max-h-32` is 128px, about eight rows, well
+              //    below what a 76-row picker walked with arrows needs.
+              //    #2106's vertical budget is conceded here, and only for a
+              //    list long enough to need it.
+              //
+              // `vh` rather than `rem` because the thing the card competes with
+              // is the viewport-tall split, which a fixed cap cannot see. 35vh
+              // is 315px on the UAT's 1440x900 window: 21 rows of picker, which
+              // the highlight follow scrolls within, and about nine rows of
+              // chat still under it once the 112px of live-region chrome and
+              // the composer are counted.
+              //
+              // Gated on `dialogRowCount` rather than on the reason, so the
+              // budget is conceded only where it buys something — see that
+              // memo. Everything else keeps the caps #2106 and #2254 set.
+              maxHeightClassName={
+                dialogRowCount > SELECTION_LIST_TALL_CARD_MIN_ROWS
+                  ? 'max-h-[35vh]'
+                  : compact
+                    ? 'max-h-32'
+                    : 'max-h-64'
+              }
+              actions={dialogActions}
+            />
+          ) : null}
         </div>
       )}
     </div>

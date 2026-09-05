@@ -12,6 +12,7 @@ import {
   killSession,
   sendSpecialKey,
   capturePane,
+  getSessionWorkingDirectory,
 } from '../tmux/tmux';
 import { sendMessageWithSubmitVerification } from './submit-verified-sender';
 import { invalidateCache } from '../tmux/tmux-capture-cache';
@@ -35,6 +36,7 @@ import {
 } from '@/lib/updates';
 import { createLogger } from '@/lib/logger';
 import { CODEX_CLI_TOOL_ID } from '@/lib/hooks/sources';
+import { shouldTrustCodexHooks } from '@/lib/hooks/sources/codex/hooks-config';
 import {
   beginAgentSession,
   buildAgentLaunchCommandLine,
@@ -44,7 +46,7 @@ import {
   TUI_EXIT_WAIT_MS,
   CODEX_DIALOG_SETTLE_MS,
 } from '@/config/cli-tool-timing-config';
-import { SessionStartUnavailableError } from '../session/session-start-error';
+import { missingToolError } from './install-hints';
 
 const logger = createLogger('cli-tools/codex');
 
@@ -94,15 +96,12 @@ const CODEX_UPDATE_LOCK_TOOL: UpdatableAgentTool = 'codex';
 const CODEX_PROMPT_WAIT_TIMEOUT_MS = 15000;
 
 /**
- * Option 3, "Continue without trusting (hooks won't run)".
+ * Screen 1, option 3: "Continue without trusting (hooks won't run)".
  *
- * Not option 2. Trusting writes `[hooks.state."<file>:<event>:0:0"]` entries
- * into the operator's own `~/.codex/config.toml` — the file that carries, among
- * other things, the `notify` command a Computer Use integration runs — and
- * granting that on someone's behalf is not this server's call. So a session
- * starts with the hooks inert and the screen scraper doing exactly what it did
- * before Issue #1760; the human enables them once through codex's own review
- * screen, or an operator sets `CM_CODEX_HOOK_TRUST=bypass`.
+ * The `CM_CODEX_HOOK_TRUST=never` answer since Issue #2315, and the default
+ * answer before it. It leaves the hooks inert and the screen scraper doing what
+ * it did before Issue #1760 — and, crucially, codex does not remember it: there
+ * is no "asked and refused" state, only a grant, so this key buys one launch.
  *
  * Sent alone, like the other numbered dialogs (Issue #890): codex confirms a
  * numbered selection instantly, and a trailing Enter would land on the next
@@ -121,24 +120,90 @@ const CODEX_PROMPT_WAIT_TIMEOUT_MS = 15000;
 const CODEX_HOOKS_REVIEW_DECLINE_KEY = '3';
 
 /**
- * How many times `waitForReady` may press `esc` to climb out of codex's hooks
- * review screens (Issue #1829).
+ * Screen 1, option 2: "Trust all and continue" (Issue #2315).
  *
- * Two is the depth of the UI — detail -> list -> closed — and the cap exists
- * because the alternative is one press per poll: 30 keystrokes into whatever is
- * really on screen if the classifier is ever wrong about a frame. Two spare
- * presses cover a redraw landing between capture and send.
+ * The default answer now, gated on {@link shouldTrustCodexHooks} — which
+ * withholds it from any worktree carrying its own `.codex/hooks.json`, the one
+ * case where "all" could mean a repository's hooks rather than the operator's.
+ * That function carries the whole of the argument for reversing #1760 here.
+ *
+ * This is the half of the fix that makes the dialog stop coming back: codex
+ * records the grant as `[hooks.state."…:<event>:0:0"] trusted_hash`, so the
+ * screen appears once rather than every launch. It only holds because the other
+ * half — `hooks/sources/codex/relay-install` — stopped the generated file's
+ * bytes moving between checkouts and invalidating that very hash.
  */
-const CODEX_HOOKS_SCREEN_MAX_ESCAPES = 4;
+const CODEX_HOOKS_REVIEW_TRUST_KEY = '2';
+
+/**
+ * Screen 1, option 1: "Review hooks", which opens the list (Issue #2315).
+ *
+ * The second attempt on screen 1, never the first. A numbered option is a
+ * position in a menu codex is free to renumber between versions, and this method
+ * has already been re-pinned twice for exactly that kind of drift (#890, #1829).
+ * The two screens *below* this one announce their own keys in a footer that
+ * `getCodexLifecycleDialog` matches — `Press t to trust all;` and
+ * `Press t to trust;` — so descending into the list turns a guess about
+ * numbering into a key the screen itself named.
+ */
+const CODEX_HOOKS_REVIEW_LIST_KEY = '1';
+
+/**
+ * `t` — "trust", the key screens 2 and 3 print in their own footers.
+ *
+ * Sent literally: `sendKeys` hands a bare string to `tmux send-keys`, which
+ * resolves key NAMES before characters, and a single letter that happens to
+ * match one would be sent as something else entirely.
+ */
+const CODEX_HOOKS_TRUST_KEY = 't';
+
+/**
+ * How many keys `waitForReady` may spend on ONE hooks screen before it stops
+ * pressing (Issue #1829, reworked for #2315).
+ *
+ * The number that matters is per screen, and the counter resets whenever the
+ * classification changes — which is the fix. #1829 spent a fixed budget of 4
+ * across the whole launch, so a pane that legitimately walked screen 1 -> 2 -> 3
+ * could exhaust it on the way down and park on the last one for good; that is
+ * one of the two ways the reported session ended up stuck. Progress now buys
+ * more attempts, and only a screen that will not respond at all runs out.
+ *
+ * Three per screen, because each screen has at most two keys worth trying
+ * (`2` then `1` on the review dialog; `t` or `esc` below it) plus one spare for
+ * a redraw landing between the capture and the send.
+ */
+const CODEX_HOOKS_SCREEN_MAX_ATTEMPTS = 3;
+
+/** The three screens codex's hook review can put in front of a launch. */
+type CodexHooksScreen = 'hooks-review' | 'hooks-list' | 'hooks-detail';
+
+/**
+ * Which screen was last acted on, and how many keys it has cost.
+ *
+ * Carried across polls by the caller so the per-screen budget above can reset on
+ * progress rather than counting down over a whole launch.
+ */
+interface CodexHooksScreenState {
+  screen: CodexHooksScreen | null;
+  attempts: number;
+}
+
+/** A fresh {@link CodexHooksScreenState}. */
+function newHooksScreenState(): CodexHooksScreenState {
+  return { screen: null, attempts: 0 };
+}
 
 /**
  * Whether the pane is sitting on the hooks review dialog.
  *
- * Position-independent on purpose, unlike `getCodexActiveDialog`: the only
- * caller checks `isCodexPromptReady` first and returns when a genuine prompt
- * exists, so residual dialog text above a live prompt is never reached, and a
- * one-shot guard stops the key being sent twice. Callers OUTSIDE this launch
- * sequence must use `getCodexLifecycleDialog` instead, which is position-based.
+ * Position-independent, which is why Issue #2315 stopped branching on it.
+ * `waitForReady` now classifies with `getCodexLifecycleDialog`, and the reason
+ * is the shape the reported session was found in: screen 1's text stays in
+ * scrollback while the pane sits on screen 3, so this predicate answers `true`
+ * for a frame whose active screen is a different one, and the key it selected
+ * was the key for the screen that had already been left. Kept as the
+ * position-INDEPENDENT question ("has this pane ever shown the dialog?"), which
+ * is a different question from "what is on it now".
  *
  * The dialog has to be handled here rather than in `getCodexActiveDialog`, which
  * classifies it as `null`: its wording matches none of that function's three
@@ -192,7 +257,7 @@ export class CodexTool extends BaseCLITool {
     // Check if Codex is installed
     const codexAvailable = await this.isInstalled();
     if (!codexAvailable) {
-      throw new SessionStartUnavailableError(this.name, 'Codex CLI is not installed or not in PATH');
+      throw missingToolError(this);
     }
 
     const sessionName = this.getSessionName(worktreeId, instanceId);
@@ -282,7 +347,14 @@ export class CodexTool extends BaseCLITool {
 
       // Poll until Codex interactive prompt is ready
       // Handles trust dialog and update notification automatically
-      await this.waitForReady(sessionName, { relaunch: relaunchIntoSamePane });
+      // Issue #2315: the provenance check happens here, where the worktree path
+      // is, and not inside the polling loop — a repository that ships its own
+      // `.codex/hooks.json` is one whose review dialog this server must not
+      // answer with "trust all".
+      await this.waitForReady(sessionName, {
+        relaunch: relaunchIntoSamePane,
+        trustHooks: shouldTrustCodexHooks(worktreePath),
+      });
 
       logger.info('started-codex-session:sessionname');
     } catch (error: unknown) {
@@ -302,18 +374,24 @@ export class CodexTool extends BaseCLITool {
    *   Supplied by {@link launchSession} and used only after the update dialog
    *   has been answered with `1` — by this method under the `update` policy of
    *   `config/codex-update-dialog-config`, or by a human under `ask`.
+   * @param options.trustHooks - Whether the hook review may be answered with
+   *   *trust* (Issue #2315). Decided by {@link shouldTrustCodexHooks} from the
+   *   worktree path, which this method does not have; passing it in keeps the
+   *   provenance check next to the directory it is a check about.
    */
   private async waitForReady(
     sessionName: string,
-    options?: { relaunch?: () => Promise<void> }
+    options?: { relaunch?: () => Promise<void>; trustHooks?: boolean }
   ): Promise<void> {
+    const trustHooks = options?.trustHooks ?? false;
     // Issue #892: one-shot guards. capturePane(50) keeps a dismissed dialog in
     // scrollback, so a key must be sent at most once per dialog -- otherwise the
     // update branch re-sends "2" every poll and the live prompt gets "222...".
     let updateDialogHandled = false;
     let trustDialogHandled = false;
-    let hooksReviewHandled = false;
-    let hooksScreenEscapes = 0;
+    // Issue #2315: one budget per hooks screen, reset whenever the screen
+    // changes, in place of #1829's single launch-wide escape count.
+    const hooksScreenState = newHooksScreenState();
 
     // Issue #2068. Resolved once per launch rather than per poll: the operator
     // does not get to change their mind halfway through one session start, and
@@ -353,6 +431,34 @@ export class CodexTool extends BaseCLITool {
       try {
         const rawOutput = await capturePane(sessionName, 50);
         const output = stripAnsi(rawOutput);
+
+        // Issue #2315: the hooks screens are judged BEFORE readiness, and the
+        // order is load-bearing. `isCodexPromptReady` answers true for
+        // `CODEX_HOOKS_STUCK_PANE` — the shape both #1829 sessions were found
+        // in — because a genuine composer line IS in the frame; it is simply
+        // buried under two review screens that codex painted after it. Ready
+        // first would return on that frame and hand `sendMessage` a pane whose
+        // keystrokes go to the review UI. `getCodexLifecycleDialog` cannot make
+        // the opposite mistake: its window starts BELOW the bottom-most prompt
+        // line, so it names a hooks screen only when that screen is what the
+        // pane is actually showing.
+        const lifecycleScreen = getCodexLifecycleDialog(output);
+        if (
+          lifecycleScreen === 'hooks-review' ||
+          lifecycleScreen === 'hooks-list' ||
+          lifecycleScreen === 'hooks-detail'
+        ) {
+          const sent = await this.answerCodexHooksScreen(
+            sessionName,
+            lifecycleScreen,
+            hooksScreenState,
+            trustHooks
+          );
+          if (sent) {
+            await new Promise((resolve) => setTimeout(resolve, CODEX_DIALOG_SETTLE_MS));
+            continue;
+          }
+        }
 
         // Check if the genuine interactive input prompt is ready.
         // Issue #892: isCodexPromptReady() is position-based -- a genuine "› " line
@@ -415,8 +521,8 @@ export class CodexTool extends BaseCLITool {
           // Left alone, the dialog simply stays on the pane where `detectPrompt`
           // reports it and the human can answer it.
           trustDialogHandled = false;
-          hooksReviewHandled = false;
-          hooksScreenEscapes = 0;
+          hooksScreenState.screen = null;
+          hooksScreenState.attempts = 0;
           // Issue #2068 x #2069: the shell prompt IS the completion signal for
           // an install this process cannot await, so release here rather than
           // holding #2069's lock for the rest of the (up to two-minute) window
@@ -428,40 +534,6 @@ export class CodexTool extends BaseCLITool {
           }
           logger.info('codex-relaunched-after-update', { sessionName, policy: updatePolicy });
           await options.relaunch();
-          continue;
-        }
-
-        // Issue #1760: "Hooks need review". Reached only when no genuine prompt
-        // exists (the check above returned), so this cannot fire on a live
-        // prompt, and the one-shot guard stops a second key on a re-render.
-        // Declines: granting trust would write the operator's config.toml.
-        if (!hooksReviewHandled && isCodexHooksReviewDialog(output)) {
-          await sendKeys(sessionName, CODEX_HOOKS_REVIEW_DECLINE_KEY, false);
-          hooksReviewHandled = true;
-          logger.info('codex-hooks-review-declined');
-          await new Promise((resolve) => setTimeout(resolve, CODEX_DIALOG_SETTLE_MS));
-          continue;
-        }
-
-        // Issue #1829: back out of the two screens the hooks dialog leads to.
-        // Confirming its option 1 -- which the Auto-Yes poller did on two live
-        // sessions, and which a human can do too -- opens a review UI whose only
-        // exits are `t` and `esc`. `t` is out: it writes `[hooks.state…]` into
-        // the operator's own ~/.codex/config.toml, the grant Issue #1760
-        // declined on their behalf. So `esc`, once per poll until the screens
-        // are gone. Before this, nothing sent either key: the whole 30-attempt
-        // window elapsed, waitForReady returned as if ready, and the session was
-        // left parked there -- reported as `running`, because neither screen
-        // carries an option, a confirm footer or a thinking indicator.
-        const hooksScreen = getCodexLifecycleDialog(output);
-        if (
-          (hooksScreen === 'hooks-list' || hooksScreen === 'hooks-detail') &&
-          hooksScreenEscapes < CODEX_HOOKS_SCREEN_MAX_ESCAPES
-        ) {
-          await sendSpecialKey(sessionName, 'Escape');
-          hooksScreenEscapes++;
-          logger.info('codex-hooks-screen-escaped');
-          await new Promise((resolve) => setTimeout(resolve, CODEX_DIALOG_SETTLE_MS));
           continue;
         }
 
@@ -607,6 +679,87 @@ export class CodexTool extends BaseCLITool {
   }
 
   /**
+   * Send the one key that gets this pane off the hooks screen it is on
+   * (Issue #2315).
+   *
+   * ## Why a state machine and not a budget
+   *
+   * codex's hook review is three screens deep, and #1829's recovery counted its
+   * `esc` presses across the whole launch. A pane that walked all three could
+   * therefore run out on the way down and park on the last one — which is one
+   * half of what the reported session was doing. The count here is per screen
+   * and resets the moment the classification changes, so descending costs
+   * nothing and only a screen that ignores its own documented key runs out.
+   *
+   * ## Which key
+   *
+   * When `trust` is granted the answer is the one that ends the review for good:
+   * `2` on the launch dialog, `t` on either screen below it. codex records that
+   * as a `trusted_hash` in the operator's `~/.codex/config.toml`, so the dialog
+   * appears once instead of on every launch — the decline it replaces was never
+   * remembered, which is why "度々" was the Issue's word for this.
+   *
+   * When it is withheld — `CM_CODEX_HOOK_TRUST=never`, or a worktree carrying
+   * its own `.codex/hooks.json` — it is the pre-#2315 path: `3`, then `esc`.
+   *
+   * The launch dialog gets a second, different key on its second attempt.
+   * Numbered options are a menu position codex is free to renumber (this method
+   * has been re-pinned for that twice already), so if `2`/`3` did not move the
+   * screen, `1` descends into the list, whose footer NAMES the key that closes
+   * it and which `getCodexLifecycleDialog` matched to get here.
+   *
+   * @param sessionName - tmux session name
+   * @param screen - The bottom-most active hooks screen, from `getCodexLifecycleDialog`
+   * @param state - Per-screen budget, carried across polls by the caller
+   * @param trust - Whether trust may be granted, from {@link shouldTrustCodexHooks}
+   * @returns True when a key was sent, false when this screen's budget is spent
+   */
+  private async answerCodexHooksScreen(
+    sessionName: string,
+    screen: CodexHooksScreen,
+    state: CodexHooksScreenState,
+    trust: boolean
+  ): Promise<boolean> {
+    if (state.screen !== screen) {
+      // Progress. The pane moved, so the previous screen's spent attempts say
+      // nothing about this one.
+      state.screen = screen;
+      state.attempts = 0;
+    }
+    if (state.attempts >= CODEX_HOOKS_SCREEN_MAX_ATTEMPTS) {
+      logger.warn('codex-hooks-screen-unresponsive', { sessionName, screen, trust });
+      return false;
+    }
+    const attempt = ++state.attempts;
+
+    if (screen === 'hooks-review') {
+      const key =
+        attempt === 1
+          ? trust
+            ? CODEX_HOOKS_REVIEW_TRUST_KEY
+            : CODEX_HOOKS_REVIEW_DECLINE_KEY
+          : CODEX_HOOKS_REVIEW_LIST_KEY;
+      // Issue #890: the number selects AND confirms. A trailing Enter would land
+      // on the screen this key just opened.
+      await sendKeys(sessionName, key, false);
+      logger.info('codex-hooks-review-answered', { sessionName, key, attempt, trust });
+      return true;
+    }
+
+    if (trust) {
+      // `t`, the key screens 2 and 3 print in their own footers. Literal, so
+      // tmux sends the character rather than resolving it as a key name.
+      await sendKeys(sessionName, CODEX_HOOKS_TRUST_KEY, false, { literal: true });
+      logger.info('codex-hooks-screen-trusted', { sessionName, screen, attempt });
+      return true;
+    }
+
+    await sendSpecialKey(sessionName, 'Escape');
+    logger.info('codex-hooks-screen-escaped', { sessionName, screen, attempt });
+    return true;
+  }
+
+  /**
    * Wait for Codex prompt before sending a message.
    * Used by sendMessage to ensure Codex is ready to accept input.
    *
@@ -620,14 +773,39 @@ export class CodexTool extends BaseCLITool {
   private async waitForPrompt(sessionName: string): Promise<void> {
     const startTime = Date.now();
     const pollInterval = 500;
+    // Issue #2315: the hooks review can come back AFTER the launch is over --
+    // `waitForReady` runs once and is long gone by then. Issue #1829's two live
+    // sessions were found in exactly that shape (`CODEX_HOOKS_STUCK_PANE`: a
+    // ready prompt in scrollback with the review screens below it), and until
+    // now nothing owned it: every send timed out here and threw, session after
+    // session, with `kill-session` by hand as the only way out. The same state
+    // machine the launch uses gets the pane back.
+    const hooksScreenState = newHooksScreenState();
+    /** Resolved lazily — one tmux call, and only if a hooks screen shows up. */
+    let trustHooks: boolean | null = null;
+
     while (Date.now() - startTime < CODEX_PROMPT_WAIT_TIMEOUT_MS) {
       try {
         const rawOutput = await capturePane(sessionName, 50);
         const output = stripAnsi(rawOutput);
-        // Issue #890/#892: position-based guard so a residual update/trust dialog
-        // ("› 1. ...") is never mistaken for a ready prompt -- yet a genuine "› "
-        // prompt below stale dialog scrollback IS accepted.
-        if (isCodexPromptReady(output)) {
+
+        // Before readiness, for the reason `waitForReady` gives: a review screen
+        // painted OVER a live composer leaves `isCodexPromptReady` true, and
+        // returning there types the user's message into the review UI.
+        const screen = getCodexLifecycleDialog(output);
+        if (screen === 'hooks-review' || screen === 'hooks-list' || screen === 'hooks-detail') {
+          if (trustHooks === null) {
+            // The pane's own directory, for the same reason `relaunchIfToolExited`
+            // asks tmux for it: `sendMessage` is handed a worktree id, not a path,
+            // and the pane knows where it is actually running.
+            const worktreePath = await getSessionWorkingDirectory(sessionName);
+            trustHooks = worktreePath !== null && shouldTrustCodexHooks(worktreePath);
+          }
+          await this.answerCodexHooksScreen(sessionName, screen, hooksScreenState, trustHooks);
+        } else if (isCodexPromptReady(output)) {
+          // Issue #890/#892: position-based guard so a residual update/trust dialog
+          // ("› 1. ...") is never mistaken for a ready prompt -- yet a genuine "› "
+          // prompt below stale dialog scrollback IS accepted.
           return;
         }
       } catch {

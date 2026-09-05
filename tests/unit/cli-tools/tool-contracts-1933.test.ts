@@ -52,6 +52,7 @@ describe('describeComposer (Issue #1933 §6.3)', () => {
       'vibe-local': 'input-line-marker',
       copilot: 'input-line-marker',
       antigravity: 'input-line-marker',
+      'command-code': 'input-line-marker',
       opencode: 'opencode-box',
     });
   });

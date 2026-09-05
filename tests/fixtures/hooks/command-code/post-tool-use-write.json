@@ -1,0 +1,15 @@
+{
+  "session_id": "33333333-3333-4333-8333-333333333333",
+  "transcript_path": "/Users/example/.commandcode/projects/private-tmp-my-code-branch-desk-probe/33333333-3333-4333-8333-333333333333.jsonl",
+  "cwd": "/private/tmp/MyCodeBranchDesk/probe",
+  "hook_event_name": "PostToolUse",
+  "permission_mode": "default",
+  "tool_use_id": "call_00_AAAABBBBCCCCDDDDEEEE0002",
+  "tool_name": "write_file",
+  "tool_display_name": "WRITE",
+  "tool_input": {
+    "file_path": "/private/tmp/MyCodeBranchDesk/probe/probe.txt",
+    "content": "hello"
+  },
+  "tool_response": "File created successfully at: /private/tmp/MyCodeBranchDesk/probe/probe.txt"
+}

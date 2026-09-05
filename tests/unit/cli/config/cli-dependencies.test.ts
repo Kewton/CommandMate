@@ -136,9 +136,80 @@ describe('getOptionalDependencies', () => {
   });
 
   it('should keep every agent CLI optional so init cannot start failing on them', () => {
-    const agentCliNames = ['Claude CLI', 'gh CLI', 'GitHub Copilot CLI', 'OpenCode CLI'];
+    const agentCliNames = [
+      'Claude CLI',
+      'gh CLI',
+      'GitHub Copilot CLI',
+      'OpenCode CLI',
+      'Codex CLI',
+      // Issue #2301
+      'Gemini CLI',
+      'Antigravity CLI',
+      'Command Code CLI',
+    ];
     for (const name of agentCliNames) {
       expect(DEPENDENCIES.find(d => d.name === name)?.required).toBe(false);
     }
+  });
+
+  // Issue #2301: `init` named four of the eight agent CLIs CommandMate drives.
+  // A reader who had just picked Command Code or Antigravity from the agent list
+  // got no version, no "Not found", and no hint that the check even existed.
+  it('should include Command Code CLI as optional, probing `commandcode`', () => {
+    const commandCode = DEPENDENCIES.find(d => d.name === 'Command Code CLI');
+    expect(commandCode).toBeDefined();
+    // The Issue's named trap. The package is `command-code` and ships four bins;
+    // `src/lib/cli-tools/command-code.ts` launches `commandcode`, and a row that
+    // probed any of the other three would report "Not found" for a tool that is
+    // installed and working. Pinned against the tool implementation itself in
+    // tests/unit/cli-tools/install-hints-2301.test.ts.
+    expect(commandCode?.command).toBe('commandcode');
+    expect(commandCode?.versionArg).toBe('--version');
+    expect(commandCode?.required).toBe(false);
+  });
+
+  it('should include Antigravity CLI as optional, probing `agy`', () => {
+    const antigravity = DEPENDENCIES.find(d => d.name === 'Antigravity CLI');
+    expect(antigravity).toBeDefined();
+    expect(antigravity?.command).toBe('agy');
+    expect(antigravity?.versionArg).toBe('--version');
+    expect(antigravity?.required).toBe(false);
+  });
+
+  it('should include Gemini CLI as optional, probing `gemini`', () => {
+    // Not named by the Issue, which listed only the two tools it was opened for.
+    // Measured on this tree, gemini was missing for exactly the same reason and
+    // the Issue's own goal — "init can report a version for all eight tools" —
+    // is unreachable without it.
+    const gemini = DEPENDENCIES.find(d => d.name === 'Gemini CLI');
+    expect(gemini).toBeDefined();
+    expect(gemini?.command).toBe('gemini');
+    expect(gemini?.versionArg).toBe('--version');
+    expect(gemini?.required).toBe(false);
+  });
+
+  it('exposes command-code and antigravity through getOptionalDependencies()', () => {
+    // The Issue's acceptance criterion, read through the accessor `init` calls
+    // rather than off the array literal.
+    const commands = getOptionalDependencies().map(d => d.command);
+    expect(commands).toContain('commandcode');
+    expect(commands).toContain('agy');
+  });
+
+  it('asks no tool for a version it does not answer', () => {
+    // `vibe-local` is the eighth CLI_TOOL_ID and is deliberately not a row.
+    // Measured 2026-09-05: `vibe-local --version` ignores the flag and opens its
+    // interactive permission prompt, so a row for it would have `init` park a
+    // terminal on a dialog. It is a local shell script rather than an
+    // installable CLI, which is also why `lib/detection/version-probes.ts`
+    // excludes it.
+    expect(DEPENDENCIES.find(d => d.command === 'vibe-local')).toBeUndefined();
+  });
+
+  it('names every agent CLI exactly once', () => {
+    // A duplicated row would make `init` run the same probe twice and print the
+    // tool twice, which is how a copy-pasted entry survives review.
+    const commands = DEPENDENCIES.map(d => d.command);
+    expect(new Set(commands).size).toBe(commands.length);
   });
 });

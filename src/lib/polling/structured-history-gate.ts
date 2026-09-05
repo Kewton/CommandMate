@@ -1,15 +1,16 @@
 /**
  * Whether somebody better-informed is already recording this turn (Issue #2041,
- * extended for Claude Code in #2121, codex in #2197 and antigravity in #2198).
+ * extended for Claude Code in #2121, codex in #2197, antigravity in #2198 and
+ * Command Code in #2252).
  *
  * The poller's job has always been to be the only writer of conversation
- * history, because for most of the six tools the terminal is the only place the
- * reply exists. Four of them now have a second writer: opencode publishes its
- * replies over the SSE stream CommandMate subscribes to (#1763/#2041), and
- * claude, codex and antigravity each keep their own transcript file on disk.
- * Two writers for one turn would put the same answer in History twice — once as
- * the agent wrote it and once as its TUI drew it — so one of them has to stand
- * down, and it is the one reading the screen.
+ * history, because for most of the seven tools the terminal is the only place
+ * the reply exists. Five of them now have a second writer: opencode publishes
+ * its replies over the SSE stream CommandMate subscribes to (#1763/#2041), and
+ * claude, codex, antigravity and command-code each keep their own transcript
+ * file on disk. Two writers for one turn would put the same answer in History
+ * twice — once as the agent wrote it and once as its TUI drew it — so one of
+ * them has to stand down, and it is the one reading the screen.
  *
  * ## Why this is a module and not an `if`
  *
@@ -82,9 +83,15 @@ import {
   resolveAntigravityTranscriptPath,
   type AntigravityTranscriptCapture,
 } from '@/lib/hooks/sources/antigravity/history';
+import {
+  captureCommandCodeTranscriptTurn,
+  resolveCommandCodeTranscriptPath,
+  type CommandCodeTranscriptCapture,
+} from '@/lib/hooks/sources/command-code/history';
 import { CLAUDE_CLI_TOOL_ID } from '@/lib/hooks/sources/claude/tool-id';
 import { CODEX_CLI_TOOL_ID } from '@/lib/hooks/sources/codex/tool-id';
 import { ANTIGRAVITY_CLI_TOOL_ID } from '@/lib/hooks/sources/antigravity/tool-id';
+import { COMMAND_CODE_CLI_TOOL_ID } from '@/lib/hooks/sources/command-code/tool-id';
 import { getAgentEventSource } from '@/lib/hooks/sources/registry';
 import type { AgentInstanceRef } from '@/lib/hooks/sources/types';
 
@@ -177,10 +184,14 @@ function serializePerInstance<T>(key: string, work: () => Promise<T>): Promise<T
  * takes only the `$CODEX_HOME` seam. antigravity needs least of all: its
  * `conversationId` is the transcript's directory name, so its only field is the
  * home-directory seam its tests use to stay off the developer's own sessions.
+ * command-code needs neither a path nor a slug: its project directory name is
+ * `slugify(cwd)` and is not computed, so the reader finds the file by session id
+ * and takes only its own home-directory seam (Issue #2252).
  */
 export type StructuredHistoryCapture = ClaudeTranscriptCapture &
   CodexTranscriptCapture &
-  AntigravityTranscriptCapture;
+  AntigravityTranscriptCapture &
+  CommandCodeTranscriptCapture;
 
 /** What a pull-mode reader is asked to do. */
 interface PullTranscriptReader {
@@ -235,6 +246,12 @@ const PULL_TRANSCRIPT_READERS: Partial<Record<CLIToolType, PullTranscriptReader>
       captureAntigravityTranscriptTurn(target, capture),
     locate: (target: AgentInstanceRef, capture: StructuredHistoryCapture) =>
       resolveAntigravityTranscriptPath(target, capture),
+  },
+  [COMMAND_CODE_CLI_TOOL_ID]: {
+    capture: (target: AgentInstanceRef, capture: StructuredHistoryCapture) =>
+      captureCommandCodeTranscriptTurn(target, capture),
+    locate: (target: AgentInstanceRef, capture: StructuredHistoryCapture) =>
+      resolveCommandCodeTranscriptPath(target, capture),
   },
 };
 

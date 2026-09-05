@@ -21,18 +21,28 @@ export type RealtimeStatus = 'connecting' | 'connected' | 'disconnected' | 'erro
 export const CLIENT_VERSION_MESSAGE_TYPE = 'client_version' as const;
 
 /**
- * Server → client notice that the running server version differs from this
- * tab's bundle version (#1338/#1356). Drives the reload banner.
+ * Server → client notice that the bundle the server now serves was built from a
+ * different version than this tab's bundle (#1338/#1356/#2271). Drives the
+ * reload banner.
  */
 export const VERSION_MISMATCH_EVENT_TYPE = 'version_mismatch' as const;
 
 /**
- * Whether the running server version and this tab's bundle version have drifted
- * apart and the user should be nudged to reload (#1338/#1356).
+ * Whether two **build identities** have drifted apart and the user should be
+ * nudged to reload (#1338/#1356).
+ *
+ * Both arguments are the version a bundle was *built from*, never the version
+ * installed on disk. Issue #2271: feeding this the runtime `package.json`
+ * version on the server side made it fire permanently for everyone, because the
+ * release procedure bumps that file and deliberately does not rebuild the
+ * running server's `.next` — so "installed > served" is the steady state after
+ * every release rather than evidence of anything. `resolveBundleDrift()` in
+ * `@/lib/version-checker` is the one caller that resolves the server side, and
+ * it resolves it from the build manifest.
  *
  * Conservative on purpose (受入条件: 版が一致している間は誤検知しない): an empty or
  * `'0.0.0'` fallback on either side means "version unknown" and is never treated
- * as a mismatch, so a server that cannot resolve its own version stays silent.
+ * as a mismatch, so a server that cannot resolve its own build stays silent.
  */
 export function isVersionMismatch(serverVersion: string, clientVersion: string): boolean {
   if (!serverVersion || !clientVersion) return false;
@@ -312,10 +322,13 @@ export interface RepositoryDeletedEvent {
 }
 
 /**
- * Server-initiated notice that the running server version no longer matches the
- * version this tab's bundle was built from (#1338/#1356). Sent directly (not via
- * the room broadcast envelope) in response to the client's {@link
+ * Server-initiated notice that the bundle the server serves was built from a
+ * different version than this tab's bundle (#1338/#1356/#2271). Sent directly
+ * (not via the room broadcast envelope) in response to the client's {@link
  * CLIENT_VERSION_MESSAGE_TYPE} hello. The reload banner listens for this.
+ *
+ * `serverVersion` is the served **build's** version, not the installed
+ * package.json's — see {@link isVersionMismatch}.
  */
 export interface VersionMismatchEvent {
   type: typeof VERSION_MISMATCH_EVENT_TYPE;

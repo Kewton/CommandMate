@@ -8,8 +8,9 @@
 
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { FilePanelContent } from '@/components/worktree/FilePanelContent';
+import { Z_INDEX } from '@/config/z-index';
 import type { FileTab } from '@/hooks/useFileTabs';
 import type { FileContent } from '@/types/models';
 
@@ -308,6 +309,85 @@ describe('FilePanelContent', () => {
       render(<FilePanelContent tab={tab} {...defaultProps} />);
 
       expect(global.fetch).not.toHaveBeenCalled();
+    });
+  });
+
+  // [Issue #2294] The maximize overlay must leave `main`'s stacking context.
+  // AppShell's `main[role="main"]` carries `view-transition-name: cm-content`
+  // (Issue #1122), which opens a stacking context: an overlay rendered inline
+  // there is ordered as if it were `main` itself, so the desktop sidebar
+  // (Z_INDEX.SIDEBAR, a sibling of main) covers its left edge no matter how
+  // high Z_INDEX.MAXIMIZED_EDITOR is. jsdom has no paint order, so what is
+  // testable here is the portal target; the pixels are asserted in
+  // tests/e2e/file-maximize-portal-2294.spec.ts.
+  describe('maximize overlay portal (Issue #2294)', () => {
+    /**
+     * Render into a real `<main>` the way AppShell does. Without this host the
+     * assertions below are vacuous: RTL's default container is itself a plain
+     * div under document.body, so an un-portalled overlay would also report
+     * `closest('main') === null`.
+     */
+    function renderInMain(ui: React.ReactElement) {
+      const main = document.createElement('main');
+      main.setAttribute('role', 'main');
+      document.body.appendChild(main);
+      return { main, ...render(ui, { container: main }) };
+    }
+
+    function createTextTab(): FileTab {
+      return createTab({ content: createContent() });
+    }
+
+    it('should render content inline while not maximized', () => {
+      const { main } = renderInMain(<FilePanelContent tab={createTextTab()} {...defaultProps} />);
+
+      expect(screen.queryByTestId('maximized-file-overlay')).not.toBeInTheDocument();
+      expect(main.querySelector('[data-testid="file-content-code"]')).not.toBeNull();
+    });
+
+    it('should render the maximized overlay outside main, directly under document.body', () => {
+      const { main } = renderInMain(<FilePanelContent tab={createTextTab()} {...defaultProps} />);
+
+      fireEvent.click(screen.getByRole('button', { name: 'Maximize' }));
+
+      const overlay = screen.getByTestId('maximized-file-overlay');
+      expect(overlay.closest('main')).toBeNull();
+      expect(main.contains(overlay)).toBe(false);
+      expect(overlay.parentElement).toBe(document.body);
+      expect(overlay).toHaveStyle({ zIndex: String(Z_INDEX.MAXIMIZED_EDITOR) });
+    });
+
+    it('should keep the file content inside the portalled overlay', () => {
+      renderInMain(<FilePanelContent tab={createTextTab()} {...defaultProps} />);
+
+      fireEvent.click(screen.getByRole('button', { name: 'Maximize' }));
+
+      const overlay = screen.getByTestId('maximized-file-overlay');
+      expect(overlay.querySelector('[data-testid="file-content-code"]')).not.toBeNull();
+    });
+
+    it('should still exit maximize on ESC once portalled', () => {
+      renderInMain(<FilePanelContent tab={createTextTab()} {...defaultProps} />);
+
+      fireEvent.click(screen.getByRole('button', { name: 'Maximize' }));
+      expect(screen.getByTestId('maximized-file-overlay')).toBeInTheDocument();
+
+      fireEvent.keyDown(window, { key: 'Escape' });
+
+      expect(screen.queryByTestId('maximized-file-overlay')).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Maximize' })).toBeInTheDocument();
+    });
+
+    it('should return to inline rendering after Minimize', () => {
+      const { main } = renderInMain(<FilePanelContent tab={createTextTab()} {...defaultProps} />);
+
+      fireEvent.click(screen.getByRole('button', { name: 'Maximize' }));
+      // The overlay toolbar and the viewer's own toolbar both expose Minimize
+      // while maximized; either one toggles the same state.
+      fireEvent.click(screen.getAllByRole('button', { name: 'Minimize' })[0]);
+
+      expect(screen.queryByTestId('maximized-file-overlay')).not.toBeInTheDocument();
+      expect(main.querySelector('[data-testid="file-content-code"]')).not.toBeNull();
     });
   });
 

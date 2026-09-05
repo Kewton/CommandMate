@@ -19,6 +19,10 @@ import {
   buildDetectPromptOptions,
   stripAnsi,
   stripBoxDrawing,
+  COPILOT_TRANSCRIPT_DIVIDER_PATTERN,
+  COPILOT_TOOL_ROW_PATTERN,
+  COPILOT_SKIP_PATTERNS,
+  COPILOT_BOOT_BANNER_ANCHORS,
 } from '@/lib/detection/cli-patterns';
 
 describe('cli-patterns', () => {
@@ -700,6 +704,98 @@ More text`;
 
     it('should handle empty string', () => {
       expect(stripBoxDrawing('')).toBe('');
+    });
+  });
+});
+
+describe('[#2269] copilot 1.0.82 row rules', () => {
+  const skips = (line: string): boolean => COPILOT_SKIP_PATTERNS.some((p) => p.test(line));
+
+  describe('COPILOT_TRANSCRIPT_DIVIDER_PATTERN', () => {
+    it('matches the half-block dividers 1.0.82 boxes a transcript row with', () => {
+      expect(COPILOT_TRANSCRIPT_DIVIDER_PATTERN.test(` ${'\u2584'.repeat(199)}`)).toBe(true);
+      expect(COPILOT_TRANSCRIPT_DIVIDER_PATTERN.test(` ${'\u2580'.repeat(199)}`)).toBe(true);
+    });
+
+    it('matches the composer fence rows, corner glyph and all', () => {
+      // Defence in depth only -- findCopilotChromeStart cuts these structurally.
+      expect(COPILOT_TRANSCRIPT_DIVIDER_PATTERN.test(`\u257b${'\u2584'.repeat(199)}`)).toBe(true);
+      expect(COPILOT_TRANSCRIPT_DIVIDER_PATTERN.test(`\u2579${'\u2580'.repeat(199)}`)).toBe(true);
+    });
+
+    it('leaves a reply that merely uses a half block as a glyph alone', () => {
+      expect(COPILOT_TRANSCRIPT_DIVIDER_PATTERN.test('\u2580 progress: 40%')).toBe(false);
+      expect(COPILOT_TRANSCRIPT_DIVIDER_PATTERN.test('bar: \u2584\u2584\u2584 done')).toBe(false);
+      expect(COPILOT_TRANSCRIPT_DIVIDER_PATTERN.test('\u2584\u2584\u2584\u2584\u2584')).toBe(false);
+    });
+
+    it('is one of the skip patterns, so the wall never reaches a saved reply', () => {
+      expect(skips(` ${'\u2580'.repeat(199)}`)).toBe(true);
+    });
+  });
+
+  describe('COPILOT_TOOL_ROW_PATTERN', () => {
+    // Measured verbatim on copilot 1.0.82 -- see
+    // tests/unit/lib/detection/fixtures/copilot-live-2269/README.md.
+    it.each([
+      ' / Search "a.ts" 1 file found',
+      ' MD Read note.md L1:1 (1 line read)',
+      ' TS Read a.ts 1 line read',
+      ' PY Read c.py 1 line read',
+      ' {} Read b.json 1 line read',
+    ])('matches the badge-marked tool row %j', (row) => {
+      expect(COPILOT_TOOL_ROW_PATTERN.test(row)).toBe(true);
+      expect(skips(row)).toBe(true);
+    });
+
+    it('leaves the `\u25cf` marker to COPILOT_TOOL_ACTION_PATTERN', () => {
+      // `\u25cf` is also the marker on copilot's own prose, so the two are told
+      // apart by the verb list in response-cleaner, not here.
+      expect(COPILOT_TOOL_ROW_PATTERN.test(' \u25cf Read d.txt 1 line read')).toBe(false);
+      expect(COPILOT_TOOL_ROW_PATTERN.test(' \u25cf done')).toBe(false);
+    });
+
+    it('does not fire on a one-character marker or on an unknown verb', () => {
+      // A one-character badge would also match the English pronoun.
+      expect(COPILOT_TOOL_ROW_PATTERN.test('I Read the file before answering')).toBe(false);
+      expect(COPILOT_TOOL_ROW_PATTERN.test(' MD Considered note.md')).toBe(false);
+      expect(COPILOT_TOOL_ROW_PATTERN.test(' Read note.md')).toBe(false);
+    });
+  });
+
+  describe('the launch screen cleans to nothing', () => {
+    // Every row copilot 1.0.82 draws before the first prompt, measured on
+    // copilot-live-2269/boot-idle.txt. If one of them survives, History opens
+    // with the banner as the agent's first message.
+    it.each([
+      '  Current   Sessions   Issues   Pull requests   Gists ',
+      '  \u256d\u2500\u256e\u256d\u2500\u256e',
+      '  \u2570\u2500\u256f\u2570\u2500\u256f  Copilot v1.0.82 uses AI.',
+      '  \u2588 \u2598\u259d \u2588  Check for mistakes.',
+      '   \u2594\u2594\u2594\u2594 ',
+      ' \u25cf Tip: /allow-all',
+      '   \u2514 Enable all permissions (tools, paths, and URLs)',
+    ])('skips the launch-screen row %j', (row) => {
+      expect(skips(row)).toBe(true);
+    });
+
+    it('keeps a reply that merely mentions one of those words', () => {
+      expect(skips('The Gists tab is the fourth one.')).toBe(false);
+      expect(skips('One tip: run the tests first.')).toBe(false);
+    });
+  });
+
+  describe('COPILOT_BOOT_BANNER_ANCHORS', () => {
+    const anchored = (text: string): boolean =>
+      COPILOT_BOOT_BANNER_ANCHORS.some((anchor) => anchor.test(text));
+
+    it('anchors the 1.0.82 launch screen', () => {
+      expect(anchored('  \u2570\u2500\u256f\u2570\u2500\u256f  Copilot v1.0.82 uses AI.')).toBe(true);
+      expect(anchored(' \u25cf Tip: /review')).toBe(true);
+    });
+
+    it('anchors the greeting copilot answers an unusable prompt with', () => {
+      expect(anchored('Hi \u2014 what would you like to work on?')).toBe(true);
     });
   });
 });

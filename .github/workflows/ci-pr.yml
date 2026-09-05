@@ -54,12 +54,53 @@ name: CI
 #
 # tests/unit/guards/workflow-timeouts.test.ts fails if a job in any workflow
 # under .github/workflows/ is added without a `timeout-minutes`.
+#
+# ---------------------------------------------------------------------------
+# [Issue #2329] RUNNER-DEPENDENT CACHING
+# ---------------------------------------------------------------------------
+# The table above was measured on GitHub-hosted x64. After the move to
+# self-hosted ARM64 (#1863) `Setup Node.js` went from 0.08m to 0.77m in every one
+# of the seven jobs that install dependencies, while `Install dependencies`
+# barely moved (0.29m -> 0.22m). Two causes, same direction: the ARM64 image has
+# no Node 22 toolcache (`Attempting to download 22...` instead of `Found in cache
+# @ /opt/hostedtoolcache/...`), and the 287 MB npm cache entry restores at
+# ~8 MB/s there — about 36s — where the hosted images restore at 130-180 MB/s.
+#
+# Measured inside the runner image (`my-ephemeral-runner:latest`, 2026-09-05):
+# the Node 22 linux-arm64 tarball downloads in 2.2s (13.5 MB/s), and a cold
+# `npm ci --no-audit` — empty npm cache, lifecycle scripts, 1.1 GB of
+# node_modules — takes 27s, the same 27s it takes with the cache warm, because
+# unpack and link dominate. So the restore was buying nothing and costing more
+# than the install it was meant to accelerate.
+#
+# `cache:` is therefore conditioned on `runner.environment` at all seven sites:
+# `Setup Node.js` 0.77m -> under 0.2m per job, ~3.5 runner-minutes per run.
+# `setup-node` itself stays, because downloading Node is the cheap half.
+# `Cache Playwright browsers` in the E2E job is deliberately NOT changed; the
+# reason is at that step.
 
 on:
   push:
     branches: [main, develop]
   pull_request:
     branches: [main, develop]
+
+# [Issue #2329] A push to a PR supersedes the run of its previous head, so cancel
+# the older run rather than let it hold self-hosted runners to a verdict nobody
+# will read. Measured over W35-W36: 32 of 285 PR runs (~11%, ~160 self-hosted
+# jobs a week) were still executing when their branch was pushed again, and W36
+# created 109 of its 228 runs within 10 minutes of the previous one — the queue
+# jams in bursts, which is exactly when a superseded run costs the most.
+#
+# Pushes to develop / main are NEVER cancelled. The post-merge run is the only
+# place two independently-green PRs are tested together, and that is where this
+# repository's integration breakages actually surface; cancelling one because
+# the next merge landed would delete the only signal. `github.run_id` is unique
+# per run, so the fallback puts every push run in a group of its own and they
+# cannot cancel each other even if `cancel-in-progress` were ever flipped on.
+concurrency:
+  group: ci-pr-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   claudemd-size:
@@ -291,15 +332,36 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: 'npm'
+          # [Issue #2329] npm cache only where restoring it is faster than not
+          # restoring it. On the self-hosted runners the 287 MB entry comes back
+          # at ~8 MB/s (36s), longer than the whole cold `npm ci` below (27s
+          # measured in the runner image); GitHub-hosted runners restore at
+          # 130-180 MB/s, so fork PRs — which fall back to `ubuntu-latest` —
+          # keep it. An empty string makes setup-node skip the restore AND the
+          # post-job save (`if (cache && ...)` in its main.ts, and an unset
+          # `CachePackageManager` state in its post step). See the header.
+          cache: ${{ runner.environment == 'github-hosted' && 'npm' || '' }}
 
       - name: Install dependencies
         # Registry fetch: 0.32m median / 0.37m max across the 84 samples of this
         # step in the run sample above, and a cold-cache `npm ci` of this
         # lockfile (572 packages, empty --cache dir, lifecycle scripts included)
         # measured 7s locally. 5 is ~13x the observed CI worst case.
+        #
+        # [Issue #2313] `--no-audit`. By default `npm ci` ends with a POST to the
+        # registry's audit endpoint and blocks on it for npm's own
+        # `fetch-timeout` (300000ms = exactly 5 minutes) before giving up. On
+        # 2026-09-04 that endpoint accepted TCP and never answered (measured
+        # 3/3 from the host: HTTP 000 at 60s, while a plain metadata GET took
+        # 0.5s), so every install here sat at the audit call until npm's 5m
+        # gave up — the same instant this step's 5m cap killed it. 15 jobs died
+        # that way in one day, always at 312s, with the real work still
+        # `skipped`. Installing does not need the audit; the `Security Audit`
+        # job runs `npm audit` explicitly and is the one place that should
+        # depend on that endpoint. Measured with the flag: 10s, exit 0, during
+        # the same outage.
         timeout-minutes: 5
-        run: npm ci
+        run: npm ci --no-audit
 
       - name: Run ESLint
         run: npm run lint
@@ -326,15 +388,36 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: 'npm'
+          # [Issue #2329] npm cache only where restoring it is faster than not
+          # restoring it. On the self-hosted runners the 287 MB entry comes back
+          # at ~8 MB/s (36s), longer than the whole cold `npm ci` below (27s
+          # measured in the runner image); GitHub-hosted runners restore at
+          # 130-180 MB/s, so fork PRs — which fall back to `ubuntu-latest` —
+          # keep it. An empty string makes setup-node skip the restore AND the
+          # post-job save (`if (cache && ...)` in its main.ts, and an unset
+          # `CachePackageManager` state in its post step). See the header.
+          cache: ${{ runner.environment == 'github-hosted' && 'npm' || '' }}
 
       - name: Install dependencies
         # Registry fetch: 0.32m median / 0.37m max across the 84 samples of this
         # step in the run sample above, and a cold-cache `npm ci` of this
         # lockfile (572 packages, empty --cache dir, lifecycle scripts included)
         # measured 7s locally. 5 is ~13x the observed CI worst case.
+        #
+        # [Issue #2313] `--no-audit`. By default `npm ci` ends with a POST to the
+        # registry's audit endpoint and blocks on it for npm's own
+        # `fetch-timeout` (300000ms = exactly 5 minutes) before giving up. On
+        # 2026-09-04 that endpoint accepted TCP and never answered (measured
+        # 3/3 from the host: HTTP 000 at 60s, while a plain metadata GET took
+        # 0.5s), so every install here sat at the audit call until npm's 5m
+        # gave up — the same instant this step's 5m cap killed it. 15 jobs died
+        # that way in one day, always at 312s, with the real work still
+        # `skipped`. Installing does not need the audit; the `Security Audit`
+        # job runs `npm audit` explicitly and is the one place that should
+        # depend on that endpoint. Measured with the flag: 10s, exit 0, during
+        # the same outage.
         timeout-minutes: 5
-        run: npm ci
+        run: npm ci --no-audit
 
       - name: Run TypeScript type check
         run: npx tsc --noEmit
@@ -362,15 +445,36 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: 'npm'
+          # [Issue #2329] npm cache only where restoring it is faster than not
+          # restoring it. On the self-hosted runners the 287 MB entry comes back
+          # at ~8 MB/s (36s), longer than the whole cold `npm ci` below (27s
+          # measured in the runner image); GitHub-hosted runners restore at
+          # 130-180 MB/s, so fork PRs — which fall back to `ubuntu-latest` —
+          # keep it. An empty string makes setup-node skip the restore AND the
+          # post-job save (`if (cache && ...)` in its main.ts, and an unset
+          # `CachePackageManager` state in its post step). See the header.
+          cache: ${{ runner.environment == 'github-hosted' && 'npm' || '' }}
 
       - name: Install dependencies
         # Registry fetch: 0.32m median / 0.37m max across the 84 samples of this
         # step in the run sample above, and a cold-cache `npm ci` of this
         # lockfile (572 packages, empty --cache dir, lifecycle scripts included)
         # measured 7s locally. 5 is ~13x the observed CI worst case.
+        #
+        # [Issue #2313] `--no-audit`. By default `npm ci` ends with a POST to the
+        # registry's audit endpoint and blocks on it for npm's own
+        # `fetch-timeout` (300000ms = exactly 5 minutes) before giving up. On
+        # 2026-09-04 that endpoint accepted TCP and never answered (measured
+        # 3/3 from the host: HTTP 000 at 60s, while a plain metadata GET took
+        # 0.5s), so every install here sat at the audit call until npm's 5m
+        # gave up — the same instant this step's 5m cap killed it. 15 jobs died
+        # that way in one day, always at 312s, with the real work still
+        # `skipped`. Installing does not need the audit; the `Security Audit`
+        # job runs `npm audit` explicitly and is the one place that should
+        # depend on that endpoint. Measured with the flag: 10s, exit 0, during
+        # the same outage.
         timeout-minutes: 5
-        run: npm ci
+        run: npm ci --no-audit
 
       - name: Run unit tests
         run: npm run test:unit
@@ -398,15 +502,36 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: 'npm'
+          # [Issue #2329] npm cache only where restoring it is faster than not
+          # restoring it. On the self-hosted runners the 287 MB entry comes back
+          # at ~8 MB/s (36s), longer than the whole cold `npm ci` below (27s
+          # measured in the runner image); GitHub-hosted runners restore at
+          # 130-180 MB/s, so fork PRs — which fall back to `ubuntu-latest` —
+          # keep it. An empty string makes setup-node skip the restore AND the
+          # post-job save (`if (cache && ...)` in its main.ts, and an unset
+          # `CachePackageManager` state in its post step). See the header.
+          cache: ${{ runner.environment == 'github-hosted' && 'npm' || '' }}
 
       - name: Install dependencies
         # Registry fetch: 0.32m median / 0.37m max across the 84 samples of this
         # step in the run sample above, and a cold-cache `npm ci` of this
         # lockfile (572 packages, empty --cache dir, lifecycle scripts included)
         # measured 7s locally. 5 is ~13x the observed CI worst case.
+        #
+        # [Issue #2313] `--no-audit`. By default `npm ci` ends with a POST to the
+        # registry's audit endpoint and blocks on it for npm's own
+        # `fetch-timeout` (300000ms = exactly 5 minutes) before giving up. On
+        # 2026-09-04 that endpoint accepted TCP and never answered (measured
+        # 3/3 from the host: HTTP 000 at 60s, while a plain metadata GET took
+        # 0.5s), so every install here sat at the audit call until npm's 5m
+        # gave up — the same instant this step's 5m cap killed it. 15 jobs died
+        # that way in one day, always at 312s, with the real work still
+        # `skipped`. Installing does not need the audit; the `Security Audit`
+        # job runs `npm audit` explicitly and is the one place that should
+        # depend on that endpoint. Measured with the flag: 10s, exit 0, during
+        # the same outage.
         timeout-minutes: 5
-        run: npm ci
+        run: npm ci --no-audit
 
       # Issue #1102: the integration suite was drifting because it never ran in
       # CI. It is self-contained (in-memory SQLite + mocked fetch/tmux, no external
@@ -442,15 +567,36 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: 'npm'
+          # [Issue #2329] npm cache only where restoring it is faster than not
+          # restoring it. On the self-hosted runners the 287 MB entry comes back
+          # at ~8 MB/s (36s), longer than the whole cold `npm ci` below (27s
+          # measured in the runner image); GitHub-hosted runners restore at
+          # 130-180 MB/s, so fork PRs — which fall back to `ubuntu-latest` —
+          # keep it. An empty string makes setup-node skip the restore AND the
+          # post-job save (`if (cache && ...)` in its main.ts, and an unset
+          # `CachePackageManager` state in its post step). See the header.
+          cache: ${{ runner.environment == 'github-hosted' && 'npm' || '' }}
 
       - name: Install dependencies
         # Registry fetch: 0.32m median / 0.37m max across the 84 samples of this
         # step in the run sample above, and a cold-cache `npm ci` of this
         # lockfile (572 packages, empty --cache dir, lifecycle scripts included)
         # measured 7s locally. 5 is ~13x the observed CI worst case.
+        #
+        # [Issue #2313] `--no-audit`. By default `npm ci` ends with a POST to the
+        # registry's audit endpoint and blocks on it for npm's own
+        # `fetch-timeout` (300000ms = exactly 5 minutes) before giving up. On
+        # 2026-09-04 that endpoint accepted TCP and never answered (measured
+        # 3/3 from the host: HTTP 000 at 60s, while a plain metadata GET took
+        # 0.5s), so every install here sat at the audit call until npm's 5m
+        # gave up — the same instant this step's 5m cap killed it. 15 jobs died
+        # that way in one day, always at 312s, with the real work still
+        # `skipped`. Installing does not need the audit; the `Security Audit`
+        # job runs `npm audit` explicitly and is the one place that should
+        # depend on that endpoint. Measured with the flag: 10s, exit 0, during
+        # the same outage.
         timeout-minutes: 5
-        run: npm ci
+        run: npm ci --no-audit
 
       # Issue #1180: the E2E suite drifted for months because it never ran in CI
       # — same failure mode as the integration suite in #1102. Only chromium is
@@ -515,6 +661,15 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Playwright (resolved): $VERSION"
 
+      # [Issue #2329] Left ON, self-hosted included, even though this restore
+      # measures 0.73m there — the same GitHub cache service that made the npm
+      # cache a net loss on those runners. The npm case was decided by measuring
+      # the ALTERNATIVE (a cold `npm ci` inside the runner image), and the
+      # equivalent number here — `npx playwright install chromium` from
+      # cdn.playwright.dev on an ARM64 runner — has not been taken. Every browser
+      # timing in the block above is GitHub-hosted x64, so it does not answer the
+      # question. Take that measurement before putting this step behind the same
+      # `runner.environment` condition.
       - name: Cache Playwright browsers
         id: playwright-cache
         uses: actions/cache@v4
@@ -614,15 +769,36 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: 'npm'
+          # [Issue #2329] npm cache only where restoring it is faster than not
+          # restoring it. On the self-hosted runners the 287 MB entry comes back
+          # at ~8 MB/s (36s), longer than the whole cold `npm ci` below (27s
+          # measured in the runner image); GitHub-hosted runners restore at
+          # 130-180 MB/s, so fork PRs — which fall back to `ubuntu-latest` —
+          # keep it. An empty string makes setup-node skip the restore AND the
+          # post-job save (`if (cache && ...)` in its main.ts, and an unset
+          # `CachePackageManager` state in its post step). See the header.
+          cache: ${{ runner.environment == 'github-hosted' && 'npm' || '' }}
 
       - name: Install dependencies
         # Registry fetch: 0.32m median / 0.37m max across the 84 samples of this
         # step in the run sample above, and a cold-cache `npm ci` of this
         # lockfile (572 packages, empty --cache dir, lifecycle scripts included)
         # measured 7s locally. 5 is ~13x the observed CI worst case.
+        #
+        # [Issue #2313] `--no-audit`. By default `npm ci` ends with a POST to the
+        # registry's audit endpoint and blocks on it for npm's own
+        # `fetch-timeout` (300000ms = exactly 5 minutes) before giving up. On
+        # 2026-09-04 that endpoint accepted TCP and never answered (measured
+        # 3/3 from the host: HTTP 000 at 60s, while a plain metadata GET took
+        # 0.5s), so every install here sat at the audit call until npm's 5m
+        # gave up — the same instant this step's 5m cap killed it. 15 jobs died
+        # that way in one day, always at 312s, with the real work still
+        # `skipped`. Installing does not need the audit; the `Security Audit`
+        # job runs `npm audit` explicitly and is the one place that should
+        # depend on that endpoint. Measured with the flag: 10s, exit 0, during
+        # the same outage.
         timeout-minutes: 5
-        run: npm ci
+        run: npm ci --no-audit
 
       - name: Build Next.js
         run: npm run build
@@ -655,17 +831,61 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: 'npm'
+          # [Issue #2329] npm cache only where restoring it is faster than not
+          # restoring it. On the self-hosted runners the 287 MB entry comes back
+          # at ~8 MB/s (36s), longer than the whole cold `npm ci` below (27s
+          # measured in the runner image); GitHub-hosted runners restore at
+          # 130-180 MB/s, so fork PRs — which fall back to `ubuntu-latest` —
+          # keep it. An empty string makes setup-node skip the restore AND the
+          # post-job save (`if (cache && ...)` in its main.ts, and an unset
+          # `CachePackageManager` state in its post step). See the header.
+          cache: ${{ runner.environment == 'github-hosted' && 'npm' || '' }}
 
       - name: Install dependencies
         # Registry fetch: 0.32m median / 0.37m max across the 84 samples of this
         # step in the run sample above, and a cold-cache `npm ci` of this
         # lockfile (572 packages, empty --cache dir, lifecycle scripts included)
         # measured 7s locally. 5 is ~13x the observed CI worst case.
+        #
+        # [Issue #2313] `--no-audit`. By default `npm ci` ends with a POST to the
+        # registry's audit endpoint and blocks on it for npm's own
+        # `fetch-timeout` (300000ms = exactly 5 minutes) before giving up. On
+        # 2026-09-04 that endpoint accepted TCP and never answered (measured
+        # 3/3 from the host: HTTP 000 at 60s, while a plain metadata GET took
+        # 0.5s), so every install here sat at the audit call until npm's 5m
+        # gave up — the same instant this step's 5m cap killed it. 15 jobs died
+        # that way in one day, always at 312s, with the real work still
+        # `skipped`. Installing does not need the audit; the `Security Audit`
+        # job runs `npm audit` explicitly and is the one place that should
+        # depend on that endpoint. Measured with the flag: 10s, exit 0, during
+        # the same outage.
         timeout-minutes: 5
-        run: npm ci
+        run: npm ci --no-audit
 
       - name: Run security audit
         # `npm audit` posts the tree to the registry; measured 0.03m max (n=12).
+        #
+        # [Issue #2313] `npm audit` exits 1 both for a critical finding and for
+        # "the registry did not answer", and on 2026-09-04 the audit endpoint
+        # did exactly that for most of a day while status.npmjs.org reported
+        # every component operational. A bare `npm audit` here turned that
+        # outage into a red Security Audit on every PR, indistinguishable on
+        # the PR page from a real CVE. So the verdict is read from the JSON
+        # shape instead (scripts/check-npm-audit.mjs): a report with anything
+        # at or above the gate fails; npm's error envelope — no report at all —
+        # is a `::warning` and exit 0 that says in so many words the tree was
+        # NOT audited on this run. That is narrower than `continue-on-error`
+        # on the job, which would also wave through a real finding.
+        #
+        # `--fetch-timeout` / `--fetch-retries`: npm's default fetch-timeout is
+        # 300000ms — the same 5 minutes as this step's cap — so a hanging
+        # endpoint used to be killed by the runner before npm could emit the
+        # envelope the script needs. 60s x 2 attempts stays well inside 5m;
+        # measured 60s end-to-end against the live outage.
         timeout-minutes: 5
-        run: npm audit --audit-level=critical
+        run: |
+          set +e
+          npm audit --audit-level=critical --json --fetch-timeout=60000 --fetch-retries=1 > "$RUNNER_TEMP/npm-audit.json"
+          rc=$?
+          set -e
+          node scripts/check-npm-audit.mjs "$RUNNER_TEMP/npm-audit.json" "$rc" --level=critical

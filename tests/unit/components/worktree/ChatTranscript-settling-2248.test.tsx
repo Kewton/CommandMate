@@ -39,6 +39,7 @@ import {
   CHAT_BUBBLE_ASSISTANT_CLASS,
   CHAT_BUBBLE_MARKDOWN_BODY_CLASS,
   CHAT_BUBBLE_ROW_CLASS,
+  CHAT_BUBBLE_TESTID,
 } from '@/components/worktree/ChatMessageBubble';
 
 const WORKTREE_ID = 'wt-2248';
@@ -88,7 +89,10 @@ function liveRow(): HTMLElement {
 
 /** The bubble box inside the live-turn row — the same probe `#2233` uses. */
 function bubbleIn(row: HTMLElement): HTMLElement {
-  const bubble = row.querySelector<HTMLElement>('[class*="rounded-2xl"]');
+  // [#2284] Found by testid, not by `[class*="rounded-2xl"]`: the assistant's
+  // half is no longer a rounded box, and what this probe wants is the element
+  // wearing the role's presentation whatever that presentation currently is.
+  const bubble = row.querySelector<HTMLElement>(`[data-testid="${CHAT_BUBBLE_TESTID}"]`);
   expect(bubble, 'row has a bubble').not.toBeNull();
   return bubble!;
 }

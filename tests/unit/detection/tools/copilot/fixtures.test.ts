@@ -106,9 +106,15 @@ describe('[#1927] copilot detection fixtures', () => {
   });
 
   it('records the build it was measured against', () => {
+    // Issue #2269 re-captured copilot at 1.0.82 and changed rules for it — the
+    // composer's fence, the composer glyph, the transcript's dividers and the
+    // tool rows' markers all moved. The frames are
+    // `tests/unit/lib/detection/fixtures/copilot-live-2269/`; the 1.0.80 frames
+    // this suite sweeps stay where they are, and the assertions above are the
+    // proof that the rules still answer for both builds.
     expect(copilotStatusDetector.verifiedAgainst).toEqual({
-      version: '1.0.80',
-      capturedAt: '2026-08-21',
+      version: '1.0.82',
+      capturedAt: '2026-09-04',
       paneGeometry: '200x1000',
     });
   });

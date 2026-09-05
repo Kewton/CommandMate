@@ -3,7 +3,7 @@
  * Issue #294: Executes CLI tool commands for scheduled executions
  * Issue #379: Added OpenCode support (opencode run)
  *
- * Supported tools: claude, codex, gemini, vibe-local, opencode, copilot, antigravity
+ * Supported tools: claude, codex, gemini, vibe-local, opencode, copilot, antigravity, command-code
  *
  * Security:
  * - Uses execFile (not exec) to prevent shell injection
@@ -17,7 +17,12 @@ import { execFile } from 'child_process';
 import { sanitizeEnvForChildProcess } from '@/lib/security/env-sanitizer';
 import { stripAnsi } from '@/lib/detection/cli-patterns';
 import { CLI_TOOL_IDS } from '@/lib/cli-tools/types';
-import { COPILOT_PERMISSIONS, type CopilotPermission } from '@/config/schedule-config';
+import {
+  COPILOT_PERMISSIONS,
+  COMMAND_CODE_PERMISSIONS,
+  type CopilotPermission,
+  type CommandCodePermission,
+} from '@/config/schedule-config';
 import type { OpencodeRunOptions } from '@/types/cmate';
 
 // =============================================================================
@@ -62,6 +67,16 @@ export function getCommandForTool(cliToolId: string): string {
     // Issue #990 (Phase C): Antigravity's executable is `agy`, not the tool id.
     case 'antigravity':
       return 'agy';
+    // Issue #2253: Command Code ships four bins (`cmd` / `cmdc` / `command-code`
+    // / `commandcode`) and Epic #2249 決定 1 picked the unambiguous spelling, so
+    // the tool id is not the executable here either. Written as a literal to
+    // match the two cases above rather than importing
+    // `COMMAND_CODE_COMMAND` from `@/lib/cli-tools/command-code`, which would
+    // pull the tmux transport into the scheduler's dependency graph; the unit
+    // test imports both and asserts they are the same string, so the copy
+    // cannot drift.
+    case 'command-code':
+      return 'commandcode';
     default:
       return cliToolId;
   }
@@ -127,6 +142,7 @@ export function truncateOutput(output: string): string {
  * - vibe-local: [-p <message> -y] or [--model <model> -p <message> -y]
  * - opencode: run --format json [-m <model>] [--agent <a>] [--variant <v>] [-c] [--title <t>] <message>
  * - antigravity: -p <message> --dangerously-skip-permissions
+ * - command-code: -p <message> --output-format json [--yolo | --permission-mode <permission>]
  * - others: -p <message> (fallback)
  *
  * @param message - Prompt message
@@ -185,6 +201,43 @@ export function buildCliArgs(message: string, cliToolId: string, permission?: st
       if (options?.continueSession) args.push('-c');
       if (options?.title) args.push('--title', options.title);
       args.push(message);
+      return args;
+    }
+    case 'command-code': {
+      // Issue #2253 (Epic #2249 Phase D): `commandcode -p <message>` runs one
+      // prompt non-interactively. `--output-format json` is unconditional for
+      // the same reason opencode's `--format json` is: the text format writes a
+      // rendered answer with no frame around it, while the json format ends in a
+      // single `{"type":"result",…}` line carrying `finalText` and `subtype`,
+      // which is what {@link extractCommandCodeResult} reads.
+      //
+      // ## `--yolo` and `--permission-mode` are different axes, and exclusive here
+      //
+      // `commandcode --help` lists them separately, and the shipped option
+      // declaration in `command-code@1.40.1/dist/cli.mjs` is
+      // `.addOption(new Be('--permission-mode <mode>', …).choices(['default',
+      // 'standard','plan','auto-accept','dont-ask']))` with `--yolo` as a plain
+      // boolean alias of `--dangerously-skip-permissions`. So `--yolo` is not a
+      // *value* of the mode flag, and sending both would ask the CLI to run
+      // under a mode and to bypass modes at once. A scheduled run has nobody to
+      // answer a permission dialog, so the default is `--yolo` and an explicit
+      // permission replaces it rather than joining it.
+      //
+      // The whitelist check follows copilot's shape (SEC4-001) rather than
+      // codex's `??`: a permission the dropdown could not have produced falls
+      // back to the unattended default instead of reaching the CLI, where an
+      // unknown `--permission-mode` value is a `.choices()` rejection and the
+      // run would fail before the prompt was ever sent.
+      //
+      // `--yolo` does not override `.commandcode/settings.json`
+      // `permissions.deny`; a denied tool call still ends the run with exit 4,
+      // which {@link describeCommandCodeExit} names in the failure reason.
+      const args = ['-p', message, '--output-format', 'json'];
+      if (COMMAND_CODE_PERMISSIONS.includes(permission as CommandCodePermission)) {
+        args.push('--permission-mode', permission as string);
+      } else {
+        args.push('--yolo');
+      }
       return args;
     }
     case 'antigravity':
@@ -328,6 +381,156 @@ function renderOpencodeErrorFrame(record: Record<string, unknown>): string {
   return message ? `opencode error: ${name}: ${message}` : `opencode error: ${name}`;
 }
 
+// =============================================================================
+// command-code `--output-format json` extraction (Issue #2253)
+// =============================================================================
+
+/**
+ * `PRINT_EXIT_CODE`, read off `command-code@1.40.1/dist/cli.mjs`.
+ *
+ * The bundle declares it as one object —
+ * `{SUCCESS:0, ERROR:1, AUTH_ERROR:3, PERMISSION_DENIED:4, RATE_LIMITED:5,
+ * CONNECTION_ERROR:6, SERVER_ERROR:7, MAX_TURNS_REACHED:8, NO_RESPONSE:9,
+ * INSUFFICIENT_CREDITS:10, INTERRUPTED:130}` — and `classifyPrintModeError`
+ * next to it is what picks between them. Issue #2253 lists six of the eleven;
+ * all eleven are recorded here because the point of the map is to turn a bare
+ * number in an execution log into a sentence, and a code that falls through
+ * produces exactly the log line the map exists to replace.
+ *
+ * 0 is deliberately absent: success is not a failure reason, and a lookup that
+ * answers for it would let a caller render "Reason: success" on a run that
+ * worked.
+ */
+export const COMMAND_CODE_EXIT_REASONS: Readonly<Record<number, string>> = {
+  1: 'error',
+  3: 'authentication failed',
+  4: 'permission denied',
+  5: 'rate limited',
+  6: 'connection error',
+  7: 'server error',
+  8: 'max turns reached',
+  9: 'no response',
+  10: 'insufficient credits',
+  130: 'interrupted',
+};
+
+/** The `{"type":"result",…}` line that closes a `--output-format json` run. */
+export interface CommandCodeResult {
+  /**
+   * `success` | `error` | `max_turns` on the measured CLI, but typed as a
+   * string: this value is read off a third-party process, and narrowing it to a
+   * union here would mean either dropping an unrecognised subtype (silently
+   * turning a failure into "no result line") or asserting a shape the process
+   * never promised.
+   */
+  subtype: string;
+  /** The assistant's answer. Empty on `max_turns` and on `error`. */
+  finalText: string;
+  /** The `error` field the CLI adds on `subtype: "error"` (its stderr line). */
+  error?: string;
+}
+
+/**
+ * The result line of `commandcode -p … --output-format json`, or null.
+ *
+ * ## The measured stream
+ *
+ * One JSON object per line. Every line but the last is `{"type":"event",…}`;
+ * the last is the result. Measured on command-code 1.40.1 (fixtures under
+ * `tests/fixtures/command-code/headless/`):
+ *
+ * ```text
+ * {"type":"event","event":{"type":"run_start","sessionId":"…"}}
+ * {"type":"event","event":{"type":"text_delta","delta":"OK"}}
+ * {"type":"event","event":{"type":"run_end","result":{"finalText":"OK",…}}}
+ * {"type":"result","subtype":"success","sessionId":"…","stopReason":"end_turn",
+ *  "usage":{…},"durationMs":1957,"finalText":"OK"}
+ * ```
+ *
+ * ## Why the last result line rather than `run_end`
+ *
+ * `run_end` carries a `result.finalText` too, and on a successful run they
+ * agree. But `buildPrintResultLine` in the bundle emits the result line on the
+ * failure path as well, where no `run_end` was ever produced: an empty query
+ * answers with exactly one line,
+ * `{"type":"result","subtype":"error",…,"finalText":"","error":"Error: No query
+ * provided. …"}`, and nothing else. Reading `run_end` would see nothing there.
+ *
+ * ## Why it never throws and never invents a result
+ *
+ * Null means "this stdout carried no result line", which the caller renders as
+ * raw output rather than as an empty answer — the state a run that dies before
+ * `runPrintMode` is actually in (`--model <unknown>` exits 1 with **empty
+ * stdout** and the message only on stderr). Unparseable lines are skipped for
+ * the reason the opencode reader skips them: a stray `console.log` from a mod
+ * lands on the same stdout as the stream.
+ *
+ * @param stdout - Raw stdout from `commandcode -p … --output-format json`
+ * @returns The decoded result line, or null when stdout carried none
+ */
+export function extractCommandCodeResult(stdout: string): CommandCodeResult | null {
+  let found: CommandCodeResult | null = null;
+
+  for (const line of stdout.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith('{')) continue;
+
+    let frame: unknown;
+    try {
+      frame = JSON.parse(trimmed);
+    } catch {
+      continue;
+    }
+    if (typeof frame !== 'object' || frame === null) continue;
+
+    const record = frame as Record<string, unknown>;
+    if (record.type !== 'result') continue;
+    if (typeof record.subtype !== 'string') continue;
+
+    found = {
+      subtype: record.subtype,
+      finalText: typeof record.finalText === 'string' ? record.finalText : '',
+      ...(typeof record.error === 'string' ? { error: record.error } : {}),
+    };
+  }
+
+  return found;
+}
+
+/**
+ * One line naming why a Command Code run failed, or null when it did not.
+ *
+ * Both halves are load-bearing, because the CLI can disagree with itself. A run
+ * whose answer is blank exits `NO_RESPONSE` (9) while `buildPrintResultLine`
+ * still stamps `subtype: "success"` — the subtype is derived from `stopReason`
+ * and the exit code from `classifyPrintOutcome`, and only the pair says what
+ * happened. So a non-zero exit is a failure whatever the subtype says, and a
+ * subtype other than `success` is a failure whatever the exit code says.
+ *
+ * @param exitCode - Process exit code (null when killed by a signal)
+ * @param result - Decoded result line, when stdout carried one
+ * @returns A `Reason: …` sentence, or null when the run succeeded
+ */
+export function describeCommandCodeFailure(
+  exitCode: number | null,
+  result: CommandCodeResult | null
+): string | null {
+  const failedByCode = exitCode !== null && exitCode !== 0;
+  const failedBySubtype = result !== null && result.subtype !== 'success';
+  if (!failedByCode && !failedBySubtype) return null;
+
+  const parts: string[] = [];
+  if (exitCode !== null && exitCode !== 0) {
+    const reason = COMMAND_CODE_EXIT_REASONS[exitCode];
+    parts.push(reason ? `exit ${exitCode} (${reason})` : `exit ${exitCode}`);
+  }
+  if (result) {
+    parts.push(`subtype=${result.subtype}`);
+    if (result.error) parts.push(result.error);
+  }
+  return `Reason: command-code ${parts.join(' / ')}`;
+}
+
 /**
  * Execute a CLI command in a worktree directory.
  *
@@ -382,19 +585,41 @@ export async function executeClaudeCommand(
           // maxBuffer 超過は時間切れではなく「出力過多」なので timeout 扱いにしない。
           const isTimeout = error.killed || errCode === 'ETIMEDOUT';
 
+          // Issue #2253: command-code writes its whole NDJSON stream *and* a
+          // final result line before exiting non-zero — a max-turns run ends at
+          // exit 8 with a complete `{"type":"result","subtype":"max_turns",…}`
+          // line — so the answer and the CLI's own reason are on stdout even
+          // here. Decoding them turns a log that said "Error: Command failed"
+          // over a 4KB event dump into the reason plus the text.
+          const commandCodeResult = cliToolId === 'command-code'
+            ? extractCommandCodeResult(stdout || '')
+            : null;
+          const exitCodeNumber = typeof errCode === 'number' ? errCode : null;
+
           const errorSummary = [
             `Error: ${error.message}`,
             `Code: ${errCode ?? 'unknown'}`,
             `Signal: ${error.signal ?? 'none'}`,
             isMaxBuffer ? 'Reason: stdout exceeded execFile maxBuffer (output_limit)' : null,
+            cliToolId === 'command-code'
+              ? describeCommandCodeFailure(exitCodeNumber, commandCodeResult)
+              : null,
           ]
             .filter((line): line is string => line !== null)
             .join('\n');
 
+          // `?? stdout` on purpose, matching the success path: a run that died
+          // before it could write a result line (an unknown `--model` exits 1
+          // with empty stdout and the message on stderr) reports what it did
+          // write rather than an empty body.
+          const decodedStdout = commandCodeResult
+            ? commandCodeResult.finalText
+            : (stdout || '');
+
           const rawOutput = stripAnsi(
             [
               errorSummary,
-              stdout ? `\n--- stdout ---\n${stdout}` : '',
+              decodedStdout ? `\n--- stdout ---\n${decodedStdout}` : '',
               stderr ? `\n--- stderr ---\n${stderr}` : '',
             ].join('\n')
           );
@@ -402,7 +627,7 @@ export async function executeClaudeCommand(
 
           resolve({
             output,
-            exitCode: typeof errCode === 'number' ? errCode : null,
+            exitCode: exitCodeNumber,
             status: isTimeout ? 'timeout' : 'failed',
             error: error.message,
           });
@@ -413,6 +638,27 @@ export async function executeClaudeCommand(
         // stored output is the assistant's answer rather than the event log.
         // `?? stdout` on purpose: an unrecognised stream is reported verbatim,
         // never swallowed.
+        //
+        // Issue #2253: command-code is the same deal one flag over
+        // (`--output-format json`), except that its stream also carries the
+        // CLI's own verdict. `classifyPrintOutcome` in the bundle can exit 0
+        // only on `subtype: "success"`, so this branch is the success case in
+        // practice — but the subtype is read rather than assumed, because
+        // "the process exited 0" and "the agent answered" are two facts and
+        // this layer is the only one that can still see the second.
+        if (cliToolId === 'command-code') {
+          const result = extractCommandCodeResult(stdout || '');
+          const failure = describeCommandCodeFailure(0, result);
+          const body = result ? result.finalText : (stdout || '');
+          resolve({
+            output: truncateOutput(stripAnsi(failure ? `${failure}\n${body}` : body)),
+            exitCode: 0,
+            status: failure ? 'failed' : 'completed',
+            ...(failure ? { error: failure } : {}),
+          });
+          return;
+        }
+
         const decoded = cliToolId === 'opencode'
           ? extractOpencodeFinalText(stdout || '') ?? stdout ?? ''
           : stdout || '';

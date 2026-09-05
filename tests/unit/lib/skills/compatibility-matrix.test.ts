@@ -184,7 +184,11 @@ describe('the 2026-07-26 measurements are recorded as taken', () => {
   // has to stay expensive.
   it('leaves every unmeasured Agent unknown', () => {
     expect(unmeasuredAgents().slice().sort()).toEqual(
-      ['antigravity', 'copilot', 'gemini', 'vibe-local'].sort()
+      // Issue #2302 measured Command Code (1.49.0) and Copilot (1.0.83) and
+      // both left this list. gemini stays on it deliberately: its discovery
+      // axis was measured but its invocation axis could not be, so the row is
+      // still `unknown` rather than a half-landed claim.
+      ['antigravity', 'gemini', 'vibe-local'].sort()
     );
   });
 
@@ -250,6 +254,7 @@ describe('evidence staleness', () => {
   });
 
   it('has no age for an Agent that was never measured', () => {
+    expect(isAgentMeasured(gemini)).toBe(false);
     expect(evidenceAgeInDays(gemini, DAY_AFTER)).toBeNull();
   });
 

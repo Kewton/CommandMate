@@ -71,6 +71,7 @@ import {
   parseCodexRollout,
   renderCodexTurn,
   type CodexRenderedTurn,
+  type CodexRolloutRecord,
   type CodexTurnAccumulator,
 } from './transcript';
 
@@ -423,17 +424,33 @@ export async function captureCodexTranscriptTurn(
       });
     }
 
+    // Every prompt row first, then every reply (Issue #2273). The two passes are
+    // what let a reply be dated at its turn's END without overtaking the NEXT
+    // turn's prompt: a queued `/send` row is written while this turn is still
+    // running, so its instant is only knowable once that row has been recorded.
+    // With one turn pending — the ordinary case — this is the single call it
+    // always was.
+    const userRows: RecordedUserTurn[] = [];
+    for (let index = 0; index < pending.turns.length; index += 1) {
+      const previousStartedAt =
+        index === 0 ? pending.previousStartedAt : pending.turns[index - 1].startedAt;
+      userRows.push(await recordCodexUserTurns(target, pending.turns[index], previousStartedAt));
+    }
+
+    const lastRecordAt = lastCodexRecordAt(parsed.records);
     let captured = false;
     for (let index = 0; index < pending.turns.length; index += 1) {
       const turn = pending.turns[index];
-      const previousStartedAt =
-        index === 0 ? pending.previousStartedAt : pending.turns[index - 1].startedAt;
-      const lastUserRow = await recordCodexUserTurns(target, turn, previousStartedAt);
       captured = await writeCodexTurn(
         target,
         turn,
         renderCodexTurn(turn),
-        resolveAssistantTimestampMs(turn, lastUserRow),
+        resolveAssistantTimestampMs(
+          turn,
+          userRows[index],
+          lastRecordAt.get(turn.turnId) ?? 0,
+          nextTurnOpensAt(pending.turns, userRows, index)
+        ),
         path
       );
     }
@@ -605,22 +622,89 @@ async function recordCodexUserTurns(
 /**
  * When the assistant row for this turn is dated.
  *
- * The turn's own clock, from the first record bearing its `turn_id`, so a row
- * written a poll late still sorts where the conversation put it.
+ * **The turn's LAST record, not its first (Issue #2273).** #2197 dated the reply
+ * by the first record bearing the `turn_id` so that a row written a poll late
+ * still sorted where the conversation put it, and #2196 moved it one millisecond
+ * past the last prompt so that `groupMessagesIntoPairs` — which orders by
+ * timestamp and nothing else — could never return the answer above the question.
+ * Both properties survive: `earliest` is a floor this never goes under, and for
+ * codex it is the floor that matters most, because a turn can carry SEVERAL
+ * prompts (measured at more than one on 23 of 326 archived turns) and the reply
+ * has to sort past all of them.
  *
- * When there is a user row it sits on the same instant or later, and
- * `groupMessagesIntoPairs` orders by timestamp and nothing else — a tie there is
- * decided by whichever row the database returned first, and the losing
- * arrangement (assistant, then user) is exactly the `orphan` pair #2196 exists
- * to remove. So the reply is moved to the first millisecond after the last
- * prompt: the smallest change that makes the order a property of the data.
+ * What neither accounted for is the row that lands BETWEEN the prompt and the
+ * reply. A tool approval is written when the dialog appears, seconds into the
+ * turn, and the chat surface orders its rows by timestamp — so a reply dated at
+ * the turn's start draws ABOVE an approval that really happened before it. The
+ * turn's last record — for codex, the `task_complete` that closes it — is the
+ * moment the turn ended, so everything it produced on the way sorts before it.
+ *
+ * `nextTurnOpensAt` is the ceiling. The next turn's prompt row may be a `/send`
+ * row written while THIS turn was still running — a queued prompt — and a reply
+ * that overtook it would be paired with the wrong question.
+ *
+ * @param lastRecordAt - Epoch ms of the turn's last record, or 0 when unknown
+ * @param nextTurnOpensAt - Epoch ms of the next turn's user row, or null when
+ *   this is the newest turn in the window
  */
 function resolveAssistantTimestampMs(
   turn: CodexTurnAccumulator,
-  userRow: RecordedUserTurn
+  userRow: RecordedUserTurn,
+  lastRecordAt = 0,
+  nextTurnOpensAt: number | null = null
 ): number {
-  if (userRow.timestampMs === null) return turn.startedAt;
-  return Math.max(turn.startedAt, userRow.timestampMs + 1);
+  const earliest =
+    userRow.timestampMs === null
+      ? turn.startedAt
+      : Math.max(turn.startedAt, userRow.timestampMs + 1);
+  const latest = nextTurnOpensAt === null ? Number.POSITIVE_INFINITY : nextTurnOpensAt - 1;
+  return Math.max(earliest, Math.min(lastRecordAt, latest));
+}
+
+/**
+ * When each turn's last record was written (Issue #2273).
+ *
+ * Keyed by `turn_id` and walked over the same records {@link buildCodexTurns}
+ * walks, with the same `response_item` exclusion — that stream is codex's
+ * duplicate of the same events and counting it would be counting each record
+ * twice. It is a second pass rather than a field on the accumulator because
+ * `./transcript` is not this Issue's to change.
+ *
+ * Every record of the turn counts, `task_complete` included: that one IS the
+ * turn's end and is exactly the instant the reply should be dated by.
+ *
+ * @returns `turn_id` → epoch ms; absent for a turn with no timestamped record
+ */
+function lastCodexRecordAt(records: readonly CodexRolloutRecord[]): Map<string, number> {
+  const at = new Map<string, number>();
+
+  for (const record of records) {
+    if (record.type === 'response_item') continue;
+    const turnId = record.turnId;
+    if (!turnId || record.timestampMs === null) continue;
+    if (record.timestampMs > (at.get(turnId) ?? 0)) at.set(turnId, record.timestampMs);
+  }
+
+  return at;
+}
+
+/**
+ * The instant the next pending turn's prompt row carries, or null (Issue #2273).
+ *
+ * The user row's own timestamp when there is one, because that is what History
+ * sorts on and it can be EARLIER than the turn's start — an adopted `/send` row
+ * was written when CommandMate handed the text to the pane, which for a queued
+ * prompt is while the previous turn was still running. The turn's start is the
+ * fallback for a turn that produced no row at all.
+ */
+function nextTurnOpensAt(
+  turns: readonly CodexTurnAccumulator[],
+  userRows: readonly RecordedUserTurn[],
+  index: number
+): number | null {
+  const next = turns[index + 1];
+  if (!next) return null;
+  return userRows[index + 1]?.timestampMs ?? next.startedAt;
 }
 
 /**

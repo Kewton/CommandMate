@@ -14,6 +14,13 @@ import type { CLIToolType } from '@/lib/cli-tools/types';
  * triggers skills with `/NAME`, not codex's `$NAME`, so when the active session
  * is antigravity a codex-skill resolves to the slash form. Codex sessions keep
  * `$NAME` (non-regression); callers that omit `cliToolId` also keep `$NAME`.
+ *
+ * Command Code also reads `.agents/skills` and also invokes with `/NAME`
+ * (measured on 1.47.0, Issue #2322), but it is deliberately NOT added to the
+ * antigravity branch here: its rows come from `loadCommandCodeSkills`, which
+ * emits `source: 'skill'` and falls through to the `/NAME` return below.
+ * Widening the `codex-skill` scope instead would have handed a command-code
+ * session the wrong trigger for every `.codex/skills` entry as well.
  */
 export function getSlashCommandTrigger(
   command: SlashCommand,

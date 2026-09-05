@@ -73,6 +73,7 @@ CM_PORT=3000 node bin/commandmate.js send abc123 "msg"
 | [`commandmate verify`](#commandmate-verify) | 検証ゲート（.commandmate/verify.yaml）の実行と検証履歴の参照 |
 | [`commandmate task`](#commandmate-task) | 実行契約（.commandmate/tasks/*.yaml）の一覧・詳細 |
 | [`commandmate capture`](#commandmate-capture) | ターミナル出力の取得 |
+| [`commandmate attach`](#commandmate-attach) | エージェントの tmux セッションにこの端末を attach |
 | [`commandmate auto-yes`](#commandmate-auto-yes) | Auto-Yesの制御 |
 | [`commandmate instances`](#commandmate-instances) | エージェントインスタンス（roster）の一覧・追加・削除・alias変更 |
 | [`commandmate agents`](#commandmate-agents) | エージェント CLI の版表示と更新（pane の外で `codex update` を実行） |
@@ -96,6 +97,16 @@ commandmate ls --quiet                  # IDのみ（1行1ID、パイプ用）
 commandmate ls --branch feature/        # ブランチ名プレフィックスでフィルタ
 commandmate ls --id anvil-              # worktree IDプレフィックスでフィルタ
 ```
+
+> **`--json` には `tmuxSession` が付きます**（Issue #2317）。その worktree の**既定エージェントの
+> プライマリインスタンス**の tmux セッション名で、`commandmate attach <id>` が開くのと同じ
+> セッションです。CLI 側で `id` と `cliToolId` から導出しており、既定エージェントが無い行や
+> この CLI が知らないエージェントの行では `null` になります。
+> インスタンスごとの一覧は `commandmate instances <id>`（`TMUX_SESSION` 列）です。
+>
+> ```bash
+> commandmate ls --json | jq -r '.[] | "\(.id)\t\(.tmuxSession)"'
+> ```
 
 > **`--id` について**: worktree ID は **worktree ディレクトリ名**由来のスラッグ（例 `commandmate-issue-1644`）です（Issue #1621。同名ディレクトリが複数リポジトリにある場合のみ `-<パスのハッシュ8桁>` が付きます）。`--id` はこの ID の前方一致でフィルタします。`--branch` と `--id` は独立して適用され、同時指定すると両方が適用されます（AND）。同一ブランチ名（例 `develop`）が複数リポジトリに存在する場合、`--id anvil-` のように ID プレフィックスで特定リポジトリの worktree に絞り込めます。前方一致は case-sensitive で、一意性は保証しません（`--id anvil-develop` は `anvil-develop-2` にもマッチし得ます）。厳密に1件へ絞るには `--quiet` の出力を `grep -x` する等してください。
 
@@ -219,7 +230,7 @@ commandmate send <worktree-id> "<message>" --auto-yes --stop-pattern "FAILED"
 | オプション | 説明 | デフォルト |
 |-----------|------|-----------|
 | `--instance <id>` | **送り先の推奨指定方法**。インスタンスID（`<agent>` または `<agent>-<n>`、例: `codex` / `claude-2`）。未起動なら自動起動 | エージェントのプライマリインスタンス |
-| `--agent <id>` | roster に無いインスタンスをアドホック起動するときの補助（claude, codex, gemini, vibe-local, opencode, copilot, antigravity） | roster の値・worktree既定 |
+| `--agent <id>` | roster に無いインスタンスをアドホック起動するときの補助（claude, codex, gemini, vibe-local, opencode, copilot, antigravity, command-code） | roster の値・worktree既定 |
 | `--register` | `--instance` で指定したセッションをroster（エージェントインスタンス一覧）に登録 | - |
 | `--auto-yes` | 送信前にAuto-Yesを有効化 | - |
 | `--duration <d>` | Auto-Yesの有効期間（1h, 3h, 8h） | 1h |
@@ -1743,6 +1754,7 @@ commandmate capture <worktree-id> --pane --tail 40    # 末尾 40 行だけ
 commandmate capture <worktree-id> --pane --raw        # 圧縮せず生のペインを出す
 commandmate capture <worktree-id> --pane --json       # 圧縮前後の行数つき JSON
 commandmate capture <worktree-id> --pane --instance codex-2
+commandmate capture <worktree-id> --pane --follow     # 追従表示（Ctrl-C で終了、Issue #2317）
 ```
 
 - **`--tail N` は「圧縮後」の末尾 N 行**です。TUI セッションは 200×1000 のキャンバスに描かれ、
@@ -1753,6 +1765,26 @@ commandmate capture <worktree-id> --pane --instance codex-2
 - 取得する行数は常に 1000 行固定（`--lines` はありません）。検知系と同じ要求のままにして、
   人が読んでいるという理由でサーバの挙動が変わらないようにしています
 - **attach も tmux 3.2+ も不要**です。`prefix+g`（下記）が使えない環境の代替になります
+
+### `--pane --follow`: 生成中の応答を追う（Issue #2317）
+
+`--pane` はスナップショットです。生成中の応答を**追いたい**ときは `--follow` を付けます。
+1〜2 秒間隔で画面をクリアして再描画し、`Ctrl-C` で終了します。
+
+```bash
+commandmate capture <worktree-id> --pane --follow                  # 既定 2000ms 間隔
+commandmate capture <worktree-id> --pane --follow --interval 1000  # 間隔指定（250〜60000ms）
+commandmate capture <worktree-id> --pane --follow --tail 40        # 圧縮後の末尾 40 行だけ追う
+```
+
+- **tmux クライアントもキーバインドも要りません。** これが効くのは
+  `tmux attach -r`（read-only）で `prefix + g` が**効かない**ときです。
+  read-only クライアントには detach 以外のキーが配送されないため、popup は開けません（実測）
+- 端末でないところ（パイプ・リダイレクト）ではエラーになります。
+  その場合は `--pane --tail N` をループしてください
+- `--json` / `--raw` とは併用できません（どちらも「バイト列が欲しい」という意味で、
+  2 秒ごとに上書きされる画面とは両立しません）
+- **セッションのジオメトリは一切変わりません。** 読むために窓を触ることはありません
 
 ### `--prompts`: 解決済みプロンプトの監査証跡（Issue #1685）
 
@@ -1823,6 +1855,122 @@ JSON 出力（`prompts` は古い順）:
 
 ---
 
+## commandmate attach
+
+worktree のエージェントが動いている tmux セッションに、**この端末を attach** します（Issue #2317）。
+
+### 使用方法
+
+```bash
+commandmate attach <worktree-id>                      # 既定エージェントのセッションへ
+commandmate attach <worktree-id> --instance codex-2   # 特定インスタンスのセッションへ
+commandmate attach <worktree-id> --read-only          # 入力を一切送らずに覗く
+commandmate attach <worktree-id> --live               # 端末サイズへ再レイアウト（claude のみ）
+```
+
+### なぜ素の `tmux attach` ではなくこのコマンドなのか
+
+手で attach したときに壊れるものが 3 つあり、それぞれをこのコマンドが吸収します。
+
+| 手で attach したとき | このコマンド |
+|---|---|
+| セッション名 `mcbd-<tool>-<worktree>[-<suffix>]` を、命名規則とロスター（`instances`）から自分で組み立てる必要がある | サーバに解決させて名前を組み立てる。`--instance` の suffix 規則も同じ |
+| `tmux attach -t =mcbd-…:` は **zsh の equals expansion に食われて `not found`**（実測）。`'=mcbd-…:'` のクォートが要る | シェルを経由せず argv で渡すので、クォートの問題自体が起きない |
+| alt-screen のエージェント（claude / opencode / copilot）では**空白と入力欄しか見えない**。壊れているように見えるが、これは 1000 行キャンバスの仕様 | attach 直前に理由と「読む 3 つの方法」を stderr に出す |
+
+セッションが無いときは非 0 で終了し、`commandmate ls` / `commandmate instances <id>` を案内します。
+
+`$TMUX` が設定されている（tmux の中から呼んだ）場合は `switch-client` に切り替えます。
+現在のクライアントが**別の tmux サーバ**にいて切り替えられないときは、クォート済みの
+`tmux attach -t '=mcbd-…:'` を表示して非 0 で終了します。
+
+### セッション名を知る
+
+```bash
+commandmate ls --json | jq -r '.[] | "\(.id)\t\(.tmuxSession)"'   # worktree 既定エージェント
+commandmate instances <worktree-id>                                # 全インスタンス（TMUX_SESSION 列）
+```
+
+### `--live`: attach 中だけ端末サイズを借りる（claude 限定）
+
+`--live` を付けると、attach している間だけウィンドウを**この端末のサイズに追従**させます
+（`window-size latest`）。TUI が再レイアウトするので、**素の attach で transcript が読めます**。
+detach すると 200x1000・`manual` に戻ります。
+
+```bash
+commandmate attach <worktree-id> --live
+# 別端末から確認:
+tmux display-message -p -t '=mcbd-claude-<worktree-id>:' '#{window_width}x#{window_height}'
+tmux show-window-options -t '=mcbd-claude-<worktree-id>:' -v window-size
+```
+
+- **claude 限定です。** 他のエージェントに指定すると拒否されます。理由は
+  「応答本文の出どころ」と「検出規則を計測した幅」の 2 つ:
+  claude は転写 JSONL から History を書くので、委譲中の小さいフレームで本文を失いません。
+  copilot / gemini / vibe-local は応答本文がペインにしか無く、
+  codex / antigravity / command-code は検出規則を 200x1000 でしか計測しておらず、
+  opencode は 121 桁以上でサイドバーが transcript 行に混ざります（#2047）
+- 委譲中はセッションに `@cm_delegated=1` が立ちます。サーバはこの間、
+  **ペインから読んだ応答本文を保存しません**（History は転写から書かれます）。
+  `send` / `wait` / Auto-Yes は通常どおり動きます
+- 復帰は 3 経路あります: CLI が attach から戻ったとき／サーバのポーリングが
+  「委譲中なのに人間のクライアントが 0」を見つけたとき／手動
+  （`sh ~/.commandmate/bin/cm-live-restore.sh <session>`）。
+  **control-mode クライアント（CommandMate 自身の接続）は人間として数えません**ので、
+  それが残っていても人間の detach で復帰します
+- 委譲中はブラウザのターミナル面も端末サイズのフレームになります
+
+> **`client-detached` フックは使っていません。** tmux 3.5a で実測したところ、
+> session 限定の `client-detached` は**発火しません**（global なら発火しますが
+> `#{session_name}` が別セッションを指し `#{client_control_mode}` が空になります）。
+> 復帰はサーバのポーリング側で行っており、CLI が kill された場合・端末の窓を閉じた場合・
+> 別クライアントから detach した場合もこれで拾えます。
+
+### 手動 attach でも委譲する（opt-in）
+
+`CM_LIVE_ATTACH_HOOK=on` でサーバを起動すると、claude セッションに session 限定の
+`client-attached` フックを張り、**手で `tmux attach` したときも**同じ委譲を行います。
+既定は off です（素の `tmux attach` が黙ってジオメトリを変えるのは、
+#2317 決定事項 1 が禁じている振る舞いのため）。
+
+### tmux 側の状態表示（Issue #2317 Phase B）
+
+サーバは状態が**変わったとき**に、そのセッションへ状態を書き込みます。
+attach しなくても `tmux ls` から running / waiting / ready / idle が分かります。
+
+```bash
+# 全 CommandMate セッションの状態を一覧
+tmux ls -F '#{session_name} #{@cm_status} #{@cm_tool}/#{@cm_instance} #{@cm_worktree}'
+
+# 1 セッションだけ
+tmux show-options -v -t '=mcbd-claude-<worktree-id>:' @cm_status
+```
+
+| user option | 内容 |
+|---|---|
+| `@cm_status` | `idle` / `ready` / `running` / `waiting`。**`commandmate ls` の STATUS 列と同じ語彙**（同じ関数から取っています） |
+| `@cm_worktree` | worktree ID |
+| `@cm_tool` | エージェント（`claude` など） |
+| `@cm_instance` | インスタンス ID |
+| `@cm_updated` | 最後に書いた時刻（ISO 8601） |
+| `@cm_delegated` | `--live` で委譲中のときだけ `1` |
+
+attach 中は status 行の右側にも出ます: `[CommandMate claude/claude waiting] 200x1000`。
+
+- **書き込みは遷移時だけ**です。ポーリングの度に `set-option` を撃つことはしません
+- **すべて session 限定**です（`set-option -t`）。global の `status-right` / `status-left` /
+  key table は変化しません。#1623 の `bind-key` だけが唯一の global 介入で、それは従来どおりです
+- **そのセッションの `status-right` を自分で設定している場合は上書きしません**
+  （session スコープの値が返ってきたら何もしません）
+- `@cm_status` に `exited` は出ません。`ls` でも `exited` は STATUS ではなく REASON で、
+  STATUS は `idle` になります（#2070）。語彙を `ls` と揃えるという要件を優先しています
+
+無効化するには `CM_TMUX_STATUS=off` を設定してサーバを再起動します。
+**次のポーリングで、そのセッションから `@cm_*` と CommandMate の `status-right` を削除します**
+（単に書かなくなるのではなく、前回書いたものを消します）。
+
+---
+
 ## 読むモード: attach したまま transcript を読む（Issue #1623）
 
 CommandMate のセッションは 200 桁 × **1000 行**のキャンバスに固定されています（#1163）。
@@ -1861,8 +2009,35 @@ tmux attach -t '=mcbd-claude-<worktree-id>:'
 |---|---|---|
 | `CM_READ_MODE` | （有効） | `off` / `0` / `false` で無効化。**次回のサーバ起動時に、前回導入したバインドを削除します** |
 | `CM_READ_MODE_KEY` | `g` | prefix に続けるキー。英数字 1 文字か `F1`–`F12`、`C-` / `M-` / `S-` 修飾可 |
+| `CM_READ_MODE_FOLLOW` | （off） | `on` で `prefix + <key>` が**追従 popup**を開きます（Issue #2317、下記） |
+| `CM_READ_MODE_AUTO_POPUP` | （off） | `on` で**人間の attach 時に追従 popup を自動で開きます**（Issue #2317、下記） |
 | `CM_READ_LINES` | `1000` | popup が遡る行数（スクリプト側） |
-| `CM_READ_PAGER` | `less -R +G` | popup 内で使うページャ（スクリプト側） |
+| `CM_READ_FOLLOW_INTERVAL` | `2` | 追従 popup の再描画間隔（秒、スクリプト側） |
+| `CM_READ_PAGER` | `less -R +G` | popup 内で使うページャ（スクリプト側、スナップショット時のみ） |
+
+### 追従 popup（Issue #2317 Phase C）
+
+`CM_READ_MODE_FOLLOW=on` でサーバを起動すると、`prefix + g` が**追従 popup**になります。
+`less` の代わりに再描画ループが走り、`q` で閉じます。閉じた直後に composer へ入力できます。
+
+- **キーは増やしていません。** Issue #2317 は「別キー（既定 `G`）」と「切り替え」の
+  どちらでもよいとしていますが、`bind-key` は tmux サーバの **global** key table を書くため、
+  2 本目を足すと決定事項 2 が最小化しようとしている global 介入が倍になります。
+  環境変数なら key table を一切消費しません
+- **窓のサイズは変わりません。** popup はクライアント単位で、閉じると何も残しません
+- 手で実行することもできます:
+  `sh ~/.commandmate/bin/cm-read-pane.sh --follow mcbd-claude-<worktree-id>`
+
+### attach したら自動で開く（opt-in、Issue #2317 Phase C）
+
+`CM_READ_MODE_AUTO_POPUP=on` でサーバを起動すると、CommandMate セッションに session 限定の
+`client-attached` フックを張り、**人間のクライアントが attach したときに追従 popup を開きます**。
+
+- **既定は off です。** popup は `q` を押すまでキー入力を奪うため、
+  頼まれてもいないのに開くと「attach すると入力できない」になります
+- **control-mode クライアント（CommandMate 自身の接続）では開きません。**
+  実測では、session 限定の `client-attached` は control-mode クライアントでは
+  そもそも発火せず、加えてスクリプト側でも `#{client_control_mode}` を見て弾いています
 
 > **サーバ停止時にバインドは削除されません。** `commandmate start --issue N` で複数サーバが
 > 1 つの tmux サーバを共有するため、片方の停止で削除すると他方のキーを奪ってしまうからです。
@@ -1935,6 +2110,55 @@ npm スクリプトがクリーンアップで `rm -rf dist` をログに出し�
 （[docs/design/task-contract.md](../design/task-contract.md)）を使ってください。こちらは
 確認プロンプトの**質問文・選択肢**に照合し、マッチしたら自動応答せず人間へエスカレートします。
 
+### 承認の経路はエージェントで 2 つに分かれる（command-code は画面ベースのみ）
+
+Auto-Yes が「自動で答える」やり方は 1 つではありません。**どちらの経路になるかはエージェントで
+決まり**、`--enable` の書き方では変わりません。
+
+| 経路 | 何が起きるか | エージェント |
+|------|-------------|-------------|
+| **hooks 承認** | エージェントがツールを実行する**前**に CommandMate へ問い合わせ、CommandMate が裁定する。承認された場合ダイアログは**描かれないまま**先へ進む | claude / codex / copilot / antigravity（opencode は hooks ではなく SSE で同じことをする） |
+| **画面ベース（TUI 番号応答）** | ダイアログが**実際に描かれてから**、CommandMate がターミナルを読み取り、選択肢の番号キーを送り返す | **command-code** / gemini / vibe-local |
+
+**command-code は構造上 hooks 承認を選べません。** このツールの `PreToolUse` hook は権限ダイアログが
+**承認された後**に発火するため、hook の応答ではダイアログを消せないからです（Command Code v1.49.0
+実測: ダイアログ検出 `23:02:19.398Z` → 番号送信 `23:02:19.919Z` → `PreToolUse` 到達
+`23:02:20.120Z`）。そのため command-code の `PreToolUse` は `/api/hooks/agent-event` に
+**観測用のイベント**として登録されており、承認の裁定には使われません。経路ごとの詳細は
+[エージェントイベント hooks](./agent-event-hooks.md) を参照してください。
+
+CLI から見える違いは次の 3 点です。
+
+- **ダイアログは一度ターミナルに描かれます。** 描かれてから消えるまで実測 3〜4 秒（うち検出から
+  番号送信までが 0.1〜0.6 秒）かかります。hooks 承認の 4 ツールでは、承認される限りダイアログ
+  そのものが出ません
+- **ターミナルを読めない状況では答えられません。** 画面ベースの経路はペインのキャプチャが唯一の
+  入力なので、キャプチャできないフレームや検出をすり抜けたフレームは無応答のまま残ります
+  （`wait` の `unclassified` と同じ穴です）
+- **`auto-yes --enable` の 2 行目（保留承認の再裁定）は出ません。** あれは `resync` capability を
+  持つ opencode だけの機能で、画面ベースの 3 ツールにも hooks 承認の 4 ツールにもありません
+
+どちらの経路であっても、**答えたのが誰かは `capture --prompts` で確認できます**
+（`answeredBy` が `auto` ならサーバの Auto-Yes、`human` なら `respond` / チャット UI からの応答）。
+
+```console
+$ commandmate capture <worktree-id> --instance command-code --prompts --json
+{
+  "prompts": [
+    {
+      "question": "… Execute Shell Command Command Code needs to execute rm -f probe.txt. …",
+      "options": [{ "number": 1, "label": "Yes", "isDefault": true }, …],
+      "status": "answered", "answer": "1", "answeredBy": "auto"
+    }
+  ]
+}
+```
+
+> **これは「command-code では Auto-Yes が弱い」という意味ではありません。** 隔離環境の実機確認では、
+> `Create File` と `Execute Shell Command` のどちらのダイアログも Auto-Yes 有効時は `answeredBy: auto`
+> で自動応答され、無効時は 45 秒放置してもダイアログが残りました（対照実験）。違うのは**経路**と、
+> 「ダイアログが一度描かれる」ことに由来する上記 3 点だけです。
+
 ---
 
 ## commandmate instances
@@ -1965,11 +2189,11 @@ commandmate instances <worktree-id> kill <instance-id>                 # 該当�
 `commandmate instances <worktree-id>`:
 
 ```
-INSTANCE_ID  ALIAS   CLI_TOOL  RUNNING  AUTO_YES  MODEL              EFFORT  SESSION_ID  SESSION_TITLE
------------  ------  --------  -------  --------  -----------------  ------  ----------  -------------
-claude       Claude  claude    yes      no        claude-opus-5[1m]                                   
-codex-2      レビュー用   codex     yes      yes       gpt-5.6-sol                                        
-opencode     opencode opencode yes      no        claude-sonnet-4.6          ses_01H…    Fix the flaky test
+INSTANCE_ID  ALIAS   CLI_TOOL  RUNNING  AUTO_YES  MODEL              EFFORT  SESSION_ID  SESSION_TITLE       TMUX_SESSION
+-----------  ------  --------  -------  --------  -----------------  ------  ----------  ------------------  --------------------
+claude       Claude  claude    yes      no        claude-opus-5[1m]                                          mcbd-claude-myrepo-x
+codex-2      レビュー用   codex     yes      yes       gpt-5.6-sol                                                mcbd-codex-myrepo-x-2
+opencode     opencode opencode yes      no        claude-sonnet-4.6          ses_01H…    Fix the flaky test  mcbd-opencode-myrepo-x
 ```
 
 `commandmate instances <worktree-id> --json`:
@@ -2007,6 +2231,19 @@ opencode     opencode opencode yes      no        claude-sonnet-4.6          ses
   }
 ]
 ```
+
+#### `TMUX_SESSION` 列（Issue #2317）
+
+そのインスタンスが動いている tmux セッション名です。`commandmate attach <id> --instance <instance-id>`
+が開くセッションと同じで、`tmux attach -t '=<name>:'` にもそのまま使えます。
+
+- ロスターの行から**導出**しています（サーバへの問い合わせは増えていません）。
+  導出は `BaseCLITool.getSessionName()` が委譲するのと同じ関数なので、
+  ここに出た名前をサーバが開かない、ということは起きません
+- 命名規則は `mcbd-<tool>-<worktree>[-<suffix>]` です。プライマリインスタンスには suffix が付かず、
+  追加インスタンスにはインスタンス ID からツール名プレフィックスを除いたものが付きます
+  （`codex-2` → `-2`）
+- 列は**末尾に追加**しています
 
 #### `SESSION_ID` / `SESSION_TITLE` 列（Issue #2038）
 
@@ -2890,7 +3127,7 @@ Error: Invalid duration. Must be one of: 1h, 3h, 8h
 ### 不正なagentエラー
 
 ```
-Error: Invalid agent. Must be one of: claude, codex, gemini, vibe-local, opencode, copilot, antigravity
+Error: Invalid agent. Must be one of: claude, codex, gemini, vibe-local, opencode, copilot, antigravity, command-code
 ```
 
 **対処**: `--agent` には上記のいずれかを指定してください。

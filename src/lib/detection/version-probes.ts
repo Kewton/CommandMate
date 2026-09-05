@@ -119,7 +119,7 @@ export function parseCliVersion(output: string): string | null {
 }
 
 /**
- * A `verifiedAgainst` stamp written as a minor-series wildcard: `0.4.x`.
+ * A `verifiedAgainst` stamp written as a minor-series wildcard: `2.0.x`.
  *
  * Only ever applied to the stamp, never to a probe's own output — one side of
  * this comparison is a string a human typed into a tool module, the other is
@@ -131,11 +131,32 @@ const VERIFIED_AGAINST_WILDCARD_REGEX = /^(\d+)\.(\d+)\.(?:x|\*)$/i;
  * The comparable form of a `verifiedAgainst` stamp, or null when there is none.
  *
  * `'unmeasured'` is null — a tool nobody has captured frames for cannot be
- * fresh or stale. `'0.4.x'` becomes `0.4.0`: antigravity's stamp is a minor
- * series rather than a build (Issue #995 measured a range), and reading it as
- * "no version" would silently exempt the one tool whose rules are furthest
- * behind. Widening to `.0` is the safe direction — it can only ever call a
- * newer install stale, never call a stale one current.
+ * fresh or stale. A minor-series stamp such as `'2.0.x'` becomes `2.0.0`;
+ * widening to `.0` is the safe direction, because it can only ever call a newer
+ * install stale, never call a stale one current.
+ *
+ * ## The wildcard branch has no caller in the table today, and stays anyway
+ *
+ * antigravity's `0.4.x` (Issue #995 measured a range rather than a build) was
+ * the only wildcard stamp ever written, and Issue #2292 replaced it with the
+ * build #2270 actually read the rules off (`1.1.25`). Re-run the grep that
+ * settled it and the branch has zero users:
+ *
+ * ```
+ * $ grep -rnE "version: '[0-9]+\.[0-9]+\.(x|\*)'" src/
+ * (no matches)
+ * ```
+ *
+ * It is kept, because deleting it would not delete the FORMAT.
+ * `verifiedAgainst` is a hand-written string, and the next person who measures a
+ * series rather than a build can still type `2.0.x`. With this branch that
+ * stamp compares. Without it {@link parseCliVersion} reads it as null and the
+ * tool is filed alongside `'unmeasured'` — never stale, no warning, nothing an
+ * operator can act on — which is the same failure #2292 was raised to fix, one
+ * level further down. A parser for an input the table still permits is not dead
+ * code; the unit exercises it on the format directly rather than through
+ * whichever stamp the table happens to hold, so it does not go vacuous now that
+ * no tool uses it.
  */
 export function parseVerifiedAgainstVersion(stamp: string): string | null {
   const wildcard = VERIFIED_AGAINST_WILDCARD_REGEX.exec(stamp);
@@ -188,6 +209,7 @@ export const DETECTOR_VERSION_PROBES: Readonly<Record<string, DetectorVersionPro
   claude: { kind: 'execFile', command: 'claude', args: ['--version'] },
   codex: { kind: 'execFile', command: 'codex', args: ['--version'] },
   antigravity: { kind: 'execFile', command: 'agy', args: ['--version'] },
+  'command-code': { kind: 'execFile', command: 'commandcode', args: ['--version'] },
   opencode: { kind: 'execFile', command: 'opencode', args: ['--version'] },
   gemini: { kind: 'execFile', command: 'gemini', args: ['--version'] },
   copilot: {

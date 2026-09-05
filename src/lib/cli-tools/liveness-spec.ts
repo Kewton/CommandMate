@@ -36,6 +36,9 @@ import {
   CODEX_DIALOG_PATTERN,
   CODEX_PROMPT_PATTERN,
   CODEX_THINKING_PATTERN,
+  COMMAND_CODE_MODE_INDICATOR_PATTERN,
+  COMMAND_CODE_PROMPT_PATTERN,
+  COMMAND_CODE_THINKING_PATTERN,
   COPILOT_IDLE_STATUS_PATTERN,
   COPILOT_PROMPT_PATTERN,
   COPILOT_THINKING_PATTERN,
@@ -233,6 +236,25 @@ const LIVENESS_SPECS: Record<CLIToolType, ToolLivenessSpec> = {
       ANTIGRAVITY_PROMPT_PATTERN,
       ANTIGRAVITY_SELECTION_LIST_PATTERN,
       ANTIGRAVITY_THINKING_PATTERN,
+    ],
+  },
+
+  /**
+   * Command Code 1.40.1 — measured live at 200x1000 (Issue #2250).
+   *
+   * The composer glyph, the footer's mode indicator and the status row. The
+   * footer is included as well as the composer because the two are drawn in the
+   * same block and a frame carrying either one is a frame Command Code owns;
+   * neither can be matched by a shell prompt, which is the only property this
+   * list has to keep.
+   */
+  'command-code': {
+    ...SHARED,
+    ...ADDED_TOOL_DEFAULTS,
+    alivePatterns: [
+      COMMAND_CODE_PROMPT_PATTERN,
+      COMMAND_CODE_MODE_INDICATOR_PATTERN,
+      COMMAND_CODE_THINKING_PATTERN,
     ],
   },
 

@@ -44,6 +44,24 @@ export const STATUS_REASON = {
   /** Issue #1893: opencode's permission dialog — an arrow-key button strip. */
   OPENCODE_PERMISSION_PROMPT: 'opencode_permission_prompt',
   CLAUDE_SELECTION_LIST: 'claude_selection_list',
+  /**
+   * Issue #2297: Command Code's own picker (`/model`, and every overlay that
+   * shares its footer).
+   *
+   * Distinct from {@link STATUS_REASON.CLAUDE_SELECTION_LIST} even though
+   * Command Code renders claude's inline TUI, because the two footers are not
+   * the same sentence and neither pattern matches the other's screen: claude
+   * prints `Enter to set as default` / `Enter to confirm · Esc`, Command Code
+   * prints a lower-case `enter to select · esc to cancel` hint bar. Reporting
+   * the claude token for a Command Code frame would tell an operator reading
+   * `capture --json` that a rule they can go and read had fired, when it had not.
+   *
+   * Before this reason existed the picker reached the `default` floor, which is
+   * `isUnclassifiedActive` — and the chat surface answers THAT with the `1`-`9`
+   * / `y` / `n` answer keys, every one of which types into the picker's
+   * `Type to search models...` box.
+   */
+  COMMAND_CODE_SELECTION_LIST: 'command_code_selection_list',
   COPILOT_SELECTION_LIST: 'copilot_selection_list',
   CODEX_SELECTION_LIST: 'codex_selection_list',
   /** Issue #1017: Codex pager / edit-previous (transcript) mode. */

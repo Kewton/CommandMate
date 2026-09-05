@@ -61,6 +61,26 @@ describe('MobileAgentInstancesPane (Issue #874)', () => {
     expect(screen.getByTestId('agent-instance-add')).toBeInTheDocument();
   });
 
+  // Issue #2316 gave the SHARED pane a scroll mode for the PC activity column.
+  // This wrapper must not opt into it: it already renders inside a scrolling
+  // mobile tab and stacks the visibility checklist BELOW the shared pane, so a
+  // height + scroller on the embedded pane would nest a second scroller and
+  // squash the roster. Assert on the shared pane's own root, since that is where
+  // #2316 puts the classes.
+  it('does not turn the embedded roster editor into its own scroller (Issue #2316)', () => {
+    render(<MobileAgentInstancesPane {...baseProps} />);
+
+    const shared = screen.getByTestId('agent-instances-pane');
+    expect(shared.className).not.toContain('overflow-y-auto');
+    expect(shared.className).not.toContain('h-full');
+
+    // The checklist stays a SIBLING below the shared pane (not inside it), which
+    // is why the pane must keep growing with its content rather than clipping.
+    const checklist = screen.getByTestId('mobile-visible-instances');
+    expect(shared).not.toContainElement(checklist);
+    expect(screen.getByTestId('mobile-agent-instances-pane')).toContainElement(checklist);
+  });
+
   it('renders a per-device visibility toggle per roster instance, using the alias label', () => {
     render(<MobileAgentInstancesPane {...baseProps} />);
     expect(screen.getByTestId('mobile-visible-instances')).toBeInTheDocument();

@@ -1,6 +1,6 @@
 /**
- * The 6x6 table of declared source capabilities (Issue #1924, §4 D3 decision 1;
- * the sixth column added by Issue #2197).
+ * The table of declared source capabilities (Issue #1924, §4 D3 decision 1; the
+ * sixth column added by Issue #2197, the seventh row by Issue #2251).
  *
  * `docs/design/multi-agent-state-architecture.md` §4 D3 states this table as the
  * decision, and DR3-006 states why it is pinned *by value* rather than by count:
@@ -65,6 +65,7 @@ import { geminiAgentEventSource } from '@/lib/hooks/sources/gemini/source';
 import { copilotAgentEventSource } from '@/lib/hooks/sources/copilot/source';
 import { opencodeAgentEventSource } from '@/lib/hooks/sources/opencode/source';
 import { antigravityAgentEventSource } from '@/lib/hooks/sources/antigravity/source';
+import { commandCodeAgentEventSource } from '@/lib/hooks/sources/command-code/source';
 import type { AgentEventSource, AgentSourceCapabilities } from '@/lib/hooks/sources/types';
 
 /**
@@ -162,6 +163,23 @@ const TABLE: Record<string, DeclaredRow> = {
     resync: 'none',
     transcriptHistory: 'pull',
   },
+  // Issue #2251 (Epic #2249 Phase B). The seventh row, and it is gemini's rather
+  // than claude's on the column that usually splits Claude-shaped tools:
+  // Command Code registers no permission hook, because its `PreToolUse` fires
+  // AFTER the approval dialog has been answered (measured — dialog 00:11:37,
+  // answered 00:11:46, hook 00:11:46), so a non-allow reply on it forecasts
+  // nothing. `transcriptHistory` became 'pull' in Phase C (#2252), which landed
+  // the reader for `~/.commandcode/projects/<slug>/<session_id>.jsonl`; flipping
+  // it back to null puts this tool's replies on the scraped pane, which is the
+  // duplicated-then-lost shape #2121 measured on claude.
+  'command-code': {
+    permissionHookPredictsDialog: false,
+    sessionStartMayArriveLate: false,
+    permissionReplyReleasesPrompt: false,
+    eventIdentity: null,
+    resync: 'none',
+    transcriptHistory: 'pull',
+  },
 };
 
 const SOURCES: Record<string, AgentEventSource> = {
@@ -171,6 +189,7 @@ const SOURCES: Record<string, AgentEventSource> = {
   copilot: copilotAgentEventSource,
   opencode: opencodeAgentEventSource,
   antigravity: antigravityAgentEventSource,
+  'command-code': commandCodeAgentEventSource,
 };
 
 function declaredRow(capabilities: AgentSourceCapabilities): DeclaredRow {
@@ -184,7 +203,7 @@ function declaredRow(capabilities: AgentSourceCapabilities): DeclaredRow {
   };
 }
 
-describe('[#1924] AgentSourceCapabilities — the 6x6 table of §4 D3', () => {
+describe('[#1924] AgentSourceCapabilities — the table of §4 D3', () => {
   it.each(Object.keys(TABLE))('%s declares exactly the row the design policy states', (id) => {
     const source = SOURCES[id];
     expect(source.cliToolId).toBe(id);
@@ -248,16 +267,17 @@ describe('[#1924] AgentSourceCapabilities — the 6x6 table of §4 D3', () => {
     expect(resyncing).toEqual(['opencode']);
   });
 
-  it('names exactly the four sources with a second writer, and which kind (#2198)', () => {
+  it('names exactly the five sources with a second writer, and which kind (#2252)', () => {
     // The column-wise reading of Issue #2197's addition, with #2198's fourth
-    // source in it. Two departures from "nobody but the scraper", and they are
-    // different departures: opencode is pushed the reply over a connection,
-    // while claude, codex and antigravity each keep a file that has to be read.
+    // source and #2252's fifth in it. Two departures from "nobody but the
+    // scraper", and they are different departures: opencode is pushed the reply
+    // over a connection, while claude, codex, antigravity and command-code each
+    // keep a file that has to be read.
     // `lib/polling/structured-history-gate` asks a different question of each,
     // so a value in the wrong one of these two lists is not a near miss — it
     // sends the gate down the other branch entirely.
     const pull = Object.keys(TABLE).filter((id) => TABLE[id].transcriptHistory === 'pull');
-    expect(pull).toEqual(['claude', 'codex', 'antigravity']);
+    expect(pull).toEqual(['claude', 'codex', 'antigravity', 'command-code']);
 
     const push = Object.keys(TABLE).filter((id) => TABLE[id].transcriptHistory === 'push');
     expect(push).toEqual(['opencode']);

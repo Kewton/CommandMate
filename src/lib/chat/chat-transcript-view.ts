@@ -112,14 +112,98 @@ export type ChatTranscriptRow =
     };
 
 /**
+ * Move each turn's approval rows ahead of its replies (Issue #2273).
+ *
+ * ## The defect
+ *
+ * A turn really goes **question → approval → answer**, and the chat surface drew
+ * it as question → answer → approval. Measured on antigravity: prompt
+ * `04:49:50.989Z`, reply `04:49:54.000Z`, approval dialog `04:49:57.513Z`. The
+ * transcript readers dated a reply by the instant the TURN OPENED, so the reply
+ * sorted three seconds before an approval that the agent had asked for on the
+ * way to writing it. The readers now date a reply at its turn's END, which fixes
+ * every row written from here on — and fixes nothing already in the database,
+ * because a row's timestamp is never rewritten (#2264 replaces bodies, not
+ * clocks).
+ *
+ * ## Why the display layer carries it too
+ *
+ * Two reasons, and either one alone would justify it:
+ *
+ *  - **the rows already there.** They keep the timestamp they were written with,
+ *    so the only place their order can be corrected is here.
+ *  - **the producers that are still late.** An approval is written by three
+ *    different paths (see `./chat-tool-approvals`) and the Auto-Yes one lands
+ *    1–2 seconds after the sweep's row — measured — so an approval row arriving
+ *    *after* a reply that was correctly dated is a shape that still occurs.
+ *
+ * ## The rule, and what it gives up
+ *
+ * A turn is one `role: 'user'` row and everything until the next one. Inside a
+ * turn, every approval row is emitted first, in its own order, and everything
+ * else follows in its own order. Nothing crosses a turn boundary, so no approval
+ * can be lifted onto the wrong question.
+ *
+ * What this gives up is the INTERLEAVING between approvals and replies inside
+ * one turn: a scraped turn saved as `[a1, p1, a2]` renders as `p1, a1, a2`. That
+ * is a deliberate trade and the cheap direction — a chip group is one line
+ * standing for rows #2245 measured at 41–43 of every 50, and its position within
+ * a turn carries far less than the turn's own shape does. The alternative, a
+ * per-row rule that guessed which replies a given approval preceded, would be
+ * guessing from the timestamps that are the thing at fault.
+ *
+ * Pure, and returns the argument itself when nothing has to move — which is
+ * every turn whose rows were written after this Issue landed.
+ */
+export function hoistTurnApprovals(messages: ChatMessage[]): ChatMessage[] {
+  const ordered: ChatMessage[] = [];
+  /** This turn's approval rows, and its other rows, both in arrival order. */
+  let approvals: ChatMessage[] = [];
+  let spoken: ChatMessage[] = [];
+  let moved = false;
+
+  const flushTurn = (): void => {
+    ordered.push(...approvals, ...spoken);
+    approvals = [];
+    spoken = [];
+  };
+
+  for (const message of messages) {
+    // A `user` row opens a turn and stays at its head: it is the question the
+    // approvals below it were asked on the way to answering.
+    if (message.role === 'user' && !isToolApprovalMessage(message)) {
+      flushTurn();
+      ordered.push(message);
+      continue;
+    }
+    if (!isToolApprovalMessage(message)) {
+      spoken.push(message);
+      continue;
+    }
+    // An approval with a reply already ahead of it in this turn is the defect:
+    // it has to jump, and only then has anything actually moved.
+    if (spoken.length > 0) moved = true;
+    approvals.push(message);
+  }
+  flushTurn();
+
+  // Returning the argument when nothing jumped keeps `buildChatTranscriptRows`
+  // allocation-free on the path every row written after this Issue takes, and
+  // keeps the `useMemo` that calls it honest.
+  return moved ? ordered : messages;
+}
+
+/**
  * Turn a message list into the rows the transcript renders.
  *
- * Two things happen here and both are load-bearing:
+ * Three things happen here and all three are load-bearing:
  *
- *  1. consecutive approval rows fold into one `approvals` row;
- *  2. `showHeader` is computed against the previous NON-approval message.
+ *  1. each turn's approval rows are lifted ahead of its replies
+ *     ({@link hoistTurnApprovals}, Issue #2273);
+ *  2. consecutive approval rows fold into one `approvals` row;
+ *  3. `showHeader` is computed against the previous NON-approval message.
  *
- * (2) is what keeps the role labels honest. A chip group is not an assistant
+ * (3) is what keeps the role labels honest. A chip group is not an assistant
  * turn, so it must not be able to add or remove an "Assistant" header:
  * `[user, assistant]` and `[user, prompt, prompt, assistant]` render the same
  * one header, and `[assistant, prompt, assistant]` still renders exactly one.
@@ -127,6 +211,10 @@ export type ChatTranscriptRow =
  * what the pre-#2245 code did, since a chip row was an assistant bubble — gives
  * the second list ZERO assistant headers, because the reply is reading itself as
  * a continuation of an audit row.
+ *
+ * (1) cannot disturb (3) for the same reason: the header of a reply is decided
+ * against the last row that SPEAKS, and lifting chips over it changes neither
+ * which rows speak nor their order among themselves.
  */
 export function buildChatTranscriptRows(messages: ChatMessage[]): ChatTranscriptRow[] {
   const rows: ChatTranscriptRow[] = [];
@@ -144,7 +232,7 @@ export function buildChatTranscriptRows(messages: ChatMessage[]): ChatTranscript
     run = [];
   };
 
-  for (const message of messages) {
+  for (const message of hoistTurnApprovals(messages)) {
     if (isToolApprovalMessage(message)) {
       run.push(message);
       continue;
@@ -174,18 +262,56 @@ export interface ChatContentPart {
 }
 
 /**
- * Absolute-looking paths with an extension. Same shape `ConversationPairCard`
- * matches on, and intentionally not shared with it: that file is frozen by this
- * Issue's scope, and a regex copied WITH the reason for its shape is a smaller
- * liability than an import that cannot be made.
+ * Absolute-looking paths with an extension, anchored on their LEFT edge.
+ *
+ * Issue #2274: without the boundary group this pattern was
+ * `/(\/[^\s\n<>"']+\.[a-zA-Z0-9]+)/g`, which starts a match at ANY `/` — so
+ * `commandmate-skills/docs/uat/report-template.md` in a reply linkified its
+ * tail, `/docs/uat/report-template.md`, and only its tail. One path rendered in
+ * two colors, and the half that became a button named a file this worktree does
+ * not have. Group 1 is that boundary and it is CONSUMED rather than looked
+ * behind (see {@link splitFilePathParts} for what that costs, which is nothing):
+ * a match may only begin at the start of the body or right after whitespace, a
+ * backtick, a quote or an opening bracket.
+ *
+ * Two consequences worth stating, because both are behaviour changes:
+ *
+ *  - a RELATIVE path is not a link. `docs/uat/x.md` stays plain text, and that
+ *    is the decision this Issue makes rather than a gap in it: `a/b.md` is not
+ *    distinguishable, from the text alone, from this worktree's `a/b.md`,
+ *    another repository's, or prose about a ratio. The defect being fixed here
+ *    is exactly a false positive of that kind, so adding a relative branch back
+ *    would re-open it under a different name.
+ *  - a URL is not a link either. `https://example.com/a/b.js` offers no
+ *    boundary before either slash of `//` (`:` and `/` are deliberately absent
+ *    from the boundary class), so it is no longer split into prose plus a
+ *    fictional file. It was, before this Issue.
+ *
+ * `ConversationPairCard` renders History's copy of the same bodies and now
+ * imports {@link splitFilePathParts} instead of carrying its own copy of this
+ * pattern. Issue #2232 froze that file to keep History pixel-identical; a
+ * clickable range that names the wrong file is not a look, so the freeze does
+ * not reach it. One regex, one behaviour, asserted from both surfaces against
+ * the same fixtures.
  */
-const FILE_PATH_REGEX = /(\/[^\s\n<>"']+\.[a-zA-Z0-9]+)/g;
+const FILE_PATH_REGEX = /(^|[\s`"'(\[<（「『【])(\/[^\s\n<>"']+\.[a-zA-Z0-9]+)/g;
 
 /**
  * Split a body into alternating text and path runs.
  *
  * Returns a single text part when there is nothing to link, so the caller can
  * render the common case without allocating a list of one-character spans.
+ *
+ * Issue #2274 replaced `String.prototype.match` + `indexOf` with `matchAll`:
+ * the old loop re-FOUND each matched string by searching for it, which the
+ * boundary group would have made ambiguous, and which could already land on the
+ * wrong occurrence of a repeated path. `match.index` is the position the engine
+ * actually matched at, so the offsets are no longer a second guess at it.
+ *
+ * Consuming the boundary character cannot hide a second path: the boundary sits
+ * BEFORE a run, a run always ends on `[a-zA-Z0-9]`, and therefore the character
+ * that terminates one path is never the character another path needs as its
+ * boundary. `a /x.ts /y.ts` yields both.
  */
 export function splitFilePathParts(content: string): ChatContentPart[] {
   // A row whose `content` is not a string is a data defect somewhere upstream,
@@ -196,22 +322,25 @@ export function splitFilePathParts(content: string): ChatContentPart[] {
     return [{ type: 'text', content: '' }];
   }
 
-  const matches = content.match(FILE_PATH_REGEX);
-  if (!matches || matches.length === 0) {
-    return [{ type: 'text', content }];
-  }
-
   const parts: ChatContentPart[] = [];
   let lastIndex = 0;
 
-  for (const match of matches) {
-    const index = content.indexOf(match, lastIndex);
-    if (index === -1) continue;
+  // `matchAll` copies the pattern and its `lastIndex`, so this module-level
+  // `/g` regex is safe to share across calls (an `exec` loop would not be).
+  for (const match of content.matchAll(FILE_PATH_REGEX)) {
+    const boundary = match[1] ?? '';
+    const filePath = match[2];
+    if (!filePath) continue;
+    const index = (match.index ?? 0) + boundary.length;
     if (index > lastIndex) {
       parts.push({ type: 'text', content: content.slice(lastIndex, index) });
     }
-    parts.push({ type: 'path', content: match });
-    lastIndex = index + match.length;
+    parts.push({ type: 'path', content: filePath });
+    lastIndex = index + filePath.length;
+  }
+
+  if (parts.length === 0) {
+    return [{ type: 'text', content }];
   }
 
   if (lastIndex < content.length) {

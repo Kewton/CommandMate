@@ -363,7 +363,11 @@ describe('turns whose prompt was not the operator’s', () => {
 
     const rows = saved();
     expect(rows.map((row) => row.role)).toEqual(['assistant']);
-    expect(rows[0].timestamp.getTime()).toBe(prompt.timestampMs);
+    // Issue #2273: the turn's LAST assistant record, which is where a reply is
+    // dated whether or not the turn produced a user row. Still the transcript's
+    // own clock and still strictly after the prompt record it answers.
+    expect(rows[0].timestamp.getTime()).toBe(Date.parse('2026-08-22T15:34:57.513Z'));
+    expect(rows[0].timestamp.getTime()).toBeGreaterThan(prompt.timestampMs as number);
   });
 });
 

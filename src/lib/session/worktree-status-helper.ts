@@ -18,7 +18,11 @@ import { CLI_TOOL_IDS, type CLIToolType } from '@/lib/cli-tools/types';
 import { captureSessionOutput } from './cli-session';
 import { detectSessionStatus } from '@/lib/detection/status-detector';
 import { STATUS_REASON } from '@/lib/detection/status-reason';
-import { sessionStatusToActivityFlags } from './status-mapping';
+import { deriveCliStatus, sessionStatusToActivityFlags } from './status-mapping';
+// Issue #2317: the tmux session is a SURFACE, not just a place to run a process.
+// Reached through `cli-session`, which is the gateway Issue #1922's import guard
+// names — this module may not import `lib/tmux/**` itself.
+import { forgetSessionSurface, publishSessionSurface } from './cli-session';
 import { resolveCaptureSpec } from '@/lib/cli-tools/capture-spec';
 import { probeToolSessionLiveness } from '@/lib/cli-tools/session-liveness';
 import { getLastServerResponseTimestamp, buildCompositeKey } from '@/lib/polling/auto-yes-manager';
@@ -401,7 +405,8 @@ async function detectInstanceSessionStatus(
   metrics?: StatusDetectionMetrics,
 ): Promise<CliToolSessionStatus> {
   // Issue #405: Use Set.has() instead of individual hasSession() calls
-  let isRunning = sessionNameSet.has(sessionName);
+  const sessionExists = sessionNameSet.has(sessionName);
+  let isRunning = sessionExists;
 
   // Issue #2070: the liveness probe, for EVERY tool.
   //
@@ -587,6 +592,52 @@ async function detectInstanceSessionStatus(
   const eventSource = isRunning
     ? describeEventSourceFor(worktreeId, cliToolId, instanceId)
     : null;
+
+  // ---------------------------------------------------------------------
+  // Issue #2317: everything above decided what this session IS. What follows
+  // publishes that onto the tmux session, so `tmux ls` and an attached status
+  // line can answer the same question the sidebar answers.
+  //
+  // Placed at the very end so a failure here cannot change a single field of
+  // the object below, and awaited rather than fired off because the poll's own
+  // metrics (#2060) are only honest if the round-trips it pays for are inside
+  // it. `publishSessionStatus` touches tmux only on a TRANSITION, so the steady
+  // state costs nothing at all.
+  // ---------------------------------------------------------------------
+  //
+  // The try/catch is not defensive padding. Everything inside it is a
+  // convenience surface hanging off the poll that drives the sidebar, the header
+  // chip and `commandmate ls`; a tmux that hiccups, or a session killed between
+  // the probe above and the write below, must cost a status line and nothing
+  // else. It also keeps this call out of the blast radius of a suite that
+  // replaces `./cli-session` wholesale — several do, and a status assertion
+  // should not turn into a TypeError because a mock omitted a function that has
+  // nothing to do with what it is testing.
+  try {
+    if (sessionExists) {
+      await publishSessionSurface({
+        sessionName,
+        worktreeId,
+        cliToolId,
+        instanceId,
+        // The `commandmate ls` STATUS word, from the same function the sidebar
+        // uses. Issue #2317 asks for exactly that vocabulary, and taking it from
+        // `deriveCliStatus` rather than restating the three-way branch is what
+        // stops the tmux surface and the CLI table naming one session two ways.
+        status: deriveCliStatus({ isRunning, isWaitingForResponse, isProcessing }),
+      });
+    } else {
+      // The session is gone. Drop the memos so a session created later under the
+      // same name publishes from scratch instead of being deduped against a dead
+      // one's last status.
+      forgetSessionSurface(sessionName);
+    }
+  } catch (error: unknown) {
+    logger.debug('tmux-surface:publish-failed', {
+      sessionName,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 
   return {
     isRunning,

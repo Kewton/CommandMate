@@ -58,6 +58,7 @@ import {
   buildOpencodeTurnsFromMessages,
   claimOpencodeMessage,
   createOpencodeTurn,
+  OPENCODE_TURN_KEY_FIELD,
   ownsOpencodeMessage,
   readOpencodePart,
   renderOpencodeTurn,
@@ -316,6 +317,48 @@ async function publishOpencodeTurnProgress(
 }
 
 /**
+ * When each backfilled turn's last assistant message finished (Issue #2273).
+ *
+ * `info.time.completed` on every `role: "assistant"` message, folded onto the
+ * turn key (`parentID`) with `Math.max` — a tool-calling turn produces more than
+ * one assistant message (measured: two, in turn 2 of the captured session) and
+ * the turn ended when the last of them did. `time.created` is the fallback for a
+ * message opencode has not marked complete.
+ *
+ * Read here rather than on the accumulator because `./transcript` is not this
+ * Issue's to change, and read defensively for the reason everything in this
+ * subsystem is: a shape opencode changes must cost the timestamp, not the row.
+ *
+ * @returns `parentID` → epoch ms; absent for a turn with no usable clock
+ */
+function lastOpencodeCompletedAt(body: unknown): Map<string, number> {
+  const at = new Map<string, number>();
+  if (!Array.isArray(body)) return at;
+
+  for (const entry of body) {
+    if (!isPlainObject(entry)) continue;
+    const info = isPlainObject(entry.info) ? entry.info : null;
+    if (!info || info.role !== 'assistant') continue;
+
+    const userMessageId = readStringField(info, OPENCODE_TURN_KEY_FIELD);
+    if (!userMessageId) continue;
+
+    const time = isPlainObject(info.time) ? info.time : null;
+    const finished =
+      readFiniteNumber(time?.completed) ?? readFiniteNumber(time?.created) ?? null;
+    if (finished === null) continue;
+    if (finished > (at.get(userMessageId) ?? 0)) at.set(userMessageId, finished);
+  }
+
+  return at;
+}
+
+/** A finite number, or null. */
+function readFiniteNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+/**
  * The turn currently open on this session, for tests and for callers that need
  * to know whether a flush would do anything.
  */
@@ -341,11 +384,15 @@ export function peekOpencodeTurn(
  *
  * @param target - The instance
  * @param sessionId - `ses_…` from the `session.idle` frame
+ * @param closedAt - When the turn ended, epoch ms. Defaults to now, which is
+ *   what `session.idle` means: opencode's own end-of-turn frame is being handled
+ *   (Issue #2273). A parameter only so a test need not move the clock.
  * @returns Whether a row was written
  */
 export async function flushOpencodeTurn(
   target: AgentInstanceRef,
-  sessionId: string
+  sessionId: string,
+  closedAt: number = Date.now()
 ): Promise<boolean> {
   const turns = transcripts.get(keyOf(target));
   const turn = turns?.get(sessionId);
@@ -355,7 +402,17 @@ export async function flushOpencodeTurn(
   // existence check below.
   turns.delete(sessionId);
 
-  return writeOpencodeTurn(target, renderOpencodeTurn(turn), turn.startedAt, 'stream');
+  // The turn's END and not its start (Issue #2273). A reply dated where the turn
+  // opened draws ABOVE the tool approvals that were written seconds into it, so
+  // the chat surface reads question → answer → approval for a turn that really
+  // went question → approval → answer. `Math.max` because a clock that went
+  // backwards must not put the reply before its own prompt.
+  return writeOpencodeTurn(
+    target,
+    renderOpencodeTurn(turn),
+    Math.max(turn.startedAt, closedAt),
+    'stream'
+  );
 }
 
 /**
@@ -528,6 +585,12 @@ export async function backfillOpencodeHistory(
       });
     }
 
+    // Issue #2273: the same rule the live flush follows, off the REST document's
+    // own clock. `time.completed` is when opencode finished the assistant
+    // message; the stream route has no equivalent field and uses the instant
+    // `session.idle` arrived, which is the same fact a moment later.
+    const completedAt = lastOpencodeCompletedAt(body);
+
     let written = 0;
     // Oldest of the kept ones first, so the rows are inserted in conversation
     // order and `updateWorktreeTimestamp` ends on the newest.
@@ -535,7 +598,7 @@ export async function backfillOpencodeHistory(
       const saved = await writeOpencodeTurn(
         target,
         renderOpencodeTurn(turn),
-        turn.startedAt,
+        Math.max(turn.startedAt, completedAt.get(turn.userMessageId) ?? 0),
         'backfill'
       );
       if (saved) written += 1;

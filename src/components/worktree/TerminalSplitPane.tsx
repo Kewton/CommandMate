@@ -3,7 +3,8 @@
  *
  * Single split within `TerminalSplitContainer`. Renders:
  *  - Header: agent-instance selector (with "other-split-uses" excluded) +
- *    output-surface toggle (Issue #2193) + terminal-search button (Issue #47).
+ *    output-surface toggle (Issue #2193) + terminal-search button (Issue #47) +
+ *    maximize / restore toggle (Issue #2261).
  *  - Body: caller-supplied terminal content (TerminalDisplay).
  *  - Footer: caller-supplied navigation / prompt / message input.
  *
@@ -19,7 +20,7 @@
 'use client';
 
 import React, { memo, useCallback, useState } from 'react';
-import { ChevronDown, MessageSquare, TerminalSquare } from 'lucide-react';
+import { ChevronDown, Maximize2, MessageSquare, Minimize2, TerminalSquare } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import {
   getInstanceLabel,
@@ -35,6 +36,7 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from '@/components/ui/DropdownMenu';
+import { Tooltip } from '@/components/common/Tooltip';
 
 /**
  * Issue #786 / #869: dedicated MIME so the drag payload never collides with
@@ -145,6 +147,19 @@ export interface TerminalSplitPaneProps {
   terminal: React.ReactNode;
   /** Navigation buttons + PromptPanel + MessageInput. */
   footer: React.ReactNode;
+  /**
+   * Issue #2261: whether this split is currently filling the whole terminal row.
+   * Presentational — the container owns the state and the layout; this only
+   * drives which icon and which label the toggle shows.
+   */
+  isMaximized?: boolean;
+  /**
+   * Issue #2261: maximize this split / restore the split layout.
+   * OMITTING IT HIDES THE TOGGLE, the same contract `onSurfaceModeChange` uses,
+   * which is what keeps every pre-#2261 caller rendering the header it rendered
+   * before.
+   */
+  onToggleMaximize?: () => void;
   /** Optional inline width (flex-grow ratio). When omitted, parent controls layout. */
   style?: React.CSSProperties;
   /**
@@ -179,6 +194,8 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
   headerExtras,
   surfaceMode = DEFAULT_SURFACE_MODE,
   onSurfaceModeChange,
+  isMaximized = false,
+  onToggleMaximize,
   terminal,
   footer,
   style,
@@ -278,6 +295,9 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
   // the CLI tool name when the instance is stale/undefined).
   const attachLabel = getInstanceLabel(instance ?? { cliTool: cliToolId });
   const selectInstanceLabel = t('terminal.selectInstance', { split: splitLabel });
+  // [Issue #2307] i18n-ized (was a hardcoded English string) so it can drive
+  // both the Tooltip and the aria-label without drifting apart.
+  const searchLabel = t('terminal.searchOutput', { split: splitLabel });
 
   return (
     <div
@@ -351,22 +371,22 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
               const active = surfaceMode === mode;
               const label = t(labelKey);
               return (
-                <button
-                  key={mode}
-                  type="button"
-                  onClick={() => onSurfaceModeChange(mode)}
-                  aria-pressed={active}
-                  aria-label={label}
-                  title={label}
-                  data-testid={`surface-mode-${mode}-${splitIndex}`}
-                  className={`flex items-center justify-center rounded px-1.5 py-0.5 touch-manipulation transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
-                    active
-                      ? 'bg-accent-500/15 text-accent-600 dark:text-accent-400'
-                      : 'text-muted-foreground hover:bg-muted hover:text-surface-foreground'
-                  }`}
-                >
-                  <Icon size={14} aria-hidden="true" />
-                </button>
+                <Tooltip key={mode} content={label} placement="bottom">
+                  <button
+                    type="button"
+                    onClick={() => onSurfaceModeChange(mode)}
+                    aria-pressed={active}
+                    aria-label={label}
+                    data-testid={`surface-mode-${mode}-${splitIndex}`}
+                    className={`flex items-center justify-center rounded px-1.5 py-0.5 touch-manipulation transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                      active
+                        ? 'bg-accent-500/15 text-accent-600 dark:text-accent-400'
+                        : 'text-muted-foreground hover:bg-muted hover:text-surface-foreground'
+                    }`}
+                  >
+                    <Icon size={14} aria-hidden="true" />
+                  </button>
+                </Tooltip>
               );
             })}
           </div>
@@ -412,29 +432,67 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
             button keeps `ml-auto` and stays pinned to the right edge. */}
         {headerExtras}
 
-        <button
-          type="button"
-          onClick={handleSearchClick}
-          aria-label={`Search terminal output for ${splitLabel}`}
-          data-testid={`terminal-search-button-${splitIndex}`}
-          className="ml-auto flex items-center gap-1 px-1.5 py-0.5 text-xs text-muted-foreground hover:text-surface-foreground hover:bg-muted-foreground/10 rounded transition-colors"
-        >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            className="h-3 w-3"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            strokeWidth={2}
-            aria-hidden="true"
+        <Tooltip content={searchLabel} placement="bottom" className="ml-auto">
+          <button
+            type="button"
+            onClick={handleSearchClick}
+            aria-label={searchLabel}
+            data-testid={`terminal-search-button-${splitIndex}`}
+            className="flex items-center gap-1 px-1.5 py-0.5 text-xs text-muted-foreground hover:text-surface-foreground hover:bg-muted-foreground/10 rounded transition-colors"
           >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-            />
-          </svg>
-        </button>
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              className="h-3 w-3"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+              aria-hidden="true"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+              />
+            </svg>
+          </button>
+        </Tooltip>
+
+        {/* Issue #2261: maximize / restore, at the far right of the title bar
+            where a window control is looked for. `flex-shrink-0` (and the
+            `truncate`d alias to its left) is what keeps the row from wrapping in
+            a narrow split — this is the row's fourth control. Rendered only when
+            the parent wired `onToggleMaximize`. */}
+        {onToggleMaximize ? (
+          <Tooltip
+            content={`${
+              isMaximized
+                ? t('terminal.restoreSplits')
+                : t('terminal.maximizeSplit', { split: splitLabel })
+            } — ${t('terminal.maximizeShortcutHint')}`}
+            placement="bottom"
+            className="flex-shrink-0"
+          >
+            <button
+              type="button"
+              onClick={onToggleMaximize}
+              aria-pressed={isMaximized}
+              aria-label={
+                isMaximized
+                  ? t('terminal.restoreSplits')
+                  : t('terminal.maximizeSplit', { split: splitLabel })
+              }
+              data-testid={`toggle-maximize-${splitIndex}`}
+              className="flex flex-shrink-0 items-center justify-center px-1.5 py-0.5 text-muted-foreground hover:text-surface-foreground hover:bg-muted-foreground/10 rounded transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              {isMaximized ? (
+                <Minimize2 size={14} aria-hidden="true" />
+              ) : (
+                <Maximize2 size={14} aria-hidden="true" />
+              )}
+            </button>
+          </Tooltip>
+        ) : null}
       </div>
 
       {/* Body: terminal display (or attach skeleton) */}

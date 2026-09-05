@@ -1,0 +1,1 @@
+{"type":"result","subtype":"error","usage":{"inputTokens":0,"outputTokens":0,"cacheReadTokens":0,"cacheWriteTokens":0},"durationMs":1,"finalText":"","error":"Error: No query provided. Usage: cmd -p \"your query\""}

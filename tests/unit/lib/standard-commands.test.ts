@@ -460,9 +460,23 @@ describe('STANDARD_COMMANDS', () => {
   // defect), and a tool losing it is still red. What is gone is the third widening
   // in a row that had to be typed in by hand after the evidence was already
   // written down somewhere else.
+  //
+  // Issue #2253 narrows /todos and /pr-comments the way #1913 narrowed /undo,
+  // and for the same reason. Both were **claude** phantoms in #1503, and both
+  // are real on Command Code 1.40.1: `/todos` and `/pr-comments` are entries in
+  // the shipped command registry of command-code@1.40.1/dist/cli.mjs, rows in
+  // the "Slash Commands" section of `commandcode --help`, and rows in the
+  // Built-in Commands tables of the attested source. Banning the string would
+  // hide two real commands, so each ban now names the tool it was measured on.
   it('does not carry the Issue #1503 phantom commands', () => {
-    for (const name of ['cost', 'lazy', 'todos', 'pr-comments', 'approvals']) {
+    for (const name of ['cost', 'lazy', 'approvals']) {
       expect(STANDARD_COMMANDS.some((c) => c.name === name), `/${name} must be gone`).toBe(false);
+    }
+    for (const name of ['todos', 'pr-comments']) {
+      expect(
+        STANDARD_COMMANDS.some((c) => c.name === name && toolsOfCommand(c).includes('claude')),
+        `/${name} must stay off claude`
+      ).toBe(false);
     }
     expect(
       STANDARD_COMMANDS.some((c) => c.name === 'undo' && c.cliTools?.includes('codex')),
@@ -472,9 +486,14 @@ describe('STANDARD_COMMANDS', () => {
     const attestedClaimants = DEFAULT_ATTESTATIONS.filter((a) =>
       attestedCatalogNames(a, DEFAULT_EXCLUSIONS).includes('agents')
     ).map((a) => a.tool);
-    // The evidence trail #1503/#1767/#1913/#2024 built, now stated once: three
-    // tools ship /agents and copilot ships /agent, a different command.
-    expect([...attestedClaimants].sort()).toEqual(['claude', 'codex', 'opencode']);
+    // The evidence trail #1503/#1767/#1913/#2024/#2253 built, now stated once:
+    // four tools ship /agents and copilot ships /agent, a different command.
+    expect([...attestedClaimants].sort()).toEqual([
+      'claude',
+      'codex',
+      'command-code',
+      'opencode',
+    ]);
 
     const agentsEntries = STANDARD_COMMANDS.filter((c) => c.name === 'agents');
     expect(agentsEntries.flatMap((c) => toolsOfCommand(c)).sort()).toEqual(
@@ -924,9 +943,12 @@ describe('copilot / opencode catalog reconcile (Issue #1913)', () => {
   // only useful if each entry actually points at its own leaf.
   it('gives /exit a tool-scoped key per tool, and keeps the OpenCode wording on opencode', () => {
     const exits = STANDARD_COMMANDS.filter((c) => c.name === 'exit');
+    // Issue #2253: command-code joins the split. `/exit` means "Exit Command
+    // Code" there, so it gets its own leaf like every other claimant.
     expect(exits.map((c) => c.cliTools?.join(',')).sort()).toEqual([
       'claude',
       'codex',
+      'command-code',
       'copilot',
       'opencode',
     ]);
@@ -939,7 +961,7 @@ describe('copilot / opencode catalog reconcile (Issue #1913)', () => {
       const dict = loadDescriptions(locale);
       const opencodeText = dict['exit.opencode'];
       expect(opencodeText).toBeTruthy();
-      for (const tool of ['claude', 'codex', 'copilot']) {
+      for (const tool of ['claude', 'codex', 'copilot', 'command-code']) {
         expect(dict[`exit.${tool}`], `${locale} exit.${tool}`).toBeTruthy();
         expect(
           dict[`exit.${tool}`],

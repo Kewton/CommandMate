@@ -11,6 +11,7 @@
 'use client';
 
 import React, { useEffect, useRef, memo, useState, useCallback, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import dynamic from 'next/dynamic';
 import { useTranslations } from 'next-intl';
 import { Maximize2, Minimize2, ClipboardCopy, Check, Copy, Search } from 'lucide-react';
@@ -614,7 +615,20 @@ function MarpEditorWithSlides({
   );
 }
 
-/** Wrapper that adds a maximize overlay */
+/**
+ * Wrapper that adds a maximize overlay.
+ *
+ * [Issue #2294] The overlay is portalled to `document.body`. Rendered inline it
+ * stays inside `main[role="main"]`, whose `view-transition-name: cm-content`
+ * (Issue #1122) opens a stacking context: `Z_INDEX.MAXIMIZED_EDITOR` is then
+ * only compared against main's own children, and the desktop sidebar — a
+ * sibling of main at `Z_INDEX.SIDEBAR` — covers the overlay's left edge,
+ * swallowing both the toolbar and the content underneath it. The portal moves
+ * the overlay next to the sidebar so the declared order actually applies.
+ *
+ * ESC-to-exit (the keydown listener on `window` in FilePanelContent) and React
+ * synthetic-event bubbling both survive the portal, so behaviour is unchanged.
+ */
 function MaximizableWrapper({
   children,
   isMaximized,
@@ -626,21 +640,30 @@ function MaximizableWrapper({
   onToggle: () => void;
   filePath: string;
 }) {
-  if (isMaximized) {
-    return (
-      <div
-        className="fixed inset-0 bg-surface flex flex-col"
-        style={{ zIndex: Z_INDEX.MAXIMIZED_EDITOR }}
-      >
-        <FileToolbar filePath={filePath} isMaximized={isMaximized} onToggleMaximize={onToggle} />
-        <div className="flex-1 min-h-0 overflow-hidden">
-          {children}
-        </div>
-      </div>
-    );
+  if (!isMaximized) {
+    return <>{children}</>;
   }
 
-  return <>{children}</>;
+  const overlay = (
+    <div
+      data-testid="maximized-file-overlay"
+      className="fixed inset-0 bg-surface flex flex-col"
+      style={{ zIndex: Z_INDEX.MAXIMIZED_EDITOR }}
+    >
+      <FileToolbar filePath={filePath} isMaximized={isMaximized} onToggleMaximize={onToggle} />
+      <div className="flex-1 min-h-0 overflow-hidden">
+        {children}
+      </div>
+    </div>
+  );
+
+  // No portal target during SSR — render inline until the client takes over
+  // (same guard shape as components/ui/Modal.tsx).
+  if (typeof document === 'undefined') {
+    return overlay;
+  }
+
+  return createPortal(overlay, document.body);
 }
 
 /** [Issue #47] Markdown editor with file content search (PC) [DR2-005] */

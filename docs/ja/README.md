@@ -50,13 +50,23 @@ tmux も Git worktree もターミナルもエージェント CLI も置き換�
 | **Skills カタログ** | 公式 Catalog の Skill を worktree ごとに導入・更新（Web UI / `commandmate skill`） | 方法論は誰かの頭の中ではなく、エージェントが読む形で導入される |
 | **入力待ちを見逃さない** | 入力待ちがバッジ・トースト・タブタイトル・PWA の App Badge・push 通知で届く | エージェントがあなたを必要とした瞬間に、席を外していても気づける |
 | **Git Worktree セッション** | worktree ごとに独立したセッション、並列実行 | 複数の Issue が干渉なく同時に進む |
-| **マルチエージェント対応** | worktree ごとに Claude Code / Codex / Gemini CLI / Copilot / OpenCode / Antigravity / ローカルモデルを選択 | タスクに最適なエージェントを使い分け |
+| **マルチエージェント対応** | worktree ごとに Claude Code / Codex / Gemini CLI / Copilot / OpenCode / Antigravity / Command Code / ローカルモデルを選択 | タスクに最適なエージェントを使い分け |
 | **Auto Yes モード** | 確認なしでエージェントが動き続ける | 信頼できるワークフロー向けのオプショナル自動実行モード |
 | **Web UI（デスクトップ & モバイル）** | あらゆるブラウザからセッションを操作 | デスクからでもスマホからでも監視・指示が可能 |
+| **会話ビュー** | セッションの出力面を生のターミナルとチャットで切り替え。返答は全文で表示され、ツール実行と承認はチップに畳まれ、TUI のダイアログにもチャット面から答えられる | TUI を読まずに、デスクからでもスマホからでも実行を追い、その場で応答できる |
 | **ファイルビューワ & Markdown エディタ** | ブラウザからファイルの閲覧・編集 | IDE を開かずにコード確認や AI への指示更新 |
 | **スクリーンショット指示** | プロンプトに画像を添付 | バグ画面を撮影 →「これ直して」— エージェントが画像を認識 |
 | **スケジュール実行** | CMATE.md に cron 式を定義して自動実行 | 毎朝レビュー、毎晩テスト — エージェントが定期的に働く |
 | **トークン認証** | SHA-256 ハッシュ + HTTPS + レート制限 | 安全なリモートアクセス — 認証情報の漏洩なし、総当たり攻撃を防止 |
+
+### 対応エージェント
+
+8 種すべてが第一級。CommandMate の内部ではどれも同じ扱い（専用の起動経路・hook ソース・ステータス検出）を受けるため、worktree セッション・実行契約・検証ゲート・証跡の挙動は、どのエージェントを選んでも変わらない。
+
+- **Claude Code** ・ **Codex** ・ **Gemini CLI** ・ **Copilot** ・ **Antigravity** — worktree ごと、タスクごとに選ぶ。
+- **OpenCode** — オープンソースのターミナルエージェント。他と同じ契約とゲートの経路で動かせる。
+- **Command Code** — 同じ経路で動かせる。hooks と transcript の取り込みにも対応。
+- **ローカルモデル**（`vibe-local`） — 自分でホストするモデルで、同じループを回す。
 
 ---
 
@@ -294,20 +304,36 @@ commandmate start -p 3001
 
 ### セッションが固まっている / 応答がない？
 
-tmux セッションを直接確認できます。CommandMate は `mcbd-{ツール名}-{worktree名}` の形式でセッションを管理しています：
+CommandMate 自身のコマンドで確認できます（tmux セッション名は自動で解決されます）：
 
 ```bash
-# CommandMate が管理しているセッション一覧を確認
-tmux list-sessions | grep mcbd
+# 各 worktree のエージェントの状態と、動いている tmux セッション名
+commandmate ls
+commandmate ls --json | jq -r '.[] | "\(.id)\t\(.tmuxSession)"'
 
-# 特定セッションの出力を確認（アタッチせずに）
-tmux capture-pane -t "mcbd-claude-feature-123" -p
+# attach せずに transcript を読む
+commandmate capture <worktree-id> --pane --tail 60
+commandmate capture <worktree-id> --pane --follow    # 生成中の応答を追う
 
-# セッションにアタッチして確認（detach は Ctrl+b → d）
-tmux attach -t "mcbd-claude-feature-123"
+# この端末を attach（detach は Ctrl+b → d）
+commandmate attach <worktree-id>
+commandmate attach <worktree-id> --live              # 端末サイズへ再レイアウト（claude のみ）
+```
 
-# 壊れたセッションを手動で削除
-tmux kill-session -t "mcbd-claude-feature-123"
+**素の `tmux attach` が空白に見える理由。** CommandMate のセッションは、状態検出が十分な履歴を
+`capture-pane` で取れるように 200 桁 × 1000 行のキャンバスに固定されています。alt-screen の
+エージェント（claude / opencode / copilot）は transcript をその上端に、入力欄を下端に描き、
+tmux はカーソルを追従表示します。したがって普通のサイズの端末では**入力欄と空白しか見えず、
+会話は一行も見えません**。壊れているわけではありません。読むには上記の `capture --pane`、
+attach 中なら `prefix + g`、あるいは `attach --live` で窓を端末に合わせてください。
+
+attach せずに tmux 側から見る：
+
+```bash
+tmux ls -F '#{session_name} #{@cm_status} #{@cm_tool}/#{@cm_instance}'
+
+# 壊れたセッションを手動で削除（`=name:` は完全一致。zsh は素の `=` を食うのでクォート必須）
+tmux kill-session -t '=mcbd-claude-feature-123:'
 ```
 
 > **注意：** アタッチ中にセッション内で直接入力すると、CommandMate のセッション管理と干渉する可能性があります。`Ctrl+b` → `d` で detach し、CommandMate UI から操作してください。
@@ -387,7 +413,7 @@ npm start
 | 証跡 | チャットの履歴 | commit ・ ゲートログ ・ `verify history` ・ `report metrics` |
 | 並列作業 | ターミナルのタブ | タスクごとに worktree 1 つと契約 1 つ |
 | 止まったとき | そのうち気づく | 入力待ちが届く: バッジ ・ トースト ・ タブタイトル ・ 通知 |
-| 使えるエージェント | 1 つに固定 | Claude Code ・ Codex ・ Gemini CLI ・ Copilot ・ OpenCode ・ Antigravity ・ ローカルモデル |
+| 使えるエージェント | 1 つに固定 | Claude Code ・ Codex ・ Gemini CLI ・ Copilot ・ OpenCode ・ Antigravity ・ Command Code ・ ローカルモデル |
 
 </details>
 

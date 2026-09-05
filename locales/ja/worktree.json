@@ -104,13 +104,15 @@
       "tasks": "バックグラウンドタスクを表示・管理",
       "memory": {
         "claude": "CLAUDE.md メモリファイルを編集し auto-memory を管理",
-        "copilot": "メモリの状態表示と、セッション間メモリの有効・無効切り替え"
+        "copilot": "メモリの状態表示と、セッション間メモリの有効・無効切り替え",
+        "command-code": "Command Code のメモリを管理"
       },
       "new": "新しい会話を開始",
       "logout": {
         "codex": "Codex からサインアウト",
         "claude": "Anthropic アカウントからサインアウト",
-        "copilot": "現在の OAuth ログインセッションからログアウト"
+        "copilot": "現在の OAuth ログインセッションからログアウト",
+        "command-code": "Command Code またはプロバイダーからログアウト"
       },
       "quit": "Codex CLI を終了",
       "diff": "Git の差分を表示（未追跡ファイルを含む）",
@@ -120,12 +122,14 @@
         "codex": "カレントディレクトリに AGENTS.md テンプレートを生成",
         "claude": "リポジトリ向けの CLAUDE.md ガイドを生成",
         "copilot": "このリポジトリ向けの Copilot 指示ファイルを初期化",
-        "opencode": "AGENTS.md のガイド付きセットアップを実行"
+        "opencode": "AGENTS.md のガイド付きセットアップを実行",
+        "command-code": "このプロジェクト向けの AGENTS.md を生成"
       },
       "feedback": {
         "codex": "Codex チームにフィードバックを送信",
         "claude": "Claude Code についてのフィードバックを送信",
-        "copilot": "CLI についてのフィードバックを送信"
+        "copilot": "CLI についてのフィードバックを送信",
+        "command-code": "GitHub にバグ報告・フィードバックを送信"
       },
       "plan": "プランモードを切り替え",
       "goal": "現在のセッションの目標を設定",
@@ -139,7 +143,8 @@
         "codex": "Codex のスキルを管理",
         "claude": "Claude Code のスキルを管理",
         "copilot": "機能を拡張するスキルを管理",
-        "opencode": "利用可能なスキルを一覧・実行"
+        "opencode": "利用可能なスキルを一覧・実行",
+        "command-code": "エージェントスキルを一覧・表示"
       },
       "hooks": "フック設定を確認・管理",
       "sessions": "会話履歴を閲覧",
@@ -148,13 +153,15 @@
         "opencode": "OpenCode TUI を終了",
         "claude": "CLI を終了",
         "codex": "CLI を終了",
-        "copilot": "CLI を終了"
+        "copilot": "CLI を終了",
+        "command-code": "Command Code を終了"
       },
       "models": "AI モデルを切り替え",
       "agents": {
         "opencode": "利用可能なエージェントを一覧・管理",
         "claude": "サブエージェントの作成・管理を Claude に依頼するか .claude/agents/ を直接編集するよう促す案内を表示",
-        "codex": "稼働中のすべてのエージェントセッションを一覧・切り替え"
+        "codex": "稼働中のすべてのエージェントセッションを一覧・切り替え",
+        "command-code": "エージェント構成を管理"
       },
       "themes": "TUI のテーマを変更",
       "editor": "長文メッセージ用のエディタを開く",
@@ -193,7 +200,8 @@
       "keybindings": "キーボードショートカットの設定ファイルを開く",
       "login": {
         "claude": "Anthropic アカウントにサインイン",
-        "copilot": "Copilot にログイン"
+        "copilot": "Copilot にログイン",
+        "command-code": "Command Code またはプロバイダーにログイン"
       },
       "mobile": "Claude モバイルアプリのダウンロード用 QR コードを表示",
       "passes": "Claude Code の 1 週間無料パスを友人に共有",
@@ -244,7 +252,8 @@
       "approve": "直近の自動レビュー拒否に対する再試行を 1 回承認",
       "import": {
         "codex": "Claude Code から設定・プロジェクト・最近のチャットを取り込み",
-        "claude": "OpenAI Codex / Google Gemini CLI の設定（指示ファイル・MCP サーバー・コマンド・サブエージェント・スキル）を Claude Code に取り込み"
+        "claude": "OpenAI Codex / Google Gemini CLI の設定（指示ファイル・MCP サーバー・コマンド・サブエージェント・スキル）を Claude Code に取り込み",
+        "command-code": "他のコーディングエージェント（Claude Code / Codex / Cursor / pi / OpenCode / Gemini）から設定を取り込み"
       },
       "archive": "このセッションをアーカイブして終了",
       "delete": "このセッションを完全に削除して終了",
@@ -302,7 +311,26 @@
       "artifacts": "自分が所有または共有されている Artifact を一覧し、セッションへの添付・ブラウザで開く・リンクのコピーを行う",
       "auto-mode-setup": "プロジェクトと最近のセッションから autoMode.environment の下書きを作成し、内容を確認してユーザー設定に保存する",
       "rate-limit-options": "claude.ai の使用量上限でリクエストがブロックされたときに作業を続ける方法を表示（上限リセット時の自動継続・使用クレジットの追加・プランのアップグレード）",
-      "workflow-authoring": "動的ワークフロースクリプトを書くためのリファレンスを読み込み（スクリプト API・レジューム挙動・品質パターン・実例）"
+      "workflow-authoring": "動的ワークフロースクリプトを書くためのリファレンスを読み込み（スクリプト API・レジューム挙動・品質パターン・実例）",
+      "clone": "現在のブランチを新しいセッションに複製して切り替え",
+      "compact-mode": "セッション圧縮に使うコンパクトモードを選択",
+      "design": "UI の監査・構築・合成・出荷を支援するデザインパートナー",
+      "extra": "オンデマンドクレジットを購入する請求ページを開く",
+      "hotkeys": "すべてのキーボードショートカットを表示",
+      "learn": "学習ハブをブラウザで開く",
+      "learn-taste": "他のコーディングエージェントのセッションからコーディングの好みを学習",
+      "mode": "権限モードを表示・切り替え",
+      "plan-review": "このセッションの最新プランをレビュー表示で開く",
+      "plans": "保存済みプランの閲覧・レビュー・注釈",
+      "pr-comments": "現在のブランチの PR コメントをすべて取得",
+      "reload": "CLI を再起動してこのセッションを再開し、保留中の更新を適用",
+      "session-file": "現在のセッション ID とセッションファイルのパスを表示",
+      "taste": "taste 学習と利用状況を管理",
+      "todos": "セッションの TODO リストを管理",
+      "trace": "サポート調査用に現在のトレース ID をコピー",
+      "tree": "セッションツリーを辿って任意の地点へジャンプ",
+      "unshare": "会話の共有を停止",
+      "worktree": "git worktree の作成・一覧・切り替え"
     }
   },
   "session": {
@@ -386,11 +414,11 @@
   },
   "terminal": {
     "historyLabel": "履歴",
-    "filesLabel": "ファイル",
+    "filesLabel": "開いているファイル",
     "showHistory": "履歴を表示",
     "hideHistory": "履歴を非表示",
-    "showFiles": "ファイルを表示",
-    "hideFiles": "ファイルを非表示",
+    "showFiles": "開いているファイルを表示",
+    "hideFiles": "開いているファイルを非表示",
     "equalizeWidths": "均等幅",
     "equalizeWidthsHint": "ターミナル幅を均等にし、履歴幅を初期値に戻す",
     "addSplit": "分割を追加",
@@ -398,8 +426,17 @@
     "selectInstance": "{split} のエージェントインスタンスを選択",
     "moreActions": "その他の操作",
     "searchTerminal": "ターミナル内を検索",
+    "searchOutput": "{split} のターミナル出力を検索",
     "endSession": "セッションを終了",
-    "endSessionFor": "{name}のセッションを終了"
+    "endSessionFor": "{name}のセッションを終了",
+    "filesEmptyHint": "ファイルを開くと有効になります",
+    "historyAllSplitsHint": "すべての split に適用",
+    "historyChatOnlyHint": "すべての split がチャット表示のため、履歴列はありません",
+    "maximizeSplit": "{split} を最大化",
+    "maximizeFocusedSplit": "フォーカス中の split を最大化",
+    "restoreSplits": "分割表示に戻す",
+    "maximizeShortcutHint": "⌘ / Ctrl + Shift + Enter",
+    "maximizedStatus": "{split} を最大化中"
   },
   "surfaceMode": {
     "groupLabel": "{split} の出力面",
@@ -414,18 +451,20 @@
     "liveRegionLabel": "セッションの状態",
     "generating": "応答中…",
     "thinking": "考え中…",
-    "bannerLabel": "ターミナルでの操作が必要です",
-    "reasonPager": "ページャ表示中です。スクロールと終了はターミナル面で操作してください。",
-    "reasonSelectionList": "選択リストが開いています。項目の移動と決定はターミナル面で操作してください。",
-    "reasonUnclassified": "チャットでは読み取れない画面が出ています。ターミナル面で内容を確認してください。",
-    "reasonPromptUnreadable": "応答待ちですが選択肢を読み取れませんでした。ターミナル面で確認してください。",
+    "bannerLabel": "ここで操作できます",
+    "reasonPager": "ページャ表示中です。下の画面を見ながら、ここでスクロールと終了ができます。",
+    "reasonSelectionList": "選択リストが開いています。下の画面を見ながら、ここで項目の移動と決定ができます。",
+    "reasonUnclassified": "チャットでは種類を判別できない画面です。下にそのまま表示しているので、ここでキーを送って操作できます。",
+    "reasonPromptUnreadable": "応答待ちですが選択肢を読み取れませんでした。下の画面を見て、番号か y／n で答えられます。",
     "openTerminal": "ターミナルで確認",
     "jumpToLatest": "新着へ",
     "jumpToLatestGenerating": "新着へ（応答中）",
     "progressLabel": "生成中の返答",
     "progressPartial": "途中から表示しています",
     "settling": "まだ履歴に確定していません",
-    "settlingLabel": "確定待ちの返答"
+    "settlingLabel": "確定待ちの返答",
+    "dialogCardLabel": "ターミナルの画面",
+    "unreadableHint": "画面に出ている番号（1〜9）か y／n で答えてください。Enter は選択中の項目をそのまま確定します。"
   },
   "chatTranscript": {
     "regionLabel": "チャット履歴",
@@ -433,6 +472,22 @@
     "empty": "まだメッセージはありません",
     "emptyHint": "送信するとセッションが起動します",
     "openSearch": "この会話を検索",
+    "filePathMissing": "このパスは worktree にありません",
+    "thinking": {
+      "summary": "思考 {count} 件",
+      "expand": "思考を開く",
+      "collapse": "思考を閉じる"
+    },
+    "jumpToTop": "会話の先頭へ",
+    "toolLog": {
+      "summary": "\u30c4\u30fc\u30eb\u547c\u3073\u51fa\u3057 {count} \u4ef6",
+      "expand": "\u30c4\u30fc\u30eb\u547c\u3073\u51fa\u3057\u3092\u958b\u304f",
+      "collapse": "\u30c4\u30fc\u30eb\u547c\u3073\u51fa\u3057\u3092\u9589\u3058\u308b"
+    },
+    "toolActivity": {
+      "show": "\u30c4\u30fc\u30eb\u6d3b\u52d5\u3092\u958b\u304f",
+      "hide": "\u30c4\u30fc\u30eb\u6d3b\u52d5\u3092\u9589\u3058\u308b"
+    },
     "toolApproval": {
       "summary": "ツール承認 {count} 件",
       "expand": "ツール承認を開く",
@@ -561,7 +616,16 @@
   },
   "fileTabs": {
     "unsavedChanges": "未保存の変更",
-    "closeTab": "{name} を閉じる"
+    "closeTab": "{name} を閉じる",
+    "tabActions": "タブの操作",
+    "closeAll": "すべて閉じる",
+    "closeOthers": "他を閉じる",
+    "closeToRight": "右側を閉じる",
+    "confirmCloseTitle": "未保存の変更があります",
+    "confirmCloseBody": "閉じようとしているタブのうち {count} 件に未保存の変更があります。閉じると編集内容は失われます。",
+    "confirmKeepUnsaved": "未保存を残して閉じる",
+    "confirmDiscard": "すべて閉じる",
+    "confirmCancel": "キャンセル"
   },
   "markdownPreview": {
     "loadingImage": "[画像を読み込み中...]",
@@ -819,7 +883,7 @@
   "activityBar": {
     "toggleSidebar": "サイドバーを切り替え",
     "label": "アクティビティバー",
-    "files": "ファイル",
+    "files": "ファイルツリー",
     "git": "Git",
     "notes": "メモ",
     "schedules": "スケジュール",
@@ -846,6 +910,22 @@
     "toolbarLabel": "TUI ナビゲーション",
     "caption": "ナビ",
     "quitPager": "ページャーを終了"
+  },
+  "promptAnswerKeys": {
+    "toolbarLabel": "ダイアログへの回答キー",
+    "caption": "回答"
+  },
+  "selectionKeys": {
+    "numbersToolbarLabel": "選択肢の番号キー",
+    "numbersCaption": "選択",
+    "commitToolbarLabel": "選択中の項目を適用",
+    "sessionOnly": "このセッションのみ",
+    "sessionOnlyAria": "選択中の項目をこのセッションのみに適用 (s)",
+    "setDefault": "既定に設定",
+    "setDefaultAria": "選択中の項目を既定に設定 (Enter)",
+    "defaultWarning": "Enter はこの選択を新規セッションの既定として保存します。既定を変えずに切り替えるなら「このセッションのみ」を使ってください。",
+    "opencodeToolbarLabel": "opencode のモデルキー",
+    "opencodeCaption": "モデル"
   },
   "newFileDialog": {
     "title": "新規ファイル",

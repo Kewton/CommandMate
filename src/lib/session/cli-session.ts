@@ -23,6 +23,21 @@ import {
   sliceOutput,
   CACHE_MAX_CAPTURE_LINES,
 } from '@/lib/tmux/tmux-capture-cache';
+// Issue #2317: this module is one of the two gateways Issue #1922's import guard
+// names, which is why the tmux SURFACE is reached from here and not from
+// `worktree-status-helper.ts`. Static, not `await import()`: the guard's
+// `no-restricted-syntax` rule blocks the dynamic form outright ("keep it at
+// zero"), and this module already imports from `lib/tmux/**` above.
+import {
+  ensureSessionHooks,
+  forgetSessionHooks,
+  reconcileDelegatedGeometry,
+} from '@/lib/tmux/session-hooks';
+import {
+  forgetSessionStatus,
+  publishSessionStatus,
+} from '@/lib/tmux/session-status-options';
+import { isLiveAttachEligibleSession } from './tmux-session-surface';
 
 const logger = createLogger('cli-session');
 
@@ -158,4 +173,70 @@ export async function captureSessionOutputFresh(
  */
 export function getSessionName(worktreeId: string, cliToolId: CLIToolType, instanceId?: string): string {
   return resolveSessionContext(worktreeId, cliToolId, instanceId).sessionName;
+}
+
+// ===========================================================================
+// The tmux SURFACE (Issue #2317)
+// ===========================================================================
+
+/**
+ * What one session's surface write is about (Issue #2317).
+ *
+ * Structurally the same object `publishSessionStatus` takes; restated here
+ * rather than re-exported so this module's callers do not import a type from
+ * `lib/tmux/**` in order to call the gateway that exists to keep them out of it.
+ */
+export interface SessionSurfacePublication {
+  sessionName: string;
+  worktreeId: string;
+  cliToolId: string;
+  instanceId: string;
+  /** The `commandmate ls` STATUS word: `idle` / `ready` / `running` / `waiting`. */
+  status: string;
+}
+
+/**
+ * Publish one session's state onto its tmux session, and take back a geometry
+ * no human is using (Issue #2317, Phases B and D).
+ *
+ * ## Why this is here rather than called directly
+ *
+ * `worktree-status-helper.ts` is the caller, and Issue #1922's import guard
+ * (§4 D4) forbids it from reaching `lib/tmux/**` — this module is one of the two
+ * sanctioned gateways the guard's own message names, and the guard's allowlist
+ * "may only shrink". So the status poll asks this module, and this module owns
+ * the three tmux-side calls.
+ *
+ * Everything below is no-throw by construction (each callee swallows its own
+ * errors), and the whole thing is a convenience surface: a tmux hiccup must not
+ * be able to fail the poll that the sidebar, the header chip and
+ * `commandmate ls` all read.
+ *
+ * Costs nothing in the steady state: the status write is skipped unless the
+ * status CHANGED, the hook reconcile runs once per session per process, and the
+ * geometry probe is asked only for the tools `attach --live` accepts.
+ *
+ * @param publication - Session identity plus the status word to publish
+ */
+export async function publishSessionSurface(
+  publication: SessionSurfacePublication,
+): Promise<void> {
+  await ensureSessionHooks(publication.sessionName);
+  if (isLiveAttachEligibleSession(publication.sessionName)) {
+    await reconcileDelegatedGeometry(publication.sessionName);
+  }
+  await publishSessionStatus(publication);
+}
+
+/**
+ * Drop every memo held for a session that is known to be gone (Issue #2317).
+ *
+ * Without it, a session created later under the same name would be deduped
+ * against the dead one's last published status and never write its own.
+ *
+ * @param sessionName - tmux session name that no longer exists
+ */
+export function forgetSessionSurface(sessionName: string): void {
+  forgetSessionStatus(sessionName);
+  forgetSessionHooks(sessionName);
 }

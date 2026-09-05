@@ -150,6 +150,42 @@ export const ANTIGRAVITY_MARKDOWN_REQUEST_ID_PREFIX = 'antigravity-turn:';
 export const ANTIGRAVITY_PROMPT_REQUEST_ID_PREFIX = 'antigravity-prompt:';
 
 /**
+ * The same, for a turn read out of Command Code's transcript JSONL (Issue #2252).
+ *
+ * A fifth namespace for the fifth reader, for the reason
+ * {@link CLAUDE_MARKDOWN_REQUEST_ID_PREFIX} gives: the value is an idempotency
+ * key as well as a marker, and Command Code names its records with an **8-hex
+ * short id of its own minting** (`cb06ab09`), which is a far smaller space than
+ * claude's uuids. Sharing a prefix with claude would therefore not merely be
+ * untidy — a `command-code` id is exactly the shape a claude uuid's first
+ * segment has, and a collision between two tools' ids reads as "already saved",
+ * which is the one failure a key must not have.
+ *
+ * `command-code-` and not `cc-`: the string is what an operator reads in the row
+ * when they ask why History shows Markdown, and the tool id is what they will
+ * search the codebase for.
+ */
+export const COMMAND_CODE_MARKDOWN_REQUEST_ID_PREFIX = 'command-code-turn:';
+
+/**
+ * Prefix on a **user** row whose text was read out of Command Code's transcript
+ * JSONL (Issue #2252).
+ *
+ * Deliberately absent from {@link AGENT_MARKDOWN_REQUEST_ID_PREFIXES}, for the
+ * whole of the reason {@link CLAUDE_PROMPT_REQUEST_ID_PREFIX} states: the
+ * operator's own text is drawn verbatim and must not change shape because it
+ * happened to contain a `#` or a `|`.
+ *
+ * Keyed on the same record id as the turn's assistant row, which is claude's
+ * arrangement rather than codex's. It is the right one here because Command
+ * Code opens a turn with exactly one fresh `role: "user"` record — its own
+ * `isFreshUserTurn` is `role === 'user' && no tool_result block`, and a prompt
+ * typed while a turn is running is appended as a `meta.source: "steering"`
+ * record that opens a turn of its own rather than joining the one in flight.
+ */
+export const COMMAND_CODE_PROMPT_REQUEST_ID_PREFIX = 'command-code-prompt:';
+
+/**
  * Every prefix that means "this row holds source, not a rendering".
  *
  * One list rather than a chain of `startsWith` calls, so that adding the third
@@ -163,6 +199,7 @@ export const AGENT_MARKDOWN_REQUEST_ID_PREFIXES: readonly string[] = [
   CLAUDE_MARKDOWN_REQUEST_ID_PREFIX,
   CODEX_MARKDOWN_REQUEST_ID_PREFIX,
   ANTIGRAVITY_MARKDOWN_REQUEST_ID_PREFIX,
+  COMMAND_CODE_MARKDOWN_REQUEST_ID_PREFIX,
 ];
 
 /**
@@ -318,4 +355,41 @@ export function antigravityTurnRequestId(conversationId: string, stepIndex: numb
  */
 export function antigravityPromptRequestId(conversationId: string, stepIndex: number): string {
   return `${ANTIGRAVITY_PROMPT_REQUEST_ID_PREFIX}${antigravityTurnKey(conversationId, stepIndex)}`;
+}
+
+/**
+ * The row id for one Command Code turn (Issue #2252).
+ *
+ * The turn is named by the **prompt record it answers** — the `id` of the fresh
+ * `role: "user"` record the operator's text arrived on. That is claude's
+ * arrangement (#2121) and antigravity's (#2198) rather than codex's, because
+ * Command Code writes nothing that closes a turn and nothing that links a reply
+ * back to its prompt: `parentId` chains one record to the previous one in file
+ * order, not a reply to its question, so what opens the turn is the only
+ * boundary in the file.
+ *
+ * Deliberately not the assistant record's own `id`: one turn produces one
+ * assistant record per round of the agent loop — the captured two-tool turn has
+ * two — and keying on those would split one reply into several History rows.
+ *
+ * @param promptId - `id` of the user record that opened the turn
+ */
+export function commandCodeTurnRequestId(promptId: string): string {
+  return `${COMMAND_CODE_MARKDOWN_REQUEST_ID_PREFIX}${promptId}`;
+}
+
+/**
+ * The row id for the **prompt** that opened one Command Code turn (Issue #2252).
+ *
+ * Same `id`, different prefix, and therefore a different row — exactly the
+ * relationship {@link claudePromptRequestId} has with {@link claudeTurnRequestId},
+ * and for the same reason: one record names one turn, and a turn is a user row
+ * plus an assistant row, so keying both on the record that opened it is what
+ * makes the pair reconstructible from the transcript alone, including on a
+ * re-read where both halves must resolve to "already there" independently.
+ *
+ * @param promptId - `id` of the user record the operator's text arrived on
+ */
+export function commandCodePromptRequestId(promptId: string): string {
+  return `${COMMAND_CODE_PROMPT_REQUEST_ID_PREFIX}${promptId}`;
 }

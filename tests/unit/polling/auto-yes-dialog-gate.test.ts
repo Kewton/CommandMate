@@ -80,6 +80,10 @@ describe('[#1928] the rollout table', () => {
       gemini: 'legacy',
       antigravity: 'legacy',
       'vibe-local': 'legacy',
+      // Issue #2250 / Epic #2249 決定 3: Command Code's `PreToolUse` fires AFTER
+      // its permission dialog is answered, so a hook-driven `permissionDecision`
+      // cannot dismiss the dialog and there is no measured rule to gate on.
+      'command-code': 'legacy',
     });
   });
 

@@ -73,7 +73,7 @@ describe('resolveSessionName (Issue #1984)', () => {
   it('compares a non-empty set of names (guards the loop above against a no-op)', () => {
     // CLI_TOOL_IDS が空になったり getTool が全部落ちたりすれば、上のループは
     // 0 回まわって緑になる。回数を名指ししておく。
-    expect(CLI_TOOL_IDS.length).toBe(7);
-    expect(WORKTREE_IDS.length * 4 * CLI_TOOL_IDS.length).toBe(84);
+    expect(CLI_TOOL_IDS.length).toBe(8);
+    expect(WORKTREE_IDS.length * 4 * CLI_TOOL_IDS.length).toBe(96);
   });
 });

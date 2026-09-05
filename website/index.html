@@ -100,7 +100,7 @@
             width="400"
             height="300"
             role="img"
-            aria-label="The CommandMate loop, drawn as a cycle of four steps: a requirement becomes a contract; CommandMate sends that contract to any of seven coding agent CLIs; verification gates judge the work; and the verified result comes back with the evidence that feeds the next requirement."
+            aria-label="The CommandMate loop, drawn as a cycle of four steps: a requirement becomes a contract; CommandMate sends that contract to any of eight coding agent CLIs; verification gates judge the work; and the verified result comes back with the evidence that feeds the next requirement."
           >
             <g class="node">
               <rect x="8" y="18" width="150" height="70" rx="12" />
@@ -117,7 +117,7 @@
             <g class="node">
               <rect x="242" y="212" width="150" height="70" rx="12" />
               <text class="node-title" x="317" y="243">Coding agent</text>
-              <text class="node-sub" x="317" y="262">any of seven CLIs</text>
+              <text class="node-sub" x="317" y="262">any of eight CLIs</text>
             </g>
 
             <g class="node">
@@ -243,7 +243,7 @@ $ echo $?
           <article class="card">
             <h3>Any agent, in parallel</h3>
             <p>
-              One worktree and one contract per task, across seven agent CLIs and local models.
+              One worktree and one contract per task, across eight agent CLIs and local models.
             </p>
           </article>
           <article class="card">
@@ -523,7 +523,7 @@ $ echo $?
                 <th scope="row">Which agent</th>
                 <td>Locked to one</td>
                 <td class="with">
-                  Claude Code, Codex, Gemini CLI, Copilot, OpenCode, Antigravity, local models
+                  Claude Code, Codex, Gemini CLI, Copilot, OpenCode, Antigravity, Command Code, local models
                 </td>
               </tr>
             </tbody>
@@ -535,7 +535,8 @@ $ echo $?
       <section class="section" aria-labelledby="gallery-h">
         <h2 id="gallery-h">On desktop and on mobile</h2>
         <p class="section-lede">
-          The same sessions in your browser, whichever screen you are on.
+          The same sessions in your browser, whichever screen you are on — as the raw agent
+          terminal, or as a conversation you can read and answer.
         </p>
 
         <div class="gallery">
@@ -556,6 +557,23 @@ $ echo $?
               decoding="async"
             />
             <figcaption>Drill into a worktree and drive its agent session.</figcaption>
+          </figure>
+          <!-- The chat surface (Issue #2192). Deliberately captioned as a way to
+               READ and STEER a run, never as the record of one: the with/without
+               table above places "a chat transcript" on the Without side, and
+               that is about evidence — commits, gate logs, `verify history` —
+               which this surface does not replace and does not claim to. -->
+          <figure class="shot shot-wide">
+            <img
+              src="assets/img/screenshot-worktree-desktop-chat.webp"
+              alt="The same CommandMate worktree session shown as a chat conversation on desktop: the request, the agent's reply in full, and its tool calls and approvals folded into chips"
+              loading="lazy"
+              decoding="async"
+            />
+            <figcaption>
+              Or read the same session as a conversation — the reply in full, the tool calls
+              folded away.
+            </figcaption>
           </figure>
           <figure class="shot">
             <img
@@ -584,7 +602,21 @@ $ echo $?
             />
             <figcaption>A live agent terminal, in your pocket.</figcaption>
           </figure>
+          <figure class="shot">
+            <img
+              src="assets/img/screenshot-worktree-mobile-chat.webp"
+              alt="The same conversation on a phone: the agent's replies in full, its tool calls folded into a chip, and a composer to answer from"
+              loading="lazy"
+              decoding="async"
+            />
+            <figcaption>And the same conversation, read and answered on the phone.</figcaption>
+          </figure>
         </div>
+        <p class="note">
+          The conversation is somewhere to watch a run and answer it — a dialog the agent stops
+          on is answerable there, not only in the terminal. What the run is judged on does not
+          move: commits, gate logs, <code>verify history</code>.
+        </p>
       </section>
 
       <!-- Pairing a phone. The gallery above shows the phone screens without

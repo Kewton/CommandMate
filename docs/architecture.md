@@ -58,7 +58,7 @@
 ### 1.3 実装済み機能
 
 - **CLI ツールのサポート** (Issue #4で実装完了、Issue #368/#379/#545/#988 で拡張)
-  - Claude Code, Codex CLI, Gemini CLI, Vibe-Local (Ollama), OpenCode, GitHub Copilot, Antigravity の 7 ツール対応（正本は `src/lib/cli-tools/types.ts` の `CLI_TOOL_IDS`）
+  - Claude Code, Codex CLI, Gemini CLI, Vibe-Local (Ollama), OpenCode, GitHub Copilot, Antigravity, Command Code の 8 ツール対応（正本は `src/lib/cli-tools/types.ts` の `CLI_TOOL_IDS`）
   - Strategy パターンによる拡張可能な設計
   - worktree毎に2〜4エージェントを選択可能（`selected_agents`カラム）
   - Vibe-LocalはOllamaモデルを指定可能（`vibe_local_model`カラム）
@@ -170,6 +170,25 @@ graph TD
   （生成中の本文は列末尾の `ChatLiveTurnBubble`、Issue #2233）、`terminal` は
   `TerminalDisplay`。**入力面は両モード共通**で、待機中は同じ `PromptPanel` が
   出る（Issue #2194 が出力面に応答 UI を置いていないのはこのため）
+- **「TUI 外ダイアログ・選択リスト・pager はチャット面で操作しない」という Epic #2192 の
+  決定 5 は Issue #2254 で撤回された**。チャット面は `resolveBlockedReason` が非 null の
+  4 状態（pager / selectionList / unclassified / promptUnreadable）で、live 領域に
+  **ペイン末尾を描いた `ChatDialogCard`**（切り出しは `lib/chat/dialog-frame.ts`）と
+  状態別の操作（`NavigationButtons` / `TerminalEscapeHatch` / `PromptAnswerKeys`）を出す。
+  切り出しは**空行圧縮 → 末尾 12〜20 行**の順で、逆順にすると codex のように内容がペイン
+  上端に来るツールでカードが空になる（`capture-pane` は `TUI_PANE_HEIGHT` = 1000 行を
+  そのまま返す。実測は `tests/fixtures/chat-dialog-card-2254/README.md`）。
+  `frame` に渡すのは `PaneTerminalState.output` で、`realtimeSnippet`（末尾 100 行）は
+  同じ理由で使えない
+- **答えが「方向」でなく「文字」の待ちのために `NAVIGATION_KEY_VALUES` へ `1`〜`9` / `y` / `n`
+  を追加**（Issue #2254、`ANSWER_KEY_VALUES`）。`/special-keys` は宣言したツールの語彙で
+  検証するので（Issue #2046）全ツールが受け付ける。自由文字列は通さず、`/send` の
+  `prompt_waiting` ガードも触っていない
+- **同じ操作 UI を 2 か所に出さない**。チャット面表示中は PC footer の `showNav` /
+  `showEscapeHatch`（`TerminalSplitPaneContent`）と、スマホの docked `NavigationButtons`
+  （`WorktreeDetailRefactored`）を落としてカード側へ寄せる。後者はタブ外にあるため
+  `MobileTerminalTab` が `onSurfaceModeChange` で mount 時にもモードを上へ報告する。
+  `PromptPanel` / `MobilePromptSheet` は対象外（答えられる待ちにカードを出さないため）
 - **「チャット面の本体は `HistoryPane` をそのまま使う」という Epic #2192 の決定 1 は
   Issue #2232 で撤回された**。履歴ブラウザは 1 画面に多くのターンを俯瞰させたい、会話面は
   返信そのものを読ませたい、と必要な情報密度が正反対で 1 実装では両立しないため
@@ -477,6 +496,8 @@ tmux セッション / Claude プロセスが落ちた場合
 - `VibeLocalTool` - Vibe-Local / Ollama (Issue #368)
 - `OpenCodeTool` - OpenCode (Issue #379)
 - `CopilotTool` - GitHub Copilot CLI (Issue #545)
+- `AntigravityTool` - Antigravity CLI / `agy` (Issue #988)
+- `CommandCodeTool` - Command Code CLI / `commandcode` (Issue #2250)
 
 **管理:**
 - `CLIToolManager` シングルトンクラスで各ツールインスタンスを管理
@@ -518,7 +539,7 @@ tmux send-keys -t "{sessionName}" "claude" C-m
 - テーブル（イメージ）:
 - worktrees:
 - id, name, path, last_message_summary, updated_at
-- **cli_tool_id** (追加: Issue #4、#379/#545/#988 で拡張) - 使用するCLI tool ('claude' | 'codex' | 'gemini' | 'vibe-local' | 'opencode' | 'copilot' | 'antigravity')
+- **cli_tool_id** (追加: Issue #4、#379/#545/#988/#2250 で拡張) - 使用するCLI tool ('claude' | 'codex' | 'gemini' | 'vibe-local' | 'opencode' | 'copilot' | 'antigravity' | 'command-code')
 - **selected_agents** (追加: Issue #368) - 選択中の2〜4エージェント (JSON配列, 例: '["claude","vibe-local"]')
 - **vibe_local_model** (追加: Issue #368) - Vibe-Local用Ollamaモデル名 (nullable)
 - repository_path, repository_name, description
@@ -603,14 +624,14 @@ feature/foo
 
 - ChatMessage.requestId とログ名に埋め込むことで、「どのリクエストの応答か」をより厳密にトレース可能。
 
-### 10.2 マルチ LLM / マルチセッション ✅ 実装済み (Issue #4、#368/#379/#545/#988 で拡張)
+### 10.2 マルチ LLM / マルチセッション ✅ 実装済み (Issue #4、#368/#379/#545/#988/#2250 で拡張)
 
 **実装内容:**
-- Claude Code / Codex / Gemini / Vibe-Local / OpenCode / GitHub Copilot / Antigravity の 7 ツールに対応
+- Claude Code / Codex / Gemini / Vibe-Local / OpenCode / GitHub Copilot / Antigravity / Command Code の 8 ツールに対応
 - ワークツリーごとに `cliToolId` フィールドで使用するCLIツールを管理
 - Strategy パターンによる抽象化:
   - `BaseCLITool` 抽象クラス
-  - `ClaudeTool` / `CodexTool` / `GeminiTool` / `VibeLocalTool` / `OpenCodeTool` / `CopilotTool` / `AntigravityTool` 実装クラス
+  - `ClaudeTool` / `CodexTool` / `GeminiTool` / `VibeLocalTool` / `OpenCodeTool` / `CopilotTool` / `AntigravityTool` / `CommandCodeTool` 実装クラス
   - `CLIToolManager` シングルトンでツールインスタンスを管理
 - データベーススキーマ: `worktrees.cli_tool_id` カラム（デフォルト: 'claude'）
 - 対応API:

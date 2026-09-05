@@ -29,8 +29,21 @@ The following tools are required to use CommandMate.
 | npm | - | Yes | `npm -v` |
 | Git | - | Yes | `git --version` |
 | tmux | - | Yes | `tmux -V` |
-| Claude CLI | - | Optional | `claude --version` |
 | gh CLI | - | Optional | `gh --version` |
+| Claude Code | - | Optional | `claude --version` |
+| Codex CLI | - | Optional | `codex --version` |
+| Gemini CLI | - | Optional | `gemini --version` |
+| GitHub Copilot CLI | - | Optional | `copilot --version` |
+| OpenCode | - | Optional | `opencode --version` |
+| Antigravity CLI | - | Optional | `agy --version` |
+| Command Code CLI | - | Optional | `commandcode --version` |
+
+Every agent CLI is optional. CommandMate starts with none of them installed, but a
+worktree cannot start a session for an agent whose CLI is missing.
+`commandmate init` reports a version (or "not found") for every row above.
+
+> **Note**: `vibe-local` is a seat for a local script driving an Ollama model.
+> There is no published artifact to check, so `init` does not check for one.
 
 ### Checking Prerequisites
 
@@ -53,6 +66,34 @@ brew install node git tmux
 ```bash
 sudo apt update
 sudo apt install nodejs npm git tmux
+```
+
+#### Agent CLIs
+
+Install only the agents you intend to use — one line per agent.
+
+```bash
+npm install -g @anthropic-ai/claude-code   # Claude Code (claude)
+npm install -g @openai/codex               # Codex CLI (codex)
+npm install -g @google/gemini-cli          # Gemini CLI (gemini)
+npm install -g opencode-ai                 # OpenCode (opencode)
+npm install -g command-code                # Command Code CLI (commandcode)
+brew install copilot-cli                   # GitHub Copilot CLI (copilot)
+                                           # or: npm i -g @github/copilot
+```
+
+The Antigravity CLI (`agy`) is not published on npm. See the
+[official documentation](https://antigravity.google/docs/cli/reference) for how to get it.
+
+> **Note**: The `command-code` package installs four executables — `cmd`, `cmdc`,
+> `command-code` and `commandcode`. CommandMate launches `commandcode`, because
+> `cmd` collides with the Windows shell.
+
+Starting an agent that is not installed answers with both facts — that it is
+missing, and **how to install it** — in one sentence. For example:
+
+```text
+Command Code CLI (commandcode) is not installed or not in PATH. Install with: npm install -g command-code
 ```
 
 > **Note**: Native Windows is not supported because CommandMate depends on tmux. On Windows, run CommandMate inside WSL2 — see the [WSL2 Setup Guide](./wsl2-setup.md).

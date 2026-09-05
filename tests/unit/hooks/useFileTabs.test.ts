@@ -7,7 +7,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
-import { useFileTabs, MAX_FILE_TABS, fileTabsReducer } from '@/hooks/useFileTabs';
+import { useFileTabs, MAX_FILE_TABS, fileTabsReducer, selectTabsToClose } from '@/hooks/useFileTabs';
 import type { FileTabsState, FileTabsAction, FileTab, FileTabsActions } from '@/hooks/useFileTabs';
 import type { FileContent } from '@/types/models';
 
@@ -357,6 +357,134 @@ describe('fileTabsReducer', () => {
     });
   });
 
+  // ==========================================================================
+  // Bulk close (Issue #2260)
+  // ==========================================================================
+
+  /** State with tabs a.ts..(n) and the given active index. */
+  function bulkState(paths: string[], activeIndex: number | null): FileTabsState {
+    return {
+      tabs: paths.map((path) => ({
+        path,
+        name: path,
+        content: null,
+        loading: false,
+        error: null,
+        isDirty: false,
+      })),
+      activeIndex,
+    };
+  }
+
+  const paths = (state: FileTabsState): string[] => state.tabs.map((t) => t.path);
+
+  describe('CLOSE_OTHERS (Issue #2260)', () => {
+    it('keeps only the anchor tab and activates it', () => {
+      const state = bulkState(['a.ts', 'b.ts', 'c.ts', 'd.ts'], 3);
+      const result = fileTabsReducer(state, { type: 'CLOSE_OTHERS', path: 'b.ts' });
+
+      expect(paths(result)).toEqual(['b.ts']);
+      // The active tab (d.ts) was closed, so the surviving anchor takes over.
+      expect(result.activeIndex).toBe(0);
+    });
+
+    it('keeps the anchor active when the anchor was already active', () => {
+      const state = bulkState(['a.ts', 'b.ts', 'c.ts'], 1);
+      const result = fileTabsReducer(state, { type: 'CLOSE_OTHERS', path: 'b.ts' });
+
+      expect(paths(result)).toEqual(['b.ts']);
+      expect(result.activeIndex).toBe(0);
+    });
+
+    it('is a no-op when the anchor is the only open tab', () => {
+      const state = bulkState(['a.ts'], 0);
+      expect(fileTabsReducer(state, { type: 'CLOSE_OTHERS', path: 'a.ts' })).toBe(state);
+    });
+
+    it('is a no-op when the anchor is not open', () => {
+      const state = bulkState(['a.ts', 'b.ts'], 0);
+      expect(fileTabsReducer(state, { type: 'CLOSE_OTHERS', path: 'zz.ts' })).toBe(state);
+    });
+  });
+
+  describe('CLOSE_TO_RIGHT (Issue #2260)', () => {
+    it('keeps the anchor and everything left of it, closing only what follows', () => {
+      const state = bulkState(['a.ts', 'b.ts', 'c.ts', 'd.ts'], 0);
+      const result = fileTabsReducer(state, { type: 'CLOSE_TO_RIGHT', path: 'b.ts' });
+
+      // Boundary: the anchor itself survives, its immediate neighbour does not.
+      expect(paths(result)).toEqual(['a.ts', 'b.ts']);
+      expect(result.activeIndex).toBe(0);
+    });
+
+    it('moves the selection onto the anchor when the active tab is closed', () => {
+      const state = bulkState(['a.ts', 'b.ts', 'c.ts', 'd.ts'], 3);
+      const result = fileTabsReducer(state, { type: 'CLOSE_TO_RIGHT', path: 'b.ts' });
+
+      expect(paths(result)).toEqual(['a.ts', 'b.ts']);
+      expect(result.activeIndex).toBe(1);
+    });
+
+    it('leaves the selection alone when the active tab survives', () => {
+      const state = bulkState(['a.ts', 'b.ts', 'c.ts', 'd.ts'], 1);
+      const result = fileTabsReducer(state, { type: 'CLOSE_TO_RIGHT', path: 'c.ts' });
+
+      expect(paths(result)).toEqual(['a.ts', 'b.ts', 'c.ts']);
+      expect(result.activeIndex).toBe(1);
+    });
+
+    it('is a no-op when the anchor is the rightmost tab', () => {
+      const state = bulkState(['a.ts', 'b.ts', 'c.ts'], 0);
+      expect(fileTabsReducer(state, { type: 'CLOSE_TO_RIGHT', path: 'c.ts' })).toBe(state);
+    });
+
+    it('is a no-op when the anchor is not open', () => {
+      const state = bulkState(['a.ts', 'b.ts'], 0);
+      expect(fileTabsReducer(state, { type: 'CLOSE_TO_RIGHT', path: 'zz.ts' })).toBe(state);
+    });
+
+    it('matches closing the same tabs one at a time from the right', () => {
+      const state = bulkState(['a.ts', 'b.ts', 'c.ts', 'd.ts', 'e.ts'], 4);
+
+      const batched = fileTabsReducer(state, { type: 'CLOSE_TO_RIGHT', path: 'b.ts' });
+      const oneAtATime = ['e.ts', 'd.ts', 'c.ts'].reduce(
+        (acc, path) => fileTabsReducer(acc, { type: 'CLOSE_TAB', path }),
+        state,
+      );
+
+      expect(paths(batched)).toEqual(paths(oneAtATime));
+      expect(batched.activeIndex).toBe(oneAtATime.activeIndex);
+    });
+  });
+
+  describe('selectTabsToClose (Issue #2260)', () => {
+    const tabs = bulkState(['a.ts', 'b.ts', 'c.ts', 'd.ts'], 0).tabs;
+
+    it("'all' returns every open path regardless of the anchor", () => {
+      expect(selectTabsToClose(tabs, 'zz.ts', 'all')).toEqual(['a.ts', 'b.ts', 'c.ts', 'd.ts']);
+    });
+
+    it("'others' returns every path but the anchor, in tab-bar order", () => {
+      expect(selectTabsToClose(tabs, 'b.ts', 'others')).toEqual(['a.ts', 'c.ts', 'd.ts']);
+    });
+
+    it("'right' excludes the anchor and includes its immediate neighbour", () => {
+      const selected = selectTabsToClose(tabs, 'b.ts', 'right');
+
+      expect(selected).toEqual(['c.ts', 'd.ts']);
+      expect(selected).not.toContain('b.ts');
+    });
+
+    it("'right' returns nothing for the rightmost tab", () => {
+      expect(selectTabsToClose(tabs, 'd.ts', 'right')).toEqual([]);
+    });
+
+    it('returns nothing when the anchor is not open', () => {
+      expect(selectTabsToClose(tabs, 'zz.ts', 'others')).toEqual([]);
+      expect(selectTabsToClose(tabs, 'zz.ts', 'right')).toEqual([]);
+    });
+  });
+
   // ============================================================================
   // MAX_FILE_TABS regression guard (Issue #505) [DR3-002]
   // ============================================================================
@@ -695,6 +823,50 @@ describe('useFileTabs', () => {
       const fn1 = result.current[1].closeAllTabs;
       rerender();
       expect(Object.is(fn1, result.current[1].closeAllTabs)).toBe(true);
+    });
+  });
+
+  describe('closeOtherTabs / closeTabsToRight (Issue #2260)', () => {
+    function openThree() {
+      const { result, rerender } = renderHook(() => useFileTabs('test-wt'));
+      act(() => {
+        result.current[1].openFile('a.ts');
+        result.current[1].openFile('b.ts');
+        result.current[1].openFile('c.ts');
+      });
+      return { result, rerender };
+    }
+
+    it('closeOtherTabs leaves only the anchor open', () => {
+      const { result } = openThree();
+
+      act(() => {
+        result.current[1].closeOtherTabs('b.ts');
+      });
+
+      expect(result.current[0].tabs.map((t) => t.path)).toEqual(['b.ts']);
+      expect(result.current[0].activeIndex).toBe(0);
+    });
+
+    it('closeTabsToRight keeps the anchor and everything before it', () => {
+      const { result } = openThree();
+
+      act(() => {
+        result.current[1].closeTabsToRight('a.ts');
+      });
+
+      expect(result.current[0].tabs.map((t) => t.path)).toEqual(['a.ts']);
+      expect(result.current[0].activeIndex).toBe(0);
+    });
+
+    it('both dispatcher identities are stable across renders', () => {
+      const { result, rerender } = openThree();
+      const others = result.current[1].closeOtherTabs;
+      const toRight = result.current[1].closeTabsToRight;
+      rerender();
+
+      expect(Object.is(others, result.current[1].closeOtherTabs)).toBe(true);
+      expect(Object.is(toRight, result.current[1].closeTabsToRight)).toBe(true);
     });
   });
 

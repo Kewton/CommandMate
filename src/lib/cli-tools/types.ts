@@ -15,7 +15,7 @@ import type {
  * T2.1: Single source of truth for CLI tool IDs
  * CLIToolType is derived from this constant (DRY principle)
  */
-export const CLI_TOOL_IDS = ['claude', 'codex', 'gemini', 'vibe-local', 'opencode', 'copilot', 'antigravity'] as const;
+export const CLI_TOOL_IDS = ['claude', 'codex', 'gemini', 'vibe-local', 'opencode', 'copilot', 'antigravity', 'command-code'] as const;
 
 /**
  * CLIツールタイプ
@@ -42,6 +42,10 @@ const ALTERNATE_SCREEN_CLI_TOOLS: ReadonlySet<CLIToolType> = new Set<CLIToolType
   'claude',
   'opencode',
   'copilot',
+  // Issue #2250: `command-code` is deliberately absent. Command Code renders
+  // INLINE -- measured on 1.40.1, `#{alternate_on}` is 0 and the pane keeps its
+  // scrollback -- so its captured line count really is a monotonic cursor, the
+  // way codex's and agy's are.
 ]);
 
 /**
@@ -343,6 +347,7 @@ export const CLI_TOOL_DISPLAY_NAMES: Record<CLIToolType, string> = {
   opencode: 'OpenCode',
   copilot: 'Copilot',
   antigravity: 'Antigravity',
+  'command-code': 'Command Code',
 };
 
 /**

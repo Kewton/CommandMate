@@ -74,6 +74,40 @@ export const DEPENDENCIES: DependencyCheck[] = [
     versionArg: '--version',
     required: false,
   },
+  // Issue #2301: the same gap #2069 closed for codex, still open for three more
+  // of the eight tools `CLI_TOOL_IDS` names. `commandmate init` reported a
+  // version for four agent CLIs and stayed silent about gemini, antigravity and
+  // Command Code, so an operator who had just picked one of those from the
+  // agent list got no answer from the one command whose job is to answer it.
+  //
+  // The binary names are the ones the tool implementations launch, not the ones
+  // the package is called: `command-code` ships four bins and
+  // `src/lib/cli-tools/command-code.ts` picks `commandcode`; Antigravity's is
+  // `agy`.
+  //
+  // `vibe-local` is the eighth id and is deliberately NOT here. It is a local
+  // shell script rather than an installable CLI (`version-probes.ts` excludes it
+  // for the same reason), and it has no `--version`: measured on 2026-09-05,
+  // `vibe-local --version` ignores the flag and opens its interactive
+  // permission prompt, which is the last thing `init` should do to a terminal.
+  {
+    name: 'Gemini CLI',
+    command: 'gemini',
+    versionArg: '--version',
+    required: false,
+  },
+  {
+    name: 'Antigravity CLI',
+    command: 'agy',
+    versionArg: '--version',
+    required: false,
+  },
+  {
+    name: 'Command Code CLI',
+    command: 'commandcode',
+    versionArg: '--version',
+    required: false,
+  },
 ];
 
 /**

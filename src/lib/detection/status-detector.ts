@@ -131,6 +131,12 @@ export const SELECTION_LIST_REASONS = new Set<string>([
   // 1.18.21), so it is a `menu`, not something `respond <id> N` can answer.
   STATUS_REASON.OPENCODE_PERMISSION_PROMPT,
   STATUS_REASON.CLAUDE_SELECTION_LIST,
+  // Issue #2297: Command Code's picker. Its footer is a lower-case hint bar of
+  // its own (`enter to select · esc to cancel`), so it needs its own rule — and
+  // it needs to be HERE, because the alternative reading of that frame is the
+  // unclassified floor, whose controls are the answer characters and whose
+  // answer characters go into the picker's search box.
+  STATUS_REASON.COMMAND_CODE_SELECTION_LIST,
   STATUS_REASON.COPILOT_SELECTION_LIST,
   STATUS_REASON.CODEX_SELECTION_LIST,
   // Issue #1017: Codex pager/edit-previous mode also drives NavigationButtons.

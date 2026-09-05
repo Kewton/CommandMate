@@ -28,7 +28,7 @@ import {
   TUI_EXIT_WAIT_MS,
   VIBE_LOCAL_DOUBLE_ENTER_WAIT_MS,
 } from '@/config/cli-tool-timing-config';
-import { SessionStartUnavailableError } from '../session/session-start-error';
+import { missingToolError } from './install-hints';
 
 const logger = createLogger('cli-tools/vibe-local');
 
@@ -72,7 +72,7 @@ export class VibeLocalTool extends BaseCLITool {
   protected async launchSession(worktreeId: string, worktreePath: string, instanceId?: string): Promise<void> {
     const vibeLocalAvailable = await this.isInstalled();
     if (!vibeLocalAvailable) {
-      throw new SessionStartUnavailableError(this.name, 'vibe-local is not installed or not in PATH');
+      throw missingToolError(this);
     }
 
     const sessionName = this.getSessionName(worktreeId, instanceId);

@@ -19,6 +19,13 @@ const { NAVIGATION_KEY_VALUES } = vi.hoisted(() => ({
   NAVIGATION_KEY_VALUES: [
     'Up', 'Down', 'Left', 'Right', 'Enter', 'Escape', 'Tab', 'BTab',
     'PageUp', 'PageDown', 'Home', 'End', 'q',
+    // Issue #2254: the answer characters. Mirrored here because this stub IS
+    // the vocabulary the route validates against in this file — the real list
+    // is never imported (see the note above), so a divergence would leave the
+    // 400-path cases below asserting against a vocabulary production dropped.
+    // The REAL registry is exercised in
+    // tests/unit/api/special-keys-per-tool-vocabulary-2046.test.ts.
+    '1', '2', '3', '4', '5', '6', '7', '8', '9', 'y', 'n',
   ] as const,
 }));
 

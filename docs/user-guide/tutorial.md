@@ -38,6 +38,7 @@
 | 5 | worktree ごとのセッション並列と、契約ごとのゲート | 並列は隔離と各自のゲートがあって初めて安全 |
 | 6 | `verify history` / `task show` / Review 画面 / `report metrics` | 証跡はチャットより長生きする |
 | 7 | （任意）PR にする | — |
+| 別紙 | opencode / Command Code で同じ 1 周を回す | 判定の仕組みがエージェントに依存していないこと |
 
 ---
 
@@ -46,7 +47,8 @@
 - **CommandMate 0.24.0 以上**が起動していること（まだなら `npx commandmate@latest`）
   サンプルリポジトリの契約は自前のゲート定義（`gateDefinitions`）を持っており、これは 0.24.0 以降の機能です
 - **Node.js 22 以上**
-- **エージェント CLI がいずれか 1 つ**使えること（Claude Code / Codex / Antigravity）
+- **エージェント CLI がいずれか 1 つ**使えること（Claude Code / Codex / Antigravity / OpenCode / Command Code）
+  本文の実測は Claude Code で取っていますが、opencode / Command Code で同じ 1 周を回す手順は [別紙](#別紙-opencode--command-code-で同じ-1-周を回す) にあります
 - **GitHub アカウント**（サンプルリポジトリを fork するために使います）
 - **`gh`（GitHub CLI）が認証済み**であること — Step 0 の **Fork & Add** を使う場合のみ
 
@@ -261,6 +263,9 @@ Message sent.
 
 CommandMate はタスクを記録し、契約の goal と scope をエージェントへ渡します。
 
+> **Claude Code 以外を使っている場合**: 送り先を `--instance` で名指しするだけで、以降は同じです。
+> 契約もゲートもエージェント別の分岐を持ちません。手順は [別紙: opencode / Command Code で同じ 1 周を回す](#別紙-opencode--command-code-で同じ-1-周を回す) を参照してください。
+
 ![契約ファイルと検証設定を読んでから、契約を送って判定を受け取るまで](../images/tutorial/cm-t4-contract-verify.ja.gif)
 
 **映っているもの**: 検証設定（`verify.yaml`）と契約ファイルの中身を 1 枚ずつ表示したあと、ターミナルで `commandmate ls` → `commandmate send <id> --contract <path>` → `commandmate wait <id> --verify` が `exit 10`（エージェントが確認を求めている）で返り、`commandmate respond <id> 1` のあとの 2 回目の `wait` が `GATE work-evidence PASS` / `GATE scope PASS` / `GATE unit PASS` / `RESULT passed` を出して `echo $?` が `0` を返すところ。
@@ -319,7 +324,7 @@ CommandMate は **worktree 1 つにつきセッション 1 つ**を割り当て�
 /worktree-new fix/shout
 ```
 
-**Antigravity の場合** — `worktree-new` は Claude Code（`.claude/skills/`）と Codex（`.agents/skills/`）で動作確認済みですが、**Antigravity では未確認**です。代わりに次の指示文を貼り付けてください。
+**Antigravity / opencode / Command Code の場合** — `worktree-new` は Claude Code（`.claude/skills/`）と Codex（`.agents/skills/`）で動作確認済みですが、**この 3 つでは未確認**です。代わりに次の指示文を貼り付けてください（Skill を経由しないので、どのエージェントでも同じように読めます）。
 
 > `fix/shout` という新しいブランチ用の git worktree を作成してください。
 > このリポジトリの隣に `commandmate-tutorial-fix-shout` という名前の兄弟ディレクトリとして、
@@ -465,6 +470,95 @@ gh pr create --fill
 ```
 
 受入条件そのものを Skill 化したい場合は、公式 Catalog の `cmate-acceptance-test` を Step 2 と同じ手順で導入してください。
+
+---
+
+## 別紙: opencode / Command Code で同じ 1 周を回す
+
+> **エンジニアならここで何を気にするか**: 判定の仕組みがエージェントに依存しているなら、それは判定ではなく相性。
+
+本文の実測は Claude Code で取っていますが、**契約 → 送信 → 検証ゲート**のループそのものは
+エージェントに依存しません。変わるのは**送り先の名指し方**だけです。ここでは opencode と
+Command Code で、Step 3 → Step 4 → Step 6 と同じ 1 周を回します。
+
+### A-1. なぜエージェントに依存しないのか
+
+- **契約は YAML で、エージェントに届くのはただのテキストです。** CommandMate が契約から
+  前文（`## 実行契約` / `## タスク`）を組み立ててセッションへ送ります。この組み立てに
+  エージェント別の分岐はありません（`composeContractMessage()`、`src/lib/tasks/contract-message.ts`）
+- **ゲートは worktree の作業ディレクトリで走るシェルコマンドです。** 合否はそのプロセスの
+  exit code で決まり、エージェントは判定に関与しません。`.commandmate/verify.yaml` の
+  `command: npm test` は、誰が書いたコードに対しても同じように走ります
+
+だから Step 3（`commandmate verify`）と Step 6（`verify history` / `task show` /
+`report metrics`）は、**本文のコマンドをそのまま**使えます。名指しが要るのは、エージェントの
+セッションに触る `send` と `wait` だけです。
+
+### A-2. 送り先を名指しする
+
+`--instance` に **CLI ツール名そのもの**を渡すと、そのツールの**プライマリインスタンス**として
+解決されます。roster へ事前登録する必要はなく、セッションが起動していなければ `send` が
+起動します。
+
+```bash
+# opencode で 1 周する
+commandmate send commandmate-tutorial --contract .commandmate/tasks/fix-greet.yaml --instance opencode
+commandmate wait commandmate-tutorial --instance opencode --verify
+echo $?
+```
+
+```bash
+# Command Code で 1 周する
+commandmate send commandmate-tutorial --contract .commandmate/tasks/fix-greet.yaml --instance command-code
+commandmate wait commandmate-tutorial --instance command-code --verify
+echo $?
+```
+
+返ってくるものは Step 4-4 と同じ形です（`GATE` 行 → `RESULT` → exit code）。判定するゲートも
+同じ `issue-greet` のままです。契約が変わっていない以上、変わりようがありません。
+
+> **`wait` にも `--instance` を書いてください。** `wait` に `--agent` はありません。`send` だけで
+> 名指しして `wait` を素で呼ぶと、待つ相手はその worktree の**既定エージェント**になります。
+> まだ動いている opencode を横目に Claude Code の完了を「検知」してしまう取り違えが、
+> エラーを出さずに起きます（[CLI 運用ガイド](./cli-operations-guide.md#commandmate-wait)）。
+
+### A-3. 名指しが効いたかを確かめる
+
+送り先が思ったところに解決されたかは、その場で読めます。
+
+```bash
+commandmate capture commandmate-tutorial --instance opencode --json | jq -r '.cliTool, .instanceId, .resolvedBy'
+```
+
+期待する値は `opencode` / `opencode` / `primary` です。`resolvedBy` が `worktree-default` で
+返ってきたら、その `--instance` は roster にも無くツール名とも一致していないので、
+**worktree の既定エージェント**に落ちています。
+
+roster に載せて、ブラウザ UI の Agent パネルからも同じインスタンスを扱えるようにするなら
+次です（任意。`--agent` は roster 行の CLI ツールを宣言するもので、`add` では必須です）。
+
+```bash
+commandmate instances commandmate-tutorial add --agent opencode
+commandmate instances commandmate-tutorial
+```
+
+詳細は [CLI 運用ガイド](./cli-operations-guide.md#commandmate-instances) を参照してください。
+
+### A-4. エージェントによって変わるところ
+
+ループは共通でも、次の 3 つは共通ではありません。**共通でないものを共通だと書かない**ために
+分けてあります。
+
+| 変わるもの | 何が起きるか |
+|---|---|
+| Step 2 の Skill 発見 | どのエージェントがどの root を読み、どう呼び出せるかは実測記録として管理されています。導入手順そのものは共通です。対応状況は [Agent Skills 配布](./skills.md) と [skill-agent-compatibility.md](../reference/skill-agent-compatibility.md) を参照してください（実測が入るたびに更新されます） |
+| Step 5-1 の `/worktree-new` | Claude Code と Codex で確認済みです。opencode / Command Code では未確認なので、Step 5-1 の**貼り付け用の指示文**をそのまま使ってください。Skill を経由しない素の指示なので、判定の側は何も変わりません |
+| 完了検知 | `wait` が「エージェントが止まった」と判断する部分は、エージェントごとの検出層に依ります。契約と判定は共通でも、ここは共通ではありません。止まったように見えないときは `commandmate capture <worktree-id> --instance <instance-id>` で画面を読んでください |
+
+> **opencode を名指しした run だけ、work-evidence に第 2 の証跡が加わります（Issue #2043）**。
+> git が「コミットも未コミット変更も無い」と判定した**その分岐でのみ**、opencode 自身の diff 台帳を
+> 参照します。`--instance opencode` と名指ししたときだけ効く、限定された経路です
+> （[CLI 運用ガイド](./cli-operations-guide.md#commandmate-wait)）。
 
 ---
 

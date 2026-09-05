@@ -50,13 +50,23 @@ If this is the kind of AI development workflow you want, [give the repo a star](
 | **Skills Catalog** | Install and update official Skills per worktree, from the web UI or `commandmate skill` | The method is installed for the agent to read, not kept in someone's head |
 | **Never miss a waiting agent** | A waiting agent shows up as a badge, a toast, the tab title, the PWA app badge and a push notification | You find out the moment an agent needs you, even away from the desk |
 | **Git Worktree Sessions** | One session per worktree, parallel execution | Multiple issues progress simultaneously without interference |
-| **Multi-Agent Support** | Choose Claude Code, Codex, Gemini CLI, Copilot, OpenCode, Antigravity or local models per worktree | Pick the right agent for each task |
+| **Multi-Agent Support** | Choose Claude Code, Codex, Gemini CLI, Copilot, OpenCode, Antigravity, Command Code or local models per worktree | Pick the right agent for each task |
 | **Auto Yes Mode** | Agent runs without stopping for confirmations | Optional unattended mode for trusted workflows — review the Security section before enabling |
 | **Web UI (Desktop & Mobile)** | Full session control from any browser | Monitor and steer from your desk or your phone |
+| **Conversation view** | Switch a session's output between the raw terminal and a chat transcript — replies render in full, tool runs and approvals fold into chips, and a TUI dialog is answerable from the chat surface | Follow the run and answer it — from your desk or your phone — without reading the TUI |
 | **File Viewer & Markdown Editor** | Browse and edit worktree files in the browser | Review changes and update AI instructions without opening an IDE |
 | **Screenshot Instructions** | Attach images to your prompts | Snap a bug → "Fix this" — the agent sees the screenshot |
 | **Scheduled Execution** | Cron-based auto-run via CMATE.md | Daily reviews, nightly tests — agents work on a schedule |
 | **Token Authentication** | SHA-256 hashed token + HTTPS + rate limiting | Secure remote access — no credentials leaked, brute-force protected |
+
+### Supported agents
+
+All eight are first-class. Each one gets the same treatment inside CommandMate — its own launch path, its own hook source and its own status detection — so the worktree session, the task contract, the verification gates and the evidence trail behave the same way whichever agent you pick.
+
+- **Claude Code**, **Codex**, **Gemini CLI**, **Copilot**, **Antigravity** — choose per worktree, per task.
+- **OpenCode** — the open-source terminal agent, driven through the same contract-and-gate path as the rest.
+- **Command Code** — driven the same way, its hooks and its transcript included.
+- **Local models** (`vibe-local`) — run the same loop against a model you host yourself.
 
 ---
 
@@ -341,20 +351,36 @@ commandmate start -p 3001
 
 ### Session stuck or not responding?
 
-Check tmux sessions directly. CommandMate manages sessions with the naming format `mcbd-{tool}-{worktree}`:
+Look at the session with CommandMate's own commands — they resolve the tmux session name for you:
 
 ```bash
-# List all CommandMate sessions
-tmux list-sessions | grep mcbd
+# What every worktree's agent is doing, and the tmux session it runs in
+commandmate ls
+commandmate ls --json | jq -r '.[] | "\(.id)\t\(.tmuxSession)"'
 
-# View session output (without attaching)
-tmux capture-pane -t "mcbd-claude-feature-123" -p
+# Read the transcript WITHOUT attaching
+commandmate capture <worktree-id> --pane --tail 60
+commandmate capture <worktree-id> --pane --follow    # follow a reply as it is generated
 
-# Attach to inspect (detach with Ctrl+b then d)
-tmux attach -t "mcbd-claude-feature-123"
+# Attach this terminal (detach with Ctrl+b then d)
+commandmate attach <worktree-id>
+commandmate attach <worktree-id> --live              # re-lay out to your terminal (claude only)
+```
 
-# Kill a broken session
-tmux kill-session -t "mcbd-claude-feature-123"
+**Why a bare `tmux attach` looks empty.** A CommandMate session is pinned to a 200x1000 canvas so
+`capture-pane` keeps enough history for status detection. Alternate-screen agents (claude / opencode /
+copilot) draw their transcript at the top of that canvas and their composer at the bottom, and tmux
+follows the cursor — so a normal-sized terminal sees the composer, blank rows, and not one line of the
+conversation. Nothing is broken. Read it with `capture --pane` above, with `prefix + g` while
+attached, or hand the window to your terminal with `attach --live`.
+
+From tmux itself, without attaching at all:
+
+```bash
+tmux ls -F '#{session_name} #{@cm_status} #{@cm_tool}/#{@cm_instance}'
+
+# Kill a broken session (`=name:` is an exact match; quote it — zsh eats a bare `=`)
+tmux kill-session -t '=mcbd-claude-feature-123:'
 ```
 
 > **Note:** When attached, avoid typing directly into the session — this can interfere with CommandMate's session management. Use `Ctrl+b` then `d` to detach and operate through the CommandMate UI instead.
@@ -446,7 +472,7 @@ The comparison that matters is not against other products; it is against the way
 | Evidence | A chat transcript | Commits, gate logs, `verify history`, `report metrics` |
 | Parallel work | Terminal tabs | One worktree and one contract per task |
 | When it stops | You notice, eventually | Waiting is surfaced: badge, toast, tab title, push |
-| Which agent | Locked to one | Claude Code, Codex, Gemini CLI, Copilot, OpenCode, Antigravity, local models |
+| Which agent | Locked to one | Claude Code, Codex, Gemini CLI, Copilot, OpenCode, Antigravity, Command Code, local models |
 
 </details>
 
