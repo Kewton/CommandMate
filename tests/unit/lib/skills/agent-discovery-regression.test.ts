@@ -28,10 +28,12 @@ import { filterCommandsByCliTool } from '@/lib/command-merger';
 import {
   loadAgentsSkills,
   loadCodexSkills,
+  loadCommandCodeSkills,
   loadOpencodeSkills,
   loadSkills,
   mergeCodexFamilySkills,
 } from '@/lib/slash-commands';
+import { getSlashCommandTrigger } from '@/lib/slash-command-format';
 import {
   SKILL_CLAUDE_INSTALL_ROOT_PREFIX,
   SKILL_INSTALL_ROOT_PREFIX,
@@ -69,49 +71,55 @@ const LOADER_BY_ROOT: Record<string, (basePath: string) => Promise<SlashCommand[
 };
 
 /**
- * Agents whose entries do not come from the root-keyed loaders above (#2037).
+ * Agents whose entries do not come from the root-keyed loaders above (#2037,
+ * #2322).
  *
  * opencode was measured to read *both* install roots and to run a Skill as
  * `/<name>`, so its palette entries are produced by one loader that folds every
  * root it reads — `loadOpencodeSkills` — rather than by the per-root loader the
- * codex/claude split uses. Resolving by agent first keeps the binding this
- * suite exists for: a root named in the matrix must be reachable from *that
- * Agent's* loader, whichever loader that is.
+ * codex/claude split uses. Command Code has the same shape with a different
+ * root set (`.commandcode/skills` + `.agents/skills`, never `.claude/skills`)
+ * and therefore its own folding loader, `loadCommandCodeSkills`.
+ *
+ * Resolving by agent first keeps the binding this suite exists for: a root
+ * named in the matrix must be reachable from *that Agent's* loader, whichever
+ * loader that is. For command-code the root-keyed map would have answered
+ * `loadAgentsSkills`, whose entries are scoped to codex and antigravity — the
+ * exact mismatch #2322 closed.
  */
 const LOADER_BY_AGENT: Partial<
   Record<SkillAgentMatrixEntry['agent'], (basePath: string) => Promise<SlashCommand[]>>
 > = {
   opencode: loadOpencodeSkills,
+  'command-code': loadCommandCodeSkills,
 };
 
 /**
  * Measured Agents whose matrix roots CommandMate's own palette does not serve.
  *
- * Issue #2302 measured three Agents that read an install root and get nothing
- * from CommandMate's palette:
+ * Issue #2302 measured two such Agents. **command-code has since been wired up**
+ * (#2322): `loadCommandCodeSkills` serves `.agents/skills` and
+ * `.commandcode/skills` to a command-code session as `/name`, so it is no
+ * longer exempt and now runs the parity loop above through `LOADER_BY_AGENT`.
  *
- *  - **command-code** reads `.agents/skills` and offers what it finds there in
- *    its own composer as `[skill]` rows.
- *  - **copilot** reads *both* install roots and lists them in its own palette.
+ * What is left is **copilot**, measured on 1.0.83 to read *both* install roots
+ * and to list them in its own palette. That is not an invisible install — the
+ * Agent finds the Skill itself. What is missing is the CommandMate half:
+ * `loadAgentsSkills` tags its entries `cliTools: ['codex', 'antigravity']` and
+ * `loadSkills` leaves `cliTools` undefined (Claude-only), so copilot is served
+ * a row by neither.
  *
  * (gemini 0.58.0 has the same shape and the same gap; its matrix row is still
  * unmeasured because its invocation axis could not be measured at all, so it is
  * not listed here.)
  *
- * So nothing here is an invisible install — each Agent finds the Skill itself.
- * What is missing is the CommandMate half: `loadAgentsSkills` tags its entries
- * `cliTools: ['codex', 'antigravity']` and `loadSkills` leaves `cliTools`
- * undefined (Claude-only), so neither is served a row. Worse than a missing
- * row, `getSlashCommandTrigger` spells a `codex-skill` as `$name`, which is not
- * the `/name` either of them resolves.
- *
- * Wiring that up is a `src/lib/slash-commands.ts` change and Issue #2302 is a
- * measurement, so the gap is *pinned* below rather than waved through: the
- * "palette parity" suite asserts it still exists exactly as described, and
- * closing it turns that suite red — which is when these exemptions come out.
+ * Closing a gap does *not* mean widening `loadAgentsSkills`' cliTools:
+ * `getSlashCommandTrigger` spells a `codex-skill` as `$name`, and `/name` is
+ * the route these Agents resolve. #2322 closed the command-code half with a
+ * separate loader for exactly that reason, and the test below pins the
+ * distinction so the cheap-looking fix cannot be applied by accident.
  */
 const PALETTE_PARITY_GAPS: Partial<Record<SkillAgentMatrixEntry['agent'], string>> = {
-  'command-code': 'CommandMate does not serve .agents/skills rows to Command Code yet',
   copilot: 'CommandMate serves neither install root to Copilot yet',
 };
 
@@ -251,19 +259,26 @@ describe('palette parity: the CommandMate-side gap the measurement exposed (#230
     }
   });
 
-  it('still scopes .agents/skills rows away from a Command Code session', async () => {
-    // Command Code was measured on 1.49.0 to read this exact root and to reach
-    // the Skill on its own, so this is a palette *parity* gap and not an
-    // invisible install — the user gets there, just not through CommandMate's
-    // palette.
+  it('serves Command Code its root through its own loader, not by widening the codex family', async () => {
+    // The gap #2302 pinned here is closed (#2322), and *how* it was closed is
+    // the thing worth holding still. Command Code reads `.agents/skills`, which
+    // `loadAgentsSkills` also reads — so the cheap fix was to add 'command-code'
+    // to that loader's cliTools. It would have been wrong: `getSlashCommandTrigger`
+    // spells a `codex-skill` as `$name`, and `$name` is not the route that
+    // produced a `skill_loaded` event on 1.49.0. `/name` is.
     //
-    // Asserted by value so that widening the loader's cliTools fails here,
-    // which is the reminder to delete the exemptions above and to check that
-    // `getSlashCommandTrigger` spells these `/name` rather than `$name`.
-    const loaded = await loadAgentsSkills(workspace);
-    expect(loaded.map((command) => command.name)).toEqual([SKILL_ID]);
-    expect(loaded[0].cliTools).toEqual(['codex', 'antigravity']);
-    expect(namesFor(loaded, 'command-code')).toEqual([]);
+    // So the codex family stays exactly as it was...
+    const codexFamily = await loadAgentsSkills(workspace);
+    expect(codexFamily.map((command) => command.name)).toEqual([SKILL_ID]);
+    expect(codexFamily[0].cliTools).toEqual(['codex', 'antigravity']);
+    expect(namesFor(codexFamily, 'command-code')).toEqual([]);
+
+    // ...and the command-code rows come from a loader of their own, spelled the
+    // way the Agent actually resolves them.
+    const commandCode = await loadCommandCodeSkills(workspace);
+    expect(namesFor(commandCode, 'command-code')).toEqual([SKILL_ID]);
+    expect(commandCode[0].source).toBe('skill');
+    expect(getSlashCommandTrigger(commandCode[0], 'command-code')).toBe(`/${SKILL_ID}`);
   });
 
   it('serves Copilot neither install root, though it was measured to read both', async () => {
@@ -279,7 +294,9 @@ describe('palette parity: the CommandMate-side gap the measurement exposed (#230
   });
 
   it('leaves the codex and antigravity rows exactly as they were', async () => {
-    // The gap must stay a gap and not quietly become a regression elsewhere.
+    // Closing the command-code half (#2322) must not have moved the rows that
+    // were already correct, and the remaining copilot gap must not quietly
+    // become a regression elsewhere.
     const loaded = await loadAgentsSkills(workspace);
     expect(namesFor(loaded, 'codex')).toEqual([SKILL_ID]);
     expect(namesFor(loaded, 'antigravity')).toEqual([SKILL_ID]);

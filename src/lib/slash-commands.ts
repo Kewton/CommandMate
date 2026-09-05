@@ -6,6 +6,8 @@
  * - .claude/skills/{name}/SKILL.md (Claude skills, Issue #343)
  * - .agents/skills/{name}/SKILL.md (Codex skills, current CLI standard, Issue #1165)
  * - .codex/skills/{name}/SKILL.md (Codex skills, legacy, Issue #166)
+ * - .opencode/skills, .commandcode/skills (per-tool roots folded in by the
+ *   opencode / Command Code loaders below, Issue #2037, Issue #2322)
  *
  * `.agents/skills` is where the current Codex CLI reads skills
  * ($REPO_ROOT/.agents/skills and $HOME/.agents/skills); `.codex/skills` is kept
@@ -72,6 +74,36 @@ const OPENCODE_SKILLS_SUBDIR = path.join('.opencode', 'skills');
 const OPENCODE_SKILL_SUBDIRS = [
   OPENCODE_SKILLS_SUBDIR,
   path.join('.claude', 'skills'),
+  AGENTS_SKILLS_SUBDIR,
+] as const;
+
+/** Command Code's own project/user skills subdirectory (Issue #2322) */
+const COMMAND_CODE_SKILLS_SUBDIR = path.join('.commandcode', 'skills');
+
+/**
+ * Skill roots Command Code 1.47.0 was **measured** to scan, in the order they
+ * are folded together here (Issue #2322).
+ *
+ * Read off the running CLI, not the docs: one probe Skill was planted per
+ * candidate root in an isolated repo and `cmd skills list -d` (and the TUI
+ * `/skills` picker) listed exactly these two, `.agents/skills` carrying an
+ * `[.agents]` badge. The bundle (`dist/cli.mjs`) names the same pair for the
+ * project (cwd *and* git root) and for the user (`~/.commandcode/skills`,
+ * `~/.agents/skills`).
+ *
+ * `.claude/skills` is deliberately absent: it is the one CommandMate install
+ * root Command Code does **not** read. Negative control — `/probe-claude-root`,
+ * planted only there, answered "I don't see a skill named probe-claude-root
+ * available" with zero `skill_loaded` events. Listing it would put a row in the
+ * palette that the session cannot run.
+ *
+ * `.agents/skills` is listed last on purpose, exactly as in
+ * OPENCODE_SKILL_SUBDIRS: it is CommandMate's primary install root, and the fold
+ * below lets the last occurrence of a name win, so a package installed by
+ * CommandMate beats a same-named copy left in `.commandcode/skills`.
+ */
+const COMMAND_CODE_SKILL_SUBDIRS = [
+  COMMAND_CODE_SKILLS_SUBDIR,
   AGENTS_SKILLS_SUBDIR,
 ] as const;
 
@@ -466,14 +498,86 @@ export async function loadAgentsSkills(basePath?: string): Promise<SlashCommand[
  * @returns Skills scoped to opencode, later roots winning a name collision
  */
 export async function loadOpencodeSkills(basePath?: string): Promise<SlashCommand[]> {
+  return foldSkillRoots(basePath, OPENCODE_SKILL_SUBDIRS, 'opencode', 'opencode-skills-count-limit');
+}
+
+/**
+ * Load the Skills a Command Code session can actually invoke (Issue #2322).
+ *
+ * ## What was measured, on Command Code 1.47.0, 2026-09-04
+ *
+ * Isolated git repo, one probe Skill per candidate root, each instructed to
+ * answer a unique token:
+ *
+ *  - **discovery** — `cmd skills list -d` and the TUI `/skills` picker listed
+ *    the probes planted in `<project>/.agents/skills` (with an `[.agents]`
+ *    badge) and `<project>/.commandcode/skills`, and nothing from
+ *    `.claude/skills` or `.opencode/skills`. The real catalog packages
+ *    (`cmate-repository-analysis`, `cmate-verify`, `cmate-orchestrate`) were
+ *    all three listed with no skip reason.
+ *  - **invocation** — `cmd -p "/probe-agents-root" --output-format json` emitted
+ *    `{"type":"event","event":{"type":"skill_loaded","name":"probe-agents-root"}}`
+ *    and finished with `PROBE_OK_probe-agents-root`. So a `/`-prefixed name is a
+ *    working invocation route, resolved by the CLI's own slash router.
+ *  - **negative control** — `/probe-claude-root`, planted only in
+ *    `.claude/skills`, answered "I don't see a skill named probe-claude-root
+ *    available" with zero `skill_loaded` events. That is why
+ *    COMMAND_CODE_SKILL_SUBDIRS omits the Claude root.
+ *  - **the gap this function fills** — CommandMate's `.agents/skills` entries
+ *    are produced by `loadAgentsSkills` with `cliTools: ['codex', 'antigravity']`,
+ *    so `filterCommandsByCliTool` drops every one of them in a command-code
+ *    session and the palette shows no Skill at all.
+ *
+ * As with opencode, these are surfaced as `source: 'skill'` rather than folded
+ * into the `codex-skill` entries: `getSlashCommandTrigger` spells a
+ * `codex-skill` as `$name` for everything but antigravity, and `$name` is not
+ * the route measured to work here — `/name` is. A separate entry also keeps
+ * `keyOf` (`name::command-code`) distinct from `name::antigravity,codex`, so the
+ * codex and antigravity palettes stay byte-identical.
+ *
+ * Unlike opencode, Command Code re-scans on demand: a Skill added while the TUI
+ * was running showed up as soon as `/skills` was reopened, with no restart.
+ *
+ * @param basePath - Repository root to scan, or os.homedir() for the user roots
+ * @returns Skills scoped to command-code, later roots winning a name collision
+ */
+export async function loadCommandCodeSkills(basePath?: string): Promise<SlashCommand[]> {
+  return foldSkillRoots(
+    basePath,
+    COMMAND_CODE_SKILL_SUBDIRS,
+    'command-code',
+    'command-code-skills-count-limit',
+  );
+}
+
+/**
+ * Fold several per-tool Skill roots under one base into a single scoped list.
+ *
+ * Shared by loadOpencodeSkills and loadCommandCodeSkills: both scan a measured
+ * list of roots below the same base and surface the result as `source: 'skill'`
+ * scoped to one CLI tool. The last root that carries a name wins, which is why
+ * each SUBDIRS constant ends with CommandMate's primary install root.
+ *
+ * @param basePath - Repository root to scan, or os.homedir() for the user roots
+ * @param subdirs - Roots to scan, earliest first, later occurrences winning
+ * @param cliTool - The only session these entries are offered to
+ * @param warnTag - Log tag used when a root exceeds MAX_SKILLS_COUNT
+ * @returns Skills sorted by name, one row per name
+ */
+function foldSkillRoots(
+  basePath: string | undefined,
+  subdirs: readonly string[],
+  cliTool: CLIToolType,
+  warnTag: string
+): SlashCommand[] {
   const root = basePath ?? os.homedir();
   const byName = new Map<string, SlashCommand>();
 
-  for (const subdir of OPENCODE_SKILL_SUBDIRS) {
+  for (const subdir of subdirs) {
     const skills = scanSkillDirs(
       path.join(root, subdir),
-      { source: 'skill', cliTools: ['opencode'] },
-      'opencode-skills-count-limit',
+      { source: 'skill', cliTools: [cliTool] },
+      warnTag,
     );
     for (const skill of skills) byName.set(skill.name, skill);
   }
