@@ -53,6 +53,7 @@ If this is the kind of AI development workflow you want, [give the repo a star](
 | **Multi-Agent Support** | Choose Claude Code, Codex, Gemini CLI, Copilot, OpenCode, Antigravity, Command Code or local models per worktree | Pick the right agent for each task |
 | **Auto Yes Mode** | Agent runs without stopping for confirmations | Optional unattended mode for trusted workflows — review the Security section before enabling |
 | **Web UI (Desktop & Mobile)** | Full session control from any browser | Monitor and steer from your desk or your phone |
+| **Conversation view** | Switch a session's output between the raw terminal and a chat transcript — replies render in full, tool runs and approvals fold into chips, and a TUI dialog is answerable from the chat surface | Follow the run and answer it — from your desk or your phone — without reading the TUI |
 | **File Viewer & Markdown Editor** | Browse and edit worktree files in the browser | Review changes and update AI instructions without opening an IDE |
 | **Screenshot Instructions** | Attach images to your prompts | Snap a bug → "Fix this" — the agent sees the screenshot |
 | **Scheduled Execution** | Cron-based auto-run via CMATE.md | Daily reviews, nightly tests — agents work on a schedule |

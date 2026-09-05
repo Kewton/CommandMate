@@ -404,7 +404,7 @@ surface** switches — the input surface stays exactly the same in either mode
 | Mode | What you see | When it helps |
 |------|--------------|---------------|
 | **Terminal** | The tmux screen as it is drawn (TUI borders, cursor and pagers included) | Working a dialog, TUI-specific screens, reading output in detail |
-| **Chat** | The conversation transcript (your messages paired with the agent's replies) | Following what was exchanged, watching progress from a phone |
+| **Chat** | A flat column of bubbles (one message per row; your messages as bubbles on the right, the agent's replies in full across the row) | Following what was exchanged, watching progress from a phone |
 
 ### How to switch
 
@@ -429,16 +429,34 @@ quietly revert on the next visit.
 
 ### What the chat surface shows
 
+The chat surface is **its own column of bubbles, separate from the History column**
+(Issue #2232). One message is one row: **your messages are bubbles on the right**, and
+**the agent's replies take the full width of the row** and are shown **in full**. There is
+no 100-character clamp and no "show more" here — that is the History column's shape.
+
 - **A generating indicator** — "Responding…" / "Thinking…" while the agent is working
 - **The reply as it is written** — on agents that support it, the in-progress answer streams
-  in place (Issue #2199). When it is too long and the head had to be dropped, it says
-  "Showing the latest part only"
-- **"Jump to latest"** — appears when a new line arrives while you are reading back through
-  the history. Pressing it returns you to the newest one
-- **"Show archived"** — a toggle for reading rows from past sessions as well
+  **in place at the end of the column** (Issue #2199 / #2233). When it is too long and the
+  head had to be dropped, it says "Showing the latest part only"
+- **In-flight becomes settled without moving** — when the reply is finished, the body stays
+  in the **same place, in the same type**; the only thing that changes is the spinner going
+  away (Issue #2233). Until the settled row reaches the transcript, the body is held with
+  "Not saved to the conversation yet" beside it, so it never blinks out (Issue #2248)
+- **Chips for tool calls, reasoning and approvals** — tool calls, the reasoning section and
+  approval dialogs are taken out of the reply body and become **one-line chips that are
+  folded by default** ("Tool calls · 3", "Tool approvals · 5"). Pressing a chip opens it in
+  place (Issue #2245 / #2272 / #2284). The **"Show / Hide tool activity"** toggle at the top
+  right of the column folds and unfolds the whole column at once
+- **"Jump to latest"** — press it to return to the newest row while you are reading back
+  through the transcript; it reads "Jump to latest (still responding)" while a reply is
+  being written. At the tail it offers "Jump to the beginning" instead (Issue #2283)
 - **The dialog card** — when a dialog or a selection list is up on the TUI side, a card that
   shows the **tail of the terminal screen** as-is with the controls for it underneath
   (Issue #2254). See the next section
+
+> **Note**: the controls that **narrow the transcript** — the display-count select, "Show
+> archived" and "User only" — **are not on the chat surface**. They belong to the History
+> column; search is the only one of them chat keeps.
 
 ### The dialog card — answering a TUI without leaving chat
 

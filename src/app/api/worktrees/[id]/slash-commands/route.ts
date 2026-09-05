@@ -17,7 +17,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { getDbInstance } from '@/lib/db/db-instance';
 import { getWorktreeById } from '@/lib/db';
-import { getSlashCommandGroups, loadSkills, loadCodexSkills, loadAgentsSkills, loadOpencodeSkills, mergeCodexFamilySkills, getCopilotBuiltinCommands, getGeminiBuiltinCommands, opencodeLiveCommandsToSlashCommands } from '@/lib/slash-commands';
+import { getSlashCommandGroups, loadSkills, loadCodexSkills, loadAgentsSkills, loadOpencodeSkills, loadCommandCodeSkills, mergeCodexFamilySkills, getCopilotBuiltinCommands, getGeminiBuiltinCommands, opencodeLiveCommandsToSlashCommands } from '@/lib/slash-commands';
 import {
   getOpencodeLiveCommands,
   scheduleOpencodeLiveRefresh,
@@ -163,6 +163,27 @@ export async function GET(
           ])
         : [[], []];
 
+    // Skill roots Command Code 1.47.0 was measured to read — `.commandcode/skills`
+    // and `.agents/skills`, in the worktree and under $HOME (Issue #2322).
+    // `.claude/skills` is deliberately absent: a Skill planted only there is not
+    // discovered (negative control in loadCommandCodeSkills), so offering it
+    // would put an unrunnable row in the palette.
+    //
+    // Placed here, and only for a command-code session, for the same two reasons
+    // as the opencode scan above: the entries carry cliTools ['command-code'] so
+    // every other tool would filter them out anyway, and keeping them out of
+    // getSlashCommandGroups means no other caller gains a second copy of every
+    // Skill. Without this the palette is empty of Skills entirely — the
+    // `.agents/skills` rows loadAgentsSkills produces are scoped to codex and
+    // antigravity.
+    const [worktreeCommandCodeSkills, globalCommandCodeSkills] =
+      cliTool === 'command-code'
+        ? await Promise.all([
+            loadCommandCodeSkills(worktree.path).catch(() => []),
+            loadCommandCodeSkills(os.homedir()).catch(() => []),
+          ])
+        : [[], []];
+
     // SF-1: Merge with worktree commands taking priority
     // Include global Codex skills in worktree groups (local ones already included via getSlashCommandGroups)
     const globalCodexGroups: SlashCommandGroup[] = globalSkills.length > 0
@@ -195,9 +216,17 @@ export async function GET(
       ? [{ category: 'skill' as const, label: 'Skills', commands: worktreeOpencodeSkills }]
       : [];
 
+    // Same global-then-worktree ordering, same reason (Issue #2322).
+    const globalCommandCodeGroups: SlashCommandGroup[] = globalCommandCodeSkills.length > 0
+      ? [{ category: 'skill' as const, label: 'Skills', commands: globalCommandCodeSkills }]
+      : [];
+    const worktreeCommandCodeGroups: SlashCommandGroup[] = worktreeCommandCodeSkills.length > 0
+      ? [{ category: 'skill' as const, label: 'Skills', commands: worktreeCommandCodeSkills }]
+      : [];
+
     const mergedGroups = mergeCommandGroups(
       standardGroups,
-      [...globalClaudeGroups, ...globalOpencodeGroups, ...worktreeGroups, ...worktreeOpencodeGroups, ...globalCodexGroups, ...copilotBuiltinGroups, ...geminiBuiltinGroups]
+      [...globalClaudeGroups, ...globalOpencodeGroups, ...globalCommandCodeGroups, ...worktreeGroups, ...worktreeOpencodeGroups, ...worktreeCommandCodeGroups, ...globalCodexGroups, ...copilotBuiltinGroups, ...geminiBuiltinGroups]
     );
 
     // Issue #4: Filter by CLI tool
