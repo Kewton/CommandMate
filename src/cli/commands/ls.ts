@@ -11,6 +11,11 @@ import { ApiClient } from '../utils/api-client';
 // and the server must not be able to disagree about what `exited` is spelled.
 import { STATUS_REASON } from '../../lib/detection/status-reason';
 import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
+// Issue #2317: the tmux session name, so nobody has to assemble
+// `mcbd-<tool>-<worktree>[-<suffix>]` by hand from two commands' output.
+import { isCliToolId } from '../config/cli-tool-ids';
+import { resolveSessionName } from '../../lib/cli-tools/session-name';
+import type { CLIToolType } from '../../lib/cli-tools/types';
 
 /**
  * Derive display status from worktree flags.
@@ -123,6 +128,37 @@ function formatTable(worktrees: WorktreeItem[]): string {
   return [headerLine, separator, ...dataLines].join('\n');
 }
 
+/** A `--json` row plus Issue #2317's tmux session name. */
+type JsonWorktreeRow = WorktreeItem & { tmuxSession: string | null };
+
+/**
+ * The tmux session name of this worktree's DEFAULT agent, or null (Issue #2317).
+ *
+ * The default agent's PRIMARY instance, which is the session `commandmate
+ * attach <id>` opens with no flags — so the two answers cannot disagree. A
+ * worktree running several agents has several sessions, and this field names one
+ * of them on purpose: the complete per-instance list is what
+ * `commandmate instances <id>` is for, and duplicating it here would put the
+ * roster in two places.
+ *
+ * Null when the row names no default agent, or names one this CLI does not know
+ * (a server newer than the CLI), or when the id would not survive
+ * `validateSessionName` — the same three cases in which there is no name to
+ * give rather than a wrong one.
+ *
+ * Computed CLIENT-side. The server does not publish it, and asking it to would
+ * mean `/api/worktrees` — the sidebar's poll, for every worktree, every couple
+ * of seconds — carrying a string derivable from two fields already in the row.
+ */
+function deriveTmuxSession(wt: WorktreeItem): string | null {
+  if (!wt.cliToolId || !isCliToolId(wt.cliToolId)) return null;
+  try {
+    return resolveSessionName(wt.cliToolId as CLIToolType, wt.id);
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Format output based on options [DR1-02]
  *
@@ -141,7 +177,14 @@ function formatTable(worktrees: WorktreeItem[]): string {
  */
 function formatOutput(worktrees: WorktreeItem[], options: LsOptions): string {
   if (options.json) {
-    return JSON.stringify(worktrees, null, 2);
+    // Issue #2317 appends one key and changes nothing else: every field the
+    // server sent still passes through verbatim, so a consumer reading
+    // `sessionStatusByCli.<tool>.statusEvidence` is unaffected.
+    const rows: JsonWorktreeRow[] = worktrees.map((wt) => ({
+      ...wt,
+      tmuxSession: deriveTmuxSession(wt),
+    }));
+    return JSON.stringify(rows, null, 2);
   }
   if (options.quiet) {
     return worktrees.map(wt => wt.id).join('\n');

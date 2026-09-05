@@ -333,6 +333,33 @@ export interface LsOptions {
   token?: string;
 }
 
+/**
+ * attach command options [Issue #2317, Phase A/D]
+ *
+ * No `--tail` / `--follow`: this command hands the terminal to tmux, and what to
+ * do once you are there belongs to `capture --pane` and to `prefix + g`.
+ */
+export interface AttachOptions {
+  /** Issue #868: agent instance ID or alias (defaults to the agent's primary instance) */
+  instance?: string;
+  /** CLI tool to address, when the roster does not settle it */
+  agent?: string;
+  /**
+   * Attach with `tmux attach -r`.
+   *
+   * tmux delivers no keys to a read-only client except the detach one, so
+   * `prefix + g` does NOT open the reading popup here — the command says so
+   * before attaching rather than leaving the key looking broken.
+   */
+  readOnly?: boolean;
+  /**
+   * Hand the session's window size to this terminal while attached, and pin it
+   * back to 200x1000 on detach (Phase D). claude only; see `LIVE_ATTACH_TOOLS`.
+   */
+  live?: boolean;
+  token?: string;
+}
+
 /** sync command options [Issue #1680] */
 export interface SyncOptions {
   json?: boolean;
@@ -470,6 +497,16 @@ export interface CaptureOptions {
   prompts?: boolean;
   /** Issue #1685: with `--prompts`, number of most recent prompts to list. */
   limit?: string;
+  /**
+   * Issue #2317: with `--pane`, redraw on an interval instead of printing once.
+   *
+   * The reading path that needs neither a tmux client nor a key table — which is
+   * what makes it the answer for `tmux attach -r`, where #1623's `prefix + g`
+   * popup cannot open because tmux delivers no keys to a read-only client.
+   */
+  follow?: boolean;
+  /** Issue #2317: with `--pane --follow`, redraw interval in milliseconds. */
+  interval?: string;
 }
 
 /** interrupt command options [Issue #2101] */

@@ -31,6 +31,19 @@ import { squeezeTranscript } from '../../lib/tmux/transcript-squeeze';
 const PANE_CAPTURE_LINES = 1000;
 
 /**
+ * Default redraw interval of `--pane --follow`, in milliseconds (Issue #2317).
+ *
+ * Two seconds, matching the response poller's own cadence: a faster redraw
+ * cannot show anything the server has not captured yet, and would only add tmux
+ * round-trips to a session someone is already watching.
+ */
+const DEFAULT_FOLLOW_INTERVAL_MS = 2000;
+
+/** Floor and ceiling for `--interval`. */
+const MIN_FOLLOW_INTERVAL_MS = 250;
+const MAX_FOLLOW_INTERVAL_MS = 60_000;
+
+/**
  * `promptData.type` the server writes for a frame the detection layer could not
  * classify (Issue #1708). Mirrors UNCLASSIFIED_PROMPT_TYPE in
  * src/types/models.ts; duplicated rather than imported because the CLI bundle
@@ -291,6 +304,99 @@ async function capturePane(worktreeId: string, options: CaptureOptions): Promise
   printMaybePaged(text);
 }
 
+/**
+ * Parse and validate `--interval <ms>`.
+ *
+ * @param raw - Raw option value, if the user passed one
+ * @returns The interval in milliseconds
+ */
+function parseFollowInterval(raw: string | undefined): number {
+  if (raw === undefined) return DEFAULT_FOLLOW_INTERVAL_MS;
+  const value = Number(raw);
+  if (
+    !Number.isInteger(value) ||
+    value < MIN_FOLLOW_INTERVAL_MS ||
+    value > MAX_FOLLOW_INTERVAL_MS
+  ) {
+    console.error(
+      `Error: --interval must be an integer between ${MIN_FOLLOW_INTERVAL_MS} and ${MAX_FOLLOW_INTERVAL_MS} (milliseconds).`
+    );
+    process.exit(ExitCode.CONFIG_ERROR);
+  }
+  return value;
+}
+
+/**
+ * `--pane --follow`: redraw the squeezed transcript on an interval (Issue #2317).
+ *
+ * ## Why this exists next to `prefix + g`
+ *
+ * The popup #1623 added is a SNAPSHOT and needs a key press to refresh, and it
+ * does not work at all under `tmux attach -r` (a read-only client is delivered
+ * no keys but the detach one). This is the reading path that needs neither a
+ * tmux client nor a key table: it works from any terminal, over ssh, and while
+ * somebody else is attached.
+ *
+ * ## What it does NOT do
+ *
+ * It never writes. Every iteration makes exactly the request `--pane` already
+ * makes — same route, same {@link PANE_CAPTURE_LINES} — so the detection
+ * pipeline sees no different payload because a human is watching, and the
+ * session's geometry is untouched (Issue #2317 受入条件 Phase C 2).
+ *
+ * Ctrl-C is the exit, and it needs no handler: SIGINT's default action ends the
+ * process, and the alternate screen is left with the cursor restored by the
+ * `finally` below.
+ */
+async function capturePaneFollow(worktreeId: string, options: CaptureOptions): Promise<void> {
+  if (!process.stdout.isTTY) {
+    console.error(
+      'Error: --follow needs a terminal (it redraws the screen). '
+      + 'Without one, loop over `commandmate capture <id> --pane --tail N` instead.'
+    );
+    process.exit(ExitCode.CONFIG_ERROR);
+  }
+
+  const client = new ApiClient({ token: options.token });
+  const tail = parseTail(options.tail);
+  const intervalMs = parseFollowInterval(options.interval);
+  const cliToolId = await resolvePaneCliTool(client, worktreeId, options.agent, options.instance);
+
+  // Hide the cursor while redrawing, and put it back whatever ends the loop.
+  process.stdout.write('\u001b[?25l');
+  const restoreCursor = (): void => {
+    process.stdout.write('\u001b[?25h');
+  };
+  process.on('exit', restoreCursor);
+
+  try {
+    for (;;) {
+      const data = await client.post<PaneCaptureResponse>(
+        `/api/worktrees/${worktreeId}/capture`,
+        {
+          cliToolId,
+          lines: PANE_CAPTURE_LINES,
+          ...(options.instance ? { instanceId: options.instance } : {}),
+        }
+      );
+      const squeezed = squeezeTranscript(data.output ?? '', { tail });
+      // The visible rows, minus one for the footer. Slicing HERE rather than
+      // asking the server for fewer lines is the same choice `--tail` makes: the
+      // squeeze has to run over the whole frame or the blank padding is what
+      // gets kept.
+      const rows = Math.max(1, (process.stdout.rows || 40) - 1);
+      const body = squeezed.text.split('\n').slice(-rows).join('\n');
+      process.stdout.write(`\u001b[H\u001b[2J${body}\n`);
+      process.stdout.write(
+        `\u001b[7m[CommandMate] ${worktreeId} / ${cliToolId} — Ctrl-C to stop\u001b[0m`
+      );
+      await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    }
+  } finally {
+    restoreCursor();
+  }
+}
+
 export function createCaptureCommand(): Command {
   const cmd = new Command('capture');
   cmd
@@ -302,6 +408,9 @@ export function createCaptureCommand(): Command {
     .option('--pane', 'Read the raw tmux pane as a transcript, with blank layout rows squeezed')
     .option('--tail <n>', 'With --pane: keep only the last N lines OF THE SQUEEZED transcript')
     .option('--raw', 'With --pane: skip the squeeze and print the pane verbatim')
+    // Issue #2317: the reading path that needs no tmux client and no key table.
+    .option('--follow', 'With --pane: redraw on an interval instead of printing once (Ctrl-C to stop)')
+    .option('--interval <ms>', `With --pane --follow: redraw interval in milliseconds (default ${DEFAULT_FOLLOW_INTERVAL_MS})`)
     // Issue #1685: audit trail of resolved prompts (question/options/answer/answeredBy)
     .option('--prompts', 'List recent prompts from chat history (including ones Auto-Yes already resolved)')
     .option('--limit <n>', `With --prompts: number of most recent prompts to list (default ${DEFAULT_PROMPTS_LIMIT})`)
@@ -334,6 +443,24 @@ export function createCaptureCommand(): Command {
           process.exit(ExitCode.CONFIG_ERROR);
         }
 
+        // Issue #2317: same rule as --tail/--raw. A --follow that silently did
+        // nothing outside --pane would look like the flag was accepted.
+        if (!options.pane && (options.follow || options.interval !== undefined)) {
+          console.error('Error: --follow and --interval require --pane.');
+          process.exit(ExitCode.CONFIG_ERROR);
+        }
+        if (options.interval !== undefined && !options.follow) {
+          console.error('Error: --interval requires --follow.');
+          process.exit(ExitCode.CONFIG_ERROR);
+        }
+        // The follow loop redraws the screen; --json and --raw are both "give me
+        // the bytes", and neither has a meaning that survives being overwritten
+        // every two seconds.
+        if (options.follow && (options.json || options.raw)) {
+          console.error('Error: --follow cannot be combined with --json or --raw.');
+          process.exit(ExitCode.CONFIG_ERROR);
+        }
+
         // Issue #1685: --prompts reads history, --pane reads the live pane —
         // asking for both at once has no meaningful answer.
         if (options.prompts && options.pane) {
@@ -351,6 +478,10 @@ export function createCaptureCommand(): Command {
         }
 
         if (options.pane) {
+          if (options.follow) {
+            await capturePaneFollow(worktreeId, options);
+            return;
+          }
           await capturePane(worktreeId, options);
           return;
         }

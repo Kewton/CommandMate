@@ -72,6 +72,27 @@ export const MCBD_SESSION_PREFIX = 'mcbd-';
 export const DEFAULT_READ_MODE_KEY = 'g';
 
 /**
+ * Environment variable that makes `prefix + <key>` open the FOLLOWING popup
+ * instead of the snapshot one (Issue #2317, Phase C).
+ *
+ * ## Why one key and an option, rather than a second binding
+ *
+ * Issue #2317 offers two shapes for the follow mode — a second bound key
+ * (`CM_READ_MODE_FOLLOW_KEY`, default `G`) or a switch — and leaves the choice
+ * to implementation. This is the switch, for a reason that outlives the choice:
+ * a `bind-key` writes the tmux server's GLOBAL prefix table, which every session
+ * on the machine inherits including ones CommandMate knows nothing about. #2317
+ * 決定事項 2 says the new surface must stay session-scoped; a SECOND global key
+ * would have doubled the one global intervention the feature was allowed to
+ * keep. An environment variable costs no key table at all.
+ *
+ * The follow popup remains reachable two other ways with no key at all:
+ * `commandmate capture <id> --pane --follow`, and the opt-in
+ * `CM_READ_MODE_AUTO_POPUP=on`, which opens it on attach.
+ */
+export const READ_MODE_FOLLOW_ENV = 'CM_READ_MODE_FOLLOW';
+
+/**
  * Accepted `CM_READ_MODE_KEY` values: a single alphanumeric, an F-key, either
  * optionally with a `C-` / `M-` / `S-` modifier. Deliberately narrow — a typo
  * should be rejected loudly rather than bound to something surprising in the
@@ -122,6 +143,28 @@ export function getPagerScriptPath(): string {
 export function isReadModeEnabled(): boolean {
   const raw = (process.env.CM_READ_MODE ?? '').trim().toLowerCase();
   return raw !== 'off' && raw !== '0' && raw !== 'false';
+}
+
+/** True when the operator asked `prefix + <key>` to follow rather than snapshot. */
+export function isReadModeFollowEnabled(): boolean {
+  return (process.env[READ_MODE_FOLLOW_ENV] ?? '').trim().toLowerCase() === 'on';
+}
+
+/**
+ * The shell command the popup runs: the pager script, plus `--follow` when the
+ * operator asked for it.
+ *
+ * One word per argument and no quoting of its own — {@link quoteForTmuxCommand}
+ * wraps the WHOLE line, so tmux hands `/bin/sh` a single command string. That is
+ * the same shape the snapshot form has always had; the flag rides inside the
+ * quotes rather than after them, because a word after the closing quote would be
+ * a second argument to `display-popup`, not to the script.
+ *
+ * @param scriptPath - Absolute path of the materialized pager script
+ * @param follow - Whether to append `--follow`
+ */
+export function buildPopupCommand(scriptPath: string, follow: boolean): string {
+  return follow ? `${scriptPath} --follow` : scriptPath;
 }
 
 /**
@@ -310,7 +353,7 @@ export async function reconcileReadModeBinding(): Promise<ReadModeStatus> {
       };
     }
 
-    const quoted = quoteForTmuxCommand(scriptPath);
+    const quoted = quoteForTmuxCommand(buildPopupCommand(scriptPath, isReadModeFollowEnabled()));
     if (quoted === undefined) {
       return { installed: false, outcome: 'unsafe-script-path', key, scriptPath };
     }

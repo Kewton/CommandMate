@@ -172,9 +172,24 @@ describe('[#2060] ls and the sidebar converge on the route response', () => {
   it('publishes to `ls --json` exactly the rows the route composed', async () => {
     // The CLI's `--json` contract is "the server's rows, verbatim". #2060 must
     // not have inserted a projection between the two.
+    //
+    // Issue #2317 adds ONE key that the server does not send and cannot: the
+    // tmux session name, derived client-side from `id` + `cliToolId` by the same
+    // function `BaseCLITool.getSessionName()` uses. It is stripped here rather
+    // than folded into the expectation, so this assertion keeps meaning what it
+    // has always meant — every server field arrives untouched — and a future
+    // projection over one of them still fails it.
     const rows = await routeRows();
-    const json = JSON.parse(await runLs(rows, ['--json']));
-    expect(json).toEqual(rows);
+    const json = JSON.parse(await runLs(rows, ['--json'])) as Array<Record<string, unknown>>;
+    const derived = json.map(({ tmuxSession: _tmuxSession, ...rest }) => rest);
+    expect(derived).toEqual(rows);
+    expect(json.map((row) => row.tmuxSession)).toEqual([
+      'mcbd-claude-wt-waiting',
+      'mcbd-claude-wt-running',
+      'mcbd-codex-wt-ready',
+      'mcbd-claude-wt-idle',
+      'mcbd-claude-wt-alias',
+    ]);
   });
 
   it('keeps every field the two surfaces read present on the default response', async () => {

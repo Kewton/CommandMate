@@ -63,7 +63,9 @@ describe('instances table: MODEL / EFFORT columns', () => {
     // the reader has to look up.
     expect(codexRow).toContain('codex-2');
     expect(codexRow).not.toContain('claude-opus-5');
-    expect(codexRow.trimEnd()).toMatch(/\bno\s+no$/);
+    // MODEL and EFFORT are both blank for the stopped instance. The row ends
+    // with Issue #2317's TMUX_SESSION column, which is derived and never blank.
+    expect(codexRow.trimEnd()).toMatch(/\bno\s+no\s+mcbd-codex-wt1-2$/);
   });
 
   it('appends the columns rather than inserting them', async () => {
@@ -90,6 +92,8 @@ describe('instances table: MODEL / EFFORT columns', () => {
       // Issue #2038 appended two more, for the same reason and in the same way.
       'SESSION_ID',
       'SESSION_TITLE',
+      // Issue #2317 appended one more, likewise.
+      'TMUX_SESSION',
     ]);
   });
 });
@@ -117,6 +121,8 @@ describe('instances --json: model / reasoningEffort fields', () => {
         // Issue #2038: null for every non-opencode instance, by construction.
         sessionId: null,
         sessionTitle: null,
+        // Issue #2317: derived from the roster row, never fetched.
+        tmuxSession: 'mcbd-claude-wt1',
       },
       {
         instanceId: 'codex-2',
@@ -128,6 +134,8 @@ describe('instances --json: model / reasoningEffort fields', () => {
         reasoningEffort: null,
         sessionId: null,
         sessionTitle: null,
+        // Issue #2317: the alias instance's own session, suffix and all.
+        tmuxSession: 'mcbd-codex-wt1-2',
       },
     ]);
   });

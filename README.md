@@ -351,20 +351,36 @@ commandmate start -p 3001
 
 ### Session stuck or not responding?
 
-Check tmux sessions directly. CommandMate manages sessions with the naming format `mcbd-{tool}-{worktree}`:
+Look at the session with CommandMate's own commands — they resolve the tmux session name for you:
 
 ```bash
-# List all CommandMate sessions
-tmux list-sessions | grep mcbd
+# What every worktree's agent is doing, and the tmux session it runs in
+commandmate ls
+commandmate ls --json | jq -r '.[] | "\(.id)\t\(.tmuxSession)"'
 
-# View session output (without attaching)
-tmux capture-pane -t "mcbd-claude-feature-123" -p
+# Read the transcript WITHOUT attaching
+commandmate capture <worktree-id> --pane --tail 60
+commandmate capture <worktree-id> --pane --follow    # follow a reply as it is generated
 
-# Attach to inspect (detach with Ctrl+b then d)
-tmux attach -t "mcbd-claude-feature-123"
+# Attach this terminal (detach with Ctrl+b then d)
+commandmate attach <worktree-id>
+commandmate attach <worktree-id> --live              # re-lay out to your terminal (claude only)
+```
 
-# Kill a broken session
-tmux kill-session -t "mcbd-claude-feature-123"
+**Why a bare `tmux attach` looks empty.** A CommandMate session is pinned to a 200x1000 canvas so
+`capture-pane` keeps enough history for status detection. Alternate-screen agents (claude / opencode /
+copilot) draw their transcript at the top of that canvas and their composer at the bottom, and tmux
+follows the cursor — so a normal-sized terminal sees the composer, blank rows, and not one line of the
+conversation. Nothing is broken. Read it with `capture --pane` above, with `prefix + g` while
+attached, or hand the window to your terminal with `attach --live`.
+
+From tmux itself, without attaching at all:
+
+```bash
+tmux ls -F '#{session_name} #{@cm_status} #{@cm_tool}/#{@cm_instance}'
+
+# Kill a broken session (`=name:` is an exact match; quote it — zsh eats a bare `=`)
+tmux kill-session -t '=mcbd-claude-feature-123:'
 ```
 
 > **Note:** When attached, avoid typing directly into the session — this can interfere with CommandMate's session management. Use `Ctrl+b` then `d` to detach and operate through the CommandMate UI instead.

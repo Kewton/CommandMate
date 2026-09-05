@@ -304,20 +304,36 @@ commandmate start -p 3001
 
 ### セッションが固まっている / 応答がない？
 
-tmux セッションを直接確認できます。CommandMate は `mcbd-{ツール名}-{worktree名}` の形式でセッションを管理しています：
+CommandMate 自身のコマンドで確認できます（tmux セッション名は自動で解決されます）：
 
 ```bash
-# CommandMate が管理しているセッション一覧を確認
-tmux list-sessions | grep mcbd
+# 各 worktree のエージェントの状態と、動いている tmux セッション名
+commandmate ls
+commandmate ls --json | jq -r '.[] | "\(.id)\t\(.tmuxSession)"'
 
-# 特定セッションの出力を確認（アタッチせずに）
-tmux capture-pane -t "mcbd-claude-feature-123" -p
+# attach せずに transcript を読む
+commandmate capture <worktree-id> --pane --tail 60
+commandmate capture <worktree-id> --pane --follow    # 生成中の応答を追う
 
-# セッションにアタッチして確認（detach は Ctrl+b → d）
-tmux attach -t "mcbd-claude-feature-123"
+# この端末を attach（detach は Ctrl+b → d）
+commandmate attach <worktree-id>
+commandmate attach <worktree-id> --live              # 端末サイズへ再レイアウト（claude のみ）
+```
 
-# 壊れたセッションを手動で削除
-tmux kill-session -t "mcbd-claude-feature-123"
+**素の `tmux attach` が空白に見える理由。** CommandMate のセッションは、状態検出が十分な履歴を
+`capture-pane` で取れるように 200 桁 × 1000 行のキャンバスに固定されています。alt-screen の
+エージェント（claude / opencode / copilot）は transcript をその上端に、入力欄を下端に描き、
+tmux はカーソルを追従表示します。したがって普通のサイズの端末では**入力欄と空白しか見えず、
+会話は一行も見えません**。壊れているわけではありません。読むには上記の `capture --pane`、
+attach 中なら `prefix + g`、あるいは `attach --live` で窓を端末に合わせてください。
+
+attach せずに tmux 側から見る：
+
+```bash
+tmux ls -F '#{session_name} #{@cm_status} #{@cm_tool}/#{@cm_instance}'
+
+# 壊れたセッションを手動で削除（`=name:` は完全一致。zsh は素の `=` を食うのでクォート必須）
+tmux kill-session -t '=mcbd-claude-feature-123:'
 ```
 
 > **注意：** アタッチ中にセッション内で直接入力すると、CommandMate のセッション管理と干渉する可能性があります。`Ctrl+b` → `d` で detach し、CommandMate UI から操作してください。
