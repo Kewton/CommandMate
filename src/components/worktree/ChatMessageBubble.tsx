@@ -76,6 +76,7 @@ import { getDateFnsLocale } from '@/lib/date-locale';
 import { formatMessageTimestamp } from '@/lib/date-utils';
 import { stripAnsi } from '@/lib/detection/ansi';
 import { splitFilePathParts } from '@/lib/chat/chat-transcript-view';
+import { classifyChatLink, normalizeChatFilePath } from '@/lib/chat/chat-file-path';
 import { splitToolLog } from '@/lib/chat/chat-tool-log';
 import type {
   ToolApprovalEntry,
@@ -542,6 +543,114 @@ export const ChatToolLogDisclosure = memo(function ChatToolLogDisclosure({
 // ============================================================================
 
 /**
+ * What a clickable path wears, on both surfaces (Issue #2345).
+ *
+ * The bare-path `<button>` below already looked like this; the Markdown link
+ * renderer now wears the same string rather than a second copy of it, so a body
+ * that names the same file twice — once as prose and once as `[label](path)` —
+ * does not draw the two in different colors. History's own bare-path button
+ * keeps its pre-existing classes (Issue #2232 froze how that card looks); what
+ * is shared across the two surfaces is the LINK, which had no styling at all
+ * before this Issue.
+ */
+export const CHAT_FILE_LINK_CLASS =
+  'cursor-pointer font-mono text-sm text-accent-700 underline-offset-2 hover:underline dark:text-accent-400';
+
+/** The testid every in-app file link publishes, on both surfaces. */
+export const CHAT_FILE_LINK_TESTID = 'chat-file-link';
+
+/**
+ * One Markdown link in an agent-authored body (Issue #2345).
+ *
+ * ## Why an `a` renderer had to exist at all
+ *
+ * The linkifier below only ever sees TEXT. A Markdown link's destination is
+ * consumed by the parser, so `[整理文書](/Users/…/notes.md)` never reaches
+ * {@link splitFilePathParts} and react-markdown's default `<a>` was emitted
+ * verbatim — with no `target`, so clicking it navigated the CommandMate tab to
+ * `http://localhost:3000/Users/…` and left the app on a 404. Both halves of that
+ * are fixed here: an in-worktree destination opens the file panel, and an
+ * ordinary URL opens in a new tab so this tab is never lost either way.
+ *
+ * ## One component, two surfaces
+ *
+ * `ConversationPairCard` imports this rather than growing a second `a`
+ * override. #2274 already established the precedent: History and chat had
+ * separate copies of the path rule, both were wrong the same way, and one copy
+ * is what makes "the same link behaves the same in both places" a fact instead
+ * of a coincidence.
+ *
+ * ## Where the path is turned into a path
+ *
+ * Nowhere here. The click reports the href exactly as written and the surface's
+ * own `handleFilePathClick` — which is also where the bare-path button lands,
+ * and the only place that knows this worktree's root — runs
+ * {@link normalizeChatFilePath}. Normalizing in the renderer would mean doing it
+ * twice, in two components, from a prop each would have to be handed.
+ *
+ * `rehypeSanitize` has already dropped the href of anything whose scheme is not
+ * http / https / mailto (measured: `file:`, `tel:` and `javascript:` all arrive
+ * with no href at all), so a hrefless link simply renders as text.
+ */
+export const ChatFileLink = memo(function ChatFileLink({
+  href,
+  children,
+  onFilePathClick,
+  ...rest
+}: React.AnchorHTMLAttributes<HTMLAnchorElement> & {
+  /** Where the surface should look for the file. Given the href verbatim. */
+  onFilePathClick: (path: string) => void;
+}) {
+  const t = useTranslations('worktree');
+  const target = href ? classifyChatLink(href) : null;
+
+  const handleClick = useCallback(
+    (event: React.MouseEvent<HTMLAnchorElement>) => {
+      if (!href) return;
+      event.preventDefault();
+      onFilePathClick(href);
+    },
+    [href, onFilePathClick],
+  );
+
+  // No href, an anchor, or a scheme nothing here can act on: the browser's own
+  // behaviour is already right (or already nothing).
+  if (!href || target === null || target === 'anchor') {
+    // `rest` is forwarded on every branch so remark's own attributes survive —
+    // a GFM footnote reference is an anchor carrying `id` and
+    // `data-footnote-ref`, and dropping those breaks the jump back.
+    return (
+      <a {...rest} href={href}>
+        {children}
+      </a>
+    );
+  }
+
+  if (target === 'external') {
+    // `noopener noreferrer` with `_blank`: the new tab must not get a handle on
+    // this one, and the point of the whole renderer is that this tab stays put.
+    return (
+      <a {...rest} href={href} target="_blank" rel="noopener noreferrer">
+        {children}
+      </a>
+    );
+  }
+
+  return (
+    <a
+      {...rest}
+      href={href}
+      data-testid={CHAT_FILE_LINK_TESTID}
+      onClick={handleClick}
+      className={CHAT_FILE_LINK_CLASS}
+      aria-label={t('conversation.openFile', { path: normalizeChatFilePath(href) ?? href })}
+    >
+      {children}
+    </a>
+  );
+});
+
+/**
  * A verbatim body with its file paths turned into buttons.
  *
  * `whitespace-pre-wrap` is load-bearing: everything that is not agent-authored
@@ -626,6 +735,15 @@ export const ChatMarkdownBody = memo(function ChatMarkdownBody({
       th: ({ children }) => <th>{linkify(children)}</th>,
       strong: ({ children }) => <strong>{linkify(children)}</strong>,
       em: ({ children }) => <em>{linkify(children)}</em>,
+      // [#2345] The one element the linkifier above cannot reach: a Markdown
+      // link's destination is consumed by the parser, so it is never a text
+      // child of anything. Its children are deliberately NOT linkified — a path
+      // inside a link's label is part of the label.
+      a: ({ href, children, node: _node, ...rest }) => (
+        <ChatFileLink {...rest} href={href} onFilePathClick={onFilePathClick}>
+          {children}
+        </ChatFileLink>
+      ),
     };
   }, [onFilePathClick]);
 

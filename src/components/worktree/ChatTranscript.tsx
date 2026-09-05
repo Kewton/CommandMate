@@ -138,6 +138,8 @@ import type { ShowToast } from '@/types/markdown-editor';
 import { useHistorySearch } from '@/hooks/useHistorySearch';
 import { copyToClipboard } from '@/lib/clipboard-utils';
 import { encodePathForUrl } from '@/lib/url-path-encoder';
+import { normalizeChatFilePath } from '@/lib/chat/chat-file-path';
+import { useChatFileLinkScope } from '@/lib/chat/chat-file-link-scope';
 import { applyHistoryHighlights, clearHistoryHighlights } from '@/lib/terminal-highlight';
 import { isNearBottom } from '@/lib/history-virtualization';
 import {
@@ -354,6 +356,17 @@ export interface ChatTranscriptProps {
   /** The transcript, chronologically ordered. NOT grouped into pairs. */
   messages: ChatMessage[];
   worktreeId: string;
+  /**
+   * Issue #2345: `Worktree.path`, this worktree's absolute root.
+   *
+   * What turns `/Users/…/worktree/workspace/notes.md` — the shape codex writes
+   * both as a Markdown destination and as bare prose — into the worktree-relative
+   * path the file API can actually serve. Optional, and falls back to
+   * {@link useChatFileLinkScope} for the mounts whose parent builds its child
+   * props as one frozen object (`TerminalSplitPaneContent`). With neither, an
+   * absolute path is passed through unchanged, which is the pre-#2345 behaviour.
+   */
+  worktreePath?: string;
   /** Metadata only — the messages are already filtered by the caller's fetch. */
   cliToolId?: CLIToolType;
   isLoading?: boolean;
@@ -533,6 +546,7 @@ function ChatTranscriptEmpty() {
 export const ChatTranscript = memo(function ChatTranscript({
   messages,
   worktreeId,
+  worktreePath,
   cliToolId: _cliToolId,
   isLoading = false,
   className = '',
@@ -934,6 +948,11 @@ export const ChatTranscript = memo(function ChatTranscript({
   const tRef = useRef(t);
   tRef.current = t;
 
+  // [#2345] The prop wins; the screen's scope is the fallback for the mounts
+  // whose parent cannot pass it (see `ChatTranscriptProps.worktreePath`).
+  const fileLinkScope = useChatFileLinkScope();
+  const resolvedWorktreePath = worktreePath ?? fileLinkScope.worktreePath;
+
   /**
    * Open a path from a message body — but only after asking whether it is here.
    *
@@ -951,16 +970,22 @@ export const ChatTranscript = memo(function ChatTranscript({
     (path: string) => {
       const open = onFilePathClick;
       if (!open) return;
+      // [#2345] ONE normalization for both affordances — the bare-path button
+      // and the Markdown link — because they were both broken by the same
+      // thing. `null` means the href was never a file (an anchor, an external
+      // URL, the worktree root itself), and nothing at all should happen.
+      const target = normalizeChatFilePath(path, resolvedWorktreePath);
+      if (target === null) return;
       void (async () => {
-        const probe = await probeChatFilePath(worktreeId, path);
+        const probe = await probeChatFilePath(worktreeId, target);
         if (probe === 'missing') {
           showToast?.(tRef.current('chatTranscript.filePathMissing'), 'error');
           return;
         }
-        open(path);
+        open(target);
       })();
     },
-    [onFilePathClick, worktreeId, showToast],
+    [onFilePathClick, worktreeId, resolvedWorktreePath, showToast],
   );
 
   const handleCopy = useCallback(
