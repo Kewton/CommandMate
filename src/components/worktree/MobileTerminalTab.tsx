@@ -77,6 +77,7 @@ import {
   useChatComposerInsert,
   useRegisterChatOptimisticSend,
 } from '@/contexts/WorktreeChatSendContext';
+import { useChatFileLinkScope } from '@/lib/chat/chat-file-link-scope';
 import { worktreeApi } from '@/lib/api-client';
 import { getTerminalDisplayCompaction } from '@/config/terminal-display-compaction';
 import {
@@ -207,6 +208,12 @@ const MobileChatSurface = memo(function MobileChatSurface({
   // moment this surface stops being the one the transcript is on.
   useRegisterChatOptimisticSend({ cliToolId, instanceId, send: sendOptimistic });
 
+  // [#2345] The screen's file-link scope: the worktree root this transcript's
+  // absolute paths are relative to, and the panel to open them in. Stated as
+  // props on the way down rather than read again inside `ChatTranscript`, so
+  // the phone's chain says out loud where the path came from.
+  const { worktreePath, openFile } = useChatFileLinkScope();
+
   // Discarding a failed send returns the text to the composer instead of
   // dropping it — PC does this through `onHistoryInsertToMessage`; here the
   // screen's own insert callback arrives over the same context.
@@ -223,6 +230,7 @@ const MobileChatSurface = memo(function MobileChatSurface({
     <ChatSurface
       messages={messages}
       worktreeId={worktreeId}
+      worktreePath={worktreePath}
       cliToolId={cliToolId}
       instanceId={instanceId}
       live={live}
@@ -235,10 +243,14 @@ const MobileChatSurface = memo(function MobileChatSurface({
       onKeysSent={onKeysSent}
       compact
       history={{
-        // File-path routing still has no owner on this screen: `handleFilePathClick`
-        // lives in `WorktreeDetailRefactored` and is not threaded through
-        // `MobileContent` to this tab. A no-op keeps the required prop honest.
-        onFilePathClick: () => {},
+        // Issue #2345: file-path routing now HAS an owner on this screen. It is
+        // still `WorktreeDetailRefactored`'s `handleFilePathClick` — which on a
+        // phone is `setMobileFileViewerPath` — and it still is not threaded
+        // through `MobileContent`, which builds this tab's props itself; it
+        // arrives over the screen's `ChatFileLinkProvider` instead. Left
+        // undefined when no provider is above (the transcript then opens
+        // nothing and, unlike the no-op it replaces, probes nothing either).
+        onFilePathClick: openFile,
         isLoading,
         onRetryPending: retryPending,
         onDiscardPending: handleDiscardPending,

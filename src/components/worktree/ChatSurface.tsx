@@ -354,6 +354,14 @@ export interface ChatSurfaceProps {
    */
   messages: ChatMessage[];
   worktreeId: string;
+  /**
+   * Issue #2345: `Worktree.path`, forwarded verbatim to `ChatTranscript` so an
+   * absolute path in a reply can be turned into the worktree-relative one the
+   * file API serves. Omitting it is legal — the transcript then reads the
+   * screen's `ChatFileLinkProvider` instead (which is how the PC split, whose
+   * prop object this component spreads, gets the same answer).
+   */
+  worktreePath?: string;
   cliToolId?: CLIToolType;
   /** The agent instance this surface is showing. Published as `data-instance-id`. */
   instanceId?: string;
@@ -464,6 +472,7 @@ export function resolveBlockedReason(live: ChatSurfaceLiveState): ChatSurfaceBlo
 export const ChatSurface = memo(function ChatSurface({
   messages,
   worktreeId,
+  worktreePath,
   cliToolId,
   instanceId,
   live,
@@ -898,6 +907,7 @@ export const ChatSurface = memo(function ChatSurface({
           {...historyProps}
           messages={visibleMessages}
           worktreeId={worktreeId}
+          worktreePath={worktreePath}
           cliToolId={cliToolId}
           liveTurn={liveTurn}
           onScrollControlsChange={handleScrollControlsChange}

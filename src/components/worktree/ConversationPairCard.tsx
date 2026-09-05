@@ -20,6 +20,7 @@ import { isAgentAuthoredMarkdown } from '@/types/agent-transcript';
 import { getDateFnsLocale } from '@/lib/date-locale';
 import { formatMessageTimestamp } from '@/lib/date-utils';
 import { splitFilePathParts } from '@/lib/chat/chat-transcript-view';
+import { ChatFileLink } from '@/components/worktree/ChatMessageBubble';
 
 // ============================================================================
 // Types
@@ -237,6 +238,16 @@ const AssistantMarkdown = memo(function AssistantMarkdown({
       th: ({ children }) => <th>{linkify(children)}</th>,
       strong: ({ children }) => <strong>{linkify(children)}</strong>,
       em: ({ children }) => <em>{linkify(children)}</em>,
+      // [#2345] A Markdown link's destination is consumed by the parser, so it
+      // never reaches the linkifier above and used to render as a bare `<a>`
+      // that navigated this tab away from CommandMate. Chat's renderer, not a
+      // second copy of it — #2274's lesson about two copies of the path rule
+      // applies to the link rule for exactly the same reason.
+      a: ({ href, children, node: _node, ...rest }) => (
+        <ChatFileLink {...rest} href={href} onFilePathClick={onFilePathClick}>
+          {children}
+        </ChatFileLink>
+      ),
     };
   }, [onFilePathClick]);
 
