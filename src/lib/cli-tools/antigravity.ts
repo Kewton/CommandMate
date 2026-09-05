@@ -32,7 +32,7 @@ import {
   TUI_SESSION_CREATE_WAIT_MS,
   TUI_EXIT_WAIT_MS,
 } from '@/config/cli-tool-timing-config';
-import { SessionStartUnavailableError } from '../session/session-start-error';
+import { missingToolError } from './install-hints';
 
 const logger = createLogger('cli-tools/antigravity');
 
@@ -137,7 +137,7 @@ export class AntigravityTool extends BaseCLITool {
     // Check if agy is installed
     const available = await this.isInstalled();
     if (!available) {
-      throw new SessionStartUnavailableError(this.name, 'Antigravity CLI (agy) is not installed or not in PATH');
+      throw missingToolError(this);
     }
 
     const sessionName = this.getSessionName(worktreeId, instanceId);
