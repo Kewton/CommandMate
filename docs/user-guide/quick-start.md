@@ -30,6 +30,33 @@ commandmate start --daemon
 
 ---
 
+## どのエージェントでも回る最小ループ
+
+この先の `/work-plan` `/tdd-impl` は **Claude Code のスラッシュコマンド**で、しかも CommandMate
+リポジトリ自身の `.claude/commands` に置かれているものです。一方、CommandMate の中核である
+**契約 → 送信 → 検証ゲート**のループは、どのエージェントでも同じコマンドで回ります。
+
+契約は YAML で、エージェントに届くのはそこから組み立てられたただのテキストです。ゲートは worktree の
+作業ディレクトリで走るシェルコマンドで、合否はその exit code で決まります。どちらもエージェント別の
+分岐を持ちません。**変わるのは送り先の名指し方だけ**です。
+
+```bash
+# 送り先は --instance で名指しする（ツール名そのものを渡すとプライマリインスタンスに解決される）
+commandmate send <worktree-id> --contract .commandmate/tasks/<task>.yaml --instance opencode
+commandmate wait <worktree-id> --instance opencode --verify
+echo $?   # 0=合格 / 20=ゲート不合格 / 21=作業証跡なし / 10=応答待ち
+```
+
+`opencode` のところを `claude` `codex` `command-code` などに置き換えれば、そのまま別の
+エージェントの 1 周になります。`wait` には `--agent` が無いので、**`send` と `wait` の両方に
+`--instance` を書いてください**（片方だけだと worktree の既定エージェントを待ちます）。
+
+opencode / Command Code で実際に 1 周する手順（送り先の解決の確かめ方、エージェントによって
+変わるところ）は、[チュートリアルの別紙](./tutorial.md#別紙-opencode--command-code-で同じ-1-周を回す)
+にあります。
+
+---
+
 ## 5分で始める開発フロー
 
 ### Step 1: Issue確認
