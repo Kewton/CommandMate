@@ -23,6 +23,8 @@ import { ConversationPairCard } from './ConversationPairCard';
 import { HistorySearchBar } from './HistorySearchBar';
 import { HISTORY_PANE_ID } from './TerminalContainer';
 import { copyToClipboard } from '@/lib/clipboard-utils';
+import { normalizeChatFilePath } from '@/lib/chat/chat-file-path';
+import { useChatFileLinkScope } from '@/lib/chat/chat-file-link-scope';
 import {
   applyHistoryHighlights,
   clearHistoryHighlights,
@@ -81,6 +83,17 @@ export function collapseButtonTestId(splitIndex: number | undefined): string {
 export interface HistoryPaneProps {
   messages: ChatMessage[];
   worktreeId: string;
+  /**
+   * Issue #2345: `Worktree.path`, this worktree's absolute root.
+   *
+   * History's bodies are the same bodies the chat surface renders, so they carry
+   * the same absolute paths — both as bare prose and, since #2345, as clickable
+   * Markdown destinations. This is what turns one into the worktree-relative
+   * path the file API can serve. Optional, and falls back to the screen's
+   * `ChatFileLinkProvider`, which is how the two mounts whose parents build one
+   * frozen prop object (`TerminalSplitPaneContent`, `MobileContent`) get it.
+   */
+  worktreePath?: string;
   onFilePathClick: (path: string) => void;
   isLoading?: boolean;
   className?: string;
@@ -253,6 +266,7 @@ const BASE_CONTAINER_CLASSES = [
 export const HistoryPane = memo(function HistoryPane({
   messages,
   worktreeId,
+  worktreePath,
   onFilePathClick,
   isLoading = false,
   className = '',
@@ -272,6 +286,11 @@ export const HistoryPane = memo(function HistoryPane({
 }: HistoryPaneProps) {
   const t = useTranslations('worktree');
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+
+  // [#2345] The prop wins; the screen's scope is the fallback for the mounts
+  // whose parent cannot pass it (see `HistoryPaneProps.worktreePath`).
+  const fileLinkScope = useChatFileLinkScope();
+  const resolvedWorktreePath = worktreePath ?? fileLinkScope.worktreePath;
 
   // Issue #744: per-split CSS highlight namespace. When this pane is inside a
   // PC terminal split, each split gets its own `history-search-<idx>` keys so
@@ -515,9 +534,18 @@ export const HistoryPane = memo(function HistoryPane({
     [className]
   );
 
+  // [#2345] The same single normalization the chat surface applies, for the same
+  // reason: History's bare-path buttons could not open a worktree-internal
+  // absolute path either (`files//Users/…` 308s into a relative read and 404s),
+  // and its Markdown links now land here too. `null` means the href named no
+  // file — an anchor, an external URL, or the worktree root — so nothing opens.
   const handleFilePathClick = useCallback(
-    (path: string) => onFilePathClick(path),
-    [onFilePathClick]
+    (path: string) => {
+      const target = normalizeChatFilePath(path, resolvedWorktreePath);
+      if (target === null) return;
+      onFilePathClick(target);
+    },
+    [onFilePathClick, resolvedWorktreePath]
   );
 
   const createToggleHandler = useCallback(

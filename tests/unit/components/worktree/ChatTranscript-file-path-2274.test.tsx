@@ -221,6 +221,30 @@ describe('[#2274] ChatTranscript asks whether the file is here before opening it
     expect(showToast).not.toHaveBeenCalled();
   });
 
+  it('probes an in-worktree absolute path RELATIVELY (Issue #2345)', async () => {
+    // The URL #2274 pinned above is `files/` + the path verbatim, which for an
+    // absolute path is `files//Users/…`. Next 308-normalizes the doubled slash
+    // away and the route reads the remainder as a relative path, so the file
+    // this worktree DOES have answered 404 and the toast said it was missing.
+    // #2345 makes the surface hand the probe the worktree-relative path instead;
+    // everything above still holds, because it is asked without a worktree root.
+    const onFilePathClick = vi.fn();
+    const worktreePath = '/Users/dev/wt-2274';
+    renderTranscript([msg('a1', 'assistant', `edited ${worktreePath}/src/app/page.tsx now`)], {
+      onFilePathClick,
+      worktreePath,
+    });
+
+    fireEvent.click(nodeFor(`${worktreePath}/src/app/page.tsx`));
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/api/worktrees/${WORKTREE_ID}/files/src/app/page.tsx`,
+      { method: 'HEAD', cache: 'no-store' },
+    );
+    expect(String(fetchMock.mock.calls[0][0])).not.toContain('files//');
+    await waitFor(() => expect(onFilePathClick).toHaveBeenCalledWith('src/app/page.tsx'));
+  });
+
   it('probes nothing when the caller wired no open handler', () => {
     renderTranscript([msg('a1', 'assistant', `edited ${OWN_PATH} just now`)], {
       onFilePathClick: undefined,

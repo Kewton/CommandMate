@@ -16,7 +16,7 @@
 
 'use client';
 
-import React, { memo, useCallback, useState } from 'react';
+import React, { memo, useCallback, useMemo, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { useTranslations } from 'next-intl';
 import { MoreHorizontal } from 'lucide-react';
@@ -84,6 +84,10 @@ import {
   WorktreeChatSendProvider,
   useChatOptimisticSend,
 } from '@/contexts/WorktreeChatSendContext';
+import {
+  ChatFileLinkProvider,
+  type ChatFileLinkScope,
+} from '@/lib/chat/chat-file-link-scope';
 import type { MobileTab } from '@/components/mobile/MobileTabBar';
 import { VerificationStatusChip } from '@/components/worktree/VerificationStatusChip';
 import type { SubTabRequest } from '@/components/worktree/NotesAndLogsPane';
@@ -391,6 +395,26 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     onSwipeRight: () => goToAdjacentTab(-1),
   });
 
+  // Issue #2345: the screen's file-link scope, published to every chat surface
+  // and History pane below — on BOTH layouts, because the same reply is read
+  // through both. It carries two things the transcript cannot derive:
+  //
+  //  - `worktreePath`, without which an absolute path a reply names cannot be
+  //    recognized as living inside this worktree, and is requested as
+  //    `files//Users/…` — a URL Next 308s into a relative read that 404s;
+  //  - `openFile`, which on the phone had no owner at all: the transcript lives
+  //    inside `MobileTerminalTab` while the viewer is this component's
+  //    `mobileFileViewerPath`, and the tab was passing `() => {}`.
+  //
+  // Declared here rather than threaded down because the components in between
+  // (`TerminalSplitPaneContent`, `MobileContent`) each build their children's
+  // props as one frozen object — the same ownership shape `WorktreeChatSendProvider`
+  // above exists for.
+  const chatFileLinkScope: ChatFileLinkScope = useMemo(
+    () => ({ worktreePath: worktree?.path, openFile: handleFilePathClick }),
+    [worktree?.path, handleFilePathClick],
+  );
+
   // Render
   // ========================================================================
 
@@ -427,7 +451,10 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   // Render desktop layout
   if (!isMobile) {
     return (
-      <>
+      // [#2345] The file-link scope wraps the PC layout too: its split builds
+      // one frozen prop object for both the chat surface and the History
+      // column, so neither can be handed `worktreePath` from here directly.
+      <ChatFileLinkProvider value={chatFileLinkScope}>
         {/* Issue #755: PC desktop layout extracted to WorktreeDetailDesktop. */}
         <WorktreeDetailDesktop
           worktreeId={worktreeId}
@@ -536,7 +563,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
             </div>
           </Modal>
         )}
-      </>
+      </ChatFileLinkProvider>
     );
   }
 
@@ -562,342 +589,347 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           `onOptimisticSend` directly). `onInsertToComposer` gives a discarded
           failed send the same draft-restore PC has. */}
       <WorktreeChatSendProvider onInsertToComposer={handleInsertToMessage}>
-        <div
-          className="flex flex-col overflow-hidden"
-          style={{ height: viewportHeight != null ? `${viewportHeight}px` : '100%' }}
-          data-testid="mobile-worktree-shell"
-        >
-          <div className="flex-shrink-0">
-            <MobileHeader
-              worktreeName={worktreeName}
-              repositoryName={worktree?.repositoryName}
-              status={worktreeStatus}
-              gitStatus={worktree?.gitStatus}
-              onBackClick={handleBackClick}
-              onMenuClick={openMobileDrawer}
-            />
-          </div>
-
-          {/* Issue #1816: task contract / verification verdict. Renders nothing
-              when the branch has no task row, so this strip only appears for
-              worktrees that were actually delegated with a contract. */}
-          {verification.task && (
-            <div className="flex-shrink-0 border-b border-border bg-surface px-3 py-1.5">
-              <VerificationStatusChip
-                task={verification.task}
-                latestRun={verification.latestRun}
-                latestRunGates={
-                  verification.selectedRun !== null &&
-                  verification.selectedRun.id === verification.latestRun?.id
-                    ? verification.selectedRun.gates
-                    : null
-                }
-                onOpen={handleOpenVerificationMobile}
-                className="w-full justify-start"
-              />
-            </div>
-          )}
-
-          {/* Issue #111: Branch mismatch warning (Mobile) */}
-          {worktree?.gitStatus && worktree.gitStatus.isBranchMismatch && (
-            <div className="z-35 flex-shrink-0">
-              <BranchMismatchAlert
-                isBranchMismatch={worktree.gitStatus.isBranchMismatch}
-                currentBranch={worktree.gitStatus.currentBranch}
-                initialBranch={worktree.gitStatus.initialBranch}
-              />
-            </div>
-          )}
-
-          {/* Agent-instance tabs row (Mobile, Issue #1080) — dedicated to the
-              per-instance tabs. Auto-Yes moved into the composer meta row; terminal
-              search + End moved into the "more actions" bottom sheet.
-              Issue #1166: `flex-shrink-0` in the viewport-height flex column (the
-              row no longer needs `sticky` — the shell itself does not scroll). */}
-          <div className="flex-shrink-0 z-30 flex items-center gap-2 px-3 py-1.5 bg-surface-2 border-b border-border">
-            {/* CLI tool tabs — horizontally scrollable so 3+ agents never overflow
-                off-screen (Issue #958). `min-w-0` releases the flex item's default
-                min-width:auto so the nav scrolls instead of expanding.
-                Issue #874: per-agent-instance (alias-aware) tabs mirror the PC
-                header; `displayedInstances` is the per-device visible subset.
-                Issue #960: status resolved per-instance優先（PC版と整合）. */}
-            <nav
-              className="flex gap-1 flex-1 min-w-0 overflow-x-auto scrollbar-hide"
-              aria-label={tWorktree('detail.agentInstanceSelection')}
-            >
-              {displayedInstances.map((inst) => {
-                const toolStatus = deriveCliStatus(
-                  worktree?.sessionStatusByInstance?.[inst.id] ?? worktree?.sessionStatusByCli?.[inst.cliTool]
-                );
-                // Issue #1277: the status wording comes from the generic
-                // `common.status.*` keys (#1273) — one source of truth, shared
-                // with SIDEBAR_STATUS_CONFIG's labelKey (#1304).
-                const statusLabel = tCommon(`status.${toolStatus}`);
-                const isActive = activeInstanceId === inst.id;
-                return (
-                  <button
-                    key={inst.id}
-                    onClick={() => setActiveInstanceId(inst.id)}
-                    // Issue #1127: min-h-[44px] + touch-manipulation give these
-                    // densely-packed instance tabs a ≥44px tap target (text stays
-                    // text-xs; only the hit area grows) and kill the double-tap
-                    // zoom delay on touch devices.
-                    className={`flex-shrink-0 whitespace-nowrap min-h-[44px] px-1.5 py-1 font-medium text-xs transition-colors flex items-center gap-1 border-b-2 touch-manipulation ${
-                      isActive
-                        ? 'text-accent-600 dark:text-accent-400 border-accent-500'
-                        : 'text-muted-foreground hover:text-foreground border-transparent'
-                    }`}
-                    aria-current={isActive ? 'page' : undefined}
-                  >
-                    {/* Issue #1078: unified StatusDot visual language (was blue spinner) */}
-                    <StatusDot
-                      status={toolStatus}
-                      size="sm"
-                      label={tWorktree('detail.statusPill', {
-                        label: getInstanceLabel(inst),
-                        status: statusLabel,
-                      })}
-                    />
-                    {getInstanceLabel(inst)}
-                  </button>
-                );
-              })}
-            </nav>
-            {/* More actions (terminal search + End) — pinned, opens bottom sheet */}
-            <button
-              type="button"
-              onClick={() => setShowActionsSheet(true)}
-              className="flex-shrink-0 flex items-center justify-center min-h-[44px] min-w-[44px] rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors touch-manipulation"
-              aria-label={tWorktree('terminal.moreActions')}
-              data-testid="mobile-more-actions-button"
-            >
-              <MoreHorizontal size={18} aria-hidden="true" />
-            </button>
-          </div>
-
-          {/* Issue #1166: `flex-1 min-h-0 overflow-y-auto` — the only element that
-              absorbs the flex column's remaining space and scrolls internally, so
-              the fixed-height header/tabs/composer/tab bar keep their size when the
-              keyboard shrinks the shell. The old 12rem bottom padding is gone: the
-              composer + tab bar are now in-flow siblings, not fixed overlays. */}
-          <main
-            className="flex-1 min-h-0 overflow-y-auto"
-            ref={tabSwipeRef}
+        {/* [#2345] `MobileContent` builds the terminal tab's props, so the tab's
+            file-path routing (and the worktree root the transcript normalizes
+            against) arrives over this scope instead. */}
+        <ChatFileLinkProvider value={chatFileLinkScope}>
+          <div
+            className="flex flex-col overflow-hidden"
+            style={{ height: viewportHeight != null ? `${viewportHeight}px` : '100%' }}
+            data-testid="mobile-worktree-shell"
           >
-            <MobileContent
-              activeTab={activeTab}
-              worktreeId={worktreeId}
-              worktree={worktree}
-              messages={state.messages}
-              cliToolId={activeCliTab}
-              instanceId={activeInstanceId}
-              onFilePathClick={handleFilePathClick}
-              onFileSelect={handleFileSelect}
-              onWorktreeUpdate={setWorktree}
-              onNewFile={handleNewFile}
-              onNewDirectory={handleNewDirectory}
-              onRename={handleRename}
-              onDelete={handleDelete}
-              onUpload={handleUpload}
-              onMove={handleMove}
-              onFileTreeReset={resetFileTreeView}
-              refreshTrigger={fileTreeRefresh}
-              fileSearch={fileSearch}
-              showToast={showToast}
-              // Issue #874 (折衷案): the Agent tab manages the shared instance
-              // ROSTER (entity + alias → DB, consistent with PC via
-              // handleAgentInstancesChange) PLUS a per-device "show as tabs"
-              // selection that only writes localStorage (toggleInstanceVisible),
-              // preserving the #837/#851 intent that narrowing tabs on mobile must
-              // not shrink the PC view. `selectedAgents` is still passed for the
-              // TimerPane; mobile selection itself is now instance-driven so the
-              // legacy change callback is a no-op.
-              selectedAgents={mobileSelectedAgents}
-              onSelectedAgentsChange={NOOP_SELECTED_AGENTS_CHANGE}
-              useInstanceManagement
-              instances={agentInstances}
-              onInstancesChange={handleAgentInstancesChange}
-              visibleInstanceIds={visibleInstanceIds}
-              onToggleInstanceVisible={toggleInstanceVisible}
-              vibeLocalModel={vibeLocalModel}
-              onVibeLocalModelChange={handleVibeLocalModelChange}
-              vibeLocalContextWindow={vibeLocalContextWindow}
-              onVibeLocalContextWindowChange={handleVibeLocalContextWindowChange}
-              disableAutoFollow={disableAutoFollow}
-              historySubTab={historySubTab}
-              onHistorySubTabChange={setHistorySubTab}
-              onDiffSelect={handleDiffSelect}
-              onInsertToMessage={handleInsertToMessage}
-              showArchived={showArchived}
-              onShowArchivedChange={handleShowArchivedChange}
-              historyDisplayLimit={historyDisplayLimit}
-              onHistoryDisplayLimitChange={handleHistoryDisplayLimitChange}
-              historyUserOnly={historyUserOnly}
-              onHistoryUserOnlyChange={handleHistoryUserOnlyChange}
-              verification={verification}
-              toolsSubTabRequest={toolsSubTabRequest}
-              onSurfaceModeChange={setMobileSurfaceMode}
-            />
-          </main>
+            <div className="flex-shrink-0">
+              <MobileHeader
+                worktreeName={worktreeName}
+                repositoryName={worktree?.repositoryName}
+                status={worktreeStatus}
+                gitStatus={worktree?.gitStatus}
+                onBackClick={handleBackClick}
+                onMenuClick={openMobileDrawer}
+              />
+            </div>
 
-          {/* Message Input — Issue #1166: in-flow bottom bar (`flex-shrink-0`).
-              The viewport-height shell keeps this docked above the software
-              keyboard, so it no longer needs `position: fixed` + a translateY lift. */}
-          <div className="flex-shrink-0 border-t border-border bg-surface z-30">
-            {/* Issue #473: Navigation buttons for OpenCode TUI selection list (mobile).
-                Issue #2254: not while the terminal tab is showing the CHAT
-                surface — that surface draws its own pad inside the dialog card,
-                directly under the frame, and this docked copy would be a second
-                one twelve rows away from the list it drives. Both terms are
-                required: `activeTab` because the mode only describes the
-                terminal tab (History / Files / Tools keep the docked pad), and
-                `mobileSurfaceMode` because that is which half of it is on. */}
-            {isSelectionListActive && !isMobileChatSurface && (
-              <div className="px-2 pt-1 border-b border-border">
-                <NavigationButtons
-                  worktreeId={worktreeId}
-                  cliToolId={activeCliTab}
-                  instanceId={activeInstanceId}
-                  onKeysSent={fetchCurrentOutput}
-                  showPagerKeys={isPagerActive}
+            {/* Issue #1816: task contract / verification verdict. Renders nothing
+                when the branch has no task row, so this strip only appears for
+                worktrees that were actually delegated with a contract. */}
+            {verification.task && (
+              <div className="flex-shrink-0 border-b border-border bg-surface px-3 py-1.5">
+                <VerificationStatusChip
+                  task={verification.task}
+                  latestRun={verification.latestRun}
+                  latestRunGates={
+                    verification.selectedRun !== null &&
+                    verification.selectedRun.id === verification.latestRun?.id
+                      ? verification.selectedRun.gates
+                      : null
+                  }
+                  onOpen={handleOpenVerificationMobile}
+                  className="w-full justify-start"
                 />
               </div>
             )}
-            <div className="p-2">
-              {/* Issue #2213: `MobileComposer` is `MessageInput` plus the one line
-                  that reads the screen's registered optimistic send. It has to be a
-                  child component because that read is a hook and the provider is
-                  rendered by THIS component. */}
-              <MobileComposer
+
+            {/* Issue #111: Branch mismatch warning (Mobile) */}
+            {worktree?.gitStatus && worktree.gitStatus.isBranchMismatch && (
+              <div className="z-35 flex-shrink-0">
+                <BranchMismatchAlert
+                  isBranchMismatch={worktree.gitStatus.isBranchMismatch}
+                  currentBranch={worktree.gitStatus.currentBranch}
+                  initialBranch={worktree.gitStatus.initialBranch}
+                />
+              </div>
+            )}
+
+            {/* Agent-instance tabs row (Mobile, Issue #1080) — dedicated to the
+                per-instance tabs. Auto-Yes moved into the composer meta row; terminal
+                search + End moved into the "more actions" bottom sheet.
+                Issue #1166: `flex-shrink-0` in the viewport-height flex column (the
+                row no longer needs `sticky` — the shell itself does not scroll). */}
+            <div className="flex-shrink-0 z-30 flex items-center gap-2 px-3 py-1.5 bg-surface-2 border-b border-border">
+              {/* CLI tool tabs — horizontally scrollable so 3+ agents never overflow
+                  off-screen (Issue #958). `min-w-0` releases the flex item's default
+                  min-width:auto so the nav scrolls instead of expanding.
+                  Issue #874: per-agent-instance (alias-aware) tabs mirror the PC
+                  header; `displayedInstances` is the per-device visible subset.
+                  Issue #960: status resolved per-instance優先（PC版と整合）. */}
+              <nav
+                className="flex gap-1 flex-1 min-w-0 overflow-x-auto scrollbar-hide"
+                aria-label={tWorktree('detail.agentInstanceSelection')}
+              >
+                {displayedInstances.map((inst) => {
+                  const toolStatus = deriveCliStatus(
+                    worktree?.sessionStatusByInstance?.[inst.id] ?? worktree?.sessionStatusByCli?.[inst.cliTool]
+                  );
+                  // Issue #1277: the status wording comes from the generic
+                  // `common.status.*` keys (#1273) — one source of truth, shared
+                  // with SIDEBAR_STATUS_CONFIG's labelKey (#1304).
+                  const statusLabel = tCommon(`status.${toolStatus}`);
+                  const isActive = activeInstanceId === inst.id;
+                  return (
+                    <button
+                      key={inst.id}
+                      onClick={() => setActiveInstanceId(inst.id)}
+                      // Issue #1127: min-h-[44px] + touch-manipulation give these
+                      // densely-packed instance tabs a ≥44px tap target (text stays
+                      // text-xs; only the hit area grows) and kill the double-tap
+                      // zoom delay on touch devices.
+                      className={`flex-shrink-0 whitespace-nowrap min-h-[44px] px-1.5 py-1 font-medium text-xs transition-colors flex items-center gap-1 border-b-2 touch-manipulation ${
+                        isActive
+                          ? 'text-accent-600 dark:text-accent-400 border-accent-500'
+                          : 'text-muted-foreground hover:text-foreground border-transparent'
+                      }`}
+                      aria-current={isActive ? 'page' : undefined}
+                    >
+                      {/* Issue #1078: unified StatusDot visual language (was blue spinner) */}
+                      <StatusDot
+                        status={toolStatus}
+                        size="sm"
+                        label={tWorktree('detail.statusPill', {
+                          label: getInstanceLabel(inst),
+                          status: statusLabel,
+                        })}
+                      />
+                      {getInstanceLabel(inst)}
+                    </button>
+                  );
+                })}
+              </nav>
+              {/* More actions (terminal search + End) — pinned, opens bottom sheet */}
+              <button
+                type="button"
+                onClick={() => setShowActionsSheet(true)}
+                className="flex-shrink-0 flex items-center justify-center min-h-[44px] min-w-[44px] rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors touch-manipulation"
+                aria-label={tWorktree('terminal.moreActions')}
+                data-testid="mobile-more-actions-button"
+              >
+                <MoreHorizontal size={18} aria-hidden="true" />
+              </button>
+            </div>
+
+            {/* Issue #1166: `flex-1 min-h-0 overflow-y-auto` — the only element that
+                absorbs the flex column's remaining space and scrolls internally, so
+                the fixed-height header/tabs/composer/tab bar keep their size when the
+                keyboard shrinks the shell. The old 12rem bottom padding is gone: the
+                composer + tab bar are now in-flow siblings, not fixed overlays. */}
+            <main
+              className="flex-1 min-h-0 overflow-y-auto"
+              ref={tabSwipeRef}
+            >
+              <MobileContent
+                activeTab={activeTab}
                 worktreeId={worktreeId}
-                onMessageSent={handleMessageSent}
+                worktree={worktree}
+                messages={state.messages}
                 cliToolId={activeCliTab}
                 instanceId={activeInstanceId}
-                isSessionRunning={activeSessionRunning}
-                pendingInsertText={pendingInsertText}
-                onInsertConsumed={handleInsertConsumedSingle}
-                // Issue #1080: Auto-Yes now lives in the composer meta row (moved off
-                // the sticky tab row). The active agent tab already names the tool, so
-                // the parenthetical tool name is suppressed here (showToolName=false).
-                autoYesSlot={
-                  <AutoYesToggle
-                    enabled={autoYesEnabled}
-                    expiresAt={autoYesExpiresAt}
-                    onToggle={handleAutoYesToggle}
-                    lastAutoResponse={lastAutoResponse}
-                    cliToolName={activeCliTab}
-                    inline
-                    showToolName={false}
-                  />
-                }
+                onFilePathClick={handleFilePathClick}
+                onFileSelect={handleFileSelect}
+                onWorktreeUpdate={setWorktree}
+                onNewFile={handleNewFile}
+                onNewDirectory={handleNewDirectory}
+                onRename={handleRename}
+                onDelete={handleDelete}
+                onUpload={handleUpload}
+                onMove={handleMove}
+                onFileTreeReset={resetFileTreeView}
+                refreshTrigger={fileTreeRefresh}
+                fileSearch={fileSearch}
+                showToast={showToast}
+                // Issue #874 (折衷案): the Agent tab manages the shared instance
+                // ROSTER (entity + alias → DB, consistent with PC via
+                // handleAgentInstancesChange) PLUS a per-device "show as tabs"
+                // selection that only writes localStorage (toggleInstanceVisible),
+                // preserving the #837/#851 intent that narrowing tabs on mobile must
+                // not shrink the PC view. `selectedAgents` is still passed for the
+                // TimerPane; mobile selection itself is now instance-driven so the
+                // legacy change callback is a no-op.
+                selectedAgents={mobileSelectedAgents}
+                onSelectedAgentsChange={NOOP_SELECTED_AGENTS_CHANGE}
+                useInstanceManagement
+                instances={agentInstances}
+                onInstancesChange={handleAgentInstancesChange}
+                visibleInstanceIds={visibleInstanceIds}
+                onToggleInstanceVisible={toggleInstanceVisible}
+                vibeLocalModel={vibeLocalModel}
+                onVibeLocalModelChange={handleVibeLocalModelChange}
+                vibeLocalContextWindow={vibeLocalContextWindow}
+                onVibeLocalContextWindowChange={handleVibeLocalContextWindowChange}
+                disableAutoFollow={disableAutoFollow}
+                historySubTab={historySubTab}
+                onHistorySubTabChange={setHistorySubTab}
+                onDiffSelect={handleDiffSelect}
+                onInsertToMessage={handleInsertToMessage}
+                showArchived={showArchived}
+                onShowArchivedChange={handleShowArchivedChange}
+                historyDisplayLimit={historyDisplayLimit}
+                onHistoryDisplayLimitChange={handleHistoryDisplayLimitChange}
+                historyUserOnly={historyUserOnly}
+                onHistoryUserOnlyChange={handleHistoryUserOnlyChange}
+                verification={verification}
+                toolsSubTabRequest={toolsSubTabRequest}
+                onSurfaceModeChange={setMobileSurfaceMode}
               />
-            </div>
-          </div>
+            </main>
 
-          {/* Issue #1166: `inFlow` renders the tab bar as the bottom flex child
-              (static) so it tracks the viewport-height shell above the keyboard. */}
-          <MobileTabBar
-            activeTab={activeTab}
-            onTabChange={handleMobileTabSelect}
-            hasNewOutput={hasNewOutput}
-            hasPrompt={state.prompt.visible}
-            hasUpdate={hasUpdate}
-            inFlow
-          />
-
-          {!autoYesEnabled && (
-            <MobilePromptSheet
-              promptData={state.prompt.data}
-              visible={state.prompt.visible}
-              answering={state.prompt.answering}
-              onRespond={handlePromptRespond}
-              onDismiss={handlePromptDismiss}
-              cliToolName={getCliToolDisplayName(activeCliTab)}
-            />
-          )}
-
-          {/* Issue #1080: terminal secondary actions (search + End) bottom sheet.
-              Issue #1171: End defers to openActiveKillConfirm, which snapshots the
-              active instance as the kill target and opens the confirm dialog. */}
-          <MobileTerminalActionsSheet
-            open={showActionsSheet}
-            onClose={() => setShowActionsSheet(false)}
-            onSearch={() => window.dispatchEvent(new CustomEvent('terminal-search-open'))}
-            onEnd={openActiveKillConfirm}
-            endDisabled={!activeSessionRunning}
-          />
-
-          {/* Issue #1519: single mobile file screen — markdown viewing and editing
-              now live inside FileViewer, so there is no separate editor modal. */}
-          <FileViewer
-            isOpen={mobileFileViewerPath !== null}
-            onClose={handleMobileFileViewerClose}
-            worktreeId={worktreeId}
-            filePath={mobileFileViewerPath ?? ''}
-            onFileSaved={handleEditorSave}
-            onOpenFile={handleFilePathClick}
-          />
-          {/* Hidden file input for upload (Mobile) */}
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept={UPLOADABLE_EXTENSIONS.join(',')}
-            onChange={handleFileInputChange}
-            className="hidden"
-            aria-label={tWorktree('detail.uploadFile')}
-          />
-          {/* Kill session confirmation dialog (Mobile) — Issue #1171: same
-              target-snapshot model as PC (killTarget drives open-state + title;
-              Confirm disabled while the POST is in flight). */}
-          <Modal
-            isOpen={killTarget !== null}
-            onClose={handleKillCancel}
-            title={tWorktree('session.confirmEnd', { tool: killDialogLabel })}
-            size="sm"
-            showCloseButton={true}
-          >
-            <div className="space-y-4">
-              <p className="text-sm text-foreground">
-                {tWorktree('session.endWarning')}
-              </p>
-              <div className="flex justify-end gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={handleKillCancel}
-                  className="px-4 py-2 text-sm font-medium rounded-md bg-muted hover:bg-muted/80 text-foreground"
-                >
-                  {tCommon('cancel')}
-                </button>
-                <button
-                  type="button"
-                  onClick={handleKillConfirm}
-                  disabled={isKillPending}
-                  className="px-4 py-2 text-sm font-medium rounded-md bg-danger hover:bg-danger/90 text-white disabled:opacity-60 disabled:cursor-not-allowed"
-                >
-                  {tCommon('end')}
-                </button>
+            {/* Message Input — Issue #1166: in-flow bottom bar (`flex-shrink-0`).
+                The viewport-height shell keeps this docked above the software
+                keyboard, so it no longer needs `position: fixed` + a translateY lift. */}
+            <div className="flex-shrink-0 border-t border-border bg-surface z-30">
+              {/* Issue #473: Navigation buttons for OpenCode TUI selection list (mobile).
+                  Issue #2254: not while the terminal tab is showing the CHAT
+                  surface — that surface draws its own pad inside the dialog card,
+                  directly under the frame, and this docked copy would be a second
+                  one twelve rows away from the list it drives. Both terms are
+                  required: `activeTab` because the mode only describes the
+                  terminal tab (History / Files / Tools keep the docked pad), and
+                  `mobileSurfaceMode` because that is which half of it is on. */}
+              {isSelectionListActive && !isMobileChatSurface && (
+                <div className="px-2 pt-1 border-b border-border">
+                  <NavigationButtons
+                    worktreeId={worktreeId}
+                    cliToolId={activeCliTab}
+                    instanceId={activeInstanceId}
+                    onKeysSent={fetchCurrentOutput}
+                    showPagerKeys={isPagerActive}
+                  />
+                </div>
+              )}
+              <div className="p-2">
+                {/* Issue #2213: `MobileComposer` is `MessageInput` plus the one line
+                    that reads the screen's registered optimistic send. It has to be a
+                    child component because that read is a hook and the provider is
+                    rendered by THIS component. */}
+                <MobileComposer
+                  worktreeId={worktreeId}
+                  onMessageSent={handleMessageSent}
+                  cliToolId={activeCliTab}
+                  instanceId={activeInstanceId}
+                  isSessionRunning={activeSessionRunning}
+                  pendingInsertText={pendingInsertText}
+                  onInsertConsumed={handleInsertConsumedSingle}
+                  // Issue #1080: Auto-Yes now lives in the composer meta row (moved off
+                  // the sticky tab row). The active agent tab already names the tool, so
+                  // the parenthetical tool name is suppressed here (showToolName=false).
+                  autoYesSlot={
+                    <AutoYesToggle
+                      enabled={autoYesEnabled}
+                      expiresAt={autoYesExpiresAt}
+                      onToggle={handleAutoYesToggle}
+                      lastAutoResponse={lastAutoResponse}
+                      cliToolName={activeCliTab}
+                      inline
+                      showToolName={false}
+                    />
+                  }
+                />
               </div>
             </div>
-          </Modal>
-          {/* [Issue #162] Move Dialog (Mobile) */}
-          {moveTarget && (
-            <MoveDialog
-              isOpen={isMoveDialogOpen}
-              onClose={handleMoveCancel}
-              onConfirm={handleMoveConfirm}
-              worktreeId={worktreeId}
-              sourcePath={moveTarget.path}
-              sourceType={moveTarget.type}
+
+            {/* Issue #1166: `inFlow` renders the tab bar as the bottom flex child
+                (static) so it tracks the viewport-height shell above the keyboard. */}
+            <MobileTabBar
+              activeTab={activeTab}
+              onTabChange={handleMobileTabSelect}
+              hasNewOutput={hasNewOutput}
+              hasPrompt={state.prompt.visible}
+              hasUpdate={hasUpdate}
+              inFlow
             />
-          )}
-          {/* [Issue #646] New file dialog (Mobile) */}
-          <NewFileDialog
-            isOpen={showNewFileDialog}
-            parentPath={newFileParentPath}
-            onConfirm={handleNewFileConfirm}
-            onCancel={handleNewFileCancel}
-          />
-        </div>
+
+            {!autoYesEnabled && (
+              <MobilePromptSheet
+                promptData={state.prompt.data}
+                visible={state.prompt.visible}
+                answering={state.prompt.answering}
+                onRespond={handlePromptRespond}
+                onDismiss={handlePromptDismiss}
+                cliToolName={getCliToolDisplayName(activeCliTab)}
+              />
+            )}
+
+            {/* Issue #1080: terminal secondary actions (search + End) bottom sheet.
+                Issue #1171: End defers to openActiveKillConfirm, which snapshots the
+                active instance as the kill target and opens the confirm dialog. */}
+            <MobileTerminalActionsSheet
+              open={showActionsSheet}
+              onClose={() => setShowActionsSheet(false)}
+              onSearch={() => window.dispatchEvent(new CustomEvent('terminal-search-open'))}
+              onEnd={openActiveKillConfirm}
+              endDisabled={!activeSessionRunning}
+            />
+
+            {/* Issue #1519: single mobile file screen — markdown viewing and editing
+                now live inside FileViewer, so there is no separate editor modal. */}
+            <FileViewer
+              isOpen={mobileFileViewerPath !== null}
+              onClose={handleMobileFileViewerClose}
+              worktreeId={worktreeId}
+              filePath={mobileFileViewerPath ?? ''}
+              onFileSaved={handleEditorSave}
+              onOpenFile={handleFilePathClick}
+            />
+            {/* Hidden file input for upload (Mobile) */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept={UPLOADABLE_EXTENSIONS.join(',')}
+              onChange={handleFileInputChange}
+              className="hidden"
+              aria-label={tWorktree('detail.uploadFile')}
+            />
+            {/* Kill session confirmation dialog (Mobile) — Issue #1171: same
+                target-snapshot model as PC (killTarget drives open-state + title;
+                Confirm disabled while the POST is in flight). */}
+            <Modal
+              isOpen={killTarget !== null}
+              onClose={handleKillCancel}
+              title={tWorktree('session.confirmEnd', { tool: killDialogLabel })}
+              size="sm"
+              showCloseButton={true}
+            >
+              <div className="space-y-4">
+                <p className="text-sm text-foreground">
+                  {tWorktree('session.endWarning')}
+                </p>
+                <div className="flex justify-end gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={handleKillCancel}
+                    className="px-4 py-2 text-sm font-medium rounded-md bg-muted hover:bg-muted/80 text-foreground"
+                  >
+                    {tCommon('cancel')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleKillConfirm}
+                    disabled={isKillPending}
+                    className="px-4 py-2 text-sm font-medium rounded-md bg-danger hover:bg-danger/90 text-white disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    {tCommon('end')}
+                  </button>
+                </div>
+              </div>
+            </Modal>
+            {/* [Issue #162] Move Dialog (Mobile) */}
+            {moveTarget && (
+              <MoveDialog
+                isOpen={isMoveDialogOpen}
+                onClose={handleMoveCancel}
+                onConfirm={handleMoveConfirm}
+                worktreeId={worktreeId}
+                sourcePath={moveTarget.path}
+                sourceType={moveTarget.type}
+              />
+            )}
+            {/* [Issue #646] New file dialog (Mobile) */}
+            <NewFileDialog
+              isOpen={showNewFileDialog}
+              parentPath={newFileParentPath}
+              onConfirm={handleNewFileConfirm}
+              onCancel={handleNewFileCancel}
+            />
+          </div>
+        </ChatFileLinkProvider>
       </WorktreeChatSendProvider>
     </ErrorBoundary>
   );
