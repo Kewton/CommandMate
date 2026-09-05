@@ -44,6 +44,38 @@
  * tested and used for `capture.transcriptPathHint`, so the day the payload is
  * plumbed the change is one line at the producer.
  *
+ * ## What Issue #2304 measured about that seam
+ *
+ * The two halves are now joined by a test rather than by a paragraph.
+ * `tests/unit/hooks/sources/command-code-transcript-path-2304.test.ts` runs the
+ * real captured payloads through {@link readCommandCodeTranscriptPath} into
+ * `transcriptPathHint` and asserts the turn that comes out — against a **decoy**
+ * directory named exactly what claude's `[^A-Za-z0-9] → -` rule would produce
+ * for the same `cwd`, holding the same session id and a newer mtime. A reader
+ * that computed the slug and a reader that only scanned both write the decoy;
+ * only one that follows the hook's own path writes the right turn. The control
+ * is asserted too: take the hint away and the scan really does resolve to the
+ * decoy.
+ *
+ * Three live facts from that capture (Command Code 1.49.0, 2026-09-04):
+ *
+ *  - **`transcript_path` is on all four events with one value for the session**,
+ *    so a receiver may latch it off whichever it sees first. `cwd` is on all
+ *    four as well — the temptation to compute the slug is *in the payload*, and
+ *    Epic #2249 決定 4 is the answer to it.
+ *  - **The slug still splits camel case**: `…/cwd/MyCodeBranchDesk/probe` →
+ *    `…-cwd-my-code-branch-desk-probe`, where claude's rule would answer
+ *    `-…-cwd-MyCodeBranchDesk-probe`. Two differences, both pinned by name.
+ *  - **1.49.0 writes two new files beside the transcript**:
+ *    `<session_id>.meta.json` and `<session_id>.checkpoints.jsonl`.
+ *    {@link findCommandCodeTranscriptPath} matches `<session_id>.jsonl`
+ *    exactly, so neither is a candidate — an `endsWith('.jsonl')` scan would
+ *    have picked the checkpoints file up. It also passes
+ *    {@link acceptCommandCodeTranscriptHint} (absolute, under the root,
+ *    `.jsonl`), and the reason that is still safe is that its rows carry no
+ *    `type`, so the parser declines all of them and this returns false. No
+ *    fourth condition on the accept.
+ *
  * ## Nothing here throws
  *
  * Same contract as its four siblings, and one more reason: a throw here would

@@ -1,0 +1,63 @@
+[
+  {
+    "observed_at": "2026-09-04T23:12:19.000Z",
+    "event": "SessionStart",
+    "payload": {
+      "session_id": "ce63472c-d5ed-4af6-85a2-c93ae35a81f6",
+      "transcript_path": "/private/tmp/cc2304-home/.commandcode/projects/private-tmp-cc2304-probe-my-code-branch-desk-probe/ce63472c-d5ed-4af6-85a2-c93ae35a81f6.jsonl",
+      "cwd": "/private/tmp/cc2304-probe/MyCodeBranchDesk/probe",
+      "hook_event_name": "SessionStart",
+      "permission_mode": "default",
+      "source": "startup"
+    }
+  },
+  {
+    "observed_at": "2026-09-04T23:12:51.000Z",
+    "event": "PreToolUse",
+    "payload": {
+      "session_id": "ce63472c-d5ed-4af6-85a2-c93ae35a81f6",
+      "transcript_path": "/private/tmp/cc2304-home/.commandcode/projects/private-tmp-cc2304-probe-my-code-branch-desk-probe/ce63472c-d5ed-4af6-85a2-c93ae35a81f6.jsonl",
+      "cwd": "/private/tmp/cc2304-probe/MyCodeBranchDesk/probe",
+      "hook_event_name": "PreToolUse",
+      "permission_mode": "default",
+      "tool_use_id": "call_00_8daq2E0EKcTnQHrRsE8g4223",
+      "tool_name": "write_file",
+      "tool_display_name": "WRITE",
+      "tool_input": {
+        "file_path": "/private/tmp/cc2304-probe/MyCodeBranchDesk/probe/probe2304.txt",
+        "content": "PROBE-2304"
+      }
+    }
+  },
+  {
+    "observed_at": "2026-09-04T23:12:51.000Z",
+    "event": "PostToolUse",
+    "payload": {
+      "session_id": "ce63472c-d5ed-4af6-85a2-c93ae35a81f6",
+      "transcript_path": "/private/tmp/cc2304-home/.commandcode/projects/private-tmp-cc2304-probe-my-code-branch-desk-probe/ce63472c-d5ed-4af6-85a2-c93ae35a81f6.jsonl",
+      "cwd": "/private/tmp/cc2304-probe/MyCodeBranchDesk/probe",
+      "hook_event_name": "PostToolUse",
+      "permission_mode": "default",
+      "tool_use_id": "call_00_8daq2E0EKcTnQHrRsE8g4223",
+      "tool_name": "write_file",
+      "tool_display_name": "WRITE",
+      "tool_input": {
+        "file_path": "/private/tmp/cc2304-probe/MyCodeBranchDesk/probe/probe2304.txt",
+        "content": "PROBE-2304"
+      },
+      "tool_response": "File created successfully at: /private/tmp/cc2304-probe/MyCodeBranchDesk/probe/probe2304.txt"
+    }
+  },
+  {
+    "observed_at": "2026-09-04T23:12:52.000Z",
+    "event": "Stop",
+    "payload": {
+      "session_id": "ce63472c-d5ed-4af6-85a2-c93ae35a81f6",
+      "transcript_path": "/private/tmp/cc2304-home/.commandcode/projects/private-tmp-cc2304-probe-my-code-branch-desk-probe/ce63472c-d5ed-4af6-85a2-c93ae35a81f6.jsonl",
+      "cwd": "/private/tmp/cc2304-probe/MyCodeBranchDesk/probe",
+      "hook_event_name": "Stop",
+      "permission_mode": "default",
+      "stop_hook_active": false
+    }
+  }
+]
