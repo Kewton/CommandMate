@@ -215,6 +215,37 @@ POST /api/worktrees/:id/auto-yes
 - **Invalid duration value**: Returns 400 error
 - **Security**: 5-layer defense with worktreeId format validation -> JSON parse validation -> type validation -> whitelist validation
 
+### Approval Routes Differ by Agent
+
+There are two routes by which Auto Yes answers a confirmation, and **which one you get is a property
+of the agent**, not of how you set the toggle.
+
+| Route | What you see on screen | Agents |
+|-------|------------------------|--------|
+| **Hook approval** | The confirmation dialog **never appears**. The agent asks CommandMate before it runs the tool and proceeds straight away once allowed | Claude / Codex / Copilot / Antigravity (OpenCode does the same thing over SSE rather than hooks) |
+| **Screen-based (TUI numbered response)** | The confirmation dialog **is drawn on the terminal surface**, then a few seconds later it is answered automatically and disappears | **Command Code** / Gemini / Vibe-Local |
+
+**Command Code cannot use hook approval, structurally.** It tells CommandMate that it is about to run
+a tool only **after** the permission dialog has been answered — by then the dialog is gone, so the
+reply cannot be an approval. Command Code's Auto Yes therefore runs entirely on the route that reads
+the terminal surface and sends back the option's number key.
+
+This does not mean Auto Yes is broken on Command Code: in a live check both a file-creation
+confirmation and a shell-command confirmation were answered automatically. What differs is how it
+looks and what it depends on.
+
+- **The dialog is visible for a few seconds** (measured: 3–4 seconds before it is answered and
+  disappears). On the four hook-approval tools no dialog appears at all as long as the request is
+  allowed
+- **Nothing is answered while the terminal cannot be read.** Reading the terminal surface is this
+  route's only input, so a frame that cannot be read — or that slips past detection — leaves the
+  dialog standing. Click the option manually when that happens
+- **Who answered is recorded.** In the prompt history on the terminal surface (or
+  `commandmate capture <worktree-id> --prompts` from the CLI), `answeredBy` is `auto` for the
+  server-side Auto Yes and `human` for a manual answer
+
+See [Agent event hooks](./agent-event-hooks.md) for the per-route technical detail.
+
 ### Important Notes
 
 - While Auto Yes is active, all confirmations are automatically answered with "Yes"
@@ -341,8 +372,15 @@ Select which CLI agents to use for each worktree.
 | **Codex** | OpenAI Codex CLI |
 | **Gemini** | Google Gemini CLI |
 | **Vibe-Local** | Ollama local LLM |
+| **OpenCode** | OpenCode CLI |
+| **Copilot** | GitHub Copilot CLI |
+| **Antigravity** | Antigravity CLI (`agy`) |
+| **Command Code** | Command Code CLI (`commandcode`, Issue #2250) |
 
 - You must always select exactly **2** agents
+- **Auto Yes behaves differently per agent.** Command Code / Gemini / Vibe-Local only have
+  the screen-based route (the dialog is drawn once, then answered automatically). See
+  [Approval Routes Differ by Agent](#approval-routes-differ-by-agent)
 - The selected agents appear as tabs in the terminal header
 
 ### Ollama Model Selection (Vibe-Local)

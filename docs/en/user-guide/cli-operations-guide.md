@@ -1103,6 +1103,57 @@ To suppress automatic answers for dangerous commands, use the execution contract
 one matches against the **question text and options** of the confirmation prompt, and on a match it
 declines to answer and escalates to a human.
 
+### Two Approval Routes, and command-code Only Has the Screen One
+
+"Answering automatically" is not one mechanism. **Which route is used is a property of the agent**,
+not of how you spell `--enable`.
+
+| Route | What happens | Agents |
+|-------|--------------|--------|
+| **Hook approval** | The agent asks CommandMate **before** it runs the tool, and CommandMate adjudicates. When the answer is "allow", the dialog is **never drawn** | claude / codex / copilot / antigravity (opencode does the same thing over SSE rather than hooks) |
+| **Screen-based (TUI numbered response)** | The dialog **is actually drawn**, then CommandMate reads the terminal and sends back the option's number key | **command-code** / gemini / vibe-local |
+
+**command-code cannot use hook approval, structurally.** Its `PreToolUse` hook fires **after** the
+permission dialog has been answered, so no hook reply can dismiss one (measured on Command Code
+v1.49.0: dialog detected `23:02:19.398Z` → number sent `23:02:19.919Z` → `PreToolUse` delivered
+`23:02:20.120Z`). That is why command-code's `PreToolUse` is registered against
+`/api/hooks/agent-event` as an **ordinary observation** and is never consulted for an approval.
+See [Agent event hooks](./agent-event-hooks.md) for the per-tool details.
+
+Three consequences are visible from the CLI:
+
+- **The dialog is drawn on the terminal, once.** Measured, it stands for 3–4 seconds before it is
+  answered and disappears (0.1–0.6 s of that is detection → keystroke). On the four hook-approval
+  tools no dialog appears at all as long as the request is allowed
+- **Nothing is answered when the terminal cannot be read.** A pane capture is the only input this
+  route has, so a frame that cannot be captured — or that slips past detection — is left standing
+  (the same gap `wait` reports as `unclassified`)
+- **`auto-yes --enable` never prints its second line here.** Re-judging pending approvals needs the
+  `resync` capability, which today only opencode has — neither the three screen-based tools nor the
+  four hook-approval ones print it
+
+Either way, **`capture --prompts` is where you find out who answered** (`answeredBy` is `auto` for
+the server-side Auto-Yes, `human` for `respond` or the chat UI).
+
+```console
+$ commandmate capture <worktree-id> --instance command-code --prompts --json
+{
+  "prompts": [
+    {
+      "question": "… Execute Shell Command Command Code needs to execute rm -f probe.txt. …",
+      "options": [{ "number": 1, "label": "Yes", "isDefault": true }, …],
+      "status": "answered", "answer": "1", "answeredBy": "auto"
+    }
+  ]
+}
+```
+
+> **This does not mean Auto-Yes is weaker on command-code.** In an isolated live check both a
+> `Create File` and an `Execute Shell Command` dialog were answered with `answeredBy: auto` while
+> Auto-Yes was on, and with it off the same dialog was still standing 45 seconds later (the control).
+> What differs is the **route**, and the three consequences above that follow from the dialog being
+> drawn at all.
+
 ---
 
 ## commandmate instances
