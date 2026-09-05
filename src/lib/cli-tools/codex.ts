@@ -46,7 +46,7 @@ import {
   TUI_EXIT_WAIT_MS,
   CODEX_DIALOG_SETTLE_MS,
 } from '@/config/cli-tool-timing-config';
-import { SessionStartUnavailableError } from '../session/session-start-error';
+import { missingToolError } from './install-hints';
 
 const logger = createLogger('cli-tools/codex');
 
@@ -257,7 +257,7 @@ export class CodexTool extends BaseCLITool {
     // Check if Codex is installed
     const codexAvailable = await this.isInstalled();
     if (!codexAvailable) {
-      throw new SessionStartUnavailableError(this.name, 'Codex CLI is not installed or not in PATH');
+      throw missingToolError(this);
     }
 
     const sessionName = this.getSessionName(worktreeId, instanceId);
