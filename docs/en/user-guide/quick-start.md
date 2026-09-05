@@ -31,6 +31,33 @@ See the [CLI Setup Guide](./cli-setup-guide.md) for details.
 
 ---
 
+## The minimum loop, on any agent
+
+The `/work-plan` and `/tdd-impl` commands below are **Claude Code slash commands**, and they live in
+the CommandMate repository's own `.claude/commands` at that. CommandMate's core loop — **contract in,
+send, verification gate out** — runs with the same commands on any agent.
+
+A contract is YAML, and what reaches the agent is the plain text composed from it. A gate is a shell
+command run in the worktree's working directory, and pass or fail is that command's exit code.
+Neither branches on the agent. **The only thing that changes is how you name the target.**
+
+```bash
+# name the target with --instance (a CLI tool id resolves to that tool's primary instance)
+commandmate send <worktree-id> --contract .commandmate/tasks/<task>.yaml --instance opencode
+commandmate wait <worktree-id> --instance opencode --verify
+echo $?   # 0=passed / 20=a gate failed / 21=no work evidence / 10=waiting for an answer
+```
+
+Swap `opencode` for `claude`, `codex`, `command-code` and so on and it is the same round on that
+agent. `wait` has no `--agent`, so **write `--instance` on both `send` and `wait`** — name it on
+only one and the other waits on the worktree's default agent.
+
+For the full round with OpenCode and Command Code — how to confirm where the target resolved, and
+what genuinely does differ per agent — see
+[the tutorial's appendix](./tutorial.md#appendix-run-the-same-loop-with-opencode-or-command-code).
+
+---
+
 ## 5-Minute Development Flow
 
 ### Step 1: Review the Issue
