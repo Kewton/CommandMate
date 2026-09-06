@@ -54,6 +54,12 @@ const PUSH_MESSAGES: Record<SupportedLocale, typeof enNotifications.push> = {
 };
 
 /**
+ * The `tag` segment a model-change card carries in place of its kind
+ * (Issue #2357). Exported so the notifier's tests can name the card they expect.
+ */
+export const MODEL_CHANGE_TAG_SUFFIX = 'model';
+
+/**
  * Narrow a stored subscription locale to one we can actually render.
  * Subscriptions registered before v42 have `locale = NULL` and land on
  * DEFAULT_LOCALE; they self-heal when the browser next re-registers.
@@ -112,6 +118,24 @@ export interface FailureContext {
    * attempt counter). Producers build it; see `failure-push-notifier`.
    */
   signature: string;
+}
+
+/** What a model-change notification is about (Issue #2357). */
+export interface ModelChangeContext {
+  /** The model the instance was on. Never rendered here — the body is prebuilt. */
+  from: string;
+  /** The model it is on now. */
+  to: string;
+  /**
+   * The sentence, per locale, already interpolated.
+   *
+   * Prebuilt by the producer rather than looked up here so this module keeps
+   * exactly one dictionary (`notifications.json`): the wording is shared with
+   * the history row the same edge writes, and lives in `worktree.json` beside
+   * the phone's session row that shows the same value. Keyed by
+   * `SupportedLocale` so a new locale is a type error at the producer.
+   */
+  body: Record<SupportedLocale, string>;
 }
 
 /** The agent event that triggers a notification. */
@@ -180,6 +204,24 @@ export interface NotificationEvent {
     /** The version opencode says is available (`properties.version`). */
     version: string;
   };
+  /**
+   * This instance moved to a different model (Issue #2357).
+   *
+   * Rides on `kind: 'failure'`, and the reason is the stored toggle rather
+   * than the word: `push_subscriptions` keeps two columns, and `failure` maps
+   * to `enabled_prompt` — the "you need to act" bucket a new subscription
+   * starts ON. A model change is exactly the fact the Issue wants delivered by
+   * default (a rate-limit downgrade nobody asked for), so it goes to the
+   * bucket that is on by default; `completion` would have reached nobody who
+   * had not opted in. The `kind` word never reaches a reader: the Service
+   * Worker carries it as data only, and this event replaces both the body and
+   * the `tag` (see {@link buildPushPayload}), so a model card never displaces a
+   * failure card or vice versa.
+   *
+   * Set only by `model-change-push-notifier`; `failure` is left undefined on
+   * such an event, and {@link buildPushPayload} reads this field first.
+   */
+  modelChange?: ModelChangeContext;
   /**
    * Where tapping this notification goes (Issue #2022).
    *
@@ -334,9 +376,14 @@ export function buildPushPayload(
   const excerpt = buildExcerpt(event.excerpt);
   const agentSuffix = event.agentName ? ` (${event.agentName})` : '';
   const title = `${event.worktreeName}${agentSuffix}`;
-  const messages = PUSH_MESSAGES[resolvePushLocale(locale)];
+  const resolvedLocale = resolvePushLocale(locale);
+  const messages = PUSH_MESSAGES[resolvedLocale];
   const body =
-    event.kind === 'prompt'
+    // Issue #2357: read first, because the event's `kind` is the bucket it is
+    // delivered to and says nothing about what it is. See `modelChange`.
+    event.modelChange
+      ? event.modelChange.body[resolvedLocale]
+      : event.kind === 'prompt'
       ? // Issue #2001: the resolution's body replaces the stale card's, so it
         // has to answer the question that card asked. It quotes no excerpt —
         // the prompt is over, and repeating it would read as a new one.
@@ -365,7 +412,12 @@ export function buildPushPayload(
     // Unchanged by #1790, and deliberately: the escalation carries the same tag
     // as the notification it follows up, so the Service Worker replaces the
     // stale one instead of stacking a second card for the same wait.
-    tag: `${event.worktreeId}:${event.kind}`,
+    // Issue #2357: a model change gets a tag of its own, so it neither replaces
+    // a failure card (its transport bucket) nor is replaced by one; two changes
+    // of the same worktree do collapse, which is right — the newer is the fact.
+    tag: event.modelChange
+      ? `${event.worktreeId}:${MODEL_CHANGE_TAG_SUFFIX}`
+      : `${event.worktreeId}:${event.kind}`,
     timestamp: now,
     ...(event.waitingKind ? { waitingKind: event.waitingKind } : {}),
     ...(event.resolved === true ? { resolved: true as const } : {}),
@@ -448,6 +500,18 @@ function passesDedup(event: NotificationEvent): boolean {
   // `${worktreeId}:prompt`, the same slot a legacy (pre-#1790) prompt event
   // uses, so the two would suppress each other on a 30 s window neither wants.
   if (event.resolved === true) return true;
+
+  // Issue #2357: keyed on the transition, not on its wording — the body is
+  // localized per device and the same change must not send twice because two
+  // readers speak different languages. The producer already emits one edge per
+  // transition; this is the second net, on the same 30 s window as the rest.
+  if (event.modelChange) {
+    return shouldSendNotification({
+      worktreeId: event.worktreeId,
+      kind: event.kind,
+      content: `${MODEL_CHANGE_TAG_SUFFIX}:${event.instanceId ?? event.agentName ?? ''}:${event.modelChange.from}>${event.modelChange.to}`,
+    });
+  }
 
   if (event.kind === 'prompt' && typeof event.waitingSince === 'number') {
     return shouldSendWaitingPush({

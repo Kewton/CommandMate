@@ -56,11 +56,17 @@
  * composer is most likely to be discovered. Its gate is the composer text, not a
  * detection flag, so the two bars can be on screen at once and neither implies
  * the other.
+ *
+ * Issue #2357: the session row ({@link MobileSessionRow}) — which model this
+ * instance is running, in the PC split header's exact words, with the amber
+ * "changed" notice the server's model edge raises. It is the one thing in this
+ * tab that takes vertical space by design (28px, inside #2106's budget), and
+ * only while a model is known; see the component for the arithmetic.
  */
 
-import { memo, useCallback, useEffect, useMemo, useState } from 'react';
-import { MessageSquare, TerminalSquare } from 'lucide-react';
-import { useTranslations } from 'next-intl';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Cpu, MessageSquare, TerminalSquare } from 'lucide-react';
+import { useLocale, useTranslations } from 'next-intl';
 import { TerminalDisplay } from '@/components/worktree/TerminalDisplay';
 import { TerminalEscapeHatch } from '@/components/worktree/TerminalEscapeHatch';
 import { UnsentComposerBar, hasUnsentComposerText } from '@/components/worktree/UnsentComposerBar';
@@ -75,9 +81,22 @@ import { useSplitMessages } from '@/hooks/useSplitMessages';
 import { usePendingMessages, type OptimisticSendOptions } from '@/hooks/usePendingMessages';
 import {
   useChatComposerInsert,
+  useChatOptimisticSend,
   useRegisterChatOptimisticSend,
 } from '@/contexts/WorktreeChatSendContext';
 import { useChatFileLinkScope } from '@/lib/chat/chat-file-link-scope';
+import {
+  buildModelByInstance,
+  formatAgentModelLabel,
+  formatAgentSessionTooltip,
+  formatAgentSessionUsage,
+} from '@/components/worktree/WorktreeDetailSubComponents';
+import { useRealtimeListener } from '@/hooks/useRealtimeConnection';
+import { useSpecialKeys } from '@/hooks/useSpecialKeys';
+import { useOptionalWorktreesCacheContext } from '@/components/providers/WorktreesCacheProvider';
+import { MODEL_CHANGED_EVENT_TYPE, type ModelChangedEvent, type RealtimeEvent } from '@/lib/realtime/types';
+import { OPENCODE_LEADER_KEY } from '@/types/terminal-keys';
+import { NAV_KEY_REFRESH_DELAY_MS } from '@/config/ui-feedback-config';
 import { worktreeApi } from '@/lib/api-client';
 import { getTerminalDisplayCompaction } from '@/config/terminal-display-compaction';
 import {
@@ -125,6 +144,191 @@ const MOBILE_SURFACE_SEGMENTS: readonly {
   { mode: 'terminal', labelKey: 'surfaceMode.terminal', icon: TerminalSquare },
   { mode: 'chat', labelKey: 'surfaceMode.chat', icon: MessageSquare },
 ] as const;
+
+// ============================================================================
+// The session row's model source (Issue #2357)
+// ============================================================================
+
+/**
+ * The `model · effort` label for one instance of this worktree, or null when
+ * nothing has reported one (Issue #2357).
+ *
+ * Read from the app-wide worktrees cache — the `/api/worktrees` list every
+ * screen already polls for the sidebar — rather than from a value threaded
+ * down from the detail screen, and the reason is ownership: the value the PC
+ * split header reads lives on `WorktreeDetailRefactored`'s `worktree`, but this
+ * tab's props are built by `MobileContent` (`WorktreeDetailMobile`) as one
+ * frozen object, and neither a new prop nor a new context could cross that
+ * boundary without a module every mount of this tab does not already have.
+ * The list is the same information: both routes build
+ * `sessionStatusByInstance` with `detectWorktreeSessionStatus`, so the phone
+ * and the desktop read one field from one builder, and `buildModelByInstance`
+ * is the same projection `WorktreeDetailDesktop` feeds the split. The list
+ * polls slower than the detail (20s with a live socket), which is why a
+ * `model_changed` frame asks it to refresh at once — see the listener below.
+ *
+ * No provider above (every pre-#2357 suite of this tab) → null → no row.
+ */
+function useCachedAgentModelLabel(worktreeId: string, instanceId: string): string | null {
+  const cache = useOptionalWorktreesCacheContext();
+  const worktrees = cache?.worktrees;
+  return useMemo(() => {
+    const worktree = worktrees?.find((entry) => entry.id === worktreeId);
+    return buildModelByInstance(worktree?.sessionStatusByInstance)[instanceId] ?? null;
+  }, [worktrees, worktreeId, instanceId]);
+}
+
+/**
+ * How long the session row stays amber after a model change (Issue #2357).
+ *
+ * Five minutes, measured from the change's own timestamp rather than from
+ * when the frame arrived, so a phone that reconnects late shows the notice
+ * for the remainder of the same window rather than for a fresh one.
+ */
+export const MODEL_CHANGE_HIGHLIGHT_MS = 5 * 60_000;
+
+/** A model change this tab has heard about and not yet dismissed. */
+interface RecentModelChange {
+  from: string;
+  to: string;
+  at: number;
+}
+
+/**
+ * The keys that open opencode's model picker (Issue #2357).
+ *
+ * opencode has no `/model` — its picker is the `ctrl+x m` leader chord, the
+ * same two-entry request `OpencodeQuickKeys`'s `models` button sends. Every
+ * other tool with a model to show (claude, codex, copilot, antigravity,
+ * command-code) takes `/model` in its composer.
+ */
+const OPENCODE_MODEL_PICKER_KEYS: readonly string[] = [OPENCODE_LEADER_KEY, 'm'];
+
+/** The slash command every non-opencode tool opens its picker with. */
+const MODEL_PICKER_COMMAND = '/model';
+
+/**
+ * Whether a `model_changed` frame is about THIS tab's instance.
+ *
+ * `instance` is always resolved on the wire (`instanceId ?? cliToolId`), so
+ * the comparison is against this tab's resolved id and nothing else.
+ */
+function isModelChangeForInstance(
+  event: RealtimeEvent,
+  worktreeId: string,
+  instanceId: string
+): event is ModelChangedEvent {
+  if (event.type !== MODEL_CHANGED_EVENT_TYPE) return false;
+  const evt = event as Partial<ModelChangedEvent>;
+  return evt.worktreeId === worktreeId && evt.instance === instanceId;
+}
+
+/**
+ * The phone's session row (Issue #2357).
+ *
+ * One line at the top of the terminal / chat pane: `agent · model · effort`,
+ * and for opencode the `$cost · tokens (percent)` chip beside it — the same two
+ * strings, from the same two formatters, that the PC split header shows
+ * (`TerminalSplitPane`'s `agentModel` / `agentUsage`). Nothing here composes a
+ * label of its own, which is what keeps the two screens from drifting.
+ *
+ * Rendered only when a model is known — the PC rule: `formatAgentModelLabel`
+ * returns null for gemini, vibe-local and any pane whose hooks are not wired,
+ * and null draws nothing. The row is therefore absent, not empty, on those
+ * panes, and the layout below it is the pre-#2357 one.
+ *
+ * ## The vertical budget
+ *
+ * This row is IN the flex flow, which #2193's control could not afford, and
+ * the numbers are what allow it: the row is a fixed 28px (`h-7`, one
+ * `text-[11px]` line, `truncate` so it can never wrap), against the 33px
+ * #2106 left in the budget at 360x640 — the terminal keeps 256px there with
+ * the row present, above #2106's 250px floor. #1127's 44px tap target is met
+ * without spending layout height: each control extends its hit area 8px above
+ * and below itself with a pseudo-element (`before:-inset-y-2`), into the
+ * instance-tab row above and the output region below, the way the docked
+ * instance tabs grow their hit area without growing their text. The surface
+ * toggle, which is pinned to the tab's top edge, moves down by the row's
+ * height while the row is showing so the two never overlap.
+ *
+ * ## Two taps, two things
+ *
+ * Tapping the label opens the tool's model picker — `/model` through the
+ * composer's own send path for every tool but opencode, the `ctrl+x m` chord
+ * for opencode — after which the dialog card (#2254 / #2297) is the surface
+ * the choice is made on. Tapping the amber "changed" chip dismisses the
+ * highlight and nothing else; it is a separate control so that noticing a
+ * change cannot accidentally send a command.
+ */
+const MobileSessionRow = memo(function MobileSessionRow({
+  modelLabel,
+  usage,
+  usageDetail,
+  recentChange,
+  onOpenPicker,
+  onDismissChange,
+}: {
+  modelLabel: string;
+  usage: string | null;
+  usageDetail: string | null;
+  recentChange: RecentModelChange | null;
+  onOpenPicker: () => void;
+  onDismissChange: () => void;
+}) {
+  const t = useTranslations('worktree');
+  const changed = recentChange !== null;
+  const rowLabel = t('agentModel.sessionRow', { model: modelLabel });
+  return (
+    <div
+      data-testid="mobile-session-row"
+      data-model-changed={changed ? 'true' : 'false'}
+      className={`relative z-20 flex h-7 shrink-0 items-center gap-2 border-b px-3 text-[11px] leading-none ${
+        changed
+          ? 'border-warning-border bg-warning-subtle text-warning-foreground'
+          : 'border-border bg-surface-2 text-muted-foreground'
+      }`}
+    >
+      <button
+        type="button"
+        onClick={onOpenPicker}
+        aria-label={rowLabel}
+        title={rowLabel}
+        data-testid="mobile-session-model"
+        className="relative flex min-w-0 flex-1 items-center gap-1.5 truncate text-left touch-manipulation before:absolute before:inset-x-0 before:-inset-y-2 before:content-['']"
+      >
+        <Cpu size={12} aria-hidden="true" className="shrink-0" />
+        <span className="min-w-0 truncate">{modelLabel}</span>
+      </button>
+      {usage ? (
+        <span
+          data-testid="mobile-session-usage"
+          title={usageDetail ?? t('agentSession.chipLabel', { usage })}
+          className="min-w-0 max-w-[10rem] shrink-0 truncate tabular-nums"
+        >
+          {usage}
+        </span>
+      ) : null}
+      {recentChange ? (
+        <button
+          type="button"
+          onClick={onDismissChange}
+          aria-label={t('agentModel.changedRecentlyDetail', {
+            from: recentChange.from,
+            to: recentChange.to,
+          })}
+          title={t('agentModel.changedRecentlyDetail', {
+            from: recentChange.from,
+            to: recentChange.to,
+          })}
+          data-testid="mobile-session-model-changed"
+          className="relative shrink-0 rounded-full border border-warning-border bg-warning/20 px-1.5 py-0.5 font-medium touch-manipulation before:absolute before:inset-x-0 before:-inset-y-2 before:content-['']"
+        >
+          {t('agentModel.changedRecently')}
+        </button>
+      ) : null}
+    </div>
+  );
+});
 
 /**
  * Issue #2193: the phone's chat output surface.
@@ -289,6 +493,107 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
     getTerminalDisplayCompaction(cliToolId);
 
   const t = useTranslations('worktree');
+  const locale = useLocale();
+
+  // --------------------------------------------------------------------------
+  // The session row (Issue #2357)
+  // --------------------------------------------------------------------------
+  // The instance this tab is showing, resolved the way the poller and `/send`
+  // resolve it: the primary instance is named by the tool id.
+  const resolvedInstanceId = instanceId ?? cliToolId;
+
+  // `model · effort` from the worktrees cache, then the persona in front of
+  // it — the exact two-step the PC split does (`WorktreeDetailDesktop` composes
+  // model+effort, `TerminalSplitPaneContent` re-enters the formatter with the
+  // opencode agent). Null for every pane whose tool reports no model, and null
+  // means the row is not rendered at all.
+  const modelByInstanceLabel = useCachedAgentModelLabel(worktreeId, resolvedInstanceId);
+  const worktreesCache = useOptionalWorktreesCacheContext();
+  const sessionModelLabel = formatAgentModelLabel(
+    modelByInstanceLabel,
+    null,
+    agentSession.session?.agent
+  );
+  const sessionUsage = formatAgentSessionUsage(
+    agentSession.session,
+    agentSession.context,
+    t,
+    locale
+  );
+  const sessionUsageDetail = formatAgentSessionTooltip(
+    agentSession.session,
+    agentSession.context,
+    t,
+    locale
+  );
+
+  // The most recent `model_changed` frame for THIS instance, held until it is
+  // dismissed or `MODEL_CHANGE_HIGHLIGHT_MS` has passed since the change. The
+  // frame comes from the server's edge (`agent-event-state`), which already
+  // applied every suppression rule; this tab compares nothing itself.
+  const [recentModelChange, setRecentModelChange] = useState<RecentModelChange | null>(null);
+  useRealtimeListener((event) => {
+    if (!isModelChangeForInstance(event, worktreeId, resolvedInstanceId)) return;
+    setRecentModelChange({ from: event.from, to: event.to, at: event.at });
+    // The label reads the list cache, which polls slowly while a socket is
+    // up; the frame IS the news that it is stale, so the list is re-read now
+    // rather than the row saying "changed to B" beside a label still reading A.
+    void worktreesCache?.refresh();
+  });
+  // Expire the highlight relative to the change's own timestamp. Keyed on `at`
+  // so a second change restarts the window, and cleared on unmount so a timer
+  // cannot fire into a torn-down tree.
+  useEffect(() => {
+    if (recentModelChange === null) return;
+    const remaining = recentModelChange.at + MODEL_CHANGE_HIGHLIGHT_MS - Date.now();
+    if (remaining <= 0) {
+      setRecentModelChange(null);
+      return;
+    }
+    const timer = setTimeout(() => setRecentModelChange(null), remaining);
+    return () => clearTimeout(timer);
+  }, [recentModelChange]);
+  const dismissModelChange = useCallback(() => setRecentModelChange(null), []);
+  // A different instance is a different session row: drop the notice with it.
+  useEffect(() => {
+    setRecentModelChange(null);
+  }, [worktreeId, resolvedInstanceId]);
+
+  // Opening the picker. opencode's is a chord through `/special-keys` (the
+  // same request its quick-keys `models` button posts); every other tool takes
+  // `/model` through the composer's own send path — the screen's optimistic
+  // send while the chat surface is registered (so the bubble appears in the
+  // transcript, #2213), the plain API otherwise. Either way the pane is
+  // re-polled once tmux has had time to draw the picker, so the dialog card
+  // (#2254) or the terminal shows it without waiting for the next tick.
+  const sendPickerChord = useSpecialKeys(worktreeId, cliToolId, instanceId, refresh);
+  const optimisticSend = useChatOptimisticSend({ cliToolId, instanceId });
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (refreshTimerRef.current !== null) clearTimeout(refreshTimerRef.current);
+    },
+    []
+  );
+  const openModelPicker = useCallback(() => {
+    if (cliToolId === 'opencode') {
+      sendPickerChord([...OPENCODE_MODEL_PICKER_KEYS]);
+      return;
+    }
+    const options: OptimisticSendOptions = { cliToolId, instanceId };
+    if (optimisticSend) {
+      optimisticSend(MODEL_PICKER_COMMAND, options);
+    } else {
+      void worktreeApi.sendMessage(worktreeId, MODEL_PICKER_COMMAND, options).catch(() => {
+        // Advisory: the pane's next poll shows whether the picker opened.
+      });
+    }
+    if (refreshTimerRef.current !== null) clearTimeout(refreshTimerRef.current);
+    refreshTimerRef.current = setTimeout(() => {
+      refreshTimerRef.current = null;
+      void refresh();
+    }, NAV_KEY_REFRESH_DELAY_MS);
+  }, [cliToolId, instanceId, optimisticSend, refresh, sendPickerChord, worktreeId]);
 
   // Issue #2193: one preference per worktree here (the phone shows one pane at
   // a time), against one per split on PC. SSR-safe default first, then the
@@ -405,7 +710,12 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
         role="group"
         aria-label={t('surfaceMode.groupLabelMobile')}
         data-testid="mobile-surface-mode-toggle"
-        className="pointer-events-none absolute right-2 top-2 z-30 flex items-center gap-0.5 rounded-full border border-border bg-surface-2/95 p-0.5 shadow-lg backdrop-blur"
+        // Issue #2357: `top-9` (36px = the 28px session row + the 8px gap the
+        // pill already keeps) while the row is showing, so the pill sits over
+        // the output as before rather than over the row.
+        className={`pointer-events-none absolute right-2 z-30 flex items-center gap-0.5 rounded-full border border-border bg-surface-2/95 p-0.5 shadow-lg backdrop-blur ${
+          sessionModelLabel ? 'top-9' : 'top-2'
+        }`}
       >
         {MOBILE_SURFACE_SEGMENTS.map(({ mode, labelKey, icon: Icon }) => {
           const active = surfaceMode === mode;
@@ -446,6 +756,19 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
           visible and enabled. Clipping the region is the fix, and it is correct
           independent of #2193: a zero-height region has no business drawing
           outside itself. */}
+      {/* Issue #2357: the session row — which model this instance is on, in
+          the PC split header's words. Absent (not empty) when nothing has
+          reported a model; see `MobileSessionRow` for the height budget. */}
+      {sessionModelLabel ? (
+        <MobileSessionRow
+          modelLabel={sessionModelLabel}
+          usage={sessionUsage}
+          usageDetail={sessionUsageDetail}
+          recentChange={recentModelChange}
+          onOpenPicker={openModelPicker}
+          onDismissChange={dismissModelChange}
+        />
+      ) : null}
       <div className="flex-1 min-h-0 overflow-hidden" data-testid="mobile-terminal-region">
         {surfaceMode === 'chat' ? (
           <div className="h-full min-h-0" data-testid="mobile-chat-surface">

@@ -932,3 +932,63 @@ export function recordAnsweredPrompt(
   });
   return { message, created: true };
 }
+
+// ============================================================================
+// Model change rows (Issue #2357)
+// ============================================================================
+
+/**
+ * The `request_id` prefix a model-change row carries (Issue #2357).
+ *
+ * `chat_messages` has no `system` role — `role` is `user | assistant` and every
+ * reader of the column branches on exactly those two — so the sentence "the
+ * model changed" is stored as an assistant row and *identified* by its request
+ * id instead: `model-changed:<epoch ms>`. A reader that wants to style these
+ * rows differently, or a `capture --prompts`-style audit that wants to list
+ * them, matches on this prefix rather than on the wording, which is localized
+ * at write time and would otherwise have to be matched in every language.
+ */
+export const MODEL_CHANGE_REQUEST_ID_PREFIX = 'model-changed:';
+
+/** What {@link createModelChangeMessage} needs to write one row. */
+export interface CreateModelChangeMessageParams {
+  worktreeId: string;
+  cliToolId: CLIToolType;
+  /** Resolved instance id; defaults to the primary (`=== cliToolId`). */
+  instanceId?: string;
+  /** The already-localized sentence the transcript shows. */
+  content: string;
+  /** Epoch ms of the report that carried the new model. */
+  at: number;
+}
+
+/**
+ * Persist "the model changed" into the instance's history (Issue #2357).
+ *
+ * One row per transition, written by the model edge's subscriber and nothing
+ * else — the chat transcript and the History tab both read this table, so one
+ * write reaches both, and the same row is what the `message` frame pushes to a
+ * transcript that is open at the time.
+ *
+ * An assistant row, on purpose: the transcript groups an assistant row that
+ * follows no user row as a standalone reply, which is the closest the schema
+ * comes to a system line without a migration. The row is a `normal` message
+ * (not a `prompt`), so nothing that scans for open dialogs will mistake it for
+ * one, and the request id (see {@link MODEL_CHANGE_REQUEST_ID_PREFIX}) is what
+ * marks it.
+ */
+export function createModelChangeMessage(
+  db: Database.Database,
+  params: CreateModelChangeMessageParams
+): ChatMessage {
+  return createMessage(db, {
+    worktreeId: params.worktreeId,
+    role: 'assistant',
+    content: params.content,
+    messageType: 'normal',
+    timestamp: new Date(params.at),
+    requestId: `${MODEL_CHANGE_REQUEST_ID_PREFIX}${params.at}`,
+    cliToolId: params.cliToolId,
+    instanceId: params.instanceId ?? params.cliToolId,
+  });
+}

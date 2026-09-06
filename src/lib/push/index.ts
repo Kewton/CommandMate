@@ -139,3 +139,18 @@ export {
   PROMPT_CARD_KEY_PREFIX,
   PROMPT_CARD_MAX_AGE_MS,
 } from './prompt-card-state';
+
+// The model edge's push (Issue #2357).
+// NOTE: `realtime/model-change-broadcast` imports these from
+// './model-change-push-notifier' directly, for the reason every block above
+// gives — a suite that stubs the whole '@/lib/push' barrel would otherwise
+// leave the notifier undefined on the path it guards.
+export {
+  notifyModelChangePush,
+  buildModelChangedSentence,
+  buildModelChangedBodies,
+  resolveReadersLocale,
+} from './model-change-push-notifier';
+export type { ModelChangePushSuppressionReason } from './model-change-push-notifier';
+export { MODEL_CHANGE_TAG_SUFFIX } from './push-sender';
+export type { ModelChangeContext } from './push-sender';

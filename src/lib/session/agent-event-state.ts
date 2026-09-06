@@ -143,6 +143,10 @@ declare global {
   var __agentCapturedModelInfo: Map<string, ModelInfo> | undefined;
   // eslint-disable-next-line no-var
   var __agentEventLastEffort: Map<string, string> | undefined;
+  // eslint-disable-next-line no-var
+  var __agentModelBaseline: Map<string, AgentModelBaseline> | undefined;
+  // eslint-disable-next-line no-var
+  var __agentModelChangeListeners: Set<AgentModelChangeListener> | undefined;
 }
 
 /** compositeKey -> epoch ms of the most recent stop event. */
@@ -282,6 +286,252 @@ const capturedModelInfo = globalThis.__agentCapturedModelInfo ??
  */
 const reportedEffort = globalThis.__agentEventLastEffort ??
   (globalThis.__agentEventLastEffort = new Map<string, string>());
+
+// =============================================================================
+// Model change detection (Issue #2357)
+// =============================================================================
+
+/** Which channel a model value arrived on. See {@link AgentModelChange.source}. */
+export type AgentModelSource = 'hook' | 'frame';
+
+/**
+ * The resolved model this instance was last seen on, and which channel put it
+ * there (Issue #2357).
+ *
+ * "Resolved" is {@link getResolvedAgentModelInfo}'s answer — the hook value when
+ * one has arrived, the scraped frame otherwise — so this is the value the UI and
+ * `capture --json` publish, not either raw latch. The source is kept beside it
+ * because the two channels spell the same model differently (agy reports
+ * `gemini-3.7-flash-high` and prints `Gemini 3.7 Flash`), and a comparison that
+ * did not know it was crossing channels would announce a change every time the
+ * hook overtook the screen. See {@link isSameAgentModelName}.
+ */
+export interface AgentModelBaseline {
+  model: string;
+  source: AgentModelSource;
+}
+
+/** One model transition of one instance — the `model_changed` event's payload. */
+export interface AgentModelChange {
+  worktreeId: string;
+  cliToolId: CLIToolType;
+  /** Always resolved (`instanceId ?? cliToolId`), so a listener can key on it directly. */
+  instanceId: string;
+  /** The model the instance was on. Never null: `null → value` is not a change. */
+  from: string;
+  /** The model it is on now. Never null: `value → null` is not a change either. */
+  to: string;
+  /** Which channel reported the new value. */
+  source: AgentModelSource;
+  /** Epoch ms of the report that carried the new value. */
+  at: number;
+}
+
+export type AgentModelChangeListener = (change: AgentModelChange) => void;
+
+/**
+ * compositeKey -> the model this instance was last observed on (Issue #2357).
+ *
+ * A *fourth* map beside the three latches rather than a comparison against
+ * them, because the latches are what they are for a reason: each remembers the
+ * last non-null value its channel produced, and none of them can say "and the
+ * value before that". This map holds exactly that — the previous answer of
+ * {@link getResolvedAgentModelInfo} — so a write to either latch can be judged
+ * as "same model", "first sighting" or "changed" without re-deriving history
+ * from maps that never kept it.
+ *
+ * Cleared wherever the latches are cleared (generation, discard, test seam) and
+ * on `session_start`, so the first model a new agent process reports is
+ * recorded as its starting model and announced to nobody.
+ */
+const modelBaseline = globalThis.__agentModelBaseline ??
+  (globalThis.__agentModelBaseline = new Map<string, AgentModelBaseline>());
+
+/**
+ * Listeners for the model edge, on `globalThis` for the reason the maps above
+ * are: under `next dev` each route bundle evaluates this module once, and the
+ * hook route (which writes the hook latch) and the status poll (which writes
+ * the frame latch) are different bundles. A module-scoped set would let each
+ * bundle notify only the listeners registered in the same bundle — which is
+ * none, for the one that receives the hook.
+ */
+const modelChangeListeners = globalThis.__agentModelChangeListeners ??
+  (globalThis.__agentModelChangeListeners = new Set<AgentModelChangeListener>());
+
+/**
+ * A trailing reasoning-effort token in a model id (`gemini-3.7-flash-high`).
+ *
+ * The same five words `model-info-extractor` recognises, matched only at the
+ * very end and only after a separator, so `gpt-5-mini` keeps its `mini` and a
+ * model that merely ends in these letters is untouched. agy encodes the effort
+ * in the id it reports on every event (`deriveEffortFromModelId`), and a user
+ * moving the same model from `high` to `low` has not changed model.
+ */
+export const AGENT_MODEL_EFFORT_SUFFIX_PATTERN = /[-_ ](?:minimal|low|medium|high|xhigh)$/i;
+
+/**
+ * Tokens a display label carries that the id does not, dropped before comparing.
+ *
+ * Measured pairs only: claude's banner reads `Opus 5 (1M context)` for the id
+ * `claude-opus-5[1m]` — the `1m` is part of the model, the word is not.
+ */
+const MODEL_LABEL_NOISE_PATTERN = /\bcontext\b/gi;
+
+/** Lowercase alphanumerics, effort suffix and label-only words removed. */
+function modelNameKey(value: string): string {
+  return value
+    .replace(AGENT_MODEL_EFFORT_SUFFIX_PATTERN, '')
+    .replace(MODEL_LABEL_NOISE_PATTERN, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
+}
+
+/**
+ * Do two model names name the same model? (Issue #2357)
+ *
+ * Within one channel the answer is exact on alphanumerics — `GPT-5 mini` and
+ * `gpt-5-mini` are one model rendered two ways (copilot's bar and its notice,
+ * both read off the frame), while `gpt-5` and `gpt-5-mini` are two models and
+ * the second is precisely the downgrade this Issue exists to announce. The
+ * effort suffix is stripped first, because agy's id carries it and an effort
+ * change is not a model change.
+ *
+ * *Across* channels the rule is widened to containment: the hook reports an
+ * id, the screen prints a label, and every measured pair is the label's key
+ * inside the id's (`gemini37flash` ⊂ `gemini37flashhigh`, `opus51m` ⊂
+ * `claudeopus51m`, `claudesonnet46` ⊂ `anthropicclaudesonnet46`). Containment
+ * is NOT applied within a channel — it would fold `gpt-5` into `gpt-5-mini` —
+ * and a caller has to say which case it is in.
+ *
+ * Exported for the tests and for anything that has to agree with this module
+ * about identity; deliberately local rather than the extractor's `sameModel`,
+ * which is a single-channel exact match and is shared with #2358's edit.
+ */
+export function isSameAgentModelName(
+  a: string,
+  b: string,
+  options: { crossSource?: boolean } = {}
+): boolean {
+  const ka = modelNameKey(a);
+  const kb = modelNameKey(b);
+  if (ka === kb) return true;
+  if (!options.crossSource) return false;
+  if (ka.length === 0 || kb.length === 0) return false;
+  return ka.includes(kb) || kb.includes(ka);
+}
+
+/**
+ * Subscribe to the model edge (Issue #2357).
+ *
+ * The listener receives every transition {@link observeAgentModel} judged to be
+ * a change — never a first sighting, never a value going quiet. `#2357`'s
+ * realtime broadcaster and push notifier are the two subscribers; neither keeps
+ * a "what was it last time?" of its own, which is the point of this being an
+ * edge rather than a level.
+ *
+ * @returns The unsubscribe function
+ */
+export function onAgentModelChange(listener: AgentModelChangeListener): () => void {
+  modelChangeListeners.add(listener);
+  return () => {
+    modelChangeListeners.delete(listener);
+  };
+}
+
+/** Deliver one change; a listener that throws must not disturb the write that observed it. */
+function emitAgentModelChange(change: AgentModelChange): void {
+  for (const listener of modelChangeListeners) {
+    try {
+      listener(change);
+    } catch {
+      // Advisory. The hook route and the status poll are the callers, and a
+      // notification failure is not a reason to fail either.
+    }
+  }
+}
+
+/**
+ * The model this instance was last observed on, or null. Test seam.
+ */
+export function getAgentModelBaseline(
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  instanceId?: string
+): AgentModelBaseline | null {
+  return modelBaseline.get(buildCompositeKey(worktreeId, cliToolId, instanceId)) ?? null;
+}
+
+/**
+ * Judge the resolved model after a latch wrote, and announce a change
+ * (Issue #2357).
+ *
+ * Called after every write to {@link lastAgentModel} and
+ * {@link capturedModelInfo}, with the channel that wrote. What it compares is
+ * {@link getResolvedAgentModelInfo}'s *model* — the merged value the UI shows —
+ * against the previous merged value this map remembers. The suppression rules,
+ * each of which is a measured false positive:
+ *
+ *  - **`null → value`** (first report, server restart): recorded as the
+ *    starting model, announced to nobody.
+ *  - **`value → null`**: cannot reach here — the latches never write null, so
+ *    a frame that stopped showing the banner leaves the merged value where it
+ *    was. A generation reset clears this map along with the latches, so the
+ *    next value is a first sighting again.
+ *  - **same name, either channel**: `GPT-5 mini` after `gpt-5-mini` is not a
+ *    change. Compared with {@link isSameAgentModelName}; the cross-channel
+ *    widening applies only when the merged value's source actually moved.
+ *  - **`session_start`**: {@link recordAgentEvent} drops the baseline first, so
+ *    the model a relaunched process reports is that process's starting model.
+ *
+ * Everything else is a change and is emitted exactly once — the baseline is
+ * advanced before the listeners run, so a listener that re-enters this module
+ * cannot see the same edge twice.
+ */
+function observeAgentModel(
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  instanceId: string | undefined,
+  source: AgentModelSource,
+  at: number
+): void {
+  const key = buildCompositeKey(worktreeId, cliToolId, instanceId);
+  const hooksModel = lastAgentModel.get(key) ?? null;
+  const resolved = getResolvedAgentModelInfo(worktreeId, cliToolId, instanceId).model;
+  if (resolved === null) return;
+  // Where the merged value came from — `mergeModelInfo` prefers the hook, so a
+  // resolved value equal to the hook latch is the hook's regardless of which
+  // channel just wrote.
+  const resolvedSource: AgentModelSource = hooksModel !== null ? 'hook' : 'frame';
+
+  const previous = modelBaseline.get(key);
+  const next: AgentModelBaseline = { model: resolved, source: resolvedSource };
+  if (previous === undefined) {
+    modelBaseline.set(key, next);
+    trimOldestEntries(modelBaseline, MAX_RECENT_EVENT_KEYS);
+    return;
+  }
+  if (
+    isSameAgentModelName(previous.model, resolved, {
+      crossSource: previous.source !== resolvedSource,
+    })
+  ) {
+    // Same model, possibly a new spelling or a new channel: follow it so the
+    // next comparison is against the current representation.
+    modelBaseline.set(key, next);
+    return;
+  }
+
+  modelBaseline.set(key, next);
+  emitAgentModelChange({
+    worktreeId,
+    cliToolId,
+    instanceId: instanceId ?? cliToolId,
+    from: previous.model,
+    to: resolved,
+    source,
+    at,
+  });
+}
 
 /**
  * How long two identical events count as one delivery.
@@ -839,11 +1089,21 @@ export function recordAgentEvent(
     // then dropped on the floor. copilot reports none today (#1783), which is
     // exactly why this has to be decided here rather than left to be noticed.
     latchAgentModel(key, record);
+    observeAgentModel(worktreeId, cliToolId, instanceId, 'hook', record.at);
     return { recorded: false, skipped: 'late-session-start' };
   }
 
   lastAgentEvent.set(key, record);
+  if (record.event === 'session_start') {
+    // Issue #2357: a new agent process, whatever model it names first is its
+    // STARTING model — recorded below, announced to nobody. Dropped before the
+    // latch so the comparison in `observeAgentModel` has nothing to compare
+    // against. `/clear` (session_end + session_start on the same process, same
+    // model) passes through here unchanged: same name, no edge either way.
+    modelBaseline.delete(key);
+  }
   latchAgentModel(key, record);
+  observeAgentModel(worktreeId, cliToolId, instanceId, 'hook', record.at);
   applyAskUserQuestionTransition(key, record);
   if (record.event === 'session_start') {
     // The agent restarting inside a pane CommandMate never touched — `claude`
@@ -1528,7 +1788,8 @@ export function recordCapturedModelInfo(
   worktreeId: string,
   cliToolId: CLIToolType,
   instanceId: string | undefined,
-  info: ModelInfo
+  info: ModelInfo,
+  at: number = Date.now()
 ): void {
   if (!info.model && !info.effort) return;
   const key = buildCompositeKey(worktreeId, cliToolId, instanceId);
@@ -1537,6 +1798,10 @@ export function recordCapturedModelInfo(
     model: info.model ? info.model.slice(0, MAX_EVENT_DETAIL_LENGTH) : (previous?.model ?? null),
     effort: info.effort ?? previous?.effort ?? null,
   });
+  // Issue #2357: an effort-only frame leaves the model half where it was, so
+  // there is nothing to judge; a frame that named a model is the screen's
+  // report and is compared against what this instance was last seen on.
+  if (info.model) observeAgentModel(worktreeId, cliToolId, instanceId, 'frame', at);
 }
 
 /**
@@ -1717,6 +1982,10 @@ export function beginAgentEventGeneration(
   // Issue #2048: and the variant the agent named, for exactly #1783's reason —
   // the new process may have been launched with a different one, or with none.
   reportedEffort.delete(key);
+  // Issue #2357: and the model this instance was last seen on. The next value
+  // is a new process's starting model (`null → value`), not a change from the
+  // process that was replaced.
+  modelBaseline.delete(key);
   // Issue #1899: the ids claimed for this key were issued by the process that
   // has just been replaced. Unlike the time-window keys, they never expire on
   // their own, so a generation is the only thing that retires them.
@@ -1765,6 +2034,8 @@ export function discardAgentEventState(
   capturedModelInfo.delete(key);
   // Issue #2048: nor the variant that session was running at.
   reportedEffort.delete(key);
+  // Issue #2357: nor the model it was last seen on.
+  modelBaseline.delete(key);
   // Issue #1899: nor do the frame ids that session issued.
   recentEventIdentities.delete(key);
 }
@@ -2521,4 +2792,8 @@ export function clearAgentStopEvents(): void {
   capturedModelInfo.clear();
   // Issue #2048: and for the variant the agent reported.
   reportedEffort.clear();
+  // Issue #2357: and for the model each instance was last seen on. The
+  // listener set is deliberately NOT cleared — a subscription belongs to the
+  // process, not to a session, and a suite that armed one expects it to stay.
+  modelBaseline.clear();
 }

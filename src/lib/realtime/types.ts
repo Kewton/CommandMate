@@ -336,10 +336,45 @@ export interface VersionMismatchEvent {
   clientVersion: string;
 }
 
+/**
+ * "This instance is now on a different model" (Issue #2357).
+ *
+ * Emitted once per transition from `agent-event-state`'s model edge, on the
+ * same room broadcast `session_status_changed` rides — so every client that
+ * subscribed to the worktree hears it, and one that never subscribed does not.
+ * It is its own type rather than a field on `session_status_changed` because
+ * the consumers do not overlap: the phone's session row is the only thing that
+ * reacts, and every `session_status_changed` listener would otherwise have to
+ * learn to ignore it.
+ *
+ * `from` and `to` are the resolved values `sessionStatusByInstance[].model`
+ * publishes, verbatim — the client shows them, it does not compare them. The
+ * suppression rules (`null → value`, `value → null`, a first sighting, a
+ * spelling change) are applied by the producer, and there is nothing here for
+ * a client to re-judge.
+ */
+export const MODEL_CHANGED_EVENT_TYPE = 'model_changed' as const;
+
+/** See {@link MODEL_CHANGED_EVENT_TYPE}. */
+export interface ModelChangedEvent {
+  type: typeof MODEL_CHANGED_EVENT_TYPE;
+  worktreeId: string;
+  cliTool: CLIToolType;
+  /** Always resolved (`instanceId ?? cliToolId`), like `TerminalSnapshotEvent`'s. */
+  instance: string;
+  from: string;
+  to: string;
+  /** Which channel reported the new value. */
+  source: 'hook' | 'frame';
+  /** Epoch ms of the report that carried the new value. */
+  at: number;
+}
+
 export type RealtimeEvent =
   | SessionStatusEvent
   | MessageBroadcastEvent
   | MessagesInvalidatedEvent
+  | ModelChangedEvent
   | TerminalSnapshotEvent
   | ChatTurnProgressEvent
   | RepositoryDeletedEvent
