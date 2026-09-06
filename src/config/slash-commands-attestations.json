@@ -51,10 +51,10 @@
   "attestations": [
     {
       "tool": "claude",
-      "version": "2.1.251",
-      "source": "https://code.claude.com/docs/en/commands.md — the built-in slash command table, active canonical rows only (rows whose note says the command was removed, and \"Alias for /x\" rows, are not commands the CLI ships).",
-      "observedAt": "2026-08-30",
-      "issue": 2158,
+      "version": "2.1.261",
+      "source": "https://code.claude.com/docs/en/commands.md — the built-in slash command table, active canonical rows only (rows whose note says the command was removed, and \"Alias for /x\" rows, are not commands the CLI ships). Read 2026-09-06: 112 data rows = 107 active + 3 removed (/pr-comments \"Removed in v2.1.91\", /vim \"Removed in v2.1.92\", /ultraplan bare \"Removed.\") + 2 alias (/cost, /stats -> /usage). /ultraplan is counted here anyway (108) because its row carries no version, so the provider reads it as active and would otherwise report it as drift every run; the phantom exclusion (#1503) is what keeps it off the palette. Change since the 2.1.251 read (#2158): /design and /skill-doctor added. No dedicated issue — taken as the Phase 1.5 leftover of release v0.31.1 (PR #2348).",
+      "observedAt": "2026-09-06",
+      "issue": 2348,
       "commands": [
         "add-dir",
         "advisor",
@@ -81,6 +81,7 @@
         "dataviz",
         "debug",
         "deep-research",
+        "design",
         "design-login",
         "design-sync",
         "desktop",
@@ -140,6 +141,7 @@
         "setup-bedrock",
         "setup-vertex",
         "simplify",
+        "skill-doctor",
         "skills",
         "status",
         "statusline",
@@ -166,10 +168,10 @@
     },
     {
       "tool": "codex",
-      "version": "0.151.0",
-      "source": "openai/codex, codex-rs/tui/src/slash_command.rs at tag rust-v0.151.0 — every `enum SlashCommand` variant except the ones whose description() is the internal \"DO NOT USE\" marker (MemoryDrop / MemoryUpdate). 59 variants, 57 active. The only command-set change since the rust-v0.149.1 enum #2026 read is the added `Recap` variant.",
-      "observedAt": "2026-08-30",
-      "issue": 2158,
+      "version": "0.153.4",
+      "source": "openai/codex, codex-rs/tui/src/slash_command.rs at tag rust-v0.153.4 — every `enum SlashCommand` variant except the ones whose description() is the internal \"DO NOT USE\" marker (MemoryDrop / MemoryUpdate). 59 variants, 57 active. Read 2026-09-06: the file is byte-identical to the rust-v0.151.0 revision the #2158 read used, so the command set is unchanged and only the version stamp moves. No dedicated issue — taken as the Phase 1.5 leftover of release v0.31.1 (PR #2348).",
+      "observedAt": "2026-09-06",
+      "issue": 2348,
       "commands": [
         "agents",
         "app",

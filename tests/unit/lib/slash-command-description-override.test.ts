@@ -180,6 +180,14 @@ describe('the bundled catalog carries descriptionKey through verbatim', () => {
     // "Exit Command Code", "Manage Command Code memory", "Log in to Command
     // Code or a provider" — and a split key cannot be re-flattened, so joining
     // is the only way in for a tool that arrives after the split.
+    // catalog-reconcile 2026-09-06 (no issue; the Phase 1.5 leftover of the
+    // v0.31.1 release): claude docs 2.1.261 gained /design, a name command-code
+    // already held under the flat key. The two are different tools — Command
+    // Code's is a "design partner for auditing, building, composing, and
+    // shipping UI", claude's drafts artboards on a canvas and publishes them as
+    // a Claude Design artifact — so `--check` reported a description-conflict
+    // and the flat key was split by hand into `design.command-code` (the
+    // shipped wording, unchanged) and `design.claude`.
     expect(overridden.map((e) => e.descriptionKey).sort()).toEqual([
       'slashCommands.descriptions.agent.copilot',
       'slashCommands.descriptions.agents.claude',
@@ -192,6 +200,8 @@ describe('the bundled catalog carries descriptionKey through verbatim', () => {
       'slashCommands.descriptions.cd.codex',
       'slashCommands.descriptions.debug.claude',
       'slashCommands.descriptions.debug.opencode',
+      'slashCommands.descriptions.design.claude',
+      'slashCommands.descriptions.design.command-code',
       'slashCommands.descriptions.exit.claude',
       'slashCommands.descriptions.exit.codex',
       'slashCommands.descriptions.exit.command-code',
