@@ -294,8 +294,11 @@ function readClaudeBanner(line: string): ModelInfo | null {
  *    identity rule is exact, so reading it would announce a second, spurious
  *    "change" the next time the fuller spelling appears. While the banner is
  *    on screen the rewrite covers `/fast`; once it is gone the switch is
- *    missed until the next `/model` line or hook — the structured
- *    `PostModelSwitch` channel is the right fix for that, in its own Issue.
+ *    missed by this reader until the next `/model` line. Issue #2363 closed
+ *    that gap on the structured side: `PostModelSwitch` is registered and
+ *    reports `/fast` as `to_model: "claude-opus-5[1m]"` — one spelling, no
+ *    drift — so this reader stays the fallback for sessions the hook does not
+ *    reach (`lib/hooks/sources/claude/model-switch`).
  *
  * The `⎿` marker is required. Claude's own prose shares the pane with its
  * chrome, and the 2.1.263 release notes alone contain 75 rows that mention

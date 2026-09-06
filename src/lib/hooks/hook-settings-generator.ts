@@ -49,6 +49,7 @@ import { join, resolve } from 'path';
 import { resolveSafeDirectory } from '@/config/safe-directory';
 import { getServerPort } from '@/lib/env';
 import { isValidInstanceId, type CLIToolType } from '@/lib/cli-tools/types';
+import { CLAUDE_POST_MODEL_SWITCH_EVENT_NAME } from '@/lib/hooks/sources/claude/model-switch';
 import { CLAUDE_CLI_TOOL_ID } from '@/lib/hooks/sources/claude/tool-id';
 import { ASK_USER_QUESTION_TOOL } from '@/lib/hooks/permission-request-payload';
 import { createLogger } from '@/lib/logger';
@@ -432,6 +433,17 @@ export function buildSessionStartCommand(
  * hook and nothing here delivers it — Claude enforces it itself, before any
  * `PermissionRequest` exists — which is precisely why it belongs next to the
  * hook that Auto-Yes answers rather than in the contract layer above it.
+ *
+ * `PostModelSwitch` (Issue #2363) is the structured report of a `/model` or
+ * `/fast` switch, measured on 2.1.263 to reach a `type: "http"` hook injected
+ * through this very file (`lib/hooks/sources/claude/model-switch` has the
+ * payload). It posts to the event receiver with no matcher: the event fires
+ * only when the model actually changes, so there is nothing to narrow. Its
+ * `PreModelSwitch` twin is deliberately NOT registered — it is a decision hook
+ * whose reply can block the switch, the probe's second session saw it fire
+ * twice per switch with inconsistent `from_model` values, and the `Post` event
+ * alone says what happened. The omission is pinned by
+ * `tests/unit/lib/hooks/hook-settings-post-model-switch-2363.test.ts`.
  */
 export function buildAgentHookSettings(
   target: HookSettingsTarget,
@@ -467,6 +479,10 @@ export function buildAgentHookSettings(
       // Issue #1726. The event receiver, not the permission one: observation.
       PreToolUse: [{ matcher: TOOL_USE_MATCHER, hooks: [http()] }],
       PostToolUse: [{ matcher: TOOL_USE_MATCHER, hooks: [http()] }],
+      // Issue #2363. The model the session is now on, on every `/model` and
+      // `/fast` that changes it. Observation, so the event receiver; and only
+      // the `Post` half — see the function comment.
+      [CLAUDE_POST_MODEL_SWITCH_EVENT_NAME]: [{ hooks: [http()] }],
       // Issue #1724. Points at its own receiver, not the event one.
       PermissionRequest: [{ hooks: [permissionHttp()] }],
     },

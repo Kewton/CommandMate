@@ -226,8 +226,9 @@ const awaitingInstruction = globalThis.__agentEventAwaitingInstruction ??
  *
  * A *separate* map, not a field read off {@link lastAgentEvent}, and that is the
  * whole point of it. `lastAgentEvent` is replaced wholesale on every delivery,
- * and Claude puts the model on `SessionStart` and on nothing else — so the very
- * next `UserPromptSubmit` would overwrite the only record that ever knew it, and
+ * and Claude puts the model on `SessionStart` and on a `PostModelSwitch`
+ * (Issue #2363) and on nothing else — so the very next `UserPromptSubmit` would
+ * overwrite the only record that ever knew it, and
  * the UI would show the model for the fraction of a second between session start
  * and the first prompt. Keeping the last *non-null* sighting separately is what
  * makes "which model is this session on" answerable at all for that tool.
@@ -243,12 +244,14 @@ const lastAgentModel = globalThis.__agentEventLastModel ??
  * compositeKey -> epoch ms of the report that last wrote {@link lastAgentModel}
  * (Issue #2361).
  *
- * Kept so the frame can be judged NEWER than the hook. Claude names its model
- * on `SessionStart` and on nothing else — measured again on 2.1.263 for #2361:
- * `/model` fires none of the events CommandMate registers, and the
- * `SessionStart` a `/clear` emits carries no `model` key — so after a `/model`
- * switch the hook latch is a true statement about a process that has since
- * changed its mind, and the screen is the only channel that heard it. See
+ * Kept so the frame can be judged NEWER than the hook. When #2361 was measured
+ * on 2.1.263, Claude named its model on `SessionStart` and on nothing
+ * CommandMate registered — `/model` fired none of the seven events, and the
+ * `SessionStart` a `/clear` emits carries no `model` key — so after a switch
+ * the hook latch was a true statement about a process that had since changed
+ * its mind, and the screen was the only channel that heard it. Issue #2363
+ * registers `PostModelSwitch`, which re-stamps this on every switch; the stamp
+ * now matters for the sessions where that hook does not arrive. See
  * {@link resolveAgentModel}.
  */
 const lastAgentModelAt = globalThis.__agentEventLastModelAt ??
@@ -1190,8 +1193,9 @@ function fenceTurnForNewGeneration(key: string, at: number): void {
 
 /**
  * Issue #1783: latch, never clear. An event without a model is the ordinary
- * case (Claude sends one on `SessionStart` alone), and reading it as "the model
- * is now unknown" would blank the display on the very next event.
+ * case (Claude sends one on `SessionStart` and, since #2363, on a model
+ * switch), and reading it as "the model is now unknown" would blank the display
+ * on the very next event.
  */
 function latchAgentModel(key: string, record: AgentEventRecord): void {
   if (typeof record.model === 'string' && record.model !== '') {
@@ -1774,8 +1778,9 @@ export function getLastAgentEvent(
  *
  * "Last **non-null**", which is the only useful reading: three of the four tools
  * that publish a model publish it on some events and not others, and Claude
- * publishes it on exactly one. Reading `getLastAgentEvent()?.model` would
- * therefore answer null for almost every moment of almost every session.
+ * publishes it on two (`SessionStart`, and each switch since #2363). Reading
+ * `getLastAgentEvent()?.model` would therefore answer null for almost every
+ * moment of almost every session.
  *
  * Deliberately **not** bounded by {@link STRUCTURED_STATE_MAX_AGE_MS}, unlike
  * every other reader in this module. That bound exists because a *status* that
@@ -1890,11 +1895,11 @@ export function getResolvedAgentModelInfo(
 }
 
 /**
- * Tools whose hook channel names the model at session start and never again
+ * Tools whose hook channel may name the model at session start and never again
  * (Issue #2361).
  *
  * For these, a frame that starts naming a DIFFERENT model after the hook last
- * spoke is the only report of a mid-session switch there will ever be, and it
+ * spoke may be the only report of a mid-session switch there is, and it
  * overtakes the hook in {@link resolveAgentModel}. For every other tool the
  * rule stays #1784's — hooks win — because their hook channel re-reports the
  * model on later events (codex and antigravity on every one, opencode on every
@@ -1902,12 +1907,40 @@ export function getResolvedAgentModelInfo(
  * that disagrees with a hook that is still re-affirming its value is a
  * misread, not news.
  *
- * Measured on claude 2.1.263: `SessionStart` alone carries `model`; `/model`,
- * `/fast` and `/effort` fire none of the registered events; the `SessionStart`
- * that `/clear` emits carries no `model`. (The same build does emit
- * `PreModelSwitch` / `PostModelSwitch` with `from_model` / `to_model`, which
- * CommandMate does not register — wiring those is a separate Issue and would
- * simply make the hook re-affirm, which this rule already defers to.)
+ * Measured on claude 2.1.263 for #2361: `SessionStart` alone carried `model`
+ * among the events then registered; `/model`, `/fast` and `/effort` fired none
+ * of them; the `SessionStart` that `/clear` emits carries no `model`.
+ *
+ * Issue #2363 registers `PostModelSwitch`, so on 2.1.263 and later the hook
+ * DOES re-report every `/model` and `/fast` that changes the model, in the
+ * `SessionStart` spelling (`claude-sonnet-5`, `claude-opus-5[1m]`). Claude
+ * stays on this list all the same, as the **fallback** rather than the rule,
+ * and the two cases the rule exists for were weighed against each other:
+ *
+ *  - *The hook re-reports.* The switch lands here as a hook write, stamping
+ *    {@link lastAgentModelAt}; the pane re-reads the rewritten banner or the
+ *    confirmation line moments later and names the same model in its label
+ *    spelling, which {@link isSameAgentModelName} (cross-channel) folds into
+ *    the hook's exact id. The frame does not overtake, the hook's id is what
+ *    is published, and the edge fires once. Nothing in this rule had to change
+ *    for that — it was written to defer to a hook that re-affirms.
+ *  - *The hook does not arrive.* A claude older than the hook, a session
+ *    launched without injection (`CM_AGENT_HOOKS_INJECT=0`, a hand-written
+ *    `--settings`), a delivery lost to a wedged server or the 3 s
+ *    de-duplication window: the latch is stale, the frame is the only channel
+ *    that heard the switch, and this rule is what publishes it. Removing the
+ *    tool from this set would take that back to the #2361 symptom — a stale
+ *    id shown with no edge — on precisely the sessions that have no other way
+ *    of reporting.
+ *
+ * The price of keeping it is the case #2361 already carried: a frame that
+ * starts showing a stale confirmation line AFTER the hook spoke (the banner
+ * scrolls away, an older `Set model to …` row becomes the fallback the
+ * extractor reads) overtakes a hook that was right. That was possible before
+ * #2363 — with a staler hook value underneath — and is no wider now; a switch
+ * whose confirmation line the extractor does read leaves the newer row on the
+ * pane, so the stale row is reachable only after a `/fast` or an automatic
+ * fallback, and only until the next `/model` line or hook.
  */
 const FRAME_OVERTAKES_HOOK_MODEL_TOOLS: ReadonlySet<CLIToolType> = new Set<CLIToolType>(['claude']);
 
