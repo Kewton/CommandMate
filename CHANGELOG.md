@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **chore(catalog): claude / codex のスラッシュコマンド attestation を再取得する** (catalog-reconcile 2026-09-06): `catalog:refresh --write` で claude `/design` `/skill-doctor` の 2 件をカタログへ追加し（新規 locale キーは `skill-doctor` の 1 件、`/design` は command-code と意味が異なるためフラットキー `descriptions.design` を `design.command-code`（出荷済み文言を据え置き）/ `design.claude`（docs 由来）へ人手で分割）、attestation を claude 2.1.251 → 2.1.261（docs 表 112 行 = active 107 + removed 3 + alias 2、`/ultraplan` 込みで 108 件、observedAt 2026-09-06）、codex 0.151.0 → 0.153.4（`slash_command.rs` @ rust-v0.153.4 は rust-v0.151.0 とバイト同一、59 variant → active 57、observedAt 2026-09-06）へ採り直した。集合の削除はゼロ、除外判断（exclusions.json 4 件）は不変
+
 ## [0.31.1] - 2026-09-06
 
 > **Highlight**: v0.31.0 で「操作できる面」へ進めたチャット面の、**ファイルを開く導線**を塞いでいた欠陥を直した。Assistant の返答に含まれる Markdown リンクをクリックすると CommandMate のタブが `http://localhost:3000/Users/…` へ遷移して 404 になり、**画面から離脱していた**（実測 2026-09-05、本番 `:3000` / Codex 2）。原因は「Markdown リンクを横取りする renderer が無い」ことと、「既存の『開く』経路が worktree 内の絶対パスを `files//Users/…` として組み立て、Next.js の 308 正規化で 相対パス扱いになって 404 を返す」ことの 2 段で、後者のため**裸パスのボタンでも worktree 内の絶対パスは元から開けていなかった**。正規化を surface 側の 1 箇所に置いたので、Markdown リンクと裸パスの両経路が同じ合流点を通って直る。あわせてスマホでパスをタップしても無反応だった配線（`onFilePathClick` の no-op）も繋いだ。
