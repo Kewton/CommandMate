@@ -1,0 +1,114 @@
+version: 1
+title: "Issue #2368: antigravity の折り返し4択ダイアログを Auto-Yes ポーラが読めず無応答になる"
+goal: |
+  https://github.com/Kewton/CommandMate/issues/2368 を実装する。
+
+  ## 事象
+  Antigravity（agy）で Auto-Yes を ON にしても、ツール実行の許可ダイアログが自動応答されず止まる。
+  ファイル作成（2択、1行ラベル）は数秒で通るのに、Bash 系のコマンド実行（4択、選択肢2・3が
+  無インデントで複数行に折り返す）は無応答のまま。
+
+  ## 真因
+  #2364 で agy 専用リーダに直したのは3経路（status検出・response poller・prompt-response）で、
+  **Auto-Yes ポーラだけが取り残されている**。`src/lib/auto-yes-poller.ts` の
+  `detectAndRespondToPrompt`（`detectPrompt` を `./detection/prompt-detector` から直接 import、
+  `buildDetectPromptOptions('antigravity')` と組み合わせて呼んでいる箇所）は、
+  `src/lib/polling/response-checker.ts` の `detectPromptWithOptions(output, cliToolId)`
+  （agy のときは `detectAntigravityNumberedDialogPrompt` を先に呼ぶ専用入口）を経由しない。
+
+  汎用の多肢選択パーサ（`prompt-detect-multiple-choice.ts` の `isContinuationLine`）は、
+  選択肢ラベルの続き行を「2スペース以上のインデント／短い断片／パス風」に限って認めるため、
+  agy が無インデントで折り返す Bash コマンド本文を含む選択肢は連なりが切れて `isPrompt: false`
+  になる。
+
+  ## 変更内容
+
+  ### A. Auto-Yes ポーラを同じ入口に乗せる（真因）
+  `src/lib/auto-yes-poller.ts` の検出呼び出しを、`detectPrompt` + `buildDetectPromptOptions` の
+  直接呼び出しから `detectPromptWithOptions(cleanOutput, cliToolId)`
+  （`src/lib/polling/response-checker.ts` からエクスポート済み）に差し替える。
+  `detectPromptWithOptions` は自前で `stripBoxDrawing(stripAnsi(output))` を行うので、渡す
+  output は auto-yes-poller 側で既にクリーニング済みのものか生のものか、二重クリーニングに
+  ならない方を選ぶこと（現状 `cleanOutput` は auto-yes-poller 内で事前に strip 済み。
+  `detectPromptWithOptions` に生の output を渡すか、あるいは `detectPromptWithOptions` に
+  precomputed 済み文字列を受け付ける経路を足すか、実装しやすい方でよい）。
+  以降の重複判定（`generatePromptKey`）・契約ポリシー（#1547）・deny パターン（#1699）・
+  ダイアログゲート（`auto-yes-dialog-gate`、agy は `legacy`）は変えない。変わるのは「読めるか」だけ。
+  agy の4択で既定は `>` の付いた1（Yes）。#2364 のリーダが返す `isDefault` をそのまま使い、
+  「always allow」系（2・3）は選ばない。
+
+  ### B. 「同じフレームの消費者は1つの入口」をガードで固定する
+  `detectPrompt` を直接 import して呼ぶ箇所を `src/` から列挙し、許可リスト
+  （`detectPromptWithOptions` 自身と `run-detection.ts`）以外に無いことを固定するテストを
+  `tests/unit/guards/` に追加する（新規ファイル）。今回のように1か所だけ取り残される再発を防ぐ。
+
+  ### C. hook 起点の即応（任意・後追い）
+  Issue本文の C 案（Auto-Yes ON 直後の短周期監視）は任意。A が入れば緊急性は無いので、
+  時間が無ければ実装しなくてよい（受入条件には含まれない）。
+
+  ## 受入条件
+  - [ ] `tests/fixtures/antigravity-live-2364/dialog-bash-wrapped.txt` を
+        `detectAndRespondToPrompt` の経路に通すと `responded`（テスト。`sendKeys` はモック）
+  - [ ] `src/` に `detectPrompt` を直接呼ぶ箇所が許可リスト外に無いことを固定するガードテストが
+        追加され、`auto-yes-poller.ts` を汎用呼び出しに戻すと落ちる（変異注入で確認）
+  - [ ] `tests/unit/lib/detection/antigravity-dialog-producers-2364.test.ts`
+        （3経路のテーブルテスト）を Auto-Yes ポーラも含む4経路のテーブルテストに拡張する
+        （新規ファイルでもよい）。全経路が同じ verdict（`isPrompt: true` / options 4）を返すこと
+  - [ ] Switch Model ピッカー・`/feedback` メニュー（`dialog-feedback-category.txt`）で
+        Auto-Yes が撃たないこと（#995 / #2364 の回帰）
+  - [ ] `npm run lint` / `npx tsc --noEmit` / `npm run test:unit` が exit 0
+        （`cmd > log; echo $?` で実測すること）
+
+  ## スコープ外
+  - Auto-Yes ON 中に API の `prompt` payload が null になる件。別Issue候補
+  - agy の hook `allow` を対話モードで効かせること（agy 側の挙動）
+  - 上記 C 案（hook 起点の即応）
+
+  ## 関連
+  #2364（agy専用リーダ。3経路まで）、#999、#1928、#372、#1779
+
+  ## 作業ルール（厳守）
+  - **`CHANGELOG.md` と `docs/module-reference.md` を編集しないでください**（scope外です）。
+    代わりに次の2ファイルを書いてください。どちらも `dev-reports/` 配下なので commit には
+    入りません。
+    - `dev-reports/changelog/issue-2368.md` — `CHANGELOG.md` の `## [Unreleased]` にそのまま
+      貼れる1エントリ（先頭は `- **<type>(<scope>): …** (#2368): …`）。1行目にコメントで
+      どの節（`### Added` / `### Changed` / `### Fixed`）に入るかを書く。
+      `- **` で始めること（`grep -cE '^- \*\*'` で集計する）。`(#2368)` は要約の外
+      （`**` を閉じた後）に置くこと。1エントリ＝1行（折らない）。
+    - `dev-reports/module-reference/issue-2368.md` — `docs/module-reference.md` の表に足す
+      注記を行キー（`| \`path\` |`）ごとに列挙する。既存行に足すときは
+      `grep -n '^| \`<path>\`' docs/module-reference.md` を実行し、その出力（行番号つきの
+      行キー）を断片に書き写してから書くこと。0件だった行への追記は指示しない。足すものが
+      無ければ「追記なし」の1行でよい。
+  - 断片が無いとリリースノートと module-reference に載らない。実装と同じ commit の時点で
+    書くこと。
+  - **`tests/unit/` 配下は `lib/` の有無で複数ツリーが併存する**（例:
+    `tests/unit/lib/auto-yes-poller-audit-1685.test.ts` と `tests/unit/lib/detection/` は
+    別ツリー）。既存テストを変更する必要が生じたら、必ず
+    `find tests/unit -iname "*<キーワード>*"` で実パスを確認してから編集すること。
+scope:
+  allow:
+    - "src/lib/auto-yes-poller.ts"
+    - "src/lib/polling/response-checker.ts"
+    - "src/lib/detection/prompt-detector.ts"
+    - "src/lib/detection/cli-patterns.ts"
+    - "src/lib/detection/prompt-detect-multiple-choice.ts"
+    - "src/lib/detection/tools/antigravity/dialog.ts"
+    - "src/lib/detection/tools/antigravity/detect.ts"
+    - "tests/unit/lib/auto-yes-poller-audit-1685.test.ts"
+    - "tests/unit/lib/auto-yes-poller-policy.test.ts"
+    - "tests/unit/lib/auto-yes-poller-2368.test.ts"
+    - "tests/unit/lib/polling/**"
+    - "tests/unit/lib/detection/**"
+    - "tests/unit/detection/**"
+    - "tests/unit/guards/**"
+    - "tests/fixtures/antigravity-live-2364/**"
+    - "dev-reports/changelog/issue-2368.md"
+    - "dev-reports/module-reference/issue-2368.md"
+  deny: []
+verify:
+  # 既定（省略）= 登録済み全ゲート
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true
