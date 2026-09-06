@@ -181,7 +181,7 @@ describe('[#2274] ChatTranscript asks whether the file is here before opening it
     fireEvent.click(nodeFor(OWN_PATH));
 
     await waitFor(() =>
-      expect(showToast).toHaveBeenCalledWith('worktree.chatTranscript.filePathMissing', 'error'),
+      expect(showToast).toHaveBeenCalledWith('worktree.conversation.filePathMissing', 'error'),
     );
     expect(onFilePathClick).not.toHaveBeenCalled();
   });
