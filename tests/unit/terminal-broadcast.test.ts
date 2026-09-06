@@ -205,6 +205,33 @@ describe('broadcastTerminalSnapshot', () => {
     },
   );
 
+  it('publishes isDismissablePanelActive on the pushed frame (Issue #2369)', async () => {
+    // The push is the path that actually feeds a live pane, so a flag the poll
+    // carries and the push drops leaves the Esc card up to 15s late — or, on a
+    // pane whose first frame arrives by push, absent entirely.
+    vi.mocked(buildCurrentOutput).mockResolvedValue({
+      ...BASE_PAYLOAD,
+      sessionStatus: 'waiting',
+      sessionStatusReason: 'command_code_dismissable_panel',
+      isDismissablePanelActive: true,
+    });
+
+    await broadcastTerminalSnapshot('wt-1', 'claude');
+
+    expect(mockBroadcast.mock.calls[0][1]).toMatchObject({
+      isDismissablePanelActive: true,
+      // Disjoint from the flag the arrow pad is drawn from.
+      isSelectionListActive: false,
+      isPagerActive: false,
+    });
+  });
+
+  it('publishes an explicit false when the payload omits the field (Issue #2369)', async () => {
+    await broadcastTerminalSnapshot('wt-1', 'claude');
+
+    expect(mockBroadcast.mock.calls[0][1]).toMatchObject({ isDismissablePanelActive: false });
+  });
+
   it('tracks versions independently per instance', async () => {
     await broadcastTerminalSnapshot('wt-1', 'claude');
     await broadcastTerminalSnapshot('wt-1', 'claude', 'claude-2');
@@ -298,6 +325,36 @@ describe('broadcastTerminalSnapshotAfterInteraction', () => {
     expect(mockBroadcast).toHaveBeenCalledTimes(2);
     expect(mockBroadcast.mock.calls[0][1]).toMatchObject({ sessionStatus: 'waiting' });
     expect(mockBroadcast.mock.calls[1][1]).toMatchObject({ sessionStatus: 'running' });
+  });
+
+  it('redraws when only the dismiss-only flag changed (Issue #2369)', async () => {
+    // The fingerprint decides whether the second push is emitted at all, and the
+    // frame that CLOSES the panel differs from the one before it only in this
+    // flag and the verdict — `fullOutput` is the fixture's, held fixed here
+    // precisely so the flag is the only thing that could distinguish them.
+    // Left out of the fingerprint, the Esc card outlives the panel it dismissed.
+    vi.useFakeTimers();
+    vi.mocked(buildCurrentOutput)
+      .mockResolvedValueOnce({
+        ...BASE_PAYLOAD,
+        sessionStatus: 'waiting',
+        sessionStatusReason: 'command_code_dismissable_panel',
+        isDismissablePanelActive: true,
+      })
+      .mockResolvedValueOnce({
+        ...BASE_PAYLOAD,
+        sessionStatus: 'waiting',
+        sessionStatusReason: 'command_code_dismissable_panel',
+        isDismissablePanelActive: false,
+      });
+
+    const pending = broadcastTerminalSnapshotAfterInteraction('wt-1', 'claude', undefined, [10]);
+    await vi.advanceTimersByTimeAsync(10);
+    await pending;
+
+    expect(mockBroadcast).toHaveBeenCalledTimes(2);
+    expect(mockBroadcast.mock.calls[0][1]).toMatchObject({ isDismissablePanelActive: true });
+    expect(mockBroadcast.mock.calls[1][1]).toMatchObject({ isDismissablePanelActive: false });
   });
 
   it('does not duplicate the initial snapshot when retry frames are unchanged', async () => {

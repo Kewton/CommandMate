@@ -138,12 +138,14 @@ import { extractDialogFrameTail } from '@/lib/chat/dialog-frame';
 import { NavigationButtons } from '@/components/worktree/NavigationButtons';
 import { TerminalEscapeHatch } from '@/components/worktree/TerminalEscapeHatch';
 import {
+  DismissPanelKeys,
   PromptAnswerKeys,
   SelectionCommitKeys,
   SelectionNumberKeys,
 } from '@/components/worktree/PromptAnswerKeys';
 import { OpencodeModelKeys } from '@/components/worktree/OpencodeQuickKeys';
 import {
+  hasDismissablePanelFooter,
   readSelectionListShape,
   shouldOfferOptionNumbers,
 } from '@/lib/detection/selection-shape';
@@ -234,10 +236,19 @@ export const SELECTION_LIST_TALL_CARD_MIN_ROWS = 24;
  * it (`isPagerActive` ⊂ `isSelectionListActive`, see `PaneTerminalState`), so a
  * pager frame raises both flags and "you are in a pager" is the more specific —
  * and more actionable — of the two sentences.
+ *
+ * `dismissablePanel` (Issue #2369) sits AFTER both of those and BEFORE
+ * `unclassified`. It is disjoint from all three by construction — the detector
+ * answers `waiting` with a reason that is in neither `SELECTION_LIST_REASONS`
+ * nor the unclassified floor — so the position decides nothing today; it is
+ * written this way to say which reading wins if a frame ever carried two. A
+ * screen that offers a highlight AND a dismiss is a selection list whose Esc is
+ * one of its keys, and it keeps its arrows.
  */
 export type ChatSurfaceBlockedReason =
   | 'pager'
   | 'selectionList'
+  | 'dismissablePanel'
   | 'unclassified'
   | 'promptUnreadable';
 
@@ -245,6 +256,7 @@ export type ChatSurfaceBlockedReason =
 const BLOCKED_REASON_KEY: Record<ChatSurfaceBlockedReason, string> = {
   pager: 'chatSurface.reasonPager',
   selectionList: 'chatSurface.reasonSelectionList',
+  dismissablePanel: 'chatSurface.reasonDismissablePanel',
   unclassified: 'chatSurface.reasonUnclassified',
   promptUnreadable: 'chatSurface.reasonPromptUnreadable',
 };
@@ -308,6 +320,17 @@ export interface ChatSurfaceLiveState {
   promptData?: LivePromptData | null;
   isSelectionListActive?: boolean;
   isPagerActive?: boolean;
+  /**
+   * A dismiss-only overlay is on the pane (Issue #2369) — its footer offers
+   * `Esc to close` and nothing else.
+   *
+   * `undefined` is NOT `false` here, and the difference is load-bearing: the
+   * pane components that build this object predate the field, and a daemon
+   * older than #2369 does not send it either. See {@link resolveBlockedReason},
+   * which falls back to reading the frame when this is absent rather than
+   * treating the absence as "no panel".
+   */
+  isDismissablePanelActive?: boolean;
   isUnclassifiedActive?: boolean;
 }
 
@@ -456,10 +479,41 @@ export function isTurnSettled(messages: readonly ChatMessage[], turnKey: string)
  * is the exclusion that matters most: anything else, including a normal
  * answerable prompt, is workable from the composer and must NOT raise a card,
  * because `PromptPanel` / `MobilePromptSheet` are already on screen for it.
+ *
+ * ## The fifth member, and why it takes the frame (Issue #2369)
+ *
+ * `dismissablePanel` is a state the set did not have: a screen that WAS read,
+ * that offers exactly one key, and whose old answer — the `unclassified` card's
+ * hatch plus answer keys — was eighteen buttons for a one-key panel.
+ *
+ * It is the only member that can be resolved without a server flag, and it has
+ * to be: `isDismissablePanelActive` is published by `buildCurrentOutput` and
+ * carried by both delivery paths, but the two components that build this
+ * object — `TerminalSplitPaneContent` and `MobileTerminalTab` — construct it
+ * field by field and do not yet copy it across. Until they do, the flag arrives
+ * as `undefined` on the very surface it was added for. `frame` is already this
+ * component's prop (the card draws it), so the fallback costs nothing and shares
+ * the detector's own predicate rather than restating it. When the field does
+ * arrive, it wins — including when it arrives as `false`.
  */
-export function resolveBlockedReason(live: ChatSurfaceLiveState): ChatSurfaceBlockedReason | null {
+export function resolveBlockedReason(
+  live: ChatSurfaceLiveState,
+  frame?: string | null,
+): ChatSurfaceBlockedReason | null {
   if (live.isPagerActive) return 'pager';
   if (live.isSelectionListActive) return 'selectionList';
+  // Issue #2369. `??`, not `||`: an explicit `false` from a server that knows
+  // the field is an ANSWER and must not be overridden by a frame read, while
+  // `undefined` — a pane component or a daemon that predates the field — is the
+  // absence of one, and the frame is then the only thing that knows.
+  //
+  // The fallback is the same expression the detector runs
+  // (`hasDismissablePanelFooter`, imported from the module the tool rule reads
+  // its pattern out of), so the two call sites cannot disagree about what a
+  // dismiss-only footer is; what they differ on is only which bytes they have.
+  if (live.isDismissablePanelActive ?? hasDismissablePanelFooter(frame)) {
+    return 'dismissablePanel';
+  }
   if (live.isUnclassifiedActive) return 'unclassified';
   if (live.isPromptWaiting && !isAnswerablePromptData(live.promptData)) return 'promptUnreadable';
   return null;
@@ -721,7 +775,10 @@ export const ChatSurface = memo(function ChatSurface({
   // --------------------------------------------------------------------
   // Live region content
   // --------------------------------------------------------------------
-  const blockedReason = resolveBlockedReason(live);
+  // Issue #2369: `frame` is handed in so the dismiss-only reading can be made
+  // from the pane when the server flag has not reached this object — see
+  // `resolveBlockedReason`, which prefers the flag whenever it is present.
+  const blockedReason = resolveBlockedReason(live, frame);
 
   const handleOpenTerminal = useCallback(() => {
     onSurfaceModeChange('terminal');
@@ -851,6 +908,14 @@ export const ChatSurface = memo(function ChatSurface({
           </div>
         );
       }
+      // Issue #2369. The footer named the one key that leaves, so that is the
+      // whole control. Not `TerminalEscapeHatch` with its arrows hidden and not
+      // `PromptAnswerKeys` alongside it: on a read-only panel every other key is
+      // either inert or a character queued for whatever takes focus when the
+      // panel goes away, and the eighteen-button card this replaces is the
+      // defect the Issue was raised about.
+      case 'dismissablePanel':
+        return <DismissPanelKeys {...keyProps} />;
       // Nobody could classify the frame, so nobody can promise it has a
       // highlight to move OR a numbered list to answer. Both pads are offered:
       // the hatch for an overlay that navigates (claude's `/help` tabs), the

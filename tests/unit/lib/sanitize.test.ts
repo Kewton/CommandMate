@@ -384,6 +384,81 @@ describe('sanitizeTerminalOutput', () => {
   });
 });
 
+describe('[#2369] OSC sequences never reach the rendered pane', () => {
+  const ESC = '\x1b';
+  const ST = `${ESC}\\`;
+  const BEL = '\x07';
+
+  /**
+   * `ansi-to-html` understands SGR and nothing else, so before Issue #2369 an
+   * OSC 8 hyperlink reached the DOM as the literal text of its own escape.
+   * Reported on Command Code's `/usage` panel, whose breakdown row is a link.
+   *
+   * `stripAnsi` was not the fix available here: this function exists to turn the
+   * SGR runs into coloured spans, so the OSC removal had to be separable — see
+   * `stripOsc` / `OSC_PATTERN` in `lib/detection/ansi.ts`.
+   */
+  it('keeps an OSC 8 link label and drops the escape around it', () => {
+    const line =
+      'Full breakdown at ' +
+      `${ESC}]8;;https://commandcode.ai/Kewton/settings/usage${ST}` +
+      'commandcode.ai/Kewton/settings/usage' +
+      `${ESC}]8;;${ST}`;
+
+    const html = sanitizeTerminalOutput(line);
+
+    expect(html).toContain('commandcode.ai/Kewton/settings/usage');
+    expect(html).not.toContain(']8;;');
+    expect(html).not.toContain('https://commandcode.ai/Kewton/settings/usage\\');
+  });
+
+  it('drops the id-carrying OSC 8 form too (#1912 vocabulary)', () => {
+    const line =
+      'Auto routes based on ' +
+      `${ESC}]8;id=md-1ub4yfi;https://docs.github.com/en/copilot${ST}` +
+      'Learn More' +
+      `${ESC}]8;;${ST}`;
+
+    const html = sanitizeTerminalOutput(line);
+
+    expect(html).toContain('Learn More');
+    expect(html).not.toContain(']8;');
+  });
+
+  it('drops the BEL-terminated OSC form (a window title)', () => {
+    const html = sanitizeTerminalOutput(`${ESC}]0;my-window${BEL}after`);
+
+    expect(html).toContain('after');
+    expect(html).not.toContain(']0;');
+    expect(html).not.toContain('my-window');
+  });
+
+  it('still renders the SGR colour around a stripped link', () => {
+    // The reason this is `stripOsc` and not `stripAnsi`: colour is the output of
+    // this function, and a fix that flattened the pane would be a worse defect
+    // than the one it repaired.
+    const line =
+      `${ESC}[31m` +
+      `${ESC}]8;;https://example.com${ST}Red link${ESC}]8;;${ST}` +
+      `${ESC}[0m`;
+
+    const html = sanitizeTerminalOutput(line);
+
+    expect(html).toContain('Red link');
+    expect(html).not.toContain(']8;;');
+    expect(html).toContain('<span');
+    expect(html).toContain('style=');
+  });
+
+  it('leaves an unterminated OSC alone rather than eating the rest of the frame', () => {
+    // Same refusal `stripAnsi` makes (#1912): swallowing everything after a
+    // truncated escape would hide real output.
+    const html = sanitizeTerminalOutput(`${ESC}]8;id=x;https://example.com no-terminator`);
+
+    expect(html).toContain('no-terminator');
+  });
+});
+
 describe('sanitizeUserInput', () => {
   it('should strip all HTML tags', () => {
     const input = '<b>Bold</b> and <i>italic</i>';

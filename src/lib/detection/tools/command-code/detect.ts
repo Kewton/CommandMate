@@ -54,6 +54,13 @@
  * numbered-response path, because Command Code fires `PreToolUse` AFTER the
  * dialog is answered, so a hook-driven permission decision cannot dismiss it.
  *
+ * Issue #2369 added a second `afterPrompt` branch for the other screen the
+ * shared chain could not read: the `/usage` panel, whose last row is
+ * `Press Esc to close`. It is not a picker — nothing moves, nothing commits —
+ * so it gets a reason of its own rather than the selection-list token, and the
+ * chat surface answers it with the one key it accepts. See
+ * `STATUS_REASON.COMMAND_CODE_DISMISSABLE_PANEL`.
+ *
  * `afterPrompt` arrived with Issue #2297, for the one screen the shared chain
  * genuinely could not read: the picker `/model` opens. It is a provider-grouped
  * list of model NAMES — no option numbers — over a `› Type to search models...`
@@ -94,7 +101,10 @@
  */
 
 import { detectThinking, getCliToolPatterns } from '../../cli-patterns';
-import { COMMAND_CODE_SELECTION_LIST_FOOTER } from '../../selection-shape';
+import {
+  COMMAND_CODE_SELECTION_LIST_FOOTER,
+  DISMISSABLE_PANEL_FOOTER_PATTERN,
+} from '../../selection-shape';
 import { STATUS_REASON } from '../../status-reason';
 import { createToolStatusDetector } from '../run-detection';
 import { COMMAND_CODE_VERIFIED_AGAINST } from '../verified-against';
@@ -108,6 +118,33 @@ export const commandCodeStatusDetector = createToolStatusDetector({
   verifiedAgainst: VERIFIED_AGAINST,
 
   afterPrompt(frame): ToolStatusVerdict | null {
+    // Issue #2369. `/usage` opens a READ-ONLY panel: a plan header, two usage
+    // meters, a breakdown URL, and `Press Esc to close` as its last row. It is
+    // matched before the picker footer below because the two are mutually
+    // exclusive sentences and this one is the more specific — a whole row that
+    // offers a dismiss and nothing else.
+    //
+    // `waiting` rather than `running`, which is the half of this branch that
+    // fixes the reported defect: `isUnclassifiedFrame` (`session/status-evidence`)
+    // is `status === 'running' && <floor reason>`, so a `waiting` verdict takes
+    // `isUnclassifiedActive` down with it and the chat surface stops answering
+    // an eighteen-button card to a one-key panel. The reason is deliberately NOT
+    // in `SELECTION_LIST_REASONS`: there is no highlight here, so the arrow pad
+    // would be as wrong as the answer keys were. `current-output-builder`
+    // publishes it as `isDismissablePanelActive` instead.
+    //
+    // A human still has to press the key, so `waiting` is also the honest word:
+    // nothing on this pane will move until they do.
+    if (DISMISSABLE_PANEL_FOOTER_PATTERN.test(frame.lastLines)) {
+      return {
+        status: 'waiting',
+        confidence: 'high',
+        reason: STATUS_REASON.COMMAND_CODE_DISMISSABLE_PANEL,
+        hasActivePrompt: false,
+        evidence: 'positive',
+      };
+    }
+
     // Issue #2297. Command Code's pickers (`/model` measured live on v1.40.1 at
     // 200x1000) are arrow-driven overlays with a search box and a lower-case
     // hint-bar footer. Nothing in the shared chain reads that footer, so before

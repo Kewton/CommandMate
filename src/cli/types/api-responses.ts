@@ -220,6 +220,19 @@ export interface CurrentOutputResponse {
   /** Issue #1017: Codex pager/edit-previous mode (subset of isSelectionListActive). */
   isPagerActive?: boolean;
   /**
+   * Issue #2369: a dismiss-only overlay is on the pane — its footer offers
+   * `Esc to close` and nothing else (Command Code's `/usage`).
+   *
+   * Disjoint from {@link isSelectionListActive}, unlike {@link isPagerActive}
+   * which is a subset of it: this screen has no highlight to move, which is the
+   * whole reason it is published separately rather than folded into the flag
+   * the arrow pad is drawn from.
+   *
+   * Optional because a daemon older than #2369 sends nothing, and `undefined`
+   * there means "this server predates the field" rather than "no such panel".
+   */
+  isDismissablePanelActive?: boolean;
+  /**
    * The frame is interactive but the detection layer could not classify it
    * (Issue #1497). The server has published this since #1120; until Issue #1708
    * the CLI never read it, so a dialog the scraper failed to parse was treated
