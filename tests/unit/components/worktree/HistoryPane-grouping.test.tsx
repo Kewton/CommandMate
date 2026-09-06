@@ -151,7 +151,7 @@ describe('HistoryPane Integration', () => {
   });
 
   describe('file path click handling', () => {
-    it('should maintain file path click functionality in grouped view', () => {
+    it('should maintain file path click functionality in grouped view', async () => {
       const messages = [
         createTestMessage('user', 'Show the file', T1),
         createTestMessage('assistant', 'Here is the file: /src/test.ts', T2),
@@ -168,7 +168,11 @@ describe('HistoryPane Integration', () => {
       const fileLink = screen.getByRole('button', { name: /\/src\/test\.ts/i });
       fireEvent.click(fileLink);
 
-      expect(mockOnFilePathClick).toHaveBeenCalledWith('/src/test.ts');
+      // [Issue #2352] The pane asks the file API whether the path exists before
+      // opening it, so the open lands after that probe settles. Nothing stubs
+      // `fetch` here, so the probe cannot reach a server and answers "unknown"
+      // — which opens, exactly as before.
+      await waitFor(() => expect(mockOnFilePathClick).toHaveBeenCalledWith('/src/test.ts'));
     });
   });
 
