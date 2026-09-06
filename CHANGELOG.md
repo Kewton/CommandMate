@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **feat(detection): Command Code の起動バナーからモデルと reasoning effort を読む** (#2358): Command Code は hooks payload に `model` を載せない唯一のツールで、`extractModelInfo` にも `command-code` のルールが無かったため `sessionStatusByInstance['command-code'].model` は常に空だった。`# models: <model> · <taste>` の行を `stripAnsi` 後に `scanFromEnd` で読む `readCommandCodeBanner` を追加し、`(latest)` などの括弧付き接尾辞は `/model` 一覧の綴りと一致させるため id の一部として保持、`taste-1` は Command Code 固有の「taste」設定なので `·` 以降を捨てる。**Issue 本文の「effort は無い」「切り替え後は再起動までバナー値」は 1.49.0 実機で両方とも成立しなかった**: `/model` は 2 画面のダイアログで、モデル選択の後に `Select reasoning effort for <model>`（`Default` / `low` / `high` / `max`、集合はモデルごと）が出て、非 Default を選ぶとバナーが `# models: <model> with <effort> effort · taste-1` になる（起動時も `config.json` の値で同形）。effort は共有語彙 `REASONING_EFFORT_LEVELS` 経由で読み、`low` / `high` は載せ `max`（語彙外）は model だけ載せて effort は null。また**モデル変更**時は Command Code が出力全体を履歴を増やさず再描画するためバナー行はその場で書き換わり（1100 行の返答でスクロールバックに押し出された後でも同じ）、`STATUS_DETECTION_CAPTURE_LINES`=1000 行の捕捉窓に入っている間は次回 poll で切り替えが見える。窓の外に出たフレームは `{null,null}` を返し `recordCapturedModelInfo` のラッチが直前値を保つ。**同一モデルの effort だけの変更は 3 試行ともバナーに反映されなかった**（Command Code 側の表示欠陥。reader は画面を写す）。実機フレーム 4 枚（起動時 max / Pro high / Kimi K3 low / バナーが窓外）を `tests/fixtures/chat-dialog-card-2254/command-code-model-1-49-0-*.txt` に追加（`command-code-live-2250/` は 13 名でピン留め、`tests/unit/lib/detection/fixtures/` は #2049 の compaction sweep が全走査するため置けない）。既存 18 フレーム全件で `{ model: 'deepseek-v4-flash-(latest)', effort: null }` を固定。表示側（`formatAgentModelLabel`）は変更なし
+
 ## [0.31.2] - 2026-09-06
 
 > **Highlight**: 「同じ出来事が二度届く」「片方の面だけ答えが違う」を潰した patch リリース。完了通知は module graph をまたぐと 2 通送られることがあり、プロンプトに答えた直後の poller 再開は直前ターンの応答をもう 1 行保存していた。ファイルパスのクリックはチャット面だけが存在確認をしていて、History は読めないタブを開いていた。あわせて files API が不在のテキストファイルに 500 を返していたのを 404 に直した。
