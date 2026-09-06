@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **fix(detection): Command Code の `/usage` パネルを dismiss 専用画面として検出し、チャット面に Esc 1個のカードを出す** (#2369): `Press Esc to close` を末尾に持つフレームを `waiting` / `command_code_dismissable_panel` として読むようにし、新フラグ `isDismissablePanelActive` を `/current-output`・WebSocket push・ポーリングフック経由でチャット面まで配線した。これまでは不明フレーム（`running` / `default`）に落ちて `isUnclassifiedActive` が立ち、実際には Esc しか効かない画面に矢印・Enter・Esc・1〜9・y・n・Enter の18個のボタンが並んでいた。あわせて `sanitizeTerminalOutput` が OSC シーケンスを `ansi-to-html` に渡す前に除去するようになり、OSC 8 ハイパーリンクが `]8;;https://…\` としてカードやターミナル表示に漏れる問題も解消した（リンクテキストのみ残る）。
+
 ## [0.31.3] - 2026-09-06
 
 > **Highlight**: エージェントの「いまどのモデルか」と「いま許可を求めているか」を、画面の読み違いに頼らず正しく届けるリリース。スマホにモデル表示が無く低いモデルへの降格に気づけなかった問題を直し、claude の `/model` 切替はフレームと `PostModelSwitch` hook の 2 経路で、Command Code は起動バナーで検知するようにした。あわせて antigravity の許可ダイアログが「選択リスト」や「生成中」に化けて yes/no に到達できず、`wait` も抜けなくなる欠陥を agy 専用リーダで塞いだ。

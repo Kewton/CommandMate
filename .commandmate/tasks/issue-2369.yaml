@@ -1,0 +1,180 @@
+version: 1
+title: "Issue #2369: Command Code の /usage パネルが unclassified 扱いで18個のボタンが出る"
+goal: |
+  https://github.com/Kewton/CommandMate/issues/2369 を実装する。
+
+  ## 事象
+  Command Code のチャット面で `/usage` を送ると、使用量パネルが開いたあとにカードへ
+  矢印・Enter・Esc・1〜9・y・n・Enter の18個のボタンが並ぶ。閉じるのに必要なのは Esc だけ。
+
+  パネルの見た目（末尾行は `Press Esc to close`）:
+  ```
+   USAGE  Go Plan · active
+  █░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 4% used
+  Cycle: $9.61 left · 259 requests · 26 days to renewal
+  Usage limits
+  5-hour  ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 0%
+  Weekly  ██░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 7% · resets in 2d 23h
+  Full breakdown at commandcode.ai/Kewton/settings/usage
+  Press Esc to close
+  ```
+
+  ## 真因
+  1. `src/lib/detection/tools/command-code/detect.ts` にこの画面の規則が無い →
+     `running / default`（不明フレーム）→ `isUnclassifiedActive: true`
+  2. チャット面は `ChatSurface.tsx` の `resolveBlockedReason` が `unclassified` を返し、
+     `TerminalEscapeHatch`（← ↑ ↓ → Enter Esc）と `PromptAnswerKeys`（1〜9 y n Enter）を
+     両方描く（#1017 / #1494 の「分類できない画面には両方の鍵を出す」設計）
+  3. 副次: パネル内の OSC 8 ハイパーリンク（`ESC ] 8 ; ; URL ESC \ … ESC ] 8 ; ; ESC \`）が
+     `]8;;https://…\` の形でカードに漏れる。`src/lib/detection/ansi.ts` の `stripAnsi` は
+     OSC を剥がすが、カードが使う `src/lib/security/sanitize.ts` の `sanitizeTerminalOutput`
+     は `ansi-to-html` に直接渡しており、`ansi-to-html` が OSC を処理しない
+
+  ## 変更内容
+
+  ### A. dismiss-only パネルを検出して Esc だけ出す（本体）
+  1. `src/lib/detection/status-reason.ts` に新しい reason 定数を足す（例
+     `STATUS_REASON.COMMAND_CODE_DISMISSABLE_PANEL = 'command_code_dismissable_panel'`）。
+     `src/lib/detection/tools/command-code/detect.ts` の `afterPrompt` に、
+     `Press Esc to close` を末尾付近に持つフレームを読む分岐を足す（`COMMAND_CODE_SELECTION_LIST`
+     の実装 — `afterPrompt` で `waiting` / `confidence: high` / `evidence: positive` /
+     `hasActivePrompt: false` を返すパターン — がそのまま手本になる。フッタ文言の検出は
+     `src/lib/detection/selection-shape.ts` に正規表現を足す形で揃える）。
+     **`isUnclassifiedFrame(status, reason)`（`src/lib/session/status-evidence.ts`）は
+     `status === 'running'` のときしか true にならないので、`status: 'waiting'` で返せば
+     `isUnclassifiedActive` は自動的に false になる。** `UNCLASSIFIED_FRAME_REASONS` 自体は
+     触らなくてよい。
+  2. ただし `isSelectionListActive`（`src/lib/session/current-output-builder.ts` の
+     `SELECTION_LIST_REASONS.has(statusResult.reason)` 判定）にもこの新 reason を入れては
+     いけない（矢印パッドが出てしまう）。**新しい真偽値
+     `isDismissablePanelActive`**（`statusResult.status === 'waiting' &&` 新reasonの判定）を
+     `isSelectionListActive` / `isPagerActive` と同じ場所（1493行目付近）に追加し、関数の
+     戻り値・型定義（同ファイル内の `ScraperVerdict` インターフェース）に足す。
+  3. この新フィールドを、`isSelectionListActive` / `isPagerActive` が通っている配線と**同じ形で**
+     以下すべてに通す（この2つが今どこを通っているかは `grep -n "isPagerActive"` で
+     ファイルごとに確認できる。1箇所でも抜けるとチャット面に反映されない）:
+     - `src/cli/types/api-responses.ts`（レスポンス型に `isDismissablePanelActive?: boolean` を追加）
+     - `src/lib/realtime/types.ts` / `src/lib/realtime/terminal-broadcast.ts`（WS 配信）
+     - `src/hooks/useTerminalPanePolling.ts`（ポーリングのスナップショット・`terminal.*` 経由の公開値）
+  4. `src/components/worktree/ChatSurface.tsx`:
+     - `ChatSurfaceBlockedReason` に `'dismissablePanel'` を追加
+     - `resolveBlockedReason` で `isPagerActive` の次あたりに
+       `if (live.isDismissablePanelActive) return 'dismissablePanel';` を追加
+       （`isUnclassifiedActive` より手前で判定すること。dismiss-only パネルは元々
+       `isUnclassifiedActive` を立てなくなる実装なので順序の実害は無いが、意図を明示する）
+     - `BLOCKED_REASON_KEY` に i18n キーを追加（例 `chatSurface.reasonDismissablePanel`）
+     - 描画の switch に `case 'dismissablePanel':` を足し、**Esc 1個のカード**にする
+       （`PromptAnswerKeys` や `TerminalEscapeHatch` 全体は出さない。Esc だけを送る最小の
+       ボタン／`special-keys` 呼び出しでよい。既存の `NavigationButtons` 等のコンポーネントに
+       Esc 単体を出すモードがあれば流用し、無ければ最小のボタンを1つ描く）
+     - `locales/en/worktree.json` と `locales/ja/worktree.json` の `chatSurface` セクションに
+       `reasonDismissablePanel` を追加する（両言語対で追加すること。片方だけだと
+       ja-en-heading-parity 系のチェックに引っかかる）
+
+  ### B. `unclassified` カードの鍵の出し方を見直す（緩和・任意）
+  Command Code 以外の未計測オーバーレイが `unclassified` に落ちたとき、frame に
+  `Esc to close` / `esc to cancel` が見えるなら Esc を先頭に大きく出し `PromptAnswerKeys` を
+  折りたたむ、という緩和は任意（受入条件には無い）。A で今回のパネルは `unclassified` に
+  落ちなくなるので急務ではない。時間があれば着手してよいが、`unclassified` に残る画面
+  （回帰確認対象）の挙動を変えないこと。
+
+  ### C. OSC を `sanitizeTerminalOutput` でも剥がす
+  `src/lib/security/sanitize.ts` の `sanitizeTerminalOutput` で、`ansiConverter.toHtml` に
+  渡す前に OSC シーケンス（`ESC ] … BEL` / `ESC ] … ESC \`）を除去する。
+  `src/lib/detection/ansi.ts` の `stripAnsi` が使っている OSC 正規表現
+  （`osc8-strip-1912` の実装、`tests/unit/lib/detection/osc8-strip-1912.test.ts` 参照）と
+  同じ考え方を共有し、OSC 8 はリンクテキスト（`commandcode.ai/Kewton/settings/usage`）だけ
+  残す。`src/components/worktree/TerminalDisplay.tsx` も同じ関数を通るので両面で直る
+  （このファイル自体の変更は不要なはず）。
+
+  ## 受入条件
+  - [ ] `/usage` の fixture で `detectSessionStatus('command-code', ...)` が `waiting` /
+        新reason、`isUnclassifiedActive: false`
+  - [ ] `isDismissablePanelActive` が `current-output-builder` の戻り値・API・
+        `useTerminalPanePolling` を経由してチャット面まで届く unit テストがある
+        （配線の途中で欠落しないことをテストで固定する）
+  - [ ] `ChatSurface` の unit テストで、`isDismissablePanelActive: true` のとき Esc 1個の
+        カードが出て `PromptAnswerKeys` と `TerminalEscapeHatch` のフルセットは出ないこと
+  - [ ] `unclassified` のまま残る画面（例: 未計測のオーバーレイ、既存 fixture）では従来の
+        鍵（矢印+PromptAnswerKeys）が出ること（回帰確認）
+  - [ ] `sanitizeTerminalOutput` に OSC 8 を含む行を通すと `]8;;` が出ず、リンクテキストだけ
+        残ること（テスト）
+  - [ ] `npm run lint` / `npx tsc --noEmit` / `npm run test:unit` が exit 0
+        （`cmd > log; echo $?` で実測すること）
+
+  ## 手動検証（🤖 では検証できないため実装対象外だが崩さないこと）
+  - 実機（Command Code 1.49）で `/usage` を送ると Esc 1個のカードが出て、押すと
+    `ready / input_prompt` に戻る
+  - Switch Model ピッカー（#2297）の番号キー描画は従来どおり
+
+  ## スコープ外
+  - Command Code 以外の dismiss-only パネルの語彙採取（規則の形だけ共通化し、語彙は本Issueでは
+    Command Code のみ）
+  - `/usage` の数値をチャットに構造化して出すこと
+  - B（緩和）は任意
+
+  ## 関連
+  #2250 / #2304、#1017 / #1494 / #1497、#2254、#1708、#1912、#2297（同型の
+  `afterPrompt` 実装の手本）
+
+  ## 作業ルール（厳守）
+  - **`CHANGELOG.md` と `docs/module-reference.md` を編集しないでください**（scope外です）。
+    代わりに次の2ファイルを書いてください。どちらも `dev-reports/` 配下なので commit には
+    入りません。
+    - `dev-reports/changelog/issue-2369.md` — `CHANGELOG.md` の `## [Unreleased]` にそのまま
+      貼れる1エントリ（先頭は `- **<type>(<scope>): …** (#2369): …`）。1行目にコメントで
+      どの節（`### Added` / `### Changed` / `### Fixed`）に入るかを書く。
+      `- **` で始めること（`grep -cE '^- \*\*'` で集計する）。`(#2369)` は要約の外
+      （`**` を閉じた後）に置くこと。1エントリ＝1行（折らない）。
+    - `dev-reports/module-reference/issue-2369.md` — `docs/module-reference.md` の表に足す
+      注記を行キー（`| \`path\` |`）ごとに列挙する。既存行に足すときは
+      `grep -n '^| \`<path>\`' docs/module-reference.md` を実行し、その出力（行番号つきの
+      行キー）を断片に書き写してから書くこと。0件だった行への追記は指示しない。足すものが
+      無ければ「追記なし」の1行でよい。
+  - 断片が無いとリリースノートと module-reference に載らない。実装と同じ commit の時点で
+    書くこと。
+  - **`tests/unit/` 配下は `lib/` の有無で複数ツリーが併存し、さらに直下にフラットな
+    `detection-*.test.ts` が単独で置かれていることもある。** 既存テストを変更する必要が
+    生じたら、必ず `find tests/unit -iname "*<キーワード>*"` で実パスを確認してから編集する
+    こと。
+  - 新しい真偽値フィールドを配線するとき、`grep -rn "isPagerActive"` で今どのファイルが
+    それを扱っているかを都度確認し、1箇所も飛ばさないこと（この種の配線漏れは過去に
+    実害を出している）。
+scope:
+  allow:
+    - "src/lib/detection/tools/command-code/detect.ts"
+    - "src/lib/detection/status-reason.ts"
+    - "src/lib/detection/selection-shape.ts"
+    - "src/lib/detection/ansi.ts"
+    - "src/lib/security/sanitize.ts"
+    - "src/lib/session/current-output-builder.ts"
+    - "src/lib/realtime/types.ts"
+    - "src/lib/realtime/terminal-broadcast.ts"
+    - "src/cli/types/api-responses.ts"
+    - "src/hooks/useTerminalPanePolling.ts"
+    - "src/components/worktree/ChatSurface.tsx"
+    - "src/components/worktree/PromptAnswerKeys.tsx"
+    - "locales/en/worktree.json"
+    - "locales/ja/worktree.json"
+    - "tests/unit/detection/tools/command-code/**"
+    - "tests/unit/lib/detection/**"
+    - "tests/unit/detection/**"
+    - "tests/unit/lib/sanitize.test.ts"
+    - "tests/unit/lib/current-output-builder.test.ts"
+    - "tests/unit/lib/current-output-builder-prompt-dedup-1695.test.ts"
+    - "tests/unit/lib/current-output-builder-2369.test.ts"
+    - "tests/unit/realtime-types.test.ts"
+    - "tests/unit/terminal-broadcast.test.ts"
+    - "tests/unit/hooks/useTerminalPanePolling.test.ts"
+    - "tests/unit/hooks/useTerminalPanePolling-2369.test.ts"
+    - "tests/unit/components/worktree/**"
+    - "tests/fixtures/command-code-live-2250/**"
+    - "tests/fixtures/chat-dialog-card-2254/**"
+    - "dev-reports/changelog/issue-2369.md"
+    - "dev-reports/module-reference/issue-2369.md"
+  deny: []
+verify:
+  # 既定（省略）= 登録済み全ゲート
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true
