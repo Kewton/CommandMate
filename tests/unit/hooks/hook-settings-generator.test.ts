@@ -89,10 +89,13 @@ function fixture(name: string): Record<string, unknown> {
 }
 
 describe('event coverage', () => {
-  it('registers the five lifecycle events plus PermissionRequest and the tool-use pair', () => {
+  it('registers the five lifecycle events plus PermissionRequest, the tool-use pair and PostModelSwitch', () => {
+    // `PostModelSwitch` since Issue #2363; its `Pre` twin is deliberately not
+    // here (see `tests/unit/lib/hooks/hook-settings-post-model-switch-2363.test.ts`).
     expect(Object.keys(buildAgentHookSettings(TARGET).hooks).sort()).toEqual([
       'Notification',
       'PermissionRequest',
+      'PostModelSwitch',
       'PostToolUse',
       'PreToolUse',
       'SessionEnd',
