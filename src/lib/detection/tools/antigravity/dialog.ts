@@ -37,13 +37,19 @@
  *
  * ## Who calls it
  *
- * Both producers of the wire, so that they cannot disagree about one screen:
- * `antigravity/detect.ts` (the status verdict `/current-output` publishes) and
- * `polling/response-checker.ts` (the `prompt` row the poller stores and the
- * push notification it raises). The Auto-Yes poller is deliberately NOT a
- * caller: with Auto-Yes on, agy's `PreToolUse` hook answers the permission
- * request before the dialog is drawn (Issue #1779), so the dialogs this module
- * reads only appear when nothing is going to auto-answer them.
+ * Every producer of the wire, so that they cannot disagree about one screen:
+ * `antigravity/detect.ts` (the status verdict `/current-output` publishes),
+ * `polling/response-checker.ts` (`detectPromptOnCleanFrame` — the `prompt` row
+ * the poller stores, the push notification it raises, AND the Auto-Yes poller's
+ * reading) and the `prompt-response` route's re-verification.
+ *
+ * Issue #2364 left the Auto-Yes poller on the generic pass, on the premise that
+ * agy's `PreToolUse` hook answers the permission request before the dialog is
+ * drawn. Measured false (#2368): agy 1.1.27 ignores a hook `allow` in
+ * interactive mode and draws the dialog anyway (#1779), so agy's Auto-Yes
+ * depends entirely on this TUI reading — and without it every wrapped Bash
+ * approval sat unanswered while `/current-output` published it as waiting.
+ * #2368 put that poller on the same entry.
  *
  * Deliberately NOT a change to the generic multiple-choice parser: folding
  * continuation rows there would change what every other tool's dialogs read
