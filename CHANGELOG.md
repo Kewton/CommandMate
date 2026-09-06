@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.31.2] - 2026-09-06
+
+> **Highlight**: 「同じ出来事が二度届く」「片方の面だけ答えが違う」を潰した patch リリース。完了通知は module graph をまたぐと 2 通送られることがあり、プロンプトに答えた直後の poller 再開は直前ターンの応答をもう 1 行保存していた。ファイルパスのクリックはチャット面だけが存在確認をしていて、History は読めないタブを開いていた。あわせて files API が不在のテキストファイルに 500 を返していたのを 404 に直した。
+
 ### Changed
 
 - **chore(catalog): claude / codex のスラッシュコマンド attestation を再取得する** (catalog-reconcile 2026-09-06): `catalog:refresh --write` で claude `/design` `/skill-doctor` の 2 件をカタログへ追加し（新規 locale キーは `skill-doctor` の 1 件、`/design` は command-code と意味が異なるためフラットキー `descriptions.design` を `design.command-code`（出荷済み文言を据え置き）/ `design.claude`（docs 由来）へ人手で分割）、attestation を claude 2.1.251 → 2.1.261（docs 表 112 行 = active 107 + removed 3 + alias 2、`/ultraplan` 込みで 108 件、observedAt 2026-09-06）、codex 0.151.0 → 0.153.4（`slash_command.rs` @ rust-v0.153.4 は rust-v0.151.0 とバイト同一、59 variant → active 57、observedAt 2026-09-06）へ採り直した。集合の削除はゼロ、除外判断（exclusions.json 4 件）は不変
