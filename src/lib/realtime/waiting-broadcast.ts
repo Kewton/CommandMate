@@ -32,6 +32,10 @@
  * @module lib/realtime/waiting-broadcast
  */
 
+import {
+  startModelChangeBroadcast,
+  stopModelChangeBroadcast,
+} from '@/lib/realtime/model-change-broadcast';
 import type { SessionStatusEvent } from '@/lib/realtime/types';
 import {
   onWaitingTransition,
@@ -78,6 +82,14 @@ export function buildWaitingStatusEvent(transition: WaitingTransition): SessionS
  * Idempotent: calling it again replaces the previous subscription rather than
  * adding a second one, so a re-entered `setupWebSocket` cannot double-send.
  *
+ * Issue #2357: this is also where the model edge is armed. `setupWebSocket`
+ * calls exactly one function to start the edge → room subscriptions, and it
+ * is this one; the model-change fan-out (`model-change-broadcast`) needs the
+ * same publisher for the same reason the waiting edge does — the closure has
+ * to hold the bundle's own `rooms` — so it is started here with it, and
+ * stopped with it below, rather than growing a second arming call in
+ * `ws-server` for every edge that comes along.
+ *
  * @param publish - Room broadcaster, normally `ws-server`'s internal one.
  * @returns The unsubscribe function (also reachable as
  *   {@link stopWaitingStatusBroadcast}).
@@ -90,6 +102,7 @@ export function startWaitingStatusBroadcast(publish: WaitingBroadcastPublisher):
   });
 
   globalThis.__waitingStatusBroadcastUnsubscribe = unsubscribe;
+  startModelChangeBroadcast(publish);
   return unsubscribe;
 }
 
@@ -97,6 +110,8 @@ export function startWaitingStatusBroadcast(publish: WaitingBroadcastPublisher):
  * Drop the subscription, if any. Safe to call when none is active — and called
  * from `closeWebSocket`, so a suite that stands a server up and tears it down
  * does not leave a listener pointed at a dead room map.
+ *
+ * Issue #2357: drops the model edge's subscription with it, for the same reason.
  */
 export function stopWaitingStatusBroadcast(): void {
   const existing = globalThis.__waitingStatusBroadcastUnsubscribe;
@@ -104,6 +119,7 @@ export function stopWaitingStatusBroadcast(): void {
     existing();
     globalThis.__waitingStatusBroadcastUnsubscribe = undefined;
   }
+  stopModelChangeBroadcast();
 }
 
 /** Whether a subscription is currently active. Test seam. */
