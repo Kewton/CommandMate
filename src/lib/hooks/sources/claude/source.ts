@@ -52,6 +52,7 @@ import {
   TOOL_CALL_ID_FIELDS,
 } from '../hook-event-vocabulary';
 import type { AgentEventSource, AgentLaunchContext, AgentLaunchPlan, Verdict } from '../types';
+import { claudeModelSwitchMapper, extractClaudeSwitchedModel } from './model-switch';
 import { CLAUDE_CLI_TOOL_ID } from './tool-id';
 
 /**
@@ -145,7 +146,12 @@ export const claudeAgentEventSource: AgentEventSource = definePushHookSource({
   // word, no predicates — so it is expressed as rules built from the table
   // rather than as a table, and a source that needs conditions (opencode) adds
   // them to the same list.
-  mappers: fromNameTable(CAMEL_CASE_HOOK_EVENT_NAMES),
+  //
+  // Issue #2363: plus the one spelling that is Claude's alone. `PostModelSwitch`
+  // is filed as `notification(model_switch:<to_model>)` — see `./model-switch`
+  // for the measurement and for why its `Pre` twin is not here. Appended after
+  // the shared table so nothing that table claims changes its word.
+  mappers: [...fromNameTable(CAMEL_CASE_HOOK_EVENT_NAMES), claudeModelSwitchMapper],
 
   nativeEventNameFields: ['hook_event_name'],
   conversationIdFields: SESSION_ID_FIELDS,
@@ -158,6 +164,13 @@ export const claudeAgentEventSource: AgentEventSource = definePushHookSource({
   // does that. The value arrives with its own suffix (`claude-opus-5[1m]`) and
   // is not parsed here: a display string the tool chose is the tool's to spell.
   modelFields: ['model'],
+  // Issue #2363. The second and only other event that names a model, and it
+  // names it under a different key: `PostModelSwitch` carries `to_model` (the
+  // model the session is now on) and no `model` at all. Read there, and only
+  // there — `from_model` is the value being left behind and must never reach
+  // the latch. `extractModel` runs before `modelFields`, and answers null for
+  // every other event so the flat lookup above is unchanged for them.
+  extractModel: extractClaudeSwitchedModel,
 
   // S2.
   extractDetail: extractSnakeCaseEventDetail,
