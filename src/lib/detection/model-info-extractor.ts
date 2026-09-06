@@ -478,6 +478,87 @@ function readOpencodeStepMarker(line: string): ModelInfo | null {
 }
 
 // =============================================================================
+// Command Code (Issue #2358)
+// =============================================================================
+
+/**
+ * Reads `<model>[ with <effort> effort]` off the `# models:` row of the Command
+ * Code startup banner (Issue #2358).
+ *
+ * Command Code's hooks carry no model at all
+ * (`src/lib/hooks/sources/command-code/source.ts`: no `model` key on any
+ * captured payload), so the banner is the only place the value exists. It is
+ * the same three rows on 1.40.1, 1.47.1 and 1.49.0, straight under the
+ * block-art logo:
+ *
+ *   `# Command Code v1.49.0`
+ *   `# models: deepseek-v4-flash-(latest) · taste-1`
+ *   `# /path/to/cwd`
+ *
+ * **The Issue text says the row is `<model> · <taste>` and that there is no
+ * effort. The pane says otherwise.** Measured live on 1.49.0 for this Issue
+ * (`tests/fixtures/chat-dialog-card-2254/command-code-model-1-49-0-*.txt`, and
+ * that directory's README): the `/model` picker is followed by a second screen,
+ * `Select reasoning effort for <model>`
+ * (`Default` / `low` / `high` / `max`, the set varying by model), and a
+ * non-default choice is printed into the banner —
+ *
+ *   `# models: deepseek-v4-pro-(latest) with high effort · taste-1`
+ *   `# models: deepseek-v4-flash-(latest) with max effort · taste-1`   (also at launch, from config)
+ *   `# models: kimi-k3 with low effort · taste-1`
+ *
+ * — while `Default` prints the bare form the 18 earlier fixtures show. So:
+ *
+ *  - **The model is everything before ` with ` / ` · `, kept verbatim.** The
+ *    `(latest)` suffix is part of the id — it is how the picker spells the same
+ *    entry (`DeepSeek V4 Flash (latest)`), so stripping it would publish a name
+ *    the picker never shows. `MODEL_LABEL_SHAPE` admits the parentheses; the
+ *    bare token shape does not.
+ *  - **`taste-1` is not a model.** It is Command Code's "taste" setting (the
+ *    footer reads `? for shortcuts · taste on`), so everything from the dot on
+ *    is dropped, and the dot itself is optional.
+ *  - **The effort is read when the banner prints one, through the shared
+ *    vocabulary.** `low` / `high` resolve; `max` is not a
+ *    {@link ReasoningEffort} and answers null rather than widening a list every
+ *    other reader and the UI type depend on. The model half is published either
+ *    way: the ` with … effort` frame delimits it cleanly, so nothing is
+ *    half-read.
+ *
+ * ## After a `/model` switch (measured, 1.49.0)
+ *
+ * Command Code renders inline (`#{alternate_on}` is 0) and on a **model**
+ * change it re-emits its whole output, banner included, without growing the
+ * history: the `# models:` row was rewritten in place both while it sat on
+ * screen and after 1100 transcript rows had pushed it into scrollback. So
+ * bottom-up scanning is the whole rule, and a switch is visible on the next
+ * poll for as long as the banner is inside the captured window
+ * (`STATUS_DETECTION_CAPTURE_LINES` = 1000 rows from the bottom —
+ * `…-switch-banner-scrolled.txt` is a frame past that point, and answers
+ * unknown so the latch keeps the pre-switch value).
+ *
+ * An **effort-only** change on the current model does NOT rewrite the row: in
+ * three trials (`max`→`high`, `high`→`max`, `max`→`Default`) the banner kept the
+ * effort it first showed for that model, while `config.json` did change. That
+ * is a Command Code display defect, and this reader mirrors the screen — the
+ * effort published for a model is the one its banner row shows, which is the
+ * launch value or the value chosen when the model was first picked.
+ *
+ * No /g. No nested quantifiers: the lazy `[^·]+?` is bounded by the literal
+ * ` with `, the literal `·`, or the end of the line; the optional effort group
+ * is anchored on two literals and contains no quantified group of its own.
+ */
+export const COMMAND_CODE_BANNER_MODELS_PATTERN =
+  /^\s*#\s+models:\s*([^·]+?)(?:\s+with\s+([A-Za-z]+)\s+effort)?\s*(?:·|$)/i;
+
+function readCommandCodeBanner(line: string): ModelInfo | null {
+  const match = COMMAND_CODE_BANNER_MODELS_PATTERN.exec(line);
+  if (!match) return null;
+  const model = match[1].trim();
+  if (!isPlausibleModelLabel(model)) return null;
+  return { model, effort: match[2] ? resolveEffortToken(match[2]) : null };
+}
+
+// =============================================================================
 // Public API
 // =============================================================================
 
@@ -550,6 +631,12 @@ export function extractModelInfo(cliToolId: CLIToolType, captureText: string): M
     }
     case 'opencode':
       return scanFromEnd(captureText, readOpencodeStepMarker) ?? unknown();
+    case 'command-code':
+      // Issue #2358. The banner is the only source — hooks carry no model — and
+      // bottom-up is the same "last banner wins" rule Claude uses: a relaunch in
+      // the same pane overtakes the banner above it, and a `/model` switch
+      // rewrites the one row in place (see `readCommandCodeBanner`).
+      return scanFromEnd(captureText, readCommandCodeBanner) ?? unknown();
     default:
       return unknown();
   }

@@ -21,7 +21,7 @@ and fails loudly if someone normalises them.
 
 | | |
 |---|---|
-| Captured | 2026-09-03; the two Issue #2297 rows on 2026-09-04 (`tmux -L cm2297`); the four Issue #2326 rows on 2026-09-05 (`tmux -L cm2326`) |
+| Captured | 2026-09-03; the two Issue #2297 rows on 2026-09-04 (`tmux -L cm2297`); the four Issue #2326 rows on 2026-09-05 (`tmux -L cm2326`); the four Issue #2358 rows on 2026-09-06 (`tmux -L cm2358`, isolated `HOME`) |
 | Pane geometry | **200x1000** — `TUI_PANE_WIDTH` x `TUI_PANE_HEIGHT` from `src/config/tmux-pane-config.ts`, i.e. the production layout. Issue #2254's "known traps" calls this out: at a default 80x24 the blank-padding shapes below do not appear at all. |
 | Isolation | private tmux socket (`tmux -L cmate-2254`), one throwaway `git init` directory under the session scratchpad, `kill-server` afterwards |
 | Command | `tmux -L cmate-2254 capture-pane -p -e -t '=dlg:0.0' -S -0 -E -` |
@@ -47,6 +47,10 @@ the trap recorded in `docs/design/`-adjacent notes and in Issue #1495 is that
 | `command-code-model-1-47-1-middle.txt` | Command Code 1.47.1 | the same frame after 32 ▼ — arrows on `Tencent Hy4 Preview` | 1000 | 333 | as above |
 | `command-code-model-1-47-1-bottom.txt` | Command Code 1.47.1 | the same frame after 72 ▼ — arrows on the last row, `Grok 4.6` | 1000 | 333 | as above |
 | `command-code-model-1-47-1-closed.txt` | Command Code 1.47.1 | the same pane immediately after `Escape` closed the picker: no footer, so nothing to crop to | 1000 | 258 | rows **1–258** |
+| `command-code-model-1-49-0-boot-effort-max.txt` | Command Code 1.49.0 | no dialog (Issue #2358): a fresh launch whose isolated `config.json` held a persisted effort, so the banner reads `# models: deepseek-v4-flash-(latest) with max effort · taste-1` | 1000 | 12 | rows **1–12** |
+| `command-code-model-1-49-0-switch-pro-high.txt` | Command Code 1.49.0 | no dialog (Issue #2358): the pane right after `/model` → `DeepSeek V4 Pro (latest)` → `2. high` was **confirmed** — the banner row rewritten in place to `# models: deepseek-v4-pro-(latest) with high effort · taste-1` | 1000 | 12 | rows **1–12** |
+| `command-code-model-1-49-0-switch-kimi-low.txt` | Command Code 1.49.0 | no dialog (Issue #2358): after `/model` → `Kimi K3` → `2. low` was confirmed — `# models: kimi-k3 with low effort · taste-1`, an id with no `(latest)` suffix | 1000 | 12 | rows **1–12** |
+| `command-code-model-1-49-0-switch-banner-scrolled.txt` | Command Code 1.49.0 | no dialog (Issue #2358): after an 1100-line reply and a confirmed `/model` switch, the visible 1000 rows hold rows ~107–1100 of the reply and the composer — the banner is in scrollback, **outside the captured window** | 1000 | 995 | rows **1–1000** |
 
 ### Both ends of the pane are represented, and that is the point
 
@@ -149,6 +153,48 @@ caret-shaped as well. Issue #2323's "last mark on the screen wins" reads through
 that correctly, and the crop removes the question by removing the rows; both are
 asserted, so neither can quietly stop being true.
 
+## What Issue #2358 added: the banner after a CONFIRMED `/model`
+
+The four `command-code-model-1-49-0-*` rows are the odd ones out on this page:
+they hold no dialog, and the picker that produced three of them **was
+confirmed**. They are here, and not in `tests/fixtures/command-code-live-2250/`,
+because that directory's file list is pinned to exactly 13 names by
+`tests/unit/detection/tools/command-code/fixtures.test.ts`, and not in
+`tests/unit/lib/detection/fixtures/`, because the Issue #2049 compaction sweep
+walks every non-opencode directory there and Command Code's painted logo rows
+are not inert under it. `tests/unit/lib/detection/model-info-command-code-2358.test.ts`
+is what reads them.
+
+Captured 2026-09-06 on Command Code v1.49.0 (`/opt/homebrew/bin/commandcode`):
+`probe` on a private socket (`tmux -L cm2358`), pane 200x1000, launched as
+`commandcode --skip-onboarding --no-auto-update --trust` with an **isolated
+`HOME`** into which only `~/.commandcode/auth.json` and `config.json` were
+copied, `kill-server` afterwards. Confirming the picker is safe under that
+isolation — every selection landed in the throwaway `config.json`, and the
+host's `~/.commandcode/config.json` is byte-for-byte what it was. Redacted, and
+nothing in the suite reads it: the probe cwd on the banner's `# <cwd>` row
+became `/private/tmp/cc2358-probe/work`.
+
+What the probe measured, and why the reader needed these frames:
+
+- `/model` is a **two-screen** dialog. Picking a model opens
+  `Select reasoning effort for <model>` — `1. Default` plus a per-model set of
+  levels (`high` / `max` for the DeepSeek V4 entries, `low` / `high` / `max`
+  for Kimi K3) — and a non-default choice is printed into the banner as
+  `# models: <model> with <effort> effort · taste-1`. `Default` prints the bare
+  `<model> · taste-1` the 18 earlier frames show. The Issue text had no effort
+  at all.
+- On a **model** change Command Code re-emits its whole output without growing
+  the history: the banner row was rewritten in place while on screen and again
+  after an 1100-line reply had pushed it into scrollback (history stayed at
+  1125 rows, the old `minimax-m3` row was gone, the new row was at row 10). The
+  Issue text had the value fixed until restart.
+- An **effort-only** change on the current model did **not** rewrite the row in
+  three trials (`max`→`high`, `high`→`max`, `max`→`Default`): the banner kept
+  the effort it first showed for that model while `config.json` changed
+  underneath. That is a Command Code display defect; the reader mirrors the
+  screen.
+
 ## Not here
 
 - **No opencode permission dialog.** The install used for these captures approves
@@ -158,4 +204,4 @@ asserted, so neither can quietly stop being true.
   agent-list dialog above uses — the frames are drawn by the same painted-panel
   code — and `tests/fixtures/opencode-live-2046/w80/dialog-*.txt` remain the
   in-repo captures of the other four opencode dialogs at 80 columns.
-- **No confirmed dialog.** Nothing here was answered; see Provenance.
+- **No confirmed dialog, except the four Issue #2358 rows.** Nothing else here was answered; see Provenance. Those four were confirmed under an isolated `HOME`, and none of them holds a dialog.
