@@ -76,35 +76,35 @@ export const OPENCODE_VERIFIED_AGAINST = {
 } as const;
 
 /**
- * agy these rules were read off (#988 / #995 footer + selection rules, re-read
- * against the #2270 live panes).
+ * agy these rules were read off (#988 / #995 footer + selection rules, #2270's
+ * numbered-dialog carve-out, re-measured and re-captured by #2364).
  *
- * Bumped from `0.4.x` / `2026-07-30` / `inline` because the frames were
- * RE-CAPTURED, not because the binary moved: #2270 drove agy 1.1.25 on a private
- * tmux socket at the production geometry and kept both panes inline in
- * `tests/unit/status-detector-selection.test.ts`
- * (`AGY_1125_PERMISSION_PANE`, `AGY_1125_SWITCH_MODEL_PANE`) under the banner
- * `Antigravity CLI 1.1.25`, trailing pane padding included. The
- * `Do you want to proceed?` + `N. label` rules were measured off those frames,
- * and `ANTIGRAVITY_SELECTION_LIST_PATTERN` (#995 / #997) was re-checked against
- * them and left unchanged.
+ * Bumped from 1.1.25 because the frames were RE-CAPTURED and the rules CHANGED:
+ * #2364 drove agy 1.1.27 on a private tmux socket at the production geometry and
+ * kept the frames in `tests/fixtures/antigravity-live-2364/` — the file-creation
+ * menu (`Allow creation of this file?`, two options), the Bash approval whose
+ * option labels wrap onto three rows each, the one-row Bash approval #2270 had
+ * measured on 1.1.25, the `/model` picker, the folder-trust screen, the
+ * slash-command popup, and the first live IDLE agy frame. The numbered-dialog
+ * discriminator (`isAntigravityNumberedDialog`) was rewritten off those frames
+ * from a question-line match to the footer + numbered-row structure, and the
+ * dialogs are now read by `tools/antigravity/dialog.ts` rather than by the
+ * generic multiple-choice parser. `ANTIGRAVITY_SELECTION_LIST_PATTERN`
+ * (#995 / #997) was re-checked against every frame and left unchanged.
  *
- * `paneGeometry` leaves `inline` because the 1.1.25 permission dialog draws no
- * composer row at all — it reproduces only at the 200x1000 pane the server
- * captures, and a fixture without the ~970 blank padding rows exercises a
- * different `lastLines` slice than production does. That is a statement about
- * the capture condition, not about agy: the scrollback-retained rendering the
- * `afterThinking` footer rules rest on (#988) is unchanged, and the 1.1.25
- * dialog still ends on `esc to cancel`.
+ * The #2270 1.1.25 panes stay where they are
+ * (`tests/unit/status-detector-selection.test.ts`) and the rules still answer
+ * for both builds.
  *
- * What this stamp does NOT claim: #2270 captured `waiting` frames only, so the
- * idle (`? for shortcuts`) and generating (spinner) branches are carried over
- * from the 0.4 captures rather than re-measured. A live IDLE 1.1.25 frame is
- * still uncaptured — see the `readIdleEvidence` note in `antigravity/detect.ts`.
+ * What this stamp does NOT claim: the generating (spinner) branch is still
+ * carried over from the 0.4 captures rather than re-measured, and the
+ * post-answer survey (`[1] Good … [0] Skip`) was seen once on the production
+ * server and reconstructed from its cleaned rows — the raw frame is not in the
+ * fixture directory (see its README).
  */
 export const ANTIGRAVITY_VERIFIED_AGAINST = {
-  version: '1.1.25',
-  capturedAt: '2026-09-04',
+  version: '1.1.27',
+  capturedAt: '2026-09-06',
   paneGeometry: '200x1000',
 } as const;
 
