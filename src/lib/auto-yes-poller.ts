@@ -12,7 +12,7 @@
 
 import type { CLIToolType } from './cli-tools/types';
 import { captureSessionOutput } from './session/cli-session';
-import { detectPrompt } from './detection/prompt-detector';
+import { detectPromptOnCleanFrame } from './polling/response-checker';
 import { resolveAutoAnswerWithPolicy } from './polling/auto-yes-resolver';
 import { getSessionAutoYesPolicy, invalidateSessionAutoYesPolicy } from './polling/auto-yes-policy';
 import { recordPolicySuppression } from './polling/auto-yes-suppression-state';
@@ -22,7 +22,7 @@ import { getDbInstance } from './db/db-instance';
 import { recordAnsweredPrompt, type RecordAnsweredPromptResult } from './db/chat-db';
 import { sendPromptAnswer } from './prompt-answer-sender';
 import { CLIToolManager } from './cli-tools/manager';
-import { stripAnsi, stripBoxDrawing, detectThinking, buildDetectPromptOptions, getCodexLifecycleDialog } from './detection/cli-patterns';
+import { stripAnsi, stripBoxDrawing, detectThinking, getCodexLifecycleDialog } from './detection/cli-patterns';
 import { generatePromptKey } from './detection/prompt-key';
 import { getErrorMessage } from './errors';
 import { invalidateCache } from './tmux/tmux-capture-cache';
@@ -339,12 +339,27 @@ export async function detectAndRespondToPrompt(
 ): Promise<'responded' | 'no_prompt' | 'duplicate' | 'no_answer' | 'error'> {
   const compositeKey = buildCompositeKey(worktreeId, cliToolId, instanceId);
   try {
-    // 1. Detect prompt
-    const promptOptions = buildDetectPromptOptions(cliToolId);
-    const promptDetection = detectPrompt(cleanOutput, {
-      ...promptOptions,
-      ...(precomputedLines && { precomputedLines }),
-    });
+    // 1. Detect prompt.
+    //
+    // Issue #2368: through `detectPromptOnCleanFrame`, the entry the status
+    // path and the response poller already read frames on — NOT the generic
+    // `detectPrompt` this used to call. #2364 gave agy its own dialog reader and
+    // wired it into three of the four consumers of one frame; this poller was
+    // the fourth, and it stayed on the generic multiple-choice parser. That
+    // parser folds a wrapped option label only when the continuation row is
+    // indented, short or path-shaped (#372, for codex prose), and agy prints the
+    // approved command INSIDE the label and wraps it at column 0 — so every
+    // Bash approval read as `isPrompt: false` here and Auto-Yes answered
+    // nothing, while `/current-output` published the same screen as a waiting
+    // four-option prompt. Everything after this point is unchanged: the
+    // duplicate key (#306), codex's launch dialogs (#1829), the dialog gate
+    // (#1928) and the contract policy (#1547) all still run. What changed is
+    // only whether the frame can be READ.
+    //
+    // `cleanOutput` is handed over already stripped, and the clean-frame entry
+    // is the one that does not strip again (`stripBoxDrawing` is not
+    // idempotent), so this poller and the response poller judge identical text.
+    const promptDetection = detectPromptOnCleanFrame(cleanOutput, cliToolId, precomputedLines);
 
     if (!promptDetection.isPrompt || !promptDetection.promptData) {
       pollerState.lastAnsweredPromptKey = null;
@@ -373,7 +388,7 @@ export async function detectAndRespondToPrompt(
     // '2', '1' — each without a trailing Enter), but only during startSession,
     // while this poller runs on its own 2s phase for the life of the session.
     // Whichever sees the dialog first decides, so the fix is to leave them all
-    // to the tool. Auto-answer layer only: detectPrompt above still reports the
+    // to the tool. Auto-answer layer only: the detection above still reports the
     // prompt, so the human keeps seeing the screen and the response poller
     // still notifies them about it.
     const launchDialog =
@@ -397,7 +412,7 @@ export async function detectAndRespondToPrompt(
     }
 
     // 3.5. Issue #1928 (§4 D1 decision 4): the generic numbered-list inference is
-    // not enough to send an answer. `detectPrompt` above judges the ROWS, and the
+    // not enough to send an answer. The detection above judges the ROWS, and the
     // rows of an agent's own reply can be indistinguishable from a dialog's --
     // opencode 1.18 answering "list three options and ask which one" is the
     // reported case (#1896), and the `1` this poller sent in reply was not
@@ -437,8 +452,8 @@ export async function detectAndRespondToPrompt(
     }
 
     // 4. Resolve auto answer under the execution contract's policy (Issue #1547).
-    // Auto-Yes calls detectPrompt directly instead of going through
-    // status-detector, so this is the only place the policy can gate an
+    // Auto-Yes reads the frame itself instead of going through status-detector
+    // (it shares the reader, not the verdict), so this is the only place the policy can gate an
     // auto-answer: a prompt the policy withholds is left for a human, and the
     // response poller's prompt path (WS broadcast + Web Push, see
     // polling/response-checker.ts) is what tells them it is waiting.
