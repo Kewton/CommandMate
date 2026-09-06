@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **feat(mobile,session): スマホにモデル表示を追加し、モデル変更を検知して 3 経路で知らせる** (#2357): スマホの Terminal / Chat タブ最上部に固定 28px のセッション行を置き、`agent · model · effort`（OpenCode はコスト/コンテキストも）を **PC の分割ヘッダと同じ `formatAgentModelLabel` / `formatAgentSessionUsage`** で描く。モデルが未知（gemini / vibe-local / hooks 未接続）なら行ごと出さない。情報源は `/api/worktrees` 一覧の `sessionStatusByInstance`（一覧も詳細も `detectWorktreeSessionStatus` が同じ field を作るので PC と同一）。タップで picker を開く（OpenCode は `ctrl+x m`、それ以外は `/model` 送信）。サーバ側は `agent-event-state` の `observeAgentModel()` が hook / frame のどちらの書き込みでも `getResolvedAgentModelInfo().model` を compositeKey ごとの前回値と比較し、変わった瞬間に `AgentModelChange {from, to, source, at}` を 1 回だけ配る。**変更と見なさない**もの: `null → 値`（初回・再起動直後は開始時モデルとして記録のみ）、`値 → null`（latch が null を書かないので到達しない）、`session_start`（新プロセスの開始時モデルとして baseline を捨てる）、表記ゆれ。表記ゆれ判定 `isSameAgentModelName` は extractor の private `sameModel` とは別のローカル実装で、**同一チャネル内は完全一致**（`gpt-5` と `gpt-5-mini` は別 — これがまさに通知したい降格）、**チャネルをまたぐ時だけ包含一致**（`Gemini 3.7 Flash` ⊂ `gemini-3.7-flash-high`）。受け手は `realtime/model-change-broadcast` が 3 つへ fan-out: (1) `chat_messages` に assistant 行（`request_id` が `model-changed:` 接頭辞。chat と History の両方に出る。`chat_messages` に system role が無いため assistant 行として書き request_id で識別）、(2) `model_changed` room frame でセッション行を 5 分間アンバー＋「変更あり」チップ、(3) Web Push を 1 遷移 1 通（既定 ON。事実のみで上位/下位の判定はしない）。各受け手は個別に try/catch で、DB 不可でも frame と push は出る。**既知の制約**: claude の `/model` 切替は hook が `SessionStart` でしかモデルを載せず extractor も起動バナーしか読まないため、`Set model to …` 行の reader が入るまで観測できない（Copilot の rate limit 降格は `COPILOT_MODEL_CHANGE_PATTERN` があるので観測できる）
+
 ## [0.31.2] - 2026-09-06
 
 > **Highlight**: 「同じ出来事が二度届く」「片方の面だけ答えが違う」を潰した patch リリース。完了通知は module graph をまたぐと 2 通送られることがあり、プロンプトに答えた直後の poller 再開は直前ターンの応答をもう 1 行保存していた。ファイルパスのクリックはチャット面だけが存在確認をしていて、History は読めないタブを開いていた。あわせて files API が不在のテキストファイルに 500 を返していたのを 404 に直した。
