@@ -140,7 +140,9 @@ declare global {
   // eslint-disable-next-line no-var
   var __agentEventLastModel: Map<string, string> | undefined;
   // eslint-disable-next-line no-var
-  var __agentCapturedModelInfo: Map<string, ModelInfo> | undefined;
+  var __agentEventLastModelAt: Map<string, number> | undefined;
+  // eslint-disable-next-line no-var
+  var __agentCapturedModelInfo: Map<string, CapturedModelRecord> | undefined;
   // eslint-disable-next-line no-var
   var __agentEventLastEffort: Map<string, string> | undefined;
   // eslint-disable-next-line no-var
@@ -238,6 +240,35 @@ const lastAgentModel = globalThis.__agentEventLastModel ??
   (globalThis.__agentEventLastModel = new Map<string, string>());
 
 /**
+ * compositeKey -> epoch ms of the report that last wrote {@link lastAgentModel}
+ * (Issue #2361).
+ *
+ * Kept so the frame can be judged NEWER than the hook. Claude names its model
+ * on `SessionStart` and on nothing else — measured again on 2.1.263 for #2361:
+ * `/model` fires none of the events CommandMate registers, and the
+ * `SessionStart` a `/clear` emits carries no `model` key — so after a `/model`
+ * switch the hook latch is a true statement about a process that has since
+ * changed its mind, and the screen is the only channel that heard it. See
+ * {@link resolveAgentModel}.
+ */
+const lastAgentModelAt = globalThis.__agentEventLastModelAt ??
+  (globalThis.__agentEventLastModelAt = new Map<string, number>());
+
+/**
+ * What {@link capturedModelInfo} holds per instance (Issue #2361).
+ *
+ * `ModelInfo` plus when the model half last CHANGED — not when it was last
+ * seen. The poll re-reads a banner that is still on screen every two seconds,
+ * so "last seen" would make every frame newer than every hook; "last changed"
+ * moves only when the pane starts saying something different, which is the
+ * one event that can mean a switch.
+ */
+interface CapturedModelRecord extends ModelInfo {
+  /** Epoch ms the `model` half last took a different value, or null while it has none. */
+  modelChangedAt: number | null;
+}
+
+/**
  * compositeKey -> what the terminal frame last showed for this instance (#1784).
  *
  * The second source, and a strictly different kind of fact from
@@ -256,7 +287,7 @@ const lastAgentModel = globalThis.__agentEventLastModel ??
  * {@link beginAgentEventGeneration} / {@link discardAgentEventState}).
  */
 const capturedModelInfo = globalThis.__agentCapturedModelInfo ??
-  (globalThis.__agentCapturedModelInfo = new Map<string, ModelInfo>());
+  (globalThis.__agentCapturedModelInfo = new Map<string, CapturedModelRecord>());
 
 /**
  * compositeKey -> the effort the *agent itself* last reported (Issue #2048).
@@ -495,13 +526,12 @@ function observeAgentModel(
   at: number
 ): void {
   const key = buildCompositeKey(worktreeId, cliToolId, instanceId);
-  const hooksModel = lastAgentModel.get(key) ?? null;
-  const resolved = getResolvedAgentModelInfo(worktreeId, cliToolId, instanceId).model;
-  if (resolved === null) return;
-  // Where the merged value came from — `mergeModelInfo` prefers the hook, so a
-  // resolved value equal to the hook latch is the hook's regardless of which
-  // channel just wrote.
-  const resolvedSource: AgentModelSource = hooksModel !== null ? 'hook' : 'frame';
+  // Where the merged value came from is decided in one place
+  // (`resolveAgentModel`, Issue #2361): the hook's, unless the frame overtook
+  // it — and that is independent of which channel just wrote.
+  const { info, source: resolvedSource } = resolveAgentModel(key, cliToolId);
+  const resolved = info.model;
+  if (resolved === null || resolvedSource === null) return;
 
   const previous = modelBaseline.get(key);
   const next: AgentModelBaseline = { model: resolved, source: resolvedSource };
@@ -1166,6 +1196,10 @@ function fenceTurnForNewGeneration(key: string, at: number): void {
 function latchAgentModel(key: string, record: AgentEventRecord): void {
   if (typeof record.model === 'string' && record.model !== '') {
     lastAgentModel.set(key, record.model.slice(0, MAX_EVENT_DETAIL_LENGTH));
+    // Issue #2361: stamped on every model-bearing report, not only on a change
+    // of value — a hook that names the same model again is the agent
+    // re-affirming it, and a frame has to be newer than THAT to overtake.
+    lastAgentModelAt.set(key, record.at);
   }
 }
 
@@ -1794,9 +1828,19 @@ export function recordCapturedModelInfo(
   if (!info.model && !info.effort) return;
   const key = buildCompositeKey(worktreeId, cliToolId, instanceId);
   const previous = capturedModelInfo.get(key);
+  const model = info.model ? info.model.slice(0, MAX_EVENT_DETAIL_LENGTH) : (previous?.model ?? null);
   capturedModelInfo.set(key, {
-    model: info.model ? info.model.slice(0, MAX_EVENT_DETAIL_LENGTH) : (previous?.model ?? null),
+    model,
     effort: info.effort ?? previous?.effort ?? null,
+    // Issue #2361: the change stamp moves only when the model half takes a
+    // different value. A banner re-read on every poll keeps the stamp where the
+    // first sighting put it, so it never out-dates a hook by mere repetition.
+    modelChangedAt:
+      model === null
+        ? null
+        : model === (previous?.model ?? null)
+          ? (previous?.modelChangedAt ?? at)
+          : at,
   });
   // Issue #2357: an effort-only frame leaves the model half where it was, so
   // there is nothing to judge; a frame that named a model is the screen's
@@ -1828,7 +1872,10 @@ export function getLastCapturedModelInfo(
  * (#1783) together with the screen under the precedence documented on
  * {@link mergeModelInfo} — hooks win for the model, the screen is the only
  * source of effort for codex/claude, and antigravity's effort is derived from
- * the id it reports rather than from its (renderer-truncated) status bar.
+ * the id it reports rather than from its (renderer-truncated) status bar —
+ * with the one exception {@link resolveAgentModel} documents (Issue #2361): a
+ * claude frame that started naming a different model after the hook last
+ * spoke is the newer statement, and wins.
  *
  * Both halves may be null, and routinely are: no tool publishes an effort over
  * hooks, and most tools publish neither. Callers omit the key rather than
@@ -1839,15 +1886,76 @@ export function getResolvedAgentModelInfo(
   cliToolId: CLIToolType,
   instanceId?: string
 ): ModelInfo {
-  return mergeModelInfo(
-    cliToolId,
-    getLastKnownAgentModel(worktreeId, cliToolId, instanceId),
-    getLastCapturedModelInfo(worktreeId, cliToolId, instanceId),
-    // Issue #2048: the third source. Null for every tool but opencode and for
-    // every opencode session running on a model's default, so every other
-    // surface's string is byte-identical to pre-#2048.
-    getLastReportedAgentEffort(worktreeId, cliToolId, instanceId)
-  );
+  return resolveAgentModel(buildCompositeKey(worktreeId, cliToolId, instanceId), cliToolId).info;
+}
+
+/**
+ * Tools whose hook channel names the model at session start and never again
+ * (Issue #2361).
+ *
+ * For these, a frame that starts naming a DIFFERENT model after the hook last
+ * spoke is the only report of a mid-session switch there will ever be, and it
+ * overtakes the hook in {@link resolveAgentModel}. For every other tool the
+ * rule stays #1784's — hooks win — because their hook channel re-reports the
+ * model on later events (codex and antigravity on every one, opencode on every
+ * `message.updated`), so a switch reaches the hook latch by itself and a frame
+ * that disagrees with a hook that is still re-affirming its value is a
+ * misread, not news.
+ *
+ * Measured on claude 2.1.263: `SessionStart` alone carries `model`; `/model`,
+ * `/fast` and `/effort` fire none of the registered events; the `SessionStart`
+ * that `/clear` emits carries no `model`. (The same build does emit
+ * `PreModelSwitch` / `PostModelSwitch` with `from_model` / `to_model`, which
+ * CommandMate does not register — wiring those is a separate Issue and would
+ * simply make the hook re-affirm, which this rule already defers to.)
+ */
+const FRAME_OVERTAKES_HOOK_MODEL_TOOLS: ReadonlySet<CLIToolType> = new Set<CLIToolType>(['claude']);
+
+/**
+ * The merged model/effort for one instance, and which channel the model half
+ * came from (Issue #2361).
+ *
+ * {@link mergeModelInfo}'s precedence — hooks win the model — with one
+ * exception layered on top for {@link FRAME_OVERTAKES_HOOK_MODEL_TOOLS}: when
+ * the frame's model half CHANGED after the hook last named a model
+ * ({@link CapturedModelRecord.modelChangedAt} > {@link lastAgentModelAt}) and
+ * the two do not name the same model ({@link isSameAgentModelName}, cross
+ * channel), the frame's value is the newer statement and is published in the
+ * hook's place. Every other case is unchanged:
+ *
+ *  - the frame names the same model as the hook (the startup banner after
+ *    `SessionStart`, or `/model` back to the model the hook named): the hook's
+ *    exact id is published, as before;
+ *  - the frame's value predates the hook (a switch line still on screen when a
+ *    relaunched process reports its starting model): the hook wins;
+ *  - no hook has spoken: the frame is the only source, as before.
+ *
+ * `source` is null when neither channel has a model.
+ */
+function resolveAgentModel(
+  key: string,
+  cliToolId: CLIToolType
+): { info: ModelInfo; source: AgentModelSource | null } {
+  const hooksModel = lastAgentModel.get(key) ?? null;
+  const captured = capturedModelInfo.get(key);
+  const capturedInfo: ModelInfo = { model: captured?.model ?? null, effort: captured?.effort ?? null };
+  // Issue #2048: the third source. Null for every tool but opencode and for
+  // every opencode session running on a model's default, so every other
+  // surface's string is byte-identical to pre-#2048.
+  const hooksEffort = reportedEffort.get(key) ?? null;
+
+  const frameChangedAt = captured?.modelChangedAt ?? null;
+  const frameOvertakes =
+    hooksModel !== null &&
+    capturedInfo.model !== null &&
+    frameChangedAt !== null &&
+    FRAME_OVERTAKES_HOOK_MODEL_TOOLS.has(cliToolId) &&
+    frameChangedAt > (lastAgentModelAt.get(key) ?? 0) &&
+    !isSameAgentModelName(hooksModel, capturedInfo.model, { crossSource: true });
+
+  const info = mergeModelInfo(cliToolId, frameOvertakes ? null : hooksModel, capturedInfo, hooksEffort);
+  if (info.model === null) return { info, source: null };
+  return { info, source: hooksModel !== null && !frameOvertakes ? 'hook' : 'frame' };
 }
 
 /**
@@ -1974,6 +2082,7 @@ export function beginAgentEventGeneration(
   // A `/clear` is deliberately not affected: it reaches `recordAgentEvent` as
   // `session_end` + `session_start`, never this function.
   lastAgentModel.delete(key);
+  lastAgentModelAt.delete(key);
   // Issue #1784: same argument for what the screen showed. The latch exists to
   // survive the banner scrolling away *within* one process; carrying it across
   // a relaunch would show the old process's effort with no frame left that
@@ -2030,6 +2139,7 @@ export function discardAgentEventState(
   awaitingInstruction.delete(key);
   // Issue #1783: the session that was on this model no longer exists.
   lastAgentModel.delete(key);
+  lastAgentModelAt.delete(key);
   // Issue #1784: nor does the pane its footer was read from.
   capturedModelInfo.delete(key);
   // Issue #2048: nor the variant that session was running at.
@@ -2788,6 +2898,7 @@ export function clearAgentStopEvents(): void {
   // repo shares this process — a model latched by one test would otherwise be
   // read by another, in file order, and only in CI.
   lastAgentModel.clear();
+  lastAgentModelAt.clear();
   // Issue #1784: and the same for the scraped half.
   capturedModelInfo.clear();
   // Issue #2048: and for the variant the agent reported.
