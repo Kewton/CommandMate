@@ -203,7 +203,7 @@ describe('[#2345] a Markdown link in a chat reply', () => {
       ),
     );
     await waitFor(() =>
-      expect(showToast).toHaveBeenCalledWith('worktree.chatTranscript.filePathMissing', 'error'),
+      expect(showToast).toHaveBeenCalledWith('worktree.conversation.filePathMissing', 'error'),
     );
     expect(onFilePathClick).not.toHaveBeenCalled();
   });
@@ -273,21 +273,23 @@ describe('[#2345] the same link in History', () => {
     );
   }
 
-  it('opens an in-worktree destination in the file panel, as a relative path', () => {
+  // Since #2352 History asks the file API first, exactly as chat does, so the
+  // open lands after the probe resolves — hence `waitFor` on this side too.
+  it('opens an in-worktree destination in the file panel, as a relative path', async () => {
     const onFilePathClick = vi.fn();
     renderPane({ onFilePathClick });
 
     const anchor = link('整理文書');
     expect(clickAllowsNavigation(anchor)).toBe(false);
-    expect(onFilePathClick).toHaveBeenCalledWith(DOC_REL);
+    await waitFor(() => expect(onFilePathClick).toHaveBeenCalledWith(DOC_REL));
   });
 
-  it('opens the bare path in the same body as the same relative path', () => {
+  it('opens the bare path in the same body as the same relative path', async () => {
     const onFilePathClick = vi.fn();
     renderPane({ onFilePathClick });
 
     fireEvent.click(screen.getByRole('button', { name: 'worktree.conversation.openFile' }));
-    expect(onFilePathClick).toHaveBeenCalledWith(DOC_REL);
+    await waitFor(() => expect(onFilePathClick).toHaveBeenCalledWith(DOC_REL));
   });
 
   it('leaves an external URL to a new tab', () => {
@@ -297,12 +299,14 @@ describe('[#2345] the same link in History', () => {
     expect(anchor).toHaveAttribute('rel', 'noopener noreferrer');
   });
 
-  it('reports a path outside this worktree unchanged', () => {
+  it('reports a path outside this worktree unchanged', async () => {
+    // Normalization leaves a foreign absolute path as itself; whether it then
+    // opens is the probe's call (#2352), and the default stub above says yes.
     const onFilePathClick = vi.fn();
     renderPane({ onFilePathClick });
 
     clickAllowsNavigation(link('別リポジトリのログ'));
-    expect(onFilePathClick).toHaveBeenCalledWith(OUTSIDE_ABS);
+    await waitFor(() => expect(onFilePathClick).toHaveBeenCalledWith(OUTSIDE_ABS));
   });
 
   it('renders the card`s own links the same way with no worktree root', () => {
@@ -347,7 +351,7 @@ describe('[#2345] the screen’s scope is the fallback for a mount with no prop'
     await waitFor(() => expect(onFilePathClick).toHaveBeenCalledWith(DOC_REL));
   });
 
-  it('HistoryPane normalizes against the provider’s root', () => {
+  it('HistoryPane normalizes against the provider’s root', async () => {
     const onFilePathClick = vi.fn();
     render(
       <ChatFileLinkProvider value={{ worktreePath: WORKTREE_PATH }}>
@@ -360,7 +364,7 @@ describe('[#2345] the screen’s scope is the fallback for a mount with no prop'
     );
 
     clickAllowsNavigation(link('整理文書'));
-    expect(onFilePathClick).toHaveBeenCalledWith(DOC_REL);
+    await waitFor(() => expect(onFilePathClick).toHaveBeenCalledWith(DOC_REL));
   });
 
   it('lets an explicit prop win over the provider', async () => {
