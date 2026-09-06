@@ -182,7 +182,7 @@ describe('HistoryPane', () => {
       expect(fileLink).toBeInTheDocument();
     });
 
-    it('should call onFilePathClick when file path is clicked', () => {
+    it('should call onFilePathClick when file path is clicked', async () => {
       const messages: ChatMessage[] = [
         createTestMessage({ content: 'Check this file: /path/to/file.ts' }),
       ];
@@ -198,7 +198,11 @@ describe('HistoryPane', () => {
       const fileLink = screen.getByRole('button', { name: /\/path\/to\/file\.ts/i });
       fireEvent.click(fileLink);
 
-      expect(mockOnFilePathClick).toHaveBeenCalledWith('/path/to/file.ts');
+      // [Issue #2352] The pane asks the file API whether the path exists before
+      // opening it (as the chat surface has since #2274), so the open lands
+      // after that probe settles. No fetch is stubbed here, so the probe cannot
+      // reach a server and answers "unknown" — which opens, as before.
+      await waitFor(() => expect(mockOnFilePathClick).toHaveBeenCalledWith('/path/to/file.ts'));
     });
 
     it('should handle multiple file paths in content', () => {
