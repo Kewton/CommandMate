@@ -24,6 +24,7 @@ import { HistorySearchBar } from './HistorySearchBar';
 import { HISTORY_PANE_ID } from './TerminalContainer';
 import { copyToClipboard } from '@/lib/clipboard-utils';
 import { normalizeChatFilePath } from '@/lib/chat/chat-file-path';
+import { probeChatFilePath } from '@/lib/chat/chat-file-probe';
 import { useChatFileLinkScope } from '@/lib/chat/chat-file-link-scope';
 import {
   applyHistoryHighlights,
@@ -534,32 +535,47 @@ export const HistoryPane = memo(function HistoryPane({
     [className]
   );
 
+  // `t` churns identity every render (Issue #1219 / #1032), and handleCopy /
+  // handleFilePathClick are handed to the memoized ConversationPairCard for
+  // every virtualized row — keying on `t` would re-render the whole list on each
+  // parent render. Read the translator through a ref so the callbacks stay
+  // stable but the toast text is still resolved fresh at click time (locale
+  // switches included).
+  const tRef = useRef(t);
+  tRef.current = t;
+
   // [#2345] The same single normalization the chat surface applies, for the same
   // reason: History's bare-path buttons could not open a worktree-internal
   // absolute path either (`files//Users/…` 308s into a relative read and 404s),
   // and its Markdown links now land here too. `null` means the href named no
   // file — an anchor, an external URL, or the worktree root — so nothing opens.
+  //
+  // [#2352] …and the same probe, for the same reason again. #2274 taught the
+  // chat surface to ask `HEAD /files/<path>` before opening, so a path the
+  // worktree does not have ends in a toast there; this column kept opening a
+  // dead tab for the very same body. Only a definite "no" (404 / 400 / 403)
+  // stops the open — a probe that could not be made is not evidence of absence,
+  // so the panel opens and reports its own error (see `lib/chat/chat-file-probe`).
   const handleFilePathClick = useCallback(
     (path: string) => {
       const target = normalizeChatFilePath(path, resolvedWorktreePath);
       if (target === null) return;
-      onFilePathClick(target);
+      void (async () => {
+        const probe = await probeChatFilePath(worktreeId, target);
+        if (probe === 'missing') {
+          showToast?.(tRef.current('conversation.filePathMissing'), 'error');
+          return;
+        }
+        onFilePathClick(target);
+      })();
     },
-    [onFilePathClick, resolvedWorktreePath]
+    [onFilePathClick, worktreeId, resolvedWorktreePath, showToast]
   );
 
   const createToggleHandler = useCallback(
     (pairId: string) => () => toggleExpand(pairId),
     [toggleExpand]
   );
-
-  // `t` churns identity every render (Issue #1219 / #1032), and handleCopy is
-  // handed to the memoized ConversationPairCard for every virtualized row —
-  // keying on `t` would re-render the whole list on each parent render. Read the
-  // translator through a ref so the callback stays stable but the toast text is
-  // still resolved fresh at click time (locale switches included).
-  const tRef = useRef(t);
-  tRef.current = t;
 
   const handleCopy = useCallback(
     async (content: string) => {

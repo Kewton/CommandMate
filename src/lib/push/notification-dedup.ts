@@ -29,7 +29,22 @@ export interface DedupEvent {
 /** Default suppression window: repeats of identical content within this are dropped. */
 export const DEFAULT_DEDUP_WINDOW_MS = 30_000;
 
-const lastSent = new Map<string, { hash: string; at: number }>();
+/**
+ * On `globalThis` for the same reason `__waitingPushDedup` below is (Issue
+ * #2228): the custom server graph (`dist/server/…`) and the Next route graph
+ * (`.next/server/chunks/…`) each evaluate this module once, even under
+ * `next start` (#2220). A module-scoped map would give each graph its own
+ * dedup memory, so a completion first notified from one graph could be sent a
+ * second time when poller ownership moves to the other (#2223 left that seam).
+ * Sharing the map is the whole change — key, hash and window are untouched.
+ */
+declare global {
+  // eslint-disable-next-line no-var
+  var __notificationDedupLastSent: Map<string, { hash: string; at: number }> | undefined;
+}
+
+const lastSent = globalThis.__notificationDedupLastSent ??
+  (globalThis.__notificationDedupLastSent = new Map<string, { hash: string; at: number }>());
 
 function contentHash(content: string): string {
   return createHash('sha256').update(content).digest('hex');

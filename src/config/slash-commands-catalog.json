@@ -2624,7 +2624,7 @@
     },
     {
       "name": "design",
-      "descriptionKey": "slashCommands.descriptions.design",
+      "descriptionKey": "slashCommands.descriptions.design.command-code",
       "category": "standard-util",
       "cliTools": [
         "command-code"
@@ -3068,6 +3068,26 @@
       "category": "standard-git",
       "cliTools": [
         "command-code"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "design",
+      "descriptionKey": "slashCommands.descriptions.design.claude",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "skill-doctor",
+      "descriptionKey": "slashCommands.descriptions.skill-doctor",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
       ],
       "isStandard": true,
       "source": "standard"

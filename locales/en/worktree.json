@@ -64,7 +64,8 @@
     "systemMessage": "System Message",
     "systemMessageLabel": "System message",
     "openFile": "Open file: {path}",
-    "conversationLabel": "Conversation: {preview}"
+    "conversationLabel": "Conversation: {preview}",
+    "filePathMissing": "That path is not in this worktree"
   },
   "slashCommands": {
     "title": "Commands",
@@ -314,7 +315,10 @@
       "workflow-authoring": "Load the reference for writing dynamic workflow scripts: the script API, resume behavior, quality patterns, and worked examples",
       "clone": "Clone the current branch into a new session and switch to it",
       "compact-mode": "Select the compaction mode used when compacting a session",
-      "design": "Design partner for auditing, building, composing, and shipping UI",
+      "design": {
+        "command-code": "Design partner for auditing, building, composing, and shipping UI",
+        "claude": "Draft UI mockups, screen flows, landing pages, or posters as artboards on one canvas, published as a Claude Design artifact"
+      },
       "extra": "Open the billing page to buy on-demand credits",
       "hotkeys": "Show all keyboard shortcuts",
       "learn": "Open the learn hub in your browser",
@@ -330,7 +334,8 @@
       "trace": "Copy the current trace id for support debugging",
       "tree": "Browse the session tree and jump to any point in it",
       "unshare": "Stop sharing the conversation",
-      "worktree": "Create, list, or switch git worktrees"
+      "worktree": "Create, list, or switch git worktrees",
+      "skill-doctor": "Show what each of your skills costs in context and how often it gets used, so you can find skills to turn off"
     }
   },
   "session": {
@@ -472,7 +477,6 @@
     "empty": "No messages yet",
     "emptyHint": "Sending a message starts the session",
     "openSearch": "Search this conversation",
-    "filePathMissing": "That path is not in this worktree",
     "thinking": {
       "summary": "Thinking · {count}",
       "expand": "Show the reasoning",

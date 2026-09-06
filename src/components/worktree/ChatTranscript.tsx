@@ -137,8 +137,8 @@ import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { ShowToast } from '@/types/markdown-editor';
 import { useHistorySearch } from '@/hooks/useHistorySearch';
 import { copyToClipboard } from '@/lib/clipboard-utils';
-import { encodePathForUrl } from '@/lib/url-path-encoder';
 import { normalizeChatFilePath } from '@/lib/chat/chat-file-path';
+import { probeChatFilePath } from '@/lib/chat/chat-file-probe';
 import { useChatFileLinkScope } from '@/lib/chat/chat-file-link-scope';
 import { applyHistoryHighlights, clearHistoryHighlights } from '@/lib/terminal-highlight';
 import { isNearBottom } from '@/lib/history-virtualization';
@@ -183,55 +183,6 @@ import { HistorySearchBar } from './HistorySearchBar';
  * pinned by a seam test rather than written twice.
  */
 export const CHAT_TRANSCRIPT_SCROLL_CONTAINER_TESTID = 'chat-transcript-scroll-container';
-
-/**
- * What asking the server about a path in a message body established.
- *
- * `'unknown'` is a third state on purpose. A probe that could not be performed
- * is not evidence the file is absent, and Issue #2274's toast SAYS the file is
- * absent — so only a definite answer from the server is allowed to produce it.
- */
-type ChatFilePathProbe = 'present' | 'missing' | 'unknown';
-
-/**
- * Ask whether `filePath` is a file this worktree actually has (Issue #2274).
- *
- * ## Why the URL is built exactly the way the file panel builds it
- *
- * `FilePanelContent`, `FileViewer` and `useFileContentPolling` all request
- * `/api/worktrees/<id>/files/<encodePathForUrl(path)>`, and so does this. That
- * is the one property that makes the probe worth having: it has to be as
- * capable as the OPEN it is gating, or it becomes a second, differently-wrong
- * opinion about which paths work. An absolute path inside the worktree is
- * encoded here the same way the panel encodes it, so whatever the routing layer
- * makes of it, the probe and the panel agree.
- *
- * ## Which statuses mean "no"
- *
- * 404 (nothing there, or a directory), 400 (outside the worktree — the shape of
- * this Issue's defect, a path belonging to a different repository) and 403
- * ([Issue #2014] a deny-tier path, which the panel could not show either).
- * Everything else — 5xx, an aborted request, an offline browser — is
- * `'unknown'`, and the caller opens the panel and lets it report its own error.
- */
-async function probeChatFilePath(
-  worktreeId: string,
-  filePath: string,
-): Promise<ChatFilePathProbe> {
-  try {
-    const response = await fetch(
-      `/api/worktrees/${encodeURIComponent(worktreeId)}/files/${encodePathForUrl(filePath)}`,
-      { method: 'HEAD', cache: 'no-store' },
-    );
-    if (response.ok) return 'present';
-    if (response.status === 404 || response.status === 400 || response.status === 403) {
-      return 'missing';
-    }
-    return 'unknown';
-  } catch {
-    return 'unknown';
-  }
-}
 
 /**
  * The scroll-to-either-end FAB's testid (Issue #2283).
@@ -979,7 +930,7 @@ export const ChatTranscript = memo(function ChatTranscript({
       void (async () => {
         const probe = await probeChatFilePath(worktreeId, target);
         if (probe === 'missing') {
-          showToast?.(tRef.current('chatTranscript.filePathMissing'), 'error');
+          showToast?.(tRef.current('conversation.filePathMissing'), 'error');
           return;
         }
         open(target);
