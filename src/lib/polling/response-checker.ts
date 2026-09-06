@@ -13,6 +13,7 @@ import {
 import { broadcastMessage } from '@/lib/ws-server';
 import type { ChatMessage } from '@/types/models';
 import { detectPrompt } from '@/lib/detection/prompt-detector';
+import { detectAntigravityNumberedDialogPrompt } from '@/lib/detection/tools/antigravity/dialog';
 import type { PromptDetectionResult } from '@/lib/detection/prompt-detector';
 import { recordClaudeConversation } from '@/lib/conversation-logger';
 import { usesAlternateScreen, type CLIToolType } from '@/lib/cli-tools/types';
@@ -275,8 +276,22 @@ export function detectPromptWithOptions(
   output: string,
   cliToolId: CLIToolType
 ): PromptDetectionResult {
+  const clean = stripBoxDrawing(stripAnsi(output));
+  // Issue #2364: agy's `↑/↓ Navigate` dialogs are read by agy's own reader
+  // before the generic pass, on the same spelling `tools/antigravity/detect.ts`
+  // reads them on. The generic multiple-choice parser takes one row per option
+  // and agy wraps a long command across several rows of one label, so without
+  // this the poller stored nothing for the frame the status API published as a
+  // prompt — and, on the file-creation menu, stored a question with the diff
+  // preview joined into it. One reader for both producers is what makes the
+  // stored `prompt` row, the push notification's excerpt and `/current-output`
+  // agree about one screen.
+  if (cliToolId === 'antigravity') {
+    const dialog = detectAntigravityNumberedDialogPrompt(clean);
+    if (dialog !== null) return dialog;
+  }
   const promptOptions = buildDetectPromptOptions(cliToolId);
-  return detectPrompt(stripBoxDrawing(stripAnsi(output)), promptOptions);
+  return detectPrompt(clean, promptOptions);
 }
 
 // ============================================================================
