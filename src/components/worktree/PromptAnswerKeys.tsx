@@ -50,6 +50,14 @@
  *    screen `Enter` rewrites the user's global default (Issue #1495) — a
  *    distinction no unlabelled key cap can carry.
  *
+ * ## And the one-key toolbar it owns too (Issue #2369)
+ *
+ * {@link DismissPanelKeys} is the opposite extreme: a panel whose footer offers
+ * `Esc to close` and nothing else gets exactly that button. It is here for the
+ * same reason the other two are — same sender, same highlight, same tap target —
+ * and it is the control that replaces THIS toolbar on such a screen, not one
+ * drawn beside it.
+ *
  * They live here rather than in files of their own because they are the same
  * control: a `useSpecialKeys` sender, a `useKeyPressFeedback` highlight, a 44px
  * tap target, no free text.
@@ -119,6 +127,14 @@ const VERDICT_KEYS: ReadonlyArray<AnswerKeyDef> = [
 ];
 
 /* eslint-enable no-restricted-syntax */
+
+/**
+ * The key a dismiss-only panel accepts (Issue #2369).
+ *
+ * A constant rather than a literal at the call site so the unit suite can assert
+ * the wire value against the same symbol {@link DismissPanelKeys} sends.
+ */
+export const DISMISS_KEY: NavigationKey = 'Escape';
 
 /** Every key this toolbar can send, in render order. Exported for the unit suite. */
 export const PROMPT_ANSWER_KEYS: ReadonlyArray<NavigationKey> = [
@@ -370,6 +386,72 @@ export function SelectionCommitKeys({
           {t('selectionKeys.defaultWarning')}
         </p>
       ) : null}
+    </div>
+  );
+}
+
+// ===========================================================================
+// Issue #2369: the ONE key a dismiss-only panel accepts
+// ===========================================================================
+
+/**
+ * A single `Esc`, for an overlay whose footer offers nothing else.
+ *
+ * Command Code's `/usage` is the measured case: a plan header, two meters and a
+ * breakdown URL over `Press Esc to close`. Nothing on it moves, nothing commits,
+ * and before Issue #2369 the chat surface answered it with eighteen buttons —
+ * `TerminalEscapeHatch`'s ◀▲▼▶ ↵ Esc plus {@link PromptAnswerKeys}' `1`–`9` `y`
+ * `n` ↵ — of which exactly one did anything. The other seventeen were not merely
+ * noise: on an inline tool a stray `y` or `4` is a character waiting to be typed
+ * into whatever has focus when the panel goes away.
+ *
+ * So this is the whole control, and it is deliberately NOT
+ * `TerminalEscapeHatch` with its arrows hidden: the hatch is the pad for a frame
+ * NOBODY could read, and its amber styling says so. This one is drawn for a
+ * frame that WAS read, whose footer named its own exit, and it carries that
+ * exit's own words — the button is labelled from the panel's promise, not from
+ * a guess.
+ *
+ * The key travels the same `/special-keys` route and the same
+ * {@link useSpecialKeys} sender as every other strip in this file; `Escape` is
+ * in the shared `NavigationKey` vocabulary, so no tool declares it specially.
+ */
+export function DismissPanelKeys({
+  worktreeId,
+  cliToolId,
+  instanceId,
+  onKeysSent,
+}: SelectionKeysProps) {
+  const t = useTranslations('worktree');
+  const { activeKey, markPressed } = useKeyPressFeedback();
+  const send = useSpecialKeys(worktreeId, cliToolId, instanceId, onKeysSent);
+
+  const handleClick = useCallback(() => {
+    markPressed(DISMISS_KEY);
+    send([DISMISS_KEY]);
+  }, [markPressed, send]);
+
+  return (
+    <div
+      data-testid="dismiss-panel-keys"
+      role="toolbar"
+      aria-label={t('dismissPanelKeys.toolbarLabel')}
+      className="flex flex-wrap items-center gap-1.5 rounded-lg bg-muted px-2 py-1.5"
+    >
+      <button
+        type="button"
+        data-testid="dismiss-panel-key-Escape"
+        aria-label={t('dismissPanelKeys.closeAria')}
+        title={t('dismissPanelKeys.closeAria')}
+        onClick={handleClick}
+        className={`min-h-[44px] rounded-md border px-3 py-2 text-sm font-medium transition-colors duration-75 touch-manipulation focus:outline-none focus:ring-2 focus:ring-ring ${
+          activeKey === DISMISS_KEY
+            ? 'border-accent-500 bg-accent-500 text-white scale-95'
+            : 'border-accent-500 bg-surface text-accent-600 hover:bg-muted active:bg-muted dark:bg-surface-2 dark:text-accent-400'
+        }`}
+      >
+        {t('dismissPanelKeys.close')}
+      </button>
     </div>
   );
 }

@@ -10,6 +10,7 @@ import {
   TERMINAL_TRUNCATION_MARKER,
   TERMINAL_TRUNCATION_LINE_SCAN_LIMIT,
 } from '@/config/terminal-output-config';
+import { stripOsc } from '@/lib/detection/ansi';
 
 const ansiConverter = new AnsiToHtml({
   fg: '#d1d5db',  // gray-300
@@ -111,8 +112,27 @@ export function sanitizeTerminalOutput(output: string): string {
   // Step 0: Input validation. Oversized input keeps its tail (Issue #1674).
   const validated = truncateTerminalOutput(output.replace(/\0/g, ''));
 
+  // Step 0.5: Drop OSC sequences (Issue #2369).
+  //
+  // `ansi-to-html` understands SGR and nothing else, so an OSC 8 hyperlink
+  // reaches the DOM as the literal text of its own escape: Command Code's
+  // `/usage` panel rendered
+  // `]8;;https://commandcode.ai/Kewton/settings/usage\commandcode.ai/…` where a
+  // terminal shows just the label. `stripOsc` removes both halves of the pair
+  // and keeps the label, which is exactly what the pane displays.
+  //
+  // Deliberately not `stripAnsi`: this function's whole purpose is to turn the
+  // SGR runs into coloured spans, and stripping them here would render the
+  // terminal in one flat colour. Same pattern source as `stripAnsi` all the
+  // same — see `lib/detection/ansi.ts` — so the two cannot disagree about what
+  // an OSC sequence is.
+  //
+  // After truncation, so the tail-alignment arithmetic still measures the bytes
+  // the cap is expressed in.
+  const withoutOsc = stripOsc(validated);
+
   // Step 1: Convert ANSI codes to HTML (escapeXML: true provides basic escaping)
-  const html = ansiConverter.toHtml(validated);
+  const html = ansiConverter.toHtml(withoutOsc);
 
   // Step 2: Additional sanitization with DOMPurify
   // Only allow span tags and style attributes (for ANSI colors)

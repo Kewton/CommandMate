@@ -459,6 +459,7 @@
     "bannerLabel": "ここで操作できます",
     "reasonPager": "ページャ表示中です。下の画面を見ながら、ここでスクロールと終了ができます。",
     "reasonSelectionList": "選択リストが開いています。下の画面を見ながら、ここで項目の移動と決定ができます。",
+    "reasonDismissablePanel": "閉じるだけの画面です。下の画面を見ながら、ここで Esc を押せます。",
     "reasonUnclassified": "チャットでは種類を判別できない画面です。下にそのまま表示しているので、ここでキーを送って操作できます。",
     "reasonPromptUnreadable": "応答待ちですが選択肢を読み取れませんでした。下の画面を見て、番号か y／n で答えられます。",
     "openTerminal": "ターミナルで確認",
@@ -918,6 +919,11 @@
   "promptAnswerKeys": {
     "toolbarLabel": "ダイアログへの回答キー",
     "caption": "回答"
+  },
+  "dismissPanelKeys": {
+    "toolbarLabel": "この画面を閉じる",
+    "close": "閉じる (Esc)",
+    "closeAria": "この画面を閉じる (Esc)"
   },
   "selectionKeys": {
     "numbersToolbarLabel": "選択肢の番号キー",

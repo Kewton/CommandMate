@@ -87,6 +87,10 @@ function snapshotFingerprint(payload: Awaited<ReturnType<typeof buildCurrentOutp
     payload.isPromptWaiting ?? false,
     payload.isSelectionListActive ?? false,
     payload.isPagerActive ?? false,
+    // Issue #2369: in the fingerprint for the same reason `sessionStatus` is —
+    // a redraw whose only change is "the /usage panel closed" has to reach the
+    // client, or the Esc card outlives the panel it dismisses.
+    payload.isDismissablePanelActive ?? false,
     payload.isUnclassifiedActive ?? false,
   ]);
 }
@@ -127,6 +131,7 @@ function emitTerminalSnapshot(
     promptData: payload.promptData ?? null,
     isSelectionListActive: payload.isSelectionListActive ?? false,
     isPagerActive: payload.isPagerActive ?? false,
+    isDismissablePanelActive: payload.isDismissablePanelActive ?? false,
     isUnclassifiedActive: payload.isUnclassifiedActive ?? false,
     version: nextVersion(key),
   });

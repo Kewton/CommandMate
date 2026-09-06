@@ -150,6 +150,21 @@ export interface TerminalSnapshotEvent {
   promptData?: LivePromptData | null;
   isSelectionListActive: boolean;
   isPagerActive: boolean;
+  /**
+   * Issue #2369: a dismiss-only overlay (`Esc to close` and nothing else).
+   *
+   * OPTIONAL, unlike its two neighbours and unlike `sessionStatus` above, and
+   * for the same reason it is optional on `CurrentOutputPayload`: it is a field
+   * a server older than #2369 does not send, and `undefined` there means "this
+   * daemon predates the field" rather than "no panel is open". `applySnapshot`
+   * reads it as `false` when absent, so a client talking to such a server
+   * behaves exactly as it did before — it just never gets the Esc card.
+   *
+   * `emitTerminalSnapshot` publishes it unconditionally (`?? false`), so within
+   * a build the value is always on the wire; what the optionality buys is that a
+   * frame constructed by an older peer still typechecks as this event.
+   */
+  isDismissablePanelActive?: boolean;
   isUnclassifiedActive: boolean;
   version: number;
 }

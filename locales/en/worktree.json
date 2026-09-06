@@ -459,6 +459,7 @@
     "bannerLabel": "You can act on this here",
     "reasonPager": "A pager is open. Scroll it and quit it from here, with the screen below in view.",
     "reasonSelectionList": "A selection list is open. Move and confirm from here, with the screen below in view.",
+    "reasonDismissablePanel": "This screen only closes. Press Esc here, with it in view below.",
     "reasonUnclassified": "Chat can't tell what this screen is. It is shown as-is below, so you can drive it with the keys here.",
     "reasonPromptUnreadable": "Waiting for an answer, and the options couldn't be read. Read the screen below and answer with a number or y/n.",
     "openTerminal": "Open terminal",
@@ -918,6 +919,11 @@
   "promptAnswerKeys": {
     "toolbarLabel": "Dialog answer keys",
     "caption": "Answer"
+  },
+  "dismissPanelKeys": {
+    "toolbarLabel": "Close this screen",
+    "close": "Close (Esc)",
+    "closeAria": "Close this screen (Esc)"
   },
   "selectionKeys": {
     "numbersToolbarLabel": "Option number keys",

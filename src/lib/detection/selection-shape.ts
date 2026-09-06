@@ -156,6 +156,77 @@ export const COMMAND_CODE_SELECTION_LIST_FOOTER =
   /\benter\s+to\s+select\b\s*[·•]\s*esc\s+to\s+cancel\b/i;
 
 /**
+ * The footer of an overlay whose ONLY exit is the dismiss (Issue #2369).
+ *
+ * Measured on Command Code 1.49's `/usage`, whose last row is verbatim
+ * `Press Esc to close`. The panel above it is read-only — a plan header, two
+ * meters, a breakdown URL — so there is no highlight to move and no key to
+ * confirm with. Before this pattern existed nothing matched the screen, it
+ * reached the `default` floor, and the chat surface answered an
+ * eighteen-button `unclassified` card to a panel with one working key.
+ *
+ * ## Why it is this narrow
+ *
+ * Three narrowings, and each one is there because this predicate SUPPRESSES
+ * controls — a false positive takes the arrow pad and the answer keys away from
+ * a screen that needed them:
+ *
+ *  - **a verb before the key.** `Press`/`Hit`/`Type`, or nothing at all, but not
+ *    an arbitrary run of prose. `esc to cancel` on its own is the tail of every
+ *    picker footer in this file, including
+ *    {@link COMMAND_CODE_SELECTION_LIST_FOOTER}, and those screens have a
+ *    highlight;
+ *  - **`close`/`dismiss`/`exit`, never `cancel` or `go back`.** The distinction
+ *    is measured rather than stylistic: `cancel` is what a screen with a
+ *    COMMITTABLE choice calls its escape (claude's `/model`, codex's picker,
+ *    Command Code's own), while `close` is what a panel that decided nothing
+ *    calls it;
+ *  - **the whole row.** Anchored at both ends (leading/trailing space aside), so
+ *    a hint bar that offers a dismiss ALONGSIDE something else — `↑/↓ navigate ·
+ *    enter to select · esc to close` — does not match, and keeps the arrows the
+ *    other half of its sentence promises.
+ *
+ * Case-insensitive because the measured row is `Press Esc to close` and Command
+ * Code writes its picker hints in lower case; nothing rests on which it uses.
+ */
+export const DISMISSABLE_PANEL_FOOTER_PATTERN =
+  /^\s*(?:press|hit|type)?\s*(?:<)?esc(?:ape)?(?:>)?\s+to\s+(?:close|dismiss|exit)\b[\s.·•]*$/im;
+
+/**
+ * How many rows from the end of the content the dismiss footer is looked for.
+ *
+ * The same 15-row tail the detection chain hands a tool module as
+ * `NormalizedFrame.lastLines` (`STATUS_CHECK_LINE_COUNT`), restated as a number
+ * here because this module is a browser-safe leaf and `tools/frame.ts` pulls in
+ * `cli-patterns`. `detect.ts` reads `frame.lastLines` and never this constant,
+ * so the two cannot disagree about the detector's own window; this one bounds
+ * the CLIENT-side reading in {@link hasDismissablePanelFooter}.
+ */
+const DISMISSABLE_PANEL_TAIL_LINE_COUNT = 15;
+
+/**
+ * Whether the tail of this frame is a dismiss-only panel (Issue #2369).
+ *
+ * The same question `commandCodeStatusDetector.afterPrompt` asks of
+ * `frame.lastLines`, asked of a raw capture, so the chat surface can answer for
+ * a frame whose server verdict has not reached it. The pattern is shared rather
+ * than restated — one expression, two call sites, exactly as
+ * {@link COMMAND_CODE_SELECTION_LIST_FOOTER} is shared between the detector and
+ * the dialog card.
+ *
+ * @param frame - a raw `capture-pane -p -e` frame, ANSI intact
+ */
+export function hasDismissablePanelFooter(frame: string | null | undefined): boolean {
+  if (!frame) return false;
+  const lines = stripAnsi(frame.replace(/\r\n/g, '\n')).split('\n');
+  let last = lines.length - 1;
+  while (last >= 0 && lines[last].trim() === '') last -= 1;
+  if (last < 0) return false;
+  const tail = lines.slice(Math.max(0, last + 1 - DISMISSABLE_PANEL_TAIL_LINE_COUNT), last + 1);
+  return tail.some((line) => DISMISSABLE_PANEL_FOOTER_PATTERN.test(line));
+}
+
+/**
  * The horizontal rule Command Code draws directly above a full-screen dialog.
  *
  * Command Code is an INLINE tool (`alternate_on=0`): opening `/model` does not
