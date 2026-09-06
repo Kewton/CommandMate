@@ -89,6 +89,13 @@ interface PollerOwner {
   readonly generation: number;
   superseded: boolean;
   stopped: boolean;
+  /**
+   * This chain ended itself from inside its own tick — `checkForResponse()`
+   * raised `stopPolling()` while it still owned the key (Issue #2230). The
+   * tick's verdict decides what the stop means (see {@link settleSelfStop}),
+   * so the response hash is not touched until that verdict is in.
+   */
+  selfStopped: boolean;
 }
 
 /**
@@ -130,6 +137,12 @@ interface PollerCoordinator {
   ownerStorage: AsyncLocalStorage<PollerOwner>;
   /** Monotonic across every key, so a generation is never reused. */
   generationCounter: number;
+  /**
+   * Poller keys whose chain stopped itself on a prompt and is waiting for the
+   * answer (Issue #2230). The next `startPolling()` for such a key is a resume
+   * of the same turn, not a new one, and keeps the response hash.
+   */
+  pausedOnPrompt: Set<string>;
 }
 
 declare global {
@@ -147,7 +160,15 @@ const coordinator: PollerCoordinator =
     pendingRestart: new Map<string, PollTarget>(),
     ownerStorage: new AsyncLocalStorage<PollerOwner>(),
     generationCounter: 0,
+    pausedOnPrompt: new Set<string>(),
   });
+
+// The coordinator object outlives a module reload (that is the point of putting
+// it on `globalThis`), so a field added after the object was first built has to
+// be filled in on an object an older evaluation created — `next dev` keeps
+// `globalThis` across HMR, and a poller started before the reload would
+// otherwise crash the first tick after it.
+coordinator.pausedOnPrompt ??= new Set<string>();
 
 /**
  * Active pollers map: "worktreeId:instanceId" -> NodeJS.Timeout
@@ -201,9 +222,23 @@ function takeOwnership(pollerKey: string): PollerOwner {
     generation: ++coordinator.generationCounter,
     superseded: false,
     stopped: false,
+    selfStopped: false,
   };
   coordinator.owners.set(pollerKey, owner);
   return owner;
+}
+
+/**
+ * The tools whose chain ends the moment a reply is saved (opencode, copilot).
+ *
+ * `checkForResponse()` stops the poller on exactly two "something was recorded"
+ * paths, and they are split by this predicate: a full-screen TUI's chain stops
+ * AFTER ITS REPLY, every other tool's chain stops ON A PROMPT and expects
+ * `/respond` to start it again. The same two tools are the ones that need the
+ * Layer-2 accumulator, so this is the single place the pair is spelled out.
+ */
+function isFullScreenTui(cliToolId: CLIToolType): boolean {
+  return cliToolId === 'opencode' || cliToolId === 'copilot';
 }
 
 // ============================================================================
@@ -217,6 +252,17 @@ function takeOwnership(pollerKey: string): PollerOwner {
  * and starting one while a tick of the previous chain is still inside
  * `checkForResponse()` does **not** run the two side by side — the restart is
  * handed to that tick's epilogue and applied when it settles.
+ *
+ * Issue #2230: two different callers reach this function, and they mean two
+ * different things. `sendUserMessage` starts a NEW TURN — the previous chain is
+ * still ticking over the finished screen, and the restart drops its response
+ * hash so an identical reply in the new turn is still recorded (#1268).
+ * `/respond`, `/prompt-response` and the Auto-Yes poller RESUME the turn the
+ * chain paused on when it recorded a prompt — the chain has already stopped
+ * itself, the screen may be exactly the finished turn the prompt was drawn
+ * over, and the hash is kept so that screen is not saved a second time. The
+ * two are told apart by the state the previous chain left behind
+ * ({@link PollerCoordinator.pausedOnPrompt}), not by who is calling.
  *
  * @param worktreeId - Worktree ID
  * @param cliToolId - CLI tool ID (claude, codex, gemini)
@@ -251,9 +297,23 @@ export function startPolling(worktreeId: string, cliToolId: CLIToolType, instanc
     coordinator.running.delete(pollerKey);
   }
 
-  // Stop existing poller if any
-  stopPolling(worktreeId, cliToolId, instanceId);
+  restartChain(pollerKey, target);
+}
 
+/**
+ * Retire whatever chain holds `pollerKey` and start a fresh one for `target`.
+ *
+ * Shared by the direct path of {@link startPolling} and the queued restart a
+ * tick applies in its epilogue, so both make the same decision about the
+ * response hash (Issue #2230): kept when the previous chain paused itself on a
+ * prompt and this is the resume, dropped otherwise.
+ */
+function restartChain(pollerKey: string, target: PollTarget): void {
+  const resume = coordinator.pausedOnPrompt.has(pollerKey);
+  stopPollingByKey(pollerKey, { resume });
+  if (resume) {
+    logger.info('poller:resumed-after-prompt', { pollerKey });
+  }
   beginPolling(target);
 }
 
@@ -265,7 +325,7 @@ function beginPolling(target: PollTarget): void {
   coordinator.pollingStartTimes.set(pollerKey, Date.now());
 
   // Initialize TUI accumulator for full-screen TUI tools (Layer 2 safety net)
-  if (target.cliToolId === 'opencode' || target.cliToolId === 'copilot') {
+  if (isFullScreenTui(target.cliToolId)) {
     initTuiAccumulator(pollerKey);
   }
 
@@ -328,12 +388,19 @@ async function runPollTick(target: PollTarget, owner: PollerOwner): Promise<void
     }
 
     // Check for response
+    let recorded = false;
     try {
-      await coordinator.ownerStorage.run(owner, () =>
+      recorded = await coordinator.ownerStorage.run(owner, () =>
         checkForResponse(target.worktreeId, target.cliToolId, target.instanceId)
       );
     } catch (error: unknown) {
       logger.error('error:', { error: error instanceof Error ? error.message : String(error) });
+    }
+
+    // Issue #2230: the chain stopped itself inside that call. Now that its
+    // verdict is known, decide whether the stop ended the turn or paused it.
+    if (owner.selfStopped) {
+      settleSelfStop(owner, target, recorded);
     }
 
     // Issue #1120: push the current terminal snapshot to WS subscribers so the
@@ -363,17 +430,65 @@ async function runPollTick(target: PollTarget, owner: PollerOwner): Promise<void
     const pending = coordinator.pendingRestart.get(pollerKey);
     if (pending) {
       coordinator.pendingRestart.delete(pollerKey);
-      stopPollingByKey(pollerKey);
-      beginPolling(pending);
+      restartChain(pollerKey, pending);
     }
   }
 }
 
 /**
+ * Finish a stop that `checkForResponse()` raised from inside its own tick
+ * (Issue #2230).
+ *
+ * `checkForResponse()` ends its chain on four paths, and `stopPollingByKey()`
+ * cannot tell them apart while the call is still on the stack — so it leaves
+ * the response hash alone and this runs once the verdict is in:
+ *
+ * - **recorded, not a full-screen TUI** — the prompt path. The turn is NOT
+ *   over: the agent is waiting for an answer, and the screen under the dialog
+ *   is very often the previous reply, already saved. The hash stays and the
+ *   key is marked paused, so the `/respond` (or Auto-Yes) restart that follows
+ *   resumes the cycle instead of opening one over the same screen. Measured
+ *   live on 2026-09-01: claude drew `Teach auto mode about your environment?`
+ *   AFTER a finished turn, and answering it re-saved the reply.
+ * - **recorded, full-screen TUI** — the reply itself was just saved and the
+ *   chain is done. The cycle ends here exactly as before.
+ * - **nothing recorded** — worktree gone or session not running. There is no
+ *   turn left to protect, and a hash kept here would suppress the first reply
+ *   of the session that replaces it.
+ *
+ * The prompt hash is NOT kept in any of these. If the answer did not take and
+ * the same dialog is still up on the first resumed tick, the operator has to
+ * get a new card rather than silence.
+ */
+function settleSelfStop(owner: PollerOwner, target: PollTarget, recorded: boolean): void {
+  if (recorded && !isFullScreenTui(target.cliToolId)) {
+    coordinator.pausedOnPrompt.add(owner.pollerKey);
+    logger.info('poller:paused-on-prompt', {
+      pollerKey: owner.pollerKey,
+      generation: owner.generation,
+    });
+    return;
+  }
+  clearResponseHashCache(owner.pollerKey);
+}
+
+/**
  * Stop the poller identified by an already-computed poller key.
  * Shared by stopPolling() and stopAllPolling() so cleanup logic stays in one place.
+ *
+ * Issue #2230: this is where the per-turn dedup caches end, and the response
+ * hash is the one whose ending has to be timed. It is dropped here for an
+ * explicit stop (a route, `session-cleanup`, `kill-session`, the 30-minute
+ * budget) and for the restart that opens a new turn. It is **kept** in two
+ * cases: `resume` — the restart is picking up a chain that paused itself on a
+ * prompt — and a stop raised by the chain's own tick, whose meaning is settled
+ * by {@link settleSelfStop} once `checkForResponse()` has returned. The prompt
+ * hash and the TUI accumulator are dropped unconditionally, as before.
+ *
+ * @param pollerKey - Poller key ("worktreeId:instanceId")
+ * @param options.resume - This stop precedes a restart of a paused chain.
  */
-function stopPollingByKey(pollerKey: string): void {
+function stopPollingByKey(pollerKey: string, options: { resume?: boolean } = {}): void {
   // Issue #2223: a tick that has been superseded still runs to completion, and
   // `checkForResponse()` ends the turn with `stopPolling()` on four paths
   // (worktree gone, session not running, prompt detected, TUI reply saved).
@@ -389,13 +504,20 @@ function stopPollingByKey(pollerKey: string): void {
   }
 
   const owner = coordinator.owners.get(pollerKey);
+  // The live owner stopping itself from inside its own tick. Identity, not key
+  // equality: a stale generation with the same key was turned away above.
+  const selfStop = owner !== undefined && caller === owner;
   if (owner) {
     owner.stopped = true;
+    owner.selfStopped = selfStop;
     coordinator.owners.delete(pollerKey);
   }
   // A restart queued behind an in-flight tick is cancelled by an explicit stop:
   // "start then stop" must leave the session stopped.
   coordinator.pendingRestart.delete(pollerKey);
+  // Whatever this stop is, the pause it may be ending is over: a resume consumes
+  // it, an explicit stop cancels it.
+  coordinator.pausedOnPrompt.delete(pollerKey);
 
   const timerId = coordinator.activePollers.get(pollerKey);
 
@@ -413,7 +535,12 @@ function stopPollingByKey(pollerKey: string): void {
 
   // Issue #1268: Clear response hash cache too, so the next turn can save a
   // response even when its content is identical to the previous turn's.
-  clearResponseHashCache(pollerKey);
+  //
+  // Issue #2230: unless this turn is not actually over. A self-stop is settled
+  // by the tick once its verdict is known; a resume is continuing a paused turn.
+  if (!selfStop && !options.resume) {
+    clearResponseHashCache(pollerKey);
+  }
 }
 
 /**
@@ -440,11 +567,15 @@ export function stopAllPolling(): void {
   const keys = new Set([
     ...Array.from(coordinator.activePollers.keys()),
     ...Array.from(coordinator.owners.keys()),
+    // Issue #2230: a paused chain has no timer and no owner, but it is still
+    // holding a response hash for the turn it paused on.
+    ...Array.from(coordinator.pausedOnPrompt),
   ]);
   for (const pollerKey of keys) {
     stopPollingByKey(pollerKey);
   }
   coordinator.pendingRestart.clear();
+  coordinator.pausedOnPrompt.clear();
 }
 
 /**
@@ -603,10 +734,28 @@ export function migrateResponsePollerWorktreeIds(
   for (const move of moves) {
     const startedAt = carried.get(move.newKey)?.startedAt;
     pollingStartTimes.set(move.newKey, startedAt ?? Date.now());
-    if (move.cliToolId === 'opencode' || move.cliToolId === 'copilot') {
+    if (isFullScreenTui(move.cliToolId)) {
       initTuiAccumulator(move.newKey);
     }
     scheduleNextResponsePoll(move.newWorktreeId, move.cliToolId, move.instanceId);
+  }
+
+  // Issue #2230: a chain paused on a prompt has no timer, so the loop above
+  // never sees it — but it is holding the response hash for the turn it paused
+  // on, and `/respond` will resume it under the NEW ID. Move the hash and the
+  // pause mark with it; the chain itself stays paused until that resume.
+  const pausedMoves: Array<{ oldKey: string; newKey: string }> = [];
+  for (const pollerKey of Array.from(coordinator.pausedOnPrompt)) {
+    const parts = splitPollerKey(pollerKey);
+    if (!parts) continue;
+    const newWorktreeId = targets.get(parts.worktreeId);
+    if (!newWorktreeId) continue;
+    pausedMoves.push({ oldKey: pollerKey, newKey: `${newWorktreeId}:${parts.instanceId}` });
+  }
+  for (const move of pausedMoves) coordinator.pausedOnPrompt.delete(move.oldKey);
+  for (const move of pausedMoves) {
+    renameResponseHashCacheKey(move.oldKey, move.newKey);
+    coordinator.pausedOnPrompt.add(move.newKey);
   }
 
   return moves;

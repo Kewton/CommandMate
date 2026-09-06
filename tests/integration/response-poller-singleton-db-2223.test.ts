@@ -48,6 +48,13 @@ vi.mock('@/lib/polling/structured-history-gate', () => ({
   isStructuredHistoryWriterLive: vi.fn(() => false),
   captureStructuredHistoryTurn: vi.fn(async () => false),
 }));
+// Issue #2317 Phase D asks tmux who owns the pane geometry on every claude poll.
+// That is a real child process, which fake timers cannot drive: left unstubbed,
+// the tick settles only after the test has closed the database, and every
+// assertion below reads an empty table.
+vi.mock('@/lib/tmux/geometry-delegation', () => ({
+  probeGeometryDelegation: vi.fn(async () => ({ delegated: false, released: false })),
+}));
 
 import { runMigrations } from '@/lib/db/db-migrations';
 import { upsertWorktree } from '@/lib/db';
