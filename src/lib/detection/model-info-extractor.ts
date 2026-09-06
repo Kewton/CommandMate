@@ -34,6 +34,7 @@
  * |-------------|------------------------------------------------------------------|
  * | codex       | footer:  `gpt-5.6-sol xhigh · ~/share/work/…`                     |
  * | claude      | banner:  `▝▜█████▛▘  Opus 5 (1M context) with xhigh effort · Claude Max` |
+ * | claude      | switch:  `  ⎿  Set model to Sonnet 5 for this session only` (#2361)  |
  * | antigravity | footer:  `? for shortcuts …               Gemini 3.7 Flash · hig` |
  * | antigravity | banner:  `    ▀▀▀▀▀▀▀▀      Gemini 3.7 Flash (High)`              |
  * | copilot     | footer:  `← open sidebar · … · tab next tab      GPT-5 mini · Medium` |
@@ -238,6 +239,87 @@ function readClaudeBanner(line: string): ModelInfo | null {
   const model = match[1].trim();
   if (!isPlausibleModelLabel(model)) return null;
   return { model, effort: resolveEffortToken(match[2]) };
+}
+
+/**
+ * Reads `<model>[ with <effort> effort]` off the line Claude prints when the
+ * session's model changes (Issue #2361).
+ *
+ * Measured live on claude 2.1.263 for this Issue
+ * (`tests/fixtures/claude-model-switch-2361/`, and that directory's README).
+ * The confirmation is the `⎿` stdout row under the `/model` command, in the
+ * same place for the picker (`Enter` / `s`) and for `/model <arg>`:
+ *
+ *   `  ⎿  Set model to Sonnet 5 for this session only`
+ *   `  ⎿  Set model to Haiku 4.5 and saved as your default for new sessions`
+ *   `  ⎿  Set model to Opus 5 (1M context) and saved as your default for new sessions with high effort`
+ *   `  ⎿  Kept model as Haiku 4.5`                     (picker closed with Esc)
+ *
+ * **The Issue's starting point (`selection-shape.ts`, "Set model to Sonnet 5
+ * and saved as your default for new sessions") is one of three suffixes, not
+ * the line.** What was measured beyond it:
+ *
+ *  - **The scope suffix comes BEFORE the effort.** `… and saved as your default
+ *    for new sessions with high effort` — the effort is appended only when the
+ *    picker's `←/→` row was moved, and is absent otherwise even though the
+ *    session has one. So the effort is read when printed and left null when
+ *    not, and `recordCapturedModelInfo` keeps the previous effort — the
+ *    Issue's rule 3.
+ *  - **`Kept model as` is the Esc outcome** and names the current model. It is
+ *    read for the same reason the banner is: it is the TUI stating the model,
+ *    and on a session whose banner scrolled away it is the only thing on screen
+ *    that does.
+ *  - **The banner is rewritten in place on every switch** (fullscreen and
+ *    inline alike): `Fable 5.1 with xhigh effort` became `Sonnet 5 with xhigh
+ *    effort` on the same row, `history_size` unchanged — and `/effort` and
+ *    `/fast` rewrite it too. That decides the precedence in
+ *    {@link extractModelInfo}: **the banner wins while it is on screen, the
+ *    line is the fallback for when it is gone**
+ *    (`fullscreen-switch-sonnet-banner-scrolled.txt`). The Issue asked for
+ *    "whichever is lower", on the premise that the banner is static; measured,
+ *    that rule answers the STALE model on `fullscreen-fast-on.txt` — the
+ *    lowest confirmation there is `Kept model as Haiku 4.5`, printed before a
+ *    `/fast` moved the session to Opus and rewrote the banner above it to
+ *    `Opus 5 (1M context) with high effort`.
+ *  - **Haiku's rewritten banner has no effort clause** (`Haiku 4.5 · API Usage
+ *    Billing`), so {@link CLAUDE_STARTUP_BANNER_PATTERN} does not read it and
+ *    the confirmation line is what publishes the model there. The banner
+ *    pattern is deliberately not widened: without the `with … effort` anchor
+ *    a box-framed table row containing ` · ` would read as a banner.
+ *  - **`/fast` prints `⎿  ↯ Fast mode ON · model set to Opus 5 · $10/$50 per
+ *    Mtok` and is a model switch** (`PostModelSwitch` reported
+ *    `claude-fable-5-1` → `claude-opus-5[1m]` on the same keypress). It is NOT
+ *    read: the line spells the model `Opus 5` where the banner and `Kept model
+ *    as` spell it `Opus 5 (1M context)`, and within one channel #2357's
+ *    identity rule is exact, so reading it would announce a second, spurious
+ *    "change" the next time the fuller spelling appears. While the banner is
+ *    on screen the rewrite covers `/fast`; once it is gone the switch is
+ *    missed until the next `/model` line or hook — the structured
+ *    `PostModelSwitch` channel is the right fix for that, in its own Issue.
+ *
+ * The `⎿` marker is required. Claude's own prose shares the pane with its
+ * chrome, and the 2.1.263 release notes alone contain 75 rows that mention
+ * a model (`fullscreen-switch-line-scrolled.txt`, which must read as unknown);
+ * the marker is what local-command output carries and prose does not. A value
+ * read here latches for the rest of the session.
+ *
+ * No /g. No nested quantifiers: the lazy label class is bounded by three
+ * literal-anchored alternatives and the end of the row; the `[^·]*` after the
+ * effort admits the parenthesised `(the effort applies to this session only)`
+ * note the binary can append, and stops at the `·` that opens the fast-mode
+ * / usage-credit suffixes. The lookahead keeps a row with no name at all from
+ * reading its own suffix as one. `ultracode` resolves to no
+ * {@link ReasoningEffort} and answers null, like Command Code's `max`.
+ */
+export const CLAUDE_MODEL_SWITCH_PATTERN =
+  /^\s*⎿\s+(?:Set model to|Kept model as)\s+(?!(?:and saved as your default|for this session only)\b)([A-Za-z0-9][A-Za-z0-9 .()[\]_:@/-]*?)(?:\s+(?:and saved as your default for new sessions|for this session only))?(?:\s+with\s+([A-Za-z]+)\s+effort\b[^·]*)?\s*(?:·.*)?$/;
+
+function readClaudeModelSwitchLine(line: string): ModelInfo | null {
+  const match = CLAUDE_MODEL_SWITCH_PATTERN.exec(line);
+  if (!match) return null;
+  const model = match[1].trim();
+  if (!isPlausibleModelLabel(model)) return null;
+  return { model, effort: match[2] ? resolveEffortToken(match[2]) : null };
 }
 
 // =============================================================================
@@ -566,8 +648,10 @@ function readCommandCodeBanner(line: string): ModelInfo | null {
  * Scan a capture from the bottom up, returning the first line that reads.
  *
  * Bottom-up is the whole rule: the status bar is the last line of the frame, and
- * for Claude "the last banner wins" is how a mid-session `/model` switch — which
- * prints a fresh banner — overtakes the one from session start.
+ * for Claude "the last banner wins" is how a fresh banner overtakes the one from
+ * session start (on 2.1.263 a `/model` switch rewrites the banner in place
+ * instead, and prints a confirmation line the second scan reads once the banner
+ * is gone — Issue #2361).
  *
  * ANSI is stripped per line rather than over the whole blob so a malformed OSC
  * sequence can never swallow a newline and merge two lines into one.
@@ -609,7 +693,19 @@ export function extractModelInfo(cliToolId: CLIToolType, captureText: string): M
     case 'codex':
       return scanFromEnd(captureText, readCodexFooter) ?? unknown();
     case 'claude':
-      return scanFromEnd(captureText, readClaudeBanner) ?? unknown();
+      // Issue #2361. The banner is live chrome — rewritten in place by
+      // `/model`, `/effort` and `/fast` — so it wins for as long as it is on
+      // screen, and the lowest `/model` confirmation line is the fallback for
+      // the long session whose banner has scrolled away (see
+      // `readClaudeModelSwitchLine` for the measured precedence). Claude's
+      // hooks name the model on `SessionStart` alone — `/model` fires none of
+      // the events CommandMate registers — so on a switch the pane is the only
+      // channel that hears it.
+      return (
+        scanFromEnd(captureText, readClaudeBanner) ??
+        scanFromEnd(captureText, readClaudeModelSwitchLine) ??
+        unknown()
+      );
     case 'antigravity':
       return (
         scanFromEnd(captureText, readAntigravityStatusBar) ??
