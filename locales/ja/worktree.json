@@ -1020,7 +1020,11 @@
   },
   "agentModel": {
     "label": "モデル",
-    "modelLabel": "モデル: {model}"
+    "modelLabel": "モデル: {model}",
+    "changed": "モデルが {from} から {to} に変わりました",
+    "sessionRow": "モデル: {model}。タップでモデル選択を開きます。",
+    "changedRecently": "変更あり",
+    "changedRecentlyDetail": "モデルが {from} から {to} に変わりました。タップで閉じます。"
   },
   "nextAction": {
     "start": "開始",

@@ -1020,7 +1020,11 @@
   },
   "agentModel": {
     "label": "Model",
-    "modelLabel": "Model: {model}"
+    "modelLabel": "Model: {model}",
+    "changed": "Model changed from {from} to {to}",
+    "sessionRow": "Model: {model}. Tap to open the model picker.",
+    "changedRecently": "Changed",
+    "changedRecentlyDetail": "Model changed from {from} to {to}. Tap to dismiss."
   },
   "nextAction": {
     "start": "Start",

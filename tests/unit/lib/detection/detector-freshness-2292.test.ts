@@ -1,5 +1,12 @@
 /**
- * `ANTIGRAVITY_VERIFIED_AGAINST` names the build #2270 measured (Issue #2292).
+ * `ANTIGRAVITY_VERIFIED_AGAINST` names the build the rules were measured on
+ * (Issue #2292; re-pinned to the #2364 re-capture).
+ *
+ * Issue #2364 re-captured agy on 1.1.27 (`tests/fixtures/antigravity-live-2364/`)
+ * and rewrote the numbered-dialog rule off those frames, so the stamp moved
+ * again — this time inside the same change as the rules, which is what #2292
+ * asked for. The values below are the 1.1.27 ones; the 1.1.25 build is now the
+ * "older install" case, which must not read as stale either.
  *
  * The stamp is "which build were these rules read off", not "which build is
  * installed". #2270 re-read agy's rules off live 1.1.25 panes at the production
@@ -83,16 +90,16 @@ beforeEach(() => {
   clearDetectorVersionProbeCache();
 });
 
-describe('[#2292] the antigravity stamp names the build #2270 measured', () => {
-  it('is agy 1.1.25, captured 2026-09-04 at the production pane geometry', () => {
+describe('[#2292] the antigravity stamp names the build the rules were measured on', () => {
+  it('is agy 1.1.27, captured 2026-09-06 at the production pane geometry', () => {
     // Pinned field by field rather than as a snapshot: each value answers a
-    // different question a later reader will ask of it, and #2270's live panes
-    // (`tests/unit/status-detector-selection.test.ts`, banner `Antigravity CLI
-    // 1.1.25`, 200x1000, 2026-09-04) are the receipt for all three.
-    expect(ANTIGRAVITY_VERIFIED_AGAINST.version).toBe('1.1.25');
-    expect(ANTIGRAVITY_VERIFIED_AGAINST.capturedAt).toBe('2026-09-04');
-    // `inline` was the 0.4-era capture condition. The 1.1.25 permission dialog
-    // draws no composer row and only reproduces at the pane the server captures.
+    // different question a later reader will ask of it, and #2364's live frames
+    // (`tests/fixtures/antigravity-live-2364/`, banner `Antigravity CLI 1.1.27`,
+    // 200x1000, 2026-09-06) are the receipt for all three.
+    expect(ANTIGRAVITY_VERIFIED_AGAINST.version).toBe('1.1.27');
+    expect(ANTIGRAVITY_VERIFIED_AGAINST.capturedAt).toBe('2026-09-06');
+    // `inline` was the 0.4-era capture condition. agy's permission dialogs draw
+    // no composer row and only reproduce at the pane the server captures.
     expect(ANTIGRAVITY_VERIFIED_AGAINST.paneGeometry).toBe('200x1000');
   });
 
@@ -103,22 +110,22 @@ describe('[#2292] the antigravity stamp names the build #2270 measured', () => {
   });
 });
 
-describe('[#2292] getDetectorFreshness reads agy 1.1.25 as current', () => {
-  it('does not report antigravity as stale when 1.1.25 is installed', async () => {
-    installAgy('1.1.25');
+describe('[#2292] getDetectorFreshness reads agy 1.1.27 as current', () => {
+  it('does not report antigravity as stale when 1.1.27 is installed', async () => {
+    installAgy('1.1.27');
 
     expect(await antigravityRow()).toEqual({
       tool: 'antigravity',
-      installed: '1.1.25',
-      verifiedAgainst: '1.1.25',
+      installed: '1.1.27',
+      verifiedAgainst: '1.1.27',
       stale: false,
     });
   });
 
-  it('keeps antigravity out of the wire staleness at 1.1.25', async () => {
+  it('keeps antigravity out of the wire staleness at 1.1.27', async () => {
     // What `commandmate status` and `capture --json` actually publish: absent,
     // not present-with-stale-false. This is the line the operator stopped seeing.
-    installAgy('1.1.25');
+    installAgy('1.1.27');
 
     expect(toDetectorStaleness(await getDetectorFreshness()).antigravity).toBeUndefined();
   });
@@ -131,21 +138,24 @@ describe('[#2292] getDetectorFreshness reads agy 1.1.25 as current', () => {
     expect(await antigravityRow()).toEqual({
       tool: 'antigravity',
       installed: '1.2.0',
-      verifiedAgainst: '1.1.25',
+      verifiedAgainst: '1.1.27',
       stale: true,
     });
     expect(toDetectorStaleness(await getDetectorFreshness()).antigravity).toEqual({
       installed: '1.2.0',
-      verifiedAgainst: '1.1.25',
+      verifiedAgainst: '1.1.27',
     });
   });
 
   it('does not report an older install as stale either', async () => {
-    // 1.1.18 is what the #1929 measurement table recorded. Rules read off a
-    // NEWER build than the one installed is not the skew this warning is about.
-    installAgy('1.1.18');
-
-    expect((await antigravityRow()).stale).toBe(false);
+    // 1.1.18 is what the #1929 measurement table recorded and 1.1.25 is the
+    // build #2270 measured. Rules read off a NEWER build than the one installed
+    // is not the skew this warning is about.
+    for (const older of ['1.1.18', '1.1.25']) {
+      clearDetectorVersionProbeCache();
+      installAgy(older);
+      expect((await antigravityRow()).stale, older).toBe(false);
+    }
   });
 });
 
@@ -170,6 +180,6 @@ describe('[#2292] the minor-series wildcard branch outlives its last user', () =
     expect(parseVerifiedAgainstVersion('2.0.x')).toBe('2.0.0');
     expect(parseVerifiedAgainstVersion('2.0.*')).toBe('2.0.0');
     expect(parseVerifiedAgainstVersion('unmeasured')).toBeNull();
-    expect(parseVerifiedAgainstVersion('1.1.25')).toBe('1.1.25');
+    expect(parseVerifiedAgainstVersion('1.1.27')).toBe('1.1.27');
   });
 });

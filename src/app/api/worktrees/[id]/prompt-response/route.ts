@@ -13,6 +13,7 @@ import { isCliToolType, isValidInstanceId, type CLIToolType } from '@/lib/cli-to
 import { captureSessionOutputFresh } from '@/lib/session/cli-session';
 import { detectPrompt, type PromptDetectionResult } from '@/lib/detection/prompt-detector';
 import { stripAnsi, stripBoxDrawing, buildDetectPromptOptions } from '@/lib/detection/cli-patterns';
+import { detectAntigravityNumberedDialogPrompt } from '@/lib/detection/tools/antigravity/dialog';
 import { sendPromptAnswer, PromptAnswerRejectedError } from '@/lib/prompt-answer-sender';
 import { resolvePromptAnswer, PromptAnswerResolutionError, type AnswerResolution } from '@/lib/prompt-answer-semantic';
 import { getAskUserQuestion } from '@/lib/session/agent-event-state';
@@ -200,9 +201,19 @@ export async function POST(
     try {
       const currentOutput = await captureSessionOutputFresh(id, cliToolId, undefined, instanceId);
       verifiedFrame = currentOutput;
-      const cleanOutput = stripAnsi(currentOutput);
+      const cleanOutput = stripBoxDrawing(stripAnsi(currentOutput));
+      // Issue #2364: agy's `↑/↓ Navigate` dialogs are read by agy's own reader
+      // first, exactly as `/current-output` and the response poller read them
+      // (`detectPromptWithOptions`). The generic pass alone refused
+      // (`prompt_no_longer_active`) the very dialog the status API had just
+      // published as answerable: agy's Bash approval wraps its option labels,
+      // which the one-row-per-option parser cannot read, so PromptPanel's
+      // Submit did nothing while the dialog stayed up.
+      const toolDialog = cliToolId === 'antigravity'
+        ? detectAntigravityNumberedDialogPrompt(cleanOutput)
+        : null;
       const promptOptions = buildDetectPromptOptions(cliToolId);
-      promptCheck = detectPrompt(stripBoxDrawing(cleanOutput), promptOptions);
+      promptCheck = toolDialog ?? detectPrompt(cleanOutput, promptOptions);
 
       if (!promptCheck.isPrompt) {
         return NextResponse.json({
