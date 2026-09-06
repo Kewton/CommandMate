@@ -53,6 +53,7 @@ import {
 } from '@/config/pdf-extensions';
 import { extname } from 'path';
 import { readFile, stat } from 'fs/promises';
+import type { Stats } from 'fs';
 import { createLogger } from '@/lib/logger';
 import { buildAttachmentContentDisposition } from '@/lib/http/content-disposition';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
@@ -420,7 +421,20 @@ export async function GET(
     // Non-image file: use existing text file reading logic
     // [Issue #469] Last-Modified / If-Modified-Since conditional request support
     const fullPath = join(worktree.path, relativePath);
-    const fileStat = await stat(fullPath);
+    // [Issue #2349] A missing file is 404 here too. This `stat` used to sit
+    // outside every `try`, so ENOENT fell through to the outer catch and became
+    // 500 INTERNAL_ERROR — the only one of the four GET branches that did.
+    // Same shape as the download / image / video branches: ENOENT only; EACCES
+    // and the rest still propagate and stay 500.
+    let fileStat: Stats;
+    try {
+      fileStat = await stat(fullPath);
+    } catch (err: unknown) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+        return createErrorResponse('FILE_NOT_FOUND', 'File not found');
+      }
+      throw err;
+    }
 
     // [Issue #723] Line-range mode detection — when present, skip the
     // If-Modified-Since/304 fast-path and always return 200 with a partial
