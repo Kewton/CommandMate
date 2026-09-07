@@ -6,6 +6,12 @@
  * `'<path>' --settings '<file>'`, and `CM_AGENT_HOOKS_INJECT=0` puts the bare
  * form back, so both spellings are legitimate launches of the same binary.
  *
+ * Issue #2403 added a third variation on the same theme: every launch line is
+ * now preceded by `CM_PORT='<port>'`, and lines that carry hook correlation
+ * keys were already preceded by those. The prefix is shell environment
+ * assignments, so it is stripped before the path is matched rather than added
+ * to the list of accepted spellings — which is what this module exists for.
+ *
  * Shared between the unit and integration suites on purpose. The tests that
  * broke when the launch line changed are about *which path was resolved*
  * (CLAUDE_PATH validation) and *when the launch happened* relative to
@@ -29,7 +35,26 @@ export type SendKeysCall = readonly unknown[];
  */
 export function isClaudeLaunchCommand(command: unknown, claudePath: string): boolean {
   if (typeof command !== 'string') return false;
-  return command === claudePath || command.startsWith(`'${claudePath}' `);
+  const launched = stripEnvAssignments(command);
+  return launched === claudePath || launched.startsWith(`'${claudePath}' `);
+}
+
+/**
+ * Drop the `NAME='value' ` assignments `renderAgentLaunchCommand` writes in
+ * front of the executable.
+ *
+ * Only single-quoted values, because that is the only form the renderer emits
+ * (`shellQuote`), and `'\''` inside a value is therefore the one escape to
+ * step over. A token that is not an assignment ends the scan, so a path
+ * containing an `=` cannot be eaten.
+ */
+function stripEnvAssignments(command: string): string {
+  const assignment = /^[A-Za-z_][A-Za-z0-9_]*='(?:[^']|'\\'')*' /;
+  let rest = command;
+  for (let match = assignment.exec(rest); match; match = assignment.exec(rest)) {
+    rest = rest.slice(match[0].length);
+  }
+  return rest;
 }
 
 /**

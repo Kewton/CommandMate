@@ -71,6 +71,10 @@ function agyLaunch(modelSuffix = ''): RegExp {
   return new RegExp(
     `^CM_HOOK_URL='http://127\\.0\\.0\\.1:\\d+/api/hooks/agent-event${query}' ` +
       `CM_PERMISSION_HOOK_URL='http://127\\.0\\.0\\.1:\\d+/api/hooks/permission-request${query}' ` +
+      // #2403: every launch line ends with the launching server's own port, so a
+      // `commandmate` typed inside the agent reaches the server that started it
+      // rather than whichever one poisoned the tmux server's global environment.
+      `CM_PORT='\\d+' ` +
       `'agy'${escaped}$`
   );
 }

@@ -165,11 +165,18 @@ describe('startSession injects the correlation keys', () => {
     ]);
   });
 
-  it('starts exactly the pre-#1760 command when injection is switched off', async () => {
+  it('starts the pre-#1760 command, behind the server port, when injection is off', async () => {
+    // "Exactly the pre-#1760 command" up to #2403: hook injection being off says
+    // nothing about which CommandMate the agent belongs to, and a `commandmate`
+    // typed inside it still has to reach the server that launched it.
     process.env.CM_AGENT_HOOKS_INJECT = '0';
     await new CodexTool().startSession(WORKTREE_ID, WORKTREE_PATH);
-    expect(launchCommand()).toBe('codex');
-    expect(vi.mocked(sendKeys)).toHaveBeenCalledWith('mcbd-codex-wt-codex-1760', 'codex', true);
+    expect(launchCommand()).toBe("CM_PORT='4321' codex");
+    expect(vi.mocked(sendKeys)).toHaveBeenCalledWith(
+      'mcbd-codex-wt-codex-1760',
+      "CM_PORT='4321' codex",
+      true
+    );
   });
 });
 

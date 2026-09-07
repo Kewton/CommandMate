@@ -27,6 +27,7 @@
  * @module lib/hooks/sources/launch-command
  */
 
+import { getServerPort } from '@/lib/env';
 import { shellQuote } from '@/lib/hooks/hook-settings-generator';
 import type { AgentLaunchPlan } from './types';
 
@@ -119,17 +120,63 @@ export const AGENT_CORRELATION_ENV_VARS: readonly string[] = [
 ];
 
 /**
- * The other thing a launch line carries: where a tool reads its own settings.
+ * The variable a CommandMate CLI run inside an agent resolves its server from
+ * (Issue #2403).
  *
- * A per-tool HOME/config redirect, set by a source so the agent resolves the
- * same settings file CommandMate just wrote — codex's `CODEX_HOME` is the whole
- * of it today. Deliberately **not** stripped from CommandMate's child
- * processes: a redirect is neither a credential nor an identity, and a child
- * that inherits one is unaffected.
+ * `src/cli/utils/server-url.ts` resolves a destination as `process.env` first,
+ * `~/.commandmate/.env` second — the documented precedence from #1743, which is
+ * what makes `CM_PORT=3011 commandmate ls` work. #2403 measured what that
+ * precedence costs when two servers share one tmux server: the tmux server's
+ * *global* environment carries whichever `CM_PORT` the server that started it
+ * had, every pane's `-zsh` inherits it, and an agent launched by the OTHER
+ * server therefore types `commandmate` at a destination that is not the server
+ * that launched it. The measured split was hooks on 60301 and the CLI on 3000 —
+ * `whoami` right (it reads the tmux session name), `ls` and `instances` wrong,
+ * and `ask` returning exit 0 from the wrong database, so no caller could tell.
  *
- * **One name, measured, not three.** #1933's test carried a local allowlist of
- * `CODEX_HOME` / `COPILOT_HOME` / `XDG_CONFIG_HOME`; building the seven plans
- * shows only the first is ever written. `COPILOT_HOME` and `XDG_CONFIG_HOME` are
+ * The launch line is the one place that outranks the inherited environment, so
+ * the launching server states its own port there. {@link resolveAgentLaunchEnv}
+ * is what writes it and carries the rule about when.
+ *
+ * Listed here, beside `CODEX_HOME`, rather than in
+ * {@link AGENT_CORRELATION_ENV_VARS}: see that decision below.
+ */
+export const SERVER_PORT_ENV_VAR = 'CM_PORT';
+
+/**
+ * The other thing a launch line carries: config the agent — and everything it
+ * spawns — is meant to keep.
+ *
+ * Two names, and the same test: neither is a credential and neither is an
+ * *identity*, so both are deliberately **not** stripped from CommandMate's own
+ * child processes by `lib/security/env-sanitizer`.
+ *
+ *  - `CODEX_HOME` is a per-tool HOME/config redirect, set by a source so the
+ *    agent resolves the same settings file CommandMate just wrote. A child that
+ *    inherits one is unaffected.
+ *  - {@link SERVER_PORT_ENV_VAR} says which CommandMate server this process
+ *    belongs to. #2403 put it here rather than on the correlation list on
+ *    purpose, and the reason is inheritance: a correlation variable answers
+ *    "which agent is this?", which a child is not, and #1996 strips all six
+ *    precisely so a relay firing from a grandchild cannot claim the agent's
+ *    identity. `CM_PORT` answers "which server do I dial?", and the right
+ *    answer for a descendant is *the same one* — a `commandmate send` typed by
+ *    a shell the agent spawned must reach the server that launched the agent.
+ *    Stripping it would recreate the bug one level down, and would also delete
+ *    an operator-facing variable (#1743) from every child of the server.
+ *
+ *    Measured, not assumed: because `CM_PORT` is on this list,
+ *    `sanitizeEnvForChildProcess()` is byte-identical to what it returned
+ *    before #2403, so none of its six call sites
+ *    (`assistant/non-interactive-runner`, `updates/agent-updater`,
+ *    `cli-tools/copilot-executable`, `slash-command-catalog`,
+ *    `detection/version-probes`, `session/claude-executor`) can change
+ *    behaviour. `tests/unit/security/child-process-server-port-2403.test.ts`
+ *    asserts that with a real child process.
+ *
+ * **Still not `COPILOT_HOME` or `XDG_CONFIG_HOME`.** #1933's test carried a
+ * local allowlist of `CODEX_HOME` / `COPILOT_HOME` / `XDG_CONFIG_HOME`;
+ * building the seven plans shows only the first is ever written. `COPILOT_HOME` and `XDG_CONFIG_HOME` are
  * *read* from the ambient environment by `copilot/hook-settings` and the
  * antigravity config writer to decide where a file goes — they never reach
  * `plan.env`. An allowlist wide enough to admit them would wave through a source
@@ -138,7 +185,48 @@ export const AGENT_CORRELATION_ENV_VARS: readonly string[] = [
  * Enumerated for the same reason as the list above: so the drift guard can
  * subtract it and hold the remainder to an exact set.
  */
-export const AGENT_LAUNCH_CONFIG_ENV_VARS: readonly string[] = ['CODEX_HOME'];
+export const AGENT_LAUNCH_CONFIG_ENV_VARS: readonly string[] = [
+  'CODEX_HOME',
+  SERVER_PORT_ENV_VAR,
+];
+
+/**
+ * The environment a launch line actually carries: the plan's own, plus this
+ * server's port (Issue #2403).
+ *
+ * A source's `prepareLaunch` builds `plan.env` out of what it knows about *its
+ * tool*. Which server is running is not that — it is the same fact for all
+ * seven sources, and seven copies of it would be seven chances to forget one.
+ * Two sources would have had to grow an environment they do not otherwise have
+ * (claude keeps its correlation keys inside the `--settings` file, opencode
+ * puts its port in argv), and those two are exactly where the reported failure
+ * was found. So it belongs at the one place that already exists for
+ * "everything a launch line carries", which is this module.
+ *
+ * **`getServerPort()`, unconditionally.** The same call the hook URL on the
+ * same line is built from (#1722), so the two cannot name different servers —
+ * including in the degenerate case where `CM_PORT` is unusable and both fall
+ * back to 3000 together. Writing it when nothing was configured is not a guess:
+ * a server given no `CM_PORT` really is listening on 3000, and the pane it
+ * launches an agent into really can have inherited some other server's port
+ * from the tmux server's global environment. A pin that only fired when
+ * `CM_PORT` was set would leave that case — the unconfigured server as the
+ * *victim* — broken.
+ *
+ * **Appended, never overriding.** A source that names `CM_PORT` itself has said
+ * something more specific than "the server that launched me", and keeps it.
+ * Appending also leaves every existing assignment in its existing position, so
+ * codex's `CODEX_HOME` is still the first thing on its line and the correlation
+ * URLs are still where a reader of a `ps` line expects them.
+ *
+ * @param plan - What the source's `prepareLaunch` returned
+ * @returns A copy of `plan.env` with {@link SERVER_PORT_ENV_VAR} appended,
+ *   unless the plan named it first
+ */
+export function resolveAgentLaunchEnv(plan: AgentLaunchPlan): Record<string, string> {
+  if (SERVER_PORT_ENV_VAR in plan.env) return plan.env;
+  return { ...plan.env, [SERVER_PORT_ENV_VAR]: String(getServerPort()) };
+}
 
 /**
  * Turn a plan into the line a shell can run.
@@ -149,11 +237,20 @@ export const AGENT_LAUNCH_CONFIG_ENV_VARS: readonly string[] = ['CODEX_HOME'];
  * Values are quoted; names are not, because a name that needed quoting would
  * not be a name a shell would assign.
  *
+ * Since #2403 the environment rendered is {@link resolveAgentLaunchEnv}'s, not
+ * `plan.env` directly — the difference is this server's own `CM_PORT`, added
+ * last.
+ *
+ * The empty-assignment branch survives because the renderer is a total
+ * function on plans, not because any plan reaches it: since #2403 every
+ * resolved environment names at least the port.
+ *
  * @param plan - What the source's `prepareLaunch` returned
- * @returns `NAME='value' … command`, or just `command` when `env` is empty
+ * @returns `NAME='value' … command`, or just `command` when there is no
+ *   environment to apply
  */
 export function renderAgentLaunchCommand(plan: AgentLaunchPlan): string {
-  const assignments = Object.entries(plan.env).map(
+  const assignments = Object.entries(resolveAgentLaunchEnv(plan)).map(
     ([name, value]) => `${name}=${shellQuote(value)}`
   );
   if (assignments.length === 0) return plan.command;

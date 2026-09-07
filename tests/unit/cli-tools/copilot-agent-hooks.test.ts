@@ -204,9 +204,12 @@ describe('the launch command', () => {
   it('carries the correlation keys into the agent’s environment', async () => {
     await startSession('copilot-2');
 
+    // `CM_HOOK_PORT` and `CM_PORT` are different questions and both are on the
+    // line: the first is where copilot's relay posts (#1904), the second is where
+    // a `commandmate` typed inside copilot resolves to (#2403).
     expect(await sentCommand()).toBe(
       `CM_AGENT_WORKTREE_ID='${WORKTREE_ID}' CM_AGENT_INSTANCE_ID='copilot-2' ` +
-        `CM_HOOK_PORT='3210' copilot`
+        `CM_HOOK_PORT='3210' CM_PORT='3210' copilot`
     );
   });
 
@@ -217,12 +220,15 @@ describe('the launch command', () => {
     expect(existsSync(join(home, 'config.json'))).toBe(false);
   });
 
-  it('is byte-for-byte the pre-#1761 command when injection is switched off', async () => {
+  it('is the pre-#1761 command behind the server port when injection is off', async () => {
+    // Byte-for-byte until #2403 added the port, which is not hook injection: it
+    // is which CommandMate this agent belongs to, and switching hooks off does
+    // not make that question go away.
     process.env.CM_AGENT_HOOKS_INJECT = '0';
 
     await startSession('copilot-2');
 
-    expect(await sentCommand()).toBe('copilot');
+    expect(await sentCommand()).toBe("CM_PORT='3210' copilot");
     expect(existsSync(join(home, 'settings.json'))).toBe(false);
   });
 
@@ -234,6 +240,6 @@ describe('the launch command', () => {
 
     await startSession();
 
-    expect(await sentCommand()).toBe('copilot');
+    expect(await sentCommand()).toBe("CM_PORT='3210' copilot");
   });
 });

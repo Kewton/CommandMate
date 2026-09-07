@@ -62,9 +62,23 @@ function makeTempDir(prefix: string): string {
 
 const TARGET = { worktreeId: 'wt-2251', cliToolId: 'command-code' as const, instanceId: 'command-code' };
 
+/**
+ * The port `renderAgentLaunchCommand` states on every launch line since #2403.
+ *
+ * A pane inherits whichever `CM_PORT` the tmux server's global environment
+ * carries — the port of whatever CommandMate started that tmux server — so the
+ * launching server pins its own, and a `commandmate` typed inside the agent
+ * resolves to the server that launched it. Fixed here so the byte-pins below do
+ * not depend on the `CM_PORT` of the machine running the tests.
+ */
+const SERVER_PORT = '60301';
+const PORT_ASSIGNMENT = `CM_PORT='${SERVER_PORT}'`;
+
+
 beforeEach(() => {
   worktree = makeTempDir('cmate-2251-wt-');
   vi.stubEnv('CM_AGENT_HOOKS_INJECT', '1');
+  vi.stubEnv('CM_PORT', SERVER_PORT);
 });
 
 afterEach(() => {
@@ -404,7 +418,7 @@ describe('[#2251] the launch line', () => {
     expect(plan.env.CM_HOOK_URL).toContain('worktreeId=wt-2251');
     expect(plan.env.CM_HOOK_URL).toContain('tool=command-code');
     expect(renderAgentLaunchCommand(plan)).toBe(
-      `CM_HOOK_URL='${plan.env.CM_HOOK_URL}' '/usr/local/bin/commandcode'`
+      `CM_HOOK_URL='${plan.env.CM_HOOK_URL}' ${PORT_ASSIGNMENT} '/usr/local/bin/commandcode'`
     );
   });
 
@@ -421,9 +435,10 @@ describe('[#2251] the launch line', () => {
     expect(plan.env).toEqual({});
     expect(plan.settingsPath).toBeNull();
     expect(existsSync(getCommandCodeSettingsPath(worktree))).toBe(false);
-    // The rendered line grows no leading space, which is what makes the Phase A
-    // launch line byte-identical.
-    expect(renderAgentLaunchCommand(plan)).toBe('commandcode');
+    // Injection off means no correlation variable, but #2403's port is not
+    // hook injection — an agent whose hooks are switched off still has to reach
+    // the right server when someone types `commandmate` inside it.
+    expect(renderAgentLaunchCommand(plan)).toBe(`${PORT_ASSIGNMENT} commandcode`);
   });
 
   it('refuses to inject for an instance id the receiver would reject', () => {

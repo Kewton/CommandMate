@@ -53,6 +53,17 @@ import {
   type CodexHookSettings,
 } from '@/lib/hooks/sources/codex/hooks-config';
 
+/**
+ * What `renderAgentLaunchCommand` appends to every line since #2403.
+ *
+ * This suite deletes `CM_PORT` (see {@link MANAGED_ENV}), so `getServerPort()`
+ * falls back to 3000 — and #2403 pins the fallback too, on purpose: a server
+ * given no `CM_PORT` really is listening on 3000, while the pane it launches an
+ * agent into can still have inherited a different server's port from the tmux
+ * server's global environment.
+ */
+const PORT_ASSIGNMENT = "CM_PORT='3000'";
+
 const TARGET = { worktreeId: 'wt-alpha', cliToolId: 'codex' } as const;
 const TARGET_2 = { worktreeId: 'wt-alpha', cliToolId: 'codex', instanceId: 'codex-2' } as const;
 
@@ -493,10 +504,16 @@ describe('the launch command', () => {
   });
 
   it('falls back to the bare command when the ids could not be used', () => {
-    expect(line('codex', { worktreeId: '../etc', cliToolId: 'codex' })).toBe('codex');
+    // "Bare" means no hook configuration: no `CODEX_HOME`, no correlation URL.
+    // The server port is not hook configuration and stays (#2403) — an agent
+    // whose hooks could not be set up still has to reach the right CommandMate
+    // when someone types `commandmate` inside it.
+    expect(line('codex', { worktreeId: '../etc', cliToolId: 'codex' })).toBe(
+      `${PORT_ASSIGNMENT} codex`
+    );
     expect(
       line('codex', { worktreeId: 'wt-alpha', cliToolId: 'codex', instanceId: 'a b' })
-    ).toBe('codex');
+    ).toBe(`${PORT_ASSIGNMENT} codex`);
   });
 
   it('falls back to the bare command when the file cannot be written', () => {
@@ -504,6 +521,8 @@ describe('the launch command', () => {
     // a regular file makes the directory creation fail.
     const blocked = join(home, 'blocked');
     writeFileSync(blocked, 'not a directory');
-    expect(line('codex', TARGET, { codexHome: join(blocked, 'inner') })).toBe('codex');
+    expect(line('codex', TARGET, { codexHome: join(blocked, 'inner') })).toBe(
+      `${PORT_ASSIGNMENT} codex`
+    );
   });
 });
