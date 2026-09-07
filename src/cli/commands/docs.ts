@@ -22,6 +22,46 @@ import {
   readSection,
   searchDocs,
 } from '../utils/docs-reader';
+import { AGENT_DELEGATION_GUIDE } from '../docs/agent-operations';
+
+/**
+ * Sections this command carries itself (Issue #2376).
+ *
+ * `docs-reader.ts` owns the section registry, and it is not in this Issue's
+ * change scope, so the delegation guide is registered here instead: the reader
+ * stays the authority on every section it already serves, and this one extra
+ * entry is resolved before the reader is consulted. Everything the reader does
+ * for a section — listing, reading, searching — is done for this one too, just
+ * a layer up.
+ *
+ * The next change to touch `docs-reader.ts` should fold this into
+ * `EMBEDDED_SECTIONS` and delete the three branches below.
+ */
+const LOCAL_SECTIONS: Record<string, string> = {
+  delegation: AGENT_DELEGATION_GUIDE,
+};
+
+/** Every section name, the reader's plus {@link LOCAL_SECTIONS}. */
+function allSectionNames(): string[] {
+  return [...getAvailableSections(), ...Object.keys(LOCAL_SECTIONS)];
+}
+
+/**
+ * Search {@link LOCAL_SECTIONS} the way `searchDocs` searches the reader's own:
+ * case-insensitive substring match, one entry per section with the matching
+ * lines.
+ *
+ * @param query - Search query, already length-checked by `searchDocs`
+ */
+function searchLocalSections(query: string): Array<{ section: string; matches: string[] }> {
+  const lower = query.toLowerCase();
+  const results: Array<{ section: string; matches: string[] }> = [];
+  for (const [section, content] of Object.entries(LOCAL_SECTIONS)) {
+    const matches = content.split('\n').filter(line => line.toLowerCase().includes(lower));
+    if (matches.length > 0) results.push({ section, matches });
+  }
+  return results;
+}
 
 /**
  * Create the docs command.
@@ -35,7 +75,7 @@ export function createDocsCommand(): Command {
     .option('-a, --all', 'Show all available section names')
     .action((options: DocsOptions) => {
       if (options.all) {
-        const sections = getAvailableSections();
+        const sections = allSectionNames();
         console.log('Available documentation sections:');
         console.log('');
         sections.forEach(s => console.log(`  - ${s}`));
@@ -45,11 +85,17 @@ export function createDocsCommand(): Command {
       }
 
       if (options.section) {
+        const local = LOCAL_SECTIONS[options.section];
+        if (local !== undefined) {
+          console.log(local);
+          process.exit(ExitCode.SUCCESS);
+        }
+
         if (!isValidSection(options.section)) {
           console.error(`Unknown section: ${options.section}`);
           console.error('');
           console.error('Available sections:');
-          getAvailableSections().forEach(s => console.error(`  - ${s}`));
+          allSectionNames().forEach(s => console.error(`  - ${s}`));
           process.exit(ExitCode.UNEXPECTED_ERROR);
         }
 
@@ -65,7 +111,7 @@ export function createDocsCommand(): Command {
 
       if (options.search) {
         try {
-          const results = searchDocs(options.search);
+          const results = [...searchDocs(options.search), ...searchLocalSections(options.search)];
           if (results.length === 0) {
             console.log(`No results found for: "${options.search}"`);
           } else {
@@ -85,7 +131,7 @@ export function createDocsCommand(): Command {
       }
 
       // No option specified: show help
-      const sections = getAvailableSections();
+      const sections = allSectionNames();
       console.log('CommandMate Documentation');
       console.log('');
       console.log('Available sections:');

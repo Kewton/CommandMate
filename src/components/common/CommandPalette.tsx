@@ -9,6 +9,8 @@
  *     shared WorktreesCache (always fresh + auto-retried, single poller per
  *     Issue #709); each row shows a StatusDot (Issue #1051). Running sessions
  *     sort first; the group is omitted while the cache reports an error.
+ *   - Delegate (Issue #2376): typed as `/delegate`, lists every worktree x agent
+ *     instance and inserts a delegation brief into the composer on screen.
  *   - Actions: theme toggle, PC display-size switching, repository sync,
  *     language switch, open GitHub.
  *
@@ -24,8 +26,8 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { useRouter } from 'next/navigation';
-import { useTranslations } from 'next-intl';
+import { usePathname, useRouter } from 'next/navigation';
+import { useLocale, useTranslations } from 'next-intl';
 import { useTheme } from 'next-themes';
 import { Command } from 'cmdk';
 import {
@@ -46,6 +48,7 @@ import {
   Languages,
   Github,
   Keyboard,
+  Send,
 } from 'lucide-react';
 import { cn } from '@/lib/utils/cn';
 import { Z_INDEX } from '@/config/z-index';
@@ -59,6 +62,10 @@ import { repositoryApi } from '@/lib/api-client';
 import { StatusDot, type StatusDotStatus } from '@/components/ui/StatusDot';
 import { Kbd } from '@/components/ui/Kbd';
 import { useToast } from '@/components/common/Toast';
+import { buildDelegationBrief } from '@/lib/cli/command-reference';
+import { getCliToolDisplayName, type AgentInstance } from '@/lib/cli-tools/types';
+import type { CliReferenceResponse } from '@/app/api/worktrees/[id]/cli-reference/route';
+import type { ResolveTargetResponse } from '@/app/api/worktrees/[id]/resolve-target/route';
 import type { Worktree } from '@/types/models';
 
 /**
@@ -184,6 +191,247 @@ const ITEM_CLASS = cn(
 
 const ICON_CLASS = 'shrink-0 text-muted-foreground';
 
+
+// ============================================================================
+// Delegation brief delivery (Issue #2376)
+// ============================================================================
+
+/**
+ * The composer textarea, as `MessageInput` renders it.
+ *
+ * A `data-testid` used as a production selector on purpose: it is the only
+ * stable handle the composer publishes, it is already load-bearing for the
+ * suite, and the alternatives — a class name, a DOM shape — are what silently
+ * stop matching.
+ */
+const COMPOSER_TEXTAREA_SELECTOR = '[data-testid="message-input-textarea"]';
+
+/** What `ChatSurface` publishes about whose transcript is on screen. */
+const CHAT_INSTANCE_SELECTOR = '[data-instance-id]';
+
+/**
+ * The instance whose transcript is currently on screen, or null when nothing
+ * says.
+ *
+ * This is the whole of the "do not delegate to yourself" test, and it is
+ * allowed to answer null. The composer carries no instance id of its own, and
+ * in terminal mode there is no chat surface at all — so callers must read null
+ * as "cannot prove this is self", never as "this is not self".
+ *
+ * Exported because the roster pane asks the same question about its own rows.
+ */
+export function readVisibleChatInstanceId(): string | null {
+  if (typeof document === 'undefined') return null;
+  const el = document.querySelector(CHAT_INSTANCE_SELECTOR);
+  const value = el?.getAttribute('data-instance-id')?.trim();
+  return value ? value : null;
+}
+
+/**
+ * Put `text` into the message composer that is on screen.
+ *
+ * ## Why the DOM rather than a React callback
+ *
+ * The screen's "insert into the composer" callback is not reachable from either
+ * place that needs it. `WorktreeChatSendProvider`'s `insertToComposer`
+ * (Issue #2213) is rendered by the MOBILE branch of `WorktreeDetailRefactored`
+ * only — PC returns before it and threads `handleInsertToMessage` down as props
+ * that `AgentInstancesPane` is not given — and this palette is mounted by
+ * `AppShell` as a SIBLING of the page, so no provider inside the page is an
+ * ancestor of it at all. Writing to the textarea is what both can do, and it is
+ * the same event a keystroke produces: the value goes in through the native
+ * setter and an `input` event is dispatched, so React's `onChange` runs and the
+ * controlled state updates.
+ *
+ * Appends rather than replaces, with a blank line between, so a half-typed
+ * message is not destroyed by a menu item.
+ *
+ * ## Why it lives here
+ *
+ * Both callers can import this module for free — the palette is already in
+ * every page's shell — while importing the roster pane into the shell would put
+ * a screen's worth of component behind every route. It is not in
+ * `lib/cli/command-reference.ts` beside {@link buildDelegationBrief} for a
+ * harder reason: `commandmate peers` imports that module, and the CLI build has
+ * no DOM lib.
+ *
+ * @param text - The brief to insert
+ * @returns true when a composer was found and written to
+ */
+export function insertIntoVisibleComposer(text: string): boolean {
+  if (typeof document === 'undefined') return false;
+
+  const composers = Array.from(
+    document.querySelectorAll<HTMLTextAreaElement>(COMPOSER_TEXTAREA_SELECTOR),
+  );
+  if (composers.length === 0) return false;
+
+  // The focused one when the user is in a composer (a PC split renders one
+  // each), otherwise the first in document order.
+  const active = document.activeElement;
+  const target = composers.find((el) => el === active) ?? composers[0];
+
+  const existing = target.value;
+  const next = existing.trim() === '' ? text : `${existing}\n\n${text}`;
+
+  const setter = Object.getOwnPropertyDescriptor(
+    HTMLTextAreaElement.prototype,
+    'value',
+  )?.set;
+  if (setter) {
+    setter.call(target, next);
+  } else {
+    // Any engine that hides the prototype descriptor: a plain assignment still
+    // updates the element, and the dispatch below still tells React about it.
+    target.value = next;
+  }
+  target.dispatchEvent(new Event('input', { bubbles: true }));
+
+  target.focus();
+  target.setSelectionRange(next.length, next.length);
+  return true;
+}
+
+/** The worktree the browser is looking at, from `/worktrees/<id>`, or null. */
+export function worktreeIdFromPath(pathname: string | null): string | null {
+  const match = /^\/worktrees\/([^/?#]+)/.exec(pathname ?? '');
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+/**
+ * Fetch what only the server can say about how a command is spelled, and build
+ * the brief.
+ *
+ * Both reads, every time, and no fallback to what the browser already knows:
+ * the binary name and the `CM_PORT=` prefix exist only in the server process,
+ * and the instance id must be the RESOLVED one (Issue #1925 is the record of
+ * what two authorities answering that question cost). A read that fails
+ * produces no brief rather than a plausible, unverified one.
+ *
+ * @param worktreeId - Worktree the brief addresses
+ * @param instance - Roster row the brief was requested from
+ * @param locale - UI locale
+ * @returns The brief, or null when either read failed
+ */
+export async function fetchDelegationBrief(
+  worktreeId: string,
+  instance: AgentInstance,
+  locale: string,
+): Promise<string | null> {
+  try {
+    const [referenceResponse, targetResponse] = await Promise.all([
+      fetch(`/api/worktrees/${worktreeId}/cli-reference`),
+      fetch(
+        `/api/worktrees/${worktreeId}/resolve-target?instance=${encodeURIComponent(instance.id)}`,
+      ),
+    ]);
+    if (!referenceResponse.ok || !targetResponse.ok) return null;
+    const [reference, target] = (await Promise.all([
+      referenceResponse.json(),
+      targetResponse.json(),
+    ])) as [CliReferenceResponse, ResolveTargetResponse];
+
+    return buildDelegationBrief({
+      binary: reference.binary,
+      worktreeId: reference.worktreeId,
+      instanceId: target.instanceId,
+      instanceLabel: instance.alias,
+      toolLabel: getCliToolDisplayName(target.cliToolId),
+      portPrefix: reference.portPrefix,
+      locale,
+    });
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The delegation feature's UI strings, in the two locales the app ships.
+ *
+ * Exported because the roster pane's menu item is the same feature reached from
+ * the other end, and two copies of "cannot delegate to yourself" is two chances
+ * for one of them to stop saying it.
+ *
+ * Inline rather than in `locales/`, for the same reason the brief's own text is
+ * (see {@link buildDelegationBrief}): this feature's wording and its behaviour
+ * arrived together, and a key that resolves to its own name renders a command
+ * called `commandPalette.delegate.heading` in a list of real ones. The i18n
+ * guard (Issue #1271) exists to stop English being FIXED at module scope — both
+ * locales are present here and the resolution happens at render, from
+ * `useLocale()`, so the failure it guards against cannot occur. Moving these
+ * into `locales/{en,ja}.json` is the right follow-up and needs only a key swap.
+ */
+/* eslint-disable no-restricted-syntax -- both locales are declared here and
+   resolved at render time via useLocale(); see the note above. */
+export const DELEGATE_TEXT = {
+  ja: {
+    heading: '委任 (/delegate)',
+    menuItem: '委任方法をコンポーザーに挿入',
+    inserted: '委任方法をコンポーザーに挿入しました',
+    self: '自分自身には委任できません',
+    noComposer: 'コンポーザーが見つかりません。worktree 画面を開いてから実行してください',
+    failed: '委任方法を作成できませんでした',
+  },
+  en: {
+    heading: 'Delegate (/delegate)',
+    menuItem: 'Insert delegation brief into the composer',
+    inserted: 'Delegation brief inserted into the composer',
+    self: 'That is this session — nothing to delegate to',
+    noComposer: 'No composer on screen. Open a worktree screen and try again',
+    failed: 'Could not build the delegation brief',
+  },
+} as const;
+/* eslint-enable no-restricted-syntax */
+
+/** Every worktree x roster instance, as delegation targets. */
+interface DelegateTarget {
+  worktree: Worktree;
+  instance: AgentInstance;
+}
+
+/**
+ * Flatten the worktrees cache into one row per agent instance.
+ *
+ * A worktree with no roster still has its primary instance — that is what
+ * `--instance` resolves to with no roster row at all (#868) — so it contributes
+ * one row named after its own CLI tool. One that declares no tool either
+ * contributes NO row: a brief naming the wrong agent is a message typed into a
+ * session that was never started.
+ */
+export function buildDelegateTargets(worktrees: Worktree[]): DelegateTarget[] {
+  const targets: DelegateTarget[] = [];
+  for (const worktree of worktrees) {
+    const roster: AgentInstance[] = worktree.agentInstances?.length
+      ? worktree.agentInstances
+      : worktree.cliToolId
+        ? [{
+            id: worktree.cliToolId,
+            cliTool: worktree.cliToolId,
+            alias: getCliToolDisplayName(worktree.cliToolId),
+            order: 0,
+          }]
+        : [];
+    for (const instance of roster) {
+      targets.push({ worktree, instance });
+    }
+  }
+  return targets;
+}
+
+/**
+ * Whether the palette should show the Delegate group for this query.
+ *
+ * Gated on the query rather than always shown: the group is one row per
+ * instance per worktree, which on an install with a dozen worktrees would bury
+ * Navigation and Actions under it on an empty query. `/` is enough to reveal it
+ * so the slash form is discoverable by typing one character.
+ */
+export function shouldShowDelegateGroup(search: string): boolean {
+  const query = search.trim().toLowerCase();
+  if (query === '') return false;
+  return query.startsWith('/') || query.includes('delegate');
+}
+
 /** A palette action descriptor, rendered in Actions and replayable from Recent. */
 interface ActionDescriptor {
   id: string;
@@ -208,6 +456,10 @@ export function CommandPalette() {
   const { open, setOpen } = useCommandPalette();
   const { setOpen: setShortcutsOpen } = useKeyboardShortcuts();
   const router = useRouter();
+  // Issue #2376: which worktree the browser is on, so "delegate to myself" can
+  // be recognised. Half the test; the other half is the visible chat surface.
+  const pathname = usePathname();
+  const locale = useLocale();
   const t = useTranslations('commandPalette');
   const tCommon = useTranslations('common');
   const { theme, setTheme } = useTheme();
@@ -296,6 +548,36 @@ export function CommandPalette() {
     [setOpen]
   );
 
+  /**
+   * Insert the delegation brief for one session into the composer on screen
+   * (Issue #2376).
+   *
+   * Refuses the caller's own session. "Own" is (this worktree) AND (the
+   * instance whose transcript is visible): the second half can be unknown — in
+   * terminal mode nothing publishes it — and an unknown one does not block the
+   * insert, because refusing on a guess would make the menu item look broken
+   * whenever the chat surface happens to be hidden.
+   */
+  const handleDelegate = useCallback(
+    async (target: DelegateTarget) => {
+      const text = DELEGATE_TEXT[locale === 'ja' ? 'ja' : 'en'];
+      const onThisWorktree = worktreeIdFromPath(pathname) === target.worktree.id;
+      if (onThisWorktree && readVisibleChatInstanceId() === target.instance.id) {
+        showToast(text.self, 'info');
+        return;
+      }
+
+      const brief = await fetchDelegationBrief(target.worktree.id, target.instance, locale);
+      if (brief === null) {
+        showToast(text.failed, 'error');
+        return;
+      }
+      const inserted = insertIntoVisibleComposer(brief);
+      showToast(inserted ? text.inserted : text.noComposer, inserted ? 'success' : 'error');
+    },
+    [locale, pathname, showToast],
+  );
+
   const handleSyncRepositories = useCallback(async () => {
     try {
       await repositoryApi.sync();
@@ -317,6 +599,12 @@ export function CommandPalette() {
   const showWorktrees = worktrees.length > 0;
   const showWorktreesLoading =
     !worktreesError && worktreesLoading && worktrees.length === 0;
+
+  // Issue #2376: one row per worktree x agent instance, shown only when the
+  // query asks for them (see shouldShowDelegateGroup).
+  const showDelegate = shouldShowDelegateGroup(search);
+  const delegateTargets = showDelegate ? buildDelegateTargets(worktrees) : [];
+  const delegateText = DELEGATE_TEXT[locale === 'ja' ? 'ja' : 'en'];
 
   const sortedWorktrees = sortWorktrees(worktrees);
   const visibleWorktrees = isEmptyQuery
@@ -589,6 +877,33 @@ export function CommandPalette() {
                               size="sm"
                               className={repo ? 'ml-2' : 'ml-auto'}
                             />
+                          </Command.Item>
+                        );
+                      })}
+                    </Command.Group>
+                  )}
+
+                  {delegateTargets.length > 0 && (
+                    <Command.Group heading={delegateText.heading}>
+                      {delegateTargets.map((target) => {
+                        const branch = target.worktree.branch || target.worktree.name;
+                        return (
+                          <Command.Item
+                            key={`${target.worktree.id}:${target.instance.id}`}
+                            data-testid={`palette-delegate-${target.worktree.id}-${target.instance.id}`}
+                            // `/delegate` is part of the searchable value, not a
+                            // parsed prefix: cmdk scores the query against this
+                            // string, so the slash form has to be IN it for
+                            // typing `/delegate` to reach the row at all.
+                            value={`/delegate ${target.worktree.id} ${target.instance.id} ${target.instance.alias} ${branch}`}
+                            onSelect={() => runCommand(() => { void handleDelegate(target); })}
+                            className={ITEM_CLASS}
+                          >
+                            <Send size={16} className={ICON_CLASS} aria-hidden="true" />
+                            <span className="truncate">{target.instance.alias}</span>
+                            <span className="ml-auto truncate pl-2 text-xs text-muted-foreground">
+                              {branch} / {target.instance.id}
+                            </span>
                           </Command.Item>
                         );
                       })}

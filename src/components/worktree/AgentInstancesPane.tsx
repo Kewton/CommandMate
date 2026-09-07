@@ -16,7 +16,7 @@
 'use client';
 
 import React, { useState, useCallback, useEffect, useMemo, memo } from 'react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import {
   GripVertical,
   ChevronUp,
@@ -29,6 +29,7 @@ import {
   Radio,
   Check,
   Terminal,
+  Send,
 } from 'lucide-react';
 import {
   CLI_TOOL_IDS,
@@ -60,6 +61,17 @@ import { AgentUpdatesCard } from '@/components/settings';
 import { Spinner } from '@/components/ui/Spinner';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { TruncationTooltip } from '@/components/common/TruncationTooltip';
+import { useToast } from '@/components/common/Toast';
+// Issue #2376: the delegation brief, and the one way a component on this screen
+// can reach the composer. Imported from the palette because that module is
+// already in every page's shell — see `insertIntoVisibleComposer` for why the
+// screen's own `onInsertToComposer` is out of reach from here.
+import {
+  DELEGATE_TEXT,
+  fetchDelegationBrief,
+  insertIntoVisibleComposer,
+  readVisibleChatInstanceId,
+} from '@/components/common/CommandPalette';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -255,6 +267,8 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
   className = '',
 }: AgentInstancesPaneProps) {
   const t = useTranslations('schedule');
+  const locale = useLocale();
+  const { showToast } = useToast();
   const tCommon = useTranslations('common');
   // Issue #1783: the model strings live in the `worktree` namespace beside the
   // other session-status wording, not in `schedule` with the roster editor's.
@@ -281,6 +295,39 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
   // an instance id rather than a boolean per row so at most one panel — and so
   // at most one pair of reads — can ever be live.
   const [cliCommandsFor, setCliCommandsFor] = useState<string | null>(null);
+
+  /**
+   * Insert "here is how you delegate to this session" into the composer
+   * (Issue #2376).
+   *
+   * The row is the TARGET (session B); the composer belongs to whichever
+   * session the operator is talking to (session A). Refused when the two are
+   * the same — "own" being the instance whose transcript is visible, which in
+   * terminal mode nothing publishes, so an unknown answer does not block the
+   * insert rather than making the item look broken.
+   *
+   * The brief itself is built from two server reads, never from this row: the
+   * binary name and port prefix exist only in the server process, and the
+   * `--instance` value has to be the RESOLVED one (see
+   * {@link InstanceCliCommandsModal} for what two authorities on that cost).
+   */
+  const handleDelegate = useCallback(
+    async (inst: AgentInstance) => {
+      const text = DELEGATE_TEXT[locale === 'ja' ? 'ja' : 'en'];
+      if (readVisibleChatInstanceId() === inst.id) {
+        showToast(text.self, 'info');
+        return;
+      }
+      const brief = await fetchDelegationBrief(worktreeId, inst, locale);
+      if (brief === null) {
+        showToast(text.failed, 'error');
+        return;
+      }
+      const inserted = insertIntoVisibleComposer(brief);
+      showToast(inserted ? text.inserted : text.noComposer, inserted ? 'success' : 'error');
+    },
+    [locale, showToast, worktreeId],
+  );
 
   // Issue #2054: read before the first row is built so every row resolves from
   // one snapshot rather than from a map that could change mid-render.
@@ -624,6 +671,20 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
                   </button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
+                  {/* Issue #2376: the one item here that does NOT mutate the
+                      roster. It is in the kebab rather than beside the CLI-
+                      commands icon because it is an action ("put this text
+                      there"), not a reference panel to read. */}
+                  <DropdownMenuItem
+                    data-testid={`agent-instance-delegate-${inst.id}`}
+                    onSelect={() => {
+                      void handleDelegate(inst);
+                    }}
+                  >
+                    <Send className="w-4 h-4" />
+                    {DELEGATE_TEXT[locale === 'ja' ? 'ja' : 'en'].menuItem}
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
                   <DropdownMenuItem
                     data-testid={`agent-instance-move-up-${inst.id}`}
                     disabled={index === 0}

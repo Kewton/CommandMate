@@ -381,8 +381,12 @@ describe('send option validation happens before the task row is created', () => 
       error: 'Error: Invalid agent. Must be one of: ',
     },
     {
+      // Issue #2376 widened `--instance` to accept a roster ALIAS, and an alias
+      // is free text — `bad instance!` is a possible one, so it is no longer
+      // rejected here. What still is: a value no alias could be (longer than
+      // the alias field allows).
       name: '--instance',
-      argv: ['wt1', ...CONTRACT, '--instance', 'bad instance!'],
+      argv: ['wt1', ...CONTRACT, '--instance', 'x '.repeat(30)],
       error: 'Error: Invalid --instance.',
     },
     {
