@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **test(mobile): スマホの Agent ペインの「委任方法をコンポーザーに挿入」を実機経路で固定し、この面に delegate 実装が無いのは継承だと明記** (#2382): Issue は `MobileAgentInstancesPane.tsx` に `delegat` が 0 件であることから「スマホ Agent ペインには無い」と判断していたが、このペインは共有 roster エディタ `AgentInstancesPane` をそのまま埋め込んでおり、#2376 の行メニュー項目 `agent-instance-delegate-<id>`・`fetchDelegationBrief`・`insertIntoVisibleComposer`・`DELEGATE_TEXT` はスマホでも最初から同じ 1 実装で動いていた（隔離 dev サーバ・390×844・Playwright で実測: Tools → Agent の Codex 行 → 挿入で下端に常駐するコンポーザーに PC と同じ定型文が入り、`--instance codex` は `/resolve-target` の答えと一致、Terminal / Chat タブへ切り替えても保持される）。二重実装は Issue 自身が禁じているので項目は増やさず、`tests/unit/components/worktree/MobileAgentInstancesPane.test.tsx` にこのラッパー経由の 5 件（項目の存在と文言の一致／挿入と `--instance` がサーバの答えであること／画面上のセッションの行の拒否と読み取り 0 件／別行は拒否されないこと／コンポーザー無しは例外でなく `noComposer` トースト）を追加し、期待値 3 箇所の変異でそれぞれ赤になることを確認した。あわせて module コメントに、行アクションは共有ペイン由来で `grep delegat` が 0 件なのは想定どおりであること、スマホではコンポーザーが全タブ下端に常駐するので「コンポーザー無し」は worktree 画面では起きないこと、「自分には委任しない」判定は chat surface の `data-instance-id` を読むが Agent ペイン（Tools タブ）と chat surface は同時に表示されないため**スマホでは不発**（実機で Claude タブ表示中に Claude 行から挿入できることを確認、PC の terminal モードと同じ設計上の帰結）であることを書いた。**未達 2 点（scope 外、#2395 で対応）**: (1) 受入条件「表示中の自分自身の行にはメニュー項目が出ない」は、メニューが共有ペインのもので、かつ下端コンポーザーの送り先 `activeInstanceId` がこのペインに届いていないため満たせない — `NotesAndLogsPane` 経由で `activeInstanceId` を通し共有ペインに self 行を隠す prop を足すか、モバイルシェルがコンポーザーの送り先を `data-instance-id` 相当で公開する必要がある。(2) `/delegate` はスマホの worktree 画面でも同じ定型文を入れる（⌘K で開いて実測）が、`/worktrees/*` では `GlobalMobileNav` が隠れ `Header` のトリガは PC 限定なので**スマホにはパレットを開く画面上の入口が無く**、入口のある Home からは `noComposer` トーストになる。
+
 ## [0.32.0] - 2026-09-07
 
 > **Highlight**: セッション間の委任が「頼むだけ」で完結するようになりました。往復に 3 コマンドと exit code の分岐が要ったところを `commandmate ask` の 1 本にまとめ（#2376）、さらに `send --reply-to` / `ask --async` で**返答がサーバから依頼元のコンポーザーへ自動で届く**ようにしています（#2377、実測 14 秒で配送）。加えて、その委任機能を実機 UAT にかけて見つけた 3 件の欠陥を同じリリースで塞ぎました — codex で `ask` が返答ではなく空のコンポーザーを返す問題（3/3 再現）、relay の連鎖深度が常に 1 のままでループ上限に到達できない問題、配送のたびに History へ同じ行が 2 本残る問題です。
