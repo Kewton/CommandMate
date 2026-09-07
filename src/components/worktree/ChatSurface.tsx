@@ -324,11 +324,12 @@ export interface ChatSurfaceLiveState {
    * A dismiss-only overlay is on the pane (Issue #2369) — its footer offers
    * `Esc to close` and nothing else.
    *
-   * `undefined` is NOT `false` here, and the difference is load-bearing: the
-   * pane components that build this object predate the field, and a daemon
-   * older than #2369 does not send it either. See {@link resolveBlockedReason},
-   * which falls back to reading the frame when this is absent rather than
-   * treating the absence as "no panel".
+   * `undefined` is NOT `false` here, and the difference is load-bearing: a
+   * daemon older than #2369 does not send this field at all. (The two pane
+   * components that build this object did not copy it across either, until
+   * Issue #2373; they do now.) See {@link resolveBlockedReason}, which falls
+   * back to reading the frame when this is absent rather than treating the
+   * absence as "no panel".
    */
   isDismissablePanelActive?: boolean;
   isUnclassifiedActive?: boolean;
@@ -486,15 +487,20 @@ export function isTurnSettled(messages: readonly ChatMessage[], turnKey: string)
  * that offers exactly one key, and whose old answer — the `unclassified` card's
  * hatch plus answer keys — was eighteen buttons for a one-key panel.
  *
- * It is the only member that can be resolved without a server flag, and it has
- * to be: `isDismissablePanelActive` is published by `buildCurrentOutput` and
- * carried by both delivery paths, but the two components that build this
- * object — `TerminalSplitPaneContent` and `MobileTerminalTab` — construct it
- * field by field and do not yet copy it across. Until they do, the flag arrives
- * as `undefined` on the very surface it was added for. `frame` is already this
- * component's prop (the card draws it), so the fallback costs nothing and shares
- * the detector's own predicate rather than restating it. When the field does
- * arrive, it wins — including when it arrives as `false`.
+ * It is also the only member that CAN be resolved without a server flag, and it
+ * keeps that fallback on purpose. `isDismissablePanelActive` is published by
+ * `buildCurrentOutput`, carried by both delivery paths, and — since Issue #2373 —
+ * copied into this object by both of the components that build it field by field
+ * (`TerminalSplitPaneContent`, `MobileTerminalTab`), so the server's verdict is
+ * normally what this reads and the frame is normally not consulted at all.
+ *
+ * The fallback is for the case where it is not: a daemon older than #2369
+ * publishes no such field, and its absence arrives here as `undefined`, which
+ * means "nobody said" — never "no panel". That is why the expression below is
+ * `??` and not `||`: an explicit `false` is an ANSWER, from a server that knows,
+ * and it outranks the frame. `frame` is already this component's prop (the card
+ * draws it), so reading it costs nothing and shares the detector's own predicate
+ * rather than restating it.
  */
 export function resolveBlockedReason(
   live: ChatSurfaceLiveState,
@@ -504,8 +510,8 @@ export function resolveBlockedReason(
   if (live.isSelectionListActive) return 'selectionList';
   // Issue #2369. `??`, not `||`: an explicit `false` from a server that knows
   // the field is an ANSWER and must not be overridden by a frame read, while
-  // `undefined` — a pane component or a daemon that predates the field — is the
-  // absence of one, and the frame is then the only thing that knows.
+  // `undefined` — a daemon that predates the field — is the absence of one, and
+  // the frame is then the only thing that knows.
   //
   // The fallback is the same expression the detector runs
   // (`hasDismissablePanelFooter`, imported from the module the tool rule reads
