@@ -1,0 +1,88 @@
+version: 1
+title: "Issue #2374: PCヘッダー上段にリポジトリタブ帯を追加しサイドバー開閉を永続化する（Phase1-3）"
+goal: |
+  Issue #2374 の追加対応（本体は commit 済み・全ゲート緑）。**残りは1点だけ**です。
+
+  ## やること
+  あなたが `src/components/layout/repository-tab-bar-copy.ts` に置いた 4 つの文言を、
+  正規の辞書へ移してください。そのファイル自身の docblock に書いたとおりの「pure move」です:
+
+  > the follow-up is a pure move: lift `REPOSITORY_TAB_BAR_COPY` into
+  > `locales/{en,ja}/common.json` as `repoTabBar.*`, swap this hook for
+  > `useTranslations('common')`, and delete the file.
+
+  当時 `locales/` を scope に入れていなかったのはオーケストレーター（私）の記述漏れです。
+  scope を広げたので、いま実施してください。
+
+  ## 具体的な作業
+  1. `locales/en/common.json` と `locales/ja/common.json` に `repoTabBar.*` を追加する
+     （キー構成は現在の `RepositoryTabBarCopy` と同じ: `settingLabel` と
+     `mode.always` / `mode.collapsed` / `mode.hidden` に相当するもの。既存の
+     `nav.*` / `sidebar.*` / `status.*` と同じ階層の作法に合わせる）
+     - **en と ja の両方**に入れること（片方だけだと i18n の対称性テストに落ちる）
+  2. `RepositoryTabBarModeSelector.tsx` を `useTranslations('common')` に差し替える
+  3. `src/components/layout/repository-tab-bar-copy.ts` を**削除**する
+     （`src/components/layout/index.ts` の export も併せて整理）
+  4. 既存テスト（`RepositoryTabBarModeSelector-2374.test.tsx` など）が
+     next-intl のモック経由で通るよう必要最小限だけ直す
+     - **注意**: このリポジトリの next-intl モックは補間 param を落とすことがあるため、
+       補間を使うキーを足す場合は補間の assert が空振りしないか確認すること
+
+  ## 制約
+  - **文言の内容（日本語・英語の文面そのもの）は変えないこと。** 移設だけです
+  - タブ帯の実装（`RepositoryTabBar.tsx` / `sidebar-utils.ts` / `SidebarContext.tsx` /
+    `AppShell.tsx` / `Sidebar.tsx` / `CommandPalette.tsx`）は変更しないこと。既に裁定合格しています
+  - 既存の locale キーを変更・削除しないこと（追加のみ）
+
+  ## 受入条件
+  - [ ] `locales/en/common.json` と `locales/ja/common.json` の両方に `repoTabBar.*` があり、
+        文面は移設前と同一
+  - [ ] `RepositoryTabBarModeSelector.tsx` が `useTranslations('common')` を使い、
+        `repository-tab-bar-copy.ts` への import が `src/` から消えている
+  - [ ] `src/components/layout/repository-tab-bar-copy.ts` が削除されている
+        （`git status` で D として出る）
+  - [ ] `npm run lint` / `npx tsc --noEmit` / `npm run test:unit` が exit 0
+
+  ## 前回の作業（完了済み・再実施は不要）
+  リポジトリタブ帯（`RepositoryTabBar.tsx` 699行・ポップオーバー・オーバーフロー）、
+  サイドバー開閉の永続化、`sidebar-utils` への共有規則の集約、Command Palette の
+  リポジトリ見出し、E2E とユニットテスト計 17 ファイルを commit 済み。全ゲート緑。
+  **この部分はやり直さないでください。**
+
+  ## 断片について
+  `dev-reports/changelog/issue-2374.md` と `dev-reports/module-reference/issue-2374.md` は
+  作成済みです。今回の移設に伴い module-reference 断片の
+  `repository-tab-bar-copy.ts` の新規行の記述が古くなるので、**その行を削除**し、
+  必要なら `RepositoryTabBarModeSelector.tsx` の行に「文言は `locales/*/common.json` の
+  `repoTabBar.*`」と追記してください（`CHANGELOG.md` と `docs/module-reference.md` の
+  本体は編集しないこと。scope 外です）。
+
+scope:
+  allow:
+    - "locales/en/common.json"
+    - "locales/ja/common.json"
+    - "src/contexts/SidebarContext.tsx"
+    - "src/components/layout/Sidebar.tsx"
+    - "src/components/layout/AppShell.tsx"
+    - "src/components/layout/**"
+    - "src/components/common/CommandPalette.tsx"
+    - "src/hooks/useWorktreeList.ts"
+    - "src/lib/sidebar-utils.ts"
+    - "src/types/sidebar.ts"
+    - "src/config/status-colors.ts"
+    - "src/config/pc-display-size.ts"
+    - "src/app/api/sidebar/**"
+    - "tests/unit/contexts/SidebarContext*.test.ts*"
+    - "tests/unit/components/layout/**"
+    - "tests/unit/components/common/CommandPalette*.test.tsx"
+    - "tests/unit/hooks/useWorktreeList*.test.ts"
+    - "tests/unit/lib/sidebar-utils*.test.ts"
+    - "tests/e2e/**"
+    - "dev-reports/changelog/issue-2374.md"
+    - "dev-reports/module-reference/issue-2374.md"
+  deny: []
+verify:
+  # 既定（省略）= 登録済み全ゲート
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true
