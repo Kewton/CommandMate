@@ -241,6 +241,7 @@ describe('[#2197] the Markdown body', () => {
           raw_content: [],
         })!,
       ],
+      started: true,
       closed: true,
       overflowed: false,
     };
@@ -258,6 +259,7 @@ describe('[#2197] the Markdown body', () => {
         readCodexRolloutItem({ type: 'HolographicPairProgramming', id: 'x' })!,
         readCodexRolloutItem({ type: 'ContextCompaction', id: 'c' })!,
       ],
+      started: true,
       closed: true,
       overflowed: false,
     };
@@ -310,6 +312,10 @@ describe('[#2197] reading a file that is being written', () => {
       '01a05a83-a87d-7362-80fe-027b7584e589',
       '01a05a84-76f2-7390-83f3-51ea1346a364',
     ]);
+    // Issue #2402: and it says which of the two it watched begin. The first
+    // one's `task_started` is on the far side of the window's first byte, so it
+    // is read as headless rather than as a turn that opened here.
+    expect(turns.map((turn) => turn.started)).toEqual([false, true]);
   });
 
   it('survives a line that is valid JSON but not a record', () => {
