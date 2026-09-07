@@ -42,6 +42,7 @@ import { v56_migrations } from './v56-gate-result-source';
 import { v57_migrations } from './v57-push-subscription-defaults-notice';
 import { v58_migrations } from './v58-agent-session-costs';
 import { v59_migrations } from './v59-opencode-instance-settings';
+import { v60_migrations } from './v60-session-relays';
 
 /**
  * Complete ordered list of all migrations.
@@ -89,4 +90,5 @@ export const migrations: Migration[] = [
   ...v57_migrations,
   ...v58_migrations,
   ...v59_migrations,
+  ...v60_migrations,
 ];

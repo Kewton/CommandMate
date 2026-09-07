@@ -126,7 +126,9 @@
 
 import React, { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { ArrowDown, Loader2, TerminalSquare } from 'lucide-react';
+import { ArrowDown, Forward, Loader2, TerminalSquare } from 'lucide-react';
+import { useSessionRelays } from '@/lib/relay/use-session-relays';
+import { resolveRelayBadges, resolveRelayStrip } from '@/lib/relay/relay-badges';
 import {
   ChatTranscript,
   CHAT_TRANSCRIPT_SCROLL_CONTAINER_TESTID,
@@ -958,6 +960,34 @@ export const ChatSurface = memo(function ChatSurface({
 
   const historyProps = history ?? {};
 
+  // Issue #2377: the system line for a delegation this session is part of.
+  //
+  // A STRIP rather than a transcript row, and the two are deliberately both
+  // there: the durable "delegated / replied" lines are `chat_messages` rows the
+  // server writes (the #2357 mechanism), so they scroll away with the
+  // conversation they belong to, while this says what is true RIGHT NOW and
+  // follows the ledger. Absent whenever nothing is open, which is the normal
+  // case — the phone's vertical budget (#2106) is not spent on a delegation
+  // that does not exist.
+  const relays = useSessionRelays(worktreeId);
+  const relayInstanceId = instanceId ?? cliToolId ?? null;
+  const relayStrip = useMemo(() => {
+    if (!relayInstanceId) return null;
+    return resolveRelayStrip(
+      resolveRelayBadges({
+        owed: relays.owedBy(relayInstanceId),
+        awaiting: relays.awaitedBy(relayInstanceId),
+        // The other end is normally another worktree, whose roster this surface
+        // has never read, so the id qualified by its worktree is the honest
+        // name — the same rule the relay header itself follows.
+        aliasOf: (endpoint) =>
+          endpoint.worktreeId === worktreeId
+            ? endpoint.instanceId
+            : `${endpoint.instanceId} @ ${endpoint.worktreeId}`,
+      }),
+    );
+  }, [relays, relayInstanceId, worktreeId]);
+
   return (
     <div
       ref={rootRef}
@@ -970,6 +1000,27 @@ export const ChatSurface = memo(function ChatSurface({
         .filter(Boolean)
         .join(' ')}
     >
+      {/* Issue #2377: the relay strip. Above the transcript because it is a
+          statement about the SESSION rather than about the conversation, and
+          `shrink-0` for the same reason the footer live region is. */}
+      {relayStrip && (
+        <div
+          data-testid="chat-surface-relay"
+          data-relay-tone={relayStrip.tone}
+          role="status"
+          className={`flex shrink-0 items-center gap-1.5 border-b border-border px-3 py-1 text-xs ${
+            relayStrip.tone === 'prompt'
+              ? 'bg-warning-subtle text-warning-foreground'
+              : 'bg-surface-2 text-muted-foreground'
+          }`}
+        >
+          <Forward size={12} className="shrink-0" aria-hidden="true" />
+          <span className="min-w-0 flex-1 truncate">
+            {t(`relay.${relayStrip.key}`, relayStrip.params)}
+          </span>
+        </div>
+      )}
+
       {/* Transcript. `relative` so the jump-to-latest chip can float over its
           bottom edge instead of taking height from it — the phone's terminal tab
           has ~33px of vertical budget (Issue #2106) and this surface shares it. */}

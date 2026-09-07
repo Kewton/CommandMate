@@ -13,12 +13,18 @@
  * still putting `ask` / `whoami` / `peers` on `--help`, on `help <cmd>` and on
  * the parse path. `program.addCommand()` is commander's own composition API and
  * the resulting program is indistinguishable from one that declared them inline.
+ *
+ * Issue #2377 adds `relays` to that group, for the same reason: it is the other
+ * half of the same feature — what a delegation left standing — and `send`'s and
+ * `ask`'s `--reply-to` are declared on their own commands inside
+ * `buildProgram()` because those commands already exist there.
  */
 
 import { buildProgram } from './program';
 import { createAskCommand } from './commands/ask';
 import { createWhoamiCommand } from './commands/whoami';
 import { createPeersCommand } from './commands/peers';
+import { createRelaysCommand } from './commands/relays';
 
 const program = buildProgram();
 
@@ -26,6 +32,8 @@ const program = buildProgram();
 program.addCommand(createAskCommand());
 program.addCommand(createWhoamiCommand());
 program.addCommand(createPeersCommand());
+// Issue #2377: and the ledger the delegation leaves behind.
+program.addCommand(createRelaysCommand());
 
 // Parse and execute
 program.parse();

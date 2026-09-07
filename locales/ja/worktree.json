@@ -1024,6 +1024,23 @@
     "degradedTitle": "構造化イベントが届いていません",
     "healthyTitle": "構造化イベントを受信中"
   },
+  "relay": {
+    "badgeOwed": "{alias} へ返信予定",
+    "badgeOwedMany": "返信予定 {count} 件",
+    "badgeAwaiting": "{alias} の返信待ち",
+    "badgeAwaitingMany": "返信待ち {count} 件",
+    "badgePrompt": "確認待ちを通知済み",
+    "owedTitle": "このセッションは委任された返信を抱えています。ターン完了時に自動で届きます。",
+    "awaitingTitle": "このセッションは委任した返信を待っています。届くとコンポーザーに relay メッセージとして入ります。",
+    "promptTitle": "相手セッションが確認待ちで止まり、依頼元へ通知済みです。",
+    "stripAwaiting": "{alias} へ委任、返信待ち",
+    "stripAwaitingMany": "返信待ち {count} 件",
+    "stripPrompt": "{alias} が確認待ち",
+    "stripOwed": "{alias} へ返信予定: ターン完了時に届きます",
+    "historyBadge": "relay",
+    "historyBadgeTitle": "別のエージェントセッションから届いたメッセージです（Issue #2377 relay）。",
+    "historyCount": "表示範囲に relay メッセージが {count} 件"
+  },
   "agentModel": {
     "label": "モデル",
     "modelLabel": "モデル: {model}",

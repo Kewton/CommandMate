@@ -1024,6 +1024,23 @@
     "degradedTitle": "Structured events are not arriving",
     "healthyTitle": "Receiving structured events"
   },
+  "relay": {
+    "badgeOwed": "Reply due to {alias}",
+    "badgeOwedMany": "Replies due ({count})",
+    "badgeAwaiting": "Waiting on {alias}",
+    "badgeAwaitingMany": "Waiting on {count} replies",
+    "badgePrompt": "Confirmation reported",
+    "owedTitle": "This session owes a delegated reply. It is delivered automatically when the turn ends.",
+    "awaitingTitle": "This session is waiting for a delegated reply. It arrives in the composer as a relay message.",
+    "promptTitle": "The other session stopped on a confirmation; the requester has been told.",
+    "stripAwaiting": "Delegated to {alias}; waiting for the reply.",
+    "stripAwaitingMany": "Waiting for {count} delegated replies.",
+    "stripPrompt": "{alias} is waiting for a confirmation.",
+    "stripOwed": "Owed to {alias}: this session's reply is delivered when the turn ends.",
+    "historyBadge": "relay",
+    "historyBadgeTitle": "Delivered by another agent session (Issue #2377 relay).",
+    "historyCount": "{count} relayed message(s) in view"
+  },
   "agentModel": {
     "label": "Model",
     "modelLabel": "Model: {model}",

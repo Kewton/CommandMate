@@ -47,9 +47,24 @@ const baseProps = {
   onVibeLocalContextWindowChange: vi.fn(),
 };
 
-/** Parse the JSON body sent on the Nth PATCH call. */
+/**
+ * The requests this pane made that are NOT the relay-badge read (Issue #2377).
+ *
+ * `/api/relays?worktree=…` is issued unconditionally on mount, so every count
+ * and index below is taken over the roster's own traffic instead of over
+ * `mockFetch` wholesale — which would otherwise pin the ORDER of two unrelated
+ * effects and break on the next one that lands.
+ */
+function rosterCalls(): Array<[string, RequestInit | undefined]> {
+  return mockFetch.mock.calls
+    .map((call) => [String(call[0]), call[1] as RequestInit | undefined] as const)
+    .filter(([url]) => !url.startsWith('/api/relays'))
+    .map(([url, init]) => [url, init] as [string, RequestInit | undefined]);
+}
+
+/** Parse the JSON body sent on the Nth roster PATCH call. */
 function patchBody(callIndex = 0): { agentInstances: AgentInstance[] } {
-  const init = mockFetch.mock.calls[callIndex][1] as RequestInit;
+  const init = rosterCalls()[callIndex][1] as RequestInit;
   return JSON.parse(init.body as string);
 }
 
@@ -156,8 +171,8 @@ describe('AgentInstancesPane (Issue #869)', () => {
       });
       fireEvent.click(screen.getByTestId('agent-instance-add'));
 
-      await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1));
-      const [url, init] = mockFetch.mock.calls[0];
+      await waitFor(() => expect(rosterCalls()).toHaveLength(1));
+      const [url, init] = rosterCalls()[0];
       expect(url).toBe('/api/worktrees/w-1');
       expect((init as RequestInit).method).toBe('PATCH');
       const body = patchBody();
@@ -174,7 +189,7 @@ describe('AgentInstancesPane (Issue #869)', () => {
       );
       // Select defaults to 'claude'; adding again must not collide with the primary id.
       fireEvent.click(screen.getByTestId('agent-instance-add'));
-      await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(rosterCalls()).toHaveLength(1));
       const body = patchBody();
       expect(body.agentInstances.map((i) => i.id)).toEqual(['claude', 'claude-2']);
       expect(body.agentInstances[1].cliTool).toBe('claude');
@@ -193,7 +208,7 @@ describe('AgentInstancesPane (Issue #869)', () => {
       fireEvent.change(input, { target: { value: 'Claude (review)' } });
       fireEvent.blur(input);
 
-      await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(rosterCalls()).toHaveLength(1));
       const body = patchBody();
       expect(body.agentInstances.find((i) => i.id === 'claude')?.alias).toBe('Claude (review)');
     });
@@ -210,7 +225,7 @@ describe('AgentInstancesPane (Issue #869)', () => {
       fireEvent.blur(input);
       // Give any pending microtask a chance, then assert no call.
       await Promise.resolve();
-      expect(mockFetch).not.toHaveBeenCalled();
+      expect(rosterCalls()).toEqual([]);
     });
   });
 
@@ -228,7 +243,7 @@ describe('AgentInstancesPane (Issue #869)', () => {
       fireEvent.click(screen.getByTestId('agent-instance-delete-claude'));
       // Deletion is gated behind the shared ConfirmDialog.
       fireEvent.click(await screen.findByTestId('confirm-dialog-confirm'));
-      await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(rosterCalls()).toHaveLength(1));
       const body = patchBody();
       expect(body.agentInstances.map((i) => i.id)).toEqual(['codex', 'gemini']);
       expect(body.agentInstances.map((i) => i.order)).toEqual([0, 1]);
@@ -247,7 +262,7 @@ describe('AgentInstancesPane (Issue #869)', () => {
       fireEvent.click(screen.getByTestId('agent-instance-delete-claude'));
       fireEvent.click(await screen.findByTestId('confirm-dialog-cancel'));
       await waitFor(() => expect(screen.queryByTestId('confirm-dialog')).toBeNull());
-      expect(mockFetch).not.toHaveBeenCalled();
+      expect(rosterCalls()).toEqual([]);
     });
 
     it('disables delete at MIN (single instance) and shows the min hint', () => {
@@ -268,7 +283,7 @@ describe('AgentInstancesPane (Issue #869)', () => {
       );
       openRowMenu('claude');
       fireEvent.click(screen.getByTestId('agent-instance-move-down-claude'));
-      await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(rosterCalls()).toHaveLength(1));
       const body = patchBody();
       expect(body.agentInstances.map((i) => i.id)).toEqual(['codex', 'claude', 'gemini']);
       expect(body.agentInstances.map((i) => i.order)).toEqual([0, 1, 2]);
@@ -320,7 +335,7 @@ describe('AgentInstancesPane (Issue #869)', () => {
       render(<AgentInstancesPane {...baseProps} instances={full} />);
       fireEvent.click(screen.getByTestId('agent-instance-add'));
       await Promise.resolve();
-      expect(mockFetch).not.toHaveBeenCalled();
+      expect(rosterCalls()).toEqual([]);
     });
   });
 
@@ -428,13 +443,13 @@ describe('AgentInstancesPane (Issue #869)', () => {
           instances={[primary('claude', 0), primary('codex', 1)]}
         />,
       );
-      expect(mockFetch).not.toHaveBeenCalled();
+      expect(rosterCalls()).toEqual([]);
     });
 
     it('asks resolve-target for the row it was opened from', async () => {
       stubReads();
       await openPanel();
-      const urls = mockFetch.mock.calls.map((call) => String(call[0]));
+      const urls = rosterCalls().map(([url]) => url);
       expect(urls).toContain('/api/worktrees/w-1/resolve-target?instance=codex');
       expect(urls).toContain('/api/worktrees/w-1/cli-reference');
     });

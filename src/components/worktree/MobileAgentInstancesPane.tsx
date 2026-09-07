@@ -18,7 +18,7 @@
 
 'use client';
 
-import React, { memo } from 'react';
+import React, { memo, useCallback } from 'react';
 import { useTranslations } from 'next-intl';
 import {
   getInstanceLabel,
@@ -27,7 +27,9 @@ import {
 } from '@/lib/cli-tools/types';
 import { Checkbox } from '@/components/ui';
 import { MIN_VISIBLE_INSTANCES } from '@/hooks/useMobileSelectedInstances';
-import { AgentInstancesPane } from '@/components/worktree/AgentInstancesPane';
+import { AgentInstancesPane, relayBadgeClassName } from '@/components/worktree/AgentInstancesPane';
+import { useSessionRelays } from '@/lib/relay/use-session-relays';
+import { resolveRelayBadges } from '@/lib/relay/relay-badges';
 import type { AgentEventSourceView } from '@/types/models';
 
 export interface MobileAgentInstancesPaneProps {
@@ -88,6 +90,23 @@ export const MobileAgentInstancesPane = memo(function MobileAgentInstancesPane({
   const visibleSet = new Set(visibleInstanceIds);
   const atMinVisible = visibleInstanceIds.length <= MIN_VISIBLE_INSTANCES;
 
+  // Issue #2377: the relay lines, on this list as well as on the shared roster
+  // editor above it. Both are drawn because they answer different questions —
+  // the roster is where a session is configured, this list is where a phone
+  // decides which tabs to carry, and "this one owes somebody a reply" is a
+  // reason to keep a tab visible.
+  const relays = useSessionRelays(worktreeId);
+  const aliasOf = useCallback(
+    (endpoint: { worktreeId: string; instanceId: string }) => {
+      if (endpoint.worktreeId !== worktreeId) {
+        return `${endpoint.instanceId} @ ${endpoint.worktreeId}`;
+      }
+      return instances.find((inst) => inst.id === endpoint.instanceId)?.alias
+        ?? endpoint.instanceId;
+    },
+    [instances, worktreeId],
+  );
+
   return (
     <div data-testid="mobile-agent-instances-pane">
       {/* Shared roster editor (entity + alias → DB, consistent with PC). */}
@@ -126,6 +145,12 @@ export const MobileAgentInstancesPane = memo(function MobileAgentInstancesPane({
             const disabled = checked && atMinVisible;
             // Issue #1783: observed model for this instance, or null.
             const instanceModel = modelByInstance?.[inst.id] ?? null;
+            // Issue #2377: what this session owes and is waiting for.
+            const relayBadges = resolveRelayBadges({
+              owed: relays.owedBy(inst.id),
+              awaiting: relays.awaitedBy(inst.id),
+              aliasOf,
+            });
             return (
               <label
                 key={inst.id}
@@ -157,6 +182,18 @@ export const MobileAgentInstancesPane = memo(function MobileAgentInstancesPane({
                       {instanceModel}
                     </span>
                   )}
+                  {/* Issue #2377: absent when nothing is open, exactly as the
+                      model line above is absent when nothing was reported. */}
+                  {relayBadges.map((badge) => (
+                    <span
+                      key={badge.key}
+                      data-testid={`mobile-visible-instance-relay-${badge.tone}-${inst.id}`}
+                      title={tWorktree(`relay.${badge.titleKey}`)}
+                      className={`block text-xs truncate ${relayBadgeClassName(badge)}`}
+                    >
+                      {tWorktree(`relay.${badge.key}`, badge.params)}
+                    </span>
+                  ))}
                 </span>
               </label>
             );

@@ -15,6 +15,8 @@ import type {
 import type {
   DailySummaryGetResponse,
   DailySummaryGenerateResponse,
+  RelayCountsResponse,
+  RelayListResponse,
   TemplateResponse,
   VibeMetrics,
   VibeMetricsResponse,
@@ -73,6 +75,36 @@ const MAX_METRICS_DAYS = 90;
  */
 function formatRate(value: number | null): string {
   return value === null ? 'n/a' : `${(value * 100).toFixed(1)}%`;
+}
+
+/**
+ * Relay counts over the same window, or null when the daemon has no ledger.
+ *
+ * Best effort and separate from the vibe metrics on purpose: `/api/metrics/vibe`
+ * is computed from tasks and verification runs, and a relay is neither. A daemon
+ * that predates Issue #2377 answers 404 here, which is a reason to print the
+ * metrics without the relay line, not a reason to fail the command.
+ */
+async function readRelayCounts(
+  client: ApiClient,
+  days: number
+): Promise<RelayCountsResponse | null> {
+  try {
+    const response = await client.get<RelayListResponse>(
+      `/api/relays?days=${encodeURIComponent(String(days))}`
+    );
+    return response.counts ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** The relay line, in the same shape as the four above it. */
+export function formatRelayCounts(counts: RelayCountsResponse): string {
+  return (
+    `Relays:       ${counts.delivered} delivered / ${counts.prompt} waiting on a prompt `
+    + `/ ${counts.expired} expired  (${counts.pending} still open, ${counts.cancelled} cancelled)`
+  );
 }
 
 function formatVibeMetrics(m: VibeMetrics): string {
@@ -253,11 +285,15 @@ export function createReportCommand(): Command {
         const data = await client.get<VibeMetricsResponse>(
           `/api/metrics/vibe?days=${encodeURIComponent(String(days))}`
         );
+        // Issue #2377: delegation between sessions is work this harness did, and
+        // until now it was the only kind that left no mark on the metrics.
+        const relays = await readRelayCounts(client, days);
 
         if (options.json) {
-          console.log(JSON.stringify(data.metrics, null, 2));
+          console.log(JSON.stringify({ ...data.metrics, relays }, null, 2));
         } else {
           console.log(formatVibeMetrics(data.metrics));
+          if (relays) console.log(formatRelayCounts(relays));
         }
       } catch (error) {
         handleCommandError(error);

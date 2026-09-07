@@ -412,6 +412,22 @@ export interface SendOptions {
    * terminal scraper can see is still refused.
    */
   ignoreStructuredPrompt?: boolean;
+  /**
+   * Issue #2377: deliver the target's reply to this session when it finishes.
+   *
+   * `<worktree-id>[@<instance-id>]`, or `self` for the session running the
+   * command. Registering the relay is what makes the send fire-and-forget: the
+   * caller does not `wait`, and the answer arrives in their composer.
+   */
+  replyTo?: string;
+  /**
+   * Issue #2377: permit a relay opened while answering a relayed message.
+   *
+   * Refused by default (exit 2) because two agents each relaying the other's
+   * reply is a loop with no natural end. Even with the flag the chain stops at
+   * `MAX_RELAY_HOPS`.
+   */
+  allowRelayChain?: boolean;
 }
 
 /** task list command options [Issue #1545] */

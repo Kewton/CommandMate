@@ -2011,3 +2011,73 @@ export interface InterruptResponse {
   message: string;
   interrupted: InterruptedSession[];
 }
+
+// ===========================================================================
+// Relays (Issue #2377)
+// ===========================================================================
+
+/**
+ * Mirrors: `RelayEndpoint` in src/lib/relay/types.ts.
+ *
+ * `instanceId` is always the RESOLVED id — the primary instance's id is its
+ * tool's id (#868) — because that is the only form any other route accepts.
+ */
+export interface RelayEndpointResponse {
+  worktreeId: string;
+  instanceId: string;
+}
+
+/**
+ * Mirrors: `SessionRelay` in src/lib/relay/types.ts.
+ *
+ * `state` is `string` rather than a union for the reason every other id on this
+ * page is: the CLI bundle keeps its own copy of the API shapes, and a newer
+ * daemon naming a state this build has never heard of must print through rather
+ * than fail to parse.
+ */
+export interface RelayView {
+  id: string;
+  /** The session that asked, and is owed the answer. */
+  from: RelayEndpointResponse;
+  /** The session that was asked. */
+  to: RelayEndpointResponse;
+  state: string;
+  hops: number;
+  sentRequestId: string | null;
+  pendingKind: string | null;
+  /** Epoch ms. */
+  createdAt: number;
+  updatedAt: number;
+  expiresAt: number;
+  deliveredAt: number | null;
+}
+
+/** Mirrors: `RelayCounts` in src/lib/relay/types.ts. */
+export interface RelayCountsResponse {
+  pending: number;
+  delivered: number;
+  prompt: number;
+  expired: number;
+  cancelled: number;
+}
+
+/** Mirrors: src/app/api/relays/route.ts GET 200 response. */
+export interface RelayListResponse {
+  /** Open relays this session must answer. Empty unless `instance` was given. */
+  owed: RelayView[];
+  /** Open relays this session is waiting on. Empty unless `instance` was given. */
+  awaiting: RelayView[];
+  /** Every open relay in scope, whichever end it belongs to. */
+  open: RelayView[];
+  counts: RelayCountsResponse;
+}
+
+/** Mirrors: src/app/api/relays/route.ts POST 201 response. */
+export interface RelayCreateResponse {
+  relay: RelayView;
+}
+
+/** Mirrors: src/app/api/relays/[relayId]/cancel/route.ts POST 200 response. */
+export interface RelayCancelResponse {
+  relay: RelayView;
+}

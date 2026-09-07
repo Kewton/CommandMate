@@ -155,6 +155,20 @@ function renderSurface(
 
 let fetchMock: ReturnType<typeof vi.fn>;
 
+/**
+ * The requests this surface made that are NOT the relay-badge read (#2377).
+ *
+ * `/api/relays?worktree=…` is issued on mount, so indexing `fetchMock.mock.calls`
+ * would pin the ORDER of two unrelated effects. Every assertion below is taken
+ * over the key traffic instead.
+ */
+function keyCalls(): Array<[string, RequestInit]> {
+  return fetchMock.mock.calls
+    .filter((call) => !String(call[0]).startsWith('/api/relays'))
+    .map((call) => [String(call[0]), (call[1] ?? {}) as RequestInit]);
+}
+
+
 beforeEach(() => {
   vi.clearAllMocks();
   fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ success: true }) });
@@ -353,11 +367,11 @@ describe('[#2254] the answer keys reach /special-keys verbatim', () => {
 
     fireEvent.click(screen.getByTestId('prompt-answer-key-2'));
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0];
+    expect(keyCalls()).toHaveLength(1);
+    const [url, init] = keyCalls()[0];
     expect(url).toBe(`/api/worktrees/${WORKTREE_ID}/special-keys`);
     expect(init.method).toBe('POST');
-    expect(JSON.parse(init.body)).toEqual({
+    expect(JSON.parse(init.body as string)).toEqual({
       cliToolId: 'claude',
       keys: ['2'],
       // Issue #869: a non-primary instance names itself.
@@ -368,7 +382,7 @@ describe('[#2254] the answer keys reach /special-keys verbatim', () => {
   it.each(['y', 'n', 'Enter'])('POSTs %s as a single-key array', (key) => {
     renderSurface({ isUnclassifiedActive: true });
     fireEvent.click(screen.getByTestId(`prompt-answer-key-${key}`));
-    expect(JSON.parse(fetchMock.mock.calls[0][1].body).keys).toEqual([key]);
+    expect(JSON.parse(keyCalls()[0][1].body as string).keys).toEqual([key]);
   });
 
   it('sends the arrow pad through the same route for a selection list', () => {
@@ -376,7 +390,7 @@ describe('[#2254] the answer keys reach /special-keys verbatim', () => {
     fireEvent.click(
       within(screen.getByTestId('chat-dialog-card-actions')).getByLabelText('Down'),
     );
-    expect(JSON.parse(fetchMock.mock.calls[0][1].body).keys).toEqual(['Down']);
+    expect(JSON.parse(keyCalls()[0][1].body as string).keys).toEqual(['Down']);
   });
 });
 
