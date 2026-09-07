@@ -31,10 +31,13 @@ REPO_ROOT="${CM_DEMO_REPO_ROOT:-$(cd "$SKILL_DIR/../../.." && pwd)}"
 # stayed false, and every scene died at its own timeout.
 MESSAGE="Add a dark mode toggle to the header"
 STORYBOARD="$SKILL_DIR/storyboard/default.yaml"
-# The claude pane's cassette. The default drives the approval-prompt scenes of
-# storyboard/default.yaml; a storyboard built around the delegation round trip
-# (Issue #2381) passes fixtures/claude-delegate.cast here.
-CLAUDE_CASSETTE="${CM_DEMO_CLAUDE_CASSETTE:-$SKILL_DIR/fixtures/claude-session-sample.cast}"
+# The claude pane's cassette. A storyboard may name its own with a top-level
+# `claude-cassette:` (readme-hero.yaml names fixtures/claude-hero.cast, whose
+# two passes are the delegation round trip and an approval — Issue #2381);
+# `--claude-cassette` / CM_DEMO_CLAUDE_CASSETTE override that, and with neither
+# the default drives the approval-prompt scenes of storyboard/default.yaml.
+CLAUDE_CASSETTE="${CM_DEMO_CLAUDE_CASSETTE:-}"
+DEFAULT_CLAUDE_CASSETTE="$SKILL_DIR/fixtures/claude-session-sample.cast"
 OUT_DIR="${CM_DEMO_OUT_DIR:-$HOME/Desktop/commandmate-demo}"
 LOCALES="ja en"
 WANT_GIF=0
@@ -61,10 +64,10 @@ Usage: demo-video.sh [--locale ja|en|all] [--out DIR] [--gif] [--check]
 
   --locale L    ja, en or all (default all)
   --out DIR     where the finished videos go (default ~/Desktop/commandmate-demo)
-  --storyboard  storyboard YAML (default storyboard/default.yaml)
-  --claude-cassette FILE  cassette for the claude pane (default
-                fixtures/claude-session-sample.cast; the delegation take uses
-                fixtures/claude-delegate.cast)
+  --storyboard  storyboard YAML, or the stem of one in storyboard/
+                (`readme-hero` -> storyboard/readme-hero.yaml; default default.yaml)
+  --claude-cassette FILE  cassette for the claude pane (default: the storyboard's
+                own `claude-cassette:`, else fixtures/claude-session-sample.cast)
   --frame WxH   output frame size (default 1280x800)
   --gif         also write a README-sized GIF next to each mp4
   --check       run the dependency check and storyboard validation, then stop
@@ -137,9 +140,21 @@ if [ -n "$MISSING" ]; then
   esac
   exit 1
 fi
-[ -f "$CLAUDE_CASSETTE" ] || die "claude cassette not found: $CLAUDE_CASSETTE"
 [ -x "$REPO_ROOT/node_modules/.bin/tsx" ] || die "tsx not found — run 'npm install' in $REPO_ROOT"
 log "dependencies ok"
+
+# `--storyboard readme-hero` names a cut shipped with the skill (#2381). A path
+# is used as given; a bare stem that is not a file resolves next to default.yaml.
+if [ ! -f "$STORYBOARD" ]; then
+  case "$STORYBOARD" in
+    */*|*.yaml) die "storyboard not found: $STORYBOARD" ;;
+    *)
+      [ -f "$SKILL_DIR/storyboard/$STORYBOARD.yaml" ] \
+        || die "storyboard not found: $STORYBOARD (no $SKILL_DIR/storyboard/$STORYBOARD.yaml either)"
+      STORYBOARD="$SKILL_DIR/storyboard/$STORYBOARD.yaml"
+      ;;
+  esac
+fi
 
 # Validating up front means a typo in the storyboard costs a second instead of
 # two full recording cycles.
@@ -148,6 +163,18 @@ for loc in $LOCALES; do
     --file "$STORYBOARD" --locale "$loc" >/dev/null || die "storyboard validation failed for locale '$loc'"
 done
 log "storyboard ok: $STORYBOARD"
+
+# The cassette the cut asks for, read off the plan the same way compose.sh reads
+# `#total`: the storyboard is the source of truth for what the claude pane has
+# to be replaying, and a flag only overrides it on purpose.
+if [ -z "$CLAUDE_CASSETTE" ]; then
+  CLAUDE_CASSETTE="$("$REPO_ROOT/node_modules/.bin/tsx" "$SCRIPT_DIR/storyboard.ts" \
+    --file "$STORYBOARD" --locale "${LOCALES%% *}" --format plan \
+    | awk -F'\t' '$1 == "#claude-cassette" { print $2; exit }')"
+  CLAUDE_CASSETTE="${CLAUDE_CASSETTE:-$DEFAULT_CLAUDE_CASSETTE}"
+fi
+[ -f "$CLAUDE_CASSETTE" ] || die "claude cassette not found: $CLAUDE_CASSETTE"
+log "claude cassette: $CLAUDE_CASSETTE"
 
 if [ "$CHECK_ONLY" -eq 1 ]; then
   log "--check given, stopping before the first recording"
