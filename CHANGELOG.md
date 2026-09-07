@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.32.1] - 2026-09-08
+
+> **Highlight**: 委任と転写の 2 つの経路に残っていた「静かに壊れる」欠陥をまとめて塞ぎました。同一マシンで 2 つのサーバが 1 つの tmux サーバを共有すると、エージェント内の `commandmate` が**起動元とは別のサーバへ接続**します（hooks は正しく、CLI だけが割れる）。`ask` は exit 0 を返すので呼び出し側は気づけず、実測では委任が無関係な worktree へ流れました。起動行に起動サーバ自身の `CM_PORT` を pin して真因を塞ぎ（#2403）、万一同じ不一致が起きても `whoami` / `instances` / `peers` が接続先 URL つきで申告するようにしています（#2404）。あわせて転写の保存経路を 4 箇所直しました — Stop 受け口の自己待ち（実測 105/105 失敗、#2398）、飽和した codex ペインがフッタ 1 行に化ける件（#2400）、dedup の早期 return で転写リーダーが二度と呼ばれない件（#2399）、4 MiB 窓に頭が入らないターンが頭切れのまま「完成した返答」として残る件（#2402）です。
+
 ### Added
 
 - **feat(demo-video): README 冒頭の 30 秒を UX 先行の `readme-hero` 絵コンテで撮る** (#2381): `record-scenes.ts` に `repo-tab-switch` / `agent-tabs` / `delegate-ask` / `reply-file-link` / `mobile-approve` / `mobile-file-link` の 6 シーンを追加（sidebar 折りたたみ・チャット面・Agent ペインは localStorage seed、撮影前に warm-up、`after` で撮影外検証）。絵コンテに `claude-cassette:`（cut が claude ペインのカセットを宣言し `--storyboard readme-hero` 1 つで回る）、`gif: { width, fps, maxBytes }`（600px / 10fps / 1.84MB のゲート。超過は palette 256→128→64 色で再試行し、それでも超えれば GIF を消して exit 1）、record シーンの `head: N`（take の先頭 N 秒 + 末尾をジャンプカット）、`telop.position: top`（帯をヘッダー下へ。PNG に焼くので compose.sh は座標を持たない）を追加。`fake-agent.sh` に `@pass` 行（同一カセット内で次の指示を開始。`{{TASK}}` / `{{EXEC_OUTPUT}}` を空にする）を追加し、`@input` 行はフレームを描いてから settle を読む（起動バナーが返答として保存される競合を閉じる）。`claude-hero.cast`（委任パス + `@pass` + 承認パス）と `transcripts/claude-tests.jsonl` を追加。`env-up.sh` の `SessionStart` に `model`（スマホのセッション行に claude のモデルが出る）と `CM_LAUNCHED_BY=commandmate-cli`（画面の CLI 表記が `commandmate` になる）を追加。`public-messaging.md` §5 / §6 に hero の行を追記し `public-messaging.test.ts` が 16 行を照合。
