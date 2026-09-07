@@ -1,0 +1,126 @@
+version: 1
+title: "Issue #2399: pull 転写ツールで scrape 保存後に転写リーダーが二度と呼ばれない"
+goal: |
+  https://github.com/Kewton/CommandMate/issues/2399 を実装する。
+
+  ## 前提（このブランチの基点）
+  本Issueは兄弟Issueの後に着手している。**基点 develop には既に次がマージ済み**なので、
+  実装前に現在のコードを読むこと（Issue本文は着手前の状態を書いている）:
+  - **#2398**（PR #2408）: Stop 受け口の自己待ちを解消。`STOP_TRANSCRIPT_DEFERRED_DELAYS_MS`
+    による遅延読みを追加済み
+  - **#2400**（PR #2409）: codex の `findCodexChromeStart` を追加。飽和 pane でフッタ1行に
+    化ける問題は解消済み（＝dedup を永久ロックさせていた固定内容の入力は減っている）
+  - **#2401**（PR #2407）: relay の返答選択が出自を見るようになった
+
+  ## 現象
+  pull 型転写ツール（claude / codex / antigravity / command-code）で、Stop hook 経路が転写を
+  書けなかったターンを poller が救済できない。scraper が一度でも scrape を保存すると、以後30分
+  （`MAX_POLLING_DURATION`）は毎 tick `duplicate-response-skipped` で終わり、**転写リーダーは
+  二度と呼ばれない**。
+
+  実測（2026-09-07、`commandagent-develop` / codex）:
+  ```
+  12:05:21.833Z codex-transcript-turn-open   ← poller が1回だけリーダーを呼ぶ（未閉鎖→false）
+  12:05:21.895Z (chat_messages) footer 1行を assistant 行として保存
+  12:05:23.607Z (rollout) task_complete      ← ここで閉じた
+  12:05:23.918Z duplicate-response-skipped
+  12:05:25.946Z duplicate-response-skipped
+     … 2秒ごとに30分続く。codex-transcript-turn-saved は出ない
+  ```
+
+  ## 機構（コードで確認済み。行番号は基点 develop 6156d3a0 時点）
+  `src/lib/polling/response-checker.ts` の `checkForResponse` は
+  1. line 1232 `if (isDuplicateResponse(pollerKey, cleanedResponse))` → 重複なら
+     line 1238 で `duplicate-response-skipped` をログし `updateSessionState` して **return**
+  2. line 1264 `captureStructuredHistoryTurn(...)`（転写リーダー）
+
+  の順になっている。scrape の内容が前回と同じである限り 2 に到達しない。「scrape は同じ＝画面は
+  静止＝もう書くものは無い」という前提だが、転写リーダーにとっては「画面が静止した後に転写が
+  閉じる」のが普通で、**前提が逆**。
+
+  codex ではこの経路が Stop 失敗の唯一の救済であり（#2398 で自己待ちは直ったが、**遅延読みが
+  尽きた場合の最終救済は依然この経路**）、hooks が trust されていない／未設定のセッションでは
+  **どのツールでも**唯一の経路。
+
+  ## 影響
+  - Stop 経路が失敗したターンの Markdown 行が永久に落ちる
+  - 先に保存された scrape 行だけがチャット面・History に残る
+
+  ## 対応（この Issue の scope。1 か 2 を選ぶ）
+  1. リーダーが「転写はあるがターン未閉鎖」を返した事実を poller key ごとに覚え、scrape が重複でも
+     **次 tick でリーダーだけ再照会**する（4 MiB の tail 読みなので、必要なら 2〜3 tick に1回に
+     間引く）。成功したら従来どおり `structured-history-scrape-suppressed` 相当で終える
+  2. あるいは順序を入れ替え、リーダーへの照会を dedup より前に置く。ただしリーダーは書き込みを
+     伴うので、同一 tick で scrape を保存した直後の再照会が二重書きにならないことを確認する
+     （gate の冪等キーで担保されるはず）
+  3. Markdown 行が後から書けたとき、同じターンで先に保存した scrape 行をどうするか決める
+     （`archived` にする／残す）。**残すなら理由を書くこと**
+
+  **`src/lib/hooks/stop-history-capture.ts` のコメントも直すこと。** #2398 が既に
+  「poller の dedup が capture 呼び出しより前に return する（#2399）」と実態を書いている
+  （line 116-124 付近）。本Issueで順序が直ったら、その記述を**新しい実態に合わせて更新**する。
+  この1ファイルは**コメントのみの変更**にとどめること（ロジックは #2398 の成果物なので触らない）。
+
+  ## 受入条件
+  - [ ] fake リーダー false → true の順で、**scrape 内容が同一のまま2 tick 目に Markdown 行が
+        書かれる**（ユニット、4ツール共通の gate 経路）
+  - [ ] dedup が効いている間もリーダー照会は tick ごと（または間引き周期）に1回だけで、
+        同一ターンの二重書きが無い
+  - [ ] `tests/unit/lib/polling/response-checker-dedup-visibility-1695.test.ts`、
+        `tests/unit/lib/polling/response-checker-structured-history-2041.test.ts`、
+        `tests/unit/polling/structured-history-gate-2246.test.ts` が緑
+        （**前提が変わる箇所は書き換え理由をコメントに残すこと**）
+  - [ ] `stop-history-capture.ts` のコメントが実装と一致する
+  - [ ] `npm run lint` / `npx tsc --noEmit` / `npm run test:unit` が exit 0
+
+  ## スコープ外（他Issueが担当。ファイルも触らないこと）
+  - Stop hook のロジック（#2398、マージ済み。`stop-history-capture.ts` は**コメントのみ**可）
+  - codex の chrome finder / echo regex（#2400、マージ済み。
+    `src/lib/detection/cli-patterns.ts` には触れない）
+  - relay の返答選択（#2401、マージ済み）
+  - 4 MiB 窓の headless turn（#2402。**本Issueの後に着手予定**。
+    `src/lib/hooks/sources/codex/history.ts` には触れない）
+
+  ## 関連
+  #1268 / #1670（content dedup の導入。`lineCountIsCursor` が false のときの代替）/
+  #2041 / #2121（gate と pull リーダーの導入）/ #2264（Stop 受け口のリトライ）/
+  #2398（真因、マージ済み）/ #2400（マージ済み）
+
+  ## 作業ルール（厳守）
+  - **`CHANGELOG.md` と `docs/module-reference.md` を編集しないでください**（scope外です）。
+    代わりに次の2ファイルを書いてください。どちらも `dev-reports/` 配下なので commit には
+    入りません。
+    - `dev-reports/changelog/issue-2399.md` — `CHANGELOG.md` の `## [Unreleased]` にそのまま
+      貼れる1エントリ（先頭は `- **<type>(<scope>): …** (#2399): …`）。1行目にコメントで
+      どの節（`### Added` / `### Changed` / `### Fixed`）に入るかを書く。
+      `- **` で始めること（`grep -cE '^- \*\*'` で集計する）。`(#2399)` は要約の外
+      （`**` を閉じた後）に置くこと。1エントリ＝1行（折らない）。
+    - `dev-reports/module-reference/issue-2399.md` — `docs/module-reference.md` の表に足す
+      注記を行キー（`| \`path\` |`）ごとに列挙する。既存行に足すときは
+      `grep -n '^| \`<path>\`' docs/module-reference.md` を実行し、その出力（行番号つきの
+      行キー）を断片に書き写してから書くこと。0件だった行への追記は指示しない
+      （新しい行を足すなら「新規行」と明記する）。足すものが無ければ「追記なし」の1行でよい。
+    - **表のセル内で使う `|`（union 型など）は `\|` にエスケープすること。** 生パイプは表を
+      壊すが `tsc` / lint / CI をすべて通過してしまう（本バッチで実際に発生した）。
+  - 断片が無いとリリースノートと module-reference に載らない。実装と同じ commit の時点で
+    書くこと。
+scope:
+  allow:
+    - "src/lib/polling/response-checker.ts"
+    - "src/lib/polling/response-dedup.ts"
+    - "src/lib/polling/structured-history-gate.ts"
+    - "src/lib/hooks/stop-history-capture.ts"
+    - "tests/unit/lib/polling/**"
+    - "tests/unit/polling/**"
+    - "dev-reports/changelog/issue-2399.md"
+    - "dev-reports/module-reference/issue-2399.md"
+  deny:
+    - "src/lib/detection/cli-patterns.ts"
+    - "src/lib/relay/relay-delivery.ts"
+    - "src/lib/hooks/sources/codex/history.ts"
+    - "src/lib/hooks/agent-event-service.ts"
+verify:
+  # 既定（省略）= 登録済み全ゲート
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true
