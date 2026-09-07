@@ -77,6 +77,19 @@ const REJECTED_ENV = 'OPENCODE_CONFIG_CONTENT';
 
 let sandbox: string;
 
+
+/**
+ * The port `renderAgentLaunchCommand` states on every launch line since #2403.
+ *
+ * A pane inherits whichever `CM_PORT` the tmux server's global environment
+ * carries — the port of whatever CommandMate started that tmux server — so the
+ * launching server pins its own, and a `commandmate` typed inside the agent
+ * resolves to the server that launched it. Fixed here so the byte-pins below do
+ * not depend on the `CM_PORT` of the machine running the tests.
+ */
+const SERVER_PORT = '60301';
+const PORT_ASSIGNMENT = `CM_PORT='${SERVER_PORT}'`;
+
 beforeAll(() => {
   sandbox = makeTempDir('opencode-config-scope-2053-');
 });
@@ -92,6 +105,7 @@ beforeEach(() => {
   // and a test that allocated a port would write into it.
   vi.stubEnv('CM_OPENCODE_PORT_FILE', join(sandbox, 'opencode-ports.json'));
   vi.stubEnv('CM_AGENT_HOOKS_INJECT', '1');
+  vi.stubEnv('CM_PORT', SERVER_PORT);
 });
 
 describe('[#2053] the ruling: opencode declares `configScope: "none"`', () => {
@@ -141,7 +155,9 @@ describe('[#2053] the launch plan declares no configuration environment', () => 
     // would surface on the line CommandMate types into the pane.
     rememberOpencodePort(REF, 4731, '/tmp/wt-2053');
     const line = renderAgentLaunchCommand(prepareOpencodeLaunch(LAUNCH));
-    expect(line).toBe(`'opencode' --port 4731 --hostname 127.0.0.1`);
+    // The only assignment is #2403's server port — which is not configuration,
+    // it is which CommandMate the agent belongs to.
+    expect(line).toBe(`${PORT_ASSIGNMENT} 'opencode' --port 4731 --hostname 127.0.0.1`);
     expect(line).not.toContain('OPENCODE_CONFIG');
   });
 });

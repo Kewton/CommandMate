@@ -78,6 +78,16 @@ const FIXTURE_DIR = path.resolve(__dirname, '../../fixtures/command-code-live-22
 const frame = (name: string): string =>
   fs.readFileSync(path.join(FIXTURE_DIR, `${name}.txt`), 'utf-8');
 
+/**
+ * The port every launch line carries since #2403.
+ *
+ * A pane inherits whichever `CM_PORT` the tmux server's global environment
+ * holds, so the launching server states its own and a `commandmate` typed
+ * inside the agent resolves to the server that started it.
+ */
+const SERVER_PORT = '60301';
+const PORT_ASSIGNMENT = `CM_PORT='${SERVER_PORT}'`;
+
 describe('CommandCodeTool', () => {
   let tool: CommandCodeTool;
 
@@ -87,6 +97,9 @@ describe('CommandCodeTool', () => {
     // The default for this file. The hooks-on path is exercised in its own
     // block, with a real worktree to write into.
     vi.stubEnv('CM_AGENT_HOOKS_INJECT', '0');
+    // #2403 puts the launching server's own port on every line; fixed here so
+    // the byte-pins below do not read the `CM_PORT` of the machine under test.
+    vi.stubEnv('CM_PORT', SERVER_PORT);
   });
 
   afterEach(() => {
@@ -137,9 +150,11 @@ describe('CommandCodeTool', () => {
   describe('buildCommandCodeLaunchCommand (the Phase B seam)', () => {
     it('renders the launch line Epic #2249 決定 2 fixed', () => {
       // With injection off — the documented rollback (`CM_AGENT_HOOKS_INJECT=0`)
-      // — the line is byte-identical to the one Phase A shipped.
+      // — the line is the one Phase A shipped, behind #2403's server port. The
+      // port is not hook configuration: it is which CommandMate the agent
+      // belongs to, which the rollback does not change.
       expect(buildCommandCodeLaunchCommand(launchContext())).toBe(
-        'commandcode --trust --skip-onboarding --no-auto-update',
+        `${PORT_ASSIGNMENT} commandcode --trust --skip-onboarding --no-auto-update`,
       );
     });
 
@@ -161,7 +176,9 @@ describe('CommandCodeTool', () => {
           ...launchContext(),
           executablePath: '/opt/homebrew/bin/commandcode',
         }),
-      ).toBe('/opt/homebrew/bin/commandcode --trust --skip-onboarding --no-auto-update');
+      ).toBe(
+        `${PORT_ASSIGNMENT} /opt/homebrew/bin/commandcode --trust --skip-onboarding --no-auto-update`,
+      );
     });
   });
 
@@ -395,7 +412,7 @@ describe('CommandCodeTool', () => {
       // straight into `sendKeys`, which is the mistake #1846 exists to stop —
       // drops the environment, and the hooks then post with no instance.
       expect(line).toMatch(
-        /^CM_HOOK_URL='[^']+' 'commandcode' --trust --skip-onboarding --no-auto-update$/,
+        /^CM_HOOK_URL='[^']+' CM_PORT='\d+' 'commandcode' --trust --skip-onboarding --no-auto-update$/,
       );
       expect(line).toContain('tool=command-code');
       expect(line).toContain('worktreeId=test-wt');

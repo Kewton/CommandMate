@@ -140,7 +140,8 @@ function expectLaunchedFrom(claudePath: string): void {
 
   const call = vi.mocked(sendKeys).mock.calls[index];
   expect(call[0]).toBe(TEST_SESSION_NAME);
-  expect(call[1]).toMatch(new RegExp(`^'${claudePath}' --settings '.+\\.json'$`));
+  // #2403 puts this server's own port in front of every launch line.
+  expect(call[1]).toMatch(new RegExp(`^CM_PORT='\\d+' '${claudePath}' --settings '.+\\.json'$`));
   expect(call[2]).toBe(true);
 }
 
@@ -1816,10 +1817,16 @@ describe('claude-session - hooks auto-injection (Issue #1722)', () => {
     expect((await launchCommand(TEST_SESSION_OPTIONS)).split('\n')).toHaveLength(1);
   });
 
-  it('launches the bare CLI when CM_AGENT_HOOKS_INJECT=0', async () => {
+  it('launches the bare CLI, behind the server port, when CM_AGENT_HOOKS_INJECT=0', async () => {
+    // Bare means no `--settings`. #2403's `CM_PORT` is not hook injection: it
+    // says which CommandMate the agent belongs to, so a `commandmate` typed
+    // inside it reaches the server that launched it, and switching hooks off
+    // does not change that.
     process.env.CM_AGENT_HOOKS_INJECT = '0';
 
-    expect(await launchCommand(TEST_SESSION_OPTIONS)).toBe('/usr/local/bin/claude');
+    expect(await launchCommand(TEST_SESSION_OPTIONS)).toMatch(
+      /^CM_PORT='\d+' \/usr\/local\/bin\/claude$/
+    );
   });
 
   it('does not inject into a healthy session it is reusing', async () => {
