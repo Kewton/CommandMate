@@ -142,6 +142,43 @@ function pushRecent(prev: RecentEntry[], entry: RecentEntry): RecentEntry[] {
   return next;
 }
 
+/** One repository's rows in the palette's Worktrees section (Issue #2374). */
+interface PaletteWorktreeGroup {
+  /** React key — the repository name, or a sentinel for the unnamed bucket. */
+  key: string;
+  /** Repository display name; `''` for rows whose repository is unknown. */
+  repository: string;
+  /** The rows, in the order they arrived. */
+  worktrees: Worktree[];
+}
+
+/**
+ * Bucket worktrees under their repository, preserving the incoming order
+ * (Issue #2374).
+ *
+ * Order is preserved on both axes on purpose: repositories come out in the
+ * order they first appear, and rows keep their position within a repository —
+ * so grouping adds headings without re-sorting a list whose
+ * running-sessions-first order predates this Issue.
+ *
+ * @param worktrees - Rows already sorted and limited by the caller
+ * @returns One entry per repository, in first-appearance order
+ * @internal Exported for unit tests.
+ */
+export function groupWorktreesByRepository(
+  worktrees: readonly Worktree[]
+): PaletteWorktreeGroup[] {
+  const byRepository = new Map<string, PaletteWorktreeGroup>();
+  for (const wt of worktrees) {
+    const repository = wt.repositoryDisplayName || wt.repositoryName || '';
+    const key = repository || '\u0000unnamed';
+    const existing = byRepository.get(key);
+    if (existing) existing.worktrees.push(wt);
+    else byRepository.set(key, { key, repository, worktrees: [wt] });
+  }
+  return [...byRepository.values()];
+}
+
 /**
  * Derive a StatusDot status from a worktree's live session flags (same
  * precedence as the sidebar: waiting > processing > running > idle).
@@ -843,45 +880,62 @@ export function CommandPalette() {
                     })}
                   </Command.Group>
 
-                  {showWorktrees && (
-                    <Command.Group heading={t('groups.worktrees')}>
-                      {visibleWorktrees.map((wt) => {
-                        const repo =
-                          wt.repositoryDisplayName || wt.repositoryName || '';
-                        const branch = wt.branch || wt.name;
-                        return (
-                          <Command.Item
-                            key={wt.id}
-                            value={`worktree ${repo} ${branch} ${wt.name} ${wt.id}`}
-                            onSelect={() =>
-                              runCommand(() => router.push(`/worktrees/${wt.id}`), {
-                                kind: 'worktree',
-                                id: wt.id,
-                              })
-                            }
-                            className={ITEM_CLASS}
-                          >
-                            <GitBranch
-                              size={16}
-                              className={ICON_CLASS}
-                              aria-hidden="true"
-                            />
-                            <span className="truncate">{branch}</span>
-                            {repo && (
-                              <span className="ml-auto truncate pl-2 text-xs text-muted-foreground">
-                                {repo}
-                              </span>
-                            )}
-                            <StatusDot
-                              status={worktreeStatus(wt)}
-                              size="sm"
-                              className={repo ? 'ml-2' : 'ml-auto'}
-                            />
-                          </Command.Item>
-                        );
-                      })}
-                    </Command.Group>
-                  )}
+                  {/*
+                    Issue #2374: one group per repository instead of one flat
+                    "Worktrees" list, so the palette names repositories the way
+                    the header's repository tab strip does.
+
+                    Separate `Command.Group`s rather than groups nested inside a
+                    "Worktrees" group: cmdk registers an item against its
+                    NEAREST group, so a nested layout leaves the outer group
+                    with zero registered items and cmdk hides it — and every
+                    group under it — the moment the user types. Flat sibling
+                    groups also get cmdk's empty-group hiding for free, so a
+                    repository with no matching branch drops its heading too.
+
+                    The row ORDER is untouched: `visibleWorktrees` keeps the
+                    running-sessions-first order this group has always had, and
+                    the repositories are emitted in the order they first appear
+                    in it. The repository name stays inside each item's `value`,
+                    so typing a repository name still matches its branches even
+                    though the name is no longer repeated on every row.
+                  */}
+                  {showWorktrees &&
+                    groupWorktreesByRepository(visibleWorktrees).map((group) => (
+                      <Command.Group
+                        key={group.key}
+                        heading={group.repository || t('groups.worktrees')}
+                      >
+                        {group.worktrees.map((wt) => {
+                          const branch = wt.branch || wt.name;
+                          return (
+                            <Command.Item
+                              key={wt.id}
+                              value={`worktree ${group.repository} ${branch} ${wt.name} ${wt.id}`}
+                              onSelect={() =>
+                                runCommand(() => router.push(`/worktrees/${wt.id}`), {
+                                  kind: 'worktree',
+                                  id: wt.id,
+                                })
+                              }
+                              className={ITEM_CLASS}
+                            >
+                              <GitBranch
+                                size={16}
+                                className={ICON_CLASS}
+                                aria-hidden="true"
+                              />
+                              <span className="truncate">{branch}</span>
+                              <StatusDot
+                                status={worktreeStatus(wt)}
+                                size="sm"
+                                className="ml-auto"
+                              />
+                            </Command.Item>
+                          );
+                        })}
+                      </Command.Group>
+                    ))}
 
                   {delegateTargets.length > 0 && (
                     <Command.Group heading={delegateText.heading}>

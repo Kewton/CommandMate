@@ -330,6 +330,83 @@ describe('CommandPalette (Issue #1053)', () => {
     expect(pushMock).toHaveBeenCalledWith('/worktrees/wt-login');
   });
 
+  // --- Repository headings (Issue #2374) -----------------------------------
+
+  it('heads each worktree run with its repository name, matching the tab strip', () => {
+    mockCache = makeCache({
+      worktrees: [
+        { id: 'wt-login', name: 'feature/login', branch: 'feature/login', repositoryName: 'MyApp' },
+        { id: 'wt-docs', name: 'docs/readme', branch: 'docs/readme', repositoryName: 'OtherRepo' },
+        { id: 'wt-dark', name: 'feature/dark-mode', branch: 'feature/dark-mode', repositoryName: 'MyApp' },
+      ],
+    });
+    renderPalette();
+    pressKey(window, { key: 'k', metaKey: true });
+
+    const headings = Array.from(
+      document.querySelectorAll('[cmdk-group-heading]')
+    ).map((node) => node.textContent);
+    expect(headings).toContain('MyApp');
+    expect(headings).toContain('OtherRepo');
+    // The generic "Worktrees" heading is replaced by the repository names —
+    // the same vocabulary the header's repository tab strip uses.
+    expect(headings).not.toContain('commandPalette.groups.worktrees');
+  });
+
+  it('prefers the repository display name when the payload carries one', () => {
+    mockCache = makeCache({
+      worktrees: [
+        {
+          id: 'wt-login',
+          name: 'feature/login',
+          branch: 'feature/login',
+          repositoryName: 'my-app',
+          repositoryDisplayName: 'My Application',
+        },
+      ],
+    });
+    renderPalette();
+    pressKey(window, { key: 'k', metaKey: true });
+
+    const headings = Array.from(
+      document.querySelectorAll('[cmdk-group-heading]')
+    ).map((node) => node.textContent);
+    expect(headings).toContain('My Application');
+    expect(headings).not.toContain('my-app');
+  });
+
+  it('still matches a branch when the user types its repository name', async () => {
+    mockCache = makeCache({
+      worktrees: [
+        { id: 'wt-login', name: 'feature/login', branch: 'feature/login', repositoryName: 'MyApp' },
+        { id: 'wt-docs', name: 'docs/readme', branch: 'docs/readme', repositoryName: 'OtherRepo' },
+      ],
+    });
+    renderPalette();
+    pressKey(window, { key: 'k', metaKey: true });
+
+    const input = screen.getByTestId('command-palette-input');
+    fireEvent.change(input, { target: { value: 'OtherRepo' } });
+
+    await waitFor(() => {
+      expect(screen.getByText('docs/readme')).toBeInTheDocument();
+    });
+    expect(screen.queryByText('feature/login')).toBeNull();
+  });
+
+  it('falls back to the generic heading for a worktree with no repository', () => {
+    mockCache = makeCache({
+      worktrees: [{ id: 'wt-orphan', name: 'orphan', branch: 'orphan' }],
+    });
+    renderPalette();
+    pressKey(window, { key: 'k', metaKey: true });
+
+    const headings = Array.from(
+      document.querySelectorAll('[cmdk-group-heading]')
+    ).map((node) => node.textContent);
+    expect(headings).toContain('commandPalette.groups.worktrees');
+  });
+
   it('reflects a later cache update (new worktree becomes searchable)', () => {
     mockCache = makeCache({
       worktrees: [
@@ -349,7 +426,10 @@ describe('CommandPalette (Issue #1053)', () => {
 
     expect(screen.getByText('common.nav.sessions')).toBeInTheDocument();
     expect(screen.queryByText('feature/login')).toBeNull();
-    expect(screen.queryByText('commandPalette.groups.worktrees')).toBeNull();
+    // Issue #2374: the section is headed by repository names now, so absence is
+    // asserted against those — the generic heading is gone either way, which
+    // would make the old assertion pass no matter what this branch did.
+    expect(screen.queryByText('MyApp')).toBeNull();
   });
 
   it('hides worktrees on cache error even if stale data is present', () => {
@@ -372,7 +452,7 @@ describe('CommandPalette (Issue #1053)', () => {
     pressKey(window, { key: 'k', metaKey: true });
     // Navigation still works; no worktrees group
     expect(screen.getByText('common.nav.sessions')).toBeInTheDocument();
-    expect(screen.queryByText('commandPalette.groups.worktrees')).toBeNull();
+    expect(screen.queryByText('MyApp')).toBeNull();
   });
 
   // --- Actions group ---------------------------------------------------------
