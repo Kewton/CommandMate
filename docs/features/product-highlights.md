@@ -214,18 +214,29 @@ GIF はバイト予算（既定 1.5MB）に収まるまで解像度・fps・パ�
 完了後の一覧 3.7〜4.2s / contract-verify 37.3〜38.8s。
 
 動画は圧縮済みで git の delta 圧縮が効かないため、**作り直すたびに全 12 本を再コミットしない**
-こと（`docs/images/demo-mobile.gif` は既に履歴へ 4 版残っている）。差し替えは実際に変えた本数だけ。
+こと（`docs/images/demo-contract-verify.gif` は旧名 `demo-desktop.gif` で既に履歴へ 4 版残っている）。
+差し替えは実際に変えた本数だけ。
 今回の撮り直しだけは例外で、収録の間に Activity Bar のアイコンが増えたため、部分更新すると
 chrome の異なる版が 1 ページに混在してしまう。
 
-個人環境で撮られた `docs/images/` の旧素材は **#1815 で差替え済み**。README（EN / JA は
-同一ファイルを参照するので en 版のテロップが両方に出る）の `demo-desktop.gif` は
-`cm-11-contract-verify.en.mp4` の 0〜18 秒（outro カードを落とした 4 ビート）、
-`demo-mobile.gif` は `cm-03-never-miss-waiting.en.mp4` の `respond-from-mobile`（14〜18 秒）を
-**520x800 に切り抜いた**もの。切り抜き幅はスマホ枠（370px）ではなくテロップ帯の文字幅で決まる
-— 枠幅で切ると帯が途中で切れ、帯幅（594px）で切るとスマホが 187px まで縮んで画面の字が読めない。
-旧 `demo-desktop.mp4` / `demo-mobile.mp4`（合わせて 69,870,130 バイト）は削除した
-（[website/assets/media/README.md](../../website/assets/media/README.md) 参照）。
+個人環境で撮られた `docs/images/` の旧素材は **#1815 で差替え済み**。README の冒頭はこの
+ライブラリではなく、絵コンテ `readme-hero`
+（`.claude/skills/demo-video/storyboard/readme-hero.yaml`、#2381）になった。タブ帯 →
+5 エージェント → チャット面で委任 → 返答のリンク → スマホで同じこと、の 30 秒である。
+**ロケールごとに 1 本ずつ**撮るので `README.md` は `demo-hero.en.gif`（1,406,883 バイト）、
+`docs/ja/README.md` は `demo-hero.ja.gif`（1,552,144 バイト）を参照する
+— 1 本を共有していたときの「ja README に en テロップが出る」問題はこれで解消した。
+どちらも 600px / 10fps で、絵コンテが宣言する 1.84MB 予算を `compose.sh` が実測で守る。
+
+契約 → 検証のカットは残り、README の *「たぶん動く」ではなく検証済み* 節へ下りた（#2383）。
+`demo-contract-verify.gif`（909,922 バイト、旧名 `demo-desktop.gif`）は従来どおり
+`cm-11-contract-verify.en.mp4` の 0〜18 秒（outro カードを落とした 4 ビート）である。
+lede の下にあったスマホの GIF は、冒頭の hero にスマホが入ったので同時に削除した。
+今後スマホのシーンを 1280x800 の合成から切り抜くときは、切り抜き幅をスマホ枠（370px）ではなく
+テロップ帯の文字幅で決めること — 枠幅で切ると帯が途中で切れ、帯幅（594px）で切ると
+スマホが 187px まで縮んで画面の字が読めない。
+これらが置き換えた旧 mp4 2 本（合わせて 69,870,130 バイト）は #1815 で削除済みで、
+ファイル名は [website/assets/media/README.md](../../website/assets/media/README.md) にある。
 
 ## 関連ドキュメント
 

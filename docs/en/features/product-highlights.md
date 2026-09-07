@@ -225,20 +225,30 @@ Review screen 15.8–17.8s / diff 9.7–10.2s / slash palette 12.0–15.2s / ins
 back to ready 3.7–4.2s / contract-verify 37.3–38.8s.
 
 Video is already compressed, so git cannot delta it — **do not re-commit all twelve every time you
-regenerate** (`docs/images/demo-mobile.gif` already sits in history in four versions). Replace
-only what actually changed. The exception was this re-shoot: the Activity Bar gained icons between
-takes, so a partial update would have produced a page mixing two versions of the chrome.
+regenerate** (`docs/images/demo-contract-verify.gif`, under its old name `demo-desktop.gif`,
+already sits in history in four versions). Replace only what actually changed. The exception was
+this re-shoot: the Activity Bar gained icons between takes, so a partial update would have
+produced a page mixing two versions of the chrome.
 
 The old recordings under `docs/images/` that were made on a personal machine are **replaced as
-of #1815**. The README GIFs are cut from this library (EN and JA point at one file each, so both
-carry the en telop): `demo-desktop.gif` is seconds 0-18 of `cm-11-contract-verify.en.mp4` — the
-four beats without the outro card — and `demo-mobile.gif` is `respond-from-mobile` (seconds
-14-18) of `cm-03-never-miss-waiting.en.mp4`, **cropped to 520x800**. That crop width is set by
-the telop band's text, not by the phone frame (370px): cropping to the frame cuts the band
-mid-word, and cropping to the band's full width (594px) shrinks the phone to 187px, where the
-text on its screen stops being readable. The old `demo-desktop.mp4` and `demo-mobile.mp4`
-(69,870,130 bytes together) are deleted
-(see [website/assets/media/README.md](../../../website/assets/media/README.md)).
+of #1815**. The README no longer opens on this library. Its hero is the `readme-hero` storyboard
+(`.claude/skills/demo-video/storyboard/readme-hero.yaml`, #2381): 30 seconds of tab strip → five
+agents → delegation on the chat surface → the reply's file link → the same two things from a
+phone. It is recorded **once per language**, so `README.md` points at `demo-hero.en.gif`
+(1,406,883 bytes) and `docs/ja/README.md` at `demo-hero.ja.gif` (1,552,144 bytes) — the JA README
+no longer carries en telops, which is what pointing both at one file used to cost. Both are
+600px / 10fps and `compose.sh` gates them against the 1.84MB budget the storyboard declares.
+
+The contract → verification cut stayed and moved down to the README's *Verified, not
+vibe-checked* section (#2383): `demo-contract-verify.gif` (909,922 bytes, renamed from
+`demo-desktop.gif`) is still seconds 0-18 of `cm-11-contract-verify.en.mp4` — the four beats
+without the outro card. The mobile GIF that used to sit under the lede was deleted with that
+move, because the hero now shows the phone itself. If a phone scene is ever cropped out of the
+1280x800 composite again, the crop width is set by the telop band's text and not by the phone
+frame (370px): cropping to the frame cuts the band mid-word, and cropping to the band's full
+width (594px) shrinks the phone to 187px, where the text on its screen stops being readable. The
+two `.mp4` originals this pair replaced (69,870,130 bytes together) were deleted in #1815 — they
+are named in [website/assets/media/README.md](../../../website/assets/media/README.md).
 
 ## Related documents
 
