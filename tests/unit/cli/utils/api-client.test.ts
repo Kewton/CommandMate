@@ -629,6 +629,42 @@ describe('handleApiError — 5xx carries the server\'s reason (Issue #1637)', ()
   });
 });
 
+/**
+ * Issue #2404: a 404 that says only "Check the worktree ID." sends the reader
+ * after a typo. With two servers on the machine — the ordinary state of a
+ * worktree-per-issue setup — the id is routinely correct and the SERVER is the
+ * thing that is wrong, and nothing in the message said which one answered.
+ */
+describe('handleApiError — a 404 names the server that answered (Issue #2404)', () => {
+  it('appends the URL the request actually went to', () => {
+    const result = handleApiError(null, 404, undefined, { serverUrl: 'http://127.0.0.1:3011' });
+
+    expect(result.message).toBe(
+      'Resource not found. Check the worktree ID. (server: http://127.0.0.1:3011)'
+    );
+    expect(result.exitCode).toBe(ExitCode.UNEXPECTED_ERROR);
+  });
+
+  it('leaves the sentence exactly as it was when no URL is given', () => {
+    // `.claude/skills/orchestrate-monitor` matches on this wording, and the two
+    // callers that classify without a client pass no context.
+    expect(handleApiError(null, 404).message).toBe('Resource not found. Check the worktree ID.');
+    expect(handleApiError(null, 404, undefined, {}).message).toBe(
+      'Resource not found. Check the worktree ID.'
+    );
+  });
+
+  it('does not decorate the other statuses', () => {
+    const context = { serverUrl: 'http://127.0.0.1:3011' };
+
+    // 401 and 400 already name what to fix, and a 5xx carries the server's own
+    // sentence (#1637) — a URL there would only pad messages nobody misreads.
+    expect(handleApiError(null, 400, undefined, context).message).not.toContain('3011');
+    expect(handleApiError(null, 401, undefined, context).message).not.toContain('3011');
+    expect(handleApiError(null, 500, { error: 'boom' }, context).message).not.toContain('3011');
+  });
+});
+
 describe('ApiClient — the reason reaches the caller (Issue #1637)', () => {
   afterEach(() => {
     restoreFetch();

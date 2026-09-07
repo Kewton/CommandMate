@@ -26,6 +26,10 @@ import {
   MIN_AGENT_INSTANCES,
 } from '../utils/agent-instances';
 import { resolveSessionTarget, describeSessionTargetConflict } from '../utils/session-target';
+// Issue #2404: "the worktree is not on this server" is a different failure from
+// "the worktree id is wrong", and only the session's own identity can tell them
+// apart.
+import { describeServerMismatch, formatServerMismatchHint } from './whoami';
 import type { CurrentOutputResponse, OpencodeSessionsResponse } from '../types/api-responses';
 // Issue #2317: the tmux session name each instance runs in, so `commandmate
 // attach` / `tmux attach` need no hand-assembly of `mcbd-<tool>-<wt>[-<suffix>]`.
@@ -357,8 +361,11 @@ async function fetchOpencodeSessions(
  * Probes GET .../current-output?cliTool=&instance= per instance (same
  * endpoint capture.ts uses) since the roster itself carries no session state.
  */
-async function listInstances(worktreeId: string, options: InstancesOptions): Promise<void> {
-  const client = new ApiClient({ token: options.token });
+async function listInstances(
+  client: ApiClient,
+  worktreeId: string,
+  options: InstancesOptions
+): Promise<void> {
   const instances = await fetchAgentInstances(client, worktreeId);
 
   // Issue #2038: one extra request for the whole worktree, and only when there
@@ -408,7 +415,11 @@ async function listInstances(worktreeId: string, options: InstancesOptions): Pro
 /**
  * Add action: append a new instance to the roster (PATCH full replacement).
  */
-async function addInstance(worktreeId: string, options: InstancesOptions): Promise<void> {
+async function addInstance(
+  client: ApiClient,
+  worktreeId: string,
+  options: InstancesOptions
+): Promise<void> {
   if (!options.agent) {
     console.error('Error: add requires --agent <tool>.');
     process.exit(ExitCode.CONFIG_ERROR);
@@ -426,7 +437,6 @@ async function addInstance(worktreeId: string, options: InstancesOptions): Promi
     process.exit(ExitCode.CONFIG_ERROR);
   }
 
-  const client = new ApiClient({ token: options.token });
   const existing = await fetchAgentInstances(client, worktreeId);
 
   if (existing.length >= MAX_AGENT_INSTANCES) {
@@ -460,13 +470,17 @@ async function addInstance(worktreeId: string, options: InstancesOptions): Promi
  * Remove action: drop an instance from the roster. Kills the session first
  * (when --kill) so the server can still resolve its CLI tool from the roster.
  */
-async function removeInstance(worktreeId: string, instanceId: string, options: InstancesOptions): Promise<void> {
+async function removeInstance(
+  client: ApiClient,
+  worktreeId: string,
+  instanceId: string,
+  options: InstancesOptions
+): Promise<void> {
   if (!isValidInstanceId(instanceId)) {
     console.error('Error: Invalid instance id. Must be an alphanumeric/underscore/hyphen identifier (max 64 chars).');
     process.exit(ExitCode.CONFIG_ERROR);
   }
 
-  const client = new ApiClient({ token: options.token });
   const existing = await fetchAgentInstances(client, worktreeId);
 
   if (!existing.some(inst => inst.id === instanceId)) {
@@ -496,10 +510,10 @@ async function removeInstance(worktreeId: string, instanceId: string, options: I
  * Alias action: rename an existing instance's display label.
  */
 async function renameInstance(
+  client: ApiClient,
   worktreeId: string,
   instanceId: string,
-  alias: string,
-  options: InstancesOptions
+  alias: string
 ): Promise<void> {
   if (!isValidInstanceId(instanceId)) {
     console.error('Error: Invalid instance id. Must be an alphanumeric/underscore/hyphen identifier (max 64 chars).');
@@ -510,7 +524,6 @@ async function renameInstance(
     process.exit(ExitCode.CONFIG_ERROR);
   }
 
-  const client = new ApiClient({ token: options.token });
   const existing = await fetchAgentInstances(client, worktreeId);
   const index = existing.findIndex(inst => inst.id === instanceId);
   if (index === -1) {
@@ -528,15 +541,36 @@ async function renameInstance(
  * The server resolves the backing CLI tool from the roster via the `instance`
  * query param (kill-session/route.ts), so no extra lookup is needed here.
  */
-async function killInstance(worktreeId: string, instanceId: string, options: InstancesOptions): Promise<void> {
+async function killInstance(
+  client: ApiClient,
+  worktreeId: string,
+  instanceId: string
+): Promise<void> {
   if (!isValidInstanceId(instanceId)) {
     console.error('Error: Invalid instance id. Must be an alphanumeric/underscore/hyphen identifier (max 64 chars).');
     process.exit(ExitCode.CONFIG_ERROR);
   }
 
-  const client = new ApiClient({ token: options.token });
   await client.post(`/api/worktrees/${worktreeId}/kill-session?instance=${encodeURIComponent(instanceId)}`);
   console.error(`Session killed: ${instanceId}`);
+}
+
+/**
+ * Print the "you are on another server" hint when that is what a 404 means
+ * (Issue #2404).
+ *
+ * Runs only on a failure path, so the extra `tmux display-message` +
+ * `GET /api/worktrees` it costs buys the difference between a correct diagnosis
+ * and a wrong one. Never throws: {@link describeServerMismatch} swallows its own
+ * failures, and a diagnosis must not replace the error being diagnosed.
+ *
+ * @param client - The client whose request failed
+ * @param error - The caught error, diagnosed only when it is a 404
+ */
+async function warnIfDifferentServer(client: ApiClient, error: unknown): Promise<void> {
+  if (!(error instanceof ApiError) || error.statusCode !== 404) return;
+  const mismatch = await describeServerMismatch(client);
+  if (mismatch) console.error(formatServerMismatchHint(mismatch));
 }
 
 export function createInstancesCommand(): Command {
@@ -553,6 +587,10 @@ export function createInstancesCommand(): Command {
     .option('--kill', 'Also kill the running session when removing an instance')
     .option('--token <token>', TOKEN_WARNING)
     .action(async (worktreeId: string, action: string | undefined, rest: string[], options: InstancesOptions) => {
+      // One client for the whole invocation (Issue #2404): every action built
+      // its own identical one, and the failure path below has to report the URL
+      // the request actually went to — a second construction is a second answer.
+      const client = new ApiClient({ token: options.token });
       try {
         if (!isValidWorktreeId(worktreeId)) {
           console.error('Error: Invalid worktree ID format.');
@@ -561,11 +599,11 @@ export function createInstancesCommand(): Command {
 
         switch (action ?? 'list') {
           case 'list':
-            await listInstances(worktreeId, options);
+            await listInstances(client, worktreeId, options);
             break;
 
           case 'add':
-            await addInstance(worktreeId, options);
+            await addInstance(client, worktreeId, options);
             break;
 
           case 'remove': {
@@ -574,7 +612,7 @@ export function createInstancesCommand(): Command {
               console.error('Error: remove requires an <instance-id> argument.');
               process.exit(ExitCode.CONFIG_ERROR);
             }
-            await removeInstance(worktreeId, instanceId, options);
+            await removeInstance(client, worktreeId, instanceId, options);
             break;
           }
 
@@ -585,7 +623,7 @@ export function createInstancesCommand(): Command {
               console.error('Error: alias requires <instance-id> and <new-alias> arguments.');
               process.exit(ExitCode.CONFIG_ERROR);
             }
-            await renameInstance(worktreeId, instanceId, alias, options);
+            await renameInstance(client, worktreeId, instanceId, alias);
             break;
           }
 
@@ -595,7 +633,7 @@ export function createInstancesCommand(): Command {
               console.error('Error: kill requires an <instance-id> argument.');
               process.exit(ExitCode.CONFIG_ERROR);
             }
-            await killInstance(worktreeId, instanceId, options);
+            await killInstance(client, worktreeId, instanceId);
             break;
           }
 
@@ -604,6 +642,13 @@ export function createInstancesCommand(): Command {
             process.exit(ExitCode.CONFIG_ERROR);
         }
       } catch (error) {
+        // Issue #2404: a 404 here says "no such worktree ON THIS SERVER", and
+        // `Resource not found. Check the worktree ID.` reads as "you typed it
+        // wrong". When the caller's own session belongs to a worktree this
+        // server does not list, the id was never the problem — say so before
+        // handleCommandError() exits, so nobody re-checks a correct id and then
+        // delegates to whatever this server does have.
+        await warnIfDifferentServer(client, error);
         handleCommandError(error);
       }
     });
