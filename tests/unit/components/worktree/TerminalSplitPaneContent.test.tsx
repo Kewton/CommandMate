@@ -58,18 +58,44 @@ vi.mock('@/components/worktree/MessageInput', () => ({
     splitIndex,
     pendingInsertText,
     autoYesSlot,
+    isProcessing,
+    showToast,
   }: {
     cliToolId: string;
     splitIndex: number;
     pendingInsertText?: string | null;
     // Issue #1080: Auto-Yes moved into the composer meta row (autoYesSlot).
     autoYesSlot?: React.ReactNode;
+    // Issue #2406: the queued-send toast's gate, and the surface it fires on.
+    isProcessing?: boolean;
+    showToast?: (message: string, type?: string) => void;
   }) => (
     <div
       data-testid={`message-input-${splitIndex}`}
       data-cli-tool-id={cliToolId}
       data-pending-insert={pendingInsertText ?? ''}
+      data-is-processing={String(isProcessing ?? false)}
     >
+      {/* Issue #2406: a stand-in for the real composer's send. The real
+          MessageInput fires the "Queued (session busy)" toast on exactly this
+          condition and no other (`if (isProcessing) showToast(...)`, both send
+          paths, pinned by MessageInput.test.tsx). Reproducing that one line here
+          is what lets this suite assert which VALUE the split feeds the prop,
+          which is the whole of Issue #2406. */}
+      <button
+        type="button"
+        data-testid={`message-input-send-${splitIndex}`}
+        onClick={() => {
+          if (isProcessing) {
+            showToast?.(
+              'Queued (session busy) \u2014 your message will run after the current task finishes.',
+              'warning',
+            );
+          }
+        }}
+      >
+        send
+      </button>
       {autoYesSlot}
     </div>
   ),
@@ -1392,6 +1418,91 @@ describe('TerminalSplitPaneContent', () => {
         const posted = postedCalls();
         expect(posted.map(([url]) => url)).toContain('/api/worktrees/w-1/clear-composer');
       });
+    });
+  });
+  /**
+   * Issue #2406: the composer's "Queued (session busy)" toast (#806) fired on
+   * every send to a live pane, because `isProcessing` was wired to
+   * `terminal.isRunning` — which has meant "a tmux session exists and is
+   * healthy" since Issue #2238, not "the agent is mid-turn".
+   *
+   * Both cases below keep `isRunning: true` (a live pane, the send button
+   * enabled) and vary ONLY the merged status verdict, so the suite cannot pass
+   * by accident on a pane that simply has no session.
+   */
+  describe('queued-send toast gate (Issue #2406)', () => {
+    const QUEUED = 'Queued (session busy)';
+
+    function renderWithStatus(sessionStatus: string, showToast: (m: string, t?: string) => void) {
+      mockFetch.mockImplementation(() =>
+        okJson({
+          isRunning: true,
+          fullOutput: `claude body (${sessionStatus})`,
+          thinking: false,
+          sessionStatus,
+        }),
+      );
+
+      return render(
+        <TerminalSplitPaneContent
+          worktreeId="w-1"
+          splitIndex={0}
+          cliToolId="claude"
+          availableInstances={[inst('claude')]}
+          onInstanceChange={vi.fn()}
+          onFocus={vi.fn()}
+          autoYes={{ onToggle: vi.fn() }}
+          history={{ showToast }}
+        />,
+      );
+    }
+
+    it('does NOT toast when the agent is ready (session alive, nothing running)', async () => {
+      const showToast = vi.fn();
+      renderWithStatus('ready', showToast);
+
+      // The poll has landed and reported a LIVE session, so this is the exact
+      // frame the old wiring called "busy".
+      await waitFor(() =>
+        expect(screen.getByTestId('terminal-output').textContent).toBe('claude body (ready)'),
+      );
+      expect(screen.getByTestId('terminal-active').textContent).toBe('true');
+      expect(screen.getByTestId('message-input-0').getAttribute('data-is-processing')).toBe('false');
+
+      fireEvent.click(screen.getByTestId('message-input-send-0'));
+
+      expect(showToast).not.toHaveBeenCalled();
+    });
+
+    it('still toasts when the agent is generating (sessionStatus running)', async () => {
+      const showToast = vi.fn();
+      renderWithStatus('running', showToast);
+
+      await waitFor(() =>
+        expect(screen.getByTestId('terminal-output').textContent).toBe('claude body (running)'),
+      );
+      await waitFor(() =>
+        expect(screen.getByTestId('message-input-0').getAttribute('data-is-processing')).toBe('true'),
+      );
+
+      fireEvent.click(screen.getByTestId('message-input-send-0'));
+
+      expect(showToast).toHaveBeenCalledTimes(1);
+      expect(showToast).toHaveBeenCalledWith(expect.stringContaining(QUEUED), 'warning');
+    });
+
+    it('does NOT toast while the pane sits at a prompt (waiting), which is not a turn', async () => {
+      const showToast = vi.fn();
+      renderWithStatus('waiting', showToast);
+
+      await waitFor(() =>
+        expect(screen.getByTestId('terminal-output').textContent).toBe('claude body (waiting)'),
+      );
+      expect(screen.getByTestId('message-input-0').getAttribute('data-is-processing')).toBe('false');
+
+      fireEvent.click(screen.getByTestId('message-input-send-0'));
+
+      expect(showToast).not.toHaveBeenCalled();
     });
   });
 });
