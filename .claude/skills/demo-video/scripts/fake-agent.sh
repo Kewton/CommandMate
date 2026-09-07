@@ -23,6 +23,16 @@
 
 set -u
 
+# bash 5.2 turned `patsub_replacement` on by default: in `${var//pat/$rep}` an
+# unquoted `&` in the replacement becomes the matched text and a backslash
+# quotes it, so a message carrying `\` or `&` was mangled on its way into the
+# pane echo and the transcript — measured on CI (ubuntu, bash 5.2): `\\`
+# collapsed to `\` and the JSON line no longer parsed. Quoting the replacement
+# is not the fix: bash 3.2 keeps the quote characters. With the option off the
+# replacement is literal on every version from 3.2 up; the option does not
+# exist before 5.2, hence the silenced failure.
+shopt -u patsub_replacement 2>/dev/null || true
+
 SPEED="1.0"
 LOOP=1
 DRY_RUN=0

@@ -741,15 +741,30 @@ describe('@transcript rows (Issue #2380)', () => {
     '@input\techo\\n\n@exec\tcommandmate ask wt\n@transcript\tturn.jsonl\n0\tdone\\n\n',
   );
 
+  /**
+   * Every character that is special to *something* on the way from stdin to
+   * the JSON line: a backslash and a double quote (JSON), a tab (JSON, and a
+   * field separator to `read`), `&` and `\&` (bash 5.2's `patsub_replacement`
+   * treats an unquoted `&` in a `${var//pat/$rep}` replacement as the matched
+   * text and a backslash as its quote — which is exactly how CI on ubuntu
+   * collapsed `\\` to `\` and produced an unparseable line while macOS bash
+   * 3.2 stayed green), and a second line (sed works per line; the joiner has
+   * to be written as `\n`).
+   */
+  const TRICKY_FIRST_LINE = 'Fix "Header" \\ now & \\& tab\there';
+  const TRICKY_MESSAGE = `${TRICKY_FIRST_LINE}\nline two`;
+
   it('appends the template with the row\'s values spliced in, JSON-escaped', () => {
     const target = path.join(STUB_ROOT, 'out', 'nested', `${CLAUDE_SID}.jsonl`);
     fs.rmSync(path.dirname(target), { recursive: true, force: true });
     const result = runWithStubs(
       [cassette, '--once', '--input-settle', '1', '--worktree', 'wt-dark-mode', '--transcript', target],
-      'Fix "Header" \\ now\nline two\n',
+      `${TRICKY_MESSAGE}\n`,
     );
     expect(result.status).toBe(0);
     const lines = fs.readFileSync(target, 'utf8').trim().split('\n');
+    // Two template rows, two lines: the message's own newline was written as
+    // `\n`, not as a line break.
     expect(lines).toHaveLength(2);
     const first = JSON.parse(lines[0]);
     const second = JSON.parse(lines[1]);
@@ -760,11 +775,40 @@ describe('@transcript rows (Issue #2380)', () => {
     expect(first.wt).toBe('wt-dark-mode');
     expect(Date.parse(first.timestamp)).toBeGreaterThan(Date.now() - 60_000);
     // The whole submission, newline-joined — what the reader matches against
-    // the `/send` row — with the quote and backslash escaped for JSON.
-    expect(second.message).toBe('Fix "Header" \\ now\nline two');
-    expect(second.input).toBe('Fix "Header" \\ now');
-    expect(second.task).toBe('Fix "Header" \\ now');
+    // the `/send` row — byte for byte once the JSON is decoded.
+    expect(second.message).toBe(TRICKY_MESSAGE);
+    expect(second.input).toBe(TRICKY_FIRST_LINE);
+    expect(second.task).toBe(TRICKY_FIRST_LINE);
     expect(second.exec).toContain('stub-commandmate\n[ask]\n[wt]');
+    // And the raw bytes carry exactly the JSON escapes, so a reader that does
+    // not tolerate a stray `\ ` sees none.
+    expect(lines[1]).toContain('"message":"Fix \\"Header\\" \\\\ now & \\\\& tab\\there\\nline two"');
+    // The same values reach the pane echo unescaped: `&` is not the matched
+    // text and `\\` is not a quote.
+    expect(result.stdout.startsWith(`echo\n`)).toBe(true);
+  });
+
+  it('echoes a message with & and backslashes verbatim into the pane', () => {
+    // The composer echo goes through the same `${var//pat/$rep}` as the
+    // transcript, and bash 5.2 mangled it the same way: `&` became `{{INPUT}}`.
+    const file = tmpCassette('@input\techo:{{INPUT}}|{{TASK}}\\n\n');
+    const result = runWithStubs([file, '--once'], `${TRICKY_FIRST_LINE}\n`);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe(`echo:${TRICKY_FIRST_LINE}|${TRICKY_FIRST_LINE}\n`);
+  });
+
+  it('splices & and backslashes into an @exec argv element verbatim', () => {
+    const file = tmpCassette('@input\tx\\n\n@exec\tcommandmate ask "{{TASK}}"\n');
+    const result = runWithStubs([file, '--once'], `${TRICKY_FIRST_LINE}\n`);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain(`[${TRICKY_FIRST_LINE}]\n`);
+  });
+
+  it('turns patsub_replacement off, so a bash 5.2 replacement is literal', () => {
+    // The guard the three cases above depend on; a future tidy-up that drops
+    // it would only be caught on a bash 5.2 runner.
+    const source = fs.readFileSync(SCRIPT, 'utf8');
+    expect(source).toMatch(/^shopt -u patsub_replacement 2>\/dev\/null \|\| true$/m);
   });
 
   it('mints a fresh turn id per row', () => {
