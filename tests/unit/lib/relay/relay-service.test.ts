@@ -40,20 +40,55 @@ function insertWorktree(id: string, cliToolId = 'claude'): void {
   ).run(id, id, `/tmp/${id}`, cliToolId, NOW);
 }
 
+/** The body a delivery puts in the requester's composer, and the reader echoes. */
+const RELAYED_BODY = '[from Codex 2 / wt-b] done';
+
 /** The row a delivered relay leaves in the requester's history. */
 function seedRelayedUserMessage(
   worktreeId: string,
   cliToolId: 'claude' | 'codex' | 'copilot',
   instanceId: string,
-  relayId: string
+  relayId: string,
+  atMs = NOW
 ): void {
   createMessage(db, {
     worktreeId,
     role: 'user',
-    content: '[from Codex 2 / wt-b] done',
+    content: RELAYED_BODY,
     messageType: 'relay',
-    timestamp: new Date(NOW),
+    timestamp: new Date(atMs),
     requestId: relayRequestId(relayId),
+    cliToolId,
+    instanceId,
+  });
+}
+
+/**
+ * The SECOND row the same delivery produces (Issue #2387).
+ *
+ * The agent's own transcript reader records the prompt it was just handed, and
+ * `recordUserTurn` cannot fold it into the relay row: that path only claims rows
+ * with no `request_id`, and the relay row carries `relay:<id>`. So History gets
+ * a `normal` twin of the relay row — measured 662ms behind it, same worktree,
+ * same tool, same instance, same body, keyed `<tool>-prompt:<id>`.
+ *
+ * This is the row the loop guard used to trip over: it became the newest user
+ * row, and a lookup that read only the newest row stopped seeing the parent.
+ */
+function seedTranscriptEchoRow(
+  worktreeId: string,
+  cliToolId: 'claude' | 'codex' | 'copilot',
+  instanceId: string,
+  atMs: number,
+  content: string = RELAYED_BODY
+): void {
+  createMessage(db, {
+    worktreeId,
+    role: 'user',
+    content,
+    messageType: 'normal',
+    timestamp: new Date(atMs),
+    requestId: `${cliToolId}-prompt:bbc5c6d9-ea0`,
     cliToolId,
     instanceId,
   });
@@ -213,6 +248,60 @@ describe('openRelay', () => {
       expect(result.ok).toBe(false);
     });
 
+    it('still refuses seconds later, once the reader has echoed the delivery', () => {
+      // Issue #2387: the echo is the newest user row from 662ms after the
+      // delivery onward, so a guard that read only the newest row stopped
+      // refusing here — the chain block became a race the operator could win.
+      makeAAnsweringARelay();
+      seedTranscriptEchoRow('wt-a', 'claude', 'claude', NOW + 662);
+
+      const result = openRelay(db, { from: A, to: B, now: NOW + 5_000 });
+
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.refusal.code).toBe('RELAY_CHAIN_BLOCKED');
+    });
+
+    it('goes one hop deeper past the echo, not back to depth 1', () => {
+      makeAAnsweringARelay(1);
+      seedTranscriptEchoRow('wt-a', 'claude', 'claude', NOW + 662);
+
+      const result = openRelay(db, { from: A, to: B, allowRelayChain: true, now: NOW + 5_000 });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.relay.hops).toBe(2);
+    });
+
+    it('stops at MAX_RELAY_HOPS past the echo too', () => {
+      makeAAnsweringARelay(MAX_RELAY_HOPS);
+      seedTranscriptEchoRow('wt-a', 'claude', 'claude', NOW + 662);
+
+      const result = openRelay(db, { from: A, to: B, allowRelayChain: true, now: NOW + 5_000 });
+
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.refusal.code).toBe('RELAY_HOPS_EXCEEDED');
+    });
+
+    it('is not a chain when a human typed after the echo', () => {
+      // The echo is stepped over; an ordinary message is not. #2377's rule —
+      // the operator taking the session over ends the chain — survives #2387.
+      makeAAnsweringARelay();
+      seedTranscriptEchoRow('wt-a', 'claude', 'claude', NOW + 662);
+      createMessage(db, {
+        worktreeId: 'wt-a',
+        role: 'user',
+        content: 'a human typed this',
+        messageType: 'normal',
+        timestamp: new Date(NOW + 5_000),
+        cliToolId: 'claude',
+        instanceId: 'claude',
+      });
+
+      expect(openRelay(db, { from: A, to: B, now: NOW + 6_000 }).ok).toBe(true);
+    });
+
     it('scopes the guard to the instance, not the worktree', () => {
       makeAAnsweringARelay();
 
@@ -247,6 +336,76 @@ describe('findParentRelayHops', () => {
     seedRelayedUserMessage('wt-a', 'claude', 'claude', parent.relay.id);
 
     expect(findParentRelayHops(db, A)).toBe(2);
+  });
+
+  describe('the transcript reader\'s duplicate row (Issue #2387)', () => {
+    /** Depth-2 parent, its delivered row, and the echo the reader adds. */
+    function seedDeliveryWithEcho(echoAtMs = NOW + 662): void {
+      const parent = openRelay(db, { from: C, to: A, now: NOW });
+      expect(parent.ok).toBe(true);
+      if (!parent.ok) throw new Error('setup');
+      db.prepare('UPDATE session_relays SET hops = 2 WHERE id = ?').run(parent.relay.id);
+      seedRelayedUserMessage('wt-a', 'claude', 'claude', parent.relay.id);
+      seedTranscriptEchoRow('wt-a', 'claude', 'claude', echoAtMs);
+    }
+
+    it('finds the parent behind the duplicate the reader wrote 662ms later', () => {
+      // The exact ordering measured on 2026-09-07: `relay` at t, `normal` twin
+      // at t+662ms. Reading only the newest user row answers null here, which
+      // is what pinned every chained relay at hops = 1.
+      seedDeliveryWithEcho();
+
+      expect(findParentRelayHops(db, A)).toBe(2);
+    });
+
+    it('finds it however long the echo has been the newest row', () => {
+      seedDeliveryWithEcho(NOW + 5_000);
+
+      expect(findParentRelayHops(db, A)).toBe(2);
+    });
+
+    it('finds it behind a turn with more assistant rows than a row window holds', () => {
+      // Why the lookback counts TURNS: one codex turn can emit dozens of
+      // assistant rows, and a row-counted window would push both user rows out.
+      seedDeliveryWithEcho();
+      for (let i = 0; i < 60; i += 1) {
+        createMessage(db, {
+          worktreeId: 'wt-a',
+          role: 'assistant',
+          content: `step ${i}`,
+          messageType: 'normal',
+          timestamp: new Date(NOW + 1_000 + i),
+          cliToolId: 'claude',
+          instanceId: 'claude',
+        });
+      }
+
+      expect(findParentRelayHops(db, A)).toBe(2);
+    });
+
+    it('answers null when an ordinary message follows the echo', () => {
+      seedDeliveryWithEcho();
+      createMessage(db, {
+        worktreeId: 'wt-a',
+        role: 'user',
+        content: 'a human typed this',
+        messageType: 'normal',
+        timestamp: new Date(NOW + 5_000),
+        cliToolId: 'claude',
+        instanceId: 'claude',
+      });
+
+      expect(findParentRelayHops(db, A)).toBeNull();
+    });
+
+    it('answers null when the newer row carries a different body', () => {
+      // Only a row that repeats the delivery is stepped over. Skipping every
+      // `normal` row would report a parent for somebody else's message.
+      seedDeliveryWithEcho();
+      seedTranscriptEchoRow('wt-a', 'claude', 'claude', NOW + 900, 'something else entirely');
+
+      expect(findParentRelayHops(db, A)).toBeNull();
+    });
   });
 });
 
