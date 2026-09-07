@@ -111,10 +111,16 @@ CommandMate の公開面（LP `website/` ・ README ・ チュートリアル �
 | 2 | Verified, not vibe-checked | ターミナル: `commandmate wait <id> --verify` の `GATE` 行と `RESULT` 行、そして終了コード | Gates run, and the exit code is the verdict. | ゲートが走り、判定は exit code で返る。 |
 | 3 | Any agent, in parallel | ブラウザ: 複数 worktree のセッションが同時に走り、サイドバーの状態が個別に変わる | One session per worktree, running in parallel. | worktree ごとに 1 セッション、並列で走る。 |
 | 4 | Stay in control, anywhere | ブラウザ / スマホ: 入力待ちがバッジ・トースト・タブタイトルに出て、スマホから応答する | Waiting reaches you, and you answer from your phone. | 入力待ちが届き、スマホから応答する。 |
+| hero | README 冒頭（4 カードの前、Issue #2381） | ブラウザ → スマホ: ヘッダーのリポジトリタブ帯で worktree を切り替え、5 エージェントの roster とピッカー、チャット面で隣のセッションへ委任（`commandmate ask … --instance codex` のツール呼び出しチップ）、返答のリンクからファイルビューア、スマホで承認シートを 1 タップ、スマホでファイルを開く | Switch repos from the tab bar, delegate to the next session, open the file from the reply — then the same from your phone. | タブでリポジトリを切り替え、隣のセッションに委任し、返答のリンクからファイルを開く。同じことをスマホでも。 |
 
 > **旧デモとの差分**: 旧 4 本目 `tmux-in-browser`（"Your tmux session, driven from the browser."）は
 > 廃止し、入力待ち通知デモへ置き換える（Epic #1807 D1）。検証は Web UI を待たず
 > ターミナル映像で見せる（同 D5）。
+
+> **README hero（#2381）**: README 冒頭の 30 秒は体験を先に、保証を後に置く。契約 → 検証の
+> カット（`contract-verify`）は "Verified, not vibe-checked" の節へ下げる（#2383）。live に動くのは
+> Claude と Codex の 2 体で、「5 エージェント」は roster とピッカーに 5 体が並ぶ事実まで。
+> 5 体全部が動いたとは言わない。
 
 ---
 
@@ -134,6 +140,19 @@ CommandMate の公開面（LP `website/` ・ README ・ チュートリアル �
 | 3 | record | 並列で走る worktree | Worktrees running side by side. |
 | 4 | card | 入力待ちは、バッジ・トースト・タブ・通知で届く | Waiting reaches you: badge, toast, tab title, push. |
 | 4 | record | スマホから応答する | Answer from your phone. |
+| hero | card | CommandMate | CommandMate |
+| hero | record | リポジトリはタブで切り替える | Switch repos from the tab bar. |
+| hero | record | 5 エージェント、1 worktree | Five agents in one worktree. |
+| hero | record | 隣のセッションに頼むだけ | Delegate to the next session. |
+| hero | record | 返答のリンクからファイルを開く | Open the file from the reply. |
+| hero | record | 承認はスマホから 1 タップ | Approve from your phone. |
+| hero | record | ファイルもスマホで開く | Open files on your phone, too. |
+| hero | card | github.com/Kewton/CommandMate | github.com/Kewton/CommandMate |
+
+`hero` の 8 行は `.claude/skills/demo-video/storyboard/readme-hero.yaml` の絵コンテと 1 対 1 で、
+`tests/unit/skills/demo-video/storyboard.test.ts` が絵コンテ側の文言がここに在ることを照合する
+（Issue #2381）。「5 エージェント、1 worktree」は本文案の「5 エージェントが 1 つの worktree に」
+（25 文字）を record の上限 20 文字に収めた形。
 
 ---
 
@@ -236,3 +255,4 @@ LP / README / チュートリアルは各面の Issue（#1812 / #1814 / #1813）
 | #1813 | チュートリアル v2 | §2 ・ §7 ・ §9 |
 | #1814 | README 整合 | §1 ・ §2 ・ §3 ・ §4 ・ §9 |
 | #1815 | README GIF | §5 ・ §6 |
+| #2381 | README hero（UX 先行の 30 秒） | §5 ・ §6 |

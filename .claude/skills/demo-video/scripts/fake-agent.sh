@@ -121,12 +121,14 @@ Usage: fake-agent.sh <cassette> [--speed N] [--once] [--dry-run]
   --input-settle N  seconds an @input row keeps reading after its first line, to
                   take a multi-line message as one submission (default 1; 0 off).
 
-Cassette rows are "<delayMs>|@input|@exec|@transcript|@hook <TAB> <payload>";
+Cassette rows are "<delayMs>|@input|@exec|@transcript|@hook|@pass <TAB> <payload>";
 `#` rows and blank rows are ignored. Payloads of delay and @input rows go through
 `printf %b`. `{{INPUT}}` is replaced with the last line read from stdin,
 `{{TASK}}` with the first line of the pass — a cassette that answers a mid-run
 approval prompt still has to echo the original instruction afterwards, not the
-"y" that cleared the prompt — and `{{WORKTREE}}` with --worktree.
+"y" that cleared the prompt — and `{{WORKTREE}}` with --worktree. A bare `@pass`
+row starts a new pass inside one cassette: `{{TASK}}` and `{{EXEC_OUTPUT}}` are
+cleared, so the next `@input` is a fresh instruction rather than a follow-up.
 `@exec <TAB> commandmate …` runs that command in the pane's cwd and streams its
 output to the pane; only commands whose first word is `commandmate`, with no
 shell operators, are accepted, and a cassette carrying anything else is refused
@@ -372,6 +374,9 @@ validate_cassette() {
           SessionStart|UserPromptSubmit|Stop|SessionEnd) : ;;
           *) die "row $row: @hook must be one of SessionStart, UserPromptSubmit, Stop, SessionEnd (got '$payload')" ;;
         esac
+        ;;
+      '@pass')
+        [ -z "$payload" ] || die "row $row: @pass takes no payload (got '$payload')"
         ;;
     esac
   done <"$CASSETTE"
@@ -641,36 +646,50 @@ run_hook() {
 
 # --------------------------------------------------------------- rows --------
 
-# Read one submission off stdin. Returns 1 when stdin closed, so callers stop
-# instead of repainting the composer with a stale line.
+# Read the first line of one submission off stdin. Returns 1 when stdin closed,
+# so callers stop instead of repainting the composer with a stale line.
+#
+# The rest of the submission is read by drain_submission, and the two are
+# separate on purpose (Issue #2381): the `@input` row's frame is painted between
+# them. The first line is everything that frame needs (`{{INPUT}}` and
+# `{{TASK}}` are both that line), while the drain waits out --input-settle —
+# a second during which the pane still showed the idle banner. CommandMate's
+# capture cache is 5 s and the browser polls the pane every second, so a
+# capture taken in that second was served to the response poller's first
+# tick, which read the idle frame as a finished turn and saved the banner
+# line as the reply. Painting first closes the window.
 read_submission() {
   IFS= read -r LAST_INPUT || return 1
   LAST_MESSAGE="$LAST_INPUT"
-  # One submission, however many lines it is (Issue #1810).
-  #
-  # CommandMate types the whole message into the pane and then presses
-  # Enter, so a multi-line message arrives as multiple lines on stdin —
-  # and `commandmate send --contract` prepends a preamble dozens of lines
-  # long. Treating each line as its own `@input` made the cassette race
-  # through a complete pass per line: the approval frame was painted and
-  # immediately answered by the next line of the same message, `wait`
-  # reported `Completed` about work that had not happened, and the pane
-  # ended up showing a frame from a later pass. The remaining lines are
-  # therefore drained here; what the pane echoes is the first line, which
-  # is what a TUI shows for a pasted block, and the whole text is kept for
-  # `{{MESSAGE}}`.
-  #
-  # `--input-settle` is whole seconds because bash 3.2's `read -t` takes no
-  # fraction. Every already-buffered line returns immediately, so the wait
-  # is only paid once, after the last line of the submission — and not at
-  # all when stdin is a closed pipe, which is what the tests feed.
+  [ -n "$TASK_INPUT" ] || TASK_INPUT="$LAST_INPUT"
+  return 0
+}
+
+# One submission, however many lines it is (Issue #1810).
+#
+# CommandMate types the whole message into the pane and then presses
+# Enter, so a multi-line message arrives as multiple lines on stdin —
+# and `commandmate send --contract` prepends a preamble dozens of lines
+# long. Treating each line as its own `@input` made the cassette race
+# through a complete pass per line: the approval frame was painted and
+# immediately answered by the next line of the same message, `wait`
+# reported `Completed` about work that had not happened, and the pane
+# ended up showing a frame from a later pass. The remaining lines are
+# therefore drained here; what the pane echoes is the first line, which
+# is what a TUI shows for a pasted block, and the whole text is kept for
+# `{{MESSAGE}}`.
+#
+# `--input-settle` is whole seconds because bash 3.2's `read -t` takes no
+# fraction. Every already-buffered line returns immediately, so the wait
+# is only paid once, after the last line of the submission — and not at
+# all when stdin is a closed pipe, which is what the tests feed.
+drain_submission() {
   if [ "$INPUT_SETTLE" -gt 0 ]; then
     while IFS= read -r -t "$INPUT_SETTLE" drained_line; do
       LAST_MESSAGE="$LAST_MESSAGE
 $drained_line"
     done
   fi
-  [ -n "$TASK_INPUT" ] || TASK_INPUT="$LAST_INPUT"
   return 0
 }
 
@@ -701,7 +720,9 @@ play_once() {
       '@input')
         [ "$DRY_RUN" -eq 1 ] && printf 'trace step=%d kind=input\n' "$step" >&2
         read_submission || return 1
+        # Paint before the drain: see read_submission.
         emit "$payload"
+        drain_submission
         continue
         ;;
       '@exec')
@@ -720,8 +741,20 @@ play_once() {
         run_hook "$payload"
         continue
         ;;
+      '@pass')
+        # A second instruction inside the same cassette (Issue #2381): the
+        # hero cassette's approval pass follows its delegation pass in one
+        # file. Without this, `{{TASK}}` would keep echoing the FIRST
+        # instruction of the file — the reset in play_once is per replay, not
+        # per pass — and the transcript's prompt would name a message nobody
+        # sent this turn, so the reader could not adopt the `/send` row.
+        [ "$DRY_RUN" -eq 1 ] && printf 'trace step=%d kind=pass\n' "$step" >&2
+        TASK_INPUT=""
+        LAST_EXEC_OUTPUT=""
+        continue
+        ;;
       *[!0-9]*)
-        die "row $step: delay must be @input or an integer ms (or @exec / @transcript / @hook), got '$delay'"
+        die "row $step: delay must be @input or an integer ms (or @exec / @transcript / @hook / @pass), got '$delay'"
         ;;
     esac
 
@@ -758,8 +791,11 @@ play_idle() {
         run_hook "$payload"
         continue
         ;;
+      '@pass')
+        continue
+        ;;
       *[!0-9]*)
-        die "row $step: delay must be @input or an integer ms (or @exec / @transcript / @hook), got '$delay'"
+        die "row $step: delay must be @input or an integer ms (or @exec / @transcript / @hook / @pass), got '$delay'"
         ;;
     esac
     sleep_row "$delay"
@@ -775,6 +811,7 @@ if [ "$IDLE_ONLY" -eq 1 ]; then
   # a script that has nothing to advance to — and the idle rows are repainted
   # so the composer never shows a smeared echo. EOF ends the hold.
   while read_submission; do
+    drain_submission
     [ "$DRY_RUN" -eq 1 ] && printf 'trace kind=idle-hold\n' >&2
     play_idle
   done

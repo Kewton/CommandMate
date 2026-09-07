@@ -1,0 +1,60 @@
+transcript row 11966
+transcript row 11967
+transcript row 11968
+transcript row 11969
+transcript row 11970
+transcript row 11971
+transcript row 11972
+transcript row 11973
+transcript row 11974
+transcript row 11975
+transcript row 11976
+transcript row 11977
+transcript row 11978
+transcript row 11979
+transcript row 11980
+transcript row 11981
+transcript row 11982
+transcript row 11983
+transcript row 11984
+transcript row 11985
+transcript row 11986
+transcript row 11987
+transcript row 11988
+transcript row 11989
+transcript row 11990
+transcript row 11991
+transcript row 11992
+transcript row 11993
+transcript row 11994
+transcript row 11995
+transcript row 11996
+transcript row 11997
+transcript row 11998
+transcript row 11999
+transcript row 12000
+maenokota@MAENOnoMac-Studio repo % codex
+[2m╭──────────────────────────────────────────────────────────╮[0m
+[2m│ >_ [0;1mOpenAI Codex[0;2m (v0.153.4)                               │[0m
+[2m│                                                          │[0m
+[2m│ model:     [0mgpt-6-astra[2m   [0m[38;5;6m/model[2m[39m to change                │[0m
+[2m│ directory: [0m/private/tmp/claude-501/…ue-2400/…/probe/repo[2m │[0m
+[2m╰──────────────────────────────────────────────────────────╯[0m
+
+  [1mTip:[0m This is GPT-6, a new generation of intelligence. Astra is state-of-the-art in coding, computer use, science, and professional work. Give it a hard problem, a half-formed idea, or anything
+  you've been meaning to build. See where it takes you.
+
+[2m• [0mYou have 3 usage limit resets available. Run /usage to use one.
+
+
+[1;2m› [0mReply with exactly three short lines describing what a worktree is.
+
+
+[2m• [0mA worktree is a working directory for a Git repository.
+  Each worktree can check out a different branch.
+  Worktrees share repository history but keep files separate.
+
+
+[1m›[0m [2mAsk Codex to do anything[0m
+
+  [38;2;246;226;183mgpt-6-astra default[2m[39m · [0m[38;2;171;223;167m/private/tmp/claude-501/-Users-maenokota-share-work-github-kewton-commandmate-issue-2400/e53ac251-e1a6-40d1-b698-8457ec73548a/scratchpad/probe/repo[39m

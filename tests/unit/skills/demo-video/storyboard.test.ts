@@ -19,11 +19,17 @@ import {
   APPROVAL_CONSUMING_SCENES,
   ATTENTION_SCENE_ID,
   DEFAULT_STORYBOARD_PATH,
+  DEFAULT_TELOP_POSITION,
+  DELEGATE_SCENE_ID,
+  GIF_FPS_RANGE,
+  GIF_WIDTH_RANGE,
   MAX_CODE_CARD_COLUMNS,
   MAX_CODE_CARD_LINES,
+  SCENES_REQUIRING_A_PRIOR_DELEGATION,
   SCENES_REQUIRING_A_PRIOR_SEND,
   SEND_SCENE_ID,
   TELOP_LIMITS,
+  resolveClaudeCassette,
   buildPlan,
   countEnglishWords,
   formatPlan,
@@ -331,9 +337,9 @@ describe('every storyboard committed to the repository', () => {
 
   it('finds every storyboard, so the per-file check below cannot be vacuous', () => {
     // 12 product-highlight cuts (#1811 added contract-verify and install-skill)
-    // + 8 tutorial cuts (#1813 took them from 5 to 8) + the skill's default and
-    // contract-verify cuts in both install roots.
-    expect(files.length).toBe(24);
+    // + 8 tutorial cuts (#1813 took them from 5 to 8) + the skill's default,
+    // contract-verify and readme-hero (#2381) cuts in both install roots.
+    expect(files.length).toBe(26);
   });
 
   const parseCommitted = (relative: string) =>
@@ -475,17 +481,19 @@ describe('formatPlan', () => {
 
   it('emits a tab-separated plan compose.sh can read without jq', () => {
     const rows = formatPlan(storyboard, 'ja').trim().split('\n');
-    expect(rows[0]).toBe('#id\ttype\tviewport\tstart\tduration\ttelop');
+    // Seven columns since #2381: `head` is last and empty on a scene that has
+    // none, which is every scene of this cut.
+    expect(rows[0]).toBe('#id\ttype\tviewport\tstart\tduration\ttelop\thead');
     expect(rows).toContain('#total\t30.000');
     expect(rows).toContain('#output\tdemo-30s.ja');
     const first = rows.find((row) => row.startsWith('title\t'))!;
-    expect(first.split('\t')).toEqual(['title', 'card', 'pc', '0.000', '3.000', 'CommandMate']);
+    expect(first.split('\t')).toEqual(['title', 'card', 'pc', '0.000', '3.000', 'CommandMate', '']);
   });
 
   it('never emits a telop containing a tab, which would shift every column', () => {
     for (const locale of ['ja', 'en'] as const) {
       for (const row of formatPlan(storyboard, locale).trim().split('\n')) {
-        expect(row.split('\t').length).toBeLessThanOrEqual(6);
+        expect(row.split('\t').length).toBeLessThanOrEqual(7);
       }
     }
   });
@@ -731,6 +739,261 @@ describe('scene ordering rules', () => {
         IMPLEMENTED,
       ).errors,
     ).toEqual([]);
+  });
+
+  // Issue #2381: the hero cassette paints the reply and then the approval only
+  // downstream of the delegation send, so the same rule applies to that family.
+  it('names the three scenes downstream of the delegation', () => {
+    expect(DELEGATE_SCENE_ID).toBe('delegate-ask');
+    expect([...SCENES_REQUIRING_A_PRIOR_DELEGATION]).toEqual([
+      'reply-file-link',
+      'mobile-approve',
+      'mobile-file-link',
+    ]);
+    // The approval it answers counts against the one-answer-per-cut rule.
+    expect(APPROVAL_CONSUMING_SCENES).toContain('mobile-approve');
+  });
+
+  it.each(SCENES_REQUIRING_A_PRIOR_DELEGATION)('refuses %s placed without the delegation', (id) => {
+    expect(parseStoryboard(cut(id), IMPLEMENTED).errors.join('\n')).toMatch(
+      new RegExp(`scene '${id}' needs '${DELEGATE_SCENE_ID}' earlier`),
+    );
+  });
+
+  it.each(SCENES_REQUIRING_A_PRIOR_DELEGATION)('refuses %s placed before the delegation', (id) => {
+    expect(parseStoryboard(cut(id, DELEGATE_SCENE_ID), IMPLEMENTED).errors.join('\n')).toMatch(
+      new RegExp(`scene '${id}' needs '${DELEGATE_SCENE_ID}' earlier`),
+    );
+  });
+
+  it.each(SCENES_REQUIRING_A_PRIOR_DELEGATION)('accepts %s placed after the delegation', (id) => {
+    expect(parseStoryboard(cut(DELEGATE_SCENE_ID, id), IMPLEMENTED).errors).toEqual([]);
+  });
+
+  it('refuses the phone approval next to the other approval scenes', () => {
+    const errors = parseStoryboard(
+      cut(SEND_SCENE_ID, APPROVAL_CONSUMING_SCENES[0], DELEGATE_SCENE_ID, 'mobile-approve'),
+      IMPLEMENTED,
+    ).errors;
+    expect(errors.join('\n')).toMatch(/both answer the approval prompt/);
+  });
+});
+
+/**
+ * The per-scene knobs the hero cut added (Issue #2381): `head`, which keeps
+ * the front of an over-long take as well as its tail, and `telop.position`.
+ */
+describe('head and telop position', () => {
+  const one = (body: string, type = 'record', duration = 4): string =>
+    `version: 1\nduration: ${duration}\noutput: demo\nscenes:\n  - id: ${type === 'record' ? IMPLEMENTED[0] : 'title'}\n    type: ${type}\n    duration: ${duration}\n${body}`;
+  const errorsFor = (yaml: string): string[] => parseStoryboard(yaml, IMPLEMENTED).errors;
+
+  it('defaults to a bottom band and no head', () => {
+    const { storyboard } = parseStoryboard(one('    telop: { ja: "説明", en: "Explanation" }\n'), IMPLEMENTED);
+    expect(storyboard!.scenes[0].telopPosition).toBe(DEFAULT_TELOP_POSITION);
+    expect(DEFAULT_TELOP_POSITION).toBe('bottom');
+    expect(storyboard!.scenes[0].head).toBeUndefined();
+  });
+
+  it('reads head and a top band on a record scene', () => {
+    const { storyboard, errors } = parseStoryboard(
+      one('    head: 1.5\n    telop: { position: top, ja: "説明", en: "Explanation" }\n'),
+      IMPLEMENTED,
+    );
+    expect(errors).toEqual([]);
+    expect(storyboard!.scenes[0].head).toBe(1.5);
+    expect(storyboard!.scenes[0].telopPosition).toBe('top');
+  });
+
+  it('refuses a head on a still, which has no take', () => {
+    expect(errorsFor(one('    head: 1\n    telop: { ja: "題", en: "Title" }\n', 'card')).join('\n')).toMatch(
+      /a card scene is a still/,
+    );
+  });
+
+  it('refuses a head that is not a positive number of seconds', () => {
+    expect(errorsFor(one('    head: 0\n    telop: { ja: "説明", en: "Explanation" }\n')).join('\n')).toMatch(
+      /head must be a positive number/,
+    );
+    expect(errorsFor(one('    head: soon\n    telop: { ja: "説明", en: "Explanation" }\n')).join('\n')).toMatch(
+      /head must be a positive number/,
+    );
+  });
+
+  it('refuses a head that would keep the whole slot from the front', () => {
+    // The payoff of a scene is at its end; a head as long as the slot leaves
+    // nothing of the tail, which is the opposite of the default.
+    expect(errorsFor(one('    head: 4\n    telop: { ja: "説明", en: "Explanation" }\n')).join('\n')).toMatch(
+      /head \(4s\) must be shorter than duration \(4s\)/,
+    );
+  });
+
+  it('refuses a band position it cannot draw, and one on a still', () => {
+    expect(
+      errorsFor(one('    telop: { position: middle, ja: "説明", en: "Explanation" }\n')).join('\n'),
+    ).toMatch(/telop.position must be 'top' or 'bottom'/);
+    expect(
+      errorsFor(one('    telop: { position: top, ja: "題", en: "Title" }\n', 'card')).join('\n'),
+    ).toMatch(/telop.position only applies to a record scene/);
+  });
+
+  it('still refuses a telop language it would never draw', () => {
+    // `position` is the one non-language key the mapping accepts.
+    expect(
+      errorsFor(one('    telop: { ja: "説明", en: "Explanation", fr: "Explication" }\n')).join('\n'),
+    ).toMatch(/unknown telop language 'fr'/);
+  });
+
+  it('carries both into the plan, and head into the TSV compose.sh reads', () => {
+    const { storyboard } = parseStoryboard(
+      one('    head: 1.5\n    telop: { position: top, ja: "説明", en: "Explanation" }\n'),
+      IMPLEMENTED,
+    );
+    const [entry] = buildPlan(storyboard!, 'ja');
+    expect(entry.head).toBe(1.5);
+    expect(entry.telopPosition).toBe('top');
+    const tsv = formatPlan(storyboard!, 'ja');
+    expect(tsv.split('\n')[0]).toBe('#id\ttype\tviewport\tstart\tduration\ttelop\thead');
+    expect(tsv).toContain(`${IMPLEMENTED[0]}\trecord\tpc\t0.000\t4.000\t説明\t1.500`);
+    // A scene with no head leaves the column empty rather than absent, so a
+    // seven-variable `read` and a six-column plan agree.
+    const plain = parseStoryboard(one('    telop: { ja: "説明", en: "Explanation" }\n'), IMPLEMENTED).storyboard!;
+    expect(formatPlan(plain, 'ja')).toContain(`${IMPLEMENTED[0]}\trecord\tpc\t0.000\t4.000\t説明\t`);
+  });
+});
+
+/**
+ * The cut-level settings the hero cut added (Issue #2381): which cassette the
+ * claude pane replays, and how the GIF is delivered.
+ */
+describe('claude-cassette and gif', () => {
+  const skillDir = path.join(REPO_ROOT, '.claude/skills/demo-video');
+  const storyboardDir = path.join(skillDir, 'storyboard');
+  const withTop = (extra: string): string =>
+    `version: 1\nduration: 3\noutput: demo\n${extra}scenes:\n  - id: title\n    type: card\n    duration: 3\n    telop: { ja: "題", en: "Title" }\n`;
+  const parseIn = (yaml: string) => parseStoryboard(yaml, IMPLEMENTED, storyboardDir);
+
+  it('resolves a cassette next door in the skill and puts it on the plan', () => {
+    const { storyboard, errors } = parseIn(withTop('claude-cassette: ../fixtures/claude-hero.cast\n'));
+    expect(errors).toEqual([]);
+    expect(storyboard!.claudeCassette).toBe(fs.realpathSync(path.join(skillDir, 'fixtures/claude-hero.cast')));
+    expect(formatPlan(storyboard!, 'ja')).toContain(`#claude-cassette\t${storyboard!.claudeCassette}\n`);
+  });
+
+  it('leaves the plan without a cassette row when the cut names none', () => {
+    const { storyboard } = parseIn(withTop(''));
+    expect(storyboard!.claudeCassette).toBeUndefined();
+    expect(formatPlan(storyboard!, 'ja')).not.toContain('#claude-cassette');
+  });
+
+  it('refuses a cassette outside the skill, an absolute one, a non-cassette and a missing one', () => {
+    // A cassette is replayed — its @exec rows run — so it is contained like
+    // a code listing is, one level wider.
+    expect(parseIn(withTop('claude-cassette: ../../../../package.json\n')).errors.join('\n')).toMatch(
+      /claude-cassette must name a .cast file/,
+    );
+    expect(parseIn(withTop('claude-cassette: ../../../../nope.cast\n')).errors.join('\n')).toMatch(
+      /claude-cassette must stay inside/,
+    );
+    expect(parseIn(withTop('claude-cassette: /etc/x.cast\n')).errors.join('\n')).toMatch(
+      /must be relative to the storyboard/,
+    );
+    expect(parseIn(withTop('claude-cassette: ../fixtures/missing.cast\n')).errors.join('\n')).toMatch(
+      /claude-cassette not found/,
+    );
+    expect(parseIn(withTop('claude-cassette: 7\n')).errors.join('\n')).toMatch(/must be a path string/);
+  });
+
+  it('resolves and refuses as a unit', () => {
+    expect(resolveClaudeCassette(storyboardDir, '../fixtures/claude-hero.cast')).toHaveProperty('path');
+    expect(resolveClaudeCassette(storyboardDir, '../../orchestrate-monitor/x.cast')).toHaveProperty('error');
+  });
+
+  it('reads a gif block and puts it on the plan', () => {
+    const { storyboard, errors } = parseIn(withTop('gif:\n  width: 600\n  fps: 10\n  maxBytes: 1840000\n'));
+    expect(errors).toEqual([]);
+    expect(storyboard!.gif).toEqual({ width: 600, fps: 10, maxBytes: 1840000 });
+    expect(formatPlan(storyboard!, 'en')).toContain('#gif\t600\t10\t1840000\n');
+    // No budget: the column is empty, and compose.sh reads that as no gate.
+    const open = parseIn(withTop('gif:\n  width: 720\n  fps: 12\n')).storyboard!;
+    expect(formatPlan(open, 'en')).toContain('#gif\t720\t12\t\n');
+  });
+
+  it('refuses a gif block it cannot deliver', () => {
+    expect(parseIn(withTop(`gif:\n  width: ${GIF_WIDTH_RANGE.max + 1}\n  fps: 10\n`)).errors.join('\n')).toMatch(
+      /gif.width must be an integer in/,
+    );
+    expect(parseIn(withTop(`gif:\n  width: 600\n  fps: ${GIF_FPS_RANGE.min - 1}\n`)).errors.join('\n')).toMatch(
+      /gif.fps must be an integer in/,
+    );
+    expect(parseIn(withTop('gif:\n  width: 600\n  fps: 10\n  maxBytes: 0\n')).errors.join('\n')).toMatch(
+      /gif.maxBytes must be a positive integer/,
+    );
+    expect(parseIn(withTop('gif:\n  width: 600\n  fps: 10\n  colours: 8\n')).errors.join('\n')).toMatch(
+      /gif: unknown key 'colours'/,
+    );
+    expect(parseIn(withTop('gif: small\n')).errors.join('\n')).toMatch(/gif must be a mapping/);
+  });
+});
+
+describe('the committed readme-hero cut', () => {
+  const file = path.join(REPO_ROOT, '.claude/skills/demo-video/storyboard/readme-hero.yaml');
+  const { storyboard, errors } = parseStoryboard(
+    fs.readFileSync(file, 'utf8'),
+    undefined,
+    path.dirname(file),
+  );
+
+  it('validates, and is the 30 second cut the Issue asks for', () => {
+    expect(errors).toEqual([]);
+    expect(storyboard!.duration).toBe(30);
+    expect(storyboard!.output).toBe('demo-hero');
+  });
+
+  it('runs tab strip -> five agents -> delegation -> reply link -> phone approval -> phone link', () => {
+    expect(storyboard!.scenes.map((scene) => scene.id)).toEqual([
+      'title',
+      'repo-tab-switch',
+      'agent-tabs',
+      'delegate-ask',
+      'reply-file-link',
+      'mobile-approve',
+      'mobile-file-link',
+      'outro',
+    ]);
+    expect(storyboard!.scenes[0].duration).toBe(1);
+  });
+
+  it('replays the two-pass hero cassette in the claude pane', () => {
+    expect(storyboard!.claudeCassette).toBe(
+      fs.realpathSync(path.join(REPO_ROOT, '.claude/skills/demo-video/fixtures/claude-hero.cast')),
+    );
+  });
+
+  it('delivers the README GIF at 600px / 10 fps under the #1815 budget', () => {
+    expect(storyboard!.gif).toEqual({ width: 600, fps: 10, maxBytes: 1840000 });
+  });
+
+  it('keeps the head of the delegation take, whose action is at both ends', () => {
+    const delegate = storyboard!.scenes.find((scene) => scene.id === 'delegate-ask')!;
+    expect(delegate.head).toBeGreaterThan(0);
+    expect(delegate.head).toBeLessThan(delegate.duration);
+    for (const scene of storyboard!.scenes) {
+      if (scene.id !== 'delegate-ask') expect(scene.head, scene.id).toBeUndefined();
+    }
+  });
+
+  it('lifts the band off the composer, the newest reply and the phone sheet', () => {
+    const top = storyboard!.scenes.filter((scene) => scene.telopPosition === 'top').map((scene) => scene.id);
+    expect(top).toEqual(['delegate-ask', 'mobile-approve']);
+  });
+
+  it('takes its wording from the canonical public messaging document', () => {
+    const messaging = fs.readFileSync(path.join(REPO_ROOT, 'docs/design/public-messaging.md'), 'utf8');
+    for (const scene of storyboard!.scenes) {
+      expect(messaging, `telop.ja of ${scene.id}`).toContain(scene.telop.ja);
+      expect(messaging, `telop.en of ${scene.id}`).toContain(scene.telop.en);
+    }
   });
 });
 
