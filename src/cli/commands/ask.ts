@@ -79,6 +79,170 @@ const REPLY_LOOKBACK_MESSAGES = 30;
 /** Squeezed pane lines kept for the fallback reply. */
 const PANE_FALLBACK_TAIL = 80;
 
+/**
+ * The `request_id` namespace every transcript reader mints for a turn.
+ *
+ * `codex-turn:<turn_id>`, `claude-turn:<uuid>`, `antigravity-turn:<id>`,
+ * `command-code-turn:<id>` and opencode's `oc-turn:<msg id>` — mirrored here as
+ * a shape rather than imported, for the reason {@link PROMPT_WAITING_CODE}
+ * gives: the CLI bundle keeps its own copies of API strings instead of pulling
+ * `src/types/agent-transcript.ts` and its dependents into `build:cli`. Matching
+ * the shape rather than a list of five literals is also what stops the sixth
+ * reader from silently landing outside the filter.
+ *
+ * A `:` cannot appear in any of the ids themselves, so this cannot match a row
+ * that merely CONTAINS the text.
+ */
+const TURN_REQUEST_ID_PATTERN = /-turn:/;
+
+/**
+ * Request-id namespaces CommandMate writes about a session, not for it.
+ *
+ * `chat_messages` has no `system` role, so "the model changed" (Issue #2357)
+ * and "reply from X" (Issue #2377) are both stored as ASSISTANT rows and told
+ * apart by their request id. Neither is anything the other session said, and
+ * delivering the relay notice back as an answer is the smallest possible loop —
+ * `findWorkerReply` steps over the same rows for the same reason.
+ */
+const SYSTEM_ROW_REQUEST_ID_PREFIXES = ['relay-sys:', 'model-changed:'] as const;
+
+/**
+ * Tools whose reply CommandMate reads out of a transcript rather than a screen.
+ *
+ * For these five the ledger is authoritative and a row with no turn marker is
+ * by definition not the answer, so `ask` may hold out for a marked one. For
+ * every other tool (copilot / gemini / vibe-local) the scraper's row is the
+ * only record there will ever be, and demanding a marker would throw away a
+ * cleaned reply in favour of the raw pane.
+ *
+ * Mirrors the five readers that live under `src/lib/hooks/sources/`.
+ */
+const TRANSCRIPT_READER_TOOLS: ReadonlySet<string> = new Set([
+  'claude',
+  'codex',
+  'antigravity',
+  'command-code',
+  'opencode',
+]);
+
+/**
+ * How long `ask` will hold out for the turn row after the turn ends.
+ *
+ * Issue #2386 measured the gap on codex 0.153.4 at 5.2 s: the scraper writes the
+ * idle composer into the ledger in the millisecond BEFORE the send, and the
+ * rollout reader writes the real answer five seconds after `wait` has already
+ * said `basis=hook_stop`. Reading once at that instant is how the junk got
+ * printed as the answer, three times out of three.
+ *
+ * Three times the measured gap, and spent only when the ledger has nothing
+ * marked yet — a session that already answered returns on the first read. When
+ * it does elapse the existing pane fallback takes over, so the cost of guessing
+ * this too low is a screen scrape, never a lost turn.
+ */
+const REPLY_TURN_ROW_GRACE_MS = 15_000;
+
+/** How often the grace above re-reads the ledger. */
+const REPLY_TURN_ROW_POLL_MS = 1_000;
+
+/**
+ * ANSI escape sequences, as a pattern built from escapes rather than literals.
+ *
+ * `scripts/check-control-chars.mjs` fails the build on a raw C0 byte in `src/`
+ * (Issue #1432), and a raw ESC here would be one.
+ */
+const ANSI_ESCAPE_PATTERN =
+  /[\u001B\u009B][[\]()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-PR-TZcf-nqry=><]/g;
+
+/** Remaining C0/C1 control bytes, once the sequences above are gone. */
+const CONTROL_CHAR_PATTERN = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g;
+
+/** Sleep, for the grace window above. */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * A reply body fit to print, or `''` if nothing survived.
+ *
+ * Issue #2386 asked for this as a belt to the braces: the row the junk came
+ * from held RAW ANSI, and a caller that pipes `ask` into a report or a commit
+ * message should never have to strip escape codes out of an agent's sentence.
+ * Applied to the pane fallback as well as to the ledger, because the pane is
+ * the more likely of the two to carry them.
+ *
+ * @param raw - Reply text as it arrived
+ */
+function sanitizeReply(raw: string): string {
+  return raw.replace(ANSI_ESCAPE_PATTERN, '').replace(CONTROL_CHAR_PATTERN, '').trim();
+}
+
+/** Whether a row's `request_id` says a transcript reader wrote it. */
+function isTurnRow(requestId: string | undefined | null): boolean {
+  return typeof requestId === 'string' && TURN_REQUEST_ID_PATTERN.test(requestId);
+}
+
+/** Whether a row is CommandMate's own furniture rather than the agent's words. */
+function isSystemRow(requestId: string | undefined | null): boolean {
+  return typeof requestId === 'string'
+    && SYSTEM_ROW_REQUEST_ID_PREFIXES.some((prefix) => requestId.startsWith(prefix));
+}
+
+/** One assistant row that could be this turn's answer. */
+interface ReplyCandidate {
+  /** Sanitized body. Never empty — an empty one is not a candidate. */
+  content: string;
+  /** Whether a transcript reader wrote it (see {@link isTurnRow}). */
+  fromTranscript: boolean;
+}
+
+/**
+ * The rows that could be this turn's reply, oldest first.
+ *
+ * @param messages - Rows as the messages route serialized them
+ * @param since - Epoch ms taken immediately before the send
+ */
+function replyCandidates(messages: PromptMessageResponse[], since: number): ReplyCandidate[] {
+  const candidates: ReplyCandidate[] = [];
+  for (const m of messages) {
+    if (m.role !== 'assistant') continue;
+    if (m.messageType === 'prompt') continue;
+    if (typeof m.content !== 'string') continue;
+    if (!(Date.parse(m.timestamp) >= since)) continue;
+    if (isSystemRow(m.requestId)) continue;
+    const content = sanitizeReply(m.content);
+    if (content === '') continue;
+    candidates.push({ content, fromTranscript: isTurnRow(m.requestId) });
+  }
+  return candidates;
+}
+
+/**
+ * The recent chat rows for this instance, or null if they cannot be read.
+ *
+ * @param client - API client
+ * @param worktreeId - Worktree ID
+ * @param instanceId - Resolved instance ID
+ */
+async function fetchRecentMessages(
+  client: ApiClient,
+  worktreeId: string,
+  instanceId: string | undefined,
+): Promise<PromptMessageResponse[] | null> {
+  const query = new URLSearchParams({ limit: String(REPLY_LOOKBACK_MESSAGES) });
+  if (instanceId) query.set('instance', instanceId);
+  try {
+    // PromptMessageResponse is the CLI's mirror of a serialized chat row; the
+    // `messageType: 'prompt'` filter is the caller's, not the type's, so it is
+    // the right shape for reading normal rows too.
+    const messages = await client.get<PromptMessageResponse[]>(
+      `/api/worktrees/${worktreeId}/messages?${query.toString()}`,
+    );
+    return Array.isArray(messages) ? messages : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Where the printed reply came from. Reported in `--json`. */
 type ReplySource = 'history' | 'pane' | 'none';
 
@@ -127,46 +291,63 @@ function parseTimeout(raw: string | undefined): number {
  * code and the JSON payload, and printing its question as if it were an answer
  * is what would teach a caller to answer it.
  *
+ * ## Why a timestamp is not enough (Issue #2386)
+ *
+ * `since` fences off the previous turn; it does nothing about a row written
+ * INSIDE this one that is not a reply. codex's screen scraper writes the idle
+ * composer into the ledger as an assistant row one millisecond before the send
+ * lands — measured 3/3 on codex 0.153.4 — so at the moment `wait` says
+ * `basis=hook_stop` the newest row after `since` is a scrape of an empty input
+ * box, in raw ANSI, and the rollout reader's real answer is still five seconds
+ * away. `ask` printed the box.
+ *
+ * The separator is the row's own `request_id`, which is why #2386 put it on the
+ * wire: a reply a transcript reader wrote is keyed `<tool>-turn:<id>`, a scrape
+ * is keyed nothing at all. For a tool that HAS such a reader the marker is
+ * therefore required, and this waits {@link REPLY_TURN_ROW_GRACE_MS} for one
+ * rather than answering with whatever the screen happened to hold. For a tool
+ * that has none — copilot / gemini / vibe-local — the scraper's row is the only
+ * record there will ever be, so it is taken as it always was, with no wait.
+ *
  * Never throws. A daemon that cannot serve the ledger is a reason to fall back
  * to the pane, not a reason to lose a turn that already completed.
  *
  * @param client - API client
  * @param worktreeId - Worktree ID
  * @param instanceId - Resolved instance ID
- * @param since - ISO timestamp taken immediately before the send
+ * @param since - Epoch ms taken immediately before the send
+ * @param cliToolId - Resolved CLI tool, when one is known
  */
 async function readLatestReply(
   client: ApiClient,
   worktreeId: string,
   instanceId: string | undefined,
   since: number,
+  cliToolId: string | undefined,
 ): Promise<string | null> {
-  const query = new URLSearchParams({ limit: String(REPLY_LOOKBACK_MESSAGES) });
-  if (instanceId) query.set('instance', instanceId);
+  const requireTurnRow = cliToolId !== undefined && TRANSCRIPT_READER_TOOLS.has(cliToolId);
+  const deadline = Date.now() + (requireTurnRow ? REPLY_TURN_ROW_GRACE_MS : 0);
 
-  let messages: PromptMessageResponse[];
-  try {
-    // PromptMessageResponse is the CLI's mirror of a serialized chat row; the
-    // `messageType: 'prompt'` filter is the caller's, not the type's, so it is
-    // the right shape for reading normal rows too.
-    messages = await client.get<PromptMessageResponse[]>(
-      `/api/worktrees/${worktreeId}/messages?${query.toString()}`,
-    );
-  } catch {
-    return null;
+  for (;;) {
+    const messages = await fetchRecentMessages(client, worktreeId, instanceId);
+    const candidates = replyCandidates(messages ?? [], since);
+
+    // Newest first among the rows a reader wrote. A turn that emitted several
+    // assistant rows (a narration then the summary) still ends on its summary.
+    for (let i = candidates.length - 1; i >= 0; i -= 1) {
+      if (candidates[i].fromTranscript) return candidates[i].content;
+    }
+
+    if (!requireTurnRow) {
+      // Unchanged behaviour for a tool with no transcript: the newest row after
+      // the send, marker or not.
+      const newest = candidates[candidates.length - 1];
+      return newest ? newest.content : null;
+    }
+
+    if (Date.now() >= deadline) return null;
+    await sleep(REPLY_TURN_ROW_POLL_MS);
   }
-  if (!Array.isArray(messages)) return null;
-
-  const replies = messages.filter(
-    (m) =>
-      m.role === 'assistant'
-      && m.messageType !== 'prompt'
-      && typeof m.content === 'string'
-      && m.content.trim() !== ''
-      && Date.parse(m.timestamp) >= since,
-  );
-  if (replies.length === 0) return null;
-  return replies[replies.length - 1].content.trim();
 }
 
 /**
@@ -367,10 +548,12 @@ a decision about that session's guard rails, not part of asking it a question.
         }
 
         let source: ReplySource = 'history';
-        let reply = await readLatestReply(client, worktreeId, instanceId, askedAt);
+        let reply = await readLatestReply(client, worktreeId, instanceId, askedAt, agent);
         if (reply === null && agent) {
           source = 'pane';
-          reply = await readPaneTail(client, worktreeId, agent, instanceId);
+          const pane = await readPaneTail(client, worktreeId, agent, instanceId);
+          const cleaned = pane === null ? '' : sanitizeReply(pane);
+          reply = cleaned === '' ? null : cleaned;
         }
         if (reply === null) {
           source = 'none';
