@@ -65,6 +65,47 @@ export type SortDirection = 'asc' | 'desc';
 export type ViewMode = 'grouped' | 'flat';
 
 /**
+ * When the header's repository tab bar is shown (Issue #2374).
+ *
+ * Declared as a const array so the localStorage validator and the settings
+ * selector read the same list — a second hand-written union is exactly how a
+ * mode ends up persistable but unselectable.
+ */
+export const REPO_TAB_BAR_MODES = ['always', 'collapsed', 'hidden'] as const;
+
+/**
+ * Visibility rule for the repository tab bar (Issue #2374).
+ * - `always`: the bar is up whether the sidebar is open or collapsed
+ * - `collapsed`: only while the sidebar is collapsed (the default; the bar is
+ *   the collapsed sidebar's replacement, not a second copy of it)
+ * - `hidden`: never
+ */
+export type RepoTabBarMode = typeof REPO_TAB_BAR_MODES[number];
+
+/**
+ * Type guard for a stored {@link RepoTabBarMode}.
+ *
+ * @param value - Candidate string (typically straight out of localStorage)
+ * @returns true when `value` is one of {@link REPO_TAB_BAR_MODES}
+ */
+export const isValidRepoTabBarMode = (value: string): value is RepoTabBarMode =>
+  (REPO_TAB_BAR_MODES as ReadonlyArray<string>).includes(value);
+
+/**
+ * Default visibility rule for the repository tab bar (Issue #2374).
+ *
+ * `collapsed` rather than `always`: the bar replaces the collapsed sidebar's
+ * navigation, so showing both at once is redundant chrome on the laptop screen
+ * this Issue is about.
+ *
+ * Declared here rather than in `SidebarContext` so `AppShell` can read it
+ * without importing from a module that component tests routinely `vi.mock`
+ * wholesale — a default that only exists behind a mock is a default that
+ * disappears in exactly the tests that need it.
+ */
+export const DEFAULT_REPO_TAB_BAR_MODE: RepoTabBarMode = 'collapsed';
+
+/**
  * A group of branches belonging to the same repository
  */
 export interface BranchGroup {
@@ -101,6 +142,18 @@ export const STATUS_PRIORITY: Record<BranchStatus, number> = {
  * descending — "show me the idle ones first" — silently impossible.
  */
 const USER_CONTROLLED_STATUS_SORT_KEY: SortKey = 'status';
+
+/**
+ * Fold-down order for a repository's aggregated dot (Issue #2374), most
+ * significant first. Mirrors `aggregateCliStatus`'s ladder exactly.
+ */
+const GROUP_STATUS_LADDER: ReadonlyArray<BranchStatus> = [
+  'waiting',
+  'running',
+  'generating',
+  'ready',
+  'idle',
+];
 
 /** Saturation value for repository color dots (%) */
 export const REPO_DOT_SATURATION = 65;
@@ -213,23 +266,83 @@ export function compareByTimestamp(
 }
 
 /**
- * Whether a branch belongs in the sidebar's pinned "needs you" group
- * (Issue #1787).
+ * The status a branch row actually SHOWS (Issue #1787, extracted in #2374).
  *
  * Reads the AGGREGATED per-instance status, which is what the row's single dot
- * shows — a branch whose `claude-2` is waiting renders an amber dot, so it must
- * also float. Falls back to the branch-level `status` when the item carries no
- * per-instance map (legacy payloads, and most unit fixtures).
+ * renders — a branch whose `claude-2` is waiting shows an amber dot. Falls back
+ * to the branch-level `status` when the item carries no per-instance map
+ * (legacy payloads, and most unit fixtures).
+ *
+ * Extracted so the repository tab bar's per-repository dot is computed from the
+ * same number the sidebar row paints. A second "read cliStatus, else status"
+ * expression is precisely how a tab ends up gray above an amber row.
+ *
+ * @param branch - Branch item to read
+ * @returns The displayed (aggregated) status for this branch
+ */
+export function resolveBranchStatus(branch: SidebarBranchItem): BranchStatus {
+  return branch.cliStatus && Object.keys(branch.cliStatus).length > 0
+    ? aggregateCliStatus(branch.cliStatus)
+    : branch.status;
+}
+
+/**
+ * Whether a branch belongs in the sidebar's pinned "needs you" group
+ * (Issue #1787).
  *
  * @param branch - Branch item to classify
  * @returns true when the branch is waiting for the user
  */
 export function isWaitingBranch(branch: SidebarBranchItem): boolean {
-  const aggregated =
-    branch.cliStatus && Object.keys(branch.cliStatus).length > 0
-      ? aggregateCliStatus(branch.cliStatus)
-      : branch.status;
-  return aggregated === 'waiting';
+  return resolveBranchStatus(branch) === 'waiting';
+}
+
+/**
+ * Fold a repository's branches into the single status its tab shows
+ * (Issue #2374).
+ *
+ * Same precedence as {@link aggregateCliStatus} — waiting > running >
+ * generating > ready > idle — applied one level up, over branches instead of
+ * over agent instances. Deliberately the same ladder rather than a parallel
+ * one: a tab that ranked `running` above `waiting` would hide the only state
+ * that needs a human behind the state they can ignore.
+ *
+ * NOT {@link STATUS_PRIORITY}, which ranks `ready` ABOVE `running`. That is the
+ * sidebar's SORT order, where "done, waiting for your next message" deserves to
+ * float above "still working" — the opposite of what a single fold-down dot
+ * should say, which is that the repository is busy.
+ *
+ * @param branches - Branches belonging to one repository
+ * @returns The most significant status among them (`idle` when empty)
+ */
+export function aggregateGroupStatus(
+  branches: ReadonlyArray<SidebarBranchItem>
+): BranchStatus {
+  const statuses = new Set(branches.map(resolveBranchStatus));
+  for (const candidate of GROUP_STATUS_LADDER) {
+    if (statuses.has(candidate)) return candidate;
+  }
+  return 'idle';
+}
+
+/**
+ * How many of a repository's branches are waiting for the user (Issue #2374).
+ *
+ * Counts BRANCHES, not agent instances, matching `useAttentionCount`'s rule:
+ * one waiting worktree counts once however many of its agents are blocked, so
+ * the per-tab badges sum to the global "N need your attention" pill.
+ *
+ * @param branches - Branches belonging to one repository
+ * @returns Number of waiting branches
+ */
+export function countWaitingBranches(
+  branches: ReadonlyArray<SidebarBranchItem>
+): number {
+  let count = 0;
+  for (const branch of branches) {
+    if (isWaitingBranch(branch)) count++;
+  }
+  return count;
 }
 
 /**
@@ -383,4 +496,130 @@ export function groupBranches(
     repositoryName,
     branches: sortBranches(groupMap.get(repositoryName)!, sortKey, direction),
   }));
+}
+
+// ============================================================================
+// Repository group order (Issue #651 sidebar DnD, shared since Issue #2374)
+// ============================================================================
+
+/** LocalStorage key for the repository group order cache */
+export const SIDEBAR_GROUP_ORDER_CACHE_STORAGE_KEY = 'mcbd-sidebar-group-order-cache';
+
+/** Maximum entries accepted from a stored order (matches the API's PUT limit) */
+const MAX_REPOSITORY_ORDER_ENTRIES = 500;
+
+/**
+ * In-memory copy of the last order read/written, so a client-side remount that
+ * happens before localStorage is readable still gets the order back.
+ */
+let lastRepositoryOrder: string[] | null = null;
+
+/**
+ * Parse a stored repository order, discarding anything that is not a plain
+ * array of strings.
+ *
+ * @param raw - JSON string from localStorage (or the API cache)
+ * @returns The order, capped at {@link MAX_REPOSITORY_ORDER_ENTRIES}; `[]` on
+ *   any parse or shape error
+ */
+export function parseRepositoryOrder(raw: string): string[] {
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((value): value is string => typeof value === 'string')
+      .slice(0, MAX_REPOSITORY_ORDER_ENTRIES);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Read the cached repository order.
+ *
+ * The cache exists so the sidebar and the repository tab bar can paint the
+ * user's order on the FIRST frame, before `/api/sidebar/group-order` answers —
+ * without it the tabs visibly re-sort a moment after load.
+ *
+ * @returns The cached order, or `[]` when there is none
+ */
+export function readRepositoryOrderCache(): string[] {
+  if (typeof window === 'undefined') return lastRepositoryOrder ?? [];
+
+  try {
+    const stored = localStorage.getItem(SIDEBAR_GROUP_ORDER_CACHE_STORAGE_KEY);
+    if (!stored) return [];
+    const parsed = parseRepositoryOrder(stored);
+    lastRepositoryOrder = parsed.length > 0 ? parsed : null;
+    return parsed;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Write the repository order to the cache.
+ *
+ * @param order - Repository display names, in the order the user arranged them
+ */
+export function persistRepositoryOrderCache(order: string[]): void {
+  lastRepositoryOrder = order;
+  if (typeof window === 'undefined') return;
+
+  try {
+    localStorage.setItem(SIDEBAR_GROUP_ORDER_CACHE_STORAGE_KEY, JSON.stringify(order));
+  } catch {
+    // Ignore localStorage errors
+  }
+}
+
+/**
+ * Apply the user's saved repository order to grouped branches (Issue #2374).
+ *
+ * Shared by the sidebar's grouped list and the header's repository tab bar so
+ * "the tabs are in the sidebar's order" is one function rather than two
+ * implementations that agree until one of them is edited.
+ *
+ * Repositories present in `repositoryOrder` come first in that order; anything
+ * the user has never dragged (a repository registered after the last reorder)
+ * follows, alphabetically — which is the order `groupBranches` already
+ * produced, so an empty `repositoryOrder` is returned untouched.
+ *
+ * @param groups - Groups from `groupBranches` (already alphabetical)
+ * @param repositoryOrder - Saved order, from `/api/sidebar/group-order`
+ * @returns A new array in display order (the input is never mutated)
+ */
+export function orderBranchGroups(
+  groups: ReadonlyArray<BranchGroup>,
+  repositoryOrder: ReadonlyArray<string>
+): BranchGroup[] {
+  if (repositoryOrder.length === 0) return groups.slice();
+
+  const orderMap = new Map(repositoryOrder.map((name, index) => [name, index]));
+  return groups.slice().sort((a, b) => {
+    const ia = orderMap.has(a.repositoryName) ? orderMap.get(a.repositoryName)! : Infinity;
+    const ib = orderMap.has(b.repositoryName) ? orderMap.get(b.repositoryName)! : Infinity;
+    if (ia === ib) return a.repositoryName.localeCompare(b.repositoryName);
+    return ia - ib;
+  });
+}
+
+/**
+ * Whether the repository tab bar should be on screen (Issue #2374).
+ *
+ * A pure rule rather than an inline ternary in `AppShell` so the three modes
+ * are unit-testable without mounting the shell, and so the setting's meaning is
+ * stated once.
+ *
+ * @param mode - The user's visibility rule
+ * @param isSidebarOpen - Desktop sidebar open state
+ * @returns true when the bar should render
+ */
+export function shouldShowRepositoryTabBar(
+  mode: RepoTabBarMode,
+  isSidebarOpen: boolean
+): boolean {
+  if (mode === 'hidden') return false;
+  if (mode === 'always') return true;
+  return !isSidebarOpen;
 }

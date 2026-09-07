@@ -2,9 +2,19 @@
  * SidebarContext
  *
  * Context for managing sidebar state including:
- * - Open/closed state for desktop
+ * - Open/closed state for desktop (persisted since Issue #2374)
  * - Width configuration
  * - Mobile drawer state
+ * - Sort key / direction and view mode
+ * - The saved repository group order, and when the repository tab bar shows
+ *   (Issue #2374)
+ *
+ * The last two live here rather than in `Sidebar` because two surfaces read
+ * them: the sidebar's grouped list and the header's `RepositoryTabBar`. A
+ * component-local copy in each is how "I dragged the groups and the tabs did
+ * not move" happens. The `/api/sidebar/group-order` fetch and PUT still belong
+ * to `Sidebar` (AppShell mounts it on every route); this context is where the
+ * result is published.
  */
 
 'use client';
@@ -19,8 +29,19 @@ import React, {
   useMemo,
   type ReactNode,
 } from 'react';
-import { isValidSortKey } from '@/lib/sidebar-utils';
-import type { SortKey, SortDirection, ViewMode } from '@/lib/sidebar-utils';
+import {
+  isValidSortKey,
+  isValidRepoTabBarMode,
+  readRepositoryOrderCache,
+  persistRepositoryOrderCache,
+  DEFAULT_REPO_TAB_BAR_MODE,
+} from '@/lib/sidebar-utils';
+import type {
+  SortKey,
+  SortDirection,
+  ViewMode,
+  RepoTabBarMode,
+} from '@/lib/sidebar-utils';
 
 // ============================================================================
 // Constants
@@ -47,6 +68,25 @@ export const DEFAULT_VIEW_MODE: ViewMode = 'grouped';
 /** LocalStorage key for sidebar width */
 export const SIDEBAR_WIDTH_STORAGE_KEY = 'mcbd-sidebar-width';
 
+/**
+ * LocalStorage key for the desktop open/closed state (Issue #2374).
+ *
+ * The other three sidebar preferences have been persisted since #651; this one
+ * was not, so every reload reopened a sidebar the user had deliberately
+ * collapsed — the state the repository tab bar exists to serve.
+ */
+export const SIDEBAR_OPEN_STORAGE_KEY = 'mcbd-sidebar-open';
+
+/** LocalStorage key for the repository tab bar's visibility rule (Issue #2374) */
+export const REPO_TAB_BAR_MODE_STORAGE_KEY = 'mcbd-repo-tab-bar-mode';
+
+/**
+ * Default visibility rule for the repository tab bar. Declared in
+ * `@/lib/sidebar-utils` alongside the mode list and re-exported here so the
+ * three `DEFAULT_*` sidebar preferences stay discoverable together.
+ */
+export { DEFAULT_REPO_TAB_BAR_MODE };
+
 /** Legacy default width before Issue #651 compaction (for migration) */
 const LEGACY_SIDEBAR_WIDTH = 288;
 
@@ -68,6 +108,10 @@ interface SidebarState {
   sortDirection: SortDirection;
   /** Current view mode */
   viewMode: ViewMode;
+  /** Saved repository group order (Issue #2374: shared with the tab bar) */
+  repositoryOrder: string[];
+  /** When the repository tab bar is shown */
+  repoTabBarMode: RepoTabBarMode;
 }
 
 /** Sidebar context value */
@@ -98,6 +142,20 @@ interface SidebarContextValue {
   viewMode: ViewMode;
   /** Set view mode */
   setViewMode: (viewMode: ViewMode) => void;
+  /**
+   * Repository display names in the order the user arranged them (Issue #2374).
+   *
+   * Lives here rather than in `Sidebar` so the header's repository tab bar
+   * follows a sidebar drag in the same commit — two components each holding
+   * their own copy is how "the tabs did not move" happens.
+   */
+  repositoryOrder: string[];
+  /** Replace the repository order (also refreshes the localStorage cache) */
+  setRepositoryOrder: (order: string[]) => void;
+  /** When the repository tab bar is shown */
+  repoTabBarMode: RepoTabBarMode;
+  /** Set the repository tab bar's visibility rule */
+  setRepoTabBarMode: (mode: RepoTabBarMode) => void;
 }
 
 /** Sidebar provider props */
@@ -118,7 +176,10 @@ type SidebarAction =
   | { type: 'SET_SORT_KEY'; sortKey: SortKey }
   | { type: 'SET_SORT_DIRECTION'; sortDirection: SortDirection }
   | { type: 'LOAD_SORT_SETTINGS'; sortKey: SortKey; sortDirection: SortDirection }
-  | { type: 'SET_VIEW_MODE'; viewMode: ViewMode };
+  | { type: 'SET_VIEW_MODE'; viewMode: ViewMode }
+  | { type: 'SET_OPEN'; isOpen: boolean }
+  | { type: 'SET_REPOSITORY_ORDER'; repositoryOrder: string[] }
+  | { type: 'SET_REPO_TAB_BAR_MODE'; repoTabBarMode: RepoTabBarMode };
 
 // ============================================================================
 // Context
@@ -196,6 +257,12 @@ function sidebarReducer(state: SidebarState, action: SidebarAction): SidebarStat
       return { ...state, sortKey: action.sortKey, sortDirection: action.sortDirection };
     case 'SET_VIEW_MODE':
       return { ...state, viewMode: action.viewMode };
+    case 'SET_OPEN':
+      return state.isOpen === action.isOpen ? state : { ...state, isOpen: action.isOpen };
+    case 'SET_REPOSITORY_ORDER':
+      return { ...state, repositoryOrder: action.repositoryOrder };
+    case 'SET_REPO_TAB_BAR_MODE':
+      return { ...state, repoTabBarMode: action.repoTabBarMode };
     default:
       return state;
   }
@@ -231,6 +298,10 @@ export function SidebarProvider({
     sortKey: DEFAULT_SORT_KEY,
     sortDirection: DEFAULT_SORT_DIRECTION,
     viewMode: DEFAULT_VIEW_MODE,
+    // Read synchronously so the sidebar groups and the repository tabs paint in
+    // the user's order on the first frame, before the API answers (Issue #2374).
+    repositoryOrder: readRepositoryOrderCache(),
+    repoTabBarMode: DEFAULT_REPO_TAB_BAR_MODE,
   });
 
   // Sync sort settings with localStorage (load on mount, persist on change)
@@ -278,6 +349,36 @@ export function SidebarProvider({
     },
   );
 
+  // Sync the desktop open/closed state with localStorage (Issue #2374).
+  //
+  // Stored as the literal 'true'/'false' rather than JSON so a corrupted or
+  // hand-edited value simply fails both comparisons and leaves the default
+  // (open) in place. `useLocalStorageSync` only calls `onLoad` for a non-empty
+  // string, and both literals are non-empty — a bare `'0'`-style encoding would
+  // be fine too, but this one is readable in devtools.
+  useLocalStorageSync(
+    SIDEBAR_OPEN_STORAGE_KEY,
+    state.isOpen,
+    () => String(state.isOpen),
+    (stored) => {
+      if (stored === 'true' || stored === 'false') {
+        dispatch({ type: 'SET_OPEN', isOpen: stored === 'true' });
+      }
+    },
+  );
+
+  // Sync the repository tab bar's visibility rule with localStorage (Issue #2374)
+  useLocalStorageSync(
+    REPO_TAB_BAR_MODE_STORAGE_KEY,
+    state.repoTabBarMode,
+    () => state.repoTabBarMode,
+    (stored) => {
+      if (isValidRepoTabBarMode(stored)) {
+        dispatch({ type: 'SET_REPO_TAB_BAR_MODE', repoTabBarMode: stored });
+      }
+    },
+  );
+
   const toggle = useCallback(() => {
     dispatch({ type: 'TOGGLE' });
   }, []);
@@ -306,6 +407,18 @@ export function SidebarProvider({
     dispatch({ type: 'SET_VIEW_MODE', viewMode });
   }, []);
 
+  // The order cache is written here rather than by each caller: `Sidebar` sets
+  // it from the API response AND from an optimistic drag, and the tab bar reads
+  // it on the next mount — one writer keeps those three in step.
+  const setRepositoryOrder = useCallback((repositoryOrder: string[]) => {
+    dispatch({ type: 'SET_REPOSITORY_ORDER', repositoryOrder });
+    persistRepositoryOrderCache(repositoryOrder);
+  }, []);
+
+  const setRepoTabBarMode = useCallback((repoTabBarMode: RepoTabBarMode) => {
+    dispatch({ type: 'SET_REPO_TAB_BAR_MODE', repoTabBarMode });
+  }, []);
+
   const value: SidebarContextValue = useMemo(() => ({
     isOpen: state.isOpen,
     width: state.width,
@@ -320,6 +433,10 @@ export function SidebarProvider({
     setSortDirection,
     viewMode: state.viewMode,
     setViewMode,
+    repositoryOrder: state.repositoryOrder,
+    setRepositoryOrder,
+    repoTabBarMode: state.repoTabBarMode,
+    setRepoTabBarMode,
   }), [
     state.isOpen,
     state.width,
@@ -327,6 +444,8 @@ export function SidebarProvider({
     state.sortKey,
     state.sortDirection,
     state.viewMode,
+    state.repositoryOrder,
+    state.repoTabBarMode,
     toggle,
     setWidth,
     openMobileDrawer,
@@ -334,6 +453,8 @@ export function SidebarProvider({
     setSortKey,
     setSortDirection,
     setViewMode,
+    setRepositoryOrder,
+    setRepoTabBarMode,
   ]);
 
   return (
@@ -366,4 +487,18 @@ export function useSidebarContext(): SidebarContextValue {
     throw new Error('useSidebarContext must be used within a SidebarProvider');
   }
   return context;
+}
+
+/**
+ * Non-throwing variant of {@link useSidebarContext} (Issue #2374).
+ *
+ * Mirrors `useOptionalWorktreesCacheContext`: a control that merely *adjusts* a
+ * sidebar preference — rather than being part of the sidebar — must be safe to
+ * mount in a tree that has no `SidebarProvider`, such as an isolated component
+ * test of the header. Consumers render nothing when this returns null.
+ *
+ * @returns The context value, or null when no provider is above the caller
+ */
+export function useOptionalSidebarContext(): SidebarContextValue | null {
+  return useContext(SidebarContext);
 }

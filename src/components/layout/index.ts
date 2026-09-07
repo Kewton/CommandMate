@@ -17,3 +17,7 @@ export { VersionMismatchBanner } from './VersionMismatchBanner';
 export { Sidebar } from './Sidebar';
 
 export { SidebarToggle } from './SidebarToggle';
+
+export { RepositoryTabBar, REPOSITORY_TAB_BAR_HEIGHT } from './RepositoryTabBar';
+
+export { RepositoryTabBarModeSelector } from './RepositoryTabBarModeSelector';
