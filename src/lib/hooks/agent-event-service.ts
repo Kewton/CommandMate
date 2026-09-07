@@ -28,7 +28,10 @@ import { applyTaskEvent } from '@/lib/tasks/task-transition-service';
 import { startVerification, VerificationConflictError } from '@/lib/verification/gate-runner';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { recordAgentStopEvent } from '@/lib/session/agent-event-state';
-import { captureTranscriptTurnOnStop } from '@/lib/hooks/stop-history-capture';
+import {
+  resolveStopTranscriptCapture,
+  type StopTranscriptCaptureStatus,
+} from '@/lib/hooks/stop-history-capture';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('lib/hooks/agent-event-service');
@@ -170,14 +173,33 @@ export interface AgentStopOutcome {
   /** Verification run started by `success.autoVerifyOnStop`, or null. */
   verificationRunId: number | null;
   /**
-   * Whether the transcript reader recorded this instance's newest turn (#2246).
+   * Whether the transcript reader recorded this instance's newest turn *before*
+   * this event was answered (#2246, narrowed by #2398).
    *
    * False for every tool without a transcript to pull from, and for one that has
    * it whenever the reader could not write — no session pointer, no file, a turn
-   * whose body has not been flushed even after the retry. Never a failure on its
-   * own: the poller's own trigger is still behind it.
+   * whose body has not been flushed. Never a failure on its own: the poller's
+   * own trigger is still behind it.
+   *
+   * **It is not the negation of "the reply reached History".** Since #2398 a
+   * turn that was still open is read again after this function returns, and a
+   * codex turn captured that way answers false here — the row is written a few
+   * hundred milliseconds later, and the receiver is long gone. Read
+   * {@link AgentStopOutcome.structuredHistoryOutcome} to tell the two apart;
+   * this field stays a boolean because `/api/hooks/agent-event` logs it under
+   * that name and #2246's tests pin it.
    */
   structuredHistoryCaptured: boolean;
+  /**
+   * Which of the three things happened to this instance's newest turn (#2398).
+   *
+   * `captured` — written, before the answer. `deferred` — the turn was open and
+   * detached reads are scheduled; whether they wrote is in the log
+   * (`stop-history-capture-deferred-captured`), because by then nobody is
+   * listening here. `unavailable` — nothing written and nothing scheduled, so
+   * the scraper is this turn's only writer.
+   */
+  structuredHistoryOutcome: StopTranscriptCaptureStatus;
 }
 
 /**
@@ -200,9 +222,21 @@ export interface AgentStopOutcome {
  * skip it, and after `recordAgentStopEvent` because the reader resolves its
  * transcript through the session pointer that call refreshes.
  *
- * It is awaited rather than detached. The turn has already ended, so the cost is
- * paid by nobody who is waiting for an answer, and a detached promise here would
- * be one whose failures nothing observes.
+ * ## Exactly one read is awaited (Issue #2398)
+ *
+ * The comment that stood here said the read could be awaited freely, because
+ * "the turn has already ended, so the cost is paid by nobody who is waiting for
+ * an answer". That is true of Claude Code, which writes its transcript and then
+ * fires the hook, and false of codex, which does not append the record closing
+ * the turn until this hook's command exits — so for codex the agent *is* waiting
+ * for this answer, and the retries that were waiting for the file were waiting
+ * for themselves. Measured 2026-09-07: 105 codex stop events, 0 captured, 1 s of
+ * the agent's stop path spent on each.
+ *
+ * So the reader is asked once here, and anything further happens after this
+ * function has returned — detached, and observed through the log rather than
+ * through the return value, which is what
+ * {@link AgentStopOutcome.structuredHistoryOutcome} exists to say.
  *
  * Never throws. A hook is fire-and-forget from a CLI's stop handler, and a
  * failure here must not become the agent's problem.
@@ -215,11 +249,12 @@ export async function applyAgentStopEvent(
 ): Promise<AgentStopOutcome> {
   recordAgentStopEvent(worktree.id, cliToolId, instanceId);
 
-  const structuredHistoryCaptured = await captureTranscriptTurnOnStop(
+  const { status: structuredHistoryOutcome } = await resolveStopTranscriptCapture(
     worktree,
     cliToolId,
     instanceId
   );
+  const structuredHistoryCaptured = structuredHistoryOutcome === 'captured';
 
   let task;
   try {
@@ -234,6 +269,7 @@ export async function applyAgentStopEvent(
       taskEventApplied: false,
       verificationRunId: null,
       structuredHistoryCaptured,
+      structuredHistoryOutcome,
     };
   }
 
@@ -243,6 +279,7 @@ export async function applyAgentStopEvent(
       taskEventApplied: false,
       verificationRunId: null,
       structuredHistoryCaptured,
+      structuredHistoryOutcome,
     };
   }
 
@@ -263,6 +300,7 @@ export async function applyAgentStopEvent(
       taskEventApplied,
       verificationRunId: null,
       structuredHistoryCaptured,
+      structuredHistoryOutcome,
     };
   }
 
@@ -287,5 +325,11 @@ export async function applyAgentStopEvent(
     }
   }
 
-  return { taskId: task.id, taskEventApplied, verificationRunId, structuredHistoryCaptured };
+  return {
+    taskId: task.id,
+    taskEventApplied,
+    verificationRunId,
+    structuredHistoryCaptured,
+    structuredHistoryOutcome,
+  };
 }
