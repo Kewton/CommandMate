@@ -1,0 +1,129 @@
+version: 1
+title: "Issue #2398: codex の Stop 受け口が転写閉鎖を同期で待って自己待ちになる"
+goal: |
+  https://github.com/Kewton/CommandMate/issues/2398 を実装する。
+
+  ## 現象（実測済み。稼働版0.31.3、develop 0.32.0 でも該当コード同一）
+  チャット面で codex の返答が表示されないことがある。DB を見ると、そのターンの `codex-turn:`
+  行（転写リーダーが書く Markdown 行）が**存在しない**。代わりに scraper が書いたフッタ1行
+  （`request_id` NULL）や送信前フラッシュの ANSI ダンプが assistant 行として残る。
+
+  実測（2026-09-07）: 当該 worktree の codex は当日6ターン中**3ターン**の返答が未保存。
+  **Stop hook 経由の転写保存は3日分のログで codex 105回中0回成功**
+  （`agent-event-stop-applied … "structuredHistoryCaptured":false`。1回だけの true は保存済み
+  ターンの再読）。claude は 506/508、antigravity 9/9、command-code 1/1。保存できた codex ターンは
+  全て poller の tick がたまたま `task_complete` の後（2〜4秒後）に当たったものだけ。
+
+  ## 機構（実測、真因）
+  21:04:48 のターン（`turn_id 01a07bc1-…`）:
+  ```
+  12:05:22.515Z codex-transcript-turn-open  items:6   ← Stop 受け口 attempt 1
+  12:05:23.065Z codex-transcript-turn-open  items:6   ← attempt 2
+  12:05:23.604Z codex-transcript-turn-open  items:6   ← attempt 3
+  12:05:23.604Z agent-event-stop-applied structuredHistoryCaptured:false  ← 受け口が応答
+  12:05:23.607Z (rollout) task_complete    ← 応答の3ms後に codex が追記
+  ```
+
+  **codex は Stop hook のコマンド（relay の同期 `curl --max-time 5`）が終了するまで rollout に
+  `task_complete` を書かない。** 受け口の応答時刻と `task_complete` の timestamp の差は当日5ターンで
+  **3/16/59/61/63ms**、全て「応答の後」。`stop-history-capture.ts` の「3回×500ms待って読む」は、
+  待っている本人が追記をブロックしている**自己待ち**なので、回数や間隔を増やしても成功しない。
+  副作用として codex の全ターンの終了を毎回1秒遅らせている。
+
+  前提が誤っている箇所（実装で訂正すること）:
+  - `src/lib/hooks/agent-event-service.ts` の `applyAgentStopEvent`:
+    「It is awaited rather than detached. The turn has already ended, so the cost is paid by
+    nobody who is waiting for an answer」— Claude Code（転写を書いてから Stop を発火する）では真、
+    codex では偽
+  - `src/lib/hooks/stop-history-capture.ts` の `STOP_TRANSCRIPT_MAX_ATTEMPTS` のコメント:
+    「if the turn is still open after the third ask, the next poll is the right place to
+    notice」— poller 側は dedup が先に return するので拾えない（#2399。本Issueのスコープ外）
+
+  **これが真因。** poller の dedup 順序・placeholder を拾う echo regex・30分の poller 上限は
+  「落ちた返答を救済経路が拾えるか」を決める条件で、真因ではない（#2399 / #2400 / #2402、いずれも
+  別Issue）。
+
+  ## 影響
+  - codex の返答の約4割が Markdown 行を持たない
+  - 30分（`MAX_POLLING_DURATION`）を超えたターンとサーバ再起動後のターンは poller が無く、
+    Stop 経路が唯一なので**必ず**落ちる
+  - 全 worktree・全インスタンスで同じ（この worktree 固有ではない）
+  - codex のターン終了が毎回1秒遅い
+
+  ## 対応（この Issue の scope）
+  1. `captureTranscriptTurnOnStop` は**最初の1回だけ同期で試す**（claude / antigravity /
+     command-code はここで成功するので挙動不変）。false かつ転写が存在するなら**応答を返してから**
+     detach した遅延読み（例: 150ms / 500ms / 2s / 5s の有限回）に切り替える。codex の追記は
+     応答の数十ms後なので1回目で拾える設計にする
+  2. 遅延読みは既存の gate の per-instance 直列化に乗せ、成功時は従来どおり `broadcastMessage` と
+     `onRelayTurnCompleted(…, true)` が出るようにする
+  3. `AgentStopOutcome.structuredHistoryCaptured` の意味（同期で書けた / 遅延読みを予約した /
+     転写なし）を決め、log と route の応答に反映する
+  4. `agent-event-service.ts` / `stop-history-capture.ts` の前提コメントを訂正し、
+     `docs/design/codex-transcript-reader.md` §3 に「Stop hook は `task_complete` の**前**に発火し、
+     hook の終了を待つ」を実測として追記する
+
+  代替案（Stop payload の `last_assistant_message` と `turn_id` を relay で転送して受け口で直接書く。
+  `tests/fixtures/transcripts/codex/hook-events-01510.json` に payload の形がある）は**採らない**
+  — ツール呼び出し節つきの本文は転写からしか作れないため。上記1〜4を本命とする。
+
+  ## 受入条件
+  - [ ] fake リーダーが「受け口が応答した後にだけ閉じる」条件で、Markdown 行が書かれる（ユニット）
+  - [ ] Stop の HTTP 応答時間が転写の閉鎖に依存しない（同期1回分だけ）
+  - [ ] claude / antigravity / command-code の既存テスト
+        （`tests/unit/hooks/stop-history-capture-2246.test.ts`、`-2264.test.ts`、
+        `tests/integration/stop-history-capture-2246.test.ts`）が**無変更で緑**
+  - [ ] 実機（codex 0.153.x）で Stop の直後に `codex-transcript-turn-saved` が出て、チャット面に
+        返答が表示される。3ターン連続
+  - [ ] `npm run lint` / `npx tsc --noEmit` / `npm run test:unit` が exit 0
+
+  ## スコープ外（他Issueが担当。ファイルも触らないこと）
+  - poller の dedup 順序（#2399。`src/lib/polling/response-checker.ts` には触れない）
+  - codex の chrome finder・echo regex（#2400。`src/lib/detection/cli-patterns.ts` には触れない）
+  - relay の返答選択（#2401）
+  - 4 MiB 窓の headless turn（#2402。`src/lib/hooks/sources/codex/history.ts` には触れない）
+
+  ## 関連
+  #2246（Stop受け口の導入）/ #2264（3回リトライ化。前提が codex で偽）/ #2197（codex転写リーダー）/
+  #2121（claude）/ #2386（`ask` が junk行を拾う。同じ根の消費側防御）。同時起票の兄弟:
+  #2399（poller の dedup順序）/ #2400（codex の chrome finder）/ #2401（relay の返答選択）/
+  #2402（4 MiB窓の headless turn）— **#2399 は本Issue完了後に着手する**（`stop-history-capture.ts`
+  のコメントを #2399 が直すため）。
+
+  ## 作業ルール（厳守）
+  - **`CHANGELOG.md` と `docs/module-reference.md` を編集しないでください**（scope外です）。
+    代わりに次の2ファイルを書いてください。どちらも `dev-reports/` 配下なので commit には
+    入りません。
+    - `dev-reports/changelog/issue-2398.md` — `CHANGELOG.md` の `## [Unreleased]` にそのまま
+      貼れる1エントリ（先頭は `- **<type>(<scope>): …** (#2398): …`）。1行目にコメントで
+      どの節（`### Added` / `### Changed` / `### Fixed`）に入るかを書く。
+      `- **` で始めること（`grep -cE '^- \*\*'` で集計する）。`(#2398)` は要約の外
+      （`**` を閉じた後）に置くこと。1エントリ＝1行（折らない）。
+    - `dev-reports/module-reference/issue-2398.md` — `docs/module-reference.md` の表に足す
+      注記を行キー（`| \`path\` |`）ごとに列挙する。既存行に足すときは
+      `grep -n '^| \`<path>\`' docs/module-reference.md` を実行し、その出力（行番号つきの
+      行キー）を断片に書き写してから書くこと。0件だった行への追記は指示しない
+      （新しい行を足すなら「新規行」と明記する）。足すものが無ければ「追記なし」の1行でよい。
+  - 断片が無いとリリースノートと module-reference に載らない。実装と同じ commit の時点で
+    書くこと。
+  - **本Issueは並列で3件（#2398/#2400/#2401）が同時に開発されています。** 上記スコープ外の
+    ファイルに触れると他のワーカーの作業と衝突します。厳守してください。
+scope:
+  allow:
+    - "src/lib/hooks/stop-history-capture.ts"
+    - "src/lib/hooks/agent-event-service.ts"
+    - "docs/design/codex-transcript-reader.md"
+    - "tests/unit/hooks/**"
+    - "tests/integration/stop-history-capture*.test.ts"
+    - "dev-reports/changelog/issue-2398.md"
+    - "dev-reports/module-reference/issue-2398.md"
+  deny:
+    - "src/lib/polling/response-checker.ts"
+    - "src/lib/detection/cli-patterns.ts"
+    - "src/lib/relay/relay-delivery.ts"
+    - "src/lib/hooks/sources/codex/history.ts"
+verify:
+  # 既定（省略）= 登録済み全ゲート
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true
