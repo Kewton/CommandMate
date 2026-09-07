@@ -12,6 +12,11 @@
 #      CM_ROOT_DIR is a container path and is deliberately not scanned (#1328).
 #   4. The server runs in its own process group, so env-down.sh can stop exactly
 #      what this script started without pattern-killing anything else.
+#   5. $HOME is NOT the login home (Issue #2380). The transcript readers resolve
+#      `~/.claude/projects` and `~/.codex/sessions` from `os.homedir()`, and this
+#      script plants fake transcripts there for the chat surface to render — so
+#      it refuses to run at all unless HOME has been moved (README takes run
+#      with HOME=/Users/Shared/cmdemo-home). Exit 2, before anything is written.
 #
 # bash 3.2 compatible: no associative arrays, no mapfile.
 
@@ -36,6 +41,65 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # levels below the repository root, so one expression serves both copies.
 REPO_ROOT="${CM_DEMO_REPO_ROOT:-$(cd "$SCRIPT_DIR/../../../.." && pwd)}"
 [ -f "$REPO_ROOT/server.ts" ] || die "no server.ts under $REPO_ROOT (set CM_DEMO_REPO_ROOT)"
+
+# ------------------------------------------------------------ home guard -----
+
+# The account's real home directory, from the user database rather than from
+# $HOME — $HOME is the thing being checked. `dscl` on macOS, `getent` on Linux,
+# and the shell's own `~user` expansion (which reads the same database) as the
+# portable fallback.
+login_home() {
+  local name dir
+  name="$(id -un 2>/dev/null)" || name="${USER:-}"
+  case "$name" in
+    ''|*[!A-Za-z0-9._-]*) return 1 ;;
+  esac
+  if command -v dscl >/dev/null 2>&1; then
+    dir="$(dscl . -read "/Users/$name" NFSHomeDirectory 2>/dev/null | sed -n 's/^NFSHomeDirectory: //p')"
+    if [ -n "$dir" ]; then printf '%s' "$dir"; return 0; fi
+  fi
+  if command -v getent >/dev/null 2>&1; then
+    dir="$(getent passwd "$name" 2>/dev/null | cut -d: -f6)"
+    if [ -n "$dir" ]; then printf '%s' "$dir"; return 0; fi
+  fi
+  dir="$(eval "printf '%s' ~$name" 2>/dev/null)"
+  case "$dir" in
+    /*) printf '%s' "$dir"; return 0 ;;
+  esac
+  return 1
+}
+
+# A directory's physical path, so a symlinked HOME cannot dodge the comparison.
+physical_dir() {
+  (cd "$1" 2>/dev/null && pwd -P)
+}
+
+# Exit 2 — distinct from every other refusal in this script — and before the
+# port is picked, the seed is written or the server is started: nothing this
+# run does may touch the real `~/.claude/projects` / `~/.codex/sessions`.
+refuse_home() {
+  printf 'env-up: %s\n' "$1" >&2
+  printf 'env-up: fake transcripts are planted under $HOME; run the demo with an isolated home, e.g.\n' >&2
+  printf 'env-up:   export HOME=/Users/Shared/cmdemo-home   # see SKILL.md > 隔離の不変条件\n' >&2
+  exit 2
+}
+
+assert_isolated_home() {
+  local real current
+  [ -n "${HOME:-}" ] || refuse_home "HOME is not set"
+  current="$(physical_dir "$HOME")" || current=""
+  [ -n "$current" ] || refuse_home "HOME does not exist: $HOME"
+  real="$(login_home)" || refuse_home "could not determine the login home directory, so HOME=$HOME cannot be proven isolated"
+  real="$(physical_dir "$real")" || real=""
+  [ -n "$real" ] || refuse_home "the login home directory does not exist"
+  if [ "$current" = "$real" ]; then
+    refuse_home "HOME=$HOME is the login home directory; refusing to plant fake transcripts in it"
+  fi
+}
+
+# No bypass switch, on purpose: the one way to run this script is with HOME
+# moved, and a flag that skipped the check would be the leak it exists to stop.
+assert_isolated_home
 
 STATE_DIR="${CM_DEMO_HOME:-$HOME/.commandmate-demo}"
 case "$STATE_DIR" in
@@ -178,6 +242,18 @@ options:
   skipInPrimaryCheckout: false
 VERIFY
 
+  # The roster every seed worktree opens with (Issue #2380): the two live
+  # panes first, then the three present-only ones. A repository declaration
+  # rather than a server setting because the boot sync reads it for the
+  # worktrees it discovers (`.commandmate/agents.yaml`, #2066), and the
+  # server-wide default only reaches worktrees discovered after it is set.
+  cat >"$SEED_REPO/.commandmate/agents.yaml" <<'AGENTS'
+# Demo seed roster. Read by every sync for worktrees that have no agent
+# configuration yet; the order is the tab order and agents[0] is the primary.
+agents: [claude, codex, antigravity, opencode, command-code]
+primary: claude
+AGENTS
+
   cat >"$SEED_REPO/.commandmate/tasks/dark-mode.yaml" <<'CONTRACT'
 version: 1
 title: "Add a dark mode toggle"
@@ -241,6 +317,42 @@ create_seed_repo() {
   git -C "$SEED_REPO" add -A
   seed_commit 'feat: add theme storage key'
 
+  # The file the delegation reply links to (Issue #2380): the chat surface
+  # turns `[Header.tsx](src/components/layout/Header.tsx)` into a ChatFileLink
+  # (#2345), and clicking it opens the file viewer — which needs a file to
+  # open. Committed on `main` so every worktree carries it unchanged and the
+  # dark-mode worktree's only dirty file stays `src/theme.ts` (the
+  # contract-verify take counts on that).
+  mkdir -p "$SEED_REPO/src/components/layout"
+  cat >"$SEED_REPO/src/components/layout/Header.tsx" <<'HEADER'
+import { THEME_STORAGE_KEY } from "../../theme";
+
+type Theme = "light" | "dark";
+
+function currentTheme(): Theme {
+  return document.documentElement.dataset.theme === "dark" ? "dark" : "light";
+}
+
+export function Header() {
+  const toggle = () => {
+    const next: Theme = currentTheme() === "dark" ? "light" : "dark";
+    document.documentElement.dataset.theme = next;
+    localStorage.setItem(THEME_STORAGE_KEY, next);
+  };
+
+  return (
+    <header className="app-header">
+      <h1>cmdemo</h1>
+      <button type="button" onClick={toggle} aria-label="Toggle dark mode">
+        ◐
+      </button>
+    </header>
+  );
+}
+HEADER
+  git -C "$SEED_REPO" add -A
+  seed_commit 'feat: header with a dark mode toggle'
+
   seed_verification_assets
 
   git -C "$SEED_REPO" worktree add -q -b feature/demo-dark-mode "$WT_DARK_MODE" >/dev/null
@@ -303,6 +415,103 @@ UNSYNCED_WORKTREE_ID="$(derive_worktree_id "$WT_API_CACHE")"
 for derived in "$PRIMARY_WORKTREE_ID" "$WORKTREE_ID" "$LOGIN_WORKTREE_ID" "$UNSYNCED_WORKTREE_ID"; do
   [ -n "$derived" ] || die "a seed directory name sanitizes to an empty worktree id"
 done
+
+# ----------------------------------------------------------- transcripts -----
+
+# Fake transcripts (Issue #2380). The chat surface renders an assistant reply as
+# Markdown only when one of the transcript readers wrote it
+# (src/lib/hooks/sources/{claude,codex}/history.ts); a pane with no transcript
+# falls back to the poller's scrape, which is raw text — no ChatFileLink, no
+# tool chips. So the two live panes get a transcript each:
+#
+#   claude: $HOME/.claude/projects/<slug(worktree path)>/<session id>.jsonl
+#   codex:  $CODEX_HOME/sessions/<yyyy>/<mm>/<dd>/rollout-<local time>-<session id>.jsonl
+#
+# This script plants only the SKELETON — the file, and for codex its
+# `session_meta` line — and tells the server which session id each pane is
+# under, the way a real CLI does: one `SessionStart` hook per instance on
+# /api/hooks/agent-event. The turn itself is appended by fake-agent.sh's
+# `@transcript` row at the moment the cassette reaches it, because the reader
+# adopts the `/send` row for the prompt by matching text within ±2 minutes of
+# the transcript's own timestamp; a turn stamped now would be orphaned by the
+# time the take gets to it, and the reply would sort above the question.
+#
+# Everything here is under $HOME, which assert_isolated_home has already
+# proven is not the login home.
+
+json_string() {
+  printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
+}
+
+new_uuid() {
+  if command -v uuidgen >/dev/null 2>&1; then
+    uuidgen | LC_ALL=C tr 'A-Z' 'a-z'
+  elif [ -r /proc/sys/kernel/random/uuid ]; then
+    cat /proc/sys/kernel/random/uuid
+  else
+    od -An -N16 -tx1 /dev/urandom | tr -d ' \n' \
+      | sed -e 's/^\(........\)\(....\)\(....\)\(....\)\(............\)$/\1-\2-\3-\4-\5/'
+  fi
+}
+
+# `claudeProjectSlug` (src/lib/hooks/sources/claude/transcript.ts): every byte
+# that is not [A-Za-z0-9] becomes `-`, case preserved. Applied to the path the
+# server stores for the worktree — `path.resolve()` of what `git worktree list`
+# reports, which is the path given to `git worktree add` above.
+claude_project_slug() {
+  printf '%s' "$1" | LC_ALL=C sed -e 's/[^A-Za-z0-9]/-/g'
+}
+
+# `$CODEX_HOME` is honoured the way the reader honours it (resolveCodexHome).
+CODEX_HOME_DIR="${CODEX_HOME:-$HOME/.codex}"
+
+CLAUDE_SESSION_ID=""
+CODEX_SESSION_ID=""
+CLAUDE_TRANSCRIPT=""
+CODEX_TRANSCRIPT=""
+
+place_transcripts() {
+  local day stamp
+  CLAUDE_SESSION_ID="$(new_uuid)"
+  CODEX_SESSION_ID="$(new_uuid)"
+  CLAUDE_TRANSCRIPT="$HOME/.claude/projects/$(claude_project_slug "$WT_DARK_MODE")/$CLAUDE_SESSION_ID.jsonl"
+  day="$(date +%Y/%m/%d)"
+  stamp="$(date +%Y-%m-%dT%H-%M-%S)"
+  CODEX_TRANSCRIPT="$CODEX_HOME_DIR/sessions/$day/rollout-$stamp-$CODEX_SESSION_ID.jsonl"
+
+  mkdir -p "$(dirname "$CLAUDE_TRANSCRIPT")" || die "cannot create $(dirname "$CLAUDE_TRANSCRIPT")"
+  : >"$CLAUDE_TRANSCRIPT" || die "cannot create $CLAUDE_TRANSCRIPT"
+
+  mkdir -p "$(dirname "$CODEX_TRANSCRIPT")" || die "cannot create $(dirname "$CODEX_TRANSCRIPT")"
+  printf '{"timestamp":"%s","type":"session_meta","payload":{"session_id":"%s","id":"%s","timestamp":"%s","cwd":"%s","originator":"codex-tui","cli_version":"0.153.2","source":"cli","model_provider":"openai"}}\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" "$CODEX_SESSION_ID" "$CODEX_SESSION_ID" \
+    "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" "$(json_string "$WT_DARK_MODE")" >"$CODEX_TRANSCRIPT" \
+    || die "cannot create $CODEX_TRANSCRIPT"
+  log "planted transcripts under $HOME for claude and codex"
+}
+
+# The session pointer, delivered the way the real CLI delivers it. Nothing but
+# the pointer is set: `SessionStart` opens a generation and carries no verdict
+# (agent-event-state.ts), so the pane's status still comes from the screen.
+announce_session() {
+  local tool="$1" session_id="$2" body
+  body="$(printf '{"tool":"%s","hook_event_name":"SessionStart","source":"startup","session_id":"%s","cwd":"%s","worktreeId":"%s","instanceId":"%s"}' \
+    "$tool" "$session_id" "$(json_string "$WT_DARK_MODE")" "$WORKTREE_ID" "$tool")"
+  curl -fsS -o /dev/null --max-time 10 -X POST "$BASE_URL/api/hooks/agent-event" \
+    -H 'Content-Type: application/json' --data "$body" \
+    || die "could not announce the $tool session to $BASE_URL/api/hooks/agent-event"
+}
+
+# The five-agent roster is declared in the seed's `.commandmate/agents.yaml`
+# (read by every sync); this is the server-wide default behind it, so a
+# repository registered on camera gets the same five.
+DEMO_AGENTS_JSON='["claude","codex","antigravity","opencode","command-code"]'
+
+set_default_agents() {
+  curl -fsS -o /dev/null --max-time 10 -X PUT "$BASE_URL/api/settings/default-agents" \
+    -H 'Content-Type: application/json' --data "{\"agents\":$DEMO_AGENTS_JSON}" \
+    || die "could not set the default agents on $BASE_URL/api/settings/default-agents"
+}
 
 # ---------------------------------------------------------------- boot -------
 
@@ -378,6 +587,12 @@ if [ "$ready" -ne 1 ]; then
   die "server did not answer $BASE_URL/ within ${READY_TIMEOUT}s"
 fi
 
+log "setting the default agents and announcing the claude / codex sessions"
+set_default_agents || { cleanup_failed_boot; exit 1; }
+place_transcripts || { cleanup_failed_boot; exit 1; }
+announce_session claude "$CLAUDE_SESSION_ID" || { cleanup_failed_boot; exit 1; }
+announce_session codex "$CODEX_SESSION_ID" || { cleanup_failed_boot; exit 1; }
+
 # Created only now, after the boot sync in server.ts has already scanned
 # WORKTREE_REPOS. That ordering is what leaves this worktree on disk and absent
 # from the database, which is the precondition the sync-worktrees scene films.
@@ -406,6 +621,11 @@ CM_DEMO_UNSYNCED_WORKTREE_ID=$UNSYNCED_WORKTREE_ID
 CM_DEMO_WORKTREE_PATH=$WT_DARK_MODE
 CM_DEMO_LOGIN_WORKTREE_PATH=$WT_LOGIN_ERROR
 CM_DEMO_UNSYNCED_WORKTREE_PATH=$WT_API_CACHE
+CM_DEMO_AGENTS=claude,codex,antigravity,opencode,command-code
+CM_DEMO_CLAUDE_SESSION_ID=$CLAUDE_SESSION_ID
+CM_DEMO_CODEX_SESSION_ID=$CODEX_SESSION_ID
+CM_DEMO_CLAUDE_TRANSCRIPT=$CLAUDE_TRANSCRIPT
+CM_DEMO_CODEX_TRANSCRIPT=$CODEX_TRANSCRIPT
 EOF
 
 log "ready at $BASE_URL (pid $SERVER_PID)"

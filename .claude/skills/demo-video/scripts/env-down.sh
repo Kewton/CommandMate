@@ -55,6 +55,10 @@ CM_DEMO_PRIMARY_WORKTREE_ID=""
 CM_DEMO_WORKTREE_ID=""
 CM_DEMO_LOGIN_WORKTREE_ID=""
 CM_DEMO_UNSYNCED_WORKTREE_ID=""
+CM_DEMO_CLAUDE_SESSION_ID=""
+CM_DEMO_CODEX_SESSION_ID=""
+CM_DEMO_CLAUDE_TRANSCRIPT=""
+CM_DEMO_CODEX_TRANSCRIPT=""
 # shellcheck source=/dev/null
 . "$STATE_FILE"
 
@@ -124,6 +128,10 @@ stop_server() {
 # `-F` and `-x`: the name is compared as a whole literal line, so a record file
 # that somehow held a metacharacter could not turn into a pattern that matches
 # somebody else's session.
+# CLI_TOOL_IDS (src/lib/cli-tools/types.ts) as an alternation. Pinned against
+# the product's list by env-scripts.test.ts.
+DEMO_TOOL_IDS='claude|codex|gemini|vibe-local|opencode|copilot|antigravity|command-code'
+
 kill_session_if_live() {
   grep -Fqx -- "$1" "$LIVE_SESSIONS" || return 0
   log "killing demo tmux session: $1"
@@ -150,8 +158,13 @@ kill_demo_sessions() {
                  "$CM_DEMO_LOGIN_WORKTREE_ID" "$CM_DEMO_UNSYNCED_WORKTREE_ID"; do
     [ -n "$demo_id" ] || continue
     # Worktree ids are `[a-z0-9-]+` (sanitizeIdSegment), so interpolating one
-    # into the pattern cannot introduce a regex metacharacter.
-    grep -E "^mcbd-[a-z0-9]+-${demo_id}(-[a-zA-Z0-9_-]+)?\$" "$LIVE_SESSIONS" \
+    # into the pattern cannot introduce a regex metacharacter. The tool segment
+    # is the closed list of CLI tool ids rather than `[a-z0-9]+` (Issue #2380):
+    # `command-code` and `vibe-local` carry a `-`, which the old class could
+    # not match, so `mcbd-command-code-wt-dark-mode` survived teardown — and
+    # `[a-z0-9-]+` would over-match, taking `mcbd-claude-foo-wt-dark-mode`
+    # (worktree `foo-wt-dark-mode`, somebody else's) down with it.
+    grep -E "^mcbd-(${DEMO_TOOL_IDS})-${demo_id}(-[a-zA-Z0-9_-]+)?\$" "$LIVE_SESSIONS" \
       >"$STATE_DIR/.matched-sessions" 2>/dev/null || : >"$STATE_DIR/.matched-sessions"
     while IFS= read -r session; do
       [ -n "$session" ] || continue
@@ -186,6 +199,34 @@ if [ "$KEEP_SEED" -eq 0 ] && [ -n "$CM_DEMO_SEED_ROOT" ]; then
     *) log "seed root '$CM_DEMO_SEED_ROOT' is outside $STATE_DIR; leaving it alone" ;;
   esac
 fi
+
+# The planted transcripts (Issue #2380). Under the isolated $HOME rather than
+# under the state dir, so they get their own guard instead of purge_path's:
+# only the two files state.env recorded, only if each still sits where env-up
+# put it (`<home>/.claude/projects/<slug>/<session id>.jsonl`,
+# `<codex home>/sessions/<date>/rollout-<time>-<session id>.jsonl`) and is
+# named after the session id that was minted for it. A hand-edited state file
+# cannot turn this into `rm` of anything else.
+remove_transcript() {
+  local target="$1" session_id="$2" root="$3" shape="$4"
+  [ -n "$target" ] && [ -n "$session_id" ] || return 0
+  case "$target" in
+    "$root"/*) : ;;
+    *) log "transcript '$target' is outside $root; leaving it alone"; return 0 ;;
+  esac
+  case "$target" in
+    $shape) : ;;
+    *) log "transcript '$target' is not named after its session id; leaving it alone"; return 0 ;;
+  esac
+  [ -f "$target" ] || return 0
+  rm -f "$target"
+  log "removed planted transcript $target"
+}
+
+remove_transcript "$CM_DEMO_CLAUDE_TRANSCRIPT" "$CM_DEMO_CLAUDE_SESSION_ID" \
+  "$HOME/.claude/projects" "$HOME/.claude/projects/*/$CM_DEMO_CLAUDE_SESSION_ID.jsonl"
+remove_transcript "$CM_DEMO_CODEX_TRANSCRIPT" "$CM_DEMO_CODEX_SESSION_ID" \
+  "${CODEX_HOME:-$HOME/.codex}/sessions" "${CODEX_HOME:-$HOME/.codex}/sessions/*/rollout-*-$CM_DEMO_CODEX_SESSION_ID.jsonl"
 
 rm -f "$STATE_FILE"
 

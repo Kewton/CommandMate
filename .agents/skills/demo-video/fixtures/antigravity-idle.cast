@@ -1,0 +1,12 @@
+# demo-video fake-agent cassette — Antigravity CLI boot screen, present-only (Issue #2380)
+#
+# One frame, replayed with --idle-only: the tool is in the roster and never
+# prompted, so the pane only has to read as `ready` for the whole take.
+#
+# Provenance: real `tmux capture-pane -p -e` of agy 1.1.27 (200x1000, private
+# tmux socket, disposable HOME) taken on 2026-09-06 for Issue #2364 —
+# tests/fixtures/antigravity-live-2364/boot-idle.txt — with the probe directory
+# rewritten to the demo seed. The account line was already sanitised in the
+# fixture. The `>` composer between the two rules and the `? for shortcuts`
+# footer are what the antigravity detector keys on; do not strip the ANSI.
+0	\e[2J\e[3J\e[Huser@host wt-dark-mode % agy\n\n      \e[38;5;179m▄\e[38;5;208m\e[48;5;208m▀\e[38;5;203m\e[48;5;209m▀\e[49m▄\e[39m        \e[1m\e[94mAntigravity CLI 1.1.27\e[0m\n     \e[38;5;149m\e[48;5;113m▀\e[38;5;143m\e[48;5;107m▀\e[38;5;173m\e[48;5;173m▀\e[38;5;209m\e[48;5;209m▀\e[38;5;203m\e[48;5;167m▀▀\e[39m\e[49m       \e[90magy-user@example.com (Google AI Pro)\e[39m\n    \e[38;5;107m\e[48;5;113m▀\e[38;5;71m\e[48;5;72m▀\e[38;5;72m\e[48;5;68m▀\e[38;5;67m\e[49m▀\e[38;5;103m▀\e[38;5;98m\e[48;5;68m▀\e[38;5;97m\e[48;5;62m▀\e[38;5;132m\e[48;5;97m▀\e[39m\e[49m      \e[90mGemini 3.8 Flash (High)\e[39m\n   \e[38;5;78m▄\e[48;5;74m▀\e[38;5;73m▀\e[39m\e[49m    \e[38;5;68m\e[48;5;69m▀▀\e[49m▄\e[39m     \e[90m~/.commandmate-demo/seed/wt-dark-mode\e[39m\n  \e[38;5;75m▄\e[38;5;79m\e[48;5;75m▀\e[38;5;75m\e[49m▀\e[39m      \e[38;5;69m▀\e[48;5;69m▀\e[49m▄\e[39m\n\n\e[90m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n\e[94m>\e[39m\n\e[90m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n? for shortcuts\e[39m                                                                                                                                                                  \e[2mGemini 3.8 Flash · hig\e[0m
