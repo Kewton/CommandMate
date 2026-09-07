@@ -2,19 +2,29 @@
  * The loop guard against the row ordering production actually produces (#2387).
  *
  * `relay-service.test.ts` states the rule with hand-built rows. This file states
- * the same rule with the *real* second writer: `recordUserTurn`, the function
+ * the same rule against the *real* second writer: `recordUserTurn`, the function
  * every transcript reader calls, run against the same database a moment after a
  * delivery. That matters because the defect #2387 fixes was a green suite over
  * an input production never produces — the guard's contract was satisfied and
  * the ledger still recorded `hops = 1` for every chain, because nothing here had
  * ever asked what History looks like 662ms after a relay lands.
  *
- * So the echo is not seeded: it is *made*, by the writer that makes it, from the
- * body the delivery really sends (`buildRelayReplyMessage`). The first assertion
- * of the file is that it is an INSERT — that `recordUserTurn`'s de-duplication
- * genuinely cannot fold it into the relay row, because the relay row carries a
- * `request_id` and that path only claims rows without one. Everything after it
- * would be vacuous if that ever stopped being true.
+ * ## What #2392 changed underneath this file
+ *
+ * When it was written, `recordUserTurn` could not help INSERTING the echo: the
+ * relay row carries `relay:<ledgerId>` and #2196's claim only ever touched rows
+ * with no `request_id`. #2392 removed the echo at its source — the reader now
+ * recognises the delivery's own row and writes nothing — so the first test below
+ * states that new truth, including the part #2387 depends on: the delivery's
+ * `request_id` is **not** rewritten, because that column is the loop guard's
+ * only way back to the ledger.
+ *
+ * The guard's tolerance of an echo is not thereby untested, and must not be: an
+ * echo row sits in every database a delivery reached before #2392 landed, and
+ * any producer writing an identical `normal` row would make another. So the
+ * second half of the file seeds one by hand and re-states every rule against it.
+ * Together the two halves say the guard holds both for the row ordering
+ * production makes now and for the one it made before.
  *
  * @vitest-environment node
  */
@@ -108,6 +118,26 @@ function readTranscriptBack(atMs = NOW + ECHO_DELAY_MS) {
   );
 }
 
+/**
+ * The echo row as it exists in a database written before #2392.
+ *
+ * Seeded rather than made, because the writer that made it no longer does: this
+ * is the row the guard still has to see past, in every History a delivery
+ * reached while `recordUserTurn` was still inserting it.
+ */
+function seedEchoRow(atMs = NOW + ECHO_DELAY_MS) {
+  return createMessage(db, {
+    worktreeId: 'wt-a',
+    role: 'user',
+    content: DELIVERED_BODY,
+    messageType: 'normal',
+    timestamp: new Date(atMs),
+    requestId: 'claude-prompt:bbc5c6d9-ea0f-4c3b-9d21-6a5f0e2c1d47',
+    cliToolId: 'claude',
+    instanceId: 'claude',
+  });
+}
+
 function userRowsForA() {
   return getMessages(db, 'wt-a', {
     limit: 50,
@@ -132,21 +162,22 @@ afterEach(async () => {
   db.close();
 });
 
-describe('the delivery a transcript reader records twice (Issue #2387)', () => {
-  it('really does write a second user row, and it is the newest one', async () => {
-    deliverRelayToA(1);
+describe('the delivery a transcript reader reads back (Issues #2387, #2392)', () => {
+  it('writes no second row, and leaves the ledger pointer on the first', async () => {
+    const relayId = deliverRelayToA(1);
 
     const recorded = await readTranscriptBack();
 
-    // Not 'adopted': the relay row is keyed, and `recordUserTurn` only claims
-    // rows with no `request_id`. This is the whole mechanism of the defect.
-    expect(recorded.outcome).toBe('inserted');
+    // Not 'adopted' either: #2392 recognises the row without claiming it,
+    // because claiming would overwrite the `relay:<id>` this file exists to
+    // protect. Everything below would be vacuous if this ever became an insert.
+    expect(recorded.outcome).toBe('already-recorded');
 
     const rows = userRowsForA();
-    expect(rows).toHaveLength(2);
-    expect(rows[0].messageType).toBe('normal');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].messageType).toBe('relay');
     expect(rows[0].content).toBe(DELIVERED_BODY);
-    expect(rows[1].messageType).toBe('relay');
+    expect(rows[0].requestId).toBe(relayRequestId(relayId));
   });
 
   it('does not hide the parent from the loop guard', async () => {
@@ -192,6 +223,75 @@ describe('the delivery a transcript reader records twice (Issue #2387)', () => {
   it('releases the chain when the operator types something of their own', async () => {
     deliverRelayToA(1);
     await readTranscriptBack();
+    createMessage(db, {
+      worktreeId: 'wt-a',
+      role: 'user',
+      content: 'never mind, do this instead',
+      messageType: 'normal',
+      timestamp: new Date(NOW + 30_000),
+      cliToolId: 'claude',
+      instanceId: 'claude',
+    });
+
+    expect(findParentRelayHops(db, A)).toBeNull();
+    expect(openRelay(db, { from: A, to: B, now: NOW + 31_000 }).ok).toBe(true);
+  });
+});
+
+describe('an echo row written before #2392 removed the duplicate', () => {
+  it('is still there to be seen past — the guard, not the writer, handles it', () => {
+    deliverRelayToA(1);
+    seedEchoRow();
+
+    const rows = userRowsForA();
+    expect(rows).toHaveLength(2);
+    expect(rows[0].messageType).toBe('normal');
+    expect(rows[1].messageType).toBe('relay');
+  });
+
+  it('does not hide the parent from the loop guard', () => {
+    deliverRelayToA(1);
+    seedEchoRow();
+
+    expect(findParentRelayHops(db, A)).toBe(1);
+  });
+
+  it('leaves a chained relay recorded one hop deeper', () => {
+    deliverRelayToA(1);
+    seedEchoRow();
+
+    const result = openRelay(db, { from: A, to: B, allowRelayChain: true, now: NOW + 5_000 });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.relay.hops).toBe(2);
+  });
+
+  it('still refuses an unflagged chain five seconds after the delivery', () => {
+    deliverRelayToA(1);
+    seedEchoRow();
+
+    const result = openRelay(db, { from: A, to: B, now: NOW + 5_000 });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.refusal.code).toBe('RELAY_CHAIN_BLOCKED');
+  });
+
+  it('still stops the chain at MAX_RELAY_HOPS', () => {
+    deliverRelayToA(MAX_RELAY_HOPS);
+    seedEchoRow();
+
+    const result = openRelay(db, { from: A, to: B, allowRelayChain: true, now: NOW + 5_000 });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.refusal.code).toBe('RELAY_HOPS_EXCEEDED');
+  });
+
+  it('releases the chain when the operator types something of their own', () => {
+    deliverRelayToA(1);
+    seedEchoRow();
     createMessage(db, {
       worktreeId: 'wt-a',
       role: 'user',

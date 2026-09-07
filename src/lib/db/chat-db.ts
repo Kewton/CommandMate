@@ -373,7 +373,7 @@ export function findMessageByRequestId(
 }
 
 /** Which rows {@link findUnkeyedUserMessages} will consider. */
-export interface UnkeyedUserMessageQuery {
+export interface UserTurnCandidateQuery {
   readonly worktreeId: string;
   readonly cliToolId: CLIToolType;
   /** The agent instance; the primary instance's id equals `cliToolId`. */
@@ -382,22 +382,33 @@ export interface UnkeyedUserMessageQuery {
   readonly fromMs: number;
   /** Newest `timestamp` accepted, inclusive, as epoch ms. */
   readonly toMs: number;
-  /** Cap on rows returned. Defaults to {@link UNKEYED_USER_MESSAGE_LIMIT}. */
+  /** Cap on rows returned. Defaults to {@link USER_TURN_CANDIDATE_LIMIT}. */
   readonly limit?: number;
+  /**
+   * Also return the rows a RELAY delivery wrote (Issue #2392).
+   *
+   * Off by default, and the widening is an `OR` rather than a replacement, so a
+   * caller that omits it gets #2196's query byte for byte. On, the answer may
+   * contain rows that carry `relay:<ledgerId>` — see
+   * {@link findUnkeyedUserMessages} for why the caller must read `requestId`
+   * before it does anything to a row it got back.
+   */
+  readonly includeRelayDelivered?: boolean;
 }
 
 /**
- * How many candidate rows {@link findUnkeyedUserMessages} returns.
+ * How many candidate rows a user-row candidate lookup returns.
  *
  * The caller compares content in JavaScript, so this bounds the work rather than
  * the correctness. Twenty is far above the number of user rows one instance can
  * accumulate inside the caller's few-minute window and still small enough that
  * the query is never the expensive part of a poll.
  */
-export const UNKEYED_USER_MESSAGE_LIMIT = 20;
+export const USER_TURN_CANDIDATE_LIMIT = 20;
 
 /**
- * User rows for one instance that no producer has claimed yet (Issue #2196).
+ * User rows for one instance that no producer has claimed yet (Issue #2196) —
+ * and, on request, the one keyed row that is a duplicate of one (Issue #2392).
  *
  * The lookup behind "the operator's input is already in History — `/send` put it
  * there". A row qualifies when it is this instance's, is a `user` row, sits in
@@ -421,18 +432,44 @@ export const UNKEYED_USER_MESSAGE_LIMIT = 20;
  * `ACTIVE_FILTER` applies: an archived row has been cleared out of History, and
  * adopting one would key a turn to a row nobody can see.
  *
+ * ## The one keyed row this will hand back, and only when asked
+ *
+ * Issue #2392. `relay-delivery` writes the answer it types into the requesting
+ * session's composer as a `relay` user row keyed `relay:<ledgerId>`, and that
+ * session's own transcript reader then reads the delivered body back as a prompt
+ * it was handed — 662ms later, measured — and duplicated it, because the row it
+ * should have recognised was keyed and therefore invisible here.
+ *
+ * `includeRelayDelivered` widens the predicate to `request_id IS NULL OR (a
+ * relay row keyed `relay:…`)`. It is an OR and an opt-in, so no existing caller
+ * sees a row it did not see before; `message_type` and the key prefix are both
+ * required, because a relay *prompt* delivery is a `relay` row with no key at
+ * all and stays an ordinary unkeyed candidate, while a `relay-sys:` row is
+ * transcript furniture that is not the delivery.
+ *
+ * **A row that comes back with a `requestId` must not be claimed.** That key is
+ * how `relay-service`'s `findParentRelayHops` reads the ledger back out of the
+ * row (#2387), so re-pointing one at a transcript key would silently un-chain
+ * every relay opened from the session. {@link setMessageRequestId}'s
+ * `request_id IS NULL` predicate refuses the write in any case; the caller is
+ * expected to branch on `requestId` rather than rely on that.
+ *
  * @returns Candidate rows, newest first
  */
 export function findUnkeyedUserMessages(
   db: Database.Database,
-  query: UnkeyedUserMessageQuery
+  query: UserTurnCandidateQuery
 ): ChatMessage[] {
+  const keyFilter = query.includeRelayDelivered
+    ? `AND (request_id IS NULL OR (message_type = 'relay' AND request_id LIKE ?))`
+    : 'AND request_id IS NULL';
+
   const stmt = db.prepare(`
     SELECT id, worktree_id, role, content, summary, timestamp, log_file_name, request_id, message_type, prompt_data, cli_tool_id, instance_id, archived
     FROM chat_messages
     WHERE worktree_id = ?
       AND role = 'user'
-      AND request_id IS NULL
+      ${keyFilter}
       AND COALESCE(cli_tool_id, 'claude') = ?
       AND COALESCE(instance_id, cli_tool_id, 'claude') = ?
       AND timestamp >= ? AND timestamp <= ?
@@ -443,14 +480,21 @@ export function findUnkeyedUserMessages(
 
   const rows = stmt.all(
     query.worktreeId,
+    ...(query.includeRelayDelivered ? [`${RELAY_REQUEST_ID_PREFIX}%`] : []),
     query.cliToolId,
     query.instanceId,
     query.fromMs,
     query.toMs,
-    query.limit ?? UNKEYED_USER_MESSAGE_LIMIT
+    query.limit ?? USER_TURN_CANDIDATE_LIMIT
   ) as ChatMessageRow[];
 
-  return rows.map(mapChatMessage);
+  // A bare `relay:` names no ledger entry and so is not a delivery — the rule
+  // `parseRelayRequestId` already states for the loop guard, applied here so the
+  // two readers cannot disagree about what counts as one. A no-op without the
+  // option, where nothing that comes back is keyed at all.
+  return rows
+    .map(mapChatMessage)
+    .filter((message) => !message.requestId || parseRelayRequestId(message.requestId) !== null);
 }
 
 /**
