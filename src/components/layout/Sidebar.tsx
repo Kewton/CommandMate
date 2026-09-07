@@ -45,7 +45,7 @@ import { useWorktreeSelection } from '@/contexts/WorktreeSelectionContext';
 import { useSidebarContext } from '@/contexts/SidebarContext';
 import { BranchListItem } from '@/components/sidebar/BranchListItem';
 import { SortSelector } from '@/components/sidebar/SortSelector';
-import { Button, Input, Skeleton } from '@/components/ui';
+import { Button, GroupIcon, Input, Skeleton } from '@/components/ui';
 import { Tooltip } from '@/components/common/Tooltip';
 import { TruncationTooltip } from '@/components/common/TruncationTooltip';
 import { LocaleSwitcher } from '@/components/common/LocaleSwitcher';
@@ -851,26 +851,6 @@ function ChevronIcon({ isExpanded }: { isExpanded: boolean }) {
       strokeWidth={2}
     >
       <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-    </svg>
-  );
-}
-
-/** Folder/group icon with optional repository color */
-function GroupIcon({ className = 'w-3.5 h-3.5', color }: { className?: string; color?: string }) {
-  return (
-    <svg
-      className={`${className} flex-shrink-0`}
-      viewBox="0 0 24 24"
-      fill={color ?? 'none'}
-      stroke={color ? 'none' : 'currentColor'}
-      strokeWidth={color ? 0 : 2}
-      aria-hidden="true"
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
-      />
     </svg>
   );
 }
