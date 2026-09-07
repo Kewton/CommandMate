@@ -1,0 +1,173 @@
+version: 1
+title: "Issue #2376: 委任方法の1クリック挿入（/delegate）と commandmate ask/whoami/peers、--instance のalias解決"
+goal: |
+  https://github.com/Kewton/CommandMate/issues/2376 を実装する。
+
+  ## 目的
+  セッションA（エージェント）に「セッションBへこう頼め」と伝えるのが、毎回ハーネス設計に
+  なっている。CLIの4コマンド（`send`/`wait`/`capture`/`respond`）とexit codeの分岐をAに
+  正しく教え、宛先の生IDを調べ、プロンプト待ちの扱いを決めて、初めて委任が成立する。これを
+  **GUIからの1クリック挿入**（A）と**1コマンドで往復が済む `commandmate ask`**（B）で
+  「頼むだけ」にする。
+
+  返信の自動配送（`--reply-to`）は #2377、Skill化はKewton/commandmate-skills#241で扱う
+  （**本Issueのスコープには含めない**）。
+
+  ## 現状
+  | ある | 内容 |
+  |---|---|
+  | CLI4本 | `send`/`wait`/`capture`/`respond`。`--instance` で送り先を指定、`wait` は
+    0完了/10プロンプト/124タイムアウト/20・21検証 |
+  | 埋め込みドキュメント | `commandmate docs`（`src/cli/docs/agent-operations.ts`）に
+    send→wait→captureの基本形、Auto-Yes付き、プロンプト応答ループ、並列の4サンプル。
+    `## Multi-Session` 節あり |
+  | GUIの「CLIコマンド」モーダル（#2120） | `InstanceCliCommandsModal.tsx`: Agentペインの
+    インスタンス行から、その相手向けの4コマンドをコピーできる。`--instance`の値は
+    `GET /api/worktrees/:id/resolve-target`、バイナリ名と`CM_PORT=`接頭辞は
+    `GET …/cli-reference` が確定する。文面は `src/lib/cli/command-reference.ts` の
+    `buildInstanceCliCommands` |
+  | コンポーザーへの挿入経路 | `WorktreeChatSendProvider`（`WorktreeDetailRefactored.tsx:591`、
+    Historyの「メッセージに挿入」が使う） |
+
+  **足りないもの**
+  1. Aに渡す定型文が無い
+  2. 往復に3コマンドとexit codeの分岐が要る（`wait`を抜くと空転、`respond yes`は番号解決
+     されず誤応答になり得る #1681）
+  3. Aは自分と相手を知らない（自分のworktree/instanceを返すコマンドが無い。`--instance`は
+     生IDのみでaliasは届かない）
+  4. 返信はAが取りに行くしかない（#2377、本Issueのスコープ外）
+
+  ## 変更内容
+
+  ### A. 「このセッションへの委任方法を挿入」（GUI）
+  - Agentペイン（PC `AgentInstancesPane.tsx` / スマホ `MobileAgentInstancesPane.tsx`）の
+    インスタンス行メニューに「委任方法をコンポーザーに挿入」を追加。Bの行から押すと、
+    **現在アクティブなセッションA**のコンポーザーへ定型文を挿入する
+    （`WorktreeChatSendProvider` の `onInsertToComposer`）
+  - 定型文は `resolve-target`/`cli-reference` で確定した値を埋め、UIロケールで生成する。
+    `buildInstanceCliCommands` の隣に `buildDelegationBrief(target, reference, locale)` を
+    置き、モーダルと同じ1か所から文面を出す
+  - 文面（jaの例。Bで`ask`が入る前は`send`→`wait --on-prompt human`→`capture --pane --tail 60`
+    の3行版）:
+    ```
+    ## 別セッション「Codex 2」への委任
+    - 宛先: worktree `commandagent-develop` / instance `codex-2`（Codex）
+    - 依頼: commandmate ask commandagent-develop --instance codex-2 "<依頼文>" --timeout 1800
+      - exit 0: 標準出力が返答本文
+      - exit 10: 相手が確認待ち。標準出力のprompt JSONを私に報告して止まる（自分で答えない）
+      - exit 124: タイムアウト。captureで状況を見て報告
+    - 進捗確認: commandmate capture commandagent-develop --instance codex-2 --pane --tail 60
+    - 禁止: respondで相手のプロンプトに答える / auto-yesを有効化する
+    ```
+  - Command Paletteに `/delegate` を追加: セッション一覧（`WorktreesCache`のworktree×instance）
+    を選ぶと同じ定型文を挿入する。**`CommandPalette.tsx` は #2374 が並行してWorktreesグループの
+    見出しを追加中。既存のWorktreesグループの実装には触れず、新規コマンド `/delegate` の追加に
+    限定すること**
+  - 自分自身（A=B）を選んだときは挿入しない（トースト）
+
+  ### B. `commandmate ask` と自己認識（CLI）
+  - **`commandmate ask <worktree-id> "<msg>" [--instance <id|alias>] [--timeout <sec>] [--json]`**
+    - `send`→`wait`（`--on-prompt human`相当、完了検知）→**Historyに保存された最新assistant
+      本文**（`structured-history-gate`/転写リーダーが書いた`chat_messages`の行）をstdoutに
+      出す。転写を持たないツール（copilot/gemini/vibe-local）は`capture --pane --tail`の
+      squeeze済みテキストにフォールバックし、`--json`の`source`にどちらかを記す
+    - exit codeは`wait`と同じ（0/10/124/20/21/99）。10のときはstdoutにprompt JSON
+      （`wait --on-prompt agent`と同形）
+    - `--auto-yes`は**付けない**
+  - **`--instance`にaliasを許可**する（`send`/`wait`/`capture`/`respond`/`ask`共通）。
+    `resolve-target`にalias解決を足し、同名が2件以上なら exit 2 で候補を列挙する。alias は
+    `instances alias` で付いたもの
+  - **起動するtmuxセッションに`CM_WORKTREE_ID`/`CM_INSTANCE_ID`/`CM_CLI_TOOL`をexport**し、
+    **`commandmate whoami [--json]`**がそれを読んで自分のworktree/instance/ツール/aliasを出す
+    （envが無いとき＝CommandMate外から呼ばれたときはexit 3と説明）
+  - **`commandmate peers [--json]`**: 自分と同じリポジトリ配下の他セッション一覧を、`ask`の
+    実行例付きで出す（`ls`+`instances`の合成。自分自身は`(you)`付きで表示）
+  - `commandmate docs --section delegation` を追加し、Aの定型文と同じ流儀
+    （askを使う、プロンプトは人へ、auto-yesを触らない、返答は要約して報告）を載せる。
+    `agent-operations`の`## Multi-Session`から参照する
+
+  ## 受入条件
+  - [ ] AgentペインでBの行から「委任方法を挿入」を押すと、Aのコンポーザーに定型文が入り、
+        `--instance`の値が`resolve-target`の答えと一致する（PC/スマホ）
+  - [ ] `/delegate`から同じ定型文が挿入される。自分自身を選ぶと挿入されない
+  - [ ] `commandmate ask <wt> --instance codex-2 "1+1は？"` がexit 0で返答本文だけをstdoutに
+        出す（claude/codexで実機1回ずつ）。相手が確認待ちになる依頼ではexit 10とprompt JSON
+  - [ ] `--instance <alias>` が `send`/`ask`/`capture`/`wait` で解決される。重複aliasは
+        exit 2と候補列挙
+  - [ ] CommandMateが起こしたセッション内のBashから `commandmate whoami` が自分の
+        worktree/instanceを返す。外のshellではexit 3
+  - [ ] `commandmate peers` の出力例をそのまま貼って `ask` が通る
+  - [ ] `commandmate docs --section delegation` が存在し、定型文と同じ流儀が書かれている
+  - [ ] `npm run lint` / `npx tsc --noEmit` / `npm run test:unit` が exit 0
+
+  ## スコープ外
+  - 返信の自動配送（`send --reply-to` / `ask --async`）— #2377
+  - Skill化（`cmate-delegate`）— Kewton/commandmate-skills#241
+  - 相手のAuto-Yesを`ask`から操作すること
+
+  ## 関連
+  #2120、#1925、#1681、#518、#1000、#1638
+
+  ## 作業ルール（厳守）
+  - **`CHANGELOG.md` と `docs/module-reference.md` を編集しないでください**（scope外です）。
+    代わりに次の2ファイルを書いてください。どちらも `dev-reports/` 配下なので commit には
+    入りません。
+    - `dev-reports/changelog/issue-2376.md` — `CHANGELOG.md` の `## [Unreleased]` にそのまま
+      貼れる1エントリ（先頭は `- **<type>(<scope>): …** (#2376): …`）。1行目にコメントで
+      どの節（`### Added` / `### Changed` / `### Fixed`）に入るかを書く。
+      `- **` で始めること（`grep -cE '^- \*\*'` で集計する）。`(#2376)` は要約の外
+      （`**` を閉じた後）に置くこと。1エントリ＝1行（折らない）。
+    - `dev-reports/module-reference/issue-2376.md` — `docs/module-reference.md` の表に足す
+      注記を行キー（`| \`path\` |`）ごとに列挙する。既存行に足すときは
+      `grep -n '^| \`<path>\`' docs/module-reference.md` を実行し、その出力（行番号つきの
+      行キー）を断片に書き写してから書くこと。0件だった行への追記は指示しない
+      （新しい行を足すなら「新規行」と明記する）。足すものが無ければ「追記なし」の1行でよい。
+  - 断片が無いとリリースノートと module-reference に載らない。実装と同じ commit の時点で
+    書くこと。
+  - **`CommandPalette.tsx` は #2374 が並行してWorktreesグループの見出しをsend中。既存の
+    Worktreesグループの実装や並びを変更しないこと。** 差分は新規コマンド `/delegate` の
+    追加に限定する。
+  - **CLI新コマンド（`ask`/`whoami`/`peers`）は既存コマンド（`send.ts`/`wait.ts`/
+    `capture.ts`/`instances.ts`）の実装パターンを踏襲すること**（引数パース・exit code・
+    `--json` の形）。alias解決は `resolve-target` の既存ロジックに追加する形にし、
+    別の解決経路を新設しないこと。
+  - **`src/cli/` から `src/lib/tmux/**` を直接 import しないこと。** `tsconfig.cli.json` の
+    `paths:{}` と ESLint の import 制限ガードにより、CLI から tmux モジュールへの直接・動的
+    import はエラーになる（許可リストは縮む方向にしか変更できない）。tmux セッションへの
+    env 付与（`CM_WORKTREE_ID` 等）が必要な場合は、既存のゲートウェイ `src/lib/session/
+    cli-session.ts` を経由すること。
+scope:
+  allow:
+    - "src/cli/commands/ask.ts"
+    - "src/cli/commands/whoami.ts"
+    - "src/cli/commands/peers.ts"
+    - "src/cli/commands/send.ts"
+    - "src/cli/commands/wait.ts"
+    - "src/cli/commands/capture.ts"
+    - "src/cli/commands/respond.ts"
+    - "src/cli/commands/instances.ts"
+    - "src/cli/commands/docs.ts"
+    - "src/cli/docs/agent-operations.ts"
+    - "src/cli/index.ts"
+    - "src/app/api/worktrees/[id]/resolve-target/**"
+    - "src/lib/cli/command-reference.ts"
+    - "src/components/worktree/InstanceCliCommandsModal.tsx"
+    - "src/components/worktree/AgentInstancesPane.tsx"
+    - "src/components/worktree/MobileAgentInstancesPane.tsx"
+    - "src/components/common/CommandPalette.tsx"
+    - "src/lib/session/cli-session.ts"
+    - "tests/unit/cli/commands/**"
+    - "tests/unit/api/resolve-target.test.ts"
+    - "tests/unit/lib/cli/command-reference*.test.ts"
+    - "tests/unit/components/worktree/InstanceCliCommandsModal*.test.tsx"
+    - "tests/unit/components/worktree/AgentInstancesPane*.test.tsx"
+    - "tests/unit/components/worktree/MobileAgentInstancesPane*.test.tsx"
+    - "tests/unit/components/common/CommandPalette*.test.tsx"
+    - "dev-reports/changelog/issue-2376.md"
+    - "dev-reports/module-reference/issue-2376.md"
+  deny: []
+verify:
+  # 既定（省略）= 登録済み全ゲート
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true
