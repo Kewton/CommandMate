@@ -1,0 +1,22 @@
+# demo-video transcript template — the Claude turn `claude-delegate.cast` appends (Issue #2380)
+#
+# One Claude Code session turn in the JSONL dialect
+# src/lib/hooks/sources/claude/transcript.ts reads: the operator's prompt
+# (`origin.kind: human`, `promptSource: typed` — the markers #2196 requires
+# before a `user` row is written), an assistant record that calls Bash with
+# `commandmate ask …`, the `tool_result` for it, and the closing assistant
+# record (`stop_reason: end_turn` with prose — what #2264 requires before the
+# turn may be written). fake-agent.sh's `@transcript` row appends every
+# non-comment line to the file named by --transcript, replacing {{NOW}} {{TURN}}
+# {{SESSION_ID}} {{CWD}} {{WORKTREE}} {{MESSAGE}} {{EXEC_OUTPUT}} at replay time.
+#
+# Shape taken from tests/fixtures/claude-transcript-2264/turn-closed.jsonl
+# (Claude Code 2.1.240, captured 2026-09-02): the `attachment`, `system` and
+# usage bookkeeping are left out because the reader ignores them. The last
+# record's text is the Markdown the chat surface renders; the
+# `[Header.tsx](src/components/layout/Header.tsx)` link is what becomes a
+# ChatFileLink (#2345). No personal path: `cwd` is the seed worktree.
+{"parentUuid":null,"isSidechain":false,"type":"user","message":{"role":"user","content":"{{MESSAGE}}"},"uuid":"{{TURN}}","timestamp":"{{NOW}}","permissionMode":"default","origin":{"kind":"human"},"promptSource":"typed","userType":"external","entrypoint":"cli","cwd":"{{CWD}}","sessionId":"{{SESSION_ID}}","version":"2.1.261","gitBranch":"feature/demo-dark-mode"}
+{"parentUuid":"{{TURN}}","isSidechain":false,"message":{"model":"claude-opus-5","id":"msg-a1-{{TURN}}","type":"message","role":"assistant","content":[{"type":"text","text":"I'll ask Codex to review the toggle and tell us where it lives."},{"type":"tool_use","id":"toolu-1-{{TURN}}","name":"Bash","input":{"command":"commandmate ask {{WORKTREE}} --instance codex \"Review the dark mode toggle in the header. Reply in Markdown and link the file.\" --json","description":"Delegate the review to Codex"}}],"stop_reason":"tool_use"},"type":"assistant","uuid":"a1-{{TURN}}","timestamp":"{{NOW}}","userType":"external","entrypoint":"cli","cwd":"{{CWD}}","sessionId":"{{SESSION_ID}}","version":"2.1.261","gitBranch":"feature/demo-dark-mode"}
+{"parentUuid":"a1-{{TURN}}","isSidechain":false,"type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu-1-{{TURN}}","type":"tool_result","content":"{{EXEC_OUTPUT}}","is_error":false}]},"uuid":"r1-{{TURN}}","timestamp":"{{NOW}}","sourceToolAssistantUUID":"a1-{{TURN}}","userType":"external","entrypoint":"cli","cwd":"{{CWD}}","sessionId":"{{SESSION_ID}}","version":"2.1.261","gitBranch":"feature/demo-dark-mode"}
+{"parentUuid":"r1-{{TURN}}","isSidechain":false,"message":{"model":"claude-opus-5","id":"msg-a2-{{TURN}}","type":"message","role":"assistant","content":[{"type":"text","text":"Codex reviewed the change and is happy with it.\n\n- The toggle is in [Header.tsx](src/components/layout/Header.tsx); it stores the choice under `THEME_STORAGE_KEY`.\n- `resolveTheme` in [theme.ts](src/theme.ts) defaults to `light`, which Codex called the safe choice.\n\nNothing to fix before merging."}],"stop_reason":"end_turn"},"type":"assistant","uuid":"a2-{{TURN}}","timestamp":"{{NOW}}","userType":"external","entrypoint":"cli","cwd":"{{CWD}}","sessionId":"{{SESSION_ID}}","version":"2.1.261","gitBranch":"feature/demo-dark-mode"}

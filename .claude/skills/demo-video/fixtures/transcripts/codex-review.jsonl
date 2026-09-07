@@ -1,0 +1,26 @@
+# demo-video transcript template — the codex turn `codex-review.cast` appends (Issue #2380)
+#
+# One codex rollout turn, in the `event_msg` / `item_completed` dialect the
+# reader in src/lib/hooks/sources/codex/transcript.ts reads (the `response_item`
+# duplicate stream is omitted: the reader drops it). fake-agent.sh's
+# `@transcript` row appends every non-comment line to the rollout file named by
+# --transcript, replacing {{NOW}} {{TURN}} {{SESSION_ID}} {{CWD}} {{MESSAGE}}
+# at replay time — the timestamps have to be the moment the turn happens, or the
+# reader cannot adopt the `/send` row (`recordUserTurn` looks ±2 minutes around
+# the prompt's own timestamp) and the reply would sort above the question.
+#
+# Shape taken from tests/fixtures/transcripts/codex/rollout-three-turns-01510.jsonl
+# (codex-cli 0.151.0, captured 2026-09-01 for Issue #2197): `task_started`,
+# `turn_context`, one `UserMessage`, the commentary `AgentMessage`, two
+# `CommandExecution` items, the `final_answer` `AgentMessage`, `task_complete`.
+# The `final_answer` text is the Markdown the chat surface renders — the
+# `[Header.tsx](src/components/layout/Header.tsx)` link is what becomes a
+# ChatFileLink (#2345). No personal path: `cwd` is the seed worktree.
+{"timestamp":"{{NOW}}","type":"event_msg","payload":{"type":"task_started","turn_id":"{{TURN}}","model_context_window":258400,"collaboration_mode_kind":"default"}}
+{"timestamp":"{{NOW}}","type":"turn_context","payload":{"turn_id":"{{TURN}}","cwd":"{{CWD}}","model":"gpt-5.6-sol"}}
+{"timestamp":"{{NOW}}","type":"event_msg","payload":{"type":"item_completed","thread_id":"{{SESSION_ID}}","turn_id":"{{TURN}}","item":{"type":"UserMessage","id":"um-{{TURN}}","content":[{"type":"text","text":"{{MESSAGE}}","text_elements":[]}]}}}
+{"timestamp":"{{NOW}}","type":"event_msg","payload":{"type":"item_completed","thread_id":"{{SESSION_ID}}","turn_id":"{{TURN}}","item":{"type":"AgentMessage","id":"am-1-{{TURN}}","content":[{"type":"Text","text":"I’ll read the header and the theme helper, then review the toggle."}],"phase":"commentary"}}}
+{"timestamp":"{{NOW}}","type":"event_msg","payload":{"type":"item_completed","thread_id":"{{SESSION_ID}}","turn_id":"{{TURN}}","item":{"type":"CommandExecution","id":"exec-1-{{TURN}}","command":["/bin/zsh","-lc","cat src/components/layout/Header.tsx"],"cwd":"file://{{CWD}}","parsed_cmd":[{"type":"read","cmd":"cat src/components/layout/Header.tsx","name":"Header.tsx","path":"src/components/layout/Header.tsx"}],"status":"completed","exit_code":0}}}
+{"timestamp":"{{NOW}}","type":"event_msg","payload":{"type":"item_completed","thread_id":"{{SESSION_ID}}","turn_id":"{{TURN}}","item":{"type":"CommandExecution","id":"exec-2-{{TURN}}","command":["/bin/zsh","-lc","node --test"],"cwd":"file://{{CWD}}","parsed_cmd":[{"type":"unknown","cmd":"node --test"}],"status":"completed","exit_code":0}}}
+{"timestamp":"{{NOW}}","type":"event_msg","payload":{"type":"item_completed","thread_id":"{{SESSION_ID}}","turn_id":"{{TURN}}","item":{"type":"AgentMessage","id":"am-2-{{TURN}}","content":[{"type":"Text","text":"Reviewed the dark mode toggle.\n\n- The toggle lives in [Header.tsx](src/components/layout/Header.tsx) and writes the choice under `THEME_STORAGE_KEY`.\n- `resolveTheme` in [theme.ts](src/theme.ts) falls back to `light` for an unknown stored value, which is the safe default.\n\nLooks good to merge."}],"phase":"final_answer"}}}
+{"timestamp":"{{NOW}}","type":"event_msg","payload":{"type":"task_complete","turn_id":"{{TURN}}","last_agent_message":"Reviewed the dark mode toggle."}}

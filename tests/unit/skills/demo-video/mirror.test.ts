@@ -35,11 +35,18 @@ function walk(root: string): string[] {
 describe('demo-video skill mirroring', () => {
   const claudeFiles = walk(CLAUDE_ROOT);
 
-  it('ships the Phase A assets and the #1810 additions', () => {
+  it('ships the Phase A assets, the #1810 additions and the #2380 cassettes', () => {
     // Guards against an empty tree quietly passing the comparison below.
     expect(claudeFiles).toEqual([
       'SKILL.md',
+      'fixtures/antigravity-idle.cast',
+      'fixtures/claude-delegate.cast',
       'fixtures/claude-session-sample.cast',
+      'fixtures/codex-review.cast',
+      'fixtures/command-code-idle.cast',
+      'fixtures/opencode-idle.cast',
+      'fixtures/transcripts/claude-delegate.jsonl',
+      'fixtures/transcripts/codex-review.jsonl',
       'scripts/cli-scene.sh',
       'scripts/compose.sh',
       'scripts/demo-video.sh',
