@@ -12,7 +12,7 @@
 **[CommandMate 公式サイト（英語）→](https://kewton.github.io/CommandMate/)**
 
 <p align="center">
-  <img src="../images/demo-desktop.gif" width="600" alt="契約つきで送信し、ゲートが走り、exit code が RESULT passed を返す" />
+  <img src="../images/demo-hero.ja.gif" width="600" alt="タブでリポジトリを切り替え、チャットから別のエージェントに委任し、返答のリンクからファイルを開く。スマホでも同じ" />
 </p>
 
 > **vibe coding から、Vibe Engineering へ。**
@@ -30,8 +30,12 @@ npx commandmate@latest
 CommandMate は、既に使っているエージェント CLI の上に**仕組み**を足します。作業の前に契約を、作業の後に検証ゲートを、方法論は Skill として。
 tmux も Git worktree もターミナルもエージェント CLI も置き換えません。それらに枠をかけ、成果物が「終わった」ではなく「検証済み」で返るようにします。
 
+## 「たぶん動く」ではなく検証済み
+
+完了を決めるのはあなたが宣言したゲートで、判定は実 exit code である。
+
 <p align="center">
-  <img src="../images/demo-mobile.gif" width="300" alt="入力待ちが届き、スマホから応答する" />
+  <img src="../images/demo-contract-verify.gif" width="600" alt="契約つきで送信し、ゲートが走り、exit code が RESULT passed を返す" />
 </p>
 
 デスクトップでもモバイルでも使えます。あらゆるブラウザからセッションを監視・操作できます。
