@@ -14,7 +14,9 @@
 
 import { describe, it, expect } from 'vitest';
 import {
+  buildDelegationBrief,
   buildInstanceCliCommands,
+  DELEGATION_ASK_TIMEOUT_SECONDS,
   resolveCommandMateBinary,
   COMMANDMATE_GLOBAL_BINARY,
   COMMANDMATE_DEV_BINARY,
@@ -121,5 +123,86 @@ describe('[#2120] buildInstanceCliCommands', () => {
   it('keeps the message body a placeholder, quoted', () => {
     const { send } = buildInstanceCliCommands({ ...base, messagePlaceholder: 'message' });
     expect(send).toContain('"message"');
+  });
+});
+
+
+/**
+ * The delegation brief (Issue #2376).
+ *
+ * The brief is a PROMPT: another agent reads it and acts on it, so what is
+ * pinned is not its prose but the four things that change behaviour if they go
+ * missing — the resolved target in the `ask` line, the exit-code branch, the
+ * "do not answer their prompt" clause, and the absence of any suggestion to
+ * touch the other session's Auto-Yes.
+ */
+describe('[#2376] buildDelegationBrief', () => {
+  const base = {
+    binary: COMMANDMATE_DEV_BINARY,
+    worktreeId: 'anvil-develop',
+    instanceId: 'codex-2',
+    instanceLabel: 'Codex 2',
+    toolLabel: 'Codex',
+    locale: 'ja',
+  };
+
+  it.each(['ja', 'en'])('names the resolved target in the ask line (%s)', (locale) => {
+    const brief = buildDelegationBrief({ ...base, locale });
+    expect(brief).toContain(
+      `${COMMANDMATE_DEV_BINARY} ask anvil-develop --instance codex-2`,
+    );
+    expect(brief).toContain(`--timeout ${DELEGATION_ASK_TIMEOUT_SECONDS}`);
+  });
+
+  it.each(['ja', 'en'])('branches on the exit codes wait actually returns (%s)', (locale) => {
+    const brief = buildDelegationBrief({ ...base, locale });
+    expect(brief).toContain('exit 0');
+    expect(brief).toContain('exit 10');
+    expect(brief).toContain('exit 124');
+  });
+
+  it.each(['ja', 'en'])('tells the reader to report a prompt, not answer it (%s)', (locale) => {
+    const brief = buildDelegationBrief({ ...base, locale });
+    // The clause this whole feature exists to carry: `respond` does not resolve
+    // an answer semantically (#1681), so answering somebody else's dialog picks
+    // whatever was highlighted.
+    expect(brief).toContain('respond');
+    expect(brief).toContain('auto-yes');
+  });
+
+  it('never suggests enabling auto-yes', () => {
+    for (const locale of ['ja', 'en']) {
+      const brief = buildDelegationBrief({ ...base, locale });
+      expect(brief).not.toMatch(/--auto-yes/);
+    }
+  });
+
+  it('writes Japanese for ja and English for anything else', () => {
+    expect(buildDelegationBrief({ ...base, locale: 'ja' })).toContain('への委任');
+    expect(buildDelegationBrief({ ...base, locale: 'en' })).toContain('Delegating to session');
+    // An unknown locale is English, not a blank brief.
+    expect(buildDelegationBrief({ ...base, locale: 'fr' })).toContain('Delegating to session');
+  });
+
+  it('carries the alias so the reader knows which session is meant', () => {
+    const brief = buildDelegationBrief({ ...base, locale: 'ja' });
+    expect(brief).toContain('Codex 2');
+    expect(brief).toContain('Codex');
+  });
+
+  it('prefixes CM_PORT= on a non-default port, on every command line', () => {
+    const brief = buildDelegationBrief({ ...base, portPrefix: 3135, locale: 'en' });
+    expect(brief).toContain(`CM_PORT=3135 ${COMMANDMATE_DEV_BINARY} ask `);
+    expect(brief).toContain(`CM_PORT=3135 ${COMMANDMATE_DEV_BINARY} capture `);
+  });
+
+  it('omits the prefix on the default port', () => {
+    expect(buildDelegationBrief({ ...base, portPrefix: DEFAULT_SERVER_PORT, locale: 'en' }))
+      .toBe(buildDelegationBrief({ ...base, locale: 'en' }));
+  });
+
+  it('offers a progress check that reads without interfering', () => {
+    const brief = buildDelegationBrief({ ...base, locale: 'en' });
+    expect(brief).toContain('capture anvil-develop --instance codex-2 --pane --tail 60');
   });
 });

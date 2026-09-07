@@ -59,6 +59,19 @@ function mockRoutes(routes: { polls: unknown[]; messages?: unknown }): void {
         json({ serverVersion: '0.0.0-test', capabilities: ['resolve-session-target'] }),
       );
     }
+    // Issue #2376: `wait --instance` resolves the selector once per worktree
+    // before polling, so an ALIAS reaches `/current-output?instance=` as the id
+    // it stands for. Answered here, ahead of the catch-all, or the resolution
+    // would eat the first poll.
+    if (url.includes('/resolve-target')) {
+      // Echoes the requested instance, as the real route does for an id it
+      // recognises. A stub that answered a fixed id would silently rewrite
+      // `--instance copilot-2` and hide exactly what the scoping tests check.
+      const requested = new URL(url).searchParams.get('instance') ?? 'copilot';
+      return Promise.resolve(
+        json({ cliToolId: 'copilot', instanceId: requested, resolvedBy: 'roster', conflict: null }),
+      );
+    }
     if (url.includes('/messages?')) return Promise.resolve(json(routes.messages ?? []));
     const poll = routes.polls[Math.min(pollIndex, routes.polls.length - 1)];
     pollIndex += 1;

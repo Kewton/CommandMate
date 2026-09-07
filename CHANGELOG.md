@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **feat(ui): ヘッダー上段にリポジトリタブ帯を追加しサイドバー開閉を永続化** (#2374): サイドバーを折りたたむとヘッダーの上に高さ32pxのリポジトリタブ帯が出るようになりました。タブ＝リポジトリで、並び・集約状態ドット・Needs attention 件数・非表示リポジトリの除外はサイドバーと同じルールに従います。タブをクリック（キーボードは Enter / ↓）するとそのリポジトリのブランチ一覧がポップオーバーで開き、行はサイドバーと同じ `BranchListItem` — 状態ドット・次アクション・Ready for work バッジ・未読ドットまで同一 — で、クリックすると表示が切り替わり Esc / 外側クリックで閉じます。表示条件はヘッダーの新しいセレクタで「常に表示 / サイドバー折りたたみ時のみ（既定）/ 非表示」から選べ、帯の高さは表示サイズ倍率に追従します。あわせてサイドバーの開閉状態が localStorage (`mcbd-sidebar-open`) に保存されるようになり、閉じたまま再読み込みしても閉じたままになります。Command Palette の Worktrees 行もリポジトリ名の見出しでまとまり、タブ帯と語彙が揃いました（スマホは従来どおり下タブとハンバーガーのまま）。
+- **feat(cli,ui): セッション間の委任を「頼むだけ」にする** (#2376): 往復 1 コマンドの `commandmate ask`（send→wait→返答本文を stdout、exit code は `wait` と同一の 0/10/124/21）、自己認識の `commandmate whoami`（env と tmux セッション名から worktree/instance/ツール/alias を出す。CommandMate 外では exit 3）、同一リポジトリの他セッションを `ask` の実行例つきで並べる `commandmate peers`、`commandmate docs --section delegation` を追加。`--instance` が roster の alias（例 `--instance "Codex 2"`）を受け付けるようになり（`send`/`wait`/`capture`/`respond`/`ask` 共通。同名 2 件は exit 2 で候補列挙）、GUI では Agent ペインの各行メニューと Command Palette の `/delegate` から「委任方法」の定型文をコンポーザーに挿入できる
 
 ### Fixed
 

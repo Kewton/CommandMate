@@ -10,12 +10,16 @@ import { ExitCode } from '../types';
 import type { CaptureOptions } from '../types';
 import type { CurrentOutputResponse, PromptMessageResponse, WorktreeDetailResponse } from '../types/api-responses';
 import { MAX_MESSAGES_LIMIT } from '../../config/history-display-config';
-import { ApiClient, isValidWorktreeId, isValidInstanceId } from '../utils/api-client';
+import { ApiClient, isValidWorktreeId } from '../utils/api-client';
 import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
 import { isCliToolId, DEFAULT_CLI_TOOL_ID } from '../config/cli-tool-ids';
 import { AGENT_OPTION_DESCRIPTION, INSTANCE_OPTION_DESCRIPTION } from '../config/agent-target-options';
-import { resolveInstanceCliTool } from './instances';
-import { resolveSessionTarget, describeSessionTargetConflict } from '../utils/session-target';
+import {
+  isInstanceSelector,
+  INSTANCE_ALIAS_HELP_SUFFIX,
+  INSTANCE_SELECTOR_ERROR,
+  resolveInstanceTarget,
+} from './instances';
 import { printMaybePaged } from '../utils/pager';
 import { squeezeTranscript } from '../../lib/tmux/transcript-squeeze';
 
@@ -91,7 +95,7 @@ function parseTail(raw: string | undefined): number | undefined {
  *
  * POST /capture demands an explicit `cliToolId`, so unlike GET /current-output
  * this path cannot leave the choice to the server. Issue #1925 moved the choice
- * itself to the server anyway — `resolveSessionTarget` asks
+ * itself to the server anyway — `resolveInstanceTarget` asks
  * `/resolve-target`, which applies the same precedence every other route now
  * uses, so bare `capture <id> --pane` reads the session the rest of the CLI
  * addresses instead of a locally-guessed one.
@@ -104,32 +108,42 @@ function parseTail(raw: string | undefined): number | undefined {
  * The tail of this function only runs against a server too old to resolve, the
  * one case where the CLI still has to name a default itself.
  *
+ * Issue #2376 widened the return to the resolved INSTANCE as well as the tool:
+ * `--instance` now accepts an alias, and `POST /capture` reads instance ids.
+ * The NAME is deliberately unchanged — the design doc
+ * `docs/design/multi-agent-state-architecture.md` names this function in five
+ * places, and `tests/unit/docs/design-doc-identifier-audit.test.ts` fails when
+ * a name the design doc uses is no longer in the tree.
+ *
  * @param client - API client
  * @param worktreeId - Worktree ID
  * @param agent - Value of `--agent`, already validated
  * @param instance - Value of `--instance`, already validated
- * @returns CLI tool ID to capture
+ * @returns The CLI tool to capture, and the resolved instance id when there is one
  */
 async function resolvePaneCliTool(
   client: ApiClient,
   worktreeId: string,
   agent: string | undefined,
   instance: string | undefined
-): Promise<string> {
-  const target = await resolveSessionTarget(client, worktreeId, {
-    instanceId: instance,
-    requestedCliTool: agent,
-  });
-  if (target.conflict) {
-    console.error(
-      `Warning: ${describeSessionTargetConflict(target.conflict)} `
-      + `Reading ${target.conflict.rosterCliTool}.`
-    );
+): Promise<{ cliToolId: string; instanceId: string | undefined }> {
+  // Issue #2376: through the shared resolver so `--instance "Codex 2"` names
+  // the same session here as it does on `send`, and so an alias two rows answer
+  // to stops with the candidates listed rather than reading one of them.
+  // Called with or WITHOUT a selector, exactly as before: `capture --pane` with
+  // no `--instance` has asked the server since #1925, and skipping the request
+  // when nothing was named would be the CLI resolving for itself again.
+  const target = await resolveInstanceTarget(client, worktreeId, instance, agent, 'read-only');
+
+  if (target.cliToolId) {
+    return { cliToolId: target.cliToolId, instanceId: target.instanceId };
   }
-  if (target.cliToolId) return target.cliToolId;
 
   const worktree = await client.get<WorktreeDetailResponse>(`/api/worktrees/${worktreeId}`);
-  return worktree.cliToolId || DEFAULT_CLI_TOOL_ID;
+  return {
+    cliToolId: worktree.cliToolId || DEFAULT_CLI_TOOL_ID,
+    instanceId: target.instanceId,
+  };
 }
 
 /** Default number of prompts `--prompts` lists (Issue #1685). */
@@ -177,9 +191,16 @@ async function capturePrompts(worktreeId: string, options: CaptureOptions): Prom
   const client = new ApiClient({ token: options.token });
   const limit = parsePromptsLimit(options.limit);
 
+  // Issue #2376: /messages filters by instance ID, so an alias has to be
+  // resolved before it gets there — otherwise `--instance "Codex 2"` silently
+  // matches nothing and the audit trail comes back empty.
+  const target = options.instance
+    ? await resolveInstanceTarget(client, worktreeId, options.instance, options.agent, 'read-only')
+    : null;
+
   const query = new URLSearchParams({ messageType: 'prompt', limit: String(limit) });
   if (options.agent) query.set('cliTool', options.agent);
-  if (options.instance) query.set('instance', options.instance);
+  if (target?.instanceId) query.set('instance', target.instanceId);
 
   const messages = await client.get<PromptMessageResponse[]>(
     `/api/worktrees/${worktreeId}/messages?${query.toString()}`
@@ -270,12 +291,14 @@ async function capturePrompts(worktreeId: string, options: CaptureOptions): Prom
 async function capturePane(worktreeId: string, options: CaptureOptions): Promise<void> {
   const client = new ApiClient({ token: options.token });
   const tail = parseTail(options.tail);
-  const cliToolId = await resolvePaneCliTool(client, worktreeId, options.agent, options.instance);
+  const { cliToolId, instanceId } = await resolvePaneCliTool(
+    client, worktreeId, options.agent, options.instance
+  );
 
   const data = await client.post<PaneCaptureResponse>(`/api/worktrees/${worktreeId}/capture`, {
     cliToolId,
     lines: PANE_CAPTURE_LINES,
-    ...(options.instance ? { instanceId: options.instance } : {}),
+    ...(instanceId ? { instanceId } : {}),
   });
 
   const raw = data.output ?? '';
@@ -287,7 +310,7 @@ async function capturePane(worktreeId: string, options: CaptureOptions): Promise
       JSON.stringify(
         {
           cliToolId,
-          instanceId: options.instance ?? null,
+          instanceId: instanceId ?? null,
           output: text,
           lines: options.raw ? squeezed.rawLines : squeezed.lines,
           rawLines: squeezed.rawLines,
@@ -327,6 +350,47 @@ function parseFollowInterval(raw: string | undefined): number {
 }
 
 /**
+ * Read one instance's pane and return its squeezed tail, or null.
+ *
+ * Exported for `ask` (Issue #2376), which needs the same read for the tools
+ * that keep no transcript — and which must not import
+ * `lib/tmux/transcript-squeeze` itself: Issue #1922's import guard names this
+ * module in its allowlist as baseline debt that "may only shrink", so the
+ * squeeze stays behind the command that already owns it.
+ *
+ * Null on any failure. Both callers treat an unreadable pane as "no reply to
+ * show", never as an error of their own.
+ *
+ * @param client - API client
+ * @param worktreeId - Worktree ID
+ * @param cliToolId - Resolved CLI tool
+ * @param instanceId - Resolved instance ID, when there is one
+ * @param tail - Lines of squeezed transcript to keep
+ */
+export async function readSqueezedPaneTail(
+  client: ApiClient,
+  worktreeId: string,
+  cliToolId: string,
+  instanceId: string | undefined,
+  tail: number,
+): Promise<string | null> {
+  try {
+    const data = await client.post<PaneCaptureResponse>(
+      `/api/worktrees/${worktreeId}/capture`,
+      {
+        cliToolId,
+        lines: PANE_CAPTURE_LINES,
+        ...(instanceId ? { instanceId } : {}),
+      },
+    );
+    const text = squeezeTranscript(data.output ?? '', { tail }).text.trim();
+    return text === '' ? null : text;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * `--pane --follow`: redraw the squeezed transcript on an interval (Issue #2317).
  *
  * ## Why this exists next to `prefix + g`
@@ -360,7 +424,9 @@ async function capturePaneFollow(worktreeId: string, options: CaptureOptions): P
   const client = new ApiClient({ token: options.token });
   const tail = parseTail(options.tail);
   const intervalMs = parseFollowInterval(options.interval);
-  const cliToolId = await resolvePaneCliTool(client, worktreeId, options.agent, options.instance);
+  const { cliToolId, instanceId } = await resolvePaneCliTool(
+    client, worktreeId, options.agent, options.instance
+  );
 
   // Hide the cursor while redrawing, and put it back whatever ends the loop.
   process.stdout.write('\u001b[?25l');
@@ -376,7 +442,7 @@ async function capturePaneFollow(worktreeId: string, options: CaptureOptions): P
         {
           cliToolId,
           lines: PANE_CAPTURE_LINES,
-          ...(options.instance ? { instanceId: options.instance } : {}),
+          ...(instanceId ? { instanceId } : {}),
         }
       );
       const squeezed = squeezeTranscript(data.output ?? '', { tail });
@@ -414,7 +480,7 @@ export function createCaptureCommand(): Command {
     // Issue #1685: audit trail of resolved prompts (question/options/answer/answeredBy)
     .option('--prompts', 'List recent prompts from chat history (including ones Auto-Yes already resolved)')
     .option('--limit <n>', `With --prompts: number of most recent prompts to list (default ${DEFAULT_PROMPTS_LIMIT})`)
-    .option('--instance <id>', INSTANCE_OPTION_DESCRIPTION)
+    .option('--instance <id>', `${INSTANCE_OPTION_DESCRIPTION} ${INSTANCE_ALIAS_HELP_SUFFIX}`)
     .option('--agent <agent>', AGENT_OPTION_DESCRIPTION)
     .option('--token <token>', TOKEN_WARNING)
     .action(async (worktreeId: string, options: CaptureOptions) => {
@@ -430,9 +496,9 @@ export function createCaptureCommand(): Command {
           process.exit(ExitCode.CONFIG_ERROR);
         }
 
-        // Issue #868: Validate instance ID if provided
-        if (options.instance && !isValidInstanceId(options.instance)) {
-          console.error('Error: Invalid --instance. Must be an alphanumeric/underscore/hyphen identifier (max 64 chars).');
+        // Issue #868 / #2376: an instance id or a roster alias.
+        if (options.instance && !isInstanceSelector(options.instance)) {
+          console.error(INSTANCE_SELECTOR_ERROR);
           process.exit(ExitCode.CONFIG_ERROR);
         }
 
@@ -493,17 +559,19 @@ export function createCaptureCommand(): Command {
         // alone captured the wrong (claude-named) session. Resolve the tool the
         // instance is registered under before asking. Issue #1925: 'read-only',
         // because capture looks rather than acts — see resolvePaneCliTool.
-        const agent = options.instance
-          ? await resolveInstanceCliTool(client, worktreeId, options.instance, options.agent, 'read-only')
-          : options.agent;
+        const target = options.instance
+          ? await resolveInstanceTarget(client, worktreeId, options.instance, options.agent, 'read-only')
+          : null;
+        const agent = target ? target.cliToolId : options.agent;
 
-        // Build path with optional cliTool/instance query parameters
+        // Build path with optional cliTool/instance query parameters. Issue
+        // #2376: the RESOLVED instance id — /current-output cannot read an alias.
         const query = new URLSearchParams();
         if (agent) {
           query.set('cliTool', agent);
         }
-        if (options.instance) {
-          query.set('instance', options.instance);
+        if (target?.instanceId) {
+          query.set('instance', target.instanceId);
         }
         const qs = query.toString();
         const path = `/api/worktrees/${worktreeId}/current-output${qs ? `?${qs}` : ''}`;

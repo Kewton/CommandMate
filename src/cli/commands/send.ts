@@ -7,14 +7,19 @@ import { Command } from 'commander';
 import { ExitCode } from '../types';
 import type { SendOptions } from '../types';
 import type { ChatMessage, TaskCreateResponse } from '../types/api-responses';
-import { ApiClient, ApiError, assertResponseShape, isValidWorktreeId, isValidInstanceId, MAX_STOP_PATTERN_LENGTH } from '../utils/api-client';
+import { ApiClient, ApiError, assertResponseShape, isValidWorktreeId, MAX_STOP_PATTERN_LENGTH } from '../utils/api-client';
 import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
 import { parseDurationToMs, ALLOWED_DURATIONS } from '../config/duration-constants';
 import { isCliToolId, CLI_TOOL_IDS } from '../config/cli-tool-ids';
 import { AGENT_OPTION_DESCRIPTION, INSTANCE_OPTION_DESCRIPTION } from '../config/agent-target-options';
 import { validateCopilotModelName, validateAntigravityModelName } from '../config/model-validation';
 import { fetchAgentInstances, saveAgentInstances, defaultAlias, MAX_AGENT_INSTANCES } from '../utils/agent-instances';
-import { resolveInstanceCliTool } from './instances';
+import {
+  isInstanceSelector,
+  INSTANCE_ALIAS_HELP_SUFFIX,
+  INSTANCE_SELECTOR_ERROR,
+  resolveInstanceTarget,
+} from './instances';
 
 /** Auto-yes duration used when --duration is omitted. */
 const DEFAULT_AUTO_YES_DURATION = '1h';
@@ -72,7 +77,8 @@ async function enableAutoYes(
   worktreeId: string,
   options: SendOptions,
   durationMs: number,
-  agent: string | undefined
+  agent: string | undefined,
+  instanceId: string | undefined
 ): Promise<void> {
   const autoYesBody: Record<string, unknown> = {
     enabled: true,
@@ -84,8 +90,8 @@ async function enableAutoYes(
   // Issue #896: per-instance auto-yes. When --instance is given, the poller keys
   // on worktreeId:cliToolId:instanceId so the targeted instance is auto-answered
   // independently of other instances of the same agent.
-  if (options.instance) {
-    autoYesBody.instanceId = options.instance;
+  if (instanceId) {
+    autoYesBody.instanceId = instanceId;
   }
   if (options.stopPattern) {
     autoYesBody.stopPattern = options.stopPattern;
@@ -132,14 +138,15 @@ async function createContractTask(
   client: ApiClient,
   worktreeId: string,
   options: SendOptions,
-  agent: string | undefined
+  agent: string | undefined,
+  instanceId: string | undefined
 ): Promise<{ taskId: string; message: string }> {
   const body: Record<string, unknown> = { contractPath: options.contract };
   if (agent) {
     body.cliToolId = agent;
   }
-  if (options.instance) {
-    body.instanceId = options.instance;
+  if (instanceId) {
+    body.instanceId = instanceId;
   }
 
   try {
@@ -190,7 +197,7 @@ export function createSendCommand(): Command {
     .description('Send a message to a worktree agent')
     .argument('<worktree-id>', 'Worktree ID')
     .argument('[message]', 'Message to send (omit when using --contract)')
-    .option('--instance <id>', INSTANCE_OPTION_DESCRIPTION)
+    .option('--instance <id>', `${INSTANCE_OPTION_DESCRIPTION} ${INSTANCE_ALIAS_HELP_SUFFIX}`)
     .option('--agent <agent>', AGENT_OPTION_DESCRIPTION)
     .option('--register', 'Register the --instance session into the agent-instance roster (needs --agent unless the instance id is itself a CLI tool id)')
     .option('--model <model>', 'Specify AI model for Copilot or Antigravity agent')
@@ -225,9 +232,10 @@ export function createSendCommand(): Command {
           process.exit(ExitCode.CONFIG_ERROR);
         }
 
-        // Issue #868: Validate instance ID if provided
-        if (options.instance && !isValidInstanceId(options.instance)) {
-          console.error('Error: Invalid --instance. Must be an alphanumeric/underscore/hyphen identifier (max 64 chars).');
+        // Issue #868 / #2376: Validate the instance SELECTOR if provided. An id
+        // or an alias — which of the two it is, only the roster knows.
+        if (options.instance && !isInstanceSelector(options.instance)) {
+          console.error(INSTANCE_SELECTOR_ERROR);
           process.exit(ExitCode.CONFIG_ERROR);
         }
 
@@ -265,9 +273,14 @@ export function createSendCommand(): Command {
         // the roster is the only place that pairs the two. Resolve it once, up
         // front, so the task row, the send and auto-yes all name the same tool
         // as the session that actually starts.
-        const agent = options.instance
-          ? await resolveInstanceCliTool(client, worktreeId, options.instance, options.agent)
-          : options.agent;
+        const target = options.instance
+          ? await resolveInstanceTarget(client, worktreeId, options.instance, options.agent)
+          : null;
+        const agent = target ? target.cliToolId : options.agent;
+        // Issue #2376: the RESOLVED id, never the string the user typed.
+        // `--instance "Codex 2"` has to reach /send as `codex-2`; no route but
+        // /resolve-target knows how to read an alias.
+        const instanceId = target?.instanceId;
 
         // Issue #576/#588/#989: Validate --model option via shared validator (DR1-003).
         // Issue #1925: judged against the RESOLVED agent, not against --agent.
@@ -299,7 +312,7 @@ export function createSendCommand(): Command {
         let taskId: string | undefined;
         let content = message;
         if (options.contract) {
-          const task = await createContractTask(client, worktreeId, options, agent);
+          const task = await createContractTask(client, worktreeId, options, agent, instanceId);
           taskId = task.taskId;
           content = task.message;
           console.error(`Task created: ${taskId}`);
@@ -308,7 +321,7 @@ export function createSendCommand(): Command {
 
         // --auto-yes: enable auto-yes first (unless --model is specified, then after send) [DR2-02]
         if (options.autoYes && !options.model) {
-          await enableAutoYes(client, worktreeId, options, autoYesDurationMs, agent);
+          await enableAutoYes(client, worktreeId, options, autoYesDurationMs, agent, instanceId);
         }
 
         // [DR2-05] Send API uses "content" not "message"
@@ -317,8 +330,8 @@ export function createSendCommand(): Command {
           sendBody.cliToolId = agent;
         }
         // Issue #868: Include instance ID in send body
-        if (options.instance) {
-          sendBody.instanceId = options.instance;
+        if (instanceId) {
+          sendBody.instanceId = instanceId;
         }
         // Issue #576: Include model in send body
         if (options.model) {
@@ -361,14 +374,14 @@ export function createSendCommand(): Command {
 
         // Issue #1000: register the ad-hoc instance into the roster after the
         // session has started, so a follow-up `commandmate instances` lists it.
-        if (options.register && options.instance) {
-          await registerInstance(client, worktreeId, options.instance, options.agent ?? options.instance);
+        if (options.register && instanceId) {
+          await registerInstance(client, worktreeId, instanceId, options.agent ?? instanceId);
         }
 
         // Issue #576: Enable auto-yes AFTER send when --model is specified
         // This avoids auto-yes interfering with the /model command interaction
         if (options.autoYes && options.model) {
-          await enableAutoYes(client, worktreeId, options, autoYesDurationMs, agent);
+          await enableAutoYes(client, worktreeId, options, autoYesDurationMs, agent, instanceId);
         }
       } catch (error) {
         handleCommandError(error);

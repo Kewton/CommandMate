@@ -386,10 +386,18 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
   Per-instance auto-yes: --instance scopes --auto-yes/--duration/--stop-pattern
   to that specific session, independent of other instances of the same agent.
 
+  --instance also accepts the ALIAS shown in the ALIAS column of
+  'commandmate instances <id>' and in the browser UI's Agent panel
+  (Issue #2376), e.g. --instance "Codex 2". An alias two roster rows answer to
+  is refused with exit 2 and both candidates listed; ids always win over aliases.
+
   commandmate instances <id>                        # discover valid --instance values
   commandmate send <id> "task" --instance codex-2 --auto-yes
   commandmate wait <id> --instance codex-2 --timeout 600
   commandmate capture <id> --instance codex-2
+
+  Asking ANOTHER session something and getting its reply is one command, not
+  three: see 'commandmate docs --section delegation'.
 
 ## All Exit Codes
 
@@ -554,4 +562,85 @@ Copy and adapt these patterns for your use case.
 
   # Re-run a subset after a fix, without waiting on the agent
   commandmate verify "$WT" --gates lint,unit
+`;
+
+/**
+ * Delegation between agent sessions (Issue #2376).
+ *
+ * Read by `commandmate docs --section delegation`. Kept as its own section
+ * rather than a paragraph inside AGENT_OPERATIONS_GUIDE because it is written
+ * for a different reader: the guide tells an operator how the commands work,
+ * this tells an AGENT how to hand work to another agent — and the two rules
+ * that matter most here (report a prompt, never answer it; never touch the
+ * other session's Auto-Yes) are rules about restraint that would be lost in a
+ * reference listing.
+ *
+ * Deliberately the same flow the GUI's "insert delegation brief" menu item
+ * writes into a composer (`buildDelegationBrief` in
+ * `src/lib/cli/command-reference.ts`): the agent that reads this and the agent
+ * that is handed that paragraph must not be following two different protocols.
+ */
+export const AGENT_DELEGATION_GUIDE = `# Delegating to Another Agent Session
+
+You are one agent session. Other sessions of other agents are running in the
+same CommandMate server, and you can hand work to them.
+
+## 1. Find out who you are
+
+  commandmate whoami                  # worktree / instance / tool / alias
+  commandmate whoami --json
+
+  Exit 3 means this shell was not started by CommandMate, so there is no
+  session identity to report. Use 'commandmate ls' from outside a session.
+
+## 2. Find out who you can ask
+
+  commandmate peers                   # sessions in THIS repository, '(you)' marked
+  commandmate peers --json
+
+  Every row but your own carries a ready-to-run 'ask' line. Paste it and edit
+  the message; do not assemble the ids by hand.
+
+## 3. Ask
+
+  commandmate ask <worktree-id> "<request>" --instance <id> --timeout 1800
+
+  One command for the whole round trip: it sends, waits for the turn to end,
+  and prints the reply on stdout. --instance takes an instance id or a roster
+  alias (e.g. "Codex 2").
+
+  Exit codes are wait's, unchanged:
+
+    0    the turn ended; stdout is the reply body
+    10   they are waiting on a confirmation. stdout carries the prompt JSON
+    21   nothing was running to ask
+    124  timed out
+
+  --json adds the target and a 'source' field saying whether the reply came
+  from the chat transcript ("history") or from the pane ("pane"). copilot,
+  gemini and vibe-local keep no transcript, so their replies are pane reads.
+
+## 4. Watch, do not interfere
+
+  commandmate capture <worktree-id> --instance <id> --pane --tail 60
+
+## The three rules
+
+  1. A prompt is REPORTED, not answered. On exit 10, print the prompt JSON to
+     your own operator and stop. 'respond' hands its argument to the pane as
+     keystrokes and does not resolve it semantically (Issue #1681), so
+     answering another session's dialog on its behalf picks whatever option
+     happened to be highlighted.
+
+  2. Never enable Auto-Yes on a session that is not yours. 'ask' has no
+     --auto-yes for this reason: whether a session may auto-answer its own
+     dialogs is a decision about that session's guard rails.
+
+  3. Summarise the reply for your operator. The other session answered YOUR
+     question; pasting its whole transcript back is not a report.
+
+## What this does not do
+
+  The reply is not delivered back automatically — you collect it, because you
+  are the one waiting on it. Nothing here starts a background job.
 `;

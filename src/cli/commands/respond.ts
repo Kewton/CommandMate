@@ -13,11 +13,16 @@ import type {
   PromptResponseResult,
   StructuredDecisionResult,
 } from '../types/api-responses';
-import { ApiClient, ApiError, isValidWorktreeId, isValidInstanceId } from '../utils/api-client';
+import { ApiClient, ApiError, isValidWorktreeId } from '../utils/api-client';
 import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
 import { isCliToolId } from '../config/cli-tool-ids';
 import { AGENT_OPTION_DESCRIPTION, INSTANCE_OPTION_DESCRIPTION } from '../config/agent-target-options';
-import { resolveInstanceCliTool } from './instances';
+import {
+  isInstanceSelector,
+  INSTANCE_ALIAS_HELP_SUFFIX,
+  INSTANCE_SELECTOR_ERROR,
+  resolveInstanceTarget,
+} from './instances';
 
 /**
  * Whether this instance's agent can be answered by naming a decision
@@ -162,7 +167,7 @@ export function createRespondCommand(): Command {
     .argument('<worktree-id>', 'Worktree ID')
     .argument('[answer]', 'Response answer (yes, no, number, or free text)')
     .option('--default', "Select the prompt's default option (mutually exclusive with <answer>)")
-    .option('--instance <id>', INSTANCE_OPTION_DESCRIPTION)
+    .option('--instance <id>', `${INSTANCE_OPTION_DESCRIPTION} ${INSTANCE_ALIAS_HELP_SUFFIX}`)
     .option('--agent <agent>', AGENT_OPTION_DESCRIPTION)
     .option('--token <token>', TOKEN_WARNING)
     .action(async (worktreeId: string, answer: string | undefined, options: RespondOptions) => {
@@ -179,9 +184,9 @@ export function createRespondCommand(): Command {
           process.exit(ExitCode.CONFIG_ERROR);
         }
 
-        // Issue #868: Validate instance ID if provided
-        if (options.instance && !isValidInstanceId(options.instance)) {
-          console.error('Error: Invalid --instance. Must be an alphanumeric/underscore/hyphen identifier (max 64 chars).');
+        // Issue #868 / #2376: an instance id or a roster alias.
+        if (options.instance && !isInstanceSelector(options.instance)) {
+          console.error(INSTANCE_SELECTOR_ERROR);
           process.exit(ExitCode.CONFIG_ERROR);
         }
 
@@ -202,9 +207,12 @@ export function createRespondCommand(): Command {
         // and falls back to the worktree default, so `--instance codex` alone
         // answered into a session that was never started. Resolve the tool the
         // instance is registered under first.
-        const agent = options.instance
-          ? await resolveInstanceCliTool(client, worktreeId, options.instance, options.agent)
-          : options.agent;
+        const target = options.instance
+          ? await resolveInstanceTarget(client, worktreeId, options.instance, options.agent)
+          : null;
+        const agent = target ? target.cliToolId : options.agent;
+        // Issue #2376: the resolved id. /prompt-response reads instance ids.
+        const instanceId = target?.instanceId;
 
         // [DR2-06] Use prompt-response API with cliTool (not cliToolId)
         const body: Record<string, unknown> = useDefault ? { useDefault: true } : { answer };
@@ -212,8 +220,8 @@ export function createRespondCommand(): Command {
           body.cliTool = agent;
         }
         // Issue #868: target a specific agent instance
-        if (options.instance) {
-          body.instanceId = options.instance;
+        if (instanceId) {
+          body.instanceId = instanceId;
         }
 
         // Issue #2040: for an agent that publishes per-decision ids (opencode
@@ -229,7 +237,7 @@ export function createRespondCommand(): Command {
         // as many words) — while Enter at a `keys` dialog is a real answer that
         // this command has always been able to give.
         const structured =
-          !useDefault && (await addressesDecisionsById(client, worktreeId, agent, options.instance));
+          !useDefault && (await addressesDecisionsById(client, worktreeId, agent, instanceId));
 
         let result: PromptResponseResult | StructuredDecisionResult | null = null;
         if (structured) {
