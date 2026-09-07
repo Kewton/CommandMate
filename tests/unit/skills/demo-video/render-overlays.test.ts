@@ -14,6 +14,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import {
+  TELOP_TOP_CLASS_NAME,
   TEXT_SELECTOR,
   overlayJobs,
   overlayKind,
@@ -225,10 +226,51 @@ describe('code overlays', () => {
             durationSec: 1,
             endSec: 1,
             telop: 'a',
+            telopPosition: 'bottom',
           },
         ],
         { storyboardPath: file, outDir: '/tmp/overlays', locale: 'ja', frame: FRAME },
       ),
     ).toThrow(/no sourcePath in the plan/);
+  });
+});
+
+/**
+ * `telop.position` (Issue #2381): the band at the top of the frame, for a scene
+ * whose payoff is where the default band would land. Baked into the PNG — the
+ * overlay is full-frame and compose.sh composites it at 0:0 — so this is a
+ * template rule plus a job field, and nothing downstream learns a coordinate.
+ */
+describe('telop position', () => {
+  const file = path.resolve(__dirname, '../../../../.claude/skills/demo-video/storyboard/readme-hero.yaml');
+  const board = parseStoryboard(fs.readFileSync(file, 'utf8'), undefined, path.dirname(file)).storyboard!;
+  const jobs = overlayJobs(buildPlan(board, 'en'), {
+    storyboardPath: file,
+    outDir: '/tmp/overlays',
+    locale: 'en',
+    frame: FRAME,
+  });
+
+  it('carries the position onto telop jobs, and onto nothing else', () => {
+    const positions = Object.fromEntries(jobs.map((job) => [job.sceneId, job.position]));
+    expect(positions).toEqual({
+      title: undefined,
+      'repo-tab-switch': 'bottom',
+      'agent-tabs': 'bottom',
+      'delegate-ask': 'top',
+      'reply-file-link': 'bottom',
+      'mobile-approve': 'top',
+      'mobile-file-link': 'bottom',
+      outro: undefined,
+    });
+  });
+
+  it('is laid out by the template under one body class', () => {
+    const html = fs.readFileSync(templatePath('telop'), 'utf8');
+    expect(TELOP_TOP_CLASS_NAME).toBe('telop-top');
+    expect(html).toMatch(new RegExp(`body\\.${TELOP_TOP_CLASS_NAME}\\s*\\{[^}]*align-items:\\s*flex-start`));
+    expect(html).toMatch(new RegExp(`body\\.${TELOP_TOP_CLASS_NAME} #telop-band\\s*\\{[^}]*margin-top:`));
+    // Not vacuous: the default layout is the bottom one.
+    expect(html).toMatch(/body\s*\{[^}]*align-items:\s*flex-end/);
   });
 });

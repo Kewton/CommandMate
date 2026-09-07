@@ -276,6 +276,8 @@ interface WorktreeSummary {
   id: string;
   /** Absolute directory the id was minted from (`deriveWorktreeId`). */
   path?: string;
+  /** Checked-out branch, which is what a sidebar/popover row is labelled with. */
+  branch?: string;
   isSessionRunning?: boolean;
   isProcessing?: boolean;
   isWaitingForResponse?: boolean;
@@ -463,10 +465,28 @@ interface SceneCommon {
    * prompt sheet the scene exists to show never made the cut.
    */
   prepare?: (ctx: PrepareContext) => Promise<void>;
+  /**
+   * Assert, off camera, what the take claimed (#2381). Runs after the
+   * recording context has closed, so a server-side confirmation that can take
+   * a capture-cache TTL to arrive — the prompt really released by the answer
+   * the phone gave — is checked without being filmed as seconds of a page
+   * doing nothing. compose.sh keeps the tail of a take, so a wait inside
+   * `run` after the payoff would be exactly what ends up in the cut.
+   */
+  after?: (ctx: PrepareContext) => Promise<void>;
 }
 
 export interface BrowserScene extends SceneCommon {
   kind?: 'browser';
+  /**
+   * localStorage entries to plant before the page's first script runs
+   * (#2381): the sidebar collapsed, the Agent pane open, the tool-call chips
+   * unfolded. Every scene films in a fresh browser context, so a preference
+   * one scene clicked into place is gone by the next; seeding it is the only
+   * way a cut can open on the layout it means to show. Keys are the product's
+   * own (`record-scenes.test.ts` pins them against the source).
+   */
+  seedStorage?: (options: RecordOptions, state: DemoState) => Record<string, string>;
   run: (ctx: SceneContext) => Promise<void>;
 }
 
@@ -682,6 +702,109 @@ export const TERMINAL_CAPTURE_INTERVAL_MS = 250;
  * bounded at 180s each, the gates they start, and the hold on the last frame.
  */
 export const TERMINAL_TAKE_TIMEOUT_MS = 480_000;
+
+// ----------------------------------------------------- hero cut (#2381) ------
+
+/**
+ * localStorage keys the README hero scenes seed, spelled as the product spells
+ * them. Not imported from `src/`: this script is run with `npx tsx` from a
+ * checkout and reaches for nothing but Playwright, so the test pins these
+ * against `SIDEBAR_OPEN_STORAGE_KEY`, `getActivityBarStorageKey`,
+ * `ACTIVITY_CLOSED_SENTINEL` and `CHAT_TOOL_ACTIVITY_STORAGE_KEY` instead.
+ */
+export const SIDEBAR_OPEN_STORAGE_KEY = 'mcbd-sidebar-open';
+export const ACTIVITY_BAR_STORAGE_KEY_PREFIX = 'commandmate.worktree.activeActivity-';
+export const ACTIVITY_CLOSED_SENTINEL = '__closed__';
+export const CHAT_TOOL_ACTIVITY_STORAGE_KEY = 'commandmate:chatShowToolActivity';
+export const SURFACE_MODE_STORAGE_KEY_PREFIX = 'commandmate.worktree.surfaceMode-';
+
+/** `?view=chat`: the deep link that opens a split's output surface as chat. */
+export const CHAT_VIEW_QUERY = 'view=chat';
+
+/**
+ * The first split's and the phone's persisted surface mode for `worktreeId`
+ * (`getSplitSurfaceModeStorageKey` / `getMobileSurfaceModeStorageKey`), set to
+ * chat. `?view=chat` covers a page the take navigates to itself; this covers
+ * the page the app navigates to — the branch picked in the tab strip opens
+ * `/worktrees/<id>` with no query, and would open on the terminal.
+ */
+function chatSurfaceStorage(worktreeId: string): Record<string, string> {
+  return {
+    [`${SURFACE_MODE_STORAGE_KEY_PREFIX}${worktreeId}-split-0`]: 'chat',
+    [`${SURFACE_MODE_STORAGE_KEY_PREFIX}${worktreeId}-mobile`]: 'chat',
+  };
+}
+
+/**
+ * What the `delegate-ask` take types before it inserts the brief: the ask
+ * itself, on one line. The brief the Agent pane appends underneath is the
+ * product's own text (`buildDelegationBrief`), and the request the claude
+ * cassette really sends codex is spelled in the cassette's `@exec` row — this
+ * line is the operator's instruction as the chat shows it.
+ */
+export const DELEGATE_ASK_MESSAGE = 'Ask Codex to review the dark mode toggle in the header.';
+
+/**
+ * What `mobile-approve` sends to reach the hero cassette's approval pass. One
+ * line, deliberately: the transcript template for that pass writes `{{TASK}}`
+ * (the first line of the pass's first submission), because by the time the
+ * turn closes the LAST submission is the answer the phone gave.
+ */
+export const MOBILE_APPROVE_MESSAGE = 'Run the unit tests and tell me if the header is ready to merge.';
+
+/**
+ * Sidebar collapsed, so the repository tab strip is on screen (it is the
+ * collapsed sidebar's navigation, shown by default only while collapsed —
+ * `shouldShowRepositoryTabBar`).
+ */
+function heroPcStorage(options: RecordOptions, activity: string | null): Record<string, string> {
+  return {
+    ...chatSurfaceStorage(options.worktreeId),
+    [SIDEBAR_OPEN_STORAGE_KEY]: 'false',
+    [`${ACTIVITY_BAR_STORAGE_KEY_PREFIX}${options.worktreeId}`]: activity ?? ACTIVITY_CLOSED_SENTINEL,
+    // The tool-call chip opens by default, so the `commandmate ask … --instance
+    // codex` row is on screen the moment the reply lands, without a click.
+    [CHAT_TOOL_ACTIVITY_STORAGE_KEY]: 'true',
+  };
+}
+
+/** The worktree registered from `path`, once the server has scanned it. */
+function worktreeAtPath(entries: readonly WorktreeSummary[], target: string): WorktreeSummary | undefined {
+  return entries.find((entry) => entry.path === target);
+}
+
+/** The most recent reply's file link, on either surface. */
+function lastFileLink(page: Page): Locator {
+  return page.getByTestId('chat-file-link').last();
+}
+
+/**
+ * Close the "Queued (session busy)" toast the PC composer raises on every send
+ * to a live session, the way a user would.
+ *
+ * Measured on develop at 8f41c074 (2026-09-07): `TerminalSplitPaneContent`
+ * hands `MessageInput` `isProcessing={terminal.isRunning}`, and since #2238
+ * `isRunning` means "a tmux session exists", not "the agent is generating" —
+ * so the warning fires for a session that is `ready`, as the header pill
+ * says beside it. That is a product defect outside this skill's reach, and a
+ * README that shows a false warning would be worse than one that shows a
+ * toast being closed. It is closed through its own control, never hidden.
+ */
+async function dismissQueuedBusyToast(page: Page): Promise<void> {
+  // The warning one specifically: the "brief inserted" success toast beside
+  // it is the feature announcing itself and stays.
+  const close = page
+    .getByTestId('toast-container')
+    .getByRole('alert')
+    .filter({ has: page.getByTestId('toast-icon-warning') })
+    .getByTestId('toast-close-button');
+  try {
+    await close.waitFor({ state: 'visible', timeout: 1500 });
+    await close.click();
+  } catch {
+    /* no toast: nothing to close */
+  }
+}
 
 export const SCENES: Scene[] = [
   {
@@ -1261,7 +1384,376 @@ export const SCENES: Scene[] = [
       });
     },
   },
+  // ---------------------------------------------------- README hero (#2381) --
+  {
+    id: 'repo-tab-switch',
+    title: 'Switch repository and branch from the header tab strip',
+    viewport: 'pc',
+    // The take starts in the second repository, whose worktree id is the seed
+    // directory's basename (`deriveWorktreeId`); its page gets the same layout
+    // as the one the switch lands on, or the activity pane would close mid-cut.
+    seedStorage: (options, state) => {
+      const docsId = path.basename(state.CM_DEMO_SEED_REPO_2 ?? '');
+      return {
+        ...heroPcStorage(options, null),
+        ...(docsId
+          ? {
+              ...chatSurfaceStorage(docsId),
+              [`${ACTIVITY_BAR_STORAGE_KEY_PREFIX}${docsId}`]: ACTIVITY_CLOSED_SENTINEL,
+            }
+          : {}),
+      };
+    },
+    // The strip needs two repositories to switch between. The second seed
+    // (`cmdemo-docs`) is registered here by the same route the add-repository
+    // scene drives on camera — a path scan, never a clone — so a cut that
+    // places this scene and not that one still has two tabs.
+    prepare: async ({ baseUrl, options, state }) => {
+      const target = secondSeedRepository(state);
+      const paths = readRepositoryPaths(await defaultWaitDeps.fetchJson(`${baseUrl}/api/repositories`));
+      if (!paths.includes(target)) {
+        await postJson(`${baseUrl}/api/repositories/scan`, { repositoryPath: target });
+      }
+      await waitForJson(
+        `${baseUrl}/api/worktrees`,
+        readWorktreeEntries,
+        (entries) => {
+          assertIdForPath(entries, options.worktreeId, options.worktreePath);
+          const live = entries.find((entry) => entry.id === options.worktreeId);
+          return live?.isSessionRunning === true && worktreeAtPath(entries, target) !== undefined;
+        },
+        `${path.basename(target)} to be registered and ${options.worktreeId} to show a live session`,
+        options.timeoutMs,
+      );
+    },
+    run: async ({ page, baseUrl, options, state }) => {
+      const entries = readWorktreeEntries(await defaultWaitDeps.fetchJson(`${baseUrl}/api/worktrees`));
+      const docs = worktreeAtPath(entries, secondSeedRepository(state));
+      const live = entries.find((entry) => entry.id === options.worktreeId);
+      if (!docs || !live?.branch) {
+        throw new Error('the second repository or the live worktree left /api/worktrees between prepare and run');
+      }
+      // Start in the OTHER repository, so the switch has somewhere to go.
+      await gotoLocalized(page, `${baseUrl}/worktrees/${docs.id}?${CHAT_VIEW_QUERY}`, options.locale);
+      const strip = page.getByTestId('repository-tab-strip');
+      await strip.waitFor({ state: 'visible', timeout: options.timeoutMs });
+      const tab = strip.locator(
+        `[data-testid="repository-tab"][data-repository="${path.basename(state.CM_DEMO_SEED_REPO ?? '')}"]`,
+      );
+      await tab.waitFor({ state: 'visible', timeout: options.timeoutMs });
+      await page.waitForTimeout(600);
+
+      const popover = page.getByTestId('repository-tab-popover');
+      await clickUntilEffective(tab, () => popover.isVisible(), 'the repository tab', options.timeoutMs);
+      // The rows carry the sidebar's status dots; hold so they can be read.
+      // Long on purpose: compose.sh keeps the tail, and the landing below —
+      // a navigation and a transcript fetch — is what pushes the popover out
+      // of the slot when it runs slow.
+      const row = popover.getByTestId('branch-list-item').filter({ hasText: live.branch });
+      await row.first().waitFor({ state: 'visible', timeout: options.timeoutMs });
+      await page.waitForTimeout(2200);
+
+      await row.first().click();
+      // The popover closes under the pointer, which is then resting on
+      // whatever was drawn underneath — the split toolbar's remove button,
+      // with its tooltip — for the whole route transition. Park the pointer
+      // over the transcript at once.
+      await page.mouse.move(Math.round(options.viewport.width * 0.6), Math.round(options.viewport.height * 0.55));
+      await page.waitForURL(`**/worktrees/${options.worktreeId}**`, { timeout: options.timeoutMs });
+      // The header naming the branch is the landing; the transcript behind it
+      // may still be loading, and waiting that out pushed the popover out of
+      // the slot (measured: 3-4 s in a fresh context). The transition itself
+      // is about 2 s on the dev server, which is why the slot is 5 s.
+      // By `title`: the visible text is truncated to DESKTOP_BRANCH_MAX_LENGTH.
+      await page
+        .locator(`[data-testid="desktop-branch-name"][title="${live.branch}"]`)
+        .waitFor({ state: 'visible', timeout: options.timeoutMs });
+      await page.waitForTimeout(800);
+    },
+  },
+  {
+    id: 'agent-tabs',
+    title: 'Five agents in one worktree: the roster and the split\'s instance picker',
+    viewport: 'pc',
+    seedStorage: (options) => heroPcStorage(options, 'agent'),
+    prepare: ({ baseUrl, options }) =>
+      waitForWorktree(
+        baseUrl,
+        { id: options.worktreeId, path: options.worktreePath },
+        (worktree) => worktree.isSessionRunning === true,
+        'showing a live agent session',
+        options.timeoutMs,
+      ).then(() => undefined),
+    run: async ({ page, baseUrl, options, state }) => {
+      await gotoLocalized(page, `${baseUrl}/worktrees/${options.worktreeId}?${CHAT_VIEW_QUERY}`, options.locale);
+      await page.getByTestId('chat-surface').waitFor({ state: 'visible', timeout: options.timeoutMs });
+      // Every agent env-up.sh seeded has a roster row — asserted, so a roster
+      // that came back short (the client default is three) fails the take
+      // rather than filming "three agents".
+      const agents = (state.CM_DEMO_AGENTS ?? '').split(',').filter((id) => id !== '');
+      if (agents.length === 0) throw new Error('state.env has no CM_DEMO_AGENTS — re-run env-up.sh');
+      for (const agent of agents) {
+        await page.getByTestId(`agent-instance-cli-${agent}`).waitFor({ state: 'visible', timeout: options.timeoutMs });
+        await page.getByTestId(`desktop-agent-status-${agent}`).waitFor({ state: 'visible', timeout: options.timeoutMs });
+      }
+      await page.waitForTimeout(800);
+      // The split's own instance picker lists the five by name, unabridged —
+      // the header row folds idle agents into dots and the roster's alias
+      // inputs truncate at the pane's width.
+      const picker = page.getByTestId('cli-selector-0');
+      await picker.click();
+      const menu = page.getByRole('menu');
+      await menu.waitFor({ state: 'visible', timeout: options.timeoutMs });
+      // The list of five is the payoff, and the tail is what compose.sh
+      // keeps, so the take ends on it open; the next scene opens its own page.
+      await page.waitForTimeout(2600);
+    },
+  },
+  {
+    id: 'delegate-ask',
+    title: 'Delegate to the next session: brief in, commandmate ask out, reply back',
+    viewport: 'pc',
+    seedStorage: (options) => heroPcStorage(options, 'agent'),
+    // The first send of the cut: the hero cassette's delegation pass. Idle is
+    // required, not merely live — a pane already mid-pass would consume this
+    // send as its approval answer.
+    prepare: ({ baseUrl, options }) =>
+      waitForWorktree(
+        baseUrl,
+        { id: options.worktreeId, path: options.worktreePath },
+        (worktree) =>
+          worktree.isSessionRunning === true &&
+          worktree.isProcessing !== true &&
+          worktree.isWaitingForResponse !== true,
+        'idle with a live agent session',
+        options.timeoutMs,
+      ).then(() => undefined),
+    run: async ({ page, baseUrl, options }) => {
+      await gotoLocalized(page, `${baseUrl}/worktrees/${options.worktreeId}?${CHAT_VIEW_QUERY}`, options.locale);
+      const composer = page.getByTestId('message-input-textarea');
+      await composer.waitFor({ state: 'visible', timeout: options.timeoutMs });
+      await composer.click();
+      // The ask first, then the brief underneath it: `insertIntoVisibleComposer`
+      // appends after a blank line, and Enter would send, so the two are
+      // never joined by a typed newline.
+      await composer.pressSequentially(DELEGATE_ASK_MESSAGE, { delay: 9 });
+
+      await page.getByTestId('agent-instance-menu-codex').click();
+      const insert = page.getByTestId('agent-instance-delegate-codex');
+      await insert.waitFor({ state: 'visible', timeout: options.timeoutMs });
+      await insert.click();
+      // The brief is the product's own text; wait for the line that names the
+      // command rather than for a fixed time.
+      await page.waitForFunction(
+        () =>
+          (document.querySelector('[data-testid="message-input-textarea"]') as HTMLTextAreaElement | null)
+            ?.value.includes('--instance codex') ?? false,
+        undefined,
+        { timeout: options.timeoutMs },
+      );
+      await page.waitForTimeout(500);
+      await page.getByTestId('send-message-button').click();
+      await dismissQueuedBusyToast(page);
+
+      // Server-side truth, in order: the claude pane starts, codex is asked,
+      // and the reply — with its tool-call chip — lands in the transcript.
+      const target = { id: options.worktreeId, path: options.worktreePath };
+      await waitForWorktree(baseUrl, target, (w) => w.isProcessing === true, 'generating', options.timeoutMs);
+      await lastFileLink(page).waitFor({ state: 'visible', timeout: options.timeoutMs });
+      await page.getByTestId('chat-tool-log-body').last().waitFor({ state: 'visible', timeout: options.timeoutMs });
+      // Short on purpose: the tail compose.sh keeps starts before the reply
+      // landed, so the codex pill going `Running` is in the cut as well.
+      await page.waitForTimeout(1200);
+    },
+  },
+  {
+    id: 'reply-file-link',
+    title: 'Open the file a reply links to, beside the chat',
+    viewport: 'pc',
+    seedStorage: (options) => heroPcStorage(options, null),
+    // The delegation reply has to be on record: the claude pane back to idle
+    // after its pass means the transcript was read and the row written.
+    prepare: ({ baseUrl, options }) =>
+      waitForWorktree(
+        baseUrl,
+        { id: options.worktreeId, path: options.worktreePath },
+        (worktree) => worktree.isSessionRunning === true && worktree.isProcessing !== true,
+        'idle after the delegation',
+        options.timeoutMs,
+      ).then(() => undefined),
+    run: async ({ page, baseUrl, options }) => {
+      await gotoLocalized(page, `${baseUrl}/worktrees/${options.worktreeId}?${CHAT_VIEW_QUERY}`, options.locale);
+      await page.getByTestId('chat-surface').waitFor({ state: 'visible', timeout: options.timeoutMs });
+      // The reply of the session that was ASKED, from its own tab.
+      await clickUntilEffective(
+        page.getByTestId('desktop-agent-status-codex'),
+        async () => (await page.getByTestId('desktop-agent-status-codex').getAttribute('aria-pressed')) === 'true',
+        'the Codex instance tab',
+        options.timeoutMs,
+      );
+      const link = page.getByTestId('chat-file-link').first();
+      await link.waitFor({ state: 'visible', timeout: options.timeoutMs });
+      await page.waitForTimeout(1500);
+      await link.click();
+      // FilePanelSplit mounts the pane only once the file came back.
+      await page.getByTestId('file-panel-pane').waitFor({ state: 'visible', timeout: options.timeoutMs });
+      await page.waitForTimeout(2300);
+    },
+  },
+  {
+    id: 'mobile-approve',
+    title: 'Approve a confirmation from the phone, on the chat tab',
+    viewport: 'mobile',
+    seedStorage: (options) => chatSurfaceStorage(options.worktreeId),
+    // The hero cassette's second pass: sent from here when the pane is idle
+    // (the same self-service attention-badge does), then waited on until the
+    // approval frame is up. Waiting is the whole of `prepare` so the sheet is
+    // already on screen when the camera rolls.
+    prepare: async ({ baseUrl, options }) => {
+      const target = { id: options.worktreeId, path: options.worktreePath };
+      const live = await waitForWorktree(
+        baseUrl,
+        target,
+        (worktree) => worktree.isSessionRunning === true && worktree.isProcessing !== true,
+        'idle with a live agent session',
+        options.timeoutMs,
+      );
+      if (live.isWaitingForResponse !== true) {
+        await postJson(`${baseUrl}/api/worktrees/${options.worktreeId}/send`, {
+          content: MOBILE_APPROVE_MESSAGE,
+        });
+      }
+      await waitForWorktree(
+        baseUrl,
+        target,
+        (worktree) => worktree.isWaitingForResponse === true,
+        'waiting for a response',
+        options.timeoutMs,
+      );
+    },
+    run: async ({ page, baseUrl, options }) => {
+      await gotoLocalized(page, `${baseUrl}/worktrees/${options.worktreeId}?${CHAT_VIEW_QUERY}`, options.locale);
+      // The session row (#2357) is the model the phone shows; absent means the
+      // SessionStart env-up.sh announced carried no model, which is a seed
+      // defect rather than a slow page.
+      await page.getByTestId('mobile-session-model').waitFor({ state: 'visible', timeout: options.timeoutMs });
+      const sheet = page.getByTestId('mobile-prompt-sheet');
+      await sheet.waitFor({ state: 'visible', timeout: options.timeoutMs });
+      // Long: the tail is what compose.sh keeps, and after the tap the sheet
+      // spends ~2.5 s on "Sending…" (the answer typed, Enter, read-back) and
+      // the context another second closing — measured — so the seconds the
+      // sheet is simply on screen have to be bought up front.
+      await page.waitForTimeout(3800);
+      await sheet
+        .getByRole('button', { name: submitButtonLabel(options.repoRoot, options.locale) })
+        .click();
+      // The sheet closes when POST prompt-response has succeeded — the answer
+      // is in the pane — and that is the beat the shot ends on. The server's
+      // own `isWaitingForResponse` follows within a capture-cache TTL and is
+      // asserted in `after`, off camera: waited for here it would be the
+      // seconds compose.sh keeps, and the sheet would be cut.
+      await sheet.waitFor({ state: 'hidden', timeout: options.timeoutMs });
+      await page.waitForTimeout(500);
+    },
+    after: ({ baseUrl, options }) =>
+      waitForWorktree(
+        baseUrl,
+        { id: options.worktreeId, path: options.worktreePath },
+        (worktree) => worktree.isWaitingForResponse === false,
+        'released by the answer',
+        options.timeoutMs,
+      ).then(() => undefined),
+  },
+  {
+    id: 'mobile-file-link',
+    title: 'Open the file a reply links to, on the phone',
+    viewport: 'mobile',
+    seedStorage: (options) => chatSurfaceStorage(options.worktreeId),
+    // The approval pass has to have closed: its reply carries the link.
+    prepare: ({ baseUrl, options }) =>
+      waitForWorktree(
+        baseUrl,
+        { id: options.worktreeId, path: options.worktreePath },
+        (worktree) =>
+          worktree.isSessionRunning === true &&
+          worktree.isProcessing !== true &&
+          worktree.isWaitingForResponse !== true,
+        'idle after the approval',
+        options.timeoutMs,
+      ).then(() => undefined),
+    run: async ({ page, baseUrl, options }) => {
+      await gotoLocalized(page, `${baseUrl}/worktrees/${options.worktreeId}?${CHAT_VIEW_QUERY}`, options.locale);
+      const link = lastFileLink(page);
+      await link.waitFor({ state: 'visible', timeout: options.timeoutMs });
+      await link.scrollIntoViewIfNeeded();
+      await page.waitForTimeout(1000);
+      await link.click();
+      // The phone opens files in FileViewer's modal (`modal-panel`, titled
+      // with the path); the copy button is only drawn once the content is in.
+      const viewer = page.getByTestId('modal-panel');
+      await viewer.waitFor({ state: 'visible', timeout: options.timeoutMs });
+      await viewer.getByTestId('copy-content-button').waitFor({ state: 'visible', timeout: options.timeoutMs });
+      await page.waitForTimeout(1800);
+    },
+  },
 ];
+
+/**
+ * Runs in the page before any of its own scripts: the seeded preferences are
+ * what the app's first render reads. `try` because a browser with site data
+ * blocked throws on the property access, and the take should still film.
+ */
+function seedLocalStorage(entries: Record<string, string>): void {
+  try {
+    for (const [key, value] of Object.entries(entries)) {
+      window.localStorage.setItem(key, value);
+    }
+  } catch {
+    /* storage unavailable: the page renders its defaults */
+  }
+}
+
+/**
+ * Compile the routes the takes will hit, off camera.
+ *
+ * The demo server is `tsx server.ts` in development mode, which compiles a
+ * page on its first request. That first request used to be a scene's own
+ * navigation, so the opening seconds of a take were a blank page — and for
+ * a scene that keeps its head (`head:` in the storyboard) rather than its
+ * tail, that blank page is what ships. One throwaway context, closed before
+ * any recording starts.
+ */
+async function warmUp(
+  browser: import('@playwright/test').Browser,
+  baseUrl: string,
+  options: RecordOptions,
+): Promise<void> {
+  const context = await browser.newContext({ viewport: { ...options.viewport }, locale: options.locale });
+  await context.addCookies([localeCookie(baseUrl, options.locale)]);
+  const page = await context.newPage();
+  try {
+    for (const url of [
+      `${baseUrl}/`,
+      `${baseUrl}/worktrees/${options.worktreeId}`,
+      `${baseUrl}/worktrees/${options.worktreeId}?${CHAT_VIEW_QUERY}`,
+    ]) {
+      await page.goto(url, { waitUntil: 'networkidle', timeout: options.timeoutMs }).catch(() => undefined);
+    }
+    // API routes a take calls for the first time mid-shot: the two reads
+    // behind the delegation brief (`fetchDelegationBrief`) and the file the
+    // reply links to. Compiled here, each costs a few hundred milliseconds
+    // on camera instead of a couple of seconds.
+    for (const url of [
+      `${baseUrl}/api/worktrees/${options.worktreeId}/cli-reference`,
+      `${baseUrl}/api/worktrees/${options.worktreeId}/resolve-target?instance=codex`,
+      `${baseUrl}/api/worktrees/${options.worktreeId}/files/README.md`,
+    ]) {
+      await fetch(url).catch(() => undefined);
+    }
+  } finally {
+    await context.close();
+  }
+}
 
 export function viewportFor(scene: Scene, options: RecordOptions): { width: number; height: number } {
   return scene.viewport === 'mobile' ? { ...MOBILE_VIEWPORT } : { ...options.viewport };
@@ -1359,6 +1851,9 @@ export async function recordScenesDetailed(requested: RecordOptions): Promise<Re
   const skipped: { id: string; reason: string }[] = [];
 
   try {
+    if (selected.some((scene) => !isTerminalScene(scene))) {
+      await warmUp(browser, state.baseUrl, options);
+    }
     for (const scene of selected) {
       const target = path.join(outDir, `${scene.id}.webm`);
       try {
@@ -1400,6 +1895,10 @@ export async function recordScenesDetailed(requested: RecordOptions): Promise<Re
       // The context locale only sets Accept-Language, which resolveLocale reads
       // as a fallback. The cookie is what actually pins the app's UI language.
       await context.addCookies([localeCookie(state.baseUrl, options.locale)]);
+      const seeded = scene.seedStorage?.(options, state);
+      if (seeded && Object.keys(seeded).length > 0) {
+        await context.addInitScript(seedLocalStorage, seeded);
+      }
       const page = await context.newPage();
       const video = page.video();
       try {
@@ -1413,6 +1912,8 @@ export async function recordScenesDetailed(requested: RecordOptions): Promise<Re
         written.push(target);
         process.stdout.write(`recorded ${scene.id} -> ${target}\n`);
       }
+      // Off camera: see SceneCommon.after.
+      await scene.after?.({ baseUrl: state.baseUrl, options, state });
     }
   } finally {
     await browser.close();

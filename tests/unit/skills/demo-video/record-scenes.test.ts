@@ -16,13 +16,21 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Page } from '@playwright/test';
 
 import {
+  ACTIVITY_BAR_STORAGE_KEY_PREFIX,
+  ACTIVITY_CLOSED_SENTINEL,
+  CHAT_TOOL_ACTIVITY_STORAGE_KEY,
+  CHAT_VIEW_QUERY,
   DEFAULT_CLI_SESSION,
   DEFAULT_MESSAGE,
   DEFAULT_VIEWPORT,
+  DELEGATE_ASK_MESSAGE,
   DEMO_CATALOG_SKILL_ID,
+  MOBILE_APPROVE_MESSAGE,
   MOBILE_VIEWPORT,
   SCENES,
+  SIDEBAR_OPEN_STORAGE_KEY,
   SLASH_PALETTE_COMMANDS,
+  SURFACE_MODE_STORAGE_KEY_PREFIX,
   SceneUnavailableError,
   assertIdForPath,
   isTerminalScene,
@@ -51,6 +59,17 @@ import {
 } from '../../../../.claude/skills/demo-video/scripts/record-scenes';
 import { deriveWorktreeId } from '@/lib/git/worktree-id';
 import { removeTempDir } from '@tests/helpers/temp-dir';
+import { SIDEBAR_OPEN_STORAGE_KEY as PRODUCT_SIDEBAR_OPEN_KEY } from '@/contexts/SidebarContext';
+import {
+  ACTIVITY_CLOSED_SENTINEL as PRODUCT_ACTIVITY_CLOSED,
+  getActivityBarStorageKey,
+} from '@/config/activity-bar-config';
+import { CHAT_TOOL_ACTIVITY_STORAGE_KEY as PRODUCT_CHAT_TOOL_ACTIVITY_KEY } from '@/lib/chat/chat-tool-activity';
+import {
+  SURFACE_MODE_VIEW_PARAM,
+  getMobileSurfaceModeStorageKey,
+  getSplitSurfaceModeStorageKey,
+} from '@/config/surface-mode-config';
 
 /** env-up.sh derives the ids from these directory names; nothing hard-codes them. */
 const SEED_ROOT = '/home/dev/.commandmate-demo/seed';
@@ -226,6 +245,13 @@ describe('SCENES', () => {
       'complete',
       'verify-red',
       'evidence',
+      // Issue #2381: the README hero cut.
+      'repo-tab-switch',
+      'agent-tabs',
+      'delegate-ask',
+      'reply-file-link',
+      'mobile-approve',
+      'mobile-file-link',
     ]);
   });
 
@@ -292,10 +318,207 @@ describe('SCENES', () => {
     }
   });
 
-  it('films the approval scene, and only that one, at phone size', () => {
+  it('films the phone scenes, and only those, at phone size', () => {
     expect(SCENES.filter((scene) => scene.viewport === 'mobile').map((s) => s.id)).toEqual([
       'respond-from-mobile',
+      'mobile-approve',
+      'mobile-file-link',
     ]);
+  });
+});
+
+/**
+ * The README hero scenes (Issue #2381): what each one seeds into the browser
+ * before the first render, and what each one's `prepare` insists on.
+ */
+describe('the #2381 hero scenes', () => {
+  const BASE = 'http://127.0.0.1:3399';
+  const scene = (id: string) => SCENES.find((s) => s.id === id)! as BrowserScene;
+  const options = () => ({ ...parseRecordArgs(ARGS, {}), timeoutMs: 30 });
+  const state = (): DemoState =>
+    ({
+      baseUrl: BASE,
+      videoDir: '/tmp/videos',
+      CM_DEMO_SEED_REPO: `${SEED_ROOT}/cmdemo-app`,
+      CM_DEMO_SEED_REPO_2: `${SEED_ROOT}/cmdemo-docs`,
+      CM_DEMO_AGENTS: 'claude,codex,antigravity,opencode,command-code',
+    }) as DemoState;
+  const seeded = (id: string) => scene(id).seedStorage!(options(), state());
+
+  it('spells the storage keys the product spells', () => {
+    // record-scenes.ts imports nothing from src/ (it runs under bare tsx from
+    // a checkout), so the keys are literals there and pinned here.
+    expect(SIDEBAR_OPEN_STORAGE_KEY).toBe(PRODUCT_SIDEBAR_OPEN_KEY);
+    expect(`${ACTIVITY_BAR_STORAGE_KEY_PREFIX}wt-x`).toBe(getActivityBarStorageKey('wt-x'));
+    expect(ACTIVITY_CLOSED_SENTINEL).toBe(PRODUCT_ACTIVITY_CLOSED);
+    expect(CHAT_TOOL_ACTIVITY_STORAGE_KEY).toBe(PRODUCT_CHAT_TOOL_ACTIVITY_KEY);
+    expect(`${SURFACE_MODE_STORAGE_KEY_PREFIX}wt-x-split-0`).toBe(getSplitSurfaceModeStorageKey('wt-x', 0));
+    expect(`${SURFACE_MODE_STORAGE_KEY_PREFIX}wt-x-mobile`).toBe(getMobileSurfaceModeStorageKey('wt-x'));
+    expect(CHAT_VIEW_QUERY).toBe(`${SURFACE_MODE_VIEW_PARAM}=chat`);
+  });
+
+  it('opens every PC scene with the sidebar collapsed and the split on the chat surface', () => {
+    // The tab strip is the collapsed sidebar's navigation and only shows by
+    // default while it is collapsed; the split would otherwise open on the
+    // terminal, because the branch picked in the strip navigates with no
+    // `?view=`.
+    for (const id of ['repo-tab-switch', 'agent-tabs', 'delegate-ask', 'reply-file-link']) {
+      const entries = seeded(id);
+      expect(entries[SIDEBAR_OPEN_STORAGE_KEY], id).toBe('false');
+      expect(entries[getSplitSurfaceModeStorageKey('wt-dark-mode', 0)], id).toBe('chat');
+      expect(entries[CHAT_TOOL_ACTIVITY_STORAGE_KEY], id).toBe('true');
+    }
+    // The tab switch starts in the second repository, whose worktree id is the
+    // seed directory's basename: that page gets the same layout, or the pane
+    // would close mid-cut.
+    expect(seeded('repo-tab-switch')[getSplitSurfaceModeStorageKey('cmdemo-docs', 0)]).toBe('chat');
+    expect(seeded('repo-tab-switch')[getActivityBarStorageKey('cmdemo-docs')]).toBe(ACTIVITY_CLOSED_SENTINEL);
+  });
+
+  it('opens the Agent pane where the roster is the subject, and closes it where the chat is', () => {
+    const key = getActivityBarStorageKey('wt-dark-mode');
+    expect(seeded('agent-tabs')[key]).toBe('agent');
+    expect(seeded('delegate-ask')[key]).toBe('agent');
+    expect(seeded('repo-tab-switch')[key]).toBe(ACTIVITY_CLOSED_SENTINEL);
+    expect(seeded('reply-file-link')[key]).toBe(ACTIVITY_CLOSED_SENTINEL);
+  });
+
+  it('opens the phone scenes on the chat surface', () => {
+    for (const id of ['mobile-approve', 'mobile-file-link']) {
+      expect(seeded(id)[getMobileSurfaceModeStorageKey('wt-dark-mode')], id).toBe('chat');
+    }
+  });
+
+  it('keeps both typed messages to one line, which the transcript templates count on', () => {
+    // `{{TASK}}` is the first line of a pass's first submission; a second line
+    // would be dropped from the transcript's prompt and the reader could not
+    // adopt the `/send` row.
+    expect(DELEGATE_ASK_MESSAGE).not.toMatch(/\n/);
+    expect(MOBILE_APPROVE_MESSAGE).not.toMatch(/\n/);
+    expect(DELEGATE_ASK_MESSAGE).toMatch(/Codex/);
+  });
+
+  function prepareContext(overrides: Partial<RecordOptions> = {}): PrepareContext {
+    return { baseUrl: BASE, options: { ...options(), ...overrides }, state: state() };
+  }
+
+  function stubFetch(routes: Record<string, unknown | (() => Response)>) {
+    const posts: { url: string; body: unknown }[] = [];
+    vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        posts.push({ url, body: JSON.parse(String(init.body)) });
+        return new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      const key = Object.keys(routes).find((route) => url.endsWith(route));
+      if (key === undefined) return new Response('not found', { status: 404 });
+      const value = routes[key];
+      if (typeof value === 'function') return (value as () => Response)();
+      return new Response(JSON.stringify(value), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    });
+    return posts;
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const live = (extra: Record<string, unknown> = {}) => ({
+    id: 'wt-dark-mode',
+    path: DARK_MODE_DIR,
+    branch: 'feature/demo-dark-mode',
+    isSessionRunning: true,
+    isProcessing: false,
+    isWaitingForResponse: false,
+    ...extra,
+  });
+  const docs = { id: 'cmdemo-docs', path: `${SEED_ROOT}/cmdemo-docs`, branch: 'main' };
+
+  it('registers the second seed repository by path when the strip would have one tab', async () => {
+    // A path scan, never a clone: the isolated environment must not reach the
+    // network, and the add-repository scene registers the same way on camera.
+    let registered = false;
+    const posts = stubFetch({
+      '/api/repositories': () =>
+        new Response(JSON.stringify({ repositories: registered ? [{ path: `${SEED_ROOT}/cmdemo-docs` }] : [] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      '/api/worktrees': () =>
+        new Response(JSON.stringify({ worktrees: registered ? [live(), docs] : [live()] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+    });
+    const pending = scene('repo-tab-switch').prepare!(prepareContext({ timeoutMs: 2000 }));
+    await vi.waitFor(() => expect(posts).toHaveLength(1));
+    registered = true;
+    await pending;
+    expect(posts[0].url).toBe(`${BASE}/api/repositories/scan`);
+    expect(posts[0].body).toEqual({ repositoryPath: `${SEED_ROOT}/cmdemo-docs` });
+  });
+
+  it('does not register the second repository twice', async () => {
+    const posts = stubFetch({
+      '/api/repositories': { repositories: [{ path: `${SEED_ROOT}/cmdemo-docs` }] },
+      '/api/worktrees': { worktrees: [live(), docs] },
+    });
+    await scene('repo-tab-switch').prepare!(prepareContext());
+    expect(posts).toEqual([]);
+  });
+
+  it('sends the delegation only to an idle session', async () => {
+    // A pane already mid-pass would consume the send as its approval answer.
+    stubFetch({ '/api/worktrees': { worktrees: [live({ isProcessing: true })] } });
+    await expect(scene('delegate-ask').prepare!(prepareContext())).rejects.toThrow(
+      /idle with a live agent session/,
+    );
+  });
+
+  it('waits for the delegation to have closed before filming its reply', async () => {
+    stubFetch({ '/api/worktrees': { worktrees: [live({ isProcessing: true })] } });
+    await expect(scene('reply-file-link').prepare!(prepareContext())).rejects.toThrow(
+      /idle after the delegation/,
+    );
+  });
+
+  it('sends the approval pass itself and waits for the prompt before the phone opens', async () => {
+    let waiting = false;
+    const posts = stubFetch({
+      '/api/worktrees': () =>
+        new Response(JSON.stringify({ worktrees: [live({ isWaitingForResponse: waiting })] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+    });
+    const pending = scene('mobile-approve').prepare!(prepareContext({ timeoutMs: 2000 }));
+    await vi.waitFor(() => expect(posts).toHaveLength(1));
+    waiting = true;
+    await pending;
+    expect(posts[0].url).toBe(`${BASE}/api/worktrees/wt-dark-mode/send`);
+    expect(posts[0].body).toEqual({ content: MOBILE_APPROVE_MESSAGE });
+  });
+
+  it('does not send again when the approval is already on screen', async () => {
+    const posts = stubFetch({ '/api/worktrees': { worktrees: [live({ isWaitingForResponse: true })] } });
+    await scene('mobile-approve').prepare!(prepareContext());
+    expect(posts).toEqual([]);
+  });
+
+  it('confirms the release of the prompt off camera, after the take', async () => {
+    // A wait inside `run` after the tap would be the seconds compose.sh keeps.
+    expect(typeof scene('mobile-approve').after).toBe('function');
+    stubFetch({ '/api/worktrees': { worktrees: [live({ isWaitingForResponse: true })] } });
+    await expect(scene('mobile-approve').after!(prepareContext())).rejects.toThrow(/released by the answer/);
+  });
+
+  it('films the phone file link only once the approval pass has closed', async () => {
+    stubFetch({ '/api/worktrees': { worktrees: [live({ isWaitingForResponse: true })] } });
+    await expect(scene('mobile-file-link').prepare!(prepareContext())).rejects.toThrow(
+      /idle after the approval/,
+    );
   });
 });
 

@@ -180,6 +180,21 @@ describe('argument handling with no ffmpeg on PATH', () => {
     expect(result.stderr).toContain('unknown argument');
   });
 
+  it('refuses a plan whose #gif row is not numbers, before it needs ffmpeg', () => {
+    // #2381: the storyboard's `gif:` block arrives as a plan row and is read
+    // like `#total` — and checked in the same place, ahead of the dependency
+    // check, so a bad row is reported as what it is on every machine.
+    const plan = path.join(SCRATCH, 'bad-gif.tsv');
+    fs.writeFileSync(plan, '#total\t3.000\n#gif\tsix hundred\t10\t\n');
+    const result = compose(
+      ['--plan', plan, '--scenes', SCRATCH, '--overlays', SCRATCH, '--out', path.join(SCRATCH, 'x.mp4')],
+      NO_FFMPEG,
+    );
+    expect(result.status).toBe(1);
+    expect(result.stderr).toMatch(/GIF width must be an integer, got 'six hundred'/);
+    expect(result.stderr).not.toMatch(/required command not found/);
+  });
+
   it('still runs the --compare gate, which needs only awk', () => {
     expect(compose(['--compare', '30.2', '--expect', '30'], NO_FFMPEG).status).toBe(0);
     expect(compose(['--compare', '30.6', '--expect', '30'], NO_FFMPEG).status).toBe(1);
@@ -475,5 +490,177 @@ describe.skipIf(!HAS_FFMPEG)('the real pipeline', () => {
     ]);
     expect(result.status).toBe(1);
     expect(result.stderr).toMatch(/missing card image: .*card-intro\.en\.png/);
+  }, 300_000);
+
+  /** Mean RGB of the frame at `at` seconds, so a cut can be read off colour. */
+  function meanRgb(file: string, at: number): [number, number, number] {
+    const result = spawnSync(
+      'ffmpeg',
+      ['-hide_banner', '-nostdin', '-v', 'error', '-ss', String(at), '-i', file, '-frames:v', '1',
+        '-vf', 'scale=8:8', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'],
+      { maxBuffer: 1 << 20 },
+    );
+    if (result.status !== 0) throw new Error(`ffmpeg failed: ${result.stderr?.toString().slice(-400)}`);
+    const bytes = result.stdout;
+    const sum = [0, 0, 0];
+    for (let i = 0; i < bytes.length; i += 3) {
+      sum[0] += bytes[i];
+      sum[1] += bytes[i + 1];
+      sum[2] += bytes[i + 2];
+    }
+    const n = bytes.length / 3;
+    return [sum[0] / n, sum[1] / n, sum[2] / n];
+  }
+  const hue = (rgb: [number, number, number]): 'red' | 'green' | 'blue' => {
+    const [r, g, b] = rgb;
+    return r > g && r > b ? 'red' : g > r && g > b ? 'green' : 'blue';
+  };
+
+  it('keeps the head of a take as well as its tail when the plan says so', () => {
+    // #2381: two seconds each of red, green and blue. A 3 s slot with
+    // `head: 1` keeps the first second (red) and the last two (blue), so the
+    // green middle — the wait a viewer need not sit through — is what goes.
+    const rgb = path.join(DIR, 'rgb.webm');
+    ffmpeg([
+      '-f', 'lavfi', '-i', `color=c=red:s=${FRAME}:r=15:d=2`,
+      '-f', 'lavfi', '-i', `color=c=green:s=${FRAME}:r=15:d=2`,
+      '-f', 'lavfi', '-i', `color=c=blue:s=${FRAME}:r=15:d=2`,
+      '-filter_complex', '[0:v][1:v][2:v]concat=n=3:v=1:a=0[v]', '-map', '[v]',
+      '-c:v', 'libvpx', '-b:v', '200k', '-an', rgb,
+    ]);
+    const scenes = path.join(DIR, 'scenes-rgb');
+    fs.mkdirSync(scenes, { recursive: true });
+    fs.copyFileSync(rgb, path.join(scenes, 'rgb.webm'));
+    // A genuinely transparent band, so the colour of the footage is what the
+    // segment shows. (The suite's `telop-body` strip is opaque outside its
+    // box — `color=black@0.0` without `format=rgba` in the graph keeps no
+    // alpha — which is fine for the duration cases and blinding here.)
+    ffmpeg([
+      '-f', 'lavfi', '-i', `color=c=black@0.0:s=${FRAME}:d=1,format=rgba`,
+      '-frames:v', '1', path.join(OVERLAYS, 'telop-rgb.ja.png'),
+    ]);
+    const rgbPlan = (name: string, head: string): string => {
+      const file = path.join(DIR, `${name}.tsv`);
+      fs.writeFileSync(
+        file,
+        [
+          '#id\ttype\tviewport\tstart\tduration\ttelop\thead',
+          '#total\t4.000',
+          '#output\tfixture.ja',
+          'intro\tcard\tpc\t0.000\t1.000\tはじめに\t',
+          `rgb\trecord\tpc\t1.000\t3.000\t本編\t${head}`,
+          '',
+        ].join('\n'),
+      );
+      return file;
+    };
+    const work = path.join(DIR, 'work-head');
+    const result = compose([
+      '--plan', rgbPlan('head', '1.000'), '--scenes', scenes, '--overlays', OVERLAYS, '--locale', 'ja',
+      '--frame', FRAME, '--fps', '15', '--tolerance', '0.5', '--keep-work', '--work', work,
+      '--out', path.join(DIR, 'head.mp4'),
+    ]);
+    expect(result.stderr).toBe('');
+    expect(result.status).toBe(0);
+    expect(result.stdout).toMatch(/take 6\.\d+s, head 1\.000s \+ tail from \+4\.\d+s/);
+
+    const segment = path.join(work, '02-rgb.mp4');
+    expect(probe(segment)).toBeGreaterThan(2.9);
+    expect(probe(segment)).toBeLessThan(3.2);
+    expect(hue(meanRgb(segment, 0.4))).toBe('red');
+    expect(hue(meanRgb(segment, 1.6))).toBe('blue');
+    expect(hue(meanRgb(segment, 2.7))).toBe('blue');
+    // The plain path on the same take keeps only the tail: green then blue,
+    // never red — which is what makes the assertion above non-vacuous.
+    const tailWork = path.join(DIR, 'work-head-off');
+    const plain = compose([
+      '--plan', rgbPlan('head-off', ''), '--scenes', scenes, '--overlays', OVERLAYS, '--locale', 'ja',
+      '--frame', FRAME, '--fps', '15', '--tolerance', '0.5', '--keep-work', '--work', tailWork,
+      '--out', path.join(DIR, 'head-off.mp4'),
+    ]);
+    expect(plain.status).toBe(0);
+    expect(hue(meanRgb(path.join(tailWork, '02-rgb.mp4'), 0.4))).toBe('green');
+    expect(hue(meanRgb(path.join(tailWork, '02-rgb.mp4'), 2.7))).toBe('blue');
+  }, 300_000);
+
+  it('pads a short take exactly as before when the plan names a head', () => {
+    // `head` only means something when the take is longer than its slot.
+    const plan = path.join(DIR, 'head-short.tsv');
+    fs.writeFileSync(
+      plan,
+      [
+        '#id\ttype\tviewport\tstart\tduration\ttelop\thead',
+        '#total\t3.000',
+        '#output\tfixture.ja',
+        'intro\tcard\tpc\t0.000\t1.000\tはじめに\t',
+        'body\trecord\tpc\t1.000\t2.000\t本編\t0.500',
+        '',
+      ].join('\n'),
+    );
+    const out = path.join(DIR, 'head-short.mp4');
+    const result = compose([
+      '--plan', plan, '--scenes', SCENES, '--overlays', OVERLAYS, '--locale', 'ja',
+      '--frame', FRAME, '--fps', '15', '--tolerance', '0.5', '--out', out,
+    ]);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toMatch(/take 1\.\d+s, from \+0\.000s/);
+    expect(probe(out)).toBeGreaterThan(2.5);
+    expect(probe(out)).toBeLessThan(3.5);
+  }, 300_000);
+
+  it('writes the GIF at the size and rate the plan declares, and gates it on the budget', () => {
+    // #2381: the storyboard's `gif:` block. A generous budget passes at the
+    // declared width and rate with the pre-#2381 palette; an impossible one
+    // steps the palette down, then refuses to leave the file behind. Width
+    // and rate are never what gives, because the storyboard declared them.
+    const plan = (name: string, budget: string) => {
+      const file = path.join(DIR, `${name}.tsv`);
+      fs.writeFileSync(
+        file,
+        [
+          '#id\ttype\tviewport\tstart\tduration\ttelop\thead',
+          '#total\t3.000',
+          '#output\tfixture.ja',
+          `#gif\t160\t8\t${budget}`,
+          'intro\tcard\tpc\t0.000\t1.000\tはじめに\t',
+          'body\trecord\tpc\t1.000\t2.000\t本編\t',
+          '',
+        ].join('\n'),
+      );
+      return file;
+    };
+    const args = (file: string, out: string) => [
+      '--plan', file, '--scenes', SCENES, '--overlays', OVERLAYS, '--locale', 'ja',
+      '--frame', FRAME, '--fps', '15', '--tolerance', '0.5', '--gif', '--out', out,
+    ];
+
+    const ok = path.join(DIR, 'gif-ok.mp4');
+    const fits = compose(args(plan('gif-ok', '100000000'), ok));
+    expect(fits.stderr).toBe('');
+    expect(fits.status).toBe(0);
+    expect(fits.stdout).toMatch(/writing .*gif-ok\.gif \(160px, 8 fps, budget 100000000 bytes\)/);
+    expect(fits.stdout).toMatch(/within the 100000000 byte budget/);
+    const gif = path.join(DIR, 'gif-ok.gif');
+    expect(fs.existsSync(gif)).toBe(true);
+    const dims = spawnSync(
+      'ffprobe',
+      ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,r_frame_rate', '-of', 'csv=p=0', gif],
+      { encoding: 'utf8' },
+    ).stdout.trim();
+    expect(dims).toBe('160,8/1');
+
+    const over = compose(args(plan('gif-over', '1'), path.join(DIR, 'gif-over.mp4')));
+    expect(over.status).toBe(1);
+    expect(over.stdout).toMatch(/retrying with 128 colours, no dithering/);
+    expect(over.stdout).toMatch(/retrying with 64 colours, no dithering/);
+    expect(over.stderr).toMatch(/GIF budget FAILED: \d+ bytes at 160px\/8 fps with 64 colours, budget is 1 bytes/);
+    expect(fs.existsSync(path.join(DIR, 'gif-over.gif'))).toBe(false);
+    // The mp4 itself is fine and stays: only the GIF failed its gate.
+    expect(fs.existsSync(path.join(DIR, 'gif-over.mp4'))).toBe(true);
+
+    // A flag beats the plan's row.
+    const flagged = compose([...args(plan('gif-flag', ''), path.join(DIR, 'gif-flag.mp4')), '--gif-width', '120']);
+    expect(flagged.status).toBe(0);
+    expect(flagged.stdout).toMatch(/writing .*gif-flag\.gif \(120px, 8 fps\)/);
   }, 300_000);
 });

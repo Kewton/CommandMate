@@ -711,9 +711,11 @@ describe('env-up plants the transcripts and announces the sessions (Issue #2380)
     // URL carries, and `cwd` is the worktree.
     const starts = seen.filter((r) => r.method === 'POST' && r.url === '/api/hooks/agent-event');
     expect(starts.map((r) => (r.body as { tool: string }).tool)).toEqual(['claude', 'codex']);
-    for (const [tool, sessionId] of [
-      ['claude', state.CM_DEMO_CLAUDE_SESSION_ID],
-      ['codex', state.CM_DEMO_CODEX_SESSION_ID],
+    // `model` as on the real hook (#1783): it is the only way claude's model
+    // reaches the phone's session row (#2357), which the hero cut films.
+    for (const [tool, sessionId, model] of [
+      ['claude', state.CM_DEMO_CLAUDE_SESSION_ID, 'claude-opus-5'],
+      ['codex', state.CM_DEMO_CODEX_SESSION_ID, 'gpt-5.6-sol'],
     ]) {
       const body = starts.find((r) => (r.body as { tool: string }).tool === tool)!.body;
       expect(body).toEqual({
@@ -724,6 +726,7 @@ describe('env-up plants the transcripts and announces the sessions (Issue #2380)
         cwd: state.CM_DEMO_WORKTREE_PATH,
         worktreeId: state.CM_DEMO_WORKTREE_ID,
         instanceId: tool,
+        model,
       });
     }
     // Both land after the server answered `/`, i.e. after the boot sync has a

@@ -268,7 +268,28 @@ describe('demo telops fit the storyboard validator', () => {
   );
 
   it('lists a telop for every demo and scene type', () => {
-    expect(telopRows.length).toBe(8);
+    // 4 LP demos x (card + record) + the 8 beats of the README hero (#2381).
+    expect(telopRows.length).toBe(16);
+  });
+
+  it('carries the README hero cut beat for beat', () => {
+    // The storyboard test pins the other direction (every telop in the YAML
+    // is in this document); this pins that the document has the hero at all,
+    // so a row cannot be dropped here and the YAML edited to match.
+    const hero = telopRows.filter((row) => row.cells[0] === 'hero');
+    expect(hero.map((row) => row.cells[1])).toEqual([
+      'card', 'record', 'record', 'record', 'record', 'record', 'record', 'card',
+    ]);
+    expect(hero.map((row) => row.cells[3])).toEqual([
+      'CommandMate',
+      'Switch repos from the tab bar.',
+      'Five agents in one worktree.',
+      'Delegate to the next session.',
+      'Open the file from the reply.',
+      'Approve from your phone.',
+      'Open files on your phone, too.',
+      'github.com/Kewton/CommandMate',
+    ]);
   });
 
   it.each([
