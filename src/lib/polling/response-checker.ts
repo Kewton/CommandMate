@@ -36,6 +36,8 @@ import {
   COPILOT_USER_ECHO_PATTERN,
   COPILOT_TRANSCRIPT_CONTINUATION_PATTERN,
   findOpenCodeChromeStart,
+  findCodexChromeStart,
+  findCodexUserEchoIndex,
 } from '@/lib/detection/cli-patterns';
 import { createLogger } from '@/lib/logger';
 import { THINKING_TAIL_LINE_COUNT } from '@/config/thinking-constants';
@@ -404,15 +406,26 @@ export function extractResponse(
   // that placeholder is drawn with the same `❯ <text>` shape as a transcript
   // echo, so without the boundary `findRecentUserPromptIndex` anchors the turn
   // on the FOOTER and every reply extracts as empty (#1289's defect, verbatim).
+  //
+  // Issue #2400: codex is the fifth, and the one that had been missing. It pins
+  // the same two rows — `› Ask Codex to do anything` and the `model · cwd`
+  // status bar — and without a boundary the saturated-window anchor (#1670)
+  // walked into them: the newest `›` in the pane was the COMPOSER, so extraction
+  // started on the status bar and every reply on a saturated pane was saved as
+  // that one row. `findCodexChromeStart` reads the composer by its SGR
+  // attributes (#2310) rather than by its placeholder wording, which is what the
+  // previous guard did and why it stopped working at codex 0.15x.
   const chromeStart = cliToolId === 'claude'
     ? findClaudeChromeStart(lines)
     : cliToolId === 'copilot'
       ? findCopilotChromeStart(lines)
       : cliToolId === 'command-code'
         ? findCommandCodeChromeStart(lines)
-        : openCodeCleanLines
-          ? findOpenCodeChromeStart(openCodeCleanLines)
-          : -1;
+        : cliToolId === 'codex'
+          ? findCodexChromeStart(lines)
+          : openCodeCleanLines
+            ? findOpenCodeChromeStart(openCodeCleanLines)
+            : -1;
   const contentEnd = chromeStart >= 0 ? chromeStart : totalLines;
 
   const BUFFER_RESET_TOLERANCE = 25;
@@ -439,7 +452,22 @@ export function extractResponse(
   const findRecentUserPromptIndex = (windowSize: number = 60): number => {
     let userPromptPattern: RegExp;
     if (cliToolId === 'codex') {
-      userPromptPattern = /^›\s+(?!Implement|Find and fix|Type|Summarize)/;
+      // Issue #2400: codex's three uses of `›` are separated by their SGR
+      // attributes, not by their text (#2310). This branch used to exclude the
+      // composer with a negative lookahead over its placeholder strings
+      // (`Implement`, `Find and fix`, `Type`, `Summarize`) — codex 0.1x wording,
+      // none of which 0.15x draws. `Ask Codex to do anything` passed the guard,
+      // became the newest "echo", and on a saturated pane (#1670) — the only
+      // path where this anchor decides where extraction STARTS — every reply was
+      // saved as the single status-bar row below it.
+      //
+      // Two independent things now keep the composer out, and the reader needs
+      // both because neither covers the other's frames: `contentEnd` cuts the
+      // composer off structurally when `findCodexChromeStart` located it, and
+      // when it did not, `findCodexUserEchoIndex` steps over the bottom-most
+      // `›` row instead. The second is what still answers on an ANSI-stripped
+      // capture, where none of #2310's attributes survive to be read.
+      return findCodexUserEchoIndex(lines, contentEnd, windowSize, chromeStart >= 0);
     } else if (openCodeCleanLines) {
       // Issue #1911: anchor on the newest ECHOED USER PROMPT, not on the
       // second-to-last `▣ Build` row. The old anchor belonged to the PREVIOUS
@@ -577,10 +605,21 @@ export function extractResponse(
       captureWindowSaturated
     );
 
-    let endIndex = totalLines;
-
     // `contentEnd` bounds the content only; `endIndex` keeps reporting the full
     // buffer so lineCount bookkeeping in session_states is unchanged (#1289).
+    //
+    // Issue #2400: codex is the exception, and it is the pre-existing behaviour
+    // rather than a new rule. Before this Issue the loop below stopped on the
+    // composer's `›` and wrote that row's index into `endIndex`; now the composer
+    // is outside `contentEnd`, so the break can no longer fire on it and
+    // `endIndex` would silently advance ~3 rows further. Those rows matter for
+    // codex specifically: it renders INLINE, and it repaints the composer band in
+    // place — the next turn's transcript is printed over exactly the rows the
+    // composer occupied in this capture. A cursor parked past them would skip
+    // real content on the following poll. So the cursor stops where the content
+    // stops, which is what it did before.
+    let endIndex = cliToolId === 'codex' ? contentEnd : totalLines;
+
     for (let i = startIndex; i < contentEnd; i++) {
       const line = lines[i];
       const cleanLine = stripAnsi(line);
