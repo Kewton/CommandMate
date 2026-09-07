@@ -52,6 +52,34 @@
  * boundary is a field, and a turn is closed by the `task_complete` that carries
  * its id — measured on 326 of 326 archived turns.
  *
+ * ## A turn can begin outside the window (Issue #2402)
+ *
+ * `./history` reads the rollout's last `CODEX_TRANSCRIPT_TAIL_BYTES` and nothing
+ * more, because the largest rollout on this machine was 273 MB. A long turn
+ * outgrows that window: measured on 2026-09-07 on a 30 MB / 7,408-line rollout
+ * whose newest turn ran seven hours over 387 items and four compactions, so its
+ * `task_started` and its first two prompts sat outside the 4 MiB tail while its
+ * later items sat inside it.
+ *
+ * The `turn_id` stamp is what makes that recoverable. Because it is on **every**
+ * `item_completed` and not only on `task_started`, a window that opens in the
+ * middle of a turn still reads the turn's real id — so the turn can be rendered
+ * AND written under the key a later read will recognise. What is lost is the
+ * head of the body, and {@link CodexTurnAccumulator.started} is how that becomes
+ * a fact the writer can state: it is the opening mark, exactly as `closed` is
+ * the closing one, and a turn with `started: false` is rendered behind
+ * {@link CODEX_TURN_HEAD_TRUNCATION_MARKER}.
+ *
+ * **This is where codex and claude diverge, and the divergence is deliberate.**
+ * `../claude/history`'s `collectHeadlessClaudeTurn` renders the same situation
+ * and refuses to write it, because claude's transcript carries no link from a
+ * reply to the prompt it answers: a turn whose prompt record is outside the
+ * window has no key at all, so writing it would mean inventing one, and an
+ * invented key is a row no later run can recognise as already written. codex is
+ * not under that constraint — the key is a field on the records that ARE in the
+ * window — so the argument that stops claude does not reach here. Copying
+ * claude's refusal would drop a body codex handed over for free.
+ *
  * ## Pure on purpose
  *
  * No filesystem, no database, no `globalThis` — `./history` owns all three, the
@@ -76,6 +104,18 @@ export const MAX_CODEX_TURN_BODY_LENGTH = 200_000;
 
 /** Appended when {@link MAX_CODEX_TURN_BODY_LENGTH} truncates a turn. */
 export const CODEX_TURN_TRUNCATION_MARKER = '\n\n_(truncated)_';
+
+/**
+ * Prepended when a turn's opening records fell outside the window (#2402).
+ *
+ * The mirror of {@link CODEX_TURN_TRUNCATION_MARKER} — same italic parenthetical
+ * in the same plain Markdown, on the other end of the body — because the two say
+ * the same thing about the same row and a reader who has learned to read one
+ * should not have to learn a second notation for the other. Written into
+ * `chat_messages.content` at read time like every other string these readers
+ * emit, so it is English and outlives any later locale change.
+ */
+export const CODEX_TURN_HEAD_TRUNCATION_MARKER = '_(head truncated)_\n\n';
 
 /**
  * Cap on items kept for one turn.
@@ -155,6 +195,15 @@ export interface CodexTurnAccumulator {
   readonly prompts: CodexPrompt[];
   /** Everything else the turn produced, in the order codex displayed it. */
   readonly items: CodexRolloutItem[];
+  /**
+   * True once `task_started` for this `turn_id` was seen (Issue #2402).
+   *
+   * The opening mark, paired with {@link closed}. False means the window opened
+   * after the turn had already begun, so the turn's first items — and any prompt
+   * it folded in before the window's first byte — are not in `items` / `prompts`
+   * and never will be for this read.
+   */
+  started: boolean;
   /** True once `task_complete` for this `turn_id` was seen. */
   closed: boolean;
   /** True once an item had to be dropped for {@link MAX_CODEX_TURN_ITEMS}. */
@@ -167,6 +216,15 @@ export interface CodexRenderedTurn {
   readonly turnId: string;
   /** The Markdown body, or an empty string when the turn said nothing. */
   readonly body: string;
+  /**
+   * Whether the turn began outside the window (Issue #2402).
+   *
+   * Reported for every turn, marked in {@link body} only when there was a body
+   * to mark: a headless turn that rendered to nothing is handed to the scraper
+   * whole, and a body consisting of the marker alone would be a row that says
+   * only that something is missing.
+   */
+  readonly headless: boolean;
   /** How many `AgentMessage` items contributed prose. */
   readonly textBlocks: number;
   /** How many tool items were summarised. */
@@ -447,10 +505,19 @@ export function buildCodexTurns(
         startedAt: record.timestampMs ?? 0,
         prompts: [],
         items: [],
+        started: false,
         closed: false,
         overflowed: false,
       };
       turns.set(turnId, turn);
+    }
+
+    if (record.payloadType === 'task_started') {
+      // The opening mark (Issue #2402). Recorded rather than assumed from "this
+      // is the first record we saw for the id", which is true of every turn in
+      // the window — including the one whose real first record is outside it.
+      turn.started = true;
+      continue;
     }
 
     if (record.payloadType === 'task_complete') {
@@ -565,6 +632,9 @@ export function renderCodexTurn(turn: CodexTurnAccumulator): CodexRenderedTurn {
   }
 
   let body = separateTurnBody(rendered).body;
+  // The head mark goes on before the length bound, so a headless turn long
+  // enough to be truncated at both ends still says so at both ends.
+  if (!turn.started && body.length > 0) body = CODEX_TURN_HEAD_TRUNCATION_MARKER + body;
   if (body.length > MAX_CODEX_TURN_BODY_LENGTH) {
     body =
       body.slice(0, MAX_CODEX_TURN_BODY_LENGTH - CODEX_TURN_TRUNCATION_MARKER.length) +
@@ -575,6 +645,7 @@ export function renderCodexTurn(turn: CodexTurnAccumulator): CodexRenderedTurn {
     sessionId: turn.sessionId,
     turnId: turn.turnId,
     body,
+    headless: !turn.started,
     textBlocks,
     toolBlocks,
     unknownBlockTypes: [...unknown],

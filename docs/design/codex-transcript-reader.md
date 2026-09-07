@@ -276,6 +276,85 @@ codex の 105 回はすべて `codex-transcript-turn-open` を 3 回（500ms 間
   `sources/types.ts` は `agent-event-types.ts` から `AgentEventType` を import しているため、
   語彙側にフィールドを置くとモジュールの向きが逆転する。語とフィールドを 1 ファイルに同居させる方を採った。
 
+### 4.5 頭が窓の外に落ちたターン（Issue #2402）
+
+#### 実測（2026-09-07、`commandagent-develop` / codex）
+
+| 事実 | 実測値 |
+|---|---|
+| rollout | 30 MB / 7,408 行 |
+| 該当ターン `01a07a0e-…` | 13:09→20:00（7 時間）、387 items、`compacted` 4 回 |
+| 行の範囲 | 1,660〜7,390 行目 |
+| 窓（4 MiB）の外に落ちたもの | `task_started` と最初の 2 プロンプト |
+| 窓の中に残ったもの | 後半の items と 19:45 の steer プロンプト |
+| 13:15:02 の steer プロンプト | user 行が adopt されず（`request_id` NULL のまま）、`user-turn-adopted` も出ていない |
+
+`buildCodexTurns` は `turn_id` をキーに**窓内の最初のレコード**で turn を開き、`task_started` の
+有無を見ていなかった。`closed`（`task_complete` を見たか）はあるのに、対になる開始側の印が無い。
+その結果、頭が欠けたターンと最初から見ていたターンが**区別できず**、本文は窓内の item だけで
+書かれ、欠落は無言だった。
+
+#### 決定 1: `task_started` を見たかを持ち、印を付けて**書く**
+
+`CodexTurnAccumulator.started` を足す（`closed` と対）。`renderCodexTurn` は
+`started === false` かつ本文が空でないとき、先頭に `CODEX_TURN_HEAD_TRUNCATION_MARKER`
+（`_(head truncated)_`）を付ける。`MAX_CODEX_TURN_BODY_LENGTH` 超過時の
+`CODEX_TURN_TRUNCATION_MARKER`（`_(truncated)_`）と**同じ様式・反対の端**。
+長さ上限の適用より**前**に付けるので、両端が切れたターンは両端でそう言う。
+
+本文が空のときは印を付けない。「何かが欠けています」だけの行は、行が無いより悪い
+（`writeCodexTurn` は空本文をスクレイパへ渡す。渡せるのは本文が空のままのときだけ）。
+
+#### 決定 2: claude と逆に「書く」— 非対称の根拠
+
+| | claude（`../claude/history`） | codex（本モジュール） |
+|---|---|---|
+| 頭が窓外のターンの扱い | **書かない**（`collectHeadlessClaudeTurn` は描画専用） | **印を付けて書く** |
+| 根拠 | 返答からプロンプトへのリンクが**1 つも無い**。turn key を捏造するしかなく、捏造した key は後続の run が「既に書いた」と認識できない行になる | `turn_id` が `task_started` だけでなく**全 `item_completed` / `turn_context` / `task_complete`** に載る（§2.4、326/326）。**頭が窓外でも窓内の item から正しい key が読める** |
+| `partial` の置き場所 | `ClaudeTurnProgress`（プレビュー用・書き込み無し） | `chat_messages` の行そのもの |
+
+claude の「書かない」をそのまま真似すると、codex がタダで渡してくれている本文を捨てることになる。
+**この非対称性は `transcript.ts` のモジュール docblock にも書いてある**（実装を読む人が
+claude 側と読み比べたときに必ずぶつかるため）。
+
+#### 決定 3: 窓外の steer プロンプトは adopt **しない**。ログに理由を残すだけ
+
+Issue の対応案 2（「既存の `/send` 行のうち turn 開始〜窓先頭の範囲にある未 adopt 行を候補として
+扱えるか」）は**採らない**。
+
+- `recordCodexUserTurns` が見るのは `turn.prompts`＝**窓内の `UserMessage` item** だけ。
+  窓外のプロンプトはテキストが読めない（そのバイトを読んでいない）。
+- テキストが無い以上、未 adopt の `/send` 行のどれがこのターンのものかは**照合できない**。
+  時間範囲だけで結び付けると、別インスタンス・別ターンの行に `codex-prompt:<item id>` を
+  付けてしまう。その key は**間違った行に永久に付く**（`setMessageRequestId` は一度きり）。
+- 誤 adopt のコストは「打った文が別の返答に紐づく」で、無 adopt のコスト
+  （`request_id` NULL の行が 1 本残る＝ §5-5 の orphan が 1 つ増える）より大きい。
+
+代わりに、headless なターンを書いたときに `codex-transcript-turn-headless` を出し、
+**窓が実際に測れたものだけ**を載せる。
+
+| フィールド | 意味 |
+|---|---|
+| `windowBytes` | `CODEX_TRANSCRIPT_TAIL_BYTES`（なぜ切れたか） |
+| `windowFirstRecordAt` | 窓の最初のタイムスタンプ付きレコードの epoch ms。「ターンはこれより前に始まった」の上界 |
+| `turnlessRecords` / `malformedLines` | 窓が turn に帰属させられなかった数／読めなかった行数 |
+| `promptsInWindow` | **窓内にあったプロンプト数。** これが 0 や 1 で、UI にプロンプトが足りなければ「窓外プロンプトがある」と読める |
+| `itemsInWindow` | 窓内の item 数 |
+
+**窓外に何件落ちたかは載せない。** そのバイトを読んでいない read には知りようがなく、
+推定値は沈黙より悪い。
+
+#### 決定 4: 窓（4 MiB）は codex だけ広げない
+
+`src/lib/history/transcript-tail.ts` には触れない。本機の最大 rollout は **273 MB**（#2197 実測）で、
+窓はその 1 ファイルを毎ターン読まないために在る。codex だけ広げると、
+「一番大きいファイルを持つツールの窓を一番大きくする」ことになる。
+
+なお `transcript-tail.ts` の docblock にある「a turn that genuinely does not fit produces a turn
+with no prompt in it, which each reader detects and reports **rather than writing as a headless
+reply**」は、この Issue 以降 **codex には当てはまらない**（claude / antigravity は従来どおり）。
+共有モジュールの記述は #2402 のスコープ外なので直していない。
+
 ---
 
 ## 5. 既知の制約
@@ -294,6 +373,9 @@ codex の 105 回はすべて `codex-transcript-turn-open` を 3 回（500ms 間
    user 行は 1 プロンプト 1 行、assistant 行は 1 ターン 1 行なので、2 プロンプトのターンは
    （user, なし）＋（user, assistant）になる。畳んで 1 行にするより、打った文が消えない方を採った。
 6. **生成中の本文（#2199）はスコープ外。** 本リーダーは閉じたターンしか書かない。
+7. **窓（4 MiB）より長いターンは頭が欠ける。**（#2402、§4.5）本文には `_(head truncated)_` が付き、
+   `codex-transcript-turn-headless` が出るが、**欠けた本文と窓外プロンプトは戻らない**。
+   窓外プロンプトの `/send` 行は `request_id` NULL のまま残る（adopt しない理由は §4.5 決定 3）。
 
 ---
 
@@ -312,6 +394,10 @@ codex の 105 回はすべて `codex-transcript-turn-open` を 3 回（500ms 間
 ## 7. 検証
 
 - fixture 駆動 unit: `tests/unit/hooks/sources/codex-transcript-2197.test.ts`
+- 頭が窓外のターン（§4.5）: `tests/unit/hooks/sources/codex-headless-turn-2402.test.ts`
+  （fixture `tests/fixtures/transcripts/codex/rollout-headless-tail-2402.jsonl` ＝
+  `rollout-three-turns-01510.jsonl` の末尾バイト列。陰性対照として同じ capture を
+  **丸ごと**読ませ、3 ターンの本文が印なしで従来どおりであることも同ファイルで固定している）
 - リーダー（ファイル解決・冪等・fail-open）: `tests/unit/hooks/sources/codex-history-2197.test.ts`
 - ゲートの capability 分岐: `tests/unit/polling/structured-history-gate-2197.test.ts`
 - capability pin 表（全 6 source 全数一致）: `tests/unit/hooks/sources/capabilities.test.ts`
