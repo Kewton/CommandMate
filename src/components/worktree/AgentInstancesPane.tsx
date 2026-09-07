@@ -132,6 +132,26 @@ export interface AgentInstancesPaneProps {
    */
   sourceByInstance?: Readonly<Partial<Record<string, AgentEventSourceView>>>;
   /**
+   * Issue #2395: the instance the composer on screen will send to, when the
+   * caller knows it.
+   *
+   * This is the "do not delegate to yourself" answer, and it is a PROP because
+   * the DOM cannot supply it everywhere. {@link readVisibleChatInstanceId}
+   * reads the chat surface, and on a phone that surface belongs to the Terminal
+   * tab while this pane belongs to the Tools tab — the two are never mounted
+   * together, so the DOM read there is permanently "unknown" and the row that
+   * IS the composer's target offers to delegate to itself (#2382).
+   *
+   * Supplied, it WINS over the DOM read: the caller holds the composer's own
+   * target state, which is a stronger fact than a surface that may not be
+   * rendered. The row it names loses the delegation item entirely rather than
+   * keeping an item that can only toast a refusal.
+   *
+   * Absent — the PC path, where the pane sits beside the chat surface — the
+   * DOM read stays the only authority and this pane behaves exactly as before.
+   */
+  composerTargetInstanceId?: string;
+  /**
    * Issue #2316: root class, the same className-driven convention the other
    * activity panes follow (TodoPane, VerificationPane, EnvManagerPane, ...).
    *
@@ -280,6 +300,7 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
   onVibeLocalContextWindowChange,
   modelByInstance,
   sourceByInstance,
+  composerTargetInstanceId,
   className = '',
 }: AgentInstancesPaneProps) {
   const t = useTranslations('schedule');
@@ -318,9 +339,10 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
    *
    * The row is the TARGET (session B); the composer belongs to whichever
    * session the operator is talking to (session A). Refused when the two are
-   * the same — "own" being the instance whose transcript is visible, which in
-   * terminal mode nothing publishes, so an unknown answer does not block the
-   * insert rather than making the item look broken.
+   * the same — "own" being {@link composerTargetInstanceId} when the caller
+   * supplied it (Issue #2395) and otherwise the instance whose transcript is
+   * visible, which in terminal mode nothing publishes, so an unknown answer
+   * does not block the insert rather than making the item look broken.
    *
    * The brief itself is built from two server reads, never from this row: the
    * binary name and port prefix exist only in the server process, and the
@@ -330,7 +352,10 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
   const handleDelegate = useCallback(
     async (inst: AgentInstance) => {
       const text = DELEGATE_TEXT[locale === 'ja' ? 'ja' : 'en'];
-      if (readVisibleChatInstanceId() === inst.id) {
+      // Issue #2395: the caller's answer first, the DOM's second. Only an
+      // ABSENT prop falls back — a caller that supplied one has already
+      // answered the question this read exists to answer.
+      if ((composerTargetInstanceId ?? readVisibleChatInstanceId()) === inst.id) {
         showToast(text.self, 'info');
         return;
       }
@@ -342,7 +367,7 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
       const inserted = insertIntoVisibleComposer(brief);
       showToast(inserted ? text.inserted : text.noComposer, inserted ? 'success' : 'error');
     },
-    [locale, showToast, worktreeId],
+    [composerTargetInstanceId, locale, showToast, worktreeId],
   );
 
   // Issue #2054: read before the first row is built so every row resolves from
@@ -587,6 +612,13 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
             awaiting: relays.awaitedBy(inst.id),
             aliasOf,
           });
+          // Issue #2395: this row IS the composer's target, so "delegate to it"
+          // has nothing to offer. The item is dropped rather than left in place
+          // to toast a refusal: the refusal toast exists for the case the DOM
+          // read cannot rule out at render time, and a caller that supplied the
+          // target has ruled it out. Never true without the prop, which is what
+          // keeps the PC kebab exactly as #2376 built it.
+          const isComposerTarget = composerTargetInstanceId === inst.id;
           return (
             <div
               key={inst.id}
@@ -734,17 +766,24 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
                   {/* Issue #2376: the one item here that does NOT mutate the
                       roster. It is in the kebab rather than beside the CLI-
                       commands icon because it is an action ("put this text
-                      there"), not a reference panel to read. */}
-                  <DropdownMenuItem
-                    data-testid={`agent-instance-delegate-${inst.id}`}
-                    onSelect={() => {
-                      void handleDelegate(inst);
-                    }}
-                  >
-                    <Send className="w-4 h-4" />
-                    {DELEGATE_TEXT[locale === 'ja' ? 'ja' : 'en'].menuItem}
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
+                      there"), not a reference panel to read.
+                      Issue #2395: absent on the row the composer is already
+                      talking to. The separator goes with it so the kebab does
+                      not open on a leading rule. */}
+                  {!isComposerTarget && (
+                    <>
+                      <DropdownMenuItem
+                        data-testid={`agent-instance-delegate-${inst.id}`}
+                        onSelect={() => {
+                          void handleDelegate(inst);
+                        }}
+                      >
+                        <Send className="w-4 h-4" />
+                        {DELEGATE_TEXT[locale === 'ja' ? 'ja' : 'en'].menuItem}
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                    </>
+                  )}
                   <DropdownMenuItem
                     data-testid={`agent-instance-move-up-${inst.id}`}
                     disabled={index === 0}

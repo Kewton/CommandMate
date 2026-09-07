@@ -32,10 +32,16 @@
  * "Do not delegate to yourself" is the shared pane's guard too, and it reads
  * the chat surface's `data-instance-id`. That surface is never mounted at the
  * same time as this pane (it belongs to the terminal tab), so on a phone the
- * guard answers "unknown" and lets the insert through — the same outcome PC
- * has in terminal mode, by the same design (see `readVisibleChatInstanceId`).
- * Making it bite here would need the docked composer's target instance to
- * reach this pane, which no prop threads today.
+ * DOM read answers "unknown" and would let the insert through — the same
+ * outcome PC has in terminal mode, by the same design (see
+ * `readVisibleChatInstanceId`).
+ *
+ * Issue #2395 supplies the answer the DOM cannot: {@link
+ * MobileAgentInstancesPaneProps.composerTargetInstanceId} carries the docked
+ * composer's own target down from `WorktreeDetailRefactored` (its
+ * `activeInstanceId`) through `WorktreeDetailMobile` and `NotesAndLogsPane`.
+ * Forwarded unchanged; this wrapper adds no rule of its own, so the row that is
+ * the composer's target loses the item on exactly the shared pane's terms.
  */
 
 'use client';
@@ -90,6 +96,16 @@ export interface MobileAgentInstancesPaneProps {
    * `sessionStatusByInstance` avoids a second read.
    */
   sourceByInstance?: Readonly<Partial<Record<string, AgentEventSourceView>>>;
+  /**
+   * Issue #2395: the instance the phone's docked composer sends to.
+   *
+   * Forwarded verbatim to the shared {@link AgentInstancesPane}, which drops
+   * its "insert delegation brief" item on that row. Optional only so this pane
+   * still renders standalone (tests, and any caller that has no composer): with
+   * nothing supplied the shared pane falls back to its DOM read, which on a
+   * phone answers "unknown" — the pre-#2395 behaviour.
+   */
+  composerTargetInstanceId?: string;
 }
 
 export const MobileAgentInstancesPane = memo(function MobileAgentInstancesPane({
@@ -104,6 +120,7 @@ export const MobileAgentInstancesPane = memo(function MobileAgentInstancesPane({
   onToggleInstanceVisible,
   modelByInstance,
   sourceByInstance,
+  composerTargetInstanceId,
 }: MobileAgentInstancesPaneProps) {
   const t = useTranslations('schedule');
   // Issue #1783: model wording lives in the `worktree` namespace.
@@ -148,6 +165,9 @@ export const MobileAgentInstancesPane = memo(function MobileAgentInstancesPane({
         // when a caller already holds the map. Undefined leaves it reading for
         // itself, which is the mobile shell's path today.
         sourceByInstance={sourceByInstance}
+        // Issue #2395: the docked composer's target, so the shared pane's self
+        // guard can bite on a phone. Undefined leaves the pane on its DOM read.
+        composerTargetInstanceId={composerTargetInstanceId}
       />
 
       {/* Per-device "show as tabs" selection (localStorage, never the DB). */}

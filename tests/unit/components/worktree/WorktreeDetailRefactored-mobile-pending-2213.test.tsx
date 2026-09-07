@@ -127,6 +127,27 @@ vi.mock('@/components/worktree/ChatTranscript', () => ({
   CHAT_TRANSCRIPT_SCROLL_CONTAINER_TESTID: 'chat-transcript-scroll-container',
 }));
 
+// Issue #2395: the phone's Agent pane, stubbed down to the ONE prop this file
+// is about. The pane's own behaviour (which row loses the delegation item) is
+// pinned in `AgentInstancesPane-delegation-2376.test.tsx`; what only this render
+// can show is that the composer's live target actually travels
+// `WorktreeDetailRefactored` -> `MobileContent` -> `NotesAndLogsPane` -> here.
+vi.mock('@/components/worktree/MobileAgentInstancesPane', () => ({
+  MobileAgentInstancesPane: ({
+    composerTargetInstanceId,
+  }: {
+    composerTargetInstanceId?: string;
+  }) => (
+    <div data-testid="mobile-agent-instances-pane">
+      {/* A sentinel for "absent": absent is what leaves the shared pane on its
+          DOM read, which on a phone can never answer. */}
+      <span data-testid="agent-pane-composer-target">
+        {composerTargetInstanceId ?? '(none)'}
+      </span>
+    </div>
+  ),
+}));
+
 const { useTerminalPanePollingMock, useSplitMessagesMock } = vi.hoisted(() => ({
   useTerminalPanePollingMock: vi.fn(),
   useSplitMessagesMock: vi.fn(),
@@ -140,6 +161,10 @@ vi.mock('@/hooks/useSplitMessages', () => ({
 }));
 
 import { WorktreeDetailRefactored } from '@/components/worktree/WorktreeDetailRefactored';
+import {
+  CommandPaletteProvider,
+  useCommandPalette,
+} from '@/contexts/CommandPaletteContext';
 
 const WORKTREE_ID = 'wt-2213';
 
@@ -300,6 +325,126 @@ describe('[#2213] mobile screen: composer send → pending row on the chat surfa
 
     await act(async () => {
       resolveSend?.();
+    });
+  });
+});
+
+// ============================================================================
+// Issue #2395: the two things the phone's worktree screen was missing
+// ============================================================================
+
+/**
+ * Both halves of #2395 are SEAMS, and a seam is only visible when the whole
+ * screen is rendered:
+ *
+ *   - the command palette is mounted by `AppShell` on every mobile route, but
+ *     `/worktrees/*` is the one route that hides `GlobalMobileNav` — the only
+ *     thing that could open it. The trigger therefore has to live on this
+ *     screen's own header;
+ *   - the roster pane's "do not delegate to yourself" guard reads the chat
+ *     surface, and on a phone that surface belongs to a DIFFERENT tab. The
+ *     composer's target has to be handed down instead, and it is handed down
+ *     through three components that each own none of it.
+ */
+describe('[#2395] mobile screen: palette entry point and composer target', () => {
+  /** Reports the palette open state `AppShell`'s `<CommandPalette />` reads. */
+  function PaletteProbe() {
+    const { open } = useCommandPalette();
+    return <span data-testid="palette-open">{open ? 'open' : 'closed'}</span>;
+  }
+
+  const ROSTER = [
+    { id: 'claude', cliTool: 'claude', alias: 'Claude', order: 0 },
+    { id: 'codex', cliTool: 'codex', alias: 'Codex', order: 1 },
+  ];
+
+  beforeEach(() => {
+    window.localStorage.clear();
+    window.history.replaceState({}, '', `/worktrees/${WORKTREE_ID}`);
+    mockPaneState();
+    useSplitMessagesMock.mockReturnValue({
+      messages: [],
+      isLoading: false,
+      refresh: vi.fn(() => Promise.resolve()),
+    });
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string) => {
+        if (typeof url === 'string' && url.includes('/messages')) {
+          return Promise.resolve(jsonResponse([]));
+        }
+        if (typeof url === 'string' && url.includes('/current-output')) {
+          return Promise.resolve(
+            jsonResponse({ isRunning: false, isGenerating: false, content: '', thinking: false }),
+          );
+        }
+        return Promise.resolve(
+          jsonResponse({
+            id: WORKTREE_ID,
+            name: 'feature/2395',
+            path: '/tmp/wt',
+            repositoryPath: '/tmp/repo',
+            repositoryName: 'CommandMate',
+            agentInstances: ROSTER,
+          }),
+        );
+      }),
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+    window.history.replaceState({}, '', '/');
+  });
+
+  async function openToolsAgentTab(): Promise<void> {
+    await waitFor(() => {
+      expect(screen.getByTestId('mobile-tab-memo')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTestId('mobile-tab-memo'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Agent' }));
+  }
+
+  it('carries a command palette trigger on the header, and it opens the palette', async () => {
+    render(
+      <CommandPaletteProvider>
+        <PaletteProbe />
+        <WorktreeDetailRefactored worktreeId={WORKTREE_ID} />
+      </CommandPaletteProvider>,
+    );
+
+    // The route that hides GlobalMobileNav still renders this header.
+    const trigger = await screen.findByTestId('mobile-header-command-palette-trigger');
+    expect(screen.getByTestId('palette-open').textContent).toBe('closed');
+
+    fireEvent.click(trigger);
+
+    expect(screen.getByTestId('palette-open').textContent).toBe('open');
+  });
+
+  it('hands the Agent pane the instance the docked composer is addressing', async () => {
+    render(<WorktreeDetailRefactored worktreeId={WORKTREE_ID} />);
+    await openToolsAgentTab();
+
+    // `activeInstanceId` — the composer's send target — is the primary instance
+    // until a tab is switched.
+    await waitFor(() => {
+      expect(screen.getByTestId('agent-pane-composer-target').textContent).toBe('claude');
+    });
+  });
+
+  it('follows the composer when the operator switches agent tabs', async () => {
+    // The value has to be the LIVE target, not the roster's first row: a
+    // constant would pass the assertion above and still hide the wrong item.
+    render(<WorktreeDetailRefactored worktreeId={WORKTREE_ID} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /Codex/ }));
+    await openToolsAgentTab();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('agent-pane-composer-target').textContent).toBe('codex');
     });
   });
 });
