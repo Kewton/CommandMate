@@ -3,12 +3,18 @@
  *
  * ## Why the poller was not enough
  *
- * `lib/polling/structured-history-gate` is asked to record a turn at exactly one
- * moment: the poll on which the scraper decided the turn had finished and was
- * about to save its own copy. That is the right moment — doing the handover at
- * the point of the write is what makes it impossible for both writers to run —
- * but it is the *only* moment, and the decision behind it is a string analysis
- * of a terminal frame.
+ * `lib/polling/structured-history-gate` is asked to record a turn from exactly
+ * one place: the scraper's own judgement that the turn had finished and its copy
+ * was about to be saved. That is the right place — doing the handover at the
+ * point of the write is what makes it impossible for both writers to run — but
+ * the judgement behind it is a string analysis of a terminal frame, and the
+ * whole trigger hangs off it.
+ *
+ * Issue #2399 made the ask itself repeat: the poll that saves the scrape now
+ * re-asks the reader on the duplicate ticks after it, throttled, until it
+ * answers. That closes the case where the frame is judged finished BEFORE the
+ * transcript closes — the ordinary one. It does nothing for a completion the
+ * frame analysis never judges at all, which is the case below.
  *
  * When that analysis misses one completion the cost is not a delay. By the time
  * the next completion is judged, the newest turn is the next one; before #2246
@@ -115,12 +121,21 @@ export const STOP_TRANSCRIPT_RETRY_DELAY_MS = 500;
  *
  * #2264's own comment here used to add that "if the turn is still open after the
  * third ask, the next poll is the right place to notice". Issue #2398 measured
- * that sentence and it is two claims, of which only the first survives: the
- * poller does run again when the pane returns to the composer, but on the
- * measured codex incident it never reached the gate — its dedup returns before
- * the capture call (#2399). So the third ask is not backed by a second chance,
- * and raising the ceiling is not the fix for a tool that cannot close its turn
- * while this handler is running. That case leaves the awaited path entirely:
+ * that sentence and found two claims of which only the first held: the poller
+ * does run again when the pane returns to the composer, but on the measured
+ * codex incident it never reached the gate — its content dedup returned before
+ * the capture call. Issue #2399 fixed that half. A poll that skips a duplicate
+ * frame now re-asks the reader from inside the skip, throttled to one ask every
+ * three ticks, so the sentence is true again and the third attempt does have a
+ * second chance behind it.
+ *
+ * Which is a reason to leave this ceiling where it is, not to raise it. The
+ * recheck is what makes three enough: a fourth awaited ask would spend another
+ * 500 ms of the agent's stop path buying what a tick of the poller now provides
+ * for nothing. And it is still no answer for a tool that cannot close its turn
+ * while this handler is running, because there the first thing that has to
+ * happen is this handler returning — a backstop measured in poll ticks cannot
+ * bring that forward. That case leaves the awaited path entirely:
  * {@link STOP_TRANSCRIPT_DEFERRED_DELAYS_MS}.
  */
 export const STOP_TRANSCRIPT_MAX_ATTEMPTS = 3;
