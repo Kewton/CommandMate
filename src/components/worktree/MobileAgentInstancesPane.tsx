@@ -14,6 +14,28 @@
  *
  * This component renders the shared roster editor plus a "Show on this device"
  * checklist driven by the visibility props.
+ *
+ * ## Row actions, including "insert delegation brief" (Issue #2376 / #2382)
+ *
+ * Every per-row action a phone user sees here — rename, reorder, delete, and
+ * the #2376 "insert delegation brief into the composer" kebab item
+ * (`agent-instance-delegate-<id>`) — is rendered by the shared
+ * {@link AgentInstancesPane}. There is deliberately no mobile copy of the
+ * delegation item: its wording (`DELEGATE_TEXT`), its two server reads
+ * (`fetchDelegationBrief`) and its delivery (`insertIntoVisibleComposer`) are
+ * one implementation, so a `grep delegat` on this file finding nothing is
+ * expected, not a gap. On a phone that item lands in the composer docked under
+ * EVERY mobile tab (`MobileComposer` in `WorktreeDetailRefactored`), so it
+ * works from the Tools tab this pane lives on; the "no composer" toast is
+ * reachable only where no composer is mounted at all.
+ *
+ * "Do not delegate to yourself" is the shared pane's guard too, and it reads
+ * the chat surface's `data-instance-id`. That surface is never mounted at the
+ * same time as this pane (it belongs to the terminal tab), so on a phone the
+ * guard answers "unknown" and lets the insert through — the same outcome PC
+ * has in terminal mode, by the same design (see `readVisibleChatInstanceId`).
+ * Making it bite here would need the docked composer's target instance to
+ * reach this pane, which no prop threads today.
  */
 
 'use client';
@@ -109,7 +131,9 @@ export const MobileAgentInstancesPane = memo(function MobileAgentInstancesPane({
 
   return (
     <div data-testid="mobile-agent-instances-pane">
-      {/* Shared roster editor (entity + alias → DB, consistent with PC). */}
+      {/* Shared roster editor (entity + alias → DB, consistent with PC).
+          Issue #2382: this is also where the phone gets the #2376 "insert
+          delegation brief" row action — see the module comment above. */}
       <AgentInstancesPane
         worktreeId={worktreeId}
         instances={instances}
