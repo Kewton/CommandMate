@@ -464,4 +464,72 @@ describe('RepositoryTabBar (Issue #2374)', () => {
       ).toEqual(SAVED_ORDER);
     });
   });
+
+  /**
+   * Issue #2374 follow-up: the tab used to mark a repository with an 8px
+   * colour chip, which sat a few pixels from the aggregated `StatusDot` and
+   * read as a second status dot. The tab now uses the sidebar's folder glyph.
+   *
+   * The assertion compares the two surfaces rather than a hand-written path:
+   * "same icon as the sidebar" is the requirement, so a test that pinned a
+   * literal `d` would keep passing if only one of the two ever changed.
+   */
+  describe('repository glyph agrees with the sidebar', () => {
+    it('marks a tab with the sidebar\'s folder icon, not a second dot', async () => {
+      renderStrip(<Sidebar />);
+      await waitFor(() => expect(tabNames()).toEqual(SAVED_ORDER));
+      await waitFor(() =>
+        expect(screen.getAllByTestId('group-header')).toHaveLength(2)
+      );
+
+      // A group header paints two glyphs — the expand chevron and the folder —
+      // so the assertion is that the tab's glyph is ONE OF the sidebar's, not
+      // that it is the first one.
+      const sidebarPaths = Array.from(
+        screen.getAllByTestId('group-header')[0].querySelectorAll('svg path')
+      ).map((path) => path.getAttribute('d'));
+      expect(sidebarPaths.length).toBeGreaterThan(1);
+
+      const tab = screen.getAllByTestId('repository-tab')[0];
+      const tabPath = tab.querySelector('svg path')?.getAttribute('d');
+
+      expect(tabPath).toBeTruthy();
+      expect(sidebarPaths).toContain(tabPath);
+
+      // The old chip was the only `rounded-sm` box in the tab; the status dot
+      // it was confused with is `rounded-full`, so its absence is what says
+      // the two shapes are no longer the same.
+      expect(tab.querySelector('span.rounded-sm')).toBeNull();
+    });
+
+    it('marks an overflow row with the same folder icon', async () => {
+      renderStrip(<Sidebar />);
+      await waitFor(() => expect(tabNames()).toEqual(SAVED_ORDER));
+      await waitFor(() =>
+        expect(screen.getAllByTestId('group-header')).toHaveLength(2)
+      );
+      const sidebarPaths = Array.from(
+        screen.getAllByTestId('group-header')[0].querySelectorAll('svg path')
+      ).map((path) => path.getAttribute('d'));
+
+      // jsdom has no layout, so the overflow menu only exists once the strip is
+      // told it does not fit — the same stubbing the `overflow` suite uses.
+      const strip = screen.getByTestId('repository-tab-strip');
+      Object.defineProperty(strip, 'scrollWidth', { value: 1200, configurable: true });
+      Object.defineProperty(strip, 'clientWidth', { value: 400, configurable: true });
+      act(() => {
+        window.dispatchEvent(new Event('resize'));
+      });
+
+      fireEvent.click(screen.getByTestId('repository-tab-overflow'));
+      const menu = screen.getByTestId('repository-tab-overflow-menu');
+      const rowPath = within(menu)
+        .getAllByTestId('repository-tab-overflow-item')[0]
+        .querySelector('svg path')
+        ?.getAttribute('d');
+
+      expect(rowPath).toBeTruthy();
+      expect(sidebarPaths).toContain(rowPath);
+    });
+  });
 });

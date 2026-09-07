@@ -54,6 +54,7 @@ import { useWorktreeSelection } from '@/contexts/WorktreeSelectionContext';
 import { usePcDisplaySizeContext } from '@/contexts/PcDisplaySizeContext';
 import { useViewTransitionRouter } from '@/components/providers/ViewTransitionsProvider';
 import { BranchListItem } from '@/components/sidebar/BranchListItem';
+import { GroupIcon } from '@/components/ui/GroupIcon';
 import { StatusDot } from '@/components/ui/StatusDot';
 import { useWorktreeList } from '@/hooks/useWorktreeList';
 import { toBranchItem } from '@/types/sidebar';
@@ -436,7 +437,8 @@ export const RepositoryTabBar = memo(function RepositoryTabBar() {
 // ============================================================================
 
 /**
- * One repository's tab: colour chip, name, aggregated status dot and — only
+ * One repository's tab: folder icon in the repository colour, name, aggregated
+ * status dot and — only
  * when something is blocked — the count of branches waiting for the user.
  */
 const RepositoryTab = memo(function RepositoryTab({
@@ -492,10 +494,9 @@ const RepositoryTab = memo(function RepositoryTab({
         }
       `}
     >
-      <span
-        aria-hidden="true"
-        className="h-2 w-2 flex-shrink-0 rounded-sm"
-        style={{ backgroundColor: generateRepositoryColor(group.repositoryName) }}
+      <GroupIcon
+        className="h-3.5 w-3.5"
+        color={generateRepositoryColor(group.repositoryName)}
       />
       <span className="min-w-0 truncate">{group.repositoryName}</span>
       <StatusDot
@@ -675,10 +676,9 @@ function OverflowMenu({
                 transition-colors hover:bg-sidebar-hover
                 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
             >
-              <span
-                aria-hidden="true"
-                className="h-2 w-2 flex-shrink-0 rounded-sm"
-                style={{ backgroundColor: generateRepositoryColor(group.repositoryName) }}
+              <GroupIcon
+                className="h-3.5 w-3.5"
+                color={generateRepositoryColor(group.repositoryName)}
               />
               <span className="min-w-0 flex-1 truncate">{group.repositoryName}</span>
               <StatusDot
