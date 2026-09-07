@@ -11,7 +11,10 @@
  *    agent has CLOSED, which is a stronger statement than any amount of quiet,
  *    so the capture is delivered as soon as it lands. Both triggers of that
  *    capture — the Stop hook and the poller — reach the same function, which is
- *    why this module needs one hook and not two.
+ *    why this module needs one hook and not two. For these five the transcript
+ *    is also the ONLY thing a reply may be read from: the poller's own scrape
+ *    of the same turn arrives first and carries junk (Issue #2401), so an
+ *    unmarked row is stepped over and the marked one waited for.
  *  - **Tools without one** (copilot, gemini, vibe-local). What a finished turn
  *    leaves behind is the poller's copy of the SCREEN, judged by a string
  *    analysis of a frame that may still be being drawn. The Issue asks for
@@ -52,6 +55,7 @@ import {
 import {
   getLatestOpenPromptMessage,
   getMessages,
+  MODEL_CHANGE_REQUEST_ID_PREFIX,
   relayRequestId,
   RELAY_SYSTEM_REQUEST_ID_PREFIX,
 } from '@/lib/db/chat-db';
@@ -89,6 +93,91 @@ const REPLY_LOOKBACK_MESSAGES = 40;
 const SCRAPE_STABILITY_ATTEMPTS = 3;
 
 /**
+ * The `request_id` shape a transcript reader mints for a finished turn.
+ *
+ * `claude-turn:<uuid>`, `codex-turn:<turn_id>`, `antigravity-turn:<id>`,
+ * `command-code-turn:<id>` and opencode's `oc-turn:<message id>`. Matched as a
+ * SHAPE rather than as a list of five literals for the reason `ask`'s copy of
+ * this line gives (Issue #2386): the sixth reader lands INSIDE the filter
+ * instead of silently outside it. A `:` cannot appear in any of the ids
+ * themselves, so this cannot match a row that merely contains the text.
+ *
+ * Copied rather than imported, deliberately. `src/cli/commands/ask.ts` has the
+ * same regexp, and importing it here would invert the dependency (lib reaching
+ * into the CLI bundle); `AGENT_MARKDOWN_REQUEST_ID_PREFIXES` in
+ * `src/types/agent-transcript.ts` is the LIST form this shape is chosen not to
+ * be. One regexp in each layer is cheaper than either edge.
+ */
+const TURN_REQUEST_ID_PATTERN = /-turn:/;
+
+/**
+ * Request-id namespaces CommandMate writes ABOUT a session, not for it.
+ *
+ * `chat_messages` has no `system` role, so "reply from X" (Issue #2377) and
+ * "the model changed" (Issue #2357) are both stored as assistant rows and told
+ * apart by their request id. Neither is a word the worker said, and handing the
+ * relay's own notice back to the session it came from is the smallest possible
+ * loop. `ask` steps over exactly these two for the same reason.
+ */
+const SYSTEM_ROW_REQUEST_ID_PREFIXES = [
+  RELAY_SYSTEM_REQUEST_ID_PREFIX,
+  MODEL_CHANGE_REQUEST_ID_PREFIX,
+] as const;
+
+/**
+ * Whether this tool's reply is read out of a transcript rather than off a screen.
+ *
+ * For the five that answer `true` the ledger is authoritative: a row with no
+ * turn marker was written by the SCRAPER, and for these tools a scraped row is
+ * never the answer — it is a footer line, a half-drawn frame or the ANSI dump
+ * the send path flushes (Issues #2398 / #2400). The relay may therefore hold
+ * out for a marked row. For copilot, gemini and vibe-local the scraper's row is
+ * the only record there will ever be, and demanding a marker would deliver
+ * nothing, ever.
+ *
+ * A record and not a `Set`, so a ninth entry in `CLI_TOOL_IDS` fails `tsc` here
+ * instead of quietly defaulting to "screen-scraped" — the idiom
+ * `cli-tools/install-hints` uses for the same reason.
+ *
+ * Deliberately NOT `isPullTranscriptHistory`: that asks who does the READING,
+ * so opencode (whose own server pushes) answers `false` even though its rows
+ * carry `oc-turn:` like the other four. It also lives in `lib/polling`, whose
+ * module graph reaches this file's triggers — importing it would close a cycle
+ * the relay was built to avoid.
+ */
+const TRANSCRIPT_READER_TOOLS: Readonly<Record<CLIToolType, boolean>> = {
+  claude: true,
+  codex: true,
+  antigravity: true,
+  'command-code': true,
+  opencode: true,
+  copilot: false,
+  gemini: false,
+  'vibe-local': false,
+};
+
+/**
+ * How long the scrape path holds out for the transcript row.
+ *
+ * Issue #2386 measured the gap on codex 0.153.4 at 5.2 s: the scraper writes
+ * the pane into the ledger in the millisecond before the send, and the rollout
+ * reader writes the real answer about five seconds after the completion was
+ * already announced. Three times the measured gap, the same window `ask` holds,
+ * and spent only when the ledger has nothing marked yet — a worker whose
+ * transcript already landed stashes on the first read.
+ *
+ * When it does elapse nothing is delivered. That is the safe direction and not
+ * a lost answer: the relay is a STANDING instruction, so the transcript
+ * reader's own `settled` announcement (or the next completion) still delivers,
+ * and if neither ever comes the requester is told by the expiry notice rather
+ * than by a footer line dressed up as the reply.
+ */
+const RELAY_TURN_ROW_GRACE_MS = 15_000;
+
+/** How often the grace above re-reads the ledger. */
+const RELAY_TURN_ROW_POLL_MS = 1_000;
+
+/**
  * Relays being delivered right now, by id.
  *
  * On `globalThis` for the reason every shared map in this subsystem is (#1736):
@@ -124,14 +213,40 @@ function senderLabel(db: Database.Database, relay: SessionRelay): RelaySenderLab
   return { alias: worker.alias, worktreeId: worker.worktreeId };
 }
 
+/** Whether a row's `request_id` says a transcript reader wrote it. */
+function isTurnRow(requestId: string | null | undefined): boolean {
+  return typeof requestId === 'string' && TURN_REQUEST_ID_PATTERN.test(requestId);
+}
+
+/** Whether a row is CommandMate's own furniture rather than the worker's words. */
+function isSystemRow(requestId: string | null | undefined): boolean {
+  return typeof requestId === 'string'
+    && SYSTEM_ROW_REQUEST_ID_PREFIXES.some((prefix) => requestId.startsWith(prefix));
+}
+
+/** Whether this worker's answer is only ever a transcript row. */
+function requiresTurnRow(cliToolId: CLIToolType): boolean {
+  return TRANSCRIPT_READER_TOOLS[cliToolId] === true;
+}
+
 /**
  * The newest thing B actually said, at or after `since`.
  *
- * Three kinds of row are stepped over, and each exclusion is load-bearing:
+ * Four kinds of row are stepped over, and each exclusion is load-bearing:
  * prompt rows (a question is not an answer, and the confirmation notice is a
- * separate delivery), relay SYSTEM rows (this session's own transcript
- * furniture — delivering "Reply from X" back to X is the smallest possible
- * loop), and empty bodies.
+ * separate delivery), CommandMate's own system rows (delivering "Reply from X"
+ * back to X is the smallest possible loop), empty bodies — and, for a tool that
+ * keeps a transcript, every row the SCRAPER wrote.
+ *
+ * That last one is Issue #2401. Until it was added the filter looked only at
+ * shape, never at provenance, so the newest row won whatever had written it:
+ * a codex footer line, a partial scrape, or the raw ANSI the send path flushes
+ * lands in the ledger with `request_id IS NULL` and, being newest, WAS the
+ * reply — forwarded to the requesting agent as the worker's own answer, which
+ * it then summarises. #2386 fixed the identical hole in `ask` by demanding the
+ * turn marker; the relay looked exempt only because its 15-second pump usually
+ * gave the transcript time to land, and a race the timing usually wins is still
+ * a race.
  */
 export function findWorkerReply(
   db: Database.Database,
@@ -144,12 +259,14 @@ export function findWorkerReply(
     instanceId: worker.instanceId,
     matchResolvedInstance: true,
   });
+  const requireTurnRow = requiresTurnRow(worker.cliToolId);
 
   // `getMessages` answers newest-first, so the first candidate IS the newest.
   for (const message of messages) {
     if (message.role !== 'assistant') continue;
     if (message.messageType === 'prompt') continue;
-    if (message.requestId?.startsWith(RELAY_SYSTEM_REQUEST_ID_PREFIX)) continue;
+    if (isSystemRow(message.requestId)) continue;
+    if (requireTurnRow && !isTurnRow(message.requestId)) continue;
     if (message.content.trim() === '') continue;
     return message.timestamp.getTime() < since ? null : message;
   }
@@ -208,6 +325,45 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
+ * Hold out for the transcript row this scrape got ahead of, then stash it.
+ *
+ * Called for a tool whose answers come out of a transcript, on the completion
+ * edge the POLLER raised — which is the edge that fires early. #2386 measured
+ * the reader landing about five seconds behind it, so re-reading beats both
+ * giving up on the first look and delivering what is there instead.
+ *
+ * The re-read is {@link stashReplyForOpenRelays} and not
+ * {@link findWorkerReply}, because "is there an answer yet" has to be asked per
+ * relay against that relay's own `createdAt`: a marked row older than the relay
+ * answered somebody else's question and must not end the wait. The stash itself
+ * is guarded on `pending_kind IS NULL`, so asking repeatedly costs reads and
+ * never a second payload.
+ *
+ * Returns having delivered nothing when the grace elapses. See
+ * {@link RELAY_TURN_ROW_GRACE_MS} for why that is the safe direction.
+ */
+async function deliverWhenTranscriptCatchesUp(
+  db: Database.Database,
+  worker: RelayWorkerRef
+): Promise<void> {
+  const deadline = Date.now() + RELAY_TURN_ROW_GRACE_MS;
+  for (;;) {
+    if (stashReplyForOpenRelays(db, worker, Date.now()) > 0) {
+      void pumpRelayDeliveries();
+      return;
+    }
+    if (Date.now() >= deadline) break;
+    await sleep(RELAY_TURN_ROW_POLL_MS);
+  }
+  logger.info('relay-scrape-row-not-transcript-backed', {
+    worktreeId: worker.worktreeId,
+    cliToolId: worker.cliToolId,
+    instanceId: worker.instanceId,
+    graceMs: RELAY_TURN_ROW_GRACE_MS,
+  });
+}
+
+/**
  * B finished a turn. Deliver it, or arrange to.
  *
  * @param worker - The session that finished
@@ -228,6 +384,16 @@ export async function notifyRelayTurnCompleted(
 
     if (options.settled) {
       if (stashReplyForOpenRelays(db, worker, Date.now()) > 0) void pumpRelayDeliveries();
+      return;
+    }
+
+    // The scrape path, and it forks on who is allowed to write this worker's
+    // answers. A tool with a transcript has an authoritative record, so the
+    // scraped row this announcement is about is not a candidate at all — the
+    // relay waits for the marked one instead of watching an unmarked one hold
+    // still (Issue #2401).
+    if (requiresTurnRow(worker.cliToolId)) {
+      await deliverWhenTranscriptCatchesUp(db, worker);
       return;
     }
 
