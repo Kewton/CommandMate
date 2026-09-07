@@ -1,0 +1,108 @@
+version: 1
+title: "Issue #2386: codex で commandmate ask が返答ではなく空のコンポーザーを返す（exit 0 のまま）"
+goal: |
+  https://github.com/Kewton/CommandMate/issues/2386 を実装する。
+
+  ## 現象（実測済み。UAT 2026-09-07、隔離サーバ、codex 0.153.4、3回中3回再現）
+  `commandmate ask <wt> --instance codex "<質問>"` が **exit 0 を返すのに、stdout が返答本文ではなく
+  「空のコンポーザー」**（ANSI 付き）になる。`--json` でも同じ内容が `reply` に入る。codex 自身は
+  正しく答えており（ペインにも `chat_messages` にも正しい行がある）、壊れているのは `ask` の読み取り側。
+
+  claude では再現しない。
+
+  ## 機構（実測済み）
+  codex のスクリーンスクレイパが、**送信の直前にアイドルのコンポーザーを assistant 行として
+  `chat_messages` に書く**。この行は `request_id` が NULL で、本文は生 ANSI。実測（時刻昇順）:
+
+  ```
+  05:49:53.518 | assistant | request_id=NULL          | (ANSI) "Ask Codex to do anything..."  <- junk
+  05:49:53.519 | user      | codex-prompt:01a07a6a-.. | "5+6 は？ 答えの数字だけを返してください。"
+  05:49:58.706 | assistant | codex-turn:01a07a6a-7a.. | "11"                                  <- 本物（5.2秒後）
+  ```
+
+  `ask` は `wait` が `basis=hook_stop` で完了を告げた**その瞬間**に History を読むため、本物の転写行が
+  着地する前に junk を拾う。`src/cli/commands/ask.ts:160-169` の `readLatestReply` のフィルタは
+  `role/messageType/content/timestamp` しか見ておらず、turn の `requestId` を要求していない。
+
+  **対照**: #2377 の relay 配送（`findWorkerReply`、`src/lib/relay/relay-delivery.ts:136-157`）は
+  同じ状況で正しく本物の行を配送した。差は 15 秒周期の配送ポンプが結果的に猶予になっていたこと。
+
+  ## 対応（この Issue の scope）
+  1. **turn の `requestId` を要求する**。転写リーダーを持つツール（claude / codex / antigravity /
+     command-code / opencode）が書く「本物の返答行」は `request_id` が `<tool>-turn:<id>` の形（例:
+     `codex-turn:01a07a6a-...`、`claude-turn:...`）で入る。junk 行は `request_id` が NULL。
+     `readLatestReply` のフィルタに **`requestId` が非 null であること**を追加する
+     （`requestId` が undefined/null の行は候補から除外）。
+     - **ただし** `--json` の `source` が `"pane"` になる経路（copilot / gemini / vibe-local など
+       転写を持たないツールの `readSqueezedPaneTail` フォールバック）はこの限りではない。そちらは
+       元々 History を経由しないので変更不要
+  2. **`requestId` が API レスポンスまで届いていない。** `PromptMessageResponse`
+     （`src/cli/types/api-responses.ts:982-993`）に `requestId` フィールドが無く、
+     `GET /api/worktrees/:id/messages` のルート（`src/app/api/worktrees/[id]/messages/route.ts`）も
+     `requestId` を wire へ出していない（`chat-db.ts` の内部 `ChatMessage` 型は既に
+     `requestId: row.request_id || undefined` を持っている＝サーバ内では既に読めている）。
+     - `PromptMessageResponse` に `requestId?: string;` を追加
+     - route のレスポンス組み立てに `requestId: m.requestId` を追加（既存フィールドと同じ場所）
+     - `ask.ts` のフィルタで `m.requestId` を見る
+  3. **完了検知から転写行の着地までの猶予**（対応案 2、任意）: 1 だけで「junk しか無ければ null を
+     返す」形に直った場合、`ask` は `readLatestReply` が null を返した時点で `capture` フォールバック
+     （`readSqueezedPaneTail`）に落ちる実装（既存の `source: "pane"` 経路）が既にあるかを確認し、
+     無ければ「本物の turn 行が現れるまで数秒だけ短くポーリングしてから諦める」猶予を足す。
+     **1 だけで受入条件を満たせるなら 3 は実装しなくてよい**（過剰実装を避ける）。
+  4. `ask --json` の `reply` から ANSI 制御文字を落とす防御を追加する（1・2 で junk が消えても、
+     防御として）
+
+  ## 受入条件
+  - [ ] `commandmate ask <wt> --instance codex "1+1 は？"` が exit 0 で `2` だけを stdout に出す
+        （実機 3 回連続、claude ↔ codex）
+  - [ ] `--json` の `reply` に ANSI 制御文字（`\x1b` 等）が含まれない
+  - [ ] `commandmate peers` が出した `ask` 行をそのまま実行して codex から返答本文が返る
+  - [ ] `request_id` が NULL の assistant 行（junk）を挟んだ History を fixture にした回帰テストがあり、
+        **その fixture 込みで `ask` が正しい turn 行を選ぶこと**をユニットテストで確認している。
+        junk 行を候補から外す条件を無効化する変異注入で赤くなることを確認する
+  - [ ] 既存の claude 経路（`ask ... --instance claude` は `2` だけを返す）が壊れていない（回帰無し）
+  - [ ] `npm run lint` / `npx tsc --noEmit` / `npm run test:unit` が exit 0
+
+  ## スコープ外
+  - codex スクレイパが junk 行を書くこと自体の修正（#2192 系のチャット面汚染。根治すれば本Issueも
+    自然に消えるが、本Issueは消費側の防御に限定する）
+  - #2387（relay の hops）— 別Issue。ファイルも別（本Issueは `src/lib/relay/**` に触れない）
+
+  ## 関連
+  #2376（`ask` の実装）、#2377（対照として有用）、Kewton/commandmate-skills#241
+
+  ## 作業ルール（厳守）
+  - **`CHANGELOG.md` と `docs/module-reference.md` を編集しないでください**（scope外です）。
+    代わりに次の2ファイルを書いてください。どちらも `dev-reports/` 配下なので commit には
+    入りません。
+    - `dev-reports/changelog/issue-2386.md` — `CHANGELOG.md` の `## [Unreleased]` にそのまま
+      貼れる1エントリ（先頭は `- **<type>(<scope>): …** (#2386): …`）。1行目にコメントで
+      どの節（`### Added` / `### Changed` / `### Fixed`）に入るかを書く。
+      `- **` で始めること（`grep -cE '^- \*\*'` で集計する）。`(#2386)` は要約の外
+      （`**` を閉じた後）に置くこと。1エントリ＝1行（折らない）。
+    - `dev-reports/module-reference/issue-2386.md` — `docs/module-reference.md` の表に足す
+      注記を行キー（`| \`path\` |`）ごとに列挙する。既存行に足すときは
+      `grep -n '^| \`<path>\`' docs/module-reference.md` を実行し、その出力（行番号つきの
+      行キー）を断片に書き写してから書くこと。0件だった行への追記は指示しない
+      （新しい行を足すなら「新規行」と明記する）。足すものが無ければ「追記なし」の1行でよい。
+  - 断片が無いとリリースノートと module-reference に載らない。実装と同じ commit の時点で
+    書くこと。
+  - **`src/lib/relay/**` には触れないこと。** #2387 が並行して同じ症状の別ファイルを扱っている。
+    重複行の根治や relay 側の hops 計算は本Issueのscope外。
+scope:
+  allow:
+    - "src/cli/commands/ask.ts"
+    - "src/cli/types/api-responses.ts"
+    - "src/app/api/worktrees/[id]/messages/route.ts"
+    - "tests/unit/cli/commands/ask-2376.test.ts"
+    - "tests/unit/cli/commands/**"
+    - "tests/integration/api-messages.test.ts"
+    - "dev-reports/changelog/issue-2386.md"
+    - "dev-reports/module-reference/issue-2386.md"
+  deny:
+    - "src/lib/relay/**"
+verify:
+  # 既定（省略）= 登録済み全ゲート
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true

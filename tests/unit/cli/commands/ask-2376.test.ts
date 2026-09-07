@@ -25,6 +25,7 @@ afterEach(() => {
   mockExit.mockClear();
   mockConsoleLog.mockClear();
   mockConsoleError.mockClear();
+  vi.useRealTimers();
 });
 
 /** A frame that says "the turn ended", as `wait`'s own tests spell it. */
@@ -53,6 +54,14 @@ function resolveTarget(cliToolId: string, instanceId: string) {
   return { data: { cliToolId, instanceId, resolvedBy: 'roster', conflict: null } };
 }
 
+/**
+ * A reply row as a transcript reader writes it.
+ *
+ * `requestId` is not decoration: since Issue #2386 a row with no `<tool>-turn:`
+ * marker is a screen scrape rather than the agent's words, and `ask` will not
+ * print one for a tool that has a transcript reader. A fixture without it would
+ * be asserting the defect.
+ */
 function chatRow(overrides: Record<string, unknown> = {}) {
   return {
     id: 'm1',
@@ -61,6 +70,7 @@ function chatRow(overrides: Record<string, unknown> = {}) {
     content: '2 です',
     timestamp: new Date(Date.now() + 1000).toISOString(),
     messageType: 'normal',
+    requestId: 'codex-turn:01a07a6a',
     archived: false,
     ...overrides,
   };
@@ -130,7 +140,13 @@ describe('ask: the successful round trip', () => {
     expect(String(callsTo('/resolve-target')[0][0])).toContain('instance=Codex+2');
   });
 
+  // Issue #2386: for a tool with a transcript reader `ask` now holds out for a
+  // turn row for a few seconds before giving up, so the two "there is no answer
+  // here" cases below have to be driven through that window. Timers are faked
+  // rather than waited on; the fetch sequence runs dry inside the window and
+  // every further read fails closed, which is the state under test.
   it('ignores an assistant row written before the send (previous turn)', async () => {
+    vi.useFakeTimers();
     const stale = chatRow({
       id: 'old',
       content: 'answer to the PREVIOUS question',
@@ -144,13 +160,18 @@ describe('ask: the successful round trip', () => {
     ]);
 
     const { createAskCommand } = await import('../../../../src/cli/commands/ask');
-    await createAskCommand().parseAsync(['node', 'ask', 'wt1', 'hi', '--instance', 'codex']);
+    const pending = createAskCommand().parseAsync(
+      ['node', 'ask', 'wt1', 'hi', '--instance', 'codex']
+    );
+    await vi.advanceTimersByTimeAsync(20_000);
+    await pending;
 
     expect(mockConsoleLog).not.toHaveBeenCalled();
     expect(mockConsoleError.mock.calls.flat().join('\n')).toContain('no reply could be read');
   });
 
   it('never prints a prompt row as if it were an answer', async () => {
+    vi.useFakeTimers();
     const promptRow = chatRow({
       messageType: 'prompt',
       content: 'Continue?',
@@ -164,7 +185,11 @@ describe('ask: the successful round trip', () => {
     ]);
 
     const { createAskCommand } = await import('../../../../src/cli/commands/ask');
-    await createAskCommand().parseAsync(['node', 'ask', 'wt1', 'hi', '--instance', 'codex']);
+    const pending = createAskCommand().parseAsync(
+      ['node', 'ask', 'wt1', 'hi', '--instance', 'codex']
+    );
+    await vi.advanceTimersByTimeAsync(20_000);
+    await pending;
 
     expect(mockConsoleLog).not.toHaveBeenCalled();
   });

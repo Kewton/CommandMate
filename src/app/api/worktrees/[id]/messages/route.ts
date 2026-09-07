@@ -112,6 +112,14 @@ export async function GET(
       (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
     );
 
+    // The whole `ChatMessage` goes on the wire, `requestId` included. That is
+    // not incidental any more (Issue #2386): `commandmate ask` decides whether
+    // an assistant row is the agent's own reply or a scrape of its idle
+    // composer by looking at nothing but `request_id` — a row keyed
+    // `<tool>-turn:<id>` was written by a transcript reader, a row with none
+    // came off the screen. Narrowing this response to a hand-picked field list
+    // would take that field away and put the junk back on the caller's stdout,
+    // so tests/integration/api-messages.test.ts pins the field's presence.
     return NextResponse.json(chronologicalMessages, { status: 200 });
   } catch (error) {
     logger.error('error-fetching-messages:', { error: error instanceof Error ? error.message : String(error) });

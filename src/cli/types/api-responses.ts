@@ -989,6 +989,26 @@ export interface PromptMessageResponse {
   promptData?: PromptData;
   cliToolId?: string;
   instanceId?: string;
+  /**
+   * The producer's own id for this row, when it had one (Issue #2386).
+   *
+   * `chat_messages.request_id`, already carried by the server's internal
+   * `ChatMessage` and already serialized by
+   * `GET /api/worktrees/:id/messages` — it was simply missing from this mirror,
+   * so the CLI could not see the one field that separates a transcript reader's
+   * row from a screen scrape.
+   *
+   * It is a namespace plus an id, and the namespace is what a reader matches:
+   * `<tool>-turn:<id>` (`codex-turn:`, `claude-turn:`, `antigravity-turn:`,
+   * `command-code-turn:`, opencode's `oc-turn:`) means "a transcript reader
+   * wrote this, and it is the agent's own words"; `relay-sys:` / `model-changed:`
+   * mean "CommandMate wrote this about the session"; **absent** means the row
+   * came off the screen. `ask` requires the first of those (Issue #2386): the
+   * codex scraper writes the idle composer into the ledger as an assistant row
+   * with no request id in the millisecond before a send, and that junk was
+   * being printed as the answer.
+   */
+  requestId?: string;
   archived: boolean;
 }
 
