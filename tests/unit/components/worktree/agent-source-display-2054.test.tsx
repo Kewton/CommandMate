@@ -255,7 +255,16 @@ describe('[#2054] AgentInstancesPane warning row', () => {
     renderPane([primary('claude', 0), primary('codex', 1)]);
 
     await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(mockFetch).not.toHaveBeenCalled();
+    // Issue #2377 added ONE read to this pane — the relay badges' `/api/relays`
+    // — and it is deliberately excluded here rather than folded in: the
+    // invariant #2054 established is that a roster of hook tools does not start
+    // polling the SESSION STATUS because an opencode-only feature landed, and
+    // that is what the filter below still asserts. A relay badge applies to
+    // every session equally, so it is not the cost this test exists to bound.
+    const otherReads = mockFetch.mock.calls
+      .map((call) => String(call[0]))
+      .filter((url) => !url.startsWith('/api/relays'));
+    expect(otherReads).toEqual([]);
   });
 
   it('reads the status map itself when the caller supplies none', async () => {
@@ -283,6 +292,15 @@ describe('[#2054] AgentInstancesPane warning row', () => {
     renderPane([primary('opencode', 0)], { opencode: LIVE_SSE });
 
     await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(mockFetch).not.toHaveBeenCalled();
+    // Issue #2377 added ONE read to this pane — the relay badges' `/api/relays`
+    // — and it is deliberately excluded here rather than folded in: the
+    // invariant #2054 established is that a roster of hook tools does not start
+    // polling the SESSION STATUS because an opencode-only feature landed, and
+    // that is what the filter below still asserts. A relay badge applies to
+    // every session equally, so it is not the cost this test exists to bound.
+    const otherReads = mockFetch.mock.calls
+      .map((call) => String(call[0]))
+      .filter((url) => !url.startsWith('/api/relays'));
+    expect(otherReads).toEqual([]);
   });
 });

@@ -317,8 +317,17 @@ export type ChatRole = 'user' | 'assistant';
 
 /**
  * Message type discriminator
+ *
+ * Issue #2377 adds `relay`: a user row that another SESSION produced rather
+ * than a person or a timer. It is a message type and not a role because the row
+ * really is a user turn — it was typed into this agent's composer and the agent
+ * answered it — and because `role` has exactly two values that every reader of
+ * the column branches on. What the discriminator buys is the ability to tell
+ * "somebody delegated this to me" from "my operator asked me this", which is
+ * what History marks and what the loop guard reads (a session may not, by
+ * default, open a new relay while answering a relayed message).
  */
-export type MessageType = 'normal' | 'prompt' | 'prompt_response';
+export type MessageType = 'normal' | 'prompt' | 'prompt_response' | 'relay';
 
 /**
  * Prompt type discriminator

@@ -156,8 +156,21 @@ function actions(): HTMLElement {
 }
 
 /** Every `keys` array POSTed to `/special-keys`, in order. */
+/**
+ * The requests this surface made that are NOT the relay-badge read (#2377).
+ *
+ * `/api/relays?worktree=…` is issued on mount, so indexing `fetchMock.mock.calls`
+ * would pin the ORDER of two unrelated effects. Every assertion below is taken
+ * over the key traffic instead.
+ */
+function keyCalls(): Array<[string, RequestInit]> {
+  return fetchMock.mock.calls
+    .filter((call) => !String(call[0]).startsWith('/api/relays'))
+    .map((call) => [String(call[0]), (call[1] ?? {}) as RequestInit]);
+}
+
 function sentKeys(): string[][] {
-  return fetchMock.mock.calls.map(([, init]) => JSON.parse((init as RequestInit).body as string).keys);
+  return keyCalls().map(([, init]) => JSON.parse(init.body as string).keys);
 }
 
 let fetchMock: ReturnType<typeof vi.fn>;
@@ -190,8 +203,8 @@ describe('[#2297] A. claude /model gets both halves of its own footer', () => {
 
     fireEvent.click(screen.getByTestId('selection-commit-session'));
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0];
+    expect(keyCalls()).toHaveLength(1);
+    const [url, init] = keyCalls()[0];
     expect(url).toBe(`/api/worktrees/${WORKTREE_ID}/special-keys`);
     expect(JSON.parse((init as RequestInit).body as string)).toEqual({
       cliToolId: 'claude',
@@ -213,7 +226,7 @@ describe('[#2297] A. claude /model gets both halves of its own footer', () => {
 
     fireEvent.click(screen.getByTestId('selection-commit-session'));
 
-    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+    expect(JSON.parse(keyCalls()[0][1].body as string)).toEqual({
       cliToolId: 'claude',
       keys: [SESSION_SCOPE_KEY],
       instanceId: 'claude-2',
@@ -366,7 +379,7 @@ describe('[#2297] C. opencode gets the keys that actually change its model', () 
 
     fireEvent.click(screen.getByTestId('opencode-model-key-models'));
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(keyCalls()).toHaveLength(1);
     expect(sentKeys()).toEqual([['C-x', 'm']]);
   });
 

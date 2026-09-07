@@ -146,6 +146,20 @@ function actions(): HTMLElement {
 
 let fetchMock: ReturnType<typeof vi.fn>;
 
+/**
+ * The requests this surface made that are NOT the relay-badge read (#2377).
+ *
+ * `/api/relays?worktree=…` is issued on mount, so indexing `fetchMock.mock.calls`
+ * would pin the ORDER of two unrelated effects. Every assertion below is taken
+ * over the key traffic instead.
+ */
+function keyCalls(): Array<[string, RequestInit]> {
+  return fetchMock.mock.calls
+    .filter((call) => !String(call[0]).startsWith('/api/relays'))
+    .map((call) => [String(call[0]), (call[1] ?? {}) as RequestInit]);
+}
+
+
 beforeEach(() => {
   vi.clearAllMocks();
   fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ success: true }) });
@@ -229,8 +243,8 @@ describe('[#2369] B. the panel gets one button and neither full pad', () => {
 
     fireEvent.click(screen.getByTestId(`dismiss-panel-key-${DISMISS_KEY}`));
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0];
+    expect(keyCalls()).toHaveLength(1);
+    const [url, init] = keyCalls()[0];
     expect(url).toBe(`/api/worktrees/${WORKTREE_ID}/special-keys`);
     expect(JSON.parse((init as RequestInit).body as string)).toEqual({
       cliToolId: 'command-code',
@@ -243,7 +257,7 @@ describe('[#2369] B. the panel gets one button and neither full pad', () => {
 
     fireEvent.click(screen.getByTestId(`dismiss-panel-key-${DISMISS_KEY}`));
 
-    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+    expect(JSON.parse(keyCalls()[0][1].body as string)).toEqual({
       cliToolId: 'command-code',
       keys: ['Escape'],
       instanceId: 'command-code-2',

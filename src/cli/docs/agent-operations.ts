@@ -71,6 +71,13 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
                            Send even if only the agent's hooks report an open dialog.
                            For a session whose pane looks idle but keeps refusing;
                            a dialog visible in the terminal is still refused.
+    --reply-to <target>    Deliver the target session's reply into <target>'s composer
+                           when the turn ends: <worktree-id>[@<instance-id|alias>], or
+                           'self' for the session running the command. Nothing blocks --
+                           there is no wait to run and no pane to scrape.
+    --allow-relay-chain    Permit --reply-to while answering a message that itself
+                           arrived over a relay. Refused by default (exit 2); chains
+                           still stop at 3 hops.
 
   Refused while the agent is waiting on a prompt (exit 2). Keystrokes sent to
   an open dialog never reach the agent -- they pile up in the dialog's own
@@ -106,6 +113,35 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
   session in silence.
     commandmate send "$WT" "Implement this" --instance codex
     commandmate wait "$WT" --instance codex
+
+  Delegating without blocking (--reply-to):
+    commandmate send "$WT" "Implement this" --instance codex --reply-to self
+    # ... keep working. When codex finishes, its answer arrives in your composer as
+    # [from Codex 2 / <worktree>] <reply>, saved in History as a 'relay' message.
+    commandmate relays                       # what is still outstanding
+
+  The relay is refused (exit 2, nothing sent) when the message you are answering
+  arrived over a relay itself (pass --allow-relay-chain), when the chain would
+  exceed 3 hops, or when an open relay between the two sessions already exists.
+  If the target stops on a confirmation you are told, once, and the relay stays
+  open -- answer the dialog on that session and the reply still arrives. A relay
+  nobody could deliver expires after 24h with a single line of notice.
+
+### commandmate relays
+  List the standing delegations this session is waiting on and owes.
+
+    commandmate relays                      # the session running the command
+    commandmate relays --worktree <id> --instance codex-2
+    commandmate relays --json               # owed / awaiting / open / counts
+    commandmate relays cancel <relay-id>    # withdraw one; nothing is delivered
+
+  States: pending (the worker has not finished), prompt (it stopped on a
+  confirmation and the requester was told; still open), delivered, expired,
+  cancelled.
+
+  A reply is held rather than delivered while the requesting session is
+  generating -- typing into a running composer interrupts the turn -- and is
+  delivered as soon as it is idle again.
 
 ### commandmate wait <worktree-id...>
   Block until agent completes or prompt is detected.

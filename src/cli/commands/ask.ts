@@ -45,6 +45,14 @@ import {
 } from './instances';
 import { pollWorktree } from './wait';
 import { readSqueezedPaneTail } from './capture';
+import {
+  ALLOW_RELAY_CHAIN_DESCRIPTION,
+  REPLY_TO_OPTION_DESCRIPTION,
+  cancelRelayQuietly,
+  registerRelay,
+  resolveEndpointForWorktree,
+  resolveRelayEndpoint,
+} from './relays';
 
 /**
  * Code the send API returns when the session is blocked on a prompt.
@@ -81,6 +89,12 @@ interface AskOptions {
   timeout?: string;
   json?: boolean;
   token?: string;
+  /** Issue #2377: register a relay and return, instead of waiting. */
+  async?: boolean;
+  /** Issue #2377: who the reply goes to. Defaults to `self` under `--async`. */
+  replyTo?: string;
+  /** Issue #2377: permit a relay opened while answering a relayed message. */
+  allowRelayChain?: boolean;
 }
 
 /**
@@ -193,9 +207,22 @@ export function createAskCommand(): Command {
       `Maximum time to wait for the reply (default ${DEFAULT_ASK_TIMEOUT_SECONDS})`
     )
     .option('--json', 'Print the reply as JSON with the target and the reply source')
+    .option(
+      '--async',
+      'Do not wait: register a relay, print its id and exit 0. The reply is '
+      + 'delivered into --reply-to\'s composer when the turn ends (defaults to this session)'
+    )
+    .option('--reply-to <target>', REPLY_TO_OPTION_DESCRIPTION)
+    .option('--allow-relay-chain', ALLOW_RELAY_CHAIN_DESCRIPTION)
     .option('--token <token>', TOKEN_WARNING)
     .addHelpText('after', `
-Exit codes (wait's, unchanged):
+--async is the same delegation without the block (Issue #2377). Nothing waits,
+stdout is the relay id, and when the other session finishes CommandMate puts
+its answer into your composer prefixed with \`[from <alias> / <worktree>]\`. Use
+\`commandmate relays\` to see what is outstanding and \`relays cancel <id>\` to
+withdraw one. --reply-to / --allow-relay-chain are only meaningful with it.
+
+Exit codes (wait's, unchanged; --async always exits 0 once the relay exists):
   0    the turn ended; stdout is the reply body
   10   the other session is waiting on a prompt. stdout carries the prompt JSON
        (same shape as \`wait --on-prompt agent\`). Report it; do NOT answer it
@@ -226,6 +253,14 @@ a decision about that session's guard rails, not part of asking it a question.
           process.exit(ExitCode.CONFIG_ERROR);
         }
 
+        // `--reply-to` / `--allow-relay-chain` only mean something under
+        // `--async`: without it `ask` returns the reply on stdout, and a second
+        // copy arriving in somebody's composer is a surprise, not a feature.
+        if (!options.async && (options.replyTo || options.allowRelayChain)) {
+          console.error('Error: --reply-to and --allow-relay-chain require --async.');
+          process.exit(ExitCode.CONFIG_ERROR);
+        }
+
         const timeout = parseTimeout(options.timeout);
         const client = new ApiClient({ token: options.token });
 
@@ -244,6 +279,25 @@ a decision about that session's guard rails, not part of asking it a question.
         // timestamp rather than against a re-derived clock.
         const askedAt = Date.now();
 
+        // Issue #2377: registered BEFORE the send, so a session that answers
+        // immediately cannot finish its turn in the window between the message
+        // and the ledger row. A refusal exits 2 having sent nothing.
+        let relayId: string | undefined;
+        if (options.async) {
+          const replyEndpoint = await resolveRelayEndpoint(client, options.replyTo ?? 'self');
+          const workerEndpoint = await resolveEndpointForWorktree(
+            client,
+            worktreeId,
+            options.instance,
+            options.agent
+          );
+          relayId = await registerRelay(client, {
+            from: replyEndpoint,
+            to: workerEndpoint,
+            allowRelayChain: options.allowRelayChain,
+          });
+        }
+
         const sendBody: Record<string, unknown> = { content: message };
         if (agent) sendBody.cliToolId = agent;
         if (instanceId) sendBody.instanceId = instanceId;
@@ -256,6 +310,8 @@ a decision about that session's guard rails, not part of asking it a question.
           // agent (Issue #1708). Reported as a config error with the server's
           // own sentence: the answer is to look at that session, never to
           // re-send.
+          // A relay whose message never arrived can never be answered.
+          if (relayId) await cancelRelayQuietly(client, relayId);
           if (error instanceof ApiError && error.apiCode === PROMPT_WAITING_CODE) {
             console.error(
               `Error: ${error.payload?.error
@@ -265,6 +321,30 @@ a decision about that session's guard rails, not part of asking it a question.
           }
           throw error;
         }
+
+        // Issue #2377: the whole point of `--async`. Nothing is waited on, so
+        // the caller's own turn ends here and the answer arrives later, in their
+        // composer, as a `relay` row.
+        if (relayId) {
+          if (options.json) {
+            console.log(JSON.stringify({
+              worktreeId,
+              instanceId: instanceId ?? null,
+              cliToolId: agent ?? null,
+              relayId,
+              mode: 'async',
+            }, null, 2));
+          } else {
+            console.log(relayId);
+          }
+          console.error(
+            'Message sent. The reply will be delivered when the turn ends; '
+            + 'watch it with `commandmate relays`.'
+          );
+          process.exit(ExitCode.SUCCESS);
+          return;
+        }
+
         console.error('Message sent. Waiting for the reply...');
 
         // `wait`'s own poller, with `wait`'s own defaults: --on-prompt is left

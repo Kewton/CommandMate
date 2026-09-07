@@ -10,7 +10,13 @@
 import { Command } from 'commander';
 import { ExitCode } from '../types';
 import type { TaskListOptions, TaskShowOptions } from '../types';
-import type { TaskDetailResponse, TaskListResponse, TaskView } from '../types/api-responses';
+import type {
+  RelayCountsResponse,
+  RelayListResponse,
+  TaskDetailResponse,
+  TaskListResponse,
+  TaskView,
+} from '../types/api-responses';
 import { ApiClient, assertResponseShape, isValidWorktreeId } from '../utils/api-client';
 import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
 
@@ -21,6 +27,30 @@ const TASK_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-
 
 function formatTimestamp(value: string | null): string {
   return value ?? '-';
+}
+
+/**
+ * The relay counts for the session this task ran in, or null (Issue #2377).
+ *
+ * Scoped to the task's own worktree AND instance, because that is the session a
+ * relay would have been opened by or against — a worktree-wide count would put
+ * another agent's delegations on this task's page.
+ *
+ * Best effort: a daemon with no relay ledger is one that answers 404 here, which
+ * must not fail `task show`.
+ */
+async function readTaskRelayCounts(
+  client: ApiClient,
+  task: TaskView
+): Promise<RelayCountsResponse | null> {
+  const query = new URLSearchParams({ worktree: task.worktreeId });
+  if (task.instanceId) query.set('instance', task.instanceId);
+  try {
+    const response = await client.get<RelayListResponse>(`/api/relays?${query.toString()}`);
+    return response.counts ?? null;
+  } catch {
+    return null;
+  }
 }
 
 function printTaskLine(task: TaskView): void {
@@ -144,6 +174,17 @@ export function createTaskCommand(): Command {
         console.log(`CREATED:   ${task.createdAt}`);
         console.log(`STARTED:   ${formatTimestamp(task.startedAt)}`);
         console.log(`FINISHED:  ${formatTimestamp(task.finishedAt)}`);
+
+        // Issue #2377: what this session delegated, and what came back. Printed
+        // before the verification block because it is about the same session,
+        // whereas the run below is about one judgement of it.
+        const relays = await readTaskRelayCounts(client, task);
+        if (relays) {
+          console.log(
+            `RELAYS:    ${relays.delivered} delivered / ${relays.prompt} prompt / `
+            + `${relays.expired} expired  (${relays.pending} open)`
+          );
+        }
 
         if (!lastVerificationRun) {
           console.log('VERIFY:    (no verification run yet)');

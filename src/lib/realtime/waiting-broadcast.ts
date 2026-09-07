@@ -36,6 +36,7 @@ import {
   startModelChangeBroadcast,
   stopModelChangeBroadcast,
 } from '@/lib/realtime/model-change-broadcast';
+import { startRelayTriggers, stopRelayTriggers } from '@/lib/relay/relay-triggers';
 import type { SessionStatusEvent } from '@/lib/realtime/types';
 import {
   onWaitingTransition,
@@ -103,6 +104,14 @@ export function startWaitingStatusBroadcast(publish: WaitingBroadcastPublisher):
 
   globalThis.__waitingStatusBroadcastUnsubscribe = unsubscribe;
   startModelChangeBroadcast(publish);
+  // Issue #2377: and the relay subsystem, for the third time and the same
+  // reason. Its two background jobs — "tell the requester their worker stopped
+  // on a dialog" and "expire deadlines / retry deliveries a busy composer
+  // refused" — are the server's lifetime, not a request's, and this is the one
+  // function `setupWebSocket` calls to say the server is up. Unlike the two
+  // above it needs no publisher: a relay's delivery is a message written through
+  // `sendUserMessage`, which broadcasts its own row.
+  startRelayTriggers();
   return unsubscribe;
 }
 
@@ -112,6 +121,8 @@ export function startWaitingStatusBroadcast(publish: WaitingBroadcastPublisher):
  * does not leave a listener pointed at a dead room map.
  *
  * Issue #2357: drops the model edge's subscription with it, for the same reason.
+ * Issue #2377: and the relay triggers, whose interval would otherwise keep
+ * ticking against a database the suite has closed.
  */
 export function stopWaitingStatusBroadcast(): void {
   const existing = globalThis.__waitingStatusBroadcastUnsubscribe;
@@ -120,6 +131,7 @@ export function stopWaitingStatusBroadcast(): void {
     globalThis.__waitingStatusBroadcastUnsubscribe = undefined;
   }
   stopModelChangeBroadcast();
+  stopRelayTriggers();
 }
 
 /** Whether a subscription is currently active. Test seam. */

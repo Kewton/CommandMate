@@ -30,7 +30,10 @@ import {
   Check,
   Terminal,
   Send,
+  Forward,
 } from 'lucide-react';
+import { useSessionRelays } from '@/lib/relay/use-session-relays';
+import { resolveRelayBadges, type RelayBadge } from '@/lib/relay/relay-badges';
 import {
   CLI_TOOL_IDS,
   getCliToolDisplayName,
@@ -250,6 +253,19 @@ function useAgentSourceByInstance(
   return provided ?? fetched;
 }
 
+/**
+ * Token classes for a relay badge (Issue #2377).
+ *
+ * `prompt` is the only one drawn as a warning, because it is the only one that
+ * means somebody has to act; the other two are statements of fact about work
+ * that is proceeding, and are drawn in the same muted grey as the model and
+ * event-source lines above them. Semantic tokens only — see
+ * `scripts/check-token-discipline.mjs`.
+ */
+export function relayBadgeClassName(badge: RelayBadge): string {
+  return badge.tone === 'prompt' ? 'text-warning' : 'text-muted-foreground';
+}
+
 // ============================================================================
 // Component
 // ============================================================================
@@ -335,6 +351,25 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
     worktreeId,
     instances,
     sourceByInstance,
+  );
+
+  // Issue #2377: the open relays at both ends of every session in this
+  // worktree, read once for the whole pane for the same reason.
+  const relays = useSessionRelays(worktreeId);
+  // The other end of a relay is usually a session in ANOTHER worktree, whose
+  // roster this pane has not read — so the alias falls back to the instance id
+  // and is qualified by the worktree whenever it is not one of ours. A bare
+  // `Codex 2` pointing at somebody else's repository is the ambiguity the relay
+  // header itself avoids by always printing both.
+  const aliasOf = useCallback(
+    (endpoint: { worktreeId: string; instanceId: string }) => {
+      if (endpoint.worktreeId !== worktreeId) {
+        return `${endpoint.instanceId} @ ${endpoint.worktreeId}`;
+      }
+      return instances.find((inst) => inst.id === endpoint.instanceId)?.alias
+        ?? endpoint.instanceId;
+    },
+    [instances, worktreeId],
   );
 
   const atMax = instances.length >= MAX_AGENT_INSTANCES;
@@ -544,6 +579,14 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
           const instanceSource = sourceStatusByInstance?.[inst.id];
           const sourceLabel = formatAgentSourceLabel(instanceSource, tWorktree);
           const sourceDegraded = isAgentSourceDegraded(instanceSource);
+          // Issue #2377: what this session owes and what it is waiting for.
+          // Empty for every row with no open relay, which is every row in a
+          // worktree nobody has delegated to or from.
+          const relayBadges = resolveRelayBadges({
+            owed: relays.owedBy(inst.id),
+            awaiting: relays.awaitedBy(inst.id),
+            aliasOf,
+          });
           return (
             <div
               key={inst.id}
@@ -631,6 +674,23 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
                     <span className="truncate">{sourceLabel}</span>
                   </span>
                 )}
+                {/* Issue #2377: the relay lines. Absent whenever nothing is
+                    open, on exactly the same terms as the two blocks above —
+                    a roster of sessions nobody has delegated to renders
+                    identically to before this Issue. */}
+                {relayBadges.map((badge) => (
+                  <span
+                    key={badge.key}
+                    data-testid={`agent-instance-relay-${badge.tone}-${inst.id}`}
+                    title={tWorktree(`relay.${badge.titleKey}`)}
+                    className={`mt-0.5 flex items-center gap-1 truncate text-xs ${relayBadgeClassName(badge)}`}
+                  >
+                    <Forward className="w-3 h-3 shrink-0" aria-hidden="true" />
+                    <span className="truncate">
+                      {tWorktree(`relay.${badge.key}`, badge.params)}
+                    </span>
+                  </span>
+                ))}
               </div>
 
               {/* Issue #2120: how to drive THIS instance from a terminal. An icon

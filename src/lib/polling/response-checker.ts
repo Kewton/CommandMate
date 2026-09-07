@@ -56,6 +56,7 @@ import { isDuplicatePrompt, normalizePromptForDedup } from './prompt-dedup';
 import { recordPromptDedupSkip } from './prompt-dedup-state';
 import { isDuplicateResponse } from './response-dedup';
 import { captureStructuredHistoryTurn, isStructuredHistoryWriterLive } from './structured-history-gate';
+import { onRelayTurnCompleted } from '@/lib/relay/relay-triggers';
 // Issue #2317 Phase D: while a human holds the pane's geometry, the frame is
 // their terminal (44 rows), not the 1000-row canvas every rule below was
 // measured against. See the block in `checkForResponse` for what that changes.
@@ -1292,6 +1293,15 @@ export async function checkForResponse(
 
       // Broadcast message to WebSocket clients
       broadcastMessage('message', { worktreeId, message });
+
+      // Issue #2377: the scrape path's completion edge. `settled: false` is the
+      // whole difference from the gate's own announcement: this row was read off
+      // a SCREEN whose completion was judged by string analysis, so a relay
+      // waiting on this session re-reads after a few seconds of quiet before it
+      // delivers — the Issue's 「完了検知 + 数秒の静穏」 for the three tools that
+      // keep no transcript. Announced here rather than after the `if` because
+      // the suppressed branch means the gate already announced it, settled.
+      onRelayTurnCompleted(worktreeId, cliToolId, resolvedInstanceId, false);
     } else {
       logger.info('structured-history-scrape-suppressed', {
         worktreeId,

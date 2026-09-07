@@ -243,6 +243,14 @@ export function buildDelegationBrief(input: DelegationBriefInput): string {
 
   const capture = `${head} capture ${worktreeId} ${target} --pane --tail ${DELEGATION_CAPTURE_TAIL}`;
 
+  // Issue #2377: the same delegation without the block. Offered as the SECOND
+  // line rather than as a replacement because the two are different jobs: `ask`
+  // is right when the answer is the next thing you need, `--async` is right when
+  // it is not — and a brief that only taught the asynchronous form would have
+  // agents registering relays for questions they are about to sit and wait for
+  // anyway.
+  const asyncAsk = `${head} ask ${worktreeId} ${target} "<request>" --async`;
+
   if (locale === 'ja') {
     const ask =
       `${head} ask ${worktreeId} ${target} "<依頼文>" --timeout ${DELEGATION_ASK_TIMEOUT_SECONDS}`;
@@ -253,6 +261,9 @@ export function buildDelegationBrief(input: DelegationBriefInput): string {
       '  - exit 0: 標準出力が返答本文',
       '  - exit 10: 相手が確認待ち。標準出力のprompt JSONを私に報告して止まる（自分で答えない）',
       '  - exit 124: タイムアウト。captureで状況を見て報告',
+      `- 待たない依頼: ${asyncAsk}`,
+      '  - 即座に relay id を返して exit 0。完了時に `[from ...]` 付きで返答が私のコンポーザーに届く',
+      `  - 状況確認: ${head} relays / 取り消し: ${head} relays cancel <relay-id>`,
       `- 進捗確認: ${capture}`,
       '- 禁止: respondで相手のプロンプトに答える / auto-yesを有効化する',
     ].join('\n');
@@ -267,6 +278,9 @@ export function buildDelegationBrief(input: DelegationBriefInput): string {
     '  - exit 0: stdout is the reply body',
     '  - exit 10: they are waiting on a confirmation. Report the prompt JSON on stdout back to me and stop (do not answer it yourself)',
     '  - exit 124: timed out. Look with capture and report what you see',
+    `- Ask without waiting: ${asyncAsk}`,
+    '  - exits 0 with a relay id on stdout; the reply lands in my composer prefixed `[from ...]` when the turn ends',
+    `  - Outstanding: ${head} relays / withdraw: ${head} relays cancel <relay-id>`,
     `- Progress: ${capture}`,
     '- Do not: answer their prompt with respond / turn auto-yes on',
   ].join('\n');

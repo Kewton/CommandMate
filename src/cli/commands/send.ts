@@ -20,6 +20,14 @@ import {
   INSTANCE_SELECTOR_ERROR,
   resolveInstanceTarget,
 } from './instances';
+import {
+  ALLOW_RELAY_CHAIN_DESCRIPTION,
+  REPLY_TO_OPTION_DESCRIPTION,
+  cancelRelayQuietly,
+  registerRelay,
+  resolveEndpointForWorktree,
+  resolveRelayEndpoint,
+} from './relays';
 
 /** Auto-yes duration used when --duration is omitted. */
 const DEFAULT_AUTO_YES_DURATION = '1h';
@@ -206,7 +214,20 @@ export function createSendCommand(): Command {
     .option('--stop-pattern <pattern>', 'Auto-yes stop pattern (regex). Matched against terminal output; cannot block commands (use the task contract\'s autoYes.denyPatterns for that)')
     .option('--contract <path>', 'Execution contract path relative to the worktree root (e.g. .commandmate/tasks/my-task.yaml). Records a task and sends the contract preamble plus its goal.')
     .option('--ignore-structured-prompt', 'Send even if only the agent\'s hooks report an open dialog (Issue #1737). Use when the pane looks idle but sends are refused; a prompt visible in the terminal is still refused.')
+    .option('--reply-to <target>', REPLY_TO_OPTION_DESCRIPTION)
+    .option('--allow-relay-chain', ALLOW_RELAY_CHAIN_DESCRIPTION)
     .option('--token <token>', TOKEN_WARNING)
+    .addHelpText('after', `
+--reply-to registers a relay: when the target session finishes this turn,
+CommandMate puts its answer into the named session's composer, prefixed with
+\`[from <alias> / <worktree>]\`. Nothing blocks — there is no wait to run and
+no pane to scrape. Watch it with \`commandmate relays\`, withdraw it with
+\`commandmate relays cancel <id>\`; it expires after 24h either way.
+
+Exit 2 when the relay is refused: you are answering a relayed message already
+(pass --allow-relay-chain), the chain would exceed 3 hops, or an open relay
+between these two sessions exists. Nothing is sent in that case.
+`)
     .action(async (worktreeId: string, message: string | undefined, options: SendOptions) => {
       try {
         // [SEC4-04] Validate worktree ID
@@ -324,6 +345,32 @@ export function createSendCommand(): Command {
           await enableAutoYes(client, worktreeId, options, autoYesDurationMs, agent, instanceId);
         }
 
+        // Issue #2377: the relay is registered BEFORE the message goes out, so a
+        // session that answers immediately cannot finish its turn in the window
+        // between the send and the ledger row — the completion trigger reads the
+        // ledger, and a row that does not exist yet is a reply nobody collects.
+        // A refusal exits 2 here, having sent nothing.
+        let relayId: string | undefined;
+        if (options.replyTo) {
+          const replyEndpoint = await resolveRelayEndpoint(client, options.replyTo);
+          const workerEndpoint = await resolveEndpointForWorktree(
+            client,
+            worktreeId,
+            options.instance,
+            options.agent
+          );
+          relayId = await registerRelay(client, {
+            from: replyEndpoint,
+            to: workerEndpoint,
+            allowRelayChain: options.allowRelayChain,
+          });
+          // stderr, not stdout: `--contract` already owns this command's stdout
+          // (it prints the task id there), and two commands writing two ids to
+          // one stream is how a `$(…)` capture ends up with both. `ask --async`
+          // is the form that hands the relay id back on stdout.
+          console.error(`Relay registered: ${relayId}`);
+        }
+
         // [DR2-05] Send API uses "content" not "message"
         const sendBody: Record<string, unknown> = { content };
         if (agent) {
@@ -351,6 +398,12 @@ export function createSendCommand(): Command {
           // one: nothing is working on it and nothing ever will.
           if (taskId) {
             await reportTaskStatus(client, taskId, 'failed');
+          }
+          // A relay whose message never arrived can never be answered; leaving
+          // it open would have the requester waiting 24h for a turn that was
+          // never started.
+          if (relayId) {
+            await cancelRelayQuietly(client, relayId);
           }
           // Issue #1708: the session is sitting on a prompt, so the message
           // would have been typed into the prompt's input line rather than

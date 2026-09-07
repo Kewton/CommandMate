@@ -318,8 +318,15 @@ describe('the guard covers every message-send path and no answer path (Issue #17
   });
 
   it('names every caller of sendUserMessage, so a new one is a decision', () => {
+    // Issue #2377's relay delivery is the third, and it is here BECAUSE of this
+    // guard rather than in spite of it: a relayed reply is typed into session
+    // A's composer by the server, so it is exactly the kind of send that must
+    // not land in an open dialog. Going through the service is what gives it
+    // #1708's refusal for free — the delivery treats `prompt_waiting` as "retry
+    // on the next pump", which is the behaviour the ledger exists to allow.
     expect(importersOf('send-user-message')).toEqual([
       'app/api/worktrees/[id]/send/route.ts',
+      'lib/relay/relay-delivery.ts',
       'lib/timer-manager.ts',
     ]);
   });

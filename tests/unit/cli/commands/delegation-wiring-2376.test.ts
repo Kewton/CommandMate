@@ -1,5 +1,5 @@
 /**
- * The three delegation commands are actually REACHABLE (Issue #2376).
+ * The delegation commands are actually REACHABLE (Issue #2376, #2377).
  *
  * A command factory that nothing calls compiles, lints, and passes its own unit
  * tests while `commandmate ask` answers "unknown command". The factories are
@@ -27,10 +27,12 @@ vi.mock('../../../../src/cli/program', () => ({
 }));
 
 describe('src/cli/index.ts', () => {
-  it('attaches ask / whoami / peers and then parses', async () => {
+  it('attaches ask / whoami / peers / relays and then parses', async () => {
     await import('../../../../src/cli/index');
 
-    expect(attached).toEqual(['ask', 'whoami', 'peers']);
+    // Issue #2377 added `relays`, the other half of the same feature: what a
+    // delegation left standing. Same wiring, same reason it needs a test.
+    expect(attached).toEqual(['ask', 'whoami', 'peers', 'relays']);
     expect(parse).toHaveBeenCalledTimes(1);
   });
 });
