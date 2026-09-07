@@ -130,6 +130,14 @@
     "small": "Small",
     "xsmall": "Extra small"
   },
+  "repoTabBar": {
+    "settingLabel": "Repository tabs",
+    "mode": {
+      "always": "Always show",
+      "collapsed": "Only when the sidebar is collapsed",
+      "hidden": "Hidden"
+    }
+  },
   "confirmDialog": {
     "title": "Confirm",
     "confirm": "OK"

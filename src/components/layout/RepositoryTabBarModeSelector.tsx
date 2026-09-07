@@ -6,15 +6,22 @@
  * localStorage, with no server round-trip. Hidden on mobile for the same reason
  * that one is — the strip it governs is desktop-only.
  *
+ * Wording lives in `common.repoTabBar.*` (locales/{en,ja}/common.json). Every
+ * other string the strip renders reuses an existing key — repository names are
+ * data, the status words are `common.status.*` via `SIDEBAR_STATUS_CONFIG`, the
+ * attention count is `common.attention.badgeLabel`, the overflow trigger is
+ * `common.nav.more`, and the popover's landmark / empty copy is
+ * `common.sidebar.*`.
+ *
  * @module components/layout/RepositoryTabBarModeSelector
  */
 
 'use client';
 
 import React from 'react';
+import { useTranslations } from 'next-intl';
 import { useOptionalSidebarContext } from '@/contexts/SidebarContext';
 import { REPO_TAB_BAR_MODES, isValidRepoTabBarMode } from '@/lib/sidebar-utils';
-import { useRepositoryTabBarCopy } from './repository-tab-bar-copy';
 
 /**
  * Three-way visibility selector for the repository tab bar.
@@ -29,7 +36,7 @@ export function RepositoryTabBarModeSelector() {
   // tests, and a preference control has no business being the reason one of
   // them throws. In the app the provider is always above it (AppProviders).
   const sidebar = useOptionalSidebarContext();
-  const copy = useRepositoryTabBarCopy();
+  const t = useTranslations('common');
 
   if (!sidebar) return null;
   const { repoTabBarMode, setRepoTabBarMode } = sidebar;
@@ -37,13 +44,13 @@ export function RepositoryTabBarModeSelector() {
   return (
     <div className="hidden md:flex items-center">
       <label htmlFor="repo-tab-bar-mode" className="sr-only">
-        {copy.settingLabel}
+        {t('repoTabBar.settingLabel')}
       </label>
       <select
         id="repo-tab-bar-mode"
         data-testid="repo-tab-bar-mode-select"
-        aria-label={copy.settingLabel}
-        title={copy.settingLabel}
+        aria-label={t('repoTabBar.settingLabel')}
+        title={t('repoTabBar.settingLabel')}
         value={repoTabBarMode}
         onChange={(event) => {
           const next = event.target.value;
@@ -57,7 +64,7 @@ export function RepositoryTabBarModeSelector() {
       >
         {REPO_TAB_BAR_MODES.map((mode) => (
           <option key={mode} value={mode}>
-            {copy.mode[mode]}
+            {t(`repoTabBar.mode.${mode}`)}
           </option>
         ))}
       </select>
