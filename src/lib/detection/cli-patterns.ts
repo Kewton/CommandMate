@@ -8,6 +8,7 @@ import type { DetectPromptOptions } from './types';
 import { createLogger } from '@/lib/logger';
 import { stripAnsi } from './ansi';
 import { findClaudeInputBox } from './composer-text';
+import { readCodexGlyphRowKind } from './tools/codex/cli-patterns';
 import { THINKING_TAIL_LINE_COUNT } from '@/config/thinking-constants';
 
 const logger = createLogger('cli-patterns');
@@ -624,6 +625,213 @@ export const CODEX_PAGER_FOOTER_PATTERN =
  * line. No nested quantifiers (ReDoS-safe; adjacent greedy quantifiers only).
  */
 export const CODEX_STATUS_BAR_PATTERN = /^\s*\S.*·\s*~?\/\S*\s*$/;
+
+/**
+ * How far above the last non-blank row {@link findCodexChromeStart} looks for the
+ * composer.
+ *
+ * Same allowance and the same reason as {@link CODEX_COMPOSER_SEARCH_ROWS}: codex
+ * pins the composer two to three rows above the bottom in every measured frame
+ * (`tests/fixtures/codex-live-2310/`), and a wider band would let the search walk
+ * into the transcript and mistake the echoed user message — drawn with the same
+ * `›` — for the input box.
+ *
+ * Wider than the 8 rows of the liveness search because 0.15x can draw notices
+ * BELOW the composer (`N background terminal running · /ps to view · /stop to
+ * close`) that the liveness search never had to step over.
+ */
+const CODEX_CHROME_SEARCH_ROWS = 12;
+
+/**
+ * A row whose first character is codex's `›` glyph, with something after it.
+ *
+ * Deliberately not {@link CODEX_PROMPT_PATTERN}: that one is multiline and
+ * matches a bare `›`, which is right for "is a prompt on screen anywhere?" and
+ * wrong for classifying ONE row. Anchored at column 0 because all three of
+ * codex's `›` uses are, and an indented `›` in a reply is quoted text.
+ */
+const CODEX_CHROME_GLYPH_ROW_PATTERN = /^›(\s|$)/;
+
+/**
+ * Locate the start of codex's bottom-pinned chrome within a captured pane.
+ *
+ * The fifth reader of this shape, after {@link findClaudeChromeStart} (#1289),
+ * {@link findCopilotChromeStart} (#1897), {@link findOpenCodeChromeStart}
+ * (#1911) and {@link findCommandCodeChromeStart} (#2250). codex is the tool that
+ * never got one, and Issue #2400 is the bill for that.
+ *
+ * codex renders inline and pins two rows to the bottom of a settled pane:
+ *
+ * ```text
+ * › Ask Codex to do anything                      ← composer (placeholder or typed text)
+ *
+ *   gpt-6-astra xhigh · ~/share/work/…/CommandMate ← status bar (model · cwd)
+ * ```
+ *
+ * Below the composer codex may also draw its own notices (`N background terminal
+ * running · /ps to view`), so the boundary is "the composer row" rather than a
+ * list of footer shapes: everything from the composer down is chrome by
+ * construction, whatever codex adds there next.
+ *
+ * ## What went wrong without it (#2400)
+ *
+ * While the capture window is NOT saturated codex's extraction starts at
+ * `lastCapturedLine`, so the composer only ever mattered as the `endIndex` break
+ * — which the extraction loop already had. Once the pane outgrows
+ * `CACHE_MAX_CAPTURE_LINES` (#1670) the cursor stops being a position in the
+ * capture and `resolveExtractionStartIndex` switches to the newest echoed user
+ * prompt. With no `contentEnd`, that backwards search started at the very bottom
+ * of the pane and the first `›` it met was the COMPOSER. Extraction then began
+ * on the row after it, i.e. on the status bar, and the saved "reply" for every
+ * turn on a saturated pane was one row:
+ *
+ * ```text
+ * gpt-6-astra xhigh · ~/share/work/github_kewton/CommandAgent-develop
+ * ```
+ *
+ * Identical on every turn, so `isDuplicateResponse` then locked on it and the
+ * pane could not record another reply at all. That is #1289's defect verbatim,
+ * one tool later — the same reason `findCommandCodeChromeStart` exists.
+ *
+ * ## Why the attributes and not the placeholder text
+ *
+ * The codex branch of `findRecentUserPromptIndex` used to exclude the composer by
+ * naming its placeholders (`Implement`, `Find and fix`, `Type`, `Summarize`).
+ * Those are codex 0.1x wording, and 0.15x draws `Ask Codex to do anything`, so
+ * the list silently stopped matching the thing it was written for. Issue #2310
+ * measured what actually separates codex's three uses of `›` (U+203A), and it is
+ * the SGR attributes, not the text: the composer glyph is bold (`ESC[1m›`), a
+ * transcript echo is dim (`ESC[1;2m›`), a dialog option carries a coloured glyph
+ * or a bold label. {@link readCodexGlyphRowKind} is that measurement, and this
+ * reader is one of its callers.
+ *
+ * `-1` is returned for a frame whose bottom-most `›` is an option row: codex
+ * replaces the composer with the dialog, so there is no chrome to trim and the
+ * caller resolves the frame on the prompt path instead.
+ *
+ * ## The stripped-capture fallback
+ *
+ * Auto-Yes hands the detection layer a capture that has already been through
+ * `stripAnsi`, and there every `›` is the same byte — {@link
+ * readCodexGlyphRowKind} answers `null` on purpose rather than guessing. This
+ * reader still has to answer for those frames, so it falls back to the one
+ * structural landmark codex pins BELOW the composer and nowhere else: the status
+ * bar ({@link CODEX_STATUS_BAR_PATTERN}, `model · /path`). Requiring it means a
+ * frame with no bar — a pane mid-redraw, an overlay — yields `-1` and the
+ * pre-#2400 reading, which is the direction that costs nothing.
+ *
+ * @param lines - Captured pane lines, ANSI-bearing or not; trailing blanks tolerated
+ * @returns Index of the composer row, or -1 when no composer chrome is present
+ */
+export function findCodexChromeStart(lines: readonly string[]): number {
+  let lastRow = lines.length - 1;
+  while (lastRow >= 0 && stripAnsi(lines[lastRow]).trim() === '') lastRow--;
+  if (lastRow < 0) return -1;
+
+  // Bottom-most `›` row within the band codex reserves for its chrome. Anything
+  // further up is transcript, and latching onto an echo there would cut the
+  // reply this whole reader exists to keep.
+  let glyphRow = -1;
+  for (let i = lastRow; i >= Math.max(0, lastRow - CODEX_CHROME_SEARCH_ROWS); i--) {
+    if (CODEX_CHROME_GLYPH_ROW_PATTERN.test(stripAnsi(lines[i]))) {
+      glyphRow = i;
+      break;
+    }
+  }
+  if (glyphRow < 0) return -1;
+
+  const kind = readCodexGlyphRowKind(lines[glyphRow]);
+  if (kind === 'composer') return glyphRow;
+  // A dialog is up (no composer drawn) or the bottom-most `›` is a transcript
+  // echo mid-redraw. Neither is chrome to trim.
+  if (kind !== null) return -1;
+
+  // Stripped capture: no attributes to read. Accept the row as the composer only
+  // when codex's status bar is drawn below it, which is where it always sits and
+  // where a transcript echo can never be.
+  for (let i = glyphRow + 1; i <= lastRow; i++) {
+    if (CODEX_STATUS_BAR_PATTERN.test(stripAnsi(lines[i]))) return glyphRow;
+  }
+  return -1;
+}
+
+/**
+ * The shape of a codex row that could be the echo of a message the user sent.
+ *
+ * Shape only — `›` at column 0 with text after it — which all three of codex's
+ * `›` uses share. {@link findCodexUserEchoIndex} is what tells them apart.
+ */
+export const CODEX_USER_ECHO_PATTERN = /^›\s+\S/;
+
+/**
+ * Find the newest transcript echo of an operator message in a codex capture.
+ *
+ * The reader `findRecentUserPromptIndex` anchors codex turns on (Issue #2400).
+ * It replaces a negative lookahead over composer placeholder strings
+ * (`(?!Implement|Find and fix|Type|Summarize)`) written against codex 0.1x:
+ * 0.15x draws `Ask Codex to do anything`, so the guard matched nothing it was
+ * written for. The composer became the newest "echo", and on a saturated pane —
+ * the one path where this anchor decides where extraction STARTS (#1670) — the
+ * reply saved for every turn was the single status-bar row below it.
+ *
+ * ## What the attributes can and cannot separate
+ *
+ * #2310 measured the three uses of `›` and this reader adds the fourth reading
+ * they left open, captured for #2400 on codex-cli 0.153.4
+ * (`tests/fixtures/codex-live-2310/turn-submitted-no-status.txt`): the echo of
+ * a message the operator has JUST submitted is drawn `ESC[1m› ESC[0m<text>` —
+ * bold glyph, plain label — and only becomes the dim `ESC[1;2m› ` of the
+ * measured frames once the turn settles. That shape is indistinguishable from a
+ * composer holding typed text, so no per-row attribute rule can separate them.
+ *
+ * What separates them is position, which codex's layout fixes: the composer is
+ * the BOTTOM-MOST `›` row of a frame. So the reader takes the boundary from its
+ * caller:
+ *
+ * - `composerTrimmed` — `findCodexChromeStart` located the chrome and `lines`
+ *   has already been cut above it, so every `›` row left is transcript and the
+ *   newest one wins outright.
+ * - otherwise — the composer may still be the bottom-most `›` row, so the first
+ *   candidate is stepped over. This is the structural spelling of the guard the
+ *   placeholder list used to be, and unlike that list it cannot go stale.
+ *
+ * Dialog option rows are refused wherever they appear: codex renders inline, so
+ * a dialog answered minutes ago is still in the scrollback with its options
+ * intact (#1160), and anchoring on one would cut the reply mid-way.
+ *
+ * @param lines - Captured pane rows, ANSI intact where the caller has it
+ * @param contentEnd - Exclusive end of the conversation region
+ * @param windowSize - How many rows above `contentEnd` to search
+ * @param composerTrimmed - Whether `contentEnd` already excludes the composer
+ * @returns Index of the newest echo row, or -1 when none is in the window
+ */
+export function findCodexUserEchoIndex(
+  lines: readonly string[],
+  contentEnd: number,
+  windowSize: number,
+  composerTrimmed: boolean,
+): number {
+  let composerHandled = composerTrimmed;
+  for (let i = Math.min(contentEnd, lines.length) - 1; i >= Math.max(0, contentEnd - windowSize); i--) {
+    if (!CODEX_USER_ECHO_PATTERN.test(stripAnsi(lines[i]))) continue;
+
+    const kind = readCodexGlyphRowKind(lines[i]);
+    // An option row of a dialog still sitting in the scrollback.
+    if (kind === 'option') continue;
+    // Positively an echo: codex has settled the row and drawn its glyph dim.
+    if (kind === 'transcript-echo') return i;
+
+    // `composer` (bold glyph) or `null` (an ANSI-stripped capture, where all
+    // three uses are one byte). Either could be the input box, and the input box
+    // is always the bottom-most `›` row.
+    if (!composerHandled) {
+      composerHandled = true;
+      continue;
+    }
+    return i;
+  }
+  return -1;
+}
 
 /**
  * Pasted text pattern

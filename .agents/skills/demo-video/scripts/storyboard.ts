@@ -263,7 +263,50 @@ export const SCENES_REQUIRING_A_PRIOR_SEND: readonly string[] = [
  * asking anything — a failed take, minutes in, whose message says only that
  * nothing became `isWaitingForResponse`.
  */
-export const APPROVAL_CONSUMING_SCENES: readonly string[] = ['respond-from-mobile', 'review-screen'];
+export const APPROVAL_CONSUMING_SCENES: readonly string[] = [
+  'respond-from-mobile',
+  'review-screen',
+  // Answers the approval the hero cassette paints on its second pass (#2381).
+  // One per cut for the same reason: a cassette paints one prompt per pass.
+  'mobile-approve',
+];
+
+/**
+ * Scenes whose footage only exists once the delegation round trip has run
+ * (Issue #2381).
+ *
+ * `delegate-ask` is the send that drives `claude-hero.cast`'s first pass: the
+ * reply the file-link scenes click into is that pass's transcript, and the
+ * approval `mobile-approve` taps is painted by the *second* pass, which the
+ * cassette only reaches after the first. Placed without `delegate-ask` earlier
+ * in the cut, each of these waits out its whole timeout against a session that
+ * never painted what it films.
+ */
+export const DELEGATE_SCENE_ID = 'delegate-ask';
+export const SCENES_REQUIRING_A_PRIOR_DELEGATION: readonly string[] = [
+  'reply-file-link',
+  'mobile-approve',
+  'mobile-file-link',
+];
+
+/** Where a record scene's telop band sits over the footage (#2381). */
+export type TelopPosition = 'bottom' | 'top';
+export const DEFAULT_TELOP_POSITION: TelopPosition = 'bottom';
+
+/**
+ * Bounds for a `gif` block (#2381). The README GIF is 600px wide at 10 fps and
+ * has to stay under the budget #1815 set; a storyboard names the numbers so the
+ * cut and its delivery constraints are declared together.
+ */
+export const GIF_WIDTH_RANGE = { min: 240, max: 1280 };
+export const GIF_FPS_RANGE = { min: 4, max: 30 };
+
+export interface GifSettings {
+  width: number;
+  fps: number;
+  /** Hard byte budget; compose.sh refuses to leave a larger GIF behind. */
+  maxBytes?: number;
+}
 
 /**
  * Films the moment a session *starts* waiting, so it has to run before anything
@@ -278,6 +321,14 @@ export interface StoryboardScene {
   duration: number;
   viewport: Viewport;
   telop: Record<Locale, string>;
+  /** Where the band goes. `record` scenes only; defaults to `bottom`. */
+  telopPosition: TelopPosition;
+  /**
+   * `record` scenes only: seconds of the take kept from the *front* when the
+   * take is longer than `duration`. compose.sh normally keeps the tail; with
+   * `head` it keeps this much of the head as well and jump-cuts to the tail.
+   */
+  head?: number;
   /** `code` scenes only: the path as authored, relative to the storyboard. */
   source?: string;
   /** `code` scenes only: `source` resolved against the storyboard's directory. */
@@ -291,6 +342,15 @@ export interface Storyboard {
   duration: number;
   output: string;
   scenes: StoryboardScene[];
+  /**
+   * Absolute path of the cassette the claude pane replays for this cut, when
+   * the storyboard names one (`claude-cassette:`). The recorder's scenes assume
+   * a particular cassette — the delegation scenes need the hero cassette — so
+   * the cut declares it rather than relying on a flag being remembered.
+   */
+  claudeCassette?: string;
+  /** GIF delivery settings, when the storyboard declares a `gif:` block. */
+  gif?: GifSettings;
 }
 
 /**
@@ -449,6 +509,25 @@ function readScene(
     return null;
   }
 
+  let head: number | undefined;
+  if (map.head !== undefined) {
+    if (type !== 'record') {
+      errors.push(`${where} (${id}): a ${type} scene is a still, so it has no take to keep the head of`);
+      return null;
+    }
+    if (typeof map.head !== 'number' || !Number.isFinite(map.head) || map.head <= 0) {
+      errors.push(`${where} (${id}): head must be a positive number of seconds, got ${JSON.stringify(map.head)}`);
+      return null;
+    }
+    if (map.head >= duration) {
+      // Keeping the whole slot from the front is the opposite of the default
+      // and leaves nothing for the tail the scene's payoff sits in.
+      errors.push(`${where} (${id}): head (${map.head}s) must be shorter than duration (${duration}s)`);
+      return null;
+    }
+    head = map.head;
+  }
+
   const telopRaw = map.telop;
   if (typeof telopRaw !== 'object' || telopRaw === null || Array.isArray(telopRaw)) {
     errors.push(`${where} (${id}): telop must be a mapping with ja and en`);
@@ -456,6 +535,19 @@ function readScene(
   }
   const telop = {} as Record<Locale, string>;
   let telopOk = true;
+  let telopPosition: TelopPosition = DEFAULT_TELOP_POSITION;
+  const positionRaw = (telopRaw as Record<string, YamlValue>).position;
+  if (positionRaw !== undefined) {
+    if (type !== 'record') {
+      errors.push(`${where} (${id}): telop.position only applies to a record scene's band`);
+      telopOk = false;
+    } else if (positionRaw !== 'top' && positionRaw !== 'bottom') {
+      errors.push(`${where} (${id}): telop.position must be 'top' or 'bottom', got ${JSON.stringify(positionRaw)}`);
+      telopOk = false;
+    } else {
+      telopPosition = positionRaw;
+    }
+  }
   for (const locale of LOCALES) {
     const value = (telopRaw as Record<string, YamlValue>)[locale];
     if (typeof value !== 'string' || value.trim() === '') {
@@ -473,6 +565,7 @@ function readScene(
     telop[locale] = value;
   }
   for (const key of Object.keys(telopRaw as Record<string, YamlValue>)) {
+    if (key === 'position') continue;
     if (!LOCALES.includes(key as Locale)) {
       errors.push(`${where} (${id}): unknown telop language '${key}'`);
       telopOk = false;
@@ -492,9 +585,75 @@ function readScene(
     );
   }
 
-  return code
-    ? { id, type, duration, viewport, telop, ...code }
-    : { id, type, duration, viewport, telop };
+  const scene: StoryboardScene = { id, type, duration, viewport, telop, telopPosition };
+  if (head !== undefined) scene.head = head;
+  return code ? { ...scene, ...code } : scene;
+}
+
+/**
+ * Resolve a `claude-cassette:` path and refuse anything outside the skill.
+ *
+ * A cassette is not shown on screen but it is *replayed*: its `@exec` rows run
+ * commands in the pane. The same containment `source` gets, one level wider —
+ * the cassette lives in the skill's `fixtures/`, a sibling of `storyboard/`,
+ * so the boundary is the skill directory rather than the storyboard's own.
+ */
+export function resolveClaudeCassette(
+  baseDir: string,
+  cassette: string,
+): { path: string } | { error: string } {
+  if (cassette.trim() === '') return { error: 'claude-cassette must not be empty' };
+  if (path.isAbsolute(cassette)) {
+    return { error: `claude-cassette must be relative to the storyboard, got '${cassette}'` };
+  }
+  if (!cassette.endsWith('.cast')) {
+    return { error: `claude-cassette must name a .cast file, got '${cassette}'` };
+  }
+  const base = fs.existsSync(baseDir) ? fs.realpathSync(baseDir) : path.resolve(baseDir);
+  const skillRoot = path.dirname(base);
+  const joined = path.resolve(base, cassette);
+  const resolved = fs.existsSync(joined) ? fs.realpathSync(joined) : joined;
+  if (!resolved.startsWith(skillRoot + path.sep)) {
+    return { error: `claude-cassette must stay inside ${skillRoot}, got '${cassette}' -> ${resolved}` };
+  }
+  if (!fs.existsSync(resolved)) {
+    return { error: `claude-cassette not found: '${cassette}' (looked at ${resolved})` };
+  }
+  return { path: resolved };
+}
+
+function readGifSettings(raw: YamlValue, errors: string[]): GifSettings | null {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    errors.push('gif must be a mapping with width, fps and optionally maxBytes');
+    return null;
+  }
+  const map = raw as Record<string, YamlValue>;
+  const inRange = (key: string, range: { min: number; max: number }): number | null => {
+    const value = map[key];
+    if (typeof value !== 'number' || !Number.isInteger(value) || value < range.min || value > range.max) {
+      errors.push(`gif.${key} must be an integer in ${range.min}..${range.max}, got ${JSON.stringify(value)}`);
+      return null;
+    }
+    return value;
+  };
+  const width = inRange('width', GIF_WIDTH_RANGE);
+  const fps = inRange('fps', GIF_FPS_RANGE);
+  let maxBytes: number | undefined;
+  if (map.maxBytes !== undefined) {
+    if (typeof map.maxBytes !== 'number' || !Number.isInteger(map.maxBytes) || map.maxBytes <= 0) {
+      errors.push(`gif.maxBytes must be a positive integer, got ${JSON.stringify(map.maxBytes)}`);
+      return null;
+    }
+    maxBytes = map.maxBytes;
+  }
+  for (const key of Object.keys(map)) {
+    if (key !== 'width' && key !== 'fps' && key !== 'maxBytes') {
+      errors.push(`gif: unknown key '${key}'`);
+      return null;
+    }
+  }
+  if (width === null || fps === null) return null;
+  return maxBytes === undefined ? { width, fps } : { width, fps, maxBytes };
 }
 
 export interface ValidationResult {
@@ -536,6 +695,22 @@ export function validateStoryboard(
     // `output` becomes a file name; anything with a slash or a leading dot
     // would write outside the directory the operator chose.
     errors.push(`output must be a plain file stem, got ${JSON.stringify(output)}`);
+  }
+
+  let claudeCassette: string | undefined;
+  if (map['claude-cassette'] !== undefined) {
+    if (typeof map['claude-cassette'] !== 'string') {
+      errors.push(`claude-cassette must be a path string, got ${JSON.stringify(map['claude-cassette'])}`);
+    } else {
+      const resolved = resolveClaudeCassette(baseDir, map['claude-cassette']);
+      if ('error' in resolved) errors.push(resolved.error);
+      else claudeCassette = resolved.path;
+    }
+  }
+
+  let gif: GifSettings | undefined;
+  if (map.gif !== undefined) {
+    gif = readGifSettings(map.gif, errors) ?? undefined;
   }
 
   const rawScenes = map.scenes;
@@ -595,6 +770,21 @@ export function validateStoryboard(
     }
   }
 
+  // Same shape as the send rule, for the hero cassette (#2381): the reply the
+  // file-link scenes open and the approval `mobile-approve` answers are both
+  // downstream of the delegation send.
+  const delegateAt = orderOf(DELEGATE_SCENE_ID);
+  for (const dependent of SCENES_REQUIRING_A_PRIOR_DELEGATION) {
+    const at = orderOf(dependent);
+    if (at === -1) continue;
+    if (delegateAt === -1 || delegateAt > at) {
+      errors.push(
+        `scene '${dependent}' needs '${DELEGATE_SCENE_ID}' earlier in the cut: the hero cassette ` +
+          'paints the reply and the approval only after the delegation send',
+      );
+    }
+  }
+
   const consumers = APPROVAL_CONSUMING_SCENES.filter((id) => orderOf(id) !== -1);
   if (consumers.length > 1) {
     errors.push(
@@ -615,15 +805,15 @@ export function validateStoryboard(
   }
 
   if (errors.length > 0) return { storyboard: null, errors };
-  return {
-    storyboard: {
-      version: 1,
-      duration: duration as number,
-      output: output as string,
-      scenes,
-    },
-    errors: [],
+  const storyboard: Storyboard = {
+    version: 1,
+    duration: duration as number,
+    output: output as string,
+    scenes,
   };
+  if (claudeCassette) storyboard.claudeCassette = claudeCassette;
+  if (gif) storyboard.gif = gif;
+  return { storyboard, errors: [] };
 }
 
 /**
@@ -655,6 +845,10 @@ export interface PlanEntry {
   durationSec: number;
   endSec: number;
   telop: string;
+  /** Where the band sits; `bottom` unless the storyboard said `top`. */
+  telopPosition: TelopPosition;
+  /** `record` scenes only: seconds kept from the front of an over-long take. */
+  head?: number;
   /** `code` scenes only: absolute path of the listing the card renders. */
   sourcePath?: string;
   /** `code` scenes only: syntax label rendered on the card. */
@@ -673,6 +867,8 @@ export function buildPlan(storyboard: Storyboard, locale: Locale): PlanEntry[] {
       durationSec: scene.duration,
       endSec: cursor + scene.duration,
       telop: scene.telop[locale],
+      telopPosition: scene.telopPosition,
+      ...(scene.head !== undefined ? { head: scene.head } : {}),
       // Deliberately not a TSV column: compose.sh only needs to know that the
       // row is a still, and every extra column is one more thing its `read`
       // has to keep in step with. The path is for render-overlays.ts, which
@@ -684,7 +880,12 @@ export function buildPlan(storyboard: Storyboard, locale: Locale): PlanEntry[] {
   });
 }
 
-const TSV_HEADER = '#id\ttype\tviewport\tstart\tduration\ttelop';
+/**
+ * `head` is the seventh column and empty for every scene that has none, so a
+ * plan written before #2381 (six columns) and a `read` that names seven
+ * variables agree: bash leaves the missing one empty.
+ */
+const TSV_HEADER = '#id\ttype\tviewport\tstart\tduration\ttelop\thead';
 
 /**
  * Tab-separated so `compose.sh` can read it with `while IFS=$'\t' read` on bash
@@ -699,15 +900,24 @@ export function formatPlan(storyboard: Storyboard, locale: Locale): string {
       entry.startSec.toFixed(3),
       entry.durationSec.toFixed(3),
       entry.telop,
+      entry.head === undefined ? '' : entry.head.toFixed(3),
     ].join('\t'),
   );
-  return [
+  const header = [
     TSV_HEADER,
     `#total\t${storyboard.duration.toFixed(3)}`,
     `#output\t${storyboard.output}.${locale}`,
-    ...rows,
-    '',
-  ].join('\n');
+  ];
+  // What the cut needs from outside the plan: which cassette the claude pane
+  // replays, and how the GIF is delivered. demo-video.sh and compose.sh read
+  // these rows the way they read `#total`, so a cut carries its own settings.
+  if (storyboard.claudeCassette) header.push(`#claude-cassette\t${storyboard.claudeCassette}`);
+  if (storyboard.gif) {
+    header.push(
+      `#gif\t${storyboard.gif.width}\t${storyboard.gif.fps}\t${storyboard.gif.maxBytes ?? ''}`,
+    );
+  }
+  return [...header, ...rows, ''].join('\n');
 }
 
 export const DEFAULT_STORYBOARD_PATH = path.resolve(__dirname, '../storyboard/default.yaml');

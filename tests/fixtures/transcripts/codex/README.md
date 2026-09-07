@@ -26,6 +26,7 @@
 | `rollout-after-new-01510.jsonl` | 同じペインで `/new` を打った**後**のセッション 2 ターン。②が `FileChange` ＋ 空の `Reasoning` ＋ `CommandExecution` を含む。`session_id` = `01a05a85-f872-79d3-85c3-c1933dc86828` |
 | `rollout-second-instance-01510.jsonl` | **同じ cwd で同時に動かした 2 本目の codex**（`codex-2` 相当）。`session_id` = `01a05a85-2e16-7253-96be-cd143be9049c` |
 | `hook-events-01510.json` | 上記 3 セッションが実際に送った hook payload 21 件（`pane` / `event` / `payload`）。`session_id` と `transcript_path` の対応がこれで検証できる |
+| `rollout-headless-tail-2402.jsonl` | **上記 `rollout-three-turns-01510.jsonl` の末尾バイト列そのもの**（Issue #2402）。最後の `task_started` 行の**次の行**から EOF まで。4 MiB 窓がその `task_started` 行の途中で開いたとき `readTranscriptTail` が（自分の先頭断片を落として）パーサに渡す文字列と**バイト単位で同一**。新規採取ではなく既存 fixture の切り出しである |
 
 ## この fixture が固定している事実
 
@@ -39,6 +40,13 @@
 5. **operator の入力は `item_completed` の `UserMessage` だけ。** 同じファイルの
    `response_item` 側には `role: "user"` の `<environment_context>` などが混ざっているが、
    `UserMessage` item は本人の入力にしか出ない。
+6. **窓が turn の途中で開くと `task_started` が窓の外に出る。**（Issue #2402）
+   `rollout-headless-tail-2402.jsonl` は `task_complete` と `item_completed` を持ちながら
+   `task_started` を持たない。**それでも `turn_id` は読める** — codex は `turn_id` を
+   `task_started` だけでなく全 `item_completed` / `turn_context` / `task_complete` に押すので
+   （上の 4）、頭が欠けた窓でもその turn の本当の id が分かる。これが claude
+   （返答からプロンプトへのリンクが無く、頭が欠けると key を捏造するしかない）との決定的な違いで、
+   codex 側だけが「印を付けて**書く**」を選べる理由。
 
 ## 置換したもの（それ以外は無加工）
 

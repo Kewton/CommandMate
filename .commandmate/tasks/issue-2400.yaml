@@ -1,0 +1,132 @@
+version: 1
+title: "Issue #2400: codex の scrape が飽和 pane でフッタ1行だけになる（chrome finder 不在）"
+goal: |
+  https://github.com/Kewton/CommandMate/issues/2400 を実装する。
+
+  ## 現象（実測済み）
+  codex（0.153.x）の scrollback が捕捉窓 `CACHE_MAX_CAPTURE_LINES`（10,000行）を超えた pane
+  では、scraper が保存する「返答」が**フッタ1行だけ**になる。
+
+  実測（2026-09-07、`history_size 12683 + pane 1000` 行）:
+  ```
+  chat_messages | assistant | request_id NULL | 123文字
+    "gpt-6-astra xhigh · ~/share/work/github_kewton/CommandAgent-develop"
+  ```
+  同じ内容の行が繰り返し保存され、チャット面には「gpt-6-astra xhigh · ~/share/…」という1行の
+  assistant バブルが返答の代わりに出る。
+
+  ## 機構（実測、コード読み込み済み）
+  1. 窓が飽和すると `resolveExtractionStartIndex` は `findRecentUserPromptIndex(totalLines)` に
+     切り替わる（#1670）
+  2. codex の echo 検索 regex は `src/lib/polling/response-checker.ts` の
+     `findRecentUserPromptIndex`（line 439-441）で
+     `/^›\s+(?!Implement|Find and fix|Type|Summarize)/`。除外語は旧版の placeholder で、
+     **0.15x の composer placeholder `› Ask Codex to do anything` を除外していない**
+  3. codex には claude / copilot / opencode / command-code にある chrome finder が無い。
+     `src/lib/polling/response-checker.ts` は `src/lib/detection/cli-patterns.ts` から
+     `findClaudeChromeStart` / `findCopilotChromeStart` / `findCommandCodeChromeStart` /
+     `findOpenCodeChromeStart` を import して `contentEnd` を決めている（line 408-416）が、
+     **codex 用が無いので `contentEnd = totalLines` のまま**。下から探して最初に当たるのが
+     composer 行になる
+  4. 抽出開始が composer の次の行＝フッタになる
+
+  pane 末尾の実フレーム:
+  ```
+  ›  Ask Codex to do anything
+    gpt-6-astra xhigh · ~/share/work/github_kewton/CommandAgent-develop
+  ```
+
+  この行は turn が変わっても同一なので、content dedup（`isDuplicateResponse`）が**永久にロック**
+  され、転写リーダーへの再照会も阻まれる（poller 側の順序は #2399、別Issue）。
+
+  あわせて、steer（実行中の追加送信）の直後数秒は scraper が `ready / input_prompt` と判定する
+  （`detection-divergence` 当日17件、例 `scraperStatus:ready scraperReason:input_prompt
+  structuredStatus:running`）。ステータス API は structured 側が勝つので表示は正しいが、poller は
+  scraper の判定だけで「完了」とみなして scrape を保存し、上のロックに入る。
+
+  ## 影響
+  - 飽和した codex pane では scrape 経路が返答を一切保存できない（フッタのみ）
+  - dedup が固定内容でロックされ、Stop 経路が失敗したターンの救済が効かない
+  - `ask`（#2386）や relay（#2401）がこの行を「返答」として拾い得る
+
+  ## 対応（この Issue の scope）
+  1. claude / copilot / opencode / command-code と同型の **`findCodexChromeStart`** を
+     `src/lib/detection/cli-patterns.ts` に置き、composer 行とフッタ（model · cwd 行、
+     `N background terminal running …` 行）を `contentEnd` の外に出す。判別は #2310 の SGR規則
+     （composer は**bold グリフ** `ESC[1m›`、transcript echo は**dim グリフ** `ESC[1;2m›`）で行い、
+     placeholder 文字列の除外リストに頼らない。`response-checker.ts` の import と `contentEnd` の
+     決定ロジック（line 408-416 相当）に codex 分岐を足す
+  2. `findRecentUserPromptIndex` の codex 分岐（line 439-441）も同じ SGR 規則で echo だけを拾う
+     形に直す（文字列の負の先読み `(?!Implement|Find and fix|Type|Summarize)` は撤去）
+  3. steer 直後のフレームを実機で採取し、`isCodexTurnActive`（`src/lib/detection/cli-patterns.ts`
+     に既存）が `running` を返せるか確認する。返せないなら「`user_prompt_submit` から N 秒は
+     完了判定を保留する」等の扱いを決める（**結果次第で本Issueの範囲外にしてよいが、計測は
+     本Issueで行い Issue コメントに残すこと**）
+  4. fixture は `tests/fixtures/codex-live-2310/`（`idle-composer.txt` / `turn-running.txt` が
+     既にある）に**飽和フレーム**と**steer直後フレーム**を raw（ANSI保持）で追加する。
+     **`tests/unit/lib/detection/fixtures/` は別 suite が全走査して名前で pin するので置かないこと**
+     （このリポジトリで過去に実害あり）
+
+  ## 受入条件
+  - [ ] 飽和した idle フレーム（`history_size > 10000`、composer に placeholder）から返答本文が
+        抽出され、composer行・フッタ行が含まれない
+  - [ ] 非飽和フレームの既存抽出結果が変わらない
+        （`tests/unit/lib/polling/response-checker-capture-window-saturation.test.ts`、
+        `tests/unit/lib/detection/codex-*.test.ts` が緑）
+  - [ ] フッタだけの assistant 行が生成されない（fixture で回帰テスト。**変異注入で赤くなること**
+        を確認する）
+  - [ ] steer直後フレームの計測結果が Issue かコメントに残っている
+  - [ ] `npm run lint` / `npx tsc --noEmit` / `npm run test:unit` が exit 0
+
+  ## スコープ外（他Issueが担当。ファイルも触らないこと）
+  - Stop hook の自己待ち（#2398。`src/lib/hooks/stop-history-capture.ts` には触れない）
+  - poller の dedup 順序（#2399）
+  - relay の返答選択（#2401。`src/lib/relay/relay-delivery.ts` には触れない）
+  - 4 MiB 窓の headless turn（#2402）
+
+  ## 関連
+  #1670（捕捉窓の飽和と echo アンカーへの切替）/ #2310（codexの`›`3用途とSGR判別。
+  `tests/fixtures/codex-live-2310/README.md`）/ #1289 / #1897 / #1911 / #2250（他ツールの
+  chrome finder。同型で4本目）/ #2386（送信前フラッシュの junk行。同じ生産者の別の口）。
+  同時起票の兄弟: #2398（真因） / #2399（poller の dedup順序、本Issue完了後に着手） /
+  #2401（relay の返答選択） / #2402（4 MiB窓）
+
+  ## 作業ルール（厳守）
+  - **`CHANGELOG.md` と `docs/module-reference.md` を編集しないでください**（scope外です）。
+    代わりに次の2ファイルを書いてください。どちらも `dev-reports/` 配下なので commit には
+    入りません。
+    - `dev-reports/changelog/issue-2400.md` — `CHANGELOG.md` の `## [Unreleased]` にそのまま
+      貼れる1エントリ（先頭は `- **<type>(<scope>): …** (#2400): …`）。1行目にコメントで
+      どの節（`### Added` / `### Changed` / `### Fixed`）に入るかを書く。
+      `- **` で始めること（`grep -cE '^- \*\*'` で集計する）。`(#2400)` は要約の外
+      （`**` を閉じた後）に置くこと。1エントリ＝1行（折らない）。
+    - `dev-reports/module-reference/issue-2400.md` — `docs/module-reference.md` の表に足す
+      注記を行キー（`| \`path\` |`）ごとに列挙する。既存行に足すときは
+      `grep -n '^| \`<path>\`' docs/module-reference.md` を実行し、その出力（行番号つきの
+      行キー）を断片に書き写してから書くこと。0件だった行への追記は指示しない
+      （新しい行を足すなら「新規行」と明記する）。足すものが無ければ「追記なし」の1行でよい。
+  - 断片が無いとリリースノートと module-reference に載らない。実装と同じ commit の時点で
+    書くこと。
+  - **本Issueは並列で3件（#2398/#2400/#2401）が同時に開発されています。** 上記スコープ外の
+    ファイルに触れると他のワーカーの作業と衝突します。厳守してください。
+scope:
+  allow:
+    - "src/lib/detection/cli-patterns.ts"
+    - "src/lib/polling/response-checker.ts"
+    - "tests/unit/lib/polling/response-checker-capture-window-saturation.test.ts"
+    - "tests/unit/lib/polling/**"
+    - "tests/unit/lib/detection/**"
+    - "tests/fixtures/codex-live-2310/**"
+    - "dev-reports/changelog/issue-2400.md"
+    - "dev-reports/module-reference/issue-2400.md"
+  deny:
+    - "src/lib/hooks/stop-history-capture.ts"
+    - "src/lib/hooks/agent-event-service.ts"
+    - "src/lib/relay/relay-delivery.ts"
+    - "src/lib/hooks/sources/codex/history.ts"
+    - "tests/unit/lib/detection/fixtures/**"
+verify:
+  # 既定（省略）= 登録済み全ゲート
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true

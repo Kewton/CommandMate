@@ -12,6 +12,9 @@
  *    the same finished turn.
  *  - **The quiet window** applies to a scrape-only completion and not to a
  *    transcript one.
+ *  - **Provenance beats recency** (Issue #2401). For a tool that keeps a
+ *    transcript the scraper's rows are not candidates at all, so a footer line
+ *    written after the real answer does not become the reply.
  *  - **One expiry notice**, because the state change is guarded.
  *
  * @vitest-environment node
@@ -20,7 +23,13 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { runMigrations } from '@/lib/db/db-migrations';
-import { createMessage, relayRequestId, RELAY_SYSTEM_REQUEST_ID_PREFIX } from '@/lib/db/chat-db';
+import {
+  createMessage,
+  MODEL_CHANGE_REQUEST_ID_PREFIX,
+  relayRequestId,
+  RELAY_SYSTEM_REQUEST_ID_PREFIX,
+} from '@/lib/db/chat-db';
+import { codexTurnRequestId, opencodeTurnRequestId } from '@/types/agent-transcript';
 import {
   createRelay,
   getRelayById,
@@ -32,6 +41,8 @@ const NOW = 1_800_000_000_000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const A = { worktreeId: 'wt-a', instanceId: 'claude' };
 const B = { worktreeId: 'wt-b', instanceId: 'codex' };
+/** A worker whose only record is the screen: gemini keeps no transcript. */
+const C = { worktreeId: 'wt-c', instanceId: 'gemini' };
 
 let db: Database.Database;
 
@@ -62,7 +73,37 @@ function insertWorktree(id: string, cliToolId: string): void {
   ).run(id, id, `/tmp/${id}`, cliToolId, NOW);
 }
 
+let turnSeq = 0;
+
+/**
+ * A row the codex TRANSCRIPT reader wrote, i.e. a real answer.
+ *
+ * The request id comes from the production minter rather than from a literal,
+ * so a change to the `codex-turn:` namespace fails here instead of leaving the
+ * suite asserting a shape nothing writes any more.
+ */
 function seedReply(content: string, at = NOW + 1000): string {
+  turnSeq += 1;
+  return createMessage(db, {
+    worktreeId: 'wt-b',
+    role: 'assistant',
+    content,
+    messageType: 'normal',
+    timestamp: new Date(at),
+    requestId: codexTurnRequestId(`turn-${turnSeq}`),
+    cliToolId: 'codex',
+    instanceId: 'codex',
+  }).id;
+}
+
+/**
+ * A row the SCRAPER wrote for the same codex session.
+ *
+ * `request_id IS NULL` is what the poller's save path leaves behind, and the
+ * bodies #2398 / #2400 measured are exactly this: a footer line, a partial
+ * frame, the ANSI dump flushed just before a send.
+ */
+function seedScrapeRow(content: string, at = NOW + 2000): string {
   return createMessage(db, {
     worktreeId: 'wt-b',
     role: 'assistant',
@@ -74,11 +115,29 @@ function seedReply(content: string, at = NOW + 1000): string {
   }).id;
 }
 
+/** The only kind of row a scrape-only tool ever has. */
+function seedGeminiReply(content: string, at = NOW + 1000): string {
+  return createMessage(db, {
+    worktreeId: 'wt-c',
+    role: 'assistant',
+    content,
+    messageType: 'normal',
+    timestamp: new Date(at),
+    cliToolId: 'gemini',
+    instanceId: 'gemini',
+  }).id;
+}
+
 function newRelay(expiresAt = NOW + DAY_MS) {
   return createRelay(db, { from: A, to: B, hops: 1, expiresAt, now: NOW });
 }
 
+function newGeminiRelay(expiresAt = NOW + DAY_MS) {
+  return createRelay(db, { from: A, to: C, hops: 1, expiresAt, now: NOW });
+}
+
 const CODEX_WORKER = { worktreeId: 'wt-b', cliToolId: 'codex' as const, instanceId: 'codex' };
+const GEMINI_WORKER = { worktreeId: 'wt-c', cliToolId: 'gemini' as const, instanceId: 'gemini' };
 
 /**
  * Let the fire-and-forget pump a notifier started run to completion, then run
@@ -110,7 +169,9 @@ beforeEach(() => {
   runMigrations(db);
   insertWorktree('wt-a', 'claude');
   insertWorktree('wt-b', 'codex');
+  insertWorktree('wt-c', 'gemini');
 
+  turnSeq = 0;
   resetRelayDeliveryState();
   sendUserMessage.mockReset();
   sendUserMessage.mockResolvedValue({ ok: true, message: { id: 'm1' } });
@@ -131,41 +192,112 @@ describe('findWorkerReply', () => {
     expect(findWorkerReply(db, CODEX_WORKER, 0)?.id).toBe(newest);
   });
 
+  // The three exclusions below are asserted against a SCRAPE-ONLY worker on
+  // purpose. For a transcript tool the provenance filter (#2401) would step
+  // over each of these rows on its own, so asserting them against codex would
+  // pass whether or not the guard under test existed; on gemini the guard is
+  // the only thing standing between the row and the requester.
   it('steps over a prompt row', () => {
-    const reply = seedReply('the answer', NOW + 1000);
+    const reply = seedGeminiReply('the answer', NOW + 1000);
     createMessage(db, {
-      worktreeId: 'wt-b',
+      worktreeId: 'wt-c',
       role: 'assistant',
       content: 'Allow this?',
       messageType: 'prompt',
       timestamp: new Date(NOW + 2000),
-      cliToolId: 'codex',
-      instanceId: 'codex',
+      cliToolId: 'gemini',
+      instanceId: 'gemini',
     });
 
-    expect(findWorkerReply(db, CODEX_WORKER, 0)?.id).toBe(reply);
+    expect(findWorkerReply(db, GEMINI_WORKER, 0)?.id).toBe(reply);
   });
 
   it('steps over a relay system row', () => {
-    const reply = seedReply('the answer', NOW + 1000);
+    const reply = seedGeminiReply('the answer', NOW + 1000);
     createMessage(db, {
-      worktreeId: 'wt-b',
+      worktreeId: 'wt-c',
       role: 'assistant',
       content: 'Delegated to X; waiting for the reply.',
       messageType: 'normal',
       timestamp: new Date(NOW + 2000),
       requestId: `${RELAY_SYSTEM_REQUEST_ID_PREFIX}r1:requested`,
-      cliToolId: 'codex',
-      instanceId: 'codex',
+      cliToolId: 'gemini',
+      instanceId: 'gemini',
     });
 
-    expect(findWorkerReply(db, CODEX_WORKER, 0)?.id).toBe(reply);
+    expect(findWorkerReply(db, GEMINI_WORKER, 0)?.id).toBe(reply);
+  });
+
+  it('steps over a model-change row', () => {
+    const reply = seedGeminiReply('the answer', NOW + 1000);
+    createMessage(db, {
+      worktreeId: 'wt-c',
+      role: 'assistant',
+      content: 'Model changed to gemini-2.5-pro',
+      messageType: 'normal',
+      timestamp: new Date(NOW + 2000),
+      requestId: `${MODEL_CHANGE_REQUEST_ID_PREFIX}${NOW + 2000}`,
+      cliToolId: 'gemini',
+      instanceId: 'gemini',
+    });
+
+    expect(findWorkerReply(db, GEMINI_WORKER, 0)?.id).toBe(reply);
+  });
+
+  it('steps over an empty body', () => {
+    const reply = seedGeminiReply('the answer', NOW + 1000);
+    seedGeminiReply('   \n  ', NOW + 2000);
+
+    expect(findWorkerReply(db, GEMINI_WORKER, 0)?.id).toBe(reply);
   });
 
   it('refuses a reply written before the relay existed', () => {
     seedReply('answered somebody else', NOW - 5000);
 
     expect(findWorkerReply(db, CODEX_WORKER, NOW)).toBeNull();
+  });
+});
+
+describe('findWorkerReply: who wrote the row (Issue #2401)', () => {
+  it('takes the transcript row when the SCRAPER wrote a newer one', () => {
+    const real = seedReply('Fixed it; the patch is on fix/2401.', NOW + 1000);
+    // What #2398 / #2400 measured: codex chrome, scraped and saved with no
+    // request id, landing after the rollout reader had already written the
+    // answer. Newest, and not a word the agent said.
+    seedScrapeRow('? for shortcuts', NOW + 2000);
+
+    expect(findWorkerReply(db, CODEX_WORKER, 0)?.id).toBe(real);
+  });
+
+  it('finds nothing when a transcript tool has only scraper rows', () => {
+    seedScrapeRow('? for shortcuts', NOW + 2000);
+
+    expect(findWorkerReply(db, CODEX_WORKER, 0)).toBeNull();
+  });
+
+  it('takes the scraper row for a tool that keeps no transcript', () => {
+    // The other half of the rule: demanding a marker from gemini would deliver
+    // nothing, ever, because nothing ever writes one.
+    const only = seedGeminiReply('here is the summary', NOW + 1000);
+
+    expect(findWorkerReply(db, GEMINI_WORKER, 0)?.id).toBe(only);
+  });
+
+  it("accepts opencode's oc-turn: namespace, which does not start with its tool id", () => {
+    insertWorktree('wt-d', 'opencode');
+    const reply = createMessage(db, {
+      worktreeId: 'wt-d',
+      role: 'assistant',
+      content: 'done',
+      messageType: 'normal',
+      timestamp: new Date(NOW + 1000),
+      requestId: opencodeTurnRequestId('msg-1'),
+      cliToolId: 'opencode',
+      instanceId: 'opencode',
+    }).id;
+
+    const worker = { worktreeId: 'wt-d', cliToolId: 'opencode' as const, instanceId: 'opencode' };
+    expect(findWorkerReply(db, worker, 0)?.id).toBe(reply);
   });
 });
 
@@ -316,13 +448,13 @@ describe('holding a delivery while the requester is mid-turn', () => {
   });
 });
 
-describe('notifyRelayTurnCompleted (scraped)', () => {
+describe('notifyRelayTurnCompleted (scraped, tool with no transcript)', () => {
   it('waits out the quiet window before delivering', async () => {
     vi.useFakeTimers();
-    newRelay();
-    seedReply('half a fra');
+    newGeminiRelay();
+    seedGeminiReply('half a fra');
 
-    const pending = notifyRelayTurnCompleted(CODEX_WORKER, { settled: false });
+    const pending = notifyRelayTurnCompleted(GEMINI_WORKER, { settled: false });
     // Nothing yet: the frame has not been shown to be still.
     expect(listRelaysWithPendingPayload(db)).toHaveLength(0);
     expect(sendUserMessage).not.toHaveBeenCalled();
@@ -337,13 +469,13 @@ describe('notifyRelayTurnCompleted (scraped)', () => {
 
   it('delivers the LATER row when the pane kept moving', async () => {
     vi.useFakeTimers();
-    newRelay();
-    seedReply('half a fra', NOW + 1000);
+    newGeminiRelay();
+    seedGeminiReply('half a fra', NOW + 1000);
 
-    const pending = notifyRelayTurnCompleted(CODEX_WORKER, { settled: false });
+    const pending = notifyRelayTurnCompleted(GEMINI_WORKER, { settled: false });
     // Still inside the first quiet window: the pane is not done drawing.
     await vi.advanceTimersByTimeAsync(2_000);
-    seedReply('half a frame, then the rest', NOW + 2000);
+    seedGeminiReply('half a frame, then the rest', NOW + 2000);
     await vi.advanceTimersByTimeAsync(10_000);
     await pending;
     await settleFake();
@@ -363,6 +495,87 @@ describe('notifyRelayTurnCompleted (scraped)', () => {
     expect(
       listRelaysWithPendingPayload(db).length + sendUserMessage.mock.calls.length
     ).toBeGreaterThan(0);
+  });
+});
+
+describe('notifyRelayTurnCompleted (scraped, tool WITH a transcript) — Issue #2401', () => {
+  it('delivers the transcript row rather than the newer junk one', async () => {
+    newRelay();
+    const real = 'Fixed it; the patch is on fix/2401.';
+    seedReply(real, NOW + 1000);
+    seedScrapeRow('? for shortcuts', NOW + 2000);
+
+    // The poller's edge, which is the one that fires with the junk row newest.
+    await notifyRelayTurnCompleted(CODEX_WORKER, { settled: false });
+    await settle();
+
+    expect(sendUserMessage).toHaveBeenCalledTimes(1);
+    const body = String(sendUserMessage.mock.calls[0][1].content);
+    expect(body).toContain(real);
+    expect(body).not.toContain('? for shortcuts');
+  });
+
+  it('delivers the transcript row on the settled edge too', async () => {
+    newRelay();
+    seedReply('Fixed it; the patch is on fix/2401.', NOW + 1000);
+    // The Stop hook announces, and the scraper's flush lands in between.
+    seedScrapeRow('? for shortcuts', NOW + 2000);
+
+    await notifyRelayTurnCompleted(CODEX_WORKER, { settled: true });
+    await settle();
+
+    expect(sendUserMessage).toHaveBeenCalledTimes(1);
+    expect(String(sendUserMessage.mock.calls[0][1].content)).not.toContain('? for shortcuts');
+  });
+
+  it('delivers NOTHING while the ledger holds only junk', async () => {
+    vi.useFakeTimers();
+    const relay = newRelay();
+    seedScrapeRow('? for shortcuts', NOW + 2000);
+
+    const pending = notifyRelayTurnCompleted(CODEX_WORKER, { settled: false });
+    // Past the grace, so this is the settled answer and not merely "not yet".
+    await vi.advanceTimersByTimeAsync(20_000);
+    await pending;
+    await settleFake();
+
+    expect(sendUserMessage).not.toHaveBeenCalled();
+    expect(listRelaysWithPendingPayload(db)).toHaveLength(0);
+    // Still standing: the reader's own announcement can still answer it, and
+    // failing that the sweep tells the requester there was no reply.
+    expect(getRelayById(db, relay.id)?.state).toBe('pending');
+  });
+
+  it('delivers the transcript row that lands DURING the grace', async () => {
+    vi.useFakeTimers();
+    newRelay();
+    seedScrapeRow('? for shortcuts', NOW + 2000);
+
+    const pending = notifyRelayTurnCompleted(CODEX_WORKER, { settled: false });
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(sendUserMessage).not.toHaveBeenCalled();
+
+    // #2386 measured the rollout reader landing about five seconds behind the
+    // completion edge. This is that row arriving.
+    seedReply('Fixed it; the patch is on fix/2401.', NOW + 3000);
+    await vi.advanceTimersByTimeAsync(2_000);
+    await pending;
+    await settleFake();
+
+    expect(sendUserMessage).toHaveBeenCalledTimes(1);
+    expect(String(sendUserMessage.mock.calls[0][1].content)).toContain('fix/2401');
+  });
+
+  it('gives up rather than waiting for ever', async () => {
+    vi.useFakeTimers();
+    newRelay();
+    seedScrapeRow('? for shortcuts', NOW + 2000);
+
+    const pending = notifyRelayTurnCompleted(CODEX_WORKER, { settled: false });
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    // Resolved, not still polling: a poller tick that never returns is a leak.
+    await expect(pending).resolves.toBeUndefined();
   });
 });
 

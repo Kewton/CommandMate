@@ -337,6 +337,13 @@ export interface CodexTranscriptCapture {
  * attach` is the thing #2196 exists to record, and it is worth recording next to
  * a *scraped* reply just as much as next to a Markdown one.
  *
+ * A turn whose `task_started` fell outside the window is written too, behind
+ * `CODEX_TURN_HEAD_TRUNCATION_MARKER` and beside a
+ * `codex-transcript-turn-headless` report (Issue #2402). See `./transcript`'s
+ * module docblock for why codex may do that where `../claude/history` may not,
+ * and `docs/design/codex-transcript-reader.md` §4.5 for why the prompts that
+ * went out of the window with it are left unadopted rather than guessed at.
+ *
  * Never throws.
  *
  * @param target - The instance whose turn just ended
@@ -437,6 +444,13 @@ export async function captureCodexTranscriptTurn(
       userRows.push(await recordCodexUserTurns(target, pending.turns[index], previousStartedAt));
     }
 
+    const windowFacts: CodexWindowFacts = {
+      path,
+      firstRecordAt: firstCodexRecordAt(parsed.records),
+      turnlessRecords: built.turnlessRecords,
+      malformedLines: parsed.malformedLines,
+    };
+
     const lastRecordAt = lastCodexRecordAt(parsed.records);
     let captured = false;
     for (let index = 0; index < pending.turns.length; index += 1) {
@@ -451,7 +465,7 @@ export async function captureCodexTranscriptTurn(
           lastRecordAt.get(turn.turnId) ?? 0,
           nextTurnOpensAt(pending.turns, userRows, index)
         ),
-        path
+        windowFacts
       );
     }
     return captured;
@@ -485,6 +499,46 @@ export async function resolveCodexTranscriptPath(
   } catch {
     return null;
   }
+}
+
+/**
+ * What the window itself knows about the read it came from (Issue #2402).
+ *
+ * Only measured quantities. A turn whose `task_started` fell outside the window
+ * cannot say how much of itself is missing — the bytes before the window's first
+ * one were never read — so nothing here is an estimate of that. What is honest
+ * is where the window opens and what it could not attribute, and the report
+ * {@link writeCodexTurn} logs is built from exactly these.
+ */
+interface CodexWindowFacts {
+  /** The rollout the window was read from. */
+  readonly path: string;
+  /** Epoch ms of the window's first timestamped record, or null. */
+  readonly firstRecordAt: number | null;
+  /** Records in the window that belong to no turn. */
+  readonly turnlessRecords: number;
+  /**
+   * Lines the window could not parse.
+   *
+   * Not the window's own opening cut: `readTranscriptTail` drops its partial
+   * first line itself, so this counts only a fragment codex was mid-append on.
+   */
+  readonly malformedLines: number;
+}
+
+/**
+ * When the window's first timestamped record was written (Issue #2402).
+ *
+ * The floor on "everything this read could possibly have seen". For a headless
+ * turn it is also the only honest thing to say about where the missing head
+ * ends: the turn began before this instant, and by how much is not in the file
+ * this read opened.
+ */
+function firstCodexRecordAt(records: readonly CodexRolloutRecord[]): number | null {
+  for (const record of records) {
+    if (record.timestampMs !== null) return record.timestampMs;
+  }
+  return null;
 }
 
 /** What {@link selectUnwrittenCodexTurns} answers. */
@@ -726,7 +780,7 @@ async function writeCodexTurn(
   turn: CodexTurnAccumulator,
   rendered: CodexRenderedTurn,
   timestampMs: number,
-  path: string
+  windowFacts: CodexWindowFacts
 ): Promise<boolean> {
   const instanceId = target.instanceId ?? target.cliToolId;
 
@@ -799,6 +853,39 @@ async function writeCodexTurn(
     return true;
   }
 
+  if (rendered.headless) {
+    // Issue #2402. The turn's `task_started` is outside the window, so this row
+    // carries `CODEX_TURN_HEAD_TRUNCATION_MARKER` and the operator can see that
+    // — but the operator cannot see WHY, and neither can anyone reading the logs
+    // afterwards. Everything below is measured: where the window opens, what it
+    // held that no turn claimed, and how many of the turn's prompts were inside
+    // it. How much fell out is deliberately NOT here. It is not knowable from a
+    // read that never saw those bytes, and a guess would be worse than silence.
+    //
+    // `promptsInWindow` is the one to read when a prompt is missing from the
+    // conversation: codex folds a prompt submitted mid-turn into that same turn
+    // (23 of 326 archived turns carry more than one), so a headless turn's
+    // earlier prompts can be outside the window too — and unlike the body, those
+    // are NOT recoverable. `recordCodexUserTurns` only ever sees `turn.prompts`,
+    // which is what the window held; a `/send` row for a prompt written before
+    // the window stays unkeyed. Adopting it would mean guessing which unkeyed
+    // row belongs to this turn with no text to match on — see
+    // `docs/design/codex-transcript-reader.md` §4.5.
+    logger.info('codex-transcript-turn-headless', {
+      worktreeId: target.worktreeId,
+      instanceId,
+      sessionId: rendered.sessionId,
+      turnId: rendered.turnId,
+      path: windowFacts.path,
+      windowBytes: CODEX_TRANSCRIPT_TAIL_BYTES,
+      windowFirstRecordAt: windowFacts.firstRecordAt,
+      turnlessRecords: windowFacts.turnlessRecords,
+      malformedLines: windowFacts.malformedLines,
+      promptsInWindow: turn.prompts.length,
+      itemsInWindow: turn.items.length,
+    });
+  }
+
   const message = createMessage(db, {
     worktreeId: target.worktreeId,
     role: 'assistant',
@@ -816,7 +903,7 @@ async function writeCodexTurn(
     instanceId,
     sessionId: rendered.sessionId,
     requestId,
-    path,
+    path: windowFacts.path,
     bodyLength: rendered.body.length,
     textBlocks: rendered.textBlocks,
     toolBlocks: rendered.toolBlocks,

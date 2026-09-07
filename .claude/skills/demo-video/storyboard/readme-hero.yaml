@@ -1,0 +1,106 @@
+# README hero: the 30 seconds that open README.md (Issue #2381).
+#
+# Experience first, guarantee later: the cut that used to sit here opened on a
+# YAML listing and a CLI log, and the first GUI frame arrived 18 seconds in.
+# This one goes tab strip -> five agents -> delegation on the chat surface ->
+# the reply's file link -> the same two things from a phone. The contract ->
+# verification cut (contract-verify.yaml) moves down the README to the section
+# that is about it (#2383).
+#
+# What this file declares beyond the wording:
+#   - `claude-cassette`: the claude pane has to be replaying claude-hero.cast,
+#     whose two passes are the delegation round trip and then an approval.
+#     demo-video.sh reads this off the plan, so `--storyboard readme-hero` is
+#     the whole command.
+#   - `gif`: 600px / 10 fps, under the 1.84 MB budget #1815 set for the README
+#     (18 s measured 910 KB; 30 s lands around 1.5 MB). compose.sh gates it.
+#   - `head: 5` on delegate-ask: the round trip takes ~25 s and the slot is 7,
+#     so the take keeps its first 5 s (the ask typed, the brief inserted, the
+#     send) and jump-cuts to its last 2 (the reply landing; reply-file-link
+#     then holds it). The brief lands at ~3 s of the take and the send at
+#     ~3.5 s (measured), and a head of 4 cut the send on a slow page.
+#   - Two slots differ from the Issue's table by a second each, measured on
+#     the dev server: repo-tab-switch has 5 s (the route transition after the
+#     branch is picked takes ~2 s and at 4 s pushed the popover out of the
+#     slot) and mobile-approve has 5 s (answering takes ~2.5 s of "Sending…"
+#     after the tap, and at 4 s the sheet was on screen for one second).
+#     reply-file-link and mobile-file-link give up the seconds: their payoff
+#     is a single frame, the opened file.
+#   - `position: top` on delegate-ask and the phone approval: the default band
+#     sits on the composer, the newest reply and the sheet's options, which
+#     are the shot. At the top it covers older transcript. reply-file-link
+#     keeps the bottom band: its reply sits mid-frame and the file viewer's
+#     first lines are at the top.
+#
+# Ordering is enforced by storyboard.ts: reply-file-link, mobile-approve and
+# mobile-file-link need delegate-ask earlier in the cut, and mobile-approve is
+# the cut's one approval.
+#
+# Captions say only what is on screen (docs/design/public-messaging.md §5):
+# "five agents in one worktree" is the roster and the picker listing five, not
+# a claim that five ran — live are Claude and Codex. Wording is copied from
+# public-messaging.md §6, the canonical source, and tests/unit/docs pins the
+# two against each other.
+
+version: 1
+duration: 30
+output: demo-hero
+claude-cassette: ../fixtures/claude-hero.cast
+gif:
+  width: 600
+  fps: 10
+  maxBytes: 1840000
+scenes:
+  - id: title
+    type: card
+    duration: 1
+    telop: { ja: "CommandMate", en: "CommandMate" }
+  - id: repo-tab-switch
+    type: record
+    duration: 5
+    viewport: pc
+    telop:
+      ja: "リポジトリはタブで切り替える"
+      en: "Switch repos from the tab bar."
+  - id: agent-tabs
+    type: record
+    duration: 3
+    viewport: pc
+    telop:
+      ja: "5 エージェント、1 worktree"
+      en: "Five agents in one worktree."
+  - id: delegate-ask
+    type: record
+    duration: 7
+    viewport: pc
+    head: 5
+    telop:
+      position: top
+      ja: "隣のセッションに頼むだけ"
+      en: "Delegate to the next session."
+  - id: reply-file-link
+    type: record
+    duration: 4
+    viewport: pc
+    telop:
+      ja: "返答のリンクからファイルを開く"
+      en: "Open the file from the reply."
+  - id: mobile-approve
+    type: record
+    duration: 5
+    viewport: mobile
+    telop:
+      position: top
+      ja: "承認はスマホから 1 タップ"
+      en: "Approve from your phone."
+  - id: mobile-file-link
+    type: record
+    duration: 3
+    viewport: mobile
+    telop:
+      ja: "ファイルもスマホで開く"
+      en: "Open files on your phone, too."
+  - id: outro
+    type: card
+    duration: 2
+    telop: { ja: "github.com/Kewton/CommandMate", en: "github.com/Kewton/CommandMate" }

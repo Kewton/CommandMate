@@ -71,11 +71,25 @@ async function runStart(start: () => Promise<void>): Promise<void> {
   }
 }
 
+
+/**
+ * The port every launch line carries since #2403.
+ *
+ * A pane inherits whichever `CM_PORT` the tmux server's global environment
+ * holds — the port of whatever CommandMate started that tmux server — so the
+ * launching server states its own, and a `commandmate` typed inside the agent
+ * resolves to the server that started it. Fixed here so the byte-pins below do
+ * not read the `CM_PORT` of the machine under test.
+ */
+const SERVER_PORT = '60301';
+const PORT_ASSIGNMENT = `CM_PORT='${SERVER_PORT}'`;
+
 beforeEach(async () => {
   home = makeTempDir('cmate-1762-start-home-');
   worktree = makeTempDir('cmate-1762-start-wt-');
   vi.stubEnv('HOME', home);
   vi.stubEnv('CM_AGENT_HOOKS_INJECT', '1');
+  vi.stubEnv('CM_PORT', SERVER_PORT);
   vi.clearAllMocks();
   // `clearAllMocks` clears calls, not implementations, so a `mockResolvedValue`
   // from an earlier test would leak into the next one — which for `hasSession`
@@ -170,13 +184,15 @@ describe('GeminiTool.startSession', () => {
     expect(sendKeys).toHaveBeenCalled();
   });
 
-  it('launches the bare command under CM_AGENT_HOOKS_INJECT=0', async () => {
+  it('launches the bare command, behind the server port, under CM_AGENT_HOOKS_INJECT=0', async () => {
     vi.stubEnv('CM_AGENT_HOOKS_INJECT', '0');
     const { sendKeys } = await import('@/lib/tmux/tmux');
 
     await runStart(() => tool.startSession('wt-g', worktree));
 
-    expect(sendKeys).toHaveBeenCalledWith('mcbd-gemini-wt-g', 'gemini', true);
+    // #2403's port is not hook injection: switching hooks off does not change
+    // which CommandMate the agent belongs to.
+    expect(sendKeys).toHaveBeenCalledWith('mcbd-gemini-wt-g', `${PORT_ASSIGNMENT} gemini`, true);
     expect(existsSync(join(worktree, '.gemini', 'settings.json'))).toBe(false);
     // The fence is not part of the rollback: it costs nothing and protects the
     // scraper path too.
@@ -250,7 +266,7 @@ describe('AntigravityTool.startSession', () => {
     expect(command.endsWith(`'agy' --model 'model'\\''; rm -rf ~ #'`)).toBe(true);
   });
 
-  it('launches the bare command under CM_AGENT_HOOKS_INJECT=0', async () => {
+  it('launches the bare command, behind the server port, under CM_AGENT_HOOKS_INJECT=0', async () => {
     vi.stubEnv('CM_AGENT_HOOKS_INJECT', '0');
     const { sendKeys } = await import('@/lib/tmux/tmux');
 
@@ -258,7 +274,7 @@ describe('AntigravityTool.startSession', () => {
 
     expect(sendKeys).toHaveBeenCalledWith(
       'mcbd-antigravity-wt-a',
-      "agy --model 'Gemini 3.1 Pro (High)'",
+      `${PORT_ASSIGNMENT} agy --model 'Gemini 3.1 Pro (High)'`,
       true
     );
     expect(existsSync(join(home, '.gemini', 'config', 'hooks.json'))).toBe(false);

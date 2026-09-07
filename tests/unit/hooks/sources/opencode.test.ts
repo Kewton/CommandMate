@@ -92,6 +92,18 @@ const REF = {
 
 let sandbox: string;
 
+/**
+ * The port `renderAgentLaunchCommand` states on every launch line since #2403.
+ *
+ * A pane inherits whichever `CM_PORT` the tmux server's global environment
+ * carries — the port of whatever CommandMate started that tmux server — so the
+ * launching server pins its own, and a `commandmate` typed inside the agent
+ * resolves to the server that launched it. Fixed here so the byte-pins below do
+ * not depend on the `CM_PORT` of the machine running the tests.
+ */
+const SERVER_PORT = '60301';
+const PORT_ASSIGNMENT = `CM_PORT='${SERVER_PORT}'`;
+
 beforeAll(() => {
   sandbox = makeTempDir('opencode-source-');
 });
@@ -109,6 +121,7 @@ beforeEach(() => {
   // and a test that allocated a port would write into it.
   vi.stubEnv('CM_OPENCODE_PORT_FILE', join(sandbox, 'opencode-ports.json'));
   vi.stubEnv('CM_AGENT_HOOKS_INJECT', '1');
+  vi.stubEnv('CM_PORT', SERVER_PORT);
 });
 
 afterEach(() => {
@@ -438,13 +451,15 @@ describe('prepareLaunch', () => {
     });
   });
 
-  it('renders to the bare command line, because there is nothing to prefix', () => {
-    // The #1846 renderer is the only thing that turns a plan into a line, and
-    // an empty `env` has to leave the command byte-identical — otherwise every
-    // source without correlation variables would grow a leading space.
+  it('renders to a command line prefixed only by the server’s port', () => {
+    // The #1846 renderer is the only thing that turns a plan into a line, and an
+    // empty `env` used to leave the command byte-identical. #2403 makes that one
+    // assignment rather than none, and opencode declares no correlation
+    // variables — so this line is the port and nothing else, which is still what
+    // catches a stray separator.
     rememberOpencodePort(REF, 4242, '/tmp/wt');
     expect(renderAgentLaunchCommand(prepareOpencodeLaunch(LAUNCH))).toBe(
-      `'opencode' --port 4242 --hostname 127.0.0.1`
+      `${PORT_ASSIGNMENT} 'opencode' --port 4242 --hostname 127.0.0.1`
     );
   });
 });

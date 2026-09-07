@@ -107,6 +107,19 @@ afterAll(() => {
   removeTempDir(sandbox);
 });
 
+
+/**
+ * The port every launch line carries since #2403.
+ *
+ * A pane inherits whichever `CM_PORT` the tmux server's global environment
+ * holds — the port of whatever CommandMate started that tmux server — so the
+ * launching server states its own, and a `commandmate` typed inside the agent
+ * resolves to the server that started it. Fixed here so the byte-pins below do
+ * not read the `CM_PORT` of the machine under test.
+ */
+const SERVER_PORT = '60301';
+const PORT_ASSIGNMENT = `CM_PORT='${SERVER_PORT}'`;
+
 describe('OpenCodeTool', () => {
   let tool: OpenCodeTool;
 
@@ -123,6 +136,7 @@ describe('OpenCodeTool', () => {
     );
     resetOpencodeLaunchSettings();
     vi.stubEnv('CM_AGENT_HOOKS_INJECT', '1');
+    vi.stubEnv('CM_PORT', SERVER_PORT);
     // `clearAllMocks` clears calls but keeps implementations, so the pipeline
     // stubs are re-stated here — a test that made one reserve a port would
     // otherwise leak it into every test that follows.
@@ -273,7 +287,7 @@ describe('OpenCodeTool', () => {
 
       expect(sendKeys).toHaveBeenCalledWith(
         'mcbd-opencode-test-123',
-        `'opencode' --port 4242 --hostname 127.0.0.1`,
+        `${PORT_ASSIGNMENT} 'opencode' --port 4242 --hostname 127.0.0.1`,
         true
       );
       expect(attachOpencodeEventStream).toHaveBeenCalled();
@@ -302,7 +316,13 @@ describe('OpenCodeTool', () => {
       await vi.runAllTimersAsync();
       vi.useRealTimers();
 
-      expect(sendKeys).toHaveBeenCalledWith('mcbd-opencode-test-123', 'opencode', true);
+      // Hooks off, but #2403's port stays: it says which CommandMate the agent
+      // belongs to, not whether its hooks are configured.
+      expect(sendKeys).toHaveBeenCalledWith(
+        'mcbd-opencode-test-123',
+        `${PORT_ASSIGNMENT} opencode`,
+        true
+      );
     });
 
     it('should create session and start opencode TUI', async () => {
@@ -337,8 +357,13 @@ describe('OpenCodeTool', () => {
       });
 
       // Verify opencode command was sent. Issue #1763: with no port reserved
-      // (the stub above answers null) this stays the pre-#1763 bare command.
-      expect(sendKeys).toHaveBeenCalledWith('mcbd-opencode-test-123', 'opencode', true);
+      // (the stub above answers null) this stays the pre-#1763 bare command —
+      // behind #2403's server port, which every line carries.
+      expect(sendKeys).toHaveBeenCalledWith(
+        'mcbd-opencode-test-123',
+        `${PORT_ASSIGNMENT} opencode`,
+        true
+      );
     });
   });
 

@@ -1,0 +1,105 @@
+version: 1
+title: "Issue #2401: relay の findWorkerReply が行の出自を見ず junk 行を配達し得る"
+goal: |
+  https://github.com/Kewton/CommandMate/issues/2401 を実装する。
+
+  ## 現象
+  relay（#2377）の返答選択 `findWorkerReply`（`src/lib/relay/relay-delivery.ts`）は「最新の
+  非prompt な assistant 行」をそのまま返す。ワーカーが codex のとき、scraper が書いた junk 行
+  （フッタ1行、部分scrape、送信前フラッシュの ANSI ダンプ）が本物の `codex-turn:` 行より新しい・
+  または本物が無い状態が実測で頻発しており（#2398: Stop経路105/105失敗。飽和時はフッタのみ＝
+  #2400、いずれも別Issue）、その行が依頼元エージェントに「相手の返答」として配達され得る。
+
+  ログ上（9/4〜9/7）relay の配達は0件で**未観測**。**コードの読みによる latent bug**（実機で
+  踏んだ report ではない）。
+
+  ## 機構
+  - scrape 経路は `onRelayTurnCompleted(…, settled=false)` を投げ、`notifyRelayTurnCompleted` は
+    `RELAY_SCRAPE_QUIET_MS` の静穏を1回確認して `findWorkerReply(db, worker, 0)` を stash する
+  - `findWorkerReply` のフィルタは `role === 'assistant' && messageType !== 'prompt' &&
+    content.trim() !== ''` だけで、**行の出自（`request_id` の `<tool>-turn:` 接頭辞）を見ない**
+  - #2386（develop にマージ済み）は同型の `ask` を「turn の `requestId` を要求する」で直した。
+    `src/cli/commands/ask.ts` に `TURN_REQUEST_ID_PATTERN = /-turn:/` と `isTurnRow(requestId)`
+    が既にある。その修正の本文には「relay は15秒周期の配送ポンプが結果的に猶予になっていたので
+    対照として正しく動いた」と記されている——**猶予であってフィルタの強さではない**、という
+    ことは今回の relay 側にも同じ穴が空いていることを意味する
+
+  ## 影響
+  - 依頼元エージェントがフッタ1行や ANSI ダンプを要約して報告する（`cmate-delegate` Skill の
+    第一手段が relay/`ask`）
+  - #2398 と #2400 で Stop経路と scrape の junk が直れば確率は下がるが、機構は残る
+
+  ## 対応（この Issue の scope）
+  1. pull型転写ツール（`isPullTranscriptHistory` 相当の判定。既存であればそれを使い、無ければ
+     `TRANSCRIPT_READER_TOOLS`（`src/cli/commands/ask.ts` に定義済み: claude / codex /
+     antigravity / command-code / opencode）と同じ集合を使う）のワーカーでは、`<tool>-turn:`
+     接頭辞の行だけを候補にする。**#2386 の `isTurnRow` と同じ判定**を使うこと——ただし
+     `src/cli/commands/ask.ts` を import すると CLI 層から lib 層への逆依存になるため、
+     **判定ロジックは `src/lib/relay/relay-delivery.ts` 側に複製するか、両方が参照できる
+     lib 層の共有場所に切り出すかを判断して実装する**（新しい依存グラフを増やさない方を選ぶこと。
+     単純な正規表現1行なので複製で十分な可能性が高い）
+  2. 転写行が無く scrape 行しか無い場合は、`settled` が来るまで待つ（上限つき）か、「未確定の
+     scrape」であることを配送本文に明示する（**どちらにするかは実装判断**。#2377/#2392 の
+     relay 設計と整合する方を選ぶこと）
+  3. `settled=true` の経路（gate が Markdown 行を書いた直後）は現状維持
+
+  ## 受入条件
+  - [ ] junk行（`request_id` NULL のフッタ1行）が本物の `codex-turn:` 行より新しい History
+        fixture で、relay が**本物を配達する**（**変異注入で赤くなることを確認**）
+  - [ ] 本物が無い fixture で、junk行が配達されない（待つ／未確定表示のいずれか、決めた方）
+  - [ ] `tests/unit/lib/relay/relay-delivery.test.ts`、
+        `tests/unit/polling/structured-history-relay-trigger-2377.test.ts` が緑
+  - [ ] `npm run lint` / `npx tsc --noEmit` / `npm run test:unit` が exit 0
+
+  ## スコープ外（他Issueが担当。ファイルも触らないこと）
+  - Stop hook の自己待ち（#2398）
+  - poller の dedup 順序（#2399）
+  - codex の chrome finder（#2400。`src/lib/detection/cli-patterns.ts` / `response-checker.ts`
+    には触れない）
+  - 4 MiB 窓の headless turn（#2402）
+  - **`src/cli/commands/ask.ts` の編集は不要**（#2386 は既にマージ済みで完結している。参照は
+    読むだけにとどめ、判定ロジックが必要なら複製すること）
+
+  ## 関連
+  #2377（relay台帳と配送）/ #2386（`ask` の同型修正。判定を参考にする）/ #2392（relay配送行の
+  重複。消費側の別の罠）。同時起票の兄弟: #2398（真因） / #2399（poller の dedup順序、本Issueとは
+  独立） / #2400（codex の chrome finder） / #2402（4 MiB窓）
+
+  ## 作業ルール（厳守）
+  - **`CHANGELOG.md` と `docs/module-reference.md` を編集しないでください**（scope外です）。
+    代わりに次の2ファイルを書いてください。どちらも `dev-reports/` 配下なので commit には
+    入りません。
+    - `dev-reports/changelog/issue-2401.md` — `CHANGELOG.md` の `## [Unreleased]` にそのまま
+      貼れる1エントリ（先頭は `- **<type>(<scope>): …** (#2401): …`）。1行目にコメントで
+      どの節（`### Added` / `### Changed` / `### Fixed`）に入るかを書く。
+      `- **` で始めること（`grep -cE '^- \*\*'` で集計する）。`(#2401)` は要約の外
+      （`**` を閉じた後）に置くこと。1エントリ＝1行（折らない）。
+    - `dev-reports/module-reference/issue-2401.md` — `docs/module-reference.md` の表に足す
+      注記を行キー（`| \`path\` |`）ごとに列挙する。既存行に足すときは
+      `grep -n '^| \`<path>\`' docs/module-reference.md` を実行し、その出力（行番号つきの
+      行キー）を断片に書き写してから書くこと。0件だった行への追記は指示しない
+      （新しい行を足すなら「新規行」と明記する）。足すものが無ければ「追記なし」の1行でよい。
+  - 断片が無いとリリースノートと module-reference に載らない。実装と同じ commit の時点で
+    書くこと。
+  - **本Issueは並列で3件（#2398/#2400/#2401）が同時に開発されています。** 上記スコープ外の
+    ファイルに触れると他のワーカーの作業と衝突します。厳守してください。
+scope:
+  allow:
+    - "src/lib/relay/relay-delivery.ts"
+    - "src/lib/relay/relay-service.ts"
+    - "tests/unit/lib/relay/**"
+    - "tests/unit/polling/structured-history-relay-trigger-2377.test.ts"
+    - "dev-reports/changelog/issue-2401.md"
+    - "dev-reports/module-reference/issue-2401.md"
+  deny:
+    - "src/lib/hooks/stop-history-capture.ts"
+    - "src/lib/hooks/agent-event-service.ts"
+    - "src/lib/polling/response-checker.ts"
+    - "src/lib/detection/cli-patterns.ts"
+    - "src/lib/hooks/sources/codex/history.ts"
+    - "src/cli/commands/ask.ts"
+verify:
+  # 既定（省略）= 登録済み全ゲート
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true

@@ -31,6 +31,13 @@ REPO_ROOT="${CM_DEMO_REPO_ROOT:-$(cd "$SKILL_DIR/../../.." && pwd)}"
 # stayed false, and every scene died at its own timeout.
 MESSAGE="Add a dark mode toggle to the header"
 STORYBOARD="$SKILL_DIR/storyboard/default.yaml"
+# The claude pane's cassette. A storyboard may name its own with a top-level
+# `claude-cassette:` (readme-hero.yaml names fixtures/claude-hero.cast, whose
+# two passes are the delegation round trip and an approval — Issue #2381);
+# `--claude-cassette` / CM_DEMO_CLAUDE_CASSETTE override that, and with neither
+# the default drives the approval-prompt scenes of storyboard/default.yaml.
+CLAUDE_CASSETTE="${CM_DEMO_CLAUDE_CASSETTE:-}"
+DEFAULT_CLAUDE_CASSETTE="$SKILL_DIR/fixtures/claude-session-sample.cast"
 OUT_DIR="${CM_DEMO_OUT_DIR:-$HOME/Desktop/commandmate-demo}"
 LOCALES="ja en"
 WANT_GIF=0
@@ -57,7 +64,10 @@ Usage: demo-video.sh [--locale ja|en|all] [--out DIR] [--gif] [--check]
 
   --locale L    ja, en or all (default all)
   --out DIR     where the finished videos go (default ~/Desktop/commandmate-demo)
-  --storyboard  storyboard YAML (default storyboard/default.yaml)
+  --storyboard  storyboard YAML, or the stem of one in storyboard/
+                (`readme-hero` -> storyboard/readme-hero.yaml; default default.yaml)
+  --claude-cassette FILE  cassette for the claude pane (default: the storyboard's
+                own `claude-cassette:`, else fixtures/claude-session-sample.cast)
   --frame WxH   output frame size (default 1280x800)
   --gif         also write a README-sized GIF next to each mp4
   --check       run the dependency check and storyboard validation, then stop
@@ -80,6 +90,7 @@ while [ $# -gt 0 ]; do
       ;;
     --out) [ $# -ge 2 ] || die "--out needs a value"; OUT_DIR="$2"; shift 2 ;;
     --storyboard) [ $# -ge 2 ] || die "--storyboard needs a value"; STORYBOARD="$2"; shift 2 ;;
+    --claude-cassette) [ $# -ge 2 ] || die "--claude-cassette needs a value"; CLAUDE_CASSETTE="$2"; shift 2 ;;
     --frame) [ $# -ge 2 ] || die "--frame needs a value"; FRAME="$2"; shift 2 ;;
     --gif) WANT_GIF=1; shift ;;
     --check) CHECK_ONLY=1; shift ;;
@@ -92,12 +103,14 @@ done
 # ---------------------------------------------------------- dependencies -----
 
 MISSING=""
-# `claude` is in this list even though the demo never runs a real LLM: the send
-# scene posts to /api/worktrees/<id>/send, and that route answers 503 before it
-# looks at anything else when `cliTool.isInstalled()` is false — a plain
-# `which claude` (src/app/api/worktrees/[id]/send/route.ts). Without the binary
-# on PATH the take dies mid-recording instead of here.
-for tool in tmux git curl node awk ffmpeg ffprobe claude; do
+# The five agent binaries are in this list even though the demo never runs a
+# real LLM: the send scene posts to /api/worktrees/<id>/send, and that route
+# answers 503 before it looks at anything else when `cliTool.isInstalled()` is
+# false — a plain `which <binary>` (src/app/api/worktrees/[id]/send/route.ts).
+# Without the binary on PATH the take dies mid-recording instead of here. The
+# names are the executables, not the tool ids (src/lib/cli-tools/install-hints.ts
+# has the table): antigravity is `agy`, Command Code is `commandcode`.
+for tool in tmux git curl node awk ffmpeg ffprobe claude codex agy opencode commandcode; do
   if ! command -v "$tool" >/dev/null 2>&1; then
     MISSING="$MISSING $tool"
   fi
@@ -111,12 +124,37 @@ if [ -n "$MISSING" ]; then
     *tmux*) printf '  brew install tmux\n' >&2 ;;
   esac
   case "$MISSING" in
-    *claude*) printf '  npm install -g @anthropic-ai/claude-code   # or https://claude.com/download\n' >&2 ;;
+    *" claude"*) printf '  npm install -g @anthropic-ai/claude-code   # or https://claude.com/download\n' >&2 ;;
+  esac
+  case "$MISSING" in
+    *" codex"*) printf '  npm install -g @openai/codex\n' >&2 ;;
+  esac
+  case "$MISSING" in
+    *" agy"*) printf '  Install the Antigravity CLI: https://antigravity.google/docs/cli/reference\n' >&2 ;;
+  esac
+  case "$MISSING" in
+    *" opencode"*) printf '  npm install -g opencode-ai\n' >&2 ;;
+  esac
+  case "$MISSING" in
+    *" commandcode"*) printf '  npm install -g command-code\n' >&2 ;;
   esac
   exit 1
 fi
 [ -x "$REPO_ROOT/node_modules/.bin/tsx" ] || die "tsx not found — run 'npm install' in $REPO_ROOT"
 log "dependencies ok"
+
+# `--storyboard readme-hero` names a cut shipped with the skill (#2381). A path
+# is used as given; a bare stem that is not a file resolves next to default.yaml.
+if [ ! -f "$STORYBOARD" ]; then
+  case "$STORYBOARD" in
+    */*|*.yaml) die "storyboard not found: $STORYBOARD" ;;
+    *)
+      [ -f "$SKILL_DIR/storyboard/$STORYBOARD.yaml" ] \
+        || die "storyboard not found: $STORYBOARD (no $SKILL_DIR/storyboard/$STORYBOARD.yaml either)"
+      STORYBOARD="$SKILL_DIR/storyboard/$STORYBOARD.yaml"
+      ;;
+  esac
+fi
 
 # Validating up front means a typo in the storyboard costs a second instead of
 # two full recording cycles.
@@ -125,6 +163,18 @@ for loc in $LOCALES; do
     --file "$STORYBOARD" --locale "$loc" >/dev/null || die "storyboard validation failed for locale '$loc'"
 done
 log "storyboard ok: $STORYBOARD"
+
+# The cassette the cut asks for, read off the plan the same way compose.sh reads
+# `#total`: the storyboard is the source of truth for what the claude pane has
+# to be replaying, and a flag only overrides it on purpose.
+if [ -z "$CLAUDE_CASSETTE" ]; then
+  CLAUDE_CASSETTE="$("$REPO_ROOT/node_modules/.bin/tsx" "$SCRIPT_DIR/storyboard.ts" \
+    --file "$STORYBOARD" --locale "${LOCALES%% *}" --format plan \
+    | awk -F'\t' '$1 == "#claude-cassette" { print $2; exit }')"
+  CLAUDE_CASSETTE="${CLAUDE_CASSETTE:-$DEFAULT_CLAUDE_CASSETTE}"
+fi
+[ -f "$CLAUDE_CASSETTE" ] || die "claude cassette not found: $CLAUDE_CASSETTE"
+log "claude cassette: $CLAUDE_CASSETTE"
 
 if [ "$CHECK_ONLY" -eq 1 ]; then
   log "--check given, stopping before the first recording"
@@ -156,27 +206,51 @@ for loc in $LOCALES; do
   ENV_IS_UP=1
   # Cleared before sourcing so a key the new state file does not carry cannot be
   # satisfied by the previous locale's value.
+  CM_DEMO_PORT=""
   CM_DEMO_WORKTREE_ID=""
   CM_DEMO_UNSYNCED_WORKTREE_ID=""
   CM_DEMO_WORKTREE_PATH=""
   CM_DEMO_SESSIONS_FILE=""
+  CM_DEMO_CLAUDE_TRANSCRIPT=""
+  CM_DEMO_CODEX_TRANSCRIPT=""
   # shellcheck disable=SC1090
   . "${CM_DEMO_HOME:-$HOME/.commandmate-demo}/state.env"
+  [ -n "$CM_DEMO_PORT" ] || die "state.env has no CM_DEMO_PORT — env-up.sh is out of date"
   [ -n "$CM_DEMO_WORKTREE_ID" ] || die "state.env has no CM_DEMO_WORKTREE_ID — env-up.sh is out of date"
   [ -n "$CM_DEMO_UNSYNCED_WORKTREE_ID" ] || die "state.env has no CM_DEMO_UNSYNCED_WORKTREE_ID — env-up.sh is out of date"
   [ -n "$CM_DEMO_WORKTREE_PATH" ] || die "state.env has no CM_DEMO_WORKTREE_PATH — env-up.sh is out of date"
   [ -n "$CM_DEMO_SESSIONS_FILE" ] || die "state.env has no CM_DEMO_SESSIONS_FILE — env-up.sh is out of date"
+  [ -n "$CM_DEMO_CLAUDE_TRANSCRIPT" ] || die "state.env has no CM_DEMO_CLAUDE_TRANSCRIPT — env-up.sh is out of date"
+  [ -n "$CM_DEMO_CODEX_TRANSCRIPT" ] || die "state.env has no CM_DEMO_CODEX_TRANSCRIPT — env-up.sh is out of date"
 
-  # `mcbd-claude-<worktreeId>` with no suffix: that is the primary instance's
-  # name (`getSessionName`, src/lib/session/claude-session.ts), and matching it
-  # is what makes the server adopt this pane instead of launching a real CLI.
-  SESSION_NAME="mcbd-claude-$CM_DEMO_WORKTREE_ID"
-  log "starting the fake agent in $SESSION_NAME"
-  "$SCRIPT_DIR/fake-agent.sh" "$SKILL_DIR/fixtures/claude-session-sample.cast" \
-    --session "$SESSION_NAME" \
-    --cwd "$CM_DEMO_WORKTREE_PATH" \
-    --record-to "$CM_DEMO_SESSIONS_FILE" >/dev/null \
-    || die "could not start the fake agent"
+  # One pane per agent in the seed roster (Issue #2380). fake-agent.sh derives
+  # `mcbd-<tool>-<worktreeId>` — the primary instance's name (`getSessionName`,
+  # src/lib/session/claude-session.ts) — and matching it is what makes the
+  # server adopt the pane instead of launching a real CLI. claude and codex are
+  # live (they answer what they are sent, and their transcripts are what the
+  # chat surface renders); the other three hold their boot screen.
+  #
+  # `--commandmate` points the claude cassette's `@exec` at this checkout's own
+  # CLI, so a delegation take needs no global `commandmate` install; the pane's
+  # cwd is the worktree, hence the absolute path to src/cli/index.ts.
+  COMMANDMATE_CMD="$REPO_ROOT/node_modules/.bin/tsx $REPO_ROOT/src/cli/index.ts"
+  start_agent() {
+    log "starting the fake $1 agent in mcbd-$1-$CM_DEMO_WORKTREE_ID"
+    shift
+    "$SCRIPT_DIR/fake-agent.sh" "$@" \
+      --worktree "$CM_DEMO_WORKTREE_ID" \
+      --cwd "$CM_DEMO_WORKTREE_PATH" \
+      --port "$CM_DEMO_PORT" \
+      --record-to "$CM_DEMO_SESSIONS_FILE" >/dev/null \
+      || die "could not start the fake agent ($*)"
+  }
+  start_agent claude "$CLAUDE_CASSETTE" --tool claude \
+    --transcript "$CM_DEMO_CLAUDE_TRANSCRIPT" --commandmate "$COMMANDMATE_CMD"
+  start_agent codex "$SKILL_DIR/fixtures/codex-review.cast" --tool codex \
+    --transcript "$CM_DEMO_CODEX_TRANSCRIPT"
+  start_agent antigravity "$SKILL_DIR/fixtures/antigravity-idle.cast" --tool antigravity --idle-only
+  start_agent opencode "$SKILL_DIR/fixtures/opencode-idle.cast" --tool opencode --idle-only
+  start_agent command-code "$SKILL_DIR/fixtures/command-code-idle.cast" --tool command-code --idle-only
 
   SCENES_DIR="$CM_DEMO_VIDEO_DIR/$loc"
   OVERLAY_DIR="$OUT_DIR/.overlays"

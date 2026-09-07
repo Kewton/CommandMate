@@ -31,6 +31,8 @@ import { resolveCommandMateBinary } from '../../lib/cli/command-reference';
 import {
   NOT_IN_SESSION,
   NOT_IN_SESSION_MESSAGE,
+  detectServerMismatch,
+  formatServerMismatchWarning,
   resolveSessionIdentity,
   type SessionIdentity,
 } from './whoami';
@@ -218,13 +220,29 @@ export function createPeersCommand(): Command {
         const binary = resolveCommandMateBinary();
         const rows = buildPeerRows(worktrees, identity, binary);
 
+        // Issue #2404: the listing above is empty precisely when the caller's own
+        // worktree is absent from `worktrees` — which is what "you are on another
+        // server" looks like from here, and which `No peer sessions found.` reads
+        // as "you have no siblings". The list is already in hand, so the check is
+        // free and applies whichever source named the worktree.
+        const mismatch = detectServerMismatch(
+          identity,
+          new Set(worktrees.map((wt) => wt.id)),
+          client.serverUrl,
+        );
+        if (mismatch) console.error(formatServerMismatchWarning(mismatch));
+
         if (options.json) {
           console.log(JSON.stringify({
+            // `self` is unchanged: it answers "who is asking", and the server is
+            // not part of that. The connection target is its own top-level field.
             self: {
               worktreeId: identity.worktreeId,
               instanceId: identity.instanceId,
               cliToolId: identity.cliToolId,
             },
+            serverUrl: client.serverUrl,
+            ...(mismatch ? { serverMismatch: true } : {}),
             peers: rows,
           }, null, 2));
           return;

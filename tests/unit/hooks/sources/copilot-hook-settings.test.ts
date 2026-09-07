@@ -57,16 +57,33 @@ const OPTIONS = { port: 3999, relayScriptPath: '/pkg/scripts/hooks/cmate-agent-e
 const URL_PREFIX = `'http://127.0.0.1:'"$CM_HOOK_PORT"'`;
 
 let home: string;
+let originalPort: string | undefined;
+
+/**
+ * The port `renderAgentLaunchCommand` states on every launch line since #2403.
+ *
+ * A pane inherits whichever `CM_PORT` the tmux server's global environment
+ * carries — the port of whatever CommandMate started that tmux server — so the
+ * launching server pins its own, and a `commandmate` typed inside the agent
+ * resolves to the server that launched it. Fixed here so the byte-pins below do
+ * not depend on the `CM_PORT` of the machine running the tests.
+ */
+const SERVER_PORT = '60301';
+const PORT_ASSIGNMENT = `CM_PORT='${SERVER_PORT}'`;
 
 beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), 'cmate-copilot-home-'));
   process.env.COPILOT_HOME = home;
   delete process.env.CM_AGENT_HOOKS_INJECT;
+  originalPort = process.env.CM_PORT;
+  process.env.CM_PORT = SERVER_PORT;
 });
 
 afterEach(() => {
   delete process.env.COPILOT_HOME;
   delete process.env.CM_AGENT_HOOKS_INJECT;
+  if (originalPort === undefined) delete process.env.CM_PORT;
+  else process.env.CM_PORT = originalPort;
   removeTempDir(home);
 });
 
@@ -347,9 +364,13 @@ describe('the launch command, and every way it fails open', () => {
     expect(plan.command).not.toMatch(/^[A-Z_][A-Z0-9_]*=/);
     expect(plan.settingsPath).toBe(getCopilotSettingsPath());
 
-    // …and the line a pane receives is the pre-#1846 one plus #1904's port.
+    // …and the line a pane receives is the pre-#1846 one, plus #1904's hook port
+    // and #2403's server port. The two are different questions: `CM_HOOK_PORT`
+    // is where copilot's relay posts, `CM_PORT` is where a `commandmate` typed
+    // inside copilot resolves to.
     expect(renderAgentLaunchCommand(plan)).toBe(
-      "CM_AGENT_WORKTREE_ID='wt-1' CM_AGENT_INSTANCE_ID='copilot-2' CM_HOOK_PORT='3999' gh copilot"
+      "CM_AGENT_WORKTREE_ID='wt-1' CM_AGENT_INSTANCE_ID='copilot-2' CM_HOOK_PORT='3999' " +
+        `${PORT_ASSIGNMENT} gh copilot`
     );
   });
 

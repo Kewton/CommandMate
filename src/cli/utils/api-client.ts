@@ -98,6 +98,28 @@ function serverErrorDetail(payload?: ApiErrorPayload): string | undefined {
 }
 
 /**
+ * What this function knows about the request, beyond its status (Issue #2404).
+ *
+ * `handleApiError` is a pure classifier over `(status, payload)` and has no way
+ * to know which server answered — which is exactly the fact a 404 needs. The
+ * caller's `Resource not found. Check the worktree ID.` sent an agent looking
+ * for a typo in an id that was correct: the CLI was dialling a *different*
+ * CommandMate server than the one that had started its session, and the id it
+ * was asking about lived on the other one. Optional so the two callers that
+ * classify without a client ({@link ApiClient} aside, `server-capabilities.ts`)
+ * keep compiling and keep their wording.
+ */
+export interface ApiErrorContext {
+  /** The base URL the failing request was actually sent to. */
+  serverUrl?: string;
+}
+
+/** Append `(server: <url>)` when the caller named one. */
+function withServerUrl(message: string, context?: ApiErrorContext): string {
+  return context?.serverUrl ? `${message} (server: ${context.serverUrl})` : message;
+}
+
+/**
  * Classify API errors into user-friendly messages and exit codes.
  * [IA3-09] Covers: ECONNREFUSED, 400, 401/403, 404, 429, 500, timeout
  *
@@ -106,12 +128,16 @@ function serverErrorDetail(payload?: ApiErrorPayload): string | undefined {
  * @param payload - Parsed error body, when the response carried one (Issue #1637).
  *   Used for 5xx only: the 4xx messages below are already specific, and are
  *   pinned by tests as the CLI's own wording.
+ * @param context - Which server answered, when the caller knows (Issue #2404).
+ *   Read by the 404 branch only; the other messages do not send anyone looking
+ *   in the wrong place.
  * @returns User-friendly error message and exit code
  */
 export function handleApiError(
   error: unknown,
   status?: number,
-  payload?: ApiErrorPayload
+  payload?: ApiErrorPayload,
+  context?: ApiErrorContext
 ): ApiErrorResult {
   // HTTP status-based errors
   if (status !== undefined) {
@@ -128,8 +154,12 @@ export function handleApiError(
           exitCode: ExitCode.CONFIG_ERROR,
         };
       case 404:
+        // Issue #2404: the sentence stays, so everything matching on it keeps
+        // matching; the URL is appended because "check the worktree ID" is
+        // advice about the wrong thing whenever the id is fine and the SERVER
+        // is the one that is wrong.
         return {
-          message: 'Resource not found. Check the worktree ID.',
+          message: withServerUrl('Resource not found. Check the worktree ID.', context),
           exitCode: ExitCode.UNEXPECTED_ERROR,
         };
       case 429:
@@ -227,6 +257,19 @@ export class ApiClient {
     }
   }
 
+  /**
+   * The base URL this client actually dials (Issue #2404).
+   *
+   * Resolved once in the constructor through the precedence in
+   * `loadClientEnv()` (`--base-url` > exported `CM_PORT` > `~/.commandmate/.env`
+   * > 3000), which is why it is read from here rather than re-derived by each
+   * caller: a second derivation is a second answer, and "which server did this
+   * command talk to" only helps if it is the one the request went to.
+   */
+  get serverUrl(): string {
+    return this.baseUrl;
+  }
+
   private getHeaders(): Record<string, string> {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
@@ -275,7 +318,7 @@ export class ApiClient {
         // Issue #1637: read the body first — handleApiError needs it to surface
         // the server's reason for a 5xx instead of "check the logs".
         const payload = await readErrorPayload(response);
-        const errResult = handleApiError(null, response.status, payload);
+        const errResult = handleApiError(null, response.status, payload, { serverUrl: this.baseUrl });
         throw new ApiError(errResult.message, errResult.exitCode, response.status, payload);
       }
 
@@ -303,7 +346,7 @@ export class ApiClient {
         // Issue #1637: read the body first — handleApiError needs it to surface
         // the server's reason for a 5xx instead of "check the logs".
         const payload = await readErrorPayload(response);
-        const errResult = handleApiError(null, response.status, payload);
+        const errResult = handleApiError(null, response.status, payload, { serverUrl: this.baseUrl });
         throw new ApiError(errResult.message, errResult.exitCode, response.status, payload);
       }
 
@@ -335,7 +378,7 @@ export class ApiClient {
         // Issue #1637: read the body first — handleApiError needs it to surface
         // the server's reason for a 5xx instead of "check the logs".
         const payload = await readErrorPayload(response);
-        const errResult = handleApiError(null, response.status, payload);
+        const errResult = handleApiError(null, response.status, payload, { serverUrl: this.baseUrl });
         throw new ApiError(errResult.message, errResult.exitCode, response.status, payload);
       }
 

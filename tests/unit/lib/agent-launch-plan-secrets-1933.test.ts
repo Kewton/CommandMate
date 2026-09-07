@@ -38,6 +38,16 @@
  * both directions. That is what replaces the prefix for names outside
  * `CM_HOOK_`, which the prefix never covered at all.
  *
+ * ## What #2403 moved
+ *
+ * The measured thing is now `resolveAgentLaunchEnv(plan)` rather than
+ * `plan.env`. They differ by one name: `CM_PORT`, which says which CommandMate
+ * server the agent belongs to and is added where the line is rendered rather
+ * than by any source — it is the same fact for all seven, and two of them
+ * (claude, opencode) declare no environment at all and so would have had to
+ * grow one. Reading `plan.env` here after #2403 would be reading something that
+ * is no longer the launch line.
+ *
  * @vitest-environment node
  */
 
@@ -47,7 +57,9 @@ import {
   AGENT_CORRELATION_ENV_VARS,
   AGENT_LAUNCH_CONFIG_ENV_VARS,
   COMMANDMATE_HOOK_ENV_VARS,
+  SERVER_PORT_ENV_VAR,
   renderAgentLaunchCommand,
+  resolveAgentLaunchEnv,
 } from '@/lib/hooks/sources/launch-command';
 import {
   SENSITIVE_ENV_KEYS,
@@ -76,17 +88,34 @@ const PLANTED_SECRETS: Record<string, string> = {
 };
 
 /**
- * Config-file variables a source is allowed to set, beyond the correlation set.
+ * Config variables the launch line is allowed to carry, beyond the correlation
+ * set.
  *
- * A per-tool HOME/config redirect the tool needs in order to read the settings
- * file CommandMate wrote for it. This file used to carry its own allowlist of
- * three (`CODEX_HOME` / `XDG_CONFIG_HOME` / `COPILOT_HOME`); #1996 measured that
- * only `CODEX_HOME` is ever written — the other two are *read* from the ambient
- * environment to decide where a file goes and never reach `plan.env` — and moved
- * the declaration into `launch-command` so the exact-set assertion below has one
- * list rather than a local copy.
+ * Two, since #2403. `CODEX_HOME` is a per-tool HOME/config redirect the tool
+ * needs in order to read the settings file CommandMate wrote for it; `CM_PORT`
+ * says which CommandMate server the agent — and anything it spawns — should
+ * dial. Neither is an identity, so neither is stripped from CommandMate's own
+ * children, which is the property the last two tests in this file hold.
+ *
+ * This file used to carry its own allowlist of three (`CODEX_HOME` /
+ * `XDG_CONFIG_HOME` / `COPILOT_HOME`); #1996 measured that only `CODEX_HOME` is
+ * ever written — the other two are *read* from the ambient environment to decide
+ * where a file goes and never reach `plan.env` — and moved the declaration into
+ * `launch-command` so the exact-set assertion below has one list rather than a
+ * local copy.
  */
 const ALLOWED_CONFIG_ENV_VARS = AGENT_LAUNCH_CONFIG_ENV_VARS;
+
+/**
+ * The port the launching server listens on, for the duration of this file.
+ *
+ * Pinned rather than inherited so the measurement below is about #2403's rule
+ * and not about whatever `CM_PORT` the machine running the tests happens to
+ * export. 60301 is the port from the report — a global CommandMate whose agents
+ * were dialling a development server on 3000 because the tmux server's global
+ * environment said so.
+ */
+const CONFIGURED_PORT = '60301';
 
 /**
  * Every correlation variable a source may set, as MEASURED and now DECLARED.
@@ -115,10 +144,11 @@ describe('AgentLaunchPlan.env carries no secrets (Issue #1933 S18)', () => {
     for (const [name, value] of Object.entries(PLANTED_SECRETS)) {
       process.env[name] = value;
     }
+    process.env[SERVER_PORT_ENV_VAR] = CONFIGURED_PORT;
   });
 
   afterEach(() => {
-    for (const name of Object.keys(PLANTED_SECRETS)) {
+    for (const name of [...Object.keys(PLANTED_SECRETS), SERVER_PORT_ENV_VAR, 'MCBD_PORT']) {
       if (originalEnv[name] === undefined) delete process.env[name];
       else process.env[name] = originalEnv[name];
     }
@@ -128,7 +158,7 @@ describe('AgentLaunchPlan.env carries no secrets (Issue #1933 S18)', () => {
     const plan = planFor(cliToolId);
     const rendered = renderAgentLaunchCommand(plan);
 
-    for (const name of Object.keys(plan.env)) {
+    for (const name of Object.keys(resolveAgentLaunchEnv(plan))) {
       expect(SENSITIVE_ENV_KEYS).not.toContain(name);
       expect(name).not.toBe('CM_AUTH_TOKEN');
     }
@@ -146,7 +176,10 @@ describe('AgentLaunchPlan.env carries no secrets (Issue #1933 S18)', () => {
     (cliToolId) => {
       const plan = planFor(cliToolId);
 
-      for (const name of Object.keys(plan.env)) {
+      // The *rendered* environment, not `plan.env`: since #2403 the server's own
+      // `CM_PORT` is added by `resolveAgentLaunchEnv` rather than by a source, so
+      // reading the plan alone would no longer be reading the launch line.
+      for (const name of Object.keys(resolveAgentLaunchEnv(plan))) {
         const allowed =
           ALLOWED_CORRELATION_NAMES.includes(name) || ALLOWED_CONFIG_ENV_VARS.includes(name);
         expect(allowed, `unexpected launch-line variable: ${name}`).toBe(true);
@@ -206,7 +239,7 @@ describe('AgentLaunchPlan.env carries no secrets (Issue #1933 S18)', () => {
   it('writes exactly the launch-line variables that are declared', () => {
     const onLaunchLine = new Set<string>();
     for (const id of CLI_TOOL_IDS) {
-      for (const name of Object.keys(planFor(id).env)) onLaunchLine.add(name);
+      for (const name of Object.keys(resolveAgentLaunchEnv(planFor(id)))) onLaunchLine.add(name);
     }
 
     const declared = [...ALLOWED_CORRELATION_NAMES, ...ALLOWED_CONFIG_ENV_VARS].sort();
@@ -215,8 +248,69 @@ describe('AgentLaunchPlan.env carries no secrets (Issue #1933 S18)', () => {
     // Non-vacuity: hook injection can be switched off (`CM_AGENT_HOOKS_INJECT=0`),
     // and every plan then renders a bare command with an empty `env`. An empty
     // measurement would make the comparison above pass against an empty
-    // declaration, so the count is pinned too.
-    expect(onLaunchLine.size).toBe(7);
+    // declaration, so the count is pinned too. Eight since #2403 — the six
+    // correlation variables, `CODEX_HOME`, and the server's own `CM_PORT`.
+    expect(onLaunchLine.size).toBe(8);
+  });
+
+  /**
+   * The half of #2403 no per-source measurement can state: the port is on
+   * EVERY line, including the two sources that declare no environment at all.
+   *
+   * claude keeps its correlation keys inside the `--settings` file and opencode
+   * puts its port in argv, so both return `env: {}` and both used to render to a
+   * bare command. They are exactly the sessions the reported failure was found
+   * in — an agent typing `commandmate ls` and reaching a different server —
+   * which is why the pin is applied where the line is rendered rather than in
+   * seven `prepareLaunch` implementations that could each forget it.
+   */
+  it.each(CLI_TOOL_IDS)('%s: states the launching server’s port on the line', (cliToolId) => {
+    const plan = planFor(cliToolId);
+
+    expect(resolveAgentLaunchEnv(plan)[SERVER_PORT_ENV_VAR]).toBe(CONFIGURED_PORT);
+    expect(renderAgentLaunchCommand(plan)).toContain(
+      `${SERVER_PORT_ENV_VAR}='${CONFIGURED_PORT}'`
+    );
+    // The plan itself is untouched: a source that never mentioned the port
+    // still does not, so `prepareLaunch` stays a statement about its own tool.
+    expect(SERVER_PORT_ENV_VAR in plan.env).toBe(false);
+  });
+
+  /**
+   * …including when nothing configured one, which is the case a conditional pin
+   * would have left broken.
+   *
+   * `getServerPort()` answers 3000 for an unset `CM_PORT` and the server really
+   * does listen there, so the launch line still names a true port — and the
+   * pane it is typed into can still have inherited a *different* server's port
+   * from the tmux server's global environment. The victim of the reported
+   * failure does not have to be the configured one.
+   */
+  it('states the default port when the server was configured with none', () => {
+    delete process.env[SERVER_PORT_ENV_VAR];
+    delete process.env.MCBD_PORT;
+
+    for (const id of CLI_TOOL_IDS) {
+      const plan = planFor(id);
+      expect(resolveAgentLaunchEnv(plan)[SERVER_PORT_ENV_VAR]).toBe('3000');
+      // The same number the hook URL on the same line falls back to: the two
+      // may not name different servers, in this case least of all.
+      expect(renderAgentLaunchCommand(plan)).toContain(`${SERVER_PORT_ENV_VAR}='3000'`);
+    }
+  });
+
+  /**
+   * A source that names the port itself has said something more specific than
+   * "the server that launched me", and keeps it.
+   */
+  it('does not overwrite a port a plan declared for itself', () => {
+    const rendered = renderAgentLaunchCommand({
+      command: 'agent',
+      settingsPath: null,
+      env: { [SERVER_PORT_ENV_VAR]: '3011' },
+    });
+
+    expect(rendered).toBe(`${SERVER_PORT_ENV_VAR}='3011' agent`);
   });
 
   /**

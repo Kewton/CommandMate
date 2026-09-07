@@ -1,0 +1,25 @@
+# demo-video transcript template — the Claude turn claude-hero.cast's second pass appends (Issue #2381)
+#
+# One Claude Code session turn in the JSONL dialect
+# src/lib/hooks/sources/claude/transcript.ts reads, shaped like
+# claude-delegate.jsonl: the operator's prompt (`origin.kind: human`,
+# `promptSource: typed` — the markers #2196 requires before a `user` row is
+# written), an assistant record that calls Bash with `npm run test:unit`, its
+# `tool_result`, and the closing assistant record (`stop_reason: end_turn` with
+# prose — what #2264 requires before the turn may be written).
+#
+# The prompt is `{{TASK}}`, not `{{MESSAGE}}`: by the time this row plays the
+# last submission is the approval answer ("1"), and `{{TASK}}` is the first line
+# of the pass's first submission — the instruction the phone approved. The
+# scene that sends it keeps it to one line for exactly this reason. The
+# tool_result is a literal: there is no `@exec` on this pass, so `{{EXEC_OUTPUT}}`
+# would still be the delegation's `ask` output.
+#
+# The last record's text is the Markdown the chat surface renders; the
+# `[Header.tsx](src/components/layout/Header.tsx)` link is what becomes a
+# ChatFileLink (#2345), and the phone taps it. No personal path: `cwd` is the
+# seed worktree.
+{"parentUuid":null,"isSidechain":false,"type":"user","message":{"role":"user","content":"{{TASK}}"},"uuid":"{{TURN}}","timestamp":"{{NOW}}","permissionMode":"default","origin":{"kind":"human"},"promptSource":"typed","userType":"external","entrypoint":"cli","cwd":"{{CWD}}","sessionId":"{{SESSION_ID}}","version":"2.1.261","gitBranch":"feature/demo-dark-mode"}
+{"parentUuid":"{{TURN}}","isSidechain":false,"message":{"model":"claude-opus-5","id":"msg-a1-{{TURN}}","type":"message","role":"assistant","content":[{"type":"text","text":"I'll run the unit tests before we call this ready."},{"type":"tool_use","id":"toolu-1-{{TURN}}","name":"Bash","input":{"command":"npm run test:unit","description":"Run the unit tests"}}],"stop_reason":"tool_use"},"type":"assistant","uuid":"a1-{{TURN}}","timestamp":"{{NOW}}","userType":"external","entrypoint":"cli","cwd":"{{CWD}}","sessionId":"{{SESSION_ID}}","version":"2.1.261","gitBranch":"feature/demo-dark-mode"}
+{"parentUuid":"a1-{{TURN}}","isSidechain":false,"type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu-1-{{TURN}}","type":"tool_result","content":"24 passed","is_error":false}]},"uuid":"r1-{{TURN}}","timestamp":"{{NOW}}","sourceToolAssistantUUID":"a1-{{TURN}}","userType":"external","entrypoint":"cli","cwd":"{{CWD}}","sessionId":"{{SESSION_ID}}","version":"2.1.261","gitBranch":"feature/demo-dark-mode"}
+{"parentUuid":"r1-{{TURN}}","isSidechain":false,"message":{"model":"claude-opus-5","id":"msg-a2-{{TURN}}","type":"message","role":"assistant","content":[{"type":"text","text":"All 24 tests pass, including the new coverage for the toggle in [Header.tsx](src/components/layout/Header.tsx).\n\nReady to merge."}],"stop_reason":"end_turn"},"type":"assistant","uuid":"a2-{{TURN}}","timestamp":"{{NOW}}","userType":"external","entrypoint":"cli","cwd":"{{CWD}}","sessionId":"{{SESSION_ID}}","version":"2.1.261","gitBranch":"feature/demo-dark-mode"}

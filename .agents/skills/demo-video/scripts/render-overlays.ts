@@ -21,9 +21,11 @@ import {
   LOCALES,
   buildPlan,
   parseStoryboard,
+  DEFAULT_TELOP_POSITION,
   type Locale,
   type PlanEntry,
   type Storyboard,
+  type TelopPosition,
 } from './storyboard';
 
 export interface OverlayJob {
@@ -38,6 +40,17 @@ export interface OverlayJob {
   file: string;
   width: number;
   height: number;
+  /**
+   * `telop` jobs only: where the band sits in the frame (#2381).
+   *
+   * Baked into the PNG rather than handed to ffmpeg: the overlay is already a
+   * full-frame transparent image that compose.sh composites at 0:0, so moving
+   * the band is a layout decision of the template and nothing downstream has
+   * to learn a coordinate. `top` is for a scene whose payoff is at the bottom
+   * of the frame — the composer, the newest reply — where the default band
+   * would sit on top of it.
+   */
+  position?: TelopPosition;
   /** `code` jobs only: the listing to typeset, read from the plan's sourcePath. */
   code?: string;
   /** `code` jobs only: syntax label printed in the card's header. */
@@ -78,6 +91,9 @@ export function overlayJobs(plan: PlanEntry[], options: RenderOptions): OverlayJ
       width: options.frame.width,
       height: options.frame.height,
     };
+    if (kind === 'telop') {
+      return { ...job, position: entry.telopPosition ?? DEFAULT_TELOP_POSITION };
+    }
     if (kind !== 'code') return job;
     if (!entry.sourcePath) {
       // Unreachable through the validator, which refuses a code scene with no
@@ -115,6 +131,15 @@ async function renderJob(browser: Browser, job: OverlayJob): Promise<void> {
     await page.$eval(selector, (element, text) => {
       element.textContent = text;
     }, job.text);
+    if (job.kind === 'telop') {
+      // A class on <body>, so the template's own CSS owns both layouts and the
+      // renderer never computes a pixel.
+      // The class name is passed in: this callback runs in the page, where a
+      // module constant of this file does not exist.
+      await page.$eval('body', (element, layout) => {
+        element.classList.toggle(layout.className, layout.position === 'top');
+      }, { className: TELOP_TOP_CLASS_NAME, position: job.position ?? DEFAULT_TELOP_POSITION });
+    }
     if (job.kind === 'code') {
       await page.$eval('#code-lang', (element, lang) => {
         element.textContent = lang;
@@ -155,6 +180,9 @@ async function renderJob(browser: Browser, job: OverlayJob): Promise<void> {
     await context.close();
   }
 }
+
+/** The <body> class telop.html lays the band out at the top under. */
+export const TELOP_TOP_CLASS_NAME = 'telop-top';
 
 /** The element each template's telop/caption text is injected into. */
 export const TEXT_SELECTOR: Record<OverlayJob['kind'], string> = {

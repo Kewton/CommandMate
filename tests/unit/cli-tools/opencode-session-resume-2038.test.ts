@@ -101,6 +101,19 @@ function typedLaunchCommand(): string {
   return String(call?.[1] ?? '');
 }
 
+
+/**
+ * The port every launch line carries since #2403.
+ *
+ * A pane inherits whichever `CM_PORT` the tmux server's global environment
+ * holds — the port of whatever CommandMate started that tmux server — so the
+ * launching server states its own, and a `commandmate` typed inside the agent
+ * resolves to the server that started it. Fixed here so the byte-pins below do
+ * not read the `CM_PORT` of the machine under test.
+ */
+const SERVER_PORT = '60301';
+const PORT_ASSIGNMENT = `CM_PORT='${SERVER_PORT}'`;
+
 beforeEach(() => {
   vi.clearAllMocks();
   sandbox = makeTempDir('opencode-resume-2038-');
@@ -110,6 +123,7 @@ beforeEach(() => {
   process.env.CM_OPENCODE_PORT_FILE = join(sandbox, 'opencode-ports.json');
   process.env.CM_AGENT_HOOKS_DIR = join(sandbox, 'hooks');
   process.env.CODEX_HOME = join(sandbox, 'codex-home');
+  process.env.CM_PORT = SERVER_PORT;
   resetOpencodePortAssignments();
   resetOpencodeSessionMemories();
 
@@ -134,7 +148,7 @@ describe('OpenCodeTool launch: resuming the last session', () => {
 
     await new OpenCodeTool().startSession(WORKTREE_ID, worktreePath);
 
-    expect(typedLaunchCommand()).toBe(`opencode -s ${SESSION_ID}`);
+    expect(typedLaunchCommand()).toBe(`${PORT_ASSIGNMENT} opencode -s ${SESSION_ID}`);
   });
 
   it('ACCEPTANCE: does NOT resume a session recorded for a different worktree', async () => {
@@ -146,14 +160,16 @@ describe('OpenCodeTool launch: resuming the last session', () => {
     await new OpenCodeTool().startSession(WORKTREE_ID, worktreePath);
 
     const command = typedLaunchCommand();
-    expect(command).toBe('opencode');
+    expect(command).toBe(`${PORT_ASSIGNMENT} opencode`);
     expect(command).not.toContain(SESSION_ID);
     expect(command).not.toContain(' -s ');
   });
 
   it('launches bare when nothing has ever been recorded', async () => {
+    // "Bare" is the tool's own flags — #2403's server port rides in front of
+    // every line and says nothing about the session being resumed.
     await new OpenCodeTool().startSession(WORKTREE_ID, worktreePath);
-    expect(typedLaunchCommand()).toBe('opencode');
+    expect(typedLaunchCommand()).toBe(`${PORT_ASSIGNMENT} opencode`);
   });
 
   it('keeps the resume flag beside the --port flag #1763 added', async () => {
@@ -165,7 +181,7 @@ describe('OpenCodeTool launch: resuming the last session', () => {
     // `prepareOpencodeLaunch` shell-quotes the executable when it passes flags;
     // the resume flag is appended after that, untouched.
     expect(typedLaunchCommand()).toBe(
-      `'opencode' --port 4242 --hostname 127.0.0.1 -s ${SESSION_ID}`
+      `${PORT_ASSIGNMENT} 'opencode' --port 4242 --hostname 127.0.0.1 -s ${SESSION_ID}`
     );
   });
 
@@ -178,7 +194,7 @@ describe('OpenCodeTool launch: resuming the last session', () => {
     rememberOpencodeSession(target, { sessionId: SESSION_ID, worktreePath });
 
     await new OpenCodeTool().startSession(WORKTREE_ID, worktreePath, 'opencode-2');
-    expect(typedLaunchCommand()).toBe('opencode');
+    expect(typedLaunchCommand()).toBe(`${PORT_ASSIGNMENT} opencode`);
 
     vi.mocked(sendKeys).mockClear();
     rememberOpencodeSession(second, {
@@ -186,7 +202,7 @@ describe('OpenCodeTool launch: resuming the last session', () => {
       worktreePath,
     });
     await new OpenCodeTool().startSession(WORKTREE_ID, worktreePath, 'opencode-2');
-    expect(typedLaunchCommand()).toBe('opencode -s ses_second0000000000000000');
+    expect(typedLaunchCommand()).toBe(`${PORT_ASSIGNMENT} opencode -s ses_second0000000000000000`);
   });
 
   it('does not type a launch command at all on the reuse path', async () => {

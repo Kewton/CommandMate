@@ -73,6 +73,30 @@ export interface SessionIdentity {
   source: IdentitySource;
   /** The tmux session, when the identity came from (or could be checked against) one. */
   sessionName: string | null;
+  /**
+   * Every worktree id the server answered with while this identity was resolved,
+   * or null/undefined when no list was read (Issue #2404).
+   *
+   * Carried rather than discarded because it is the whole evidence for
+   * {@link detectServerMismatch}: the tmux path already fetches it to break the
+   * `-<n>` ambiguity, so "is my own worktree on the server I am dialling?" costs
+   * no second request. Absent on the env path, which never asks — and that is
+   * the reason a `source: 'env'` identity never reports a mismatch here.
+   */
+  knownWorktreeIds?: Set<string> | null;
+}
+
+/**
+ * The caller is on a session one server started and is talking to another
+ * (Issue #2404).
+ */
+export interface ServerMismatch {
+  /** The worktree this session belongs to, as {@link resolveSessionIdentity} read it. */
+  worktreeId: string;
+  /** The server this CLI is dialling — the one that does NOT list that worktree. */
+  serverUrl: string;
+  /** Where the worktree id came from, so the warning can say how it is known. */
+  source: IdentitySource;
 }
 
 /** First non-empty value among `names`, or undefined. */
@@ -236,7 +260,102 @@ export async function resolveSessionIdentity(
     cliToolId: parsed.cliToolId,
     source: 'tmux-session',
     sessionName,
+    knownWorktreeIds: known,
   };
+}
+
+// ===========================================================================
+// "Am I even talking to the server that started me?" (Issue #2404)
+// ===========================================================================
+
+/**
+ * Whether the caller's own worktree is missing from the server it is dialling.
+ *
+ * The contradiction this names was, until now, unnameable: `whoami` answers
+ * from the tmux session name and therefore succeeds, while `ls` / `instances` /
+ * `peers` answer from a *different* server's ledger and therefore say the
+ * worktree does not exist. Both are correct and they disagree, and an agent
+ * reading them concluded the reasonable, wrong thing — "I must not be in the
+ * ledger" — and delegated its work into an unrelated worktree on the other
+ * server (#2403). Exit codes said nothing: `ask` returned 0.
+ *
+ * Deliberately NOT gated on {@link IdentitySource}. The gate is having a list at
+ * all: the env path never fetches one, so it passes null and cannot flag, while
+ * `peers` — which has just fetched the whole list for its own listing — can
+ * check an env-derived identity for free. A missing list is never a mismatch:
+ * a stopped server must not be reported as the wrong server.
+ *
+ * @param identity - Who the caller is
+ * @param knownWorktreeIds - Worktree ids from the server, or null when unread
+ * @param serverUrl - The URL those ids came from ({@link ApiClient.serverUrl})
+ * @returns The mismatch, or null when there is nothing to report
+ */
+export function detectServerMismatch(
+  identity: SessionIdentity,
+  knownWorktreeIds: Set<string> | null | undefined,
+  serverUrl: string,
+): ServerMismatch | null {
+  if (!knownWorktreeIds) return null;
+  if (knownWorktreeIds.has(identity.worktreeId)) return null;
+  return { worktreeId: identity.worktreeId, serverUrl, source: identity.source };
+}
+
+/** How the worktree id was established, as a phrase for the warning. */
+function describeSource(source: IdentitySource): string {
+  return source === 'tmux-session'
+    ? 'read from the tmux session name'
+    : 'read from the CM_* variables on this session\'s launch line';
+}
+
+/**
+ * The multi-line warning printed when {@link detectServerMismatch} fires.
+ *
+ * Says what is wrong, why it is not a typo, and what it costs to ignore —
+ * because the failure it describes is silent by construction: every command
+ * involved keeps exiting 0 while answering about the wrong machine's worktrees.
+ */
+export function formatServerMismatchWarning(mismatch: ServerMismatch): string {
+  return [
+    `Warning: this session is worktree '${mismatch.worktreeId}' (${describeSource(mismatch.source)}), `
+      + `but the server this CLI is talking to (${mismatch.serverUrl}) does not list it.`,
+    '  You are almost certainly connected to a DIFFERENT CommandMate server than the one that started this session.',
+    '  Everything that reads the server ledger — ls / instances / peers / ask — is answering about that other server,',
+    '  so anything delegated from here can land in an unrelated worktree while still exiting 0.',
+    '  Aim the CLI at the right server (CM_PORT=<port> commandmate …) or check ~/.commandmate/.env, then re-run.',
+  ].join('\n');
+}
+
+/** The one-line form, for a command that has already failed for another reason. */
+export function formatServerMismatchHint(mismatch: ServerMismatch): string {
+  return (
+    `Hint: this session is worktree '${mismatch.worktreeId}' (${describeSource(mismatch.source)}), `
+    + `which the server at ${mismatch.serverUrl} does not list — this CLI is probably connected to a `
+    + 'different CommandMate server than the one that started this session, so the id is not the problem.'
+  );
+}
+
+/**
+ * Resolve the caller's identity and report a mismatch, or null.
+ *
+ * For commands that only need this on a failure path: it costs a `tmux
+ * display-message` and one `GET /api/worktrees`, and it is called after the
+ * request that already failed. Never throws — a diagnosis that fails must not
+ * replace the error it was diagnosing.
+ *
+ * @param client - The client whose 404 is being explained
+ */
+export async function describeServerMismatch(client: ApiClient): Promise<ServerMismatch | null> {
+  try {
+    const identity = await resolveSessionIdentity(client);
+    if (!identity) return null;
+    // The env path carries no list, so ask for one here: this runs only after a
+    // command has already failed, where one extra request buys the difference
+    // between "check the worktree ID" and the actual cause.
+    const known = identity.knownWorktreeIds ?? (await readWorktreeIds(client));
+    return detectServerMismatch(identity, known, client.serverUrl);
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -284,6 +403,18 @@ export function createWhoamiCommand(): Command {
         }
 
         const roster = await readOwnRosterEntry(client, identity);
+        // Issue #2404: no extra request — `resolveSessionIdentity` already read
+        // the list on the tmux path, which is the path that can be wrong.
+        const mismatch = detectServerMismatch(
+          identity,
+          identity.knownWorktreeIds,
+          client.serverUrl,
+        );
+
+        // stderr in both modes: it must not corrupt `--json` stdout, and a skill
+        // that reports "I asked <url>" needs to see it whichever mode it ran in.
+        // Exit code stays 0 — whoami still answered the question it was asked.
+        if (mismatch) console.error(formatServerMismatchWarning(mismatch));
 
         if (options.json) {
           console.log(JSON.stringify({
@@ -293,6 +424,12 @@ export function createWhoamiCommand(): Command {
             alias: roster?.alias ?? null,
             source: identity.source,
             sessionName: identity.sessionName,
+            // Always present: "where did this answer come from" is half of what
+            // makes the answer checkable (Issue #2404).
+            serverUrl: client.serverUrl,
+            // Absent, not false, when everything agrees: a reader tests for the
+            // flag, and an ordinary session's output carries no trace of it.
+            ...(mismatch ? { serverMismatch: true } : {}),
           }, null, 2));
           return;
         }
@@ -303,6 +440,7 @@ export function createWhoamiCommand(): Command {
         console.log(`alias:     ${roster?.alias ?? '-'}`);
         console.log(`source:    ${identity.source}`);
         console.log(`tmux:      ${identity.sessionName ?? '-'}`);
+        console.log(`server:    ${client.serverUrl}`);
       } catch (error) {
         handleCommandError(error);
       }

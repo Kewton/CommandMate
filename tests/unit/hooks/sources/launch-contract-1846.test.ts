@@ -62,6 +62,19 @@ const TOOLS = [
 ] as const;
 
 const dirs: string[] = [];
+
+/**
+ * The port every launch line states since #2403, and the assignment it renders
+ * to.
+ *
+ * `renderAgentLaunchCommand` appends `CM_PORT=<this server's port>` to every
+ * plan, because a pane inherits some other CommandMate's `CM_PORT` from the
+ * tmux server's global environment and a `commandmate` typed inside the agent
+ * would otherwise resolve to it. Appended, so every assertion below about
+ * *order* is still an assertion about the source's own declarations.
+ */
+const SERVER_PORT = '60301';
+const PORT_ASSIGNMENT = `CM_PORT='${SERVER_PORT}'`;
 let home: string;
 let worktree: string;
 
@@ -88,6 +101,10 @@ beforeEach(() => {
   vi.stubEnv('HOME', home);
   vi.stubEnv('CODEX_HOME', join(home, '.codex'));
   vi.stubEnv('CM_AGENT_HOOKS_INJECT', '1');
+  // #2403: the rendered line ends with this server's own port, so the byte-pins
+  // below need it to be a number this file chose rather than whatever `CM_PORT`
+  // the machine running the tests exports.
+  vi.stubEnv('CM_PORT', SERVER_PORT);
 });
 
 afterEach(() => {
@@ -181,18 +198,25 @@ describe('2. the plan declares its environment (adopted)', () => {
     const line = renderAgentLaunchCommand(plan);
 
     const rendered = Object.entries(plan.env).map(([k, v]) => `${k}='${v}'`);
-    expect(line).toBe(`${rendered.join(' ')} ${plan.command}`);
+    // #2403's port is appended, after everything the source declared and before
+    // the command — which is what keeps the rest of this assertion about order.
+    expect(line).toBe(`${rendered.join(' ')} ${PORT_ASSIGNMENT} ${plan.command}`);
     // codex pins `CODEX_HOME` first on purpose: the file it wrote and the file
     // codex reads have to be the same file.
     expect(line.startsWith('CODEX_HOME=')).toBe(true);
   });
 
-  it('leaves a command alone when there is nothing to apply', () => {
-    // An empty env must not grow a leading space, or claude's launch line stops
-    // being byte-identical to the pre-#1846 one.
+  it('applies only the server’s port when a source declares nothing', () => {
+    // Was "leaves a command alone": until #2403 an empty `env` rendered to the
+    // bare command, and the thing being guarded was that it must not grow a
+    // *leading* space. The port is now always applied, so the guard is stated as
+    // the exact line instead — a stray separator would show up in it.
     const plan = getAgentEventSource('claude').prepareLaunch(context('claude'));
     expect(plan.env).toEqual({});
-    expect(renderAgentLaunchCommand(plan)).toBe(plan.command);
+
+    const line = renderAgentLaunchCommand(plan);
+    expect(line).toBe(`${PORT_ASSIGNMENT} ${plan.command}`);
+    expect(line).not.toMatch(/^\s|\s\s/);
   });
 
   it('quotes values so a worktree path with a space survives', () => {
@@ -202,7 +226,19 @@ describe('2. the plan declares its environment (adopted)', () => {
         settingsPath: null,
         env: { CM_HOOK_URL: `http://x/?a=1&b='2'`, OTHER: 'a b' },
       })
-    ).toBe(`CM_HOOK_URL='http://x/?a=1&b='\\''2'\\''' OTHER='a b' agent`);
+    ).toBe(`CM_HOOK_URL='http://x/?a=1&b='\\''2'\\''' OTHER='a b' ${PORT_ASSIGNMENT} agent`);
+  });
+
+  it('states the launching server’s port on every source’s line (#2403)', () => {
+    // The failure this closes: two CommandMate servers sharing one tmux server,
+    // the tmux server's global environment carrying the port of whichever
+    // started it, and every pane's `-zsh` inheriting it. `commandmate ls` typed
+    // inside an agent then answered for the other server — while the agent's
+    // hooks, whose URL is on this same line, posted to the right one.
+    for (const tool of TOOLS) {
+      const line = renderAgentLaunchCommand(getAgentEventSource(tool).prepareLaunch(context(tool)));
+      expect(line, `${tool} states no server port`).toContain(`${PORT_ASSIGNMENT} `);
+    }
   });
 });
 

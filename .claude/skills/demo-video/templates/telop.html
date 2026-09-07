@@ -31,6 +31,23 @@
         align-items: flex-end;
         justify-content: center;
       }
+      /*
+        `telop-top` (Issue #2381): the band over the top of the frame instead of
+        the bottom, for a scene whose payoff sits where the default band would
+        land — a composer being sent, the newest reply of a chat. A percentage
+        margin resolves against the frame's WIDTH (as margin-bottom's 7.5% =
+        96px does), so 12.8% of 1280 puts the band's top at y≈164: below the
+        app header and the split's own title bar (y≈130-165), over the oldest
+        lines of the transcript. The bottom margin is dropped so the band does
+        not float mid-frame. render-overlays.ts toggles the class on <body>.
+      */
+      body.telop-top {
+        align-items: flex-start;
+      }
+      body.telop-top #telop-band {
+        margin-top: 12.8%;
+        margin-bottom: 0;
+      }
       #telop-band {
         display: inline-flex;
         align-items: center;
