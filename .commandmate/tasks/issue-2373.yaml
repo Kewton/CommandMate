@@ -1,0 +1,61 @@
+version: 1
+title: "Issue #2373: TerminalSplitPaneContent / MobileTerminalTab が isDismissablePanelActive を live prop に写していない"
+goal: |
+  Issue #2373 の追加対応（実装本体は commit 済み・全ゲート緑）。**残りは1点だけ**です。
+
+  ## やること
+  `src/components/worktree/ChatSurface.tsx` の `resolveBlockedReason` 直前の docblock に、
+  **今回の変更で事実に反するようになった記述**があります。該当箇所（489行目付近）:
+
+  > …`isDismissablePanelActive` is published by `buildCurrentOutput` and carried by both
+  > delivery paths, but the two components that build this object — `TerminalSplitPaneContent`
+  > and `MobileTerminalTab` — construct it field by field and **do not yet copy it across.
+  > Until they do, the flag arrives as `undefined`** on the very surface it was added for.
+
+  あなたが今回 `TerminalSplitPaneContent` と `MobileTerminalTab` の両方に写したので、
+  **「まだ写していない／undefined で届く」は嘘になりました。** この段落を現状に合わせて
+  書き直してください。
+
+  ## 書き換えの方針
+  - 「両親がフィールドを写すようになったので、通常はサーバのフラグが届く」ことを述べる（#2373）
+  - **フレーム fallback を残している理由は書き換えて残す**: 削除しない。理由は
+    (a) このフィールドを知らない古いデーモンに繋いだ場合、(b) `undefined` が「知らない」を
+    意味する契約であること、(c) `??` なのでサーバが `false` を明示したときはサーバが勝つこと
+  - `frame` が既にこのコンポーネントの prop であること、検出器と同じ述語を共有していることの
+    記述はそのまま活かしてよい
+  - コメントだけの変更です。**コードのロジックは1文字も変えないでください**
+
+  ## 受入条件
+  - [ ] 上記 docblock から「do not yet copy it across」「Until they do, the flag arrives as
+        `undefined`」に相当する記述が消え、現状（両親が写している）と整合している
+  - [ ] fallback を残す理由が読み取れる（削除の口実にならない書き方であること）
+  - [ ] `resolveBlockedReason` を含むコードの実行時挙動が変わっていない（コメントのみの diff）
+  - [ ] `npm run lint` / `npx tsc --noEmit` / `npm run test:unit` が exit 0
+
+  ## 前回の作業（完了済み・再実施は不要）
+  `TerminalSplitPaneContent.tsx` と `MobileTerminalTab.tsx` の `live` オブジェクトと依存配列に
+  `isDismissablePanelActive` を追加し、テスト2ファイルを追加して commit 済み。全ゲート緑。
+  **この部分はやり直さないでください。**
+
+  ## 断片について
+  `dev-reports/changelog/issue-2373.md` と `dev-reports/module-reference/issue-2373.md` は
+  既に作成済みです。今回のコメント修正を踏まえて内容が古くなる場合だけ更新してください
+  （`CHANGELOG.md` と `docs/module-reference.md` の本体は編集しないこと。scope 外です）。
+
+scope:
+  allow:
+    - "src/components/worktree/ChatSurface.tsx"
+    - "src/components/worktree/TerminalSplitPaneContent.tsx"
+    - "src/components/worktree/MobileTerminalTab.tsx"
+    - "tests/unit/components/worktree/TerminalSplitPaneContent.test.tsx"
+    - "tests/unit/components/worktree/TerminalSplitPaneContent-2373.test.tsx"
+    - "tests/unit/components/worktree/MobileTerminalTab.test.tsx"
+    - "tests/unit/components/worktree/MobileTerminalTab-2373.test.tsx"
+    - "dev-reports/changelog/issue-2373.md"
+    - "dev-reports/module-reference/issue-2373.md"
+  deny: []
+verify:
+  # 既定（省略）= 登録済み全ゲート
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true

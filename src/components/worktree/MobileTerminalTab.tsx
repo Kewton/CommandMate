@@ -662,6 +662,11 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
       promptData: prompt.data,
       isSelectionListActive: terminal.isSelectionListActive,
       isPagerActive: terminal.isPagerActive,
+      // Issue #2373: same copy, same reason as the PC split — without it the
+      // surface only ever sees `undefined` here and re-derives the verdict from
+      // the frame it was handed, which is a different slice of bytes than the
+      // one the server judged.
+      isDismissablePanelActive: terminal.isDismissablePanelActive,
       isUnclassifiedActive: terminal.isUnclassifiedActive,
     }),
     [
@@ -670,6 +675,7 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
       terminal.isThinking,
       terminal.isSelectionListActive,
       terminal.isPagerActive,
+      terminal.isDismissablePanelActive,
       terminal.isUnclassifiedActive,
       prompt.visible,
       prompt.data,

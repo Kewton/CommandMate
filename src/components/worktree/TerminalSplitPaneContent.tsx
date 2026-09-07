@@ -713,6 +713,13 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
               promptData: prompt.data,
               isSelectionListActive: terminal.isSelectionListActive,
               isPagerActive: terminal.isPagerActive,
+              // Issue #2373: the field #2369 added and did not copy across. The
+              // surface falls back to reading `frame` when this is absent, so the
+              // card was already correct — but that fallback reads the raw
+              // capture's last 15 rows while the server read `frame.lastLines`,
+              // and an explicit `false` from the server could never win because it
+              // never arrived. Copied here so the server's answer is the answer.
+              isDismissablePanelActive: terminal.isDismissablePanelActive,
               isUnclassifiedActive: terminal.isUnclassifiedActive,
             }}
             onSurfaceModeChange={handleSurfaceModeChange}
@@ -739,6 +746,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       terminal.isThinking,
       terminal.isSelectionListActive,
       terminal.isPagerActive,
+      terminal.isDismissablePanelActive,
       terminal.isUnclassifiedActive,
       terminal.output,
       refresh,
