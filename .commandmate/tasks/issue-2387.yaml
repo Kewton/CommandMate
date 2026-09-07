@@ -1,0 +1,111 @@
+version: 1
+title: "Issue #2387: relay の hops が増えず「hops 3 で止まる」ループ防止が実機で到達不能"
+goal: |
+  https://github.com/Kewton/CommandMate/issues/2387 を実装する。
+
+  ## 現象（実測済み。UAT 2026-09-07、隔離サーバ、claude + codex + codex-2）
+  relay の連鎖は `hops` で数え、上限3で止まる仕様（#2377）だが、**実機では hops が常に 1 のまま
+  増えない**。台帳を直接読んだ結果、作成した relay 3件すべて hops=1（うち1件は relay を受け取った
+  直後に張った子 relay で、親 hops=1 なので本来 hops=2 になるべきだった）。
+
+  ## 機構（実測済み）
+  **relay 配送のたびに user 行が2本書かれる。** 本物の `relay` 行の **662ms 後**に、依頼側エージェント
+  のスクリーンスクレイパが同じ本文を `normal` として書く（`cli_tool_id`/`instance_id` も同じなので
+  スコープでは区別できない）。実測（timestamp 降順）:
+
+  ```
+  1788760303761|normal|claude-prompt:bbc5c6d9-ea0|[from Codex 2 / agents-repo] 2
+  1788760303099|relay |relay:a4ae92d2-eec8-46f3-9|[from Codex 2 / agents-repo] 2
+  ```
+
+  `findParentRelayHops`（`src/lib/relay/relay-service.ts:82-107`）は
+  `getLastUserMessageForInstance`（`src/lib/db/chat-db.ts:1052-1066`、`ORDER BY timestamp DESC LIMIT 1`）
+  で**最新の1行だけ**を見て `messageType === 'relay'` を要求する:
+
+  ```ts
+  const lastUser = getLastUserMessageForInstance(db, from.worktreeId, resolved.cliToolId, from.instanceId);
+  if (!lastUser || lastUser.messageType !== 'relay') return null;
+  ```
+
+  配送から約0.66秒が過ぎると最新の user 行は `normal` の重複行になり、親 relay を見失う（null を
+  返す）。結果として **hops が常に1**（親が見つからないので `parentHops` が null → 深さ1として
+  記録される）で、連鎖ブロックも配送直後0.66秒の窓の中でしか効かない（タイミング依存）。
+
+  ## 既存テストがこれを捕まえられない理由
+  `tests/unit/lib/relay/relay-policy.test.ts:62-63` と
+  `tests/unit/lib/relay/relay-service.test.ts:170` は hops 2/3 を assert しているが、`parentHops` を
+  直接与えるか台帳と History を直接組むため、「配送の0.66秒後にスクレイパが重複行を書く」という
+  production の並び順を再現しない。契約は満たしているが、その契約に渡る入力が実機では作られない
+  形の空虚な緑になっている。
+
+  ## 対応（この Issue の scope）
+  `findParentRelayHops` を「最新の1行」ではなく、**直近数行のうち最初に見つかった `messageType ===
+  'relay'` の行**で親を引くように変更する。
+
+  - 既に `src/lib/relay/relay-delivery.ts:141-146` が `getMessages(db, worker.worktreeId, {limit,
+    cliToolId, instanceId, matchResolvedInstance: true})` を使っている（`src/lib/db/chat-db.ts:230`
+    でエクスポート済み）。同じ関数を再利用し、`role === 'user'` で絞って**新しい順に走査し、最初に
+    `messageType === 'relay'` の行が現れたらそれを親とする**（`normal` の重複行は無視して先へ進む）。
+    **新しい DB クエリ関数を増やさないこと**（`getLastUserMessageForInstance` を直接直さない —
+    他の呼び出し元に影響させないため）
+  - 走査する行数の上限は小さく持つ（`REPLY_LOOKBACK_MESSAGES` など既存の定数があれば流用、無ければ
+    5〜10 件程度で十分。無限に遡って無関係な relay を親と誤認しないこと）
+  - `since`（この from セッションの直近の意味のある基準時刻）で区切ることも検討してよいが、
+    必須ではない。まずは「直近 N 件から最初の relay 行」で十分に直る
+
+  ## 受入条件
+  - [ ] relay を受け取った直後 **および 5 秒後** に `--allow-relay-chain` で子 relay を張ると、
+        どちらも `hops=2` で記録される（実機、claude ↔ codex）
+  - [ ] hops=3 の relay からさらに張ろうとすると `RELAY_HOPS_EXCEEDED` で拒否される（実機で確認、
+        `--allow-relay-chain` の連鎖を3回繰り返す）
+  - [ ] `--allow-relay-chain` なしの連鎖が、配送直後でも数秒後でも exit 2 で拒否される
+        （タイミング依存が無いことを確認）
+  - [ ] 上記を「`relay` 行の後に `normal` 重複行が来る」History fixture で固定したユニットテストが
+        あり、`findParentRelayHops` がその重複行を飛ばして親を見つけることを assert する。
+        「最新1行だけを見る」実装に戻す変異注入で赤くなることを確認する
+  - [ ] 既存の `relay-policy.test.ts` / `relay-service.test.ts` の hops 2/3 assertion が
+        引き続き green（回帰無し）
+  - [ ] `npm run lint` / `npx tsc --noEmit` / `npm run test:unit` が exit 0
+
+  ## スコープ外
+  - **重複行そのものの根治**（スクレイパが同じ本文を `normal` としても書いてしまうこと）。
+    #2192 系のチャット面汚染と同じ根で、根治すれば History の二重表示も自然に消えるが、規模が
+    大きいため別Issueとする。本Issueは relay の hops 計算という消費側の防御に限定する
+  - #2386（`ask` が junk 行を拾う問題）— 別Issue。ファイルも別（本Issueは
+    `src/cli/commands/ask.ts` に触れない）
+
+  ## 関連
+  #2377（relay 台帳の実装）、#2386（同じ症状の別consumer。対照として有用）
+
+  ## 作業ルール（厳守）
+  - **`CHANGELOG.md` と `docs/module-reference.md` を編集しないでください**（scope外です）。
+    代わりに次の2ファイルを書いてください。どちらも `dev-reports/` 配下なので commit には
+    入りません。
+    - `dev-reports/changelog/issue-2387.md` — `CHANGELOG.md` の `## [Unreleased]` にそのまま
+      貼れる1エントリ（先頭は `- **<type>(<scope>): …** (#2387): …`）。1行目にコメントで
+      どの節（`### Added` / `### Changed` / `### Fixed`）に入るかを書く。
+      `- **` で始めること（`grep -cE '^- \*\*'` で集計する）。`(#2387)` は要約の外
+      （`**` を閉じた後）に置くこと。1エントリ＝1行（折らない）。
+    - `dev-reports/module-reference/issue-2387.md` — `docs/module-reference.md` の表に足す
+      注記を行キー（`| \`path\` |`）ごとに列挙する。既存行に足すときは
+      `grep -n '^| \`<path>\`' docs/module-reference.md` を実行し、その出力（行番号つきの
+      行キー）を断片に書き写してから書くこと。0件だった行への追記は指示しない
+      （新しい行を足すなら「新規行」と明記する）。足すものが無ければ「追記なし」の1行でよい。
+  - 断片が無いとリリースノートと module-reference に載らない。実装と同じ commit の時点で
+    書くこと。
+  - **`src/cli/commands/ask.ts` には触れないこと。** #2386 が並行して同じ症状の別ファイルを
+    扱っている。
+scope:
+  allow:
+    - "src/lib/relay/relay-service.ts"
+    - "src/lib/relay/relay-delivery.ts"
+    - "tests/unit/lib/relay/**"
+    - "dev-reports/changelog/issue-2387.md"
+    - "dev-reports/module-reference/issue-2387.md"
+  deny:
+    - "src/cli/commands/ask.ts"
+verify:
+  # 既定（省略）= 登録済み全ゲート
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true
