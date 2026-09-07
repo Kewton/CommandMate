@@ -6,6 +6,11 @@
  *
  * Issue #600: UX refresh - useLayoutConfig flags drive rendering.
  * AppShell only renders based on flags; layout logic is in useLayoutConfig().
+ *
+ * Issue #2374: the desktop branch also draws the repository tab strip, above
+ * the header. It lives at this level rather than inside `Header` because
+ * `/worktrees/*` hides the header entirely (`showGlobalNav: false`) and that is
+ * the screen users switch branches from most.
  */
 
 'use client';
@@ -17,10 +22,15 @@ import { useLayoutConfig } from '@/hooks/useLayoutConfig';
 import { usePcDisplaySizeContext } from '@/contexts/PcDisplaySizeContext';
 import { Sidebar } from './Sidebar';
 import { Header } from './Header';
+import { RepositoryTabBar, REPOSITORY_TAB_BAR_HEIGHT } from './RepositoryTabBar';
 import { GlobalMobileNav } from '@/components/mobile/GlobalMobileNav';
 import { CommandPalette } from '@/components/common/CommandPalette';
 import { KeyboardShortcutsOverlay } from '@/components/common/KeyboardShortcutsOverlay';
 import { VersionMismatchBanner } from './VersionMismatchBanner';
+import {
+  shouldShowRepositoryTabBar,
+  DEFAULT_REPO_TAB_BAR_MODE,
+} from '@/lib/sidebar-utils';
 import { Z_INDEX } from '@/config/z-index';
 
 // ============================================================================
@@ -38,6 +48,9 @@ const MIN_SIDEBAR_WIDTH = 160;
 
 /** Maximum sidebar width when drag-resizing */
 const MAX_SIDEBAR_WIDTH = 480;
+
+/** Header height in px — the `h-16` on Header's inner row (Issue #1070). */
+const HEADER_HEIGHT = 64;
 
 // ============================================================================
 // Types
@@ -72,7 +85,14 @@ export interface AppShellProps {
  * ```
  */
 export const AppShell = memo(function AppShell({ children }: AppShellProps) {
-  const { isOpen, isMobileDrawerOpen, closeMobileDrawer, width, setWidth } = useSidebarContext();
+  const {
+    isOpen,
+    isMobileDrawerOpen,
+    closeMobileDrawer,
+    width,
+    setWidth,
+    repoTabBarMode,
+  } = useSidebarContext();
   const isMobile = useIsMobile();
   const { showSidebar, showGlobalNav } = useLayoutConfig();
   // Issue #915: scale fixed-px sidebar width by the PC display-size factor.
@@ -85,6 +105,30 @@ export const AppShell = memo(function AppShell({ children }: AppShellProps) {
   const displayWidth = Math.round(
     Math.min(maxWidth, Math.max(minWidth, width * factor))
   );
+
+  // Issue #2374: the repository strip. Desktop only, and by default only while
+  // the sidebar is collapsed — it is that sidebar's navigation, not a second
+  // copy of it. Drawn at AppShell level rather than inside Header so it is also
+  // there on /worktrees/*, where `showGlobalNav` removes the header entirely
+  // (useLayoutConfig) — which is exactly the screen users switch branches from.
+  // `?? DEFAULT_REPO_TAB_BAR_MODE` keeps the shell renderable against a partial
+  // SidebarContext stub.
+  const showRepositoryTabBar = shouldShowRepositoryTabBar(
+    repoTabBarMode ?? DEFAULT_REPO_TAB_BAR_MODE,
+    isOpen
+  );
+
+  // The desktop sidebar is `position: fixed`, so it does not participate in the
+  // flex column the strip is added to — its `top-16 / top-0` classes would put
+  // it underneath the band. When (and only when) the band is up, an inline
+  // offset overrides those classes; with the band down nothing is written and
+  // the classes stand exactly as they did, which is what #1070's assertions
+  // pin.
+  const bandHeight = Math.round(REPOSITORY_TAB_BAR_HEIGHT * factor);
+  const sidebarTop = bandHeight + (showGlobalNav ? HEADER_HEIGHT : 0);
+  const sidebarOffsetStyle = showRepositoryTabBar
+    ? { top: `${sidebarTop}px`, height: `calc(100vh - ${sidebarTop}px)` }
+    : {};
 
   // Refs for direct DOM manipulation during drag (avoids React re-render lag)
   const sidebarRef = useRef<HTMLElement>(null);
@@ -152,6 +196,9 @@ export const AppShell = memo(function AppShell({ children }: AppShellProps) {
   // Issue #112: Using transform for better performance (GPU-accelerated)
   return (
     <div data-testid="app-shell" className="h-screen flex flex-col">
+      {/* Repository tab strip, above the header (Issue #2374) */}
+      {showRepositoryTabBar && <RepositoryTabBar />}
+
       {/* Header with 5-screen navigation */}
       {showGlobalNav && <Header />}
 
@@ -169,7 +216,11 @@ export const AppShell = memo(function AppShell({ children }: AppShellProps) {
               ${SIDEBAR_TRANSITION}
               ${isOpen ? 'translate-x-0' : '-translate-x-full'}
             `}
-            style={{ width: `${displayWidth}px`, zIndex: Z_INDEX.SIDEBAR }}
+            style={{
+              width: `${displayWidth}px`,
+              zIndex: Z_INDEX.SIDEBAR,
+              ...sidebarOffsetStyle,
+            }}
             role="complementary"
             aria-hidden={!isOpen}
           >

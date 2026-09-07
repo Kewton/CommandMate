@@ -12,6 +12,11 @@
  * release re-renders instead of waiting for the next poll.
  * Issue #2059: the branch list distinguishes first load, load failure and a
  * genuinely empty list, instead of saying "No branches available" for all three.
+ *
+ * Issue #2374: the repository group order moved into `SidebarContext` so the
+ * header's `RepositoryTabBar` re-orders in the same commit as a drag here, and
+ * the ordering itself is `orderBranchGroups()` from sidebar-utils rather than
+ * an inline sort. The fetch/PUT against `/api/sidebar/group-order` stays here.
  */
 
 'use client';
@@ -55,6 +60,7 @@ import {
   generateRepositoryColor,
   buildHiddenRepositoryPathSet,
   filterWorktreesByVisibility,
+  orderBranchGroups,
 } from '@/lib/sidebar-utils';
 import { useWorktreeList } from '@/hooks/useWorktreeList';
 import type { ViewMode } from '@/lib/sidebar-utils';
@@ -70,9 +76,6 @@ const SIDEBAR_GROUP_COLLAPSED_STORAGE_KEY = 'mcbd-sidebar-group-collapsed';
 /** LocalStorage key for branch list scroll position */
 const SIDEBAR_SCROLL_TOP_STORAGE_KEY = 'mcbd-sidebar-scroll-top';
 
-/** LocalStorage key for repository group order cache */
-const SIDEBAR_GROUP_ORDER_CACHE_STORAGE_KEY = 'mcbd-sidebar-group-order-cache';
-
 /**
  * Shared Tailwind size for the sidebar header action icons (Issue #946).
  * Applied to the view-mode toggle, sync button, sort selector and Repositories
@@ -82,44 +85,6 @@ const HEADER_ICON_CLASS = 'w-4 h-4';
 
 /** In-memory cache used across client-side remounts */
 let lastSidebarScrollTop = 0;
-let lastRepositoryOrder: string[] | null = null;
-
-function parseRepositoryOrder(raw: string): string[] {
-  try {
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .filter((value): value is string => typeof value === 'string')
-      .slice(0, 500);
-  } catch {
-    return [];
-  }
-}
-
-function readRepositoryOrderCache(): string[] {
-  if (typeof window === 'undefined') return lastRepositoryOrder ?? [];
-
-  try {
-    const stored = localStorage.getItem(SIDEBAR_GROUP_ORDER_CACHE_STORAGE_KEY);
-    if (!stored) return [];
-    const parsed = parseRepositoryOrder(stored);
-    lastRepositoryOrder = parsed.length > 0 ? parsed : null;
-    return parsed;
-  } catch {
-    return [];
-  }
-}
-
-function persistRepositoryOrderCache(order: string[]): void {
-  lastRepositoryOrder = order;
-  if (typeof window === 'undefined') return;
-
-  try {
-    localStorage.setItem(SIDEBAR_GROUP_ORDER_CACHE_STORAGE_KEY, JSON.stringify(order));
-  } catch {
-    // Ignore localStorage errors
-  }
-}
 
 function readSidebarScrollTop(): number {
   if (typeof window === 'undefined') return lastSidebarScrollTop;
@@ -182,7 +147,18 @@ export const Sidebar = memo(function Sidebar() {
     isLoading,
     error,
   } = useWorktreeSelection();
-  const { closeMobileDrawer, sortKey, sortDirection, viewMode, setViewMode } = useSidebarContext();
+  const {
+    closeMobileDrawer,
+    sortKey,
+    sortDirection,
+    viewMode,
+    setViewMode,
+    // Issue #2374: the group order now lives in SidebarContext so the header's
+    // repository tab bar follows a drag here without a second fetch or a second
+    // copy of the order.
+    repositoryOrder,
+    setRepositoryOrder,
+  } = useSidebarContext();
   const t = useTranslations('common');
   const [searchQuery, setSearchQuery] = useState('');
   const branchListRef = useRef<HTMLDivElement>(null);
@@ -198,8 +174,10 @@ export const Sidebar = memo(function Sidebar() {
     }
   });
 
-  // Repository group display order (DB-backed, fetched on mount)
-  const [repositoryOrder, setRepositoryOrder] = useState<string[]>(readRepositoryOrderCache);
+  // Repository group display order is DB-backed. The Sidebar owns the fetch —
+  // it is the component that is always mounted (AppShell renders it on every
+  // route, merely translated off-screen when collapsed) — and publishes the
+  // result through SidebarContext for the tab bar to read.
   const orderLoadedRef = useRef(false);
 
   // Fetch saved group order from server on mount
@@ -212,13 +190,12 @@ export const Sidebar = memo(function Sidebar() {
       .then((data: { success: boolean; order: string[] | null }) => {
         if (data.success && Array.isArray(data.order)) {
           setRepositoryOrder(data.order);
-          persistRepositoryOrderCache(data.order);
         }
       })
       .catch(() => {
         // Non-fatal: fall back to alphabetical order
       });
-  }, []);
+  }, [setRepositoryOrder]);
 
   // Issue #690: Filter out worktrees whose repository is hidden (visible=false).
   // This is a Sidebar-local filter — useWorktreeList is intentionally not
@@ -369,23 +346,16 @@ export const Sidebar = memo(function Sidebar() {
     filterText: searchQuery,
   });
 
-  // Apply saved repository order to groupedItems (only when not searching)
+  // Apply saved repository order to groupedItems (only when not searching).
+  // `orderBranchGroups` is shared with the repository tab bar (Issue #2374) so
+  // "the tabs are in the sidebar's order" cannot drift into two orderings.
   const orderedGroups: BranchGroup[] | null = useMemo(() => {
     if (viewMode !== 'grouped' || !groupedItems) return null;
-
-    if (searchQuery.trim() || repositoryOrder.length === 0) {
-      // No custom order: use default (alphabetical from groupBranches)
-      return groupedItems;
-    }
-
-    // Place known repos first in saved order, then append any new repos at end
-    const orderMap = new Map(repositoryOrder.map((name, idx) => [name, idx]));
-    return [...groupedItems].sort((a, b) => {
-      const ia = orderMap.has(a.repositoryName) ? orderMap.get(a.repositoryName)! : Infinity;
-      const ib = orderMap.has(b.repositoryName) ? orderMap.get(b.repositoryName)! : Infinity;
-      if (ia === ib) return a.repositoryName.localeCompare(b.repositoryName);
-      return ia - ib;
-    });
+    // While searching, the alphabetical order from `groupBranches` is kept: the
+    // DnD handles are disabled then, so a custom order the user cannot adjust
+    // would only make the filtered result harder to scan.
+    if (searchQuery.trim()) return groupedItems;
+    return orderBranchGroups(groupedItems, repositoryOrder);
   }, [viewMode, groupedItems, repositoryOrder, searchQuery]);
 
   // Adapt groupedItems to match previous interface (null when flat mode)
@@ -464,9 +434,9 @@ export const Sidebar = memo(function Sidebar() {
 
       const newOrder = arrayMove(currentOrder, oldIndex, newIndex);
 
-      // Optimistic update
+      // Optimistic update — writes through SidebarContext, so the header's
+      // repository tabs re-order in the same commit as these group headers.
       setRepositoryOrder(newOrder);
-      persistRepositoryOrderCache(newOrder);
 
       // Persist to server
       fetch('/api/sidebar/group-order', {
@@ -476,10 +446,9 @@ export const Sidebar = memo(function Sidebar() {
       }).catch(() => {
         // Revert on error
         setRepositoryOrder(currentOrder);
-        persistRepositoryOrderCache(currentOrder);
       });
     },
-    [groupedBranches]
+    [groupedBranches, setRepositoryOrder]
   );
 
   // Check if list is empty (for both modes)
