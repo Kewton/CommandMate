@@ -12,7 +12,7 @@
 **[commandmate website →](https://kewton.github.io/CommandMate/)**
 
 <p align="center">
-  <img src="./docs/images/demo-desktop.gif" width="600" alt="A task contract is sent, the verification gates run, and the exit code returns RESULT passed" />
+  <img src="./docs/images/demo-hero.en.gif" width="600" alt="Switch repos from the tab bar, delegate to another agent from the chat, open the file it names, and do the same from a phone" />
 </p>
 
 > **From vibe coding to Vibe Engineering.**
@@ -30,8 +30,12 @@ npx commandmate@latest
 CommandMate adds the machinery — a contract before the work, verification gates after it, Skills that carry the method — on top of the agent CLIs you already use.
 It does not replace tmux, Git worktrees, your terminal, or your agent CLI. It puts a frame around them, so the work arrives verified instead of merely finished.
 
+## Verified, not vibe-checked
+
+Gates you declared decide whether the work is done, and the exit code is the verdict.
+
 <p align="center">
-  <img src="./docs/images/demo-mobile.gif" width="300" alt="A waiting agent reaches you, and the prompt is answered from a phone" />
+  <img src="./docs/images/demo-contract-verify.gif" width="600" alt="A task contract is sent, the verification gates run, and the exit code returns RESULT passed" />
 </p>
 
 Works on desktop and mobile — monitor and steer sessions from any browser, including your phone.
