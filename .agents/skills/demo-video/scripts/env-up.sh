@@ -493,10 +493,16 @@ place_transcripts() {
 # The session pointer, delivered the way the real CLI delivers it. Nothing but
 # the pointer is set: `SessionStart` opens a generation and carries no verdict
 # (agent-event-state.ts), so the pane's status still comes from the screen.
+#
+# `model` rides along as it does on the real hook (#1783: claude names its model
+# on `SessionStart` and nowhere else; the codex one is what its footer already
+# says). It is what the phone's session row and the roster's model line show
+# (#2357), so a cut that films them needs the pane to have said it — the claude
+# banner in the cassettes carries no model line to scrape.
 announce_session() {
-  local tool="$1" session_id="$2" body
-  body="$(printf '{"tool":"%s","hook_event_name":"SessionStart","source":"startup","session_id":"%s","cwd":"%s","worktreeId":"%s","instanceId":"%s"}' \
-    "$tool" "$session_id" "$(json_string "$WT_DARK_MODE")" "$WORKTREE_ID" "$tool")"
+  local tool="$1" session_id="$2" model="$3" body
+  body="$(printf '{"tool":"%s","hook_event_name":"SessionStart","source":"startup","session_id":"%s","cwd":"%s","worktreeId":"%s","instanceId":"%s","model":"%s"}' \
+    "$tool" "$session_id" "$(json_string "$WT_DARK_MODE")" "$WORKTREE_ID" "$tool" "$model")"
   curl -fsS -o /dev/null --max-time 10 -X POST "$BASE_URL/api/hooks/agent-event" \
     -H 'Content-Type: application/json' --data "$body" \
     || die "could not announce the $tool session to $BASE_URL/api/hooks/agent-event"
@@ -537,11 +543,20 @@ set -m
   cd "$REPO_ROOT" || exit 1
   # `env -u` drops the ambient overrides that would otherwise point the demo at
   # the developer's real database or a real repository list.
+  #
+  # CM_LAUNCHED_BY (#2381): the marker `commandmate start` stamps on the server
+  # it spawns, and the only thing it decides is how the product SPELLS its own
+  # CLI in what it puts on screen (`resolveCommandMateBinary`): `commandmate`
+  # for an installed CLI, `commandmatedev` for a checkout. The demo stands in
+  # for an installed CommandMate, and the delegation brief the hero cut films
+  # names the command — a README that shows `commandmatedev` would be
+  # documenting this harness rather than the product.
   exec env -u DATABASE_PATH -u MCBD_DB_PATH -u MCBD_PORT -u MCBD_ROOT_DIR \
     -u CM_AUTH_TOKEN_HASH -u CM_HTTPS_CERT -u CM_HTTPS_KEY -u CM_ALLOWED_IPS \
     NODE_ENV=development \
     CM_PORT="$PORT" \
     CM_BIND=127.0.0.1 \
+    CM_LAUNCHED_BY=commandmate-cli \
     CM_DB_PATH="$DB_PATH" \
     WORKTREE_REPOS="$SEED_REPO" \
     CM_ROOT_DIR="$SEED_ROOT" \
@@ -590,8 +605,10 @@ fi
 log "setting the default agents and announcing the claude / codex sessions"
 set_default_agents || { cleanup_failed_boot; exit 1; }
 place_transcripts || { cleanup_failed_boot; exit 1; }
-announce_session claude "$CLAUDE_SESSION_ID" || { cleanup_failed_boot; exit 1; }
-announce_session codex "$CODEX_SESSION_ID" || { cleanup_failed_boot; exit 1; }
+# The models match the transcript templates (`claude-opus-5` in
+# fixtures/transcripts/claude-*.jsonl) and the codex cassette's footer.
+announce_session claude "$CLAUDE_SESSION_ID" claude-opus-5 || { cleanup_failed_boot; exit 1; }
+announce_session codex "$CODEX_SESSION_ID" gpt-5.6-sol || { cleanup_failed_boot; exit 1; }
 
 # Created only now, after the boot sync in server.ts has already scanned
 # WORKTREE_REPOS. That ordering is what leaves this worktree on disk and absent

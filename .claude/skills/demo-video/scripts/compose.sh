@@ -34,6 +34,13 @@ OVERLAYS_DIR=""
 OUT=""
 LOCALE="ja"
 WANT_GIF=0
+# GIF delivery: the plan's `#gif` row (from the storyboard's `gif:` block) sets
+# these; a flag overrides the row; the defaults are the pre-#2381 values.
+GIF_WIDTH=""
+GIF_FPS=""
+GIF_MAX_BYTES=""
+DEFAULT_GIF_WIDTH=720
+DEFAULT_GIF_FPS=12
 KEEP_WORK=0
 VERIFY_FILE=""
 COMPARE=""
@@ -63,6 +70,10 @@ Usage: compose.sh --plan FILE --scenes DIR --overlays DIR --out FILE.mp4 [option
   --fps N           output frame rate (default 30)
   --tolerance SEC   duration gate half-width (default 0.5)
   --gif             also write a README-sized GIF beside --out
+  --gif-width N     GIF width in px (default: the plan's #gif row, else 720)
+  --gif-fps N       GIF frame rate (default: the plan's #gif row, else 12)
+  --gif-max-bytes N refuse to leave a GIF larger than N bytes behind
+                    (default: the plan's #gif row, else no limit)
   --keep-work       keep the intermediate segments for inspection
   --verify FILE     only run the duration gate against an existing file
   --compare SECONDS run the gate against an already-measured duration
@@ -92,6 +103,9 @@ while [ $# -gt 0 ]; do
       shift 2
       ;;
     --gif) WANT_GIF=1; shift ;;
+    --gif-width) [ $# -ge 2 ] || die "--gif-width needs a value"; GIF_WIDTH="$2"; shift 2 ;;
+    --gif-fps) [ $# -ge 2 ] || die "--gif-fps needs a value"; GIF_FPS="$2"; shift 2 ;;
+    --gif-max-bytes) [ $# -ge 2 ] || die "--gif-max-bytes needs a value"; GIF_MAX_BYTES="$2"; shift 2 ;;
     --keep-work) KEEP_WORK=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) usage >&2; die "unknown argument: $1" ;;
@@ -158,6 +172,22 @@ esac
 TOTAL="$(awk -F'\t' '$1 == "#total" { print $2; exit }' "$PLAN")"
 [ -n "$TOTAL" ] || die "plan has no '#total' row — was it produced by storyboard.ts?"
 
+# The storyboard's `gif:` block, unless a flag already said otherwise (#2381).
+if [ -z "$GIF_WIDTH" ]; then
+  GIF_WIDTH="$(awk -F'\t' '$1 == "#gif" { print $2; exit }' "$PLAN")"
+fi
+if [ -z "$GIF_FPS" ]; then
+  GIF_FPS="$(awk -F'\t' '$1 == "#gif" { print $3; exit }' "$PLAN")"
+fi
+if [ -z "$GIF_MAX_BYTES" ]; then
+  GIF_MAX_BYTES="$(awk -F'\t' '$1 == "#gif" { print $4; exit }' "$PLAN")"
+fi
+GIF_WIDTH="${GIF_WIDTH:-$DEFAULT_GIF_WIDTH}"
+GIF_FPS="${GIF_FPS:-$DEFAULT_GIF_FPS}"
+case "$GIF_WIDTH" in ''|*[!0-9]*) die "GIF width must be an integer, got '$GIF_WIDTH'" ;; esac
+case "$GIF_FPS" in ''|*[!0-9]*) die "GIF fps must be an integer, got '$GIF_FPS'" ;; esac
+case "$GIF_MAX_BYTES" in *[!0-9]*) die "GIF byte budget must be an integer, got '$GIF_MAX_BYTES'" ;; esac
+
 OUT_DIR="$(cd "$(dirname "$OUT")" && pwd)" || die "output directory does not exist: $(dirname "$OUT")"
 OUT="$OUT_DIR/$(basename "$OUT")"
 
@@ -197,7 +227,10 @@ run_ffmpeg() {
 SEGMENT_INDEX=0
 TAB="$(printf '\t')"
 
-while IFS="$TAB" read -r id type viewport start duration telop; do
+# `head` is the seventh column (#2381) and empty on every row that has none —
+# and on every plan written before the column existed, which `read` handles the
+# same way: a missing field is an empty variable.
+while IFS="$TAB" read -r id type viewport start duration telop head; do
   case "$id" in
     ''|'#'*) continue ;;
   esac
@@ -234,14 +267,35 @@ while IFS="$TAB" read -r id type viewport start duration telop; do
     if [ -n "$take" ]; then
       seek="$(awk -v t="$take" -v d="$duration" 'BEGIN { s = t - d; if (s < 0) s = 0; printf "%.3f", s }')"
     fi
-    log "record  $id  ${start}s..${end}s  (take ${take:-?}s, from +${seek}s)  \"$telop\""
-    # tpad clones the last frame when the take is shorter than the declared
-    # slot; trim cuts it when it is longer. Either way the segment is exactly
-    # `duration`, which is what makes the concatenated total match the
-    # storyboard instead of drifting scene by scene.
-    run_ffmpeg -ss "$seek" -i "$footage" -loop 1 -t "$duration" -i "$telop_png" \
-      -filter_complex "[0:v]${SCALE_PAD},fps=${FPS},tpad=stop_mode=clone:stop_duration=${duration},trim=duration=${duration},setpts=PTS-STARTPTS[base];[1:v]format=rgba,fade=t=in:st=0:d=${fade}:alpha=1,fade=t=out:st=${fade_out_at}:d=${fade}:alpha=1[tel];[base][tel]overlay=0:0:format=auto,format=yuv420p[v]" \
-      -map '[v]' -an -c:v libx264 -preset veryfast -crf "$CRF" -r "$FPS" -t "$duration" "$segment"
+    # A `head` (#2381) keeps the first N seconds of the take as well as the tail
+    # and jump-cuts between them — for a scene whose action starts at the front
+    # (a brief going into the composer, the send) and pays off at the end (the
+    # reply), with a wait in between that no viewer needs to sit through. It
+    # only applies when the take is actually longer than its slot; a short
+    # take is padded exactly as before.
+    jump=0
+    if [ -n "$head" ] && [ -n "$take" ] && [ "$(awk -v t="$take" -v d="$duration" 'BEGIN { print (t > d + 0.001) ? 1 : 0 }')" = "1" ]; then
+      jump=1
+      tail_len="$(awk -v d="$duration" -v h="$head" 'BEGIN { printf "%.3f", d - h }')"
+      tail_from="$(awk -v t="$take" -v l="$tail_len" 'BEGIN { printf "%.3f", t - l }')"
+    fi
+    if [ "$jump" -eq 1 ]; then
+      log "record  $id  ${start}s..${end}s  (take ${take}s, head ${head}s + tail from +${tail_from}s)  \"$telop\""
+      # Two trims off one decode, concatenated, then the same normalisation
+      # the plain path applies: the segment is still exactly `duration`.
+      run_ffmpeg -i "$footage" -loop 1 -t "$duration" -i "$telop_png" \
+        -filter_complex "[0:v]split=2[h][t];[h]trim=duration=${head},setpts=PTS-STARTPTS[hh];[t]trim=start=${tail_from},setpts=PTS-STARTPTS[tt];[hh][tt]concat=n=2:v=1:a=0,${SCALE_PAD},fps=${FPS},tpad=stop_mode=clone:stop_duration=${duration},trim=duration=${duration},setpts=PTS-STARTPTS[base];[1:v]format=rgba,fade=t=in:st=0:d=${fade}:alpha=1,fade=t=out:st=${fade_out_at}:d=${fade}:alpha=1[tel];[base][tel]overlay=0:0:format=auto,format=yuv420p[v]" \
+        -map '[v]' -an -c:v libx264 -preset veryfast -crf "$CRF" -r "$FPS" -t "$duration" "$segment"
+    else
+      log "record  $id  ${start}s..${end}s  (take ${take:-?}s, from +${seek}s)  \"$telop\""
+      # tpad clones the last frame when the take is shorter than the declared
+      # slot; trim cuts it when it is longer. Either way the segment is exactly
+      # `duration`, which is what makes the concatenated total match the
+      # storyboard instead of drifting scene by scene.
+      run_ffmpeg -ss "$seek" -i "$footage" -loop 1 -t "$duration" -i "$telop_png" \
+        -filter_complex "[0:v]${SCALE_PAD},fps=${FPS},tpad=stop_mode=clone:stop_duration=${duration},trim=duration=${duration},setpts=PTS-STARTPTS[base];[1:v]format=rgba,fade=t=in:st=0:d=${fade}:alpha=1,fade=t=out:st=${fade_out_at}:d=${fade}:alpha=1[tel];[base][tel]overlay=0:0:format=auto,format=yuv420p[v]" \
+        -map '[v]' -an -c:v libx264 -preset veryfast -crf "$CRF" -r "$FPS" -t "$duration" "$segment"
+    fi
   fi
 
   printf "file '%s'\n" "$segment" >>"$CONCAT_LIST"
@@ -263,7 +317,7 @@ if ! within_tolerance "$ACTUAL" "$TOTAL" "$TOLERANCE"; then
   printf 'compose: duration gate FAILED: %ss, expected %ss +/- %ss\n' "$ACTUAL" "$TOTAL" "$TOLERANCE" >&2
   printf 'compose: per-segment measurement (declared vs actual):\n' >&2
   index=0
-  while IFS="$TAB" read -r id type viewport start duration telop; do
+  while IFS="$TAB" read -r id type viewport start duration telop head; do
     case "$id" in
       ''|'#'*) continue ;;
     esac
@@ -279,13 +333,57 @@ fi
 
 log "duration ${ACTUAL}s is within ${TOTAL}s +/- ${TOLERANCE}s"
 
+# Bytes on disk, portable across the BSD and GNU `stat` spellings.
+file_size() {
+  wc -c <"$1" | tr -d ' '
+}
+
+# $1 = output, $2 = width, $3 = fps, $4 = palette size, $5 = paletteuse dither
+write_gif() {
+  PALETTE="$WORK_DIR/palette.png"
+  run_ffmpeg -i "$OUT" -vf "fps=$3,scale=$2:-1:flags=lanczos,palettegen=max_colors=$4" "$PALETTE"
+  run_ffmpeg -i "$OUT" -i "$PALETTE" \
+    -lavfi "fps=$3,scale=$2:-1:flags=lanczos[x];[x][1:v]paletteuse=dither=$5" -loop 0 "$1"
+}
+
 if [ "$WANT_GIF" -eq 1 ]; then
   GIF="${OUT%.mp4}.gif"
-  PALETTE="$WORK_DIR/palette.png"
-  log "writing $GIF"
-  run_ffmpeg -i "$OUT" -vf 'fps=12,scale=720:-1:flags=lanczos,palettegen' "$PALETTE"
-  run_ffmpeg -i "$OUT" -i "$PALETTE" \
-    -lavfi 'fps=12,scale=720:-1:flags=lanczos[x];[x][1:v]paletteuse' -loop 0 "$GIF"
+  log "writing $GIF (${GIF_WIDTH}px, ${GIF_FPS} fps${GIF_MAX_BYTES:+, budget ${GIF_MAX_BYTES} bytes})"
+  # The first attempt is the pre-#2381 encoding, so a cut with no budget comes
+  # out as it always did.
+  gif_colors=256
+  gif_dither=sierra2_4a
+  write_gif "$GIF" "$GIF_WIDTH" "$GIF_FPS" "$gif_colors" "$gif_dither"
+  if [ -n "$GIF_MAX_BYTES" ]; then
+    # The budget is a gate (#1815 / #2381), and the same discipline video-to-gif
+    # keeps: cheaper attempts, then refuse to leave an over-budget file behind
+    # that looks deliberate — a README that embeds one is the failure this
+    # exists to stop, and it is only visible on GitHub.
+    #
+    # What gets cheaper is the palette, never the frame or the rate: the
+    # storyboard declared those, and a README GIF that came out narrower than
+    # it said would break the acceptance criterion silently. Measured on the
+    # hero cut at 600px / 10 fps (a light UI, mostly flat colour): 256 colours
+    # with error-diffusion dithering 2.31 MB, 128 colours undithered 1.54 MB,
+    # 64 colours undithered 1.24 MB — and the 128-colour frame is not
+    # distinguishable from the first at that width, because the dithering
+    # noise on anti-aliased text is what LZW was choking on.
+    gif_size="$(file_size "$GIF")"
+    while [ "$gif_size" -gt "$GIF_MAX_BYTES" ] && [ "$gif_colors" -gt 64 ]; do
+      gif_colors=$((gif_colors / 2))
+      gif_dither=none
+      log "GIF is ${gif_size} bytes, over the ${GIF_MAX_BYTES} byte budget: retrying with ${gif_colors} colours, no dithering"
+      write_gif "$GIF" "$GIF_WIDTH" "$GIF_FPS" "$gif_colors" "$gif_dither"
+      gif_size="$(file_size "$GIF")"
+    done
+    if [ "$gif_size" -gt "$GIF_MAX_BYTES" ]; then
+      rm -f "$GIF"
+      printf 'compose: GIF budget FAILED: %s bytes at %spx/%s fps with %s colours, budget is %s bytes; %s was not written\n' \
+        "$gif_size" "$GIF_WIDTH" "$GIF_FPS" "$gif_colors" "$GIF_MAX_BYTES" "$GIF" >&2
+      exit 1
+    fi
+    log "GIF is ${gif_size} bytes (${GIF_WIDTH}px, ${GIF_FPS} fps, ${gif_colors} colours), within the ${GIF_MAX_BYTES} byte budget"
+  fi
 fi
 
 if [ "$KEEP_WORK" -eq 0 ]; then

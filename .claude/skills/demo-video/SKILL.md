@@ -13,10 +13,34 @@ export HOME=/Users/Shared/cmdemo-home                      # 必須。実ログ�
 .claude/skills/demo-video/scripts/demo-video.sh            # ja + en
 .claude/skills/demo-video/scripts/demo-video.sh --check    # 依存＋絵コンテ検証だけ
 .claude/skills/demo-video/scripts/demo-video.sh --locale ja --gif --out ~/Desktop/cm-demo
-.claude/skills/demo-video/scripts/demo-video.sh --claude-cassette .claude/skills/demo-video/fixtures/claude-delegate.cast   # 委任往復の take
+.claude/skills/demo-video/scripts/demo-video.sh --storyboard readme-hero --gif   # README 冒頭の 30 秒（#2381）
+.claude/skills/demo-video/scripts/demo-video.sh --claude-cassette .claude/skills/demo-video/fixtures/claude-delegate.cast   # 委任往復だけの take
 ```
 
 出力先の既定は `~/Desktop/commandmate-demo/`。**リポジトリ外**である。mp4 / GIF / 中間 PNG は**コミットしない**（配布は GitHub Release アセット等）。生成後に `git status` がクリーンであることが受入条件のひとつ。
+
+### 絵コンテ一覧
+
+| `--storyboard` | 出力 | 中身 | claude ペインのカセット |
+|---|---|---|---|
+| `default`（既定） | `demo-30s.{ja,en}.mp4` | 一覧 → 送信 → スマホ承認 → 完了（#1554） | `claude-session-sample.cast` |
+| `contract-verify` | `contract-verify.{ja,en}.mp4` | 契約 → 検証の 30 秒。code card 2 枚 + ターミナル収録（#1810） | 同上 |
+| `readme-hero` | `demo-hero.{ja,en}.mp4` + `.gif` | README 冒頭の 30 秒。タブ帯 → 5 エージェント → チャット面で委任 → 返答のリンク → スマホで承認とファイル（#2381） | `claude-hero.cast`（絵コンテが `claude-cassette:` で宣言） |
+
+`--storyboard` は YAML のパスか、`storyboard/` にある stem。絵コンテが `claude-cassette:` を持てばそのカセットで claude ペインを起こし（`--claude-cassette` で上書き可）、`gif:` を持てば `--gif` の幅 / fps / バイト予算はそこから読む。
+
+### README 撮影の env（#2381）
+
+```bash
+export HOME=/Users/Shared/cmdemo-home                                    # 実 HOME だと env-up.sh が exit 2。転写は $HOME 配下に置かれる
+export PLAYWRIGHT_BROWSERS_PATH=/Users/<real>/Library/Caches/ms-playwright  # HOME を動かすと chromium が見つからない
+export CM_DEMO_PORT=3481                                                 # 3000 は 3 箇所で拒否
+export CM_DEMO_TMUX_SOCKET=cmdemo2381                                    # ターミナル収録の tmux -L（この絵コンテは使わないが習慣として）
+unset TMUX
+.claude/skills/demo-video/scripts/demo-video.sh --storyboard readme-hero --gif --out ~/Desktop/commandmate-demo/readme-hero
+```
+
+偽エージェントの tmux セッション（`mcbd-<tool>-wt-dark-mode`）は既定サーバに立つ。サーバも `tmux` を素で呼ぶので同じサーバでないと採用されない。後片付けは `env-down.sh` が**記録した名前だけ**を kill する。
 
 ## 設計判断
 
@@ -50,6 +74,7 @@ demo-video/
 ├── storyboard/
 │   ├── default.yaml        # 文言を編集する唯一の場所
 │   ├── contract-verify.yaml # 契約 → 検証の 30 秒（code card + terminal シーン）
+│   ├── readme-hero.yaml    # README 冒頭の 30 秒（#2381。claude-cassette / gif / head / telop.position を使う）
 │   └── code/               # code card が読む実ファイル（絵コンテの配下に閉じる）
 ├── templates/
 │   ├── telop.html          # 画面下部のテロップ帯（透過 PNG）
@@ -59,12 +84,14 @@ demo-video/
 └── fixtures/
     ├── claude-session-sample.cast   # 採取済みカセット（テキスト。コミット可）。既定絵コンテの claude ペイン
     ├── claude-delegate.cast         # 委任する側の Claude（`@exec` で commandmate ask を本当に打つ）
+    ├── claude-hero.cast             # claude-delegate の 1 パス目 + `@pass` + 承認の 2 パス目（readme-hero 用）
     ├── codex-review.cast            # 頼まれる側の Codex（Markdown の返答、Header.tsx へのリンク）
     ├── antigravity-idle.cast        # present-only 3 体の起動画面（--idle-only で保持）
     ├── opencode-idle.cast           #   〃（80x200）
     ├── command-code-idle.cast       #   〃
     └── transcripts/
         ├── claude-delegate.jsonl    # `@transcript` が追記する Claude のターン（テンプレート）
+        ├── claude-tests.jsonl       #   〃 claude-hero の 2 パス目（`npm run test:unit` の承認後。プロンプトは `{{TASK}}`）
         └── codex-review.jsonl       #   〃 Codex の rollout ターン
 ```
 
@@ -88,8 +115,8 @@ npx playwright install chromium   # 未導入なら実行（導入済みなら n
 ロケールごとに、次を通しで実行する。どこかで失敗したら `trap` で `env-down.sh --purge` まで必ず到達する。
 
 1. 依存チェックと**絵コンテの検証**（不正なら 1 秒で止まる。2 回分の録画を無駄にしないため先に回す）
-2. `env-up.sh` → `fake-agent.sh` × 5（claude / codex は live、antigravity / opencode / command-code は `--idle-only`）
-3. `record-scenes.ts --locale <L>` — UI を当該ロケールに切り替えて 4 シーン録画
+2. `env-up.sh` → `fake-agent.sh` × 5（claude / codex は live、antigravity / opencode / command-code は `--idle-only`。claude のカセットは絵コンテの `claude-cassette:` → `--claude-cassette` → 既定の順）
+3. `record-scenes.ts --locale <L>` — UI を当該ロケールに切り替えて絵コンテのシーンを録画（最初に撮影外の context で `/` と worktree 画面を 1 度開いて dev サーバのコンパイルを済ませる。#2381）
 4. `render-overlays.ts --locale <L>` — テロップ帯とカードを PNG 化
 5. `storyboard.ts --format plan` — 尺と in/out タイムコードを算出した plan（TSV）を書き出す
 6. `compose.sh` — 正規化 → overlay → concat → **尺検証ゲート**
@@ -191,6 +218,12 @@ worktree id に**既定値は無い**。`--worktree` か環境変数 `CM_DEMO_WO
 | `slash-palette` | pc | コンポーザーで `/` → `/cmate-verify` `/work-plan` `/create-pr` `/tdd-impl` が並ぶ → Esc で閉じる（送信しない） | `isSessionRunning === true` |
 | `install-skill` | pc | Skills → Catalog の `cmate-repository-analysis` → Build install plan → Install into this worktree | `GET /api/skills` が **fresh**（stale/503 なら skip）＋ 当該 worktree に未導入 |
 | `contract-verify` | **terminal** | `send --contract` → `wait --verify` の `GATE` 行・`RESULT` 行・終了コード | セッションが adopted であること。以降は §contract-verify |
+| `repo-tab-switch` | pc | サイドバー折りたたみ。`cmdemo-docs` の worktree から始め、ヘッダーのタブ帯で `cmdemo-app` → ポップオーバー（状態ドット付き）→ `feature/demo-dark-mode` の行で切替（#2381） | 2 つ目の seed（`CM_DEMO_SEED_REPO_2`）を `POST /api/repositories/scan` で登録（未登録なら）→ その worktree が `/api/worktrees` に出て、`wt-dark-mode` が live |
+| `agent-tabs` | pc | チャット面（`?view=chat`）で Agent ペインの roster 5 行 + ヘッダーの状態ドット + split のインスタンスピッカー（5 名がフル表示） | `isSessionRunning === true`。roster に `CM_DEMO_AGENTS` の全員が並ぶことを assert（3 体で撮らない） |
+| `delegate-ask` | pc | 依頼を 1 行タイプ → Codex 行の ⋮ →「委任方法をコンポーザーに挿入」→ 送信 → 返答に `Tool calls` チップ（`commandmate ask … --instance codex`、開いた状態）とリンク | **idle**（`isProcessing`/`isWaitingForResponse` とも false）。途中のパスに送ると承認の答えとして食われる |
+| `reply-file-link` | pc | Codex タブの返答（全幅 Markdown）の `Header.tsx` リンク → 右にファイルビューア | 委任が閉じていること（idle） |
+| `mobile-approve` | **mobile** | Chat タブ上部にモデル名（`mobile-session-model`）、承認シートを 1 タップ | idle なら自分で送信（`MOBILE_APPROVE_MESSAGE`）→ `isWaitingForResponse === true`。解放は撮影後 `after` で検証 |
+| `mobile-file-link` | **mobile** | 直近の返答のリンクをタップ → FileViewer（`modal-panel`） | 承認パスが閉じていること（idle） |
 
 `attention-badge` は**遷移そのもの**が題材なので、`run` の中に 1 箇所だけ待ちがある（`isWaitingForResponse` になる瞬間）。Toast は realtime の `session_status_changed` で発火するため（`WaitingToastListener`）、**既に待ちに入ったセッションで撮ると Toast だけ黙って落ちる**。`prepare` は「生成中かつ未待ち」を要求し、そうでなければテイクを失敗させる。
 
@@ -222,7 +255,8 @@ npx tsx .claude/skills/demo-video/scripts/storyboard.ts --locale ja --format pla
 
 `compose.sh` はシーンごとに「フレームサイズへ scale + letterbox → 宣言尺へ正規化 → テロップを fade in/out 付きで overlay」した mp4 を作り、concat して尺を検証する。
 
-- **尺の伸縮**: 実尺が宣言尺より短ければ最終フレームを `tpad` で引き延ばし、長ければ**頭を切って末尾を残す**。どのシーンも見せ場は末尾（承認シート、完了した一覧）にあるため。
+- **尺の伸縮**: 実尺が宣言尺より短ければ最終フレームを `tpad` で引き延ばし、長ければ**頭を切って末尾を残す**。どのシーンも見せ場は末尾（承認シート、完了した一覧）にあるため。絵コンテに `head: N` があれば先頭 N 秒も残し、間を飛ばす（`split` → `trim` × 2 → `concat`。#2381 の委任往復用）。plan の 7 列目が `head` で、無いシーンは空欄
+- **GIF**: `#gif` 行（絵コンテの `gif:`）の幅 / fps で書き、`maxBytes` があれば予算ゲート。超えたら palette を 128 → 64 色（ディザ無し）に落として再試行し、それでも超えれば GIF を消して exit 1（mp4 は残る）。`--gif-width` / `--gif-fps` / `--gif-max-bytes` は plan を上書きする
 - **タイムコードは絵コンテから機械算出**。手書きのタイムコードはどこにも無い。絵コンテで尺を変えれば以降のテロップ位置も自動で動く。
 - **尺検証ゲート**: `ffprobe` の実測が `duration ± 0.5s` を外れたら **exit 1**。落ちたときはシートごとの宣言尺と実測尺の差分表を stderr に出し、中間ファイルを残す。
 - 単体でゲートだけ回すこともできる: `compose.sh --verify out.mp4 --expect 30`、測定済みの秒数なら `--compare 30.2 --expect 30`。
@@ -345,7 +379,7 @@ tmux セッションの kill 対象は 2 系統で、どちらも**この run �
 1 行 1 イベントのテキスト。`#` 行と空行は無視。
 
 ```
-<遅延ms>|@input|@exec|@transcript|@hook <TAB> <ペイロード>
+<遅延ms>|@input|@exec|@transcript|@hook|@pass <TAB> <ペイロード>
 ```
 
 - ペイロードは `printf %b` で展開する（`\e` `\n` `\t`）。ANSI を含めたまま 1 行に収まり、diff も grep も効く
@@ -353,6 +387,8 @@ tmux セッションの kill 対象は 2 系統で、どちらも**この run �
 - 承認プロンプトの後は `{{TASK}}` を使う。そこでは `{{INPUT}}` が承認の `y` になっており、それを指示として画面に映すと製品がしていないことを主張することになる
 - 差し込みは **`%b` 展開の後**に行う。先に差し込むと、メッセージ中の `%` や `\e[` が printf に解釈され、カセットが書いていない制御列で pane が塗られる
 - `--speed N` は数値遅延を N で割る。`--dry-run` は寝ずにスケジュールを stderr へ出す（テストが壁時計に依存しないため）。`@exec` は trace だけで実行しない
+- `@pass`（ペイロード無し、#2381）は同じカセットの中で**次の指示**を始める。`{{TASK}}` と `{{EXEC_OUTPUT}}` を空にするので、続く `@input` は前の指示の続き（承認の答え）ではなく新しい指示として読まれる。`claude-hero.cast` は委任パス → `@pass` → 承認パスの 2 パス構成
+- `@input` 行は**先頭行を読んだ瞬間にフレームを描き**、その後で `--input-settle` 秒の残り行を読む（#2381）。逆順だと settle の 1 秒間ペインは起動画面のままで、その間にブラウザの `current-output` が撮った capture が 5 秒キャッシュに乗り、poller の初回 tick がそれを読んで**起動バナー 1 行を返答として保存**した（実測: `✻ Welcome to Claude Code · demo fixture` が assistant 行に）
 
 ### `@exec`（Issue #2380）
 
@@ -446,6 +482,11 @@ tmux セッションの kill 対象は 2 系統で、どちらも**この run �
 | `respond-from-mobile` / `attention-badge` / `review-screen` は手前に `send-and-generate` が要る | カセットは `@input` で送信を待つので、送信より先の画は一切描かれない |
 | 承認に答えるシーン（`respond-from-mobile` / `review-screen`）は 1 本の絵コンテに **1 つまで** | カセットは 1 パスに 1 プロンプトしか描かない。2 つ置くと 2 本目がタイムアウトまで待つ |
 | `attention-badge` は承認に答えるシーンより**前** | 待ちに入る瞬間が題材なので、既に答えたあとでは撮れない |
+| `reply-file-link` / `mobile-approve` / `mobile-file-link` は手前に `delegate-ask` が要る（#2381） | `claude-hero.cast` は 1 パス目が委任、2 パス目が承認。ファイルリンクはその返答、承認は 2 パス目にしか無い |
+| `head: N`（record のみ、0 < N < duration） | take が尺より長いとき、末尾だけでなく**先頭 N 秒も残してジャンプカット**する。委任往復は約 25 秒で、頭（挿入と送信）と尻（返答）の両方が見せ場 |
+| `telop.position: top` / `bottom`（record のみ） | 帯を上に置く。既定の下帯はコンポーザーと最新の返答と承認シートの選択肢に被る。座標は `telop.html` の CSS が持ち、PNG に焼く（compose.sh は 0:0 に重ねるだけ） |
+| `claude-cassette: <path>`（絵コンテからの相対、skill ディレクトリの内側、`.cast`、実在） | 撮る内容はカセットに依存する。絵コンテが宣言すれば `--storyboard` 1 つで済み、忘れたフラグが数分後のタイムアウトになるのを防ぐ。`@exec` を実行するファイルなので `source` と同じ封じ込め |
+| `gif: { width, fps, maxBytes }` | `--gif` の幅 / fps / 予算。予算超過は palette を 256 → 128 → 64 色（ディザ無し）へ落として再試行し、それでも超えれば GIF を**消して exit 1**。幅と fps は絵コンテが決めたので落とさない |
 
 ```yaml
   - id: contract-yaml
@@ -488,11 +529,21 @@ YAML は自前の**厳格なサブセットパーサ**で読む。このツリ�
 | #2380: 5 本のカセットは実 TUI を隔離 tmux で採る | 採取そのものはオーケストレーターの作業（契約の必須範囲外） | 同梱 4 本は本 repo が別 Issue で採取済みの実フレーム（`tests/fixtures/*-live-*`）から採取ディレクトリだけ書き換えて組み、`claude-delegate` は既存 sample のフレームを流用。検出器のアンカーは実キャプチャのまま。採り直すときは同じ regime で |
 | #2380: 委任カセットの `@exec` は「`commandmate` 始まり」を許可条件にする | 先頭語だけの判定では `commandmate x; rm -rf …` が通る | 先頭語 `commandmate` **かつ**シェル演算子（`;` `&` `\|` バッククォート `$` `<` `>` `(` `)`）を含まない。差し込みは語分割の後 |
 | #1810: 静止画は 5 点とも 100KB 未満 | `screenshot-worktree-desktop` は 3 ペインで、旧アセットも 169KB だった | 本文の例外指定（`website/assets/media/README.md`）に合わせ、この 1 枚だけ 200KB。他の 4 枚は 100KB 未満（実測 q=82 で 47〜79KB） |
+| #2381: 各シーンの秒数（`repo-tab-switch` 4 / `reply-file-link` 5 / `mobile-approve` 4 / `mobile-file-link` 4） | 実測: タブ帯のブランチを押してからの遷移は dev サーバで約 2 秒（4 秒枠だとポップオーバーが枠外）、承認シートのタップ後「送信中…」が約 2.5 秒（4 秒枠だとシートが 1 秒）、委任往復の頭（依頼をタイプ → 挿入 → 送信）は 3.5〜4.8 秒（`head: 4` では送信が切れた） | `repo-tab-switch` 5 / `reply-file-link` 4 / `mobile-approve` 5 / `mobile-file-link` 3、`delegate-ask` は 7 秒のまま `head: 5`（尻 2 秒）。合計 30 秒は変えていない。見せ場が 1 フレームで済む 2 本（開いたファイル）から秒を回した |
+| #2381: `agent-tabs` の telop.ja「5 エージェントが 1 つの worktree に」 | 25 文字で record の上限 20 文字を超える（Issue 自身が「字数超過はそこで落ちる」と書いている） | 「5 エージェント、1 worktree」（19 文字）。public-messaging.md §6 も同じ文言 |
+| #2381: 「エージェントタブに 5 体」 | PC ヘッダーの行は idle を**ドット**に畳む（`classifyHeaderInstances`）ので、5 体が名前で並ぶのは split のインスタンスピッカーと Agent ペインの roster だけ | `agent-tabs` は Agent ペインを開いた状態でピッカーを開いて撮る。roster の alias 入力は幅で切れる（`Antigravit`、`Command`）が、ピッカーはフル表示 |
+| #2381: 「2 つ目のリポジトリをクリック」 | タブ帯は名前順で `cmdemo-app` が 1 つ目。2 つ目の `cmdemo-docs` には live セッションが無い | `cmdemo-docs` の worktree から始めて `cmdemo-app` のタブを押す（ポップオーバーに 3 ブランチと状態ドット、`feature/demo-dark-mode` が緑）。切替先が次のシーンの worktree になる |
+| #2381: 「Codex の返答（全幅 Markdown）」 | codex 側は初回送信でバナー行が `chat_messages` に残る（#2380 の既知行）が、チャット面には描かれなかった | Issue どおり Codex タブで撮る。Claude 側にも同じリンクがあるので、描かれるようになったら Claude タブへ切り替えればよい |
+| #2381: 「PC 送信シーンのテロップ位置」 | 下帯（y 612〜720）はコンポーザーと最新の返答に被る。スマホの承認シートの選択肢にも被る | `telop.position: top`（y 164〜272、ヘッダーと split の題名帯の下）。`delegate-ask` と `mobile-approve` に付けた。`reply-file-link` は返答が中段、ファイルビューアの先頭行が上段なので下帯のまま |
+| #2381: GIF は 600px / 10fps / 1.84MB 以下 | 600px / 10fps / 256 色 + 誤差拡散ディザで 2.19〜2.31MB（UI 面はテキストのアンチエイリアスにディザ・ノイズが乗り LZW が効かない） | 予算超過時は palette を 128 色・ディザ無しに落として 1.49〜1.54MB。600px と 10fps は落とさない。見た目の差は 600px では判別できない（実測） |
+| #2381: 承認は「同じ worktree」で | `claude-delegate.cast` に承認フレームは無い。`claude-session-sample.cast` を使えば委任が撮れない | `claude-hero.cast` = 委任パス + `@pass` + 承認パス。`mobile-approve` は idle を待って自分で 1 行送り、2 パス目の `Do you want to proceed?` を待ってから開く |
 
 ## 既知の製品側の行（#2380 の往復で観測、スキルでは直せない）
 
 - **codex の 1 送信目の直前に、起動バナーが assistant 行として保存される。** `send-user-message.ts` の手順 1（`savePendingAssistantResponse`）は scrollback 系ツール（codex 等）で「前回の返答の未保存分」をペインから読み、`lastCapturedLine` が 0 の初回送信ではバナー（ANSI 付き）をそのまま行にする。実 codex でも同じ（#2192 の「送信前フラッシュ」）。チャット面の codex 側は返答の上にこの行が 1 つ乗る。撮るなら Claude 側のチャット面（`claude-turn:` 行にも同じリンクがある）か、製品側で「転写リーダーが生きている instance では送信前フラッシュを飛ばす」修正を別 Issue で
 - `commandmate ask … --json` の出力は `ask` が返した瞬間だけ Claude ペインの running フレームの下に見える（次の行が塗り直す）
+- **PC のコンポーザーは live セッションへの送信のたびに「Queued (session busy)」の警告トーストを出す（#2381 で観測、develop 8f41c074）。** `TerminalSplitPaneContent` が `MessageInput` に `isProcessing={terminal.isRunning}` を渡しているが、#2238 以降の `isRunning` は「tmux セッションが在る」の意味で「生成中」ではない。ヘッダーの pill が `Ready` の隣で「busy」と言う。`delegate-ask` は送信直後にそのトーストの ✕ を押して閉じる（隠さない）。製品側の修正は別 Issue
+- codex の初回送信直前の起動バナー行（上記）は `chat_messages` には残るが、チャット面には描かれない（実測 2026-09-07。`reply-file-link` は Codex タブで撮っている）
 
 ## 制約
 

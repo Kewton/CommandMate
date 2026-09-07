@@ -156,12 +156,57 @@ claude（返信とプロンプトを結ぶフィールドが無く、レコー�
 | 複数インスタンス（`codex-2`）でファイルは分かれるか | **分かれる。** 同一 cwd で同時起動した 2 本は `session_id` が別で、rollout も別ファイル |
 | `/clear` 相当でファイルは切り替わるか | **切り替わる。** 0.151.0 の `/new` が新しい `session_id` と新しい rollout を開き、2 回目の `SessionStart` hook がそれを運んでくる |
 | `SessionStart` に `turn_id` はあるか | **無い。** `UserPromptSubmit` / `Stop` / `PreToolUse` / `PostToolUse` にはある |
+| `Stop` hook と rollout の `task_complete` の順序 | **hook が先。** しかも codex は hook のコマンドが終了するまで `task_complete` を書かない（#2398、§3.1） |
 
 fixture: [`hook-events-01510.json`](../../tests/fixtures/transcripts/codex/hook-events-01510.json)（21 件）。
 
 **「同一 cwd で 2 本目が別ファイル」は本リーダーの設計を 1 つ決めている。**
 cwd から最新の rollout を推測する実装は、`codex` のターンを `codex-2` の会話へ書き込む。
 だから pointer が無いときの代替探索は**置かない** — false を返してスクレイパに任せる。
+
+### 3.1 Stop hook は `task_complete` の**前**に発火し、hook の終了を待つ（Issue #2398 実測）
+
+§4.3 の「閉じたターンだけ書く」は `task_complete` を見て判定する。その `task_complete` が
+**いつ書かれるか**は #2197 では計測していなかった。#2398 で計測したところ、claude と逆だった。
+
+稼働ログ 3 日分（2026-09-07 時点）。「Stop 受け口が同期に転写を書けた回数」:
+
+| tool | 同期で書けた / Stop 受信 |
+|---|---|
+| claude | 506 / 508 |
+| antigravity | 9 / 9 |
+| command-code | 1 / 1 |
+| **codex** | **0 / 105** |
+
+codex の 105 回はすべて `codex-transcript-turn-open` を 3 回（500ms 間隔）出して false で終わっている。
+1 ターンの実測（`turn_id 01a07bc1-…`、21:04:48 のターン）:
+
+```
+12:05:22.515Z codex-transcript-turn-open  items:6   ← Stop 受け口 attempt 1
+12:05:23.065Z codex-transcript-turn-open  items:6   ← attempt 2
+12:05:23.604Z codex-transcript-turn-open  items:6   ← attempt 3
+12:05:23.604Z agent-event-stop-applied structuredHistoryCaptured:false  ← 受け口が応答
+12:05:23.607Z (rollout) task_complete                ← 応答の 3ms 後に codex が追記
+```
+
+受け口の応答時刻と `task_complete` の timestamp の差は当日 5 ターンで **3 / 16 / 59 / 61 / 63 ms**、
+すべて「応答の**後**」。つまり **codex は Stop hook のコマンド（relay の同期 `curl --max-time 5`）が
+終了するまで rollout に `task_complete` を書かない。** claude は逆（転写を書いてから Stop を発火する）で、
+#2246 / #2264 の「2 つの追記が競合している」という読みは claude では正しく、codex では偽である。
+
+設計上の帰結（`src/lib/hooks/stop-history-capture.ts`）:
+
+- **受け口の中で待ってはいけない。** 待っている本人が追記をブロックしているので、#2264 の
+  「3 回 × 500ms」は回数を増やしても間隔を延ばしても勝てない（自己待ち）。
+  副作用として codex の全ターンの終了を毎回 1 秒遅らせていた。
+- 同期の読みは **1 回だけ**。false かつ転写が在るなら、**応答を返してから** detach した遅延読み
+  （150 / 500 / 2000 / 5000 ms の有限回）へ切り替える。1 回目の 150ms で実測 63ms を追い越す。
+- 遅延読みも `structured-history-gate` の `captureStructuredHistoryTurn` を通す。
+  per-instance 直列化・冪等な書き込み・`broadcastMessage`・`onRelayTurnCompleted` はそのまま効く。
+- claude / antigravity / command-code は 1 回目で成功するので、この分岐に入らず #2264 のまま。
+- 「どのツールが hook 終了を待つか」は今のところ `STOP_HOOK_BLOCKS_TRANSCRIPT_CLOSE`
+  （`stop-history-capture.ts`）の 1 行テーブル。2 つ目が出た時点で
+  `AgentSourceCapabilities` へ移す（§4.4 の `transcriptHistory` の隣）。
 
 ---
 

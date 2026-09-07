@@ -9,7 +9,7 @@
  *
  * @vitest-environment node
  */
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -440,6 +440,7 @@ import { claudeTurnRequestId, codexTurnRequestId } from '@/types/agent-transcrip
 const FIXTURES = path.join(SKILL, 'fixtures');
 const CODEX_CASSETTE = path.join(FIXTURES, 'codex-review.cast');
 const CLAUDE_DELEGATE_CASSETTE = path.join(FIXTURES, 'claude-delegate.cast');
+const CLAUDE_HERO_CASSETTE = path.join(FIXTURES, 'claude-hero.cast');
 const IDLE_CASSETTES: Array<[string, string]> = [
   ['antigravity', 'antigravity-idle.cast'],
   ['opencode', 'opencode-idle.cast'],
@@ -1172,5 +1173,152 @@ describe('the committed tool cassettes drive the real status detectors (Issue #2
         expect(text, file).not.toMatch(/claude-501|MyCodeBranchDesk|agyprobe|cc2304/);
       }
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Issue #2381: `@pass` rows, the paint-before-drain order, and claude-hero.cast
+// ---------------------------------------------------------------------------
+
+describe('@pass rows (Issue #2381)', () => {
+  const TWO_PASSES = [
+    `0\t${'\\e[2J\\e[3J\\e[H'}idle\\n`,
+    `@input\t${'\\e[2J\\e[3J\\e[H'}first {{TASK}}\\n`,
+    `@input\t${'\\e[2J\\e[3J\\e[H'}after answer {{TASK}}\\n`,
+    '@pass',
+    `@input\t${'\\e[2J\\e[3J\\e[H'}second {{TASK}}\\n`,
+    '',
+  ].join('\n');
+
+  it('starts a new instruction inside one cassette: {{TASK}} is the new pass\'s first line', () => {
+    const result = run([tmpCassette(TWO_PASSES), '--once'], 'delegate\ny\nrun the tests\n');
+    expect(result.status).toBe(0);
+    const frames = result.stdout.split(CLEAR).filter((frame) => frame.trim() !== '');
+    expect(frames).toEqual(['idle\n', 'first delegate\n', 'after answer delegate\n', 'second run the tests\n']);
+  });
+
+  it('keeps echoing the first instruction across an answer when there is no @pass', () => {
+    // The pre-#2381 contract, unchanged: one cassette used to be one pass.
+    const result = run([tmpCassette(TWO_PASSES.replace('@pass\n', '')), '--once'], 'delegate\ny\nrun the tests\n');
+    expect(result.stdout.split(CLEAR).filter((frame) => frame.trim() !== '').at(-1)).toBe('second delegate\n');
+  });
+
+  it('refuses a payload on the row, before the first row plays', () => {
+    const result = run([tmpCassette(TWO_PASSES.replace('@pass', '@pass\tagain')), '--once', '--dry-run']);
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain('@pass takes no payload');
+    expect(result.stdout).toBe('');
+  });
+
+  it('traces the row under --dry-run', () => {
+    const result = run([tmpCassette(TWO_PASSES), '--once', '--dry-run'], 'a\nb\nc\n');
+    expect(result.stderr).toContain('kind=pass');
+  });
+});
+
+describe('an @input row paints before it drains the settle window (Issue #2381)', () => {
+  it('has the frame on the pane well inside --input-settle, not after it', async () => {
+    // The response poller's first tick used to be served a capture taken
+    // during the settle second — the idle banner — through the 5 s capture
+    // cache, and saved that banner line as the reply. With a 3 s settle the
+    // frame has to arrive in well under 3 s of the first line; before the
+    // reorder it arrived only after the drain gave up waiting for more.
+    const cassette = tmpCassette(
+      [`0\t${'\\e[2J\\e[3J\\e[H'}idle\\n`, `@input\t${'\\e[2J\\e[3J\\e[H'}got {{INPUT}}\\n`, ''].join('\n'),
+    );
+    const child = spawn('bash', [SCRIPT, cassette, '--once', '--input-settle', '3'], { stdio: 'pipe' });
+    let out = '';
+    const framePainted = new Promise<number>((resolve) => {
+      const started = Date.now();
+      child.stdout.on('data', (chunk: Buffer) => {
+        out += chunk.toString();
+        if (out.includes('got line one')) resolve(Date.now() - started);
+      });
+    });
+    child.stdin.write('line one\n');
+    const elapsed = await Promise.race([
+      framePainted,
+      new Promise<number>((resolve) => setTimeout(() => resolve(Number.POSITIVE_INFINITY), 8000)),
+    ]);
+    child.stdin.end();
+    await new Promise<void>((resolve) => child.on('close', () => resolve()));
+    expect(elapsed).toBeLessThan(1500);
+  }, 15_000);
+});
+
+describe('claude-hero.cast (Issue #2381)', () => {
+  const transcript = path.join(STUB_ROOT, 'claude-hero', `${CLAUDE_SID}.jsonl`);
+  fs.rmSync(transcript, { force: true });
+  const result = runWithStubs(
+    [CLAUDE_HERO_CASSETTE, '--once', '--worktree', 'wt-dark-mode',
+      '--port', '3399', '--speed', '1000', '--transcript', transcript],
+    'Ask Codex to review the dark mode toggle\nRun the unit tests\n1\n',
+  );
+  const frames = String(result.stdout).split(CLEAR).filter((frame) => frame.trim() !== '');
+  const statuses = frames.map((frame) => detectSessionStatus(frame, 'claude'));
+
+  it('walks the delegation pass and then the approval pass under the claude detector', () => {
+    expect(result.status).toBe(0);
+    expect(statuses.map((s) => s.status)).toEqual([
+      // pass 1: claude-delegate.cast, row for row
+      'ready', 'running', 'running', 'running', 'running', 'ready', 'ready',
+      // pass 2: reading, the approval, the answer, the reply
+      'running', 'running', 'waiting', 'running', 'running', 'ready', 'ready',
+    ]);
+    expect(statuses.every((s) => s.confidence === 'high')).toBe(true);
+    expect(result.stdout).toContain('[ask]\n[wt-dark-mode]\n[--instance]\n[codex]\n');
+  });
+
+  it('is the delegation cassette followed by an approval, with a @pass between them', () => {
+    const rows = fs.readFileSync(CLAUDE_HERO_CASSETTE, 'utf8').split('\n')
+      .filter((line) => line.trim() !== '' && !line.startsWith('#'));
+    const delegate = fs.readFileSync(CLAUDE_DELEGATE_CASSETTE, 'utf8').split('\n')
+      .filter((line) => line.trim() !== '' && !line.startsWith('#'));
+    expect(rows.slice(0, delegate.length)).toEqual(delegate);
+    const kinds = rows.slice(delegate.length).map((line) => line.split('\t')[0]);
+    expect(kinds).toEqual([
+      '@pass', '@input', '@hook', '2200', '2200', '@input', '2200', '@transcript', '2200', '@hook', '8000',
+    ]);
+    expect(rows.slice(delegate.length).find((line) => line.startsWith('@transcript'))).toBe(
+      '@transcript\ttranscripts/claude-tests.jsonl',
+    );
+  });
+
+  it('parks the second pass on an approval the phone sheet answers with one tap', () => {
+    const waiting = statuses.find((s) => s.status === 'waiting')!;
+    expect(waiting.hasActivePrompt).toBe(true);
+    expect(waiting.promptDetection.promptData?.type).toBe('multiple_choice');
+    expect(waiting.promptDetection.promptData?.options[0]).toMatchObject({ label: 'Yes', isDefault: true });
+    expect(waiting.promptDetection.promptData?.question.length).toBeLessThan(60);
+  });
+
+  it('echoes each pass\'s own instruction, never the other\'s', () => {
+    const text = frames.map((frame) => frame.replace(/\u001b\[[0-9;]*m/g, ''));
+    expect(text[1]).toContain('❯ Ask Codex to review the dark mode toggle');
+    expect(text[7]).toContain('❯ Run the unit tests');
+    // After the answer the pass keeps echoing its instruction, not the "1".
+    expect(text[10]).toContain('❯ Run the unit tests');
+    expect(text[10]).not.toContain('❯ 1');
+  });
+
+  it('records two closed turns the reader will write, each linking Header.tsx', () => {
+    const parsed = parseClaudeTranscript(fs.readFileSync(transcript, 'utf8'));
+    expect(parsed.malformedLines).toBe(0);
+    const prompts = parsed.records.filter(isClaudeOperatorPromptRecord);
+    expect(prompts.map((p) => p.text)).toEqual([
+      'Ask Codex to review the dark mode toggle',
+      'Run the unit tests',
+    ]);
+    const built = buildClaudeTurns(parsed.records, CLAUDE_SID);
+    expect(built.turns).toHaveLength(2);
+    expect(built.orphanedAssistantRecords).toBe(0);
+    for (const turn of built.turns) {
+      expect(isClaudeTurnWritable(turn)).toBe(true);
+      expect(renderClaudeTurn(turn).body).toContain('[Header.tsx](src/components/layout/Header.tsx)');
+    }
+    expect(renderClaudeTurn(built.turns[0]).body).toContain('commandmate ask wt-dark-mode --instance codex');
+    expect(renderClaudeTurn(built.turns[1]).body).toContain('npm run test:unit');
+    // The second turn's tool_result is a literal, never the first pass's ask output.
+    expect(fs.readFileSync(transcript, 'utf8').split('\n').slice(4).join('\n')).not.toContain('stub-commandmate');
   });
 });
