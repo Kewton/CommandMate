@@ -56,7 +56,12 @@ import {
 } from '../tui-accumulator';
 import { isDuplicatePrompt, normalizePromptForDedup } from './prompt-dedup';
 import { recordPromptDedupSkip } from './prompt-dedup-state';
-import { isDuplicateResponse } from './response-dedup';
+import {
+  isDuplicateResponse,
+  claimStructuredHistoryRecheck,
+  markStructuredHistoryRecheckPending,
+  settleStructuredHistoryRecheck,
+} from './response-dedup';
 import { captureStructuredHistoryTurn, isStructuredHistoryWriterLive } from './structured-history-gate';
 import { onRelayTurnCompleted } from '@/lib/relay/relay-triggers';
 // Issue #2317 Phase D: while a human holds the pane's geometry, the frame is
@@ -899,6 +904,26 @@ export function extractResponse(
 // ============================================================================
 
 /**
+ * Record what the structured writers said about this turn, for the ticks that
+ * will not get to ask (Issue #2399).
+ *
+ * One line either way, but named because the two calls are a pair and the
+ * failure mode of writing only one of them is silent: mark without settle and
+ * the reader is re-asked forever after a turn it already recorded; settle
+ * without mark and the fix does not exist.
+ *
+ * @param pollerKey - Poller key ("worktreeId:instanceId")
+ * @param recorded - Whether a structured writer owns this turn
+ */
+function markOrSettleStructuredHistoryRecheck(pollerKey: string, recorded: boolean): void {
+  if (recorded) {
+    settleStructuredHistoryRecheck(pollerKey);
+  } else {
+    markStructuredHistoryRecheckPending(pollerKey);
+  }
+}
+
+/**
  * Check for CLI tool response once
  *
  * Issue #868: Optionally scoped to a specific agent instance. The instanceId
@@ -1237,6 +1262,67 @@ export async function checkForResponse(
         // are found by one grep.
         logger.info('duplicate-response-skipped', { worktreeId, cliToolId, instanceId: resolvedInstanceId });
         updateSessionState(db, worktreeId, cliToolId, result.lineCount, resolvedInstanceId);
+
+        // Issue #2399: the skip above is about the SCREEN, and until this Issue
+        // it also ended the tick for the TRANSCRIPT READER 100 lines below —
+        // which is the one consumer for whom "the frame has not changed" is not
+        // evidence of anything. A pull-mode agent closes its turn in its own
+        // file AFTER the pane has gone quiet, so the reader's single ask (on the
+        // poll that saved the scrape) is systematically too early, and every
+        // later poll returned here. Measured on codex 2026-09-07: one
+        // `codex-transcript-turn-open`, `task_complete` appended 1.8 s later,
+        // and then `duplicate-response-skipped` every 2 s until
+        // `MAX_POLLING_DURATION` ran out. The Markdown row was never written and
+        // the only thing left in History was the scrape — for a saturated pane,
+        // a single footer line.
+        //
+        // So the reader is re-asked from inside the skip, throttled by
+        // `claimStructuredHistoryRecheck` (once on the first duplicate tick,
+        // then every third — see `./response-dedup`). Deliberately the reader
+        // and nothing else: the scrape stays suppressed, the cursor has already
+        // been advanced above, and none of the bookkeeping the guard skips has a
+        // second producer to be asked about.
+        //
+        // Order over the alternative in the Issue (hoist the reader above the
+        // guard): the reader is a WRITE, and hoisting it would run that write on
+        // every one of the 900 ticks of a 30-minute cycle instead of on the ones
+        // that are owed an answer — the same argument the #2317 Phase D comment
+        // below makes for not letting the delegation test short-circuit it.
+        //
+        // What this does NOT do is retract the scraped row the earlier tick
+        // saved. Three reasons, and the first is decisive: nothing here can
+        // identify that row. The hash this guard matched is per pollerKey, not
+        // per turn — it survives the `resume` of a chain paused on a prompt —
+        // so the row it stands for may belong to an earlier turn entirely, and
+        // a scraped row carries no turn key to join on. Second, `archived` in
+        // this schema is the tombstone of an operator clearing History (#168),
+        // written by `archiveMessages` for a whole worktree; reusing it for
+        // "superseded" would make a clear and a handover indistinguishable in
+        // the table. Third, the scrape is not always junk — when a turn is
+        // interrupted the pane holds text the transcript's closed turn does not
+        // — and a duplicated row is visible and recoverable where a deleted one
+        // is neither. Two rows for one turn is the failure this trades for, and
+        // #2401 has already stopped the junk one being picked as a relay's
+        // answer.
+        if (claimStructuredHistoryRecheck(pollerKey)) {
+          const recaptured = await captureStructuredHistoryTurn(worktreeId, cliToolId, instanceId, {
+            worktreePath: worktree.path,
+            transcriptPathHint: claudeMetadata?.logFilePath ?? null,
+          });
+          if (recaptured) {
+            settleStructuredHistoryRecheck(pollerKey);
+            logger.info('structured-history-recheck-captured', {
+              worktreeId,
+              cliToolId,
+              instanceId: resolvedInstanceId,
+            });
+            // The turn IS now in History, as the agent's own Markdown, so this
+            // tick recorded something and says so. Inert for the poller either
+            // way: `runPollTick` only reads this value after a stop the tick
+            // raised itself, and this branch raises none.
+            return true;
+          }
+        }
         return false;
       }
     }
@@ -1265,6 +1351,17 @@ export async function checkForResponse(
         worktreePath: worktree.path,
         transcriptPathHint: claudeMetadata?.logFilePath ?? null,
       }));
+
+    // Issue #2399: remember which way that went, because the next tick may not
+    // get here. A `false` is the reader saying "not yet, or not mine", and the
+    // dedup guard above turns every following poll of the same static frame into
+    // a return — so unless the fact is written down now, the ask never happens
+    // again. A `true` settles it: the turn is recorded and there is nothing left
+    // to re-ask about.
+    markOrSettleStructuredHistoryRecheck(
+      getPollerKey(worktreeId, cliToolId, instanceId),
+      structuredHistoryLive
+    );
 
     // Issue #2317 Phase D: the scrape is dropped while the geometry is
     // delegated, and the transcript capture above is what makes that safe.
