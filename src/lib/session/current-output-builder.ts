@@ -510,6 +510,17 @@ export interface CurrentOutputPayload {
   };
   isSelectionListActive?: boolean;
   isPagerActive?: boolean;
+  /**
+   * Issue #2369: a dismiss-only overlay is on the pane — the frame's footer
+   * offers `Esc to close` and nothing else.
+   *
+   * NOT a subset of {@link isSelectionListActive} (which `isPagerActive` is):
+   * this screen has no highlight, so the two are disjoint by construction and a
+   * consumer must not read one for the other. The chat surface answers it with
+   * a single Esc button; a consumer that does not know the field sees the same
+   * `waiting` it would have seen anyway.
+   */
+  isDismissablePanelActive?: boolean;
   isUnclassifiedActive?: boolean;
   /**
    * Whether {@link sessionStatus} rests on something positive (Issue #1926,
@@ -1493,6 +1504,24 @@ async function buildPayload(
   const isSelectionListActive =
     statusResult.status === 'waiting' && SELECTION_LIST_REASONS.has(statusResult.reason);
   const isPagerActive = statusResult.reason === STATUS_REASON.CODEX_PAGER;
+  // Issue #2369: an overlay whose ONLY exit is the dismiss — Command Code's
+  // `/usage` panel, whose last row is `Press Esc to close`.
+  //
+  // A THIRD flag rather than a member of `SELECTION_LIST_REASONS`, and the
+  // separation is the fix rather than a nicety: `isSelectionListActive` is what
+  // the arrow pad is drawn from, and this screen has no highlight to move. Nor
+  // is it `isUnclassifiedActive` any more — the detector answers `waiting` for
+  // it, and `isUnclassifiedFrame` only ever says yes to `running` — which is
+  // exactly what stops the chat surface offering the eighteen-button
+  // hatch + answer-key card to a panel that accepts one key.
+  //
+  // `status === 'waiting'` is checked as well as the reason, the same shape
+  // `isSelectionListActive` above uses, so a future producer that publishes the
+  // token with some other status cannot silently turn the card into an Esc
+  // button.
+  const isDismissablePanelActive =
+    statusResult.status === 'waiting'
+    && statusResult.reason === STATUS_REASON.COMMAND_CODE_DISMISSABLE_PANEL;
   // Issue #1497: the detection-independent nav hatch (#1017/#1494) is gated on
   // isUnclassifiedActive. A static, unrecognized TUI overlay (e.g. Claude `/help`)
   // whose frame stops changing degrades from `running`/`default` to
@@ -1834,6 +1863,7 @@ async function buildPayload(
     },
     isSelectionListActive,
     isPagerActive,
+    isDismissablePanelActive,
     isUnclassifiedActive: merged.isUnclassifiedActive,
     // Issue #1926: the same fact `isUnclassifiedActive` carries, named the way
     // §4 D1 names it. Published from the merged verdict so the two cannot

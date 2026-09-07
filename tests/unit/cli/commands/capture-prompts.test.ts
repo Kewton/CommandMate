@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { mockFetchResponse, restoreFetch } from '../../../helpers/mock-api';
+import { mockFetchResponse, mockFetchSequence, restoreFetch } from '../../../helpers/mock-api';
 
 const mockExit = vi.spyOn(process, 'exit').mockImplementation((() => {}) as never);
 const mockConsoleLog = vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -85,10 +85,18 @@ describe('capture --prompts request shape', () => {
   });
 
   it('passes --limit, --agent and --instance through as query params', async () => {
-    mockFetchResponse([]);
-    await runCapture(['wt1', '--prompts', '--limit', '5', '--agent', 'codex', '--instance', 'codex-2']);
+    // Issue #2376: `--instance` may be a roster alias, and `/messages` filters
+    // by instance ID — so the selector is resolved first and the RESOLVED id is
+    // what the listing asks for. The resolution is the first request now.
+    mockFetchSequence([
+      { data: { cliToolId: 'codex', instanceId: 'codex-2', resolvedBy: 'roster', conflict: null } },
+      { data: [] },
+    ]);
+    await runCapture(['wt1', '--prompts', '--limit', '5', '--agent', 'codex', '--instance', 'Codex 2']);
 
-    const url = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+    const url = (global.fetch as ReturnType<typeof vi.fn>).mock.calls
+      .map((c) => String(c[0]))
+      .find((u) => u.includes('/messages')) as string;
     expect(url).toContain('limit=5');
     expect(url).toContain('cliTool=codex');
     expect(url).toContain('instance=codex-2');

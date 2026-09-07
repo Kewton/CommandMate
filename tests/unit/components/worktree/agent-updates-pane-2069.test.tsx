@@ -99,7 +99,13 @@ describe('[#2069] the update section in AgentInstancesPane', () => {
     expect(screen.getByTestId('agent-updates-toggle')).toBeInTheDocument();
     // Give any stray effect a turn to fire before concluding it did not.
     await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(mockFetch).not.toHaveBeenCalled();
+    // Issue #2377's relay-badge read is excluded: this test bounds what the
+    // UPDATE section costs while collapsed, which is still nothing.
+    expect(
+      mockFetch.mock.calls
+        .map((call) => String(call[0]))
+        .filter((url) => !url.startsWith('/api/relays')),
+    ).toEqual([]);
   });
 
   it('starts collapsed, so the card is not mounted', () => {

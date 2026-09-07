@@ -13,7 +13,7 @@ import { Command } from 'commander';
 import { ExitCode, getErrorMessage } from '../types';
 import type { InstancesOptions } from '../types';
 import type { AgentInstance } from '../types/api-responses';
-import { ApiClient, isValidWorktreeId, isValidInstanceId } from '../utils/api-client';
+import { ApiClient, ApiError, isValidWorktreeId, isValidInstanceId } from '../utils/api-client';
 import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
 import { isCliToolId } from '../config/cli-tool-ids';
 import {
@@ -181,22 +181,145 @@ export async function resolveInstanceCliTool(
   requestedAgent: string | undefined,
   mode: InstanceConflictMode = 'strict'
 ): Promise<string | undefined> {
-  const target = await resolveSessionTarget(client, worktreeId, {
-    instanceId,
-    requestedCliTool: requestedAgent,
-  });
+  return (await resolveInstanceTarget(client, worktreeId, instanceId, requestedAgent, mode))
+    .cliToolId;
+}
+
+// ===========================================================================
+// Instance selectors: an id OR an alias (Issue #2376)
+// ===========================================================================
+
+/**
+ * The server's code for an `--instance` two roster rows answer to.
+ *
+ * Mirrors `AMBIGUOUS_INSTANCE_ALIAS` in
+ * `src/app/api/worktrees/[id]/resolve-target/route.ts`; duplicated rather than
+ * imported because a route module may export only the names Next.js accepts
+ * (`scripts/check-route-exports.mjs`, Issue #1946) — the same arrangement
+ * `send.ts` has with `PROMPT_WAITING`.
+ */
+const AMBIGUOUS_INSTANCE_ALIAS_CODE = 'ambiguous_instance_alias';
+
+/**
+ * Whether `value` is something the server could resolve to an instance.
+ *
+ * An instance id, or an alias. Issue #2376 widened `--instance` to accept the
+ * second because it is the only name a human has for `codex-2`: the roster pane
+ * shows `Codex 2`, `commandmate instances <id>` prints it in the ALIAS column,
+ * and `--instance "Codex 2"` used to be rejected here — before any request —
+ * with "must be an alphanumeric identifier".
+ *
+ * The check is deliberately loose: an alias is free text (`レビュー担当`), and
+ * the authority on whether one EXISTS is the roster, which only the server has.
+ * All this rules out is a value no alias can be — empty, longer than the alias
+ * field allows, or carrying control characters.
+ *
+ * @param value - The `--instance` value as given
+ */
+export function isInstanceSelector(value: string): boolean {
+  if (isValidInstanceId(value)) return true;
+  if (value.length === 0 || value.length > MAX_AGENT_ALIAS_LENGTH) return false;
+  // eslint-disable-next-line no-control-regex
+  return !/[\u0000-\u001f\u007f]/.test(value);
+}
+
+/**
+ * The sentence appended to every command's `--instance` help (Issue #2376).
+ *
+ * Kept beside the validator that accepts the form, not in
+ * `config/agent-target-options.ts`, so the help and the check cannot drift: the
+ * day the alias stage is removed, both go together.
+ */
+export const INSTANCE_ALIAS_HELP_SUFFIX =
+  'Also accepts a roster alias as shown by `commandmate instances <worktree-id>` '
+  + '(e.g. --instance "Codex 2"); an alias two rows answer to is exit 2 with the candidates listed.';
+
+/** The sentence `--instance` is rejected with. One place, five commands. */
+export const INSTANCE_SELECTOR_ERROR =
+  'Error: Invalid --instance. Give an instance id (alphanumeric/underscore/hyphen, max 64 chars) '
+  + `or a roster alias (max ${MAX_AGENT_ALIAS_LENGTH} chars).`;
+
+/** A resolved target: which agent, and which instance id to address it by. */
+export interface ResolvedInstanceTarget {
+  /** The agent to send as, or undefined to let an older server decide. */
+  cliToolId: string | undefined;
+  /**
+   * The instance id to put in the request, or undefined when the caller named
+   * no instance at all.
+   *
+   * **Not the value the user typed.** `--instance "Codex 2"` resolves here to
+   * `codex-2`, and every downstream body/query must carry the resolved id: the
+   * alias is a label the roster holds, and no other route knows how to read one.
+   *
+   * Undefined for a caller that passed no selector, even though the server
+   * answers with the worktree's default instance: a request that named no
+   * instance must keep not naming one, or `capture <id> --pane` would start
+   * pinning a session it was deliberately leaving to the server.
+   */
+  instanceId: string | undefined;
+}
+
+/**
+ * Resolve `--instance` — id or alias — to the agent and instance id to address.
+ *
+ * The one resolution path, as Issue #1925 established: the server answers,
+ * `resolveSessionTarget` asks, and this adds only what a CLI caller has to do
+ * with the two answers it can get back that a browser does not care about — a
+ * roster contradiction ({@link InstanceConflictMode}) and, since Issue #2376, an
+ * alias that names more than one row.
+ *
+ * The ambiguity is exit 2 with every candidate printed, never a pick: two rows
+ * called `Codex` are two different tmux sessions, and choosing one for the
+ * operator is how a message reaches the wrong agent silently.
+ *
+ * @param client - API client aimed at the server
+ * @param worktreeId - Worktree ID
+ * @param selector - The `--instance` value (an instance id or a roster alias),
+ *   or undefined for a caller that resolves only to learn the agent
+ * @param requestedAgent - The `--agent` value, if the user gave one
+ * @param mode - What a roster contradiction means for this caller
+ */
+export async function resolveInstanceTarget(
+  client: ApiClient,
+  worktreeId: string,
+  selector: string | undefined,
+  requestedAgent: string | undefined,
+  mode: InstanceConflictMode = 'strict'
+): Promise<ResolvedInstanceTarget> {
+  let target;
+  try {
+    target = await resolveSessionTarget(client, worktreeId, {
+      instanceId: selector,
+      requestedCliTool: requestedAgent,
+    });
+  } catch (error) {
+    if (error instanceof ApiError && error.apiCode === AMBIGUOUS_INSTANCE_ALIAS_CODE) {
+      console.error(`Error: ${error.payload?.error ?? `--instance '${selector}' is ambiguous.`}`);
+      for (const candidate of error.payload?.issues ?? []) {
+        console.error(`  - ${candidate}`);
+      }
+      process.exit(ExitCode.CONFIG_ERROR);
+    }
+    throw error;
+  }
 
   if (target.conflict) {
     const detail = describeSessionTargetConflict(target.conflict);
     if (mode === 'strict') {
       console.error(`Error: ${detail}`);
       process.exit(ExitCode.CONFIG_ERROR);
-      return requestedAgent;
+    } else {
+      console.error(`Warning: ${detail} Reading ${target.conflict.rosterCliTool}.`);
     }
-    console.error(`Warning: ${detail} Reading ${target.conflict.rosterCliTool}.`);
   }
 
-  return target.cliToolId;
+  return {
+    cliToolId: target.cliToolId,
+    // The server always echoes the effective instance; the fallback covers the
+    // `client-fallback` path against a daemon older than the endpoint, where the
+    // value the user typed is the only one there is.
+    instanceId: selector === undefined ? undefined : (target.instanceId ?? selector),
+  };
 }
 
 /**

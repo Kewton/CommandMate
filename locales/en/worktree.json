@@ -459,6 +459,7 @@
     "bannerLabel": "You can act on this here",
     "reasonPager": "A pager is open. Scroll it and quit it from here, with the screen below in view.",
     "reasonSelectionList": "A selection list is open. Move and confirm from here, with the screen below in view.",
+    "reasonDismissablePanel": "This screen only closes. Press Esc here, with it in view below.",
     "reasonUnclassified": "Chat can't tell what this screen is. It is shown as-is below, so you can drive it with the keys here.",
     "reasonPromptUnreadable": "Waiting for an answer, and the options couldn't be read. Read the screen below and answer with a number or y/n.",
     "openTerminal": "Open terminal",
@@ -919,6 +920,11 @@
     "toolbarLabel": "Dialog answer keys",
     "caption": "Answer"
   },
+  "dismissPanelKeys": {
+    "toolbarLabel": "Close this screen",
+    "close": "Close (Esc)",
+    "closeAria": "Close this screen (Esc)"
+  },
   "selectionKeys": {
     "numbersToolbarLabel": "Option number keys",
     "numbersCaption": "Pick",
@@ -1017,6 +1023,23 @@
     "reasonOther": "reason: {reason}",
     "degradedTitle": "Structured events are not arriving",
     "healthyTitle": "Receiving structured events"
+  },
+  "relay": {
+    "badgeOwed": "Reply due to {alias}",
+    "badgeOwedMany": "Replies due ({count})",
+    "badgeAwaiting": "Waiting on {alias}",
+    "badgeAwaitingMany": "Waiting on {count} replies",
+    "badgePrompt": "Confirmation reported",
+    "owedTitle": "This session owes a delegated reply. It is delivered automatically when the turn ends.",
+    "awaitingTitle": "This session is waiting for a delegated reply. It arrives in the composer as a relay message.",
+    "promptTitle": "The other session stopped on a confirmation; the requester has been told.",
+    "stripAwaiting": "Delegated to {alias}; waiting for the reply.",
+    "stripAwaitingMany": "Waiting for {count} delegated replies.",
+    "stripPrompt": "{alias} is waiting for a confirmation.",
+    "stripOwed": "Owed to {alias}: this session's reply is delivered when the turn ends.",
+    "historyBadge": "relay",
+    "historyBadgeTitle": "Delivered by another agent session (Issue #2377 relay).",
+    "historyCount": "{count} relayed message(s) in view"
   },
   "agentModel": {
     "label": "Model",

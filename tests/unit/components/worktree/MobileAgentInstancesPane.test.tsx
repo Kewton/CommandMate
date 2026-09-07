@@ -115,7 +115,13 @@ describe('MobileAgentInstancesPane (Issue #874)', () => {
   it('does NOT write the DB (no PATCH) when toggling per-device visibility', () => {
     render(<MobileAgentInstancesPane {...baseProps} />);
     fireEvent.click(screen.getByTestId('mobile-visible-instance-toggle-claude-2'));
-    expect(mockFetch).not.toHaveBeenCalled();
+    // The claim is "no WRITE", which is what a per-device preference must never
+    // be. Issue #2377's relay-badge read is a GET and is excluded rather than
+    // folded in, so this stays a statement about writes.
+    const writes = mockFetch.mock.calls.filter(
+      (call) => ((call[1] as RequestInit | undefined)?.method ?? 'GET') !== 'GET',
+    );
+    expect(writes).toEqual([]);
   });
 
   it('disables the toggle for the last remaining visible instance (MIN=1)', () => {

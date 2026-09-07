@@ -1,0 +1,97 @@
+version: 1
+title: "Issue #2388: docs --section delegation が #2377 の着地後も古い記述のまま"
+goal: |
+  https://github.com/Kewton/CommandMate/issues/2388 を実装する。
+
+  ## 現象（実測済み。UAT 2026-09-07）
+  `commandmate docs --section delegation`（#2376 で追加）の末尾に、#2377 の着地で事実でなくなった
+  記述が残っている:
+
+  ```
+  ## What this does not do
+
+    The reply is not delivered back automatically - you collect it, because you
+    are the one waiting on it. Nothing here starts a background job.
+  ```
+
+  #2377 で `commandmate send <B> "<msg>" --reply-to <A>` と `commandmate ask <B> "<msg>" --async` が
+  入り、**返答は自動で依頼元のコンポーザーへ配送される**ようになった。relay 台帳は15秒周期のポンプと
+  期限掃除という常駐ジョブを持つので、"Nothing here starts a background job." も現状と合わない。
+
+  `src/cli/docs/agent-operations.ts` の `## Multi-Session` 節は #2377 で更新されたが（`--reply-to` /
+  `commandmate relays` への言及 10 箇所）、`delegation` 節は 0 箇所のまま更新から漏れている。
+
+  ## なぜ問題か
+  `delegation` 節は「他セッションへの委任のやり方」をエージェントに教えるための唯一の埋め込み
+  ドキュメントで、`whoami` → `peers` → `ask` の手順と、プロンプトは人へ / auto-yes を触らない /
+  返答は要約して報告、という流儀が書かれている（そこは正しく、変更不要）。締めくくりが
+  「返信は自分で取りに行くしかない」と言い切っているため、**この節だけを読んだエージェントは
+  `--reply-to` / `--async` に到達できない**。
+
+  ## 対応
+  `src/cli/docs/agent-operations.ts` の `delegation` 節を更新する:
+  1. `## What this does not do` の「返信は自動配送されない」の記述を削除する
+  2. 「待たない委任」を手順として追加する:
+     - `commandmate send <B> "<msg>" --reply-to self`（返答が今すぐ要るわけではないとき）
+     - `commandmate ask <B> "<msg>" --async`（relay id を返して即 exit 0）
+     - `commandmate relays` で状態を見る、`commandmate relays cancel <id>` で取り下げる
+  3. **同期形（`ask`）を残す理由も書く** — 返答が次の作業の入力なら待つのが正しく、非同期形だけを
+     教えると待つべき依頼にまで relay を張ることになる（`buildDelegationBrief`
+     `src/lib/cli/command-reference.ts` は #2377 でこの方針を採っているので、そこの文面を参考にして
+     揃える）
+  4. 既存の流儀（プロンプトは人へ / 他人のセッションに auto-yes を有効化しない / 返答は要約して
+     報告）は relay 経由でも変わらないことを明示する
+  5. **`agent-operations` 節（`## Multi-Session`）との間で委任手順に矛盾が無いこと**を確認する
+     （両方読んでも食い違わない）
+
+  ## 別リポジトリの確認（Skill 側。編集はしない）
+  Kewton/commandmate-skills の `cmate-delegate` Skill（SKILL.md）が同じ流儀を教えている。そちらにも
+  同じ古い記述（「返信は自動配送されない」相当）が無いか **確認だけ**行い、あれば
+  `dev-reports/changelog/issue-2388.md` の末尾に所見として書く（**Kewton/commandmate-skills の
+  ファイルは一切編集しないこと**。別リポジトリであり、本Issueのscope外）。
+
+  ## 受入条件
+  - [ ] `commandmate docs --section delegation` に「返信は自動配送されない」という記述が無い
+  - [ ] 同じ節に `--reply-to` / `--async` / `commandmate relays` が載っており、同期形（`ask`）を
+        選ぶ基準も書かれている
+  - [ ] `agent-operations` 節（`## Multi-Session`）と `delegation` 節の間に、委任手順の矛盾が無い
+  - [ ] Kewton/commandmate-skills の `cmate-delegate` SKILL.md を確認し、古い記述があれば
+        断片（`dev-reports/changelog/issue-2388.md`）の末尾に所見として書く（編集はしない）
+  - [ ] 既存テスト `tests/unit/cli/commands/docs-delegation-2376.test.ts` を確認し、古い文言を
+        assert している箇所があれば更新する（新しい文言に合わせる。テストの意図までは変えない）
+  - [ ] `npm run lint` / `npx tsc --noEmit` / `npm run test:unit` が exit 0
+
+  ## 関連
+  #2376（`docs --section delegation` を追加）、#2377（`--reply-to` / `ask --async` / `relays` を
+  追加。`agent-operations` は更新したが `delegation` が漏れた）、Kewton/commandmate-skills#241
+
+  ## 作業ルール（厳守）
+  - **`CHANGELOG.md` と `docs/module-reference.md` を編集しないでください**（scope外です）。
+    代わりに次の2ファイルを書いてください。どちらも `dev-reports/` 配下なので commit には
+    入りません。
+    - `dev-reports/changelog/issue-2388.md` — `CHANGELOG.md` の `## [Unreleased]` にそのまま
+      貼れる1エントリ（先頭は `- **<type>(<scope>): …** (#2388): …`）。1行目にコメントで
+      どの節（`### Added` / `### Changed` / `### Fixed`）に入るかを書く。`type` は `docs` を使う。
+      `- **` で始めること（`grep -cE '^- \*\*'` で集計する）。`(#2388)` は要約の外
+      （`**` を閉じた後）に置くこと。1エントリ＝1行（折らない）。末尾に
+      Kewton/commandmate-skills 側の確認結果（所見）を1〜2文で足してよい
+    - `dev-reports/module-reference/issue-2388.md` — `docs/module-reference.md` の表に足す
+      注記を行キー（`| \`path\` |`）ごとに列挙する。既存行に足すときは
+      `grep -n '^| \`<path>\`' docs/module-reference.md` を実行し、その出力（行番号つきの
+      行キー）を断片に書き写してから書くこと。足すものが無ければ「追記なし」の1行でよい
+  - 断片が無いとリリースノートと module-reference に載らない。実装と同じ commit の時点で
+    書くこと。
+  - **Kewton/commandmate-skills のファイルには一切触れないこと。** 確認のみ、編集はしない。
+scope:
+  allow:
+    - "src/cli/docs/agent-operations.ts"
+    - "tests/unit/cli/commands/docs-delegation-2376.test.ts"
+    - "tests/unit/cli/commands/**"
+    - "dev-reports/changelog/issue-2388.md"
+    - "dev-reports/module-reference/issue-2388.md"
+  deny: []
+verify:
+  # 既定（省略）= 登録済み全ゲート
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true

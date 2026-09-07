@@ -1,0 +1,113 @@
+version: 1
+title: "Issue #2392: relay 配送の返答が History に 2 行残る（転写リーダーの echo が畳まれない）"
+goal: |
+  https://github.com/Kewton/CommandMate/issues/2392 を実装する。
+
+  ## 現象（実測済み。UAT 2026-09-07、隔離サーバ、develop b4c8ab9c）
+  relay（#2377）が配送されるたびに、依頼元の `chat_messages` に**同じ本文の user 行が2本**残る:
+
+  ```
+  [from Codex / agents-repo] 8|2|relay,normal|relay:c12d462f-8e1,claude-prompt:29a5
+  ```
+
+  - 1本目: `sendUserMessage` が `messageType: 'relay'`・`requestId: 'relay:<id>'` で書いた行
+    （`src/lib/relay/relay-delivery.ts:406` 付近）
+  - 2本目: 依頼元エージェント**自身の転写リーダー**が、これを「新しく届いた自分宛のプロンプト」だと
+    思って `recordUserTurn`（`src/lib/history/user-turn-recorder.ts`）を呼び、独自の key
+    （例 `claude-prompt:<uuid>`）で**別行として insert**したもの。約662ms後に書かれる
+
+  ## 機構（実測済み。コードで裏取り済み）
+  `recordUserTurn` は次の順で動く:
+  1. `findMessageByRequestId(db, worktreeId, key)` — 自分の key で既に書いた行が無いかを見る
+     （無い。relay 行の key は `relay:<id>` で、転写リーダー自身の key とは別物）
+  2. `adoptExistingRow` — `findUnkeyedUserMessages`（**`request_id IS NULL` の行だけ**を候補にする）
+     で本文一致の未keyed行を探し、見つかれば `setMessageRequestId` で**その行に自分の key を書き込む**
+     （relay 行は `request_id = 'relay:<id>'` で NULL ではないので候補に入らない＝claim できない）
+  3. 1・2のどちらでも見つからなければ `createMessage` で**新規 insert**
+
+  relay 行は 2 で拾えないため、常に 3 の新規 insert に落ち、重複行が生まれる。
+
+  ## 絶対に壊してはいけない制約（#2387 の裁定済みロジックとの依存）
+  `src/lib/relay/relay-service.ts` の `findParentRelayHops`（#2387、直近デプロイ・PR #2390 で
+  マージ済み）は、`messageType === 'relay'` の行を見つけたあと **`parseRelayRequestId(row.requestId)`
+  で `request_id` から relay id を逆算し**、`getRelayById` で hops を引く
+  （`src/lib/db/chat-db.ts:1034` の `parseRelayRequestId`、`RELAY_REQUEST_ID_PREFIX = 'relay:'`）。
+
+  **したがって、relay が書いた行の `request_id`（`relay:<id>` の形）は、いかなる修正でも
+  書き換えてはならない。** `setMessageRequestId` で relay 行に別の key を上書きすると、#2387 の
+  hops 計算・連鎖ブロックが再び壊れる（実機 UAT で「配送直後・6秒後とも hops=2」まで確認済みの
+  ロジックを退行させることになる）。
+
+  ## 対応方針（設計は委ねる。上記の制約だけは必須）
+  `recordUserTurn` / `adoptExistingRow` が、**relay 由来の行（`messageType === 'relay'` かつ
+  `request_id` が `relay:` 接頭辞）にも本文一致で気づけるようにする**が、気づいた場合は
+  **その行の `request_id` を書き換えずに「既にこの内容は記録済み」として insert をスキップする**。
+
+  実装方針の一例（強制ではない。既存 API を壊さない・シンプルな方を選ぶこと）:
+  - `findUnkeyedUserMessages` とは別に、relay 由来の行も候補にする読み取りを追加する
+    （新しい DB 関数、または既存関数へのオプション追加。**既存の呼び出し元の挙動は変えないこと** —
+    `findUnkeyedUserMessages` 自体のクエリ条件は変更しない）
+  - `adoptExistingRow` で、NULL 行のクレーム（既存どおり `setMessageRequestId`）を試した後、
+    relay 由来の行との本文一致もチェックし、一致すれば `request_id` は触らずに
+    `outcome: 'already-recorded'`（または同等の新しい outcome）として `messageId` にその行の id を
+    返す。呼び出し側（転写リーダー各所）は `already-recorded` を「書けた」と同じに扱っているはず
+    なので、この分岐が増えても呼び出し側の変更は不要なことを確認すること
+
+  ## 受入条件
+  - [ ] relay 配送後、依頼元の History に同じ本文の user 行が **1 行だけ**（`message_type = 'relay'`、
+        `request_id = 'relay:<id>'` のまま）残る（実機 claude ↔ codex、`chat_messages` を直接確認）
+  - [ ] チャット面でも委任の返答が1回だけ表示される
+  - [ ] **relay 行の `request_id` が書き換わっていないこと**を assert する（新規テストで）
+  - [ ] #2387 の relay 回帰テストが全て引き続き緑（`tests/unit/lib/relay/` 全体、
+        `relay-parent-hops-2387.test.ts` を含む）
+  - [ ] #2196 の既存挙動（`request_id IS NULL` の行の claim）が壊れていないこと
+        （`tests/unit/lib/history/user-turn-recorder-2196.test.ts` が引き続き緑）
+  - [ ] 新しい fixture（relay 行の直後に転写リーダーが同じ本文を記録しようとするシナリオ）で
+        重複が起きないことを固定した回帰テストがあり、**変異注入で赤くなること**を確認している
+        （relay 由来の行を候補にしない実装へ戻す変異で赤、復元で緑）
+  - [ ] `npm run lint` / `npx tsc --noEmit` / `npm run test:unit` が exit 0
+
+  ## スコープ外
+  - #2386 / #2387 自体の再実装（両方ともマージ済みで、契約は現状のロジックに依存している）
+  - relay 以外の重複行（#2196 が既に扱っている領域）
+
+  ## 関連
+  #2377（relay 台帳）、#2387（`findParentRelayHops` — 本Issueが壊してはいけない依存）、
+  #2386（同系統の症状。junk 行を拾う問題）、#2196（`recordUserTurn` の重複除去の初出）
+
+  ## 作業ルール（厳守）
+  - **`CHANGELOG.md` と `docs/module-reference.md` を編集しないでください**（scope外です）。
+    代わりに次の2ファイルを書いてください。どちらも `dev-reports/` 配下なので commit には
+    入りません。
+    - `dev-reports/changelog/issue-2392.md` — `CHANGELOG.md` の `## [Unreleased]` にそのまま
+      貼れる1エントリ（先頭は `- **<type>(<scope>): …** (#2392): …`）。1行目にコメントで
+      どの節（`### Added` / `### Changed` / `### Fixed`）に入るかを書く。
+      `- **` で始めること（`grep -cE '^- \*\*'` で集計する）。`(#2392)` は要約の外
+      （`**` を閉じた後）に置くこと。1エントリ＝1行（折らない）。
+    - `dev-reports/module-reference/issue-2392.md` — `docs/module-reference.md` の表に足す
+      注記を行キー（`| \`path\` |`）ごとに列挙する。既存行に足すときは
+      `grep -n '^| \`<path>\`' docs/module-reference.md` を実行し、その出力（行番号つきの
+      行キー）を断片に書き写してから書くこと。0件だった行への追記は指示しない
+      （新しい行を足すなら「新規行」と明記する）。足すものが無ければ「追記なし」の1行でよい。
+  - 断片が無いとリリースノートと module-reference に載らない。実装と同じ commit の時点で
+    書くこと。
+  - **relay 行の `request_id`（`relay:` 接頭辞）を書き換える実装は禁止**（上記「絶対に壊しては
+    いけない制約」を参照）。実装後、必ず `git diff` で `src/lib/relay/**` に変更が無いことを
+    確認すること（このIssueは消費側=`recordUserTurn`の防御ではなく、生産側の重複そのものを直す）。
+scope:
+  allow:
+    - "src/lib/history/user-turn-recorder.ts"
+    - "src/lib/db/chat-db.ts"
+    - "tests/unit/lib/history/**"
+    - "tests/unit/lib/db/**"
+    - "tests/unit/lib/relay/**"
+    - "dev-reports/changelog/issue-2392.md"
+    - "dev-reports/module-reference/issue-2392.md"
+  deny:
+    - "src/lib/relay/relay-service.ts"
+    - "src/lib/relay/relay-delivery.ts"
+verify:
+  # 既定（省略）= 登録済み全ゲート
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true

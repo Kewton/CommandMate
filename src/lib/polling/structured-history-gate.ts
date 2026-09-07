@@ -94,6 +94,7 @@ import { ANTIGRAVITY_CLI_TOOL_ID } from '@/lib/hooks/sources/antigravity/tool-id
 import { COMMAND_CODE_CLI_TOOL_ID } from '@/lib/hooks/sources/command-code/tool-id';
 import { getAgentEventSource } from '@/lib/hooks/sources/registry';
 import type { AgentInstanceRef } from '@/lib/hooks/sources/types';
+import { onRelayTurnCompleted } from '@/lib/relay/relay-triggers';
 
 const logger = createLogger('lib/polling/structured-history-gate');
 
@@ -377,10 +378,21 @@ export async function captureStructuredHistoryTurn(
     captureKeyOf(worktreeId, cliToolId, resolvedInstanceId),
     async (): Promise<boolean> => {
       try {
-        return await reader.capture(
+        const captured = await reader.capture(
           { worktreeId, cliToolId, instanceId: resolvedInstanceId },
           capture
         );
+        // Issue #2377: the moment a relay is waiting for. This is the single
+        // point BOTH triggers of a pull capture pass through — the poller's save
+        // path and the Stop hook receiver — which is why the relay needs one
+        // hook here and not one in each of them. The turn is closed by the
+        // agent's own account, so the delivery needs no quiet window.
+        //
+        // Announced only when the capture actually wrote something: a `false`
+        // means the scraper is still the writer for this turn, and the poller's
+        // own call below will announce it.
+        if (captured) onRelayTurnCompleted(worktreeId, cliToolId, resolvedInstanceId, true);
+        return captured;
       } catch (error) {
         logger.warn('structured-history-capture-unavailable', {
           worktreeId,

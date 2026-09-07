@@ -34,7 +34,7 @@ describe('db-migrations', () => {
 
   describe('CURRENT_SCHEMA_VERSION', () => {
     it('should be 59 after Migration #59 (opencode instance settings, #2048)', () => {
-      expect(CURRENT_SCHEMA_VERSION).toBe(59);
+      expect(CURRENT_SCHEMA_VERSION).toBe(60);
     });
   });
 

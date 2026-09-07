@@ -126,7 +126,9 @@
 
 import React, { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { ArrowDown, Loader2, TerminalSquare } from 'lucide-react';
+import { ArrowDown, Forward, Loader2, TerminalSquare } from 'lucide-react';
+import { useSessionRelays } from '@/lib/relay/use-session-relays';
+import { resolveRelayBadges, resolveRelayStrip } from '@/lib/relay/relay-badges';
 import {
   ChatTranscript,
   CHAT_TRANSCRIPT_SCROLL_CONTAINER_TESTID,
@@ -138,12 +140,14 @@ import { extractDialogFrameTail } from '@/lib/chat/dialog-frame';
 import { NavigationButtons } from '@/components/worktree/NavigationButtons';
 import { TerminalEscapeHatch } from '@/components/worktree/TerminalEscapeHatch';
 import {
+  DismissPanelKeys,
   PromptAnswerKeys,
   SelectionCommitKeys,
   SelectionNumberKeys,
 } from '@/components/worktree/PromptAnswerKeys';
 import { OpencodeModelKeys } from '@/components/worktree/OpencodeQuickKeys';
 import {
+  hasDismissablePanelFooter,
   readSelectionListShape,
   shouldOfferOptionNumbers,
 } from '@/lib/detection/selection-shape';
@@ -234,10 +238,19 @@ export const SELECTION_LIST_TALL_CARD_MIN_ROWS = 24;
  * it (`isPagerActive` ⊂ `isSelectionListActive`, see `PaneTerminalState`), so a
  * pager frame raises both flags and "you are in a pager" is the more specific —
  * and more actionable — of the two sentences.
+ *
+ * `dismissablePanel` (Issue #2369) sits AFTER both of those and BEFORE
+ * `unclassified`. It is disjoint from all three by construction — the detector
+ * answers `waiting` with a reason that is in neither `SELECTION_LIST_REASONS`
+ * nor the unclassified floor — so the position decides nothing today; it is
+ * written this way to say which reading wins if a frame ever carried two. A
+ * screen that offers a highlight AND a dismiss is a selection list whose Esc is
+ * one of its keys, and it keeps its arrows.
  */
 export type ChatSurfaceBlockedReason =
   | 'pager'
   | 'selectionList'
+  | 'dismissablePanel'
   | 'unclassified'
   | 'promptUnreadable';
 
@@ -245,6 +258,7 @@ export type ChatSurfaceBlockedReason =
 const BLOCKED_REASON_KEY: Record<ChatSurfaceBlockedReason, string> = {
   pager: 'chatSurface.reasonPager',
   selectionList: 'chatSurface.reasonSelectionList',
+  dismissablePanel: 'chatSurface.reasonDismissablePanel',
   unclassified: 'chatSurface.reasonUnclassified',
   promptUnreadable: 'chatSurface.reasonPromptUnreadable',
 };
@@ -308,6 +322,18 @@ export interface ChatSurfaceLiveState {
   promptData?: LivePromptData | null;
   isSelectionListActive?: boolean;
   isPagerActive?: boolean;
+  /**
+   * A dismiss-only overlay is on the pane (Issue #2369) — its footer offers
+   * `Esc to close` and nothing else.
+   *
+   * `undefined` is NOT `false` here, and the difference is load-bearing: a
+   * daemon older than #2369 does not send this field at all. (The two pane
+   * components that build this object did not copy it across either, until
+   * Issue #2373; they do now.) See {@link resolveBlockedReason}, which falls
+   * back to reading the frame when this is absent rather than treating the
+   * absence as "no panel".
+   */
+  isDismissablePanelActive?: boolean;
   isUnclassifiedActive?: boolean;
 }
 
@@ -456,10 +482,46 @@ export function isTurnSettled(messages: readonly ChatMessage[], turnKey: string)
  * is the exclusion that matters most: anything else, including a normal
  * answerable prompt, is workable from the composer and must NOT raise a card,
  * because `PromptPanel` / `MobilePromptSheet` are already on screen for it.
+ *
+ * ## The fifth member, and why it takes the frame (Issue #2369)
+ *
+ * `dismissablePanel` is a state the set did not have: a screen that WAS read,
+ * that offers exactly one key, and whose old answer — the `unclassified` card's
+ * hatch plus answer keys — was eighteen buttons for a one-key panel.
+ *
+ * It is also the only member that CAN be resolved without a server flag, and it
+ * keeps that fallback on purpose. `isDismissablePanelActive` is published by
+ * `buildCurrentOutput`, carried by both delivery paths, and — since Issue #2373 —
+ * copied into this object by both of the components that build it field by field
+ * (`TerminalSplitPaneContent`, `MobileTerminalTab`), so the server's verdict is
+ * normally what this reads and the frame is normally not consulted at all.
+ *
+ * The fallback is for the case where it is not: a daemon older than #2369
+ * publishes no such field, and its absence arrives here as `undefined`, which
+ * means "nobody said" — never "no panel". That is why the expression below is
+ * `??` and not `||`: an explicit `false` is an ANSWER, from a server that knows,
+ * and it outranks the frame. `frame` is already this component's prop (the card
+ * draws it), so reading it costs nothing and shares the detector's own predicate
+ * rather than restating it.
  */
-export function resolveBlockedReason(live: ChatSurfaceLiveState): ChatSurfaceBlockedReason | null {
+export function resolveBlockedReason(
+  live: ChatSurfaceLiveState,
+  frame?: string | null,
+): ChatSurfaceBlockedReason | null {
   if (live.isPagerActive) return 'pager';
   if (live.isSelectionListActive) return 'selectionList';
+  // Issue #2369. `??`, not `||`: an explicit `false` from a server that knows
+  // the field is an ANSWER and must not be overridden by a frame read, while
+  // `undefined` — a daemon that predates the field — is the absence of one, and
+  // the frame is then the only thing that knows.
+  //
+  // The fallback is the same expression the detector runs
+  // (`hasDismissablePanelFooter`, imported from the module the tool rule reads
+  // its pattern out of), so the two call sites cannot disagree about what a
+  // dismiss-only footer is; what they differ on is only which bytes they have.
+  if (live.isDismissablePanelActive ?? hasDismissablePanelFooter(frame)) {
+    return 'dismissablePanel';
+  }
   if (live.isUnclassifiedActive) return 'unclassified';
   if (live.isPromptWaiting && !isAnswerablePromptData(live.promptData)) return 'promptUnreadable';
   return null;
@@ -721,7 +783,10 @@ export const ChatSurface = memo(function ChatSurface({
   // --------------------------------------------------------------------
   // Live region content
   // --------------------------------------------------------------------
-  const blockedReason = resolveBlockedReason(live);
+  // Issue #2369: `frame` is handed in so the dismiss-only reading can be made
+  // from the pane when the server flag has not reached this object — see
+  // `resolveBlockedReason`, which prefers the flag whenever it is present.
+  const blockedReason = resolveBlockedReason(live, frame);
 
   const handleOpenTerminal = useCallback(() => {
     onSurfaceModeChange('terminal');
@@ -851,6 +916,14 @@ export const ChatSurface = memo(function ChatSurface({
           </div>
         );
       }
+      // Issue #2369. The footer named the one key that leaves, so that is the
+      // whole control. Not `TerminalEscapeHatch` with its arrows hidden and not
+      // `PromptAnswerKeys` alongside it: on a read-only panel every other key is
+      // either inert or a character queued for whatever takes focus when the
+      // panel goes away, and the eighteen-button card this replaces is the
+      // defect the Issue was raised about.
+      case 'dismissablePanel':
+        return <DismissPanelKeys {...keyProps} />;
       // Nobody could classify the frame, so nobody can promise it has a
       // highlight to move OR a numbered list to answer. Both pads are offered:
       // the hatch for an overlay that navigates (claude's `/help` tabs), the
@@ -887,6 +960,34 @@ export const ChatSurface = memo(function ChatSurface({
 
   const historyProps = history ?? {};
 
+  // Issue #2377: the system line for a delegation this session is part of.
+  //
+  // A STRIP rather than a transcript row, and the two are deliberately both
+  // there: the durable "delegated / replied" lines are `chat_messages` rows the
+  // server writes (the #2357 mechanism), so they scroll away with the
+  // conversation they belong to, while this says what is true RIGHT NOW and
+  // follows the ledger. Absent whenever nothing is open, which is the normal
+  // case — the phone's vertical budget (#2106) is not spent on a delegation
+  // that does not exist.
+  const relays = useSessionRelays(worktreeId);
+  const relayInstanceId = instanceId ?? cliToolId ?? null;
+  const relayStrip = useMemo(() => {
+    if (!relayInstanceId) return null;
+    return resolveRelayStrip(
+      resolveRelayBadges({
+        owed: relays.owedBy(relayInstanceId),
+        awaiting: relays.awaitedBy(relayInstanceId),
+        // The other end is normally another worktree, whose roster this surface
+        // has never read, so the id qualified by its worktree is the honest
+        // name — the same rule the relay header itself follows.
+        aliasOf: (endpoint) =>
+          endpoint.worktreeId === worktreeId
+            ? endpoint.instanceId
+            : `${endpoint.instanceId} @ ${endpoint.worktreeId}`,
+      }),
+    );
+  }, [relays, relayInstanceId, worktreeId]);
+
   return (
     <div
       ref={rootRef}
@@ -899,6 +1000,27 @@ export const ChatSurface = memo(function ChatSurface({
         .filter(Boolean)
         .join(' ')}
     >
+      {/* Issue #2377: the relay strip. Above the transcript because it is a
+          statement about the SESSION rather than about the conversation, and
+          `shrink-0` for the same reason the footer live region is. */}
+      {relayStrip && (
+        <div
+          data-testid="chat-surface-relay"
+          data-relay-tone={relayStrip.tone}
+          role="status"
+          className={`flex shrink-0 items-center gap-1.5 border-b border-border px-3 py-1 text-xs ${
+            relayStrip.tone === 'prompt'
+              ? 'bg-warning-subtle text-warning-foreground'
+              : 'bg-surface-2 text-muted-foreground'
+          }`}
+        >
+          <Forward size={12} className="shrink-0" aria-hidden="true" />
+          <span className="min-w-0 flex-1 truncate">
+            {t(`relay.${relayStrip.key}`, relayStrip.params)}
+          </span>
+        </div>
+      )}
+
       {/* Transcript. `relative` so the jump-to-latest chip can float over its
           bottom edge instead of taking height from it — the phone's terminal tab
           has ~33px of vertical budget (Issue #2106) and this surface shares it. */}

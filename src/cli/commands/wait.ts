@@ -20,7 +20,7 @@
  */
 
 import { Command } from 'commander';
-import { ExitCode, VerifyExitCode, WAIT_EXIT_CODE_PRIORITY, WaitExitCode } from '../types';
+import { ExitCode, getErrorMessage, VerifyExitCode, WAIT_EXIT_CODE_PRIORITY, WaitExitCode } from '../types';
 import type { WaitOptions } from '../types';
 import type {
   AutoYesSuppressionReason,
@@ -30,10 +30,16 @@ import type {
   TaskStatus,
   WaitPromptOutput,
 } from '../types/api-responses';
-import { ApiClient, ApiError, isValidWorktreeId, isValidInstanceId } from '../utils/api-client';
+import { ApiClient, ApiError, isValidWorktreeId } from '../utils/api-client';
 import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
 import { runVerification, WORK_EVIDENCE_GATE_ID } from '../utils/verify-runner';
 import { WAIT_INSTANCE_OPTION_DESCRIPTION } from '../config/agent-target-options';
+import {
+  isInstanceSelector,
+  INSTANCE_ALIAS_HELP_SUFFIX,
+  INSTANCE_SELECTOR_ERROR,
+  resolveInstanceTarget,
+} from './instances';
 
 /** [IA3-02] Polling interval 5 seconds (matches tmux-capture-cache TTL=2s) */
 const POLL_INTERVAL_MS = 5000;
@@ -554,8 +560,18 @@ function outstandingPrompt(data: CurrentOutputResponse, submittedAt: number): bo
 
 /**
  * Poll a single worktree until completion, prompt, or timeout.
+ *
+ * Exported since Issue #2376 so `ask` can do the WAITING half of its round trip
+ * with this function rather than a second implementation of it. `ask` is
+ * `send` + `wait` + "read the reply", and a private copy of the turn-boundary
+ * rules here (#1839's `basis`, #1975's unanswered-prompt hold, #1708's
+ * unclassified dwell) is a copy that would drift into reporting a completion
+ * this one refuses.
+ *
+ * `options.instance` must already be a resolved instance ID — see
+ * {@link resolveWaitInstance}.
  */
-async function pollWorktree(
+export async function pollWorktree(
   client: ApiClient,
   worktreeId: string,
   options: WaitOptions,
@@ -1071,6 +1087,43 @@ function mergeExitCode(current: number, candidate: number): number {
   return rank(candidate) < rank(current) ? candidate : current;
 }
 
+/**
+ * `options` with `--instance` resolved from a selector to an instance ID
+ * (Issue #2376).
+ *
+ * `wait` polls `/current-output?instance=`, which matches instance IDs and
+ * nothing else, so an alias that reached it would filter to no session and the
+ * wait would report on the worktree default instead — the exact silent
+ * wrong-session failure Issue #1638 catalogued for `--agent`.
+ *
+ * @param client - API client
+ * @param worktreeId - Worktree the selector is resolved against
+ * @param options - The options as given
+ */
+async function resolveWaitInstance(
+  client: ApiClient,
+  worktreeId: string,
+  options: WaitOptions,
+): Promise<WaitOptions> {
+  if (!options.instance) return options;
+  try {
+    const target = await resolveInstanceTarget(client, worktreeId, options.instance, undefined);
+    return { ...options, instance: target.instanceId ?? options.instance };
+  } catch (error) {
+    // Degrade to the pre-#2376 behaviour rather than failing the wait. An
+    // instance ID needs no resolution to reach `/current-output?instance=` —
+    // resolution exists here so that an ALIAS can — so a resolver that cannot
+    // be reached costs alias support for this call and nothing else. Failing
+    // instead would turn a reachable session into a non-zero exit for an
+    // orchestrator that has been waiting on it correctly for two years.
+    console.error(
+      `Warning: could not resolve --instance '${options.instance}' `
+      + `(${getErrorMessage(error)}); using it as an instance id.`
+    );
+    return options;
+  }
+}
+
 export function createWaitCommand(): Command {
   const cmd = new Command('wait');
   cmd
@@ -1079,7 +1132,7 @@ export function createWaitCommand(): Command {
     .option('--timeout <seconds>', 'Maximum wait time in seconds', parseInt)
     .option('--on-prompt <mode>', 'Prompt handling: agent (default) exits 10 with a prompt JSON payload on stdout (read it before re-capturing); human keeps waiting for a human reply')
     .option('--stall-timeout <seconds>', 'Maximum time without output change', parseInt)
-    .option('--instance <id>', WAIT_INSTANCE_OPTION_DESCRIPTION)
+    .option('--instance <id>', `${WAIT_INSTANCE_OPTION_DESCRIPTION} ${INSTANCE_ALIAS_HELP_SUFFIX}`)
     .option('--verify', 'After completion, run every verification gate; exit 20 when a gate fails, 21 when there is nothing to verify')
     .option('--require-work', 'After completion, run only the work-evidence gate; exit 21 when the worktree has no commits and no uncommitted changes')
     .option('--fail-on-upstream-fault', 'Exit 11 instead of 0 when the agent returns to its composer with an upstream API failure (529/limit/API Error) on the frame')
@@ -1132,14 +1185,22 @@ A prompt the agent has not answered yet (Issue #1975):
           }
         }
 
-        // Issue #868: Validate instance ID if provided
-        if (options.instance && !isValidInstanceId(options.instance)) {
-          console.error('Error: Invalid --instance. Must be an alphanumeric/underscore/hyphen identifier (max 64 chars).');
+        // Issue #868 / #2376: an instance id or a roster alias.
+        if (options.instance && !isInstanceSelector(options.instance)) {
+          console.error(INSTANCE_SELECTOR_ERROR);
           process.exit(ExitCode.CONFIG_ERROR);
           return;
         }
 
         const client = new ApiClient({ token: options.token });
+
+        // Issue #2376: resolve the selector PER worktree. `wait a b --instance
+        // "Codex 2"` is one alias against two rosters, and the id behind it can
+        // legitimately differ — resolving once and reusing the answer would poll
+        // the wrong session on the second worktree.
+        const perWorktreeOptions = await Promise.all(
+          worktreeIds.map(id => resolveWaitInstance(client, id, options))
+        );
 
         // Issue #1620: resolved before any polling starts. Once the agent stops
         // there is no reliable way left to tell which contract this wait was
@@ -1150,7 +1211,7 @@ A prompt the agent has not answered yet (Issue #1975):
 
         if (worktreeIds.length === 1) {
           // Single worktree
-          const result = await pollWorktree(client, worktreeIds[0], options);
+          const result = await pollWorktree(client, worktreeIds[0], perWorktreeOptions[0]);
           if (result.output) {
             // stdout for result (JSON output)
             console.log(JSON.stringify(result.output));
@@ -1169,7 +1230,7 @@ A prompt the agent has not answered yet (Issue #1975):
 
         // [DR1-07] Multiple worktrees: Promise.allSettled for error isolation
         const results = await Promise.allSettled(
-          worktreeIds.map(id => pollWorktree(client, id, options))
+          worktreeIds.map((id, index) => pollWorktree(client, id, perWorktreeOptions[index]))
         );
 
         // Collect results

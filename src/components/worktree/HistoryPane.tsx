@@ -13,7 +13,7 @@
 import React, { useMemo, useCallback, memo, useRef, useLayoutEffect, useState, useEffect } from 'react';
 import { useTranslations } from 'next-intl';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { Search, User, UserCheck, ChevronLeft } from 'lucide-react';
+import { Search, User, UserCheck, ChevronLeft, Forward } from 'lucide-react';
 import { Checkbox, Skeleton } from '@/components/ui';
 import type { ChatMessage } from '@/types/models';
 import { useConversationHistory } from '@/hooks/useConversationHistory';
@@ -365,6 +365,24 @@ export const HistoryPane = memo(function HistoryPane({
 
   const isSearchActive = isSearchOpen && matchPositions.length > 0;
 
+  /**
+   * How many rows in view arrived from another agent session (Issue #2377).
+   *
+   * A count in the header rather than a chip on each card: the card itself is
+   * `ConversationPairCard`, and a relayed row IS an ordinary user turn — the
+   * agent read it and answered it, and rendering it as something else would be
+   * a lie about what the conversation was. What the reader actually needs from
+   * History is the fact that some of this conversation was not their own typing,
+   * and the bodies already say who each one is from
+   * (`[from <alias> / <worktree>]`).
+   *
+   * Absent at zero, which is every conversation nobody delegated into.
+   */
+  const relayedMessageCount = useMemo(
+    () => messages.filter((m) => m.messageType === 'relay').length,
+    [messages]
+  );
+
   const [autoExpandedIds, setAutoExpandedIds] = useState<Set<string>>(new Set());
 
   // Reset search when worktree context changes.
@@ -696,6 +714,16 @@ export const HistoryPane = memo(function HistoryPane({
       {/* Header — fixed row, always pinned at the top (Issue #1019) */}
       <div className="flex-shrink-0 bg-surface-2 border-b border-border px-4 py-2 flex items-center justify-between flex-wrap gap-1">
         <h3 className="text-sm font-medium text-foreground">{t('history.title')}</h3>
+        {relayedMessageCount > 0 && (
+          <span
+            data-testid="history-relay-count"
+            title={t('relay.historyBadgeTitle')}
+            className="flex items-center gap-1 text-xs text-muted-foreground"
+          >
+            <Forward size={12} className="shrink-0" aria-hidden="true" />
+            {t('relay.historyCount', { count: relayedMessageCount })}
+          </span>
+        )}
         <div className="flex items-center gap-2 flex-wrap">
           {onHistoryDisplayLimitChange && historyDisplayLimit !== undefined && (
             <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer">

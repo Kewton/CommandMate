@@ -459,6 +459,7 @@
     "bannerLabel": "ここで操作できます",
     "reasonPager": "ページャ表示中です。下の画面を見ながら、ここでスクロールと終了ができます。",
     "reasonSelectionList": "選択リストが開いています。下の画面を見ながら、ここで項目の移動と決定ができます。",
+    "reasonDismissablePanel": "閉じるだけの画面です。下の画面を見ながら、ここで Esc を押せます。",
     "reasonUnclassified": "チャットでは種類を判別できない画面です。下にそのまま表示しているので、ここでキーを送って操作できます。",
     "reasonPromptUnreadable": "応答待ちですが選択肢を読み取れませんでした。下の画面を見て、番号か y／n で答えられます。",
     "openTerminal": "ターミナルで確認",
@@ -919,6 +920,11 @@
     "toolbarLabel": "ダイアログへの回答キー",
     "caption": "回答"
   },
+  "dismissPanelKeys": {
+    "toolbarLabel": "この画面を閉じる",
+    "close": "閉じる (Esc)",
+    "closeAria": "この画面を閉じる (Esc)"
+  },
   "selectionKeys": {
     "numbersToolbarLabel": "選択肢の番号キー",
     "numbersCaption": "選択",
@@ -1017,6 +1023,23 @@
     "reasonOther": "理由: {reason}",
     "degradedTitle": "構造化イベントが届いていません",
     "healthyTitle": "構造化イベントを受信中"
+  },
+  "relay": {
+    "badgeOwed": "{alias} へ返信予定",
+    "badgeOwedMany": "返信予定 {count} 件",
+    "badgeAwaiting": "{alias} の返信待ち",
+    "badgeAwaitingMany": "返信待ち {count} 件",
+    "badgePrompt": "確認待ちを通知済み",
+    "owedTitle": "このセッションは委任された返信を抱えています。ターン完了時に自動で届きます。",
+    "awaitingTitle": "このセッションは委任した返信を待っています。届くとコンポーザーに relay メッセージとして入ります。",
+    "promptTitle": "相手セッションが確認待ちで止まり、依頼元へ通知済みです。",
+    "stripAwaiting": "{alias} へ委任、返信待ち",
+    "stripAwaitingMany": "返信待ち {count} 件",
+    "stripPrompt": "{alias} が確認待ち",
+    "stripOwed": "{alias} へ返信予定: ターン完了時に届きます",
+    "historyBadge": "relay",
+    "historyBadgeTitle": "別のエージェントセッションから届いたメッセージです（Issue #2377 relay）。",
+    "historyCount": "表示範囲に relay メッセージが {count} 件"
   },
   "agentModel": {
     "label": "モデル",

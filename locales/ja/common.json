@@ -130,6 +130,14 @@
     "small": "小",
     "xsmall": "極小"
   },
+  "repoTabBar": {
+    "settingLabel": "リポジトリタブ帯",
+    "mode": {
+      "always": "常に表示",
+      "collapsed": "サイドバー折りたたみ時のみ",
+      "hidden": "非表示"
+    }
+  },
   "confirmDialog": {
     "title": "確認",
     "confirm": "OK"

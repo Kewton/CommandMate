@@ -346,6 +346,51 @@ describe('GET /api/worktrees/:id/messages', () => {
     });
   });
 
+  // Issue #2386: `commandmate ask` tells the agent's own reply from a scrape of
+  // its idle composer by looking at nothing but `request_id` — a row keyed
+  // `<tool>-turn:<id>` was written by a transcript reader, a row with none came
+  // off the screen. The route serializes the whole `ChatMessage`, so the field
+  // has always been there; what was missing was anything saying it must stay.
+  // Narrowing this response to a hand-picked field list would put the junk back
+  // on the caller's stdout, which is the defect #2386 measured 3/3 on codex.
+  describe('request_id on the wire (Issue #2386)', () => {
+    it('serializes requestId, so a turn row can be told from a scrape', async () => {
+      const scraped = createMessage(db, {
+        worktreeId: 'test-worktree',
+        role: 'assistant',
+        content: 'Ask Codex to do anything',
+        messageType: 'normal',
+        cliToolId: 'codex',
+        timestamp: new Date('2026-09-07T05:49:53.518Z'),
+      });
+      const fromTranscript = createMessage(db, {
+        worktreeId: 'test-worktree',
+        role: 'assistant',
+        content: '11',
+        messageType: 'normal',
+        cliToolId: 'codex',
+        requestId: 'codex-turn:01a07a6a-7a',
+        timestamp: new Date('2026-09-07T05:49:58.706Z'),
+      });
+
+      const request = new Request('http://localhost:3000/api/worktrees/test-worktree/messages');
+      const params = { params: Promise.resolve({ id: 'test-worktree' }) };
+      const response = await getMessages(
+        request as unknown as import('next/server').NextRequest,
+        params
+      );
+
+      expect(response.status).toBe(200);
+      const data: ChatMessage[] = await response.json();
+      const byId = new Map(data.map((m) => [m.id, m]));
+
+      expect(byId.get(fromTranscript.id)?.requestId).toBe('codex-turn:01a07a6a-7a');
+      // And the scraper's row carries none — which is what makes the field a
+      // usable separator rather than decoration.
+      expect(byId.get(scraped.id)?.requestId).toBeUndefined();
+    });
+  });
+
   it('should return 500 on database error', async () => {
     db.close();
 

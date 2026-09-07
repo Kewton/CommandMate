@@ -15,11 +15,19 @@
  *
  * ## Isomorphic on purpose
  *
- * {@link buildInstanceCliCommands} is a pure function of strings so the browser
- * can call it. {@link resolveCommandMateBinary} reads an environment and is
- * meant for the server — a client component cannot read `CM_LAUNCHED_BY`
- * (Next.js inlines only `NEXT_PUBLIC_*` into the browser bundle), which is why
+ * {@link buildInstanceCliCommands} and {@link buildDelegationBrief} are pure
+ * functions of strings so the browser can call them.
+ * {@link resolveCommandMateBinary} reads an environment and is meant for the
+ * server — a client component cannot read `CM_LAUNCHED_BY` (Next.js inlines
+ * only `NEXT_PUBLIC_*` into the browser bundle), which is why
  * `GET /api/worktrees/:id/cli-reference` exists to hand the answer down.
+ *
+ * Nothing here touches a DOM, and that is load-bearing rather than incidental:
+ * `commandmate peers` imports {@link resolveCommandMateBinary} from this file,
+ * and the CLI build (`tsconfig.cli.json`) has no DOM lib at all. The delegation
+ * brief's delivery into a composer therefore lives with the components that
+ * deliver it — see `insertIntoVisibleComposer` in
+ * `src/components/common/CommandPalette.tsx` (Issue #2376).
  */
 
 /** The binary name a globally installed CommandMate puts on PATH. */
@@ -148,4 +156,132 @@ export function buildInstanceCliCommands(
     capture: `${head} capture ${worktreeId} ${target}`,
     respond: `${head} respond ${worktreeId} "${RESPOND_ANSWER_EXAMPLE}" ${target}`,
   };
+}
+
+// ===========================================================================
+// Delegation brief (Issue #2376)
+// ===========================================================================
+
+/**
+ * `--timeout` the brief tells session A to use, in seconds.
+ *
+ * 30 minutes. Long enough that an ordinary implementation request is not cut
+ * off mid-turn, short enough that a session which died in its pane surfaces as
+ * an exit 124 in the same sitting rather than at the end of the day. A caller
+ * who wants a different one edits the line — it is a brief, not a config.
+ */
+export const DELEGATION_ASK_TIMEOUT_SECONDS = 1800;
+
+/**
+ * Rows of pane transcript the brief's progress-check line asks for.
+ *
+ * Matches what `capture --pane --tail 60` shows a human: enough to see what the
+ * other session is doing, short enough to paste into a report.
+ */
+const DELEGATION_CAPTURE_TAIL = 60;
+
+/** The locales the brief is written in. Anything else falls back to English. */
+export type DelegationBriefLocale = 'ja' | 'en';
+
+export interface DelegationBriefInput {
+  /** From {@link resolveCommandMateBinary}, never hardcoded by the caller. */
+  binary: string;
+  /** The worktree id as the CLI must be given it. */
+  worktreeId: string;
+  /**
+   * The instance id **as the server resolved it**
+   * (`GET /api/worktrees/:id/resolve-target`) — the same rule
+   * {@link InstanceCliCommandInput.instanceId} states, for the same reason.
+   */
+  instanceId: string;
+  /** The roster alias of the target instance, e.g. `Codex 2`. */
+  instanceLabel: string;
+  /** Display name of the CLI tool behind the instance, e.g. `Codex`. */
+  toolLabel: string;
+  /** As {@link InstanceCliCommandInput.portPrefix}. */
+  portPrefix?: number | null;
+  /** UI locale. Anything but `ja` is written in English. */
+  locale: string;
+}
+
+/**
+ * The paragraph one agent session pastes to another agent session's operator —
+ * "here is how you delegate to that session" — in the UI's own language.
+ *
+ * ## Why it lives beside {@link buildInstanceCliCommands}
+ *
+ * Both answer the same question (how is a CommandMate command aimed at ONE
+ * instance spelled?) from the same two server reads, and Issue #2120 already
+ * paid for learning that a second copy of the binary-name rule is a copy that
+ * tells the human one thing and the assistant another. The panel and the brief
+ * therefore share this module, and neither composes a command from what the
+ * browser happens to know.
+ *
+ * ## Why the text is here rather than in `locales/`
+ *
+ * It is a PROMPT, not a label. The whole value of it is that the four exit
+ * codes, the "do not answer their prompt" rule and the command spellings arrive
+ * together and unedited; a translator moving a line between keys, or a key
+ * resolving to its own name because the namespace was renamed, produces a brief
+ * that still looks like a brief and quietly drops the one clause that stops
+ * session A from answering session B's permission dialog. The two languages are
+ * written out in full, side by side, so a change to one is visibly a change to
+ * the other.
+ *
+ * @param input - Binary, target and locale
+ * @returns The brief, ready to be inserted into a composer
+ */
+export function buildDelegationBrief(input: DelegationBriefInput): string {
+  const { binary, worktreeId, instanceId, instanceLabel, toolLabel } = input;
+  const prefix =
+    input.portPrefix != null && input.portPrefix !== DEFAULT_SERVER_PORT
+      ? `CM_PORT=${input.portPrefix} `
+      : '';
+  const head = `${prefix}${binary}`;
+  const target = `--instance ${instanceId}`;
+  const locale: DelegationBriefLocale = input.locale === 'ja' ? 'ja' : 'en';
+
+  const capture = `${head} capture ${worktreeId} ${target} --pane --tail ${DELEGATION_CAPTURE_TAIL}`;
+
+  // Issue #2377: the same delegation without the block. Offered as the SECOND
+  // line rather than as a replacement because the two are different jobs: `ask`
+  // is right when the answer is the next thing you need, `--async` is right when
+  // it is not — and a brief that only taught the asynchronous form would have
+  // agents registering relays for questions they are about to sit and wait for
+  // anyway.
+  const asyncAsk = `${head} ask ${worktreeId} ${target} "<request>" --async`;
+
+  if (locale === 'ja') {
+    const ask =
+      `${head} ask ${worktreeId} ${target} "<依頼文>" --timeout ${DELEGATION_ASK_TIMEOUT_SECONDS}`;
+    return [
+      `## 別セッション「${instanceLabel}」への委任`,
+      `- 宛先: worktree \`${worktreeId}\` / instance \`${instanceId}\`（${toolLabel}）`,
+      `- 依頼: ${ask}`,
+      '  - exit 0: 標準出力が返答本文',
+      '  - exit 10: 相手が確認待ち。標準出力のprompt JSONを私に報告して止まる（自分で答えない）',
+      '  - exit 124: タイムアウト。captureで状況を見て報告',
+      `- 待たない依頼: ${asyncAsk}`,
+      '  - 即座に relay id を返して exit 0。完了時に `[from ...]` 付きで返答が私のコンポーザーに届く',
+      `  - 状況確認: ${head} relays / 取り消し: ${head} relays cancel <relay-id>`,
+      `- 進捗確認: ${capture}`,
+      '- 禁止: respondで相手のプロンプトに答える / auto-yesを有効化する',
+    ].join('\n');
+  }
+
+  const ask =
+    `${head} ask ${worktreeId} ${target} "<request>" --timeout ${DELEGATION_ASK_TIMEOUT_SECONDS}`;
+  return [
+    `## Delegating to session "${instanceLabel}"`,
+    `- Target: worktree \`${worktreeId}\` / instance \`${instanceId}\` (${toolLabel})`,
+    `- Ask: ${ask}`,
+    '  - exit 0: stdout is the reply body',
+    '  - exit 10: they are waiting on a confirmation. Report the prompt JSON on stdout back to me and stop (do not answer it yourself)',
+    '  - exit 124: timed out. Look with capture and report what you see',
+    `- Ask without waiting: ${asyncAsk}`,
+    '  - exits 0 with a relay id on stdout; the reply lands in my composer prefixed `[from ...]` when the turn ends',
+    `  - Outstanding: ${head} relays / withdraw: ${head} relays cancel <relay-id>`,
+    `- Progress: ${capture}`,
+    '- Do not: answer their prompt with respond / turn auto-yes on',
+  ].join('\n');
 }

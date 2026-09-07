@@ -56,6 +56,7 @@ import { isDuplicatePrompt, normalizePromptForDedup } from './prompt-dedup';
 import { recordPromptDedupSkip } from './prompt-dedup-state';
 import { isDuplicateResponse } from './response-dedup';
 import { captureStructuredHistoryTurn, isStructuredHistoryWriterLive } from './structured-history-gate';
+import { onRelayTurnCompleted } from '@/lib/relay/relay-triggers';
 // Issue #2317 Phase D: while a human holds the pane's geometry, the frame is
 // their terminal (44 rows), not the 1000-row canvas every rule below was
 // measured against. See the block in `checkForResponse` for what that changes.
@@ -263,6 +264,56 @@ export function buildPromptExtractionResult(
 }
 
 /**
+ * The one reading of a frame that every consumer of it shares, for a capture
+ * that has ALREADY been through `stripBoxDrawing(stripAnsi(…))`.
+ *
+ * Split out of {@link detectPromptWithOptions} by Issue #2368 so the Auto-Yes
+ * poller can reach it. That poller cleans its own capture once per tick
+ * (`captureAndCleanOutput`) and reuses the cleaned string and its line split for
+ * the stop-condition delta, the dialog gate and the thinking check, so handing
+ * it back through `detectPromptWithOptions` would clean it a SECOND time — and
+ * `stripBoxDrawing` is not idempotent (it removes one leading `│` per pass, so a
+ * doubly-bordered row loses a second character on the second pass). Taking the
+ * already-clean frame here is what keeps the two callers reading identical text.
+ *
+ * @param cleanOutput - tmux output with ANSI **and** box drawing already removed
+ * @param cliToolId - CLI tool identifier for building detection options
+ * @param precomputedLines - `cleanOutput.split('\n')` when the caller already has it
+ *   (Issue #499 Item 4); must be the split of THIS string, not of the raw capture
+ * @returns PromptDetectionResult with isPrompt, promptData, and cleanContent
+ */
+export function detectPromptOnCleanFrame(
+  cleanOutput: string,
+  cliToolId: CLIToolType,
+  precomputedLines?: string[],
+): PromptDetectionResult {
+  // Issue #2364: agy's `↑/↓ Navigate` dialogs are read by agy's own reader
+  // before the generic pass, on the same spelling `tools/antigravity/detect.ts`
+  // reads them on. The generic multiple-choice parser takes one row per option
+  // and agy wraps a long command across several rows of one label, so without
+  // this the poller stored nothing for the frame the status API published as a
+  // prompt — and, on the file-creation menu, stored a question with the diff
+  // preview joined into it. One reader for both producers is what makes the
+  // stored `prompt` row, the push notification's excerpt and `/current-output`
+  // agree about one screen.
+  //
+  // Issue #2368: and the Auto-Yes poller, which was the one consumer #2364 left
+  // on the generic pass. agy's Bash approvals wrap their option labels with no
+  // indentation, `isContinuationLine` refuses those rows, and the frame came
+  // back `isPrompt: false` — so Auto-Yes sent nothing at all while the status
+  // API published the very same screen as an answerable four-option prompt.
+  if (cliToolId === 'antigravity') {
+    const dialog = detectAntigravityNumberedDialogPrompt(cleanOutput);
+    if (dialog !== null) return dialog;
+  }
+  const promptOptions = buildDetectPromptOptions(cliToolId);
+  return detectPrompt(
+    cleanOutput,
+    precomputedLines ? { ...promptOptions, precomputedLines } : promptOptions,
+  );
+}
+
+/**
  * Internal helper: detect prompt with CLI-tool-specific options.
  *
  * Centralizes the stripAnsi() + buildDetectPromptOptions() + detectPrompt() pipeline
@@ -276,22 +327,7 @@ export function detectPromptWithOptions(
   output: string,
   cliToolId: CLIToolType
 ): PromptDetectionResult {
-  const clean = stripBoxDrawing(stripAnsi(output));
-  // Issue #2364: agy's `↑/↓ Navigate` dialogs are read by agy's own reader
-  // before the generic pass, on the same spelling `tools/antigravity/detect.ts`
-  // reads them on. The generic multiple-choice parser takes one row per option
-  // and agy wraps a long command across several rows of one label, so without
-  // this the poller stored nothing for the frame the status API published as a
-  // prompt — and, on the file-creation menu, stored a question with the diff
-  // preview joined into it. One reader for both producers is what makes the
-  // stored `prompt` row, the push notification's excerpt and `/current-output`
-  // agree about one screen.
-  if (cliToolId === 'antigravity') {
-    const dialog = detectAntigravityNumberedDialogPrompt(clean);
-    if (dialog !== null) return dialog;
-  }
-  const promptOptions = buildDetectPromptOptions(cliToolId);
-  return detectPrompt(clean, promptOptions);
+  return detectPromptOnCleanFrame(stripBoxDrawing(stripAnsi(output)), cliToolId);
 }
 
 // ============================================================================
@@ -1257,6 +1293,15 @@ export async function checkForResponse(
 
       // Broadcast message to WebSocket clients
       broadcastMessage('message', { worktreeId, message });
+
+      // Issue #2377: the scrape path's completion edge. `settled: false` is the
+      // whole difference from the gate's own announcement: this row was read off
+      // a SCREEN whose completion was judged by string analysis, so a relay
+      // waiting on this session re-reads after a few seconds of quiet before it
+      // delivers — the Issue's 「完了検知 + 数秒の静穏」 for the three tools that
+      // keep no transcript. Announced here rather than after the `if` because
+      // the suppressed branch means the gate already announced it, settled.
+      onRelayTurnCompleted(worktreeId, cliToolId, resolvedInstanceId, false);
     } else {
       logger.info('structured-history-scrape-suppressed', {
         worktreeId,

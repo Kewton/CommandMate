@@ -63,6 +63,18 @@ export interface SendUserMessageParams {
   instanceId?: string;
   /** chat_messages message_type. Defaults to 'normal'. */
   messageType?: MessageType;
+  /**
+   * `chat_messages.request_id` for the row this send writes (Issue #2377).
+   *
+   * Omitted by every human-facing path — a message a person typed has no
+   * producer id — and set by the relay delivery, where the row has to point back
+   * at the ledger entry that produced it (`relay:<relayId>`). That pointer is
+   * read in both directions: the ledger's UNIQUE index on `sent_request_id`
+   * makes a second delivery of one relay unrecordable, and the loop guard walks
+   * the other way, from the newest user row to the relay whose depth the next
+   * one is measured from.
+   */
+  requestId?: string;
   /** Validated absolute image path (send API only; Timer never sets this). */
   absoluteImagePath?: string;
   /** Validated Copilot model to switch to before sending (send API only). */
@@ -260,6 +272,7 @@ export async function sendUserMessage(
     timestamp: userMessageTimestamp,
     cliToolId,
     instanceId,
+    requestId: params.requestId,
   });
 
   // 5b. Broadcast the user row (Issue #2195).

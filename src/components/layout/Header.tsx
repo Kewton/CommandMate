@@ -14,6 +14,7 @@ import { TransitionLink } from '@/components/view-transitions/TransitionLink';
 import { useTranslations } from 'next-intl';
 import { Folder, Github, Search } from 'lucide-react';
 import { PcDisplaySizeSelector } from './PcDisplaySizeSelector';
+import { RepositoryTabBarModeSelector } from './RepositoryTabBarModeSelector';
 import { ThemeToggle } from '@/components/common/ThemeToggle';
 import { ConnectionStatusIndicator } from '@/components/common/ConnectionStatusIndicator';
 import { Kbd } from '@/components/ui/Kbd';
@@ -119,6 +120,8 @@ export function Header({ title = 'CommandMate' }: HeaderProps) {
             <ConnectionStatusIndicator />
             {/* PC display size selector (Issue #915) - hidden on mobile */}
             <PcDisplaySizeSelector />
+            {/* Repository tab strip visibility (Issue #2374) - hidden on mobile */}
+            <RepositoryTabBarModeSelector />
             {/* Theme toggle promoted to the header (Issue #1071) */}
             <ThemeToggle />
             <a

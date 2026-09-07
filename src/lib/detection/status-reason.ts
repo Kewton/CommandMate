@@ -62,6 +62,34 @@ export const STATUS_REASON = {
    * `Type to search models...` box.
    */
   COMMAND_CODE_SELECTION_LIST: 'command_code_selection_list',
+  /**
+   * Issue #2369: a Command Code overlay that only Esc leaves.
+   *
+   * `/usage` opens a read-only panel — a plan header, two usage meters, a
+   * breakdown URL — whose last row is `Press Esc to close`. There is no
+   * highlight to move, no numbered option and no confirm key; the ONE thing the
+   * screen accepts is the dismiss.
+   *
+   * Distinct from {@link STATUS_REASON.COMMAND_CODE_SELECTION_LIST} because the
+   * two screens want different controls, and that is the whole of this Issue:
+   * before it, this panel matched no rule at all, reached the `default` floor
+   * and so raised `isUnclassifiedActive` — which the chat surface answers with
+   * `TerminalEscapeHatch` plus `PromptAnswerKeys`, eighteen buttons (arrows,
+   * Enter, Esc, `1`-`9`, `y`, `n`) of which exactly one does anything. Reporting
+   * the selection-list token instead would put the arrow pad on the card and
+   * tell an operator reading `capture --json` that a moving highlight had been
+   * read off a panel that has none.
+   *
+   * Deliberately NOT a member of `SELECTION_LIST_REASONS`
+   * (`lib/detection/status-detector.ts`): that set is what `isSelectionListActive`
+   * — and therefore the arrow pad — is derived from. The flag this one feeds is
+   * `isDismissablePanelActive`, published beside it.
+   *
+   * The vocabulary is Command Code's alone for now (方針書 §4 D2's tool-by-tool
+   * rule): the SHAPE "an overlay whose footer offers only a dismiss" is general,
+   * the sentence that identifies it was measured on one tool.
+   */
+  COMMAND_CODE_DISMISSABLE_PANEL: 'command_code_dismissable_panel',
   COPILOT_SELECTION_LIST: 'copilot_selection_list',
   CODEX_SELECTION_LIST: 'codex_selection_list',
   /** Issue #1017: Codex pager / edit-previous (transcript) mode. */

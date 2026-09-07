@@ -151,9 +151,29 @@ describe('GET /api/worktrees/:id/resolve-target', () => {
     });
   });
 
-  it('rejects a malformed instance id before touching the roster', async () => {
+  /**
+   * Issue #2376 widened `?instance=` from "an instance id" to "an instance id
+   * or an alias", and an alias is free text — `not an id` is a perfectly
+   * possible one. So the 400 now covers only what NO alias can be: something
+   * longer than the alias field allows, or carrying control characters.
+   * A free-text value that matches nothing resolves to nothing, exactly as an
+   * unknown instance id always has.
+   */
+  it('rejects an instance selector no alias could be', async () => {
+    const tooLong = await call(WORKTREE_ID, `?instance=${'x%20'.repeat(30)}`);
+    expect(tooLong.status).toBe(400);
+
+    const controlChar = await call(WORKTREE_ID, '?instance=bad%01value');
+    expect(controlChar.status).toBe(400);
+  });
+
+  it('resolves a free-text selector that matches no row to the worktree default', async () => {
     const response = await call(WORKTREE_ID, '?instance=not%20an%20id');
-    expect(response.status).toBe(400);
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      cliToolId: 'gemini',
+      resolvedBy: 'worktree-default',
+    });
   });
 
   it('rejects a cliTool that is not a known agent', async () => {
@@ -180,5 +200,136 @@ describe('GET /api/worktrees/:id/resolve-target', () => {
     // Per IP, not global: a second caller is unaffected by the first's spending.
     const other = await call(WORKTREE_ID, '', '10.9.9.10');
     expect(other.status).toBe(200);
+  });
+});
+
+/**
+ * `?instance=` as an ALIAS (Issue #2376).
+ *
+ * The stage is LAST in the chain, and these tests are mostly about that: every
+ * request that resolved before this Issue must resolve to the same answer, so
+ * what is pinned is where the alias lookup does NOT run as much as where it
+ * does.
+ */
+describe('GET /api/worktrees/:id/resolve-target — alias selectors (Issue #2376)', () => {
+  let db: Database.Database;
+
+  beforeEach(async () => {
+    db = new Database(':memory:');
+    runMigrations(db);
+    const { setMockDb } = await import('@/lib/db/db-instance');
+    setMockDb(db);
+
+    const worktree: Worktree = {
+      id: WORKTREE_ID,
+      name: 'Target',
+      path: '/path/to/wt',
+      repositoryPath: '/path/to/repo',
+      repositoryName: 'repo',
+      cliToolId: 'gemini',
+    };
+    upsertWorktree(db, worktree);
+    setAgentInstances(db, WORKTREE_ID, [
+      { id: 'claude', cliTool: 'claude', alias: 'Claude', order: 0 },
+      { id: 'codex-2', cliTool: 'codex', alias: 'Codex 2', order: 1 },
+      { id: 'codex-3', cliTool: 'codex', alias: 'レビュー担当', order: 2 },
+    ]);
+  });
+
+  afterEach(async () => {
+    const { closeDbInstance } = await import('@/lib/db/db-instance');
+    closeDbInstance();
+  });
+
+  it('resolves an alias to its instance id', async () => {
+    const response = await call(WORKTREE_ID, '?instance=Codex%202');
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      cliToolId: 'codex',
+      instanceId: 'codex-2',
+      resolvedBy: 'roster',
+    });
+  });
+
+  it('resolves a non-ASCII alias', async () => {
+    const response = await call(WORKTREE_ID, `?instance=${encodeURIComponent('レビュー担当')}`);
+    await expect(response.json()).resolves.toMatchObject({ instanceId: 'codex-3' });
+  });
+
+  it('matches an alias case-insensitively when nothing matches exactly', async () => {
+    const response = await call(WORKTREE_ID, '?instance=codex%202');
+    await expect(response.json()).resolves.toMatchObject({ instanceId: 'codex-2' });
+  });
+
+  /**
+   * The additive property, stated as a rule rather than as an example: an id
+   * that a roster row carries is that row, whatever anybody's alias says.
+   */
+  it('lets a roster id win over an identical alias', async () => {
+    setAgentInstances(db, WORKTREE_ID, [
+      { id: 'claude', cliTool: 'claude', alias: 'Claude', order: 0 },
+      // This row's ALIAS is another row's ID.
+      { id: 'codex-2', cliTool: 'codex', alias: 'claude', order: 1 },
+    ]);
+
+    const response = await call(WORKTREE_ID, '?instance=claude');
+    await expect(response.json()).resolves.toMatchObject({
+      cliToolId: 'claude',
+      instanceId: 'claude',
+    });
+  });
+
+  /**
+   * The primary anchor (#868) sits between the roster and the alias: bare
+   * `--instance codex` has meant "codex's primary instance" since before
+   * aliases were selectable, with or without a roster row.
+   */
+  it('lets the primary anchor win over an alias', async () => {
+    setAgentInstances(db, WORKTREE_ID, [
+      { id: 'claude', cliTool: 'claude', alias: 'Claude', order: 0 },
+      { id: 'gemini-2', cliTool: 'gemini', alias: 'codex', order: 1 },
+    ]);
+
+    const response = await call(WORKTREE_ID, '?instance=codex');
+    await expect(response.json()).resolves.toMatchObject({
+      cliToolId: 'codex',
+      instanceId: 'codex',
+      resolvedBy: 'primary',
+    });
+  });
+
+  it('409s with every candidate when two rows answer to one alias', async () => {
+    setAgentInstances(db, WORKTREE_ID, [
+      { id: 'codex', cliTool: 'codex', alias: 'Reviewer', order: 0 },
+      { id: 'codex-2', cliTool: 'codex', alias: 'Reviewer', order: 1 },
+    ]);
+
+    const response = await call(WORKTREE_ID, '?instance=Reviewer');
+    expect(response.status).toBe(409);
+    const body = await response.json();
+    expect(body.code).toBe('ambiguous_instance_alias');
+    expect(body.issues).toHaveLength(2);
+    expect(body.issues.join('\n')).toContain('codex-2');
+  });
+
+  it('does not resolve an alias across worktrees', async () => {
+    const other: Worktree = {
+      id: 'wt-neighbour',
+      name: 'Neighbour',
+      path: '/path/to/other',
+      repositoryPath: '/path/to/repo',
+      repositoryName: 'repo',
+      cliToolId: 'claude',
+    };
+    upsertWorktree(db, other);
+    setAgentInstances(db, 'wt-neighbour', [
+      { id: 'copilot-2', cliTool: 'copilot', alias: 'Neighbour Bot', order: 0 },
+    ]);
+
+    const response = await call(WORKTREE_ID, '?instance=Neighbour%20Bot');
+    await expect(response.json()).resolves.toMatchObject({
+      cliToolId: 'gemini',
+      resolvedBy: 'worktree-default',
+    });
   });
 });

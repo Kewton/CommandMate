@@ -146,6 +146,21 @@ export interface PaneTerminalState {
    */
   isPagerActive: boolean;
   /**
+   * Issue #2369: a dismiss-only overlay is on the pane — `Esc to close` and
+   * nothing else.
+   *
+   * Disjoint from {@link isSelectionListActive} rather than a subset of it
+   * (which {@link isPagerActive} is): the panel has no highlight, so the arrow
+   * pad would be as wrong on it as the answer keys were. The chat surface draws
+   * a single Esc button from this.
+   *
+   * Applied with no dwell counter, unlike {@link isUnclassifiedActive} below:
+   * this is a POSITIVE reading of a footer the tool drew, not the absence of
+   * one, so a single frame carrying it is evidence and a single frame without it
+   * is the panel having closed.
+   */
+  isDismissablePanelActive: boolean;
+  /**
    * Issue #1017: the session is interactive but detection could not classify the
    * frame (status 'running', reason 'default') — i.e. stuck in an unrecognized TUI
    * mode. Gates the detection-independent Esc/q escape hatch. Deliberately false
@@ -196,6 +211,8 @@ interface CurrentOutputResponse {
   thinking?: boolean;
   isSelectionListActive?: boolean;
   isPagerActive?: boolean;
+  /** Issue #2369: absent on a daemon older than the field. */
+  isDismissablePanelActive?: boolean;
   isUnclassifiedActive?: boolean;
   /**
    * Issue #2042: the two blocks that describe the conversation rather than the
@@ -262,6 +279,7 @@ export function useTerminalPanePolling({
     sessionStatus: '',
     isSelectionListActive: false,
     isPagerActive: false,
+    isDismissablePanelActive: false,
     isUnclassifiedActive: false,
     composerText: '',
     attaching: true,
@@ -358,6 +376,7 @@ export function useTerminalPanePolling({
       thinking?: boolean;
       isSelectionListActive?: boolean;
       isPagerActive?: boolean;
+      isDismissablePanelActive?: boolean;
       isUnclassifiedActive?: boolean;
       isPromptWaiting?: boolean;
       promptData?: LivePromptData | null;
@@ -366,7 +385,10 @@ export function useTerminalPanePolling({
       const rawUnclassified = data.isUnclassifiedActive === true
         && data.isPromptWaiting !== true
         && data.isSelectionListActive !== true
-        && data.isPagerActive !== true;
+        && data.isPagerActive !== true
+        // Issue #2369: same exclusion as the three above — a frame somebody
+        // COULD read is not an unclassified one, whatever else the payload says.
+        && data.isDismissablePanelActive !== true;
       if (rawUnclassified) {
         unclassifiedCountRef.current += 1;
         unclassifiedSinceRef.current ??= Date.now();
@@ -404,6 +426,7 @@ export function useTerminalPanePolling({
           sessionStatus: data.sessionStatus ?? prev.sessionStatus,
           isSelectionListActive: data.isSelectionListActive ?? false,
           isPagerActive: data.isPagerActive ?? false,
+          isDismissablePanelActive: data.isDismissablePanelActive ?? false,
           isUnclassifiedActive: confirmedUnclassified,
           composerText,
           attaching: false,
@@ -504,6 +527,7 @@ export function useTerminalPanePolling({
       sessionStatus: '',
       isSelectionListActive: false,
       isPagerActive: false,
+      isDismissablePanelActive: false,
       isUnclassifiedActive: false,
       composerText: '',
       attaching: true,
@@ -568,6 +592,7 @@ export function useTerminalPanePolling({
         thinking: snap.thinking,
         isSelectionListActive: snap.isSelectionListActive,
         isPagerActive: snap.isPagerActive,
+        isDismissablePanelActive: snap.isDismissablePanelActive,
         isUnclassifiedActive: snap.isUnclassifiedActive,
         isPromptWaiting: snap.isPromptWaiting,
         promptData: snap.promptData ?? null,
@@ -608,6 +633,7 @@ export function useTerminalPanePolling({
         thinking: false,
         isSelectionListActive: false,
         isPagerActive: false,
+        isDismissablePanelActive: false,
         isUnclassifiedActive: false,
         isPromptWaiting: false,
         promptData: null,
@@ -632,6 +658,10 @@ export function useTerminalPanePolling({
     const interactionActive = prompt.visible
       || terminal.isSelectionListActive
       || terminal.isPagerActive
+      // Issue #2369: a dismiss-only panel is a human staring at a screen, so it
+      // earns the fast cadence the other three do — the Esc card has to vanish
+      // promptly once they press the key.
+      || terminal.isDismissablePanelActive
       || terminal.isUnclassifiedActive;
     const intervalMs = connected && pushHealthy && !interactionActive
       ? WS_CONNECTED_POLLING_INTERVAL_MS
@@ -672,6 +702,7 @@ export function useTerminalPanePolling({
     terminal.isRunning,
     terminal.isSelectionListActive,
     terminal.isPagerActive,
+    terminal.isDismissablePanelActive,
     terminal.isUnclassifiedActive,
     prompt.visible,
     fetchCurrentOutput,

@@ -94,10 +94,17 @@ describe('AgentInstancesPane defaults panel (Issue #2067)', () => {
   });
 
   describe('cost of being on screen', () => {
-    it('issues no request at all while the panel is closed', () => {
+    it('issues no request of its own while the panel is closed', () => {
       renderPane([primary('claude', 0), primary('codex', 1)]);
       expect(screen.queryByTestId('agent-defaults-section')).toBeNull();
-      expect(mockFetch).not.toHaveBeenCalled();
+      // Issue #2377's relay-badge read is excluded: what this test bounds is
+      // the cost of the DEFAULTS panel being on screen, and the relay read
+      // belongs to the roster rows rather than to the panel.
+      expect(
+        mockFetch.mock.calls
+          .map((call) => String(call[0]))
+          .filter((url) => !url.startsWith('/api/relays')),
+      ).toEqual([]);
     });
 
     it('reads the eligible count once, when the panel is opened', async () => {
@@ -107,9 +114,14 @@ describe('AgentInstancesPane defaults panel (Issue #2067)', () => {
 
       expect(callsTo(APPLY_DEFAULT_AGENTS_ENDPOINT)).toHaveLength(1);
       // Bounded to the worktree the pane is rendered for, not to the install.
-      expect(mockFetch.mock.calls[0][0]).toBe(
-        `${APPLY_DEFAULT_AGENTS_ENDPOINT}?worktreeId=w-2067`,
-      );
+      // Found by endpoint rather than by call index: #2377 put a relay-badge
+      // read on the same pane, and an index would pin the ORDER of two
+      // unrelated effects.
+      expect(
+        mockFetch.mock.calls
+          .map((call) => String(call[0]))
+          .filter((url) => url.startsWith(APPLY_DEFAULT_AGENTS_ENDPOINT)),
+      ).toEqual([`${APPLY_DEFAULT_AGENTS_ENDPOINT}?worktreeId=w-2067`]);
       expect(screen.getByTestId('agent-defaults-eligible')).toHaveAttribute('data-count', '7');
     });
   });

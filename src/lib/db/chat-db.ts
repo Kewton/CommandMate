@@ -88,7 +88,7 @@ function mapChatMessage(row: ChatMessageRow): ChatMessage {
     timestamp: new Date(row.timestamp),
     logFileName: row.log_file_name || undefined,
     requestId: row.request_id || undefined,
-    messageType: (row.message_type as 'normal' | 'prompt') || 'normal',
+    messageType: (row.message_type as MessageType | null) || 'normal',
     promptData: row.prompt_data ? JSON.parse(row.prompt_data) : undefined,
     cliToolId,
     instanceId: row.instance_id ?? cliToolId,
@@ -373,7 +373,7 @@ export function findMessageByRequestId(
 }
 
 /** Which rows {@link findUnkeyedUserMessages} will consider. */
-export interface UnkeyedUserMessageQuery {
+export interface UserTurnCandidateQuery {
   readonly worktreeId: string;
   readonly cliToolId: CLIToolType;
   /** The agent instance; the primary instance's id equals `cliToolId`. */
@@ -382,22 +382,33 @@ export interface UnkeyedUserMessageQuery {
   readonly fromMs: number;
   /** Newest `timestamp` accepted, inclusive, as epoch ms. */
   readonly toMs: number;
-  /** Cap on rows returned. Defaults to {@link UNKEYED_USER_MESSAGE_LIMIT}. */
+  /** Cap on rows returned. Defaults to {@link USER_TURN_CANDIDATE_LIMIT}. */
   readonly limit?: number;
+  /**
+   * Also return the rows a RELAY delivery wrote (Issue #2392).
+   *
+   * Off by default, and the widening is an `OR` rather than a replacement, so a
+   * caller that omits it gets #2196's query byte for byte. On, the answer may
+   * contain rows that carry `relay:<ledgerId>` — see
+   * {@link findUnkeyedUserMessages} for why the caller must read `requestId`
+   * before it does anything to a row it got back.
+   */
+  readonly includeRelayDelivered?: boolean;
 }
 
 /**
- * How many candidate rows {@link findUnkeyedUserMessages} returns.
+ * How many candidate rows a user-row candidate lookup returns.
  *
  * The caller compares content in JavaScript, so this bounds the work rather than
  * the correctness. Twenty is far above the number of user rows one instance can
  * accumulate inside the caller's few-minute window and still small enough that
  * the query is never the expensive part of a poll.
  */
-export const UNKEYED_USER_MESSAGE_LIMIT = 20;
+export const USER_TURN_CANDIDATE_LIMIT = 20;
 
 /**
- * User rows for one instance that no producer has claimed yet (Issue #2196).
+ * User rows for one instance that no producer has claimed yet (Issue #2196) —
+ * and, on request, the one keyed row that is a duplicate of one (Issue #2392).
  *
  * The lookup behind "the operator's input is already in History — `/send` put it
  * there". A row qualifies when it is this instance's, is a `user` row, sits in
@@ -421,18 +432,44 @@ export const UNKEYED_USER_MESSAGE_LIMIT = 20;
  * `ACTIVE_FILTER` applies: an archived row has been cleared out of History, and
  * adopting one would key a turn to a row nobody can see.
  *
+ * ## The one keyed row this will hand back, and only when asked
+ *
+ * Issue #2392. `relay-delivery` writes the answer it types into the requesting
+ * session's composer as a `relay` user row keyed `relay:<ledgerId>`, and that
+ * session's own transcript reader then reads the delivered body back as a prompt
+ * it was handed — 662ms later, measured — and duplicated it, because the row it
+ * should have recognised was keyed and therefore invisible here.
+ *
+ * `includeRelayDelivered` widens the predicate to `request_id IS NULL OR (a
+ * relay row keyed `relay:…`)`. It is an OR and an opt-in, so no existing caller
+ * sees a row it did not see before; `message_type` and the key prefix are both
+ * required, because a relay *prompt* delivery is a `relay` row with no key at
+ * all and stays an ordinary unkeyed candidate, while a `relay-sys:` row is
+ * transcript furniture that is not the delivery.
+ *
+ * **A row that comes back with a `requestId` must not be claimed.** That key is
+ * how `relay-service`'s `findParentRelayHops` reads the ledger back out of the
+ * row (#2387), so re-pointing one at a transcript key would silently un-chain
+ * every relay opened from the session. {@link setMessageRequestId}'s
+ * `request_id IS NULL` predicate refuses the write in any case; the caller is
+ * expected to branch on `requestId` rather than rely on that.
+ *
  * @returns Candidate rows, newest first
  */
 export function findUnkeyedUserMessages(
   db: Database.Database,
-  query: UnkeyedUserMessageQuery
+  query: UserTurnCandidateQuery
 ): ChatMessage[] {
+  const keyFilter = query.includeRelayDelivered
+    ? `AND (request_id IS NULL OR (message_type = 'relay' AND request_id LIKE ?))`
+    : 'AND request_id IS NULL';
+
   const stmt = db.prepare(`
     SELECT id, worktree_id, role, content, summary, timestamp, log_file_name, request_id, message_type, prompt_data, cli_tool_id, instance_id, archived
     FROM chat_messages
     WHERE worktree_id = ?
       AND role = 'user'
-      AND request_id IS NULL
+      ${keyFilter}
       AND COALESCE(cli_tool_id, 'claude') = ?
       AND COALESCE(instance_id, cli_tool_id, 'claude') = ?
       AND timestamp >= ? AND timestamp <= ?
@@ -443,14 +480,21 @@ export function findUnkeyedUserMessages(
 
   const rows = stmt.all(
     query.worktreeId,
+    ...(query.includeRelayDelivered ? [`${RELAY_REQUEST_ID_PREFIX}%`] : []),
     query.cliToolId,
     query.instanceId,
     query.fromMs,
     query.toMs,
-    query.limit ?? UNKEYED_USER_MESSAGE_LIMIT
+    query.limit ?? USER_TURN_CANDIDATE_LIMIT
   ) as ChatMessageRow[];
 
-  return rows.map(mapChatMessage);
+  // A bare `relay:` names no ledger entry and so is not a delivery — the rule
+  // `parseRelayRequestId` already states for the loop guard, applied here so the
+  // two readers cannot disagree about what counts as one. A no-op without the
+  // option, where nothing that comes back is keyed at all.
+  return rows
+    .map(mapChatMessage)
+    .filter((message) => !message.requestId || parseRelayRequestId(message.requestId) !== null);
 }
 
 /**
@@ -988,6 +1032,160 @@ export function createModelChangeMessage(
     messageType: 'normal',
     timestamp: new Date(params.at),
     requestId: `${MODEL_CHANGE_REQUEST_ID_PREFIX}${params.at}`,
+    cliToolId: params.cliToolId,
+    instanceId: params.instanceId ?? params.cliToolId,
+  });
+}
+
+// ===========================================================================
+// Relay rows (Issue #2377)
+// ===========================================================================
+
+/**
+ * The `request_id` prefix a RELAYED message carries.
+ *
+ * The delivered body is an ordinary user row — session B's answer, typed into
+ * session A's composer — and `relay:<relayId>` is what turns that row back into
+ * a pointer at the ledger entry that produced it. Two readers depend on that
+ * direction:
+ *
+ *  - the ledger's own idempotency, because the id is also
+ *    `session_relays.sent_request_id` and that column carries a UNIQUE index;
+ *  - the loop guard, which asks "was the last thing this session was told a
+ *    relayed message, and if so, whose?" — the answer is the parent relay, and
+ *    its `hops` is what the new relay's depth is measured from.
+ *
+ * Same shape and same reasoning as {@link MODEL_CHANGE_REQUEST_ID_PREFIX}: a
+ * prefix rather than a wording, because the wording is localized at write time.
+ */
+export const RELAY_REQUEST_ID_PREFIX = 'relay:';
+
+/** The `request_id` prefix a relay SYSTEM row carries (`relay-sys:<relayId>:<kind>`). */
+export const RELAY_SYSTEM_REQUEST_ID_PREFIX = 'relay-sys:';
+
+/** Build the relay message's request id from the ledger id. */
+export function relayRequestId(relayId: string): string {
+  return `${RELAY_REQUEST_ID_PREFIX}${relayId}`;
+}
+
+/**
+ * The ledger id inside a relayed row's request id, or null.
+ *
+ * Null for every other row, including a relay SYSTEM row: those are transcript
+ * furniture, not the delivery, and treating one as the delivery would let a
+ * session's own "delegated, waiting" line count as an inbound relay.
+ */
+export function parseRelayRequestId(requestId: string | undefined | null): string | null {
+  if (!requestId || !requestId.startsWith(RELAY_REQUEST_ID_PREFIX)) return null;
+  const id = requestId.slice(RELAY_REQUEST_ID_PREFIX.length);
+  return id === '' ? null : id;
+}
+
+/**
+ * The newest user-authored row for ONE agent instance.
+ *
+ * {@link getLastUserMessage} answers the same question for a whole worktree,
+ * which is the wrong scope for the loop guard: a worktree runs several sessions
+ * and "was I asked this by a relay?" is a question about one of them.
+ *
+ * `matchResolvedInstance`'s expression is spelled out here rather than reused
+ * through `getMessages` because this read wants the newest USER row and
+ * `getMessages` bounds by rows of every role — a turn with thirty assistant
+ * rows in it would push the user row out of any sane limit.
+ */
+export function getLastUserMessageForInstance(
+  db: Database.Database,
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  instanceId: string
+): ChatMessage | null {
+  const stmt = db.prepare(`
+    SELECT id, worktree_id, role, content, summary, timestamp, log_file_name, request_id, message_type, prompt_data, cli_tool_id, instance_id, archived
+    FROM chat_messages
+    WHERE worktree_id = ? AND role = 'user' ${ACTIVE_FILTER}
+      AND COALESCE(cli_tool_id, 'claude') = ?
+      AND COALESCE(instance_id, cli_tool_id, 'claude') = ?
+    ORDER BY timestamp DESC
+    LIMIT 1
+  `);
+
+  const row = stmt.get(worktreeId, cliToolId, instanceId) as ChatMessageRow | undefined;
+  return row ? mapChatMessage(row) : null;
+}
+
+/**
+ * The newest unanswered prompt row for one agent instance, or null.
+ *
+ * What the confirmation notice is written from. `promptData.status` is the
+ * only thing consulted — the row's own wording is what the notice quotes — and
+ * a row whose data is one of #1738's degraded records simply yields no options,
+ * which the notice renders as a question with no choices rather than dropping.
+ */
+export function getLatestOpenPromptMessage(
+  db: Database.Database,
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  instanceId: string
+): ChatMessage | null {
+  const stmt = db.prepare(`
+    SELECT id, worktree_id, role, content, summary, timestamp, log_file_name, request_id, message_type, prompt_data, cli_tool_id, instance_id, archived
+    FROM chat_messages
+    WHERE worktree_id = ? AND message_type = 'prompt' ${ACTIVE_FILTER}
+      AND COALESCE(cli_tool_id, 'claude') = ?
+      AND COALESCE(instance_id, cli_tool_id, 'claude') = ?
+    ORDER BY timestamp DESC
+    LIMIT 1
+  `);
+
+  const row = stmt.get(worktreeId, cliToolId, instanceId) as ChatMessageRow | undefined;
+  if (!row) return null;
+  const message = mapChatMessage(row);
+  return message.promptData?.status === 'answered' ? null : message;
+}
+
+/** What {@link createRelaySystemMessage} needs to write one row. */
+export interface CreateRelaySystemMessageParams {
+  worktreeId: string;
+  cliToolId: CLIToolType;
+  /** Resolved instance id; defaults to the primary (`=== cliToolId`). */
+  instanceId?: string;
+  /** The already-localized sentence the transcript shows. */
+  content: string;
+  /** The ledger row this line is about. */
+  relayId: string;
+  /** Which line it is; part of the request id so the four cannot collide. */
+  kind: string;
+  /** Epoch ms. */
+  at: number;
+}
+
+/**
+ * Persist "this session delegated / got an answer" into the transcript (#2377).
+ *
+ * An assistant row with a marker request id, exactly as
+ * {@link createModelChangeMessage} writes the model-change line, and for the
+ * same reasons: `chat_messages` has no `system` role, the transcript groups a
+ * leading assistant row as a standalone reply, and the row is `normal` so
+ * nothing scanning for open dialogs mistakes it for one. Writing it here rather
+ * than inventing a fourth history surface is what puts the line in the chat
+ * pane AND the History tab from one write.
+ *
+ * Idempotent by construction at the call site: the request id is
+ * `relay-sys:<relayId>:<kind>` and the callers probe
+ * {@link findMessageByRequestId} before writing, so a retried delivery does not
+ * leave two "waiting for the reply" lines in one transcript.
+ */
+export function createRelaySystemMessage(
+  db: Database.Database,
+  params: CreateRelaySystemMessageParams
+): ChatMessage {
+  return createMessage(db, {
+    worktreeId: params.worktreeId,
+    role: 'assistant',
+    content: params.content,
+    messageType: 'normal',
+    timestamp: new Date(params.at),
+    requestId: `${RELAY_SYSTEM_REQUEST_ID_PREFIX}${params.relayId}:${params.kind}`,
     cliToolId: params.cliToolId,
     instanceId: params.instanceId ?? params.cliToolId,
   });

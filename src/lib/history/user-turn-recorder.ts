@@ -26,6 +26,17 @@
  * 1. **The key is already on a row** — nothing happens. The callers are pollers,
  *    so being asked to record the same prompt again is the normal case rather
  *    than an error.
+ * 1b. **A RELAY delivery's row already holds this text** (Issue #2392) — the
+ *    same answer, reached without the key. A relay hands session A the reply
+ *    session B wrote by sending it into A's composer, and the row it writes
+ *    carries `relay:<ledgerId>` so that the ledger can be read back out of it
+ *    (#2387). Being keyed is exactly what put it beyond outcome 2's claim, so
+ *    until this Issue every delivery left the operator reading the reply twice.
+ *    The row is recognised here but deliberately **not** claimed: nothing is
+ *    written, its key stays `relay:<ledgerId>`, and the caller is told
+ *    `already-recorded` with that row's id — because re-pointing it at a
+ *    transcript key would take the loop guard's only route back to the ledger
+ *    away with it.
  * 2. **An unkeyed row already holds this text** — that row is *claimed*, not
  *    duplicated. This is the `/send` case, and it is the whole reason the
  *    recorder is not simply an insert: `sendUserMessage` wrote the operator's
@@ -79,7 +90,13 @@ export const USER_TURN_ADOPTION_WINDOW_MS = 120_000;
 
 /** What {@link recordUserTurn} did. */
 export type UserTurnOutcome =
-  /** The key was already on a row; nothing was written. */
+  /**
+   * This prompt is already in History; nothing was written.
+   *
+   * Either the key is on a row, or — Issue #2392 — a relay delivery's own row
+   * holds this text and keeps its own key. Callers treat the two the same: the
+   * prompt is on record and `messageId` names the row it is on.
+   */
   | 'already-recorded'
   /** An unkeyed row held this text and was claimed for the key. */
   | 'adopted'
@@ -246,21 +263,29 @@ type ChatDbModule = typeof import('@/lib/db/chat-db');
 /** The handle `chat-db` takes, without naming `better-sqlite3` statically. */
 type ChatDbHandle = Parameters<ChatDbModule['findUnkeyedUserMessages']>[0];
 
+/** One `chat_messages` row, in the shape `chat-db` hands it back. */
+type ChatDbUserRow = ReturnType<ChatDbModule['findUnkeyedUserMessages']>[number];
+
 /**
- * Claim the `/send` row for this prompt, if there is one.
+ * Recognise the row this prompt is already on, if there is one.
  *
- * The candidates come back newest first and are compared on normalised content;
- * the one nearest the agent's clock wins, which only matters when the operator
- * sent the same text twice inside the window and is the right tie-break then
- * too.
+ * One window, two kinds of row in it, and what may be done with them differs:
  *
- * The claim itself can lose — `setMessageRequestId` refuses a row that acquired
- * a key between the read and the write. Losing means some other producer got
- * there first, so the next candidate is tried and, if none is left, the caller
- * falls through to the insert. It cannot loop: each attempt either claims a row
- * or removes it from contention.
+ * 1. the `/send` row, which carries no key and is **claimed** — this is #2196's
+ *    case and the reason the recorder is not simply an insert;
+ * 2. a relay delivery's row, which carries `relay:<ledgerId>` and is **left
+ *    exactly as it is** — Issue #2392. `includeRelayDelivered` is what puts it
+ *    in the answer at all, and `requestId` is what tells the two apart.
  *
- * @returns The claimed row, or null when nothing here belongs to this prompt
+ * The claim is tried across every unkeyed candidate first, so the presence of a
+ * delivery cannot cost an orphan row its key. It can lose —
+ * `setMessageRequestId` refuses a row that acquired a key between the read and
+ * the write. Losing means some other producer got there first, so the next
+ * candidate is tried and, if none is left, the delivery is considered and then
+ * the caller falls through to the insert. It cannot loop: each attempt either
+ * claims a row or removes it from contention.
+ *
+ * @returns The row this prompt is on, or null when nothing here is this prompt's
  */
 function adoptExistingRow(
   chatDb: ChatDbModule,
@@ -280,20 +305,25 @@ function adoptExistingRow(
     options.adoptionFromMs ?? Number.POSITIVE_INFINITY
   );
 
-  const candidates = chatDb
-    .findUnkeyedUserMessages(db, {
+  const candidates = sameText(
+    chatDb.findUnkeyedUserMessages(db, {
       worktreeId: target.worktreeId,
       cliToolId: target.cliToolId,
       instanceId,
       fromMs,
       toMs: at + USER_TURN_ADOPTION_WINDOW_MS,
-    })
-    .filter((row) => normalizeUserTurnContent(row.content) === normalized)
-    .sort(
-      (a, b) => Math.abs(a.timestamp.getTime() - at) - Math.abs(b.timestamp.getTime() - at)
-    );
+      // Issue #2392. Without this the relay delivery's row is not in the answer
+      // at all, and the prompt it holds is inserted a second time.
+      includeRelayDelivered: true,
+    }),
+    normalized,
+    at
+  );
 
   for (const candidate of candidates) {
+    // A relay delivery, kept for the pass below: claiming it would overwrite the
+    // `relay:<ledgerId>` the loop guard reads the ledger back out of.
+    if (candidate.requestId) continue;
     if (!chatDb.setMessageRequestId(db, candidate.id, key)) continue;
     logger.info('user-turn-adopted', {
       ...describe(target),
@@ -308,5 +338,50 @@ function adoptExistingRow(
     };
   }
 
+  // Issue #2392. Nothing is written here and that is the whole point: the row
+  // already says what this prompt says, and its `request_id` is the loop guard's
+  // only way back to the ledger entry that produced it (`findParentRelayHops`,
+  // #2387). So the prompt is reported as recorded on the row that holds it, and
+  // the insert below is not reached. `setMessageRequestId` would refuse the
+  // write anyway — it is a compare-and-set on `request_id IS NULL` — but the
+  // branch above says so explicitly rather than leaning on that.
+  //
+  // No direction test on the timestamp, unlike #2387's `isEchoOfRelayRow`: that
+  // one is deciding whether a row it can already see is an echo, while this is
+  // deciding whether to write a row at all, and a transcript whose clock rounds
+  // a prompt to a whole second would land just *before* the delivery and bring
+  // the duplicate straight back. The symmetric window is safe here because the
+  // text being matched is a relay body — `buildRelayReplyMessage`'s framing, not
+  // anything an operator types.
+  const delivered = candidates.find((candidate) => candidate.requestId);
+  if (delivered) {
+    logger.info('user-turn-already-relayed', {
+      ...describe(target),
+      requestId: key,
+      messageId: delivered.id,
+      relayRequestId: delivered.requestId ?? null,
+      driftMs: delivered.timestamp.getTime() - at,
+    });
+    return {
+      outcome: 'already-recorded',
+      messageId: delivered.id,
+      timestampMs: delivered.timestamp.getTime(),
+    };
+  }
+
   return null;
+}
+
+/**
+ * The rows here that hold this prompt's text, nearest the agent's clock first.
+ *
+ * Content is compared normalised, because that is the only comparison
+ * `chat_messages` cannot make for itself (see `findUnkeyedUserMessages`). The
+ * ordering only matters when the same text sits on two rows inside the window,
+ * and nearest-in-time is the right tie-break then too.
+ */
+function sameText(rows: ChatDbUserRow[], normalized: string, at: number): ChatDbUserRow[] {
+  return rows
+    .filter((row) => normalizeUserTurnContent(row.content) === normalized)
+    .sort((a, b) => Math.abs(a.timestamp.getTime() - at) - Math.abs(b.timestamp.getTime() - at));
 }

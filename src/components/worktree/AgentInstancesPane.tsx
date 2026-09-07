@@ -16,7 +16,7 @@
 'use client';
 
 import React, { useState, useCallback, useEffect, useMemo, memo } from 'react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import {
   GripVertical,
   ChevronUp,
@@ -29,7 +29,11 @@ import {
   Radio,
   Check,
   Terminal,
+  Send,
+  Forward,
 } from 'lucide-react';
+import { useSessionRelays } from '@/lib/relay/use-session-relays';
+import { resolveRelayBadges, type RelayBadge } from '@/lib/relay/relay-badges';
 import {
   CLI_TOOL_IDS,
   getCliToolDisplayName,
@@ -60,6 +64,17 @@ import { AgentUpdatesCard } from '@/components/settings';
 import { Spinner } from '@/components/ui/Spinner';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { TruncationTooltip } from '@/components/common/TruncationTooltip';
+import { useToast } from '@/components/common/Toast';
+// Issue #2376: the delegation brief, and the one way a component on this screen
+// can reach the composer. Imported from the palette because that module is
+// already in every page's shell — see `insertIntoVisibleComposer` for why the
+// screen's own `onInsertToComposer` is out of reach from here.
+import {
+  DELEGATE_TEXT,
+  fetchDelegationBrief,
+  insertIntoVisibleComposer,
+  readVisibleChatInstanceId,
+} from '@/components/common/CommandPalette';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -238,6 +253,19 @@ function useAgentSourceByInstance(
   return provided ?? fetched;
 }
 
+/**
+ * Token classes for a relay badge (Issue #2377).
+ *
+ * `prompt` is the only one drawn as a warning, because it is the only one that
+ * means somebody has to act; the other two are statements of fact about work
+ * that is proceeding, and are drawn in the same muted grey as the model and
+ * event-source lines above them. Semantic tokens only — see
+ * `scripts/check-token-discipline.mjs`.
+ */
+export function relayBadgeClassName(badge: RelayBadge): string {
+  return badge.tone === 'prompt' ? 'text-warning' : 'text-muted-foreground';
+}
+
 // ============================================================================
 // Component
 // ============================================================================
@@ -255,6 +283,8 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
   className = '',
 }: AgentInstancesPaneProps) {
   const t = useTranslations('schedule');
+  const locale = useLocale();
+  const { showToast } = useToast();
   const tCommon = useTranslations('common');
   // Issue #1783: the model strings live in the `worktree` namespace beside the
   // other session-status wording, not in `schedule` with the roster editor's.
@@ -282,12 +312,64 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
   // at most one pair of reads — can ever be live.
   const [cliCommandsFor, setCliCommandsFor] = useState<string | null>(null);
 
+  /**
+   * Insert "here is how you delegate to this session" into the composer
+   * (Issue #2376).
+   *
+   * The row is the TARGET (session B); the composer belongs to whichever
+   * session the operator is talking to (session A). Refused when the two are
+   * the same — "own" being the instance whose transcript is visible, which in
+   * terminal mode nothing publishes, so an unknown answer does not block the
+   * insert rather than making the item look broken.
+   *
+   * The brief itself is built from two server reads, never from this row: the
+   * binary name and port prefix exist only in the server process, and the
+   * `--instance` value has to be the RESOLVED one (see
+   * {@link InstanceCliCommandsModal} for what two authorities on that cost).
+   */
+  const handleDelegate = useCallback(
+    async (inst: AgentInstance) => {
+      const text = DELEGATE_TEXT[locale === 'ja' ? 'ja' : 'en'];
+      if (readVisibleChatInstanceId() === inst.id) {
+        showToast(text.self, 'info');
+        return;
+      }
+      const brief = await fetchDelegationBrief(worktreeId, inst, locale);
+      if (brief === null) {
+        showToast(text.failed, 'error');
+        return;
+      }
+      const inserted = insertIntoVisibleComposer(brief);
+      showToast(inserted ? text.inserted : text.noComposer, inserted ? 'success' : 'error');
+    },
+    [locale, showToast, worktreeId],
+  );
+
   // Issue #2054: read before the first row is built so every row resolves from
   // one snapshot rather than from a map that could change mid-render.
   const sourceStatusByInstance = useAgentSourceByInstance(
     worktreeId,
     instances,
     sourceByInstance,
+  );
+
+  // Issue #2377: the open relays at both ends of every session in this
+  // worktree, read once for the whole pane for the same reason.
+  const relays = useSessionRelays(worktreeId);
+  // The other end of a relay is usually a session in ANOTHER worktree, whose
+  // roster this pane has not read — so the alias falls back to the instance id
+  // and is qualified by the worktree whenever it is not one of ours. A bare
+  // `Codex 2` pointing at somebody else's repository is the ambiguity the relay
+  // header itself avoids by always printing both.
+  const aliasOf = useCallback(
+    (endpoint: { worktreeId: string; instanceId: string }) => {
+      if (endpoint.worktreeId !== worktreeId) {
+        return `${endpoint.instanceId} @ ${endpoint.worktreeId}`;
+      }
+      return instances.find((inst) => inst.id === endpoint.instanceId)?.alias
+        ?? endpoint.instanceId;
+    },
+    [instances, worktreeId],
   );
 
   const atMax = instances.length >= MAX_AGENT_INSTANCES;
@@ -497,6 +579,14 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
           const instanceSource = sourceStatusByInstance?.[inst.id];
           const sourceLabel = formatAgentSourceLabel(instanceSource, tWorktree);
           const sourceDegraded = isAgentSourceDegraded(instanceSource);
+          // Issue #2377: what this session owes and what it is waiting for.
+          // Empty for every row with no open relay, which is every row in a
+          // worktree nobody has delegated to or from.
+          const relayBadges = resolveRelayBadges({
+            owed: relays.owedBy(inst.id),
+            awaiting: relays.awaitedBy(inst.id),
+            aliasOf,
+          });
           return (
             <div
               key={inst.id}
@@ -584,6 +674,23 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
                     <span className="truncate">{sourceLabel}</span>
                   </span>
                 )}
+                {/* Issue #2377: the relay lines. Absent whenever nothing is
+                    open, on exactly the same terms as the two blocks above —
+                    a roster of sessions nobody has delegated to renders
+                    identically to before this Issue. */}
+                {relayBadges.map((badge) => (
+                  <span
+                    key={badge.key}
+                    data-testid={`agent-instance-relay-${badge.tone}-${inst.id}`}
+                    title={tWorktree(`relay.${badge.titleKey}`)}
+                    className={`mt-0.5 flex items-center gap-1 truncate text-xs ${relayBadgeClassName(badge)}`}
+                  >
+                    <Forward className="w-3 h-3 shrink-0" aria-hidden="true" />
+                    <span className="truncate">
+                      {tWorktree(`relay.${badge.key}`, badge.params)}
+                    </span>
+                  </span>
+                ))}
               </div>
 
               {/* Issue #2120: how to drive THIS instance from a terminal. An icon
@@ -624,6 +731,20 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
                   </button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
+                  {/* Issue #2376: the one item here that does NOT mutate the
+                      roster. It is in the kebab rather than beside the CLI-
+                      commands icon because it is an action ("put this text
+                      there"), not a reference panel to read. */}
+                  <DropdownMenuItem
+                    data-testid={`agent-instance-delegate-${inst.id}`}
+                    onSelect={() => {
+                      void handleDelegate(inst);
+                    }}
+                  >
+                    <Send className="w-4 h-4" />
+                    {DELEGATE_TEXT[locale === 'ja' ? 'ja' : 'en'].menuItem}
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
                   <DropdownMenuItem
                     data-testid={`agent-instance-move-up-${inst.id}`}
                     disabled={index === 0}

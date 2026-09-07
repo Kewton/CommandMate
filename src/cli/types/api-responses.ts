@@ -220,6 +220,19 @@ export interface CurrentOutputResponse {
   /** Issue #1017: Codex pager/edit-previous mode (subset of isSelectionListActive). */
   isPagerActive?: boolean;
   /**
+   * Issue #2369: a dismiss-only overlay is on the pane — its footer offers
+   * `Esc to close` and nothing else (Command Code's `/usage`).
+   *
+   * Disjoint from {@link isSelectionListActive}, unlike {@link isPagerActive}
+   * which is a subset of it: this screen has no highlight to move, which is the
+   * whole reason it is published separately rather than folded into the flag
+   * the arrow pad is drawn from.
+   *
+   * Optional because a daemon older than #2369 sends nothing, and `undefined`
+   * there means "this server predates the field" rather than "no such panel".
+   */
+  isDismissablePanelActive?: boolean;
+  /**
    * The frame is interactive but the detection layer could not classify it
    * (Issue #1497). The server has published this since #1120; until Issue #1708
    * the CLI never read it, so a dialog the scraper failed to parse was treated
@@ -976,6 +989,26 @@ export interface PromptMessageResponse {
   promptData?: PromptData;
   cliToolId?: string;
   instanceId?: string;
+  /**
+   * The producer's own id for this row, when it had one (Issue #2386).
+   *
+   * `chat_messages.request_id`, already carried by the server's internal
+   * `ChatMessage` and already serialized by
+   * `GET /api/worktrees/:id/messages` — it was simply missing from this mirror,
+   * so the CLI could not see the one field that separates a transcript reader's
+   * row from a screen scrape.
+   *
+   * It is a namespace plus an id, and the namespace is what a reader matches:
+   * `<tool>-turn:<id>` (`codex-turn:`, `claude-turn:`, `antigravity-turn:`,
+   * `command-code-turn:`, opencode's `oc-turn:`) means "a transcript reader
+   * wrote this, and it is the agent's own words"; `relay-sys:` / `model-changed:`
+   * mean "CommandMate wrote this about the session"; **absent** means the row
+   * came off the screen. `ask` requires the first of those (Issue #2386): the
+   * codex scraper writes the idle composer into the ledger as an assistant row
+   * with no request id in the millisecond before a send, and that junk was
+   * being printed as the answer.
+   */
+  requestId?: string;
   archived: boolean;
 }
 
@@ -1997,4 +2030,74 @@ export interface InterruptResponse {
   /** e.g. `Interrupt sent to 1 session(s)`. */
   message: string;
   interrupted: InterruptedSession[];
+}
+
+// ===========================================================================
+// Relays (Issue #2377)
+// ===========================================================================
+
+/**
+ * Mirrors: `RelayEndpoint` in src/lib/relay/types.ts.
+ *
+ * `instanceId` is always the RESOLVED id — the primary instance's id is its
+ * tool's id (#868) — because that is the only form any other route accepts.
+ */
+export interface RelayEndpointResponse {
+  worktreeId: string;
+  instanceId: string;
+}
+
+/**
+ * Mirrors: `SessionRelay` in src/lib/relay/types.ts.
+ *
+ * `state` is `string` rather than a union for the reason every other id on this
+ * page is: the CLI bundle keeps its own copy of the API shapes, and a newer
+ * daemon naming a state this build has never heard of must print through rather
+ * than fail to parse.
+ */
+export interface RelayView {
+  id: string;
+  /** The session that asked, and is owed the answer. */
+  from: RelayEndpointResponse;
+  /** The session that was asked. */
+  to: RelayEndpointResponse;
+  state: string;
+  hops: number;
+  sentRequestId: string | null;
+  pendingKind: string | null;
+  /** Epoch ms. */
+  createdAt: number;
+  updatedAt: number;
+  expiresAt: number;
+  deliveredAt: number | null;
+}
+
+/** Mirrors: `RelayCounts` in src/lib/relay/types.ts. */
+export interface RelayCountsResponse {
+  pending: number;
+  delivered: number;
+  prompt: number;
+  expired: number;
+  cancelled: number;
+}
+
+/** Mirrors: src/app/api/relays/route.ts GET 200 response. */
+export interface RelayListResponse {
+  /** Open relays this session must answer. Empty unless `instance` was given. */
+  owed: RelayView[];
+  /** Open relays this session is waiting on. Empty unless `instance` was given. */
+  awaiting: RelayView[];
+  /** Every open relay in scope, whichever end it belongs to. */
+  open: RelayView[];
+  counts: RelayCountsResponse;
+}
+
+/** Mirrors: src/app/api/relays/route.ts POST 201 response. */
+export interface RelayCreateResponse {
+  relay: RelayView;
+}
+
+/** Mirrors: src/app/api/relays/[relayId]/cancel/route.ts POST 200 response. */
+export interface RelayCancelResponse {
+  relay: RelayView;
 }

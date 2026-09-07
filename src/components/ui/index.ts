@@ -12,6 +12,7 @@ export type { CardProps, CardHeaderProps, CardTitleProps, CardContentProps, Card
 export { Badge } from './Badge';
 export type { BadgeProps, BadgeVariant } from './Badge';
 
+export { GroupIcon } from './GroupIcon';
 export { StatusDot } from './StatusDot';
 export type { StatusDotProps, StatusDotStatus, StatusDotSize } from './StatusDot';
 
