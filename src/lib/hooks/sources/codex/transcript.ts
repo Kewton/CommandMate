@@ -132,6 +132,23 @@ export const MAX_CODEX_TOOL_DETAIL_LENGTH = 200;
 /** The label a reasoning summary is folded behind. Same word claude uses. */
 export const CODEX_THINKING_LABEL = 'Thinking';
 
+/**
+ * `AgentMessage.phase` for the reply codex means the operator to read.
+ *
+ * Measured 268 of 2,211 archived `AgentMessage` items
+ * (`docs/design/codex-transcript-reader.md` §2.3).
+ */
+export const CODEX_FINAL_ANSWER_PHASE = 'final_answer';
+
+/**
+ * `AgentMessage.phase` for the progress narration codex writes while it works.
+ *
+ * Measured 1,943 of 2,211 — the majority of what codex says in a turn is this.
+ * The one phase {@link renderCodexTurn} folds; see its docblock for why the
+ * classification is an allow-list of exactly this value and nothing else.
+ */
+export const CODEX_COMMENTARY_PHASE = 'commentary';
+
 /** One `item_completed` item, reduced to what a reader needs. */
 export interface CodexRolloutItem {
   /** `UserMessage` / `AgentMessage` / `CommandExecution` / … verbatim. */
@@ -145,7 +162,14 @@ export interface CodexRolloutItem {
    * `Reasoning`. Null for every item that carries none.
    */
   readonly text: string | null;
-  /** `commentary` / `final_answer` on an `AgentMessage`; null otherwise. */
+  /**
+   * `commentary` / `final_answer` on an `AgentMessage`; null otherwise.
+   *
+   * Kept as the raw string rather than a union: this is what the file said, and
+   * a phase codex adds later has to survive the trip to
+   * {@link renderCodexTurn}'s allow-list intact so it can be treated as body
+   * text. Read `null` as "codex wrote no phase", never as a default.
+   */
   readonly phase: string | null;
   /** The one-line summary of a tool item; null when it has none. */
   readonly detail: string | null;
@@ -225,7 +249,12 @@ export interface CodexRenderedTurn {
    * only that something is missing.
    */
   readonly headless: boolean;
-  /** How many `AgentMessage` items contributed prose. */
+  /**
+   * How many `AgentMessage` items contributed text.
+   *
+   * Counts the folded `commentary` too (#2420): the number says how much the
+   * agent wrote, not where in the body it ended up.
+   */
   readonly textBlocks: number;
   /** How many tool items were summarised. */
   readonly toolBlocks: number;
@@ -592,13 +621,83 @@ function renderReasoningItem(text: string): string {
 }
 
 /**
+ * The prose one `AgentMessage` contributes, or `''` when it contributes none.
+ *
+ * The single definition of "non-empty body" for this reader, shared by
+ * {@link hasFinalAnswerProse} and by {@link renderCodexTurn}'s loop on purpose:
+ * the fallback asks whether the turn renders an answer, and if the two spelled
+ * that test out separately they could disagree about a message that is nothing
+ * but whitespace — the exact turn the fallback exists for.
+ */
+function agentMessageText(item: CodexRolloutItem): string {
+  return item.text?.trim() ?? '';
+}
+
+/**
+ * Whether this turn renders at least one non-empty `final_answer`.
+ *
+ * The test is on the **rendered body**, not on the presence of an item: item
+ * count and drawn paragraphs are different quantities, because a message whose
+ * text is empty or whitespace is dropped before it reaches the body. A turn
+ * whose only `final_answer` is blank would, on an item-count test, fold its
+ * commentary away and leave an empty bubble.
+ */
+function hasFinalAnswerProse(turn: CodexTurnAccumulator): boolean {
+  return turn.items.some(
+    (item) =>
+      item.type === 'AgentMessage' &&
+      item.phase === CODEX_FINAL_ANSWER_PHASE &&
+      agentMessageText(item).length > 0
+  );
+}
+
+/**
  * Render one turn to Markdown.
  *
  * Transcript order within each kind — the same decision #2041 and #2121 took,
  * and for the same reason: the order is the only record of what happened when,
- * and this row is the record. Both `commentary` and `final_answer` messages are
- * kept; codex's TUI shows both, and dropping the commentary would remove the
- * sentence that explains what the tool line underneath it is for.
+ * and this row is the record.
+ *
+ * ## Why `commentary` is folded now (Issue #2420)
+ *
+ * #2197 kept `commentary` in the body on the argument that "the sentence that
+ * explains what the tool line underneath it is for" would otherwise be lost.
+ * **#2234 retired that argument by moving every tool line to a folded section
+ * at the end of the body** — there is no line underneath the commentary any
+ * more, so what leads the bubble is narration with nothing left to narrate.
+ * Measured on one live session (`codex-turn:01a07e37-0658`): 4 commentary
+ * blocks / 754 characters in front of a single 495-character answer, so the
+ * operator read four paragraphs of progress notes before reaching the reply.
+ *
+ * ## The classification is an allow-list
+ *
+ * Exactly `phase === 'commentary'` folds. `final_answer`, a missing `phase` and
+ * any value codex has not shipped yet all stay in the body. The deny-list
+ * spelling — "fold everything that is not `final_answer`" — is rejected on
+ * #2196's discipline: it hands codex the power to hide the body of a bubble by
+ * adding a phase name, and the failure would be silent. Every `final_answer` is
+ * kept, not just the last: the measured corpus has turns carrying more than one.
+ *
+ * ## The fallback
+ *
+ * A turn with no non-empty `final_answer` keeps its commentary in the body —
+ * see {@link hasFinalAnswerProse}. Folding is only ever an improvement when
+ * there is something better to lead with.
+ *
+ * ## Why the `Thinking` chip and not a new label
+ *
+ * The folded commentary rides `../turn-body`'s existing `reasoning` kind, so it
+ * lands under the `Thinking (N)` heading the other readers already write, and
+ * `splitChatThinking` in `components/worktree/ChatMessageBubble` draws it in
+ * the chip that is already there. A second label (`Progress`) would read more
+ * precisely, and it was rejected on cost: these labels are baked into
+ * `chat_messages.content` **at read time**, so a new one is a string every
+ * future reader of the table has to keep folding forever, for rows nothing can
+ * re-label. Against that, the chip already means the right thing — "subordinate
+ * narration the reader may want and does not want first" — and the operator who
+ * reported #2420 called this content "thinking" in their own words. Same
+ * reasoning as {@link CODEX_THINKING_LABEL}, which is `Thinking` for the same
+ * reason.
  *
  * The layout — prose first, the calls folded into one labelled section — is
  * `../turn-body`'s and is shared with the other three readers (#2234).
@@ -608,12 +707,14 @@ export function renderCodexTurn(turn: CodexTurnAccumulator): CodexRenderedTurn {
   const unknown = new Set<string>();
   let textBlocks = 0;
   let toolBlocks = 0;
+  const foldsCommentary = hasFinalAnswerProse(turn);
 
   for (const item of turn.items) {
     if (item.type === 'AgentMessage') {
-      const text = item.text?.trim() ?? '';
+      const text = agentMessageText(item);
       if (text.length === 0) continue;
-      rendered.push({ kind: 'prose', text });
+      const folds = foldsCommentary && item.phase === CODEX_COMMENTARY_PHASE;
+      rendered.push({ kind: folds ? 'reasoning' : 'prose', text });
       textBlocks += 1;
       continue;
     }
