@@ -77,15 +77,19 @@ export function reportSessionStartFailure(
 }
 
 /**
- * An adopted tmux session whose hooks are addressed to another server
- * (Issue #2429).
+ * A tmux session whose hooks are addressed to another server (Issue #2429).
  *
  * Not a failed start — the session is up and the agent is answering — which is
  * why it carries its own shape rather than being squeezed into a
  * {@link SessionStartFailureReport} with a synthetic error. What it shares with
- * one is the audience and the moment: it is discovered at start time, nothing
- * else on any surface reports it, and the operator has to act (restart the
- * session) before the agent's telemetry reaches this server again.
+ * one is the audience: nothing else on any surface reports it, and the operator
+ * has to act (restart the session) before the agent's telemetry reaches this
+ * server again.
+ *
+ * The moment it is discovered is no longer only a start. Issue #2433 measured
+ * that the start-time probe cannot see the case #2429 was written for — the
+ * pane is alive, so nothing restarts it — and added the send path, which is the
+ * one that keeps typing into the mispointed session.
  */
 export interface StaleHookUrlReport {
   worktreeId: string;
@@ -106,8 +110,9 @@ export interface StaleHookUrlReport {
  * The "once" in the Issue's acceptance, and it is keyed on the *facts* rather
  * than on the session name so the two ways this can recur read correctly:
  *
- *  - the same pane adopted again by the same server is the same sentence, and
- *    is dropped;
+ *  - the same pane asked about again by the same server — adopted a second
+ *    time, or sent to a hundred times more — is the same sentence, and is
+ *    dropped;
  *  - a pane that moves to a different mismatch — a third server, or the one it
  *    was pointing at coming back — is a different sentence and is told.
  *
@@ -118,7 +123,7 @@ export interface StaleHookUrlReport {
 const reportedStaleHookUrls = new Set<string>();
 
 /**
- * Report an adopted session whose hook URL names another server, at most once.
+ * Report a session whose hook URL names another server, at most once.
  *
  * Fire-and-forget through the same one窓口 as {@link reportSessionStartFailure},
  * and deferred behind `await import()` for the same reason: this file is loaded
