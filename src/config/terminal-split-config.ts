@@ -190,8 +190,21 @@ export function resolveRowHeights(rowHeights: number[] | undefined): number[] {
  */
 export function toGridTrackFractions(a: number, b: number): [number, number] {
   const total = a + b;
-  if (!Number.isFinite(total) || total <= 0) return [0.5, 0.5];
-  return [a / total, b / total];
+  if (!Number.isFinite(total) || total <= 0) return [1, 1];
+  const smaller = Math.min(a, b);
+  // Scaling by the SMALLER share, not by the total. Both spellings preserve the
+  // ratio, and both fix the plain case, but only this one survives `minmax()`:
+  // when a row is pinned at MIN_GRID_ROW_PX the grid freezes that track and
+  // distributes what is left among the REMAINING flex factors, so a pair
+  // normalised to sum 1 leaves its partner holding a factor below 1 and the gap
+  // re-opens. Measured in Chromium on a 775px container:
+  // `minmax(280px, 0.7387fr) / minmax(280px, 0.2613fr)` lays out as
+  // `362.7px / 280px` and strands 128px, while the same ratio written as
+  // `2.827fr / 1fr` fills it exactly (`491px / 280px`). Dividing by the smaller
+  // share makes every factor >= 1, so whichever track survives a freeze still
+  // claims all of the leftover space.
+  if (!Number.isFinite(smaller) || smaller <= 0) return [1, 1];
+  return [a / smaller, b / smaller];
 }
 
 /**

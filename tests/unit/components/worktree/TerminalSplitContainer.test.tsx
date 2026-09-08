@@ -937,10 +937,10 @@ describe('[#2421] TerminalSplitContainer 2x2 grid', () => {
     // factors (#2424). The stored shares are `0.25` per pane; handing those to
     // CSS verbatim sums to 0.5, which lays the tracks out at half width and
     // leaves the right half of the grid blank.
-    expect(layout().style.gridTemplateColumns).toBe('0.5fr 4px 0.5fr');
+    expect(layout().style.gridTemplateColumns).toBe('1fr 4px 1fr');
     // ...and two pane rows, each floored so a 2x2 cannot crush the terminals.
     expect(layout().style.gridTemplateRows).toBe(
-      `minmax(${MIN_GRID_ROW_PX}px, 0.5fr) 4px minmax(${MIN_GRID_ROW_PX}px, 0.5fr)`,
+      `minmax(${MIN_GRID_ROW_PX}px, 1fr) 4px minmax(${MIN_GRID_ROW_PX}px, 1fr)`,
     );
   });
 
@@ -950,8 +950,14 @@ describe('[#2421] TerminalSplitContainer 2x2 grid', () => {
    * The regression it guards was a ratio that was already right — `0.25fr` and
    * `0.25fr` describe two equal columns — laid out at half width because CSS
    * gives tracks whose flex factors sum below 1 only that fraction of the
-   * leftover space. Asserting the ratio alone passes against the bug, so these
-   * assert the SUM, which is the property the container's width depends on.
+   * leftover space. Asserting the ratio alone passes against the bug.
+   *
+   * The invariant asserted here is **每 factor >= 1**, not "the pair sums to 1".
+   * The weaker one is not enough under `minmax()`: once a row is pinned at
+   * MIN_GRID_ROW_PX the grid freezes that track and shares what is left among
+   * the REMAINING factors, so a partner holding 0.74 strands the rest. Measured
+   * on a 775px container: `0.7387fr / 0.2613fr` renders `362.7px / 280px` and
+   * leaves 128px blank; `2.827fr / 1fr` renders `491px / 280px` and leaves none.
    */
   describe('grid tracks fill the container (Issue #2424)', () => {
     // Every `<number>fr` in the template, wherever it sits — the row track is
@@ -963,16 +969,23 @@ describe('[#2421] TerminalSplitContainer 2x2 grid', () => {
         0,
       );
 
-    it('column fr factors sum to at least 1 on a fresh grid', () => {
+    const frFactors = (template: string): number[] =>
+      [...template.matchAll(/([\d.]+)fr/g)].map((m) => parseFloat(m[1]));
+
+    it('every column fr factor is at least 1 on a fresh grid', () => {
       setup();
       addSplits(3);
-      expect(frSum(layout().style.gridTemplateColumns)).toBeCloseTo(1, 5);
+      const factors = frFactors(layout().style.gridTemplateColumns);
+      expect(factors).toHaveLength(2);
+      for (const f of factors) expect(f).toBeGreaterThanOrEqual(1);
     });
 
-    it('row fr factors sum to at least 1 on a fresh grid', () => {
+    it('every row fr factor is at least 1 on a fresh grid', () => {
       setup();
       addSplits(3);
-      expect(frSum(layout().style.gridTemplateRows)).toBeCloseTo(1, 5);
+      const factors = frFactors(layout().style.gridTemplateRows);
+      expect(factors).toHaveLength(2);
+      for (const f of factors) expect(f).toBeGreaterThanOrEqual(1);
     });
 
     it('fills vertically for a persisted rowHeights pair that sums below 1', () => {
@@ -991,7 +1004,9 @@ describe('[#2421] TerminalSplitContainer 2x2 grid', () => {
       });
       setup();
       expect(layout()).toHaveAttribute('data-layout', 'grid');
-      expect(frSum(layout().style.gridTemplateRows)).toBeCloseTo(1, 5);
+      const factors = frFactors(layout().style.gridTemplateRows);
+      expect(factors).toHaveLength(2);
+      for (const f of factors) expect(f).toBeGreaterThanOrEqual(1);
     });
   });
 
@@ -1080,7 +1095,7 @@ describe('[#2421] TerminalSplitContainer 2x2 grid', () => {
 
         // Top row grew, bottom row shrank, and the pair still sums to 1.
         expect(layout().style.gridTemplateRows).toBe(
-          `minmax(${MIN_GRID_ROW_PX}px, 0.6fr) 4px minmax(${MIN_GRID_ROW_PX}px, 0.4fr)`,
+          `minmax(${MIN_GRID_ROW_PX}px, 1.4999999999999998fr) 4px minmax(${MIN_GRID_ROW_PX}px, 1fr)`,
         );
         const stored = readTerminalSplitsLocalStorage('w-1');
         expect(stored?.rowHeights?.[0]).toBeCloseTo(0.6, 5);
@@ -1166,7 +1181,7 @@ describe('[#2421] TerminalSplitContainer 2x2 grid', () => {
         // out as normalised `fr` (#2424): the handler preserves its own total
         // (0.5), so the shares stay 0.3 / 0.2 and only the rendered factors are
         // scaled.
-        expect(layout().style.gridTemplateColumns).toBe('0.6fr 4px 0.4fr');
+        expect(layout().style.gridTemplateColumns).toBe('1.4999999999999998fr 4px 1fr');
         const stored = readTerminalSplitsLocalStorage('w-1');
         expect(stored?.widths?.[2]).toBeCloseTo(stored?.widths?.[0] ?? 0, 5);
         expect(stored?.widths?.[3]).toBeCloseTo(stored?.widths?.[1] ?? 0, 5);
