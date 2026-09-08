@@ -17,6 +17,7 @@ import { SURFACE_MODE_CHANGE_EVENT } from '@/hooks/useSplitSurfaceModes';
 import { getSplitSurfaceModeStorageKey } from '@/config/surface-mode-config';
 import {
   clearTerminalSplitsLocalStorage,
+  mockTerminalSplitsLocalStorage,
   readTerminalSplitsLocalStorage,
 } from '@tests/helpers/terminal-splits';
 import { TOOLTIP_DELAY_MS } from '@/components/common/Tooltip';
@@ -932,12 +933,66 @@ describe('[#2421] TerminalSplitContainer 2x2 grid', () => {
     addSplits(3);
     expect(layout()).toHaveAttribute('data-layout', 'grid');
     expect(layout().className).toContain('grid');
-    // Two pane columns with a divider track between them...
-    expect(layout().style.gridTemplateColumns).toBe('0.25fr 4px 0.25fr');
+    // Two pane columns with a divider track between them, as NORMALISED `fr`
+    // factors (#2424). The stored shares are `0.25` per pane; handing those to
+    // CSS verbatim sums to 0.5, which lays the tracks out at half width and
+    // leaves the right half of the grid blank.
+    expect(layout().style.gridTemplateColumns).toBe('0.5fr 4px 0.5fr');
     // ...and two pane rows, each floored so a 2x2 cannot crush the terminals.
     expect(layout().style.gridTemplateRows).toBe(
       `minmax(${MIN_GRID_ROW_PX}px, 0.5fr) 4px minmax(${MIN_GRID_ROW_PX}px, 0.5fr)`,
     );
+  });
+
+  /*
+   * Issue #2424: the grid must FILL its container, not merely keep the ratio.
+   *
+   * The regression it guards was a ratio that was already right — `0.25fr` and
+   * `0.25fr` describe two equal columns — laid out at half width because CSS
+   * gives tracks whose flex factors sum below 1 only that fraction of the
+   * leftover space. Asserting the ratio alone passes against the bug, so these
+   * assert the SUM, which is the property the container's width depends on.
+   */
+  describe('grid tracks fill the container (Issue #2424)', () => {
+    // Every `<number>fr` in the template, wherever it sits — the row track is
+    // `minmax(280px, 0.5fr)`, so splitting on spaces would miss it entirely and
+    // report a sum of 0 for a perfectly good template.
+    const frSum = (template: string): number =>
+      [...template.matchAll(/([\d.]+)fr/g)].reduce(
+        (total, match) => total + parseFloat(match[1]),
+        0,
+      );
+
+    it('column fr factors sum to at least 1 on a fresh grid', () => {
+      setup();
+      addSplits(3);
+      expect(frSum(layout().style.gridTemplateColumns)).toBeCloseTo(1, 5);
+    });
+
+    it('row fr factors sum to at least 1 on a fresh grid', () => {
+      setup();
+      addSplits(3);
+      expect(frSum(layout().style.gridTemplateRows)).toBeCloseTo(1, 5);
+    });
+
+    it('fills vertically for a persisted rowHeights pair that sums below 1', () => {
+      // `isValidRowHeights` accepts any positive pair, so this payload is legal
+      // and reaches the renderer as-is. Before #2424 it opened a gap along the
+      // bottom the same way the columns opened one down the right.
+      mockTerminalSplitsLocalStorage('w-1', {
+        splits: [
+          { cliToolId: 'claude', instanceId: 'claude' },
+          { cliToolId: 'claude', instanceId: 'claude-2' },
+          { cliToolId: 'codex', instanceId: 'codex' },
+          { cliToolId: 'codex', instanceId: 'codex-2' },
+        ],
+        widths: [0.25, 0.25, 0.25, 0.25],
+        rowHeights: [0.3, 0.3],
+      });
+      setup();
+      expect(layout()).toHaveAttribute('data-layout', 'grid');
+      expect(frSum(layout().style.gridTemplateRows)).toBeCloseTo(1, 5);
+    });
   });
 
   it('places the four panes as 2 rows x 2 columns (not one row of four)', () => {
@@ -1107,8 +1162,11 @@ describe('[#2421] TerminalSplitContainer 2x2 grid', () => {
         fireEvent.mouseMove(document, { clientX: 600 }); // +100px of 1000px
         fireEvent.mouseUp(document);
 
-        // 0.25 + 0.1 * (0.25 + 0.25) = 0.30 -> a 60/40 column split.
-        expect(layout().style.gridTemplateColumns).toBe('0.3fr 4px 0.2fr');
+        // 0.25 + 0.1 * (0.25 + 0.25) = 0.30 -> a 60/40 column split, written
+        // out as normalised `fr` (#2424): the handler preserves its own total
+        // (0.5), so the shares stay 0.3 / 0.2 and only the rendered factors are
+        // scaled.
+        expect(layout().style.gridTemplateColumns).toBe('0.6fr 4px 0.4fr');
         const stored = readTerminalSplitsLocalStorage('w-1');
         expect(stored?.widths?.[2]).toBeCloseTo(stored?.widths?.[0] ?? 0, 5);
         expect(stored?.widths?.[3]).toBeCloseTo(stored?.widths?.[1] ?? 0, 5);

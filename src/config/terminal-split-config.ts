@@ -161,6 +161,40 @@ export function resolveRowHeights(rowHeights: number[] | undefined): number[] {
 }
 
 /**
+ * Issue #2424: the two `fr` factors a grid track pair is rendered with.
+ *
+ * `widths` and `rowHeights` are unitless SHARES — only their ratio carries
+ * meaning, and nothing in this module constrains what they sum to.
+ * `equalGridWidths()` writes `1 / 4` per pane, so a fresh 2x2 grid reaches the
+ * renderer as `0.25` and `0.25`; `isValidRowHeights` likewise accepts any pair
+ * of positive numbers, so a persisted `[0.3, 0.3]` is valid.
+ *
+ * Handed to CSS unchanged, that is a bug rather than a scale: **when the flex
+ * factors of a grid sum to LESS THAN 1, the tracks take only that fraction of
+ * the leftover space instead of sharing all of it.** Measured in Chromium on a
+ * 1000px container: `0.25fr 4px 0.25fr` lays out as `249px 4px 249px` and
+ * leaves 498px blank, which is the ~50% gap #2424 reported down the right of
+ * the grid. `0.5fr` / `1fr` pairs both fill it.
+ *
+ * Normalising here rather than at the source keeps the fix in one place and
+ * independent of scale: the persisted shapes are unchanged (no migration), and
+ * `handleGridColumnResize` / `handleGridRowResize` can keep preserving their
+ * own total the way they do — whatever total that is, the tracks still fill the
+ * container.
+ *
+ * @param a - First track's share; must be finite and > 0
+ * @param b - Second track's share; must be finite and > 0
+ * @returns The pair scaled so it sums to 1, or equal halves when the input
+ *   cannot be scaled (a non-positive sum would divide by zero, and the caller
+ *   has nothing better to draw than two equal tracks)
+ */
+export function toGridTrackFractions(a: number, b: number): [number, number] {
+  const total = a + b;
+  if (!Number.isFinite(total) || total <= 0) return [0.5, 0.5];
+  return [a / total, b / total];
+}
+
+/**
  * Defensive type guard. Rejects any input that does not exactly match the
  * `TerminalSplitConfig` invariants. Used by `useTerminalSplits` to discard
  * stale or externally-edited localStorage payloads.
