@@ -97,6 +97,7 @@ import {
   type RecordedUserTurn,
   type RecordUserTurnOptions,
 } from '@/lib/history/user-turn-recorder';
+import { advanceCapturedLineForTranscriptTurn } from '@/lib/assistant-response-saver';
 import { createLogger } from '@/lib/logger';
 import { commandCodePromptRequestId, commandCodeTurnRequestId } from '@/types/agent-transcript';
 import type { ChatMessage } from '@/types/models';
@@ -432,6 +433,9 @@ export async function captureCommandCodeTranscriptTurn(
         instanceId,
         turnsInWindow: built.turns.length,
       });
+      // Issue #2437: this turn is already History's Markdown, so the pane rows
+      // behind it must stop being "unsaved output" the pre-send flush can pick up.
+      await advanceCapturedLineForTranscriptTurn(target);
       return true;
     }
 
@@ -482,6 +486,13 @@ export async function captureCommandCodeTranscriptTurn(
         ),
         path
       );
+    }
+    if (captured) {
+      // Issue #2437: History now holds this turn as the agent's own Markdown.
+      // Park the pre-send flush's cursor past the pane rows it covers, or a
+      // `/send` arriving before the next poll tick saves the whole finished turn
+      // a second time.
+      await advanceCapturedLineForTranscriptTurn(target);
     }
     return captured;
   } catch (error) {
