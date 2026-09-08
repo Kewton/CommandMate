@@ -76,6 +76,83 @@ export function reportSessionStartFailure(
     .catch(() => {});
 }
 
+/**
+ * An adopted tmux session whose hooks are addressed to another server
+ * (Issue #2429).
+ *
+ * Not a failed start — the session is up and the agent is answering — which is
+ * why it carries its own shape rather than being squeezed into a
+ * {@link SessionStartFailureReport} with a synthetic error. What it shares with
+ * one is the audience and the moment: it is discovered at start time, nothing
+ * else on any surface reports it, and the operator has to act (restart the
+ * session) before the agent's telemetry reaches this server again.
+ */
+export interface StaleHookUrlReport {
+  worktreeId: string;
+  cliToolId: CLIToolType;
+  /** Agent instance the pane belongs to; defaults to the tool id. */
+  instanceId?: string;
+  /** Display name of the CLI tool, e.g. `Command Code CLI`. */
+  toolName: string;
+  /** The port the adopted pane's launch line still posts hooks to. */
+  sessionPort: number;
+  /** The port this server is listening on. */
+  serverPort: number;
+}
+
+/**
+ * Which (instance, port pair) has already been reported (Issue #2429).
+ *
+ * The "once" in the Issue's acceptance, and it is keyed on the *facts* rather
+ * than on the session name so the two ways this can recur read correctly:
+ *
+ *  - the same pane adopted again by the same server is the same sentence, and
+ *    is dropped;
+ *  - a pane that moves to a different mismatch — a third server, or the one it
+ *    was pointing at coming back — is a different sentence and is told.
+ *
+ * Process-lifetime, like every other in-memory notification ledger here: a
+ * server that restarts is a server whose port may have changed, and re-asking
+ * is cheaper than a stale answer.
+ */
+const reportedStaleHookUrls = new Set<string>();
+
+/**
+ * Report an adopted session whose hook URL names another server, at most once.
+ *
+ * Fire-and-forget through the same one窓口 as {@link reportSessionStartFailure},
+ * and deferred behind `await import()` for the same reason: this file is loaded
+ * by `./base`, which every tool module loads, and `push/failure-push-notifier`
+ * pulls the database and `web-push` behind it.
+ *
+ * @param report - The pane, the port it posts to, and the port that is listening
+ */
+export function reportStaleHookUrl(report: StaleHookUrlReport): void {
+  const key = [
+    report.worktreeId,
+    report.instanceId ?? report.cliToolId,
+    report.sessionPort,
+    report.serverPort,
+  ].join(':');
+  if (reportedStaleHookUrls.has(key)) return;
+  reportedStaleHookUrls.add(key);
+
+  void import('../push/failure-push-notifier')
+    .then(({ notifyStaleHookUrlPush }) => notifyStaleHookUrlPush(report))
+    .catch(() => {});
+}
+
+/**
+ * Forget every stale-hook-URL report made so far (Issue #2429).
+ *
+ * Test-only, and named so: the ledger above is process-lifetime state, and a
+ * suite that asserts "the second call says nothing" needs the first call to be
+ * the first one.
+ */
+export function resetStaleHookUrlReportsForTest(): void {
+  reportedStaleHookUrls.clear();
+}
+
 /** Where a refusal should be attributed, for {@link assertToolStartable}. */
 export interface StartTarget {
   worktreeId: string;

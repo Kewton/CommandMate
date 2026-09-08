@@ -9,6 +9,13 @@
 
 import type Database from 'better-sqlite3';
 import { getSessionState, createMessage } from '@/lib/db';
+// Issue #2429: the send ledger, read directly from `chat-db` rather than from
+// the `@/lib/db` barrel because that barrel does not re-export it. It is the
+// SAME row `commandmate wait` asks for over
+// `GET /api/worktrees/:id/messages?limit=1&unit=pairs` (see `readNewestPromptAt`
+// in `cli/commands/wait.ts`), so the server and the CLI cannot disagree about
+// when this instance was last handed a prompt.
+import { getLastUserMessageForInstance } from '@/lib/db/chat-db';
 import { observeUnclassifiedFrame } from '@/lib/detection/unclassified-frame-tracker';
 import { extractComposerText, type ComposerTextState } from '@/lib/detection/composer-text';
 import { matchUpstreamFault } from '@/lib/detection/upstream-faults';
@@ -1132,6 +1139,7 @@ export function mergeStructuredStatus(
   structured: StructuredSessionState | null,
   promptWaiting: StructuredPromptWaitingState | null = null,
   turn: PublishedTurn | null = null,
+  lastPromptAt: number | null = null,
 ): MergedStatusVerdict {
   if (scraper.status === 'waiting') {
     return { ...scraper, structuredApplied: false };
@@ -1157,6 +1165,14 @@ export function mergeStructuredStatus(
   }
 
   if (structured === null || structured.status === 'waiting') {
+    return { ...scraper, structuredApplied: false };
+  }
+
+  // Issue #2429: the structured `ready` is about a turn older than the prompt
+  // this instance is currently answering, and the screen says so. See
+  // {@link structuredReadyPredatesPrompt} for why that combination is the only
+  // one in which the scraper wins a `running`.
+  if (structuredReadyPredatesPrompt(scraper, structured, turn, lastPromptAt)) {
     return { ...scraper, structuredApplied: false };
   }
 
@@ -1220,6 +1236,145 @@ function hookClosedTurn(turn: PublishedTurn | null): boolean {
   if (turn === null) return false;
   const { closedBy, closedAt, openedAt } = turn;
   return closedBy === 'stop' && closedAt !== null && openedAt !== null && closedAt > openedAt;
+}
+
+/**
+ * Whether a structured `ready` could be about a turn that ended before the
+ * prompt now on screen (Issue #2429).
+ *
+ * The cheap half of {@link structuredReadyPredatesPrompt}, split out because
+ * `buildPayload` asks it FIRST: it is the gate on the one database read this
+ * rule needs, and a session that is not in this state must not pay for the send
+ * ledger on every poll. One expression, two callers — the alternative is the
+ * "two expressions for one fact" the merge's own docblock says is how this
+ * layer drifts.
+ *
+ * Three conjuncts, and all three are about the same instant:
+ *
+ *  - **the screen is positively generating.** `ScraperVerdict.thinking` is
+ *    `isGeneratingStatus`, i.e. `running` with `thinking_indicator` /
+ *    `opencode_processing_indicator` behind it — a spinner, `✻ Thinking…` or
+ *    `esc to interrupt` that a tool's own pattern matched. It is deliberately
+ *    NOT `scraper.status === 'running'`: the `no_recent_output` and
+ *    `unknown_frame` floors are also `running`, and neither is evidence of
+ *    anything. A frame that merely stopped changing must never retire a `Stop`
+ *    the agent actually sent.
+ *  - **the structured layer says `ready`.** `running` and `waiting` already win
+ *    on their own paths and are not in question here.
+ *  - **that `ready` came from the agent's own `Stop`.**
+ *    `getStructuredSessionState` publishes `ready / hook_stop` exactly when the
+ *    turn record carries `closedBy: 'stop'` with a `closedAt`, so the record is
+ *    read rather than the folded reason.
+ *
+ * `openedAt` is deliberately not required, which is what separates this from
+ * {@link hookClosedTurn}. A `Stop` that arrived with no turn open publishes
+ * `openedAt: null`, and for the tool this Issue was reported from that is the
+ * ORDINARY shape: Command Code cannot emit `UserPromptSubmit` (its loader
+ * validates the event name against a closed list) and emits no
+ * `PreToolUse` / `PostToolUse` on a turn that calls no tool, so nothing ever
+ * opens the turn. Requiring an `openedAt` here would exclude precisely the case
+ * this rule exists for.
+ */
+function staleReadyCandidate(
+  scraper: ScraperVerdict,
+  structured: StructuredSessionState | null,
+  turn: PublishedTurn | null,
+): boolean {
+  if (!scraper.thinking) return false;
+  if (structured === null || structured.status !== 'ready') return false;
+  if (turn === null) return false;
+  return turn.closedBy === 'stop' && turn.closedAt !== null;
+}
+
+/**
+ * Whether the structured layer's `ready` has been outlived by the newest prompt
+ * this instance was handed (Issue #2429).
+ *
+ * ## The defect this closes
+ *
+ * The merge above prefers the agent's own account to the screen, and until this
+ * Issue the only exception was a scraper `waiting` (#1708). That is correct for
+ * every tool that can say when a turn BEGINS — claude, codex, copilot, gemini
+ * and antigravity all post a turn-opening event, so a live turn replaces the
+ * previous turn's `stop` before the first generating frame is ever read.
+ *
+ * Command Code can post neither: no `UserPromptSubmit`, and no `PreToolUse` /
+ * `PostToolUse` on a turn that calls no tool. The previous turn's `ready /
+ * hook_stop` therefore stays the newest structured fact for the whole of the
+ * next turn, and the merge published it over a pane that was visibly generating.
+ * Measured 2026-09-08 on a 19 s turn: `sessionStatus` read `ready / hook_stop`
+ * from 4 s to 18 s while the status row said `esc to interrupt`. `commandmate
+ * wait` reads that field — not the frame — for "is at its composer", so #1975's
+ * 60 s unanswered-prompt hold was the only thing standing between a long turn
+ * and a `basis=scraper_ready` completion reported before the reply existed.
+ *
+ * ## Why a comparison rather than a timer
+ *
+ * The same comparison `wait` already makes (`outstandingPrompt`), against the
+ * same two server-stamped facts: the turn's `closedAt`, and the timestamp of
+ * the newest user row in the chat ledger. A `Stop` that POSTDATES the newest
+ * prompt is this turn's own — the agent finished, the spinner on the frame is a
+ * repaint that has not settled, and the structured `ready` keeps winning. A
+ * `Stop` that predates it has reported neither the start nor the end of the
+ * work now on screen, and about that work it says nothing at all.
+ *
+ * Shortening #1975's hold would have been the other repair, and the Issue rules
+ * it out for a reason worth restating here: the hold is what stops a false
+ * completion during a turn nobody has reported yet, so a shorter one moves the
+ * false completion earlier rather than removing it.
+ *
+ * @param lastPromptAt - Epoch ms of the newest prompt handed to this instance,
+ *   or null when the ledger was not read or holds none. Null decides nothing:
+ *   an unreadable ledger is not evidence that nothing was sent, so the
+ *   structured verdict stands exactly as it did before this Issue.
+ */
+function structuredReadyPredatesPrompt(
+  scraper: ScraperVerdict,
+  structured: StructuredSessionState | null,
+  turn: PublishedTurn | null,
+  lastPromptAt: number | null,
+): boolean {
+  if (lastPromptAt === null) return false;
+  if (!staleReadyCandidate(scraper, structured, turn)) return false;
+  const closedAt = turn?.closedAt ?? null;
+  return closedAt !== null && closedAt < lastPromptAt;
+}
+
+/**
+ * When this instance was last handed a prompt, or null (Issue #2429).
+ *
+ * The server's half of the comparison `commandmate wait` makes over HTTP. Both
+ * sides read the same row — the newest `role: 'user'` message scoped to this
+ * (worktree, tool, instance) — so the field this function feeds and the notice
+ * `wait` prints cannot describe different sends.
+ *
+ * Best effort, like {@link recordUnclassifiedFrame} and
+ * {@link recordStructuredPrompt}: the caller is building a payload, and a
+ * ledger that cannot be read must cost this one comparison and nothing else.
+ * Null is reported rather than a guess, and null leaves the pre-#2429
+ * precedence in place — an unreadable ledger is not evidence that nothing was
+ * sent, which is the position `wait` takes on the same read.
+ */
+function readNewestPromptAt(
+  db: Database.Database,
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  instanceId: string,
+): number | null {
+  try {
+    const row = getLastUserMessageForInstance(db, worktreeId, cliToolId, instanceId);
+    if (!row) return null;
+    const at = row.timestamp instanceof Date ? row.timestamp.getTime() : NaN;
+    return Number.isFinite(at) ? at : null;
+  } catch (error: unknown) {
+    logger.debug('newest-prompt-read-failed', {
+      worktreeId,
+      cliToolId,
+      instanceId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
 }
 
 /**
@@ -1594,14 +1749,25 @@ async function buildPayload(
     structuredEvents.promptWaitingSource = promptWaiting.source;
   }
 
+  const scraperVerdict: ScraperVerdict = {
+    status: statusResult.status,
+    reason: statusResult.reason,
+    thinking,
+    evidence,
+    isUnclassifiedActive,
+  };
+
+  // Issue #2429: the send ledger, read ONLY when it could change the verdict.
+  // `staleReadyCandidate` is the merge's own first three conjuncts, so the two
+  // cannot disagree about when this read is needed — and every other poll (an
+  // idle pane, a turn the agent has opened, a tool that reports its own start)
+  // costs exactly what it did before this Issue, which is nothing.
+  const lastPromptAt = staleReadyCandidate(scraperVerdict, structured, structuredEvents)
+    ? readNewestPromptAt(db, worktreeId, cliToolId, resolvedInstanceId)
+    : null;
+
   const merged = mergeStructuredStatus(
-    {
-      status: statusResult.status,
-      reason: statusResult.reason,
-      thinking,
-      evidence,
-      isUnclassifiedActive,
-    },
+    scraperVerdict,
     structured,
     promptWaiting,
     // Issue #2011: the same record `structuredEvents` publishes, read once. The
@@ -1610,6 +1776,7 @@ async function buildPayload(
     // cannot tell a `Stop` that closed a watched turn from one that arrived with
     // no turn open.
     structuredEvents,
+    lastPromptAt,
   );
 
   // The OR rule, computed once for the whole server (Issue #1737): this is the

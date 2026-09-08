@@ -11,6 +11,7 @@
  * | verification failed | `lib/verification/gate-runner`              | event  |
  * | upstream API fault  | `lib/polling/response-checker` (#1839 match)| level  |
  * | session start failed| `lib/cli-tools/start-availability` (#2009/#2022)| event |
+ * | stale hook URL      | `lib/cli-tools/start-availability` (#2429)  | event  |
  *
  * The shape column is the whole design. An **event** fires once by construction
  * — a run closes once, a start attempt throws once — so its only guard is the
@@ -70,6 +71,8 @@ import {
 import { observeUpstreamFaultEdge } from './failure-episode-state';
 import { notifyPushSubscribers, type FailurePushReason } from './push-sender';
 import { isPushConfigured } from './vapid';
+import type { SupportedLocale } from '@/config/i18n-config';
+import type { StaleHookUrlReport } from '@/lib/cli-tools/start-availability';
 
 const logger = createLogger('push/failure-notifier');
 
@@ -212,6 +215,11 @@ interface RaiseFailurePushInput {
   signature: string;
   /** Short human-readable detail for the body. */
   excerpt?: string;
+  /**
+   * The whole body, per locale, when the dictionary cannot express it
+   * (Issue #2429). See `push-sender`'s {@link FailureContext.body}.
+   */
+  body?: Record<SupportedLocale, string>;
   /** Extra fields for the log line only. Never sent to a device. */
   logContext?: Record<string, unknown>;
   /**
@@ -260,7 +268,11 @@ async function raiseFailurePush(input: RaiseFailurePushInput): Promise<void> {
       agentName: input.agentLabel ?? input.instanceId,
       instanceId: input.instanceId,
       excerpt: input.excerpt,
-      failure: { reason: input.reason, signature: input.signature },
+      failure: {
+        reason: input.reason,
+        signature: input.signature,
+        ...(input.body ? { body: input.body } : {}),
+      },
       ...(input.subject ? { url: input.subject.url } : {}),
     });
   } catch (error) {
@@ -605,5 +617,71 @@ export async function notifySessionStartFailurePush(
     excerpt: verdict.excerpt,
     logContext: { cliToolId: input.cliToolId },
     subject: input.subject,
+  });
+}
+
+// ===========================================================================
+// 4. Stale hook URL on an adopted session
+// ===========================================================================
+
+/**
+ * The sentence a stale hook URL gets, per locale (Issue #2429).
+ *
+ * Written here rather than in the `locales/<lang>/notifications.json`
+ * dictionaries, for the reason `push-sender`'s
+ * {@link ProducerWordedFailureReason} gives: the body is a
+ * relation between two numbers and a remedy, not a template plus a name, and
+ * this is the layer that holds the numbers. `Record<SupportedLocale, string>`
+ * is what makes a new locale a type error here instead of an English card in a
+ * Japanese notification tray.
+ *
+ * Both wordings name the remedy — restarting the session — because the fact on
+ * its own is not actionable: an operator who is told only that two ports differ
+ * has no way to know that CommandMate will not repair it by itself, and it will
+ * not, deliberately (see `BaseCLITool.warnIfHookUrlIsStale`).
+ */
+function staleHookUrlBody(report: StaleHookUrlReport): Record<SupportedLocale, string> {
+  const { toolName, sessionPort, serverPort } = report;
+  return {
+    en:
+      `${toolName} is still posting its hooks to port ${sessionPort}, but this server is on ` +
+      `${serverPort}. Restart the session to reconnect it.`,
+    ja:
+      `${toolName} のフックが古いポート ${sessionPort} 宛のままです（このサーバーは ` +
+      `${serverPort}）。セッションを再起動すると直ります。`,
+  };
+}
+
+/**
+ * Notify that an adopted session's hooks are addressed to another server.
+ * Never throws.
+ *
+ * Called from exactly one place — `reportStaleHookUrl` in
+ * `lib/cli-tools/start-availability`, which is also where the "once" lives.
+ * This function therefore has no edge of its own, exactly like
+ * {@link notifySessionStartFailurePush}: the rate is bounded by how often a
+ * session is started, and the caller has already decided that this particular
+ * (instance, port pair) has not been reported before.
+ *
+ * `kind: 'failure'` rather than `'completion'` because the reader has to act —
+ * until they restart the session, `commandmate wait` on it cannot complete on
+ * the agent's own word and every turn pays #1975's 60 s hold before falling
+ * back to the frame.
+ */
+export async function notifyStaleHookUrlPush(report: StaleHookUrlReport): Promise<void> {
+  const instanceId = report.instanceId ?? report.cliToolId;
+  await raiseFailurePush({
+    reason: 'hook-url-stale',
+    worktreeId: report.worktreeId,
+    instanceId,
+    // The two ports, so a pane that later points at a THIRD server is a second
+    // incident rather than a repeat of this one.
+    signature: `hook-url-stale:${instanceId}:${report.sessionPort}:${report.serverPort}`,
+    body: staleHookUrlBody(report),
+    logContext: {
+      cliToolId: report.cliToolId,
+      sessionPort: report.sessionPort,
+      serverPort: report.serverPort,
+    },
   });
 }
