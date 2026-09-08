@@ -19,8 +19,8 @@
 
 'use client';
 
-import React, { memo, useCallback, useState } from 'react';
-import { ChevronDown, Maximize2, MessageSquare, Minimize2, TerminalSquare } from 'lucide-react';
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ChevronDown, Maximize2, MessageSquare, Minimize2, StickyNote, TerminalSquare } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import {
   getInstanceLabel,
@@ -32,11 +32,15 @@ import { StatusDot, type StatusDotStatus } from '@/components/ui/StatusDot';
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/DropdownMenu';
 import { Tooltip } from '@/components/common/Tooltip';
+import { useOptionalWorktreesCacheContext } from '@/components/providers/WorktreesCacheProvider';
+import { formatSessionNoteTimestamp } from '@/lib/date-utils';
 
 /**
  * Issue #786 / #869: dedicated MIME so the drag payload never collides with
@@ -62,6 +66,293 @@ const SURFACE_MODE_SEGMENTS: readonly {
   { mode: 'terminal', labelKey: 'surfaceMode.showTerminal', icon: TerminalSquare },
   { mode: 'chat', labelKey: 'surfaceMode.showChat', icon: MessageSquare },
 ] as const;
+
+// ---------------------------------------------------------------------------
+// Session notes (Issue #2427)
+// ---------------------------------------------------------------------------
+//
+// A one-line memo the operator keeps beside a session — "#2427 の DB 層",
+// "レビュー待ち" — rewritten every time they hand that session a new
+// instruction. It exists because a four-way split shows four headers that all
+// read `claude`, and the pane three scrollbacks deep answers nothing.
+//
+// It is NOT an alias. Since Issue #2376 an alias is a RESOLUTION key
+// (`--instance レビュー担当` finds the roster row through it), so an alias
+// decides where the next `send` lands. A note is read by human eyes only:
+// nothing in `/resolve-target` or `resolveInstanceCliTool` can see this value,
+// which is what makes it safe to rewrite hourly.
+//
+// ## Why the note is read from the app-wide list cache rather than a prop
+//
+// This pane is presentational and everything else it renders arrives as a prop.
+// The note cannot: `TerminalSplitContainer` composes this component's props, and
+// the phone's equivalent (`MobileTerminalTab`) is handed ONE frozen object built
+// by `MobileContent`. The list cache is the seam both surfaces already share —
+// `MobileTerminalTab`'s `useCachedAgentModelLabel` reads the model out of the
+// same place — and it is a poll every client already pays for, which is also how
+// a note edited in another browser reaches this one (the Issue's last acceptance
+// condition). No provider above (every pre-#2427 test of this pane) yields null,
+// and null renders nothing.
+
+/**
+ * Longest note the editor accepts, in UTF-16 units (`maxLength`).
+ *
+ * A convenience mirror of `MAX_SESSION_NOTE_LENGTH` in
+ * `@/lib/db/agent-instances-db`, which is the enforcement — the route is
+ * reachable without this UI, and the server counts CODE POINTS while
+ * `maxLength` counts UTF-16 units. The two agree on every note that is not
+ * mostly emoji, and where they disagree this one is the stricter, so the input
+ * can never compose a note the server would refuse. Pinned to the server's
+ * constant by `TerminalSplitPane-session-note-2427.test.tsx`.
+ */
+export const SESSION_NOTE_MAX_LENGTH = 100;
+
+/**
+ * Window event that asks the mounted note editor to open (Issue #2427).
+ *
+ * The phone's edit entry point is a row in `MobileTerminalActionsSheet`, which
+ * is rendered by `WorktreeDetailRefactored` beside the tab rather than inside
+ * it — so the sheet knows neither the worktree nor the active instance. This is
+ * the same escape hatch the terminal search already uses from this very header
+ * (`terminal-search-open`): the sheet raises the intent, and the component that
+ * holds the target listens. `MobileTerminalTab` is the listener.
+ */
+export const SESSION_NOTE_OPEN_EVENT = 'session-note-open';
+
+/** One session's note, as `GET /api/worktrees` carries it (Issue #2427). */
+export interface SessionNoteValue {
+  /** The memo itself; never empty — a cleared note is absence, not `''`. */
+  text: string;
+  /** Epoch ms it was last written, rendered beside it. */
+  updatedAt: number;
+}
+
+/**
+ * The per-worktree map the list route attaches (Issue #2427).
+ *
+ * Read structurally rather than off `Worktree`: the field is transported by one
+ * route and read by two panes, and every other surface that holds a `Worktree`
+ * (the sidebar, Review, the command palette) has no use for it. The values are
+ * typed as `unknown` because they crossed a network boundary — a stale client
+ * against a newer server is the ordinary case for a page nobody reloaded.
+ */
+interface WorktreeWithSessionNotes {
+  id: string;
+  sessionNotes?: Record<string, { text?: unknown; updatedAt?: unknown } | undefined>;
+}
+
+/**
+ * Pull one instance's note out of the cached list, or null when there is none.
+ *
+ * An empty `text` is treated as absent, so a server that ever stored `''`
+ * renders the same nothing a missing row does.
+ */
+function readSessionNote(
+  worktrees: readonly { id: string }[] | undefined,
+  worktreeId: string,
+  instanceId: string,
+): SessionNoteValue | null {
+  const worktree = worktrees?.find((entry) => entry.id === worktreeId) as
+    | WorktreeWithSessionNotes
+    | undefined;
+  const raw = worktree?.sessionNotes?.[instanceId];
+  if (!raw || typeof raw.text !== 'string' || raw.text.length === 0) return null;
+  return {
+    text: raw.text,
+    updatedAt: typeof raw.updatedAt === 'number' ? raw.updatedAt : 0,
+  };
+}
+
+/**
+ * Fold what was typed into the single line the server will store.
+ *
+ * A weaker copy of the server's `normalizeSessionNoteText` on purpose: this one
+ * only collapses whitespace, because an `<input type="text">` cannot contain a
+ * newline in the first place and the control characters the server strips cannot
+ * be typed into one. Its job is to make the OPTIMISTIC value equal to the value
+ * the poll will bring back, so the override below settles instead of flickering.
+ */
+export function normalizeSessionNoteInput(raw: string): string {
+  return raw.replace(/\s+/g, ' ').trim();
+}
+
+/** What {@link useSessionNote} hands a surface. */
+export interface SessionNoteHandle {
+  /** The note to render, or null when this session has none. */
+  note: SessionNoteValue | null;
+  /** Write (or, with an empty string, clear) the note. Never rejects. */
+  save: (text: string) => void;
+}
+
+/**
+ * The note for one session, and the way to change it (Issue #2427).
+ *
+ * Reads the app-wide list cache and writes through the narrow endpoint, then
+ * asks the cache to re-read so every other surface of this browser agrees at
+ * once rather than at the next poll (20-60s with a live socket).
+ *
+ * ## The override
+ *
+ * A write is shown immediately and held until the list confirms it. Without that
+ * the note would visibly revert for as long as the poll takes — the cache is the
+ * only reader, and it has not heard yet.
+ *
+ * It is released on EITHER of two signals, and the second one is the one that is
+ * easy to miss: the cached value agreeing with what was written, or the cached
+ * value having moved off what it held when the write started. Without the
+ * second, a note somebody else changed in the same second as this write would
+ * never match, and this browser would keep showing its own memo — a private
+ * truth nothing could dislodge — until the pane was switched or written again.
+ */
+export function useSessionNote(worktreeId: string, instanceId: string): SessionNoteHandle {
+  const cache = useOptionalWorktreesCacheContext();
+  const worktrees = cache?.worktrees;
+  const refresh = cache?.refresh;
+
+  const stored = useMemo(
+    () => readSessionNote(worktrees, worktreeId, instanceId),
+    [worktrees, worktreeId, instanceId],
+  );
+
+  // `value: null` means "this session has no note"; the outer null means "no
+  // write of ours is in flight", which is why this is not just `SessionNoteValue
+  // | null`. `base` is what the list held when the write started — see the
+  // release rule in the doc comment.
+  const [override, setOverride] = useState<{
+    value: SessionNoteValue | null;
+    base: SessionNoteValue | null;
+  } | null>(null);
+
+  // A different session is a different note: never show one instance's memo
+  // while the cache still holds another's.
+  useEffect(() => {
+    setOverride(null);
+  }, [worktreeId, instanceId]);
+
+  useEffect(() => {
+    if (override === null) return;
+    // Our write landed. The server's `updatedAt` is not the optimistic one, so
+    // the text is what is compared.
+    const landed =
+      override.value === null
+        ? stored === null
+        : stored !== null && stored.text === override.value.text;
+    // Or the list moved off what it held when the write started, which means
+    // somebody else's write is now the truth even though it is not ours.
+    const moved =
+      stored?.text !== override.base?.text || stored?.updatedAt !== override.base?.updatedAt;
+    if (landed || moved) setOverride(null);
+  }, [override, stored]);
+
+  const save = useCallback(
+    (raw: string) => {
+      const text = normalizeSessionNoteInput(raw);
+      if (Array.from(text).length > SESSION_NOTE_MAX_LENGTH) return;
+      setOverride({
+        value: text.length > 0 ? { text, updatedAt: Date.now() } : null,
+        base: stored,
+      });
+      void (async () => {
+        try {
+          const response = await fetch(
+            `/api/worktrees/${encodeURIComponent(worktreeId)}/instances/notes`,
+            {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ instanceId, text }),
+            },
+          );
+          if (!response.ok) {
+            // Drop the optimistic value rather than reporting: the header has no
+            // room for an error, and falling back to the stored note is the
+            // honest thing to show.
+            setOverride(null);
+            return;
+          }
+          await refresh?.();
+        } catch {
+          setOverride(null);
+        }
+      })();
+    },
+    [instanceId, refresh, stored, worktreeId],
+  );
+
+  return { note: override ? override.value : stored, save };
+}
+
+/**
+ * The note's one-line editor, shared by the split header and the phone (#2427).
+ *
+ * One component so the IME guard cannot exist on one surface and not the other.
+ * That guard is the point: on a Japanese keyboard the Enter that CONFIRMS a
+ * conversion candidate and the Enter that submits are the same key event, and
+ * without `isComposing` the first one saves the unconverted kana. Same shape as
+ * `TodoPane`'s add-input.
+ *
+ * Escape cancels. Blur does not commit — the editor is opened from a Radix menu
+ * whose close restores focus to its trigger, so a blur-commit would fire on the
+ * way in.
+ */
+export function SessionNoteInput({
+  initialText,
+  onCommit,
+  onCancel,
+  ariaLabel,
+  placeholder,
+  testId,
+}: {
+  initialText: string;
+  onCommit: (text: string) => void;
+  onCancel: () => void;
+  ariaLabel: string;
+  placeholder: string;
+  testId: string;
+}) {
+  const [value, setValue] = useState(initialText);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+    inputRef.current?.select();
+  }, []);
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (e.key === 'Enter') {
+        // Guard against IME composition (Enter confirms the candidate, not the
+        // note). Without this an operator converting 「レビュー」 saves 「れびゅー」.
+        if (e.nativeEvent.isComposing) return;
+        e.preventDefault();
+        onCommit(value);
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        // The pane's own Escape handling (and the terminal below it) has no
+        // business seeing the keystroke that closed this editor.
+        e.stopPropagation();
+        onCancel();
+      }
+    },
+    [onCancel, onCommit, value],
+  );
+
+  return (
+    <input
+      ref={inputRef}
+      type="text"
+      value={value}
+      maxLength={SESSION_NOTE_MAX_LENGTH}
+      placeholder={placeholder}
+      aria-label={ariaLabel}
+      data-testid={testId}
+      onChange={(e) => setValue(e.target.value)}
+      onKeyDown={handleKeyDown}
+      className="w-full rounded border border-border bg-surface px-2 py-1 text-xs text-surface-foreground placeholder:text-muted-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+    />
+  );
+}
 
 export interface TerminalSplitPaneProps {
   worktreeId: string;
@@ -179,6 +470,7 @@ export interface TerminalSplitPaneProps {
 }
 
 export const TerminalSplitPane = memo(function TerminalSplitPane({
+  worktreeId,
   splitIndex,
   cliToolId,
   instanceId,
@@ -207,6 +499,32 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
   // change never re-creates the parent's renderSplitPane / terminalSplitRegion
   // memo (which would re-render every split). null = no drag over this pane.
   const [dragOverState, setDragOverState] = useState<'allowed' | 'forbidden' | null>(null);
+
+  // Issue #2427: this split's session note, read from the list cache and written
+  // through the narrow endpoint. See the section above the props for why it does
+  // not arrive as a prop like everything else here.
+  const { note: sessionNote, save: saveSessionNote } = useSessionNote(worktreeId, instanceId);
+  const [noteEditing, setNoteEditing] = useState(false);
+  // A different session is a different memo; never leave the editor open across
+  // an instance swap holding the previous session's text.
+  useEffect(() => {
+    setNoteEditing(false);
+  }, [worktreeId, instanceId]);
+  const openNoteEditor = useCallback(() => setNoteEditing(true), []);
+  const closeNoteEditor = useCallback(() => setNoteEditing(false), []);
+  const commitNote = useCallback(
+    (text: string) => {
+      saveSessionNote(text);
+      setNoteEditing(false);
+    },
+    [saveSessionNote],
+  );
+  // Opened from the session-title menu on the NEXT macrotask: Radix restores
+  // focus to the menu trigger as it closes, so an editor mounted synchronously
+  // in `onSelect` would be focused and then immediately un-focused.
+  const openNoteEditorFromMenu = useCallback(() => {
+    setTimeout(() => setNoteEditing(true), 0);
+  }, []);
 
   // Whether drag-drop is active for this pane (the parent wired a handler).
   const dropEnabled = onDropInstance != null;
@@ -298,6 +616,15 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
   // [Issue #2307] i18n-ized (was a hardcoded English string) so it can drive
   // both the Tooltip and the aria-label without drifting apart.
   const searchLabel = t('terminal.searchOutput', { split: splitLabel });
+  // Issue #2427: the note's own strings. `noteStamp` is the compact absolute
+  // time (`14:32` today, `9/7 14:32` before today) and it is composed into the
+  // tooltip rather than printed twice — the header row shows the memo and the
+  // stamp side by side, and the tooltip is where the untruncated pair lives.
+  const noteEditLabel = t('sessionNote.editLabel', { split: splitLabel });
+  const noteStamp = sessionNote ? formatSessionNoteTimestamp(new Date(sessionNote.updatedAt)) : '';
+  const noteLabel = sessionNote
+    ? t('sessionNote.label', { note: sessionNote.text, time: noteStamp })
+    : '';
 
   return (
     <div
@@ -320,8 +647,11 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      {/* Header: session title bar — instance selector (status + alias) + search */}
-      <div className="px-2 py-1 flex items-center gap-2 bg-surface-2 border-b border-border flex-shrink-0">
+      {/* Header: session title bar — instance selector (status + alias) + search.
+          `relative` anchors the Issue #2427 note editor, which is absolutely
+          positioned below this row so that opening it cannot change the header's
+          height (and therefore cannot resize the terminal underneath). */}
+      <div className="relative px-2 py-1 flex items-center gap-2 bg-surface-2 border-b border-border flex-shrink-0">
         {/* Issue #1079: native <select> → Radix DropdownMenu. The trigger reads as
             a session title (StatusDot + alias + chevron); the radio group keeps
             the same single-select value/onChange semantics as the old <select>. */}
@@ -348,6 +678,20 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
                 </DropdownMenuRadioItem>
               ))}
             </DropdownMenuRadioGroup>
+            {/* Issue #2427: the note's entry point on PC, inside the menu that
+                already exists rather than as a new header control. The Issue
+                requires that an EMPTY note put nothing extra in the header, and
+                a header row that already carries four controls has no room for
+                a fifth that is blank most of the time. When the note is set it
+                is also clickable in the row itself. */}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              data-testid={`split-session-note-menu-item-${splitIndex}`}
+              onSelect={openNoteEditorFromMenu}
+            >
+              <StickyNote size={14} aria-hidden="true" className="opacity-70" />
+              {t('sessionNote.menuItem')}
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
 
@@ -399,11 +743,19 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
             would eat the alias to make room for the model. Rendered only when a
             model is actually known — see `agentModel`. `truncate` + `title` keep
             a long id from pushing the search button off the row. */}
+        {/* Issue #2427: the model is also the label that gives way. When a note
+            is present its cap drops from 10rem to 5rem and it shrinks four times
+            as fast as the note, so a narrow split spends its width on what the
+            operator wrote — which changes with every instruction — rather than
+            on a model id that is fixed for the session and readable in the
+            tooltip either way. */}
         {agentModel && (
           <span
             data-testid={`split-agent-model-${splitIndex}`}
             title={t('agentModel.modelLabel', { model: agentModel })}
-            className="min-w-0 max-w-[10rem] truncate text-[11px] leading-none text-muted-foreground"
+            className={`min-w-0 truncate text-[11px] leading-none text-muted-foreground ${
+              sessionNote ? 'max-w-[5rem] shrink-[4]' : 'max-w-[10rem]'
+            }`}
           >
             {agentModel}
           </span>
@@ -424,6 +776,33 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
           >
             {agentUsage}
           </span>
+        )}
+
+        {/* Issue #2427: the memo, as a sibling of the model and usage chips and
+            under the same rule — rendered ONLY when there is one, so an empty
+            note leaves the header exactly as it was before this Issue. It is a
+            button because clicking it is how the note is edited; `truncate` +
+            `title` keep a 100-character memo from pushing the search button off
+            the row, and `shrink` (1, against the model's 4) is what makes the
+            model give way first. */}
+        {sessionNote && (
+          <button
+            type="button"
+            onClick={openNoteEditor}
+            aria-label={noteEditLabel}
+            title={noteLabel}
+            data-testid={`split-session-note-${splitIndex}`}
+            className="flex min-w-0 max-w-[16rem] shrink items-center gap-1 rounded px-1 py-0.5 text-[11px] leading-none text-muted-foreground hover:bg-muted-foreground/10 hover:text-surface-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <StickyNote size={11} aria-hidden="true" className="shrink-0 opacity-70" />
+            <span className="min-w-0 truncate">{sessionNote.text}</span>
+            <span
+              data-testid={`split-session-note-time-${splitIndex}`}
+              className="shrink-0 tabular-nums opacity-70"
+            >
+              {noteStamp}
+            </span>
+          </button>
         )}
 
         {/* Issue #1171: session-scoped extras (the End × button) sit directly
@@ -492,6 +871,30 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
               )}
             </button>
           </Tooltip>
+        ) : null}
+
+        {/* Issue #2427: the note editor, absolutely positioned UNDER the header
+            so opening it never changes the header's height — this row sits above
+            a terminal whose visible height is a measured budget (#2106), and a
+            popover that pushed it down would resize the pane every time somebody
+            wrote a memo. `z-30` clears the terminal's own painted rows. */}
+        {noteEditing ? (
+          <div
+            data-testid={`split-session-note-editor-${splitIndex}`}
+            className="absolute inset-x-2 top-full z-30 mt-1 rounded-md border border-border bg-surface p-2 shadow-lg"
+          >
+            <SessionNoteInput
+              initialText={sessionNote?.text ?? ''}
+              onCommit={commitNote}
+              onCancel={closeNoteEditor}
+              ariaLabel={noteEditLabel}
+              placeholder={t('sessionNote.placeholder')}
+              testId={`split-session-note-input-${splitIndex}`}
+            />
+            <p className="mt-1 text-[10px] leading-tight text-muted-foreground">
+              {t('sessionNote.hint')}
+            </p>
+          </div>
         ) : null}
       </div>
 

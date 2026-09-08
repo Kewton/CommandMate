@@ -18,6 +18,7 @@ import { getDbInstance } from '@/lib/db/db-instance';
 import { getWorktreeById, saveInitialBranch, getInitialBranch } from '@/lib/db';
 import { resolveInstanceCliTool } from '@/lib/db/agent-instances-db';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
+import { probeRunningSessionHookUrl } from '@/lib/cli-tools/base';
 import { CLI_TOOL_IDS, isValidInstanceId, type CLIToolType } from '@/lib/cli-tools/types';
 import { sendUserMessage } from '@/lib/session/send-user-message';
 import { PROMPT_WAITING_CODE } from '@/lib/session/prompt-waiting-guard';
@@ -336,6 +337,23 @@ export async function POST(
       // Issue #1120: push the running transition so sidebar status dots flip
       // immediately instead of waiting for the next /api/worktrees poll.
       broadcastSessionStatus(id, true, { cliTool: cliToolId, instance: instanceId ?? null });
+    } else {
+      // Issue #2433: the session is already up, so `startSession()` — and with it
+      // #2429's check that the pane's `CM_HOOK_URL` still names THIS server — is
+      // skipped. That skip is the whole defect: a pane raised by a server on
+      // another port keeps posting its lifecycle events there, `wait` holds for
+      // #1975's full 60 s on every turn, and nothing on any surface says why.
+      // #2429 hung the check off the adopt path, which for the three tools that
+      // carry `CM_HOOK_URL` on the launch line (antigravity / command-code /
+      // gemini) requires `hasSession()` to be true and false at once, so it never
+      // ran. Here it is reachable, and here is where it matters: this is the
+      // branch that keeps typing into the mispointed pane.
+      //
+      // Not awaited, and it does not gate the send. The session is NOT restarted
+      // — it may be mid-turn — so the answer changes nothing about the message
+      // below; and after the first send to a given pane the probe is a `Set`
+      // lookup, so the per-send `capture-pane` count is unchanged.
+      probeRunningSessionHookUrl(cliTool, id, instanceId);
     }
 
     // Issue #474: Validate imagePath if provided (HTTP-layer validation stays here)

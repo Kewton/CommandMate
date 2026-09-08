@@ -8,6 +8,7 @@ import { promisify } from 'util';
 import type { ICLITool, CLIToolType } from './types';
 import { resolveSessionName } from './session-name';
 import {
+  capturePane,
   getSessionWorkingDirectory,
   reconcileSessionGeometry,
   sendSpecialKey,
@@ -18,7 +19,10 @@ import { resolveCaptureSpec } from './capture-spec';
 import { resolveGracefulExitSpec } from './graceful-exit';
 import { resolveLivenessSpec } from './liveness-spec';
 import { probeSessionLiveness } from './session-liveness';
-import { reportSessionStartFailure } from './start-availability';
+import { reportSessionStartFailure, reportStaleHookUrl } from './start-availability';
+import { stripAnsi } from '../detection/ansi';
+import { getServerPort } from '../env';
+import { AGENT_EVENT_URL_ENV_VAR } from '../hooks/sources/launch-command';
 import { createLogger } from '../logger';
 import type {
   CaptureSpec,
@@ -29,10 +33,123 @@ import type {
 } from '../../types/cli-tool-contracts';
 import { NAVIGATION_KEY_VALUES } from '../../types/terminal-keys';
 import { LIVENESS_CONFIRM_DELAY_MS } from '../../config/cli-tool-timing-config';
+import { TMUX_HISTORY_LIMIT } from '../../config/tmux-pane-config';
 
 const execAsync = promisify(exec);
 
 const logger = createLogger('cli-tools/base');
+
+/**
+ * `CM_HOOK_URL='…'` as a launch line spells it (Issue #2429).
+ *
+ * Built from {@link AGENT_EVENT_URL_ENV_VAR} rather than from a literal, for
+ * the reason `launch-command` gives for owning that constant: a drifted name
+ * here would read a variable CommandMate never wrote and report every session
+ * as fine.
+ *
+ * All three quoting forms, because the reader is a pane and not a parser:
+ * `resolveAgentLaunchEnv` renders single quotes today, and a line typed by hand
+ * or by an older build may carry double quotes or none.
+ */
+const HOOK_URL_ASSIGNMENT_PATTERN = new RegExp(
+  `${AGENT_EVENT_URL_ENV_VAR}=(?:'([^']*)'|"([^"]*)"|(\\S+))`,
+  'g',
+);
+
+/**
+ * Session names whose launch took the REUSE branch (Issue #2429).
+ *
+ * The adopt marker, and the reason it is a set rather than a return value:
+ * {@link BaseCLITool.reconcileExistingSession} is the one line every tool's
+ * reuse branch calls and it is handed only a session name, while the identity
+ * the warning needs — worktree, instance, tool name — is `startSession`'s. A
+ * signature change would have to reach seven `launchSession` implementations to
+ * carry one boolean back up.
+ *
+ * Written by the reconcile, consumed by `startSession` (see
+ * {@link BaseCLITool.takeAdoptionMark}), so a pane this server CREATED never
+ * reaches the probe: its launch line is one this process just typed, and asking
+ * tmux to prove that would cost a full-scrollback `capture-pane` on every
+ * session start for an answer that is known.
+ */
+const adoptedSessions = new Set<string>();
+
+/**
+ * Session names whose launch line this process has already read (Issue #2433).
+ *
+ * The reason the send path can ask at all. #2429 put the hook-URL probe behind
+ * the adopt marker, and measured on this tree that marker is unreachable for
+ * every tool that writes `CM_HOOK_URL` onto its launch line: antigravity,
+ * command-code and gemini all answer `isRunning()` with `hasSession()`, so the
+ * reuse branch that sets the mark needs a pane to exist while `startSession()`
+ * — the only caller of `launchSession()` — is reached only when one does not.
+ * The situation #2429 actually reported (a pane raised by a server on another
+ * port, still being typed into) is exactly the situation in which the pane is
+ * alive, so the probe never ran.
+ *
+ * Moving the question to "we are about to send into an existing session" makes
+ * it reachable, and this set is what keeps it cheap: reading the launch line
+ * costs a full-scrollback `capture-pane`, and a send happens as often as an
+ * operator presses Enter. A launch line does not change while a pane lives —
+ * {@link BaseCLITool.relaunchIfToolExited} re-types it with THIS server's port,
+ * which is never the mismatch — so one read per session per process answers it
+ * for good.
+ *
+ * Recorded only after a capture that actually returned, so a pane that could not
+ * be read (a session that vanished between `isRunning` and here) is asked again
+ * rather than silently written off.
+ */
+const hookUrlProbedSessions = new Set<string>();
+
+/**
+ * Forget every hook-URL probe made so far (Issue #2433).
+ *
+ * Test-only, and named so, for the same reason
+ * `resetStaleHookUrlReportsForTest` is: the set above is process-lifetime state
+ * and a suite that asserts "the pane is read once" needs the first read to be
+ * the first one.
+ */
+export function resetHookUrlProbesForTest(): void {
+  hookUrlProbedSessions.clear();
+}
+
+/**
+ * The last `CM_HOOK_URL` a pane's scrollback names, or null (Issue #2429).
+ *
+ * **Last**, not first. An adopted pane carries only the launch line that
+ * started the agent — the stale one. A pane whose tool exited and was relaunched
+ * by {@link BaseCLITool.relaunchIfToolExited} carries both, oldest first, and
+ * the newest is the one in force. Taking the first match would report a
+ * mismatch this server had already repaired.
+ *
+ * Exported for the unit suite: the whole rule is "what does this text say", and
+ * pinning it against real launch lines needs no tmux.
+ */
+export function readLaunchLineHookUrl(pane: string): string | null {
+  let last: string | null = null;
+  for (const match of stripAnsi(pane).matchAll(HOOK_URL_ASSIGNMENT_PATTERN)) {
+    const value = match[1] ?? match[2] ?? match[3] ?? null;
+    if (value) last = value;
+  }
+  return last;
+}
+
+/**
+ * The port a hook URL posts to, or null when it is not a URL (Issue #2429).
+ *
+ * The default port is filled in from the scheme rather than left null, so a
+ * `http://127.0.0.1/api/hooks/...` line is compared as 80 instead of being
+ * waved through as unreadable.
+ */
+export function hookUrlPort(url: string): number | null {
+  try {
+    const parsed = new URL(url);
+    if (parsed.port !== '') return Number(parsed.port);
+    return parsed.protocol === 'https:' ? 443 : 80;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Abstract base class for CLI tools
@@ -148,6 +265,10 @@ export abstract class BaseCLITool implements ICLITool {
     try {
       await this.launchSession(worktreeId, worktreePath, instanceId, model);
     } catch (error: unknown) {
+      // Issue #2429: a launch that threw is reported as a failed start and as
+      // nothing else. The mark is dropped rather than left behind so a later,
+      // successful start of the same session does not inherit it.
+      this.takeAdoptionMark(worktreeId, instanceId);
       reportSessionStartFailure(
         {
           worktreeId,
@@ -159,14 +280,185 @@ export abstract class BaseCLITool implements ICLITool {
       );
       throw error;
     }
+    const adopted = this.takeAdoptionMark(worktreeId, instanceId);
+    if (adopted !== null) await this.warnIfHookUrlIsStale(worktreeId, adopted, instanceId);
   }
 
-  /** Repair geometry when reusing a tmux session that predates the current defaults. */
+  /**
+   * Repair geometry when reusing a tmux session that predates the current
+   * defaults, and record that this launch reused one (Issue #2429).
+   */
   protected async reconcileExistingSession(
     sessionName: string,
     options?: SessionGeometryOptions,
   ): Promise<void> {
+    adoptedSessions.add(sessionName);
     await reconcileSessionGeometry(sessionName, options);
+  }
+
+  /**
+   * The reused pane's session name, or null when this launch created one
+   * (Issue #2429).
+   *
+   * Consumes the mark, so one launch asks one question. `getSessionName` can
+   * throw on an id that would not validate — the tool's own `launchSession`
+   * would have thrown on it first, so reaching that catch means something more
+   * interesting than a stale hook URL is wrong and this must not be what
+   * reports it.
+   */
+  private takeAdoptionMark(worktreeId: string, instanceId?: string): string | null {
+    try {
+      const sessionName = this.getSessionName(worktreeId, instanceId);
+      return adoptedSessions.delete(sessionName) ? sessionName : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Warn when an adopted pane's hooks are addressed to another server
+   * (Issue #2429).
+   *
+   * ## What goes wrong without it
+   *
+   * `CM_HOOK_URL` is written onto the launch line by the server that starts the
+   * agent, and it is the whole of the correlation channel: it names the port the
+   * relay posts every lifecycle event to. A tmux session outlives the server
+   * that created it, so a pane started by a server on :3010 and later adopted by
+   * one on :3000 — {@link reconcileExistingSession}'s branch, which repairs the
+   * window geometry and nothing else — goes on posting to :3010. Measured
+   * 2026-09-08: every `commandmate wait` on that session held for #1975's full
+   * 60 s and then completed `basis=scraper_ready` with `Its hooks are not
+   * answering`, because from :3000's side the agent had simply gone silent.
+   *
+   * Nothing on any surface said so. The pane looked healthy, the CLI was
+   * reachable, and the only evidence was a port number in a launch line
+   * thousands of scrollback rows up.
+   *
+   * ## Why it warns rather than repairs
+   *
+   * The repair is to restart the agent, and restarting it is exactly what must
+   * not happen automatically: the adopted session may be mid-turn, and killing a
+   * generating agent to fix its telemetry costs the work. So this reports and
+   * stops. `reportStaleHookUrl` is what makes it once — see that function.
+   *
+   * ## Who asks, and why the create path still does not
+   *
+   * Two callers. {@link startSession} asks when the launch REUSED a pane —
+   * {@link reconcileExistingSession}'s mark — and
+   * {@link warnIfRunningSessionHookUrlIsStale} asks when a send is about to type
+   * into a session that is already running. The second was added by Issue #2433
+   * because the first, alone, is unreachable for every tool that puts
+   * `CM_HOOK_URL` on its launch line: see {@link hookUrlProbedSessions}.
+   *
+   * A pane this server CREATED is asked by neither. Its launch line is one this
+   * process typed a moment ago, so the comparison is this server's port against
+   * itself and the answer is known without asking; asking anyway would put a
+   * full-scrollback `capture-pane` in front of every session start, which is a
+   * real cost on the path an operator is waiting on.
+   *
+   * The #2070 relaunch (the tool died, so the pane is reused but the launch
+   * line is re-typed) goes through the adopt mark too, and is why
+   * {@link readLaunchLineHookUrl} takes the NEWEST assignment: such a pane
+   * carries both, and the new one is in force.
+   *
+   * Never throws, never blocks a start and never blocks a send: a tool whose
+   * hook URL cannot be read — claude and opencode keep theirs out of the launch
+   * line entirely — simply yields null and is left alone.
+   */
+  private async warnIfHookUrlIsStale(
+    worktreeId: string,
+    sessionName: string,
+    instanceId?: string,
+  ): Promise<void> {
+    // Issue #2433: at most one read per session per process. The send path calls
+    // this on every message to an already-running session, and without this line
+    // that would put a full-scrollback capture in front of every Enter.
+    if (hookUrlProbedSessions.has(sessionName)) return;
+    try {
+      // The whole scrollback: the launch line is the OLDEST thing in an adopted
+      // pane, and `TMUX_HISTORY_LIMIT` is the ceiling tmux was told to keep.
+      const pane = await capturePane(sessionName, { startLine: -TMUX_HISTORY_LIMIT });
+      hookUrlProbedSessions.add(sessionName);
+      const sessionHookUrl = readLaunchLineHookUrl(pane);
+      if (sessionHookUrl === null) return;
+
+      const sessionPort = hookUrlPort(sessionHookUrl);
+      const serverPort = getServerPort();
+      if (sessionPort === null || sessionPort === serverPort) return;
+
+      logger.warn('session:hook-url-stale', {
+        cliToolId: this.id,
+        sessionName,
+        sessionPort,
+        serverPort,
+      });
+      reportStaleHookUrl({
+        worktreeId,
+        cliToolId: this.id,
+        instanceId,
+        toolName: this.name,
+        sessionPort,
+        serverPort,
+      });
+    } catch (error: unknown) {
+      logger.debug('session:hook-url-probe-failed', {
+        cliToolId: this.id,
+        worktreeId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  /**
+   * Ask the same question of a session that is ALREADY running (Issue #2433).
+   *
+   * ## Why the send path is where it has to be asked
+   *
+   * #2429's probe hangs off the adopt marker, and the marker is set inside a
+   * tool's `launchSession()` reuse branch — which `startSession()` reaches only
+   * when the pane already exists, while `POST /api/worktrees/:id/send` calls
+   * `startSession()` only when `isRunning()` said it does not. For antigravity,
+   * command-code and gemini — the three tools that write `CM_HOOK_URL` onto the
+   * launch line at all — `isRunning()` IS `hasSession()`, so those two
+   * conditions cannot both hold and the probe never ran. claude's `isRunning()`
+   * does look at the process, but claude keeps its endpoint out of the launch
+   * line, so {@link readLaunchLineHookUrl} answers null for it.
+   *
+   * The result was that the one situation #2429 was written for — a pane raised
+   * by a server on another port, still being typed into, its hooks posting into
+   * the void — was precisely the situation in which the pane is alive and
+   * therefore never examined. Measured 2026-09-08 against a live
+   * `mcbd-command-code-…` session whose launch line named :3000 while the server
+   * was :3010: zero `session:hook-url-stale` lines from either a capture or a
+   * send.
+   *
+   * ## What it costs
+   *
+   * One `capture-pane` per session per server process, and nothing after that —
+   * {@link hookUrlProbedSessions} is checked before tmux is touched, so the
+   * second and every later send to the same pane reach no further than a `Set`
+   * lookup. The per-send capture count the launch-readiness suites pin is
+   * unchanged.
+   *
+   * Nothing here can fail a send: {@link warnIfHookUrlIsStale} contains its own
+   * faults, and a session id that would not validate is simply not probed (the
+   * send that follows will fail on its own account, with a better message).
+   *
+   * @param worktreeId - Worktree the running session belongs to
+   * @param instanceId - Agent instance ID (defaults to the primary instance)
+   */
+  async warnIfRunningSessionHookUrlIsStale(
+    worktreeId: string,
+    instanceId?: string,
+  ): Promise<void> {
+    let sessionName: string;
+    try {
+      sessionName = this.getSessionName(worktreeId, instanceId);
+    } catch {
+      return;
+    }
+    await this.warnIfHookUrlIsStale(worktreeId, sessionName, instanceId);
   }
 
   /**
@@ -378,4 +670,34 @@ export abstract class BaseCLITool implements ICLITool {
   navigationKeys(): NavigationKeySpec {
     return { keys: NAVIGATION_KEY_VALUES, leaderKey: null };
   }
+}
+
+/**
+ * Probe a running session's hook URL, for a caller holding an `ICLITool`
+ * (Issue #2433).
+ *
+ * `POST /api/worktrees/:id/send` gets its tool from
+ * `CLIToolManager.getTool()`, which is typed as the {@link ICLITool} interface;
+ * the probe is a {@link BaseCLITool} concern and deliberately not part of that
+ * interface, because it is not something a tool has to implement — it is
+ * something every tool inherits. The narrowing lives here, next to the class it
+ * narrows to, rather than as an `instanceof` in the route.
+ *
+ * Fire-and-forget on purpose. The answer changes nothing about the message
+ * being sent — the Issue's decision, inherited from #2429, is to warn and NOT
+ * restart, because the adopted session may be mid-turn — so making the operator
+ * wait on a `capture-pane` for it would be paying latency for a notification.
+ * The returned promise cannot reject; the `.catch` is the belt.
+ *
+ * @param tool - The tool whose session is about to be typed into
+ * @param worktreeId - Worktree the running session belongs to
+ * @param instanceId - Agent instance ID (defaults to the primary instance)
+ */
+export function probeRunningSessionHookUrl(
+  tool: ICLITool,
+  worktreeId: string,
+  instanceId?: string,
+): void {
+  if (!(tool instanceof BaseCLITool)) return;
+  void tool.warnIfRunningSessionHookUrlIsStale(worktreeId, instanceId).catch(() => {});
 }

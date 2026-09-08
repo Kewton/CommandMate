@@ -65,7 +65,7 @@
  */
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Cpu, MessageSquare, TerminalSquare } from 'lucide-react';
+import { Cpu, MessageSquare, StickyNote, TerminalSquare } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
 import { TerminalDisplay } from '@/components/worktree/TerminalDisplay';
 import { TerminalEscapeHatch } from '@/components/worktree/TerminalEscapeHatch';
@@ -76,6 +76,19 @@ import {
 } from '@/components/worktree/OpencodeSidebarNotice';
 import { OpencodeQuickKeys } from '@/components/worktree/OpencodeQuickKeys';
 import { ChatSurface, type ChatSurfaceLiveState } from '@/components/worktree/ChatSurface';
+// Issue #2427: the session note's storage-facing half lives with the PC split
+// header — one hook, one editor, one IME guard — so the phone and the desktop
+// cannot drift into two behaviours for one field. See that file's "Session
+// notes" section for why the value is read from the list cache rather than
+// threaded as a prop, which is the same wall `useCachedAgentModelLabel` below
+// hits and solves the same way.
+import {
+  SESSION_NOTE_OPEN_EVENT,
+  SessionNoteInput,
+  useSessionNote,
+  type SessionNoteValue,
+} from '@/components/worktree/TerminalSplitPane';
+import { formatSessionNoteTimestamp } from '@/lib/date-utils';
 import { useTerminalPanePolling } from '@/hooks/useTerminalPanePolling';
 import { useSplitMessages } from '@/hooks/useSplitMessages';
 import { usePendingMessages, type OptimisticSendOptions } from '@/hooks/usePendingMessages';
@@ -265,19 +278,33 @@ const MobileSessionRow = memo(function MobileSessionRow({
   usage,
   usageDetail,
   recentChange,
+  note,
+  onEditNote,
   onOpenPicker,
   onDismissChange,
 }: {
-  modelLabel: string;
+  modelLabel: string | null;
   usage: string | null;
   usageDetail: string | null;
   recentChange: RecentModelChange | null;
+  note: SessionNoteValue | null;
+  onEditNote: () => void;
   onOpenPicker: () => void;
   onDismissChange: () => void;
 }) {
   const t = useTranslations('worktree');
   const changed = recentChange !== null;
-  const rowLabel = t('agentModel.sessionRow', { model: modelLabel });
+  const rowLabel = t('agentModel.sessionRow', { model: modelLabel ?? '' });
+  // Issue #2427: the memo, immediately right of the model — the Issue's placement,
+  // and the one that reads as "this session, and what it is on". The row itself
+  // now also exists for a note alone: a pane whose tool reports no model
+  // (gemini, vibe-local, hooks not wired) is exactly the pane whose header says
+  // least, so refusing to show its memo would withhold the label from the
+  // sessions that need it most.
+  const noteStamp = note ? formatSessionNoteTimestamp(new Date(note.updatedAt)) : '';
+  const noteLabel = note
+    ? t('sessionNote.label', { note: note.text, time: noteStamp })
+    : t('sessionNote.menuItem');
   return (
     <div
       data-testid="mobile-session-row"
@@ -288,17 +315,41 @@ const MobileSessionRow = memo(function MobileSessionRow({
           : 'border-border bg-surface-2 text-muted-foreground'
       }`}
     >
-      <button
-        type="button"
-        onClick={onOpenPicker}
-        aria-label={rowLabel}
-        title={rowLabel}
-        data-testid="mobile-session-model"
-        className="relative flex min-w-0 flex-1 items-center gap-1.5 truncate text-left touch-manipulation before:absolute before:inset-x-0 before:-inset-y-2 before:content-['']"
-      >
-        <Cpu size={12} aria-hidden="true" className="shrink-0" />
-        <span className="min-w-0 truncate">{modelLabel}</span>
-      </button>
+      {modelLabel ? (
+        <button
+          type="button"
+          onClick={onOpenPicker}
+          aria-label={rowLabel}
+          title={rowLabel}
+          data-testid="mobile-session-model"
+          // Issue #2427: `basis-0 grow` spelled out rather than `flex-1`, so the
+          // conditional `shrink` beside it is unambiguous — with a note present
+          // the model gives up width four times as fast as the memo does, which
+          // is the Issue's "narrow means the note wins" written in flexbox.
+          className={`relative flex min-w-0 basis-0 grow items-center gap-1.5 truncate text-left touch-manipulation before:absolute before:inset-x-0 before:-inset-y-2 before:content-[''] ${
+            note ? 'shrink-[4]' : 'shrink'
+          }`}
+        >
+          <Cpu size={12} aria-hidden="true" className="shrink-0" />
+          <span className="min-w-0 truncate">{modelLabel}</span>
+        </button>
+      ) : null}
+      {note ? (
+        <button
+          type="button"
+          onClick={onEditNote}
+          aria-label={noteLabel}
+          title={noteLabel}
+          data-testid="mobile-session-note"
+          className="relative flex min-w-0 shrink basis-0 grow items-center gap-1 text-left touch-manipulation before:absolute before:inset-x-0 before:-inset-y-2 before:content-['']"
+        >
+          <StickyNote size={12} aria-hidden="true" className="shrink-0 opacity-70" />
+          <span className="min-w-0 truncate">{note.text}</span>
+          <span data-testid="mobile-session-note-time" className="shrink-0 tabular-nums opacity-70">
+            {noteStamp}
+          </span>
+        </button>
+      ) : null}
       {usage ? (
         <span
           data-testid="mobile-session-usage"
@@ -527,6 +578,43 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
     locale
   );
 
+  // --------------------------------------------------------------------------
+  // The session note (Issue #2427)
+  // --------------------------------------------------------------------------
+  // The same hook the PC split header uses, against the same list cache, so the
+  // two surfaces read and write one value. The EDITOR is opened from
+  // `MobileTerminalActionsSheet`, which is rendered outside this tab by
+  // `WorktreeDetailRefactored` and therefore knows neither the worktree nor the
+  // active instance — it raises a window event and this listener, which holds
+  // both, answers it. Exactly the arrangement the terminal search already uses.
+  const { note: sessionNote, save: saveSessionNote } = useSessionNote(
+    worktreeId,
+    resolvedInstanceId
+  );
+  const [noteEditing, setNoteEditing] = useState(false);
+  useEffect(() => {
+    const open = () => setNoteEditing(true);
+    window.addEventListener(SESSION_NOTE_OPEN_EVENT, open);
+    return () => window.removeEventListener(SESSION_NOTE_OPEN_EVENT, open);
+  }, []);
+  // A different session is a different memo.
+  useEffect(() => {
+    setNoteEditing(false);
+  }, [worktreeId, resolvedInstanceId]);
+  const openNoteEditor = useCallback(() => setNoteEditing(true), []);
+  const closeNoteEditor = useCallback(() => setNoteEditing(false), []);
+  const commitNote = useCallback(
+    (text: string) => {
+      saveSessionNote(text);
+      setNoteEditing(false);
+    },
+    [saveSessionNote]
+  );
+  // Issue #2427: the row now has two reasons to exist. It was model-only, and a
+  // note on a pane whose tool reports no model would otherwise have nowhere to
+  // land — which is the pane the operator most needs a label on.
+  const showSessionRow = sessionModelLabel !== null || sessionNote !== null;
+
   // The most recent `model_changed` frame for THIS instance, held until it is
   // dismissed or `MODEL_CHANGE_HIGHLIGHT_MS` has passed since the change. The
   // frame comes from the server's edge (`agent-event-state`), which already
@@ -720,7 +808,7 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
         // pill already keeps) while the row is showing, so the pill sits over
         // the output as before rather than over the row.
         className={`pointer-events-none absolute right-2 z-30 flex items-center gap-0.5 rounded-full border border-border bg-surface-2/95 p-0.5 shadow-lg backdrop-blur ${
-          sessionModelLabel ? 'top-9' : 'top-2'
+          showSessionRow ? 'top-9' : 'top-2'
         }`}
       >
         {MOBILE_SURFACE_SEGMENTS.map(({ mode, labelKey, icon: Icon }) => {
@@ -765,15 +853,41 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
       {/* Issue #2357: the session row — which model this instance is on, in
           the PC split header's words. Absent (not empty) when nothing has
           reported a model; see `MobileSessionRow` for the height budget. */}
-      {sessionModelLabel ? (
+      {showSessionRow ? (
         <MobileSessionRow
           modelLabel={sessionModelLabel}
           usage={sessionUsage}
           usageDetail={sessionUsageDetail}
           recentChange={recentModelChange}
+          note={sessionNote}
+          onEditNote={openNoteEditor}
           onOpenPicker={openModelPicker}
           onDismissChange={dismissModelChange}
         />
+      ) : null}
+      {/* Issue #2427: the note editor, overlaid rather than in the flex flow —
+          the same #2106 budget the surface pill obeys. It is anchored under the
+          session row when there is one and at the tab's top edge when there is
+          not, so it never covers the row it is editing. */}
+      {noteEditing ? (
+        <div
+          data-testid="mobile-session-note-editor"
+          className={`absolute inset-x-2 z-40 rounded-md border border-border bg-surface p-2 shadow-lg ${
+            showSessionRow ? 'top-9' : 'top-2'
+          }`}
+        >
+          <SessionNoteInput
+            initialText={sessionNote?.text ?? ''}
+            onCommit={commitNote}
+            onCancel={closeNoteEditor}
+            ariaLabel={t('sessionNote.menuItem')}
+            placeholder={t('sessionNote.placeholder')}
+            testId="mobile-session-note-input"
+          />
+          <p className="mt-1 text-[10px] leading-tight text-muted-foreground">
+            {t('sessionNote.hint')}
+          </p>
+        </div>
       ) : null}
       <div className="flex-1 min-h-0 overflow-hidden" data-testid="mobile-terminal-region">
         {surfaceMode === 'chat' ? (

@@ -73,11 +73,26 @@ export function resolvePushLocale(locale: string | null | undefined): SupportedL
  *
  * Declared here, next to the wording it selects, rather than in
  * `failure-push-notifier`: that module imports this one, and a type living the
- * other way round would be a cycle for no gain. Each value maps to exactly one
- * pair of dictionary keys, so a new signal cannot be added without deciding
- * what the phone should say about it.
+ * other way round would be a cycle for no gain.
+ *
+ * Split in two by Issue #2429, and the split IS the rule #2000 stated: a new
+ * signal cannot be added without deciding what the phone should say about it.
+ * Add it to {@link DictionaryFailurePushReason} and the total `Record` at
+ * {@link FAILURE_BODY_KEYS} demands the copy; add it to
+ * {@link ProducerWordedFailureReason} and the producer owes a
+ * {@link FailureContext.body}. There is no third arm.
  */
-export type FailurePushReason =
+export type FailurePushReason = DictionaryFailurePushReason | ProducerWordedFailureReason;
+
+/**
+ * The failure reasons whose wording lives in the `locales/<lang>/notifications.json`
+ * dictionaries (Issue #2000).
+ *
+ * Every value here has an entry in {@link FAILURE_BODY_KEYS}, which is a total
+ * `Record` over this union — so a signal added to it cannot ship without a
+ * decision about what the phone should say.
+ */
+export type DictionaryFailurePushReason =
   /** A verification run closed `failed` / `error` (`lib/verification/gate-runner`). */
   | 'verification-failed'
   /** An upstream (model API) fault signature appeared on the pane (#1839). */
@@ -108,6 +123,37 @@ export type FailurePushReason =
    */
   | 'agent-session-error';
 
+/**
+ * The failure reasons whose body is built by the producer, per locale
+ * (Issue #2429).
+ *
+ * ## Why one signal is worded outside the dictionary
+ *
+ * The dictionary form is `<template>` + one `{excerpt}`, which fits a signal
+ * whose body is a fixed sentence plus a name. `hook-url-stale` is not that
+ * shape: the sentence has to carry two port numbers this server computed and
+ * the remedy that follows from them ("the agent is reporting to :3010, this
+ * server is :3000 — restart the session"), and an excerpt appended to a fixed
+ * template can hold one of those three facts, not the relation between them.
+ *
+ * {@link ModelChangeContext} established the shape for exactly this case
+ * (Issue #2357): the producer, which is the layer holding the values, writes
+ * the sentence once per locale and hands it over. `Record<SupportedLocale, …>`
+ * is what keeps that from being a hole — a new locale is a type error at the
+ * producer, the same way it is at {@link PUSH_MESSAGES}.
+ *
+ * A value here must set {@link FailureContext.body}; the generic "Failed"
+ * wording is what a producer that forgets gets, and it is the same fallback an
+ * event carrying no reason at all takes.
+ */
+export type ProducerWordedFailureReason =
+  /**
+   * An adopted tmux session's `CM_HOOK_URL` names a different server, so its
+   * hooks reach nobody (Issue #2429). Raised from
+   * `lib/cli-tools/start-availability`.
+   */
+  'hook-url-stale';
+
 /** What a failure notification is about (Issue #2000). */
 export interface FailureContext {
   reason: FailurePushReason;
@@ -118,6 +164,16 @@ export interface FailureContext {
    * attempt counter). Producers build it; see `failure-push-notifier`.
    */
   signature: string;
+  /**
+   * The sentence, per locale, already interpolated (Issue #2429).
+   *
+   * Required in practice for a {@link ProducerWordedFailureReason} and unused
+   * by every other signal, which keeps its body in the dictionary. Set, it
+   * replaces the body outright — the excerpt is not appended to it, because a
+   * producer that wrote the whole sentence has already said everything it meant
+   * to say.
+   */
+  body?: Record<SupportedLocale, string>;
 }
 
 /** What a model-change notification is about (Issue #2357). */
@@ -323,7 +379,7 @@ function buildWaitingBody(
  * error at {@link FAILURE_BODY_KEYS}, not a blank notification.
  */
 const FAILURE_BODY_KEYS: Record<
-  FailurePushReason,
+  DictionaryFailurePushReason,
   { withExcerpt: keyof typeof enNotifications.push; plain: keyof typeof enNotifications.push }
 > = {
   'verification-failed': {
@@ -351,17 +407,30 @@ const FAILURE_BODY_KEYS: Record<
 function buildFailureBody(
   event: NotificationEvent,
   messages: typeof enNotifications.push,
-  excerpt: string
+  excerpt: string,
+  locale: SupportedLocale
 ): string {
+  // Issue #2429: read first, for the same reason `modelChange` is read first in
+  // `buildPushPayload` — a producer that wrote the sentence itself has said
+  // something the dictionary cannot, and appending an excerpt to it would put
+  // half of that sentence twice.
+  const prebuilt = event.failure?.body?.[locale];
+  if (prebuilt) return prebuilt;
+
   // An event that claims `kind: 'failure'` without saying which failure is a
   // producer bug. Falling back to the verification wording would misreport it,
-  // so the generic "something failed" copy is used instead.
+  // so the generic "something failed" copy is used instead. A
+  // `ProducerWordedFailureReason` that arrived without its body lands here too,
+  // and lands honestly: nothing in the dictionary describes it.
   const reason = event.failure?.reason;
-  if (reason === undefined) {
+  const keys =
+    reason !== undefined
+      ? FAILURE_BODY_KEYS[reason as DictionaryFailurePushReason]
+      : undefined;
+  if (keys === undefined) {
     return excerpt ? messages.failureWithExcerpt.replace('{excerpt}', excerpt) : messages.failure;
   }
 
-  const keys = FAILURE_BODY_KEYS[reason];
   return excerpt
     ? messages[keys.withExcerpt].replace('{excerpt}', excerpt)
     : messages[keys.plain];
@@ -391,7 +460,7 @@ export function buildPushPayload(
         ? messages.promptResolved
         : buildWaitingBody(event, messages, excerpt, now)
       : event.kind === 'failure'
-        ? buildFailureBody(event, messages, excerpt)
+        ? buildFailureBody(event, messages, excerpt, resolvedLocale)
         : // Issue #2045: an update notice is a completion by *bucket*, not by
           // content, so it is the one completion whose body is not "Done".
           event.updateAvailable

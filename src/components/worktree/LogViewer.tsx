@@ -189,7 +189,8 @@ export function LogViewer({ worktreeId }: LogViewerProps) {
    * Handle keyboard shortcuts for search navigation
    */
   const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
+    // Guard against IME composition (Enter confirms candidate, not submit).
+    if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
       e.preventDefault();
       if (e.shiftKey) {
         goToPrevMatch();

@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.33.1] - 2026-09-08
+
+> **Highlight**: 日本語で使うときに毎日踏んでいた入力の取りこぼしと、Command Code の「終わっていないのに終わったことにする」を直しました。**Enter で確定するテキスト入力 7 箇所にIME の composition ガードが無く**、変換確定の Enter でそのまま確定していました — 別名やファイル名は未変換のまま永続化されます（#2428）。Command Code では、ツール呼び出しの無いターンで**前ターンの `hook_stop` が生成中の画面に勝ち続け**、`wait` が 60 秒保留のあと `scraper_ready` で早期完了していました（#2429、実測: 生成中フレーム 15/15 が `ready`。修正後は 14/14 が `running`）。あわせて 4 分割でどのターミナルが何をしていたか分かるよう、**セッションごとの 1 行メモ**を追加しています（#2427）。
+
+### Added
+
+- **feat(worktree): セッションごとに1行メモ（更新時刻つき）を付けられるようにした** (#2427): 4分割でもどのターミナルが何をしていたか一目で分かるよう、各エージェントインスタンスに自由入力の1行メモ（最大100文字・当日は`14:32` / 前日以前は`9/7 14:32`表記）を追加。PC はスプリットヘッダ（省略＋ツールチップ、狭いときはモデル名から先に truncate）、スマホはモデル行の右に表示し編集はターミナル操作シートから。保存は専用テーブル`session_notes`（migration v61）と専用エンドポイント`PUT /api/worktrees/:id/instances/notes`で、alias とは別物として roster の全置換に耐え、宛先解決（`--instance <alias>`）には一切使われない。
+
+### Fixed
+
+- **fix(ui): Enterで確定するテキスト入力7箇所でIME変換確定のEnterが未変換のまま確定してしまう問題を修正** (#2428): エージェント別名・新規ファイル名・リポジトリ表示名・ファイル/メモ/ログ検索の各入力で、`TodoPane` と同じ `!e.nativeEvent.isComposing` ガードを確定処理に追加し、変換候補を確定するEnterでは保存・ファイル作成・検索実行が走らないようにした（変換確定後のEnterは従来どおり確定する）。
+- **fix(session): Command Code の生成中に前ターンの `hook_stop` が `ready` を出し続け、`wait` が 60 秒保留のあと `scraper_ready` で早期完了する問題を修正** (#2429): 画面が生成中（`thinking_indicator`）で、かつ構造化層の最新 `stop` の `closedAt` がこのインスタンスへの最新送信（chat 台帳の user 行）より古いとき、`mergeStructuredStatus` が scraper の `running` を採るようにした。開始イベントを出せない Command Code のツール無しターンでも `sessionStatus` が `running` になり、`wait` は `basis=hook_stop` で完了する。副作用として、adopt した tmux セッションの `CM_HOOK_URL` が別ポートを指している場合に 1 度だけ push で警告する（セッションは殺さない）。
+- **fix(session): `CM_HOOK_URL` が別サーバを指す既存セッションへの `send` で警告が出ない問題を修正** (#2433): #2429 が入れた「adopt したセッションの `CM_HOOK_URL` が古いポートを指していたら警告する」検査は、実機で一度も発火しない到達不能コードだった（adopt マーカーは各ツールの `launchSession()` の再利用ブランチ＝`hasSession()===true` でしか立たず、その `launchSession()` は `send/route.ts` が `isRunning()===false` のときだけ呼ぶ `startSession()` からしか走らないため、`isRunning()===hasSession()` である antigravity / command-code / gemini — 起動行に `CM_HOOK_URL` を載せる 3 ツールそのもの — では両条件が同時に成立しえない）。検査の位置を「adopt した時」から「既にセッションが running なので `startSession()` を飛ばす時」＝`POST /api/worktrees/:id/send` の `running===true` 分岐へ移し、`session:hook-url-stale`（`sessionPort` / `serverPort` 両方を含む）と push 通知がその状況で実際に出るようにした。読み取り・比較・重複排除は #2429 の実装（`readLaunchLineHookUrl()` / `hookUrlPort()` / `warnIfHookUrlIsStale()` / `reportStaleHookUrl()`）をそのまま再利用し、呼び出し位置だけを変えている。送信ごとに全 scrollback を capture しないよう、ペインを読んだセッション名をプロセス内台帳（`hookUrlProbedSessions`）に記録して 2 回目以降は tmux に触れる前に打ち切る（送信 1 回あたりの `capturePane` 回数は不変で、既存の回数 pin テストも緑のまま）。セッションは自動再起動しない（生成中のセッションを殺さない、#2429 の判断を踏襲）。到達可能性そのものは実ルートハンドラ＋実 `CommandCodeTool.isRunning()` を通す単体テストで pin した — `warnIfHookUrlIsStale` を直接叩く #2429 のテストは、この到達不能を最後まで緑のまま見逃していたため。
+
 ## [0.33.0] - 2026-09-08
 
 > **Highlight**: 画面で「見えるべきものが見えない／見えなくていいものが見えている」を 6 件まとめて直しました。チャット面では codex のバブルが**進捗ナレーションではなく回答から**始まるようになり（#2420、実測では回答に着くまで 4 段落 754 文字を読まされていた）、待機中のエージェントへ送信するたびに出ていた「Queued (session busy)」の偽トーストも消えます（#2406、`isRunning` の意味が #2238 で変わって以来の取りこぼし）。PC のターミナル分割は **4 分割 2x2 グリッド**に対応しました（#2421）。スマホでは Agent ペインの「自分には委任しない」ガードが効くようになり、worktree 画面からコマンドパレットへ到達できます（#2395）。あわせて Debian 11 の LTS 終了で CI が恒久的に赤くなっていた件を復旧しています（#2416）。

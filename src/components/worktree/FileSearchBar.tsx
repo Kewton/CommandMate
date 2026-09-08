@@ -63,7 +63,8 @@ export const FileSearchBar = memo(function FileSearchBar({
         onChange={(e) => onQueryChange(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === 'Escape') { onClose(); }
-          if (e.key === 'Enter') { if (e.shiftKey) { onPrevMatch(); } else { onNextMatch(); } }
+          // Guard against IME composition (Enter confirms candidate, not submit).
+          if (e.key === 'Enter' && !e.nativeEvent.isComposing) { if (e.shiftKey) { onPrevMatch(); } else { onNextMatch(); } }
         }}
         placeholder={t('fileSearch.placeholder')}
         className="flex-1 min-w-0 px-2 py-0.5 text-sm bg-surface dark:text-foreground border border-input rounded outline-none focus:ring-1 focus:ring-ring"

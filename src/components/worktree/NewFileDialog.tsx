@@ -84,7 +84,8 @@ export const NewFileDialog = memo(function NewFileDialog({
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      if (e.key === 'Enter') {
+      // Guard against IME composition (Enter confirms candidate, not submit).
+      if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
         e.preventDefault();
         handleConfirm();
       }

@@ -275,7 +275,8 @@ function RepositoryListInner({ refreshKey, onChanged }: RepositoryListProps) {
 
   const handleKeyDown = useCallback(
     (event: React.KeyboardEvent<HTMLInputElement>, repo: RepositoryListItem) => {
-      if (event.key === 'Enter') {
+      // Guard against IME composition (Enter confirms candidate, not submit).
+      if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
         event.preventDefault();
         void handleSave(repo);
       } else if (event.key === 'Escape') {
