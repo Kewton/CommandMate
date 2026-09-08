@@ -19,6 +19,15 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('@/lib/db/db-instance', () => ({ getDbInstance: vi.fn(() => ({})) }));
 
+// Issue #2427: the list route also reads the per-session notes. `getDbInstance`
+// above is a bare `{}`, so the real `SELECT` would throw and take the whole list
+// with it; an empty map is what a server with no notes returns. Only that one
+// export is replaced — everything else in the module stays real.
+vi.mock('@/lib/db/agent-instances-db', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/db/agent-instances-db')>();
+  return { ...actual, getAllSessionNotes: () => ({}) };
+});
+
 const mockWorktrees = [
   { id: 'wt-1', name: 'feature/one', status: 'doing', cliToolId: 'claude', selectedAgents: ['claude'] },
   { id: 'wt-2', name: 'feature/two', status: 'done', cliToolId: 'codex', selectedAgents: ['codex'] },

@@ -27,6 +27,7 @@ import { parseIncludeParam, parseIncludeStatusParam } from '@/lib/api/worktrees-
 import { isWorktreeStalled } from '@/lib/detection/stalled-detector';
 import { getNextAction, getReviewStatus } from '@/lib/session/next-action-helper';
 import { resolveAgentInstances } from '@/lib/session/agent-instances-resolver';
+import { getAllSessionNotes, type SessionNote } from '@/lib/db/agent-instances-db';
 import { getDefaultSelectedAgents } from '@/lib/db/app-settings-db';
 import { resolveSelectedAgents } from '@/lib/selected-agents-validator';
 import { deriveSessionStatus } from '@/lib/session/status-mapping';
@@ -90,6 +91,14 @@ export async function GET(request: NextRequest) {
     const defaultSelectedAgents = resolveSelectedAgents({
       appSettings: getDefaultSelectedAgents(db),
     });
+    // Issue #2427: the per-session notes, as a SEPARATE map rather than a field
+    // on each `agentInstances` entry. `AgentInstance` is the roster PATCH's
+    // input shape as much as its output, so a note on it would become something
+    // every roster writer has to echo back or silently destroy — which is the
+    // same reason the storage is its own table (migration v61). One statement
+    // for the whole server, inside the `dbMs` window because that is what it is;
+    // a point query per worktree would multiply the poll every open client makes.
+    const sessionNotesByWorktree = getAllSessionNotes(db);
     const dbMs = performance.now() - dbStartedAt;
 
     // ---- Phase 2: the status. Every tmux round-trip lives here. -----------
@@ -135,6 +144,12 @@ export async function GET(request: NextRequest) {
     const worktreesWithStatus = worktrees.map((worktree) => {
       const agentInstances = agentInstancesByWorktree.get(worktree.id) ?? [];
       const status = statusByWorktree.get(worktree.id);
+      // Issue #2427: `{}` rather than an omitted key, so a client reading
+      // `sessionNotes[instanceId]` never has to guard the map itself. It rides
+      // the list on BOTH paths below, including `?includeStatus=0`: a note is a
+      // DB row, so nothing about it is "not measured" when tmux is not asked.
+      const sessionNotes: Record<string, SessionNote> =
+        sessionNotesByWorktree[worktree.id] ?? {};
 
       // `?includeStatus=0`: the status keys are OMITTED rather than zeroed. All
       // of them are optional on `Worktree`, and absence is the only honest way
@@ -143,13 +158,14 @@ export async function GET(request: NextRequest) {
       // dot. The review block goes with it: `nextAction` / `reviewStatus` are
       // derived from the status, so there is nothing to derive them from.
       if (!status) {
-        return { ...worktree, agentInstances };
+        return { ...worktree, agentInstances, sessionNotes };
       }
 
       const base = {
         ...worktree,
         ...status,
         agentInstances,
+        sessionNotes,
       };
 
       // Issue #600: Add review fields when ?include=review

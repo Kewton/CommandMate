@@ -259,6 +259,13 @@ export function setAgentInstances(
     // is a full replace, so an instance dropped from the roster would otherwise
     // leave its opencode settings behind for whoever next claimed that id.
     pruneOpencodeInstanceSettings(db, worktreeId, instances.map((instance) => instance.id));
+    // Issue #2427: the same rule for the session notes, and the same rule read
+    // the other way round — this prunes only the ids that LEFT the roster, so
+    // the note of every surviving instance outlives the delete/re-insert that
+    // renaming an alias or reordering the list performs. That survival is the
+    // Issue's third acceptance condition; a mutation that drops this call makes
+    // the note of a *removed* instance haunt the next instance to claim its id.
+    pruneSessionNotes(db, worktreeId, instances.map((instance) => instance.id));
     const insertStmt = db.prepare(`
       INSERT INTO agent_instances
         (worktree_id, instance_id, cli_tool_id, alias, sort_order, created_at)
@@ -326,6 +333,11 @@ export function removeAgentInstance(
   // it was configured to launch opencode with is gone with it.
   db.prepare(`
     DELETE FROM opencode_instance_settings WHERE worktree_id = ? AND instance_id = ?
+  `).run(worktreeId, instanceId);
+  // Issue #2427: and the memo written about it. A note names a session; the
+  // session is gone.
+  db.prepare(`
+    DELETE FROM session_notes WHERE worktree_id = ? AND instance_id = ?
   `).run(worktreeId, instanceId);
   return result.changes > 0;
 }
@@ -488,6 +500,253 @@ export function pruneOpencodeInstanceSettings(
   const placeholders = keepInstanceIds.map(() => '?').join(', ');
   return db.prepare(`
     DELETE FROM opencode_instance_settings
+    WHERE worktree_id = ? AND instance_id NOT IN (${placeholders})
+  `).run(worktreeId, ...keepInstanceIds).changes;
+}
+
+// ============================================================================
+// Session notes (Issue #2427). Appended after the opencode block for the same
+// reason that one was appended after the roster CRUD: everything below is
+// additive and touches no export above it, so `AgentInstance` — which is the
+// roster PATCH's INPUT shape as much as its output — is unchanged, and so is
+// every resolution path that reads it.
+//
+// A note is a memo a human reads. It is NOT an alias: since Issue #2376
+// `--instance レビュー担当` resolves through `agent_instances.alias`, so an alias
+// decides where a `send` lands. Nothing in this section is read by
+// `resolveInstanceCliTool` or by `/resolve-target`, and that is the whole reason
+// the two are stored apart.
+// ============================================================================
+
+/**
+ * Longest note this server will store, in code points (Issue #2427).
+ *
+ * One line beside a session title, so the bound is about what can be READ in a
+ * split header rather than about storage. Code points rather than UTF-16 units
+ * because the operator counts characters: an emoji is one character to whoever
+ * typed it and two to `String.prototype.length`, and a limit that charges two
+ * for one is a limit that cannot be explained.
+ *
+ * The client mirrors it as the input's `maxLength` (`SESSION_NOTE_MAX_LENGTH` in
+ * `TerminalSplitPane`), which is a convenience; THIS is the enforcement, because
+ * the route is reachable without the UI.
+ */
+export const MAX_SESSION_NOTE_LENGTH = 100;
+
+/**
+ * One session's note (Issue #2427).
+ *
+ * `text` is never empty: clearing a note deletes its row, so "no note" is
+ * absence rather than an empty string — see {@link setSessionNote}.
+ */
+export interface SessionNote {
+  /** The note itself, normalized to a single line. */
+  text: string;
+  /** Epoch ms the note was last written; rendered beside it. */
+  updatedAt: number;
+}
+
+/** Thrown when a note is longer than {@link MAX_SESSION_NOTE_LENGTH}. */
+export class SessionNoteTooLongError extends Error {
+  constructor(limit: number = MAX_SESSION_NOTE_LENGTH) {
+    super(`Session note exceeds ${limit} characters`);
+    this.name = 'SessionNoteTooLongError';
+  }
+}
+
+/** One row of `session_notes`. */
+interface SessionNoteRow {
+  instance_id: string;
+  note: string;
+  updated_at: number;
+}
+
+/** Below this code point (plus DEL) a character cannot be typed into a memo. */
+const FIRST_PRINTABLE_CODE_POINT = 0x20;
+const DELETE_CODE_POINT = 0x7f;
+
+/**
+ * Fold a submitted note into the one line that is actually stored.
+ *
+ * Control characters — a pasted newline above all, which is how a multi-line
+ * clipboard reaches a one-line input — become spaces rather than being rejected:
+ * the operator pasting two lines of a commit message means the text, not the
+ * line break, and a refusal there would read as a bug. Runs of whitespace
+ * collapse and the ends are trimmed, so the stored value is what the header will
+ * render, and the length limit is measured against that rather than against
+ * padding.
+ *
+ * Iterating code points rather than matching a control-character class keeps the
+ * repository's own `scripts/check-control-chars.mjs` discipline — the escape
+ * sequence for a control character is still a control character to a reviewer
+ * skimming the line — and gets surrogate pairs right for free.
+ *
+ * Returns `''` for anything that folds away to nothing, which is the caller's
+ * signal to DELETE rather than to store.
+ */
+export function normalizeSessionNoteText(raw: unknown): string {
+  if (typeof raw !== 'string') return '';
+  let folded = '';
+  for (const char of raw) {
+    const code = char.codePointAt(0) ?? 0;
+    folded += code < FIRST_PRINTABLE_CODE_POINT || code === DELETE_CODE_POINT ? ' ' : char;
+  }
+  return folded.replace(/\s+/g, ' ').trim();
+}
+
+/** How long a normalized note is, counted the way the limit is defined. */
+export function sessionNoteLength(text: string): number {
+  return Array.from(text).length;
+}
+
+/**
+ * The note kept beside one session, or null when there is none.
+ *
+ * @param db - Database instance
+ * @param worktreeId - Worktree ID
+ * @param instanceId - Instance ID (the primary instance uses the CLI tool id)
+ */
+export function getSessionNote(
+  db: Database.Database,
+  worktreeId: string,
+  instanceId: string
+): SessionNote | null {
+  const row = db.prepare(`
+    SELECT instance_id, note, updated_at
+    FROM session_notes
+    WHERE worktree_id = ? AND instance_id = ?
+  `).get(worktreeId, instanceId) as SessionNoteRow | undefined;
+
+  return row ? { text: row.note, updatedAt: row.updated_at } : null;
+}
+
+/**
+ * Every note kept for a worktree, keyed by instance id.
+ *
+ * One statement rather than one per roster entry: the split header asks for the
+ * whole worktree at once, and an instance with no row is simply absent from the
+ * result — which is also how the UI decides to render nothing.
+ */
+export function getSessionNotesByWorktree(
+  db: Database.Database,
+  worktreeId: string
+): Record<string, SessionNote> {
+  const rows = db.prepare(`
+    SELECT instance_id, note, updated_at
+    FROM session_notes
+    WHERE worktree_id = ?
+  `).all(worktreeId) as SessionNoteRow[];
+
+  const notes: Record<string, SessionNote> = {};
+  for (const row of rows) {
+    notes[row.instance_id] = { text: row.note, updatedAt: row.updated_at };
+  }
+  return notes;
+}
+
+/**
+ * Every note on the server, grouped by worktree id then instance id.
+ *
+ * `GET /api/worktrees` composes one payload for every worktree at once and is
+ * polled by every open client, so it reads this table ONCE rather than issuing a
+ * point query per row of the list. The whole table is a handful of rows per
+ * worktree by construction (at most `MAX_AGENT_INSTANCES`, and only for the
+ * sessions somebody annotated), so grouping in JS costs less than the round
+ * trips it replaces — and it is immune to SQLite's bound-parameter ceiling,
+ * which an `IN (...)` over every worktree id would not be.
+ */
+export function getAllSessionNotes(
+  db: Database.Database
+): Record<string, Record<string, SessionNote>> {
+  const rows = db.prepare(`
+    SELECT worktree_id, instance_id, note, updated_at
+    FROM session_notes
+  `).all() as Array<SessionNoteRow & { worktree_id: string }>;
+
+  const byWorktree: Record<string, Record<string, SessionNote>> = {};
+  for (const row of rows) {
+    const notes = byWorktree[row.worktree_id] ?? (byWorktree[row.worktree_id] = {});
+    notes[row.instance_id] = { text: row.note, updatedAt: row.updated_at };
+  }
+  return byWorktree;
+}
+
+/**
+ * Write one session's note, or clear it.
+ *
+ * A note that normalizes to nothing DELETES the row instead of storing `''`, for
+ * the reason {@link setOpencodeInstanceSettings} deletes an all-unset write: the
+ * two states are indistinguishable to every reader, and absence is what lets the
+ * split header render nothing at all rather than an empty chip.
+ *
+ * @param at - Epoch ms recorded as the note's time; injectable so a test can
+ *   assert the displayed timestamp without racing the clock
+ * @returns The stored note, or null when the note was cleared
+ * @throws InvalidAgentInstanceError when the instance id is not a valid one
+ * @throws SessionNoteTooLongError when the note is over the limit
+ */
+export function setSessionNote(
+  db: Database.Database,
+  worktreeId: string,
+  instanceId: string,
+  text: unknown,
+  at: number = Date.now()
+): SessionNote | null {
+  if (!isValidInstanceId(instanceId)) {
+    throw new InvalidAgentInstanceError(`Invalid instance id: ${String(instanceId)}`);
+  }
+  const normalized = normalizeSessionNoteText(text);
+  if (sessionNoteLength(normalized) > MAX_SESSION_NOTE_LENGTH) {
+    throw new SessionNoteTooLongError();
+  }
+
+  if (normalized.length === 0) {
+    db.prepare(`
+      DELETE FROM session_notes WHERE worktree_id = ? AND instance_id = ?
+    `).run(worktreeId, instanceId);
+    return null;
+  }
+
+  db.prepare(`
+    INSERT INTO session_notes (worktree_id, instance_id, note, updated_at)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(worktree_id, instance_id) DO UPDATE SET
+      note = excluded.note,
+      updated_at = excluded.updated_at
+  `).run(worktreeId, instanceId, normalized, at);
+
+  return { text: normalized, updatedAt: at };
+}
+
+/**
+ * Drop the notes of instances that are no longer in the roster.
+ *
+ * Called by {@link setAgentInstances} and {@link removeAgentInstance} for the
+ * reason {@link pruneOpencodeInstanceSettings} is: `session_notes` is keyed on an
+ * instance id and nothing else would ever remove a row for an instance the
+ * operator deleted, so re-adding an instance under the same id would inherit a
+ * memo written about a session that no longer exists as if it were its own.
+ *
+ * The counterpart matters just as much: this prunes the ids that are GONE and
+ * leaves every surviving id alone, which is what makes a note survive the roster
+ * replace that an alias edit performs.
+ *
+ * @param keepInstanceIds - The ids that survive; every other row is deleted
+ * @returns How many rows were removed
+ */
+export function pruneSessionNotes(
+  db: Database.Database,
+  worktreeId: string,
+  keepInstanceIds: readonly string[]
+): number {
+  if (keepInstanceIds.length === 0) {
+    return db.prepare(`
+      DELETE FROM session_notes WHERE worktree_id = ?
+    `).run(worktreeId).changes;
+  }
+  const placeholders = keepInstanceIds.map(() => '?').join(', ');
+  return db.prepare(`
+    DELETE FROM session_notes
     WHERE worktree_id = ? AND instance_id NOT IN (${placeholders})
   `).run(worktreeId, ...keepInstanceIds).changes;
 }

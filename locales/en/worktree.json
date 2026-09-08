@@ -1049,6 +1049,14 @@
     "changedRecently": "Changed",
     "changedRecentlyDetail": "Model changed from {from} to {to}. Tap to dismiss."
   },
+  "sessionNote": {
+    "menuItem": "Session note",
+    "placeholder": "What is this session working on?",
+    "hint": "Enter to save, Esc to cancel. An empty note is removed.",
+    "editLabel": "Edit the session note for {split}",
+    "label": "Note: {note} (updated {time})",
+    "empty": "No note yet"
+  },
   "nextAction": {
     "start": "Start",
     "sendMessage": "Send message",
