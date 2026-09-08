@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **fix(ui): Enterで確定するテキスト入力7箇所でIME変換確定のEnterが未変換のまま確定してしまう問題を修正** (#2428): エージェント別名・新規ファイル名・リポジトリ表示名・ファイル/メモ/ログ検索の各入力で、`TodoPane` と同じ `!e.nativeEvent.isComposing` ガードを確定処理に追加し、変換候補を確定するEnterでは保存・ファイル作成・検索実行が走らないようにした（変換確定後のEnterは従来どおり確定する）。
+- **fix(session): Command Code の生成中に前ターンの `hook_stop` が `ready` を出し続け、`wait` が 60 秒保留のあと `scraper_ready` で早期完了する問題を修正** (#2429): 画面が生成中（`thinking_indicator`）で、かつ構造化層の最新 `stop` の `closedAt` がこのインスタンスへの最新送信（chat 台帳の user 行）より古いとき、`mergeStructuredStatus` が scraper の `running` を採るようにした。開始イベントを出せない Command Code のツール無しターンでも `sessionStatus` が `running` になり、`wait` は `basis=hook_stop` で完了する。副作用として、adopt した tmux セッションの `CM_HOOK_URL` が別ポートを指している場合に 1 度だけ push で警告する（セッションは殺さない）。
+
 ## [0.33.0] - 2026-09-08
 
 > **Highlight**: 画面で「見えるべきものが見えない／見えなくていいものが見えている」を 6 件まとめて直しました。チャット面では codex のバブルが**進捗ナレーションではなく回答から**始まるようになり（#2420、実測では回答に着くまで 4 段落 754 文字を読まされていた）、待機中のエージェントへ送信するたびに出ていた「Queued (session busy)」の偽トーストも消えます（#2406、`isRunning` の意味が #2238 で変わって以来の取りこぼし）。PC のターミナル分割は **4 分割 2x2 グリッド**に対応しました（#2421）。スマホでは Agent ペインの「自分には委任しない」ガードが効くようになり、worktree 画面からコマンドパレットへ到達できます（#2395）。あわせて Debian 11 の LTS 終了で CI が恒久的に赤くなっていた件を復旧しています（#2416）。
