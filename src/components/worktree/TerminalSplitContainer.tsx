@@ -57,6 +57,7 @@ import type { ShowToast } from '@/types/markdown-editor';
 import {
   MAX_SPLITS,
   MIN_GRID_ROW_PX,
+  toGridTrackFractions,
   MIN_SPLITS,
   isGridLayout,
 } from '@/config/terminal-split-config';
@@ -337,6 +338,19 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
    * pointer's speed, because the sum it divides by (1.0, all four entries) is
    * twice the share the two visible columns actually occupy.
    */
+  /*
+   * Issue #2424: the `fr` pairs the grid is actually laid out with.
+   *
+   * `widths` / `rowHeights` are shares whose total is not pinned to 1 (a fresh
+   * grid is `0.25` per pane, and `isValidRowHeights` accepts any positive
+   * pair). CSS gives tracks whose flex factors sum below 1 only that fraction
+   * of the space, so the raw values have to be normalised before they reach
+   * `gridTemplate*`. Derived rather than stored: the resize handlers stay free
+   * to preserve whatever total they already use.
+   */
+  const gridColumnFr = toGridTrackFractions(widths[0] ?? 1, widths[1] ?? 1);
+  const gridRowFr = toGridTrackFractions(rowHeights[0] ?? 1, rowHeights[1] ?? 1);
+
   const handleGridColumnResize = useCallback(
     (_resizerIdx: number, deltaPx: number) => {
       const container = containerRef.current;
@@ -719,12 +733,16 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
                 // hidden, so `display: none` alone would leave the maximized
                 // pane in the top-left quarter. While maximized the grid IS one
                 // cell.
+                // Issue #2424: normalised, NOT the raw shares. A fresh grid
+                // carries `0.25` per pane, and `0.25fr + 0.25fr` sums to less
+                // than 1 — which CSS reads as "take half the leftover space"
+                // rather than "split it evenly", leaving the right ~50% blank.
                 gridTemplateColumns: isMaximized
                   ? '1fr'
-                  : `${widths[0]}fr ${GRID_DIVIDER_PX}px ${widths[1]}fr`,
+                  : `${gridColumnFr[0]}fr ${GRID_DIVIDER_PX}px ${gridColumnFr[1]}fr`,
                 gridTemplateRows: isMaximized
                   ? '1fr'
-                  : `minmax(${MIN_GRID_ROW_PX}px, ${rowHeights[0]}fr) ${GRID_DIVIDER_PX}px minmax(${MIN_GRID_ROW_PX}px, ${rowHeights[1]}fr)`,
+                  : `minmax(${MIN_GRID_ROW_PX}px, ${gridRowFr[0]}fr) ${GRID_DIVIDER_PX}px minmax(${MIN_GRID_ROW_PX}px, ${gridRowFr[1]}fr)`,
               }
             : undefined
         }
