@@ -53,15 +53,20 @@ vi.mock('@/components/worktree/MobileAgentInstancesPane', () => ({
     worktreeId,
     instances,
     visibleInstanceIds,
+    composerTargetInstanceId,
   }: {
     worktreeId: string;
     instances: AgentInstance[];
     visibleInstanceIds: string[];
+    composerTargetInstanceId?: string;
   }) => (
     <div data-testid="mobile-agent-instances-pane">
       MobileAgentInstancesPane: {worktreeId}
       <span data-testid="mai-roster-ids">{instances.map((i) => i.id).join(',')}</span>
       <span data-testid="mai-visible-ids">{visibleInstanceIds.join(',')}</span>
+      {/* Issue #2395: a sentinel for "absent", because absent is a MEANING here
+          — it is what leaves the shared pane on its DOM read. */}
+      <span data-testid="mai-composer-target">{composerTargetInstanceId ?? '(none)'}</span>
     </div>
   ),
 }));
@@ -224,6 +229,23 @@ describe('NotesAndLogsPane', () => {
       fireEvent.click(screen.getByText('schedule.agentTab'));
       expect(screen.getByTestId('mai-roster-ids').textContent).toBe('claude,claude-2');
       expect(screen.getByTestId('mai-visible-ids').textContent).toBe('claude');
+    });
+
+    // Issue #2395: the docked composer lives OUTSIDE this pane, so its target
+    // can only reach the roster rows by being threaded through. This pane must
+    // pass it on untouched — a pane that swallowed it would leave the phone's
+    // self guard exactly as broken as #2382 found it, with every unit below
+    // still green.
+    it('forwards the docked composer target to MobileAgentInstancesPane', () => {
+      render(<NotesAndLogsPane {...instanceProps} composerTargetInstanceId="claude-2" />);
+      fireEvent.click(screen.getByText('schedule.agentTab'));
+      expect(screen.getByTestId('mai-composer-target').textContent).toBe('claude-2');
+    });
+
+    it('passes nothing on when the caller supplies no composer target', () => {
+      render(<NotesAndLogsPane {...instanceProps} />);
+      fireEvent.click(screen.getByText('schedule.agentTab'));
+      expect(screen.getByTestId('mai-composer-target').textContent).toBe('(none)');
     });
 
     it('falls back to AgentSettingsPane when useInstanceManagement is false (backward compat)', () => {

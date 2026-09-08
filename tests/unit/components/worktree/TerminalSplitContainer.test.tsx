@@ -6,7 +6,7 @@
 
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, act } from '@testing-library/react';
+import { render, screen, fireEvent, act, within } from '@testing-library/react';
 import { TerminalSplitContainer } from '@/components/worktree/TerminalSplitContainer';
 import {
   OpenFilesContext,
@@ -15,13 +15,18 @@ import {
 } from '@/hooks/useFilePanelState';
 import { SURFACE_MODE_CHANGE_EVENT } from '@/hooks/useSplitSurfaceModes';
 import { getSplitSurfaceModeStorageKey } from '@/config/surface-mode-config';
-import { clearTerminalSplitsLocalStorage } from '@tests/helpers/terminal-splits';
+import {
+  clearTerminalSplitsLocalStorage,
+  mockTerminalSplitsLocalStorage,
+  readTerminalSplitsLocalStorage,
+} from '@tests/helpers/terminal-splits';
 import { TOOLTIP_DELAY_MS } from '@/components/common/Tooltip';
 import {
   CLI_TOOL_IDS,
   getCliToolDisplayName,
   type AgentInstance,
 } from '@/lib/cli-tools/types';
+import { MIN_GRID_ROW_PX } from '@/config/terminal-split-config';
 
 /**
  * Issue #869: the container is now driven by an agent-instance roster. The
@@ -129,13 +134,17 @@ describe('TerminalSplitContainer', () => {
     expect(screen.queryByTestId('split-resizer-1')).not.toBeInTheDocument();
   });
 
-  it('disables add at MAX_SPLITS=3 and disables remove at MIN=1', () => {
+  // Issue #2421: the ceiling moved 3 -> 4, so the 3rd add is no longer the last.
+  it('disables add at MAX_SPLITS=4 and disables remove at MIN=1', () => {
     setup();
     fireEvent.click(screen.getByTestId('add-terminal-split'));
+    fireEvent.click(screen.getByTestId('add-terminal-split'));
+    expect(screen.getByTestId('add-terminal-split')).not.toBeDisabled();
     fireEvent.click(screen.getByTestId('add-terminal-split'));
     expect(screen.getByTestId('add-terminal-split')).toBeDisabled();
     expect(screen.getByTestId('remove-terminal-split')).not.toBeDisabled();
 
+    fireEvent.click(screen.getByTestId('remove-terminal-split'));
     fireEvent.click(screen.getByTestId('remove-terminal-split'));
     fireEvent.click(screen.getByTestId('remove-terminal-split'));
     expect(screen.getByTestId('remove-terminal-split')).toBeDisabled();
@@ -226,6 +235,7 @@ describe('TerminalSplitContainer History/Files toggles (Issue #841)', () => {
     setup();
     fireEvent.click(screen.getByTestId('add-terminal-split'));
     fireEvent.click(screen.getByTestId('add-terminal-split'));
+    fireEvent.click(screen.getByTestId('add-terminal-split')); // Issue #2421: MAX is 4
     expect(screen.getByTestId('add-terminal-split')).toBeDisabled(); // at MAX
     expect(screen.getByTestId('toggle-history-pane')).toBeInTheDocument();
     expect(screen.getByTestId('toggle-file-panel')).toBeInTheDocument();
@@ -868,6 +878,332 @@ describe('TerminalSplitContainer panel toggle availability (Issue #2259)', () =>
       expect(btn).toHaveAttribute('aria-expanded', 'true');
       fireEvent.click(btn);
       expect(btn).toHaveAttribute('aria-expanded', 'false');
+    });
+  });
+});
+
+/**
+ * Issue #2421: the 2x2 grid.
+ *
+ * A quarter-width column cannot show a 200-column agent TUI, so the 4th split
+ * switches the container from a flex row to a CSS grid. These tests read the
+ * layout the way the browser does — the container's `grid-template-*` and each
+ * pane's track placement — because "there are four panes on screen" is equally
+ * true of the four-column layout this Issue exists to avoid.
+ */
+describe('[#2421] TerminalSplitContainer 2x2 grid', () => {
+  beforeEach(() => clearTerminalSplitsLocalStorage());
+  afterEach(() => clearTerminalSplitsLocalStorage());
+
+  function addSplits(n: number): void {
+    for (let i = 0; i < n; i++) {
+      fireEvent.click(screen.getByTestId('add-terminal-split'));
+    }
+  }
+
+  const layout = () => screen.getByTestId('terminal-split-layout');
+  const wrapperOf = (idx: number) => screen.getByTestId(`split-wrapper-${idx}`);
+
+  describe('1-3 splits stay the pre-#2421 flex row (regression)', () => {
+    it.each([1, 2, 3])('renders %i split(s) as a row, not a grid', (count) => {
+      setup();
+      addSplits(count - 1);
+      expect(layout()).toHaveAttribute('data-layout', 'row');
+      expect(layout().className).toContain('flex');
+      expect(layout().className).not.toContain('grid');
+      expect(layout().style.gridTemplateColumns).toBe('');
+      expect(layout().style.gridTemplateRows).toBe('');
+      // Panes are flex children sized by flex-grow, with no track placement.
+      for (let i = 0; i < count; i++) {
+        expect(wrapperOf(i).style.flexBasis).toBe('0px');
+        expect(Number(wrapperOf(i).style.flexGrow)).toBeGreaterThan(0);
+        expect(wrapperOf(i).style.gridColumn).toBe('');
+      }
+      // One divider per boundary, all of them the row's positional resizers.
+      expect(document.querySelectorAll('[data-testid^="split-resizer-"]')).toHaveLength(
+        count - 1,
+      );
+      expect(screen.queryByTestId('split-grid-column-resizer')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('split-grid-row-resizer')).not.toBeInTheDocument();
+    });
+  });
+
+  it('switches to a 2x2 grid at the 4th split', () => {
+    setup();
+    addSplits(3);
+    expect(layout()).toHaveAttribute('data-layout', 'grid');
+    expect(layout().className).toContain('grid');
+    // Two pane columns with a divider track between them, as NORMALISED `fr`
+    // factors (#2424). The stored shares are `0.25` per pane; handing those to
+    // CSS verbatim sums to 0.5, which lays the tracks out at half width and
+    // leaves the right half of the grid blank.
+    expect(layout().style.gridTemplateColumns).toBe('1fr 4px 1fr');
+    // ...and two pane rows, each floored so a 2x2 cannot crush the terminals.
+    expect(layout().style.gridTemplateRows).toBe(
+      `minmax(${MIN_GRID_ROW_PX}px, 1fr) 4px minmax(${MIN_GRID_ROW_PX}px, 1fr)`,
+    );
+  });
+
+  /*
+   * Issue #2424: the grid must FILL its container, not merely keep the ratio.
+   *
+   * The regression it guards was a ratio that was already right — `0.25fr` and
+   * `0.25fr` describe two equal columns — laid out at half width because CSS
+   * gives tracks whose flex factors sum below 1 only that fraction of the
+   * leftover space. Asserting the ratio alone passes against the bug.
+   *
+   * The invariant asserted here is **每 factor >= 1**, not "the pair sums to 1".
+   * The weaker one is not enough under `minmax()`: once a row is pinned at
+   * MIN_GRID_ROW_PX the grid freezes that track and shares what is left among
+   * the REMAINING factors, so a partner holding 0.74 strands the rest. Measured
+   * on a 775px container: `0.7387fr / 0.2613fr` renders `362.7px / 280px` and
+   * leaves 128px blank; `2.827fr / 1fr` renders `491px / 280px` and leaves none.
+   */
+  describe('grid tracks fill the container (Issue #2424)', () => {
+    // Every `<number>fr` in the template, wherever it sits — the row track is
+    // `minmax(280px, 0.5fr)`, so splitting on spaces would miss it entirely and
+    // report a sum of 0 for a perfectly good template.
+    const frSum = (template: string): number =>
+      [...template.matchAll(/([\d.]+)fr/g)].reduce(
+        (total, match) => total + parseFloat(match[1]),
+        0,
+      );
+
+    const frFactors = (template: string): number[] =>
+      [...template.matchAll(/([\d.]+)fr/g)].map((m) => parseFloat(m[1]));
+
+    it('every column fr factor is at least 1 on a fresh grid', () => {
+      setup();
+      addSplits(3);
+      const factors = frFactors(layout().style.gridTemplateColumns);
+      expect(factors).toHaveLength(2);
+      for (const f of factors) expect(f).toBeGreaterThanOrEqual(1);
+    });
+
+    it('every row fr factor is at least 1 on a fresh grid', () => {
+      setup();
+      addSplits(3);
+      const factors = frFactors(layout().style.gridTemplateRows);
+      expect(factors).toHaveLength(2);
+      for (const f of factors) expect(f).toBeGreaterThanOrEqual(1);
+    });
+
+    it('fills vertically for a persisted rowHeights pair that sums below 1', () => {
+      // `isValidRowHeights` accepts any positive pair, so this payload is legal
+      // and reaches the renderer as-is. Before #2424 it opened a gap along the
+      // bottom the same way the columns opened one down the right.
+      mockTerminalSplitsLocalStorage('w-1', {
+        splits: [
+          { cliToolId: 'claude', instanceId: 'claude' },
+          { cliToolId: 'claude', instanceId: 'claude-2' },
+          { cliToolId: 'codex', instanceId: 'codex' },
+          { cliToolId: 'codex', instanceId: 'codex-2' },
+        ],
+        widths: [0.25, 0.25, 0.25, 0.25],
+        rowHeights: [0.3, 0.3],
+      });
+      setup();
+      expect(layout()).toHaveAttribute('data-layout', 'grid');
+      const factors = frFactors(layout().style.gridTemplateRows);
+      expect(factors).toHaveLength(2);
+      for (const f of factors) expect(f).toBeGreaterThanOrEqual(1);
+    });
+  });
+
+  it('places the four panes as 2 rows x 2 columns (not one row of four)', () => {
+    setup();
+    addSplits(3);
+    // Tracks 1 and 3 are the panes; track 2 on each axis is the divider.
+    expect([wrapperOf(0).style.gridColumn, wrapperOf(0).style.gridRow]).toEqual(['1', '1']);
+    expect([wrapperOf(1).style.gridColumn, wrapperOf(1).style.gridRow]).toEqual(['3', '1']);
+    expect([wrapperOf(2).style.gridColumn, wrapperOf(2).style.gridRow]).toEqual(['1', '3']);
+    expect([wrapperOf(3).style.gridColumn, wrapperOf(3).style.gridRow]).toEqual(['3', '3']);
+    // The flex sizing that WOULD produce four columns is gone.
+    for (const i of [0, 1, 2, 3]) expect(wrapperOf(i).style.flexGrow).toBe('');
+  });
+
+  it('scrolls rather than shrinking past the row floor on a short viewport', () => {
+    setup();
+    addSplits(3);
+    expect(layout().className).toContain('overflow-y-auto');
+  });
+
+  /*
+   * A grid column is shared by both of its cells, so the grid has ONE column
+   * boundary and ONE row boundary — two dividers, not the three a four-way flex
+   * row would have.
+   */
+  it('replaces the row dividers with exactly one column and one row divider', () => {
+    setup();
+    addSplits(3);
+    expect(document.querySelectorAll('[data-testid^="split-resizer-"]')).toHaveLength(0);
+
+    const column = screen.getByTestId('split-grid-column-resizer');
+    const row = screen.getByTestId('split-grid-row-resizer');
+    expect(within(column).getByRole('separator')).toHaveAttribute(
+      'aria-orientation',
+      'horizontal',
+    );
+    // The vertical orientation had NO caller in src/ before this Issue.
+    expect(within(row).getByRole('separator')).toHaveAttribute(
+      'aria-orientation',
+      'vertical',
+    );
+    expect(within(row).getByRole('separator').className).toContain('cursor-row-resize');
+    // Each spans the whole of its axis, across both of the tracks it divides.
+    expect([column.style.gridColumn, column.style.gridRow]).toEqual(['2', '1 / span 3']);
+    expect([row.style.gridColumn, row.style.gridRow]).toEqual(['1 / span 3', '2']);
+  });
+
+  describe('the vertical divider drives (and persists) the row heights', () => {
+    // jsdom reports every box as 0x0, and the resize math divides by the
+    // container's size — so the pixel delta has to land against a real one.
+    function withContainerSize(run: () => void): void {
+      Object.defineProperty(HTMLDivElement.prototype, 'offsetHeight', {
+        configurable: true,
+        value: 1000,
+      });
+      Object.defineProperty(HTMLDivElement.prototype, 'offsetWidth', {
+        configurable: true,
+        value: 1000,
+      });
+      try {
+        run();
+      } finally {
+        Object.defineProperty(HTMLDivElement.prototype, 'offsetHeight', {
+          configurable: true,
+          value: 0,
+        });
+        Object.defineProperty(HTMLDivElement.prototype, 'offsetWidth', {
+          configurable: true,
+          value: 0,
+        });
+      }
+    }
+
+    it('drags the row boundary down and writes the new ratio to storage', () => {
+      withContainerSize(() => {
+        setup();
+        addSplits(3);
+        const handle = within(screen.getByTestId('split-grid-row-resizer')).getByRole(
+          'separator',
+        );
+
+        fireEvent.mouseDown(handle, { clientY: 500 });
+        fireEvent.mouseMove(document, { clientY: 600 }); // +100px of 1000px = +0.1
+        fireEvent.mouseUp(document);
+
+        // Top row grew, bottom row shrank, and the pair still sums to 1.
+        expect(layout().style.gridTemplateRows).toBe(
+          `minmax(${MIN_GRID_ROW_PX}px, 1.4999999999999998fr) 4px minmax(${MIN_GRID_ROW_PX}px, 1fr)`,
+        );
+        const stored = readTerminalSplitsLocalStorage('w-1');
+        expect(stored?.rowHeights?.[0]).toBeCloseTo(0.6, 5);
+        expect(stored?.rowHeights?.[1]).toBeCloseTo(0.4, 5);
+      });
+    });
+
+    it('resizes with the keyboard too (ArrowDown / ArrowUp)', () => {
+      withContainerSize(() => {
+        setup();
+        addSplits(3);
+        const handle = within(screen.getByTestId('split-grid-row-resizer')).getByRole(
+          'separator',
+        );
+
+        fireEvent.keyDown(handle, { key: 'ArrowDown' }); // +10px of 1000px
+        expect(readTerminalSplitsLocalStorage('w-1')?.rowHeights?.[0]).toBeCloseTo(0.51, 5);
+
+        fireEvent.keyDown(handle, { key: 'ArrowUp' });
+        expect(readTerminalSplitsLocalStorage('w-1')?.rowHeights?.[0]).toBeCloseTo(0.5, 5);
+      });
+    });
+
+    /*
+     * `PaneResizer`'s `orientation="vertical"` branch had NO caller in `src/`
+     * before this Issue, so all three of its input paths are exercised here
+     * rather than assumed: mouse (above), keyboard (above) and touch. Touch
+     * matters because the vertical branch reads `touches[0].clientY` where the
+     * horizontal one reads `clientX` — a copy-paste slip there is invisible on a
+     * desktop and total on a tablet.
+     */
+    it('resizes by touch drag as well', () => {
+      withContainerSize(() => {
+        setup();
+        addSplits(3);
+        const handle = within(screen.getByTestId('split-grid-row-resizer')).getByRole(
+          'separator',
+        );
+
+        fireEvent.touchStart(handle, { touches: [{ clientX: 0, clientY: 400 }] });
+        fireEvent.touchMove(document, { touches: [{ clientX: 0, clientY: 500 }] });
+        fireEvent.touchEnd(document, { touches: [] });
+
+        expect(readTerminalSplitsLocalStorage('w-1')?.rowHeights?.[0]).toBeCloseTo(0.6, 5);
+      });
+    });
+
+    it('refuses to drag a row past the 5% floor', () => {
+      withContainerSize(() => {
+        setup();
+        addSplits(3);
+        const handle = within(screen.getByTestId('split-grid-row-resizer')).getByRole(
+          'separator',
+        );
+
+        fireEvent.mouseDown(handle, { clientY: 500 });
+        fireEvent.mouseMove(document, { clientY: 1500 }); // would leave the bottom row at -0.5
+        fireEvent.mouseUp(document);
+
+        expect(readTerminalSplitsLocalStorage('w-1')?.rowHeights).toEqual([0.5, 0.5]);
+      });
+    });
+
+    /*
+     * The column divider cannot reuse the row layout's handler: that one divides
+     * by the sum of ALL FOUR widths (1.0) while the two visible columns only
+     * occupy half of it, which would move the boundary at twice the pointer's
+     * speed. 100px of a 1000px container has to read as 10% of the columns.
+     */
+    it('moves the shared column boundary at pointer speed and mirrors it to the bottom row', () => {
+      withContainerSize(() => {
+        setup();
+        addSplits(3);
+        const handle = within(screen.getByTestId('split-grid-column-resizer')).getByRole(
+          'separator',
+        );
+
+        fireEvent.mouseDown(handle, { clientX: 500 });
+        fireEvent.mouseMove(document, { clientX: 600 }); // +100px of 1000px
+        fireEvent.mouseUp(document);
+
+        // 0.25 + 0.1 * (0.25 + 0.25) = 0.30 -> a 60/40 column split, written
+        // out as normalised `fr` (#2424): the handler preserves its own total
+        // (0.5), so the shares stay 0.3 / 0.2 and only the rendered factors are
+        // scaled.
+        expect(layout().style.gridTemplateColumns).toBe('1.4999999999999998fr 4px 1fr');
+        const stored = readTerminalSplitsLocalStorage('w-1');
+        expect(stored?.widths?.[2]).toBeCloseTo(stored?.widths?.[0] ?? 0, 5);
+        expect(stored?.widths?.[3]).toBeCloseTo(stored?.widths?.[1] ?? 0, 5);
+      });
+    });
+
+    it('double-clicking a grid divider equalizes both axes', () => {
+      withContainerSize(() => {
+        setup();
+        addSplits(3);
+        const rowHandle = within(screen.getByTestId('split-grid-row-resizer')).getByRole(
+          'separator',
+        );
+        fireEvent.keyDown(rowHandle, { key: 'ArrowDown' });
+        expect(readTerminalSplitsLocalStorage('w-1')?.rowHeights?.[0]).not.toBeCloseTo(
+          0.5,
+          5,
+        );
+
+        fireEvent.doubleClick(rowHandle);
+        expect(readTerminalSplitsLocalStorage('w-1')?.rowHeights).toEqual([0.5, 0.5]);
+      });
     });
   });
 });

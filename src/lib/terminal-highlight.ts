@@ -58,7 +58,8 @@ export const HISTORY_SEARCH_NAMESPACE: HighlightNamespace = {
 /**
  * [Issue #744] Per-split History search namespace factory.
  *
- * The History pane was moved into each PC terminal split (1-3 splits). Because
+ * The History pane was moved into each PC terminal split (1-4 splits since
+ * Issue #2421; 1-3 when this was written). Because
  * the CSS Custom Highlight registry (`CSS.highlights`) is a single global Map
  * keyed by name, two simultaneously-mounted HistoryPanes that both used the
  * shared `HISTORY_SEARCH_NAMESPACE` would call
@@ -69,9 +70,13 @@ export const HISTORY_SEARCH_NAMESPACE: HighlightNamespace = {
  * `history-search-fallback-overlay-0`, ...) so each split's highlights live
  * under a distinct registry key and never overwrite one another.
  *
- * Static `::highlight()` CSS rules for `history-search-0|1|2` and
- * `history-search-current-0|1|2` are defined in `src/app/globals.css`
- * (MAX_SPLITS=3, see `src/config/terminal-split-config.ts`).
+ * Static `::highlight()` CSS rules for `history-search-0|1|2|3` and
+ * `history-search-current-0|1|2|3` are defined in `src/app/globals.css`
+ * (MAX_SPLITS=4 since Issue #2421, see `src/config/terminal-split-config.ts`).
+ * The rule list is the hard bound on the split count: a namespace with no rule
+ * still registers matches and still scrolls to them, it just paints nothing, so
+ * raising MAX_SPLITS without extending globals.css breaks search in the LAST
+ * split silently.
  *
  * The blue fallback color is intentionally identical to
  * `HISTORY_SEARCH_NAMESPACE` so all history splits look the same.
