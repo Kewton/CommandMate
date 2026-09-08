@@ -542,6 +542,13 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   // than becoming "the footer happens to be drawing the nav pad".
   const isSelectionListFrame = terminal.isSelectionListActive;
   const showNav = isSelectionListFrame && !isChatSurface;
+  // Issue #2406: "this pane's agent is generating right now". The merged status
+  // verdict is the only field that answers that question -- `terminal.isRunning`
+  // has meant "a tmux session exists and is healthy" since Issue #2238, so it is
+  // true for an agent sitting idle at its prompt. Same expression `ChatSurface`
+  // gates its in-flight bubble on (`live.sessionStatus === 'running'`), so both
+  // halves of the split read one verdict.
+  const isGenerating = terminal.sessionStatus === 'running';
   const showPrompt = prompt.visible && !autoYesEnabled;
   // Issue #1932: the approval this pane's dialog addresses, when the payload
   // names one. Null for every scraper-read prompt and for every source that
@@ -919,10 +926,15 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
           splitIndex={splitIndex}
           onFocus={onFocus}
           // Issue #806: surface a "queued (session busy)" toast when sending to
-          // a session that is still processing the previous task. isProcessing
-          // is sourced from this split's own poller (terminal.isRunning), and
-          // showToast reuses the existing history toast surface.
-          isProcessing={terminal.isRunning}
+          // a session that is still processing the previous task. showToast
+          // reuses the existing history toast surface.
+          // Issue #2406: sourced from `isGenerating` (the merged status verdict),
+          // NOT `terminal.isRunning`. This prop is the toast's ONLY gate, and it
+          // is a different question from `isSessionRunning` above (which drives
+          // the send button's enabled state and rightly asks about the session).
+          // Wired to `isRunning` the toast fired on every send to a live pane,
+          // including a ready agent with nothing to queue behind.
+          isProcessing={isGenerating}
           showToast={showToast}
           // Issue #1080: per-split Auto-Yes toggle now lives in the composer's
           // bottom meta row instead of its own full-width footer row.
@@ -966,6 +978,8 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       handleMessageSent,
       sendOptimistic,
       terminal.isRunning,
+      // Issue #2406: the composer's queued-send toast gate.
+      isGenerating,
       pendingInsertText,
       onInsertConsumed,
       splitIndex,
