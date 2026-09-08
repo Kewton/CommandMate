@@ -43,6 +43,7 @@ import { v57_migrations } from './v57-push-subscription-defaults-notice';
 import { v58_migrations } from './v58-agent-session-costs';
 import { v59_migrations } from './v59-opencode-instance-settings';
 import { v60_migrations } from './v60-session-relays';
+import { v61_migrations } from './v61-session-notes';
 
 /**
  * Complete ordered list of all migrations.
@@ -91,4 +92,5 @@ export const migrations: Migration[] = [
   ...v58_migrations,
   ...v59_migrations,
   ...v60_migrations,
+  ...v61_migrations,
 ];

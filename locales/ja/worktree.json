@@ -1049,6 +1049,14 @@
     "changedRecently": "変更あり",
     "changedRecentlyDetail": "モデルが {from} から {to} に変わりました。タップで閉じます。"
   },
+  "sessionNote": {
+    "menuItem": "セッションメモ",
+    "placeholder": "このセッションで何をしているか",
+    "hint": "Enter で保存、Esc で取消。空にすると削除します。",
+    "editLabel": "{split} のセッションメモを編集",
+    "label": "メモ: {note}（{time} 更新）",
+    "empty": "メモなし"
+  },
   "nextAction": {
     "start": "開始",
     "sendMessage": "メッセージを送信",

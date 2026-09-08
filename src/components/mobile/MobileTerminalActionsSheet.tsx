@@ -6,14 +6,28 @@
  * dedicated to the agent-instance tabs; these secondary actions moved here,
  * opened from the row's "more actions" trigger. "End session" is destructive and
  * defers the confirmation to the caller (the existing kill-confirm dialog).
+ *
+ * Issue #2427 adds the session note, and it is the one row here that does not
+ * take a callback prop. The sheet is rendered by `WorktreeDetailRefactored`
+ * *beside* the terminal tab rather than inside it, so it knows neither the
+ * worktree nor the instance the note belongs to; it raises the intent as a
+ * window event and `MobileTerminalTab` — which holds both — opens the editor.
+ * That is the same escape hatch "Search terminal" already travels
+ * (`terminal-search-open`, dispatched by this sheet's caller and by the PC split
+ * header), so the pattern is the surface's own rather than a new one.
+ *
+ * The row is present unconditionally, empty note or not: it is the only way to
+ * WRITE a first note on a phone, and a control that appears only once you have
+ * used it cannot be discovered.
  */
 
 'use client';
 
 import React, { useCallback, useEffect, useId } from 'react';
 import { useTranslations } from 'next-intl';
-import { Search, LogOut } from 'lucide-react';
+import { Search, LogOut, StickyNote } from 'lucide-react';
 import { useFocusTrap } from '@/hooks/useFocusTrap';
+import { SESSION_NOTE_OPEN_EVENT } from '@/components/worktree/TerminalSplitPane';
 
 export interface MobileTerminalActionsSheetProps {
   /** Whether the sheet is visible. */
@@ -54,6 +68,12 @@ export function MobileTerminalActionsSheet({
     onEnd();
     onClose();
   }, [onEnd, onClose]);
+
+  // Issue #2427: no `onNote` prop — see the note at the top of this file.
+  const handleSessionNote = useCallback(() => {
+    window.dispatchEvent(new CustomEvent(SESSION_NOTE_OPEN_EVENT));
+    onClose();
+  }, [onClose]);
 
   // Dismiss on Escape while the sheet is open (parity with the backdrop-tap /
   // action-button close paths for this role="dialog" aria-modal surface).
@@ -106,6 +126,15 @@ export function MobileTerminalActionsSheet({
           >
             <Search size={18} aria-hidden="true" className="text-muted-foreground" />
             {t('terminal.searchTerminal')}
+          </button>
+          <button
+            type="button"
+            data-testid="actions-sheet-session-note"
+            onClick={handleSessionNote}
+            className="flex w-full items-center gap-3 rounded-lg px-3 py-3 text-sm text-foreground hover:bg-muted transition-colors touch-manipulation"
+          >
+            <StickyNote size={18} aria-hidden="true" className="text-muted-foreground" />
+            {t('sessionNote.menuItem')}
           </button>
           <button
             type="button"

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **feat(worktree): セッションごとに1行メモ（更新時刻つき）を付けられるようにした** (#2427): 4分割でもどのターミナルが何をしていたか一目で分かるよう、各エージェントインスタンスに自由入力の1行メモ（最大100文字・当日は`14:32` / 前日以前は`9/7 14:32`表記）を追加。PC はスプリットヘッダ（省略＋ツールチップ、狭いときはモデル名から先に truncate）、スマホはモデル行の右に表示し編集はターミナル操作シートから。保存は専用テーブル`session_notes`（migration v61）と専用エンドポイント`PUT /api/worktrees/:id/instances/notes`で、alias とは別物として roster の全置換に耐え、宛先解決（`--instance <alias>`）には一切使われない。
+
 ### Fixed
 
 - **fix(ui): Enterで確定するテキスト入力7箇所でIME変換確定のEnterが未変換のまま確定してしまう問題を修正** (#2428): エージェント別名・新規ファイル名・リポジトリ表示名・ファイル/メモ/ログ検索の各入力で、`TodoPane` と同じ `!e.nativeEvent.isComposing` ガードを確定処理に追加し、変換候補を確定するEnterでは保存・ファイル作成・検索実行が走らないようにした（変換確定後のEnterは従来どおり確定する）。
