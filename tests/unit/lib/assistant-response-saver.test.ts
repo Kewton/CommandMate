@@ -14,9 +14,21 @@ import type { CLIToolType } from '@/lib/cli-tools/types';
 // The module we're testing - will be created
 import {
   savePendingAssistantResponse,
+  advanceCapturedLineForTranscriptTurn,
   cleanCliResponse,
   detectBufferReset,
 } from '@/lib/assistant-response-saver';
+
+// Issue #2437: advanceCapturedLineForTranscriptTurn is called from the Stop
+// path, which has no `db` handle to pass — it resolves the singleton itself.
+// Point that singleton at this file's in-memory database.
+let dbForSingleton: Database.Database | null = null;
+vi.mock('@/lib/db/db-instance', () => ({
+  getDbInstance: () => {
+    if (!dbForSingleton) throw new Error('no test database bound');
+    return dbForSingleton;
+  },
+}));
 
 // Mock cli-session module
 vi.mock('@/lib/session/cli-session', () => ({
@@ -43,6 +55,7 @@ describe('assistant-response-saver', () => {
     testDb = new Database(':memory:');
     // Run migrations to set up latest schema
     runMigrations(testDb);
+    dbForSingleton = testDb;
 
     // Insert test worktree
     upsertWorktree(testDb, {
@@ -58,6 +71,7 @@ describe('assistant-response-saver', () => {
   });
 
   afterEach(() => {
+    dbForSingleton = null;
     testDb.close();
   });
 
@@ -239,6 +253,48 @@ More response
         const cleaned = cleanCliResponse(rawResponse, 'codex');
 
         expect(cleaned).toBe('Codex response text');
+      });
+    });
+
+    /**
+     * Issue #2437: the four tools that had no branch at all. `codex` had one
+     * and it was `return output.trim()` under the comment "Codex doesn't need
+     * special cleaning"; the other three fell through to the same line by
+     * default. What that saved into History was the tool's idle composer.
+     *
+     * The frames here are one row each, so the assertion is about the BRANCH
+     * existing. The measured pane frames those branches were written against
+     * are in `./response-cleaner-scrollback-2437.test.ts`.
+     */
+    describe('scrollback tools (Issue #2437)', () => {
+      it('drops codex chrome instead of returning the frame verbatim', () => {
+        // The composer as codex draws it — bold `›`, dim placeholder (#2310) —
+        // with the status bar underneath. This is the two-row shape the 10
+        // bogus History rows on `commandagent-develop` were copies of.
+        const idleComposer =
+          '\x1b[1m\u203a\x1b[0m \x1b[2mAsk Codex to do anything\x1b[0m\n' +
+          '\n' +
+          '  \x1b[38;2;246;226;183mgpt-6-astra default\x1b[0m \u00b7 /repo';
+
+        expect(cleanCliResponse(idleComposer, 'codex')).toBe('');
+      });
+
+      it('drops the command-code composer placeholder', () => {
+        expect(cleanCliResponse('❯ Ask your question...', 'command-code')).toBe('');
+      });
+
+      it('drops the antigravity bare input prompt', () => {
+        expect(cleanCliResponse('>', 'antigravity')).toBe('');
+      });
+
+      it('drops the vibe-local status bar', () => {
+        expect(cleanCliResponse('✦ Ready    ESC: stop', 'vibe-local')).toBe('');
+      });
+
+      it('keeps ordinary prose for all four', () => {
+        for (const cliToolId of ['codex', 'command-code', 'antigravity', 'vibe-local'] as const) {
+          expect(cleanCliResponse('Here is the answer.', cliToolId)).toBe('Here is the answer.');
+        }
       });
     });
   });
@@ -801,4 +857,142 @@ zsh: no such file or directory
       });
     });
   });
+
+  /**
+   * Issue #2437, form 2: the pre-send flush re-saving a turn History already
+   * holds as the agent's own Markdown.
+   *
+   * `savePendingAssistantResponse` saves EVERYTHING past `lastCapturedLine`.
+   * The Stop path that writes the transcript row never moved that cursor
+   * (`updateSessionState` call count in `hooks/sources/*` was zero), so a
+   * `/send` landing between the transcript write and the next 2-second poll
+   * tick saved the whole finished turn a second time — as the pane's scrape of
+   * the very same words. No cleaner can see that: what is duplicated is the
+   * real body, not chrome.
+   */
+  describe('advanceCapturedLineForTranscriptTurn (Issue #2437)', () => {
+    /** A pane holding one finished turn, `count` rows tall. */
+    function pane(count: number): string {
+      const rows: string[] = [];
+      for (let i = 0; i < count; i++) rows.push(`Turn body row ${i}`);
+      return rows.join('\n');
+    }
+
+    it('parks the cursor at the pane height so the flush has nothing left to save', async () => {
+      updateSessionState(testDb, 'test-worktree', 'codex', 10);
+      mockCaptureSessionOutput.mockResolvedValue(pane(40));
+
+      const advanced = await advanceCapturedLineForTranscriptTurn({
+        worktreeId: 'test-worktree',
+        cliToolId: 'codex',
+      });
+
+      expect(advanced).toBe(40);
+      expect(getSessionState(testDb, 'test-worktree', 'codex')?.lastCapturedLine).toBe(40);
+
+      // The `/send` that arrives before the next poll tick.
+      const result = await savePendingAssistantResponse(
+        testDb,
+        'test-worktree',
+        'codex',
+        new Date()
+      );
+
+      expect(result).toBeNull();
+      expect(getMessages(testDb, 'test-worktree').filter(m => m.role === 'assistant')).toHaveLength(0);
+    });
+
+    it('without it, that same `/send` saves the finished turn a second time', async () => {
+      // The control for the test above: same pane, same cursor, transcript row
+      // written — only the advance is missing. This is production before #2437,
+      // and it is what keeps the assertion above from being vacuous.
+      updateSessionState(testDb, 'test-worktree', 'codex', 10);
+      mockCaptureSessionOutput.mockResolvedValue(pane(40));
+
+      const result = await savePendingAssistantResponse(
+        testDb,
+        'test-worktree',
+        'codex',
+        new Date()
+      );
+
+      expect(result?.content).toContain('Turn body row 39');
+    });
+
+    it('trims the pane padding tmux adds below the transcript', async () => {
+      // The cursor has to mean the same thing both writers mean by it, or the
+      // poller's `lineCount <= lastCapturedLine` dedup can never fire again.
+      updateSessionState(testDb, 'test-worktree', 'codex', 0);
+      mockCaptureSessionOutput.mockResolvedValue(`${pane(12)}\n\n\n   \n`);
+
+      await advanceCapturedLineForTranscriptTurn({
+        worktreeId: 'test-worktree',
+        cliToolId: 'codex',
+      });
+
+      expect(getSessionState(testDb, 'test-worktree', 'codex')?.lastCapturedLine).toBe(12);
+    });
+
+    it('never moves the cursor backwards', async () => {
+      // A capture shorter than the stored value is a buffer reset, and
+      // detectBufferReset owns that reading. Rewinding from here would hand the
+      // flush a range it has already saved.
+      updateSessionState(testDb, 'test-worktree', 'codex', 900);
+      mockCaptureSessionOutput.mockResolvedValue(pane(40));
+
+      const advanced = await advanceCapturedLineForTranscriptTurn({
+        worktreeId: 'test-worktree',
+        cliToolId: 'codex',
+      });
+
+      expect(advanced).toBeNull();
+      expect(getSessionState(testDb, 'test-worktree', 'codex')?.lastCapturedLine).toBe(900);
+    });
+
+    it('keys the cursor on the instance, not on the tool', async () => {
+      // Issue #868: session_states is (worktree_id, instance_id). A second codex
+      // in the same worktree must not have its cursor moved by the first one.
+      updateSessionState(testDb, 'test-worktree', 'codex', 5, 'codex-2');
+      mockCaptureSessionOutput.mockResolvedValue(pane(30));
+
+      await advanceCapturedLineForTranscriptTurn({
+        worktreeId: 'test-worktree',
+        cliToolId: 'codex',
+        instanceId: 'codex-2',
+      });
+
+      expect(getSessionState(testDb, 'test-worktree', 'codex-2')?.lastCapturedLine).toBe(30);
+      expect(getSessionState(testDb, 'test-worktree', 'codex')).toBeNull();
+    });
+
+    it('does nothing for alternate-screen tools', async () => {
+      // Their line count is a screen-row constant, not a cursor (Issue #1268),
+      // and savePendingAssistantResponse refuses to run for them at all — there
+      // is no cursor here to advance and writing one would be a lie.
+      updateSessionState(testDb, 'test-worktree', 'claude', 7);
+      mockCaptureSessionOutput.mockResolvedValue(pane(1000));
+
+      const advanced = await advanceCapturedLineForTranscriptTurn({
+        worktreeId: 'test-worktree',
+        cliToolId: 'claude',
+      });
+
+      expect(advanced).toBeNull();
+      expect(mockCaptureSessionOutput).not.toHaveBeenCalled();
+      expect(getSessionState(testDb, 'test-worktree', 'claude')?.lastCapturedLine).toBe(7);
+    });
+
+    it('returns null instead of throwing when the pane cannot be captured', async () => {
+      // The transcript row is already written by the time this runs. A throw
+      // here would cost that row; a null costs one duplicated reply.
+      updateSessionState(testDb, 'test-worktree', 'codex', 3);
+      mockCaptureSessionOutput.mockRejectedValue(new Error('session not found'));
+
+      await expect(
+        advanceCapturedLineForTranscriptTurn({ worktreeId: 'test-worktree', cliToolId: 'codex' })
+      ).resolves.toBeNull();
+      expect(getSessionState(testDb, 'test-worktree', 'codex')?.lastCapturedLine).toBe(3);
+    });
+  });
+
 });

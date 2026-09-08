@@ -17,7 +17,11 @@ import {
   COPILOT_TOOL_VERBS,
   COPILOT_BOX_ROW_PATTERN,
   findCopilotChromeStart,
+  findCodexChromeStart,
+  findCommandCodeChromeStart,
+  getCliToolPatterns,
 } from './detection/cli-patterns';
+import type { CLIToolType } from './cli-tools/types';
 import { normalizeOpenCodeLine, normalizeCopilotLine } from './tui-accumulator';
 import {
   COPILOT_MAX_MESSAGE_LENGTH,
@@ -455,6 +459,91 @@ export function cleanOpenCodeResponse(response: string): string {
     if (OPENCODE_RESPONSE_COMPLETE.test(cleanLine)) continue;
 
     cleanedLines.push(cleanLine);
+  }
+
+  return cleanedLines.join('\n').trim();
+}
+
+/**
+ * Locate the bottom-pinned chrome of an inline-rendering tool, or -1.
+ *
+ * Only two of the four tools {@link cleanScrollbackResponse} serves have a
+ * measured structural reader, and that is deliberate rather than a gap left to
+ * fill later:
+ *
+ *  - **codex** — {@link findCodexChromeStart}, which reads the composer by
+ *    #2310's SGR rule (composer glyph bold, transcript echo dim) rather than by
+ *    its placeholder wording. That distinction is the whole point here: the
+ *    previous guard named codex 0.1x placeholders (`Implement`, `Find and fix`,
+ *    `Type`) and silently stopped matching when 0.15x started drawing `Ask Codex
+ *    to do anything` (#2400);
+ *  - **command-code** — {@link findCommandCodeChromeStart}, anchored on the two
+ *    full-pane rules that fence its `❯` composer (#2250).
+ *
+ * agy and vibe-local pin no composer this repository has measured a landmark
+ * for, so they get -1 and their whole capture is filtered by their own skip
+ * patterns. Inventing a landmark for them would be a guess, and a boundary that
+ * is wrong deletes replies instead of chrome.
+ *
+ * @param lines - Capture rows, ANSI intact — both readers read attributes
+ */
+function findScrollbackChromeStart(lines: string[], cliToolId: CLIToolType): number {
+  switch (cliToolId) {
+    case 'codex':
+      return findCodexChromeStart(lines);
+    case 'command-code':
+      return findCommandCodeChromeStart(lines);
+    default:
+      return -1;
+  }
+}
+
+/**
+ * Clean a capture from a scrollback-rendering tool that has no cleaner of its
+ * own (Issue #2437): codex, command-code, antigravity and vibe-local.
+ *
+ * Until #2437 `cleanCliResponse` returned these tools' captures verbatim, under
+ * a comment claiming codex "doesn't need special cleaning". The pre-send flush
+ * (`savePendingAssistantResponse`) therefore saved codex's **idle composer** as
+ * an assistant reply — measured 10 times on `commandagent-develop` from
+ * 2026-09-07, each row a copy of
+ *
+ * ```text
+ * › Ask Codex to do anything
+ *
+ *   gpt-6-astra xhigh · ~/share/work/… · Main [default]
+ * ```
+ *
+ * Two steps, in this order, and both are needed:
+ *
+ *  1. cut the bottom-pinned chrome structurally
+ *     ({@link findScrollbackChromeStart}) — the composer's text is whatever the
+ *     tool decides to print in it, so no pattern can own that boundary;
+ *  2. filter what is left with the tool's own skip patterns, the same list
+ *     `response-checker` already applies on the poller path
+ *     ({@link getCliToolPatterns}). Sharing the list is what keeps the two
+ *     paths from disagreeing about what counts as furniture.
+ *
+ * ANSI is stripped **per row, after** the boundary is found: both chrome readers
+ * classify rows by their SGR attributes, and stripping first would destroy the
+ * evidence they read.
+ *
+ * @param response - Raw capture, ANSI intact
+ * @param cliToolId - The tool the capture came from
+ * @returns Cleaned response, or an empty string when the capture was all chrome
+ */
+export function cleanScrollbackResponse(response: string, cliToolId: CLIToolType): string {
+  const allLines = response.split('\n');
+  const chromeStart = findScrollbackChromeStart(allLines, cliToolId);
+  const bodyLines = chromeStart >= 0 ? allLines.slice(0, chromeStart) : allLines;
+  const { skipPatterns } = getCliToolPatterns(cliToolId);
+
+  const cleanedLines: string[] = [];
+  for (const rawLine of bodyLines) {
+    const line = stripAnsi(rawLine);
+    if (!line.trim()) continue;
+    if (skipPatterns.some(pattern => pattern.test(line))) continue;
+    cleanedLines.push(line);
   }
 
   return cleanedLines.join('\n').trim();
