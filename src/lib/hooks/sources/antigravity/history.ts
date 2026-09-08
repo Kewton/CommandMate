@@ -70,6 +70,7 @@ import {
 import { createLogger } from '@/lib/logger';
 import { antigravityPromptRequestId, antigravityTurnRequestId } from '@/types/agent-transcript';
 import type { AgentInstanceRef } from '../types';
+import type { StructuredHistoryCaptureReport } from '@/lib/polling/structured-history-gate';
 import {
   ANTIGRAVITY_BRAIN_DIR_SEGMENT,
   ANTIGRAVITY_TRANSCRIPT_EXTENSION,
@@ -305,13 +306,22 @@ export interface AntigravityTranscriptCapture {
  *
  * Never throws.
  *
+ * Since Issue #2436 the false can explain itself: pass a
+ * `StructuredHistoryCaptureReport` and `outcome` is set to `'not_yet_closed'`
+ * when the newest turn is one the agent has not finished writing — the case the
+ * `-turn-open` line below reports, and the one where the caller's scraped copy
+ * is worth holding rather than saving. Every other false leaves it unset, which
+ * the gate reads as `'unavailable'`.
+ *
  * @param target - The instance whose turn just ended
  * @param capture - See {@link AntigravityTranscriptCapture}
+ * @param report - Optional out-parameter; see `StructuredHistoryCaptureReport`
  * @returns Whether History now holds this turn as the agent's own Markdown
  */
 export async function captureAntigravityTranscriptTurn(
   target: AgentInstanceRef,
-  capture: AntigravityTranscriptCapture = {}
+  capture: AntigravityTranscriptCapture = {},
+  report?: StructuredHistoryCaptureReport
 ): Promise<boolean> {
   const instanceId = target.instanceId ?? target.cliToolId;
   try {
@@ -419,7 +429,8 @@ export async function captureAntigravityTranscriptTurn(
           lastAntigravityRecordAt(turn),
           nextTurnOpensAt(pending.turns, userRows, index)
         ),
-        path
+        path,
+        report
       );
     }
     return captured;
@@ -684,9 +695,15 @@ async function writeAntigravityTurn(
   turn: AntigravityTurnAccumulator,
   rendered: AntigravityRenderedTurn,
   timestampMs: number,
-  path: string
+  path: string,
+  report?: StructuredHistoryCaptureReport
 ): Promise<boolean> {
   const instanceId = target.instanceId ?? target.cliToolId;
+
+  // Issue #2436: the caller's report is about the turn THIS call is deciding.
+  // The loop above walks oldest-first, so a verdict left by an earlier turn has
+  // to be cleared before this one's is written.
+  if (report) report.outcome = undefined;
 
   if (!isAntigravityTurnWritable(turn)) {
     // agy has not finished this answer and no later prompt has taken over, so
@@ -696,6 +713,7 @@ async function writeAntigravityTurn(
     // answers "already saved". That is Issue #2264, reported against claude and
     // structurally identical here: a turn cut off after its `tool_calls` renders
     // a *non-empty* body, so the emptiness guard below cannot see it.
+    if (report) report.outcome = 'not_yet_closed';
     logger.info('antigravity-transcript-turn-open', {
       worktreeId: target.worktreeId,
       instanceId,
