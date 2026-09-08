@@ -28,6 +28,7 @@ import { MobilePromptSheet } from '@/components/mobile/MobilePromptSheet';
 import { MobileTerminalActionsSheet } from '@/components/mobile/MobileTerminalActionsSheet';
 import { ErrorBoundary } from '@/components/error/ErrorBoundary';
 import { MessageInput } from '@/components/worktree/MessageInput';
+import type { ShowToast } from '@/types/markdown-editor';
 import { NavigationButtons } from '@/components/worktree/NavigationButtons';
 import { FileViewer } from '@/components/worktree/FileViewer';
 
@@ -154,6 +155,8 @@ const MobileComposer = memo(function MobileComposer({
   instanceId,
   onMessageSent,
   isSessionRunning,
+  isProcessing,
+  showToast,
   pendingInsertText,
   onInsertConsumed,
   autoYesSlot,
@@ -163,6 +166,14 @@ const MobileComposer = memo(function MobileComposer({
   instanceId?: string;
   onMessageSent?: (cliToolId: CLIToolType) => void;
   isSessionRunning?: boolean;
+  /**
+   * Issue #2406: "the agent is generating", the gate on the queued-send toast
+   * (#806). A different question from `isSessionRunning` above, which asks
+   * whether a tmux session exists and drives the send button's enabled state.
+   */
+  isProcessing?: boolean;
+  /** Issue #2406: toast surface for the queued-send hint. */
+  showToast?: ShowToast;
   pendingInsertText?: string | null;
   onInsertConsumed?: () => void;
   autoYesSlot?: React.ReactNode;
@@ -175,6 +186,8 @@ const MobileComposer = memo(function MobileComposer({
       cliToolId={cliToolId}
       instanceId={instanceId}
       isSessionRunning={isSessionRunning}
+      isProcessing={isProcessing}
+      showToast={showToast}
       pendingInsertText={pendingInsertText}
       onInsertConsumed={onInsertConsumed}
       onOptimisticSend={optimisticSend}
@@ -447,6 +460,16 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   const activeSessionRunning =
     (worktree?.sessionStatusByInstance?.[activeInstanceId] ?? worktree?.sessionStatusByCli?.[activeCliTab])
       ?.isRunning ?? false;
+
+  // Issue #2406: the generating verdict for the same instance, kept beside
+  // `activeSessionRunning` because the composer needs BOTH and they answer
+  // different questions. `isProcessing` on this payload is
+  // `sessionStatusToActivityFlags(status).isProcessing` — true for exactly
+  // `status === 'running'` (`lib/session/status-mapping.ts`), which is the same
+  // verdict PC's split reads off its own poller as `sessionStatus === 'running'`.
+  const activeSessionProcessing =
+    (worktree?.sessionStatusByInstance?.[activeInstanceId] ?? worktree?.sessionStatusByCli?.[activeCliTab])
+      ?.isProcessing ?? false;
 
   // Render desktop layout
   if (!isMobile) {
@@ -805,6 +828,12 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                   cliToolId={activeCliTab}
                   instanceId={activeInstanceId}
                   isSessionRunning={activeSessionRunning}
+                  // Issue #2406: the phone never passed `isProcessing` at all, so
+                  // the queued-send toast (#806) could not fire here even while
+                  // the agent was mid-turn. Wired to the generating verdict — the
+                  // same source PC now reads — rather than to `isRunning`.
+                  isProcessing={activeSessionProcessing}
+                  showToast={showToast}
                   pendingInsertText={pendingInsertText}
                   onInsertConsumed={handleInsertConsumedSingle}
                   // Issue #1080: Auto-Yes now lives in the composer meta row (moved off
