@@ -19,6 +19,15 @@
  * pane carries both), the comparison, and the two properties the Issue's
  * acceptance names: it warns **once**, and it does **not** kill the session.
  *
+ * Issue #2433 added the last block. #2429 wired all of the above behind the
+ * adopt marker alone, which is unreachable for every tool that puts
+ * `CM_HOOK_URL` on its launch line, so the send path asks now as well — and the
+ * contract that makes asking on a send affordable (one pane read per session,
+ * one ledger shared with the adopt path) is pinned at the bottom of this file.
+ * That the send path asks AT ALL is pinned at the route, in
+ * `tests/unit/app/api/worktrees/send-stale-hook-url-2433.test.ts`, because that
+ * is the question this file's shape cannot answer.
+ *
  * @vitest-environment node
  */
 
@@ -51,7 +60,9 @@ vi.mock('@/lib/push/failure-push-notifier', () => ({
 import {
   BaseCLITool,
   hookUrlPort,
+  probeRunningSessionHookUrl,
   readLaunchLineHookUrl,
+  resetHookUrlProbesForTest,
 } from '@/lib/cli-tools/base';
 import {
   reportStaleHookUrl,
@@ -121,6 +132,9 @@ beforeEach(() => {
   getServerPort.mockReturnValue(3000);
   capturePane.mockResolvedValue(ADOPTED_PANE);
   resetStaleHookUrlReportsForTest();
+  // Issue #2433: the pane is read at most once per session per process, so the
+  // ledger that records it has to start each test empty too.
+  resetHookUrlProbesForTest();
 });
 
 describe('[#2429] reading CM_HOOK_URL off a pane', () => {
@@ -285,5 +299,81 @@ describe('[#2429] reportStaleHookUrl reports each mismatch once', () => {
     await report({ instanceId: 'command-code-2' });
 
     expect(notifyStaleHookUrlPush).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe('[#2433] the same question, asked of a session that is already running', () => {
+  /**
+   * The reachability half is pinned at the route
+   * (`tests/unit/app/api/worktrees/send-stale-hook-url-2433.test.ts`), because
+   * that is the thing #2429's suite could not see: every test above calls the
+   * probe by hand, and all of them stayed green while nothing in production
+   * called it at all. What is pinned here is the contract that made putting it
+   * on the send path affordable — one pane read per session, shared with the
+   * adopt path.
+   */
+  it('reads the pane once, however many sends ask', async () => {
+    const tool = new TestTool();
+
+    for (let i = 0; i < 5; i += 1) {
+      await tool.warnIfRunningSessionHookUrlIsStale('rag-document');
+      await settleNotification();
+    }
+
+    expect(capturePane).toHaveBeenCalledTimes(1);
+    expect(notifyStaleHookUrlPush).toHaveBeenCalledTimes(1);
+    expect(killed).toBe(false);
+  });
+
+  it('does not re-read a pane the adopt path already read', async () => {
+    // One ledger, two callers. A session adopted at start and then sent to is
+    // one launch line, and reading it twice would buy nothing.
+    const tool = new TestTool();
+
+    await tool.startSession('rag-document', '/tmp/rag-document');
+    await tool.warnIfRunningSessionHookUrlIsStale('rag-document');
+    await settleNotification();
+
+    expect(capturePane).toHaveBeenCalledTimes(1);
+    expect(notifyStaleHookUrlPush).toHaveBeenCalledTimes(1);
+  });
+
+  it('asks again when the capture itself failed', async () => {
+    // A capture that threw is not an answer, so the pane is not written off.
+    capturePane.mockRejectedValueOnce(new Error("can't find pane"));
+    const tool = new TestTool();
+
+    await tool.warnIfRunningSessionHookUrlIsStale('wt-retry');
+    await tool.warnIfRunningSessionHookUrlIsStale('wt-retry');
+    await settleNotification();
+
+    expect(capturePane).toHaveBeenCalledTimes(2);
+    expect(notifyStaleHookUrlPush).toHaveBeenCalledTimes(1);
+  });
+
+  it('probes nothing for an id that would not make a session name', async () => {
+    // The send that follows will fail on its own account with a better message;
+    // this must not be what reports it.
+    await new TestTool().warnIfRunningSessionHookUrlIsStale('wt with spaces; rm -rf /');
+    await settleNotification();
+
+    expect(capturePane).not.toHaveBeenCalled();
+    expect(notifyStaleHookUrlPush).not.toHaveBeenCalled();
+  });
+
+  it('is a no-op for a tool object that is not a BaseCLITool', async () => {
+    // `CLIToolManager.getTool()` is typed as the interface, so the narrowing has
+    // to be somewhere; it is in `probeRunningSessionHookUrl` rather than as an
+    // `instanceof` in the route.
+    const notATool = {
+      id: 'command-code' as CLIToolType,
+      name: 'Command Code CLI',
+      command: 'commandcode',
+    } as unknown as Parameters<typeof probeRunningSessionHookUrl>[0];
+
+    probeRunningSessionHookUrl(notATool, 'rag-document');
+    await settleNotification();
+
+    expect(capturePane).not.toHaveBeenCalled();
   });
 });
