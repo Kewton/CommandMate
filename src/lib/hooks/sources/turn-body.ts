@@ -37,7 +37,9 @@
  * The four readers that push `aside` (claude, codex, antigravity, command-code)
  * are untouched by this Issue because none of them has been measured the way
  * opencode has; they can move a block at a time by switching kind, with no
- * change here.
+ * change here. Issue #2420 is the first time that happened: `./codex/transcript`
+ * now tags its `commentary` messages `reasoning` and nothing in this module
+ * moved.
  *
  * ## Why the order claim from #2041 / #2121 is narrowed rather than dropped
  *
@@ -98,11 +100,19 @@ export type TurnBlockKind =
    */
   | 'aside'
   /**
-   * RAW reasoning text, to be folded into the trailing section (Issue #2272).
+   * RAW subordinate text, to be folded into the trailing section (Issue #2272).
    *
    * Raw and not pre-quoted because the section owns the quoting: N blocks go
    * under ONE `Thinking (N)` heading, so a block that arrived already wearing a
    * heading of its own would nest one label inside another.
+   *
+   * Named for what #2272 first put here and no longer only that: since #2420
+   * `./codex/transcript` pushes an `AgentMessage` whose `phase` is `commentary`
+   * — codex's progress narration — through this kind as well. Two producers,
+   * one heading, on purpose: the label is written into `chat_messages.content`
+   * at read time, so every distinct label is a string the chat surface has to
+   * keep folding for the life of the table. The kind therefore means "the
+   * agent's own words ABOUT the reply", and the reply itself is `prose`.
    */
   | 'reasoning'
   /** One tool call, rendered as a single Markdown list item. */
