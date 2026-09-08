@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **fix(worktree): 待機中のエージェントに送信するたび「Queued (session busy)」トーストが出る問題を修正** (#2406): PC の分割ペイン（`TerminalSplitPaneContent`）が `MessageInput` の `isProcessing` に `terminal.isRunning` を渡していたため、#2238 で `isRunning` の意味が「tmux セッションが存在する」に変わって以降、生成中でない ready なセッションへの送信でも毎回トーストが出ていた。判定を「生成中」を表す `sessionStatus === 'running'`（`ChatSurface` が生成中バブルに使うのと同じ verdict）へ差し替え。あわせてスマホ側（`WorktreeDetailRefactored` の `MobileComposer`）は `isProcessing` を一度も渡しておらず、生成中に出るべきトーストが逆に一度も出ない状態だったため、同じ verdict（`sessionStatusByInstance[instanceId].isProcessing`）を配線した。送信ボタンの活性を決める `isSessionRunning` は別 prop なので不変。
+
 ## [0.32.1] - 2026-09-08
 
 > **Highlight**: 委任と転写の 2 つの経路に残っていた「静かに壊れる」欠陥をまとめて塞ぎました。同一マシンで 2 つのサーバが 1 つの tmux サーバを共有すると、エージェント内の `commandmate` が**起動元とは別のサーバへ接続**します（hooks は正しく、CLI だけが割れる）。`ask` は exit 0 を返すので呼び出し側は気づけず、実測では委任が無関係な worktree へ流れました。起動行に起動サーバ自身の `CM_PORT` を pin して真因を塞ぎ（#2403）、万一同じ不一致が起きても `whoami` / `instances` / `peers` が接続先 URL つきで申告するようにしています（#2404）。あわせて転写の保存経路を 4 箇所直しました — Stop 受け口の自己待ち（実測 105/105 失敗、#2398）、飽和した codex ペインがフッタ 1 行に化ける件（#2400）、dedup の早期 return で転写リーダーが二度と呼ばれない件（#2399）、4 MiB 窓に頭が入らないターンが頭切れのまま「完成した返答」として残る件（#2402）です。
