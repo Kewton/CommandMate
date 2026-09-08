@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **fix(session): 送信直前フラッシュが composer と前ターン本文を返答として保存する問題を修正** (#2437): `cleanCliResponse` に codex / command-code / antigravity / vibe-local の分岐を追加し（composer の判別は #2310 の SGR 規則に基づく `findCodexChromeStart` と `findCommandCodeChromeStart` で構造的に行い、文字列の除外リストにしない）、さらに 4 つの pull 転写リーダー（`captureClaudeTranscriptTurn` / `captureCodexTranscriptTurn` / `captureAntigravityTranscriptTurn` / `captureCommandCodeTranscriptTurn`）が転写行の書き込みに成功したときに `last_captured_line` を進めるようにして、次の poll より先に `/send` が来たときに前ターンの本文がまるごと再保存されるのを防いだ。
+
 ## [0.33.1] - 2026-09-08
 
 > **Highlight**: 日本語で使うときに毎日踏んでいた入力の取りこぼしと、Command Code の「終わっていないのに終わったことにする」を直しました。**Enter で確定するテキスト入力 7 箇所にIME の composition ガードが無く**、変換確定の Enter でそのまま確定していました — 別名やファイル名は未変換のまま永続化されます（#2428）。Command Code では、ツール呼び出しの無いターンで**前ターンの `hook_stop` が生成中の画面に勝ち続け**、`wait` が 60 秒保留のあと `scraper_ready` で早期完了していました（#2429、実測: 生成中フレーム 15/15 が `ready`。修正後は 14/14 が `running`）。あわせて 4 分割でどのターミナルが何をしていたか分かるよう、**セッションごとの 1 行メモ**を追加しています（#2427）。
