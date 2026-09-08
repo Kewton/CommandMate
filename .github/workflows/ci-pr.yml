@@ -265,6 +265,16 @@ jobs:
         # apt-get reaches the Debian mirrors; measured 0.05m max (n=12).
         timeout-minutes: 5
         run: |
+          # [Issue #2416] bullseye reached end of LTS (2026-08-31) and the
+          # `bullseye-security` InRelease signature expired with it
+          # (Valid-Until: 2026-09-07T21:13:04Z), which made `apt-get update`
+          # fail outright. tmux lives in `main`, and the `main` Release file
+          # carries no Valid-Until at all, so dropping the security suite makes
+          # this step immune to the expiry instead of merely deferring it.
+          # The base image stays node:18-bullseye on purpose: it is what supplies
+          # tmux 3.1c, and bookworm's 3.3a HAS display-popup, which would delete
+          # the whole point of this job.
+          printf 'deb http://deb.debian.org/debian bullseye main\n' > /etc/apt/sources.list
           apt-get update -qq
           DEBIAN_FRONTEND=noninteractive apt-get install -y -qq tmux
 
