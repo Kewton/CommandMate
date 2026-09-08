@@ -300,3 +300,70 @@ describe('MobileAgentInstancesPane: delegation brief (Issue #2382)', () => {
   });
 });
 
+
+// ============================================================================
+// Issue #2395: the docked composer's target reaches the shared self guard
+// ============================================================================
+
+/**
+ * #2382 left the phone's guard permanently "unknown": the shared pane asks the
+ * DOM which transcript is on screen, and on a phone the transcript (Terminal
+ * tab) and this pane (Tools tab) are never mounted together. So the row the
+ * composer was already addressing offered to delegate to itself.
+ *
+ * `composerTargetInstanceId` is that answer, threaded down from the screen. This
+ * wrapper's only job is to forward it, so what is pinned here is the FORWARD:
+ * the prop given to this component has to reach the shared pane's rows, and no
+ * mobile rule of its own may sit in between.
+ */
+describe('MobileAgentInstancesPane: composer target (Issue #2395)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    document.body.innerHTML = '';
+    mockFetch.mockResolvedValue({ ok: true, json: () => Promise.resolve({}) });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('drops the delegation item on the row the docked composer sends to', () => {
+    render(<MobileAgentInstancesPane {...baseProps} composerTargetInstanceId="claude" />);
+    openRowMenu('claude');
+
+    expect(screen.queryByTestId('agent-instance-delegate-claude')).toBeNull();
+  });
+
+  it('keeps it on the other rows, including the other instance of the same tool', () => {
+    render(<MobileAgentInstancesPane {...baseProps} composerTargetInstanceId="claude" />);
+
+    openRowMenu('claude-2');
+    expect(screen.getByTestId('agent-instance-delegate-claude-2')).toBeTruthy();
+
+    openRowMenu('codex');
+    expect(screen.getByTestId('agent-instance-delegate-codex')).toBeTruthy();
+  });
+
+  it('still inserts from a kept row while a target is named', async () => {
+    // The point of the guard is to remove one dead item, not to disarm the
+    // feature on phones: the rows that remain must still write the composer.
+    answerBriefReads('codex', 'codex');
+    const composer = mountComposer();
+
+    render(<MobileAgentInstancesPane {...baseProps} composerTargetInstanceId="claude" />);
+    openRowMenu('codex');
+    fireEvent.click(screen.getByTestId('agent-instance-delegate-codex'));
+
+    await waitFor(() => expect(composer.value).not.toBe(''));
+    expect(composer.value).toContain('--instance codex');
+    expect(showToast).toHaveBeenCalledWith(DELEGATE_TEXT.en.inserted, 'success');
+  });
+
+  it('leaves every row offering the item when no target is supplied', () => {
+    // The pre-#2395 shape, and the one every other caller of this pane gets.
+    render(<MobileAgentInstancesPane {...baseProps} />);
+
+    openRowMenu('claude');
+    expect(screen.getByTestId('agent-instance-delegate-claude')).toBeTruthy();
+  });
+});

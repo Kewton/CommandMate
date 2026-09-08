@@ -10,6 +10,10 @@ import { render, screen, fireEvent } from '@testing-library/react';
 
 import { MobileHeader } from '@/components/mobile/MobileHeader';
 import type { MobileHeaderProps } from '@/components/mobile/MobileHeader';
+import {
+  CommandPaletteProvider,
+  useCommandPalette,
+} from '@/contexts/CommandPaletteContext';
 
 describe('MobileHeader', () => {
   const defaultProps: MobileHeaderProps = {
@@ -233,6 +237,67 @@ describe('MobileHeader', () => {
       fireEvent.click(backButton);
 
       expect(onBackClick).toHaveBeenCalled();
+    });
+  });
+
+  // ==========================================================================
+  // Command palette trigger (Issue #2395)
+  // ==========================================================================
+
+  describe('Command Palette Trigger', () => {
+    /** Reports the palette's shared open state, which is what the button moves. */
+    function PaletteProbe() {
+      const { open } = useCommandPalette();
+      return <span data-testid="palette-open">{open ? 'open' : 'closed'}</span>;
+    }
+
+    it('should render a command palette trigger', () => {
+      render(<MobileHeader {...defaultProps} />);
+
+      expect(screen.getByTestId('mobile-header-command-palette-trigger')).toBeInTheDocument();
+    });
+
+    it('should render the trigger even with no other header actions', () => {
+      // `/worktrees/*` is the one mobile route with no GlobalMobileNav, so this
+      // header is the only chrome that can carry the palette there. It must not
+      // be conditional on the back / menu callbacks.
+      render(<MobileHeader {...defaultProps} />);
+
+      expect(screen.queryByRole('button', { name: /menu/i })).not.toBeInTheDocument();
+      expect(screen.getByTestId('mobile-header-command-palette-trigger')).toBeInTheDocument();
+    });
+
+    it('should open the shared palette state when tapped', () => {
+      render(
+        <CommandPaletteProvider>
+          <PaletteProbe />
+          <MobileHeader {...defaultProps} onMenuClick={vi.fn()} />
+        </CommandPaletteProvider>
+      );
+
+      expect(screen.getByTestId('palette-open').textContent).toBe('closed');
+
+      fireEvent.click(screen.getByTestId('mobile-header-command-palette-trigger'));
+
+      // `AppShell` mounts `<CommandPalette />` off this same context on every
+      // mobile route, so flipping it here is what puts the palette on screen.
+      expect(screen.getByTestId('palette-open').textContent).toBe('open');
+    });
+
+    it('should not collide with the menu button', () => {
+      const onMenuClick = vi.fn();
+      render(<MobileHeader {...defaultProps} onMenuClick={onMenuClick} />);
+
+      fireEvent.click(screen.getByTestId('mobile-header-command-palette-trigger'));
+
+      expect(onMenuClick).not.toHaveBeenCalled();
+      expect(screen.getByRole('button', { name: /menu/i })).toBeInTheDocument();
+    });
+
+    it('should label the trigger for screen readers', () => {
+      render(<MobileHeader {...defaultProps} />);
+
+      expect(screen.getByTestId('mobile-header-command-palette-trigger')).toHaveAccessibleName();
     });
   });
 

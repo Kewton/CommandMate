@@ -418,6 +418,12 @@ export const MobileContent = memo(function MobileContent({
             // memoised because `MobileContent` re-renders on the same cadence
             // as `worktree` anyway — the whole switch below is keyed off it.
             modelByInstance={buildModelByInstance(worktree?.sessionStatusByInstance)}
+            // Issue #2395: the docked composer's target — the SAME `instanceId`
+            // the terminal tab above is given, because it is the same state
+            // (`activeInstanceId`). Handing it to the Tools tab is what lets the
+            // Agent pane's "delegate to this session" item drop itself on the
+            // row the composer is already addressing.
+            composerTargetInstanceId={instanceId}
             verification={verification}
             requestedSubTab={toolsSubTabRequest}
           />

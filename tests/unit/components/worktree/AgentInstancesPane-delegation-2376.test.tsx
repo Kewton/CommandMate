@@ -189,3 +189,100 @@ describe('AgentInstancesPane: delegation brief (Issue #2376)', () => {
       .toHaveLength(0);
   });
 });
+
+// ============================================================================
+// Issue #2395: the composer's target, supplied as a prop
+// ============================================================================
+
+/**
+ * The DOM read this pane shipped with (#2376) answers "unknown" wherever the
+ * chat surface is not mounted, and on a phone it never is: the Agent pane is on
+ * the Tools tab and the transcript is on the Terminal tab. The row that IS the
+ * composer's target therefore kept offering to delegate to itself (#2382).
+ *
+ * `composerTargetInstanceId` is the caller's answer to the same question. What
+ * is pinned here:
+ *
+ *   - the named row loses the item entirely, rather than keeping one that can
+ *     only toast a refusal;
+ *   - every other row keeps it, so the guard is per row and not a mode;
+ *   - with the prop absent the kebab is byte-for-byte #2376's — that is the
+ *     whole of "PC is unchanged";
+ *   - when prop and DOM disagree the PROP wins, in both directions.
+ */
+describe('AgentInstancesPane: composer target overrides the DOM read (Issue #2395)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    document.body.innerHTML = '';
+    mockFetch.mockResolvedValue({ ok: true, json: () => Promise.resolve({}) });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('drops the item on the row the composer is already addressing', () => {
+    render(<AgentInstancesPane {...baseProps} composerTargetInstanceId="claude" />);
+    openRowMenu('claude');
+
+    expect(screen.queryByTestId('agent-instance-delegate-claude')).toBeNull();
+    // Only that one item goes: the roster actions the kebab exists for stay.
+    expect(screen.getByTestId('agent-instance-move-down-claude')).toBeTruthy();
+    expect(screen.getByTestId('agent-instance-delete-claude')).toBeTruthy();
+  });
+
+  it('keeps the item on every other row', () => {
+    render(<AgentInstancesPane {...baseProps} composerTargetInstanceId="claude" />);
+    openRowMenu('codex-2');
+
+    expect(screen.getByTestId('agent-instance-delegate-codex-2')).toBeTruthy();
+  });
+
+  it('leaves the kebab untouched when no target is supplied (the PC path)', () => {
+    render(<AgentInstancesPane {...baseProps} />);
+    openRowMenu('claude');
+
+    expect(screen.getByTestId('agent-instance-delegate-claude')).toBeTruthy();
+  });
+
+  it('inserts for a row the DOM calls self but the composer does not', async () => {
+    // The chat surface says codex-2's transcript is on screen; the composer
+    // says it is talking to claude. Only one of those is where the text will
+    // land, so delegating TO codex-2 must go through — under #2376's DOM-only
+    // guard this click was refused.
+    answerBriefReads('codex-2', 'codex');
+    const composer = mountComposer();
+    mountChatSurface('codex-2');
+
+    render(<AgentInstancesPane {...baseProps} composerTargetInstanceId="claude" />);
+    openRowMenu('codex-2');
+    fireEvent.click(screen.getByTestId('agent-instance-delegate-codex-2'));
+
+    await waitFor(() => expect(composer.value).not.toBe(''));
+    expect(composer.value).toContain('--instance codex-2');
+    expect(showToast).toHaveBeenCalledWith(expect.any(String), 'success');
+  });
+
+  it('leaves the named row with no path to the two reads at all', async () => {
+    // A one-row roster: even as the ONLY row, the composer's own target offers
+    // no delegation item — and with no item there is no click, so neither of
+    // the brief's requests can be started for it.
+    answerBriefReads('claude', 'claude');
+    const composer = mountComposer();
+    mountChatSurface('codex-2');
+
+    render(
+      <AgentInstancesPane
+        {...baseProps}
+        instances={[INSTANCES[0]]}
+        composerTargetInstanceId="claude"
+      />,
+    );
+    openRowMenu('claude');
+
+    expect(screen.queryByTestId('agent-instance-delegate-claude')).toBeNull();
+    expect(mockFetch.mock.calls.filter((c) => String(c[0]).includes('/cli-reference')))
+      .toHaveLength(0);
+    expect(composer.value).toBe('');
+  });
+});

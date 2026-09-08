@@ -104,6 +104,16 @@ export interface NotesAndLogsPaneProps {
    */
   modelByInstance?: Readonly<Partial<Record<string, string | null>>>;
   /**
+   * Issue #2395: the instance the phone's docked composer sends to.
+   *
+   * A pass-through for {@link MobileAgentInstancesPane}'s self guard — this
+   * pane neither reads it nor renders anything from it. It arrives here because
+   * the composer lives OUTSIDE this pane (docked under every mobile tab in
+   * `WorktreeDetailRefactored`) while the roster rows that offer to delegate to
+   * it live inside, so the 'agent' sub-tab is the only place the two meet.
+   */
+  composerTargetInstanceId?: string;
+  /**
    * Issue #1816: task contract + verification runs, owned by
    * `useWorktreeVerification` in the detail controller.
    *
@@ -170,6 +180,7 @@ export const NotesAndLogsPane = memo(function NotesAndLogsPane({
   visibleInstanceIds,
   onToggleInstanceVisible,
   modelByInstance,
+  composerTargetInstanceId,
   verification,
   requestedSubTab,
 }: NotesAndLogsPaneProps) {
@@ -259,6 +270,12 @@ export const NotesAndLogsPane = memo(function NotesAndLogsPane({
                 visibleInstanceIds={visibleInstanceIds}
                 onToggleInstanceVisible={onToggleInstanceVisible}
                 modelByInstance={modelByInstance}
+                // Issue #2395: the docked composer's target. Without it the
+                // roster row the composer is already talking to offers to
+                // delegate to itself — the chat surface the shared pane reads
+                // instead belongs to the Terminal tab, never mounted with this
+                // one.
+                composerTargetInstanceId={composerTargetInstanceId}
               />
             </div>
           ) : (
