@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **fix(ui): Enterで確定するテキスト入力7箇所でIME変換確定のEnterが未変換のまま確定してしまう問題を修正** (#2428): エージェント別名・新規ファイル名・リポジトリ表示名・ファイル/メモ/ログ検索の各入力で、`TodoPane` と同じ `!e.nativeEvent.isComposing` ガードを確定処理に追加し、変換候補を確定するEnterでは保存・ファイル作成・検索実行が走らないようにした（変換確定後のEnterは従来どおり確定する）。
+- **fix(session): Command Code の生成中に前ターンの `hook_stop` が `ready` を出し続け、`wait` が 60 秒保留のあと `scraper_ready` で早期完了する問題を修正** (#2429): 画面が生成中（`thinking_indicator`）で、かつ構造化層の最新 `stop` の `closedAt` がこのインスタンスへの最新送信（chat 台帳の user 行）より古いとき、`mergeStructuredStatus` が scraper の `running` を採るようにした。開始イベントを出せない Command Code のツール無しターンでも `sessionStatus` が `running` になり、`wait` は `basis=hook_stop` で完了する。副作用として、adopt した tmux セッションの `CM_HOOK_URL` が別ポートを指している場合に 1 度だけ push で警告する（セッションは殺さない）。
 
 ## [0.33.0] - 2026-09-08
 
