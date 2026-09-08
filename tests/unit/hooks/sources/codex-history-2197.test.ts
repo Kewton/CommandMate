@@ -77,6 +77,7 @@ import {
 } from '@/lib/hooks/sources/codex/history';
 import { TRANSCRIPT_TAIL_BYTES } from '@/lib/history/transcript-tail';
 import { codexPromptRequestId, codexTurnRequestId } from '@/types/agent-transcript';
+import type { StructuredHistoryCaptureReport } from '@/lib/polling/structured-history-gate';
 
 const FIXTURES = join(process.cwd(), 'tests/fixtures/transcripts/codex');
 const THREE_TURNS = readFileSync(join(FIXTURES, 'rollout-three-turns-01510.jsonl'), 'utf8');
@@ -335,6 +336,31 @@ describe('[#2197] refusing to write', () => {
 
     expect(await captureCodexTranscriptTurn(TARGET, { codexHome })).toBe(false);
     expect(savedOf('assistant')).toHaveLength(0);
+  });
+
+  it('[#2436] says WHY it refused: the turn is not closed yet', async () => {
+    // The distinction the poller needs and the boolean could not carry. A
+    // `not_yet_closed` means the Markdown row is coming — measured at ~700 ms
+    // on codex 2026-09-08 — so the caller holds its scraped copy instead of
+    // writing it beside the answer.
+    const lines = THREE_TURNS.trim().split('\n');
+    const lastComplete = lines.findLastIndex((line) => line.includes('"task_complete"'));
+    await writeRollout(SESSION, `${lines.slice(0, lastComplete).join('\n')}\n`);
+
+    const report: StructuredHistoryCaptureReport = {};
+    expect(await captureCodexTranscriptTurn(TARGET, { codexHome }, report)).toBe(false);
+    expect(report.outcome).toBe('not_yet_closed');
+  });
+
+  it('[#2436] leaves the report unset when there is no rollout to read', async () => {
+    // Everything that is not "the turn is still open" stays the pre-#2436
+    // silence, which the gate reads as `unavailable`: nothing is coming, and a
+    // caller holding a scrape should write it now.
+    getLastAgentEvent.mockReturnValue({ sessionId: null });
+
+    const report: StructuredHistoryCaptureReport = {};
+    expect(await captureCodexTranscriptTurn(TARGET, { codexHome }, report)).toBe(false);
+    expect(report.outcome).toBeUndefined();
   });
 
   it('still records the prompt of an unfinished turn', async () => {

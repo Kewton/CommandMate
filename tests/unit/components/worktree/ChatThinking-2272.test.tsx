@@ -342,7 +342,11 @@ describe('[#2272] the bubble', () => {
   it('does not touch a terminal-scrape row that happens to quote Thinking', () => {
     // No `requestId` prefix means the plain path, where the body is a screen
     // scrape and every character of it is content.
-    renderBubble(LEGACY_SHAPE, { requestId: undefined });
+    // [#2436] `req_…` and not `undefined`: the scraper's own id for a Claude
+    // row, which matches no Markdown prefix (so this is still the plain path,
+    // which is what the test is about) and is not the unkeyed shape the
+    // pane-scrape fold now puts behind a chip.
+    renderBubble(LEGACY_SHAPE, { requestId: 'req_scrape' });
     expect(screen.queryByTestId(CHAT_THINKING_GROUP_TESTID)).toBeNull();
     expect(bodyOf().textContent).toContain(`> **${TURN_REASONING_LABEL}**`);
   });

@@ -96,6 +96,7 @@ import {
   renderCommandCodeTurn,
 } from '@/lib/hooks/sources/command-code/transcript';
 import { claudeProjectSlug } from '@/lib/hooks/sources/claude/transcript';
+import type { StructuredHistoryCaptureReport } from '@/lib/polling/structured-history-gate';
 
 const FIXTURES = join(process.cwd(), 'tests/fixtures/transcripts/command-code');
 
@@ -110,6 +111,8 @@ const DELIVERIES: CapturedDelivery[] = JSON.parse(
   readFileSync(join(FIXTURES, 'hook-payloads-1490.json'), 'utf8')
 );
 const TRANSCRIPT = readFileSync(join(FIXTURES, 'hook-session-1490.jsonl'), 'utf8');
+/** A real capture of a turn that stopped on a tool call — #2252's `isFreshUserTurn` fixture. */
+const OPEN_TURN = readFileSync(join(FIXTURES, 'open-turn-1401.jsonl'), 'utf8');
 const TURN_BODY = readFileSync(join(FIXTURES, 'hook-session-1490.turn.md'), 'utf8').replace(
   /\n$/,
   ''
@@ -389,6 +392,22 @@ describe('[#2304] the scan still works, and 1.49.0`s new sibling files do not co
         transcriptPathHint: checkpoints,
       })
     ).toBe(false);
+  });
+
+  it('[#2436] says WHY it refused: the turn is not closed yet', async () => {
+    // `open-turn-1401` is a real capture of a turn that stopped on a tool call
+    // — Command Code's shape of "not finished" — placed under the session id
+    // the hook reports so the reader finds it the ordinary way. The report is
+    // what lets the poller hold its scraped copy instead of writing it beside
+    // an answer that is still on its way.
+    await place(REAL_SLUG, `${SESSION}.jsonl`, OPEN_TURN);
+    getLastAgentEvent.mockReturnValue({ sessionId: SESSION });
+
+    const report: StructuredHistoryCaptureReport = {};
+    expect(
+      await captureCommandCodeTranscriptTurn(TARGET, { commandCodeHome: home }, report)
+    ).toBe(false);
+    expect(report.outcome).toBe('not_yet_closed');
   });
 
   it('finds the file under the camel-split slug with no hint and no cwd', async () => {

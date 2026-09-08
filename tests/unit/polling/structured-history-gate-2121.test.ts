@@ -69,7 +69,10 @@ describe('captureStructuredHistoryTurn', () => {
     await captureStructuredHistoryTurn('wt-1', 'claude', undefined, CAPTURE);
     expect(vi.mocked(captureClaudeTranscriptTurn)).toHaveBeenCalledWith(
       { worktreeId: 'wt-1', cliToolId: 'claude', instanceId: 'claude' },
-      CAPTURE
+      CAPTURE,
+      // [#2436] The third argument is the gate's out-parameter for the
+      // three-valued outcome; the reader fills it, the gate copies it out.
+      expect.objectContaining({}),
     );
   });
 
@@ -77,7 +80,10 @@ describe('captureStructuredHistoryTurn', () => {
     await captureStructuredHistoryTurn('wt-1', 'claude', 'claude-3', CAPTURE);
     expect(vi.mocked(captureClaudeTranscriptTurn)).toHaveBeenCalledWith(
       { worktreeId: 'wt-1', cliToolId: 'claude', instanceId: 'claude-3' },
-      CAPTURE
+      CAPTURE,
+      // [#2436] The third argument is the gate's out-parameter for the
+      // three-valued outcome; the reader fills it, the gate copies it out.
+      expect.objectContaining({}),
     );
   });
 

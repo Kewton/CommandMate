@@ -17,7 +17,13 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-vi.mock('@/lib/polling/response-checker', () => ({ checkForResponse: vi.fn(async () => false) }));
+// [#2436] `stopPollingByKey` confirms a held scrape before it clears the caches
+// that key it, so `response-poller-core` reaches for this second export. It is a
+// no-op here: nothing in this suite holds one.
+vi.mock('@/lib/polling/response-checker', () => ({
+  checkForResponse: vi.fn(async () => false),
+  flushPendingScrapedResponse: vi.fn(() => false),
+}));
 vi.mock('@/lib/realtime/terminal-broadcast', () => ({ broadcastTerminalSnapshot: vi.fn(async () => {}) }));
 
 import {

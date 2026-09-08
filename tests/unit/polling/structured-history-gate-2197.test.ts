@@ -96,7 +96,10 @@ describe('[#2197] the codex reader is wired into the gate', () => {
     expect(await captureStructuredHistoryTurn('wt-1', 'codex', 'codex', CAPTURE)).toBe(true);
     expect(vi.mocked(captureCodexTranscriptTurn)).toHaveBeenCalledWith(
       { worktreeId: 'wt-1', cliToolId: 'codex', instanceId: 'codex' },
-      CAPTURE
+      CAPTURE,
+      // [#2436] The third argument is the gate's out-parameter for the
+      // three-valued outcome; the reader fills it, the gate copies it out.
+      expect.objectContaining({}),
     );
   });
 
@@ -158,7 +161,10 @@ describe('[#2198] the antigravity reader is wired into the gate', () => {
     );
     expect(vi.mocked(captureAntigravityTranscriptTurn)).toHaveBeenCalledWith(
       { worktreeId: 'wt-1', cliToolId: 'antigravity', instanceId: 'antigravity' },
-      CAPTURE
+      CAPTURE,
+      // [#2436] The third argument is the gate's out-parameter for the
+      // three-valued outcome; the reader fills it, the gate copies it out.
+      expect.objectContaining({}),
     );
   });
 
