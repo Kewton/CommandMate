@@ -71,6 +71,7 @@ import { advanceCapturedLineForTranscriptTurn } from '@/lib/assistant-response-s
 import { createLogger } from '@/lib/logger';
 import { antigravityPromptRequestId, antigravityTurnRequestId } from '@/types/agent-transcript';
 import type { AgentInstanceRef } from '../types';
+import type { ChatMessage } from '@/types/models';
 import type { StructuredHistoryCaptureReport } from '@/lib/polling/structured-history-gate';
 import {
   ANTIGRAVITY_BRAIN_DIR_SEGMENT,
@@ -307,6 +308,16 @@ export interface AntigravityTranscriptCapture {
  *
  * Never throws.
  *
+ * **A row this reader wrote is not final (Issue #2438).** Before anything is
+ * written, the newest already-written turns — at most
+ * {@link ANTIGRAVITY_TURN_RECHECK_LIMIT} of them — are re-rendered and compared
+ * against the rows they produced, and a row whose turn now renders *strictly
+ * longer* is replaced in place. agy has no record that closes a turn, so an
+ * interim report reads as a finished answer (`isAntigravityTurnClosingRecord`)
+ * and used to freeze a half-written reply into History forever. That is a
+ * repair and not a second verdict: growing an older row changes neither the
+ * return value nor `report`, both of which are about the **newest** turn.
+ *
  * Since Issue #2436 the false can explain itself: pass a
  * `StructuredHistoryCaptureReport` and `outcome` is set to `'not_yet_closed'`
  * when the newest turn is one the agent has not finished writing — the case the
@@ -384,6 +395,23 @@ export async function captureAntigravityTranscriptTurn(
     }
 
     const pending = await selectUnwrittenAntigravityTurns(target, built.turns);
+
+    // Before anything is written: the rows that are already there (#2438). This
+    // is deliberately ahead of the early return below, because "the newest turn
+    // is already a row" is exactly the state the frozen row the Issue measured
+    // was stuck in — agy said "waiting for the worker", the writer saved that,
+    // and every later read answered true and did nothing while the conclusion
+    // sat in the transcript beside it. Written turns are re-checked whether or
+    // not anything is pending, so an old turn can be repaired in the same pass
+    // that writes a new one.
+    await refreshAntigravityTurnRows(
+      target,
+      built.turns
+        .slice(0, built.turns.length - pending.turns.length)
+        .slice(-ANTIGRAVITY_TURN_RECHECK_LIMIT),
+      path
+    );
+
     if (pending.turns.length === 0) {
       logger.debug('antigravity-transcript-turns-already-saved', {
         worktreeId: target.worktreeId,
@@ -688,6 +716,153 @@ function nextTurnOpensAt(
 }
 
 /**
+ * How many already-written turns are re-rendered and compared (Issue #2438).
+ *
+ * The repair half of #2438 has to look at rows this reader has **already**
+ * written, which is the one thing the anchor rule of
+ * {@link selectUnwrittenAntigravityTurns} deliberately does not do — so it is
+ * bounded here rather than by the read window. Three, the number claude and
+ * command-code settled on in #2264 and for the same arithmetic: the poller runs
+ * every couple of seconds, re-rendering the whole window on every tick would
+ * make a repair the most expensive thing the poll does, and a turn that is going
+ * to grow grows within seconds of being written.
+ *
+ * The cost of the bound is paid by rows a session has already moved three turns
+ * past: those keep whatever they were written with. The measured case — one
+ * conversation whose only turn was `#0` — is inside it by a wide margin.
+ */
+export const ANTIGRAVITY_TURN_RECHECK_LIMIT = 3;
+
+/**
+ * Replace a saved row whose body has since grown (Issue #2438).
+ *
+ * The defect this exists for is not that the wrong body was written; it is that
+ * the row was written **early**. `isAntigravityTurnClosingRecord` reads prose
+ * with no `tool_calls` as agy finishing, and an interim report — "waiting for
+ * the worker" — has exactly that shape. The row is keyed
+ * `antigravity-turn:<conversationId>#<stepIndex>`, so once it exists every later
+ * read finds it, answers "already saved", and the gate suppresses the scrape
+ * that could have carried the conclusion instead. Nothing else in the system
+ * ever revisits that row.
+ *
+ * **Strictly longer, never merely different.** Equality is the ordinary case and
+ * must cost nothing, and a body that got *shorter* between two reads is not a
+ * turn that grew — it is a window that slid, or a truncation marker, and
+ * overwriting a full reply with a shorter one is the one outcome worse than the
+ * bug. Longer implies different, so one comparison covers both.
+ *
+ * Only `content` moves. The row's `id`, `request_id`, `timestamp`, worktree,
+ * tool and instance are what History sorts and pairs on, and a repair that
+ * disturbed any of them would move an old answer to the bottom of the
+ * conversation.
+ *
+ * `message_updated`, never `message`: the row already existed and was already
+ * delivered when it was created, so a client that appended instead of replacing
+ * would show the reply twice.
+ *
+ * @param existing - The row `findMessageByRequestId` answered with
+ * @returns Whether the row was replaced
+ */
+async function growAntigravityTurnRow(
+  target: AgentInstanceRef,
+  existing: ChatMessage,
+  rendered: AntigravityRenderedTurn,
+  path: string
+): Promise<boolean> {
+  const instanceId = target.instanceId ?? target.cliToolId;
+
+  // The stored body is the only evidence of what History holds, so a row that
+  // carries none is not evidence that anything grew. Same answer as "not
+  // longer": leave it alone. This runs inside the poller's save path, where the
+  // module contract is that nothing throws.
+  const previous = existing.content;
+  if (typeof previous !== 'string') return false;
+  const previousLength = previous.length;
+  if (rendered.body.length <= previousLength) return false;
+
+  const [{ getDbInstance }, { updateMessageContent }, { broadcastMessage }] = await Promise.all([
+    import('@/lib/db/db-instance'),
+    import('@/lib/db'),
+    import('@/lib/ws-server'),
+  ]);
+
+  updateMessageContent(getDbInstance(), existing.id, rendered.body);
+  broadcastMessage('message_updated', {
+    worktreeId: target.worktreeId,
+    message: { ...existing, content: rendered.body },
+  });
+  logger.info('antigravity-transcript-turn-updated', {
+    worktreeId: target.worktreeId,
+    instanceId,
+    conversationId: rendered.conversationId,
+    stepIndex: rendered.stepIndex,
+    requestId: existing.requestId,
+    path,
+    previousLength,
+    bodyLength: rendered.body.length,
+    textBlocks: rendered.textBlocks,
+    toolBlocks: rendered.toolBlocks,
+  });
+  return true;
+}
+
+/**
+ * Re-read the newest already-written turns and grow the short ones (#2438).
+ *
+ * Runs before the pending turns are written and independently of whether there
+ * are any — the case it exists for is precisely the one
+ * {@link captureAntigravityTranscriptTurn} used to return `true` from without
+ * doing anything: the newest turn already has a row, and that row stopped at
+ * agy's interim report.
+ *
+ * Turns that are open again are skipped rather than compared. A turn whose last
+ * record is a `tool_calls` is one agy is still working through, its body is by
+ * definition not the final one, and a repair that raced the agent would rewrite
+ * the row on every poll of a long turn. **This is not a second chance to write
+ * a turn**: a candidate with no row is left alone, because the anchor rule
+ * already decided it is not this pass's to create.
+ *
+ * The database is asked before the turn is rendered, so a candidate with no row
+ * — every candidate, in a session this reader has never written to — costs one
+ * indexed lookup and no Markdown.
+ *
+ * Serialisation is the gate's, per instance: this adds no loop and no timer of
+ * its own, it is one more thing the poll's existing pass does.
+ *
+ * @param candidates - Already-written turns, oldest first, at most
+ *   {@link ANTIGRAVITY_TURN_RECHECK_LIMIT}
+ * @returns How many rows were replaced
+ */
+async function refreshAntigravityTurnRows(
+  target: AgentInstanceRef,
+  candidates: readonly AntigravityTurnAccumulator[],
+  path: string
+): Promise<number> {
+  if (candidates.length === 0) return 0;
+
+  const [{ getDbInstance }, { findMessageByRequestId }] = await Promise.all([
+    import('@/lib/db/db-instance'),
+    import('@/lib/db'),
+  ]);
+  const db = getDbInstance();
+
+  let updated = 0;
+  for (const turn of candidates) {
+    if (!isAntigravityTurnWritable(turn)) continue;
+    const existing = findMessageByRequestId(
+      db,
+      target.worktreeId,
+      antigravityTurnRequestId(turn.conversationId, turn.stepIndex)
+    );
+    if (!existing) continue;
+    if (await growAntigravityTurnRow(target, existing, renderAntigravityTurn(turn), path)) {
+      updated += 1;
+    }
+  }
+  return updated;
+}
+
+/**
  * Write one rendered turn, unless it is already there.
  *
  * `findMessageByRequestId` is both the idempotency check and the reason a repeat
@@ -697,7 +872,10 @@ function nextTurnOpensAt(
  * Answering **true** for a turn that was already saved is deliberate. It means
  * "History holds this turn as Markdown", which is what the poller needs to know
  * — a second poll of the same finished turn must not save the pane's copy on top
- * of the row this path wrote.
+ * of the row this path wrote. Since #2438 that row is no longer left as it was
+ * found: it is the same comparison {@link growAntigravityTurnRow} makes for the
+ * turns the recheck window covers, made here where both the row and the turn
+ * are already in hand.
  *
  * @returns Whether History holds this turn as the agent's own Markdown
  */
@@ -719,11 +897,17 @@ async function writeAntigravityTurn(
   if (!isAntigravityTurnWritable(turn)) {
     // agy has not finished this answer and no later prompt has taken over, so
     // what is in the file is a turn in progress. Writing it would put a reply
-    // with its last paragraph missing into History permanently — the row is
-    // keyed on `(conversationId, step_index)`, so every later read finds it and
-    // answers "already saved". That is Issue #2264, reported against claude and
+    // with its last paragraph missing into History — the row is keyed on
+    // `(conversationId, step_index)`, so every later read finds it and answers
+    // "already saved". That is Issue #2264, reported against claude and
     // structurally identical here: a turn cut off after its `tool_calls` renders
     // a *non-empty* body, so the emptiness guard below cannot see it.
+    //
+    // #2438 made such a row repairable rather than making it acceptable: a
+    // short row only grows while its turn is still among the newest
+    // {@link ANTIGRAVITY_TURN_RECHECK_LIMIT}, and nothing at all rewinds what a
+    // relay already delivered from it. Not writing it in the first place is
+    // still the fix; the repair is the second line.
     if (report) report.outcome = 'not_yet_closed';
     logger.info('antigravity-transcript-turn-open', {
       worktreeId: target.worktreeId,
@@ -784,12 +968,20 @@ async function writeAntigravityTurn(
     ]);
 
   const db = getDbInstance();
-  if (findMessageByRequestId(db, target.worktreeId, requestId)) {
+  const existing = findMessageByRequestId(db, target.worktreeId, requestId);
+  if (existing) {
     logger.debug('antigravity-transcript-turn-already-saved', {
       worktreeId: target.worktreeId,
       instanceId,
       requestId,
     });
+    // The row may be one of the ones #2438 was reported for — saved at agy's
+    // interim report — and this is the one place that holds both the row and
+    // the turn. The comparison and the notification are not repeated here; see
+    // {@link growAntigravityTurnRow}. The verdict is unchanged: History holds
+    // this turn either way, and `report.outcome` is about this turn's
+    // completeness rather than about an edit.
+    await growAntigravityTurnRow(target, existing, rendered, path);
     return true;
   }
 

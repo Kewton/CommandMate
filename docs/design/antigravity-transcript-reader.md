@@ -186,7 +186,7 @@ claude の転写リーダー（#2121）と同じで、turn の終わりは agy �
 | pointer latch | `resolveAntigravityConversationId()` — `getLastAgentEvent().sessionId`（= `conversationId`）。無ければ latch。**cwd フォールバックは置かない** |
 | ホーム配下検証 | `acceptAntigravityTranscriptPath()` — `<agyHome>/brain` 配下・`.jsonl`・NUL 無しを resolve 後に検査 |
 | 窓読み | `readTranscriptTail()`（#2196 の共通ヘルパ、4 MiB） |
-| turn 境界 | `USER_EXPLICIT`/`USER_INPUT` が開く。最新 turn だけを書く |
+| turn 境界 | `USER_EXPLICIT`/`USER_INPUT` が開く。#2198 当時は最新 turn だけを書いた（現行は §5） |
 | assistant 行 | `request_id = antigravity-turn:<conversationId>#<stepIndex>`。`AGENT_MARKDOWN_REQUEST_ID_PREFIXES` に追加 |
 | user 行 | `antigravity-prompt:<conversationId>#<stepIndex>` を `recordUserTurn()` へ。prefix は Markdown 一覧に**入れない** |
 | capability | `transcriptHistory: 'pull'` ＋ `PULL_TRANSCRIPT_READERS` に 1 行 |
@@ -198,6 +198,7 @@ claude の転写リーダー（#2121）と同じで、turn の終わりは agy �
    走査するが、agy はパスが conversationId から決まる。走査コードは書かない。
 2. **turn を閉じるレコードが無い。** codex は `task_complete` を待てるが agy には無いので、
    claude と同じく「最新 turn を書く」。空本文の turn は false を返して scraper に委ねる。
+   **書いた行がそこで確定しない**のはこの帰結であり、§5 に分けて書く。
 
 ### レンダリング規則（すべて §2 ① の全数計測に基づく）
 
@@ -208,3 +209,57 @@ claude の転写リーダー（#2121）と同じで、turn の終わりは agy �
   ツール出力は呼び出し行がすでに要約しており、`SYSTEM` は agent の言葉ではない。
   ただし**「知らない type」とは区別する**: 上記 15 語は既知の沈黙リストに置き、
   それ以外が来たら `unknownRecordTypes` に数えてログへ出す。
+
+---
+
+## 5. 書いた行を後から更新する（Issue #2438）
+
+§4 の「最新 turn を書く」は #2246 で「窓内の未書き込み turn を全部書く」に広がったが、
+**一度書いた行には誰も戻らなかった**。本節はその穴と、#2438 で入れた回復処理の範囲を書く。
+「既存行は常に書きっぱなし」という §4 までの読み方は、ここで置き換わる。
+
+### 何が起きたか（2026-09-09 実測、リリース 0.33.1、`:60301`）
+
+agy には turn を閉じるレコードが無い（§2 ③）ので、`isAntigravityTurnClosingRecord` は
+「散文があって `tool_calls` が無い `PLANNER_RESPONSE`」を終了と読むしかない。
+**中間報告はこの形をしている。** 実際に観測された会話
+`b8ae0056-01ad-484e-8e6d-ed63522b4060` は 34 レコード 1 ターンで、step 31 の
+「現在 Command Code からの返答待機中です」で行が保存され、step 33 の結論が同じ turn に
+追記されても行は 16,959 文字のまま凍った（結論込みなら 21,581 文字）。
+
+行のキーは `antigravity-turn:<conversationId>#<開始 step>` なので、以後の読込は
+`selectUnwrittenAntigravityTurns` の anchor でこの行を見つけ、pending は空になり、
+`captureAntigravityTranscriptTurn` は本文を比べずに true を返す。gate はその true で
+scrape の保存も止める。**結論が History に載る経路が一つも無い状態**だった。
+
+### 入れた処理
+
+| 部品 | 実装 |
+|---|---|
+| 再確認の対象 | `built.turns.slice(0, built.turns.length - pending.turns.length).slice(-ANTIGRAVITY_TURN_RECHECK_LIMIT)`。既に書いた側の末尾 3 turn |
+| 実行位置 | `selectUnwrittenAntigravityTurns` の直後、**pending 0 の早期 return より前**。pending があっても実行する（古い A を直しつつ新しい B を通常どおり書く） |
+| 更新条件 | `renderAntigravityTurn(turn).body` が保存済み `content` より**厳密に長い**ときだけ。同一・同長・短い場合は DB も通知も触らない |
+| 未完了 turn | `isAntigravityTurnWritable` が false なら比較しない。長くなっていても待つ |
+| 行が無い候補 | **作らない**。anchor 規則が「この pass のものではない」と決めた turn を後から生やさない |
+| 更新方法 | `updateMessageContent(db, existing.id, body)` のみ。`id` / `request_id` / `timestamp` / worktree / tool / instance は不変 |
+| 通知 | `broadcastMessage('message_updated', …)`。新規 `message` は出さない（作成時に配送済み） |
+| ログ | `antigravity-transcript-turn-updated`（対象・turn キー・更新前後の長さ。本文は出さない） |
+| 直列化 | gate の instance 単位の直列化に相乗り。読込ループもタイマーも増やさない |
+| 戻り値 | **変えない。** 「どこかの古い行を更新したか」は返さず、pending 0 なら true、pending があれば最新 turn の保存可否。#2436 の `report.outcome` にも書かない（あれは最新 turn の判定） |
+
+claude（#2264 の `growClaudeTurnRow` / `refreshClaudeTurnRows`）と command-code の同等処理と
+同じ形にしてある。3 という上限も同じで、根拠も同じ: ポーラは数秒ごとに走るので窓全体の
+再レンダリングは poll で最も高い処理になるが、伸びる行は書かれてから数秒で伸びる。
+
+### 範囲と、残る制限
+
+- **回復は次の転写 capture が走った時点で起きる。** 画面を再読込して DB を引き直すだけでは
+  転写を読み直さない。修正前に凍った行も、conversation pointer が解決でき、元の転写と
+  開始プロンプトが読込窓（`ANTIGRAVITY_TRANSCRIPT_TAIL_BYTES`）内にあり、再確認の 3 turn に
+  入っていれば直る。
+- 窓の外・上限の外に出た行、同長または短くなった描画、`MAX_ANTIGRAVITY_TURN_BODY_LENGTH` に
+  達した行の全部を直す保証はしない。上限や比較規則そのものの変更は別の設計課題。
+- **中間報告を終了と見なす判定は残る。** `captureStructuredHistoryTurn` が true を返すと
+  relay へ完了が伝わるので、中間報告が最終回答として配送されるリスクは消えていない。
+  **後からの更新は、配送済み・stash 済みの内容を訂正しない。** 保存可能と完了の区別は
+  #2377 に連なる別課題。
