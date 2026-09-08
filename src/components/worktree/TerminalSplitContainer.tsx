@@ -1,7 +1,10 @@
 /**
- * TerminalSplitContainer Component (Issue #728)
+ * TerminalSplitContainer Component (Issue #728, 2x2 grid in Issue #2421)
  *
- * Hosts 1-3 horizontal terminal splits in the PC layout. Owns:
+ * Hosts 1-4 terminal splits in the PC layout. 1-3 splits are a horizontal row
+ * (flex); at exactly 4 the row becomes a 2x2 CSS grid — a quarter-width column
+ * cannot show a 200-column agent TUI, and the tmux pane geometry is independent
+ * of the browser pane, so the grid is a display change only. Owns:
  *  - split configuration via `useTerminalSplits` (worktreeId-scoped)
  *  - add / remove buttons (disabled at the MIN / MAX boundary and while
  *    a PaneResizer drag is in progress)
@@ -9,10 +12,16 @@
  *    made the SOLE entry point by Issue #2259 — the vertical collapse strips
  *    are gone), reading the persisted state in useHistoryPaneState /
  *    useFilePanelState and disabled when the panel they name cannot appear
- *  - PaneResizer widget(s) between splits, with width persistence
+ *  - PaneResizer widget(s) between splits, with width persistence — in the grid
+ *    that is exactly two: one vertical column divider and one horizontal row
+ *    divider (`orientation="vertical"`), since a grid track is shared by both
+ *    of its cells
  *  - the temporary "maximize one split" state (Issue #2261): the Action bar's
  *    restore button, and the `display: none` that hides the other splits
- *    WITHOUT unmounting them, so their sessions and polling keep running
+ *    WITHOUT unmounting them, so their sessions and polling keep running.
+ *    Issue #2421: in the grid, hiding is not enough — a grid TRACK survives its
+ *    children being hidden, so the surviving pane would sit in the top-left
+ *    quarter. The grid collapses to a single `1fr` / `1fr` cell while maximized
  *  - delegating each split's body to a parent-supplied `renderPane`
  *
  * Does NOT include HistoryPane (HISTORY_PANE_ID uniqueness is owned by
@@ -45,7 +54,12 @@ import {
 } from 'lucide-react';
 import { getInstanceLabel, type AgentInstance, type CLIToolType } from '@/lib/cli-tools/types';
 import type { ShowToast } from '@/types/markdown-editor';
-import { MAX_SPLITS, MIN_SPLITS } from '@/config/terminal-split-config';
+import {
+  MAX_SPLITS,
+  MIN_GRID_ROW_PX,
+  MIN_SPLITS,
+  isGridLayout,
+} from '@/config/terminal-split-config';
 import { useTerminalSplits } from '@/hooks/useTerminalSplits';
 import {
   useHistoryPaneState,
@@ -59,7 +73,28 @@ import {
 } from '@/hooks/useFilePanelState';
 import { useSplitSurfaceModes } from '@/hooks/useSplitSurfaceModes';
 import { Tooltip } from '@/components/common/Tooltip';
-import { PaneResizer } from './PaneResizer';
+import { PaneResizer, type ResizerOrientation } from './PaneResizer';
+
+/**
+ * Issue #2421: thickness of the grid's two divider TRACKS, in px.
+ *
+ * A grid divider needs a track of its own (unlike a flex row, where the resizer
+ * is just another `flex-shrink-0` child), and the number has to match the line
+ * `PaneResizer` draws — `w-1` / `h-1`, i.e. 4px — or the handle would float
+ * inside a wider gap.
+ */
+const GRID_DIVIDER_PX = 4;
+
+/** Issue #2421: 2x2 placement — panes 0/1 on the top row, 2/3 on the bottom. */
+function gridColumnOf(idx: number): number {
+  // Track 2 is the column divider, so the right-hand column is track 3.
+  return idx % 2 === 0 ? 1 : 3;
+}
+
+function gridRowOf(idx: number): number {
+  // Track 2 is the row divider, so the bottom row is track 3.
+  return idx < 2 ? 1 : 3;
+}
 
 /** Render-prop signature: each pane is supplied externally so the
  *  container does not need to know about MessageInput / TerminalDisplay. */
@@ -160,6 +195,8 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
   const {
     splits,
     widths,
+    rowHeights,
+    setRowHeights,
     addSplit,
     removeSplit,
     setSplitInstance,
@@ -290,6 +327,54 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
     [widths, setSplitWidth],
   );
 
+  /*
+   * Issue #2421: the grid's two dividers.
+   *
+   * They cannot reuse `handleResize`: that one walks a 1-D `widths` array where
+   * every entry spans the container, while a grid has ONE column ratio
+   * (`widths[0] : widths[1]`, shared by both rows because a grid column is) and
+   * one row ratio. Feeding it `resizerIdx` would move the boundary at twice the
+   * pointer's speed, because the sum it divides by (1.0, all four entries) is
+   * twice the share the two visible columns actually occupy.
+   */
+  const handleGridColumnResize = useCallback(
+    (_resizerIdx: number, deltaPx: number) => {
+      const container = containerRef.current;
+      if (!container) return;
+      const w = container.offsetWidth;
+      if (w === 0) return;
+      const total = widths[0] + widths[1];
+      if (!(total > 0)) return;
+      const percentDelta = (deltaPx / w) * total;
+      const left = widths[0] + percentDelta;
+      const right = widths[1] - percentDelta;
+      const FLOOR = total * 0.05;
+      if (left < FLOOR || right < FLOOR) return;
+      // The bottom row mirrors the top so every entry still describes its own
+      // pane's horizontal share (the grid reads the ratio off the first two).
+      setSplitWidth([left, right, left, right]);
+    },
+    [widths, setSplitWidth],
+  );
+
+  const handleGridRowResize = useCallback(
+    (_resizerIdx: number, deltaPx: number) => {
+      const container = containerRef.current;
+      if (!container) return;
+      const h = container.offsetHeight;
+      if (h === 0) return;
+      const total = rowHeights[0] + rowHeights[1];
+      if (!(total > 0)) return;
+      const percentDelta = (deltaPx / h) * total;
+      const top = rowHeights[0] + percentDelta;
+      const bottom = rowHeights[1] - percentDelta;
+      const FLOOR = total * 0.05;
+      if (top < FLOOR || bottom < FLOOR) return;
+      setRowHeights([top, bottom]);
+    },
+    [rowHeights, setRowHeights],
+  );
+
   const handleResizeStart = useCallback(() => setIsResizing(true), []);
   const handleResizeEnd = useCallback(() => setIsResizing(false), []);
 
@@ -322,6 +407,13 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
    */
   const isMaximized = maximizedIndex !== null;
   const canMaximize = splits.length > MIN_SPLITS;
+  /**
+   * Issue #2421: 4 splits render as a 2x2 grid, everything below as the
+   * pre-#2421 flex row. The two branches are kept side by side (rather than
+   * generalizing the row into a 1xN grid) so 1-3 splits keep byte-identical
+   * layout styles and cannot regress.
+   */
+  const isGrid = isGridLayout(splits.length);
   const handleToggleMaximize = useCallback(() => {
     toggleMaximize(maximizedIndex ?? focusedSplitIndex);
   }, [toggleMaximize, maximizedIndex, focusedSplitIndex]);
@@ -599,8 +691,44 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
         </Tooltip>
       </div>
 
-      {/* Splits row */}
-      <div ref={containerRef} className="flex flex-1 min-h-0 w-full">
+      {/*
+        Splits area.
+
+        Issue #2421: `flex` for 1-3 splits (unchanged), `grid` at 4. The grid is
+        3x3 in TRACKS — pane, divider, pane on each axis — so the two dividers
+        get real tracks instead of overlaying the panes.
+
+        `overflow-y-auto` is the other half of the MIN_GRID_ROW_PX floor: the
+        rows' `minmax()` refuses to shrink past it, so on a viewport too short
+        for two usable rows the grid scrolls rather than crushing both panes into
+        a few lines of terminal.
+      */}
+      <div
+        ref={containerRef}
+        data-testid="terminal-split-layout"
+        data-layout={isGrid ? 'grid' : 'row'}
+        className={
+          isGrid
+            ? 'grid flex-1 min-h-0 w-full overflow-y-auto'
+            : 'flex flex-1 min-h-0 w-full'
+        }
+        style={
+          isGrid
+            ? {
+                // Issue #2421 (trap 2): a grid track survives its children being
+                // hidden, so `display: none` alone would leave the maximized
+                // pane in the top-left quarter. While maximized the grid IS one
+                // cell.
+                gridTemplateColumns: isMaximized
+                  ? '1fr'
+                  : `${widths[0]}fr ${GRID_DIVIDER_PX}px ${widths[1]}fr`,
+                gridTemplateRows: isMaximized
+                  ? '1fr'
+                  : `minmax(${MIN_GRID_ROW_PX}px, ${rowHeights[0]}fr) ${GRID_DIVIDER_PX}px minmax(${MIN_GRID_ROW_PX}px, ${rowHeights[1]}fr)`,
+              }
+            : undefined
+        }
+      >
         {splits.map((split, idx) => {
           const isLast = idx === splits.length - 1;
           /*
@@ -615,18 +743,33 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
            * so restoring shows output that kept arriving.
            */
           const hidden = maximizedIndex !== null && maximizedIndex !== idx;
+          const maximizedHere = maximizedIndex === idx;
           return (
             <React.Fragment key={`split-${idx}`}>
               <div
                 data-testid={`split-wrapper-${idx}`}
                 data-hidden={hidden ? 'true' : undefined}
-                style={{
-                  flexGrow: maximizedIndex === idx ? 1 : (widths[idx] ?? 1),
-                  flexShrink: 1,
-                  flexBasis: 0,
-                  minWidth: 0,
-                  ...(hidden ? { display: 'none' } : null),
-                }}
+                style={
+                  isGrid
+                    ? {
+                        // The maximized pane moves to the single collapsed cell;
+                        // everyone else keeps their 2x2 slot (they are hidden, so
+                        // the placement is inert, and restoring needs no
+                        // re-derivation).
+                        gridColumn: maximizedHere ? 1 : gridColumnOf(idx),
+                        gridRow: maximizedHere ? 1 : gridRowOf(idx),
+                        minWidth: 0,
+                        minHeight: 0,
+                        ...(hidden ? { display: 'none' } : null),
+                      }
+                    : {
+                        flexGrow: maximizedHere ? 1 : (widths[idx] ?? 1),
+                        flexShrink: 1,
+                        flexBasis: 0,
+                        minWidth: 0,
+                        ...(hidden ? { display: 'none' } : null),
+                      }
+                }
                 className="h-full"
               >
                 {renderPane({
@@ -641,11 +784,11 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
                   onFocus: focusHandlers[idx],
                   isFocused: focusedSplitIndex === idx,
                   onDropInstance: dropHandlers[idx],
-                  isMaximized: maximizedIndex === idx,
+                  isMaximized: maximizedHere,
                   onToggleMaximize: maximizeHandlers[idx],
                 })}
               </div>
-              {!isLast ? (
+              {!isGrid && !isLast ? (
                 <PaneResizerWrapper
                   resizerIdx={idx}
                   // Issue #2261: there is no boundary to drag while one split
@@ -665,6 +808,40 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
             </React.Fragment>
           );
         })}
+
+        {/*
+          Issue #2421: the grid's two dividers, rendered after the panes because
+          each carries its own explicit track placement — a grid column is shared
+          by both of its cells, so there is one column divider spanning both rows
+          and one row divider spanning both columns, not one per pane boundary.
+        */}
+        {isGrid ? (
+          <>
+            <PaneResizerWrapper
+              resizerIdx={0}
+              testId="split-grid-column-resizer"
+              gridArea={{ gridColumn: 2, gridRow: '1 / span 3' }}
+              hidden={isMaximized}
+              ariaValueNow={(widths[0] / (widths[0] + widths[1])) * 100}
+              onResize={handleGridColumnResize}
+              onStart={handleResizeStart}
+              onEnd={handleResizeEnd}
+              onDoubleClick={resetWidths}
+            />
+            <PaneResizerWrapper
+              resizerIdx={0}
+              testId="split-grid-row-resizer"
+              orientation="vertical"
+              gridArea={{ gridColumn: '1 / span 3', gridRow: 2 }}
+              hidden={isMaximized}
+              ariaValueNow={(rowHeights[0] / (rowHeights[0] + rowHeights[1])) * 100}
+              onResize={handleGridRowResize}
+              onStart={handleResizeStart}
+              onEnd={handleResizeEnd}
+              onDoubleClick={resetWidths}
+            />
+          </>
+        ) : null}
       </div>
     </div>
   );
@@ -674,6 +851,11 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
  * Internal helper: wraps PaneResizer so we can intercept the underlying
  * mousedown / touchstart events to mark `isResizing=true` synchronously.
  * `mouseup` clears it.
+ *
+ * Issue #2421: also carries the grid's two dividers, which differ from the row's
+ * only in orientation, track placement and test id — the drag / touch / keyboard
+ * machinery is the same `PaneResizer` either way (its `orientation="vertical"`
+ * branch had no caller in `src/` before this Issue).
  */
 function PaneResizerWrapper({
   resizerIdx,
@@ -683,6 +865,9 @@ function PaneResizerWrapper({
   onEnd,
   onDoubleClick,
   hidden = false,
+  orientation = 'horizontal',
+  testId,
+  gridArea,
 }: {
   resizerIdx: number;
   ariaValueNow: number;
@@ -693,6 +878,12 @@ function PaneResizerWrapper({
   onDoubleClick?: () => void;
   /** Issue #2261: hidden (but mounted) while a split is maximized. */
   hidden?: boolean;
+  /** Issue #2421: `vertical` drives the grid's row divider (row-resize / clientY). */
+  orientation?: ResizerOrientation;
+  /** Issue #2421: overrides the row layout's positional id for the grid dividers. */
+  testId?: string;
+  /** Issue #2421: explicit grid placement; omitted in the flex row. */
+  gridArea?: { gridColumn: number | string; gridRow: number | string };
 }) {
   const handleResize = useCallback(
     (delta: number) => onResize(resizerIdx, delta),
@@ -700,8 +891,8 @@ function PaneResizerWrapper({
   );
   return (
     <div
-      data-testid={`split-resizer-${resizerIdx}`}
-      style={hidden ? { display: 'none' } : undefined}
+      data-testid={testId ?? `split-resizer-${resizerIdx}`}
+      style={{ ...gridArea, ...(hidden ? { display: 'none' } : null) }}
       onMouseDownCapture={onStart}
       onTouchStartCapture={onStart}
       onMouseUpCapture={onEnd}
@@ -709,7 +900,7 @@ function PaneResizerWrapper({
     >
       <PaneResizer
         onResize={handleResize}
-        orientation="horizontal"
+        orientation={orientation}
         ariaValueNow={ariaValueNow}
         onDoubleClick={onDoubleClick}
       />

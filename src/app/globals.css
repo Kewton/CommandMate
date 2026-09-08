@@ -538,23 +538,30 @@
 
 /*
  * [Issue #744] Per-split History search highlights.
- * The HistoryPane now lives inside each PC terminal split (MAX_SPLITS=3, see
+ * The HistoryPane now lives inside each PC terminal split (MAX_SPLITS=4, see
  * src/config/terminal-split-config.ts). `::highlight()` rules cannot be created
  * dynamically, so a static rule per split namespace
  * (`makeHistoryNamespace(splitIndex)` in src/lib/terminal-highlight.ts) is
  * declared here. Colors mirror the legacy `history-search` palette so all
  * splits look identical.
+ *
+ * [Issue #2421] The suffixes must cover 0..MAX_SPLITS-1. They stopped at 2 while
+ * MAX_SPLITS was 3; raising the ceiling to 4 without adding `-3` would have made
+ * the 4th split the one where search finds matches and scrolls to them but paints
+ * nothing — a failure with no error anywhere.
  */
 ::highlight(history-search-0),
 ::highlight(history-search-1),
-::highlight(history-search-2) {
+::highlight(history-search-2),
+::highlight(history-search-3) {
   background-color: rgb(var(--info) / 0.4);
   color: inherit;
 }
 
 ::highlight(history-search-current-0),
 ::highlight(history-search-current-1),
-::highlight(history-search-current-2) {
+::highlight(history-search-current-2),
+::highlight(history-search-current-3) {
   background-color: rgb(var(--info) / 0.8);
   color: white;
 }
@@ -565,14 +572,15 @@
  * is ONE global registry keyed by name — sharing `history-search*` would make a
  * chat search erase a History search's marks (and vice versa) whenever both are
  * mounted. Names come from `src/lib/chat/chat-search-namespace.ts`; the split
- * suffixes stop at 2 for the same reason #744's do (MAX_SPLITS = 3, see
- * src/config/terminal-split-config.ts). Same blue as History on purpose: it is
- * the same act, in a different pane.
+ * suffixes run 0..MAX_SPLITS-1 for the same reason #744's do (MAX_SPLITS = 4
+ * since Issue #2421, see src/config/terminal-split-config.ts). Same blue as
+ * History on purpose: it is the same act, in a different pane.
  */
 ::highlight(chat-search),
 ::highlight(chat-search-0),
 ::highlight(chat-search-1),
-::highlight(chat-search-2) {
+::highlight(chat-search-2),
+::highlight(chat-search-3) {
   background-color: rgb(var(--info) / 0.4);
   color: inherit;
 }
@@ -580,7 +588,8 @@
 ::highlight(chat-search-current),
 ::highlight(chat-search-current-0),
 ::highlight(chat-search-current-1),
-::highlight(chat-search-current-2) {
+::highlight(chat-search-current-2),
+::highlight(chat-search-current-3) {
   background-color: rgb(var(--info) / 0.8);
   color: white;
 }

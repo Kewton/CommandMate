@@ -19,7 +19,9 @@
  * Static `::highlight()` rules for `chat-search`, `chat-search-current` and
  * their per-split suffixes live in `src/app/globals.css` — `::highlight()`
  * cannot be created at runtime, so the rule set bounds the split count exactly
- * the way #744's does (MAX_SPLITS = 3, `src/config/terminal-split-config.ts`).
+ * the way #744's does (MAX_SPLITS = 4 since Issue #2421,
+ * `src/config/terminal-split-config.ts`). A suffix with no rule is a silent
+ * failure: the search still matches and still scrolls, it just never paints.
  */
 
 import type { HighlightNamespace } from '@/lib/terminal-highlight';

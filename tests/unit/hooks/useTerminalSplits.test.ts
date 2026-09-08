@@ -72,15 +72,18 @@ describe('useTerminalSplits', () => {
     ]);
   });
 
-  it('falls back to default when stored splits.length=4', () => {
+  // Issue #2421: 4 splits is the 2x2 grid and now loads; the over-limit case
+  // moved to 5.
+  it('falls back to default when stored splits.length=5', () => {
     mockTerminalSplitsLocalStorage('w-1', {
       splits: [
         { cliToolId: 'claude' },
         { cliToolId: 'codex' },
         { cliToolId: 'gemini' },
         { cliToolId: 'copilot' },
+        { cliToolId: 'opencode' },
       ],
-      widths: [1, 1, 1, 1],
+      widths: [1, 1, 1, 1, 1],
     });
     const { result } = renderHook(() => useTerminalSplits('w-1', ROSTER));
     expect(result.current.splits).toEqual([{ cliToolId: 'claude', instanceId: 'claude' }]);
@@ -134,6 +137,7 @@ describe('useTerminalSplits', () => {
     expect(warnSpy).toHaveBeenCalled();
   });
 
+  // Issue #2421: MAX_SPLITS is 4 (the 4th turns the row into a 2x2 grid).
   it('addSplit grows to MAX_SPLITS and then no-ops', () => {
     const { result } = renderHook(() => useTerminalSplits('w-1', ROSTER));
 
@@ -143,9 +147,12 @@ describe('useTerminalSplits', () => {
     act(() => result.current.addSplit());
     expect(result.current.splits).toHaveLength(3);
 
+    act(() => result.current.addSplit());
+    expect(result.current.splits).toHaveLength(4);
+
     // upper bound
     act(() => result.current.addSplit());
-    expect(result.current.splits).toHaveLength(3);
+    expect(result.current.splits).toHaveLength(4);
   });
 
   it('addSplit no-ops when no spare instance remains', () => {
@@ -644,6 +651,196 @@ describe('useTerminalSplits', () => {
       expect(readTerminalSplitsLocalStorage('w-a')?.splits.map(s => s.instanceId)).toEqual([
         'claude',
         'claude-2',
+      ]);
+    });
+  });
+
+  // ==========================================================================
+  // Issue #2421: the 2x2 grid (4 splits) and its row heights
+  // ==========================================================================
+
+  describe('[#2421] 2x2 grid row heights', () => {
+    function growTo(result: { current: ReturnType<typeof useTerminalSplits> }, n: number) {
+      while (result.current.splits.length < n) {
+        act(() => result.current.addSplit());
+      }
+    }
+
+    it('reports equal rows while the layout is still a 1-3 split row', () => {
+      const { result } = renderHook(() => useTerminalSplits('w-1', ROSTER));
+      expect(result.current.rowHeights).toEqual([0.5, 0.5]);
+      growTo(result, 3);
+      expect(result.current.rowHeights).toEqual([0.5, 0.5]);
+    });
+
+    /*
+     * The persisted shape is the contract with every pre-#2421 build (and with
+     * #2261's "only splits + widths" persistence test): row heights exist on
+     * disk exactly while the layout is a grid, never before and never after.
+     */
+    it('writes rowHeights ONLY at 4 splits, and removes the key on the way back down', () => {
+      const { result } = renderHook(() => useTerminalSplits('w-1', ROSTER));
+      growTo(result, 3);
+      expect(Object.keys(readTerminalSplitsLocalStorage('w-1') as object).sort()).toEqual([
+        'splits',
+        'widths',
+      ]);
+
+      act(() => result.current.addSplit()); // -> 4 splits (the grid)
+      expect(Object.keys(readTerminalSplitsLocalStorage('w-1') as object).sort()).toEqual([
+        'rowHeights',
+        'splits',
+        'widths',
+      ]);
+      expect(readTerminalSplitsLocalStorage('w-1')?.rowHeights).toEqual([0.5, 0.5]);
+
+      act(() => result.current.removeSplit()); // -> 3 splits (a row again)
+      expect(Object.keys(readTerminalSplitsLocalStorage('w-1') as object).sort()).toEqual([
+        'splits',
+        'widths',
+      ]);
+    });
+
+    /*
+     * Entering the grid is a LAYOUT-MODE change: three columns become two shared
+     * by both rows, so `addSplit`'s halving (which would open the grid at the
+     * 3-split row's 2:1 column ratio) is replaced by an equal 2x2. The mirror
+     * (widths[2] === widths[0]) is what lets every entry keep describing its own
+     * pane while the single column ratio is read off the first two.
+     */
+    it('opens the grid equal rather than inheriting the 3-split row ratios', () => {
+      const { result } = renderHook(() => useTerminalSplits('w-1', ROSTER));
+      growTo(result, 3);
+      expect(result.current.widths[0]).not.toBeCloseTo(result.current.widths[1], 5);
+
+      act(() => result.current.addSplit());
+      expect(result.current.widths).toEqual([0.25, 0.25, 0.25, 0.25]);
+      expect(result.current.rowHeights).toEqual([0.5, 0.5]);
+    });
+
+    it('setRowHeights replaces the pair and persists it', () => {
+      const { result } = renderHook(() => useTerminalSplits('w-1', ROSTER));
+      growTo(result, 4);
+
+      act(() => result.current.setRowHeights([0.7, 0.3]));
+      expect(result.current.rowHeights).toEqual([0.7, 0.3]);
+      expect(readTerminalSplitsLocalStorage('w-1')?.rowHeights).toEqual([0.7, 0.3]);
+    });
+
+    it('setRowHeights ignores malformed pairs', () => {
+      const { result } = renderHook(() => useTerminalSplits('w-1', ROSTER));
+      growTo(result, 4);
+
+      act(() => result.current.setRowHeights([0.5]));
+      act(() => result.current.setRowHeights([1, 0]));
+      act(() => result.current.setRowHeights([Number.NaN, 1]));
+      expect(result.current.rowHeights).toEqual([0.5, 0.5]);
+    });
+
+    it('setRowHeights is a no-op outside the grid (no key added to the payload)', () => {
+      const { result } = renderHook(() => useTerminalSplits('w-1', ROSTER));
+      growTo(result, 2);
+
+      act(() => result.current.setRowHeights([0.7, 0.3]));
+      expect(result.current.rowHeights).toEqual([0.5, 0.5]);
+      expect(Object.keys(readTerminalSplitsLocalStorage('w-1') as object).sort()).toEqual([
+        'splits',
+        'widths',
+      ]);
+    });
+
+    // Issue #861 asked "equalize" to make every split the same size. In a 2x2,
+    // half of that is vertical — equal columns beside a 70/30 row split is not
+    // an equalized grid.
+    it('resetWidths equalizes the ROWS too while the layout is a grid', () => {
+      const { result } = renderHook(() => useTerminalSplits('w-1', ROSTER));
+      growTo(result, 4);
+      act(() => result.current.setRowHeights([0.8, 0.2]));
+      act(() => result.current.setSplitWidth([0.4, 0.1, 0.4, 0.1]));
+
+      act(() => result.current.resetWidths());
+      expect(result.current.rowHeights).toEqual([0.5, 0.5]);
+      expect(result.current.widths).toEqual([0.25, 0.25, 0.25, 0.25]);
+    });
+
+    it('restores a persisted 4-split grid, row heights included', () => {
+      mockTerminalSplitsLocalStorage('w-1', {
+        splits: [
+          { cliToolId: 'claude', instanceId: 'claude' },
+          { cliToolId: 'codex', instanceId: 'codex' },
+          { cliToolId: 'gemini', instanceId: 'gemini' },
+          { cliToolId: 'copilot', instanceId: 'copilot' },
+        ],
+        widths: [0.3, 0.2, 0.3, 0.2],
+        rowHeights: [0.65, 0.35],
+      });
+      const { result } = renderHook(() => useTerminalSplits('w-1', ROSTER));
+      expect(result.current.splits).toHaveLength(4);
+      expect(result.current.rowHeights).toEqual([0.65, 0.35]);
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
+
+    /*
+     * Trap 3, at the hook level: a layout built by a pre-#2421 build has no
+     * `rowHeights`. It must load as itself — same splits, same widths — not fall
+     * back to the single default split.
+     */
+    it('loads a pre-#2421 payload without falling back to the default layout', () => {
+      mockTerminalSplitsLocalStorage('w-1', {
+        splits: [
+          { cliToolId: 'claude', instanceId: 'claude' },
+          { cliToolId: 'codex', instanceId: 'codex' },
+          { cliToolId: 'gemini', instanceId: 'gemini' },
+        ],
+        widths: [0.5, 0.25, 0.25],
+      });
+      const { result } = renderHook(() => useTerminalSplits('w-1', ROSTER));
+      expect(result.current.splits.map(s => s.instanceId)).toEqual([
+        'claude',
+        'codex',
+        'gemini',
+      ]);
+      expect(result.current.widths).toEqual([0.5, 0.25, 0.25]);
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
+
+    // A 4-split payload written before row heights existed is still a grid; it
+    // gets equal rows rather than being discarded.
+    it('supplies equal rows for a 4-split payload that predates rowHeights', () => {
+      mockTerminalSplitsLocalStorage('w-1', {
+        splits: [
+          { cliToolId: 'claude', instanceId: 'claude' },
+          { cliToolId: 'codex', instanceId: 'codex' },
+          { cliToolId: 'gemini', instanceId: 'gemini' },
+          { cliToolId: 'copilot', instanceId: 'copilot' },
+        ],
+        widths: [0.25, 0.25, 0.25, 0.25],
+      });
+      const { result } = renderHook(() => useTerminalSplits('w-1', ROSTER));
+      expect(result.current.splits).toHaveLength(4);
+      expect(result.current.rowHeights).toEqual([0.5, 0.5]);
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
+
+    // The roster reconcile (#869 / #898) can trim a grid to 3 without anyone
+    // pressing "remove", so the grid-only invariant is re-established there too.
+    it('drops rowHeights when the roster reconcile trims the grid below 4', () => {
+      mockTerminalSplitsLocalStorage('w-1', {
+        splits: [
+          { cliToolId: 'claude', instanceId: 'claude' },
+          { cliToolId: 'codex', instanceId: 'codex' },
+          { cliToolId: 'gemini', instanceId: 'gemini' },
+          { cliToolId: 'copilot', instanceId: 'copilot' },
+        ],
+        widths: [0.25, 0.25, 0.25, 0.25],
+        rowHeights: [0.7, 0.3],
+      });
+      // A roster with only 3 instances cannot show 4 distinct splits.
+      const { result } = renderHook(() => useTerminalSplits('w-1', ROSTER.slice(0, 3)));
+      expect(result.current.splits).toHaveLength(3);
+      expect(Object.keys(readTerminalSplitsLocalStorage('w-1') as object).sort()).toEqual([
+        'splits',
+        'widths',
       ]);
     });
   });
