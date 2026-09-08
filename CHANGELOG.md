@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **fix(chat): 転写行が書かれたターンにペイン全体の scrape 行が並ぶ問題を修正** (#2436): `captureStructuredHistoryTurn` に三値の outcome（`captured` / `not_yet_closed` / `unavailable`）を報告させ、転写がまだ閉じていないターンでは scrape の保存を `STOP_TRANSCRIPT_DEFERRED_DELAYS_MS` の総和（7.65 秒）まで保留するようにした。保留は dedup キャッシュの外に置き、期限切れ・セッション終了・次ターン開始（`stopPollingByKey` の全経路）で確定し、その間に転写行が着地したら破棄する。表示側では `request_id` を持たない assistant/normal 行のうち転写リーダーを持つツール（copilot / gemini / vibe-local を除く）のものをチップに折り畳む保険を追加した。
+
 ## [0.33.1] - 2026-09-08
 
 > **Highlight**: 日本語で使うときに毎日踏んでいた入力の取りこぼしと、Command Code の「終わっていないのに終わったことにする」を直しました。**Enter で確定するテキスト入力 7 箇所にIME の composition ガードが無く**、変換確定の Enter でそのまま確定していました — 別名やファイル名は未変換のまま永続化されます（#2428）。Command Code では、ツール呼び出しの無いターンで**前ターンの `hook_stop` が生成中の画面に勝ち続け**、`wait` が 60 秒保留のあと `scraper_ready` で早期完了していました（#2429、実測: 生成中フレーム 15/15 が `ready`。修正後は 14/14 が `running`）。あわせて 4 分割でどのターミナルが何をしていたか分かるよう、**セッションごとの 1 行メモ**を追加しています（#2427）。
