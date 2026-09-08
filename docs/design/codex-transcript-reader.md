@@ -114,7 +114,7 @@ hooks 自体の stable が 0.146 なので、実質「hooks が使えるなら 0
 |---|---:|---|---|
 | `Reasoning` | 12,084 | `summary_text`（**12,084 件すべて空**） | 非空のときだけ `> **Thinking**` の引用。実測では常に出力なし |
 | `CommandExecution` | 9,211 | `parsed_cmd[].cmd` →（無ければ）`command` argv | `` - `exec` — <cmd> `` |
-| `AgentMessage` | 2,211 | `content[].text`、`phase` | 段落そのまま（`commentary` / `final_answer` の両方） |
+| `AgentMessage` | 2,211 | `content[].text`、`phase` | 段落そのまま。`phase === 'commentary'` だけ末尾の `Thinking (N)` 節へ折り畳む（#2420。下記参照） |
 | `FileChange` | 1,407 | `changes` のキー（パス） | `` - `edit` — <paths> `` |
 | `UserMessage` | 286 | `content[].text`、`id` | assistant 本文には入れない（user 行になる） |
 | `McpToolCall` | 102 | `server` / `tool` | `` - `mcp` — <server>.<tool> `` |
@@ -127,8 +127,28 @@ hooks 自体の stable が 0.146 なので、実質「hooks が使えるなら 0
 
 - `AgentMessage.phase` は `commentary` 1,943 / `final_answer` 268。
   **`final_answer` は必ずそのターン最後の `AgentMessage`**（309 / 309 ターン）。
-- `commentary` も本文に入れる。codex の TUI は両方表示するし、直後のツール行が何のためかを説明しているのは
-  `commentary` の側だから。
+- `commentary` は**末尾の折り畳み節に入れる**（Issue #2420）。
+
+#### `commentary` を本文から外した理由（Issue #2420 による #2197 判断の訂正）
+
+**旧判断（#2197、失効）**: 「`commentary` も本文に入れる。codex の TUI は両方表示するし、
+直後のツール行が何のためかを説明しているのは `commentary` の側だから」。
+
+この根拠は **Issue #2234 が失効させた**。#2234 はツール行をすべて本文末尾の折り畳み節へ移したので、
+`commentary` の直後にツール行はもう無い。説明する対象を失った進捗ナレーションだけが本文の先頭に残り、
+読み手は回答に着くまでそれを読まされる。実測（`codex-turn:01a07e37-0658`）で
+commentary 4 件 / 754 文字に対し `final_answer` 1 件 / 495 文字、
+つまりバブルの先頭 4 段落が進捗説明だった。
+
+分類・境界条件・ラベルの決定は次のとおり（実装は `renderCodexTurn`）。
+
+| 決定 | 内容 | 根拠 |
+|---|---|---|
+| 分類は allow-list | 折り畳むのは `phase === 'commentary'` **だけ**。`final_answer` / `phase` 欠落 / 未知の値はすべて本文に残す | deny-list（`final_answer` 以外を畳む）だと codex が phase を増やした瞬間に本文が**無言で**隠れる。#2196 の positive evidence 規律 |
+| `final_answer` は全件残す | 「最後の 1 件だけ残す」ではない | 保存済みコーパスに `final_answer` を 2 件以上持つターンが在る |
+| フォールバックは「非空の本文」で判定 | 「`final_answer` item が無い」ではなく「**非空の `final_answer` 本文が無い**」ときに commentary を本文へ戻す | item 件数と描画される段落数は別の量。空白だけの本文は描画前に捨てられるので、item 件数で判定すると空のバブルが出る |
+| ラベルは既存の `Thinking` に相乗り | `turn-body` の `reasoning` kind に載せ、`Thinking (N)` の見出し＋既存チップで描く。新ラベル（`Progress`）は採らない | ラベルは read time に `chat_messages.content` へ**焼き込まれる**ので、新ラベルは「今後テーブルを読む全員が永久に畳み続ける文字列」を 1 本増やすことになる（既存行は再ラベルできない）。既存チップの意味（「回答より後で読みたい従属的な記述」）はそのまま当てはまり、報告者自身がこの内容を「thinking」と呼んでいる |
+| 適用は新しい行から | 保存済み Markdown 行の再生成はしない | 行は `request_id` で照合され書き換えない（#2246 と同じ規律） |
 
 ### 2.4 turn 境界は書いてある
 

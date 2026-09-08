@@ -24,11 +24,12 @@ import {
   parseCodexRollout,
   readCodexRolloutItem,
   renderCodexTurn,
+  CODEX_THINKING_LABEL,
   MAX_CODEX_TOOL_DETAIL_LENGTH,
   MAX_CODEX_TURN_ITEMS,
   type CodexTurnAccumulator,
 } from '@/lib/hooks/sources/codex/transcript';
-import { TURN_TOOL_LOG_LABEL } from '@/lib/hooks/sources/turn-body';
+import { TURN_REASONING_LABEL, TURN_TOOL_LOG_LABEL } from '@/lib/hooks/sources/turn-body';
 
 const FIXTURES = join(process.cwd(), 'tests/fixtures/transcripts/codex');
 
@@ -194,15 +195,28 @@ describe('[#2197] the Markdown body', () => {
     }
   });
 
-  it('leads with both prose blocks and puts the call in the folded section', () => {
-    // Issue #2234: the commentary and the answer keep their order and lead; the
-    // `exec` line that used to sit between them is in the section at the end.
+  it('leads with the answer and folds the commentary and the call behind it', () => {
+    // REWRITTEN BY #2420. This test used to pin the opposite — that "the
+    // commentary and the answer keep their order and lead" — and that
+    // expectation stopped being right for a reason outside this file:
+    //
+    //  - #2197 kept the commentary in the body because it explained the tool
+    //    line printed directly underneath it.
+    //  - #2234 then moved every tool line into the folded section at the end,
+    //    so there is no line underneath the commentary any more. What led the
+    //    bubble was narration with nothing left to narrate.
+    //
+    // #2420 therefore folds `phase: 'commentary'` and leaves the answer
+    // leading. The `exec` line is where #2234 put it; only the first paragraph
+    // moved.
     const bodies = bodiesOf(THREE_TURNS, THREE_TURNS_SESSION);
     expect(bodies[1]).toBe(
       [
-        'I’ll create the marker file and verify its contents.',
-        '',
         'marker.txt contains `CMATE-2197`.',
+        '',
+        `> **${TURN_REASONING_LABEL} (1)**`,
+        '>',
+        '> I’ll create the marker file and verify its contents.',
         '',
         `> **${TURN_TOOL_LOG_LABEL} (1)**`,
         '>',
@@ -224,7 +238,15 @@ describe('[#2197] the Markdown body', () => {
     // every reply would be the cost of not checking.
     const turns = turnsOf(AFTER_NEW, AFTER_NEW_SESSION);
     expect(turns[1].items.some((item) => item.type === 'Reasoning')).toBe(true);
-    expect(bodiesOf(AFTER_NEW, AFTER_NEW_SESSION)[1]).not.toContain('Thinking');
+    // NARROWED BY #2420. This used to read `.not.toContain('Thinking')`, which
+    // stopped discriminating once this turn's commentary began arriving under
+    // `> **Thinking (1)**`. The shape being ruled out is the one an EMPTY
+    // `Reasoning` item would render — `renderReasoningItem`'s bare, uncounted
+    // heading over a blank quote — and that is a different string, so the
+    // property survives the rewrite intact.
+    expect(bodiesOf(AFTER_NEW, AFTER_NEW_SESSION)[1]).not.toContain(
+      `> **${CODEX_THINKING_LABEL}**`
+    );
   });
 
   it('folds a reasoning summary into a quote when codex does write one', () => {
@@ -289,6 +311,207 @@ describe('[#2197] the Markdown body', () => {
       command: ['/bin/zsh', '-lc', 'git status'],
     });
     expect(item?.detail).toBe('/bin/zsh -lc git status');
+  });
+});
+
+describe('[#2420] which AgentMessage phases lead the bubble', () => {
+  /**
+   * One turn built from `AgentMessage` items alone.
+   *
+   * Synthesised rather than captured, and deliberately so: the whole point of
+   * this Issue is the phases the archived corpus does NOT contain. Measured on
+   * the fixtures, `phase` is `commentary` or `final_answer` and never absent,
+   * never unknown, and never attached to an empty body — so a missing phase, a
+   * phase codex has not shipped yet, and a blank `final_answer` can only be
+   * written by hand. The record shape is the fixture's, field for field: every
+   * item goes through `readCodexRolloutItem`, the same reader the real file
+   * does, so a change to how `phase` is parsed breaks these too.
+   *
+   * `phase: undefined` is dropped from the object rather than passed, because
+   * `readStringField` must see the key ABSENT to answer `null`.
+   */
+  function turnOfMessages(
+    messages: readonly { readonly text: string; readonly phase?: string }[]
+  ): CodexTurnAccumulator {
+    return {
+      sessionId: 's',
+      turnId: 't',
+      startedAt: 0,
+      prompts: [],
+      items: messages.map(
+        (message, index) =>
+          readCodexRolloutItem({
+            type: 'AgentMessage',
+            id: `m${index}`,
+            content: [{ type: 'text', text: message.text, text_elements: [] }],
+            ...(message.phase === undefined ? {} : { phase: message.phase }),
+          })!
+      ),
+      started: true,
+      closed: true,
+      overflowed: false,
+    };
+  }
+
+  const REASONING_HEADING = (blocks: number) => `> **${TURN_REASONING_LABEL} (${blocks})**`;
+
+  it('opens with the final answer and puts the commentary in the folded section', () => {
+    const body = renderCodexTurn(
+      turnOfMessages([
+        { text: 'Reading the file now.', phase: 'commentary' },
+        { text: 'The file holds two entries.', phase: 'final_answer' },
+      ])
+    ).body;
+    expect(body).toBe(
+      [
+        'The file holds two entries.',
+        '',
+        REASONING_HEADING(1),
+        '>',
+        '> Reading the file now.',
+      ].join('\n')
+    );
+    // The property, stated once so a later change to the exact bytes above
+    // cannot quietly drop it: the first line of the bubble is the answer.
+    expect(body.split('\n')[0]).toBe('The file holds two entries.');
+  });
+
+  it('folds four commentary blocks under one heading, in transcript order', () => {
+    // The shape #2420 was reported against: `codex-turn:01a07e37-0658` carried
+    // 4 commentary blocks / 754 characters in front of one 495-character
+    // answer, so the operator read four paragraphs before reaching the reply.
+    const body = renderCodexTurn(
+      turnOfMessages([
+        { text: 'First I will look around.', phase: 'commentary' },
+        { text: 'Now I will read the config.', phase: 'commentary' },
+        { text: 'The config points at a second file.', phase: 'commentary' },
+        { text: 'Reading that one too.', phase: 'commentary' },
+        { text: 'The timeout is 30 seconds.', phase: 'final_answer' },
+      ])
+    ).body;
+    expect(body).toBe(
+      [
+        'The timeout is 30 seconds.',
+        '',
+        REASONING_HEADING(4),
+        '>',
+        '> First I will look around.',
+        '>',
+        '> Now I will read the config.',
+        '>',
+        '> The config points at a second file.',
+        '>',
+        '> Reading that one too.',
+      ].join('\n')
+    );
+  });
+
+  it('keeps every final answer in the body, not only the last', () => {
+    // The corpus has turns carrying more than one `final_answer`, so "keep the
+    // last one" would drop a paragraph the agent meant the operator to read.
+    const body = renderCodexTurn(
+      turnOfMessages([
+        { text: 'Checking both halves.', phase: 'commentary' },
+        { text: 'The first half passes.', phase: 'final_answer' },
+        { text: 'The second half passes too.', phase: 'final_answer' },
+      ])
+    ).body;
+    expect(body).toBe(
+      [
+        'The first half passes.',
+        '',
+        'The second half passes too.',
+        '',
+        REASONING_HEADING(1),
+        '>',
+        '> Checking both halves.',
+      ].join('\n')
+    );
+  });
+
+  it('leaves a message with no phase in the body even when a final answer exists', () => {
+    // The allow-list, from the side that matters: only `commentary` folds. A
+    // deny-list ("fold everything that is not `final_answer`") would hide this
+    // paragraph, and hide it silently.
+    const body = renderCodexTurn(
+      turnOfMessages([
+        { text: 'A message codex wrote without a phase.' },
+        { text: 'Done.', phase: 'final_answer' },
+      ])
+    ).body;
+    expect(body).toBe('A message codex wrote without a phase.\n\nDone.');
+    expect(body).not.toContain(TURN_REASONING_LABEL);
+  });
+
+  it('leaves a phase it has never seen in the body rather than guessing', () => {
+    // The regression a deny-list would ship the day codex adds a phase name.
+    const body = renderCodexTurn(
+      turnOfMessages([
+        { text: 'Something from a newer codex.', phase: 'plan_update' },
+        { text: 'Done.', phase: 'final_answer' },
+      ])
+    ).body;
+    expect(body).toBe('Something from a newer codex.\n\nDone.');
+    expect(body).not.toContain(TURN_REASONING_LABEL);
+  });
+
+  it('keeps the commentary when the only final answer is whitespace', () => {
+    // The fallback is on the RENDERED body, not on the item count: this turn
+    // HAS a `final_answer` item, and it draws nothing, so folding the
+    // commentary away would leave an empty bubble.
+    const turn = turnOfMessages([
+      { text: 'Looking into it.', phase: 'commentary' },
+      { text: '   \n  ', phase: 'final_answer' },
+    ]);
+    expect(turn.items.some((item) => item.phase === 'final_answer')).toBe(true);
+    expect(renderCodexTurn(turn).body).toBe('Looking into it.');
+  });
+
+  it('keeps the commentary when the turn produced no final answer at all', () => {
+    // A turn cut short, or one that only narrated. Folding is an improvement
+    // only when there is something better to lead with.
+    const body = renderCodexTurn(
+      turnOfMessages([
+        { text: 'Starting on the migration.', phase: 'commentary' },
+        { text: 'Still working through the fixtures.', phase: 'commentary' },
+      ])
+    ).body;
+    expect(body).toBe('Starting on the migration.\n\nStill working through the fixtures.');
+    expect(body).not.toContain(TURN_REASONING_LABEL);
+  });
+
+  it('counts the folded commentary as text the agent wrote', () => {
+    // `textBlocks` is the log line's answer to "how much did the agent say",
+    // and folding is a layout decision — it must not change the number.
+    const rendered = renderCodexTurn(
+      turnOfMessages([
+        { text: 'Working on it.', phase: 'commentary' },
+        { text: 'Done.', phase: 'final_answer' },
+      ])
+    );
+    expect(rendered.textBlocks).toBe(2);
+  });
+
+  it('does not break the bubble when the final answer is a single short word', () => {
+    // Measured at 18 % of turns: `PONG-1` (6 characters) and `PATCHED` (7) are
+    // real captured answers. A one-word reply plus a folded heading must stay
+    // one short paragraph and one quote — not a heading with nothing over it.
+    const bodies = bodiesOf(THREE_TURNS, THREE_TURNS_SESSION);
+    expect(bodies[0]).toBe('PONG-1');
+
+    const patched = bodiesOf(AFTER_NEW, AFTER_NEW_SESSION)[1];
+    expect(patched.startsWith('PATCHED\n\n')).toBe(true);
+    expect(patched).toContain(`${REASONING_HEADING(1)}\n>\n> I’ll patch \`README.md\` directly.`);
+    expect(patched.split('\n')[0]).toBe('PATCHED');
+  });
+
+  it('folds nothing on a turn that never had a phase to fold', () => {
+    // The negative control for the whole Issue: the third captured turn is one
+    // `final_answer` and no commentary, and must come out byte-identical to
+    // what #2234 produced.
+    expect(bodiesOf(THREE_TURNS, THREE_TURNS_SESSION)[2]).toBe(
+      '## Result\n\n- alpha\n- beta\n\n**Done.**'
+    );
   });
 });
 
