@@ -63,6 +63,7 @@ import {
   Loader2,
   RotateCcw,
   ShieldCheck,
+  TerminalSquare,
   Wrench,
   X,
 } from 'lucide-react';
@@ -71,6 +72,7 @@ import remarkGfm from 'remark-gfm';
 import rehypeSanitize from 'rehype-sanitize';
 import rehypeHighlight from 'rehype-highlight';
 import type { ChatMessage } from '@/types/models';
+import type { CLIToolType } from '@/lib/cli-tools/types';
 import { isAgentAuthoredMarkdown } from '@/types/agent-transcript';
 import { getDateFnsLocale } from '@/lib/date-locale';
 import { formatMessageTimestamp } from '@/lib/date-utils';
@@ -539,6 +541,145 @@ export const ChatToolLogDisclosure = memo(function ChatToolLogDisclosure({
 });
 
 // ============================================================================
+// Folded pane scrape (Issue #2436)
+// ============================================================================
+
+/**
+ * Whether a row with no turn key was written by a tool that HAS a transcript.
+ *
+ * The same record `lib/relay/relay-delivery` keeps under the same name and for
+ * the same reason, and the values are its values. It is spelled again here
+ * rather than imported because that module is server code — it reaches the
+ * database, the relay triggers and the whole `lib/hooks` graph — and this file
+ * is `'use client'`. What is shared is the FACT, and the fact is two sentences
+ * long:
+ *
+ * For the five that answer `true`, a reply is written by a transcript reader
+ * and carries a `<tool>-turn:` request id. A row of theirs with `request_id`
+ * NULL was therefore written by the SCRAPER, and on a turn the reader also
+ * recorded it is the pane's copy of an answer History already holds — prompt
+ * echo, intermediate output and footer included, measured at 234,323 characters
+ * on `commandagent-develop`.
+ *
+ * For copilot, gemini and vibe-local the scraper's row is the ONLY record there
+ * will ever be, and every one of their replies has `request_id` NULL: 255 of
+ * 255 copilot rows and 3 of 3 gemini rows, measured over this database's whole
+ * history. Folding on "no turn key" alone would hide every answer those two
+ * tools have ever given. That is why this is a tool table and not a test on the
+ * id's shape.
+ *
+ * A record and not a `Set`, so a ninth entry in `CLI_TOOL_IDS` fails `tsc` here
+ * instead of quietly defaulting to "folded" — `relay-delivery` gives the same
+ * reason for the same shape.
+ */
+export const CHAT_TRANSCRIPT_READER_TOOLS: Readonly<Record<CLIToolType, boolean>> = {
+  claude: true,
+  codex: true,
+  antigravity: true,
+  'command-code': true,
+  opencode: true,
+  copilot: false,
+  gemini: false,
+  'vibe-local': false,
+};
+
+/**
+ * Whether this row is a pane scrape standing beside a turn History already has.
+ *
+ * Four conditions, and dropping any one of them breaks a different thing:
+ *
+ *  - `role === 'assistant'` — user rows carry no request id either, and the
+ *    prompt is the half of the conversation the reader typed.
+ *  - `messageType === 'normal'` — a `prompt` row is #2245's approval chip and a
+ *    dialog card, neither of which is a scrape.
+ *  - **no `requestId`** — every second writer keys its row (`claude-turn:`,
+ *    `cx-turn:`, `oc-turn:`, …), and so does every piece of CommandMate's own
+ *    furniture: `model-changed:` (`chat-db`'s model banner) and `relay-sys:`
+ *    (the relay's notices) are assistant/normal rows that must stay visible,
+ *    and they stay visible by having a key rather than by being listed here.
+ *    An exclusion list would have to grow with every new prefix; this cannot.
+ *  - **{@link CHAT_TRANSCRIPT_READER_TOOLS}** — see there. Without it copilot
+ *    and gemini lose every answer they have ever given.
+ *
+ * Folded, never dropped. #2399 kept the row deliberately: an interrupted turn
+ * leaves text in the pane that the transcript's closed turn does not have, and
+ * a duplicated row is recoverable where a deleted one is not. This changes what
+ * it costs to read, not whether it exists.
+ *
+ * @param message - The row about to be rendered
+ * @returns Whether the body belongs behind a chip
+ */
+export function isFoldedPaneScrape(message: ChatMessage): boolean {
+  if (message.role !== 'assistant') return false;
+  if (message.messageType !== 'normal') return false;
+  if (typeof message.requestId === 'string' && message.requestId.length > 0) return false;
+  // `?? 'claude'` is `chat-db`'s own fallback for a row whose `cli_tool_id` is
+  // NULL, spelled the same way so the two cannot disagree about who wrote it.
+  return CHAT_TRANSCRIPT_READER_TOOLS[message.cliToolId ?? 'claude'] === true;
+}
+
+/** The collapsible row a folded pane scrape is drawn as. */
+export const CHAT_PANE_SCRAPE_GROUP_TESTID = 'chat-pane-scrape-group';
+/** The disclosure control on that row. */
+export const CHAT_PANE_SCRAPE_TOGGLE_TESTID = 'chat-pane-scrape-toggle';
+/** The opened region holding the pane's copy itself. */
+export const CHAT_PANE_SCRAPE_BODY_TESTID = 'chat-pane-scrape-body';
+
+/**
+ * The pane's copy of a turn, behind one chip.
+ *
+ * The fourth fold on this surface and deliberately the same part as the other
+ * three: {@link CHAT_TOOL_ACTIVITY_CHIP_CLASS}, a chevron, closed by default,
+ * answering to the transcript's one toggle. A reader who has asked to see the
+ * subordinate material sees this too, and a search hit inside it opens the row
+ * it is in (`ChatTranscript` publishes {@link CHAT_TOOL_ACTIVITY_OPEN} for a
+ * matched row), which is what keeps the match findable.
+ *
+ * The label is `agentSource.kindScraper` — "screen scrape" — because that is
+ * already this repository's word for exactly this producer, and the accessible
+ * name of a disclosure button is its own text plus `aria-expanded`. No second
+ * label to keep in step with the first.
+ */
+export const ChatPaneScrapeDisclosure = memo(function ChatPaneScrapeDisclosure({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  const t = useTranslations('worktree');
+  const { isOpen, toggle } = useChatToolActivityDisclosure();
+
+  const Chevron = isOpen ? ChevronDown : ChevronRight;
+
+  return (
+    <div
+      data-testid={CHAT_PANE_SCRAPE_GROUP_TESTID}
+      className="flex w-full flex-col gap-1"
+    >
+      <button
+        type="button"
+        data-testid={CHAT_PANE_SCRAPE_TOGGLE_TESTID}
+        onClick={toggle}
+        aria-expanded={isOpen}
+        className={CHAT_TOOL_ACTIVITY_CHIP_CLASS}
+      >
+        <TerminalSquare size={12} aria-hidden="true" />
+        <span>{t('agentSource.kindScraper')}</span>
+        <Chevron size={12} aria-hidden="true" />
+      </button>
+
+      {isOpen && (
+        <div
+          data-testid={CHAT_PANE_SCRAPE_BODY_TESTID}
+          className="max-w-full border-l-2 border-border pl-2 text-muted-foreground"
+        >
+          {children}
+        </div>
+      )}
+    </div>
+  );
+});
+
+// ============================================================================
 // Body renderers
 // ============================================================================
 
@@ -939,6 +1080,9 @@ export const ChatMessageBubble = memo(function ChatMessageBubble({
   const isUser = message.role === 'user';
   const sendState = message.optimisticState;
   const isMarkdown = isAgentAuthoredMarkdown(message.requestId);
+  // [#2436] A pane dump standing beside a turn the agent's own transcript
+  // already wrote. Folded, not dropped — see {@link isFoldedPaneScrape}.
+  const isPaneScrape = isFoldedPaneScrape(message);
   const formattedTime = formatMessageTimestamp(message.timestamp, getDateFnsLocale(locale));
 
   // [#2245] What the reader sees, and therefore what copy has to hand them. The
@@ -1004,13 +1148,25 @@ export const ChatMessageBubble = memo(function ChatMessageBubble({
       )}
 
       <div data-testid={CHAT_BUBBLE_TESTID} className={bubbleClassName}>
-        <div data-message-id={message.id} data-markdown={isMarkdown ? 'true' : undefined} className={bodyClassName}>
-          {isMarkdown ? (
-            <ChatMarkdownBody content={message.content} onFilePathClick={onFilePathClick} />
-          ) : (
-            <ChatPlainBody content={plainBody} onFilePathClick={onFilePathClick} />
-          )}
-        </div>
+        {isPaneScrape ? (
+          // The `data-message-id` element stays INSIDE the disclosure: it is
+          // what the search highlighter marks, and a hit it could not mark
+          // would be counted and then not shown. Opening the chip mounts it,
+          // and a matched row is published open.
+          <ChatPaneScrapeDisclosure>
+            <div data-message-id={message.id} className={bodyClassName}>
+              <ChatPlainBody content={plainBody} onFilePathClick={onFilePathClick} />
+            </div>
+          </ChatPaneScrapeDisclosure>
+        ) : (
+          <div data-message-id={message.id} data-markdown={isMarkdown ? 'true' : undefined} className={bodyClassName}>
+            {isMarkdown ? (
+              <ChatMarkdownBody content={message.content} onFilePathClick={onFilePathClick} />
+            ) : (
+              <ChatPlainBody content={plainBody} onFilePathClick={onFilePathClick} />
+            )}
+          </div>
+        )}
       </div>
 
       {/* Send state and actions. Always rendered — see the file header on why

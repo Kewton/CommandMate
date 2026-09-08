@@ -10,7 +10,7 @@ import {
 import { clearPromptHashCache, renamePromptHashCacheKey } from './prompt-dedup';
 import { clearResponseHashCache, renameResponseHashCacheKey } from './response-dedup';
 import { renamePromptDedupSkips } from './prompt-dedup-state';
-import { checkForResponse } from './response-checker';
+import { checkForResponse, flushPendingScrapedResponse } from './response-checker';
 import { broadcastTerminalSnapshot } from '@/lib/realtime/terminal-broadcast';
 
 const logger = createLogger('response-poller');
@@ -502,6 +502,26 @@ function stopPollingByKey(pollerKey: string, options: { resume?: boolean } = {})
     });
     return;
   }
+
+  // Issue #2436: a scraped reply this cycle decided to HOLD — because the
+  // agent's transcript had not closed the turn yet — is confirmed here, before
+  // anything that keys it is dropped. Every way a cycle ends comes through this
+  // function: an explicit stop, `checkForResponse` finding the session gone,
+  // `MAX_POLLING_DURATION`, and the restart that opens the next turn. A hold
+  // that outlived its cycle would be a reply nobody ever writes, which is worse
+  // than the duplicate row the hold is trading against.
+  //
+  // Ahead of `clearResponseHashCache` below, and that ordering is the whole
+  // reason the held reply does not live in `./response-dedup` beside the hash:
+  // it would be cleared by the same call that has to write it.
+  //
+  // `resume` is the one exception, and for the same reason the response hash
+  // survives it: the cycle is not ending, it is being picked up where a prompt
+  // paused it, and the turn the hold belongs to is still the current one. The
+  // hold stays bounded regardless — the first tick of the resumed chain runs
+  // `settleExpiredPendingScrapedResponse`, and by then the deadline has almost
+  // certainly passed.
+  if (!options.resume) flushPendingScrapedResponse(pollerKey, 'poller-stopped');
 
   const owner = coordinator.owners.get(pollerKey);
   // The live owner stopping itself from inside its own tick. Identity, not key

@@ -45,8 +45,12 @@ const stubs = vi.hoisted(() => ({
 // module instance. A factory that built them inline would create a fresh spy
 // per `vi.resetModules()`, and "how many ticks ran in total" — the question the
 // whole suite asks — would be unanswerable.
+// [#2436] `stopPollingByKey` confirms a held scrape before it clears the caches
+// that key it, so `response-poller-core` reaches for this second export. It is a
+// no-op here: nothing in this suite holds one.
 vi.mock('@/lib/polling/response-checker', () => ({
   checkForResponse: stubs.checkForResponse,
+  flushPendingScrapedResponse: vi.fn(() => false),
 }));
 vi.mock('@/lib/realtime/terminal-broadcast', () => ({
   broadcastTerminalSnapshot: stubs.broadcastTerminalSnapshot,

@@ -86,6 +86,82 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+/**
+ * The gate answering "not yet" rather than "never" (Issue #2436).
+ *
+ * Requirement C of that Issue: `captureStructuredHistoryTurn` keeps answering a
+ * BOOLEAN, and the three statuses this module returns are decided by reading it
+ * as one. A three-valued return would have been truthy in every state, and the
+ * three `if (await gate.captureStructuredHistoryTurn(...))` in this file would
+ * have started calling an open turn a captured one — cancelling the very reads
+ * that go on to write it. The third value arrives beside the boolean, in an
+ * out-parameter, and the assertions below are what stop a later change moving
+ * it into the return.
+ */
+describe('[#2436] the third value does not become the verdict', () => {
+  /** The gate as it behaves for a turn codex has not closed: false + a reason. */
+  function readerThatReportsAnOpenTurn(): void {
+    captureStructuredHistoryTurn.mockImplementation(async (...args: unknown[]) => {
+      const report = args[4] as { outcome?: string } | undefined;
+      if (report) report.outcome = 'not_yet_closed';
+      return false;
+    });
+  }
+
+  it('an open turn is not `captured`, and the detached reads are still scheduled', async () => {
+    readerThatReportsAnOpenTurn();
+
+    const outcome = await resolveStopTranscriptCapture(WORKTREE, 'codex', 'codex');
+
+    expect(outcome.status).toBe('deferred');
+    expect(await captureTranscriptTurnOnStop(WORKTREE, 'codex', 'codex')).toBe(false);
+  });
+
+  it('an open turn needs no second round trip to prove its file exists', async () => {
+    // A reader that says "the turn in it is still open" has just read the file.
+    // Asking `hasStructuredHistoryTranscript` again would be a `locate` per stop
+    // for an answer already in hand.
+    readerThatReportsAnOpenTurn();
+
+    await resolveStopTranscriptCapture(WORKTREE, 'codex', 'codex');
+
+    expect(hasStructuredHistoryTranscript).not.toHaveBeenCalled();
+  });
+
+  it('a reader that explains nothing still gets the pre-#2436 probe', async () => {
+    // The fallback, and the reason every existing stub of the gate keeps
+    // working: an unexplained false is `unavailable`, and the file question is
+    // asked the way it was asked before this Issue.
+    captureStructuredHistoryTurn.mockResolvedValue(false);
+
+    const outcome = await resolveStopTranscriptCapture(WORKTREE, 'codex', 'codex');
+
+    expect(hasStructuredHistoryTranscript).toHaveBeenCalledTimes(1);
+    expect(outcome.status).toBe('deferred');
+  });
+
+  it('and answers `unavailable` when that probe says there is no transcript', async () => {
+    captureStructuredHistoryTurn.mockResolvedValue(false);
+    hasStructuredHistoryTranscript.mockResolvedValue(false);
+
+    const outcome = await resolveStopTranscriptCapture(WORKTREE, 'codex', 'codex');
+
+    expect(outcome.status).toBe('unavailable');
+  });
+
+  it('on the awaited path too: an open turn keeps retrying, it does not report success', async () => {
+    // claude's path. `not_yet_closed` is exactly the state #2264's retries exist
+    // for, so reading it as truthy would have removed the retry loop's reason.
+    readerThatReportsAnOpenTurn();
+
+    const pending = resolveStopTranscriptCapture(WORKTREE, 'claude', 'claude');
+    await vi.advanceTimersByTimeAsync(STOP_TRANSCRIPT_RETRY_DELAY_MS * STOP_TRANSCRIPT_MAX_ATTEMPTS);
+
+    await expect(pending).resolves.toEqual({ status: 'unavailable' });
+    expect(captureStructuredHistoryTurn).toHaveBeenCalledTimes(STOP_TRANSCRIPT_MAX_ATTEMPTS);
+  });
+});
+
 describe('the turn that closes only after the receiver answers', () => {
   it('is written by the read that happens after the answer', async () => {
     const rollout = readerThatClosesOnlyAfterTheAnswer();
@@ -118,6 +194,10 @@ describe('the turn that closes only after the receiver answers', () => {
         'codex',
         'codex-2',
         { worktreePath: WORKTREE.path, transcriptPathHint: null },
+        // [#2436] The gate's out-parameter for the three-valued outcome. Read
+        // by the receiver to tell "the turn is still open" from "there is
+        // nothing here", and left untouched by this suite's stub.
+        expect.objectContaining({}),
       ]);
     }
   });

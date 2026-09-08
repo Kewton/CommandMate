@@ -79,6 +79,7 @@ import {
   type ClaudeTurnAccumulator,
 } from '@/lib/hooks/sources/claude/transcript';
 import { claudeTurnRequestId } from '@/types/agent-transcript';
+import type { StructuredHistoryCaptureReport } from '@/lib/polling/structured-history-gate';
 
 const FIXTURE_DIR = join(process.cwd(), 'tests/fixtures/claude-transcript-2264');
 const WORKTREE_ID = 'wt-2264';
@@ -239,6 +240,35 @@ describe('the writer refuses a turn the agent has not finished', () => {
     expect(await capture()).toBe(false);
 
     expect(writtenKeys()).not.toContain(claudeTurnRequestId(C));
+  });
+
+  it('[#2436] says WHY it refused: the turn is not closed yet', async () => {
+    await writeTranscript(open);
+
+    const report: StructuredHistoryCaptureReport = {};
+    expect(
+      await captureClaudeTranscriptTurn(
+        TARGET,
+        { worktreePath: WORKTREE_PATH, homeDir: home },
+        report
+      )
+    ).toBe(false);
+    expect(report.outcome).toBe('not_yet_closed');
+  });
+
+  it('[#2436] reports nothing for a closed turn it wrote', async () => {
+    await writeTranscript(closed);
+
+    const report: StructuredHistoryCaptureReport = {};
+    expect(
+      await captureClaudeTranscriptTurn(
+        TARGET,
+        { worktreePath: WORKTREE_PATH, homeDir: home },
+        report
+      )
+    ).toBe(true);
+    // `captured` is the boolean's job; the report only ever explains a false.
+    expect(report.outcome).toBeUndefined();
   });
 
   it('writes it once the last record arrives', async () => {

@@ -102,6 +102,7 @@ import { createLogger } from '@/lib/logger';
 import { commandCodePromptRequestId, commandCodeTurnRequestId } from '@/types/agent-transcript';
 import type { ChatMessage } from '@/types/models';
 import type { AgentInstanceRef } from '../types';
+import type { StructuredHistoryCaptureReport } from '@/lib/polling/structured-history-gate';
 import {
   buildCommandCodeTurns,
   COMMAND_CODE_MESSAGE_RECORD_TYPE,
@@ -350,12 +351,21 @@ export interface CommandCodeTranscriptCapture {
  *
  * Never throws.
  *
+ * Since Issue #2436 the false can explain itself: pass a
+ * `StructuredHistoryCaptureReport` and `outcome` is set to `'not_yet_closed'`
+ * when the newest turn is one the agent has not finished writing — the case the
+ * `-turn-open` line below reports, and the one where the caller's scraped copy
+ * is worth holding rather than saving. Every other false leaves it unset, which
+ * the gate reads as `'unavailable'`.
+ *
  * @param target - The instance whose turn just ended
+ * @param report - Optional out-parameter; see `StructuredHistoryCaptureReport`
  * @returns Whether History now holds this instance's newest turn as Markdown
  */
 export async function captureCommandCodeTranscriptTurn(
   target: AgentInstanceRef,
-  capture: CommandCodeTranscriptCapture
+  capture: CommandCodeTranscriptCapture,
+  report?: StructuredHistoryCaptureReport
 ): Promise<boolean> {
   const instanceId = target.instanceId ?? target.cliToolId;
   try {
@@ -484,7 +494,8 @@ export async function captureCommandCodeTranscriptTurn(
           lastRecordAt.get(turn.promptId) ?? 0,
           nextTurnOpensAt(pending.turns, userRows, index)
         ),
-        path
+        path,
+        report
       );
     }
     if (captured) {
@@ -914,9 +925,15 @@ async function writeCommandCodeTurn(
   turn: CommandCodeTurnAccumulator,
   rendered: CommandCodeRenderedTurn,
   timestampMs: number,
-  path: string
+  path: string,
+  report?: StructuredHistoryCaptureReport
 ): Promise<boolean> {
   const instanceId = target.instanceId ?? target.cliToolId;
+
+  // Issue #2436: the caller's report is about the turn THIS call is deciding.
+  // The loop above walks oldest-first, so a verdict left by an earlier turn has
+  // to be cleared before this one's is written.
+  if (report) report.outcome = undefined;
 
   if (!isCommandCodeTurnWritable(turn)) {
     // The agent's last word in this turn reached for a tool and no later prompt
@@ -932,6 +949,7 @@ async function writeCommandCodeTurn(
     // Handing it back to the scraper costs the Markdown rendering for this turn
     // and nothing else: the Stop receiver asks again after a short delay, and
     // the poller asks again when the pane returns to the composer.
+    if (report) report.outcome = 'not_yet_closed';
     logger.info('command-code-transcript-turn-open', {
       worktreeId: target.worktreeId,
       instanceId,

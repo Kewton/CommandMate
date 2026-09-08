@@ -36,8 +36,12 @@ const stubs = vi.hoisted(() => ({
   broadcastTerminalSnapshot: vi.fn(async () => {}),
 }));
 
+// [#2436] `stopPollingByKey` confirms a held scrape before it clears the caches
+// that key it, so `response-poller-core` reaches for this second export. It is a
+// no-op here: nothing in this suite holds one.
 vi.mock('@/lib/polling/response-checker', () => ({
   checkForResponse: stubs.checkForResponse,
+  flushPendingScrapedResponse: vi.fn(() => false),
 }));
 vi.mock('@/lib/realtime/terminal-broadcast', () => ({
   broadcastTerminalSnapshot: stubs.broadcastTerminalSnapshot,

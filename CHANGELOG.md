@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **fix(chat): 転写行が書かれたターンにペイン全体の scrape 行が並ぶ問題を修正** (#2436): `captureStructuredHistoryTurn` に三値の outcome（`captured` / `not_yet_closed` / `unavailable`）を報告させ、転写がまだ閉じていないターンでは scrape の保存を `STOP_TRANSCRIPT_DEFERRED_DELAYS_MS` の総和（7.65 秒）まで保留するようにした。保留は dedup キャッシュの外に置き、期限切れ・セッション終了・次ターン開始（`stopPollingByKey` の全経路）で確定し、その間に転写行が着地したら破棄する。表示側では `request_id` を持たない assistant/normal 行のうち転写リーダーを持つツール（copilot / gemini / vibe-local を除く）のものをチップに折り畳む保険を追加した。
 - **fix(session): 送信直前フラッシュが composer と前ターン本文を返答として保存する問題を修正** (#2437): `cleanCliResponse` に codex / command-code / antigravity / vibe-local の分岐を追加し（composer の判別は #2310 の SGR 規則に基づく `findCodexChromeStart` と `findCommandCodeChromeStart` で構造的に行い、文字列の除外リストにしない）、さらに 4 つの pull 転写リーダー（`captureClaudeTranscriptTurn` / `captureCodexTranscriptTurn` / `captureAntigravityTranscriptTurn` / `captureCommandCodeTranscriptTurn`）が転写行の書き込みに成功したときに `last_captured_line` を進めるようにして、次の poll より先に `/send` が来たときに前ターンの本文がまるごと再保存されるのを防いだ。
 
 ## [0.33.1] - 2026-09-08

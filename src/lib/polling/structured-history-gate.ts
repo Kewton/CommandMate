@@ -194,12 +194,70 @@ export type StructuredHistoryCapture = ClaudeTranscriptCapture &
   AntigravityTranscriptCapture &
   CommandCodeTranscriptCapture;
 
+/**
+ * The three answers a pull capture can give (Issue #2436).
+ *
+ * Until this Issue there were two, and one of them was carrying two meanings.
+ * `captureStructuredHistoryTurn` answered a bare boolean, so "the agent has not
+ * closed this turn yet — ask again in a second" and "there is no transcript
+ * here and there never will be" arrived at the caller as the same `false`, and
+ * the only thing the caller could do with a `false` was save the pane's copy.
+ * The readers could already tell the two apart — a `codex-transcript-turn-open`
+ * line is written on exactly one of them — and the information stopped at the
+ * return statement.
+ *
+ * What it cost is measured in #2436: for a turn whose transcript closes ~700 ms
+ * after the frame goes quiet, History ends up with the agent's Markdown AND the
+ * whole pane (prompt echo, intermediate output, footer; 234,323 characters at
+ * the extreme) as two rows of one turn.
+ *
+ *  - `captured` — History holds the turn as the agent's own Markdown, written
+ *    by this call or by an earlier poll of the same finished turn.
+ *  - `not_yet_closed` — the transcript exists and was read, and the newest turn
+ *    in it is still open. The row IS coming; a caller holding a scraped copy
+ *    should wait rather than write it.
+ *  - `unavailable` — nothing was written and nothing is expected: a tool with
+ *    no reader, no session pointer, no file, an unreadable one, a window with no
+ *    turn in it, or a closed turn that said nothing. The scraper is the only
+ *    writer this turn will ever have.
+ *
+ * Reported through {@link StructuredHistoryCaptureReport} rather than as the
+ * return value, and that is deliberate: `false` has meant "the scraper still
+ * owns this turn" since #2121, every caller and every test double reads it that
+ * way, and a three-valued return would be TRUTHY in all three states — the
+ * `if (await captureStructuredHistoryTurn(...))` in `lib/hooks/
+ * stop-history-capture` would start reporting an open turn as a captured one,
+ * silently, with nothing for `tsc` to catch. The extra information is extra; it
+ * does not belong in a return type that already means something.
+ */
+export type StructuredHistoryCaptureOutcome = 'captured' | 'not_yet_closed' | 'unavailable';
+
+/**
+ * Where a caller that needs the third value asks for it (Issue #2436).
+ *
+ * An out-parameter: pass an object and the gate fills `outcome` in before it
+ * returns. Optional at every level, so a caller that only needs "did the
+ * scraper just get relieved of this turn?" keeps asking exactly the question it
+ * asked before.
+ */
+export interface StructuredHistoryCaptureReport {
+  /** Set on every call that reaches the gate; see {@link StructuredHistoryCaptureOutcome}. */
+  outcome?: StructuredHistoryCaptureOutcome;
+}
+
 /** What a pull-mode reader is asked to do. */
 interface PullTranscriptReader {
-  /** Record every turn this instance has not had written yet. */
+  /**
+   * Record every turn this instance has not had written yet.
+   *
+   * `report` is the reader's chance to say WHY it answered false (Issue #2436);
+   * see {@link StructuredHistoryCaptureOutcome}. A reader that leaves it unset
+   * is read as `unavailable`, which is the pre-#2436 behaviour exactly.
+   */
   readonly capture: (
     target: AgentInstanceRef,
-    capture: StructuredHistoryCapture
+    capture: StructuredHistoryCapture,
+    report?: StructuredHistoryCaptureReport
   ) => Promise<boolean>;
   /**
    * Name the file {@link PullTranscriptReader.capture} would read, without
@@ -231,26 +289,38 @@ interface PullTranscriptReader {
  */
 const PULL_TRANSCRIPT_READERS: Partial<Record<CLIToolType, PullTranscriptReader>> = {
   [CLAUDE_CLI_TOOL_ID]: {
-    capture: (target: AgentInstanceRef, capture: StructuredHistoryCapture) =>
-      captureClaudeTranscriptTurn(target, capture),
+    capture: (
+      target: AgentInstanceRef,
+      capture: StructuredHistoryCapture,
+      report?: StructuredHistoryCaptureReport
+    ) => captureClaudeTranscriptTurn(target, capture, report),
     locate: (target: AgentInstanceRef, capture: StructuredHistoryCapture) =>
       resolveClaudeTranscriptPath(target, capture),
   },
   [CODEX_CLI_TOOL_ID]: {
-    capture: (target: AgentInstanceRef, capture: StructuredHistoryCapture) =>
-      captureCodexTranscriptTurn(target, capture),
+    capture: (
+      target: AgentInstanceRef,
+      capture: StructuredHistoryCapture,
+      report?: StructuredHistoryCaptureReport
+    ) => captureCodexTranscriptTurn(target, capture, report),
     locate: (target: AgentInstanceRef, capture: StructuredHistoryCapture) =>
       resolveCodexTranscriptPath(target, capture),
   },
   [ANTIGRAVITY_CLI_TOOL_ID]: {
-    capture: (target: AgentInstanceRef, capture: StructuredHistoryCapture) =>
-      captureAntigravityTranscriptTurn(target, capture),
+    capture: (
+      target: AgentInstanceRef,
+      capture: StructuredHistoryCapture,
+      report?: StructuredHistoryCaptureReport
+    ) => captureAntigravityTranscriptTurn(target, capture, report),
     locate: (target: AgentInstanceRef, capture: StructuredHistoryCapture) =>
       resolveAntigravityTranscriptPath(target, capture),
   },
   [COMMAND_CODE_CLI_TOOL_ID]: {
-    capture: (target: AgentInstanceRef, capture: StructuredHistoryCapture) =>
-      captureCommandCodeTranscriptTurn(target, capture),
+    capture: (
+      target: AgentInstanceRef,
+      capture: StructuredHistoryCapture,
+      report?: StructuredHistoryCaptureReport
+    ) => captureCommandCodeTranscriptTurn(target, capture, report),
     locate: (target: AgentInstanceRef, capture: StructuredHistoryCapture) =>
       resolveCommandCodeTranscriptPath(target, capture),
   },
@@ -350,17 +420,28 @@ export function isStructuredHistoryWriterLive(
  * not: this runs inside the poller's save path, and an exception here would cost
  * the scraped reply as well as the structured one.
  *
+ * Since Issue #2436 the `false` can be asked to explain itself: pass a
+ * {@link StructuredHistoryCaptureReport} and `outcome` says whether the turn is
+ * merely still open — the row is coming, and a caller holding the pane's copy
+ * should wait — or whether nothing will ever be written for it. The boolean is
+ * unchanged in meaning and in value; see
+ * {@link StructuredHistoryCaptureOutcome} for why the third value is reported
+ * beside it rather than in it.
+ *
  * @param worktreeId - The worktree
  * @param cliToolId - The tool driving the pane
  * @param instanceId - The agent instance; defaults to the primary
  * @param capture - Where to look; see {@link StructuredHistoryCapture}
+ * @param report - Optional out-parameter; see {@link StructuredHistoryCaptureReport}
  */
 export async function captureStructuredHistoryTurn(
   worktreeId: string,
   cliToolId: CLIToolType,
   instanceId: string | undefined,
-  capture: StructuredHistoryCapture
+  capture: StructuredHistoryCapture,
+  report?: StructuredHistoryCaptureReport
 ): Promise<boolean> {
+  if (report) report.outcome = 'unavailable';
   if (!isPullTranscriptHistory(cliToolId)) return false;
 
   const reader = PULL_TRANSCRIPT_READERS[cliToolId];
@@ -377,11 +458,21 @@ export async function captureStructuredHistoryTurn(
   return serializePerInstance(
     captureKeyOf(worktreeId, cliToolId, resolvedInstanceId),
     async (): Promise<boolean> => {
+      // The reader's own report, kept local and copied out below: `report` is
+      // the caller's object and must end up holding one verdict, not whatever
+      // the last reader to touch it happened to leave there.
+      const readerReport: StructuredHistoryCaptureReport = {};
       try {
         const captured = await reader.capture(
           { worktreeId, cliToolId, instanceId: resolvedInstanceId },
-          capture
+          capture,
+          readerReport
         );
+        if (report) {
+          // A reader that says nothing is read as `unavailable` — the pre-#2436
+          // behaviour, and the safe direction: the scraper keeps the turn.
+          report.outcome = captured ? 'captured' : readerReport.outcome ?? 'unavailable';
+        }
         // Issue #2377: the moment a relay is waiting for. This is the single
         // point BOTH triggers of a pull capture pass through — the poller's save
         // path and the Stop hook receiver — which is why the relay needs one

@@ -82,6 +82,7 @@
 
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { CODEX_CLI_TOOL_ID } from '@/lib/hooks/sources/codex/tool-id';
+import type { StructuredHistoryCaptureReport } from '@/lib/polling/structured-history-gate';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('lib/hooks/stop-history-capture');
@@ -282,11 +283,17 @@ async function readAfterResponding(
   try {
     for (const [index, delayMs] of delaysMs.entries()) {
       await sleep(delayMs);
+      // Issue #2436: the boolean is the verdict, the report says why. Read
+      // explicitly rather than as truthiness — an open turn answers `false`
+      // here and must keep the loop going, which is exactly the misreading the
+      // Issue's requirement C is about.
+      const report: StructuredHistoryCaptureReport = {};
       const captured = await gate.captureStructuredHistoryTurn(
         worktree.id,
         cliToolId,
         instanceId,
-        capture
+        capture,
+        report
       );
       if (captured) {
         // The line an operator greps when a codex reply did reach the chat
@@ -308,6 +315,10 @@ async function readAfterResponding(
         instanceId,
         attempt: index + 1,
         attempts: delaysMs.length,
+        // Issue #2436: `not_yet_closed` here means the next read is worth
+        // taking; anything else means these delays are being spent on a turn
+        // that will never be written by this reader.
+        outcome: report.outcome ?? 'unavailable',
         elapsedMs: Date.now() - startedAt,
       });
     }
@@ -369,7 +380,23 @@ export async function resolveStopTranscriptCapture(
     // event this path could act on.
     const capture = { worktreePath: worktree.path, transcriptPathHint: null };
 
-    if (await gate.captureStructuredHistoryTurn(worktree.id, cliToolId, instanceId, capture)) {
+    // Issue #2436: `captureStructuredHistoryTurn` still answers a boolean, and
+    // `true` still means — and only means — "the row is written NOW". That is
+    // load-bearing here: the three statuses below are decided by reading this
+    // value as a boolean, and a tri-state RETURN would have made every one of
+    // them truthy, turning an open turn into `captured` and cancelling the very
+    // reads that go on to write it. The third value arrives beside the boolean
+    // instead, in `firstReport`, and is used explicitly.
+    const firstReport: StructuredHistoryCaptureReport = {};
+    if (
+      await gate.captureStructuredHistoryTurn(
+        worktree.id,
+        cliToolId,
+        instanceId,
+        capture,
+        firstReport
+      )
+    ) {
       return { status: 'captured' };
     }
 
@@ -379,8 +406,15 @@ export async function resolveStopTranscriptCapture(
     // nor deferring can fix, and an instance with no transcript will not have
     // one in 150 ms either. A transcript that exists does not stop existing
     // between attempts, so this is not re-asked.
+    //
+    // Issue #2436: a reader that answered `not_yet_closed` HAS just read the
+    // file — that is what "the turn in it is still open" is a statement about —
+    // so the probe is skipped and the answer taken from the report. The
+    // fallback is the pre-#2436 round-trip, for a reader that reported nothing.
     const hasTranscript = (): Promise<boolean> =>
-      gate.hasStructuredHistoryTranscript(worktree.id, cliToolId, instanceId, capture);
+      firstReport.outcome === 'not_yet_closed'
+        ? Promise.resolve(true)
+        : gate.hasStructuredHistoryTranscript(worktree.id, cliToolId, instanceId, capture);
 
     if (STOP_HOOK_BLOCKS_TRANSCRIPT_CLOSE.has(cliToolId)) {
       const delaysMs = options.deferredDelaysMs ?? STOP_TRANSCRIPT_DEFERRED_DELAYS_MS;
@@ -411,11 +445,13 @@ export async function resolveStopTranscriptCapture(
     const maxAttempts = Math.max(1, options.maxAttempts ?? STOP_TRANSCRIPT_MAX_ATTEMPTS);
     for (let attempt = 2; attempt <= maxAttempts; attempt += 1) {
       await sleep(retryDelayMs);
+      const report: StructuredHistoryCaptureReport = {};
       const captured = await gate.captureStructuredHistoryTurn(
         worktree.id,
         cliToolId,
         instanceId,
-        capture
+        capture,
+        report
       );
       logger.debug('stop-history-capture-retried', {
         worktreeId: worktree.id,
@@ -424,6 +460,7 @@ export async function resolveStopTranscriptCapture(
         attempt,
         maxAttempts,
         captured,
+        outcome: report.outcome ?? 'unavailable',
       });
       if (captured) return { status: 'captured' };
     }

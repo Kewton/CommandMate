@@ -62,7 +62,12 @@ import {
   markStructuredHistoryRecheckPending,
   settleStructuredHistoryRecheck,
 } from './response-dedup';
-import { captureStructuredHistoryTurn, isStructuredHistoryWriterLive } from './structured-history-gate';
+import {
+  captureStructuredHistoryTurn,
+  isStructuredHistoryWriterLive,
+  type StructuredHistoryCaptureReport,
+} from './structured-history-gate';
+import { STOP_TRANSCRIPT_DEFERRED_DELAYS_MS } from '@/lib/hooks/stop-history-capture';
 import { onRelayTurnCompleted } from '@/lib/relay/relay-triggers';
 // Issue #2317 Phase D: while a human holds the pane's geometry, the frame is
 // their terminal (44 rows), not the 1000-row canvas every rule below was
@@ -903,6 +908,229 @@ export function extractResponse(
 // checkForResponse (exported for response-poller-core.ts)
 // ============================================================================
 
+// ============================================================================
+// The held scrape (Issue #2436)
+// ============================================================================
+
+/**
+ * How long a scraped reply is held while its transcript finishes closing.
+ *
+ * Derived from `STOP_TRANSCRIPT_DEFERRED_DELAYS_MS`, not spelled again: those
+ * are the instants the Stop receiver re-reads the transcript at after it has
+ * answered the agent (#2398), so their SUM is the moment after which nobody is
+ * still trying. Holding past it would be holding for a row that has no producer
+ * left; stopping short of it would race the producer that is still running.
+ *
+ * The measured gap this covers is under a second — codex 2026-09-08 appended
+ * `task_complete` ~700 ms after the frame went quiet — so the budget is roughly
+ * ten times the case it exists for, spent only on turns that ask for it.
+ */
+export const PENDING_SCRAPE_HOLD_MS = STOP_TRANSCRIPT_DEFERRED_DELAYS_MS.reduce(
+  (total, delay) => total + delay,
+  0
+);
+
+/**
+ * A scraped reply the poller has read but not written yet (Issue #2436).
+ *
+ * Everything `checkForResponse` would have passed to `createMessage`, plus the
+ * instant it decided to and the instant it stops waiting. The timestamp is the
+ * one taken when the turn was JUDGED finished rather than when the row is
+ * finally written: History sorts on it, and a row dated seven seconds late would
+ * sort under the next turn's prompt.
+ */
+interface PendingScrapedResponse {
+  readonly worktreeId: string;
+  readonly cliToolId: CLIToolType;
+  readonly instanceId: string;
+  /** The pane's copy of the reply, cleaned. Replaced if the frame moves on. */
+  content: string;
+  readonly timestamp: Date;
+  readonly summary?: string;
+  readonly logFileName?: string;
+  readonly requestId?: string;
+  /** `transcriptPathHint` for the last-chance re-ask; see {@link settleExpiredPendingScrapedResponse}. */
+  readonly worktreePath: string;
+  readonly transcriptPathHint: string | null;
+  /** `Date.now()` after which the hold is over and the row is written. */
+  readonly expiresAt: number;
+}
+
+declare global {
+  // eslint-disable-next-line no-var
+  var __pendingScrapedResponses: Map<string, PendingScrapedResponse> | undefined;
+}
+
+/**
+ * Held scrapes, by poller key.
+ *
+ * **Deliberately not in `./response-dedup`.** That module's two caches are
+ * cleared by `stopPollingByKey` — `clearResponseHashCache` is called from
+ * inside it — so a held reply parked beside them would be dropped by the very
+ * event that has to write it (Issue #2436, requirement B). It lives here, next
+ * to the code that fills it and the code that writes it out, and
+ * `flushPendingScrapedResponse` is what the poller calls before it clears
+ * anything.
+ *
+ * On `globalThis` for the reason every shared map in this subsystem is (#1736):
+ * under `next dev` the poller's bundle and each route's bundle would otherwise
+ * hold a private copy, and a held reply only one bundle can see is a lost one.
+ */
+const pendingScrapedResponses = (globalThis.__pendingScrapedResponses ??= new Map<
+  string,
+  PendingScrapedResponse
+>());
+
+/** Forget every held scrape. Test seam. */
+export function resetPendingScrapedResponses(): void {
+  pendingScrapedResponses.clear();
+}
+
+/** Whether a scrape is being held for this poller key. Test seam / diagnostics. */
+export function hasPendingScrapedResponse(pollerKey: string): boolean {
+  return pendingScrapedResponses.has(pollerKey);
+}
+
+/**
+ * Hold this tick's scraped reply instead of writing it (Issue #2436).
+ *
+ * Called when the transcript reader has said `not_yet_closed`: the agent's own
+ * Markdown for this turn is coming, and writing the pane's copy now is what put
+ * 234,323 characters of prompt echo, intermediate output and footer into
+ * History beside the real answer.
+ *
+ * A second hold for the same key REPLACES the content and keeps the original
+ * deadline. Replaces, because a frame that moved on is a better copy of the
+ * same turn; keeps, because a pane that redraws every tick would otherwise push
+ * its own deadline forward forever and the hold would stop being bounded.
+ */
+function holdScrapedResponse(pollerKey: string, pending: PendingScrapedResponse): void {
+  const existing = pendingScrapedResponses.get(pollerKey);
+  if (existing) {
+    existing.content = pending.content;
+    return;
+  }
+  pendingScrapedResponses.set(pollerKey, pending);
+}
+
+/**
+ * Drop a held scrape without writing it (Issue #2436).
+ *
+ * The one thing that justifies dropping it: the transcript reader has since
+ * written the turn as the agent's own Markdown, so the pane's copy is the
+ * duplicate this Issue exists to stop.
+ */
+function discardPendingScrapedResponse(pollerKey: string): void {
+  pendingScrapedResponses.delete(pollerKey);
+}
+
+/**
+ * Write a held scrape now, whatever the clock says (Issue #2436).
+ *
+ * Exported because `response-poller-core` calls it from `stopPollingByKey`,
+ * which is every way a polling cycle ends: an explicit stop, the session going
+ * away, `MAX_POLLING_DURATION`, and the restart that opens the NEXT turn. A
+ * held reply must not be able to outlive the cycle that holds it — the caches
+ * that key it are cleared in that same function, and a reply nobody writes is
+ * strictly worse than the duplicate row this Issue is trading against.
+ *
+ * **Deliberately bypasses `isDuplicateResponse`.** The hash for this content was
+ * registered by the tick that decided to hold it (the dedup guard's check is
+ * also its write), so a re-check here would answer "duplicate" for the reply
+ * that has never been saved. That is requirement A of the Issue in one line.
+ *
+ * Synchronous through the row: `better-sqlite3` is, and this runs on shutdown
+ * paths where an awaited continuation may never be reached. The Markdown
+ * conversation log is fired afterwards and not waited for, because it is a
+ * secondary record and the row is the one History reads.
+ *
+ * @param pollerKey - Poller key ("worktreeId:instanceId")
+ * @param reason - What ended the hold; logged, for the operator reading back
+ * @returns Whether a held reply was written
+ */
+export function flushPendingScrapedResponse(pollerKey: string, reason: string): boolean {
+  const pending = pendingScrapedResponses.get(pollerKey);
+  if (!pending) return false;
+  pendingScrapedResponses.delete(pollerKey);
+
+  try {
+    const db = getDbInstance();
+    const message = createMessage(db, {
+      worktreeId: pending.worktreeId,
+      role: 'assistant',
+      content: pending.content,
+      messageType: 'normal',
+      timestamp: pending.timestamp,
+      cliToolId: pending.cliToolId,
+      instanceId: pending.instanceId,
+      summary: pending.summary,
+      logFileName: pending.logFileName,
+      requestId: pending.requestId,
+    });
+    broadcastMessage('message', { worktreeId: pending.worktreeId, message });
+    logger.info('pending-scrape-flushed', {
+      worktreeId: pending.worktreeId,
+      cliToolId: pending.cliToolId,
+      instanceId: pending.instanceId,
+      reason,
+      scrapedLength: pending.content.length,
+      heldForMs: Date.now() - pending.timestamp.getTime(),
+    });
+    void recordClaudeConversation(db, pending.worktreeId, pending.content, pending.cliToolId).catch(
+      () => {}
+    );
+    return true;
+  } catch (error) {
+    logger.warn('pending-scrape-flush-failed', {
+      worktreeId: pending.worktreeId,
+      cliToolId: pending.cliToolId,
+      instanceId: pending.instanceId,
+      reason,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return false;
+  }
+}
+
+/**
+ * End a hold whose deadline has passed, one way or the other (Issue #2436).
+ *
+ * Run at the top of every tick, because the tick that has to notice an expiry
+ * is very often one that returns early — a static frame yields no new lines for
+ * a scrollback tool and is a duplicate for an alternate-screen one, and neither
+ * of those paths reaches the save block at the bottom of `checkForResponse`.
+ *
+ * The reader is asked ONE more time before the row is written. By the deadline
+ * the throttled recheck (#2399) has usually already captured the turn and
+ * dropped the hold, but the two are not in step — the recheck is every third
+ * duplicate tick and this is a wall clock — and a last read costs one tail
+ * parse against writing a pane dump that is about to be superseded.
+ */
+async function settleExpiredPendingScrapedResponse(pollerKey: string): Promise<void> {
+  const pending = pendingScrapedResponses.get(pollerKey);
+  if (!pending || Date.now() < pending.expiresAt) return;
+
+  const captured = await captureStructuredHistoryTurn(
+    pending.worktreeId,
+    pending.cliToolId,
+    pending.instanceId,
+    { worktreePath: pending.worktreePath, transcriptPathHint: pending.transcriptPathHint }
+  );
+  if (captured) {
+    discardPendingScrapedResponse(pollerKey);
+    settleStructuredHistoryRecheck(pollerKey);
+    logger.info('pending-scrape-superseded', {
+      worktreeId: pending.worktreeId,
+      cliToolId: pending.cliToolId,
+      instanceId: pending.instanceId,
+      heldForMs: Date.now() - pending.timestamp.getTime(),
+    });
+    return;
+  }
+
+  flushPendingScrapedResponse(pollerKey, 'hold-expired');
+}
+
 /**
  * Record what the structured writers said about this turn, for the ticks that
  * will not get to ask (Issue #2399).
@@ -958,9 +1186,22 @@ export async function checkForResponse(
     const running = await isSessionRunning(worktreeId, cliToolId, instanceId);
     if (!running) {
       logger.info('session-not-running');
+      // `stopPolling` is what confirms a held scrape here; see
+      // `flushPendingScrapedResponse` and `stopPollingByKey`. Requirement B of
+      // Issue #2436: this return is ~300 lines above the save path, so a hold
+      // released only down there would never be released at all.
       stopPolling(worktreeId, cliToolId, instanceId);
       return false;
     }
+
+    const pollerKey = getPollerKey(worktreeId, cliToolId, instanceId);
+
+    // Issue #2436: a scrape held by an earlier tick, whose transcript has now
+    // had its whole budget to close. Ahead of everything below because most
+    // ticks of a finished turn never reach the save path — a static frame is a
+    // duplicate for an alternate-screen tool and yields no new lines for a
+    // scrollback one, and both of those return early.
+    await settleExpiredPendingScrapedResponse(pollerKey);
 
     // Issue #2317 Phase D: is a human reading this pane at their own terminal
     // size right now, and did they just stop?
@@ -1011,7 +1252,6 @@ export async function checkForResponse(
     // Layer 2: Accumulate TUI content for full-screen TUI tools, so a turn that
     // outgrows the alternate-screen pane keeps the head that has scrolled away.
     if (cliToolId === 'opencode' || cliToolId === 'copilot') {
-      const pollerKey = getPollerKey(worktreeId, cliToolId, instanceId);
       // Issue #1911: opencode is accumulated from the CURRENT TURN'S REGION
       // rather than the whole frame. Feeding the raw pane seeded the accumulator
       // with the previous turn's transcript, the echoed prompt and the bottom
@@ -1079,7 +1319,6 @@ export async function checkForResponse(
     if (promptDetection.isPrompt) {
       // Issue #565: Content hash-based duplicate prompt prevention
       const promptContent = promptDetection.rawContent || promptDetection.cleanContent;
-      const pollerKey = getPollerKey(worktreeId, cliToolId, instanceId);
       const normalizedForDedup = normalizePromptForDedup(promptContent, cliToolId);
       if (isDuplicatePrompt(pollerKey, normalizedForDedup)) {
         // Issue #1695: the log line below is invisible to `commandmate capture
@@ -1203,7 +1442,6 @@ export async function checkForResponse(
     } else if (cliToolId === 'claude') {
       cleanedResponse = cleanClaudeResponse(result.response);
     } else if (cliToolId === 'copilot') {
-      const pollerKey = getPollerKey(worktreeId, cliToolId, instanceId);
       const accumulatedContent = getAccumulatedContent(pollerKey);
       const sourceContent = accumulatedContent || result.response;
       cleanedResponse = cleanCopilotResponse(sourceContent);
@@ -1211,7 +1449,6 @@ export async function checkForResponse(
 
       clearTuiAccumulator(pollerKey);
     } else if (cliToolId === 'opencode') {
-      const pollerKey = getPollerKey(worktreeId, cliToolId, instanceId);
       // Issue #1911 defect 3: opencode wrote to the Layer-2 accumulator but never
       // read it, so any turn longer than the pane was saved without its head.
       //
@@ -1253,7 +1490,6 @@ export async function checkForResponse(
     // Without this the disabled cursor would leave nothing suppressing re-saves and
     // the poller would append the same finished reply every 2 s.
     if (!lineCountIsCursor) {
-      const pollerKey = getPollerKey(worktreeId, cliToolId, instanceId);
       if (isDuplicateResponse(pollerKey, cleanedResponse)) {
         // Issue #1695: this branch used to drop the response silently — the
         // prompt-side guard above has logged its skip since #565, this one
@@ -1304,6 +1540,16 @@ export async function checkForResponse(
         // is neither. Two rows for one turn is the failure this trades for, and
         // #2401 has already stopped the junk one being picked as a relay's
         // answer.
+        //
+        // Issue #2436 narrowed what that trade costs, without changing the
+        // decision above. The row this skip cannot retract is now only ever one
+        // the poller had no reason to hold: a turn whose reader said
+        // `not_yet_closed` is held at the save path below rather than written,
+        // so on the ordinary codex turn there is no earlier row here to regret.
+        // What remains is the case the three reasons above are actually about —
+        // a scrape written when the reader could tell us nothing, and a
+        // transcript that closed later anyway — and for that the row stays,
+        // folded rather than deleted on the chat surface (`ChatMessageBubble`).
         if (claimStructuredHistoryRecheck(pollerKey)) {
           const recaptured = await captureStructuredHistoryTurn(worktreeId, cliToolId, instanceId, {
             worktreePath: worktree.path,
@@ -1311,6 +1557,11 @@ export async function checkForResponse(
           });
           if (recaptured) {
             settleStructuredHistoryRecheck(pollerKey);
+            // Issue #2436: the turn is now the agent's own Markdown, so a
+            // scrape held for it is exactly the second row this Issue exists
+            // to stop. Dropped, not written — the only case where dropping a
+            // held reply loses nothing.
+            discardPendingScrapedResponse(pollerKey);
             logger.info('structured-history-recheck-captured', {
               worktreeId,
               cliToolId,
@@ -1345,12 +1596,24 @@ export async function checkForResponse(
     // Markdown and answers true, or answers false and leaves the scrape below to
     // be the only record. `||` and not `&&`: the two are different tools'
     // answers to the same question, and each one is false for the other's tool.
+    //
+    // Issue #2436 adds the third answer. `captureReport.outcome` distinguishes
+    // "the agent has not closed this turn yet" from "there is nothing to read
+    // here", which the boolean could not: both arrived as `false`, and `false`
+    // meant "save the pane's copy". See {@link StructuredHistoryCaptureOutcome}.
+    const captureReport: StructuredHistoryCaptureReport = {};
     const structuredHistoryLive =
       isStructuredHistoryWriterLive(worktreeId, cliToolId, instanceId) ||
-      (await captureStructuredHistoryTurn(worktreeId, cliToolId, instanceId, {
-        worktreePath: worktree.path,
-        transcriptPathHint: claudeMetadata?.logFilePath ?? null,
-      }));
+      (await captureStructuredHistoryTurn(
+        worktreeId,
+        cliToolId,
+        instanceId,
+        {
+          worktreePath: worktree.path,
+          transcriptPathHint: claudeMetadata?.logFilePath ?? null,
+        },
+        captureReport
+      ));
 
     // Issue #2399: remember which way that went, because the next tick may not
     // get here. A `false` is the reader saying "not yet, or not mine", and the
@@ -1358,10 +1621,7 @@ export async function checkForResponse(
     // a return — so unless the fact is written down now, the ask never happens
     // again. A `true` settles it: the turn is recorded and there is nothing left
     // to re-ask about.
-    markOrSettleStructuredHistoryRecheck(
-      getPollerKey(worktreeId, cliToolId, instanceId),
-      structuredHistoryLive
-    );
+    markOrSettleStructuredHistoryRecheck(pollerKey, structuredHistoryLive);
 
     // Issue #2317 Phase D: the scrape is dropped while the geometry is
     // delegated, and the transcript capture above is what makes that safe.
@@ -1381,8 +1641,21 @@ export async function checkForResponse(
     // the agent's answer is not.
     const suppressScrapedHistory = structuredHistoryLive || delegation.delegated;
 
+    // Issue #2436: not suppressed — HELD. The reader has read the transcript,
+    // found the newest turn still open and said so, which means the agent's own
+    // Markdown for this turn is on its way. Writing the pane's copy now is what
+    // put a 234,323-character dump of prompt echo, intermediate output and
+    // footer into History beside the real answer, and #2399 explicitly accepted
+    // that trade because the boolean it had could not tell "not yet" from
+    // "never". It can now.
+    //
+    // Everything else this tick does still happens: the cursor advances, the
+    // prompts are marked answered, the waiting episode closes, the push goes
+    // out. Only the two writes that RECORD THE REPLY wait.
+    const holdScrapedHistory = !suppressScrapedHistory && captureReport.outcome === 'not_yet_closed';
+
     // Create Markdown log file for the conversation pair
-    if (cleanedResponse && !suppressScrapedHistory) {
+    if (cleanedResponse && !suppressScrapedHistory && !holdScrapedHistory) {
       await recordClaudeConversation(db, worktreeId, cleanedResponse, cliToolId);
     }
 
@@ -1412,7 +1685,38 @@ export async function checkForResponse(
     // are not byte-comparable — the pane's copy is hard-wrapped at the pane
     // width and gutter-prefixed, so no content check could ever recognise them
     // as the same reply.
-    if (!suppressScrapedHistory) {
+    if (holdScrapedHistory) {
+      holdScrapedResponse(pollerKey, {
+        worktreeId,
+        cliToolId,
+        instanceId: resolvedInstanceId,
+        content: cleanedResponse,
+        // The instant the turn was JUDGED finished, not the instant the row is
+        // written. History sorts on this, and a row dated at the end of the
+        // hold would sort under the NEXT turn's prompt.
+        timestamp: new Date(),
+        summary: claudeMetadata?.summary,
+        logFileName: claudeMetadata?.logFileName,
+        requestId: claudeMetadata?.requestId,
+        worktreePath: worktree.path,
+        transcriptPathHint: claudeMetadata?.logFilePath ?? null,
+        expiresAt: Date.now() + PENDING_SCRAPE_HOLD_MS,
+      });
+      logger.info('structured-history-scrape-held', {
+        worktreeId,
+        cliToolId,
+        instanceId: resolvedInstanceId,
+        scrapedLength: cleanedResponse.length,
+        holdMs: PENDING_SCRAPE_HOLD_MS,
+      });
+
+      // The completion edge is announced HERE and not at the flush, because the
+      // turn finished now. A relay waiting on this session gets #2401's grace
+      // window to find a turn-keyed row, which is exactly the row the hold is
+      // waiting for; delaying the announcement by the hold would delay every
+      // delivery by it too.
+      onRelayTurnCompleted(worktreeId, cliToolId, resolvedInstanceId, false);
+    } else if (!suppressScrapedHistory) {
       // Create new CLI tool message in database
       const message = createMessage(db, {
         worktreeId,
@@ -1439,6 +1743,9 @@ export async function checkForResponse(
       // the suppressed branch means the gate already announced it, settled.
       onRelayTurnCompleted(worktreeId, cliToolId, resolvedInstanceId, false);
     } else {
+      // Issue #2436: a hold from an earlier tick of this same turn is now moot
+      // — the row it was waiting for exists.
+      if (structuredHistoryLive) discardPendingScrapedResponse(pollerKey);
       logger.info('structured-history-scrape-suppressed', {
         worktreeId,
         cliToolId,
