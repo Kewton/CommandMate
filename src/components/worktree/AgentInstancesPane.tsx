@@ -660,7 +660,8 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
                   }
                   onBlur={(e) => commitAlias(inst.id, e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter') e.currentTarget.blur();
+                    // Guard against IME composition (Enter confirms candidate, not submit).
+                    if (e.key === 'Enter' && !e.nativeEvent.isComposing) e.currentTarget.blur();
                   }}
                   className="w-full text-sm font-medium border border-input rounded-md px-2 py-1 bg-surface dark:bg-surface-2 text-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-accent-500 disabled:opacity-50"
                 />

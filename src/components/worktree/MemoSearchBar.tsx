@@ -58,7 +58,10 @@ export function MemoSearchBar({
     (e: React.KeyboardEvent<HTMLInputElement>) => {
       if (e.key === 'Escape') {
         onClose();
-      } else if (e.key === 'Enter') {
+        return;
+      }
+      // Guard against IME composition (Enter confirms candidate, not submit).
+      if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
         e.preventDefault();
         onNext();
       }
