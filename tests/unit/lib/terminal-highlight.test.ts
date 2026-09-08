@@ -6,7 +6,10 @@
  * @vitest-environment jsdom
  */
 
+import { readFileSync } from 'fs';
+import path from 'path';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { MAX_SPLITS } from '@/config/terminal-split-config';
 import {
   isCSSHighlightSupported,
   applyTerminalHighlights,
@@ -457,5 +460,54 @@ describe('terminal-highlight', () => {
       expect(mockDelete).toHaveBeenCalledWith('history-search');
       expect(mockDelete).toHaveBeenCalledWith('history-search-current');
     });
+  });
+});
+
+/**
+ * Issue #2421: `makeHistoryNamespace(i)` is only half of a highlight.
+ *
+ * `::highlight()` rules cannot be created at runtime, so the static rules in
+ * `src/app/globals.css` are the OTHER half — and the failure when they are
+ * missing is silent: the search still finds its matches, still counts them and
+ * still scrolls to them, it just never paints. `MAX_SPLITS` went 3 -> 4 in this
+ * Issue, which is exactly the kind of change that leaves the last split's
+ * namespace unpainted, so the rule list is asserted against the constant rather
+ * than trusted.
+ */
+describe('[#2421] per-split History highlight rules exist in globals.css', () => {
+  const css = readFileSync(path.join(process.cwd(), 'src/app/globals.css'), 'utf8');
+
+  it('declares a rule for every split index makeHistoryNamespace can produce', () => {
+    for (let i = 0; i < MAX_SPLITS; i++) {
+      const ns = makeHistoryNamespace(i);
+      expect(css, `missing ::highlight(${ns.highlightName})`).toContain(
+        `::highlight(${ns.highlightName})`,
+      );
+      expect(css, `missing ::highlight(${ns.currentHighlightName})`).toContain(
+        `::highlight(${ns.currentHighlightName})`,
+      );
+    }
+  });
+
+  it('gives each of those rules a real background (a rule that paints nothing is the same bug)', () => {
+    for (let i = 0; i < MAX_SPLITS; i++) {
+      const ns = makeHistoryNamespace(i);
+      for (const name of [ns.highlightName, ns.currentHighlightName]) {
+        // Selectors are comma-grouped, so the declaration block follows the LAST
+        // selector of the group this name belongs to.
+        const block = css.slice(css.indexOf(`::highlight(${name})`));
+        const declarations = block.slice(block.indexOf('{'), block.indexOf('}'));
+        expect(declarations, `::highlight(${name}) paints nothing`).toContain(
+          'background-color:',
+        );
+      }
+    }
+  });
+
+  // The negative control: the suffix one past the ceiling must NOT be declared,
+  // which is what proves the assertions above are reading the rule list rather
+  // than matching any `history-search-*` substring.
+  it('does not declare a rule beyond the ceiling', () => {
+    expect(css).not.toContain(`::highlight(history-search-${MAX_SPLITS})`);
   });
 });

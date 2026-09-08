@@ -14,6 +14,12 @@
  * by instanceId. For the primary instance `instanceId === cliToolId`, so the
  * pre-#869 single-instance behavior is byte-for-byte unchanged.
  *
+ * Issue #2421: the ceiling is 4 splits, and at exactly 4 the container lays the
+ * splits out as a 2x2 grid instead of a row. The hook's contribution to that is
+ * `rowHeights` — the grid's two row ratios — plus the invariant that they exist
+ * ONLY while the layout is a grid (`syncGridRowHeights`), which is what keeps a
+ * 1-3 split payload identical to its pre-#2421 self on disk.
+ *
  * Issue #2261: the hook also owns `maximizedIndex` — which single split is
  * temporarily filling the terminal row. It sits BESIDE the persisted
  * `TerminalSplitConfig` rather than inside it precisely so it is not written to
@@ -29,11 +35,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { AgentInstance } from '@/lib/cli-tools/types';
 import {
+  DEFAULT_GRID_ROW_HEIGHTS,
   DEFAULT_SPLIT_CONFIG,
+  GRID_ROW_COUNT,
+  GRID_SPLIT_COUNT,
   MAX_SPLITS,
   MIN_SPLITS,
   getTerminalSplitsStorageKey,
+  isGridLayout,
+  isValidRowHeights,
   normalizeSplitConfig,
+  resolveRowHeights,
   type TerminalSplitConfig,
   type TerminalSplitEntry,
 } from '@/config/terminal-split-config';
@@ -56,9 +68,27 @@ export interface UseTerminalSplitsReturn {
   setSplitInstance: (idx: number, instanceId: string) => boolean;
   setSplitWidth: (widths: number[]) => void;
   /**
+   * Issue #2421: the two row ratios of the 2x2 grid.
+   *
+   * Always `GRID_ROW_COUNT` entries, even while the layout is a 1-3 split row —
+   * consumers get equal rows there rather than `undefined`, which is what keeps
+   * the container free of "is this a grid yet?" branching in its style math.
+   * Only the grid PERSISTS them (see `TerminalSplitConfig.rowHeights`).
+   */
+  rowHeights: number[];
+  /**
+   * Issue #2421: replace the grid's row ratios. Ignores anything that is not
+   * `GRID_ROW_COUNT` finite positive numbers, mirroring `setSplitWidth`.
+   */
+  setRowHeights: (rowHeights: number[]) => void;
+  /**
    * Issue #861: equalize the visible split widths so each split occupies an
    * equal share (`1 / n`, n = split count). Splits / instance assignments are
    * left untouched; only `widths` changes. Sum stays ~1.0 (n * (1/n)).
+   *
+   * Issue #2421: in the grid it equalizes the ROWS too — "equalize" means the
+   * user wants every pane the same size, and in a 2x2 half of that size is
+   * vertical. Equal widths alone would leave a 70/30 row split standing.
    */
   resetWidths: () => void;
   /** Returns instance ids allowed for `idx` (excludes instances used by other splits). */
@@ -103,6 +133,46 @@ function defaultConfigFor(instances: AgentInstance[]): TerminalSplitConfig {
 function normalizeWidths(widths: number[]): number[] {
   const sum = widths.reduce((s, w) => s + w, 0);
   return sum > 0 ? widths.map(w => w / sum) : widths.map(() => 1 / widths.length);
+}
+
+/**
+ * Issue #2421: keep `rowHeights` present exactly while the layout is a grid.
+ *
+ * Applied to EVERY config transition (initial read, add, remove, roster
+ * reconcile, worktree switch) so the persisted payload can never carry row
+ * heights for a layout that has no rows — which is what lets the 1-3 split JSON
+ * stay byte-identical to what pre-#2421 builds wrote and read.
+ *
+ * Returns the SAME reference when nothing has to change, so callers keep the
+ * `setConfig` bail-out (no re-render) they had before.
+ */
+function syncGridRowHeights(config: TerminalSplitConfig): TerminalSplitConfig {
+  if (isGridLayout(config.splits.length)) {
+    if (isValidRowHeights(config.rowHeights) && config.rowHeights !== undefined) return config;
+    return { ...config, rowHeights: [...DEFAULT_GRID_ROW_HEIGHTS] };
+  }
+  if (config.rowHeights === undefined) return config;
+  // Delete rather than set to `undefined`: `Object.keys` on the parsed payload
+  // is what pins the persisted shape (#2261's persistence test).
+  const { rowHeights: _dropped, ...rest } = config;
+  return rest;
+}
+
+/**
+ * Issue #2421: the widths a FRESH 2x2 grid starts from.
+ *
+ * Entering the grid changes what `widths` means — three columns become two
+ * (shared by both rows), so the ratios that described the row layout no longer
+ * describe anything. Rather than reinterpret them into a lopsided grid
+ * (`[0.5, 0.25, 0.25]` would open the grid at a 2:1 column split), a layout-mode
+ * change starts equal, the same way `resetWidths` does.
+ *
+ * `widths[2]` / `widths[3]` mirror `widths[0]` / `widths[1]` so each entry still
+ * describes its own pane's horizontal share even though the column ratio is read
+ * off the first two.
+ */
+function equalGridWidths(): number[] {
+  return Array.from({ length: GRID_SPLIT_COUNT }, () => 1 / GRID_SPLIT_COUNT);
 }
 
 /**
@@ -168,7 +238,9 @@ function reconcileConfig(config: TerminalSplitConfig, instances: AgentInstance[]
   } else {
     widths = Array.from({ length: newSplits.length }, () => 1 / newSplits.length);
   }
-  return { splits: newSplits, widths };
+  // Issue #2421: the reconcile can trim a 4-split grid down to 3 (or grow back),
+  // so the grid-only `rowHeights` invariant is re-established here too.
+  return syncGridRowHeights({ ...config, splits: newSplits, widths });
 }
 
 /**
@@ -187,7 +259,10 @@ function loadPersistedConfig(worktreeId: string, instances: AgentInstance[]): Te
     const normalized = normalizeSplitConfig(parsed);
     if (normalized) {
       // Self-heal widths (sum -> 1.0); leave splits untouched.
-      return { ...normalized, widths: normalizeWidths(normalized.widths) };
+      // Issue #2421: `syncGridRowHeights` supplies equal rows for a persisted
+      // 4-split payload that predates row heights, and strips a stray pair off a
+      // 1-3 split one — neither case falls back to the default layout.
+      return syncGridRowHeights({ ...normalized, widths: normalizeWidths(normalized.widths) });
     }
     console.warn(
       `[useTerminalSplits] stale state for ${worktreeId}; falling back to default`,
@@ -221,6 +296,15 @@ function readInitialState(
 ): TerminalSplitConfig {
   const loaded = loadPersistedConfig(worktreeId, instances);
   return rosterReady ? reconcileConfig(loaded, instances) : loaded;
+}
+
+/** Issue #2421: shape guard for `setRowHeights`, mirroring `widthsValid`. */
+function rowHeightsValid(rowHeights: unknown): rowHeights is number[] {
+  return (
+    Array.isArray(rowHeights) &&
+    rowHeights.length === GRID_ROW_COUNT &&
+    isValidRowHeights(rowHeights)
+  );
 }
 
 function pickUnusedInstance(
@@ -336,16 +420,20 @@ export function useTerminalSplits(
       const used = new Set(prev.splits.map(s => s.instanceId));
       const next = pickUnusedInstance(instancesRef.current, used);
       if (!next) return prev; // no spare instance to assign
+      const splits = [...prev.splits, { cliToolId: next.cliTool, instanceId: next.id }];
+      // Issue #2421: the 4th split is a LAYOUT-MODE change (row -> 2x2 grid), so
+      // the 1-D ratios stop describing the layout and the grid opens equal
+      // instead of inheriting a lopsided column split from the 3-split row.
+      if (isGridLayout(splits.length)) {
+        return syncGridRowHeights({ ...prev, splits, widths: equalGridWidths() });
+      }
       const lastIdx = prev.widths.length - 1;
       const lastWidth = prev.widths[lastIdx];
       const halved = lastWidth / 2;
       const newWidths = [...prev.widths];
       newWidths[lastIdx] = halved;
       newWidths.push(halved);
-      return {
-        splits: [...prev.splits, { cliToolId: next.cliTool, instanceId: next.id }],
-        widths: newWidths,
-      };
+      return syncGridRowHeights({ ...prev, splits, widths: newWidths });
     });
   }, []);
 
@@ -358,7 +446,9 @@ export function useTerminalSplits(
       if (prev.splits.length <= MIN_SPLITS) return prev;
       const splits = prev.splits.slice(0, -1);
       const widths = normalizeWidths(prev.widths.slice(0, -1));
-      return { splits, widths };
+      // Issue #2421: leaving the grid drops `rowHeights` (there are no rows to
+      // describe), which is what restores the pre-#2421 payload shape.
+      return syncGridRowHeights({ ...prev, splits, widths });
     });
   }, []);
 
@@ -420,7 +510,30 @@ export function useTerminalSplits(
     setConfig(prev => {
       const n = prev.splits.length;
       if (n === 0) return prev; // defensive; MIN_SPLITS=1 makes this unreachable
-      return { ...prev, widths: Array.from({ length: n }, () => 1 / n) };
+      const widths = Array.from({ length: n }, () => 1 / n);
+      // Issue #2421: in the grid, half of "same size" is vertical — equal
+      // columns beside a 70/30 row split is not what the user asked for. Equal
+      // widths also restore the mirror (widths[2]===widths[0]) the grid reads
+      // its single column ratio through.
+      if (isGridLayout(n)) {
+        return { ...prev, widths, rowHeights: [...DEFAULT_GRID_ROW_HEIGHTS] };
+      }
+      return syncGridRowHeights({ ...prev, widths });
+    });
+  }, []);
+
+  /**
+   * Issue #2421: replace the grid's row ratios (the vertical resizer's writer).
+   *
+   * Silently ignored while the layout is not a grid: there is no row boundary to
+   * move, and writing the pair would put `rowHeights` into a payload whose shape
+   * this Issue promises not to change.
+   */
+  const setRowHeights = useCallback((next: number[]) => {
+    setConfig(prev => {
+      if (!isGridLayout(prev.splits.length)) return prev;
+      if (!rowHeightsValid(next)) return prev;
+      return { ...prev, rowHeights: [...next] };
     });
   }, []);
 
@@ -439,6 +552,14 @@ export function useTerminalSplits(
     setFocusedSplitIndexRaw(idx);
   }, []);
 
+  // Issue #2421: always a usable pair, so the container never branches on
+  // `undefined`. Memoized on the persisted value so the array identity is stable
+  // across renders that did not touch the rows.
+  const rowHeights = useMemo(
+    () => resolveRowHeights(config.rowHeights),
+    [config.rowHeights],
+  );
+
   // Issue #2261: same button in the split title bar and in the Action bar, so
   // one toggle rather than a maximize()/restore() pair. Reads the live split
   // count through `configRef` (not `config`) to stay referentially stable.
@@ -450,6 +571,8 @@ export function useTerminalSplits(
   return {
     splits: config.splits,
     widths: config.widths,
+    rowHeights,
+    setRowHeights,
     addSplit,
     removeSplit,
     setSplitInstance,

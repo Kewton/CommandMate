@@ -199,7 +199,8 @@ describe('[#2261] TerminalSplitContainer maximize toggle', () => {
     it('shows the count while nothing is maximized', () => {
       setup();
       addSplits(1);
-      expect(screen.getByTestId('split-count-label')).toHaveTextContent('2 / 3 splits');
+      // Issue #2421: the denominator is MAX_SPLITS, now 4.
+      expect(screen.getByTestId('split-count-label')).toHaveTextContent('2 / 4 splits');
     });
 
     it('says which split is filling the row while one is maximized', () => {
@@ -248,5 +249,95 @@ describe('[#2261] TerminalSplitContainer maximize toggle', () => {
       fireEvent.click(screen.getByTestId('equalize-split-widths'));
       for (const i of [0, 1]) expect(wrapperOf(i).style.display).toBe('');
     });
+  });
+});
+
+/**
+ * Issue #2421 (trap 2): the same maximize, inside the 2x2 grid.
+ *
+ * `display: none` alone is NOT enough here. A CSS grid TRACK survives its
+ * children being hidden, so with the 2x2 template still in place the surviving
+ * pane would sit in the top-left quarter of the terminal area and the other
+ * three quarters would be empty — visibly wrong, and invisible to any test that
+ * only asserts the other panes are hidden. So the template itself has to
+ * collapse to one cell while a split is maximized.
+ */
+describe('[#2421] maximize inside the 2x2 grid', () => {
+  beforeEach(() => clearTerminalSplitsLocalStorage());
+  afterEach(() => clearTerminalSplitsLocalStorage());
+
+  const layout = () => screen.getByTestId('terminal-split-layout');
+
+  function setupGrid() {
+    const utils = setup();
+    addSplits(3); // -> 4 splits, the grid
+    expect(layout()).toHaveAttribute('data-layout', 'grid');
+    return utils;
+  }
+
+  it('collapses the grid to a single cell so the pane is not left in a quarter', () => {
+    setupGrid();
+    const beforeColumns = layout().style.gridTemplateColumns;
+    const beforeRows = layout().style.gridTemplateRows;
+
+    fireEvent.click(screen.getByTestId('pane-maximize-3'));
+
+    expect(layout().style.gridTemplateColumns).toBe('1fr');
+    expect(layout().style.gridTemplateRows).toBe('1fr');
+    // ...and the surviving pane occupies it, rather than keeping its 2x2 slot
+    // (bottom-right) inside a one-cell grid.
+    expect(wrapperOf(3).style.gridColumn).toBe('1');
+    expect(wrapperOf(3).style.gridRow).toBe('1');
+
+    fireEvent.click(screen.getByTestId('pane-maximize-3'));
+    expect(layout().style.gridTemplateColumns).toBe(beforeColumns);
+    expect(layout().style.gridTemplateRows).toBe(beforeRows);
+    expect(wrapperOf(3).style.gridColumn).toBe('3');
+    expect(wrapperOf(3).style.gridRow).toBe('3');
+  });
+
+  it('hides the other three WITHOUT unmounting them (same contract as the row)', () => {
+    setupGrid();
+    fireEvent.click(screen.getByTestId('pane-maximize-1'));
+
+    for (const i of [0, 2, 3]) expect(wrapperOf(i).style.display).toBe('none');
+    expect(wrapperOf(1).style.display).toBe('');
+    for (const i of [0, 2, 3]) expect(screen.getByTestId(`pane-${i}`)).toBeInTheDocument();
+  });
+
+  it('hides both grid dividers while maximized and brings them back on restore', () => {
+    setupGrid();
+    const column = () => screen.getByTestId('split-grid-column-resizer');
+    const row = () => screen.getByTestId('split-grid-row-resizer');
+    expect(column().style.display).toBe('');
+    expect(row().style.display).toBe('');
+
+    fireEvent.click(screen.getByTestId('pane-maximize-0'));
+    expect(column().style.display).toBe('none');
+    expect(row().style.display).toBe('none');
+
+    fireEvent.click(screen.getByTestId('pane-maximize-0'));
+    expect(column().style.display).toBe('');
+    expect(row().style.display).toBe('');
+  });
+
+  it('restores the exact column and row ratios (nothing is re-derived)', () => {
+    setupGrid();
+    const before = {
+      columns: layout().style.gridTemplateColumns,
+      rows: layout().style.gridTemplateRows,
+    };
+
+    fireEvent.click(screen.getByTestId('toggle-maximize-split'));
+    fireEvent.click(screen.getByTestId('toggle-maximize-split'));
+
+    expect(layout().style.gridTemplateColumns).toBe(before.columns);
+    expect(layout().style.gridTemplateRows).toBe(before.rows);
+    for (const i of [0, 1, 2, 3]) expect(wrapperOf(i).style.display).toBe('');
+  });
+
+  it('reports 4 / 4 splits, the new ceiling', () => {
+    setupGrid();
+    expect(screen.getByTestId('split-count-label')).toHaveTextContent('4 / 4 splits');
   });
 });
