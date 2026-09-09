@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.33.3] - 2026-09-09
+
+> **Highlight**: チャット面が「終わったセッションの会話」を現行のものとして見せ続ける問題を、サーバ側とUI側の両方から塞ぎました。CommandMate の外でセッションが終わった場合（tmux 消滅・CLI が shell に落ちる・再起動）、これまで行を archive する経路は kill-session だけで、本番 DB では archived=0 の 327 行すべてが既に死んだセッションのものでした（#2444）。新しいエージェントプロセスが始まる時点で前セッションの行を退避し、UI 側では非稼働の間だけ旧行を「前回のセッション」に畳んで終了バナーを出します（#2445）。あわせて chat 表示にも History 列を並べられるようにして、過去の会話を読む導線を回復しました（#2446）。antigravity の中間ナレーションを「ターン終了」と誤判定して暫定本文のまま完了配送していた件も、保存と完了を分離して修正しています（#2443）。さらに socket 未指定の tmux 破壊コマンドを生成 deny 規則・静的ガード・env-clean の 3 層で塞ぎました — 2026-08-02 と 2026-09-08 の 2 度、既定サーバの全 mcbd-* セッションが消えた事故を受けた対応です（#2442）。
+
 ### Added
 
 - **feat(hooks,verify): socket 未指定の tmux 破壊コマンドを機構で塞ぎ、env-clean を契約から選べるようにする** (#2442): Claude セッションへ注入する `permissions.deny` に socket 無指定の `tmux kill-server` / `kill-session` / `set-option -g`（alias `set -g`）/ `bind-key`（`bind`）/ `unbind-key`（`unbind`）を追加（`-L` / `-S` つきの隔離 probe は従来どおり通る。claude 2.1.266 で実測、記録は `docs/design/agent-hooks-permission-deny-verification.md` §6）。静的ガードの走査対象を `tests/` から `scripts/` / `docs/` / `.claude/` / `.agents/` / ルート `AGENTS.md`・`CLAUDE.md` の実行コードブロックまで広げ、判定を近傍 120 文字の窓から呼び出し単位へ変更。契約に `success.requireEnvClean` と `verify.gates: [env-clean]` を追加し（repository option と OR）、本リポジトリの `.commandmate/verify.yaml` で `options.requireEnvClean: true` を有効化。
