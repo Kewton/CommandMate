@@ -39,6 +39,10 @@ function msg(id: string, role: ChatMessage['role'], offsetMs = 0): ChatMessage {
     messageType: 'normal',
     archived: false,
     cliToolId: 'claude',
+    // [#2436] `req_…` is the id the scraper has always written for a Claude row
+    // (`parseClaudeOutput`), so this stays on the verbatim path — and stays out
+    // of the pane-scrape fold, which is about rows with NO request id at all.
+    requestId: `req_${id}`,
   };
 }
 

@@ -27,7 +27,13 @@ import {
 } from './db';
 import { broadcastMessage } from './ws-server';
 // Issue #571 [DR1-05]: Import directly from response-cleaner instead of barrel re-export
-import { cleanClaudeResponse, cleanGeminiResponse, cleanOpenCodeResponse, cleanCopilotResponse } from './response-cleaner';
+import {
+  cleanClaudeResponse,
+  cleanGeminiResponse,
+  cleanOpenCodeResponse,
+  cleanCopilotResponse,
+  cleanScrollbackResponse,
+} from './response-cleaner';
 import { usesAlternateScreen, type CLIToolType } from './cli-tools/types';
 import type { ChatMessage } from '@/types/models';
 import { createLogger } from '@/lib/logger';
@@ -95,6 +101,32 @@ export function detectBufferReset(
 }
 
 /**
+ * How many rows of a capture count as "read so far".
+ *
+ * Trailing blank rows are discarded, for consistency with the response poller's
+ * `extractResponse`: tmux pads the pane out to its height, and counting that
+ * padding inflates the stored cursor so far past the real content that the
+ * poller's dedup check (`result.lineCount <= lastCapturedLine`) can never fire
+ * again.
+ *
+ * The one definition of the count, shared by the two writers of
+ * `session_states.last_captured_line` in this module (Issue #2437): the
+ * pre-send flush and {@link advanceCapturedLineForTranscriptTurn}. Two spellings
+ * of "how far have I read" would be two cursors that disagree.
+ *
+ * @param output - Raw capture
+ * @returns Row count with trailing blank rows removed
+ */
+function countCapturedLines(output: string): number {
+  const lines = output.split('\n');
+  let trimmedLength = lines.length;
+  while (trimmedLength > 0 && lines[trimmedLength - 1].trim() === '') {
+    trimmedLength--;
+  }
+  return trimmedLength;
+}
+
+/**
  * Time offset (in milliseconds) for assistant message timestamp
  * Ensures assistant response appears before user message in chronological order
  * @constant
@@ -104,8 +136,23 @@ const ASSISTANT_TIMESTAMP_OFFSET_MS: number = 1;
 /**
  * Clean CLI tool response based on tool type
  *
+ * Every one of `CLI_TOOL_IDS`' eight tools has a branch (Issue #2437). Until
+ * then four of them — codex, command-code, antigravity and vibe-local — fell
+ * through to `output.trim()`, and codex's branch said so in as many words:
+ * *"Codex doesn't need special cleaning"*. It does. What that branch actually
+ * saved was codex's **idle composer**, ANSI and all, as an assistant reply:
+ *
+ * ```text
+ * › Ask Codex to do anything
+ *
+ *   gpt-6-astra xhigh · ~/share/work/… · Main [default]
+ * ```
+ *
+ * See {@link cleanScrollbackResponse} for how the four share one cleaner
+ * without sharing a boundary rule.
+ *
  * @param output - Raw output from CLI tool
- * @param cliToolId - CLI tool identifier (claude, codex, gemini)
+ * @param cliToolId - CLI tool identifier
  * @returns Cleaned response content
  */
 export function cleanCliResponse(output: string, cliToolId: CLIToolType): string {
@@ -119,10 +166,111 @@ export function cleanCliResponse(output: string, cliToolId: CLIToolType): string
     case 'copilot':
       return cleanCopilotResponse(output);
     case 'codex':
-      // Codex doesn't need special cleaning
-      return output.trim();
+    case 'command-code':
+    case 'antigravity':
+    case 'vibe-local':
+      return cleanScrollbackResponse(output, cliToolId);
     default:
       return output.trim();
+  }
+}
+
+/**
+ * Move `last_captured_line` past everything a transcript row now covers
+ * (Issue #2437).
+ *
+ * ## The defect this closes
+ *
+ * The pre-send flush ({@link savePendingAssistantResponse}) reads
+ * `lastCapturedLine`, and saves **everything past it** as the pending reply. The
+ * only writer of that cursor used to be the flush itself and the response
+ * poller — the Stop path that writes the agent's OWN Markdown into History
+ * (`hooks/sources/<tool>/history.ts`) never touched it. So on this ordering, which
+ * costs nothing to hit at a 2-second poll interval:
+ *
+ * ```text
+ * 1. turn ends  → the Stop path writes the turn as a Markdown row   (cursor unmoved)
+ * 2. `/send` arrives BEFORE the next poll tick
+ * 3. the flush saves "everything since the cursor" = the whole finished turn
+ * ```
+ *
+ * The second copy is the pane's scrape of the very same turn, so the chat
+ * surface shows one reply twice. A cleaner cannot help: what is duplicated is
+ * the real body, not chrome.
+ *
+ * ## Why a capture rather than an arithmetic bump
+ *
+ * The cursor is a row index into the pane, and the transcript reader never looks
+ * at the pane at all — it reads a JSONL file. The only honest way to say "the
+ * pane up to here is already in History" is to ask the pane how tall it is now.
+ * The capture is the cached one ({@link captureSessionOutput}, 5s TTL shared
+ * with the poller), so a Stop that lands between two ticks usually costs no
+ * `tmux capture-pane` at all.
+ *
+ * ## What it deliberately does not do
+ *
+ * - **Alternate-screen tools are skipped.** For claude, opencode and copilot the
+ *   line count is a screen-row constant rather than a cursor (Issue #1268), and
+ *   {@link savePendingAssistantResponse} refuses to run for them at all — there
+ *   is no cursor here to advance and writing one would be a lie.
+ * - **The cursor only ever moves forward.** A capture shorter than the stored
+ *   value is a buffer reset, and `detectBufferReset` owns that reading; moving
+ *   the cursor backwards from here would hand the flush a range it has already
+ *   saved.
+ * - **It never throws, and never changes the caller's answer.** The transcript
+ *   row is written whether or not this succeeds; a failure here costs one
+ *   duplicated reply, and a failure that propagated would cost the row.
+ *
+ * @param target - The instance whose turn was just written to History
+ * @returns The cursor's new value, or null when it was left where it was
+ */
+export async function advanceCapturedLineForTranscriptTurn(target: {
+  worktreeId: string;
+  cliToolId: CLIToolType;
+  instanceId?: string;
+}): Promise<number | null> {
+  const { worktreeId, cliToolId } = target;
+  const resolvedInstanceId = target.instanceId ?? cliToolId;
+  try {
+    if (usesAlternateScreen(cliToolId)) {
+      return null;
+    }
+
+    const output = await captureSessionOutput(
+      worktreeId,
+      cliToolId,
+      SESSION_OUTPUT_BUFFER_SIZE,
+      target.instanceId
+    );
+    if (!output) {
+      return null;
+    }
+
+    const currentLineCount = countCapturedLines(output);
+    const { getDbInstance } = await import('./db/db-instance');
+    const db = getDbInstance();
+    const lastCapturedLine = getSessionState(db, worktreeId, resolvedInstanceId)?.lastCapturedLine || 0;
+    if (currentLineCount <= lastCapturedLine) {
+      return null;
+    }
+
+    updateSessionState(db, worktreeId, cliToolId, currentLineCount, target.instanceId);
+    logger.info('transcript:cursor-advanced', {
+      worktreeId,
+      instanceId: resolvedInstanceId,
+      from: lastCapturedLine,
+      to: currentLineCount,
+    });
+    return currentLineCount;
+  } catch (error) {
+    // Never the caller's problem: the transcript row is already written, and the
+    // worst this costs is the duplicate it was meant to prevent.
+    logger.debug('transcript:cursor-advance-failed', {
+      worktreeId,
+      instanceId: resolvedInstanceId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
   }
 }
 
@@ -193,16 +341,9 @@ export async function savePendingAssistantResponse(
       return null;
     }
 
-    // 3. Calculate current line count
-    // Trim trailing empty lines for consistency with response-poller's extractResponse.
-    // Without this, tmux buffer padding inflates the line count, causing the poller's
-    // dedup check (result.lineCount <= lastCapturedLine) to always trigger.
+    // 3. Calculate current line count (see countCapturedLines for the trim).
     const lines = output.split('\n');
-    let trimmedLength = lines.length;
-    while (trimmedLength > 0 && lines[trimmedLength - 1].trim() === '') {
-      trimmedLength--;
-    }
-    const currentLineCount = trimmedLength;
+    const currentLineCount = countCapturedLines(output);
 
     // 4. Detect buffer reset (Issue #59 fix)
     const { bufferReset, reason } = detectBufferReset(currentLineCount, lastCapturedLine);

@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.33.2] - 2026-09-09
+
+> **Highlight**: チャット面に並んでいた「返答ではない行」を 3 件まとめて塞ぎました。転写を持つツールでは、転写行が着地するまでペイン全体の scrape を最大 7.65 秒保留し、着地したら保留を破棄します（#2436、UAT 実測: 転写が保留内に閉じたケースで scrape 行 0 件、閉じないケースで 1 件という対照）。送信直前のフラッシュが idle composer や前ターンの本文を返答として保存していた件は、SGR に基づく構造的な composer 判別と、転写書き込み時の `last_captured_line` 前進で塞いでいます（#2437）。antigravity では中間報告のまま凍っていた行が、後から届いた結論で同じ行のまま更新されるようになりました（実測 16,959 → 21,581 字、#2438）。
+
+### Security
+
+- **chore(deps): Next.js を 15.5.25 へ更新し、critical 勧告を塞いだ**: リリース PR の Security Audit ジョブが `npm audit report: critical=1` で赤になった。実体は Next.js の `>=13.4.0 <15.5.24` に効く **GHSA-p293-qw3h-jr36（Windows ホストでの認証不要 RCE、CVSS 9.0）** で、同時期に公開された 9 件の勧告（Server Actions の DoS / SSRF、Image Optimization API の AVIF 経由 RCE、レスポンスボディのキャッシュ混線、内部 Server Function エンドポイントの無認証露出など）も同じ更新で解消する。宣言を `^15.5.20` → `^15.5.25` に上げ、`npm audit --audit-level=critical` が exit 0 になることを確認した。コードの変更は無い。
+
+### Fixed
+
+- **fix(history): antigravity の保存済みターンを後から届いた結論で更新するようにした** (#2438): agy には turn を閉じるレコードが無いので `isAntigravityTurnClosingRecord` は「散文があって `tool_calls` が無い `PLANNER_RESPONSE`」を終了と読むしかなく、**中間報告がその形をしている**ため、「現在返答待機中です」の時点で assistant 行が保存され、同じターンに結論が追記されても行が凍ったままになっていた（実測: 1 会話 34 レコードで 16,959 文字のまま、結論込みなら 21,581 文字）。行のキーは `antigravity-turn:<conversationId>#<開始step>` なので以後の読込は anchor でこの行を見つけて pending が空になり、`captureAntigravityTranscriptTurn` は本文を比べずに true を返し、gate はその true で scrape の保存も止めるため、結論が History に載る経路が一つも無かった。#2264 が claude / command-code に入れたのと同型の `growAntigravityTurnRow` / `refreshAntigravityTurnRows` を追加し、`selectUnwrittenAntigravityTurns` の直後・**pending 0 の早期 return より前**に既に書いた側の末尾 `ANTIGRAVITY_TURN_RECHECK_LIMIT`（3）ターンを描き直して、既存 `content` より**厳密に長い**ときだけ `updateMessageContent` で同じ行を置換する（`id` / `requestId` / `timestamp` は維持し `message_updated` で配信、新規 `message` は出さない）。同長の別本文・短い描画・まだ writable でないターン・行の無い候補は触らない。戻り値と #2436 の `report.outcome` は不変で、pending があるときは従来どおり最新ターンの保存可否を返す（古い行を直しても最新が未完了なら false）。中間報告を終了と見なす判定そのものは残り、後からの更新は relay が配送済みの内容を訂正しない。
+- **fix(chat): 転写行が書かれたターンにペイン全体の scrape 行が並ぶ問題を修正** (#2436): `captureStructuredHistoryTurn` に三値の outcome（`captured` / `not_yet_closed` / `unavailable`）を報告させ、転写がまだ閉じていないターンでは scrape の保存を `STOP_TRANSCRIPT_DEFERRED_DELAYS_MS` の総和（7.65 秒）まで保留するようにした。保留は dedup キャッシュの外に置き、期限切れ・セッション終了・次ターン開始（`stopPollingByKey` の全経路）で確定し、その間に転写行が着地したら破棄する。表示側では `request_id` を持たない assistant/normal 行のうち転写リーダーを持つツール（copilot / gemini / vibe-local を除く）のものをチップに折り畳む保険を追加した。
+- **fix(session): 送信直前フラッシュが composer と前ターン本文を返答として保存する問題を修正** (#2437): `cleanCliResponse` に codex / command-code / antigravity / vibe-local の分岐を追加し（composer の判別は #2310 の SGR 規則に基づく `findCodexChromeStart` と `findCommandCodeChromeStart` で構造的に行い、文字列の除外リストにしない）、さらに 4 つの pull 転写リーダー（`captureClaudeTranscriptTurn` / `captureCodexTranscriptTurn` / `captureAntigravityTranscriptTurn` / `captureCommandCodeTranscriptTurn`）が転写行の書き込みに成功したときに `last_captured_line` を進めるようにして、次の poll より先に `/send` が来たときに前ターンの本文がまるごと再保存されるのを防いだ。
+
 ## [0.33.1] - 2026-09-08
 
 > **Highlight**: 日本語で使うときに毎日踏んでいた入力の取りこぼしと、Command Code の「終わっていないのに終わったことにする」を直しました。**Enter で確定するテキスト入力 7 箇所にIME の composition ガードが無く**、変換確定の Enter でそのまま確定していました — 別名やファイル名は未変換のまま永続化されます（#2428）。Command Code では、ツール呼び出しの無いターンで**前ターンの `hook_stop` が生成中の画面に勝ち続け**、`wait` が 60 秒保留のあと `scraper_ready` で早期完了していました（#2429、実測: 生成中フレーム 15/15 が `ready`。修正後は 14/14 が `running`）。あわせて 4 分割でどのターミナルが何をしていたか分かるよう、**セッションごとの 1 行メモ**を追加しています（#2427）。

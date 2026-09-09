@@ -61,10 +61,14 @@ describe('the happy path', () => {
       captureTranscriptTurnOnStop(WORKTREE, 'claude', 'claude-2')
     ).resolves.toBe(true);
 
-    expect(captureStructuredHistoryTurn).toHaveBeenCalledWith('wt-2246', 'claude', 'claude-2', {
-      worktreePath: WORKTREE.path,
-      transcriptPathHint: null,
-    });
+    expect(captureStructuredHistoryTurn).toHaveBeenCalledWith(
+      'wt-2246',
+      'claude',
+      'claude-2',
+      { worktreePath: WORKTREE.path, transcriptPathHint: null },
+      // [#2436] The gate's out-parameter for the three-valued outcome.
+      expect.objectContaining({}),
+    );
   });
 
   it('does not retry when the first ask succeeded', async () => {

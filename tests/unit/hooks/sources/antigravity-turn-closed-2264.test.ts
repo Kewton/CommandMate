@@ -42,9 +42,20 @@ const findMessageByRequestId = vi.fn(
   (_db: unknown, worktreeId: string, requestId: string) =>
     rows.get(`${worktreeId}::${requestId}`) ?? null
 );
+/**
+ * Issue #2438 gave this reader a second thing to do with an existing row: grow
+ * it. The mock writes, rather than only recording the call, so a test here can
+ * never pass on an update that changed nothing.
+ */
+const updateMessageContent = vi.fn((_db: unknown, messageId: string, content: string) => {
+  for (const row of rows.values()) {
+    if (row.id === messageId) row.content = content;
+  }
+});
 vi.mock('@/lib/db', () => ({
   createMessage: (...a: [unknown, Record<string, unknown>]) => createMessage(...a),
   findMessageByRequestId: (...a: [unknown, string, string]) => findMessageByRequestId(...a),
+  updateMessageContent: (...a: [unknown, string, string]) => updateMessageContent(...a),
 }));
 vi.mock('@/lib/db/chat-db', () => ({
   createMessage: (...a: [unknown, Record<string, unknown>]) => createMessage(...a),
@@ -67,6 +78,7 @@ import {
   type AntigravityTurnAccumulator,
 } from '@/lib/hooks/sources/antigravity/transcript';
 import { antigravityTurnRequestId } from '@/types/agent-transcript';
+import type { StructuredHistoryCaptureReport } from '@/lib/polling/structured-history-gate';
 
 const FIXTURE_DIR = join(process.cwd(), 'tests/fixtures/antigravity-transcript-2264');
 const WORKTREE_ID = 'wt-2264';
@@ -169,6 +181,16 @@ describe('the writer refuses a turn agy has not finished', () => {
     expect(await capture()).toBe(false);
 
     expect(writtenKeys()).not.toContain(antigravityTurnRequestId(CONVERSATION, C));
+  });
+
+  it('[#2436] says WHY it refused: the turn is not closed yet', async () => {
+    await writeTranscript(open);
+
+    const report: StructuredHistoryCaptureReport = {};
+    expect(await captureAntigravityTranscriptTurn(TARGET, { antigravityHome: home }, report)).toBe(
+      false
+    );
+    expect(report.outcome).toBe('not_yet_closed');
   });
 
   it('writes it once the reply arrives', async () => {

@@ -65,10 +65,12 @@ import {
   type RecordedUserTurn,
   type RecordUserTurnOptions,
 } from '@/lib/history/user-turn-recorder';
+import { advanceCapturedLineForTranscriptTurn } from '@/lib/assistant-response-saver';
 import { createLogger } from '@/lib/logger';
 import { claudePromptRequestId, claudeTurnRequestId } from '@/types/agent-transcript';
 import type { ChatMessage } from '@/types/models';
 import type { AgentInstanceRef } from '../types';
+import type { StructuredHistoryCaptureReport } from '@/lib/polling/structured-history-gate';
 import {
   buildClaudeTurns,
   claudeProjectSlug,
@@ -283,12 +285,21 @@ export interface ClaudeTranscriptCapture {
  *
  * Never throws.
  *
+ * Since Issue #2436 the false can explain itself: pass a
+ * `StructuredHistoryCaptureReport` and `outcome` is set to `'not_yet_closed'`
+ * when the newest turn is one the agent has not finished writing — the case the
+ * `-turn-open` line below reports, and the one where the caller's scraped copy
+ * is worth holding rather than saving. Every other false leaves it unset, which
+ * the gate reads as `'unavailable'`.
+ *
  * @param target - The instance whose turn just ended
+ * @param report - Optional out-parameter; see `StructuredHistoryCaptureReport`
  * @returns Whether History now holds this instance's newest turn as Markdown
  */
 export async function captureClaudeTranscriptTurn(
   target: AgentInstanceRef,
-  capture: ClaudeTranscriptCapture
+  capture: ClaudeTranscriptCapture,
+  report?: StructuredHistoryCaptureReport
 ): Promise<boolean> {
   const instanceId = target.instanceId ?? target.cliToolId;
   try {
@@ -370,6 +381,9 @@ export async function captureClaudeTranscriptTurn(
         instanceId,
         turnsInWindow: built.turns.length,
       });
+      // Issue #2437: this turn is already History's Markdown, so the pane rows
+      // behind it must stop being "unsaved output" the pre-send flush can pick up.
+      await advanceCapturedLineForTranscriptTurn(target);
       return true;
     }
 
@@ -418,8 +432,16 @@ export async function captureClaudeTranscriptTurn(
           lastRecordAt.get(turn.promptUuid) ?? 0,
           nextTurnOpensAt(pending.turns, userRows, index)
         ),
-        path
+        path,
+        report
       );
+    }
+    if (captured) {
+      // Issue #2437: History now holds this turn as the agent's own Markdown.
+      // Park the pre-send flush's cursor past the pane rows it covers, or a
+      // `/send` arriving before the next poll tick saves the whole finished turn
+      // a second time.
+      await advanceCapturedLineForTranscriptTurn(target);
     }
     return captured;
   } catch (error) {
@@ -1093,9 +1115,15 @@ async function writeClaudeTurn(
   turn: ClaudeTurnAccumulator,
   rendered: ClaudeRenderedTurn,
   timestampMs: number,
-  path: string
+  path: string,
+  report?: StructuredHistoryCaptureReport
 ): Promise<boolean> {
   const instanceId = target.instanceId ?? target.cliToolId;
+
+  // Issue #2436: the caller's report is about the turn THIS call is deciding.
+  // The loop above walks oldest-first, so a verdict left by an earlier turn has
+  // to be cleared before this one's is written.
+  if (report) report.outcome = undefined;
 
   if (!isClaudeTurnWritable(turn)) {
     // The agent has not said `end_turn` for this prompt and no later prompt has
@@ -1111,6 +1139,7 @@ async function writeClaudeTurn(
     // Handing it back to the scraper costs the Markdown rendering for this turn
     // and nothing else: the Stop receiver asks again after a short delay, and
     // the poller asks again when the pane returns to the composer.
+    if (report) report.outcome = 'not_yet_closed';
     logger.info('claude-transcript-turn-open', {
       worktreeId: target.worktreeId,
       instanceId,

@@ -176,7 +176,9 @@ describe('what the reader is told to look at', () => {
       WT,
       'claude',
       'claude-3',
-      expect.objectContaining({ worktreePath: '/repos/wt-2121' })
+      expect.objectContaining({ worktreePath: '/repos/wt-2121' }),
+      // [#2436] The gate's out-parameter for the three-valued outcome.
+      expect.objectContaining({}),
     );
   });
 
@@ -189,7 +191,9 @@ describe('what the reader is told to look at', () => {
       undefined,
       expect.objectContaining({
         transcriptPathHint: PANE_LOG_PATH,
-      })
+      }),
+      // [#2436] The gate's out-parameter for the three-valued outcome.
+      expect.objectContaining({}),
     );
   });
 

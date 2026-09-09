@@ -49,6 +49,10 @@ function makeMessages(count: number): ChatMessage[] {
     messageType: 'normal' as const,
     archived: false,
     cliToolId: 'claude' as const,
+    // [#2436] `req_…` is the id the scraper has always written for a Claude row
+    // (`parseClaudeOutput`), so these stay out of the pane-scrape fold, which is
+    // about rows with NO request id at all.
+    requestId: `req_m-${i}`,
   }));
 }
 
