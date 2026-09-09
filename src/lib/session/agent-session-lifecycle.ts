@@ -42,15 +42,27 @@ import {
   beginAgentEventGeneration,
   getAgentEventDropCounts,
 } from '@/lib/session/agent-event-state';
+import { archiveSupersededSessionMessages } from '@/lib/session/session-generation-archive';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('lib/session/agent-session-lifecycle');
 
 /**
- * Open a new event generation for an agent instance that is about to start.
+ * Open a new event generation for an agent instance that is about to start,
+ * and retire the previous process's chat history (Issue #2444).
  *
  * Safe to call for a tool that emits nothing: the fence is a timestamp, and a
  * tool with no events simply never has any to fence.
+ *
+ * The archive rides here rather than in its own seam because this function is
+ * already the answer to "a new agent process is being created for this
+ * (worktree, instance)" — the one fact that distinguishes a replacement from a
+ * reconnect, and the fact `chat_messages.archived` needs. See
+ * `lib/session/session-generation-archive` for why observing the *death*
+ * instead would archive live conversations. Note that the boundary is this call
+ * and not the adoption mark: codex's and opencode's relaunch paths run
+ * `reconcileExistingSession`, which sets an adoption mark, so a reader of that
+ * mark would miss exactly the endings this exists for.
  *
  * @param target - The instance being created
  * @param at - Epoch ms; defaults to now
@@ -83,6 +95,24 @@ export function beginAgentSession(target: AgentInstanceRef, at: number = Date.no
     // learn by noticing their `respond` no longer has anything to answer.
     decisionsEvicted: after - before,
   });
+
+  // Issue #2444: the rows the replaced process wrote are a previous session's
+  // history now. Inside a `try` and after the fence on purpose — this module
+  // otherwise touches nothing but memory, and a database that is missing,
+  // locked or mid-migration must cost a log line, never a session that refuses
+  // to start. It is also a no-op by construction wherever there is no database
+  // to reach (see `resolveSessionArchiveDatabase`), which is what keeps the
+  // suites that call this with tmux mocked and no DB at all unchanged.
+  try {
+    archiveSupersededSessionMessages(target);
+  } catch (error) {
+    logger.warn('session-generation-archive-failed', {
+      worktreeId: target.worktreeId,
+      cliToolId: target.cliToolId,
+      instanceId: target.instanceId ?? target.cliToolId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
 /**
