@@ -176,13 +176,19 @@ Claude は承認ダイアログを**描く前に**この hook を叩き、Comman
 > 実際の Claude セッションに対して毎回測り直す。3 項目の記録先の一覧は
 > [`docs/design/agent-hooks-live-verification.md`](../design/agent-hooks-live-verification.md) の §8。
 
-### 0.7 `permissions.deny` — パターン一括 kill の禁止（Issue #1739）
+### 0.7 `permissions.deny` — パターン一括 kill と socket 未指定 tmux の禁止（Issue #1739 / #2442）
 
 注入ファイルには hooks に加えて `permissions.deny` が入る。
 
 ```jsonc
 "permissions": {
-  "deny": ["Bash(pkill:*)", "Bash(killall:*)", "Bash(kill -9:*)"]
+  "deny": [
+    "Bash(pkill:*)", "Bash(killall:*)", "Bash(kill -9:*)",
+    "Bash(tmux kill-server:*)", "Bash(tmux kill-session:*)",
+    "Bash(tmux set-option -g:*)", "Bash(tmux set -g:*)",
+    "Bash(tmux bind-key:*)", "Bash(tmux bind:*)",
+    "Bash(tmux unbind-key:*)", "Bash(tmux unbind:*)"
+  ]
 }
 ```
 
@@ -226,6 +232,46 @@ kill "$(cat "$U/uat.pid")"      # ← deny 対象外。そのまま実行でき�
 拒否は**コマンドを合成しても回避できない**。`cd /tmp && pkill …`・`pkill … \| cat`・
 `echo x; pkill …` はいずれも拒否される（コマンド行が分解され、区間ごとに照合されるため。§0.7 の実測）。
 
+#### socket を指定しない tmux 操作（Issue #2442）
+
+2026-08-02 と 2026-09-08 の 2 度、**socket を指定しない `tmux kill-server`** が既定サーバの
+`mcbd-*` セッションを全滅させた（2 度目は 42 本）。2 度目はテストではなく、UAT 手順に従って
+書かれたその場の Bash ブロックからで、直前に `TMUX_TMPDIR` を設定していた。
+**`TMUX_TMPDIR` は `$TMUX` が未設定のときしか読まれない** — CommandMate のエージェントは
+必ず tmux pane の中で動くので `$TMUX` は常にユーザーの本番サーバを指しており、隔離は無効だった。
+
+tmux は宛先サーバを**サブコマンドの前に置く大域オプション**で受け取る（`-L <名前>` /
+`-S <パス>`）。どちらも `$TMUX` より優先される（tmux 3.5a で実測）。つまり
+「どのサーバに届くか」は argv の形だけで決まるので、deny 規則もその形を読む。
+
+| 書き方 | 可否 |
+|---|---|
+| `tmux -L cmate-probe <サブコマンド> …` / `tmux -S <パス> <サブコマンド> …` | ✅ 通る（**隔離の正しい書き方**） |
+| socket 無しの `kill-server` / `kill-session` | ❌ 拒否 |
+| socket 無しの `set-option -g` / `set -g` | ❌ 拒否 |
+| socket 無しの `bind-key` / `bind` / `unbind-key` / `unbind` | ❌ 拒否 |
+| socket 無しの読み取り（`list-sessions` / `capture-pane` / `show-options -g` …） | ✅ 通る |
+| socket 無しの `new-session` / `send-keys` / `kill-pane` など session 単位の操作 | ✅ 通る |
+
+**`kill-session -t '=name:'` も socket 無しでは拒否される。** 完全一致なので「名前を挙げた
+1 本しか壊さない」のは本当だが、**どのサーバの 1 本かは指定していない**。隔離 probe の
+後始末は `-L` つきで書くこと:
+
+```bash
+S=cmate-uat-$$                      # 自分専用の socket 名
+tmux -L "$S" new-session -d -s probe
+tmux -L "$S" send-keys -t probe 'echo hello' Enter
+tmux -L "$S" capture-pane -p -t probe
+tmux -L "$S" kill-session -t '=probe:'   # ← 後始末も -L つきで
+```
+
+拒否されない書き方もある（**「拒否されない」は「安全」ではない**）。実測済みの未防御形:
+絶対パス（`/opt/homebrew/bin/tmux …`）、`bash -c '…'`、サブコマンド前の別の大域オプション
+（`tmux -u …`）、tmux の省略形（`tmux kill-serv`）、結合された大域フラグ（`tmux set -ga …`）。
+またこの設定は **Claude セッションにしか効かない** —— 他 CLI（codex / copilot / gemini /
+opencode / antigravity）の Bash は裁定しない。後追い検知は `env-clean` ゲート
+（[docs/design/task-contract.md](../design/task-contract.md) §2.6）が担当する。
+
 #### ユーザー設定との関係
 
 - `--settings` の deny ルールは Claude 内部で **`flagSettings` という独立の宛先**に入り、
@@ -235,6 +281,10 @@ kill "$(cat "$U/uat.pid")"      # ← deny 対象外。そのまま実行でき�
   つまりユーザー設定の `permissions.allow` でこの禁止を開け直すことはできない。
 - 前方一致は**フラグまで含めて**照合される。`Bash(kill -9:*)` は `kill -9 …` だけを拒否し、
   `kill <pid>` には当たらない（`Bash(uname -a:*)` が `uname -a` を拒否し `uname -s` を通した実測による）。
+- 照合は**語単位かつ隣接**である（claude 2.1.266 で実測。#2442）。語の途中までの規則
+  （`Bash(tmux list-p:*)`）は `tmux list-panes` に当たらず、`Bash(… -g:*)` は結合フラグ
+  （`-gv`）にも離れた位置の `-g` にも当たらない。だから tmux の alias（`set` / `bind` /
+  `unbind`）には**それぞれ独立の行**が要る。
 
 実測の詳細は [agent-hooks-permission-deny-verification.md](../design/agent-hooks-permission-deny-verification.md)。
 

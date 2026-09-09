@@ -215,5 +215,19 @@ gates:
 options:
   baseRef: origin/develop
   skipInPrimaryCheckout: true
+  # [Issue #2442] リポジトリ外の副作用（稼働中サーバのポート・`mcbd-*` tmux セッション・
+  # `$HOME` 直下・`~/.commandmate` 直下）を裁定する組み込み env-clean ゲートを有効にする。
+  # 2026-08-02（#1624）と 2026-09-08 の 2 度、socket 未指定の `tmux kill-server` が
+  # 既定サーバの全 `mcbd-*` セッションを消した。どちらも scope ゲートは緑である
+  # （リポジトリ内のファイルは 1 つも壊れていない）。仕様は
+  # docs/design/task-contract.md §2.6。
+  #
+  # **これはリポジトリ全体の設定であり、委任だけのスイッチではない。** 自分の
+  # `commandmate verify` にも効く。ベースラインは task 作成時（`send --contract`）に
+  # しか採れないので、**この行より前に作られた task と、契約なしの verify は
+  # UNKNOWN（gate error → run failed）になる。** 過去に遡ってベースラインは作れない
+  # （検証直前の状態を「開始時」と偽ることが、このゲートが拒否する fail-open そのもの）。
+  # 契約なしの単独 verify で env-clean を避けるには `--gates` で明示指名する。
+  requireEnvClean: true
   # 8192 では vitest の失敗サマリが途中で切れ、2 件の失敗のうち 1 件しか読めなかった。
   maxLogTailBytes: 32768

@@ -13,20 +13,44 @@
  * directory would make the suite non-deterministic and, for tmux, would reach
  * the developer's own sessions.
  *
+ * Issue #2442 extends the same seam in three directions and adds the case the
+ * incidents were actually about — a tmux session that existed when the task began
+ * and is gone by verification time:
+ *
+ *   - the contract's own `success.requireEnvClean` now parses, so the switch works
+ *     per delegation and not only per repository;
+ *   - a contract may select the gate by naming it in `verify.gates`, which has to
+ *     record a baseline even though both booleans are false;
+ *   - this repository's `.commandmate/verify.yaml` turns the option on, asserted
+ *     here against the real file rather than a fixture.
+ *
  * @vitest-environment node
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { execFileSync } from 'child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, writeFileSync } from 'fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  writeFileSync,
+} from 'fs';
 import { tmpdir } from 'os';
-import { join } from 'path';
+import { join, resolve as resolvePath } from 'path';
 import type { NextRequest } from 'next/server';
 import { runMigrations } from '@/lib/db/db-migrations';
 import { getVerificationRun, upsertWorktree } from '@/lib/db';
 import { startVerification, waitForVerification } from '@/lib/verification/gate-runner';
-import { ENV_CLEAN_GATE_ID } from '@/lib/verification/verify-config';
+import {
+  defaultPlannedGateIds,
+  ENV_CLEAN_GATE_ID,
+  loadVerifyConfig,
+} from '@/lib/verification/verify-config';
+import { MCBD_SESSION_PREFIX } from '@/lib/verification/env-snapshot';
 import {
   ENV_SNAPSHOT_VERSION,
   type EnvProbeId,
@@ -161,8 +185,8 @@ function useRepo(requireEnvClean: boolean): void {
 }
 
 /** Create the task the way `send --contract` does: through the route. */
-async function sendContract(): Promise<string> {
-  writeFileSync(join(repo, '.commandmate', 'tasks', 'task.yaml'), CONTRACT);
+async function sendContract(source: string = CONTRACT): Promise<string> {
+  writeFileSync(join(repo, '.commandmate', 'tasks', 'task.yaml'), source);
   const { POST } = await import('@/app/api/worktrees/[id]/tasks/route');
   const response = await POST(
     asReq(
@@ -300,5 +324,179 @@ describe('send → verify', () => {
     const run = await verify(taskId);
     expect(run?.gates.map((gate) => gate.gateId)).toEqual(['work-evidence', 'scope', 'pass-gate']);
     expect(run?.status).toBe('passed');
+  });
+});
+
+// =============================================================================
+// Issue #2442
+// =============================================================================
+
+/** A worker's tmux session, named the way `lib/tmux` names them. */
+const OTHER_WORKER_SESSION = `${MCBD_SESSION_PREFIX}claude-wt-other-2442`;
+const OWN_SESSION = `${MCBD_SESSION_PREFIX}claude-${wtId}`;
+
+/** The contract spellings #2442 opened, each as the only thing switching the gate on. */
+const CONTRACT_SUCCESS_FLAG = `${CONTRACT}success:
+  requireEnvClean: true
+`;
+const CONTRACT_NAMING_THE_GATE = `${CONTRACT}verify:
+  gates: [env-clean, pass-gate]
+`;
+const CONTRACT_SAYING_FALSE = `${CONTRACT}success:
+  requireEnvClean: false
+`;
+
+describe('the tmux wipe this gate exists for (#1624, 2026-09-08)', () => {
+  it('fails the run when a session that existed at task start is gone', async () => {
+    // The shape of both incidents: a socket-less `kill-server` takes down every
+    // `mcbd-*` session on the machine, including other workers'. Nothing inside
+    // the repository changed, so `scope` and `work-evidence` are both green — this
+    // gate is the only one that can see it.
+    useRepo(true);
+    machine = snapshot({
+      listeners: listing(['tcp/3000']),
+      'tmux-sessions': listing([OWN_SESSION, OTHER_WORKER_SESSION]),
+    });
+    const taskId = await sendContract();
+    agentDidSomeWork();
+
+    machine = snapshot({ listeners: listing(['tcp/3000']), 'tmux-sessions': listing([]) });
+
+    const run = await verify(taskId);
+    const gate = run?.gates.find((entry) => entry.gateId === ENV_CLEAN_GATE_ID);
+    expect(gate?.status).toBe('failed');
+    // Both losses are named: a removal is a violation whoever owned it.
+    expect(gate?.logTail).toContain(`- ${OWN_SESSION}`);
+    expect(gate?.logTail).toContain(`- ${OTHER_WORKER_SESSION}`);
+    expect(run?.status).toBe('failed');
+    expect(run?.gates.find((entry) => entry.gateId === 'scope')?.status).toBe('passed');
+  });
+
+  it('compares against the stored baseline after the agent is gone', async () => {
+    // The row the Issue's table calls "the agent died, the verification server did
+    // not". The baseline is a file, not memory, so the comparison survives the
+    // session it describes — which is the only reason a wipe can be attributed at
+    // all. Verified by reading it off disk between the two halves of the run.
+    useRepo(true);
+    machine = snapshot({ 'tmux-sessions': listing([OWN_SESSION]) });
+    const taskId = await sendContract();
+
+    const stored = JSON.parse(readFileSync(join(snapshotDir, `${taskId}.json`), 'utf-8'));
+    expect(stored.probes['tmux-sessions'].entries.map((e: { key: string }) => e.key)).toEqual([
+      OWN_SESSION,
+    ]);
+
+    agentDidSomeWork();
+    machine = snapshot({ 'tmux-sessions': listing([]) });
+
+    expect((await verify(taskId))?.status).toBe('failed');
+  });
+
+  it('produces no result at all when verification is never started', async () => {
+    // The last row of the Issue's table, stated rather than wished away: if the
+    // verification server is gone too, nothing runs and nothing is written. This
+    // gate is a detector, not a watchdog — it cannot report on a run that never
+    // happened, and must not be described as if it could.
+    useRepo(true);
+    machine = snapshot({ 'tmux-sessions': listing([OWN_SESSION]) });
+    const taskId = await sendContract();
+    machine = snapshot({ 'tmux-sessions': listing([]) });
+
+    // The baseline is on disk and still readable; there is simply no verdict.
+    expect(existsSync(join(snapshotDir, `${taskId}.json`))).toBe(true);
+    expect(getVerificationRun(db, 1)).toBeNull();
+  });
+});
+
+describe('the contract can switch the gate on by itself (#2442)', () => {
+  it('records a baseline from success.requireEnvClean alone', async () => {
+    // Before #2442 the parser refused this key outright (400 at send).
+    useRepo(false);
+    const taskId = await sendContract(CONTRACT_SUCCESS_FLAG);
+
+    expect(existsSync(join(snapshotDir, `${taskId}.json`))).toBe(true);
+  });
+
+  it('runs the gate and fails on a wipe from success.requireEnvClean alone', async () => {
+    useRepo(false);
+    machine = snapshot({ 'tmux-sessions': listing([OWN_SESSION]) });
+    const taskId = await sendContract(CONTRACT_SUCCESS_FLAG);
+    agentDidSomeWork();
+    machine = snapshot({ 'tmux-sessions': listing([]) });
+
+    const run = await verify(taskId);
+    expect(run?.gates.find((entry) => entry.gateId === ENV_CLEAN_GATE_ID)?.status).toBe('failed');
+    expect(run?.status).toBe('failed');
+  });
+
+  it('records a baseline from verify.gates: [env-clean] with both booleans false', async () => {
+    // The seam that had to move with the gate id. Opening the id in
+    // `validateContractAgainstVerifyConfig` without teaching `recordEnvBaseline`
+    // about it would produce a gate that runs and can only ever say UNKNOWN.
+    useRepo(false);
+    machine = snapshot({ 'tmux-sessions': listing([OWN_SESSION]) });
+    const taskId = await sendContract(CONTRACT_NAMING_THE_GATE);
+
+    expect(existsSync(join(snapshotDir, `${taskId}.json`))).toBe(true);
+
+    agentDidSomeWork();
+    machine = snapshot({ 'tmux-sessions': listing([]) });
+
+    const run = await verify(taskId);
+    const gate = run?.gates.find((entry) => entry.gateId === ENV_CLEAN_GATE_ID);
+    expect(gate?.status).toBe('failed');
+    // Specifically NOT the UNKNOWN this test exists to rule out.
+    expect(gate?.logTail).not.toContain('UNKNOWN');
+    expect(run?.status).toBe('failed');
+  });
+
+  it('passes that same contract when the machine is handed back intact', async () => {
+    // Mutation control for the test above: a gate that failed no matter what
+    // would have satisfied it too.
+    useRepo(false);
+    machine = snapshot({ 'tmux-sessions': listing([OWN_SESSION]) });
+    const taskId = await sendContract(CONTRACT_NAMING_THE_GATE);
+    agentDidSomeWork();
+
+    const run = await verify(taskId);
+    expect(run?.gates.find((entry) => entry.gateId === ENV_CLEAN_GATE_ID)?.status).toBe('passed');
+    expect(run?.status).toBe('passed');
+  });
+
+  it('cannot switch OFF a gate the repository declared', async () => {
+    // `success.requireEnvClean: false` against `options.requireEnvClean: true`.
+    // A contract may only ever tighten; letting it relax the repository's rule
+    // would reopen the hole one delegation at a time.
+    useRepo(true);
+    machine = snapshot({ 'tmux-sessions': listing([OWN_SESSION]) });
+    const taskId = await sendContract(CONTRACT_SAYING_FALSE);
+
+    expect(existsSync(join(snapshotDir, `${taskId}.json`))).toBe(true);
+
+    agentDidSomeWork();
+    machine = snapshot({ 'tmux-sessions': listing([]) });
+
+    expect((await verify(taskId))?.status).toBe('failed');
+  });
+});
+
+describe('this repository has the option switched on (#2442)', () => {
+  it('declares options.requireEnvClean in its own verify.yaml', () => {
+    // Read off the real file, through the real loader. A fixture asserting the
+    // same thing would pass with the repository's own switch left off — which is
+    // exactly the state this Issue exists to change.
+    const config = loadVerifyConfig(resolvePath(__dirname, '..', '..'));
+
+    expect(config).not.toBeNull();
+    expect(config?.options.requireEnvClean).toBe(true);
+  });
+
+  it("adds env-clean to this repository's default gate set", () => {
+    // The switch has to reach the planner, not only the loader: `defaultPlannedGateIds`
+    // is what the pane's progress denominator and the re-run list are built from.
+    const config = loadVerifyConfig(resolvePath(__dirname, '..', '..'));
+
+    expect(config).not.toBeNull();
+    expect(defaultPlannedGateIds(config!)).toContain(ENV_CLEAN_GATE_ID);
   });
 });

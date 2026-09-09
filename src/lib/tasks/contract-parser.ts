@@ -132,6 +132,25 @@ export interface TaskContractSuccess {
    */
   requireCommit: boolean;
   /**
+   * Fail the run when the machine *outside* the repository was left changed
+   * (#1740, opened to contracts in #2442).
+   *
+   * `requireScopeClean` judges the files this delegation touched;
+   * this judges the ports, tmux sessions, `$HOME` and `~/.commandmate` entries
+   * it took away or left behind — the half that both tmux wipes (#1624, and
+   * 2026-09-08) and the pkill accident (#1739) passed cleanly.
+   *
+   * ORed with `options.requireEnvClean` in verify.yaml, never overridden, for
+   * the reason {@link requireCommit} is: a contract may switch on a check the
+   * repository left off, but a contract answering `false` must not be able to
+   * switch off one the repository declared.
+   *
+   * Defaults to false, and the default costs nothing at all — with both
+   * declarations off no gate row is created, no probe runs, and no baseline file
+   * is written. See docs/design/task-contract.md §2.6.
+   */
+  requireEnvClean: boolean;
+  /**
    * Run the verification gates when the agent reports it stopped (#1549).
    *
    * Defaults to false while its siblings default to true, because it is the one
@@ -171,6 +190,7 @@ const SUCCESS_KEYS = [
   'requireWorkEvidence',
   'requireScopeClean',
   'requireCommit',
+  'requireEnvClean',
   'autoVerifyOnStop',
 ];
 
@@ -456,6 +476,7 @@ function validateSuccess(value: unknown, issues: string[]): TaskContractSuccess 
     requireWorkEvidence: true,
     requireScopeClean: true,
     requireCommit: false,
+    requireEnvClean: false,
     autoVerifyOnStop: false,
   };
   if (value === undefined || value === null) return success;
