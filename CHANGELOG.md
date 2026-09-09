@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **fix(session): CommandMate の外で終わったセッションの行が、次のプロセス開始時に archive されるようにした** (#2444): tmux が消えた・CLI が `/exit` で shell に落ちた・マシンが再起動した、のどれで終わっても `chat_messages.archived` を書く経路が `POST /api/worktrees/:id/kill-session` の 1 つしかなく、しかも生きたセッションが 1 つも無いと同 route は archive の手前で 404 を返すため、死んだセッションの行が `archived = 0` のままチャット面に「現行の会話」として残り続けていた。`beginAgentSession()`（8 ツールの生成経路と codex / opencode の同一 pane 再起動経路が呼ぶ、opencode の live-reuse では呼ばれない seam）から新モジュール `src/lib/session/session-generation-archive.ts` を try/catch つきで呼び、当該 `(worktreeId, instanceId)` の active 行だけを `deleteMessagesByInstance` で archive して `recomputeLastUserMessage` でサイドバーを追従させ、`messages_invalidated`（`reason: 'session_generation'`、受信側は理由で分岐しない契約なので互換）を `(worktreeId, cliToolId, instanceId)` scope で配信する。死を観測した瞬間（`isRunning=false`）ではなく**新プロセスを作る事実**を境界にしたのは、has-session のタイムアウトや状態判定の揺れで一瞬 `false` になっただけの生きた会話を消さないため。schema は変えず（#168 が却下した `session_id` 方式は採らない）、archive 失敗はログのみでセッション起動は止めない。あわせて唯一 `beginAgentSession` を呼んでいなかった `vibe-local` の生成経路に同じ 1 行を追加した。既知の制約として、archive 後に転写リーダーが前セッションの行を**新規 INSERT** した場合はその 1 行が新セッション側に混ざる（既存行の UPDATE は `archived` を触らないため影響しない）。
 - **fix(history): antigravity の中間ナレーションを「ターン終了」と誤判定し、暫定本文のまま relay へ完了配送する問題を修正** (#2443): 保存（History への行）と完了（配送してよい）を分離し、agy 自身の `Stop` が turn の最新レコード以降に届いたときだけ確定として扱う。暫定の行は保存・更新を続けつつ配送せず、暫定で書いた行は通常の直近 3 件の窓を外れても結論へ追随する。
 
 ## [0.33.2] - 2026-09-09
