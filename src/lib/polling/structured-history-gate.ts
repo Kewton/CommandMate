@@ -101,6 +101,8 @@ const logger = createLogger('lib/polling/structured-history-gate');
 declare global {
   // eslint-disable-next-line no-var
   var __structuredHistoryCaptureQueue: Map<string, Promise<void>> | undefined;
+  // eslint-disable-next-line no-var
+  var __structuredHistoryAnnouncedCompletions: Map<string, string> | undefined;
 }
 
 /**
@@ -142,9 +144,44 @@ const captureQueue = (globalThis.__structuredHistoryCaptureQueue ??= new Map<
   Promise<void>
 >());
 
-/** Forget every instance's in-flight capture. Test seam. */
+/**
+ * The last completion each instance was announced for (Issue #2443).
+ *
+ * Keyed by the same triple as {@link captureQueue}, holding whatever
+ * `StructuredHistoryCaptureReport.completionKey` the reader minted. Its only job
+ * is to make the completion edge an *edge*: the poller re-reads a finished turn
+ * every couple of seconds, and #2443 forbids adding a path that re-delivers a
+ * body somebody already has.
+ *
+ * On `globalThis` for the reason {@link captureQueue} is, and in memory for the
+ * reason `session/agent-event-state` gives: the value describes a live session,
+ * and a restart that forgets it costs at most one extra announcement into a
+ * relay whose own stash guard already refuses a second payload.
+ */
+const announcedCompletions = (globalThis.__structuredHistoryAnnouncedCompletions ??= new Map<
+  string,
+  string
+>());
+
+/** Forget every instance's in-flight capture and announced completion. Test seam. */
 export function resetStructuredHistoryCaptureQueue(): void {
   captureQueue.clear();
+  announcedCompletions.clear();
+}
+
+/**
+ * Whether this completion has already been announced for this instance (#2443).
+ *
+ * A reader that minted no key is always announced — the pre-#2443 behaviour, and
+ * the behaviour claude, codex and command-code keep. Records the key as a side
+ * effect when the answer is "no", because the two steps must not be separable:
+ * an announcement that forgot to record would repeat on the next poll.
+ */
+function claimCompletionAnnouncement(key: string, completionKey: string | undefined): boolean {
+  if (completionKey === undefined) return true;
+  if (announcedCompletions.get(key) === completionKey) return false;
+  announcedCompletions.set(key, completionKey);
+  return true;
 }
 
 /** The queue key; the same triple `buildCompositeKey` spells everywhere else. */
@@ -233,6 +270,25 @@ export type StructuredHistoryCapture = ClaudeTranscriptCapture &
 export type StructuredHistoryCaptureOutcome = 'captured' | 'not_yet_closed' | 'unavailable';
 
 /**
+ * Whether a captured turn is finished, or only saved so far (Issue #2443).
+ *
+ * The distinction #2443 exists to draw, and it is orthogonal to
+ * {@link StructuredHistoryCaptureOutcome}: `captured` says History holds the
+ * turn and the scraper must stand down, which stays true of a body the agent may
+ * still add to. What must NOT be true of such a body is that it is delivered
+ * onward as the answer somebody asked for.
+ *
+ *  - `settled` — the agent's own account says this is the body it finished on.
+ *    The completion edge is announced and a waiting relay may take it.
+ *  - `provisional` — History holds the newest turn, and the reader cannot show
+ *    that the agent is done with it. The row keeps being repaired
+ *    (`broadcastMessage('message_updated', …)`, which is a display update and
+ *    reaches no other session), and **nothing is announced**: a relay waits on
+ *    its own existing deadline instead of being handed an interim report.
+ */
+export type StructuredHistoryTurnCompletion = 'settled' | 'provisional';
+
+/**
  * Where a caller that needs the third value asks for it (Issue #2436).
  *
  * An out-parameter: pass an object and the gate fills `outcome` in before it
@@ -243,6 +299,38 @@ export type StructuredHistoryCaptureOutcome = 'captured' | 'not_yet_closed' | 'u
 export interface StructuredHistoryCaptureReport {
   /** Set on every call that reaches the gate; see {@link StructuredHistoryCaptureOutcome}. */
   outcome?: StructuredHistoryCaptureOutcome;
+  /**
+   * Whether the saved body is the one the agent finished on (Issue #2443).
+   *
+   * **Absent means `settled`**, which is the pre-#2443 contract and is what
+   * keeps claude, codex and command-code exactly where they were: for them a
+   * written row has always been a finished turn, because each of the three has a
+   * record that closes one. antigravity has none — see
+   * `hooks/sources/antigravity/transcript`'s
+   * `resolveAntigravityTurnCompletion` — so it is the reader that fills this in.
+   */
+  completion?: StructuredHistoryTurnCompletion;
+  /**
+   * An opaque name for the settled turn *and the body it settled with* (#2443).
+   *
+   * Present only alongside `completion: 'settled'`, and only from a reader that
+   * can name one. The gate announces a completion once per distinct value, so a
+   * poll that re-reads the same finished turn adds no second announcement, while
+   * a turn that grows and is confirmed again does.
+   *
+   * A reader that supplies nothing is announced on every capture — again the
+   * pre-#2443 behaviour, and the reason this is a separate optional field rather
+   * than a required identity every reader has to mint.
+   */
+  completionKey?: string;
+  /**
+   * Why the reader called the turn settled or provisional (Issue #2443).
+   *
+   * Diagnostic only, and deliberately a bare string: the vocabulary is the
+   * reader's — `AntigravityTurnCompletionReason` today — and this layer must
+   * not grow a union that every future reader has to be added to.
+   */
+  completionReason?: string;
 }
 
 /** What a pull-mode reader is asked to do. */
@@ -455,8 +543,9 @@ export async function captureStructuredHistoryTurn(
   }
 
   const resolvedInstanceId = instanceId ?? cliToolId;
+  const captureKey = captureKeyOf(worktreeId, cliToolId, resolvedInstanceId);
   return serializePerInstance(
-    captureKeyOf(worktreeId, cliToolId, resolvedInstanceId),
+    captureKey,
     async (): Promise<boolean> => {
       // The reader's own report, kept local and copied out below: `report` is
       // the caller's object and must end up holding one verdict, not whatever
@@ -468,10 +557,17 @@ export async function captureStructuredHistoryTurn(
           capture,
           readerReport
         );
+        // Issue #2443: absent means `settled`, which is what leaves the three
+        // readers that have a turn-closing record exactly where they were.
+        const completion: StructuredHistoryTurnCompletion =
+          readerReport.completion ?? 'settled';
         if (report) {
           // A reader that says nothing is read as `unavailable` — the pre-#2436
           // behaviour, and the safe direction: the scraper keeps the turn.
           report.outcome = captured ? 'captured' : readerReport.outcome ?? 'unavailable';
+          report.completion = completion;
+          report.completionKey = readerReport.completionKey;
+          report.completionReason = readerReport.completionReason;
         }
         // Issue #2377: the moment a relay is waiting for. This is the single
         // point BOTH triggers of a pull capture pass through — the poller's save
@@ -482,7 +578,32 @@ export async function captureStructuredHistoryTurn(
         // Announced only when the capture actually wrote something: a `false`
         // means the scraper is still the writer for this turn, and the poller's
         // own call below will announce it.
-        if (captured) onRelayTurnCompleted(worktreeId, cliToolId, resolvedInstanceId, true);
+        //
+        // Issue #2443 adds the second condition, and it is the whole Issue.
+        // `captured` means History holds the newest turn; it does **not** mean
+        // the agent is finished with it, because antigravity has no record that
+        // closes a turn and an interim report is saved under the same key the
+        // conclusion will land on. Announcing here would hand a relay the
+        // interim body as the answer, and `broadcastMessage('message_updated',
+        // …)` — the repair #2438 added — does not take a delivered message
+        // back. So a provisional capture announces nothing at all; the relay
+        // keeps waiting on the deadline it already has, and the settled capture
+        // that follows announces the finished body.
+        if (captured && completion === 'settled') {
+          if (claimCompletionAnnouncement(captureKey, readerReport.completionKey)) {
+            onRelayTurnCompleted(worktreeId, cliToolId, resolvedInstanceId, true);
+          }
+        } else if (captured) {
+          logger.info('structured-history-capture-provisional', {
+            worktreeId,
+            cliToolId,
+            instanceId: resolvedInstanceId,
+            // The reader's own word for what is missing; see
+            // `AntigravityTurnCompletionReason`. This is the line #2443 asks for
+            // — the reason left on the relay's waiting path.
+            reason: readerReport.completionReason ?? 'unknown',
+          });
+        }
         return captured;
       } catch (error) {
         logger.warn('structured-history-capture-unavailable', {
