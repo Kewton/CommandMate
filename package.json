@@ -88,7 +88,7 @@
     "jsdom": "^28.1.0",
     "lucide-react": "^0.554.0",
     "mermaid": "^11.12.2",
-    "next": "^15.5.20",
+    "next": "^15.5.25",
     "next-intl": "^4.8.2",
     "next-themes": "^0.4.6",
     "postcss": "^8.5.6",
