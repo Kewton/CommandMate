@@ -11,11 +11,19 @@
  *   - MessageInput (always; carries draft persistence per splitIndex)
  *
  * Issue #2193: the pane's OUTPUT half is switchable. `surfaceMode === 'chat'`
- * puts the split's own `HistoryPane` where `TerminalDisplay` would be and drops
- * the collapsible History column (the same transcript, twice, is not a layout).
+ * puts the split's own `HistoryPane` where `TerminalDisplay` would be.
  * Everything below the output — nav / hatch / prompt / quick keys / composer /
  * Auto-Yes — is identical in both modes, which is why a send, a prompt answer
  * and an interrupt all keep working from the chat surface.
+ *
+ * Issue #2446: both modes now compose the SAME row —
+ * `[History column | PaneResizer | output]`. #2193 dropped the column in chat
+ * mode on the reading that it would be the same transcript twice; #2232 ended
+ * that (the two surfaces render different things — History clamps a reply to
+ * 100 characters, chat shows it whole), and #2445 takes past sessions out of
+ * the chat surface entirely, which would otherwise leave chat mode with nowhere
+ * to read them. Visibility and width come from the one `useHistoryPaneState`
+ * below, so switching modes never makes the column appear or disappear.
  *
  * Issue #2254 made TWO of those footer members mode-dependent, and only two:
  * `NavigationButtons` and `TerminalEscapeHatch` drive the TUI FRAME rather than
@@ -86,7 +94,6 @@ import {
 import { useSplitMessages } from '@/hooks/useSplitMessages';
 import { usePendingMessages, type OptimisticSendOptions } from '@/hooks/usePendingMessages';
 import { useHistoryPaneState } from '@/hooks/useHistoryPaneState';
-import { emitSurfaceModeChange } from '@/hooks/useSplitSurfaceModes';
 import { worktreeApi } from '@/lib/api-client';
 import { buildPromptResponseBody } from '@/lib/prompt-response-body-builder';
 import { readPromptDecisionId } from '@/components/worktree/prompt-decision-id';
@@ -255,13 +262,8 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
     (mode: SurfaceMode) => {
       setSurfaceModeState(mode);
       writeSurfaceMode(surfaceStorageKey, mode);
-      // Issue #2259: the Action bar disables its History toggle while EVERY
-      // split shows chat (the chat surface has no History column). It reads the
-      // modes out of the same storage, but a same-window write fires no
-      // `storage` event, so the change is announced explicitly.
-      emitSurfaceModeChange({ worktreeId, splitIndex, mode });
     },
-    [surfaceStorageKey, worktreeId, splitIndex],
+    [surfaceStorageKey],
   );
 
   // Read by the keydown listener so the listener itself never has to be torn
@@ -673,8 +675,10 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
     ],
   );
 
-  // Issue #2193: the chat output surface. The split's own HistoryPane, full
-  // width, with no collapse button and NO second copy of itself beside it.
+  // Issue #2193: the chat output surface — the split's own transcript, with no
+  // collapse button of its own (collapsing the OUTPUT would leave the split
+  // showing nothing). Issue #2446 wraps it in `chatSlot` below, which puts the
+  // History column beside it exactly as the terminal row does.
   //
   // Theme-following on purpose: the terminal is a permanently dark island
   // because it mirrors a fixed xterm palette, and this surface is a transcript,
@@ -763,10 +767,42 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
     ],
   );
 
-  // Issue #744: compose [HistoryPane | PaneResizer | TerminalDisplay]. When the
-  // history is hidden, nothing replaces it and the terminal takes the whole
-  // row: Issue #2259 removed the 36px expand strip, which cost 36px per split
-  // (108px at 3 splits) to duplicate a toggle the Action bar already owns.
+  // Issue #744: the collapsible History column and its resizer. When the column
+  // is hidden nothing replaces it and the output takes the whole row: Issue
+  // #2259 removed the 36px expand strip, which cost 36px per split (108px at 3
+  // splits) to duplicate a toggle the Action bar already owns.
+  //
+  // Issue #2446: BOTH output surfaces compose this same fragment, from the one
+  // `useHistoryPaneState` above — which is what makes "show the History column"
+  // and its width single settings that survive a mode switch instead of two.
+  const historyColumnSlot = useMemo(
+    () =>
+      historyVisible ? (
+        <>
+          <div
+            // Issue #744: real DOM id so the embedded HistoryPane collapse
+            // button's per-split `aria-controls` resolves to this region
+            // (the PC-wide HISTORY_PANE_ID is not rendered inside splits).
+            // Only ONE surface is mounted at a time, so the id stays unique.
+            id={splitHistorySlotId(splitIndex)}
+            data-testid={`split-history-slot-${splitIndex}`}
+            aria-label="History pane"
+            style={{ width: `${historyWidth}%` }}
+            className="flex-shrink-0 overflow-hidden min-h-0"
+          >
+            {historyPaneSlot}
+          </div>
+          <PaneResizer
+            onResize={handleHistoryResize}
+            orientation="horizontal"
+            ariaValueNow={historyWidth}
+          />
+        </>
+      ) : null,
+    [historyVisible, historyWidth, historyPaneSlot, handleHistoryResize, splitIndex],
+  );
+
+  // Issue #744: compose [HistoryPane | PaneResizer | TerminalDisplay].
   const terminalSlot = useMemo(
     () => (
       <div
@@ -774,27 +810,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
         data-testid={`split-terminal-row-${splitIndex}`}
         className="flex h-full min-h-0 w-full"
       >
-        {historyVisible ? (
-          <>
-            <div
-              // Issue #744: real DOM id so the embedded HistoryPane collapse
-              // button's per-split `aria-controls` resolves to this region
-              // (the PC-wide HISTORY_PANE_ID is not rendered inside splits).
-              id={splitHistorySlotId(splitIndex)}
-              data-testid={`split-history-slot-${splitIndex}`}
-              aria-label="History pane"
-              style={{ width: `${historyWidth}%` }}
-              className="flex-shrink-0 overflow-hidden min-h-0"
-            >
-              {historyPaneSlot}
-            </div>
-            <PaneResizer
-              onResize={handleHistoryResize}
-              orientation="horizontal"
-              ariaValueNow={historyWidth}
-            />
-          </>
-        ) : null}
+        {historyColumnSlot}
         <div
           // Issue #2131: the measured half of the pair above. This is the box
           // `TerminalDisplay` fills, so its `getBoundingClientRect().height` IS
@@ -810,14 +826,45 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
         </div>
       </div>
     ),
-    [
-      historyVisible,
-      historyWidth,
-      historyPaneSlot,
-      handleHistoryResize,
-      terminalDisplaySlot,
-      splitIndex,
-    ],
+    [historyVisible, historyColumnSlot, terminalDisplaySlot, splitIndex],
+  );
+
+  // Issue #2446: the chat surface's row — the SAME
+  // `[History column | PaneResizer | output]` skeleton as `terminalSlot`, so
+  // the column is where the eye already expects it and the Action bar's
+  // "History" toggle means one thing in both modes.
+  //
+  // The column and the chat surface read the same `historyPaneProps`, but they
+  // are not two copies of one screen: History clamps an assistant reply to 100
+  // characters and pairs it with its prompt (#2232), the chat surface renders
+  // the reply whole. Their search highlights cannot collide either — the column
+  // paints into `history-search-<splitIndex>` and the transcript into
+  // `chat-search-<splitIndex>` (`src/lib/chat/chat-search-namespace.ts`).
+  //
+  // `historyContainerRef` is attached here as well as on the terminal row:
+  // exactly one of the two is mounted, and `handleHistoryResize` measures
+  // whichever row is on screen.
+  const chatSlot = useMemo(
+    () => (
+      <div
+        ref={historyContainerRef}
+        data-testid={`split-chat-row-${splitIndex}`}
+        className="flex h-full min-h-0 w-full"
+      >
+        {historyColumnSlot}
+        <div
+          data-testid={`split-chat-output-${splitIndex}`}
+          // Issue #2259's rule, applied to this surface: with the column
+          // collapsed there is nothing beside the chat surface, so it is given
+          // an explicit full width rather than left to `flex-grow` alone.
+          style={historyVisible ? undefined : { width: '100%' }}
+          className="flex-grow overflow-hidden min-w-0 min-h-0"
+        >
+          {chatSurfaceSlot}
+        </div>
+      </div>
+    ),
+    [historyVisible, historyColumnSlot, chatSurfaceSlot, splitIndex],
   );
 
   const footerSlot = useMemo(
@@ -1091,7 +1138,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       // Issue #2261: the title bar's half of the maximize toggle.
       isMaximized={isMaximized}
       onToggleMaximize={onToggleMaximize}
-      terminal={surfaceMode === 'chat' ? chatSurfaceSlot : terminalSlot}
+      terminal={surfaceMode === 'chat' ? chatSlot : terminalSlot}
       footer={footerSlot}
       // Issue #786 / #869: drag-drop pass-through (optional; inert when omitted).
       onDropInstance={onDropInstance}
