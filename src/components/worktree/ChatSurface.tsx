@@ -299,6 +299,20 @@ export interface ChatSurfaceLiveState {
    */
   isRunning?: boolean;
   /**
+   * The pane is still performing its initial attach — no `/current-output`
+   * answer has been applied yet (Issue #2445).
+   *
+   * `useTerminalPanePolling` starts every pane at `{ isRunning: false,
+   * attaching: true }` and re-initialises both on a worktree / CLI / instance
+   * switch, so `isRunning === false` on its own is ALSO the value a pane has
+   * before anybody has asked tmux anything. This field is what separates the
+   * two, and it is why {@link isChatSessionEnded} insists on an explicit
+   * `false` here rather than reading `!attaching`: a caller that has not been
+   * updated sends `undefined`, which means "nobody said", and a surface must
+   * not tell the reader a session is over on the strength of a default.
+   */
+  attaching?: boolean;
+  /**
    * The merged status verdict, or `undefined` when the caller has none yet
    * (Issue #2238). `'running'` is this surface's ONLY generating signal.
    *
@@ -472,6 +486,30 @@ export function isTurnSettled(messages: readonly ChatMessage[], turnKey: string)
 }
 
 /**
+ * Whether the pane has been ASKED and answered "there is no session" (Issue #2445).
+ *
+ * Both halves are explicit `false` comparisons and neither is negotiable:
+ *
+ *  - `attaching === false` is the pane saying it has applied at least one
+ *    `/current-output` answer. Before that, `isRunning` is the hook's own
+ *    initial `false` — a value nobody measured — and reading it would flash
+ *    "the session has ended" across every page load and every instance switch;
+ *  - `isRunning === false` is the answer itself. `undefined` is not `false`
+ *    here: a caller that has not copied the field across (or a daemon that
+ *    does not send it) has said nothing, and nothing is not "dead".
+ *
+ * Deliberately NOT `sessionStatus`: `'idle'` / `'ready'` / `'waiting'` are all
+ * states of a session that EXISTS, and #2238's whole correction was that the
+ * two questions are different ones. And deliberately not `TerminalDisplay`'s
+ * #842 `hasBeenActive` hysteresis either — that exists to keep a never-started
+ * pane from reading as an ended one, and a transcript with rows in it is not a
+ * pane that never started.
+ */
+export function isChatSessionEnded(live: ChatSurfaceLiveState): boolean {
+  return live.attaching === false && live.isRunning === false;
+}
+
+/**
  * Why this frame needs the dialog card, or `null` when it needs nothing.
  *
  * The four members are the states Epic #2192 decided were terminal-only: arrow-key
@@ -549,6 +587,12 @@ export const ChatSurface = memo(function ChatSurface({
   const rootRef = useRef<HTMLDivElement>(null);
 
   const visibleMessages = useMemo(() => dedupeById(messages), [messages]);
+
+  // Issue #2445: "there is no session behind these rows". Computed once here and
+  // handed to the transcript, so the fold, the ended banner and the suppression
+  // of the in-flight bubble below are all the SAME verdict rather than three
+  // readings of the same two flags.
+  const sessionEnded = isChatSessionEnded(live);
 
   // --------------------------------------------------------------------
   // Follow the tail (Issue #2194 §3)
@@ -701,12 +745,33 @@ export const ChatSurface = memo(function ChatSurface({
     if (holdAnchorRef.current.id !== lastMessageId) setIsHoldReleased(true);
   }, [isHolding, lastMessageId]);
 
+  // --------------------------------------------------------------------
+  // Ending the hold when the SESSION goes away (Issue #2445)
+  // --------------------------------------------------------------------
+  // The fourth release condition, and the one none of the other three can
+  // reach. `useChatTurnProgress` releases a held body when `enabled` RISES and
+  // when a row lands past it; a session dying does neither, so a turn that was
+  // in flight when the pane went away is still in the hook's hand when the next
+  // session comes up — and the memo below stops drawing it only for as long as
+  // the pane is observed dead. Without this, starting a new session would
+  // re-hang the DEAD one's last paragraph over the new conversation.
+  //
+  // Recorded as the turn's key rather than as a boolean: the next real turn
+  // carries a different `turnKey` (it is the row's `requestId`), so this
+  // suppresses exactly the turn that was orphaned and nothing after it.
+  const [endedTurnKey, setEndedTurnKey] = useState<string | null>(null);
+  useEffect(() => {
+    if (sessionEnded && pushedProgress !== null) setEndedTurnKey(pushedProgress.turnKey);
+  }, [sessionEnded, pushedProgress]);
+
   // The swap. Held until the row for this exact turn is in the transcript, which
   // is what keeps the reply from vanishing for the poll it takes the row to
   // arrive, and what keeps it from being on screen twice once it has. Issue
-  // #2248 added the third clause: a hold the transcript has moved past.
+  // #2248 added the third clause: a hold the transcript has moved past; Issue
+  // #2445 the fourth: a turn whose session is gone.
   const progress: ChatTurnProgressView | null =
     pushedProgress !== null &&
+    pushedProgress.turnKey !== endedTurnKey &&
     !isTurnSettled(visibleMessages, pushedProgress.turnKey) &&
     !(pushedProgress.settling && isHoldReleased)
       ? pushedProgress
@@ -731,6 +796,13 @@ export const ChatSurface = memo(function ChatSurface({
   // object identity on every poll would re-render the memoized `ChatTranscript`
   // — and re-run its virtualizer — for a turn whose body has not changed.
   const liveTurn = useMemo<ChatTranscriptLiveTurn | null>(() => {
+    // Issue #2445. A dead pane produces neither kind of tail, and the held one
+    // (#2248) is the dangerous half: it survives the turn that made it, so a
+    // session dying mid-hold would leave a paragraph sitting under the reader
+    // as if the agent were still finishing it. The hold itself is left alone —
+    // `useChatTurnProgress` releases it when `enabled` rises again — so a
+    // session coming back does not resurrect the previous instance's bubble.
+    if (sessionEnded) return null;
     if (progress !== null) {
       return {
         turnKey: progress.turnKey,
@@ -750,7 +822,7 @@ export const ChatSurface = memo(function ChatSurface({
     // an idle pane, so the surface fell through to here and drew the bare
     // "Responding…" bubble on top of a finished conversation.
     return isGenerating ? { isThinking: live.isThinking === true } : null;
-  }, [progress, isGenerating, live.isThinking]);
+  }, [progress, isGenerating, live.isThinking, sessionEnded]);
 
   const isLiveTurn = liveTurn !== null;
   // Issue #2248: what the jump-to-latest chip is allowed to claim. A held body
@@ -1032,6 +1104,11 @@ export const ChatSurface = memo(function ChatSurface({
           worktreePath={worktreePath}
           cliToolId={cliToolId}
           liveTurn={liveTurn}
+          instanceId={instanceId}
+          // Issue #2445: the verdict, not the flags. The transcript is what
+          // folds the previous session's rows and draws the ended banner,
+          // because both are decisions about which ROWS are on screen.
+          sessionEnded={sessionEnded}
           onScrollControlsChange={handleScrollControlsChange}
           className="h-full"
         />
