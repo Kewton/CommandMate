@@ -46,6 +46,25 @@
  * module reads only the former — see {@link ANTIGRAVITY_CLI_HOME_SEGMENTS} — and
  * the conversation ids are uuids in any case.
  *
+ * ## Saving and finishing are two questions (Issue #2443)
+ *
+ * agy writes no record that closes a turn, so "may this be saved" has to be
+ * answered from the shape of its last words — and an interim report has the
+ * same shape as a conclusion. #2438 made the row that follows repairable. #2443
+ * separates the *second* consequence of the same evidence: whether the body may
+ * be handed onward as the answer. Two states, and the reader reports which one
+ * the newest turn is in:
+ *
+ *  - **provisional** — History holds the turn, the scraper stands down, the row
+ *    keeps being re-read and grown, and `broadcastMessage('message_updated', …)`
+ *    refreshes what a browser is showing. Nothing leaves the server.
+ *  - **settled** — agy's own `Stop` arrived at or after the turn's newest
+ *    record, so the body is the one it finished on. The gate announces the
+ *    completion edge exactly once for that body.
+ *
+ * `docs/design/antigravity-turn-completion-2443.md` is the argument, including
+ * what happens when the evidence never arrives.
+ *
  * ## Nothing here throws
  *
  * Same contract as the other three readers, for the same reason: this runs
@@ -77,12 +96,15 @@ import {
   ANTIGRAVITY_BRAIN_DIR_SEGMENT,
   ANTIGRAVITY_TRANSCRIPT_EXTENSION,
   ANTIGRAVITY_TRANSCRIPT_PATH_SEGMENTS,
+  antigravityTurnLastRecordAt,
   buildAntigravityTurns,
   isAntigravityTurnWritable,
   parseAntigravityTranscript,
   renderAntigravityTurn,
+  resolveAntigravityTurnCompletion,
   type AntigravityRenderedTurn,
   type AntigravityTurnAccumulator,
+  type AntigravityTurnCompletion,
 } from './transcript';
 
 const logger = createLogger('lib/hooks/sources/antigravity/history');
@@ -129,6 +151,8 @@ const ANTIGRAVITY_CONVERSATION_ID_PATTERN =
 declare global {
   // eslint-disable-next-line no-var
   var __antigravityTranscriptConversations: Map<string, string> | undefined;
+  // eslint-disable-next-line no-var
+  var __antigravityUnsettledTurns: Map<string, UnsettledAntigravityTurns> | undefined;
 }
 
 /**
@@ -148,13 +172,172 @@ const conversationPointers = (globalThis.__antigravityTranscriptConversations ??
   string
 >());
 
+/**
+ * How many written-but-unconfirmed turns one instance may be following (#2443).
+ *
+ * The bound on the answer to "a saved row must be able to catch up with its
+ * conclusion even once three later turns have been written". Sixteen and not
+ * "however many are in the window", because the list is walked on **every**
+ * poll: each entry costs one indexed `findMessageByRequestId` and, only when
+ * that finds a row, one render of a turn that is already parsed. Sixteen turns
+ * is more than a working session accumulates without a single `Stop` arriving,
+ * and it is a fixed ceiling on a per-instance map rather than a function of a
+ * file somebody else appends to.
+ *
+ * Eviction is oldest-first and is a real loss of coverage, which is why it is
+ * logged (`antigravity-transcript-unsettled-evicted`) rather than silent. What
+ * is left is #2438's behaviour for that row: the newest
+ * {@link ANTIGRAVITY_TURN_RECHECK_LIMIT} turns are re-read regardless of this
+ * list, so an evicted entry loses the *extra* reach and not the ordinary one.
+ */
+export const ANTIGRAVITY_UNSETTLED_TURN_LIMIT = 16;
+
+/** One instance's unconfirmed rows, and the conversation they belong to. */
+interface UnsettledAntigravityTurns {
+  /** Rows from another conversation are not this session's to follow. */
+  conversationId: string;
+  /** `step_index` of each written-but-unconfirmed turn, oldest first. */
+  steps: number[];
+}
+
+/**
+ * Which written turns are still waiting for agy to vouch for them (#2443).
+ *
+ * On `globalThis` for the reason {@link conversationPointers} is: under `next
+ * dev` the poller's bundle and the hook receiver's bundle each get their own
+ * copy of a module-scoped map, and a list only one of the two writers can see is
+ * not a list.
+ *
+ * In memory and not in SQLite, deliberately. The entry describes a turn this
+ * *process* wrote provisionally and has not seen confirmed; a restart loses it,
+ * and what remains is exactly {@link ANTIGRAVITY_TURN_RECHECK_LIMIT} — the same
+ * coverage #2438 shipped. Persisting it would make a row's repair depend on a
+ * table that outlives the transcript window it can only be repaired from.
+ */
+const unsettledTurns = (globalThis.__antigravityUnsettledTurns ??= new Map<
+  string,
+  UnsettledAntigravityTurns
+>());
+
 function keyOf(target: AgentInstanceRef): string {
   return buildCompositeKey(target.worktreeId, target.cliToolId, target.instanceId);
 }
 
-/** Forget every instance's pointer. Test seam. */
+/**
+ * Forget every instance's pointer and every unconfirmed row it was following.
+ *
+ * Test seam. Both maps, because they are two halves of one per-instance state:
+ * a suite that reset the pointer and kept the follow list would carry one test's
+ * `step_index` values into the next one's conversation.
+ */
 export function resetAntigravityTranscriptConversations(): void {
   conversationPointers.clear();
+  unsettledTurns.clear();
+}
+
+/** Forget the unconfirmed rows alone. Test seam. */
+export function resetAntigravityUnsettledTurns(): void {
+  unsettledTurns.clear();
+}
+
+/**
+ * The steps this instance is following in `conversationId`, oldest first.
+ *
+ * A conversation that is not the one the list was built for answers empty and
+ * drops the list: `/clear` mints a new conversation id, and following the old
+ * one's `step_index` values into it would re-check turns that are not the same
+ * turns. This is the leak test #2443 asks for, expressed as the read path
+ * rather than as a promise.
+ */
+function unsettledStepsFor(key: string, conversationId: string): readonly number[] {
+  const entry = unsettledTurns.get(key);
+  if (!entry) return [];
+  if (entry.conversationId !== conversationId) {
+    unsettledTurns.delete(key);
+    return [];
+  }
+  return entry.steps;
+}
+
+/**
+ * Start, or stop, following one written turn (Issue #2443).
+ *
+ * `confirmed` is {@link AntigravityTurnCompletion.confirmed}: a turn agy has
+ * vouched for cannot grow again without a later record, and a later record takes
+ * the confirmation away and re-adds it here on the very next pass. So the list
+ * holds exactly the rows whose body is still provisional.
+ *
+ * @returns The step that was evicted to make room, or null
+ */
+function noteAntigravityTurnCompletion(
+  key: string,
+  conversationId: string,
+  stepIndex: number,
+  confirmed: boolean
+): number | null {
+  const entry = unsettledTurns.get(key);
+  if (entry && entry.conversationId !== conversationId) unsettledTurns.delete(key);
+
+  if (confirmed) {
+    const current = unsettledTurns.get(key);
+    if (!current) return null;
+    current.steps = current.steps.filter((step) => step !== stepIndex);
+    if (current.steps.length === 0) unsettledTurns.delete(key);
+    return null;
+  }
+
+  const current = unsettledTurns.get(key) ?? { conversationId, steps: [] };
+  unsettledTurns.set(key, current);
+  if (current.steps.includes(stepIndex)) return null;
+  current.steps.push(stepIndex);
+  if (current.steps.length <= ANTIGRAVITY_UNSETTLED_TURN_LIMIT) return null;
+  return current.steps.shift() ?? null;
+}
+
+/** Stop following steps the current read window no longer contains. */
+function forgetAntigravityTurnsOutsideWindow(
+  key: string,
+  conversationId: string,
+  present: ReadonlySet<number>
+): number[] {
+  const entry = unsettledTurns.get(key);
+  if (!entry || entry.conversationId !== conversationId) return [];
+  const dropped = entry.steps.filter((step) => !present.has(step));
+  if (dropped.length === 0) return [];
+  entry.steps = entry.steps.filter((step) => present.has(step));
+  if (entry.steps.length === 0) unsettledTurns.delete(key);
+  return dropped;
+}
+
+/**
+ * When this instance last reported that its loop stopped, or null (#2443).
+ *
+ * The one piece of evidence {@link resolveAntigravityTurnCompletion} is asked to
+ * judge against, read the way {@link resolveAntigravityConversationId} reads its
+ * own: dynamically, so `agent-event-state`'s module graph is not a static
+ * dependency of the poller, and defensively, so a state module that cannot be
+ * reached — or a build in which this reader is newer than its neighbour — is one
+ * that knows of no stop rather than one that throws inside the save path.
+ *
+ * `recordAgentStopEvent` runs **before** the Stop receiver asks for a capture
+ * (`lib/hooks/agent-event-service`), so the value is already there on the read
+ * that stop itself triggers. That ordering is what lets one seam serve both
+ * triggers instead of the receiver having to hand a flag down through the gate.
+ */
+async function resolveAntigravityStopAt(target: AgentInstanceRef): Promise<number | null> {
+  try {
+    const state = await import('@/lib/session/agent-event-state');
+    const read = state.getLastStopEventAt;
+    if (typeof read !== 'function') return null;
+    return read(target.worktreeId, target.cliToolId, target.instanceId) ?? null;
+  } catch (error) {
+    logger.debug('antigravity-transcript-stop-lookup-failed', {
+      worktreeId: target.worktreeId,
+      instanceId: target.instanceId ?? target.cliToolId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
 }
 
 /**
@@ -325,6 +508,20 @@ export interface AntigravityTranscriptCapture {
  * is worth holding rather than saving. Every other false leaves it unset, which
  * the gate reads as `'unavailable'`.
  *
+ * **A saved turn is not a finished turn (Issue #2443).** #2438 made the frozen
+ * row repairable and left the other half of the damage in place: the same
+ * `true` that tells the poller to drop its scrape also told the relay that the
+ * turn was over, so an interim report was **delivered** to whoever had asked
+ * agy a question, and no later `message_updated` could take that back. So the
+ * `true` now carries a second word. `report.completion` is `'settled'` only
+ * when {@link resolveAntigravityTurnCompletion} can show, from agy's own `Stop`
+ * event, that the body in hand is the one it finished on; otherwise it is
+ * `'provisional'` — History still holds the row, the repair still runs on every
+ * later read, and nothing is announced to a relay. Rows written provisionally
+ * are followed by `step_index` (see {@link ANTIGRAVITY_UNSETTLED_TURN_LIMIT}),
+ * so the conclusion is still picked up once the turn has fallen out of
+ * {@link ANTIGRAVITY_TURN_RECHECK_LIMIT}'s window.
+ *
  * @param target - The instance whose turn just ended
  * @param capture - See {@link AntigravityTranscriptCapture}
  * @param report - Optional out-parameter; see `StructuredHistoryCaptureReport`
@@ -394,7 +591,43 @@ export async function captureAntigravityTranscriptTurn(
       });
     }
 
+    // Issue #2443: one read of the evidence, applied to every turn in the
+    // window. `stopAt` is agy's own account of when its loop ended; see
+    // {@link resolveAntigravityTurnCompletion} for why an ordering against the
+    // turn's newest record — rather than a word, a silence or a `status` — is
+    // what the promotion to "final" rests on.
+    const instanceKey = keyOf(target);
+    const stopAt = await resolveAntigravityStopAt(target);
+    const completions = new Map<number, AntigravityTurnCompletion>();
+    for (const turn of built.turns) {
+      completions.set(turn.stepIndex, resolveAntigravityTurnCompletion(turn, stopAt));
+    }
+    const newestTurn = built.turns[built.turns.length - 1];
+    const newestCompletion =
+      completions.get(newestTurn.stepIndex) ??
+      resolveAntigravityTurnCompletion(newestTurn, stopAt);
+
+    // A step this read can no longer see is a step no later read can repair:
+    // the 4 MiB tail slid past it, its `USER_INPUT` is outside the window, or
+    // the file was replaced. Logged rather than dropped in silence, because it
+    // is the boundary of what #2443 promises.
+    const forgotten = forgetAntigravityTurnsOutsideWindow(
+      instanceKey,
+      conversationId,
+      new Set(built.turns.map((turn) => turn.stepIndex))
+    );
+    if (forgotten.length > 0) {
+      logger.info('antigravity-transcript-unsettled-out-of-window', {
+        worktreeId: target.worktreeId,
+        instanceId,
+        conversationId,
+        steps: forgotten,
+        turnsInWindow: built.turns.length,
+      });
+    }
+
     const pending = await selectUnwrittenAntigravityTurns(target, built.turns);
+    const writtenTurns = built.turns.slice(0, built.turns.length - pending.turns.length);
 
     // Before anything is written: the rows that are already there (#2438). This
     // is deliberately ahead of the early return below, because "the newest turn
@@ -406,10 +639,12 @@ export async function captureAntigravityTranscriptTurn(
     // that writes a new one.
     await refreshAntigravityTurnRows(
       target,
-      built.turns
-        .slice(0, built.turns.length - pending.turns.length)
-        .slice(-ANTIGRAVITY_TURN_RECHECK_LIMIT),
-      path
+      selectAntigravityRecheckCandidates(
+        writtenTurns,
+        unsettledStepsFor(instanceKey, conversationId)
+      ),
+      path,
+      { instanceKey, conversationId, completions }
     );
 
     if (pending.turns.length === 0) {
@@ -421,6 +656,7 @@ export async function captureAntigravityTranscriptTurn(
       // Issue #2437: this turn is already History's Markdown, so the pane rows
       // behind it must stop being "unsaved output" the pre-send flush can pick up.
       await advanceCapturedLineForTranscriptTurn(target);
+      reportAntigravityCompletion(report, newestTurn, newestCompletion);
       return true;
     }
 
@@ -458,12 +694,24 @@ export async function captureAntigravityTranscriptTurn(
         resolveAssistantTimestampMs(
           turn,
           userRows[index],
-          lastAntigravityRecordAt(turn),
+          antigravityTurnLastRecordAt(turn),
           nextTurnOpensAt(pending.turns, userRows, index)
         ),
         path,
         report
       );
+      // Issue #2443: a row now exists for this turn, and whether it is the body
+      // agy finished on is a separate question from whether it could be saved.
+      // An unconfirmed one joins the follow list so that its conclusion is still
+      // picked up once three later turns have pushed it out of #2438's window.
+      if (captured) {
+        noteUnsettledAntigravityTurn(
+          target,
+          instanceKey,
+          turn,
+          completions.get(turn.stepIndex) ?? resolveAntigravityTurnCompletion(turn, stopAt)
+        );
+      }
     }
     if (captured) {
       // Issue #2437: History now holds this turn as the agent's own Markdown.
@@ -471,6 +719,7 @@ export async function captureAntigravityTranscriptTurn(
       // `/send` arriving before the next poll tick saves the whole finished turn
       // a second time.
       await advanceCapturedLineForTranscriptTurn(target);
+      reportAntigravityCompletion(report, newestTurn, newestCompletion);
     }
     return captured;
   } catch (error) {
@@ -680,23 +929,6 @@ function resolveAssistantTimestampMs(
 }
 
 /**
- * When the last record agy wrote for this turn was made (Issue #2273).
- *
- * The maximum rather than `records.at(-1)`: `created_at` is agy's own field and
- * a record that carries none reads as null, so the last record in file order is
- * not always the last one with a clock on it.
- *
- * @returns Epoch ms, or 0 when the turn has no timestamped record
- */
-function lastAntigravityRecordAt(turn: AntigravityTurnAccumulator): number {
-  let at = 0;
-  for (const record of turn.records) {
-    if (record.timestampMs !== null && record.timestampMs > at) at = record.timestampMs;
-  }
-  return at;
-}
-
-/**
  * The instant the next pending turn's prompt row carries, or null (Issue #2273).
  *
  * The user row's own timestamp when there is one, because that is what History
@@ -836,7 +1068,8 @@ async function growAntigravityTurnRow(
 async function refreshAntigravityTurnRows(
   target: AgentInstanceRef,
   candidates: readonly AntigravityTurnAccumulator[],
-  path: string
+  path: string,
+  follow: AntigravityFollowContext
 ): Promise<number> {
   if (candidates.length === 0) return 0;
 
@@ -848,18 +1081,135 @@ async function refreshAntigravityTurnRows(
 
   let updated = 0;
   for (const turn of candidates) {
-    if (!isAntigravityTurnWritable(turn)) continue;
+    // Issue #2443: the row lookup moved ahead of the writable check, because
+    // the follow list is a statement about ROWS. A turn that is open again has a
+    // row whose body is provisional by definition and must stay followed, and a
+    // candidate whose row has gone — History cleared, the key rewritten — is one
+    // nothing can repair and is dropped here rather than re-queried forever.
     const existing = findMessageByRequestId(
       db,
       target.worktreeId,
       antigravityTurnRequestId(turn.conversationId, turn.stepIndex)
     );
-    if (!existing) continue;
+    if (!existing) {
+      noteAntigravityTurnCompletion(follow.instanceKey, follow.conversationId, turn.stepIndex, true);
+      continue;
+    }
+    noteUnsettledAntigravityTurn(
+      target,
+      follow.instanceKey,
+      turn,
+      follow.completions.get(turn.stepIndex) ?? resolveAntigravityTurnCompletion(turn, null)
+    );
+    if (!isAntigravityTurnWritable(turn)) continue;
     if (await growAntigravityTurnRow(target, existing, renderAntigravityTurn(turn), path)) {
       updated += 1;
     }
   }
   return updated;
+}
+
+/** What {@link refreshAntigravityTurnRows} needs to keep the follow list honest. */
+interface AntigravityFollowContext {
+  /** `buildCompositeKey` of the instance whose list this is. */
+  readonly instanceKey: string;
+  /** The conversation the window was read from. */
+  readonly conversationId: string;
+  /** `step_index` → the verdict {@link resolveAntigravityTurnCompletion} gave it. */
+  readonly completions: ReadonlyMap<number, AntigravityTurnCompletion>;
+}
+
+/**
+ * The written turns to re-read on this pass (Issue #2443).
+ *
+ * Two sources, concatenated oldest-first and de-duplicated:
+ *
+ *  - **the newest {@link ANTIGRAVITY_TURN_RECHECK_LIMIT}**, which is #2438's
+ *    window exactly and is what covers the ordinary case — a row saved at an
+ *    interim report and concluded seconds later, while the session has not moved
+ *    on. It is kept as a floor rather than replaced, so a cold process (one that
+ *    restarted, or one whose follow list was evicted) still has #2438's reach.
+ *  - **the followed steps**, which are the rows this process wrote from a body
+ *    agy had not vouched for. They are the ones the limit above loses: four
+ *    prompts queued back to back push the first turn out of the window in
+ *    seconds, and nothing else in the system ever revisits it.
+ *
+ * The result is bounded by `ANTIGRAVITY_TURN_RECHECK_LIMIT +
+ * {@link ANTIGRAVITY_UNSETTLED_TURN_LIMIT}` — a fixed 19 — whatever the window
+ * holds, so a long transcript cannot make a poll's cost grow with it.
+ *
+ * @param writtenTurns - Turns in the window that already have rows, oldest first
+ * @param followed - `step_index` values from the follow list
+ */
+function selectAntigravityRecheckCandidates(
+  writtenTurns: readonly AntigravityTurnAccumulator[],
+  followed: readonly number[]
+): readonly AntigravityTurnAccumulator[] {
+  const recent = writtenTurns.slice(-ANTIGRAVITY_TURN_RECHECK_LIMIT);
+  if (followed.length === 0) return recent;
+
+  const inRecent = new Set(recent.map((turn) => turn.stepIndex));
+  const followedSteps = new Set(followed);
+  const older = writtenTurns.filter(
+    (turn) => followedSteps.has(turn.stepIndex) && !inRecent.has(turn.stepIndex)
+  );
+  return older.length === 0 ? recent : [...older, ...recent];
+}
+
+/**
+ * Follow this row, or stop following it, and say so once (Issue #2443).
+ *
+ * The log line is the only place an operator can see why a repair did or did not
+ * keep happening, so it carries the reason word rather than the boolean:
+ * `no-stop-event` and `stop-before-last-record` are very different sessions.
+ */
+function noteUnsettledAntigravityTurn(
+  target: AgentInstanceRef,
+  instanceKey: string,
+  turn: AntigravityTurnAccumulator,
+  completion: AntigravityTurnCompletion
+): void {
+  const evicted = noteAntigravityTurnCompletion(
+    instanceKey,
+    turn.conversationId,
+    turn.stepIndex,
+    completion.confirmed
+  );
+  if (evicted === null) return;
+  logger.info('antigravity-transcript-unsettled-evicted', {
+    worktreeId: target.worktreeId,
+    instanceId: target.instanceId ?? target.cliToolId,
+    conversationId: turn.conversationId,
+    step: evicted,
+    limit: ANTIGRAVITY_UNSETTLED_TURN_LIMIT,
+  });
+}
+
+/**
+ * Tell the caller whether the turn it was handed is final (Issue #2443).
+ *
+ * `completion` is what the gate reads to decide whether a relay may be told the
+ * turn ended; `completionKey` is what stops it being told twice about one body.
+ * The key names the turn **and** the instant of its newest record, so a turn
+ * that grows after being confirmed is a new state and is announced again once
+ * the new state is itself confirmed — which is exactly the `Stop`-then-`continue`
+ * case `./source` warns about, handled without a second rule.
+ *
+ * Left entirely alone when the body is not confirmed, apart from the word
+ * `provisional`: the gate defaults an absent `completion` to `settled`, so this
+ * is the one place antigravity opts out of the pre-#2443 announcement.
+ */
+function reportAntigravityCompletion(
+  report: StructuredHistoryCaptureReport | undefined,
+  turn: AntigravityTurnAccumulator,
+  completion: AntigravityTurnCompletion
+): void {
+  if (!report) return;
+  report.completion = completion.confirmed ? 'settled' : 'provisional';
+  report.completionKey = completion.confirmed
+    ? `${antigravityTurnRequestId(turn.conversationId, turn.stepIndex)}@${completion.lastRecordAt}`
+    : undefined;
+  report.completionReason = completion.reason;
 }
 
 /**
