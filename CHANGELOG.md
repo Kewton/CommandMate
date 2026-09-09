@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.33.2] - 2026-09-09
+
+> **Highlight**: チャット面に並んでいた「返答ではない行」を 3 件まとめて塞ぎました。転写を持つツールでは、転写行が着地するまでペイン全体の scrape を最大 7.65 秒保留し、着地したら保留を破棄します（#2436、UAT 実測: 転写が保留内に閉じたケースで scrape 行 0 件、閉じないケースで 1 件という対照）。送信直前のフラッシュが idle composer や前ターンの本文を返答として保存していた件は、SGR に基づく構造的な composer 判別と、転写書き込み時の `last_captured_line` 前進で塞いでいます（#2437）。antigravity では中間報告のまま凍っていた行が、後から届いた結論で同じ行のまま更新されるようになりました（実測 16,959 → 21,581 字、#2438）。
+
 ### Fixed
 
 - **fix(history): antigravity の保存済みターンを後から届いた結論で更新するようにした** (#2438): agy には turn を閉じるレコードが無いので `isAntigravityTurnClosingRecord` は「散文があって `tool_calls` が無い `PLANNER_RESPONSE`」を終了と読むしかなく、**中間報告がその形をしている**ため、「現在返答待機中です」の時点で assistant 行が保存され、同じターンに結論が追記されても行が凍ったままになっていた（実測: 1 会話 34 レコードで 16,959 文字のまま、結論込みなら 21,581 文字）。行のキーは `antigravity-turn:<conversationId>#<開始step>` なので以後の読込は anchor でこの行を見つけて pending が空になり、`captureAntigravityTranscriptTurn` は本文を比べずに true を返し、gate はその true で scrape の保存も止めるため、結論が History に載る経路が一つも無かった。#2264 が claude / command-code に入れたのと同型の `growAntigravityTurnRow` / `refreshAntigravityTurnRows` を追加し、`selectUnwrittenAntigravityTurns` の直後・**pending 0 の早期 return より前**に既に書いた側の末尾 `ANTIGRAVITY_TURN_RECHECK_LIMIT`（3）ターンを描き直して、既存 `content` より**厳密に長い**ときだけ `updateMessageContent` で同じ行を置換する（`id` / `requestId` / `timestamp` は維持し `message_updated` で配信、新規 `message` は出さない）。同長の別本文・短い描画・まだ writable でないターン・行の無い候補は触らない。戻り値と #2436 の `report.outcome` は不変で、pending があるときは従来どおり最新ターンの保存可否を返す（古い行を直しても最新が未完了なら false）。中間報告を終了と見なす判定そのものは残り、後からの更新は relay が配送済みの内容を訂正しない。
