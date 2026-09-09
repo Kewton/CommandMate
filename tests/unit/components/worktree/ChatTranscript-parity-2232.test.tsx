@@ -11,7 +11,8 @@
  *   - clickable file paths (`onFilePathClick`);
  *   - copy, and the toast that says it worked;
  *   - insert-into-composer (`onInsertToMessage`);
- *   - #168's dimming of archived rows;
+ *   - #168's dimming of archived rows — **withdrawn by Issue #2445**, see the
+ *     `#168 archived rows` block below;
  *   - #716's in-place search, including next/previous.
  *
  * Two of these change SHAPE rather than existing: the actions are rendered
@@ -230,15 +231,53 @@ describe('[#2232] ChatTranscript keeps the row actions', () => {
 // #168 archived rows
 // ---------------------------------------------------------------------------
 
-describe('[#2232] ChatTranscript keeps archived rows dimmed', () => {
-  it('dims an archived row and leaves a live one alone', () => {
+describe('[#2445] ChatTranscript drops archived rows instead of dimming them', () => {
+  /**
+   * The parity item this replaces, and why it is gone.
+   *
+   * #2232 inherited History's answer to an archived row: draw it, at
+   * `opacity-60`. On the PC split that turned out to be the wrong answer for
+   * THIS surface — the History column and the chat surface share one
+   * `useSplitMessages` fetch, `includeArchived` included, so ticking "show
+   * archived" in the browser pushed retired rows into the conversation. #2445
+   * makes the two halves of this component agree instead: search has excluded
+   * `archived` rows since #2232 (`searchableMessages`), and the display now
+   * does too. Dimming still exists — `ChatMessageBubble` keeps it, and the
+   * History column still renders those rows through it.
+   */
+  it('renders no row at all for an archived message', () => {
     renderTranscript([
       msg('old', 'assistant', 'from a previous session', { archived: true }),
       msg('new', 'assistant', 'from this one'),
     ]);
 
-    expect(rowFor('old').className).toContain('opacity-60');
+    expect(document.querySelector('[data-row-message-id="old"]')).toBeNull();
     expect(rowFor('new').className).not.toContain('opacity-60');
+  });
+
+  it('shows the empty state when every row is archived', () => {
+    // Not "a transcript with nothing in it and no explanation": the column has
+    // to say why it is blank and what to do about it, which is the empty state
+    // #2232 already owns.
+    renderTranscript([msg('old', 'assistant', 'retired', { archived: true })]);
+
+    expect(screen.getByTestId('chat-transcript-empty')).toBeInTheDocument();
+    expect(document.querySelector('[data-row-message-id="old"]')).toBeNull();
+  });
+
+  it('keeps an archived row out of the search haystack', () => {
+    // The half that was already right, kept as the control: if the display
+    // filter were ever reverted, this assertion alone would not notice.
+    renderTranscript([
+      msg('old', 'assistant', 'sentinel in a retired row', { archived: true }),
+      msg('new', 'assistant', 'nothing to find here'),
+    ]);
+    fireEvent.click(screen.getByTestId('chat-transcript-search-toggle'));
+    fireEvent.change(screen.getByLabelText('worktree.history.search.keywordLabel'), {
+      target: { value: 'sentinel' },
+    });
+
+    expect(document.querySelector('[data-row-message-id="old"]')).toBeNull();
   });
 });
 

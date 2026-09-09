@@ -619,3 +619,144 @@ export function renderAntigravityTurn(
     unknownRecordTypes: [...unknown],
   };
 }
+
+/**
+ * Epoch ms of the newest record agy wrote inside this turn, or 0 (Issue #2443).
+ *
+ * The maximum rather than `records.at(-1)`: `created_at` is agy's own field and
+ * a record that carries none reads as null, so the last record in file order is
+ * not always the last one with a clock on it. The prompt record is deliberately
+ * outside the walk — `records` holds everything *after* the `USER_INPUT` — which
+ * is why {@link resolveAntigravityTurnCompletion} floors the comparison at
+ * {@link AntigravityTurnAccumulator.startedAt} as well.
+ *
+ * @returns Epoch ms, or 0 when the turn has no timestamped record
+ */
+export function antigravityTurnLastRecordAt(turn: AntigravityTurnAccumulator): number {
+  let at = 0;
+  for (const record of turn.records) {
+    if (record.timestampMs !== null && record.timestampMs > at) at = record.timestampMs;
+  }
+  return at;
+}
+
+/**
+ * Why one turn's body is, or is not, the one agy finished on (Issue #2443).
+ *
+ * One word per branch of {@link resolveAntigravityTurnCompletion}, so a log line
+ * says which condition was missing rather than only that something was.
+ *
+ *  - `stop-after-last-record` — confirmed. The only value that means yes.
+ *  - `turn-open` — agy's last word in this turn was a tool call, so there is not
+ *    even a body to confirm yet ({@link isAntigravityTurnWritable}).
+ *  - `no-timestamped-record` — nothing in the turn carries a `created_at`, so a
+ *    `Stop` cannot be placed before or after it and the correlation is refused
+ *    rather than guessed.
+ *  - `no-stop-event` — this instance has reported no `Stop` at all. The ordinary
+ *    state of a turn that is still being written, and the permanent state of a
+ *    session whose agent died before its stop handler ran.
+ *  - `stop-before-last-record` — a `Stop` exists but predates the newest record,
+ *    so it is a statement about an earlier state of this turn or about the turn
+ *    before it. This is the value that makes a **stale** stop harmless.
+ */
+export type AntigravityTurnCompletionReason =
+  | 'stop-after-last-record'
+  | 'turn-open'
+  | 'no-timestamped-record'
+  | 'no-stop-event'
+  | 'stop-before-last-record';
+
+/** What {@link resolveAntigravityTurnCompletion} answers. */
+export interface AntigravityTurnCompletion {
+  /** Whether agy's own account says this body is the one it finished on. */
+  readonly confirmed: boolean;
+  /** Which branch produced {@link confirmed}; see the type. */
+  readonly reason: AntigravityTurnCompletionReason;
+  /** {@link antigravityTurnLastRecordAt} of the turn, carried for the log and the key. */
+  readonly lastRecordAt: number;
+  /** The `Stop` instant the answer was made against, or null. */
+  readonly stopAt: number | null;
+}
+
+/**
+ * Whether agy has vouched for this turn's body (Issue #2443).
+ *
+ * ## What this is separate from, and why the separation is the Issue
+ *
+ * {@link isAntigravityTurnWritable} answers "may a row be written from this
+ * turn". It has to be generous — agy writes **no record that closes a turn**, so
+ * the shape of the last thing it wrote is all there is, and an interim report
+ * ("waiting for the worker") is prose with no `tool_calls` exactly like a
+ * conclusion is. #2438 made the row that follows from that repairable. What it
+ * could not make repairable is everything a save *triggers*: a relay delivering
+ * the interim body to the session that asked for the answer cannot be taken
+ * back, and `broadcastMessage('message_updated', …)` does not rewind it.
+ *
+ * So this is the second question — "is this body final" — and it is answered
+ * from a different kind of evidence, deliberately:
+ *
+ *  - **not the wording.** "waiting", "Waiting for" and their translations are a
+ *    model's prose, and a rule keyed on them is wrong the first time the model
+ *    is asked to answer in another language or writes a conclusion that mentions
+ *    waiting.
+ *  - **not a fixed quiet period.** The gaps measured on the reporting machine
+ *    were 3 / 58 / 156 s from an interim candidate to the next record and 9 /
+ *    113 / 118 s from the final one, which overlap: no constant separates them.
+ *  - **not `status: DONE`** (all 15 measured candidates carry it, early and
+ *    final alike) **and not `truncated_fields`**, which is agy saying it
+ *    shortened a field.
+ *
+ * ## The evidence that is used
+ *
+ * agy's own `Stop` hook, correlated by instant. `Stop` is agy reporting that its
+ * loop ended, and CommandMate already records when one arrived
+ * (`session/agent-event-state`'s `getLastStopEventAt`). What makes it usable
+ * despite `source.ts`'s warning that a `Stop` can be answered with
+ * `{"decision":"continue"}` is that the correlation is an ordering rather than a
+ * flag: a stop is evidence about the file **as it was when the stop arrived**.
+ *
+ *  - A resumed loop appends records *after* the stop, which pushes
+ *    `lastRecordAt` past `stopAt` and takes the confirmation away again. The
+ *    evidence therefore withdraws itself in exactly the case the warning is
+ *    about, with no `continue`-detection of its own.
+ *  - A stop belonging to the *previous* turn is older than this turn's records
+ *    and confirms nothing.
+ *  - No stop at all — hooks not wired up, agy killed, CommandMate restarted
+ *    since — is `no-stop-event`, and the caller keeps the body provisional
+ *    rather than promoting it.
+ *
+ * The residual is agy's clock resolution: `created_at` is written to the second,
+ * so a record appended in the same second as the stop compares equal to it.
+ * That is a sub-second window, it is bounded by one `created_at` tick, and the
+ * direction of the error is a body confirmed one record early rather than a turn
+ * confirmed that never ended.
+ *
+ * Pure: the stop instant is a parameter, so this file keeps its no-filesystem,
+ * no-database, no-`globalThis` contract and the rule is a property a test states
+ * against values rather than against a running server.
+ *
+ * @param turn - The turn to judge
+ * @param stopAt - Epoch ms of this instance's last `Stop`, or null when none has
+ *   been received
+ */
+export function resolveAntigravityTurnCompletion(
+  turn: AntigravityTurnAccumulator,
+  stopAt: number | null
+): AntigravityTurnCompletion {
+  const lastRecordAt = antigravityTurnLastRecordAt(turn);
+  const base = { confirmed: false as const, lastRecordAt, stopAt };
+
+  // A turn agy is still working through has no final body to vouch for. Asked
+  // before the clock questions so that "it is still running" never reads as
+  // "its records are unstamped".
+  if (!isAntigravityTurnWritable(turn)) return { ...base, reason: 'turn-open' };
+  if (lastRecordAt <= 0) return { ...base, reason: 'no-timestamped-record' };
+  if (stopAt === null) return { ...base, reason: 'no-stop-event' };
+  // `startedAt` as well as the newest record: a turn whose records all predate
+  // its own prompt is a shape this reader has not seen, and taking the later of
+  // the two cannot make the test easier to pass.
+  if (stopAt < Math.max(lastRecordAt, turn.startedAt)) {
+    return { ...base, reason: 'stop-before-last-record' };
+  }
+  return { confirmed: true, reason: 'stop-after-last-record', lastRecordAt, stopAt };
+}

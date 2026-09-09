@@ -39,10 +39,17 @@ const TERMINAL_KEYS = [
   'hideFiles',
   // Issue #2259 additions: the tooltips that explain a disabled toggle and the
   // scope of the History switch.
+  //
+  // Issue #2446 dropped `historyChatOnlyHint`: chat mode now carries the same
+  // History column the terminal does, so the History toggle is never disabled
+  // and nothing requests that key. It is asserted GONE below — a stale hint
+  // left in the dictionaries is a promise the UI no longer keeps.
   'historyAllSplitsHint',
-  'historyChatOnlyHint',
   'filesEmptyHint',
 ];
+
+/** Keys the Action bar stopped requesting; leaving them behind is dead text. */
+const REMOVED_TERMINAL_KEYS = ['historyChatOnlyHint'];
 
 describe('[#2259] worktree panel-toggle i18n', () => {
   for (const locale of LOCALES) {
@@ -53,6 +60,13 @@ describe('[#2259] worktree panel-toggle i18n', () => {
         const value = terminal?.[key];
         expect(value, `${locale}: terminal.${key}`).toBeTypeOf('string');
         expect(String(value).trim().length, `${locale}: terminal.${key}`).toBeGreaterThan(0);
+      }
+    });
+
+    it(`${locale} no longer defines the withdrawn disabled-History hint`, () => {
+      const terminal = worktreeDict(locale).terminal;
+      for (const key of REMOVED_TERMINAL_KEYS) {
+        expect(terminal?.[key], `${locale}: terminal.${key}`).toBeUndefined();
       }
     });
 

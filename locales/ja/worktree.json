@@ -436,12 +436,13 @@
     "endSessionFor": "{name}のセッションを終了",
     "filesEmptyHint": "ファイルを開くと有効になります",
     "historyAllSplitsHint": "すべての split に適用",
-    "historyChatOnlyHint": "すべての split がチャット表示のため、履歴列はありません",
     "maximizeSplit": "{split} を最大化",
     "maximizeFocusedSplit": "フォーカス中の split を最大化",
     "restoreSplits": "分割表示に戻す",
     "maximizeShortcutHint": "⌘ / Ctrl + Shift + Enter",
-    "maximizedStatus": "{split} を最大化中"
+    "maximizedStatus": "{split} を最大化中",
+    "loading": "読込中...",
+    "sessionEnded": "セッションは終了しています。送信すると新しいセッションが起動します。"
   },
   "surfaceMode": {
     "groupLabel": "{split} の出力面",
@@ -504,6 +505,12 @@
       "unclassified": "判別できないダイアログ",
       "resolved": "応答済み",
       "unlabeled": "承認ダイアログ"
+    },
+    "previousSession": {
+      "summary": "前回のセッション（{count} 件）",
+      "expand": "前回のセッションを開く",
+      "collapse": "前回のセッションを閉じる",
+      "hint": "前回の会話は履歴で参照できます。"
     }
   },
   "unsentComposer": {
