@@ -1263,6 +1263,7 @@ autoYes:
 success:
   requireWorkEvidence: true
   requireScopeClean: true
+  requireEnvClean: true               # 省略時 false。リポジトリ外の副作用（ポート・tmux セッション・$HOME）も裁定する
 ```
 
 ```bash
@@ -1275,6 +1276,37 @@ commandmate capture <worktree-id> --prompts      # auto-yes が解決したプ�
 フィールドの正準仕様は [docs/design/task-contract.md](../design/task-contract.md)、
 判定の可観測性の設計原則は
 [docs/design/discoverability-principle.md](../design/discoverability-principle.md) を参照してください。
+
+#### `success.requireEnvClean` — リポジトリ外の副作用を裁定する（Issue #1740 / #2442）
+
+`requireScopeClean` は**リポジトリ内**のファイル変更を裁定します。`requireEnvClean: true` は
+**外**を裁定します —— 稼働中サーバのポート、`mcbd-*` tmux セッション、`$HOME` 直下、
+`~/.commandmate` 直下が、**増えても減っても**不合格です。2 度の tmux セッション全滅
+（2026-08-02 / 2026-09-08）も本番サーバの巻き込み停止（#1739）も、リポジトリ内は 1 バイトも
+壊れていないので `scope` は緑でした。
+
+| 宣言場所 | 単位 |
+|---|---|
+| `options.requireEnvClean`（`.commandmate/verify.yaml`） | リポジトリ全体。**自分の `commandmate verify` にも効く** |
+| `success.requireEnvClean`（契約） | 委任 1 件 |
+| 契約の `verify.gates: [env-clean, …]` | 委任 1 件（明示指名） |
+
+3 つは **OR** です。`requireCommit` と同じく契約は締める方向にしか効かず、
+契約に `requireEnvClean: false` と書いてもリポジトリ側の `true` は解除できません。
+
+**有効化は task 作成より前に。** 基準となるスナップショットは `send --contract` の瞬間に
+1 回だけ採られます。有効化前に作られた task、契約を持たない素の `verify`、検証時にだけ
+`--gates env-clean` を足した実行は、比較対象が無いので **UNKNOWN**（gate `error` → run
+`failed`、exit 20）になります —— 検証直前の状態を「開始時」に仕立てて緑にすることはしません。
+
+```bash
+commandmate verify <worktree-id> --json | jq '.gates[] | select(.gateId=="env-clean")'
+```
+
+失敗ログは消えたものを `- tcp/3000` / `- mcbd-claude-<id>`、増えたものを `+ …` の形で挙げます。
+**減ったものは誰のものであれ違反**、増えたものは他ワーカーに帰属できるときだけ免除されます
+（並列委任は互いの計測窓の中で正当に自分のセッションを起こすため）。
+詳細は [docs/design/task-contract.md](../design/task-contract.md) §2.6。
 
 ### 一覧・詳細
 

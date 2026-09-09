@@ -15,12 +15,14 @@
  */
 
 import {
+  ENV_CLEAN_GATE_ID,
   SCOPE_GATE_ID,
   VERIFY_CONFIG_RELATIVE_PATH,
   WORK_EVIDENCE_GATE_ID,
   type VerifyConfig,
   type VerifyGate,
 } from '@/lib/verification/verify-config';
+import { resolveRequireEnvClean } from '@/lib/verification/env-clean-gate';
 import type { TaskContract } from './contract-parser';
 
 /**
@@ -35,6 +37,15 @@ import type { TaskContract } from './contract-parser';
 const WORK_EVIDENCE_ANY_CHANGE_LABEL = `${WORK_EVIDENCE_GATE_ID}（commit または未 commit の変更が存在すること）`;
 const WORK_EVIDENCE_COMMIT_LABEL = `${WORK_EVIDENCE_GATE_ID}（commit が存在すること。未 commit の変更は作業証跡として数えない）`;
 const SCOPE_LABEL = `${SCOPE_GATE_ID}（変更ファイルが scope.allow の内側に収まっていること）`;
+/**
+ * `env-clean` reads the machine, not the repository, so the preamble has to say
+ * so (#2442). Without this row the gate would run — and could fail the run —
+ * without ever having been named in the completion criterion the agent was sent,
+ * which is the same "declared and never checked" defect pointed the other way.
+ */
+const ENV_CLEAN_LABEL =
+  `${ENV_CLEAN_GATE_ID}（タスク開始時に在ったポート・tmux セッション・$HOME / ~/.commandmate ` +
+  '直下のエントリが、増えても減っても不合格）';
 
 /** The obligation line, in the two forms the pipeline can actually enforce. */
 const COMMIT_REQUIRED_LINE =
@@ -78,31 +89,76 @@ export function resolveRequireCommit(
 }
 
 /**
+ * The built-in gates, in the order `gate-runner` runs them.
+ *
+ * Named once because two things have to agree with it: the resolved gate id list
+ * below and the preamble's command list. A contract that typed
+ * `gates: [lint, env-clean]` must still be told the order the run will take.
+ */
+export const BUILT_IN_GATE_ORDER: readonly string[] = [
+  WORK_EVIDENCE_GATE_ID,
+  SCOPE_GATE_ID,
+  ENV_CLEAN_GATE_ID,
+];
+
+/**
  * The gate ids a contract asks for, or null for "every gate".
  *
  * The `success` flags — not the `verify.gates` list — decide whether the built-in
  * gates run. A contract that required work evidence or a clean scope while
  * listing only `[lint, unit]` would otherwise declare rules that nothing
  * checked: the flags would read as enforced and the gates would never run.
+ *
+ * `env-clean` joined that rule in #2442. Only the contract's own half is visible
+ * here — `options.requireEnvClean` lives in verify.yaml, which this function does
+ * not take — so callers that hold a config OR the two together;
+ * `selectGates` in gate-runner already does, and so does
+ * {@link resolveGateCommands} for the sentence the agent reads.
  */
 export function resolveContractGateIds(contract: TaskContract): string[] | null {
   const gates = contract.verify.gates;
   if (!gates) return null;
 
-  const builtIns = [
+  const required = new Map<string, boolean>([
     [WORK_EVIDENCE_GATE_ID, contract.success.requireWorkEvidence],
     [SCOPE_GATE_ID, contract.success.requireScopeClean],
-  ] as const;
+    [ENV_CLEAN_GATE_ID, contract.success.requireEnvClean],
+  ]);
 
   // Built-ins are listed first and in their execution order even when the
   // contract already named one, so the resolved list reads as the order the run
   // will actually take rather than the order the contract happened to type.
-  const selected = builtIns
-    .filter(([id, required]) => required || gates.includes(id))
-    .map(([id]) => id as string);
-  const rest = gates.filter((id) => !builtIns.some(([builtIn]) => builtIn === id));
+  const selected = BUILT_IN_GATE_ORDER.filter(
+    (id) => required.get(id) === true || gates.includes(id)
+  );
+  const rest = gates.filter((id) => !BUILT_IN_GATE_ORDER.includes(id));
 
   return [...selected, ...rest];
+}
+
+/**
+ * Whether a verification run for this contract will include `env-clean` (#2442).
+ *
+ * Three declarations can put the gate in a run and the baseline has to be
+ * recorded for all three, because the snapshot is taken once — at send — and
+ * cannot be reconstructed later:
+ *
+ *   1. `options.requireEnvClean` in the repository's verify.yaml,
+ *   2. `success.requireEnvClean` in the contract,
+ *   3. the contract naming `env-clean` in `verify.gates`.
+ *
+ * (3) is the one that was easy to miss. Opening the id to `verify.gates` without
+ * also asking here would have made every contract that used it report UNKNOWN
+ * forever: `selectGates` would run the gate, and `recordEnvBaseline` — reading
+ * only the OR of (1) and (2) — would never have written anything to compare
+ * against. An operator's `verify --gates env-clean` on a task created without any
+ * of the three still reports UNKNOWN, which is correct: no baseline exists, and
+ * inventing one from the state at verification time is the fail-open this gate
+ * refuses.
+ */
+export function runsEnvCleanGate(contract: TaskContract, config: VerifyConfig | null): boolean {
+  if (resolveRequireEnvClean(contract, config).required) return true;
+  return resolveContractGateIds(contract)?.includes(ENV_CLEAN_GATE_ID) ?? false;
 }
 
 /**
@@ -176,7 +232,16 @@ export function validateContractAgainstVerifyConfig(
   }
 
   if (gates) {
-    const known = new Set<string>([WORK_EVIDENCE_GATE_ID, SCOPE_GATE_ID, ...configIds]);
+    // `env-clean` joins the built-ins a contract may name (#2442). It is a
+    // reserved id, so it can never appear in `configIds` — leaving it out of this
+    // set made `verify.gates: [env-clean]` an unknown id at send, which is how
+    // the gate ended up reachable only through the repository-wide switch.
+    const known = new Set<string>([
+      WORK_EVIDENCE_GATE_ID,
+      SCOPE_GATE_ID,
+      ENV_CLEAN_GATE_ID,
+      ...configIds,
+    ]);
     const defined = new Set(definitions.map((gate) => gate.id));
     const unknown = gates.filter((id) => !known.has(id) && !defined.has(id));
     if (unknown.length > 0) {
@@ -209,6 +274,10 @@ export function resolveGateCommands(
   const builtInLabels = new Map<string, string>([
     [WORK_EVIDENCE_GATE_ID, workEvidenceLabel],
     [SCOPE_GATE_ID, SCOPE_LABEL],
+    // Without this row a contract naming `env-clean` resolved to `undefined` and
+    // the preamble handed the agent the literal string "undefined" as one of the
+    // commands it had to pass.
+    [ENV_CLEAN_GATE_ID, ENV_CLEAN_LABEL],
   ]);
 
   // Contract-defined gates run after the repository's own, so the preamble
@@ -216,17 +285,29 @@ export function resolveGateCommands(
   // will run", and an order it invents would be the first thing to drift.
   const declared = [...config.gates, ...contractGateDefinitions(contract)];
 
+  const envCleanRequired = resolveRequireEnvClean(contract, config).required;
+
   const selected = resolveContractGateIds(contract);
   if (!selected) {
     // An omitted gates list runs every gate, and the built-ins are still governed
     // by the success flags rather than by the (absent) list.
     const builtIns = [workEvidenceLabel];
     if (contract.success.requireScopeClean) builtIns.push(SCOPE_LABEL);
+    if (envCleanRequired) builtIns.push(ENV_CLEAN_LABEL);
     return [...builtIns, ...declared.map((gate) => gate.command)];
   }
 
+  // Re-derive the built-in prefix instead of trusting `selected`'s: the
+  // repository-wide `options.requireEnvClean` forces the gate into the run
+  // without appearing in the contract at all, and a preamble that omitted it
+  // would hand the agent a completion criterion the run does not use.
+  const builtIns = BUILT_IN_GATE_ORDER.filter(
+    (id) => selected.includes(id) || (id === ENV_CLEAN_GATE_ID && envCleanRequired)
+  );
+  const rest = selected.filter((id) => !BUILT_IN_GATE_ORDER.includes(id));
+
   const byId = new Map(declared.map((gate) => [gate.id, gate.command] as const));
-  return selected.map((id) => builtInLabels.get(id) ?? (byId.get(id) as string));
+  return [...builtIns, ...rest].map((id) => builtInLabels.get(id) ?? (byId.get(id) as string));
 }
 
 /**

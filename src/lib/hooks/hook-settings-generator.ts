@@ -123,6 +123,63 @@ export const NOTIFICATION_MATCHER = 'permission_prompt|idle_prompt';
 export const TOOL_USE_MATCHER = ASK_USER_QUESTION_TOOL;
 
 /**
+ * tmux spellings that reach whichever server the ambient environment points at
+ * (Issue #2442).
+ *
+ * On 2026-09-08 22:53 JST all 42 `mcbd-*` sessions on the default tmux server
+ * were destroyed by a socket-less `tmux kill-server` run from an ad-hoc Bash
+ * block — the second such wipe after 2026-08-02 (#1624). The block had set
+ * `TMUX_TMPDIR` first, which reads as isolation and is not: tmux consults it
+ * only while `$TMUX` is unset, and every CommandMate agent runs inside a pane.
+ *
+ * A tmux invocation carries its target as a *global option before the
+ * subcommand* — `-L <name>` (socket name) or `-S <path>` (socket path) — and
+ * both outrank `$TMUX`. So "which server does this hit" is decidable from the
+ * argv shape alone, and that is what these rules read: a command whose first
+ * word is `tmux` and whose second is a destroying or server-global subcommand
+ * names no socket and therefore hits the shared one.
+ *
+ * The pinned spelling of every rule below is deliberately *not* covered, which
+ * is what keeps the isolated-probe recipes in `docs/design/` working. "Not
+ * covered" means "no new deny rule matches it", not "pre-approved": such a
+ * command still goes through the session's normal permission handling.
+ *
+ * Aliases get their own entry because Claude's prefix matching is **token-exact
+ * and adjacency-sensitive**, measured on 2.1.266 in
+ * `docs/design/agent-hooks-permission-deny-verification.md` §6: a rule naming
+ * `tmux list-p` left `tmux list-panes` untouched, and one naming
+ * `tmux show-options -g` left both `tmux show-options -gv …` and
+ * `tmux show-options -t 0 -g` untouched. A single truncated rule covering a
+ * family is therefore not available — it would load without error and match
+ * nothing. `bind` / `unbind` / `set` are tmux's own documented aliases for
+ * `bind-key` / `unbind-key` / `set-option`; `kill-server` and `kill-session`
+ * have none.
+ *
+ * Shapes that escape these rules (absolute path, `bash -c`, another global
+ * option before the subcommand, tmux's unambiguous-prefix abbreviations,
+ * combined global flags) are measured and listed in §6.4 of the same document
+ * rather than guessed at here. This layer narrows the accident, it does not
+ * close the class — `env-clean` (#1740) is the after-the-fact detector.
+ */
+export const TMUX_UNPINNED_DENY_RULES: readonly string[] = [
+  // Destroys every session on the server it reaches. The 2026-08-02 and
+  // 2026-09-08 wipes were both this word.
+  'Bash(tmux kill-server:*)',
+  // `-t` included on purpose: an exact-match `kill-session -t '=name:'` is safe
+  // only about *what* it names, never about *where* — and the static guard's
+  // exemption for that spelling is why agent recipes must pin the socket.
+  'Bash(tmux kill-session:*)',
+  // Server-global mutations outlive the caller and are shared with every session
+  // on that server.
+  'Bash(tmux set-option -g:*)',
+  'Bash(tmux set -g:*)',
+  'Bash(tmux bind-key:*)',
+  'Bash(tmux bind:*)',
+  'Bash(tmux unbind-key:*)',
+  'Bash(tmux unbind:*)',
+];
+
+/**
  * Bash spellings this server refuses to let an agent run (Issue #1739).
  *
  * On 2026-08-06 a delegated worker restarted its own isolated server with
@@ -157,11 +214,15 @@ export const TOOL_USE_MATCHER = ASK_USER_QUESTION_TOOL;
  * signals every process the user owns and `kill -9 -<pgid>` a whole group; the
  * default `kill` (SIGTERM) is untouched, so the graceful spelling of the same
  * intent is the one that survives.
+ *
+ * Issue #2442 adds the tmux half of the same story: see
+ * {@link TMUX_UNPINNED_DENY_RULES}.
  */
 export const PERMISSION_DENY_RULES: readonly string[] = [
   'Bash(pkill:*)',
   'Bash(killall:*)',
   'Bash(kill -9:*)',
+  ...TMUX_UNPINNED_DENY_RULES,
 ];
 
 /** Relay script shipped with the package (`files: ["scripts/hooks/"]`). */

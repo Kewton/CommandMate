@@ -95,9 +95,10 @@ vi.mock('@/components/worktree/HistoryPane', () => ({
 }));
 
 // Issue #2232: the chat surface's body is `ChatTranscript`, not `HistoryPane`.
-// Both mocks are needed here because this file drives BOTH modes — the History
-// column in terminal mode, the transcript in chat mode — and the property under
-// test is that exactly one transcript is on screen in each.
+// Both mocks are needed here because this file drives BOTH modes, and the
+// property under test is which BODY fills the output box: `TerminalDisplay` or
+// the transcript. Since #2446 the History column is beside either one, so
+// `history-pane` is present in both modes and cannot stand in for the mode.
 vi.mock('@/components/worktree/ChatTranscript', () => ({
   ChatTranscript: ({
     splitIndex,
@@ -126,8 +127,10 @@ vi.mock('@/hooks/useSplitMessages', () => ({
   }),
 }));
 
-// History column visible, so "chat mode hides it" is an observable change
-// rather than a coincidence of the collapsed default.
+// History column visible in both modes. Issue #2446: chat mode no longer hides
+// it, so what this pins is that the SAME column is on screen either way — the
+// mock's `visible: true` is the shared `useHistoryPaneState` value both rows
+// read.
 vi.mock('@/hooks/useHistoryPaneState', () => ({
   useHistoryPaneState: () => ({
     visible: true,
@@ -217,14 +220,36 @@ describe('[#2193] TerminalSplitPaneContent output surface', () => {
       expect(screen.getByTestId('split-chat-slot-0')).toBeInTheDocument();
     });
     expect(screen.queryByTestId('terminal-display')).not.toBeInTheDocument();
-    // The collapsible History column is gone, so the transcript is not doubled.
-    expect(screen.queryByTestId('split-history-slot-0')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('history-pane')).not.toBeInTheDocument();
+    // Issue #2232 / #2446: the History column IS beside the chat surface, but
+    // it renders `ConversationPairCard`s, not this transcript. Exactly one
+    // `chat-transcript` is the property that matters.
     const panes = screen.getAllByTestId('chat-transcript');
     expect(panes).toHaveLength(1);
-    // Same instance-scoped fetch as the column it replaced.
+    // Same instance-scoped fetch as the column beside it.
     expect(panes[0].getAttribute('data-cli-tool-id')).toBe('claude');
     expect(panes[0].getAttribute('data-message-count')).toBe('1');
+  });
+
+  it('[#2446] keeps the History column beside the chat surface', async () => {
+    render(renderSplit(0));
+
+    fireEvent.click(screen.getByTestId('surface-mode-chat-0'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('split-chat-slot-0')).toBeInTheDocument();
+    });
+    // The column is the same mount, at the same width, with the same
+    // instance-scoped messages it has in terminal mode — and it keeps its own
+    // collapse button (the chat surface deliberately has none of its own).
+    const column = screen.getByTestId('split-history-slot-0');
+    expect(column).toBeInTheDocument();
+    expect(column.style.width).toBe('40%');
+    const pane = screen.getByTestId('history-pane');
+    expect(pane.getAttribute('data-collapsible')).toBe('true');
+    expect(pane.getAttribute('data-cli-tool-id')).toBe('claude');
+    expect(pane.getAttribute('data-message-count')).toBe('1');
+    // One resizer between the two, exactly as the terminal row has.
+    expect(screen.getByTestId('split-chat-row-0').children).toHaveLength(3);
   });
 
   it('keeps the whole input half rendered in chat mode', async () => {
@@ -288,7 +313,10 @@ describe('[#2193] TerminalSplitPaneContent output surface', () => {
     expect(screen.getAllByTestId('terminal-display')).toHaveLength(1);
     expect(screen.getByTestId('split-history-slot-0')).toBeInTheDocument();
     expect(screen.queryByTestId('split-chat-slot-0')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('split-history-slot-1')).not.toBeInTheDocument();
+    // Issue #2446: split 1's column is in ITS OWN row now, not absent — the
+    // per-split slot id is what keeps the Action bar's `aria-controls` honest.
+    expect(screen.getByTestId('split-history-slot-1')).toBeInTheDocument();
+    expect(screen.getByTestId('split-chat-row-1')).toBeInTheDocument();
   });
 
   it('opens in chat when ?view=chat deep-links it, and persists that', async () => {
