@@ -8,10 +8,10 @@
  * replacement: nothing renders beside the terminal, and the terminal is
  * explicitly the full width of the row.
  *
- * It also pins the broadcast the Action bar depends on: the bar disables its
- * History toggle while every split is in chat mode, and it learns about a mode
- * change from a CustomEvent — a same-window `localStorage.setItem` fires no
- * `storage` event, so without the emit the bar would stay stale until remount.
+ * The CustomEvent broadcast this file used to pin is gone with Issue #2446: it
+ * existed only so the Action bar could disable its History toggle while every
+ * split showed chat, and chat mode now carries the same column. What is pinned
+ * instead is the write the pane still owes — the persisted per-split mode.
  *
  * @vitest-environment jsdom
  */
@@ -20,7 +20,6 @@ import React from 'react';
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { TerminalSplitPaneContent } from '@/components/worktree/TerminalSplitPaneContent';
-import { SURFACE_MODE_CHANGE_EVENT } from '@/hooks/useSplitSurfaceModes';
 import { getSplitSurfaceModeStorageKey } from '@/config/surface-mode-config';
 import type { AgentInstance, CLIToolType } from '@/lib/cli-tools/types';
 import { installRadixJsdomPolyfills } from '@tests/helpers/radix-jsdom';
@@ -179,27 +178,38 @@ describe('[#2259] the split History column has no vertical strip', () => {
     expect(screen.getByTestId('split-history-slot-0').style.width).toBe('40%');
   });
 
-  it('announces a surface-mode change so the Action bar can re-evaluate', () => {
-    const heard: Array<{ splitIndex: number; mode: string; worktreeId: string }> = [];
-    const listener = (event: Event) => {
-      heard.push((event as CustomEvent).detail);
-    };
-    window.addEventListener(SURFACE_MODE_CHANGE_EVENT, listener);
-    try {
-      render(renderSplit(0));
-      fireEvent.click(screen.getByTestId('surface-mode-chat-0'));
-    } finally {
-      window.removeEventListener(SURFACE_MODE_CHANGE_EVENT, listener);
-    }
+  it('persists the surface mode the split switched to', () => {
+    render(renderSplit(0));
+    fireEvent.click(screen.getByTestId('surface-mode-chat-0'));
 
-    expect(heard).toContainEqual({
-      worktreeId: WORKTREE_ID,
-      splitIndex: 0,
-      mode: 'chat',
-    });
-    // The persisted value the bar reads on mount agrees with what was announced.
     expect(
       window.localStorage.getItem(getSplitSurfaceModeStorageKey(WORKTREE_ID, 0)),
     ).toBe('chat');
+  });
+
+  it('[#2446] keeps the column and its resizer in the chat row too', () => {
+    render(renderSplit(0));
+    fireEvent.click(screen.getByTestId('surface-mode-chat-0'));
+
+    const row = screen.getByTestId('split-chat-row-0');
+    // Column + resizer + chat surface — the same three children the terminal
+    // row has, at the same width.
+    expect(row.children).toHaveLength(3);
+    expect(screen.getByTestId('split-history-slot-0')).toBeInTheDocument();
+    expect(screen.getByTestId('split-history-slot-0').style.width).toBe('40%');
+    expect(screen.getByTestId('split-chat-output-0').style.width).toBe('');
+  });
+
+  it('[#2446] gives the chat surface 100% of the split when the column is hidden', () => {
+    historyState.visible = false;
+    render(renderSplit(0));
+    fireEvent.click(screen.getByTestId('surface-mode-chat-0'));
+
+    const row = screen.getByTestId('split-chat-row-0');
+    const output = screen.getByTestId('split-chat-output-0');
+    expect(row.children).toHaveLength(1);
+    expect(row.children[0]).toBe(output);
+    expect(output.style.width).toBe('100%');
+    expect(screen.queryByTestId('split-history-slot-0')).not.toBeInTheDocument();
   });
 });

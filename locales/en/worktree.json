@@ -436,12 +436,13 @@
     "endSessionFor": "End session for {name}",
     "filesEmptyHint": "Open a file to enable this",
     "historyAllSplitsHint": "Applies to all splits",
-    "historyChatOnlyHint": "Every split shows Chat, which has no history column",
     "maximizeSplit": "Maximize {split}",
     "maximizeFocusedSplit": "Maximize the focused split",
     "restoreSplits": "Restore the split layout",
     "maximizeShortcutHint": "⌘ / Ctrl + Shift + Enter",
-    "maximizedStatus": "Split {split} maximized"
+    "maximizedStatus": "Split {split} maximized",
+    "loading": "Loading…",
+    "sessionEnded": "The session has ended. Send a message to start a new session."
   },
   "surfaceMode": {
     "groupLabel": "Output surface for {split}",
@@ -504,6 +505,12 @@
       "unclassified": "Dialog not recognized",
       "resolved": "Resolved",
       "unlabeled": "Approval dialog"
+    },
+    "previousSession": {
+      "summary": "Previous session ({count})",
+      "expand": "Show the previous session",
+      "collapse": "Hide the previous session",
+      "hint": "You can view the previous conversation in History."
     }
   },
   "unsentComposer": {

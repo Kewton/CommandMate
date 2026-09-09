@@ -130,7 +130,17 @@ import React, {
 } from 'react';
 import { useTranslations } from 'next-intl';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { ArrowDown, ArrowUp, Loader2, MessageSquare, Search, Wrench } from 'lucide-react';
+import {
+  ArrowDown,
+  ArrowUp,
+  ChevronDown,
+  ChevronRight,
+  History,
+  Loader2,
+  MessageSquare,
+  Search,
+  Wrench,
+} from 'lucide-react';
 import { Skeleton } from '@/components/ui';
 import type { ChatMessage } from '@/types/models';
 import type { CLIToolType } from '@/lib/cli-tools/types';
@@ -148,6 +158,7 @@ import {
   CHAT_FALLBACK_RENDER_COUNT,
   CHAT_VIRTUAL_OVERSCAN,
   shouldShowLiveRoleHeader,
+  type ChatTranscriptRow,
 } from '@/lib/chat/chat-transcript-view';
 import { isToolApprovalMessage } from '@/lib/chat/chat-tool-approvals';
 import { resolveChatSearchNamespace } from '@/lib/chat/chat-search-namespace';
@@ -203,6 +214,32 @@ export const CHAT_TRANSCRIPT_JUMP_FAB_TESTID = 'chat-transcript-jump-fab';
  * whichever row happens to be on screen.
  */
 export const CHAT_TRANSCRIPT_TOOL_ACTIVITY_TESTID = 'chat-transcript-tool-activity-toggle';
+
+/**
+ * The previous-session fold's toggle (Issue #2445).
+ *
+ * Exported because the fold is a statement about the SESSION and the suites
+ * that assert it live above this component (`ChatSurface`, the two pane
+ * wirings) as well as beside it.
+ */
+export const CHAT_PREVIOUS_SESSION_TOGGLE_TESTID = 'chat-previous-session-toggle';
+
+/** The ended banner under the fold (Issue #2445). */
+export const CHAT_SESSION_ENDED_BANNER_TESTID = 'chat-session-ended-banner';
+
+/**
+ * The disclosure region's DOM id, which the toggle names in `aria-controls`.
+ *
+ * Namespaced by `splitIndex` for the same reason the search highlights are
+ * (`resolveChatSearchNamespace`): the PC mounts up to four of these side by
+ * side, and a duplicated id would make every split's button point at the first
+ * split's rows.
+ */
+export function chatPreviousSessionRegionId(splitIndex: number | undefined): string {
+  return splitIndex === undefined
+    ? 'chat-previous-session-region'
+    : `chat-previous-session-region-${splitIndex}`;
+}
 
 /**
  * Animation-frame ceiling for the tail anchor (Issue #2283).
@@ -289,6 +326,21 @@ export interface ChatTranscriptScrollControls {
   scrollToTop: () => void;
 }
 
+/**
+ * A row of the rendered column (Issue #2445).
+ *
+ * `ChatTranscriptRow` describes a row built out of MESSAGES and stays exactly
+ * that — `lib/chat/chat-transcript-view` is shared with the tests that assert
+ * the approval folding and the turn ordering, and neither of those has an
+ * opinion about sessions. This local union adds the one row the fold needs (its
+ * own header) and the one flag the fold needs on the rows underneath it, so the
+ * virtualizer still counts ONE list and `messageRowIndexById` still resolves a
+ * search hit to an index in it.
+ */
+type ChatDisplayRow =
+  | { kind: 'previousSessionHeader'; key: string; count: number }
+  | ({ previousSession?: boolean } & ChatTranscriptRow);
+
 /** One in-flight run of the tail anchor (Issue #2283). */
 interface TailAnchorRun {
   /** The pending `requestAnimationFrame` handle, or null between frames. */
@@ -320,6 +372,12 @@ export interface ChatTranscriptProps {
   worktreePath?: string;
   /** Metadata only — the messages are already filtered by the caller's fetch. */
   cliToolId?: CLIToolType;
+  /**
+   * Issue #2445: the agent instance these rows belong to. Metadata only, and
+   * used for exactly one thing — re-closing the previous-session fold when the
+   * column starts showing a different instance's conversation.
+   */
+  instanceId?: string;
   isLoading?: boolean;
   className?: string;
   onFilePathClick?: (path: string) => void;
@@ -340,6 +398,21 @@ export interface ChatTranscriptProps {
    * why it is neither a virtualized row nor a footer.
    */
   liveTurn?: ChatTranscriptLiveTurn | null;
+  /**
+   * Issue #2445: the pane has been asked, and there is no session behind these
+   * rows (`ChatSurface`'s `isChatSessionEnded`).
+   *
+   * What it turns on here is a way of READING the rows, never a change to them:
+   * the saved rows that were already on screen when the verdict arrived go into
+   * a fold that starts closed, and an ended banner is drawn under it. Nothing
+   * is written, no `archived` flag is faked, and the whole presentation is
+   * withdrawn the moment a session exists again.
+   *
+   * Deliberately a prop rather than a second read of the polled state: the
+   * surface above already owns that read, and two components deciding "is it
+   * dead" from the same two flags is how they end up disagreeing.
+   */
+  sessionEnded?: boolean;
   /**
    * Issue #2283: published on mount and withdrawn on unmount, so a parent can
    * jump this transcript through the VIRTUALIZER rather than by writing
@@ -475,6 +548,87 @@ function ChatSettlingTurnBubble({
   );
 }
 
+/**
+ * The previous session's fold, as the first row of the column (Issue #2445).
+ *
+ * A row of the virtual list rather than a header above it, and that is the
+ * whole reason it looks like this. The alternative — a heading in flow above
+ * the sizer — shifts every offset `@tanstack/react-virtual` computes against
+ * the scroll element by its own height, which is the arithmetic behind #2283's
+ * "lands 7,770px short". As a row it is measured like any other and the tail
+ * anchor keeps working unchanged.
+ *
+ * `count` is the number of SAVED, non-archived messages inside the fold — user,
+ * assistant and saved approval rows alike. Not chips, not pairs, and not the
+ * server's total: a display limit or a page boundary means the column holds
+ * what it fetched, and the number has to describe what opening the fold will
+ * actually show.
+ */
+function ChatPreviousSessionHeader({
+  count,
+  isOpen,
+  regionId,
+  onToggle,
+}: {
+  count: number;
+  isOpen: boolean;
+  regionId: string;
+  onToggle: () => void;
+}) {
+  const t = useTranslations('worktree');
+  const Chevron = isOpen ? ChevronDown : ChevronRight;
+  return (
+    <div className="mb-2 flex w-full items-center">
+      <button
+        type="button"
+        data-testid={CHAT_PREVIOUS_SESSION_TOGGLE_TESTID}
+        data-count={String(count)}
+        onClick={onToggle}
+        aria-expanded={isOpen}
+        aria-controls={regionId}
+        aria-label={
+          isOpen
+            ? t('chatTranscript.previousSession.collapse')
+            : t('chatTranscript.previousSession.expand')
+        }
+        className="flex min-h-[32px] items-center gap-1.5 rounded-full border border-border bg-surface-2 px-3 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring touch-manipulation"
+      >
+        <History size={12} aria-hidden="true" />
+        <span>{t('chatTranscript.previousSession.summary', { count })}</span>
+        <Chevron size={12} aria-hidden="true" />
+      </button>
+    </div>
+  );
+}
+
+/**
+ * "This conversation is over" (Issue #2445).
+ *
+ * Two sentences, from two keys, because they answer to different owners. The
+ * first is `terminal.sessionEnded`, shared verbatim with `TerminalDisplay`'s
+ * #842 placeholder so the two output surfaces cannot describe the same dead
+ * session differently. The second is chat's own: the terminal has no History
+ * column to point at.
+ *
+ * A plain sibling after the virtual list rather than a row in it, so it cannot
+ * be scrolled past, cannot be unmounted by the virtualizer, and — unlike a row
+ * beyond index 40 — is still drawn in the #1123 fallback that every jsdom test
+ * and every first paint runs through.
+ */
+function ChatSessionEndedBanner() {
+  const t = useTranslations('worktree');
+  return (
+    <div
+      data-testid={CHAT_SESSION_ENDED_BANNER_TESTID}
+      role="status"
+      className="mt-2 flex flex-col gap-0.5 rounded-lg border border-border bg-surface-2 px-3 py-2 text-xs text-muted-foreground"
+    >
+      <span>{t('terminal.sessionEnded')}</span>
+      <span>{t('chatTranscript.previousSession.hint')}</span>
+    </div>
+  );
+}
+
 /** The transcript's ONE empty state. */
 function ChatTranscriptEmpty() {
   const t = useTranslations('worktree');
@@ -498,7 +652,8 @@ export const ChatTranscript = memo(function ChatTranscript({
   messages,
   worktreeId,
   worktreePath,
-  cliToolId: _cliToolId,
+  cliToolId,
+  instanceId,
   isLoading = false,
   className = '',
   onFilePathClick,
@@ -508,6 +663,7 @@ export const ChatTranscript = memo(function ChatTranscript({
   onDiscardPending,
   splitIndex,
   liveTurn = null,
+  sessionEnded = false,
   onScrollControlsChange,
 }: ChatTranscriptProps) {
   const t = useTranslations('worktree');
@@ -515,6 +671,117 @@ export const ChatTranscript = memo(function ChatTranscript({
 
   const highlightNamespace = useMemo(
     () => resolveChatSearchNamespace(splitIndex),
+    [splitIndex],
+  );
+
+  // ---------------------------------------------------------------
+  // Archived rows are not part of this conversation (Issue #2445)
+  // ---------------------------------------------------------------
+  // The PC split shares ONE fetch between the History column and this surface,
+  // `includeArchived` and all — so turning "show archived" on in the browser
+  // used to push retired rows into the chat. Search already refused them
+  // (`!m.archived`, below, since #2232); this is the display side agreeing, and
+  // everything downstream — the rows, the count in the fold, the empty state,
+  // the virtualizer's indices — is derived from this array rather than from
+  // `messages`.
+  //
+  // Returns the argument itself when nothing is archived, which is the normal
+  // case, so the memos below are not handed a fresh identity on every poll.
+  const visibleMessages = useMemo(() => {
+    const kept = messages.filter((m) => !m.archived);
+    return kept.length === messages.length ? messages : kept;
+  }, [messages]);
+
+  // ---------------------------------------------------------------
+  // The previous session (Issue #2445)
+  // ---------------------------------------------------------------
+  // Two questions, and they are not the same one:
+  //
+  //  1. **is the presentation on?** `sessionEnded` from the surface, AND the
+  //     first history fetch has landed. A transcript that is still loading has
+  //     no rows to call previous, and switching on mid-fetch would fold an
+  //     empty column and then have to unfold it;
+  //  2. **which rows are previous?** The ids that were on screen when (1)
+  //     turned on — snapshotted once, held until it turns off again.
+  //
+  // (2) is a snapshot rather than a predicate because of what happens next. The
+  // reader sends a message to a dead pane: the #1121 bubble is optimistic and
+  // is trivially excluded, but the moment the server echo replaces it that row
+  // is a plain saved user message like any other, and `isRunning` may not have
+  // come back yet (the two arrive on different clocks, and the Issue asks for
+  // the reversed order to work). A predicate would fold the message the reader
+  // just sent into a closed group and make it disappear; a snapshot cannot,
+  // because that row's id was never in it.
+  const isEndedPresentation = sessionEnded && !isLoading;
+
+  // The conversation this column is showing. A change of any part of it is a
+  // different transcript, so the snapshot and the fold both start over.
+  const conversationKey = `${worktreeId}|${cliToolId ?? ''}|${instanceId ?? ''}`;
+  const previousIdsRef = useRef<ReadonlySet<string> | null>(null);
+  const conversationKeyRef = useRef(conversationKey);
+  if (conversationKeyRef.current !== conversationKey) {
+    conversationKeyRef.current = conversationKey;
+    previousIdsRef.current = null;
+  }
+  if (!isEndedPresentation) {
+    previousIdsRef.current = null;
+  } else if (previousIdsRef.current === null) {
+    // Taken during render, not in an effect: an effect would paint one frame
+    // with every row unclassified — i.e. the dead session's conversation shown
+    // as the current one, which is the defect.
+    previousIdsRef.current = new Set(
+      visibleMessages.filter((m) => !m.optimisticState).map((m) => m.id),
+    );
+  }
+  const previousIds = previousIdsRef.current;
+
+  const { previousMessages, currentMessages } = useMemo(() => {
+    if (previousIds === null || previousIds.size === 0) {
+      return { previousMessages: [] as ChatMessage[], currentMessages: visibleMessages };
+    }
+    const previous: ChatMessage[] = [];
+    const current: ChatMessage[] = [];
+    for (const message of visibleMessages) {
+      // `optimisticState` is re-checked rather than trusted to the snapshot: a
+      // discarded-and-retried send keeps its tempId, and a retry must not be
+      // able to walk a row into the fold.
+      if (!message.optimisticState && previousIds.has(message.id)) previous.push(message);
+      else current.push(message);
+    }
+    return { previousMessages: previous, currentMessages: current };
+  }, [previousIds, visibleMessages]);
+
+  const previousSessionCount = previousMessages.length;
+  /**
+   * Whether the fold is on screen at all.
+   *
+   * Zero previous rows is a real state and it draws NOTHING: a dead pane whose
+   * only rows are a pending send, and a dead pane with no displayable rows at
+   * all (an all-archived column included), both keep the existing layout — the
+   * ordinary bubbles in the first case, `ChatTranscriptEmpty` and its "send to
+   * start a session" hint in the second. A banner there would be a second copy
+   * of the sentence the empty state already says.
+   */
+  const hasPreviousSession = isEndedPresentation && previousSessionCount > 0;
+
+  const [isPreviousSessionOpen, setIsPreviousSessionOpen] = useState(false);
+  const togglePreviousSession = useCallback(() => {
+    setIsPreviousSessionOpen((open) => !open);
+  }, []);
+  // Closed again whenever the presentation goes away — a session coming back,
+  // the column switching instance — so the NEXT dead session is met by a closed
+  // fold rather than by whatever the reader left open on the last one. The
+  // state is deliberately not persisted: it is a reading position, not a
+  // preference.
+  useEffect(() => {
+    if (!hasPreviousSession) setIsPreviousSessionOpen(false);
+  }, [hasPreviousSession]);
+  useEffect(() => {
+    setIsPreviousSessionOpen(false);
+  }, [conversationKey]);
+
+  const previousSessionRegionId = useMemo(
+    () => chatPreviousSessionRegionId(splitIndex),
     [splitIndex],
   );
 
@@ -552,16 +819,26 @@ export const ChatTranscript = memo(function ChatTranscript({
   // is no `data-message-id` element to mark) and every search for a command name
   // would land on dozens of invisible rows before reaching the reply that
   // mentions it.
+  //
+  // [#2445] The haystack is what is ON SCREEN. A closed fold's rows are not
+  // rendered, so searching them would report matches the reader cannot see and
+  // `scrollToIndex` would have no row to aim at; opening the fold puts them
+  // back in, and closing it re-runs the search (the hook re-fingerprints on the
+  // array) so no count and no current match survives its own row going away.
+  // Archived rows are excluded either way — they are not in `visibleMessages`
+  // at all, and the `!m.archived` clause stays as the belt to that braces.
   const searchableMessages = useMemo(
-    () =>
-      messages.filter(
+    () => {
+      const source = isPreviousSessionOpen ? visibleMessages : currentMessages;
+      return source.filter(
         (m) =>
           !m.archived &&
           !isToolApprovalMessage(m) &&
           typeof m.content === 'string' &&
           m.content.length > 0,
-      ),
-    [messages],
+      );
+    },
+    [visibleMessages, currentMessages, isPreviousSessionOpen],
   );
 
   const {
@@ -633,7 +910,32 @@ export const ChatTranscript = memo(function ChatTranscript({
   // Bubbles and folded approval groups, in transcript order. Also the only
   // place `showHeader` is decided, so a chip group cannot change how many
   // "Assistant" labels the column carries.
-  const rows = useMemo(() => buildChatTranscriptRows(messages), [messages]);
+  //
+  // [#2445] One list, three segments when a previous session is on screen: the
+  // fold's own header, the folded rows (only while it is open), then everything
+  // that is not previous — the #1121 pending bubble, its failed twin, and the
+  // saved row the server echoed back after a send to the dead pane. The two
+  // halves are built separately on purpose: `showHeader` is then computed
+  // within each, so the first row after the fold always carries its role label
+  // instead of reading as a continuation of a conversation that has ended.
+  const rows = useMemo<ChatDisplayRow[]>(() => {
+    if (!hasPreviousSession) return buildChatTranscriptRows(visibleMessages);
+    const folded: ChatDisplayRow[] = isPreviousSessionOpen
+      ? buildChatTranscriptRows(previousMessages).map((row) => ({ ...row, previousSession: true }))
+      : [];
+    return [
+      { kind: 'previousSessionHeader', key: 'previous-session-header', count: previousSessionCount },
+      ...folded,
+      ...buildChatTranscriptRows(currentMessages),
+    ];
+  }, [
+    hasPreviousSession,
+    isPreviousSessionOpen,
+    visibleMessages,
+    previousMessages,
+    currentMessages,
+    previousSessionCount,
+  ]);
   rowCountRef.current = rows.length;
 
   // ---------------------------------------------------------------
@@ -660,6 +962,9 @@ export const ChatTranscript = memo(function ChatTranscript({
   const messageRowIndexById = useMemo(() => {
     const map = new Map<string, number>();
     rows.forEach((row, index) => {
+      // [#2445] The fold's header names no message; a hit can never resolve to
+      // it, and it must not shift the indices of the rows that follow.
+      if (row.kind === 'previousSessionHeader') return;
       if (row.kind === 'message') map.set(row.message.id, index);
       else for (const entry of row.entries) for (const id of entry.messageIds) map.set(id, index);
     });
@@ -793,7 +1098,7 @@ export const ChatTranscript = memo(function ChatTranscript({
   useLayoutEffect(() => {
     const previousCount = prevRowCountRef.current;
     const wasLoading = prevIsLoadingRef.current;
-    const current = messages.length;
+    const current = visibleMessages.length;
     prevRowCountRef.current = current;
     prevIsLoadingRef.current = isLoading;
 
@@ -805,7 +1110,7 @@ export const ChatTranscript = memo(function ChatTranscript({
     const isFirstRenderableList = previousCount === -1 || wasLoading;
     if (!isFirstRenderableList && current <= previousCount) return;
     anchorToTail();
-  }, [messages.length, rows.length, isLoading, isSearchActive, anchorToTail]);
+  }, [visibleMessages.length, rows.length, isLoading, isSearchActive, anchorToTail]);
 
   // Publish the two ends, so the surface above can borrow the virtualizer
   // instead of writing `scrollTop` (Issue #2283). Withdrawn on unmount, so a
@@ -955,8 +1260,31 @@ export const ChatTranscript = memo(function ChatTranscript({
     (index: number) => {
       const row = rows[index];
       if (!row) return null;
+      if (row.kind === 'previousSessionHeader') {
+        return (
+          <ChatPreviousSessionHeader
+            count={row.count}
+            isOpen={isPreviousSessionOpen}
+            regionId={previousSessionRegionId}
+            onToggle={togglePreviousSession}
+          />
+        );
+      }
+      // [#2445] The retired look, applied to the ROW rather than to the message.
+      // `ChatMessageBubble` already dims an `archived` row with the same
+      // `opacity-60`, and reaching that branch by setting `archived: true` on a
+      // copy is exactly what this Issue forbids: it would put a lie about the
+      // database into the object every action on the bubble is handed.
+      const dim = (node: React.ReactNode) =>
+        row.previousSession ? (
+          <div data-previous-session="true" className="opacity-60">
+            {node}
+          </div>
+        ) : (
+          node
+        );
       if (row.kind === 'approvals') {
-        return <ChatToolApprovalGroup entries={row.entries} />;
+        return dim(<ChatToolApprovalGroup entries={row.entries} />);
       }
       const bubble = (
         <ChatMessageBubble
@@ -973,13 +1301,13 @@ export const ChatTranscript = memo(function ChatTranscript({
       // ends when the search does — the toggle's own value is untouched, and
       // closing the search folds the row back up without asking the reader.
       if (searchHitMessageIds?.has(row.message.id)) {
-        return (
+        return dim(
           <ChatToolActivityProvider value={CHAT_TOOL_ACTIVITY_OPEN}>
             {bubble}
-          </ChatToolActivityProvider>
+          </ChatToolActivityProvider>,
         );
       }
-      return bubble;
+      return dim(bubble);
     },
     [
       rows,
@@ -989,6 +1317,9 @@ export const ChatTranscript = memo(function ChatTranscript({
       onRetryPending,
       onDiscardPending,
       searchHitMessageIds,
+      isPreviousSessionOpen,
+      previousSessionRegionId,
+      togglePreviousSession,
     ],
   );
 
@@ -1008,7 +1339,13 @@ export const ChatTranscript = memo(function ChatTranscript({
     // transcript is empty on the first paint and in every jsdom test.
     if (virtualItems.length === 0) {
       return (
-        <div data-testid="chat-transcript-fallback-list">
+        <div
+          data-testid="chat-transcript-fallback-list"
+          // [#2445] The disclosure's region, on whichever list container is the
+          // one actually drawing the folded rows. `aria-controls` has to resolve
+          // in both branches or it resolves in neither.
+          id={hasPreviousSession ? previousSessionRegionId : undefined}
+        >
           {rows.slice(0, CHAT_FALLBACK_RENDER_COUNT).map((row, index) => (
             <div key={row.key}>{renderRow(index)}</div>
           ))}
@@ -1018,6 +1355,7 @@ export const ChatTranscript = memo(function ChatTranscript({
 
     return (
       <div
+        id={hasPreviousSession ? previousSessionRegionId : undefined}
         style={{ height: rowVirtualizer.getTotalSize(), width: '100%', position: 'relative' }}
       >
         {virtualItems.map((virtualRow) => (
@@ -1082,7 +1420,7 @@ export const ChatTranscript = memo(function ChatTranscript({
                 version={liveTurn.version}
                 body={liveTurn.body}
                 partial={liveTurn.partial}
-                showHeader={shouldShowLiveRoleHeader(messages[messages.length - 1])}
+                showHeader={shouldShowLiveRoleHeader(visibleMessages[visibleMessages.length - 1])}
                 onFilePathClick={handleFilePathClick}
               />
             ) : (
@@ -1092,10 +1430,15 @@ export const ChatTranscript = memo(function ChatTranscript({
                 body={liveTurn.body}
                 partial={liveTurn.partial}
                 isThinking={liveTurn.isThinking}
-                showHeader={shouldShowLiveRoleHeader(messages[messages.length - 1])}
+                showHeader={shouldShowLiveRoleHeader(visibleMessages[visibleMessages.length - 1])}
                 onFilePathClick={handleFilePathClick}
               />
             ))}
+
+          {/* [#2445] Under the fold and under anything sent since, so the last
+              thing the reader sees above the composer is what pressing send
+              will do. Withdrawn the instant a session exists again. */}
+          {hasPreviousSession && <ChatSessionEndedBanner />}
         </ChatToolActivityProvider>
       </div>
 

@@ -352,6 +352,31 @@ describe('TerminalDisplay', () => {
       render(<TerminalDisplay output="arrived" isActive={true} attaching={false} />);
       expect(screen.queryByTestId('terminal-loading-placeholder')).not.toBeInTheDocument();
     });
+
+    // [Issue #2445] Both sentences moved into `locales/{ja,en}/worktree.json`.
+    // The global next-intl mock in `tests/setup.ts` echoes the requested key, so
+    // the rendered text IS the key here — which is what makes these two able to
+    // tell a translated placeholder from a hardcoded Japanese one. The rule
+    // above (`hasBeenActive`) is untouched; only the words changed owner.
+    it('renders the loading placeholder from the dictionary', () => {
+      render(<TerminalDisplay output="" isActive={false} attaching={true} />);
+      expect(screen.getByTestId('terminal-loading-placeholder')).toHaveTextContent(
+        'worktree.terminal.loading',
+      );
+    });
+
+    it('renders the ended placeholder from the dictionary, sharing chat’s key', () => {
+      // `terminal.sessionEnded`, not a placeholder-only key: Issue #2445 gave
+      // the chat surface's ended banner the same string, so the two output
+      // surfaces cannot describe one dead session differently.
+      const { rerender } = render(
+        <TerminalDisplay output="running output" isActive={true} attaching={false} />,
+      );
+      rerender(<TerminalDisplay output="" isActive={false} attaching={false} />);
+      expect(screen.getByTestId('terminal-ended-placeholder')).toHaveTextContent(
+        'worktree.terminal.sessionEnded',
+      );
+    });
   });
 
   // ============================================================================
