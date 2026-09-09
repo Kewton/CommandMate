@@ -29,6 +29,7 @@ import {
   VIBE_LOCAL_DOUBLE_ENTER_WAIT_MS,
 } from '@/config/cli-tool-timing-config';
 import { missingToolError } from './install-hints';
+import { beginAgentSession } from '@/lib/session/agent-session-lifecycle';
 
 const logger = createLogger('cli-tools/vibe-local');
 
@@ -93,6 +94,16 @@ export class VibeLocalTool extends BaseCLITool {
       }
       logger.warn('vibe-local-session-relaunch', { sessionName });
     }
+
+    // Issue #1759 / #2444: the one line every tool's creation path owes the
+    // rest of the system. vibe-local emits no structured events, so the
+    // generation fence itself is inert here — but `beginAgentSession` is also
+    // where a superseded session's chat rows are retired, and vibe-local was
+    // the only tool that never called it. Placed after the healthy-reuse
+    // `return` above and before the pane is touched, exactly as codex places
+    // its call: a reuse is the same process and must archive nothing, a
+    // relaunch into this same pane is a new one and must.
+    beginAgentSession({ worktreeId, cliToolId: this.id, instanceId });
 
     try {
       // Issue #2070: creation only. On the relaunch path the pane already

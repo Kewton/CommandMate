@@ -158,6 +158,58 @@ describe('useSplitMessages history invalidation (Issue #2219)', () => {
     });
   });
 
+  /**
+   * Issue #2444: the second producer of this frame.
+   *
+   * A new agent process took over this (worktree, instance) and the previous
+   * process's rows were archived server-side, so the pane's copy of them is a
+   * dead session's conversation being shown as the live one. The contract says
+   * a receiver re-fetches and does NOT branch on `reason`, and this is the test
+   * that makes that a fact rather than a comment: the pane has never heard of
+   * `session_generation` and reacts to it exactly as it reacts to
+   * `orphan_cleanup`.
+   */
+  it('re-reads history for a session_generation frame it has no special handling for', async () => {
+    bodies = [[row('prev-session', 'from the process that died')], [row('fresh', 'new turn')]];
+
+    const { result } = renderHook(() =>
+      useSplitMessages({ worktreeId: 'w-1', cliToolId: 'claude' }),
+    );
+    await waitFor(() =>
+      expect(result.current.messages.map((m) => m.id)).toEqual(['prev-session']),
+    );
+    const fetchesBefore = mockFetch.mock.calls.length;
+
+    act(() => {
+      realtimeMock.emit(invalidatedEvent({ reason: 'session_generation' }));
+    });
+
+    await waitFor(() => {
+      expect(mockFetch.mock.calls.length).toBe(fetchesBefore + 1);
+      expect(result.current.messages.map((m) => m.id)).toEqual(['fresh']);
+    });
+  });
+
+  it('ignores a session_generation frame aimed at a sibling instance', async () => {
+    // Issue #2444's own scope claim: restarting `claude` must not make
+    // `claude-2`'s pane drop a conversation whose process is still alive.
+    bodies = [[row('mine', 'kept', { instanceId: 'claude-2' })]];
+
+    const { result } = renderHook(() =>
+      useSplitMessages({ worktreeId: 'w-1', cliToolId: 'claude', instanceId: 'claude-2' }),
+    );
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    const fetchesBefore = mockFetch.mock.calls.length;
+
+    act(() => {
+      realtimeMock.emit(invalidatedEvent({ instanceId: 'claude', reason: 'session_generation' }));
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, FETCH_DELAY_MS * 3));
+    expect(mockFetch.mock.calls.length).toBe(fetchesBefore);
+    expect(result.current.messages.map((m) => m.id)).toEqual(['mine']);
+  });
+
   it('ignores a frame for another instance of the same CLI tool', async () => {
     // The sibling-instance guard, which is the only one that can catch this:
     // both frames carry `cliToolId: 'claude'`. A matching frame follows through

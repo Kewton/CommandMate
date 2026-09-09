@@ -316,8 +316,16 @@ export interface ChatTurnProgressEvent {
 export const MESSAGES_INVALIDATED_EVENT_TYPE = 'messages_invalidated' as const;
 
 /** Why a {@link MessagesInvalidatedEvent} was emitted. Diagnostics only — a
- * receiver re-fetches regardless, and must not branch on this. */
-export type MessagesInvalidatedReason = 'orphan_cleanup';
+ * receiver re-fetches regardless, and must not branch on this.
+ *
+ * `session_generation` (Issue #2444) is the second producer: a new agent
+ * process is taking over a `(worktree, instance)` whose previous process ended
+ * outside CommandMate, and that process's rows were just archived. It is a new
+ * member of this union rather than a new event type precisely *because* the
+ * contract forbids branching — every receiver already does the only thing this
+ * frame asks for, so an older client re-reads its history exactly as a current
+ * one does. */
+export type MessagesInvalidatedReason = 'orphan_cleanup' | 'session_generation';
 
 /** See {@link MESSAGES_INVALIDATED_EVENT_TYPE}. */
 export interface MessagesInvalidatedEvent {

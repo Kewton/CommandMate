@@ -17,7 +17,7 @@
  * @vitest-environment node
  */
 
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -33,6 +33,25 @@ import {
   recordAgentEvent,
 } from '@/lib/session/agent-event-state';
 import { CLAUDE_CLI_TOOL_ID } from '@/lib/hooks/sources';
+import { archiveSupersededSessionMessages } from '@/lib/session/session-generation-archive';
+
+/**
+ * Issue #2444: the second thing `beginAgentSession` now means.
+ *
+ * "A new agent process is being created for this (worktree, instance)" is also
+ * the moment the previous process's chat rows stop being the current
+ * conversation, so the archive hangs off this call rather than off a death
+ * observer (see `session-generation-archive`'s module doc for why observing the
+ * death archives live conversations). Mocked here because what this file owns
+ * is the *wiring*: that the call happens, with the target it was given, and
+ * that a failure inside it cannot stop a session from starting. The SQL scope
+ * is pinned against a real database in
+ * `tests/unit/session/session-generation-archive-2444.test.ts`.
+ */
+vi.mock('@/lib/session/session-generation-archive', () => ({
+  archiveSupersededSessionMessages: vi.fn(() => ({ archived: 0, instanceId: 'claude' })),
+  resolveSessionArchiveDatabase: vi.fn(() => null),
+}));
 
 const WT = 'wt-fence';
 const NOW = 1_700_000_000_000;
@@ -50,6 +69,11 @@ beforeEach(() => {
   // earlier file in this worker would make these pass for the wrong reason.
   globalThis.__agentEventGenerationStartedAt?.clear();
   globalThis.__agentEventLast?.clear();
+  vi.mocked(archiveSupersededSessionMessages).mockClear();
+  vi.mocked(archiveSupersededSessionMessages).mockReturnValue({
+    archived: 0,
+    instanceId: 'claude',
+  });
 });
 
 describe('beginAgentSession', () => {
@@ -100,6 +124,30 @@ describe('beginAgentSession', () => {
   it('defaults the instance to the primary', () => {
     beginAgentSession({ worktreeId: WT, cliToolId: CLAUDE_CLI_TOOL_ID }, NOW);
     expect(getAgentEventGenerationStartedAt(WT, 'claude')).toBe(NOW);
+  });
+
+  // Issue #2444.
+  it('retires the replaced process’s chat rows, for the instance it was given', () => {
+    const target = { worktreeId: WT, cliToolId: CLAUDE_CLI_TOOL_ID, instanceId: 'claude-2' };
+
+    beginAgentSession(target, NOW);
+
+    expect(archiveSupersededSessionMessages).toHaveBeenCalledTimes(1);
+    expect(archiveSupersededSessionMessages).toHaveBeenCalledWith(target);
+  });
+
+  it('starts the session anyway when the archive throws', () => {
+    vi.mocked(archiveSupersededSessionMessages).mockImplementation(() => {
+      throw new Error('database is locked');
+    });
+
+    // A database that is missing, locked or mid-migration costs a log line.
+    // Refusing to start the agent because its old rows could not be retired
+    // would turn a cosmetic defect into an outage.
+    expect(() =>
+      beginAgentSession({ worktreeId: WT, cliToolId: CLAUDE_CLI_TOOL_ID, instanceId: 'claude' }, NOW)
+    ).not.toThrow();
+    expect(getAgentEventGenerationStartedAt(WT, 'claude', 'claude')).toBe(NOW);
   });
 });
 
