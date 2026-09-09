@@ -78,6 +78,7 @@ describe('parseTaskContract — valid documents', () => {
         requireWorkEvidence: true,
         requireScopeClean: true,
         requireCommit: false,
+        requireEnvClean: false,
         autoVerifyOnStop: false,
       },
     });
@@ -101,6 +102,7 @@ success:
   requireWorkEvidence: true
   requireScopeClean: false
   requireCommit: true
+  requireEnvClean: true
   autoVerifyOnStop: true
 `,
       'task.yaml'
@@ -119,6 +121,7 @@ success:
       requireWorkEvidence: true,
       requireScopeClean: false,
       requireCommit: true,
+      requireEnvClean: true,
       autoVerifyOnStop: true,
     });
   });
@@ -143,6 +146,7 @@ success:
       requireWorkEvidence: true,
       requireScopeClean: true,
       requireCommit: false,
+      requireEnvClean: false,
       autoVerifyOnStop: false,
     });
   });

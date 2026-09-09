@@ -403,9 +403,13 @@ snapshot 済みで変更集合からも除外済みなので、**新しい改竄
 契約の記述順がその順序を偽ってはならない）。
 
 組み込み `env-clean`（§2.6）も同じ規則で、実行有無は `success.requireEnvClean` と
-verify.yaml の `options.requireEnvClean` の OR が決める。ただし現時点では
-`verify.gates: [env-clean]` と書くと送信時の照合（`validateContractAgainstVerifyConfig`）で
-未知の id として弾かれる — §2.6「未着地部分」を参照。
+verify.yaml の `options.requireEnvClean` の OR が決める。**Issue #2442 以降は
+`verify.gates: [env-clean]` と明示指名もできる**（送信時の照合が受理する）。組み込みの
+実行順は `work-evidence` → `scope` → `env-clean` で、解決後のリストは契約の記述順ではなく
+この順に並ぶ（`BUILT_IN_GATE_ORDER`、`src/lib/tasks/contract-message.ts`）。
+前文（§5）に載る完了条件も同じ解決を通るので、**リポジトリ側の `options.requireEnvClean` だけで
+有効になった場合も前文に `env-clean` の行が出る** — 走るゲートを前文が黙っていると、
+エージェントは自分が評価されない条件で判定されることになる。
 
 ### 2.4 `autoYes`
 
@@ -483,7 +487,7 @@ enforcement が「契約が無いから従来動作」と「契約が off と言
 | `requireScopeClean` | boolean | `true` | `scope` 外の変更を不合格とする（組み込み `scope` ゲート。§2.2） |
 | `requireCommit` | boolean | `false` | `work-evidence` に「変更が在る」ではなく **「commit が在る」** を要求する。`commits=0 uncommitted=1` は failed（run は `not_started`）。Issue #1642 |
 | `autoVerifyOnStop` | boolean | `false` | `POST /api/hooks/agent-event`（`event: stop`）受信時に検証ランを自動起動する（Issue #1549） |
-| `requireEnvClean` | boolean | `false` | リポジトリ**外**の副作用（プロセス・ポート・tmux セッション・`$HOME`）を不合格とする（組み込み `env-clean` ゲート。§2.6）。Issue #1740。**現時点でパーサはこのキーを受理しない** — §2.6 の「未着地部分」を参照 |
+| `requireEnvClean` | boolean | `false` | リポジトリ**外**の副作用（プロセス・ポート・tmux セッション・`$HOME`）を不合格とする（組み込み `env-clean` ゲート。§2.6）。Issue #1740、**パーサ受理は Issue #2442**。明示 boolean のみ（文字列 `yes` / 数値 / null は契約エラー）。verify.yaml の `options.requireEnvClean` と **OR** で、契約の `false` はリポジトリの `true` を解除しない |
 
 `requireWorkEvidence` / `requireScopeClean` は §2.3 のとおり `verify.gates` に対応する
 組み込みゲートを自動で足す。フラグが単独で意味を持つ（ゲートリストと矛盾しない）ように
@@ -539,10 +543,14 @@ Phase 0 の bash 参照実装（`.claude/skills/cmate-verify/scripts/verify-run.
 
 ### 2.6 組み込み `env-clean` ゲート（Issue #1740）
 
-実装: `src/lib/verification/env-snapshot.ts` / `src/lib/verification/env-clean-gate.ts`
+実装: `src/lib/verification/env-snapshot.ts` / `src/lib/verification/env-clean-gate.ts` /
+`src/lib/tasks/contract-parser.ts`（`success.requireEnvClean`） /
+`src/lib/tasks/contract-message.ts`（`runsEnvCleanGate` / `BUILT_IN_GATE_ORDER`） /
+`src/app/api/worktrees/[id]/tasks/route.ts`（`recordEnvBaseline`）
 テスト: `tests/unit/verification/env-snapshot.test.ts` /
 `tests/unit/verification/env-clean-gate.test.ts` /
 `tests/unit/verification/gate-runner-env-clean.test.ts` /
+`tests/unit/tasks/contract-env-clean-2442.test.ts` /
 `tests/integration/env-clean-gate-1740.test.ts`
 
 `scope` は**リポジトリ内**のファイル変更を裁定する。`env-clean` は**リポジトリ外**を裁定する。
@@ -617,6 +625,44 @@ probe は `ok` / `unavailable` のどちらかを必ず名乗り、`unavailable`
 `commandmate verify <id> --gates env-clean` で明示指名もできる。ベースラインが無ければ
 UNKNOWN を返す（黙って PASS はしない）。
 
+#### ベースラインを採る条件（Issue #2442）
+
+ベースラインは **task 作成時（`POST /api/worktrees/:id/tasks` ＝ `send --contract`）に 1 回だけ**
+採られる。採るかどうかを決めるのは `runsEnvCleanGate`（`src/lib/tasks/contract-message.ts`）で、
+**次の 3 つの OR** である:
+
+| # | 宣言 | 単位 |
+|---|---|---|
+| 1 | `options.requireEnvClean`（verify.yaml） | リポジトリ |
+| 2 | `success.requireEnvClean`（契約） | 委任 1 件 |
+| 3 | 契約の `verify.gates` が `env-clean` を名指し | 委任 1 件 |
+
+**3 を落とすと必ず壊れる。** `verify.gates: [env-clean]` を受理しただけでは、
+`selectGates` はゲートを走らせるのに `recordEnvBaseline` が 1 と 2 だけを見るため、
+両 boolean が false の契約は**毎回 UNKNOWN** になる（ベースラインが存在しないので比較できない）。
+`tests/unit/tasks/contract-env-clean-2442.test.ts` の
+`answers true for the case the two booleans alone would have missed` と、
+integration 側の `records a baseline from verify.gates: [env-clean] with both booleans false` が
+この 1 点を固定している。
+
+`commandmate verify <id> --gates env-clean` は 3 に**含まれない**（契約ではなくその場の実行時指定）。
+そのタスクのベースラインが無ければ UNKNOWN であって、検証直前の状態を「開始時」に仕立てることはしない。
+
+#### 有効化の順序（過去には遡れない）
+
+ベースラインは task 作成時にしか採れないので、**有効化は task 作成より前**でなければならない。
+次の 3 つはいずれも UNKNOWN（gate `error` → run `failed`）になり、`passed` にはならない:
+
+| 状況 | 理由 |
+|---|---|
+| `options.requireEnvClean: true` を**足す前に**作られた task | その task のベースラインが存在しない |
+| 契約を持たない素の `commandmate verify` | 比較対象の task が無い |
+| 検証時にだけ `--gates env-clean` を足した実行 | 同上 |
+
+本リポジトリの `.commandmate/verify.yaml` は Issue #2442 で `options.requireEnvClean: true` を
+宣言した。**これはリポジトリ全体の設定であり、委任専用のスイッチではない**（自分の
+`commandmate verify` にも効く）。この行より前に作られた task の検証は上表の 1 行目に当たる。
+
 #### 実行位置
 
 `work-evidence` → `scope` → **`env-clean`** → コマンド系ゲート。
@@ -625,23 +671,26 @@ UNKNOWN を返す（黙って PASS はしない）。
 エージェントの漏らしとして報告される。`work-evidence` が通らなかったランでは
 `scope` と同様 `skipped` を記録する（そのランは `not_started` で終わり、緑にはならない）。
 
-#### 未着地部分（本 Issue のスコープ外に落ちた分）
+#### 着地済み（Issue #2442）／未着地
 
-1. **`success.requireEnvClean` は契約 YAML にまだ書けない。** `TaskContractSuccess` と
-   `SUCCESS_KEYS`（`src/lib/tasks/contract-parser.ts`）は閉じた集合で、未知キーは
-   `unknown key "requireEnvClean"` として送信時に 400 になる。同ファイルは本委任の
-   `scope.allow` の外にあるため触れていない。**解決は 2 行**（`TaskContractSuccess` に
-   `requireEnvClean: boolean` を足し、`SUCCESS_KEYS` に `'requireEnvClean'` を足す。
-   既定値は `validateSuccess` の初期値に `requireEnvClean: false`）。
-   `resolveRequireEnvClean` は契約の `success` を**構造的に**読むので、この 2 行が入った
-   瞬間に検証側は無改修で動く（`tests/unit/verification/gate-runner-env-clean.test.ts` が
-   その挙動を先に固定してある）。
-2. **`verify.gates: [env-clean]` も同じ理由でまだ書けない。**
-   `validateContractAgainstVerifyConfig`（`src/lib/tasks/contract-message.ts`、同じく
-   scope 外）の `known` 集合に `ENV_CLEAN_GATE_ID` を足す 1 行が要る。
-3. **オーケストレーター向けヘルスチェック**（Issue「併せて欲しいもの」の
-   `commandmate status --json` 拡張）は `src/cli/commands/status.ts` が scope 外のため
-   未着手。`env-clean` は事後検知であり、即時検知は別の層である。
+#1740 が scope 外として残した 2 件は #2442 で着地した:
+
+1. ✅ **`success.requireEnvClean` は契約 YAML に書ける。** `TaskContractSuccess` /
+   `SUCCESS_KEYS` / `validateSuccess`（`src/lib/tasks/contract-parser.ts`）に入った。
+   既定 `false`、明示 boolean のみ、未知キー検査はそのまま厳格。
+2. ✅ **`verify.gates: [env-clean]` も書ける。** `validateContractAgainstVerifyConfig` の
+   `known` 集合に `ENV_CLEAN_GATE_ID` が入り、`recordEnvBaseline` が
+   `runsEnvCleanGate` を通るようになった（上の「ベースラインを採る条件」）。
+
+残る未着地:
+
+3. **オーケストレーター向けヘルスチェック**（Issue #1740 の「併せて欲しいもの」の
+   `commandmate status --json` 拡張）は未着手。`env-clean` は事後検知であり、即時検知は
+   別の層である。
+4. **`src/lib/verification/env-clean-gate.ts` の `contractRequiresEnvClean` は
+   契約の `success` を今も構造的に読む**（`success.requireEnvClean === true`）。パーサに
+   キーが入った今、型づけして読むこともできるが、同ファイルは #2442 の `scope.allow` の外に
+   あるため触れていない。挙動は同一で、そのモジュール内のコメントだけが古い。
 
 ---
 

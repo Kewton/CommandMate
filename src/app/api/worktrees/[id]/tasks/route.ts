@@ -20,10 +20,10 @@ import { isValidWorktreeId } from '@/lib/security/path-validator';
 import { loadTaskContract, TaskContractError } from '@/lib/tasks/contract-parser';
 import {
   composeContractMessage,
+  runsEnvCleanGate,
   validateContractAgainstVerifyConfig,
 } from '@/lib/tasks/contract-message';
 import { loadVerifyConfig, VerifyConfigError } from '@/lib/verification/verify-config';
-import { resolveRequireEnvClean } from '@/lib/verification/env-clean-gate';
 import { captureEnvSnapshot, saveEnvSnapshot } from '@/lib/verification/env-snapshot';
 import { createLogger } from '@/lib/logger';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
@@ -44,6 +44,11 @@ const DEFAULT_LIST_LIMIT = 20;
  * cannot retroactively produce a baseline, which is correct: the gate reports
  * UNKNOWN rather than inventing one.
  *
+ * "Switched on" is {@link runsEnvCleanGate}, not the two booleans alone: since
+ * #2442 a contract can also select the gate by naming it in `verify.gates`, and
+ * reading only the booleans would run that gate against a baseline this function
+ * had declined to write — UNKNOWN on every such delegation, forever.
+ *
  * Never throws. A snapshot that could not be written leaves no baseline, and a
  * missing baseline is UNKNOWN at verification time — failing the send instead
  * would make an unrelated `lsof` problem block the delegation itself.
@@ -51,10 +56,10 @@ const DEFAULT_LIST_LIMIT = 20;
 async function recordEnvBaseline(
   taskId: string,
   worktreeId: string,
-  contract: Parameters<typeof resolveRequireEnvClean>[0],
-  verifyConfig: Parameters<typeof resolveRequireEnvClean>[1]
+  contract: Parameters<typeof runsEnvCleanGate>[0],
+  verifyConfig: Parameters<typeof runsEnvCleanGate>[1]
 ): Promise<void> {
-  if (!resolveRequireEnvClean(contract, verifyConfig).required) return;
+  if (!runsEnvCleanGate(contract, verifyConfig)) return;
   try {
     saveEnvSnapshot(taskId, await captureEnvSnapshot({ worktreeId }));
   } catch (error) {
