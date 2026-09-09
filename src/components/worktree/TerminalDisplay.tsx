@@ -8,6 +8,7 @@
 'use client';
 
 import React, { useEffect, useRef, useState, useMemo, memo, useCallback } from 'react';
+import { useTranslations } from 'next-intl';
 import { ArrowUp, ArrowDown } from 'lucide-react';
 import { sanitizeTerminalOutput } from '@/lib/security/sanitize';
 import { MAX_TERMINAL_OUTPUT_LENGTH } from '@/config/terminal-output-config';
@@ -123,6 +124,11 @@ export const TerminalDisplay = memo(function TerminalDisplay({
   wrapMode = 'viewport',
   className = '',
 }: TerminalDisplayProps) {
+  // Issue #2445: the two #842 placeholders were the last Japanese string literals
+  // on this surface. `terminal.sessionEnded` is shared with the chat surface's
+  // own ended banner, so the two screens cannot end up saying different things
+  // about the same dead session.
+  const t = useTranslations('worktree');
   const { scrollRef, autoScroll, handleScroll, scrollToBottom, scrollToTop } =
     useTerminalScroll({
       initialAutoScroll,
@@ -406,7 +412,7 @@ export const TerminalDisplay = memo(function TerminalDisplay({
             data-testid="terminal-loading-placeholder"
             className="flex h-full items-center justify-center px-4 text-center text-sm text-gray-500 select-none"
           >
-            読込中...
+            {t('terminal.loading')}
           </div>
         )}
         {showEndedPlaceholder && (
@@ -414,7 +420,7 @@ export const TerminalDisplay = memo(function TerminalDisplay({
             data-testid="terminal-ended-placeholder"
             className="flex h-full items-center justify-center px-4 text-center text-sm text-gray-500 select-none"
           >
-            セッションは終了しました（メッセージ送信で再開できます）
+            {t('terminal.sessionEnded')}
           </div>
         )}
 

@@ -710,6 +710,9 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
             history={historyPaneProps}
             live={{
               isRunning: terminal.isRunning,
+              // Issue #2445: without this the surface cannot tell "tmux says
+              // there is no session" from the hook's own pre-first-poll default.
+              attaching: terminal.attaching,
               // Issue #2238: the generating verdict the surface actually gates
               // its in-flight bubble on. `isRunning` above stays because the
               // surface still reports on the session; it is no longer mistaken
@@ -749,6 +752,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       cliToolId,
       resolvedInstanceId,
       terminal.isRunning,
+      terminal.attaching,
       terminal.sessionStatus,
       terminal.isThinking,
       terminal.isSelectionListActive,
