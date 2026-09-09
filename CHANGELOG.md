@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **feat(worktree): PC のチャット表示でも History 列を横に並べられるようにした** (#2446): chat 面（#2193）は `ChatSurface` 単体で split の出力半分を占め、アクションバーの［履歴］は全 split が chat のとき無効化されていた（#2259）ため、チャット面から過去セッションの行を外す #2445 が入るとチャット表示には過去の会話を読む場所が無くなる。`chatSurfaceSlot` をターミナル面と同じ `[History列 | PaneResizer | 出力]` の骨格（`chatSlot`／共通化した `historyColumnSlot`）で包み、`historyVisible` / `historyWidth` / `toggleHistory` / `handleHistoryResize` は `useHistoryPaneState`（`commandmate.worktree.historyVisible` / `historyWidth`）をターミナル面と**共有**するので、モード切替で列が出たり消えたり幅が変わったりしない。列を閉じたときは出力側に `width:100%` を明示する（#2259 と同じ）。あわせて `TerminalSplitContainer` の `historyUnavailable` 判定・`terminal.historyChatOnlyHint`（ja/en）と、その唯一の読み手だった `src/hooks/useSplitSurfaceModes.ts`（`emitSurfaceModeChange` を含む）を削除し、［履歴］トグルは常に有効になった。History 列と `ChatTranscript` の検索ハイライトは `history-search-<splitIndex>` / `chat-search-<splitIndex>` と別名前空間なので同時表示でも衝突しない。
+
 ## [0.33.2] - 2026-09-09
 
 > **Highlight**: チャット面に並んでいた「返答ではない行」を 3 件まとめて塞ぎました。転写を持つツールでは、転写行が着地するまでペイン全体の scrape を最大 7.65 秒保留し、着地したら保留を破棄します（#2436、UAT 実測: 転写が保留内に閉じたケースで scrape 行 0 件、閉じないケースで 1 件という対照）。送信直前のフラッシュが idle composer や前ターンの本文を返答として保存していた件は、SGR に基づく構造的な composer 判別と、転写書き込み時の `last_captured_line` 前進で塞いでいます（#2437）。antigravity では中間報告のまま凍っていた行が、後から届いた結論で同じ行のまま更新されるようになりました（実測 16,959 → 21,581 字、#2438）。

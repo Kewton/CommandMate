@@ -13,7 +13,6 @@ import {
   FILE_PANEL_PANE_ID,
   type OpenFilesSnapshot,
 } from '@/hooks/useFilePanelState';
-import { SURFACE_MODE_CHANGE_EVENT } from '@/hooks/useSplitSurfaceModes';
 import { getSplitSurfaceModeStorageKey } from '@/config/surface-mode-config';
 import {
   clearTerminalSplitsLocalStorage,
@@ -731,12 +730,15 @@ describe('TerminalSplitContainer header→split wiring (Issue #1152)', () => {
 // so each toggle has to say when its panel cannot appear at all instead of
 // flipping a state with no visible effect.
 //
-//  - History lives in the TERMINAL surface. The chat surface (#2193) shows the
-//    transcript alone by design (#2232), so with every split in chat mode the
-//    button changed nothing while still rendering as pressed — the screenshot
-//    in #2232's UAT.
 //  - The file panel is not rendered at all with no tabs and no diff, which is
 //    the "press Files and nothing happens" complaint the Issue opens with.
+//
+// Issue #2446 withdrew the History half of that. #2259 disabled the History
+// toggle while every split showed chat, because the chat surface had no History
+// column; chat mode now composes the same `[column | resizer | output]` row the
+// terminal does, so there is no arrangement of surfaces in which the switch
+// does nothing. What is pinned below is the ABSENCE of that gate — a toggle
+// that goes dead on a mode the user chose is the regression.
 // ===========================================================================
 describe('TerminalSplitContainer panel toggle availability (Issue #2259)', () => {
   const WORKTREE_ID = 'w-1';
@@ -763,55 +765,41 @@ describe('TerminalSplitContainer panel toggle availability (Issue #2259)', () =>
       setup();
       const btn = screen.getByTestId('toggle-history-pane');
       expect(btn).not.toBeDisabled();
-      expect(btn).toHaveAttribute('aria-disabled', 'false');
+      // Issue #2446: nothing disables this button any more, so it carries no
+      // `aria-disabled` at all rather than a permanent "false".
+      expect(btn).not.toHaveAttribute('aria-disabled');
     });
 
-    it('is disabled when every split shows chat', () => {
+    it('[#2446] stays enabled when every split shows chat', () => {
       vi.useFakeTimers();
       setSurface(0, 'chat');
       setup();
       const btn = screen.getByTestId('toggle-history-pane');
-      expect(btn).toBeDisabled();
-      expect(btn).toHaveAttribute('aria-disabled', 'true');
+      expect(btn).not.toBeDisabled();
+      expect(btn).not.toHaveAttribute('aria-disabled');
       expect(btn.getAttribute('title')).toBeNull();
-      expect(revealTooltip(btn)).toBe('worktree.terminal.historyChatOnlyHint');
+      // The tooltip is the ordinary show/hide wording plus the scope note —
+      // never `historyChatOnlyHint`, which #2446 deleted from the dictionaries.
+      const tooltipText = revealTooltip(btn);
+      expect(tooltipText).toContain('worktree.terminal.hideHistory');
+      expect(tooltipText).toContain('worktree.terminal.historyAllSplitsHint');
+      expect(tooltipText).not.toContain('historyChatOnlyHint');
       vi.useRealTimers();
     });
 
-    it('does not toggle the persisted state while disabled', () => {
+    it('[#2446] toggles the shared state while every split shows chat', () => {
       setSurface(0, 'chat');
       setup();
       fireEvent.click(screen.getByTestId('toggle-history-pane'));
+      // The column lives in the chat row too, so the write must land — before
+      // #2446 the click was swallowed and this key stayed null.
       expect(
         window.localStorage.getItem('commandmate.worktree.historyVisible'),
-      ).toBeNull();
-    });
-
-    it('is enabled again as soon as ONE split shows the terminal', () => {
-      setSurface(0, 'chat');
-      setSurface(1, 'terminal');
-      setup();
-      expect(screen.getByTestId('toggle-history-pane')).toBeDisabled();
-      // Adding split 1 brings a terminal surface back onto the screen.
-      fireEvent.click(screen.getByTestId('add-terminal-split'));
-      expect(screen.getByTestId('toggle-history-pane')).not.toBeDisabled();
-    });
-
-    it('re-enables live when a split switches back to the terminal', () => {
-      setSurface(0, 'chat');
-      setup();
-      expect(screen.getByTestId('toggle-history-pane')).toBeDisabled();
-
-      // The panes broadcast their mode changes; the bar listens (a same-window
-      // localStorage write fires no `storage` event).
-      act(() => {
-        window.dispatchEvent(
-          new CustomEvent(SURFACE_MODE_CHANGE_EVENT, {
-            detail: { worktreeId: WORKTREE_ID, splitIndex: 0, mode: 'terminal' },
-          }),
-        );
-      });
-      expect(screen.getByTestId('toggle-history-pane')).not.toBeDisabled();
+      ).toBe('false');
+      fireEvent.click(screen.getByTestId('toggle-history-pane'));
+      expect(
+        window.localStorage.getItem('commandmate.worktree.historyVisible'),
+      ).toBe('true');
     });
 
     it('names every split history region in aria-controls', () => {
