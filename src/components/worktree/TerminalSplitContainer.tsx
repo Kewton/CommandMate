@@ -72,7 +72,6 @@ import {
   useOpenFiles,
   FILE_PANEL_PANE_ID,
 } from '@/hooks/useFilePanelState';
-import { useSplitSurfaceModes } from '@/hooks/useSplitSurfaceModes';
 import { Tooltip } from '@/components/common/Tooltip';
 import { PaneResizer, type ResizerOrientation } from './PaneResizer';
 
@@ -439,35 +438,27 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
   const maximizeTooltip = `${maximizeLabel} — ${t('terminal.maximizeShortcutHint')}`;
 
   /*
-   * Issue #2259: the two toggles are disabled when the thing they show cannot
-   * appear, instead of flipping a state with no visible effect.
+   * Issue #2259: the Open Files toggle is disabled when the panel it shows
+   * cannot appear at all, instead of flipping a state with no visible effect —
+   * `FilePanelSplit` renders no panel with no tabs and no diff, which is the
+   * "press Files and nothing happens" complaint the Issue opens with. The count
+   * rides along as a badge, which is what tells the two "Files" apart at a
+   * glance: the Activity Bar's file TREE, and this panel of files you opened
+   * from it.
    *
-   * History — the column lives in the TERMINAL surface only. The chat surface
-   * (#2193) renders the transcript alone on purpose (#2232: chat is not the
-   * History column), so with every split in chat mode this button changed
-   * nothing while still rendering as pressed. On the SSR pass and the first
-   * client render `surfaceModes` is all-`terminal` (what the panes themselves
-   * render before their own effect resolves), so the toggle starts enabled and
-   * settles rather than flickering disabled. The `length > 0` guard is there
-   * because `[].every(...)` is `true` — an empty array must not read as "all
-   * chat".
-   *
-   * Open Files — `FilePanelSplit` renders no panel at all with no tabs and no
-   * diff, so the button had nothing to toggle. The count also rides along as a
-   * badge, which is what tells the two "Files" apart at a glance: the Activity
-   * Bar's file TREE, and this panel of files you opened from it.
+   * The History toggle used to carry the same treatment, disabled while EVERY
+   * split showed chat because the chat surface had no History column. Issue
+   * #2446 gave chat mode the same `[History column | resizer | output]` row the
+   * terminal has, so the column exists in both surfaces and the toggle is
+   * unconditionally live again (the `useSplitSurfaceModes` hook that fed the
+   * old verdict had no other reader and is gone with it).
    */
-  const surfaceModes = useSplitSurfaceModes(worktreeId, splits.length);
-  const historyUnavailable =
-    surfaceModes.length > 0 && surfaceModes.every((mode) => mode === 'chat');
   const { tabCount: openFileCount, hasDiff } = useOpenFiles();
   const filesUnavailable = openFileCount === 0 && !hasDiff;
   // [Issue #2307] Tooltip content mirrors the former native `title` text.
-  const historyTooltip = historyUnavailable
-    ? t('terminal.historyChatOnlyHint')
-    : `${
-        historyVisible ? t('terminal.hideHistory') : t('terminal.showHistory')
-      } — ${t('terminal.historyAllSplitsHint')}`;
+  const historyTooltip = `${
+    historyVisible ? t('terminal.hideHistory') : t('terminal.showHistory')
+  } — ${t('terminal.historyAllSplitsHint')}`;
   const filesTooltip = filesUnavailable
     ? t('terminal.filesEmptyHint')
     : filesVisible
@@ -651,8 +642,6 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
           <button
             type="button"
             onClick={toggleHistory}
-            disabled={historyUnavailable}
-            aria-disabled={historyUnavailable}
             aria-pressed={historyVisible}
             aria-expanded={historyVisible}
             aria-controls={historySlotIds}
@@ -662,7 +651,7 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
                 : t('terminal.showHistory')
             }
             data-testid="toggle-history-pane"
-            className={`flex flex-shrink-0 items-center gap-1 whitespace-nowrap text-xs px-2 py-0.5 rounded border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+            className={`flex flex-shrink-0 items-center gap-1 whitespace-nowrap text-xs px-2 py-0.5 rounded border transition-colors ${
               historyVisible
                 ? 'border-accent-300 dark:border-accent-700 bg-accent-50 dark:bg-accent-900/30 text-accent-700 dark:text-accent-300'
                 : 'border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
