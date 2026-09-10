@@ -371,3 +371,73 @@ describe('[#1928] every gated tool declares at least one positive and one mutati
     }
   });
 });
+
+/**
+ * Issue #2457's corpus, read by claude's own rules.
+ *
+ * The `negatives` tables above are per-tool and live: one idle pane each, plus
+ * copilot's two "the reply forged the chrome" captures. #2457 added a whole
+ * directory of the OTHER shape — Claude panes whose last turn is an ANSWER
+ * written as a numbered list — because that is what the generic parser turns
+ * into a `multiple_choice` candidate once the chrome has been cut off, and
+ * because `evaluateDialogPresence` now stands between such a candidate and a
+ * `prompt` row in History.
+ *
+ * They belong here rather than only in `tests/unit/polling/`: what makes them
+ * safe is a statement about claude's dialog RULE, and this is the file that
+ * owns that rule. `tests/fixtures/claude-idle-numbered-list-2457/README.md`
+ * records how each frame was composed and what the parser says about it.
+ */
+describe('[#2457] a Claude reply written as a numbered list carries no dialog', () => {
+  const REPLIES = path.resolve(__dirname, '../../../fixtures/claude-idle-numbered-list-2457');
+
+  const FRAMES = [
+    'reply-numbered-list-idle',
+    'reply-numbered-list-taskpanel',
+    'reply-numbered-list-composer-text',
+    'reply-numbered-list-repaint',
+    'reply-numbered-list-generating-repaint',
+    'reply-question-paragraph',
+    'reply-quotes-dialog-wording',
+    'reply-table',
+  ] as const;
+
+  function replyFrame(name: string): string {
+    return readFileSync(path.join(REPLIES, `${name}.txt`), 'utf8');
+  }
+
+  it.each(FRAMES)('%s is not a dialog', name => {
+    expect(dialogOf('claude', replyFrame(name))).toBeNull();
+  });
+
+  it.each(FRAMES)('%s is not a dialog once ANSI and box drawing are gone either', name => {
+    // claude is a `sameVerdictWhenStripped: true` tool, and the negatives have
+    // to hold on both spellings for the same reason the positives do: Auto-Yes
+    // and the save path read different strings off one capture.
+    expect(dialogOf('claude', asAutoYesSees(replyFrame(name)))).toBeNull();
+  });
+
+  it('is refused by BOTH of claude\'s guards, not by the wording', () => {
+    // The mutation, run backwards, one guard at a time — the rule refuses these
+    // frames twice over, and a single-step reversal would leave which guard did
+    // the work ambiguous.
+    const raw = replyFrame('reply-numbered-list-repaint');
+
+    // Guard 1 restored: put claude's selection cursor on option 1. Still not a
+    // dialog, because guard 2 also refuses — what sits under the block is the
+    // reply's closing sentence and its completion marker, and neither is one of
+    // claude's dialog footers.
+    const withCursor = rewordRow(raw, /^\s*1\.\s/, '  1.', '❯ 1.');
+    expect(dialogOf('claude', withCursor)).toBeNull();
+
+    // Guard 2 restored: take those two rows away so the block has nothing under
+    // it, which is what the footer-less AskUserQuestion screen looks like. Now
+    // the same rows ARE a dialog — so the refusals above are these two rules
+    // doing their job, not the frames being unreadable.
+    const asDialog = blankRow(
+      blankRow(withCursor, /どれも独立して着手できます/),
+      /✻ Brewed for/,
+    );
+    expect(dialogOf('claude', asDialog)).not.toBeNull();
+  });
+});
