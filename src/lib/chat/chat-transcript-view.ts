@@ -344,13 +344,50 @@ export function hoistTurnApprovals(messages: ChatMessage[]): ChatMessage[] {
 }
 
 /**
+ * Which run of consecutive `prompt` rows each dialog belongs to (Issue #2460).
+ *
+ * Computed on the INPUT order, before {@link hoistTurnApprovals} moves a turn's
+ * chips ahead of its replies. That order is the only place the boundary still
+ * exists: after the hoist, `[q1, reply, q2]` is `[q1, q2, reply]`, so two
+ * dialogs the agent raised on either side of a sentence are adjacent chips. The
+ * approval fold does not care — it identifies a dialog by `approvalTarget` — but
+ * `AskUserQuestion` has nothing of the kind, and its submit confirmation is tied
+ * to its question by "these rows are one uninterrupted operation". Handing that
+ * boundary to the fold is what keeps the hoist a rendering decision rather than
+ * a claim about what happened.
+ *
+ * Rows that are not dialogs are absent from the map; a dialog whose id repeats
+ * keeps the first run, which cannot happen for real ids and costs nothing.
+ */
+export function buildPromptRunIds(messages: ChatMessage[]): Map<string, number> {
+  const runIds = new Map<string, number>();
+  let runId = 0;
+  let open = false;
+
+  for (const message of messages) {
+    if (!isToolApprovalMessage(message)) {
+      open = false;
+      continue;
+    }
+    if (!open) {
+      runId += 1;
+      open = true;
+    }
+    if (!runIds.has(message.id)) runIds.set(message.id, runId);
+  }
+
+  return runIds;
+}
+
+/**
  * Turn a message list into the rows the transcript renders.
  *
  * Four things happen here and all four are load-bearing:
  *
  *  1. each turn's approval rows are lifted ahead of its replies
  *     ({@link hoistTurnApprovals}, Issue #2273);
- *  2. consecutive approval rows fold into one `approvals` row;
+ *  2. consecutive approval rows fold into one `approvals` row, carrying the
+ *     PRE-hoist run boundary with them ({@link buildPromptRunIds}, Issue #2460);
  *  3. `showHeader` is computed against the previous NON-approval message;
  *  4. a run of assistant rows is cut into TURNS, and each cut gets a clock
  *     ({@link ChatRowHeader}, Issue #2458).
@@ -391,6 +428,9 @@ export function buildChatTranscriptRows(messages: ChatMessage[]): ChatTranscript
   const prompts = buildPromptIndex(ordered);
 
   const rows: ChatTranscriptRow[] = [];
+  // [#2460] Taken from the argument, which is still in input order: the loop
+  // below walks the hoisted list, where the boundary is no longer visible.
+  const runIds = buildPromptRunIds(messages);
   /** The last row that speaks: approval chips are skipped over. */
   let previousSpoken: ChatMessage | undefined;
   let run: ChatMessage[] = [];
@@ -414,7 +454,7 @@ export function buildChatTranscriptRows(messages: ChatMessage[]): ChatTranscript
     rows.push({
       kind: 'approvals',
       key: `approvals:${run[0].id}`,
-      entries: buildToolApprovalEntries(run),
+      entries: buildToolApprovalEntries(run, { runIds }),
     });
     run = [];
   };

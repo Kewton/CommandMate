@@ -505,7 +505,19 @@
       "awaitingAnswer": "応答待ち",
       "unclassified": "判別できないダイアログ",
       "resolved": "応答済み",
-      "unlabeled": "承認ダイアログ"
+      "unlabeled": "承認ダイアログ",
+      "unlabeledQuestion": "質問",
+      "autoAnswered": "自動回答",
+      "submitConfirmation": "質問の送信確認",
+      "confirmation": "送信確認: {outcome}",
+      "summaryQuestions": "質問 {count} 件",
+      "summaryConfirmations": "送信確認 {count} 件",
+      "summaryConfirmationsOnly": "質問の送信確認 {count} 件",
+      "summarySeparator": "・",
+      "expandQuestions": "質問を開く",
+      "collapseQuestions": "質問を閉じる",
+      "expandMixed": "質問と承認を開く",
+      "collapseMixed": "質問と承認を閉じる"
     },
     "previousSession": {
       "summary": "前回のセッション（{count} 件）",
