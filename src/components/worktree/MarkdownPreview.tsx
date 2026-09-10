@@ -23,7 +23,6 @@
 import React, { memo, useMemo, useCallback, useRef, useState, useEffect } from 'react';
 import { useTranslations } from 'next-intl';
 import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
 import rehypeSanitize from 'rehype-sanitize';
 import rehypeSlug from 'rehype-slug';
@@ -34,6 +33,7 @@ import { MermaidCodeBlock } from '@/components/worktree/MermaidCodeBlock';
 import { CodeBlockWithCopy } from '@/components/common/CodeBlockWithCopy';
 import { classifyLink, resolveRelativePath, sanitizeHref, REHYPE_SANITIZE_SCHEMA } from '@/lib/link-utils';
 import { encodePathForUrl } from '@/lib/url-path-encoder';
+import { SHARED_REMARK_PLUGINS } from '@/lib/markdown';
 import type { Components } from 'react-markdown';
 
 // ============================================================================
@@ -230,10 +230,14 @@ export const MarkdownPreview = memo(function MarkdownPreview({
     [handleLinkClick],
   );
 
-  // Memoize plugin arrays to prevent ReactMarkdown from re-rendering on every parent render.
-  // New array references cause ReactMarkdown to fully rebuild the DOM tree,
-  // which detaches link elements and makes them unclickable.
-  const remarkPlugins = useMemo(() => [remarkGfm], []);
+  // [#2459] The remark half is `SHARED_REMARK_PLUGINS`, the one list all three
+  // Markdown surfaces render with — a module constant rather than a `useMemo`,
+  // which is the same stable identity this call site always needed: a new array
+  // reference makes ReactMarkdown rebuild the whole DOM tree, detaching link
+  // elements and making them unclickable. The rehype half below stays local,
+  // because this component's `rehypeRaw` + schema + slug pipeline is genuinely
+  // its own (Mermaid, the inline TOC) and must not be flattened into the two
+  // transcript renderers.
   // [Issue #1009] rehype-slug MUST run after rehype-sanitize: rehype-sanitize's
   // clobberPrefix rewrites any pre-existing `id` to `user-content-<id>`, which
   // would desync heading ids from the plain slugs `extractToc` (the inline TOC
@@ -246,7 +250,7 @@ export const MarkdownPreview = memo(function MarkdownPreview({
 
   return (
     <ReactMarkdown
-      remarkPlugins={remarkPlugins}
+      remarkPlugins={SHARED_REMARK_PLUGINS}
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       rehypePlugins={rehypePlugins as any}
       components={markdownComponents}
