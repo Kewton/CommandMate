@@ -393,3 +393,96 @@ export function commandCodeTurnRequestId(promptId: string): string {
 export function commandCodePromptRequestId(promptId: string): string {
   return `${COMMAND_CODE_PROMPT_REQUEST_ID_PREFIX}${promptId}`;
 }
+
+// ============================================================================
+// Turn keys, read back off a saved row (Issue #2458)
+// ============================================================================
+
+/**
+ * Every turn prefix paired with the **prompt** prefix that names the same turn.
+ *
+ * Three tools, and the two that are absent are absent for a reason rather than
+ * by oversight:
+ *
+ *  - **codex** keys its assistant row on `turn_id` and its user row on the
+ *    `UserMessage` item's own id (see {@link CODEX_PROMPT_REQUEST_ID_PREFIX} for
+ *    the measurement that forces that). The two are different ids in the
+ *    database, so there is no string this map could produce that would find the
+ *    prompt, and producing one anyway would silently correlate a turn with
+ *    whatever row happened to carry that id.
+ *  - **opencode** names a turn by the user message it answers
+ *    ({@link opencodeTurnRequestId}), but the user row itself is not written
+ *    with a matching `oc-prompt:` marker — there is no such constant — so the
+ *    same objection applies.
+ *
+ * Issue #2458 therefore shows a turn boundary for all five tools and a
+ * start-side time for these three only. That asymmetry is the contract, not a
+ * gap in it: the alternative is guessing which prompt opened a turn, and a
+ * guessed clock time is worse than no clock time.
+ */
+const TURN_PREFIX_TO_PROMPT_PREFIX: readonly (readonly [string, string])[] = [
+  [CLAUDE_MARKDOWN_REQUEST_ID_PREFIX, CLAUDE_PROMPT_REQUEST_ID_PREFIX],
+  [ANTIGRAVITY_MARKDOWN_REQUEST_ID_PREFIX, ANTIGRAVITY_PROMPT_REQUEST_ID_PREFIX],
+  [COMMAND_CODE_MARKDOWN_REQUEST_ID_PREFIX, COMMAND_CODE_PROMPT_REQUEST_ID_PREFIX],
+];
+
+/**
+ * The turn a saved row belongs to, as a comparable key, or `null`.
+ *
+ * The key is the **whole `request_id`**, prefix included, and that is
+ * load-bearing: `antigravity-turn:53b7…#0` and `claude-turn:53b7…#0` are
+ * different turns even if the suffixes ever collided, and comparing suffixes
+ * alone would fold two tools' turns into one. It also means a caller never
+ * needs to know which prefix matched — which is the point of this helper
+ * existing at all, since Issue #2458's rule ("the key CHANGED") is a string
+ * comparison and nothing more.
+ *
+ * Conservative in exactly the way {@link isAgentAuthoredMarkdown} is:
+ *
+ *  - a non-string (`undefined`, `null`, or a number that survived a bad
+ *    round-trip) is unknown;
+ *  - an unrecognised prefix — the scraper's `req_…`, a `claude-prompt:` user
+ *    row, anything a future producer invents — is unknown;
+ *  - a recognised prefix with an EMPTY or whitespace-only suffix is unknown.
+ *    `claude-turn:` on its own names no turn, and treating it as one would make
+ *    every such row read as the same turn as every other such row.
+ *
+ * "Unknown" never means "a new turn" at the call site: see
+ * `buildChatTranscriptRows`, which carries the last known key across unknown
+ * rows rather than letting one split a reply in half.
+ *
+ * @param requestId - `ChatMessage.requestId`, which is usually absent
+ * @returns The full `request_id`, or `null` when it names no known turn
+ */
+export function resolveAgentTurnKey(requestId: unknown): string | null {
+  if (typeof requestId !== 'string') return null;
+  for (const prefix of AGENT_MARKDOWN_REQUEST_ID_PREFIXES) {
+    if (!requestId.startsWith(prefix)) continue;
+    return requestId.slice(prefix.length).trim().length === 0 ? null : requestId;
+  }
+  return null;
+}
+
+/**
+ * The `request_id` the **user row** of this turn would carry, or `null`.
+ *
+ * `claude-turn:<uuid>` → `claude-prompt:<uuid>`, and the same for antigravity
+ * and Command Code. `null` for codex, for opencode, and for anything that is
+ * not a turn key at all — see {@link TURN_PREFIX_TO_PROMPT_PREFIX} for why
+ * those two are refused rather than approximated.
+ *
+ * This is a pure rename of the id, not a lookup: whether a row with that id
+ * exists, is in the same scope, is on screen and is older than the reply are
+ * four separate questions the caller answers against the rows it actually has.
+ *
+ * @param turnKey - A key from {@link resolveAgentTurnKey}
+ * @returns The correlated prompt `request_id`, or `null` when none can be named
+ */
+export function correlatedPromptRequestId(turnKey: string): string | null {
+  for (const [turnPrefix, promptPrefix] of TURN_PREFIX_TO_PROMPT_PREFIX) {
+    if (!turnKey.startsWith(turnPrefix)) continue;
+    const suffix = turnKey.slice(turnPrefix.length);
+    return suffix.trim().length === 0 ? null : `${promptPrefix}${suffix}`;
+  }
+  return null;
+}

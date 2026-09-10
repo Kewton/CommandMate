@@ -1290,6 +1290,12 @@ export const ChatTranscript = memo(function ChatTranscript({
         <ChatMessageBubble
           message={row.message}
           showHeader={row.showHeader}
+          // [#2458] The turn boundary and its clock. Carried on the row rather
+          // than recomputed here: `buildChatTranscriptRows` is the only place
+          // that knows which turn the row above belonged to, and the two
+          // segments (#2445's fold) are built by separate calls so neither can
+          // reach across it.
+          header={row.header}
           onFilePathClick={handleFilePathClick}
           onCopy={handleCopy}
           onInsertToMessage={onInsertToMessage}

@@ -52,7 +52,7 @@
  */
 
 import React, { memo, useCallback, useMemo, useState } from 'react';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTranslations } from 'next-intl';
 import {
   AlertCircle,
   ArrowDownToLine,
@@ -61,6 +61,7 @@ import {
   ChevronRight,
   Copy,
   Loader2,
+  MessageCircleQuestion,
   RotateCcw,
   ShieldCheck,
   TerminalSquare,
@@ -73,16 +74,16 @@ import rehypeHighlight from 'rehype-highlight';
 import type { ChatMessage } from '@/types/models';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { isAgentAuthoredMarkdown } from '@/types/agent-transcript';
-import { getDateFnsLocale } from '@/lib/date-locale';
-import { formatMessageTimestamp } from '@/lib/date-utils';
+import { formatChatTurnTime } from '@/lib/date-utils';
 import { stripAnsi } from '@/lib/detection/ansi';
-import { splitFilePathParts } from '@/lib/chat/chat-transcript-view';
+import { splitFilePathParts, type ChatRowHeader } from '@/lib/chat/chat-transcript-view';
 import { SHARED_REMARK_PLUGINS } from '@/lib/markdown';
 import { classifyChatLink, normalizeChatFilePath } from '@/lib/chat/chat-file-path';
 import { splitToolLog } from '@/lib/chat/chat-tool-log';
-import type {
-  ToolApprovalEntry,
-  ToolApprovalOutcome,
+import {
+  countToolApprovalEntries,
+  type ToolApprovalEntry,
+  type ToolApprovalOutcome,
 } from '@/lib/chat/chat-tool-approvals';
 
 // ============================================================================
@@ -165,6 +166,19 @@ export const CHAT_BUBBLE_ASSISTANT_CLASS = [
  * markup, not about which utilities the presentation happens to use this month.
  */
 export const CHAT_BUBBLE_TESTID = 'chat-bubble';
+
+/**
+ * The header above a row: the role block, or Issue #2458's turn boundary.
+ *
+ * One testid for both, with `data-header-variant` saying which — a suite that
+ * counts role labels and a suite that counts turn boundaries are asking about
+ * the same element in the same list, and two testids would let the two counts
+ * drift apart without anything noticing.
+ */
+export const CHAT_TURN_HEADER_TESTID = 'chat-turn-header';
+
+/** The clock inside a header: `18:59`, or `18:18 → 18:33` (Issue #2458). */
+export const CHAT_TURN_TIME_TESTID = 'chat-turn-time';
 
 /** The row a bubble sits in. Alignment is the bubble's own `ml-auto` / `mr-auto`. */
 export const CHAT_BUBBLE_ROW_CLASS = 'flex w-full flex-col gap-1 pb-3';
@@ -963,6 +977,20 @@ const OUTCOME_LABEL_KEY: Record<ToolApprovalOutcome, string> = {
 };
 
 /**
+ * The same map for a QUESTION row (Issue #2460).
+ *
+ * One entry differs, and it is the one that was wrong on screen: a question
+ * Auto-Yes answered was labelled "auto-APPROVED", which reads as a permission
+ * decision on a dialog nobody ever saw as a question. Everything else — who
+ * answered, awaiting an answer, resolved — says the same thing about both kinds
+ * and is deliberately not duplicated into a second vocabulary.
+ */
+const QUESTION_OUTCOME_LABEL_KEY: Record<ToolApprovalOutcome, string> = {
+  ...OUTCOME_LABEL_KEY,
+  auto: 'chatTranscript.toolApproval.autoAnswered',
+};
+
+/**
  * A run of tool-approval dialogs, as one collapsed row.
  *
  * ## Why a group rather than one chip per row
@@ -974,6 +1002,16 @@ const OUTCOME_LABEL_KEY: Record<ToolApprovalOutcome, string> = {
  * default, therefore — and openable, because the information is not deleted,
  * only folded.
  *
+ * ## What the summary counts (Issue #2460)
+ *
+ * Approvals, questions and loose submit confirmations, each on its own, from the
+ * FOLDED chips. `entries.length` and `messageIds.length` are both wrong here for
+ * the same reason from opposite ends: the second counts the rows the producers
+ * duplicated (three, for the measured two-question call) and the first counts
+ * chips of mixed kinds under one noun. `data-approval-count` keeps meaning "how
+ * many chips", which is what #2245's tests read it for, and the breakdown lives
+ * beside it in three attributes of its own.
+ *
  * ## Why nothing but open/closed is remembered
  *
  * Open/closed is the reader's, and since Issue #2284 it is the READER'S for the
@@ -983,7 +1021,8 @@ const OUTCOME_LABEL_KEY: Record<ToolApprovalOutcome, string> = {
  * from `entries` on every render, with nothing cached: `promptData.status` flips
  * pending → answered through a `message_updated` push, and a chip that
  * remembered its own outcome would keep saying "awaiting answer" after the
- * dialog was answered.
+ * dialog was answered — or, since #2460, would keep counting an answered
+ * question as an approval.
  */
 export const ChatToolApprovalGroup = memo(function ChatToolApprovalGroup({
   entries,
@@ -998,11 +1037,48 @@ export const ChatToolApprovalGroup = memo(function ChatToolApprovalGroup({
   if (entries.length === 0) return null;
 
   const Chevron = isOpen ? ChevronDown : ChevronRight;
+  const counts = countToolApprovalEntries(entries);
+  const hasQuestions = counts.questions + counts.confirmations > 0;
+  const hasApprovals = counts.approvals > 0;
+
+  // Every non-empty count, in one order, joined by the locale's own separator:
+  // `ツール承認 1 件・質問 2 件`. A zero is not printed — "questions · 0" tells
+  // the reader to look for something that is not there.
+  const summarySegments: string[] = [];
+  if (hasApprovals) {
+    summarySegments.push(t('chatTranscript.toolApproval.summary', { count: counts.approvals }));
+  }
+  if (counts.questions > 0) {
+    summarySegments.push(
+      t('chatTranscript.toolApproval.summaryQuestions', { count: counts.questions }),
+    );
+  }
+  if (counts.confirmations > 0) {
+    // Alone, a confirmation has to name what it confirms ("質問の送信確認"); beside
+    // the questions it belongs to, the short form is enough and the long one
+    // repeats the word "question" twice in one chip.
+    summarySegments.push(
+      t(
+        hasApprovals || counts.questions > 0
+          ? 'chatTranscript.toolApproval.summaryConfirmations'
+          : 'chatTranscript.toolApproval.summaryConfirmationsOnly',
+        { count: counts.confirmations },
+      ),
+    );
+  }
+
+  // The toggle names what it opens. A group of questions that says "show the
+  // tool approvals" is the same mislabelling as the summary, one control lower.
+  const toggleSuffix = hasQuestions && hasApprovals ? 'Mixed' : hasQuestions ? 'Questions' : '';
+  const Icon = hasApprovals ? ShieldCheck : MessageCircleQuestion;
 
   return (
     <div
       data-testid={CHAT_TOOL_APPROVAL_GROUP_TESTID}
       data-approval-count={entries.length}
+      data-approvals={counts.approvals}
+      data-questions={counts.questions}
+      data-confirmations={counts.confirmations}
       className={`${CHAT_BUBBLE_ROW_CLASS} items-start`}
     >
       <button
@@ -1010,11 +1086,13 @@ export const ChatToolApprovalGroup = memo(function ChatToolApprovalGroup({
         data-testid={CHAT_TOOL_APPROVAL_TOGGLE_TESTID}
         onClick={toggle}
         aria-expanded={isOpen}
-        aria-label={isOpen ? t('chatTranscript.toolApproval.collapse') : t('chatTranscript.toolApproval.expand')}
+        aria-label={t(
+          `chatTranscript.toolApproval.${isOpen ? 'collapse' : 'expand'}${toggleSuffix}`,
+        )}
         className={CHAT_TOOL_ACTIVITY_CHIP_CLASS}
       >
-        <ShieldCheck size={12} aria-hidden="true" />
-        <span>{t('chatTranscript.toolApproval.summary', { count: entries.length })}</span>
+        <Icon size={12} aria-hidden="true" />
+        <span>{summarySegments.join(t('chatTranscript.toolApproval.summarySeparator'))}</span>
         <Chevron size={12} aria-hidden="true" />
       </button>
 
@@ -1023,23 +1101,49 @@ export const ChatToolApprovalGroup = memo(function ChatToolApprovalGroup({
           data-testid="chat-tool-approval-list"
           className="mr-auto flex w-full max-w-full flex-col gap-1 pl-1"
         >
-          {entries.map((entry) => (
-            <li
-              key={entry.id}
-              data-testid={CHAT_TOOL_APPROVAL_ENTRY_TESTID}
-              data-approval-outcome={entry.outcome}
-              data-approval-audit={entry.isPermissionAudit ? 'true' : undefined}
-              data-approval-merged={entry.messageIds.length}
-              className="flex max-w-full flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs text-muted-foreground"
-            >
-              <span className="min-w-0 break-words [word-break:break-word] font-mono text-foreground">
-                {entry.label || t('chatTranscript.toolApproval.unlabeled')}
-              </span>
-              <span data-testid="chat-tool-approval-outcome">
-                {t(OUTCOME_LABEL_KEY[entry.outcome])}
-              </span>
-            </li>
-          ))}
+          {entries.map((entry) => {
+            const isQuestion = entry.kind === 'question';
+            const outcomeKey = isQuestion ? QUESTION_OUTCOME_LABEL_KEY : OUTCOME_LABEL_KEY;
+            const fallbackLabelKey = !isQuestion
+              ? 'chatTranscript.toolApproval.unlabeled'
+              : entry.phase === 'confirmation'
+                ? 'chatTranscript.toolApproval.submitConfirmation'
+                : 'chatTranscript.toolApproval.unlabeledQuestion';
+
+            return (
+              <li
+                key={entry.id}
+                data-testid={CHAT_TOOL_APPROVAL_ENTRY_TESTID}
+                data-approval-outcome={entry.outcome}
+                data-approval-kind={entry.kind}
+                data-approval-phase={entry.phase}
+                data-approval-confirmation={entry.confirmationOutcome}
+                data-approval-audit={entry.isPermissionAudit ? 'true' : undefined}
+                data-approval-merged={entry.messageIds.length}
+                className="flex max-w-full flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs text-muted-foreground"
+              >
+                {entry.phase === 'confirmation' && entry.label && (
+                  <span data-testid="chat-tool-approval-phase">
+                    {t('chatTranscript.toolApproval.submitConfirmation')}
+                  </span>
+                )}
+                <span className="min-w-0 break-words [word-break:break-word] font-mono text-foreground">
+                  {entry.label || t(fallbackLabelKey)}
+                </span>
+                <span data-testid="chat-tool-approval-outcome">{t(outcomeKey[entry.outcome])}</span>
+                {/* [#2460] The confirmer, beside the answerer rather than over
+                    it: the measured set was answered by Auto-Yes and submitted
+                    by a person, and one outcome cannot say both. */}
+                {entry.confirmationOutcome && (
+                  <span data-testid="chat-tool-approval-confirmation">
+                    {t('chatTranscript.toolApproval.confirmation', {
+                      outcome: t(QUESTION_OUTCOME_LABEL_KEY[entry.confirmationOutcome]),
+                    })}
+                  </span>
+                )}
+              </li>
+            );
+          })}
         </ul>
       )}
     </div>
@@ -1057,6 +1161,21 @@ export interface ChatMessageBubbleProps {
    * continues the role above it — see `shouldShowRoleHeader`.
    */
   showHeader: boolean;
+  /**
+   * What the header says and what clock it carries (Issue #2458).
+   *
+   * Two props rather than one because they answer two questions and only one
+   * of them is new: {@link showHeader} is still the sole authority on the ROLE
+   * label — #2245's invariant about how many "Assistant" labels a column
+   * carries is stated in terms of it — and this adds the turn boundary and the
+   * range. `buildChatTranscriptRows` emits them together and guarantees
+   * `showHeader === (header.variant === 'role')`.
+   *
+   * Optional so the call sites that only ever wanted a role header (the suites
+   * that render one bubble in isolation) need not construct one; absent means
+   * "no boundary, no start time", which is what those call sites already got.
+   */
+  header?: ChatRowHeader;
   onFilePathClick: (path: string) => void;
   onCopy?: (content: string) => void;
   /** Issue #485: put a user message back into the composer. */
@@ -1070,13 +1189,13 @@ export interface ChatMessageBubbleProps {
 export const ChatMessageBubble = memo(function ChatMessageBubble({
   message,
   showHeader,
+  header,
   onFilePathClick,
   onCopy,
   onInsertToMessage,
   onRetryPending,
   onDiscardPending,
 }: ChatMessageBubbleProps) {
-  const locale = useLocale();
   const t = useTranslations('worktree');
   const tCommon = useTranslations('common');
 
@@ -1086,7 +1205,21 @@ export const ChatMessageBubble = memo(function ChatMessageBubble({
   // [#2436] A pane dump standing beside a turn the agent's own transcript
   // already wrote. Folded, not dropped — see {@link isFoldedPaneScrape}.
   const isPaneScrape = isFoldedPaneScrape(message);
-  const formattedTime = formatMessageTimestamp(message.timestamp, getDateFnsLocale(locale));
+  // [#2458] The turn's clock. `startedAtMs` is present only when a saved user
+  // row in this segment provably opened the same turn, so the range never
+  // appears on a reply whose question this surface cannot name.
+  const startedAt = useMemo(
+    () => (typeof header?.startedAtMs === 'number' ? new Date(header.startedAtMs) : null),
+    [header?.startedAtMs],
+  );
+  const formattedTime = formatChatTurnTime(message.timestamp, startedAt);
+  // [#2458] `showHeader` wins on the role label; the variant only decides
+  // whether a row that is NOT starting a role block still opens a new turn.
+  const headerVariant: ChatRowHeader['variant'] = showHeader
+    ? 'role'
+    : header?.variant === 'time'
+      ? 'time'
+      : 'none';
 
   // [#2245] What the reader sees, and therefore what copy has to hand them. The
   // Markdown path keeps `message.content` verbatim — see `toPlainBodyText`.
@@ -1134,10 +1267,16 @@ export const ChatMessageBubble = memo(function ChatMessageBubble({
         .filter(Boolean)
         .join(' ')}
     >
-      {showHeader && (
+      {headerVariant === 'role' && (
         <div
+          data-testid={CHAT_TURN_HEADER_TESTID}
+          data-header-variant="role"
           className={[
-            'flex items-center gap-2 px-1 text-xs text-muted-foreground',
+            // `flex-wrap` and nothing else: the header is ONE line at every
+            // width this surface is used at (Issue #2458 renders at most a role
+            // label plus `M/d HH:mm → M/d HH:mm`), and wrapping is the graceful
+            // way out at 320px rather than a horizontal scrollbar.
+            'flex flex-wrap items-center gap-x-2 px-1 text-xs text-muted-foreground',
             isUser ? 'justify-end' : '',
           ]
             .filter(Boolean)
@@ -1146,7 +1285,34 @@ export const ChatMessageBubble = memo(function ChatMessageBubble({
           <span className={isUser ? 'font-medium text-accent-700 dark:text-accent-400' : 'font-medium'}>
             {isUser ? t('conversation.you') : t('conversation.assistant')}
           </span>
-          {formattedTime && <span>{formattedTime}</span>}
+          {formattedTime && <span data-testid={CHAT_TURN_TIME_TESTID}>{formattedTime}</span>}
+        </div>
+      )}
+
+      {/* [#2458] A new turn by the SAME speaker. A clock between two hairlines
+          and no role label: repeating "Assistant" every few rows is what made
+          the surface read as a log, and what the reader is missing is where one
+          answer ended, not who wrote it.
+
+          One row of the scroll content, `text-xs` like every other header here,
+          so it costs the pane no fixed height — the composer and the footer are
+          outside this component and are not touched by it. */}
+      {headerVariant === 'time' && formattedTime && (
+        <div
+          data-testid={CHAT_TURN_HEADER_TESTID}
+          data-header-variant="time"
+          // A `separator` with a name, because the visual cue — a hairline with
+          // a clock in it — carries nothing to a screen reader on its own, and
+          // "18:59" read out between two replies would be a stray number.
+          role="separator"
+          aria-label={t('chatTranscript.turnBoundary')}
+          className="flex w-full items-center gap-2 px-1 pt-2 text-xs text-muted-foreground"
+        >
+          <span className="h-px min-w-[1rem] flex-1 bg-border" aria-hidden="true" />
+          <span data-testid={CHAT_TURN_TIME_TESTID} className="shrink-0 whitespace-nowrap">
+            {formattedTime}
+          </span>
+          <span className="h-px min-w-[1rem] flex-1 bg-border" aria-hidden="true" />
         </div>
       )}
 

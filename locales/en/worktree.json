@@ -479,6 +479,7 @@
     "empty": "No messages yet",
     "emptyHint": "Sending a message starts the session",
     "openSearch": "Search this conversation",
+    "turnBoundary": "Next turn",
     "thinking": {
       "summary": "Thinking · {count}",
       "expand": "Show the reasoning",
@@ -504,7 +505,19 @@
       "awaitingAnswer": "Awaiting an answer",
       "unclassified": "Dialog not recognized",
       "resolved": "Resolved",
-      "unlabeled": "Approval dialog"
+      "unlabeled": "Approval dialog",
+      "unlabeledQuestion": "Question",
+      "autoAnswered": "Auto-answered",
+      "submitConfirmation": "Answer submission",
+      "confirmation": "Submission: {outcome}",
+      "summaryQuestions": "Questions · {count}",
+      "summaryConfirmations": "Submissions · {count}",
+      "summaryConfirmationsOnly": "Answer submissions · {count}",
+      "summarySeparator": " / ",
+      "expandQuestions": "Show the questions",
+      "collapseQuestions": "Hide the questions",
+      "expandMixed": "Show the questions and approvals",
+      "collapseMixed": "Hide the questions and approvals"
     },
     "previousSession": {
       "summary": "Previous session ({count})",

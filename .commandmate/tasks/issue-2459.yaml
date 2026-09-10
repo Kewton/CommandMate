@@ -1,0 +1,147 @@
+version: 1
+title: "Issue #2459: 太字URL直後の全角句読点でautolinkが伸びて壊れる"
+goal: |
+  https://github.com/Kewton/CommandMate/issues/2459 を実装する。
+
+  ## 事象
+  `**https://example.com/issue/2454**（注記）` のように太字URL直後に全角句読点が続くと、
+  remark-gfmのautolinkが`https://example.com/issue/2454**（注記`まで伸び、太字が外れ
+  リンク先が壊れる。`url === 子text`では自動リンクと明示リンクを区別できない
+  （`[url](url)`や`<url>`も同じ等式を満たす）。node.positionで元ソースを切り出せば
+  裸URL/`[text](url)`/`<url>`を区別できる。
+
+  照合基準: package.json は `react-markdown ^10.1.0` / `remark-gfm ^4.0.1`。
+  実装・テストはlockfileの解決版を使用。upgrade/forkは対象外。
+
+  ## 確定仕様
+
+  ### 1. 共有remarkプラグインと対象描画経路
+  `src/lib/markdown/`（新規）等の共有位置へ副作用のないremark transformerを置く。
+  安定参照の共通plugin配列 `[remarkGfm, <今回のplugin>]` を定義し、次の**3コンポーネント
+  内の全ReactMarkdown呼出し**で使う:
+  - `src/components/worktree/ChatMessageBubble.tsx`（本文/reasoning/tool activityの複数呼出し）
+  - `src/components/worktree/ConversationPairCard.tsx`
+  - `src/components/worktree/MarkdownPreview.tsx`
+
+  共有するのはremark配列。MarkdownPreviewのMermaid等に必要なrehype設定は一律に置き換えない。
+  既存の`rehypeSanitize`/highlight/custom components/URL安全化/copyする原文を維持する。
+  新規`rehypeRaw`や生HTML挿入を導入しない。
+
+  ### 2. 対象となるリンクを元ソースで確認する
+  修復対象は裸で書いた`http://`/`https://`のautolink literalに限定する。`url===子text`は
+  補助条件にしか使わず、**node.positionのoffsetと、その parseに渡されたVFileの元文字列**
+  で記法を確認する。
+  - `[text](url)`（text/urlが同じ例含む）、参照リンク、`<url>`、画像、code/inlineCodeは
+    変更しない
+  - `www.`/email自動リンク、URL schemeの追加は対象外として従来どおり扱う
+  - offset不在、不正なrange、ソースとnodeの不一致、他pluginが作った出所不明のlinkは
+    変更せず、例外を投げない
+  - Chatの本文分割後も、offsetはそのReactMarkdownに渡された文字列に対するものとして扱う
+    （元の長いassistant content全体へ適用しない）
+
+  ### 3. 日本語のURL境界を修復する
+  対象literal内の **`（` `）` `、` `。` `「` `」` `【` `】`** の最初の出現を境界にする。
+  そこから後ろを通常textとして同じinline親へ戻し、hrefとリンクの表示文字の両方から除く。
+  前後の文字・空白・改行を欠落/重複させない。これはCommandMateの**裸URLに対する表示規則**
+  （正当なURLを意図する場合は明示リンク/`<url>`/percent encodingで従来どおり表現可能）。
+  他の日本語文字・全角英数字・percent-encodedの文字は切らない。decodeしてから境界探索しない。
+
+  ### 4. 巻き込まれた強調delimiterの扱い
+  - 日本語境界の直前に`**`または`__`が巻き込まれている場合、それもURLの外へ出す
+  - 同じinline親内の直前textが**ソース上で未エスケープの同じ開始delimiter**で終わり、
+    元ソースの範囲が対応することを確認できた場合だけ、開始・終了delimiterを除きリンクを
+    `strong`で包む（`__`もstrong）
+  - 対になる開始delimiterがない、エスケープ済み、別block/別node構造にまたがる等で確認
+    できない場合はstrongにせず、delimiterを通常textとして残す。リンク先だけを境界で修復する
+  - URLの中間にある`**`/`__`を無条件に最初の位置で切らない（`/a__b`/`/a**b`はそれだけでは
+    境界ではない）。通常のquery/fragmentも維持する
+  - 既に正しくparseされた`strong > link`、半角空白付きやURL単独の太字は変更しない。
+    単一`*`/`_`、複雑な入れ子emphasisの全面修復は対象外
+
+  transformerはparagraphだけに限定せずlist/blockquote/table cell等のinline親でも処理する。
+  兄弟nodeをspliceする際のindexずれで次のリンクを飛ばさず、同じtreeに再適用しても結果が
+  変わらないようにする。原文そのものは変更しない。
+
+  ## 受入テスト
+  `tests/unit/hooks/sources/turn-separation-2234.test.ts` のように実ReactMarkdown→remark→
+  既存rehype pipelineを通す。URLは以下`https://example.com/issue/2454`を表す。
+
+  | 入力 | 期待 |
+  |---|---|
+  | `**URL**（注記）`/`__URL__（注記）` | `strong > a[href=URL]`の後ろに`（注記）`。生delimiterなし |
+  | `**URL**、次へ`/`**URL**。` | 同じstrong、句読点以降はlink外 |
+  | `URL）`/`URL、次へ`等 | URLが指定句読点の直前で終わる |
+  | `URL**（注記）`（開始delimiterなし） | strongにしない。linkはURL、`**（注記）`はtext |
+  | エスケープした開始delimiterと`URL**（注記）` | strongを捏造せずdelimiterをtext保持 |
+  | `**URL** (label)`/`**URL**`/既存`__URL__` | 修正plugin無しと同じ描画 |
+  | `[t](URL**x)`/`[URL**x](URL**x)`/`<URL**x>` | href・表示とも変更なし |
+  | 明示リンク/`<url>`で対象句読点をURLに含む | 変更なし |
+  | 裸`https://example.com/a__b`/`a**b`、query/fragment | delimiterだけでは分割しない |
+  | `/日本語`、percent-encoded句読点を含むURL | 指定literal句読点以外は維持 |
+  | fenced code/inlineCode/参照リンク/画像 | 変更なし |
+
+  - [ ] 最初の報告文（inline codeの`bug`含む）でもstrong・href・後続inline nodeが正しい。
+        複数リンク、list/table/blockquote、先行Unicode文字を含むoffsetをテストする
+  - [ ] position欠落node、異常値、未対応schemeは安全にno-op。二重適用は冪等
+  - [ ] 既存sanitizerとURL検査を維持し、不正なHTML・危険schemeを新たに通さない。テストは
+        生成DOM/hrefを検査し危険リンクへ実際にアクセスしない
+  - [ ] 3コンポーネントすべてで共通配列の修復が働き、Chatの分割されたreasoning/tool bodyも
+        同じpipelineを通る
+  - [ ] 修復pluginを抜いた対照で報告入力のテストが失敗する（変異注入）
+  - [ ] `npm run lint`、`npx tsc --noEmit`、`npm run test:unit`がexit 0。3画面の関連
+        component testと既存Markdown/Mermaid/sanitizer回帰を通す
+
+  ## 対象外
+  上流parserのfork/patch、一般のIRI正規化、保存済みcontentの書換え、他の無関係なMarkdown
+  rendererの統合。共有pluginを直接依存で型付けする必要がある場合だけpackage.json/lockfile
+  を最小更新してよい。
+
+  ## 関連・共有ファイル
+  #2458/#2460と`ChatMessageBubble.tsx`を共有する。別々に着手できるが、統合後に新しい
+  見出し・質問グループとMarkdown描画を確認すること（マージ担当が実施）。#2457のprompt
+  生産修正とは別の問題。
+
+  ## 作業ルール（厳守）
+
+  - **`CHANGELOG.md` と `docs/module-reference.md` を編集しないでください**（scope 外です）。
+    代わりに次の 2 ファイルを書いてください。どちらも `dev-reports/` 配下なので commit には入りません。
+    - `dev-reports/changelog/issue-2459.md` — `CHANGELOG.md` の `## [Unreleased]` にそのまま
+      貼れる **1 エントリ**（先頭は `- **fix(chat): …** (#2459): …`）。1行目に
+      `<!-- ### Fixed -->` とコメント。1エントリ＝1行（折らない）。`(#2459)`は要約の外。
+    - `dev-reports/module-reference/issue-2459.md` — 次の**既存行**への追記内容を書く:
+      ```
+      docs/module-reference.md:497:| `src/components/worktree/ChatMessageBubble.tsx` | ...
+      docs/module-reference.md:481:| `src/components/worktree/ConversationPairCard.tsx` | ...
+      docs/module-reference.md:518:| `src/components/worktree/MarkdownPreview.tsx` | ...
+      ```
+      `src/lib/markdown/` は新規ディレクトリなので新規行として追加してよい
+      （`## 新規行`セクションに追加内容を記載）。
+      既存行は書く前に自分でも `grep -n '^| \`<path>\`' docs/module-reference.md` を実行し、
+      その出力を断片に書き写してから追記内容を書くこと。
+  - 断片が無いとリリースノートと module-reference に載らない。実装と同じ commit の時点で書くこと。
+
+  ## 受入条件
+  - [ ] `**URL**（注記）`が`strong > a[href=URL]`＋`（注記）`に修復される
+  - [ ] 開始delimiterが無い場合はstrongにしない
+  - [ ] 明示リンク/`<url>`/コード内文字列は変更されない
+  - [ ] 3コンポーネント全てで共通pluginが使われる
+  - [ ] 変異注入でplugin除去時にテストが赤になることを確認済み
+  - [ ] lint/tsc/unitがexit 0
+
+scope:
+  allow:
+    - "src/lib/markdown/**"
+    - "src/components/worktree/ChatMessageBubble.tsx"
+    - "src/components/worktree/ConversationPairCard.tsx"
+    - "src/components/worktree/MarkdownPreview.tsx"
+    - "tests/unit/lib/markdown/**"
+    - "tests/unit/components/**"
+    - "package.json"
+    - "package-lock.json"
+    - "dev-reports/changelog/issue-2459.md"
+    - "dev-reports/module-reference/issue-2459.md"
+  deny: []
+
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true

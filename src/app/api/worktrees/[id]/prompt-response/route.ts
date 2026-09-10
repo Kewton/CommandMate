@@ -14,6 +14,7 @@ import { captureSessionOutputFresh } from '@/lib/session/cli-session';
 import { detectPrompt, type PromptDetectionResult } from '@/lib/detection/prompt-detector';
 import { stripAnsi, stripBoxDrawing, buildDetectPromptOptions } from '@/lib/detection/cli-patterns';
 import { detectAntigravityNumberedDialogPrompt } from '@/lib/detection/tools/antigravity/dialog';
+import { evaluateDialogPresence } from '@/lib/polling/auto-yes-dialog-gate';
 import { sendPromptAnswer, PromptAnswerRejectedError } from '@/lib/prompt-answer-sender';
 import { resolvePromptAnswer, PromptAnswerResolutionError, type AnswerResolution } from '@/lib/prompt-answer-semantic';
 import { getAskUserQuestion } from '@/lib/session/agent-event-state';
@@ -215,7 +216,31 @@ export async function POST(
       const promptOptions = buildDetectPromptOptions(cliToolId);
       promptCheck = toolDialog ?? detectPrompt(cleanOutput, promptOptions);
 
-      if (!promptCheck.isPrompt) {
+      // Issue #2457: the same shared gate the response poller saves through.
+      // Without it this re-verification vouched for the very rows #2457 is
+      // about — a reply whose Markdown `1. / 2. / 3.` satisfies the generic
+      // parser — and PromptPanel's Submit typed a digit into an idle composer,
+      // i.e. sent the agent a bare "1" as a new instruction.
+      //
+      // The gate is handed `currentOutput`, the capture itself — not
+      // `cleanOutput`, which the generic parser needs and the tools' dialog
+      // rules do not (see `evaluateDialogPresence`). agy is unaffected in either
+      // direction: it is `legacy` in the rollout table, so the gate does not
+      // judge it and its own reader above keeps deciding.
+      const numberedCandidateVouched = evaluateDialogPresence(
+        cliToolId,
+        promptCheck.promptData?.type,
+        currentOutput,
+      ).present;
+
+      if (!promptCheck.isPrompt || !numberedCandidateVouched) {
+        logger.info('prompt-response-refused', {
+          worktreeId: id,
+          cliToolId,
+          instanceId,
+          reason: 'prompt_no_longer_active',
+          vouched: numberedCandidateVouched,
+        });
         return NextResponse.json({
           success: false,
           reason: 'prompt_no_longer_active',

@@ -113,6 +113,66 @@ function createRequest(worktreeId: string, answerOrOptions: string | CreateReque
   }) as unknown as NextRequest;
 }
 
+/**
+ * Frames the route's own re-verification can vouch for (Issue #2457).
+ *
+ * Before #2457 that re-verification only asked `detectPrompt`, which these
+ * suites mock, so the captured frame could be any placeholder string. It now
+ * also asks claude's measured dialog rules whether the pane really carries a
+ * dialog (`evaluateDialogPresence`) — which is the whole point of the Issue: a
+ * reply whose Markdown `1. / 2. / 3.` satisfies the generic parser must not be
+ * answered by typing into an idle composer. So the capture handed to it has to
+ * be a dialog, spelled the way Claude Code draws one: the `❯` cursor on the
+ * highlighted option, and either one of its footers or nothing at all
+ * (`tests/unit/lib/detection/fixtures/claude-live-1708/`).
+ *
+ * The mocked `detectPrompt` return values below are untouched — they are what
+ * drives the key arithmetic each of these tests is actually about.
+ */
+const CLAUDE_PERMISSION_FRAME = [
+  '⏺ Bash command',
+  '',
+  '   npm test',
+  '   Run the test suite',
+  '',
+  ' Do you want to make this edit?',
+  ' ❯ 1. Yes',
+  '   2. Yes, allow all edits during this session (shift+tab)',
+  '   3. No, and tell Claude what to do differently (esc)',
+  '',
+  ' Esc to cancel · Tab to amend · ctrl+e to explain',
+].join('\n');
+
+/** The `/model` overlay of #1495, which carries its own footer. */
+const CLAUDE_MODEL_PICKER_FRAME = [
+  '⏺ Switching model',
+  '',
+  ' Select model',
+  ' ❯ 1. Default (recommended)',
+  '   2. Opus',
+  '',
+  ' Enter to set as default · s to use this session only · Esc to cancel',
+].join('\n');
+
+/**
+ * An AskUserQuestion multi-select, drawn WITH its option numbers.
+ *
+ * That is how Claude Code renders one — `☐ 1. Blue / ☑ 2. Green` is the shape
+ * `prompt-detect-multiple-choice.ts` documents from a live pane for #1708 — and
+ * the numbers are what let a checkbox picker be addressed by option number at
+ * all, which is what the three tests below are about.
+ */
+const CLAUDE_MULTISELECT_FRAME = [
+  '⏺ Calling 1 tool…',
+  '',
+  ' Select tools:',
+  ' ❯ 1. ☐ Option A',
+  '   2. ☐ Option B',
+  '   3. ☐ Option C',
+  '',
+  ' Enter to select · ↑/↓ to navigate · Esc to cancel',
+].join('\n');
+
 // --- Tests ---
 
 describe('POST /api/worktrees/:id/prompt-response - Prompt re-verification (Issue #161)', () => {
@@ -679,7 +739,7 @@ describe('POST /api/worktrees/:id/prompt-response - Multi-select (checkbox) prom
     const { sendSpecialKeys } = await import('@/lib/tmux/tmux');
 
     // Multi-select prompt with checkbox-style options
-    vi.mocked(captureSessionOutputFresh).mockResolvedValue('Select tools:\n\u276F [ ] Option A\n  [ ] Option B\n  [ ] Option C');
+    vi.mocked(captureSessionOutputFresh).mockResolvedValue(CLAUDE_MULTISELECT_FRAME);
     vi.mocked(detectPrompt).mockReturnValue({
       isPrompt: true,
       promptData: {
@@ -714,7 +774,7 @@ describe('POST /api/worktrees/:id/prompt-response - Multi-select (checkbox) prom
     const { sendSpecialKeys } = await import('@/lib/tmux/tmux');
 
     // Default is option 3, selecting option 1
-    vi.mocked(captureSessionOutputFresh).mockResolvedValue('Select:\n  [x] A\n  [ ] B\n\u276F [ ] C');
+    vi.mocked(captureSessionOutputFresh).mockResolvedValue(CLAUDE_MULTISELECT_FRAME);
     vi.mocked(detectPrompt).mockReturnValue({
       isPrompt: true,
       promptData: {
@@ -745,7 +805,7 @@ describe('POST /api/worktrees/:id/prompt-response - Multi-select (checkbox) prom
     const { detectPrompt } = await import('@/lib/detection/prompt-detector');
     const { sendSpecialKeys } = await import('@/lib/tmux/tmux');
 
-    vi.mocked(captureSessionOutputFresh).mockResolvedValue('Pick:\n\u276F [ ] Alpha\n  [ ] Beta');
+    vi.mocked(captureSessionOutputFresh).mockResolvedValue(CLAUDE_MULTISELECT_FRAME);
     vi.mocked(detectPrompt).mockReturnValue({
       isPrompt: true,
       promptData: {
@@ -825,7 +885,7 @@ describe('POST /api/worktrees/:id/prompt-response - Semantic yes/no resolution (
     const { detectPrompt } = await import('@/lib/detection/prompt-detector');
     const { sendSpecialKeys, sendKeys } = await import('@/lib/tmux/tmux');
 
-    vi.mocked(captureSessionOutputFresh).mockResolvedValue('permission menu');
+    vi.mocked(captureSessionOutputFresh).mockResolvedValue(CLAUDE_PERMISSION_FRAME);
     vi.mocked(detectPrompt).mockReturnValue({
       isPrompt: true,
       promptData: claudePermissionPromptData,
@@ -853,7 +913,7 @@ describe('POST /api/worktrees/:id/prompt-response - Semantic yes/no resolution (
     const { detectPrompt } = await import('@/lib/detection/prompt-detector');
     const { sendSpecialKeys } = await import('@/lib/tmux/tmux');
 
-    vi.mocked(captureSessionOutputFresh).mockResolvedValue('permission menu');
+    vi.mocked(captureSessionOutputFresh).mockResolvedValue(CLAUDE_PERMISSION_FRAME);
     vi.mocked(detectPrompt).mockReturnValue({
       isPrompt: true,
       promptData: claudePermissionPromptData,
@@ -875,7 +935,7 @@ describe('POST /api/worktrees/:id/prompt-response - Semantic yes/no resolution (
     const { detectPrompt } = await import('@/lib/detection/prompt-detector');
     const { sendSpecialKeys, sendKeys } = await import('@/lib/tmux/tmux');
 
-    vi.mocked(captureSessionOutputFresh).mockResolvedValue('model picker');
+    vi.mocked(captureSessionOutputFresh).mockResolvedValue(CLAUDE_MODEL_PICKER_FRAME);
     vi.mocked(detectPrompt).mockReturnValue({
       isPrompt: true,
       promptData: {
@@ -935,7 +995,7 @@ describe('POST /api/worktrees/:id/prompt-response - Semantic yes/no resolution (
     const { detectPrompt } = await import('@/lib/detection/prompt-detector');
     const { sendSpecialKeys } = await import('@/lib/tmux/tmux');
 
-    vi.mocked(captureSessionOutputFresh).mockResolvedValue('permission menu');
+    vi.mocked(captureSessionOutputFresh).mockResolvedValue(CLAUDE_PERMISSION_FRAME);
     vi.mocked(detectPrompt).mockReturnValue({
       isPrompt: true,
       promptData: claudePermissionPromptData,

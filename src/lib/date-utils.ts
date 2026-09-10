@@ -174,3 +174,115 @@ export function formatSessionNoteTimestamp(timestamp: Date, now: Date = new Date
 
   return format(timestamp, sameDay ? 'HH:mm' : 'M/d HH:mm');
 }
+
+/**
+ * Format one chat turn's clock as the transcript's turn header (Issue #2458).
+ *
+ * `18:18 → 18:33` when the prompt that opened the turn is known, `18:59` when
+ * it is not. The caller decides which of those two it is by handing over a
+ * `startedAt` or a `null` — this helper never guesses one, because the whole
+ * point of Issue #2458 is that a start time is shown only when a specific saved
+ * user row proves it (see `buildChatTranscriptRows`).
+ *
+ * ## The four shapes, and the rule that produces them
+ *
+ * Each side is stamped `HH:mm`, or `M/d HH:mm` when its own date is not
+ * obvious, and "obvious" is exactly one condition: the instant falls on the
+ * same calendar day as `now` AND the range does not cross a day boundary. So:
+ *
+ * | start | end | reference day | output |
+ * |---|---|---|---|
+ * | 18:18 today | 18:33 today | today | `18:18 → 18:33` |
+ * | — | 18:59 today | today | `18:59` |
+ * | 23:58 Sep 7 | 00:04 Sep 8 | Sep 8 | `9/7 23:58 → 9/8 00:04` |
+ * | — | 18:59 Sep 7 | Sep 8 | `9/7 18:59` |
+ *
+ * Both sides always wear the SAME shape. A range reading `9/7 23:58 → 00:04`
+ * is a sentence the reader has to finish themselves, and the four extra columns
+ * are cheaper than that.
+ *
+ * ## Why the minute, and why collapsing
+ *
+ * The stamp is minute-resolution, so a turn that opened and closed inside one
+ * minute renders both sides identically. `18:33 → 18:33` says nothing and looks
+ * like a rendering fault, so an identical pair collapses to the single stamp —
+ * the reader loses only the fact that the two instants differed by seconds,
+ * which is not a fact this header exists to carry.
+ *
+ * ## Why it is not localized
+ *
+ * Same reason {@link formatSessionNoteTimestamp} is not, and it is the stronger
+ * case of the two: this header shares one line with a role label inside a pane
+ * that is 360px wide on a phone, and can hold TWO stamps. `'PPp'` renders
+ * `September 7, 2026 at 6:18 PM`, so a range would be 60 characters before the
+ * arrow is counted. `M/d` and a 24-hour clock read the same to an English and a
+ * Japanese operator, and Issue #2458's acceptance names `18:18 → 18:33`
+ * literally — a locale that reordered or re-punctuated it would fail that.
+ *
+ * Invalid input degrades quietly rather than printing `Invalid Date`, which is
+ * this module's standing contract: an unusable `endedAt` yields `''` (the
+ * header then draws no time at all), and an unusable `startedAt` is treated as
+ * an absent one.
+ *
+ * @param endedAt - The row's own instant: when the turn finished
+ * @param startedAt - The correlated prompt's instant, or `null` when unknown
+ * @param now - The instant "today" is measured against; injectable so a test
+ *   can pin the boundary instead of racing midnight
+ * @returns `HH:mm`, `M/d HH:mm`, either of those twice around ` → `, or `''`
+ *
+ * @example
+ * ```ts
+ * const now = new Date(2026, 8, 7, 21, 0);
+ * formatChatTurnTime(new Date(2026, 8, 7, 18, 33), new Date(2026, 8, 7, 18, 18), now)
+ * // => '18:18 → 18:33'
+ * formatChatTurnTime(new Date(2026, 8, 7, 18, 59), null, now)
+ * // => '18:59'
+ * ```
+ */
+export function formatChatTurnTime(
+  endedAt: Date,
+  startedAt: Date | null | undefined,
+  now: Date = new Date(),
+): string {
+  if (!isUsableDate(endedAt)) return '';
+  const reference = isUsableDate(now) ? now : new Date();
+  const start = isUsableDate(startedAt) ? startedAt : null;
+
+  // The date is spelled out when either end is not on the reference day, or
+  // when the two ends disagree about which day they are on.
+  const withDate =
+    !isSameCalendarDay(endedAt, reference)
+    || (start !== null && (!isSameCalendarDay(start, reference) || !isSameCalendarDay(start, endedAt)));
+  const pattern = withDate ? 'M/d HH:mm' : 'HH:mm';
+
+  const end = format(endedAt, pattern);
+  if (start === null) return end;
+
+  const opened = format(start, pattern);
+  // Same minute on both sides: one stamp, not a range that says nothing.
+  return opened === end ? end : `${opened}${CHAT_TURN_TIME_SEPARATOR}${end}`;
+}
+
+/**
+ * What sits between the two ends of a turn's clock (Issue #2458).
+ *
+ * Exported so a test can assert the range without re-typing the glyph — the
+ * arrow is the thing that makes the header read as a duration rather than as
+ * two unrelated stamps, and a test that spelled it out itself would keep
+ * passing if this became a hyphen.
+ */
+export const CHAT_TURN_TIME_SEPARATOR = ' → ';
+
+/** A `Date` that can actually be formatted. Nothing else is trusted at runtime. */
+function isUsableDate(value: unknown): value is Date {
+  return value instanceof Date && !isNaN(value.getTime());
+}
+
+/** Whether two instants fall on the same local calendar day. */
+function isSameCalendarDay(a: Date, b: Date): boolean {
+  return (
+    a.getFullYear() === b.getFullYear()
+    && a.getMonth() === b.getMonth()
+    && a.getDate() === b.getDate()
+  );
+}
