@@ -109,6 +109,38 @@ function isCronJobActive(cronJob: import('croner').Cron): boolean {
   return true;
 }
 
+/**
+ * Attach the execution callback to a cron job.
+ *
+ * The callback closes over the {@link ScheduleState}, never over the entry the
+ * timer was built from (Issue #2456). Two things follow, and both are load
+ * bearing when a timer is replaced while its schedule keeps running:
+ *
+ * - the tick executes `state.entry`, so a Message/CLI Tool/Permission edit
+ *   picked up by a later sync is the one the next run uses;
+ * - the tick reads `state.isExecuting`, the single guard every timer this
+ *   schedule ever owns shares. `protect: true` cannot stand in for it: the
+ *   callback returns `undefined` rather than the execution's Promise, so croner
+ *   never sees itself as blocking, and a fresh timer with its own state would
+ *   start a second run on top of a live one.
+ *
+ * @param state - The schedule state the callback executes
+ * @param cronJob - The cron job to attach the callback to
+ */
+function scheduleExecution(state: ScheduleState, cronJob: import('croner').Cron): void {
+  cronJob.schedule(() => {
+    // Issue #1343: executeSchedule() rejects if its own error handling fails
+    // (e.g. the DB is still down when writing the 'failed' log). Without this
+    // catch the rejection is silently unhandled.
+    void executeSchedule(state).catch((error: unknown) => {
+      logger.error('execution:unhandled', {
+        name: state.entry.name,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+  });
+}
+
 function createScheduleState(
   worktreeId: string,
   scheduleId: string,
@@ -127,19 +159,107 @@ function createScheduleState(
     entry,
   };
 
-  cronJob.schedule(() => {
-    // Issue #1343: executeSchedule() rejects if its own error handling fails
-    // (e.g. the DB is still down when writing the 'failed' log). Without this
-    // catch the rejection is silently unhandled.
-    void executeSchedule(state).catch((error: unknown) => {
-      logger.error('execution:unhandled', {
-        name: entry.name,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    });
-  });
+  scheduleExecution(state, cronJob);
 
   return state;
+}
+
+/**
+ * Move a live schedule onto a new cron expression (Issue #2456).
+ *
+ * The bug this exists for: the sync loop used to answer a changed CMATE.md row
+ * with `existingState.entry = entry`, which updates every field the executor
+ * reads at run time but not the pattern `croner` compiled into the timer at
+ * construction. A Cron edit was therefore accepted by the parser, written to the
+ * DB, shown by the API — and ignored by the thing that actually fires, for as
+ * long as the server stayed up.
+ *
+ * ## Order of operations
+ *
+ * The replacement is built **paused** first, so the only step that can reject a
+ * pattern happens while the old timer is still the one and only live timer, and
+ * a rejected pattern leaves the schedule exactly as it was. Only then is the old
+ * timer stopped and the replacement resumed — in that order, so the two are
+ * never runnable at the same instant. `state.cronJob` and `state.entry` are
+ * published last, together, so a caller that reads the state never sees a timer
+ * and an entry that disagree.
+ *
+ * A pause costs nothing here: `resume()` follows synchronously, so no tick can
+ * pass while the replacement is paused and there is nothing to "catch up" on.
+ * The new expression's first run is its first occurrence after now, which is
+ * what a schedule edit should mean.
+ *
+ * ## Failure
+ *
+ * Failure keeps the old timer and the old entry, and says so — no
+ * `schedule:updated`. What it must never do is leave two live timers, so the
+ * candidate (which has never run) is the one discarded. If the failure was
+ * `stop()` on the old timer, that timer is left in whatever state it reached:
+ * either it stopped, and the next sync's inactive-state recovery rebuilds it
+ * from the newest entry, or it survived on its old expression. Both are
+ * recoverable, and the caller invalidates this worktree's mtime cache so the
+ * next sync retries even though CMATE.md has not been touched again.
+ *
+ * @param state - The live schedule state (kept, so its execution guard survives)
+ * @param entry - The entry carrying the new cron expression
+ * @returns true when the schedule now runs on `entry.cronExpression`
+ */
+function replaceCronExpression(
+  state: ScheduleState,
+  entry: ScheduleState['entry']
+): boolean {
+  const previousCron = state.entry.cronExpression;
+  const failed = (phase: 'prepare' | 'swap', error: unknown): false => {
+    logger.error('schedule:update-failed', {
+      scheduleId: state.scheduleId,
+      worktreeId: state.worktreeId,
+      previousCron,
+      cron: entry.cronExpression,
+      phase,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return false;
+  };
+
+  let candidate: import('croner').Cron | null = null;
+  try {
+    candidate = new Cron(entry.cronExpression, { paused: true, protect: true });
+    scheduleExecution(state, candidate);
+  } catch (error) {
+    if (candidate) {
+      try {
+        candidate.stop();
+      } catch {
+        // The candidate never ran; nothing else to reclaim
+      }
+    }
+    return failed('prepare', error);
+  }
+
+  try {
+    state.cronJob.stop();
+    candidate.resume();
+  } catch (error) {
+    try {
+      candidate.stop();
+    } catch {
+      // The candidate never ran; nothing else to reclaim
+    }
+    return failed('swap', error);
+  }
+
+  state.cronJob = candidate;
+  state.entry = entry;
+
+  // Deliberately without the message: the prompt body is not an operational
+  // fact and execution_logs already holds it.
+  logger.info('schedule:updated', {
+    scheduleId: state.scheduleId,
+    worktreeId: state.worktreeId,
+    previousCron,
+    cron: entry.cronExpression,
+  });
+  return true;
 }
 
 // =============================================================================
@@ -196,6 +316,9 @@ function getLazyDbInstance(): ReturnType<typeof import('./db/db-instance').getDb
  * Issue #406: Async I/O for readCmateFile() to avoid event loop blocking.
  * Issue #409: Uses mtime caching to skip unchanged CMATE.md files
  * and batchUpsertSchedules() for efficient DB operations.
+ * Issue #2456: A changed Cron column swaps the timer (replaceCronExpression);
+ * everything else about an existing schedule is an entry update that leaves the
+ * timer alone.
  *
  * DJ-007: isSyncing guard prevents concurrent execution when async
  * operations exceed the 60-second polling interval.
@@ -271,11 +394,6 @@ async function syncSchedules(): Promise<void> {
           const entry = entries[i];
           const scheduleId = scheduleIds[i];
 
-          if (manager.schedules.size >= MAX_CONCURRENT_SCHEDULES) {
-            logger.warn('schedule:max-concurrent-reached', { limit: MAX_CONCURRENT_SCHEDULES });
-            return;
-          }
-
           activeScheduleIds.add(scheduleId);
 
           // Skip disabled or incomplete entries
@@ -300,18 +418,64 @@ async function syncSchedules(): Promise<void> {
                 // Ignore cleanup errors for inactive cron jobs
               }
 
-              const recoveredState = createScheduleState(worktree.id, scheduleId, entry);
-              manager.schedules.set(scheduleId, recoveredState);
-              logger.warn('schedule:recreated-inactive', { name: entry.name, cron: entry.cronExpression });
+              // Issue #2456: recover onto the newest entry, and keep the same
+              // ScheduleState so a still-running execution's guard survives the
+              // exchange rather than being reset by a fresh object.
+              try {
+                const recovered = new Cron(entry.cronExpression, { paused: false, protect: true });
+                scheduleExecution(existingState, recovered);
+                existingState.cronJob = recovered;
+                existingState.entry = entry;
+                logger.warn('schedule:recreated-inactive', { name: entry.name, cron: entry.cronExpression });
+              } catch (recoverError) {
+                manager.cmateFileCache.delete(worktree.path);
+                logger.error('schedule:update-failed', {
+                  scheduleId,
+                  worktreeId: worktree.id,
+                  previousCron: existingState.entry.cronExpression,
+                  cron: entry.cronExpression,
+                  phase: 'recover',
+                  error: recoverError instanceof Error ? recoverError.message : String(recoverError),
+                });
+              }
               continue;
             }
 
-            // Update entry if changed
+            // Issue #2456: a changed Cron column has to reach the timer, not
+            // just the entry the executor reads. String comparison on purpose —
+            // the parser has already trimmed the cell, and two spellings of the
+            // same schedule are a rewrite the operator asked for.
+            if (existingState.entry.cronExpression !== entry.cronExpression) {
+              if (!replaceCronExpression(existingState, entry)) {
+                // The old timer and the old entry are still in force. Drop this
+                // worktree's mtime cache so the next sync retries even though
+                // CMATE.md itself has not changed again — without this the file
+                // would have to be touched to get another attempt.
+                manager.cmateFileCache.delete(worktree.path);
+              }
+              continue;
+            }
+
+            // Metadata-only change (Message / CLI Tool / Permission / model):
+            // the timer stays, and the next tick reads this entry through the
+            // shared state.
             existingState.entry = entry;
             continue;
           }
 
-          // Create new cron job
+          // Create new cron job. The cap belongs here and only here (Issue
+          // #2456): it bounds how many timers exist, so refusing a new one must
+          // not also refuse to update, disable or clean up the ones already
+          // running — nor abandon the rest of the sync, which is what the
+          // previous `return` did.
+          if (manager.schedules.size >= MAX_CONCURRENT_SCHEDULES) {
+            logger.warn('schedule:max-concurrent-reached', {
+              limit: MAX_CONCURRENT_SCHEDULES,
+              name: entry.name,
+            });
+            continue;
+          }
+
           try {
             const state = createScheduleState(worktree.id, scheduleId, entry);
             manager.schedules.set(scheduleId, state);
