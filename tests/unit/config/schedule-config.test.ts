@@ -15,6 +15,7 @@ import {
   COPILOT_PERMISSIONS,
   ANTIGRAVITY_PERMISSIONS,
   COMMAND_CODE_PERMISSIONS,
+  COMMAND_CODE_SCHEDULE_PERMISSIONS,
   GEMINI_PERMISSIONS,
   VIBE_LOCAL_PERMISSIONS,
   OPENCODE_PERMISSIONS,
@@ -154,9 +155,56 @@ describe('COMMAND_CODE_PERMISSIONS (Issue #2250)', () => {
     );
   });
 
-  it('defaults to the mode the tool itself reports', () => {
-    expect(DEFAULT_PERMISSIONS['command-code']).toBe('default');
+  it('still contains the mode the tool reports in its hook payloads', () => {
     expect(COMMAND_CODE_PERMISSIONS as readonly string[]).toContain('default');
+  });
+});
+
+/**
+ * Issue #2454: the Permission *column* takes six values, of which only five are
+ * `--permission-mode` modes.
+ *
+ * `commandcode -p` injects a `print-permission-gate` mod unless it was launched
+ * with `--yolo`, and that mod blocks `edit_file` / `write_file` /
+ * `shell_command` / `monitor_command` / `kill_shell`. `--permission-mode` never
+ * reaches the gate, so all five modes leave print mode read-only — and the
+ * block does not fail the run, which ends exit 0 with `subtype: "success"`.
+ * A schedule that left the column empty therefore reported success forever and
+ * changed nothing, because the parser filled it with `'default'`.
+ *
+ * The column now spells the flag as the value `yolo` (copilot's shape), and
+ * that is the default. COMMAND_CODE_PERMISSIONS keeps its five-value meaning:
+ * it is what `buildCliArgs` checks before emitting `--permission-mode`, and it
+ * has to keep matching the CLI's own `.choices()`.
+ */
+describe('COMMAND_CODE_SCHEDULE_PERMISSIONS (Issue #2454)', () => {
+  it('is the five modes plus the column-only yolo, in that order', () => {
+    expect([...COMMAND_CODE_SCHEDULE_PERMISSIONS]).toEqual([
+      'yolo',
+      'default',
+      'standard',
+      'plan',
+      'auto-accept',
+      'dont-ask',
+    ]);
+  });
+
+  it('is a superset of the --permission-mode choices, by exactly one value', () => {
+    for (const mode of COMMAND_CODE_PERMISSIONS) {
+      expect(COMMAND_CODE_SCHEDULE_PERMISSIONS as readonly string[]).toContain(mode);
+    }
+    expect(COMMAND_CODE_SCHEDULE_PERMISSIONS).toHaveLength(COMMAND_CODE_PERMISSIONS.length + 1);
+  });
+
+  it('defaults to yolo, the only value that lets print mode write', () => {
+    expect(DEFAULT_PERMISSIONS['command-code']).toBe('yolo');
+    expect(COMMAND_CODE_SCHEDULE_PERMISSIONS as readonly string[]).toContain('yolo');
+  });
+
+  it('spells the flag short, not as the --dangerously-skip-permissions alias', () => {
+    expect(COMMAND_CODE_SCHEDULE_PERMISSIONS as readonly string[]).not.toContain(
+      '--dangerously-skip-permissions',
+    );
   });
 });
 
@@ -183,7 +231,9 @@ describe('getPermissionOptionsForTool() resolves through the tool\'s own case (I
     ['codex', CODEX_SANDBOXES],
     ['copilot', COPILOT_PERMISSIONS],
     ['antigravity', ANTIGRAVITY_PERMISSIONS],
-    ['command-code', COMMAND_CODE_PERMISSIONS],
+    // Issue #2454: the dropdown offers the six-value column vocabulary, not
+    // the five `--permission-mode` choices `buildCliArgs` matches against.
+    ['command-code', COMMAND_CODE_SCHEDULE_PERMISSIONS],
     ['gemini', GEMINI_PERMISSIONS],
     ['vibe-local', VIBE_LOCAL_PERMISSIONS],
     ['opencode', OPENCODE_PERMISSIONS],
