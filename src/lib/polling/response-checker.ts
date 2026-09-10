@@ -55,6 +55,10 @@ import {
   clearTuiAccumulator,
 } from '../tui-accumulator';
 import { isDuplicatePrompt, normalizePromptForDedup } from './prompt-dedup';
+// Issue #2457: the same rollout table, `hasDialogRules` cross-check and
+// `detectDialog` seam Auto-Yes reads, reached through the presence helper rather
+// than through `evaluateAutoYesDialogGate` — see `isNumberedDialogVouched`.
+import { evaluateDialogPresence } from './auto-yes-dialog-gate';
 import { recordPromptDedupSkip } from './prompt-dedup-state';
 import {
   isDuplicateResponse,
@@ -326,6 +330,64 @@ export function detectPromptOnCleanFrame(
 }
 
 /**
+ * Is the generic parser's numbered-list candidate a dialog the tool vouches for?
+ * (Issue #2457)
+ *
+ * ## The candidate this removes
+ *
+ * `detectPrompt` classifies a frame as `multiple_choice` from the ROWS alone,
+ * and for Claude `buildDetectPromptOptions` returns
+ * `requireDefaultIndicator: false` — so a reply that happens to answer in
+ * Markdown ("1. …  2. …  3. …") is a candidate with no `❯` anywhere near it.
+ * Every one of those was stored as a `prompt` message, and the chat surface drew
+ * a tool-approval chip over an ordinary answer.
+ *
+ * ## Why the whole frame, and only the frame
+ *
+ * `detectDialog` decides by POSITION and CHROME — where the option block sits
+ * relative to the transcript tail, what (if anything) is drawn under it. None of
+ * that survives being handed the extracted response, the question string or a
+ * tail window, so the caller passes the same capture the candidate came off, as
+ * captured: `evaluateDialogPresence` documents why the box drawing must still be
+ * on it.
+ *
+ * ## What a `false` means downstream
+ *
+ * Not "there is no output here" — only "this is not a prompt". The caller falls
+ * through to the ordinary completion/partial reading, so a real reply is still
+ * saved by the normal path and a half-written one still reports
+ * `isComplete: false`.
+ *
+ * @param cliToolId - CLI tool the frame came from
+ * @param promptDetection - What the generic parser (or a tool reader) answered
+ * @param frame - The whole capture this tick made, as captured
+ * @returns True when the candidate may be treated as a live prompt
+ */
+export function isNumberedDialogVouched(
+  cliToolId: CLIToolType,
+  promptDetection: PromptDetectionResult,
+  frame: string,
+): boolean {
+  const presence = evaluateDialogPresence(
+    cliToolId,
+    promptDetection.promptData?.type,
+    frame,
+  );
+  if (presence.present) return true;
+
+  // `debug`, not `info`: the poller re-reads a static idle pane every 2s, so a
+  // reply carrying a numbered list would print this on every tick for as long as
+  // it stays on screen. The suppression is not silent where it matters — nothing
+  // is stored, so History simply shows the reply the ordinary path saves.
+  logger.debug('prompt-candidate-not-vouched', {
+    cliToolId,
+    promptType: promptDetection.promptData?.type,
+    gateMode: presence.mode,
+  });
+  return false;
+}
+
+/**
  * Internal helper: detect prompt with CLI-tool-specific options.
  *
  * Centralizes the stripAnsi() + buildDetectPromptOptions() + detectPrompt() pipeline
@@ -549,7 +611,13 @@ export function extractResponse(
     const fullOutput = lines.join('\n');
     const promptDetection = detectPromptWithOptions(fullOutput, cliToolId);
 
-    if (promptDetection.isPrompt) {
+    // Issue #2457: a candidate the tool's own rules cannot vouch for is not a
+    // prompt, and returning here would declare the turn finished ON IT — the
+    // early-completion half of the defect. Falling through leaves the ordinary
+    // completion/partial reading to answer, which is what a reply containing a
+    // numbered list needs. The gate is handed `fullOutput`, the capture itself,
+    // not the string `detectPromptWithOptions` cleaned for the parser.
+    if (promptDetection.isPrompt && isNumberedDialogVouched(cliToolId, promptDetection, fullOutput)) {
       return buildPromptExtractionResult(
         lines, lastCapturedLine, totalLines, bufferReset, cliToolId, findRecentUserPromptIndex,
         promptDetection, captureWindowSaturated,
@@ -856,9 +924,12 @@ export function extractResponse(
   // Check if this is an interactive prompt
   if (cliToolId !== 'opencode') {
     const fullOutput = lines.join('\n');
+    // Issue #2457: same gate as the early check above — this is the site a frame
+    // reaches when the completion rules said "unfinished", so a candidate
+    // accepted here would end the turn on it just the same.
     const promptDetection = detectPromptWithOptions(fullOutput, cliToolId);
 
-    if (promptDetection.isPrompt) {
+    if (promptDetection.isPrompt && isNumberedDialogVouched(cliToolId, promptDetection, fullOutput)) {
       return buildPromptExtractionResult(
         lines, lastCapturedLine, totalLines, bufferReset, cliToolId, findRecentUserPromptIndex,
         promptDetection, captureWindowSaturated,
@@ -1316,7 +1387,25 @@ export async function checkForResponse(
     // Response is complete! Check if it's a prompt.
     const promptDetection = result.promptDetection ?? detectPromptWithOptions(result.response, cliToolId);
 
-    if (promptDetection.isPrompt) {
+    // Issue #2457: the gate is applied HERE as well as in `extractResponse`, and
+    // to a carried `result.promptDetection` as well as to one derived on this
+    // line. Two independent reasons, either one sufficient:
+    //
+    //  1. the fallback above reads `result.response` — the EXTRACTED text, with
+    //     the pane's chrome already cut off — so a reply's `1. / 2. / 3.` rows
+    //     look even more like a dialog here than they did upstream, and a tool
+    //     the early check never runs for (opencode) reaches the save path only
+    //     through this line;
+    //  2. `promptDetection` carried from `extractResponse` is the one thing that
+    //     could walk a candidate past the gate unexamined, and this is the last
+    //     position before the row is written.
+    //
+    // The frame is the capture this tick made — never `result.response`, which
+    // has lost the position `detectDialog` judges by.
+    const promptIsLive =
+      promptDetection.isPrompt && isNumberedDialogVouched(cliToolId, promptDetection, output);
+
+    if (promptIsLive) {
       // Issue #565: Content hash-based duplicate prompt prevention
       const promptContent = promptDetection.rawContent || promptDetection.cleanContent;
       const normalizedForDedup = normalizePromptForDedup(promptContent, cliToolId);

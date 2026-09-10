@@ -210,26 +210,134 @@ export function evaluateAutoYesDialogGate(
   cleanOutput: string,
   env: NodeJS.ProcessEnv = process.env,
 ): AutoYesDialogGateVerdict {
-  const detector = getToolStatusDetector(cliToolId);
-  const mode = resolveAutoYesDialogGateMode(cliToolId, env);
-
   // A tool nobody has measured is not gated whatever the table says. Belt and
   // braces on purpose: the failure mode of getting this wrong is Auto-Yes going
   // permanently silent for that tool, which looks exactly like a hung worker.
-  if (promptType !== GATED_PROMPT_TYPE || !detector.hasDialogRules || mode === 'legacy') {
-    return { allowed: true, dialog: null, mode, gated: false };
-  }
-
-  const dialog = detector.detectDialog(normalizeFrame(cleanOutput));
+  // `judgeDialogPresence` holds that rule; Issue #2457 split it out so the
+  // history-save and `/prompt-response` paths judge a frame the same way this
+  // one does instead of re-deriving the rollout table.
+  const presence = judgeDialogPresence(
+    cliToolId,
+    promptType,
+    cleanOutput,
+    resolveAutoYesDialogGateMode(cliToolId, env),
+  );
 
   return {
     // `keys` is a dialog and still not answerable: opencode's button strip takes
     // ←/→ + Enter, so the digit is swallowed and the Enter confirms whatever is
     // highlighted — asking to Reject would Approve (#1893). Sending nothing is
     // the only safe answer, and `wait` still stops for the frame.
-    allowed: dialog !== null && dialog.answerMode === 'numbered',
-    dialog,
-    mode,
-    gated: true,
+    //
+    // Issue #2457: this extra test is what makes `allowed` unusable as an
+    // "is there a dialog here?" answer, and why the save path reads
+    // {@link evaluateDialogPresence} instead.
+    allowed: presence.gated
+      ? presence.dialog !== null && presence.dialog.answerMode === 'numbered'
+      : true,
+    dialog: presence.dialog,
+    mode: presence.mode,
+    gated: presence.gated,
   };
+}
+
+/**
+ * The gate's answer to a narrower question than {@link evaluateAutoYesDialogGate}'s:
+ * *is this frame carrying one of the tool's dialogs at all?* (Issue #2457)
+ *
+ * ## Why "allowed" could not be reused
+ *
+ * {@link AutoYesDialogGateVerdict.allowed} answers "may Auto-Yes TYPE at this",
+ * which is strictly narrower: opencode's button strip is a real, live dialog and
+ * still `allowed: false`, because a digit sent at it selects nothing (#1893).
+ * Wiring that boolean into the save path would delete opencode's prompt rows
+ * from History — a prompt nobody can auto-answer is exactly the one a human has
+ * to be shown. Existence is `dialog !== null`; answerability is the extra
+ * `answerMode` test, and only Auto-Yes asks for it.
+ */
+export interface DialogPresenceVerdict {
+  /**
+   * Whether the numbered-list candidate may be treated as a live dialog.
+   *
+   * True — with `gated: false` — for every case the gate does not judge, so a
+   * caller can use this as "carry on" without repeating the rollout table.
+   */
+  present: boolean;
+  /** The dialog the tool vouched for, or null when it did not. */
+  dialog: DialogVerdict | null;
+  /** The mode in force, for the log line. */
+  mode: AutoYesDialogGateMode;
+  /** Whether the gate actually judged this frame; see {@link AutoYesDialogGateVerdict.gated}. */
+  gated: boolean;
+}
+
+/** The one reading of a frame both gates share. `mode` is resolved by the caller. */
+function judgeDialogPresence(
+  cliToolId: CLIToolType,
+  promptType: PromptType | undefined,
+  frame: string,
+  mode: AutoYesDialogGateMode,
+): DialogPresenceVerdict {
+  const detector = getToolStatusDetector(cliToolId);
+
+  if (promptType !== GATED_PROMPT_TYPE || !detector.hasDialogRules || mode === 'legacy') {
+    return { present: true, dialog: null, mode, gated: false };
+  }
+
+  const dialog = detector.detectDialog(normalizeFrame(frame));
+
+  return { present: dialog !== null, dialog, mode, gated: true };
+}
+
+/**
+ * Does this frame POSITIVELY carry a dialog for the numbered-list candidate the
+ * generic parser found on it? (Issue #2457)
+ *
+ * The same rollout table, the same `hasDialogRules` cross-check and the same
+ * `detectDialog` seam Auto-Yes reads — and deliberately NOT the same env var.
+ * `CM_AUTOYES_DIALOG_GATE` is the kill switch for *answering* prompts without a
+ * human: an operator who sets it because their unattended pipeline stopped
+ * replying is saying nothing at all about which rows belong in History, and
+ * letting that flag also decide what gets stored would make the chat surface's
+ * contents depend on an Auto-Yes setting. So this reads
+ * {@link AUTO_YES_DIALOG_GATE_DEFAULT_MODE} directly.
+ *
+ * Auto-Yes being enabled or disabled is likewise not a condition here: the false
+ * `1. / 2. / 3.` row #2457 reported was saved by the response poller, which runs
+ * for every session whether or not anything is auto-answering it.
+ *
+ * @param cliToolId - CLI tool the frame came from
+ * @param promptType - How the generic parser classified the frame; anything but
+ *   `multiple_choice` is left alone (see the module docstring on `yes_no`)
+ * @param frame - The WHOLE capture the candidate was read off, **as captured**.
+ *   Never the extracted response, the question alone or a tail window: the rules
+ *   `detectDialog` applies are about where the block sits in the pane, so a
+ *   fragment answers a different question from the one being asked.
+ *
+ *   And never a `stripBoxDrawing`-ed string, which is the one place this differs
+ *   from {@link evaluateAutoYesDialogGate}. That function is handed the spelling
+ *   Auto-Yes already had in hand (`captureAndCleanOutput`); this one is handed
+ *   the capture, because that is the spelling on which ALL FOUR gated tools have
+ *   working rules. opencode is the proof and it is already documented in
+ *   `tests/unit/detection/tools/dialogs.test.ts`: its permission strip is
+ *   anchored on the input box's own gutter (#1893's anchor, which must not be
+ *   weakened), so with the box drawing removed its live dialog reads as `null`.
+ *   For Auto-Yes `null` and `keys` both mean "send nothing" and the difference
+ *   is invisible; here `null` would mean "there is no prompt on this screen",
+ *   which about an open approval is simply false. `normalizeFrame` runs
+ *   `stripAnsi` itself and each tool's rule applies `stripBoxDrawing` where it
+ *   needs it, so nothing is lost by handing over the capture — and
+ *   `stripBoxDrawing` never runs twice over the same row.
+ */
+export function evaluateDialogPresence(
+  cliToolId: CLIToolType,
+  promptType: PromptType | undefined,
+  frame: string,
+): DialogPresenceVerdict {
+  return judgeDialogPresence(
+    cliToolId,
+    promptType,
+    frame,
+    AUTO_YES_DIALOG_GATE_DEFAULT_MODE[cliToolId] ?? 'legacy',
+  );
 }
