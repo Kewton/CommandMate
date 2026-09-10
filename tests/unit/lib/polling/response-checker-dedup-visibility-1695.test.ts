@@ -64,6 +64,8 @@ vi.mock('@/lib/push', () => ({ notifyPushSubscribers: vi.fn(async () => {}) }));
 vi.mock('@/lib/conversation-logger', () => ({ recordClaudeConversation: vi.fn(async () => {}) }));
 vi.mock('@/lib/realtime/terminal-broadcast', () => ({ broadcastTerminalSnapshot: vi.fn(async () => {}) }));
 
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { checkForResponse } from '@/lib/polling/response-checker';
 import { stopPolling } from '@/lib/polling/response-poller-core';
 import {
@@ -73,7 +75,27 @@ import {
 
 const WT = 'wt-1695';
 
-/** A permission prompt, transcribed from the shape a live pane carries. */
+/**
+ * The copilot permission dialog, from the live capture (Issue #2457).
+ *
+ * The copilot cases below used to run on {@link PROMPT_PANE}, which is CLAUDE's
+ * pane shape. That was invisible while the only reader was the generic numbered
+ * parser — it reads rows, and claude's and copilot's rows are close enough. It
+ * stopped being invisible when #2457 put the tool's OWN dialog rules in front of
+ * the prompt-save path: copilot vouches for a frame by copilot's footer
+ * (`↑/↓ to navigate · enter to select · esc to cancel`) with its status bar
+ * gone, and a claude pane carries neither, so the suite was asserting copilot's
+ * dedup behaviour on a frame copilot never draws.
+ *
+ * `PROMPT_PANE` is kept for the claude cases, which is the tool it was written
+ * for.
+ */
+const COPILOT_PROMPT_PANE = readFileSync(
+  path.resolve(__dirname, '../detection/fixtures/copilot-live-1885/permission-dialog.txt'),
+  'utf8',
+);
+
+/** A permission prompt, transcribed from the shape a live claude pane carries. */
 const PROMPT_PANE = [
   '❯ apply the refactor',
   '',
@@ -125,7 +147,7 @@ describe('Issue #1695: prompt dedup skips are counted', () => {
     // Guards the premise. If copilot stopped re-polling a prompt it is sitting
     // on, the assertions below would pass vacuously against a guard that never
     // ran.
-    captureSessionOutput.mockResolvedValue(PROMPT_PANE);
+    captureSessionOutput.mockResolvedValue(COPILOT_PROMPT_PANE);
 
     expect(await checkForResponse(WT, 'copilot')).toBe(true);
     expect(await checkForResponse(WT, 'copilot')).toBe(false);
@@ -133,7 +155,7 @@ describe('Issue #1695: prompt dedup skips are counted', () => {
   });
 
   it('records the skip count and the time of the last skip', async () => {
-    captureSessionOutput.mockResolvedValue(PROMPT_PANE);
+    captureSessionOutput.mockResolvedValue(COPILOT_PROMPT_PANE);
     const before = Date.now();
 
     await checkForResponse(WT, 'copilot');
@@ -149,7 +171,7 @@ describe('Issue #1695: prompt dedup skips are counted', () => {
   });
 
   it('leaves the tally at zero when nothing was suppressed', async () => {
-    captureSessionOutput.mockResolvedValue(PROMPT_PANE);
+    captureSessionOutput.mockResolvedValue(COPILOT_PROMPT_PANE);
 
     await checkForResponse(WT, 'copilot');
 
@@ -160,7 +182,7 @@ describe('Issue #1695: prompt dedup skips are counted', () => {
   });
 
   it('attributes the skip to the instance that skipped', async () => {
-    captureSessionOutput.mockResolvedValue(PROMPT_PANE);
+    captureSessionOutput.mockResolvedValue(COPILOT_PROMPT_PANE);
 
     await checkForResponse(WT, 'copilot', 'copilot-2');
     await checkForResponse(WT, 'copilot', 'copilot-2');
