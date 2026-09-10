@@ -386,6 +386,22 @@ describe('[#2245] worktree.chatTranscript.toolApproval i18n', () => {
     'unclassified',
     'resolved',
     'unlabeled',
+    // [#2460] The question vocabulary. Every one of these is reachable from
+    // `ChatToolApprovalGroup`, and the next-intl mock echoes keys back, so a
+    // missing one is invisible to every component test and renders as the
+    // literal key in production.
+    'summaryQuestions',
+    'summaryConfirmations',
+    'summaryConfirmationsOnly',
+    'summarySeparator',
+    'expandQuestions',
+    'collapseQuestions',
+    'expandMixed',
+    'collapseMixed',
+    'autoAnswered',
+    'unlabeledQuestion',
+    'submitConfirmation',
+    'confirmation',
   ];
 
   function section(locale: string): Record<string, string> {
@@ -409,7 +425,32 @@ describe('[#2245] worktree.chatTranscript.toolApproval i18n', () => {
 
   it('keeps the count interpolation in both dictionaries', () => {
     for (const locale of LOCALES) {
-      expect(section(locale).summary, locale).toContain('{count}');
+      for (const key of [
+        'summary',
+        // [#2460] Each kind is counted on its own, so each one interpolates.
+        'summaryQuestions',
+        'summaryConfirmations',
+        'summaryConfirmationsOnly',
+      ]) {
+        expect(section(locale)[key], `${locale}: ${key}`).toContain('{count}');
+      }
+      // The confirmer is named by nesting the outcome sentence into this one.
+      expect(section(locale).confirmation, locale).toContain('{outcome}');
+    }
+  });
+
+  it('[#2460] separates approval wording from question wording', () => {
+    for (const locale of LOCALES) {
+      const dictionary = section(locale);
+      // The one word that was wrong on screen: a question Auto-Yes answered was
+      // labelled "auto-approved", which describes a permission decision.
+      expect(dictionary.autoAnswered, locale).not.toBe(dictionary.autoApproved);
+      expect(dictionary.expandQuestions, locale).not.toBe(dictionary.expand);
+      expect(dictionary.expandMixed, locale).not.toBe(dictionary.expandQuestions);
+      expect(dictionary.summaryQuestions, locale).not.toBe(dictionary.summary);
+      // The two directions of every toggle must not be the same sentence.
+      expect(dictionary.expandQuestions, locale).not.toBe(dictionary.collapseQuestions);
+      expect(dictionary.expandMixed, locale).not.toBe(dictionary.collapseMixed);
     }
   });
 
@@ -420,5 +461,11 @@ describe('[#2245] worktree.chatTranscript.toolApproval i18n', () => {
   it('leaves no English string in the ja dictionary', () => {
     expect(/[぀-ヿ一-鿿]/.test(section('ja').autoApproved)).toBe(true);
     expect(/[぀-ヿ一-鿿]/.test(section('en').autoApproved)).toBe(false);
+    // [#2460] and the same for the question wording, which is where a copied
+    // English placeholder would be easiest to leave behind.
+    for (const key of ['autoAnswered', 'summaryQuestions', 'submitConfirmation']) {
+      expect(/[぀-ヿ一-鿿]/.test(section('ja')[key]), `ja: ${key}`).toBe(true);
+      expect(/[぀-ヿ一-鿿]/.test(section('en')[key]), `en: ${key}`).toBe(false);
+    }
   });
 });
