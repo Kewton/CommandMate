@@ -15,6 +15,7 @@
  */
 
 import type { ChatMessage } from '@/types/models';
+import { correlatedPromptRequestId, resolveAgentTurnKey } from '@/types/agent-transcript';
 import {
   buildToolApprovalEntries,
   isToolApprovalMessage,
@@ -84,6 +85,142 @@ export function shouldShowRoleHeader(
 }
 
 // ============================================================================
+// Turn boundaries (Issue #2458)
+// ============================================================================
+
+/**
+ * What a transcript row's header says.
+ *
+ *  - `role` — the conventional label + clock ("Assistant · 18:18 → 18:33").
+ *    Drawn at the top of a display segment and whenever the speaker changes.
+ *  - `time` — a CLOCK ONLY, drawn as a thin rule between two consecutive
+ *    assistant rows that belong to different turns. No role label, because
+ *    repeating "Assistant" every few rows is what made the pre-#2458 surface
+ *    read as a log; what the reader is missing is *when this answer finished*,
+ *    not *who wrote it*.
+ *  - `none` — a continuation of the row above.
+ */
+export type ChatRowHeaderVariant = 'none' | 'role' | 'time';
+
+/**
+ * The header above one row, and the clock it carries (Issue #2458).
+ *
+ * `startedAtMs` is the instant the CORRELATED USER ROW was saved — a fact read
+ * off a row that is in this same segment, not an estimate of when the model
+ * began working. `null` means no such row could be identified, and the header
+ * then shows the end instant alone. Nothing here ever falls back to "the
+ * previous user message": see {@link resolveTurnStartMs}.
+ */
+export interface ChatRowHeader {
+  readonly variant: ChatRowHeaderVariant;
+  readonly startedAtMs: number | null;
+}
+
+/** The shared "this row continues the one above it" header. */
+const CHAT_ROW_HEADER_NONE: ChatRowHeader = { variant: 'none', startedAtMs: null };
+
+/**
+ * The conversation a row belongs to, as far as this transcript can tell.
+ *
+ * `ChatTranscript` already keys its own state on
+ * `worktreeId|cliToolId|instanceId` (its `conversationKey`) and every row in one
+ * call to {@link buildChatTranscriptRows} shares a worktree, so the tool and the
+ * instance are the whole of what can still vary inside one list. Two rows that
+ * disagree on it are two different agents whose turns happen to be interleaved
+ * in one column, and correlating a claude reply with a codex prompt because
+ * their ids matched would be worse than showing no start time at all.
+ */
+function chatRowScopeKey(message: ChatMessage): string {
+  return `${message.cliToolId ?? ''}|${message.instanceId ?? ''}`;
+}
+
+/** A user row that could open a turn, reduced to the two facts the header needs. */
+interface CorrelatedPrompt {
+  readonly atMs: number;
+  readonly scope: string;
+}
+
+/**
+ * `request_id` → the user row carrying it, or `null` when more than one does.
+ *
+ * The `null` is the interesting half. Two saved user rows with the SAME prompt
+ * id is a shape the database does not promise against — a re-read that raced
+ * its own idempotency check, a row copied across instances — and when it
+ * happens neither row is evidence of anything. "Ambiguous" and "absent" then
+ * produce the same header, which is the conservative direction: an end time
+ * alone is incomplete, a start time taken from the wrong row is wrong.
+ *
+ * Refused before they can be indexed:
+ *
+ *  - **approval rows** (`messageType === 'prompt'`), which are dialogs rather
+ *    than anything the operator typed;
+ *  - **optimistic rows** (#1121's pending and failed sends), whose clock is the
+ *    browser's guess at a send that may not have happened;
+ *  - **archived rows**, which are a previous session's (#2445 keeps them out of
+ *    the list entirely, and this is the belt to that braces);
+ *  - **an unusable timestamp**, which is indexed as ambiguous rather than
+ *    skipped so that a second row bearing the same id still poisons the key.
+ */
+function buildPromptIndex(messages: readonly ChatMessage[]): Map<string, CorrelatedPrompt | null> {
+  const index = new Map<string, CorrelatedPrompt | null>();
+  for (const message of messages) {
+    if (message.role !== 'user') continue;
+    if (isToolApprovalMessage(message)) continue;
+    if (message.optimisticState) continue;
+    if (message.archived) continue;
+    const requestId = message.requestId;
+    if (typeof requestId !== 'string' || requestId.length === 0) continue;
+    if (index.has(requestId)) {
+      index.set(requestId, null);
+      continue;
+    }
+    const atMs = message.timestamp instanceof Date ? message.timestamp.getTime() : NaN;
+    index.set(
+      requestId,
+      Number.isFinite(atMs) ? { atMs, scope: chatRowScopeKey(message) } : null,
+    );
+  }
+  return index;
+}
+
+/**
+ * When the turn this reply belongs to was ASKED, or `null`.
+ *
+ * Five conditions, and every one of them is a way of saying "no" rather than a
+ * way of finding a number:
+ *
+ *  1. the reply names a turn at all ({@link resolveAgentTurnKey});
+ *  2. that turn key can name its prompt row ({@link correlatedPromptRequestId}
+ *     — `null` for codex and opencode, whose two halves carry different ids);
+ *  3. exactly one displayable user row in this segment carries that id;
+ *  4. that row is in the same scope as the reply;
+ *  5. both clocks are usable and the prompt is not AFTER the reply.
+ *
+ * (5)'s ordering check is not paranoia about the database: #2273 measured
+ * producers writing an approval 1–2 seconds late, a row's timestamp is never
+ * rewritten, and a "start" that follows its own "end" would render as
+ * `18:33 → 18:18` — a header that tells the reader the surface is broken. The
+ * end instant alone is the honest fallback.
+ */
+function resolveTurnStartMs(
+  message: ChatMessage,
+  turnKey: string | null,
+  prompts: ReadonlyMap<string, CorrelatedPrompt | null>,
+): number | null {
+  if (turnKey === null) return null;
+  const promptRequestId = correlatedPromptRequestId(turnKey);
+  if (promptRequestId === null) return null;
+  const prompt = prompts.get(promptRequestId);
+  // Absent (`undefined`) and ambiguous (`null`) are one answer here.
+  if (!prompt) return null;
+  if (prompt.scope !== chatRowScopeKey(message)) return null;
+  const endedAtMs = message.timestamp instanceof Date ? message.timestamp.getTime() : NaN;
+  if (!Number.isFinite(endedAtMs)) return null;
+  if (prompt.atMs > endedAtMs) return null;
+  return prompt.atMs;
+}
+
+// ============================================================================
 // Rows (Issue #2245)
 // ============================================================================
 
@@ -102,7 +239,20 @@ export type ChatTranscriptRow =
       /** Virtualizer key. The message id, which is already unique per row. */
       key: string;
       message: ChatMessage;
+      /**
+       * Whether the ROLE label is drawn. Unchanged in meaning since #2245, and
+       * deliberately still a boolean: Issue #2458's new header is not a role
+       * label, so it must not be able to turn this on (see {@link header}).
+       */
       showHeader: boolean;
+      /**
+       * What the header above this row says, and what clock it carries
+       * (Issue #2458).
+       *
+       * Invariant, and it is asserted rather than assumed:
+       * `showHeader === (header.variant === 'role')`.
+       */
+      header: ChatRowHeader;
     }
   | {
       kind: 'approvals';
@@ -196,12 +346,28 @@ export function hoistTurnApprovals(messages: ChatMessage[]): ChatMessage[] {
 /**
  * Turn a message list into the rows the transcript renders.
  *
- * Three things happen here and all three are load-bearing:
+ * Four things happen here and all four are load-bearing:
  *
  *  1. each turn's approval rows are lifted ahead of its replies
  *     ({@link hoistTurnApprovals}, Issue #2273);
  *  2. consecutive approval rows fold into one `approvals` row;
- *  3. `showHeader` is computed against the previous NON-approval message.
+ *  3. `showHeader` is computed against the previous NON-approval message;
+ *  4. a run of assistant rows is cut into TURNS, and each cut gets a clock
+ *     ({@link ChatRowHeader}, Issue #2458).
+ *
+ * (4) is what this function is for now. Saved assistant rows arrive
+ * back-to-back whenever a turn was opened by something other than a typed
+ * prompt — a `task-notification` reply has no user row at all, because
+ * `recordClaudeUserTurn` does not write one — so before this Issue four
+ * separate answers rendered under ONE "Assistant 18:33" header and the reader
+ * could not tell where one ended. The cut is made on the turn key the row
+ * already carries (`request_id`), never on a time gap: a long turn writes its
+ * rows minutes apart and a gap rule would cut it in half.
+ *
+ * The header's start-side clock is deliberately scarce. It is shown only when a
+ * user row in THIS segment provably opened that same turn — see
+ * {@link resolveTurnStartMs} — so codex and opencode rows get the boundary and
+ * no start time, and nothing is ever borrowed from "the user message above".
  *
  * (3) is what keeps the role labels honest. A chip group is not an assistant
  * turn, so it must not be able to add or remove an "Assistant" header:
@@ -217,10 +383,31 @@ export function hoistTurnApprovals(messages: ChatMessage[]): ChatMessage[] {
  * which rows speak nor their order among themselves.
  */
 export function buildChatTranscriptRows(messages: ChatMessage[]): ChatTranscriptRow[] {
+  const ordered = hoistTurnApprovals(messages);
+  // [#2458] Built once per segment, and from THIS segment only: the caller
+  // splits the previous session from the current one (#2445) by calling this
+  // function twice, so a prompt on the far side of that fold can never be
+  // reached from here.
+  const prompts = buildPromptIndex(ordered);
+
   const rows: ChatTranscriptRow[] = [];
   /** The last row that speaks: approval chips are skipped over. */
   let previousSpoken: ChatMessage | undefined;
   let run: ChatMessage[] = [];
+  /**
+   * [#2458] The last KNOWN turn key of the assistant run in progress, and the
+   * scope it was read from.
+   *
+   * "Last known" and not "the previous row's": a row with no usable
+   * `request_id` — a pane scrape, an Auto-Yes note, a producer this build does
+   * not know — must not be able to CREATE a boundary, so it leaves the memory
+   * alone. `[A, unknown, A]` is one turn and draws one header; `[A, unknown,
+   * B]` is two and draws two. Treating unknown as a new key would split every
+   * reply that happens to contain a scraped row, and treating it as the end of
+   * the run would silently merge the two turns on either side of it.
+   */
+  let lastTurnKey: string | null = null;
+  let lastScope: string | null = null;
 
   const flushRun = (): void => {
     if (run.length === 0) return;
@@ -232,17 +419,49 @@ export function buildChatTranscriptRows(messages: ChatMessage[]): ChatTranscript
     run = [];
   };
 
-  for (const message of hoistTurnApprovals(messages)) {
+  for (const message of ordered) {
     if (isToolApprovalMessage(message)) {
       run.push(message);
       continue;
     }
     flushRun();
+
+    const showHeader = shouldShowRoleHeader(previousSpoken, message);
+    let header: ChatRowHeader = CHAT_ROW_HEADER_NONE;
+
+    if (message.role !== 'assistant') {
+      // A user row is the start of a new question, so the run it closes cannot
+      // reach across it. Its own header shows its own instant and nothing else:
+      // a prompt has no duration to report.
+      lastTurnKey = null;
+      lastScope = null;
+      if (showHeader) header = { variant: 'role', startedAtMs: null };
+    } else {
+      const scope = chatRowScopeKey(message);
+      // A role change already means a new run; a scope change means the rows
+      // are two different agents' and were never one run to begin with.
+      if (showHeader || lastScope !== scope) lastTurnKey = null;
+      lastScope = scope;
+
+      const turnKey = resolveAgentTurnKey(message.requestId);
+      const startedAtMs = resolveTurnStartMs(message, turnKey, prompts);
+
+      if (showHeader) {
+        header = { variant: 'role', startedAtMs };
+      } else if (turnKey !== null && lastTurnKey !== null && turnKey !== lastTurnKey) {
+        // The one new header this Issue adds: same speaker, different turn.
+        header = { variant: 'time', startedAtMs };
+      }
+
+      if (turnKey !== null) lastTurnKey = turnKey;
+    }
+
     rows.push({
       kind: 'message',
       key: message.id,
       message,
-      showHeader: shouldShowRoleHeader(previousSpoken, message),
+      showHeader,
+      header,
     });
     previousSpoken = message;
   }

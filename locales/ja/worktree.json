@@ -479,6 +479,7 @@
     "empty": "まだメッセージはありません",
     "emptyHint": "送信するとセッションが起動します",
     "openSearch": "この会話を検索",
+    "turnBoundary": "ここから次のターン",
     "thinking": {
       "summary": "思考 {count} 件",
       "expand": "思考を開く",
