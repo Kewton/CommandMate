@@ -52,7 +52,7 @@
  */
 
 import React, { memo, useCallback, useMemo, useState } from 'react';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTranslations } from 'next-intl';
 import {
   AlertCircle,
   ArrowDownToLine,
@@ -75,10 +75,9 @@ import rehypeHighlight from 'rehype-highlight';
 import type { ChatMessage } from '@/types/models';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { isAgentAuthoredMarkdown } from '@/types/agent-transcript';
-import { getDateFnsLocale } from '@/lib/date-locale';
-import { formatMessageTimestamp } from '@/lib/date-utils';
+import { formatChatTurnTime } from '@/lib/date-utils';
 import { stripAnsi } from '@/lib/detection/ansi';
-import { splitFilePathParts } from '@/lib/chat/chat-transcript-view';
+import { splitFilePathParts, type ChatRowHeader } from '@/lib/chat/chat-transcript-view';
 import { classifyChatLink, normalizeChatFilePath } from '@/lib/chat/chat-file-path';
 import { splitToolLog } from '@/lib/chat/chat-tool-log';
 import {
@@ -167,6 +166,19 @@ export const CHAT_BUBBLE_ASSISTANT_CLASS = [
  * markup, not about which utilities the presentation happens to use this month.
  */
 export const CHAT_BUBBLE_TESTID = 'chat-bubble';
+
+/**
+ * The header above a row: the role block, or Issue #2458's turn boundary.
+ *
+ * One testid for both, with `data-header-variant` saying which — a suite that
+ * counts role labels and a suite that counts turn boundaries are asking about
+ * the same element in the same list, and two testids would let the two counts
+ * drift apart without anything noticing.
+ */
+export const CHAT_TURN_HEADER_TESTID = 'chat-turn-header';
+
+/** The clock inside a header: `18:59`, or `18:18 → 18:33` (Issue #2458). */
+export const CHAT_TURN_TIME_TESTID = 'chat-turn-time';
 
 /** The row a bubble sits in. Alignment is the bubble's own `ml-auto` / `mr-auto`. */
 export const CHAT_BUBBLE_ROW_CLASS = 'flex w-full flex-col gap-1 pb-3';
@@ -1146,6 +1158,21 @@ export interface ChatMessageBubbleProps {
    * continues the role above it — see `shouldShowRoleHeader`.
    */
   showHeader: boolean;
+  /**
+   * What the header says and what clock it carries (Issue #2458).
+   *
+   * Two props rather than one because they answer two questions and only one
+   * of them is new: {@link showHeader} is still the sole authority on the ROLE
+   * label — #2245's invariant about how many "Assistant" labels a column
+   * carries is stated in terms of it — and this adds the turn boundary and the
+   * range. `buildChatTranscriptRows` emits them together and guarantees
+   * `showHeader === (header.variant === 'role')`.
+   *
+   * Optional so the call sites that only ever wanted a role header (the suites
+   * that render one bubble in isolation) need not construct one; absent means
+   * "no boundary, no start time", which is what those call sites already got.
+   */
+  header?: ChatRowHeader;
   onFilePathClick: (path: string) => void;
   onCopy?: (content: string) => void;
   /** Issue #485: put a user message back into the composer. */
@@ -1159,13 +1186,13 @@ export interface ChatMessageBubbleProps {
 export const ChatMessageBubble = memo(function ChatMessageBubble({
   message,
   showHeader,
+  header,
   onFilePathClick,
   onCopy,
   onInsertToMessage,
   onRetryPending,
   onDiscardPending,
 }: ChatMessageBubbleProps) {
-  const locale = useLocale();
   const t = useTranslations('worktree');
   const tCommon = useTranslations('common');
 
@@ -1175,7 +1202,21 @@ export const ChatMessageBubble = memo(function ChatMessageBubble({
   // [#2436] A pane dump standing beside a turn the agent's own transcript
   // already wrote. Folded, not dropped — see {@link isFoldedPaneScrape}.
   const isPaneScrape = isFoldedPaneScrape(message);
-  const formattedTime = formatMessageTimestamp(message.timestamp, getDateFnsLocale(locale));
+  // [#2458] The turn's clock. `startedAtMs` is present only when a saved user
+  // row in this segment provably opened the same turn, so the range never
+  // appears on a reply whose question this surface cannot name.
+  const startedAt = useMemo(
+    () => (typeof header?.startedAtMs === 'number' ? new Date(header.startedAtMs) : null),
+    [header?.startedAtMs],
+  );
+  const formattedTime = formatChatTurnTime(message.timestamp, startedAt);
+  // [#2458] `showHeader` wins on the role label; the variant only decides
+  // whether a row that is NOT starting a role block still opens a new turn.
+  const headerVariant: ChatRowHeader['variant'] = showHeader
+    ? 'role'
+    : header?.variant === 'time'
+      ? 'time'
+      : 'none';
 
   // [#2245] What the reader sees, and therefore what copy has to hand them. The
   // Markdown path keeps `message.content` verbatim — see `toPlainBodyText`.
@@ -1223,10 +1264,16 @@ export const ChatMessageBubble = memo(function ChatMessageBubble({
         .filter(Boolean)
         .join(' ')}
     >
-      {showHeader && (
+      {headerVariant === 'role' && (
         <div
+          data-testid={CHAT_TURN_HEADER_TESTID}
+          data-header-variant="role"
           className={[
-            'flex items-center gap-2 px-1 text-xs text-muted-foreground',
+            // `flex-wrap` and nothing else: the header is ONE line at every
+            // width this surface is used at (Issue #2458 renders at most a role
+            // label plus `M/d HH:mm → M/d HH:mm`), and wrapping is the graceful
+            // way out at 320px rather than a horizontal scrollbar.
+            'flex flex-wrap items-center gap-x-2 px-1 text-xs text-muted-foreground',
             isUser ? 'justify-end' : '',
           ]
             .filter(Boolean)
@@ -1235,7 +1282,34 @@ export const ChatMessageBubble = memo(function ChatMessageBubble({
           <span className={isUser ? 'font-medium text-accent-700 dark:text-accent-400' : 'font-medium'}>
             {isUser ? t('conversation.you') : t('conversation.assistant')}
           </span>
-          {formattedTime && <span>{formattedTime}</span>}
+          {formattedTime && <span data-testid={CHAT_TURN_TIME_TESTID}>{formattedTime}</span>}
+        </div>
+      )}
+
+      {/* [#2458] A new turn by the SAME speaker. A clock between two hairlines
+          and no role label: repeating "Assistant" every few rows is what made
+          the surface read as a log, and what the reader is missing is where one
+          answer ended, not who wrote it.
+
+          One row of the scroll content, `text-xs` like every other header here,
+          so it costs the pane no fixed height — the composer and the footer are
+          outside this component and are not touched by it. */}
+      {headerVariant === 'time' && formattedTime && (
+        <div
+          data-testid={CHAT_TURN_HEADER_TESTID}
+          data-header-variant="time"
+          // A `separator` with a name, because the visual cue — a hairline with
+          // a clock in it — carries nothing to a screen reader on its own, and
+          // "18:59" read out between two replies would be a stray number.
+          role="separator"
+          aria-label={t('chatTranscript.turnBoundary')}
+          className="flex w-full items-center gap-2 px-1 pt-2 text-xs text-muted-foreground"
+        >
+          <span className="h-px min-w-[1rem] flex-1 bg-border" aria-hidden="true" />
+          <span data-testid={CHAT_TURN_TIME_TESTID} className="shrink-0 whitespace-nowrap">
+            {formattedTime}
+          </span>
+          <span className="h-px min-w-[1rem] flex-1 bg-border" aria-hidden="true" />
         </div>
       )}
 

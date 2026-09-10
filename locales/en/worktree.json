@@ -479,6 +479,7 @@
     "empty": "No messages yet",
     "emptyHint": "Sending a message starts the session",
     "openSearch": "Search this conversation",
+    "turnBoundary": "Next turn",
     "thinking": {
       "summary": "Thinking · {count}",
       "expand": "Show the reasoning",

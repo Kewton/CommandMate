@@ -1,0 +1,74 @@
+[
+  {
+    "id": "2458-row-1",
+    "worktreeId": "chat-turn-headers-2458",
+    "role": "user",
+    "content": "Issue #2458 の実装方針をまとめて。",
+    "timestamp": "2026-09-07T18:18:00",
+    "requestId": "claude-prompt:aaaaaaaa-0000-4000-8000-000000000001",
+    "messageType": "normal",
+    "cliToolId": "claude",
+    "instanceId": "claude",
+    "archived": false
+  },
+  {
+    "id": "2458-row-2",
+    "worktreeId": "chat-turn-headers-2458",
+    "role": "assistant",
+    "content": "まず現行の `buildChatTranscriptRows` を読みました。方針は 3 点です。",
+    "timestamp": "2026-09-07T18:33:00",
+    "requestId": "claude-turn:aaaaaaaa-0000-4000-8000-000000000001",
+    "messageType": "normal",
+    "cliToolId": "claude",
+    "instanceId": "claude",
+    "archived": false
+  },
+  {
+    "id": "2458-row-3",
+    "worktreeId": "chat-turn-headers-2458",
+    "role": "assistant",
+    "content": "テストを追加し、ユニットは全て緑になりました。",
+    "timestamp": "2026-09-07T18:59:00",
+    "requestId": "claude-turn:bbbbbbbb-0000-4000-8000-000000000002",
+    "messageType": "normal",
+    "cliToolId": "claude",
+    "instanceId": "claude",
+    "archived": false
+  },
+  {
+    "id": "2458-row-4",
+    "worktreeId": "chat-turn-headers-2458",
+    "role": "assistant",
+    "content": "lint と tsc も exit 0 です。",
+    "timestamp": "2026-09-07T19:14:00",
+    "requestId": "claude-turn:cccccccc-0000-4000-8000-000000000003",
+    "messageType": "normal",
+    "cliToolId": "claude",
+    "instanceId": "claude",
+    "archived": false
+  },
+  {
+    "id": "2458-row-5",
+    "worktreeId": "chat-turn-headers-2458",
+    "role": "assistant",
+    "content": "ビルドまで通したので、いつでも確認できます。",
+    "timestamp": "2026-09-07T19:26:00",
+    "requestId": "claude-turn:dddddddd-0000-4000-8000-000000000004",
+    "messageType": "normal",
+    "cliToolId": "claude",
+    "instanceId": "claude",
+    "archived": false
+  },
+  {
+    "id": "2458-row-6",
+    "worktreeId": "chat-turn-headers-2458",
+    "role": "user",
+    "content": "ありがとう。PR を作って。",
+    "timestamp": "2026-09-07T21:25:00",
+    "requestId": "claude-prompt:eeeeeeee-0000-4000-8000-000000000005",
+    "messageType": "normal",
+    "cliToolId": "claude",
+    "instanceId": "claude",
+    "archived": false
+  }
+]
