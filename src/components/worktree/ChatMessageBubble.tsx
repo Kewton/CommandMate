@@ -69,7 +69,6 @@ import {
   X,
 } from 'lucide-react';
 import ReactMarkdown, { type Components } from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import rehypeSanitize from 'rehype-sanitize';
 import rehypeHighlight from 'rehype-highlight';
 import type { ChatMessage } from '@/types/models';
@@ -78,6 +77,7 @@ import { isAgentAuthoredMarkdown } from '@/types/agent-transcript';
 import { formatChatTurnTime } from '@/lib/date-utils';
 import { stripAnsi } from '@/lib/detection/ansi';
 import { splitFilePathParts, type ChatRowHeader } from '@/lib/chat/chat-transcript-view';
+import { SHARED_REMARK_PLUGINS } from '@/lib/markdown';
 import { classifyChatLink, normalizeChatFilePath } from '@/lib/chat/chat-file-path';
 import { splitToolLog } from '@/lib/chat/chat-tool-log';
 import {
@@ -851,7 +851,8 @@ const ChatPlainBody = memo(function ChatPlainBody({
 /**
  * An agent-authored Markdown body (Issue #2041's distinction, unchanged).
  *
- * Same plugin set as History's renderer — `remarkGfm` + `rehypeSanitize` +
+ * Same plugin set as History's renderer — {@link SHARED_REMARK_PLUGINS}
+ * (`remarkGfm` + #2459's autolink boundary repair) + `rehypeSanitize` +
  * `rehypeHighlight`, and deliberately no `rehypeRaw`, because this renders
  * whatever a language model emitted and turning the HTML parser on costs every
  * unfenced `<T>` in ordinary prose. File paths stay clickable by splicing the
@@ -902,7 +903,9 @@ export const ChatMarkdownBody = memo(function ChatMarkdownBody({
     };
   }, [onFilePathClick]);
 
-  const remarkPlugins = useMemo(() => [remarkGfm], []);
+  // [#2459] All three renders below — body, reasoning, tool log — take the same
+  // shared remark list, so the Issue's broken bold URL is repaired wherever the
+  // splitter happened to put it.
   const rehypePlugins = useMemo(() => [rehypeSanitize, rehypeHighlight], []);
 
   // [#2272] / [#2284] The answer, then the chips. `<ReactMarkdown>` inside a
@@ -920,7 +923,7 @@ export const ChatMarkdownBody = memo(function ChatMarkdownBody({
   return (
     <>
       <ReactMarkdown
-        remarkPlugins={remarkPlugins}
+        remarkPlugins={SHARED_REMARK_PLUGINS}
         rehypePlugins={rehypePlugins}
         components={components}
       >
@@ -929,7 +932,7 @@ export const ChatMarkdownBody = memo(function ChatMarkdownBody({
       {thinking.reasoning !== null && (
         <ChatThinkingDisclosure blocks={thinking.blocks}>
           <ReactMarkdown
-            remarkPlugins={remarkPlugins}
+            remarkPlugins={SHARED_REMARK_PLUGINS}
             rehypePlugins={rehypePlugins}
             components={components}
           >
@@ -940,7 +943,7 @@ export const ChatMarkdownBody = memo(function ChatMarkdownBody({
       {tools.toolCalls > 0 && (
         <ChatToolLogDisclosure toolCalls={tools.toolCalls}>
           <ReactMarkdown
-            remarkPlugins={remarkPlugins}
+            remarkPlugins={SHARED_REMARK_PLUGINS}
             rehypePlugins={rehypePlugins}
             components={components}
           >
