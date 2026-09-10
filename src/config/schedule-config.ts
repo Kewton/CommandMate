@@ -73,6 +73,44 @@ export const COMMAND_CODE_PERMISSIONS = [
 ] as const;
 export type CommandCodePermission = (typeof COMMAND_CODE_PERMISSIONS)[number];
 
+/**
+ * The value that means `--yolo` in the Permission column (Issue #2454).
+ *
+ * Not a `--permission-mode` value — it is the flag name, the same trick
+ * {@link COPILOT_PERMISSIONS} plays with `allow-all-tools` / `yolo`. Named so
+ * the branch in `buildCliArgs` reads as a comparison against a vocabulary
+ * entry rather than against a bare string.
+ */
+export const COMMAND_CODE_YOLO_PERMISSION = 'yolo';
+
+/**
+ * What the CMATE.md Permission column accepts for command-code (Issue #2454).
+ *
+ * {@link COMMAND_CODE_PERMISSIONS} is what `--permission-mode` accepts; this is
+ * what a *schedule* may say, and the two are different sets because `--yolo`
+ * lives on its own axis. The column is modelled on copilot's, where the cell
+ * holds a flag name (`allow-all-tools` / `yolo`) rather than a mode.
+ *
+ * ## Why `yolo` is first and is the default
+ *
+ * Measured on the 1.53.0 bundle: `commandcode -p …` injects a
+ * `print-permission-gate` mod unless `--yolo` was passed, and that mod answers
+ * `edit_file` / `write_file` / `shell_command` / `monitor_command` /
+ * `kill_shell` with `block: true`. `--permission-mode` does not reach the gate
+ * at all — every one of the five values leaves print mode read-only. The block
+ * does not fail the run: it ends exit 0 with `subtype: "success"`, so the
+ * execution log says the schedule succeeded and nothing was written.
+ *
+ * Before this Issue the column had no spelling for `--yolo`, so the parser
+ * filled an empty cell with `'default'` and `buildCliArgs`'s `--yolo` branch
+ * was unreachable from a schedule (#2454).
+ */
+export const COMMAND_CODE_SCHEDULE_PERMISSIONS = [
+  COMMAND_CODE_YOLO_PERMISSION,
+  ...COMMAND_CODE_PERMISSIONS,
+] as const;
+export type CommandCodeSchedulePermission = (typeof COMMAND_CODE_SCHEDULE_PERMISSIONS)[number];
+
 /** Allowed permission values for gemini CLI (no permission flags) */
 export const GEMINI_PERMISSIONS = [] as const;
 
@@ -123,7 +161,11 @@ export const DEFAULT_PERMISSIONS: Record<string, string> = {
   opencode: '',
   copilot: 'allow-all-tools',
   antigravity: '--dangerously-skip-permissions',
-  'command-code': 'default',
+  // Issue #2454: `yolo`, not `default` -- see COMMAND_CODE_SCHEDULE_PERMISSIONS.
+  // Every `--permission-mode` value leaves `commandcode -p` read-only, and the
+  // run still reports success, so an unattended schedule that omits the column
+  // would look like it worked and change nothing.
+  'command-code': COMMAND_CODE_YOLO_PERMISSION,
 };
 
 /**
@@ -160,7 +202,10 @@ export function getPermissionOptionsForTool(cliToolId: string): readonly string[
     case 'antigravity':
       return ANTIGRAVITY_PERMISSIONS;
     case 'command-code':
-      return COMMAND_CODE_PERMISSIONS;
+      // Issue #2454: the six-value column vocabulary, not the five
+      // `--permission-mode` choices -- the dropdown has to be able to offer
+      // `yolo`, which is the only value that lets print mode write.
+      return COMMAND_CODE_SCHEDULE_PERMISSIONS;
     case 'gemini':
       return GEMINI_PERMISSIONS;
     case 'vibe-local':

@@ -20,7 +20,7 @@ import {
   CODEX_SANDBOXES,
   COPILOT_PERMISSIONS,
   ANTIGRAVITY_PERMISSIONS,
-  COMMAND_CODE_PERMISSIONS,
+  COMMAND_CODE_SCHEDULE_PERMISSIONS,
 } from '@/config/schedule-config';
 import { parseAndValidateCliToolColumn } from '@/lib/cmate-cli-tool-parser';
 import { isCliToolType } from '@/lib/cli-tools/types';
@@ -278,12 +278,15 @@ export function validateSchedulesSection(
       // `opencode`, `gemini`, `vibe-local`, and any tool added to CLI_TOOL_IDS
       // without a branch here -- has no flag, so a non-empty Permission cell is
       // an error rather than something silently checked against Claude's list.
+      // Issue #2454: command-code's list is the six-value column vocabulary
+      // (`yolo` + the five `--permission-mode` choices), the same set the
+      // parser accepts and the dialog offers.
       const allowedValues: readonly string[] =
         cliToolId === 'claude' ? CLAUDE_PERMISSIONS
         : cliToolId === 'codex' ? CODEX_SANDBOXES
         : cliToolId === 'copilot' ? COPILOT_PERMISSIONS
         : cliToolId === 'antigravity' ? ANTIGRAVITY_PERMISSIONS
-        : cliToolId === 'command-code' ? COMMAND_CODE_PERMISSIONS
+        : cliToolId === 'command-code' ? COMMAND_CODE_SCHEDULE_PERMISSIONS
         : [];
       if (!allowedValues.includes(trimmedPermission)) {
         errors.push({

@@ -22,7 +22,7 @@ import {
   CODEX_SANDBOXES,
   COPILOT_PERMISSIONS,
   ANTIGRAVITY_PERMISSIONS,
-  COMMAND_CODE_PERMISSIONS,
+  COMMAND_CODE_SCHEDULE_PERMISSIONS,
   DEFAULT_PERMISSIONS,
 } from '@/config/schedule-config';
 import {
@@ -278,8 +278,15 @@ export function parseSchedulesSection(rows: string[][]): ScheduleEntry[] {
       // Issue #2250: its own case, not a fall-through. #1914's rule is that a
       // tool with a permission vocabulary names itself here; inheriting the
       // no-flag branch would silently blank a valid `plan` / `auto-accept` cell.
+      //
+      // Issue #2454: the column vocabulary is the six-value
+      // COMMAND_CODE_SCHEDULE_PERMISSIONS, not the five `--permission-mode`
+      // choices. An empty cell therefore resolves to `yolo` through
+      // `defaultPermission` above, which is the only value that lets
+      // `commandcode -p` write anything -- the five modes all leave print mode
+      // read-only while still reporting success.
       case 'command-code':
-        allowedValues = COMMAND_CODE_PERMISSIONS;
+        allowedValues = COMMAND_CODE_SCHEDULE_PERMISSIONS;
         break;
       case 'gemini':
       case 'vibe-local':

@@ -22,7 +22,13 @@ vi.mock('@/lib/logger', () => ({
 
 import { parseSchedulesSection } from '@/lib/cmate-parser';
 import { validateSchedulesSection } from '@/lib/cmate-validator';
-import { COPILOT_PERMISSIONS, ANTIGRAVITY_PERMISSIONS, COMMAND_CODE_PERMISSIONS, CLAUDE_PERMISSIONS } from '@/config/schedule-config';
+import {
+  COPILOT_PERMISSIONS,
+  ANTIGRAVITY_PERMISSIONS,
+  COMMAND_CODE_PERMISSIONS,
+  COMMAND_CODE_SCHEDULE_PERMISSIONS,
+  CLAUDE_PERMISSIONS,
+} from '@/config/schedule-config';
 
 describe('cmate-parser / cmate-validator consistency (SEC4-004)', () => {
   for (const permission of COPILOT_PERMISSIONS) {
@@ -98,7 +104,11 @@ describe('cmate-parser / cmate-validator consistency (SEC4-004)', () => {
   // Issue #2250: Command Code permission consistency. Its own `case` in the
   // parser and its own ternary arm in the validator -- inheriting #1914's
   // no-flag fallback would silently blank a valid `plan` / `auto-accept` cell.
-  for (const permission of COMMAND_CODE_PERMISSIONS) {
+  //
+  // Issue #2454 widens the set both sides check against to
+  // COMMAND_CODE_SCHEDULE_PERMISSIONS -- the five modes plus the column's own
+  // `yolo`, which names the `--yolo` flag rather than a sixth mode.
+  for (const permission of COMMAND_CODE_SCHEDULE_PERMISSIONS) {
     it(`should accept command-code permission "${permission}" in both parser and validator`, () => {
       const row = ['cc-task', '0 9 * * *', 'Do something', 'command-code', 'true', permission];
 
@@ -111,19 +121,53 @@ describe('cmate-parser / cmate-validator consistency (SEC4-004)', () => {
     });
   }
 
-  it('should reject an invalid command-code permission in both parser and validator', () => {
-    // `acceptEdits` is claude's vocabulary. Before #1914 the shared fallback was
-    // CLAUDE_PERMISSIONS, so a tool with no case of its own accepted it.
-    const row = ['cc-task', '0 9 * * *', 'Do something', 'command-code', 'true', 'acceptEdits'];
+  // Guards the guard: `yolo` has to be in the set the loop above iterates, or
+  // the widening it is supposed to cover would go untested.
+  it('the command-code column vocabulary is the five modes plus yolo (Issue #2454)', () => {
+    expect([...COMMAND_CODE_SCHEDULE_PERMISSIONS]).toEqual(['yolo', ...COMMAND_CODE_PERMISSIONS]);
+  });
+
+  /**
+   * Issue #2454: an empty cell is the common case (the column is optional), and
+   * it has to land on `yolo` on the parser side while staying error-free on the
+   * validator side. Before this Issue it landed on `default`, which leaves
+   * `commandcode -p` unable to write.
+   */
+  it('should treat an empty command-code permission cell as yolo in both parser and validator', () => {
+    const row = ['cc-task', '0 9 * * *', 'Do something', 'command-code', 'true', ''];
 
     const entries = parseSchedulesSection([row]);
     expect(entries).toHaveLength(1);
-    expect(entries[0].permission).not.toBe('acceptEdits');
+    expect(entries[0].permission).toBe('yolo');
 
     const errors = validateSchedulesSection([row]);
-    expect(errors).toHaveLength(1);
-    expect(errors[0].field).toBe('permission');
+    expect(errors).toEqual([]);
   });
+
+  // Issue #2454: widening the vocabulary by one value must not open it to the
+  // other tools' words. `bypassPermissions` and `acceptEdits` are claude's,
+  // `allow-all-tools` is copilot's, `--dangerously-skip-permissions` is
+  // antigravity's -- and note that the last one is what `--yolo` is an alias
+  // for, so "means the same thing" is not a reason for the column to take it.
+  it.each(['acceptEdits', 'bypassPermissions', 'allow-all-tools', '--dangerously-skip-permissions'])(
+    'should reject an invalid command-code permission "%s" in both parser and validator',
+    (permission) => {
+      // Before #1914 the shared fallback was CLAUDE_PERMISSIONS, so a tool with
+      // no case of its own accepted claude's words.
+      const row = ['cc-task', '0 9 * * *', 'Do something', 'command-code', 'true', permission];
+
+      const entries = parseSchedulesSection([row]);
+      expect(entries).toHaveLength(1);
+      expect(entries[0].permission).not.toBe(permission);
+      // The fallback is the safe-for-unattended value, not merely "not the
+      // rejected one".
+      expect(entries[0].permission).toBe('yolo');
+
+      const errors = validateSchedulesSection([row]);
+      expect(errors).toHaveLength(1);
+      expect(errors[0].field).toBe('permission');
+    },
+  );
 
   it('should reject the same invalid antigravity permission in both parser and validator', () => {
     const row = ['antigravity-task', '0 9 * * *', 'Do something', 'antigravity', 'true', 'invalid-perm'];

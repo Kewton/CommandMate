@@ -138,20 +138,39 @@ CLI Tool列で `copilot --model <model-name>` と記述すると、スケジュ�
 
 > **Warning:** 無人バッチであるスケジュール実行では、これが唯一の許可値である点に注意してください。
 
-### command-code（--permission-mode）
+### command-code（--yolo / --permission-mode）
 
 | 値 | 説明 |
 |----|------|
-| `default` | 権限プロンプトを出す（**デフォルト**。Command Code 自身が hook payload で報告する値） |
-| `standard` | `default` と同じ扱いの別名（`--help` が案内するのはこの綴り） |
-| `plan` | 読み取りと計画のみ |
-| `auto-accept` | 編集を確認なしで適用 |
-| `dont-ask` | 権限プロンプトを出さない |
+| `yolo` | `--yolo`（= `--dangerously-skip-permissions`）で起動する（**デフォルト**）。**書き込み系ツールが使えるのはこの値だけ** |
+| `default` | `--permission-mode default`。読み取り専用（下の Warning 参照） |
+| `standard` | `--permission-mode standard`。読み取り専用 |
+| `plan` | `--permission-mode plan`。読み取り専用 |
+| `auto-accept` | `--permission-mode auto-accept`。読み取り専用 |
+| `dont-ask` | `--permission-mode dont-ask`。読み取り専用 |
 
-> **Note:** 値は `commandcode --help`（3 種のみ表示）ではなく、同梱バンドルの
-> `.choices(["default","standard","plan","auto-accept","dont-ask"])` を実測した 5 種です（Issue #2250）。
-> `--yolo`（= `--dangerously-skip-permissions`）は `--permission-mode` の値ではなく別軸の boolean なので
-> Permission 列には書けません。
+> **Warning:** スケジュール実行が使う print モード（`commandcode -p`）では、`--yolo` 以外で起動すると
+> `edit_file` / `write_file` / `shell_command` / `monitor_command` / `kill_shell` の 5 ツールが
+> ブロックされます。`--permission-mode` はこのゲートに一切効かないため、**5 種のモード値はどれも
+> 読み取り専用になります**。しかもブロックはランを落とさず exit 0 / `subtype:"success"` で終わるので、
+> 実行ログ上は成功したまま成果物がゼロになります（Command Code 1.53.0 バンドル実測、Issue #2454）。
+> ファイルを書かせたいスケジュールでは `yolo` のままにしてください。
+
+> **Note:** `yolo` は CommandMate の Permission 列だけの値で、`--permission-mode` の 6 番目の値では
+> ありません。copilot 列の `yolo` と同じく**フラグ名**を書く形です。`--permission-mode` が受理する
+> 5 種は `commandcode --help`（3 種のみ表示）ではなく同梱バンドルの
+> `.choices(["default","standard","plan","auto-accept","dont-ask"])` を実測したものです（Issue #2250）。
+> Permission 列を空にすると `yolo` が使われます。
+
+> **Note:** `--yolo` は万能ではありません。worktree の `.commandcode/settings.json` で
+> `permissions.disableBypass` が真になっていると `--yolo` 自体が無効化され、上の Warning と同じ
+> 読み取り専用状態に戻ります。`permissions.deny` は `--yolo` を付けても効き、拒否されたツール呼び出しは
+> exit 4 でランを終わらせます。
+
+> **Note:** print モードでは以下のツールが withheld（そもそも提供されない）です:
+> `ask_user_question` / `enter_plan_mode` / `exit_plan_mode` / `plan_review` / `todo_write` /
+> `cron_create` / `cron_list` / `cron_delete` / `taste`。対話を要求するツールと TUI 専用ツールなので、
+> メッセージ側でこれらを前提にした指示を書かないでください。
 
 ### opencode
 

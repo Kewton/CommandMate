@@ -137,6 +137,7 @@
     "opencodeTitlePlaceholder": "nightly-review",
     "opencodeContinue": "直前のセッションを継続する（--continue）",
     "permission": "権限",
+    "commandCodeReadOnlyNote": "command-code の print モードでは、`yolo` 以外を選ぶと edit_file / write_file / shell_command / monitor_command / kill_shell がブロックされ、読み取り専用の実行になります（実行自体は成功として記録されます）。",
     "message": "メッセージ",
     "messagePlaceholder": "README.mdを要約してください",
     "charCount": "{count} / {max}",
