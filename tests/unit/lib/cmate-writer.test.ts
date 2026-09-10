@@ -212,6 +212,62 @@ describe('validateScheduleInput', () => {
     expect(result.errors).toContain('permission is not supported for this CLI tool');
   });
 
+  /**
+   * Issue #2454: the writer's vocabulary comes from
+   * `getPermissionOptionsForTool`, so widening command-code's column to six
+   * values makes `yolo` writable without a change here -- and this is what
+   * proves the dialog's new default can actually be saved. Had the writer
+   * checked COMMAND_CODE_PERMISSIONS (the five `--permission-mode` choices)
+   * instead, every default command-code schedule would fail validation.
+   */
+  it('accepts a command-code schedule with the yolo permission (Issue #2454)', () => {
+    const result = validateScheduleInput({
+      ...baseSchedule,
+      cliToolId: 'command-code',
+      permission: 'yolo',
+    });
+    expect(result.valid).toBe(true);
+  });
+
+  it('accepts the five command-code --permission-mode values', () => {
+    for (const permission of ['default', 'standard', 'plan', 'auto-accept', 'dont-ask']) {
+      const result = validateScheduleInput({
+        ...baseSchedule,
+        cliToolId: 'command-code',
+        permission,
+      });
+      expect(result.valid, permission).toBe(true);
+    }
+  });
+
+  it('still rejects another tool\'s vocabulary on a command-code schedule', () => {
+    for (const permission of ['bypassPermissions', 'allow-all-tools', '--dangerously-skip-permissions']) {
+      const result = validateScheduleInput({
+        ...baseSchedule,
+        cliToolId: 'command-code',
+        permission,
+      });
+      expect(result.valid, permission).toBe(false);
+      expect(result.errors).toContain('invalid permission');
+    }
+  });
+
+  /**
+   * The round trip: what the dialog saves is what the parser reads back.
+   * `serializeScheduleRow` writes the cell verbatim, so the guard that matters
+   * is that `yolo` survives the escaping and lands in the Permission column.
+   */
+  it('serializes the yolo permission into the Permission cell', () => {
+    const row = serializeScheduleRow({
+      ...baseSchedule,
+      cliToolId: 'command-code',
+      permission: 'yolo',
+    });
+    const cells = row.split('|').map((c) => c.trim());
+    expect(cells.at(-2)).toBe('yolo');
+    expect(row).toContain('command-code');
+  });
+
   it('accepts a copilot schedule with a model', () => {
     const result = validateScheduleInput({
       ...baseSchedule,

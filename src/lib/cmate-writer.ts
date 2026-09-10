@@ -418,6 +418,13 @@ export function validateScheduleInput(input: ScheduleWriteInput): ScheduleValida
 
     const permission = (input.permission ?? '').trim();
     if (permission) {
+      // The vocabulary is whatever the tool's own case in
+      // `getPermissionOptionsForTool` returns, never a list repeated here.
+      // Issue #2454 widened command-code's to six values without touching this
+      // file's logic: `yolo` is a Permission *column* value naming the `--yolo`
+      // flag (copilot's shape), not a sixth `--permission-mode` mode, so
+      // checking against COMMAND_CODE_PERMISSIONS here would reject the value
+      // the dialog now writes by default.
       const options = getPermissionOptionsForTool(input.cliToolId);
       if (options.length === 0) {
         errors.push('permission is not supported for this CLI tool');

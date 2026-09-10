@@ -138,21 +138,40 @@ Model names may contain alphanumeric characters, hyphens, dots, slashes and colo
 
 > **Warning:** note that this is the only permitted value, and scheduled execution is an unattended batch.
 
-### command-code (--permission-mode)
+### command-code (--yolo / --permission-mode)
 
 | Value | Description |
 |-------|-------------|
-| `default` | Prompt for permission (**default**; the value Command Code reports in its own hook payloads) |
-| `standard` | An alias for `default` (the spelling `--help` advertises) |
-| `plan` | Read and plan only |
-| `auto-accept` | Apply edits without prompting |
-| `dont-ask` | Never prompt for permission |
+| `yolo` | Launch with `--yolo` (= `--dangerously-skip-permissions`) (**default**). **The only value that lets the run write anything** |
+| `default` | `--permission-mode default`. Read-only (see the Warning below) |
+| `standard` | `--permission-mode standard`. Read-only |
+| `plan` | `--permission-mode plan`. Read-only |
+| `auto-accept` | `--permission-mode auto-accept`. Read-only |
+| `dont-ask` | `--permission-mode dont-ask`. Read-only |
 
-> **Note:** the list is read off the shipped bundle's
+> **Warning:** in the print mode a schedule runs (`commandcode -p`), launching with anything other
+> than `--yolo` blocks five tools: `edit_file` / `write_file` / `shell_command` /
+> `monitor_command` / `kill_shell`. `--permission-mode` does not reach that gate at all, so **all
+> five mode values leave the run read-only**. Worse, a block does not fail the run — it ends exit 0
+> with `subtype:"success"` — so the execution log reports success while nothing was produced
+> (measured on the Command Code 1.53.0 bundle, Issue #2454). Leave the column at `yolo` for any
+> schedule that is supposed to write files.
+
+> **Note:** `yolo` is a CommandMate Permission-column value, not a sixth `--permission-mode` value.
+> It names the **flag**, the same way `yolo` does in the copilot column. The five values
+> `--permission-mode` accepts are read off the shipped bundle's
 > `.choices(["default","standard","plan","auto-accept","dont-ask"])`, not off `commandcode --help`,
-> which advertises only three of them (Issue #2250). `--yolo`
-> (= `--dangerously-skip-permissions`) is a separate boolean flag rather than a `--permission-mode`
-> value, so it cannot appear in the Permission column.
+> which advertises only three of them (Issue #2250). An empty Permission column resolves to `yolo`.
+
+> **Note:** `--yolo` is not absolute. If the worktree's `.commandcode/settings.json` sets
+> `permissions.disableBypass` to true, `--yolo` itself is disabled and the run falls back to the
+> read-only state the Warning above describes. `permissions.deny` applies even under `--yolo`, and a
+> denied tool call ends the run with exit 4.
+
+> **Note:** print mode withholds these tools entirely: `ask_user_question` / `enter_plan_mode` /
+> `exit_plan_mode` / `plan_review` / `todo_write` / `cron_create` / `cron_list` / `cron_delete` /
+> `taste`. They are the ones that need a human to answer or a TUI to draw, so do not write a message
+> that depends on them.
 
 ### opencode
 

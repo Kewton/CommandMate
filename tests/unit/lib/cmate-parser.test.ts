@@ -231,6 +231,49 @@ More text here.
       expect(entries[0].name).toBe('\u6BCE\u65E5\u30EC\u30D3\u30E5\u30FC');
     });
 
+    /**
+     * Issue #2454: an omitted Permission cell for command-code resolves to
+     * `yolo`, the column's spelling of the `--yolo` flag.
+     *
+     * It used to resolve to `default`, and `commandcode -p --permission-mode
+     * default` blocks edit_file / write_file / shell_command /
+     * monitor_command / kill_shell while still exiting 0 with
+     * `subtype: "success"` -- so every schedule written without touching the
+     * column produced a green execution log and no work. `--permission-mode`
+     * does not reach that gate at all, which is why the fix is a new column
+     * value rather than a different mode.
+     */
+    it('should default an omitted command-code permission to yolo (Issue #2454)', () => {
+      const rows = [['cc-task', '0 9 * * *', 'hello', 'command-code', 'true']];
+
+      const entries = parseSchedulesSection(rows);
+      expect(entries).toHaveLength(1);
+      expect(entries[0].permission).toBe('yolo');
+    });
+
+    it('should treat a blank command-code permission cell the same as an omitted one', () => {
+      const rows = [['cc-task', '0 9 * * *', 'hello', 'command-code', 'true', '   ']];
+
+      const entries = parseSchedulesSection(rows);
+      expect(entries[0].permission).toBe('yolo');
+    });
+
+    it('should keep an explicit command-code mode value (Issue #2250 vocabulary)', () => {
+      const rows = [['cc-task', '0 9 * * *', 'hello', 'command-code', 'true', 'plan']];
+
+      const entries = parseSchedulesSection(rows);
+      expect(entries[0].permission).toBe('plan');
+    });
+
+    it('should fall back to yolo for a command-code permission outside the vocabulary', () => {
+      mockLogger.warn.mockClear();
+      const rows = [['cc-task', '0 9 * * *', 'hello', 'command-code', 'true', 'bypassPermissions']];
+
+      const entries = parseSchedulesSection(rows);
+      expect(entries[0].permission).toBe('yolo');
+      expect(mockLogger.warn).toHaveBeenCalledWith('parse:invalid-permission', expect.any(Object));
+    });
+
     it('should enforce MAX_SCHEDULE_ENTRIES limit', () => {
       mockLogger.warn.mockClear();
       const rows = Array.from({ length: MAX_SCHEDULE_ENTRIES + 5 }, (_, i) => [

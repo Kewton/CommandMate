@@ -114,6 +114,92 @@ describe('ScheduleEditDialog', () => {
     expect(getSelectValues('schedule-permission-select')).toEqual(['allow-all-tools', 'yolo']);
   });
 
+  /**
+   * Issue #2454: command-code's dropdown leads with `yolo`, and `yolo` is the
+   * value selected on arrival.
+   *
+   * `commandcode -p` blocks edit_file / write_file / shell_command /
+   * monitor_command / kill_shell unless it was launched with `--yolo`, and a
+   * blocked call still ends the run exit 0 with `subtype: "success"`. So the
+   * five `--permission-mode` values all buy a read-only run that reports
+   * success -- picking one of them has to be a deliberate act, not what the
+   * form hands you.
+   */
+  it('offers six permission options for command-code, led by yolo', () => {
+    renderDialog();
+    fireEvent.change(screen.getByTestId('schedule-cli-tool-select'), {
+      target: { value: 'command-code' },
+    });
+    expect(getSelectValues('schedule-permission-select')).toEqual([
+      'yolo',
+      'default',
+      'standard',
+      'plan',
+      'auto-accept',
+      'dont-ask',
+    ]);
+  });
+
+  it('selects yolo by default when the tool is switched to command-code', () => {
+    renderDialog();
+    fireEvent.change(screen.getByTestId('schedule-cli-tool-select'), {
+      target: { value: 'command-code' },
+    });
+    expect((screen.getByTestId('schedule-permission-select') as HTMLSelectElement).value).toBe(
+      'yolo',
+    );
+    // The note is about a choice the user has not made, so it must not be up yet.
+    expect(screen.queryByTestId('schedule-permission-readonly-note')).toBeNull();
+  });
+
+  it('warns that the five mode values leave command-code read-only', () => {
+    renderDialog();
+    fireEvent.change(screen.getByTestId('schedule-cli-tool-select'), {
+      target: { value: 'command-code' },
+    });
+    fireEvent.change(screen.getByTestId('schedule-permission-select'), {
+      target: { value: 'plan' },
+    });
+    const note = screen.getByTestId('schedule-permission-readonly-note');
+    // Resolved through the real `en` dictionary (see the next-intl mock above),
+    // so an absent key would fail here rather than echo itself back.
+    expect(note.textContent).toContain('read-only');
+    expect(note.textContent).toContain('write_file');
+
+    // Going back to yolo takes the note down again.
+    fireEvent.change(screen.getByTestId('schedule-permission-select'), {
+      target: { value: 'yolo' },
+    });
+    expect(screen.queryByTestId('schedule-permission-readonly-note')).toBeNull();
+  });
+
+  it('does not show the read-only note for other tools', () => {
+    renderDialog();
+    // copilot also has a `yolo` value; the note is command-code's alone.
+    fireEvent.change(screen.getByTestId('schedule-cli-tool-select'), {
+      target: { value: 'copilot' },
+    });
+    fireEvent.change(screen.getByTestId('schedule-permission-select'), {
+      target: { value: 'allow-all-tools' },
+    });
+    expect(screen.queryByTestId('schedule-permission-readonly-note')).toBeNull();
+  });
+
+  it('shows the read-only note when editing a saved command-code schedule that picked a mode', () => {
+    renderDialog({
+      originalName: 'cc-task',
+      initialValues: {
+        name: 'cc-task',
+        cronExpression: '0 9 * * *',
+        message: 'do it',
+        cliToolId: 'command-code',
+        permission: 'dont-ask',
+        enabled: true,
+      },
+    });
+    expect(screen.getByTestId('schedule-permission-readonly-note')).toBeDefined();
+  });
+
   it('disables Save and shows an error when the name is empty', () => {
     renderDialog();
     expect(screen.getByTestId('schedule-name-error')).toBeDefined();

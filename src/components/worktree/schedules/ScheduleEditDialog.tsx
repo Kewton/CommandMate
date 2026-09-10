@@ -38,6 +38,7 @@ import {
 import {
   getPermissionOptionsForTool,
   DEFAULT_PERMISSIONS,
+  COMMAND_CODE_YOLO_PERMISSION,
   MAX_SCHEDULE_NAME_LENGTH,
   MAX_SCHEDULE_MESSAGE_LENGTH,
 } from '@/config/schedule-config';
@@ -317,6 +318,15 @@ export function ScheduleEditDialog({
 
   const permissionOptions = getPermissionOptionsForTool(form.cliToolId);
   const showPermission = permissionOptions.length > 0;
+  // Issue #2454: `commandcode -p` blocks edit_file / write_file /
+  // shell_command / monitor_command / kill_shell unless it was launched with
+  // `--yolo`, and a blocked call still ends the run exit 0 with
+  // `subtype: "success"`. Every `--permission-mode` value therefore buys a
+  // read-only run that reports success, which is the failure this note exists
+  // to make visible *before* the schedule is saved rather than after a week of
+  // green execution logs that changed nothing.
+  const showCommandCodeReadOnlyNote =
+    form.cliToolId === 'command-code' && form.permission !== COMMAND_CODE_YOLO_PERMISSION;
   // Issue #2044: both flags read the parser's Sets, so the dialog cannot offer a
   // field the CMATE.md grammar would reject — nor hide one it accepts.
   const showModel = TOOLS_WITH_MODEL_SUPPORT.has(form.cliToolId);
@@ -699,6 +709,14 @@ export function ScheduleEditDialog({
               </option>
             ))}
           </select>
+          {showCommandCodeReadOnlyNote && (
+            <p
+              className="mt-1 text-xs text-warning-foreground"
+              data-testid="schedule-permission-readonly-note"
+            >
+              {t('edit.commandCodeReadOnlyNote')}
+            </p>
+          )}
         </div>
       )}
     </>
