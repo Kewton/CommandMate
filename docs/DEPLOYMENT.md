@@ -386,17 +386,19 @@ WebSocket 接続がアクティブな場合、グレースフルシャットダ�
 - または、以下のコマンドで強制終了：
 
 ```bash
-lsof -ti:3000 | xargs kill -9
+lsof -nP -iTCP:3000 -sTCP:LISTEN -t | xargs kill -9
 ```
+
+> **注意**: `-sTCP:LISTEN` で待ち受け中のサーバーだけに絞っています。外すと 3000 番に接続しているだけのプロセス（CommandMate を開いているブラウザの network service、他セッションの CLI など）まで対象になり、CommandMate 以外のタブの通信も一斉に切れます。
 
 ### ポートが使用中
 
 ```bash
-# ポート使用状況の確認
-lsof -ti:3000
+# ポート使用状況の確認（待ち受け中のプロセスだけを表示）
+lsof -nP -iTCP:3000 -sTCP:LISTEN
 
 # プロセスの終了
-kill -9 $(lsof -ti:3000)
+kill -9 $(lsof -nP -iTCP:3000 -sTCP:LISTEN -t)
 ```
 
 ### データベースエラー

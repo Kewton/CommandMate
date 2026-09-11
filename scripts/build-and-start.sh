@@ -22,6 +22,8 @@ MAX_LOG_GENERATIONS=3        # Number of log generations to keep
 
 # Load .env file (custom server does not auto-load .env)
 source "$SCRIPT_DIR/load-env.sh"
+# find_listen_pids_by_port (Issue #2473)
+source "$SCRIPT_DIR/lib/port-pids.sh"
 
 # Support both CM_PORT and legacy MCBD_PORT
 PORT=${CM_PORT:-${MCBD_PORT:-3000}}
@@ -161,7 +163,9 @@ if [ "$1" = "--daemon" ] || [ "$1" = "-d" ]; then
     # Check if already running (port-based) [D1-004]
     # Detects orphaned processes even when PID file is missing.
     # stop-server.sh Step 1 (port-based stop) can handle this without a PID file.
-    PORT_PIDS=$(lsof -ti:$PORT 2>/dev/null | grep -E '^[0-9]+$' | sort -u || true)
+    # Listeners only (Issue #2473): a process that is merely connected to the
+    # port is not a server.
+    PORT_PIDS=$(find_listen_pids_by_port "$PORT")
     if [ -n "$PORT_PIDS" ]; then
         echo "Port $PORT is already in use by process(es): $(echo $PORT_PIDS | tr '\n' ' ')"
         echo "Use ./scripts/stop-server.sh to stop it first"

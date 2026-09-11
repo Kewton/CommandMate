@@ -72,7 +72,8 @@ cd {TARGET_DIR} && ./scripts/stop.sh && ./scripts/build-and-start.sh --daemon
 cd {TARGET_DIR} && CM_PORT={port} ./scripts/stop.sh && CM_PORT={port} ./scripts/build-and-start.sh --daemon
 ```
 
-**注意**: ポート競合が発生した場合は `lsof -i :{port} -t` でプロセスを特定し、killしてから再試行する。
+**注意**: ポート競合が発生した場合は `lsof -nP -iTCP:{port} -sTCP:LISTEN -t` で**待ち受け中の**プロセスを特定し、killしてから再試行する。
+`-sTCP:LISTEN` を外すと、そのポートに接続しているだけのプロセス（CommandMate を開いているブラウザの network service、他セッションの CLI など）まで返り、止めると CommandMate 以外のタブの通信も一斉に切れる（Issue #2473）。
 
 ## 完了報告形式
 

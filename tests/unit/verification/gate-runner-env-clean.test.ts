@@ -24,6 +24,7 @@ import { runMigrations } from '@/lib/db/db-migrations';
 import { createTask, getVerificationRun, upsertWorktree, type Task } from '@/lib/db';
 import { parseTaskContract, type TaskContract } from '@/lib/tasks/contract-parser';
 import { startVerification, waitForVerification } from '@/lib/verification/gate-runner';
+import { recordTaskSession } from '@/lib/verification/env-clean-gate';
 import { ENV_CLEAN_GATE_ID } from '@/lib/verification/verify-config';
 import {
   ENV_SNAPSHOT_VERSION,
@@ -318,6 +319,53 @@ describe('repository-wide opt-in (options.requireEnvClean)', () => {
     expect(run?.status).toBe('not_started');
     expect(envCleanGate(run)?.status).toBe('skipped');
     expect(captureCalls).toBe(0);
+  });
+});
+
+describe('the delegation’s own agent session (#2472)', () => {
+  /** Spelled out: this pins the name the send starts, not whatever the code derives. */
+  const TASK_SESSION = `mcbd-claude-${wtId}`;
+
+  beforeEach(() => {
+    setupRepo('  requireEnvClean: true\n');
+  });
+
+  it('passes a run whose only new session is the one the send started', async () => {
+    const task = seedTask();
+    baselines.set(task.id, recordTaskSession(snapshot(), task));
+    currentSnapshot = snapshot({ 'tmux-sessions': listing([TASK_SESSION]) });
+    addWork();
+
+    const run = await runToCompletion({ taskId: task.id });
+    expect(envCleanGate(run)?.status).toBe('passed');
+    expect(envCleanGate(run)?.logTail).toContain(`+ ${TASK_SESSION} [task session, excused]`);
+    expect(run?.status).toBe('passed');
+  });
+
+  it('still fails the run when the worker left a second session behind', async () => {
+    const task = seedTask();
+    baselines.set(task.id, recordTaskSession(snapshot(), task));
+    currentSnapshot = snapshot({
+      'tmux-sessions': listing([TASK_SESSION, `mcbd-codex-${wtId}`]),
+    });
+    addWork();
+
+    const run = await runToCompletion({ taskId: task.id });
+    expect(envCleanGate(run)?.status).toBe('failed');
+    expect(envCleanGate(run)?.logTail).toContain(`+ mcbd-codex-${wtId} [self]`);
+    expect(run?.status).toBe('failed');
+  });
+
+  it('fails the same run against a baseline written before #2472', async () => {
+    const task = seedTask();
+    baselines.set(task.id, snapshot());
+    currentSnapshot = snapshot({ 'tmux-sessions': listing([TASK_SESSION]) });
+    addWork();
+
+    const run = await runToCompletion({ taskId: task.id });
+    expect(envCleanGate(run)?.status).toBe('failed');
+    expect(envCleanGate(run)?.logTail).toContain('task-session=unrecorded');
+    expect(run?.status).toBe('failed');
   });
 });
 

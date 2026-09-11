@@ -395,17 +395,19 @@ When WebSocket connections are active, graceful shutdown may take time.
 - Or forcefully terminate with:
 
 ```bash
-lsof -ti:3000 | xargs kill -9
+lsof -nP -iTCP:3000 -sTCP:LISTEN -t | xargs kill -9
 ```
+
+> **Note**: `-sTCP:LISTEN` narrows the lookup to the process listening on the port. Without it, every process that is merely connected to port 3000 (the browser showing CommandMate, via its network service, or another session's CLI) is included too, and stopping it cuts off every other browser tab as well.
 
 ### Port Already in Use
 
 ```bash
-# Check port usage
-lsof -ti:3000
+# Check port usage (listening processes only)
+lsof -nP -iTCP:3000 -sTCP:LISTEN
 
 # Kill the process
-kill -9 $(lsof -ti:3000)
+kill -9 $(lsof -nP -iTCP:3000 -sTCP:LISTEN -t)
 ```
 
 ### Database Errors

@@ -14,7 +14,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db/db-instance';
-import { createTask, getWorktreeById, listTasks } from '@/lib/db';
+import { createTask, getWorktreeById, listTasks, type Task } from '@/lib/db';
 import { isValidInstanceId, isCliToolType } from '@/lib/cli-tools/types';
 import { isValidWorktreeId } from '@/lib/security/path-validator';
 import { loadTaskContract, TaskContractError } from '@/lib/tasks/contract-parser';
@@ -25,6 +25,7 @@ import {
 } from '@/lib/tasks/contract-message';
 import { loadVerifyConfig, VerifyConfigError } from '@/lib/verification/verify-config';
 import { captureEnvSnapshot, saveEnvSnapshot } from '@/lib/verification/env-snapshot';
+import { recordTaskSession } from '@/lib/verification/env-clean-gate';
 import { createLogger } from '@/lib/logger';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 
@@ -49,22 +50,29 @@ const DEFAULT_LIST_LIMIT = 20;
  * reading only the booleans would run that gate against a baseline this function
  * had declined to write — UNKNOWN on every such delegation, forever.
  *
+ * The snapshot also names the task's own agent session (Issue #2472). That
+ * session cannot be observed here: this route runs before `send --contract`
+ * sends the message, and the send is what starts the session when none is
+ * running. So the name is derived from the task row just created — through
+ * `resolveSessionName`, the function that names the session when it starts —
+ * and the gate excuses exactly that one addition.
+ *
  * Never throws. A snapshot that could not be written leaves no baseline, and a
  * missing baseline is UNKNOWN at verification time — failing the send instead
  * would make an unrelated `lsof` problem block the delegation itself.
  */
 async function recordEnvBaseline(
-  taskId: string,
-  worktreeId: string,
+  task: Task,
   contract: Parameters<typeof runsEnvCleanGate>[0],
   verifyConfig: Parameters<typeof runsEnvCleanGate>[1]
 ): Promise<void> {
   if (!runsEnvCleanGate(contract, verifyConfig)) return;
   try {
-    saveEnvSnapshot(taskId, await captureEnvSnapshot({ worktreeId }));
+    const snapshot = await captureEnvSnapshot({ worktreeId: task.worktreeId });
+    saveEnvSnapshot(task.id, recordTaskSession(snapshot, task));
   } catch (error) {
     logger.warn('env-baseline-capture-failed', {
-      taskId,
+      taskId: task.id,
       error: error instanceof Error ? error.message : String(error),
     });
   }
@@ -161,7 +169,7 @@ export async function POST(
       contract,
     });
 
-    await recordEnvBaseline(task.id, id, contract, verifyConfig);
+    await recordEnvBaseline(task, contract, verifyConfig);
 
     return NextResponse.json(
       { task, message: composeContractMessage(contract, verifyConfig) },
