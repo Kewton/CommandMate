@@ -56,7 +56,7 @@
  * @module lib/hooks/sources/claude/history
  */
 
-import { open, stat } from 'fs/promises';
+import { open, stat, type FileHandle } from 'fs/promises';
 import { homedir } from 'os';
 import { join, resolve, sep } from 'path';
 import { buildCompositeKey } from '@/lib/auto-yes-state';
@@ -67,43 +67,96 @@ import {
 } from '@/lib/history/user-turn-recorder';
 import { advanceCapturedLineForTranscriptTurn } from '@/lib/assistant-response-saver';
 import { createLogger } from '@/lib/logger';
-import { claudePromptRequestId, claudeTurnRequestId } from '@/types/agent-transcript';
+import {
+  CLAUDE_HEADLESS_TURN_ID_PREFIX,
+  claudePromptRequestId,
+  claudeTurnRequestId,
+} from '@/types/agent-transcript';
 import type { ChatMessage } from '@/types/models';
 import type { AgentInstanceRef } from '../types';
 import type { StructuredHistoryCaptureReport } from '@/lib/polling/structured-history-gate';
 import {
   buildClaudeTurns,
+  buildHeadlessClaudeTurn,
   claudeProjectSlug,
   CLAUDE_PROJECTS_DIR_SEGMENTS,
+  CLAUDE_TURN_TRUNCATION_MARKER,
   isClaudePromptRecord,
   isClaudeTurnWritable,
   MAX_CLAUDE_TURN_BLOCKS,
+  MAX_CLAUDE_TURN_BODY_LENGTH,
   parseClaudeTranscript,
+  readClaudeTranscriptRecord,
   renderClaudeTurn,
   type ClaudeContentBlock,
   type ClaudeRenderedTurn,
+  type ClaudeTranscriptParse,
   type ClaudeTranscriptRecord,
   type ClaudeTurnAccumulator,
+  type ClaudeTurnBuild,
 } from './transcript';
 
 const logger = createLogger('lib/hooks/sources/claude/history');
 
 /**
- * How much of the transcript's tail is read.
+ * How much of the transcript's tail is read first.
  *
  * The file grows for the life of the session and a long one is tens of
  * megabytes — the largest on this machine on 2026-08-31 was 23 MB — so reading
  * it whole on every finished turn would be the most expensive thing the poller
- * does. Only turns whose prompt record is inside the window are ever written
- * (see {@link captureClaudeTranscriptTurn}), which is also what stops a turn the
+ * does. A turn is only ever written from a prompt record inside the window (see
+ * {@link captureClaudeTranscriptTurn}), which is also what stops a turn the
  * window opened halfway through being written from its middle.
  *
- * 4 MiB is roughly two orders of magnitude above the measured size of a single
- * turn and still small enough to read and parse in one tick. A turn that
- * genuinely does not fit produces orphaned assistant records, which is detected
- * and reported rather than written as a headless reply.
+ * #2121 sized this as "roughly two orders of magnitude above a single turn".
+ * Issue #2470 measured that and it does not hold at the top of the
+ * distribution. Over the 27 transcripts in this repository's project directory
+ * written in the 14 days to 2026-09-11 — 1,663 turns — the bytes one turn
+ * occupies in the file, from its prompt record to the next, were:
+ *
+ * | p50 | p90 | p99 | max | over 4 MiB |
+ * |---|---|---|---|---|
+ * | 0.04 MiB | 0.24 MiB | 4.71 MiB | 23.72 MiB | 19 turns (1.1%) |
+ *
+ * Every one of the 19 was a long, human-started orchestrate or UAT turn — the
+ * replies an operator most wants to read back — and before #2470 every one of
+ * them was reported as orphaned records and written by nobody. 4 MiB is kept as
+ * the size of the *first* read, which is the whole read for 99% of turns; a turn
+ * that does not fit is read further back instead of dropped. See
+ * {@link CLAUDE_TRANSCRIPT_MAX_TAIL_BYTES}.
  */
 export const CLAUDE_TRANSCRIPT_TAIL_BYTES = 4 * 1024 * 1024;
+
+/**
+ * How far back a finished turn's prompt record is looked for (Issue #2470).
+ *
+ * When the first window holds assistant records and no prompt record at all,
+ * {@link captureClaudeTranscriptTurn} doubles it — 8, 16, 32, 64 MiB — until a
+ * prompt record is inside, and stops there. 64 MiB is almost three times the
+ * largest turn measured (23.72 MiB), and it bounds the one cost this adds:
+ * reading up to 60 MiB more of the file, once per ask, for a turn that ran that
+ * long. Measured on 2026-09-11 with a synthetic transcript of 20 KiB tool
+ * results, reading and parsing a 64 MiB tail took 41 ms (4 MiB: 3 ms).
+ *
+ * A turn longer than this is still not dropped: what can be read of it is saved
+ * behind {@link CLAUDE_TURN_HEAD_MISSING_MARKER}. See
+ * {@link captureClaudeTranscriptTurn}.
+ */
+export const CLAUDE_TRANSCRIPT_MAX_TAIL_BYTES = 64 * 1024 * 1024;
+
+/**
+ * The first line of a reply saved without its beginning (Issue #2470).
+ *
+ * Plain English Markdown, the way {@link CLAUDE_TURN_TRUNCATION_MARKER} marks
+ * the other end of a cut reply, rather than a translated string. `content` is
+ * fixed when the row is written and read back by every viewer in whatever
+ * language they use, and this layer has nobody to ask: the Stop hook that
+ * writes the row arrives with no request and no locale behind it. The
+ * `--- Output truncated (exceeded 100KB limit) ---` line
+ * `lib/session/claude-executor` appends to a scheduled run's output is the same
+ * choice for the same reason.
+ */
+export const CLAUDE_TURN_HEAD_MISSING_MARKER = `_(The beginning of this reply is not shown: the turn runs further back than the ${CLAUDE_TRANSCRIPT_MAX_TAIL_BYTES / (1024 * 1024)} MiB of transcript that is read.)_`;
 
 /** `.jsonl`; the only extension this reader will open. */
 const CLAUDE_TRANSCRIPT_EXTENSION = '.jsonl';
@@ -270,6 +323,36 @@ export interface ClaudeTranscriptCapture {
  * where the earlier turns really are the scraper's, and there is no evidence in
  * the window that says otherwise.
  *
+ * ## A turn longer than the window (Issue #2470)
+ *
+ * A turn can be bigger than {@link CLAUDE_TRANSCRIPT_TAIL_BYTES} — 1.1% of the
+ * turns measured were, and they were the longest replies of all. Its window
+ * holds its assistant records and no prompt record, so `buildClaudeTurns` finds
+ * no turn, and before #2470 this answered false with nobody left to write the
+ * reply: the Stop receiver has no scrape to fall back on, and the poller that
+ * has one may have been restarted, or have given up at its 30-minute limit, long
+ * before a fifty-minute turn ends. The measured case wrote no row at all.
+ *
+ * Two steps now, and both only when the window holds orphaned assistant records
+ * and **no** prompt record. A window with a prompt record anywhere in it is read
+ * exactly as before, byte for byte.
+ *
+ *  1. **Read further back** ({@link extendClaudeTranscriptRead}). The window
+ *     doubles, up to {@link CLAUDE_TRANSCRIPT_MAX_TAIL_BYTES}, until a prompt
+ *     record is in it, and the turn is then written like any other — user row,
+ *     backfill anchor, #2264's open-turn gate and all.
+ *  2. **Save what can be read** ({@link captureHeadlessClaudeTurn}). A turn whose
+ *     prompt is further back than even that is written as a reply behind
+ *     {@link CLAUDE_TURN_HEAD_MISSING_MARKER}, with no user row, keyed on the
+ *     record that closed it. Only when the read stopped at the limit rather than
+ *     at the start of the file: a whole file with no prompt record in it is not a
+ *     turn too long to reach but a shape this reader does not understand, and the
+ *     scraper keeps it, as it did before.
+ *
+ * Either way the answer is still about the newest turn and means what it always
+ * meant: a headless row answers true because History now holds the turn, and an
+ * open one answers false with `not_yet_closed`.
+ *
  * The return value is the poller's instruction, so the two failure directions
  * are worth stating plainly. **True** means this path has recorded the turn and
  * the scrape must be dropped. **False** means it has not, for any reason at all
@@ -320,20 +403,29 @@ export async function captureClaudeTranscriptTurn(
       return false;
     }
 
-    const text = await readClaudeTranscriptTail(path);
-    if (text === null) return false;
+    const read = await readClaudeTranscriptTurns(target, path, sessionId ?? '');
+    if (read === null) return false;
 
-    const parsed = parseClaudeTranscript(text);
-    const built = buildClaudeTurns(parsed.records, sessionId ?? '');
+    const { parsed, built } = read;
     if (built.turns.length === 0) {
-      logger.info('claude-transcript-no-turn', {
+      const orphaned = built.orphanedAssistantRecords;
+      // A warning since Issue #2470: when this line was `info`, the measured
+      // incident — a fifty-minute turn whose reply reached no writer at all —
+      // was three of them in a row and nothing else.
+      logger.warn('claude-transcript-no-turn', {
         worktreeId: target.worktreeId,
         instanceId,
         path,
         records: parsed.records.length,
         malformedLines: parsed.malformedLines,
-        orphanedAssistantRecords: built.orphanedAssistantRecords,
+        orphanedAssistantRecords: orphaned,
+        // Orphans are the one reason the window can be to blame, so they are
+        // when how much of the file the read covered is worth reading.
+        ...(orphaned > 0 ? { readBytes: read.size - read.startByte, size: read.size } : {}),
       });
+      if (orphaned > 0 && read.reachedLimit) {
+        return await captureHeadlessClaudeTurn(target, parsed.records, sessionId ?? '', path, report);
+      }
       return false;
     }
 
@@ -343,11 +435,12 @@ export async function captureClaudeTranscriptTurn(
       // both are the kind of thing that must be visible when it stops being
       // small.
       //
-      // `orphanedAssistantRecords` is also the shape the Issue #2196 tail-window
-      // trap takes: a turn whose prompt record fell outside
-      // CLAUDE_TRANSCRIPT_TAIL_BYTES has assistant records and no prompt to
-      // record a user row from. It is reported here rather than dropped in
-      // silence, exactly as #2121 left it.
+      // `orphanedAssistantRecords` used to be the shape the Issue #2196
+      // tail-window trap took as well: a turn whose prompt record fell outside
+      // CLAUDE_TRANSCRIPT_TAIL_BYTES. Since #2470 that shape never gets here —
+      // a window with no prompt record in it is read further back first — so
+      // what is counted now is the harmless half: the tail of an earlier turn,
+      // in front of the prompt that opened the newest one.
       logger.info('claude-transcript-partial-read', {
         worktreeId: target.worktreeId,
         instanceId,
@@ -469,10 +562,14 @@ export async function captureClaudeTranscriptTurn(
  *    after its user row (`resolveAssistantTimestampMs`), so the rows do not
  *    carry an ordering that could be trusted for this.
  *  - **The window bounds it.** `buildClaudeTurns` only opens a turn on a prompt
- *    record, so a turn whose prompt fell outside
- *    {@link CLAUDE_TRANSCRIPT_TAIL_BYTES} is not in `turns` at all and cannot be
- *    backfilled from its middle. Its records are counted as
- *    `orphanedAssistantRecords` instead, which is what the caller reports.
+ *    record, so a turn whose prompt fell outside the window is not in `turns` at
+ *    all and cannot be backfilled from its middle. Its records are counted as
+ *    `orphanedAssistantRecords` instead, which is what the caller reports. Since
+ *    Issue #2470 the window can be wider than {@link CLAUDE_TRANSCRIPT_TAIL_BYTES}
+ *    — widened only because the newest turn's prompt was not in the first one —
+ *    and the rule is the same over it: an older turn the wider read happens to
+ *    bring in is a candidate like any other, and one whose prompt is still
+ *    outside is not.
  *
  * A window with no anchor answers with the newest turn alone. See
  * {@link captureClaudeTranscriptTurn} for why that is #2121's behaviour rather
@@ -577,10 +674,13 @@ export interface ClaudeTurnProgress {
    *
    * The head is missing only when the window holds assistant records and no
    * prompt record at all — a single turn whose own prompt has scrolled out of
-   * {@link CLAUDE_TRANSCRIPT_TAIL_BYTES}. #2121 leaves that turn unwritten (there
-   * is no `uuid` to key a row on) and this reader will not leave it invisible:
-   * the readable tail is published and marked, because a reply shown from the
-   * middle without saying so is worse than no reply at all.
+   * {@link CLAUDE_TRANSCRIPT_TAIL_BYTES}. #2121 left that turn unwritten. Since
+   * Issue #2470 the writer reads further back for its prompt once the turn has
+   * ended, and saves the readable end under a key of its own when even that
+   * fails; this reader does neither (see {@link readClaudeTurnProgress} for
+   * why), so while the turn runs the readable tail is published and marked,
+   * because a reply shown from the middle without saying so is worse than no
+   * reply at all.
    */
   readonly partial: boolean;
 }
@@ -593,9 +693,15 @@ export interface ClaudeTurnProgress {
  * different things to the client. A prompt-derived key is a promise that a row
  * with the same id is coming; this one is a promise that no such row exists, so
  * the bubble it draws is cleared by the session going idle rather than by a swap.
+ *
+ * Since Issue #2470 a row for the same turn usually does follow — under the
+ * prompt's key once the writer has read back far enough to find it, or under
+ * `claudeHeadlessTurnId` when it cannot — but never under this key, which is one
+ * per session and must not be written: the session's second long turn would
+ * find the first one's row and read "already saved".
  */
 function headlessClaudeTurnKey(sessionId: string): string {
-  return claudeTurnRequestId(`partial:${sessionId}`);
+  return claudeTurnRequestId(`${CLAUDE_HEADLESS_TURN_ID_PREFIX}${sessionId}`);
 }
 
 /**
@@ -610,6 +716,12 @@ function headlessClaudeTurnKey(sessionId: string): string {
  *
  * Only the records before the first prompt record are taken, which is exactly
  * the set `buildClaudeTurns` counted as orphaned.
+ *
+ * The writer's counterpart is `buildHeadlessClaudeTurn` (Issue #2470), and the
+ * two are kept apart on purpose. That one is keyed on the record that closed
+ * the turn, reads `closed` off it, and keeps the turn's *end* when the block cap
+ * bites; this one keeps the first window's first blocks, as the live bubble
+ * always has, and its accumulator still never reaches a writer.
  */
 function collectHeadlessClaudeTurn(
   records: readonly ClaudeTranscriptRecord[],
@@ -671,6 +783,19 @@ function collectHeadlessClaudeTurn(
  * has just finished is harmless: the settled row carries the same
  * {@link ClaudeTurnProgress.turnKey}, so the client replaces one with the other.
  *
+ * **Not widened (Issue #2470).** The writer reads further back than
+ * {@link CLAUDE_TRANSCRIPT_TAIL_BYTES} when a window holds no prompt record; this
+ * reader deliberately does not, and keeps the one window and the `partial`
+ * bubble. The Issue left the choice to a measurement, and the measurement is
+ * about *when* the cost is paid rather than how big it is: a 64 MiB tail read
+ * and parsed in 41 ms on 2026-09-11 against 3 ms for 4 MiB, which is nothing
+ * once per finished turn and is a 10–40 ms stall of the server's event loop
+ * **every second** here — this runs on each generating tick with a subscriber
+ * (`CHAT_TURN_PROGRESS_MIN_INTERVAL_MS`), and the only turns that would widen are
+ * the ones that generate longest. What the wider read would buy is the prompt's
+ * key on the bubble instead of the partial marker; the reply itself is already
+ * on screen, and the row the writer saves when the turn ends replaces it.
+ *
  * Never throws.
  *
  * @param target - The instance whose turn is in flight
@@ -692,14 +817,14 @@ export async function readClaudeTurnProgress(
     const path = await locateClaudeTranscript(homeDir, capture, sessionId);
     if (!path) return null;
 
-    const text = await readClaudeTranscriptTail(path);
-    if (text === null) return null;
+    const window = await readClaudeTranscriptTail(path);
+    if (window === null) return null;
 
     // A fragment at the tail of a file being appended to is the normal case here
     // — this reader runs *while* Claude is writing — and `parseClaudeTranscript`
     // already counts it rather than throwing. Nothing extra is needed, and that
     // is the property `claude-transcript-progress-2199` pins.
-    const parsed = parseClaudeTranscript(text);
+    const parsed = parseClaudeTranscript(window.text);
     const built = buildClaudeTurns(parsed.records, sessionId ?? '');
     const turn = built.turns.at(-1);
 
@@ -937,6 +1062,23 @@ async function isReadableFile(path: string): Promise<boolean> {
   }
 }
 
+/** `\n`, which in UTF-8 is one byte and never part of another character. */
+const LINE_FEED = 0x0a;
+
+/** A run of whole lines read out of a transcript (Issue #2470). */
+interface ClaudeTranscriptSpan {
+  /** The lines, decoded as UTF-8, with a windowed read's cut first line dropped. */
+  readonly text: string;
+  /** Where {@link text} starts in the file; 0 once a read has reached the start. */
+  readonly startByte: number;
+}
+
+/** The span at the end of the file, and how big the file was when it was read. */
+interface ClaudeTranscriptWindow extends ClaudeTranscriptSpan {
+  /** The file's size when it was opened. Every later read of one ask stops here. */
+  readonly size: number;
+}
+
 /**
  * The last {@link CLAUDE_TRANSCRIPT_TAIL_BYTES} of the file, as UTF-8.
  *
@@ -945,24 +1087,35 @@ async function isReadableFile(path: string): Promise<boolean> {
  * it would count as malformed anyway, and dropping it deliberately keeps that
  * counter meaning "the writer was mid-append", which is the thing worth seeing.
  *
- * @returns The text, or null when the file could not be read
+ * Since Issue #2470 the cut line is found by its byte rather than its
+ * character, because the window now says where its text starts and a read
+ * further back continues from there. The text is the same either way: the line
+ * feed is one byte that no other character contains, so decoding what follows
+ * it gives exactly what decoding the whole window and slicing after it did.
+ *
+ * @returns The window, or null when the file could not be read
  */
-async function readClaudeTranscriptTail(path: string): Promise<string | null> {
-  let handle;
+async function readClaudeTranscriptTail(path: string): Promise<ClaudeTranscriptWindow | null> {
+  let handle: FileHandle | undefined;
   try {
     handle = await open(path, 'r');
     const { size } = await handle.stat();
     const offset = Math.max(0, size - CLAUDE_TRANSCRIPT_TAIL_BYTES);
     const length = size - offset;
-    if (length <= 0) return '';
+    if (length <= 0) return { text: '', size, startByte: 0 };
 
     const buffer = Buffer.alloc(length);
     const { bytesRead } = await handle.read(buffer, 0, length, offset);
-    const text = buffer.subarray(0, bytesRead).toString('utf8');
-    if (offset === 0) return text;
+    const bytes = buffer.subarray(0, bytesRead);
+    if (offset === 0) return { text: bytes.toString('utf8'), size, startByte: 0 };
 
-    const firstBreak = text.indexOf('\n');
-    return firstBreak === -1 ? '' : text.slice(firstBreak + 1);
+    const firstBreak = bytes.indexOf(LINE_FEED);
+    if (firstBreak === -1) return { text: '', size, startByte: size };
+    return {
+      text: bytes.subarray(firstBreak + 1).toString('utf8'),
+      size,
+      startByte: offset + firstBreak + 1,
+    };
   } catch (error) {
     logger.warn('claude-transcript-read-failed', {
       path,
@@ -972,6 +1125,293 @@ async function readClaudeTranscriptTail(path: string): Promise<string | null> {
   } finally {
     await handle?.close().catch(() => {});
   }
+}
+
+/**
+ * The whole lines of `[from, to)`, for a read continuing in front of one whose
+ * text started at `to` (Issue #2470).
+ *
+ * `to` is always the start of a line — it is where the previous read's text
+ * began — so the only line that can be cut is the one at `from`, and it is
+ * dropped for the reason {@link readClaudeTranscriptTail} drops it.
+ *
+ * @returns The span, or null when fewer bytes came back than were asked for —
+ *   the file is no longer the one the reads before this were taken from
+ */
+async function readClaudeTranscriptSpan(
+  handle: FileHandle,
+  from: number,
+  to: number
+): Promise<ClaudeTranscriptSpan | null> {
+  const length = to - from;
+  const buffer = Buffer.alloc(length);
+  const { bytesRead } = await handle.read(buffer, 0, length, from);
+  if (bytesRead !== length) return null;
+  if (from === 0) return { text: buffer.toString('utf8'), startByte: 0 };
+
+  const firstBreak = buffer.indexOf(LINE_FEED);
+  if (firstBreak === -1) return { text: '', startByte: to };
+  return { text: buffer.subarray(firstBreak + 1).toString('utf8'), startByte: from + firstBreak + 1 };
+}
+
+/** What {@link readClaudeTranscriptTurns} answers. */
+interface ClaudeTranscriptTurnsRead {
+  readonly parsed: ClaudeTranscriptParse;
+  readonly built: ClaudeTurnBuild;
+  /** The file's size when it was opened. */
+  readonly size: number;
+  /** Where the parsed text starts in the file. */
+  readonly startByte: number;
+  /**
+   * True when the read stopped at {@link CLAUDE_TRANSCRIPT_MAX_TAIL_BYTES} with
+   * file still in front of it and no prompt record found: the newest turn's
+   * prompt record, if it has one, is further back than this reader goes.
+   */
+  readonly reachedLimit: boolean;
+}
+
+/**
+ * The transcript's last records, read back far enough to hold the newest turn's
+ * prompt record where that is possible (Issue #2470).
+ *
+ * The first read is {@link readClaudeTranscriptTail} and nothing else, and for a
+ * window holding a prompt record anywhere that is the whole of it: the records
+ * and the turns are exactly what they were before #2470. Only a window of
+ * orphaned assistant records and no prompt record is read further back — see
+ * {@link extendClaudeTranscriptRead}.
+ *
+ * @returns The records and turns, or null when the file could not be read
+ */
+async function readClaudeTranscriptTurns(
+  target: AgentInstanceRef,
+  path: string,
+  sessionId: string
+): Promise<ClaudeTranscriptTurnsRead | null> {
+  const window = await readClaudeTranscriptTail(path);
+  if (window === null) return null;
+
+  const parsed = parseClaudeTranscript(window.text);
+  const built = buildClaudeTurns(parsed.records, sessionId);
+  const read: ClaudeTranscriptTurnsRead = {
+    parsed,
+    built,
+    size: window.size,
+    startByte: window.startByte,
+    reachedLimit: false,
+  };
+  if (built.turns.length > 0 || built.orphanedAssistantRecords === 0 || window.startByte === 0) {
+    return read;
+  }
+  // A read further back that fails leaves the first window's answer standing,
+  // which is the pre-#2470 answer: no turn, and the scraper keeps it.
+  return (await extendClaudeTranscriptRead(target, path, sessionId, read)) ?? read;
+}
+
+/**
+ * Double the window until the newest turn's prompt record is in it (Issue #2470).
+ *
+ * 8, 16, 32, 64 MiB, stopping at the first size that brings a prompt record in,
+ * at the start of the file, or at {@link CLAUDE_TRANSCRIPT_MAX_TAIL_BYTES}. One
+ * sequence per ask, and one `claude-transcript-window-extended` line for it.
+ *
+ * Each step reads only the bytes in front of the previous one and puts their
+ * records in front of the records already parsed, so the cost of reaching a
+ * prompt 20 MiB back is one read of 20-odd MiB, not four overlapping ones. That
+ * is sound because the file is append-only and every read of one ask is bounded
+ * by the size it was first opened at: the bytes already read do not change. It
+ * also means the newest prompt record, once there is one, is in the span just
+ * read — nothing behind it held one — which is where its offset is looked up.
+ *
+ * @returns The widened read, or null when a read failed part-way
+ */
+async function extendClaudeTranscriptRead(
+  target: AgentInstanceRef,
+  path: string,
+  sessionId: string,
+  first: ClaudeTranscriptTurnsRead
+): Promise<ClaudeTranscriptTurnsRead | null> {
+  const { size } = first;
+  let handle: FileHandle | undefined;
+  try {
+    handle = await open(path, 'r');
+    let records = first.parsed.records;
+    let malformedLines = first.parsed.malformedLines;
+    let built = first.built;
+    let startByte = first.startByte;
+    let windowBytes = CLAUDE_TRANSCRIPT_TAIL_BYTES;
+    let promptOffsetFromEnd: number | null = null;
+
+    while (
+      built.turns.length === 0 &&
+      startByte > 0 &&
+      windowBytes < CLAUDE_TRANSCRIPT_MAX_TAIL_BYTES
+    ) {
+      windowBytes *= 2;
+      const span = await readClaudeTranscriptSpan(handle, Math.max(0, size - windowBytes), startByte);
+      if (span === null) return null;
+
+      const prefix = parseClaudeTranscript(span.text);
+      records = [...prefix.records, ...records];
+      malformedLines += prefix.malformedLines;
+      startByte = span.startByte;
+      built = buildClaudeTurns(records, sessionId);
+
+      const newest = built.turns.at(-1);
+      if (newest) promptOffsetFromEnd = claudeRecordOffsetFromEnd(span, newest.promptUuid, size);
+    }
+
+    logger.info('claude-transcript-window-extended', {
+      worktreeId: target.worktreeId,
+      instanceId: target.instanceId ?? target.cliToolId,
+      path,
+      fromBytes: CLAUDE_TRANSCRIPT_TAIL_BYTES,
+      toBytes: windowBytes,
+      size,
+      // Null when no prompt record was found; see `reachedLimit`.
+      promptOffsetFromEnd,
+      records: records.length,
+    });
+
+    return {
+      parsed: { records, malformedLines },
+      built,
+      size,
+      startByte,
+      reachedLimit: built.turns.length === 0 && startByte > 0,
+    };
+  } catch (error) {
+    logger.warn('claude-transcript-read-failed', {
+      path,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  } finally {
+    await handle?.close().catch(() => {});
+  }
+}
+
+/**
+ * How far from the end of the file the line holding this record starts, or null.
+ *
+ * The number `claude-transcript-window-extended` reports, and nothing branches
+ * on it: it says how much bigger than the first window the turn was. A line is
+ * accepted only once it parses as the record with this `uuid`, because the same
+ * string is also the next record's `parentUuid`.
+ */
+function claudeRecordOffsetFromEnd(
+  span: ClaudeTranscriptSpan,
+  uuid: string,
+  size: number
+): number | null {
+  const { text } = span;
+  for (let at = text.indexOf(uuid); at !== -1; at = text.indexOf(uuid, at + uuid.length)) {
+    const lineStart = text.lastIndexOf('\n', at) + 1;
+    const lineEnd = text.indexOf('\n', at);
+    let record: ClaudeTranscriptRecord | null = null;
+    try {
+      record = readClaudeTranscriptRecord(
+        JSON.parse(text.slice(lineStart, lineEnd === -1 ? text.length : lineEnd))
+      );
+    } catch {
+      // Not a whole record; keep looking.
+    }
+    if (record?.uuid === uuid) {
+      return size - span.startByte - Buffer.byteLength(text.slice(0, lineStart), 'utf8');
+    }
+  }
+  return null;
+}
+
+/** A turn with no prompt record writes no user row; see {@link recordClaudeUserTurn}. */
+const NO_USER_ROW: RecordedUserTurn = { outcome: 'skipped', messageId: null, timestampMs: null };
+
+/**
+ * Save what can be read of a turn whose prompt record is out of reach (Issue #2470).
+ *
+ * The safety net under {@link CLAUDE_TRANSCRIPT_MAX_TAIL_BYTES}: the window has
+ * been widened as far as it goes and still holds no prompt record, so there is
+ * no prompt `uuid` to key a row on and no user row to write. What the window
+ * does hold is the turn's end — the part the operator most wants, and the part a
+ * long turn's pane has scrolled furthest past — and this writes that rather than
+ * leave the turn with no row at all. The body opens with
+ * {@link CLAUDE_TURN_HEAD_MISSING_MARKER}, so it never reads as the whole reply.
+ *
+ * Everything that makes a prompt-opened row safe to write applies unchanged,
+ * because the row goes through the same {@link writeClaudeTurn}: an open turn is
+ * refused and reported `not_yet_closed` (#2264, #2436), an empty one is handed
+ * back to the scraper, and a second read finds the row by its key and answers
+ * true. The key is the one difference, and {@link buildHeadlessClaudeTurn} says
+ * why it can be written under at all: it names the record that closed the turn,
+ * which every later read sees too.
+ *
+ * Neither the live bubble's body nor its key. {@link collectHeadlessClaudeTurn}
+ * builds the bubble from the first window under the session's one live key, and
+ * that key, written, would make the session's next long turn read "already
+ * saved".
+ *
+ * @returns Whether History now holds the turn, marked as missing its beginning
+ */
+async function captureHeadlessClaudeTurn(
+  target: AgentInstanceRef,
+  records: readonly ClaudeTranscriptRecord[],
+  sessionId: string,
+  path: string,
+  report?: StructuredHistoryCaptureReport
+): Promise<boolean> {
+  const instanceId = target.instanceId ?? target.cliToolId;
+  const headless = buildHeadlessClaudeTurn(records, sessionId);
+  if (headless === null) {
+    logger.debug('claude-transcript-headless-unkeyed', {
+      worktreeId: target.worktreeId,
+      instanceId,
+      path,
+    });
+    return false;
+  }
+
+  const { turn } = headless;
+  const rendered = renderClaudeTurn(turn);
+  logger.info('claude-transcript-headless-turn', {
+    worktreeId: target.worktreeId,
+    instanceId,
+    sessionId: turn.sessionId,
+    requestId: claudeTurnRequestId(turn.promptUuid),
+    path,
+    assistantRecords: turn.assistantRecords,
+    overflowed: turn.overflowed,
+  });
+
+  const captured = await writeClaudeTurn(
+    target,
+    turn,
+    // An empty body stays empty, so the writer hands the turn back to the
+    // scraper instead of saving a row that is nothing but the marker.
+    rendered.body.length === 0 ? rendered : markClaudeTurnHeadMissing(rendered),
+    resolveAssistantTimestampMs(turn, NO_USER_ROW, headless.lastRecordAt, null),
+    path,
+    report
+  );
+  if (captured) {
+    // Issue #2437, for the reason the prompt-opened path gives.
+    await advanceCapturedLineForTranscriptTurn(target);
+  }
+  return captured;
+}
+
+/**
+ * A rendered turn with {@link CLAUDE_TURN_HEAD_MISSING_MARKER} as its first line.
+ *
+ * Held to {@link MAX_CLAUDE_TURN_BODY_LENGTH} the way `renderClaudeTurn` holds
+ * every body, so a turn already cut at its end is still cut the same way.
+ */
+function markClaudeTurnHeadMissing(rendered: ClaudeRenderedTurn): ClaudeRenderedTurn {
+  let body = `${CLAUDE_TURN_HEAD_MISSING_MARKER}\n\n${rendered.body}`;
+  if (body.length > MAX_CLAUDE_TURN_BODY_LENGTH) {
+    body =
+      body.slice(0, MAX_CLAUDE_TURN_BODY_LENGTH - CLAUDE_TURN_TRUNCATION_MARKER.length) +
+      CLAUDE_TURN_TRUNCATION_MARKER;
+  }
+  return { ...rendered, body };
 }
 
 /**
@@ -1101,7 +1541,9 @@ async function refreshClaudeTurnRows(
  *
  * `findMessageByRequestId` is both the idempotency check and the reason a
  * repeat poll does not duplicate the row: the id is derived from the prompt
- * record's `uuid`, which does not change between reads of the same file.
+ * record's `uuid` — or, for a turn whose prompt record is out of reach (Issue
+ * #2470), from the record that closed it (`claudeHeadlessTurnId`) — and neither
+ * changes between reads of the same file.
  *
  * Answering **true** for a turn that was already saved is deliberate. It means
  * "History holds this turn as Markdown", which is exactly what the poller needs

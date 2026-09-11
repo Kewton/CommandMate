@@ -271,6 +271,55 @@ export function claudePromptRequestId(promptUuid: string): string {
 }
 
 /**
+ * The segment a Claude turn id opens with when no prompt record names the turn
+ * (Issue #2199, made durable by Issue #2470).
+ *
+ * `partial:` cannot be the start of a UUID, so no turn id built on it can equal
+ * a prompt record's `uuid` — which is what keeps every key built on it apart
+ * from {@link claudeTurnRequestId} of a real prompt.
+ */
+export const CLAUDE_HEADLESS_TURN_ID_PREFIX = 'partial:';
+
+/**
+ * The turn id for a Claude reply whose prompt record could not be read (Issue #2470).
+ *
+ * `partial:<sessionId>:<closingRecordUuid>`, handed to {@link claudeTurnRequestId}
+ * where a prompt `uuid` would otherwise go. A turn longer than the widest window
+ * `lib/hooks/sources/claude/history` reads back has no prompt record in reach,
+ * and #2470 saves what can be read of it rather than nothing. That row still
+ * needs a key that does both jobs every key in this module does — idempotency
+ * and provenance — without the record that normally provides one.
+ *
+ * Three candidates were available, and the other two fail on the first job:
+ *
+ *  - **`partial:<sessionId>`**, the live bubble's key (#2199). One per session,
+ *    so a second long turn in the same session would find the first one's row,
+ *    read "already saved" and be lost. It stays the live key and only that.
+ *  - **The first assistant record in the window.** The window is the file's last
+ *    N bytes, and Claude keeps appending after a turn closes — measured on
+ *    2026-09-11 over 298 transcripts, the records between a closing `end_turn`
+ *    and the next prompt were `attachment` (1,929), `system:turn_duration`
+ *    (1,927), `system:stop_hook_summary` (1,923), `queue-operation` (1,487) and
+ *    more. Every one of them moves the window's head, so two reads of one
+ *    finished turn could name two different records and write the reply twice.
+ *  - **The record that closed the turn** — its last assistant record. In the
+ *    same census, across 1,973 closed turns, not one assistant record followed a
+ *    closing `end_turn` before the next prompt. Every read that can see the turn
+ *    at all therefore names the same record, and no two turns share one.
+ *
+ * The second `:` is what separates this from the live key: a session id is a
+ * UUID and has none. {@link correlatedPromptRequestId} turns it into a
+ * `claude-prompt:partial:…` id that no writer produces, which is correct — a
+ * turn with no prompt record in reach gets no user row.
+ *
+ * @param sessionId - The session the turn was read from
+ * @param closingRecordUuid - `uuid` of the turn's last assistant record
+ */
+export function claudeHeadlessTurnId(sessionId: string, closingRecordUuid: string): string {
+  return `${CLAUDE_HEADLESS_TURN_ID_PREFIX}${sessionId}:${closingRecordUuid}`;
+}
+
+/**
  * The row id for one codex turn (Issue #2197).
  *
  * The turn is named by codex's own **`turn_id`**, which it stamps on
