@@ -33,6 +33,17 @@ import {
 const DEFAULT_AUTO_YES_DURATION = '1h';
 
 /**
+ * The message length `send` is verified to deliver whole (Issue #2464): the
+ * largest body sent through the paste path to claude, codex, command-code and
+ * antigravity and found byte-identical in each tool's own transcript
+ * (`docs/design/2464-long-body-repro-matrix.md`). Stated in `--help` so a
+ * caller can choose "put it in a file" instead. A documented guarantee, not an
+ * enforced cap: a longer message takes the same path and the same check.
+ */
+const SEND_VERIFIED_MAX_KIB = 48;
+const SEND_VERIFIED_MAX_LINES = 240;
+
+/**
  * Code the send API returns when the session is blocked on a prompt (Issue
  * #1708). Mirrors PROMPT_WAITING_CODE in src/lib/session/prompt-waiting-guard.ts;
  * duplicated rather than imported so the CLI bundle does not pull the server's
@@ -227,6 +238,14 @@ no pane to scrape. Watch it with \`commandmate relays\`, withdraw it with
 Exit 2 when the relay is refused: you are answering a relayed message already
 (pass --allow-relay-chain), the chain would exceed 3 hops, or an open relay
 between these two sessions exists. Nothing is sent in that case.
+
+Message length (Issue #2464): up to ${SEND_VERIFIED_MAX_KIB} KiB and ${SEND_VERIFIED_MAX_LINES} lines is verified
+to arrive whole on claude, codex, command-code and antigravity. A message over
+512 bytes is pasted into the agent's composer as one bracketed paste, and Enter
+waits until the composer shows all of it. If it never does, nothing is
+submitted and send exits 99 with "Message body did not arrive intact" -- it
+does not print "Message sent.". For a longer brief, write it to a file in the
+worktree and send a short message that tells the agent to read that file.
 `)
     .action(async (worktreeId: string, message: string | undefined, options: SendOptions) => {
       try {
