@@ -18,8 +18,12 @@
  *   401 / 403                       -> auth error; stop
  *   3xx / HTML / unparseable        -> cannot classify; stop
  *
- * The last test pins the other half of DR2-008: the fallback is a compatibility
- * path, not a second implementation to grow. It must stay two stages.
+ * The last tests pin the other half of DR2-008: the fallback is a compatibility
+ * path, not a second implementation to grow. It still chooses a tool in two
+ * stages; the one thing it shares with the server beyond them is refusing the
+ * contradiction Issue #2487 found — an unregistered tool-named instance given a
+ * different `--agent` — because a copy that obeys it sends somewhere the server
+ * would have refused to.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -151,6 +155,37 @@ describe('a server that declares the capability', () => {
     ]);
     expect(mockConsoleError).not.toHaveBeenCalled();
   });
+
+  /**
+   * Issue #2487: the server marks a contradiction of the primary anchor with
+   * `primaryAnchor`, and the sentence the CLI prints depends on it, so the
+   * marker has to survive the trip.
+   */
+  it('hands a primary-anchor conflict through with its marker', async () => {
+    const conflict = {
+      instanceId: 'antigravity',
+      rosterCliTool: 'antigravity',
+      requestedCliTool: 'command-code',
+      primaryAnchor: true,
+    };
+    mockServer((url) =>
+      url.includes('/api/capabilities')
+        ? CAPABLE
+        : { status: 200, body: JSON.stringify({ cliToolId: 'antigravity', instanceId: 'antigravity', resolvedBy: 'primary', conflict }) }
+    );
+
+    const target = await resolveSessionTarget(client(), 'wt1', {
+      instanceId: 'antigravity',
+      requestedCliTool: 'command-code',
+    });
+
+    expect(target).toEqual({
+      cliToolId: 'antigravity',
+      instanceId: 'antigravity',
+      resolvedBy: 'primary',
+      conflict,
+    });
+  });
 });
 
 describe('a real 404 — the one branch that degrades', () => {
@@ -158,6 +193,13 @@ describe('a real 404 — the one branch that degrades', () => {
     ['an empty body', { status: 404, contentType: null }],
     ["Next.js's JSON 404", { status: 404, body: JSON.stringify({ error: 'Not Found' }) }],
   ];
+
+  /** An old server with the given roster: no capability, the roster readable. */
+  function oldServer(roster: Array<{ id: string; cliTool: string }>): Recorded[] {
+    return mockServer((url) =>
+      url.includes('/api/capabilities') ? { status: 404, contentType: null } : rosterReply(roster)
+    );
+  }
 
   it.each(notFoundBodies)('treats %s as an old server and resolves locally', async (_name, reply) => {
     mockServer((url) => (url.includes('/api/capabilities') ? reply : rosterReply([{ id: 'codex', cliTool: 'codex' }])));
@@ -169,11 +211,7 @@ describe('a real 404 — the one branch that degrades', () => {
 
   /** §10.6 item 6: a degraded resolution is never silent. */
   it('warns on stderr, naming the degradation and the fix', async () => {
-    mockServer((url) =>
-      url.includes('/api/capabilities')
-        ? { status: 404, contentType: null }
-        : rosterReply([{ id: 'codex', cliTool: 'codex' }])
-    );
+    oldServer([{ id: 'codex', cliTool: 'codex' }]);
 
     await resolveSessionTarget(client(), 'wt1', { instanceId: 'codex' });
 
@@ -191,16 +229,101 @@ describe('a real 404 — the one branch that degrades', () => {
    * exactly as it did before this Issue.
    */
   it('does not grow the primary-anchor stage the server has', async () => {
-    mockServer((url) =>
-      url.includes('/api/capabilities')
-        ? { status: 404, contentType: null }
-        : rosterReply([])
-    );
+    oldServer([]);
 
     const target = await resolveSessionTarget(client(), 'wt1', { instanceId: 'opencode' });
 
     expect(target.cliToolId).toBeUndefined();
     expect(target.resolvedBy).toBe('client-fallback');
+  });
+
+  /**
+   * Issue #2487. With no roster row, an id that is itself a CLI tool id is that
+   * tool's primary instance to the server, and a different `--agent` is a
+   * contradiction the server refuses. Obeying it here would send
+   * `--instance antigravity --agent command-code` to an ad-hoc command-code
+   * session the old server's `/send` happily starts, while anything that later
+   * names `antigravity` alone reads agy. Reporting the contradiction is not
+   * resolving the anchor: without `--agent` the id still resolves to nothing
+   * (the test above).
+   */
+  it('reports an --agent that contradicts an unregistered tool-named instance, as the server does', async () => {
+    oldServer([]);
+
+    const target = await resolveSessionTarget(client(), 'wt1', {
+      instanceId: 'antigravity',
+      requestedCliTool: 'command-code',
+    });
+
+    expect(target).toEqual({
+      cliToolId: 'antigravity',
+      instanceId: 'antigravity',
+      resolvedBy: 'client-fallback',
+      conflict: {
+        instanceId: 'antigravity',
+        rosterCliTool: 'antigravity',
+        requestedCliTool: 'command-code',
+        primaryAnchor: true,
+      },
+    });
+  });
+
+  it('takes an --agent that agrees with an unregistered tool-named instance', async () => {
+    oldServer([]);
+
+    const target = await resolveSessionTarget(client(), 'wt1', {
+      instanceId: 'command-code',
+      requestedCliTool: 'command-code',
+    });
+
+    expect(target).toEqual({
+      cliToolId: 'command-code',
+      instanceId: 'command-code',
+      resolvedBy: 'client-fallback',
+      conflict: null,
+    });
+  });
+
+  /**
+   * The negative control for Issue #2487: `codex-3` only looks like a tool id,
+   * so `--agent` stays the only declaration there is — the `send --agent …
+   * --instance … --register` flow depends on it.
+   */
+  it('still takes --agent as given for an ad-hoc id that only resembles a tool id', async () => {
+    oldServer([]);
+
+    const target = await resolveSessionTarget(client(), 'wt1', {
+      instanceId: 'codex-3',
+      requestedCliTool: 'command-code',
+    });
+
+    expect(target).toEqual({
+      cliToolId: 'command-code',
+      instanceId: 'codex-3',
+      resolvedBy: 'client-fallback',
+      conflict: null,
+    });
+  });
+
+  /** A roster row still outranks the anchor, and its contradiction carries no marker. */
+  it('keeps a roster contradiction as it was, without the primary-anchor marker', async () => {
+    oldServer([{ id: 'antigravity', cliTool: 'antigravity' }]);
+
+    const target = await resolveSessionTarget(client(), 'wt1', {
+      instanceId: 'antigravity',
+      requestedCliTool: 'command-code',
+    });
+
+    expect(target).toEqual({
+      cliToolId: 'antigravity',
+      instanceId: 'antigravity',
+      resolvedBy: 'client-fallback',
+      conflict: {
+        instanceId: 'antigravity',
+        rosterCliTool: 'antigravity',
+        requestedCliTool: 'command-code',
+      },
+    });
   });
 });
 
