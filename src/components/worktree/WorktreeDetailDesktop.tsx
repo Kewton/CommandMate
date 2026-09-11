@@ -806,6 +806,10 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
 
         History now lives inside `TerminalContainer` (passed as `rightPane`),
         so the desktop layout itself no longer takes a `historyPane` prop.
+
+        Issue #2481: `overflow-hidden` clips without a scrollbar, so nothing in
+        this column may count on overflowing it. DesktopHeader fits itself to
+        the column's width instead (see `useDesktopHeaderFit`).
       */}
       <div className="flex h-full overflow-hidden relative">
         {activityBarMemo}
