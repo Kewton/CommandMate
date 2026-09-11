@@ -36,6 +36,12 @@ import type { NormalizedFrame } from '../types';
  * them, which after `compactBlankRows` is a handful of rows up even when the
  * live pane put ~870 blank rows in between.
  *
+ * The same finder claims the right-aligned session-diff HUD row
+ * (`+N files edited before this session (show)`, Issue #2468). On the
+ * AskUserQuestion confirmation screen, which has no input box and no footer,
+ * that row is the bottom of the frame; before the finder knew it, it WAS the
+ * tail, and the dialog above it read as finished output.
+ *
  * Returning an index rather than a boolean keeps this usable by anything else
  * that needs "the last thing Claude actually said".
  */

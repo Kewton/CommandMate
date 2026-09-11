@@ -245,6 +245,26 @@ describe('[#2457] POST /prompt-response on a Claude pane', () => {
     expect(sendSpecialKeys).toHaveBeenCalled();
   });
 
+  it('still answers that screen under claude-cli 2.1.267\'s files-edited HUD (#2468)', async () => {
+    // The HUD row right-aligned at the bottom of this live capture used to be
+    // read as the screen's footer, and the route refused a dialog that was open.
+    const { captureSessionOutputFresh } = await import('@/lib/session/cli-session');
+    const { sendSpecialKeys } = await import('@/lib/tmux/tmux');
+    const capture = path.resolve(
+      __dirname,
+      '../../fixtures/claude-live-2468/askuserquestion-submit-files-edited-panel.txt',
+    );
+    vi.mocked(captureSessionOutputFresh).mockResolvedValue(readFileSync(capture, 'utf8'));
+
+    const response = await promptResponse(createRequest(WT, { answer: '1' }), {
+      params: Promise.resolve({ id: WT }),
+    });
+    const data = await response.json();
+
+    expect(data.success).toBe(true);
+    expect(sendSpecialKeys).toHaveBeenCalled();
+  });
+
   it('leaves the capture-failure path exactly where it was', async () => {
     // A negative verdict and an unreadable pane are different things: #287's
     // fallback answers a client-declared prompt when the capture threw, and

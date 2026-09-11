@@ -511,6 +511,17 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
         if (!response.ok) {
           throw new Error(`Failed to send prompt response: ${response.status}`);
         }
+        // Issue #2468: a refusal is a 200 `{ success: false, reason }` —
+        // `prompt_no_longer_active` when the re-captured pane no longer reads as
+        // the dialog — so `ok` alone is not "answered". Clearing the card on a
+        // refusal hid a dialog that was still open: the next poll put it
+        // straight back, and nothing ever said why the answer went nowhere.
+        const result = (await response.json().catch(() => null)) as { success?: unknown } | null;
+        if (result?.success === false) {
+          showToast?.(t('promptResponse.refused'), 'warning');
+          await refresh();
+          return;
+        }
         clearPrompt();
         await refresh();
       } catch (err) {
@@ -519,7 +530,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
         setPromptAnswering(false);
       }
     },
-    [worktreeId, cliToolId, resolvedInstanceId, prompt.data, setPromptAnswering, clearPrompt, refresh],
+    [worktreeId, cliToolId, resolvedInstanceId, prompt.data, setPromptAnswering, clearPrompt, refresh, showToast, t],
   );
 
   const handlePromptDismiss = useCallback(() => {

@@ -115,11 +115,46 @@ const CLAUDE_TASK_PANEL_HEADER_PATTERN = /^\s*\d{1,3}\s+tasks?\s+\(\d+\s+done\b/
 const CLAUDE_TASK_PANEL_ROW_PATTERN = /^\s*[◼◻]\s/;
 
 /**
- * Line indices belonging to a Claude task panel within [start, end).
+ * [Issue #2468] Claude Code 2.1.267's session-diff HUD row, in the two
+ * spellings measured on a live pane (tests/fixtures/claude-live-2468):
+ *   "No changes this session"
+ *   "+28 files edited before this session (show)"
  *
- * Walks down from each header row for as long as rows keep looking like panel
- * content (task rows or the collapsed `… +N …` summary). The first line that is
- * neither ends the block, so a panel that abuts other content cannot swallow it.
+ * Chrome like the task panel, but a single row and RIGHT-aligned: on a
+ * 200-column pane it is ~110 columns of padding and then the text. It is
+ * therefore matched on the trimmed row — a reader that slices the row from the
+ * left sees nothing but blanks.
+ *
+ * It broke two readers. Pass 2 below parses `+2 files edited …` as option 2,
+ * which poisons the real `1. / 2.` above it the way `… +2 completed` did in
+ * #1708. And `findClaudeTranscriptTail` took it for the last transcript row, so
+ * `detectClaudeDialog` read it as the footer of the AskUserQuestion
+ * confirmation screen — a dialog that draws no footer — and refused a dialog
+ * that was open on screen: Auto-Yes, the UI's answer and `commandmate respond`
+ * all got `prompt_no_longer_active`.
+ *
+ * `files?` is the one spelling not seen on a pane: a one-file session was not
+ * captured, and the singular is accepted so that it is not the case that
+ * regresses. Everything else is literal, for the same reason the glyph set
+ * above is an allowlist. Anchored at both ends, no nested quantifiers — ReDoS
+ * safe (S4-001).
+ */
+const CLAUDE_SESSION_DIFF_HUD_PATTERN =
+  /^(?:No changes this session|\+\d+ files? edited before this session \(show\))$/;
+
+/**
+ * Line indices belonging to Claude's bottom-pinned panels within [start, end).
+ *
+ * Two panels, both chrome rather than transcript or prompt:
+ *  - the task panel (#1708). Walks down from each header row for as long as
+ *    rows keep looking like panel content (task rows or the collapsed `… +N …`
+ *    summary). The first line that is neither ends the block, so a panel that
+ *    abuts other content cannot swallow it.
+ *  - the session-diff HUD (#2468), a single row claimed on its own.
+ *
+ * Pass 2 here, `findClaudeTranscriptTail` and `detectClaudeDialog`'s footer
+ * guard all read this one set, so they cannot disagree about which rows are
+ * chrome.
  *
  * @param lines - Full frame, already ANSI/box stripped
  * @param start - First index to consider (inclusive)
@@ -129,6 +164,10 @@ const CLAUDE_TASK_PANEL_ROW_PATTERN = /^\s*[◼◻]\s/;
 export function findClaudeTaskPanelLines(lines: string[], start: number, end: number): Set<number> {
   const panelLines = new Set<number>();
   for (let i = Math.max(0, start); i < Math.min(end, lines.length); i++) {
+    if (CLAUDE_SESSION_DIFF_HUD_PATTERN.test(lines[i].trim())) {
+      panelLines.add(i);
+      continue;
+    }
     if (!CLAUDE_TASK_PANEL_HEADER_PATTERN.test(lines[i])) continue;
     panelLines.add(i);
     for (let j = i + 1; j < Math.min(end, lines.length); j++) {

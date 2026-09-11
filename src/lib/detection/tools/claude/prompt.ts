@@ -34,9 +34,20 @@
  * bullet — ` ● Which color scheme do you prefer?` is a live row of
  * `askuserquestion-submit-taskpanel.txt`. Accepting it here would let Claude's
  * own prose vouch for itself, which is the #1896 failure with a different glyph.
+ *
+ * ## Claude's pinned panels are not a footer (Issue #2468)
+ *
+ * claude-cli 2.1.267 draws a right-aligned HUD row at the bottom of the pane
+ * (`+28 files edited before this session (show)` / `No changes this session`,
+ * `tests/fixtures/claude-live-2468/`). Under the footer-less AskUserQuestion
+ * screen it was read as that screen's footer, failed the footer test, and the
+ * open dialog was refused. The footer guard therefore reads the rows under the
+ * options through `findClaudeTaskPanelLines` — the same set the transcript-tail
+ * walk steps over — and a footer made only of panel rows is no footer.
  */
 
 import { stripBoxDrawing } from '../../cli-patterns';
+import { findClaudeTaskPanelLines } from '../../prompt-detect-multiple-choice';
 import { findNumberedOptionBlock } from '../dialog-block';
 import type { DialogVerdict, NormalizedFrame } from '../types';
 
@@ -92,6 +103,26 @@ function readContextAbove(lines: readonly string[], firstRow: number): string {
   return rows.join('\n');
 }
 
+/**
+ * The non-blank rows in [from, end) — the block's footer — without Claude's
+ * pinned panels (Issue #2468).
+ *
+ * `findClaudeTranscriptTail` already steps over the panels, so normally none is
+ * in range. #2468 is what "normally" cost: a HUD row the tail walk did not know
+ * became the tail, then the footer, and the one dialog with no footer of its own
+ * was refused over a row of chrome. Reading the range through the same row set
+ * the tail walk uses keeps the two rules from disagreeing about what is chrome.
+ */
+function readFooter(lines: string[], from: number, end: number): string {
+  const panelRows = findClaudeTaskPanelLines(lines, from, end);
+  const rows: string[] = [];
+  for (let i = from; i < Math.min(end, lines.length); i++) {
+    const row = lines[i].trim();
+    if (row !== '' && !panelRows.has(i)) rows.push(row);
+  }
+  return rows.join('\n');
+}
+
 function classify(context: string, footer: string): string {
   if (CLAUDE_ASK_USER_QUESTION_PATTERN.test(context)) return 'ask_user';
   if (CLAUDE_PICKER_FOOTER_PATTERN.test(footer)) return 'picker';
@@ -117,7 +148,8 @@ export function detectClaudeDialog(
   // `frame.contentLines` is valid here too — and a frame whose gutter the
   // Auto-Yes poller already removed parses to the same rows.
   const lines = stripBoxDrawing(frame.clean).split('\n');
-  const block = findNumberedOptionBlock(lines, context.transcriptTail + 1);
+  const end = context.transcriptTail + 1;
+  const block = findNumberedOptionBlock(lines, end);
   if (!block) return null;
 
   // Guard 1: the selection cursor. Claude puts it on the highlighted option of
@@ -129,8 +161,9 @@ export function detectClaudeDialog(
   // Guard 2: whatever sits between the options and the end of the transcript
   // must be one of Claude's dialog footers, or nothing at all. A completion
   // marker (`✻ Brewed for 24s`) or a fresh line of prose there means the block
-  // is finished output with something after it, not an open dialog.
-  const footer = block.footer.trim();
+  // is finished output with something after it, not an open dialog. Claude's
+  // pinned panels are neither, so they are read out of it first (Issue #2468).
+  const footer = readFooter(lines, block.lastRow + 1, end);
   if (footer !== '' && !CLAUDE_DIALOG_FOOTER_PATTERN.test(footer)) return null;
 
   return {
