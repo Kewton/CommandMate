@@ -26,9 +26,12 @@
  *
  * The roster outranks the explicit request because it is the user-maintained
  * declaration of what a named instance is; a contradiction is reported rather
- * than silently resolved. Callers decide what to do with it: routes with a side
- * effect answer 400, read-only routes answer 200 and surface the conflict in
- * the payload (design §4 D5 / DR3-015).
+ * than silently resolved. A tool-named instance id is a declaration too — the
+ * id `codex` says which agent it is — so with no roster row an explicit request
+ * for another tool is reported against the primary anchor the same way (Issue
+ * #2487). Callers decide what to do with it: routes with a side effect answer
+ * 400, read-only routes answer 200 and surface the conflict in the payload
+ * (design §4 D5 / DR3-015).
  */
 
 import type Database from 'better-sqlite3';
@@ -63,11 +66,27 @@ export type SessionTargetResolvedBy =
   | 'fallback'
   | 'client-fallback';
 
-/** An explicit request that contradicts the roster (design §4 D5 決定 2). */
+/**
+ * An explicit request that contradicts what the instance is declared as
+ * (design §4 D5 決定 2): its roster row, or — with no row — its own id when
+ * that id names a CLI tool (the primary-instance anchor, #868; Issue #2487).
+ */
 export interface SessionTargetConflict {
   instanceId: string;
+  /**
+   * The tool the instance is declared as. Named for the roster, the only
+   * declaration there was until Issue #2487; for a primary-anchor conflict it
+   * is the instance id itself.
+   */
   rosterCliTool: CLIToolType;
   requestedCliTool: CLIToolType;
+  /**
+   * Set when the declaration is the primary-instance anchor, not a roster row.
+   * Absent for a roster contradiction, so the payloads that already carry one
+   * are unchanged; it exists so the message offers only ways out that exist —
+   * there is no roster entry to update.
+   */
+  primaryAnchor?: true;
 }
 
 /** Machine-readable reason code for a contradiction, shared by every route. */
@@ -80,9 +99,10 @@ export interface SessionTarget {
   instanceId: string;
   resolvedBy: SessionTargetResolvedBy;
   /**
-   * Present only when the caller named a tool the roster contradicts. Read-only
-   * routes resolve anyway (roster wins) and carry this so the contradiction is
-   * visible instead of silently corrected (DR3-015).
+   * Present only when the caller named a tool the instance's declaration — its
+   * roster row, or its own tool-named id (#868) — contradicts. Read-only routes
+   * resolve anyway (the declaration wins) and carry this so the contradiction
+   * is visible instead of silently corrected (DR3-015).
    */
   conflict?: SessionTargetConflict;
 }
@@ -105,7 +125,8 @@ export interface ResolveSessionTargetOptions {
  * @param db - Database instance
  * @param worktreeId - Worktree ID (already canonicalized and validated)
  * @param options - Targeting signals carried by the request
- * @returns The resolved target, with `conflict` set when the request contradicts the roster
+ * @returns The resolved target, with `conflict` set when the request contradicts
+ *   the roster or the primary-instance anchor
  */
 export function resolveSessionTarget(
   db: Database.Database,
@@ -145,9 +166,27 @@ export function resolveSessionTarget(
     return target;
   }
 
-  // The roster does not know this instance (the ad-hoc `send --instance <new-id>`
-  // flow), so an explicit tool is the only declaration there is.
+  // The roster does not know this instance, so for an ad-hoc id (the
+  // `send --instance <new-id>` flow) an explicit tool is the only declaration
+  // there is. A tool-named id declares itself (#868, below), and a request for
+  // a different tool contradicts that exactly as it would a roster row (Issue
+  // #2487). Taking the request instead started `mcbd-<requested>-<wt>-<id>`, a
+  // session nothing that names the id alone ever reads: `ask --instance
+  // antigravity --agent command-code` sent there, then waited on agy.
   if (requestedCliTool) {
+    if (isCliToolType(instanceId) && requestedCliTool !== instanceId) {
+      return {
+        cliToolId: instanceId,
+        instanceId,
+        resolvedBy: 'primary',
+        conflict: {
+          instanceId,
+          rosterCliTool: instanceId,
+          requestedCliTool,
+          primaryAnchor: true,
+        },
+      };
+    }
     return { cliToolId: requestedCliTool, instanceId, resolvedBy: 'explicit' };
   }
 
@@ -220,11 +259,19 @@ export function resolveSessionTargetStrict(
 }
 
 /**
- * The sentence shown to a human when the roster and the request disagree.
- * Names both declarations and the three ways out, because the operator has to
- * pick which one is wrong.
+ * The sentence shown to a human when the instance's declaration and the
+ * request disagree. Names both declarations and the three ways out, because the
+ * operator has to pick which one is wrong. A primary-anchor conflict has no
+ * roster entry to update, so its third way out is another instance.
  */
 export function describeSessionTargetConflict(conflict: SessionTargetConflict): string {
+  if (conflict.primaryAnchor) {
+    return (
+      `Agent instance '${conflict.instanceId}' is the primary instance of ${conflict.rosterCliTool}, `
+      + `but ${conflict.requestedCliTool} was requested. `
+      + `Omit the agent, pass ${conflict.rosterCliTool}, or target a ${conflict.requestedCliTool} instance instead.`
+    );
+  }
   return (
     `Agent instance '${conflict.instanceId}' is registered as ${conflict.rosterCliTool}, `
     + `but ${conflict.requestedCliTool} was requested. `
