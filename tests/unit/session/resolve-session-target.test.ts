@@ -188,6 +188,67 @@ describe('resolveSessionTarget', () => {
       });
     });
 
+    /**
+     * Issue #2487 (UAT 2026-09-11, TC-79-4B). The anchor is a declaration in
+     * its own right — the id `antigravity` says which agent it is — so a
+     * request for another tool contradicts it exactly as it would a roster
+     * row, and has to be reported with no row at all: the UAT worktree had
+     * none (the claude/codex/antigravity rows `instances --json` shows are
+     * derived from selectedAgents, not registered). Taken as an ad-hoc
+     * declaration instead, `ask --instance antigravity --agent command-code`
+     * started `mcbd-command-code-<wt>-antigravity`, sent the message there,
+     * and then waited on agy until exit 124.
+     */
+    it('reports a request that contradicts an unregistered tool-named instance', () => {
+      expect(resolveSessionTarget(db, WORKTREE_ID, {
+        instanceId: 'antigravity',
+        requestedCliTool: 'command-code',
+      })).toEqual({
+        cliToolId: 'antigravity',
+        instanceId: 'antigravity',
+        resolvedBy: 'primary',
+        conflict: {
+          instanceId: 'antigravity',
+          rosterCliTool: 'antigravity',
+          requestedCliTool: 'command-code',
+          primaryAnchor: true,
+        },
+      });
+    });
+
+    /**
+     * Issue #2479's `ask --agent <tool>` alone resolves with the tool id as the
+     * selector, so the request and the anchor agree and there is nothing to
+     * report.
+     */
+    it('takes a request that agrees with an unregistered tool-named instance', () => {
+      expect(resolveSessionTarget(db, WORKTREE_ID, {
+        instanceId: 'command-code',
+        requestedCliTool: 'command-code',
+      })).toEqual({
+        cliToolId: 'command-code',
+        instanceId: 'command-code',
+        resolvedBy: 'explicit',
+      });
+    });
+
+    /**
+     * The negative control for Issue #2487: only an id that IS a CLI tool id
+     * declares a tool. `codex-3` merely looks like one, so the request is still
+     * the only declaration there is — `send --agent … --instance …
+     * --register` depends on that — even for a tool the name does not suggest.
+     */
+    it('still takes the request for an ad-hoc id that only resembles a tool id', () => {
+      expect(resolveSessionTarget(db, WORKTREE_ID, {
+        instanceId: 'codex-3',
+        requestedCliTool: 'command-code',
+      })).toEqual({
+        cliToolId: 'command-code',
+        instanceId: 'codex-3',
+        resolvedBy: 'explicit',
+      });
+    });
+
     it("falls through to the worktree's agent for an unregistered, unnamed instance", () => {
       seedRoster();
       expect(resolveSessionTarget(db, WORKTREE_ID, { instanceId: 'worker-z' })).toEqual({
@@ -236,6 +297,29 @@ describe('resolveSessionTarget', () => {
       });
     });
 
+    /**
+     * Issue #2487: a strict caller refuses on `conflict` alone, so a
+     * primary-anchor contradiction is refused with the same reason code as a
+     * roster one — 400 from the side-effect routes, and exit 2 from the CLI's
+     * strict `resolveInstanceTarget` (`ask`, `send`, `respond`) before anything
+     * is sent.
+     */
+    it('refuses a contradiction of the primary anchor the same way', () => {
+      expect(resolveSessionTargetStrict(db, WORKTREE_ID, {
+        instanceId: 'antigravity',
+        requestedCliTool: 'command-code',
+      })).toEqual({
+        ok: false,
+        error: INSTANCE_TOOL_CONFLICT,
+        conflict: {
+          instanceId: 'antigravity',
+          rosterCliTool: 'antigravity',
+          requestedCliTool: 'command-code',
+          primaryAnchor: true,
+        },
+      });
+    });
+
     it('names both declarations and the ways out', () => {
       const message = describeSessionTargetConflict({
         instanceId: 'codex',
@@ -245,6 +329,24 @@ describe('resolveSessionTarget', () => {
       expect(message).toContain("'codex'");
       expect(message).toContain('registered as codex');
       expect(message).toContain('claude was requested');
+    });
+
+    /**
+     * No roster row stands behind a primary-anchor conflict, so "registered
+     * as" would be untrue and "update the instance's roster entry" a dead end
+     * (`instances add --id antigravity` answers "already exists").
+     */
+    it('does not point a primary-anchor conflict at a roster entry it does not have', () => {
+      const message = describeSessionTargetConflict({
+        instanceId: 'antigravity',
+        rosterCliTool: 'antigravity',
+        requestedCliTool: 'command-code',
+        primaryAnchor: true,
+      });
+      expect(message).toContain("'antigravity' is the primary instance of antigravity");
+      expect(message).toContain('command-code was requested');
+      expect(message).toContain('pass antigravity');
+      expect(message).not.toMatch(/registered|roster/);
     });
   });
 });

@@ -374,3 +374,38 @@ describe('ask: the targeting that Issue #2479 leaves alone', () => {
     expect(requestsTo('/send')).toHaveLength(0);
   });
 });
+
+/**
+ * Issue #2487 (UAT 2026-09-11, TC-79-4B), end to end: a worktree with no
+ * roster rows, `--instance` naming a tool's primary instance and `--agent`
+ * naming a different tool. Before the fix the resolver took `--agent` as the
+ * declaration of an ad-hoc instance, so the message went to a new
+ * `mcbd-command-code-<wt>-antigravity` while the wait watched agy. The
+ * resolution runs through the REAL server resolver, so this pins both halves:
+ * the server reports the contradiction, and `ask` refuses it before the send
+ * with a sentence that does not point at a roster entry there is none of.
+ */
+describe('ask --instance <tool> --agent <another tool> (Issue #2487)', () => {
+  it('exits 2 having sent nothing, rather than sending to an ad-hoc session and waiting on the primary', async () => {
+    startServer({
+      antigravity: { doneAt: NOW + 5_000, reply: 'never asked' },
+      'command-code': { doneAt: NOW + 5_000, reply: 'never asked' },
+    });
+    mockExit.mockImplementationOnce((() => {
+      throw new Error('process.exit');
+    }) as never);
+
+    await runAsk(['Reply with exactly: OK', '--instance', 'antigravity', '--agent', 'command-code']);
+
+    expect(mockExit.mock.calls[0]).toEqual([ExitCode.CONFIG_ERROR]);
+    const resolutions = requestsTo('/resolve-target');
+    expect(resolutions).toHaveLength(1);
+    expect(resolutions[0].params.get('instance')).toBe('antigravity');
+    expect(resolutions[0].params.get('cliTool')).toBe('command-code');
+    expect(resolutions[0].resolvedBy).toBe('primary');
+    expect(requestsTo('/send')).toHaveLength(0);
+    expect(requestsTo('/current-output')).toHaveLength(0);
+    expect(stderr()).toContain("instance 'antigravity' is the primary instance of antigravity");
+    expect(stderr()).not.toMatch(/regist|roster/i);
+  });
+});

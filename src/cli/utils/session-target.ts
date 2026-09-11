@@ -15,10 +15,14 @@
  * compatibility path for a daemon older than the endpoint, reported as
  * `resolvedBy: 'client-fallback'` with a warning on stderr. It is deliberately
  * NOT kept in step with the server — adding the primary-anchor stage to it would
- * be growing the second authority back (DR2-008).
+ * be growing the second authority back (DR2-008). The one exception is a
+ * refusal, not a choice: an `--agent` that contradicts an unregistered
+ * tool-named instance is reported exactly as the server reports it (Issue
+ * #2487), because a copy that obeys it sends where the server would refuse to.
  */
 
 import { getErrorMessage } from '../types';
+import { isCliToolId } from '../config/cli-tool-ids';
 import type { ApiClient } from './api-client';
 import { fetchAgentInstances } from './agent-instances';
 import { serverResolvesSessionTargets } from './server-capabilities';
@@ -37,11 +41,22 @@ export type SessionTargetResolvedBy =
   | 'fallback'
   | 'client-fallback';
 
-/** An explicit `--agent` that the roster contradicts. */
+/**
+ * An explicit `--agent` that the instance's declaration contradicts: its roster
+ * row, or — with no row — its own id when that id is a CLI tool id (the
+ * primary-instance anchor, #868; Issue #2487).
+ */
 export interface SessionTargetConflict {
   instanceId: string;
+  /** The tool the instance is declared as; for a primary-anchor conflict, the id itself. */
   rosterCliTool: string;
   requestedCliTool: string;
+  /**
+   * Set when the declaration is the primary-instance anchor rather than a
+   * roster row. Mirrors the server's field of the same name, which
+   * `resolve-target` sends; absent for a roster contradiction.
+   */
+  primaryAnchor?: true;
 }
 
 export interface CliSessionTarget {
@@ -93,7 +108,8 @@ function warnClientFallback(): void {
  * @param client - API client aimed at the server
  * @param worktreeId - Worktree ID
  * @param options - `--instance` and `--agent` as the user gave them
- * @returns The resolved target, with `conflict` set when `--agent` contradicts the roster
+ * @returns The resolved target, with `conflict` set when `--agent` contradicts
+ *   the roster or the primary-instance anchor
  * @throws ApiError when the server's capabilities cannot be determined (auth
  *   failure, redirect, non-JSON body) — those are never treated as "old server"
  */
@@ -137,6 +153,13 @@ async function resolveViaServer(
  * primary-anchor stage and no worktree-default read — an old server applies
  * those itself when the CLI sends no `cliToolId`, and reimplementing them here
  * is how the second authority grew in the first place (DR2-008).
+ *
+ * The one thing borrowed from the server's chain is its refusal (Issue #2487):
+ * with no roster row, an `--agent` that differs from a tool-named instance id
+ * is the contradiction the server reports, and it is reported here with the
+ * same `conflict`. It resolves nothing — without `--agent` that id still
+ * resolves to nothing here — but taking the `--agent` would start an ad-hoc
+ * session under another tool's primary id, which the server now refuses.
  */
 async function resolveLocally(
   client: ApiClient,
@@ -170,6 +193,14 @@ async function resolveLocally(
   }
 
   if (!registered) {
+    if (requestedCliTool && isCliToolId(instanceId) && requestedCliTool !== instanceId) {
+      return degraded(instanceId, {
+        instanceId,
+        rosterCliTool: instanceId,
+        requestedCliTool,
+        primaryAnchor: true,
+      });
+    }
     return degraded(requestedCliTool);
   }
 
@@ -185,11 +216,21 @@ async function resolveLocally(
 }
 
 /**
- * The sentence shown when the roster and `--agent` disagree. Names both
- * declarations and the three ways out, because only the operator knows which of
- * the two is wrong.
+ * The sentence shown when the instance's declaration and `--agent` disagree.
+ * Names both declarations and the three ways out, because only the operator
+ * knows which of the two is wrong. A primary-anchor conflict has no roster row
+ * to re-register — `instances add --id <tool>` answers "already exists" — so its
+ * third way out is another instance.
  */
 export function describeSessionTargetConflict(conflict: SessionTargetConflict): string {
+  if (conflict.primaryAnchor) {
+    return (
+      `instance '${conflict.instanceId}' is the primary instance of ${conflict.rosterCliTool}, `
+      + `but --agent ${conflict.requestedCliTool} was given. `
+      + `Drop --agent, pass --agent ${conflict.rosterCliTool}, or target a ${conflict.requestedCliTool} instance instead `
+      + `(e.g. --instance ${conflict.requestedCliTool}).`
+    );
+  }
   return (
     `instance '${conflict.instanceId}' is registered as ${conflict.rosterCliTool}, `
     + `but --agent ${conflict.requestedCliTool} was given. `
