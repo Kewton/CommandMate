@@ -1206,7 +1206,11 @@ describe('Issue #1699: policy suppression is reported while waiting', () => {
     ]);
 
     const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
-    await createWaitCommand().parseAsync(['node', 'wait', 'wt1']);
+    // Issue #2463: Auto-Yes is on in this fixture and nothing withheld THIS
+    // prompt, so by default wait would hold it for Auto-Yes to answer. The grace
+    // is turned off to keep this about the one poll it was written for; the held
+    // form is pinned in wait-auto-yes-grace-2463.test.ts.
+    await createWaitCommand().parseAsync(['node', 'wait', 'wt1', '--auto-yes-grace', '0']);
 
     const stderr = mockConsoleError.mock.calls.map(c => String(c[0])).join('\n');
     expect(stderr).not.toContain('auto-yes suppressed');
@@ -1218,7 +1222,8 @@ describe('Issue #1699: policy suppression is reported while waiting', () => {
     mockFetchSequence([{ data: suppressedPrompt(null) }]);
 
     const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
-    await createWaitCommand().parseAsync(['node', 'wait', 'wt1']);
+    // Issue #2463: same reason as above — Auto-Yes on, nothing withheld.
+    await createWaitCommand().parseAsync(['node', 'wait', 'wt1', '--auto-yes-grace', '0']);
 
     const stderr = mockConsoleError.mock.calls.map(c => String(c[0])).join('\n');
     expect(stderr).not.toContain('auto-yes suppressed');
