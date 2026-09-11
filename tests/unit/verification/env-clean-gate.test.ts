@@ -9,7 +9,9 @@
  *      the message, because the defect being prevented is a green verdict —
  *      wording is secondary.
  *   2. Removals are violations whoever they belonged to (#1739, #1624), and
- *      additions are violations unless they are demonstrably another worker's.
+ *      additions are violations unless they are demonstrably another worker's —
+ *      or are the one agent session the delegation itself started, named in the
+ *      baseline and excused by that exact name (#2472).
  *   3. Omitting every declaration leaves the gate off.
  *
  * @vitest-environment node
@@ -22,12 +24,17 @@ import {
   diffEnvSnapshots,
   evaluateEnvClean,
   formatEnvCleanReport,
+  readTaskSession,
+  recordTaskSession,
   REQUIRE_ENV_CLEAN_SOURCE_CONFIG,
   REQUIRE_ENV_CLEAN_SOURCE_CONTRACT,
   resolveRequireEnvClean,
+  resolveTaskSessionName,
+  type TaskSessionOwner,
 } from '@/lib/verification/env-clean-gate';
 import {
   ENV_SNAPSHOT_VERSION,
+  isEnvSnapshot,
   type EnvEntry,
   type EnvProbeId,
   type EnvProbeResult,
@@ -310,6 +317,212 @@ describe('evaluateEnvClean', () => {
     });
     expect(outcome.startedAt).toBeGreaterThan(0);
     expect(outcome.durationMs).toBeGreaterThanOrEqual(0);
+  });
+});
+
+// =============================================================================
+// The task's own agent session (Issue #2472)
+// =============================================================================
+
+describe('the task’s own agent session (#2472)', () => {
+  /** The row `send --contract` creates for the primary Claude instance. */
+  const PRIMARY_TASK: TaskSessionOwner = {
+    worktreeId: WORKTREE_ID,
+    cliToolId: 'claude',
+    instanceId: null,
+  };
+  /**
+   * Spelled out rather than derived: the code derives the name, the test pins
+   * the format — deriving both would pass with any naming rule at all.
+   */
+  const PRIMARY_SESSION = `mcbd-claude-${WORKTREE_ID}`;
+
+  function sessions(names: string[]): EnvProbeResult {
+    return probe(names.map((name) => entry(name)));
+  }
+
+  /** A baseline as the route writes it: captured, then stamped with the task. */
+  function taskBaseline(names: string[], task: TaskSessionOwner = PRIMARY_TASK) {
+    return recordTaskSession(snapshot({ 'tmux-sessions': sessions(names) }), task);
+  }
+
+  function atVerification(names: string[]): EnvSnapshot {
+    return snapshot({ 'tmux-sessions': sessions(names) });
+  }
+
+  describe('resolveTaskSessionName', () => {
+    it('names the primary instance the way the session is started', () => {
+      expect(resolveTaskSessionName(PRIMARY_TASK)).toBe(PRIMARY_SESSION);
+      // The primary instance may also be recorded under the tool id itself.
+      expect(resolveTaskSessionName({ ...PRIMARY_TASK, instanceId: 'claude' })).toBe(
+        PRIMARY_SESSION
+      );
+    });
+
+    it('names an additional instance with its suffix', () => {
+      expect(resolveTaskSessionName({ ...PRIMARY_TASK, instanceId: 'claude-2' })).toBe(
+        `${PRIMARY_SESSION}-2`
+      );
+      expect(
+        resolveTaskSessionName({ worktreeId: WORKTREE_ID, cliToolId: 'vibe-local', instanceId: null })
+      ).toBe(`mcbd-vibe-local-${WORKTREE_ID}`);
+    });
+
+    it('answers null for a row it cannot name, rather than guessing one', () => {
+      expect(resolveTaskSessionName({ ...PRIMARY_TASK, cliToolId: 'not-a-tool' })).toBeNull();
+      expect(resolveTaskSessionName({ ...PRIMARY_TASK, worktreeId: 'bad;id' })).toBeNull();
+    });
+  });
+
+  describe('recordTaskSession / readTaskSession', () => {
+    it('stamps the baseline without touching the snapshot it was given', () => {
+      const captured = snapshot();
+      expect(recordTaskSession(captured, PRIMARY_TASK).taskSession).toBe(PRIMARY_SESSION);
+      expect('taskSession' in captured).toBe(false);
+    });
+
+    it('survives the JSON round trip as a snapshot the loader still accepts', () => {
+      // The field rides on a file whose shape env-snapshot owns. A loader that
+      // refused it would turn every new baseline into UNKNOWN.
+      const stored: unknown = JSON.parse(JSON.stringify(taskBaseline([])));
+      expect(isEnvSnapshot(stored)).toBe(true);
+      expect(readTaskSession(stored as EnvSnapshot)).toBe(PRIMARY_SESSION);
+    });
+
+    it('tells a baseline written before #2472 from one recorded as unresolvable', () => {
+      expect(readTaskSession(snapshot())).toBeUndefined();
+      expect(
+        readTaskSession(recordTaskSession(snapshot(), { ...PRIMARY_TASK, cliToolId: 'nope' }))
+      ).toBeNull();
+      expect(readTaskSession({ ...snapshot(), taskSession: 42 } as unknown as EnvSnapshot)).toBeNull();
+    });
+  });
+
+  describe('diffEnvSnapshots', () => {
+    it('excuses the session the send started, and lists it as excused', () => {
+      const { diff, probe: tmux } = probeDiff(
+        taskBaseline([]),
+        atVerification([PRIMARY_SESSION]),
+        'tmux-sessions'
+      );
+      expect(diff.status).toBe('clean');
+      expect(tmux?.added).toEqual([]);
+      expect(tmux?.taskSessionAdded.map((change) => change.key)).toEqual([PRIMARY_SESSION]);
+      expect(formatEnvCleanReport(diff)).toContain(`+ ${PRIMARY_SESSION} [task session, excused]`);
+    });
+
+    it('excuses only the instance the task was sent to', () => {
+      const { diff, probe: tmux } = probeDiff(
+        taskBaseline([], { ...PRIMARY_TASK, instanceId: 'claude-2' }),
+        atVerification([`${PRIMARY_SESSION}-2`, PRIMARY_SESSION]),
+        'tmux-sessions'
+      );
+      expect(diff.status).toBe('violated');
+      expect(tmux?.taskSessionAdded.map((change) => change.key)).toEqual([`${PRIMARY_SESSION}-2`]);
+      expect(tmux?.added.map((change) => change.key)).toEqual([PRIMARY_SESSION]);
+      expect(tmux?.added[0].owner).toBe('self');
+    });
+
+    it('still reports every other session of the same worktree', () => {
+      // A worker-started codex session and a test-created suffix both parse as
+      // `self`; only the exact recorded name is excused.
+      const { diff, probe: tmux } = probeDiff(
+        taskBaseline([]),
+        atVerification([
+          PRIMARY_SESSION,
+          `mcbd-codex-${WORKTREE_ID}`,
+          `mcbd-claude-${WORKTREE_ID}-x`,
+        ]),
+        'tmux-sessions'
+      );
+      expect(diff.status).toBe('violated');
+      expect(tmux?.added.map((change) => change.key)).toEqual([
+        `mcbd-codex-${WORKTREE_ID}`,
+        `mcbd-claude-${WORKTREE_ID}-x`,
+      ]);
+      expect(tmux?.taskSessionAdded.map((change) => change.key)).toEqual([PRIMARY_SESSION]);
+    });
+
+    it('reports the task’s session disappearing — excusing an addition never excuses a removal', () => {
+      const { diff, probe: tmux } = probeDiff(
+        taskBaseline([PRIMARY_SESSION]),
+        atVerification([]),
+        'tmux-sessions'
+      );
+      expect(diff.status).toBe('violated');
+      expect(tmux?.removed.map((change) => change.key)).toEqual([PRIMARY_SESSION]);
+      expect(tmux?.taskSessionAdded).toEqual([]);
+    });
+
+    it('excuses nothing from a baseline written before #2472', () => {
+      // Backward compatibility, and the standing control for the first case in
+      // this block: the same addition without the record is the #2470 verdict.
+      const { diff, probe: tmux } = probeDiff(
+        snapshot(),
+        atVerification([PRIMARY_SESSION]),
+        'tmux-sessions'
+      );
+      expect(diff.status).toBe('violated');
+      expect(tmux?.added.map((change) => change.key)).toEqual([PRIMARY_SESSION]);
+      expect(formatEnvCleanReport(diff)).toContain(`+ ${PRIMARY_SESSION} [self]`);
+    });
+
+    it('excuses nothing when the task could not be named', () => {
+      const baseline = recordTaskSession(snapshot(), { ...PRIMARY_TASK, cliToolId: 'not-a-tool' });
+      expect(diffEnvSnapshots(baseline, atVerification([PRIMARY_SESSION]), CONTEXT).status).toBe(
+        'violated'
+      );
+    });
+
+    it('excuses the name in tmux-sessions only', () => {
+      // A directory in $HOME that happens to spell the session name is still a
+      // directory left in $HOME.
+      const { diff, probe: home } = probeDiff(
+        taskBaseline([]),
+        snapshot({ 'home-entries': probe([entry(PRIMARY_SESSION)]) }),
+        'home-entries'
+      );
+      expect(diff.status).toBe('violated');
+      expect(home?.added.map((change) => change.key)).toEqual([PRIMARY_SESSION]);
+    });
+  });
+
+  describe('evaluateEnvClean', () => {
+    const base = { ...CONTEXT, taskId: 'task-2472', sources: [REQUIRE_ENV_CLEAN_SOURCE_CONFIG] };
+
+    it('passes a delegation whose only new session is its own, and names it', async () => {
+      const outcome = await evaluateEnvClean({
+        ...base,
+        baseline: taskBaseline([]),
+        capture: async () => atVerification([PRIMARY_SESSION]),
+      });
+      expect(outcome.status).toBe('passed');
+      expect(outcome.exitCode).toBe(0);
+      expect(outcome.logTail).toContain(`task-session=${PRIMARY_SESSION}`);
+      expect(outcome.logTail).toContain(`+ ${PRIMARY_SESSION} [task session, excused]`);
+    });
+
+    it('fails on anything else left behind, without counting the excused session', async () => {
+      const outcome = await evaluateEnvClean({
+        ...base,
+        baseline: taskBaseline([]),
+        capture: async () => atVerification([PRIMARY_SESSION, `mcbd-codex-${WORKTREE_ID}`]),
+      });
+      expect(outcome.status).toBe('failed');
+      expect(outcome.logTail).toContain('tmux-sessions VIOLATED (mcbd-* tmux sessions): +1 -0');
+      expect(outcome.logTail).toContain(`+ mcbd-codex-${WORKTREE_ID} [self]`);
+      expect(outcome.logTail).toContain(`+ ${PRIMARY_SESSION} [task session, excused]`);
+    });
+
+    it('says why nothing was excused when the baseline predates the record', async () => {
+      const outcome = await evaluateEnvClean({
+        ...base,
+        baseline: snapshot(),
+        capture: async () => atVerification([PRIMARY_SESSION]),
+      });
+      expect(outcome.status).toBe('failed');
+      expect(outcome.logTail).toContain('task-session=unrecorded');
+    });
   });
 });
 
