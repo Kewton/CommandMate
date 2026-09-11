@@ -31,6 +31,15 @@
  * strip follows it) and searching stays in the command palette (⌘K), so there
  * is exactly one place to do each.
  *
+ * **No scrollbar.** The strip scrolls sideways once the tabs outgrow it, but
+ * the classic always-visible scrollbar macOS draws while a mouse is connected
+ * takes 15 of the band's 32px and squashes every tab into the top half (Issue
+ * #2480). So the bar is hidden (`scrollbar-hide`) and the scrolled-out tabs
+ * stay reachable three other ways — a trackpad swipe, a vertical mouse wheel
+ * (turned sideways by `resolveWheelScrollLeftDelta`) and the "…" overflow
+ * menu — while the tab of the worktree on screen is kept in view, since
+ * nothing else says the strip is scrolled.
+ *
  * @module components/layout/RepositoryTabBar
  */
 
@@ -105,6 +114,18 @@ const VIEWPORT_MARGIN = 8;
 /** Matches `/worktrees/<id>` (and anything under it) to find the active branch. */
 const WORKTREE_ROUTE_PATTERN = /^\/worktrees\/([^/]+)/;
 
+/** `WheelEvent.deltaMode` values, spelled out so the helper needs no DOM global. */
+const DOM_DELTA_LINE = 1;
+const DOM_DELTA_PAGE = 2;
+
+/**
+ * Pixels one wheel "line" is worth, for a browser that reports a mouse wheel in
+ * lines (Firefox) rather than pixels. Only the magnitude matters: the usual
+ * three lines a notch should move the strip about as far as the ~100px notch
+ * a pixel-mode browser reports.
+ */
+const WHEEL_LINE_HEIGHT = 40;
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -171,6 +192,46 @@ export function clampPopoverLeft(
       ? anchor.right - popoverWidth
       : anchor.left;
   return Math.min(Math.max(preferred, VIEWPORT_MARGIN), maxLeft);
+}
+
+/**
+ * How far a wheel event should move the strip sideways, in px.
+ *
+ * The strip only scrolls horizontally and a mouse wheel only scrolls
+ * vertically, so with the scrollbar hidden (Issue #2480) a mouse user would
+ * have no way to scroll it at all. The vertical delta becomes a horizontal
+ * one; what the browser already does sideways on its own is left to it
+ * (returns 0):
+ *
+ * - a mostly-horizontal gesture — a trackpad swipe or a tilt wheel, which
+ *   already scroll the strip natively; adding `deltaY` on top would skew it;
+ * - Shift+wheel — the platform's own horizontal-scroll chord;
+ * - Ctrl+wheel — how a trackpad pinch-zoom arrives.
+ *
+ * @param event - The wheel event's deltas, delta mode and modifier keys
+ * @param pageWidth - The strip's visible width, what one `DOM_DELTA_PAGE` is worth
+ * @returns px to add to `scrollLeft`, or 0 to leave the event to the browser
+ * @internal Exported for unit tests.
+ */
+export function resolveWheelScrollLeftDelta(
+  event: Pick<WheelEvent, 'deltaX' | 'deltaY' | 'deltaMode' | 'ctrlKey' | 'shiftKey'>,
+  pageWidth: number
+): number {
+  if (event.ctrlKey || event.shiftKey) return 0;
+  if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return 0;
+  if (event.deltaMode === DOM_DELTA_LINE) return event.deltaY * WHEEL_LINE_HEIGHT;
+  if (event.deltaMode === DOM_DELTA_PAGE) return event.deltaY * pageWidth;
+  return event.deltaY;
+}
+
+/**
+ * Scroll a tab into the visible part of the strip. `nearest` on both axes
+ * moves the strip only as far as needed and leaves the page itself alone.
+ * Optional call because jsdom does not implement scrollIntoView, and the
+ * shell's tests mount the strip on worktree routes.
+ */
+function revealTab(node: HTMLElement | undefined): void {
+  node?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
 }
 
 // ============================================================================
@@ -269,10 +330,10 @@ export const RepositoryTabBar = memo(function RepositoryTabBar() {
 
   // ---- overflow detection ----
   // The strip never wraps (`flex-nowrap`), so with enough repositories it
-  // scrolls. Scrolling alone reaches everything, but a horizontal scrollbar is
-  // easy to miss and impossible to tab to, so an overflow menu appears next to
-  // it — and only then, because an always-present "…" is chrome that earns
-  // nothing when three tabs fit.
+  // scrolls. A swipe or the wheel reaches everything, but with the scrollbar
+  // hidden (Issue #2480) nothing says there is more, and neither can be tabbed
+  // to, so an overflow menu appears next to it — and only then, because an
+  // always-present "…" is chrome that earns nothing when three tabs fit.
   const [hasOverflow, setHasOverflow] = useState(false);
   const measureOverflow = useCallback(() => {
     const strip = stripRef.current;
@@ -339,6 +400,20 @@ export const RepositoryTabBar = memo(function RepositoryTabBar() {
     closeAll();
   }, [pathname, closeAll]);
 
+  // ---- keep the current repository's tab in view ----
+  // With no scrollbar (Issue #2480) nothing says the strip is scrolled, so the
+  // tab marked current must not sit scrolled out of sight. It is revealed on
+  // first paint; after every navigation — keyed on `pathname`, not just the
+  // repository, so moving between two branches of one repository brings its
+  // tab back even after the user scrolled the strip away; and when the "…"
+  // button appearing narrows the strip under it. Not on data refreshes: the
+  // worktree poll re-renders every few seconds and would yank a strip the user
+  // is scrolling. A layout effect, so the first paint already shows the tab.
+  useLayoutEffect(() => {
+    if (!activeRepositoryName) return;
+    revealTab(tabRefs.current.get(activeRepositoryName));
+  }, [activeRepositoryName, pathname, hasOverflow]);
+
   // ---- navigation ----
   const handleBranchClick = useCallback(
     (branchId: string) => {
@@ -352,12 +427,23 @@ export const RepositoryTabBar = memo(function RepositoryTabBar() {
   const handleOverflowSelect = useCallback(
     (repositoryName: string) => {
       const node = tabRefs.current.get(repositoryName);
-      node?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      revealTab(node);
       openPopoverFor(repositoryName);
       node?.focus();
     },
     [openPopoverFor]
   );
+
+  // ---- mouse wheel ----
+  // React's wheel listener is passive, so this adds to the browser's own
+  // scroll instead of replacing it. Nothing is lost by that: the strip cannot
+  // scroll vertically, and the shell (`h-screen`) has nothing above it that
+  // would take the vertical part of the wheel instead.
+  const handleStripWheel = useCallback((event: React.WheelEvent<HTMLElement>) => {
+    const strip = event.currentTarget;
+    const delta = resolveWheelScrollLeftDelta(event, strip.clientWidth);
+    if (delta !== 0) strip.scrollLeft += delta;
+  }, []);
 
   if (groups.length === 0) return null;
 
@@ -374,7 +460,8 @@ export const RepositoryTabBar = memo(function RepositoryTabBar() {
         ref={stripRef}
         data-testid="repository-tab-strip"
         aria-label={t('nav.repositories')}
-        className="flex min-w-0 flex-1 flex-nowrap items-stretch overflow-x-auto overflow-y-hidden"
+        onWheel={handleStripWheel}
+        className="flex min-w-0 flex-1 flex-nowrap items-stretch overflow-x-auto overflow-y-hidden scrollbar-hide"
       >
         {groups.map((group) => (
           <RepositoryTab
