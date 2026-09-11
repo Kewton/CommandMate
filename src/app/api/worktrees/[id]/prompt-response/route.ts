@@ -14,7 +14,7 @@ import { captureSessionOutputFresh } from '@/lib/session/cli-session';
 import { detectPrompt, type PromptDetectionResult } from '@/lib/detection/prompt-detector';
 import { stripAnsi, stripBoxDrawing, buildDetectPromptOptions } from '@/lib/detection/cli-patterns';
 import { detectAntigravityNumberedDialogPrompt } from '@/lib/detection/tools/antigravity/dialog';
-import { evaluateDialogPresence } from '@/lib/polling/auto-yes-dialog-gate';
+import { evaluateDialogPresence, judgePromptResponse } from '@/lib/polling/auto-yes-dialog-gate';
 import { sendPromptAnswer, PromptAnswerRejectedError } from '@/lib/prompt-answer-sender';
 import { resolvePromptAnswer, PromptAnswerResolutionError, type AnswerResolution } from '@/lib/prompt-answer-semantic';
 import { getAskUserQuestion } from '@/lib/session/agent-event-state';
@@ -227,23 +227,30 @@ export async function POST(
       // rules do not (see `evaluateDialogPresence`). agy is unaffected in either
       // direction: it is `legacy` in the rollout table, so the gate does not
       // judge it and its own reader above keeps deciding.
-      const numberedCandidateVouched = evaluateDialogPresence(
+      const presence = evaluateDialogPresence(
         cliToolId,
         promptCheck.promptData?.type,
         currentOutput,
-      ).present;
+      );
 
-      if (!promptCheck.isPrompt || !numberedCandidateVouched) {
+      // Issue #2486: a refusal says WHICH of the two it is. "The prompt is
+      // gone" and "a picker is up but its layout could not be verified" need
+      // different next steps from the operator (retry vs. answer at the pane),
+      // and #2486's `respond` said the first while `wait` had just exited 10
+      // for the second.
+      const refusal = judgePromptResponse(promptCheck, presence);
+      if (refusal) {
         logger.info('prompt-response-refused', {
           worktreeId: id,
           cliToolId,
           instanceId,
-          reason: 'prompt_no_longer_active',
-          vouched: numberedCandidateVouched,
+          reason: refusal.reason,
+          vouched: presence.present,
         });
         return NextResponse.json({
           success: false,
-          reason: 'prompt_no_longer_active',
+          reason: refusal.reason,
+          ...(refusal.message ? { message: refusal.message } : {}),
           answer: answer ?? '',
         });
       }

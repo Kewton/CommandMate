@@ -12,7 +12,7 @@ import {
   CLAUDE_INTERRUPT_HINT_PATTERN,
 } from '../../cli-patterns';
 import { findClaudeInputBox } from '../../composer-text';
-import { findClaudeTaskPanelLines } from '../../prompt-detect-multiple-choice';
+import { findClaudeChrome } from '../../prompt-detect-multiple-choice';
 import { STATUS_REASON } from '../../status-reason';
 import { detectClaudeDialog } from './prompt';
 import { createToolStatusDetector } from '../run-detection';
@@ -42,6 +42,11 @@ import type { NormalizedFrame } from '../types';
  * that row is the bottom of the frame; before the finder knew it, it WAS the
  * tail, and the dialog above it read as finished output.
  *
+ * It is read through `findClaudeChrome`, the one reading `detectClaudeDialog`
+ * and the generic parser use too — which since Issue #2486 includes the
+ * AskUserQuestion preview pane — so the three cannot disagree about which rows
+ * are chrome.
+ *
  * Returning an index rather than a boolean keeps this usable by anything else
  * that needs "the last thing Claude actually said".
  */
@@ -49,13 +54,13 @@ export function findClaudeTranscriptTail(contentLines: readonly string[]): numbe
   const lines = contentLines as string[];
   const box = findClaudeInputBox(lines);
   const end = box ? box.openingSeparator : lines.length;
-  const panelRows = findClaudeTaskPanelLines(lines, 0, end);
+  const chromeRows = findClaudeChrome(lines, 0, end).rows;
 
   let index = end - 1;
   while (
     index >= 0 &&
     (lines[index].trim() === '' ||
-      panelRows.has(index) ||
+      chromeRows.has(index) ||
       CLAUDE_EFFORT_CHIP_PATTERN.test(lines[index]))
   ) {
     index--;

@@ -15,6 +15,11 @@ Issue #2050 で **2 つ目のツール `opencode` が 5 シナリオ**入った�
 （既定は `claude`）。**1 回の実行が駆動するのは 1 ツールだけ** — 使い捨て HOME・pane geometry・
 起動完了行・起動フラグがツールごとに違い、途中で組み替えるとハーネスを建て直すことになるため。
 
+Issue #2486 で **claude に AskUserQuestion picker の 4 シナリオ**が入った（計 11 シナリオ）。
+preview 付きの選択肢で `commandmate respond` が `prompt_no_longer_active` になった Issue を、
+タブ行・preview 枠を 1 つずつ変えた入力で再現し、最後の 1 本は `wait` → `respond "1"` で
+2 問目と Submit まで答え切る（後述「AskUserQuestion シナリオ」）。
+
 - 実装: [`scripts/canary/`](../../scripts/canary/)
 - 生成される実フレーム: `tests/fixtures/canary/`
 - 単体テスト（tmux も課金も不要）: `tests/unit/canary/`
@@ -78,7 +83,7 @@ opencode は provider の credential を `~/.local/share/opencode/auth.json` か
 ## 実行
 
 ```bash
-npm run canary                                   # claude 7 シナリオすべて
+npm run canary                                   # claude 11 シナリオすべて
 npm run canary -- --tool opencode                # opencode 5 シナリオすべて
 npm run canary -- --list                         # 全ツールのシナリオ一覧（意図・期待値・所要時間）
 npm run canary -- --only model-overlay,idle      # 一部だけ実行
@@ -146,6 +151,13 @@ CM_CANARY_OPENCODE_MODEL=... npm run canary -- --tool opencode   # opencode の 
 | トークンを使うシナリオ | 3 つ（`opencode-generating` / `opencode-permission` / `opencode-turn-complete`）。`opencode-idle` と `opencode-picker` は **API を一切呼ばない** |
 | 1 ターンの生成時間 | 12.8s / 20.7s（約 300 語のプロンプト。`--mutate` の mutant 選択がこの値に依存する — 後述） |
 
+2026-09-12 の実測（同環境, claude 2.1.268, Opus 5 既定。Issue #2486 のシナリオ 8〜11）:
+
+| 項目 | 実測 |
+|---|---|
+| シナリオ 8〜11 | **102.1 秒**（8: 14.6s / 9: 16.6s / 10: 18.6s / 11: 49.1s — このときの 11 は次画面の判定側の不備で赤。修正後の 11 単独は **23.8 秒**で緑） |
+| トークンを使うシナリオ | 4 つとも（各 1 プロンプト。11 は回答後に Claude が短い返答を 1 回書く） |
+
 費用は 1 回あたり**数十セント程度**（各シナリオで短いプロンプト 1 本 + システムプロンプト。既定モデルが Opus 5 の場合の概算で、
 実測ではなく見積り）。Max プラン配下で実行した場合はプランの利用枠から引かれる。
 `CM_CANARY_MODEL=haiku` を付けると課金対象の 3 シナリオが Haiku 4.5 で走り、桁で安くなる
@@ -155,7 +167,7 @@ CM_CANARY_OPENCODE_MODEL=... npm run canary -- --tool opencode   # opencode の 
 
 ## 何を assert しているか
 
-### claude（Issue #1727 / #1847、7 シナリオ）
+### claude（Issue #1727 / #1847 / #2486、11 シナリオ）
 
 | # | シナリオ id | 状態 | 期待する検出結果 |
 |---|---|---|---|
@@ -166,6 +178,10 @@ CM_CANARY_OPENCODE_MODEL=... npm run canary -- --tool opencode   # opencode の 
 | 5 | `generating` | 生成中 | `running` / `thinking_indicator`、Auto-Yes 沈黙 |
 | 6 | `permission-hook-allow` | Auto-Yes v2 が `PermissionRequest` に `allow` を返した後 | **ダイアログがどちらの経路にも出ない**、`structuredEvents` も prompt を報告しない、**probe ファイルが実在する**（＝ツールが本当に走った） |
 | 7 | `permission-hook-no-decision` | 契約 `denyPatterns` 一致 → no-decision | `waiting` / `prompt_detected`、両経路から見える、`autoYes.lastSuppression.reason = deny-pattern`、**probe ファイルは無い** |
+| 8 | `askuserquestion-tabs` | 2 問・preview なし（タブ行 `←  ☐ … ✔ Submit  →` のみ） | `waiting` / `prompt_detected`、選択肢 4 つ、`question` にタブ行も直前ツールの行も無い、`detectDialog` が保証、Auto-Yes は `1` |
+| 9 | `askuserquestion-preview` | 1 問・選択肢に preview（右に枠） | 同上、選択肢は picker の 2 つだけで枠の文字を含まない |
+| 10 | `askuserquestion-tabs-preview` | Issue #2486 の入力そのもの（2 問・1 問目に preview） | 同上 |
+| 11 | `askuserquestion-respond-walk` | 同じ入力で `wait` → `respond "1"` を 1 問目・2 問目・Submit | 各画面で `wait` が止まり `respond` が受理され、最後に transcript が 2 つの回答を記録する |
 
 シナリオ 6・7 は Auto-Yes v2（#1724）の裁定を実 TUI で確認するもので（Issue #1847）、
 フレームだけでは足りない点が他の 5 つと違う。**「裁定が無いとき」と同じ画面が期待値**なので、
@@ -193,6 +209,34 @@ probe ファイルの実在（6）と裁定器自身の verdict ＋ `lastSuppres
 capture は本番と同じ `capture-pane -p -e -S -1000`、ペインも本番の geometry（`TUI_PANE_WIDTH` × `TUI_PANE_HEIGHT` = 200×1000、
 `history-limit` も同値）で作る。#1708 の「上端に picker・下端にタスクパネル・間に約 950 行の空行」というレイアウトは
 この geometry でしか再現しない。
+
+### claude の AskUserQuestion シナリオ（Issue #2486、シナリオ 8〜11）
+
+Claude には `ask.json`（シナリオの `workspaceFiles` で作業ディレクトリに置く）を Read させ、
+その中身をそのまま AskUserQuestion に渡させる。入力は Issue の transcript にあった tool_use そのもので、
+8 は preview を外し、9 は 1 問目だけにしたもの。~3 KB の日本語を `send-keys` で打たずに済み、
+Read の行が picker の直上に来る（Issue の画面で Bash の行が占めていた位置）。
+
+期待値（`scripts/canary/askuserquestion-expectations.ts`）は 2 つの独立な主張をする:
+
+1. **本番の判定** — status 経路の `waiting` / `prompt_detected`（`wait --on-prompt agent` が exit 10 を返す根拠）、
+   `detectPrompt` の選択肢と `question`（タブ行・直前ツールの行・枠の文字を含まない）、
+   `evaluateDialogPresence`（`/prompt-response` の再検証）、`evaluateAutoYesDialogGate` と `resolveAutoAnswer`
+   （Auto-Yes が単一質問と同じく `1` に答える — 方針は不変）
+2. **フレームの構造的事実** — タブ行・preview が本当に画面にあること。検出器の `picker-chrome.ts` を import せず
+   その場に書き下す
+
+シナリオ 11 の歩行（`scripts/canary/respond-walk.ts`）は CommandMate サーバを持たないので、
+`/prompt-response` のキー送信経路を**同じ呼び出し列で**辿る: `detectPrompt`（box 除去済み）→
+`evaluateDialogPresence`（生 capture）→ `judgePromptResponse` → `resolvePromptAnswer` →
+本番の `sendPromptAnswer`（検証したフレームを渡す）。キーは本番の `src/lib/tmux/tmux.ts` から出る。
+このモジュールは socket 引数を取らないので、`CanarySession.withProductionTmux` が呼ぶ間だけ `$TMUX` を
+私設ソケットへ向け、**本番 `listSessions()` が私設サーバと同じ一覧を返すことを assert してから**送る
+（不一致なら 1 キーも送らず中止）。拒否や未到達は `ScenarioStepError` でその画面のフレームを残して赤になる。
+構造化 decision 経路と `applyAskUserQuestion` は通らない（claude は decision id を持たず、カナリアは hooks を注入しない）。
+
+2026-09-12 の実測（claude 2.1.268）: 8〜10 は各 15〜19 秒で緑、11 は 22.1 秒で緑
+（1 問目 `Down Up Enter` → 2 問目 → Submit、transcript に `User answered Claude's questions:` と 2 つの回答）。
 
 ### opencode（Issue #2050、5 シナリオ）
 
@@ -246,6 +290,7 @@ capture は本番と同じ `capture-pane -p -e -S -200`、ペインも本番の 
 | 実 `~/.config/opencode/opencode.json{,c}`・`~/.local/share/opencode/auth.json` | 触らない | 同上（sha256） |
 | 実 `~/.local/share/opencode/opencode.db` | 触らない | 同上。ただし **size+mtime** で照合（58MB あり、シナリオごとに 2 回ハッシュすると実行より重い） |
 | ユーザーの `mcbd-*` セッション | 触らない | 実行前後で一覧を突き合わせ、消滅・出現を検出（違反は exit 3） |
+| 本番の tmux コード（`src/lib/tmux/tmux.ts`、#2486） | socket 引数を取らないので、呼ぶ間だけ `$TMUX` を私設ソケットへ向ける（`CanarySession.withProductionTmux`） | キー送信の前に本番 `listSessions()` が私設サーバと同じ一覧を返すことを assert。不一致なら 1 キーも送らず中止し、`$TMUX` は必ず元に戻す |
 
 補足:
 
@@ -254,7 +299,8 @@ capture は本番と同じ `capture-pane -p -e -S -200`、ペインも本番の 
   セッションを 1 回動かすだけで `opencode.db` に書くので、HOME を差し替えないと実データを汚す
   （方針書 `docs/design/opencode-server-live-verification.md` §4.1）。XDG 変数を落とすのは、
   使い捨て HOME の中から実ディレクトリへ戻る経路を塞ぐため
-- 素の `tmux` を呼ぶ箇所は `guards.ts` の `listUserTmuxSessions()` **ただ一つ**で、`list-sessions` 決め打ちの読み取り専用
+- 素の `tmux` を呼ぶ箇所は `guards.ts` の `listUserTmuxSessions()`（`list-sessions` 決め打ちの読み取り専用）と、
+  `$TMUX` を私設ソケットへ向けて転送を assert した後の `withProductionTmux`（#2486。シナリオ 11 だけが使う）の 2 つだけ
 - 私設サーバは `-f /dev/null` で起動する（開発者の `~/.tmux.conf` に左右されない）
 - 使い捨て HOME には認証情報の複製が入るため、実行後に必ず削除する（`--keep` 時のみ残り、削除コマンドが表示される）
 
@@ -400,10 +446,11 @@ pane geometry も一緒に報告する（`80x200 (stamp says …)`）。
 ## 既知の限界
 
 - **claude / opencode 以外のツール（codex / gemini / antigravity / copilot）は未対応。** Epic #1720 Phase 4 と同時期に追加する
-- **#1708 の「Ready to submit your answers?」確認画面は対象外。** これは picker と違いフッターを持たず、
-  現行コードでは**既知の未修正欠陥**（Issue #1708 で追跡中）。既知バグを緑の期待値としてハーネスに固定すると
-  カナリアが恒常的に赤になり signal として死ぬため、シナリオ 3 は「picker ＋ タスクパネル併存」（#807 のガードが効く形）を対象にしている。
-  #1708 が修正されたら、確認画面を新しいシナリオとして追加すること（id は 6・7 が Auto-Yes v2 で埋まっている）
+- **「Ready to submit your answers?」確認画面**は単独のシナリオにはしていないが、シナリオ 11（#2486）が
+  2 問の流れの 3 画面目として毎回通る（`wait` が止まり `respond "1"` で Submit できること）。
+  タスクパネルと併存する確認画面（#1708 の形）はまだ実機シナリオにしておらず、`claude-live-1708` の手採りフレームが単体テストで守っている
+- **AskUserQuestion シナリオ（8〜11）は 200 桁・preview 付きの 1 レイアウトだけを採る。** 狭いペインで preview が
+  選択肢の下に回るか、multiSelect と preview の組み合わせがどう描かれるかは未計測（検出器は計測した形だけを読む）
 - シナリオ 3 は Claude の `TaskCreate` ツールに依存する。ツール名が変わるとタスクパネルが描画されず、
   「併存を再現できなかった」として赤になる（これは意図した挙動: 弱いプローブが緑の顔をするより良い）。
   **2026-08-20 に実際にこれが起きた**: claude 2.1.237 のセッションに `TaskCreate` が存在せず

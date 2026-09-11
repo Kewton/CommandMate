@@ -4,6 +4,11 @@ import type { DetectPromptOptions, PromptDetectionResult } from './types';
 import type { SubmitMode } from '@/types/models';
 import { normalizeTuiFrameForDetection } from './tui-detection-frame';
 import { CLAUDE_MODEL_OVERLAY_FOOTER_PATTERN } from './cli-patterns';
+import {
+  ASK_USER_QUESTION_PICKER_FOOTER_PATTERN,
+  findAskUserQuestionTabRow,
+  findClaudePreviewPanes,
+} from './tools/claude/picker-chrome';
 
 // ============================================================================
 // Constants
@@ -153,8 +158,9 @@ const CLAUDE_SESSION_DIFF_HUD_PATTERN =
  *  - the session-diff HUD (#2468), a single row claimed on its own.
  *
  * Pass 2 here, `findClaudeTranscriptTail` and `detectClaudeDialog`'s footer
- * guard all read this one set, so they cannot disagree about which rows are
- * chrome.
+ * guard all read this one set — through {@link findClaudeChrome}, which adds an
+ * AskUserQuestion preview pane to it (Issue #2486) — so they cannot disagree
+ * about which rows are chrome.
  *
  * @param lines - Full frame, already ANSI/box stripped
  * @param start - First index to consider (inclusive)
@@ -178,6 +184,66 @@ export function findClaudeTaskPanelLines(lines: string[], start: number, end: nu
   }
   return panelLines;
 }
+
+/**
+ * [Issue #2486] Everything Claude draws around a dialog that is not the dialog,
+ * in one reading: the two bottom-pinned panels above, plus an AskUserQuestion
+ * picker's preview pane (`tools/claude/picker-chrome.ts`).
+ *
+ * The pane is why this is more than a row set. It opens to the RIGHT of the
+ * options, so the option rows share their line with it; those rows are not
+ * chrome but must be read as the options column alone — hence {@link cuts}.
+ * Its other rows (the interior beside an empty options column, its bottom
+ * border, its `Notes:` row) are chrome like a panel row and join {@link rows}.
+ *
+ * Pass 2 here, `findClaudeTranscriptTail` and `detectClaudeDialog` all read this
+ * one reading, so they cannot disagree about which rows are chrome — the
+ * disagreement #2468 was, and #2486 was again for a chrome they did not know.
+ */
+export interface ClaudeChrome {
+  /** Rows holding nothing but chrome. */
+  readonly rows: ReadonlySet<number>;
+  /** Rows the preview pane shares with the options column: row → index at which the pane begins. */
+  readonly cuts: ReadonlyMap<number, number>;
+}
+
+/**
+ * Claude's chrome within [start, end). See {@link ClaudeChrome}.
+ *
+ * @param lines - Full frame, ANSI stripped; box drawing optional
+ * @param start - First index to consider (inclusive)
+ * @param end - Last index to consider (exclusive)
+ */
+export function findClaudeChrome(lines: string[], start: number, end: number): ClaudeChrome {
+  const rows = findClaudeTaskPanelLines(lines, start, end);
+  const panes = findClaudePreviewPanes(lines, start, end);
+  for (const row of panes.rows) rows.add(row);
+  return { rows, cuts: panes.cuts };
+}
+
+/**
+ * The frame with Claude's chrome taken out: chrome rows blank, rows shared with
+ * the preview pane cut back to the options column. Row indices are unchanged,
+ * so a reader of the result can report positions in the original frame.
+ */
+export function maskClaudeChrome(lines: readonly string[], chrome: ClaudeChrome): string[] {
+  return lines.map((line, i) => {
+    if (chrome.rows.has(i)) return '';
+    const cut = chrome.cuts.get(i);
+    return cut === undefined ? line : line.slice(0, cut).trimEnd();
+  });
+}
+
+/**
+ * [Issue #2486] An indented row in the options column beside a preview pane.
+ *
+ * The column is ~30 wide there and draws no descriptions (the pane replaces
+ * them), so such a row is the wrapped tail of the label above it —
+ * `❯ 1. 整えた状態で続行` / `    (Recommended)` on the live capture. Option rows
+ * start within two columns (`❯ 1.` / `  2.`); three or more spaces is a wrap.
+ * Anchored, no nested quantifiers — ReDoS safe (S4-001).
+ */
+const PANE_WRAPPED_LABEL_PATTERN = /^\s{3,}\S/;
 
 /**
  * Pattern for separator lines (horizontal rules).
@@ -282,8 +348,11 @@ const CLAUDE_PROMPT_FOOTER_PATTERN = /Esc\s+to\s+cancel\s*[·•]\s*Tab\s+to\s+a
  *
  * Linear pattern, single unbounded quantifier between literal anchors —
  * ReDoS safe (S4-001).
+ *
+ * [Issue #2486] Defined in `tools/claude/picker-chrome.ts`, whose preview-pane
+ * finder anchors a pane on this same footer.
  */
-const CLAUDE_ASK_USER_QUESTION_FOOTER_PATTERN = /Enter\s+to\s+select\b.*\bnavigate\b/i;
+const CLAUDE_ASK_USER_QUESTION_FOOTER_PATTERN = ASK_USER_QUESTION_PICKER_FOOTER_PATTERN;
 
 /**
  * Codex/OpenAI TUI confirmation footer shown beneath interactive choices.
@@ -620,15 +689,18 @@ function isContinuationLine(rawLine: string, line: string): boolean {
  *
  * @param lines - Array of output lines
  * @param questionEndIndex - Index of the last line before options, or -1 if not found
+ * @param floor - First row the question may start at. Issue #2486: one below an
+ *   AskUserQuestion picker's tab row, so neither that row nor the transcript
+ *   above it becomes part of the question; 0 when there is none.
  * @returns Extracted question text, or generic fallback if questionEndIndex is -1
  */
-function extractQuestionText(lines: string[], questionEndIndex: number): string {
+function extractQuestionText(lines: string[], questionEndIndex: number, floor = 0): string {
   if (questionEndIndex < 0) {
     return 'Please select an option:';
   }
 
   const questionLines: string[] = [];
-  for (let i = Math.max(0, questionEndIndex - QUESTION_CONTEXT_LINES); i <= questionEndIndex; i++) {
+  for (let i = Math.max(floor, questionEndIndex - QUESTION_CONTEXT_LINES); i <= questionEndIndex; i++) {
     const line = lines[i].trim();
     if (line && !SEPARATOR_LINE_PATTERN.test(line)) {
       questionLines.push(line);
@@ -758,15 +830,22 @@ export function joinApprovalTarget(lines: string[], start: number, end: number):
  * of the deny surface. Narrowing that would change prompt dedup keys and what
  * the UI renders, and it is bounded by the options below it either way.
  *
+ * [Issue #2486] One exception to both: neither reaches above an AskUserQuestion
+ * picker's tab row. Everything up there is the transcript — the Bash call Claude
+ * ran just before asking, on the Issue's pane — and a question is not the
+ * command that happened to precede it.
+ *
  * @param lines - Array of output lines
  * @param questionEndIndex - Index of the last line before options, or -1 if not found
  * @param effectiveEnd - End index of non-trailing-empty lines
+ * @param floor - First row the block may start at (Issue #2486); 0 for none
  * @returns Approval target string, or undefined if no question line found
  */
 function extractApprovalTarget(
   lines: string[],
   questionEndIndex: number,
   effectiveEnd: number,
+  floor = 0,
 ): string | undefined {
   if (questionEndIndex < 0) {
     return undefined;
@@ -774,7 +853,7 @@ function extractApprovalTarget(
 
   return joinApprovalTarget(
     lines,
-    findApprovalContextStart(lines, questionEndIndex),
+    Math.max(floor, findApprovalContextStart(lines, questionEndIndex)),
     effectiveEnd,
   );
 }
@@ -992,15 +1071,36 @@ export function detectMultipleChoicePrompt(
   // [Issue #1708] Claude's bottom-anchored task panel is an overlay, not part of
   // the prompt frame. Resolved as a block up front because the reverse scan meets
   // its rows before its header and so cannot recognise them one at a time.
-  const taskPanelLines = findClaudeTaskPanelLines(lines, scanStart, effectiveEnd);
+  //
+  // [Issue #2486] The same reading carries an AskUserQuestion preview pane, whose
+  // rows the scan likewise meets before the top border that identifies it — and
+  // some of which it shares with the options column.
+  const chrome = findClaudeChrome(lines, scanStart, effectiveEnd);
+  // [Issue #2486] Wrapped label rows beside a preview pane, held for the option
+  // ABOVE them, which the reverse scan has not reached yet.
+  let paneWrap: string[] = [];
 
   for (let i = effectiveEnd - 1; i >= scanStart; i--) {
-    const line = lines[i].trim();
-
-    // [Issue #1708] Task-panel rows are metadata. Same handling as the
+    // [Issue #1708] Chrome rows are metadata. Same handling as the
     // COLLAPSED_OUTPUT / SUMMARY guards below: skip without ending the scan, so
-    // the options rendered ABOVE the panel are still reachable.
-    if (taskPanelLines.has(i)) {
+    // the options rendered ABOVE the panel (or beside the pane) are still
+    // reachable.
+    if (chrome.rows.has(i)) {
+      continuationLineCount++;
+      continue;
+    }
+
+    // [Issue #2486] A row the preview pane shares with the options column is
+    // read as the options column alone. Unread, `❯ 1. 整えた状態で続行   ┌───┐`
+    // became the option label `整えた状態で続行   ┌───┐`.
+    const paneCut = chrome.cuts.get(i);
+    // Original indentation preserved; only the pane is cut off.
+    const rawLine = paneCut === undefined ? lines[i] : lines[i].slice(0, paneCut).trimEnd();
+    const line = rawLine.trim();
+
+    // [Issue #2486] See PANE_WRAPPED_LABEL_PATTERN: the tail of the label above.
+    if (paneCut !== undefined && PANE_WRAPPED_LABEL_PATTERN.test(rawLine)) {
+      paneWrap.unshift(line);
       continuationLineCount++;
       continue;
     }
@@ -1037,7 +1137,9 @@ export function detectMultipleChoicePrompt(
     if (defaultMatch) {
       const number = parseInt(defaultMatch[1], 10);
       if (number <= 20 && isValidPrecedingOption(number, collectedOptions)) {
-        const label = defaultMatch[2].trim();
+        // [Issue #2486] A label that wrapped beside a preview pane is whole again.
+        const label = [defaultMatch[2].trim(), ...paneWrap].join(' ');
+        paneWrap = [];
         collectedOptions.unshift({ number, label, isDefault: true });
         continuationLineCount = 0;
         continue;
@@ -1055,7 +1157,8 @@ export function detectMultipleChoicePrompt(
       } else if (!isValidPrecedingOption(number, collectedOptions)) {
         // Treat as non-option line (e.g., diff line numbers from Codex approval prompts)
       } else {
-        const label = normalMatch[2].trim();
+        const label = [normalMatch[2].trim(), ...paneWrap].join(' ');
+        paneWrap = [];
         collectedOptions.unshift({ number, label, isDefault: false });
         continuationLineCount = 0;
         continue;
@@ -1074,8 +1177,6 @@ export function detectMultipleChoicePrompt(
 
     // Non-option line handling
     if (collectedOptions.length > 0 && line && !SEPARATOR_LINE_PATTERN.test(line)) {
-      const rawLine = lines[i]; // Original line with indentation preserved
-
       // [Issue #460] For deeply indented lines (4+ leading spaces), check
       // continuation BEFORE question keywords. These are option description
       // lines (e.g., "     Let Gemini CLI decide the best model...") that may
@@ -1183,11 +1284,20 @@ export function detectMultipleChoicePrompt(
     }
   }
 
-  const question = extractQuestionText(lines, questionEndIndex);
+  // [Issue #2486] An AskUserQuestion picker's tab row is the dialog's top edge:
+  // the row is chrome and everything above it is transcript. Found once so
+  // `question` and `approvalTarget` start at the same row; 0 on a frame with no
+  // tab row, which leaves every other prompt exactly as it was. `instructionText`
+  // keeps its wide window — it is the human's view, and on a preview picker the
+  // pane it carries is what the question asks the human to look at.
+  const pickerTop = questionEndIndex < 0
+    ? 0
+    : findAskUserQuestionTabRow(lines, questionEndIndex, APPROVAL_TARGET_MAX_LOOKBACK) + 1;
+  const question = extractQuestionText(lines, questionEndIndex, pickerTop);
   const instructionText = extractInstructionText(lines, questionEndIndex, effectiveEnd);
   // Issue #1699: the same block, cut at the previous turn's boundary. Display
   // keeps the wide window; deny patterns are judged against this one.
-  const approvalTarget = extractApprovalTarget(lines, questionEndIndex, effectiveEnd);
+  const approvalTarget = extractApprovalTarget(lines, questionEndIndex, effectiveEnd, pickerTop);
 
   // Issue #616: Determine submitMode from confirmation footer (detected in single-pass above)
   const submitMode: SubmitMode | undefined = hasConfirmationFooter

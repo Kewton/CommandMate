@@ -59,6 +59,7 @@
 
 import type { ChatMessage } from '@/types/models';
 import { UNCLASSIFIED_PROMPT_TYPE } from '@/types/models';
+import { ASK_USER_QUESTION_TAB_BAR_PREFIX_PATTERN } from '@/lib/detection/tools/claude/picker-chrome';
 
 // ============================================================================
 // Constants
@@ -100,8 +101,10 @@ export const TOOL_APPROVAL_LABEL_MAX_CHARS = 160;
  *
  * `←  ☐ 実行範囲  ☐ 起動場所  ✔ Submit  →` is a tab bar: one checkbox per
  * question, `✔ Submit` for the confirmation step, and an arrow at each end. It
- * is part of the row's `question` because the detector's upward scan sweeps
- * whole pane lines together, and it says nothing a reader wants.
+ * is part of a stored row's `question` because, before Issue #2486, the
+ * detector's upward scan swept whole pane lines together, and it says nothing a
+ * reader wants. The detector now stops the question below it; rows already in
+ * the database still carry it, so the display keeps stripping it.
  *
  * The whole structure is required — both arrows, at least one checkbox and the
  * literal `✔ Submit` — rather than "a line that starts with an arrow", because
@@ -109,8 +112,12 @@ export const TOOL_APPROVAL_LABEL_MAX_CHARS = 160;
  * line break (the class excludes only the structure's own glyphs), which is what
  * `\S+` in the shape originally proposed for this could not do: it stopped at
  * the space inside `Color scheme` and left the rest of the bar in the label.
+ *
+ * Defined once, in the detection layer's picker-chrome leaf, so the reader that
+ * stops at the bar and the one that strips it cannot disagree about its shape
+ * (Issue #2486).
  */
-const ASK_USER_QUESTION_TAB_ROW = /^←\s*(?:[☐☒☑][^←→☐☒☑✔]*)+✔\s*Submit\s*→\s*/;
+const ASK_USER_QUESTION_TAB_ROW = ASK_USER_QUESTION_TAB_BAR_PREFIX_PATTERN;
 
 /**
  * The sentence the submit-confirmation screen ends on (Issue #2460).
