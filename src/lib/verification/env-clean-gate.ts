@@ -19,7 +19,9 @@
  *      the pkill (#1739) and `kill-server` (#1624) case. New things are a
  *      violation *unless they are attributable to another worker*, because
  *      parallel delegations legitimately start their own sessions and servers
- *      inside each other's measurement windows.
+ *      inside each other's measurement windows — or unless they are the one
+ *      agent session the delegation itself started (#2472), which the baseline
+ *      names and which is excused by that exact name only.
  *
  * Server-only: consumes snapshots produced by env-snapshot.
  *
@@ -28,7 +30,8 @@
 
 import { dirname, resolve, sep } from 'path';
 import type { VerificationGateTerminalStatus } from '@/lib/db';
-import { CLI_TOOL_IDS } from '@/lib/cli-tools/types';
+import { resolveSessionName } from '@/lib/cli-tools/session-name';
+import { CLI_TOOL_IDS, isCliToolType } from '@/lib/cli-tools/types';
 import type { TaskContract } from '@/lib/tasks/contract-parser';
 import {
   captureEnvSnapshot,
@@ -181,6 +184,81 @@ function attributeEntry(
 }
 
 // =============================================================================
+// The task's own agent session (Issue #2472)
+// =============================================================================
+
+/**
+ * A baseline, plus the one tmux session the task's own delegation starts.
+ *
+ * Recorded rather than observed, because it cannot be observed: `send
+ * --contract` creates the task — and with it this baseline — *before* it sends
+ * the message, and that send is what starts the agent's session when none is
+ * running. A delegation into a worktree with no live session therefore always
+ * gained exactly one `self` session between the two snapshots and failed this
+ * gate however clean its work was, while the same delegation re-sent after a
+ * failed first attempt passed, because by then the session was in the baseline.
+ *
+ * Carried on the snapshot object rather than declared in `EnvSnapshot`: the
+ * file is a JSON round trip and `isEnvSnapshot` ignores keys it does not know,
+ * so a baseline with the field loads wherever one without it did.
+ *
+ * `taskSession` has three states, read by {@link readTaskSession}:
+ *   - a name — exactly that key is excused among `tmux-sessions` additions;
+ *   - `null` — the task row could not name a session (see
+ *     {@link resolveTaskSessionName}); nothing is excused;
+ *   - absent — a baseline written before #2472. Nothing is excused, which is
+ *     the verdict that baseline was always going to get. Recovering the name
+ *     from the task row at verification time would put the database in this
+ *     module for files that age out with `ENV_SNAPSHOT_RETENTION_MS` anyway.
+ */
+export interface EnvBaseline extends EnvSnapshot {
+  taskSession?: string | null;
+}
+
+/** The task-row fields that name the session a delegation runs in. */
+export interface TaskSessionOwner {
+  worktreeId: string;
+  cliToolId: string;
+  /** Null (or the tool id itself) for the primary instance. */
+  instanceId: string | null;
+}
+
+/**
+ * The tmux session a task's delegation runs in.
+ *
+ * `resolveSessionName` is the function that names the session when it is
+ * started, so the naming rule stays in one place: a second copy here would be
+ * free to drift, and the drift would read as a leak.
+ *
+ * @returns null when the row cannot name a session — a CLI tool id this build
+ *          does not know, or a name `validateSessionName` refuses
+ */
+export function resolveTaskSessionName(task: TaskSessionOwner): string | null {
+  if (!isCliToolType(task.cliToolId)) return null;
+  try {
+    return resolveSessionName(task.cliToolId, task.worktreeId, task.instanceId ?? undefined);
+  } catch {
+    return null;
+  }
+}
+
+/** A freshly captured baseline, stamped with its task's own agent session. */
+export function recordTaskSession(snapshot: EnvSnapshot, task: TaskSessionOwner): EnvBaseline {
+  return { ...snapshot, taskSession: resolveTaskSessionName(task) };
+}
+
+/**
+ * The session a baseline excuses: its name, `null` when it was recorded as
+ * unresolvable, or `undefined` when the baseline predates the field. Only a
+ * non-empty string excuses anything.
+ */
+export function readTaskSession(baseline: EnvSnapshot): string | null | undefined {
+  if (!('taskSession' in baseline)) return undefined;
+  const recorded = baseline.taskSession;
+  return typeof recorded === 'string' && recorded !== '' ? recorded : null;
+}
+
+// =============================================================================
 // Diff
 // =============================================================================
 
@@ -201,12 +279,21 @@ export interface EnvProbeDiff {
   added: EnvChange[];
   /** Entries that appeared and were excused by attribution. */
   ignoredAdded: EnvChange[];
+  /**
+   * The task's own agent session, when it appeared during the task (#2472).
+   * Only ever filled for `tmux-sessions`, and only by an exact match on the name
+   * the baseline recorded — never by a pattern, so a second session of the same
+   * worktree stays in `added`.
+   */
+  taskSessionAdded: EnvChange[];
   /** Entries that existed at task start and are gone. Always violations. */
   removed: EnvChange[];
 }
 
 export interface EnvCleanDiff {
   status: EnvDiffStatus;
+  /** What the baseline excused as the task's own session; see {@link readTaskSession}. */
+  taskSession: string | null | undefined;
   probes: EnvProbeDiff[];
 }
 
@@ -227,6 +314,7 @@ export function diffEnvSnapshots(
   final: EnvSnapshot,
   context: EnvAttributionContext
 ): EnvCleanDiff {
+  const taskSession = readTaskSession(baseline);
   const probes: EnvProbeDiff[] = ENV_PROBE_IDS.map((probeId) => {
     const before = baseline.probes[probeId];
     const after = final.probes[probeId];
@@ -238,6 +326,7 @@ export function diffEnvSnapshots(
         reason: `baseline probe unavailable: ${before?.reason ?? 'not recorded'}`,
         added: [],
         ignoredAdded: [],
+        taskSessionAdded: [],
         removed: [],
       };
     }
@@ -248,6 +337,7 @@ export function diffEnvSnapshots(
         reason: `current probe unavailable: ${after?.reason ?? 'not recorded'}`,
         added: [],
         ignoredAdded: [],
+        taskSessionAdded: [],
         removed: [],
       };
     }
@@ -257,9 +347,16 @@ export function diffEnvSnapshots(
 
     const added: EnvChange[] = [];
     const ignoredAdded: EnvChange[] = [];
+    const taskSessionAdded: EnvChange[] = [];
     for (const entry of after.entries) {
       if (beforeKeys.has(entry.key)) continue;
       const owner = attributeEntry(probeId, entry, context);
+      if (probeId === 'tmux-sessions' && taskSession && entry.key === taskSession) {
+        // Additions only: a task session that existed at task start and is gone
+        // falls through to `removed` below like everything else (#1624).
+        taskSessionAdded.push(toChange(entry, owner));
+        continue;
+      }
       (owner === 'other' ? ignoredAdded : added).push(toChange(entry, owner));
     }
 
@@ -273,6 +370,7 @@ export function diffEnvSnapshots(
       reason: null,
       added,
       ignoredAdded,
+      taskSessionAdded,
       removed,
     };
   });
@@ -286,7 +384,7 @@ export function diffEnvSnapshots(
       ? 'unknown'
       : 'clean';
 
-  return { status, probes };
+  return { status, taskSession, probes };
 }
 
 // =============================================================================
@@ -303,7 +401,9 @@ export const MAX_REPORTED_ENV_CHANGES = 25;
  */
 export const ENV_CLEAN_GUIDANCE =
   'Anything listed under "+" was started or created during this task and left behind — ' +
-  'stop it by PID and remove it. Anything under "-" existed when the task started and is ' +
+  'stop it by PID and remove it. The one exception is a "+" line marked "task session, ' +
+  'excused": that is the agent session this delegation itself started, it is not counted, ' +
+  'and it must be left running. Anything under "-" existed when the task started and is ' +
   'now gone — it was killed or deleted; restart or restore it. Never stop a process by ' +
   'pattern (`pkill -f`): it takes every process whose command line matches, which is how ' +
   'the production server was stopped in #1739.';
@@ -317,6 +417,27 @@ function formatChanges(sign: string, changes: EnvChange[]): string[] {
   });
   if (remainder > 0) lines.push(`    ... and ${remainder} more`);
   return lines;
+}
+
+/**
+ * The excused task session, listed rather than dropped (#2472): a verdict that
+ * silently discounted a session would read exactly like one that never saw it.
+ */
+function formatTaskSessionChanges(changes: EnvChange[]): string[] {
+  return changes.map((change) => {
+    const detail = change.detail ? ` ${change.detail}` : '';
+    return `    + ${change.key}${detail} [task session, excused]`;
+  });
+}
+
+/**
+ * The header's account of what could be excused, so a report judged against a
+ * baseline written before #2472 says why the task's own session was not.
+ */
+function describeTaskSession(taskSession: string | null | undefined): string {
+  if (taskSession === undefined) return 'unrecorded (baseline predates #2472; nothing excused)';
+  if (taskSession === null) return 'unresolved (nothing excused)';
+  return taskSession;
 }
 
 /** Render a diff for `log_tail`. */
@@ -334,6 +455,7 @@ export function formatEnvCleanReport(diff: EnvCleanDiff): string {
           ? ` (${probe.ignoredAdded.length} addition(s) attributed to another worktree)`
           : '';
       lines.push(`  ${probe.probeId} clean (${label})${excused}`);
+      lines.push(...formatTaskSessionChanges(probe.taskSessionAdded));
       continue;
     }
     lines.push(
@@ -341,6 +463,7 @@ export function formatEnvCleanReport(diff: EnvCleanDiff): string {
     );
     lines.push(...formatChanges('+', probe.added));
     lines.push(...formatChanges('-', probe.removed));
+    lines.push(...formatTaskSessionChanges(probe.taskSessionAdded));
     for (const excused of probe.ignoredAdded) {
       lines.push(`    · ${excused.key} (ignored: belongs to another worktree)`);
     }
@@ -427,7 +550,7 @@ export async function evaluateEnvClean(input: EvaluateEnvCleanInput): Promise<En
   const diff = diffEnvSnapshots(input.baseline, final, input);
   const header =
     `${ENV_CLEAN_GATE_ID}: baseline=${new Date(input.baseline.capturedAt).toISOString()} ` +
-    `status=${diff.status}`;
+    `status=${diff.status} task-session=${describeTaskSession(diff.taskSession)}`;
   const report = `${header}\n${formatEnvCleanReport(diff)}`;
 
   if (diff.status === 'clean') return done('passed', report, 0);
