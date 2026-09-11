@@ -275,3 +275,187 @@ test.describe('Repository tab bar (Issue #2374)', () => {
     }
   });
 });
+
+/** The tab of one repository, by name. */
+function tabFor(page: Page, repositoryName: string) {
+  return page.locator(
+    `[data-testid="repository-tab"][data-repository="${repositoryName}"]`
+  );
+}
+
+/** Whether a repository's tab lies wholly inside the strip's visible box. */
+async function isTabInsideStrip(page: Page, repositoryName: string): Promise<boolean> {
+  return page.getByTestId('repository-tab-strip').evaluate((strip, name) => {
+    const tab = strip.querySelector(
+      `[data-testid="repository-tab"][data-repository="${name}"]`
+    );
+    if (!tab) return false;
+    const box = strip.getBoundingClientRect();
+    const rect = tab.getBoundingClientRect();
+    return rect.left >= box.left - 1 && rect.right <= box.right + 1;
+  }, repositoryName);
+}
+
+async function stripScrollLeft(page: Page): Promise<number> {
+  return page.getByTestId('repository-tab-strip').evaluate((el) => el.scrollLeft);
+}
+
+/**
+ * Issue #2480: the strip scrolls without a scrollbar.
+ *
+ * macOS draws a classic, always-visible scrollbar while a mouse is connected,
+ * and on the 32px band that bar took 15px and squashed every tab into the top
+ * half. That cannot show in Playwright's usual browser (see the first test),
+ * so it is recreated there and the band is measured under it.
+ *
+ * A 1024px window makes eight repositories overflow the strip, so every
+ * assertion here is about a strip that really scrolls.
+ */
+test.describe('Repository tab bar without a scrollbar (Issue #2480)', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.setViewportSize({ width: 1024, height: 768 });
+    await stubWorktrees(page, MANY_WORKTREES);
+  });
+
+  test('keeps the whole band for the tabs where the OS draws a classic scrollbar', async ({
+    playwright,
+    baseURL,
+  }) => {
+    // Playwright starts headless Chromium with --hide-scrollbars, under which
+    // no scrollbar takes any space and the defect cannot show at all — the
+    // test passed with the fix reverted. So this one drives a browser of its
+    // own without that flag, and the shared `page` goes unused.
+    const browser = await playwright.chromium.launch({
+      ignoreDefaultArgs: ['--hide-scrollbars'],
+    });
+    try {
+      const page = await browser.newPage({ baseURL, viewport: { width: 1024, height: 768 } });
+      await stubWorktrees(page, MANY_WORKTREES);
+      await page.goto('/');
+      await expect(page.getByTestId('repository-tab')).toHaveCount(8);
+
+      // Even without the flag, Chromium on macOS draws overlay scrollbars;
+      // this rule makes them classic ones that take layout space, and a bare
+      // control scroller proves it took effect before the strip is judged.
+      await page.addStyleTag({
+        content:
+          '[data-testid="repository-tab-strip"]::-webkit-scrollbar,' +
+          ' #classic-scrollbar-control::-webkit-scrollbar { height: 15px; }',
+      });
+      const controlBarHeight = await page.evaluate(() => {
+        const control = document.createElement('div');
+        control.id = 'classic-scrollbar-control';
+        control.style.cssText = 'overflow-x: auto; width: 50px';
+        control.innerHTML = '<div style="width: 200px; height: 10px"></div>';
+        document.body.appendChild(control);
+        const barHeight = control.offsetHeight - control.clientHeight;
+        control.remove();
+        return barHeight;
+      });
+      expect(controlBarHeight).toBe(15);
+
+      const strip = await page.getByTestId('repository-tab-strip').evaluate((el) => ({
+        overflows: el.scrollWidth > el.clientWidth + 1,
+        offsetHeight: (el as HTMLElement).offsetHeight,
+        clientHeight: el.clientHeight,
+      }));
+      expect(strip.overflows).toBe(true);
+      // No scrollbar eats into the band...
+      expect(strip.clientHeight).toBe(strip.offsetHeight);
+      // ...so every tab keeps its full height: the 32px band less its 1px
+      // bottom border, at the default (medium) display size.
+      expect(strip.offsetHeight).toBe(31);
+      const tabHeights = await page
+        .getByTestId('repository-tab')
+        .evaluateAll((tabs) => tabs.map((tab) => Math.round(tab.getBoundingClientRect().height)));
+      expect(new Set(tabHeights)).toEqual(new Set([31]));
+    } finally {
+      await browser.close();
+    }
+  });
+
+  test('scrolls sideways under a vertical mouse wheel, and still under a trackpad swipe', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    await expect(page.getByTestId('repository-tab')).toHaveCount(8);
+    expect(await stripScrollLeft(page)).toBe(0);
+
+    await page.getByTestId('repository-tab-strip').hover();
+    await page.mouse.wheel(0, 300);
+    await expect.poll(() => stripScrollLeft(page)).toBeGreaterThan(0);
+
+    // A swipe arrives as a horizontal wheel delta, which the browser scrolls
+    // on its own; the wheel handler must leave that alone.
+    await page.getByTestId('repository-tab-strip').evaluate((el) => {
+      el.scrollLeft = 0;
+    });
+    await page.mouse.wheel(300, 0);
+    await expect.poll(() => stripScrollLeft(page)).toBeGreaterThan(0);
+  });
+
+  test('reaches a scrolled-out tab through the "…" menu', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.getByTestId('repository-tab')).toHaveCount(8);
+    expect(await isTabInsideStrip(page, 'repository-number-7')).toBe(false);
+
+    await page.getByTestId('repository-tab-overflow').click();
+    await page
+      .locator(
+        '[data-testid="repository-tab-overflow-item"][data-repository="repository-number-7"]'
+      )
+      .click();
+
+    await expect(page.getByTestId('repository-tab-popover')).toHaveAttribute(
+      'data-repository',
+      'repository-number-7'
+    );
+    await expect.poll(() => isTabInsideStrip(page, 'repository-number-7')).toBe(true);
+  });
+
+  test('shows the current repository on a cold load of a worktree scrolled out of the strip', async ({
+    page,
+  }) => {
+    // `/worktrees/[id]` compiles on first hit in dev.
+    test.slow();
+    await page.goto('/worktrees/repo-7-main');
+
+    await expect(tabFor(page, 'repository-number-7')).toHaveAttribute('aria-current', 'true', {
+      timeout: 60_000,
+    });
+    await expect.poll(() => isTabInsideStrip(page, 'repository-number-7')).toBe(true);
+  });
+
+  test('brings the current repository back into view after a navigation', async ({ page }) => {
+    test.slow();
+    await page.goto('/worktrees/repo-0-main');
+    await expect(tabFor(page, 'repository-number-0')).toHaveAttribute('aria-current', 'true', {
+      timeout: 60_000,
+    });
+
+    // `/worktrees/[id]` renders its own AppShell, so every navigation below
+    // arrives at a freshly mounted strip scrolled to its start.
+
+    // Go to the last repository through the "…" menu and its popover; on
+    // arrival its tab is the one in view, which pushes the first tab out...
+    await page.getByTestId('repository-tab-overflow').click();
+    await page
+      .locator(
+        '[data-testid="repository-tab-overflow-item"][data-repository="repository-number-7"]'
+      )
+      .click();
+    await page.getByTestId('repository-tab-popover').getByTestId('branch-list-item').first().click();
+    await expect(page).toHaveURL(/\/worktrees\/repo-7-main$/, { timeout: 60_000 });
+    await expect(tabFor(page, 'repository-number-7')).toHaveAttribute('aria-current', 'true', {
+      timeout: 60_000,
+    });
+    await expect.poll(() => isTabInsideStrip(page, 'repository-number-7')).toBe(true);
+    expect(await isTabInsideStrip(page, 'repository-number-0')).toBe(false);
+
+    // ...then back, which must bring the first tab into view again.
+    await page.goBack();
+    await expect(page).toHaveURL(/\/worktrees\/repo-0-main$/, { timeout: 60_000 });
+    await expect(tabFor(page, 'repository-number-0')).toHaveAttribute('aria-current', 'true');
+    await expect.poll(() => isTabInsideStrip(page, 'repository-number-0')).toBe(true);
+  });
+});
