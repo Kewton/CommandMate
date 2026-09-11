@@ -10,6 +10,8 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # Load .env file (for CM_PORT, CM_DB_PATH etc.)
 source "$SCRIPT_DIR/load-env.sh"
+# find_listen_pids_by_port (Issue #2473)
+source "$SCRIPT_DIR/lib/port-pids.sh"
 
 # Support both CM_PORT and legacy MCBD_PORT
 PORT=${CM_PORT:-${MCBD_PORT:-3000}}
@@ -22,7 +24,8 @@ echo ""
 
 # Check if application is running
 echo -n "Checking if application is running... "
-if lsof -ti:$PORT &> /dev/null; then
+# Listeners only (Issue #2473): a browser connected to the port is not the server.
+if [ -n "$(find_listen_pids_by_port "$PORT")" ]; then
   echo "✓"
 else
   echo "✗ (not running on port $PORT)"

@@ -82,8 +82,8 @@ tail -f dev.log
 ### Server Verification
 
 ```bash
-# Check if the port is in use
-lsof -i:3000
+# Check the process listening on the port
+lsof -nP -iTCP:3000 -sTCP:LISTEN
 
 # Check the process
 ps aux | grep "tsx server.ts"
@@ -318,8 +318,8 @@ npm run test:e2e -- --project=webkit
 ### Server Won't Start
 
 ```bash
-# If the port is in use
-lsof -ti:3000 | xargs kill -9
+# If the port is in use (stop only the listener; without -sTCP:LISTEN, connected clients such as your browser are stopped too)
+lsof -nP -iTCP:3000 -sTCP:LISTEN -t | xargs kill -9
 
 # Reinstall dependencies
 rm -rf node_modules package-lock.json
