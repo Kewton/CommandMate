@@ -197,7 +197,7 @@ Phase 2 と同じ観点で再レビューする。
 
 ```bash
 for port in $(seq 3010 3030); do
-  if ! lsof -i :$port -t >/dev/null 2>&1; then
+  if ! lsof -nP -iTCP:$port -sTCP:LISTEN -t >/dev/null 2>&1; then
     echo "Available: $port"
     break
   fi
@@ -325,14 +325,16 @@ CM_PORT={UAT_PORT} ./scripts/stop.sh
 #### 8-2. ポート解放確認
 
 ```bash
-lsof -i :{UAT_PORT} -t 2>/dev/null && echo "WARNING: Port still in use" || echo "Port released"
+lsof -nP -iTCP:{UAT_PORT} -sTCP:LISTEN -t 2>/dev/null && echo "WARNING: Port still in use" || echo "Port released"
 ```
 
 ポートが解放されない場合は強制停止する：
 
 ```bash
-lsof -i :{UAT_PORT} -t 2>/dev/null | xargs kill -9 2>/dev/null
+lsof -nP -iTCP:{UAT_PORT} -sTCP:LISTEN -t 2>/dev/null | xargs kill -9 2>/dev/null
 ```
+
+`-sTCP:LISTEN` を外さないこと（5-1 / 8-2 も同じ）。外すとそのポートに接続しているだけのプロセス（UAT 画面を開いているブラウザの network service など）まで返り、止めると他のタブの通信まで切れる（Issue #2473）。
 
 #### 8-3. 完了報告
 

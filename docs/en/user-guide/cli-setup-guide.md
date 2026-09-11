@@ -413,8 +413,10 @@ If you see `Error: Port 3000 is already in use`:
 # Start on a different port
 commandmate start --port 3001
 
-# Or check and stop the process using the port
-lsof -ti:3000 | xargs kill -9
+# Or check and stop the process listening on the port
+# (without -sTCP:LISTEN this also stops clients merely connected to it, such as your browser)
+lsof -nP -iTCP:3000 -sTCP:LISTEN
+lsof -nP -iTCP:3000 -sTCP:LISTEN -t | xargs kill -9
 ```
 
 ### Server Won't Start

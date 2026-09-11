@@ -524,8 +524,10 @@ sudo npm install -g commandmate
 # 別ポートで起動
 commandmate start --port 3001
 
-# または使用中のプロセスを確認して停止
-lsof -ti:3000 | xargs kill -9
+# または待ち受け中のプロセスを確認して停止
+# （-sTCP:LISTEN を外すと、3000 番に接続しているだけのブラウザ等まで止めてしまう）
+lsof -nP -iTCP:3000 -sTCP:LISTEN
+lsof -nP -iTCP:3000 -sTCP:LISTEN -t | xargs kill -9
 ```
 
 ### サーバーが起動しない
