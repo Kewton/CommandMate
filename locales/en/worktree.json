@@ -940,6 +940,9 @@
     "toolbarLabel": "Dialog answer keys",
     "caption": "Answer"
   },
+  "promptResponse": {
+    "refused": "Your answer was not sent because the dialog has changed. Please check the screen."
+  },
   "dismissPanelKeys": {
     "toolbarLabel": "Close this screen",
     "close": "Close (Esc)",

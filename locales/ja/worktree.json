@@ -940,6 +940,9 @@
     "toolbarLabel": "ダイアログへの回答キー",
     "caption": "回答"
   },
+  "promptResponse": {
+    "refused": "ダイアログの状態が変わったため送信できませんでした。画面を確認してください。"
+  },
   "dismissPanelKeys": {
     "toolbarLabel": "この画面を閉じる",
     "close": "閉じる (Esc)",
