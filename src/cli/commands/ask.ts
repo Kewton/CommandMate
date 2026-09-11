@@ -449,8 +449,17 @@ a decision about that session's guard rails, not part of asking it a question.
         // reads: the alias-to-id mapping and the roster's tool are the same
         // facts for all four requests, and asking twice is how two of them end
         // up addressing different sessions (Issue #1925).
-        const target = options.instance
-          ? await resolveInstanceTarget(client, worktreeId, options.instance, options.agent)
+        //
+        // Issue #2479: `--agent` alone is resolved too, with the tool id as the
+        // selector — a tool id names that tool's primary instance (#868) unless
+        // the roster has a row by that id. `resolveInstanceTarget` hands back no
+        // instance for an undefined selector (send / respond / capture rely on
+        // that), and an instance-less `ask` sent to <tool> but waited on the
+        // worktree default: exit 21 while the default was not running, and the
+        // default's turn instead of <tool>'s while it was.
+        const selector = options.instance ?? options.agent;
+        const target = selector
+          ? await resolveInstanceTarget(client, worktreeId, selector, options.agent)
           : null;
         const agent = target ? target.cliToolId : options.agent;
         const instanceId = target?.instanceId;
