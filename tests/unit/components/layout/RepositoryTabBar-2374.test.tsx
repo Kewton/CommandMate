@@ -21,17 +21,34 @@ import type { Worktree } from '@/types/models';
 
 const mockPush = vi.fn();
 const mockPathname = vi.fn(() => '/');
-vi.mock('next/navigation', () => ({
-  useRouter: () => ({
-    push: mockPush,
-    replace: vi.fn(),
-    prefetch: vi.fn(),
-    back: vi.fn(),
-    forward: vi.fn(),
-  }),
-  usePathname: () => mockPathname(),
-  useSearchParams: () => new URLSearchParams(),
-}));
+/** Subscribers of the mocked `usePathname`; see `navigateTo`. */
+const pathnameListeners = new Set<() => void>();
+vi.mock('next/navigation', async () => {
+  const { useSyncExternalStore } = await import('react');
+  return {
+    useRouter: () => ({
+      push: mockPush,
+      replace: vi.fn(),
+      prefetch: vi.fn(),
+      back: vi.fn(),
+      forward: vi.fn(),
+    }),
+    // A store rather than a bare call, so that `navigateTo` re-renders the
+    // strip the way the router's own pathname context does — the strip is a
+    // prop-less `memo`, which a `rerender` would never reach.
+    usePathname: () =>
+      useSyncExternalStore(
+        (listener) => {
+          pathnameListeners.add(listener);
+          return () => {
+            pathnameListeners.delete(listener);
+          };
+        },
+        () => mockPathname()
+      ),
+    useSearchParams: () => new URLSearchParams(),
+  };
+});
 
 vi.mock('@/lib/api-client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/api-client')>();
@@ -46,7 +63,10 @@ vi.mock('@/lib/api-client', async (importOriginal) => {
 });
 
 import { worktreeApi } from '@/lib/api-client';
-import { RepositoryTabBar } from '@/components/layout/RepositoryTabBar';
+import {
+  RepositoryTabBar,
+  resolveWheelScrollLeftDelta,
+} from '@/components/layout/RepositoryTabBar';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { ToastProvider } from '@/components/common/Toast';
 import { SidebarProvider, useSidebarContext } from '@/contexts/SidebarContext';
@@ -530,6 +550,168 @@ describe('RepositoryTabBar (Issue #2374)', () => {
 
       expect(rowPath).toBeTruthy();
       expect(sidebarPaths).toContain(rowPath);
+    });
+  });
+
+  /**
+   * Issue #2480: a mouse-connected macOS draws a classic, always-visible
+   * scrollbar, which took 15 of the band's 32px and squashed the tabs into
+   * the top half. The strip now hides it, so these pin what replaces it: the
+   * class that hides it, a wheel that scrolls without it, and the current tab
+   * kept in view, since nothing else shows where the strip is scrolled to.
+   */
+  describe('scrolling with the scrollbar hidden (Issue #2480)', () => {
+    /** Change the route the way the App Router does: new pathname, subscribers told. */
+    function navigateTo(pathname: string): void {
+      mockPathname.mockReturnValue(pathname);
+      act(() => {
+        pathnameListeners.forEach((listener) => listener());
+      });
+    }
+
+    it('hides the scrollbar but still scrolls', async () => {
+      renderStrip();
+      await waitFor(() => expect(tabNames()).toHaveLength(2));
+      const strip = screen.getByTestId('repository-tab-strip');
+      expect(strip.className).toContain('scrollbar-hide');
+      expect(strip.className).toContain('overflow-x-auto');
+    });
+
+    describe('mouse wheel', () => {
+      it('turns a vertical wheel over a tab into a sideways scroll of the strip', async () => {
+        renderStrip();
+        await waitFor(() => expect(tabNames()).toHaveLength(2));
+        const strip = screen.getByTestId('repository-tab-strip');
+        const tab = screen.getAllByTestId('repository-tab')[0];
+
+        fireEvent.wheel(tab, { deltaY: 120 });
+        expect(strip.scrollLeft).toBe(120);
+        fireEvent.wheel(strip, { deltaY: -50 });
+        expect(strip.scrollLeft).toBe(70);
+        // The strip scrolls, not the tab the pointer happened to be over.
+        expect(tab.scrollLeft).toBe(0);
+      });
+
+      it('leaves a trackpad swipe to the browser, which already scrolls the strip', async () => {
+        renderStrip();
+        await waitFor(() => expect(tabNames()).toHaveLength(2));
+        const strip = screen.getByTestId('repository-tab-strip');
+
+        fireEvent.wheel(strip, { deltaX: 80, deltaY: 12 });
+        expect(strip.scrollLeft).toBe(0);
+      });
+    });
+
+    describe('resolveWheelScrollLeftDelta', () => {
+      function wheel(
+        init: Partial<Pick<WheelEvent, 'deltaX' | 'deltaY' | 'deltaMode' | 'ctrlKey' | 'shiftKey'>>
+      ) {
+        return { deltaX: 0, deltaY: 0, deltaMode: 0, ctrlKey: false, shiftKey: false, ...init };
+      }
+
+      it('passes a pixel-mode vertical delta straight through, in both directions', () => {
+        expect(resolveWheelScrollLeftDelta(wheel({ deltaY: 100 }), 400)).toBe(100);
+        expect(resolveWheelScrollLeftDelta(wheel({ deltaY: -100 }), 400)).toBe(-100);
+      });
+
+      it('turns a line-mode notch (Firefox with a mouse) into about a pixel-mode notch', () => {
+        // Three lines is one notch; a pixel-mode browser reports ~100px for it.
+        const delta = resolveWheelScrollLeftDelta(wheel({ deltaY: 3, deltaMode: 1 }), 400);
+        expect(delta).toBeGreaterThanOrEqual(60);
+        expect(delta).toBeLessThanOrEqual(150);
+      });
+
+      it('takes a page-mode delta as one visible width of the strip', () => {
+        expect(resolveWheelScrollLeftDelta(wheel({ deltaY: 1, deltaMode: 2 }), 400)).toBe(400);
+      });
+
+      it('leaves a mostly-horizontal gesture to the browser', () => {
+        expect(resolveWheelScrollLeftDelta(wheel({ deltaX: 40, deltaY: 10 }), 400)).toBe(0);
+        expect(resolveWheelScrollLeftDelta(wheel({ deltaX: -30, deltaY: 30 }), 400)).toBe(0);
+      });
+
+      it('leaves Shift+wheel and Ctrl+wheel (a trackpad pinch-zoom) to the browser', () => {
+        expect(resolveWheelScrollLeftDelta(wheel({ deltaY: 100, shiftKey: true }), 400)).toBe(0);
+        expect(resolveWheelScrollLeftDelta(wheel({ deltaY: 100, ctrlKey: true }), 400)).toBe(0);
+      });
+    });
+
+    describe('current tab', () => {
+      const originalScrollIntoView = Element.prototype.scrollIntoView;
+      const scrollIntoView = vi.fn<(arg?: boolean | ScrollIntoViewOptions) => void>();
+
+      beforeEach(() => {
+        // jsdom does not implement scrollIntoView.
+        scrollIntoView.mockClear();
+        Element.prototype.scrollIntoView = scrollIntoView;
+      });
+
+      afterEach(() => {
+        Element.prototype.scrollIntoView = originalScrollIntoView;
+      });
+
+      /** Repositories whose tab was scrolled into view, in call order. */
+      function revealed(): string[] {
+        return scrollIntoView.mock.contexts.map(
+          (el) => (el as Element).getAttribute('data-repository') ?? ''
+        );
+      }
+
+      it('scrolls the current repository\'s tab into view on first paint', async () => {
+        mockPathname.mockReturnValue('/worktrees/zebra-main');
+        renderStrip();
+
+        await waitFor(() => expect(revealed()).toContain('zebra-tools'));
+        expect(revealed()).not.toContain('alpha-app');
+        expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest', inline: 'nearest' });
+      });
+
+      it('scrolls the new repository\'s tab into view after a navigation', async () => {
+        mockPathname.mockReturnValue('/worktrees/alpha-main');
+        renderStrip();
+        await waitFor(() => expect(revealed()).toContain('alpha-app'));
+        scrollIntoView.mockClear();
+
+        navigateTo('/worktrees/zebra-main');
+
+        expect(revealed()).toEqual(['zebra-tools']);
+      });
+
+      it('brings the tab back after a navigation within the same repository', async () => {
+        // The user may have scrolled the strip away since the last reveal, so
+        // a new branch of the same repository must reveal its tab again.
+        mockPathname.mockReturnValue('/worktrees/alpha-main');
+        renderStrip();
+        await waitFor(() => expect(revealed()).toContain('alpha-app'));
+        scrollIntoView.mockClear();
+
+        navigateTo('/worktrees/alpha-feature');
+
+        expect(revealed()).toEqual(['alpha-app']);
+      });
+
+      it('scrolls it into view again once the "…" button narrows the strip', async () => {
+        mockPathname.mockReturnValue('/worktrees/zebra-main');
+        renderStrip();
+        await waitFor(() => expect(revealed()).toContain('zebra-tools'));
+        scrollIntoView.mockClear();
+
+        const strip = screen.getByTestId('repository-tab-strip');
+        Object.defineProperty(strip, 'scrollWidth', { value: 1200, configurable: true });
+        Object.defineProperty(strip, 'clientWidth', { value: 400, configurable: true });
+        act(() => {
+          window.dispatchEvent(new Event('resize'));
+        });
+
+        expect(screen.getByTestId('repository-tab-overflow')).toBeInTheDocument();
+        expect(revealed()).toEqual(['zebra-tools']);
+      });
+
+      it('scrolls nothing while no worktree is on screen', async () => {
+        renderStrip();
+        await waitFor(() => expect(tabNames()).toHaveLength(2));
+        expect(scrollIntoView).not.toHaveBeenCalled();
+      });
     });
   });
 });
