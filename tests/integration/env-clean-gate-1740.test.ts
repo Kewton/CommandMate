@@ -24,6 +24,11 @@
  *   - this repository's `.commandmate/verify.yaml` turns the option on, asserted
  *     here against the real file rather than a fixture.
  *
+ * Issue #2472 closes the case that made every delegation into an idle worktree
+ * fail: the route writes the baseline before the send starts the agent's
+ * session, so the route now records that session's name in the baseline and the
+ * gate excuses exactly that one addition — asserted through the stored file.
+ *
  * @vitest-environment node
  */
 
@@ -184,8 +189,14 @@ function useRepo(requireEnvClean: boolean): void {
   });
 }
 
-/** Create the task the way `send --contract` does: through the route. */
-async function sendContract(source: string = CONTRACT): Promise<string> {
+/**
+ * Create the task the way `send --contract` does: through the route, naming the
+ * agent and instance the way the CLI does when `--agent` / `--instance` is given.
+ */
+async function sendContract(
+  source: string = CONTRACT,
+  target: { cliToolId?: string; instanceId?: string } = {}
+): Promise<string> {
   writeFileSync(join(repo, '.commandmate', 'tasks', 'task.yaml'), source);
   const { POST } = await import('@/app/api/worktrees/[id]/tasks/route');
   const response = await POST(
@@ -193,7 +204,7 @@ async function sendContract(source: string = CONTRACT): Promise<string> {
       new Request(`http://localhost/api/worktrees/${wtId}/tasks`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ contractPath: '.commandmate/tasks/task.yaml' }),
+        body: JSON.stringify({ contractPath: '.commandmate/tasks/task.yaml', ...target }),
       })
     ),
     { params: Promise.resolve({ id: wtId }) }
@@ -498,5 +509,98 @@ describe('this repository has the option switched on (#2442)', () => {
 
     expect(config).not.toBeNull();
     expect(defaultPlannedGateIds(config!)).toContain(ENV_CLEAN_GATE_ID);
+  });
+});
+
+// =============================================================================
+// Issue #2472
+// =============================================================================
+
+describe('the delegation’s own agent session (#2472)', () => {
+  const CODEX_SESSION = `${MCBD_SESSION_PREFIX}codex-${wtId}`;
+
+  function storedTaskSession(taskId: string): unknown {
+    return JSON.parse(readFileSync(join(snapshotDir, `${taskId}.json`), 'utf-8')).taskSession;
+  }
+
+  function envCleanGate(run: Awaited<ReturnType<typeof verify>>) {
+    return run?.gates.find((entry) => entry.gateId === ENV_CLEAN_GATE_ID);
+  }
+
+  it('passes when the only new session is the one the send started', async () => {
+    // The #2470 shape. No session is running when the task is created, so the
+    // session `send` starts right after is not in the baseline. Before #2472
+    // this was exit 20 on a single `+ mcbd-claude-<wt> [self]` line, with
+    // nothing wrong with the work.
+    useRepo(true);
+    machine = snapshot({ listeners: listing(['tcp/3000']), 'tmux-sessions': listing([]) });
+    const taskId = await sendContract();
+    expect(storedTaskSession(taskId)).toBe(OWN_SESSION);
+
+    // What `send` does next in an idle worktree: start the agent's session.
+    machine = snapshot({
+      listeners: listing(['tcp/3000']),
+      'tmux-sessions': listing([OWN_SESSION]),
+    });
+    agentDidSomeWork();
+
+    const run = await verify(taskId);
+    expect(envCleanGate(run)?.status).toBe('passed');
+    expect(envCleanGate(run)?.logTail).toContain(`+ ${OWN_SESSION} [task session, excused]`);
+    expect(run?.status).toBe('passed');
+  });
+
+  it('records the instance the task was sent to, and excuses only that one', async () => {
+    useRepo(true);
+    const taskId = await sendContract(CONTRACT, { cliToolId: 'claude', instanceId: 'claude-2' });
+    expect(storedTaskSession(taskId)).toBe(`${OWN_SESSION}-2`);
+
+    machine = snapshot({
+      listeners: listing(['tcp/3000']),
+      'tmux-sessions': listing([`${OWN_SESSION}-2`, OWN_SESSION]),
+    });
+    agentDidSomeWork();
+
+    const run = await verify(taskId);
+    expect(envCleanGate(run)?.status).toBe('failed');
+    expect(envCleanGate(run)?.logTail).toContain(`+ ${OWN_SESSION} [self]`);
+    expect(envCleanGate(run)?.logTail).toContain(`+ ${OWN_SESSION}-2 [task session, excused]`);
+    expect(run?.status).toBe('failed');
+  });
+
+  it('still fails when the worker started another session in its own worktree', async () => {
+    useRepo(true);
+    const taskId = await sendContract();
+
+    machine = snapshot({
+      listeners: listing(['tcp/3000']),
+      'tmux-sessions': listing([OWN_SESSION, CODEX_SESSION]),
+    });
+    agentDidSomeWork();
+
+    const run = await verify(taskId);
+    expect(envCleanGate(run)?.status).toBe('failed');
+    expect(envCleanGate(run)?.logTail).toContain(`+ ${CODEX_SESSION} [self]`);
+    expect(run?.status).toBe('failed');
+  });
+
+  it('still fails when the task’s own session is gone', async () => {
+    // Excusing its addition must not become excusing its removal: a session
+    // that was there at send time and is gone at verification is the #1624 wipe.
+    useRepo(true);
+    machine = snapshot({
+      listeners: listing(['tcp/3000']),
+      'tmux-sessions': listing([OWN_SESSION]),
+    });
+    const taskId = await sendContract();
+    expect(storedTaskSession(taskId)).toBe(OWN_SESSION);
+
+    machine = snapshot({ listeners: listing(['tcp/3000']), 'tmux-sessions': listing([]) });
+    agentDidSomeWork();
+
+    const run = await verify(taskId);
+    expect(envCleanGate(run)?.status).toBe('failed');
+    expect(envCleanGate(run)?.logTail).toContain(`- ${OWN_SESSION}`);
+    expect(run?.status).toBe('failed');
   });
 });
