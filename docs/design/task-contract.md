@@ -546,7 +546,8 @@ Phase 0 の bash 参照実装（`.claude/skills/cmate-verify/scripts/verify-run.
 実装: `src/lib/verification/env-snapshot.ts` / `src/lib/verification/env-clean-gate.ts` /
 `src/lib/tasks/contract-parser.ts`（`success.requireEnvClean`） /
 `src/lib/tasks/contract-message.ts`（`runsEnvCleanGate` / `BUILT_IN_GATE_ORDER`） /
-`src/app/api/worktrees/[id]/tasks/route.ts`（`recordEnvBaseline`）
+`src/app/api/worktrees/[id]/tasks/route.ts`（`recordEnvBaseline`。Issue #2472 からタスク自身のセッション名も記録） /
+`src/lib/cli-tools/session-name.ts`（`resolveSessionName`。読むだけ）
 テスト: `tests/unit/verification/env-snapshot.test.ts` /
 `tests/unit/verification/env-clean-gate.test.ts` /
 `tests/unit/verification/gate-runner-env-clean.test.ts` /
@@ -565,7 +566,7 @@ Phase 0 の bash 参照実装（`.claude/skills/cmate-verify/scripts/verify-run.
 | probe id | 取得方法 | 違反の意味 |
 |---|---|---|
 | `listeners` | `lsof -nP -iTCP -sTCP:LISTEN -F pcn` を `ps -A -o pid=,command=` と突き合わせ、コマンドラインが CommandMate のもの（`COMMANDMATE_PROCESS_PATTERN`）だけを残す。key は `tcp/<port>`、anchor は `lsof -a -d cwd` で引いた cwd | ポートが消えた＝サーバを落とした／増えた＝サーバを残した |
-| `tmux-sessions` | `tmux list-sessions -F '#{session_name}'` のうち `mcbd-` 始まり | 他ワーカーのセッションを殺した（#1624）／自分のセッションを残した |
+| `tmux-sessions` | `tmux list-sessions -F '#{session_name}'` のうち `mcbd-` 始まり | 他ワーカーのセッションを殺した（#1624）／自分のセッションを残した（**タスク自身のエージェントセッション 1 本は除く**。下の「タスク自身のエージェントセッション」、Issue #2472） |
 | `home-entries` | `$HOME` 直下の `readdir` | HOME を汚した |
 | `commandmate-entries` | `~/.commandmate` 直下の `readdir` | 設定・状態ディレクトリを汚した |
 
@@ -599,17 +600,46 @@ probe は `ok` / `unavailable` のどちらかを必ず名乗り、`unavailable`
   まさにこれ）。
 - **増えたものは、他ワーカーに帰属できる場合だけ免除。** 並列委任は互いの計測窓の中で
   正当に自分のセッションやサーバを起こすため、これを違反にすると並列実行が成立しない。
+- **もう 1 つの例外は、タスク自身のエージェントセッション 1 本だけ（Issue #2472）。** 委任そのものが
+  起動したセッションは「ワーカーが残したもの」ではない。名前の完全一致でしか免除せず、
+  消失は免除しない（下の「タスク自身のエージェントセッション」）。
 
 帰属の判定:
 
 | probe | 判定 |
 |---|---|
-| `tmux-sessions` | 名前 `mcbd-<cli>-<worktreeId>[-suffix]` を分解し、自 worktree なら `self`、別 worktree なら `other`、解釈できなければ `unattributed`。worktree id はハイフンを含みうるので曖昧なケースは `self` に倒す（厳しい側） |
+| `tmux-sessions` | 名前 `mcbd-<cli>-<worktreeId>[-suffix]` を分解し、自 worktree なら `self`、別 worktree なら `other`、解釈できなければ `unattributed`。worktree id はハイフンを含みうるので曖昧なケースは `self` に倒す（厳しい側）。ただし**追加のうちタスク自身のエージェントセッションと完全一致する 1 本**は、帰属より先に除外する（Issue #2472） |
 | `listeners` | プロセスの cwd が自 worktree 配下なら `self`、**自 worktree の兄弟ディレクトリ**なら `other`（linked worktree は横並びに作られ、ユーザの本番サーバが動くプライマリ checkout もそこに居る）、それ以外・cwd 不明は `unattributed` |
 | `home-entries` / `commandmate-entries` | ファイルに所有者は無いので常に `unattributed` |
 
 `unattributed` は「たぶん誰のものでもない」ではなく「他人のものだと**示せなかった**」であり、
 追加は違反として扱う。免除には他所有者の積極的な証拠が要る。
+
+#### タスク自身のエージェントセッション（Issue #2472）
+
+`send --contract` は **task を作ってから**メッセージを送る。ベースラインは task 作成時に採られ、
+セッションが無い worktree ではその後の送信（`sendUserMessage` → `startSession`）がセッションを作る。
+つまりベースラインに無い `self` セッションが**必ず 1 本**増え、作業に問題の無いワーカーが毎回
+`failed`（`wait --verify` の exit 20）になっていた（#2470、/orchestrate 2456〜2460 の 5 本すべて）。
+1 回目の送信が cold-start timeout で失敗してセッションだけが残り、2 回目の送信のベースラインに
+入っていた場合だけ PASS した（#2468）— 判定がセッションの生まれた時刻だけで決まっていた。
+
+対処: ベースラインを保存するとき、**そのタスクが起動するセッション名**を snapshot に
+`taskSession` として記録し、ゲートは `tmux-sessions` の追加のうち**その名前と完全一致する 1 本だけ**を
+免除する。
+
+| 項目 | 規則 |
+|---|---|
+| 名前の求め方 | task 行の `(worktreeId, cliToolId, instanceId)` から `resolveSessionName()`（`src/lib/cli-tools/session-name.ts`）で求める。セッションを起動する側と同じ関数を使い、命名規則を 2 箇所に持たない。主インスタンスは `mcbd-<cli>-<wt>`、追加インスタンスは `mcbd-<cli>-<wt>-<suffix>` |
+| 免除の範囲 | その 1 本の完全一致だけ。同じ worktree の別セッション（ワーカーが起こした `mcbd-codex-<wt>`、タスクと別インスタンスの `mcbd-claude-<wt>-2`、テストが作った `mcbd-*-<wt>-x`）の追加は従来どおり違反 |
+| 消失 | 免除しない。タスク自身のセッションでも、ベースラインに在って検証時に無ければ違反（#1624 / #1739 / #2442 の kill-server・pkill を捕まえる規則はそのまま） |
+| 出力 | 黙って消さない。`+ mcbd-claude-<wt> [task session, excused]` として列挙し、`+N -M` の件数と status からは除く。ヘッダに `task-session=<名前>` を出す |
+| 名前を求められない task 行 | 未知の CLI tool id など。`taskSession: null` を記録し、何も免除しない（ヘッダは `task-session=unresolved`） |
+| #2472 より前に書かれたベースライン | `taskSession` キー自体が無い。**何も免除しない** — そのベースラインが元々受けるはずだった判定のまま（ヘッダは `task-session=unrecorded`）。検証時に task 行から名前を引き直す方式にしなかったのは、ゲートに DB 依存を持ち込まないためで、古いファイルは 30 日の保持期限で消える |
+
+`taskSession` は `EnvSnapshot` の型には足さず、snapshot オブジェクトに載せて保存する
+（`EnvBaseline`、`src/lib/verification/env-clean-gate.ts`）。保存は JSON の往復で、
+`isEnvSnapshot` は知らないキーを無視するため、キー付きのファイルも従来のローダでそのまま読める。
 
 #### 既定は無効、opt-in で有効
 
