@@ -12,8 +12,15 @@ Issue #2050 で **2 つ目のツール（opencode）** が入った。`--tool` �
 （既定は `claude`）。1 回の実行が駆動するのは 1 ツールだけ — 使い捨て HOME・pane geometry・
 起動完了行がツールごとに違うため。
 
+Issue #2486 で **claude に AskUserQuestion の 4 シナリオ**が加わった（`askuserquestion-*`）。
+タブ行だけ・preview 枠だけ・両方（Issue の入力そのもの）の picker を検出 2 経路と claude の
+`detectDialog` で読み、最後の 1 本（`askuserquestion-respond-walk`）は各画面で
+「`wait --on-prompt agent` が止まる → `respond "1"` が受理される」を 1 問目・2 問目・Submit まで
+実機で通す。キー送信は本番の `sendPromptAnswer` → `src/lib/tmux/tmux.ts` で、`$TMUX` を私設ソケットへ
+向けたうえで**転送されたことを assert してから**送る（`CanarySession.withProductionTmux`）。
+
 ```bash
-npm run canary                        # claude 7 シナリオ
+npm run canary                        # claude 11 シナリオ
 npm run canary -- --tool opencode     # opencode 5 シナリオ
 npm run canary -- --list              # 全ツールのシナリオ一覧
 npm run canary -- --help              # オプション
@@ -41,11 +48,14 @@ npm run canary -- --strict-version    # 版ずれ（installed > verifiedAgainst�
 | `tool-profiles.ts` | ツールごとの実行形（実行ファイル・geometry・起動完了行・起動フラグ）。#2050 |
 | `opencode-scenarios.ts` | opencode の 5 シナリオ（branch A0/A/C/D/E に 1 本ずつ）。#2050 |
 | `opencode-expectations.ts` | opencode の期待値・起動オーバーレイ（**純関数**）。#2050 |
+| `askuserquestion-scenarios.ts` | claude の AskUserQuestion 4 シナリオと Issue #2486 の入力（`workspaceFiles` の `ask.json` で渡す）。#2486 |
+| `askuserquestion-expectations.ts` | AskUserQuestion シナリオの期待値（**純関数**。本番の判定＋フレームの構造的事実）。#2486 |
+| `respond-walk.ts` | `wait` → `respond "1"` の画面ごとの歩行。`/prompt-response` の送信前検証と同じ呼び出し列＋本番 `sendPromptAnswer`。#2486 |
 | `expectations.ts` | claude の期待値・起動オーバーレイ・上流障害パターン（すべて**純関数**。単体テスト対象） |
 | `hook-expectations.ts` | Auto-Yes v2 シナリオの期待値（フレームではなく `Observation.hooks` を読む。#1847） |
 | `hook-receiver.ts` | `PermissionRequest` / agent-event の受け口。裁定は本体の `resolvePermissionRequest`（#1847） |
 | `probe.ts` | フレーム → 検出 2 経路の verdict（本番の呼び方を複製） |
-| `session.ts` | 使い捨てセッション（起動・オーバーレイ処理・送信・ポーリング）。形は `tool-profiles.ts` から取る |
+| `session.ts` | 使い捨てセッション（起動・オーバーレイ処理・送信・ポーリング）。形は `tool-profiles.ts` から取る。`withProductionTmux` は本番 tmux コードを `$TMUX` 経由で私設サーバへ向け、転送を assert してから実行する（#2486） |
 | `tmux-private.ts` | `-L cmate-canary-*` を強制する tmux ラッパ（`kill-server` はここ経由でしか到達できない） |
 | `isolated-home.ts` | 使い捨て HOME の作成・シード・認証解決・破棄 |
 | `guards.ts` | 実 `~/.claude/settings.json`・`~/.config/opencode/*`・`auth.json`・`opencode.db` と `mcbd-*` セッションの before/after 検証 |

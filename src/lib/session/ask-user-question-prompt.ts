@@ -105,9 +105,11 @@ function corresponds(a: string, b: string): boolean {
  * Containment rather than the prefix rule the labels use, because the two are
  * extracted differently. An option label is a parsed line; the question is
  * whatever the detector's upward scan swept together, and on a real capture that
- * is several lines glued into one — the canary frame yields
+ * was several lines glued into one — before Issue #2486 the canary frame yielded
  * `"⏺ I'll load the TaskCreate tool schema first. ☐ First task Which task would
- * you like to start with?"` for a question that is only its last clause.
+ * you like to start with?"` for a question that is only its last clause. The
+ * picker's tab row now caps that scan, but the scan still reads at most a few
+ * rows, so a long question arrives cut and containment is still the right test.
  *
  * The floor stops a short question ("Continue?") from matching unrelated prose;
  * the uniqueness requirement in {@link matchAskUserQuestion} does the rest. On

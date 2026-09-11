@@ -277,4 +277,15 @@ export class PrivateTmuxServer {
   get openSessions(): string[] {
     return [...this.createdSessions];
   }
+
+  /**
+   * This run's socket path, known once a session has been created (Issue #2486).
+   *
+   * The value `$TMUX` must name for PRODUCTION tmux code — which takes no socket
+   * argument — to reach this server instead of the user's. See
+   * `CanarySession.withProductionTmux`, the only reader.
+   */
+  get socketPath(): string | null {
+    return this.resolvedSocketPath;
+  }
 }

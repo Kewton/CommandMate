@@ -27,7 +27,7 @@
  */
 
 import { execFile } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
@@ -311,6 +311,14 @@ async function runScenario(scenario: CanaryScenario, deps: RunScenarioDeps): Pro
   log(`  expect: ${expectation.label}`);
   if (options.mutateVerdict && scenario.hooks) {
     log('  --mutate-verdict: the receiver answers the OPPOSITE verdict; this scenario must FAIL.');
+  }
+
+  // Issue #2486: seed the working directory before the tool starts in it.
+  for (const [name, content] of Object.entries(scenario.workspaceFiles ?? {})) {
+    if (path.basename(name) !== name) {
+      throw new Error(`canary: workspace file "${name}" of ${scenario.id} must be a bare file name`);
+    }
+    writeFileSync(path.join(home.workingDirectoryFor(scenario.id), name), content, { mode: 0o600 });
   }
 
   const hookSession = scenario.hooks ? prepareHookSession(scenario, deps) : null;

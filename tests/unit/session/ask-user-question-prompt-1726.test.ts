@@ -153,8 +153,12 @@ describe('the live picker with the task panel on screen (Issue #1726)', () => {
   });
 
   it('replaces the question with the agent’s text, not the pane’s sweep', () => {
-    // The detector's upward scan glues several lines together.
-    expect(screen.question).toContain("I'll load the TaskCreate tool schema first");
+    // Before Issue #2486 the detector's upward scan glued the previous
+    // transcript row and the picker's tab chip in front of the question
+    // (`⏺ I'll load the TaskCreate tool schema first. ☐ First task Which task…`).
+    // It now stops at the chip, so the pane's reading is the question alone —
+    // and the agent's own text is still what `applyAskUserQuestion` publishes.
+    expect(screen.question).toBe('Which task would you like to start with?');
     expect(applyAskUserQuestion(screen, TASK_SPEC)!.question).toBe(
       'Which task would you like to start with?',
     );

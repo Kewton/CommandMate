@@ -57,6 +57,7 @@ import { normalizeFrame } from '@/lib/detection/tools/frame';
 import { getToolStatusDetector } from '@/lib/detection/tools/registry';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { DialogVerdict } from '@/lib/detection/tools/types';
+import type { PromptDetectionResult } from '@/lib/detection/prompt-detector';
 import type { PromptType } from '@/types/models';
 
 /**
@@ -340,4 +341,65 @@ export function evaluateDialogPresence(
     frame,
     AUTO_YES_DIALOG_GATE_DEFAULT_MODE[cliToolId] ?? 'legacy',
   );
+}
+
+/** `/prompt-response`'s refusal when the prompt it was asked to answer is gone. */
+export const PROMPT_NO_LONGER_ACTIVE_REASON = 'prompt_no_longer_active';
+
+/**
+ * `/prompt-response`'s refusal when an AskUserQuestion picker IS on screen but
+ * the tool's own dialog rule could not vouch for it (Issue #2486).
+ */
+export const UNSUPPORTED_DIALOG_LAYOUT_REASON = 'unsupported_dialog_layout';
+
+/**
+ * Fixed text, never quoting the answer (SEC-003, as in `prompt-answer-semantic`),
+ * so it is safe to return to a client verbatim.
+ */
+const UNSUPPORTED_DIALOG_LAYOUT_MESSAGE =
+  'An AskUserQuestion picker is on screen, but its layout could not be verified as one of the ' +
+  "agent's dialogs, so no key was sent. Answer it in the terminal, or retry once the screen has settled.";
+
+/** Why `/prompt-response` will not answer a frame. */
+export interface PromptResponseRefusal {
+  reason: typeof PROMPT_NO_LONGER_ACTIVE_REASON | typeof UNSUPPORTED_DIALOG_LAYOUT_REASON;
+  message?: string;
+}
+
+/**
+ * May `/prompt-response` answer this frame? Null when it may; otherwise why not
+ * (Issue #2486).
+ *
+ * The route has refused whenever the generic parser found no prompt OR the gate
+ * could not vouch for the one it found (#161, #2457), and it called both
+ * `prompt_no_longer_active`. For the second half that was sometimes false: in
+ * #2486 an AskUserQuestion picker with a preview pane was open on screen, `wait`
+ * had just exited 10 for it, and `respond` said the prompt was gone. The two
+ * cases need different next steps — retry versus answer at the pane — so they
+ * get different reasons.
+ *
+ * The evidence for "a picker IS on screen" is the picker's own footer
+ * (`Enter to select · … navigate`, which sets `isAskUserQuestion`), not the
+ * parser's candidate alone: #2457's reply frames are candidates too, and for
+ * them `prompt_no_longer_active` stays the answer.
+ *
+ * @param promptCheck - What the generic parser (or agy's reader) found on the frame
+ * @param presence - {@link evaluateDialogPresence} for the same frame
+ */
+export function judgePromptResponse(
+  promptCheck: Pick<PromptDetectionResult, 'isPrompt' | 'promptData'>,
+  presence: DialogPresenceVerdict,
+): PromptResponseRefusal | null {
+  if (promptCheck.isPrompt && presence.present) return null;
+
+  const promptData = promptCheck.promptData;
+  if (
+    promptCheck.isPrompt &&
+    presence.gated &&
+    promptData?.type === 'multiple_choice' &&
+    promptData.isAskUserQuestion === true
+  ) {
+    return { reason: UNSUPPORTED_DIALOG_LAYOUT_REASON, message: UNSUPPORTED_DIALOG_LAYOUT_MESSAGE };
+  }
+  return { reason: PROMPT_NO_LONGER_ACTIVE_REASON };
 }

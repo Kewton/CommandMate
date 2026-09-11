@@ -258,11 +258,15 @@ export function createRespondCommand(): Command {
         if (result && !result.success) {
           // [DR2-06] Check reason for failure
           const reason = result.reason || 'unknown';
-          // Issue #1681 / #1726: these two mean the server refused BEFORE
-          // sending, so the terminal is untouched — worth saying plainly,
-          // because the other reasons leave the answer's fate unknown.
+          // Issue #1681 / #1726: these mean the server refused BEFORE sending,
+          // so the terminal is untouched — worth saying plainly, because the
+          // other reasons leave the answer's fate unknown. Issue #2486 adds
+          // `unsupported_dialog_layout`: a picker IS on screen but its layout
+          // could not be verified, and the server's message says what to do.
           const refusedBeforeSending =
-            reason === 'unresolvable_answer' || reason === 'answer_out_of_range';
+            reason === 'unresolvable_answer' ||
+            reason === 'answer_out_of_range' ||
+            reason === 'unsupported_dialog_layout';
           // Issue #1898: the verdict was addressed to the agent's own API and
           // the POST did not land. Distinct from the two above — the answer was
           // resolved and an attempt was made — and distinct from a keystroke,
