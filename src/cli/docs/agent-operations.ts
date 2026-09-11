@@ -102,6 +102,13 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
   narrow: a prompt on screen is still refused, and the payload still reports it
   (wait and the UI do not go quiet).
 
+  Message length: up to 48 KiB and 240 lines arrives whole on claude, codex,
+  command-code and antigravity (verified, Issue #2464). Over 512 bytes the
+  message is pasted as one bracketed paste and Enter waits until the agent's
+  composer shows all of it; if it never does, nothing is submitted and send
+  exits 99 ("Message body did not arrive intact"). Put a longer brief in a
+  file and send a message that names it ('commandmate docs --section delegation').
+
   Finding worktree IDs:
     WT=$(commandmate ls --branch feature/101 --quiet)
     WT=$(commandmate ls --id anvil- --quiet)   # disambiguate by repo (id prefix)
@@ -663,6 +670,20 @@ same CommandMate server, and you can hand work to them.
   --json adds the target and a 'source' field saying whether the reply came
   from the chat transcript ("history") or from the pane ("pane"). copilot,
   gemini and vibe-local keep no transcript, so their replies are pane reads.
+
+## How long a request can be
+
+  A request of up to 48 KiB and 240 lines is verified to arrive whole on
+  claude, codex, command-code and antigravity (Issue #2464). Anything over 512
+  bytes is pasted into the other session's composer as one bracketed paste,
+  and Enter waits until the composer shows all of it. When it does not, nothing
+  is submitted and the command exits 99 with "Message body did not arrive
+  intact" -- a request is never cut short silently.
+
+  For a longer brief, write it to a file inside the worktree and ask the other
+  session to read that file:
+
+    commandmate ask <worktree-id> "Read .commandmate/briefs/review.md and do what it says." --instance <id>
 
 ## 4. Ask without waiting
 

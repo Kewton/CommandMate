@@ -30,11 +30,18 @@ vi.mock('@/lib/tmux/tmux', () => ({
   // be here. Mocking composer-clear instead would test the wiring and nothing
   // about the behaviour that matters.
   clearComposerLine: vi.fn().mockResolvedValue(undefined),
+  // Issue #2464: the paste target of a long body.
+  exactTarget: (name: string) => `=${name}:`,
 }));
 
 vi.mock('@/lib/tmux/tmux-capture-cache', () => ({
   invalidateCache: vi.fn(),
 }));
+
+// Issue #2464: a long body is pasted with `load-buffer` / `paste-buffer`, which
+// run through execFile directly. Every call succeeds; see
+// submit-verified-sender-long-body-2464.test.ts for what they carry.
+vi.mock('child_process', () => ({ execFile: vi.fn() }));
 
 /** Stable across createLogger() calls so the #1880 audit log can be asserted. */
 const loggerSpies = vi.hoisted(() => ({
@@ -55,7 +62,28 @@ import {
 } from '@/lib/cli-tools/submit-verified-sender';
 import { sendKeys, sendSpecialKeys, capturePane, clearInputLine, clearComposerLine } from '@/lib/tmux/tmux';
 import { invalidateCache } from '@/lib/tmux/tmux-capture-cache';
+import { execFile } from 'child_process';
 import type { CLIToolType } from '@/lib/cli-tools/types';
+
+/**
+ * Every tmux execFile succeeds (Issue #2464: `load-buffer` / `paste-buffer`);
+ * returns the calls, each with what was written to its stdin.
+ */
+function stubExecFile(): Array<{ args: string[]; stdin?: string }> {
+  const calls: Array<{ args: string[]; stdin?: string }> = [];
+  vi.mocked(execFile).mockImplementation(((
+    _file: string,
+    args: string[],
+    _options: unknown,
+    callback: (error: Error | null) => void
+  ) => {
+    const call: { args: string[]; stdin?: string } = { args };
+    calls.push(call);
+    queueMicrotask(() => callback(null));
+    return { stdin: { end: (data: string) => { call.stdin = data; } } };
+  }) as never);
+  return calls;
+}
 
 const SESSION = 'mcbd-claude-test-wt';
 /** Input line cleared -> the message left the box -> submitted. */
@@ -128,6 +156,7 @@ describe('submit-verified-sender', () => {
     vi.mocked(clearInputLine).mockResolvedValue(undefined);
     vi.mocked(clearComposerLine).mockResolvedValue(undefined);
     vi.mocked(invalidateCache).mockReturnValue(undefined);
+    stubExecFile();
   });
 
   // ---------------------------------------------------------------------------
@@ -261,7 +290,6 @@ describe('submit-verified-sender', () => {
     const cases: Array<[string, string]> = [
       ['single-line', 'hello'],
       ['multi-line', 'line1\nline2\nline3'],
-      ['long (paste-length)', LONG_MESSAGE],
     ];
 
     it.each(cases)('confirms submit for a %s message', async (_label, message) => {
@@ -280,6 +308,31 @@ describe('submit-verified-sender', () => {
         expect(invalidateCache).toHaveBeenCalledWith(SESSION);
         // No `\n` gate: the body is always typed via a non-Enter send-keys.
         expect(sendKeys).toHaveBeenCalledWith(SESSION, message, false, { literal: true });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('confirms submit for a long (paste-length) message, pasted rather than typed (Issue #2464)', async () => {
+      vi.useFakeTimers();
+      try {
+        const calls = stubExecFile();
+        // The composer shows the start of the body until Enter, then empties.
+        vi.mocked(capturePane).mockImplementation((async () =>
+          vi.mocked(sendSpecialKeys).mock.calls.length > 0 ? EMPTY_PROMPT : `❯ ${LONG_MESSAGE.slice(0, 150)}`
+        ) as never);
+
+        const submitEnterCount = cliToolId === 'vibe-local' ? 2 : 1;
+        const p = sendMessageWithSubmitVerification({ sessionName: SESSION, message: LONG_MESSAGE, cliToolId, submitEnterCount });
+        await vi.runAllTimersAsync();
+        await expect(p).resolves.toBeUndefined();
+
+        expect(invalidateCache).toHaveBeenCalledWith(SESSION);
+        // Typed, a body past one pty read reaches Claude Code as several reads
+        // and only the last one survives; it goes in as one bracketed paste.
+        expect(sendKeys).not.toHaveBeenCalled();
+        expect(calls.map((c) => c.args[0])).toEqual(['load-buffer', 'paste-buffer']);
+        expect(calls[0].stdin).toBe(LONG_MESSAGE);
       } finally {
         vi.useRealTimers();
       }
@@ -322,14 +375,30 @@ describe('submit-verified-sender', () => {
     it('recovers a folded paste placeholder and confirms once generating (version-resilient)', async () => {
       vi.useFakeTimers();
       try {
-        vi.mocked(capturePane)
-          .mockResolvedValueOnce('❯ [Pasted text +40 lines]') // NOT submitted (no #N, drift)
-          .mockResolvedValue('thinking… (esc to interrupt)');  // generating => submitted
+        // 41 lines, past LITERAL_SEND_MAX_BYTES: pasted, so the paste is
+        // confirmed before Enter (Issue #2464) and the folded placeholder that
+        // is still there AFTER Enter is the swallowed-Enter case this recovers.
+        const message = Array.from({ length: 41 }, (_, i) => `line ${i} of a folded paste`).join('\n');
+        const verifyFrames = [
+          '❯ [Pasted text #1 +40 lines]', // before Enter: the whole paste landed
+          '❯ [Pasted text +40 lines]',    // after Enter: still there (no #N, drift) -> resend
+          'thinking… (esc to interrupt)', // generating => submitted
+        ];
+        let verifyRead = 0;
+        vi.mocked(capturePane).mockImplementation((async (_session: string, arg?: unknown) =>
+          // The numeric form is the #1880 pre-send clear's read.
+          typeof arg === 'number' ? EMPTY_PROMPT : verifyFrames[Math.min(verifyRead++, verifyFrames.length - 1)]
+        ) as never);
 
-        const p = sendMessageWithSubmitVerification({ sessionName: SESSION, message: LONG_MESSAGE, cliToolId: 'claude' });
+        const p = sendMessageWithSubmitVerification({ sessionName: SESSION, message, cliToolId: 'claude' });
         await vi.runAllTimersAsync();
         await expect(p).resolves.toBeUndefined();
 
+        // Initial Enter + one recovery Enter for the placeholder left behind.
+        const enterCalls = vi.mocked(sendSpecialKeys).mock.calls.filter(
+          (c) => c[0] === SESSION && Array.isArray(c[1]) && c[1][0] === 'Enter'
+        );
+        expect(enterCalls.length).toBe(2);
         expect(invalidateCache).toHaveBeenCalledWith(SESSION);
       } finally {
         vi.useRealTimers();
