@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **feat(sessions): `/sessions` のタイルでターミナル面を選べるようにし、TUI を崩さず読める幅と縦積みの履歴を持たせた** (#2510): タイルヘッダにチャット / ターミナルの切替（worktree ごとに `commandmate.sessions.tileSurfaceMode-<id>` へ永続、既定は従来どおり chat）を追加し、チャット面の「ターミナルを開く」も `/worktrees/<id>` への遷移ではなくタイル内の切替にした。ターミナル面は全ツール `wrapMode='frame'`（フレーム自身の桁数を保ちタイル内で横スクロール）＋ `TerminalDisplay` の新 prop `density='compact'`（12px、`text-sm` 比で約 17% 多くの桁が見える）で描き、1920x1080 実測でタイルの端末領域 804px に対し claude の 200 桁フレームが 1440px のまま枠線・区切り線・フッタが 1 行ずつ保たれ、ページ自体は横スクロールしない（390px〜1920px で確認）。履歴はターミナルの下に 3:2（実測 274px / 183px）で縦積みし、既定表示。表示状態は `useHistoryPaneState` に追加したタイル専用スコープ（`commandmate.sessions.tileHistoryVisible`）に保存し、同一ページ内の同期イベントもスコープで分けたため、タイルと worktree 詳細画面の履歴開閉は互いに影響しない（引数なし呼び出しは従来のキーのまま）。履歴を閉じたターミナル面のタイルは `/messages` をポーリングしない（#2511 のタイル用カデンスはそのまま）。あわせて `measureTerminalFrameColumns()` が OSC 8 ハイパーリンクを桁数に数えていたため claude の実キャプチャを 228〜270 桁と過大計測し、frame 表示で最大 70 桁ぶんの空の横スクロールが出ていた点を、描画側と同じ `stripOsc` で除いてから測るよう修正した。
 - **feat(sessions): /sessions にタイル表示モードを追加** (#2509): list / tile を localStorage 永続（既定 list）で切り替え、tile では `container-custom` を外した全幅 `grid-cols-1 xl:grid-cols-2` に各 worktree のチャット（会話履歴）を内蔵した固定高タイルを並べる。タイルヘッダはリポジトリ名 / `/worktrees/<id>` へのブランチリンク / 状態ドット / instance selector（カード全体はリンクにしない）。ビューポート外のタイルは `IntersectionObserver` で `enabled: false` にし `/current-output` も `/messages` も叩かない。
 
 ### Changed
