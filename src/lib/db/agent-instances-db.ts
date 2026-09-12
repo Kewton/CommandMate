@@ -171,6 +171,17 @@ export type InstanceCliToolResolution =
  * conflict rather than silently overriding it: the roster is user-maintained
  * and a mismatch means one of the two is wrong. Callers surface it as an error.
  *
+ * @deprecated Issue #1925 made `resolveSessionTarget`
+ * (`src/lib/session/resolve-session-target.ts`) the one authority, and Issue
+ * #2491 moved the last two callers — `POST /send` and `resolveRelaySession` —
+ * onto it. **Do not give this function a new caller.** Step 2 above is exactly
+ * what #2487 corrected: with no roster row it takes `requestedCliTool` even
+ * when `instanceId` itself names a different tool, so a caller wired here gets
+ * `mcbd-<requested>-<wt>-<tool-named-id>` back instead of a conflict. It is
+ * kept only because its #1629 unit test
+ * (`tests/unit/db/agent-instances-resolve-cli-tool.test.ts`) still pins that
+ * behaviour; removing both is a separate change.
+ *
  * @param db - Database instance
  * @param worktreeId - Worktree ID
  * @param instanceId - Targeted agent instance ID (omitted for the primary instance)
