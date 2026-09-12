@@ -2,7 +2,7 @@
 
 /**
  * SessionTile — one worktree's live conversation, as a fixed-height card
- * (Issue #2509, Epic #2508 Phase 1).
+ * (Issue #2509, Epic #2508 Phase 1; terminal surface in Issue #2510, Phase 2).
  *
  * The `/sessions` tile layout exists so several agents can be watched at once
  * without opening a worktree screen per agent. What makes that possible is that
@@ -28,14 +28,33 @@
  * input bar to travel with it — the whole of `WorktreeChatSendContext` — and the
  * one-tap trail to the worktree screen already reaches all of that.
  *
- * **Not a second surface.** The output is `chat`, always. That is what satisfies
- * the "conversation history is visible" requirement with no new rendering path,
- * and it sidesteps the width problem a 200-column terminal frame has in a half-
- * width card. `ChatSurface` still draws its dialog card for the frames chat
- * cannot express (a selection list, a pager, an unclassified overlay), so a tile
- * is not blind to those either — see {@link ChatSurface}. Its "open the
- * terminal" button navigates to the worktree screen, which is where the terminal
- * actually is.
+ * ## Two surfaces, chat first (Issue #2510)
+ *
+ * The output starts as `chat`, and stays there until the tile is switched. That
+ * is what satisfies the "conversation history is visible" requirement with no
+ * extra pane, and a transcript is variable-width text with no width problem.
+ * `ChatSurface` still draws its dialog card for the frames chat cannot express
+ * (a selection list, a pager, an unclassified overlay), and its "open the
+ * terminal" button now switches THIS tile to its terminal rather than leaving
+ * `/sessions` — the same in-place switch the worktree screen's button performs.
+ *
+ * The terminal surface is the part #2510 had to make usable, and two things
+ * stood in the way:
+ *
+ * - **Width.** A claude / codex frame is 200 columns and a half-width tile's
+ *   terminal is ~95 of them at the worktree screen's font (804px at 1920x1080),
+ *   so re-wrapping folds every rule and box edge in two. The tile renders
+ *   `TerminalDisplay` with {@link SESSION_TILE_TERMINAL_LAYOUT} — the frame
+ *   keeps its own columns and scrolls sideways inside the tile, at a compact
+ *   font. See that constant.
+ * - **History.** The terminal is not a transcript, so History comes back as a
+ *   second pane — stacked UNDER the terminal, because the worktree screen's
+ *   side-by-side 40% column would leave an ~800px tile a ~480px terminal. Its
+ *   visibility is the tile scope of `useHistoryPaneState`
+ *   (`commandmate.sessions.tileHistoryVisible`, shown by default), so a tile
+ *   and the worktree screen never close each other's History.
+ *
+ * The surface itself is remembered per worktree — `useSessionTileSurfaceMode`.
  *
  * ## The header is a row, not a wrapper
  *
@@ -49,12 +68,19 @@
 
 import { memo, useCallback, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
+import { History, MessageSquare, TerminalSquare } from 'lucide-react';
 import { ChatSurface, type ChatSurfaceLiveState } from '@/components/worktree/ChatSurface';
+import { HistoryPane } from '@/components/worktree/HistoryPane';
+import { TerminalDisplay } from '@/components/worktree/TerminalDisplay';
 import { StatusDot } from '@/components/ui';
 import { useTerminalPanePolling } from '@/hooks/useTerminalPanePolling';
 import { useSplitMessages } from '@/hooks/useSplitMessages';
+import {
+  SESSION_TILE_HISTORY_PANE_STORAGE_KEYS,
+  useHistoryPaneState,
+} from '@/hooks/useHistoryPaneState';
+import { useSessionTileSurfaceMode } from '@/hooks/useSessionTileSurfaceMode';
 import { deriveCliStatus } from '@/types/sidebar';
 import {
   agentInstancesFromSelectedAgents,
@@ -65,8 +91,59 @@ import {
   TILE_MESSAGES_POLLING_CADENCE,
   TILE_PANE_POLLING_CADENCE,
 } from '@/config/pane-polling-cadence';
+import {
+  SESSION_TILE_TERMINAL_LAYOUT,
+  getTerminalDisplayCompaction,
+} from '@/config/terminal-display-compaction';
 import type { AgentInstance } from '@/lib/cli-tools/types';
 import type { Worktree } from '@/types/models';
+import type { SurfaceMode } from '@/types/ui-state';
+
+/**
+ * The terminal's share of a tile body while History is stacked under it
+ * (Issue #2510), and the floor it keeps.
+ *
+ * 3 : 2 of the 457px under the header, measured in a real browser at every width
+ * from 390px to 1920px: 274px of terminal (~16 rows at the compact font) over
+ * 183px of History (its header plus a conversation card or two). The floors are what "neither pane is crushed" means if the tile ever
+ * gets shorter: together 16rem, well inside the body, so on today's tile they
+ * never bind and the ratio decides.
+ */
+export const SESSION_TILE_TERMINAL_ROW_CLASS = 'flex-[3_3_0%] min-h-[9rem]';
+
+/** History's share and floor under the terminal. See {@link SESSION_TILE_TERMINAL_ROW_CLASS}. */
+export const SESSION_TILE_HISTORY_ROW_CLASS = 'flex-[2_2_0%] min-h-[7rem]';
+
+/** DOM id of one tile's stacked History region — the header toggle's `aria-controls`. */
+export function sessionTileHistoryRegionId(worktreeId: string): string {
+  return `session-tile-history-${worktreeId}`;
+}
+
+/**
+ * The surface segments in render order. i18n KEYS (in the `worktree` namespace)
+ * rather than labels, and the same keys the worktree screen's split header
+ * uses, so the two controls cannot name one surface two ways.
+ */
+const TILE_SURFACE_SEGMENTS: readonly {
+  mode: SurfaceMode;
+  labelKey: string;
+  icon: typeof TerminalSquare;
+}[] = [
+  { mode: 'chat', labelKey: 'surfaceMode.showChat', icon: MessageSquare },
+  { mode: 'terminal', labelKey: 'surfaceMode.showTerminal', icon: TerminalSquare },
+] as const;
+
+/** Shared look of the header's icon buttons; `active` is the pressed state. */
+function headerIconButtonClass(active: boolean): string {
+  return `flex h-7 w-7 shrink-0 items-center justify-center rounded transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+    active
+      ? 'bg-accent-500/15 text-accent-600 dark:text-accent-400'
+      : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+  }`;
+}
+
+/** A tile has no file panel to open a path in; see the History pane below. */
+const noopFilePathClick = (): void => {};
 
 export interface SessionTileProps {
   /**
@@ -109,7 +186,7 @@ export const SessionTile = memo(function SessionTile({
   className = '',
 }: SessionTileProps) {
   const t = useTranslations('common');
-  const router = useRouter();
+  const tWorktree = useTranslations('worktree');
 
   const instances = useMemo(() => resolveInstances(worktree), [worktree]);
   // Which instance this tile is showing. Held as an id and re-resolved against
@@ -123,13 +200,23 @@ export const SessionTile = memo(function SessionTile({
   const instanceId = activeInstance?.id;
   const cliToolId = activeInstance?.cliTool ?? 'claude';
 
+  // Issue #2510: which surface, and — for the terminal — whether History is
+  // stacked under it. The History toggle is the TILE scope, never the worktree
+  // screen's; see the module comment.
+  const { surfaceMode, setSurfaceMode } = useSessionTileSurfaceMode(worktree.id);
+  const { visible: historyVisible, toggle: toggleHistory } = useHistoryPaneState(
+    SESSION_TILE_HISTORY_PANE_STORAGE_KEYS,
+  );
+  const isTerminalSurface = surfaceMode === 'terminal';
+  const showStackedHistory = isTerminalSurface && historyVisible;
+
   // Issue #2511: the tile profile, not the worktree screen's. A tile is one of
   // up to twenty live panes on one screen, and the profile is what keeps that
   // affordable — measured at 2.0 req/s and 2.5 MB/s for twenty idle tiles,
   // against 11.3 req/s and 18.6 MB/s under the worktree screen's cadence. The
   // worktree screen keeps its own numbers precisely because they are not shared.
   // See `config/pane-polling-cadence` and `docs/design/sessions-tile-polling-2511.md`.
-  const { terminal, prompt, refresh } = useTerminalPanePolling({
+  const { terminal, prompt, refresh, setAutoScroll } = useTerminalPanePolling({
     worktreeId: worktree.id,
     cliToolId,
     instanceId,
@@ -137,11 +224,16 @@ export const SessionTile = memo(function SessionTile({
     cadence: TILE_PANE_POLLING_CADENCE,
   });
 
+  // Issue #2510: the transcript is only on screen in chat, or under the
+  // terminal while History is open. A terminal tile with History closed has no
+  // reader for `/messages`, so it does not poll it — the same "nothing unseen
+  // costs anything" rule `enabled` applies to an offscreen tile, and the same
+  // #2511 cadence whenever it does run. Re-enabling fetches at once.
   const { messages, isLoading } = useSplitMessages({
     worktreeId: worktree.id,
     cliToolId,
     instanceId,
-    enabled,
+    enabled: enabled && (!isTerminalSurface || historyVisible),
     cadence: TILE_MESSAGES_POLLING_CADENCE,
   });
 
@@ -176,12 +268,25 @@ export const SessionTile = memo(function SessionTile({
     ],
   );
 
-  // ChatSurface's banner offers a way out to the terminal. There is no terminal
-  // on this screen, so the way out is the worktree screen — an explicit button
-  // press, which is the only kind of navigation a tile may perform.
-  const handleSurfaceModeChange = useCallback(() => {
-    router.push(`/worktrees/${worktree.id}`);
-  }, [router, worktree.id]);
+  // Issue #2510: ChatSurface's banner offers a way out to the terminal. Phase 1
+  // had no terminal here and navigated to the worktree screen; the tile now has
+  // one, so the banner switches the tile in place like the header segments do.
+  const handleSurfaceModeChange = useCallback(
+    (mode: SurfaceMode) => setSurfaceMode(mode),
+    [setSurfaceMode],
+  );
+
+  // The same per-tool display policy both worktree-screen surfaces read, so one
+  // session's frame is compacted identically wherever it is watched.
+  const { compactTuiLayoutPadding, preservePaintedPanelRows } = useMemo(
+    () => getTerminalDisplayCompaction(cliToolId),
+    [cliToolId],
+  );
+  // opencode / copilot draw their TUIs in the alternate screen with menus at the
+  // top; following the tail would scroll those out of view. Same rule as the
+  // worktree screen's split pane.
+  const disableAutoFollow = cliToolId === 'opencode' || cliToolId === 'copilot';
+  const historyRegionId = sessionTileHistoryRegionId(worktree.id);
 
   const handleInstanceChange = useCallback((event: React.ChangeEvent<HTMLSelectElement>) => {
     setRequestedInstanceId(event.target.value);
@@ -229,13 +334,111 @@ export const SessionTile = memo(function SessionTile({
             ))}
           </select>
         )}
+        {/* Issue #2510: History under the terminal. Only offered on the terminal
+            surface — on chat the surface IS the transcript. */}
+        {isTerminalSurface && (
+          <button
+            type="button"
+            onClick={toggleHistory}
+            aria-pressed={historyVisible}
+            aria-expanded={historyVisible}
+            aria-controls={historyRegionId}
+            aria-label={
+              historyVisible ? tWorktree('terminal.hideHistory') : tWorktree('terminal.showHistory')
+            }
+            title={
+              historyVisible ? tWorktree('terminal.hideHistory') : tWorktree('terminal.showHistory')
+            }
+            className={headerIconButtonClass(historyVisible)}
+            data-testid={`session-tile-history-toggle-${worktree.id}`}
+          >
+            <History size={14} aria-hidden="true" />
+          </button>
+        )}
+        {/* Issue #2510: the surface segments. */}
+        <div
+          role="group"
+          aria-label={tWorktree('surfaceMode.groupLabelMobile')}
+          className="flex shrink-0 items-center gap-0.5 rounded-md border border-border p-0.5"
+          data-testid={`session-tile-surface-mode-${worktree.id}`}
+        >
+          {TILE_SURFACE_SEGMENTS.map(({ mode, labelKey, icon: Icon }) => {
+            const active = surfaceMode === mode;
+            const label = tWorktree(labelKey);
+            return (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => setSurfaceMode(mode)}
+                aria-pressed={active}
+                aria-label={label}
+                title={label}
+                className={headerIconButtonClass(active)}
+                data-testid={`session-tile-surface-${mode}-${worktree.id}`}
+              >
+                <Icon size={14} aria-hidden="true" />
+              </button>
+            );
+          })}
+        </div>
       </header>
 
       {/* Body. Nothing is rendered while the tile is off screen — the hooks above
           are already suspended, so a mounted ChatSurface would only be an empty
           transcript plus its own `/api/relays` poll. */}
-      <div className="min-h-0 flex-1">
-        {enabled ? (
+      <div className="min-h-0 min-w-0 flex-1">
+        {enabled && isTerminalSurface ? (
+          // Issue #2510: terminal on top, History stacked under it. Both rows
+          // clip (`overflow-hidden`, `min-w-0`) so the frame's sideways scroll
+          // stays inside `TerminalDisplay`'s own log and never widens the tile,
+          // the grid cell or the page.
+          <div
+            className="flex h-full min-h-0 min-w-0 flex-col"
+            data-testid={`session-tile-terminal-stack-${worktree.id}`}
+          >
+            <div
+              className={`relative min-w-0 overflow-hidden ${
+                showStackedHistory ? SESSION_TILE_TERMINAL_ROW_CLASS : 'min-h-0 flex-1'
+              }`}
+              data-testid={`session-tile-terminal-${worktree.id}`}
+            >
+              <TerminalDisplay
+                output={terminal.output}
+                isActive={terminal.isRunning}
+                attaching={terminal.attaching}
+                isThinking={terminal.isThinking}
+                autoScroll={terminal.autoScroll}
+                onScrollChange={setAutoScroll}
+                disableAutoFollow={disableAutoFollow}
+                compactTuiLayoutPadding={compactTuiLayoutPadding}
+                preservePaintedPanelRows={preservePaintedPanelRows}
+                wrapMode={SESSION_TILE_TERMINAL_LAYOUT.wrapMode}
+                density={SESSION_TILE_TERMINAL_LAYOUT.density}
+              />
+            </div>
+            {showStackedHistory && (
+              <div
+                id={historyRegionId}
+                className={`min-w-0 overflow-hidden border-t border-border ${SESSION_TILE_HISTORY_ROW_CLASS}`}
+                data-testid={`session-tile-history-${worktree.id}`}
+              >
+                {/* No `onCollapse`: its arrow points at a column to the left,
+                    and the header toggle already owns this region. No file
+                    panel either, so a path in a body opens nothing — the chat
+                    surface in a tile behaves the same way. */}
+                <HistoryPane
+                  messages={messages}
+                  worktreeId={worktree.id}
+                  worktreePath={worktree.path}
+                  cliToolId={cliToolId}
+                  isLoading={isLoading}
+                  onFilePathClick={noopFilePathClick}
+                  className="h-full"
+                />
+              </div>
+            )}
+          </div>
+        ) : enabled ? (
           <ChatSurface
             messages={messages}
             worktreeId={worktree.id}
