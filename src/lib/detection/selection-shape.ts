@@ -435,13 +435,23 @@ export interface CommandCodeQuestionRegion {
  * So this takes a raw frame and nothing else, and imports nothing but
  * `./ansi` — the same trade the rest of this module makes.
  *
- * ## The one path it cannot answer on
+ * ## The one spelling it cannot answer on
  *
- * Auto-Yes hands the detector a capture that `captureAndCleanOutput` has
- * already run `stripBoxDrawing` over, and that blanks a pure-U+2500 row — so
- * condition 1 finds no seam and this returns `null` there. Same limitation
- * `extractOpenCodeModalOverlayFrame` records for the same path, and Auto-Yes on
- * this screen is Issue #2522's, not this one's.
+ * A capture that has been through `stripBoxDrawing` — which blanks a pure-U+2500
+ * row, so condition 1 finds no seam and this returns `null`. Same limitation
+ * `extractOpenCodeModalOverlayFrame` records for the same reason. Issue #2522
+ * did not weaken the reading to work around it: the three consumers that clean
+ * their frames (the response poller, Auto-Yes, `/prompt-response`) now keep the
+ * same tick's RAW capture and hand that here, so both spellings of one capture
+ * exist and the right one is passed.
+ *
+ * ## Issue #2522: the structural half is shared
+ *
+ * Conditions 1, 2, 3-minus-strictness and 5 moved into
+ * {@link scanCommandCodeQuestionScreen}, which {@link hasCommandCodeQuestionChrome}
+ * also reads. This function is exactly that scan plus the two conditions that
+ * are about the LIST — a strict run and a single cursor — so every verdict it
+ * gave before is the verdict it gives now.
  *
  * @param frame - a raw `capture-pane -p -e` frame, ANSI intact (CRLF tolerated)
  * @returns the region's line indices into the LF-normalised frame, or `null`
@@ -449,6 +459,97 @@ export interface CommandCodeQuestionRegion {
 export function readCommandCodeQuestionRegion(
   frame: string | null | undefined,
 ): CommandCodeQuestionRegion | null {
+  const screen = scanCommandCodeQuestionScreen(frame);
+  if (screen === null) return null;
+
+  // 3 (continued). A STRICT run. The numbers were collected in the order they
+  // are drawn and are compared against the run, rather than restarted on every
+  // fresh `1` the way `countTrailingOptionRun` does: that function is reading a
+  // tail that may hold two lists, and this one is asserting that the region
+  // holds exactly one.
+  if (!screen.numbers.every((value, index) => value === index + 1)) return null;
+
+  // 4 (continued). Exactly ONE cursor. Two means two screens — typically a
+  // composer's own `❯` under the dialog, or a frame caught mid-repaint.
+  if (screen.cursorCount !== 1) return null;
+
+  return {
+    ruleLineIndex: screen.ruleLineIndex,
+    firstLineIndex: screen.firstLineIndex,
+    lastLineIndex: screen.lastLineIndex,
+    tabLineIndex: screen.tabLineIndex,
+    cursorLineIndex: screen.cursorLineIndex,
+    optionCount: screen.numbers.length,
+  };
+}
+
+/**
+ * Is Command Code's question CHROME on this frame, whatever its numbering says?
+ * (Issue #2522)
+ *
+ * The same five conditions {@link readCommandCodeQuestionRegion} applies, minus
+ * the two that are about the LIST rather than about the screen: the run need not
+ * be a strict `1.`…`N.`, and there may be more than one cursor on it.
+ *
+ * ## Why the weaker reading is worth having
+ *
+ * Issue #2522 確定仕様 B needs three answers where #2521 had two. "Not this
+ * screen" keeps every existing verdict; "read in full" produces an answerable
+ * prompt; and **"this screen, unreadable"** — a gap in the numbering, a repeated
+ * row, a list that starts at `2`, a second cursor from a half-finished repaint —
+ * has to reach the manual-operation fallback rather than the `ready` the generic
+ * composer check would otherwise publish off the dialog's own `❯` row. That is
+ * the very failure both Issues exist for: `wait` exiting 0 on a pane that is
+ * asking a human a question.
+ *
+ * It is deliberately NOT a relaxation of the strict reading. Nothing that was
+ * `null` becomes a REGION, so no partial option list is produced anywhere and no
+ * existing crop, card or prompt payload changes. What this adds is the ability
+ * to say "declined for a numbering reason" out loud.
+ *
+ * ## Why it is still narrow
+ *
+ * Every structural condition stays: the last qualifying rule row, a genuine tab
+ * strip as the first row under it ({@link isCommandCodeQuestionTabRow} — one
+ * filled marker, one hollow, `|`-separated), a non-blank question body before
+ * the first option, at least two numbered rows, at least one `❯` ON one of them,
+ * and none of the pickers, panels or other-turn UI the other branches own. An
+ * assistant answering in a numbered list carries none of that, and a frame with
+ * one option or with the `❯` on a composer row is still `false` — the two cases
+ * #2521 recorded as "the highlight is elsewhere".
+ *
+ * @param frame - a raw `capture-pane -p -e` frame, ANSI intact (CRLF tolerated)
+ */
+export function hasCommandCodeQuestionChrome(frame: string | null | undefined): boolean {
+  return scanCommandCodeQuestionScreen(frame) !== null;
+}
+
+/** What {@link scanCommandCodeQuestionScreen} read off one frame. */
+interface CommandCodeQuestionScreen {
+  readonly ruleLineIndex: number;
+  readonly firstLineIndex: number;
+  readonly lastLineIndex: number;
+  readonly tabLineIndex: number;
+  /** The option numbers, in draw order. NOT asserted to be a strict run. */
+  readonly numbers: readonly number[];
+  /** How many {@link COMMAND_CODE_CURSOR_GLYPH} the region carries. */
+  readonly cursorCount: number;
+  /** The LAST option row carrying a cursor. */
+  readonly cursorLineIndex: number;
+}
+
+/**
+ * The structural half of the question-screen reading, shared by the strict
+ * {@link readCommandCodeQuestionRegion} and the weaker
+ * {@link hasCommandCodeQuestionChrome} (Issue #2522 split them apart).
+ *
+ * Written once rather than twice on purpose: the conditions below are what make
+ * the reading safe for every other CLI's frames, and a second copy of them is a
+ * second thing to forget to narrow.
+ */
+function scanCommandCodeQuestionScreen(
+  frame: string | null | undefined,
+): CommandCodeQuestionScreen | null {
   if (!frame) return null;
   // Stripped per line off the same split, so every index below is valid against
   // the ANSI-bearing rows the cropper slices.
@@ -483,11 +584,7 @@ export function readCommandCodeQuestionRegion(
   if (tabOffset < 0) return null;
   if (!isCommandCodeQuestionTabRow(region[tabOffset])) return null;
 
-  // 3. A strict `1.` … `N.` run under it. The numbers are collected in the order
-  // they are drawn and compared against the run, rather than restarted on every
-  // fresh `1` the way `countTrailingOptionRun` does: that function is reading a
-  // tail that may hold two lists, and this one is asserting that the region
-  // holds exactly one.
+  // 3. Numbered rows under it.
   const numbers: number[] = [];
   let firstOptionOffset = -1;
   for (let i = tabOffset + 1; i < region.length; i += 1) {
@@ -501,11 +598,11 @@ export function readCommandCodeQuestionRegion(
   // rather than a length check — that pattern captures a SINGLE digit, so a
   // `10.` row is not read as an option at all and an eleven-option screen
   // reports its first nine. Recognising such a screen and under-counting it is
-  // the right failure: the count is not answerable in this Issue (the card draws
-  // no number keys for this frame, see `ChatSurface`), while declining it would
-  // put the pane back on the `ready` that made `wait` exit 0.
+  // the right failure: declining it would put the pane back on the `ready` that
+  // made `wait` exit 0. (Issue #2522's reader cross-checks the count against its
+  // own block reading and declines to ANSWER such a screen; what it must not do
+  // is hand the pane back to the composer check.)
   if (numbers.length < 2) return null;
-  if (!numbers.every((value, index) => value === index + 1)) return null;
 
   // 2 (continued). The question itself. A tab strip sitting straight on top of
   // its options is some other screen.
@@ -513,25 +610,25 @@ export function readCommandCodeQuestionRegion(
     return null;
   }
 
-  // 4. One cursor, on an option row.
-  let cursors = 0;
+  // 4. A cursor, on an option row.
+  let cursorCount = 0;
   let cursorOffset = -1;
   for (let i = 0; i < region.length; i += 1) {
     const inRow = region[i].split(COMMAND_CODE_CURSOR_GLYPH).length - 1;
     if (inRow === 0) continue;
-    cursors += inRow;
-    cursorOffset = i;
+    cursorCount += inRow;
+    if (OPTION_ROW_PATTERN.test(region[i])) cursorOffset = i;
   }
-  if (cursors !== 1) return null;
-  if (!OPTION_ROW_PATTERN.test(region[cursorOffset])) return null;
+  if (cursorCount === 0 || cursorOffset < 0) return null;
 
   return {
     ruleLineIndex,
     firstLineIndex: ruleLineIndex + 1,
     lastLineIndex: last,
     tabLineIndex: ruleLineIndex + 1 + tabOffset,
+    numbers,
+    cursorCount,
     cursorLineIndex: ruleLineIndex + 1 + cursorOffset,
-    optionCount: numbers.length,
   };
 }
 

@@ -1,0 +1,179 @@
+# Command Code v1.53.0
+# models: deepseek-v4-flash-(latest) · taste-1
+# /private/tmp/cc2522-probe/sample-repo
+
+❯ Draft a dispatch plan for the sample backlog. 
+
+✻ Thought for 1 second [ctrl+o to expand]
+
+⠶ Here is the plan. I will wait for your decision before creating anything.
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+● Dispatch | ◯ Review
+
+Approve proceeding from the plan into worktree creation and dispatch?
+
+❯ 1. Prepare worktrees + dispatch (Recommended)
+     description row 1 of option 1
+     description row 2 of option 1
+     description row 3 of option 1
+     description row 4 of option 1
+     description row 5 of option 1
+     description row 6 of option 1
+     description row 7 of option 1
+     description row 8 of option 1
+     description row 9 of option 1
+     description row 10 of option 1
+     description row 11 of option 1
+     description row 12 of option 1
+     description row 13 of option 1
+     description row 14 of option 1
+     description row 15 of option 1
+     description row 16 of option 1
+     description row 17 of option 1
+     description row 18 of option 1
+     description row 19 of option 1
+     description row 20 of option 1
+     description row 21 of option 1
+     description row 22 of option 1
+     description row 23 of option 1
+     description row 24 of option 1
+     description row 25 of option 1
+     description row 26 of option 1
+     description row 27 of option 1
+     description row 28 of option 1
+     description row 29 of option 1
+     description row 30 of option 1
+     description row 31 of option 1
+     description row 32 of option 1
+     description row 33 of option 1
+     description row 34 of option 1
+     description row 35 of option 1
+     description row 36 of option 1
+     description row 37 of option 1
+     description row 38 of option 1
+     description row 39 of option 1
+     description row 40 of option 1
+     description row 41 of option 1
+     description row 42 of option 1
+     description row 43 of option 1
+     description row 44 of option 1
+     description row 45 of option 1
+     description row 46 of option 1
+     description row 47 of option 1
+     description row 48 of option 1
+     description row 49 of option 1
+     description row 50 of option 1
+     description row 51 of option 1
+     description row 52 of option 1
+     description row 53 of option 1
+     description row 54 of option 1
+     description row 55 of option 1
+     description row 56 of option 1
+     description row 57 of option 1
+     description row 58 of option 1
+     description row 59 of option 1
+     description row 60 of option 1
+  2. Worktrees only, then pause
+  3. Stop at the plan
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

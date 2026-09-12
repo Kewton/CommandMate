@@ -1,0 +1,178 @@
+version: 1
+title: "Issue #2522: Command Code 専用ダイアログリーダで AskUserQuestion を読む"
+goal: |
+  https://github.com/Kewton/CommandMate/issues/2522 を実装してください。
+  `/bug-fix` ワークフローで着手すること。原因分析・確定仕様（A〜D の 4 節）は Issue 本文に
+  完備済みのため追加の根本原因分析は不要。**本文が非常に長く要約では実装できません。
+  必ず全文を読んでください**:
+    gh issue view 2522 --repo Kewton/CommandMate
+
+  ## 前提（満たされています）
+  先行 Issue #2521 は **develop にマージ済み**（PR #2528、commit `ee034072`）。この worktree には
+  既に以下が入っています。**再実装せず、そのまま再利用してください**:
+  - `src/lib/detection/selection-shape.ts` の `readCommandCodeQuestionRegion(frame)`
+    — 罫線＋タブ＋厳密連番＋単一 `❯` の領域判定（tool ID を取らず browser-safe）
+  - `tests/fixtures/command-code-askuserquestion-2521/`（README・最小例・200x1000 版）
+
+  ## 目的・分担
+  Command Code の**単一選択式 AskUserQuestion に複数行の説明が付く形**を専用リーダで読み、
+  status／履歴・通知／respond／Auto-Yes が同じ質問と選択肢を扱えるようにする。
+  #2521 は操作カードと wait の偽完了防止（fallback）、**本件は構造化 prompt と応答経路**。
+  本件の reader が成功した画面では #2521 の fallback より `PROMPT_DETECTED` を優先します。
+
+  **重要**: #2521 の fallback 自体のテストは残してください。同じ fixture の verdict が
+  `COMMAND_CODE_SELECTION_LIST` → `PROMPT_DETECTED` に変わるのは**意図された仕様**なので、
+  既存 assertion は削除ではなく「最終状態へ更新」し、reader が読めない画面では
+  fallback へ落ちることを別途固定します。
+
+  ## 確定仕様（要点。全文は Issue 本文 A〜D を参照）
+
+  ### A. 共有領域と専用リーダ
+  `src/lib/detection/tools/command-code/dialog.ts`（新規）に副作用のない reader を置く。
+  領域・タブ識別は #2521 の helper を再利用。`findNumberedOptionBlock` /
+  `buildMultipleChoiceResult`（`src/lib/detection/prompt-detect-multiple-choice.ts`）は
+  入力契約を確認して再利用する（agy の dialog.ts 全体を複製しない）。
+  - 質問: タブ直後から最初の option 直前まで。折り返しは空白1個で連結。`?`/`？` は必須にしない
+  - 選択肢: 1 からの厳密連番・2個以上。非番号の説明行は**画面で直上の option** に空白1個で畳み込む
+  - 既定値: 実測の `❯` が付いた option を1個だけ `isDefault:true`（タブの `●` を誤認しない）
+  - 読み取り上限: 15行/40行 tail に制限しない。上限超過は成功扱いせず「未対応」へ落とす
+  - 自由入力行: `Type something...` は表示上の選択肢として保持し `requiresTextInput:true`。
+    **数字4を送れば回答できるとは扱わない。** Auto-Yes がこの option を自動選択しないこと
+  - result: `isPrompt:true` / `promptData.type:'multiple_choice'` / `status:'pending'`
+
+  ### B. 非該当・未対応の区別（3状態）
+  | 状態 | 処理 |
+  |---|---|
+  | 非該当 | 既存の tool 固有／generic 経路を維持 |
+  | 読み取り成功 | この prompt を使い、generic で再上書きしない |
+  | 対象の質問 UI は明確だが読めない（欠番・本文欠け・上限超過） | #2521 と同じ `waiting / COMMAND_CODE_SELECTION_LIST / hasActivePrompt:false` の手動操作 fallback。promptData／自動回答は生成せず、generic の部分リストへ流さない |
+
+  未対応画面への手動 `/prompt-response` は HTTP 200・`success:false`・`unsupported_dialog_layout`
+  で、キー送信と answered 更新を行わない。質問が消えていれば従来の `prompt_no_longer_active`。
+
+  ### C. raw／clean と 4 つの実経路（本件の核心）
+  **罫線が消える経路がある。** status の `normalizeFrame` は罫線を保持するが、
+  `detectPromptWithOptions`・Auto-Yes の `captureAndCleanOutput`・prompt-response route は
+  `stripBoxDrawing` を通すため、#2521 の領域判定は Auto-Yes 経路で**常に null** になります。
+  **1 tick の同じ capture から raw（または ANSI のみ除去した罫線付き frame）と従来 clean を作り、
+  必要な方を渡してください。** 罫線の復元や別の再 capture による辻褄合わせはしない。
+  `stripBoxDrawing` は非冪等なので 2 回適用しない。
+
+  | 経路 | 接続先 |
+  |---|---|
+  | status | `src/lib/detection/tools/command-code/detect.ts` の `beforePrompt` 等（/model・/usage・既存 permission の優先順位を維持） |
+  | 回答抽出・保存・通知 | `src/lib/polling/response-checker.ts` の `detectPromptWithOptions` / `detectPromptOnCleanFrame` / `extractResponse` |
+  | Auto-Yes | `src/lib/auto-yes-poller.ts` の `captureAndCleanOutput`(:276) → `detectAndRespondToPrompt`(:332)。**現状は clean 文字列しか渡さないので、同じ capture の raw を保持・伝搬する接続変更を含める** |
+  | respond 再検証 | `src/app/api/worktrees/[id]/prompt-response/route.ts` の新鮮な capture |
+
+  `precomputedLines` は引き続き cleanOutput の split。`detectPromptOnCleanFrame` に reader を
+  足しただけで「Auto-Yes も対応済み」としないこと。
+
+  ### D. 1 回の回答が進めるのは 1 操作
+  対象版で入力方法を確認し、数字で即選択される質問では既存 `submitMode:'answer_only'` を使う。
+  - 選択肢1〜3の手動回答は、選んだ値でその質問だけを確定。数字＋遅延 Enter で次画面まで進めない
+  - `Type something...` に数字4を送って既定選択肢を確定する fallback は**禁止**
+  - Auto-Yes は**有効かつ既存契約が許す場合のみ**回答（OFF、policy off/safe/allow-listed の不許可、
+    deny-pattern、既定値が requiresTextInput の場合は送信しない）
+
+  ## COMMAND_CODE_VERIFIED_AGAINST の扱い（重要）
+  `src/lib/detection/tools/verified-against.ts` の stamp は、**新ルールの根拠となる実キャプチャで
+  証明できた exact version** にのみ更新してください。合成 fixture やローカル package の静的確認
+  だけで実測 stamp を更新してはいけません。**実機検証ができない場合は stamp を据え置き、
+  その項目を「未実施」として進捗報告に明記**してください（全受入済みとしない）。
+
+  ## fixture
+  `tests/fixtures/command-code-askuserquestion-2522/`（新規）へ、#2521 の fixture を基底に派生例と
+  README を置く。折り返しあり／なし、説明位置の違い、インデント0/1/2、日本語・`？`・疑問符なし、
+  15/40行窓越え、reader 上限越え、ANSI/CRLF/padding、古い質問＋新しい composer、通常の番号リスト、
+  欠番・重複、Review／自由入力／複数選択／model／usage の対照。実キャプチャと合成を区別し、
+  README に version・採取日・geometry・加工箇所を記す。**git 管理外の original や稼働 musubi への
+  アクセスは前提にしない**（合成で構いません）。
+
+  ## 対象外（緩めてはいけない規約）
+  - 汎用 `isContinuationLine` の緩和は**しない**
+  - 汎用 `prompt-detect-multiple-choice.ts` の条件緩和・`TEXT_INPUT_PATTERNS` の変更は**しない**
+    （Command Code 専用の識別は builder の結果に加える形で行う）
+  - PreToolUse の発火順変更、契約ポリシーの意味変更、DB migration は対象外
+  - Review／複数選択／自由入力を今回の単一選択 parser に押し込まない
+  - #2457 の presence gate、#2486 の refusal、Auto-Yes の既存 legacy/enforce 表・override・policy・
+    dedup・cooldown・instance scope を維持。本件を理由に Command Code を新たに enforce へ切り替えない
+
+  ## 受入条件（Issue本文のチェックリスト）
+  - [ ] 報告と同形の frame で `waiting / PROMPT_DETECTED / hasActivePrompt:true`。question は
+        `Approve proceeding from the plan into worktree creation and dispatch?`、options=4、既定値=1。
+        タブ／罫線／TODOS の混入なし
+  - [ ] option 1 の label は `… for you to answer).` まで含み、説明を別 option へ付け替えない。
+        option 4 は requiresTextInput=true
+  - [ ] **実際の前処理込みで** status・回答抽出/保存・Auto-Yes・route の question/options/既定値が一致。
+        短い折り返しなしの入力でも専用 reader が優先される。**完成した prompt 結果の mock 注入で
+        済ませない**
+  - [ ] HTTP／WebSocket の current-output が `isPromptWaiting:true` と同じ promptData を公開し、
+        #2521 の fallback card と二重表示しない
+  - [ ] Auto-Yes の実 capture→reader→policy→sender 接続を test し、許可時だけ送信。
+        policy off/safe/allow-listed/deny、requiresTextInput、重複を対照にする
+  - [ ] Auto-Yes OFF の CLI wait は exit 10／multiple_choice／4 options。読めない質問画面は
+        #2521 の selection_list fallback で停止できる
+  - [ ] 未対応 layout と質問消失の route refusal、キー送信 0 回、未対応 frame の prompt 保存・
+        自動回答 0 回。instance 間で frame／応答を取り違えない
+  - [ ] 既存 Command Code permission 4本、model/usage/boot/turn-done/interrupt の fixture、
+        agy #2364/#2368、Claude #2457/#2486、他 CLI の既存 suites を維持。generic parser を変更しない
+  - [ ] reader／raw 伝搬／Auto-Yes 配線／submitMode を**それぞれ外した対照**で対応テストが失敗する
+  - [ ] `npm run lint`、`npx tsc --noEmit`、`npm run test:unit`、`npm run test:integration` が exit 0
+
+  参考テスト: `tests/unit/lib/detection/antigravity-numbered-dialog-2364.test.ts`、
+  `antigravity-dialog-producers-2364.test.ts`、`tests/unit/lib/auto-yes-poller-2368.test.ts`、
+  `tests/unit/lib/auto-yes-poller-policy.test.ts`、`tests/unit/api/prompt-response-verification.test.ts`、
+  `tests/unit/cli/commands/wait.test.ts`。
+
+  ## 作業ルール（厳守）
+  - **PR を作らないでください。** `/create-pr` 等は実行不要です（PR はオーケストレーターが作ります）。
+    実装とテストと断片を書いてコミットしたら、そのまま停止してください。
+  - **`CHANGELOG.md` と `docs/module-reference.md` を編集しないでください**（scope 外です）。
+    代わりに次の 2 ファイルを書いてください。どちらも `dev-reports/` 配下なので commit には
+    入りません。
+    - `dev-reports/changelog/issue-2522.md` — `CHANGELOG.md` の `## [Unreleased]` にそのまま
+      貼れる **1 エントリ**（先頭は `- **<type>(<scope>): …** (#2522): …`）。どの節
+      （`### Added` / `### Changed` / `### Fixed`）に入るかを 1 行目にコメントで書く。
+      形式は次の実例に合わせてください（エントリは**ファイル中では 1 行**）:
+
+      ```markdown
+      <!-- ### Fixed -->
+      - **fix(cli): `send` 直後の `wait` が「まだ始まっていない」を完了と読む問題を修正** (#1975): `wait` が `sessionStatus==='ready'` を完了と判定する直前に、**「このインスタンスに最後に渡されたプロンプト」と「エージェント自身が最後に報告したターン終了（`lastStopEventAt`）」を突き合わせる**ゲートを追加。`send` 直後は最新の構造化イベントが直前ターンの `stop` のままなので #1839 の `adoptTurnStart()` が何も採用せず、`turnStartedAt === null` が「決着済み」と読まれてアイドル composer をそのまま完了にしていた（隔離サーバ実測 2026-08-22 / copilot 1.0.80: `send`→`wait` 5 回中 3 回が約 0.3 秒・`basis=scraper_ready`・成果物ゼロで exit 0）。**hook を出さないツールは挙動不変**。保留は `PENDING_PROMPT_HOLD_MS`=60 秒で打ち切り、`--timeout` / `--stall-timeout` はそれより短ければ従来どおり優先される。
+      ```
+
+      - `- **` で始めること（`grep -cE '^- \*\*'` で数える）。
+      - `(#2522)` は要約の**外**（`**` を閉じた後）に置くこと。
+      - `<type>` は CLAUDE.md の規約と同じ語彙。今回は `fix`。
+      - 1 エントリ＝1 行（折らない）。
+    - `dev-reports/module-reference/issue-2522.md` — `docs/module-reference.md` の表に足す
+      注記を**行キー（`| \`path\` |`）ごと**に列挙する。既存行に足すときは
+      `grep -n '^| \`<path>\`' docs/module-reference.md` を実行し、その出力（行番号つきの
+      行キー）を断片に書き写してから書くこと。0 件だった行への追記を指示しない
+      （新規行を足すなら「新規行」と明記する）。
+  - 断片が無いとリリースノートに載らない。実装と同じ commit の時点で書くこと。
+scope:
+  allow:
+    - "src/lib/detection/tools/command-code/**"
+    - "src/lib/detection/selection-shape.ts"
+    - "src/lib/detection/prompt-detect-multiple-choice.ts"
+    - "src/lib/detection/tools/verified-against.ts"
+    - "src/lib/polling/response-checker.ts"
+    - "src/lib/auto-yes-poller.ts"
+    - "src/lib/session/current-output-builder.ts"
+    - "src/app/api/worktrees/[id]/prompt-response/route.ts"
+    - "src/lib/cli-tools/**"
+    - "tests/fixtures/command-code-askuserquestion-2522/**"
+    - "tests/fixtures/command-code-askuserquestion-2521/**"
+    - "tests/unit/lib/detection/**"
+    - "tests/unit/lib/**"
+    - "tests/unit/api/**"
+    - "tests/unit/cli/commands/wait.test.ts"
+    - "tests/unit/components/worktree/**"
+    - "tests/integration/**"
+  deny: []
+verify:
+  gates: null
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true

@@ -71,15 +71,23 @@
  * box. Measured live on v1.40.1 at the production 200x1000 geometry; the capture
  * is `tests/fixtures/chat-dialog-card-2254/command-code-model-1-40-1.txt`.
  *
- * Issue #2521 added the third `afterPrompt` branch, and it is the first one that
- * is not read off a footer: `AskUserQuestion` draws none. The screen is a rule, a
- * tab strip (`● Dispatch | ◯ Review`), the question and a strict `1.`…`N.` run
- * with one `❯` on it, and `readCommandCodeQuestionRegion` is what recognises that
- * shape. Before it, a wrapped option description took the frame away from the
- * shared parser (see the branch) and the generic composer check answered `ready`
- * off the dialog's own cursor row — so `wait` exited 0 on a pane that was asking
- * a human a question. The branch publishes the selection-list reason and NO
- * `promptData`; producing one, and with it `respond` and Auto-Yes, is #2522.
+ * `beforePrompt` arrived with Issue #2521 as a third `afterPrompt` branch and
+ * was moved ahead of the shared parser by Issue #2522. It is the only branch
+ * here not read off a footer: `AskUserQuestion` draws none. The screen is a
+ * rule, a tab strip (`● Dispatch | ◯ Review`), the question and a strict
+ * `1.`…`N.` run with one `❯` on it, and `readCommandCodeQuestionRegion` is what
+ * recognises that shape. Before #2521, a wrapped option description took the
+ * frame away from the shared parser and the generic composer check answered
+ * `ready` off the dialog's own cursor row — so `wait` exited 0 on a pane that
+ * was asking a human a question.
+ *
+ * #2521 answered that with a manual-operation fallback (the selection-list
+ * reason, no `promptData`). #2522 added `tools/command-code/dialog.ts`, which
+ * READS the same region, and the branch now publishes one of two verdicts:
+ * `PROMPT_DETECTED` with the parsed question, options and `❯` default where the
+ * reading succeeds, and #2521's fallback where the screen is plainly up and the
+ * reading declines. The move to `beforePrompt` is part of that: see the branch
+ * for why the generic parser must not get this frame either before or after.
  *
  * ## What #2304 re-measured, and what it did not change
  *
@@ -114,8 +122,8 @@ import { detectThinking, getCliToolPatterns } from '../../cli-patterns';
 import {
   COMMAND_CODE_SELECTION_LIST_FOOTER,
   DISMISSABLE_PANEL_FOOTER_PATTERN,
-  readCommandCodeQuestionRegion,
 } from '../../selection-shape';
+import { readCommandCodeQuestionDialog } from './dialog';
 import { STATUS_REASON } from '../../status-reason';
 import { createToolStatusDetector } from '../run-detection';
 import { COMMAND_CODE_VERIFIED_AGAINST } from '../verified-against';
@@ -127,6 +135,86 @@ export const VERIFIED_AGAINST = COMMAND_CODE_VERIFIED_AGAINST;
 export const commandCodeStatusDetector = createToolStatusDetector({
   tool: 'command-code',
   verifiedAgainst: VERIFIED_AGAINST,
+
+  beforePrompt(frame): ToolStatusVerdict | null {
+    // Issue #2521 recognised this screen; Issue #2522 reads it.
+    //
+    // `AskUserQuestion` draws no footer, so neither `afterPrompt` branch below
+    // reads it — and the shared `detectPrompt` at step 1 does not either, because
+    // a wrapped option description continues on a row that begins with a SINGLE
+    // space (` answer).`) and the generic multiple-choice parser ends its scan
+    // there, one row short of option 1. The frame therefore reached step 3, where
+    // `COMMAND_CODE_PROMPT_PATTERN` (`^❯(\s*$|\s+\S)`) matched the dialog's own
+    // cursor row, `❯ 1. Prepare worktrees + dispatch (Recommended)`, and the pane
+    // was published as `ready` / `input_prompt`. A human was being asked a
+    // question and `wait` exited 0 on it.
+    //
+    // ## Why `beforePrompt` and not `afterPrompt` (Issue #2522 確定仕様 A / B)
+    //
+    // #2521's branch sat at 1.5, after the shared parser, because it only had to
+    // catch the frames that parser could not read. This one has to run FIRST, and
+    // for two separate reasons:
+    //
+    //  - **the short spelling.** With one-line descriptions the generic parser
+    //    SUCCEEDS on this screen, and succeeds badly: `extractQuestionText` walks
+    //    up to five rows above option 1 and takes the tab strip, the rule and the
+    //    transcript's TODOS row into the question. Placing the reader after it
+    //    would leave exactly the frames that already look fine — and are wrong;
+    //  - **the unreadable spelling.** A question screen with a gap in its
+    //    numbering, or one taller than the reader's cap, must reach #2521's
+    //    manual-operation fallback and NOT the generic parser's partial list.
+    //    That is only expressible ahead of the parser.
+    //
+    // `/usage`, `/model` and the four permission dialogs are unaffected, and not
+    // by ordering: `readCommandCodeQuestionRegion` positively declines every one
+    // of them (the pickers by their own footers, the permission dialogs by having
+    // no tab strip), which is what the fixture sweep in
+    // `command-code-askuserquestion-2521.test.ts` pins.
+    //
+    // Read against `frame.raw` rather than `frame.lastLines` or `frame.clean`:
+    // the region runs from the last rule row to the last content row, which is
+    // more rows than the 15-row window holds, and the rule row itself is what
+    // `stripBoxDrawing` would erase. Every other consumer of this reading keeps
+    // the same tick's raw capture for the same reason (確定仕様 C).
+    const reading = readCommandCodeQuestionDialog(frame.raw);
+
+    // Read in full: the question, its options, the `❯` default and the free-text
+    // row are all in hand, so the pane is published exactly as an ordinary
+    // answerable dialog is. `hasActivePrompt: true` is what puts `promptData` on
+    // `/current-output`, raises the answer buttons, lets `respond <id> 2` reach
+    // the pane and lets Auto-Yes consider it — every one of them through the
+    // SAME payload, which is the point of reading it once here.
+    if (reading.kind === 'prompt') {
+      return {
+        status: 'waiting',
+        confidence: 'high',
+        reason: STATUS_REASON.PROMPT_DETECTED,
+        hasActivePrompt: true,
+        evidence: 'positive',
+        promptDetection: reading.prompt,
+      };
+    }
+
+    // The question UI is plainly up and this reader could not read it. #2521's
+    // verdict, unchanged and deliberately kept: `COMMAND_CODE_SELECTION_LIST` is
+    // in `SELECTION_LIST_REASONS`, which publishes `isSelectionListActive`,
+    // raises the arrow-driven card and makes `wait` exit 10 instead of polling a
+    // blocked agent to its `--timeout`.
+    //
+    // `hasActivePrompt: false` and no `promptDetection`: nothing parsed the
+    // options, so there is no payload to answer with and none is invented — and
+    // the generic parser is not given a second chance to invent a partial one.
+    if (reading.kind === 'unsupported') {
+      return {
+        status: 'waiting',
+        confidence: 'high',
+        reason: STATUS_REASON.COMMAND_CODE_SELECTION_LIST,
+        hasActivePrompt: false,
+        evidence: 'positive',
+      };
+    }
+    return null;
+  },
 
   afterPrompt(frame): ToolStatusVerdict | null {
     // Issue #2369. `/usage` opens a READ-ONLY panel: a plan header, two usage
@@ -177,43 +265,6 @@ export const commandCodeStatusDetector = createToolStatusDetector({
       };
     }
 
-    // Issue #2521. `AskUserQuestion` draws no footer, so neither branch above
-    // reads it — and the shared `detectPrompt` at step 1 does not either, because
-    // a wrapped option description continues on a row that begins with a SINGLE
-    // space (` answer).`) and the generic multiple-choice parser ends its scan
-    // there, one row short of option 1. The frame therefore reached step 3, where
-    // `COMMAND_CODE_PROMPT_PATTERN` (`^❯(\s*$|\s+\S)`) matched the dialog's own
-    // cursor row, `❯ 1. Prepare worktrees + dispatch (Recommended)`, and the pane
-    // was published as `ready` / `input_prompt`. A human was being asked a
-    // question and `wait` exited 0 on it.
-    //
-    // Evaluated LAST of the three, so `/usage` and `/model` keep the readings
-    // they were measured for, and against `frame.raw` rather than
-    // `frame.lastLines`: the region runs from the last rule row to the last
-    // content row, which on the measured capture is 14 rows — one more than the
-    // 15-row window would leave room for once a description wraps further. The
-    // reading is the shared one the chat surface and the cropper use, so the
-    // status, the card's rows and the suppressed number keys cannot disagree
-    // about which screen this is.
-    //
-    // `COMMAND_CODE_SELECTION_LIST` rather than a reason of its own: the controls
-    // this screen answers to ARE a selection list's — a moving highlight, Enter,
-    // Esc — and membership in `SELECTION_LIST_REASONS` is what publishes
-    // `isSelectionListActive`, raises the card and makes `wait` exit 10 instead
-    // of polling a blocked agent to its `--timeout`.
-    //
-    // `hasActivePrompt: false` and no `promptDetection`: nothing here parsed the
-    // options, so there is no payload to answer with and none is invented.
-    // `respond`, Auto-Yes and the numbered reply UI are Issue #2522's.
-    if (readCommandCodeQuestionRegion(frame.raw) !== null) {
-      return {
-        status: 'waiting',
-        confidence: 'high',
-        reason: STATUS_REASON.COMMAND_CODE_SELECTION_LIST,
-        hasActivePrompt: false,
-        evidence: 'positive',
-      };
-    }
     return null;
   },
 

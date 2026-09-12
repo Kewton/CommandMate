@@ -1,0 +1,81 @@
+# Command Code v1.53.0
+# models: deepseek-v4-flash-(latest) · taste-1
+# /private/tmp/cc2522-probe/sample-repo
+
+❯ Draft a dispatch plan for the sample backlog. 
+
+✻ Thought for 1 second [ctrl+o to expand]
+
+⠶ Here is the plan. I will wait for your decision before creating anything.
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+● Dispatch | ◯ Review
+
+Choose how much of the dispatch plan I should carry out now, bearing in mind that
+the worktrees are cheap to create and expensive to clean up, and that the workers
+will start spending turns the moment they are dispatched
+
+❯ 1. Everything in the plan
+  2. Worktrees only
+  3. Nothing yet
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

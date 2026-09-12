@@ -31,6 +31,21 @@
  * bytes — spelled out so the assertions above cannot pass on a fixture that
  * never reproduced the defect.
  *
+ * ## Issue #2522 moved section C's verdict, on purpose
+ *
+ * #2521 published these two frames as `command_code_selection_list` with no
+ * `promptData`, because nothing had parsed their options. #2522's reader parses
+ * them, so the SAME bytes are now `prompt_detected` with an answerable payload —
+ * an intended change of final state, not a regression, and the reason section C
+ * below asserts that instead. The manual-operation fallback #2521 introduced is
+ * still the verdict for a question screen that cannot be READ, and section F
+ * pins it there so removing it fails here as well as in
+ * `command-code-askuserquestion-2522.test.ts`.
+ *
+ * Everything else in this file — the region reading, the ~15 one-condition-off
+ * negatives, the crop and the card's number suppression — is untouched by #2522
+ * and is what keeps its reader honest.
+ *
  * @vitest-environment node
  */
 
@@ -365,31 +380,39 @@ describe('[#2521] B. the reading declines everything it was not measured on', ()
 // C. The status the region produces
 // ===========================================================================
 
-describe('[#2521] C. the screen is published as a selection list, with no promptData', () => {
-  it.each(POSITIVES)('%s: waiting / command_code_selection_list / positive', (_name, frame) => {
+describe('[#2521→#2522] C. the screen is published as a waiting, answerable prompt', () => {
+  it.each(POSITIVES)('%s: waiting / prompt_detected / positive', (_name, frame) => {
+    // #2521 answered `command_code_selection_list` here and #2522 reads the
+    // options, so the final state is the ordinary answerable one. What has NOT
+    // changed is the half of #2521 that fixes the reported defect: `waiting`,
+    // high confidence, positive evidence — never the `ready` / `input_prompt`
+    // the generic composer check published off the dialog's own `❯` row.
     const result = detectSessionStatus(frame, 'command-code');
 
     expect(result.status).toBe('waiting');
     expect(result.confidence).toBe('high');
-    expect(result.reason).toBe(STATUS_REASON.COMMAND_CODE_SELECTION_LIST);
+    expect(result.reason).toBe(STATUS_REASON.PROMPT_DETECTED);
     expect(result.evidence).toBe('positive');
   });
 
-  it.each(POSITIVES)('%s: claims no answerable prompt and invents no payload', (_name, frame) => {
-    // #2522's half. `respond <id> N` and Auto-Yes key off `hasActivePrompt`, and
-    // nothing here parsed the options — the last of them is a text input in the
-    // TUI, not a fourth choice.
+  it.each(POSITIVES)('%s: carries the four options a human can answer', (_name, frame) => {
+    // #2522's half, which #2521 deliberately left undone. `respond <id> N` and
+    // Auto-Yes key off `hasActivePrompt`; the payload's own shape is pinned in
+    // `command-code-askuserquestion-2522.test.ts`.
     const result = detectSessionStatus(frame, 'command-code');
 
-    expect(result.hasActivePrompt).toBe(false);
-    expect(result.promptDetection.isPrompt).toBe(false);
-    expect(result.promptDetection.promptData).toBeUndefined();
+    expect(result.hasActivePrompt).toBe(true);
+    expect(result.promptDetection.isPrompt).toBe(true);
+    expect(result.promptDetection.promptData?.type).toBe('multiple_choice');
   });
 
-  it.each(POSITIVES)('%s: is in SELECTION_LIST_REASONS, not the floor', (_name, frame) => {
+  it.each(POSITIVES)('%s: is not the unclassified floor, and no longer a selection list', (_name, frame) => {
+    // `isSelectionListActive` is what raises #2521's arrow-only fallback card.
+    // It must go false exactly as `promptData` appears, or the chat surface
+    // draws both for one screen.
     const result = detectSessionStatus(frame, 'command-code');
 
-    expect(SELECTION_LIST_REASONS.has(result.reason)).toBe(true);
+    expect(SELECTION_LIST_REASONS.has(result.reason)).toBe(false);
     expect(isUnclassifiedFrame(result.status, result.reason)).toBe(false);
   });
 
@@ -438,6 +461,38 @@ describe('[#2521] C. the screen is published as a selection list, with no prompt
     expect(detectSessionStatus(MINIMAL, 'claude').reason).not.toBe(
       STATUS_REASON.COMMAND_CODE_SELECTION_LIST,
     );
+  });
+});
+
+// ===========================================================================
+// F. The fallback #2521 introduced, on the frames that still take it
+// ===========================================================================
+
+describe('[#2521] F. a question screen that cannot be READ still stops the agent', () => {
+  // #2522 reads the two positives above, so the fallback would be dead code if
+  // nothing else reached it. These are the frames that do: the chrome is a
+  // question screen's and the option run cannot be resolved into choices, so
+  // there is no payload to publish and a human has to answer at the pane.
+  const UNREADABLE = path.resolve(
+    __dirname,
+    '../../../fixtures/command-code-askuserquestion-2522',
+  );
+
+  it.each([
+    ['a gap in the numbering', 'unsupported-missing-number.txt'],
+    ['a repeated option row', 'unsupported-duplicate-number.txt'],
+    ['a region past the reader cap', 'unsupported-region-too-tall.txt'],
+    ['a multi-select checkbox list', 'unsupported-multi-select-checkboxes.txt'],
+  ])('%s: waiting / command_code_selection_list / no promptData', (_label, name) => {
+    const result = detectSessionStatus(read(UNREADABLE, name), 'command-code');
+
+    expect(result.status).toBe('waiting');
+    expect(result.reason).toBe(STATUS_REASON.COMMAND_CODE_SELECTION_LIST);
+    expect(result.evidence).toBe('positive');
+    expect(result.hasActivePrompt).toBe(false);
+    expect(result.promptDetection.promptData).toBeUndefined();
+    expect(SELECTION_LIST_REASONS.has(result.reason)).toBe(true);
+    expect(isUnclassifiedFrame(result.status, result.reason)).toBe(false);
   });
 });
 
