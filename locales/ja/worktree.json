@@ -334,7 +334,10 @@
       "trace": "サポート調査用に現在のトレース ID をコピー",
       "tree": "セッションツリーを辿って任意の地点へジャンプ",
       "unshare": "会話の共有を停止",
-      "worktree": "git worktree の作成・一覧・切り替え",
+      "worktree": {
+      "codex": "新しい worktree で会話を開始・再開する",
+      "command-code": "git worktree の作成・一覧・切り替え"
+    },
       "skill-doctor": "各スキルのコンテキスト消費量と使用頻度を表示し、オフにするスキルを特定"
     }
   },

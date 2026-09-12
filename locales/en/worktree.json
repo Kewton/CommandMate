@@ -334,7 +334,10 @@
       "trace": "Copy the current trace id for support debugging",
       "tree": "Browse the session tree and jump to any point in it",
       "unshare": "Stop sharing the conversation",
-      "worktree": "Create, list, or switch git worktrees",
+      "worktree": {
+      "codex": "Start or continue a conversation in a new worktree",
+      "command-code": "Create, list, or switch git worktrees"
+    },
       "skill-doctor": "Show what each of your skills costs in context and how often it gets used, so you can find skills to turn off"
     }
   },

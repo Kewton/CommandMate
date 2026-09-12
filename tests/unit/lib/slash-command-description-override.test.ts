@@ -188,6 +188,14 @@ describe('the bundled catalog carries descriptionKey through verbatim', () => {
     // a Claude Design artifact — so `--check` reported a description-conflict
     // and the flat key was split by hand into `design.command-code` (the
     // shipped wording, unchanged) and `design.claude`.
+    // catalog-reconcile 2026-09-12 (no issue; the Phase 1.5 leftover of the
+    // v0.34.0 release, PR #2497): codex 0.154.0 added /worktree, a name
+    // command-code already held under the flat key. The two are different
+    // tools — codex starts or continues a conversation in a new worktree,
+    // Command Code's creates, lists or switches git worktrees — so `--check`
+    // reported a description-conflict and the flat key was split by hand into
+    // `worktree.command-code` (the shipped wording, unchanged) and
+    // `worktree.codex`.
     expect(overridden.map((e) => e.descriptionKey).sort()).toEqual([
       'slashCommands.descriptions.agent.copilot',
       'slashCommands.descriptions.agents.claude',
@@ -238,6 +246,8 @@ describe('the bundled catalog carries descriptionKey through verbatim', () => {
       'slashCommands.descriptions.skills.command-code',
       'slashCommands.descriptions.skills.copilot',
       'slashCommands.descriptions.skills.opencode',
+      'slashCommands.descriptions.worktree.codex',
+      'slashCommands.descriptions.worktree.command-code',
     ]);
 
     for (const locale of ['en', 'ja'] as const) {
