@@ -15,8 +15,9 @@
  */
 
 import type Database from 'better-sqlite3';
-import { getAgentInstance, resolveInstanceCliTool } from '@/lib/db/agent-instances-db';
+import { getAgentInstance } from '@/lib/db/agent-instances-db';
 import { getWorktreeById } from '@/lib/db/worktree-db';
+import { resolveSessionTarget } from '@/lib/session/resolve-session-target';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { RelayEndpoint } from '@/lib/relay/types';
 import { createLogger } from '@/lib/logger';
@@ -38,11 +39,21 @@ const FALLBACK_CLI_TOOL: CLIToolType = 'claude';
 /**
  * Resolve one end of a relay.
  *
- * The tool comes from `resolveInstanceCliTool` — the same authority
+ * The tool comes from `resolveSessionTarget` — the same authority
  * `POST /api/worktrees/:id/send` uses, so a relay cannot address a session the
  * send route would address differently (#1629 is the record of what two
  * authorities on that cost) — falling back to the worktree's own tool and then
  * to claude.
+ *
+ * Issue #2491: that sentence was true of `resolveInstanceCliTool` when this
+ * module was written and stopped being true when `send` moved to the shared
+ * resolver. The two answer identically here — a relay never names a tool, and
+ * with `requestedCliTool` absent both walk roster → primary anchor → worktree
+ * default → claude — so this is the comment made true again, not a behaviour
+ * change. `resolveSessionTarget` folds in the worktree-default and claude
+ * stages this function used to spell out for itself; `FALLBACK_CLI_TOOL` stays
+ * because the catch below still needs an answer when the roster cannot be read
+ * at all.
  */
 export function resolveRelaySession(
   db: Database.Database,
@@ -52,12 +63,9 @@ export function resolveRelaySession(
   let alias = endpoint.instanceId;
 
   try {
-    const resolution = resolveInstanceCliTool(db, endpoint.worktreeId, endpoint.instanceId);
-    if (resolution.ok && resolution.cliToolId) {
-      cliToolId = resolution.cliToolId;
-    } else {
-      cliToolId = getWorktreeById(db, endpoint.worktreeId)?.cliToolId ?? FALLBACK_CLI_TOOL;
-    }
+    cliToolId = resolveSessionTarget(db, endpoint.worktreeId, {
+      instanceId: endpoint.instanceId,
+    }).cliToolId;
     const rosterRow = getAgentInstance(db, endpoint.worktreeId, endpoint.instanceId);
     if (rosterRow?.alias) alias = rosterRow.alias;
   } catch (error) {

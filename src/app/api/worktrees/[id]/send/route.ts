@@ -16,7 +16,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db/db-instance';
 import { getWorktreeById, saveInitialBranch, getInitialBranch } from '@/lib/db';
-import { resolveInstanceCliTool } from '@/lib/db/agent-instances-db';
+import {
+  resolveSessionTargetStrict,
+  describeSessionTargetConflict,
+  INSTANCE_TOOL_CONFLICT,
+} from '@/lib/session/resolve-session-target';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { probeRunningSessionHookUrl } from '@/lib/cli-tools/base';
 import { CLI_TOOL_IDS, isValidInstanceId, type CLIToolType } from '@/lib/cli-tools/types';
@@ -42,8 +46,10 @@ const logger = createLogger('api/send');
 /** Supported CLI tool IDs - derived from CLI_TOOL_IDS (Issue #368: DRY) */
 const VALID_CLI_TOOL_IDS: readonly CLIToolType[] = CLI_TOOL_IDS;
 
-/** Default CLI tool when not specified */
-const DEFAULT_CLI_TOOL: CLIToolType = 'claude';
+// Issue #2491: the route's own `DEFAULT_CLI_TOOL = 'claude'` is gone. The tail
+// of the chain it spelled (`worktree.cliToolId || 'claude'`) is
+// `resolveSessionTarget`'s worktree-default / fallback stages, and design §4 D5
+// 決定 4 says that literal may be written in exactly one module.
 
 interface SendMessageRequest {
   content: string;
@@ -189,29 +195,42 @@ export async function POST(
     // Issue #1629: the roster is what declares which CLI tool backs an instance.
     // Without this the tool came from the worktree default, so `--instance codex`
     // started Claude in a session named `mcbd-claude-<worktree>-codex`.
-    const resolution = resolveInstanceCliTool(db, id, instanceId, requestedCliToolId);
+    //
+    // Issue #1925 / #2491: resolution goes through the one shared resolver
+    // (design §4 D5). This route was the last caller of the older
+    // `resolveInstanceCliTool`, whose chain takes an explicit tool whenever the
+    // roster has no row for the instance — so #2487's rule, that a tool-named
+    // instance id declares its tool with or without a roster row (the #868
+    // primary anchor), could not reach here. `POST /send {instanceId:
+    // 'antigravity', cliToolId: 'command-code'}` therefore answered 201 and
+    // started `mcbd-command-code-<wt>-antigravity`, a session nothing that names
+    // the instance alone ever reads.
+    //
+    // Strict, like the other side-effect routes (`kill-session` / `terminal` /
+    // `respond` / `auto-yes` POST, DR3-015): sending types into a session, and
+    // with two contradicting declarations of which agent is meant, refusing is
+    // the only answer that cannot land the message in the wrong pane.
+    const resolution = resolveSessionTargetStrict(db, id, {
+      instanceId,
+      requestedCliTool: requestedCliToolId,
+    });
     if (!resolution.ok) {
       return NextResponse.json(
         {
-          error: `Agent instance '${resolution.instanceId}' is registered as ${resolution.rosterCliTool}, `
-            + `but ${resolution.requestedCliTool} was requested. `
-            + `Omit the agent, pass ${resolution.rosterCliTool}, or update the instance's roster entry.`,
+          error: describeSessionTargetConflict(resolution.conflict),
+          code: INSTANCE_TOOL_CONFLICT,
+          ...resolution.conflict,
         },
         { status: 400 }
       );
     }
 
-    // Determine which CLI tool to use
-    // (priority: request/roster > worktree setting > default)
-    const cliToolId = resolution.cliToolId || worktree.cliToolId || DEFAULT_CLI_TOOL;
-
-    // Validate CLI tool ID (DR4-002: fixed error text, no raw input reflection)
-    if (!VALID_CLI_TOOL_IDS.includes(cliToolId)) {
-      return NextResponse.json(
-        { error: `Invalid CLI tool ID. Must be one of: ${VALID_CLI_TOOL_IDS.join(', ')}` },
-        { status: 400 }
-      );
-    }
+    // Which CLI tool to use (request/roster > primary anchor > worktree setting
+    // > default). The resolver only ever answers with a CLIToolType — every
+    // stage is guarded by `isCliToolType` — so the second `VALID_CLI_TOOL_IDS`
+    // check this line used to carry had become unreachable. The one that still
+    // matters is the check on `body.cliToolId` above, which runs on raw input.
+    const cliToolId = resolution.target.cliToolId;
 
     // Issue #576/#588/#989: Validate model parameter via shared validator (DR1-003)
     //
