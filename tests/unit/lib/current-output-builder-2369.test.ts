@@ -23,6 +23,8 @@
  * @vitest-environment node
  */
 
+import fs from 'node:fs';
+import path from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type Database from 'better-sqlite3';
 
@@ -135,5 +137,75 @@ describe('[#2369] buildCurrentOutput publishes isDismissablePanelActive', () => 
 
     expect(payload.isDismissablePanelActive).toBe(false);
     expect(Object.prototype.hasOwnProperty.call(payload, 'isDismissablePanelActive')).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Issue #2521: the footer-less question screen reaches the wire the same way
+// ---------------------------------------------------------------------------
+
+/**
+ * Command Code's `AskUserQuestion`, as the anonymised live capture drew it.
+ *
+ * Read from the fixture rather than written inline, because the defect is in the
+ * BYTES: the continuation row of option 1's description begins with a single
+ * space, which is what took the frame away from the shared prompt parser and
+ * left the generic composer check answering `ready` off `❯ 1. Prepare …`.
+ *
+ * The assertions are the API half of Issue #2521's 確定仕様 C: the flag the chat
+ * surface and `wait` both read is true, and the two fields that would make this
+ * look answerable stay false / null — `promptData` is #2522's to produce.
+ */
+const ASK_USER_QUESTION = fs.readFileSync(
+  path.join(__dirname, '../../fixtures/command-code-askuserquestion-2521/askuserquestion-wrapped-1530-200x1000.txt'),
+  'utf-8',
+);
+
+describe('[#2521] buildCurrentOutput publishes the question screen as a selection list', () => {
+  it('raises isSelectionListActive and drops the ready verdict', async () => {
+    const payload = await payloadFor(ASK_USER_QUESTION);
+
+    expect(payload.sessionStatus).toBe('waiting');
+    expect(payload.sessionStatusReason).toBe(STATUS_REASON.COMMAND_CODE_SELECTION_LIST);
+    expect(payload.isSelectionListActive).toBe(true);
+    expect(payload.statusEvidence).toBe('positive');
+  });
+
+  it('publishes no prompt and no payload to answer it with', async () => {
+    // The line between #2521 and #2522, asserted at the producer: the card and
+    // `wait` get a blocked agent, and nothing gets an options list that was
+    // never parsed.
+    const payload = await payloadFor(ASK_USER_QUESTION);
+
+    expect(payload.isPromptWaiting).toBe(false);
+    expect(payload.promptData).toBeNull();
+  });
+
+  it('keeps the other three overlay flags false', async () => {
+    // This screen has a moving highlight and no dismiss-only footer, no pager
+    // and — now that a rule reads it — nothing unclassified about it.
+    const payload = await payloadFor(ASK_USER_QUESTION);
+
+    expect(payload.isDismissablePanelActive).toBe(false);
+    expect(payload.isPagerActive).toBe(false);
+    expect(payload.isUnclassifiedActive).toBe(false);
+  });
+
+  it('still completes a real Command Code idle pane — the verdict this branch must not take', async () => {
+    // The control for the new branch, on live bytes rather than the hand-written
+    // composer above: `turn-done-1490.txt` ends in Command Code's own
+    // rule / `❯ Ask your question...` / rule / hint-row block, so the LAST
+    // qualifying rule is the composer's lower one and the region under it is the
+    // hint row. A reading that fired on "a rule with rows under it" would have
+    // stopped every Command Code turn from ever finishing.
+    const payload = await payloadFor(
+      fs.readFileSync(
+        path.join(__dirname, '../../fixtures/command-code-live-2250/turn-done-1490.txt'),
+        'utf-8',
+      ),
+    );
+
+    expect(payload.sessionStatus).toBe('ready');
+    expect(payload.isSelectionListActive).toBe(false);
   });
 });
