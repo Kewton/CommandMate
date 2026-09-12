@@ -93,6 +93,11 @@ import {
 } from '@/hooks/useTerminalPanePolling';
 import { useSplitMessages } from '@/hooks/useSplitMessages';
 import { usePendingMessages, type OptimisticSendOptions } from '@/hooks/usePendingMessages';
+import {
+  useConnectivity,
+  isServerConfirmedReachable,
+  isConnectionKnownDown,
+} from '@/hooks/useConnectivity';
 import { useHistoryPaneState } from '@/hooks/useHistoryPaneState';
 import { worktreeApi } from '@/lib/api-client';
 import { buildPromptResponseBody } from '@/lib/prompt-response-body-builder';
@@ -391,6 +396,22 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       worktreeApi.sendMessage(worktreeId, content, options),
     [worktreeId],
   );
+  // Issue #2503: the same connection verdict the header pill renders (#2501),
+  // read here so a send made in a tunnel is held as "waiting" and resent once
+  // the server answers again, instead of failing after 30s of no network.
+  // Both halves read the *signals* rather than `status`, because both decide
+  // to act: `isServerConfirmedReachable` rather than `isOnline`, so a desktop
+  // carried by polling with the WebSocket down still counts as able to send;
+  // `isConnectionKnownDown` rather than `isOffline`, so a send is only held back
+  // from failing when something actually measured the network as gone.
+  const connectivity = useConnectivity();
+  const pendingConnectivity = useMemo(
+    () => ({
+      offline: isConnectionKnownDown(connectivity.signals),
+      reachable: isServerConfirmedReachable(connectivity.signals),
+    }),
+    [connectivity.signals],
+  );
   const {
     messages: mergedMessages,
     sendOptimistic,
@@ -401,6 +422,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
     serverMessages: splitMessages,
     sendFn: sendMessageFn,
     onSent: refreshSplitMessages,
+    connectivity: pendingConnectivity,
   });
 
   // Issue #744: History visible/width. MVP keeps this common across splits

@@ -159,6 +159,38 @@ export function resolveConnectivityStatus(signals: ConnectivitySignals): Connect
   return signals.realtimeStatus === 'connecting' ? 'reconnecting' : 'offline';
 }
 
+/**
+ * Whether the server has *positively answered* — the only thing that may be
+ * read as proof of being back on the network.
+ *
+ * Issue #2503 needs a stricter reading than `status === 'online'` gives it.
+ * `online` requires a live WebSocket, so a phone carried by polling alone would
+ * never qualify; `reconnecting` is too loose, because it covers both "an HTTP
+ * exchange completed" and "the socket is still opening and nothing has been
+ * measured at all". This function names the half that is evidence: a live
+ * socket, or a completed exchange. `browserOnline` is deliberately not consulted
+ * — `navigator.onLine === true` is exactly the signal the module note says can
+ * never confirm a connection on its own.
+ */
+export function isServerConfirmedReachable(signals: ConnectivitySignals): boolean {
+  return signals.realtimeStatus === 'connected' || signals.serverReachable === true;
+}
+
+/**
+ * The mirror image: the connection has been *measured* down.
+ *
+ * `status === 'offline'` is the right input for a banner, which is allowed to
+ * be pessimistic — it also covers "the socket is closed and nothing has been
+ * measured yet", a state a page reaches with no network evidence at all. Issue
+ * #2503 acts on an offline verdict by withholding a failure the user would
+ * otherwise see, so it needs the same standard the online side is held to: a
+ * device that says it is off the network, or an exchange that came back
+ * unreachable. With nothing measured, a failed send is still a failed send.
+ */
+export function isConnectionKnownDown(signals: ConnectivitySignals): boolean {
+  return signals.browserOnline === false || signals.serverReachable === false;
+}
+
 // ============================================================================
 // Reachability probe
 // ============================================================================
