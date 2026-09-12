@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **fix(scripts): `stop.sh` → `build-and-start.sh --daemon` が旧サーバーの終了処理と競合して「Server is already running」でビルド前に中断し、サーバーが落ちたまま残る問題を修正** (#2488): 停止の判定を**ポートの静けさからプロセスの生死へ**移した。`server.ts` の `gracefulShutdown` は待ち受けソケットを先に閉じ、残っている接続（ダッシュボードを開いたタブの keep-alive）を最大 3 秒待ってから強制終了するので、SIGTERM と exit の間には「**誰も LISTEN していないのに旧プロセスは生きていて `logs/server.pid` も握ったまま**」という窓ができる。`stop.sh` はその窓を `sleep 2` + LISTEN 再検索で「停止済み」と読んで戻り、`&&` で続く `build-and-start.sh --daemon` が生きている PID を見て**ビルド前に exit 1**していた（2026-09-11 22:44〜22:47 JST、本番ポート 3000 に LISTEN 無し・`.next/BUILD_ID` 据え置き・`GET /` が 000 のまま 3 分間）。`stop.sh` / `stop-server.sh` は**自分が SIGTERM を送った PID そのもの**を `kill -0` で 100ms 間隔にポーリングし、猶予（`CM_STOP_GRACE_SECONDS`、既定 10 秒 = server.ts の 3 秒強制終了より長い）を超えた分だけ SIGKILL へ上げる。`stop.sh` には `stop-server.sh` にしか無かった PID ファイル段（`nohup npm start` = node の親。LISTEN しないのでポート検索には決して映らず、まさに `Server is already running` として読み返される PID）を入れ、2 つの停止スクリプトの挙動を揃えた。`build-and-start.sh` / `start.sh` は PID ファイルの PID が生きていても即断せず同じ猶予だけ待ち、**待っても生きていれば従来どおり exit 1**（本当に動いているサーバーは猶予を越えるので拒否は変わらない）。`server.ts` 側は `server.close()` の後に `server.closeIdleConnections()` を足して、リクエストが飛んでいない keep-alive ソケットだけを落とす（処理中のリクエストは idle ではないので従来どおり 3 秒もらえる）——窓そのものが通常ミリ秒に縮む。**#2473 の要件は維持**: 待つのも殺すのも LISTEN 限定の検索が返した PID だけなので、ポートに接続しているだけのプロセス（ブラウザの network service、他セッションの CLI）は依然として一切触らない。検証は `tests/unit/scripts/stop-waits-for-exit-2488.test.ts` — 終了に 3 秒かかるサーバーを模した孤児プロセス＋接続中クライアントで、`stop.sh` が `✓ Application stopped` を出した時点の `kill -0` が ESRCH であること、`stop.sh && start.sh --daemon` が中断せず起動しきること、変異対照（`wait_for_exit` を修正前の `sleep 2` + LISTEN 再検索に戻すと旧プロセスが生きたまま「停止済み」と出る）まで含む。
+
 ## [0.34.0] - 2026-09-12
 
 > **Highlight**: 委任まわりの検出と CLI の信頼性を立て直したリリース。Claude の AskUserQuestion は、選択肢に preview が付くと `commandmate respond` が `prompt_no_longer_active` で拒否され、複数質問のタブを1 問も進められなかった（#2486）。食い違う `--instance <tool>` と `--agent <別tool>` は送信前に止まらず、ad-hoc セッションへ本文が届いて `ask` が待ち先を見失っていた（#2487）。どちらも隔離環境の実機 UAT で修正前後を対照して確認している（25 件中 24 PASS・不合格 0、`dev-reports/uat/2486-2487/`）。
