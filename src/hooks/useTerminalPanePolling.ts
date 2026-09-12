@@ -42,16 +42,28 @@ import type {
 import { useRealtime } from '@/hooks/useRealtimeConnection';
 import type { RealtimeEvent, TerminalSnapshotEvent, SessionStatusEvent } from '@/lib/realtime/types';
 import { extractComposerText } from '@/lib/detection/composer-text';
+import {
+  DETAIL_PANE_POLLING_CADENCE,
+  isGeneratingStatus,
+  selectPanePollIntervalMs,
+  type PanePollingCadence,
+} from '@/config/pane-polling-cadence';
 
-export const ACTIVE_POLLING_INTERVAL_MS = 2000;
-export const IDLE_POLLING_INTERVAL_MS = 5000;
+/**
+ * Issue #2511: the numbers now live in `config/pane-polling-cadence` so the
+ * `/sessions` tile grid can declare a different profile without touching this
+ * hook's behaviour. Re-exported unchanged — these three names are what the
+ * worktree screen's tests and `tests/integration/ws-realtime-fallback` read.
+ */
+export const ACTIVE_POLLING_INTERVAL_MS = DETAIL_PANE_POLLING_CADENCE.activeMs;
+export const IDLE_POLLING_INTERVAL_MS = DETAIL_PANE_POLLING_CADENCE.idleMs;
 
 /**
  * Issue #1120: while a live WebSocket connection is established the terminal
  * output streams via `terminal_snapshot` push, so the HTTP poll is throttled to
  * a slow fallback that only recovers if push delivery stalls.
  */
-export const WS_CONNECTED_POLLING_INTERVAL_MS = 15000;
+export const WS_CONNECTED_POLLING_INTERVAL_MS = DETAIL_PANE_POLLING_CADENCE.wsFallbackMs;
 /** Push is unhealthy when no terminal snapshot heartbeat arrives in this window. */
 export const WS_PUSH_STALE_AFTER_MS = 5000;
 /** Require two consecutive low-confidence frames before exposing escape controls. */
@@ -242,6 +254,16 @@ export interface UseTerminalPanePollingOptions {
   instanceId?: string;
   /** When false the poller is suspended (e.g. parent unmounted / error state). */
   enabled?: boolean;
+  /**
+   * Issue #2511: which polling profile this pane belongs to.
+   *
+   * Defaults to {@link DETAIL_PANE_POLLING_CADENCE} — the worktree screen's, and
+   * the only one this hook had before — so every existing caller keeps the
+   * cadence it was written against. `/sessions` tiles pass
+   * `TILE_PANE_POLLING_CADENCE`; see `config/pane-polling-cadence` for what
+   * differs and why.
+   */
+  cadence?: PanePollingCadence;
 }
 
 export interface UseTerminalPanePollingReturn {
@@ -268,6 +290,7 @@ export function useTerminalPanePolling({
   cliToolId,
   instanceId,
   enabled = true,
+  cadence = DETAIL_PANE_POLLING_CADENCE,
 }: UseTerminalPanePollingOptions): UseTerminalPanePollingReturn {
   // Resolve to the primary instance when omitted (instanceId === cliToolId).
   const resolvedInstanceId = instanceId ?? cliToolId;
@@ -642,8 +665,9 @@ export function useTerminalPanePolling({
   }, [enabled, worktreeId, addListener, applySnapshot]);
 
   // Initial + interval polling. Pauses when hidden, resumes on visible.
-  // Cadence depends on isRunning (active=2s, idle=5s); while a WS push
-  // connection is up (Issue #1120) the poll is throttled to a slow fallback.
+  // Cadence comes from the pane's profile (Issue #2511): for the worktree
+  // screen's default that is isRunning (active=2s, idle=5s), throttled to a slow
+  // fallback while a WS push connection is up and healthy (Issue #1120).
   useEffect(() => {
     if (!enabled) return;
     let cancelled = false;
@@ -663,11 +687,16 @@ export function useTerminalPanePolling({
       // promptly once they press the key.
       || terminal.isDismissablePanelActive
       || terminal.isUnclassifiedActive;
-    const intervalMs = connected && pushHealthy && !interactionActive
-      ? WS_CONNECTED_POLLING_INTERVAL_MS
-      : terminal.isRunning || interactionActive
-        ? ACTIVE_POLLING_INTERVAL_MS
-        : IDLE_POLLING_INTERVAL_MS;
+    // Issue #2511: the rule itself moved to `selectPanePollIntervalMs` so the
+    // tile grid can pick a different profile. Under the default profile it
+    // computes exactly what the expression here used to.
+    const intervalMs = selectPanePollIntervalMs(cadence, {
+      connected,
+      pushHealthy,
+      interactionActive,
+      sessionAlive: terminal.isRunning,
+      generating: isGeneratingStatus(terminal.sessionStatus),
+    });
     let intervalId: ReturnType<typeof setInterval> | null = startInterval(intervalMs);
 
     // Kick once immediately if the page is visible.
@@ -697,9 +726,15 @@ export function useTerminalPanePolling({
     //   - fetchCurrentOutput identity changes (cliToolId / worktreeId)
   }, [
     enabled,
+    cadence,
     connected,
     pushHealthy,
     terminal.isRunning,
+    // Issue #2511: a tile's cadence turns on the generating verdict, so the
+    // interval has to be re-created when that verdict moves. The detail profile
+    // ignores it, and re-creating an interval at the same length is a no-op for
+    // it beyond one skipped tick.
+    terminal.sessionStatus,
     terminal.isSelectionListActive,
     terminal.isPagerActive,
     terminal.isDismissablePanelActive,
