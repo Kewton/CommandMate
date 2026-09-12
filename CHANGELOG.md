@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **feat(sessions): /sessions にタイル表示モードを追加** (#2509): list / tile を localStorage 永続（既定 list）で切り替え、tile では `container-custom` を外した全幅 `grid-cols-1 xl:grid-cols-2` に各 worktree のチャット（会話履歴）を内蔵した固定高タイルを並べる。タイルヘッダはリポジトリ名 / `/worktrees/<id>` へのブランチリンク / 状態ドット / instance selector（カード全体はリンクにしない）。ビューポート外のタイルは `IntersectionObserver` で `enabled: false` にし `/current-output` も `/messages` も叩かない。
+
 ### Fixed
 
 - **fix(chat): オフライン送信の自動再送が実機で発火しない問題を修正** (#2535): オフライン中は `serverReachable` が healthy 時の `true` のまま残り（プローブは `browserOnline` でゲートされ、`assertOnline` は送信前に落として何も報告しない）、`isServerConfirmedReachable()` が圏外の間ずっと `true` を返していた。このため #2503 の再送トリガである「reachable の立ち上がり」が一度も観測されず、圏外で送ったメッセージが `Sending…` のまま残り `POST /api/worktrees/<id>/send` が再発行されなかった。`navigator.onLine === false` のときは reachable を確定させない・offline 遷移時に `serverReachable` を未計測へ戻す・再送の arming を「保留中のキュー」という定常状態からも行い（復帰時の `online` イベントと WebSocket 再接続が同一バッチに畳まれても取りこぼさない）よう修正。
