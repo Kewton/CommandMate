@@ -70,6 +70,24 @@ describe('isServerConfirmedReachable', () => {
     expect(isServerConfirmedReachable(merelyOpening)).toBe(false);
   });
 
+  it('refuses every kind of evidence once the device says it is off the network', () => {
+    // Issue #2535. Both positive signals go stale in exactly this situation and
+    // nothing clears them: `serverReachable` keeps the `true` a healthy session
+    // left behind (the probe is gated on `browserOnline`, and `assertOnline`
+    // refuses the request before it is made without reporting anything), and a
+    // socket to a server on loopback never notices the Wi-Fi is gone. Reading
+    // either as proof told the resend layer the server was answering during the
+    // whole of an outage — so the transition back to it never happened and a
+    // parked message sat in 「送信中」 forever.
+    for (const stale of [
+      signals({ browserOnline: false, realtimeStatus: 'connected' }),
+      signals({ browserOnline: false, serverReachable: true }),
+      signals({ browserOnline: false, realtimeStatus: 'connected', serverReachable: true }),
+    ]) {
+      expect(isServerConfirmedReachable(stale), JSON.stringify(stale)).toBe(false);
+    }
+  });
+
   it('reads the socket even when a stale probe says unreachable', () => {
     // Matches resolveConnectivityStatus, which lets a live socket outrank a
     // stale `serverReachable: false`.
@@ -111,6 +129,10 @@ describe('isConnectionKnownDown', () => {
       signals({ browserOnline: false }),
       signals({ serverReachable: false }),
       signals({ realtimeStatus: 'connecting' }),
+      // Issue #2535: the combinations an outage actually leaves behind. These
+      // are the ones that used to answer `true` to both questions at once.
+      signals({ browserOnline: false, realtimeStatus: 'connected' }),
+      signals({ browserOnline: false, serverReachable: true }),
     ];
     for (const c of cases) {
       expect(isServerConfirmedReachable(c) && isConnectionKnownDown(c)).toBe(false);

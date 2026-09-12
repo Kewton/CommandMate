@@ -176,11 +176,26 @@ export function resolveConnectivityStatus(signals: ConnectivitySignals): Connect
  * never qualify; `reconnecting` is too loose, because it covers both "an HTTP
  * exchange completed" and "the socket is still opening and nothing has been
  * measured at all". This function names the half that is evidence: a live
- * socket, or a completed exchange. `browserOnline` is deliberately not consulted
- * — `navigator.onLine === true` is exactly the signal the module note says can
- * never confirm a connection on its own.
+ * socket, or a completed exchange.
+ *
+ * The asymmetry applies here in the one direction it is allowed to: a device
+ * that says it is **off** the network cannot be confirmed reachable, whatever
+ * the other two signals still claim. Issue #2535 is what that guard is for.
+ * Both remaining signals go stale in exactly this situation and nothing clears
+ * them — `serverReachable` keeps the `true` a healthy session left behind (the
+ * probe below is gated on `browserOnline`, and `api-client`'s `assertOnline`
+ * refuses the request before it is made without reporting anything), and a
+ * socket to a server on loopback never notices the Wi-Fi is gone at all. So
+ * without this line the function answered "the server is answering" for the
+ * whole of an outage, which is the opposite of what {@link isConnectionKnownDown}
+ * was saying about the same signals at the same moment.
+ *
+ * `browserOnline === true` is still not consulted as evidence — it grants
+ * nothing on its own, and positive proof continues to come only from the socket
+ * or a completed exchange.
  */
 export function isServerConfirmedReachable(signals: ConnectivitySignals): boolean {
+  if (signals.browserOnline === false) return false;
   return signals.realtimeStatus === 'connected' || signals.serverReachable === true;
 }
 
@@ -354,7 +369,16 @@ export function useConnectivity(options: UseConnectivityOptions = {}): Connectiv
       setServerReachable(null);
       setBrowserOnline(true);
     };
-    const handleOffline = () => setBrowserOnline(false);
+    const handleOffline = () => {
+      // Issue #2535: drop reachability back to unmeasured on the way out too,
+      // for the same reason `handleOnline` does it on the way in — a verdict
+      // measured against the network that just went away says nothing about the
+      // one the device is on now. Leaving it behind is what let a session that
+      // had been healthy read as "the server is answering" for the whole of an
+      // outage, and no probe can correct it while `browserOnline` is false.
+      setServerReachable(null);
+      setBrowserOnline(false);
+    };
 
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
