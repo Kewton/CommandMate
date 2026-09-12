@@ -108,6 +108,90 @@ const TERMINAL_FALLBACK_CAPTURE_LINES = -200;
 const PROXY_ALLOWED_HOSTS = new Set(['localhost', '127.0.0.1']);
 
 /**
+ * Which listener a request arrived on (Issue #2489).
+ *
+ * `commandmate remote --auth remote-only` needs "is this request from the PC in
+ * front of the machine, or from the phone on the other side of the tunnel?" —
+ * and NONE of the usual answers work here. Both Tailscale Serve and the
+ * Cloudflare Quick Tunnel connect to `http://127.0.0.1:<port>` as their
+ * upstream, so a tunnelled request has `socket.remoteAddress === '127.0.0.1'`
+ * exactly like a local one; exempting loopback would hand the whole public URL
+ * out unauthenticated. `Host` and `X-Forwarded-*` are worse: a client picks
+ * those itself, and a Provider was measured rewriting `Host` to the upstream's
+ * (docs/qa/1937-remote-uat-record.md D-2).
+ *
+ * What IS unforgeable is the socket a connection landed on. `remote-only`
+ * therefore runs TWO listeners on 127.0.0.1 — the existing one for the user,
+ * and a second one that the Provider alone is pointed at — and `server.ts`
+ * stamps every request with the listener it arrived on before Next or this
+ * module sees it. The client's own value is overwritten, not merged, so the
+ * header below means "which socket", never "what the caller claimed".
+ */
+export type CmIngress = 'local' | 'remote';
+
+/**
+ * The header `server.ts` overwrites on every request and upgrade.
+ *
+ * Written out as a literal in `server.ts` would be a second spelling of the same
+ * name, so it lives here and `server.ts` imports it — that file already imports
+ * this module at eval time (`setupWebSocket`), which is why this is the one
+ * place the constant can live without adding a module graph to `server.ts`'s
+ * eval-time graph (see the `x-cm-raw-url` comment there for what that costs).
+ * `middleware.ts` cannot import it: it runs on the Edge runtime and this module
+ * is Node-only, so it inlines the same literal under the C001 rule that already
+ * duplicates the auth constants.
+ */
+export const CM_INGRESS_HEADER = 'x-cm-ingress';
+
+/**
+ * Value of `CM_AUTH_SCOPE` that exempts the local listener from authentication.
+ *
+ * Any other value — absent, misspelt, `all` — leaves every listener
+ * authenticated, which is the pre-#2489 behaviour and the fail-closed default.
+ */
+export const REMOTE_ONLY_AUTH_SCOPE = 'remote-only';
+
+/**
+ * Stamp the listener identity onto a request, discarding whatever the client
+ * sent under the same name.
+ *
+ * A plain assignment, not a merge: Node joins a repeated unknown header into
+ * one comma-separated string, and assigning replaces that string wholesale.
+ * Called for EVERY request on EVERY listener — a listener that forgot to stamp
+ * would leave the caller's own value in place, which is the one way this scheme
+ * can fail open.
+ *
+ * @param headers - The mutable `req.headers` of an incoming request or upgrade
+ * @param ingress - The listener the request arrived on
+ */
+export function stampIngress(
+  headers: NodeJS.Dict<string | string[]>,
+  ingress: CmIngress
+): void {
+  headers[CM_INGRESS_HEADER] = ingress;
+}
+
+/**
+ * Whether this request may skip authentication because of where it arrived.
+ *
+ * Fail-closed on both halves: the scope has to be exactly `remote-only`, and
+ * the stamp has to be exactly `local`. An unstamped request (no listener
+ * claimed it), an array value (a repeated header that somehow survived) and an
+ * unknown value all authenticate.
+ *
+ * @param headers - Request headers, after `server.ts` has stamped them
+ * @param env - Environment to read `CM_AUTH_SCOPE` from; defaults to the process's
+ * @returns true when the request came in on the local listener of a `remote-only` server
+ */
+export function isIngressAuthExempt(
+  headers: NodeJS.Dict<string | string[]>,
+  env: NodeJS.ProcessEnv | Record<string, string | undefined> = process.env
+): boolean {
+  if (env.CM_AUTH_SCOPE !== REMOTE_ONLY_AUTH_SCOPE) return false;
+  return headers[CM_INGRESS_HEADER] === 'local';
+}
+
+/**
  * Write a minimal HTTP error response to a raw upgrade socket and destroy it.
  * Used for 4xx / 5xx rejections in the /proxy/<prefix> upgrade branch.
  */
@@ -313,6 +397,7 @@ function isExpectedWebSocketError(error: Error & { code?: string }): boolean {
  * Issue #331: Added auth check on WebSocket upgrade
  *
  * @param server - HTTP or HTTPS server instance
+ * @param options - Extra listeners to serve the same WebSocket from (Issue #2489)
  *
  * @example
  * ```typescript
@@ -321,7 +406,24 @@ function isExpectedWebSocketError(error: Error & { code?: string }): boolean {
  * server.listen(3000);
  * ```
  */
-export function setupWebSocket(server: HTTPServer | HTTPSServer): void {
+export function setupWebSocket(
+  server: HTTPServer | HTTPSServer,
+  options?: {
+    /**
+     * Issue #2489: further listeners whose upgrades this same `wss` handles.
+     *
+     * `remote --auth remote-only` runs a second loopback listener for the
+     * Provider, and a phone talks to the terminal over WebSocket like any other
+     * client — so that listener needs the upgrade handler too. It is registered
+     * here rather than by a second `setupWebSocket` call because this function
+     * claims the room-publisher registry (#2220) and owns the module's `rooms`
+     * map: calling it twice would have the second call silently supersede the
+     * first, leaving the main listener's sockets unreachable from route
+     * handlers. One `wss`, one registry claim, N listeners.
+     */
+    additionalServers?: readonly (HTTPServer | HTTPSServer)[];
+  }
+): void {
   wss = new WebSocketServer({ noServer: true });
 
   // Issue #2220: this instance now owns the sockets, so publish the capability
@@ -339,7 +441,11 @@ export function setupWebSocket(server: HTTPServer | HTTPSServer): void {
   startWaitingStatusBroadcast(handleBroadcast);
 
   // Handle upgrade requests - only accept app WebSocket connections, not Next.js HMR
-  server.on('upgrade', (request, socket, head) => {
+  const handleUpgrade = (
+    request: IncomingMessage,
+    socket: Duplex,
+    head: Buffer
+  ): void => {
     const pathname = request.url || '/';
 
     // Let Next.js handle its own HMR WebSocket connections in development.
@@ -372,7 +478,13 @@ export function setupWebSocket(server: HTTPServer | HTTPSServer): void {
     }
 
     // Issue #331: WebSocket authentication via Cookie header
-    if (isAuthEnabled()) {
+    //
+    // Issue #2489: `isIngressAuthExempt` is the ONLY thing that can skip this,
+    // and it reads the same stamped header `middleware.ts` reads. HTTP and WS
+    // have to agree here: a phone drives the terminal over this socket, so a WS
+    // path that exempted more than the HTTP path would hand the tunnel a live
+    // shell while the screen behind it still asked for a password.
+    if (isAuthEnabled() && !isIngressAuthExempt(request.headers)) {
       const cookieHeader = request.headers.cookie || '';
       const cookies = parseCookies(cookieHeader);
       const token = cookies[AUTH_COOKIE_NAME];
@@ -415,7 +527,15 @@ export function setupWebSocket(server: HTTPServer | HTTPSServer): void {
     wss!.handleUpgrade(request, socket, head, (ws) => {
       wss!.emit('connection', ws, request);
     });
-  });
+  };
+
+  // Issue #2489: every listener gets the same handler, and therefore the same
+  // auth decision. `server.ts` has already stamped `x-cm-ingress` by the time
+  // this runs (its stamping listener is registered first, and listeners fire in
+  // registration order), so the handler never has to know which socket it is on.
+  for (const target of [server, ...(options?.additionalServers ?? [])]) {
+    target.on('upgrade', handleUpgrade);
+  }
 
   // Handle WebSocket server errors (e.g., invalid frames from clients)
   wss.on('error', (error) => {

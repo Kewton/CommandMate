@@ -598,10 +598,21 @@ describe('Issue #2488: all four scripts carry the same wait', () => {
   it('closes idle keep-alive connections on the way out (server.ts)', () => {
     // The other half of the 3-second window: without this the close callback
     // waits for connections that nothing will ever close.
+    //
+    // The call sits INSIDE the loop that shutdown runs over every listener, not
+    // on `server` alone. Issue #2489 opens a second listener for the provider
+    // and states the invariant that whatever shutdown does to one listener it
+    // does to all of them; `server.closeIdleConnections()` would leave the
+    // provider's door unable to shed its idle sockets — the same 3-second
+    // window this Issue is closing, on the listener nobody watches. That the
+    // call reaches BOTH listeners is measured rather than read off the source
+    // by tests/integration/server-shutdown-remote-ingress-2489.test.ts; this
+    // pin only keeps it from drifting back out of the loop.
     const code = read('server.ts');
-    expect(code).toContain('server.closeIdleConnections();');
-    const close = code.indexOf('server.close(() => {');
-    expect(close).toBeGreaterThan(-1);
-    expect(code.indexOf('server.closeIdleConnections();')).toBeGreaterThan(close);
+    expect(code).toContain('listener.closeIdleConnections();');
+    expect(code).not.toContain('server.closeIdleConnections();');
+    const loop = code.indexOf('for (const listener of listeners) {');
+    expect(loop).toBeGreaterThan(-1);
+    expect(code.indexOf('listener.closeIdleConnections();')).toBeGreaterThan(loop);
   });
 });

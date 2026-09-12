@@ -52,12 +52,21 @@ client) or **`tailscale`** — depending on which provider it selects.
   127.0.0.1 becomes reachable through a provider URL — a random public address
   (`https://<random>.trycloudflare.com`) with Cloudflare, or a tailnet-only address with
   Tailscale Serve
-- **The bind address does not change.** `remote` neither reads nor writes `CM_BIND`; it
-  stays at the default `127.0.0.1`. No new port opens on your LAN
+- **The bind address does not change.** `remote` never writes `CM_BIND`; it stays at the
+  default `127.0.0.1`. No new port opens on your LAN. Under `--auth remote-only` one more
+  listener appears on `127.0.0.1`, and that one is loopback-only too
 - Only this one CommandMate server is published. Nothing else on the machine is
 - Because anyone who learns the URL can reach it, **CommandMate's own token authentication
   is mandatory**. `remote` always starts the server with authentication enabled, and only a
   device that redeems the pairing code (single-use, 10 minutes by default) can sign in
+- **`--auth remote-only` still authenticates the provider route.** All it exempts is the
+  loopback listener this PC uses itself (Issue #2489). The decision is made from which
+  listener a request arrived on, never from its source IP or `Host` — a tunnel's upstream is
+  `127.0.0.1` too, so exempting by source IP would leave the published URL entirely
+  unauthenticated. A non-loopback `CM_BIND` is refused with exit 2. **The trade-off**: in
+  this mode any process on this PC — including the agents CommandMate runs in tmux — can
+  call the API without a token. That is weaker than the default `all`, which is why `all`
+  stays the default
 - **Creating a public tunnel always requires your explicit approval.** Interactively you
   are shown a warning and asked; non-interactively the run stops with `CONFIG_ERROR` unless
   you passed `--yes`. Nothing is ever published silently
@@ -79,6 +88,9 @@ client) or **`tailscale`** — depending on which provider it selects.
 - When `--expires` (8 hours by default) elapses, **only the outward door closes — the
   server is not stopped**, because stopping it would take your local session on the machine
   down with it
+- The extra listener added by `--auth remote-only` is not closed by `remote stop` either,
+  for the same reason. It is loopback-only and always authenticated, so closing the provider
+  is what removes the route from outside; the socket is released when the server stops
 
 ## Least Privilege Guide
 
@@ -100,6 +112,8 @@ client) or **`tailscale`** — depending on which provider it selects.
   entrance, for long-lived or production use
 - Forwarding, screenshotting into a chat, or reusing the pairing QR code / URL — it is a
   single-use credential
+- Using `commandmate remote --auth remote-only` on a machine you share with other people —
+  anyone with local access reaches the API without a token
 
 ## Preventing Dangerous Operations
 

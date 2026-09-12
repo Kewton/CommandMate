@@ -1816,7 +1816,7 @@ Each of these prints a message and exits 0 without changing anything.
 
 Make this server reachable from outside and pair a phone with it over a QR code. Unlike the other commands here, **what it acts on is not a worktree — it is this machine's server and a provider (tunnel)**.
 
-> **All `remote` adds is an outward door.** It neither reads nor writes `CM_BIND`, so the default `127.0.0.1` bind does not change. There is no flag to enable Auto-Yes either, so on a server started by `remote` Auto-Yes stays off for every worktree.
+> **All `remote` adds is an outward door.** It never writes `CM_BIND`, so the default `127.0.0.1` bind does not change (it **reads** it only under `--auth remote-only`, to decide whether that mode is allowed at all). There is no flag to enable Auto-Yes either, so on a server started by `remote` Auto-Yes stays off for every worktree.
 
 #### Usage
 
@@ -1829,6 +1829,7 @@ commandmate remote --provider cloudflare        # force a provider
 commandmate remote --expires 24h                # remote session TTL
 commandmate remote --pairing-expires 3m         # pairing code TTL
 commandmate remote --yes                        # approve a public tunnel (required when non-interactive)
+commandmate remote --auth remote-only           # authenticate the provider route only; local stays open
 commandmate remote status --json                # machine-readable output
 ```
 
@@ -1841,6 +1842,7 @@ commandmate remote status --json                # machine-readable output
 | `--pairing-expires <duration>` | Pairing code TTL (`1m`-`24h`) | `10m` |
 | `-p, --port <number>` | Port of the server to expose | Same resolution order as `commandmate start` |
 | `--yes` | Approve creating a public tunnel. Required without a TTY | Off (asks interactively) |
+| `--auth <scope>` | How far authentication reaches (`all` / `remote-only`). See [Authentication scope](#authentication-scope---auth) | `all` |
 | `--json` | JSON output | Off |
 
 > **There is no `--token` flag and no `--auto-yes` flag in any form.** `remote` is the side that mints the token, so one supplied from outside would have no matching hash on the server. For Auto-Yes, see the note above.
@@ -1851,7 +1853,7 @@ commandmate remote status --json                # machine-readable output
 |:----:|------|---------|
 | 0 | SUCCESS | Published, reported, or stopped successfully (including a `stop` that found nothing recorded to clean up) |
 | 1 | DEPENDENCY_ERROR | No provider is usable / the provider named by `--provider` is unusable on this machine |
-| 2 | CONFIG_ERROR | No TTY and no `--yes` for a public tunnel / an invalid `--expires`, `--pairing-expires` or `--provider` value / a server with authentication is already running / restarting the running server was not approved |
+| 2 | CONFIG_ERROR | No TTY and no `--yes` for a public tunnel / an invalid `--expires`, `--pairing-expires`, `--provider` or `--auth` value / `--auth remote-only` with a non-loopback `CM_BIND` / a server with authentication is already running / restarting the running server was not approved |
 | 3 | START_FAILED | The server or the provider failed to start (anything already opened is rolled back) |
 | 4 | STOP_FAILED | The provider session could not be closed (the state file is kept, so you can retry) |
 | 99 | UNEXPECTED_ERROR | Unexpected error |
@@ -1879,6 +1881,34 @@ A Cloudflare Quick Tunnel creates `https://<random>.trycloudflare.com` — an ad
 
 Only the CommandMate server running on 127.0.0.1 is published; nothing else on this machine is. CommandMate answers with token authentication enabled, so a visitor without the pairing code is refused — but **the listener itself is public**. See the [Security Guide](../security-guide.md) as well.
 
+#### Authentication scope (`--auth`)
+
+`remote` starts the server with token authentication enabled. `--auth` chooses **which routes** that authentication applies to.
+
+| Value | Through the provider (your phone) | Local on this PC (`http://localhost:<port>`) |
+|-------|----------------------------------|----------------------------------------------|
+| `all` (default) | Authenticated | Authenticated |
+| `remote-only` | Authenticated | **Not authenticated** |
+
+Under the default `all`, a remote session also asks the browser on this machine to log in — and the plaintext token is deleted the instant pairing succeeds, so **there is no way to log in from the PC**. The CLI on this machine (`commandmate ls` / `send` / `wait` / `capture`) stops for the same reason. Use `--auth remote-only` when you want the phone and the PC at the same time (Issue #2489).
+
+```bash
+commandmate remote --auth remote-only
+```
+
+**The decision is made from which listener a request arrived on, never from its source address.** Tailscale Serve and the Cloudflare Quick Tunnel both connect to `http://127.0.0.1:<port>` as their upstream, so a tunnelled request reaches the server from `127.0.0.1` exactly like a local one; exempting loopback would publish an unauthenticated CommandMate to whoever has the URL. `Host` and `X-Forwarded-*` are not used either — the caller sets them, and a provider was measured rewriting `Host` to the upstream's own.
+
+Under `remote-only` the server opens **a second listener on a separate `127.0.0.1` port** alongside the existing one, and the provider is pointed at that one alone. Authentication is decided per listener, and an internal header a request brings with it is always overwritten by the server.
+
+- The provider's listener **always authenticates**. Before pairing: 307 for screens, 401 for the API, 401 for WebSocket
+- Only the local listener is exempt. **IP restriction (`CM_ALLOWED_IPS`) is not exempt**
+- `--auth remote-only` exits 2 when `CM_BIND` is not loopback (`127.0.0.1` / `localhost` / `::1`). An unauthenticated listener open to the LAN would extend "local means trusted" to every host that can reach this machine
+- If the second listener cannot be opened, the server falls back to authenticating everything (fail-closed) and `remote` rolls the whole session back. **Publication never proceeds on its own**
+
+> **The trade-off.** Under `remote-only`, any process on this PC — including the agents CommandMate itself runs in tmux — can reach the API without a token. That is the same exposure as a CommandMate used locally without `remote` at all, and weaker than `all`, which is why `all` remains the default.
+
+> **`remote stop` does not close the second listener.** It closes the provider, as before. The listener is loopback-only and authenticates every request, so closing the provider is what removes the route from outside; the socket itself lives until the server is stopped (the same reason `--expires` does not stop the server — that would take your local session down with it).
+
 #### Pairing code
 
 - **Single-use**, and expires after 10 minutes by default (`--pairing-expires`)
@@ -1891,10 +1921,19 @@ Only the CommandMate server running on 127.0.0.1 is published; nothing else on t
 ```
 Provider:        cloudflare-quick
 URL:             https://<random>.trycloudflare.com
+Auth scope:      all (every request needs the paired token)
 Remote expires:  2026-08-29T21:00:00.000Z (in 6h 12m)
 Pairing:         unused
 Server:          running (pid 12345, http://localhost:3000, auth: on)
 ```
+
+Started with `--auth remote-only`, the `Auth scope:` line names both the port that is exempt and the port that is not:
+
+```
+Auth scope:      remote-only (provider port 51234 needs the paired token; http://127.0.0.1:3000 on this machine does not)
+```
+
+`--json` carries the same information in `.remote.authScope` (`all` / `remote-only`) and `.remote.server.remoteIngressPort`. A session recorded before #2489 has no `authScope` field and reads as `all`.
 
 `Pairing:` is one of `unused` / `consumed` / `expired`. With no remote session recorded it looks like this:
 
@@ -1925,9 +1964,9 @@ Running `commandmate remote status` after `--expires` (`8h` by default) has elap
 - **Running without authentication**: it has to be restarted with authentication enabled, so you are asked to confirm a stop and restart. Without a TTY this is refused with exit 2 unless `--yes` was passed
 - **Running with authentication**: that server's token hash was fixed at start and the plaintext is not retained, so **this session cannot pair with it**. It stops with exit 2 — run `commandmate stop` first, then `commandmate remote`
 
-#### remote passes exactly three environment variables to the server
+#### The environment variables remote passes to the server
 
-`CM_AUTH_TOKEN_HASH`, `CM_AUTH_EXPIRE` and `CM_REMOTE_PAIRING_FILE`, and the third is a **path, not a secret**. No plaintext long-lived token goes into the environment, because a tmux pane inherits the server's environment wholesale — anything left there would be readable by the very agents CommandMate is driving. `CM_BIND` is neither read nor written, so your existing bind setting is untouched.
+`CM_AUTH_TOKEN_HASH`, `CM_AUTH_EXPIRE`, `CM_REMOTE_PAIRING_FILE` and `CM_AUTH_SCOPE` — five with `CM_REMOTE_INGRESS_PORT`, which is added only under `--auth remote-only`. `CM_REMOTE_PAIRING_FILE` is a **path, not a secret**, and neither `CM_AUTH_SCOPE` nor `CM_REMOTE_INGRESS_PORT` is a secret either. No plaintext long-lived token goes into the environment, because a tmux pane inherits the server's environment wholesale — anything left there would be readable by the very agents CommandMate is driving. `CM_BIND` is never written, so your existing bind setting is untouched.
 
 #### Reading `--json`
 

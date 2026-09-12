@@ -149,8 +149,19 @@ export function handleApiError(
         };
       case 401:
       case 403:
+        // Issue #2489: the second sentence is the one that matters during a
+        // `commandmate remote` session. `remote` mints the token, hands its
+        // plaintext to the phone once through the pairing handoff and deletes
+        // it — so "set CM_AUTH_TOKEN" names a value the operator has no way to
+        // obtain, and following that advice is a dead end (#2489's report spent
+        // a session there). `--auth remote-only` is the exit: it leaves the
+        // loopback listener this client dials unauthenticated while the
+        // Provider's listener keeps demanding the token.
         return {
-          message: 'Authentication failed. Use --token <token> or set CM_AUTH_TOKEN environment variable.',
+          message:
+            'Authentication failed. Use --token <token> or set CM_AUTH_TOKEN environment variable. ' +
+            'During a "commandmate remote" session the token is only ever shown to the paired phone — ' +
+            'restart it with "commandmate remote --auth remote-only" to use the CLI from this machine without one.',
           exitCode: ExitCode.CONFIG_ERROR,
         };
       case 404:

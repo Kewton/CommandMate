@@ -6,6 +6,8 @@
  *   commandmate remote status     # Provider / URL / expiry / pairing state
  *   commandmate remote stop       # close the door, keeping the server running
  *
+ *   commandmate remote --auth remote-only   # only the phone's route authenticates
+ *
  * ## What lives here rather than in a Provider (§6.2)
  *
  * Two things, and both for the same reason — they are decisions about an
@@ -19,6 +21,17 @@
  *  2. **Whether a public tunnel may be created at all.** A prompt inside a
  *     Provider would have to re-derive interactive-vs-not per Provider, and its
  *     answer would be invisible to the caller that has to honour `--yes`.
+ *
+ * ## How far the token reaches (Issue #2489)
+ *
+ * `--auth all` (the default) authenticates every listener, which is what #1937
+ * shipped. `--auth remote-only` runs a SECOND loopback listener, points the
+ * Provider at that one alone, and exempts the original from authentication — so
+ * the phone still pairs and the PC in front of the machine keeps working. The
+ * exemption is decided by which listener a request arrived on, never by its
+ * source address: a Provider's upstream IS 127.0.0.1, so every IP- and
+ * header-based answer here fails open. See `src/lib/ws-server.ts`'s ingress
+ * section for the full argument.
  *
  * ## What this command deliberately does not have
  *
@@ -52,13 +65,16 @@ import {
   readRemoteState,
   removeRemoteState,
   writeRemoteState,
+  type RemoteAuthScope,
   type RemoteState,
 } from '../utils/remote-state';
+import { loadEffectiveEnv } from '../utils/server-url';
 import { logSecurityEvent } from '../utils/security-logger';
 import { waitForServer } from '../utils/server-ready';
 import {
   createRemoteProviders,
   detectRemoteProviders,
+  findFreeLoopbackPort,
   type ProviderCandidate,
   type RemoteHandle,
   type RemoteProviderId,
@@ -119,6 +135,12 @@ export const PUBLIC_TUNNEL_PROVIDERS: readonly RemoteProviderId[] = ['cloudflare
  *    put here would be readable by the very agents CommandMate is driving
  *    (§7.2).
  *
+ *  - `CM_AUTH_SCOPE` — the `--auth` value (#2489). Not a secret and not a path:
+ *    the string `all` or `remote-only`, which is what `middleware.ts` and
+ *    `ws-server.ts` read to decide whether the local listener may skip the
+ *    token. Always exported, including for `all`, so the server is told what
+ *    was chosen rather than inferring it from a missing variable.
+ *
  * `tests/unit/cli/commands/remote-launch-env-1937.test.ts` holds the measured
  * set to this declaration in BOTH directions, the way
  * `agent-launch-plan-secrets-1933.test.ts` does for `prepareLaunch`. Adding a
@@ -128,6 +150,20 @@ export const REMOTE_LAUNCH_ENV_KEYS = [
   'CM_AUTH_TOKEN_HASH',
   'CM_AUTH_EXPIRE',
   'CM_REMOTE_PAIRING_FILE',
+  'CM_AUTH_SCOPE',
+] as const;
+
+/**
+ * The measured set for `--auth remote-only` (Issue #2489).
+ *
+ * One key more than {@link REMOTE_LAUNCH_ENV_KEYS}, and declared separately
+ * rather than as an "optional extra" so the exact-set measurement keeps working
+ * in BOTH directions for BOTH modes. A conditional key checked against a single
+ * list would be a list that describes neither mode.
+ */
+export const REMOTE_ONLY_LAUNCH_ENV_KEYS = [
+  ...REMOTE_LAUNCH_ENV_KEYS,
+  'CM_REMOTE_INGRESS_PORT',
 ] as const;
 
 /** Inputs of {@link buildRemoteLaunchEnv}. */
@@ -138,6 +174,17 @@ export interface RemoteLaunchEnvInput {
   authExpire: string;
   /** Absolute path of the 0600 pairing handoff file. */
   pairingFilePath: string;
+  /** Issue #2489: how far authentication reaches. */
+  authScope: RemoteAuthScope;
+  /**
+   * Issue #2489: the loopback port the server opens for the Provider.
+   *
+   * Required when `authScope` is `remote-only` and meaningless otherwise — the
+   * server refuses `remote-only` without it and falls back to authenticating
+   * every listener, so passing one mode's value with the other mode's scope
+   * cannot silently produce a half-open server.
+   */
+  remoteIngressPort?: number;
 }
 
 /** Pairing state as reported by `remote status` (§5.4). */
@@ -151,15 +198,20 @@ export type PairingState = 'unused' | 'consumed' | 'expired';
  * {@link REMOTE_LAUNCH_ENV_KEYS} — "what did remote add" is otherwise only
  * observable by diffing a global.
  *
- * @param input - Hash, expiry and handoff path
- * @returns The three variables, and nothing else
+ * @param input - Hash, expiry, handoff path and auth scope
+ * @returns Those variables, and nothing else
  */
 export function buildRemoteLaunchEnv(input: RemoteLaunchEnvInput): Record<string, string> {
-  return {
+  const env: Record<string, string> = {
     CM_AUTH_TOKEN_HASH: input.authTokenHash,
     CM_AUTH_EXPIRE: input.authExpire,
     CM_REMOTE_PAIRING_FILE: input.pairingFilePath,
+    CM_AUTH_SCOPE: input.authScope,
   };
+  if (input.authScope === 'remote-only' && input.remoteIngressPort !== undefined) {
+    env.CM_REMOTE_INGRESS_PORT = String(input.remoteIngressPort);
+  }
+  return env;
 }
 
 /**
@@ -216,6 +268,87 @@ export function parsePairingDuration(value: string): number {
   }
 
   return ms;
+}
+
+/**
+ * What the user may type after `--auth`, and the default when they type nothing.
+ *
+ * Issue #2489. `all` is the default deliberately: `remote-only` leaves every
+ * process on this machine — including the agents CommandMate itself runs in tmux
+ * — able to reach the API without a token, which is the same exposure as a
+ * CommandMate started without `--auth` at all, and weaker than `all`. Opting
+ * into that is the user's call to make, not a default to inherit.
+ */
+export const REMOTE_AUTH_SCOPES: readonly RemoteAuthScope[] = ['all', 'remote-only'];
+
+/** Auth scope applied when `--auth` is not given (Issue #2489). */
+export const DEFAULT_REMOTE_AUTH_SCOPE: RemoteAuthScope = 'all';
+
+/**
+ * Where the `remote-only` ingress listener lives (Issue #2489).
+ *
+ * The literal loopback address, matching `REMOTE_INGRESS_BIND` in `server.ts`:
+ * both Providers dial `http://127.0.0.1:<port>`, and the listener must not be
+ * reachable from anywhere else.
+ */
+export const REMOTE_INGRESS_HOST = '127.0.0.1';
+
+/**
+ * Loopback bind addresses that keep the local listener off the network.
+ *
+ * Issue #2489: `remote-only` makes the local listener unauthenticated, so it is
+ * refused when the server would bind anywhere a second machine can reach —
+ * otherwise "local means trusted" quietly becomes "the LAN means trusted".
+ * `server.ts` re-checks this against its own effective `CM_BIND`; this copy is
+ * what turns the mistake into an exit code instead of a degraded server.
+ */
+const LOOPBACK_BINDS: readonly string[] = ['127.0.0.1', 'localhost', '::1', '[::1]'];
+
+/**
+ * Parse an `--auth` value.
+ *
+ * @param value - Raw flag value; undefined means the flag was not given
+ * @returns The scope to use
+ * @throws Error naming the valid values, for CONFIG_ERROR
+ */
+export function parseAuthScope(value: string | undefined): RemoteAuthScope {
+  if (value === undefined) return DEFAULT_REMOTE_AUTH_SCOPE;
+  const normalized = value.trim().toLowerCase();
+  const match = REMOTE_AUTH_SCOPES.find((scope) => scope === normalized);
+  if (match === undefined) {
+    throw new Error(
+      `Unknown --auth value: "${value}". Valid values: ${REMOTE_AUTH_SCOPES.join(', ')}.`
+    );
+  }
+  return match;
+}
+
+/**
+ * The bind address the server this session starts will actually listen on.
+ *
+ * Read through `loadEffectiveEnv()` rather than `process.env` because that is
+ * what `daemon.start()` hands the child: it layers `.env` OVER the exported
+ * environment, so a `CM_BIND=0.0.0.0` written in `~/.commandmate/.env` is
+ * invisible to `process.env` here and decisive for the server. Checking the
+ * wrong one is how this guard would pass while the thing it guards against
+ * happened anyway.
+ *
+ * This is the one place `remote` reads `CM_BIND`, and only in `remote-only`
+ * mode — §9.1's "remote neither reads nor writes CM_BIND" still holds for every
+ * other path, and `remote` never writes it.
+ *
+ * @returns The effective `CM_BIND`, defaulted the way `server.ts` defaults it
+ */
+export function resolveEffectiveBind(): string {
+  return loadEffectiveEnv().CM_BIND || '127.0.0.1';
+}
+
+/**
+ * @param bind - An effective `CM_BIND` value
+ * @returns true when nothing outside this machine can reach that address
+ */
+export function isLoopbackBind(bind: string): boolean {
+  return LOOPBACK_BINDS.includes(bind.trim().toLowerCase());
 }
 
 /** Outcome of applying the selection rule to a probe result. */
@@ -461,6 +594,38 @@ export async function runRemoteUp(options: RemoteOptions): Promise<ExitCode> {
     return ExitCode.CONFIG_ERROR;
   }
 
+  // Issue #2489. Both checks happen BEFORE any Provider is probed: neither an
+  // unknown `--auth` value nor a LAN-facing bind should cost the user a
+  // `tailscale serve` that then has to be reverted.
+  let authScope: RemoteAuthScope;
+  try {
+    authScope = parseAuthScope(options.auth);
+  } catch (error) {
+    logger.error(getErrorMessage(error));
+    return ExitCode.CONFIG_ERROR;
+  }
+
+  if (authScope === 'remote-only') {
+    const bind = resolveEffectiveBind();
+    if (!isLoopbackBind(bind)) {
+      logger.error(
+        `--auth remote-only requires a loopback CM_BIND, but this server would bind to ${bind}.`
+      );
+      logger.info(
+        'In this mode the local listener answers without a token, so a non-loopback bind would ' +
+          'extend that to every host that can reach this machine.'
+      );
+      logger.info('Set CM_BIND=127.0.0.1, or run "commandmate remote --auth all".');
+      logSecurityEvent({
+        timestamp: new Date().toISOString(),
+        command: 'remote',
+        action: 'failure',
+        details: `up: remote-only refused (CM_BIND=${bind})`,
+      });
+      return ExitCode.CONFIG_ERROR;
+    }
+  }
+
   // 1. Probe every Provider, then apply the selection rule here (§6.2).
   const candidates = await detectRemoteProviders();
   const selection = selectProvider(candidates, options.provider);
@@ -506,10 +671,32 @@ export async function runRemoteUp(options: RemoteOptions): Promise<ExitCode> {
   const authTokenHash = hashToken(sessionToken);
   const pairing = createPairingHandoff({ ttlMs: pairingTtlMs, sessionToken });
 
+  // 4b. Issue #2489: in `remote-only` the Provider gets a socket of its own, so
+  // "which listener did this arrive on" can answer "does this need a token".
+  // Picked here rather than by the server because the Provider is started from
+  // this process and has to be pointed somewhere; the server re-validates the
+  // value and falls back to authenticating everything if it cannot use it.
+  let remoteIngressPort: number | undefined;
+  if (authScope === 'remote-only') {
+    try {
+      remoteIngressPort = await findFreeLoopbackPort();
+    } catch (error) {
+      logger.error(`Could not reserve a loopback port for the remote listener: ${getErrorMessage(error)}`);
+      consumePairingHandoff(pairing.filePath);
+      return ExitCode.START_FAILED;
+    }
+  }
+
   // 5. Start the server through the existing exit-free core. Not reimplemented:
   // `runStart` already owns .env loading, port allocation and the daemon spawn.
   const restoreEnv = applyRemoteLaunchEnv(
-    buildRemoteLaunchEnv({ authTokenHash, authExpire: expires, pairingFilePath: pairing.filePath })
+    buildRemoteLaunchEnv({
+      authTokenHash,
+      authExpire: expires,
+      pairingFilePath: pairing.filePath,
+      authScope,
+      remoteIngressPort,
+    })
   );
 
   logger.info('Starting the CommandMate server...');
@@ -538,11 +725,34 @@ export async function runRemoteUp(options: RemoteOptions): Promise<ExitCode> {
   }
   logger.success(`Server: ${started.url} (pid ${started.pid})`);
 
+  // 6b. Issue #2489: the remote listener is fatal in exactly the same way. The
+  // server refuses `remote-only` rather than dying when it cannot open this
+  // socket — it must not take the user's local session down — so its absence
+  // reaches us as a port that never answers, and publishing a URL that fronts
+  // it would hand the user a QR code for nothing. Roll the whole session back.
+  if (remoteIngressPort !== undefined) {
+    if (!(await waitForServer(REMOTE_INGRESS_HOST, remoteIngressPort))) {
+      logger.error(
+        `The server did not open its remote listener on ${REMOTE_INGRESS_HOST}:${remoteIngressPort} in time.`
+      );
+      logger.info('Nothing was published. Re-run, or use "commandmate remote --auth all".');
+      await rollback(daemonManager, pairing.filePath, restoreEnv);
+      return ExitCode.START_FAILED;
+    }
+    logger.success(`Remote listener: ${REMOTE_INGRESS_HOST}:${remoteIngressPort} (authentication required)`);
+  }
+
   // 7. Open the outside door. The Provider is handed 127.0.0.1 explicitly; it
   // never reads CM_BIND (§9.1).
+  //
+  // Issue #2489: in `remote-only` it is handed the SEPARATE loopback port
+  // instead. That substitution is the whole mechanism — the Provider reaches
+  // only the listener that always authenticates, and the port the user's own
+  // browser and CLI dial is never published.
+  const publishedPort = remoteIngressPort ?? endpoint.port;
   let handle: RemoteHandle;
   try {
-    handle = await provider.start({ port: endpoint.port, signal: new AbortController().signal });
+    handle = await provider.start({ port: publishedPort, signal: new AbortController().signal });
   } catch (error) {
     logger.error(`Provider ${provider.id} failed to start: ${getErrorMessage(error)}`);
     await rollback(daemonManager, pairing.filePath, restoreEnv);
@@ -568,7 +778,12 @@ export async function runRemoteUp(options: RemoteOptions): Promise<ExitCode> {
     expiresAt: now + expiresMs,
     pairing: { filePath: pairing.filePath, expiresAt: pairing.expiresAt },
     handle,
-    server: { pid: started.pid ?? null, port: endpoint.port },
+    server: {
+      pid: started.pid ?? null,
+      port: endpoint.port,
+      remoteIngressPort: remoteIngressPort ?? null,
+    },
+    authScope,
   };
 
   try {
@@ -591,7 +806,7 @@ export async function runRemoteUp(options: RemoteOptions): Promise<ExitCode> {
     command: 'remote',
     action: 'success',
     // Neither the pairing code nor the token appears here (§5.2).
-    details: `up: provider=${handle.provider} port=${endpoint.port}`,
+    details: `up: provider=${handle.provider} port=${publishedPort} auth=${authScope}`,
   });
 
   if (options.json) {
@@ -605,13 +820,19 @@ export async function runRemoteUp(options: RemoteOptions): Promise<ExitCode> {
         {
           action: 'up',
           provider: state.provider,
+          authScope: state.authScope ?? DEFAULT_REMOTE_AUTH_SCOPE,
           url: state.url,
           // The one-time display, in the form a machine caller can use. `status`
           // never emits this field - the code is shown by `up` or not at all.
           pairingUrl,
           expiresAt: new Date(state.expiresAt).toISOString(),
           pairing: { expiresAt: new Date(state.pairing.expiresAt).toISOString() },
-          server: { pid: state.server.pid, port: state.server.port, url: started.url },
+          server: {
+            pid: state.server.pid,
+            port: state.server.port,
+            url: started.url,
+            remoteIngressPort: state.server.remoteIngressPort ?? null,
+          },
         },
         null,
         2
@@ -815,6 +1036,9 @@ export async function runRemoteStatus(options: RemoteOptions): Promise<ExitCode>
           action: 'status',
           remote: {
             provider: state.provider,
+            // Issue #2489: what `--auth` this session ran with. A record written
+            // before #2489 has no such field and was, by construction, `all`.
+            authScope: state.authScope ?? DEFAULT_REMOTE_AUTH_SCOPE,
             // The URL is public information; the pairing code and the token are
             // not, and neither appears here or anywhere else in `status` (§5.4).
             url: state.url,
@@ -826,6 +1050,10 @@ export async function runRemoteStatus(options: RemoteOptions): Promise<ExitCode>
               state: pairing,
               expiresAt: new Date(state.pairing.expiresAt).toISOString(),
             },
+            server: {
+              port: state.server.port,
+              remoteIngressPort: state.server.remoteIngressPort ?? null,
+            },
           },
           server,
         },
@@ -836,6 +1064,7 @@ export async function runRemoteStatus(options: RemoteOptions): Promise<ExitCode>
   } else {
     logger.info(`Provider:        ${state.provider}`);
     logger.info(`URL:             ${state.url}`);
+    logger.info(`Auth scope:      ${describeAuthScope(state)}`);
     logger.info(
       `Remote expires:  ${new Date(state.expiresAt).toISOString()} (${formatRemaining(state.expiresAt - now)})`
     );
@@ -853,6 +1082,29 @@ export async function runRemoteStatus(options: RemoteOptions): Promise<ExitCode>
   }
 
   return ExitCode.SUCCESS;
+}
+
+/**
+ * Render the `Auth scope:` line (Issue #2489).
+ *
+ * `remote-only` says where the exemption applies as well as that it exists: the
+ * difference between the two ports is the entire security boundary, so a line
+ * that named only the mode would leave the reader to guess which socket is
+ * which.
+ *
+ * @param state - The recorded session
+ * @returns The text after `Auth scope:`
+ */
+function describeAuthScope(state: RemoteState): string {
+  const scope = state.authScope ?? DEFAULT_REMOTE_AUTH_SCOPE;
+  if (scope !== 'remote-only') {
+    return 'all (every request needs the paired token)';
+  }
+  const ingress = state.server.remoteIngressPort;
+  return (
+    `remote-only (provider port ${ingress ?? 'unknown'} needs the paired token; ` +
+    `http://${REMOTE_INGRESS_HOST}:${state.server.port} on this machine does not)`
+  );
 }
 
 /**
@@ -995,6 +1247,10 @@ export function createRemoteCommand(): Command {
     )
     .option('-p, --port <number>', 'Port for the server to expose', parseInt)
     .option('--yes', 'Approve creating a public tunnel without prompting (required when non-interactive)')
+    .option(
+      '--auth <scope>',
+      `How far authentication reaches: all or remote-only (default: ${DEFAULT_REMOTE_AUTH_SCOPE})`
+    )
     .option('--json', 'JSON output')
     // Deliberately absent: --token (remote mints its own; see the file header)
     // and every --auto-yes flag (§5.5).

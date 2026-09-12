@@ -80,10 +80,15 @@ vi.mock('../../../../src/cli/commands/start', () => ({ runStart: vi.fn() }));
 vi.mock('../../../../src/lib/remote', () => ({
   detectRemoteProviders: vi.fn(),
   createRemoteProviders: vi.fn(() => []),
+  // Issue #2489: `--auth remote-only` reserves a loopback port for the second
+  // listener. Stubbed so the suite never opens a socket, and fixed so the value
+  // that reaches CM_REMOTE_INGRESS_PORT is checkable.
+  findFreeLoopbackPort: vi.fn(async () => 45678),
 }));
 
 import {
   REMOTE_LAUNCH_ENV_KEYS,
+  REMOTE_ONLY_LAUNCH_ENV_KEYS,
   buildRemoteLaunchEnv,
   runRemoteUp,
 } from '../../../../src/cli/commands/remote';
@@ -128,7 +133,9 @@ interface LaunchObservation {
   startOptions: StartOptions | undefined;
 }
 
-async function observeLaunch(): Promise<LaunchObservation> {
+async function observeLaunch(
+  options: Parameters<typeof runRemoteUp>[0] = {}
+): Promise<LaunchObservation> {
   const before = { ...process.env };
   // Recorded as a plain map rather than a `NodeJS.ProcessEnv`: the repo types
   // `NODE_ENV` as required on that interface, and this is a snapshot, not an
@@ -142,7 +149,7 @@ async function observeLaunch(): Promise<LaunchObservation> {
     return { ok: true, exitCode: ExitCode.SUCCESS, url: 'http://127.0.0.1:3000', pid: 4242 };
   });
 
-  const exitCode = await runRemoteUp({});
+  const exitCode = await runRemoteUp(options);
 
   const snapshot: Record<string, string | undefined> = atStart ?? {};
   const addedKeys = Object.keys(snapshot).filter((key) => before[key] !== snapshot[key]);
@@ -267,10 +274,83 @@ describe('remote launch environment (Issue #1937 R10, §9.2)', () => {
       authTokenHash: 'a'.repeat(64),
       authExpire: '8h',
       pairingFilePath: '/tmp/handoff.json',
+      authScope: 'all',
     });
 
     expect(Object.keys(built).sort()).toEqual([...REMOTE_LAUNCH_ENV_KEYS].sort());
     expect(built.CM_REMOTE_PAIRING_FILE).toBe('/tmp/handoff.json');
     expect(built.CM_AUTH_EXPIRE).toBe('8h');
+    expect(built.CM_AUTH_SCOPE).toBe('all');
+  });
+
+  describe('--auth remote-only (Issue #2489)', () => {
+    it('adds exactly the declared variables for this mode, and nothing else', async () => {
+      const observed = await observeLaunch({ auth: 'remote-only' });
+
+      expect(observed.exitCode).toBe(ExitCode.SUCCESS);
+      // Same both-directions contract as `all`, against this mode's own list.
+      // One extra key — the loopback port the Provider is pointed at — and a
+      // sixth appearing here would fail by name.
+      expect(observed.addedKeys.sort()).toEqual([...REMOTE_ONLY_LAUNCH_ENV_KEYS].sort());
+      expect(observed.added.CM_AUTH_SCOPE).toBe('remote-only');
+      expect(observed.added.CM_REMOTE_INGRESS_PORT).toBe('45678');
+    });
+
+    it('still exports the token hash, so the paired route authenticates', async () => {
+      const observed = await observeLaunch({ auth: 'remote-only' });
+
+      // The exemption is about WHICH listener, never about whether the server
+      // has a token at all. Dropping the hash here would turn `remote-only`
+      // into "publish an unauthenticated CommandMate to the internet".
+      expect(observed.added.CM_AUTH_TOKEN_HASH).toMatch(/^[0-9a-f]{64}$/);
+    });
+
+    it('still does not touch CM_BIND', async () => {
+      // §9.1 holds in this mode too: `remote-only` READS the effective CM_BIND
+      // to refuse a LAN-facing bind, and writes nothing.
+      process.env.CM_BIND = '127.0.0.1';
+      const observed = await observeLaunch({ auth: 'remote-only' });
+
+      expect(observed.exitCode).toBe(ExitCode.SUCCESS);
+      expect(observed.addedKeys).not.toContain('CM_BIND');
+      expect(process.env.CM_BIND).toBe('127.0.0.1');
+    });
+
+    it('carries no plaintext secret in this mode either', async () => {
+      const observed = await observeLaunch({ auth: 'remote-only' });
+
+      const handoff = readPairingHandoff(observed.added[PAIRING_FILE_ENV_KEY] as string);
+      const values = Object.values(observed.added);
+      expect(values).not.toContain(handoff?.sessionToken);
+      expect(values).not.toContain(handoff?.pairingHash);
+    });
+
+    it('declares the same keys the builder produces for this mode', () => {
+      const built = buildRemoteLaunchEnv({
+        authTokenHash: 'a'.repeat(64),
+        authExpire: '8h',
+        pairingFilePath: '/tmp/handoff.json',
+        authScope: 'remote-only',
+        remoteIngressPort: 45678,
+      });
+
+      expect(Object.keys(built).sort()).toEqual([...REMOTE_ONLY_LAUNCH_ENV_KEYS].sort());
+      expect(built.CM_REMOTE_INGRESS_PORT).toBe('45678');
+    });
+
+    it('never exports a port under --auth all', () => {
+      // A stray CM_REMOTE_INGRESS_PORT with scope `all` is inert on the server
+      // (it only reads the port when the scope says remote-only), but exporting
+      // one would still be a variable nobody asked for.
+      const built = buildRemoteLaunchEnv({
+        authTokenHash: 'a'.repeat(64),
+        authExpire: '8h',
+        pairingFilePath: '/tmp/handoff.json',
+        authScope: 'all',
+        remoteIngressPort: 45678,
+      });
+
+      expect(built.CM_REMOTE_INGRESS_PORT).toBeUndefined();
+    });
   });
 });

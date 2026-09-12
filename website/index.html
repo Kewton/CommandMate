@@ -3,14 +3,15 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>CommandMate — From vibe coding to Vibe Engineering</title>
-    <!-- Copy on this page comes from docs/design/public-messaging.md (Issue #1808).
-         It is the single source for every public surface, so wording is copied
-         from it rather than rephrased here — a paraphrase splits the LP from the
-         README and the tutorial, which is the failure that file exists to stop. -->
+    <title>CommandMate — One agent leads. Gates decide what's done.</title>
+    <!-- Copy on this page comes from docs/design/public-messaging.md, revised onto
+         the orchestrate axis in Issue #2493. It is the single source for every
+         public surface, so wording is copied from it rather than rephrased here —
+         a paraphrase splits the LP from the README and the tutorial, which is the
+         failure that file exists to stop. -->
     <meta
       name="description"
-      content="Vibe Engineering — the AI does the building; the system, not your expertise, guarantees the engineering. Any coding agent turns your requirement into a verified result."
+      content="CommandMate gives your lead agent the machinery to run the others: one Git worktree and one contract per task, gates that decide what is done, and a record of every run."
     />
     <link rel="canonical" href="https://kewton.github.io/CommandMate/" />
     <meta name="color-scheme" content="light dark" />
@@ -27,10 +28,10 @@
          the isolated environment stays the og:image (Issue #1272, #1810). -->
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://kewton.github.io/CommandMate/" />
-    <meta property="og:title" content="CommandMate — From vibe coding to Vibe Engineering" />
+    <meta property="og:title" content="CommandMate — One agent leads. Gates decide what's done." />
     <meta
       property="og:description"
-      content="Vibe Engineering — the AI does the building; the system, not your expertise, guarantees the engineering. Any coding agent turns your requirement into a verified result."
+      content="CommandMate gives your lead agent the machinery to run the others: one Git worktree and one contract per task, gates that decide what is done, and a record of every run."
     />
     <meta property="og:image" content="https://kewton.github.io/CommandMate/assets/img/screenshot-desktop.webp" />
     <meta name="twitter:card" content="summary_large_image" />
@@ -58,15 +59,12 @@
       <section class="hero">
         <div class="hero-copy">
           <p class="status-pill">Status: Beta</p>
-          <h1>From vibe coding to Vibe Engineering.</h1>
+          <h1>One agent leads. Gates decide what's done.</h1>
           <p class="lede">
-            CommandMate builds the engineering discipline into the workflow: a contract before
-            the work, verification gates after it, evidence throughout. Any coding agent turns
-            your requirement into a verified result.
-          </p>
-          <p class="definition">
-            Vibe Engineering — the AI does the building; the system, not your expertise,
-            guarantees the engineering.
+            CommandMate gives your lead agent the machinery to run the others: one Git worktree
+            and one contract per task, gates that decide what is done, and a record of every run.
+            Claude Code, Codex, Antigravity, Command Code, OpenCode, Gemini CLI, Copilot and
+            local models. You approve; you don't relay.
           </p>
 
           <div class="install">
@@ -75,9 +73,12 @@
               <span data-copy-label>Copy</span>
             </button>
           </div>
+          <p class="facts">
+            Open source (MIT) · runs on your machine · macOS / Linux / Windows (WSL2) · no app to
+            install
+          </p>
           <p class="prereq">
-            From install to your first session in 60 seconds.<br />
-            macOS / Linux / Windows (WSL2) · Node.js v22+ · npm · git · tmux
+            From install to your first session in 60 seconds. Node.js v22+ · npm · git · tmux
           </p>
 
           <div class="cta-row">
@@ -145,7 +146,124 @@
         </figure>
       </section>
 
-      <!-- 2. The loop -->
+      <!-- 2. The problem, in the reader's words rather than ours. It sits between
+           the hero and everything the product does, because a reader who does not
+           recognise their own week here has no reason to read the rest
+           (docs/design/public-messaging.md §1b). -->
+      <section class="section" id="problem" aria-labelledby="problem-h">
+        <h2 id="problem-h">More agents, same you</h2>
+        <ul class="problem-points">
+          <li>The agents are parallel. You are still single-threaded.</li>
+          <li>From the outside, an idle agent and one waiting on you look the same.</li>
+          <li>The agent's summary of what it did is not evidence of what it did.</li>
+          <li>Nobody can safely merge a PR that nobody understands.</li>
+        </ul>
+        <p class="note">
+          CommandMate puts the machinery around the CLIs you already run: a lead that hands out
+          contracts, session state read from the agents' own hooks, gates after the work, and the
+          record in between.
+        </p>
+      </section>
+
+      <!-- 3. See it running -->
+      <section class="section" id="demos" aria-labelledby="demos-h">
+        <h2 id="demos-h">See it running</h2>
+        <p class="section-lede">
+          The first is one real run, start to finish. The four under it are twenty seconds each,
+          recorded against a throwaway repository with a stubbed agent — except the gates in the
+          first of those four, which are executed for real, so the exit codes on screen are the
+          ones that run produced.
+        </p>
+
+        <figure class="demo demo-lead">
+          <video
+            src="assets/media/orchestrate-run.mp4"
+            poster="assets/media/poster-orchestrate-run.webp"
+            autoplay
+            muted
+            loop
+            playsinline
+            preload="none"
+            width="1080"
+            height="1080"
+            aria-label="One message sent to a Command Code session, four issues dispatched to four workers in their own worktrees, a worker terminal writing tests, and a closing phase-by-issue matrix in which all four pass dispatch, merge and UAT"
+          ></video>
+          <figcaption>
+            One message to Command Code. Four issues, four workers, 4/4 gates, then UAT.
+          </figcaption>
+        </figure>
+
+        <div class="demos">
+          <figure class="demo">
+            <video
+              src="assets/media/contract-verify.mp4"
+              poster="assets/media/poster-contract-verify.webp"
+              autoplay
+              muted
+              loop
+              playsinline
+              preload="none"
+              width="1280"
+              height="800"
+              aria-label="A task contract and a verify.yaml, then a terminal running the gates and printing RESULT passed"
+            ></video>
+            <figcaption>
+              Hand the agent a contract before the work starts. Gates run, and the exit code is
+              the verdict.
+            </figcaption>
+          </figure>
+          <figure class="demo">
+            <video
+              src="assets/media/install-skill.mp4"
+              poster="assets/media/poster-install-skill.webp"
+              autoplay
+              muted
+              loop
+              playsinline
+              preload="none"
+              width="1280"
+              height="800"
+              aria-label="Installing a Skill from the official Catalog into a worktree, then calling it from the composer"
+            ></video>
+            <figcaption>
+              The method is not in someone's head. It is installed as Skills and read by the
+              agent.
+            </figcaption>
+          </figure>
+          <figure class="demo">
+            <video
+              src="assets/media/parallel-worktrees.mp4"
+              poster="assets/media/poster-parallel-worktrees.webp"
+              autoplay
+              muted
+              loop
+              playsinline
+              preload="none"
+              width="1280"
+              height="800"
+              aria-label="One session per git worktree, several branches running in parallel"
+            ></video>
+            <figcaption>One session per worktree, running in parallel.</figcaption>
+          </figure>
+          <figure class="demo">
+            <video
+              src="assets/media/never-miss-waiting.mp4"
+              poster="assets/media/poster-never-miss-waiting.webp"
+              autoplay
+              muted
+              loop
+              playsinline
+              preload="none"
+              width="1280"
+              height="800"
+              aria-label="A session that stops for confirmation raises a needs-attention pill and a toast, and is answered from a phone"
+            ></video>
+            <figcaption>Waiting reaches you, and you answer from your phone.</figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <!-- 4. The loop -->
       <section class="section" id="loop" aria-labelledby="loop-h">
         <h2 id="loop-h">The loop</h2>
         <p class="section-lede">
@@ -222,35 +340,38 @@ $ echo $?
         </ol>
       </section>
 
-      <!-- 3. Four cards -->
+      <!-- 5. Four cards -->
       <section class="section" aria-labelledby="why">
         <h2 id="why">What it gives you</h2>
         <div class="cards">
           <article class="card">
-            <h3>Method as a system</h3>
+            <h3>One agent leads</h3>
             <p>
-              The method is not in someone's head — it is installed as Skills and read by the
-              agent.
+              One message to your lead session; it hands each task to a worker in its own worktree
+              under a contract, and only what passes the gates comes back. Measured with Claude
+              Code and Command Code as the lead.
             </p>
           </article>
           <article class="card">
             <h3>Verified, not vibe-checked</h3>
             <p>
               Gates you declared decide whether the work is done, and the exit code is the
-              verdict.
+              verdict. The agent's summary is not the evidence; the run is.
             </p>
           </article>
           <article class="card">
-            <h3>Any agent, in parallel</h3>
+            <h3>Know which one needs you</h3>
             <p>
-              One worktree and one contract per task, across eight agent CLIs and local models.
+              Waiting is a state read from the agent's hooks, not a guess from the screen. It
+              reaches you as a badge, a toast, the tab title, a push, and you answer from your
+              phone.
             </p>
           </article>
           <article class="card">
-            <h3>Stay in control, anywhere</h3>
+            <h3>Method as a system</h3>
             <p>
-              When an agent needs you, it reaches you — badge, toast, tab title, push — and you
-              answer from your phone.
+              The method is not in someone's head. It is installed as Skills and read by the
+              agent.
             </p>
           </article>
         </div>
@@ -260,7 +381,7 @@ $ echo $?
         </p>
       </section>
 
-      <!-- 4. 60-second quick start -->
+      <!-- 6. 60-second quick start -->
       <section class="section" id="quick-start" aria-labelledby="quick-start-h">
         <h2 id="quick-start-h">Quick start, in 60 seconds</h2>
         <p class="section-lede">
@@ -361,7 +482,7 @@ $ echo $?
         </p>
       </section>
 
-      <!-- 5. Tutorial -->
+      <!-- 7. Tutorial -->
       <section class="section" id="tutorial" aria-labelledby="tutorial-h">
         <h2 id="tutorial-h">Then run the loop on a real repository</h2>
         <p class="section-lede">
@@ -389,86 +510,7 @@ $ echo $?
         </p>
       </section>
 
-      <!-- 6. Feature demos -->
-      <section class="section" id="demos" aria-labelledby="demos-h">
-        <h2 id="demos-h">See it running</h2>
-        <p class="section-lede">
-          Twenty seconds each, recorded against a throwaway repository with a stubbed agent. The
-          gates in the first one are executed for real, so the exit codes on screen are the ones
-          that run produced.
-        </p>
-
-        <div class="demos">
-          <figure class="demo">
-            <video
-              src="assets/media/contract-verify.mp4"
-              poster="assets/media/poster-contract-verify.webp"
-              autoplay
-              muted
-              loop
-              playsinline
-              preload="none"
-              width="1280"
-              height="800"
-              aria-label="A task contract and a verify.yaml, then a terminal running the gates and printing RESULT passed"
-            ></video>
-            <figcaption>
-              Hand the agent a contract before the work starts. Gates run, and the exit code is
-              the verdict.
-            </figcaption>
-          </figure>
-          <figure class="demo">
-            <video
-              src="assets/media/never-miss-waiting.mp4"
-              poster="assets/media/poster-never-miss-waiting.webp"
-              autoplay
-              muted
-              loop
-              playsinline
-              preload="none"
-              width="1280"
-              height="800"
-              aria-label="A session that stops for confirmation raises a needs-attention pill and a toast, and is answered from a phone"
-            ></video>
-            <figcaption>Waiting reaches you, and you answer from your phone.</figcaption>
-          </figure>
-          <figure class="demo">
-            <video
-              src="assets/media/parallel-worktrees.mp4"
-              poster="assets/media/poster-parallel-worktrees.webp"
-              autoplay
-              muted
-              loop
-              playsinline
-              preload="none"
-              width="1280"
-              height="800"
-              aria-label="One session per git worktree, several branches running in parallel"
-            ></video>
-            <figcaption>One session per worktree, running in parallel.</figcaption>
-          </figure>
-          <figure class="demo">
-            <video
-              src="assets/media/install-skill.mp4"
-              poster="assets/media/poster-install-skill.webp"
-              autoplay
-              muted
-              loop
-              playsinline
-              preload="none"
-              width="1280"
-              height="800"
-              aria-label="Installing a Skill from the official Catalog into a worktree, then calling it from the composer"
-            ></video>
-            <figcaption>
-              The method is not in someone's head — it is installed as Skills and read by the
-              agent.
-            </figcaption>
-          </figure>
-        </div>
-      </section>
-
-      <!-- 7. With / Without CommandMate -->
+      <!-- 8. With / Without CommandMate -->
       <section class="section" id="with-without" aria-labelledby="with-without-h">
         <h2 id="with-without-h">With and without CommandMate</h2>
         <p class="section-lede">
@@ -531,7 +573,35 @@ $ echo $?
         </div>
       </section>
 
-      <!-- 8. Screenshot gallery -->
+      <!-- 9. What it does not do. The table above is the strongest set of claims
+           on the page, so the limits follow it immediately rather than being left
+           for a reader to discover after installing
+           (docs/design/public-messaging.md §4b). -->
+      <section class="section" id="limits" aria-labelledby="limits-h">
+        <h2 id="limits-h">What it does not do</h2>
+        <ul class="limits">
+          <li>
+            It is a run, not a resident agent. Nothing loops forever, and nothing mutates without
+            an explicit approve.
+          </li>
+          <li>
+            It does not read the code for you. Gates catch what your tests and checks catch.
+          </li>
+          <li>
+            Review by another agent is a step you add, not something the runner does for you.
+          </li>
+          <li>
+            Approvals still come to a person. Auto Yes is opt-in, time-boxed, and stops on the
+            patterns you set.
+          </li>
+          <li>
+            It does not replace tmux, Git worktrees, your terminal, or your agent CLI. An OS
+            reboot ends the processes; what survives is the record.
+          </li>
+        </ul>
+      </section>
+
+      <!-- 10. Screenshot gallery -->
       <section class="section" aria-labelledby="gallery-h">
         <h2 id="gallery-h">On desktop and on mobile</h2>
         <p class="section-lede">
@@ -709,9 +779,31 @@ $ echo $?
           <a class="btn btn-ghost" href="https://github.com/Kewton/CommandMate/blob/main/docs/en/user-guide/cli-setup-guide.md">Setup guide</a>
         </div>
       </section>
+      <!-- 11. Philosophy. The old H1 was not retired, it was demoted: it names the
+           idea rather than the product, so it reads as the closing argument instead
+           of the opening claim (docs/design/public-messaging.md §2). The definition
+           sentence is verbatim from that file's def:en markers, and a test compares
+           the two strings. -->
+      <section class="section philosophy" id="philosophy" aria-labelledby="philosophy-h">
+        <h2 id="philosophy-h">From vibe coding to Vibe Engineering.</h2>
+        <p class="definition">
+          Vibe Engineering — the AI does the building; the system, not your expertise, guarantees
+          the engineering.
+        </p>
+        <p class="creed">
+          We do not make the AI smarter. We make the software-engineering ability its user needed
+          into a system.
+        </p>
+        <!-- The axis word is not ours, and a page that used it as if it were would
+             be claiming a coinage it does not hold (public-messaging.md §10). -->
+        <p class="attribution">
+          The term "vibe engineering" was coined by Simon Willison (2025).
+          <a href="https://simonwillison.net/2025/Oct/7/vibe-engineering/">Read the original post</a>.
+        </p>
+      </section>
     </main>
 
-    <!-- 9. Footer -->
+    <!-- 12. Footer -->
     <footer class="site-footer">
       <div class="footer-inner">
         <div class="footer-brand">
@@ -725,12 +817,6 @@ $ echo $?
           <a href="https://github.com/Kewton/CommandMate/blob/main/LICENSE">MIT License</a>
         </nav>
       </div>
-      <!-- The axis word is not ours, and a page that used it as if it were would
-           be claiming a coinage it does not hold (public-messaging.md §10). -->
-      <p class="attribution">
-        The term "vibe engineering" was coined by Simon Willison (2025).
-        <a href="https://simonwillison.net/2025/Oct/7/vibe-engineering/">Read the original post</a>.
-      </p>
       <p class="copyright">MIT License · Copyright (c) 2026 Kewton</p>
     </footer>
 
