@@ -93,7 +93,12 @@ describe('FileViewer download link (Issue #1024)', () => {
   });
 
   it('builds the href with ?download=1 and encodePathForUrl-encoded path', async () => {
-    const filePath = 'dir with space/レポート.txt';
+    // [Issue #2507] `.log`, not `.txt`: editable extensions now open on the
+    // unified full-screen editor, whose download anchor lives in the action
+    // sheet. This case is about the MODAL toolbar's href, so it needs a text
+    // file that stays on the modal surface. The `.txt` unified-screen download
+    // is covered in FileViewer.editable-files-2507.test.tsx.
+    const filePath = 'dir with space/レポート.log';
     stubFetchTextFile(filePath);
 
     render(<FileViewer {...baseProps} filePath={filePath} />);
@@ -147,7 +152,9 @@ describe('FileViewer download link (Issue #1024)', () => {
   });
 
   it('coexists with the copy-content-button for text files (no id collision)', async () => {
-    const filePath = 'notes.txt';
+    // [Issue #2507] Non-editable extension for the same reason as above: both
+    // buttons under test are the modal toolbar's.
+    const filePath = 'notes.log';
     stubFetchTextFile(filePath);
 
     render(<FileViewer {...baseProps} filePath={filePath} />);

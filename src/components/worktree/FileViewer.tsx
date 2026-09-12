@@ -23,7 +23,7 @@ import dynamic from 'next/dynamic';
 import { useTranslations } from 'next-intl';
 import { Modal, Spinner } from '@/components/ui';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
-import { FileContent } from '@/types/models';
+import { FileContent, FileReadOnlyReason } from '@/types/models';
 import { ImageViewer } from './ImageViewer';
 import { VideoViewer } from './VideoViewer';
 import { PdfPreview } from './PdfPreview';
@@ -31,8 +31,9 @@ import { MarkdownPreview } from './MarkdownPreview';
 import { MobileFileActionsSheet } from '@/components/mobile/MobileFileActionsSheet';
 import type { SandboxLevel } from '@/config/html-extensions';
 import { SANDBOX_ATTRIBUTES } from '@/config/html-extensions';
+import { isEditableExtension } from '@/config/editable-extensions';
 import { copyToClipboard } from '@/lib/clipboard-utils';
-import { Copy, Check, Maximize2, Minimize2, ClipboardCopy, Eye, Pencil, Search, X, Download, MoreHorizontal } from 'lucide-react';
+import { Copy, Check, Maximize2, Minimize2, ClipboardCopy, Eye, Lock, Pencil, Search, X, Download, MoreHorizontal } from 'lucide-react';
 import { Z_INDEX } from '@/config/z-index';
 import { encodePathForUrl } from '@/lib/url-path-encoder';
 import { useFileContentSearch } from '@/hooks/useFileContentSearch';
@@ -300,8 +301,32 @@ function HtmlPreviewMobile({
   );
 }
 
-/** Which surface the unified markdown screen is showing (Issue #1519). */
-type MarkdownMode = 'viewer' | 'editor';
+/** Which surface the unified file screen is showing (Issue #1519). */
+type FileScreenMode = 'viewer' | 'editor';
+
+/**
+ * Banner explaining why a file opened read-only (Issue #2505, mobile side added
+ * in Issue #2507).
+ *
+ * Mirrors `ReadOnlyNotice` in `FilePanelContent`: the wording comes from the
+ * server (`FileContent.readOnlyReason.message`) rather than a translation key,
+ * because the server is the side that knows which ceiling applied — `.html` has
+ * its own 5MB limit, every other editable extension 2MB. Without it, an
+ * oversize `.txt` would simply open without the editor and look like a bug.
+ */
+function MobileReadOnlyNotice({ reason }: { reason: FileReadOnlyReason }) {
+  return (
+    <div
+      data-testid="file-read-only-notice"
+      data-reason-code={reason.code}
+      role="status"
+      className="flex items-center gap-2 px-3 py-2 bg-warning-subtle border-b border-warning-border text-xs text-warning-foreground"
+    >
+      <Lock className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+      <span>{reason.message}</span>
+    </div>
+  );
+}
 
 export interface FileViewerProps {
   isOpen: boolean;
@@ -338,8 +363,8 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
   const [marpSlides, setMarpSlides] = useState<string[] | null>(null);
   const [marpCurrentSlide, setMarpCurrentSlide] = useState(0);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  // [Issue #1519] Unified markdown screen state.
-  const [markdownMode, setMarkdownMode] = useState<MarkdownMode>('viewer');
+  // [Issue #1519] Unified file screen state.
+  const [screenMode, setScreenMode] = useState<FileScreenMode>('viewer');
   const [actionsOpen, setActionsOpen] = useState(false);
   /** Live editor text, mirrored up so the viewer shows unsaved edits too. */
   const [draft, setDraft] = useState<string | null>(null);
@@ -378,10 +403,51 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
   );
 
   /**
-   * [Issue #1519] Every `.md` file gets the unified screen: rendered viewer,
-   * editor, action sheet and a permanent maximize control on one surface.
+   * Lower-cased because the API hands back the extension exactly as it appears
+   * on disk (`relativePath.split('.').pop()`), so `NOTES.MD` arrives as `MD`.
+   * `isEditableExtension()` normalizes internally; the `.md` comparison below
+   * would not, and a capitalised name would land on the editor with no preview.
    */
-  const isUnifiedMarkdown = content?.extension === 'md';
+  const extension = content?.extension.toLowerCase() ?? '';
+
+  /** `.md` is the only extension with a rendered preview to switch to. */
+  const isMarkdown = extension === 'md';
+
+  /**
+   * [Issue #1519, #2507] Which files get the unified screen: rendered viewer,
+   * editor, action sheet and a permanent maximize control on one surface.
+   *
+   * Was `content?.extension === 'md'`, which left `.txt` / `.yaml` / `.yml`
+   * viewable but not editable on mobile even though PC routes them to an editor
+   * off the very same `isEditableExtension()` list (Issue #2507). Two
+   * extensions are deliberately held back from that list here:
+   *
+   * - `readOnly` files (Issue #2505). The flag means "over the ceiling PUT
+   *   still enforces", so an editor would be a broken promise as well as the
+   *   performance cliff the flag exists to avoid — same reasoning, and same
+   *   precedence, as the read-only branch in `FilePanelContent`.
+   * - `.html` / `.htm`. They keep `HtmlPreviewMobile`, which is a viewer with
+   *   its own Source/Preview tabs AND a security-relevant sandbox trust
+   *   selector. Folding that surface under a second viewer/editor switch would
+   *   nest tabs inside tabs at phone width, and dropping it would cost mobile
+   *   its only way to see rendered HTML. Reading the source is already possible
+   *   from its Source tab; editing `.html` stays a PC affordance
+   *   (`HtmlPreview`). This is the Issue #2507 decision for `.html`.
+   */
+  const isUnifiedEditable = Boolean(
+    content && !content.readOnly && !content.isHtml && isEditableExtension(`.${extension}`)
+  );
+
+  /**
+   * The mode actually on screen. Only `.md` has somewhere to switch *to*, so
+   * every other editable type is editor-only — except while the search bar is
+   * open, which needs the line-anchored source view to scroll matches into.
+   */
+  const activeMode: FileScreenMode = isMarkdown
+    ? screenMode
+    : searchOpen
+      ? 'viewer'
+      : 'editor';
 
   /**
    * [Issue #162] Copy file content to clipboard.
@@ -423,23 +489,23 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
     }
   }, [searchCurrentIdx, searchMatches]);
 
-  // ESC to exit fullscreen. The unified markdown screen has its own Escape
-  // ladder (search -> maximize -> close), so it opts out here.
+  // ESC to exit fullscreen. The unified file screen has its own Escape ladder
+  // (search -> maximize -> close), so it opts out here.
   useEffect(() => {
-    if (!isFullscreen || isUnifiedMarkdown) return;
+    if (!isFullscreen || isUnifiedEditable) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setIsFullscreen(false);
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isFullscreen, isUnifiedMarkdown]);
+  }, [isFullscreen, isUnifiedEditable]);
 
   useEffect(() => {
     if (!isOpen || !filePath) {
       setContent(null);
       setError(null);
       resetContentCopied();
-      setMarkdownMode('viewer');
+      setScreenMode('viewer');
       setActionsOpen(false);
       setDraft(null);
       setEditorDirty(false);
@@ -447,7 +513,7 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
       return;
     }
 
-    setMarkdownMode('viewer');
+    setScreenMode('viewer');
     setActionsOpen(false);
     setDraft(null);
     setEditorDirty(false);
@@ -554,7 +620,7 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
    * then leave the maximized (chrome-collapsed) view, then close.
    */
   useEffect(() => {
-    if (!isUnifiedMarkdown || actionsOpen) return;
+    if (!isUnifiedEditable || actionsOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
       if (searchOpen) {
@@ -568,7 +634,7 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   // eslint-disable-next-line react-hooks/exhaustive-deps -- closeSearch is stable (only resets state)
-  }, [isUnifiedMarkdown, actionsOpen, searchOpen, isFullscreen, requestClose]);
+  }, [isUnifiedEditable, actionsOpen, searchOpen, isFullscreen, requestClose]);
 
   /**
    * Text the viewer pane renders. It stays mounted behind the editor so its
@@ -578,20 +644,20 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
    */
   const [previewText, setPreviewText] = useState('');
   useEffect(() => {
-    if (markdownMode === 'viewer' && sourceText !== undefined) {
+    if (isMarkdown && activeMode === 'viewer' && sourceText !== undefined) {
       setPreviewText(sourceText);
     }
-  }, [markdownMode, sourceText]);
+  }, [isMarkdown, activeMode, sourceText]);
 
   // The unified screen replaces Modal, so it takes over the body scroll lock.
   useEffect(() => {
-    if (!isUnifiedMarkdown || !isOpen) return;
+    if (!isUnifiedEditable || !isOpen) return;
     const previous = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     return () => {
       document.body.style.overflow = previous;
     };
-  }, [isUnifiedMarkdown, isOpen]);
+  }, [isUnifiedEditable, isOpen]);
 
   const codeViewData = useMemo(() => {
     if (!content || sourceText === undefined || content.isImage || content.isVideo || content.isHtml || content.isPdf) {
@@ -817,6 +883,17 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
     </div>
   );
 
+  /**
+   * [Issue #2505 / #2507] Read-only files never reach the unified editor
+   * screen, so the modal and fullscreen surfaces are where the reason has to
+   * surface — otherwise an oversize `.txt` just silently opens without an
+   * editor.
+   */
+  const renderReadOnlyNotice = () =>
+    content?.readOnly && content.readOnlyReason ? (
+      <MobileReadOnlyNotice reason={content.readOnlyReason} />
+    ) : null;
+
   const renderSearchBar = () => (
     <FileViewerSearchBar
       searchInputRef={searchInputRef}
@@ -831,12 +908,12 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
   );
 
   /**
-   * [Issue #1519] Unified markdown screen: one full-height surface holding the
-   * rendered viewer, the editor, the action sheet and a permanent maximize
-   * control. Replaces the old viewer-modal → editor-modal round trip, which
-   * re-fetched the file and could not go back.
+   * [Issue #1519, #2507] Unified file screen: one full-height surface holding
+   * the rendered viewer (`.md` only), the editor, the action sheet and a
+   * permanent maximize control. Replaces the old viewer-modal → editor-modal
+   * round trip, which re-fetched the file and could not go back.
    */
-  if (isUnifiedMarkdown && content && !loading && !error) {
+  if (isUnifiedEditable && content && !loading && !error) {
     const modeButtonClass = (active: boolean) =>
       `flex min-h-[44px] items-center justify-center gap-1 rounded-md px-2 text-xs font-medium touch-manipulation transition-colors ${
         active
@@ -886,33 +963,40 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
               <p className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">
                 {filePath}
               </p>
-              <div
-                data-testid="markdown-file-mode-switch"
-                role="group"
-                aria-label={t('fileViewer.modeSwitch')}
-                className="flex flex-shrink-0 items-center gap-0.5 rounded-lg bg-muted p-0.5"
-              >
-                <button
-                  type="button"
-                  data-testid="markdown-file-mode-viewer"
-                  aria-pressed={markdownMode === 'viewer'}
-                  onClick={() => setMarkdownMode('viewer')}
-                  className={modeButtonClass(markdownMode === 'viewer')}
+              {/* [Issue #2507] Only `.md` renders to something other than its
+                  own source, so it is the only type with a second mode to
+                  switch to. `.txt` / `.yaml` / `.yml` open straight into the
+                  editor and a two-button group pointing at one destination
+                  would just eat toolbar width on a phone. */}
+              {isMarkdown && (
+                <div
+                  data-testid="markdown-file-mode-switch"
+                  role="group"
+                  aria-label={t('fileViewer.modeSwitch')}
+                  className="flex flex-shrink-0 items-center gap-0.5 rounded-lg bg-muted p-0.5"
                 >
-                  <Eye className="h-4 w-4" />
-                  {t('fileViewer.modeViewer')}
-                </button>
-                <button
-                  type="button"
-                  data-testid="markdown-file-mode-editor"
-                  aria-pressed={markdownMode === 'editor'}
-                  onClick={() => setMarkdownMode('editor')}
-                  className={modeButtonClass(markdownMode === 'editor')}
-                >
-                  <Pencil className="h-4 w-4" />
-                  {t('fileViewer.modeEditor')}
-                </button>
-              </div>
+                  <button
+                    type="button"
+                    data-testid="markdown-file-mode-viewer"
+                    aria-pressed={screenMode === 'viewer'}
+                    onClick={() => setScreenMode('viewer')}
+                    className={modeButtonClass(screenMode === 'viewer')}
+                  >
+                    <Eye className="h-4 w-4" />
+                    {t('fileViewer.modeViewer')}
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="markdown-file-mode-editor"
+                    aria-pressed={screenMode === 'editor'}
+                    onClick={() => setScreenMode('editor')}
+                    className={modeButtonClass(screenMode === 'editor')}
+                  >
+                    <Pencil className="h-4 w-4" />
+                    {t('fileViewer.modeEditor')}
+                  </button>
+                </div>
+              )}
               <button
                 type="button"
                 data-testid="markdown-file-actions-trigger"
@@ -947,14 +1031,14 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
           {searchOpen && <div className="flex-shrink-0">{renderSearchBar()}</div>}
 
           <div className="flex min-h-0 flex-1 flex-col">
-            <div className={markdownMode === 'viewer' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}>
+            <div className={activeMode === 'viewer' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}>
               {searchOpen ? (
                 /* Search needs line anchors to scroll to, so it shows the
                    highlighted source; closing it returns to the rendered view. */
                 <div className="min-h-0 flex-1 overflow-auto">{renderSourceTable()}</div>
               ) : isMarp ? (
                 renderMarpSlides()
-              ) : (
+              ) : isMarkdown ? (
                 <div
                   data-testid="markdown-file-preview"
                   className="prose prose-sm dark:prose-invert min-h-0 max-w-none flex-1 overflow-y-auto p-4"
@@ -966,13 +1050,13 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
                     onOpenFile={onOpenFile}
                   />
                 </div>
-              )}
+              ) : null}
             </div>
             {/* The editor stays mounted across mode switches so an unsaved
                 draft survives a trip to the viewer and back. */}
             <div
               data-testid="markdown-file-editor"
-              className={markdownMode === 'editor' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}
+              className={activeMode === 'editor' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}
             >
               <MarkdownEditor
                 key={filePath}
@@ -1000,7 +1084,7 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
             open={actionsOpen}
             onClose={() => setActionsOpen(false)}
             onSearch={() => {
-              setMarkdownMode('viewer');
+              setScreenMode('viewer');
               openSearch();
             }}
             onCopyContent={handleCopy}
@@ -1023,6 +1107,7 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
         style={{ zIndex: Z_INDEX.MAXIMIZED_EDITOR }}
       >
         {renderToolbar()}
+        {renderReadOnlyNotice()}
         {/* [Issue #47] File content search bar (fullscreen) */}
         {searchOpen && renderSearchBar()}
         <div className="flex-1 overflow-auto">
@@ -1081,6 +1166,7 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
             {/* Fixed header: toolbar + search bar */}
             <div className="flex-shrink-0">
               {renderToolbar()}
+              {renderReadOnlyNotice()}
               {/* [Issue #47] File content search bar */}
               {searchOpen && renderSearchBar()}
             </div>
