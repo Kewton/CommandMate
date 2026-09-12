@@ -7,6 +7,10 @@
  * Issue #600: UX refresh - useLayoutConfig flags drive rendering.
  * AppShell only renders based on flags; layout logic is in useLayoutConfig().
  *
+ * Issue #2501: the mobile branch draws the connection banner. It has to live
+ * here because the mobile branch renders no `Header`, which is where the
+ * desktop `ConnectionStatusIndicator` sits.
+ *
  * Issue #2374: the desktop branch also draws the repository tab strip, above
  * the header. It lives at this level rather than inside `Header` because
  * `/worktrees/*` hides the header entirely (`showGlobalNav: false`) and that is
@@ -24,6 +28,7 @@ import { Sidebar } from './Sidebar';
 import { Header } from './Header';
 import { RepositoryTabBar, REPOSITORY_TAB_BAR_HEIGHT } from './RepositoryTabBar';
 import { GlobalMobileNav } from '@/components/mobile/GlobalMobileNav';
+import { MobileConnectionBanner } from '@/components/mobile/MobileConnectionBanner';
 import { CommandPalette } from '@/components/common/CommandPalette';
 import { KeyboardShortcutsOverlay } from '@/components/common/KeyboardShortcutsOverlay';
 import { VersionMismatchBanner } from './VersionMismatchBanner';
@@ -145,6 +150,12 @@ export const AppShell = memo(function AppShell({ children }: AppShellProps) {
   if (isMobile) {
     return (
       <div data-testid="app-shell" className="h-screen flex flex-col">
+        {/* Connection status (Issue #2501). First in the column, and in flow
+            rather than floating, so its height comes out of <main> and it can
+            never cover the composer or the bottom tab bar (cf. #2271). Renders
+            nothing while connected. */}
+        <MobileConnectionBanner />
+
         {/* Mobile drawer overlay */}
         {isMobileDrawerOpen && (
           <div
