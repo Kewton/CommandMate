@@ -13,7 +13,14 @@
     "refreshError": "Failed to refresh sessions: {message}",
     "loadError": "Failed to load sessions: {message}",
     "noMatching": "No matching sessions found.",
-    "empty": "No sessions yet."
+    "empty": "No sessions yet.",
+    "viewMode": {
+      "groupAriaLabel": "Session layout",
+      "list": "List view",
+      "tile": "Tile view"
+    },
+    "tileAriaLabel": "Session tile for {branch}",
+    "tileInstanceAriaLabel": "Agent instance shown in this tile"
   },
   "nav": {
     "home": "Home",
