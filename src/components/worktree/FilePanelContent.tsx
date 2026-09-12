@@ -14,10 +14,10 @@ import React, { useEffect, useRef, memo, useState, useCallback, useMemo } from '
 import { createPortal } from 'react-dom';
 import dynamic from 'next/dynamic';
 import { useTranslations } from 'next-intl';
-import { Maximize2, Minimize2, ClipboardCopy, Check, Copy, Search } from 'lucide-react';
+import { Maximize2, Minimize2, ClipboardCopy, Check, Copy, Search, Lock } from 'lucide-react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { FileTab } from '@/hooks/useFileTabs';
-import type { FileContent } from '@/types/models';
+import type { FileContent, FileReadOnlyReason } from '@/types/models';
 import { useFileContentPolling } from '@/hooks/useFileContentPolling';
 import { useFileContentSearch } from '@/hooks/useFileContentSearch';
 import { useCopyFeedback } from '@/hooks/useCopyFeedback';
@@ -150,6 +150,31 @@ function ErrorDisplay({ error }: { error: string }) {
         </svg>
         <p className="text-sm text-danger-foreground">{error}</p>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Banner explaining why a file opened read-only (Issue #2505).
+ *
+ * The wording comes from the server (`FileContent.readOnlyReason.message`)
+ * rather than a translation key, because the server is the side that knows
+ * which ceiling applied — `.html` has its own 5MB limit, every other editable
+ * extension 2MB — and re-deriving that mapping in the client is how the two
+ * drift. `code` stays available on the payload for a later localized rendering.
+ *
+ * Styled as an advisory, not an error: the file loaded fine, only saving is off.
+ */
+function ReadOnlyNotice({ reason }: { reason: FileReadOnlyReason }) {
+  return (
+    <div
+      data-testid="file-read-only-notice"
+      data-reason-code={reason.code}
+      role="status"
+      className="flex items-center gap-2 px-3 py-2 bg-warning-subtle border-b border-warning-border text-xs text-warning-foreground"
+    >
+      <Lock className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+      <span>{reason.message}</span>
     </div>
   );
 }
@@ -710,7 +735,15 @@ function MarkdownWithSearch({ tab, content, worktreeId, isMaximized, onToggleMax
   );
 }
 
-/** [Issue #47] Code viewer with file content search (PC) */
+/**
+ * [Issue #47] Code viewer with file content search (PC).
+ *
+ * [Issue #2505] Also the destination for files the API flagged read-only. It is
+ * the virtualized viewer, which is exactly what an oversize file needs: the
+ * editable branches below render a `<textarea>` in one shot, and a multi-MB file
+ * mounted that way is what froze phones before Issue #723 introduced
+ * virtualization here.
+ */
 function CodeViewerWithSearch({
   tab,
   content,
@@ -753,6 +786,9 @@ function CodeViewerWithSearch({
   return (
     <div className="h-full flex flex-col">
       <FileToolbar filePath={tab.path} isMaximized={isMaximized} onToggleMaximize={onToggleMaximize} copyableContent={content.content} onSearch={search.openSearch} />
+      {content.readOnly && content.readOnlyReason && (
+        <ReadOnlyNotice reason={content.readOnlyReason} />
+      )}
       {search.searchOpen && (
         <FileSearchBar
           inputRef={search.searchInputRef}
@@ -983,6 +1019,29 @@ export const FilePanelContent = memo(function FilePanelContent({
             <PdfPreview dataUri={content.content} filePath={tab.path} />
           </div>
         </div>
+      </MaximizableWrapper>
+    );
+  }
+
+  // [Issue #2505] Read-only check sits AHEAD of every editable branch (isHtml /
+  // md / other editable extensions), because those branches all lead to an
+  // editor: `HtmlPreview` and `MarkdownWithSearch` both offer a save action and
+  // mount the whole file into a `<textarea>`. A file is flagged read-only
+  // precisely when it is too big for that, so offering the editor would be both
+  // a broken promise (PUT still refuses it) and the performance cliff the flag
+  // exists to avoid. Binary viewers (image / video / PDF) stay above this: they
+  // are never flagged read-only and have their own size rules.
+  if (content.readOnly) {
+    return (
+      <MaximizableWrapper isMaximized={isMaximized} onToggle={toggleMaximize} filePath={tab.path}>
+        <CodeViewerWithSearch
+          tab={tab}
+          content={content}
+          worktreeId={worktreeId}
+          isMaximized={isMaximized}
+          onToggleMaximize={toggleMaximize}
+          onLoadContent={onLoadContent}
+        />
       </MaximizableWrapper>
     );
   }
