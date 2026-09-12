@@ -1,0 +1,146 @@
+version: 1
+title: "Issue #2493: public-messaging を orchestrate 軸へ改訂"
+goal: |
+  https://github.com/Kewton/CommandMate/issues/2493 を実装してください。
+  `/pm-auto-issue2dev` ワークフローで着手すること。この Issue は Epic 相当で、子 Issue
+  #2494（README）／ #2495（LP）はこの Issue のマージ後に着手します（このタスクの
+  スコープではありません）。詳細・背景調査（Reddit 調査結果等）は以下で確認できます:
+    gh issue view 2493 --repo Kewton/CommandMate
+
+  ## 目的
+  公開面（README / LP）の文言の単一ソース `docs/design/public-messaging.md` を、
+  **「orchestrate」を看板にした軸**へ改訂する。README と LP はこの文書からコピーして
+  書く（言い換えない）ので、まずここを直す。**文言は下の指定を逐語で使うこと。**
+
+  ## 決定事項
+  - **軸語 "Vibe Engineering" は思想の名前として残す**。定義文は逐語で維持。H1 だけを
+    差し替える。
+  - **H1（en）**: `One agent leads. Gates decide what's done.`
+  - **H1（ja）**: `指揮するのは、いつもの Agent。判定するのは、ゲート。`
+  - 「orchestrator」を製品の名詞にしない。動詞・形容（orchestrated）で使う。verify を
+    H1 と同じ行に置く。
+  - OSS（MIT）・ローカル・macOS / Linux / WSL2・アプリ不要を hero 直下の事実行に書く
+    （比較ではなく事実として）。
+  - 禁止語に `control layer` / `コントロールレイヤー` を追加。
+
+  ## 実装仕様
+
+  ### §1 Hero
+  | 項目 | 新 |
+  |---|---|
+  | H1（en） | One agent leads. Gates decide what's done. |
+  | H1（ja） | 指揮するのは、いつもの Agent。判定するのは、ゲート。 |
+  | lede（en、2文） | CommandMate gives your lead agent the machinery to run the others: one Git worktree and one contract per task, gates that decide what is done, and a record of every run. Claude Code, Codex, Antigravity, Command Code, OpenCode, Gemini CLI, Copilot and local models. You approve; you don't relay. |
+  | 事実行（en） | Open source (MIT) · runs on your machine · macOS / Linux / Windows (WSL2) · no app to install |
+  | ja | 同じ構成で訳す |
+
+  旧 H1 `From vibe coding to Vibe Engineering.` は**§2 定義文の直上に「思想の名（節の題）」
+  として残す**。README / LP では Philosophy 節の `##` 見出しになる。
+
+  ### §1b Problem 節（新設）
+  ```
+  ## More agents, same you
+  - The agents are parallel. You are still single-threaded.
+  - From the outside, an idle agent and one waiting on you look the same.
+  - The agent's summary of what it did is not evidence of what it did.
+  - Nobody can safely merge a PR that nobody understands.
+
+  CommandMate puts the machinery around the CLIs you already run: a lead that
+  hands out contracts, session state read from the agents' own hooks, gates
+  after the work, and the record in between.
+  ```
+  ja 訳を併記（見出し案: 「エージェントは増えた。あなたは 1 人」）。
+
+  ### §3 4カード（順序と題）
+  | # | 題（en） | 1文（en） |
+  |---|---|---|
+  | 1 | One agent leads | One message to your lead session; it hands each task to a worker in its own worktree under a contract, and only what passes the gates comes back. Measured with Claude Code and Command Code as the lead. |
+  | 2 | Verified, not vibe-checked | Gates you declared decide whether the work is done, and the exit code is the verdict. The agent's summary is not the evidence; the run is. |
+  | 3 | Know which one needs you | Waiting is a state read from the agent's hooks, not a guess from the screen. It reaches you as a badge, a toast, the tab title, a push, and you answer from your phone. |
+  | 4 | Method as a system | The method is not in someone's head. It is installed as Skills and read by the agent. |
+
+  旧「Any agent, in parallel」は1に吸収、旧「Stay in control, anywhere」は3に改題。
+  §5 の LP デモ4本はカードと1:1なので、対応表の番号を付け替える（LP本体は別Issue）。
+
+  ### §新設 What it does not do（en/ja）
+  ```
+  - It is a run, not a resident agent. Nothing loops forever, and nothing mutates without an explicit approve.
+  - It does not read the code for you. Gates catch what your tests and checks catch.
+  - Review by another agent is a step you add, not something the runner does for you.
+  - Approvals still come to a person. Auto Yes is opt-in, time-boxed, and stops on the patterns you set.
+  - It does not replace tmux, Git worktrees, your terminal, or your agent CLI. An OS reboot ends the processes; what survives is the record.
+  ```
+
+  ### §新設 言えること / 言えないこと（実測の範囲）
+  - 言える: lead は Claude Code / Command Code で実測（4 Issue → 4/4、8m39s / 7m46s）。
+    worker は Codex / Claude Code / Antigravity / Command Code で実測。別 CLI のレビューで
+    REJECT → 修正 → APPROVE。plan は dry-run、mutation は `--approve` の invocation だけ、
+    gate 不合格で停止、修正ループは上限つき。
+  - 言えない: "your orchestrator" / "runs 24/7" / "self-managing backlog" / "loop" /
+    "orchestrate with any agent as the lead" / "review by a fresh agent is built in" /
+    "the only …" / "no supervision" / モデルの安さ・賢さの序列 / 未計測の数字。
+
+  ### §8 Footer
+  現行維持（`The method, built in — for any coding agent.`）。変更は任意。
+
+  ### §9 禁止語
+  表に `control layer`（代わりに: 何も置かない。文を落とす）と `コントロールレイヤー` を
+  追加。`tests/unit/docs/public-messaging.test.ts` の `BANNED_TERMS` にも**同時に**追加
+  （表と配列の一致がテスト）。README / concept / LP に現時点で該当語は無い（grep 済み）。
+
+  ### テストへの影響（この Issue では定数を変えない）
+  `public-messaging.test.ts` は文書が `HERO_H1_EN/JA` を含むことを要求するが、旧 H1 は
+  §2 に「思想の名」として残るので **`toContain` は通る**。定数の差し替え（`HERO_H1_*` を
+  新 H1 に、旧 H1 を `AXIS_*` として concept と Philosophy 節に要求）は README 側の Issue
+  で README と同じ PR で行う（このタスクではやらない）。CI が途中で赤くならない順序にする。
+
+  ## 受入条件
+  - [ ] §1 の H1 / lede / 事実行（en/ja）、§1b Problem 節、§3 の順序と題、
+        What it does not do、言えること/言えないこと が上の内容で入っている
+  - [ ] 旧 H1 が §2 に「思想の名」として残っている（`npm run test:unit` の
+        public-messaging が緑）
+  - [ ] 禁止語表と `BANNED_TERMS` に `control layer` / `コントロールレイヤー` が追加され、
+        片方だけ更新すると赤くなる（変異注入で確認）
+  - [ ] §12 の後続 Issue 表に #2494（README）/ #2495（LP）
+  - [ ] CHANGELOG `[Unreleased]` に docs として 1 行
+
+  ## スコープ外
+  - README / LP 本体の変更（子 Issue #2494 / #2495）
+  - `docs/concept.md` の Mission / Vision 本文（変えない）
+  - 製品側の変更（orchestrate の gate に別 CLI レビューを足す、契約の decision 欄、
+    done と「何も起きなかった」の判別は別途）
+
+  ## 作業ルール（厳守）
+  - **`CHANGELOG.md` と `docs/module-reference.md` を編集しないでください**（scope 外です）。
+    代わりに次の 2 ファイルを書いてください。どちらも `dev-reports/` 配下なので commit には
+    入りません。
+    - `dev-reports/changelog/issue-2493.md` — `CHANGELOG.md` の `## [Unreleased]` にそのまま
+      貼れる **1 エントリ**（先頭は `- **<type>(<scope>): …** (#2493): …`）。どの節
+      （`### Added` / `### Changed` / `### Fixed`）に入るかを 1 行目にコメントで書く。
+      形式は次の実例に合わせてください（エントリは**ファイル中では 1 行**）:
+
+      ```markdown
+      <!-- ### Changed -->
+      - **fix(cli): `send` 直後の `wait` が「まだ始まっていない」を完了と読む問題を修正** (#1975): `wait` が `sessionStatus==='ready'` を完了と判定する直前に、**「このインスタンスに最後に渡されたプロンプト」と「エージェント自身が最後に報告したターン終了（`lastStopEventAt`）」を突き合わせる**ゲートを追加。`send` 直後は最新の構造化イベントが直前ターンの `stop` のままなので #1839 の `adoptTurnStart()` が何も採用せず、`turnStartedAt === null` が「決着済み」と読まれてアイドル composer をそのまま完了にしていた（隔離サーバ実測 2026-08-22 / copilot 1.0.80: `send`→`wait` 5 回中 3 回が約 0.3 秒・`basis=scraper_ready`・成果物ゼロで exit 0）。ゲートは `GET /api/worktrees/:id/messages?limit=1&unit=pairs` を `--instance`（無指定ならサーバが解決した `cliToolId`）でスコープして読む。**hook を出さないツールは挙動不変** — `structuredEvents.source.capabilities.supportedEvents`（#1924 の宣言値）が `stop` とターン開始語の両方を宣言しているソースだけがこのゲートに入り、legacy-relay（`supportedEvents: []`）と #1924 以前のサーバは従来経路のまま台帳も引かない。保留は `PENDING_PROMPT_HOLD_MS`=60 秒で打ち切り（hooks は全経路 fail-open なので `Stop` の取りこぼしで `wait` が返らなくなってはいけない）、`--timeout` / `--stall-timeout` はそれより短ければ従来どおり優先される。完了行の `basis=` は、エージェントが最新プロンプトの終了を報告していれば `hook_stop` になる（`scraper_ready` は「画面しか言っていない」という文書どおりの意味に戻る）。
+      ```
+
+      - `- **` で始めること（`grep -cE '^- \*\*'` で数える）。
+      - `(#2493)` は要約の**外**（`**` を閉じた後）に置くこと。
+      - `<type>` は CLAUDE.md のコミットメッセージ規約と同じ語彙（`feat`/`fix`/`docs`/`refactor`/`test`/`chore`/`ci`/`style`）。今回は `docs` を使う。
+      - 1 エントリ＝1 行（折らない）。
+    - `dev-reports/module-reference/issue-2493.md` — `docs/module-reference.md` の表に足す
+      注記を**行キー（`| \`path\` |`）ごと**に列挙する。既存行に足すときは
+      `grep -n '^| \`<path>\`' docs/module-reference.md` を実行し、その出力（行番号つきの
+      行キー）を断片に書き写してから書くこと。0 件だった行への追記を指示しない
+      （足すものが無ければ「追記なし」の1行でよい）。
+  - 断片が無いとリリースノートと module-reference に載らない。実装と同じ commit の時点で書くこと。
+scope:
+  allow:
+    - "docs/design/public-messaging.md"
+    - "tests/unit/docs/public-messaging.test.ts"
+  deny: []
+verify:
+  gates: null
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true
