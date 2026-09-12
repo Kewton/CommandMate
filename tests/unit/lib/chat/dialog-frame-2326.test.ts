@@ -243,10 +243,19 @@ describe('[#2326] the reading fires on Command Code frames and no others', () =>
     return out.sort();
   }
 
-  it('crops exactly the Command Code /model captures, out of every fixture', () => {
+  it('crops exactly the Command Code dialog captures, out of every fixture', () => {
     // The sweep, not a hand-written list: this is what says claude, codex,
     // copilot, gemini and opencode are untouched, and it re-derives itself
     // whenever a capture is added.
+    //
+    // Issue #2521 added the two `askuserquestion` rows. They are the screen that
+    // draws NO footer, so they take the second reading
+    // (`readCommandCodeQuestionRegion`) rather than this Issue's rule-to-footer
+    // seam — and the fact that the sweep grew by exactly those two, out of every
+    // capture in the repository, is what says that reading is as narrow as the
+    // footer one. Everything else in `command-code-live-2250` — four permission
+    // dialogs with the same rule-question-`❯ 1.` shape, and the idle / thinking /
+    // done frames — is still left uncropped.
     const cropped = everyCapture()
       .filter((file) => extractCommandCodeSelectionListFrame(fs.readFileSync(file, 'utf8')) !== null)
       .map((file) => path.relative(FIXTURE_ROOT, file));
@@ -256,6 +265,8 @@ describe('[#2326] the reading fires on Command Code frames and no others', () =>
       'chat-dialog-card-2254/command-code-model-1-47-1-bottom.txt',
       'chat-dialog-card-2254/command-code-model-1-47-1-middle.txt',
       'chat-dialog-card-2254/command-code-model-1-47-1-open.txt',
+      'command-code-askuserquestion-2521/askuserquestion-wrapped-1530-200x1000.txt',
+      'command-code-askuserquestion-2521/askuserquestion-wrapped-minimal.txt',
     ]);
   });
 
