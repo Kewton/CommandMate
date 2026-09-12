@@ -37,8 +37,14 @@ import {
   describeCommandCodeFailure,
   COMMAND_CODE_EXIT_REASONS,
 } from '@/lib/session/claude-executor';
-import { COMMAND_CODE_COMMAND } from '@/lib/cli-tools/command-code';
-import { COMMAND_CODE_PERMISSIONS } from '@/config/schedule-config';
+import { COMMAND_CODE_COMMAND, COMMAND_CODE_LAUNCH_FLAGS } from '@/lib/cli-tools/command-code';
+import {
+  COMMAND_CODE_PERMISSIONS,
+  COMMAND_CODE_SCHEDULE_PERMISSIONS,
+  COMMAND_CODE_YOLO_PERMISSION,
+  DEFAULT_PERMISSIONS,
+} from '@/config/schedule-config';
+import { parseSchedulesSection } from '@/lib/cmate-parser';
 
 const mockedExecFile = vi.mocked(execFile);
 
@@ -104,6 +110,21 @@ describe('buildCliArgs("command-code")', () => {
       '--output-format',
       'json',
       '--yolo',
+      '--no-auto-update',
+    ]);
+  });
+
+  // Issue #2454: the Permission column's own spelling for the flag, the way
+  // copilot's column spells `yolo`. This is the value the parser now fills an
+  // empty cell with, so it is the argv every default schedule is launched with.
+  it('emits --yolo for the "yolo" column value', () => {
+    expect(buildCliArgs('hello', 'command-code', COMMAND_CODE_YOLO_PERMISSION)).toEqual([
+      '-p',
+      'hello',
+      '--output-format',
+      'json',
+      '--yolo',
+      '--no-auto-update',
     ]);
   });
 
@@ -120,6 +141,7 @@ describe('buildCliArgs("command-code")', () => {
         'json',
         '--permission-mode',
         permission,
+        '--no-auto-update',
       ]);
     }
   );
@@ -139,6 +161,8 @@ describe('buildCliArgs("command-code")', () => {
     ['', '--yolo'] as const,
     ['acceptEdits', '--yolo'] as const,
     ['bypassPermissions', '--yolo'] as const,
+    // Issue #2454: `yolo` is now a *known* column value rather than an
+    // unrecognised one, and it still has to land on `--yolo` alone.
     ['yolo', '--yolo'] as const,
     ['--yolo', '--yolo'] as const,
     ['workspace-write', '--yolo'] as const,
@@ -164,6 +188,116 @@ describe('buildCliArgs("command-code")', () => {
     const args = buildCliArgs('a "b" && c', 'command-code');
     expect(args[0]).toBe('-p');
     expect(args[1]).toBe('a "b" && c');
+  });
+
+  /**
+   * Issue #2454: every command-code argv carries `--no-auto-update`.
+   *
+   * Without it `resolveCliStartupPlan` runs an update check and kicks off a
+   * background self-update on each scheduled run — a cron schedule turns into a
+   * download loop, and a mid-run version swap is not something an unattended
+   * job can notice.
+   */
+  it.each([
+    [undefined] as const,
+    [COMMAND_CODE_YOLO_PERMISSION] as const,
+    ...COMMAND_CODE_PERMISSIONS.map((p) => [p] as const),
+    ['not-a-real-permission'] as const,
+  ])('passes --no-auto-update for permission %s', (permission) => {
+    expect(buildCliArgs('hello', 'command-code', permission)).toContain('--no-auto-update');
+  });
+
+  /**
+   * The literal cannot drift from the interactive launch line's constant.
+   *
+   * `buildCliArgs` spells the flag out rather than importing
+   * COMMAND_CODE_LAUNCH_FLAGS, for the reason `getCommandForTool` spells
+   * `commandcode` out: importing `@/lib/cli-tools/command-code` would pull the
+   * tmux transport into the scheduler's dependency graph. This test is the
+   * thing that makes the copy safe — it imports both and compares them.
+   */
+  it('spells --no-auto-update the way COMMAND_CODE_LAUNCH_FLAGS does', () => {
+    const flag = buildCliArgs('hello', 'command-code').at(-1);
+    expect(COMMAND_CODE_LAUNCH_FLAGS).toContain(flag);
+    expect(flag).toBe('--no-auto-update');
+  });
+
+  /**
+   * The other two launch flags are deliberately NOT copied: print mode
+   * dispatches before the TUI's trust prompt and onboarding wizard, so there is
+   * nothing for them to answer. Asserting their absence keeps "share the whole
+   * array" from looking like the obvious cleanup.
+   */
+  it('does not copy the TUI-only launch flags', () => {
+    const args = buildCliArgs('hello', 'command-code');
+    expect(args).not.toContain('--trust');
+    expect(args).not.toContain('--skip-onboarding');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// parser -> executor (Issue #2454)
+// ---------------------------------------------------------------------------
+
+/**
+ * The seam the defect actually lived on.
+ *
+ * `buildCliArgs('hello', 'command-code')` — no permission argument — always
+ * emitted `--yolo`, and every test above asserted exactly that. But no schedule
+ * ever calls it that way: `parseSchedulesSection()` fills an empty Permission
+ * cell from `DEFAULT_PERMISSIONS['command-code']` first, and while that was
+ * `'default'` the `--yolo` branch was unreachable from CMATE.md. Direct-call
+ * tests were green the entire time.
+ *
+ * So this walks the real path: a CMATE.md row with an empty Permission cell,
+ * through the parser, into the executor's argv builder.
+ */
+describe('command-code schedule with an empty Permission cell (Issue #2454)', () => {
+  const emptyPermissionRow = ['cc-task', '0 9 * * *', 'Do the thing', 'command-code', 'true', ''];
+
+  it('resolves the empty cell to the yolo column value', () => {
+    const entries = parseSchedulesSection([emptyPermissionRow]);
+    expect(entries).toHaveLength(1);
+    expect(entries[0].permission).toBe('yolo');
+  });
+
+  it('reaches the CLI as --yolo, so print mode can write', () => {
+    const [entry] = parseSchedulesSection([emptyPermissionRow]);
+    const args = buildCliArgs(entry.message, entry.cliToolId, entry.permission);
+    expect(args).toEqual([
+      '-p',
+      'Do the thing',
+      '--output-format',
+      'json',
+      '--yolo',
+      '--no-auto-update',
+    ]);
+    // The regression itself: `--permission-mode default` is what shipped, and
+    // it leaves edit_file / write_file / shell_command / monitor_command /
+    // kill_shell blocked while the run still exits 0 with subtype "success".
+    expect(args).not.toContain('--permission-mode');
+  });
+
+  it('keeps an explicit mode cell on --permission-mode', () => {
+    const row = ['cc-task', '0 9 * * *', 'Do the thing', 'command-code', 'true', 'plan'];
+    const [entry] = parseSchedulesSection([row]);
+    const args = buildCliArgs(entry.message, entry.cliToolId, entry.permission);
+    expect(args).toContain('--permission-mode');
+    expect(args).toContain('plan');
+    expect(args).not.toContain('--yolo');
+  });
+
+  // Guards the guard: if `DEFAULT_PERMISSIONS` and the column vocabulary ever
+  // disagree, the two tests above would still pass by accident on whatever the
+  // parser happened to fill in.
+  it('has yolo as both the default and a member of the column vocabulary', () => {
+    expect(DEFAULT_PERMISSIONS['command-code']).toBe(COMMAND_CODE_YOLO_PERMISSION);
+    expect(COMMAND_CODE_SCHEDULE_PERMISSIONS as readonly string[]).toContain(
+      COMMAND_CODE_YOLO_PERMISSION,
+    );
+    expect(COMMAND_CODE_PERMISSIONS as readonly string[]).not.toContain(
+      COMMAND_CODE_YOLO_PERMISSION,
+    );
   });
 });
 
@@ -324,7 +458,14 @@ describe('executeClaudeCommand with command-code', () => {
     await runWith(fixture('success.jsonl'), '', 0);
     const [command, args] = mockedExecFile.mock.calls[0] as unknown as [string, string[]];
     expect(command).toBe('commandcode');
-    expect(args).toEqual(['-p', 'hi', '--output-format', 'json', '--yolo']);
+    expect(args).toEqual([
+      '-p',
+      'hi',
+      '--output-format',
+      'json',
+      '--yolo',
+      '--no-auto-update',
+    ]);
   });
 
   it('stores the answer, not the event log', async () => {

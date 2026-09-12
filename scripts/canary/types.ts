@@ -181,6 +181,12 @@ export interface ScenarioDriver {
   ): Promise<Observation>;
   /** Emit a progress line (suppressed in `--json` mode). */
   log(message: string): void;
+  /**
+   * Run `fn` with PRODUCTION tmux code (`src/lib/tmux/tmux.ts`, which takes no
+   * socket argument) pointed at this session's private server, and hand it the
+   * session name (Issue #2486). The redirect is asserted before `fn` runs.
+   */
+  withProductionTmux<T>(fn: (sessionName: string) => Promise<T>): Promise<T>;
 }
 
 /** Raised when a scenario never reached its expected state within the timeout. */
@@ -192,6 +198,22 @@ export class ObservationTimeoutError extends Error {
   ) {
     super(message);
     this.name = 'ObservationTimeoutError';
+  }
+}
+
+/**
+ * Raised by a scenario's own `drive()` when a step it takes is refused
+ * (Issue #2486) — `respond` answered `prompt_no_longer_active`, or `wait` would
+ * not have stopped.
+ *
+ * A subclass of {@link ObservationTimeoutError} on purpose: the runner then
+ * reports it exactly like an unreached state — red, with the frame the step was
+ * refused on saved as the fixture — instead of aborting the whole run.
+ */
+export class ScenarioStepError extends ObservationTimeoutError {
+  constructor(message: string, observation: Observation) {
+    super(message, observation, 0);
+    this.name = 'ScenarioStepError';
   }
 }
 
@@ -236,6 +258,15 @@ export interface CanaryScenario {
    * a bare `claude`, exactly as the five #1727 scenarios do.
    */
   hooks?: HookScenarioSetup;
+  /**
+   * Files written into the scenario's working directory before the session
+   * starts, name → content (Issue #2486). Bare file names only.
+   *
+   * For inputs too long to type into the composer: the AskUserQuestion
+   * scenarios hand Claude the Issue's own tool input as `ask.json` and ask it to
+   * read the file, rather than sending ~3 KB through `send-keys`.
+   */
+  workspaceFiles?: Readonly<Record<string, string>>;
   /** Drives the fresh session into the target state. */
   drive(driver: ScenarioDriver): Promise<void>;
   /** Best-effort keys to leave the state before the session is torn down. */

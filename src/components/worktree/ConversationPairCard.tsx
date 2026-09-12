@@ -11,7 +11,6 @@ import React, { useMemo, useCallback, memo } from 'react';
 import { Copy, ArrowDownToLine, ChevronDown, Loader2, AlertCircle, RotateCcw, X } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
 import ReactMarkdown, { type Components } from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import rehypeSanitize from 'rehype-sanitize';
 import rehypeHighlight from 'rehype-highlight';
 import type { ConversationPair } from '@/types/conversation';
@@ -20,6 +19,7 @@ import { isAgentAuthoredMarkdown } from '@/types/agent-transcript';
 import { getDateFnsLocale } from '@/lib/date-locale';
 import { formatMessageTimestamp } from '@/lib/date-utils';
 import { splitFilePathParts } from '@/lib/chat/chat-transcript-view';
+import { SHARED_REMARK_PLUGINS } from '@/lib/markdown';
 import { ChatFileLink } from '@/components/worktree/ChatMessageBubble';
 
 // ============================================================================
@@ -197,7 +197,8 @@ const COLLAPSED_MARKDOWN_MAX_HEIGHT = 'max-h-[3.25rem]';
  *
  * ## The plugin set, and the one that is missing
  *
- * `remarkGfm` + `rehypeSanitize` + `rehypeHighlight`, which is exactly what
+ * {@link SHARED_REMARK_PLUGINS} (`remarkGfm` + #2459's autolink boundary
+ * repair) + `rehypeSanitize` + `rehypeHighlight`, which is exactly what
  * `components/home/AssistantMessageList` already renders assistant Markdown
  * with. `rehypeRaw` is deliberately **not** in the list, unlike
  * `MarkdownPreview`: that component renders files a human wrote and asked to
@@ -251,12 +252,14 @@ const AssistantMarkdown = memo(function AssistantMarkdown({
     };
   }, [onFilePathClick]);
 
-  const remarkPlugins = useMemo(() => [remarkGfm], []);
+  // [#2459] The remark half is shared with Chat and MarkdownPreview so a fix to
+  // how a bare URL ends lands on all three at once; the rehype half stays local
+  // because this surface deliberately has no `rehypeRaw`.
   const rehypePlugins = useMemo(() => [rehypeSanitize, rehypeHighlight], []);
 
   return (
     <ReactMarkdown
-      remarkPlugins={remarkPlugins}
+      remarkPlugins={SHARED_REMARK_PLUGINS}
       rehypePlugins={rehypePlugins}
       components={components}
     >

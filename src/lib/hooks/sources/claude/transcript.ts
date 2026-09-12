@@ -55,6 +55,7 @@
  * @module lib/hooks/sources/claude/transcript
  */
 
+import { claudeHeadlessTurnId } from '@/types/agent-transcript';
 import { isPlainObject, readStringField } from '../event-mapper';
 import { separateTurnBody, type TurnRenderBlock } from '../turn-body';
 
@@ -740,9 +741,15 @@ export interface ClaudeTurnBuild {
    * Assistant records that arrived before any prompt record.
    *
    * Non-zero means the read started inside a turn — the tail window `./history`
-   * uses did not reach back as far as the prompt. Their text is dropped rather
-   * than attached to a turn key that would be invented for it, because an
+   * uses did not reach back as far as the prompt. Their text is dropped here
+   * rather than attached to a turn key that would be invented for it, because an
    * invented key is a row no later run can recognise as already written.
+   *
+   * Since Issue #2470 that is not where the story ends when these are the
+   * *only* records a window holds: `./history` widens the window until a prompt
+   * record is in it, and when even the widest window has none it hands the same
+   * records to {@link buildHeadlessClaudeTurn}, whose key is not invented — it
+   * names the record that closed the turn, which every later read sees too.
    */
   readonly orphanedAssistantRecords: number;
   /** Sub-agent records skipped. See below. */
@@ -818,6 +825,116 @@ export function buildClaudeTurns(
   }
 
   return { turns, orphanedAssistantRecords, sidechainRecords };
+}
+
+/** What {@link buildHeadlessClaudeTurn} answers. */
+export interface ClaudeHeadlessTurn {
+  /**
+   * The turn, keyed on {@link claudeHeadlessTurnId} in place of a prompt `uuid`.
+   *
+   * `promptText` is empty and `promptIsOperatorInput` false, so a writer handed
+   * it records no user row — there is no prompt record to record one from.
+   */
+  readonly turn: ClaudeTurnAccumulator;
+  /**
+   * Epoch ms of the newest timestamped assistant record, or 0.
+   *
+   * What `./history` dates the row by (Issue #2273). Returned from here because
+   * the pass `./history` runs for prompt-opened turns is keyed on the prompt
+   * record and never sees these records.
+   */
+  readonly lastRecordAt: number;
+}
+
+/**
+ * The turn the records in front of the first prompt record belong to (Issue #2470).
+ *
+ * {@link buildClaudeTurns} counts these as orphans and drops them, and for the
+ * case it was written for that is right: a window that opens mid-turn over a
+ * long session holds the tail of a turn that was written back when it was the
+ * newest. This is for the other case, and `./history` only calls it there — a
+ * window widened to its limit that still holds **no** prompt record at all, so
+ * these records are the newest turn and no other reader is going to write them.
+ *
+ * Built by the rules `buildClaudeTurns` applies to a turn, so the two cannot
+ * disagree about what one is: sidechains skipped, `closed` read off the **last**
+ * assistant record ({@link isClaudeTurnClosingRecord}), `stopReasonObserved` set
+ * by any. `./history`'s writer therefore refuses a headless turn that is still
+ * open exactly as it refuses any other (#2264).
+ *
+ * The key is {@link claudeHeadlessTurnId} of the last assistant record's `uuid`;
+ * see that function for the census behind choosing it over the first record in
+ * the window. Once the turn is closed, the last assistant record is the one
+ * record every later read of it is guaranteed to see.
+ *
+ * **When the block cap bites, the end is kept, not the beginning** — the reverse
+ * of `buildClaudeTurns`. A prompt-opened turn keeps its first
+ * {@link MAX_CLAUDE_TURN_BLOCKS} because that is where its reply starts; a
+ * headless one has already lost its start, and what is worth keeping of the rest
+ * is where the reply ends.
+ *
+ * @param records - In file order
+ * @param sessionId - Fallback for records that carry no `sessionId`
+ * @returns The turn, or null when no assistant record precedes the first prompt
+ *   record, or when the last one has no `uuid` to key the turn on
+ */
+export function buildHeadlessClaudeTurn(
+  records: readonly ClaudeTranscriptRecord[],
+  sessionId: string
+): ClaudeHeadlessTurn | null {
+  const blocks: ClaudeContentBlock[] = [];
+  let assistantRecords = 0;
+  let closed = false;
+  let stopReasonObserved = false;
+  let superseded = false;
+  let firstRecordAt = 0;
+  let lastRecordAt = 0;
+  let last: ClaudeTranscriptRecord | null = null;
+
+  for (const record of records) {
+    if (record.isSidechain) continue;
+    if (isClaudePromptRecord(record)) {
+      // A later prompt is proof nothing more is coming, as it is for
+      // `buildClaudeTurns`. `./history` never hands this a window holding one.
+      superseded = true;
+      break;
+    }
+    if (record.type !== 'assistant') continue;
+
+    assistantRecords += 1;
+    // Assigned, not or-ed — the last record's answer stands. See buildClaudeTurns.
+    closed = isClaudeTurnClosingRecord(record);
+    if (record.stopReason !== null) stopReasonObserved = true;
+    if (record.timestampMs !== null) {
+      if (firstRecordAt === 0) firstRecordAt = record.timestampMs;
+      lastRecordAt = Math.max(lastRecordAt, record.timestampMs);
+    }
+    for (const block of record.blocks) blocks.push(block);
+    last = record;
+  }
+
+  if (last === null || !last.uuid) return null;
+
+  const turnSessionId = last.sessionId ?? sessionId;
+  const overflowed = blocks.length > MAX_CLAUDE_TURN_BLOCKS;
+  return {
+    turn: {
+      sessionId: turnSessionId,
+      promptUuid: claudeHeadlessTurnId(turnSessionId, last.uuid),
+      // The earliest instant the window can vouch for. `./history` only uses it
+      // as the floor it dates the row against, and it is never above lastRecordAt.
+      startedAt: firstRecordAt,
+      promptText: '',
+      promptIsOperatorInput: false,
+      blocks: overflowed ? blocks.slice(-MAX_CLAUDE_TURN_BLOCKS) : blocks,
+      assistantRecords,
+      closed,
+      superseded,
+      stopReasonObserved,
+      overflowed,
+    },
+    lastRecordAt,
+  };
 }
 
 /**

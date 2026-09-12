@@ -137,6 +137,7 @@
     "opencodeTitlePlaceholder": "nightly-review",
     "opencodeContinue": "Continue the last session (--continue)",
     "permission": "Permission",
+    "commandCodeReadOnlyNote": "In command-code print mode, anything other than `yolo` blocks edit_file / write_file / shell_command / monitor_command / kill_shell, so the run is read-only (and is still recorded as a success).",
     "message": "Message",
     "messagePlaceholder": "Summarize README.md",
     "charCount": "{count} / {max}",

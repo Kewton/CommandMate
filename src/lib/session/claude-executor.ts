@@ -20,6 +20,7 @@ import { CLI_TOOL_IDS } from '@/lib/cli-tools/types';
 import {
   COPILOT_PERMISSIONS,
   COMMAND_CODE_PERMISSIONS,
+  COMMAND_CODE_YOLO_PERMISSION,
   type CopilotPermission,
   type CommandCodePermission,
 } from '@/config/schedule-config';
@@ -142,7 +143,7 @@ export function truncateOutput(output: string): string {
  * - vibe-local: [-p <message> -y] or [--model <model> -p <message> -y]
  * - opencode: run --format json [-m <model>] [--agent <a>] [--variant <v>] [-c] [--title <t>] <message>
  * - antigravity: -p <message> --dangerously-skip-permissions
- * - command-code: -p <message> --output-format json [--yolo | --permission-mode <permission>]
+ * - command-code: -p <message> --output-format json [--yolo | --permission-mode <permission>] --no-auto-update
  * - others: -p <message> (fallback)
  *
  * @param message - Prompt message
@@ -232,12 +233,42 @@ export function buildCliArgs(message: string, cliToolId: string, permission?: st
       // `--yolo` does not override `.commandcode/settings.json`
       // `permissions.deny`; a denied tool call still ends the run with exit 4,
       // which {@link describeCommandCodeExit} names in the failure reason.
+      //
+      // ## Issue #2454: `yolo` is a Permission *column* value, and the default
+      //
+      // Every `--permission-mode` value leaves print mode read-only. The 1.53.0
+      // bundle injects a `print-permission-gate` mod whenever `--yolo` was not
+      // passed, and that mod answers `edit_file` / `write_file` /
+      // `shell_command` / `monitor_command` / `kill_shell` with `block: true`;
+      // the mode flag never reaches it. A blocked call does not fail the run —
+      // it ends exit 0 with `subtype: "success"` — so a schedule that asked for
+      // `default` looked successful and changed nothing.
+      //
+      // So the column now spells `--yolo` as the value `yolo`
+      // ({@link COMMAND_CODE_SCHEDULE_PERMISSIONS}, copilot's shape), and the
+      // parser fills an empty cell with it. The `else` below used to be the
+      // only way to reach `--yolo` and was unreachable from a schedule, because
+      // `DEFAULT_PERMISSIONS['command-code']` was `'default'`.
       const args = ['-p', message, '--output-format', 'json'];
-      if (COMMAND_CODE_PERMISSIONS.includes(permission as CommandCodePermission)) {
+      if (permission === COMMAND_CODE_YOLO_PERMISSION) {
+        args.push('--yolo');
+      } else if (COMMAND_CODE_PERMISSIONS.includes(permission as CommandCodePermission)) {
         args.push('--permission-mode', permission as string);
       } else {
+        // Not reachable through the parser (it falls back to `yolo`); this is
+        // the direct-call guard.
         args.push('--yolo');
       }
+      // Issue #2454: without this, `resolveCliStartupPlan` runs an update check
+      // and a background self-update on every scheduled run. Spelled as a
+      // literal for the same reason `getCommandForTool` spells `commandcode` as
+      // one — importing `COMMAND_CODE_LAUNCH_FLAGS` from
+      // `@/lib/cli-tools/command-code` would pull the tmux transport into the
+      // scheduler's dependency graph. The unit test imports both and asserts
+      // the spelling matches, so the copy cannot drift. `--trust` /
+      // `--skip-onboarding` are *not* copied: print mode dispatches before the
+      // TUI's trust and onboarding gates, so they have nothing to answer.
+      args.push('--no-auto-update');
       return args;
     }
     case 'antigravity':

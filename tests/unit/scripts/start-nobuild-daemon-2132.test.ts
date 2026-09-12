@@ -164,8 +164,9 @@ describe('Issue #2132: start.sh --daemon refuses rather than half-starting', () 
 
   beforeAll(() => {
     sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-start-daemon-'));
-    fs.mkdirSync(path.join(sandbox, 'scripts'));
-    for (const name of ['start.sh', 'load-env.sh']) {
+    // lib/port-pids.sh: start.sh sources it next to load-env.sh (Issue #2473).
+    fs.mkdirSync(path.join(sandbox, 'scripts', 'lib'), { recursive: true });
+    for (const name of ['start.sh', 'load-env.sh', 'lib/port-pids.sh']) {
       fs.copyFileSync(path.join(REPO_ROOT, 'scripts', name), path.join(sandbox, 'scripts', name));
     }
   });

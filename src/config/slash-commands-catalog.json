@@ -3064,7 +3064,7 @@
     },
     {
       "name": "worktree",
-      "descriptionKey": "slashCommands.descriptions.worktree",
+      "descriptionKey": "slashCommands.descriptions.worktree.command-code",
       "category": "standard-git",
       "cliTools": [
         "command-code"
@@ -3088,6 +3088,16 @@
       "category": "standard-util",
       "cliTools": [
         "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "worktree",
+      "descriptionKey": "slashCommands.descriptions.worktree.codex",
+      "category": "standard-util",
+      "cliTools": [
+        "codex"
       ],
       "isStandard": true,
       "source": "standard"

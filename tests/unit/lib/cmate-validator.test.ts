@@ -350,6 +350,50 @@ describe('cmate-validator', () => {
       expect(errors).toEqual([]);
     });
 
+    /**
+     * Issue #2454: `yolo` joins command-code's column vocabulary.
+     *
+     * It is the flag name (`--yolo`), not a sixth `--permission-mode` value,
+     * so the validator has to check the column against
+     * COMMAND_CODE_SCHEDULE_PERMISSIONS rather than against the CLI's
+     * `.choices()` set -- and the parser has to agree, which
+     * `cmate-parser-validator-consistency.test.ts` covers row for row.
+     */
+    it('should accept command-code permission yolo (Issue #2454)', () => {
+      const rows = [['cc-task', '0 * * * *', 'Do something', 'command-code', 'true', 'yolo']];
+      const errors = validateSchedulesSection(rows);
+      expect(errors).toEqual([]);
+    });
+
+    it('should accept the five command-code --permission-mode values', () => {
+      for (const permission of ['default', 'standard', 'plan', 'auto-accept', 'dont-ask']) {
+        const rows = [['cc-task', '0 * * * *', 'Do something', 'command-code', 'true', permission]];
+        expect(validateSchedulesSection(rows), permission).toEqual([]);
+      }
+    });
+
+    it('should allow an omitted command-code permission column (parser fills yolo)', () => {
+      const rows = [['cc-task', '0 * * * *', 'Do something', 'command-code', 'true']];
+      const errors = validateSchedulesSection(rows);
+      expect(errors).toEqual([]);
+    });
+
+    // The widening must not let another tool's vocabulary in. Note
+    // `--dangerously-skip-permissions`: `--yolo` is an alias for it, but the
+    // column takes the short spelling only, so "means the same flag" is not a
+    // reason to accept antigravity's word here.
+    it.each(['bypassPermissions', 'acceptEdits', 'allow-all-tools', '--dangerously-skip-permissions', 'workspace-write'])(
+      'should detect invalid command-code permission "%s"',
+      (permission) => {
+        const rows = [['cc-task', '0 * * * *', 'Do something', 'command-code', 'true', permission]];
+        const errors = validateSchedulesSection(rows);
+        expect(errors).toHaveLength(1);
+        expect(errors[0].field).toBe('permission');
+        expect(errors[0].message).toContain('invalid permission');
+        expect(errors[0].message).toContain('command-code');
+      },
+    );
+
     // Issue #588: copilot --model validation
     it('should accept copilot --model with valid model name', () => {
       const rows = [['copilot-task', '0 * * * *', 'Do something', 'copilot --model gpt-4', 'true', 'allow-all-tools']];

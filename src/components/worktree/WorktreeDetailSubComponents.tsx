@@ -11,7 +11,7 @@
 
 'use client';
 
-import React, { useEffect, useCallback, useState, memo, useRef } from 'react';
+import React, { useEffect, useCallback, useLayoutEffect, useState, memo, useRef } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { type WorktreeStatus } from '@/components/mobile/MobileHeader';
 import { DESKTOP_STATUS_LABEL_KEYS } from '@/config/status-colors';
@@ -23,7 +23,11 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
 } from '@/components/ui/DropdownMenu';
-import { classifyHeaderInstances } from '@/lib/agent-status-display';
+import {
+  classifyHeaderInstances,
+  isLabeledInstance,
+  type HeaderInstanceItem,
+} from '@/lib/agent-status-display';
 import { LogViewer } from '@/components/worktree/LogViewer';
 import { VersionSection } from '@/components/worktree/VersionSection';
 import { FeedbackSection } from '@/components/worktree/FeedbackSection';
@@ -830,8 +834,136 @@ interface DesktopHeaderProps {
  * Issue #1078: max labelled agent pills kept inline in the desktop header before
  * the rest collapse into the "+N" overflow menu. Idle/ready instances always
  * render as narrow icon-only dots and never count against this budget.
+ *
+ * Issue #2481: a ceiling, not the budget itself — a header too narrow for this
+ * many keeps fewer (see {@link useDesktopHeaderFit}).
  */
 const MAX_HEADER_AGENT_PILLS = 4;
+
+/** What the desktop header can afford at its current width (Issue #2481). */
+interface DesktopHeaderFit {
+  /** Labelled agent pills kept inline; the rest fold into the "+N" menu. */
+  pillBudget: number;
+  /**
+   * The last resort, once there is no labelled pill left to fold: the identity
+   * group and the agent row clip horizontally instead of painting under the
+   * right-hand controls.
+   */
+  squeezed: boolean;
+}
+
+/**
+ * Whether anything in the desktop header's identity group is wider than its box
+ * (Issue #2481).
+ *
+ * The group's own overflow catches content pushed past its edge. The walk
+ * catches content that collides inside it without widening anything: the
+ * verification chip squeezed below its badges paints them over its own ⓘ
+ * toggle, and the chip is a slot this module does not look into. Elements that
+ * clip (the `truncate` spans) are wider than their box by design and skipped.
+ */
+function identityOverflows(identity: HTMLElement): boolean {
+  if (identity.scrollWidth > identity.clientWidth + 1) return true;
+  for (const el of Array.from(identity.querySelectorAll('*'))) {
+    if (el.scrollWidth <= el.clientWidth + 1) continue;
+    if (getComputedStyle(el).overflowX !== 'visible') continue;
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Fits the desktop header's one row to its width (Issue #2481).
+ *
+ * At 1470px with the sidebar open, identity (name, branch, verification chip)
+ * plus the agent pills and controls no longer fit, and the header's parent is
+ * `overflow-hidden` — so the right end (display size, Info) was cut off with no
+ * way to scroll to it. The layout now decides who gives way: the controls group
+ * never shrinks, the identity group (`min-w-0`) takes what is left and
+ * truncates. This hook handles the point where truncating is not enough — the
+ * identity group's content is wider than its box — by folding one more
+ * labelled pill into the existing "+N" menu (#1078) and measuring again, down
+ * to zero pills and then {@link DesktopHeaderFit.squeezed}.
+ *
+ * The measurement runs in a layout effect, whose state updates re-render before
+ * the browser paints, so the intermediate steps are never seen. Folding only
+ * goes one way, so the fit restarts from the ceiling whenever there may be room
+ * again: the header got wider or narrower (a ResizeObserver — opening the
+ * sidebar resizes the header without resizing the window), or `contentKey`
+ * changed (an instance went idle, a label or the branch changed).
+ *
+ * @param headerRef - The header row, observed for size changes
+ * @param identityRef - The left group; its overflow is the "does not fit" signal
+ * @param contentKey - What, besides the budget, changes the row's widths
+ * @param labelledCount - Instances that want a labelled pill (active or working)
+ * @param unkeyedContent - Content whose width `contentKey` cannot capture (the
+ *   verification chip node): a new value re-measures without restarting, so a
+ *   chip that grows folds a pill and one that shrinks waits for the next resize
+ */
+function useDesktopHeaderFit(
+  headerRef: React.RefObject<HTMLDivElement | null>,
+  identityRef: React.RefObject<HTMLDivElement | null>,
+  contentKey: string,
+  labelledCount: number,
+  unkeyedContent: unknown
+): DesktopHeaderFit {
+  const [fit, setFit] = useState(() => ({
+    key: contentKey,
+    pillBudget: MAX_HEADER_AGENT_PILLS,
+    squeezed: false,
+  }));
+
+  // Reset while rendering (React's "adjust state when a prop changes"
+  // pattern), not in an effect: an effect would run after the step below in
+  // the same commit and be overwritten by it.
+  let current = fit;
+  if (fit.key !== contentKey) {
+    current = { key: contentKey, pillBudget: MAX_HEADER_AGENT_PILLS, squeezed: false };
+    setFit(current);
+  }
+
+  // While the identity group's content overflows, give up one more step.
+  // Every step is a new `fit`, so this re-runs until the row fits or is
+  // squeezed; a step never undoes one, so the chain ends.
+  useLayoutEffect(() => {
+    const identity = identityRef.current;
+    if (!identity || fit.squeezed || !identityOverflows(identity)) return;
+    setFit((prev) => {
+      if (prev.squeezed) return prev;
+      const shown = Math.min(prev.pillBudget, labelledCount);
+      return shown > 0 ? { ...prev, pillBudget: shown - 1 } : { ...prev, squeezed: true };
+    });
+  }, [identityRef, fit, labelledCount, unkeyedContent]);
+
+  useEffect(() => {
+    const header = headerRef.current;
+    if (!header || typeof ResizeObserver === 'undefined') return;
+    let lastWidth: number | null = null;
+    let lastHeight: number | null = null;
+    const observer = new ResizeObserver((entries) => {
+      const rect = entries[entries.length - 1]?.contentRect;
+      if (!rect) return;
+      const widthChanged = rect.width !== lastWidth;
+      if (!widthChanged && rect.height === lastHeight) return;
+      lastWidth = rect.width;
+      lastHeight = rect.height;
+      // A new width may hold more: start again from the ceiling. The header's
+      // width comes from its parent, never from this row, so this cannot feed
+      // back into itself. A height-only change (display size) is only
+      // re-checked — a fresh object re-renders, and the step above can only
+      // fold further, so it cannot oscillate either.
+      setFit((prev) =>
+        widthChanged
+          ? { key: prev.key, pillBudget: MAX_HEADER_AGENT_PILLS, squeezed: false }
+          : { ...prev }
+      );
+    });
+    observer.observe(header);
+    return () => observer.disconnect();
+  }, [headerRef]);
+
+  return { pillBudget: current.pillBudget, squeezed: current.squeezed };
+}
 
 /** Desktop header with hamburger menu, back button, worktree name, repository, status, and info button */
 export const DesktopHeader = memo(function DesktopHeader({
@@ -915,15 +1047,95 @@ export const DesktopHeader = memo(function DesktopHeader({
     ? truncateString(worktreeDescription, DESCRIPTION_MAX_LENGTH)
     : null;
 
+  // Issue #875: resolve each instance's status from the per-instance map so
+  // alias instances (instanceId !== cliToolId) show their own status; fall back
+  // to the per-CLI map for backward compat. Resolved up here rather than inside
+  // the row (Issue #2481) because the width fit below needs the same facts.
+  const headerItems: HeaderInstanceItem<AgentInstance>[] = (instances ?? []).map((inst) => ({
+    item: inst,
+    status: deriveCliStatus(
+      sessionStatusByInstance?.[inst.id] ?? sessionStatusByCli?.[inst.cliTool]
+    ),
+    isActive: inst.id === activeInstanceId,
+  }));
+
+  // Issue #1787 acceptance 4: the detail header is the third surface
+  // that has to say "an agent here is done and wants work", alongside
+  // the sidebar row and the WorktreeCard. It was missed when #1787
+  // landed because this file sat outside that Issue's scope.
+  //
+  // ONE badge for the whole row, not one per pill, which is the same
+  // granularity `BranchListItem` shows (`branch.awaitingInstruction` is
+  // already the fold across every instance — see
+  // `deriveWorktreeWaitingDetail`). It is also the only granularity this
+  // row can afford: it is width-budgeted by MAX_HEADER_AGENT_PILLS, and
+  // a per-pill string would push working instances into the "+N"
+  // overflow to make room — the very trade-off #1783 refused when it
+  // put the model in the tooltip instead. Rendered AFTER the overflow
+  // trigger so it takes nothing from the pill budget, and nothing that
+  // was here before is removed.
+  //
+  // Resolved per instance with the same per-instance → per-CLI fallback
+  // the status dots use, so an alias instance is not read off a roster
+  // entry that has no status of its own.
+  const awaitingInstruction = (instances ?? []).some(
+    (inst) =>
+      (sessionStatusByInstance?.[inst.id] ?? sessionStatusByCli?.[inst.cliTool])
+        ?.awaitingInstruction === true
+  );
+
+  const showKillButton = Boolean(onKillSession) && activeInstanceRunning;
+
+  // Issue #2481: everything, besides the pill budget itself, that changes how
+  // wide the row is. A change here may have made room, so the fit restarts
+  // from MAX_HEADER_AGENT_PILLS. The verification chip is a node and cannot be
+  // keyed; a chip that grows still folds a pill (the fit re-measures on every
+  // commit), a chip that shrinks gets the room back on the next resize.
+  const headerFitKey = [
+    locale,
+    worktreeName,
+    repositoryName,
+    truncatedDescription ?? '',
+    gitStatus?.currentBranch ?? '',
+    gitStatus?.isDirty ? 'dirty' : '',
+    showKillButton ? 'end' : '',
+    awaitingInstruction ? 'awaiting' : '',
+    ...headerItems.map(
+      (it) => `${it.item.id}:${getInstanceLabel(it.item)}:${it.status}:${it.isActive ? 'active' : ''}`
+    ),
+  ].join('\n');
+  const headerRef = useRef<HTMLDivElement>(null);
+  const identityRef = useRef<HTMLDivElement>(null);
+  const headerFit = useDesktopHeaderFit(
+    headerRef,
+    identityRef,
+    headerFitKey,
+    headerItems.filter(isLabeledInstance).length,
+    verificationChip
+  );
+
   return (
-    <div className="flex items-center justify-between px-4 py-3 bg-surface border-b border-border">
-      {/* Left: Back button and title (Issue #747: hamburger moved to ActivityBar) */}
-      <div className="flex items-center gap-3">
+    <div
+      ref={headerRef}
+      data-testid="desktop-header"
+      className="flex items-center justify-between gap-3 px-4 py-3 bg-surface border-b border-border"
+    >
+      {/* Left: Back button and title (Issue #747: hamburger moved to ActivityBar).
+          Issue #2481: `min-w-0` makes this group — not the controls on the
+          right — the one that gives way on a narrow header: the name, branch
+          and chip title truncate. The back link, divider and dot keep their
+          width. Clipped only as the fit's last resort, because the chip's
+          reason popover hangs out of this group and a clip would cut it. */}
+      <div
+        ref={identityRef}
+        data-testid="desktop-header-identity"
+        className={`flex items-center gap-3 min-w-0${headerFit.squeezed ? ' overflow-x-clip' : ''}`}
+      >
         {/* Issue #1061: paddingless nav link — Button base px-4 py-2 would enlarge/misalign the header back control — 残置 */}
         <button
           type="button"
           onClick={onBackClick}
-          className="flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors"
+          className="flex flex-shrink-0 items-center gap-1 text-muted-foreground hover:text-foreground transition-colors"
           aria-label={tWorktree('detail.goBack')}
           data-testid="worktree-back-button"
         >
@@ -943,7 +1155,7 @@ export const DesktopHeader = memo(function DesktopHeader({
           </svg>
           <span className="text-sm font-medium">{tWorktree('detail.home')}</span>
         </button>
-        <div className="w-px h-6 bg-border" aria-hidden="true" />
+        <div className="w-px h-6 flex-shrink-0 bg-border" aria-hidden="true" />
         {/* Worktree-level status (Issue #1078: unified StatusDot visual language) */}
         <StatusDot
           data-testid="desktop-status-indicator"
@@ -951,8 +1163,11 @@ export const DesktopHeader = memo(function DesktopHeader({
           size="lg"
           label={statusLabel}
         />
-        {/* Worktree name, memo, and repository */}
-        <div className="flex flex-col min-w-0">
+        {/* Worktree name, memo, and repository. Issue #2481: gives way before
+            the verification chip on a narrow header (`shrink-4` against the
+            chip's 1), down to a floor that keeps the start of the name
+            readable. A whole-number factor on purpose — see the chip below. */}
+        <div className="flex flex-col min-w-[6rem] shrink-4">
           <h1 className="text-lg font-semibold text-foreground truncate max-w-[200px] leading-tight">
             {worktreeName}
           </h1>
@@ -990,12 +1205,29 @@ export const DesktopHeader = memo(function DesktopHeader({
         </div>
         {/* Issue #1816: task contract / verification verdict, next to the branch
             identity it belongs to. `min-w-0` so a long task title truncates
-            instead of pushing the right-hand controls off the header. */}
-        {verificationChip && <div className="min-w-0 max-w-[360px]">{verificationChip}</div>}
+            instead of pushing the right-hand controls off the header.
+            Issue #2481: the name column gives way before it, because the chip's
+            badges cannot truncate and, once it is down to them, the header has
+            to fold an agent pill. Two flexbox rules shape this. The 360px cap
+            is a `w-*` capped by `max-w-max` rather than a `max-w-*`, because an
+            item that hits its max-width is frozen there — a long task title
+            stayed 360px while the name truncated to nothing. And the name gets
+            the larger factor rather than the chip a fractional one, because
+            items whose factors sum below 1 absorb only that fraction of the
+            overflow: at `shrink-[0.25]` the chip, left alone to shrink once the
+            name hit its floor, stopped 70px short. Same width as before
+            whenever the row fits. */}
+        {verificationChip && (
+          <div className="min-w-0 w-[360px] max-w-max">{verificationChip}</div>
+        )}
       </div>
 
-      {/* Right: Per-agent status row + Status dropdown + Info button */}
-      <div className="flex items-center gap-2">
+      {/* Right: Per-agent status row + Status dropdown + Info button.
+          Issue #2481: never shrinks, so the controls always keep their width;
+          room is made by the fit folding agent pills instead. `max-w-full` only
+          matters on a header too narrow even for this group alone: it caps the
+          group at the header's width and the agent row (`min-w-0`) yields. */}
+      <div className="flex items-center gap-2 flex-shrink-0 max-w-full" data-testid="desktop-header-controls">
         {/* Issue #749/#869/#1078: Per-instance session status row (PC only).
             Distinct from the worktree-level StatusDot on the left: this row is
             per-agent-instance and doubles as an instance-tab switcher. Issue #1078
@@ -1003,21 +1235,11 @@ export const DesktopHeader = memo(function DesktopHeader({
             active/working instances stay labelled pills, idle/ready collapse to
             icon-only dots (label via Tooltip), and pills beyond the budget fold
             into a "+N" overflow menu so a working session never gets buried.
+            Issue #2481: the budget is what the header's width affords, capped
+            at MAX_HEADER_AGENT_PILLS (useDesktopHeaderFit).
             Rendered only when instances is provided (backward compat). */}
         {instances && instances.length > 0 && (() => {
-          // Issue #875: resolve each instance's status from the per-instance map
-          // so alias instances (instanceId !== cliToolId) show their own status;
-          // fall back to the per-CLI map for backward compat.
-          const classified = classifyHeaderInstances(
-            instances.map((inst) => ({
-              item: inst,
-              status: deriveCliStatus(
-                sessionStatusByInstance?.[inst.id] ?? sessionStatusByCli?.[inst.cliTool]
-              ),
-              isActive: inst.id === activeInstanceId,
-            })),
-            MAX_HEADER_AGENT_PILLS
-          );
+          const classified = classifyHeaderInstances(headerItems, headerFit.pillBudget);
           const overflow = classified.filter((c) => c.slot === 'overflow');
           // Issue #1078: if any folded instance is actively working, surface the
           // living glow on the "+N" trigger so a running session stays visible
@@ -1028,33 +1250,11 @@ export const DesktopHeader = memo(function DesktopHeader({
             overflow.find((c) => c.status === 'waiting')?.status ??
             null;
 
-          // Issue #1787 acceptance 4: the detail header is the third surface
-          // that has to say "an agent here is done and wants work", alongside
-          // the sidebar row and the WorktreeCard. It was missed when #1787
-          // landed because this file sat outside that Issue's scope.
-          //
-          // ONE badge for the whole row, not one per pill, which is the same
-          // granularity `BranchListItem` shows (`branch.awaitingInstruction` is
-          // already the fold across every instance — see
-          // `deriveWorktreeWaitingDetail`). It is also the only granularity this
-          // row can afford: it is width-budgeted by MAX_HEADER_AGENT_PILLS, and
-          // a per-pill string would push working instances into the "+N"
-          // overflow to make room — the very trade-off #1783 refused when it
-          // put the model in the tooltip instead. Rendered AFTER the overflow
-          // trigger so it takes nothing from the pill budget, and nothing that
-          // was here before is removed.
-          //
-          // Resolved per instance with the same per-instance → per-CLI fallback
-          // the status dots use, so an alias instance is not read off a roster
-          // entry that has no status of its own.
-          const awaitingInstruction = instances.some(
-            (inst) =>
-              (sessionStatusByInstance?.[inst.id] ?? sessionStatusByCli?.[inst.cliTool])
-                ?.awaitingInstruction === true
-          );
-
           return (
-            <div className="flex items-center gap-2 flex-shrink-0" data-testid="desktop-agent-status-row">
+            <div
+              className={`flex items-center gap-2 min-w-0${headerFit.squeezed ? ' overflow-x-clip' : ''}`}
+              data-testid="desktop-agent-status-row"
+            >
               {classified.map((c) => {
                 if (c.slot === 'overflow') return null;
                 const inst = c.item;
@@ -1253,7 +1453,7 @@ export const DesktopHeader = memo(function DesktopHeader({
             Mobile kill button (WorktreeDetailRefactored.tsx:409-421). Rendered
             only when a kill handler is wired AND the active CLI session is
             running; click opens the existing confirmation modal. */}
-        {onKillSession && activeInstanceRunning && (
+        {showKillButton && (
           <Button
             variant="ghost"
             type="button"
@@ -1275,7 +1475,7 @@ export const DesktopHeader = memo(function DesktopHeader({
               onWorktreeStatusChange(val === '' ? null : val as 'ready' | 'in_progress' | 'in_review' | 'done');
             }}
             onClick={(e) => e.stopPropagation()}
-            className="text-xs px-2 py-1.5 rounded-lg border border-input bg-surface text-foreground focus:ring-2 focus:ring-ring focus:border-transparent cursor-pointer"
+            className="flex-shrink-0 text-xs px-2 py-1.5 rounded-lg border border-input bg-surface text-foreground focus:ring-2 focus:ring-ring focus:border-transparent cursor-pointer"
             data-testid="desktop-status-dropdown"
             aria-label={tWorktree('detail.worktreeStatusLabel')}
           >
@@ -1295,8 +1495,9 @@ export const DesktopHeader = memo(function DesktopHeader({
         variant="ghost"
         type="button"
         onClick={onInfoClick}
-        className="relative flex items-center gap-1.5 px-3 py-1.5 text-muted-foreground hover:text-foreground hover:bg-muted rounded-lg transition-colors"
+        className="relative flex flex-shrink-0 items-center gap-1.5 px-3 py-1.5 text-muted-foreground hover:text-foreground hover:bg-muted rounded-lg transition-colors"
         aria-label={tWorktree('detail.viewInfo')}
+        data-testid="desktop-info-button"
       >
         <svg
           className="w-5 h-5"

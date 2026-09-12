@@ -102,6 +102,13 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
   narrow: a prompt on screen is still refused, and the payload still reports it
   (wait and the UI do not go quiet).
 
+  Message length: up to 48 KiB and 240 lines arrives whole on claude, codex,
+  command-code and antigravity (verified, Issue #2464). Over 512 bytes the
+  message is pasted as one bracketed paste and Enter waits until the agent's
+  composer shows all of it; if it never does, nothing is submitted and send
+  exits 99 ("Message body did not arrive intact"). Put a longer brief in a
+  file and send a message that names it ('commandmate docs --section delegation').
+
   Finding worktree IDs:
     WT=$(commandmate ls --branch feature/101 --quiet)
     WT=$(commandmate ls --id anvil- --quiet)   # disambiguate by repo (id prefix)
@@ -153,6 +160,8 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
     --instance <id>            Agent instance to wait on. There is no --agent here.
     --verify                   After completion, run every verification gate
     --require-work             After completion, run only the work-evidence gate
+    --auto-yes-grace <seconds> With the target's Auto-Yes on, how long a prompt may
+                               stay open before exit 10 (default 30; 0 = at once)
 
   Exit codes:
     0   - Completed (agent idle/ready), and verified when --verify was given
@@ -162,8 +171,18 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
     124 - Timeout exceeded
 
   --on-prompt modes:
-    agent  - Returns exit 10 immediately with prompt JSON on stdout
+    agent  - Returns exit 10 with prompt JSON on stdout: at once, or after the
+             Auto-Yes grace below when the target's Auto-Yes is on
     human  - Keeps blocking until human responds via browser UI
+
+  Auto-Yes on the target (Issue #2463): in agent mode a prompt on a session
+  whose Auto-Yes is on is held, not reported, for up to --auto-yes-grace
+  seconds (default 30) -- Auto-Yes answers it within seconds, and an exit 10
+  would stop a delegation for a prompt nobody had to see. One stderr line says
+  so; stdout stays empty. If the prompt clears, wait goes on judging completion
+  as usual ('ask' does the same). It still exits 10 when the grace runs out,
+  and at once when the Auto-Yes policy withheld the answer -- the payload then
+  carries autoYesSuppression. --auto-yes-grace 0 restores the immediate exit.
 
   Prompt JSON output (exit 10):
     {"worktreeId":"...","cliToolId":"claude","type":"yes_no","question":"...","options":["yes","no"],"status":"pending"}
@@ -660,9 +679,30 @@ same CommandMate server, and you can hand work to them.
     21   nothing was running to ask
     124  timed out
 
+  A confirmation their own Auto-Yes is answering is not a 10 (Issue #2463):
+  when the target has Auto-Yes on, ask gives it up to 30 s to answer -- one
+  line on stderr says so -- and keeps waiting for the reply if it does. A 10
+  from such a session therefore means Auto-Yes did not answer: its policy
+  withheld the answer (autoYesSuppression in the JSON) or 30 s passed. Rule 1
+  below applies to it like to any other prompt.
+
   --json adds the target and a 'source' field saying whether the reply came
   from the chat transcript ("history") or from the pane ("pane"). copilot,
   gemini and vibe-local keep no transcript, so their replies are pane reads.
+
+## How long a request can be
+
+  A request of up to 48 KiB and 240 lines is verified to arrive whole on
+  claude, codex, command-code and antigravity (Issue #2464). Anything over 512
+  bytes is pasted into the other session's composer as one bracketed paste,
+  and Enter waits until the composer shows all of it. When it does not, nothing
+  is submitted and the command exits 99 with "Message body did not arrive
+  intact" -- a request is never cut short silently.
+
+  For a longer brief, write it to a file inside the worktree and ask the other
+  session to read that file:
+
+    commandmate ask <worktree-id> "Read .commandmate/briefs/review.md and do what it says." --instance <id>
 
 ## 4. Ask without waiting
 

@@ -34,11 +34,39 @@
  * bullet — ` ● Which color scheme do you prefer?` is a live row of
  * `askuserquestion-submit-taskpanel.txt`. Accepting it here would let Claude's
  * own prose vouch for itself, which is the #1896 failure with a different glyph.
+ *
+ * ## Claude's pinned panels are not a footer (Issue #2468)
+ *
+ * claude-cli 2.1.267 draws a right-aligned HUD row at the bottom of the pane
+ * (`+28 files edited before this session (show)` / `No changes this session`,
+ * `tests/fixtures/claude-live-2468/`). Under the footer-less AskUserQuestion
+ * screen it was read as that screen's footer, failed the footer test, and the
+ * open dialog was refused. The footer guard therefore reads the rows under the
+ * options through `findClaudeTaskPanelLines` — the same set the transcript-tail
+ * walk steps over — and a footer made only of panel rows is no footer.
+ *
+ * ## An AskUserQuestion preview pane is chrome too (Issue #2486)
+ *
+ * claude-cli 2.1.268 opens a box to the right of the options when an option
+ * carries a `preview` (`tests/fixtures/claude-live-2486/`). Its ~20 rows sit
+ * between the last option and the footer, so the block reader's footer scan —
+ * eight non-blank rows — ran out on pane rows, found no option, and an open
+ * picker was refused as `prompt_no_longer_active`. The region is therefore read
+ * with Claude's chrome masked out (`findClaudeChrome` / `maskClaudeChrome`):
+ * the reading the transcript-tail walk and the generic parser use as well. The
+ * picker's tab row bounds the context scan above the options for the same
+ * reason in the other direction.
  */
 
 import { stripBoxDrawing } from '../../cli-patterns';
+import {
+  APPROVAL_TARGET_MAX_LOOKBACK,
+  findClaudeChrome,
+  maskClaudeChrome,
+} from '../../prompt-detect-multiple-choice';
 import { findNumberedOptionBlock } from '../dialog-block';
 import type { DialogVerdict, NormalizedFrame } from '../types';
+import { findAskUserQuestionTabRow } from './picker-chrome';
 
 /** What `detect.ts` measured about this frame before handing it over. */
 export interface ClaudeDialogContext {
@@ -81,13 +109,44 @@ const CLAUDE_ASK_USER_QUESTION_PATTERN = /ready to submit your answers\?|review 
 /** The `/model` overlay's footer verb (Issue #1495). */
 const CLAUDE_PICKER_FOOTER_PATTERN = /set\s+as\s+default/i;
 
-/** The non-blank rows immediately above `firstRow`, nearest first. */
+/**
+ * The non-blank rows immediately above `firstRow`, nearest first — up to an
+ * AskUserQuestion picker's tab row, which is the dialog's top edge (Issue
+ * #2486). Above it is the transcript, whose rows have no say in what kind of
+ * dialog this is.
+ */
 function readContextAbove(lines: readonly string[], firstRow: number): string {
+  const tabRow = findAskUserQuestionTabRow(lines, firstRow, APPROVAL_TARGET_MAX_LOOKBACK);
   const rows: string[] = [];
-  for (let i = firstRow - 1; i >= 0 && rows.length < QUESTION_SCAN_ROWS; i--) {
+  for (let i = firstRow - 1; i > tabRow && rows.length < QUESTION_SCAN_ROWS; i--) {
     const row = lines[i].trim();
     if (row === '') continue;
     rows.push(row);
+  }
+  return rows.join('\n');
+}
+
+/**
+ * The non-blank rows in [from, end) — the block's footer — without Claude's
+ * chrome (Issue #2468).
+ *
+ * `findClaudeTranscriptTail` already steps over the panels, so normally none is
+ * in range. #2468 is what "normally" cost: a HUD row the tail walk did not know
+ * became the tail, then the footer, and the one dialog with no footer of its own
+ * was refused over a row of chrome. Reading the range through the same chrome
+ * the tail walk uses keeps the two rules from disagreeing about what is chrome —
+ * and since #2486 that includes the preview pane, whose rows sit exactly here.
+ */
+function readFooter(
+  lines: readonly string[],
+  chromeRows: ReadonlySet<number>,
+  from: number,
+  end: number,
+): string {
+  const rows: string[] = [];
+  for (let i = from; i < Math.min(end, lines.length); i++) {
+    const row = lines[i].trim();
+    if (row !== '' && !chromeRows.has(i)) rows.push(row);
   }
   return rows.join('\n');
 }
@@ -117,7 +176,24 @@ export function detectClaudeDialog(
   // `frame.contentLines` is valid here too — and a frame whose gutter the
   // Auto-Yes poller already removed parses to the same rows.
   const lines = stripBoxDrawing(frame.clean).split('\n');
-  const block = findNumberedOptionBlock(lines, context.transcriptTail + 1);
+  const end = context.transcriptTail + 1;
+
+  // Issue #2486: read the region with Claude's chrome taken out. An
+  // AskUserQuestion preview pane puts ~20 rows between the options and the
+  // footer and shares its top rows with the options; unmasked, the block reader's
+  // footer scan ran out on pane rows before it reached an option, and the open
+  // dialog was refused. Masking keeps row indices, so everything below reports
+  // positions in `lines` unchanged.
+  //
+  // The chrome is measured on the rows as they ARRIVED, not on `lines`: the
+  // Auto-Yes poller hands this a frame it already box-stripped, and a second
+  // `stripBoxDrawing` removes the pane border an option row is left ending with
+  // (`  2. ファイル読取のみで続行       │`) — the one mark that the row shares its
+  // line with the pane. The cuts carry over, because a strip only ever shortens
+  // such a row from the right.
+  const chrome = findClaudeChrome(frame.contentLines as string[], 0, end);
+  const visible = maskClaudeChrome(lines, chrome);
+  const block = findNumberedOptionBlock(visible, end);
   if (!block) return null;
 
   // Guard 1: the selection cursor. Claude puts it on the highlighted option of
@@ -129,12 +205,14 @@ export function detectClaudeDialog(
   // Guard 2: whatever sits between the options and the end of the transcript
   // must be one of Claude's dialog footers, or nothing at all. A completion
   // marker (`✻ Brewed for 24s`) or a fresh line of prose there means the block
-  // is finished output with something after it, not an open dialog.
-  const footer = block.footer.trim();
+  // is finished output with something after it, not an open dialog. Claude's
+  // chrome is neither, so it is read out of it first (Issue #2468; an
+  // AskUserQuestion preview pane since #2486).
+  const footer = readFooter(visible, chrome.rows, block.lastRow + 1, end);
   if (footer !== '' && !CLAUDE_DIALOG_FOOTER_PATTERN.test(footer)) return null;
 
   return {
-    kind: classify(readContextAbove(lines, block.firstRow), footer),
+    kind: classify(readContextAbove(visible, block.firstRow), footer),
     options: block.options,
     // Claude's menus take ↑/↓ + Enter, and `sendPromptAnswer` already knows
     // that: it NAVIGATES to the numbered option for claude rather than typing

@@ -13,6 +13,7 @@
  */
 
 import { stripAnsi } from '@/lib/detection/ansi';
+import { listSessions } from '@/lib/tmux/tmux';
 import { findStartupOverlay, findUpstreamFault } from './expectations';
 import { probeFrame } from './probe';
 import type { CanaryToolProfile } from './tool-profiles';
@@ -257,6 +258,46 @@ export class CanarySession implements ScenarioDriver {
         );
       }
       await sleep(STARTUP_POLL_INTERVAL_MS);
+    }
+  }
+
+  /**
+   * Run `fn` with PRODUCTION tmux code pointed at this session (Issue #2486).
+   *
+   * `src/lib/tmux/tmux.ts` takes no socket argument: it reaches whichever
+   * server `$TMUX` names — and the canary runs inside a pane of the user's
+   * server. `-L` cannot be passed through code that does not take it, so `$TMUX`
+   * is pointed at the private socket for the duration of `fn`, and before `fn`
+   * may send anything the redirect is ASSERTED: production `listSessions()` must
+   * see exactly the private server's sessions, this one among them. A redirect
+   * that silently failed would show the user's `mcbd-*` sessions (or nothing)
+   * and is refused. `$TMUX` is restored whatever `fn` does.
+   *
+   * tmux reads only the path part of `$TMUX`; the pid and index are placeholders.
+   */
+  async withProductionTmux<T>(fn: (sessionName: string) => Promise<T>): Promise<T> {
+    const socketPath = this.options.tmux.socketPath;
+    if (!socketPath) {
+      throw new Error('canary: the private tmux socket path is unknown; refusing to run production tmux code');
+    }
+    const saved = process.env.TMUX;
+    process.env.TMUX = `${socketPath},0,0`;
+    try {
+      const seenByProduction = (await listSessions()).map(session => session.name).sort();
+      const onPrivateServer = (await this.options.tmux.listSessions()).sort();
+      if (
+        !seenByProduction.includes(this.options.sessionName) ||
+        seenByProduction.join('\n') !== onPrivateServer.join('\n')
+      ) {
+        throw new Error(
+          `canary: $TMUX did not redirect production tmux to ${socketPath} ` +
+            `(it sees: ${seenByProduction.join(', ') || 'nothing'}). Refusing to send keys.`
+        );
+      }
+      return await fn(this.options.sessionName);
+    } finally {
+      if (saved === undefined) delete process.env.TMUX;
+      else process.env.TMUX = saved;
     }
   }
 

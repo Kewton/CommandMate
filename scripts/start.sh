@@ -80,6 +80,8 @@ done
 
 # Load .env file (custom server does not auto-load .env)
 source "$SCRIPT_DIR/load-env.sh"
+# find_listen_pids_by_port (Issue #2473)
+source "$SCRIPT_DIR/lib/port-pids.sh"
 
 echo "Starting CommandMate..."
 
@@ -178,7 +180,9 @@ if [ "$DAEMON_MODE" = true ]; then
 
     # Check if already running (port-based) [D1-004]
     # Detects orphaned processes even when the PID file is missing.
-    PORT_PIDS=$(lsof -ti:"$PORT" 2>/dev/null | grep -E '^[0-9]+$' | sort -u || true)
+    # Listeners only (Issue #2473): a process that is merely connected to the
+    # port is not a server.
+    PORT_PIDS=$(find_listen_pids_by_port "$PORT")
     if [ -n "$PORT_PIDS" ]; then
         echo "Port $PORT is already in use by process(es): $(echo $PORT_PIDS | tr '\n' ' ')"
         echo "Use ./scripts/stop-server.sh to stop it first"

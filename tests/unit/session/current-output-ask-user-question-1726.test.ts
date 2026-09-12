@@ -182,7 +182,11 @@ describe('the picker with the task panel on screen (Issue #1726)', () => {
     ]);
     expect(promptData.options.every((o) => o.description === undefined)).toBe(true);
     expect(promptData.askUserQuestion).toBeUndefined();
-    expect(promptData.question).toContain("I'll load the TaskCreate tool schema first");
+    // Issue #2486: the scraper's question no longer carries the transcript row
+    // and the tab chip above the picker, so it reads the same as the payload's.
+    // The missing descriptions and `askUserQuestion` above are what prove this
+    // is the scraper's own reading.
+    expect(promptData.question).toBe('Which task would you like to start with?');
   });
 
   it('falls back once the call is over, even while the pane still shows it', async () => {

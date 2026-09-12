@@ -940,6 +940,15 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
         if (!response.ok) {
           throw new Error(`Failed to send prompt response: ${response.status}`);
         }
+        // Issue #2468: a refusal is a 200 `{ success: false, reason }`, so the
+        // card stays and the user is told why — the same contract as the split
+        // pane's `handlePromptRespond`.
+        const result = (await response.json().catch(() => null)) as { success?: unknown } | null;
+        if (result?.success === false) {
+          showToast(tWorktree('promptResponse.refused'), 'warning');
+          await fetchCurrentOutput();
+          return;
+        }
         actions.clearPrompt();
         // Immediately fetch current output to update terminal without waiting for polling
         await fetchCurrentOutput();
@@ -949,7 +958,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
         actions.setPromptAnswering(false);
       }
     },
-    [worktreeId, actions, fetchCurrentOutput, activeCliTab, state.prompt.data]
+    [worktreeId, actions, fetchCurrentOutput, activeCliTab, state.prompt.data, showToast, tWorktree]
   );
 
   /** Handle prompt dismiss without response */

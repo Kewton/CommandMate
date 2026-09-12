@@ -82,8 +82,8 @@ tail -f dev.log
 ### サーバーの確認
 
 ```bash
-# ポートが使用されているか確認
-lsof -i:3000
+# ポートで待ち受けているプロセスを確認
+lsof -nP -iTCP:3000 -sTCP:LISTEN
 
 # プロセスを確認
 ps aux | grep "tsx server.ts"
@@ -318,8 +318,8 @@ npm run test:e2e -- --project=webkit
 ### サーバーが起動しない
 
 ```bash
-# ポートが使用中の場合
-lsof -ti:3000 | xargs kill -9
+# ポートが使用中の場合（待ち受け中のプロセスだけを止める。-sTCP:LISTEN を外すと接続中のブラウザ等も止まる）
+lsof -nP -iTCP:3000 -sTCP:LISTEN -t | xargs kill -9
 
 # 依存関係を再インストール
 rm -rf node_modules package-lock.json

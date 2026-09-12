@@ -168,10 +168,10 @@
     },
     {
       "tool": "codex",
-      "version": "0.153.4",
-      "source": "openai/codex, codex-rs/tui/src/slash_command.rs at tag rust-v0.153.4 — every `enum SlashCommand` variant except the ones whose description() is the internal \"DO NOT USE\" marker (MemoryDrop / MemoryUpdate). 59 variants, 57 active. Read 2026-09-06: the file is byte-identical to the rust-v0.151.0 revision the #2158 read used, so the command set is unchanged and only the version stamp moves. No dedicated issue — taken as the Phase 1.5 leftover of release v0.31.1 (PR #2348).",
-      "observedAt": "2026-09-06",
-      "issue": 2348,
+      "version": "0.154.0",
+      "source": "openai/codex, codex-rs/tui/src/slash_command.rs at tag rust-v0.154.0 — every `enum SlashCommand` variant except the two whose description() is the internal \"DO NOT USE\" marker (MemoryDrop / MemoryUpdate). 60 variants, 58 active. Names are not the identifiers: the enum carries #[strum(serialize_all = \"kebab-case\")] with per-variant overrides, so AutoReview reads as \"approve\", MultiAgents as \"subagents\", ElevateSandbox as \"setup-default-sandbox\" and SandboxReadRoot as \"sandbox-add-read-dir\" (Pwd / Pets / Stop keep their to_string spelling). Read 2026-09-12 for release v0.34.0 (PR #2497): the only change from the rust-v0.153.4 revision the #2348 read used is the added Worktree variant, so the set grows by exactly /worktree and the version stamp moves. No dedicated issue — taken as the Phase 1.5 leftover of this release.",
+      "observedAt": "2026-09-12",
+      "issue": 2497,
       "commands": [
         "agents",
         "app",
@@ -229,7 +229,8 @@
         "theme",
         "title",
         "usage",
-        "vim"
+        "vim",
+        "worktree"
       ]
     },
     {

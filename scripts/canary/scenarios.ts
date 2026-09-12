@@ -9,7 +9,10 @@
  * two (#1847) additionally point the session's injected hooks at the canary's
  * own receiver and assert what Auto-Yes v2's verdict did to the screen; those
  * carry a `hooks` block and their expectations live in `hook-expectations.ts`.
- * Five more (#2050) drive `opencode` and live in `opencode-scenarios.ts`.
+ * Four more claude scenarios (#2486) live in `askuserquestion-scenarios.ts`:
+ * AskUserQuestion pickers with a tab row and/or a preview pane, the last of
+ * which answers every screen through the production `respond` path. Five more
+ * (#2050) drive `opencode` and live in `opencode-scenarios.ts`.
  *
  * A run drives ONE tool (`--tool`, default claude) — the throwaway HOME, the
  * pane geometry and the readiness row all differ per tool — so every entry
@@ -33,6 +36,7 @@ import {
   expectPermissionAllowedByHook,
   expectPermissionDialogAfterNoDecision,
 } from './hook-expectations';
+import { ASK_USER_QUESTION_SCENARIOS } from './askuserquestion-scenarios';
 import { OPENCODE_SCENARIOS } from './opencode-scenarios';
 import type { AutoYesPolicy } from '@/lib/polling/auto-yes-resolver';
 import type { CanaryScenario, CanaryToolId } from './types';
@@ -204,7 +208,11 @@ const CLAUDE_SCENARIOS: readonly CanaryScenario[] = [
 ];
 
 /** Every scenario, claude's first then opencode's, in declaration order. */
-export const SCENARIOS: readonly CanaryScenario[] = [...CLAUDE_SCENARIOS, ...OPENCODE_SCENARIOS];
+export const SCENARIOS: readonly CanaryScenario[] = [
+  ...CLAUDE_SCENARIOS,
+  ...ASK_USER_QUESTION_SCENARIOS,
+  ...OPENCODE_SCENARIOS,
+];
 
 /** The scenarios that drive `tool`, in declaration order. */
 export function scenariosForTool(tool: CanaryToolId): CanaryScenario[] {

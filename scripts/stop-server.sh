@@ -11,6 +11,8 @@ PID_FILE="$LOG_DIR/server.pid"
 
 # Load .env file (for CM_PORT etc.)
 source "$SCRIPT_DIR/load-env.sh"
+# find_listen_pids_by_port / print_port_targets (Issue #2473)
+source "$SCRIPT_DIR/lib/port-pids.sh"
 
 # Support both CM_PORT and legacy MCBD_PORT
 PORT=${CM_PORT:-${MCBD_PORT:-3000}}
@@ -25,31 +27,26 @@ echo "=== Stopping server ==="
 
 stopped=false
 
-# Cross-platform PID lookup: lsof (macOS/Linux) -> ss+fuser fallback (WSL2/Linux)
-find_pids_by_port() {
-    local port=$1
-    if command -v lsof &>/dev/null; then
-        lsof -ti:"$port" 2>/dev/null | grep -E '^[0-9]+$' | sort -u || true
-    elif command -v ss &>/dev/null && command -v fuser &>/dev/null; then
-        fuser "$port"/tcp 2>/dev/null | tr -s ' ' '\n' | grep -E '^[0-9]+$' | sort -u || true
-    else
-        echo "WARNING: Neither lsof nor ss+fuser available. Cannot find processes by port." >&2
-    fi
-}
-
-# Step 1: Port-based stop - kill all processes using the port (most reliable)
-# Safe PID pipeline: validate numeric + deduplicate [D1-002]
-PIDS=$(find_pids_by_port $PORT)
+# Step 1: Port-based stop - kill the process(es) LISTENING on the port (most reliable)
+# Listeners only (Issue #2473): a process merely CONNECTED to the port (the
+# browser showing CommandMate, another session's CLI) is not the server. The
+# cross-platform lookup and the numeric/dedup validation [D1-002] live in
+# lib/port-pids.sh.
+PIDS=$(find_listen_pids_by_port "$PORT")
 
 if [ -n "$PIDS" ]; then
-    echo "Stopping process(es) on port $PORT: $(echo $PIDS | tr '\n' ' ')"
+    echo "Stopping process(es) listening on port $PORT:"
+    # Name each target before signalling it; a bare PID identifies nothing
+    # once the process is gone.
+    print_port_targets "Stopping" $PIDS
     echo "$PIDS" | xargs kill 2>/dev/null  # SIGTERM first
     sleep 2
 
     # SIGKILL fallback [D1-002: || true for REMAINING]
-    REMAINING=$(find_pids_by_port $PORT)
+    REMAINING=$(find_listen_pids_by_port "$PORT")
     if [ -n "$REMAINING" ]; then
-        echo "Force killing remaining: $(echo $REMAINING | tr '\n' ' ')"
+        echo "Force killing remaining:"
+        print_port_targets "Force killing" $REMAINING
         echo "$REMAINING" | xargs kill -9 2>/dev/null
     fi
     stopped=true
@@ -84,9 +81,10 @@ sleep 1
 
 # Step 3: Final check - make sure port is free [C2-003]
 # At this point SIGTERM->SIGKILL stages already attempted, SIGKILL is justified
-REMAINING=$(find_pids_by_port $PORT)
+REMAINING=$(find_listen_pids_by_port "$PORT")
 if [ -n "$REMAINING" ]; then
-    echo "Cleaning up remaining processes: $(echo $REMAINING | tr '\n' ' ')"
+    echo "Cleaning up remaining processes:"
+    print_port_targets "Cleaning up" $REMAINING
     echo "$REMAINING" | xargs kill -9 2>/dev/null  # Final check: SIGKILL as last resort
     sleep 1
 fi

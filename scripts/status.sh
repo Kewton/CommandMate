@@ -10,6 +10,8 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # Load .env file (for CM_PORT, CM_DB_PATH etc.)
 source "$SCRIPT_DIR/load-env.sh"
+# find_listen_pids_by_port (Issue #2473)
+source "$SCRIPT_DIR/lib/port-pids.sh"
 
 echo "CommandMate Status"
 echo "=================="
@@ -30,11 +32,13 @@ fi
 # Check port
 # Support both CM_PORT and legacy MCBD_PORT
 PORT=${CM_PORT:-${MCBD_PORT:-3000}}
-if lsof -ti:$PORT &> /dev/null; then
-  PID=$(lsof -ti:$PORT)
+# Listeners only (Issue #2473): a browser connected to the port is not the
+# server, and its PID must not be reported as the server's.
+PID=$(find_listen_pids_by_port "$PORT")
+if [ -n "$PID" ]; then
   echo "Process:"
   echo "  Port: $PORT"
-  echo "  PID: $PID"
+  echo "  PID: $(echo $PID)"
   echo ""
 else
   echo "Process: Not running on port $PORT"

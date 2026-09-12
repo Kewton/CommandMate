@@ -1,15 +1,23 @@
 /**
  * Unit tests for AntigravityTool
  * Issue #988: Antigravity (agy) CLI support (Phase A)
+ * Issue #2478: the send-path readiness check, pinned to live agy frames
  */
 
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { mkdtempSync, realpathSync } from 'fs';
+import { mkdtempSync, readdirSync, readFileSync, realpathSync } from 'fs';
 import { tmpdir } from 'os';
-import { join } from 'path';
+import { join, resolve } from 'path';
 import { removeTempDir } from '@tests/helpers/temp-dir';
-import { AntigravityTool } from '@/lib/cli-tools/antigravity';
+import {
+  ANTIGRAVITY_GENERATING_CAPTURE_V1_1_13,
+  ANTIGRAVITY_IDLE_CAPTURE_V1_1_13,
+  ANTIGRAVITY_IDLE_CAPTURE_V1_1_13_ANSI,
+} from '@tests/fixtures/model-info-captures';
+import { AntigravityTool, isAntigravityReady } from '@/lib/cli-tools/antigravity';
 import type { CLIToolType } from '@/lib/cli-tools/types';
+import { stripAnsi } from '@/lib/detection/cli-patterns';
+import { detectSessionStatus } from '@/lib/detection/status-detector';
 
 // Mock tmux functions
 vi.mock('@/lib/tmux/tmux', () => ({
@@ -46,7 +54,26 @@ vi.mock('@/lib/logger', () => ({
 }));
 
 const SESSION = 'mcbd-antigravity-test-wt';
-const IDLE_FOOTER = '? for shortcuts';
+
+/** Live agy 1.2.1 frames (Issue #2478) — provenance and redaction in the directory's README. */
+const LIVE_2478 = resolve(__dirname, '../../fixtures/antigravity-live-2478');
+/** Live agy 1.1.27 frames (Issue #2364): the trust screen, the pickers, the dialogs. */
+const LIVE_2364 = resolve(__dirname, '../../fixtures/antigravity-live-2364');
+
+const frameIn = (dir: string, name: string): string =>
+  readFileSync(join(dir, `${name}.txt`), 'utf8');
+
+/** agy 1.2.1 after a turn with three Bash tool calls: no `? for shortcuts` on the status row. */
+const AFTER_TOOL_TURN = frameIn(LIVE_2478, 'after-tool-turn');
+/** agy 1.2.1 after two turns without tools: `? for shortcuts` on the status row. */
+const AFTER_PLAIN_TURNS = frameIn(LIVE_2478, 'after-plain-turns');
+
+/**
+ * A pane agy is idle in. Until #2478 the bare string `'? for shortcuts'` stood
+ * in for one; the readiness check now reads the input box, so the double has to
+ * be a real frame.
+ */
+const IDLE_FRAME = AFTER_PLAIN_TURNS;
 const TRUST_DIALOG =
   'Do you trust the contents of this project?\n> Yes, I trust this folder\n  No, exit\n↑/↓ Navigate · enter Confirm';
 
@@ -202,7 +229,7 @@ describe('AntigravityTool', () => {
         let call = 0;
         vi.mocked(capturePane).mockImplementation(async () => {
           call++;
-          return call === 1 ? TRUST_DIALOG : IDLE_FOOTER;
+          return call === 1 ? TRUST_DIALOG : IDLE_FRAME;
         });
 
         const promise = tool.startSession('test-wt', '/path/to/wt');
@@ -226,7 +253,7 @@ describe('AntigravityTool', () => {
         const { hasSession, sendSpecialKey, capturePane } = await import('@/lib/tmux/tmux');
         vi.spyOn(tool, 'isInstalled').mockResolvedValue(true);
         vi.mocked(hasSession).mockResolvedValue(false);
-        vi.mocked(capturePane).mockResolvedValue(IDLE_FOOTER);
+        vi.mocked(capturePane).mockResolvedValue(IDLE_FRAME);
 
         const promise = tool.startSession('test-wt', '/path/to/wt');
         await vi.advanceTimersByTimeAsync(40000);
@@ -247,7 +274,7 @@ describe('AntigravityTool', () => {
           const { hasSession, sendKeys, capturePane } = await import('@/lib/tmux/tmux');
           vi.spyOn(tool, 'isInstalled').mockResolvedValue(true);
           vi.mocked(hasSession).mockResolvedValue(false);
-          vi.mocked(capturePane).mockResolvedValue(IDLE_FOOTER);
+          vi.mocked(capturePane).mockResolvedValue(IDLE_FRAME);
 
           const promise = tool.startSession('test-wt', '/path/to/wt', undefined, 'Gemini 3.1 Pro (High)');
           await vi.advanceTimersByTimeAsync(40000);
@@ -269,7 +296,7 @@ describe('AntigravityTool', () => {
           const { hasSession, sendKeys, capturePane } = await import('@/lib/tmux/tmux');
           vi.spyOn(tool, 'isInstalled').mockResolvedValue(true);
           vi.mocked(hasSession).mockResolvedValue(false);
-          vi.mocked(capturePane).mockResolvedValue(IDLE_FOOTER);
+          vi.mocked(capturePane).mockResolvedValue(IDLE_FRAME);
 
           const promise = tool.startSession('test-wt', '/path/to/wt');
           await vi.advanceTimersByTimeAsync(40000);
@@ -287,7 +314,7 @@ describe('AntigravityTool', () => {
           const { hasSession, sendKeys, capturePane } = await import('@/lib/tmux/tmux');
           vi.spyOn(tool, 'isInstalled').mockResolvedValue(true);
           vi.mocked(hasSession).mockResolvedValue(false);
-          vi.mocked(capturePane).mockResolvedValue(IDLE_FOOTER);
+          vi.mocked(capturePane).mockResolvedValue(IDLE_FRAME);
 
           const promise = tool.startSession('test-wt', '/path/to/wt', undefined, "model'; rm -rf ~ #");
           await vi.advanceTimersByTimeAsync(40000);
@@ -320,7 +347,7 @@ describe('AntigravityTool', () => {
         const { sendMessageWithSubmitVerification } = await import('@/lib/cli-tools/submit-verified-sender');
         const { invalidateCache } = await import('@/lib/tmux/tmux-capture-cache');
         vi.mocked(hasSession).mockResolvedValue(true);
-        vi.mocked(capturePane).mockResolvedValue(IDLE_FOOTER);
+        vi.mocked(capturePane).mockResolvedValue(IDLE_FRAME);
 
         const promise = tool.sendMessage('test-wt', 'hello');
         await vi.advanceTimersByTimeAsync(20000);
@@ -343,7 +370,7 @@ describe('AntigravityTool', () => {
         const { hasSession, capturePane } = await import('@/lib/tmux/tmux');
         const { sendMessageWithSubmitVerification } = await import('@/lib/cli-tools/submit-verified-sender');
         vi.mocked(hasSession).mockResolvedValue(true);
-        vi.mocked(capturePane).mockResolvedValue(IDLE_FOOTER);
+        vi.mocked(capturePane).mockResolvedValue(IDLE_FRAME);
 
         const promise = tool.sendMessage('test-wt', 'line1\nline2');
         await vi.advanceTimersByTimeAsync(20000);
@@ -356,6 +383,134 @@ describe('AntigravityTool', () => {
       } finally {
         vi.useRealTimers();
       }
+    });
+  });
+
+  // Issue #2478: agy 1.2.1 stops drawing `? for shortcuts` after a turn that
+  // used a tool, and the send check required it — every later send to that
+  // session waited 15 s and threw, while the status detector called the same
+  // pane `ready`. The check now reads what the detector reads. Every frame
+  // below is a live capture; see each directory's README.
+  describe('isAntigravityReady (Issue #2478)', () => {
+    describe('agy 1.2.1: the two frames the Issue measured', () => {
+      it('the after-tool-turn frame still describes the defect: input box drawn, no `? for shortcuts`', () => {
+        expect(AFTER_TOOL_TURN).not.toMatch(/\?\s+for\s+shortcuts/);
+        expect(AFTER_TOOL_TURN).toMatch(/^>$/m);
+        // What the status detector said about this pane while the sends failed.
+        expect(detectSessionStatus(AFTER_TOOL_TURN, 'antigravity').status).toBe('ready');
+      });
+
+      it('is ready after a turn that used a tool (no `? for shortcuts` on the status row)', () => {
+        expect(isAntigravityReady(AFTER_TOOL_TURN)).toBe(true);
+      });
+
+      it('is ready after turns that used no tool (`? for shortcuts` on the status row)', () => {
+        expect(AFTER_PLAIN_TURNS).toMatch(/\?\s+for\s+shortcuts/);
+        expect(isAntigravityReady(AFTER_PLAIN_TURNS)).toBe(true);
+      });
+    });
+
+    describe('not ready on a screen a typed message must not reach', () => {
+      it('generating: agy 1.1.13 mid-turn, `esc to cancel` on the status row', () => {
+        // The input box stays on screen while agy generates, so the box alone
+        // must not read as ready.
+        expect(ANTIGRAVITY_GENERATING_CAPTURE_V1_1_13).toMatch(/^>$/m);
+        expect(ANTIGRAVITY_GENERATING_CAPTURE_V1_1_13).toContain('esc to cancel');
+        expect(isAntigravityReady(ANTIGRAVITY_GENERATING_CAPTURE_V1_1_13)).toBe(false);
+      });
+
+      it('the folder-trust dialog', () => {
+        const raw = frameIn(LIVE_2364, 'trust-dialog');
+        expect(raw).toContain('Do you trust the contents of this project?');
+        expect(isAntigravityReady(raw)).toBe(false);
+      });
+
+      it.each(['picker-switch-model', 'popup-slash-commands'])('the selection list %s', (name) => {
+        const raw = frameIn(LIVE_2364, name);
+        expect(raw).toMatch(/↑\/↓/);
+        expect(isAntigravityReady(raw)).toBe(false);
+      });
+
+      it.each(['dialog-create-file', 'dialog-bash-wrapped', 'dialog-bash-wrapped-six'])(
+        'the numbered permission dialog %s',
+        (name) => {
+          expect(isAntigravityReady(frameIn(LIVE_2364, name))).toBe(false);
+        }
+      );
+
+      it("`/feedback`'s category menu: drawn below an empty input box, with no `↑/↓ Navigate`", () => {
+        const plain = stripAnsi(frameIn(LIVE_2364, 'dialog-feedback-category'));
+        expect(plain).toMatch(/^>$/m);
+        expect(plain).not.toMatch(/↑\/↓/);
+        expect(isAntigravityReady(plain)).toBe(false);
+      });
+    });
+
+    describe('agrees with the status detector on every captured agy frame', () => {
+      // `survey-after-deny.reconstructed.txt` is not a capture (see its
+      // README), so it is not a witness here.
+      const frames = [
+        { name: 'antigravity-live-2478/after-tool-turn (1.2.1)', raw: AFTER_TOOL_TURN },
+        { name: 'antigravity-live-2478/after-plain-turns (1.2.1)', raw: AFTER_PLAIN_TURNS },
+        { name: 'model-info-captures idle (1.1.13)', raw: ANTIGRAVITY_IDLE_CAPTURE_V1_1_13 },
+        { name: 'model-info-captures idle, ANSI (1.1.13)', raw: ANTIGRAVITY_IDLE_CAPTURE_V1_1_13_ANSI },
+        { name: 'model-info-captures generating (1.1.13)', raw: ANTIGRAVITY_GENERATING_CAPTURE_V1_1_13 },
+        ...readdirSync(LIVE_2364)
+          .filter((file) => file.endsWith('.txt') && !file.includes('.reconstructed.'))
+          .map((file) => ({
+            name: `antigravity-live-2364/${file} (1.1.27)`,
+            raw: readFileSync(join(LIVE_2364, file), 'utf8'),
+          })),
+      ];
+
+      it('has witnesses for both verdicts', () => {
+        expect(frames.length).toBeGreaterThanOrEqual(15);
+        expect(new Set(frames.map(({ raw }) => isAntigravityReady(raw)))).toEqual(new Set([true, false]));
+      });
+
+      it.each(frames)('$name', ({ raw }) => {
+        expect(isAntigravityReady(raw)).toBe(detectSessionStatus(raw, 'antigravity').status === 'ready');
+      });
+    });
+
+    describe('sendMessage over those frames', () => {
+      it('sends to a session whose last turn used a tool', async () => {
+        vi.useFakeTimers();
+        try {
+          const { hasSession, capturePane } = await import('@/lib/tmux/tmux');
+          const { sendMessageWithSubmitVerification } = await import('@/lib/cli-tools/submit-verified-sender');
+          vi.mocked(hasSession).mockResolvedValue(true);
+          vi.mocked(capturePane).mockResolvedValue(AFTER_TOOL_TURN);
+
+          const promise = tool.sendMessage('test-wt', 'the same request again');
+          await vi.advanceTimersByTimeAsync(20000);
+          await promise;
+
+          expect(sendMessageWithSubmitVerification).toHaveBeenCalledWith(
+            expect.objectContaining({ sessionName: SESSION, message: 'the same request again' })
+          );
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      it('still refuses a generating pane: times out without typing', async () => {
+        vi.useFakeTimers();
+        try {
+          const { hasSession, capturePane } = await import('@/lib/tmux/tmux');
+          const { sendMessageWithSubmitVerification } = await import('@/lib/cli-tools/submit-verified-sender');
+          vi.mocked(hasSession).mockResolvedValue(true);
+          vi.mocked(capturePane).mockResolvedValue(ANTIGRAVITY_GENERATING_CAPTURE_V1_1_13);
+
+          const outcome = expect(tool.sendMessage('test-wt', 'hello')).rejects.toThrow(/prompt not ready/);
+          await vi.advanceTimersByTimeAsync(20000);
+          await outcome;
+
+          expect(sendMessageWithSubmitVerification).not.toHaveBeenCalled();
+        } finally {
+          vi.useRealTimers();
+        }
+      });
     });
   });
 

@@ -8,7 +8,9 @@
  *       selection lists — Issue #1628 — and interactive frames the detection
  *       layer could not classify at all — Issue #1708. Both are reported as
  *       exit 10 with a distinguishing `type` rather than a new exit code, so
- *       callers that already branch on 10 keep working.)
+ *       callers that already branch on 10 keep working. Issue #2463: a prompt
+ *       the target's own Auto-Yes is answering is held for --auto-yes-grace
+ *       seconds before it is reported.)
  * - 11: UPSTREAM_FAULT (--fail-on-upstream-fault only, Issue #1839: the agent
  *       came back to its composer with an upstream API failure on the frame)
  * - 124: TIMEOUT (--timeout exceeded)
@@ -204,6 +206,17 @@ function describePaneObstruction(data: CurrentOutputResponse): string {
  * is a historical suppression of some earlier prompt. The window is generous
  * against the server's own poll interval — being a few seconds late with a true
  * report beats staying silent, which is the failure this exists to fix.
+ *
+ * Issue #2463 reads the same window as "the policy withheld THIS prompt", which
+ * is what ends the Auto-Yes hold at once. `current-output` publishes no start
+ * time for a scraped prompt, so the push gate's `suppression.at >= waitingSince`
+ * (`src/lib/push/prompt-push-gate.ts`) cannot be computed here; a record that is
+ * still being re-stamped is the CLI's reading of it. Using one window for both
+ * keeps the hold and the payload in agreement: an exit 10 carries
+ * `autoYesSuppression` exactly when the hold judged the answer withheld. The
+ * error runs towards reporting — a withheld answer to an earlier prompt, under a
+ * minute old, still ends the hold, which is the pre-#2463 exit rather than a
+ * new failure.
  */
 const SUPPRESSION_FRESH_MS = 60_000;
 
@@ -559,6 +572,78 @@ function outstandingPrompt(data: CurrentOutputResponse, submittedAt: number): bo
 }
 
 /**
+ * How long `--on-prompt agent` holds a prompt the target's own Auto-Yes is
+ * answering before reporting it anyway, in seconds (Issue #2463).
+ *
+ * Measured 2026-09-09 with Command Code 1.51.3 delegating to Antigravity over
+ * `ask`: the target's permission dialog for `git log && npm test` ended the ask
+ * with exit 10 on the spot, the delegating agent stopped and reported to its
+ * human — which is what exit 10 tells it to do — and the target's Auto-Yes then
+ * answered the dialog and finished the turn with nobody waiting for it. A take
+ * without Auto-Yes was right to exit 10; the only difference was a flag `wait`
+ * did not read.
+ *
+ * The server's Auto-Yes poller re-reads the pane every 2 s and sits out 5 s
+ * after each answer (`POLLING_INTERVAL_MS` / `COOLDOWN_INTERVAL_MS` in
+ * `src/lib/auto-yes-state.ts`), so a prompt it can answer is gone within one or
+ * two of this command's 5 s polls. 30 s is several times that, and short enough
+ * that a prompt Auto-Yes has no answer for — free text, a type it does not
+ * resolve — still reaches a human in half a minute.
+ */
+const AUTO_YES_GRACE_DEFAULT_SECONDS = 30;
+
+/**
+ * {@link pollWorktree}'s options: {@link WaitOptions} plus the Auto-Yes grace
+ * (Issue #2463).
+ */
+export interface PollWorktreeOptions extends WaitOptions {
+  /**
+   * `--auto-yes-grace`, in seconds; 0 turns the hold off. Absent means
+   * {@link AUTO_YES_GRACE_DEFAULT_SECONDS}, which is what `ask` gets: it calls
+   * {@link pollWorktree} without the flag.
+   */
+  autoYesGrace?: number;
+}
+
+/**
+ * Parse `--auto-yes-grace <seconds>` (Issue #2463).
+ *
+ * A whole number of seconds, 0 or more. Anything else parses to NaN, which the
+ * action refuses with exit 2 like every other malformed argument here. Not
+ * `parseInt` like the neighbouring options: it accepts `2.5` and `30s` by
+ * truncating them, and a grace other than the one asked for quietly moves when
+ * exit 10 arrives.
+ */
+function parseGraceSeconds(raw: string): number {
+  const trimmed = raw.trim();
+  return /^\d+$/.test(trimmed) ? Number(trimmed) : Number.NaN;
+}
+
+/**
+ * Whether one more poll interval still lands inside `--timeout` and
+ * `--stall-timeout` (Issue #2463).
+ *
+ * The Auto-Yes hold asks before it sleeps. Otherwise a caller whose deadline
+ * lapses during the hold would hear 124 about a prompt it used to hear 10 about:
+ * the hold is there to give Auto-Yes a chance to answer, not to turn an open
+ * prompt into a timeout. The same two checks the top of {@link pollWorktree}'s
+ * loop makes, one interval ahead.
+ */
+function nextPollWithinDeadlines(
+  options: WaitOptions,
+  startTime: number,
+  lastActivityTime: number,
+  now: number,
+): boolean {
+  const nextPollAt = now + POLL_INTERVAL_MS;
+  if (options.timeout && nextPollAt - startTime >= options.timeout * 1000) return false;
+  if (options.stallTimeout && nextPollAt - lastActivityTime >= options.stallTimeout * 1000) {
+    return false;
+  }
+  return true;
+}
+
+/**
  * Poll a single worktree until completion, prompt, or timeout.
  *
  * Exported since Issue #2376 so `ask` can do the WAITING half of its round trip
@@ -566,7 +651,8 @@ function outstandingPrompt(data: CurrentOutputResponse, submittedAt: number): bo
  * `send` + `wait` + "read the reply", and a private copy of the turn-boundary
  * rules here (#1839's `basis`, #1975's unanswered-prompt hold, #1708's
  * unclassified dwell) is a copy that would drift into reporting a completion
- * this one refuses.
+ * this one refuses. #2463's Auto-Yes hold is shared the same way: `ask` passes
+ * no `autoYesGrace` and holds for the default.
  *
  * `options.instance` must already be a resolved instance ID — see
  * {@link resolveWaitInstance}.
@@ -574,7 +660,7 @@ function outstandingPrompt(data: CurrentOutputResponse, submittedAt: number): bo
 export async function pollWorktree(
   client: ApiClient,
   worktreeId: string,
-  options: WaitOptions,
+  options: PollWorktreeOptions,
 ): Promise<{ exitCode: number; output?: WaitPromptOutput }> {
   const startTime = Date.now();
   let lastActivityTime = Date.now();
@@ -606,6 +692,15 @@ export async function pollWorktree(
    * unreachable endpoint on every poll.
    */
   let promptLedgerReadable = true;
+  /**
+   * Epoch ms of the first poll in the current unbroken run of an agent-mode
+   * prompt the target's Auto-Yes is expected to answer, or null (Issue #2463).
+   * Cleared by the first poll that shows no prompt, so every prompt Auto-Yes
+   * answers gets a window of its own.
+   */
+  let autoYesAnsweringSince: number | null = null;
+  const autoYesGraceSeconds = options.autoYesGrace ?? AUTO_YES_GRACE_DEFAULT_SECONDS;
+  const autoYesGraceMs = autoYesGraceSeconds * 1000;
 
   while (true) {
     // Check timeout
@@ -666,6 +761,42 @@ export async function pollWorktree(
           continue;
         }
 
+        // Issue #2463: the one case `decidePromptPush()` stays quiet about —
+        // Auto-Yes is on and has not withheld this answer — is a prompt Auto-Yes
+        // is about to answer, and exit 10 there hands a delegation back to a
+        // human for a dialog nobody had to see. Hold it for the grace window; a
+        // poll that shows no prompt ends the hold below and completion is judged
+        // as usual. A withheld answer (`suppressed`) and Auto-Yes being off are
+        // the gate's other two branches and still exit 10 at once.
+        if (!suppressed && data.autoYes?.enabled === true && autoYesGraceMs > 0) {
+          const now = Date.now();
+          if (autoYesAnsweringSince === null) {
+            autoYesAnsweringSince = now;
+            // stderr only: stdout is the exit-10 payload and nothing else.
+            console.error(
+              "Prompt detected; the target's Auto-Yes is answering, waiting up to " +
+                `${autoYesGraceSeconds}s… (${worktreeId})`,
+            );
+          }
+          const heldMs = now - autoYesAnsweringSince;
+          if (
+            heldMs < autoYesGraceMs &&
+            nextPollWithinDeadlines(options, startTime, lastActivityTime, now)
+          ) {
+            await sleep(POLL_INTERVAL_MS);
+            continue;
+          }
+          console.error(
+            heldMs < autoYesGraceMs
+              ? `Note: the prompt on ${worktreeId} is still open after ${Math.round(heldMs / 1000)}s ` +
+                  'under Auto-Yes, and the next poll would pass --timeout/--stall-timeout; reporting it now.'
+              : `Note: the target's Auto-Yes did not answer the prompt on ${worktreeId} within ` +
+                  `${autoYesGraceSeconds}s; reporting it.`,
+          );
+        } else if (autoYesAnsweringSince !== null && !suppressed) {
+          console.error(`Note: Auto-Yes is no longer enabled on ${worktreeId}; reporting the prompt.`);
+        }
+
         // Default (agent mode): output prompt info and exit 10
         //
         // Issue #1898: the degraded `unclassified` payload carries no `options`
@@ -706,6 +837,17 @@ export async function pollWorktree(
         }
 
         return { exitCode: WaitExitCode.PROMPT_DETECTED, output: promptOutput };
+      }
+
+      // Issue #2463: the prompt the hold was waiting on has gone. Who answered it
+      // is not on the wire — Auto-Yes, or a human at the pane — so the line says
+      // only that it cleared; what the agent does next is for the checks below.
+      if (autoYesAnsweringSince !== null) {
+        console.error(
+          `Prompt on ${worktreeId} cleared after ` +
+            `${Math.round((Date.now() - autoYesAnsweringSince) / 1000)}s; judging completion as usual.`,
+        );
+        autoYesAnsweringSince = null;
       }
 
       // Issue #1628: an arrow-key menu is the agent blocked on a human just as much
@@ -1100,11 +1242,11 @@ function mergeExitCode(current: number, candidate: number): number {
  * @param worktreeId - Worktree the selector is resolved against
  * @param options - The options as given
  */
-async function resolveWaitInstance(
+async function resolveWaitInstance<T extends WaitOptions>(
   client: ApiClient,
   worktreeId: string,
-  options: WaitOptions,
-): Promise<WaitOptions> {
+  options: T,
+): Promise<T> {
   if (!options.instance) return options;
   try {
     const target = await resolveInstanceTarget(client, worktreeId, options.instance, undefined);
@@ -1136,6 +1278,11 @@ export function createWaitCommand(): Command {
     .option('--verify', 'After completion, run every verification gate; exit 20 when a gate fails, 21 when there is nothing to verify')
     .option('--require-work', 'After completion, run only the work-evidence gate; exit 21 when the worktree has no commits and no uncommitted changes')
     .option('--fail-on-upstream-fault', 'Exit 11 instead of 0 when the agent returns to its composer with an upstream API failure (529/limit/API Error) on the frame')
+    .option(
+      '--auto-yes-grace <seconds>',
+      "With --on-prompt agent, how long a prompt the target's Auto-Yes is answering may stay open before exit 10 (default: 30; 0 exits 10 at once)",
+      parseGraceSeconds,
+    )
     .option('--token <token>', TOKEN_WARNING)
     // Issue #1926 (design 規約 3): the unclassified dwell is a stop reason with
     // no flag of its own, so `--help` is the only place a caller can find out
@@ -1173,8 +1320,23 @@ A prompt the agent has not answered yet (Issue #1975):
   60 s still win and return 124. A tool that posts no hooks (supportedEvents is
   empty) never enters this path at all. The completion line says which record
   decided it: basis=hook_stop when the agent reported the end of that turn.
+
+A prompt the target's Auto-Yes is answering (Issue #2463):
+  With --on-prompt agent, a prompt on a session whose Auto-Yes is on is not
+  reported at once: Auto-Yes answers it within seconds, and exit 10 would hand
+  the delegation back to a human for a prompt nobody had to see. wait keeps
+  polling for up to --auto-yes-grace seconds (default: 30), says so in one
+  stderr line and leaves stdout empty. If the prompt clears, completion is
+  judged as usual; \`commandmate ask\` shares this poller and does the same.
+
+  exit 10 still comes back when the grace runs out with the prompt open, and at
+  once when the Auto-Yes policy withheld the answer (the payload then carries
+  autoYesSuppression) or Auto-Yes is off. A --timeout / --stall-timeout that
+  would lapse during the grace ends it early with exit 10, not 124.
+  --auto-yes-grace 0 restores the immediate exit; --on-prompt human is
+  unchanged.
 `)
-    .action(async (worktreeIds: string[], options: WaitOptions) => {
+    .action(async (worktreeIds: string[], options: PollWorktreeOptions) => {
       try {
         // [SEC4-04] Validate all worktree IDs
         for (const id of worktreeIds) {
@@ -1188,6 +1350,13 @@ A prompt the agent has not answered yet (Issue #1975):
         // Issue #868 / #2376: an instance id or a roster alias.
         if (options.instance && !isInstanceSelector(options.instance)) {
           console.error(INSTANCE_SELECTOR_ERROR);
+          process.exit(ExitCode.CONFIG_ERROR);
+          return;
+        }
+
+        // Issue #2463: see parseGraceSeconds.
+        if (options.autoYesGrace !== undefined && Number.isNaN(options.autoYesGrace)) {
+          console.error('Error: --auto-yes-grace must be a whole number of seconds (0 or more).');
           process.exit(ExitCode.CONFIG_ERROR);
           return;
         }
