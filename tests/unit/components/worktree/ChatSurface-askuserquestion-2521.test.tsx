@@ -27,6 +27,17 @@
  * everything below it is the real implementation, and `fetch` is the seam the
  * key assertions land on.
  *
+ * ## Which screen this live state now belongs to (Issue #2522)
+ *
+ * `QUESTION_LIVE` below is `isSelectionListActive: true` with no `promptData` —
+ * the payload #2521 published for EVERY frame of this shape. #2522 reads the
+ * options, so that payload is now what the server publishes for a question
+ * screen it could NOT read (a gap in the numbering, an over-tall region); the
+ * frame prop stays the reported capture because the card's rows are what is
+ * under test here and they are drawn the same way either way. The answerable
+ * half — one card, not two — is
+ * `ChatSurface-askuserquestion-2522.test.tsx`.
+ *
  * @vitest-environment jsdom
  */
 

@@ -115,6 +115,26 @@ export const ANTIGRAVITY_VERIFIED_AGAINST = {
  * tmux socket at the production geometry — the default pane size does not
  * reproduce the 200-column rules that fence the composer, and the status row
  * drops its `esc to interrupt` tail below 72 columns.
+ *
+ * ## Deliberately NOT advanced by Issues #2521 / #2522
+ *
+ * Both read the `AskUserQuestion` screen, and both did it from the anonymised
+ * capture in `tests/fixtures/command-code-askuserquestion-2521/` — whose rows
+ * 410-423 are verbatim from a live pane, but whose version is what the reporting
+ * session SAID it was (1.53.0) rather than something re-probed. #2522's own
+ * fixture directory is synthetic throughout, and the send mode
+ * (`submitMode: 'answer_only'`) was chosen from a STATIC reading of a locally
+ * installed 1.53.1 `QuestionPrompt` plus the safe-direction argument in
+ * `tools/command-code/dialog.ts` — not from a keystroke sent at a live pane.
+ *
+ * None of that is the measurement this stamp records. #2304 set the precedent in
+ * the other direction: seven frames re-captured live on 1.49.0 changed no rule,
+ * and the stamp still says 1.40.1 because that is the build the rules were READ
+ * OFF. Advancing it here on a reported version, a synthetic fixture and a
+ * package read off disk would make `getDetectorFreshness` claim a measurement
+ * nobody took. When a live 1.53.x session is probed — the question screen, the
+ * keys it accepts and what one of them advances — bump this to that exact
+ * version with its own `capturedAt`.
  */
 export const COMMAND_CODE_VERIFIED_AGAINST = {
   version: '1.40.1',

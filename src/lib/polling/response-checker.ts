@@ -14,6 +14,7 @@ import { broadcastMessage } from '@/lib/ws-server';
 import type { ChatMessage } from '@/types/models';
 import { detectPrompt } from '@/lib/detection/prompt-detector';
 import { detectAntigravityNumberedDialogPrompt } from '@/lib/detection/tools/antigravity/dialog';
+import { readCommandCodeQuestionDialog } from '@/lib/detection/tools/command-code/dialog';
 import type { PromptDetectionResult } from '@/lib/detection/prompt-detector';
 import { recordClaudeConversation } from '@/lib/conversation-logger';
 import { usesAlternateScreen, type CLIToolType } from '@/lib/cli-tools/types';
@@ -292,16 +293,33 @@ export function buildPromptExtractionResult(
  * doubly-bordered row loses a second character on the second pass). Taking the
  * already-clean frame here is what keeps the two callers reading identical text.
  *
+ * ## The raw frame, and why it is a SECOND argument rather than a replacement
+ *
+ * Issue #2522. Command Code's `AskUserQuestion` is anchored on a 200-column
+ * U+2500 rule row, and `stripBoxDrawing` blanks exactly that row — so the
+ * reading that recognises the screen answers `null` on the spelling this
+ * function takes, however plainly the dialog is on the pane. The frame the
+ * cleaning started from is therefore passed alongside it: the caller has it in
+ * hand from the same tick, no second capture is taken, and `stripBoxDrawing`
+ * (which is not idempotent) still runs exactly once per tick, upstream.
+ *
+ * Omitting `rawFrame` is not an error and not a silent downgrade for anything
+ * else: only Command Code's reader consults it, and a caller that has no raw
+ * frame for this tool reaches the same `null` the old code did.
+ *
  * @param cleanOutput - tmux output with ANSI **and** box drawing already removed
  * @param cliToolId - CLI tool identifier for building detection options
  * @param precomputedLines - `cleanOutput.split('\n')` when the caller already has it
  *   (Issue #499 Item 4); must be the split of THIS string, not of the raw capture
+ * @param rawFrame - the SAME tick's capture with its box drawing intact (ANSI
+ *   optional), for the tool readers anchored on it (Issue #2522)
  * @returns PromptDetectionResult with isPrompt, promptData, and cleanContent
  */
 export function detectPromptOnCleanFrame(
   cleanOutput: string,
   cliToolId: CLIToolType,
   precomputedLines?: string[],
+  rawFrame?: string,
 ): PromptDetectionResult {
   // Issue #2364: agy's `↑/↓ Navigate` dialogs are read by agy's own reader
   // before the generic pass, on the same spelling `tools/antigravity/detect.ts`
@@ -322,6 +340,32 @@ export function detectPromptOnCleanFrame(
     const dialog = detectAntigravityNumberedDialogPrompt(cleanOutput);
     if (dialog !== null) return dialog;
   }
+
+  // Issue #2522: Command Code's footer-less `AskUserQuestion`, read by the same
+  // module `tools/command-code/detect.ts` publishes its status from — so the
+  // status API, the row this poller stores, the push notification's excerpt and
+  // `/prompt-response`'s re-verification all describe ONE screen with one
+  // question, one option list and one default.
+  //
+  // Ahead of the generic pass rather than after it, and both halves matter:
+  //
+  //  - `prompt` — the generic parser SUCCEEDS on the short, unwrapped spelling
+  //    of this screen and drags the tab strip and the transcript row above it
+  //    into the question, so "fall back to the reader" would leave the frames
+  //    that look fine looking wrong;
+  //  - `unsupported` — the question UI is up and the reading declined (a gap in
+  //    the numbering, an over-tall region). 確定仕様 B: no `promptData`, and
+  //    explicitly NOT the generic parser's partial list either. The status path
+  //    publishes #2521's manual-operation fallback for the same frame, so a
+  //    human is still told to answer it at the pane.
+  if (cliToolId === 'command-code' && rawFrame !== undefined) {
+    const reading = readCommandCodeQuestionDialog(rawFrame);
+    if (reading.kind === 'prompt') return reading.prompt;
+    if (reading.kind === 'unsupported') {
+      return { isPrompt: false, cleanContent: cleanOutput.trim() };
+    }
+  }
+
   const promptOptions = buildDetectPromptOptions(cliToolId);
   return detectPrompt(
     cleanOutput,
@@ -401,7 +445,11 @@ export function detectPromptWithOptions(
   output: string,
   cliToolId: CLIToolType
 ): PromptDetectionResult {
-  return detectPromptOnCleanFrame(stripBoxDrawing(stripAnsi(output)), cliToolId);
+  // Issue #2522: `output` is the capture, so the box-drawing-bearing spelling is
+  // right here and is handed on as `rawFrame`. Nothing is captured twice and
+  // nothing is cleaned twice — the fourth argument is the string the first one
+  // was DERIVED from.
+  return detectPromptOnCleanFrame(stripBoxDrawing(stripAnsi(output)), cliToolId, undefined, output);
 }
 
 // ============================================================================

@@ -152,43 +152,78 @@ describe('[#2369] buildCurrentOutput publishes isDismissablePanelActive', () => 
  * space, which is what took the frame away from the shared prompt parser and
  * left the generic composer check answering `ready` off `❯ 1. Prepare …`.
  *
- * The assertions are the API half of Issue #2521's 確定仕様 C: the flag the chat
- * surface and `wait` both read is true, and the two fields that would make this
- * look answerable stay false / null — `promptData` is #2522's to produce.
+ * Issue #2521 published this as a selection list with no `promptData`; Issue
+ * #2522 reads the options, so the assertions below are #2522's final state. The
+ * flag that must MOVE is `isSelectionListActive`: it is what raises #2521's
+ * arrow-only fallback card, and a payload carrying both it and `promptData`
+ * would draw two cards for one screen.
  */
 const ASK_USER_QUESTION = fs.readFileSync(
   path.join(__dirname, '../../fixtures/command-code-askuserquestion-2521/askuserquestion-wrapped-1530-200x1000.txt'),
   'utf-8',
 );
 
-describe('[#2521] buildCurrentOutput publishes the question screen as a selection list', () => {
-  it('raises isSelectionListActive and drops the ready verdict', async () => {
+/** The same screen with a gap in its numbering: #2521's fallback still applies. */
+const UNREADABLE_QUESTION = fs.readFileSync(
+  path.join(__dirname, '../../fixtures/command-code-askuserquestion-2522/unsupported-missing-number.txt'),
+  'utf-8',
+);
+
+describe('[#2521→#2522] buildCurrentOutput publishes the question screen as an answerable prompt', () => {
+  it('publishes a waiting prompt rather than the ready verdict', async () => {
     const payload = await payloadFor(ASK_USER_QUESTION);
+
+    expect(payload.sessionStatus).toBe('waiting');
+    expect(payload.sessionStatusReason).toBe(STATUS_REASON.PROMPT_DETECTED);
+    expect(payload.statusEvidence).toBe('positive');
+  });
+
+  it('publishes the same promptData both delivery paths answer from', async () => {
+    // The HTTP poll and the WebSocket push share this producer, so this IS the
+    // payload PromptPanel and MobilePromptSheet draw and `respond` resolves
+    // against.
+    const payload = await payloadFor(ASK_USER_QUESTION);
+
+    expect(payload.isPromptWaiting).toBe(true);
+    expect(payload.promptData).not.toBeNull();
+    const promptData = payload.promptData as {
+      type: string;
+      question: string;
+      options: Array<{ number: number; isDefault: boolean; requiresTextInput?: boolean }>;
+      submitMode?: string;
+    };
+    expect(promptData.type).toBe('multiple_choice');
+    expect(promptData.question).toBe(
+      'Approve proceeding from the plan into worktree creation and dispatch?',
+    );
+    expect(promptData.options).toHaveLength(4);
+    expect(promptData.options.filter((o) => o.isDefault).map((o) => o.number)).toEqual([1]);
+    expect(promptData.options[3].requiresTextInput).toBe(true);
+    expect(promptData.submitMode).toBe('answer_only');
+  });
+
+  it('does not raise #2521’s fallback card alongside it', async () => {
+    // `isSelectionListActive` is `resolveBlockedReason`'s second test and it
+    // outranks the prompt panel, so leaving it true here would replace the
+    // answer buttons with an arrow pad for a screen that now has both.
+    const payload = await payloadFor(ASK_USER_QUESTION);
+
+    expect(payload.isSelectionListActive).toBe(false);
+    expect(payload.isDismissablePanelActive).toBe(false);
+    expect(payload.isPagerActive).toBe(false);
+    expect(payload.isUnclassifiedActive).toBe(false);
+  });
+
+  it('still publishes the fallback for a question screen it cannot read', async () => {
+    // #2521's verdict, on the frames that still take it: a blocked agent, an
+    // arrow-driven card, and nothing that looks answerable.
+    const payload = await payloadFor(UNREADABLE_QUESTION);
 
     expect(payload.sessionStatus).toBe('waiting');
     expect(payload.sessionStatusReason).toBe(STATUS_REASON.COMMAND_CODE_SELECTION_LIST);
     expect(payload.isSelectionListActive).toBe(true);
-    expect(payload.statusEvidence).toBe('positive');
-  });
-
-  it('publishes no prompt and no payload to answer it with', async () => {
-    // The line between #2521 and #2522, asserted at the producer: the card and
-    // `wait` get a blocked agent, and nothing gets an options list that was
-    // never parsed.
-    const payload = await payloadFor(ASK_USER_QUESTION);
-
     expect(payload.isPromptWaiting).toBe(false);
     expect(payload.promptData).toBeNull();
-  });
-
-  it('keeps the other three overlay flags false', async () => {
-    // This screen has a moving highlight and no dismiss-only footer, no pager
-    // and — now that a rule reads it — nothing unclassified about it.
-    const payload = await payloadFor(ASK_USER_QUESTION);
-
-    expect(payload.isDismissablePanelActive).toBe(false);
-    expect(payload.isPagerActive).toBe(false);
-    expect(payload.isUnclassifiedActive).toBe(false);
   });
 
   it('still completes a real Command Code idle pane — the verdict this branch must not take', async () => {
