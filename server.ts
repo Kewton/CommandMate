@@ -869,12 +869,43 @@ app.prepare().then(() => {
       process.exit(1);
     }, 3000);
 
-    // Try graceful HTTP server close
-    server.close(() => {
-      clearTimeout(forceExitTimeout);
-      console.log('Server closed gracefully');
-      process.exit(0);
-    });
+    // Try graceful HTTP server close.
+    //
+    // Issue #2489: EVERY listener this process opened, not just the main one.
+    // `remoteServer` was absent from this function entirely, and the cost was
+    // asymmetry on the door the user cannot see: `server.close()`'s callback
+    // fires once the LOCAL connections have drained, and the `process.exit(0)`
+    // inside it then cut off any request still in flight through the provider.
+    // The local listener had three seconds of grace and the remote one had
+    // none. (The accept window between the teardown above and this point is the
+    // same for both listeners, and effectively zero — everything between the
+    // signal and here is synchronous, so the event loop never turns to accept a
+    // connection. The in-flight requests are the real loss.)
+    //
+    // The invariant, rather than the fix: whatever shutdown does to one
+    // listener it does to all of them. Anything added here belongs INSIDE this
+    // loop rather than on `server` alone — #2488 is adding
+    // `closeIdleConnections()` to stop a keep-alive tab from holding the
+    // callback back, and applying that to `server` only would put the
+    // asymmetry straight back on the listener nobody is looking at.
+    const listeners = remoteServer === null ? [server] : [server, remoteServer];
+
+    // `close()` stops each accept loop immediately and calls back once that
+    // listener's own connections have ended, so both doors shut now and the
+    // exit waits for the last one to drain. A listener that never reached
+    // `listen()` (EADDRINUSE on the remote port) calls its callback with an
+    // Error instead of throwing, which counts as drained here — which is what
+    // we want: a door that never opened cannot be holding anything.
+    let draining = listeners.length;
+    for (const listener of listeners) {
+      listener.close(() => {
+        draining -= 1;
+        if (draining > 0) return;
+        clearTimeout(forceExitTimeout);
+        console.log('Server closed gracefully');
+        process.exit(0);
+      });
+    }
   }
 
   process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
