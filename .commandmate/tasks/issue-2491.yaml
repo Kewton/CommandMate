@@ -1,0 +1,106 @@
+version: 1
+title: "Issue #2491: POST /send を resolveSessionTargetStrict() に揃える"
+goal: |
+  https://github.com/Kewton/CommandMate/issues/2491 を実装してください。
+  `/bug-fix` ワークフローで着手すること。原因分析は Issue 本文に完了済みのため、追加の
+  根本原因分析は不要。詳細は以下で確認できます:
+    gh issue view 2491 --repo Kewton/CommandMate
+
+  ## 前提（満たされています）
+  この Issue は #2487 のマージ後に着手する前提でしたが、#2487 は develop に既にマージ済み
+  （PR #2492、v0.34.0 に含まれる）です。着手して問題ありません。
+
+  ## 目的と照合基準
+  `POST /api/worktrees/:id/send` の tool / instance 解決を、#1925 で一本化した
+  `resolveSessionTargetStrict()` に揃える。そうすれば #2487 の規則（登録行が無くても、
+  tool 名の instance id に別の tool を要求したら食い違い）がこの route にも効く。
+
+  ## 事象（コードで確認。実機では再現していない）
+  - `src/app/api/worktrees/[id]/send/route.ts:192` は
+    `resolveInstanceCliTool(db, id, instanceId, requestedCliToolId)`
+    （`src/lib/db/agent-instances-db.ts:179`）で解決する。この関数の順序は
+    「roster の登録行 → 要求された tool → tool 名の instance id（#868 の primary anchor）」
+    で、登録行が無いと要求された tool をそのまま採る。
+  - そのため、登録行の無い worktree で `POST /send` に
+    `{ "instanceId": "antigravity", "cliToolId": "command-code" }` を渡すと、400 にならず
+    `mcbd-command-code-<wt>-antigravity` を立ててそこへ送る（#2487 と同じ形）。
+  - #2487 は `resolveSessionTarget()`（`src/lib/session/resolve-session-target.ts`）で
+    この食い違いを conflict にしたが、この route は別の resolver を使うので効かない。
+
+  ## この経路を通るもの
+  - CLI の `send` / `ask` / `respond`: 送る前に `resolve-target`（strict）で解決するので
+    既に exit 2 で止まり、この route には届かない（対象外）。
+  - Web UI: 通常は roster の行から両方を取るので、ふつうは食い違わない。
+  - API を直接呼ぶもの（スクリプト、Skill など）: ad-hoc のセッションがそのまま立つ
+    （これが対象）。
+
+  ## 原因
+  `resolveInstanceCliTool` のほかの利用者は `src/lib/relay/relay-session-ref.ts:55` だけ。
+  要求 tool を渡さないので、この食い違いの問題は起きない。
+
+  ## 対策の方向（案）
+  - `POST /send` を `resolveSessionTargetStrict()` に置き換える。conflict のときは、
+    ほかの副作用 route（`kill-session` / `terminal` / `auto-yes` POST など）と同じく
+    400 `instance_tool_conflict` と `describeSessionTargetConflict()` の文言で返す。
+  - 既定の連鎖 `resolution.cliToolId || worktree.cliToolId || DEFAULT_CLI_TOOL` は、
+    `resolveSessionTarget()` の worktree-default / fallback と同じ意味なので、置き換えても
+    既定の挙動は変わらないはず（テストで固定する）。
+  - `relay-session-ref.ts` も同じ resolver に揃えるか（挙動の差は無い）、揃えた後に
+    `resolveInstanceCliTool` を消せるかは設計で決めてよい（必須ではない）。
+
+  ## 受入条件
+  - unit / integration: 登録行の無い worktree で
+    `POST /send { instanceId: 'antigravity', cliToolId: 'command-code' }` → 400
+    `instance_tool_conflict`、tmux セッションは立たない。
+  - 陰性対照（従来どおり）: ad-hoc の id（`codex-3`）＋ `cliToolId` は送れる
+    （`--register` の経路）。roster の食い違いは 400。instance も tool も無い要求は
+    worktree の既定へ。
+
+  ## 作業ルール（厳守）
+  - **`CHANGELOG.md` と `docs/module-reference.md` を編集しないでください**（scope 外です）。
+    代わりに次の 2 ファイルを書いてください。どちらも `dev-reports/` 配下なので commit には
+    入りません。
+    - `dev-reports/changelog/issue-2491.md` — `CHANGELOG.md` の `## [Unreleased]` にそのまま
+      貼れる **1 エントリ**（先頭は `- **<type>(<scope>): …** (#2491): …`）。どの節
+      （`### Added` / `### Changed` / `### Fixed`）に入るかを 1 行目にコメントで書く。
+      形式は次の実例に合わせてください（エントリは**ファイル中では 1 行**）:
+
+      ```markdown
+      <!-- ### Fixed -->
+      - **fix(cli): `send` 直後の `wait` が「まだ始まっていない」を完了と読む問題を修正** (#1975): `wait` が `sessionStatus==='ready'` を完了と判定する直前に、**「このインスタンスに最後に渡されたプロンプト」と「エージェント自身が最後に報告したターン終了（`lastStopEventAt`）」を突き合わせる**ゲートを追加。`send` 直後は最新の構造化イベントが直前ターンの `stop` のままなので #1839 の `adoptTurnStart()` が何も採用せず、`turnStartedAt === null` が「決着済み」と読まれてアイドル composer をそのまま完了にしていた（隔離サーバ実測 2026-08-22 / copilot 1.0.80: `send`→`wait` 5 回中 3 回が約 0.3 秒・`basis=scraper_ready`・成果物ゼロで exit 0）。ゲートは `GET /api/worktrees/:id/messages?limit=1&unit=pairs` を `--instance`（無指定ならサーバが解決した `cliToolId`）でスコープして読む。**hook を出さないツールは挙動不変** — `structuredEvents.source.capabilities.supportedEvents`（#1924 の宣言値）が `stop` とターン開始語の両方を宣言しているソースだけがこのゲートに入り、legacy-relay（`supportedEvents: []`）と #1924 以前のサーバは従来経路のまま台帳も引かない。保留は `PENDING_PROMPT_HOLD_MS`=60 秒で打ち切り（hooks は全経路 fail-open なので `Stop` の取りこぼしで `wait` が返らなくなってはいけない）、`--timeout` / `--stall-timeout` はそれより短ければ従来どおり優先される。完了行の `basis=` は、エージェントが最新プロンプトの終了を報告していれば `hook_stop` になる（`scraper_ready` は「画面しか言っていない」という文書どおりの意味に戻る）。
+      ```
+
+      - `- **` で始めること（`grep -cE '^- \*\*'` で数える）。
+      - `(#2491)` は要約の**外**（`**` を閉じた後）に置くこと。
+      - `<type>` は CLAUDE.md のコミットメッセージ規約と同じ語彙（`feat`/`fix`/`docs`/`refactor`/`test`/`chore`/`ci`/`style`）。
+      - 1 エントリ＝1 行（折らない）。
+    - `dev-reports/module-reference/issue-2491.md` — `docs/module-reference.md` の表に足す
+      注記を**行キー（`| \`path\` |`）ごと**に列挙する。既存行に足すときは
+      `grep -n '^| \`<path>\`' docs/module-reference.md` を実行し、その出力（行番号つきの
+      行キー）を断片に書き写してから書くこと。0 件だった行への追記を指示しない。実例:
+
+      ```markdown
+      ## 既存行への追記
+      - `src/lib/session/worktree-status-helper.ts` — 実在確認: `docs/module-reference.md:103`（行番号は確認時点のもの）
+        追記内容: 「...」
+
+      ## 新規行
+      追記なし
+      ```
+  - 断片が無いとリリースノートと module-reference に載らない。実装と同じ commit の時点で書くこと。
+scope:
+  allow:
+    - "src/app/api/worktrees/[id]/send/route.ts"
+    - "src/lib/session/resolve-session-target.ts"
+    - "src/lib/relay/relay-session-ref.ts"
+    - "src/lib/db/agent-instances-db.ts"
+    - "tests/unit/app/api/worktrees/**"
+    - "tests/unit/session/**"
+    - "tests/unit/relay/**"
+    - "tests/integration/**"
+  deny: []
+verify:
+  gates: null
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true
