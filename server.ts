@@ -33,7 +33,7 @@ import { readFileSync, existsSync, accessSync, realpathSync, statSync } from 'fs
 import { constants as fsConstants } from 'fs';
 import { parse } from 'url';
 import next from 'next';
-import { setupWebSocket, closeWebSocket } from './src/lib/ws-server';
+import { setupWebSocket, closeWebSocket, stampIngress, type CmIngress } from './src/lib/ws-server';
 import {
   getRepositoryPaths,
   scanMultipleRepositories,
@@ -58,6 +58,94 @@ import { syncWorktreesAndCleanup } from './src/lib/session-cleanup';
 const dev = process.env.NODE_ENV !== 'production';
 const hostname = getEnvByKey('CM_BIND') || '127.0.0.1';
 const port = parseInt(getEnvByKey('CM_PORT') || '3000', 10);
+
+/**
+ * Issue #2489: the `CM_AUTH_SCOPE` value that exempts the local listener.
+ *
+ * Written out here rather than imported from `src/lib/ws-server.ts`, which
+ * exports the same constant for the Node-runtime side, for the same reason the
+ * `x-cm-raw-url` header name below is written out: this is read at MODULE SCOPE,
+ * before `app.prepare()`, and everything server.ts evaluates that early has to
+ * stand on its own. `tests/integration/remote-ingress-auth-2489.test.ts` holds
+ * the two spellings equal, so a rename cannot leave one of them behind.
+ */
+const REMOTE_ONLY_AUTH_SCOPE = 'remote-only';
+
+/**
+ * Issue #2489: the loopback address the Provider's upstream is pointed at.
+ *
+ * `commandmate remote --auth remote-only` asks for "the phone authenticates,
+ * the PC in front of the machine does not". The listener a request landed on is
+ * the only unforgeable way to tell those apart (see the header of
+ * `src/lib/ws-server.ts`'s ingress section), so this bind is deliberately the
+ * literal loopback address rather than `hostname`: the second listener must
+ * never be reachable from the LAN, whatever `CM_BIND` says.
+ */
+const REMOTE_INGRESS_BIND = '127.0.0.1';
+
+/**
+ * Issue #2489: whether `CM_BIND` keeps the local listener off the network.
+ *
+ * `remote-only` makes the local listener unauthenticated, so a non-loopback
+ * bind would extend "local means trusted" to every host on the LAN. The CLI
+ * refuses that combination up front (exit 2); this is the second, independent
+ * check, because `CM_BIND` can also be set in `.env` or exported after the fact.
+ */
+function isLoopbackBind(bind: string): boolean {
+  return bind === '127.0.0.1' || bind === 'localhost' || bind === '::1' || bind === '[::1]';
+}
+
+/**
+ * Fall back to authenticating every listener, and say why.
+ *
+ * Writes the decision back into `process.env` rather than only returning it:
+ * `middleware.ts` and `ws-server.ts` read `CM_AUTH_SCOPE` per request, so a
+ * degradation that lived in a local variable would leave the local listener
+ * exempt while this process believed it had closed the door.
+ */
+function refuseRemoteOnly(reason: string): null {
+  console.error(
+    `[Security] CM_AUTH_SCOPE=${REMOTE_ONLY_AUTH_SCOPE} refused: ${reason}. ` +
+      'Every listener will require authentication.'
+  );
+  process.env.CM_AUTH_SCOPE = 'all';
+  return null;
+}
+
+/**
+ * Resolve the port of the remote-only ingress listener, or null for one listener.
+ *
+ * Fail-closed at every branch: anything this cannot verify turns into
+ * {@link refuseRemoteOnly}, which is the pre-#2489 behaviour (auth everywhere).
+ *
+ * @returns The loopback port to open for the Provider, or null
+ */
+function resolveRemoteIngressPort(): number | null {
+  if (process.env.CM_AUTH_SCOPE !== REMOTE_ONLY_AUTH_SCOPE) return null;
+
+  if (!isLoopbackBind(hostname)) {
+    return refuseRemoteOnly(`CM_BIND is ${hostname}, which is not loopback`);
+  }
+
+  const raw = process.env.CM_REMOTE_INGRESS_PORT;
+  if (!raw) {
+    return refuseRemoteOnly('CM_REMOTE_INGRESS_PORT is not set');
+  }
+
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 65535) {
+    return refuseRemoteOnly(`CM_REMOTE_INGRESS_PORT is not a valid port: ${raw}`);
+  }
+  if (parsed === port) {
+    // One socket cannot be two ingresses, and "the Provider dials the port the
+    // user dials" is exactly the confusion this whole mechanism exists to avoid.
+    return refuseRemoteOnly('CM_REMOTE_INGRESS_PORT is the same port the server serves on');
+  }
+
+  return parsed;
+}
+
+const remoteIngressPort = resolveRemoteIngressPort();
 
 // Issue #331: HTTPS configuration
 const certPath = process.env.CM_HTTPS_CERT;
@@ -162,14 +250,31 @@ async function resolveWorktreeAliasRedirect(url: string): Promise<WorktreeRedire
 (app as unknown as { setupWebSocketHandler?: () => void }).setupWebSocketHandler = () => {};
 
 app.prepare().then(() => {
-  // Request handler for both HTTP and HTTPS
-  const requestHandler = async (req: import('http').IncomingMessage, res: import('http').ServerResponse) => {
+  // Request handler for both HTTP and HTTPS.
+  //
+  // Issue #2489: a factory rather than a single handler, because the ONE thing a
+  // request cannot lie about is the listener it arrived on, and that fact is
+  // only known here — at the point the listener is constructed. Every listener
+  // is built through this function, so every request is stamped; a listener
+  // wired up any other way would leave the caller's own `x-cm-ingress` in place,
+  // which is the single way this scheme can fail open.
+  const requestHandlerFor = (ingress: CmIngress) => async (
+    req: import('http').IncomingMessage,
+    res: import('http').ServerResponse
+  ) => {
     // Guard: res must be a proper HTTP ServerResponse (not a raw net.Socket).
     // Defense-in-depth: normally not needed after the setupWebSocketHandler fix above,
     // but kept for safety in case any other path passes a non-ServerResponse object.
     if (typeof (res as unknown as { setHeader?: unknown })?.setHeader !== 'function') {
       return;
     }
+
+    // Issue #2489: overwrite, unconditionally and before anything reads it.
+    // `middleware.ts` and `ws-server.ts` decide whether to demand a token from
+    // this value alone — deliberately NOT from `X-Real-IP` / `X-Forwarded-For` /
+    // `Host`, all of which a tunnelled request carries identically to a local
+    // one (a Provider's upstream IS 127.0.0.1).
+    stampIngress(req.headers, ingress);
 
     // Issue #332: Inject X-Real-IP header for IP restriction
     // [S3-005] This applies to HTTP requests only. WebSocket upgrade requests
@@ -246,7 +351,7 @@ app.prepare().then(() => {
   };
 
   // Issue #331: Create HTTP or HTTPS server
-  let server: import('http').Server | import('https').Server;
+  let tlsOptions: { cert: Buffer; key: Buffer } | null = null;
   let protocol = 'http';
 
   if (certPath && keyPath) {
@@ -254,21 +359,52 @@ app.prepare().then(() => {
     const validatedKeyPath = validateCertPath(keyPath, 'Key');
 
     try {
-      const cert = readFileSync(validatedCertPath);
-      const key = readFileSync(validatedKeyPath);
-      server = createHttpsServer({ cert, key }, requestHandler);
+      tlsOptions = {
+        cert: readFileSync(validatedCertPath),
+        key: readFileSync(validatedKeyPath),
+      };
       protocol = 'https';
       console.log('HTTPS server created with TLS certificates');
     } catch (error) {
       console.error('Failed to read TLS certificates:', error);
       process.exit(2);
     }
-  } else {
-    server = createHttpServer(requestHandler);
   }
 
+  /**
+   * Issue #2489: build one listener, stamped with its own ingress.
+   *
+   * The TLS material is read once above and shared, so the remote listener is
+   * the same server in every respect except which socket it answers on — which
+   * is the only difference that is allowed to matter.
+   */
+  const createListener = (ingress: CmIngress): import('http').Server | import('https').Server =>
+    tlsOptions === null
+      ? createHttpServer(requestHandlerFor(ingress))
+      : createHttpsServer(tlsOptions, requestHandlerFor(ingress));
+
+  const server = createListener('local');
+
+  /**
+   * Issue #2489: the listener `commandmate remote --auth remote-only` points the
+   * Provider at. Null in every other configuration, which is what keeps
+   * `--auth all` (and a plain `commandmate start`) on exactly one socket.
+   */
+  const remoteServer = remoteIngressPort === null ? null : createListener('remote');
+
+  // Issue #2489: stamp WebSocket upgrades too, and BEFORE `setupWebSocket`
+  // registers its own 'upgrade' listener — Node fires listeners in registration
+  // order, so this is what guarantees the auth check downstream reads a value
+  // this process wrote. HTTP and WS must agree: a phone drives the terminal over
+  // this socket, so a WS path that exempted more than the HTTP path would hand
+  // the tunnel a live shell while the screen behind it still asked for a token.
+  server.on('upgrade', (request) => stampIngress(request.headers, 'local'));
+  remoteServer?.on('upgrade', (request) => stampIngress(request.headers, 'remote'));
+
   // Setup WebSocket server
-  setupWebSocket(server as import('http').Server);
+  setupWebSocket(server as import('http').Server, {
+    additionalServers: remoteServer === null ? [] : [remoteServer as import('http').Server],
+  });
 
   // Scan and sync worktrees on startup
   async function initializeWorktrees() {
@@ -499,9 +635,42 @@ app.prepare().then(() => {
     process.exit(1);
   });
 
+  // Issue #2489: open the Provider's door on its own loopback socket.
+  //
+  // Started before the main `listen` so the CLI's readiness probe on this port
+  // cannot outrun it. An error here is NOT fatal to the process — killing the
+  // server would take the user's local session down with the remote one, which
+  // is the same reason `--expires` closes only the Provider (§5.3) — but it IS
+  // fail-closed: without this socket there is no "remote" ingress, so the local
+  // exemption is withdrawn and every listener goes back to demanding a token.
+  // `commandmate remote` then fails its readiness probe on this port and rolls
+  // the whole session back, which is where the user sees the error.
+  if (remoteServer !== null && remoteIngressPort !== null) {
+    remoteServer.on('error', (err: NodeJS.ErrnoException) => {
+      console.error(
+        `[Security] Remote ingress listener on ${REMOTE_INGRESS_BIND}:${remoteIngressPort} failed ` +
+          `(${err.code ?? err.message}). Every listener will require authentication.`
+      );
+      process.env.CM_AUTH_SCOPE = 'all';
+    });
+    remoteServer.listen(remoteIngressPort, REMOTE_INGRESS_BIND, () => {
+      console.log(
+        `> Remote ingress ready on ${protocol}://${REMOTE_INGRESS_BIND}:${remoteIngressPort} (authentication required)`
+      );
+    });
+  }
+
   server.listen(port, hostname, async () => {
     console.log(`> Ready on ${protocol}://${hostname}:${port}`);
     console.log(`> WebSocket server ready`);
+    if (remoteIngressPort !== null) {
+      // Say it on the main "Ready" line too: "the PC does not need to log in" is
+      // a security-relevant departure from the default, and a server log that
+      // only mentions it in a line above is a log nobody reads.
+      console.log(
+        `> Auth scope: ${REMOTE_ONLY_AUTH_SCOPE} — ${protocol}://${hostname}:${port} does not require a token`
+      );
+    }
 
     // Issue #2113: verify that the URL the documentation advertises
     // (`http://localhost:<port>`) actually reaches THIS process. It does not when
@@ -700,12 +869,43 @@ app.prepare().then(() => {
       process.exit(1);
     }, 3000);
 
-    // Try graceful HTTP server close
-    server.close(() => {
-      clearTimeout(forceExitTimeout);
-      console.log('Server closed gracefully');
-      process.exit(0);
-    });
+    // Try graceful HTTP server close.
+    //
+    // Issue #2489: EVERY listener this process opened, not just the main one.
+    // `remoteServer` was absent from this function entirely, and the cost was
+    // asymmetry on the door the user cannot see: `server.close()`'s callback
+    // fires once the LOCAL connections have drained, and the `process.exit(0)`
+    // inside it then cut off any request still in flight through the provider.
+    // The local listener had three seconds of grace and the remote one had
+    // none. (The accept window between the teardown above and this point is the
+    // same for both listeners, and effectively zero — everything between the
+    // signal and here is synchronous, so the event loop never turns to accept a
+    // connection. The in-flight requests are the real loss.)
+    //
+    // The invariant, rather than the fix: whatever shutdown does to one
+    // listener it does to all of them. Anything added here belongs INSIDE this
+    // loop rather than on `server` alone — #2488 is adding
+    // `closeIdleConnections()` to stop a keep-alive tab from holding the
+    // callback back, and applying that to `server` only would put the
+    // asymmetry straight back on the listener nobody is looking at.
+    const listeners = remoteServer === null ? [server] : [server, remoteServer];
+
+    // `close()` stops each accept loop immediately and calls back once that
+    // listener's own connections have ended, so both doors shut now and the
+    // exit waits for the last one to drain. A listener that never reached
+    // `listen()` (EADDRINUSE on the remote port) calls its callback with an
+    // Error instead of throwing, which counts as drained here — which is what
+    // we want: a door that never opened cannot be holding anything.
+    let draining = listeners.length;
+    for (const listener of listeners) {
+      listener.close(() => {
+        draining -= 1;
+        if (draining > 0) return;
+        clearTimeout(forceExitTimeout);
+        console.log('Server closed gracefully');
+        process.exit(0);
+      });
+    }
   }
 
   process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));

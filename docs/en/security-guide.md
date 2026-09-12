@@ -35,16 +35,16 @@ When `CM_BIND=0.0.0.0` is set, the server becomes accessible from external netwo
 
 `commandmate remote` is a third shape, and neither of the two modes above describes it.
 
-The server keeps its `127.0.0.1` bind — `remote` neither reads nor writes `CM_BIND`, so a
-host on the default binding stays on the default binding. What `remote` adds is an
-*outward door*: a provider process (or, for Tailscale, a provider *configuration*) that
-accepts connections from outside and forwards them to the loopback listener.
+The server keeps its `127.0.0.1` bind — `remote` never writes `CM_BIND`, so a host on the
+default binding stays on the default binding. What `remote` adds is an *outward door*: a
+provider process (or, for Tailscale, a provider *configuration*) that accepts connections
+from outside and forwards them to the loopback listener.
 
 | Property | Value under `commandmate remote` |
 |----------|----------------------------------|
-| Listening socket | Still `127.0.0.1` only — nothing new listens on your LAN interface |
+| Listening socket | Still `127.0.0.1` only — nothing new listens on your LAN interface. `--auth remote-only` adds a second `127.0.0.1` socket, also loopback-only |
 | Reachability | The provider URL is reachable by anyone who learns it (a Cloudflare Quick Tunnel URL is public; a Tailscale Serve URL is reachable only from your tailnet) |
-| Authentication | Always on. `remote` starts the server with token authentication enabled |
+| Authentication | Always on for the provider's route. `remote` starts the server with token authentication enabled; `--auth remote-only` exempts the loopback route you use yourself, and nothing else |
 | Blast radius | The CommandMate server only, not other services on this machine |
 
 So the exposure is "one authenticated HTTP surface, reachable by anyone who learns the
@@ -258,6 +258,7 @@ commandmate remote stop     # close the outside door; the server keeps running
 | `--pairing-expires <duration>` | Pairing code TTL (default `10m`, range `1m`-`24h`) |
 | `-p, --port <number>` | Port of the server to expose |
 | `--yes` | Approve creating a public tunnel without prompting (required when non-interactive) |
+| `--auth <all\|remote-only>` | How far authentication reaches (default `all`). See *Authentication scope* below |
 | `--json` | JSON output |
 
 There is deliberately **no `--token` flag**: `remote` is the side that mints the token, so
@@ -267,9 +268,10 @@ server start, so a server `remote` has just started has Auto-Yes off for every w
 not offering a flag to turn it on is the structural guarantee that it stays off.
 
 Exit codes: `0` success, `1` `DEPENDENCY_ERROR` (no usable provider), `2` `CONFIG_ERROR`
-(non-interactive without approval, an invalid `--expires`, or a server already running with
-authentication enabled that this session cannot pair with), `3` `START_FAILED`,
-`4` `STOP_FAILED`, `99` `UNEXPECTED_ERROR`.
+(non-interactive without approval, an invalid `--expires` or `--auth`, `--auth remote-only`
+with a non-loopback `CM_BIND`, or a server already running with authentication enabled that
+this session cannot pair with), `3` `START_FAILED`, `4` `STOP_FAILED`,
+`99` `UNEXPECTED_ERROR`.
 
 #### Provider availability
 
@@ -306,6 +308,55 @@ this machine on the public internet always requires your explicit approval.
 > `--provider tailscale`. The measured record is in
 > [`docs/qa/1937-remote-uat-record.md`](../qa/1937-remote-uat-record.md) (defect D-1).
 
+#### Authentication scope (`--auth`), and why it is not an IP check
+
+Under the default `--auth all`, every route into the server authenticates — including the
+browser and the CLI on the machine itself. That is the safest arrangement and it has one
+sharp edge: the plaintext session token is shown only to the paired phone and then deleted,
+so **there is no way to log in from the PC while a remote session is running**, and the local
+CLI (`commandmate ls` / `send` / `wait` / `capture`) has no token to present either
+(Issue #2489).
+
+`--auth remote-only` resolves that by narrowing the authenticated surface to the provider's
+route:
+
+| Value | Through the provider | Loopback on this machine |
+|-------|---------------------|--------------------------|
+| `all` (default) | Authenticated | Authenticated |
+| `remote-only` | Authenticated | Not authenticated |
+
+**The distinction is made by listener, never by source address, and that is a security
+requirement rather than an implementation detail.** Both providers connect to
+`http://127.0.0.1:<port>` as their upstream, so a request that came through the tunnel
+reaches the server from `127.0.0.1` exactly like one from the browser on the same machine.
+Exempting loopback — via `X-Real-IP`, `X-Forwarded-For`, or the socket's peer address —
+would therefore publish an **unauthenticated** CommandMate to anyone holding the provider
+URL. `Host` and `X-Forwarded-*` are unusable for the same reason and worse: the caller sets
+them, and a provider has been measured rewriting `Host` to the upstream's own.
+
+So under `remote-only` the server opens a **second loopback listener on its own port** and
+the provider is pointed at that one alone. Each request is tagged with the listener it
+arrived on, overwriting any value the client sent under the same name, and the
+authentication decision — for HTTP and for WebSocket upgrades alike — reads only that tag.
+The decision is fail-closed at every step: an unrecognised scope, a missing tag, and a
+listener that could not be opened all result in authenticating everything.
+
+Two constraints follow, and both are enforced rather than documented:
+
+- **`CM_BIND` must be loopback.** `--auth remote-only` exits `2` when the server would bind
+  to `0.0.0.0` or any other reachable address, because an unauthenticated listener on a LAN
+  interface would extend "local means trusted" to every host on the network.
+- **IP restriction still applies.** `CM_ALLOWED_IPS` is not part of the exemption; it is
+  evaluated for every listener.
+
+> **What you are accepting.** Under `remote-only`, any process on this machine — including
+> the agent CLIs CommandMate itself runs in tmux — can call the CommandMate API without a
+> token. That is the same exposure as running CommandMate locally without `--auth` at all,
+> and it is strictly weaker than `all`. This is why `all` is the default and why
+> `remote-only` has to be asked for explicitly. `remote stop` closes the provider; the
+> second listener is loopback-only and always authenticated, and it is released when the
+> server stops.
+
 #### Cloudflare Quick Tunnel: what you are approving
 
 A Quick Tunnel is convenient *and* disposable. Both halves matter:
@@ -321,7 +372,9 @@ A Quick Tunnel is convenient *and* disposable. Both halves matter:
   (Cloudflare Access) or Option 3 (Tailscale) instead.
 - **CommandMate's own authentication is not optional here.** `remote` always starts the
   server with token authentication enabled; a visitor who does not redeem the pairing code
-  is refused. The tunnel publishes an authenticated surface, never an open one.
+  is refused. The tunnel publishes an authenticated surface, never an open one — and that
+  holds under `--auth remote-only` too, which exempts only the loopback listener the
+  provider is never pointed at.
 - **CommandMate never creates a public tunnel without explicit approval.** Interactively
   you are shown a warning and must confirm. Non-interactively — CI, a script, a message
   sent by an agent — there is nobody to ask, so the run fails with `CONFIG_ERROR`
@@ -339,11 +392,13 @@ tailnet rather than to the internet, so it does not require `--yes`.
   `~/.commandmate/remote-pairing.json`, mode `0600`, and that file is deleted the instant
   the code is redeemed. "Already used" is represented by the file's *absence*, not by a
   flag written inside it
-- `remote` contributes exactly three environment variables to the server it starts:
-  `CM_AUTH_TOKEN_HASH`, `CM_AUTH_EXPIRE`, and `CM_REMOTE_PAIRING_FILE`. The third is a
-  **path, not a secret**. No plaintext long-lived token is placed in the environment,
-  because a tmux pane CommandMate spawns inherits the server's environment wholesale —
-  anything left there would be readable by the very agents CommandMate is driving
+- `remote` contributes four environment variables to the server it starts —
+  `CM_AUTH_TOKEN_HASH`, `CM_AUTH_EXPIRE`, `CM_REMOTE_PAIRING_FILE` and `CM_AUTH_SCOPE` —
+  plus `CM_REMOTE_INGRESS_PORT` under `--auth remote-only`. `CM_REMOTE_PAIRING_FILE` is a
+  **path, not a secret**, and neither of the two scope variables is a secret either. No
+  plaintext long-lived token is placed in the environment, because a tmux pane CommandMate
+  spawns inherits the server's environment wholesale — anything left there would be readable
+  by the very agents CommandMate is driving
 
 #### The session cookie carries no `Secure` attribute over a tunnel (expected)
 
@@ -457,6 +512,7 @@ When using `commandmate remote`:
 - [ ] `commandmate remote stop` is run when remote access is no longer needed (expiry closes the door, but only after the TTL elapses)
 - [ ] Teardown goes through `commandmate remote stop`, never through Tailscale's own untargeted `serve ... off` hint, which clears the whole port
 - [ ] You accept that over a tunnel the session cookie has no `Secure` attribute (see Option 4) — use built-in TLS if you need it
+- [ ] If `--auth remote-only` is used, you accept that any process on this machine can call the API without a token, and `CM_BIND` is loopback (the command refuses anything else)
 
 ---
 
@@ -498,4 +554,4 @@ rather than a public issue.
 
 ---
 
-*Last updated: 2026-08-29 (Issue #1937: `commandmate remote`, Quick Tunnel risks, cookie `Secure` over a tunnel)*
+*Last updated: 2026-09-12 (Issue #2489: `remote --auth <all|remote-only>`, listener-based authentication scope)*

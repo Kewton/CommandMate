@@ -615,6 +615,7 @@ Provider のツール（`tailscale` / `cloudflared`）を入れたくない、�
 | **認証** | あり（ペアリングしたスマホだけ） | **なし** |
 | **暗号化** | あり（外側が HTTPS） | **なし**（平文 HTTP） |
 | **届く範囲** | 外出先からも（tailnet またはインターネット経由） | 同じ Wi-Fi の中だけ |
+| **PC からの併用** | `--auth remote-only` ならログイン不要のまま（下記） | そのまま使える |
 | **必要なもの** | `tailscale` または `cloudflared` | なし |
 | **サーバの bind** | `127.0.0.1` のまま | `0.0.0.0`（全インターフェース） |
 
@@ -676,6 +677,37 @@ commandmate remote --yes    # 確認をスキップして公開 Tunnel を作る
 > 両方の実測は [`docs/qa/1937-remote-uat-record.md`](../qa/1937-remote-uat-record.md)
 > （D-1 は §3.6、解消は §6）にあります。
 
+#### PC と併用する（`--auth remote-only`）
+
+既定（`--auth all`）では、remote 実行中は **PC のブラウザからもログインを求められます**。
+しかもトークンの平文はペアリング成功と同時に削除されるため、PC からログインする手段が
+ありません。PC 側の CLI（`commandmate ls` / `send` / `wait` / `capture`）も同じ理由で
+止まります。スマホと PC を同時に使いたいときは `--auth remote-only` を付けてください。
+
+```bash
+commandmate remote --auth remote-only
+```
+
+| 値 | Provider 経由（スマホ） | PC ローカル（`http://localhost:<port>`） |
+|----|------------------------|------------------------------------------|
+| `all`（既定） | 認証 | 認証 |
+| `remote-only` | 認証 | **認証なし** |
+
+このモードでは、サーバは既存ポートに加えて `127.0.0.1` の**別ポートに remote 専用の
+リスナー**を立て、Provider はそちらだけに向けられます。認証の要否は「どのリスナーに
+着いたか」で決まるので、送信元 IP や `Host` を偽装しても Provider 経由の経路は
+無認証になりません（Tunnel の upstream も `127.0.0.1` なので、送信元 IP では区別が
+つかないのです）。
+
+- Provider 経由は従来どおり認証されます（ペアリング前は画面 307 / API 401 / WebSocket 401）
+- **IP 制限（`CM_ALLOWED_IPS`）は免除されません**
+- `CM_BIND` が loopback 以外（`0.0.0.0` 等）のときは exit 2 で拒否されます
+
+> **トレードオフ。** `remote-only` では、この PC 上の任意のプロセス（CommandMate が
+> tmux で動かしているエージェントを含む）がトークン無しで API を叩けます。これは
+> `remote` を使わない普段のローカル利用と同じ水準で、`all` より弱いので、既定は
+> `all` のままです。
+
 #### 状態の確認と撤収
 
 ```bash
@@ -704,6 +736,7 @@ PC でのローカル利用まで巻き添えにしないためです。
 | `--pairing-expires <duration>` | `10m` | ペアリングコードの TTL（`1m`〜`24h`） |
 | `-p, --port <number>` | 自動 | 公開するサーバのポート |
 | `--yes` | — | 公開 Tunnel（`cloudflare`）の明示承認（非対話環境では必須）。`tailscale` には不要 |
+| `--auth <all\|remote-only>` | `all` | 認証をかける範囲（上記「PC と併用する」） |
 | `--json` | — | JSON 出力 |
 
 終了コード: `0` 成功 / `1` DEPENDENCY_ERROR / `2` CONFIG_ERROR / `3` START_FAILED /
@@ -712,12 +745,15 @@ CLI としての詳細は [CLI 運用ガイド](./cli-operations-guide.md) を�
 
 #### 知っておくとよいこと
 
-- **`CM_BIND` は変わりません。** `remote` は `CM_BIND` を読みも書きもせず、サーバは
-  `127.0.0.1` に bind したままです。外へ出す口を 1 つ増やすだけです。
+- **`CM_BIND` は変わりません。** `remote` が `CM_BIND` に書き込むことはなく、サーバは
+  `127.0.0.1` に bind したままです（`--auth remote-only` のときだけ、そのモードを許可して
+  よいかを判断するために**読み**ます）。外へ出す口を 1 つ増やすだけです。
 - **Auto-Yes は既定で無効のまま**です。`remote` に Auto-Yes を有効化するフラグはありません。
 - **平文の長期トークンはどこにも保存されません。** サーバに渡すのは
-  `CM_AUTH_TOKEN_HASH` / `CM_AUTH_EXPIRE` / `CM_REMOTE_PAIRING_FILE` の 3 つだけで、
-  3 つ目は秘匿値ではなくファイルパスです。ペアリング用の受け渡しファイル
+  `CM_AUTH_TOKEN_HASH` / `CM_AUTH_EXPIRE` / `CM_REMOTE_PAIRING_FILE` / `CM_AUTH_SCOPE` の
+  4 つ（`--auth remote-only` のときは `CM_REMOTE_INGRESS_PORT` が加わって 5 つ）で、
+  いずれも秘匿値ではありません（`CM_REMOTE_PAIRING_FILE` はファイルパスです）。
+  ペアリング用の受け渡しファイル
   `~/.commandmate/remote-pairing.json` は mode 0600 で、**ペアリング成功と同時に削除**されます。
 - **Tunnel 経由でもログイン Cookie に `Secure` 属性は付きません。** これは正しい挙動です。
   `Secure` を立てると `http://127.0.0.1:3000` でのローカル利用時に Cookie が拒まれ、
