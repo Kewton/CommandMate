@@ -31,8 +31,10 @@ import { getAllSessionNotes, type SessionNote } from '@/lib/db/agent-instances-d
 import { getDefaultSelectedAgents } from '@/lib/db/app-settings-db';
 import { resolveSelectedAgents } from '@/lib/selected-agents-validator';
 import { deriveSessionStatus } from '@/lib/session/status-mapping';
+import { getEnabledAutoYesByWorktree } from '@/lib/auto-yes-state';
 import { createLogger } from '@/lib/logger';
 import type { PromptType } from '@/types/models';
+import type { AutoYesInstanceSummary } from '@/types/auto-yes';
 
 const logger = createLogger('api/worktrees');
 
@@ -141,6 +143,12 @@ export async function GET(request: NextRequest) {
     }
 
     // ---- Phase 3: compose. -------------------------------------------------
+    // Issue #2512: armed Auto-Yes per instance, so a `/sessions` tile can show
+    // its toggle without one `GET /auto-yes` per tile. Neither phase above:
+    // the source is the in-memory Auto-Yes map (no SQLite, no tmux), one pass
+    // for the whole server, and it costs nothing next to `probeMs`
+    // (docs/design/sessions-tile-polling-2511.md §3.4).
+    const autoYesByWorktree = getEnabledAutoYesByWorktree();
     const worktreesWithStatus = worktrees.map((worktree) => {
       const agentInstances = agentInstancesByWorktree.get(worktree.id) ?? [];
       const status = statusByWorktree.get(worktree.id);
@@ -150,6 +158,10 @@ export async function GET(request: NextRequest) {
       // DB row, so nothing about it is "not measured" when tmux is not asked.
       const sessionNotes: Record<string, SessionNote> =
         sessionNotesByWorktree[worktree.id] ?? {};
+      // Issue #2512: the same `{}` rule and the same two paths as the notes —
+      // Auto-Yes is server state, not a tmux reading.
+      const autoYesByInstance: Record<string, AutoYesInstanceSummary> =
+        autoYesByWorktree.get(worktree.id) ?? {};
 
       // `?includeStatus=0`: the status keys are OMITTED rather than zeroed. All
       // of them are optional on `Worktree`, and absence is the only honest way
@@ -158,7 +170,7 @@ export async function GET(request: NextRequest) {
       // dot. The review block goes with it: `nextAction` / `reviewStatus` are
       // derived from the status, so there is nothing to derive them from.
       if (!status) {
-        return { ...worktree, agentInstances, sessionNotes };
+        return { ...worktree, agentInstances, sessionNotes, autoYesByInstance };
       }
 
       const base = {
@@ -166,6 +178,7 @@ export async function GET(request: NextRequest) {
         ...status,
         agentInstances,
         sessionNotes,
+        autoYesByInstance,
       };
 
       // Issue #600: Add review fields when ?include=review

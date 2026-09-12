@@ -17,3 +17,17 @@ export interface AutoYesToggleParams {
   duration?: AutoYesDuration;
   stopPattern?: string;
 }
+
+/**
+ * One instance's Auto-Yes state as the worktree list carries it (Issue #2512).
+ *
+ * The same `{ enabled, expiresAt }` pair `GET /api/worktrees/:id/auto-yes`
+ * answers per instance, so a surface reading the list and one reading the
+ * single-worktree route cannot disagree about the shape. `expiresAt` is null
+ * whenever `enabled` is false.
+ */
+export interface AutoYesInstanceSummary {
+  enabled: boolean;
+  /** Epoch ms the state expires at, or null when not enabled. */
+  expiresAt: number | null;
+}

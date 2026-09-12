@@ -10,6 +10,7 @@ import type {
   StructuredPromptHistoryRecord,
   StructuredPromptWaitingData,
 } from '@/lib/session/structured-prompt';
+import type { AutoYesInstanceSummary } from '@/types/auto-yes';
 
 export type { AgentInstance };
 
@@ -258,6 +259,17 @@ export interface Worktree {
      */
     eventSource?: AgentEventSourceView;
   } & SessionStatusReadingDetail & SessionWaitingDetail>>;
+  /**
+   * Armed Auto-Yes per agent instance (Issue #2512), keyed like
+   * {@link sessionStatusByInstance}. Only `GET /api/worktrees` fills it in, on
+   * both the status and the `?includeStatus=0` path, because the value is the
+   * server's in-memory Auto-Yes map rather than a tmux reading.
+   *
+   * An instance is present only while its Auto-Yes is enabled; absence means
+   * off, including an expiry the server resolved at read time. `{}` rather than
+   * an omitted key when nothing is armed.
+   */
+  autoYesByInstance?: Partial<Record<string, AutoYesInstanceSummary>>;
   /** Whether this worktree is marked as favorite */
   favorite?: boolean;
   /** Worktree status: ready, in_progress, in_review, done, or null if not set */

@@ -14,6 +14,14 @@
  * is installed that hands its callback back to the test — no intersection is
  * ever reported unless a test reports it, which is exactly the offscreen state.
  *
+ * Issue #2512 added a third per-tile request — the composer's slash-command
+ * catalog, fetched once when `MessageInput` mounts — and one request that is not
+ * a tile's at all: the grid's single connectivity probe (`/api/capabilities`,
+ * issued only while the connection verdict is degraded). The composer is gated
+ * on `enabled` like the pollers, so it falls under the same assertions; the
+ * probe is left out of {@link fetchedUrls}, because counting it would make these
+ * tests about a timer rather than about offscreen tiles.
+ *
  * @vitest-environment jsdom
  */
 
@@ -104,9 +112,11 @@ function createWorktree(overrides: Partial<Worktree> = {}): Worktree {
   } as Worktree;
 }
 
-/** Every URL `fetch` was called with this test. */
+/** Every worktree-scoped URL `fetch` was called with this test — i.e. every tile request. */
 function fetchedUrls(): string[] {
-  return (global.fetch as ReturnType<typeof vi.fn>).mock.calls.map((call) => String(call[0]));
+  return (global.fetch as ReturnType<typeof vi.fn>).mock.calls
+    .map((call) => String(call[0]))
+    .filter((url) => url.startsWith('/api/worktrees/'));
 }
 
 let originalIntersectionObserver: unknown;
@@ -116,9 +126,11 @@ beforeEach(() => {
   originalIntersectionObserver = (window as unknown as Record<string, unknown>).IntersectionObserver;
   (window as unknown as Record<string, unknown>).IntersectionObserver = MockIntersectionObserver;
   (globalThis as unknown as Record<string, unknown>).IntersectionObserver = MockIntersectionObserver;
-  global.fetch = vi.fn(async () => ({
+  // Each endpoint answers in its own shape: `/messages` a row array, the
+  // composer's catalog (#2512) an object of groups.
+  global.fetch = vi.fn(async (input: RequestInfo | URL) => ({
     ok: true,
-    json: async () => [],
+    json: async () => (String(input).includes('/slash-commands') ? { groups: [] } : []),
   })) as unknown as typeof fetch;
 });
 

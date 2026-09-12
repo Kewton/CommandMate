@@ -26,19 +26,36 @@
  * Each tile sits in a slot that watches its own visibility and hands the verdict
  * down as `enabled`. The slot exists because a hook cannot be called in a loop:
  * one `useInViewport` per tile means one component per tile.
+ *
+ * ## One connection verdict for the wall (Issue #2512)
+ *
+ * Every tile's composer parks a send made while the connection is down, and
+ * needs the connection verdict to do it. That verdict is read HERE, once, and
+ * handed to every tile: `useConnectivity` probes the server on its own timer
+ * while the verdict is degraded, so twenty tiles each reading their own would be
+ * twenty probes per interval exactly when the server is struggling to answer.
+ * The value changes only on a connection transition, so passing it down costs
+ * the memoised slots nothing between transitions.
  */
 
 import { memo } from 'react';
 import { SessionTile } from '@/components/sessions/SessionTile';
 import { useInViewport } from '@/hooks/useInViewport';
+import { usePendingConnectivity } from '@/hooks/usePendingConnectivity';
+import type { PendingConnectivity } from '@/hooks/usePendingMessages';
 import type { Worktree } from '@/types/models';
 
 /**
  * Tile height (Tailwind arbitrary value). Inside the 480–560px window the Issue
  * names: tall enough for a readable transcript plus the header, short enough
  * that a 1080p screen shows two rows of tiles.
+ *
+ * Issue #2512 moved it from 32rem to the top of that window, 35rem (560px). The
+ * composer takes ~97px out of the body on a desktop; the extra 48px gives most
+ * of that back, so the conversation keeps ~408px against Phase 2's 457px rather
+ * than dropping to ~360px. See `SESSION_TILE_BODY_FLOOR_CLASS` for the budget.
  */
-export const SESSION_TILE_HEIGHT_CLASS = 'h-[32rem]';
+export const SESSION_TILE_HEIGHT_CLASS = 'h-[35rem]';
 
 /**
  * How far outside the viewport a tile starts polling.
@@ -47,7 +64,7 @@ export const SESSION_TILE_HEIGHT_CLASS = 'h-[32rem]';
  * already attached and fetched by the time it is on screen — the alternative is
  * a visibly empty card that fills in a moment later, every time.
  */
-export const SESSION_TILE_ROOT_MARGIN = '512px';
+export const SESSION_TILE_ROOT_MARGIN = '560px';
 
 /**
  * One grid cell: observes its own visibility, renders one tile.
@@ -57,14 +74,20 @@ export const SESSION_TILE_ROOT_MARGIN = '512px';
  * off-screen tile — which renders a bare placeholder — still has a box of the
  * right size for the observer to measure.
  */
-const SessionTileSlot = memo(function SessionTileSlot({ worktree }: { worktree: Worktree }) {
+const SessionTileSlot = memo(function SessionTileSlot({
+  worktree,
+  connectivity,
+}: {
+  worktree: Worktree;
+  connectivity: PendingConnectivity;
+}) {
   const { ref, inViewport } = useInViewport<HTMLDivElement>({
     rootMargin: SESSION_TILE_ROOT_MARGIN,
   });
 
   return (
     <div ref={ref} className={`min-w-0 ${SESSION_TILE_HEIGHT_CLASS}`}>
-      <SessionTile worktree={worktree} enabled={inViewport} />
+      <SessionTile worktree={worktree} enabled={inViewport} connectivity={connectivity} />
     </div>
   );
 });
@@ -77,6 +100,8 @@ export interface SessionTileGridProps {
 export const SessionTileGrid = memo(function SessionTileGrid({
   worktrees,
 }: SessionTileGridProps) {
+  const connectivity = usePendingConnectivity();
+
   return (
     <div
       className="grid grid-cols-1 gap-4 xl:grid-cols-2"
@@ -85,7 +110,7 @@ export const SessionTileGrid = memo(function SessionTileGrid({
       {worktrees.map((worktree) => (
         // Keyed by id so a polling re-render never remounts a tile — remounting
         // one would drop its transcript and re-attach its poller.
-        <SessionTileSlot key={worktree.id} worktree={worktree} />
+        <SessionTileSlot key={worktree.id} worktree={worktree} connectivity={connectivity} />
       ))}
     </div>
   );
