@@ -20,8 +20,11 @@
  *
  * Signal (3) has two sources. This hook runs its own lightweight probe while
  * the verdict is degraded, and `reportServerReachability()` lets any call site
- * feed the outcome of a real API request in without going through the hook —
- * that is the seam for instrumenting the app's fetches later.
+ * feed the outcome of a real API request in without going through the hook.
+ * Issue #2499 wired that seam up: `fetchApiResponse` in `lib/api-client.ts`
+ * reports every request's outcome, so the common case is now answered by
+ * traffic the app was making anyway and the probe below is the fallback for a
+ * genuinely idle tab rather than the primary evidence.
  *
  * The status is exported as a pure function (`resolveConnectivityStatus`) so
  * the decision itself can be tested, and reused, without a React tree. That
@@ -164,6 +167,38 @@ export function resolveConnectivityStatus(signals: ConnectivitySignals): Connect
   return signals.realtimeStatus === 'connecting' ? 'reconnecting' : 'offline';
 }
 
+/**
+ * Whether the server has *positively answered* — the only thing that may be
+ * read as proof of being back on the network.
+ *
+ * Issue #2503 needs a stricter reading than `status === 'online'` gives it.
+ * `online` requires a live WebSocket, so a phone carried by polling alone would
+ * never qualify; `reconnecting` is too loose, because it covers both "an HTTP
+ * exchange completed" and "the socket is still opening and nothing has been
+ * measured at all". This function names the half that is evidence: a live
+ * socket, or a completed exchange. `browserOnline` is deliberately not consulted
+ * — `navigator.onLine === true` is exactly the signal the module note says can
+ * never confirm a connection on its own.
+ */
+export function isServerConfirmedReachable(signals: ConnectivitySignals): boolean {
+  return signals.realtimeStatus === 'connected' || signals.serverReachable === true;
+}
+
+/**
+ * The mirror image: the connection has been *measured* down.
+ *
+ * `status === 'offline'` is the right input for a banner, which is allowed to
+ * be pessimistic — it also covers "the socket is closed and nothing has been
+ * measured yet", a state a page reaches with no network evidence at all. Issue
+ * #2503 acts on an offline verdict by withholding a failure the user would
+ * otherwise see, so it needs the same standard the online side is held to: a
+ * device that says it is off the network, or an exchange that came back
+ * unreachable. With nothing measured, a failed send is still a failed send.
+ */
+export function isConnectionKnownDown(signals: ConnectivitySignals): boolean {
+  return signals.browserOnline === false || signals.serverReachable === false;
+}
+
 // ============================================================================
 // Reachability probe
 // ============================================================================
@@ -297,7 +332,13 @@ export function useConnectivity(options: UseConnectivityOptions = {}): Connectiv
   const [lastReachableAt, setLastReachableAt] = useState<number | null>(null);
 
   const markReachable = useCallback((reachable: boolean) => {
-    setServerReachable(reachable);
+    // Functional form so an unchanged verdict is an identity update and React
+    // bails out. Issue #2499 turned this from a per-probe call into a per-
+    // request one: `api-client` throttles repeats to transitions plus one
+    // refresh per API_REACHABILITY_REPORT_INTERVAL_MS, and this is the second
+    // half of that — between them, a healthy session re-renders the two
+    // connectivity surfaces on transitions and essentially nothing else.
+    setServerReachable((prev) => (prev === reachable ? prev : reachable));
     if (reachable) setLastReachableAt(Date.now());
   }, []);
 

@@ -8,9 +8,11 @@
 
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, act } from '@testing-library/react';
 import { FilePanelContent } from '@/components/worktree/FilePanelContent';
 import { Z_INDEX } from '@/config/z-index';
+import { API_GET_TIMEOUT_MS, API_RETRY_TOTAL_BUDGET_MS } from '@/config/api-timeout-config';
+import { __resetApiReachabilityReporting } from '@/lib/api-client';
 import type { FileTab } from '@/hooks/useFileTabs';
 import type { FileContent } from '@/types/models';
 
@@ -88,6 +90,7 @@ describe('FilePanelContent', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     global.fetch = vi.fn();
+    __resetApiReachabilityReporting();
   });
 
   describe('loading state', () => {
@@ -283,8 +286,11 @@ describe('FilePanelContent', () => {
       render(<FilePanelContent tab={tab} {...defaultProps} />);
 
       await waitFor(() => {
+        // Issue #2499: the second argument is the shared transport's options
+        // (an AbortSignal); the URL is what this test is about.
         expect(fetchMock).toHaveBeenCalledWith(
           '/api/worktrees/test-wt/files/dir/My%20File%20%231.ts',
+          expect.anything(),
         );
       });
     });
@@ -656,6 +662,102 @@ describe('FilePanelContent', () => {
       await waitFor(() => {
         expect(screen.queryByTestId('marp-preview')).not.toBeInTheDocument();
       });
+    });
+  });
+
+  // ==========================================================================
+  // [Issue #2499] Opening a file is bounded in time
+  // ==========================================================================
+
+  describe('bounded file open (Issue #2499)', () => {
+    /** A request that neither resolves nor rejects until it is aborted. */
+    function hangingFetch() {
+      return (_url: string, init?: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => {
+            const error = new Error('The operation was aborted.');
+            error.name = 'AbortError';
+            reject(error);
+          });
+        });
+    }
+
+    it('fails a stalled open on the clock instead of spinning forever', async () => {
+      vi.useFakeTimers();
+      try {
+        const fetchMock = global.fetch as ReturnType<typeof vi.fn>;
+        fetchMock.mockImplementation(hangingFetch());
+        const onLoadError = vi.fn();
+
+        render(
+          <FilePanelContent
+            tab={createTab()}
+            {...defaultProps}
+            onLoadError={onLoadError}
+          />,
+        );
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(0);
+        });
+        expect(onLoadError).not.toHaveBeenCalled();
+
+        // One deadline in, the open is not given up on — the ladder tries
+        // again, which is the right answer for a link that merely stuttered.
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(API_GET_TIMEOUT_MS + 1);
+        });
+        expect(onLoadError).not.toHaveBeenCalled();
+
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(API_RETRY_TOTAL_BUDGET_MS);
+        });
+
+        // The pre-#2499 behavior: `tab.loading` stayed true forever, and
+        // `fetchingRef` stayed latched, so even closing and reopening the tab
+        // could not retry it. Now the ladder gets its second attempt, the
+        // budget runs out, and the user is told.
+        expect(fetchMock.mock.calls.length).toBeGreaterThan(1);
+        expect(onLoadError).toHaveBeenCalledTimes(1);
+        expect(onLoadError.mock.calls[0][0]).toBe('src/index.ts');
+        expect(String(onLoadError.mock.calls[0][1])).toContain(String(API_GET_TIMEOUT_MS));
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('recovers from a dropped request without the user reopening the tab', async () => {
+      vi.useFakeTimers();
+      try {
+        const content = createContent();
+        const fetchMock = global.fetch as ReturnType<typeof vi.fn>;
+        fetchMock
+          .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+          .mockResolvedValueOnce({
+            ok: true,
+            status: 200,
+            json: () => Promise.resolve(content),
+          });
+        const onLoadContent = vi.fn();
+        const onLoadError = vi.fn();
+
+        render(
+          <FilePanelContent
+            tab={createTab()}
+            {...defaultProps}
+            onLoadContent={onLoadContent}
+            onLoadError={onLoadError}
+          />,
+        );
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(API_GET_TIMEOUT_MS);
+        });
+
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+        expect(onLoadContent).toHaveBeenCalledWith('src/index.ts', content);
+        expect(onLoadError).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 });
