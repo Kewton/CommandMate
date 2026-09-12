@@ -8,9 +8,11 @@
 
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, act } from '@testing-library/react';
 import { FilePanelContent } from '@/components/worktree/FilePanelContent';
 import { Z_INDEX } from '@/config/z-index';
+import { API_GET_TIMEOUT_MS, API_RETRY_TOTAL_BUDGET_MS } from '@/config/api-timeout-config';
+import { __resetApiReachabilityReporting } from '@/lib/api-client';
 import type { FileTab } from '@/hooks/useFileTabs';
 import type { FileContent } from '@/types/models';
 
@@ -88,6 +90,7 @@ describe('FilePanelContent', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     global.fetch = vi.fn();
+    __resetApiReachabilityReporting();
   });
 
   describe('loading state', () => {
@@ -283,8 +286,11 @@ describe('FilePanelContent', () => {
       render(<FilePanelContent tab={tab} {...defaultProps} />);
 
       await waitFor(() => {
+        // Issue #2499: the second argument is the shared transport's options
+        // (an AbortSignal); the URL is what this test is about.
         expect(fetchMock).toHaveBeenCalledWith(
           '/api/worktrees/test-wt/files/dir/My%20File%20%231.ts',
+          expect.anything(),
         );
       });
     });
@@ -391,6 +397,231 @@ describe('FilePanelContent', () => {
     });
   });
 
+  // ==========================================================================
+  // [Issue #2505] Read-only (oversize) files
+  // ==========================================================================
+
+  /**
+   * A file over the editing ceiling is served by the API with `readOnly: true`
+   * instead of being refused with 413. Two things must then hold in the panel:
+   *
+   *  1. it must NOT land in an editable branch. `isHtml`, `.md` and the other
+   *     editable extensions all route to a save-capable editor that mounts the
+   *     whole file into a `<textarea>` — a broken promise (PUT still refuses the
+   *     write) and the phone-freezing full-DOM mount Issue #723 removed from the
+   *     code viewer;
+   *  2. the reason must be visible, or "you cannot save this" is a silent state.
+   */
+  describe('read-only oversize files (Issue #2505)', () => {
+    const OVERSIZE_REASON = {
+      code: 'FILE_TOO_LARGE' as const,
+      message:
+        'Opened read-only: this file is 2.4MB, over the 2.0MB limit for editing. ' +
+        'You can view it but not save changes.',
+      limitBytes: 2 * 1024 * 1024,
+      sizeBytes: Math.round(2.4 * 1024 * 1024),
+    };
+
+    function createReadOnlyContent(overrides: Partial<FileContent> = {}): FileContent {
+      return createContent({
+        readOnly: true,
+        readOnlyReason: OVERSIZE_REASON,
+        ...overrides,
+      });
+    }
+
+    it('routes a read-only .md to the code viewer, not the markdown editor', () => {
+      const content = createReadOnlyContent({
+        extension: 'md',
+        path: 'BIG.md',
+        content: '# huge document',
+      });
+      const tab = createTab({ content, path: 'BIG.md', name: 'BIG.md' });
+      render(<FilePanelContent tab={tab} {...defaultProps} />);
+
+      // The virtualized viewer is identified by this testid; the editor branch
+      // never renders it.
+      expect(screen.getByTestId('file-content-code')).toBeInTheDocument();
+    });
+
+    it('routes a read-only .yaml to the code viewer', () => {
+      const content = createReadOnlyContent({
+        extension: 'yaml',
+        path: 'big.yaml',
+        content: 'key: value',
+      });
+      const tab = createTab({ content, path: 'big.yaml', name: 'big.yaml' });
+      render(<FilePanelContent tab={tab} {...defaultProps} />);
+
+      expect(screen.getByTestId('file-content-code')).toBeInTheDocument();
+    });
+
+    it('routes a read-only .html to the code viewer, not the HTML preview', () => {
+      // `isHtml` is still true on the payload — it IS html — so this pins that
+      // `readOnly` is checked FIRST. HtmlPreview offers a save action and an
+      // iframe, both wrong for a 5MB+ file.
+      const content = createReadOnlyContent({
+        isHtml: true,
+        extension: 'html',
+        path: 'big.html',
+        content: '<h1>huge</h1>',
+        readOnlyReason: { ...OVERSIZE_REASON, limitBytes: 5 * 1024 * 1024 },
+      });
+      const tab = createTab({ content, path: 'big.html', name: 'big.html' });
+      render(<FilePanelContent tab={tab} {...defaultProps} />);
+
+      expect(screen.getByTestId('file-content-code')).toBeInTheDocument();
+      expect(screen.queryByTestId('html-preview')).not.toBeInTheDocument();
+    });
+
+    it('renders no textarea and no save control for a read-only file', () => {
+      const content = createReadOnlyContent({
+        extension: 'md',
+        path: 'BIG.md',
+        content: '# huge document',
+      });
+      const tab = createTab({ content, path: 'BIG.md', name: 'BIG.md' });
+      render(<FilePanelContent tab={tab} {...defaultProps} />);
+
+      expect(document.querySelector('textarea')).toBeNull();
+      expect(screen.queryByRole('button', { name: /save/i })).not.toBeInTheDocument();
+    });
+
+    it('shows the reason, verbatim from the API payload', () => {
+      const content = createReadOnlyContent({ extension: 'md', path: 'BIG.md' });
+      const tab = createTab({ content, path: 'BIG.md', name: 'BIG.md' });
+      render(<FilePanelContent tab={tab} {...defaultProps} />);
+
+      const notice = screen.getByTestId('file-read-only-notice');
+      expect(notice).toBeInTheDocument();
+      expect(notice).toHaveTextContent(OVERSIZE_REASON.message);
+      // The code travels with the notice so a later localized rendering can
+      // branch on it without re-parsing the sentence.
+      expect(notice).toHaveAttribute('data-reason-code', 'FILE_TOO_LARGE');
+    });
+
+    it('announces the notice to assistive tech without hijacking focus', () => {
+      const content = createReadOnlyContent({ extension: 'md', path: 'BIG.md' });
+      const tab = createTab({ content, path: 'BIG.md', name: 'BIG.md' });
+      render(<FilePanelContent tab={tab} {...defaultProps} />);
+
+      // `status`, not `alert`: the file opened fine, only saving is unavailable.
+      expect(screen.getByRole('status')).toHaveTextContent(OVERSIZE_REASON.message);
+    });
+
+    it('virtualizes a read-only file instead of mounting every line', () => {
+      // The performance half of the Issue: an oversize file reaching the
+      // textarea branch mounted in one shot and froze phones. Here it must go
+      // through the same windowed renderer a non-editable extension gets.
+      const TOTAL_LINES = 10_000;
+      const lines: string[] = [];
+      for (let i = 1; i <= TOTAL_LINES; i++) lines.push(`line ${i}`);
+      const content = createReadOnlyContent({
+        extension: 'md',
+        path: 'BIG.md',
+        content: lines.join('\n'),
+      });
+      const tab = createTab({ content, path: 'BIG.md', name: 'BIG.md' });
+      render(<FilePanelContent tab={tab} {...defaultProps} />);
+
+      const codeElement = screen.getByTestId('file-content-code');
+
+      // The spacer the virtualizer sizes to the WHOLE file proves the windowed
+      // renderer is live over all 10,000 lines (>= 1px per line). Asserting only
+      // "fewer rows than lines" would pass on an empty render, which is what
+      // jsdom produces for a zero-height scroll container.
+      const spacer = codeElement.firstElementChild as HTMLElement;
+      expect(parseFloat(spacer.style.height)).toBeGreaterThanOrEqual(TOTAL_LINES);
+
+      // ...while only a window of rows is mounted, not one node per line.
+      expect(codeElement.querySelectorAll('[data-line]').length).toBeLessThan(TOTAL_LINES / 10);
+
+      // And emphatically not the editor branch, which mounts the entire file.
+      expect(document.querySelector('textarea')).toBeNull();
+    });
+
+    it('keeps the maximize control available on a read-only file', () => {
+      const content = createReadOnlyContent({ extension: 'md', path: 'BIG.md' });
+      const tab = createTab({ content, path: 'BIG.md', name: 'BIG.md' });
+      render(<FilePanelContent tab={tab} {...defaultProps} />);
+
+      expect(screen.getByRole('button', { name: 'Maximize' })).toBeInTheDocument();
+    });
+
+    // ----------------------------------------------------------------------
+    // The flag must stay inert for everything it does not describe
+    // ----------------------------------------------------------------------
+
+    it('a .md WITHOUT readOnly still gets the markdown editor branch', () => {
+      // Guards against the read-only branch swallowing every markdown file.
+      const content = createContent({
+        extension: 'md',
+        path: 'README.md',
+        content: '# Hello World',
+      });
+      const tab = createTab({ content, path: 'README.md', name: 'README.md' });
+      render(<FilePanelContent tab={tab} {...defaultProps} />);
+
+      expect(screen.queryByTestId('file-content-code')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('file-read-only-notice')).not.toBeInTheDocument();
+    });
+
+    it('readOnly:false is treated exactly like an absent flag', () => {
+      const content = createContent({
+        readOnly: false,
+        extension: 'md',
+        path: 'README.md',
+        content: '# Hello World',
+      });
+      const tab = createTab({ content, path: 'README.md', name: 'README.md' });
+      render(<FilePanelContent tab={tab} {...defaultProps} />);
+
+      expect(screen.queryByTestId('file-content-code')).not.toBeInTheDocument();
+    });
+
+    it('shows no notice on an ordinary non-editable file', () => {
+      const tab = createTab({ content: createContent() });
+      render(<FilePanelContent tab={tab} {...defaultProps} />);
+
+      expect(screen.getByTestId('file-content-code')).toBeInTheDocument();
+      expect(screen.queryByTestId('file-read-only-notice')).not.toBeInTheDocument();
+    });
+
+    it('binary viewers still win over the read-only branch', () => {
+      // Images/videos/PDFs are never flagged read-only by the API, but if one
+      // ever were, showing its base64 data URI as source lines would be worse
+      // than useless.
+      const content = createReadOnlyContent({
+        isImage: true,
+        content: 'data:image/png;base64,abc',
+        mimeType: 'image/png',
+        path: 'image.png',
+        extension: 'png',
+      });
+      const tab = createTab({ content, path: 'image.png', name: 'image.png' });
+      render(<FilePanelContent tab={tab} {...defaultProps} />);
+
+      expect(screen.getByTestId('image-viewer')).toBeInTheDocument();
+      expect(screen.queryByTestId('file-content-code')).not.toBeInTheDocument();
+    });
+
+    it('renders the viewer but no notice when readOnly lacks a reason', () => {
+      // Defensive: `readOnlyReason` is documented as always present alongside
+      // `readOnly`, but a truncated payload must not blank the file out.
+      const content = createContent({
+        readOnly: true,
+        extension: 'md',
+        path: 'BIG.md',
+        content: '# huge document',
+      });
+      const tab = createTab({ content, path: 'BIG.md', name: 'BIG.md' });
+      render(<FilePanelContent tab={tab} {...defaultProps} />);
+
+      expect(screen.getByTestId('file-content-code')).toBeInTheDocument();
+      expect(screen.queryByTestId('file-read-only-notice')).not.toBeInTheDocument();
+    });
+  });
+
   describe('MARP state', () => {
     it('should clear stale MARP slides when content is no longer MARP', async () => {
       const fetchMock = global.fetch as ReturnType<typeof vi.fn>;
@@ -431,6 +662,102 @@ describe('FilePanelContent', () => {
       await waitFor(() => {
         expect(screen.queryByTestId('marp-preview')).not.toBeInTheDocument();
       });
+    });
+  });
+
+  // ==========================================================================
+  // [Issue #2499] Opening a file is bounded in time
+  // ==========================================================================
+
+  describe('bounded file open (Issue #2499)', () => {
+    /** A request that neither resolves nor rejects until it is aborted. */
+    function hangingFetch() {
+      return (_url: string, init?: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => {
+            const error = new Error('The operation was aborted.');
+            error.name = 'AbortError';
+            reject(error);
+          });
+        });
+    }
+
+    it('fails a stalled open on the clock instead of spinning forever', async () => {
+      vi.useFakeTimers();
+      try {
+        const fetchMock = global.fetch as ReturnType<typeof vi.fn>;
+        fetchMock.mockImplementation(hangingFetch());
+        const onLoadError = vi.fn();
+
+        render(
+          <FilePanelContent
+            tab={createTab()}
+            {...defaultProps}
+            onLoadError={onLoadError}
+          />,
+        );
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(0);
+        });
+        expect(onLoadError).not.toHaveBeenCalled();
+
+        // One deadline in, the open is not given up on — the ladder tries
+        // again, which is the right answer for a link that merely stuttered.
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(API_GET_TIMEOUT_MS + 1);
+        });
+        expect(onLoadError).not.toHaveBeenCalled();
+
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(API_RETRY_TOTAL_BUDGET_MS);
+        });
+
+        // The pre-#2499 behavior: `tab.loading` stayed true forever, and
+        // `fetchingRef` stayed latched, so even closing and reopening the tab
+        // could not retry it. Now the ladder gets its second attempt, the
+        // budget runs out, and the user is told.
+        expect(fetchMock.mock.calls.length).toBeGreaterThan(1);
+        expect(onLoadError).toHaveBeenCalledTimes(1);
+        expect(onLoadError.mock.calls[0][0]).toBe('src/index.ts');
+        expect(String(onLoadError.mock.calls[0][1])).toContain(String(API_GET_TIMEOUT_MS));
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('recovers from a dropped request without the user reopening the tab', async () => {
+      vi.useFakeTimers();
+      try {
+        const content = createContent();
+        const fetchMock = global.fetch as ReturnType<typeof vi.fn>;
+        fetchMock
+          .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+          .mockResolvedValueOnce({
+            ok: true,
+            status: 200,
+            json: () => Promise.resolve(content),
+          });
+        const onLoadContent = vi.fn();
+        const onLoadError = vi.fn();
+
+        render(
+          <FilePanelContent
+            tab={createTab()}
+            {...defaultProps}
+            onLoadContent={onLoadContent}
+            onLoadError={onLoadError}
+          />,
+        );
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(API_GET_TIMEOUT_MS);
+        });
+
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+        expect(onLoadContent).toHaveBeenCalledWith('src/index.ts', content);
+        expect(onLoadError).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 });

@@ -14,10 +14,10 @@ import React, { useEffect, useRef, memo, useState, useCallback, useMemo } from '
 import { createPortal } from 'react-dom';
 import dynamic from 'next/dynamic';
 import { useTranslations } from 'next-intl';
-import { Maximize2, Minimize2, ClipboardCopy, Check, Copy, Search } from 'lucide-react';
+import { Maximize2, Minimize2, ClipboardCopy, Check, Copy, Search, Lock } from 'lucide-react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { FileTab } from '@/hooks/useFileTabs';
-import type { FileContent } from '@/types/models';
+import type { FileContent, FileReadOnlyReason } from '@/types/models';
 import { useFileContentPolling } from '@/hooks/useFileContentPolling';
 import { useFileContentSearch } from '@/hooks/useFileContentSearch';
 import { useCopyFeedback } from '@/hooks/useCopyFeedback';
@@ -25,6 +25,7 @@ import { FileSearchBar } from './FileSearchBar';
 import { ImageViewer } from './ImageViewer';
 import { VideoViewer } from './VideoViewer';
 import { copyToClipboard } from '@/lib/clipboard-utils';
+import { fetchApiResponse } from '@/lib/api-client';
 import { encodePathForUrl } from '@/lib/url-path-encoder';
 import { isEditableExtension } from '@/config/editable-extensions';
 import { VIEWER_OVERSCAN_LINES, VIEWER_CHUNK_LINE_SIZE } from '@/config/file-viewer-config';
@@ -150,6 +151,31 @@ function ErrorDisplay({ error }: { error: string }) {
         </svg>
         <p className="text-sm text-danger-foreground">{error}</p>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Banner explaining why a file opened read-only (Issue #2505).
+ *
+ * The wording comes from the server (`FileContent.readOnlyReason.message`)
+ * rather than a translation key, because the server is the side that knows
+ * which ceiling applied — `.html` has its own 5MB limit, every other editable
+ * extension 2MB — and re-deriving that mapping in the client is how the two
+ * drift. `code` stays available on the payload for a later localized rendering.
+ *
+ * Styled as an advisory, not an error: the file loaded fine, only saving is off.
+ */
+function ReadOnlyNotice({ reason }: { reason: FileReadOnlyReason }) {
+  return (
+    <div
+      data-testid="file-read-only-notice"
+      data-reason-code={reason.code}
+      role="status"
+      className="flex items-center gap-2 px-3 py-2 bg-warning-subtle border-b border-warning-border text-xs text-warning-foreground"
+    >
+      <Lock className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+      <span>{reason.message}</span>
     </div>
   );
 }
@@ -289,7 +315,14 @@ function useLazyChunkFetcher({
     inflightChunksRef.current.add(chunkKey);
 
     const url = `/api/worktrees/${worktreeId}/files/${encodePathForUrl(filePath)}?startLine=${targetStart}&endLine=${targetEnd}`;
-    fetch(url)
+    // Issue #2499: shared transport, default read policy. This one keeps the
+    // retries the polling call sites turn off, because nothing else here will
+    // ever ask again: `inflightChunksRef` is released on settle, but the effect
+    // only re-runs when the visible window moves — so a chunk that failed under
+    // a stuttering signal stays a blank stretch of file until the user happens
+    // to scroll across it a second time. `fetchApiResponse` rather than
+    // `fetchApi` to keep `res.ok ? … : null` instead of a throw.
+    fetchApiResponse(url)
       .then(async (res) => (res.ok ? res.json() : null))
       .then((data) => {
         inflightChunksRef.current.delete(chunkKey);
@@ -666,7 +699,13 @@ function MaximizableWrapper({
   return createPortal(overlay, document.body);
 }
 
-/** [Issue #47] Markdown editor with file content search (PC) [DR2-005] */
+/**
+ * [Issue #47] Markdown editor with file content search (PC) [DR2-005]
+ *
+ * Despite the name, this is the editor branch for EVERY editable text
+ * extension, not just `.md`: `.yaml` / `.yml` (Issue #646) and `.txt`
+ * (Issue #2506) land here too, and `MarkdownEditor` puts them in text mode.
+ */
 function MarkdownWithSearch({ tab, content, worktreeId, isMaximized, onToggleMaximize, onFileSaved, onDirtyChange, onOpenFile }: { tab: FileTab; content: FileContent; worktreeId: string; isMaximized: boolean; onToggleMaximize: () => void; onFileSaved?: (path: string) => void; onDirtyChange?: (isDirty: boolean) => void; onOpenFile?: (path: string) => void }) {
   const search = useFileContentSearch(content.content);
 
@@ -689,9 +728,15 @@ function MarkdownWithSearch({ tab, content, worktreeId, isMaximized, onToggleMax
       )}
       <div className="flex-1 min-h-0">
         {search.searchOpen && search.searchQuery.length >= 2 ? (
+          // [Issue #2506] The extension comes from the file, not the literal
+          // `"md"` this used to pass. Because every editable text extension
+          // reaches this component (see the note above), the hard-coded value
+          // made the search view highlight a `.yaml` or `.txt` file as
+          // Markdown — `key: value` lines and bare prose picked up heading and
+          // emphasis colouring that the non-search view never shows.
           <CodeViewer
             content={content.content}
-            extension="md"
+            extension={content.extension}
             searchMatches={search.searchMatches}
             searchCurrentIdx={search.searchCurrentIdx}
           />
@@ -710,7 +755,15 @@ function MarkdownWithSearch({ tab, content, worktreeId, isMaximized, onToggleMax
   );
 }
 
-/** [Issue #47] Code viewer with file content search (PC) */
+/**
+ * [Issue #47] Code viewer with file content search (PC).
+ *
+ * [Issue #2505] Also the destination for files the API flagged read-only. It is
+ * the virtualized viewer, which is exactly what an oversize file needs: the
+ * editable branches below render a `<textarea>` in one shot, and a multi-MB file
+ * mounted that way is what froze phones before Issue #723 introduced
+ * virtualization here.
+ */
 function CodeViewerWithSearch({
   tab,
   content,
@@ -753,6 +806,9 @@ function CodeViewerWithSearch({
   return (
     <div className="h-full flex flex-col">
       <FileToolbar filePath={tab.path} isMaximized={isMaximized} onToggleMaximize={onToggleMaximize} copyableContent={content.content} onSearch={search.openSearch} />
+      {content.readOnly && content.readOnlyReason && (
+        <ReadOnlyNotice reason={content.readOnlyReason} />
+      )}
       {search.searchOpen && (
         <FileSearchBar
           inputRef={search.searchInputRef}
@@ -851,7 +907,11 @@ export const FilePanelContent = memo(function FilePanelContent({
 
     const fetchContent = async () => {
       try {
-        const response = await fetch(
+        // Issue #2499: the spinner this Issue is about. Opening a file on a
+        // weak link had no deadline at all, so a stalled request left
+        // `tab.loading` true forever — and `fetchingRef` stayed latched, so
+        // even closing and reopening the tab could not retry it.
+        const response = await fetchApiResponse(
           `/api/worktrees/${worktreeId}/files/${encodePathForUrl(tab.path)}`,
         );
 
@@ -903,7 +963,13 @@ export const FilePanelContent = memo(function FilePanelContent({
     let cancelled = false;
     const fetchMarpSlides = async () => {
       try {
-        const response = await fetch(
+        // Issue #2499: a write, so the transport refuses to retry it however
+        // idempotent this particular render happens to be (see
+        // API_IDEMPOTENT_METHODS). What it gains is the deadline: MARP
+        // rendering spawns a server-side pipeline, and a hung one used to hold
+        // this promise — and the effect's `cancelled` closure — for the life of
+        // the tab.
+        const response = await fetchApiResponse(
           `/api/worktrees/${worktreeId}/marp-render`,
           {
             method: 'POST',
@@ -983,6 +1049,29 @@ export const FilePanelContent = memo(function FilePanelContent({
             <PdfPreview dataUri={content.content} filePath={tab.path} />
           </div>
         </div>
+      </MaximizableWrapper>
+    );
+  }
+
+  // [Issue #2505] Read-only check sits AHEAD of every editable branch (isHtml /
+  // md / other editable extensions), because those branches all lead to an
+  // editor: `HtmlPreview` and `MarkdownWithSearch` both offer a save action and
+  // mount the whole file into a `<textarea>`. A file is flagged read-only
+  // precisely when it is too big for that, so offering the editor would be both
+  // a broken promise (PUT still refuses it) and the performance cliff the flag
+  // exists to avoid. Binary viewers (image / video / PDF) stay above this: they
+  // are never flagged read-only and have their own size rules.
+  if (content.readOnly) {
+    return (
+      <MaximizableWrapper isMaximized={isMaximized} onToggle={toggleMaximize} filePath={tab.path}>
+        <CodeViewerWithSearch
+          tab={tab}
+          content={content}
+          worktreeId={worktreeId}
+          isMaximized={isMaximized}
+          onToggleMaximize={toggleMaximize}
+          onLoadContent={onLoadContent}
+        />
       </MaximizableWrapper>
     );
   }

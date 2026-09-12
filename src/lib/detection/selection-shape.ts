@@ -257,6 +257,382 @@ const COMMAND_CODE_RULE_ROW_PATTERN = /^\u2500+$/;
 const COMMAND_CODE_RULE_MIN_COLUMNS = 40;
 
 /**
+ * The cursor glyph Command Code draws against the highlighted option.
+ *
+ * U+276F, measured on the capture Issue #2521 was raised from. Only this one,
+ * and not codex's `›` or gemini's `●`: {@link readCommandCodeQuestionRegion}
+ * counts cursors to decide whether the region holds ONE live dialog, and a
+ * wider alphabet would start counting glyphs that are not cursors at all.
+ */
+const COMMAND_CODE_CURSOR_GLYPH = '❯';
+
+/**
+ * The markers Command Code paints on a question screen's tab strip.
+ *
+ * Measured row: `● Dispatch | ◯ Review` — a filled disc on the tab that has the
+ * screen and a hollow ring on the one that does not. The names are NOT part of
+ * the reading (a different question draws different tabs); what is read is the
+ * strip's structure, which is what {@link isCommandCodeQuestionTabRow} states.
+ *
+ * Two families rather than one alphabet, because "one of these is filled and one
+ * of these is not" is the whole signal. A list of bullets (`● item one`) carries
+ * the first family and nothing else, and a bullet list is the thing this
+ * reading must never mistake for a dialog.
+ */
+const COMMAND_CODE_TAB_SELECTED_MARKERS = '●◉⦿';
+/** The hollow half of {@link COMMAND_CODE_TAB_SELECTED_MARKERS}'s pair. */
+const COMMAND_CODE_TAB_UNSELECTED_MARKERS = '◯○◌⚪';
+
+/** One `<marker> <label>` cell of the tab strip. */
+const COMMAND_CODE_TAB_SEGMENT_PATTERN = new RegExp(
+  `^\\s*([${COMMAND_CODE_TAB_SELECTED_MARKERS}${COMMAND_CODE_TAB_UNSELECTED_MARKERS}])\\s+\\S`,
+);
+
+/**
+ * Is this row Command Code's question-screen tab strip?
+ *
+ * Three conditions, and each one is a bullet list this predicate has to refuse:
+ *
+ *  - **two or more `|`-separated cells.** `● Dispatch` on its own is a bullet;
+ *    `● Dispatch | ◯ Review` is a strip. The separator is the cheapest part of
+ *    the structure and the one prose never has in this position;
+ *  - **every cell is `<marker> <label>`.** A row that is a strip for its first
+ *    cell and prose for its second is prose;
+ *  - **at least one filled marker and at least one hollow one.** A tab strip
+ *    says which tab has the screen. A row of identical bullets does not, and
+ *    `● one | ● two` is exactly the list-with-a-pipe this rules out.
+ */
+function isCommandCodeQuestionTabRow(line: string): boolean {
+  const segments = line.split('|');
+  if (segments.length < 2) return false;
+  let selected = 0;
+  let unselected = 0;
+  for (const segment of segments) {
+    const match = COMMAND_CODE_TAB_SEGMENT_PATTERN.exec(segment);
+    if (match === null) return false;
+    if (COMMAND_CODE_TAB_SELECTED_MARKERS.includes(match[1])) selected += 1;
+    else unselected += 1;
+  }
+  return selected > 0 && unselected > 0;
+}
+
+/**
+ * Rows that mean the region spans more than the one dialog on screen now.
+ *
+ * Issue #2521's condition 4: the tab strip and its options have to be the
+ * SAME screen, with no other turn's generating or completion UI between them.
+ * Structurally that is mostly settled by taking the LAST rule row as the top
+ * edge — a new turn repaints the composer, and the composer's own lower rule
+ * then becomes that edge — so this pattern is the belt to that braces, for a
+ * frame captured mid-repaint.
+ *
+ * Two rows, both restated here rather than imported: `cli-patterns` owns
+ * Command Code's busy and marker vocabularies and pulls the logger and the tool
+ * registry in with them, and this module is the browser-safe leaf the chat
+ * surface imports (see the module docblock).
+ *
+ *  - `esc to interrupt`, the tail Command Code appends to every status row
+ *    (`COMMAND_CODE_INTERRUPT_HINT_PATTERN`). A turn is in flight;
+ *  - a row that OPENS with U+273B and a word — `✻ Thought for 1 second`,
+ *    `✻ Worked for 4s`. Matched by shape rather than by the two English verbs,
+ *    so a reworded or localised marker still ends the region.
+ */
+const COMMAND_CODE_QUESTION_REGION_REJECT_PATTERN =
+  /\besc\s+to\s+interrupt\b|^[^\S\n]*✻[^\S\n]+\S/im;
+
+/**
+ * Where a footer-less Command Code question screen is, once one is recognised.
+ *
+ * Line indices, not rows, and measured against the LF-normalised frame the
+ * caller passed in — so the cropper can slice the ANSI-bearing lines and the
+ * detector can answer a status from the same reading (Issue #2521).
+ */
+export interface CommandCodeQuestionRegion {
+  /** The rule row that bounds the region above. NOT part of the region. */
+  readonly ruleLineIndex: number;
+  /** First row of the region, i.e. {@link ruleLineIndex} + 1. */
+  readonly firstLineIndex: number;
+  /** Last row of the region: the frame's last row carrying content. */
+  readonly lastLineIndex: number;
+  /** The tab strip — the region's first non-blank row. */
+  readonly tabLineIndex: number;
+  /** The option row carrying the one cursor glyph. */
+  readonly cursorLineIndex: number;
+  /** How many options the question draws: 2…{@link MAX_OPTION_NUMBER}. */
+  readonly optionCount: number;
+}
+
+/**
+ * Where a footer-less Command Code question screen sits on a pane (Issue #2521).
+ *
+ * ## The frame this exists for
+ *
+ * Command Code's `AskUserQuestion` draws no hint-bar footer. It draws a rule,
+ * a tab strip, the question, and the options — and when an option's description
+ * WRAPS, the continuation row begins with a single space:
+ *
+ *     ────────────────────────────… (200 columns of U+2500)
+ *     ● Dispatch | ◯ Review
+ *
+ *     Approve proceeding from the plan into worktree creation and dispatch?
+ *
+ *     ❯ 1. Prepare worktrees + dispatch (Recommended)
+ *          I create the worktrees and pause for you to
+ *      answer).
+ *       2. Worktrees only, then pause
+ *     …
+ *
+ * Measured 2026-09-12 on a pane reported as Command Code 1.53.0 at the
+ * production 200x1000; the anonymised capture is
+ * `tests/fixtures/command-code-askuserquestion-2521/`. Nothing read it:
+ * `detectPrompt` stops its scan at ` answer).` and never reaches option 1, and
+ * the selection-list branch below wants a footer this screen does not draw. So
+ * the frame fell through to the generic composer check — which matches, because
+ * `COMMAND_CODE_PROMPT_PATTERN` is `^❯(\s*$|\s+\S)` and `❯ 1. Prepare …` is a
+ * `❯` followed by a space and a glyph — and the pane was published as
+ * `ready` / `input_prompt`. `wait` read that as a finished turn and exited 0 on
+ * a session that was asking a question (Issue #2521's "偽完了").
+ *
+ * ## What this function is NOT
+ *
+ * It is not a general reading of footer-less dialogs, and it deliberately does
+ * not make `optionCount` into a dialog test. {@link readSelectionListShape}
+ * counts the numbers in the tail of ANY frame, an ordinary numbered answer
+ * included, and the whole point of the conditions below is that a number list
+ * on its own proves nothing. Five things have to line up:
+ *
+ *  1. the LAST rule row that qualifies as the seam ({@link
+ *     COMMAND_CODE_RULE_ROW_PATTERN} at {@link COMMAND_CODE_RULE_MIN_COLUMNS} or
+ *     wider) is the top edge, and the last row carrying content is the bottom.
+ *     Taking the LAST one is what keeps an older dialog higher up the pane out:
+ *     a new turn repaints the composer, whose own rules sit below the old
+ *     dialog, and the region is then the composer's hint row;
+ *  2. the first row under that rule is a tab strip
+ *     ({@link isCommandCodeQuestionTabRow}) and a non-blank question body
+ *     follows it before the first option;
+ *  3. the options are a STRICT run `1.` … `N.`, 2 ≤ N ≤ {@link
+ *     MAX_OPTION_NUMBER}. A gap, a repeat or a list that starts at `2` is not
+ *     this screen;
+ *  4. exactly one {@link COMMAND_CODE_CURSOR_GLYPH} in the region, and it is on
+ *     an option row. Two cursors means two screens — typically a composer's own
+ *     `❯` under the dialog — and none means the highlight is elsewhere;
+ *  5. no filter box, no `/model` footer, no dismiss-only footer and no other
+ *     turn's UI in the region ({@link FILTER_INPUT_PATTERN},
+ *     {@link COMMAND_CODE_SELECTION_LIST_FOOTER},
+ *     {@link DISMISSABLE_PANEL_FOOTER_PATTERN},
+ *     {@link COMMAND_CODE_QUESTION_REGION_REJECT_PATTERN}). `Type something...`
+ *     is an OPTION on this screen, not a filter, and the filter pattern is
+ *     narrow enough to tell them apart.
+ *
+ * `null` for anything else, which leaves every existing verdict and every
+ * existing crop exactly as they were.
+ *
+ * ## Tool-id-free and browser-safe, on purpose
+ *
+ * Three call sites read the same answer: the command-code detector's
+ * `afterPrompt`, {@link extractCommandCodeSelectionListFrame} (which runs for
+ * every CLI, with no tool id in hand) and `ChatSurface`, a client component.
+ * So this takes a raw frame and nothing else, and imports nothing but
+ * `./ansi` — the same trade the rest of this module makes.
+ *
+ * ## The one spelling it cannot answer on
+ *
+ * A capture that has been through `stripBoxDrawing` — which blanks a pure-U+2500
+ * row, so condition 1 finds no seam and this returns `null`. Same limitation
+ * `extractOpenCodeModalOverlayFrame` records for the same reason. Issue #2522
+ * did not weaken the reading to work around it: the three consumers that clean
+ * their frames (the response poller, Auto-Yes, `/prompt-response`) now keep the
+ * same tick's RAW capture and hand that here, so both spellings of one capture
+ * exist and the right one is passed.
+ *
+ * ## Issue #2522: the structural half is shared
+ *
+ * Conditions 1, 2, 3-minus-strictness and 5 moved into
+ * {@link scanCommandCodeQuestionScreen}, which {@link hasCommandCodeQuestionChrome}
+ * also reads. This function is exactly that scan plus the two conditions that
+ * are about the LIST — a strict run and a single cursor — so every verdict it
+ * gave before is the verdict it gives now.
+ *
+ * @param frame - a raw `capture-pane -p -e` frame, ANSI intact (CRLF tolerated)
+ * @returns the region's line indices into the LF-normalised frame, or `null`
+ */
+export function readCommandCodeQuestionRegion(
+  frame: string | null | undefined,
+): CommandCodeQuestionRegion | null {
+  const screen = scanCommandCodeQuestionScreen(frame);
+  if (screen === null) return null;
+
+  // 3 (continued). A STRICT run. The numbers were collected in the order they
+  // are drawn and are compared against the run, rather than restarted on every
+  // fresh `1` the way `countTrailingOptionRun` does: that function is reading a
+  // tail that may hold two lists, and this one is asserting that the region
+  // holds exactly one.
+  if (!screen.numbers.every((value, index) => value === index + 1)) return null;
+
+  // 4 (continued). Exactly ONE cursor. Two means two screens — typically a
+  // composer's own `❯` under the dialog, or a frame caught mid-repaint.
+  if (screen.cursorCount !== 1) return null;
+
+  return {
+    ruleLineIndex: screen.ruleLineIndex,
+    firstLineIndex: screen.firstLineIndex,
+    lastLineIndex: screen.lastLineIndex,
+    tabLineIndex: screen.tabLineIndex,
+    cursorLineIndex: screen.cursorLineIndex,
+    optionCount: screen.numbers.length,
+  };
+}
+
+/**
+ * Is Command Code's question CHROME on this frame, whatever its numbering says?
+ * (Issue #2522)
+ *
+ * The same five conditions {@link readCommandCodeQuestionRegion} applies, minus
+ * the two that are about the LIST rather than about the screen: the run need not
+ * be a strict `1.`…`N.`, and there may be more than one cursor on it.
+ *
+ * ## Why the weaker reading is worth having
+ *
+ * Issue #2522 確定仕様 B needs three answers where #2521 had two. "Not this
+ * screen" keeps every existing verdict; "read in full" produces an answerable
+ * prompt; and **"this screen, unreadable"** — a gap in the numbering, a repeated
+ * row, a list that starts at `2`, a second cursor from a half-finished repaint —
+ * has to reach the manual-operation fallback rather than the `ready` the generic
+ * composer check would otherwise publish off the dialog's own `❯` row. That is
+ * the very failure both Issues exist for: `wait` exiting 0 on a pane that is
+ * asking a human a question.
+ *
+ * It is deliberately NOT a relaxation of the strict reading. Nothing that was
+ * `null` becomes a REGION, so no partial option list is produced anywhere and no
+ * existing crop, card or prompt payload changes. What this adds is the ability
+ * to say "declined for a numbering reason" out loud.
+ *
+ * ## Why it is still narrow
+ *
+ * Every structural condition stays: the last qualifying rule row, a genuine tab
+ * strip as the first row under it ({@link isCommandCodeQuestionTabRow} — one
+ * filled marker, one hollow, `|`-separated), a non-blank question body before
+ * the first option, at least two numbered rows, at least one `❯` ON one of them,
+ * and none of the pickers, panels or other-turn UI the other branches own. An
+ * assistant answering in a numbered list carries none of that, and a frame with
+ * one option or with the `❯` on a composer row is still `false` — the two cases
+ * #2521 recorded as "the highlight is elsewhere".
+ *
+ * @param frame - a raw `capture-pane -p -e` frame, ANSI intact (CRLF tolerated)
+ */
+export function hasCommandCodeQuestionChrome(frame: string | null | undefined): boolean {
+  return scanCommandCodeQuestionScreen(frame) !== null;
+}
+
+/** What {@link scanCommandCodeQuestionScreen} read off one frame. */
+interface CommandCodeQuestionScreen {
+  readonly ruleLineIndex: number;
+  readonly firstLineIndex: number;
+  readonly lastLineIndex: number;
+  readonly tabLineIndex: number;
+  /** The option numbers, in draw order. NOT asserted to be a strict run. */
+  readonly numbers: readonly number[];
+  /** How many {@link COMMAND_CODE_CURSOR_GLYPH} the region carries. */
+  readonly cursorCount: number;
+  /** The LAST option row carrying a cursor. */
+  readonly cursorLineIndex: number;
+}
+
+/**
+ * The structural half of the question-screen reading, shared by the strict
+ * {@link readCommandCodeQuestionRegion} and the weaker
+ * {@link hasCommandCodeQuestionChrome} (Issue #2522 split them apart).
+ *
+ * Written once rather than twice on purpose: the conditions below are what make
+ * the reading safe for every other CLI's frames, and a second copy of them is a
+ * second thing to forget to narrow.
+ */
+function scanCommandCodeQuestionScreen(
+  frame: string | null | undefined,
+): CommandCodeQuestionScreen | null {
+  if (!frame) return null;
+  // Stripped per line off the same split, so every index below is valid against
+  // the ANSI-bearing rows the cropper slices.
+  const lines = frame.replace(/\r\n/g, '\n').split('\n').map(stripAnsi);
+
+  let last = lines.length - 1;
+  while (last >= 0 && lines[last].trim() === '') last -= 1;
+  // A region needs a rule above it, so the last content row cannot be row 0.
+  if (last < 1) return null;
+
+  let ruleLineIndex = -1;
+  for (let i = last - 1; i >= 0; i -= 1) {
+    const row = lines[i].trim();
+    if (row.length < COMMAND_CODE_RULE_MIN_COLUMNS) continue;
+    if (!COMMAND_CODE_RULE_ROW_PATTERN.test(row)) continue;
+    ruleLineIndex = i;
+    break;
+  }
+  if (ruleLineIndex < 0) return null;
+
+  const region = lines.slice(ruleLineIndex + 1, last + 1);
+  const body = region.join('\n');
+
+  // 5. The screens this reading must not take over.
+  if (FILTER_INPUT_PATTERN.test(body)) return null;
+  if (COMMAND_CODE_SELECTION_LIST_FOOTER.test(body)) return null;
+  if (DISMISSABLE_PANEL_FOOTER_PATTERN.test(body)) return null;
+  if (COMMAND_CODE_QUESTION_REGION_REJECT_PATTERN.test(body)) return null;
+
+  // 2. The tab strip opens the region.
+  const tabOffset = region.findIndex((line) => line.trim() !== '');
+  if (tabOffset < 0) return null;
+  if (!isCommandCodeQuestionTabRow(region[tabOffset])) return null;
+
+  // 3. Numbered rows under it.
+  const numbers: number[] = [];
+  let firstOptionOffset = -1;
+  for (let i = tabOffset + 1; i < region.length; i += 1) {
+    const match = OPTION_ROW_PATTERN.exec(region[i]);
+    if (match === null) continue;
+    if (firstOptionOffset < 0) firstOptionOffset = i;
+    numbers.push(Number(match[1]));
+  }
+  // Two is the floor: one numbered row under a tab strip is not a choice. The
+  // ceiling is {@link MAX_OPTION_NUMBER} and it is {@link OPTION_ROW_PATTERN}'s
+  // rather than a length check — that pattern captures a SINGLE digit, so a
+  // `10.` row is not read as an option at all and an eleven-option screen
+  // reports its first nine. Recognising such a screen and under-counting it is
+  // the right failure: declining it would put the pane back on the `ready` that
+  // made `wait` exit 0. (Issue #2522's reader cross-checks the count against its
+  // own block reading and declines to ANSWER such a screen; what it must not do
+  // is hand the pane back to the composer check.)
+  if (numbers.length < 2) return null;
+
+  // 2 (continued). The question itself. A tab strip sitting straight on top of
+  // its options is some other screen.
+  if (!region.slice(tabOffset + 1, firstOptionOffset).some((line) => line.trim() !== '')) {
+    return null;
+  }
+
+  // 4. A cursor, on an option row.
+  let cursorCount = 0;
+  let cursorOffset = -1;
+  for (let i = 0; i < region.length; i += 1) {
+    const inRow = region[i].split(COMMAND_CODE_CURSOR_GLYPH).length - 1;
+    if (inRow === 0) continue;
+    cursorCount += inRow;
+    if (OPTION_ROW_PATTERN.test(region[i])) cursorOffset = i;
+  }
+  if (cursorCount === 0 || cursorOffset < 0) return null;
+
+  return {
+    ruleLineIndex,
+    firstLineIndex: ruleLineIndex + 1,
+    lastLineIndex: last,
+    tabLineIndex: ruleLineIndex + 1 + tabOffset,
+    numbers,
+    cursorCount,
+    cursorLineIndex: ruleLineIndex + 1 + cursorOffset,
+  };
+}
+
+/**
  * The rows of a Command Code dialog, cut out of the pane it is painted on
  * (Issue #2326).
  *
@@ -297,7 +673,11 @@ const COMMAND_CODE_RULE_MIN_COLUMNS = 40;
  *  - **no footer** — the picker was closed between the flags being read and the
  *    pane being captured, or the frame is some other dialog. Cropping on a
  *    guess would blank the card, which Issue #2326 calls out as worse than
- *    showing too much;
+ *    showing too much. Issue #2521 carved ONE screen out of this: a frame that
+ *    {@link readCommandCodeQuestionRegion} positively recognises is cropped to
+ *    that region, because `AskUserQuestion` draws no footer at all and its card
+ *    was otherwise the whole pane. The carve-out is a positive reading, not a
+ *    relaxation — everything it declines still lands here;
  *  - **a footer but no rule above it** — copilot's `/model` footer is
  *    `↑/↓ to navigate · … · enter to select · esc to cancel` and matches the
  *    same pattern, but copilot draws its picker in a corner-bordered box, so no
@@ -322,7 +702,21 @@ export function extractCommandCodeSelectionListFrame(frame: string): string | nu
       break;
     }
   }
-  if (footer < 0) return null;
+  // Issue #2521: no footer is no longer unconditionally "do not crop". One
+  // screen draws none — `AskUserQuestion` — and it is the screen whose
+  // uncropped card was 409 rows of transcript with the question below the fold.
+  // The reading is the narrow one, so every other footer-less frame (a closed
+  // picker, a permission dialog, another CLI's overlay) still takes the `null`
+  // path and is returned untouched. Checked only when the footer is absent, so
+  // a picker's own crop is decided exactly as #2326 left it.
+  if (footer < 0) {
+    const region = readCommandCodeQuestionRegion(frame);
+    if (region === null) return null;
+    // The rule row itself is the transcript's boundary and not the dialog's
+    // first row — the same edge the footer path takes — and `lastLineIndex` is
+    // the last row with content, so the pane's trailing padding is left out.
+    return lines.slice(region.firstLineIndex, region.lastLineIndex + 1).join('\n');
+  }
 
   for (let i = footer - 1; i >= 0; i -= 1) {
     const row = stripAnsi(lines[i]).trim();

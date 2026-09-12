@@ -148,6 +148,7 @@ import {
 import { OpencodeModelKeys } from '@/components/worktree/OpencodeQuickKeys';
 import {
   hasDismissablePanelFooter,
+  readCommandCodeQuestionRegion,
   readSelectionListShape,
   shouldOfferOptionNumbers,
 } from '@/lib/detection/selection-shape';
@@ -903,6 +904,27 @@ export const ChatSurface = memo(function ChatSurface({
     [blockedReason, frame],
   );
 
+  // --------------------------------------------------------------------
+  // Command Code's footer-less question screen (Issue #2521)
+  // --------------------------------------------------------------------
+  // This ONE frame is a selection list whose numbers must not become buttons,
+  // and `readSelectionListShape` cannot say so: it reads `1.`…`4.` off the tail
+  // and no filter box, which for every screen measured for #2297 is exactly the
+  // shape that earns a number row. What is missing is not in the tail at all —
+  // Command Code's `AskUserQuestion` ends in a `Type something...` option that
+  // is a SEPARATE text input in the TUI (read off 1.53.1's `QuestionPrompt` /
+  // `SelectInput`), and #2521 withdrew the claim that the numbers on this screen
+  // are answerable keys rather than something #2522 still has to measure.
+  //
+  // So the suppression is scoped to the frame the new fallback identified, by
+  // the same reading the detector and the cropper use, and the all-CLI rules in
+  // `shouldOfferOptionNumbers` are left exactly as #2297 measured them: claude's
+  // trust dialog, codex's picker and copilot's `/permissions` keep their numbers.
+  const isCommandCodeQuestionFallback = useMemo(
+    () => blockedReason === 'selectionList' && readCommandCodeQuestionRegion(frame) !== null,
+    [blockedReason, frame],
+  );
+
   // How tall the selection list actually is (Issue #2326).
   //
   // The card's height cap is the only thing standing between the picker and
@@ -967,7 +989,11 @@ export const ChatSurface = memo(function ChatSurface({
         return (
           <div className="space-y-2">
             <NavigationButtons {...keyProps} />
-            {shape && shouldOfferOptionNumbers(shape) ? (
+            {/* Issue #2521 suppresses the row for the one frame whose numbers
+                have not been measured as answerable — see
+                `isCommandCodeQuestionFallback`. Every other numbered list is
+                decided by `shouldOfferOptionNumbers` alone, unchanged. */}
+            {shape && !isCommandCodeQuestionFallback && shouldOfferOptionNumbers(shape) ? (
               <SelectionNumberKeys {...keyProps} optionCount={shape.optionCount} />
             ) : null}
             {showCommitKeys && shape ? (
@@ -1028,7 +1054,16 @@ export const ChatSurface = memo(function ChatSurface({
           </div>
         );
     }
-  }, [blockedReason, cliToolId, worktreeId, instanceId, handleDialogKeysSent, selectionShape, t]);
+  }, [
+    blockedReason,
+    cliToolId,
+    worktreeId,
+    instanceId,
+    handleDialogKeysSent,
+    selectionShape,
+    isCommandCodeQuestionFallback,
+    t,
+  ]);
 
   const historyProps = history ?? {};
 

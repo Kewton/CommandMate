@@ -30,6 +30,7 @@ import { ErrorBoundary } from '@/components/error/ErrorBoundary';
 import { MessageInput } from '@/components/worktree/MessageInput';
 import type { ShowToast } from '@/types/markdown-editor';
 import { NavigationButtons } from '@/components/worktree/NavigationButtons';
+import { Button } from '@/components/ui/Button';
 import { FileViewer } from '@/components/worktree/FileViewer';
 
 
@@ -103,6 +104,70 @@ export interface WorktreeDetailRefactoredProps {
   /** Worktree ID to display */
   worktreeId: string;
 }
+
+/**
+ * Issue #2498: "this screen is stale and we are still trying".
+ *
+ * Deliberately an overlay (`fixed`, out of normal flow) rather than a strip
+ * inserted into the layout: the PC and mobile shells below both size their
+ * children against a full-height flex column, and a banner that consumed a row
+ * would shift the terminal every time a phone dipped out of signal. Floating it
+ * keeps the fix to what it claims to be — the screen underneath, composer draft
+ * included, does not move at all.
+ */
+const ReconnectingBanner = memo(function ReconnectingBanner({ label }: { label: string }) {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      data-testid="worktree-detail-reconnecting-banner"
+      className="fixed top-2 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 rounded-full border border-warning-border bg-warning-subtle px-3 py-1 text-xs text-warning-foreground shadow-sm"
+    >
+      <Spinner size="xs" />
+      <span>{label}</span>
+    </div>
+  );
+});
+
+/**
+ * Issue #2498: the expired-session screen.
+ *
+ * Not `ErrorDisplay`: an expired session is not a failure to retry into, and
+ * the message it used to carry was the SyntaxError from parsing the /login HTML
+ * ("Unexpected token <"). The one action that resolves it is logging in again,
+ * so that is the only action offered.
+ */
+const SessionExpiredNotice = memo(function SessionExpiredNotice({
+  message,
+  loginLabel,
+  onLogin,
+}: {
+  message: string;
+  loginLabel: string;
+  onLogin: () => void;
+}) {
+  return (
+    <div
+      className="flex h-full min-h-[200px] items-center justify-center"
+      role="alert"
+      aria-live="assertive"
+      data-testid="worktree-detail-session-expired"
+    >
+      <div className="max-w-md rounded-lg border border-border bg-surface p-6 text-center">
+        <p className="font-medium text-foreground">{message}</p>
+        <Button
+          variant="primary"
+          type="button"
+          onClick={onLogin}
+          className="mt-4"
+          data-testid="worktree-detail-relogin"
+        >
+          {loginLabel}
+        </Button>
+      </div>
+    </div>
+  );
+});
 
 /**
  * Issue #874: Mobile agent selection is now driven by per-instance visibility
@@ -277,6 +342,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     handlePromptDismiss,
     handlePromptRespond,
     handleRename,
+    handleReLogin,
     handleRetry,
     handleSetLoading,
     handleShowArchivedChange,
@@ -288,10 +354,12 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     historyDisplayLimit,
     historySubTab,
     historyUserOnly,
+    isAuthExpired,
     isEditorMaximized,
     isInfoModalOpen,
     isMobile,
     isMoveDialogOpen,
+    isReconnecting,
     isSelectionListActive,
     isPagerActive,
     lastAutoResponse,
@@ -328,6 +396,10 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     worktreeName,
     worktreeStatus,
   } = useWorktreeDetailController({ worktreeId });
+
+  // Issue #2498: the re-login button's label. The screen's other namespaces
+  // arrive from the controller; `auth` is only needed for this one string.
+  const tAuth = useTranslations('auth');
 
   // Issue #1080: mobile terminal secondary actions (search + End) moved off the
   // sticky control row into a bottom sheet, opened from a "more actions" trigger.
@@ -436,7 +508,25 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     return <LoadingIndicator />;
   }
 
-  // Handle error state
+  // Issue #2498: an expired session is a re-login, not an error. It used to
+  // reach ErrorDisplay carrying the HTML parse failure, which told the user
+  // nothing they could act on.
+  if (isAuthExpired) {
+    return (
+      <SessionExpiredNotice
+        message={tWorktree('editor.sessionExpired')}
+        loginLabel={tAuth('login.submitButton')}
+        onLogin={handleReLogin}
+      />
+    );
+  }
+
+  // Handle error state.
+  //
+  // Issue #2498: `error` is now raised only by a FIRST load that produced
+  // nothing — there is no screen to keep, so the full-screen card plus Retry is
+  // still the right answer. A poll that fails once a worktree is on screen no
+  // longer lands here; it raises `isReconnecting` and the screen stays put.
   if (error) {
     return <ErrorDisplay message={error} onRetry={handleRetry} />;
   }
@@ -478,6 +568,9 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
       // one frozen prop object for both the chat surface and the History
       // column, so neither can be handed `worktreePath` from here directly.
       <ChatFileLinkProvider value={chatFileLinkScope}>
+        {/* Issue #2498: overlay, so a poll failing mid-session never reflows
+            the split below it. */}
+        {isReconnecting && <ReconnectingBanner label={tCommon('connection.reconnecting')} />}
         {/* Issue #755: PC desktop layout extracted to WorktreeDetailDesktop. */}
         <WorktreeDetailDesktop
           worktreeId={worktreeId}
@@ -616,6 +709,9 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
             file-path routing (and the worktree root the transcript normalizes
             against) arrives over this scope instead. */}
         <ChatFileLinkProvider value={chatFileLinkScope}>
+          {/* Issue #2498: see the PC branch — the phone is the case this was
+              written for, and the shell below is height-critical. */}
+          {isReconnecting && <ReconnectingBanner label={tCommon('connection.reconnecting')} />}
           <div
             className="flex flex-col overflow-hidden"
             style={{ height: viewportHeight != null ? `${viewportHeight}px` : '100%' }}

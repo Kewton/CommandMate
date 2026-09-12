@@ -11,12 +11,42 @@ import { useWebSocket, computeBackoffDelay } from '@/hooks/useWebSocket';
 import { MockWebSocket, installMockWebSocket } from '@tests/helpers/mock-websocket';
 
 describe('computeBackoffDelay', () => {
+  /** 0.5 sits at the middle of the jitter window, i.e. no jitter at all. */
+  const noJitter = () => 0.5;
+
   it('grows exponentially and clamps to the max', () => {
-    expect(computeBackoffDelay(0, 1000, 30000)).toBe(1000);
-    expect(computeBackoffDelay(1, 1000, 30000)).toBe(2000);
-    expect(computeBackoffDelay(2, 1000, 30000)).toBe(4000);
-    expect(computeBackoffDelay(3, 1000, 30000)).toBe(8000);
-    expect(computeBackoffDelay(20, 1000, 30000)).toBe(30000);
+    expect(computeBackoffDelay(0, 1000, 30000, noJitter)).toBe(1000);
+    expect(computeBackoffDelay(1, 1000, 30000, noJitter)).toBe(2000);
+    expect(computeBackoffDelay(2, 1000, 30000, noJitter)).toBe(4000);
+    expect(computeBackoffDelay(3, 1000, 30000, noJitter)).toBe(8000);
+    expect(computeBackoffDelay(20, 1000, 30000, noJitter)).toBe(30000);
+  });
+
+  it('spreads each delay across a +/-20% window (#2502)', () => {
+    // The extremes of the window, which is where a sign error or a ratio typo
+    // shows up: the herd this exists to break is a server restart handing every
+    // tab the same close event in the same millisecond.
+    expect(computeBackoffDelay(2, 1000, 30000, () => 0)).toBe(3200);
+    expect(computeBackoffDelay(2, 1000, 30000, () => 1)).toBe(4800);
+    // Jitter applies to the CLAMPED value, so the ceiling is still the ceiling
+    // in expectation rather than something 2**20 can push past.
+    expect(computeBackoffDelay(20, 1000, 30000, () => 1)).toBe(36000);
+  });
+
+  it('never returns a negative delay', () => {
+    for (const r of [0, 0.25, 0.5, 0.75, 1]) {
+      expect(computeBackoffDelay(0, 1000, 30000, () => r)).toBeGreaterThanOrEqual(0);
+    }
+  });
+
+  it('defaults to Math.random, so production delays are actually jittered', () => {
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0);
+    try {
+      expect(computeBackoffDelay(0, 1000, 30000)).toBe(800);
+      expect(randomSpy).toHaveBeenCalled();
+    } finally {
+      randomSpy.mockRestore();
+    }
   });
 });
 
@@ -26,9 +56,14 @@ describe('useWebSocket', () => {
   beforeEach(() => {
     uninstall = installMockWebSocket();
     vi.useFakeTimers();
+    // Issue #2502: the backoff is jittered in production. Pin the middle of the
+    // window here so the timing assertions below can stay exact — the jitter
+    // itself is covered by the `computeBackoffDelay` cases above.
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.useRealTimers();
     uninstall();
   });

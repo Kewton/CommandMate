@@ -23,6 +23,8 @@
  * @vitest-environment node
  */
 
+import fs from 'node:fs';
+import path from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type Database from 'better-sqlite3';
 
@@ -135,5 +137,110 @@ describe('[#2369] buildCurrentOutput publishes isDismissablePanelActive', () => 
 
     expect(payload.isDismissablePanelActive).toBe(false);
     expect(Object.prototype.hasOwnProperty.call(payload, 'isDismissablePanelActive')).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Issue #2521: the footer-less question screen reaches the wire the same way
+// ---------------------------------------------------------------------------
+
+/**
+ * Command Code's `AskUserQuestion`, as the anonymised live capture drew it.
+ *
+ * Read from the fixture rather than written inline, because the defect is in the
+ * BYTES: the continuation row of option 1's description begins with a single
+ * space, which is what took the frame away from the shared prompt parser and
+ * left the generic composer check answering `ready` off `❯ 1. Prepare …`.
+ *
+ * Issue #2521 published this as a selection list with no `promptData`; Issue
+ * #2522 reads the options, so the assertions below are #2522's final state. The
+ * flag that must MOVE is `isSelectionListActive`: it is what raises #2521's
+ * arrow-only fallback card, and a payload carrying both it and `promptData`
+ * would draw two cards for one screen.
+ */
+const ASK_USER_QUESTION = fs.readFileSync(
+  path.join(__dirname, '../../fixtures/command-code-askuserquestion-2521/askuserquestion-wrapped-1530-200x1000.txt'),
+  'utf-8',
+);
+
+/** The same screen with a gap in its numbering: #2521's fallback still applies. */
+const UNREADABLE_QUESTION = fs.readFileSync(
+  path.join(__dirname, '../../fixtures/command-code-askuserquestion-2522/unsupported-missing-number.txt'),
+  'utf-8',
+);
+
+describe('[#2521→#2522] buildCurrentOutput publishes the question screen as an answerable prompt', () => {
+  it('publishes a waiting prompt rather than the ready verdict', async () => {
+    const payload = await payloadFor(ASK_USER_QUESTION);
+
+    expect(payload.sessionStatus).toBe('waiting');
+    expect(payload.sessionStatusReason).toBe(STATUS_REASON.PROMPT_DETECTED);
+    expect(payload.statusEvidence).toBe('positive');
+  });
+
+  it('publishes the same promptData both delivery paths answer from', async () => {
+    // The HTTP poll and the WebSocket push share this producer, so this IS the
+    // payload PromptPanel and MobilePromptSheet draw and `respond` resolves
+    // against.
+    const payload = await payloadFor(ASK_USER_QUESTION);
+
+    expect(payload.isPromptWaiting).toBe(true);
+    expect(payload.promptData).not.toBeNull();
+    const promptData = payload.promptData as {
+      type: string;
+      question: string;
+      options: Array<{ number: number; isDefault: boolean; requiresTextInput?: boolean }>;
+      submitMode?: string;
+    };
+    expect(promptData.type).toBe('multiple_choice');
+    expect(promptData.question).toBe(
+      'Approve proceeding from the plan into worktree creation and dispatch?',
+    );
+    expect(promptData.options).toHaveLength(4);
+    expect(promptData.options.filter((o) => o.isDefault).map((o) => o.number)).toEqual([1]);
+    expect(promptData.options[3].requiresTextInput).toBe(true);
+    expect(promptData.submitMode).toBe('answer_only');
+  });
+
+  it('does not raise #2521’s fallback card alongside it', async () => {
+    // `isSelectionListActive` is `resolveBlockedReason`'s second test and it
+    // outranks the prompt panel, so leaving it true here would replace the
+    // answer buttons with an arrow pad for a screen that now has both.
+    const payload = await payloadFor(ASK_USER_QUESTION);
+
+    expect(payload.isSelectionListActive).toBe(false);
+    expect(payload.isDismissablePanelActive).toBe(false);
+    expect(payload.isPagerActive).toBe(false);
+    expect(payload.isUnclassifiedActive).toBe(false);
+  });
+
+  it('still publishes the fallback for a question screen it cannot read', async () => {
+    // #2521's verdict, on the frames that still take it: a blocked agent, an
+    // arrow-driven card, and nothing that looks answerable.
+    const payload = await payloadFor(UNREADABLE_QUESTION);
+
+    expect(payload.sessionStatus).toBe('waiting');
+    expect(payload.sessionStatusReason).toBe(STATUS_REASON.COMMAND_CODE_SELECTION_LIST);
+    expect(payload.isSelectionListActive).toBe(true);
+    expect(payload.isPromptWaiting).toBe(false);
+    expect(payload.promptData).toBeNull();
+  });
+
+  it('still completes a real Command Code idle pane — the verdict this branch must not take', async () => {
+    // The control for the new branch, on live bytes rather than the hand-written
+    // composer above: `turn-done-1490.txt` ends in Command Code's own
+    // rule / `❯ Ask your question...` / rule / hint-row block, so the LAST
+    // qualifying rule is the composer's lower one and the region under it is the
+    // hint row. A reading that fired on "a rule with rows under it" would have
+    // stopped every Command Code turn from ever finishing.
+    const payload = await payloadFor(
+      fs.readFileSync(
+        path.join(__dirname, '../../fixtures/command-code-live-2250/turn-done-1490.txt'),
+        'utf-8',
+      ),
+    );
+
+    expect(payload.sessionStatus).toBe('ready');
+    expect(payload.isSelectionListActive).toBe(false);
   });
 });

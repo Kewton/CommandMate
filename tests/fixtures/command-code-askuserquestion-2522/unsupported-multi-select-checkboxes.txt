@@ -1,0 +1,120 @@
+# Command Code v1.53.0
+# models: deepseek-v4-flash-(latest) · taste-1
+# /private/tmp/cc2522-probe/sample-repo
+
+❯ Draft a dispatch plan for the sample backlog. 
+
+✻ Thought for 1 second [ctrl+o to expand]
+
+⠶ Here is the plan. I will wait for your decision before creating anything.
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+● Dispatch | ◯ Review
+
+Which gates should each worker run? (select all that apply)
+
+❯ 1. [ ] lint
+  2. [ ] unit
+  3. [x] build
+  4. [ ] integration
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,92 @@
+version: 1
+title: "Issue #2506: .txt を編集可能にする"
+goal: |
+  /pm-auto-issue2dev
+  https://github.com/Kewton/CommandMate/issues/2506 を実装する。
+
+  ## 概要
+  `.txt` ファイルをブラウザ上で編集・保存できるようにする。現在、編集できるのは
+  `.md`/`.html`/`.htm`/`.yaml`/`.yml` のみ。
+
+  ## 現状（コードで確認済み、file:line つき）
+  - `src/config/editable-extensions.ts:29` — `EDITABLE_EXTENSIONS = ['.md','.html','.htm','.yaml','.yml']`。
+    これがPUTの書き込み許可リストそのもの
+  - `src/app/api/worktrees/[id]/files/[...path]/route.ts:624-626` — PUTは `isEditableFile()` が
+    falseなら403 `NOT_EDITABLE`
+  - `src/components/worktree/FilePanelContent.tsx:1047` — PCのファイルパネルは
+    `isEditableExtension()` で分岐
+  - `src/components/worktree/MarkdownEditor.tsx:84` — `detectFileType()` は `.md` 以外を `text`
+    モード（プレビュー無しの素のエディタ）にする。**`.txt` は自動的にプレーンテキスト編集になる**
+  - `src/components/worktree/NewFileDialog.tsx:131` — 新規ファイルの拡張子候補も
+    `EDITABLE_EXTENSIONS` 直参照。**`.txt` が自動で選べるようになる**
+  - `src/config/uploadable-extensions.ts:98` — `.txt` はアップロードでは既に許可済み
+
+  ## 提案する解決策
+  1. `EDITABLE_EXTENSIONS` に `'.txt'` を追加する
+  2. `EXTENSION_VALIDATORS` に `{ extension: '.txt', maxFileSize: TEXT_MAX_SIZE_BYTES }` を追加する
+  3. あわせて、検索時のハイライト言語のハードコードを直す
+     - `src/components/worktree/FilePanelContent.tsx:694` — `MarkdownWithSearch` が検索中の
+       `CodeViewer` に `extension="md"` を固定で渡している。`.txt`/`.yaml` では見た目が崩れるので
+       `content.extension` を渡す
+
+  ### 追加のバリデーションは不要
+  NULLバイト検出・制御文字チェックは `validateContent()` の共通処理
+  （`editable-extensions.ts:110-145`）。`.env.txt` のような機微ファイルは
+  `findSensitivePathSegment()` が全HTTPメソッドで拒否する（Issue #2014）ため、
+  本変更で新たに露出するものは無い。
+
+  ### 更新が必要な既存テスト
+  - `tests/unit/config/editable-extensions.test.ts:29` — `expect(EDITABLE_EXTENSIONS).toHaveLength(5)`
+  - 同 `:108` — `expect(isEditableExtension('.txt')).toBe(false)`
+
+  ## 先行Issueとの接続（重要）
+  **#2505（上限超過ファイルの読み取り専用フォールバック）は develop にマージ済み**なので、
+  本Issueの前提は満たされている。`GET` は上限超過でも本文を返し、`FileContent` に
+  `readOnly: true` と `readOnlyReason`（code / limitBytes / sizeBytes）が入る。
+  `FilePanelContent` は `readOnly` を見て仮想化ビューア（`CodeViewerWithSearch`）に回す。
+  `.txt` を編集可能にした結果として、2MB超の `.txt` がこの経路に乗ることを
+  **テストで確認すること**（回帰の本体はここ）。
+
+  ## 受入条件
+  - [ ] `.txt` をPCのファイルパネルで開くと、プレーンテキストのエディタで編集できる
+  - [ ] 保存（PUT）が成功する
+  - [ ] 新規ファイルダイアログで `.txt` を選べる
+  - [ ] 2MBを超える `.txt` が従来どおり閲覧できる（読み取り専用で開く）
+  - [ ] 大きい `.txt` が仮想化ビューアで描画され、textarea一括描画に落ちない
+  - [ ] ファイル内検索中のハイライトが `.txt`/`.yaml` で `md` 固定になっていない
+  - [ ] `.env.txt` など機微パスが従来どおり拒否される
+  - [ ] 既存テスト（`toHaveLength(5)` と `isEditableExtension('.txt') === false`）が
+        新しい契約に更新されている
+
+  ## 作業ルール（厳守）
+  - **`CHANGELOG.md` と `docs/module-reference.md` を編集しないでください**（scope外です）。
+    代わりに次の2ファイルを書いてください。どちらも `dev-reports/` 配下なので commit には
+    入りません。
+    - `dev-reports/changelog/issue-2506.md` — `CHANGELOG.md` の `## [Unreleased]` にそのまま
+      貼れる1エントリ（先頭は `- **feat(files): …** (#2506): …`）。どの節（`### Added`）に
+      入るかを1行目にコメントで書く。`- **` で始めること。`(#2506)` は要約の**外**に置くこと。
+      1エントリ=1行（折らない）。
+    - `dev-reports/module-reference/issue-2506.md` — `docs/module-reference.md` の表に足す注記を
+      行キー（`| \`path\` |`）ごとに列挙する。既存行への追記なら
+      `grep -n '^| \`<path>\`' docs/module-reference.md` の出力（行番号つきの行キー）を
+      断片に書き写してから書くこと。
+  - **本Issueは #2507（モバイルのファイル画面で `.md` 以外も編集可能に）の前提。**
+    `EDITABLE_EXTENSIONS` / `isEditableExtension()` の形は後続がそのまま使う想定で変えないこと。
+scope:
+  allow:
+    - "src/config/editable-extensions.ts"
+    - "src/components/worktree/FilePanelContent.tsx"
+    - "src/components/worktree/NewFileDialog.tsx"
+    - "src/components/worktree/MarkdownEditor.tsx"
+    - "tests/unit/config/editable-extensions*.test.ts"
+    - "tests/unit/components/**"
+    - "tests/unit/app/api/worktrees/**"
+    - "tests/integration/**"
+  deny: []
+autoYes:
+  mode: allow-listed
+  allowPromptTypes: [yes_no, multiple_choice]
+  denyPatterns: ['rm -rf', 'git push.*--force', 'sudo ']
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true

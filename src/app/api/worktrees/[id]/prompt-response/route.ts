@@ -14,7 +14,12 @@ import { captureSessionOutputFresh } from '@/lib/session/cli-session';
 import { detectPrompt, type PromptDetectionResult } from '@/lib/detection/prompt-detector';
 import { stripAnsi, stripBoxDrawing, buildDetectPromptOptions } from '@/lib/detection/cli-patterns';
 import { detectAntigravityNumberedDialogPrompt } from '@/lib/detection/tools/antigravity/dialog';
-import { evaluateDialogPresence, judgePromptResponse } from '@/lib/polling/auto-yes-dialog-gate';
+import { readCommandCodeQuestionDialog } from '@/lib/detection/tools/command-code/dialog';
+import {
+  evaluateDialogPresence,
+  judgePromptResponse,
+  UNSUPPORTED_DIALOG_LAYOUT_REASON,
+} from '@/lib/polling/auto-yes-dialog-gate';
 import { sendPromptAnswer, PromptAnswerRejectedError } from '@/lib/prompt-answer-sender';
 import { resolvePromptAnswer, PromptAnswerResolutionError, type AnswerResolution } from '@/lib/prompt-answer-semantic';
 import { getAskUserQuestion } from '@/lib/session/agent-event-state';
@@ -33,6 +38,36 @@ import { applyEventToActiveTask } from '@/lib/tasks/task-transition-service';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 
 const logger = createLogger('api/prompt-response');
+
+/**
+ * The refusal text for an answer aimed at a free-text row (Issue #2522 確定仕様 D).
+ *
+ * `Type something...` is the last row of Command Code's question list and it is
+ * a `TextInput`, not a choice: a digit sent at it selects nothing. See the guard
+ * below for when this is raised.
+ */
+const COMMAND_CODE_FREE_TEXT_OPTION_MESSAGE =
+  'That option is a free-text field on this screen, not a choice a number selects, so no key was ' +
+  'sent. Send the text you want to answer with, or type it in the terminal.';
+
+/**
+ * The refusal text for a Command Code question screen that is plainly up and
+ * could not be read (Issue #2522 確定仕様 B).
+ *
+ * Shares {@link UNSUPPORTED_DIALOG_LAYOUT_REASON} with Issue #2486's refusal —
+ * the reason code is what `respond --json` and the CLI branch on, and both cases
+ * are the same thing: a picker is on screen whose layout no rule could verify.
+ * The SENTENCE is its own because the next step differs in one respect worth
+ * saying out loud: this screen's LIST is what could not be read, so retrying
+ * once the pane has repainted is genuinely worth a try before walking over to it.
+ *
+ * Both messages here are fixed text that never quotes the answer or the frame
+ * (SEC-003, as in `prompt-answer-semantic`), so both are safe to return to a
+ * client verbatim.
+ */
+const COMMAND_CODE_UNSUPPORTED_QUESTION_MESSAGE =
+  'A Command Code question is on screen, but its option list could not be read, so no key was ' +
+  'sent. Answer it in the terminal, or retry once the screen has settled.';
 
 interface PromptResponseRequest {
   answer?: string;
@@ -199,6 +234,11 @@ export async function POST(
     // SAME frame this verification passed, rather than taking a second capture
     // of a screen that may have moved on.
     let verifiedFrame: string | null = null;
+    // Issue #2522: whether THIS prompt came from Command Code's question reader.
+    // Kept outside the try for the same reason `verifiedFrame` is — the free-text
+    // guard below has to know it about the frame that was actually verified, not
+    // about a screen that may have moved on.
+    let isCommandCodeQuestion = false;
     try {
       const currentOutput = await captureSessionOutputFresh(id, cliToolId, undefined, instanceId);
       verifiedFrame = currentOutput;
@@ -213,8 +253,45 @@ export async function POST(
       const toolDialog = cliToolId === 'antigravity'
         ? detectAntigravityNumberedDialogPrompt(cleanOutput)
         : null;
+
+      // Issue #2522: Command Code's footer-less `AskUserQuestion`, read off the
+      // capture itself rather than off `cleanOutput` — the screen is anchored on
+      // a 200-column U+2500 rule row and `stripBoxDrawing` blanks it. This is
+      // the FRESH frame the answer is about to be sent at, which is the whole
+      // point of re-verifying here: the options and the default this resolves
+      // against are the ones on the pane now, not the ones the status API
+      // published some polls ago.
+      const commandCodeQuestion = cliToolId === 'command-code'
+        ? readCommandCodeQuestionDialog(currentOutput)
+        : { kind: 'none' as const };
+
+      // The question UI is up and could not be read (a gap in the numbering, an
+      // over-tall region). 確定仕様 B: refuse with the reason that says WHICH of
+      // the two it is — the operator's next step is "answer it at the pane", not
+      // "retry, the prompt is gone" — and send no key. Falling through would
+      // hand the frame to the generic parser, whose partial list is exactly what
+      // must not reach a keystroke: its "option 1" is not this screen's.
+      if (commandCodeQuestion.kind === 'unsupported') {
+        logger.info('prompt-response-refused', {
+          worktreeId: id,
+          cliToolId,
+          instanceId,
+          reason: UNSUPPORTED_DIALOG_LAYOUT_REASON,
+          vouched: false,
+        });
+        return NextResponse.json({
+          success: false,
+          reason: UNSUPPORTED_DIALOG_LAYOUT_REASON,
+          message: COMMAND_CODE_UNSUPPORTED_QUESTION_MESSAGE,
+          answer: answer ?? '',
+        });
+      }
+
+      isCommandCodeQuestion = commandCodeQuestion.kind === 'prompt';
       const promptOptions = buildDetectPromptOptions(cliToolId);
-      promptCheck = toolDialog ?? detectPrompt(cleanOutput, promptOptions);
+      promptCheck = (commandCodeQuestion.kind === 'prompt' ? commandCodeQuestion.prompt : null)
+        ?? toolDialog
+        ?? detectPrompt(cleanOutput, promptOptions);
 
       // Issue #2457: the same shared gate the response poller saves through.
       // Without it this re-verification vouched for the very rows #2457 is
@@ -322,6 +399,42 @@ export async function POST(
         });
       }
       throw error;
+    }
+
+    // Issue #2522 確定仕様 D: a bare number must never be used to "confirm" a row
+    // that is a TEXT FIELD.
+    //
+    // Command Code draws `Type something...` as the last row of the list and the
+    // measured `QuestionPrompt` renders it as a separate `TextInput`, not as a
+    // choice its `SelectInput` can select. So a digit sent at it selects
+    // nothing, and — with `answer_only` suppressing the Enter — quietly does
+    // nothing at all while this route reports success. `respond <id> --default`
+    // on a screen whose `❯` rests there is the realistic way in.
+    //
+    // Refused before any key is sent, with the reason code `respond` already
+    // treats as "the terminal is untouched". Scoped to a prompt THIS reader
+    // produced: the free-text rows other tools' pickers draw are reached by
+    // cursor navigation, where Enter does open the field, and nothing here
+    // changes that.
+    if (isCommandCodeQuestion && effectivePromptData?.type === 'multiple_choice' && /^\d+$/.test(resolution.input)) {
+      const target = effectivePromptData.options.find(
+        (option) => option.number === Number(resolution.input),
+      );
+      if (target?.requiresTextInput === true) {
+        logger.info('prompt-response-refused', {
+          worktreeId: id,
+          cliToolId,
+          instanceId,
+          reason: 'unresolvable_answer',
+          optionNumber: target.number,
+        });
+        return NextResponse.json({
+          success: false,
+          reason: 'unresolvable_answer',
+          message: COMMAND_CODE_FREE_TEXT_OPTION_MESSAGE,
+          answer: answer ?? '',
+        });
+      }
     }
 
     // Send answer to tmux
