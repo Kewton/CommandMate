@@ -289,7 +289,12 @@ describe('[#2326] the reading fires on Command Code frames and no others', () =>
       'command-code-askuserquestion-2522/unsupported-multi-select-checkboxes.txt',
       'command-code-askuserquestion-2522/unsupported-region-too-tall.txt',
     ]);
-  });
+    // The sweep walks every fixture in the repository, so its runtime grows with
+    // the corpus, not with this Issue. It crossed vitest's 5s default on
+    // `ubuntu-latest` (measured 5431ms in publish.yml) after #2521/#2522 added 20
+    // captures, while ci-pr.yml kept passing because its unit job runs on the
+    // self-hosted runner. The budget is the fix; nothing here is asserted less.
+  }, 30_000);
 
   it('leaves the opencode overlay to the opencode reader', () => {
     // Order inside `SELECTION_LIST_FRAME_CROPPERS` is only safe while the two
