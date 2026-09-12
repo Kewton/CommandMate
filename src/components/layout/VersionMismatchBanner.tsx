@@ -13,6 +13,15 @@
  * persistent reload nudge. It never auto-reloads — that would discard whatever
  * the user is typing — and never shows while the versions agree.
  *
+ * That handshake is the **primary** version-drift signal, and #2500 settled the
+ * division of labour with the other one. `app/error.tsx` reloads a tab that hit
+ * a dead chunk before this banner ever got the chance to appear; until #2500 it
+ * did so for *any* chunk failure, including one caused purely by the device
+ * losing its network — auto-reloading on a flaky phone connection, which is
+ * exactly what the paragraph above rules out. It now reloads only when nothing
+ * says the network is down, leaving this banner as the one place a genuine
+ * version drift is announced.
+ *
  * Both sides of that handshake are **build identities** since #2271: a release
  * that bumps package.json without rebuilding the served `.next` moves neither,
  * so this banner stays silent until a rebuild actually swaps the bundle out.

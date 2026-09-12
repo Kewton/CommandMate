@@ -7,6 +7,11 @@
     "title": "Updating to the latest version",
     "description": "A newer version of CommandMate is available. Reloading to get the latest update…"
   },
+  "chunkOffline": {
+    "title": "You're offline",
+    "description": "Part of the page could not be loaded because the device is off the network. It will be retried automatically as soon as the connection is back.",
+    "waiting": "Waiting for the connection to come back…"
+  },
   "unexpected": {
     "title": "Something went wrong",
     "description": "An unexpected error occurred. Try again, or reload the page."

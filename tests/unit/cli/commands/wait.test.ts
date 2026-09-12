@@ -1435,3 +1435,105 @@ describe('Issue #1725: a structured prompt with no options', () => {
     );
   });
 });
+
+// ---------------------------------------------------------------------------
+// Issue #2521: Command Code's footer-less question screen
+// ---------------------------------------------------------------------------
+
+/**
+ * `wait` on the frame that used to exit 0 (Issue #2521).
+ *
+ * The payload is DERIVED from the committed capture rather than hand-written,
+ * because the bug was never in `wait`: the server answered
+ * `ready` / `input_prompt` for a pane that was asking a human a question, and
+ * `wait` believed it. So the fields below are built by running the real detector
+ * over the real bytes and applying `buildCurrentOutput`'s own published rule
+ * (`current-output-builder.ts`: `status === 'waiting' && SELECTION_LIST_REASONS`),
+ * which makes this suite red if the detection branch is removed — the flag goes
+ * false, and `wait` goes back to reporting a blocked agent as Completed.
+ *
+ * What is pinned is Issue #2521's 確定仕様 C: exit 10, `type: 'selection_list'`,
+ * `options: []` — no options, because nothing parsed them and #2522 owns
+ * producing them — and `--on-prompt human` keeping the wait open.
+ */
+describe('Issue #2521: a Command Code question screen is a blocked agent', () => {
+  async function askUserQuestionPayload() {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const { detectSessionStatus, SELECTION_LIST_REASONS } = await import(
+      '../../../../src/lib/detection/status-detector'
+    );
+
+    const frame = fs.readFileSync(
+      path.join(
+        __dirname,
+        '../../../fixtures/command-code-askuserquestion-2521/askuserquestion-wrapped-1530-200x1000.txt',
+      ),
+      'utf-8',
+    );
+    const verdict = detectSessionStatus(frame, 'command-code');
+
+    return {
+      ...baseOutput,
+      isRunning: true,
+      isComplete: false,
+      isPromptWaiting: false,
+      promptData: null,
+      cliToolId: 'command-code',
+      fullOutput: frame,
+      sessionStatus: verdict.status,
+      sessionStatusReason: verdict.reason,
+      isSelectionListActive:
+        verdict.status === 'waiting' && SELECTION_LIST_REASONS.has(verdict.reason),
+    };
+  }
+
+  it('exits 10 with a selection_list payload and no options', async () => {
+    const selectionList = await askUserQuestionPayload();
+    // The fixture-derived precondition, stated so a detection regression fails
+    // here as a precondition rather than as a confusing exit code.
+    expect(selectionList.sessionStatus).toBe('waiting');
+    expect(selectionList.isSelectionListActive).toBe(true);
+    // `detectSessionStatus` logs through the shared logger, which writes to
+    // stdout in this environment — so the command's own JSON is not call 0 unless
+    // the spy is cleared after the payload is derived.
+    mockConsoleLog.mockClear();
+
+    mockFetchSequence([{ data: selectionList }]);
+
+    const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
+    await createWaitCommand().parseAsync(['node', 'wait', 'wt1']);
+
+    expect(mockExit).toHaveBeenCalledWith(WaitExitCode.PROMPT_DETECTED);
+    const output = JSON.parse(mockConsoleLog.mock.calls[0][0]);
+    expect(output).toMatchObject({
+      worktreeId: 'wt1',
+      cliToolId: 'command-code',
+      type: 'selection_list',
+      question: 'command_code_selection_list',
+      options: [],
+      status: 'pending',
+    });
+  });
+
+  it('keeps waiting under --on-prompt human', async () => {
+    const selectionList = await askUserQuestionPayload();
+    vi.useFakeTimers();
+    mockFetchSequence([
+      { data: selectionList },
+      { data: { ...baseOutput, isRunning: true, sessionStatus: 'ready' as const } },
+    ]);
+
+    const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
+    const promise = createWaitCommand().parseAsync([
+      'node', 'wait', 'wt1', '--on-prompt', 'human',
+    ]);
+    await vi.advanceTimersByTimeAsync(6000);
+    await promise;
+
+    expect(mockExit).toHaveBeenCalledWith(WaitExitCode.SUCCESS);
+    expect(mockConsoleError).toHaveBeenCalledWith(
+      expect.stringContaining('Selection list active on wt1 (command_code_selection_list)'),
+    );
+  });
+});
