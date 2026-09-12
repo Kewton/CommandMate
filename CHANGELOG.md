@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **feat(files): サイズ上限を超えたテキストファイルを読み取り専用で開けるようにした** (#2505): `GET /api/worktrees/:id/files/:path` は編集可能拡張子が上限（`.html`/`.htm` は 5MB、その他は 2MB）を超えると 413 `FILE_TOO_LARGE` を返し閲覧すらできなかったが、本文を 200 で返したうえで `readOnly: true` と理由（`readOnlyReason`: `code`/`message`/`limitBytes`/`sizeBytes`）を添える形に変えた。上限は「読めない」ではなく「保存できない」の意味になり、PUT 側の上限拒否（`validateContent()` の `maxFileSize`）は従来どおり。`FilePanelContent` は編集分岐（HTML プレビュー・Markdown/テキストエディタ）に入る前に `readOnly` を見て仮想化ビューア `CodeViewer` に回すため、数万行のファイルが textarea へ一括描画されてスマホがフリーズする経路も塞がる。画面には理由が警告バナーとして表示される
+- **feat(mobile): スマホに接続状態（オフライン／再接続中）を表示** (#2501): `useConnectivity` フックが `navigator.onLine`・共有WebSocketの `status`・サーバ到達性プローブの3信号を1つの判定にまとめ（`onLine === true` は「オンラインの確定」には使わず、キャプティブポータル等で「オンライン」と誤表示しない）、モバイルシェル先頭に `MobileConnectionBanner`（flex列内の細いバー。composer や `GlobalMobileNav` を覆わない）を、デスクトップは既存 `ConnectionStatusIndicator` を同フックへ載せ替えて表示する。接続中は何も表示しない
+
+### Fixed
+- **fix(ui): worktree詳細画面がポーリング1回の通信失敗で全画面エラーに落ちる問題を修正** (#2498): `fetchWorktree()` の失敗を初回ロード失敗（従来どおり `ErrorDisplay` ＋再試行ボタン）とポーリング失敗（画面を保持したまま連続3回で控えめな再接続バナー）に分離し、ポーリング effect の `if (loading || error) return` から `error` を外してエラー中も回り続けるようにした。初回ロード失敗には `useWorktreesCache` の `INITIAL_LOAD_RETRY_DELAYS_MS` 相当のバックオフラダー（2s/5s/10s）を移植し、成功1回で全ての失敗判定を解除する。あわせて `detectAuthRedirect()` / `detectNonJsonBody()` を通し、セッション期限切れ（401 / `/login` リダイレクト）を `Unexpected token '<'` ではなく再ログイン導線として表示するようにした。電波が途切れても画面とcomposerの下書きが失われず、復帰後はユーザー操作なしにポーリングが再開する。
+
 ## [0.34.1] - 2026-09-12
 
 > **Highlight**: 並列オーケストレーション 1 回分（7 Issue）をまとめたパッチ。`/rebuild` が本番サーバを落としたまま残す競合（#2488）と、unit テストが本番の opencode ポート台帳を書き換える汚染（#2490）という**運用を直接壊していた 2 件**を潰し、`remote` 実行中に PC からログインできず併用できなかった制約に `--auth remote-only` という出口を用意した（#2489）。公開面（public-messaging / README / LP）は「orchestrate」を看板にした軸へ揃えた（#2493 / #2494 / #2495）。
