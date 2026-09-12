@@ -1,0 +1,134 @@
+# Command Code v1.53.0
+# models: deepseek-v4-flash-(latest) · taste-1
+# /private/tmp/cc2522-probe/sample-repo
+
+❯ Draft a dispatch plan for the sample backlog. 
+
+✻ Thought for 1 second [ctrl+o to expand]
+
+⠶ Here is the plan. I will wait for your decision before creating anything.
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+● Dispatch | ◯ Review
+
+Approve proceeding from the plan into worktree creation and dispatch?
+
+❯ 1. Prepare worktrees + dispatch (Recommended)
+  2. Worktrees only, then pause
+  3. Stop at the plan
+     trailing description row 1 under option 3
+     trailing description row 2 under option 3
+     trailing description row 3 under option 3
+     trailing description row 4 under option 3
+     trailing description row 5 under option 3
+     trailing description row 6 under option 3
+     trailing description row 7 under option 3
+     trailing description row 8 under option 3
+     trailing description row 9 under option 3
+     trailing description row 10 under option 3
+     trailing description row 11 under option 3
+     trailing description row 12 under option 3
+     trailing description row 13 under option 3
+     trailing description row 14 under option 3
+     trailing description row 15 under option 3
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
