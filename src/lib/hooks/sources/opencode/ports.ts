@@ -100,6 +100,12 @@ function keyOf(target: AgentInstanceRef): string {
  * not throw — it spins the event loop forever, so the `try/catch` around it
  * never runs. A file path is checked the same way a directory is (the match is
  * on the prefix), so the override is refused here and the default is used.
+ *
+ * Issue #2490: the default is also what a *test* gets when it says nothing, and
+ * the writers below are read-modify-write, so an unredirected suite rewrites
+ * the ledger a live server is using. `tests/setup.ts` pins the variable for the
+ * whole suite for that reason; `tests/unit/lib/hooks/sources/opencode/port-file-isolation-2490.test.ts`
+ * is the guard on that pin.
  */
 export function getOpencodePortFilePath(): string {
   const fallback = join(homedir(), '.commandmate', 'opencode-ports.json');
