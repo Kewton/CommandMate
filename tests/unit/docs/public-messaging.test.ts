@@ -54,6 +54,8 @@ const STORYBOARD = '.claude/skills/demo-video/scripts/storyboard.ts';
 const BANNED_TERMS = [
   'control plane',
   'コントロールプレーン',
+  'control layer',
+  'コントロールレイヤー',
   'Orchestrate your agent CLIs, not your terminal tabs',
   'Vibe Coder',
   'Remote Control',
