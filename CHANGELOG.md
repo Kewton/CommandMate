@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **fix(chat): オフライン送信の自動再送が実機で発火しない問題を修正** (#2535): オフライン中は `serverReachable` が healthy 時の `true` のまま残り（プローブは `browserOnline` でゲートされ、`assertOnline` は送信前に落として何も報告しない）、`isServerConfirmedReachable()` が圏外の間ずっと `true` を返していた。このため #2503 の再送トリガである「reachable の立ち上がり」が一度も観測されず、圏外で送ったメッセージが `Sending…` のまま残り `POST /api/worktrees/<id>/send` が再発行されなかった。`navigator.onLine === false` のときは reachable を確定させない・offline 遷移時に `serverReachable` を未計測へ戻す・再送の arming を「保留中のキュー」という定常状態からも行い（復帰時の `online` イベントと WebSocket 再接続が同一バッチに畳まれても取りこぼさない）よう修正。
+
 ## [0.35.0] - 2026-09-12
 
 > **Highlight**: スマホ・弱電波での操作性をまとめて立て直したリリース。通信が数秒切れただけで worktree 詳細画面が全画面エラーに落ちてポーリングごと止まる、通信断の chunk 読み込み失敗を「サーバ更新」と誤判定して入力中の内容ごと自動リロードする、WebSocket に heartbeat が無く half-open 接続のまま送信が黙って消える——という 3 つの「固まる」経路を塞ぎ、スマホに接続状態を表示する `useConnectivity` を新設した。あわせてファイル面を広げ、2MB を超えるテキストファイルが 413 で閲覧すらできなかったのを読み取り専用で開けるようにしたうえで `.txt` を編集可能にし、スマホからも `.md` 以外を編集できるようにした。実測では heartbeat が 30 秒間隔で届き、pong を返さない接続はサーバが 52 秒で切断、クライアントの half-open 検知は 75.1 秒、オンライン復帰からの再接続は 5ms である。
