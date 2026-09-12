@@ -36,11 +36,19 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vites
 interface FakeListener {
   listenArgs: { port: number; host: string } | null;
   closeCalls: number;
+  /**
+   * Issue #2488 + #2489: how many times shutdown ended this listener's idle
+   * keep-alive sockets. The real `http.Server` has this method; the fake needs
+   * it because `gracefulShutdown` now calls it on EVERY listener, which is
+   * #2489's invariant applied to what #2488 added.
+   */
+  closeIdleCalls: number;
   /** Callbacks `close()` was given but that have not been invoked yet. */
   pendingCloseCallbacks: Array<() => void>;
   on: ReturnType<typeof vi.fn>;
   listen: ReturnType<typeof vi.fn>;
   close: ReturnType<typeof vi.fn>;
+  closeIdleConnections: ReturnType<typeof vi.fn>;
 }
 
 const h = vi.hoisted(() => {
@@ -49,6 +57,7 @@ const h = vi.hoisted(() => {
     const listener = {
       listenArgs: null as { port: number; host: string } | null,
       closeCalls: 0,
+      closeIdleCalls: 0,
       pendingCloseCallbacks: [] as Array<() => void>,
       on: vi.fn(() => listener),
       listen: vi.fn((port: number, host: string, _cb?: () => void) => {
@@ -62,6 +71,12 @@ const h = vi.hoisted(() => {
         listener.closeCalls += 1;
         if (cb) listener.pendingCloseCallbacks.push(cb);
         return listener;
+      }),
+      // Ends the keep-alive sockets with no request in flight (Issue #2488).
+      // Counted rather than ignored so a regression that applies it to the main
+      // listener alone — the asymmetry #2489 exists to prevent — is visible.
+      closeIdleConnections: vi.fn(() => {
+        listener.closeIdleCalls += 1;
       }),
     };
     created.push(listener);
@@ -204,6 +219,26 @@ describe('gracefulShutdown closes every listener (Issue #2489)', () => {
       // so the provider's door stayed open until the process died.
       expect(remote.closeCalls).toBe(1);
       expect(local.closeCalls).toBe(1);
+    });
+
+    it('ends idle keep-alive sockets on EVERY listener, not just the local one', async () => {
+      // Issue #2488 merged with this one. #2488 added `closeIdleConnections()`
+      // so a dashboard tab holding keep-alive sockets cannot keep the close
+      // callback — and the process — alive for the full force-exit window; the
+      // stop scripts used to read that window as "stopped". Applied to `server`
+      // alone it would put #2489's asymmetry straight back on the door nobody
+      // watches: the provider's listener would sit out the same 3 seconds with
+      // no way to shed its idle sockets. The two changes only compose if the
+      // call is inside the loop, and a textual merge does not check that.
+      const { listeners, sigterm } = await boot(REMOTE_ONLY_ENV);
+      const [local, remote] = listeners;
+      expect(local.closeIdleCalls).toBe(0);
+      expect(remote.closeIdleCalls).toBe(0);
+
+      sigterm();
+
+      expect(local.closeIdleCalls).toBe(1);
+      expect(remote.closeIdleCalls).toBe(1);
     });
 
     it('waits for the remote listener to drain before exiting', async () => {

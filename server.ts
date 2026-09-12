@@ -884,10 +884,8 @@ app.prepare().then(() => {
     //
     // The invariant, rather than the fix: whatever shutdown does to one
     // listener it does to all of them. Anything added here belongs INSIDE this
-    // loop rather than on `server` alone — #2488 is adding
-    // `closeIdleConnections()` to stop a keep-alive tab from holding the
-    // callback back, and applying that to `server` only would put the
-    // asymmetry straight back on the listener nobody is looking at.
+    // loop rather than on `server` alone — applying it to `server` only would
+    // put the asymmetry straight back on the listener nobody is looking at.
     const listeners = remoteServer === null ? [server] : [server, remoteServer];
 
     // `close()` stops each accept loop immediately and calls back once that
@@ -905,6 +903,25 @@ app.prepare().then(() => {
         console.log('Server closed gracefully');
         process.exit(0);
       });
+
+      // Issue #2488: close() stops accepting immediately, but its callback only
+      // fires once every ESTABLISHED connection on that listener is gone. A
+      // browser tab left on the dashboard holds keep-alive sockets with no
+      // request in flight, and nothing ever closes them, so the callback never
+      // ran and the process lived the full 3 seconds to the force-exit — with
+      // its listening socket already closed. That window is what the stop
+      // scripts used to mistake for "stopped" (they looked for a listener,
+      // found none, and returned while this process was still alive and still
+      // named by logs/server.pid).
+      //
+      // closeIdleConnections() ends exactly those sockets. A connection with a
+      // request in flight is NOT idle and is left alone: it still gets the 3
+      // seconds above, so an in-flight response is no more truncated than
+      // before. The stop scripts no longer depend on this being fast — they
+      // wait for the PID — but the common case now exits in milliseconds
+      // instead of 3 seconds. Per #2489's invariant this runs on EVERY
+      // listener, so the remote door drains on the same terms as the local one.
+      listener.closeIdleConnections();
     }
   }
 

@@ -34,6 +34,70 @@ if ! [[ "$PORT" =~ ^[0-9]+$ ]] || [ "$PORT" -lt 1 ] || [ "$PORT" -gt 65535 ]; th
     exit 1
 fi
 
+# ---------------------------------------------------------------------------
+# Issue #2488: a PID that is still alive may be a server on its way OUT
+# ---------------------------------------------------------------------------
+# server.ts's gracefulShutdown closes the listening socket FIRST and only then
+# waits — up to 3 seconds — for the connections that are still open. A stop that
+# has just returned can therefore leave the previous `npm start` alive for a
+# moment longer, still named by logs/server.pid. The PID-file check below used
+# to read that moment as "already running" and exit 1 BEFORE building, which on
+# 2026-09-11 left port 3000 with no listener at all for three minutes.
+#
+# So the check waits for the PID to go, and only calls it a running server if it
+# is still there afterwards. A server that really is up outlives the wait and is
+# refused exactly as before.
+#
+# still_alive/wait_for_exit are repeated verbatim in stop.sh, stop-server.sh and
+# start.sh: each of the four has to run on its own, and scripts/lib/port-pids.sh
+# answers "who is the server on this port", a different question from "is this
+# PID gone yet".
+
+# How long a process that was asked to stop may take to actually exit. Above
+# server.ts's 3-second force-exit, with room for a loaded machine.
+STOP_GRACE_SECONDS=${CM_STOP_GRACE_SECONDS:-10}
+if ! [[ "$STOP_GRACE_SECONDS" =~ ^[0-9]+$ ]] || [ "$STOP_GRACE_SECONDS" -lt 1 ] || [ "$STOP_GRACE_SECONDS" -gt 600 ]; then
+    echo 'ERROR: Invalid CM_STOP_GRACE_SECONDS (expected 1-600)' >&2
+    exit 1
+fi
+
+# still_alive <pid>...
+#
+# The PIDs that still exist, one per line. Nothing when they are all gone.
+still_alive() {
+    local pid
+    for pid in "$@"; do
+        if kill -0 "$pid" 2>/dev/null; then
+            echo "$pid"
+        fi
+    done
+}
+
+# wait_for_exit <seconds> <pid>...
+#
+# Polls every 100ms until every PID is gone or <seconds> elapse, then prints the
+# survivors (nothing when they all exited). Always returns 0, so it is safe
+# under `set -e` and inside `$(...)`.
+wait_for_exit() {
+    local seconds=$1
+    shift
+    local ticks=$(( seconds * 10 ))
+    local waited=0
+    local remaining
+    while :; do
+        remaining=$(still_alive "$@")
+        if [ -z "$remaining" ] || [ "$waited" -ge "$ticks" ]; then
+            break
+        fi
+        sleep 0.1
+        waited=$(( waited + 1 ))
+    done
+    if [ -n "$remaining" ]; then
+        echo "$remaining"
+    fi
+    return 0
+}
+
 # Log rotation function
 # Rotates server.log when file size exceeds MAX_LOG_SIZE_MB.
 # Uses rename strategy (safe because rotation runs before nohup).
@@ -151,10 +215,16 @@ if [ "$1" = "--daemon" ] || [ "$1" = "-d" ]; then
     if [ -f "$PID_FILE" ]; then
         # PID file validation: first line only, numeric only
         OLD_PID=$(cat "$PID_FILE" 2>/dev/null | head -1 | grep -E '^[0-9]+$')
+        # Issue #2488: give a shutting-down predecessor the grace period before
+        # calling it a running server. See the note next to wait_for_exit.
         if [ -n "$OLD_PID" ] && kill -0 "$OLD_PID" 2>/dev/null; then
-            echo "Server is already running (PID: $OLD_PID)"
-            echo "Use ./scripts/stop-server.sh to stop it first"
-            exit 1
+            echo "Previous server (PID: $OLD_PID) is still exiting, waiting up to ${STOP_GRACE_SECONDS}s..."
+            if [ -n "$(wait_for_exit "$STOP_GRACE_SECONDS" "$OLD_PID")" ]; then
+                echo "Server is already running (PID: $OLD_PID)"
+                echo "Use ./scripts/stop-server.sh to stop it first"
+                exit 1
+            fi
+            echo "Previous server (PID: $OLD_PID) has exited."
         fi
         # PID file is invalid or process has exited -> remove stale PID file
         rm -f "$PID_FILE"

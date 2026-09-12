@@ -1,0 +1,105 @@
+version: 1
+title: "Issue #2488: /rebuild の stop.sh → build-and-start.sh --daemon の競合を修正"
+goal: |
+  https://github.com/Kewton/CommandMate/issues/2488 を実装してください。
+  `/bug-fix` ワークフローで着手すること。原因分析は Issue 本文に完了済み（コード行番号つき）
+  のため、追加の根本原因分析は不要。詳細な再現ログ・エビデンスは以下で確認できます:
+    gh issue view 2488 --repo Kewton/CommandMate
+
+  ## 事象
+  `/rebuild` スキルの手順（`./scripts/stop.sh && ./scripts/build-and-start.sh --daemon`）で
+  本番サーバーを再起動すると、`stop.sh` は成功したのに `build-and-start.sh` が
+  `Server is already running (PID: …)` で**ビルド前に exit 1** し、ポート 3000 で誰も
+  待ち受けていない状態のまま残ることがある。
+
+  ## 原因（コードで確認済み）
+  1. `server.ts` の `gracefulShutdown`（`Graceful shutdown timeout` は 699 行目付近）は
+     SIGTERM で `server.close()` を呼び、既存の keep-alive 接続が終わるまで待つが、
+     3 秒後に強制終了する。`server.close()` は待ち受けソケットを即座に閉じるが、
+     プロセス自体は接続が残っていると終了処理に最大 3 秒かかる。
+  2. `scripts/stop.sh:40-56` は SIGTERM 送信後 `sleep 2` してから LISTEN の有無だけで
+     終了とみなす（プロセスの生死ではなく LISTEN の有無で判定）。2 秒待ちがサーバーの
+     3 秒の強制終了より短いため、`stop.sh` が戻った時点でまだ旧プロセスが生きうる。
+  3. `scripts/build-and-start.sh:183-185` が PID ファイルに書くのは `nohup npm start` の
+     PID（node の親）だが、`stop.sh` はこの PID ファイルを扱わない。
+  4. `scripts/build-and-start.sh:150-158`（`scripts/start.sh:168-176` も同様）は
+     `kill -0 $OLD_PID` が成功すると待たずに即座に exit 1 する。
+  5. `scripts/stop-server.sh:55-76` は PID ファイル（npm のプロセスグループ）を止めて
+     待つ Step 2 を持つが、`stop.sh` には無い。2 つの停止スクリプトの挙動が分かれている。
+
+  ## 対策の方向（Issue記載の案。実装方針は設計フェーズで確定してよい）
+  1. `stop.sh` が、自分が SIGTERM を送った PID そのものの終了を `kill -0` でポーリングして
+     待つ（サーバーの強制終了 3 秒より長い上限、例えば 10 秒を超えたら SIGKILL）。
+     LISTEN の有無ではなくプロセスの生死で判定する。
+  2. `stop.sh` にも `stop-server.sh` の Step 2（PID ファイルの npm プロセスを止めて終了を
+     待ち、PID ファイルを消す）を入れ、2 つの停止スクリプトの挙動を揃える。
+  3. `build-and-start.sh` / `start.sh` の PID ファイル判定で、プロセスが終了途中なら
+     数秒待ってから判定する（待っても生きていれば今どおり失敗させる）。
+  4. `/rebuild` スキルの完了報告に、LISTEN の有無・BUILD_ID の更新・`curl /` 200 の実測を
+     必須にする（落ちたまま完了扱いにしない）。
+
+  **必須**: #2473 の要件（ポートに接続しているだけの ESTABLISHED プロセスを kill しない。
+  LISTEN のみで判定する）を壊さないこと。
+
+  ## 受入条件
+  - [ ] 接続中のクライアントがある状態で `stop.sh && build-and-start.sh --daemon` を
+        実行しても、`Server is already running` で中断せずに新しいサーバーが起動する
+  - [ ] `stop.sh` が `✓ Application stopped` を出した時点で、旧 node と PID ファイルの
+        npm プロセスがどちらも終了している
+  - [ ] #2473 の要件（ポートに接続しているだけのプロセスを kill しない）が維持されている
+  - [ ] 終了に 3 秒かかるサーバーを模したプロセスでも競合しないことを、停止スクリプトの
+        テストで確認している
+
+  ## 注意（並列実行）
+  この worktree とは別に、#2489（`commandmate remote --auth`）が同じ `server.ts` を
+  別の目的（remote 用 listener の新設）で変更しています。あなたの変更は
+  `gracefulShutdown` 周辺に閉じ、無関係な箇所を触らないこと。マージ前にオーケストレーターが
+  両者の統合を確認します。
+
+  ## 作業ルール（厳守）
+  - **`CHANGELOG.md` と `docs/module-reference.md` を編集しないでください**（scope 外です）。
+    代わりに次の 2 ファイルを書いてください。どちらも `dev-reports/` 配下なので commit には
+    入りません。
+    - `dev-reports/changelog/issue-2488.md` — `CHANGELOG.md` の `## [Unreleased]` にそのまま
+      貼れる **1 エントリ**（先頭は `- **<type>(<scope>): …** (#2488): …`）。どの節
+      （`### Added` / `### Changed` / `### Fixed`）に入るかを 1 行目にコメントで書く。
+      形式は次の実例に合わせてください（エントリは**ファイル中では 1 行**）:
+
+      ```markdown
+      <!-- ### Fixed -->
+      - **fix(cli): `send` 直後の `wait` が「まだ始まっていない」を完了と読む問題を修正** (#1975): `wait` が `sessionStatus==='ready'` を完了と判定する直前に、**「このインスタンスに最後に渡されたプロンプト」と「エージェント自身が最後に報告したターン終了（`lastStopEventAt`）」を突き合わせる**ゲートを追加。`send` 直後は最新の構造化イベントが直前ターンの `stop` のままなので #1839 の `adoptTurnStart()` が何も採用せず、`turnStartedAt === null` が「決着済み」と読まれてアイドル composer をそのまま完了にしていた（隔離サーバ実測 2026-08-22 / copilot 1.0.80: `send`→`wait` 5 回中 3 回が約 0.3 秒・`basis=scraper_ready`・成果物ゼロで exit 0）。ゲートは `GET /api/worktrees/:id/messages?limit=1&unit=pairs` を `--instance`（無指定ならサーバが解決した `cliToolId`）でスコープして読む。**hook を出さないツールは挙動不変** — `structuredEvents.source.capabilities.supportedEvents`（#1924 の宣言値）が `stop` とターン開始語の両方を宣言しているソースだけがこのゲートに入り、legacy-relay（`supportedEvents: []`）と #1924 以前のサーバは従来経路のまま台帳も引かない。保留は `PENDING_PROMPT_HOLD_MS`=60 秒で打ち切り（hooks は全経路 fail-open なので `Stop` の取りこぼしで `wait` が返らなくなってはいけない）、`--timeout` / `--stall-timeout` はそれより短ければ従来どおり優先される。完了行の `basis=` は、エージェントが最新プロンプトの終了を報告していれば `hook_stop` になる（`scraper_ready` は「画面しか言っていない」という文書どおりの意味に戻る）。
+      ```
+
+      - `- **` で始めること（`grep -cE '^- \*\*'` で数える）。
+      - `(#2488)` は要約の**外**（`**` を閉じた後）に置くこと。
+      - `<type>` は CLAUDE.md のコミットメッセージ規約と同じ語彙（`feat`/`fix`/`docs`/`refactor`/`test`/`chore`/`ci`/`style`）。
+      - 1 エントリ＝1 行（折らない）。
+    - `dev-reports/module-reference/issue-2488.md` — `docs/module-reference.md` の表に足す
+      注記を**行キー（`| \`path\` |`）ごと**に列挙する。既存行に足すときは
+      `grep -n '^| \`<path>\`' docs/module-reference.md` を実行し、その出力（行番号つきの
+      行キー）を断片に書き写してから書くこと。0 件だった行への追記を指示しない。実例:
+
+      ```markdown
+      ## 既存行への追記
+      - `src/lib/session/worktree-status-helper.ts` — 実在確認: `docs/module-reference.md:103`（行番号は確認時点のもの）
+        追記内容: 「...」
+
+      ## 新規行
+      追記なし
+      ```
+  - 断片が無いとリリースノートと module-reference に載らない。実装と同じ commit の時点で書くこと。
+scope:
+  allow:
+    - "scripts/stop.sh"
+    - "scripts/stop-server.sh"
+    - "scripts/build-and-start.sh"
+    - "scripts/start.sh"
+    - "server.ts"
+    - "tests/unit/scripts/**"
+    - "tests/integration/**"
+  deny: []
+verify:
+  gates: null
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true
