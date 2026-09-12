@@ -26,6 +26,18 @@ const OFFLINE_URL = '/offline';
 const PRECACHE_URLS = [OFFLINE_URL];
 
 // Denylist — never cached (mirror of EXCLUDED_PATH_PREFIXES).
+//
+// `/api` is load-bearing and is not a default anyone forgot to revisit: Issue
+// #2504 asked for two of its GETs to be served from cache while revalidating,
+// and was closed wontfix. The short reason is that a cache read in this file
+// cannot be authenticated — the auth cookie is httpOnly and invisible here, the
+// server sends no `Vary: Cookie`, and the token is one server-wide secret, so
+// there is no identity to key a cache on. Whatever lands in the Cache API is
+// readable by anyone who can open this origin in this browser profile.
+// Note also that `matchesPrefix` below is a PREFIX match: `/api/worktrees` is
+// 36 routes, among them current-output, files, env, messages and terminal.
+// The rest of the reasoning is in src/lib/pwa/cache-policy.ts; the full argument
+// is the design policy filed on Issue #2504.
 const EXCLUDED_PATH_PREFIXES = ['/api', '/login', '/proxy'];
 // Allowlist — cache-first (mirror of STATIC_CACHE_PREFIXES / STATIC_CACHE_EXACT).
 const STATIC_CACHE_PREFIXES = ['/_next/static/', '/icons/'];

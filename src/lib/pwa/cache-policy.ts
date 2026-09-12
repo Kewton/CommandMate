@@ -10,6 +10,39 @@
  * Everything else is passed straight through to the network and never touched,
  * so API responses, the auth page, and dynamic proxy routes can never be
  * served from a stale cache.
+ *
+ * Issue #2504 proposed relaxing exactly that last clause — serve
+ * `GET /api/worktrees` and `GET /api/worktrees/:id` from cache while revalidating,
+ * so a phone out of coverage still shows the previous worktree list — and was
+ * closed **wontfix**. Three findings, kept here because they are the reasons this
+ * rule is not merely conservative:
+ *
+ *  1. **A cache read in a Service Worker cannot be authenticated.** The auth
+ *     cookie is `httpOnly`, so no script sees it — not `document.cookie` in the
+ *     page, not `cookieStore` in the worker — and an intercepted
+ *     `event.request` carries no `Cookie` header either, because cookies are
+ *     attached downstream of the fetch handler. On top of that the server sends
+ *     no `Vary: Cookie`, so `cache.match()` would not key on one, and the token
+ *     is a single server-wide secret, so there is no identity to key on at all.
+ *     Anything written to the Cache API is readable by whoever can open the
+ *     origin in that browser profile, with no token.
+ *  2. **The revocation path needs the connectivity the cache exists to survive.**
+ *     `commandmate remote stop` and `--expires` close the tunnel and tell the
+ *     device nothing, so the cache outlives the session by construction.
+ *  3. **`Cache-Control: no-store` does not protect this.** `next.config.js` sets
+ *     it on `/api/:path*`, but the Cache API has no HTTP-cache semantics and
+ *     `cache.put()` stores a `no-store` response as happily as any other. This
+ *     denylist is the only thing standing between an API response and the disk.
+ *
+ * `GET /api/worktrees` also carries `lastUserMessage` / `lastMessagesByCli` /
+ * `sessionNotes`, so "it is only metadata" was not true either.
+ *
+ * The full argument, including the four conditions that would make this worth
+ * revisiting, is in the design policy filed on Issue #2504. The decision is
+ * enforced by `tests/unit/pwa/cache-policy.test.ts` (every API route that exists
+ * is asserted never-cacheable) and by `tests/unit/pwa/sw-file.test.ts` (the
+ * shipped worker is evaluated and required to agree). Do not relax one of those
+ * to land a change here.
  */
 
 /**
