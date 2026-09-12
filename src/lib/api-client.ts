@@ -6,6 +6,20 @@
 import type { Worktree, ChatMessage, WorktreeMemo } from '@/types/models';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { SlashCommandGroup } from '@/types/slash-commands';
+import {
+  API_NO_TIMEOUT,
+  API_REACHABILITY_REPORT_INTERVAL_MS,
+  API_RETRY_MAX_RETRIES,
+  API_RETRY_TOTAL_BUDGET_MS,
+  computeRetryDelayMs,
+  isIdempotentMethod,
+  isRetryableStatus,
+  resolveDefaultTimeoutMs,
+} from '@/config/api-timeout-config';
+// Issue #2501 owns the connection verdict; Issue #2499 feeds it. Imported as a
+// plain module function rather than through the hook because this file is not a
+// React tree — see the "External reachability reports" section there.
+import { reportServerReachability } from '@/hooks/useConnectivity';
 
 /**
  * Repository summary from API
@@ -37,17 +51,80 @@ export interface WorktreesResponse {
 }
 
 /**
+ * What kind of failure an {@link ApiError} describes (Issue #2499).
+ *
+ * `status` alone cannot answer this: every transport-layer failure carries
+ * `status: 0`, so "the server said 500", "the request timed out", "the device
+ * is off the network" and "the caller aborted" all used to arrive as the same
+ * shapeless zero with whatever string the platform happened to put on the
+ * underlying error. A caller that wants to distinguish "retry might help" from
+ * "there is nothing to retry with" had no way to.
+ *
+ * - `http`    — the server answered; `status` is its code.
+ * - `network` — the request never completed (DNS, TCP, TLS, connection reset).
+ * - `timeout` — the request exceeded its budget and was cut off by this client.
+ * - `offline` — refused before it was sent: `navigator.onLine === false`.
+ * - `aborted` — the *caller's* own `AbortSignal` fired (navigation, a newer
+ *               request superseding this one). Never a failure to report.
+ */
+export type ApiErrorKind = 'http' | 'network' | 'timeout' | 'offline' | 'aborted';
+
+/**
  * API Error class
+ *
+ * Issue #2499 added the fourth constructor argument. It is optional and
+ * defaults from `status`, so every existing `new ApiError(msg, status)` keeps
+ * the meaning it had.
  */
 export class ApiError extends Error {
+  /** See {@link ApiErrorKind}. */
+  public readonly kind: ApiErrorKind;
+
   constructor(
     message: string,
     public status: number,
-    public data?: unknown
+    public data?: unknown,
+    kind?: ApiErrorKind
   ) {
     super(message);
     this.name = 'ApiError';
+    this.kind = kind ?? (status > 0 ? 'http' : 'network');
   }
+}
+
+/**
+ * Whether this failure is the client's own timeout — the normalized form of the
+ * `AbortError` that `fetch()` rejects with when its signal fires (Issue #2499).
+ *
+ * The normalization is the point: a raw `AbortError` is a `DOMException` whose
+ * `name` is the only thing distinguishing it, it is indistinguishable from a
+ * caller-initiated abort, and `instanceof DOMException` is not something a
+ * component should be writing. Every failure out of {@link fetchApi} and
+ * {@link fetchApiResponse} is an `ApiError` instead, and this is how a caller
+ * asks whether it was the clock.
+ */
+export function isTimeoutError(error: unknown): boolean {
+  return error instanceof ApiError && error.kind === 'timeout';
+}
+
+/**
+ * Whether this failure is the offline fail-fast: the device reported no
+ * network, so the request was never attempted (Issue #2499).
+ */
+export function isOfflineError(error: unknown): boolean {
+  return error instanceof ApiError && error.kind === 'offline';
+}
+
+/**
+ * Whether this failure was the *caller's* abort rather than a fault
+ * (Issue #2499) — a superseded search request, a component unmounting.
+ *
+ * The distinction matters at every `catch`: an aborted request is a request
+ * nobody is waiting for any more, so surfacing it as an error shows the user a
+ * message about something they themselves caused.
+ */
+export function isAbortedError(error: unknown): boolean {
+  return error instanceof ApiError && error.kind === 'aborted';
 }
 
 /**
@@ -127,15 +204,273 @@ export function detectNonJsonBody(response: Response): ApiError | null {
   return null;
 }
 
+// ============================================================================
+// Transport policy (Issue #2499)
+// ============================================================================
+
 /**
- * Base fetch wrapper with error handling
+ * Extra request knobs {@link fetchApiResponse} and {@link fetchApi} understand,
+ * on top of everything `fetch()` already takes.
+ *
+ * Both default sensibly, so the overwhelmingly common call site keeps passing
+ * nothing. They exist for the two cases where the defaults are wrong:
+ *
+ *  - a polling loop, which wants the shorter {@link API_POLL_TIMEOUT_MS} and
+ *    `retries: 0` because the next tick *is* the retry;
+ *  - a genuinely long server-side operation, which passes
+ *    `timeoutMs: API_NO_TIMEOUT` to opt out deliberately rather than by
+ *    omission.
  */
-async function fetchApi<T>(url: string, options?: RequestInit): Promise<T> {
+export interface ApiRequestOptions extends RequestInit {
+  /**
+   * Per-request timeout in ms. Omit for the method's default
+   * ({@link resolveDefaultTimeoutMs}); pass {@link API_NO_TIMEOUT} (or `null`)
+   * for none.
+   */
+  timeoutMs?: number | null;
+  /**
+   * Retries after the first attempt. Omit for {@link API_RETRY_MAX_RETRIES}.
+   *
+   * **Ignored for non-idempotent methods** — see {@link isIdempotentMethod}. A
+   * caller cannot opt a `POST` into retrying by passing a number here, because
+   * the duplicate-send hazard is a property of the method, not of the call
+   * site's confidence.
+   */
+  retries?: number;
+}
+
+/**
+ * Last reachability verdict pushed to `useConnectivity`, and when.
+ *
+ * Module state rather than a parameter because the throttle is about the
+ * *stream* of requests the app makes, not about any one of them. Reset by
+ * {@link __resetApiReachabilityReporting} between tests.
+ */
+let lastReachabilityReport: { reachable: boolean; at: number } | null = null;
+
+/**
+ * Feed one request's outcome to `useConnectivity` (Issue #2499 × #2501).
+ *
+ * This is the line the connection banner's accuracy actually rests on. #2501's
+ * own probe only runs *after* the verdict has already gone degraded and only
+ * every 15s; the requests the app is making anyway are both earlier evidence
+ * and free. So a response — **any** response, 200 or 500 alike, because a 500
+ * proves the packet crossed the network and came back — reports reachable, and
+ * a transport failure reports the opposite.
+ *
+ * Identical verdicts are collapsed to transitions plus one refresh per
+ * {@link API_REACHABILITY_REPORT_INTERVAL_MS}: the detail screen alone polls
+ * three endpoints every 2s, and re-announcing "still reachable" 90 times a
+ * minute would re-render every connectivity surface in the app for no change in
+ * what any of them display.
+ */
+function noteReachability(reachable: boolean): void {
+  const now = Date.now();
+  if (
+    lastReachabilityReport !== null &&
+    lastReachabilityReport.reachable === reachable &&
+    now - lastReachabilityReport.at < API_REACHABILITY_REPORT_INTERVAL_MS
+  ) {
+    return;
+  }
+  lastReachabilityReport = { reachable, at: now };
+  reportServerReachability(reachable);
+}
+
+/**
+ * Drop the reachability throttle's memory.
+ *
+ * Exported for tests only: the throttle above is module state, so a test that
+ * asserts a report was (or was not) emitted has to start from a known point
+ * rather than from whatever the previous test in the file left behind.
+ */
+export function __resetApiReachabilityReporting(): void {
+  lastReachabilityReport = null;
+}
+
+/**
+ * Fail before the request when the device says there is no network.
+ *
+ * The asymmetry from `useConnectivity`'s module note applies here too and in
+ * the same direction: `navigator.onLine === false` is trusted, `true` is not.
+ * `false` means the OS has no route at all, so the request cannot succeed and
+ * waiting the full timeout for it to not succeed is pure user-visible delay —
+ * which on a phone is the whole complaint in Issue #2499. `true` is worth
+ * nothing (a captive portal reports it happily) and is therefore not consulted.
+ *
+ * Deliberately does NOT call {@link noteReachability}: nothing was measured.
+ * Reporting `false` here would put a *server* verdict on the wire from a
+ * *device* signal, and `useConnectivity` already answers "offline" from
+ * `browserOnline` on its own.
+ */
+function assertOnline(): void {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    throw new ApiError('No network connection', 0, undefined, 'offline');
+  }
+}
+
+/** Turn whatever `fetch()` rejected with into an {@link ApiError}. */
+function normalizeTransportError(error: unknown): ApiError {
+  if (error instanceof ApiError) return error;
+  // AbortError is what a fired signal produces; TimeoutError is what
+  // `AbortSignal.timeout()` produces in environments that use it directly.
+  const name = error instanceof Error ? error.name : '';
+  if (name === 'AbortError' || name === 'TimeoutError') {
+    return new ApiError('Request aborted', 0, error, 'aborted');
+  }
+  return new ApiError(
+    error instanceof Error ? error.message : 'Unknown error',
+    0,
+    error,
+    'network'
+  );
+}
+
+/**
+ * One attempt, bounded by `timeoutMs`.
+ *
+ * Built on `AbortController` + `setTimeout` rather than on `AbortSignal.timeout()`
+ * for two reasons that both come down to needing to *observe* the deadline:
+ *
+ *  1. The rejection has to be distinguishable. `AbortSignal.timeout()` and a
+ *     caller's own abort both surface as an abort on the composed signal, and
+ *     telling the user "the network is slow" when they simply navigated away is
+ *     a worse bug than the one being fixed. The `timedOut` flag below is the
+ *     only thing that can tell them apart.
+ *  2. The deadline has to be drivable by `vi.useFakeTimers()`. `AbortSignal.timeout()`
+ *     runs on an internal timer no test can advance, which would leave the
+ *     central promise of this Issue — "a hung request is cut off" — asserted
+ *     only by hoping.
+ *
+ * `useConnectivity.runProbe` builds its probe timeout the same way, so the two
+ * are consistent.
+ */
+async function fetchOnce(
+  url: string,
+  init: RequestInit,
+  timeoutMs: number
+): Promise<Response> {
+  const external = init.signal ?? undefined;
+  if (external?.aborted) {
+    throw new ApiError('Request aborted', 0, undefined, 'aborted');
+  }
+  if (timeoutMs <= 0 || typeof AbortController !== 'function') {
+    return fetch(url, init);
+  }
+
+  const controller = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+  const forwardAbort = () => controller.abort();
+  external?.addEventListener('abort', forwardAbort);
+
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch (error) {
+    // Order matters: a caller who aborts at the same instant the deadline fires
+    // is still a caller who aborted, but a deadline that fired while no caller
+    // signal exists can only be ours.
+    if (external?.aborted) {
+      throw new ApiError('Request aborted', 0, error, 'aborted');
+    }
+    if (timedOut) {
+      throw new ApiError(`Request timed out after ${timeoutMs}ms`, 0, error, 'timeout');
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+    external?.removeEventListener('abort', forwardAbort);
+  }
+}
+
+/** Resolve after `ms`, used between retry attempts. */
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * The transport every client request in the app should go through: bounded in
+ * time, retried when that is safe, fail-fast when the device is offline, and
+ * reporting what it learns to the connection banner. Issue #2499.
+ *
+ * Returns the raw `Response` and interprets **nothing** about it — no status
+ * check, no JSON parse, no `Content-Type` header added. That is what makes it
+ * usable by the call sites that cannot go through {@link fetchApi}: the file
+ * poller needs to see a bare 304 and read `Last-Modified` off a response with
+ * no body at all, and the chunk loader wants `res.ok ? res.json() : null`
+ * rather than a throw. Those call sites keep their own body handling and gain
+ * only the policy. {@link fetchApi} is this function plus the JSON contract.
+ *
+ * Retry applies to idempotent methods only, and only to failures that a repeat
+ * could plausibly fix: a transport error, this client's timeout, or one of
+ * {@link API_RETRYABLE_STATUS_CODES}. A caller's own abort ends the loop
+ * immediately — it is an instruction, not a fault — and so does
+ * {@link API_RETRY_TOTAL_BUDGET_MS} running out.
+ *
+ * @throws {ApiError} always, and only — never a raw `TypeError` or `AbortError`.
+ *   A non-ok *response* is returned, not thrown; only a request that produced no
+ *   response at all rejects.
+ */
+export async function fetchApiResponse(
+  url: string,
+  options?: ApiRequestOptions
+): Promise<Response> {
+  const { timeoutMs, retries, ...init } = options ?? {};
+  const method = (init.method ?? 'GET').toUpperCase();
+  // Non-idempotent methods are pinned to zero regardless of what was asked for.
+  // This is the guard behind "a send is never duplicated": see
+  // API_IDEMPOTENT_METHODS.
+  const maxRetries = isIdempotentMethod(method)
+    ? Math.max(0, retries ?? API_RETRY_MAX_RETRIES)
+    : 0;
+  const effectiveTimeout =
+    timeoutMs === undefined ? resolveDefaultTimeoutMs(method) : timeoutMs ?? API_NO_TIMEOUT;
+  const startedAt = Date.now();
+
+  /** Whether there is another attempt left, in both count and wall clock. */
+  const canRetry = (attempt: number): boolean =>
+    attempt < maxRetries && Date.now() - startedAt < API_RETRY_TOTAL_BUDGET_MS;
+
+  for (let attempt = 0; ; attempt++) {
+    assertOnline();
+    try {
+      const response = await fetchOnce(url, init, effectiveTimeout);
+      noteReachability(true);
+      if (isRetryableStatus(response.status) && canRetry(attempt)) {
+        await delay(computeRetryDelayMs(attempt));
+        continue;
+      }
+      return response;
+    } catch (error) {
+      const apiError = normalizeTransportError(error);
+      // An abort the caller asked for says nothing about the server, and a
+      // retry would be answering a question nobody is still asking.
+      if (apiError.kind === 'aborted') throw apiError;
+      noteReachability(false);
+      if (!canRetry(attempt)) throw apiError;
+      await delay(computeRetryDelayMs(attempt));
+    }
+  }
+}
+
+/**
+ * Base fetch wrapper with error handling.
+ *
+ * Issue #2499: the request itself now goes through {@link fetchApiResponse}, so
+ * every caller of this function inherited the timeout, the retry ladder, the
+ * offline fail-fast and the reachability reporting without changing a line. The
+ * body handling below — the `Content-Type` header, the two response guards, the
+ * error-body parse — is unchanged.
+ */
+async function fetchApi<T>(url: string, options?: ApiRequestOptions): Promise<T> {
   try {
     const headers = new Headers(options?.headers);
     headers.set('Content-Type', 'application/json');
 
-    const response = await fetch(url, {
+    const response = await fetchApiResponse(url, {
       ...options,
       headers,
     });

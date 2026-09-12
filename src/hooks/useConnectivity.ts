@@ -20,8 +20,11 @@
  *
  * Signal (3) has two sources. This hook runs its own lightweight probe while
  * the verdict is degraded, and `reportServerReachability()` lets any call site
- * feed the outcome of a real API request in without going through the hook —
- * that is the seam for instrumenting the app's fetches later.
+ * feed the outcome of a real API request in without going through the hook.
+ * Issue #2499 wired that seam up: `fetchApiResponse` in `lib/api-client.ts`
+ * reports every request's outcome, so the common case is now answered by
+ * traffic the app was making anyway and the probe below is the fallback for a
+ * genuinely idle tab rather than the primary evidence.
  *
  * The status is exported as a pure function (`resolveConnectivityStatus`) so
  * the decision itself can be tested, and reused, without a React tree. That
@@ -329,7 +332,13 @@ export function useConnectivity(options: UseConnectivityOptions = {}): Connectiv
   const [lastReachableAt, setLastReachableAt] = useState<number | null>(null);
 
   const markReachable = useCallback((reachable: boolean) => {
-    setServerReachable(reachable);
+    // Functional form so an unchanged verdict is an identity update and React
+    // bails out. Issue #2499 turned this from a per-probe call into a per-
+    // request one: `api-client` throttles repeats to transitions plus one
+    // refresh per API_REACHABILITY_REPORT_INTERVAL_MS, and this is the second
+    // half of that — between them, a healthy session re-renders the two
+    // connectivity surfaces on transitions and essentially nothing else.
+    setServerReachable((prev) => (prev === reachable ? prev : reachable));
     if (reachable) setLastReachableAt(Date.now());
   }, []);
 
