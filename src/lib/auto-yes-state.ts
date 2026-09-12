@@ -14,6 +14,7 @@ import { DEFAULT_AUTO_YES_DURATION, executeRegexWithTimeout, validateStopPattern
 import { isValidWorktreeId } from './security/path-validator';
 import { isCliToolType, type CLIToolType } from './cli-tools/types';
 import { createLogger } from '@/lib/logger';
+import type { AutoYesInstanceSummary } from '@/types/auto-yes';
 
 const logger = createLogger('auto-yes-state');
 
@@ -546,6 +547,40 @@ export function deleteAutoYesStateByWorktree(worktreeId: string): number {
   const keys = getCompositeKeysByWorktree(worktreeId);
   keys.forEach(key => autoYesStates.delete(key));
   return keys.length;
+}
+
+/**
+ * Every enabled Auto-Yes state, grouped by worktree and keyed by instance, for
+ * the worktree list payload (Issue #2512).
+ *
+ * One pass over the map for the whole server rather than a
+ * {@link getCompositeKeysByWorktree} scan per row, so the list route stays
+ * O(states) however many worktrees it returns. Reads go through
+ * {@link getAutoYesState}, which resolves an expired state to disabled — the
+ * same read-time expiry `GET /api/worktrees/:id/auto-yes` applies — so the list
+ * never reports a countdown that has already run out on the server.
+ *
+ * Disabled states are left out: a reader renders "never enabled", "turned off"
+ * and "expired" identically, and the map keeps disabled entries around for
+ * inspection long after anyone needs them on the wire.
+ *
+ * @returns worktreeId -> instanceId -> summary; worktrees with nothing armed are absent
+ */
+export function getEnabledAutoYesByWorktree(): Map<string, Record<string, AutoYesInstanceSummary>> {
+  const byWorktree = new Map<string, Record<string, AutoYesInstanceSummary>>();
+  // A snapshot of the keys: an expired read below rewrites its own entry.
+  for (const key of Array.from(autoYesStates.keys())) {
+    const cliToolId = extractCliToolId(key);
+    if (!cliToolId) continue;
+    const worktreeId = extractWorktreeId(key);
+    const instanceId = extractInstanceId(key) ?? cliToolId;
+    const state = getAutoYesState(worktreeId, cliToolId, instanceId);
+    if (!state?.enabled) continue;
+    const entries = byWorktree.get(worktreeId) ?? {};
+    entries[instanceId] = { enabled: true, expiresAt: state.expiresAt };
+    byWorktree.set(worktreeId, entries);
+  }
+  return byWorktree;
 }
 
 // =============================================================================

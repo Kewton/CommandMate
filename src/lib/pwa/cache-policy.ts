@@ -35,7 +35,10 @@
  *     denylist is the only thing standing between an API response and the disk.
  *
  * `GET /api/worktrees` also carries `lastUserMessage` / `lastMessagesByCli` /
- * `sessionNotes`, so "it is only metadata" was not true either.
+ * `sessionNotes`, so "it is only metadata" was not true either. Since Issue
+ * #2512 it carries `autoYesByInstance` too — which sessions are answering their
+ * own prompts right now, and until when — which a cached copy would keep
+ * reporting after the arming it describes has been turned off.
  *
  * The full argument, including the four conditions that would make this worth
  * revisiting, is in the design policy filed on Issue #2504. The decision is

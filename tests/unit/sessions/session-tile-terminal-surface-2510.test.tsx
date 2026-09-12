@@ -78,6 +78,7 @@ vi.mock('@/components/worktree/HistoryPane', () => ({
 
 import {
   SessionTile,
+  SESSION_TILE_BODY_FLOOR_CLASS,
   SESSION_TILE_HISTORY_ROW_CLASS,
   SESSION_TILE_TERMINAL_ROW_CLASS,
   sessionTileHistoryRegionId,
@@ -337,10 +338,12 @@ describe('SessionTile stacked History (Issue #2510)', () => {
   });
 
   it('keeps the floors inside the tile body, so the ratio decides on a real tile', () => {
-    // The tile is 32rem tall (SESSION_TILE_HEIGHT_CLASS) with a ~3.3rem header.
+    // Issue #2512: the body is no longer "the tile minus its header" — the
+    // composer takes its share — so the stack's floors are held against the
+    // body's own floor, which is what the tile guarantees whatever the draft.
     const floor = (cls: string) => Number(/min-h-\[(\d+(?:\.\d+)?)rem\]/.exec(cls)?.[1]);
-    expect(floor(SESSION_TILE_TERMINAL_ROW_CLASS) + floor(SESSION_TILE_HISTORY_ROW_CLASS)).toBeLessThan(
-      32 - 3.5,
+    expect(floor(SESSION_TILE_TERMINAL_ROW_CLASS) + floor(SESSION_TILE_HISTORY_ROW_CLASS)).toBeLessThanOrEqual(
+      floor(SESSION_TILE_BODY_FLOOR_CLASS),
     );
     // …and the terminal gets the larger share.
     expect(floor(SESSION_TILE_TERMINAL_ROW_CLASS)).toBeGreaterThan(floor(SESSION_TILE_HISTORY_ROW_CLASS));
