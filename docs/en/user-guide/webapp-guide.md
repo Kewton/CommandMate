@@ -605,6 +605,7 @@ only if you would rather not install a provider tool, or you want to stay inside
 | **Encryption** | Yes (HTTPS on the outside) | **None** (plain HTTP) |
 | **Reach** | Also from away (over the internet or your tailnet) | Only inside the same Wi-Fi |
 | **Requires** | `tailscale` or `cloudflared` | Nothing |
+| **Using the PC at the same time** | No login needed with `--auth remote-only` (below) | Works as it is |
 | **Server bind** | Stays `127.0.0.1` | `0.0.0.0` (every interface) |
 
 ### Method 1 (recommended): `commandmate remote` with QR pairing
@@ -664,6 +665,37 @@ commandmate remote --yes    # skip the confirmation and create the public tunnel
 > [`docs/qa/1937-remote-uat-record.md`](../../qa/1937-remote-uat-record.md) (D-1 in §3.6, its
 > resolution in §6).
 
+#### Using the PC at the same time (`--auth remote-only`)
+
+Under the default `--auth all`, a remote session **also asks the browser on this machine to
+log in** — and because the plaintext token is deleted the instant pairing succeeds, there is
+no way to log in from the PC. The CLI on this machine (`commandmate ls` / `send` / `wait` /
+`capture`) stops for the same reason. Pass `--auth remote-only` when you want the phone and
+the PC at once.
+
+```bash
+commandmate remote --auth remote-only
+```
+
+| Value | Through the provider (your phone) | Local on this PC (`http://localhost:<port>`) |
+|-------|----------------------------------|----------------------------------------------|
+| `all` (default) | Authenticated | Authenticated |
+| `remote-only` | Authenticated | **Not authenticated** |
+
+In this mode the server opens **a second listener on a separate `127.0.0.1` port** alongside
+the existing one, and the provider is pointed at that one alone. Authentication is decided by
+which listener a request arrived on, so forging a source IP or a `Host` header cannot make
+the provider route unauthenticated (a tunnel's upstream is `127.0.0.1` too, which is exactly
+why the source address cannot tell the two apart).
+
+- The provider route stays authenticated (before pairing: 307 for screens, 401 for the API, 401 for WebSocket)
+- **IP restriction (`CM_ALLOWED_IPS`) is not exempt**
+- A non-loopback `CM_BIND` (`0.0.0.0` and friends) is refused with exit 2
+
+> **The trade-off.** Under `remote-only`, any process on this PC — including the agents
+> CommandMate runs in tmux — can reach the API without a token. That is the same exposure as
+> ordinary local use without `remote`, and weaker than `all`, so `all` remains the default.
+
 #### Checking the state, and packing up
 
 ```bash
@@ -692,6 +724,7 @@ Stopping it would take your local use of the machine down with it.
 | `--pairing-expires <duration>` | `10m` | Pairing code TTL (`1m`-`24h`) |
 | `-p, --port <number>` | Auto | Port of the server to expose |
 | `--yes` | — | Approve a public tunnel (required when non-interactive) |
+| `--auth <all\|remote-only>` | `all` | How far authentication reaches (see "Using the PC at the same time" above) |
 | `--json` | — | JSON output |
 
 Exit codes: `0` success / `1` DEPENDENCY_ERROR / `2` CONFIG_ERROR / `3` START_FAILED /
@@ -700,12 +733,14 @@ For the CLI in full, see the [CLI Operations Guide](./cli-operations-guide.md#co
 
 #### Worth knowing
 
-- **`CM_BIND` does not change.** `remote` neither reads nor writes it; the server stays
-  bound to `127.0.0.1`. All it adds is one door out.
+- **`CM_BIND` does not change.** `remote` never writes it and the server stays bound to
+  `127.0.0.1`; it is **read** only under `--auth remote-only`, to decide whether that mode is
+  allowed at all. All `remote` adds is one door out.
 - **Auto-Yes stays off by default.** `remote` has no flag that enables Auto-Yes.
 - **No plaintext long-lived token is stored anywhere.** The server is handed only
-  `CM_AUTH_TOKEN_HASH`, `CM_AUTH_EXPIRE` and `CM_REMOTE_PAIRING_FILE`, and the third is a
-  file path rather than a secret. The pairing handoff file
+  `CM_AUTH_TOKEN_HASH`, `CM_AUTH_EXPIRE`, `CM_REMOTE_PAIRING_FILE` and `CM_AUTH_SCOPE` —
+  five with `CM_REMOTE_INGRESS_PORT` under `--auth remote-only` — and none of them is a
+  secret (`CM_REMOTE_PAIRING_FILE` is a file path). The pairing handoff file
   `~/.commandmate/remote-pairing.json` is mode 0600 and is **deleted the instant pairing
   succeeds**.
 - **The login cookie carries no `Secure` attribute over a tunnel, and that is correct.**

@@ -21,6 +21,59 @@ import { getAllowedRanges, isIpAllowed, isIpRestrictionEnabled, getClientIp, nor
 const expireAt: number | null = computeExpireAt();
 
 /**
+ * Issue #2489: the header `server.ts` overwrites on every request and upgrade,
+ * naming the listener the request arrived on.
+ *
+ * Spelled out here rather than imported from `src/lib/ws-server.ts`, where the
+ * same constant and the same predicate live for the Node-runtime side. That
+ * module imports `http`, `net`, `ws` and the database; this file runs on the
+ * Edge runtime, where none of it can be loaded. It is the same C001 constraint
+ * that already duplicates the auth constants and the token comparison — see the
+ * file header — and the agreement between the two copies is measured rather than
+ * assumed (`tests/integration/remote-ingress-auth-2489.test.ts` runs the same
+ * matrix through both).
+ */
+const CM_INGRESS_HEADER = 'x-cm-ingress';
+
+/**
+ * Issue #2489: `CM_AUTH_SCOPE` value that exempts the local listener.
+ *
+ * Any other value — absent, `all`, a typo — authenticates every listener, which
+ * is both the pre-#2489 behaviour and the fail-closed answer.
+ */
+const REMOTE_ONLY_AUTH_SCOPE = 'remote-only';
+
+/**
+ * Whether this request may skip authentication because of where it arrived.
+ *
+ * ## Why the listener, and not the address
+ *
+ * Tailscale Serve and the Cloudflare Quick Tunnel both connect to
+ * `http://127.0.0.1:<port>` as their upstream, so a request from the phone on
+ * the other side of the world reaches this process from 127.0.0.1 exactly like
+ * one from the browser on the same machine. Exempting loopback — via
+ * `getClientIp()`, `X-Real-IP` or `req.socket.remoteAddress` — would therefore
+ * publish an unauthenticated CommandMate to whoever has the tunnel URL. `Host`
+ * and `X-Forwarded-*` are worse still: the caller sets them, and a Provider was
+ * measured rewriting `Host` to the upstream's own
+ * (`docs/qa/1937-remote-uat-record.md` D-2).
+ *
+ * So the question is answered by the socket instead. `remote --auth remote-only`
+ * runs a second loopback listener that the Provider alone is pointed at, and
+ * `server.ts` stamps {@link CM_INGRESS_HEADER} on both listeners, discarding
+ * whatever the client sent under that name. This function reads the stamp and
+ * nothing else.
+ *
+ * Fail-closed on both halves: the scope must be exactly `remote-only`, and the
+ * stamp exactly `local`. An unstamped request — one that reached middleware
+ * without passing a listener this process built — authenticates.
+ */
+function isIngressAuthExempt(request: NextRequest): boolean {
+  if (process.env.CM_AUTH_SCOPE !== REMOTE_ONLY_AUTH_SCOPE) return false;
+  return request.headers.get(CM_INGRESS_HEADER) === 'local';
+}
+
+/**
  * Check if the token has expired.
  * Uses the same expireAt logic as auth.ts (via shared computeExpireAt).
  */
@@ -77,13 +130,20 @@ export async function middleware(request: NextRequest) {
     }
   }
 
+  // Issue #2489: computed once, after the IP restriction above and before every
+  // auth branch below. IP restriction is NOT part of this exemption — a
+  // `CM_ALLOWED_IPS` the operator set still applies to the local listener.
+  const ingressExempt = isIngressAuthExempt(request);
+
   // WebSocket upgrade requests: verify auth before passing through.
   // On Node.js 19+, upgrade requests can trigger middleware even when an upgrade
   // listener is registered. ws-server.ts also checks auth on upgrade, so this is
   // defense-in-depth (H1 fix: prevent Upgrade header from bypassing middleware auth).
   if (request.headers.get('upgrade')?.toLowerCase() === 'websocket') {
-    // Skip auth check if auth is not enabled
-    if (!isValidTokenHash(process.env.CM_AUTH_TOKEN_HASH)) {
+    // Skip auth check if auth is not enabled, or if this upgrade arrived on the
+    // local listener of a `remote-only` server (#2489). ws-server.ts applies the
+    // same two conditions to the same header, so the two cannot drift apart.
+    if (!isValidTokenHash(process.env.CM_AUTH_TOKEN_HASH) || ingressExempt) {
       return NextResponse.next();
     }
     // Verify the auth cookie before allowing the upgrade to proceed
@@ -97,6 +157,13 @@ export async function middleware(request: NextRequest) {
 
   // Backward compatibility: skip auth if not enabled
   if (!process.env.CM_AUTH_TOKEN_HASH) {
+    return NextResponse.next();
+  }
+
+  // Issue #2489: auth IS enabled, and this request came in on the local listener
+  // of a server started with `remote --auth remote-only`. The phone's requests
+  // arrive on the other listener and fall through to the checks below.
+  if (ingressExempt) {
     return NextResponse.next();
   }
 

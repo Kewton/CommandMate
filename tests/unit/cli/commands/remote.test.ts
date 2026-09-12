@@ -71,18 +71,25 @@ vi.mock('../../../../src/cli/commands/start', () => ({ runStart: vi.fn() }));
 vi.mock('../../../../src/lib/remote', () => ({
   detectRemoteProviders: vi.fn(),
   createRemoteProviders: vi.fn(() => []),
+  // Issue #2489: `--auth remote-only` reserves a loopback port for the second
+  // listener. Stubbed so the suite never binds a socket.
+  findFreeLoopbackPort: vi.fn(async () => 45678),
 }));
 
 import {
   DEFAULT_PAIRING_EXPIRES,
+  DEFAULT_REMOTE_AUTH_SCOPE,
   DEFAULT_REMOTE_EXPIRES,
   MAX_PAIRING_TTL_MS,
   MIN_PAIRING_TTL_MS,
   PUBLIC_TUNNEL_PROVIDERS,
+  REMOTE_AUTH_SCOPES,
   buildPairingUrl,
   createRemoteCommand,
   derivePairingState,
   formatRemaining,
+  isLoopbackBind,
+  parseAuthScope,
   parsePairingDuration,
   runRemoteStatus,
   runRemoteStop,
@@ -91,7 +98,12 @@ import {
 } from '../../../../src/cli/commands/remote';
 import { ExitCode } from '../../../../src/cli/types';
 import { runStart } from '../../../../src/cli/commands/start';
-import { createRemoteProviders, detectRemoteProviders } from '../../../../src/lib/remote';
+import {
+  createRemoteProviders,
+  detectRemoteProviders,
+  findFreeLoopbackPort,
+} from '../../../../src/lib/remote';
+import { waitForServer } from '../../../../src/cli/utils/server-ready';
 import { isInteractive } from '../../../../src/cli/utils/prompt';
 import {
   REMOTE_STATE_SCHEMA_VERSION,
@@ -155,6 +167,10 @@ describe('commandmate remote', () => {
     daemonState.stopCalls = 0;
     removeRemoteState(statePath);
     vi.spyOn(console, 'log').mockImplementation(() => {});
+    // Issue #2489: `clearAllMocks` above wipes the module mocks' implementations
+    // too, so the two `up` depends on are restored here rather than at declaration.
+    vi.mocked(waitForServer).mockResolvedValue(true);
+    vi.mocked(findFreeLoopbackPort).mockResolvedValue(45678);
     vi.mocked(runStart).mockResolvedValue({
       ok: true,
       exitCode: ExitCode.SUCCESS,
@@ -187,7 +203,7 @@ describe('commandmate remote', () => {
         .filter((long): long is string => long !== null);
 
       expect(flags.sort()).toEqual(
-        ['--expires', '--json', '--pairing-expires', '--port', '--provider', '--yes'].sort()
+        ['--auth', '--expires', '--json', '--pairing-expires', '--port', '--provider', '--yes'].sort()
       );
       // §5.1: `remote` mints its own token, so a supplied one has no hash on the
       // server to match. §5.5: no flag may switch Auto-Yes on.
@@ -198,6 +214,9 @@ describe('commandmate remote', () => {
     it('documents the defaults it applies', () => {
       expect(DEFAULT_REMOTE_EXPIRES).toBe('8h');
       expect(DEFAULT_PAIRING_EXPIRES).toBe('10m');
+      // Issue #2489: `remote-only` lets every process on this machine reach the
+      // API without a token. Opting into that has to be an act, not a default.
+      expect(DEFAULT_REMOTE_AUTH_SCOPE).toBe('all');
     });
   });
 
@@ -481,6 +500,149 @@ describe('commandmate remote', () => {
 
     it('succeeds with nothing recorded', async () => {
       expect(await runRemoteStatus({})).toBe(ExitCode.SUCCESS);
+    });
+  });
+
+  describe('auth scope (Issue #2489)', () => {
+    it('rejects a value that is not one of the two scopes', async () => {
+      vi.mocked(detectRemoteProviders).mockResolvedValue([
+        candidate('tailscale-serve', { available: true, ready: true }),
+      ]);
+
+      expect(await runRemoteUp({ auth: 'none' })).toBe(ExitCode.CONFIG_ERROR);
+      // Refused before anything is started or published: an unusable flag value
+      // must not cost the user a `tailscale serve` that then has to be reverted.
+      expect(runStart).not.toHaveBeenCalled();
+      expect(() => parseAuthScope('none')).toThrow(/Unknown --auth value/);
+      expect(REMOTE_AUTH_SCOPES).toEqual(['all', 'remote-only']);
+    });
+
+    it('accepts the two scopes, case- and space-insensitively, and defaults to all', () => {
+      expect(parseAuthScope(undefined)).toBe('all');
+      expect(parseAuthScope('all')).toBe('all');
+      expect(parseAuthScope(' Remote-Only ')).toBe('remote-only');
+    });
+
+    it('refuses remote-only when the server would bind beyond loopback', async () => {
+      // The local listener answers without a token in this mode, so a
+      // non-loopback bind would hand that exemption to the whole LAN.
+      vi.mocked(detectRemoteProviders).mockResolvedValue([
+        candidate('tailscale-serve', { available: true, ready: true }),
+      ]);
+      process.env.CM_BIND = '0.0.0.0';
+
+      try {
+        expect(await runRemoteUp({ auth: 'remote-only' })).toBe(ExitCode.CONFIG_ERROR);
+        expect(runStart).not.toHaveBeenCalled();
+      } finally {
+        delete process.env.CM_BIND;
+      }
+    });
+
+    it('allows remote-only on every spelling of loopback', () => {
+      expect(isLoopbackBind('127.0.0.1')).toBe(true);
+      expect(isLoopbackBind('localhost')).toBe(true);
+      expect(isLoopbackBind('::1')).toBe(true);
+      expect(isLoopbackBind('0.0.0.0')).toBe(false);
+      expect(isLoopbackBind('192.168.1.10')).toBe(false);
+    });
+
+    it('points the provider at the second listener, never at the port the user dials', async () => {
+      const tailscale = candidate('tailscale-serve', { available: true, ready: true });
+      vi.mocked(detectRemoteProviders).mockResolvedValue([tailscale]);
+
+      expect(await runRemoteUp({ auth: 'remote-only' })).toBe(ExitCode.SUCCESS);
+
+      // 45678 is the reserved loopback port; 3000 is where the user's browser
+      // and CLI go. Publishing 3000 in this mode would publish the exemption.
+      expect(findFreeLoopbackPort).toHaveBeenCalledTimes(1);
+      expect(tailscale.provider.start).toHaveBeenCalledWith(
+        expect.objectContaining({ port: 45678 })
+      );
+      const state = readRemoteState(statePath);
+      expect(state?.authScope).toBe('remote-only');
+      expect(state?.server.remoteIngressPort).toBe(45678);
+      expect(state?.server.port).toBe(3000);
+    });
+
+    it('keeps the provider on the main port under --auth all', async () => {
+      const tailscale = candidate('tailscale-serve', { available: true, ready: true });
+      vi.mocked(detectRemoteProviders).mockResolvedValue([tailscale]);
+
+      expect(await runRemoteUp({ auth: 'all' })).toBe(ExitCode.SUCCESS);
+
+      expect(findFreeLoopbackPort).not.toHaveBeenCalled();
+      expect(tailscale.provider.start).toHaveBeenCalledWith(
+        expect.objectContaining({ port: 3000 })
+      );
+      expect(readRemoteState(statePath)?.server.remoteIngressPort).toBeNull();
+    });
+
+    it('publishes nothing when the second listener never opens', async () => {
+      // The server refuses `remote-only` rather than dying when it cannot open
+      // that socket, so its absence reaches the CLI as a port that never
+      // answers. Fronting it would hand the user a QR code for nothing.
+      const tailscale = candidate('tailscale-serve', { available: true, ready: true });
+      vi.mocked(detectRemoteProviders).mockResolvedValue([tailscale]);
+      vi.mocked(waitForServer).mockImplementation(async (_host: string, port: number) =>
+        port !== 45678
+      );
+
+      expect(await runRemoteUp({ auth: 'remote-only' })).toBe(ExitCode.START_FAILED);
+      expect(tailscale.provider.start).not.toHaveBeenCalled();
+      expect(readRemoteState(statePath)).toBeNull();
+      expect(daemonState.stopCalls).toBe(1);
+      // The plaintext token went with the rolled-back server (§7.4).
+      expect(existsSync(join(configDir, 'remote-pairing.json'))).toBe(false);
+    });
+
+    it('reports the scope in status, in both renderings', async () => {
+      writeRemoteState(
+        recordedState({
+          authScope: 'remote-only',
+          server: { pid: 4242, port: 3000, remoteIngressPort: 45678 },
+        }),
+        statePath
+      );
+      const provider = candidate('tailscale-serve', { available: true, ready: true }).provider;
+      vi.mocked(createRemoteProviders).mockReturnValue([provider]);
+      const lines: string[] = [];
+      vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+        lines.push(args.join(' '));
+      });
+
+      expect(await runRemoteStatus({ json: true })).toBe(ExitCode.SUCCESS);
+      const parsed = JSON.parse(lines.join('\n'));
+      expect(parsed.remote.authScope).toBe('remote-only');
+      expect(parsed.remote.server.remoteIngressPort).toBe(45678);
+
+      lines.length = 0;
+      expect(await runRemoteStatus({})).toBe(ExitCode.SUCCESS);
+      const text = lines.join('\n');
+      expect(text).toContain('Auth scope:');
+      expect(text).toContain('remote-only');
+      // The line names both ports: which socket is exempt IS the security
+      // boundary, and a line that only named the mode would leave it to guess.
+      expect(text).toContain('45678');
+      expect(text).toContain('3000');
+    });
+
+    it('reads a session recorded before #2489 as all', async () => {
+      // `authScope` is optional precisely so an older record still validates -
+      // rejecting it would orphan a live tunnel on upgrade.
+      const legacy = recordedState();
+      delete (legacy as { authScope?: unknown }).authScope;
+      delete (legacy.server as { remoteIngressPort?: unknown }).remoteIngressPort;
+      writeRemoteState(legacy, statePath);
+      const provider = candidate('tailscale-serve', { available: true, ready: true }).provider;
+      vi.mocked(createRemoteProviders).mockReturnValue([provider]);
+      const lines: string[] = [];
+      vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+        lines.push(args.join(' '));
+      });
+
+      expect(await runRemoteStatus({ json: true })).toBe(ExitCode.SUCCESS);
+      expect(JSON.parse(lines.join('\n')).remote.authScope).toBe('all');
     });
   });
 
