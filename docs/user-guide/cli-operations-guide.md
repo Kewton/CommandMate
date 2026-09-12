@@ -2763,7 +2763,7 @@ Update available: yes
 
 このサーバを外から到達できるようにし、スマホと QR コードでペアリングします。他のコマンドと異なり、**操作対象は worktree ではなく、この PC のサーバと Provider（トンネル）**です。
 
-> **`remote` が増やすのは「外への口」だけです。** `CM_BIND` は読みも書きもしないため、既定の `127.0.0.1` バインドは変わりません。Auto-Yes を有効化するフラグもなく、`remote` が起動したサーバでは Auto-Yes はどの worktree でも無効のままです。
+> **`remote` が増やすのは「外への口」だけです。** `CM_BIND` に書き込むことはないため、既定の `127.0.0.1` バインドは変わりません（`--auth remote-only` のときだけ、そのモードを許可してよいかを判断するために**読み**ます）。Auto-Yes を有効化するフラグもなく、`remote` が起動したサーバでは Auto-Yes はどの worktree でも無効のままです。
 
 #### 使用方法
 
@@ -2777,6 +2777,7 @@ commandmate remote --provider cloudflare        # Provider を明示指定（公
 commandmate remote --expires 24h                # remote セッションのTTL
 commandmate remote --pairing-expires 3m         # ペアリングコードのTTL
 commandmate remote --yes                        # 公開Tunnelを明示承認（非対話環境では必須）
+commandmate remote --auth remote-only           # 認証は Provider 経由だけ。PC ローカルはログイン不要
 commandmate remote status --json                # 機械可読出力
 ```
 
@@ -2789,6 +2790,7 @@ commandmate remote status --json                # 機械可読出力
 | `--pairing-expires <duration>` | ペアリングコードのTTL（`1m`〜`24h`） | `10m` |
 | `-p, --port <number>` | 公開するサーバのポート | 未指定なら `commandmate start` と同じ解決順 |
 | `--yes` | 公開Tunnel（`cloudflare`）の作成を明示承認する。非対話環境（TTYなし）では必須。`tailscale` は tailnet 内に閉じるため不要 | 無効（対話で確認する） |
+| `--auth <scope>` | 認証をかける範囲（`all` / `remote-only`）。下の「[認証範囲](#認証範囲---auth)」を参照 | `all` |
 | `--json` | JSON出力 | 無効 |
 
 > **`--token` と `--auto-yes` 系のフラグはありません。** トークンを鋳造するのは `remote` 自身の側なので、外から渡されたトークンには照合するハッシュがサーバに存在しません。Auto-Yes については上の注記のとおりです。
@@ -2799,7 +2801,7 @@ commandmate remote status --json                # 機械可読出力
 |:------:|--------|------|
 | 0 | SUCCESS | 公開・状態表示・停止に成功（`stop` で片付ける記録が無かった場合も含む） |
 | 1 | DEPENDENCY_ERROR | 使える Provider が1つも無い／`--provider` で指定した Provider がこのマシンで使えない |
-| 2 | CONFIG_ERROR | 非対話環境で公開Tunnelの承認（`--yes`）が無い／`--expires`・`--pairing-expires`・`--provider` の値が不正／認証付きのサーバが既に稼働中／稼働中サーバの再起動が承認されなかった |
+| 2 | CONFIG_ERROR | 非対話環境で公開Tunnelの承認（`--yes`）が無い／`--expires`・`--pairing-expires`・`--provider`・`--auth` の値が不正／`--auth remote-only` なのに `CM_BIND` が loopback でない／認証付きのサーバが既に稼働中／稼働中サーバの再起動が承認されなかった |
 | 3 | START_FAILED | サーバまたは Provider の起動に失敗（開きかけたものはロールバックされる） |
 | 4 | STOP_FAILED | Provider を閉じきれなかった（状態ファイルは残るので再実行できる） |
 | 99 | UNEXPECTED_ERROR | 予期しないエラー |
@@ -2826,6 +2828,34 @@ Cloudflare Quick Tunnel は `https://<ランダム>.trycloudflare.com` という
 
 公開されるのは 127.0.0.1 で動く CommandMate サーバだけで、この PC の他のものは公開されません。CommandMate はトークン認証を有効にした状態で応答するため、ペアリングコードを持たない訪問者は拒否されますが、**リスナー自体は公開**です。あわせて[セキュリティガイド](../security-guide.md)も参照してください。
 
+#### 認証範囲（`--auth`）
+
+`remote` はサーバをトークン認証つきで起動します。`--auth` は、その認証を**どの経路にかけるか**を選びます。
+
+| 値 | Provider 経由（スマホ） | PC ローカル（`http://localhost:<port>`） |
+|----|------------------------|------------------------------------------|
+| `all`（既定） | 認証 | 認証 |
+| `remote-only` | 認証 | **認証なし** |
+
+既定の `all` では、remote 実行中は PC のブラウザからもログインを求められます。ところがトークンの平文はペアリング成功と同時に削除されるため、**PC からログインする手段がありません**。PC 側の CLI（`commandmate ls` / `send` / `wait` / `capture`）も同じ理由で止まります。スマホと PC を併用したい場合は `--auth remote-only` を使ってください（Issue #2489）。
+
+```bash
+commandmate remote --auth remote-only
+```
+
+**判定は「どのリスナーに着いたか」で行います。送信元 IP では判定しません。** Tailscale Serve も Cloudflare Quick Tunnel も upstream として `http://127.0.0.1:<port>` に接続するため、tunnel 経由のリクエストも送信元は `127.0.0.1` です。loopback を免除すると公開 URL が丸ごと無認証になります。`Host` や `X-Forwarded-*` はクライアントが自由に付けられるうえ、Provider が `Host` を書き換える実測もあるため、これらも使いません。
+
+`remote-only` のとき、サーバは既存ポートに加えて **`127.0.0.1` の別ポートに remote 専用リスナー**を立て、Provider はそちらだけに向けられます。認証の要否はリスナー単位で決まり、リクエストが持ち込んだ内部ヘッダはサーバ側で必ず上書きされます。
+
+- remote 専用リスナーは**常に認証**します。ペアリング前は画面 307 / API 401 / WebSocket 401 です
+- PC ローカル側のリスナーだけが免除されます。**IP 制限（`CM_ALLOWED_IPS`）は免除されません**
+- `--auth remote-only` は `CM_BIND` が loopback（`127.0.0.1` / `localhost` / `::1`）でない場合、exit 2 で拒否されます。LAN に開いたリスナーを無認証にすると、「ローカル＝信頼」が LAN 全体に及ぶためです
+- remote 専用リスナーが開けなかった場合、サーバは認証範囲を `all` に戻し（fail-closed）、`remote` 側はセッション全体をロールバックします。**公開だけが先に進むことはありません**
+
+> **トレードオフ。** `remote-only` では、この PC 上の任意のプロセス（CommandMate が tmux で動かしているエージェントを含む）がトークン無しで API を叩けます。これは `remote` を使わない既定のローカル運用と同じ水準で、`all` より弱いので、既定は `all` のままにしてあります。
+
+> **`remote stop` は remote 専用リスナーを閉じません。** 閉じるのは従来どおり Provider だけです。リスナーは loopback 限定かつ常に認証するため、外から到達する経路は Provider を閉じた時点で無くなります。ソケット自体はサーバを停止するまで残ります（`--expires` でサーバを止めないのと同じ理由 — 止めると PC のローカル利用まで巻き添えになります）。
+
 #### ペアリングコード
 
 - **一度限り**で、既定 10 分（`--pairing-expires`）で失効します
@@ -2838,10 +2868,19 @@ Cloudflare Quick Tunnel は `https://<ランダム>.trycloudflare.com` という
 ```
 Provider:        cloudflare-quick
 URL:             https://<ランダム>.trycloudflare.com
+Auth scope:      all (every request needs the paired token)
 Remote expires:  2026-08-29T21:00:00.000Z (in 6h 12m)
 Pairing:         unused
 Server:          running (pid 12345, http://localhost:3000, auth: on)
 ```
+
+`--auth remote-only` で起動した場合、`Auth scope:` の行は免除されるポートと認証されるポートの両方を示します。
+
+```
+Auth scope:      remote-only (provider port 51234 needs the paired token; http://127.0.0.1:3000 on this machine does not)
+```
+
+`--json` では `.remote.authScope`（`all` / `remote-only`）と `.remote.server.remoteIngressPort` に同じ情報が出ます。#2489 より前に記録されたセッションには `authScope` が無く、`all` として読まれます。
 
 `Pairing:` は `unused` / `consumed` / `expired` のいずれかです。記録された remote セッションが無い場合は次のようになります。
 
@@ -2870,9 +2909,9 @@ Server:          stopped
 - **認証なしで起動中**: 認証を有効にして起動し直す必要があるため、確認のうえ停止・再起動します。非対話環境では `--yes` が無いと exit 2 で拒否されます
 - **認証ありで起動中**: そのサーバのトークンハッシュは起動時に確定していて平文は保持していないため、**このセッションからはペアリングできません**。exit 2 で停止するので、`commandmate stop` してから `commandmate remote` を実行してください
 
-#### remote がサーバへ渡す環境変数は3つだけ
+#### remote がサーバへ渡す環境変数
 
-`CM_AUTH_TOKEN_HASH` / `CM_AUTH_EXPIRE` / `CM_REMOTE_PAIRING_FILE` の3つで、3つ目は**秘匿値ではなくパス**です。平文の長期トークンを環境変数に置かないのは、tmux のペインがサーバの環境変数をそのまま継承するため — 置けば CommandMate が動かしているエージェント自身が読めてしまいます。`CM_BIND` は読みも書きもしないため、既存のバインド設定は変わりません。
+`CM_AUTH_TOKEN_HASH` / `CM_AUTH_EXPIRE` / `CM_REMOTE_PAIRING_FILE` / `CM_AUTH_SCOPE` の4つ（`--auth remote-only` のときだけ `CM_REMOTE_INGRESS_PORT` が加わって5つ）です。`CM_REMOTE_PAIRING_FILE` は**秘匿値ではなくパス**、`CM_AUTH_SCOPE` と `CM_REMOTE_INGRESS_PORT` も秘匿値ではありません。平文の長期トークンを環境変数に置かないのは、tmux のペインがサーバの環境変数をそのまま継承するため — 置けば CommandMate が動かしているエージェント自身が読めてしまいます。`CM_BIND` に書き込むことはないため、既存のバインド設定は変わりません。
 
 #### `--json` の読み方
 

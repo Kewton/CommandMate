@@ -54,6 +54,16 @@ export const REMOTE_STATE_FILE_MODE = 0o600;
  */
 export const REMOTE_STATE_SCHEMA_VERSION = 1;
 
+/**
+ * How far authentication reached for one remote session (Issue #2489).
+ *
+ *  - `all` — every listener authenticates. The pre-#2489 behaviour and the
+ *    default, and what an older state file (which has no such field) means.
+ *  - `remote-only` — the Provider's listener authenticates; the loopback
+ *    listener the user's own browser and CLI talk to does not.
+ */
+export type RemoteAuthScope = 'all' | 'remote-only';
+
 /** What one remote session recorded for the commands that come after it. */
 export interface RemoteState {
   schemaVersion: number;
@@ -85,7 +95,30 @@ export interface RemoteState {
   server: {
     pid: number | null;
     port: number;
+    /**
+     * Issue #2489: the extra loopback port the Provider was pointed at, when
+     * `--auth remote-only` was used. Null (or absent, in a file written before
+     * #2489) when the Provider fronts `port` itself.
+     *
+     * Recorded for `remote status` only. `remote stop` does not close it: the
+     * listener lives in the server process and there is no way to retract one
+     * socket without restarting the server, which §5.3 forbids — stopping the
+     * server would take the local session down with the remote one. Closing the
+     * Provider is what makes it unreachable, and the listener itself is
+     * loopback-only and authenticates every request, so what is left behind is a
+     * socket no less protected than the main port under `--auth all`.
+     */
+    remoteIngressPort?: number | null;
   };
+  /**
+   * Issue #2489: the `--auth` value this session ran with.
+   *
+   * Optional so a state file written before #2489 still validates — `remote
+   * stop` reading `null` for an unrecognised record would orphan a live tunnel,
+   * which is a far worse failure than a missing display field. Absent reads as
+   * `all`, which is what those sessions were.
+   */
+  authScope?: RemoteAuthScope;
 }
 
 /**
@@ -191,6 +224,22 @@ export function isRemoteState(value: unknown): value is RemoteState {
   if (typeof server !== 'object' || server === null) return false;
   if (server.pid !== null && typeof server.pid !== 'number') return false;
   if (typeof server.port !== 'number') return false;
+  // Issue #2489: present-and-wrong is rejected; absent is accepted and reads as
+  // "this session predates --auth", which is the compatibility this field needs.
+  if (
+    server.remoteIngressPort !== undefined &&
+    server.remoteIngressPort !== null &&
+    typeof server.remoteIngressPort !== 'number'
+  ) {
+    return false;
+  }
+  if (
+    record.authScope !== undefined &&
+    record.authScope !== 'all' &&
+    record.authScope !== 'remote-only'
+  ) {
+    return false;
+  }
 
   return isRemoteHandle(record.handle);
 }

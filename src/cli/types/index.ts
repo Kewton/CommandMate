@@ -384,6 +384,15 @@ export interface RemoteOptions {
   port?: number;
   /** Approve creating a public tunnel without prompting */
   yes?: boolean;
+  /**
+   * Issue #2489: how far authentication reaches — `all` (default) or `remote-only`.
+   *
+   * Typed as the raw string commander hands over, not a union: an unknown value
+   * has to reach `runRemoteUp` to be rejected with CONFIG_ERROR, and a union
+   * here would make that the type system's silent problem instead of the user's
+   * visible one.
+   */
+  auth?: string;
   json?: boolean;
 }
 
