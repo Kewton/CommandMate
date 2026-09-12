@@ -55,7 +55,8 @@ import {
   type CLIToolType,
   type AgentInstance,
 } from '@/lib/cli-tools/types';
-import { worktreeApi, ApiError, detectAuthRedirect, detectNonJsonBody } from '@/lib/api-client';
+import { worktreeApi, ApiError, detectAuthRedirect, detectNonJsonBody, fetchApiResponse } from '@/lib/api-client';
+import { API_POLL_TIMEOUT_MS } from '@/config/api-timeout-config';
 import type { SessionKillTarget } from '@/types/terminal-split-pane';
 import {
   ensureClientDefaultSelectedAgents,
@@ -151,6 +152,27 @@ export const DETAIL_LOAD_RETRY_DELAYS_MS = [2000, 5000, 10000] as const;
  * depending on the active/idle cadence) is long enough to mean something.
  */
 export const STALE_BANNER_FAILURE_THRESHOLD = 3;
+
+/**
+ * Issue #2499: transport options every poll on this screen uses.
+ *
+ * **Who owns the retry.** #2498 put the retry ladder above and the consecutive-
+ * failure counter behind {@link STALE_BANNER_FAILURE_THRESHOLD} in this hook,
+ * and #2499 gave the shared client a retry ladder of its own. Stacking them
+ * would be wrong in both directions: three transport-level attempts would turn
+ * one *screen-level* failure into three requests AND delay the counter's
+ * increment by up to 20s, so the stale banner — which is specified as "three
+ * consecutive failed polls" — would need nine failed requests and the better
+ * part of a minute to appear.
+ *
+ * So the split is: **this hook owns retry, the transport owns the deadline.**
+ * `retries: 0` keeps one poll equal to one request, which is what makes the
+ * counter mean what its name says; {@link API_POLL_TIMEOUT_MS} supplies the
+ * thing the hook could never do for itself, which is make a hung request fail
+ * at all. Before this, a poll that never settled never incremented the counter
+ * and never fired the banner either — the screen just stayed silently stale.
+ */
+const POLL_REQUEST_OPTIONS = { timeoutMs: API_POLL_TIMEOUT_MS, retries: 0 } as const;
 
 /** Default worktree name when not loaded */
 const DEFAULT_WORKTREE_NAME = 'Unknown';
@@ -515,7 +537,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   /** Fetch worktree metadata */
   const fetchWorktree = useCallback(async (): Promise<Worktree | null> => {
     try {
-      const response = await fetch(`/api/worktrees/${worktreeId}`);
+      const response = await fetchApiResponse(`/api/worktrees/${worktreeId}`, POLL_REQUEST_OPTIONS);
       // Issue #2498: an expired session resolves as the /login HTML page with
       // status 200 — `fetch` transparently follows the middleware's 307 — so
       // `response.json()` threw a SyntaxError that reached the user as
@@ -655,7 +677,10 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       }
       // Issue #701: include user-selected history display limit
       params.set('limit', String(historyDisplayLimitRef.current));
-      const response = await fetch(`/api/worktrees/${worktreeId}/messages?${params.toString()}`);
+      const response = await fetchApiResponse(
+        `/api/worktrees/${worktreeId}/messages?${params.toString()}`,
+        POLL_REQUEST_OPTIONS,
+      );
       if (!response.ok) {
         throw new Error(`Failed to fetch messages: ${response.status}`);
       }
@@ -694,7 +719,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       const outputUrl = onMobile
         ? `/api/worktrees/${worktreeId}/current-output?cliTool=${requestedCliTool}&instance=${encodeURIComponent(requestedInstance)}`
         : `/api/worktrees/${worktreeId}/current-output?cliTool=${requestedCliTool}`;
-      const response = await fetch(outputUrl);
+      const response = await fetchApiResponse(outputUrl, POLL_REQUEST_OPTIONS);
       if (!response.ok) {
         return;
       }
@@ -784,7 +809,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   const fetchAutoYesStates = useCallback(async (): Promise<void> => {
     const requestId = ++latestAutoYesRequestIdRef.current;
     try {
-      const response = await fetch(`/api/worktrees/${worktreeId}/auto-yes`);
+      const response = await fetchApiResponse(`/api/worktrees/${worktreeId}/auto-yes`, POLL_REQUEST_OPTIONS);
       if (!response.ok) return;
       const data = await response.json();
       // Latest-request guard: only the newest refetch may write the map.
