@@ -55,10 +55,18 @@ describe('File Operations', () => {
       expect(isEditableFile('Guide.Md')).toBe(true);
     });
 
-    it('should return false for non-.md files', () => {
-      expect(isEditableFile('file.txt')).toBe(false);
+    it('should return true for .txt files - Issue #2506', () => {
+      expect(isEditableFile('notes.txt')).toBe(true);
+      expect(isEditableFile('docs/NOTES.TXT')).toBe(true);
+    });
+
+    it('should return false for non-editable files', () => {
+      // [Issue #2506] `file.txt` moved out of this list when `.txt` joined
+      // EDITABLE_EXTENSIONS. `.text` stays here: the list gained exactly one
+      // member, not a family of text-ish suffixes.
       expect(isEditableFile('index.ts')).toBe(false);
       expect(isEditableFile('package.json')).toBe(false);
+      expect(isEditableFile('notes.text')).toBe(false);
     });
   });
 

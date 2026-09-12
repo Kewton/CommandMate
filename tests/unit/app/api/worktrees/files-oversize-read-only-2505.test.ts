@@ -10,8 +10,9 @@
  *
  * The trap this closes is that the guard keys off `isEditableExtension()`, so
  * ADDING an extension to that list silently removed the ability to READ large
- * files with it. Issue #2506 does exactly that for `.txt`, which is why the
- * `.txt`-shaped assertions below are pinned here in advance.
+ * files with it. Issue #2506 did exactly that for `.txt`; the `.txt`-shaped
+ * assertions below were pinned here in advance and have since been flipped to
+ * the post-#2506 contract (a 3MB `.txt` reads in full and is flagged read-only).
  *
  * The new contract:
  *   - GET returns 200 with the full body, plus `readOnly: true` and a structured
@@ -234,10 +235,6 @@ describe('GET oversize editable files — read-only instead of 413 (Issue #2505)
 
   describe('non-editable extensions are still uncapped and never flagged', () => {
     it.each([
-      // `.txt` is the one Issue #2506 will make editable. Today it is not
-      // editable, so it is uncapped; after #2506 it becomes read-only-over-2MB
-      // rather than unreadable — which is the regression this Issue prevents.
-      'large.txt',
       'large.log',
       'large.json',
     ])('%s at 3MB is 200 with no readOnly flag', async (name) => {
@@ -249,6 +246,25 @@ describe('GET oversize editable files — read-only instead of 413 (Issue #2505)
       const data = await response.json();
       expect(data.content).toBe(body);
       expect(data.readOnly).toBeUndefined();
+    });
+
+    it('large.txt moved to the capped side when Issue #2506 made .txt editable', async () => {
+      // This case used to sit in the list above, as the pinned prediction that
+      // adding `.txt` to EDITABLE_EXTENSIONS would change its GET behaviour.
+      // It did, and the change is the intended one: a 3MB `.txt` is still
+      // READABLE in full — the outcome #2505 exists to guarantee — it is only
+      // flagged unsaveable. Had #2505 not landed first, this same edit would
+      // have turned the response into 413 and made the file unopenable.
+      const body = writeSized('large.txt', 3 * 1024 * 1024);
+
+      const response = await GET(request('large.txt'), params('large.txt'));
+
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.content).toBe(body);
+      expect(data.readOnly).toBe(true);
+      expect(data.readOnlyReason.code).toBe('FILE_TOO_LARGE');
+      expect(data.readOnlyReason.limitBytes).toBe(TEXT_MAX_SIZE_BYTES);
     });
   });
 
@@ -346,9 +362,12 @@ describe('GET oversize editable files — read-only instead of 413 (Issue #2505)
     });
 
     it('PUT to a non-editable extension is still 403 NOT_EDITABLE', async () => {
-      writeSized('notes.txt', 16);
+      // [Issue #2506] Was `notes.txt`, which is editable now. `.js` is not, and
+      // the point of the case — that the read-only work of #2505 did not widen
+      // the write allow-list — is unchanged.
+      writeSized('notes.js', 16);
 
-      const response = await PUT(putRequest('notes.txt', 'hello'), params('notes.txt'));
+      const response = await PUT(putRequest('notes.js', 'hello'), params('notes.js'));
 
       expect(response.status).toBe(403);
       expect((await response.json()).error.code).toBe('NOT_EDITABLE');

@@ -699,7 +699,13 @@ function MaximizableWrapper({
   return createPortal(overlay, document.body);
 }
 
-/** [Issue #47] Markdown editor with file content search (PC) [DR2-005] */
+/**
+ * [Issue #47] Markdown editor with file content search (PC) [DR2-005]
+ *
+ * Despite the name, this is the editor branch for EVERY editable text
+ * extension, not just `.md`: `.yaml` / `.yml` (Issue #646) and `.txt`
+ * (Issue #2506) land here too, and `MarkdownEditor` puts them in text mode.
+ */
 function MarkdownWithSearch({ tab, content, worktreeId, isMaximized, onToggleMaximize, onFileSaved, onDirtyChange, onOpenFile }: { tab: FileTab; content: FileContent; worktreeId: string; isMaximized: boolean; onToggleMaximize: () => void; onFileSaved?: (path: string) => void; onDirtyChange?: (isDirty: boolean) => void; onOpenFile?: (path: string) => void }) {
   const search = useFileContentSearch(content.content);
 
@@ -722,9 +728,15 @@ function MarkdownWithSearch({ tab, content, worktreeId, isMaximized, onToggleMax
       )}
       <div className="flex-1 min-h-0">
         {search.searchOpen && search.searchQuery.length >= 2 ? (
+          // [Issue #2506] The extension comes from the file, not the literal
+          // `"md"` this used to pass. Because every editable text extension
+          // reaches this component (see the note above), the hard-coded value
+          // made the search view highlight a `.yaml` or `.txt` file as
+          // Markdown — `key: value` lines and bare prose picked up heading and
+          // emphasis colouring that the non-search view never shows.
           <CodeViewer
             content={content.content}
-            extension="md"
+            extension={content.extension}
             searchMatches={search.searchMatches}
             searchCurrentIdx={search.searchCurrentIdx}
           />

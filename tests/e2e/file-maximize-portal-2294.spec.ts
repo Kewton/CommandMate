@@ -23,8 +23,22 @@ import { E2E_WORKTREE_A, setupSplitTest } from './fixtures/terminal-split-helper
 
 test.use({ viewport: { width: 1440, height: 900 } });
 
-/** Plain-text file: renders through the CodeViewer path, no dynamic editor. */
-const FILE_NAME = 'notes-2294.txt';
+/**
+ * Non-editable extension: renders through the CodeViewer path, no dynamic
+ * editor. What this spec needs from the fixture is only that
+ * `data-testid="file-content-code"` is on screen and stays mounted while the
+ * overlay is toggled — the subject is the stacking of the maximized overlay,
+ * not the file type.
+ *
+ * It was `.txt` until Issue #2506 made `.txt` editable, at which point
+ * `FilePanelContent` started routing it to `MarkdownWithSearch` ->
+ * `MarkdownEditor` (dynamically imported, `<textarea>`-based) and
+ * `file-content-code` stopped rendering. `.log` is deliberately NOT in
+ * `EDITABLE_EXTENSIONS` (`src/config/editable-extensions.ts`), so it takes the
+ * default `CodeViewerWithSearch` branch the way `.txt` used to. Any future
+ * Issue that makes `.log` editable has to move this fixture again.
+ */
+const FILE_NAME = 'notes-2294.log';
 const FILE_BODY = 'maximize me\nline two\nline three\n';
 
 /** Mirror of FILE_PANEL_COLLAPSED_STORAGE_KEY (src/hooks/useFilePanelState.ts). */
@@ -93,7 +107,7 @@ test.describe('Maximized file overlay vs. desktop sidebar (Issue #2294)', () => 
           body: JSON.stringify({
             path: '',
             parentPath: null,
-            items: [{ name: FILE_NAME, type: 'file', size: FILE_BODY.length, extension: 'txt' }],
+            items: [{ name: FILE_NAME, type: 'file', size: FILE_BODY.length, extension: 'log' }],
           }),
         }),
     );
@@ -107,7 +121,7 @@ test.describe('Maximized file overlay vs. desktop sidebar (Issue #2294)', () => 
           body: JSON.stringify({
             path: FILE_NAME,
             content: FILE_BODY,
-            extension: 'txt',
+            extension: 'log',
             worktreePath: `/tmp/${E2E_WORKTREE_A}`,
           }),
         }),
