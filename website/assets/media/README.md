@@ -28,6 +28,41 @@ container it sat in, and a GIF of the identical footage passed every check
 (`docs/images/demo-mobile.gif` still exists). Issue #1577 recast the rules around this directory and
 the allowlist instead.
 
+## The lead demo (Issue #2495)
+
+`orchestrate-run.mp4` is the one file here that is **not** a copy of a
+`docs/images/features/` take, so the allowlist and this section are the whole provenance record
+for it. It is a recorded run, not a staged feature cut.
+
+| File | Source | Shows |
+|------|--------|-------|
+| `orchestrate-run.mp4` | `workspace/market/posts/06-command-code-orchestrate/clip.mp4` | One message to a Command Code session; four issues dispatched to four workers in their own worktrees; a worker terminal writing tests; a closing phase-by-issue matrix in which all four pass dispatch, merge and UAT |
+
+- **The run**: `cmate-orchestrate` over four issues (`#19`–`#22`) of the throwaway
+  `harness-pack-uat-sandbox` repository, 2026-09-10, lead and all four workers Command Code.
+  7 minutes 46 seconds end to end, 4/4 gates, UAT go 4/4. The recording notes are the post's
+  `brief.md` and `qa.md` next to the clip.
+- **What is on screen**: the repository tabs are `commandmate-skills`, `commandmate-tutorial` and
+  `harness-pack-uat-sandbox` — all throwaway or public. No personal path, no private repository
+  name and no private source appears in any frame; this was checked frame by frame before the file
+  was added, which is what the allowlist entry is asserting.
+- **Why it is not `cmp`-able**: `workspace/` is gitignored, so unlike the four below there is no
+  in-repo original to compare bytes against. If it is ever re-cut, re-check the frames rather than
+  trusting the filename.
+- **Shape**: 1080x1080, 15s, 0.96MB — square where the four below it are 16:10, which is why the
+  page gives it its own width-capped slot above the grid (`.demo-lead`) rather than a grid cell.
+
+```bash
+# From the repo root, with the take in workspace/ (not tracked).
+src=workspace/market/posts/06-command-code-orchestrate/clip.mp4
+cp "$src" website/assets/media/orchestrate-run.mp4
+cmp "$src" website/assets/media/orchestrate-run.mp4 || exit 1
+# 6.5s: the sidebar with the four worker worktrees, which is what the box should
+# show before playback rather than the opening `gh issue list`.
+ffmpeg -v error -y -ss 6.5 -i website/assets/media/orchestrate-run.mp4 \
+  -frames:v 1 -c:v libwebp -q:v 80 website/assets/media/poster-orchestrate-run.webp
+```
+
 ## The current demos (Issue #1577, re-cut for Issue #1812)
 
 The four are the four cards in `docs/design/public-messaging.md` §3, one demo each.

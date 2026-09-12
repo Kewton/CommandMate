@@ -71,26 +71,46 @@ const ALLOWED_MEDIA = [
   'contract-verify.mp4',
   'install-skill.mp4',
   'never-miss-waiting.mp4',
+  'orchestrate-run.mp4',
   'parallel-worktrees.mp4',
   'poster-contract-verify.webp',
   'poster-install-skill.webp',
   'poster-never-miss-waiting.webp',
+  'poster-orchestrate-run.webp',
   'poster-parallel-worktrees.webp',
 ];
 
 /**
- * The four demos, in page order, and the `docs/images/features/` take each one
- * is a byte-for-byte copy of. Named here rather than left implicit because the
- * copy is the whole provenance argument: a re-encode looks identical in the
- * markup and identical on screen, and only `cmp` against these sources tells
- * them apart (see `website/assets/media/README.md`).
+ * The lead demo (Issue #2495). Unlike the four below it, this is not a feature
+ * cut from `docs/images/features/`: it is one recorded orchestrate run, and its
+ * take lives in `workspace/`, which is gitignored. So there is no in-repo
+ * original to `cmp` against and the allowlist above is the whole provenance
+ * gate for it — which is why `website/assets/media/README.md` carries the run
+ * it came from in prose.
+ */
+const LEAD_DEMO = 'orchestrate-run.mp4';
+
+/**
+ * The four feature demos and the `docs/images/features/` take each one is a
+ * byte-for-byte copy of. Named here rather than left implicit because the copy
+ * is the whole provenance argument: a re-encode looks identical in the markup
+ * and identical on screen, and only `cmp` against these sources tells them
+ * apart (see `website/assets/media/README.md`).
  */
 const DEMO_SOURCES: Record<string, string> = {
   'contract-verify.mp4': 'cm-11-contract-verify.en.mp4',
-  'never-miss-waiting.mp4': 'cm-03-never-miss-waiting.en.mp4',
-  'parallel-worktrees.mp4': 'cm-01-parallel-worktrees.en.mp4',
   'install-skill.mp4': 'cm-12-install-skill.en.mp4',
+  'parallel-worktrees.mp4': 'cm-01-parallel-worktrees.en.mp4',
+  'never-miss-waiting.mp4': 'cm-03-never-miss-waiting.en.mp4',
 };
+
+/**
+ * Page order, lead first. #2495 moved "See it running" above The loop and put
+ * the orchestrate run at its head, so the order is the argument the section
+ * makes: one real run, then the gate that judged it, where the method came
+ * from, the parallelism it ran under, and how it reaches you when it stops.
+ */
+const DEMO_ORDER = [LEAD_DEMO, ...Object.keys(DEMO_SOURCES)];
 
 /** Every file under website/, recursively, as paths relative to website/. */
 function walk(dir: string, base = dir): string[] {
@@ -161,6 +181,102 @@ const LP_BANNED_TERMS = [
   'claude-squad',
   'Omnara',
 ];
+
+/**
+ * The two rows of `docs/design/public-messaging.md` §11b that cannot be scanned
+ * for as substrings. Listed rather than silently skipped: a test pins that both
+ * are still rows in that table, so dropping one from the doc surfaces here
+ * instead of leaving a dead exemption behind.
+ */
+const UNSCANNABLE_CLAIMS = ['loop', 'the only …'];
+
+/** Whitespace collapsed, tags dropped: HTML copy as a reader hears it. */
+function text(fragment: string): string {
+  return fragment
+    .replace(/<[^>]+>/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * The rows of the `|`-delimited tables in one `## <n>.` section of
+ * `docs/design/public-messaging.md`, header and separator rows dropped. Parsed
+ * rather than restated for the same reason `definitionEn()` is read out of the
+ * file: a copy of the wording here would be the second place it could drift,
+ * and #2493 renumbered which demo maps to which card without touching a single
+ * string — a hand-copied expectation would have stayed green through that.
+ */
+function sectionBody(section: string): string {
+  const lines = fs.readFileSync(MESSAGING_DOC, 'utf-8').split('\n');
+  const start = lines.findIndex((line) => line.startsWith(`## ${section}.`));
+
+  expect(start, `public-messaging.md has no "## ${section}." section`).toBeGreaterThan(-1);
+
+  // Fence-aware rather than a plain "up to the next `## `": §1b's en block is a
+  // fenced sample of the section as it renders, so it opens with a `## ` line of
+  // its own, and a naive scan ends the section in the middle of the block it was
+  // looking for.
+  const body: string[] = [];
+  let fenced = false;
+
+  for (const line of lines.slice(start + 1)) {
+    if (line.startsWith('```')) {
+      fenced = !fenced;
+    } else if (!fenced && line.startsWith('## ')) {
+      break;
+    }
+    body.push(line);
+  }
+
+  return body.join('\n');
+}
+
+function messagingTable(section: string): string[][] {
+  return sectionBody(section)
+    .split('\n')
+    .filter((line) => line.trimStart().startsWith('|'))
+    .map((line) =>
+      line
+        .trim()
+        .replace(/^\|/, '')
+        .replace(/\|$/, '')
+        .split('|')
+        .map((cell) => cell.trim()),
+    )
+    .filter((cells) => cells.length > 1 && !/^[-:\s]+$/.test(cells[0]))
+    .filter((cells) => cells[0] !== '#' && cells[0] !== '項目' && cells[0] !== '言語');
+}
+
+/** One labelled row of the §1 hero table, by the label its first cell starts with. */
+function heroRow(label: string): string {
+  const row = messagingTable('1').find((cells) => cells[0].startsWith(label));
+
+  expect(row, `public-messaging.md §1 has no "${label}…" row`).not.toBeUndefined();
+  return row![1];
+}
+
+/** The en title and sentence of each §3 card, in the order the doc lists them. */
+function messagingCards(): { title: string; body: string }[] {
+  return messagingTable('3').map((cells) => ({ title: cells[1], body: cells[2] }));
+}
+
+/** The en caption of each numbered §5 demo, hero cut excluded. */
+function messagingCaptions(): string[] {
+  return messagingTable('5')
+    .filter((cells) => /^\d+$/.test(cells[0]))
+    .map((cells) => cells[3]);
+}
+
+/**
+ * The claims §11b puts outside what has actually been measured. Backticked
+ * first cells only, which is exactly the "言えないこと" table: the "言えること"
+ * rows above it are prose.
+ */
+function unmeasuredClaims(): string[] {
+  return messagingTable('11b')
+    .map((cells) => /^`([^`]+)`$/.exec(cells[0])?.[1])
+    .filter((claim): claim is string => Boolean(claim));
+}
 
 /** Every file under website/ a person reads, with its text. */
 function textFiles(): { file: string; body: string }[] {
@@ -497,23 +613,25 @@ describe('Issue #1812: the hero diagram', () => {
 describe('Issue #1577: feature demo playback', () => {
   const videoTags = (): string[] => readIndexHtml().match(/<video\b[\s\S]*?<\/video>/g) ?? [];
 
-  it('embeds the four demos the Issue settled on', () => {
-    // #1812 re-cut the set: the retired three were shot from four reused scenes
-    // (#1811 measured two of them at SSIM 0.970), and the four below are one per
-    // card in public-messaging.md §3. Order is asserted because the page reads
-    // as an argument — contract, then what happens when it stops, then parallel,
-    // then where the method comes from.
+  it('embeds the five demos in page order, the recorded run first', () => {
+    // #1812 cut the set to one demo per card in public-messaging.md §3. #2495
+    // put a real orchestrate run at the head of it and moved the whole section
+    // above The loop, so the order is the argument the section makes: one run
+    // end to end, then the gate that judged it, where the method came from, the
+    // parallelism it ran under, and how it reaches you when it stops.
     const sources = videoTags().map((tag) => /src="([^"]+)"/.exec(tag)?.[1]);
 
     expect(sources).toEqual(
-      Object.keys(DEMO_SOURCES).map((file) => `${MEDIA_DIR.split(path.sep).join('/')}/${file}`),
+      DEMO_ORDER.map((file) => `${MEDIA_DIR.split(path.sep).join('/')}/${file}`),
     );
   });
 
-  it('ships each demo as a byte-for-byte copy of its docs/images/features take', () => {
+  it('ships each feature demo as a byte-for-byte copy of its docs/images/features take', () => {
     // The provenance argument in website/assets/media/README.md is "these are
     // copies, not re-encodes". A re-encode is indistinguishable in the markup
-    // and on screen, so the bytes are what has to be compared.
+    // and on screen, so the bytes are what has to be compared. LEAD_DEMO is not
+    // in here: its take is in gitignored `workspace/`, so the allowlist and the
+    // README are the whole gate for that one.
     const reencoded = Object.entries(DEMO_SOURCES).filter(([file, source]) => {
       const shipped = fs.readFileSync(path.join(WEBSITE_DIR, MEDIA_DIR, file));
       const original = fs.readFileSync(path.join(REPO_ROOT, 'docs/images/features', source));
@@ -694,39 +812,51 @@ describe('Issue #1812: the page says what the messaging doc says', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('names the axis and states the definition verbatim in the hero', () => {
+  it('names the axis and states the definition verbatim in the Philosophy section', () => {
     expect(normalizedHtml()).toContain('Vibe Engineering');
 
-    // Scoped to the hero rather than the whole file, because the same sentence
-    // also sits in `description` and `og:description`: a page-wide `toContain`
-    // stays green with the visible copy paraphrased. Measured, not assumed —
-    // swapping "expertise" for "skills" in the hero passed the page-wide form.
-    const hero = /<section class="hero">[\s\S]*?<\/section>/.exec(readIndexHtml());
+    // Scoped to one section rather than the whole file, because a page-wide
+    // `toContain` stays green with the visible copy paraphrased — measured, not
+    // assumed: swapping "expertise" for "skills" passed the page-wide form.
+    // #2495 moved the sentence out of the hero and into Philosophy; what has to
+    // hold is that it is somewhere on the page verbatim, not where it sits.
+    const philosophy = /<section class="section philosophy"[\s\S]*?<\/section>/.exec(
+      readIndexHtml(),
+    );
 
-    expect(hero, 'hero section not found in index.html').not.toBeNull();
+    expect(philosophy, 'philosophy section not found in index.html').not.toBeNull();
     expect(
-      hero![0].replace(/\s+/g, ' '),
-      'the en definition must be copied into the hero, not paraphrased',
+      philosophy![0].replace(/\s+/g, ' '),
+      'the en definition must be copied into the page, not paraphrased',
     ).toContain(definitionEn());
   });
 
   it('opens on the hero line the messaging doc settled on', () => {
-    // Kept as a literal rather than read from the doc: this is the one string
-    // where a marker in the source file would have to be threaded through the
-    // ja row as well, and the doc's own test already pins it there.
-    expect(normalizedHtml()).toContain('<h1>From vibe coding to Vibe Engineering.</h1>');
+    // Read from the doc rather than restated: #2493 replaced this line outright,
+    // and a hand-copied literal here is exactly what would have kept the old one
+    // green. §1 is the only place the H1 is decided.
+    expect(normalizedHtml()).toContain(`<h1>${heroRow('H1（en')}</h1>`);
   });
 
-  it('carries the axis word in the title and in both social tags', () => {
+  it('carries the H1 in the title and in both social tags', () => {
+    // Until #2495 these carried the axis word, because the axis word was the H1.
+    // It is the Philosophy heading now, so what the card and the tab have to
+    // carry is the claim the page actually opens on.
     const html = readIndexHtml();
     const title = /<title>([^<]+)<\/title>/.exec(html)?.[1] ?? '';
     const ogTitle = /<meta property="og:title" content="([^"]+)"/.exec(html)?.[1] ?? '';
     const description = /<meta\s+name="description"\s+content="([^"]+)"/.exec(html)?.[1] ?? '';
-    const ogDescription = /<meta\s+property="og:description"\s+content="([^"]+)"/.exec(html)?.[1] ?? '';
+    const ogDescription =
+      /<meta\s+property="og:description"\s+content="([^"]+)"/.exec(html)?.[1] ?? '';
 
-    for (const [name, value] of Object.entries({ title, ogTitle, description, ogDescription })) {
-      expect(value, `${name} is missing from index.html`).not.toBe('');
-      expect(value, `${name} must name the axis`).toContain('Vibe Engineering');
+    const h1 = heroRow('H1（en');
+    const [lede] = heroRow('lede（en').split(/(?<=\.)\s+/);
+
+    for (const [name, value] of Object.entries({ title, ogTitle })) {
+      expect(value, `${name} is missing from index.html`).toBe(`CommandMate — ${h1}`);
+    }
+    for (const [name, value] of Object.entries({ description, ogDescription })) {
+      expect(value, `${name} must open on the lede's first sentence`).toBe(lede);
     }
   });
 
@@ -754,6 +884,190 @@ describe('Issue #1812: the page says what the messaging doc says', () => {
 
     expect(body, '#with-without renders no table body').not.toBeNull();
     expect(body![1].match(/<tr>/g) ?? []).toHaveLength(7);
+  });
+});
+
+/**
+ * Issue #2495 — the page moved onto the orchestrate axis: the H1 says who leads
+ * and what decides completion, the reader's own problem comes before anything
+ * the product does, a recorded run opens "See it running" above The loop, and
+ * the axis word steps down to a Philosophy section above the footer.
+ *
+ * The assertions below read `docs/design/public-messaging.md` rather than
+ * restating it. That file is the single source, and #2493 rewrote the H1, the
+ * lede, all four card titles and the demo-to-card mapping without changing a
+ * single file under `website/` — against hand-copied expectations this suite
+ * would have stayed green through the whole of it.
+ */
+describe('Issue #2495: the LP on the orchestrate axis', () => {
+  /** The fenced en block of one section, as its lines. */
+  function enBlock(section: string): string[] {
+    const fenced = /\n### en\n+```\n([\s\S]*?)```/.exec(sectionBody(section));
+
+    expect(fenced, `public-messaging.md §${section} must carry a fenced en block`).not.toBeNull();
+    return fenced![1].split('\n');
+  }
+
+  const bullets = (lines: string[]): string[] =>
+    lines.filter((line) => line.startsWith('- ')).map((line) => line.slice(2).trim());
+
+  /** The en rows of the §2 tables: the axis name, the definition, the creed. */
+  const philosophyRows = (): string[] =>
+    messagingTable('2')
+      .filter((cells) => cells[0] === 'en')
+      .map((cells) => cells[1]);
+
+  const axisName = (): string => philosophyRows()[0];
+
+  const sectionHtml = (selector: RegExp): string => {
+    const found = selector.exec(readIndexHtml());
+
+    expect(found, `no section matching ${selector}`).not.toBeNull();
+    return found![0];
+  };
+
+  const positionOf = (needle: string): number => {
+    const at = readIndexHtml().indexOf(needle);
+
+    expect(at, `${needle} is not in index.html`).toBeGreaterThan(-1);
+    return at;
+  };
+
+  it('orders the page hero, problem, demos, loop — and philosophy last', () => {
+    expect(positionOf('<section class="hero">')).toBeLessThan(positionOf('id="problem"'));
+    expect(positionOf('id="problem"')).toBeLessThan(positionOf('id="demos"'));
+    expect(positionOf('id="demos"')).toBeLessThan(positionOf('id="loop"'));
+    expect(positionOf('id="with-without"')).toBeLessThan(positionOf('id="limits"'));
+    expect(positionOf('id="philosophy"')).toBeLessThan(positionOf('<footer'));
+  });
+
+  it('states the §1 lede in the hero, verbatim', () => {
+    const hero = sectionHtml(/<section class="hero">[\s\S]*?<\/section>/).replace(/\s+/g, ' ');
+
+    expect(hero, 'the lede must be copied from §1, not rephrased').toContain(heroRow('lede（en'));
+  });
+
+  it('puts the fact row directly under the install box', () => {
+    const hero = sectionHtml(/<section class="hero">[\s\S]*?<\/section>/);
+
+    expect(hero.replace(/\s+/g, ' ')).toContain(heroRow('事実行（en'));
+    // Under the command rather than above it: it is the reassurance a reader
+    // wants at the moment they are about to paste something into a shell.
+    expect(hero.indexOf('class="facts"')).toBeGreaterThan(hero.indexOf('class="install"'));
+  });
+
+  it('opens the problem section on §1b, verbatim and complete', () => {
+    const lines = enBlock('1b');
+    const heading = lines.find((line) => line.startsWith('## '))!.slice(3).trim();
+    const closing = lines
+      .filter((line) => line.trim() && !line.startsWith('#') && !line.startsWith('- '))
+      .join(' ')
+      .trim();
+    const section = sectionHtml(/<section class="section" id="problem"[\s\S]*?<\/section>/);
+    const points = [...section.matchAll(/<li>([\s\S]*?)<\/li>/g)].map((match) => text(match[1]));
+
+    expect(text(/<h2[^>]*>([\s\S]*?)<\/h2>/.exec(section)![1])).toBe(heading);
+    expect(points).toEqual(bullets(lines));
+    expect(text(section)).toContain(closing);
+  });
+
+  it('states §4b in full under "What it does not do", and adds nothing to it', () => {
+    const section = sectionHtml(/<section class="section" id="limits"[\s\S]*?<\/section>/);
+    const listed = [...section.matchAll(/<li>([\s\S]*?)<\/li>/g)].map((match) => text(match[1]));
+
+    // Equality rather than containment in both directions: §4b's own rule is
+    // "no other section promises more than these five lines", which a page that
+    // quietly added a sixth would still satisfy under a subset check.
+    expect(listed).toEqual(bullets(enBlock('4b')));
+  });
+
+  it('states the four §3 cards, in the order the doc lists them', () => {
+    const section = sectionHtml(/<h2 id="why">[\s\S]*?<\/section>/);
+    const rendered = [...section.matchAll(/<article class="card">([\s\S]*?)<\/article>/g)].map(
+      (match) => ({
+        title: text(/<h3>([\s\S]*?)<\/h3>/.exec(match[1])?.[1] ?? ''),
+        body: text(/<p>([\s\S]*?)<\/p>/.exec(match[1])?.[1] ?? ''),
+      }),
+    );
+
+    expect(rendered).toEqual(messagingCards());
+  });
+
+  it('carries every §5 caption in "See it running"', () => {
+    const section = sectionHtml(/<section class="section" id="demos"[\s\S]*?<\/section>/);
+    const captions = [...section.matchAll(/<figcaption>([\s\S]*?)<\/figcaption>/g)].map((match) =>
+      text(match[1]),
+    );
+    const rendered = captions.join(' ');
+
+    expect(captions).toHaveLength(DEMO_ORDER.length);
+    expect(
+      messagingCaptions().filter((caption) => !rendered.includes(caption)),
+      'these §5 captions are not on the page',
+    ).toEqual([]);
+  });
+
+  it('captions the lead run with what the recording shows', () => {
+    // A literal, unlike the four below it: §5 covers the feature cuts, and this
+    // clip is a recorded orchestrate run instead. Every count in the sentence
+    // was read off the footage and the take's brief before it was written —
+    // one message to a Command Code session, four issues (#19–#22), four
+    // workers, four passing gate columns, and a UAT column in the closing
+    // matrix. Nothing here is inferred from the run log.
+    const section = sectionHtml(/<figure class="demo demo-lead">[\s\S]*?<\/figure>/);
+
+    expect(text(/<figcaption>([\s\S]*?)<\/figcaption>/.exec(section)![1])).toBe(
+      'One message to Command Code. Four issues, four workers, 4/4 gates, then UAT.',
+    );
+    expect(section).toContain(`src="assets/media/${LEAD_DEMO}"`);
+  });
+
+  it('leaves the retired H1 as the Philosophy heading and nowhere else', () => {
+    const section = sectionHtml(/<section class="section philosophy"[\s\S]*?<\/section>/);
+
+    // The failure #1812 was written against was the old wording surviving in a
+    // corner nobody re-read. #2493 did not retire this sentence, it demoted it,
+    // so "is it gone" is the wrong question and "is it in exactly one place" is
+    // the right one.
+    expect(readIndexHtml().split(axisName()).length - 1).toBe(1);
+    expect(section.replace(/\s+/g, ' ')).toContain(
+      `<h2 id="philosophy-h">${axisName()}</h2>`,
+    );
+    expect(text(section)).toContain(philosophyRows().find((row) => row.startsWith('We do not'))!);
+  });
+
+  it('keeps the Willison footnote with the sentence it is a footnote to', () => {
+    const section = sectionHtml(/<section class="section philosophy"[\s\S]*?<\/section>/);
+
+    expect(section).toContain('Simon Willison');
+    expect(section).toContain('https://simonwillison.net/2025/Oct/7/vibe-engineering/');
+  });
+
+  it('makes none of the claims §11b puts outside what was measured', () => {
+    const claims = unmeasuredClaims().filter((claim) => !UNSCANNABLE_CLAIMS.includes(claim));
+
+    expect(claims.length).toBeGreaterThan(0);
+    const offenders = textFiles().flatMap(({ file, body }) =>
+      body.split('\n').flatMap((line, index) => {
+        const lowered = line.toLowerCase();
+        return claims
+          .filter((claim) => lowered.includes(claim.toLowerCase()))
+          .map((claim) => `${file}:${index + 1}: ${claim}`);
+      }),
+    );
+
+    expect(offenders).toEqual([]);
+  });
+
+  it('still finds the two §11b rows a substring scan cannot be run for', () => {
+    // Both are real rules, and neither can be a substring search on this page.
+    // "loop" is the name of a section here — the cycle the page is about, which
+    // §11b's own reason ("nothing runs forever") is not talking about, and which
+    // §4b spells out as "Nothing loops forever". "the only …" is an ellipsis,
+    // and the page legitimately says "the only network traffic is the agent
+    // CLI's own API calls", which is a scoped statement of fact rather than a
+    // claim to uniqueness. Pinned here so the exemption cannot outlive the rows.
+    expect(unmeasuredClaims()).toEqual(expect.arrayContaining(UNSCANNABLE_CLAIMS));
   });
 });
 

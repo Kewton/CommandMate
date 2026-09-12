@@ -265,8 +265,14 @@ a {
   border-color: var(--accent);
 }
 
+.facts {
+  margin: 0.9rem 0 0;
+  font-size: 0.875rem;
+  color: var(--fg);
+}
+
 .prereq {
-  margin: 1rem 0 1.75rem;
+  margin: 0.4rem 0 1.75rem;
   font-size: 0.875rem;
   color: var(--fg-muted);
 }
@@ -741,6 +747,20 @@ a {
   margin: 0;
 }
 
+/* The lead demo is one real run rather than a feature cut, and it is square
+   (1080x1080) where the four below it are 16:10. Capping its width keeps the
+   square from towering over the grid it introduces, and centring it marks it as
+   the one that is not part of the set. */
+.demo-lead {
+  max-width: 30rem;
+  margin: 0 auto 2.5rem;
+}
+
+.demo-lead figcaption {
+  text-align: center;
+  font-size: 0.9rem;
+}
+
 .demo video {
   width: 100%;
   height: auto;
@@ -755,6 +775,45 @@ a {
   margin-top: 0.6rem;
   color: var(--fg-muted);
   font-size: 0.85rem;
+}
+
+/* ---------- verbatim statement lists ---------- */
+
+.problem-points,
+.limits {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.85rem;
+}
+
+.problem-points > li,
+.limits > li {
+  padding-left: 0.9rem;
+  border-left: 3px solid var(--border);
+}
+
+.problem-points > li {
+  font-size: 1.05rem;
+}
+
+.limits > li {
+  color: var(--fg-muted);
+  max-width: 60ch;
+}
+
+/* ---------- philosophy ---------- */
+
+.philosophy .definition {
+  margin: 0 0 1.25rem;
+  font-size: 1.15rem;
+}
+
+.philosophy .creed {
+  margin: 0;
+  max-width: 60ch;
+  color: var(--fg-muted);
 }
 
 /* ---------- gallery ---------- */
@@ -951,9 +1010,8 @@ a {
 }
 
 .attribution {
-  max-width: var(--maxw);
-  margin: 2rem auto 0;
-  padding-top: 1.5rem;
+  margin: 1.75rem 0 0;
+  padding-top: 1.25rem;
   border-top: 1px solid var(--border);
   color: var(--fg-muted);
   font-size: 0.82rem;
@@ -961,7 +1019,9 @@ a {
 
 .copyright {
   max-width: var(--maxw);
-  margin: 0.5rem auto 0;
+  margin: 2rem auto 0;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--border);
   color: var(--fg-muted);
   font-size: 0.82rem;
 }
