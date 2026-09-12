@@ -25,13 +25,33 @@ describe('EDITABLE_EXTENSIONS', () => {
     expect(Array.isArray(EDITABLE_EXTENSIONS)).toBe(true);
   });
 
-  it('should include .md, .html, .htm, .yaml, .yml', () => {
-    expect(EDITABLE_EXTENSIONS).toHaveLength(5);
+  it('should include .md, .html, .htm, .yaml, .yml, .txt', () => {
+    expect(EDITABLE_EXTENSIONS).toHaveLength(6);
     expect(EDITABLE_EXTENSIONS).toContain('.md');
     expect(EDITABLE_EXTENSIONS).toContain('.html');
     expect(EDITABLE_EXTENSIONS).toContain('.htm');
     expect(EDITABLE_EXTENSIONS).toContain('.yaml');
     expect(EDITABLE_EXTENSIONS).toContain('.yml');
+    // [Issue #2506] `.txt` joined the list. The length is asserted alongside the
+    // members so that a SILENT addition fails here: this array is a write
+    // allow-list, and every entry added to it widens what PUT will overwrite.
+    expect(EDITABLE_EXTENSIONS).toContain('.txt');
+  });
+
+  it('keeps .md first so it stays the default in the new-file dropdown - Issue #2506', () => {
+    // `NewFileDialog` renders this array in order and seeds `selectedExt` with
+    // '.md'; appending rather than inserting is what keeps that pairing true.
+    expect(EDITABLE_EXTENSIONS[0]).toBe('.md');
+    expect(EDITABLE_EXTENSIONS[EDITABLE_EXTENSIONS.length - 1]).toBe('.txt');
+  });
+
+  it('every listed extension has a validator - Issue #2506', () => {
+    // The two lists are consulted at different moments (the list gates the
+    // route, the validators gate the body), so a member with no validator is a
+    // file the UI opens for editing and the API then refuses to save.
+    for (const ext of EDITABLE_EXTENSIONS) {
+      expect(EXTENSION_VALIDATORS.find(v => v.extension === ext)).toBeDefined();
+    }
   });
 });
 
@@ -71,6 +91,15 @@ describe('EXTENSION_VALIDATORS', () => {
     expect(ymlValidator?.maxFileSize).toBe(2 * 1024 * 1024);
     expect(ymlValidator?.additionalValidation).toBeDefined();
   });
+
+  it('should have a validator for .txt extension with the 2MB text ceiling - Issue #2506', () => {
+    const txtValidator = EXTENSION_VALIDATORS.find(v => v.extension === '.txt');
+    expect(txtValidator).toBeDefined();
+    expect(txtValidator?.maxFileSize).toBe(2 * 1024 * 1024);
+    // Plain text has no structure to vet, so there is deliberately no
+    // `additionalValidation`; the shared NULL-byte check still runs.
+    expect(txtValidator?.additionalValidation).toBeUndefined();
+  });
 });
 
 describe('isEditableExtension', () => {
@@ -104,11 +133,22 @@ describe('isEditableExtension', () => {
     expect(isEditableExtension('.Yml')).toBe(true);
   });
 
+  it('should return true for .txt - Issue #2506', () => {
+    expect(isEditableExtension('.txt')).toBe(true);
+  });
+
+  it('should return true for .TXT (case-insensitive) - Issue #2506', () => {
+    expect(isEditableExtension('.TXT')).toBe(true);
+    expect(isEditableExtension('.Txt')).toBe(true);
+  });
+
   it('should return false for non-editable extensions', () => {
-    expect(isEditableExtension('.txt')).toBe(false);
     expect(isEditableExtension('.js')).toBe(false);
     expect(isEditableExtension('.ts')).toBe(false);
     expect(isEditableExtension('.json')).toBe(false);
+    // [Issue #2506] `.text` is NOT an alias for `.txt`; only the exact member
+    // is editable, so widening the list does not widen it by fuzzy match.
+    expect(isEditableExtension('.text')).toBe(false);
   });
 
   it('should handle edge cases', () => {
@@ -147,7 +187,9 @@ describe('validateContent', () => {
 
   describe('unsupported extensions', () => {
     it('should reject unsupported extensions', () => {
-      const result = validateContent('.txt', 'content');
+      // [Issue #2506] This used to probe `.txt`; `.txt` is editable now, so the
+      // case moved to an extension that is still outside the list.
+      const result = validateContent('.json', 'content');
       expect(result.valid).toBe(false);
       expect(result.error).toBe('Unsupported extension');
     });
@@ -311,6 +353,47 @@ describe('validateContent', () => {
       const result = validateContent('.yaml', 'key: value\x00');
       expect(result.valid).toBe(false);
       expect(result.error).toBe('Binary content detected');
+    });
+  });
+
+  describe('plain-text content validation - Issue #2506', () => {
+    it('should accept plain text content for .txt', () => {
+      const result = validateContent('.txt', 'just some notes\nsecond line');
+      expect(result.valid).toBe(true);
+      expect(result.error).toBeUndefined();
+    });
+
+    it('should accept empty .txt content', () => {
+      expect(validateContent('.txt', '').valid).toBe(true);
+    });
+
+    it('should accept .txt content that would be a dangerous YAML tag', () => {
+      // `.txt` has no `additionalValidation`, and that is deliberate: the YAML
+      // tag scanner exists because a `.yaml` file gets PARSED somewhere. Plain
+      // text never is, so the same bytes are just bytes here.
+      const result = validateContent('.txt', 'exploit: !ruby/object:Gem::Requirement');
+      expect(result.valid).toBe(true);
+    });
+
+    it('should reject .txt content with NULL bytes (shared binary check)', () => {
+      const result = validateContent('.txt', 'notes\x00');
+      expect(result.valid).toBe(false);
+      expect(result.error).toBe('Binary content detected');
+    });
+
+    it('should reject .txt content exceeding 2MB', () => {
+      const largeContent = 'x'.repeat(2 * 1024 * 1024 + 1);
+      const result = validateContent('.txt', largeContent);
+      expect(result.valid).toBe(false);
+      expect(result.error).toBe('File size exceeds limit');
+    });
+
+    it('should accept .txt content at exactly 2MB', () => {
+      expect(validateContent('.txt', 'x'.repeat(2 * 1024 * 1024)).valid).toBe(true);
+    });
+
+    it('should handle uppercase .TXT', () => {
+      expect(validateContent('.TXT', 'hello').valid).toBe(true);
     });
   });
 

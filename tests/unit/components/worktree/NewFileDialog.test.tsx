@@ -3,10 +3,20 @@
  *
  * Tests for resolveFileName helper function (3 patterns)
  * and basic component rendering.
+ *
+ * @vitest-environment jsdom
  */
 
-import { describe, it, expect } from 'vitest';
-import { resolveFileName } from '@/components/worktree/NewFileDialog';
+import React from 'react';
+import { describe, it, expect, vi } from 'vitest';
+import { render, screen } from '@testing-library/react';
+import { NewFileDialog, resolveFileName } from '@/components/worktree/NewFileDialog';
+import { EDITABLE_EXTENSIONS } from '@/config/editable-extensions';
+
+vi.mock('next-intl', async () => {
+  const { createRealIntlMock } = await import('@tests/helpers/real-intl');
+  return createRealIntlMock('en');
+});
 
 describe('resolveFileName', () => {
   describe('(a) file name has an EDITABLE_EXTENSIONS extension', () => {
@@ -28,6 +38,10 @@ describe('resolveFileName', () => {
 
     it('should return .htm file name as-is', () => {
       expect(resolveFileName('index.htm', '.md')).toBe('index.htm');
+    });
+
+    it('should return .txt file name as-is - Issue #2506', () => {
+      expect(resolveFileName('notes.txt', '.md')).toBe('notes.txt');
     });
 
     it('should be case-insensitive for extension matching', () => {
@@ -69,10 +83,6 @@ describe('resolveFileName', () => {
     it('should return file name as-is for .json extension', () => {
       expect(resolveFileName('config.json', '.yaml')).toBe('config.json');
     });
-
-    it('should return file name as-is for .txt extension', () => {
-      expect(resolveFileName('notes.txt', '.md')).toBe('notes.txt');
-    });
   });
 
   describe('edge cases', () => {
@@ -95,5 +105,46 @@ describe('resolveFileName', () => {
     it('should handle file names with path-like dots but no extension', () => {
       expect(resolveFileName('v1.0.0', '.md')).toBe('v1.0.0');
     });
+  });
+});
+
+/**
+ * The dropdown is rendered straight from `EDITABLE_EXTENSIONS`, so the
+ * acceptance criterion "the new-file dialog offers .txt" is really a statement
+ * about that array reaching the DOM in full. Asserting the whole list (rather
+ * than only `.txt`) is what keeps the offer and the API's write allow-list from
+ * drifting apart: an option the dialog shows but PUT refuses would create a
+ * file the user cannot then save.
+ */
+describe('NewFileDialog extension dropdown', () => {
+  function renderDialog() {
+    return render(
+      <NewFileDialog isOpen parentPath="docs" onConfirm={vi.fn()} onCancel={vi.fn()} />,
+    );
+  }
+
+  function optionValues(): string[] {
+    return Array.from(
+      screen.getByTestId('new-file-ext-select').querySelectorAll('option'),
+    ).map((option) => option.value);
+  }
+
+  it('offers .txt - Issue #2506', () => {
+    renderDialog();
+
+    expect(optionValues()).toContain('.txt');
+  });
+
+  it('offers every editable extension, in list order', () => {
+    renderDialog();
+
+    expect(optionValues()).toEqual([...EDITABLE_EXTENSIONS]);
+  });
+
+  it('still defaults to .md', () => {
+    // `.txt` was appended rather than inserted precisely so this stays true.
+    renderDialog();
+
+    expect((screen.getByTestId('new-file-ext-select') as HTMLSelectElement).value).toBe('.md');
   });
 });

@@ -8,6 +8,7 @@
  * - .md: Edited via MarkdownEditor
  * - .html/.htm: Edited via HtmlPreview (Issue #490)
  * - .yaml/.yml: Edited via MarkdownEditor in text mode (Issue #646)
+ * - .txt: Edited via MarkdownEditor in text mode (Issue #2506)
  */
 
 import { HTML_MAX_SIZE_BYTES } from '@/config/html-extensions';
@@ -17,7 +18,7 @@ import { isYamlSafe } from '@/config/uploadable-extensions';
  * Maximum file size for text-based editable files (2MB).
  *
  * [Issue #723] Raised from 1MB to 2MB for unified PUT/GET enforcement.
- * - Applied to `.md` / `.yaml` / `.yml` via {@link EXTENSION_VALIDATORS}.
+ * - Applied to `.md` / `.yaml` / `.yml` / `.txt` via {@link EXTENSION_VALIDATORS}.
  * - `.html` / `.htm` use {@link HTML_MAX_SIZE_BYTES} (5MB, Issue #490).
  * - Enforced both pre-read (GET route guard) and post-validate (PUT validateContent).
  */
@@ -25,9 +26,19 @@ export const TEXT_MAX_SIZE_BYTES = 2 * 1024 * 1024;
 
 /**
  * List of file extensions that can be edited
- * Future extensions (txt, json) can be added here
+ * Future extensions (json, etc.) can be added here
+ *
+ * [Issue #2506] `.txt` is appended rather than inserted: `NewFileDialog` renders
+ * this array in order as its extension dropdown, so the existing options keep
+ * their positions and `.md` stays the first (and default) entry.
+ *
+ * Adding an entry here has three effects at once, all of them intended:
+ * PUT accepts the extension (`isEditableFile()`), the PC file panel routes it to
+ * the editor (`FilePanelContent`), and GET starts capping it at
+ * {@link TEXT_MAX_SIZE_BYTES} — over that a file opens read-only rather than
+ * becoming unreadable (Issue #2505).
  */
-export const EDITABLE_EXTENSIONS: readonly string[] = ['.md', '.html', '.htm', '.yaml', '.yml'] as const;
+export const EDITABLE_EXTENSIONS: readonly string[] = ['.md', '.html', '.htm', '.yaml', '.yml', '.txt'] as const;
 
 /**
  * Extension validator configuration
@@ -78,6 +89,14 @@ export const EXTENSION_VALIDATORS: ExtensionValidator[] = [
     extension: '.yml',
     maxFileSize: TEXT_MAX_SIZE_BYTES,
     additionalValidation: validateYamlContent,
+  },
+  {
+    // [Issue #2506] No `additionalValidation`: plain text has no structure to
+    // vet. The shared checks in `validateContent()` — NULL-byte rejection and
+    // the control-character warning — still apply, and they are the only ones
+    // that are meaningful here.
+    extension: '.txt',
+    maxFileSize: TEXT_MAX_SIZE_BYTES,
   },
 ];
 
