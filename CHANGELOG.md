@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **feat(files): サイズ上限を超えたテキストファイルを読み取り専用で開けるようにした** (#2505): `GET /api/worktrees/:id/files/:path` は編集可能拡張子が上限（`.html`/`.htm` は 5MB、その他は 2MB）を超えると 413 `FILE_TOO_LARGE` を返し閲覧すらできなかったが、本文を 200 で返したうえで `readOnly: true` と理由（`readOnlyReason`: `code`/`message`/`limitBytes`/`sizeBytes`）を添える形に変えた。上限は「読めない」ではなく「保存できない」の意味になり、PUT 側の上限拒否（`validateContent()` の `maxFileSize`）は従来どおり。`FilePanelContent` は編集分岐（HTML プレビュー・Markdown/テキストエディタ）に入る前に `readOnly` を見て仮想化ビューア `CodeViewer` に回すため、数万行のファイルが textarea へ一括描画されてスマホがフリーズする経路も塞がる。画面には理由が警告バナーとして表示される
 - **feat(mobile): スマホに接続状態（オフライン／再接続中）を表示** (#2501): `useConnectivity` フックが `navigator.onLine`・共有WebSocketの `status`・サーバ到達性プローブの3信号を1つの判定にまとめ（`onLine === true` は「オンラインの確定」には使わず、キャプティブポータル等で「オンライン」と誤表示しない）、モバイルシェル先頭に `MobileConnectionBanner`（flex列内の細いバー。composer や `GlobalMobileNav` を覆わない）を、デスクトップは既存 `ConnectionStatusIndicator` を同フックへ載せ替えて表示する。接続中は何も表示しない
 
 ### Fixed
