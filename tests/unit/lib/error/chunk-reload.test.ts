@@ -57,6 +57,8 @@ describe('isChunkLoadError (Issue #1404)', () => {
 });
 
 describe('recoverFromChunkError (Issue #1404)', () => {
+  // Every case here is the online one — #2500's offline branch is covered in
+  // chunk-reload-offline-2500.test.ts.
   function chunkError(): Error {
     const err = new Error('Loading chunk 7 failed.');
     err.name = 'ChunkLoadError';
@@ -66,7 +68,7 @@ describe('recoverFromChunkError (Issue #1404)', () => {
   it('reloads once and records the timestamp for a fresh ChunkLoadError', () => {
     const reload = vi.fn();
     const { storage, get } = makeStorage();
-    const env: ChunkRecoveryEnv = { storage, now: 1_000_000, reload };
+    const env: ChunkRecoveryEnv = { storage, now: 1_000_000, reload, onLine: true };
 
     const outcome = recoverFromChunkError(chunkError(), env);
 
@@ -82,6 +84,7 @@ describe('recoverFromChunkError (Issue #1404)', () => {
       storage,
       now: 1_000_000 + CHUNK_RELOAD_GUARD_MS - 1,
       reload,
+      onLine: true,
     };
 
     const outcome = recoverFromChunkError(chunkError(), env);
@@ -94,7 +97,7 @@ describe('recoverFromChunkError (Issue #1404)', () => {
     const reload = vi.fn();
     const { storage, get } = makeStorage(String(1_000_000));
     const now = 1_000_000 + CHUNK_RELOAD_GUARD_MS + 1;
-    const env: ChunkRecoveryEnv = { storage, now, reload };
+    const env: ChunkRecoveryEnv = { storage, now, reload, onLine: true };
 
     const outcome = recoverFromChunkError(chunkError(), env);
 
@@ -106,7 +109,7 @@ describe('recoverFromChunkError (Issue #1404)', () => {
   it('does NOT auto-reload for a non-ChunkLoadError', () => {
     const reload = vi.fn();
     const { storage, get } = makeStorage();
-    const env: ChunkRecoveryEnv = { storage, now: 1_000_000, reload };
+    const env: ChunkRecoveryEnv = { storage, now: 1_000_000, reload, onLine: true };
 
     const outcome = recoverFromChunkError(new Error('unrelated failure'), env);
 
@@ -117,7 +120,7 @@ describe('recoverFromChunkError (Issue #1404)', () => {
 
   it('does NOT reload when storage is unavailable (cannot guard against a loop)', () => {
     const reload = vi.fn();
-    const env: ChunkRecoveryEnv = { storage: null, now: 1_000_000, reload };
+    const env: ChunkRecoveryEnv = { storage: null, now: 1_000_000, reload, onLine: true };
 
     const outcome = recoverFromChunkError(chunkError(), env);
 
