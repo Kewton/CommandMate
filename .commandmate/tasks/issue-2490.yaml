@@ -1,0 +1,95 @@
+version: 1
+title: "Issue #2490: unit テストが本物の ~/.commandmate/opencode-ports.json に書き込む"
+goal: |
+  https://github.com/Kewton/CommandMate/issues/2490 を実装してください。
+  `/bug-fix` ワークフローで着手すること。原因分析は Issue 本文に完了済みのため、追加の
+  根本原因分析は不要。詳細は以下で確認できます:
+    gh issue view 2490 --repo Kewton/CommandMate
+
+  ## 目的と照合基準
+  unit テストが、ユーザーの本物の `~/.commandmate/opencode-ports.json`（本番サーバが
+  opencode のポート割り当てを保存するファイル）に書き込まないようにする。
+
+  ## 事象（実測済み）
+  以下の 3 テストファイルが `@/lib/hooks/sources/opencode/ports` を import して割り当てを
+  作るが、`CM_OPENCODE_PORT_FILE` を自分で設定していない。結果として `getOpencodePortFilePath()`
+  （`src/lib/hooks/sources/opencode/ports.ts:104` 付近）が既定値
+  `join(homedir(), '.commandmate', 'opencode-ports.json')` を使い、本物のファイルに
+  read-modify-write（`ports.ts:193-195` / `:202-205`）してしまう:
+  - `tests/unit/api/respond-decision-id-1932.test.ts`
+  - `tests/unit/api/respond-question-2039.test.ts`
+  - `tests/unit/api/respond-sole-decision-2040.test.ts`
+
+  `tests/setup.ts` は `CODEX_HOME`（:57 付近）など他ツールの HOME は tmpdir に向けているが、
+  `CM_OPENCODE_PORT_FILE` は向けていない。
+
+  ## 影響
+  本番サーバはこのファイルを起動時の reattach（`src/lib/hooks/sources/opencode/reattach.ts:220`）、
+  `src/app/api/worktrees/[id]/slash-commands/opencode-live.ts:113`、`ports.ts:349`/`:397` で
+  読む。テストと本番サーバが同じファイルを read-modify-write するので、並行すると本番の
+  割り当てを古い内容で上書きして消しうる。
+
+  ## 対策の方向（案）
+  - `tests/setup.ts` で `CM_OPENCODE_PORT_FILE` を tmpdir 配下に向ける（`CODEX_HOME` と
+    同じ形。worker pid で分けるかは同ファイルの既存の方針に合わせる）。
+  - `CM_OPENCODE_PORT_FILE` を自分で設定・`delete` するテストが、後始末で既定値まで消して
+    homedir に戻してしまわないか確認する。
+  - 回帰防止: `HOME` を空の番兵ディレクトリに向けて unit を流し、
+    `.commandmate/opencode-ports.json` が作られないことを確かめる
+    （`tests/setup.ts:70-72` にある copilot の調べ方と同じ）。
+
+  本物のファイルに残った `wt-alpha` / `wt-beta` の 3 行は、この修正とは別に手で消せる
+  （実害はないと Issue 本文で確認済み）ので、このタスクでは触れなくてよい。
+
+  ## 受入条件
+  - 上の 3 本を含む unit 全体を流しても、本物の `~/.commandmate/opencode-ports.json` が
+    変わらない（mtime・中身）。
+  - `HOME` を番兵に向けた unit の実行で `.commandmate/opencode-ports.json` が作られない。
+
+  ## 作業ルール（厳守）
+  - **`CHANGELOG.md` と `docs/module-reference.md` を編集しないでください**（scope 外です）。
+    代わりに次の 2 ファイルを書いてください。どちらも `dev-reports/` 配下なので commit には
+    入りません。
+    - `dev-reports/changelog/issue-2490.md` — `CHANGELOG.md` の `## [Unreleased]` にそのまま
+      貼れる **1 エントリ**（先頭は `- **<type>(<scope>): …** (#2490): …`）。どの節
+      （`### Added` / `### Changed` / `### Fixed`）に入るかを 1 行目にコメントで書く。
+      形式は次の実例に合わせてください（エントリは**ファイル中では 1 行**）:
+
+      ```markdown
+      <!-- ### Fixed -->
+      - **fix(cli): `send` 直後の `wait` が「まだ始まっていない」を完了と読む問題を修正** (#1975): `wait` が `sessionStatus==='ready'` を完了と判定する直前に、**「このインスタンスに最後に渡されたプロンプト」と「エージェント自身が最後に報告したターン終了（`lastStopEventAt`）」を突き合わせる**ゲートを追加。`send` 直後は最新の構造化イベントが直前ターンの `stop` のままなので #1839 の `adoptTurnStart()` が何も採用せず、`turnStartedAt === null` が「決着済み」と読まれてアイドル composer をそのまま完了にしていた（隔離サーバ実測 2026-08-22 / copilot 1.0.80: `send`→`wait` 5 回中 3 回が約 0.3 秒・`basis=scraper_ready`・成果物ゼロで exit 0）。ゲートは `GET /api/worktrees/:id/messages?limit=1&unit=pairs` を `--instance`（無指定ならサーバが解決した `cliToolId`）でスコープして読む。**hook を出さないツールは挙動不変** — `structuredEvents.source.capabilities.supportedEvents`（#1924 の宣言値）が `stop` とターン開始語の両方を宣言しているソースだけがこのゲートに入り、legacy-relay（`supportedEvents: []`）と #1924 以前のサーバは従来経路のまま台帳も引かない。保留は `PENDING_PROMPT_HOLD_MS`=60 秒で打ち切り（hooks は全経路 fail-open なので `Stop` の取りこぼしで `wait` が返らなくなってはいけない）、`--timeout` / `--stall-timeout` はそれより短ければ従来どおり優先される。完了行の `basis=` は、エージェントが最新プロンプトの終了を報告していれば `hook_stop` になる（`scraper_ready` は「画面しか言っていない」という文書どおりの意味に戻る）。
+      ```
+
+      - `- **` で始めること（`grep -cE '^- \*\*'` で数える）。
+      - `(#2490)` は要約の**外**（`**` を閉じた後）に置くこと。
+      - `<type>` は CLAUDE.md のコミットメッセージ規約と同じ語彙（`feat`/`fix`/`docs`/`refactor`/`test`/`chore`/`ci`/`style`）。
+      - 1 エントリ＝1 行（折らない）。
+    - `dev-reports/module-reference/issue-2490.md` — `docs/module-reference.md` の表に足す
+      注記を**行キー（`| \`path\` |`）ごと**に列挙する。既存行に足すときは
+      `grep -n '^| \`<path>\`' docs/module-reference.md` を実行し、その出力（行番号つきの
+      行キー）を断片に書き写してから書くこと。0 件だった行への追記を指示しない。実例:
+
+      ```markdown
+      ## 既存行への追記
+      - `src/lib/session/worktree-status-helper.ts` — 実在確認: `docs/module-reference.md:103`（行番号は確認時点のもの）
+        追記内容: 「...」
+
+      ## 新規行
+      追記なし
+      ```
+  - 断片が無いとリリースノートと module-reference に載らない。実装と同じ commit の時点で書くこと。
+scope:
+  allow:
+    - "tests/setup.ts"
+    - "tests/unit/api/respond-decision-id-1932.test.ts"
+    - "tests/unit/api/respond-question-2039.test.ts"
+    - "tests/unit/api/respond-sole-decision-2040.test.ts"
+    - "src/lib/hooks/sources/opencode/ports.ts"
+    - "tests/unit/lib/hooks/sources/opencode/**"
+    - "tests/unit/guards/**"
+  deny: []
+verify:
+  gates: null
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true
