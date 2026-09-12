@@ -24,7 +24,12 @@
  * that is the seam for instrumenting the app's fetches later.
  *
  * The status is exported as a pure function (`resolveConnectivityStatus`) so
- * the decision itself can be tested, and reused, without a React tree.
+ * the decision itself can be tested, and reused, without a React tree. That
+ * matters beyond testing: #2500's error boundaries consume
+ * `probeServerReachable` and `subscribeServerReachability` directly, because a
+ * boundary may be the only thing left rendering and cannot assume a provider —
+ * or a hook — is still available above it. Keep those two callable without
+ * React.
  */
 
 'use client';
