@@ -736,6 +736,37 @@ export interface TreeResponse {
 }
 
 /**
+ * Why a file was opened read-only (Issue #2505).
+ *
+ * `FILE_TOO_LARGE` is currently the only code. It is a string union rather than
+ * a bare `string` so that a consumer switching on it gets exhaustiveness
+ * checking when the next reason is added (Issue #2506 makes `.txt` editable and
+ * reuses this contract unchanged).
+ */
+export type FileReadOnlyReasonCode = 'FILE_TOO_LARGE';
+
+/**
+ * Structured explanation attached to a read-only {@link FileContent} (Issue #2505).
+ *
+ * Both the machine-readable `code` and the already-formatted `message` are
+ * carried: the code is what callers branch on, while `message` is what the file
+ * panel renders. The message is produced server-side because the server is the
+ * only side that knows which ceiling applied (`.html` has its own 5MB limit,
+ * everything else editable is 2MB), and duplicating that mapping in the client
+ * is how the two drift apart.
+ */
+export interface FileReadOnlyReason {
+  /** Machine-readable reason; branch on this, not on {@link message}. */
+  code: FileReadOnlyReasonCode;
+  /** Human-readable, already-formatted explanation for display. */
+  message: string;
+  /** The ceiling that was exceeded, in bytes. */
+  limitBytes: number;
+  /** Actual on-disk size of the file, in bytes. */
+  sizeBytes: number;
+}
+
+/**
  * File content representation
  * [MF-001] Does not include 'success' field - API response is a wrapper
  * that returns { success: true, ...FileContent }
@@ -743,6 +774,11 @@ export interface TreeResponse {
  * [Issue #723] Added optional metadata fields (totalLines/totalBytes/encoding/range)
  * to support read-only large-file viewer with line-range fetch + virtualization.
  * All new fields are optional for backward compatibility with existing call sites.
+ *
+ * [Issue #2505] Added `readOnly` / `readOnlyReason`. A file over the editable
+ * size ceiling is no longer refused with 413 on GET — it is returned in full and
+ * flagged read-only, so it can still be viewed. PUT is unchanged and still
+ * rejects oversize writes.
  */
 export interface FileContent {
   /** File path relative to worktree root */
@@ -771,6 +807,17 @@ export interface FileContent {
   encoding?: string;
   /** Line range actually returned when {@link content} is a partial slice (Issue #723, 1-based inclusive) */
   range?: { start: number; end: number };
+  /**
+   * True when the file may be viewed but not saved (Issue #2505).
+   *
+   * Absent/false means the normal rules apply — i.e. it is editable iff its
+   * extension is in `EDITABLE_EXTENSIONS`. When true, {@link readOnlyReason} is
+   * always present, and the file panel must route the file to the virtualized
+   * code viewer instead of a textarea-backed editor.
+   */
+  readOnly?: boolean;
+  /** Why {@link readOnly} is true. Present iff `readOnly` is true (Issue #2505). */
+  readOnlyReason?: FileReadOnlyReason;
 }
 
 /**

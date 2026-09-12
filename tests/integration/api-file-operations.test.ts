@@ -540,8 +540,12 @@ describe('File Operations API', () => {
     });
   });
 
-  describe('GET editable size pre-guard (Issue #723)', () => {
-    it('returns 413 FILE_TOO_LARGE for .md > 2MB', async () => {
+  // [Issue #2505] These cases used to assert 413 FILE_TOO_LARGE. The ceiling now
+  // governs WRITES only: GET returns the body with `readOnly: true` so the file
+  // can still be viewed, and PUT keeps refusing oversize content. The ceilings
+  // and their precedence (.html 5MB first, other editable 2MB) are unchanged.
+  describe('GET editable size guard — read-only, not refused (Issue #723, #2505)', () => {
+    it('returns 200 read-only for .md > 2MB', async () => {
       // Create a 2MB + 1 byte .md file
       const large = 'x'.repeat(2 * 1024 * 1024 + 1);
       writeFileSync(join(testDir, 'big.md'), large);
@@ -552,11 +556,15 @@ describe('File Operations API', () => {
       const response = await GET(request, params);
       const data = await response.json();
 
-      expect(response.status).toBe(413);
-      expect(data.error.code).toBe('FILE_TOO_LARGE');
+      expect(response.status).toBe(200);
+      expect(data.content).toBe(large);
+      expect(data.readOnly).toBe(true);
+      expect(data.readOnlyReason.code).toBe('FILE_TOO_LARGE');
+      expect(data.readOnlyReason.limitBytes).toBe(2 * 1024 * 1024);
+      expect(data.readOnlyReason.sizeBytes).toBe(2 * 1024 * 1024 + 1);
     });
 
-    it('returns 200 for .md at exactly 2MB', async () => {
+    it('returns 200 for .md at exactly 2MB, with no read-only flag', async () => {
       const exact = 'x'.repeat(2 * 1024 * 1024);
       writeFileSync(join(testDir, 'exact.md'), exact);
 
@@ -565,9 +573,10 @@ describe('File Operations API', () => {
 
       const response = await GET(request, params);
       expect(response.status).toBe(200);
+      expect((await response.json()).readOnly).toBeUndefined();
     });
 
-    it('returns 413 FILE_TOO_LARGE for .yaml > 2MB', async () => {
+    it('returns 200 read-only for .yaml > 2MB', async () => {
       const large = 'x'.repeat(2 * 1024 * 1024 + 1);
       writeFileSync(join(testDir, 'big.yaml'), large);
 
@@ -577,11 +586,12 @@ describe('File Operations API', () => {
       const response = await GET(request, params);
       const data = await response.json();
 
-      expect(response.status).toBe(413);
-      expect(data.error.code).toBe('FILE_TOO_LARGE');
+      expect(response.status).toBe(200);
+      expect(data.readOnly).toBe(true);
+      expect(data.readOnlyReason.limitBytes).toBe(2 * 1024 * 1024);
     });
 
-    it('returns 413 FILE_TOO_LARGE for .yml > 2MB', async () => {
+    it('returns 200 read-only for .yml > 2MB', async () => {
       const large = 'x'.repeat(2 * 1024 * 1024 + 1);
       writeFileSync(join(testDir, 'big.yml'), large);
 
@@ -591,11 +601,12 @@ describe('File Operations API', () => {
       const response = await GET(request, params);
       const data = await response.json();
 
-      expect(response.status).toBe(413);
-      expect(data.error.code).toBe('FILE_TOO_LARGE');
+      expect(response.status).toBe(200);
+      expect(data.readOnly).toBe(true);
+      expect(data.readOnlyReason.limitBytes).toBe(2 * 1024 * 1024);
     });
 
-    it('returns 200 for .html at 4MB (existing 5MB ceiling preserved)', async () => {
+    it('returns 200 for .html at 4MB with no read-only flag (5MB ceiling preserved)', async () => {
       const fourMb = 'x'.repeat(4 * 1024 * 1024);
       writeFileSync(join(testDir, 'mid.html'), fourMb);
 
@@ -604,9 +615,12 @@ describe('File Operations API', () => {
 
       const response = await GET(request, params);
       expect(response.status).toBe(200);
+      // 4MB is over the 2MB text ceiling but under HTML's own 5MB one; this
+      // pins that HTML is still evaluated against its own limit first.
+      expect((await response.json()).readOnly).toBeUndefined();
     });
 
-    it('returns 413 for .html > 5MB (Issue #490 preserved)', async () => {
+    it('returns 200 read-only for .html > 5MB (Issue #490 ceiling preserved)', async () => {
       const sixMb = 'x'.repeat(6 * 1024 * 1024);
       writeFileSync(join(testDir, 'big.html'), sixMb);
 
@@ -616,11 +630,12 @@ describe('File Operations API', () => {
       const response = await GET(request, params);
       const data = await response.json();
 
-      expect(response.status).toBe(413);
-      expect(data.error.code).toBe('FILE_TOO_LARGE');
+      expect(response.status).toBe(200);
+      expect(data.readOnly).toBe(true);
+      expect(data.readOnlyReason.limitBytes).toBe(5 * 1024 * 1024);
     });
 
-    it('does not pre-guard non-editable plain text files (no size limit for non-editable)', async () => {
+    it('does not guard non-editable plain text files (no size limit for non-editable)', async () => {
       // 3MB plain text file (non-editable extension) — should still be readable
       const threeMb = 'x'.repeat(3 * 1024 * 1024);
       writeFileSync(join(testDir, 'large.log'), threeMb);
@@ -630,6 +645,24 @@ describe('File Operations API', () => {
 
       const response = await GET(request, params);
       expect(response.status).toBe(200);
+      expect((await response.json()).readOnly).toBeUndefined();
+    });
+
+    it('PUT still refuses an oversize write to a file GET opened read-only', async () => {
+      // The half of the contract that did NOT change: the ceiling is now a
+      // write rule, so it must still actually stop a write.
+      writeFileSync(join(testDir, 'guarded.md'), '# small');
+
+      const request = createRequest('PUT', 'guarded.md', {
+        content: 'x'.repeat(2 * 1024 * 1024 + 1),
+      });
+      const params = { params: Promise.resolve({ id: 'test-worktree', path: ['guarded.md'] }) };
+
+      const response = await PUT(request, params);
+      const data = await response.json();
+
+      expect(response.status).toBe(400);
+      expect(data.error.code).toBe('INVALID_CONTENT');
     });
   });
 });

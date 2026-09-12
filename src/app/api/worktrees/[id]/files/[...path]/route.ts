@@ -57,6 +57,7 @@ import type { Stats } from 'fs';
 import { createLogger } from '@/lib/logger';
 import { buildAttachmentContentDisposition } from '@/lib/http/content-disposition';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
+import type { FileReadOnlyReason } from '@/types/models';
 
 const logger = createLogger('api/files');
 
@@ -139,30 +140,52 @@ function parseLineRangeParams(searchParams: URLSearchParams): LineRangeParseResu
 }
 
 /**
- * Apply size pre-guards for editable text GETs. Returns the first matching
- * 413 response (HTML > 5MB, or non-HTML editable > 2MB) or `null` when the
- * file is within bounds. Centralizes the precedence rule described inline at
- * the call site.
- *
- * [Issue #490] HTML 5MB. [Issue #723] Non-HTML editable 2MB.
+ * Render a byte count as megabytes for the read-only notice shown to the user.
+ * One decimal place, so a 2.0MB ceiling and the 2.4MB file that exceeded it do
+ * not both print as "2MB" and read as a contradiction.
  */
-function enforceEditableSizeGuards(ext: string, sizeBytes: number): NextResponse | null {
-  if (isHtmlExtension(ext)) {
-    if (sizeBytes > HTML_MAX_SIZE_BYTES) {
-      return createErrorResponse(
-        'FILE_TOO_LARGE',
-        `HTML file exceeds ${HTML_MAX_SIZE_BYTES} bytes limit`,
-      );
-    }
-    return null;
-  }
-  if (isEditableExtension(ext) && sizeBytes > TEXT_MAX_SIZE_BYTES) {
-    return createErrorResponse(
-      'FILE_TOO_LARGE',
-      `Editable file exceeds ${TEXT_MAX_SIZE_BYTES} bytes limit (${(TEXT_MAX_SIZE_BYTES / 1024 / 1024).toFixed(0)}MB)`,
-    );
-  }
-  return null;
+function formatMegabytes(bytes: number): string {
+  return `${(bytes / 1024 / 1024).toFixed(1)}MB`;
+}
+
+/**
+ * Decide whether an editable-extension GET must be served READ-ONLY because the
+ * file is over its editing ceiling. Returns the reason to attach to the
+ * response, or `null` when the file is within bounds.
+ *
+ * [Issue #2505] This used to be `enforceEditableSizeGuards()`, which returned a
+ * 413 and so made an oversize `.md` unreadable as well as unsaveable. One size
+ * number was doing two unrelated jobs: "too big to send to a textarea editor"
+ * and "too big to look at". Only the first is true. Viewing is now always
+ * allowed and the ceiling governs WRITES alone — PUT still rejects oversize
+ * content through `validateContent()`'s `maxFileSize`, unchanged.
+ *
+ * This mattered immediately rather than theoretically: making an extension
+ * editable (Issue #2506 does exactly that for `.txt`) used to silently take
+ * away the ability to read large files with that extension, because the guard
+ * keys off `isEditableExtension()`. Non-editable extensions were, and remain,
+ * uncapped here.
+ *
+ * Precedence is unchanged: [Issue #490] HTML gets its own 5MB ceiling and is
+ * checked first; [Issue #723] every other editable extension gets 2MB.
+ */
+function evaluateEditableSizeLimit(ext: string, sizeBytes: number): FileReadOnlyReason | null {
+  const limitBytes = isHtmlExtension(ext)
+    ? HTML_MAX_SIZE_BYTES
+    : isEditableExtension(ext)
+      ? TEXT_MAX_SIZE_BYTES
+      : null;
+
+  if (limitBytes === null || sizeBytes <= limitBytes) return null;
+
+  return {
+    code: 'FILE_TOO_LARGE',
+    message:
+      `Opened read-only: this file is ${formatMegabytes(sizeBytes)}, over the ` +
+      `${formatMegabytes(limitBytes)} limit for editing. You can view it but not save changes.`,
+    limitBytes,
+    sizeBytes,
+  };
 }
 
 /**
@@ -436,6 +459,22 @@ export async function GET(
       throw err;
     }
 
+    // [Issue #2505] Read-only evaluation happens once, before the line-range
+    // branch, so a partial slice and a full read of the same oversize file agree
+    // about being read-only. Previously the size ceiling was only consulted on
+    // the full-content path, which meant a line-range request for a 3MB `.md`
+    // succeeded while a full request for it was refused with 413.
+    //
+    // Order matters:
+    //   1. [Issue #490] HTML 5MB ceiling — HTML has its own dedicated limit.
+    //   2. [Issue #723] Non-HTML editable text 2MB ceiling — `.md` / `.yaml` /
+    //      `.yml`, evaluated AFTER HTML so HTML keeps its own ceiling.
+    // Non-editable plain text remains uncapped at this layer.
+    const readOnlyReason = evaluateEditableSizeLimit(ext, fileStat.size);
+    const readOnlyFields = readOnlyReason
+      ? { readOnly: true as const, readOnlyReason }
+      : {};
+
     // [Issue #723] Line-range mode detection — when present, skip the
     // If-Modified-Since/304 fast-path and always return 200 with a partial
     // payload (sub-ranges of the same mtime are independently requestable).
@@ -471,16 +510,9 @@ export async function GET(
         totalBytes: rangeResult.totalBytes,
         encoding: rangeResult.encoding,
         range: rangeResult.range,
+        ...readOnlyFields,
       });
     }
-
-    // Editable-text size guards. Order matters:
-    //   1. [Issue #490] HTML 5MB ceiling — HTML has its own dedicated limit.
-    //   2. [Issue #723] Non-HTML editable text 2MB ceiling — `.md` / `.yaml` /
-    //      `.yml`, evaluated AFTER the HTML branch so HTML keeps its own ceiling.
-    // Non-editable plain text remains uncapped at this layer.
-    const sizeGuardError = enforceEditableSizeGuards(ext, fileStat.size);
-    if (sizeGuardError) return sizeGuardError;
 
     const lastModified = fileStat.mtime.toUTCString();
 
@@ -520,6 +552,7 @@ export async function GET(
       worktreePath: worktree.path,
       ...(isHtml && { isHtml: true }),
       totalBytes: fileStat.size,
+      ...readOnlyFields,
     }, {
       headers: {
         'Last-Modified': lastModified,

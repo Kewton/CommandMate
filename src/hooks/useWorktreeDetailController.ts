@@ -55,7 +55,7 @@ import {
   type CLIToolType,
   type AgentInstance,
 } from '@/lib/cli-tools/types';
-import { worktreeApi, ApiError } from '@/lib/api-client';
+import { worktreeApi, ApiError, detectAuthRedirect, detectNonJsonBody } from '@/lib/api-client';
 import type { SessionKillTarget } from '@/types/terminal-split-pane';
 import {
   ensureClientDefaultSelectedAgents,
@@ -127,6 +127,31 @@ const ACTIVE_POLLING_INTERVAL_MS = 2000;
 /** Polling interval when terminal is idle (ms) */
 const IDLE_POLLING_INTERVAL_MS = 5000;
 
+/**
+ * Issue #2498: backoff ladder for a failed detail load, ported from
+ * `INITIAL_LOAD_RETRY_DELAYS_MS` in useWorktreesCache (`:53`).
+ *
+ * It only arms while the screen has *nothing* to show — i.e. the first load
+ * failed and `worktree` is still null. In that state the only other recovery
+ * path is the ordinary poll one IDLE_POLLING_INTERVAL_MS away, so the ladder
+ * front-loads a 2s attempt before falling back to it. Bounded to three
+ * attempts, so a server that is genuinely down is not hammered.
+ *
+ * Once a worktree HAS been rendered the ladder stays out of the way: a failed
+ * poll is a stale screen, not a blank one, and the poll itself is the retry.
+ */
+export const DETAIL_LOAD_RETRY_DELAYS_MS = [2000, 5000, 10000] as const;
+
+/**
+ * Issue #2498: consecutive `fetchWorktree()` failures tolerated before the
+ * screen admits to being stale.
+ *
+ * A phone that loses signal for a moment fails one poll and recovers on the
+ * next; announcing that would be noise. Three consecutive failures (6-15s,
+ * depending on the active/idle cadence) is long enough to mean something.
+ */
+export const STALE_BANNER_FAILURE_THRESHOLD = 3;
+
 /** Default worktree name when not loaded */
 const DEFAULT_WORKTREE_NAME = 'Unknown';
 
@@ -183,6 +208,23 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   const [loading, setLoading] = useState(initialFromCache === null);
   const [error, setError] = useState<string | null>(null);
   /**
+   * Issue #2498: "the screen is stale and we are still trying".
+   *
+   * Distinct from `error`, which replaces the whole screen with ErrorDisplay
+   * and is now reserved for a first load that produced nothing. Once a
+   * worktree has been rendered, a failing poll only raises this flag (after
+   * STALE_BANNER_FAILURE_THRESHOLD consecutive failures) so the screen — and
+   * the composer draft in it — survives a tunnel.
+   */
+  const [isReconnecting, setIsReconnecting] = useState(false);
+  /**
+   * Issue #2498: the session expired (401, or the middleware's 307 to /login
+   * that `fetch` transparently follows). Not an error the user can retry into
+   * — it is a re-login, and it used to surface as the SyntaxError from parsing
+   * the /login HTML ("Unexpected token <").
+   */
+  const [isAuthExpired, setIsAuthExpired] = useState(false);
+  /**
    * Bumped at the end of every poll cycle (Issue #1816).
    *
    * Deliberately NOT in the polling effect's dependency array — it is an output
@@ -190,6 +232,34 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
    * on every tick.
    */
   const [pollTick, setPollTick] = useState(0);
+
+  /**
+   * Issue #2498: consecutive `fetchWorktree()` failures. A ref, not state: the
+   * count itself is never rendered, and putting it in state would re-render
+   * (and via `fetchWorktree`'s identity, restart the poll interval) on every
+   * failed tick.
+   */
+  const detailFailureCountRef = useRef(0);
+  /** Issue #2498: index into DETAIL_LOAD_RETRY_DELAYS_MS for the next retry. */
+  const detailRetryAttemptRef = useRef(0);
+  /** Issue #2498: the pending retry timer, so success and unmount can cancel it. */
+  const detailRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Issue #2498: indirection so the retry timer always calls the current fetcher. */
+  const fetchWorktreeRef = useRef<() => Promise<Worktree | null>>(async () => null);
+
+  /**
+   * Issue #2498: cancel a pending detail-load retry.
+   *
+   * Called on success (the ladder has done its job), on a worktree switch, and
+   * on unmount, so a timer never fires against a screen that has moved on.
+   */
+  const cancelDetailRetry = useCallback(() => {
+    if (detailRetryTimerRef.current !== null) {
+      clearTimeout(detailRetryTimerRef.current);
+      detailRetryTimerRef.current = null;
+    }
+  }, []);
+
   // Captured once at mount: whether the initial render was primed from cache.
   // Drives the loadInitialData loading guard so the background refresh on a
   // cache hit never flips the screen back to the loading indicator.
@@ -226,6 +296,12 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   // Ref to access latest selectedAgents inside fetchWorktree without adding to useCallback deps
   const selectedAgentsRef = useRef(selectedAgents);
   selectedAgentsRef.current = selectedAgents;
+  // Issue #2498: `fetchWorktree` has to know whether the screen already holds a
+  // worktree (stale-but-usable) or nothing at all (first load). Read through a
+  // ref so the callback keeps its `[worktreeId]` identity — depending on
+  // `worktree` would rebuild it on every poll and restart the poll interval.
+  const worktreeRef = useRef<Worktree | null>(worktree);
+  worktreeRef.current = worktree;
   // Issue #869: Agent instance roster (PC). Drives the instance tabs / split
   // selectors. Decoupled from selectedAgents server-side; seeded from the
   // default selection until the worktree's agentInstances arrive from the API.
@@ -420,10 +496,17 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       // "claude") during the transition. The 案1 bulk refetch below repopulates
       // the map from the server an instant later (primary AND alias).
       setAutoYesStateMap(new Map());
+      // Issue #2498: the previous branch's failure history says nothing about
+      // this one. Drop the counters, disarm its ladder, and clear the stale
+      // banner so the new screen starts from a clean verdict.
+      detailFailureCountRef.current = 0;
+      detailRetryAttemptRef.current = 0;
+      cancelDetailRetry();
+      setIsReconnecting(false);
       // Update ref for next comparison
       prevWorktreeIdRef.current = worktreeId;
     }
-  }, [worktreeId, actions]);
+  }, [worktreeId, actions, cancelDetailRetry]);
 
   // ========================================================================
   // API Fetch Functions
@@ -433,8 +516,22 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   const fetchWorktree = useCallback(async (): Promise<Worktree | null> => {
     try {
       const response = await fetch(`/api/worktrees/${worktreeId}`);
+      // Issue #2498: an expired session resolves as the /login HTML page with
+      // status 200 — `fetch` transparently follows the middleware's 307 — so
+      // `response.json()` threw a SyntaxError that reached the user as
+      // "Unexpected token <". Both guards come from api-client, so this call
+      // site and `fetchApi` (and useWorktreesCache) reject exactly the same
+      // responses; the 401 they raise is routed to re-login in the catch.
+      const redirectError = detectAuthRedirect(response);
+      if (redirectError) {
+        throw redirectError;
+      }
       if (!response.ok) {
-        throw new Error(`Failed to fetch worktree: ${response.status}`);
+        throw new ApiError(`Failed to fetch worktree: ${response.status}`, response.status);
+      }
+      const formatError = detectNonJsonBody(response);
+      if (formatError) {
+        throw formatError;
       }
       const data: Worktree = await response.json();
       setWorktree(data);
@@ -475,13 +572,66 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       if ('vibeLocalContextWindow' in data) {
         setVibeLocalContextWindow(data.vibeLocalContextWindow ?? null);
       }
+      // Issue #2498: one success ends every failure verdict at once, with no
+      // user action — this is what makes the screen come back on its own when
+      // the signal does. Each setState is a no-op (React bails on an identical
+      // value) on the overwhelmingly common already-healthy tick.
+      detailFailureCountRef.current = 0;
+      detailRetryAttemptRef.current = 0;
+      cancelDetailRetry();
+      setIsReconnecting(false);
+      setIsAuthExpired(false);
+      setError(null);
       return data;
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
+      const status = err instanceof ApiError ? err.status : 0;
+      detailFailureCountRef.current += 1;
+
+      // Issue #2498: session expiry is a re-login, not a retryable error.
+      // Branch first so the raw parse message never reaches the screen.
+      if (status === 401) {
+        setIsAuthExpired(true);
+        setIsReconnecting(false);
+        setError(null);
+        return null;
+      }
+
+      // Issue #2498: a poll that fails while a worktree is already on screen
+      // means the screen is stale, not broken. Keep rendering it — the
+      // composer draft lives in that tree — and say so only after
+      // STALE_BANNER_FAILURE_THRESHOLD consecutive failures. The poll below no
+      // longer stops on failure, so recovery needs no user action.
+      if (worktreeRef.current !== null) {
+        if (detailFailureCountRef.current >= STALE_BANNER_FAILURE_THRESHOLD) {
+          setIsReconnecting(true);
+        }
+        console.error('[WorktreeDetailRefactored] Error fetching worktree:', err);
+        return null;
+      }
+
+      // First load with nothing to show: the full-screen error + Retry button
+      // stays exactly as before. What is new is that it also retries itself on
+      // the bounded ladder, so a screen opened during a blip recovers without
+      // the user finding the button.
       setError(message);
+      const attempt = detailRetryAttemptRef.current;
+      if (attempt < DETAIL_LOAD_RETRY_DELAYS_MS.length) {
+        detailRetryAttemptRef.current = attempt + 1;
+        cancelDetailRetry();
+        detailRetryTimerRef.current = setTimeout(() => {
+          detailRetryTimerRef.current = null;
+          void fetchWorktreeRef.current();
+        }, DETAIL_LOAD_RETRY_DELAYS_MS[attempt]);
+      }
       return null;
     }
-  }, [worktreeId]);
+  }, [worktreeId, cancelDetailRetry]);
+
+  // The ladder's timer calls through a ref so the scheduled callback always
+  // runs the current `fetchWorktree` without making `fetchWorktree` depend on
+  // itself (same shape as `refreshRef` in useWorktreesCache).
+  fetchWorktreeRef.current = fetchWorktree;
 
   /** Fetch message history for the worktree */
   // Issue #4: Use ref for activeCliTab to avoid callback recreation on tab switch
@@ -1367,13 +1517,35 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   /** Retry loading all data after error */
   const handleRetry = useCallback(async (): Promise<void> => {
     setError(null);
+    // Issue #2498: a deliberate retry rearms the ladder and drops the stale /
+    // expired verdicts, so the attempt is judged on its own result rather than
+    // on the run of failures that preceded it.
+    setIsReconnecting(false);
+    setIsAuthExpired(false);
+    detailFailureCountRef.current = 0;
+    detailRetryAttemptRef.current = 0;
+    cancelDetailRetry();
     setLoading(true);
     const worktreeData = await fetchWorktree();
     if (worktreeData) {
       await Promise.all([fetchMessages(), fetchCurrentOutput()]);
     }
     setLoading(false);
-  }, [fetchWorktree, fetchMessages, fetchCurrentOutput]);
+  }, [fetchWorktree, fetchMessages, fetchCurrentOutput, cancelDetailRetry]);
+
+  /**
+   * Issue #2498: re-login entry point for an expired session.
+   *
+   * A hard navigation rather than `router.push` so the middleware re-evaluates
+   * the cookie and the app shell is rebuilt authenticated — the same thing
+   * LogoutButton does (`components/common/LogoutButton.tsx:32`).
+   */
+  const handleReLogin = useCallback((): void => {
+    window.location.href = '/login';
+  }, []);
+
+  // Issue #2498: never leave a retry armed after unmount.
+  useEffect(() => cancelDetailRetry, [cancelDetailRetry]);
 
   // ========================================================================
   // Visibility Change Recovery (Issue #246, Issue #266)
@@ -1443,7 +1615,13 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
    */
   const activeCliRunning = worktree?.sessionStatusByCli?.[activeCliTab]?.isRunning ?? false;
   useEffect(() => {
-    if (loading || error) return;
+    // Issue #2498: only the initial load gates the poll now. It used to also
+    // stop on `error`, which is what turned one failed tick on a phone in a
+    // tunnel into a permanent dead end: the screen became ErrorDisplay and
+    // nothing was left running to notice the signal coming back. Polling
+    // through the failure is the auto-recovery — `fetchWorktree` clears every
+    // failure verdict on its first success.
+    if (loading) return;
 
     const pollingInterval = activeCliRunning
       ? ACTIVE_POLLING_INTERVAL_MS
@@ -1473,7 +1651,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     const intervalId = setInterval(pollData, pollingInterval);
 
     return () => clearInterval(intervalId);
-  }, [loading, error, fetchCurrentOutput, fetchWorktree, fetchMessages, activeCliRunning, isMobile]);
+  }, [loading, fetchCurrentOutput, fetchWorktree, fetchMessages, activeCliRunning, isMobile]);
 
   /**
    * Issue #902 (案1): re-seed the FULL per-instance auto-yes map whenever the
@@ -1624,6 +1802,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     handlePromptDismiss,
     handlePromptRespond,
     handleRename,
+    handleReLogin,
     handleRetry,
     handleSelectedAgentsChange,
     handleSetLoading,
@@ -1637,10 +1816,12 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     historyDisplayLimit,
     historySubTab,
     historyUserOnly,
+    isAuthExpired,
     isEditorMaximized,
     isInfoModalOpen,
     isMobile,
     isMoveDialogOpen,
+    isReconnecting,
     isSelectionListActive,
     isPagerActive,
     lastAutoResponse,
