@@ -706,6 +706,22 @@ app.prepare().then(() => {
       console.log('Server closed gracefully');
       process.exit(0);
     });
+
+    // Issue #2488: server.close() stops accepting immediately, but its callback
+    // only fires once every ESTABLISHED connection is gone. A browser tab left
+    // on the dashboard holds keep-alive sockets with no request in flight, and
+    // nothing ever closes them, so the callback above never ran and the process
+    // lived the full 3 seconds to the force-exit — with its listening socket
+    // already closed. That window is what the stop scripts used to mistake for
+    // "stopped" (they looked for a listener, found none, and returned while this
+    // process was still alive and still named by logs/server.pid).
+    //
+    // closeIdleConnections() ends exactly those sockets. A connection with a
+    // request in flight is NOT idle and is left alone: it still gets the 3
+    // seconds above, so an in-flight response is no more truncated than before.
+    // The stop scripts no longer depend on this being fast — they wait for the
+    // PID — but the common case now exits in milliseconds instead of 3 seconds.
+    server.closeIdleConnections();
   }
 
   process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));

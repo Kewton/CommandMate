@@ -23,6 +23,68 @@ if ! [[ "$PORT" =~ ^[0-9]+$ ]] || [ "$PORT" -lt 1 ] || [ "$PORT" -gt 65535 ]; th
     exit 1
 fi
 
+# ---------------------------------------------------------------------------
+# Issue #2488: wait for the process to be GONE, not for the port to go quiet
+# ---------------------------------------------------------------------------
+# server.ts's gracefulShutdown closes the listening socket FIRST and only then
+# waits — up to 3 seconds — for the connections that are still open. `sleep 2`
+# followed by a fresh port lookup therefore reports "gone" for a process that is
+# still shutting down and still owns logs/server.pid, which is what left
+# `build-and-start.sh --daemon` saying `Server is already running` with nothing
+# listening on port 3000. Liveness is read from the PIDs we signalled
+# (`kill -0`), never from the port — which also keeps Issue #2473's rule, since
+# those PIDs came from a LISTEN-only lookup.
+#
+# Repeated verbatim in stop.sh, start.sh and build-and-start.sh: each of the
+# four has to run on its own, and scripts/lib/port-pids.sh answers "who is the
+# server on this port", a different question from "is this PID gone yet".
+
+# How long a process that was asked to stop may take to actually exit before it
+# is killed outright. Above server.ts's 3-second force-exit, with room for a
+# loaded machine.
+STOP_GRACE_SECONDS=${CM_STOP_GRACE_SECONDS:-10}
+if ! [[ "$STOP_GRACE_SECONDS" =~ ^[0-9]+$ ]] || [ "$STOP_GRACE_SECONDS" -lt 1 ] || [ "$STOP_GRACE_SECONDS" -gt 600 ]; then
+    echo 'ERROR: Invalid CM_STOP_GRACE_SECONDS (expected 1-600)' >&2
+    exit 1
+fi
+
+# still_alive <pid>...
+#
+# The PIDs that still exist, one per line. Nothing when they are all gone.
+still_alive() {
+    local pid
+    for pid in "$@"; do
+        if kill -0 "$pid" 2>/dev/null; then
+            echo "$pid"
+        fi
+    done
+}
+
+# wait_for_exit <seconds> <pid>...
+#
+# Polls every 100ms until every PID is gone or <seconds> elapse, then prints the
+# survivors (nothing when they all exited). Always returns 0, so it is safe
+# under `set -e` and inside `$(...)`.
+wait_for_exit() {
+    local seconds=$1
+    shift
+    local ticks=$(( seconds * 10 ))
+    local waited=0
+    local remaining
+    while :; do
+        remaining=$(still_alive "$@")
+        if [ -z "$remaining" ] || [ "$waited" -ge "$ticks" ]; then
+            break
+        fi
+        sleep 0.1
+        waited=$(( waited + 1 ))
+    done
+    if [ -n "$remaining" ]; then
+        echo "$remaining"
+    fi
+    return 0
+}
+
 echo "=== Stopping server ==="
 
 stopped=false
@@ -40,14 +102,18 @@ if [ -n "$PIDS" ]; then
     # once the process is gone.
     print_port_targets "Stopping" $PIDS
     echo "$PIDS" | xargs kill 2>/dev/null  # SIGTERM first
-    sleep 2
 
     # SIGKILL fallback [D1-002: || true for REMAINING]
-    REMAINING=$(find_listen_pids_by_port "$PORT")
+    # Issue #2488: the survivors of the grace period, by PID, not by port.
+    REMAINING=$(wait_for_exit "$STOP_GRACE_SECONDS" $PIDS)
     if [ -n "$REMAINING" ]; then
         echo "Force killing remaining:"
         print_port_targets "Force killing" $REMAINING
         echo "$REMAINING" | xargs kill -9 2>/dev/null
+        REMAINING=$(wait_for_exit 2 $REMAINING)
+        if [ -n "$REMAINING" ]; then
+            echo "WARNING: still running after SIGKILL: $(echo $REMAINING | tr '\n' ' ')" >&2
+        fi
     fi
     stopped=true
 fi
@@ -60,14 +126,13 @@ if [ -f "$PID_FILE" ]; then
         echo "Stopping npm process (PID: $PID)"
         # SIGTERM: send to process group for graceful shutdown [D1-006]
         kill -- -$PID 2>/dev/null || kill $PID 2>/dev/null
-        sleep 2
 
-        # SIGKILL fallback (existing pattern maintained) [D1-006]
-        if kill -0 "$PID" 2>/dev/null; then
+        # Issue #2488: wait for the PID itself, not a fixed `sleep 2`.
+        if [ -n "$(wait_for_exit "$STOP_GRACE_SECONDS" "$PID")" ]; then
+            # SIGKILL fallback (existing pattern maintained) [D1-006]
             kill -9 -$PID 2>/dev/null || kill -9 $PID 2>/dev/null
-            sleep 1
             # EPERM warning [S4-004]
-            if kill -0 "$PID" 2>/dev/null; then
+            if [ -n "$(wait_for_exit 2 "$PID")" ]; then
                 echo 'WARNING: Process could not be stopped (permission denied or other error)' >&2
             fi
         fi
@@ -76,17 +141,17 @@ if [ -f "$PID_FILE" ]; then
     rm -f "$PID_FILE"
 fi
 
-# Wait a moment and verify
-sleep 1
-
 # Step 3: Final check - make sure port is free [C2-003]
-# At this point SIGTERM->SIGKILL stages already attempted, SIGKILL is justified
+# At this point SIGTERM->SIGKILL stages already attempted, SIGKILL is justified.
+# Issue #2488: this is now a genuine last resort — Steps 1 and 2 returned only
+# once the processes they signalled were gone, so anything still listening here
+# is a server nobody asked us to stop (a stale orphan from an earlier run).
 REMAINING=$(find_listen_pids_by_port "$PORT")
 if [ -n "$REMAINING" ]; then
     echo "Cleaning up remaining processes:"
     print_port_targets "Cleaning up" $REMAINING
     echo "$REMAINING" | xargs kill -9 2>/dev/null  # Final check: SIGKILL as last resort
-    sleep 1
+    wait_for_exit 2 $REMAINING > /dev/null
 fi
 
 if [ "$stopped" = true ]; then
