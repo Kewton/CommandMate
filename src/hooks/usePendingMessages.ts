@@ -52,6 +52,12 @@
  *
  * "Back online" is taken from #2501's `useConnectivity`, never from
  * `navigator.onLine === true` — see `isServerConfirmedReachable`.
+ *
+ * Issue #2535: "back" is a *standing* condition here, not a transition anyone
+ * has to be watching at the right moment. The recovery edge below arms itself
+ * from the queue as well as from the verdict, because the render in which the
+ * connection is visibly down is not guaranteed to be committed — see the two
+ * effects under "Issue #2503: connectivity".
  */
 
 'use client';
@@ -502,33 +508,61 @@ export function usePendingMessages({
    * The recovery edge: the server answered again, so ask it what it already has
    * before sending anything.
    *
-   * `armedRef` makes this a rising edge — one round per loss-of-connection, not
-   * one per render while connected. The refetch is awaited rather than fired and
-   * forgotten because it IS the duplicate check: `POST /send` has no dedupe key,
-   * so the only thing that can tell a lost request from a lost *response* is
-   * whether the message is in the transcript the server hands back. Landing the
-   * answer first also gives the pruning effect its chance to drop the pendings
-   * that were delivered all along.
+   * Split in two (Issue #2535). The first effect decides *that* a round is owed
+   * and the second one runs it, because the two need different triggers and the
+   * single effect that did both was wrong on each count.
    *
-   * The resend itself is deferred to the effect below via a token raised one
-   * settle window *after* the refetch resolves — see DEFAULT_RESEND_GRACE_MS for
-   * why resolving is not the same as having the answer.
+   * **Arming** — what the old version got wrong. It recorded "a round is owed"
+   * only while rendering a `reachable === false` state, which made the whole
+   * mechanism depend on React committing a render in the gap between the network
+   * coming back and the WebSocket reconnecting — 5ms, on the acceptance test's
+   * own measurement, and comfortably inside one batch. Miss that render and
+   * nothing is ever owed. So the debt is now recorded from a *standing* fact
+   * instead: a parked message is itself proof that a round is outstanding,
+   * whether or not the transition it was parked by was ever rendered.
+   *
+   * **Firing** — the refetch is awaited rather than fired and forgotten because
+   * it IS the duplicate check: `POST /send` has no dedupe key, so the only thing
+   * that can tell a lost request from a lost *response* is whether the message
+   * is in the transcript the server hands back. Landing the answer first also
+   * gives the pruning effect its chance to drop the pendings that were delivered
+   * all along. The request is published as a counter so that round, once begun,
+   * is never restarted or torn down by an unrelated dependency moving — least of
+   * all by the refetch it issued itself, which changes the very pending list the
+   * arming effect watches.
+   *
+   * The resend is deferred one step further, to the effect below, via a token
+   * raised a settle window *after* the refetch resolves — see
+   * DEFAULT_RESEND_GRACE_MS for why resolving is not the same as having the
+   * answer.
    */
-  const recoveryArmedRef = useRef(false);
+  const recoveryOwedRef = useRef(false);
+  const [recoveryRequest, setRecoveryRequest] = useState(0);
   const [recoveryToken, setRecoveryToken] = useState(0);
   // Read through a ref so retuning the window does not re-run the edge effect
   // (and re-arm a recovery that has already been handled).
   const graceRef = useRef(resendGraceMs);
   graceRef.current = resendGraceMs;
 
+  // How many messages are parked for connectivity. A count rather than a
+  // boolean so a second message joining the queue is a dependency change too.
+  const parkedCount = pending.reduce(
+    (n, p) => (p.queued && p.status === 'sending' ? n + 1 : n),
+    0,
+  );
+
   useEffect(() => {
-    if (!reachable) {
-      recoveryArmedRef.current = true;
-      return;
-    }
-    if (!recoveryArmedRef.current) return;
-    recoveryArmedRef.current = false;
+    // Either fact owes a round: the connection is not confirmed, or something
+    // is sitting in the queue waiting for one.
+    if (!reachable || parkedCount > 0) recoveryOwedRef.current = true;
+    if (!reachable || !recoveryOwedRef.current) return;
+    recoveryOwedRef.current = false;
     if (!pendingRef.current.some((p) => p.status === 'sending')) return;
+    setRecoveryRequest((n) => n + 1);
+  }, [reachable, parkedCount]);
+
+  useEffect(() => {
+    if (recoveryRequest === 0) return;
 
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -548,7 +582,7 @@ export function usePendingMessages({
       cancelled = true;
       if (timer !== undefined) clearTimeout(timer);
     };
-  }, [reachable]);
+  }, [recoveryRequest]);
 
   /**
    * One automatic resend per parked message, on the transcript the refetch just
