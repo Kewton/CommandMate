@@ -11,6 +11,8 @@
 
 import { useRef } from 'react';
 import { useFilePolling } from '@/hooks/useFilePolling';
+import { fetchApiResponse } from '@/lib/api-client';
+import { API_POLL_TIMEOUT_MS } from '@/config/api-timeout-config';
 import { FILE_CONTENT_POLL_INTERVAL_MS } from '@/config/file-polling-config';
 import { POLLING_DISABLED_THRESHOLD_BYTES } from '@/config/file-viewer-config';
 import { encodePathForUrl } from '@/lib/url-path-encoder';
@@ -83,7 +85,18 @@ export function useFileContentPolling({
       }
 
       try {
-        const response = await fetch(url, { headers });
+        // Issue #2499: through the shared transport, for the timeout and the
+        // offline fail-fast — but with `retries: 0`. A poll already has a retry
+        // and it is the next tick: adding a second one inside this one would
+        // put three requests on a link that is failing precisely because it
+        // cannot carry them, and could still be retrying when the following
+        // tick fires. `fetchApiResponse` (not `fetchApi`) because a 304 carries
+        // no body at all, and reading `Last-Modified` off it is the whole point.
+        const response = await fetchApiResponse(url, {
+          headers,
+          timeoutMs: API_POLL_TIMEOUT_MS,
+          retries: 0,
+        });
 
         if (response.status === 304) return; // No changes
         if (!response.ok) return; // Ignore errors in polling

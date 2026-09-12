@@ -1,0 +1,134 @@
+version: 1
+title: "Issue #2521: Command Code の折り返し AskUserQuestion 未検出を応急処置する"
+goal: |
+  https://github.com/Kewton/CommandMate/issues/2521 を実装してください。
+  `/bug-fix` ワークフローで着手すること。原因分析・確定仕様は Issue 本文に完備済み
+  （罫線＋タブ＋番号連番の領域判定、fixture 仕様、A/B/C の確定仕様）のため、追加の
+  根本原因分析は不要。詳細は以下で必ず読んでください（本文が長いため要約では不十分です）:
+    gh issue view 2521 --repo Kewton/CommandMate
+
+  ## 目的・分担（重要）
+  Command Code の折り返し説明付き AskUserQuestion が `ready` と誤判定される場合に、
+  チャットの操作カードを表示し、`wait` の偽完了を止める。**本件は表示と待機判定の
+  応急処置。** promptData の生成・respond・Auto-Yes の復旧は #2522 の別 PR（このタスクの
+  スコープ外）です。#2521 単独の段階での受入を満たしてください。
+
+  ## 症状（概要）
+  Command Code の質問画面で、選択肢1の説明文が折り返され `answer).` のように
+  1個の空白で始まる継続行になると、既存の汎用 parser（`isContinuationLine` 等）が
+  そこでスキャンを止め、`ready / input_prompt / hasActivePrompt:false` に誤判定される。
+  `wait` はこの画面を完了と誤読し「偽完了」する。
+
+  ## 確定仕様（要点。全文は Issue 本文を参照）
+
+  ### A. 画面領域の限定認識
+  `src/lib/detection/selection-shape.ts`（既存）に、footer のない Command Code 質問画面の
+  領域判定を追加してください。既存の `COMMAND_CODE_RULE_ROW_PATTERN` / `COMMAND_CODE_RULE_MIN_COLUMNS`
+  （純粋な U+2500、40列以上）を再利用します。陽性条件:
+  1. 最後の適格な罫線を上端とする
+  2. その下に Command Code のタブ構造（例 `● Dispatch | ◯ Review`）と空でない質問本文
+  3. 同じ領域に `1.` からの厳密な連番（2〜9個）と `❯` が1個だけ
+  4. タブから選択肢までが同じ画面内（別 composer・次の罫線・別turnの完了UIを含まない）
+  5. 検索/filter入力、`/model` footer、dismiss-only footerは対象外
+
+  ### B. status と cropping
+  `src/lib/detection/tools/command-code/detect.ts` の `afterPrompt` に追加。既存の
+  `/usage → /model` の順序を維持し、その後ろで A を評価。陽性時の verdict は
+  `waiting / high / COMMAND_CODE_SELECTION_LIST / hasActivePrompt:false / evidence:positive`。
+  **promptData は捏造しないでください。**
+  `src/lib/chat/dialog-frame.ts` の `extractCommandCodeSelectionListFrame` は、footer が
+  無い場合だけ A が陽性の領域を返すよう拡張。罫線自身・上のtranscript・末尾paddingを含めない。
+
+  ### C. UI・API・wait
+  - `src/lib/session/current-output-builder.ts` の既存配線を通じ `isSelectionListActive:true`
+    を公開（structured promptが無い場合は `isPromptWaiting:false` / `promptData:null` のまま）
+  - `src/components/worktree/ChatSurface.tsx` → `ChatDialogCard.tsx` に切り出した質問画面と
+    既存 `NavigationButtons.tsx` を出す。`PromptPanel.tsx` / `MobilePromptSheet.tsx` は無理に開かない
+  - この新型 fallback についてのみ `SelectionNumberKeys` を抑止（`readSelectionListShape` /
+    `shouldOfferOptionNumbers` の全CLI共通規則は広げない）
+  - `commandmate wait` は通常の agent mode で **exit 10、type=selection_list、options=[]**。
+    `--on-prompt human` は応答待ちを継続
+
+  ## fixture
+  `tests/fixtures/command-code-askuserquestion-2521/`（新規）へ最小例・匿名化した200x1000版・
+  README（採取日・geometry・加工箇所を記録）を追加。git管理外の実キャプチャや稼働セッションへの
+  アクセスは前提にしないでください（合成fixtureで十分です）。
+
+  ## 対象外（緩めてはいけない規約）
+  - 汎用 `prompt-detect-multiple-choice.ts` の条件緩和は**しない**
+  - promptData の生成、respond/Auto-Yes/契約ポリシーは**変更しない**（#2522の領域）
+  - `COMMAND_CODE_VERIFIED_AGAINST` は**変更しない**（#2522で扱う）
+  - `readSelectionListShape` の全CLI共通規則を広げない（既存 model picker・他CLIの番号操作を維持）
+
+  ## 受入条件（Issue本文のチェックリストより）
+  - [ ] 保存済み実測と同形のfixtureでA→status→APIの値が確定仕様どおり
+  - [ ] 説明が15行/40行窓を越える派生fixture、ANSI/CRLF、上端寄せ・padding付きで、
+        領域内の選択肢だけを読む
+  - [ ] 通常の回答番号リスト、古い質問＋現在のcomposer、罫線より上だけにある選択肢、
+        欠番・重複・cursor不在/複数、短い罫線、検索画面は新分岐へ落ちない
+  - [ ] 実ChatSurface/ChatDialogCardのPC・スマホ描画で本文が切り出され、スクロールでき、
+        矢印/Enter/Escが同じinstanceへ配線される。新fallbackには数字ボタンを出さない
+  - [ ] fixture由来のAPI payloadを使うCLI testでexit 10とselection_list payloadを検証。
+        `--on-prompt human`はfake timer下で継続する
+  - [ ] 既存 `command-code-live-2250/dialog-*.txt` 4本、boot-idle/turn-done/idle-after-interrupt、
+        `chat-dialog-card-2254/command-code-model-*.txt`、/usageのfixtureのverdict・操作を維持。
+        他CLIのcropも変わらない
+  - [ ] 新分岐を外した対照では再現fixtureのstatus/UI/waitの検証が失敗する
+  - [ ] `npm run lint`、`npx tsc --noEmit`、`npm run test:unit` が exit 0
+
+  主な既存テスト入口（Issue本文より）: `tests/unit/lib/detection/command-code-selection-list-2297.test.ts`、
+  `tests/unit/lib/chat/dialog-frame-2326.test.ts`、`tests/unit/lib/current-output-builder-2369.test.ts`、
+  `tests/unit/cli/commands/wait.test.ts`、ChatSurfaceのcomponent tests。
+
+  ## 注意（並行作業無し・後続の前提）
+  この worktree では #2522 は扱いません。#2521 がマージされた後、別worktreeで #2522 が
+  ここで作る共有helper（selection-shape.ts の領域判定）とfixtureをそのまま再利用します。
+  そのため、helperの責務は他CLIから見て安定した形（tool IDなしでも呼べる、browser-safe）に
+  してください。
+
+  ## 作業ルール（厳守）
+  - **`CHANGELOG.md` と `docs/module-reference.md` を編集しないでください**（scope 外です）。
+    代わりに次の 2 ファイルを書いてください。どちらも `dev-reports/` 配下なので commit には
+    入りません。
+    - `dev-reports/changelog/issue-2521.md` — `CHANGELOG.md` の `## [Unreleased]` にそのまま
+      貼れる **1 エントリ**（先頭は `- **<type>(<scope>): …** (#2521): …`）。どの節
+      （`### Added` / `### Changed` / `### Fixed`）に入るかを 1 行目にコメントで書く。
+      形式は次の実例に合わせてください（エントリは**ファイル中では 1 行**）:
+
+      ```markdown
+      <!-- ### Fixed -->
+      - **fix(cli): `send` 直後の `wait` が「まだ始まっていない」を完了と読む問題を修正** (#1975): `wait` が `sessionStatus==='ready'` を完了と判定する直前に、**「このインスタンスに最後に渡されたプロンプト」と「エージェント自身が最後に報告したターン終了（`lastStopEventAt`）」を突き合わせる**ゲートを追加。`send` 直後は最新の構造化イベントが直前ターンの `stop` のままなので #1839 の `adoptTurnStart()` が何も採用せず、`turnStartedAt === null` が「決着済み」と読まれてアイドル composer をそのまま完了にしていた（隔離サーバ実測 2026-08-22 / copilot 1.0.80: `send`→`wait` 5 回中 3 回が約 0.3 秒・`basis=scraper_ready`・成果物ゼロで exit 0）。**hook を出さないツールは挙動不変**。保留は `PENDING_PROMPT_HOLD_MS`=60 秒で打ち切り、`--timeout` / `--stall-timeout` はそれより短ければ従来どおり優先される。
+      ```
+
+      - `- **` で始めること（`grep -cE '^- \*\*'` で数える）。
+      - `(#2521)` は要約の**外**（`**` を閉じた後）に置くこと。
+      - `<type>` は CLAUDE.md の規約と同じ語彙。今回は `fix`。
+      - 1 エントリ＝1 行（折らない）。
+    - `dev-reports/module-reference/issue-2521.md` — `docs/module-reference.md` の表に足す
+      注記を**行キー（`| \`path\` |`）ごと**に列挙する。既存行に足すときは
+      `grep -n '^| \`<path>\`' docs/module-reference.md` を実行し、その出力（行番号つきの
+      行キー）を断片に書き写してから書くこと。0 件だった行への追記を指示しない。
+      足すものが無ければ「追記なし」の 1 行でよい（その場合も 0 件だった grep を記録する）。
+  - 断片が無いとリリースノートに載らない。実装と同じ commit の時点で書くこと。
+scope:
+  allow:
+    - "src/lib/detection/selection-shape.ts"
+    - "src/lib/detection/tools/command-code/detect.ts"
+    - "src/lib/chat/dialog-frame.ts"
+    - "src/lib/session/current-output-builder.ts"
+    - "src/components/worktree/ChatSurface.tsx"
+    - "src/components/worktree/ChatDialogCard.tsx"
+    - "src/components/worktree/NavigationButtons.tsx"
+    - "src/lib/cli-tools/**"
+    - "tests/fixtures/command-code-askuserquestion-2521/**"
+    - "tests/unit/lib/detection/**"
+    - "tests/unit/lib/chat/**"
+    - "tests/unit/lib/current-output-builder-2369.test.ts"
+    - "tests/unit/cli/commands/wait.test.ts"
+    - "tests/unit/components/worktree/**"
+  deny: []
+verify:
+  gates: null
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true

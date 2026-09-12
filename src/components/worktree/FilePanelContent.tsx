@@ -25,6 +25,7 @@ import { FileSearchBar } from './FileSearchBar';
 import { ImageViewer } from './ImageViewer';
 import { VideoViewer } from './VideoViewer';
 import { copyToClipboard } from '@/lib/clipboard-utils';
+import { fetchApiResponse } from '@/lib/api-client';
 import { encodePathForUrl } from '@/lib/url-path-encoder';
 import { isEditableExtension } from '@/config/editable-extensions';
 import { VIEWER_OVERSCAN_LINES, VIEWER_CHUNK_LINE_SIZE } from '@/config/file-viewer-config';
@@ -314,7 +315,14 @@ function useLazyChunkFetcher({
     inflightChunksRef.current.add(chunkKey);
 
     const url = `/api/worktrees/${worktreeId}/files/${encodePathForUrl(filePath)}?startLine=${targetStart}&endLine=${targetEnd}`;
-    fetch(url)
+    // Issue #2499: shared transport, default read policy. This one keeps the
+    // retries the polling call sites turn off, because nothing else here will
+    // ever ask again: `inflightChunksRef` is released on settle, but the effect
+    // only re-runs when the visible window moves — so a chunk that failed under
+    // a stuttering signal stays a blank stretch of file until the user happens
+    // to scroll across it a second time. `fetchApiResponse` rather than
+    // `fetchApi` to keep `res.ok ? … : null` instead of a throw.
+    fetchApiResponse(url)
       .then(async (res) => (res.ok ? res.json() : null))
       .then((data) => {
         inflightChunksRef.current.delete(chunkKey);
@@ -899,7 +907,11 @@ export const FilePanelContent = memo(function FilePanelContent({
 
     const fetchContent = async () => {
       try {
-        const response = await fetch(
+        // Issue #2499: the spinner this Issue is about. Opening a file on a
+        // weak link had no deadline at all, so a stalled request left
+        // `tab.loading` true forever — and `fetchingRef` stayed latched, so
+        // even closing and reopening the tab could not retry it.
+        const response = await fetchApiResponse(
           `/api/worktrees/${worktreeId}/files/${encodePathForUrl(tab.path)}`,
         );
 
@@ -951,7 +963,13 @@ export const FilePanelContent = memo(function FilePanelContent({
     let cancelled = false;
     const fetchMarpSlides = async () => {
       try {
-        const response = await fetch(
+        // Issue #2499: a write, so the transport refuses to retry it however
+        // idempotent this particular render happens to be (see
+        // API_IDEMPOTENT_METHODS). What it gains is the deadline: MARP
+        // rendering spawns a server-side pipeline, and a hung one used to hold
+        // this promise — and the effect's `cancelled` closure — for the life of
+        // the tab.
+        const response = await fetchApiResponse(
           `/api/worktrees/${worktreeId}/marp-render`,
           {
             method: 'POST',
