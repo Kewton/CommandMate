@@ -13,7 +13,14 @@
     "refreshError": "セッションの更新に失敗しました: {message}",
     "loadError": "セッションの読み込みに失敗しました: {message}",
     "noMatching": "一致するセッションがありません。",
-    "empty": "セッションがまだありません。"
+    "empty": "セッションがまだありません。",
+    "viewMode": {
+      "groupAriaLabel": "セッションの表示形式",
+      "list": "リスト表示",
+      "tile": "タイル表示"
+    },
+    "tileAriaLabel": "{branch} のセッションタイル",
+    "tileInstanceAriaLabel": "このタイルに表示するエージェントインスタンス"
   },
   "nav": {
     "home": "ホーム",

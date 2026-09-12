@@ -3,6 +3,12 @@
  *
  * Issue #600: UX refresh - Worktree exploration, search, and filtering.
  * Issue #606: Sessions enhancement - sort options and last sent message display.
+ * Issue #2509: two layouts. `list` is the rows this page has always had; `tile`
+ * is a two-column wall of `SessionTile`s, each carrying that worktree's live
+ * conversation, so several agents can be watched without opening one worktree
+ * screen per agent. The choice is a localStorage preference defaulting to
+ * `list`, and only the tile branch drops `container-custom` — every list-mode
+ * behaviour, down to the wrapper's classes, is unchanged.
  * Issue #709: Reads cached worktrees through `useWorktreesCacheContext()`
  * instead of `useWorktreesCache()` directly so the page shares a single
  * polling loop with `WorktreesCacheProvider` (otherwise `/api/worktrees`
@@ -19,7 +25,9 @@ import { useTranslations } from 'next-intl';
 import { ArrowDown, ArrowUp } from 'lucide-react';
 import { AppShell } from '@/components/layout';
 import { PullToRefresh } from '@/components/common/PullToRefresh';
+import { SessionTileGrid, SessionsViewModeSelector } from '@/components/sessions';
 import { useIsMobile } from '@/hooks/useIsMobile';
+import { useSessionsViewMode } from '@/hooks/useSessionsViewMode';
 import { useWorktreesCacheContext } from '@/components/providers/WorktreesCacheProvider';
 import { deriveCliStatus } from '@/types/sidebar';
 import { isWorkingStatus } from '@/lib/agent-status-display';
@@ -156,6 +164,11 @@ export default function SessionsPage() {
   const [filterText, setFilterText] = useState('');
   const [sortKey, setSortKey] = useState<SortKey>('lastSent');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+  // Issue #2509. Resolved from localStorage in an effect, so the first render is
+  // always `list` — which is also the value SSR produces, and therefore the
+  // reason switching layouts cannot cause a hydration mismatch.
+  const { viewMode, setViewMode } = useSessionsViewMode();
+  const isTileMode = viewMode === 'tile';
 
   // Issue #2065: this page reads worktrees through the shared cache, which hands
   // back rows and not the envelope the default rides in, so it seeds the mirror
@@ -251,7 +264,10 @@ export default function SessionsPage() {
       <PullToRefresh
         onRefresh={refresh}
         enabled={isMobile}
-        className="container-custom py-8 h-full"
+        // Issue #2509: tile mode drops `container-custom`'s `max-w-7xl mx-auto`
+        // and keeps only its gutters, so two 640px-wide tiles have room on a
+        // wide screen. List mode keeps the exact class it has always had.
+        className={`${isTileMode ? 'w-full px-4 sm:px-6 lg:px-8' : 'container-custom'} py-8 h-full`}
       >
         <div className="mb-6">
           <h1 className="text-2xl font-bold text-foreground mb-2">{tCommon('sessions.title')}</h1>
@@ -307,6 +323,10 @@ export default function SessionsPage() {
               <ArrowDown size={16} aria-hidden="true" />
             )}
           </button>
+          {/* Issue #2509: list / tile. Last in the row because it governs what
+              the controls to its left are applied TO — the filter and the sort
+              feed both layouts unchanged. */}
+          <SessionsViewModeSelector value={viewMode} onChange={setViewMode} />
         </div>
 
         {/*
@@ -331,129 +351,143 @@ export default function SessionsPage() {
                 {tCommon('sessions.refreshError', { message: error.message })}
               </div>
             )}
-            <div className="space-y-2" data-testid="sessions-list">
-              {filteredAndSorted.length === 0 ? (
+            {/* Issue #2509: the two layouts. Both are fed `filteredAndSorted`,
+                which is what makes the filter and the sort controls above apply
+                identically in either one. The list branch below is byte-for-byte
+                what this page rendered before tile mode existed. */}
+            {isTileMode ? (
+              filteredAndSorted.length === 0 ? (
                 <div className="text-muted-foreground py-8 text-center" data-testid="sessions-empty">
                   {tCommon('sessions.noMatching')}
                 </div>
               ) : (
-                filteredAndSorted.map((wt: Worktree, index: number) => {
-                const agents = wt.selectedAgents ?? getClientDefaultSelectedAgents();
-                const sanitizedMessage = wt.lastUserMessage
-                  ? sanitizePreview(wt.lastUserMessage)
-                  : null;
-                const relativeTime = wt.lastUserMessageAt
-                  ? formatRelativeTimeShort(String(wt.lastUserMessageAt))
-                  : null;
-                // [Issue #1078] Only actively-working agents (running/waiting)
-                // get a labelled chip; the idle group collapses to a "+N" counter
-                // so a working session is never buried under a row of gray dots.
-                const agentStatuses = agents.map((agent) => ({
-                  agent,
-                  status: deriveCliStatus(wt.sessionStatusByCli?.[agent]),
-                }));
-                const workingAgents = agentStatuses.filter((a) => isWorkingStatus(a.status));
-                const idleCount = agentStatuses.length - workingAgents.length;
-                // [Issue #1051] Active (running) cards get an accent border +
-                // subtle glow so a working session stands out at a glance.
-                const isActive = isWorktreeActive(wt, agents);
-                const cardStateClasses = isActive
-                  ? 'border-accent-500/40 shadow-[0_0_16px_-4px_rgb(var(--accent-500)/0.45)] hover:border-accent-400'
-                  : 'border-border shadow-sm hover:border-accent-300 dark:hover:border-accent-700';
+                <SessionTileGrid worktrees={filteredAndSorted} />
+              )
+            ) : (
+              <div className="space-y-2" data-testid="sessions-list">
+                {filteredAndSorted.length === 0 ? (
+                  <div className="text-muted-foreground py-8 text-center" data-testid="sessions-empty">
+                    {tCommon('sessions.noMatching')}
+                  </div>
+                ) : (
+                  filteredAndSorted.map((wt: Worktree, index: number) => {
+                  const agents = wt.selectedAgents ?? getClientDefaultSelectedAgents();
+                  const sanitizedMessage = wt.lastUserMessage
+                    ? sanitizePreview(wt.lastUserMessage)
+                    : null;
+                  const relativeTime = wt.lastUserMessageAt
+                    ? formatRelativeTimeShort(String(wt.lastUserMessageAt))
+                    : null;
+                  // [Issue #1078] Only actively-working agents (running/waiting)
+                  // get a labelled chip; the idle group collapses to a "+N" counter
+                  // so a working session is never buried under a row of gray dots.
+                  const agentStatuses = agents.map((agent) => ({
+                    agent,
+                    status: deriveCliStatus(wt.sessionStatusByCli?.[agent]),
+                  }));
+                  const workingAgents = agentStatuses.filter((a) => isWorkingStatus(a.status));
+                  const idleCount = agentStatuses.length - workingAgents.length;
+                  // [Issue #1051] Active (running) cards get an accent border +
+                  // subtle glow so a working session stands out at a glance.
+                  const isActive = isWorktreeActive(wt, agents);
+                  const cardStateClasses = isActive
+                    ? 'border-accent-500/40 shadow-[0_0_16px_-4px_rgb(var(--accent-500)/0.45)] hover:border-accent-400'
+                    : 'border-border shadow-sm hover:border-accent-300 dark:hover:border-accent-700';
 
-                return (
-                  // [Issue #1050] Stable key (wt.id) keeps the entrance stagger
-                  // from re-firing on polling re-renders.
-                  <Link
-                    key={wt.id}
-                    href={`/worktrees/${wt.id}`}
-                    style={{ animationDelay: staggerDelay(index) }}
-                    className={`block bg-surface rounded-lg p-4 border transition-colors ${cardStateClasses} ${STAGGER_ENTER_CLASS}`}
-                    data-testid={`session-item-${wt.id}`}
-                  >
-                    {/* Row 1: Name, Agent statuses */}
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="min-w-0 flex-1">
-                        <div className="text-sm font-medium text-foreground truncate">
-                          {wt.repositoryDisplayName ?? wt.repositoryName}
-                        </div>
-                        <div className="text-xs text-muted-foreground truncate">
-                          {wt.name}
-                        </div>
-                      </div>
-
-                      {/* [Issue #1078] Working agents as labelled chips; idle group collapsed */}
-                      <div className="flex items-center gap-2 ml-4 flex-shrink-0" data-testid={`session-agents-${wt.id}`}>
-                        {workingAgents.map(({ agent, status }) => (
-                          <div key={agent} className="flex items-center gap-1" data-testid={`session-agent-${agent}`}>
-                            <CliDot status={status} label={getCliToolDisplayName(agent)} />
-                            <span className="text-xs text-muted-foreground">
-                              {getCliToolDisplayName(agent)}
-                            </span>
+                  return (
+                    // [Issue #1050] Stable key (wt.id) keeps the entrance stagger
+                    // from re-firing on polling re-renders.
+                    <Link
+                      key={wt.id}
+                      href={`/worktrees/${wt.id}`}
+                      style={{ animationDelay: staggerDelay(index) }}
+                      className={`block bg-surface rounded-lg p-4 border transition-colors ${cardStateClasses} ${STAGGER_ENTER_CLASS}`}
+                      data-testid={`session-item-${wt.id}`}
+                    >
+                      {/* Row 1: Name, Agent statuses */}
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <div className="text-sm font-medium text-foreground truncate">
+                            {wt.repositoryDisplayName ?? wt.repositoryName}
                           </div>
-                        ))}
-                        {idleCount > 0 && (
-                          <div
-                            className="flex items-center gap-1"
-                            data-testid={`session-idle-cluster-${wt.id}`}
-                            aria-label={tCommon('sessions.idleAgents', { count: idleCount })}
-                          >
-                            <StatusDot status="idle" size="sm" aria-hidden title={undefined} />
-                            <span className="text-xs text-muted-foreground tabular-nums">
-                              +{idleCount}
-                            </span>
+                          <div className="text-xs text-muted-foreground truncate">
+                            {wt.name}
                           </div>
-                        )}
-                      </div>
-                    </div>
+                        </div>
 
-                    {/* Row 2: Description (if present) */}
-                    {wt.description && (
-                      <div className="mt-2">
-                        <p className="text-xs text-muted-foreground line-clamp-2 whitespace-pre-wrap">
-                          {wt.description}
-                        </p>
+                        {/* [Issue #1078] Working agents as labelled chips; idle group collapsed */}
+                        <div className="flex items-center gap-2 ml-4 flex-shrink-0" data-testid={`session-agents-${wt.id}`}>
+                          {workingAgents.map(({ agent, status }) => (
+                            <div key={agent} className="flex items-center gap-1" data-testid={`session-agent-${agent}`}>
+                              <CliDot status={status} label={getCliToolDisplayName(agent)} />
+                              <span className="text-xs text-muted-foreground">
+                                {getCliToolDisplayName(agent)}
+                              </span>
+                            </div>
+                          ))}
+                          {idleCount > 0 && (
+                            <div
+                              className="flex items-center gap-1"
+                              data-testid={`session-idle-cluster-${wt.id}`}
+                              aria-label={tCommon('sessions.idleAgents', { count: idleCount })}
+                            >
+                              <StatusDot status="idle" size="sm" aria-hidden title={undefined} />
+                              <span className="text-xs text-muted-foreground tabular-nums">
+                                +{idleCount}
+                              </span>
+                            </div>
+                          )}
+                        </div>
                       </div>
-                    )}
 
-                    {/* Row 3: Status badge (read-only) */}
-                    {wt.status && (
-                      <div className="mt-2">
-                        <span className={`px-2 py-0.5 text-xs font-medium rounded ${
-                          STATUS_BADGE_CLASSES[wt.status ?? ''] ?? DEFAULT_BADGE_CLASS
-                        }`}>
-                          {formatStatus(wt.status, tWorktree)}
-                        </span>
-                      </div>
-                    )}
+                      {/* Row 2: Description (if present) */}
+                      {wt.description && (
+                        <div className="mt-2">
+                          <p className="text-xs text-muted-foreground line-clamp-2 whitespace-pre-wrap">
+                            {wt.description}
+                          </p>
+                        </div>
+                      )}
 
-                    {/* Row 4: Last sent message preview + relative time [Issue #606] */}
-                    {sanitizedMessage && (
-                      <div className="mt-2 flex items-center gap-2" data-testid={`session-message-${wt.id}`}>
-                        {/* [Issue #1078] CSS truncate (not char-slice): byte-width is
-                            consistent across JP/EN and adapts to the container width. */}
-                        <span
-                          className="text-xs text-muted-foreground truncate min-w-0 flex-1"
-                          data-testid={`session-message-text-${wt.id}`}
-                          title={sanitizedMessage}
-                        >
-                          {sanitizedMessage}
-                        </span>
-                        {relativeTime && (
-                          <span
-                            className="text-xs text-muted-foreground flex-shrink-0 whitespace-nowrap tabular-nums"
-                            data-testid={`session-time-${wt.id}`}
-                          >
-                            {relativeTime}
+                      {/* Row 3: Status badge (read-only) */}
+                      {wt.status && (
+                        <div className="mt-2">
+                          <span className={`px-2 py-0.5 text-xs font-medium rounded ${
+                            STATUS_BADGE_CLASSES[wt.status ?? ''] ?? DEFAULT_BADGE_CLASS
+                          }`}>
+                            {formatStatus(wt.status, tWorktree)}
                           </span>
-                        )}
-                      </div>
-                    )}
-                  </Link>
-                );
-              })
-              )}
-            </div>
+                        </div>
+                      )}
+
+                      {/* Row 4: Last sent message preview + relative time [Issue #606] */}
+                      {sanitizedMessage && (
+                        <div className="mt-2 flex items-center gap-2" data-testid={`session-message-${wt.id}`}>
+                          {/* [Issue #1078] CSS truncate (not char-slice): byte-width is
+                              consistent across JP/EN and adapts to the container width. */}
+                          <span
+                            className="text-xs text-muted-foreground truncate min-w-0 flex-1"
+                            data-testid={`session-message-text-${wt.id}`}
+                            title={sanitizedMessage}
+                          >
+                            {sanitizedMessage}
+                          </span>
+                          {relativeTime && (
+                            <span
+                              className="text-xs text-muted-foreground flex-shrink-0 whitespace-nowrap tabular-nums"
+                              data-testid={`session-time-${wt.id}`}
+                            >
+                              {relativeTime}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </Link>
+                  );
+                })
+                )}
+              </div>
+            )}
           </>
         ) : (
           <>
