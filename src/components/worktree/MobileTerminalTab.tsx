@@ -93,6 +93,11 @@ import { useTerminalPanePolling } from '@/hooks/useTerminalPanePolling';
 import { useSplitMessages } from '@/hooks/useSplitMessages';
 import { usePendingMessages, type OptimisticSendOptions } from '@/hooks/usePendingMessages';
 import {
+  useConnectivity,
+  isServerConfirmedReachable,
+  isConnectionKnownDown,
+} from '@/hooks/useConnectivity';
+import {
   useChatComposerInsert,
   useChatOptimisticSend,
   useRegisterChatOptimisticSend,
@@ -447,6 +452,20 @@ const MobileChatSurface = memo(function MobileChatSurface({
       worktreeApi.sendMessage(worktreeId, content, options),
     [worktreeId],
   );
+  // Issue #2503: the phone is the surface this is actually for. The same verdict
+  // MobileConnectionBanner shows (#2501) decides whether a send that could not
+  // get out is "送信待ち" or a failure — and, on the way back, triggers exactly
+  // one automatic resend of what is still waiting. Read through the two
+  // evidence-only helpers rather than the banner's verdict: holding a failure
+  // back needs proof the network is gone, not merely a socket that is closed.
+  const connectivity = useConnectivity();
+  const pendingConnectivity = useMemo(
+    () => ({
+      offline: isConnectionKnownDown(connectivity.signals),
+      reachable: isServerConfirmedReachable(connectivity.signals),
+    }),
+    [connectivity.signals],
+  );
   const {
     messages,
     sendOptimistic,
@@ -457,6 +476,7 @@ const MobileChatSurface = memo(function MobileChatSurface({
     serverMessages,
     sendFn: sendMessageFn,
     onSent: refresh,
+    connectivity: pendingConnectivity,
   });
 
   // Publish the send for the docked composer. Released on unmount, i.e. the
