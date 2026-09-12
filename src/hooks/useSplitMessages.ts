@@ -46,9 +46,20 @@ import type {
   SessionStatusEvent,
 } from '@/lib/realtime/types';
 import { MESSAGES_INVALIDATED_EVENT_TYPE } from '@/lib/realtime/types';
+import {
+  DETAIL_MESSAGES_POLLING_CADENCE,
+  selectMessagesPollIntervalMs,
+  type MessagesPollingCadence,
+} from '@/config/pane-polling-cadence';
 
-/** Polling cadence for per-split message history (ms). */
-export const SPLIT_MESSAGES_POLL_INTERVAL_MS = 5000;
+/**
+ * Polling cadence for per-split message history (ms).
+ *
+ * Issue #2511 moved the value into `config/pane-polling-cadence` so a
+ * `/sessions` tile can declare a slower profile; this name and this number are
+ * the worktree screen's, unchanged.
+ */
+export const SPLIT_MESSAGES_POLL_INTERVAL_MS = DETAIL_MESSAGES_POLLING_CADENCE.pollMs;
 
 /**
  * Issue #2195: while a live WebSocket connection is established every history
@@ -64,7 +75,7 @@ export const SPLIT_MESSAGES_POLL_INTERVAL_MS = 5000;
  * therefore the only signal available, and the fallback poll is what covers a
  * socket that is up but not delivering.
  */
-export const WS_CONNECTED_SPLIT_MESSAGES_POLL_INTERVAL_MS = 15000;
+export const WS_CONNECTED_SPLIT_MESSAGES_POLL_INTERVAL_MS = DETAIL_MESSAGES_POLLING_CADENCE.wsFallbackMs;
 
 /**
  * The `cli_tool_id` a row without one is read as. `chat-db.mapChatMessage`
@@ -90,6 +101,12 @@ export interface UseSplitMessagesOptions {
   includeArchived?: boolean;
   /** When false the poller is suspended (e.g. parent hidden / error state). */
   enabled?: boolean;
+  /**
+   * Issue #2511: which polling profile this pane belongs to. Defaults to the
+   * worktree screen's, so every existing caller is unaffected; `/sessions` tiles
+   * pass `TILE_MESSAGES_POLLING_CADENCE`.
+   */
+  cadence?: MessagesPollingCadence;
 }
 
 export interface UseSplitMessagesReturn {
@@ -175,6 +192,7 @@ export function useSplitMessages({
   limit,
   includeArchived = false,
   enabled = true,
+  cadence = DETAIL_MESSAGES_POLLING_CADENCE,
 }: UseSplitMessagesOptions): UseSplitMessagesReturn {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -295,9 +313,9 @@ export function useSplitMessages({
     if (!enabled) return;
     let cancelled = false;
 
-    const intervalMs = connected
-      ? WS_CONNECTED_SPLIT_MESSAGES_POLL_INTERVAL_MS
-      : SPLIT_MESSAGES_POLL_INTERVAL_MS;
+    // Issue #2511: the profile decides, and the default profile is the pair of
+    // constants above, so the worktree screen is unchanged.
+    const intervalMs = selectMessagesPollIntervalMs(cadence, { connected });
 
     const intervalId = setInterval(() => {
       if (document.visibilityState === 'hidden') return;
@@ -321,7 +339,7 @@ export function useSplitMessages({
       clearInterval(intervalId);
       document.removeEventListener('visibilitychange', onVisibility);
     };
-  }, [enabled, connected, fetchMessages]);
+  }, [enabled, cadence, connected, fetchMessages]);
 
   // Issue #1171: join the worktree room so scoped stop events are delivered
   // (ref-counted, so sharing the room with useTerminalPanePolling is harmless).

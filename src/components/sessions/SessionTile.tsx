@@ -61,6 +61,10 @@ import {
   getInstanceLabel,
 } from '@/lib/cli-tools/types';
 import { getClientDefaultSelectedAgents } from '@/config/default-agents';
+import {
+  TILE_MESSAGES_POLLING_CADENCE,
+  TILE_PANE_POLLING_CADENCE,
+} from '@/config/pane-polling-cadence';
 import type { AgentInstance } from '@/lib/cli-tools/types';
 import type { Worktree } from '@/types/models';
 
@@ -119,11 +123,18 @@ export const SessionTile = memo(function SessionTile({
   const instanceId = activeInstance?.id;
   const cliToolId = activeInstance?.cliTool ?? 'claude';
 
+  // Issue #2511: the tile profile, not the worktree screen's. A tile is one of
+  // up to twenty live panes on one screen, and the profile is what keeps that
+  // affordable — measured at 2.0 req/s and 2.5 MB/s for twenty idle tiles,
+  // against 11.3 req/s and 18.6 MB/s under the worktree screen's cadence. The
+  // worktree screen keeps its own numbers precisely because they are not shared.
+  // See `config/pane-polling-cadence` and `docs/design/sessions-tile-polling-2511.md`.
   const { terminal, prompt, refresh } = useTerminalPanePolling({
     worktreeId: worktree.id,
     cliToolId,
     instanceId,
     enabled,
+    cadence: TILE_PANE_POLLING_CADENCE,
   });
 
   const { messages, isLoading } = useSplitMessages({
@@ -131,6 +142,7 @@ export const SessionTile = memo(function SessionTile({
     cliToolId,
     instanceId,
     enabled,
+    cadence: TILE_MESSAGES_POLLING_CADENCE,
   });
 
   // The same projection MobileTerminalTab builds, field for field: these are the
