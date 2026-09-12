@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **feat(mobile): スマホに接続状態（オフライン／再接続中）を表示** (#2501): `useConnectivity` フックが `navigator.onLine`・共有WebSocketの `status`・サーバ到達性プローブの3信号を1つの判定にまとめ（`onLine === true` は「オンラインの確定」には使わず、キャプティブポータル等で「オンライン」と誤表示しない）、モバイルシェル先頭に `MobileConnectionBanner`（flex列内の細いバー。composer や `GlobalMobileNav` を覆わない）を、デスクトップは既存 `ConnectionStatusIndicator` を同フックへ載せ替えて表示する。接続中は何も表示しない
 
 ### Fixed
+- **fix(ws): WebSocket に heartbeat を入れ、half-open 接続を検知して再接続する** (#2502): サーバが 30 秒ごとに ping と application-level heartbeat フレームを送り、pong の無い接続を次の周期で `terminate()` してルーム・ターミナル購読ごと解放するようにした。クライアントは受信の途絶（75 秒）で half-open と判定して自ら `close()` し `status` を `disconnected` に落とすため、ターミナル以外の面（サイドバー・履歴・版不一致検知）も通常のポーリング間隔へフォールバックする。あわせて再接続バックオフに ±20% の jitter を入れてサーバ再起動時の同時殺到を防ぎ、`online` イベントで即時再接続するようにした（従来は最大 30 秒待ち）。間隔・タイムアウト・jitter 比・close code は `src/config/websocket-config.ts` に集約。
 - **fix(ui): worktree詳細画面がポーリング1回の通信失敗で全画面エラーに落ちる問題を修正** (#2498): `fetchWorktree()` の失敗を初回ロード失敗（従来どおり `ErrorDisplay` ＋再試行ボタン）とポーリング失敗（画面を保持したまま連続3回で控えめな再接続バナー）に分離し、ポーリング effect の `if (loading || error) return` から `error` を外してエラー中も回り続けるようにした。初回ロード失敗には `useWorktreesCache` の `INITIAL_LOAD_RETRY_DELAYS_MS` 相当のバックオフラダー（2s/5s/10s）を移植し、成功1回で全ての失敗判定を解除する。あわせて `detectAuthRedirect()` / `detectNonJsonBody()` を通し、セッション期限切れ（401 / `/login` リダイレクト）を `Unexpected token '<'` ではなく再ログイン導線として表示するようにした。電波が途切れても画面とcomposerの下書きが失われず、復帰後はユーザー操作なしにポーリングが再開する。
 
 ## [0.34.1] - 2026-09-12

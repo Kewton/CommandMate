@@ -47,6 +47,10 @@ import {
   type RoomPublisherHandle,
   type RoomRename,
 } from '@/lib/realtime/publisher-registry';
+import {
+  WS_HEARTBEAT_MESSAGE_TYPE,
+  WS_SERVER_HEARTBEAT_INTERVAL_MS,
+} from '@/config/websocket-config';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('ws-server');
@@ -82,6 +86,15 @@ interface ClientInfo {
   ws: WebSocket;
   worktreeIds: Set<string>;
   terminalSubscription: TerminalSubscription | null;
+  /**
+   * Whether a pong has been seen since the last heartbeat sweep (Issue #2502).
+   *
+   * The sweep reads it, then clears it and pings. A connection that arrives at
+   * the next sweep still cleared answered nothing for a full interval and is
+   * terminated. Starts true so a socket that connects mid-interval is not
+   * killed before it has been asked anything.
+   */
+  isAlive: boolean;
 }
 
 // Global state
@@ -96,6 +109,14 @@ const rooms = new Map<string, Set<WebSocket>>();
  * bare "clear the registry" would let a torn-down instance silence a newer one.
  */
 let publisherHandle: RoomPublisherHandle | null = null;
+/**
+ * Issue #2502: the heartbeat sweep's interval, or null while no server is up.
+ *
+ * Module-scoped like `wss` and torn down with it — a timer that outlived
+ * `closeWebSocket` would go on pinging a `clients` map nobody reads, and CI
+ * shares one process across the whole suite.
+ */
+let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 const MAX_TERMINAL_INPUT_LENGTH = 4096;
 const MAX_TERMINAL_SUBSCRIBERS_PER_SESSION = 4;
 const TERMINAL_FALLBACK_CAPTURE_LINES = -200;
@@ -393,6 +414,79 @@ function isExpectedWebSocketError(error: Error & { code?: string }): boolean {
 }
 
 /**
+ * One heartbeat sweep over every connected client (Issue #2502).
+ *
+ * The `ws` library's standard liveness recipe, with one addition. The recipe:
+ * a connection that has not ponged since the previous sweep is gone — the peer
+ * crashed, or the path between us is half-open — so `terminate()` it rather
+ * than `close()` it. A close handshake needs a live peer to answer, which is
+ * exactly what is in question, so `close()` on a dead path just parks the
+ * socket in CLOSING until the OS TCP timeout fires, minutes later, with the
+ * room membership and any terminal subscription still held open the whole time.
+ *
+ * The addition is the application-level beat. A browser answers protocol pings
+ * for free but exposes neither the ping nor its own pong to page JavaScript, so
+ * the ping alone only ever teaches the SERVER that a client is gone. The extra
+ * frame is what lets the tab reach the same conclusion about us
+ * (`useWebSocket`'s liveness check).
+ *
+ * Exported through `__internal` so the behaviour can be tested without waiting
+ * {@link WS_SERVER_HEARTBEAT_INTERVAL_MS} for a real interval to fire.
+ */
+function runHeartbeatSweep(): void {
+  clients.forEach((clientInfo, ws) => {
+    if (!clientInfo.isAlive) {
+      logger.warn('heartbeat:terminate', { rooms: clientInfo.worktreeIds.size });
+      try {
+        ws.terminate();
+      } catch {
+        // Already destroyed; the disconnect bookkeeping below still has to run.
+      }
+      // `terminate()` emits 'close' and that handler cleans up too, but this is
+      // not belt-and-braces: on an already-destroyed socket no event fires at
+      // all, and `handleDisconnect` is idempotent (it returns early for a ws it
+      // no longer knows). Deleting the current key mid-`forEach` is defined
+      // behaviour for a Map.
+      handleDisconnect(ws);
+      return;
+    }
+
+    clientInfo.isAlive = false;
+    try {
+      ws.ping();
+    } catch (error) {
+      logger.error('heartbeat:ping-failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    if (ws.readyState !== WebSocket.OPEN) return;
+    try {
+      ws.send(JSON.stringify({ type: WS_HEARTBEAT_MESSAGE_TYPE, at: Date.now() }));
+    } catch {
+      // Best-effort: a failing send means the socket is already going away, and
+      // the next sweep terminates it.
+    }
+  });
+}
+
+/** Start the heartbeat sweep, replacing any previous one. */
+function startHeartbeat(): void {
+  stopHeartbeat();
+  heartbeatTimer = setInterval(runHeartbeatSweep, WS_SERVER_HEARTBEAT_INTERVAL_MS);
+  // Never the reason the process stays alive: `commandmate stop` and the CLI's
+  // short-lived server should not have to wait out a 30s tick.
+  heartbeatTimer.unref?.();
+}
+
+/** Stop the heartbeat sweep. Safe to call when none is running. */
+function stopHeartbeat(): void {
+  if (heartbeatTimer !== null) {
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+  }
+}
+
+/**
  * Setup WebSocket server on HTTP or HTTPS server
  * Issue #331: Added auth check on WebSocket upgrade
  *
@@ -439,6 +533,10 @@ export function setupWebSocket(
   // — and so the closure it registers is the one holding *this* bundle's `rooms`
   // map, which is what a broadcast has to reach.
   startWaitingStatusBroadcast(handleBroadcast);
+
+  // Issue #2502: and the liveness sweep, for the same lifetime reason — it has
+  // to die with this `wss`, not with the process.
+  startHeartbeat();
 
   // Handle upgrade requests - only accept app WebSocket connections, not Next.js HMR
   const handleUpgrade = (
@@ -550,8 +648,17 @@ export function setupWebSocket(
       ws,
       worktreeIds: new Set(),
       terminalSubscription: null,
+      isAlive: true,
     };
     clients.set(ws, clientInfo);
+
+    // Issue #2502: the other half of the liveness recipe. Browsers answer a
+    // protocol ping automatically, so a client needs no code for this to work —
+    // silence here is evidence about the path, not about the page.
+    ws.on('pong', () => {
+      const info = clients.get(ws);
+      if (info) info.isAlive = true;
+    });
 
     // Issue #573: Removed _socket direct access (as unknown as pattern).
     // ws.on('error') handler below covers socket-level errors because the ws library
@@ -1293,6 +1400,11 @@ export function closeWebSocket(): void {
     stopWaitingStatusBroadcast();
   }
 
+  // Issue #2502: unconditionally — unlike the waiting-edge subscription this is
+  // a plain module-local timer, not a `globalThis` slot, so a superseded
+  // instance clearing it cannot reach a live server's sweep.
+  stopHeartbeat();
+
   if (wss) {
     // Close all client connections
     clients.forEach((clientInfo) => {
@@ -1313,6 +1425,9 @@ export function closeWebSocket(): void {
 
 export const __internal = {
   handleMessage,
+  runHeartbeatSweep,
+  startHeartbeat,
+  stopHeartbeat,
   handleClientVersion,
   handleProxyUpgrade,
   handleTerminalSubscribe,
@@ -1320,17 +1435,26 @@ export const __internal = {
   handleTerminalResize,
   handleTerminalUnsubscribe,
   handleDisconnect,
-  registerClientForTest(ws: WebSocket): void {
+  registerClientForTest(ws: WebSocket, isAlive = true): void {
     clients.set(ws, {
       ws,
       worktreeIds: new Set(),
       terminalSubscription: null,
+      isAlive,
     });
   },
   getClientInfoForTest(ws: WebSocket): ClientInfo | undefined {
     return clients.get(ws);
   },
+  /**
+   * Every live client, for tests that hold the *client* end of a real socket and
+   * therefore have no handle on the server-side `WebSocket` to look up by.
+   */
+  listClientsForTest(): ClientInfo[] {
+    return Array.from(clients.values());
+  },
   resetStateForTest(): void {
+    stopHeartbeat();
     clients.clear();
     rooms.clear();
   },
