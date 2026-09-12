@@ -1,7 +1,8 @@
 # 公開面 発信仕様（Public Messaging）
 
 CommandMate の公開面（LP `website/` ・ README ・ チュートリアル ・ product-highlights ・ デモ動画）が
-使う文言の **単一ソース**。Issue #1808（Epic #1807 Step A）で確定した。
+使う文言の **単一ソース**。Issue #1808（Epic #1807 Step A）で確定し、Issue #2493 で
+**orchestrate を看板にした軸**へ改訂した。
 
 - 各面はこのファイルから **コピーして使う**。独自に言い換えない
 - 言い換えたくなったら、まずこのファイルを直し、その差分で各面を追随させる
@@ -15,29 +16,77 @@ CommandMate の公開面（LP `website/` ・ README ・ チュートリアル �
 
 ## 1. Hero（LP 冒頭）
 
-**採用案: 案 1（対比型）**。Epic #1807 D6 の既定どおり。案 2（宣言型）は不採用。
+**採用案: orchestrate 軸**（Issue #2493）。Epic #1807 D6 の対比型 H1 を差し替えた。
 
-理由: 軸語 "Vibe Engineering" は既出語（§10）であり、単体で置くと読み手に意味が渡らない。
-`From vibe coding to Vibe Engineering.` は **出発点（vibe coding）を否定せず、その次を示す**
-という Epic の決定（「否定ではなく出発点として書く」）を H1 の一行で満たす唯一の形である。
+理由: 読者が肯定形で自分に使う語は「orchestrate」であり、「vibe」を自称に使う人はいない
+（2026-09-11〜12 の Reddit 調査。要点は Issue #2493 本文）。軸語 "Vibe Engineering" は
+**思想の名**として §2 に残し、hero では **誰が指揮し、何が完了を決めるか**を先に言う。
+「orchestrator」は製品の名詞にしない（動詞・形容 orchestrated で使う）。verify は H1 と同じ行に置く。
 
 | 項目 | 文言 |
 |---|---|
-| H1（en / LP 本番） | From vibe coding to Vibe Engineering. |
-| H1（ja / README ja ・ 日本語面） | vibe coding から、Vibe Engineering へ。 |
-| lede 1 文目（en） | CommandMate builds the engineering discipline into the workflow: a contract before the work, verification gates after it, evidence throughout. |
-| lede 2 文目（en） | Any coding agent turns your requirement into a verified result. |
-| lede 1 文目（ja） | CommandMate は、エンジニアリングの規律をワークフローそのものに組み込みます。作業の前に契約を、作業の後に検証ゲートを、その全体に証跡を。 |
-| lede 2 文目（ja） | どのコーディングエージェントでも、あなたの要求を検証済みの成果物に変えられます。 |
+| H1（en / LP 本番） | One agent leads. Gates decide what's done. |
+| H1（ja / README ja ・ 日本語面） | 指揮するのは、いつもの Agent。判定するのは、ゲート。 |
+| lede（en、2 文） | CommandMate gives your lead agent the machinery to run the others: one Git worktree and one contract per task, gates that decide what is done, and a record of every run. Claude Code, Codex, Antigravity, Command Code, OpenCode, Gemini CLI, Copilot and local models. You approve; you don't relay. |
+| lede（ja、2 文） | CommandMate は、あなたの lead エージェントに、ほかのエージェントを走らせる仕組みを渡します。タスクごとに Git worktree 1 つと契約 1 つ、完了を決めるゲート、そして毎回のランの記録。Claude Code ・ Codex ・ Antigravity ・ Command Code ・ OpenCode ・ Gemini CLI ・ Copilot、そしてローカルモデル。あなたがやるのは承認であって、伝言ではありません。 |
+| 事実行（en） | Open source (MIT) · runs on your machine · macOS / Linux / Windows (WSL2) · no app to install |
+| 事実行（ja） | オープンソース（MIT） · あなたのマシンで動く · macOS / Linux / Windows（WSL2） · アプリのインストールは不要 |
 
-> **原案からの変更点**: 案 1 の lede は em dash を 2 つ含む 1 文だったため、意味を変えずに 2 文へ分割した
-> （制約「lede は 2 文以内」の範囲内）。H1 は原案のまま 1 文字も変えていない。
+事実行は hero の直下に 1 行で置く。**比較ではなく事実として**書く（「〇〇と違って」を付けない）。
+
+> **lede の「2 文」の数え方**: 制約「lede は 2 文以内」（Epic #1807）はいまも生きている。
+> lede のピリオドは 3 つあるが、述語を持つ文は `CommandMate gives …` と
+> `You approve; you don't relay.` の 2 つで、間の `Claude Code, Codex, … and local models.` は
+> 対応エージェントを並べただけの名詞句である。**3 文に割らないこと**（割ると LP の hero が 3 行になる）。
+
+> **旧 H1 の扱い**: `From vibe coding to Vibe Engineering.` ／ `vibe coding から、Vibe Engineering へ。` は
+> 廃止していない。**§2 の「思想の名」へ降ろした**（README / LP では Philosophy 節の `##` 見出し）。
 
 ---
 
-## 2. 定義文
+## 1b. More agents, same you（Problem）
+
+エージェントを増やしたあとに残る困りごと。LP / README では hero の直後、思想（§2）より前に置く。
+**解決策ではなく、読者の言葉で書く**。節番号が `1b` なのは、既存の §2 以降の番号をずらさないためである。
+
+### en
+
+```
+## More agents, same you
+- The agents are parallel. You are still single-threaded.
+- From the outside, an idle agent and one waiting on you look the same.
+- The agent's summary of what it did is not evidence of what it did.
+- Nobody can safely merge a PR that nobody understands.
+
+CommandMate puts the machinery around the CLIs you already run: a lead that hands out contracts, session state read from the agents' own hooks, gates after the work, and the record in between.
+```
+
+### ja
+
+```
+## エージェントは増えた。あなたは 1 人
+- エージェントは並列になった。あなたはいまもシングルスレッドのままだ。
+- 外から見ると、遊んでいるエージェントと、あなたの入力を待っているエージェントは同じに見える。
+- エージェントが書いた「やったこと」の要約は、やったことの証拠ではない。
+- 誰も理解していない PR は、誰も安全にマージできない。
+
+CommandMate は、あなたがすでに動かしている CLI のまわりに仕組みを置く。契約を配る lead、エージェント自身の hooks から読んだセッション状態、作業のあとのゲート、そしてその間の記録。
+```
+
+---
+
+## 2. 思想の名と定義文
 
 **この 2 文は逐語で固定する**。concept.md（ja / en）と LP が同じ文字列を持つことをテストで固定している。
+
+思想の名（旧 hero H1。README / LP では Philosophy 節の `##` 見出しとして使う）:
+
+| 言語 | 思想の名 |
+|---|---|
+| en | From vibe coding to Vibe Engineering. |
+| ja | vibe coding から、Vibe Engineering へ。 |
+
+hero（§1）が「誰が指揮し、何が完了を決めるか」を言い、この節が「なぜそうするのか」を言う。
 
 下の表の en 行は `def:en` の HTML コメントマーカーで囲ってある。LP のガード
 （[`tests/unit/website/landing-page.test.ts`](../../tests/unit/website/landing-page.test.ts)）は
@@ -62,10 +111,15 @@ CommandMate の公開面（LP `website/` ・ README ・ チュートリアル �
 
 | # | タイトル（en） | 1 文（en） | タイトル（ja） | 1 文（ja） |
 |---|---|---|---|---|
-| 1 | Method as a system | The method is not in someone's head — it is installed as Skills and read by the agent. | 方法論を仕組みに | 方法論は誰かの頭の中ではなく、Skill として導入され、エージェントが読む形になる。 |
-| 2 | Verified, not vibe-checked | Gates you declared decide whether the work is done, and the exit code is the verdict. | 「たぶん動く」ではなく検証済み | 完了を決めるのはあなたが宣言したゲートで、判定は実 exit code である。 |
-| 3 | Any agent, in parallel | One worktree and one contract per task, across seven agent CLIs and local models. | どのエージェントでも、並列で | タスクごとに worktree 1 つと契約 1 つ。7 種のエージェント CLI とローカルモデルに対応する。 |
-| 4 | Stay in control, anywhere | When an agent needs you, it reaches you — badge, toast, tab title, push — and you answer from your phone. | どこからでも、手綱は自分に | エージェントがあなたを必要としたら、バッジ・トースト・タブタイトル・通知で届き、スマホから応答できる。 |
+| 1 | One agent leads | One message to your lead session; it hands each task to a worker in its own worktree under a contract, and only what passes the gates comes back. Measured with Claude Code and Command Code as the lead. | 指揮するのは 1 体のエージェント | lead セッションへ 1 通送れば、各タスクはそれぞれの worktree にいる worker へ契約つきで渡り、ゲートを通ったものだけが返ってくる。lead としての実測は Claude Code と Command Code。 |
+| 2 | Verified, not vibe-checked | Gates you declared decide whether the work is done, and the exit code is the verdict. The agent's summary is not the evidence; the run is. | 「たぶん動く」ではなく検証済み | 完了を決めるのはあなたが宣言したゲートで、判定は実 exit code である。証拠はエージェントの要約ではなく、ランそのものである。 |
+| 3 | Know which one needs you | Waiting is a state read from the agent's hooks, not a guess from the screen. It reaches you as a badge, a toast, the tab title, a push, and you answer from your phone. | どれがあなたを待っているか分かる | 入力待ちは画面からの推測ではなく、エージェント自身の hooks から読んだ状態である。バッジ・トースト・タブタイトル・通知で届き、スマホから応答できる。 |
+| 4 | Method as a system | The method is not in someone's head. It is installed as Skills and read by the agent. | 方法論を仕組みに | 方法論は誰かの頭の中にはない。Skill として導入され、エージェントが読む。 |
+
+> **旧カードからの差分**（Issue #2493）: 旧 3「Any agent, in parallel」は 1 へ吸収し、
+> 旧 4「Stay in control, anywhere」は 3「Know which one needs you」へ改題した。
+> 旧 1「Method as a system」は 4 へ移動（順序だけ変更、文は 1 文を 2 文に割っただけ）。
+> §5 の LP デモ 4 本はこの 4 カードと 1 対 1 なので、対応表の「対応カード」列も付け替えてある。
 
 ---
 
@@ -100,6 +154,33 @@ CommandMate の公開面（LP `website/` ・ README ・ チュートリアル �
 
 ---
 
+## 4b. What it does not do（やらないこと）
+
+§4 の右列を読んだ人が次に確かめたくなること。**約束しないことを先に書く**。
+LP / README では §4 の直後に置く。ここに書いた 5 行を超える約束を、ほかの節で書かない。
+
+### en
+
+```
+- It is a run, not a resident agent. Nothing loops forever, and nothing mutates without an explicit approve.
+- It does not read the code for you. Gates catch what your tests and checks catch.
+- Review by another agent is a step you add, not something the runner does for you.
+- Approvals still come to a person. Auto Yes is opt-in, time-boxed, and stops on the patterns you set.
+- It does not replace tmux, Git worktrees, your terminal, or your agent CLI. An OS reboot ends the processes; what survives is the record.
+```
+
+### ja
+
+```
+- これは常駐エージェントではなく、1 回のランである。永久に回り続けるものは無く、明示的な承認なしに何かが書き換わることも無い。
+- コードを代わりに読んではくれない。ゲートが捕まえるのは、あなたのテストとチェックが捕まえる範囲だけである。
+- 別のエージェントによるレビューは、あなたが足す 1 ステップであって、ランナーが代わりにやってくれるものではない。
+- 承認はいまも人のところに来る。Auto Yes は opt-in で、時間の上限つきで、あなたが指定したパターンで止まる。
+- tmux ・ Git worktree ・ ターミナル ・ エージェント CLI を置き換えるものではない。OS を再起動すればプロセスは終わる。残るのは記録である。
+```
+
+---
+
 ## 5. LP デモ 4 本のキャプション
 
 4 本は §3 の 4 カードと 1 対 1 に対応させる。
@@ -107,10 +188,10 @@ CommandMate の公開面（LP `website/` ・ README ・ チュートリアル �
 
 | # | 対応カード | 内容（撮影対象） | キャプション（en） | キャプション（ja） |
 |---|---|---|---|---|
-| 1 | Method as a system | ターミナル: `commandmate send <id> --contract .commandmate/tasks/<name>.yaml` を実行し、契約の goal と scope がエージェントへ渡る | Hand the agent a contract before the work starts. | 作業を始める前に、エージェントへ契約を渡す。 |
-| 2 | Verified, not vibe-checked | ターミナル: `commandmate wait <id> --verify` の `GATE` 行と `RESULT` 行、そして終了コード | Gates run, and the exit code is the verdict. | ゲートが走り、判定は exit code で返る。 |
-| 3 | Any agent, in parallel | ブラウザ: 複数 worktree のセッションが同時に走り、サイドバーの状態が個別に変わる | One session per worktree, running in parallel. | worktree ごとに 1 セッション、並列で走る。 |
-| 4 | Stay in control, anywhere | ブラウザ / スマホ: 入力待ちがバッジ・トースト・タブタイトルに出て、スマホから応答する | Waiting reaches you, and you answer from your phone. | 入力待ちが届き、スマホから応答する。 |
+| 1 | Method as a system（カード 4） | ターミナル: `commandmate send <id> --contract .commandmate/tasks/<name>.yaml` を実行し、契約の goal と scope がエージェントへ渡る | Hand the agent a contract before the work starts. | 作業を始める前に、エージェントへ契約を渡す。 |
+| 2 | Verified, not vibe-checked（カード 2） | ターミナル: `commandmate wait <id> --verify` の `GATE` 行と `RESULT` 行、そして終了コード | Gates run, and the exit code is the verdict. | ゲートが走り、判定は exit code で返る。 |
+| 3 | One agent leads（カード 1） | ブラウザ: 複数 worktree のセッションが同時に走り、サイドバーの状態が個別に変わる | One session per worktree, running in parallel. | worktree ごとに 1 セッション、並列で走る。 |
+| 4 | Know which one needs you（カード 3） | ブラウザ / スマホ: 入力待ちがバッジ・トースト・タブタイトルに出て、スマホから応答する | Waiting reaches you, and you answer from your phone. | 入力待ちが届き、スマホから応答する。 |
 | hero | README 冒頭（4 カードの前、Issue #2381） | ブラウザ → スマホ: ヘッダーのリポジトリタブ帯で worktree を切り替え、5 エージェントの roster とピッカー、チャット面で隣のセッションへ委任（`commandmate ask … --instance codex` のツール呼び出しチップ）、返答のリンクからファイルビューア、スマホで承認シートを 1 タップ、スマホでファイルを開く | Switch repos from the tab bar, delegate to the next session, open the file from the reply — then the same from your phone. | タブでリポジトリを切り替え、隣のセッションに委任し、返答のリンクからファイルを開く。同じことをスマホでも。 |
 
 > **旧デモとの差分**: 旧 4 本目 `tmux-in-browser`（"Your tmux session, driven from the browser."）は
@@ -149,6 +230,12 @@ CommandMate の公開面（LP `website/` ・ README ・ チュートリアル �
 | hero | record | ファイルもスマホで開く | Open files on your phone, too. |
 | hero | card | github.com/Kewton/CommandMate | github.com/Kewton/CommandMate |
 
+> **デモ 3 のテロップが `seven` / `7 種` のままな理由**: この 2 行は撮影済み映像に焼かれており、
+> `.claude/skills/demo-video/storyboard/` の絵コンテと `tests/unit/skills/demo-video/storyboard.test.ts`
+> が逐語で固定している。**対応ツール数の権威は §11 の根拠表（`CLI_TOOL_IDS` = 8 id）**であり、
+> 数を直すときはテロップだけでなく映像と絵コンテを撮り直す（別 Issue）。§3 のカードは
+> Issue #2493 で数を述べない文言に変わったので、ここが最後の `seven` である。
+
 `hero` の 8 行は `.claude/skills/demo-video/storyboard/readme-hero.yaml` の絵コンテと 1 対 1 で、
 `tests/unit/skills/demo-video/storyboard.test.ts` が絵コンテ側の文言がここに在ることを照合する
 （Issue #2381）。「5 エージェント、1 worktree」は本文案の「5 エージェントが 1 つの worktree に」
@@ -183,8 +270,11 @@ CommandMate の公開面（LP `website/` ・ README ・ チュートリアル �
 公開面の新しい文章に書かない語。**この表がテスト側の配列と一致していること**を
 `tests/unit/docs/public-messaging.test.ts` で固定している（片方だけ更新されるのを防ぐ）。
 
-現時点でテストが適用されている対象は `docs/concept.md` と `docs/en/concept.md` のみ。
-LP / README / チュートリアルは各面の Issue（#1812 / #1814 / #1813）で改稿してから対象に加える。
+この表を読んで走査している対象は 2 系統ある。`tests/unit/docs/public-messaging.test.ts` が
+`docs/concept.md` ・ `docs/en/concept.md` ・ `README.md` ・ `docs/ja/README.md` を、
+`tests/unit/website/landing-page.test.ts` がこの表と自分の `LP_BANNED_TERMS` の和集合で
+`website/**` を走査する。したがって**この表に 1 行足すと LP と README にも同時に効く**。
+チュートリアルはまだ対象に入っていない（#1813 で改稿してから加える）。
 
 <!-- banned-terms:start -->
 
@@ -192,6 +282,8 @@ LP / README / チュートリアルは各面の Issue（#1812 / #1814 / #1813）
 |---|---|---|
 | `control plane` | §1 の hero / §8 の footer タグライン | 「複数のエージェント CLI を便利に操作するツール」という旧軸の語。方法論を提供する側面が落ちる |
 | `コントロールプレーン` | §1 の hero（ja） | 同上（日本語面） |
+| `control layer` | 何も置かない（文を落とす） | 「エージェントの上に薄い層を足す」という旧軸の言い換え。CommandMate が足すのは層ではなく、契約 → ゲート → 証跡という仕組みそのもの |
+| `コントロールレイヤー` | 何も置かない（文を落とす） | 同上（日本語面） |
 | `Orchestrate your agent CLIs, not your terminal tabs` | §1 の H1 | 旧 LP の H1。操作対象がターミナルタブになっており、軸が「操作」に留まる |
 | `Vibe Coder` | vibe coding（行為）または「AI とプロダクトを作る人」 | 人の属性でセグメントを切る旧軸。CommandMate は属性ではなく仕組みで結果を揃える |
 | `Remote Control` | §4 の With / Without 表 | 競合製品名。新しい文章に他社製品名を書かない（Epic #1807 D4） |
@@ -245,6 +337,39 @@ LP / README / チュートリアルは各面の Issue（#1812 / #1814 / #1813）
 
 ---
 
+## 11b. 言えること / 言えないこと（実測の範囲）
+
+公開面に書いてよい主張の**上限**。§11 が「機能が在ること」の根拠表であるのに対し、
+この節は「**どこまで実測したか**」の範囲表である。ここに無い強さの主張は書かない（Issue #2493）。
+
+### 言えること（実測がある）
+
+| 主張 | 実測の内容 |
+|---|---|
+| lead として動かせる | Claude Code と Command Code で実測（4 Issue → 4/4 完了、8m39s / 7m46s） |
+| worker として動かせる | Codex ・ Claude Code ・ Antigravity ・ Command Code で実測 |
+| 別 CLI のレビューが効いた | 別 CLI のレビューで REJECT → 修正 → APPROVE まで到達した |
+| plan は破壊しない | plan は dry-run。mutation は `--approve` を付けた invocation だけ |
+| ゲート不合格で止まる | gate が不合格ならそこでランが停止する |
+| 修正ループは有限 | 修正ループに上限がある |
+
+### 言えないこと（未計測 / 事実に反する）
+
+| 書かない表現 | 理由 |
+|---|---|
+| `your orchestrator` | 「orchestrator」を製品の名詞にしない。動詞・形容（orchestrated）で使う |
+| `runs 24/7` | 常駐ではなく、承認つきで 1 回通すランである |
+| `self-managing backlog` | backlog を自律管理する機能は無い |
+| `loop` | 永久に回り続けるものは無い（§4b の 1 行目） |
+| `orchestrate with any agent as the lead` | lead としての実測は Claude Code / Command Code の 2 つだけ |
+| `review by a fresh agent is built in` | cross-model review はランナーの外。利用者が足すステップである（§4b の 3 行目） |
+| `the only …` | 唯一性を検証していない |
+| `no supervision` | 承認は人のところに来る（§4b の 4 行目） |
+| モデルの安さ・賢さの序列 | 計測していない。公開面でモデルに順位を付けない |
+| 未計測の数字 | 実測のない数値は書かない |
+
+---
+
 ## 12. 後続 Issue との対応
 
 | Issue | 面 | このファイルから使う節 |
@@ -256,3 +381,12 @@ LP / README / チュートリアルは各面の Issue（#1812 / #1814 / #1813）
 | #1814 | README 整合 | §1 ・ §2 ・ §3 ・ §4 ・ §9 |
 | #1815 | README GIF | §5 ・ §6 |
 | #2381 | README hero（UX 先行の 30 秒） | §5 ・ §6 |
+| #2494 | README を orchestrate 軸へ | §1 ・ §1b ・ §2 ・ §3 ・ §4b ・ §9 ・ §11b |
+| #2495 | LP を orchestrate 軸へ | §1 ・ §1b ・ §2 ・ §3 ・ §4 ・ §4b ・ §5 ・ §8 ・ §9 ・ §10 ・ §11b |
+
+> **この表に載っていない公開面**: `docs/features/product-highlights.md` と
+> `docs/en/features/product-highlights.md` は §2 の定義文と §3 の**旧**カード文言
+> （`Method as a system` / `Verified, not vibe-checked` / 「方法論を仕組みに」）を
+> #1811 でコピーしており、#2494（README）にも #2495（LP）にも含まれていない。
+> **この 2 ファイルを縛っているテストは 1 つも無い**ので、放置すると単一ソースと静かに乖離する。
+> 追随用の Issue を別に立てること（本 Issue のスコープ外）。

@@ -1,0 +1,133 @@
+version: 1
+title: "Issue #2494: README en/ja を orchestrate 軸で再構成"
+goal: |
+  https://github.com/Kewton/CommandMate/issues/2494 を実装してください。
+  `/pm-auto-issue2dev` ワークフローで着手すること。**構成・本文・表の中身は Issue 本文に
+  全て書かれています。必ず最初に読んでください**:
+    gh issue view 2494 --repo Kewton/CommandMate
+
+  ## 前提（満たされています）
+  親 Issue #2493（public-messaging の改訂）は **develop にマージ済み**（PR #2515、
+  commit 1d0f0d9c）。この worktree の `docs/design/public-messaging.md` は改訂後の版です。
+
+  ## 最重要の原則
+  **文言は `docs/design/public-messaging.md` からコピーする。言い換えない。**
+  H1・lede・事実行・Problem 節・4 カードの題と 1 文・What it does not do の 5 行は、
+  すべてその文書に逐語で置かれています。自分の言葉で書き直さないでください。
+
+  - H1（en）: `One agent leads. Gates decide what's done.`（§1 の表）
+  - H1（ja）: `指揮するのは、いつもの Agent。判定するのは、ゲート。`
+  - 旧 H1 `From vibe coding to Vibe Engineering.` は **§13 Philosophy 節の `##` 見出し**として残す
+
+  ## 構成（`##` は en/ja で同数にする）
+  Issue 本文の 15 節構成に従ってください。要点:
+
+  1. タイトル・バッジ・言語リンク・website リンク（現行）
+  2. hero GIF（下記「hero メディア」）
+  3. H1 + lede 2 文 + 事実行 + `npx commandmate@latest` + 60 秒（前提行は維持）
+  4. `## More agents, same you`（新設・#2493 §1b）
+  5. `## One agent leads`（新設。run の 1 段落 + 契約の例 + Measured 表）
+  6. `## Verified, not vibe-checked`（既存。exit `0`/`20`/`21` と「要約は証拠ではない」を追記）
+  7. `## Review by another agent`（新設・短い）
+  8. `## Know which one needs you`（通知・スマホ・Conversation view を集約）
+  9. `## What it gives you`（Key Features を 4 群に並べ替え + 新規 2 行のみ）
+  10. `## Supported agents`（現行）
+  11. `## What it does not do`（新設・#2493 の 5 行そのまま）
+  12. `## Use cases`（更新）
+  13. `## From vibe coding to Vibe Engineering`（思想。定義文は逐語 + Willison 脚注 + concept.md リンク）
+  14. `## Security`（1 文修正: `Claude CLI's own API calls` → `the agent CLI's own API calls`。ja も）
+  15. Install as an App / Browser Support / How it works ほか（現行。mermaid に lead ノード 1 本追加）
+
+  §5 の契約の例・Measured 表・§7 の本文・§12 の表は **Issue 本文の逐語**を使ってください。
+
+  ## Measured 表の数字の出所（PR に根拠を書くこと）
+  収録記録はリポジトリ内（`workspace/` は .gitignore 対象なのでコミットされません）:
+  - `workspace/market/posts/06-command-code-orchestrate/brief.md`
+    — 本番 c3（#19〜#22）17:25:25 送信 → 17:33:11 報告（**7 分 46 秒**）。作業者 4 体とも
+    Command Code。PR 25〜28、integration verify pass、UAT go 4/4、人が develop で
+    **npm test 47/47** と 4 関数を確認
+  - Claude Code lead の 4 Issue → 4/4・**8m39s** の記録も同じ market workspace にあります
+    （`workspace/market/posts/` 配下を grep して確認し、**記録と一致する数字だけ**書くこと）
+  表の下に「as observed」と明記してください。
+
+  ## hero メディア
+  - **推奨 A**: `workspace/market/posts/06-command-code-orchestrate/clip.mp4`
+    （1,007,180 bytes ≒ 0.96MB、1080²、15 秒）を
+    `.claude/skills/video-to-gif/scripts/to-gif.sh` で GIF 化し
+    `docs/images/demo-hero.en.gif` / `demo-hero.ja.gif` へ。**予算 1.5MB**（`wc -c` で測る）。
+    現行の UX 30 秒 GIF は `docs/images/demo-ux.{en,ja}.gif` へ**改名**して §8 へ移す
+    （`git mv` を使い、README の参照も両方直すこと）。
+  - **B（A が難しい場合）**: 現行 GIF を hero に残し、06 clip は §5 に置く。
+  - §8 には 07 の一覧 GIF（4 セッション、1 体が amber、4/4 unit gate）も置く。素材は
+    `workspace/market/posts/07-four-sessions-one-screen/clip.mp4`。
+  - **alt text は「映っていること」だけ**を書く（#2493 §5 の型）。映っていないことを書かない。
+
+  ## テスト（`tests/unit/docs/public-messaging.test.ts`）
+  現状 `HERO_H1_EN`（:68）/ `HERO_H1_JA`（:69）は**旧 H1** で、concept 2 本（:177-179）と
+  README 2 本（:221-223）がそれを逐語で要求しています。次のように付け替えてください:
+  - `HERO_H1_EN/JA` を**新 H1** に差し替える
+  - 旧 H1 を `AXIS_EN/JA` として**追加**する
+  - **concept ja/en は `AXIS_*` を要求**（現行の hero 要求を置き換える。concept.md 本文は変えない）
+  - **README は `HERO_H1_*` と `AXIS_*` の両方**を要求する
+  - 「Vibe Engineering」2 回以上は §13 の見出し + 定義文で満たす
+  - `##` 数の en/ja 一致も見る
+
+  ## 受入条件
+  - [ ] README en/ja が上の 15 節構成で、`##` 数が一致
+  - [ ] H1・lede・Problem・4 カードの題・What it does not do が #2493 の文言と**逐語で一致**
+  - [ ] Measured 表の 3 行の数字が収録記録と一致（PR に根拠）
+  - [ ] 契約の例が `version` / `title` / `goal` / `scope.allow` / `verify.gates` の形
+  - [ ] `grep -c "Vibe Engineering" README.md` ≥ 2、禁止語 0（`control plane` / `control layer` / 競合名）
+  - [ ] 「your orchestrator」「24/7」「self-managing」「loop」「orchestrate with any agent as the lead」
+        「built-in review」が無い
+  - [ ] Security の 1 文が修正されている（en/ja）
+  - [ ] hero GIF が 1.5MB 以下（`wc -c`）、alt に映っていないことを書いていない
+  - [ ] `npm run test:unit` 緑（定数差し替え・`AXIS_*` 追加を含む）
+  - [ ] CHANGELOG `[Unreleased]` に docs として 1 行（断片で。下記「作業ルール」参照）
+
+  ## スコープ外
+  LP（`website/` — 並行する #2495 が担当。**触らないこと**）、`docs/concept.md` 本文、tutorial、
+  製品側の変更、新規の収録（06 / 07 の既存 clip を使う）。
+
+  ## 並行作業の注意
+  #2495（LP）が同時に走っています。あちらは `website/index.html` と
+  `tests/unit/website/landing-page.test.ts` だけを触ります（定数の共有は無く、
+  `landing-page.test.ts` は自分でファイルを読むので、あなたの定数変更は届きません）。
+  あなたは `website/` を触らないでください。
+
+  ## 作業ルール（厳守）
+  - **`CHANGELOG.md` と `docs/module-reference.md` を編集しないでください**（scope 外です）。
+    代わりに次の 2 ファイルを書いてください。どちらも `dev-reports/` 配下なので commit には
+    入りません。
+    - `dev-reports/changelog/issue-2494.md` — `CHANGELOG.md` の `## [Unreleased]` にそのまま
+      貼れる **1 エントリ**（先頭は `- **<type>(<scope>): …** (#2494): …`）。どの節
+      （`### Added` / `### Changed` / `### Fixed`）に入るかを 1 行目にコメントで書く。
+      形式は次の実例に合わせてください（エントリは**ファイル中では 1 行**）:
+
+      ```markdown
+      <!-- ### Changed -->
+      - **fix(cli): `send` 直後の `wait` が「まだ始まっていない」を完了と読む問題を修正** (#1975): `wait` が `sessionStatus==='ready'` を完了と判定する直前に、**「このインスタンスに最後に渡されたプロンプト」と「エージェント自身が最後に報告したターン終了（`lastStopEventAt`）」を突き合わせる**ゲートを追加。`send` 直後は最新の構造化イベントが直前ターンの `stop` のままなので #1839 の `adoptTurnStart()` が何も採用せず、`turnStartedAt === null` が「決着済み」と読まれてアイドル composer をそのまま完了にしていた（隔離サーバ実測 2026-08-22 / copilot 1.0.80: `send`→`wait` 5 回中 3 回が約 0.3 秒・`basis=scraper_ready`・成果物ゼロで exit 0）。**hook を出さないツールは挙動不変**。保留は `PENDING_PROMPT_HOLD_MS`=60 秒で打ち切り、`--timeout` / `--stall-timeout` はそれより短ければ従来どおり優先される。
+      ```
+
+      - `- **` で始めること（`grep -cE '^- \*\*'` で数える）。
+      - `(#2494)` は要約の**外**（`**` を閉じた後）に置くこと。
+      - `<type>` は CLAUDE.md の規約と同じ語彙。今回は `docs`。
+      - 1 エントリ＝1 行（折らない）。
+    - `dev-reports/module-reference/issue-2494.md` — `docs/module-reference.md` の表に足す
+      注記を**行キー（`| \`path\` |`）ごと**に列挙する。既存行に足すときは
+      `grep -n '^| \`<path>\`' docs/module-reference.md` を実行し、その出力（行番号つきの
+      行キー）を断片に書き写してから書くこと。0 件だった行への追記を指示しない。
+      足すものが無ければ「追記なし」の 1 行でよい（その場合も 0 件だった grep を記録する）。
+  - 断片が無いとリリースノートに載らない。実装と同じ commit の時点で書くこと。
+scope:
+  allow:
+    - "README.md"
+    - "docs/ja/README.md"
+    - "tests/unit/docs/public-messaging.test.ts"
+    - "docs/images/**"
+  deny: []
+verify:
+  gates: null
+success:
+  requireWorkEvidence: true
+  requireScopeClean: true

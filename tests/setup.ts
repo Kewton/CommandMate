@@ -131,6 +131,48 @@ if ((process.env.CM_VERIFY_WORKTREE_INDEX_ROOT ?? '').trim() === '') {
   process.env.CM_VERIFY_WORKTREE_INDEX_ROOT = join(tmpdir(), 'commandmate-test-worktree-index');
 }
 
+// Issue #2490: keep opencode's port ledger out of the developer's home.
+//
+// `getOpencodePortFilePath()` answers `~/.commandmate/opencode-ports.json`
+// unless `CM_OPENCODE_PORT_FILE` says otherwise, and `rememberOpencodePort` /
+// `forgetOpencodePort` are read-modify-write on that one file. It is the same
+// file a running CommandMate server keeps its live assignments in and reads
+// back on restart (`hooks/sources/opencode/reattach.ts`,
+// `slash-commands/opencode-live.ts`), so a test that writes it is editing
+// production state on the machine that ran the suite.
+//
+// Unlike COPILOT_HOME above this is not a fence around a future test — it was
+// already leaking. Measured on the author's machine 2026-09-12, before this
+// line: the real file held SEVEN entries and every one of them was a fixture
+// (`wt-alpha` / `wt-beta` / `wt-1898` / `wt-respond` / `wt-recheck`, all rooted
+// at `/tmp/wt*`), the operator's own assignments having been read-modify-
+// written away. Nineteen opencode test files redirect themselves; roughly ten
+// more reach the module transitively and never think about it, which is why
+// the fix belongs to the default rather than to the files somebody noticed.
+//
+// The `verify` env-clean gate cannot see this: it counts the entries directly
+// under `~/.commandmate`, and rewriting a file that is already there changes
+// no count (#2487's run 750 reported `commandmate-entries clean` while doing
+// exactly this).
+//
+// Blank counts as absent, like COPILOT_HOME: `resolveSafeDirectory` reads `''`
+// as unset and answers the home path, so an empty value left by an isolated
+// runner would route straight back to the file this line is closing. A test
+// that redirects itself with `vi.stubEnv` or a bare assignment still wins.
+//
+// Scoped by worker pid, like COPILOT_HOME and unlike CODEX_HOME: this default
+// has a real writer and the write is read-modify-write on a single JSON
+// document, so one shared path would let two checkouts running the suite at
+// once (this repo routinely runs five) drop each other's keys — the same
+// machine-global collision, one directory further down.
+if ((process.env.CM_OPENCODE_PORT_FILE ?? '').trim() === '') {
+  process.env.CM_OPENCODE_PORT_FILE = join(
+    tmpdir(),
+    'commandmate-test-opencode-ports',
+    `${process.pid}.json`
+  );
+}
+
 // Mock next-intl for all component tests
 vi.mock('next-intl', () => ({
   useTranslations: (namespace?: string) => {
