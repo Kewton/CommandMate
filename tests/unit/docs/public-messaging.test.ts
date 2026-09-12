@@ -26,9 +26,12 @@
  *    ja and en"; a blank cell is how a later issue ends up inventing wording.
  * 7. **The two READMEs are held to the same pins as the concept files**
  *    (Issue #1814). They are the surface most likely to be edited by someone
- *    who never opens public-messaging.md, so the hero, the definition and the
- *    retired wording are asserted there directly — and the two languages are
- *    kept structurally parallel for the same reason the concept files are.
+ *    who never opens public-messaging.md, so the hero, the axis, the definition
+ *    and the retired wording are asserted there directly — and the two languages
+ *    are kept structurally parallel for the same reason the concept files are.
+ *    The READMEs are the only surface pinned to BOTH the hero and the axis
+ *    (Issue #2494): they open with the pitch and then name the method, whereas
+ *    the concept files only ever name the method.
  *
  * @vitest-environment node
  */
@@ -64,9 +67,21 @@ const BANNED_TERMS = [
   'Omnara',
 ];
 
-/** The hero and the definition, verbatim. Changing these is a deliberate act. */
-const HERO_H1_EN = 'From vibe coding to Vibe Engineering.';
-const HERO_H1_JA = 'vibe coding から、Vibe Engineering へ。';
+/**
+ * The hero and the definition, verbatim. Changing these is a deliberate act.
+ *
+ * Issue #2493 moved the axis line off the hero: the hero now says who leads and
+ * what decides done, and `From vibe coding to Vibe Engineering.` became the NAME
+ * OF THE PHILOSOPHY (public-messaging.md §2) rather than the opening line. Both
+ * strings are still load-bearing, so both are pinned — `HERO_H1_*` where a
+ * surface opens, `AXIS_*` where it names the method. The concept docs are the
+ * home of the philosophy and carry only the axis; the READMEs open with the hero
+ * AND carry the axis as their Philosophy heading, so they are held to both.
+ */
+const HERO_H1_EN = "One agent leads. Gates decide what's done.";
+const HERO_H1_JA = '指揮するのは、いつもの Agent。判定するのは、ゲート。';
+const AXIS_EN = 'From vibe coding to Vibe Engineering.';
+const AXIS_JA = 'vibe coding から、Vibe Engineering へ。';
 const DEFINITION_EN =
   'Vibe Engineering — the AI does the building; the system, not your expertise, guarantees the engineering.';
 const DEFINITION_JA =
@@ -127,9 +142,16 @@ describe('public messaging is a single source', () => {
     expect([...documented].sort()).toEqual([...BANNED_TERMS].sort());
   });
 
-  it('states the hero and the definition in both languages', () => {
+  it('states the hero, the axis and the definition in both languages', () => {
     const prose = readProse(MESSAGING_DOC);
-    for (const line of [HERO_H1_EN, HERO_H1_JA, DEFINITION_EN, DEFINITION_JA]) {
+    for (const line of [
+      HERO_H1_EN,
+      HERO_H1_JA,
+      AXIS_EN,
+      AXIS_JA,
+      DEFINITION_EN,
+      DEFINITION_JA,
+    ]) {
       expect(prose, `${MESSAGING_DOC} must carry: ${line}`).toContain(line);
     }
   });
@@ -173,10 +195,12 @@ describe('concept docs are the canonical Vision/Mission text', () => {
     expect(en, `${CONCEPT_EN} must carry the en definition verbatim`).toContain(DEFINITION_EN);
   });
 
-  it('carries the hero line', () => {
-    expect(ja).toContain(HERO_H1_EN);
-    expect(ja).toContain(HERO_H1_JA);
-    expect(en).toContain(HERO_H1_EN);
+  it('carries the axis line, which is where the philosophy is named', () => {
+    // The concept docs are about the method, not the product pitch, so they
+    // keep the axis and are deliberately NOT held to the hero (Issue #2493).
+    expect(ja).toContain(AXIS_EN);
+    expect(ja).toContain(AXIS_JA);
+    expect(en).toContain(AXIS_EN);
   });
 
   it.each([
@@ -222,6 +246,14 @@ describe('the READMEs carry the same axis as the concept docs', () => {
     expect(en, `${README_EN} must carry the en definition verbatim`).toContain(DEFINITION_EN);
     expect(ja, `${README_JA} must open with the ja hero verbatim`).toContain(HERO_H1_JA);
     expect(ja, `${README_JA} must carry the ja definition verbatim`).toContain(DEFINITION_JA);
+  });
+
+  it('keeps the axis as the Philosophy heading, in its own language', () => {
+    // The hero alone would let the retired line disappear from the READMEs
+    // entirely; #2493 demoted it to a heading rather than deleting it, and a
+    // README that opens with the hero but drops the axis has lost the method.
+    expect(en, `${README_EN} must name the axis verbatim`).toContain(AXIS_EN);
+    expect(ja, `${README_JA} must name the axis verbatim`).toContain(AXIS_JA);
   });
 
   it.each([
