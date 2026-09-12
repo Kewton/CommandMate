@@ -71,6 +71,16 @@
  * box. Measured live on v1.40.1 at the production 200x1000 geometry; the capture
  * is `tests/fixtures/chat-dialog-card-2254/command-code-model-1-40-1.txt`.
  *
+ * Issue #2521 added the third `afterPrompt` branch, and it is the first one that
+ * is not read off a footer: `AskUserQuestion` draws none. The screen is a rule, a
+ * tab strip (`● Dispatch | ◯ Review`), the question and a strict `1.`…`N.` run
+ * with one `❯` on it, and `readCommandCodeQuestionRegion` is what recognises that
+ * shape. Before it, a wrapped option description took the frame away from the
+ * shared parser (see the branch) and the generic composer check answered `ready`
+ * off the dialog's own cursor row — so `wait` exited 0 on a pane that was asking
+ * a human a question. The branch publishes the selection-list reason and NO
+ * `promptData`; producing one, and with it `respond` and Auto-Yes, is #2522.
+ *
  * ## What #2304 re-measured, and what it did not change
  *
  * Nothing here changed, and that is the finding. Seven frames were captured
@@ -104,6 +114,7 @@ import { detectThinking, getCliToolPatterns } from '../../cli-patterns';
 import {
   COMMAND_CODE_SELECTION_LIST_FOOTER,
   DISMISSABLE_PANEL_FOOTER_PATTERN,
+  readCommandCodeQuestionRegion,
 } from '../../selection-shape';
 import { STATUS_REASON } from '../../status-reason';
 import { createToolStatusDetector } from '../run-detection';
@@ -157,6 +168,44 @@ export const commandCodeStatusDetector = createToolStatusDetector({
     // a human has to move the highlight and press enter, and the frame says so
     // in as many words.
     if (COMMAND_CODE_SELECTION_LIST_FOOTER.test(frame.lastLines)) {
+      return {
+        status: 'waiting',
+        confidence: 'high',
+        reason: STATUS_REASON.COMMAND_CODE_SELECTION_LIST,
+        hasActivePrompt: false,
+        evidence: 'positive',
+      };
+    }
+
+    // Issue #2521. `AskUserQuestion` draws no footer, so neither branch above
+    // reads it — and the shared `detectPrompt` at step 1 does not either, because
+    // a wrapped option description continues on a row that begins with a SINGLE
+    // space (` answer).`) and the generic multiple-choice parser ends its scan
+    // there, one row short of option 1. The frame therefore reached step 3, where
+    // `COMMAND_CODE_PROMPT_PATTERN` (`^❯(\s*$|\s+\S)`) matched the dialog's own
+    // cursor row, `❯ 1. Prepare worktrees + dispatch (Recommended)`, and the pane
+    // was published as `ready` / `input_prompt`. A human was being asked a
+    // question and `wait` exited 0 on it.
+    //
+    // Evaluated LAST of the three, so `/usage` and `/model` keep the readings
+    // they were measured for, and against `frame.raw` rather than
+    // `frame.lastLines`: the region runs from the last rule row to the last
+    // content row, which on the measured capture is 14 rows — one more than the
+    // 15-row window would leave room for once a description wraps further. The
+    // reading is the shared one the chat surface and the cropper use, so the
+    // status, the card's rows and the suppressed number keys cannot disagree
+    // about which screen this is.
+    //
+    // `COMMAND_CODE_SELECTION_LIST` rather than a reason of its own: the controls
+    // this screen answers to ARE a selection list's — a moving highlight, Enter,
+    // Esc — and membership in `SELECTION_LIST_REASONS` is what publishes
+    // `isSelectionListActive`, raises the card and makes `wait` exit 10 instead
+    // of polling a blocked agent to its `--timeout`.
+    //
+    // `hasActivePrompt: false` and no `promptDetection`: nothing here parsed the
+    // options, so there is no payload to answer with and none is invented.
+    // `respond`, Auto-Yes and the numbered reply UI are Issue #2522's.
+    if (readCommandCodeQuestionRegion(frame.raw) !== null) {
       return {
         status: 'waiting',
         confidence: 'high',
