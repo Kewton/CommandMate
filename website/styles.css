@@ -12,6 +12,9 @@
   --accent: #0a7d8c;
   --accent-fg: #ffffff;
   --accent-subtle: #e6f4f6;
+  /* Amber, for a session waiting on a person (the hero mock, Issue #2551). */
+  --attention: #8a5a00;
+  --attention-subtle: #fff3d6;
   --shadow: 0 1px 3px rgb(31 35 40 / 0.08), 0 8px 24px rgb(31 35 40 / 0.06);
   --radius: 12px;
   --maxw: 1080px;
@@ -28,6 +31,8 @@
     --accent: #39c0ce;
     --accent-fg: #04232a;
     --accent-subtle: #0e2e33;
+    --attention: #e3b341;
+    --attention-subtle: #33270c;
     --shadow: 0 1px 3px rgb(1 4 9 / 0.4), 0 8px 24px rgb(1 4 9 / 0.3);
   }
 }
@@ -330,13 +335,163 @@ a {
   background: var(--bg-subtle);
 }
 
-/* ---------- hero loop diagram ---------- */
+/* ---------- inline drawings ---------- */
 
-/* The hero drawing is inline SVG so that these rules reach it, and every ink in
-   it is a custom property. That is the whole point: a literal colour here is how
-   a diagram ends up perfectly legible in the theme its author had open and
-   invisible in the other one. Nothing below may be a hex, rgb() or named colour
-   (tests/unit/website/landing-page.test.ts pins that). */
+/* The drawings on this page are inline SVG so that these rules reach them, and
+   every ink in them is a custom property. That is the whole point: a literal
+   colour here is how a diagram ends up perfectly legible in the theme its author
+   had open and invisible in the other one. Nothing in the drawing rules below
+   may be a hex, rgb() or named colour (tests/unit/website/landing-page.test.ts
+   pins that for each drawing class). */
+
+/* The hero session mock (Issue #2551). Contrast, text on its fill, light / dark:
+   --fg 15.80 / 14.65 and --fg-muted 6.11 / 5.94 on --surface; --fg 14.02 / 12.20
+   and --fg-muted 5.43 / 4.95 on --accent-subtle; --fg 14.84 / 14.65 and
+   --fg-muted 5.74 / 5.94 on --bg-subtle (the gate lines); on the amber row,
+   --fg 14.33 / 12.37 and --fg-muted 5.54 / 5.02 on --attention-subtle, and the
+   "needs you" label, --attention on --surface, 5.93 / 8.90. */
+.hero-mock {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.hero-mock text {
+  font-family: inherit;
+}
+
+.hero-mock .frame {
+  fill: var(--surface);
+  stroke: var(--border);
+  stroke-width: 1.5;
+}
+
+.hero-mock .rule {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.hero-mock .mock-heading {
+  fill: var(--fg);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.hero-mock .session-name {
+  fill: var(--fg);
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.hero-mock .session-agent {
+  fill: var(--fg-muted);
+  font-size: 11px;
+}
+
+.hero-mock .pill {
+  stroke-width: 1;
+}
+
+.hero-mock .pill-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-anchor: middle;
+}
+
+/* The label is never --accent on --accent-subtle: that pair is 4.31:1 in the
+   light theme, under the 4.5:1 floor (see .remote-docs below). */
+.hero-mock .session-working .dot {
+  fill: var(--accent);
+}
+
+.hero-mock .session-working .pill {
+  fill: var(--accent-subtle);
+  stroke: var(--accent);
+}
+
+.hero-mock .session-working .pill-label {
+  fill: var(--fg);
+}
+
+.hero-mock .session-done .dot {
+  fill: var(--fg-muted);
+}
+
+.hero-mock .session-done .pill {
+  fill: var(--surface);
+  stroke: var(--border);
+}
+
+.hero-mock .session-done .pill-label {
+  fill: var(--fg-muted);
+}
+
+/* The one row that is waiting on a person carries the page's only warm colour,
+   so it is the row the eye lands on. */
+.hero-mock .session-needs .band {
+  fill: var(--attention-subtle);
+}
+
+.hero-mock .session-needs .dot {
+  fill: var(--attention);
+}
+
+.hero-mock .session-needs .pill {
+  fill: var(--surface);
+  stroke: var(--attention);
+}
+
+.hero-mock .session-needs .pill-label {
+  fill: var(--attention);
+  font-weight: 700;
+}
+
+.hero-mock .terminal {
+  fill: var(--bg-subtle);
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.hero-mock .term {
+  fill: var(--fg);
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 11px;
+}
+
+.hero-mock .term-prompt {
+  fill: var(--fg-muted);
+}
+
+.hero-mock .term-strong {
+  font-weight: 700;
+}
+
+.hero-mock .pointer {
+  stroke: var(--fg-muted);
+  stroke-width: 1.25;
+}
+
+.hero-mock .pointer-head {
+  fill: var(--fg-muted);
+}
+
+.hero-mock .term-note {
+  fill: var(--fg-muted);
+  font-size: 11px;
+  font-style: italic;
+}
+
+/* 360 user units render at roughly 350 CSS px on a 390px phone. Capping it on
+   wide screens keeps the type from ballooning past the hero copy beside it. */
+@media (min-width: 901px) {
+  .hero-mock {
+    max-width: 28rem;
+    margin-left: auto;
+  }
+}
+
+/* The four-step cycle at the head of The loop, moved out of the hero in #2551. */
 .loop-diagram {
   width: 100%;
   height: auto;
@@ -397,14 +552,13 @@ a {
   text-anchor: end;
 }
 
-/* The drawing is the whole width of its column on a phone, where 400 user units
-   render at roughly 335 CSS px. Capping it on wide screens keeps the type from
-   ballooning past the hero copy beside it. */
-@media (min-width: 901px) {
-  .loop-diagram {
-    max-width: 30rem;
-    margin-left: auto;
-  }
+/* The whole width of the section on a phone, where 400 user units render at
+   roughly 350 CSS px. On wide screens it is capped and centred over the beats
+   rather than stretched to the section, which would set its labels larger than
+   the section's own headings. */
+.loop-figure {
+  margin: 0 auto;
+  max-width: 30rem;
 }
 
 /* ---------- sections ---------- */
