@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.0] - 2026-09-13
+
+> **Highlight**: `/sessions` をリンクカードの一覧から、複数セッションを 2 列のタイルで同時に見張れる画面にした（Epic #2508）。タイルは会話履歴を既定で表示し、ターミナル面への切替・composer からの返信・Auto-Yes の切替までタイルの中で完結する。タイルを並べても負荷が膨らまないよう、画面外のタイルは通信せず（実ブラウザ計測で 22 タイル中 18 枚が 0 本）、アイドルのタイルを詳細画面とは別のカデンスに落とした結果、タイル 20 枚の定常負荷は 11.3 → 2.0 req/s（サーバ CPU 24.6% → 6.7%）になった。あわせて、圏外で送ったメッセージが復帰後も「送信中」のまま再送されなかった v0.35.0 の既知の問題（#2535）を直し、復帰から約 260ms で 1 回だけ再送されることを実機で確認した。
+
+### Added
+
+- **feat(sessions): `/sessions` のタイルに composer と Auto-Yes トグルを置き、worktree を開かずに返信できるようにした** (#2512): 各タイルの下端に `MessageInput` を置き（チャット面・ターミナル面の両方、画面内のタイルのみマウント）、worktree 詳細画面と同じ `usePendingMessages`（#1121）で送信直後に楽観バブルを出し、失敗時は retry / discard（discard した文面は composer に戻る）、同一文面の連投はサーバ echo と 1:1 で照合して二重登録しない。送信は詳細画面と同じ `POST /send`（選択中インスタンスの `cliToolId` / `instanceId`）なので詳細画面の同インスタンスの履歴にそのまま載る。`connectivity` は `SessionTileGrid` が `useConnectivity` を 1 回だけ読んで全タイルに配る形で配線した（タイルごとに読むと劣化中の到達性プローブがタイル枚数ぶん走るため）ので、圏外で送ったメッセージは `error` に落ちず park され、復帰時に 1 回だけ自動再送される。Auto-Yes は方式 b を採用し、`GET /api/worktrees` の各行に `autoYesByInstance`（有効なインスタンスだけ `{ enabled, expiresAt }`、無ければ `{}`、`?includeStatus=0` でも同梱、期限切れは読み取り時に off へ解決）を載せ、タイルは選択中インスタンスの値を表示する — 表示のための追加リクエストはタイル 1 / 8 / 20 枚いずれも 0 件（テストで固定）。トグルは既存の `POST /api/worktrees/:id/auto-yes` を使い、応答値を即時表示したうえで一覧キャッシュを 1 回だけ再取得する（再取得が反映された行が来た時点で行の値に戻る）。composer の分だけ本文が縮むため、タイル高を 32rem → 35rem（#2509 の 480〜560px の上限）に上げ、本文に 15rem の下限を置いた（Tailwind クラスからの計算値で、デスクトップの本文は約 408px、テキストエリアが上限 160px まで伸びたスマホ幅でも下限を割らない。ブラウザ実測はしていない。ターミナル面の縦積みの下限も 9rem + 7rem → 8.5rem + 6.5rem に揃えた）。なお composer はマウント時にスラッシュコマンド一覧を 1 回取得するため、タイルが画面内に入るたびに 1 リクエスト発生する（ポーリングではない）。
+- **feat(sessions): `/sessions` のタイルでターミナル面を選べるようにし、TUI を崩さず読める幅と縦積みの履歴を持たせた** (#2510): タイルヘッダにチャット / ターミナルの切替（worktree ごとに `commandmate.sessions.tileSurfaceMode-<id>` へ永続、既定は従来どおり chat）を追加し、チャット面の「ターミナルを開く」も `/worktrees/<id>` への遷移ではなくタイル内の切替にした。ターミナル面は全ツール `wrapMode='frame'`（フレーム自身の桁数を保ちタイル内で横スクロール）＋ `TerminalDisplay` の新 prop `density='compact'`（12px、`text-sm` 比で約 17% 多くの桁が見える）で描き、1920x1080 実測でタイルの端末領域 804px に対し claude の 200 桁フレームが 1440px のまま枠線・区切り線・フッタが 1 行ずつ保たれ、ページ自体は横スクロールしない（390px〜1920px で確認）。履歴はターミナルの下に 3:2（実測 274px / 183px）で縦積みし、既定表示。表示状態は `useHistoryPaneState` に追加したタイル専用スコープ（`commandmate.sessions.tileHistoryVisible`）に保存し、同一ページ内の同期イベントもスコープで分けたため、タイルと worktree 詳細画面の履歴開閉は互いに影響しない（引数なし呼び出しは従来のキーのまま）。履歴を閉じたターミナル面のタイルは `/messages` をポーリングしない（#2511 のタイル用カデンスはそのまま）。あわせて `measureTerminalFrameColumns()` が OSC 8 ハイパーリンクを桁数に数えていたため claude の実キャプチャを 228〜270 桁と過大計測し、frame 表示で最大 70 桁ぶんの空の横スクロールが出ていた点を、描画側と同じ `stripOsc` で除いてから測るよう修正した。
+- **feat(sessions): /sessions にタイル表示モードを追加** (#2509): list / tile を localStorage 永続（既定 list）で切り替え、tile では `container-custom` を外した全幅 `grid-cols-1 xl:grid-cols-2` に各 worktree のチャット（会話履歴）を内蔵した固定高タイルを並べる。タイルヘッダはリポジトリ名 / `/worktrees/<id>` へのブランチリンク / 状態ドット / instance selector（カード全体はリンクにしない）。ビューポート外のタイルは `IntersectionObserver` で `enabled: false` にし `/current-output` も `/messages` も叩かない。
+
+### Changed
+
+- **perf(sessions): `/sessions` タイル専用のポーリングカデンスを詳細画面と別プロファイルに分離** (#2511): タイル 1 枚あたり `/current-output` と `/messages` の 2 本が走る構造を実測（production ビルド + 隔離 tmux/DB のハーネス `scripts/measure-tile-polling/`）し、タイル 20 枚・全アイドル・WS 接続時で 11.3 req/s・18.6 MB/s・サーバ CPU 24.6% だった定常負荷を 2.0 req/s・2.5 MB/s・6.7% に下げた（`src/config/pane-polling-cadence.ts` の `TILE_PANE_POLLING_CADENCE` / `TILE_MESSAGES_POLLING_CADENCE`）。`terminal.isRunning` は「tmux セッションが生きている」であって生成中ではないためアイドルのタイルが 2 秒間隔で回っていた件と、`pushHealthy` が生成中しか立たないため遅いカデンスに落ちられない件をタイル側だけで解消し、詳細画面（`/worktrees/<id>`）の 2s/5s/15s は 32 通りの入力全列挙テストで従来どおりに固定した。計測条件と生データは `docs/design/sessions-tile-polling-2511.md`。
+
+### Fixed
+
+- **fix(chat): オフライン送信の自動再送が実機で発火しない問題を修正** (#2535): オフライン中は `serverReachable` が healthy 時の `true` のまま残り（プローブは `browserOnline` でゲートされ、`assertOnline` は送信前に落として何も報告しない）、`isServerConfirmedReachable()` が圏外の間ずっと `true` を返していた。このため #2503 の再送トリガである「reachable の立ち上がり」が一度も観測されず、圏外で送ったメッセージが `Sending…` のまま残り `POST /api/worktrees/<id>/send` が再発行されなかった。`navigator.onLine === false` のときは reachable を確定させない・offline 遷移時に `serverReachable` を未計測へ戻す・再送の arming を「保留中のキュー」という定常状態からも行い（復帰時の `online` イベントと WebSocket 再接続が同一バッチに畳まれても取りこぼさない）よう修正。
+
 ## [0.35.0] - 2026-09-12
 
 > **Highlight**: スマホ・弱電波での操作性をまとめて立て直したリリース。通信が数秒切れただけで worktree 詳細画面が全画面エラーに落ちてポーリングごと止まる、通信断の chunk 読み込み失敗を「サーバ更新」と誤判定して入力中の内容ごと自動リロードする、WebSocket に heartbeat が無く half-open 接続のまま送信が黙って消える——という 3 つの「固まる」経路を塞ぎ、スマホに接続状態を表示する `useConnectivity` を新設した。あわせてファイル面を広げ、2MB を超えるテキストファイルが 413 で閲覧すらできなかったのを読み取り専用で開けるようにしたうえで `.txt` を編集可能にし、スマホからも `.md` 以外を編集できるようにした。実測では heartbeat が 30 秒間隔で届き、pong を返さない接続はサーバが 52 秒で切断、クライアントの half-open 検知は 75.1 秒、オンライン復帰からの再接続は 5ms である。

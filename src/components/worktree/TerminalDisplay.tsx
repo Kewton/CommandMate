@@ -20,6 +20,7 @@ import { useTerminalSearch } from '@/hooks/useTerminalSearch';
 import { TerminalSearchBar } from '@/components/worktree/TerminalSearchBar';
 import {
   measureTerminalFrameColumns,
+  type TerminalDisplayDensity,
   type TerminalWrapMode,
 } from '@/config/terminal-display-compaction';
 
@@ -75,6 +76,16 @@ export interface TerminalDisplayProps {
    * than read from the tmux geometry config, so the two never have to agree.
    */
   wrapMode?: TerminalWrapMode;
+  /**
+   * Issue #2510: glyph size. `'regular'` (default, every pre-#2510 caller) is
+   * `text-sm` with `p-4`; `'compact'` is `text-xs` with `p-2`, for a pane that
+   * has to show a 200-column frame in a half-width `/sessions` tile.
+   *
+   * A prop rather than a `className` override: `text-sm` and `text-xs` in one
+   * class list are resolved by stylesheet order, not by the order written, so a
+   * caller's `text-xs` would silently lose.
+   */
+  density?: TerminalDisplayDensity;
   /** Additional CSS classes */
   className?: string;
 }
@@ -122,6 +133,7 @@ export const TerminalDisplay = memo(function TerminalDisplay({
   compactTuiLayoutPadding = false,
   preservePaintedPanelRows = false,
   wrapMode = 'viewport',
+  density = 'regular',
   className = '',
 }: TerminalDisplayProps) {
   // Issue #2445: the two #842 placeholders were the last Japanese string literals
@@ -305,8 +317,11 @@ export const TerminalDisplay = memo(function TerminalDisplay({
         // Base terminal styling
         'terminal',
         'font-mono',
-        'text-sm',
-        'p-4',
+        // Issue #2510: `compact` sets the frame smaller so a tile shows more of
+        // its columns before the sideways scroll is needed. `ch` in `frameStyle`
+        // follows the font, so the frame width stays exact in both.
+        density === 'compact' ? 'text-xs' : 'text-sm',
+        density === 'compact' ? 'p-2' : 'p-4',
         'rounded-lg',
         'overflow-y-auto',
         // Issue #2047: `frame` mode gives the output block a fixed `ch` width, so
@@ -330,7 +345,7 @@ export const TerminalDisplay = memo(function TerminalDisplay({
       ]
         .filter(Boolean)
         .join(' '),
-    [isActive, className, wrapMode]
+    [isActive, className, wrapMode, density]
   );
 
   // Issue #1079: the scroll FAB stays subtle while idle and reveals to full
