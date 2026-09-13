@@ -99,3 +99,26 @@ export function splitChatMarkdownBody(content: string): ChatMarkdownBodySplit {
 export function chatMarkdownCopyText(split: ChatMarkdownBodySplit): string | null {
   return split.body.trim().length > 0 ? split.body : null;
 }
+
+/**
+ * What the "copy the full message" action on a Markdown bubble puts on the
+ * clipboard, or null when the bubble should not offer that action (Issue #2545).
+ *
+ * The stored row itself — the answer AND the Thinking and Tool calls sections
+ * {@link splitChatMarkdownBody} folded into chips — which is exactly what the
+ * bubble's copy handed over before #2544. Offered only when something WAS
+ * folded: on a row with no chips the whole row is the answer, and a second
+ * button would put the same text on the clipboard as the first one.
+ *
+ * On a turn that only ran tools {@link chatMarkdownCopyText} answers null, so
+ * this is the one copy such a row offers.
+ *
+ * @param content - The Markdown body of one message, as stored
+ * @param split - {@link splitChatMarkdownBody}'s answer for that same `content`
+ */
+export function chatMarkdownFullCopyText(
+  content: string,
+  split: ChatMarkdownBodySplit,
+): string | null {
+  return split.folded ? content : null;
+}
