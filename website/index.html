@@ -88,60 +88,78 @@
         </div>
 
         <figure class="hero-media">
-          <!-- The loop this page is about, drawn rather than asserted. Inline
-               so it inherits the page's own custom properties: every colour in
-               it is a CSS variable (see .loop-diagram in styles.css), which is
-               what makes it follow prefers-color-scheme instead of being legible
-               in one theme and invisible in the other. viewBox + width/height
-               reserve the box before layout, and role/aria-label make it one
-               image to a screen reader rather than a pile of stray labels. -->
+          <!-- The product on first view, and what "gate" means on this page
+               (Issue #2551). Elsewhere "gate" is used for a question an agent
+               stops to ask a person; here it is a command you declared, and its
+               exit code. So the drawing puts the session list — where a person
+               is asked — above the gate lines, which answer with a number.
+               The gate lines copy the shape `commandmate wait --verify` prints
+               (GATE <id> PASS, RESULT passed; src/cli/utils/verify-runner.ts).
+               Inline so it inherits the page's own custom properties: every
+               colour in it is a CSS variable (see .hero-mock in styles.css), so
+               it follows prefers-color-scheme instead of being legible in one
+               theme and invisible in the other. viewBox + width/height reserve
+               the box before layout, and role/aria-label make it one image to a
+               screen reader rather than a pile of stray labels. -->
           <svg
-            class="loop-diagram"
-            viewBox="0 0 400 300"
-            width="400"
-            height="300"
+            class="hero-mock"
+            viewBox="0 0 360 370"
+            width="360"
+            height="370"
             role="img"
-            aria-label="The CommandMate loop, drawn as a cycle of four steps: a requirement becomes a contract; CommandMate sends that contract to any of eight coding agent CLIs; verification gates judge the work; and the verified result comes back with the evidence that feeds the next requirement."
+            aria-label="A CommandMate session list with four worktree sessions: two agents working, one done, and one marked needs you. Under it, commandmate wait --verify runs the gates for the finished session and prints GATE work-evidence PASS, GATE unit PASS (exit=0) and RESULT passed, then echo $? prints 0: the exit code is the verdict."
           >
-            <g class="node">
-              <rect x="8" y="18" width="150" height="70" rx="12" />
-              <text class="node-title" x="83" y="49">Requirement</text>
-              <text class="node-sub" x="83" y="68">one line in an issue</text>
+            <rect class="frame" x="1" y="1" width="358" height="368" rx="12" />
+            <text class="mock-heading" x="18" y="29">Sessions</text>
+
+            <g class="session session-working">
+              <line class="rule" x1="1" y1="46" x2="359" y2="46" />
+              <circle class="dot" cx="24" cy="69" r="4.5" />
+              <text class="session-name" x="38" y="65">wt-retry</text>
+              <text class="session-agent" x="38" y="81">Claude Code</text>
+              <rect class="pill" x="262" y="58" width="82" height="22" rx="11" />
+              <text class="pill-label" x="303" y="73">working</text>
             </g>
 
-            <g class="node node-accent">
-              <rect x="242" y="18" width="150" height="70" rx="12" />
-              <text class="node-title" x="317" y="49">CommandMate</text>
-              <text class="node-sub" x="317" y="68">contract and gates</text>
+            <g class="session session-done">
+              <line class="rule" x1="1" y1="92" x2="359" y2="92" />
+              <circle class="dot" cx="24" cy="115" r="4.5" />
+              <text class="session-name" x="38" y="111">wt-pick</text>
+              <text class="session-agent" x="38" y="127">Codex</text>
+              <rect class="pill" x="262" y="104" width="82" height="22" rx="11" />
+              <text class="pill-label" x="303" y="119">done</text>
             </g>
 
-            <g class="node">
-              <rect x="242" y="212" width="150" height="70" rx="12" />
-              <text class="node-title" x="317" y="243">Coding agent</text>
-              <text class="node-sub" x="317" y="262">any of eight CLIs</text>
+            <g class="session session-needs">
+              <rect class="band" x="1" y="138" width="358" height="46" />
+              <line class="rule" x1="1" y1="138" x2="359" y2="138" />
+              <circle class="dot" cx="24" cy="161" r="4.5" />
+              <text class="session-name" x="38" y="157">wt-auth</text>
+              <text class="session-agent" x="38" y="173">Antigravity</text>
+              <rect class="pill" x="262" y="150" width="82" height="22" rx="11" />
+              <text class="pill-label" x="303" y="165">needs you</text>
             </g>
 
-            <g class="node">
-              <rect x="8" y="212" width="150" height="70" rx="12" />
-              <text class="node-title" x="83" y="243">Verified result</text>
-              <text class="node-sub" x="83" y="262">exit 0, plus evidence</text>
+            <g class="session session-working">
+              <line class="rule" x1="1" y1="184" x2="359" y2="184" />
+              <circle class="dot" cx="24" cy="207" r="4.5" />
+              <text class="session-name" x="38" y="203">wt-docs</text>
+              <text class="session-agent" x="38" y="219">Command Code</text>
+              <rect class="pill" x="262" y="196" width="82" height="22" rx="11" />
+              <text class="pill-label" x="303" y="211">working</text>
+              <line class="rule" x1="1" y1="230" x2="359" y2="230" />
             </g>
 
-            <line class="edge" x1="164" y1="53" x2="229" y2="53" />
-            <polygon class="arrowhead" points="240,53 229,48 229,58" />
-            <text class="edge-label" x="200" y="41">contract</text>
-
-            <line class="edge" x1="317" y1="94" x2="317" y2="199" />
-            <polygon class="arrowhead" points="317,210 312,199 322,199" />
-            <text class="edge-label label-end" x="309" y="153">send</text>
-
-            <line class="edge" x1="236" y1="247" x2="171" y2="247" />
-            <polygon class="arrowhead" points="160,247 171,242 171,252" />
-            <text class="edge-label" x="200" y="235">gates</text>
-
-            <line class="edge" x1="83" y1="206" x2="83" y2="101" />
-            <polygon class="arrowhead" points="83,90 78,101 88,101" />
-            <text class="edge-label label-start" x="91" y="153">evidence</text>
+            <rect class="terminal" x="12" y="242" width="336" height="112" rx="8" />
+            <text class="term" x="26" y="263"><tspan class="term-prompt">$</tspan> commandmate wait wt-pick --verify</text>
+            <text class="term" x="26" y="278">GATE work-evidence PASS</text>
+            <text class="term" x="26" y="293">GATE unit PASS (exit=0)</text>
+            <text class="term term-strong" x="26" y="308">RESULT passed</text>
+            <text class="term" x="26" y="323"><tspan class="term-prompt">$</tspan> echo $?</text>
+            <text class="term term-strong" x="26" y="338">0</text>
+            <line class="pointer" x1="50" y1="334" x2="70" y2="334" />
+            <polygon class="pointer-head" points="41,334 50,329.5 50,338.5" />
+            <text class="term-note" x="78" y="338">the exit code is the verdict</text>
           </svg>
         </figure>
       </section>
@@ -404,6 +422,63 @@ verify:
           beats — the requirement, the contract, the agent's run, the verdict — and so does a task
           you send yourself.
         </p>
+
+        <!-- The cycle the four beats below walk through, drawn. It opened the
+             page until Issue #2551 gave the hero to the session mock, and it
+             moved here rather than out: this is the section it is a picture of.
+             Inline for the same reason as the hero drawing — every colour in it
+             is a CSS variable, so it follows prefers-color-scheme — and labelled
+             as one image, with its box reserved by viewBox + width/height. -->
+        <figure class="loop-figure">
+          <svg
+            class="loop-diagram"
+            viewBox="0 0 400 300"
+            width="400"
+            height="300"
+            role="img"
+            aria-label="The CommandMate loop, drawn as a cycle of four steps: a requirement becomes a contract; CommandMate sends that contract to any of eight coding agent CLIs; verification gates judge the work; and the verified result comes back with the evidence that feeds the next requirement."
+          >
+            <g class="node">
+              <rect x="8" y="18" width="150" height="70" rx="12" />
+              <text class="node-title" x="83" y="49">Requirement</text>
+              <text class="node-sub" x="83" y="68">one line in an issue</text>
+            </g>
+
+            <g class="node node-accent">
+              <rect x="242" y="18" width="150" height="70" rx="12" />
+              <text class="node-title" x="317" y="49">CommandMate</text>
+              <text class="node-sub" x="317" y="68">contract and gates</text>
+            </g>
+
+            <g class="node">
+              <rect x="242" y="212" width="150" height="70" rx="12" />
+              <text class="node-title" x="317" y="243">Coding agent</text>
+              <text class="node-sub" x="317" y="262">any of eight CLIs</text>
+            </g>
+
+            <g class="node">
+              <rect x="8" y="212" width="150" height="70" rx="12" />
+              <text class="node-title" x="83" y="243">Verified result</text>
+              <text class="node-sub" x="83" y="262">exit 0, plus evidence</text>
+            </g>
+
+            <line class="edge" x1="164" y1="53" x2="229" y2="53" />
+            <polygon class="arrowhead" points="240,53 229,48 229,58" />
+            <text class="edge-label" x="200" y="41">contract</text>
+
+            <line class="edge" x1="317" y1="94" x2="317" y2="199" />
+            <polygon class="arrowhead" points="317,210 312,199 322,199" />
+            <text class="edge-label label-end" x="309" y="153">send</text>
+
+            <line class="edge" x1="236" y1="247" x2="171" y2="247" />
+            <polygon class="arrowhead" points="160,247 171,242 171,252" />
+            <text class="edge-label" x="200" y="235">gates</text>
+
+            <line class="edge" x1="83" y1="206" x2="83" y2="101" />
+            <polygon class="arrowhead" points="83,90 78,101 88,101" />
+            <text class="edge-label label-start" x="91" y="153">evidence</text>
+          </svg>
+        </figure>
 
         <ol class="beats">
           <li class="beat">

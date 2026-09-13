@@ -20,6 +20,10 @@
  * because it is still the og:image. And the wording is no longer free text: it
  * is copied from `docs/design/public-messaging.md`, so the retired vocabulary is
  * asserted absent from everything Pages serves.
+ *
+ * Issue #2551 gave the hero to a drawing of the product — sessions, then gate
+ * lines — and moved the loop down to The loop. The colour guard now scans every
+ * drawing in INLINE_DRAWINGS rather than the one that happens to be in the hero.
  */
 import { describe, it, expect } from 'vitest';
 import fs from 'fs';
@@ -44,6 +48,15 @@ const PAGES_BASE_URL = 'https://kewton.github.io/CommandMate/';
 
 /** The LP's own source, i.e. everything Pages actually serves as the page. */
 const LP_SOURCE_FILES = ['index.html', 'styles.css', 'main.js'];
+
+/**
+ * The class of every inline SVG drawing on the page, each of which must take
+ * all of its inks from custom properties. #1812 had one, the loop in the hero;
+ * #2551 put a session mock in the hero and moved the loop to The loop — a
+ * drawing that leaves the hero still has to follow the colour scheme, so the
+ * scan grew rather than moved. A new drawing is one more entry here.
+ */
+const INLINE_DRAWINGS = ['hero-mock', 'loop-diagram'];
 
 /** Everything under website/ a human reads, as opposed to the media bytes. */
 const TEXT_FILE = /\.(html|css|js|md|json|svg|txt)$/i;
@@ -621,11 +634,13 @@ describe('Issue #1812: the hero diagram', () => {
     return figure![0];
   };
 
-  /** Every declaration inside a `.loop-diagram …` rule, selector kept for the message. */
-  const diagramDeclarations = (): { selector: string; property: string; value: string }[] => {
+  /** Every declaration inside a `.<drawing> …` rule, selector kept for the message. */
+  const diagramDeclarations = (
+    drawing: string,
+  ): { selector: string; property: string; value: string }[] => {
     const css = fs.readFileSync(STYLES_CSS, 'utf-8');
 
-    return Array.from(css.matchAll(/(\.loop-diagram[^{}]*)\{([^}]*)\}/g)).flatMap(
+    return Array.from(css.matchAll(new RegExp(`(\\.${drawing}[^{}]*)\\{([^}]*)\\}`, 'g'))).flatMap(
       ([, selector, body]) =>
         Array.from(body.matchAll(/\b(fill|stroke|color|background|background-color)\s*:\s*([^;]+);/g)).map(
           (declaration) => ({
@@ -637,7 +652,7 @@ describe('Issue #1812: the hero diagram', () => {
     );
   };
 
-  it('draws the loop inline, so the page CSS reaches it', () => {
+  it('draws the hero inline, so the page CSS reaches it', () => {
     expect(heroFigure()).toMatch(/<svg\b/);
   });
 
@@ -663,15 +678,103 @@ describe('Issue #1812: the hero diagram', () => {
     // The failure this exists for: a hard-coded ink is picked while looking at
     // one colour scheme and is unreadable in the other, and nothing in a unit
     // suite notices because the markup is valid either way.
-    const declarations = diagramDeclarations();
+    const literal = INLINE_DRAWINGS.flatMap((drawing) => {
+      const declarations = diagramDeclarations(drawing);
 
-    expect(declarations.length, 'no .loop-diagram paint rules found in styles.css').toBeGreaterThan(4);
+      // Per drawing, so a renamed class fails here instead of scanning nothing.
+      expect(declarations.length, `no .${drawing} paint rules found in styles.css`).toBeGreaterThan(4);
 
-    const literal = declarations
-      .filter(({ value }) => !/^var\(--/.test(value) && !['none', 'inherit'].includes(value))
-      .map(({ selector, property, value }) => `${selector} { ${property}: ${value} }`);
+      return declarations
+        .filter(({ value }) => !/^var\(--/.test(value) && !['none', 'inherit'].includes(value))
+        .map(({ selector, property, value }) => `${selector} { ${property}: ${value} }`);
+    });
 
-    expect(literal, 'every colour in the hero diagram must be a CSS variable').toEqual([]);
+    expect(literal, 'every colour in an inline drawing must be a CSS variable').toEqual([]);
+  });
+});
+
+/**
+ * Issue #2551 — the hero shows the product instead of the loop: a session list
+ * with one row waiting on a person, above the gate lines `commandmate wait
+ * --verify` prints. "Gate" is used elsewhere for a question an agent stops to
+ * ask; this drawing is where the page defines it as a declared command and its
+ * exit code. The loop drawing moved down to the head of The loop.
+ *
+ * The block above still carries the four hero guards and now scans both
+ * drawings' CSS. What it cannot see is the markup: an ink written as a `fill=`
+ * attribute on the SVG never reaches styles.css, and a class the scan reads
+ * that no drawing wears is a scan of nothing. Those two are pinned here.
+ */
+describe('Issue #2551: the session mock in the hero, the loop in The loop', () => {
+  const drawingMarkup = (drawing: string): string => {
+    const svg = new RegExp(`<svg\\s+class="${drawing}"[\\s\\S]*?</svg>`).exec(readIndexHtml());
+
+    expect(svg, `no <svg class="${drawing}"> in index.html`).not.toBeNull();
+    return svg![0];
+  };
+
+  const loopSection = (): string => {
+    const section = /<section class="section" id="loop"[\s\S]*?<\/section>/.exec(readIndexHtml());
+
+    expect(section, 'no #loop section in index.html').not.toBeNull();
+    return section![0];
+  };
+
+  it('draws the session mock in the hero, and the loop nowhere else but The loop', () => {
+    const hero = /<figure class="hero-media">[\s\S]*?<\/figure>/.exec(readIndexHtml())![0];
+
+    expect(hero).toContain(drawingMarkup('hero-mock'));
+    expect(hero).not.toContain('loop-diagram');
+    expect(readIndexHtml().split('class="loop-diagram"')).toHaveLength(2);
+  });
+
+  it('opens The loop on the loop drawing, before the four beats', () => {
+    const section = loopSection();
+    const svg = drawingMarkup('loop-diagram');
+
+    expect(section, 'the loop drawing must sit in #loop').toContain(svg);
+    expect(section.indexOf(svg)).toBeLessThan(section.indexOf('<ol class="beats">'));
+    // It left the hero, so the hero guards above no longer look at it.
+    expect(svg).toMatch(/role="img"/);
+    expect(/aria-label="([^"]+)"/.exec(svg)?.[1].length ?? 0).toBeGreaterThan(40);
+    expect(svg).toMatch(/viewBox="[^"]+"\s+width="\d+"\s+height="\d+"/);
+  });
+
+  it('marks one session as needing you, above gate lines in the verify output format', () => {
+    const svg = drawingMarkup('hero-mock');
+    const pills = [...svg.matchAll(/<text class="pill-label"[^>]*>([\s\S]*?)<\/text>/g)].map(
+      (match) => text(match[1]),
+    );
+    const terminal = [...svg.matchAll(/<text class="term[\s"][^>]*>([\s\S]*?)<\/text>/g)].map(
+      (match) => text(match[1]),
+    );
+
+    expect(pills).toHaveLength(4);
+    expect(pills.filter((label) => label === 'needs you')).toHaveLength(1);
+    expect(pills.filter((label) => label === 'working' || label === 'done')).toHaveLength(3);
+    expect(svg, 'the needs-you row is the amber one').toMatch(
+      /<g class="session session-needs">(?:(?!<\/g>)[\s\S])*needs you/,
+    );
+    // The shapes src/cli/utils/verify-runner.ts prints: `GATE <id> <LABEL>`
+    // with an optional `(detail)`, then `RESULT <status>`.
+    expect(terminal).toEqual([
+      '$ commandmate wait wt-pick --verify',
+      'GATE work-evidence PASS',
+      'GATE unit PASS (exit=0)',
+      'RESULT passed',
+      '$ echo $?',
+      '0',
+    ]);
+  });
+
+  it('writes no ink into the markup of either drawing, where the CSS scan cannot see it', () => {
+    const offenders = INLINE_DRAWINGS.flatMap((drawing) =>
+      [...drawingMarkup(drawing).matchAll(/\s(fill|stroke|color|stop-color|style)="[^"]*"/g)].map(
+        (match) => `.${drawing}: ${match[0].trim()}`,
+      ),
+    );
+
+    expect(offenders).toEqual([]);
   });
 });
 
