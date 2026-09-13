@@ -28,6 +28,7 @@
 import { describe, it, expect } from 'vitest';
 import { spawnSync } from 'child_process';
 import fs from 'fs';
+import { createRequire } from 'module';
 import os from 'os';
 import path from 'path';
 
@@ -949,9 +950,15 @@ describe('Issue #2554: Trust', () => {
  * What is easy to get wrong is autoplay: iOS Safari refuses it without both
  * `muted` and `playsinline`, and the failure is silent — a still frame with no
  * error anywhere. These pin the attributes that make playback happen at all.
+ *
+ * Since #2556 the tags carry `data-autoplay` rather than `autoplay`, and main.js
+ * calls play() once a demo is on screen; the conditions iOS checks are the same
+ * for that call, so the pins below stayed and only the marker they sit next to
+ * changed. The `Issue #2556` block after this one runs main.js itself.
  */
 describe('Issue #1577: feature demo playback', () => {
   const videoTags = (): string[] => readIndexHtml().match(/<video\b[\s\S]*?<\/video>/g) ?? [];
+  const source = (tag: string): string | undefined => /src="([^"]+)"/.exec(tag)?.[1];
 
   it('embeds the five demos in page order, the recorded run first', () => {
     // #1812 cut the set to one demo per card in public-messaging.md §3. #2495
@@ -959,11 +966,16 @@ describe('Issue #1577: feature demo playback', () => {
     // above The loop, so the order is the argument the section makes: one run
     // end to end, then the gate that judged it, where the method came from, the
     // parallelism it ran under, and how it reaches you when it stops.
-    const sources = videoTags().map((tag) => /src="([^"]+)"/.exec(tag)?.[1]);
+    const expected = DEMO_ORDER.map((file) => `${MEDIA_DIR.split(path.sep).join('/')}/${file}`);
 
-    expect(sources).toEqual(
-      DEMO_ORDER.map((file) => `${MEDIA_DIR.split(path.sep).join('/')}/${file}`),
-    );
+    expect(videoTags().map(source)).toEqual(expected);
+    // #2556: main.js plays what is marked, so a demo without the mark would sit
+    // on its poster for good while every assertion about the markup held.
+    expect(
+      videoTags()
+        .filter((tag) => /\sdata-autoplay\b/.test(tag))
+        .map(source),
+    ).toEqual(expected);
   });
 
   it('ships each feature demo as a byte-for-byte copy of its docs/images/features take', () => {
@@ -982,9 +994,12 @@ describe('Issue #1577: feature demo playback', () => {
   });
 
   it('carries muted and playsinline, without which iOS Safari will not autoplay', () => {
+    // Autoplay here is main.js calling play() on a `data-autoplay` video with no
+    // gesture behind it, which iOS Safari allows on exactly these two terms.
     for (const tag of videoTags()) {
-      expect(tag, `missing muted:\n${tag}`).toMatch(/\bmuted\b/);
-      expect(tag, `missing playsinline:\n${tag}`).toMatch(/\bplaysinline\b/);
+      expect(tag, `missing data-autoplay:\n${tag}`).toMatch(/\sdata-autoplay\b/);
+      expect(tag, `missing muted:\n${tag}`).toMatch(/\smuted\b/);
+      expect(tag, `missing playsinline:\n${tag}`).toMatch(/\splaysinline\b/);
     }
   });
 
@@ -1012,13 +1027,19 @@ describe('Issue #1577: feature demo playback', () => {
   });
 
   it('drops autoplay for readers who asked for reduced motion', () => {
-    // A media query cannot stop an autoplaying video, so this has to be script;
-    // the CSS block that handles animations elsewhere does nothing here.
+    // A media query cannot stop a video from playing, so this has to be script;
+    // the CSS block that handles animations elsewhere does nothing here. Since
+    // #2556 there is no `autoplay` attribute to take off — script is what starts
+    // a demo — so what has to hold is that the reduced-motion branch takes the
+    // mark off and hands over controls. The `Issue #2556` block below runs it.
     const js = fs.readFileSync(path.join(WEBSITE_DIR, 'main.js'), 'utf-8');
 
     expect(js).toMatch(/prefers-reduced-motion:\s*reduce/);
-    expect(js).toMatch(/removeAttribute\(['"]autoplay['"]\)/);
+    expect(js).toMatch(/removeAttribute\(['"]data-autoplay['"]\)/);
     expect(js).toMatch(/\.controls\s*=\s*true/);
+    expect(readIndexHtml(), 'a bare autoplay attribute outranks preload="none"').not.toMatch(
+      /<video\b[^>]*\sautoplay\b/,
+    );
   });
 
   it('keeps the demos out of the hero, which owns the LCP and the og:image', () => {
@@ -1026,6 +1047,246 @@ describe('Issue #1577: feature demo playback', () => {
 
     expect(hero).not.toBeNull();
     expect(hero![0]).not.toMatch(/<video\b/);
+  });
+});
+
+/**
+ * Issue #2556 — "The autoplay attribute has precedence over preload" (MDN), so
+ * with `autoplay` on the tags all five demos, 3.0 MB, downloaded on first load
+ * whether or not anyone scrolled to them. The tags carry `data-autoplay` now,
+ * and main.js plays a demo once an IntersectionObserver sees a quarter of it,
+ * or at once in a browser that has no observer.
+ *
+ * What changed is when play() gets called, which reading main.js as text cannot
+ * show, so these run it against index.html in jsdom — already a dependency of
+ * the app, not a new one for the LP. jsdom has neither media playback nor an
+ * IntersectionObserver; both are stubbed, which is also what lets a test decide
+ * what is on screen. The request count itself was measured in Chromium and is
+ * not repeated here. Neither is iOS Safari, which has not been run on a device:
+ * the most a test can pin is that every video main.js plays still has `muted`
+ * and `playsinline` at the moment it plays it.
+ */
+describe('Issue #2556: lazy demo playback', () => {
+  /** The part of jsdom used here. It ships no types and @types/jsdom is not installed. */
+  interface VirtualConsoleLike {
+    on(event: string, listener: (message: unknown) => void): void;
+  }
+  interface JsdomModule {
+    JSDOM: new (
+      html: string,
+      options: { runScripts: 'outside-only'; virtualConsole: VirtualConsoleLike },
+    ) => { window: Window & typeof globalThis };
+    VirtualConsole: new () => VirtualConsoleLike;
+  }
+
+  type ObserverEntry = Pick<IntersectionObserverEntry, 'target' | 'isIntersecting' | 'intersectionRatio'>;
+
+  interface FakeObserver {
+    readonly options?: IntersectionObserverInit;
+    readonly observed: Element[];
+    /** What the browser does when `target` crosses a threshold with `ratio` of it on screen. */
+    report(target: Element, ratio: number): void;
+  }
+
+  interface PlaybackRun {
+    window: Window & typeof globalThis;
+    videos: HTMLVideoElement[];
+    /** Every play() call, with the two attributes iOS Safari checks as they were at that moment. */
+    plays: { src: string; muted: boolean; playsinline: boolean }[];
+    pauses: string[];
+    observers: FakeObserver[];
+    /** Anything the page wrote to the console, jsdom's own complaints included. */
+    consoleOutput: unknown[];
+  }
+
+  const src = (element: Element): string => element.getAttribute('src') ?? '';
+
+  /** Load index.html in a fresh jsdom, stub what jsdom lacks, and run main.js the way the page does. */
+  function runMainJs(setup: {
+    intersectionObserver: boolean;
+    reducedMotion?: boolean;
+    play?: () => Promise<void>;
+  }): PlaybackRun {
+    const { JSDOM, VirtualConsole } = createRequire(__filename)('jsdom') as JsdomModule;
+    const consoleOutput: unknown[] = [];
+    const virtualConsole = new VirtualConsole();
+    for (const event of ['error', 'warn', 'jsdomError']) {
+      virtualConsole.on(event, (message) => consoleOutput.push(message));
+    }
+    const { window } = new JSDOM(readIndexHtml(), { runScripts: 'outside-only', virtualConsole });
+
+    const plays: PlaybackRun['plays'] = [];
+    const pauses: string[] = [];
+    const playing = new Set<HTMLMediaElement>();
+    const media = window.HTMLMediaElement.prototype;
+    Object.defineProperty(media, 'paused', {
+      configurable: true,
+      get(this: HTMLMediaElement) {
+        return !playing.has(this);
+      },
+    });
+    media.play = function (this: HTMLMediaElement) {
+      plays.push({
+        src: src(this),
+        muted: this.hasAttribute('muted'),
+        playsinline: this.hasAttribute('playsinline'),
+      });
+      playing.add(this);
+      return setup.play ? setup.play() : Promise.resolve();
+    };
+    media.pause = function (this: HTMLMediaElement) {
+      pauses.push(src(this));
+      playing.delete(this);
+    };
+
+    window.matchMedia = (query: string) =>
+      ({
+        matches: Boolean(setup.reducedMotion) && /prefers-reduced-motion:\s*reduce/.test(query),
+        media: query,
+      }) as MediaQueryList;
+
+    const observers: FakeObserver[] = [];
+    if (setup.intersectionObserver) {
+      class FakeIntersectionObserver implements FakeObserver {
+        readonly observed: Element[] = [];
+
+        constructor(
+          private readonly callback: (entries: ObserverEntry[]) => void,
+          readonly options?: IntersectionObserverInit,
+        ) {
+          observers.push(this);
+        }
+
+        observe(target: Element): void {
+          this.observed.push(target);
+        }
+
+        unobserve(): void {}
+
+        disconnect(): void {}
+
+        report(target: Element, ratio: number): void {
+          this.callback([{ target, isIntersecting: ratio > 0, intersectionRatio: ratio }]);
+        }
+      }
+      Object.assign(window, { IntersectionObserver: FakeIntersectionObserver });
+    } else {
+      Reflect.deleteProperty(window, 'IntersectionObserver');
+    }
+
+    window.eval(fs.readFileSync(path.join(WEBSITE_DIR, 'main.js'), 'utf-8'));
+
+    return {
+      window,
+      videos: Array.from(window.document.querySelectorAll('video')),
+      plays,
+      pauses,
+      observers,
+      consoleOutput,
+    };
+  }
+
+  it('keeps autoplay off every demo, with preload="none", loop and a poster still on it', () => {
+    const { videos } = runMainJs({ intersectionObserver: true });
+
+    expect(videos.map(src)).toEqual(DEMO_ORDER.map((file) => `assets/media/${file}`));
+    for (const video of videos) {
+      expect(video.hasAttribute('autoplay'), src(video)).toBe(false);
+      expect(video.getAttribute('preload'), src(video)).toBe('none');
+      expect(video.loop, src(video)).toBe(true);
+      expect(video.getAttribute('poster'), src(video)).toMatch(/^assets\/media\/poster-/);
+    }
+  });
+
+  it('observes every demo at a quarter visible and plays none of them on load', () => {
+    const { videos, plays, pauses, observers } = runMainJs({ intersectionObserver: true });
+
+    expect(observers).toHaveLength(1);
+    expect(observers[0].options?.threshold).toBe(0.25);
+    expect(observers[0].observed.map(src)).toEqual(videos.map(src));
+
+    // A browser reports every target once on observe(); for a demo below the
+    // fold that report is a zero, and it must neither play nor pause anything.
+    for (const video of videos) observers[0].report(video, 0);
+
+    expect(plays).toEqual([]);
+    expect(pauses).toEqual([]);
+  });
+
+  it('plays a demo once a quarter of it is on screen, and pauses it once that is no longer so', () => {
+    const { videos, plays, pauses, observers } = runMainJs({ intersectionObserver: true });
+    const [observer] = observers;
+    const demo = videos[1];
+
+    // On screen, but less than the threshold: `isIntersecting` alone would play it.
+    observer.report(demo, 0.1);
+    expect(plays).toEqual([]);
+
+    observer.report(demo, 0.25);
+    expect(plays.map((play) => play.src)).toEqual([src(demo)]);
+    expect(demo.paused).toBe(false);
+
+    observer.report(demo, 0.2);
+    expect(pauses).toEqual([src(demo)]);
+    expect(demo.paused).toBe(true);
+  });
+
+  it('plays every demo at once in a browser without IntersectionObserver', () => {
+    const { window, videos, plays } = runMainJs({ intersectionObserver: false });
+
+    expect('IntersectionObserver' in window, 'the fallback is not what ran').toBe(false);
+    expect(plays.map((play) => play.src)).toEqual(videos.map(src));
+    expect(plays).toHaveLength(DEMO_ORDER.length);
+  });
+
+  it('only ever plays a demo that is muted and playsinline, the terms iOS Safari plays on', () => {
+    // Not run on an iOS device; this pins the conditions, not the outcome.
+    const lazy = runMainJs({ intersectionObserver: true });
+    for (const video of lazy.videos) lazy.observers[0].report(video, 1);
+    const eager = runMainJs({ intersectionObserver: false });
+
+    for (const { plays } of [lazy, eager]) {
+      expect(plays).toHaveLength(DEMO_ORDER.length);
+      for (const play of plays) {
+        expect(play, play.src).toEqual({ src: play.src, muted: true, playsinline: true });
+      }
+    }
+  });
+
+  it('swallows a play() the browser refuses, so a blocked autoplay writes nothing to the console', async () => {
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on('unhandledRejection', onUnhandled);
+
+    try {
+      const { plays, consoleOutput } = runMainJs({
+        intersectionObserver: false,
+        play: () => Promise.reject(new Error('NotAllowedError: play() needs a user gesture')),
+      });
+      // Node reports an unhandled rejection once the microtask queue drains.
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      expect(plays).toHaveLength(DEMO_ORDER.length);
+      expect(unhandled).toEqual([]);
+      expect(consoleOutput).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
+  });
+
+  it('starts nothing for reduced motion, with or without an observer, and hands over controls', () => {
+    for (const intersectionObserver of [true, false]) {
+      const label = `IntersectionObserver ${intersectionObserver ? 'present' : 'absent'}`;
+      const { videos, plays, observers } = runMainJs({ intersectionObserver, reducedMotion: true });
+
+      expect(observers.flatMap((observer) => observer.observed), label).toEqual([]);
+      expect(plays, label).toEqual([]);
+      for (const video of videos) {
+        expect(video.hasAttribute('data-autoplay'), `${label}: ${src(video)}`).toBe(false);
+        expect(video.controls, `${label}: ${src(video)}`).toBe(true);
+        expect(video.loop, `${label}: ${src(video)}`).toBe(false);
+      }
+    }
   });
 });
 

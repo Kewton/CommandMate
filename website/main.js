@@ -1,25 +1,62 @@
 /* CommandMate landing page behaviour (Issue #1200).
-   Two jobs: copy-to-clipboard on the install commands, and honouring
-   prefers-reduced-motion for the feature demos (Issue #1577). No dependencies,
-   no build step. */
+   Two jobs: copy-to-clipboard on the install commands, and starting the feature
+   demos — only once they are on screen (Issue #2556), and never for a reader
+   who asked for reduced motion (Issue #1577). No dependencies, no build step. */
 
 (function () {
   'use strict';
 
-  /* ---------- motion-safe demo playback (Issue #1577) ---------- */
+  /* ---------- demo playback: lazy (Issue #2556), motion-safe (Issue #1577) ---------- */
 
-  // CSS cannot stop an autoplaying video, so the attribute has to come off in
-  // script. Dropping it alone is not enough once playback has begun, hence the
-  // pause; `controls` is what leaves the reader a way to watch on purpose.
+  // The demos carry `data-autoplay` rather than `autoplay`, because the real
+  // attribute outranks `preload="none"`: with it, all five downloaded on first
+  // load whether or not anyone scrolled that far. So playback starts here.
+  var VISIBLE_RATIO = 0.25;
+  var demos = document.querySelectorAll('video[data-autoplay]');
+
+  // A blocked autoplay rejects the promise and leaves the poster up. That is
+  // the whole failure, so it is not worth an error in the reader's console.
+  function play(video) {
+    var started = video.play();
+    if (started && typeof started.catch === 'function') {
+      started.catch(function () {});
+    }
+  }
+
   var reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)');
   if (reduceMotion && reduceMotion.matches) {
-    Array.prototype.forEach.call(document.querySelectorAll('video[autoplay]'), function (video) {
-      video.autoplay = false;
-      video.removeAttribute('autoplay');
+    // Nothing starts on its own; `controls` is what leaves the reader a way to
+    // watch on purpose.
+    Array.prototype.forEach.call(demos, function (video) {
+      video.removeAttribute('data-autoplay');
       video.loop = false;
       video.controls = true;
-      video.pause();
     });
+  } else if ('IntersectionObserver' in window) {
+    // Play at a quarter visible and pause below it, so a demo scrolled past
+    // does not go on looping off screen. The observer reports every
+    // demo once on `observe`; the `paused` check keeps that first report from
+    // calling pause() on a video that never started, which on an element with
+    // nothing loaded yet runs resource selection.
+    var observer = new IntersectionObserver(
+      function (entries) {
+        entries.forEach(function (entry) {
+          var video = entry.target;
+          if (entry.isIntersecting && entry.intersectionRatio >= VISIBLE_RATIO) {
+            play(video);
+          } else if (!video.paused) {
+            video.pause();
+          }
+        });
+      },
+      { threshold: VISIBLE_RATIO },
+    );
+    Array.prototype.forEach.call(demos, function (video) {
+      observer.observe(video);
+    });
+  } else {
+    // No observer to wait for: play at once, as the `autoplay` attribute did.
+    Array.prototype.forEach.call(demos, play);
   }
 
   /* ---------- copy buttons ---------- */
