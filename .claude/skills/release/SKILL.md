@@ -278,6 +278,52 @@ npm version "${NEXT_VERSION}" --no-git-tag-version
 
 `templates/changelog-entry.md` も参照。
 
+### 2-2a. LP の版行（website/index.html）
+
+LP の hero には、prereq 行の下に版行が**静的に**書いてある（Issue #2552。ページ読み込み時に API は叩かない）:
+
+```html
+<p class="release-line">vX.Y.Z · released YYYY-MM-DD · N+ releases</p>
+```
+
+リリースのたびにこの 1 行を書き換える。`tests/unit/website/landing-page.test.ts` が
+**版を package.json の `version` と、日付を CHANGELOG の `## [X.Y.Z] - YYYY-MM-DD` 見出しと**
+突き合わせるので、書き換え忘れは 2-3 の `npm run test:unit` で落ちる。
+
+```bash
+# 日付は 2-2 で CHANGELOG に書いた見出しから取る（JST で書き直さない。二重管理になる）
+RELEASE_DATE=$(awk -v v="## [${NEXT_VERSION}] - " 'index($0, v) == 1 { print substr($0, length(v) + 1); exit }' CHANGELOG.md)
+# Release の総数。これから作る v${NEXT_VERSION} の 1 本を足し、10 の位で切り捨てる（"N+" は下限の概数）
+RELEASE_COUNT=$(gh api repos/Kewton/CommandMate/releases --paginate --jq '.[].tag_name' | wc -l | tr -d ' ')
+RELEASE_FLOOR=$(( (RELEASE_COUNT + 1) / 10 * 10 ))
+echo "date=${RELEASE_DATE} count=${RELEASE_COUNT} floor=${RELEASE_FLOOR}"
+
+node -e '
+const fs = require("fs");
+const [version, date, floor] = process.argv.slice(1);
+if (!/^\d+\.\d+\.\d+$/.test(version) || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^[1-9]\d*0$/.test(floor)) {
+  console.error(`refusing to write: version=${version} date=${date} floor=${floor}`);
+  process.exit(1);
+}
+const file = "website/index.html";
+const html = fs.readFileSync(file, "utf8");
+const line = /<p class="release-line">[^<]*<\/p>/g;
+const found = html.match(line) || [];
+if (found.length !== 1) {
+  console.error(`expected exactly one release-line in ${file}, found ${found.length}`);
+  process.exit(1);
+}
+fs.writeFileSync(file, html.replace(line, () => `<p class="release-line">v${version} · released ${date} · ${floor}+ releases</p>`));
+' "${NEXT_VERSION}" "${RELEASE_DATE}" "${RELEASE_FLOOR}"; echo "RELEASE_LINE=$?"
+
+git diff -- website/index.html   # 版行の 1 行だけが変わっていること
+```
+
+- `RELEASE_LINE=0` であること。`RELEASE_DATE` が空（2-2 の見出しが無い／形式違い）や
+  `gh api` の失敗で `floor` が `0` になった場合、スクリプトは**書かずに exit 1** で止まる。
+  値を手で埋めて進めず、原因（CHANGELOG の見出し・`gh auth status`）を直してから再実行する
+- `git diff` が版行の 1 行以外を含んでいたら中断する（置換対象のマークアップが変わっている）
+
 ### 2-3. 品質ゲート
 
 **`npm run build` をここで実行してはいけない。**
@@ -319,7 +365,7 @@ npm run test:unit > /tmp/rel-unit.log 2>&1; echo "UNIT=$?"
 ### 2-4. コミット & push
 
 ```bash
-git add package.json package-lock.json CHANGELOG.md
+git add package.json package-lock.json CHANGELOG.md website/index.html
 # Phase 1.5-2 でカタログを --write した場合のみ:
 git add src/config/slash-commands-catalog.json locales/en/worktree.json locales/ja/worktree.json
 # Phase 1.5-3 で attestation を採り直した場合のみ（--write はこのファイルを書かないので、
@@ -329,9 +375,11 @@ git commit -m "chore: release v${NEXT_VERSION}"
 git push origin develop
 ```
 
-変更は上記 3 ファイル（**リコンサイルで差分が出た場合はカタログ＋locales の 3 ファイル、
+変更は上記 4 ファイル（package.json ・ package-lock.json ・ CHANGELOG.md ・ website/index.html。
+**リコンサイルで差分が出た場合はカタログ＋locales の 3 ファイル、
 attestation を採り直した場合はさらに 1 ファイル**）であること（`git diff --stat` で確認）。
-リコンサイルで書き込みが無く attestation も動かさなかったときは 3 ファイルのみ。
+リコンサイルで書き込みが無く attestation も動かさなかったときは基本 4 ファイルのみ
+（website/index.html は 2-2a の版行 1 行）。
 
 > `git status` に `src/config/slash-commands-attestations.json` が出ているのに
 > `New commands` が 0 件だった場合、それは**上流の削除か版の採り直し**である。
