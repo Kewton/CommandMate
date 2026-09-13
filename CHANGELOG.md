@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.1] - 2026-09-13
+
+> **Highlight**: チャット面のコピーボタンが、画面では畳まれている Thinking と Tool calls の中身までクリップボードに入れていた問題を直したパッチ（直近 30 日の実データでは、コピーした文字のうち画面に出ていない割合が claude 59.9%・codex 84.5%）。通常のコピーは画面に見えている回答本文だけを渡すようにし（#2544）、節を含む全文が要るときのために、畳まれた節を持つ行にだけ常時表示の「全文」ボタンを追加した（#2545）。PC・スマホ（タッチ）・`/sessions` のタイルで実機受入テスト 22/22 合格。
+
 ### Added
 
 - **feat(chat): チャット面の Assistant 行に、チップに畳まれた Thinking / Tool calls 節を含む全文をコピーする「全文」ボタンを追加し、History を開かずに保存行そのものをコピーできるようにした** (#2545): #2544 で通常のコピーボタンが回答本文だけを渡すようになったため、reasoning とツールログまで欲しい場合は History を開くしかなかった。`splitChatMarkdownBody` の `folded` が true の Markdown 行にだけ、通常のコピーの隣に常時表示の「全文」ボタン（`data-testid="chat-copy-full-message"`、`aria-label` / `title` / 表示文言は `chatTranscript.copyFull.*` で通常のコピーと区別）を置き、`message.content` を既存の `handleCopy`（同じ成功・失敗トースト）へ渡す。判定は純関数 `chatMarkdownFullCopyText`（`src/lib/chat/chat-markdown-body.ts`）に置き、本文が空の tool call だけのターンではこのボタンがその行の唯一のコピー手段になる。畳まれた節の無い行・terminal scrape（plain 経路）の行・History ペインのコピーは変更しない。
