@@ -323,20 +323,72 @@ describe('[#2272] the bubble', () => {
     expect(screen.getByTestId(CHAT_TOOL_LOG_BODY_TESTID).textContent).toContain('apply_patch');
   });
 
-  it('copies the whole row, reasoning included', () => {
-    // What is folded is not deleted. The copy button hands over
-    // `message.content`, which still holds every word.
+  // [#2544] This used to be "copies the whole row, reasoning included", and the
+  // expectation was `NEW_SHAPE` verbatim. That decision is reversed on purpose:
+  // the reader copies what they are READING, and what this bubble draws is the
+  // answer with the reasoning and the tool log folded shut. Handing over the
+  // whole stored row put a deliberation and a tool log on the clipboard that the
+  // reader had never opened. Nothing is deleted — the chips still hold every
+  // word, and copying the whole row is its own operation (#2545), not what the
+  // button beside the answer does.
+  it.each([
+    ['the trailing `Thinking (N)` section', NEW_SHAPE],
+    ['the legacy inline `Thinking` quotes', LEGACY_SHAPE],
+  ])('copies the answer only, without %s [#2544]', (_shape, content) => {
+    // Positive control: the stored row carries both folded sections.
+    expect(content).toContain(`> **${TURN_REASONING_LABEL}`);
+    expect(content).toContain(`> **${TURN_TOOL_LOG_LABEL} (1)**`);
+
     const onCopy = vi.fn();
     render(
       <ChatMessageBubble
-        message={message(NEW_SHAPE)}
+        message={message(content)}
         showHeader
         onFilePathClick={vi.fn()}
         onCopy={onCopy}
       />,
     );
     fireEvent.click(screen.getByTestId('chat-copy-message'));
-    expect(onCopy).toHaveBeenCalledWith(NEW_SHAPE);
+
+    // The Markdown source of the answer — backticks intact — and nothing else.
+    expect(onCopy).toHaveBeenCalledWith(
+      'カレントディレクトリに `probe.txt` を作成し、`hello` の1行を書き込みました。',
+    );
+    const copied = onCopy.mock.calls[0][0] as string;
+    expect(copied).not.toContain(`> **${TURN_REASONING_LABEL}`);
+    expect(copied).not.toContain(`> **${TURN_TOOL_LOG_LABEL}`);
+    expect(copied).not.toContain('Preparing for patch application');
+  });
+
+  it('offers no copy on a turn that was nothing but reasoning [#2544]', () => {
+    // The body is blank once the chip is folded, and the whole row is not a
+    // fallback: it is exactly the section the button now keeps off the clipboard.
+    const onCopy = vi.fn();
+    render(
+      <ChatMessageBubble
+        message={message(`> **${TURN_REASONING_LABEL} (1)**\n>\n> hmm`)}
+        showHeader
+        onFilePathClick={vi.fn()}
+        onCopy={onCopy}
+      />,
+    );
+    expect(screen.getByTestId(CHAT_THINKING_GROUP_TESTID)).toBeInTheDocument();
+    expect(screen.queryByTestId('chat-copy-message')).toBeNull();
+  });
+
+  it('copies a row with no reasoning exactly as before [#2544]', () => {
+    const content = 'Just the answer, with a `code` span.\n\n> and a quote the agent wrote';
+    const onCopy = vi.fn();
+    render(
+      <ChatMessageBubble
+        message={message(content)}
+        showHeader
+        onFilePathClick={vi.fn()}
+        onCopy={onCopy}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('chat-copy-message'));
+    expect(onCopy).toHaveBeenCalledWith(content);
   });
 
   it('does not touch a terminal-scrape row that happens to quote Thinking', () => {
@@ -380,6 +432,23 @@ describe('[#2272] the History column is untouched', () => {
     expect(screen.queryByTestId(CHAT_THINKING_GROUP_TESTID)).toBeNull();
     expect(document.querySelector('blockquote')).not.toBeNull();
     expect(document.body.textContent).toContain('Preparing for patch application');
+  });
+
+  it('still copies the whole row from the card [#2544]', () => {
+    // #2544 narrowed the CHAT bubble's copy to the answer it draws. The card
+    // draws the reasoning as a blockquote, in full, so its copy keeps handing
+    // over the whole row — the two surfaces each copy what they show.
+    const onCopy = vi.fn();
+    render(
+      <ConversationPairCard
+        pair={pairWith(NEW_SHAPE)}
+        isExpanded
+        onFilePathClick={vi.fn()}
+        onCopy={onCopy}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('copy-assistant-message'));
+    expect(onCopy).toHaveBeenCalledWith(NEW_SHAPE);
   });
 });
 

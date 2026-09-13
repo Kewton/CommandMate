@@ -292,13 +292,75 @@ describe('[#2284] the tool log is one chip', () => {
     expect(rowFor('a1').textContent).toContain(`**${TURN_TOOL_LOG_LABEL} (2)**`);
   });
 
-  it('hands the copy button the whole body, tool log included', () => {
-    // What is folded is not deleted: the reader who copies a reply gets the
-    // calls too, exactly as they did before the chip existed.
+  // [#2544] This used to be "hands the copy button the whole body, tool log
+  // included", expecting `TURN_BODY` verbatim so the reader "gets the calls too,
+  // exactly as they did before the chip existed". Reversed on purpose: once the
+  // calls are behind a shut chip, the button beside the answer is a copy of the
+  // ANSWER, and a clipboard holding a reasoning quote and twenty `- \`Bash\``
+  // lines the reader never opened is a paste they have to clean up by hand.
+  // Folded is still not deleted — the chip keeps every call, and the whole-row
+  // copy is its own operation (#2545), not this button.
+  it('hands the copy button the answer only, not the folded sections [#2544]', async () => {
+    // Positive control: the stored row carries both folded sections.
+    expect(TURN_BODY).toContain(`> **${TURN_REASONING_LABEL} (1)**`);
+    expect(TURN_BODY).toContain(`> **${TURN_TOOL_LOG_LABEL} (2)**`);
+
     renderTranscript([agentRow('a1', TURN_BODY)]);
 
     fireEvent.click(within(rowFor('a1')).getByTestId('chat-copy-message'));
-    expect(copyToClipboardMock).toHaveBeenCalledWith(TURN_BODY);
+    await waitFor(() => expect(copyToClipboardMock).toHaveBeenCalled());
+    expect(copyToClipboardMock).toHaveBeenCalledWith(
+      'Created `probe.txt` and wrote one line to it.',
+    );
+    const copied = copyToClipboardMock.mock.calls[0][0];
+    expect(copied).not.toContain(`> **${TURN_REASONING_LABEL}`);
+    expect(copied).not.toContain(`> **${TURN_TOOL_LOG_LABEL}`);
+    expect(copied).not.toContain('apply_patch');
+  });
+
+  it('copies the answer of a legacy row whose calls lead the body [#2544]', async () => {
+    const legacy = ['- `Bash` — ls', '- `Read` — src/index.ts', '', 'Here is what I found.'].join(
+      '\n',
+    );
+    renderTranscript([agentRow('a1', legacy)]);
+
+    fireEvent.click(within(rowFor('a1')).getByTestId('chat-copy-message'));
+    await waitFor(() => expect(copyToClipboardMock).toHaveBeenCalled());
+    expect(copyToClipboardMock).toHaveBeenCalledWith('Here is what I found.');
+  });
+
+  it('offers no copy on a turn that only ran tools [#2544]', () => {
+    // The answer is blank, and falling back to the whole row would put back
+    // exactly the tool log this button now keeps off the clipboard.
+    const toolsOnly = separateTurnBody([
+      { kind: 'tool', text: '- `Bash` — ls' },
+      { kind: 'tool', text: '- `Bash` — pwd' },
+    ]).body;
+    renderTranscript([agentRow('a1', toolsOnly), agentRow('a2', 'Just the answer.')]);
+
+    expect(within(rowFor('a1')).getByTestId(CHAT_TOOL_LOG_GROUP_TESTID)).toBeInTheDocument();
+    expect(within(rowFor('a1')).queryByTestId('chat-copy-message')).toBeNull();
+    // Not a transcript-wide loss of the button: the row with an answer keeps it.
+    expect(within(rowFor('a2')).getByTestId('chat-copy-message')).toBeInTheDocument();
+  });
+
+  it('copies a reply that folded nothing byte for byte [#2544]', async () => {
+    const content = 'Just the answer.\n\n> a quote the agent wrote\n\n- a prose list\n';
+    renderTranscript([agentRow('a1', content)]);
+
+    fireEvent.click(within(rowFor('a1')).getByTestId('chat-copy-message'));
+    await waitFor(() => expect(copyToClipboardMock).toHaveBeenCalled());
+    expect(copyToClipboardMock.mock.calls[0][0]).toBe(content);
+  });
+
+  it('still copies a terminal scrape whole, markers and all [#2544]', async () => {
+    // The plain path has no section markers it can trust — every character of a
+    // scrape is content — so #2544 leaves its copy exactly as it was.
+    renderTranscript([msg('a1', 'assistant', TURN_BODY)]);
+
+    fireEvent.click(within(rowFor('a1')).getByTestId('chat-copy-message'));
+    await waitFor(() => expect(copyToClipboardMock).toHaveBeenCalled());
+    expect(copyToClipboardMock.mock.calls[0][0]).toBe(TURN_BODY);
   });
 });
 
