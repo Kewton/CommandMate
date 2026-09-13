@@ -151,8 +151,14 @@ function definitionEn(): string {
   return match![1].trim();
 }
 
-/** The retired vocabulary, as `docs/design/public-messaging.md` publishes it. */
-function documentedBannedTerms(): string[] {
+/**
+ * The rows of the banned-term table in `docs/design/public-messaging.md`: each
+ * term with its reason (the last column). The table writes `同上` ("same as
+ * above") for a run of rows sharing one reason, so that is resolved to the row
+ * above here — otherwise every competitor after the first would read as having
+ * no reason at all.
+ */
+function documentedBannedRows(): { term: string; reason: string }[] {
   const doc = fs.readFileSync(MESSAGING_DOC, 'utf-8');
   const start = doc.indexOf('<!-- banned-terms:start -->');
   const end = doc.indexOf('<!-- banned-terms:end -->');
@@ -160,11 +166,25 @@ function documentedBannedTerms(): string[] {
   expect(start, 'the banned-term table must be delimited').toBeGreaterThan(-1);
   expect(end).toBeGreaterThan(start);
 
-  return doc
-    .slice(start, end)
-    .split('\n')
-    .map((line) => /^\|\s*`([^`]+)`\s*\|/.exec(line)?.[1])
-    .filter((term): term is string => Boolean(term));
+  const rows: { term: string; reason: string }[] = [];
+
+  for (const line of doc.slice(start, end).split('\n')) {
+    const term = /^\|\s*`([^`]+)`\s*\|/.exec(line)?.[1];
+    if (!term) continue;
+
+    const cells = line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|');
+    const reason = cells[cells.length - 1].trim();
+    const above = rows[rows.length - 1];
+
+    rows.push({ term, reason: reason.startsWith('同上') && above ? above.reason : reason });
+  }
+
+  return rows;
+}
+
+/** The retired vocabulary, as `docs/design/public-messaging.md` publishes it. */
+function documentedBannedTerms(): string[] {
+  return documentedBannedRows().map((row) => row.term);
 }
 
 /**
@@ -172,6 +192,11 @@ function documentedBannedTerms(): string[] {
  * These are shorter than some of the doc's rows on purpose — the old H1 is
  * banned as a whole sentence there, but the LP carried it split across a `<br>`
  * and rephrased in three meta tags, so the substring is what actually finds it.
+ *
+ * Every competitor name the doc bans is mirrored here, and a test pins that
+ * (Issue #2549). The mirror is what makes deleting such a row from the doc
+ * loud: the term stays here, so the traceability check fails, instead of the
+ * name quietly dropping out of the union the page is scanned for.
  */
 const LP_BANNED_TERMS = [
   'control plane',
@@ -180,6 +205,9 @@ const LP_BANNED_TERMS = [
   'Happy Coder',
   'claude-squad',
   'Omnara',
+  'Orca',
+  'Herdr',
+  'Lanes',
 ];
 
 /**
@@ -797,6 +825,23 @@ describe('Issue #1812: the page says what the messaging doc says', () => {
     expect(orphaned, 'these are banned here but no longer in public-messaging.md').toEqual([]);
   });
 
+  it('mirrors every competitor name the messaging doc bans into LP_BANNED_TERMS', () => {
+    // The check above only runs one way — a term here must be in the doc — so a
+    // competitor added to the doc and forgotten here stayed green. Issue #2549
+    // added three at once. A competitor row is one whose reason reads 競合製品名
+    // ("competitor product name"), `同上` rows included via documentedBannedRows.
+    const competitors = documentedBannedRows()
+      .filter((row) => row.reason.startsWith('競合製品名'))
+      .map((row) => row.term);
+    const mirrored = LP_BANNED_TERMS.map((term) => term.toLowerCase());
+
+    expect(competitors.length, 'no banned-term row reads as a competitor name').toBeGreaterThan(0);
+    expect(
+      competitors.filter((name) => !mirrored.includes(name.toLowerCase())),
+      'these competitors are banned in public-messaging.md but missing from LP_BANNED_TERMS',
+    ).toEqual([]);
+  });
+
   it('ships none of the retired wording anywhere under website/', () => {
     const banned = [...new Set([...documentedBannedTerms(), ...LP_BANNED_TERMS])];
 
@@ -1063,10 +1108,11 @@ describe('Issue #2495: the LP on the orchestrate axis', () => {
     // Both are real rules, and neither can be a substring search on this page.
     // "loop" is the name of a section here — the cycle the page is about, which
     // §11b's own reason ("nothing runs forever") is not talking about, and which
-    // §4b spells out as "Nothing loops forever". "the only …" is an ellipsis,
-    // and the page legitimately says "the only network traffic is the agent
-    // CLI's own API calls", which is a scoped statement of fact rather than a
-    // claim to uniqueness. Pinned here so the exemption cannot outlive the rows.
+    // §4b spells out as "Nothing loops forever". "the only …" is an ellipsis, a
+    // shape rather than a string. (The page once said "the only network traffic
+    // is the agent CLI's own API calls"; #2549 retracted that as an overclaim and
+    // put public-messaging.md §14 in its place.) Pinned here so the exemption
+    // cannot outlive the rows.
     expect(unmeasuredClaims()).toEqual(expect.arrayContaining(UNSCANNABLE_CLAIMS));
   });
 });

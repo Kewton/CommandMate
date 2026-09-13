@@ -65,6 +65,11 @@ const BANNED_TERMS = [
   'Happy Coder',
   'claude-squad',
   'Omnara',
+  // Issue #2549 (Epic #2548's competitor survey). Matched as case-insensitive
+  // substrings like every other row, so `Lanes` also catches "planes".
+  'Orca',
+  'Herdr',
+  'Lanes',
 ];
 
 /**

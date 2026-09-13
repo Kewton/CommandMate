@@ -375,9 +375,18 @@ $ echo $?
             </p>
           </article>
         </div>
+        <!-- Network scope, verbatim from docs/design/public-messaging.md §14 (Issue #2549).
+             It used to limit the traffic to the agent CLI's own API calls, which
+             Web Push, `commandmate remote`, the update check and the Skills Catalog
+             all contradict. Keep the per-feature list whole: dropping an
+             item brings the overclaim back. -->
         <p class="note">
-          Runs 100% locally. No external server, no cloud relay, no account required — the only
-          network traffic is the agent CLI's own API calls.
+          CommandMate runs on your machine. It sends no telemetry, needs no account, and needs no
+          external server to run. What goes over the network depends on what you use: your agent
+          CLI's own API calls; a check for a newer release on GitHub, from the web UI; the official
+          Skills Catalog on GitHub, when you list or install Skills; your browser's push service,
+          once you turn on Web Push; and Tailscale or cloudflared, while
+          <code>commandmate remote</code> is running.
         </p>
       </section>
 
