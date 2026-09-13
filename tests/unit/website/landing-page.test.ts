@@ -1111,6 +1111,177 @@ describe('Issue #1327: Track A shows what its one command does', () => {
 });
 
 /**
+ * Issue #2555 — the page had grown to about fifteen screens on a laptop and
+ * twenty-seven on a phone. Three things on it repeat what the docs already say,
+ * so they were folded or cut, with no wording changed: Track B folds into a
+ * <details>, "Pair your phone" keeps its lede, its command and the link to the
+ * CLI operations guide, and the gallery keeps four of its seven shots.
+ *
+ * The heights need a browser and are measured outside this suite. What is
+ * pinned here is the markup that made the page shorter, and that nothing a
+ * reader could still act on went with it: the fold still holds every command
+ * and its copy button, and the guide still carries what the cut cards said.
+ */
+describe('Issue #2555: compact', () => {
+  const CSS_BLOCK_START = '/* Compact (#2555) */';
+  const CSS_BLOCK_END = '/* /Compact (#2555) */';
+  const CLI_OPERATIONS_GUIDE = 'docs/en/user-guide/cli-operations-guide.md';
+  const TRACK_B_COMMANDS = ['npm install -g commandmate', 'commandmate init', 'commandmate start --daemon'];
+
+  /** The four shots the gallery keeps, in page order: the og:image first. */
+  const GALLERY_SHOTS = [
+    OG_IMAGE,
+    'assets/img/screenshot-worktree-desktop-chat.webp',
+    'assets/img/screenshot-mobile.webp',
+    'assets/img/screenshot-worktree-mobile-chat.webp',
+  ];
+
+  /**
+   * The three it dropped. They are unreferenced but still on disk: stills.ts
+   * writes a webp for each of them, because the docs use their PNGs, and
+   * tests/unit/skills/demo-video/stills.test.ts requires that webp to exist —
+   * a file this Issue's scope could not change.
+   */
+  const DROPPED_SHOTS = [
+    'assets/img/screenshot-worktree-desktop.webp',
+    'assets/img/screenshot-worktree-mobile.webp',
+    'assets/img/screenshot-worktree-mobile-terminal.webp',
+  ];
+
+  const firstMatch = (html: string, pattern: RegExp, what: string): string => {
+    const found = pattern.exec(html);
+
+    expect(found, `${what} not found in index.html`).not.toBeNull();
+    return found![0];
+  };
+
+  const trackB = (): string =>
+    firstMatch(readIndexHtml(), /<article class="track" aria-labelledby="track-daily-h">[\s\S]*?<\/article>/, 'the Track B card');
+
+  const fold = (): string => firstMatch(trackB(), /<details\b[^>]*>[\s\S]*?<\/details>/, 'the Track B <details>');
+
+  const remoteSection = (): string =>
+    firstMatch(readIndexHtml(), /<section class="section" id="remote"[\s\S]*?<\/section>/, 'the #remote section');
+
+  const gallerySection = (): string =>
+    firstMatch(readIndexHtml(), /<section class="section" aria-labelledby="gallery-h">[\s\S]*?<\/section>/, 'the gallery');
+
+  /** styles.css between this Issue's own opening and closing comments. */
+  const compactCss = (): string => {
+    const css = fs.readFileSync(STYLES_CSS, 'utf-8');
+    const start = css.indexOf(CSS_BLOCK_START);
+    const end = css.indexOf(CSS_BLOCK_END);
+
+    expect(start, `styles.css must open the compact rules with ${CSS_BLOCK_START}`).toBeGreaterThan(-1);
+    expect(end, `styles.css must close the compact rules with ${CSS_BLOCK_END}`).toBeGreaterThan(start);
+    return css.slice(start, end);
+  };
+
+  it('folds Track B into a <details> that opens on "Install it for daily use"', () => {
+    const details = fold();
+    const summary = firstMatch(details, /<summary>([\s\S]*?)<\/summary>/, 'the Track B <summary>');
+
+    expect(text(summary)).toBe('Install it for daily use');
+    // The card is still labelled by its heading, which now sits in the summary.
+    expect(summary).toMatch(/<h3 id="track-daily-h">/);
+    // Folded by default, and toggled by the browser alone, as the FAQ is.
+    expect(details).not.toMatch(/<details\b[^>]*\bopen\b/);
+    expect(details).not.toMatch(/<(?:details|summary)\b[^>]*\b(?:role|tabindex|onclick)=/);
+  });
+
+  it('keeps every Track B command and its copy button inside the fold', () => {
+    expect(copyableCommands(fold())).toEqual(TRACK_B_COMMANDS);
+    expect(copyableCommands(trackB().replace(fold(), ''))).toEqual([]);
+  });
+
+  it('leaves Track A and the stop-the-server note outside any fold', () => {
+    const section = firstMatch(readIndexHtml(), /<section class="section" id="quick-start"[\s\S]*?<\/section>/, 'the quick start')
+      // The comment above Track B names the element it explains.
+      .replace(/<!--[\s\S]*?-->/g, '');
+
+    expect(trackAMarkup()).not.toMatch(/<details\b/);
+    expect(section.match(/<details\b/g) ?? []).toHaveLength(1);
+    expect(section.slice(section.indexOf('</details>'))).toMatch(/commandmate stop/);
+  });
+
+  it('cuts "Pair your phone" to its lede, the command and the link to the CLI operations guide', () => {
+    const section = remoteSection();
+
+    expect(section.match(/<h[2-6]\b/g) ?? []).toEqual(['<h2']);
+    expect(section).not.toMatch(/<article\b|class="(?:cards|card|note)\b/);
+    expect(section.match(/<p class="([^"]+)"/g) ?? []).toEqual(['<p class="section-lede"', '<p class="remote-docs"']);
+    expect(copyableCommands(section)).toEqual(['commandmate remote']);
+    expect(section).toContain(`href="https://github.com/Kewton/CommandMate/blob/main/${CLI_OPERATIONS_GUIDE}"`);
+  });
+
+  it('leaves what the cut cards said in the CLI operations guide the section links to', () => {
+    // The cards could go only because the guide says the same; if a heading
+    // there is renamed or removed, the page has to be looked at again.
+    const guide = fs.readFileSync(path.join(REPO_ROOT, CLI_OPERATIONS_GUIDE), 'utf-8');
+    const start = guide.indexOf('\n### commandmate remote\n');
+
+    expect(start, `${CLI_OPERATIONS_GUIDE} has no "### commandmate remote" section`).toBeGreaterThan(-1);
+    const end = guide.indexOf('\n### ', start + 1);
+    const remote = guide.slice(start, end === -1 ? undefined : end);
+
+    for (const heading of [
+      '#### Provider status', // one of two providers, or DEPENDENCY_ERROR
+      '#### A public tunnel needs explicit approval', // nothing public without a yes
+      '#### Pairing code', // a code that runs out
+      '#### Expiry closes the outward door only', // the session closes itself
+      '#### remote stop does not guess', // one door, and you close it
+    ]) {
+      expect(remote.split('\n'), `the guide's remote section lost "${heading}"`).toContain(heading);
+    }
+    for (const fact of ['DEPENDENCY_ERROR', '--pairing-expires', 'never writes `CM_BIND`', 'Auto-Yes stays off']) {
+      expect(remote, `the guide's remote section no longer says ${fact}`).toContain(fact);
+    }
+  });
+
+  it('shows four shots in the gallery, the og:image first', () => {
+    const shots = Array.from(gallerySection().matchAll(/<img\b[^>]*\bsrc="([^"]+)"/g), ([, src]) => src);
+
+    expect(shots).toEqual(GALLERY_SHOTS);
+  });
+
+  it('names the three shots it dropped nowhere under website/', () => {
+    const names = DROPPED_SHOTS.map((shot) => path.basename(shot));
+
+    expect(
+      textFiles().flatMap(({ file, body }) => names.filter((name) => body.includes(name)).map((name) => `${file}: ${name}`)),
+    ).toEqual([]);
+  });
+
+  it('ships no image under assets/img/ that the page does not reference, but the three stills.ts owns', () => {
+    const refs = new Set(extractRefs(readIndexHtml()));
+    const unreferenced = walk(path.join(WEBSITE_DIR, 'assets', 'img'))
+      .map((file) => `assets/img/${file.split(path.sep).join('/')}`)
+      .filter((file) => !refs.has(file));
+
+    // A subset rather than equality, so deleting them once stills.ts stops
+    // writing them needs no edit here.
+    expect(unreferenced.filter((file) => !DROPPED_SHOTS.includes(file))).toEqual([]);
+  });
+
+  it('keeps the fold and the gallery layout inside its one commented block in styles.css', () => {
+    const css = fs.readFileSync(STYLES_CSS, 'utf-8');
+    const block = compactCss();
+    const outside = css.replace(block, '');
+
+    expect(block).toMatch(/\.track-fold\b/);
+    expect(block).toMatch(/\.gallery\s*\{[^}]*grid-template-columns/);
+    expect(block).toMatch(/\.shot-wide\s*\{/);
+    expect(outside, 'a fold rule outside the /* Compact (#2555) */ block').not.toMatch(/\.track-fold\b/);
+    expect(outside, 'gallery columns outside the /* Compact (#2555) */ block').not.toMatch(
+      /\.gallery\s*\{[^}]*grid-template-columns|\.shot-wide\b/,
+    );
+    // The card grid the remote section no longer has leaves no rule behind.
+    expect(css).not.toMatch(/\.remote-cards\b/);
+    expect(readIndexHtml()).not.toMatch(/remote-cards/);
+  });
+});
+
+/**
  * Issue #1812 — the page is written on the Vibe Engineering axis, and its words
  * are copied from `docs/design/public-messaging.md` rather than composed here.
  *
