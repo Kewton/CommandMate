@@ -467,13 +467,145 @@ a {
   font-size: 0.9rem;
 }
 
+/* Two columns at --maxw rather than four: cards 1 and 4 carry a second block
+   (the supported-agents paragraph, the Catalog chips), and four across left
+   them several times taller than the two cards between them. */
+.cards-why {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 24rem), 1fr));
+}
+
+.card .card-more {
+  margin-top: 0.9rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.875rem;
+}
+
+.chips {
+  margin: 0.6rem 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+/* An ID is one token, so it never breaks across lines; the list wraps between
+   chips instead. The longest ID is well under the width of a 390px phone. */
+.chips code {
+  display: inline-block;
+  padding: 0.1rem 0.55rem;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--fg);
+  font-size: 0.76rem;
+  white-space: nowrap;
+}
+
+/* ---------- one agent leads ---------- */
+
+/* Four across once there is room for them, since the four steps are one run
+   read left to right; two by two, then one column, below that. */
+.lead-steps {
+  list-style: none;
+  counter-reset: lead-step;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 13.5rem), 1fr));
+  gap: 1rem;
+}
+
+.lead-steps > li {
+  counter-increment: lead-step;
+  padding: 1.25rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  min-width: 0;
+}
+
+/* The step names are the runner's phase names, so they are set as the tokens
+   they are rather than as title-case headings. */
+.lead-steps h3 {
+  margin: 0 0 0.5rem;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.lead-steps h3::before {
+  content: counter(lead-step);
+  display: inline-grid;
+  place-items: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  margin-right: 0.5rem;
+  vertical-align: 0.05rem;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif;
+  font-size: 0.78rem;
+}
+
+.lead-steps p {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: 0.92rem;
+}
+
+/* Full width rather than beside the review paragraph: the goal line is the
+   longest in the file, and at half of --maxw it would sit behind the snippet's
+   scrollbar on a desktop screen. On a phone it scrolls inside the snippet. */
+.lead-contract {
+  margin: 2rem 0 0;
+  min-width: 0;
+}
+
+.lead-contract .snippet {
+  margin: 0;
+}
+
+.lead-contract figcaption {
+  margin-top: 0.6rem;
+  color: var(--fg-muted);
+  font-size: 0.88rem;
+}
+
+.lead-review {
+  margin-top: 2rem;
+  max-width: 70ch;
+}
+
+.lead-review h3 {
+  margin: 0 0 0.5rem;
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+
+.lead-review p {
+  margin: 0;
+  color: var(--fg-muted);
+}
+
+.lead-review code {
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 0.05rem 0.3rem;
+  white-space: nowrap;
+}
+
 /* ---------- the loop ---------- */
 
 /* Two columns at --maxw, so the four beats land 2x2. A 17rem floor gave three
    columns and left the fourth beat alone under a row whose height was set by
-   the two code snippets in beat 2 — a screenful of empty card. 22rem is also
-   what keeps `GATE work-evidence PASS (commits=0, uncommitted=1)` inside the
-   snippet box instead of behind its scrollbar. */
+   the tallest snippet — a screenful of empty card. 22rem is also what keeps
+   `GATE work-evidence PASS (commits=0, uncommitted=1)` inside the snippet box
+   instead of behind its scrollbar. */
 .beats {
   list-style: none;
   counter-reset: beat;
@@ -759,6 +891,59 @@ a {
 .demo-lead figcaption {
   text-align: center;
   font-size: 0.9rem;
+}
+
+/* ---------- measured ---------- */
+
+.measured {
+  margin: 0 0 2.5rem;
+}
+
+.measured h3 {
+  margin: 0 0 0.75rem;
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+
+/* Four columns of short prose. Below this width the Result column wraps to a
+   word a line, so the table scrolls inside .table-scroll instead. Two classes
+   so it wins over `.compare-prose`, which is declared further down. */
+.compare-prose.measured-table {
+  min-width: 42rem;
+}
+
+/* Left to automatic layout, the Workers column took the width and the Result
+   column broke "8 min 39 s" across two lines. The Result column is the one the
+   table is read for, so it gets the most room. */
+.measured-table thead th:nth-child(1) {
+  width: 19%;
+}
+
+.measured-table thead th:nth-child(2) {
+  width: 13%;
+}
+
+.measured-table thead th:nth-child(3) {
+  width: 25%;
+}
+
+/* The Result column is what the row is for; the rest is who ran it. */
+.measured-table td:last-child {
+  color: var(--fg);
+}
+
+.measured-caption {
+  margin: 0.45rem 0 0;
+  color: var(--fg-muted);
+  font-size: 0.8rem;
+  font-style: italic;
+}
+
+.measured-scope {
+  margin: 0.9rem 0 0;
+  max-width: 70ch;
+  color: var(--fg-muted);
+  font-size: 0.94rem;
 }
 
 .demo video {
