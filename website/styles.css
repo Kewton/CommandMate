@@ -673,6 +673,149 @@ a {
   white-space: nowrap;
 }
 
+/* Trust (#2554) */
+
+/* "Runs on your machine": the §14 lede, then a drawing of the machine and its
+   two standing connections, with the per-feature traffic as its footnote. The
+   drawing follows the inline-drawing rule above: every ink is a custom property.
+   Contrast, text on its fill, light / dark: --fg 15.80 / 16.02 and --fg-muted
+   6.11 / 6.50 on --bg (the lede, the footnote, the edge labels); --fg 14.02 /
+   12.20 on --accent-subtle ("Your machine"); --fg 15.80 / 14.65 and --fg-muted
+   6.11 / 5.94 on --surface (the node text, "tmux"); --fg 14.84 / 14.65 and
+   --fg-muted 5.74 / 5.94 on --bg-subtle (the agent CLI chip, the code span). */
+.trust-lede {
+  margin: 0;
+  max-width: 44rem;
+  color: var(--fg);
+  font-size: 1.05rem;
+}
+
+/* One column on a phone and a tablet, the footnote under the drawing; beside it
+   once the section is wide enough that the list does not wrap every line. */
+.trust-figure {
+  margin: 2rem 0 0;
+  display: grid;
+  gap: 1.5rem 2.5rem;
+  align-items: center;
+}
+
+@media (min-width: 901px) {
+  .trust-figure {
+    grid-template-columns: minmax(0, 28rem) minmax(0, 1fr);
+  }
+}
+
+.trust-diagram {
+  width: 100%;
+  max-width: 28rem;
+  height: auto;
+  margin: 0 auto;
+  display: block;
+}
+
+.trust-diagram text {
+  font-family: inherit;
+}
+
+.trust-diagram .machine-frame {
+  fill: var(--accent-subtle);
+  stroke: var(--accent);
+  stroke-width: 1.5;
+}
+
+.trust-diagram .machine-title {
+  fill: var(--fg);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.trust-diagram .chip {
+  fill: var(--surface);
+  stroke: var(--border);
+  stroke-width: 1.25;
+}
+
+.trust-diagram .tmux-frame {
+  fill: var(--surface);
+  stroke: var(--border);
+  stroke-width: 1.25;
+  stroke-dasharray: 4 3;
+}
+
+.trust-diagram .chip-inner {
+  fill: var(--bg-subtle);
+}
+
+.trust-diagram .tmux-title {
+  fill: var(--fg-muted);
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.trust-diagram .chip-title,
+.trust-diagram .peer-title {
+  fill: var(--fg);
+  font-size: 13px;
+  font-weight: 700;
+  text-anchor: middle;
+}
+
+.trust-diagram .chip-sub,
+.trust-diagram .peer-sub {
+  fill: var(--fg-muted);
+  font-size: 11px;
+  text-anchor: middle;
+}
+
+.trust-diagram .peer rect {
+  fill: var(--surface);
+  stroke: var(--border);
+  stroke-width: 1.5;
+}
+
+.trust-diagram .edge {
+  stroke: var(--fg-muted);
+  stroke-width: 1.5;
+  fill: none;
+}
+
+.trust-diagram .arrowhead {
+  fill: var(--fg-muted);
+}
+
+.trust-diagram .edge-label {
+  fill: var(--fg-muted);
+  font-size: 11px;
+  font-weight: 600;
+  text-anchor: middle;
+}
+
+.trust-notes {
+  color: var(--fg);
+  font-size: 0.94rem;
+}
+
+.trust-notes p {
+  margin: 0 0 0.6rem;
+}
+
+.trust-notes ul {
+  margin: 0;
+  padding-left: 1.25rem;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.trust-notes code {
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 0.1rem 0.35rem;
+}
+
+/* /Trust (#2554) */
+
 /* ---------- one agent leads ---------- */
 
 /* Four across once there is room for them, since the four steps are one run
