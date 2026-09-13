@@ -118,9 +118,13 @@ about 0.5MB each; the same twenty seconds as GIF would be about 1.3MB.
 
 ## Gallery images (webp)
 
-Generated, not taken by hand (Issue #1810). The five screenshots come out of the same isolated
+Generated, not taken by hand (Issue #1810). The screenshots come out of the same isolated
 environment the demo video is filmed in, so the only repository that can appear in one is the
 throwaway seed — which is what #1225 could not reproduce about the hand-taken set.
+
+The gallery shows four since Issue #2555: `screenshot-desktop`, `screenshot-worktree-desktop-chat`,
+`screenshot-mobile` and `screenshot-worktree-mobile-chat`. The two chat shots were recorded for
+#2298 in that same environment, not by the script below.
 
 ```bash
 .claude/skills/demo-video/scripts/env-up.sh
@@ -135,7 +139,15 @@ fails**. Before each shot the rendered text is read back and the run fails on a 
 private LAN address, this repository's own name or the retired product name — the fix for which is
 to compose the shot differently, never to mask it.
 
-Budget: **each image < 100KB**, except `screenshot-worktree-desktop.webp`.
+The script also shoots three worktree stills that `docs/en/user-guide/webapp-guide.md` uses as
+PNGs and the gallery dropped in Issue #2555. Their webp copies are still in `website/assets/img/`,
+unreferenced, only because `tests/unit/skills/demo-video/stills.test.ts` requires a webp for every
+still the script takes. They go once the script stops writing them; until then
+`tests/unit/website/landing-page.test.ts` fails on any other image there that `index.html` does not
+reference.
+
+Budget: **each image < 100KB**, except `screenshot-worktree-desktop-chat.webp` (131KB, #2298) and the
+wide worktree still, which `stills.ts` allows 200KB.
 
 `screenshot-desktop.webp` is the `og:image`. Issue #1812 replaced the hero image with an inline SVG
 of the loop, which changes nothing here: no browser renders an SVG — let alone an inline one — into

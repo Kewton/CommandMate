@@ -763,44 +763,51 @@ $ echo $?
             </p>
           </article>
 
+          <!-- Folded since Issue #2555: a first visit takes Track A, so Track B
+               opens on demand. A native <details>, so the toggle is the browser's
+               and needs no script; the copy buttons inside are wired at load like
+               every other one on the page, whether the fold is open or not. The
+               heading stays a heading inside the <summary>, which HTML allows. -->
           <article class="track" aria-labelledby="track-daily-h">
             <p class="track-tag">Track B</p>
-            <h3 id="track-daily-h">Install it for daily use</h3>
-            <p class="track-lede">
-              Track A runs the server out of npm's cache, where a later <code>npx</code> can swap the
-              files under it. A global install gives a long-running server somewhere stable to live.
-            </p>
-            <ol class="steps steps-stack">
-              <li>
-                <h4>Install globally</h4>
-                <div class="install install-sm">
-                  <code class="install-cmd" id="install-global-cmd">npm install -g commandmate</code>
-                  <button type="button" class="copy-btn" data-copy-target="install-global-cmd">
-                    <span data-copy-label>Copy</span>
-                  </button>
-                </div>
-              </li>
-              <li>
-                <h4>Answer the setup questions</h4>
-                <p>First run only, and skipped entirely if you already have a <code>.env</code>.</p>
-                <div class="install install-sm">
-                  <code class="install-cmd" id="init-cmd">commandmate init</code>
-                  <button type="button" class="copy-btn" data-copy-target="init-cmd">
-                    <span data-copy-label>Copy</span>
-                  </button>
-                </div>
-              </li>
-              <li>
-                <h4>Start in the background</h4>
-                <p>Keeps serving after you close the terminal.</p>
-                <div class="install install-sm">
-                  <code class="install-cmd" id="start-cmd">commandmate start --daemon</code>
-                  <button type="button" class="copy-btn" data-copy-target="start-cmd">
-                    <span data-copy-label>Copy</span>
-                  </button>
-                </div>
-              </li>
-            </ol>
+            <details class="track-fold">
+              <summary><h3 id="track-daily-h">Install it for daily use</h3></summary>
+              <p class="track-lede">
+                Track A runs the server out of npm's cache, where a later <code>npx</code> can swap the
+                files under it. A global install gives a long-running server somewhere stable to live.
+              </p>
+              <ol class="steps steps-stack">
+                <li>
+                  <h4>Install globally</h4>
+                  <div class="install install-sm">
+                    <code class="install-cmd" id="install-global-cmd">npm install -g commandmate</code>
+                    <button type="button" class="copy-btn" data-copy-target="install-global-cmd">
+                      <span data-copy-label>Copy</span>
+                    </button>
+                  </div>
+                </li>
+                <li>
+                  <h4>Answer the setup questions</h4>
+                  <p>First run only, and skipped entirely if you already have a <code>.env</code>.</p>
+                  <div class="install install-sm">
+                    <code class="install-cmd" id="init-cmd">commandmate init</code>
+                    <button type="button" class="copy-btn" data-copy-target="init-cmd">
+                      <span data-copy-label>Copy</span>
+                    </button>
+                  </div>
+                </li>
+                <li>
+                  <h4>Start in the background</h4>
+                  <p>Keeps serving after you close the terminal.</p>
+                  <div class="install install-sm">
+                    <code class="install-cmd" id="start-cmd">commandmate start --daemon</code>
+                    <button type="button" class="copy-btn" data-copy-target="start-cmd">
+                      <span data-copy-label>Copy</span>
+                    </button>
+                  </div>
+                </li>
+              </ol>
+            </details>
           </article>
         </div>
 
@@ -1029,15 +1036,6 @@ $ echo $?
             />
             <figcaption>Every session and its status, on one dashboard.</figcaption>
           </figure>
-          <figure class="shot shot-wide">
-            <img
-              src="assets/img/screenshot-worktree-desktop.webp"
-              alt="CommandMate worktree detail view on desktop, showing an agent session terminal"
-              loading="lazy"
-              decoding="async"
-            />
-            <figcaption>Drill into a worktree and drive its agent session.</figcaption>
-          </figure>
           <!-- The chat surface (Issue #2192). Deliberately captioned as a way to
                READ and STEER a run, never as the record of one: the with/without
                table above places "a chat transcript" on the Without side, and
@@ -1066,24 +1064,6 @@ $ echo $?
           </figure>
           <figure class="shot">
             <img
-              src="assets/img/screenshot-worktree-mobile.webp"
-              alt="CommandMate worktree detail view on a phone"
-              loading="lazy"
-              decoding="async"
-            />
-            <figcaption>Worktree detail, thumb-sized.</figcaption>
-          </figure>
-          <figure class="shot">
-            <img
-              src="assets/img/screenshot-worktree-mobile-terminal.webp"
-              alt="A live agent terminal session rendered on a phone"
-              loading="lazy"
-              decoding="async"
-            />
-            <figcaption>A live agent terminal, in your pocket.</figcaption>
-          </figure>
-          <figure class="shot">
-            <img
               src="assets/img/screenshot-worktree-mobile-chat.webp"
               alt="The same conversation on a phone: the agent's replies in full, its tool calls folded into a chip, and a composer to answer from"
               loading="lazy"
@@ -1104,14 +1084,16 @@ $ echo $?
            the first question a reader has after seeing them. `commandmate remote`
            is that answer, so it sits directly under them (Issue #1937).
 
-           Every claim here is scoped to what shipped: one of the two providers
-           has to be installed (src/lib/remote/provider-registry.ts; neither is a
-           DEPENDENCY_ERROR, never a fallback), the public route is approved
-           rather than assumed (selectProvider + approvePublicTunnel in
-           src/cli/commands/remote.ts), and the defaults quoted are the exported
-           DEFAULT_REMOTE_EXPIRES / DEFAULT_PAIRING_EXPIRES. `remote` has no
-           --token and no --auto-yes: do not write flags onto this page that the
-           command would reject. -->
+           Issue #2555 cut it to the lede, the command and the link. The four
+           cards that stood between them (one of two providers, nothing public
+           without a yes, a pairing code that runs out, one door that
+           `remote stop` closes) and the note on session expiry repeated the
+           `commandmate remote` section of the CLI operations guide: Provider
+           status, A public tunnel needs explicit approval, Pairing code, Expiry
+           closes the outward door only, and remote stop does not guess. A test
+           pins those headings, so the guide cannot lose them unnoticed. `remote`
+           has no --token and no --auto-yes: do not write flags onto this page
+           that the command would reject. -->
       <section class="section" id="remote" aria-labelledby="remote-h">
         <h2 id="remote-h">Pair your phone with a QR code</h2>
         <p class="section-lede">
@@ -1127,47 +1109,6 @@ $ echo $?
           </button>
         </div>
 
-        <div class="cards remote-cards">
-          <article class="card">
-            <h3>Bring one of two providers</h3>
-            <p>
-              Tailscale or <code>cloudflared</code> — one of them has to be installed and usable,
-              or <code>remote</code> stops on a dependency error. Tailscale Serve is the preferred
-              route, and stays inside your tailnet.
-            </p>
-          </article>
-          <article class="card">
-            <h3>Nothing public without a yes</h3>
-            <p>
-              A Cloudflare Quick Tunnel is a URL on the open internet, so it is created only after
-              you approve it — <code>--yes</code> when nobody is there to ask. Tailscale being
-              unusable never publishes you instead.
-            </p>
-          </article>
-          <article class="card">
-            <h3>A code that runs out</h3>
-            <p>
-              The pairing code works once and expires in ten minutes by default;
-              <code>--pairing-expires</code> sets that window. No long-lived token travels in the
-              QR code.
-            </p>
-          </article>
-          <article class="card">
-            <h3>One door, and you close it</h3>
-            <p>
-              <code>CM_BIND</code> keeps its <code>127.0.0.1</code> default — remote adds one way
-              in and changes nothing else. <code>commandmate remote stop</code> takes down what
-              CommandMate opened, and leaves the server up.
-            </p>
-          </article>
-        </div>
-
-        <p class="note">
-          Nothing is exposed until you run it, and the session closes itself — eight hours by
-          default, <code>--expires</code> to change it. <code>commandmate remote status</code>
-          reports the provider, the URL and what is left of both windows, and Auto-Yes stays off
-          unless you turn it on.
-        </p>
         <p class="remote-docs">
           The Quick Tunnel is a quick way in rather than a permanent address. Every flag, every
           exit code and the longer-lived Tailscale route are in the
