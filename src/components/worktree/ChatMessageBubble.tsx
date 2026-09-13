@@ -60,6 +60,7 @@ import {
   ChevronDown,
   ChevronRight,
   Copy,
+  CopyPlus,
   Loader2,
   MessageCircleQuestion,
   RotateCcw,
@@ -79,7 +80,11 @@ import { stripAnsi } from '@/lib/detection/ansi';
 import { splitFilePathParts, type ChatRowHeader } from '@/lib/chat/chat-transcript-view';
 import { SHARED_REMARK_PLUGINS } from '@/lib/markdown';
 import { classifyChatLink, normalizeChatFilePath } from '@/lib/chat/chat-file-path';
-import { splitToolLog } from '@/lib/chat/chat-tool-log';
+import {
+  chatMarkdownCopyText,
+  chatMarkdownFullCopyText,
+  splitChatMarkdownBody,
+} from '@/lib/chat/chat-markdown-body';
 import {
   countToolApprovalEntries,
   type ToolApprovalEntry,
@@ -309,114 +314,15 @@ export function toPlainBodyText(content: unknown): string {
 // Folded reasoning (Issue #2272)
 // ============================================================================
 
-/**
- * The label the five transcript readers write in front of a reasoning quote.
- *
- * It is `lib/hooks/sources/turn-body`'s `TURN_REASONING_LABEL` and is spelled
- * again here rather than imported: that module is server-side reader code, this
- * is a `'use client'` bundle, and the two are only allowed to agree on a string
- * that is already baked into `chat_messages.content` — the rows this reader has
- * to fold were written months before it existed and cannot be re-labelled.
- * `tests/unit/components/worktree/ChatThinking-2272.test.tsx` asserts the two
- * constants are equal, which is the seam that would otherwise drift.
- */
-export const CHAT_THINKING_LABEL = 'Thinking';
-
-/**
- * The first line of a reasoning section, in either shape.
- *
- *  - `> **Thinking (4)**` — what `separateTurnBody` writes since #2272.
- *  - `> **Thinking**` — what the five readers wrote inline before it, and what
- *    every row already in the database still holds.
- *
- * Anchored to the whole line so `> **Tool calls (1)**` and a paragraph that
- * merely mentions thinking cannot match.
- */
-const CHAT_THINKING_HEADING = /^>[ \t]*\*\*Thinking(?:[ \t]*\((\d+)\))?\*\*[ \t]*$/;
-
-/** What {@link splitChatThinking} answers. */
-export interface ChatThinkingSplit {
-  /** The body with every reasoning section removed. */
-  readonly body: string;
-  /** The reasoning, unquoted and joined, or null when the body had none. */
-  readonly reasoning: string | null;
-  /** How many blocks the chip stands for; 0 when {@link reasoning} is null. */
-  readonly blocks: number;
-}
-
-/** One quoted section's lines, with the `> ` prefix taken back off. */
-function unquoteSection(lines: readonly string[]): string {
-  return lines
-    .map((line) => line.replace(/^>[ \t]?/, ''))
-    .join('\n')
-    .replace(/^\n+/, '')
-    .replace(/\n+$/, '');
-}
-
-/**
- * Take the reasoning out of a body so the answer is what the bubble opens with.
- *
- * ## Why the renderer and not only the writer
- *
- * #2272's writer change fixes rows written from now on. It cannot fix the rows
- * already saved — `writeOpencodeTurn` matches on `request_id` and stands down
- * rather than rewriting — and those are the ones the operator is looking at.
- * Measured against opencode 1.18.22, a `reasoning` part arrives in front of
- * every text part, so *every* saved opencode row opens with `> **Thinking**`.
- * Folding on the read side is what makes the two shapes one chip.
- *
- * ## What counts as a section
- *
- * A line matching {@link CHAT_THINKING_HEADING} that OPENS a blockquote — the
- * line above it is not itself quoted — plus every `>` line that follows it. The
- * "opens" test is what stops a `Thinking` heading nested inside some larger
- * quote being torn out of the middle of it.
- *
- * Pure and total: any string in, a string out, and a body with no section comes
- * back untouched byte for byte, which is what keeps every non-opencode bubble
- * exactly as #2245 left it.
- *
- * @param content - The Markdown body of one message
- */
-export function splitChatThinking(content: string): ChatThinkingSplit {
-  // The cheap reject first: this runs on every Markdown bubble in the column.
-  if (!content.includes(CHAT_THINKING_LABEL)) {
-    return { body: content, reasoning: null, blocks: 0 };
-  }
-
-  const lines = content.split('\n');
-  const kept: string[] = [];
-  const folded: string[] = [];
-  let blocks = 0;
-  let index = 0;
-
-  while (index < lines.length) {
-    const heading = CHAT_THINKING_HEADING.exec(lines[index]);
-    const opensQuote = index === 0 || !lines[index - 1].startsWith('>');
-    if (!heading || !opensQuote) {
-      kept.push(lines[index]);
-      index += 1;
-      continue;
-    }
-    let end = index + 1;
-    while (end < lines.length && lines[end].startsWith('>')) end += 1;
-    const declared = heading[1] ? Number.parseInt(heading[1], 10) : 1;
-    blocks += Number.isFinite(declared) && declared > 0 ? declared : 1;
-    folded.push(unquoteSection(lines.slice(index + 1, end)));
-    index = end;
-  }
-
-  if (blocks === 0) return { body: content, reasoning: null, blocks: 0 };
-
-  return {
-    // Removing a section from the middle leaves the blank lines that fenced it
-    // on both sides; collapsing them is what stops a gap opening where the
-    // quote used to be.
-    body: kept.join('\n').replace(/\n{3,}/g, '\n\n').trim(),
-    reasoning: folded.join('\n\n').replace(/^\n+/, '').replace(/\n+$/, ''),
-    blocks,
-  };
-}
+// [#2544] The splitter itself lives in `lib/chat/chat-thinking`, beside
+// `chat-tool-log`, so the one function the renderer and the copy button share
+// (`lib/chat/chat-markdown-body`) can compose both without importing this
+// component. Re-exported here for the suites that have always found it here.
+export {
+  CHAT_THINKING_LABEL,
+  splitChatThinking,
+  type ChatThinkingSplit,
+} from '@/lib/chat/chat-thinking';
 
 /** The collapsible row a folded reasoning section is drawn as. */
 export const CHAT_THINKING_GROUP_TESTID = 'chat-thinking-group';
@@ -867,6 +773,10 @@ const ChatPlainBody = memo(function ChatPlainBody({
  * differs is only where the reader has to go to find it. History's
  * `ConversationPairCard` is NOT changed: it clamps to two lines and browses,
  * and folding a fold gains it nothing.
+ *
+ * Since #2544 both splits are reached through `splitChatMarkdownBody`, the one
+ * function {@link ChatMessageBubble}'s copy button also reads, so what is on the
+ * clipboard is the answer drawn here and never a section folded under it.
  */
 export const ChatMarkdownBody = memo(function ChatMarkdownBody({
   content,
@@ -912,13 +822,11 @@ export const ChatMarkdownBody = memo(function ChatMarkdownBody({
   // chip is an ELEMENT, not a render: nothing of it reaches the DOM while the
   // chip is shut.
   //
-  // The tool log comes off FIRST and the reasoning second, because that is the
-  // order `separateTurnBody` laid them in — prose, then `Thinking (N)`, then
-  // `Tool calls (N)` at the very end. Taking the trailing section off leaves a
-  // body whose last block is the reasoning, which is exactly what
-  // `splitChatThinking` was written against.
-  const tools = useMemo(() => splitToolLog(content), [content]);
-  const thinking = useMemo(() => splitChatThinking(tools.prose), [tools.prose]);
+  // [#2544] The order of the two splits — tool log first, then reasoning — is
+  // `splitChatMarkdownBody`'s to keep, not this component's: the copy button
+  // reads the same function, and a second hand-written composition here is
+  // exactly how the screen and the clipboard came to disagree.
+  const split = useMemo(() => splitChatMarkdownBody(content), [content]);
 
   return (
     <>
@@ -927,27 +835,27 @@ export const ChatMarkdownBody = memo(function ChatMarkdownBody({
         rehypePlugins={rehypePlugins}
         components={components}
       >
-        {thinking.body}
+        {split.body}
       </ReactMarkdown>
-      {thinking.reasoning !== null && (
-        <ChatThinkingDisclosure blocks={thinking.blocks}>
+      {split.reasoning !== null && (
+        <ChatThinkingDisclosure blocks={split.reasoningBlocks}>
           <ReactMarkdown
             remarkPlugins={SHARED_REMARK_PLUGINS}
             rehypePlugins={rehypePlugins}
             components={components}
           >
-            {thinking.reasoning}
+            {split.reasoning}
           </ReactMarkdown>
         </ChatThinkingDisclosure>
       )}
-      {tools.toolCalls > 0 && (
-        <ChatToolLogDisclosure toolCalls={tools.toolCalls}>
+      {split.toolCalls > 0 && (
+        <ChatToolLogDisclosure toolCalls={split.toolCalls}>
           <ReactMarkdown
             remarkPlugins={SHARED_REMARK_PLUGINS}
             rehypePlugins={rehypePlugins}
             components={components}
           >
-            {tools.toolLog}
+            {split.toolLog}
           </ReactMarkdown>
         </ChatToolLogDisclosure>
       )}
@@ -1223,8 +1131,31 @@ export const ChatMessageBubble = memo(function ChatMessageBubble({
 
   // [#2245] What the reader sees, and therefore what copy has to hand them. The
   // Markdown path keeps `message.content` verbatim — see `toPlainBodyText`.
+  // Since #2544 that verbatim value is what INSERT hands over; copy is below.
   const plainBody = useMemo(() => toPlainBodyText(message.content), [message.content]);
   const displayContent = isMarkdown ? message.content : plainBody;
+  // [#2544] The Markdown path does NOT draw `message.content` whole:
+  // `ChatMarkdownBody` draws the answer and folds the reasoning and the tool
+  // log into chips. Copy hands over that answer, as Markdown source, from
+  // the same `splitChatMarkdownBody` the renderer reads — so the clipboard can
+  // never hold a section the screen has folded away. `null` is a row that draws
+  // nothing but chips, and it offers no copy: falling back to the whole row
+  // would put exactly the folded sections back (the whole-row copy is #2545).
+  //
+  // The plain path is unchanged: a terminal scrape carries no section markers
+  // to split on, and every character of it is content.
+  const markdownSplit = useMemo(
+    () => (isMarkdown ? splitChatMarkdownBody(message.content) : null),
+    [isMarkdown, message.content],
+  );
+  const copyContent = markdownSplit ? chatMarkdownCopyText(markdownSplit) : plainBody;
+  // [#2545] The whole stored row, folded sections included — offered beside the
+  // answer-only copy, and only on a row that folded something, so the two never
+  // hand over the same text. On a tools-only turn it is the row's only copy.
+  // The plain path has no sections to tell apart and never offers it.
+  const fullCopyContent = markdownSplit
+    ? chatMarkdownFullCopyText(message.content, markdownSplit)
+    : null;
 
   // The bubble. `rounded-2xl` with one squared-off corner on the speaker's side
   // is what makes the two columns read as a dialogue rather than two lists.
@@ -1396,16 +1327,32 @@ export const ChatMessageBubble = memo(function ChatMessageBubble({
           </>
         ) : (
           <>
-            {onCopy && (
+            {onCopy && copyContent !== null && (
               <button
                 type="button"
                 data-testid="chat-copy-message"
-                onClick={() => onCopy(displayContent)}
+                onClick={() => onCopy(copyContent)}
                 className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                 aria-label={t('conversation.copyMessage')}
                 title={t('conversation.copy')}
               >
                 <Copy size={14} aria-hidden="true" />
+              </button>
+            )}
+            {/* [#2545] A visible word as well as an icon: a phone shows no
+                tooltip, and two bare copy icons side by side would leave the
+                reader guessing which one carries the Thinking and tool calls. */}
+            {onCopy && fullCopyContent !== null && (
+              <button
+                type="button"
+                data-testid="chat-copy-full-message"
+                onClick={() => onCopy(fullCopyContent)}
+                className="flex items-center gap-1 rounded px-1.5 py-1 text-xs leading-none text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                aria-label={t('chatTranscript.copyFull.action')}
+                title={t('chatTranscript.copyFull.title')}
+              >
+                <CopyPlus size={14} aria-hidden="true" />
+                <span>{t('chatTranscript.copyFull.label')}</span>
               </button>
             )}
             {isUser && onInsertToMessage && (

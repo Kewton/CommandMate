@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.1] - 2026-09-13
+
+> **Highlight**: チャット面のコピーボタンが、画面では畳まれている Thinking と Tool calls の中身までクリップボードに入れていた問題を直したパッチ（直近 30 日の実データでは、コピーした文字のうち画面に出ていない割合が claude 59.9%・codex 84.5%）。通常のコピーは画面に見えている回答本文だけを渡すようにし（#2544）、節を含む全文が要るときのために、畳まれた節を持つ行にだけ常時表示の「全文」ボタンを追加した（#2545）。PC・スマホ（タッチ）・`/sessions` のタイルで実機受入テスト 22/22 合格。
+
+### Added
+
+- **feat(chat): チャット面の Assistant 行に、チップに畳まれた Thinking / Tool calls 節を含む全文をコピーする「全文」ボタンを追加し、History を開かずに保存行そのものをコピーできるようにした** (#2545): #2544 で通常のコピーボタンが回答本文だけを渡すようになったため、reasoning とツールログまで欲しい場合は History を開くしかなかった。`splitChatMarkdownBody` の `folded` が true の Markdown 行にだけ、通常のコピーの隣に常時表示の「全文」ボタン（`data-testid="chat-copy-full-message"`、`aria-label` / `title` / 表示文言は `chatTranscript.copyFull.*` で通常のコピーと区別）を置き、`message.content` を既存の `handleCopy`（同じ成功・失敗トースト）へ渡す。判定は純関数 `chatMarkdownFullCopyText`（`src/lib/chat/chat-markdown-body.ts`）に置き、本文が空の tool call だけのターンではこのボタンがその行の唯一のコピー手段になる。畳まれた節の無い行・terminal scrape（plain 経路）の行・History ペインのコピーは変更しない。
+
+### Changed
+
+- **feat(chat): チャット面のコピーボタンが、チップに畳まれた Thinking / Tool calls 節を含めず、画面に表示されている回答本文だけを渡すようにした** (#2544): Markdown 行（transcript reader が書いた Assistant 行）のコピーは保存行の全体（`message.content`）を渡していたため、閉じたチップの中の reasoning とツールログまでクリップボードに入っていた。`splitToolLog` → `splitChatThinking` を合成する純関数 `splitChatMarkdownBody`（`src/lib/chat/chat-markdown-body.ts`）を新設し、`ChatMarkdownBody` の描画とコピーボタンの両方がこの 1 関数から本文を得るようにした（表示とコピーが今後ずれない構造）。新形状（末尾の `> **Thinking (N)**` / `> **Tool calls (N)**`）・旧形状（本文中の `> **Thinking**`、先頭の `` - `Bash` — … `` 列）どちらも本文の Markdown ソースだけを渡し、畳まれる節を含まない行のコピーはバイト等価のまま。本文が空になる行（tool call だけのターン）ではコピーボタンを出さない（全文へのフォールバックはしない。全文コピーは #2545）。PC のチャット面・スマホのチャット面・`/sessions` のタイルは同じ経路で同じ挙動になり、History ペイン（`ConversationPairCard`）のコピーと plain 経路（terminal scrape 行）のコピーは変えていない。`splitChatThinking` は `src/lib/chat/chat-thinking.ts` へ移し、`ChatMessageBubble` から再 export している
+
 ## [0.36.0] - 2026-09-13
 
 > **Highlight**: `/sessions` をリンクカードの一覧から、複数セッションを 2 列のタイルで同時に見張れる画面にした（Epic #2508）。タイルは会話履歴を既定で表示し、ターミナル面への切替・composer からの返信・Auto-Yes の切替までタイルの中で完結する。タイルを並べても負荷が膨らまないよう、画面外のタイルは通信せず（実ブラウザ計測で 22 タイル中 18 枚が 0 本）、アイドルのタイルを詳細画面とは別のカデンスに落とした結果、タイル 20 枚の定常負荷は 11.3 → 2.0 req/s（サーバ CPU 24.6% → 6.7%）になった。あわせて、圏外で送ったメッセージが復帰後も「送信中」のまま再送されなかった v0.35.0 の既知の問題（#2535）を直し、復帰から約 260ms で 1 回だけ再送されることを実機で確認した。

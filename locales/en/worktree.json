@@ -483,6 +483,11 @@
     "emptyHint": "Sending a message starts the session",
     "openSearch": "Search this conversation",
     "turnBoundary": "Next turn",
+    "copyFull": {
+      "label": "Full",
+      "action": "Copy the full message, including Thinking and tool calls",
+      "title": "Copy everything, including Thinking and tool calls"
+    },
     "thinking": {
       "summary": "Thinking · {count}",
       "expand": "Show the reasoning",

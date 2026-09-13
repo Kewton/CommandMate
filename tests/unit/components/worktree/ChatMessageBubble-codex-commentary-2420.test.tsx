@@ -199,6 +199,28 @@ describe('[#2420] the chat surface folds it into the chip that is already there'
     expect(screen.queryByTestId(CHAT_THINKING_BODY_TESTID)).toBeNull();
   });
 
+  it('copies the answer, not the notes folded behind it [#2544]', () => {
+    // The seam again, from the clipboard's side: the body `renderCodexTurn`
+    // actually writes, not a typed-out one. Before #2544 the copy button handed
+    // over the whole row, so pasting this reply led with four progress notes the
+    // bubble had folded shut — the same defect #2420 fixed on screen.
+    const body = renderCodexTurn(REPORTED_TURN).body;
+    expect(body).toContain(FIRST_NOTE); // positive control
+
+    const onCopy = vi.fn();
+    render(
+      <ChatMessageBubble message={message(body)} showHeader onFilePathClick={vi.fn()} onCopy={onCopy} />
+    );
+    fireEvent.click(screen.getByTestId('chat-copy-message'));
+
+    expect(onCopy).toHaveBeenCalledWith(
+      'タイムアウトは 30 秒です。`config.toml` の 12 行目で設定されています。'
+    );
+    const copied = onCopy.mock.calls[0][0] as string;
+    expect(copied).not.toContain(FIRST_NOTE);
+    expect(copied).not.toContain('`exec` — ls -la');
+  });
+
   it('shows every note in full when the chip is opened', () => {
     renderBubble(renderCodexTurn(REPORTED_TURN).body);
     fireEvent.click(screen.getByTestId(CHAT_THINKING_TOGGLE_TESTID));
