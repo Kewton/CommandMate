@@ -623,19 +623,90 @@ $ echo $?
             </ul>
           </article>
         </div>
-        <!-- Network scope, verbatim from docs/design/public-messaging.md §14 (Issue #2549).
-             It used to limit the traffic to the agent CLI's own API calls, which
-             Web Push, `commandmate remote`, the update check and the Skills Catalog
-             all contradict. Keep the per-feature list whole: dropping an
-             item brings the overclaim back. -->
-        <p class="note">
+      </section>
+
+      <!-- 5b. Runs on your machine (Issue #2554). The network-scope note that sat
+           under the cards, given a section and a drawing of its own. The words are
+           docs/design/public-messaging.md §14 verbatim, split in two without a word
+           changed: the lede is what CommandMate itself does, and the drawing's
+           footnote is what goes over the network and when. §14 keeps those two
+           apart on purpose, so the first is never widened into "talks to nothing".
+           The copy used to limit the traffic to the agent CLI's own API calls,
+           which Web Push, `commandmate remote`, the update check and the Skills
+           Catalog all contradict (#2549). Keep the footnote list whole: dropping an
+           item brings the overclaim back, and a test pins its length to §14's
+           evidence table. -->
+      <section class="section" id="trust" aria-labelledby="trust-h">
+        <h2 id="trust-h">Runs on your machine</h2>
+        <p class="trust-lede">
           CommandMate runs on your machine. It sends no telemetry, needs no account, and needs no
-          external server to run. What goes over the network depends on what you use: your agent
-          CLI's own API calls; a check for a newer release on GitHub, from the web UI; the official
-          Skills Catalog on GitHub, when you list or install Skills; your browser's push service,
-          once you turn on Web Push; and Tailscale or cloudflared, while
-          <code>commandmate remote</code> is running.
+          external server to run.
         </p>
+
+        <figure class="trust-figure">
+          <!-- Three nodes, and only the two connections every session has: the
+               web UI, opened from a browser or a phone, and the agent CLI's calls
+               to wherever its model runs. Arrows point the way a connection is
+               opened. What else goes out depends on the features in use, so it is
+               the footnote rather than more arrows. Inline for the same reason as
+               the hero drawing: every colour in it is a CSS variable (.trust-diagram
+               in styles.css), it is one labelled image to a screen reader, and
+               viewBox + width/height reserve its box before layout. -->
+          <svg
+            class="trust-diagram"
+            viewBox="0 0 400 250"
+            width="400"
+            height="250"
+            role="img"
+            aria-label="Where CommandMate runs, drawn as three nodes. Your machine runs CommandMate, which serves the web UI, and the agent CLI inside tmux. A browser or phone opens that web UI, and the agent CLI makes its own API calls to wherever its model runs. What else goes over the network, and when, is listed under the drawing."
+          >
+            <g class="machine">
+              <rect class="machine-frame" x="8" y="8" width="186" height="234" rx="14" />
+              <text class="machine-title" x="24" y="32">Your machine</text>
+
+              <rect class="chip" x="22" y="46" width="158" height="60" rx="10" />
+              <text class="chip-title" x="101" y="72">CommandMate</text>
+              <text class="chip-sub" x="101" y="91">serves the web UI</text>
+
+              <rect class="tmux-frame" x="22" y="120" width="158" height="112" rx="10" />
+              <text class="tmux-title" x="34" y="140">tmux</text>
+              <rect class="chip chip-inner" x="34" y="150" width="134" height="60" rx="8" />
+              <text class="chip-title" x="101" y="176">Agent CLI</text>
+              <text class="chip-sub" x="101" y="195">Claude Code, Codex, …</text>
+            </g>
+
+            <g class="peer">
+              <rect x="262" y="46" width="130" height="60" rx="12" />
+              <text class="peer-title" x="327" y="72">Browser or phone</text>
+              <text class="peer-sub" x="327" y="91">opens the web UI</text>
+            </g>
+
+            <g class="peer">
+              <rect x="262" y="150" width="130" height="60" rx="12" />
+              <text class="peer-title" x="327" y="176">The agent's API</text>
+              <text class="peer-sub" x="327" y="195">where its model runs</text>
+            </g>
+
+            <line class="edge" x1="256" y1="76" x2="196" y2="76" />
+            <polygon class="arrowhead" points="185,76 196,71 196,81" />
+            <text class="edge-label" x="228" y="66">web UI</text>
+
+            <line class="edge" x1="173" y1="180" x2="246" y2="180" />
+            <polygon class="arrowhead" points="257,180 246,175 246,185" />
+            <text class="edge-label" x="228" y="170">API calls</text>
+          </svg>
+
+          <figcaption class="trust-notes">
+            <p>What goes over the network depends on what you use:</p>
+            <ul>
+              <li>your agent CLI's own API calls;</li>
+              <li>a check for a newer release on GitHub, from the web UI;</li>
+              <li>the official Skills Catalog on GitHub, when you list or install Skills;</li>
+              <li>your browser's push service, once you turn on Web Push;</li>
+              <li>and Tailscale or cloudflared, while <code>commandmate remote</code> is running.</li>
+            </ul>
+          </figcaption>
+        </figure>
       </section>
 
       <!-- 6. 60-second quick start -->
