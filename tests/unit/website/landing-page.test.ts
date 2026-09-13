@@ -58,7 +58,7 @@ const LP_SOURCE_FILES = ['index.html', 'styles.css', 'main.js'];
  * drawing that leaves the hero still has to follow the colour scheme, so the
  * scan grew rather than moved. A new drawing is one more entry here.
  */
-const INLINE_DRAWINGS = ['hero-mock', 'loop-diagram'];
+const INLINE_DRAWINGS = ['hero-mock', 'loop-diagram', 'trust-diagram'];
 
 /** Everything under website/ a human reads, as opposed to the media bytes. */
 const TEXT_FILE = /\.(html|css|js|md|json|svg|txt)$/i;
@@ -777,6 +777,166 @@ describe('Issue #2551: the session mock in the hero, the loop in The loop', () =
     );
 
     expect(offenders).toEqual([]);
+  });
+});
+
+/**
+ * Issue #2554 — the network-scope note under the cards becomes a section of its
+ * own, "Runs on your machine", with a drawing of the machine and the two
+ * connections every session has. The words are public-messaging.md §14 between
+ * its `trust:en` markers, split without a word changed: the lede is what
+ * CommandMate itself does, the drawing's footnote is what goes over the network
+ * and when. Both halves are read from the doc, and the footnote's length from
+ * §14's evidence table, so a route added there stays red here until the page
+ * lists it too.
+ *
+ * The colour scan in the #1812 block and the markup scan in the #2551 block reach
+ * this drawing through INLINE_DRAWINGS. The other three drawing guards in #1812
+ * read the hero's figure only, so they are repeated here for this one.
+ */
+describe('Issue #2554: Trust', () => {
+  const firstGroup = (html: string, pattern: RegExp, what: string): string => {
+    const found = pattern.exec(html);
+
+    expect(found, `${what} not found`).not.toBeNull();
+    return found![1];
+  };
+
+  const trustSection = (): string =>
+    firstGroup(readIndexHtml(), /(<section class="section" id="trust"[\s\S]*?<\/section>)/, 'the #trust section');
+
+  const trustSvg = (): string =>
+    firstGroup(trustSection(), /(<svg\s+class="trust-diagram"[\s\S]*?<\/svg>)/, 'the trust drawing');
+
+  const footnote = (): string =>
+    firstGroup(trustSection(), /<figcaption class="trust-notes">([\s\S]*?)<\/figcaption>/, 'the drawing footnote');
+
+  /** §14's en sentence as the page renders it, read between its `trust:en` markers. */
+  const trustEn = (): string => {
+    const doc = fs.readFileSync(MESSAGING_DOC, 'utf-8');
+    const match = /<!-- trust:en -->([\s\S]*?)<!-- \/trust:en -->/.exec(doc);
+
+    expect(
+      match,
+      'docs/design/public-messaging.md must delimit the §14 en sentence with <!-- trust:en --> … <!-- /trust:en -->',
+    ).not.toBeNull();
+    return prose(match![1]);
+  };
+
+  /** The rows of one `### ` table in §14, its header row dropped. */
+  const trustTable = (heading: string): string[][] => {
+    const [header, ...rows] = tableRows(headingBody(sectionBody('14'), heading));
+
+    expect(header, `§14 has no table under "${heading}"`).not.toBeUndefined();
+    return rows;
+  };
+
+  it('follows "What it gives you" directly, under the heading the Issue names', () => {
+    expect(readIndexHtml()).toMatch(
+      /<h2 id="why">[\s\S]*?<\/section>\s*(?:<!--(?:(?!-->)[\s\S])*-->\s*)?<section class="section" id="trust"/,
+    );
+    expect(text(firstGroup(trustSection(), /<h2 id="trust-h">([\s\S]*?)<\/h2>/, 'the #trust heading'))).toBe(
+      'Runs on your machine',
+    );
+  });
+
+  it('states §14 verbatim: the lede, then the footnote under the drawing', () => {
+    const section = trustSection();
+    const lede = text(firstGroup(section, /<p class="trust-lede">([\s\S]*?)<\/p>/, 'the #trust lede'));
+
+    // One string split in two, not two strings: joined back, it has to be §14
+    // to the character, so neither half can be reworded or trimmed on its own.
+    expect(`${lede} ${text(footnote())}`).toBe(trustEn());
+    expect(section.indexOf('class="trust-lede"')).toBeLessThan(section.indexOf('<svg'));
+    expect(section.indexOf('</svg>')).toBeLessThan(section.indexOf('<figcaption'));
+  });
+
+  it("lists one footnote per route in §14's evidence table", () => {
+    const routes = [...footnote().matchAll(/<li>([\s\S]*?)<\/li>/g)].map((match) => text(match[1]));
+    const evidence = trustTable('### 機能ごとの通信');
+
+    // §14's rule: a route is dropped from the sentence only after the table
+    // shows the traffic itself is gone. So the table's length is the list's.
+    expect(evidence.length).toBeGreaterThan(0);
+    expect(routes).toHaveLength(evidence.length);
+  });
+
+  it('leaves no copy of the note under the cards', () => {
+    const cards = firstGroup(readIndexHtml(), /(<h2 id="why">[\s\S]*?<\/section>)/, 'the cards section');
+
+    expect(cards).not.toContain('class="note"');
+    expect(text(cards)).not.toMatch(/telemetry|over the network/i);
+  });
+
+  it('carries none of the network wording §14 retracted, anywhere Pages serves', () => {
+    const rows = trustTable('### 書かない表現');
+    const terms = (conditional: boolean): string[] =>
+      rows
+        .filter(([cell]) => cell.includes('無条件') === conditional)
+        .flatMap(([cell]) => [...cell.matchAll(/`([^`]+)`/g)].map((match) => match[1].toLowerCase()));
+    // The Issue's own criterion, as a literal too: §14 lists the whole retracted
+    // sentence, and the start of it is what would come back reworded.
+    const banned = ['the only network traffic', ...terms(false)];
+    // "No external server" is retracted only as a bare claim; §14's own
+    // replacement says it needs none "to run".
+    const bare = terms(true);
+
+    expect(banned.length).toBeGreaterThan(1);
+    expect(bare.length).toBeGreaterThan(0);
+
+    const offenders = textFiles().flatMap(({ file, body }) => {
+      const flat = body.replace(/\s+/g, ' ').toLowerCase();
+
+      return [
+        ...banned.filter((term) => flat.includes(term)).map((term) => `${file}: ${term}`),
+        ...bare.flatMap((term) =>
+          flat
+            .split(term)
+            .slice(1)
+            .filter((after) => !after.startsWith(' to run'))
+            .map(() => `${file}: ${term} (not "to run")`),
+        ),
+      ];
+    });
+
+    expect(offenders).toEqual([]);
+  });
+
+  it('scans the drawing with the colour and markup guards of the other two', () => {
+    expect(INLINE_DRAWINGS).toContain('trust-diagram');
+  });
+
+  it('draws the network scope inline, inside the section', () => {
+    const figure = firstGroup(trustSection(), /<figure class="trust-figure">([\s\S]*?)<\/figure>/, 'the trust figure');
+
+    expect(figure).toMatch(/<svg\s+class="trust-diagram"/);
+  });
+
+  it('presents the drawing as a single labelled image to a screen reader', () => {
+    const svg = trustSvg();
+
+    expect(svg).toMatch(/role="img"/);
+    const label = /aria-label="([^"]+)"/.exec(svg);
+    expect(label, 'the trust svg needs an aria-label').not.toBeNull();
+    expect(label![1].length).toBeGreaterThan(40);
+  });
+
+  it('reserves the drawing box before layout', () => {
+    expect(trustSvg()).toMatch(/viewBox="[^"]+"\s+width="\d+"\s+height="\d+"/);
+  });
+
+  it("draws three nodes: your machine running CommandMate and the agent CLI in tmux, a browser or phone, the agent's API", () => {
+    const svg = trustSvg();
+    const machine = firstGroup(svg, /<g class="machine">([\s\S]*?)<\/g>/, 'the machine node');
+    const labels = (html: string, kind: string): string[] =>
+      [...html.matchAll(new RegExp(`<text class="${kind}"[^>]*>([\\s\\S]*?)</text>`, 'g'))].map((match) =>
+        text(match[1]),
+      );
+
+    expect(labels(machine, 'machine-title')).toEqual(['Your machine']);
+    expect(labels(machine, 'chip-title')).toEqual(['CommandMate', 'Agent CLI']);
+    expect(labels(machine, 'tmux-title')).toEqual(['tmux']);
+    expect(labels(svg, 'peer-title')).toEqual(['Browser or phone', "The agent's API"]);
   });
 });
 
