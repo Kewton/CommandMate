@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **feat(chat): チャット面の Assistant 行に、チップに畳まれた Thinking / Tool calls 節を含む全文をコピーする「全文」ボタンを追加し、History を開かずに保存行そのものをコピーできるようにした** (#2545): #2544 で通常のコピーボタンが回答本文だけを渡すようになったため、reasoning とツールログまで欲しい場合は History を開くしかなかった。`splitChatMarkdownBody` の `folded` が true の Markdown 行にだけ、通常のコピーの隣に常時表示の「全文」ボタン（`data-testid="chat-copy-full-message"`、`aria-label` / `title` / 表示文言は `chatTranscript.copyFull.*` で通常のコピーと区別）を置き、`message.content` を既存の `handleCopy`（同じ成功・失敗トースト）へ渡す。判定は純関数 `chatMarkdownFullCopyText`（`src/lib/chat/chat-markdown-body.ts`）に置き、本文が空の tool call だけのターンではこのボタンがその行の唯一のコピー手段になる。畳まれた節の無い行・terminal scrape（plain 経路）の行・History ペインのコピーは変更しない。
+
 ### Changed
 
 - **feat(chat): チャット面のコピーボタンが、チップに畳まれた Thinking / Tool calls 節を含めず、画面に表示されている回答本文だけを渡すようにした** (#2544): Markdown 行（transcript reader が書いた Assistant 行）のコピーは保存行の全体（`message.content`）を渡していたため、閉じたチップの中の reasoning とツールログまでクリップボードに入っていた。`splitToolLog` → `splitChatThinking` を合成する純関数 `splitChatMarkdownBody`（`src/lib/chat/chat-markdown-body.ts`）を新設し、`ChatMarkdownBody` の描画とコピーボタンの両方がこの 1 関数から本文を得るようにした（表示とコピーが今後ずれない構造）。新形状（末尾の `> **Thinking (N)**` / `> **Tool calls (N)**`）・旧形状（本文中の `> **Thinking**`、先頭の `` - `Bash` — … `` 列）どちらも本文の Markdown ソースだけを渡し、畳まれる節を含まない行のコピーはバイト等価のまま。本文が空になる行（tool call だけのターン）ではコピーボタンを出さない（全文へのフォールバックはしない。全文コピーは #2545）。PC のチャット面・スマホのチャット面・`/sessions` のタイルは同じ経路で同じ挙動になり、History ペイン（`ConversationPairCard`）のコピーと plain 経路（terminal scrape 行）のコピーは変えていない。`splitChatThinking` は `src/lib/chat/chat-thinking.ts` へ移し、`ChatMessageBubble` から再 export している

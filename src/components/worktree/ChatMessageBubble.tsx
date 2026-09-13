@@ -60,6 +60,7 @@ import {
   ChevronDown,
   ChevronRight,
   Copy,
+  CopyPlus,
   Loader2,
   MessageCircleQuestion,
   RotateCcw,
@@ -79,7 +80,11 @@ import { stripAnsi } from '@/lib/detection/ansi';
 import { splitFilePathParts, type ChatRowHeader } from '@/lib/chat/chat-transcript-view';
 import { SHARED_REMARK_PLUGINS } from '@/lib/markdown';
 import { classifyChatLink, normalizeChatFilePath } from '@/lib/chat/chat-file-path';
-import { chatMarkdownCopyText, splitChatMarkdownBody } from '@/lib/chat/chat-markdown-body';
+import {
+  chatMarkdownCopyText,
+  chatMarkdownFullCopyText,
+  splitChatMarkdownBody,
+} from '@/lib/chat/chat-markdown-body';
 import {
   countToolApprovalEntries,
   type ToolApprovalEntry,
@@ -1139,11 +1144,18 @@ export const ChatMessageBubble = memo(function ChatMessageBubble({
   //
   // The plain path is unchanged: a terminal scrape carries no section markers
   // to split on, and every character of it is content.
-  const copyContent = useMemo(
-    () =>
-      isMarkdown ? chatMarkdownCopyText(splitChatMarkdownBody(message.content)) : plainBody,
-    [isMarkdown, message.content, plainBody],
+  const markdownSplit = useMemo(
+    () => (isMarkdown ? splitChatMarkdownBody(message.content) : null),
+    [isMarkdown, message.content],
   );
+  const copyContent = markdownSplit ? chatMarkdownCopyText(markdownSplit) : plainBody;
+  // [#2545] The whole stored row, folded sections included — offered beside the
+  // answer-only copy, and only on a row that folded something, so the two never
+  // hand over the same text. On a tools-only turn it is the row's only copy.
+  // The plain path has no sections to tell apart and never offers it.
+  const fullCopyContent = markdownSplit
+    ? chatMarkdownFullCopyText(message.content, markdownSplit)
+    : null;
 
   // The bubble. `rounded-2xl` with one squared-off corner on the speaker's side
   // is what makes the two columns read as a dialogue rather than two lists.
@@ -1325,6 +1337,22 @@ export const ChatMessageBubble = memo(function ChatMessageBubble({
                 title={t('conversation.copy')}
               >
                 <Copy size={14} aria-hidden="true" />
+              </button>
+            )}
+            {/* [#2545] A visible word as well as an icon: a phone shows no
+                tooltip, and two bare copy icons side by side would leave the
+                reader guessing which one carries the Thinking and tool calls. */}
+            {onCopy && fullCopyContent !== null && (
+              <button
+                type="button"
+                data-testid="chat-copy-full-message"
+                onClick={() => onCopy(fullCopyContent)}
+                className="flex items-center gap-1 rounded px-1.5 py-1 text-xs leading-none text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                aria-label={t('chatTranscript.copyFull.action')}
+                title={t('chatTranscript.copyFull.title')}
+              >
+                <CopyPlus size={14} aria-hidden="true" />
+                <span>{t('chatTranscript.copyFull.label')}</span>
               </button>
             )}
             {isUser && onInsertToMessage && (
