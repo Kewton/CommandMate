@@ -36,6 +36,11 @@
     <meta property="og:image" content="https://kewton.github.io/CommandMate/assets/img/screenshot-desktop.webp" />
     <meta name="twitter:card" content="summary_large_image" />
 
+    <!-- Releases as a feed, for a reader who wants to hear about the next one
+         without watching the repository (Issue #2552). GitHub publishes it; the
+         page only points at it. -->
+    <link rel="alternate" type="application/atom+xml" href="https://github.com/Kewton/CommandMate/releases.atom" title="CommandMate releases" />
+
     <link rel="stylesheet" href="styles.css" />
   </head>
 
@@ -45,10 +50,14 @@
     <header class="site-header">
       <nav class="nav" aria-label="Primary">
         <span class="wordmark">CommandMate</span>
+        <!-- Where a visitor goes next, rather than where this page scrolls
+             (Issue #2552): the in-page anchors that used to sit here are in the
+             footer now. On a phone only Docs and GitHub stay; .nav-secondary is
+             what the narrow-screen rule in styles.css hides. -->
         <div class="nav-links">
-          <a href="#loop">The loop</a>
-          <a href="#quick-start">Quick start</a>
-          <a href="#with-without">With / Without</a>
+          <a href="https://github.com/Kewton/CommandMate/tree/main/docs/en">Docs</a>
+          <a class="nav-secondary" href="https://github.com/Kewton/CommandMate/blob/main/docs/en/user-guide/tutorial.md">Tutorial</a>
+          <a class="nav-secondary" href="https://github.com/Kewton/CommandMate/releases">Changelog</a>
           <a href="https://github.com/Kewton/CommandMate">GitHub</a>
         </div>
       </nav>
@@ -80,6 +89,13 @@
           <p class="prereq">
             From install to your first session in 60 seconds. Node.js v22+ · npm · git · tmux
           </p>
+          <!-- Static on purpose: no API call at page load (Issue #2552). The
+               release skill rewrites this one line in Phase 2-2a
+               (.claude/skills/release/SKILL.md), and a test pins the version to
+               package.json and the date to that version's CHANGELOG heading. The
+               count is a floor, rounded down to ten:
+               gh api repos/Kewton/CommandMate/releases --paginate --jq '.[].tag_name' | wc -l -->
+          <p class="release-line">v0.36.1 · released 2026-09-13 · 130+ releases</p>
 
           <div class="cta-row">
             <a class="btn btn-primary" href="https://github.com/Kewton/CommandMate">View on GitHub</a>
@@ -1051,12 +1067,30 @@ $ echo $?
           <span class="wordmark">CommandMate</span>
           <p>The method, built in — for any coding agent.</p>
         </div>
-        <nav class="footer-links" aria-label="Footer">
-          <a href="https://github.com/Kewton/CommandMate">GitHub</a>
-          <a href="https://www.npmjs.com/package/commandmate">npm</a>
-          <a href="https://github.com/Kewton/CommandMate/tree/main/docs/en">Docs</a>
-          <a href="https://github.com/Kewton/CommandMate/blob/main/LICENSE">MIT License</a>
-        </nav>
+        <!-- Two groups since Issue #2552: the in-page anchors the header gave up,
+             and the project's own places. No X link yet — which account it would
+             point at is still undecided, and a guessed one is worse than none. -->
+        <div class="footer-groups">
+          <nav class="footer-group" aria-labelledby="footer-page-h">
+            <p class="footer-heading" id="footer-page-h">On this page</p>
+            <div class="footer-links">
+              <a href="#loop">The loop</a>
+              <a href="#quick-start">Quick start</a>
+              <a href="#with-without">With / Without</a>
+            </div>
+          </nav>
+          <nav class="footer-group" aria-labelledby="footer-project-h">
+            <p class="footer-heading" id="footer-project-h">Project</p>
+            <div class="footer-links">
+              <a href="https://github.com/Kewton/CommandMate">GitHub</a>
+              <a href="https://github.com/Kewton/CommandMate/tree/main/docs/en">Docs</a>
+              <a href="https://github.com/Kewton/CommandMate/releases">Releases</a>
+              <a href="https://github.com/Kewton/CommandMate/discussions">Discussions</a>
+              <a href="https://www.npmjs.com/package/commandmate">npm</a>
+              <a href="https://github.com/Kewton/CommandMate/blob/main/LICENSE">MIT License</a>
+            </div>
+          </nav>
+        </div>
       </div>
       <p class="copyright">MIT License · Copyright (c) 2026 Kewton</p>
     </footer>

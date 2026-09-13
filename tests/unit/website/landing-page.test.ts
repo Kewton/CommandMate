@@ -26,7 +26,9 @@
  * drawing in INLINE_DRAWINGS rather than the one that happens to be in the hero.
  */
 import { describe, it, expect } from 'vitest';
+import { spawnSync } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 const REPO_ROOT = path.resolve(__dirname, '../../..');
@@ -1565,5 +1567,260 @@ describe('Issue #1200: metadata and honest copy', () => {
     const quoted = /Node\.js v(\d+)\+/.exec(readIndexHtml())?.[1];
     expect(quoted).toBeDefined();
     expect(quoted).toBe(enginesMajor);
+  });
+});
+
+/**
+ * Issue #2552 — the furniture a visitor looks for before reading anything: where
+ * the docs are, what changed lately, whether the project is alive, and a text
+ * version of the page for a crawler that does not run a browser.
+ *
+ * Three of these go stale without anyone touching the page. The version line is
+ * static on purpose (no API call at load), so the release skill rewrites it —
+ * which is why the step's own script is run against a copy here: renaming the
+ * markup would otherwise break the next release, not this PR. `llms.txt` copies
+ * the hero and the cards, so it is read against the messaging doc exactly as the
+ * page is. And the header gave its in-page anchors to the footer, so every `#…`
+ * link on the page has to land on an id that still exists.
+ */
+describe('Issue #2552: nav, footer, version line and llms.txt', () => {
+  const REPO_URL = 'https://github.com/Kewton/CommandMate';
+  const LLMS_TXT = path.join(WEBSITE_DIR, 'llms.txt');
+  const RELEASE_SKILL = path.join(REPO_ROOT, '.claude/skills/release/SKILL.md');
+  const RELEASE_LINE = /<p class="release-line">v(\d+\.\d+\.\d+) · released (\d{4}-\d{2}-\d{2}) · (\d+)\+ releases<\/p>/g;
+
+  interface Anchor {
+    text: string;
+    href: string;
+    classes: string[];
+  }
+
+  const anchors = (fragment: string): Anchor[] =>
+    Array.from(fragment.matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a>/g), ([, attributes, inner]) => ({
+      text: text(inner),
+      href: /\bhref="([^"]*)"/.exec(attributes)?.[1] ?? '',
+      classes: (/\bclass="([^"]*)"/.exec(attributes)?.[1] ?? '').split(/\s+/).filter(Boolean),
+    }));
+
+  const markup = (pattern: RegExp, what: string): string => {
+    const found = pattern.exec(readIndexHtml());
+
+    expect(found, `${what} not found in index.html`).not.toBeNull();
+    return found![0];
+  };
+
+  const navLinks = (): Anchor[] =>
+    anchors(markup(/<div class="nav-links">[\s\S]*?<\/div>/, 'the primary nav'));
+
+  const footer = (): string => markup(/<footer class="site-footer">[\s\S]*?<\/footer>/, 'the footer');
+
+  /** The body of the first `@media (<query>) { … }` block, braces balanced. */
+  const mediaBlock = (query: string): string => {
+    const css = fs.readFileSync(STYLES_CSS, 'utf-8');
+    const open = css.indexOf(`@media (${query}) {`);
+
+    expect(open, `styles.css has no @media (${query}) block`).toBeGreaterThan(-1);
+
+    const start = css.indexOf('{', open) + 1;
+    let depth = 1;
+    let at = start;
+    for (; at < css.length && depth > 0; at++) {
+      if (css[at] === '{') depth++;
+      if (css[at] === '}') depth--;
+    }
+    return css.slice(start, at - 1);
+  };
+
+  const packageVersion = (): string =>
+    JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'package.json'), 'utf-8')).version;
+
+  const releaseLine = (): { version: string; date: string; count: number } => {
+    const lines = Array.from(readIndexHtml().matchAll(RELEASE_LINE));
+
+    expect(lines, 'index.html must carry exactly one version line').toHaveLength(1);
+    const [, version, date, count] = lines[0];
+    return { version, date, count: Number(count) };
+  };
+
+  /** The `node -e '…'` script the release skill runs in Phase 2-2a. */
+  const releaseLineScript = (): string => {
+    const script = /node -e '\n([\s\S]*?)\n' "\$\{NEXT_VERSION\}"/.exec(
+      fs.readFileSync(RELEASE_SKILL, 'utf-8'),
+    );
+
+    expect(script, 'the release skill no longer rewrites the version line with node -e').not.toBeNull();
+    return script![1];
+  };
+
+  /** Run that script against a copy of the page, the way the skill runs it from the repo root. */
+  const runReleaseLineScript = (args: string[]): { status: number | null; before: string; after: string } => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lp-release-line-'));
+
+    try {
+      fs.mkdirSync(path.join(root, 'website'));
+      const copy = path.join(root, 'website', 'index.html');
+      const before = readIndexHtml();
+      fs.writeFileSync(copy, before);
+
+      const run = spawnSync(process.execPath, ['-e', releaseLineScript(), ...args], {
+        cwd: root,
+        encoding: 'utf-8',
+      });
+      return { status: run.status, before, after: fs.readFileSync(copy, 'utf-8') };
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  };
+
+  const llmsTxt = (): string => fs.readFileSync(LLMS_TXT, 'utf-8');
+
+  it('links the nav to Docs, Tutorial, Changelog and GitHub, in that order', () => {
+    expect(navLinks().map(({ text: label, href }) => [label, href])).toEqual([
+      ['Docs', `${REPO_URL}/tree/main/docs/en`],
+      ['Tutorial', `${REPO_URL}/blob/main/docs/en/user-guide/tutorial.md`],
+      ['Changelog', `${REPO_URL}/releases`],
+      ['GitHub', REPO_URL],
+    ]);
+  });
+
+  it('keeps Docs and GitHub in the nav at 560px and below', () => {
+    const narrow = mediaBlock('max-width: 560px');
+
+    // By class, never by position: `:not(:last-child)` hid Docs along with the
+    // rest the moment Docs stopped being the last link.
+    expect(narrow).toMatch(/\.nav-links \.nav-secondary\s*\{\s*display:\s*none;\s*\}/);
+    expect(narrow).not.toMatch(/\.nav-links a[^{]*\{[^}]*display:\s*none/);
+    expect(
+      navLinks()
+        .filter((link) => !link.classes.includes('nav-secondary'))
+        .map((link) => link.text),
+    ).toEqual(['Docs', 'GitHub']);
+  });
+
+  it('moves the in-page anchors to the footer, and every #link lands on an id', () => {
+    const html = readIndexHtml();
+
+    expect(anchors(footer()).map((link) => link.href)).toEqual(
+      expect.arrayContaining(['#loop', '#quick-start', '#with-without']),
+    );
+
+    const dangling = Array.from(html.matchAll(/href="#([^"]+)"/g), ([, id]) => id).filter(
+      (id) => !html.includes(`id="${id}"`),
+    );
+    expect(dangling, 'these in-page links scroll nowhere').toEqual([]);
+  });
+
+  it('links the footer to Discussions and Releases, and to no X account yet', () => {
+    const links = anchors(footer()).map(({ text: label, href }) => [label, href]);
+
+    expect(links).toEqual(
+      expect.arrayContaining([
+        ['Discussions', `${REPO_URL}/discussions`],
+        ['Releases', `${REPO_URL}/releases`],
+      ]),
+    );
+    // Which account it would be is undecided; a guessed handle is worse than none.
+    expect(links.filter(([label, href]) => label === 'X' || /\/\/(www\.)?(x|twitter)\.com\b/.test(href))).toEqual([]);
+  });
+
+  it('points a feed reader at the GitHub releases feed', () => {
+    const head = markup(/<head>[\s\S]*?<\/head>/, '<head>');
+
+    expect(head).toContain(
+      `<link rel="alternate" type="application/atom+xml" href="${REPO_URL}/releases.atom"`,
+    );
+  });
+
+  it('states the version package.json ships, directly under the prerequisites', () => {
+    const hero = markup(/<section class="hero">[\s\S]*?<\/section>/, 'the hero');
+
+    expect(releaseLine().version).toBe(packageVersion());
+    expect(hero.indexOf('class="release-line"')).toBeGreaterThan(hero.indexOf('class="prereq"'));
+    expect(hero.indexOf('class="release-line"')).toBeLessThan(hero.indexOf('class="cta-row"'));
+  });
+
+  it("dates the version line from that version's CHANGELOG heading", () => {
+    const { version, date } = releaseLine();
+    const changelog = fs.readFileSync(path.join(REPO_ROOT, 'CHANGELOG.md'), 'utf-8');
+
+    expect(changelog.split('\n')).toContain(`## [${version}] - ${date}`);
+  });
+
+  it('writes the release count as a floor, rounded down to ten', () => {
+    const { count } = releaseLine();
+
+    expect(count).toBeGreaterThanOrEqual(10);
+    expect(count % 10).toBe(0);
+  });
+
+  it("rewrites only the version line when the release skill's step runs", () => {
+    const { status, before, after } = runReleaseLineScript(['9.9.9', '2099-01-31', '990']);
+
+    expect(status).toBe(0);
+    const changed = after.split('\n').filter((line, index) => line !== before.split('\n')[index]);
+    expect(changed.map((line) => line.trim())).toEqual([
+      '<p class="release-line">v9.9.9 · released 2099-01-31 · 990+ releases</p>',
+    ]);
+  });
+
+  it('refuses to write the version line from a count that failed to arrive', () => {
+    // `gh api … | wc -l` prints 0 when gh fails, which the skill turns into a
+    // floor of 0. That has to stop the step, not ship "0+ releases".
+    const { status, before, after } = runReleaseLineScript(['9.9.9', '2099-01-31', '0']);
+
+    expect(status).toBe(1);
+    expect(after).toBe(before);
+  });
+
+  it('adds the page to what the release commit stages', () => {
+    const skill = fs.readFileSync(RELEASE_SKILL, 'utf-8');
+
+    expect(skill).toMatch(/^git add package\.json package-lock\.json CHANGELOG\.md website\/index\.html$/m);
+  });
+
+  it('serves llms.txt inside the wording scans above', () => {
+    // The banned-term and §11b scans walk textFiles(); a file they skip is a
+    // file they cannot keep clean.
+    expect(fs.existsSync(LLMS_TXT)).toBe(true);
+    expect(textFiles().map((entry) => entry.file)).toContain('llms.txt');
+  });
+
+  it('opens llms.txt on the §1 H1, lede and fact row', () => {
+    const lines = llmsTxt().split('\n');
+
+    expect(lines[0]).toBe(`# CommandMate — ${heroRow('H1（en')}`);
+    expect(lines).toContain(`> ${heroRow('lede（en')}`);
+    expect(lines).toContain(heroRow('事実行（en'));
+  });
+
+  it('states the four §3 cards in llms.txt, in order and verbatim', () => {
+    const cards = llmsTxt()
+      .split('\n')
+      .flatMap((line) => {
+        const card = /^- \*\*([^*]+)\*\*: (.+)$/.exec(line);
+        return card ? [{ title: card[1], body: card[2] }] : [];
+      });
+
+    expect(cards).toEqual(messagingCards());
+  });
+
+  it('links llms.txt to the docs, the tutorial and GitHub', () => {
+    const targets = Array.from(llmsTxt().matchAll(/\]\(([^)]+)\)/g), ([, url]) => url);
+
+    expect(targets).toEqual(
+      expect.arrayContaining([
+        `${REPO_URL}/tree/main/docs/en`,
+        `${REPO_URL}/blob/main/docs/en/user-guide/tutorial.md`,
+        REPO_URL,
+      ]),
+    );
+  });
+
+  it('quotes the same Node major in llms.txt that package.json engines requires', () => {
+    const pkg = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'package.json'), 'utf-8'));
+    const quoted = Array.from(llmsTxt().matchAll(/Node\.js v(\d+)\+/g), ([, major]) => major);
+
+    expect(quoted.length).toBeGreaterThan(0);
+    expect(new Set(quoted)).toEqual(new Set([/(\d+)/.exec(pkg.engines.node)?.[1]]));
   });
 });

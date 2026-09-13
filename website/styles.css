@@ -146,8 +146,13 @@ a {
   color: var(--fg);
 }
 
+/* On a phone the wordmark and four links do not share a row, so the two that a
+   first visit needs least give way. Docs and GitHub stay: they are the answers
+   to "how do I use it" and "where is it". Hiding by class rather than by
+   position (Issue #2552) — `:not(:last-child)` used to hide everything but
+   GitHub, and it would have taken Docs with it. */
 @media (max-width: 560px) {
-  .nav-links a:not(:last-child) {
+  .nav-links .nav-secondary {
     display: none;
   }
 }
@@ -277,9 +282,20 @@ a {
 }
 
 .prereq {
-  margin: 0.4rem 0 1.75rem;
+  margin: 0.4rem 0 0;
   font-size: 0.875rem;
   color: var(--fg-muted);
+}
+
+/* The version line (Issue #2552). Quieter than the prerequisites above it: it
+   answers "is this maintained", which matters, but not before "can I run it".
+   The margin under it is the one .prereq used to carry, so the CTA row does
+   not move. */
+.release-line {
+  margin: 0.3rem 0 1.75rem;
+  font-size: 0.8rem;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .cta-row {
@@ -1331,10 +1347,25 @@ a {
   font-size: 0.9rem;
 }
 
+.footer-groups {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.25rem 3rem;
+}
+
+.footer-heading {
+  margin: 0 0 0.4rem;
+  color: var(--fg);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 .footer-links {
   display: flex;
   flex-wrap: wrap;
-  gap: 1.25rem;
+  gap: 0.35rem 1.25rem;
   font-size: 0.9rem;
 }
 
