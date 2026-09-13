@@ -929,6 +929,88 @@ $ echo $?
         </ul>
       </section>
 
+      <!-- FAQ (Issue #2553). Right after the limits, because these are the
+           questions a reader has once they know what the product will not do.
+           Questions and answers are copied verbatim, in order, from
+           docs/design/public-messaging.md §13 (between its faq:en markers); a
+           change of wording belongs there, not here. Native details / summary
+           elements, so opening one needs no script and works from the keyboard.
+           Not linked from the nav. -->
+      <section class="section" id="faq" aria-labelledby="faq-h">
+        <h2 id="faq-h">FAQ</h2>
+        <div class="faq">
+          <details class="faq-item">
+            <summary>What is a gate?</summary>
+            <p>
+              A command you declared for your project in <code>.commandmate/verify.yaml</code> —
+              tests, lint, a type check — whose exit code decides whether the work is done. A
+              person's approval is not a gate. Two gates are built in and run on every contract:
+              work-evidence, which needs a commit or an uncommitted change, and scope, which checks
+              the changed files against the contract.
+            </p>
+          </details>
+          <details class="faq-item">
+            <summary>What happens after the agent says it is done?</summary>
+            <p>
+              <code>commandmate wait --verify</code> runs the gates once the agent stops, and its
+              exit code is the verdict: <code>21</code> when there is no evidence of work at all,
+              <code>20</code> when a gate failed, <code>0</code> when every gate passed.
+              <code>verify history</code> keeps each run, so the verdict can be read again later.
+            </p>
+          </details>
+          <details class="faq-item">
+            <summary>Why is this not an IDE?</summary>
+            <p>
+              Because it does not replace the tools you already work in. Your terminal, your editor
+              and your agent CLI stay as they are; CommandMate adds a contract before the work, gates
+              after it, and a record of every run.
+            </p>
+          </details>
+          <details class="faq-item">
+            <summary>Is it free?</summary>
+            <p>
+              Yes. CommandMate is open source under the MIT License, needs no account, and needs no
+              external server to run. The agent CLIs you use keep their own plans and pricing.
+            </p>
+          </details>
+          <details class="faq-item">
+            <summary>Where does my code go?</summary>
+            <p>
+              CommandMate runs on your machine. It sends no telemetry, needs no account, and needs no
+              external server to run. What goes over the network depends on what you use: your agent
+              CLI's own API calls; a check for a newer release on GitHub, from the web UI; the
+              official Skills Catalog on GitHub, when you list or install Skills; your browser's push
+              service, once you turn on Web Push; and Tailscale or cloudflared, while
+              <code>commandmate remote</code> is running.
+            </p>
+          </details>
+          <details class="faq-item">
+            <summary>Which agents can lead?</summary>
+            <p>
+              Claude Code and Command Code have been measured as the lead. The lead is a session like
+              any other, and any of the eight agents can take the work as a worker.
+            </p>
+          </details>
+          <details class="faq-item">
+            <summary>Does it run on Windows? Is tmux required?</summary>
+            <p>
+              On Windows it runs through WSL2; native Windows is not supported. tmux is required,
+              because every worktree session runs in a tmux session of its own — but CommandMate
+              operates tmux for you, so you do not need to know it.
+            </p>
+          </details>
+          <details class="faq-item">
+            <summary>Is Auto Yes safe?</summary>
+            <p>
+              Approvals still come to a person. Auto Yes is opt-in, time-boxed, and stops on the
+              patterns you set. You choose one, three or eight hours when you turn it on (one by
+              default), and it switches itself off when that time is up or when the output matches a
+              stop pattern.
+            </p>
+          </details>
+        </div>
+      </section>
+
       <!-- 10. Screenshot gallery -->
       <section class="section" aria-labelledby="gallery-h">
         <h2 id="gallery-h">On desktop and on mobile</h2>
