@@ -1407,28 +1407,15 @@ a {
 
 /* ---------- gallery ---------- */
 
+/* The columns are set in the Compact (#2555) block below. */
 .gallery {
-  /* 15rem rather than 13: it lands on four columns at --maxw, which is what
-     makes the two wide shots fill the first row and the three phone shots the
-     second, instead of leaving a wide shot orphaned on a row of its own. */
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
   gap: 1.25rem;
   align-items: start;
 }
 
 .shot {
   margin: 0;
-}
-
-.shot-wide {
-  grid-column: span 2;
-}
-
-@media (max-width: 700px) {
-  .shot-wide {
-    grid-column: span 1;
-  }
 }
 
 .shot img {
@@ -1528,14 +1515,6 @@ a {
 
 /* ---------- pairing a phone ---------- */
 
-/* `.cards` carries no margin of its own: it only gets one from the
-   `.section > h2 + .cards` rule above, which does not match here because the
-   copyable command sits between the heading and the grid. Without this the
-   cards butt straight against that box. */
-.remote-cards {
-  margin-top: 2rem;
-}
-
 /* The trailing docs line lives outside `.note` on purpose. `.note` paints
    `--accent-subtle`, and the global link colour `--accent` measures 4.31:1
    against that tint in the light theme -- under the 4.5:1 body-text floor. On
@@ -1546,6 +1525,85 @@ a {
   color: var(--fg-muted);
   font-size: 0.9rem;
 }
+
+/* Compact (#2555) */
+
+/* Track B, folded into a native <details>. The <summary> keeps the card's <h3>;
+   only its disclosure triangle is swapped for a chevron, hidden in both the
+   standard and the WebKit form. No transition, so reduced motion has nothing
+   to switch off here. */
+.track-fold > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  cursor: pointer;
+  list-style: none;
+}
+
+.track-fold > summary::-webkit-details-marker {
+  display: none;
+}
+
+.track-fold > summary:hover {
+  color: var(--accent);
+}
+
+/* The global focus ring lists a, button and [tabindex], none of which a
+   <summary> is. */
+.track-fold > summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.track-fold > summary h3 {
+  margin: 0;
+}
+
+.track-fold > summary::after {
+  content: "";
+  flex: none;
+  width: 0.55rem;
+  height: 0.55rem;
+  margin: 0 0.35rem 0.25rem 0;
+  border-right: 2px solid var(--fg-muted);
+  border-bottom: 2px solid var(--fg-muted);
+  transform: rotate(45deg);
+}
+
+.track-fold[open] > summary::after {
+  margin: 0.25rem 0.35rem 0 0;
+  transform: rotate(-135deg);
+}
+
+/* Where the heading's own bottom margin used to be. */
+.track-fold > .track-lede {
+  margin-top: 0.5rem;
+}
+
+/* The gallery is four shots, two wide and two phones. Below 901px each wide
+   shot takes a row and the phones share one, in a column capped so that a
+   phone shot stays shorter than the screen it is read on. From 901px all four
+   share a row: six tracks, two per wide shot and one per phone, so the phones
+   stand taller than the wide shots instead of shrinking to slivers beside them. */
+.gallery {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  max-width: 40rem;
+}
+
+.shot-wide {
+  grid-column: span 2;
+}
+
+@media (min-width: 901px) {
+  .gallery {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    max-width: none;
+  }
+}
+
+/* /Compact (#2555) */
 
 /* ---------- closing ---------- */
 
