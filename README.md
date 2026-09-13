@@ -205,7 +205,7 @@ implementation item maps to a feature.
 
 ## Security
 
-Runs **100% locally**. No external server, no cloud relay, no account required. The only network traffic is the agent CLI's own API calls.
+CommandMate runs on your machine. It sends no telemetry, needs no account, and needs no external server to run. What goes over the network depends on what you use: your agent CLI's own API calls; a check for a newer release on GitHub, from the web UI; the official Skills Catalog on GitHub, when you list or install Skills; your browser's push service, once you turn on Web Push; and Tailscale or cloudflared, while `commandmate remote` is running.
 
 - Fully open-source ([MIT License](./LICENSE))
 - Local database, local sessions
