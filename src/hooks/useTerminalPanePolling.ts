@@ -336,6 +336,18 @@ export function useTerminalPanePolling({
   // splits may share a CLI tool but differ by instance).
   const inFlightInstanceRef = useRef<string>(resolvedInstanceId);
   inFlightInstanceRef.current = resolvedInstanceId;
+  // Issue #2559: false once the pane has unmounted. The poll effect's cleanup
+  // stops the interval, not a fetch already out, so without this a response
+  // settling after unmount still reached setTerminal / setPrompt /
+  // setAgentSession (same hole as useSplitMessages). Set in the effect body so
+  // StrictMode's unmount → remount leaves it true.
+  const mountedRef = useRef(false);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   // promptVisible is read inside fetchCurrentOutput; keep it as a ref so the
   // fetchCurrentOutput callback identity stays stable across prompt visibility
@@ -474,20 +486,20 @@ export function useTerminalPanePolling({
     const requestedCli = cliToolId;
     const requestedInstance = resolvedInstanceId;
     const requestId = ++requestIdRef.current;
+    // Drop if the pane unmounted (Issue #2559), a newer request superseded us,
+    // or the CLI / instance changed. One predicate for both exits.
+    const isStale = (): boolean =>
+      !mountedRef.current ||
+      requestIdRef.current !== requestId ||
+      inFlightCliToolRef.current !== requestedCli ||
+      inFlightInstanceRef.current !== requestedInstance;
     try {
       const response = await fetch(
         `/api/worktrees/${worktreeId}/current-output?cliTool=${requestedCli}&instance=${encodeURIComponent(requestedInstance)}`,
       );
       if (!response.ok) return;
       const data: CurrentOutputResponse = await response.json();
-      // Drop if a newer request superseded us, or the CLI / instance changed.
-      if (
-        requestIdRef.current !== requestId ||
-        inFlightCliToolRef.current !== requestedCli ||
-        inFlightInstanceRef.current !== requestedInstance
-      ) {
-        return;
-      }
+      if (isStale()) return;
       if (data.cliToolId && data.cliToolId !== requestedCli) {
         return;
       }
@@ -509,13 +521,7 @@ export function useTerminalPanePolling({
           : nextAgentSession
       );
     } catch (err) {
-      if (
-        requestIdRef.current !== requestId ||
-        inFlightCliToolRef.current !== requestedCli ||
-        inFlightInstanceRef.current !== requestedInstance
-      ) {
-        return;
-      }
+      if (isStale()) return;
       // Network errors are swallowed; next interval will retry.
       console.error('[useTerminalPanePolling] fetch error:', err);
     }

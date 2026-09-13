@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **fix(hooks): `useSplitMessages` / `useTerminalPanePolling` がアンマウント後に返った fetch 応答で state を更新しないようにし、CI の Unit Tests が全テスト PASS のまま Unhandled Error で exit 1 になる事象を止めた** (#2559): 両フックの fetch は「新しいリクエストに追い越された」「CLI / instance が変わった」応答しか捨てず、ポーリング effect のクリーンアップも飛行中の fetch は止めないため、アンマウント後に settle した応答（成功・失敗とも）が `setMessages` / `setIsLoading`（`useTerminalPanePolling` は `setTerminal` / `setPrompt` / `setAgentSession`、失敗時は `console.error`）に届いていた。React 19 は更新の優先度を fiber の生死を見る前に `window.event` から決めるため、jsdom 破棄後にこれが起きると `window is not defined` が投げられていた。effect 本体で true・クリーンアップで false にする `mountedRef` を追加し（StrictMode の unmount → remount でも true に戻る）、既存の stale 判定と一本化した `isStale()` で成功・失敗の両出口から捨てる。fetch を手で解決する Promise にし、`unmount()` → `vi.stubGlobal('window', undefined)` → settle の順で確かめる決定的な回帰テスト（`useSplitMessages-unmount-2559` / `useTerminalPanePolling-unmount-2559`、各 3 ケース）を追加。
+
 ## [0.36.1] - 2026-09-13
 
 > **Highlight**: チャット面のコピーボタンが、画面では畳まれている Thinking と Tool calls の中身までクリップボードに入れていた問題を直したパッチ（直近 30 日の実データでは、コピーした文字のうち画面に出ていない割合が claude 59.9%・codex 84.5%）。通常のコピーは画面に見えている回答本文だけを渡すようにし（#2544）、節を含む全文が要るときのために、畳まれた節を持つ行にだけ常時表示の「全文」ボタンを追加した（#2545）。PC・スマホ（タッチ）・`/sessions` のタイルで実機受入テスト 22/22 合格。

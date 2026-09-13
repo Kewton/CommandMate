@@ -21,7 +21,8 @@
  * scope, not a row, and this hook answers it by re-reading its history.
  *
  * Mirrors `useTerminalPanePolling` (Issue #728 / #1120):
- *  - request-id + in-flight CLI stale-guard (drop out-of-order / wrong-CLI responses)
+ *  - request-id + in-flight CLI stale-guard (drop out-of-order / wrong-CLI responses),
+ *    plus an unmount guard (drop responses that settle after the pane is gone, #2559)
  *  - polling pauses when document.visibilityState === 'hidden'
  *  - re-fetches once when the page becomes visible
  *  - re-fetches once whenever the WS connection flips (connect *and* disconnect),
@@ -234,12 +235,38 @@ export function useSplitMessages({
    */
   const inFlightPushesRef = useRef<Map<string, ChatMessage>>(new Map());
 
+  /**
+   * Issue #2559: false once the hook has unmounted.
+   *
+   * The poll effect's cleanup stops the interval but not a fetch that is already
+   * out, and neither stale check below looks at mount state — so a response that
+   * settled after unmount still reached `setMessages` / `setIsLoading`. React
+   * resolves an update's priority from `window.event` before it notices the
+   * fiber is gone, which throws once jsdom has been torn down and surfaced in CI
+   * as an Unhandled Error with every test passing. Set in the effect body rather
+   * than only initialised, so StrictMode's unmount → remount leaves it true.
+   */
+  const mountedRef = useRef(false);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
   const fetchMessages = useCallback(async (): Promise<void> => {
     const requestedCli = cliToolId;
     const requestedInstance = resolvedInstanceId;
     const requestId = ++requestIdRef.current;
     const pushBucket = new Map<string, ChatMessage>();
     inFlightPushesRef.current = pushBucket;
+    // Drop if the hook unmounted, a newer request superseded us, or the CLI /
+    // instance changed. One predicate for both exits, so they cannot drift.
+    const isStale = (): boolean =>
+      !mountedRef.current ||
+      requestIdRef.current !== requestId ||
+      inFlightCliToolRef.current !== requestedCli ||
+      inFlightInstanceRef.current !== requestedInstance;
     try {
       // Issue #1407: History renders conversation-pair cards, so the limit must be
       // counted in pairs (turns), not raw rows — otherwise codex's many-assistant-rows
@@ -256,14 +283,7 @@ export function useSplitMessages({
       );
       if (!response.ok) return;
       const data: ChatMessage[] = await response.json();
-      // Drop if a newer request superseded us, or the CLI / instance changed.
-      if (
-        requestIdRef.current !== requestId ||
-        inFlightCliToolRef.current !== requestedCli ||
-        inFlightInstanceRef.current !== requestedInstance
-      ) {
-        return;
-      }
+      if (isStale()) return;
       let next = parseMessageTimestamps(data);
       // Re-apply anything the socket delivered while this request was open.
       for (const pushed of pushBucket.values()) {
@@ -275,13 +295,7 @@ export function useSplitMessages({
       setMessages(next);
       setIsLoading(false);
     } catch (err) {
-      if (
-        requestIdRef.current !== requestId ||
-        inFlightCliToolRef.current !== requestedCli ||
-        inFlightInstanceRef.current !== requestedInstance
-      ) {
-        return;
-      }
+      if (isStale()) return;
       // Network errors are swallowed; next interval will retry.
       console.error('[useSplitMessages] fetch error:', err);
       setIsLoading(false);
