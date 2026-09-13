@@ -259,8 +259,9 @@ function sectionBody(section: string): string {
   return body.join('\n');
 }
 
-function messagingTable(section: string): string[][] {
-  return sectionBody(section)
+/** Every `|`-delimited row in a markdown fragment, as trimmed cells, separator rows dropped. */
+function tableRows(markdown: string): string[][] {
+  return markdown
     .split('\n')
     .filter((line) => line.trimStart().startsWith('|'))
     .map((line) =>
@@ -271,8 +272,54 @@ function messagingTable(section: string): string[][] {
         .split('|')
         .map((cell) => cell.trim()),
     )
-    .filter((cells) => cells.length > 1 && !/^[-:\s]+$/.test(cells[0]))
-    .filter((cells) => cells[0] !== '#' && cells[0] !== '項目' && cells[0] !== '言語');
+    .filter((cells) => cells.length > 1 && !/^[-:\s]+$/.test(cells[0]));
+}
+
+function messagingTable(section: string): string[][] {
+  return tableRows(sectionBody(section)).filter(
+    (cells) => cells[0] !== '#' && cells[0] !== '項目' && cells[0] !== '言語',
+  );
+}
+
+/**
+ * What sits under one heading of a markdown fragment, down to the next heading
+ * at the same level or above (`### en` stops at `### ja`, not at a `####`).
+ * Fence-aware like sectionBody(): §3e's contract YAML opens with a `# ` comment.
+ */
+function headingBody(markdown: string, heading: string): string {
+  const level = heading.indexOf(' ');
+  const lines = markdown.split('\n');
+  const start = lines.findIndex((line) => line.startsWith(heading));
+
+  expect(start, `public-messaging.md has no "${heading}" heading here`).toBeGreaterThan(-1);
+
+  const body: string[] = [];
+  let fenced = false;
+
+  for (const line of lines.slice(start + 1)) {
+    if (line.startsWith('```')) {
+      fenced = !fenced;
+    } else if (!fenced) {
+      const hashes = /^(#+) /.exec(line)?.[1].length;
+      if (hashes !== undefined && hashes <= level) break;
+    }
+    body.push(line);
+  }
+
+  return body.join('\n');
+}
+
+/** The contents of the first fenced block in a markdown fragment. */
+function firstFence(markdown: string): string {
+  const fence = /^```[^\n]*\n([\s\S]*?)\n```/m.exec(markdown);
+
+  expect(fence, 'expected a fenced block in public-messaging.md').not.toBeNull();
+  return fence![1];
+}
+
+/** Markdown copy as the page renders it: code spans become `<code>`, which text() drops. */
+function prose(markdown: string): string {
+  return markdown.replace(/`/g, '').replace(/\s+/g, ' ').trim();
 }
 
 /** One labelled row of the §1 hero table, by the label its first cell starts with. */
@@ -1114,6 +1161,234 @@ describe('Issue #2495: the LP on the orchestrate axis', () => {
     // put public-messaging.md §14 in its place.) Pinned here so the exemption
     // cannot outlive the rows.
     expect(unmeasuredClaims()).toEqual(expect.arrayContaining(UNSCANNABLE_CLAIMS));
+  });
+});
+
+/**
+ * Issue #2550 — the H1 says one agent leads, and until this Issue the page only
+ * showed that in a fifteen-second recording and one card. "See it running" now
+ * carries the Measured table under that recording, a new "One agent leads"
+ * section walks the lead's run, and The loop is cut down to one worker's turn
+ * inside it.
+ *
+ * All of it is copied from `docs/design/public-messaging.md` §3b–§3e, so every
+ * assertion here reads the doc rather than restating it. The Measured table is
+ * the one that most needs it: its cells are numbers read off recorded runs, and
+ * a number retyped by hand is the kind of drift nobody sees until someone
+ * checks it against the recording.
+ */
+describe('Issue #2550: the lead run, measured and walked through', () => {
+  const pageSection = (id: string): string => {
+    const found = new RegExp(`<section class="section" id="${id}"[\\s\\S]*?</section>`).exec(
+      readIndexHtml(),
+    );
+
+    expect(found, `no #${id} section in index.html`).not.toBeNull();
+    return found![0];
+  };
+
+  const firstMatch = (html: string, pattern: RegExp, what: string): string => {
+    const found = pattern.exec(html);
+
+    expect(found, `${what} not found in index.html`).not.toBeNull();
+    return found![1];
+  };
+
+  const allText = (html: string, pattern: RegExp): string[] =>
+    [...html.matchAll(pattern)].map((match) => text(match[1]));
+
+  /** One lettered part of §3e (`3e-1` … `3e-6`), with its en copy. */
+  const part = (id: string): string => headingBody(sectionBody('3e'), `### ${id}.`);
+  const partEn = (id: string): string => firstFence(headingBody(part(id), '#### en'));
+
+  /** §3b's en table and the line under it. */
+  const measuredEn = (): { header: string[]; rows: string[][]; under: string } => {
+    const body = headingBody(sectionBody('3b'), '### en');
+    const [header, ...rows] = tableRows(body);
+    const under = body
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line && !line.startsWith('|'))[0];
+
+    // Guard against a parse that finds nothing and then compares nothing.
+    expect(header, 'public-messaging.md §3b en has no table').toBeDefined();
+    expect(rows.length, 'public-messaging.md §3b en table has no rows').toBeGreaterThan(0);
+    return { header, rows, under };
+  };
+
+  /** The Measured block: after the recorded run, before the four feature demos. */
+  const measuredHtml = (): string => {
+    const demos = pageSection('demos');
+    const start = demos.indexOf('<div class="measured">');
+    const end = demos.indexOf('<div class="demos">');
+
+    expect(start, 'no .measured block in #demos').toBeGreaterThan(-1);
+    expect(start, 'the Measured table must sit under the recorded run').toBeGreaterThan(
+      demos.indexOf('<figure class="demo demo-lead">'),
+    );
+    expect(end, 'the Measured table must sit above the four feature demos').toBeGreaterThan(start);
+    return demos.slice(start, end);
+  };
+
+  it('copies the Measured table from §3b cell for cell', () => {
+    const { header, rows } = measuredEn();
+    const html = measuredHtml();
+    const thead = firstMatch(html, /<thead>([\s\S]*?)<\/thead>/, 'Measured <thead>');
+    const tbody = firstMatch(html, /<tbody>([\s\S]*?)<\/tbody>/, 'Measured <tbody>');
+
+    // Every cell, not only the numbers: "4/4 gates passed" and "UAT go" are as
+    // much a measured claim as "8 min 39 s", and §3b says the table is copied
+    // verbatim. Order and row count are part of the equality.
+    expect(allText(thead, /<th[^>]*>([\s\S]*?)<\/th>/g)).toEqual(header);
+    expect(
+      [...tbody.matchAll(/<tr>([\s\S]*?)<\/tr>/g)].map((row) =>
+        allText(row[1], /<t[hd][^>]*>([\s\S]*?)<\/t[hd]>/g),
+      ),
+    ).toEqual(rows);
+  });
+
+  it('puts "as observed" directly under the table, then §3e-4', () => {
+    const { under } = measuredEn();
+    const html = measuredHtml();
+
+    // §3b: the line goes directly under the table and the table is never shown
+    // without it — so "somewhere in the block" is not enough.
+    expect(under).toBe('as observed');
+    expect(
+      text(firstMatch(html, /<\/table>\s*<\/div>\s*<p[^>]*>([\s\S]*?)<\/p>/, 'the line under the table')),
+    ).toBe(under);
+    expect(text(html)).toContain(`${under} ${prose(partEn('3e-4'))}`);
+  });
+
+  it('scrolls the Measured table in its own box, as the With / Without table does', () => {
+    expect(measuredHtml()).toMatch(/<div class="table-scroll" tabindex="0" role="region" aria-labelledby="measured-h">/);
+    expect(measuredHtml()).toMatch(/<h3 id="measured-h">/);
+  });
+
+  it('orders the new section after "See it running" and before The loop', () => {
+    const html = readIndexHtml();
+
+    expect(html.indexOf('id="demos"')).toBeLessThan(html.indexOf('id="lead"'));
+    expect(html.indexOf('id="lead"')).toBeLessThan(html.indexOf('id="loop"'));
+  });
+
+  it('heads the section with card 1 and opens it on §3e-2', () => {
+    const section = pageSection('lead');
+
+    expect(text(firstMatch(section, /<h2[^>]*>([\s\S]*?)<\/h2>/, '#lead heading'))).toBe(
+      messagingCards()[0].title,
+    );
+    // §3e-2 ends on "Nothing mutates without an explicit approve, and a failed
+    // gate stops the run." — the sentence the Issue asked for by name.
+    expect(partEn('3e-2')).toContain('Nothing mutates without an explicit approve');
+    expect(
+      text(firstMatch(section, /<p class="section-lede">([\s\S]*?)<\/p>/, '#lead lede')),
+    ).toBe(prose(partEn('3e-2')));
+  });
+
+  it('walks plan, dispatch, merge and uat in §3e-1 order and wording', () => {
+    const lines = partEn('3e-1').split('\n');
+    const bullets = lines.filter((line) => line.startsWith('- ')).map((line) => line.slice(2).trim());
+    const closing = lines.filter((line) => line.trim() && !line.startsWith('- ')).join(' ');
+    const section = pageSection('lead');
+    const list = firstMatch(section, /<ol class="lead-steps">([\s\S]*?)<\/ol>/, '.lead-steps');
+
+    // The doc writes "name — what it does"; the page sets the name as the
+    // heading and the rest as the paragraph, so join them back to compare.
+    const steps = [...list.matchAll(/<li>([\s\S]*?)<\/li>/g)].map(
+      (item) =>
+        `${text(/<h3>([\s\S]*?)<\/h3>/.exec(item[1])?.[1] ?? '')} — ${text(/<p>([\s\S]*?)<\/p>/.exec(item[1])?.[1] ?? '')}`,
+    );
+
+    expect(bullets.map((bullet) => bullet.split(' — ')[0])).toEqual(['plan', 'dispatch', 'merge', 'uat']);
+    expect(steps).toEqual(bullets);
+    expect(
+      text(firstMatch(section, /<\/ol>\s*<p class="note">([\s\S]*?)<\/p>/, 'the note under the steps')),
+    ).toBe(prose(closing));
+  });
+
+  it('shows the §3e-3 contract byte for byte, captioned with its built-in gates', () => {
+    const section = pageSection('lead');
+    const figure = firstMatch(
+      section,
+      /<figure class="lead-contract">([\s\S]*?)<\/figure>/,
+      '.lead-contract',
+    );
+
+    // Raw rather than text(): YAML indentation is meaning, so whitespace is not
+    // collapsed here. Nothing in it needs escaping in HTML.
+    expect(firstMatch(figure, /<pre class="snippet"><code>([\s\S]*?)<\/code><\/pre>/, 'the contract snippet')).toBe(
+      firstFence(part('3e-3')),
+    );
+    expect(text(firstMatch(figure, /<figcaption>([\s\S]*?)<\/figcaption>/, 'the contract caption'))).toBe(
+      prose(partEn('3e-3')),
+    );
+  });
+
+  it('states §3e-5 whole under "Review by another agent"', () => {
+    const section = pageSection('lead');
+    const review = firstMatch(section, /<div class="lead-review">([\s\S]*?)<\/div>/, '.lead-review');
+    const title = /^### 3e-5\. (.+?)（/m.exec(sectionBody('3e'))?.[1];
+
+    expect(title, 'public-messaging.md §3e-5 has no title').toBe('Review by another agent');
+    expect(text(firstMatch(review, /<h3>([\s\S]*?)<\/h3>/, 'the review heading'))).toBe(title);
+    // Whole, never trimmed: the last sentence is what says the runner does not
+    // run a cross-model review for you (§4b), and it is the easiest one to cut.
+    expect(text(firstMatch(review, /<p>([\s\S]*?)<\/p>/, 'the review paragraph'))).toBe(
+      prose(partEn('3e-5')),
+    );
+  });
+
+  describe('the four cards', () => {
+    const cards = (): string[] => {
+      const section = /<h2 id="why">[\s\S]*?<\/section>/.exec(readIndexHtml());
+
+      expect(section, 'the cards section is not in index.html').not.toBeNull();
+      return [...section![0].matchAll(/<article class="card">([\s\S]*?)<\/article>/g)].map(
+        (match) => match[1],
+      );
+    };
+
+    it('puts §3c directly under the sentence of card 1', () => {
+      const card = cards()[0];
+      const supported = firstFence(headingBody(sectionBody('3c'), '### en'));
+
+      expect(text(firstMatch(card, /<h3>([\s\S]*?)<\/h3>/, 'card 1 title'))).toBe(messagingCards()[0].title);
+      expect(
+        text(firstMatch(card, /<\/p>\s*<p class="card-more">([\s\S]*?)<\/p>/, 'the paragraph under card 1')),
+      ).toBe(prose(supported));
+    });
+
+    it('lists the §3d Catalog IDs as chips under card 4, in order', () => {
+      const card = cards()[3];
+      const idLine = sectionBody('3d')
+        .split('\n')
+        .find((line) => line.startsWith('`cmate-'));
+      const ids = [...(idLine ?? '').matchAll(/`([^`]+)`/g)].map((match) => match[1]);
+      const label = messagingTable('3d').find((cells) => cells[0] === 'en')?.[1];
+
+      expect(ids.length, 'public-messaging.md §3d lists no Catalog IDs').toBeGreaterThan(0);
+      expect(text(firstMatch(card, /<h3>([\s\S]*?)<\/h3>/, 'card 4 title'))).toBe(messagingCards()[3].title);
+      expect(text(firstMatch(card, /<p class="card-more"[^>]*>([\s\S]*?)<\/p>/, 'the Catalog label'))).toBe(label);
+      expect(
+        allText(firstMatch(card, /<ul class="chips"[^>]*>([\s\S]*?)<\/ul>/, 'the Catalog chips'), /<li>([\s\S]*?)<\/li>/g),
+      ).toEqual(ids);
+    });
+  });
+
+  it('opens The loop on §3e-6 and keeps its four beats', () => {
+    const section = pageSection('loop');
+
+    expect(text(firstMatch(section, /<p class="section-lede">([\s\S]*?)<\/p>/, '#loop lede'))).toBe(
+      prose(partEn('3e-6')),
+    );
+    // §3e-6 names four beats, so the section still has to show four.
+    expect(allText(section, /<li class="beat">\s*<h3>([\s\S]*?)<\/h3>/g)).toEqual([
+      'The requirement',
+      'The contract',
+      'The agent runs',
+      'The verdict',
+    ]);
   });
 });
 
