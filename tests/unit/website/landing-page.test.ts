@@ -1270,6 +1270,190 @@ describe('Issue #2495: the LP on the orchestrate axis', () => {
 });
 
 /**
+ * Issue #2553 — a FAQ directly under "What it does not do": what a gate is, what
+ * happens after the agent says it is done, why this is not an IDE, and five more
+ * a reader asks before installing.
+ *
+ * The answers are where the page is most specific — exit codes, what goes over
+ * the network, when Auto Yes switches itself off — so a paraphrase here is a
+ * promise the messaging doc never made. Every question and answer is read out of
+ * §13 between its `<!-- faq:en -->` markers, the way definitionEn() reads
+ * `def:en`, and compared with the page rather than restated.
+ */
+describe('Issue #2553: FAQ', () => {
+  const CSS_BLOCK_START = '/* FAQ (#2553) */';
+  const CSS_BLOCK_END = '/* /FAQ (#2553) */';
+
+  interface Faq {
+    question: string;
+    answer: string;
+    /** The answer's code spans, which the page has to render as `<code>`. */
+    code: string[];
+  }
+
+  const codeSpans = (markdown: string): string[] =>
+    Array.from(markdown.matchAll(/`([^`]+)`/g), ([, span]) => span);
+
+  /** §13's en table as the doc fixes it: numbered rows, in order. */
+  const faqEnRows = (): string[][] => {
+    const doc = fs.readFileSync(MESSAGING_DOC, 'utf-8');
+    const match = /<!-- faq:en -->([\s\S]*?)<!-- \/faq:en -->/.exec(doc);
+
+    expect(
+      match,
+      'docs/design/public-messaging.md must delimit the en FAQ with <!-- faq:en --> … <!-- /faq:en -->',
+    ).not.toBeNull();
+    return tableRows(match![1]).filter((cells) => cells[0] !== '#');
+  };
+
+  const faqEn = (): Faq[] =>
+    faqEnRows().map(([, question, answer]) => ({
+      question: prose(question),
+      answer: prose(answer),
+      code: codeSpans(answer),
+    }));
+
+  const faqSection = (): string => {
+    const found = /<section class="section" id="faq" aria-labelledby="faq-h">[\s\S]*?<\/section>/.exec(
+      readIndexHtml(),
+    );
+
+    expect(found, 'no <section class="section" id="faq" aria-labelledby="faq-h"> in index.html').not.toBeNull();
+    return found![0];
+  };
+
+  const detailsBlocks = (): string[] =>
+    Array.from(faqSection().matchAll(/<details\b[^>]*>([\s\S]*?)<\/details>/g), ([, inner]) => inner);
+
+  const renderedFaq = (): Faq[] =>
+    detailsBlocks().map((inner) => {
+      const parts = /^\s*<summary>([\s\S]*?)<\/summary>([\s\S]*)$/.exec(inner);
+
+      expect(parts, `a <details> must open on a bare <summary>:\n${inner}`).not.toBeNull();
+      const [, summary, body] = parts!;
+      return {
+        question: text(summary),
+        answer: text(body),
+        code: Array.from(body.matchAll(/<code>([\s\S]*?)<\/code>/g), ([, span]) => text(span)),
+      };
+    });
+
+  /** styles.css between the FAQ's own opening and closing comments. */
+  const faqCss = (): string => {
+    const css = fs.readFileSync(STYLES_CSS, 'utf-8');
+    const start = css.indexOf(CSS_BLOCK_START);
+    const end = css.indexOf(CSS_BLOCK_END);
+
+    expect(start, `styles.css must open the FAQ rules with ${CSS_BLOCK_START}`).toBeGreaterThan(-1);
+    expect(end, `styles.css must close the FAQ rules with ${CSS_BLOCK_END}`).toBeGreaterThan(start);
+    return css.slice(start, end);
+  };
+
+  it('reads eight numbered questions out of the faq:en markers in §13', () => {
+    // Without this, a marker that parses to nothing would compare an empty doc
+    // against an empty page and pass.
+    const rows = faqEnRows();
+
+    expect(rows.map((cells) => cells[0])).toEqual(['1', '2', '3', '4', '5', '6', '7', '8']);
+    expect(rows.every((cells) => cells.length === 3), 'a §13 row split on a stray |').toBe(true);
+  });
+
+  it('asks and answers the eight §13 questions verbatim, in the order the doc fixes', () => {
+    // Equality in both directions, like §4b under "What it does not do": a ninth
+    // question the doc does not have is as much a drift as a reworded one.
+    expect(
+      renderedFaq().map(({ question, answer }) => ({ question, answer })),
+      'the FAQ must be copied from public-messaging.md §13, not paraphrased',
+    ).toEqual(faqEn().map(({ question, answer }) => ({ question, answer })));
+  });
+
+  it("renders each answer's code spans as code", () => {
+    expect(renderedFaq().map((faq) => faq.code)).toEqual(faqEn().map((faq) => faq.code));
+  });
+
+  it('sits directly after "What it does not do"', () => {
+    const html = readIndexHtml();
+    const limitsStart = html.indexOf('<section class="section" id="limits"');
+    const limitsEnd = html.indexOf('</section>', limitsStart);
+    const faqStart = html.indexOf('<section class="section" id="faq"');
+
+    expect(limitsStart, 'no #limits section in index.html').toBeGreaterThan(-1);
+    expect(faqStart).toBeGreaterThan(limitsEnd);
+    expect(html.slice(limitsEnd + '</section>'.length, faqStart)).not.toMatch(/<section\b/);
+    expect(text(/<h2 id="faq-h">([\s\S]*?)<\/h2>/.exec(faqSection())?.[1] ?? '')).toBe('FAQ');
+  });
+
+  it('opens and closes on the native summary alone, so the keyboard needs no script', () => {
+    const section = faqSection();
+
+    expect(detailsBlocks()).toHaveLength(faqEnRows().length);
+    expect(section.match(/<summary\b/g) ?? []).toHaveLength(faqEnRows().length);
+    // A role, a tabindex or a click handler on either element takes the toggle
+    // away from the browser, and with it Enter / Space; so does a script that
+    // reaches for them.
+    expect(section).not.toMatch(/<(?:details|summary)\b[^>]*\b(?:role|tabindex|onclick)=/);
+    expect(fs.readFileSync(path.join(WEBSITE_DIR, 'main.js'), 'utf-8')).not.toMatch(
+      /faq|querySelector(?:All)?\(\s*['"`][^'"`]*\b(?:details|summary)\b/i,
+    );
+  });
+
+  it('adds no anchor to the nav', () => {
+    const header = /<header class="site-header">[\s\S]*?<\/header>/.exec(readIndexHtml());
+
+    expect(header, 'the site header not found in index.html').not.toBeNull();
+    expect(header![0]).not.toMatch(/href="#faq/);
+  });
+
+  it('says neither "loop" nor "the only", which §13 rules out and the page-wide scan cannot', () => {
+    // UNSCANNABLE_CLAIMS exempts both from the §11b scan because the page has a
+    // section called The loop. Inside this one section there is no such excuse.
+    const said = text(faqSection()).toLowerCase();
+
+    expect(said).not.toMatch(/\bloop/);
+    expect(said).not.toMatch(/\bthe only\b/);
+  });
+
+  it('keeps every FAQ rule inside its one commented block in styles.css', () => {
+    const css = fs.readFileSync(STYLES_CSS, 'utf-8');
+    const outside = css.replace(faqCss(), '');
+
+    expect(faqCss()).toMatch(/\.faq-item\b/);
+    expect(outside, 'a FAQ rule outside the /* FAQ (#2553) */ block').not.toMatch(/\.faq\b|\.faq-|#faq\b/);
+  });
+
+  it('switches off, for reduced motion, every transition the FAQ block declares', () => {
+    const css = faqCss().replace(/\/\*[\s\S]*?\*\//g, '');
+    const media = /@media \(prefers-reduced-motion: reduce\) \{([\s\S]*?\})\s*\}/.exec(css);
+    const rules = (fragment: string): { selectors: string[]; transition?: string }[] =>
+      Array.from(fragment.matchAll(/([^{}]+)\{([^{}]*)\}/g), ([, selector, body]) => ({
+        selectors: selector.split(',').map((one) => one.trim()),
+        transition: /\btransition(?:-[a-z]+)?\s*:\s*([^;]+)/.exec(body)?.[1].trim(),
+      }));
+
+    const animated = rules(media ? css.replace(media[0], '') : css)
+      .filter((rule) => rule.transition !== undefined && !rule.transition.startsWith('none'))
+      .flatMap((rule) => rule.selectors);
+    const switchedOff = rules(media?.[1] ?? '')
+      .filter((rule) => rule.transition?.startsWith('none'))
+      .flatMap((rule) => rule.selectors);
+
+    // The page-wide reduced-motion rule only shortens a transition to 0.01ms, so
+    // the FAQ switches its own off: by name, or for everything inside #faq.
+    const covered = (selector: string): boolean => {
+      const pseudo = /::(?:before|after)$/.exec(selector)?.[0] ?? '';
+      const inside = /^(?:\.faq\b|\.faq-|#faq\s*[\s>+~])/.test(selector.slice(0, selector.length - pseudo.length));
+
+      return switchedOff.includes(selector) || (inside && switchedOff.includes(`#faq *${pseudo}`));
+    };
+
+    expect(
+      animated.filter((selector) => !covered(selector)),
+      'these FAQ rules still transition under prefers-reduced-motion: reduce',
+    ).toEqual([]);
+  });
+});
+
+/**
  * Issue #2550 — the H1 says one agent leads, and until this Issue the page only
  * showed that in a fifteen-second recording and one card. "See it running" now
  * carries the Measured table under that recording, a new "One agent leads"

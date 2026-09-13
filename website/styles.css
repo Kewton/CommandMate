@@ -1158,6 +1158,97 @@ a {
   max-width: 60ch;
 }
 
+/* FAQ (#2553) */
+
+/* One column the answers can be read in, not the whole section width. The
+   copy is public-messaging.md §13 verbatim, so nothing here styles wording. */
+.faq {
+  max-width: 48rem;
+  border-top: 1px solid var(--border);
+}
+
+.faq-item {
+  border-bottom: 1px solid var(--border);
+}
+
+/* Still a native <summary>, which is what makes it focusable and toggled by
+   Enter / Space; only its disclosure triangle is swapped for the chevron below,
+   hidden in both the standard and the WebKit form. */
+.faq-item > summary {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 0;
+  cursor: pointer;
+  list-style: none;
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+.faq-item > summary::-webkit-details-marker {
+  display: none;
+}
+
+.faq-item > summary:hover {
+  color: var(--accent);
+}
+
+/* The global focus ring lists a, button and [tabindex], none of which a
+   <summary> is. */
+.faq-item > summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.faq-item > summary::after {
+  content: "";
+  flex: none;
+  width: 0.55rem;
+  height: 0.55rem;
+  margin: 0.45rem 0.35rem 0 0;
+  border-right: 2px solid var(--fg-muted);
+  border-bottom: 2px solid var(--fg-muted);
+  transform: rotate(45deg);
+  transition: transform 0.15s ease;
+}
+
+.faq-item[open] > summary::after {
+  transform: translateY(0.25rem) rotate(-135deg);
+}
+
+.faq-item > p {
+  margin: 0 0 1.25rem;
+  max-width: 65ch;
+  color: var(--fg-muted);
+}
+
+.faq-item code {
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 0.05rem 0.3rem;
+  white-space: nowrap;
+}
+
+/* none rather than the page-wide 0.01ms: that rule shortens every transition,
+   this one removes them from the whole section, the chevron included. By the
+   section's id, since its class is the one every section shares. !important
+   because the page-wide rule carries it too; the higher specificity wins. */
+@media (prefers-reduced-motion: reduce) {
+  #faq,
+  #faq::before,
+  #faq::after,
+  #faq *,
+  #faq *::before,
+  #faq *::after {
+    transition: none !important;
+  }
+}
+
+/* /FAQ (#2553) */
+
 /* ---------- philosophy ---------- */
 
 .philosophy .definition {
