@@ -1543,6 +1543,195 @@ describe('Issue #2555: compact', () => {
 });
 
 /**
+ * Issue #2555, second pass — the page was still taller than it was before Epic
+ * #2548 on a laptop, and the Epic's additions repeated each other. Four places
+ * were folded or laid out closer, again with no wording changed: The loop's
+ * beats become one band with their code folded (the page shows a whole contract
+ * under One agent leads and gate lines in the hero), the four feature demos sit
+ * two by two, the Catalog IDs fold under their §3d label, and the closing call
+ * to action shares Philosophy's section.
+ *
+ * The heights are measured in a browser outside this suite. What is pinned here
+ * is the markup and the one CSS block that made the page shorter, and that what
+ * the other blocks read — the four beats, the five demos and their playback, §3c,
+ * §3d, the definition and #philosophy — is still where they read it.
+ */
+describe('Issue #2555: compact (2)', () => {
+  const CSS_BLOCK_START = '/* Compact 2 (#2555) */';
+  const CSS_BLOCK_END = '/* /Compact 2 (#2555) */';
+
+  const firstMatch = (html: string, pattern: RegExp, what: string): string => {
+    const found = pattern.exec(html);
+
+    expect(found, `${what} not found in index.html`).not.toBeNull();
+    return found![0];
+  };
+
+  const section = (opening: string): string =>
+    firstMatch(readIndexHtml(), new RegExp(`${opening}[\\s\\S]*?</section>`), opening);
+
+  const beats = (): string[] =>
+    Array.from(
+      firstMatch(section('<section class="section" id="loop"'), /<ol class="beats">[\s\S]*?<\/ol>/, 'the beats').matchAll(
+        /<li class="beat">([\s\S]*?)<\/li>/g,
+      ),
+      ([, inner]) => inner,
+    );
+
+  /** The four cards' markup, comments dropped: the one above the Catalog fold names the element it explains. */
+  const cards = (): string[] =>
+    Array.from(
+      firstMatch(readIndexHtml(), /<h2 id="why">[\s\S]*?<\/section>/, 'the cards section').matchAll(
+        /<article class="card">([\s\S]*?)<\/article>/g,
+      ),
+      ([, inner]) => inner.replace(/<!--[\s\S]*?-->/g, ''),
+    );
+
+  /** styles.css between this pass's own opening and closing comments. */
+  const compactCss = (): string => {
+    const css = fs.readFileSync(STYLES_CSS, 'utf-8');
+    const start = css.indexOf(CSS_BLOCK_START);
+    const end = css.indexOf(CSS_BLOCK_END);
+
+    expect(start, `styles.css must open the rules with ${CSS_BLOCK_START}`).toBeGreaterThan(-1);
+    expect(css.indexOf(CSS_BLOCK_START, start + 1), `${CSS_BLOCK_START} must open one block`).toBe(-1);
+    expect(end, `styles.css must close the rules with ${CSS_BLOCK_END}`).toBeGreaterThan(start);
+    return css.slice(start, end);
+  };
+
+  /** Every `@media (<query>) { … }` block in a CSS fragment, whole, braces balanced. */
+  const mediaBlocks = (css: string, query: string): string[] => {
+    const blocks: string[] = [];
+    for (let open = css.indexOf(`@media (${query}) {`); open > -1; open = css.indexOf(`@media (${query}) {`, open + 1)) {
+      let depth = 1;
+      let at = css.indexOf('{', open) + 1;
+      for (; at < css.length && depth > 0; at++) {
+        if (css[at] === '{') depth++;
+        if (css[at] === '}') depth--;
+      }
+      blocks.push(css.slice(open, at));
+    }
+
+    expect(blocks.length, `no @media (${query}) block`).toBeGreaterThan(0);
+    return blocks;
+  };
+
+  it('lays the four beats out as one band: four across from 901px, stacked below it', () => {
+    const block = compactCss();
+    const wide = mediaBlocks(block, 'min-width: 901px');
+    const narrow = wide.reduce((css, media) => css.replace(media, ''), block);
+    const outside = fs.readFileSync(STYLES_CSS, 'utf-8').replace(block, '');
+
+    expect(beats().map((beat) => text(/^\s*<h3>([\s\S]*?)<\/h3>/.exec(beat)?.[1] ?? ''))).toEqual([
+      'The requirement',
+      'The contract',
+      'The agent runs',
+      'The verdict',
+    ]);
+    expect(narrow).toMatch(/\.beats\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\)/);
+    expect(wide.join('\n')).toMatch(/\.beats\s*\{[^}]*grid-template-columns:\s*repeat\(4, minmax\(0, 1fr\)\)/);
+    expect(outside, 'beat columns outside the /* Compact 2 (#2555) */ block').not.toMatch(
+      /\.beats\s*\{[^}]*grid-template-columns/,
+    );
+  });
+
+  it("folds each beat's code under the artifact it holds, in words the page already carries", () => {
+    const [requirement, ...coded] = beats();
+    const faq = section('<section class="section" id="faq"');
+
+    expect(requirement, 'the requirement has no code to fold').not.toMatch(/<details\b/);
+    const folds = coded.map((beat) => {
+      expect(beat.match(/<details\b/g) ?? [], beat).toHaveLength(1);
+      const details = firstMatch(beat, /<details class="beat-fold">[\s\S]*?<\/details>/, 'a beat fold');
+      const summary = /^<details class="beat-fold">\s*<summary><code>([^<]+)<\/code><\/summary>/.exec(details);
+
+      expect(summary, `a beat fold must open on a bare <summary> holding one <code>:\n${details}`).not.toBeNull();
+      // The sentence stays in view: it comes before the fold, not inside it.
+      expect(beat.indexOf('<p>')).toBeLessThan(beat.indexOf('<details'));
+      return {
+        label: summary![1],
+        snippet: firstMatch(details, /<pre class="snippet"><code>[\s\S]*?<\/code><\/pre>/, 'the folded snippet'),
+      };
+    });
+
+    expect(folds.map((fold) => fold.label)).toEqual(['fix-shout.yaml', 'commandmate send', 'commandmate wait --verify']);
+    // No new words: the file and the send command are named out of their own
+    // snippet, and the verdict's command the way the FAQ writes it.
+    expect(coded[0]).toContain('<p class="snippet-label">.commandmate/tasks/fix-shout.yaml</p>');
+    expect(folds[1].snippet).toContain('$ commandmate send wt-shout');
+    expect(faq).toContain(`<code>${folds[2].label}</code>`);
+    expect(folds[2].snippet).toContain('$ commandmate wait wt-shout --verify');
+    expect(folds[2].snippet).toContain('RESULT passed');
+    for (const beat of coded) {
+      expect(beat, 'folded by default').not.toMatch(/<details\b[^>]*\bopen\b/);
+      expect(beat).not.toMatch(/<(?:details|summary)\b[^>]*\b(?:role|tabindex|onclick)=/);
+    }
+  });
+
+  it('puts the four feature demos two by two under the Measured table, and folds none of them', () => {
+    const demos = section('<section class="section" id="demos"');
+    const grid = firstMatch(demos, /<div class="demos">[\s\S]*<\/div>/, 'the demo grid');
+    const block = compactCss();
+    const outside = fs.readFileSync(STYLES_CSS, 'utf-8').replace(block, '');
+
+    expect(grid.match(/<figure class="demo">/g) ?? []).toHaveLength(Object.keys(DEMO_SOURCES).length);
+    expect(demos.indexOf('<div class="measured">')).toBeLessThan(demos.indexOf('<div class="demos">'));
+    // Inside a closed <details> a demo never reaches the observer's threshold,
+    // so none of the five is behind one.
+    expect(demos).not.toMatch(/<details\b/);
+    expect(block).toMatch(/\.demos\s*\{[^}]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)/);
+    expect(outside, 'demo columns outside the /* Compact 2 (#2555) */ block').not.toMatch(
+      /\.demos\s*\{[^}]*grid-template-columns/,
+    );
+  });
+
+  it('folds the Catalog IDs under their §3d label, and leaves §3c in view under card 1', () => {
+    const [first, , , fourth] = cards();
+    const fold = firstMatch(fourth, /<details\b[^>]*>[\s\S]*?<\/details>/, 'the Catalog fold');
+    const label = messagingTable('3d').find((cells) => cells[0] === 'en')?.[1];
+
+    expect(fold).toMatch(/^<details class="card-more catalog-fold">\s*<summary id="catalog-h">/);
+    expect(text(firstMatch(fold, /<summary\b[^>]*>[\s\S]*?<\/summary>/, 'the Catalog summary'))).toBe(label);
+    expect(fold.match(/<ul class="chips" aria-labelledby="catalog-h">/g) ?? []).toHaveLength(1);
+    expect(fold.match(/<li><code>cmate-[^<]+<\/code><\/li>/g) ?? []).toHaveLength(14);
+    expect(fold).not.toMatch(/<details\b[^>]*\bopen\b/);
+    expect(fold).not.toMatch(/<(?:details|summary)\b[^>]*\b(?:role|tabindex|onclick)=/);
+    // §3c is a paragraph a reader sees without opening anything.
+    expect(first).not.toMatch(/<details\b/);
+    expect(first).toMatch(/<p class="card-more">/);
+  });
+
+  it('makes the closing call to action and Philosophy one section, the last in <main>, still #philosophy', () => {
+    const html = readIndexHtml();
+    const merged = section('<section class="section philosophy" id="philosophy" aria-labelledby="philosophy-h">');
+
+    expect(html).not.toMatch(/<section class="section closing"/);
+    expect(html.match(/\sid="philosophy"/g) ?? []).toHaveLength(1);
+    expect(merged.indexOf('<div class="closing">')).toBeGreaterThan(-1);
+    expect(merged.indexOf('<div class="closing">')).toBeLessThan(merged.indexOf('<div class="philosophy-body">'));
+    expect(text(firstMatch(merged, /<div class="closing">\s*<h2>[\s\S]*?<\/h2>/, 'the closing heading'))).toBe(
+      'Start in one command',
+    );
+    expect(copyableCommands(merged)).toEqual(['npx commandmate@latest']);
+    expect(merged.replace(/\s+/g, ' ')).toContain(definitionEn());
+    expect(html.slice(html.indexOf(merged) + merged.length)).toMatch(/^\s*<\/main>/);
+  });
+
+  it('keeps its rules in one commented block, with no motion for reduced motion to switch off', () => {
+    const block = compactCss();
+    const outside = fs.readFileSync(STYLES_CSS, 'utf-8').replace(block, '');
+
+    for (const rule of [/\.beat-fold\b/, /\.catalog-fold\b/, /\.philosophy-body\b/, /#loop\b/]) {
+      expect(block).toMatch(rule);
+      expect(outside, `${rule} outside the /* Compact 2 (#2555) */ block`).not.toMatch(rule);
+    }
+    // The FAQ switches its chevron's transition off by hand; these folds never
+    // declare one, so the page-wide reduced-motion rule has nothing to shorten.
+    expect(block.replace(/\/\*[\s\S]*?\*\//g, '')).not.toMatch(/\b(?:transition|animation)(?:-[a-z]+)?\s*:/);
+  });
+});
+
+/**
  * Issue #1812 — the page is written on the Vibe Engineering axis, and its words
  * are copied from `docs/design/public-messaging.md` rather than composed here.
  *
@@ -2250,7 +2439,9 @@ describe('Issue #2550: the lead run, measured and walked through', () => {
 
       expect(ids.length, 'public-messaging.md §3d lists no Catalog IDs').toBeGreaterThan(0);
       expect(text(firstMatch(card, /<h3>([\s\S]*?)<\/h3>/, 'card 4 title'))).toBe(messagingCards()[3].title);
-      expect(text(firstMatch(card, /<p class="card-more"[^>]*>([\s\S]*?)<\/p>/, 'the Catalog label'))).toBe(label);
+      // The label is the <summary> the IDs fold under since #2555, which a
+      // paragraph cannot be; the words compared with §3d are the same.
+      expect(text(firstMatch(card, /<summary id="catalog-h">([\s\S]*?)<\/summary>/, 'the Catalog label'))).toBe(label);
       expect(
         allText(firstMatch(card, /<ul class="chips"[^>]*>([\s\S]*?)<\/ul>/, 'the Catalog chips'), /<li>([\s\S]*?)<\/li>/g),
       ).toEqual(ids);
