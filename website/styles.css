@@ -914,31 +914,20 @@ a {
 
 /* ---------- the loop ---------- */
 
-/* Two columns at --maxw, so the four beats land 2x2. A 17rem floor gave three
-   columns and left the fourth beat alone under a row whose height was set by
-   the tallest snippet — a screenful of empty card. 22rem is also what keeps
-   `GATE work-evidence PASS (commits=0, uncommitted=1)` inside the snippet box
-   instead of behind its scrollbar. */
+/* The band's columns, frame and spacing, and the beat's fold, are in the
+   Compact 2 (#2555) block below. */
 .beats {
   list-style: none;
   counter-reset: beat;
-  margin: 2rem 0 0;
   padding: 0;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr));
-  gap: 1.25rem;
-  align-items: start;
 }
 
 .beats > li {
   counter-increment: beat;
-  padding: 1.5rem;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
   /* A grid item's automatic minimum is its content's min-content width, which a
      snippet line would set to the width of its longest command. Without this the
-     card stops scrolling its own code and widens the page instead. */
+     beat stops scrolling its own code and widens the page instead. */
   min-width: 0;
 }
 
@@ -963,9 +952,7 @@ a {
 }
 
 .beats p {
-  margin: 0.9rem 0 0;
   color: var(--fg-muted);
-  font-size: 0.94rem;
 }
 
 .beats h3 + p {
@@ -1181,10 +1168,9 @@ a {
 
 /* ---------- feature demos ---------- */
 
+/* The columns are set in the Compact 2 (#2555) block below. */
 .demos {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr));
-  gap: 1.25rem;
   align-items: start;
 }
 
@@ -1208,9 +1194,7 @@ a {
 
 /* ---------- measured ---------- */
 
-.measured {
-  margin: 0 0 2.5rem;
-}
+/* The space under the block is set in the Compact 2 (#2555) block below. */
 
 .measured h3 {
   margin: 0 0 0.75rem;
@@ -1607,6 +1591,8 @@ a {
 
 /* ---------- closing ---------- */
 
+/* The head of the Philosophy section since #2555; the two halves are laid out
+   in the Compact 2 block below. */
 .closing {
   text-align: center;
 }
@@ -1687,3 +1673,239 @@ a {
   color: var(--fg-muted);
   font-size: 0.82rem;
 }
+
+/* Compact 2 (#2555) */
+
+/* The second pass at the page height (#2555): The loop's beats as one band
+   with their code folded, the four feature demos two by two, the Catalog IDs
+   folded under their label, and the closing call to action sharing a section
+   with Philosophy. Nothing here transitions or animates, so reduced motion has
+   nothing to switch off. */
+
+/* The loop drawing's viewBox keeps 18 units of air above and below its nodes.
+   Drawn at 22rem here, and at a phone's width, that is a rem, so the margins
+   hand it back rather than stacking it on the gaps around the figure. */
+.loop-figure {
+  margin-block: -1rem;
+}
+
+/* From 901px The loop opens with its heading and lede beside the drawing, as
+   the hero does, instead of above a drawing centred on a row of its own. 22rem
+   is the width the drawing already has on a phone. */
+@media (min-width: 901px) {
+  #loop {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 22rem);
+    grid-template-rows: auto 1fr;
+    column-gap: 3rem;
+  }
+
+  #loop > h2,
+  #loop > .section-lede {
+    grid-column: 1;
+  }
+
+  #loop > .loop-figure {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    max-width: none;
+    margin: -1rem 0;
+  }
+
+  #loop > .beats {
+    grid-column: 1 / -1;
+  }
+}
+
+/* One band, one frame. From 901px the four beats share a row, read left to
+   right as the turn runs; below that they stack inside the same frame. A beat
+   has no card of its own, only the rule between it and the one before. */
+.beats {
+  margin: 1.5rem 0 0;
+  grid-template-columns: minmax(0, 1fr);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.beats > li {
+  padding: 1rem 1.1rem;
+}
+
+.beats > li + li {
+  border-top: 1px solid var(--border);
+}
+
+.beats p {
+  margin: 0.6rem 0 0;
+  font-size: 0.92rem;
+}
+
+@media (min-width: 901px) {
+  .beats {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .beats > li + li {
+    border-top: 0;
+    border-left: 1px solid var(--border);
+  }
+}
+
+/* The two folds added here, a beat's code and the Catalog IDs, open on a
+   native <summary>, so Enter / Space toggle them; only the disclosure triangle
+   is swapped for a chevron, in both the standard and the WebKit form. */
+.beat-fold > summary,
+.catalog-fold > summary {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  width: fit-content;
+  max-width: 100%;
+  cursor: pointer;
+  list-style: none;
+}
+
+.beat-fold > summary::-webkit-details-marker,
+.catalog-fold > summary::-webkit-details-marker {
+  display: none;
+}
+
+/* The global focus ring lists a, button and [tabindex], none of which a
+   <summary> is. */
+.beat-fold > summary:focus-visible,
+.catalog-fold > summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.beat-fold > summary::after,
+.catalog-fold > summary::after {
+  content: "";
+  flex: none;
+  width: 0.45rem;
+  height: 0.45rem;
+  margin: 0 0.1rem 0.2rem 0;
+  border-right: 2px solid var(--fg-muted);
+  border-bottom: 2px solid var(--fg-muted);
+  transform: rotate(45deg);
+}
+
+.beat-fold[open] > summary::after,
+.catalog-fold[open] > summary::after {
+  margin: 0.2rem 0.1rem 0 0;
+  transform: rotate(-135deg);
+}
+
+/* A beat's fold is named by the artifact in it, set as the token it is. */
+.beat-fold {
+  margin-top: 0.75rem;
+}
+
+.beat-fold > summary {
+  padding: 0.25rem 0.65rem;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--fg);
+  font-size: 0.78rem;
+}
+
+.beat-fold > summary:focus-visible {
+  border-radius: 999px;
+}
+
+.beat-fold > summary:hover {
+  border-color: var(--fg-muted);
+}
+
+.beat-fold > summary code {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.beat-fold > .snippet-label {
+  margin-top: 0.75rem;
+}
+
+/* The Catalog label keeps the look it had as a paragraph. */
+.catalog-fold > summary {
+  color: var(--fg-muted);
+}
+
+.catalog-fold > summary:hover {
+  color: var(--accent);
+}
+
+.catalog-fold > .chips {
+  margin-top: 0.75rem;
+}
+
+/* The four feature demos, two by two. On a phone each caption sits under its
+   demo; from 901px beside it, which keeps the pair of rows shorter than one
+   row of demos was when each had half the section to itself. */
+.measured {
+  margin: 0 0 2rem;
+}
+
+.demos {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem 0.75rem;
+}
+
+.demos .demo figcaption {
+  font-size: 0.8rem;
+}
+
+@media (min-width: 901px) {
+  .demos {
+    column-gap: 1.5rem;
+  }
+
+  .demos .demo {
+    display: grid;
+    grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+    gap: 0.9rem;
+    align-items: center;
+  }
+
+  .demos .demo figcaption {
+    margin-top: 0;
+  }
+}
+
+/* The closing call to action, then Philosophy, in one section: one under the
+   other on a phone and a tablet, beside each other from 901px. The footnote
+   under the creed sits closer than it did at the foot of a section of its own. */
+.philosophy-body {
+  margin-top: 2rem;
+  padding-top: 2rem;
+  border-top: 1px solid var(--border);
+}
+
+.philosophy-body .attribution {
+  margin-top: 1rem;
+  padding-top: 1rem;
+}
+
+@media (min-width: 901px) {
+  .philosophy {
+    display: grid;
+    grid-template-columns: minmax(0, 24rem) minmax(0, 1fr);
+    align-items: center;
+  }
+
+  .closing {
+    padding-right: 3rem;
+  }
+
+  .philosophy-body {
+    margin-top: 0;
+    padding: 0 0 0 3rem;
+    border-top: 0;
+    border-left: 1px solid var(--border);
+  }
+}
+
+/* /Compact 2 (#2555) */

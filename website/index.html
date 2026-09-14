@@ -496,6 +496,14 @@ verify:
           </svg>
         </figure>
 
+        <!-- One band since Issue #2555: four across on a wide screen, stacked on a
+             phone. Each beat keeps its sentence in view and folds its code, which
+             the page already shows elsewhere — a whole contract under One agent
+             leads, gate lines in the hero. Each fold is named by the artifact it
+             holds, in words the page already carries: the task file, the send
+             command, and `commandmate wait --verify` as the FAQ writes it. The
+             snippets inside are unchanged. Native <details>, so Enter / Space
+             open a fold with no script. -->
         <ol class="beats">
           <li class="beat">
             <h3>The requirement</h3>
@@ -515,8 +523,10 @@ verify:
               Before the work starts, the sentence is written down as a contract: what may be
               touched, and which gates decide that it is finished.
             </p>
-            <p class="snippet-label">.commandmate/tasks/fix-shout.yaml</p>
-            <pre class="snippet"><code>title: "shout() uppercases the greeting"
+            <details class="beat-fold">
+              <summary><code>fix-shout.yaml</code></summary>
+              <p class="snippet-label">.commandmate/tasks/fix-shout.yaml</p>
+              <pre class="snippet"><code>title: "shout() uppercases the greeting"
 scope:
   allow: ["src/greet.js"]
   deny: ["test/**", ".commandmate/**"]
@@ -525,6 +535,7 @@ verify:
 success:
   requireWorkEvidence: true
   requireScopeClean: true</code></pre>
+            </details>
           </li>
 
           <li class="beat">
@@ -533,10 +544,13 @@ success:
               The contract is handed to whichever coding agent you want to use, in a Git worktree
               of its own.
             </p>
-            <pre class="snippet"><code>$ commandmate send wt-shout \
+            <details class="beat-fold">
+              <summary><code>commandmate send</code></summary>
+              <pre class="snippet"><code>$ commandmate send wt-shout \
     --contract .commandmate/tasks/fix-shout.yaml >task-id.txt
 Task created: 4d1f8b2a-6c07-4a5e-9f3b-27ac91e0d4c8
 Message sent.</code></pre>
+            </details>
           </li>
 
           <li class="beat">
@@ -546,13 +560,16 @@ Message sent.</code></pre>
               is the answer — <code>0</code> passed, <code>20</code> a gate failed,
               <code>21</code> nothing was actually done.
             </p>
-            <pre class="snippet"><code>$ commandmate wait wt-shout --verify
+            <details class="beat-fold">
+              <summary><code>commandmate wait --verify</code></summary>
+              <pre class="snippet"><code>$ commandmate wait wt-shout --verify
 GATE work-evidence PASS (commits=0, uncommitted=1)
 GATE scope PASS (exit=0, 0.1s)
 GATE unit PASS (exit=0, 0.1s)
 RESULT passed
 $ echo $?
 0</code></pre>
+            </details>
           </li>
         </ol>
       </section>
@@ -603,24 +620,29 @@ $ echo $?
             </p>
             <!-- The Catalog's skill IDs in §3d's order. No count in the label, on
                  purpose: §3d leaves it out so the label cannot go stale when the
-                 Catalog grows. -->
-            <p class="card-more" id="catalog-h">Installable today from the official Catalog</p>
-            <ul class="chips" aria-labelledby="catalog-h">
-              <li><code>cmate-acceptance-test</code></li>
-              <li><code>cmate-delegate</code></li>
-              <li><code>cmate-issue-authoring</code></li>
-              <li><code>cmate-issue-refinement</code></li>
-              <li><code>cmate-orchestrate</code></li>
-              <li><code>cmate-orchestrate-monitor</code></li>
-              <li><code>cmate-repository-analysis</code></li>
-              <li><code>cmate-task-contract</code></li>
-              <li><code>cmate-verify</code></li>
-              <li><code>cmate-verify-advisor</code></li>
-              <li><code>cmate-worker-development</code></li>
-              <li><code>cmate-workspace-research</code></li>
-              <li><code>cmate-worktree-cleanup</code></li>
-              <li><code>cmate-worktree-setup</code></li>
-            </ul>
+                 Catalog grows. Folded under that label since Issue #2555, the way
+                 Track B folds under its heading: a native <details>, so Enter /
+                 Space open it with no script, and the list is still labelled by
+                 the words it sits under. -->
+            <details class="card-more catalog-fold">
+              <summary id="catalog-h">Installable today from the official Catalog</summary>
+              <ul class="chips" aria-labelledby="catalog-h">
+                <li><code>cmate-acceptance-test</code></li>
+                <li><code>cmate-delegate</code></li>
+                <li><code>cmate-issue-authoring</code></li>
+                <li><code>cmate-issue-refinement</code></li>
+                <li><code>cmate-orchestrate</code></li>
+                <li><code>cmate-orchestrate-monitor</code></li>
+                <li><code>cmate-repository-analysis</code></li>
+                <li><code>cmate-task-contract</code></li>
+                <li><code>cmate-verify</code></li>
+                <li><code>cmate-verify-advisor</code></li>
+                <li><code>cmate-worker-development</code></li>
+                <li><code>cmate-workspace-research</code></li>
+                <li><code>cmate-worktree-cleanup</code></li>
+                <li><code>cmate-worktree-setup</code></li>
+              </ul>
+            </details>
           </article>
         </div>
       </section>
@@ -1116,41 +1138,47 @@ $ echo $?
         </p>
       </section>
 
-      <!-- Closing CTA -->
-      <section class="section closing">
-        <h2>Start in one command</h2>
-        <div class="install install-lg">
-          <code class="install-cmd" id="closing-cmd">npx commandmate@latest</code>
-          <button type="button" class="copy-btn" data-copy-target="closing-cmd">
-            <span data-copy-label>Copy</span>
-          </button>
-        </div>
-        <div class="cta-row cta-center">
-          <a class="btn btn-primary" href="https://github.com/Kewton/CommandMate">Star on GitHub</a>
-          <a class="btn btn-ghost" href="https://github.com/Kewton/CommandMate/blob/main/docs/en/user-guide/cli-setup-guide.md">Setup guide</a>
-        </div>
-      </section>
-      <!-- 11. Philosophy. The old H1 was not retired, it was demoted: it names the
+      <!-- 11. Closing CTA and Philosophy, one section since Issue #2555: the
+           command to start with, then the idea it serves, side by side on a wide
+           screen and one under the other on a phone. The section keeps the
+           Philosophy id, class and label, so #philosophy still lands here.
+
+           Philosophy: the old H1 was not retired, it was demoted: it names the
            idea rather than the product, so it reads as the closing argument instead
            of the opening claim (docs/design/public-messaging.md §2). The definition
            sentence is verbatim from that file's def:en markers, and a test compares
            the two strings. -->
       <section class="section philosophy" id="philosophy" aria-labelledby="philosophy-h">
-        <h2 id="philosophy-h">From vibe coding to Vibe Engineering.</h2>
-        <p class="definition">
-          Vibe Engineering — the AI does the building; the system, not your expertise, guarantees
-          the engineering.
-        </p>
-        <p class="creed">
-          We do not make the AI smarter. We make the software-engineering ability its user needed
-          into a system.
-        </p>
-        <!-- The axis word is not ours, and a page that used it as if it were would
-             be claiming a coinage it does not hold (public-messaging.md §10). -->
-        <p class="attribution">
-          The term "vibe engineering" was coined by Simon Willison (2025).
-          <a href="https://simonwillison.net/2025/Oct/7/vibe-engineering/">Read the original post</a>.
-        </p>
+        <div class="closing">
+          <h2>Start in one command</h2>
+          <div class="install install-lg">
+            <code class="install-cmd" id="closing-cmd">npx commandmate@latest</code>
+            <button type="button" class="copy-btn" data-copy-target="closing-cmd">
+              <span data-copy-label>Copy</span>
+            </button>
+          </div>
+          <div class="cta-row cta-center">
+            <a class="btn btn-primary" href="https://github.com/Kewton/CommandMate">Star on GitHub</a>
+            <a class="btn btn-ghost" href="https://github.com/Kewton/CommandMate/blob/main/docs/en/user-guide/cli-setup-guide.md">Setup guide</a>
+          </div>
+        </div>
+        <div class="philosophy-body">
+          <h2 id="philosophy-h">From vibe coding to Vibe Engineering.</h2>
+          <p class="definition">
+            Vibe Engineering — the AI does the building; the system, not your expertise, guarantees
+            the engineering.
+          </p>
+          <p class="creed">
+            We do not make the AI smarter. We make the software-engineering ability its user needed
+            into a system.
+          </p>
+          <!-- The axis word is not ours, and a page that used it as if it were would
+               be claiming a coinage it does not hold (public-messaging.md §10). -->
+          <p class="attribution">
+            The term "vibe engineering" was coined by Simon Willison (2025).
+            <a href="https://simonwillison.net/2025/Oct/7/vibe-engineering/">Read the original post</a>.
+          </p>
+        </div>
       </section>
     </main>
 
