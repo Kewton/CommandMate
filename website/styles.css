@@ -12,6 +12,9 @@
   --accent: #0a7d8c;
   --accent-fg: #ffffff;
   --accent-subtle: #e6f4f6;
+  /* Amber, for a session waiting on a person (the hero mock, Issue #2551). */
+  --attention: #8a5a00;
+  --attention-subtle: #fff3d6;
   --shadow: 0 1px 3px rgb(31 35 40 / 0.08), 0 8px 24px rgb(31 35 40 / 0.06);
   --radius: 12px;
   --maxw: 1080px;
@@ -28,6 +31,8 @@
     --accent: #39c0ce;
     --accent-fg: #04232a;
     --accent-subtle: #0e2e33;
+    --attention: #e3b341;
+    --attention-subtle: #33270c;
     --shadow: 0 1px 3px rgb(1 4 9 / 0.4), 0 8px 24px rgb(1 4 9 / 0.3);
   }
 }
@@ -141,8 +146,13 @@ a {
   color: var(--fg);
 }
 
+/* On a phone the wordmark and four links do not share a row, so the two that a
+   first visit needs least give way. Docs and GitHub stay: they are the answers
+   to "how do I use it" and "where is it". Hiding by class rather than by
+   position (Issue #2552) — `:not(:last-child)` used to hide everything but
+   GitHub, and it would have taken Docs with it. */
 @media (max-width: 560px) {
-  .nav-links a:not(:last-child) {
+  .nav-links .nav-secondary {
     display: none;
   }
 }
@@ -272,9 +282,20 @@ a {
 }
 
 .prereq {
-  margin: 0.4rem 0 1.75rem;
+  margin: 0.4rem 0 0;
   font-size: 0.875rem;
   color: var(--fg-muted);
+}
+
+/* The version line (Issue #2552). Quieter than the prerequisites above it: it
+   answers "is this maintained", which matters, but not before "can I run it".
+   The margin under it is the one .prereq used to carry, so the CTA row does
+   not move. */
+.release-line {
+  margin: 0.3rem 0 1.75rem;
+  font-size: 0.8rem;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .cta-row {
@@ -330,13 +351,163 @@ a {
   background: var(--bg-subtle);
 }
 
-/* ---------- hero loop diagram ---------- */
+/* ---------- inline drawings ---------- */
 
-/* The hero drawing is inline SVG so that these rules reach it, and every ink in
-   it is a custom property. That is the whole point: a literal colour here is how
-   a diagram ends up perfectly legible in the theme its author had open and
-   invisible in the other one. Nothing below may be a hex, rgb() or named colour
-   (tests/unit/website/landing-page.test.ts pins that). */
+/* The drawings on this page are inline SVG so that these rules reach them, and
+   every ink in them is a custom property. That is the whole point: a literal
+   colour here is how a diagram ends up perfectly legible in the theme its author
+   had open and invisible in the other one. Nothing in the drawing rules below
+   may be a hex, rgb() or named colour (tests/unit/website/landing-page.test.ts
+   pins that for each drawing class). */
+
+/* The hero session mock (Issue #2551). Contrast, text on its fill, light / dark:
+   --fg 15.80 / 14.65 and --fg-muted 6.11 / 5.94 on --surface; --fg 14.02 / 12.20
+   and --fg-muted 5.43 / 4.95 on --accent-subtle; --fg 14.84 / 14.65 and
+   --fg-muted 5.74 / 5.94 on --bg-subtle (the gate lines); on the amber row,
+   --fg 14.33 / 12.37 and --fg-muted 5.54 / 5.02 on --attention-subtle, and the
+   "needs you" label, --attention on --surface, 5.93 / 8.90. */
+.hero-mock {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.hero-mock text {
+  font-family: inherit;
+}
+
+.hero-mock .frame {
+  fill: var(--surface);
+  stroke: var(--border);
+  stroke-width: 1.5;
+}
+
+.hero-mock .rule {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.hero-mock .mock-heading {
+  fill: var(--fg);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.hero-mock .session-name {
+  fill: var(--fg);
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.hero-mock .session-agent {
+  fill: var(--fg-muted);
+  font-size: 11px;
+}
+
+.hero-mock .pill {
+  stroke-width: 1;
+}
+
+.hero-mock .pill-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-anchor: middle;
+}
+
+/* The label is never --accent on --accent-subtle: that pair is 4.31:1 in the
+   light theme, under the 4.5:1 floor (see .remote-docs below). */
+.hero-mock .session-working .dot {
+  fill: var(--accent);
+}
+
+.hero-mock .session-working .pill {
+  fill: var(--accent-subtle);
+  stroke: var(--accent);
+}
+
+.hero-mock .session-working .pill-label {
+  fill: var(--fg);
+}
+
+.hero-mock .session-done .dot {
+  fill: var(--fg-muted);
+}
+
+.hero-mock .session-done .pill {
+  fill: var(--surface);
+  stroke: var(--border);
+}
+
+.hero-mock .session-done .pill-label {
+  fill: var(--fg-muted);
+}
+
+/* The one row that is waiting on a person carries the page's only warm colour,
+   so it is the row the eye lands on. */
+.hero-mock .session-needs .band {
+  fill: var(--attention-subtle);
+}
+
+.hero-mock .session-needs .dot {
+  fill: var(--attention);
+}
+
+.hero-mock .session-needs .pill {
+  fill: var(--surface);
+  stroke: var(--attention);
+}
+
+.hero-mock .session-needs .pill-label {
+  fill: var(--attention);
+  font-weight: 700;
+}
+
+.hero-mock .terminal {
+  fill: var(--bg-subtle);
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.hero-mock .term {
+  fill: var(--fg);
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 11px;
+}
+
+.hero-mock .term-prompt {
+  fill: var(--fg-muted);
+}
+
+.hero-mock .term-strong {
+  font-weight: 700;
+}
+
+.hero-mock .pointer {
+  stroke: var(--fg-muted);
+  stroke-width: 1.25;
+}
+
+.hero-mock .pointer-head {
+  fill: var(--fg-muted);
+}
+
+.hero-mock .term-note {
+  fill: var(--fg-muted);
+  font-size: 11px;
+  font-style: italic;
+}
+
+/* 360 user units render at roughly 350 CSS px on a 390px phone. Capping it on
+   wide screens keeps the type from ballooning past the hero copy beside it. */
+@media (min-width: 901px) {
+  .hero-mock {
+    max-width: 28rem;
+    margin-left: auto;
+  }
+}
+
+/* The four-step cycle at the head of The loop, moved out of the hero in #2551. */
 .loop-diagram {
   width: 100%;
   height: auto;
@@ -397,14 +568,13 @@ a {
   text-anchor: end;
 }
 
-/* The drawing is the whole width of its column on a phone, where 400 user units
-   render at roughly 335 CSS px. Capping it on wide screens keeps the type from
-   ballooning past the hero copy beside it. */
-@media (min-width: 901px) {
-  .loop-diagram {
-    max-width: 30rem;
-    margin-left: auto;
-  }
+/* The whole width of the section on a phone, where 400 user units render at
+   roughly 350 CSS px. On wide screens it is capped and centred over the beats
+   rather than stretched to the section, which would set its labels larger than
+   the section's own headings. */
+.loop-figure {
+  margin: 0 auto;
+  max-width: 30rem;
 }
 
 /* ---------- sections ---------- */
@@ -467,33 +637,297 @@ a {
   font-size: 0.9rem;
 }
 
+/* Two columns at --maxw rather than four: cards 1 and 4 carry a second block
+   (the supported-agents paragraph, the Catalog chips), and four across left
+   them several times taller than the two cards between them. */
+.cards-why {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 24rem), 1fr));
+}
+
+.card .card-more {
+  margin-top: 0.9rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.875rem;
+}
+
+.chips {
+  margin: 0.6rem 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+/* An ID is one token, so it never breaks across lines; the list wraps between
+   chips instead. The longest ID is well under the width of a 390px phone. */
+.chips code {
+  display: inline-block;
+  padding: 0.1rem 0.55rem;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--fg);
+  font-size: 0.76rem;
+  white-space: nowrap;
+}
+
+/* Trust (#2554) */
+
+/* "Runs on your machine": the §14 lede, then a drawing of the machine and its
+   two standing connections, with the per-feature traffic as its footnote. The
+   drawing follows the inline-drawing rule above: every ink is a custom property.
+   Contrast, text on its fill, light / dark: --fg 15.80 / 16.02 and --fg-muted
+   6.11 / 6.50 on --bg (the lede, the footnote, the edge labels); --fg 14.02 /
+   12.20 on --accent-subtle ("Your machine"); --fg 15.80 / 14.65 and --fg-muted
+   6.11 / 5.94 on --surface (the node text, "tmux"); --fg 14.84 / 14.65 and
+   --fg-muted 5.74 / 5.94 on --bg-subtle (the agent CLI chip, the code span). */
+.trust-lede {
+  margin: 0;
+  max-width: 44rem;
+  color: var(--fg);
+  font-size: 1.05rem;
+}
+
+/* One column on a phone and a tablet, the footnote under the drawing; beside it
+   once the section is wide enough that the list does not wrap every line. */
+.trust-figure {
+  margin: 2rem 0 0;
+  display: grid;
+  gap: 1.5rem 2.5rem;
+  align-items: center;
+}
+
+@media (min-width: 901px) {
+  .trust-figure {
+    grid-template-columns: minmax(0, 28rem) minmax(0, 1fr);
+  }
+}
+
+.trust-diagram {
+  width: 100%;
+  max-width: 28rem;
+  height: auto;
+  margin: 0 auto;
+  display: block;
+}
+
+.trust-diagram text {
+  font-family: inherit;
+}
+
+.trust-diagram .machine-frame {
+  fill: var(--accent-subtle);
+  stroke: var(--accent);
+  stroke-width: 1.5;
+}
+
+.trust-diagram .machine-title {
+  fill: var(--fg);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.trust-diagram .chip {
+  fill: var(--surface);
+  stroke: var(--border);
+  stroke-width: 1.25;
+}
+
+.trust-diagram .tmux-frame {
+  fill: var(--surface);
+  stroke: var(--border);
+  stroke-width: 1.25;
+  stroke-dasharray: 4 3;
+}
+
+.trust-diagram .chip-inner {
+  fill: var(--bg-subtle);
+}
+
+.trust-diagram .tmux-title {
+  fill: var(--fg-muted);
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.trust-diagram .chip-title,
+.trust-diagram .peer-title {
+  fill: var(--fg);
+  font-size: 13px;
+  font-weight: 700;
+  text-anchor: middle;
+}
+
+.trust-diagram .chip-sub,
+.trust-diagram .peer-sub {
+  fill: var(--fg-muted);
+  font-size: 11px;
+  text-anchor: middle;
+}
+
+.trust-diagram .peer rect {
+  fill: var(--surface);
+  stroke: var(--border);
+  stroke-width: 1.5;
+}
+
+.trust-diagram .edge {
+  stroke: var(--fg-muted);
+  stroke-width: 1.5;
+  fill: none;
+}
+
+.trust-diagram .arrowhead {
+  fill: var(--fg-muted);
+}
+
+.trust-diagram .edge-label {
+  fill: var(--fg-muted);
+  font-size: 11px;
+  font-weight: 600;
+  text-anchor: middle;
+}
+
+.trust-notes {
+  color: var(--fg);
+  font-size: 0.94rem;
+}
+
+.trust-notes p {
+  margin: 0 0 0.6rem;
+}
+
+.trust-notes ul {
+  margin: 0;
+  padding-left: 1.25rem;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.trust-notes code {
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 0.1rem 0.35rem;
+}
+
+/* /Trust (#2554) */
+
+/* ---------- one agent leads ---------- */
+
+/* Four across once there is room for them, since the four steps are one run
+   read left to right; two by two, then one column, below that. */
+.lead-steps {
+  list-style: none;
+  counter-reset: lead-step;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 13.5rem), 1fr));
+  gap: 1rem;
+}
+
+.lead-steps > li {
+  counter-increment: lead-step;
+  padding: 1.25rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  min-width: 0;
+}
+
+/* The step names are the runner's phase names, so they are set as the tokens
+   they are rather than as title-case headings. */
+.lead-steps h3 {
+  margin: 0 0 0.5rem;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.lead-steps h3::before {
+  content: counter(lead-step);
+  display: inline-grid;
+  place-items: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  margin-right: 0.5rem;
+  vertical-align: 0.05rem;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif;
+  font-size: 0.78rem;
+}
+
+.lead-steps p {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: 0.92rem;
+}
+
+/* Full width rather than beside the review paragraph: the goal line is the
+   longest in the file, and at half of --maxw it would sit behind the snippet's
+   scrollbar on a desktop screen. On a phone it scrolls inside the snippet. */
+.lead-contract {
+  margin: 2rem 0 0;
+  min-width: 0;
+}
+
+.lead-contract .snippet {
+  margin: 0;
+}
+
+.lead-contract figcaption {
+  margin-top: 0.6rem;
+  color: var(--fg-muted);
+  font-size: 0.88rem;
+}
+
+.lead-review {
+  margin-top: 2rem;
+  max-width: 70ch;
+}
+
+.lead-review h3 {
+  margin: 0 0 0.5rem;
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+
+.lead-review p {
+  margin: 0;
+  color: var(--fg-muted);
+}
+
+.lead-review code {
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 0.05rem 0.3rem;
+  white-space: nowrap;
+}
+
 /* ---------- the loop ---------- */
 
-/* Two columns at --maxw, so the four beats land 2x2. A 17rem floor gave three
-   columns and left the fourth beat alone under a row whose height was set by
-   the two code snippets in beat 2 — a screenful of empty card. 22rem is also
-   what keeps `GATE work-evidence PASS (commits=0, uncommitted=1)` inside the
-   snippet box instead of behind its scrollbar. */
+/* The band's columns, frame and spacing, and the beat's fold, are in the
+   Compact 2 (#2555) block below. */
 .beats {
   list-style: none;
   counter-reset: beat;
-  margin: 2rem 0 0;
   padding: 0;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr));
-  gap: 1.25rem;
-  align-items: start;
 }
 
 .beats > li {
   counter-increment: beat;
-  padding: 1.5rem;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
   /* A grid item's automatic minimum is its content's min-content width, which a
      snippet line would set to the width of its longest command. Without this the
-     card stops scrolling its own code and widens the page instead. */
+     beat stops scrolling its own code and widens the page instead. */
   min-width: 0;
 }
 
@@ -518,9 +952,7 @@ a {
 }
 
 .beats p {
-  margin: 0.9rem 0 0;
   color: var(--fg-muted);
-  font-size: 0.94rem;
 }
 
 .beats h3 + p {
@@ -736,10 +1168,9 @@ a {
 
 /* ---------- feature demos ---------- */
 
+/* The columns are set in the Compact 2 (#2555) block below. */
 .demos {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr));
-  gap: 1.25rem;
   align-items: start;
 }
 
@@ -759,6 +1190,57 @@ a {
 .demo-lead figcaption {
   text-align: center;
   font-size: 0.9rem;
+}
+
+/* ---------- measured ---------- */
+
+/* The space under the block is set in the Compact 2 (#2555) block below. */
+
+.measured h3 {
+  margin: 0 0 0.75rem;
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+
+/* Four columns of short prose. Below this width the Result column wraps to a
+   word a line, so the table scrolls inside .table-scroll instead. Two classes
+   so it wins over `.compare-prose`, which is declared further down. */
+.compare-prose.measured-table {
+  min-width: 42rem;
+}
+
+/* Left to automatic layout, the Workers column took the width and the Result
+   column broke "8 min 39 s" across two lines. The Result column is the one the
+   table is read for, so it gets the most room. */
+.measured-table thead th:nth-child(1) {
+  width: 19%;
+}
+
+.measured-table thead th:nth-child(2) {
+  width: 13%;
+}
+
+.measured-table thead th:nth-child(3) {
+  width: 25%;
+}
+
+/* The Result column is what the row is for; the rest is who ran it. */
+.measured-table td:last-child {
+  color: var(--fg);
+}
+
+.measured-caption {
+  margin: 0.45rem 0 0;
+  color: var(--fg-muted);
+  font-size: 0.8rem;
+  font-style: italic;
+}
+
+.measured-scope {
+  margin: 0.9rem 0 0;
+  max-width: 70ch;
+  color: var(--fg-muted);
+  font-size: 0.94rem;
 }
 
 .demo video {
@@ -803,6 +1285,97 @@ a {
   max-width: 60ch;
 }
 
+/* FAQ (#2553) */
+
+/* One column the answers can be read in, not the whole section width. The
+   copy is public-messaging.md §13 verbatim, so nothing here styles wording. */
+.faq {
+  max-width: 48rem;
+  border-top: 1px solid var(--border);
+}
+
+.faq-item {
+  border-bottom: 1px solid var(--border);
+}
+
+/* Still a native <summary>, which is what makes it focusable and toggled by
+   Enter / Space; only its disclosure triangle is swapped for the chevron below,
+   hidden in both the standard and the WebKit form. */
+.faq-item > summary {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 0;
+  cursor: pointer;
+  list-style: none;
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+.faq-item > summary::-webkit-details-marker {
+  display: none;
+}
+
+.faq-item > summary:hover {
+  color: var(--accent);
+}
+
+/* The global focus ring lists a, button and [tabindex], none of which a
+   <summary> is. */
+.faq-item > summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.faq-item > summary::after {
+  content: "";
+  flex: none;
+  width: 0.55rem;
+  height: 0.55rem;
+  margin: 0.45rem 0.35rem 0 0;
+  border-right: 2px solid var(--fg-muted);
+  border-bottom: 2px solid var(--fg-muted);
+  transform: rotate(45deg);
+  transition: transform 0.15s ease;
+}
+
+.faq-item[open] > summary::after {
+  transform: translateY(0.25rem) rotate(-135deg);
+}
+
+.faq-item > p {
+  margin: 0 0 1.25rem;
+  max-width: 65ch;
+  color: var(--fg-muted);
+}
+
+.faq-item code {
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 0.05rem 0.3rem;
+  white-space: nowrap;
+}
+
+/* none rather than the page-wide 0.01ms: that rule shortens every transition,
+   this one removes them from the whole section, the chevron included. By the
+   section's id, since its class is the one every section shares. !important
+   because the page-wide rule carries it too; the higher specificity wins. */
+@media (prefers-reduced-motion: reduce) {
+  #faq,
+  #faq::before,
+  #faq::after,
+  #faq *,
+  #faq *::before,
+  #faq *::after {
+    transition: none !important;
+  }
+}
+
+/* /FAQ (#2553) */
+
 /* ---------- philosophy ---------- */
 
 .philosophy .definition {
@@ -818,28 +1391,15 @@ a {
 
 /* ---------- gallery ---------- */
 
+/* The columns are set in the Compact (#2555) block below. */
 .gallery {
-  /* 15rem rather than 13: it lands on four columns at --maxw, which is what
-     makes the two wide shots fill the first row and the three phone shots the
-     second, instead of leaving a wide shot orphaned on a row of its own. */
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
   gap: 1.25rem;
   align-items: start;
 }
 
 .shot {
   margin: 0;
-}
-
-.shot-wide {
-  grid-column: span 2;
-}
-
-@media (max-width: 700px) {
-  .shot-wide {
-    grid-column: span 1;
-  }
 }
 
 .shot img {
@@ -939,14 +1499,6 @@ a {
 
 /* ---------- pairing a phone ---------- */
 
-/* `.cards` carries no margin of its own: it only gets one from the
-   `.section > h2 + .cards` rule above, which does not match here because the
-   copyable command sits between the heading and the grid. Without this the
-   cards butt straight against that box. */
-.remote-cards {
-  margin-top: 2rem;
-}
-
 /* The trailing docs line lives outside `.note` on purpose. `.note` paints
    `--accent-subtle`, and the global link colour `--accent` measures 4.31:1
    against that tint in the light theme -- under the 4.5:1 body-text floor. On
@@ -958,8 +1510,89 @@ a {
   font-size: 0.9rem;
 }
 
+/* Compact (#2555) */
+
+/* Track B, folded into a native <details>. The <summary> keeps the card's <h3>;
+   only its disclosure triangle is swapped for a chevron, hidden in both the
+   standard and the WebKit form. No transition, so reduced motion has nothing
+   to switch off here. */
+.track-fold > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  cursor: pointer;
+  list-style: none;
+}
+
+.track-fold > summary::-webkit-details-marker {
+  display: none;
+}
+
+.track-fold > summary:hover {
+  color: var(--accent);
+}
+
+/* The global focus ring lists a, button and [tabindex], none of which a
+   <summary> is. */
+.track-fold > summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.track-fold > summary h3 {
+  margin: 0;
+}
+
+.track-fold > summary::after {
+  content: "";
+  flex: none;
+  width: 0.55rem;
+  height: 0.55rem;
+  margin: 0 0.35rem 0.25rem 0;
+  border-right: 2px solid var(--fg-muted);
+  border-bottom: 2px solid var(--fg-muted);
+  transform: rotate(45deg);
+}
+
+.track-fold[open] > summary::after {
+  margin: 0.25rem 0.35rem 0 0;
+  transform: rotate(-135deg);
+}
+
+/* Where the heading's own bottom margin used to be. */
+.track-fold > .track-lede {
+  margin-top: 0.5rem;
+}
+
+/* The gallery is four shots, two wide and two phones. Below 901px each wide
+   shot takes a row and the phones share one, in a column capped so that a
+   phone shot stays shorter than the screen it is read on. From 901px all four
+   share a row: six tracks, two per wide shot and one per phone, so the phones
+   stand taller than the wide shots instead of shrinking to slivers beside them. */
+.gallery {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  max-width: 40rem;
+}
+
+.shot-wide {
+  grid-column: span 2;
+}
+
+@media (min-width: 901px) {
+  .gallery {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    max-width: none;
+  }
+}
+
+/* /Compact (#2555) */
+
 /* ---------- closing ---------- */
 
+/* The head of the Philosophy section since #2555; the two halves are laid out
+   in the Compact 2 block below. */
 .closing {
   text-align: center;
 }
@@ -992,10 +1625,25 @@ a {
   font-size: 0.9rem;
 }
 
+.footer-groups {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.25rem 3rem;
+}
+
+.footer-heading {
+  margin: 0 0 0.4rem;
+  color: var(--fg);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 .footer-links {
   display: flex;
   flex-wrap: wrap;
-  gap: 1.25rem;
+  gap: 0.35rem 1.25rem;
   font-size: 0.9rem;
 }
 
@@ -1025,3 +1673,239 @@ a {
   color: var(--fg-muted);
   font-size: 0.82rem;
 }
+
+/* Compact 2 (#2555) */
+
+/* The second pass at the page height (#2555): The loop's beats as one band
+   with their code folded, the four feature demos two by two, the Catalog IDs
+   folded under their label, and the closing call to action sharing a section
+   with Philosophy. Nothing here transitions or animates, so reduced motion has
+   nothing to switch off. */
+
+/* The loop drawing's viewBox keeps 18 units of air above and below its nodes.
+   Drawn at 22rem here, and at a phone's width, that is a rem, so the margins
+   hand it back rather than stacking it on the gaps around the figure. */
+.loop-figure {
+  margin-block: -1rem;
+}
+
+/* From 901px The loop opens with its heading and lede beside the drawing, as
+   the hero does, instead of above a drawing centred on a row of its own. 22rem
+   is the width the drawing already has on a phone. */
+@media (min-width: 901px) {
+  #loop {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 22rem);
+    grid-template-rows: auto 1fr;
+    column-gap: 3rem;
+  }
+
+  #loop > h2,
+  #loop > .section-lede {
+    grid-column: 1;
+  }
+
+  #loop > .loop-figure {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    max-width: none;
+    margin: -1rem 0;
+  }
+
+  #loop > .beats {
+    grid-column: 1 / -1;
+  }
+}
+
+/* One band, one frame. From 901px the four beats share a row, read left to
+   right as the turn runs; below that they stack inside the same frame. A beat
+   has no card of its own, only the rule between it and the one before. */
+.beats {
+  margin: 1.5rem 0 0;
+  grid-template-columns: minmax(0, 1fr);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.beats > li {
+  padding: 1rem 1.1rem;
+}
+
+.beats > li + li {
+  border-top: 1px solid var(--border);
+}
+
+.beats p {
+  margin: 0.6rem 0 0;
+  font-size: 0.92rem;
+}
+
+@media (min-width: 901px) {
+  .beats {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .beats > li + li {
+    border-top: 0;
+    border-left: 1px solid var(--border);
+  }
+}
+
+/* The two folds added here, a beat's code and the Catalog IDs, open on a
+   native <summary>, so Enter / Space toggle them; only the disclosure triangle
+   is swapped for a chevron, in both the standard and the WebKit form. */
+.beat-fold > summary,
+.catalog-fold > summary {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  width: fit-content;
+  max-width: 100%;
+  cursor: pointer;
+  list-style: none;
+}
+
+.beat-fold > summary::-webkit-details-marker,
+.catalog-fold > summary::-webkit-details-marker {
+  display: none;
+}
+
+/* The global focus ring lists a, button and [tabindex], none of which a
+   <summary> is. */
+.beat-fold > summary:focus-visible,
+.catalog-fold > summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.beat-fold > summary::after,
+.catalog-fold > summary::after {
+  content: "";
+  flex: none;
+  width: 0.45rem;
+  height: 0.45rem;
+  margin: 0 0.1rem 0.2rem 0;
+  border-right: 2px solid var(--fg-muted);
+  border-bottom: 2px solid var(--fg-muted);
+  transform: rotate(45deg);
+}
+
+.beat-fold[open] > summary::after,
+.catalog-fold[open] > summary::after {
+  margin: 0.2rem 0.1rem 0 0;
+  transform: rotate(-135deg);
+}
+
+/* A beat's fold is named by the artifact in it, set as the token it is. */
+.beat-fold {
+  margin-top: 0.75rem;
+}
+
+.beat-fold > summary {
+  padding: 0.25rem 0.65rem;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--fg);
+  font-size: 0.78rem;
+}
+
+.beat-fold > summary:focus-visible {
+  border-radius: 999px;
+}
+
+.beat-fold > summary:hover {
+  border-color: var(--fg-muted);
+}
+
+.beat-fold > summary code {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.beat-fold > .snippet-label {
+  margin-top: 0.75rem;
+}
+
+/* The Catalog label keeps the look it had as a paragraph. */
+.catalog-fold > summary {
+  color: var(--fg-muted);
+}
+
+.catalog-fold > summary:hover {
+  color: var(--accent);
+}
+
+.catalog-fold > .chips {
+  margin-top: 0.75rem;
+}
+
+/* The four feature demos, two by two. On a phone each caption sits under its
+   demo; from 901px beside it, which keeps the pair of rows shorter than one
+   row of demos was when each had half the section to itself. */
+.measured {
+  margin: 0 0 2rem;
+}
+
+.demos {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem 0.75rem;
+}
+
+.demos .demo figcaption {
+  font-size: 0.8rem;
+}
+
+@media (min-width: 901px) {
+  .demos {
+    column-gap: 1.5rem;
+  }
+
+  .demos .demo {
+    display: grid;
+    grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+    gap: 0.9rem;
+    align-items: center;
+  }
+
+  .demos .demo figcaption {
+    margin-top: 0;
+  }
+}
+
+/* The closing call to action, then Philosophy, in one section: one under the
+   other on a phone and a tablet, beside each other from 901px. The footnote
+   under the creed sits closer than it did at the foot of a section of its own. */
+.philosophy-body {
+  margin-top: 2rem;
+  padding-top: 2rem;
+  border-top: 1px solid var(--border);
+}
+
+.philosophy-body .attribution {
+  margin-top: 1rem;
+  padding-top: 1rem;
+}
+
+@media (min-width: 901px) {
+  .philosophy {
+    display: grid;
+    grid-template-columns: minmax(0, 24rem) minmax(0, 1fr);
+    align-items: center;
+  }
+
+  .closing {
+    padding-right: 3rem;
+  }
+
+  .philosophy-body {
+    margin-top: 0;
+    padding: 0 0 0 3rem;
+    border-top: 0;
+    border-left: 1px solid var(--border);
+  }
+}
+
+/* /Compact 2 (#2555) */

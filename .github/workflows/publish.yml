@@ -58,7 +58,30 @@ jobs:
     # for "20分程度" on the grounds that no measurement existed. It does exist,
     # and 20 is only 1.25x the observed max — close enough to cut a healthy
     # release. The measurement wins.
-    timeout-minutes: 30
+    #
+    # [Issue #2560] Re-measured 2026-09-13 after the 30 cut the v0.36.1 run
+    # twice (run 34756211104: job 30.3m / 30.2m, `Run tests` 25.6m / 25.2m).
+    # Attempt 1 died inside `prepublishOnly`'s build, before any upload. Attempt 2
+    # died ONE SECOND after `npm publish` had signed provenance — and the
+    # registry had accepted the tarball: 0.36.1 appeared ~6 minutes later with
+    # the same shasum and provenance naming attempt 2. So a `cancelled` publish
+    # job is NOT proof that nothing was published; check `npm view` (allow for
+    # the propagation delay) and the attestation before re-running or re-tagging.
+    # That ambiguity is the #1830 concern, and running near the cap makes it
+    # likely. The 10 most recent successful runs, same command as above:
+    #
+    #   publish   n=10   median 26.3m   max 29.8m
+    #   (17.9 25.6 26.0 26.1 26.2 26.4 27.3 27.3 29.5 29.8)
+    #
+    # `Run tests` alone is now 21.7m median / 25.0m max — about twice the sample
+    # above, which is what put a healthy job on the old cap.
+    #
+    # 60 = `max x 2`, the same policy re-applied. Raising the cap is the release
+    # recovery, not the fix for that growth: this job runs the full `test:unit`
+    # on a tree the main-push CI has already run it on, and builds twice (the
+    # three build steps below, then `prepublishOnly`). Shortening that is a
+    # follow-up of #2560, not part of it.
+    timeout-minutes: 60
     steps:
       # [self-hosted] Toolchain and OIDC preflight, deliberately the FIRST step of
       # the only job that can publish. On a GitHub-hosted image node/npm/git are

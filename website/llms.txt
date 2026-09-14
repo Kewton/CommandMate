@@ -1,0 +1,28 @@
+# CommandMate — One agent leads. Gates decide what's done.
+
+> CommandMate gives your lead agent the machinery to run the others: one Git worktree and one contract per task, gates that decide what is done, and a record of every run. Claude Code, Codex, Antigravity, Command Code, OpenCode, Gemini CLI, Copilot and local models. You approve; you don't relay.
+
+Open source (MIT) · runs on your machine · macOS / Linux / Windows (WSL2) · no app to install
+
+Status: Beta. Start in one command: `npx commandmate@latest`. From install to your first session in 60 seconds. Node.js v22+ · npm · git · tmux
+
+What it gives you:
+
+- **One agent leads**: One message to your lead session; it hands each task to a worker in its own worktree under a contract, and only what passes the gates comes back. Measured with Claude Code and Command Code as the lead.
+- **Verified, not vibe-checked**: Gates you declared decide whether the work is done, and the exit code is the verdict. The agent's summary is not the evidence; the run is.
+- **Know which one needs you**: Waiting is a state read from the agent's hooks, not a guess from the screen. It reaches you as a badge, a toast, the tab title, a push, and you answer from your phone.
+- **Method as a system**: The method is not in someone's head. It is installed as Skills and read by the agent.
+
+## Docs
+
+- [Documentation](https://github.com/Kewton/CommandMate/tree/main/docs/en): the English docs
+- [Tutorial](https://github.com/Kewton/CommandMate/blob/main/docs/en/user-guide/tutorial.md): Use a sample repository with two bugs left in on purpose to work through the core of CommandMate in about fifteen minutes.
+- [Setup guide](https://github.com/Kewton/CommandMate/blob/main/docs/en/user-guide/cli-setup-guide.md): install it for daily use
+- [CLI operations guide](https://github.com/Kewton/CommandMate/blob/main/docs/en/user-guide/cli-operations-guide.md): every flag and every exit code
+
+## Project
+
+- [GitHub](https://github.com/Kewton/CommandMate): source code and issues
+- [Releases](https://github.com/Kewton/CommandMate/releases): the changelog, one release at a time
+- [Discussions](https://github.com/Kewton/CommandMate/discussions)
+- [npm](https://www.npmjs.com/package/commandmate)

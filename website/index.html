@@ -36,6 +36,11 @@
     <meta property="og:image" content="https://kewton.github.io/CommandMate/assets/img/screenshot-desktop.webp" />
     <meta name="twitter:card" content="summary_large_image" />
 
+    <!-- Releases as a feed, for a reader who wants to hear about the next one
+         without watching the repository (Issue #2552). GitHub publishes it; the
+         page only points at it. -->
+    <link rel="alternate" type="application/atom+xml" href="https://github.com/Kewton/CommandMate/releases.atom" title="CommandMate releases" />
+
     <link rel="stylesheet" href="styles.css" />
   </head>
 
@@ -45,10 +50,14 @@
     <header class="site-header">
       <nav class="nav" aria-label="Primary">
         <span class="wordmark">CommandMate</span>
+        <!-- Where a visitor goes next, rather than where this page scrolls
+             (Issue #2552): the in-page anchors that used to sit here are in the
+             footer now. On a phone only Docs and GitHub stay; .nav-secondary is
+             what the narrow-screen rule in styles.css hides. -->
         <div class="nav-links">
-          <a href="#loop">The loop</a>
-          <a href="#quick-start">Quick start</a>
-          <a href="#with-without">With / Without</a>
+          <a href="https://github.com/Kewton/CommandMate/tree/main/docs/en">Docs</a>
+          <a class="nav-secondary" href="https://github.com/Kewton/CommandMate/blob/main/docs/en/user-guide/tutorial.md">Tutorial</a>
+          <a class="nav-secondary" href="https://github.com/Kewton/CommandMate/releases">Changelog</a>
           <a href="https://github.com/Kewton/CommandMate">GitHub</a>
         </div>
       </nav>
@@ -80,6 +89,13 @@
           <p class="prereq">
             From install to your first session in 60 seconds. Node.js v22+ · npm · git · tmux
           </p>
+          <!-- Static on purpose: no API call at page load (Issue #2552). The
+               release skill rewrites this one line in Phase 2-2a
+               (.claude/skills/release/SKILL.md), and a test pins the version to
+               package.json and the date to that version's CHANGELOG heading. The
+               count is a floor, rounded down to ten:
+               gh api repos/Kewton/CommandMate/releases --paginate --jq '.[].tag_name' | wc -l -->
+          <p class="release-line">v0.37.0 · released 2026-09-14 · 130+ releases</p>
 
           <div class="cta-row">
             <a class="btn btn-primary" href="https://github.com/Kewton/CommandMate">View on GitHub</a>
@@ -88,13 +104,348 @@
         </div>
 
         <figure class="hero-media">
-          <!-- The loop this page is about, drawn rather than asserted. Inline
-               so it inherits the page's own custom properties: every colour in
-               it is a CSS variable (see .loop-diagram in styles.css), which is
-               what makes it follow prefers-color-scheme instead of being legible
-               in one theme and invisible in the other. viewBox + width/height
-               reserve the box before layout, and role/aria-label make it one
-               image to a screen reader rather than a pile of stray labels. -->
+          <!-- The product on first view, and what "gate" means on this page
+               (Issue #2551). Elsewhere "gate" is used for a question an agent
+               stops to ask a person; here it is a command you declared, and its
+               exit code. So the drawing puts the session list — where a person
+               is asked — above the gate lines, which answer with a number.
+               The gate lines copy the shape `commandmate wait --verify` prints
+               (GATE <id> PASS, RESULT passed; src/cli/utils/verify-runner.ts).
+               Inline so it inherits the page's own custom properties: every
+               colour in it is a CSS variable (see .hero-mock in styles.css), so
+               it follows prefers-color-scheme instead of being legible in one
+               theme and invisible in the other. viewBox + width/height reserve
+               the box before layout, and role/aria-label make it one image to a
+               screen reader rather than a pile of stray labels. -->
+          <svg
+            class="hero-mock"
+            viewBox="0 0 360 370"
+            width="360"
+            height="370"
+            role="img"
+            aria-label="A CommandMate session list with four worktree sessions: two agents working, one done, and one marked needs you. Under it, commandmate wait --verify runs the gates for the finished session and prints GATE work-evidence PASS, GATE unit PASS (exit=0) and RESULT passed, then echo $? prints 0: the exit code is the verdict."
+          >
+            <rect class="frame" x="1" y="1" width="358" height="368" rx="12" />
+            <text class="mock-heading" x="18" y="29">Sessions</text>
+
+            <g class="session session-working">
+              <line class="rule" x1="1" y1="46" x2="359" y2="46" />
+              <circle class="dot" cx="24" cy="69" r="4.5" />
+              <text class="session-name" x="38" y="65">wt-retry</text>
+              <text class="session-agent" x="38" y="81">Claude Code</text>
+              <rect class="pill" x="262" y="58" width="82" height="22" rx="11" />
+              <text class="pill-label" x="303" y="73">working</text>
+            </g>
+
+            <g class="session session-done">
+              <line class="rule" x1="1" y1="92" x2="359" y2="92" />
+              <circle class="dot" cx="24" cy="115" r="4.5" />
+              <text class="session-name" x="38" y="111">wt-pick</text>
+              <text class="session-agent" x="38" y="127">Codex</text>
+              <rect class="pill" x="262" y="104" width="82" height="22" rx="11" />
+              <text class="pill-label" x="303" y="119">done</text>
+            </g>
+
+            <g class="session session-needs">
+              <rect class="band" x="1" y="138" width="358" height="46" />
+              <line class="rule" x1="1" y1="138" x2="359" y2="138" />
+              <circle class="dot" cx="24" cy="161" r="4.5" />
+              <text class="session-name" x="38" y="157">wt-auth</text>
+              <text class="session-agent" x="38" y="173">Antigravity</text>
+              <rect class="pill" x="262" y="150" width="82" height="22" rx="11" />
+              <text class="pill-label" x="303" y="165">needs you</text>
+            </g>
+
+            <g class="session session-working">
+              <line class="rule" x1="1" y1="184" x2="359" y2="184" />
+              <circle class="dot" cx="24" cy="207" r="4.5" />
+              <text class="session-name" x="38" y="203">wt-docs</text>
+              <text class="session-agent" x="38" y="219">Command Code</text>
+              <rect class="pill" x="262" y="196" width="82" height="22" rx="11" />
+              <text class="pill-label" x="303" y="211">working</text>
+              <line class="rule" x1="1" y1="230" x2="359" y2="230" />
+            </g>
+
+            <rect class="terminal" x="12" y="242" width="336" height="112" rx="8" />
+            <text class="term" x="26" y="263"><tspan class="term-prompt">$</tspan> commandmate wait wt-pick --verify</text>
+            <text class="term" x="26" y="278">GATE work-evidence PASS</text>
+            <text class="term" x="26" y="293">GATE unit PASS (exit=0)</text>
+            <text class="term term-strong" x="26" y="308">RESULT passed</text>
+            <text class="term" x="26" y="323"><tspan class="term-prompt">$</tspan> echo $?</text>
+            <text class="term term-strong" x="26" y="338">0</text>
+            <line class="pointer" x1="50" y1="334" x2="70" y2="334" />
+            <polygon class="pointer-head" points="41,334 50,329.5 50,338.5" />
+            <text class="term-note" x="78" y="338">the exit code is the verdict</text>
+          </svg>
+        </figure>
+      </section>
+
+      <!-- 2. The problem, in the reader's words rather than ours. It sits between
+           the hero and everything the product does, because a reader who does not
+           recognise their own week here has no reason to read the rest
+           (docs/design/public-messaging.md §1b). -->
+      <section class="section" id="problem" aria-labelledby="problem-h">
+        <h2 id="problem-h">More agents, same you</h2>
+        <ul class="problem-points">
+          <li>The agents are parallel. You are still single-threaded.</li>
+          <li>From the outside, an idle agent and one waiting on you look the same.</li>
+          <li>The agent's summary of what it did is not evidence of what it did.</li>
+          <li>Nobody can safely merge a PR that nobody understands.</li>
+        </ul>
+        <p class="note">
+          CommandMate puts the machinery around the CLIs you already run: a lead that hands out
+          contracts, session state read from the agents' own hooks, gates after the work, and the
+          record in between.
+        </p>
+      </section>
+
+      <!-- 3. See it running -->
+      <section class="section" id="demos" aria-labelledby="demos-h">
+        <h2 id="demos-h">See it running</h2>
+        <p class="section-lede">
+          The first is one real run, start to finish. The four under it are twenty seconds each,
+          recorded against a throwaway repository with a stubbed agent — except the gates in the
+          first of those four, which are executed for real, so the exit codes on screen are the
+          ones that run produced.
+        </p>
+
+        <figure class="demo demo-lead">
+          <video
+            src="assets/media/orchestrate-run.mp4"
+            poster="assets/media/poster-orchestrate-run.webp"
+            data-autoplay
+            muted
+            loop
+            playsinline
+            preload="none"
+            width="1080"
+            height="1080"
+            aria-label="One message sent to a Command Code session, four issues dispatched to four workers in their own worktrees, a worker terminal writing tests, and a closing phase-by-issue matrix in which all four pass dispatch, merge and UAT"
+          ></video>
+          <figcaption>
+            One message to Command Code. Four issues, four workers, 4/4 gates, then UAT.
+          </figcaption>
+        </figure>
+
+        <!-- Measured, copied cell for cell from docs/design/public-messaging.md §3b
+             (Issue #2550). It sits under the recorded run because that run is one
+             of its rows. §3b's rule is that "as observed" goes directly under the
+             table and the table is never shown without it; the paragraph after
+             that is §3e-4, which says how far the lead column reaches. A test
+             compares every cell with §3b, so a number changes there first. -->
+        <div class="measured">
+          <h3 id="measured-h">Measured</h3>
+          <div class="table-scroll" tabindex="0" role="region" aria-labelledby="measured-h">
+            <table class="compare compare-prose measured-table">
+              <thead>
+                <tr>
+                  <th scope="col">Run</th>
+                  <th scope="col">Lead</th>
+                  <th scope="col">Workers</th>
+                  <th scope="col">Result</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <th scope="row">4 issues, one message</th>
+                  <td>Claude Code</td>
+                  <td>4 × Claude Code</td>
+                  <td>4/4 gates passed, 2 waves, PRs merged, UAT go, 8 min 39 s</td>
+                </tr>
+                <tr>
+                  <th scope="row">4 issues, one message</th>
+                  <td>Command Code</td>
+                  <td>4 × Command Code</td>
+                  <td>4/4 gates passed, 7 min 46 s; then a human pulled develop: 47/47 tests</td>
+                </tr>
+                <tr>
+                  <th scope="row">1 issue, with a review step</th>
+                  <td>Command Code</td>
+                  <td>Codex builds, Claude Code tests, Antigravity reviews</td>
+                  <td>Review REJECT → fix → APPROVE, RESULT passed</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="measured-caption">as observed</p>
+          <p class="measured-scope">
+            The lead is a session like any other: today it has been measured with Claude Code and
+            Command Code. Any of the eight agents can take the work. It is a run, not a resident
+            agent: it starts on your message and ends with a report.
+          </p>
+        </div>
+
+        <div class="demos">
+          <figure class="demo">
+            <video
+              src="assets/media/contract-verify.mp4"
+              poster="assets/media/poster-contract-verify.webp"
+              data-autoplay
+              muted
+              loop
+              playsinline
+              preload="none"
+              width="1280"
+              height="800"
+              aria-label="A task contract and a verify.yaml, then a terminal running the gates and printing RESULT passed"
+            ></video>
+            <figcaption>
+              Hand the agent a contract before the work starts. Gates run, and the exit code is
+              the verdict.
+            </figcaption>
+          </figure>
+          <figure class="demo">
+            <video
+              src="assets/media/install-skill.mp4"
+              poster="assets/media/poster-install-skill.webp"
+              data-autoplay
+              muted
+              loop
+              playsinline
+              preload="none"
+              width="1280"
+              height="800"
+              aria-label="Installing a Skill from the official Catalog into a worktree, then calling it from the composer"
+            ></video>
+            <figcaption>
+              The method is not in someone's head. It is installed as Skills and read by the
+              agent.
+            </figcaption>
+          </figure>
+          <figure class="demo">
+            <video
+              src="assets/media/parallel-worktrees.mp4"
+              poster="assets/media/poster-parallel-worktrees.webp"
+              data-autoplay
+              muted
+              loop
+              playsinline
+              preload="none"
+              width="1280"
+              height="800"
+              aria-label="One session per git worktree, several branches running in parallel"
+            ></video>
+            <figcaption>One session per worktree, running in parallel.</figcaption>
+          </figure>
+          <figure class="demo">
+            <video
+              src="assets/media/never-miss-waiting.mp4"
+              poster="assets/media/poster-never-miss-waiting.webp"
+              data-autoplay
+              muted
+              loop
+              playsinline
+              preload="none"
+              width="1280"
+              height="800"
+              aria-label="A session that stops for confirmation raises a needs-attention pill and a toast, and is answered from a phone"
+            ></video>
+            <figcaption>Waiting reaches you, and you answer from your phone.</figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <!-- One agent leads. The H1 names a lead, and until Issue #2550 the only
+           places the page showed a lead running anything were the recording above
+           and card 1. Every sentence here is copied from
+           docs/design/public-messaging.md §3e: the lede is §3e-2, the four steps
+           and the note under them §3e-1, the contract and its caption §3e-3, and
+           the review paragraph §3e-5 — copied whole, because its last sentence is
+           what keeps the review a step you add rather than one the runner takes
+           (§4b). -->
+      <section class="section" id="lead" aria-labelledby="lead-h">
+        <h2 id="lead-h">One agent leads</h2>
+        <p class="section-lede">
+          One message to your lead session. It plans the issues — dependencies, file conflicts,
+          waves — and hands each one to a worker in its own worktree under a contract. Gates decide
+          which work comes back. Only what passed becomes a PR, gets merged, and goes through
+          acceptance. Nothing mutates without an explicit approve, and a failed gate stops the run.
+        </p>
+
+        <!-- §3e-1 writes each step as "name — what it does". The name is the
+             heading here and the rest is the paragraph under it; the test joins
+             the two back with the dash and compares the result with §3e-1. -->
+        <ol class="lead-steps">
+          <li>
+            <h3>plan</h3>
+            <p>
+              a dry run. It resolves the issues' dependencies and file conflicts into waves, and
+              changes nothing.
+            </p>
+          </li>
+          <li>
+            <h3>dispatch</h3>
+            <p>
+              once you approve the plan, each issue goes to a worker in its own worktree under a
+              contract, one wave at a time, and the gates judge every one.
+            </p>
+          </li>
+          <li>
+            <h3>merge</h3>
+            <p>only the issues whose gates passed become PRs and get merged.</p>
+          </li>
+          <li>
+            <h3>uat</h3>
+            <p>acceptance is checked, with a capped number of fix attempts when it fails.</p>
+          </li>
+        </ol>
+        <p class="note">
+          Each step is its own invocation, and none of them starts the next. Nothing mutates
+          without <code>--approve</code>, and a failed gate stops the run.
+        </p>
+
+        <figure class="lead-contract">
+          <pre class="snippet"><code># .commandmate/tasks/issue-21.yaml
+version: 1
+title: "Issue #21: pick(obj, keys)"
+goal: |
+  Implement pick(obj, keys) in src/util/pick.js with node:test cases in tests/pick.test.mjs.
+  Run npm test, then commit.
+scope:
+  allow:
+    - "src/util/pick.js"
+    - "tests/pick.test.mjs"
+verify:
+  gates: [unit]</code></pre>
+          <figcaption>
+            The scope gate and the work-evidence gate are built in and run on every contract; you
+            declare only the gates that need your project's commands.
+          </figcaption>
+        </figure>
+
+        <div class="lead-review">
+          <h3>Review by another agent</h3>
+          <p>
+            A session can hand its work to another session for review —
+            <code>commandmate ask</code>, or the <code>cmate-delegate</code> Skill — and the answer
+            comes back to the lead. In the measured run, Command Code led, Codex built, Claude Code
+            wrote the tests, and Antigravity rejected the first version before approving the fix.
+            This is a step you add; the orchestrate runner does not run a cross-model review for
+            you.
+          </p>
+        </div>
+      </section>
+
+      <!-- 4. The loop, as one worker's turn inside the lead's run above (Issue
+           #2550). The lede is docs/design/public-messaging.md §3e-6. The four
+           beats stay, each cut to one sentence and one artifact: the contract as a
+           whole is shown in the section above, so this one keeps only the task
+           file that the send command below names. -->
+      <section class="section" id="loop" aria-labelledby="loop-h">
+        <h2 id="loop-h">The loop</h2>
+        <p class="section-lede">
+          One worker's turn, up close. Every task the lead hands out goes through the same four
+          beats — the requirement, the contract, the agent's run, the verdict — and so does a task
+          you send yourself.
+        </p>
+
+        <!-- The cycle the four beats below walk through, drawn. It opened the
+             page until Issue #2551 gave the hero to the session mock, and it
+             moved here rather than out: this is the section it is a picture of.
+             Inline for the same reason as the hero drawing — every colour in it
+             is a CSS variable, so it follows prefers-color-scheme — and labelled
+             as one image, with its box reserved by viewBox + width/height. -->
+        <figure class="loop-figure">
           <svg
             class="loop-diagram"
             viewBox="0 0 400 300"
@@ -144,139 +495,21 @@
             <text class="edge-label label-start" x="91" y="153">evidence</text>
           </svg>
         </figure>
-      </section>
 
-      <!-- 2. The problem, in the reader's words rather than ours. It sits between
-           the hero and everything the product does, because a reader who does not
-           recognise their own week here has no reason to read the rest
-           (docs/design/public-messaging.md §1b). -->
-      <section class="section" id="problem" aria-labelledby="problem-h">
-        <h2 id="problem-h">More agents, same you</h2>
-        <ul class="problem-points">
-          <li>The agents are parallel. You are still single-threaded.</li>
-          <li>From the outside, an idle agent and one waiting on you look the same.</li>
-          <li>The agent's summary of what it did is not evidence of what it did.</li>
-          <li>Nobody can safely merge a PR that nobody understands.</li>
-        </ul>
-        <p class="note">
-          CommandMate puts the machinery around the CLIs you already run: a lead that hands out
-          contracts, session state read from the agents' own hooks, gates after the work, and the
-          record in between.
-        </p>
-      </section>
-
-      <!-- 3. See it running -->
-      <section class="section" id="demos" aria-labelledby="demos-h">
-        <h2 id="demos-h">See it running</h2>
-        <p class="section-lede">
-          The first is one real run, start to finish. The four under it are twenty seconds each,
-          recorded against a throwaway repository with a stubbed agent — except the gates in the
-          first of those four, which are executed for real, so the exit codes on screen are the
-          ones that run produced.
-        </p>
-
-        <figure class="demo demo-lead">
-          <video
-            src="assets/media/orchestrate-run.mp4"
-            poster="assets/media/poster-orchestrate-run.webp"
-            autoplay
-            muted
-            loop
-            playsinline
-            preload="none"
-            width="1080"
-            height="1080"
-            aria-label="One message sent to a Command Code session, four issues dispatched to four workers in their own worktrees, a worker terminal writing tests, and a closing phase-by-issue matrix in which all four pass dispatch, merge and UAT"
-          ></video>
-          <figcaption>
-            One message to Command Code. Four issues, four workers, 4/4 gates, then UAT.
-          </figcaption>
-        </figure>
-
-        <div class="demos">
-          <figure class="demo">
-            <video
-              src="assets/media/contract-verify.mp4"
-              poster="assets/media/poster-contract-verify.webp"
-              autoplay
-              muted
-              loop
-              playsinline
-              preload="none"
-              width="1280"
-              height="800"
-              aria-label="A task contract and a verify.yaml, then a terminal running the gates and printing RESULT passed"
-            ></video>
-            <figcaption>
-              Hand the agent a contract before the work starts. Gates run, and the exit code is
-              the verdict.
-            </figcaption>
-          </figure>
-          <figure class="demo">
-            <video
-              src="assets/media/install-skill.mp4"
-              poster="assets/media/poster-install-skill.webp"
-              autoplay
-              muted
-              loop
-              playsinline
-              preload="none"
-              width="1280"
-              height="800"
-              aria-label="Installing a Skill from the official Catalog into a worktree, then calling it from the composer"
-            ></video>
-            <figcaption>
-              The method is not in someone's head. It is installed as Skills and read by the
-              agent.
-            </figcaption>
-          </figure>
-          <figure class="demo">
-            <video
-              src="assets/media/parallel-worktrees.mp4"
-              poster="assets/media/poster-parallel-worktrees.webp"
-              autoplay
-              muted
-              loop
-              playsinline
-              preload="none"
-              width="1280"
-              height="800"
-              aria-label="One session per git worktree, several branches running in parallel"
-            ></video>
-            <figcaption>One session per worktree, running in parallel.</figcaption>
-          </figure>
-          <figure class="demo">
-            <video
-              src="assets/media/never-miss-waiting.mp4"
-              poster="assets/media/poster-never-miss-waiting.webp"
-              autoplay
-              muted
-              loop
-              playsinline
-              preload="none"
-              width="1280"
-              height="800"
-              aria-label="A session that stops for confirmation raises a needs-attention pill and a toast, and is answered from a phone"
-            ></video>
-            <figcaption>Waiting reaches you, and you answer from your phone.</figcaption>
-          </figure>
-        </div>
-      </section>
-
-      <!-- 4. The loop -->
-      <section class="section" id="loop" aria-labelledby="loop-h">
-        <h2 id="loop-h">The loop</h2>
-        <p class="section-lede">
-          Four beats, and the same four every time. What makes the result reliable is the loop,
-          not how much software engineering the person driving it happens to carry in their head.
-        </p>
-
+        <!-- One band since Issue #2555: four across on a wide screen, stacked on a
+             phone. Each beat keeps its sentence in view and folds its code, which
+             the page already shows elsewhere — a whole contract under One agent
+             leads, gate lines in the hero. Each fold is named by the artifact it
+             holds, in words the page already carries: the task file, the send
+             command, and `commandmate wait --verify` as the FAQ writes it. The
+             snippets inside are unchanged. Native <details>, so Enter / Space
+             open a fold with no script. -->
         <ol class="beats">
           <li class="beat">
             <h3>The requirement</h3>
             <p>
               It starts where every task starts: one sentence describing what should be true when
-              this is done. Nothing about the agent, the branch or the tooling yet.
+              this is done.
             </p>
             <p class="beat-quote">
               “<code>shout()</code> should return the greeting uppercased.
@@ -288,17 +521,12 @@
             <h3>The contract</h3>
             <p>
               Before the work starts, the sentence is written down as a contract: what may be
-              touched, and which gates decide that it is finished. Two files, both in the
-              repository, both readable by a human.
+              touched, and which gates decide that it is finished.
             </p>
-            <p class="snippet-label">.commandmate/verify.yaml</p>
-            <pre class="snippet"><code>version: 1
-gates:
-  - id: unit
-    command: npm test
-    timeoutSec: 120</code></pre>
-            <p class="snippet-label">.commandmate/tasks/fix-shout.yaml</p>
-            <pre class="snippet"><code>title: "shout() uppercases the greeting"
+            <details class="beat-fold">
+              <summary><code>fix-shout.yaml</code></summary>
+              <p class="snippet-label">.commandmate/tasks/fix-shout.yaml</p>
+              <pre class="snippet"><code>title: "shout() uppercases the greeting"
 scope:
   allow: ["src/greet.js"]
   deny: ["test/**", ".commandmate/**"]
@@ -307,19 +535,22 @@ verify:
 success:
   requireWorkEvidence: true
   requireScopeClean: true</code></pre>
+            </details>
           </li>
 
           <li class="beat">
             <h3>The agent runs</h3>
             <p>
               The contract is handed to whichever coding agent you want to use, in a Git worktree
-              of its own. Several tasks can run at once because none of them shares a working
-              directory, and you can watch any of them from a browser.
+              of its own.
             </p>
-            <pre class="snippet"><code>$ commandmate send wt-shout \
+            <details class="beat-fold">
+              <summary><code>commandmate send</code></summary>
+              <pre class="snippet"><code>$ commandmate send wt-shout \
     --contract .commandmate/tasks/fix-shout.yaml >task-id.txt
 Task created: 4d1f8b2a-6c07-4a5e-9f3b-27ac91e0d4c8
 Message sent.</code></pre>
+            </details>
           </li>
 
           <li class="beat">
@@ -327,15 +558,18 @@ Message sent.</code></pre>
             <p>
               When the agent stops, the gates you declared run for real and the process exit code
               is the answer — <code>0</code> passed, <code>20</code> a gate failed,
-              <code>21</code> nothing was actually done. Not the agent's own opinion of its work.
+              <code>21</code> nothing was actually done.
             </p>
-            <pre class="snippet"><code>$ commandmate wait wt-shout --verify
+            <details class="beat-fold">
+              <summary><code>commandmate wait --verify</code></summary>
+              <pre class="snippet"><code>$ commandmate wait wt-shout --verify
 GATE work-evidence PASS (commits=0, uncommitted=1)
 GATE scope PASS (exit=0, 0.1s)
 GATE unit PASS (exit=0, 0.1s)
 RESULT passed
 $ echo $?
 0</code></pre>
+            </details>
           </li>
         </ol>
       </section>
@@ -343,13 +577,24 @@ $ echo $?
       <!-- 5. Four cards -->
       <section class="section" aria-labelledby="why">
         <h2 id="why">What it gives you</h2>
-        <div class="cards">
+        <!-- Two columns rather than four since Issue #2550: cards 1 and 4 each carry
+             a second block (§3c and §3d of docs/design/public-messaging.md), and at
+             four across those two grew several times taller than the two between
+             them. The card sentence stays the first bare <p>, which is what the
+             test comparing the cards with §3 reads. -->
+        <div class="cards cards-why">
           <article class="card">
             <h3>One agent leads</h3>
             <p>
               One message to your lead session; it hands each task to a worker in its own worktree
               under a contract, and only what passes the gates comes back. Measured with Claude
               Code and Command Code as the lead.
+            </p>
+            <p class="card-more">
+              All eight are first-class. Each one gets the same treatment inside CommandMate — its
+              own launch path, its own hook source and its own status detection — so the worktree
+              session, the task contract, the verification gates and the evidence trail behave the
+              same way whichever agent you pick.
             </p>
           </article>
           <article class="card">
@@ -373,12 +618,117 @@ $ echo $?
               The method is not in someone's head. It is installed as Skills and read by the
               agent.
             </p>
+            <!-- The Catalog's skill IDs in §3d's order. No count in the label, on
+                 purpose: §3d leaves it out so the label cannot go stale when the
+                 Catalog grows. Folded under that label since Issue #2555, the way
+                 Track B folds under its heading: a native <details>, so Enter /
+                 Space open it with no script, and the list is still labelled by
+                 the words it sits under. -->
+            <details class="card-more catalog-fold">
+              <summary id="catalog-h">Installable today from the official Catalog</summary>
+              <ul class="chips" aria-labelledby="catalog-h">
+                <li><code>cmate-acceptance-test</code></li>
+                <li><code>cmate-delegate</code></li>
+                <li><code>cmate-issue-authoring</code></li>
+                <li><code>cmate-issue-refinement</code></li>
+                <li><code>cmate-orchestrate</code></li>
+                <li><code>cmate-orchestrate-monitor</code></li>
+                <li><code>cmate-repository-analysis</code></li>
+                <li><code>cmate-task-contract</code></li>
+                <li><code>cmate-verify</code></li>
+                <li><code>cmate-verify-advisor</code></li>
+                <li><code>cmate-worker-development</code></li>
+                <li><code>cmate-workspace-research</code></li>
+                <li><code>cmate-worktree-cleanup</code></li>
+                <li><code>cmate-worktree-setup</code></li>
+              </ul>
+            </details>
           </article>
         </div>
-        <p class="note">
-          Runs 100% locally. No external server, no cloud relay, no account required — the only
-          network traffic is the agent CLI's own API calls.
+      </section>
+
+      <!-- 5b. Runs on your machine (Issue #2554). The network-scope note that sat
+           under the cards, given a section and a drawing of its own. The words are
+           docs/design/public-messaging.md §14 verbatim, split in two without a word
+           changed: the lede is what CommandMate itself does, and the drawing's
+           footnote is what goes over the network and when. §14 keeps those two
+           apart on purpose, so the first is never widened into "talks to nothing".
+           The copy used to limit the traffic to the agent CLI's own API calls,
+           which Web Push, `commandmate remote`, the update check and the Skills
+           Catalog all contradict (#2549). Keep the footnote list whole: dropping an
+           item brings the overclaim back, and a test pins its length to §14's
+           evidence table. -->
+      <section class="section" id="trust" aria-labelledby="trust-h">
+        <h2 id="trust-h">Runs on your machine</h2>
+        <p class="trust-lede">
+          CommandMate runs on your machine. It sends no telemetry, needs no account, and needs no
+          external server to run.
         </p>
+
+        <figure class="trust-figure">
+          <!-- Three nodes, and only the two connections every session has: the
+               web UI, opened from a browser or a phone, and the agent CLI's calls
+               to wherever its model runs. Arrows point the way a connection is
+               opened. What else goes out depends on the features in use, so it is
+               the footnote rather than more arrows. Inline for the same reason as
+               the hero drawing: every colour in it is a CSS variable (.trust-diagram
+               in styles.css), it is one labelled image to a screen reader, and
+               viewBox + width/height reserve its box before layout. -->
+          <svg
+            class="trust-diagram"
+            viewBox="0 0 400 250"
+            width="400"
+            height="250"
+            role="img"
+            aria-label="Where CommandMate runs, drawn as three nodes. Your machine runs CommandMate, which serves the web UI, and the agent CLI inside tmux. A browser or phone opens that web UI, and the agent CLI makes its own API calls to wherever its model runs. What else goes over the network, and when, is listed under the drawing."
+          >
+            <g class="machine">
+              <rect class="machine-frame" x="8" y="8" width="186" height="234" rx="14" />
+              <text class="machine-title" x="24" y="32">Your machine</text>
+
+              <rect class="chip" x="22" y="46" width="158" height="60" rx="10" />
+              <text class="chip-title" x="101" y="72">CommandMate</text>
+              <text class="chip-sub" x="101" y="91">serves the web UI</text>
+
+              <rect class="tmux-frame" x="22" y="120" width="158" height="112" rx="10" />
+              <text class="tmux-title" x="34" y="140">tmux</text>
+              <rect class="chip chip-inner" x="34" y="150" width="134" height="60" rx="8" />
+              <text class="chip-title" x="101" y="176">Agent CLI</text>
+              <text class="chip-sub" x="101" y="195">Claude Code, Codex, …</text>
+            </g>
+
+            <g class="peer">
+              <rect x="262" y="46" width="130" height="60" rx="12" />
+              <text class="peer-title" x="327" y="72">Browser or phone</text>
+              <text class="peer-sub" x="327" y="91">opens the web UI</text>
+            </g>
+
+            <g class="peer">
+              <rect x="262" y="150" width="130" height="60" rx="12" />
+              <text class="peer-title" x="327" y="176">The agent's API</text>
+              <text class="peer-sub" x="327" y="195">where its model runs</text>
+            </g>
+
+            <line class="edge" x1="256" y1="76" x2="196" y2="76" />
+            <polygon class="arrowhead" points="185,76 196,71 196,81" />
+            <text class="edge-label" x="228" y="66">web UI</text>
+
+            <line class="edge" x1="173" y1="180" x2="246" y2="180" />
+            <polygon class="arrowhead" points="257,180 246,175 246,185" />
+            <text class="edge-label" x="228" y="170">API calls</text>
+          </svg>
+
+          <figcaption class="trust-notes">
+            <p>What goes over the network depends on what you use:</p>
+            <ul>
+              <li>your agent CLI's own API calls;</li>
+              <li>a check for a newer release on GitHub, from the web UI;</li>
+              <li>the official Skills Catalog on GitHub, when you list or install Skills;</li>
+              <li>your browser's push service, once you turn on Web Push;</li>
+              <li>and Tailscale or cloudflared, while <code>commandmate remote</code> is running.</li>
+            </ul>
+          </figcaption>
+        </figure>
       </section>
 
       <!-- 6. 60-second quick start -->
@@ -435,44 +785,51 @@ $ echo $?
             </p>
           </article>
 
+          <!-- Folded since Issue #2555: a first visit takes Track A, so Track B
+               opens on demand. A native <details>, so the toggle is the browser's
+               and needs no script; the copy buttons inside are wired at load like
+               every other one on the page, whether the fold is open or not. The
+               heading stays a heading inside the <summary>, which HTML allows. -->
           <article class="track" aria-labelledby="track-daily-h">
             <p class="track-tag">Track B</p>
-            <h3 id="track-daily-h">Install it for daily use</h3>
-            <p class="track-lede">
-              Track A runs the server out of npm's cache, where a later <code>npx</code> can swap the
-              files under it. A global install gives a long-running server somewhere stable to live.
-            </p>
-            <ol class="steps steps-stack">
-              <li>
-                <h4>Install globally</h4>
-                <div class="install install-sm">
-                  <code class="install-cmd" id="install-global-cmd">npm install -g commandmate</code>
-                  <button type="button" class="copy-btn" data-copy-target="install-global-cmd">
-                    <span data-copy-label>Copy</span>
-                  </button>
-                </div>
-              </li>
-              <li>
-                <h4>Answer the setup questions</h4>
-                <p>First run only, and skipped entirely if you already have a <code>.env</code>.</p>
-                <div class="install install-sm">
-                  <code class="install-cmd" id="init-cmd">commandmate init</code>
-                  <button type="button" class="copy-btn" data-copy-target="init-cmd">
-                    <span data-copy-label>Copy</span>
-                  </button>
-                </div>
-              </li>
-              <li>
-                <h4>Start in the background</h4>
-                <p>Keeps serving after you close the terminal.</p>
-                <div class="install install-sm">
-                  <code class="install-cmd" id="start-cmd">commandmate start --daemon</code>
-                  <button type="button" class="copy-btn" data-copy-target="start-cmd">
-                    <span data-copy-label>Copy</span>
-                  </button>
-                </div>
-              </li>
-            </ol>
+            <details class="track-fold">
+              <summary><h3 id="track-daily-h">Install it for daily use</h3></summary>
+              <p class="track-lede">
+                Track A runs the server out of npm's cache, where a later <code>npx</code> can swap the
+                files under it. A global install gives a long-running server somewhere stable to live.
+              </p>
+              <ol class="steps steps-stack">
+                <li>
+                  <h4>Install globally</h4>
+                  <div class="install install-sm">
+                    <code class="install-cmd" id="install-global-cmd">npm install -g commandmate</code>
+                    <button type="button" class="copy-btn" data-copy-target="install-global-cmd">
+                      <span data-copy-label>Copy</span>
+                    </button>
+                  </div>
+                </li>
+                <li>
+                  <h4>Answer the setup questions</h4>
+                  <p>First run only, and skipped entirely if you already have a <code>.env</code>.</p>
+                  <div class="install install-sm">
+                    <code class="install-cmd" id="init-cmd">commandmate init</code>
+                    <button type="button" class="copy-btn" data-copy-target="init-cmd">
+                      <span data-copy-label>Copy</span>
+                    </button>
+                  </div>
+                </li>
+                <li>
+                  <h4>Start in the background</h4>
+                  <p>Keeps serving after you close the terminal.</p>
+                  <div class="install install-sm">
+                    <code class="install-cmd" id="start-cmd">commandmate start --daemon</code>
+                    <button type="button" class="copy-btn" data-copy-target="start-cmd">
+                      <span data-copy-label>Copy</span>
+                    </button>
+                  </div>
+                </li>
+              </ol>
+            </details>
           </article>
         </div>
 
@@ -601,6 +958,88 @@ $ echo $?
         </ul>
       </section>
 
+      <!-- FAQ (Issue #2553). Right after the limits, because these are the
+           questions a reader has once they know what the product will not do.
+           Questions and answers are copied verbatim, in order, from
+           docs/design/public-messaging.md §13 (between its faq:en markers); a
+           change of wording belongs there, not here. Native details / summary
+           elements, so opening one needs no script and works from the keyboard.
+           Not linked from the nav. -->
+      <section class="section" id="faq" aria-labelledby="faq-h">
+        <h2 id="faq-h">FAQ</h2>
+        <div class="faq">
+          <details class="faq-item">
+            <summary>What is a gate?</summary>
+            <p>
+              A command you declared for your project in <code>.commandmate/verify.yaml</code> —
+              tests, lint, a type check — whose exit code decides whether the work is done. A
+              person's approval is not a gate. Two gates are built in and run on every contract:
+              work-evidence, which needs a commit or an uncommitted change, and scope, which checks
+              the changed files against the contract.
+            </p>
+          </details>
+          <details class="faq-item">
+            <summary>What happens after the agent says it is done?</summary>
+            <p>
+              <code>commandmate wait --verify</code> runs the gates once the agent stops, and its
+              exit code is the verdict: <code>21</code> when there is no evidence of work at all,
+              <code>20</code> when a gate failed, <code>0</code> when every gate passed.
+              <code>verify history</code> keeps each run, so the verdict can be read again later.
+            </p>
+          </details>
+          <details class="faq-item">
+            <summary>Why is this not an IDE?</summary>
+            <p>
+              Because it does not replace the tools you already work in. Your terminal, your editor
+              and your agent CLI stay as they are; CommandMate adds a contract before the work, gates
+              after it, and a record of every run.
+            </p>
+          </details>
+          <details class="faq-item">
+            <summary>Is it free?</summary>
+            <p>
+              Yes. CommandMate is open source under the MIT License, needs no account, and needs no
+              external server to run. The agent CLIs you use keep their own plans and pricing.
+            </p>
+          </details>
+          <details class="faq-item">
+            <summary>Where does my code go?</summary>
+            <p>
+              CommandMate runs on your machine. It sends no telemetry, needs no account, and needs no
+              external server to run. What goes over the network depends on what you use: your agent
+              CLI's own API calls; a check for a newer release on GitHub, from the web UI; the
+              official Skills Catalog on GitHub, when you list or install Skills; your browser's push
+              service, once you turn on Web Push; and Tailscale or cloudflared, while
+              <code>commandmate remote</code> is running.
+            </p>
+          </details>
+          <details class="faq-item">
+            <summary>Which agents can lead?</summary>
+            <p>
+              Claude Code and Command Code have been measured as the lead. The lead is a session like
+              any other, and any of the eight agents can take the work as a worker.
+            </p>
+          </details>
+          <details class="faq-item">
+            <summary>Does it run on Windows? Is tmux required?</summary>
+            <p>
+              On Windows it runs through WSL2; native Windows is not supported. tmux is required,
+              because every worktree session runs in a tmux session of its own — but CommandMate
+              operates tmux for you, so you do not need to know it.
+            </p>
+          </details>
+          <details class="faq-item">
+            <summary>Is Auto Yes safe?</summary>
+            <p>
+              Approvals still come to a person. Auto Yes is opt-in, time-boxed, and stops on the
+              patterns you set. You choose one, three or eight hours when you turn it on (one by
+              default), and it switches itself off when that time is up or when the output matches a
+              stop pattern.
+            </p>
+          </details>
+        </div>
+      </section>
+
       <!-- 10. Screenshot gallery -->
       <section class="section" aria-labelledby="gallery-h">
         <h2 id="gallery-h">On desktop and on mobile</h2>
@@ -618,15 +1057,6 @@ $ echo $?
               decoding="async"
             />
             <figcaption>Every session and its status, on one dashboard.</figcaption>
-          </figure>
-          <figure class="shot shot-wide">
-            <img
-              src="assets/img/screenshot-worktree-desktop.webp"
-              alt="CommandMate worktree detail view on desktop, showing an agent session terminal"
-              loading="lazy"
-              decoding="async"
-            />
-            <figcaption>Drill into a worktree and drive its agent session.</figcaption>
           </figure>
           <!-- The chat surface (Issue #2192). Deliberately captioned as a way to
                READ and STEER a run, never as the record of one: the with/without
@@ -656,24 +1086,6 @@ $ echo $?
           </figure>
           <figure class="shot">
             <img
-              src="assets/img/screenshot-worktree-mobile.webp"
-              alt="CommandMate worktree detail view on a phone"
-              loading="lazy"
-              decoding="async"
-            />
-            <figcaption>Worktree detail, thumb-sized.</figcaption>
-          </figure>
-          <figure class="shot">
-            <img
-              src="assets/img/screenshot-worktree-mobile-terminal.webp"
-              alt="A live agent terminal session rendered on a phone"
-              loading="lazy"
-              decoding="async"
-            />
-            <figcaption>A live agent terminal, in your pocket.</figcaption>
-          </figure>
-          <figure class="shot">
-            <img
               src="assets/img/screenshot-worktree-mobile-chat.webp"
               alt="The same conversation on a phone: the agent's replies in full, its tool calls folded into a chip, and a composer to answer from"
               loading="lazy"
@@ -694,14 +1106,16 @@ $ echo $?
            the first question a reader has after seeing them. `commandmate remote`
            is that answer, so it sits directly under them (Issue #1937).
 
-           Every claim here is scoped to what shipped: one of the two providers
-           has to be installed (src/lib/remote/provider-registry.ts; neither is a
-           DEPENDENCY_ERROR, never a fallback), the public route is approved
-           rather than assumed (selectProvider + approvePublicTunnel in
-           src/cli/commands/remote.ts), and the defaults quoted are the exported
-           DEFAULT_REMOTE_EXPIRES / DEFAULT_PAIRING_EXPIRES. `remote` has no
-           --token and no --auto-yes: do not write flags onto this page that the
-           command would reject. -->
+           Issue #2555 cut it to the lede, the command and the link. The four
+           cards that stood between them (one of two providers, nothing public
+           without a yes, a pairing code that runs out, one door that
+           `remote stop` closes) and the note on session expiry repeated the
+           `commandmate remote` section of the CLI operations guide: Provider
+           status, A public tunnel needs explicit approval, Pairing code, Expiry
+           closes the outward door only, and remote stop does not guess. A test
+           pins those headings, so the guide cannot lose them unnoticed. `remote`
+           has no --token and no --auto-yes: do not write flags onto this page
+           that the command would reject. -->
       <section class="section" id="remote" aria-labelledby="remote-h">
         <h2 id="remote-h">Pair your phone with a QR code</h2>
         <p class="section-lede">
@@ -717,47 +1131,6 @@ $ echo $?
           </button>
         </div>
 
-        <div class="cards remote-cards">
-          <article class="card">
-            <h3>Bring one of two providers</h3>
-            <p>
-              Tailscale or <code>cloudflared</code> — one of them has to be installed and usable,
-              or <code>remote</code> stops on a dependency error. Tailscale Serve is the preferred
-              route, and stays inside your tailnet.
-            </p>
-          </article>
-          <article class="card">
-            <h3>Nothing public without a yes</h3>
-            <p>
-              A Cloudflare Quick Tunnel is a URL on the open internet, so it is created only after
-              you approve it — <code>--yes</code> when nobody is there to ask. Tailscale being
-              unusable never publishes you instead.
-            </p>
-          </article>
-          <article class="card">
-            <h3>A code that runs out</h3>
-            <p>
-              The pairing code works once and expires in ten minutes by default;
-              <code>--pairing-expires</code> sets that window. No long-lived token travels in the
-              QR code.
-            </p>
-          </article>
-          <article class="card">
-            <h3>One door, and you close it</h3>
-            <p>
-              <code>CM_BIND</code> keeps its <code>127.0.0.1</code> default — remote adds one way
-              in and changes nothing else. <code>commandmate remote stop</code> takes down what
-              CommandMate opened, and leaves the server up.
-            </p>
-          </article>
-        </div>
-
-        <p class="note">
-          Nothing is exposed until you run it, and the session closes itself — eight hours by
-          default, <code>--expires</code> to change it. <code>commandmate remote status</code>
-          reports the provider, the URL and what is left of both windows, and Auto-Yes stays off
-          unless you turn it on.
-        </p>
         <p class="remote-docs">
           The Quick Tunnel is a quick way in rather than a permanent address. Every flag, every
           exit code and the longer-lived Tailscale route are in the
@@ -765,41 +1138,47 @@ $ echo $?
         </p>
       </section>
 
-      <!-- Closing CTA -->
-      <section class="section closing">
-        <h2>Start in one command</h2>
-        <div class="install install-lg">
-          <code class="install-cmd" id="closing-cmd">npx commandmate@latest</code>
-          <button type="button" class="copy-btn" data-copy-target="closing-cmd">
-            <span data-copy-label>Copy</span>
-          </button>
-        </div>
-        <div class="cta-row cta-center">
-          <a class="btn btn-primary" href="https://github.com/Kewton/CommandMate">Star on GitHub</a>
-          <a class="btn btn-ghost" href="https://github.com/Kewton/CommandMate/blob/main/docs/en/user-guide/cli-setup-guide.md">Setup guide</a>
-        </div>
-      </section>
-      <!-- 11. Philosophy. The old H1 was not retired, it was demoted: it names the
+      <!-- 11. Closing CTA and Philosophy, one section since Issue #2555: the
+           command to start with, then the idea it serves, side by side on a wide
+           screen and one under the other on a phone. The section keeps the
+           Philosophy id, class and label, so #philosophy still lands here.
+
+           Philosophy: the old H1 was not retired, it was demoted: it names the
            idea rather than the product, so it reads as the closing argument instead
            of the opening claim (docs/design/public-messaging.md §2). The definition
            sentence is verbatim from that file's def:en markers, and a test compares
            the two strings. -->
       <section class="section philosophy" id="philosophy" aria-labelledby="philosophy-h">
-        <h2 id="philosophy-h">From vibe coding to Vibe Engineering.</h2>
-        <p class="definition">
-          Vibe Engineering — the AI does the building; the system, not your expertise, guarantees
-          the engineering.
-        </p>
-        <p class="creed">
-          We do not make the AI smarter. We make the software-engineering ability its user needed
-          into a system.
-        </p>
-        <!-- The axis word is not ours, and a page that used it as if it were would
-             be claiming a coinage it does not hold (public-messaging.md §10). -->
-        <p class="attribution">
-          The term "vibe engineering" was coined by Simon Willison (2025).
-          <a href="https://simonwillison.net/2025/Oct/7/vibe-engineering/">Read the original post</a>.
-        </p>
+        <div class="closing">
+          <h2>Start in one command</h2>
+          <div class="install install-lg">
+            <code class="install-cmd" id="closing-cmd">npx commandmate@latest</code>
+            <button type="button" class="copy-btn" data-copy-target="closing-cmd">
+              <span data-copy-label>Copy</span>
+            </button>
+          </div>
+          <div class="cta-row cta-center">
+            <a class="btn btn-primary" href="https://github.com/Kewton/CommandMate">Star on GitHub</a>
+            <a class="btn btn-ghost" href="https://github.com/Kewton/CommandMate/blob/main/docs/en/user-guide/cli-setup-guide.md">Setup guide</a>
+          </div>
+        </div>
+        <div class="philosophy-body">
+          <h2 id="philosophy-h">From vibe coding to Vibe Engineering.</h2>
+          <p class="definition">
+            Vibe Engineering — the AI does the building; the system, not your expertise, guarantees
+            the engineering.
+          </p>
+          <p class="creed">
+            We do not make the AI smarter. We make the software-engineering ability its user needed
+            into a system.
+          </p>
+          <!-- The axis word is not ours, and a page that used it as if it were would
+               be claiming a coinage it does not hold (public-messaging.md §10). -->
+          <p class="attribution">
+            The term "vibe engineering" was coined by Simon Willison (2025).
+            <a href="https://simonwillison.net/2025/Oct/7/vibe-engineering/">Read the original post</a>.
+          </p>
+        </div>
       </section>
     </main>
 
@@ -810,12 +1189,30 @@ $ echo $?
           <span class="wordmark">CommandMate</span>
           <p>The method, built in — for any coding agent.</p>
         </div>
-        <nav class="footer-links" aria-label="Footer">
-          <a href="https://github.com/Kewton/CommandMate">GitHub</a>
-          <a href="https://www.npmjs.com/package/commandmate">npm</a>
-          <a href="https://github.com/Kewton/CommandMate/tree/main/docs/en">Docs</a>
-          <a href="https://github.com/Kewton/CommandMate/blob/main/LICENSE">MIT License</a>
-        </nav>
+        <!-- Two groups since Issue #2552: the in-page anchors the header gave up,
+             and the project's own places. No X link yet — which account it would
+             point at is still undecided, and a guessed one is worse than none. -->
+        <div class="footer-groups">
+          <nav class="footer-group" aria-labelledby="footer-page-h">
+            <p class="footer-heading" id="footer-page-h">On this page</p>
+            <div class="footer-links">
+              <a href="#loop">The loop</a>
+              <a href="#quick-start">Quick start</a>
+              <a href="#with-without">With / Without</a>
+            </div>
+          </nav>
+          <nav class="footer-group" aria-labelledby="footer-project-h">
+            <p class="footer-heading" id="footer-project-h">Project</p>
+            <div class="footer-links">
+              <a href="https://github.com/Kewton/CommandMate">GitHub</a>
+              <a href="https://github.com/Kewton/CommandMate/tree/main/docs/en">Docs</a>
+              <a href="https://github.com/Kewton/CommandMate/releases">Releases</a>
+              <a href="https://github.com/Kewton/CommandMate/discussions">Discussions</a>
+              <a href="https://www.npmjs.com/package/commandmate">npm</a>
+              <a href="https://github.com/Kewton/CommandMate/blob/main/LICENSE">MIT License</a>
+            </div>
+          </nav>
+        </div>
       </div>
       <p class="copyright">MIT License · Copyright (c) 2026 Kewton</p>
     </footer>
