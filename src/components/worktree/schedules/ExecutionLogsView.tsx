@@ -12,6 +12,7 @@
 import React, { useState, useCallback, memo } from 'react';
 import { useTranslations } from 'next-intl';
 import { formatTimestamp, formatDuration } from './format';
+import { ScheduleConfigWarnings } from './ScheduleConfigWarnings';
 
 // ============================================================================
 // Types
@@ -90,12 +91,22 @@ export const ExecutionLogsView = memo(function ExecutionLogsView({
     }
   }, [worktreeId, expandedLogId]);
 
+  // Issue #2576: CMATE.md warnings sit above the runs they explain, and show
+  // before the first run too.
+  const configWarnings = <ScheduleConfigWarnings worktreeId={worktreeId} />;
+
   if (logs.length === 0) {
-    return <p className="text-sm text-muted-foreground">{t('noLogs')}</p>;
+    return (
+      <div className="space-y-2">
+        {configWarnings}
+        <p className="text-sm text-muted-foreground">{t('noLogs')}</p>
+      </div>
+    );
   }
 
   return (
     <div className="space-y-2" data-testid="execution-logs-view">
+      {configWarnings}
       {logs.map((log) => (
         <div key={log.id} className="border border-border rounded bg-surface">
           <button

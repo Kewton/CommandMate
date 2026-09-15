@@ -20,8 +20,9 @@ vi.mock('@/lib/logger', () => ({
   createLogger: vi.fn(() => mockLogger),
 }));
 
-import { parseSchedulesSection } from '@/lib/cmate-parser';
-import { validateSchedulesSection } from '@/lib/cmate-validator';
+import { parseSchedulesSection, MAX_SCHEDULE_ENTRIES } from '@/lib/cmate-parser';
+import { collectScheduleWarnings, validateSchedulesSection } from '@/lib/cmate-validator';
+import { buildCliArgs } from '@/lib/session/claude-executor';
 import {
   COPILOT_PERMISSIONS,
   ANTIGRAVITY_PERMISSIONS,
@@ -287,4 +288,70 @@ describe('cmate-parser / cmate-validator consistency (SEC4-004)', () => {
       expect(validateSchedulesSection([row])).toEqual([]);
     });
   }
+
+  /**
+   * Issue #2576: three readers answer "does this schedule run with the print
+   * gate on?" -- the parser's log line, the validator's warning channel, and
+   * the arguments the executor actually builds. They have to agree row for
+   * row, or the warning says one thing and the run does another. The executor
+   * is the ground truth: the gate stays on exactly when `--yolo` is absent.
+   */
+  describe('command-code direct write tools denied warning (Issue #2576)', () => {
+    const cells = [...COMMAND_CODE_SCHEDULE_PERMISSIONS, '', 'bypassPermissions'];
+
+    it.each(cells)('parser log, validator warning and buildCliArgs agree for "%s"', (cell) => {
+      mockLogger.warn.mockClear();
+      const row = ['cc-task', '0 9 * * *', 'Do something', 'command-code', 'true', cell];
+
+      const entries = parseSchedulesSection([row]);
+      expect(entries).toHaveLength(1);
+      const gateStaysOn = !buildCliArgs('Do something', 'command-code', entries[0].permission).includes('--yolo');
+
+      const parserWarned = mockLogger.warn.mock.calls.some(
+        ([event]) => event === 'parse:command-code-direct-write-tools-denied',
+      );
+      const validatorWarned = collectScheduleWarnings([row]).length > 0;
+
+      expect(parserWarned).toBe(gateStaysOn);
+      expect(validatorWarned).toBe(gateStaysOn);
+    });
+
+    it('a disabled row is warned about by neither the parser nor the validator', () => {
+      mockLogger.warn.mockClear();
+      const row = ['cc-task', '0 9 * * *', 'Do something', 'command-code', 'false', 'auto-accept'];
+
+      const entries = parseSchedulesSection([row]);
+      expect(entries).toHaveLength(1);
+      expect(entries[0].enabled).toBe(false);
+      expect(
+        mockLogger.warn.mock.calls.some(([event]) => event === 'parse:command-code-direct-write-tools-denied'),
+      ).toBe(false);
+      expect(collectScheduleWarnings([row])).toEqual([]);
+    });
+
+    it('parser and validator stop at the same row when out-of-vocabulary rows fill the limit', () => {
+      mockLogger.warn.mockClear();
+      const filler = Array.from({ length: MAX_SCHEDULE_ENTRIES }, (_, i) => [
+        `claude-${i}`, '0 9 * * *', 'Do something', 'claude', 'true', 'not-a-permission',
+      ]);
+      const rows = [...filler, ['cc-after-limit', '0 9 * * *', 'Do something', 'command-code', 'true', 'plan']];
+
+      const entries = parseSchedulesSection(rows);
+      expect(entries).toHaveLength(MAX_SCHEDULE_ENTRIES);
+      expect(entries.some((entry) => entry.name === 'cc-after-limit')).toBe(false);
+      expect(
+        mockLogger.warn.mock.calls.some(([event]) => event === 'parse:command-code-direct-write-tools-denied'),
+      ).toBe(false);
+      expect(collectScheduleWarnings(rows)).toEqual([]);
+    });
+
+    it('the warning set is exactly the five --permission-mode values', () => {
+      const warned = COMMAND_CODE_SCHEDULE_PERMISSIONS.filter(
+        (permission) =>
+          collectScheduleWarnings([['cc-task', '0 9 * * *', 'Do something', 'command-code', 'true', permission]])
+            .length > 0,
+      );
+      expect(warned).toEqual([...COMMAND_CODE_PERMISSIONS]);
+    });
+  });
 });

@@ -18,6 +18,12 @@ import type { ScheduleEntry, CmateConfig } from '@/types/cmate';
 import { isCliToolType } from '@/lib/cli-tools/types';
 import { parseAndValidateCliToolColumn } from '@/lib/cmate-cli-tool-parser';
 import {
+  COMMAND_CODE_DIRECT_WRITE_TOOLS_DENIED,
+  COMMAND_CODE_PRINT_GATED_TOOLS,
+  isCommandCodeDirectWriteToolsDenied,
+  isScheduleEnabled,
+} from '@/lib/cmate-validator';
+import {
   CLAUDE_PERMISSIONS,
   CODEX_SANDBOXES,
   COPILOT_PERMISSIONS,
@@ -239,10 +245,7 @@ export function parseSchedulesSection(rows: string[][]): ScheduleEntry[] {
     }
 
     // Parse enabled (default: true)
-    const enabled =
-      enabledStr === undefined ||
-      enabledStr === '' ||
-      enabledStr.toLowerCase() === 'true';
+    const enabled = isScheduleEnabled(enabledStr);
 
     // Parse and validate CLI tool column via shared pipeline (DR1-007)
     const { result: parsed, errors: cliToolErrors } = parseAndValidateCliToolColumn(rawCliTool || '');
@@ -282,9 +285,10 @@ export function parseSchedulesSection(rows: string[][]): ScheduleEntry[] {
       // Issue #2454: the column vocabulary is the six-value
       // COMMAND_CODE_SCHEDULE_PERMISSIONS, not the five `--permission-mode`
       // choices. An empty cell therefore resolves to `yolo` through
-      // `defaultPermission` above, which is the only value that lets
-      // `commandcode -p` write anything -- the five modes all leave print mode
-      // read-only while still reporting success.
+      // `defaultPermission` above, which is the only value that lifts
+      // `commandcode -p`'s print gate -- with any of the five modes the write
+      // tools the agent calls directly are rejected while the run still
+      // reports success (Issue #2576 warns about those rows below).
       case 'command-code':
         allowedValues = COMMAND_CODE_SCHEDULE_PERMISSIONS;
         break;
@@ -309,6 +313,27 @@ export function parseSchedulesSection(rows: string[][]): ScheduleEntry[] {
     if (allowedValues.length > 0 && permission && !allowedValues.includes(permission)) {
       logger.warn('parse:invalid-permission', { name: sanitizedName, cliToolId: resolvedCliToolId, permission, defaultPermission });
       permission = defaultPermission;
+    }
+
+    // Issue #2576: CMATE.md edited by hand never shows the dialog note, so the
+    // one reader every schedule goes through says it here. A warning, not a
+    // skip -- a run that only reports its final answer is a legitimate use.
+    // Disabled rows do not run, so they are not warned about (the same rule as
+    // `collectScheduleWarnings`). schedule-manager re-parses when CMATE.md's
+    // mtime changes (and when its mtime cache is empty, e.g. at startup), not on
+    // every sync, so this does not repeat every minute.
+    //
+    // Dependency direction: this server-only module imports the fs-free
+    // cmate-validator, never the reverse -- the validator is bundled into
+    // client components.
+    if (enabled && isCommandCodeDirectWriteToolsDenied(resolvedCliToolId, permission)) {
+      logger.warn('parse:command-code-direct-write-tools-denied', {
+        code: COMMAND_CODE_DIRECT_WRITE_TOOLS_DENIED,
+        name: sanitizedName,
+        cliToolId: resolvedCliToolId,
+        permission,
+        deniedTools: [...COMMAND_CODE_PRINT_GATED_TOOLS],
+      });
     }
 
     entries.push({

@@ -14,6 +14,7 @@ import {
   ScheduleEditDialog,
   type ScheduleEditDialogProps,
 } from '@/components/worktree/schedules/ScheduleEditDialog';
+import { getCommandCodeWriteToolsWarningText } from '@/components/worktree/schedules/command-code-write-tools-warning';
 
 // Issue #1307: the "Ask AI" drafts are now localized, so their assertions check
 // rendered wording. The global mock in tests/setup.ts echoes `schedule.<key>`
@@ -119,11 +120,12 @@ describe('ScheduleEditDialog', () => {
    * value selected on arrival.
    *
    * `commandcode -p` blocks edit_file / write_file / shell_command /
-   * monitor_command / kill_shell unless it was launched with `--yolo`, and a
-   * blocked call still ends the run exit 0 with `subtype: "success"`. So the
-   * five `--permission-mode` values all buy a read-only run that reports
-   * success -- picking one of them has to be a deliberate act, not what the
-   * form hands you.
+   * monitor_command / kill_shell when the agent calls them directly unless it
+   * was launched with `--yolo`, and a blocked call still ends the run exit 0
+   * with `subtype: "success"`. So with any of the five `--permission-mode`
+   * values the agent's own writes are rejected while the run reports success
+   * -- picking one of them has to be a deliberate act, not what the form hands
+   * you.
    */
   it('offers six permission options for command-code, led by yolo', () => {
     renderDialog();
@@ -149,10 +151,10 @@ describe('ScheduleEditDialog', () => {
       'yolo',
     );
     // The note is about a choice the user has not made, so it must not be up yet.
-    expect(screen.queryByTestId('schedule-permission-readonly-note')).toBeNull();
+    expect(screen.queryByTestId('schedule-permission-write-tools-denied-note')).toBeNull();
   });
 
-  it('warns that the five mode values leave command-code read-only', () => {
+  it('warns that the five mode values make command-code reject the directly-called write tools', () => {
     renderDialog();
     fireEvent.change(screen.getByTestId('schedule-cli-tool-select'), {
       target: { value: 'command-code' },
@@ -160,20 +162,23 @@ describe('ScheduleEditDialog', () => {
     fireEvent.change(screen.getByTestId('schedule-permission-select'), {
       target: { value: 'plan' },
     });
-    const note = screen.getByTestId('schedule-permission-readonly-note');
-    // Resolved through the real `en` dictionary (see the next-intl mock above),
-    // so an absent key would fail here rather than echo itself back.
-    expect(note.textContent).toContain('read-only');
+    const note = screen.getByTestId('schedule-permission-write-tools-denied-note');
+    // Issue #2576: the same wording as the CMATE.md warnings banner. It must not
+    // claim the run is read-only -- a write routed through a sub-agent can still
+    // land -- only that the tools the agent calls directly are rejected.
+    expect(note.textContent).toBe(getCommandCodeWriteToolsWarningText('en').body);
+    expect(note.textContent).toContain('calls directly');
     expect(note.textContent).toContain('write_file');
+    expect(note.textContent?.toLowerCase()).not.toContain('read-only');
 
     // Going back to yolo takes the note down again.
     fireEvent.change(screen.getByTestId('schedule-permission-select'), {
       target: { value: 'yolo' },
     });
-    expect(screen.queryByTestId('schedule-permission-readonly-note')).toBeNull();
+    expect(screen.queryByTestId('schedule-permission-write-tools-denied-note')).toBeNull();
   });
 
-  it('does not show the read-only note for other tools', () => {
+  it('does not show the write-tools note for other tools', () => {
     renderDialog();
     // copilot also has a `yolo` value; the note is command-code's alone.
     fireEvent.change(screen.getByTestId('schedule-cli-tool-select'), {
@@ -182,10 +187,10 @@ describe('ScheduleEditDialog', () => {
     fireEvent.change(screen.getByTestId('schedule-permission-select'), {
       target: { value: 'allow-all-tools' },
     });
-    expect(screen.queryByTestId('schedule-permission-readonly-note')).toBeNull();
+    expect(screen.queryByTestId('schedule-permission-write-tools-denied-note')).toBeNull();
   });
 
-  it('shows the read-only note when editing a saved command-code schedule that picked a mode', () => {
+  it('shows the write-tools note when editing a saved command-code schedule that picked a mode', () => {
     renderDialog({
       originalName: 'cc-task',
       initialValues: {
@@ -197,7 +202,28 @@ describe('ScheduleEditDialog', () => {
         enabled: true,
       },
     });
-    expect(screen.getByTestId('schedule-permission-readonly-note')).toBeDefined();
+    expect(screen.getByTestId('schedule-permission-write-tools-denied-note')).toBeDefined();
+  });
+
+  /**
+   * Issue #2576: the dialog now asks the same question the parser and the
+   * executor answer. A CMATE.md row with an empty Permission cell is seeded as
+   * `permission: ''`, and `buildCliArgs` runs it with `--yolo`, so the old
+   * `permission !== 'yolo'` check put the note on a schedule that can write.
+   */
+  it('does not show the note when editing a command-code schedule whose Permission cell is empty', () => {
+    renderDialog({
+      originalName: 'cc-task',
+      initialValues: {
+        name: 'cc-task',
+        cronExpression: '0 9 * * *',
+        message: 'do it',
+        cliToolId: 'command-code',
+        permission: '',
+        enabled: true,
+      },
+    });
+    expect(screen.queryByTestId('schedule-permission-write-tools-denied-note')).toBeNull();
   });
 
   it('disables Save and shows an error when the name is empty', () => {

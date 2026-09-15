@@ -6,6 +6,11 @@
 import { describe, it, expect } from 'vitest';
 import {
   CMATE_TEMPLATE_CONTENT,
+  COMMAND_CODE_DIRECT_WRITE_TOOLS_DENIED,
+  COMMAND_CODE_PRINT_GATED_TOOLS,
+  collectScheduleWarnings,
+  isCommandCodeDirectWriteToolsDenied,
+  isScheduleEnabled,
   parseCmateContent,
   validateScheduleHeaders,
   validateSchedulesSection,
@@ -420,6 +425,208 @@ describe('cmate-validator', () => {
       const errors = validateSchedulesSection(rows);
       expect(errors.length).toBeGreaterThan(0);
       expect(errors.some(e => e.field === 'cliTool')).toBe(true);
+    });
+  });
+
+  // ==========================================================================
+  // Warnings (Issue #2576)
+  // ==========================================================================
+
+  /**
+   * Issue #2576: the dialog note #2454 added never reaches a schedule written by
+   * editing CMATE.md, and that is the path the 9/12 incident took. These pin the
+   * read-time judgment that does not depend on the dialog.
+   */
+  describe('isCommandCodeDirectWriteToolsDenied', () => {
+    it.each(['default', 'standard', 'plan', 'auto-accept', 'dont-ask'])(
+      'is true for command-code with the --permission-mode value "%s"',
+      (permission) => {
+        expect(isCommandCodeDirectWriteToolsDenied('command-code', permission)).toBe(true);
+      },
+    );
+
+    // `yolo` is the only value that gets `--yolo`. An empty cell and an
+    // out-of-vocabulary value both resolve to `yolo` in the parser, and
+    // `buildCliArgs` passes `--yolo` for anything that is not one of the five
+    // modes, so none of these leave the print gate on.
+    it.each(['yolo', '', '   ', 'bypassPermissions', '--dangerously-skip-permissions'])(
+      'is false for command-code with "%s"',
+      (permission) => {
+        expect(isCommandCodeDirectWriteToolsDenied('command-code', permission)).toBe(false);
+      },
+    );
+
+    it('trims the cell before comparing', () => {
+      expect(isCommandCodeDirectWriteToolsDenied('command-code', ' auto-accept ')).toBe(true);
+    });
+
+    // The gate is command-code's. copilot also has a `yolo`, claude also has a
+    // `default`, and neither means anything to `commandcode -p`.
+    it.each([
+      ['claude', 'default'],
+      ['copilot', 'allow-all-tools'],
+      ['codex', 'read-only'],
+      ['opencode', ''],
+    ])('is false for %s with "%s"', (cliToolId, permission) => {
+      expect(isCommandCodeDirectWriteToolsDenied(cliToolId, permission)).toBe(false);
+    });
+
+    it('names the five tools the print gate blocks', () => {
+      expect([...COMMAND_CODE_PRINT_GATED_TOOLS]).toEqual([
+        'edit_file',
+        'write_file',
+        'shell_command',
+        'monitor_command',
+        'kill_shell',
+      ]);
+    });
+  });
+
+  describe('isScheduleEnabled', () => {
+    it.each([
+      [undefined, true],
+      ['', true],
+      ['true', true],
+      ['TRUE', true],
+      ['false', false],
+      ['no', false],
+    ])('reads %s as %s', (cell, expected) => {
+      expect(isScheduleEnabled(cell)).toBe(expected);
+    });
+  });
+
+  describe('collectScheduleWarnings', () => {
+    const header = `## Schedules
+
+| Name | Cron | Message | CLI Tool | Enabled | Permission |
+|------|------|---------|----------|---------|------------|
+`;
+
+    it('warns about a command-code + auto-accept row written directly into CMATE.md', () => {
+      const content = `${header}| githubInsights | 30 21 * * * | Collect insights | command-code | true | auto-accept |
+`;
+      const rows = parseCmateContent(content).get('Schedules') ?? [];
+
+      const warnings = collectScheduleWarnings(rows);
+
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toMatchObject({
+        row: 0,
+        name: 'githubInsights',
+        field: 'permission',
+        code: COMMAND_CODE_DIRECT_WRITE_TOOLS_DENIED,
+        cliToolId: 'command-code',
+        permission: 'auto-accept',
+      });
+    });
+
+    it('does not block: the same row validates with zero errors', () => {
+      const rows = [['githubInsights', '30 21 * * *', 'Collect insights', 'command-code', 'true', 'auto-accept']];
+
+      expect(collectScheduleWarnings(rows)).toHaveLength(1);
+      // `validateSchedulesSection` keeps its contract: an empty array means the
+      // file is valid. The warning lives in a separate channel, so a schedule
+      // that only reports its final answer is still a valid schedule.
+      expect(validateSchedulesSection(rows)).toEqual([]);
+    });
+
+    it('says the directly-called write tools are rejected, not that the run is read-only', () => {
+      const rows = [['cc-task', '0 9 * * *', 'hello', 'command-code', 'true', 'plan']];
+
+      const [warning] = collectScheduleWarnings(rows);
+
+      expect(warning.message).toContain('cc-task');
+      expect(warning.message).toContain('directly');
+      expect(warning.message).toContain('--permission-mode');
+      for (const tool of COMMAND_CODE_PRINT_GATED_TOOLS) {
+        expect(warning.message).toContain(tool);
+      }
+      expect(warning.message.toLowerCase()).not.toContain('read-only');
+    });
+
+    it('does not warn about yolo or an empty Permission cell', () => {
+      const rows = [
+        ['cc-yolo', '0 9 * * *', 'hello', 'command-code', 'true', 'yolo'],
+        ['cc-empty', '0 9 * * *', 'hello', 'command-code', 'true', ''],
+        ['cc-omitted', '0 9 * * *', 'hello', 'command-code', 'true'],
+      ];
+      expect(collectScheduleWarnings(rows)).toEqual([]);
+    });
+
+    it('does not warn about a row the parser would not run with a mode', () => {
+      const rows = [
+        // Out of vocabulary: an error, and the parser falls back to yolo.
+        ['cc-invalid-perm', '0 9 * * *', 'hello', 'command-code', 'true', 'bypassPermissions'],
+        // Invalid name / cron: the parser skips the row entirely.
+        ['bad name!', '0 9 * * *', 'hello', 'command-code', 'true', 'plan'],
+        ['cc-bad-cron', 'not a cron', 'hello', 'command-code', 'true', 'plan'],
+      ];
+      expect(collectScheduleWarnings(rows)).toEqual([]);
+    });
+
+    it('does not warn about other tools', () => {
+      const rows = [
+        ['claude-task', '0 9 * * *', 'hello', 'claude', 'true', 'default'],
+        ['copilot-task', '0 9 * * *', 'hello', 'copilot', 'true', 'yolo'],
+      ];
+      expect(collectScheduleWarnings(rows)).toEqual([]);
+    });
+
+    it('keeps the 0-based row index of each warned row', () => {
+      const rows = [
+        ['claude-task', '0 9 * * *', 'hello', 'claude', 'true', 'acceptEdits'],
+        ['cc-plan', '0 9 * * *', 'hello', 'command-code', 'true', 'plan'],
+        ['cc-yolo', '0 9 * * *', 'hello', 'command-code', 'true', 'yolo'],
+        ['cc-dont-ask', '0 9 * * *', 'hello', 'command-code', 'TRUE', 'dont-ask'],
+      ];
+
+      const warnings = collectScheduleWarnings(rows);
+
+      expect(warnings.map((w) => [w.row, w.name, w.permission])).toEqual([
+        [1, 'cc-plan', 'plan'],
+        [3, 'cc-dont-ask', 'dont-ask'],
+      ]);
+    });
+
+    // A disabled row is registered but never runs, and the warning is about a
+    // schedule that runs unnoticed. Enabling it rewrites CMATE.md, and the next
+    // read picks it up.
+    it('does not warn about a disabled row, and reads Enabled the way the parser does', () => {
+      const rows = [
+        ['cc-disabled', '0 9 * * *', 'hello', 'command-code', 'false', 'plan'],
+        ['cc-empty-enabled', '0 9 * * *', 'hello', 'command-code', '', 'plan'],
+      ];
+
+      expect(collectScheduleWarnings(rows).map((w) => w.name)).toEqual(['cc-empty-enabled']);
+    });
+
+    it('stops where the parser stops registering (MAX_SCHEDULE_ENTRIES)', () => {
+      const rows = Array.from({ length: 101 }, (_, i) => [
+        `cc-${i}`, '0 9 * * *', 'hello', 'command-code', 'true', 'plan',
+      ]);
+      // An invalid row does not count toward the limit, in the parser or here.
+      rows.unshift(['bad name!', '0 9 * * *', 'hello', 'command-code', 'true', 'plan']);
+
+      const warnings = collectScheduleWarnings(rows);
+
+      expect(warnings).toHaveLength(100);
+      expect(warnings[99].name).toBe('cc-99');
+    });
+
+    // The parser registers an out-of-vocabulary permission as `yolo`, so that
+    // row takes a slot even though it is never warned about.
+    it('counts a row with an out-of-vocabulary permission toward the limit', () => {
+      const filler = Array.from({ length: 100 }, (_, i) => [
+        `claude-${i}`, '0 9 * * *', 'hello', 'claude', 'true', 'not-a-permission',
+      ]);
+      const rows = [...filler, ['cc-after-limit', '0 9 * * *', 'hello', 'command-code', 'true', 'plan']];
+
+      expect(collectScheduleWarnings(rows)).toEqual([]);
+    });
+
+    it('returns no warnings for the template', () => {
+      const rows = parseCmateContent(CMATE_TEMPLATE_CONTENT).get('Schedules') ?? [];
+      expect(collectScheduleWarnings(rows)).toEqual([]);
     });
   });
 });
