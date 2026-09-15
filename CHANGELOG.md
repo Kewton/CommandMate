@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **feat(schedule): CMATE.md を直接編集した command-code スケジュールでも書き込み系ツール拒否の設定を警告する** (#2576): 有効な行の Permission が `--permission-mode` 系 5 値のとき、Logs タブ上部に警告バナーを出し、サーバログにも `parse:command-code-direct-write-tools-denied` を記録する。判定は `isCommandCodeDirectWriteToolsDenied()` 1 つを編集ダイアログ・バナー・パーサで共有し、実行時の `buildCliArgs` と一致させた（空セルを編集で開いたときの誤警告も解消）。警告はエラーと別経路の `collectScheduleWarnings()` で返すため、登録も実行も止めない。文言は「読み取り専用になる」ではなく「エージェントが直接呼ぶ書き込み系ツールが拒否される」とした
+
 ## [0.37.0] - 2026-09-14
 
 > **Highlight**: LP（https://kewton.github.io/CommandMate/ ）を「証拠・視覚・家具」で作り直した（Epic #2548）。hero をゲート行つきのセッション一覧に差し替えて "gate" ＝宣言したコマンドの exit code を図で示し、実測の Measured 表・「One agent leads」節・FAQ 8 問・通信範囲を 3 ノードの図で示す Trust 節・Docs / Changelog への nav・版行・`llms.txt` を足した。節を足しても長くならないよう重複を畳み、同じ手法で測ったページの高さは 1280×900 で 10,528 → 10,469px、390×844 で 17,989 → 15,942px。デモ動画は画面に入ってから再生するようにし、初回ロードの `.mp4` リクエストを 5 本（3.0 MB）から 0 本にした。通信範囲の表現は実装に合わせて README / LP とも改めた（テレメトリ無し・機能ごとの通信を列挙）。
