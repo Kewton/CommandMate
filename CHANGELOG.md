@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **fix(schedule): command-code のスケジュール実行でツール呼び出しが pre-tool hook に拒否されたとき、exit 0 / `completed` のまま警告なしで記録されるのを止め、実行ログ一覧の行に警告を出すようにした** (#2577): `claude-executor` が NDJSON を result 行だけに絞る前に `{"type":"event","event":{"type":"tool_hook_blocked",…}}` を読み、`toolName` と `hookOutput` を `Warning: command-code blocked N tool call(s) (tool_hook_blocked): write_file (1); M tool call(s) ran` の要約行＋理由行として実行ログの出力の先頭に書く（`ExecutionResult.warning` にも同じ要約行）。status は CLI の判定のまま変えないので、拒否のあと別経路で作業を終えた実行は `failed` にならず、非ゼロ終了・エラー subtype・タイムアウトは `failed` / `timeout` のまま警告だけが併記される。判定は `finalText` に依存しない。`GET /api/worktrees/:id/execution-logs` は result の先頭だけを読んで各行に `warning` を返し（本文は従来どおり返さない）、Logs タブは警告のある行に警告文を表示して completed を成功色で塗らない。成果物（ファイル生成・メール送信）ができたかの検証はしない。拒否イベントの実バイトは command-code 1.53.1 で採取した fixture（`tests/unit/session/fixtures/command-code-tool-hook-blocked-2577/`）
+
 ## [0.37.0] - 2026-09-14
 
 > **Highlight**: LP（https://kewton.github.io/CommandMate/ ）を「証拠・視覚・家具」で作り直した（Epic #2548）。hero をゲート行つきのセッション一覧に差し替えて "gate" ＝宣言したコマンドの exit code を図で示し、実測の Measured 表・「One agent leads」節・FAQ 8 問・通信範囲を 3 ノードの図で示す Trust 節・Docs / Changelog への nav・版行・`llms.txt` を足した。節を足しても長くならないよう重複を畳み、同じ手法で測ったページの高さは 1280×900 で 10,528 → 10,469px、390×844 で 17,989 → 15,942px。デモ動画は画面に入ってから再生するようにし、初回ロードの `.mp4` リクエストを 5 本（3.0 MB）から 0 本にした。通信範囲の表現は実装に合わせて README / LP とも改めた（テレメトリ無し・機能ごとの通信を列挙）。
