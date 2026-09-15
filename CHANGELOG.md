@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **fix(detection): Command Code の許可ダイアログに数字で回答したとき、確定後の余分な Enter が composer に着弾して未送信の下書きを送信してしまう事象を止めた** (#2574): 許可ダイアログは数字がホットキーで即確定する（1.53.1 実機で `1` 単独送信によりダイアログが閉じコマンドが実行されることを確認）が、汎用パーサが作る promptData に `submitMode` が無く `sendPromptAnswer` は `answer_then_enter` で数字の後に `C-m` を送っていた。考え中に composer へ打った下書きがその Enter で新しいユーザー発話として送られることを実機で再現した。command-code に `detectDialog`（`tools/command-code/permission.ts`、フッタ `↑/↓ navigate · enter select · … to bypass all permissions` が最終行でその直上に `❯` 付き番号リストがあるときだけ `kind: 'permission'` / `answerMode: 'numbered'` / `submitMode: 'answer_only'`）を追加し（`hasDialogRules: true`）、`DialogVerdict` に任意項目 `submitMode` を足して、`sendPromptAnswer` が #2033 のガードで読んだ送信直前フレームのダイアログ判定を `promptData.submitMode` より優先して Enter を決めるようにした。Auto-Yes ポーラ・`respond`・チャット画面の全経路に効く。Epic #2249 決定 3（hooks 駆動の承認は不可）は変えておらず、`AUTO_YES_DIALOG_GATE_DEFAULT_MODE['command-code']` は `legacy` のまま（許可ダイアログしか認識しないルールで enforce にすると `AskUserQuestion` が `/prompt-response` で `unsupported_dialog_layout` になり、Auto-Yes の box 除去済みフレームでは質問リーダが読めず全質問が抑止されるため。根拠をコメントとテストに固定）。修正後の実機では tmux への送信が `send-keys 1` のみになり、下書きは composer に未送信のまま残ることを Auto-Yes 形（フレーム無し）と `/prompt-response` 形（フレーム渡し）の両方で確認した
+
 ## [0.37.0] - 2026-09-14
 
 > **Highlight**: LP（https://kewton.github.io/CommandMate/ ）を「証拠・視覚・家具」で作り直した（Epic #2548）。hero をゲート行つきのセッション一覧に差し替えて "gate" ＝宣言したコマンドの exit code を図で示し、実測の Measured 表・「One agent leads」節・FAQ 8 問・通信範囲を 3 ノードの図で示す Trust 節・Docs / Changelog への nav・版行・`llms.txt` を足した。節を足しても長くならないよう重複を畳み、同じ手法で測ったページの高さは 1280×900 で 10,528 → 10,469px、390×844 で 17,989 → 15,942px。デモ動画は画面に入ってから再生するようにし、初回ロードの `.mp4` リクエストを 5 本（3.0 MB）から 0 本にした。通信範囲の表現は実装に合わせて README / LP とも改めた（テレメトリ無し・機能ごとの通信を列挙）。
