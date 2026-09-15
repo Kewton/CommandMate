@@ -108,10 +108,13 @@ describe('[#2457] the presence gate judges exactly the tools the table says', ()
     // for a tool with no `detectDialog` would silence that tool's prompts
     // outright, and a tool that HAS rules but is `legacy` must still be left
     // alone — `mode` decides, not the module's existence.
+    // Issue #2574: command-code is that tool — rules for its permission dialog,
+    // `legacy` in the table, and still `gated: false` in the case above.
+    const LEGACY_WITH_RULES: CLIToolType[] = ['command-code'];
     const withRules = CLI_TOOL_IDS.filter(tool => getToolStatusDetector(tool).hasDialogRules);
-    expect([...withRules].sort()).toEqual([...ENFORCED].sort());
+    expect([...withRules].sort()).toEqual([...ENFORCED, ...LEGACY_WITH_RULES].sort());
 
-    for (const tool of LEGACY) {
+    for (const tool of LEGACY.filter(tool => !LEGACY_WITH_RULES.includes(tool))) {
       expect(getToolStatusDetector(tool).hasDialogRules).toBe(false);
     }
   });

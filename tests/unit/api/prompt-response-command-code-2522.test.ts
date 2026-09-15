@@ -315,17 +315,17 @@ describe('[#2522] the existing Command Code dialogs are untouched', () => {
     ['dialog-create-file.txt'],
     ['dialog-kill-task-1490.txt'],
     ['dialog-shell-1490.txt'],
-  ])('%s still answers through the generic parser, with its Enter', async (name) => {
+  ])('%s still answers through the generic parser, with no Enter after the digit', async (name) => {
     // The four permission dialogs have no tab strip, so the new reading declines
-    // them and they keep the `answer_then_enter` behaviour #2250 measured.
+    // them and the generic parser still builds their prompt. Issue #2574: the
+    // digit is a hotkey that commits the dialog (measured live on 1.53.1), so
+    // command-code's `detectDialog` declares `answer_only`, and the Enter that
+    // used to follow it — which submitted a composer draft — is no longer sent.
     const raw = readFileSync(path.join(LIVE_DIR, name), 'utf8');
     const { data } = await respond(raw, { answer: '1' });
 
     expect(data.success).toBe(true);
     const keys = await keystrokes();
-    expect(keys.text).toEqual([
-      [SESSION, '1', false],
-      [SESSION, '', true],
-    ]);
+    expect(keys.text).toEqual([[SESSION, '1', false]]);
   });
 });
