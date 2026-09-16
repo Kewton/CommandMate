@@ -274,6 +274,52 @@ More text here.
       expect(mockLogger.warn).toHaveBeenCalledWith('parse:invalid-permission', expect.any(Object));
     });
 
+    /**
+     * Issue #2576: a CMATE.md edited by hand never passes through the dialog
+     * note, so the parser -- the one reader every registered schedule goes
+     * through -- has to say it. It says it and still registers the schedule:
+     * a run whose only output is the final answer is a legitimate use.
+     */
+    it('should warn about, but still register, a command-code schedule left on a mode', () => {
+      mockLogger.warn.mockClear();
+      const rows = [['githubInsights', '30 21 * * *', 'Collect insights', 'command-code', 'true', 'auto-accept']];
+
+      const entries = parseSchedulesSection(rows);
+
+      expect(entries).toHaveLength(1);
+      expect(entries[0]).toMatchObject({
+        name: 'githubInsights',
+        cliToolId: 'command-code',
+        permission: 'auto-accept',
+        enabled: true,
+      });
+      expect(mockLogger.warn).toHaveBeenCalledWith('parse:command-code-direct-write-tools-denied', {
+        code: 'command-code-direct-write-tools-denied',
+        name: 'githubInsights',
+        cliToolId: 'command-code',
+        permission: 'auto-accept',
+        deniedTools: ['edit_file', 'write_file', 'shell_command', 'monitor_command', 'kill_shell'],
+      });
+    });
+
+    it.each([
+      ['yolo', 'true', 'yolo'],
+      ['an empty cell', 'true', ''],
+      ['an out-of-vocabulary value', 'true', 'bypassPermissions'],
+      // Registered but never run, so there is nothing running unnoticed.
+      ['a mode on a disabled row', 'false', 'plan'],
+    ])('should not warn about a command-code schedule with %s', (_label, enabled, permission) => {
+      mockLogger.warn.mockClear();
+      const rows = [['cc-task', '0 9 * * *', 'hello', 'command-code', enabled, permission]];
+
+      parseSchedulesSection(rows);
+
+      expect(mockLogger.warn).not.toHaveBeenCalledWith(
+        'parse:command-code-direct-write-tools-denied',
+        expect.anything(),
+      );
+    });
+
     it('should enforce MAX_SCHEDULE_ENTRIES limit', () => {
       mockLogger.warn.mockClear();
       const rows = Array.from({ length: MAX_SCHEDULE_ENTRIES + 5 }, (_, i) => [

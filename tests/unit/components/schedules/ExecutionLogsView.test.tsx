@@ -75,4 +75,50 @@ describe('ExecutionLogsView', () => {
     render(<ExecutionLogsView worktreeId="wt-1" logs={[makeLog({ schedule_name: null })]} />);
     expect(screen.getByText('schedule.unknownSchedule')).toBeDefined();
   });
+
+  /**
+   * Issue #2576: the Logs view is where the 9/12-9/14 runs showed up green, so
+   * a command-code schedule left on a `--permission-mode` value is flagged
+   * right above them -- read from CMATE.md, without the edit dialog opening.
+   */
+  describe('CMATE.md warnings (Issue #2576)', () => {
+    function serveCmateWithModeRow() {
+      mockFetch.mockImplementation((url: string) => {
+        if (url === '/api/worktrees/wt-1/files/CMATE.md') {
+          return Promise.resolve({
+            ok: true,
+            json: () =>
+              Promise.resolve({
+                content: [
+                  '## Schedules',
+                  '',
+                  '| Name | Cron | Message | CLI Tool | Enabled | Permission |',
+                  '|------|------|---------|----------|---------|------------|',
+                  '| githubInsights | 30 21 * * * | Collect insights | command-code | true | auto-accept |',
+                  '',
+                ].join('\n'),
+              }),
+          });
+        }
+        return Promise.resolve({ ok: false, json: () => Promise.resolve({}) });
+      });
+    }
+
+    it('shows the warning above the log rows', async () => {
+      serveCmateWithModeRow();
+      render(<ExecutionLogsView worktreeId="wt-1" logs={[makeLog({ schedule_name: 'githubInsights' })]} />);
+
+      expect(await screen.findByTestId('schedule-config-warning-githubInsights')).toBeDefined();
+      // The rows are still there: the warning does not replace or hide them.
+      expect(screen.getByText('schedule.status.completed')).toBeDefined();
+    });
+
+    it('shows the warning before the schedule has run at all', async () => {
+      serveCmateWithModeRow();
+      render(<ExecutionLogsView worktreeId="wt-1" logs={[]} />);
+
+      expect(await screen.findByTestId('schedule-config-warning-githubInsights')).toBeDefined();
+      expect(screen.getByText('schedule.noLogs')).toBeDefined();
+    });
+  });
 });

@@ -110,6 +110,16 @@ export interface ExecutionResult {
   status: 'completed' | 'failed' | 'timeout';
   /** Error message if any */
   error?: string;
+  /**
+   * Issue #2577: a notice that sits *beside* `status` and never replaces it.
+   *
+   * Set when the CLI reported something `status` cannot say — today only
+   * command-code's `tool_hook_blocked`, where a run whose tool calls were all
+   * refused still exits 0 with `subtype: "success"`. The same line heads
+   * `output`, because `output` is the only field `job-executor` persists;
+   * {@link readExecutionLogWarning} reads it back from there.
+   */
+  warning?: string;
 }
 
 // =============================================================================
@@ -242,7 +252,9 @@ export function buildCliArgs(message: string, cliToolId: string, permission?: st
       // `shell_command` / `monitor_command` / `kill_shell` with `block: true`;
       // the mode flag never reaches it. A blocked call does not fail the run —
       // it ends exit 0 with `subtype: "success"` — so a schedule that asked for
-      // `default` looked successful and changed nothing.
+      // `default` looked successful and changed nothing. (Issue #2577 now
+      // records those blocks as a warning beside the status; see
+      // {@link readCommandCodeStream}.)
       //
       // So the column now spells `--yolo` as the value `yolo`
       // ({@link COMMAND_CODE_SCHEDULE_PERMISSIONS}, copilot's shape), and the
@@ -500,7 +512,68 @@ export interface CommandCodeResult {
  * @returns The decoded result line, or null when stdout carried none
  */
 export function extractCommandCodeResult(stdout: string): CommandCodeResult | null {
-  let found: CommandCodeResult | null = null;
+  return readCommandCodeStream(stdout).result;
+}
+
+/**
+ * One `tool_hook_blocked` event: a mod's `beforeToolCall` answered
+ * `block: true`, so the tool never ran (Issue #2577).
+ */
+export interface CommandCodeBlockedToolCall {
+  /** `toolCallId` off the event, or null when the event carried none. */
+  toolCallId: string | null;
+  /** `toolName` off the event (`write_file`, `shell_command`, …). */
+  toolName: string;
+  /** `hookOutput`: the refusal text, which is also what the model was shown. */
+  hookOutput: string;
+}
+
+/** What the executor reads off one `--output-format json` stream. */
+export interface CommandCodeStream {
+  /** The closing result line, as {@link extractCommandCodeResult} returns it. */
+  result: CommandCodeResult | null;
+  /** Every `tool_hook_blocked` event, in stream order. */
+  blockedToolCalls: CommandCodeBlockedToolCall[];
+  /** How many `tool_running` events the stream carried — calls that did start. */
+  startedToolCalls: number;
+}
+
+/**
+ * The result line *and* the blocked tool calls of one command-code stream.
+ *
+ * ## Why the blocks are read here, before the result line wins
+ *
+ * Issue #2577: `commandcode -p` without `--yolo` gets the `print-permission-gate`
+ * mod, which blocks `edit_file` / `write_file` / `shell_command` /
+ * `monitor_command` / `kill_shell`. A blocked call does not fail the run — it
+ * ends exit 0 with `subtype: "success"` — and the only trace of the refusal is
+ * an event in the middle of the stream. Keeping just the result line threw that
+ * event away, so a run whose every write was refused was stored as the model's
+ * `finalText`, which need not mention the refusal at all.
+ *
+ * The measured event (1.53.1, fixtures under
+ * `tests/unit/session/fixtures/command-code-tool-hook-blocked-2577/`) is
+ *
+ * ```text
+ * {"type":"event","event":{"type":"tool_hook_blocked","toolCallId":"call_…",
+ *  "toolName":"write_file","hookOutput":"Error: Tool \"write_file\" requires permissions. …"}}
+ * ```
+ *
+ * and `executeOne` returns straight after emitting it, so a blocked call has no
+ * `tool_running` / `tool_completed`. That is why the blocks are counted off this
+ * event and not inferred from tool results or from `finalText`.
+ *
+ * Every block is kept, whichever mod raised it: the gate's five tools are the
+ * case that prompted this, but a call a user's own hook refused is equally a
+ * call that did not happen.
+ *
+ * @param stdout - Raw stdout from `commandcode -p … --output-format json`
+ * @returns The decoded stream; never throws
+ */
+export function readCommandCodeStream(stdout: string): CommandCodeStream {
+  let result: CommandCodeResult | null = null;
+  const blockedToolCalls: CommandCodeBlockedToolCall[] = [];
+  let startedToolCalls = 0;
 
   for (const line of stdout.split('\n')) {
     const trimmed = line.trim();
@@ -515,17 +588,139 @@ export function extractCommandCodeResult(stdout: string): CommandCodeResult | nu
     if (typeof frame !== 'object' || frame === null) continue;
 
     const record = frame as Record<string, unknown>;
-    if (record.type !== 'result') continue;
-    if (typeof record.subtype !== 'string') continue;
 
-    found = {
-      subtype: record.subtype,
-      finalText: typeof record.finalText === 'string' ? record.finalText : '',
-      ...(typeof record.error === 'string' ? { error: record.error } : {}),
-    };
+    if (record.type === 'result') {
+      if (typeof record.subtype !== 'string') continue;
+      result = {
+        subtype: record.subtype,
+        finalText: typeof record.finalText === 'string' ? record.finalText : '',
+        ...(typeof record.error === 'string' ? { error: record.error } : {}),
+      };
+      continue;
+    }
+
+    if (record.type !== 'event') continue;
+    if (typeof record.event !== 'object' || record.event === null) continue;
+    const event = record.event as Record<string, unknown>;
+
+    if (event.type === 'tool_running') {
+      startedToolCalls += 1;
+      continue;
+    }
+
+    if (event.type === 'tool_hook_blocked') {
+      blockedToolCalls.push({
+        toolCallId: typeof event.toolCallId === 'string' ? event.toolCallId : null,
+        // A block with no name is still a block; counting it matters more than
+        // naming it.
+        toolName: typeof event.toolName === 'string' && event.toolName !== ''
+          ? event.toolName
+          : '(unnamed tool)',
+        hookOutput: typeof event.hookOutput === 'string' ? event.hookOutput : '',
+      });
+    }
   }
 
-  return found;
+  return { result, blockedToolCalls, startedToolCalls };
+}
+
+/**
+ * How a stored execution-log result starts when the run had blocked tool calls.
+ *
+ * The list API matches this against the head of `execution_logs.result` without
+ * reading the rest of the column, which is why the warning is always the first
+ * line of the output rather than wherever it would read best.
+ */
+export const COMMAND_CODE_BLOCKED_WARNING_PREFIX = 'Warning: command-code blocked ';
+
+/**
+ * How many characters of `execution_logs.result` the list API reads to recover
+ * the warning line. The summary line is bounded well below this (tool names are
+ * capped in count and length), so the line is never cut by the read.
+ */
+export const EXECUTION_LOG_WARNING_HEAD_LENGTH = 1024;
+
+const MAX_WARNING_TOOL_NAMES = 5;
+const MAX_WARNING_TOOL_NAME_LENGTH = 80;
+const MAX_WARNING_DETAIL_LINES = 5;
+const MAX_WARNING_HOOK_OUTPUT_LENGTH = 300;
+
+/** The summary line's exact shape, so an answer that merely quotes the prefix is not read as one. */
+const BLOCKED_WARNING_LINE = /^Warning: command-code blocked \d+ tool call\(s\) \(tool_hook_blocked\): /;
+
+/** Text from the stream, flattened to one bounded line. */
+function toWarningField(text: string, maxLength: number): string {
+  const flattened = stripAnsi(text).replace(/[\x00-\x1f\x7f\s]+/g, ' ').trim();
+  return flattened.length > maxLength ? `${flattened.slice(0, maxLength)}…` : flattened;
+}
+
+/**
+ * The warning block for a stream that carried blocked tool calls, or null.
+ *
+ * The first line is the summary — how many calls were blocked, which tools, and
+ * how many tool calls did run — and is what the execution-log list shows. The
+ * lines after it carry each distinct `hookOutput`, so the detail view says *why*
+ * without the operator digging through the event dump that is no longer stored.
+ *
+ * It does not judge whether the run produced anything. "Were calls blocked" and
+ * "how did the CLI exit" are recorded as two facts; whether a report was written
+ * or a mail went out is not something this layer can see (Issue #2577 対応内容 3).
+ *
+ * @param stream - A decoded stream from {@link readCommandCodeStream}
+ * @returns `[summary, ...details]`, or null when nothing was blocked
+ */
+export function describeCommandCodeBlockedToolCalls(stream: CommandCodeStream): string[] | null {
+  const { blockedToolCalls, startedToolCalls } = stream;
+  if (blockedToolCalls.length === 0) return null;
+
+  const countsByTool = new Map<string, number>();
+  const detailLines = new Map<string, string>();
+  for (const call of blockedToolCalls) {
+    const toolName = toWarningField(call.toolName, MAX_WARNING_TOOL_NAME_LENGTH);
+    countsByTool.set(toolName, (countsByTool.get(toolName) ?? 0) + 1);
+
+    const hookOutput = toWarningField(call.hookOutput, MAX_WARNING_HOOK_OUTPUT_LENGTH)
+      || '(no hook output)';
+    const key = JSON.stringify([toolName, hookOutput]);
+    if (!detailLines.has(key)) detailLines.set(key, `Blocked ${toolName}: ${hookOutput}`);
+  }
+
+  const tools = [...countsByTool]
+    .slice(0, MAX_WARNING_TOOL_NAMES)
+    .map(([toolName, count]) => `${toolName} (${count})`);
+  if (countsByTool.size > MAX_WARNING_TOOL_NAMES) {
+    tools.push(`+${countsByTool.size - MAX_WARNING_TOOL_NAMES} more`);
+  }
+
+  const summary = `${COMMAND_CODE_BLOCKED_WARNING_PREFIX}${blockedToolCalls.length} tool call(s)`
+    + ` (tool_hook_blocked): ${tools.join(', ')}; ${startedToolCalls} tool call(s) ran`;
+
+  const details = [...detailLines.values()].slice(0, MAX_WARNING_DETAIL_LINES);
+  if (detailLines.size > MAX_WARNING_DETAIL_LINES) {
+    details.push(`Blocked: +${detailLines.size - MAX_WARNING_DETAIL_LINES} more distinct reason(s)`);
+  }
+
+  return [summary, ...details];
+}
+
+/**
+ * The blocked-tool-call warning at the head of a stored execution-log result,
+ * or null.
+ *
+ * Only the first line is considered, and only in the exact summary shape
+ * {@link describeCommandCodeBlockedToolCalls} writes, so an answer that happens
+ * to contain the words further down — or a row written before Issue #2577 — is
+ * not flagged.
+ *
+ * @param result - `execution_logs.result`, or any prefix of it at least
+ *   {@link EXECUTION_LOG_WARNING_HEAD_LENGTH} characters long
+ * @returns The summary line, or null
+ */
+export function readExecutionLogWarning(result: string | null | undefined): string | null {
+  if (typeof result !== 'string') return null;
+  const newline = result.indexOf('\n');
+  const firstLine = newline === -1 ? result : result.slice(0, newline);
+  return BLOCKED_WARNING_LINE.test(firstLine) ? firstLine : null;
 }
 
 /**
@@ -622,12 +817,22 @@ export async function executeClaudeCommand(
           // line — so the answer and the CLI's own reason are on stdout even
           // here. Decoding them turns a log that said "Error: Command failed"
           // over a 4KB event dump into the reason plus the text.
-          const commandCodeResult = cliToolId === 'command-code'
-            ? extractCommandCodeResult(stdout || '')
+          //
+          // Issue #2577: the same stream says which tool calls were blocked. A
+          // failed or timed-out run stays failed or timed out — the warning is
+          // recorded next to that verdict, never instead of it — and it goes
+          // first because the list API only reads the head of the stored result.
+          const commandCodeStream = cliToolId === 'command-code'
+            ? readCommandCodeStream(stdout || '')
+            : null;
+          const commandCodeResult = commandCodeStream ? commandCodeStream.result : null;
+          const blockedWarning = commandCodeStream
+            ? describeCommandCodeBlockedToolCalls(commandCodeStream)
             : null;
           const exitCodeNumber = typeof errCode === 'number' ? errCode : null;
 
           const errorSummary = [
+            ...(blockedWarning ?? []),
             `Error: ${error.message}`,
             `Code: ${errCode ?? 'unknown'}`,
             `Signal: ${error.signal ?? 'none'}`,
@@ -661,6 +866,7 @@ export async function executeClaudeCommand(
             exitCode: exitCodeNumber,
             status: isTimeout ? 'timeout' : 'failed',
             error: error.message,
+            ...(blockedWarning ? { warning: blockedWarning[0] } : {}),
           });
           return;
         }
@@ -677,15 +883,25 @@ export async function executeClaudeCommand(
         // practice — but the subtype is read rather than assumed, because
         // "the process exited 0" and "the agent answered" are two facts and
         // this layer is the only one that can still see the second.
+        //
+        // Issue #2577: and exit 0 with `subtype: "success"` is also what a run
+        // whose every write was refused by `print-permission-gate` looks like.
+        // Failing it would also fail the run that was refused once and got its
+        // work done another way, so the status stays the CLI's verdict and the
+        // blocks are recorded beside it: a warning line at the head of the
+        // output (where the list API finds it) and `warning` on the result.
         if (cliToolId === 'command-code') {
-          const result = extractCommandCodeResult(stdout || '');
-          const failure = describeCommandCodeFailure(0, result);
-          const body = result ? result.finalText : (stdout || '');
+          const stream = readCommandCodeStream(stdout || '');
+          const failure = describeCommandCodeFailure(0, stream.result);
+          const blockedWarning = describeCommandCodeBlockedToolCalls(stream);
+          const body = stream.result ? stream.result.finalText : (stdout || '');
+          const head = [...(blockedWarning ?? []), ...(failure ? [failure] : [])];
           resolve({
-            output: truncateOutput(stripAnsi(failure ? `${failure}\n${body}` : body)),
+            output: truncateOutput(stripAnsi([...head, body].join('\n'))),
             exitCode: 0,
             status: failure ? 'failed' : 'completed',
             ...(failure ? { error: failure } : {}),
+            ...(blockedWarning ? { warning: blockedWarning[0] } : {}),
           });
           return;
         }

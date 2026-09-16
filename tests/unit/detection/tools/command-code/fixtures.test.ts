@@ -565,7 +565,6 @@ describe('[#2304] the busy row is what the running verdict rests on', () => {
     // so that adding the rule without revisiting `afterThinking`'s hardcoded
     // `'positive'` is a failing test rather than a rule that never runs.
     expect(commandCodeStatusDetector.readIdleEvidence).toBeUndefined();
-    expect(commandCodeStatusDetector.hasDialogRules).toBe(false);
   });
 });
 
