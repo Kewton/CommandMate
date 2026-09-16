@@ -41,7 +41,15 @@ export interface WorktreeItem {
   // Mirrors: src/lib/session/worktree-status-helper.ts CliToolSessionStatus
   // (the subset the CLI reads). Entries are the logical-OR aggregate across
   // every instance of a tool; the un-aggregated per-instance map is
-  // `sessionStatusByInstance`, which the CLI does not read.
+  // `sessionStatusByInstance`, which is NOT declared here.
+  //
+  // Issue #2575: `commandmate ls`'s AUTO_YES column does read it, together with
+  // `autoYesByInstance` (#2512) — but through `LsWorktreeItem`, a local
+  // widening in `src/cli/commands/ls.ts`, not through this interface. Auto-Yes
+  // is armed per INSTANCE, so the per-tool aggregate above cannot answer which
+  // session is about to stop answering prompts, and the two maps have to be
+  // read side by side to say so. They stay out of this shared shape until a
+  // second command needs them: everything else in the CLI reads the aggregate.
   sessionStatusByCli?: Partial<Record<string, {
     isRunning: boolean;
     isWaitingForResponse: boolean;
