@@ -97,6 +97,8 @@ export const AUTO_YES_DIALOG_GATE_MODES: readonly AutoYesDialogGateMode[] = ['en
  *   to write a dialog rule against. Gating it on a rule inferred from another
  *   tool's frames is the mistake #1979 had to correct; leaving it `legacy` keeps
  *   agy's Auto-Yes working exactly as it does today.
+ * - `command-code` is the one `legacy` tool that DOES declare rules (Issue
+ *   #2574), and they are not enough to gate on. See its row.
  */
 export const AUTO_YES_DIALOG_GATE_DEFAULT_MODE: Readonly<
   Record<CLIToolType, AutoYesDialogGateMode>
@@ -111,8 +113,24 @@ export const AUTO_YES_DIALOG_GATE_DEFAULT_MODE: Readonly<
   // Issue #2250 / Epic #2249 決定 3: Command Code's Auto-Yes stays on the legacy
   // numbered-response path. Its `PreToolUse` hook fires AFTER the permission
   // dialog is answered (measured: dialog 00:11:37, answer 00:11:46, hook
-  // 00:11:46), so a `permissionDecision` cannot dismiss the dialog and there is
-  // no measured dialog rule to gate on.
+  // 00:11:46), so a `permissionDecision` cannot dismiss the dialog.
+  //
+  // Issue #2574 gave the tool a `detectDialog` (`hasDialogRules: true`) and kept
+  // this row `legacy` on purpose. The rule recognises the PERMISSION dialog only;
+  // it exists to tell `sendPromptAnswer` that a digit commits without an Enter.
+  // Enforcing on it would break the other dialog this tool draws:
+  //
+  //  - `AskUserQuestion` (#2521 / #2522) is not a permission dialog, so
+  //    `judgeDialogPresence` would answer `present: false` for it and
+  //    `/prompt-response` would refuse a readable question with
+  //    `unsupported_dialog_layout`;
+  //  - teaching the rule that screen would not fix Auto-Yes either: the question
+  //    reader is anchored on the rule row `stripBoxDrawing` blanks
+  //    (`tools/command-code/dialog.ts`, 確定仕様 C), and this gate is handed the
+  //    box-stripped `cleanOutput`, so every question would be suppressed.
+  //
+  // Promote only once both dialogs are recognised on both spellings, with a
+  // `/prompt-response` test pinning that the question is still answered.
   'command-code': 'legacy',
 };
 

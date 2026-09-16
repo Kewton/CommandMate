@@ -35,6 +35,7 @@ import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { PromptDetectionResult } from '../prompt-detector';
 import type { SessionStatus, StatusConfidence } from '../status-detector';
 import type { StatusEvidence } from '@/lib/session/status-evidence';
+import type { SubmitMode } from '@/types/models';
 
 /**
  * One captured frame, normalised once and shared by every branch.
@@ -128,6 +129,15 @@ export interface DialogVerdict {
   options: readonly string[];
   /** How the dialog takes its answer (§4 D1 決定 4's gate reads this). */
   answerMode: DialogAnswerMode;
+  /**
+   * Whether a typed number commits the dialog by itself (Issue #2574).
+   *
+   * `'answer_only'` is the measured case: the digit is a hotkey, so the Enter
+   * `sendPromptAnswer` would otherwise add lands on whatever the tool paints
+   * next. Omitted where nobody measured it, which leaves the prompt's own
+   * `submitMode` in charge.
+   */
+  submitMode?: SubmitMode;
 }
 
 /**

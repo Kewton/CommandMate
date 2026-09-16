@@ -18,6 +18,7 @@ import { stripAnsi } from '@/lib/detection/cli-patterns';
 import { STATUS_REASON } from '@/lib/detection/status-detector';
 import { COMMAND_CODE_VERIFIED_AGAINST } from '@/lib/detection/tools/verified-against';
 import { commandCodeStatusDetector } from '@/lib/detection/tools/command-code/detect';
+import { AUTO_YES_DIALOG_GATE_DEFAULT_MODE } from '@/lib/polling/auto-yes-dialog-gate';
 import type { MultipleChoicePromptData } from '@/types/models';
 
 const DIR = path.resolve(__dirname, '../../../../fixtures/command-code-live-2250');
@@ -35,12 +36,19 @@ describe('Issue #2250: the registry resolves Command Code to its own module', ()
     expect(detector.verifiedAgainst.paneGeometry).toBe('200x1000');
   });
 
-  it('declares no measured dialog rules, so Auto-Yes keeps the legacy path', () => {
-    // Epic #2249 決定 3: Command Code fires `PreToolUse` AFTER its permission
-    // dialog is answered, so a hook-driven decision cannot dismiss the dialog
-    // and there is nothing for a `detectDialog` rule to gate on yet.
-    expect(detector.hasDialogRules).toBe(false);
-    expect(detector.detectDialog(normalizeFrame(frame('dialog-create-file')))).toBeNull();
+  it('declares a dialog rule, and Auto-Yes still keeps the legacy path', () => {
+    // Issue #2574: the rule says how the permission dialog takes an answer — a
+    // digit that commits it without an Enter. Epic #2249 決定 3 is untouched
+    // (Command Code fires `PreToolUse` AFTER the dialog is answered), so the
+    // rollout row that would let the rule gate Auto-Yes stays `legacy`.
+    expect(detector.hasDialogRules).toBe(true);
+    expect(detector.detectDialog(normalizeFrame(frame('dialog-create-file')))).toEqual({
+      kind: 'permission',
+      options: ['Yes', 'Yes, allow all edits this session [shift+tab]', 'No, tell Command Code what to do differently'],
+      answerMode: 'numbered',
+      submitMode: 'answer_only',
+    });
+    expect(AUTO_YES_DIALOG_GATE_DEFAULT_MODE['command-code']).toBe('legacy');
   });
 });
 

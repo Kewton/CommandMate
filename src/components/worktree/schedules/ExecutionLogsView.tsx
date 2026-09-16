@@ -5,6 +5,10 @@
  * Renders the execution log list with on-demand detail expansion. Extracted
  * from ExecutionLogPane so the "Logs" tab owns its own expansion state and
  * detail fetching, keeping the Schedules view focused.
+ *
+ * Issue #2577: a row whose `warning` is set (command-code reported blocked tool
+ * calls) shows the warning under the timestamp and never renders a completed
+ * status in the plain success colors.
  */
 
 'use client';
@@ -12,6 +16,7 @@
 import React, { useState, useCallback, memo } from 'react';
 import { useTranslations } from 'next-intl';
 import { formatTimestamp, formatDuration } from './format';
+import { ScheduleConfigWarnings } from './ScheduleConfigWarnings';
 
 // ============================================================================
 // Types
@@ -32,6 +37,12 @@ export interface ExecutionLog {
   completed_at: number | null;
   created_at: number;
   schedule_name: string | null;
+  /**
+   * Issue #2577: the list API's one-line notice, e.g. command-code's
+   * `Warning: command-code blocked 2 tool call(s) …`. Server-written English,
+   * like the `Reason:` lines in `result`. Absent on older servers.
+   */
+  warning?: string | null;
 }
 
 /** Execution log detail from the individual API (includes result) */
@@ -48,8 +59,15 @@ export interface ExecutionLogsViewProps {
 // Helpers
 // ============================================================================
 
-/** Map execution log status to Tailwind CSS color classes */
-function getStatusColor(status: ExecutionLogStatus): string {
+/**
+ * Map execution log status to Tailwind CSS color classes.
+ *
+ * Issue #2577: a completed run that carries a warning takes the warning tint, so
+ * "the CLI exited 0 but refused the tool calls" cannot read as a plain success.
+ * Failed / timeout keep their own colors; the warning line says the rest.
+ */
+function getStatusColor(status: ExecutionLogStatus, hasWarning: boolean): string {
+  if (hasWarning && status === 'completed') return 'text-warning-foreground bg-warning-subtle';
   switch (status) {
     case 'completed': return 'text-success-foreground bg-success-subtle';
     case 'failed': return 'text-danger-foreground bg-danger-subtle';
@@ -90,14 +108,29 @@ export const ExecutionLogsView = memo(function ExecutionLogsView({
     }
   }, [worktreeId, expandedLogId]);
 
+  // Issue #2576: CMATE.md warnings sit above the runs they explain, and show
+  // before the first run too.
+  const configWarnings = <ScheduleConfigWarnings worktreeId={worktreeId} />;
+
   if (logs.length === 0) {
-    return <p className="text-sm text-muted-foreground">{t('noLogs')}</p>;
+    return (
+      <div className="space-y-2">
+        {configWarnings}
+        <p className="text-sm text-muted-foreground">{t('noLogs')}</p>
+      </div>
+    );
   }
 
   return (
     <div className="space-y-2" data-testid="execution-logs-view">
+      {configWarnings}
       {logs.map((log) => (
-        <div key={log.id} className="border border-border rounded bg-surface">
+        <div
+          key={log.id}
+          className="border border-border rounded bg-surface"
+          data-testid="execution-log-row"
+          data-warning={log.warning ? 'true' : undefined}
+        >
           <button
             type="button"
             onClick={() => void handleExpandLog(log.id)}
@@ -105,7 +138,11 @@ export const ExecutionLogsView = memo(function ExecutionLogsView({
           >
             <div className="flex items-center justify-between">
               <span className="text-sm truncate max-w-[60%]">{log.schedule_name || t('unknownSchedule')}</span>
-              <span className={`text-xs px-2 py-0.5 rounded ${getStatusColor(log.status)}`}>
+              <span
+                className={`text-xs px-2 py-0.5 rounded ${getStatusColor(log.status, Boolean(log.warning))}`}
+                data-testid="execution-log-status"
+              >
+                {log.warning && <span aria-hidden="true">⚠ </span>}
                 {t(`status.${log.status}`)}
               </span>
             </div>
@@ -116,6 +153,15 @@ export const ExecutionLogsView = memo(function ExecutionLogsView({
               )}
               {log.exit_code !== null && <span className="ml-2">{t('exitCode')}: {log.exit_code}</span>}
             </div>
+            {log.warning && (
+              <div
+                className="text-xs text-warning-foreground mt-1 break-words"
+                data-testid="execution-log-warning"
+              >
+                <span aria-hidden="true">⚠ </span>
+                {log.warning}
+              </div>
+            )}
           </button>
 
           {expandedLogId === log.id && logDetail && (

@@ -12,6 +12,7 @@
 
 import {
   NAME_PATTERN,
+  MAX_SCHEDULE_ENTRIES,
   sanitizeContent,
   isValidCronExpression,
 } from '@/config/cmate-constants';
@@ -20,6 +21,7 @@ import {
   CODEX_SANDBOXES,
   COPILOT_PERMISSIONS,
   ANTIGRAVITY_PERMISSIONS,
+  COMMAND_CODE_PERMISSIONS,
   COMMAND_CODE_SCHEDULE_PERMISSIONS,
 } from '@/config/schedule-config';
 import { parseAndValidateCliToolColumn } from '@/lib/cmate-cli-tool-parser';
@@ -37,6 +39,45 @@ export interface CmateValidationError {
   message: string;
   /** Field that caused the error */
   field: 'columns' | 'name' | 'cron' | 'message' | 'header' | 'permission' | 'cliTool' | 'model';
+}
+
+/**
+ * The tools `commandcode -p` rejects when the agent calls them directly and
+ * `--yolo` was not passed (Issue #2576; measured on the 1.53.1 bundle, where
+ * `resolvePrintHarnessMods` injects `print-permission-gate` unless
+ * `dangerouslySkipPermissions` is set).
+ */
+export const COMMAND_CODE_PRINT_GATED_TOOLS = [
+  'edit_file',
+  'write_file',
+  'shell_command',
+  'monitor_command',
+  'kill_shell',
+] as const;
+
+/** Reason code of the command-code print-gate warning (Issue #2576) */
+export const COMMAND_CODE_DIRECT_WRITE_TOOLS_DENIED = 'command-code-direct-write-tools-denied' as const;
+
+/**
+ * Non-blocking finding for a row in the Schedules table (Issue #2576).
+ *
+ * Deliberately not a {@link CmateValidationError}: `validateSchedulesSection`
+ * returning `[]` means "valid", and a schedule that only reports an answer is a
+ * valid schedule. Warnings travel through {@link collectScheduleWarnings}.
+ */
+export interface CmateValidationWarning {
+  /** 0-based row index in the Schedules table */
+  row: number;
+  /** Sanitized schedule name */
+  name: string;
+  /** Field that caused the warning */
+  field: 'permission';
+  /** Machine-readable reason code */
+  code: typeof COMMAND_CODE_DIRECT_WRITE_TOOLS_DENIED;
+  cliToolId: string;
+  permission: string;
+  /** Human-readable message (English; the UI has its own localized wording) */
+  message: string;
 }
 
 /** Required header columns for the Schedules table */
@@ -299,4 +340,106 @@ export function validateSchedulesSection(
   }
 
   return errors;
+}
+
+// =============================================================================
+// Warnings (Issue #2576)
+// =============================================================================
+
+/**
+ * Whether a schedule runs `commandcode -p` with its print gate still on.
+ *
+ * Shared by the parser's log line, {@link collectScheduleWarnings} and the
+ * ScheduleEditDialog note, so the three cannot disagree.
+ *
+ * The test is "one of the five `--permission-mode` values", not "anything but
+ * `yolo`", because that is what `buildCliArgs` does: `yolo` gets `--yolo`, the
+ * five modes get `--permission-mode <value>` and leave the gate on, and
+ * anything else (an empty cell, an out-of-vocabulary value) gets `--yolo` --
+ * which is also what the parser resolves those cells to. "Not `yolo`" flagged
+ * an empty cell that in fact runs with `--yolo`.
+ *
+ * What the gate rejects is the write tools the agent calls *directly*
+ * ({@link COMMAND_CODE_PRINT_GATED_TOOLS}); a write routed through a sub-agent
+ * can still land, so this does not mean the run is read-only.
+ *
+ * @param cliToolId - CLI tool id of the schedule
+ * @param permission - Permission cell or resolved permission
+ * @returns true when the directly-called write tools will be rejected
+ */
+export function isCommandCodeDirectWriteToolsDenied(cliToolId: string, permission: string): boolean {
+  return (
+    cliToolId === 'command-code' &&
+    (COMMAND_CODE_PERMISSIONS as readonly string[]).includes(permission.trim())
+  );
+}
+
+/**
+ * Collect non-blocking warnings from the Schedules section rows (Issue #2576).
+ *
+ * CMATE.md is edited by hand, and that path never shows the dialog note, so the
+ * judgment has to run on the file itself. Only rows that will actually run with
+ * the gate on are reported, mirroring `parseSchedulesSection`:
+ *
+ * - rows the parser skips (any validation error other than the permission) are
+ *   left out and do not count toward the limit;
+ * - rows past `MAX_SCHEDULE_ENTRIES` registered rows are left out -- the parser
+ *   stops there, and a row with an out-of-vocabulary permission *is* registered
+ *   (as `yolo`), so it counts;
+ * - rows with an out-of-vocabulary permission are left out -- they run as `yolo`;
+ * - disabled rows are left out -- they are registered but never run, and the
+ *   warning is about a schedule running unnoticed. Enabling one rewrites
+ *   CMATE.md, and the next read reports it.
+ *
+ * This never adds to {@link validateSchedulesSection}'s errors -- a warned row
+ * is still registered and still runs.
+ *
+ * @param rows - Raw table rows from parseCmateContent() for the Schedules section
+ * @returns Array of warnings (empty = nothing to flag)
+ */
+export function collectScheduleWarnings(rows: string[][]): CmateValidationWarning[] {
+  const warnings: CmateValidationWarning[] = [];
+  let registered = 0;
+
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    const errors = validateSchedulesSection([row]);
+    if (errors.some((error) => error.field !== 'permission')) continue;
+    if (registered >= MAX_SCHEDULE_ENTRIES) break;
+    registered++;
+    if (errors.length > 0) continue;
+
+    const [rawName, , , rawCliTool, enabledStr, permissionStr] = row;
+    if (!isScheduleEnabled(enabledStr)) continue;
+
+    const { result: parsed } = parseAndValidateCliToolColumn(rawCliTool || '');
+    const permission = (permissionStr ?? '').trim();
+    if (!isCommandCodeDirectWriteToolsDenied(parsed.cliToolId, permission)) continue;
+
+    const name = sanitizeContent(rawName);
+    warnings.push({
+      row: i,
+      name,
+      field: 'permission',
+      code: COMMAND_CODE_DIRECT_WRITE_TOOLS_DENIED,
+      cliToolId: parsed.cliToolId,
+      permission,
+      message:
+        `Row ${i + 1}: schedule "${name}" runs command-code with the --permission-mode value "${permission}", ` +
+        `so commandcode -p rejects the write tools the agent calls directly ` +
+        `(${COMMAND_CODE_PRINT_GATED_TOOLS.join(', ')}). ` +
+        'This is a warning, not an error: the schedule still runs. Use "yolo" if it needs to write.',
+    });
+  }
+
+  return warnings;
+}
+
+/**
+ * Read the Enabled cell of a Schedules row: missing, empty or `true` (any case)
+ * means enabled. Shared with `parseSchedulesSection` so the parser and
+ * {@link collectScheduleWarnings} cannot disagree about which rows run.
+ */
+export function isScheduleEnabled(enabledStr: string | undefined): boolean {
+  return enabledStr === undefined || enabledStr === '' || enabledStr.toLowerCase() === 'true';
 }
