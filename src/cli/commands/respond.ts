@@ -280,6 +280,22 @@ export function createRespondCommand(): Command {
           }
           if (refusedBeforeSending) {
             console.error(`Error: Answer was not sent. Reason: ${reason}${result.message ? ` (${result.message})` : ''}`);
+            // Issue #2583: the operator who lands here typed WORDS at a dialog
+            // that only takes a choice — a claude / agy Bash approval refused as
+            // free text, or #2573's "No, tell … what to do differently" row. The
+            // server's sentence ends with "answer with the option number", and
+            // this is that command with the ids already filled in, so the next
+            // step is a paste rather than a trip to the docs while a dialog sits
+            // open. Printed only for the reason that means "this answer could not
+            // be mapped onto a choice", and only when the answer was not already
+            // a number (where the number itself is what was wrong).
+            if (reason === 'unresolvable_answer' && answer !== undefined && !/^\d+$/.test(answer.trim())) {
+              const target = options.instance ? ` --instance ${options.instance}` : '';
+              console.error(
+                `Hint: answer with the option number — \`commandmate respond ${worktreeId} <number>${target}\` ` +
+                  `(\`commandmate capture ${worktreeId}${target}\` prints the dialog and its numbers).`,
+              );
+            }
           } else {
             console.error(`Warning: Response may not have been applied. Reason: ${reason}`);
           }
