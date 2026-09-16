@@ -261,3 +261,136 @@ describe('[#2033] the guard is scoped to numeric answers and readable panes', ()
     expect(sendKeys).toHaveBeenCalledWith('mcbd-opencode-wt', '1', false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Issue #2574: the same reading decides the Enter
+// ---------------------------------------------------------------------------
+
+/**
+ * Command Code's permission dialog commits on the digit. Measured live on
+ * 1.53.1: `1` alone closed the dialog and ran the command, and the Enter the
+ * sender used to add a moment later landed on the composer that came back —
+ * submitting a draft typed while the agent was thinking as a new message.
+ *
+ * `promptData` here is what the generic parser publishes for that dialog: no
+ * `submitMode`. That is the input that produced the Enter, so it is the input
+ * every case below keeps.
+ */
+describe('[#2574] a digit that commits the dialog is not followed by an Enter', () => {
+  const LIVE_DIR = path.resolve(__dirname, '../../fixtures/command-code-live-2250');
+  const COMMAND_CODE_PERMISSION = () => readFileSync(path.join(LIVE_DIR, 'dialog-shell-1490.txt'), 'utf8');
+  const COMMAND_CODE_IDLE = () => readFileSync(path.join(LIVE_DIR, 'turn-done-1490.txt'), 'utf8');
+
+  const PERMISSION_PROMPT: PromptData = {
+    type: 'multiple_choice',
+    question: 'Execute Shell Command',
+    options: [
+      { number: 1, label: 'Yes', isDefault: true },
+      { number: 2, label: "Yes, don't ask again for `sleep` commands in this project" },
+      { number: 3, label: 'No, tell Command Code what to do differently', requiresTextInput: true },
+    ],
+    status: 'pending',
+  };
+
+  it('types only the digit on the frame the route re-verified', async () => {
+    await sendPromptAnswer({
+      sessionName: 'mcbd-command-code-wt',
+      answer: '2',
+      cliToolId: 'command-code',
+      promptData: PERMISSION_PROMPT,
+      frame: COMMAND_CODE_PERMISSION(),
+    });
+
+    expect(vi.mocked(sendKeys).mock.calls).toEqual([['mcbd-command-code-wt', '2', false]]);
+    expect(sendSpecialKeys).not.toHaveBeenCalled();
+  });
+
+  it('reads the pane itself on the Auto-Yes path, which passes no frame', async () => {
+    vi.mocked(capturePane).mockResolvedValue(COMMAND_CODE_PERMISSION());
+
+    await sendPromptAnswer({
+      sessionName: 'mcbd-command-code-wt',
+      answer: '1',
+      cliToolId: 'command-code',
+      promptData: PERMISSION_PROMPT,
+    });
+
+    expect(capturePane).toHaveBeenCalledWith('mcbd-command-code-wt', expect.any(Number));
+    expect(vi.mocked(sendKeys).mock.calls).toEqual([['mcbd-command-code-wt', '1', false]]);
+  });
+
+  it('holds when the caller has no promptData at all', async () => {
+    // A vouched numbered dialog is a multiple-choice prompt in its own right.
+    await sendPromptAnswer({
+      sessionName: 'mcbd-command-code-wt',
+      answer: '1',
+      cliToolId: 'command-code',
+      frame: COMMAND_CODE_PERMISSION(),
+    });
+
+    expect(vi.mocked(sendKeys).mock.calls).toEqual([['mcbd-command-code-wt', '1', false]]);
+  });
+
+  it('outranks a stale submitMode on promptData, because the dialog is read off the frame being answered', async () => {
+    await sendPromptAnswer({
+      sessionName: 'mcbd-command-code-wt',
+      answer: '1',
+      cliToolId: 'command-code',
+      promptData: { ...PERMISSION_PROMPT, submitMode: 'answer_then_enter' },
+      fallbackSubmitMode: 'answer_then_enter',
+      frame: COMMAND_CODE_PERMISSION(),
+    });
+
+    expect(vi.mocked(sendKeys).mock.calls).toEqual([['mcbd-command-code-wt', '1', false]]);
+  });
+
+  it('still sends the Enter for the same prompt when the frame carries no dialog', async () => {
+    // Non-vacuity: the decision is the frame's, not the tool id's. Same tool, same
+    // promptData, an idle pane — the pre-#2574 `answer_then_enter` stands.
+    await sendPromptAnswer({
+      sessionName: 'mcbd-command-code-wt',
+      answer: '1',
+      cliToolId: 'command-code',
+      promptData: PERMISSION_PROMPT,
+      frame: COMMAND_CODE_IDLE(),
+    });
+
+    expect(vi.mocked(sendKeys).mock.calls).toEqual([
+      ['mcbd-command-code-wt', '1', false],
+      ['mcbd-command-code-wt', '', true],
+    ]);
+  });
+
+  it('leaves a text answer on the dialog as text + Enter', async () => {
+    // Free text is not a hotkey and is #2573's path; this Issue does not move it.
+    await sendPromptAnswer({
+      sessionName: 'mcbd-command-code-wt',
+      answer: 'use a background task instead',
+      cliToolId: 'command-code',
+      promptData: PERMISSION_PROMPT,
+      frame: COMMAND_CODE_PERMISSION(),
+    });
+
+    expect(vi.mocked(sendKeys).mock.calls).toEqual([
+      ['mcbd-command-code-wt', 'use a background task instead', false],
+      ['mcbd-command-code-wt', '', true],
+    ]);
+  });
+
+  it('does not change a tool whose dialog declares no submitMode', async () => {
+    // codex's approval is vouched `numbered` with no `submitMode`, so the prompt's
+    // own (absent) mode still resolves to the Enter.
+    await sendPromptAnswer({
+      sessionName: 'mcbd-codex-wt',
+      answer: '1',
+      cliToolId: 'codex',
+      promptData: MULTIPLE_CHOICE,
+      frame: CODEX_APPROVAL(),
+    });
+
+    expect(vi.mocked(sendKeys).mock.calls).toEqual([
+      ['mcbd-codex-wt', '1', false],
+      ['mcbd-codex-wt', '', true],
+    ]);
+  });
+});

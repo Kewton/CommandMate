@@ -85,10 +85,10 @@ describe('[#1928] detectDialog is the seam Auto-Yes reads', () => {
     gemini: false,
     antigravity: false,
     'vibe-local': false,
-    // Issue #2250 / Epic #2249 決定 3: Command Code fires `PreToolUse` AFTER its
-    // permission dialog is answered, so a hook-driven decision cannot dismiss
-    // the dialog and Auto-Yes stays on the numbered-response path.
-    'command-code': false,
+    // Issue #2574: the permission dialog's answer mode — a digit that commits
+    // without an Enter. Epic #2249 決定 3 still keeps Auto-Yes on the
+    // numbered-response path: `AUTO_YES_DIALOG_GATE_DEFAULT_MODE` is `legacy`.
+    'command-code': true,
   };
 
   it('declares which tools have measured dialog rules', () => {
