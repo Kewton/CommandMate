@@ -89,10 +89,16 @@ export const FREE_TEXT_AT_MENU_ROW_REASON = 'unresolvable_answer';
 /**
  * Free text refused BEFORE any key reached the pane (Issue #2573).
  *
- * A sibling of {@link PromptAnswerRejectedError}, not a use of it: that one cites
- * a dialog the tool's own rules vouched for (`dialogKind` / `answerMode`), and
- * the first screen this one guards — Command Code's permission dialog — has no
- * such rules. What it can cite is the rows.
+ * A sibling of {@link PromptAnswerRejectedError}, not a use of it, because the
+ * two cite different evidence. That one cites the dialog the tool's own rules
+ * vouched for (`dialogKind` / `answerMode`), and no such verdict can decide this
+ * case: Command Code has had rules since Issue #2574, and the permission dialog
+ * this guard is first about is vouched `numbered` — the verdict that lets a
+ * DIGIT through — while the `AskUserQuestion` screen whose free text must keep
+ * working is deliberately not recognised by those rules at all
+ * (`tools/command-code/permission.ts`). `answerMode` says how a CHOICE is
+ * pressed; it says nothing about which row is a text field. So what this one
+ * cites is the rows.
  *
  * The message is fixed text, a tool id and option numbers, never the answer
  * (SEC-003, as in `prompt-answer-semantic`): the answer is whatever the operator
@@ -288,8 +294,10 @@ function buildNavigationKeys(offset: number): string[] {
  *   So the same Enter still sits under free text sent at, e.g., claude's
  *   `1. Yes / 2. … / 3. No`; closing that is wider than a row-level guard.
  * - It does not deliver the reason. Sending the number and then the text as a
- *   message is the follow-up (#2573 対応内容 2), and it depends on where each
- *   tool's input goes once the number has confirmed (#2574).
+ *   message is the follow-up (#2573 対応内容 2). Issue #2574 has since removed the
+ *   Enter that would have landed the reason in the wrong place on command-code,
+ *   so what is still missing is a measurement, per tool, of where the input goes
+ *   once the digit has confirmed.
  *
  * @throws {FreeTextAnswerRejectedError} when the answer is not a number and every
  *   text-bearing option of the multiple-choice prompt is a menu row.

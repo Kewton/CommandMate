@@ -57,6 +57,8 @@ import {
   sendPromptAnswer,
   PromptAnswerRejectedError,
   ANSWER_MODE_KEYS_REASON,
+  FreeTextAnswerRejectedError,
+  FREE_TEXT_AT_MENU_ROW_REASON,
 } from '@/lib/prompt-answer-sender';
 import { capturePane, sendKeys, sendSpecialKeys } from '@/lib/tmux/tmux';
 import type { PromptData } from '@/types/models';
@@ -361,9 +363,16 @@ describe('[#2574] a digit that commits the dialog is not followed by an Enter', 
     ]);
   });
 
-  it('leaves a text answer on the dialog as text + Enter', async () => {
-    // Free text is not a hotkey and is #2573's path; this Issue does not move it.
-    await sendPromptAnswer({
+  it('refuses a text answer on the dialog, and sends no key at all', async () => {
+    // Updated by Issue #2573, which landed in parallel with this Issue. The case
+    // was written here as "free text is not a hotkey and this Issue does not move
+    // it", and pinned the text + Enter that #2573 then measured as the defect:
+    // option 3 (`No, tell Command Code what to do differently`) is a menu row, so
+    // the characters are ignored and the Enter confirms the highlighted `1. Yes`
+    // — a reason meaning "do not do this" ran the command it was sent to stop.
+    // The two Issues agree on the direction: this one stops the Enter after a
+    // digit, #2573 stops the keystroke that needed it.
+    const sent = sendPromptAnswer({
       sessionName: 'mcbd-command-code-wt',
       answer: 'use a background task instead',
       cliToolId: 'command-code',
@@ -371,10 +380,14 @@ describe('[#2574] a digit that commits the dialog is not followed by an Enter', 
       frame: COMMAND_CODE_PERMISSION(),
     });
 
-    expect(vi.mocked(sendKeys).mock.calls).toEqual([
-      ['mcbd-command-code-wt', 'use a background task instead', false],
-      ['mcbd-command-code-wt', '', true],
-    ]);
+    await expect(sent).rejects.toBeInstanceOf(FreeTextAnswerRejectedError);
+    await expect(sent).rejects.toMatchObject({
+      reason: FREE_TEXT_AT_MENU_ROW_REASON,
+      optionNumbers: [3],
+    });
+
+    expect(sendKeys).not.toHaveBeenCalled();
+    expect(sendSpecialKeys).not.toHaveBeenCalled();
   });
 
   it('does not change a tool whose dialog declares no submitMode', async () => {
