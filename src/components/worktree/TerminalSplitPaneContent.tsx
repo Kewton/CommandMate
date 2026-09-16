@@ -100,6 +100,11 @@ import {
   isConnectionKnownDown,
 } from '@/hooks/useConnectivity';
 import { useHistoryPaneState } from '@/hooks/useHistoryPaneState';
+import { useComposerMaxHeight } from '@/hooks/useComposerHeight';
+import {
+  COMPOSER_PANE_BODY_MIN_HEIGHT_PX,
+  composerHeightScopeForSplit,
+} from '@/config/composer-height';
 import { worktreeApi } from '@/lib/api-client';
 import { buildPromptResponseBody } from '@/lib/prompt-response-body-builder';
 import { readPromptDecisionId } from '@/components/worktree/prompt-decision-id';
@@ -248,6 +253,18 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
 
   const t = useTranslations('worktree');
   const locale = useLocale();
+
+  // Issue #2598: the composer's height handle is bounded by what this pane's
+  // body can give up and stay at its floor. Elements in state (callback refs)
+  // so the measuring hook re-subscribes when either mounts.
+  const [paneBodyEl, setPaneBodyEl] = useState<HTMLDivElement | null>(null);
+  const [footerEl, setFooterEl] = useState<HTMLDivElement | null>(null);
+  const composerMaxHeight = useComposerMaxHeight(
+    paneBodyEl,
+    footerEl,
+    COMPOSER_PANE_BODY_MIN_HEIGHT_PX,
+  );
+  const composerHeightScope = useMemo(() => composerHeightScopeForSplit(splitIndex), [splitIndex]);
 
   // Issue #2193: this split's output surface. Per split, not per worktree —
   // watching one agent's transcript while the other's TUI is on screen is the
@@ -910,7 +927,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       // Issue #2131: `data-testid` so the PC height spec can measure what the
       // footer costs the terminal. The footer is the `flex-shrink-0` half of the
       // pane's flex column; whatever it grows by, TerminalDisplay loses.
-      <div className="space-y-2" data-testid={`split-footer-${splitIndex}`}>
+      <div ref={setFooterEl} className="space-y-2" data-testid={`split-footer-${splitIndex}`}>
         {showNav ? (
           <NavigationButtons
             worktreeId={worktreeId}
@@ -1010,6 +1027,12 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
           onInsertConsumed={onInsertConsumed}
           splitIndex={splitIndex}
           onFocus={onFocus}
+          // Issue #2598: this split's stored textarea height, bounded so the
+          // body above keeps COMPOSER_PANE_BODY_MIN_HEIGHT_PX. The bound follows
+          // the pane (window, #2421 grid rows, maximize, split count) and only
+          // bounds what is drawn — see useComposerHeight.
+          heightScope={composerHeightScope}
+          maxHeight={composerMaxHeight}
           // Issue #806: surface a "queued (session busy)" toast when sending to
           // a session that is still processing the previous task. showToast
           // reuses the existing history toast surface.
@@ -1112,6 +1135,9 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       onAutoYesToggle,
       // Issue #806: toast surface for the "queued (session busy)" hint.
       showToast,
+      // Issue #2598: the composer's height scope and bound.
+      composerHeightScope,
+      composerMaxHeight,
       // Issue #2043: the poll gives this a stable identity between turns (see
       // `agentSessionSignature`), so it re-runs the memo when the file list
       // actually changes and not on every 2s poll that repeats it.
@@ -1215,6 +1241,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       onToggleMaximize={onToggleMaximize}
       terminal={surfaceMode === 'chat' ? chatSlot : terminalSlot}
       footer={footerSlot}
+      bodyRef={setPaneBodyEl}
       // Issue #786 / #869: drag-drop pass-through (optional; inert when omitted).
       onDropInstance={onDropInstance}
       draggedInstanceId={draggedInstanceId}

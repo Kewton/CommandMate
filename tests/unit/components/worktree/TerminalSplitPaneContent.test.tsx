@@ -60,6 +60,8 @@ vi.mock('@/components/worktree/MessageInput', () => ({
     autoYesSlot,
     isProcessing,
     showToast,
+    heightScope,
+    maxHeight,
   }: {
     cliToolId: string;
     splitIndex: number;
@@ -69,13 +71,20 @@ vi.mock('@/components/worktree/MessageInput', () => ({
     // Issue #2406: the queued-send toast's gate, and the surface it fires on.
     isProcessing?: boolean;
     showToast?: (message: string, type?: string) => void;
+    // Issue #2598: the height handle's scope and bound.
+    heightScope?: string;
+    maxHeight?: number | null;
   }) => (
     <div
       data-testid={`message-input-${splitIndex}`}
       data-cli-tool-id={cliToolId}
       data-pending-insert={pendingInsertText ?? ''}
       data-is-processing={String(isProcessing ?? false)}
+      data-height-scope={heightScope ?? ''}
+      data-max-height={maxHeight ?? ''}
     >
+      {/* Issue #2598: what the split's height bound measures. */}
+      <textarea data-testid="message-input-textarea" readOnly />
       {/* Issue #2406: a stand-in for the real composer's send. The real
           MessageInput fires the "Queued (session busy)" toast on exactly this
           condition and no other (`if (isProcessing) showToast(...)`, both send
@@ -445,6 +454,72 @@ describe('TerminalSplitPaneContent', () => {
    * what is asserted here is that THIS caller passes the props that make the
    * fold possible, and that it names the desktop screen rather than the phone's.
    */
+  /**
+   * Issue #2598: the composer's height handle. The pixels are measured in
+   * `tests/e2e/composer-two-row-2598.spec.ts`; what is pinned here is that this
+   * caller names the split's own scope and that a measured bound actually
+   * reaches the composer — `footerSlot` is a hand-listed `useMemo`, and a bound
+   * missing from its dependencies would be computed and never delivered.
+   */
+  describe('composer height handle (Issue #2598)', () => {
+    const OriginalResizeObserver = window.ResizeObserver;
+    let observers: Array<() => void> = [];
+
+    beforeEach(() => {
+      observers = [];
+      mockFetch.mockImplementation(() => okJson({ isRunning: true, fullOutput: 'body', thinking: false }));
+      class CapturingResizeObserver {
+        constructor(private readonly callback: () => void) {
+          observers.push(() => this.callback());
+        }
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      }
+      (window as unknown as { ResizeObserver: unknown }).ResizeObserver = CapturingResizeObserver;
+    });
+
+    afterEach(() => {
+      (window as unknown as { ResizeObserver: unknown }).ResizeObserver = OriginalResizeObserver;
+    });
+
+    function stubHeight(el: Element, height: number) {
+      (el as HTMLElement).getBoundingClientRect = () =>
+        ({ height, width: 100, top: 0, left: 0, right: 100, bottom: height, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+    }
+
+    it('names the split scope and delivers the measured bound', async () => {
+      render(
+        <TerminalSplitPaneContent
+          worktreeId="w-1"
+          splitIndex={2}
+          cliToolId="claude"
+          availableInstances={[inst('claude')]}
+          onInstanceChange={vi.fn()}
+          onFocus={vi.fn()}
+          autoYes={{ onToggle: vi.fn() }}
+        />,
+      );
+      const composer = await screen.findByTestId('message-input-2');
+      expect(composer).toHaveAttribute('data-height-scope', 'split:2');
+      // Nothing measurable yet in jsdom: no bound.
+      expect(composer).toHaveAttribute('data-max-height', '');
+
+      // Give the pane a geometry: 800px column, a 30px header, a 120px footer
+      // holding a 36px textarea. The body gets 650px; 160px of it is its floor.
+      const body = screen.getByTestId('split-body-2');
+      const column = body.parentElement as HTMLElement;
+      stubHeight(column, 800);
+      for (const child of Array.from(column.children)) {
+        if (child !== body) stubHeight(child, child.contains(composer) ? 120 : 30);
+      }
+      stubHeight(screen.getAllByTestId('message-input-textarea')[0], 36);
+
+      act(() => observers.forEach(fire => fire()));
+      expect(screen.getByTestId('message-input-2')).toHaveAttribute('data-max-height', String(36 + 650 - 160));
+    });
+  });
+
   describe('opencode quick keys are collapsible on PC (Issue #2131)', () => {
     beforeEach(() => {
       window.localStorage.clear();

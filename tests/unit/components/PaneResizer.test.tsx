@@ -48,6 +48,27 @@ describe('PaneResizer', () => {
     });
   });
 
+  describe('Accessible name (Issue #2598)', () => {
+    it('uses the generic pane label by default', () => {
+      render(<PaneResizer onResize={mockOnResize} orientation="vertical" />);
+      expect(screen.getByRole('separator')).toHaveAttribute(
+        'aria-label',
+        'Resize panes. Use up and down arrow keys to adjust.',
+      );
+    });
+
+    it('lets a caller that is not a pane divider name itself', () => {
+      render(
+        <PaneResizer
+          onResize={mockOnResize}
+          orientation="vertical"
+          ariaLabel="Resize the message box"
+        />,
+      );
+      expect(screen.getByRole('separator', { name: 'Resize the message box' })).toBeInTheDocument();
+    });
+  });
+
   describe('Orientation', () => {
     it('should default to horizontal orientation', () => {
       render(<PaneResizer onResize={mockOnResize} />);
