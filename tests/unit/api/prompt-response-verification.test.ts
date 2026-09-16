@@ -1035,3 +1035,119 @@ describe('POST /api/worktrees/:id/prompt-response - Semantic yes/no resolution (
     expect(response.status).toBe(400);
   });
 });
+
+describe('POST /api/worktrees/:id/prompt-response - Free text aimed at a menu row (Issue #2573)', () => {
+  let db: Database.Database;
+
+  /**
+   * Claude's pre-2.1 permission menu, whose third row carries the words the
+   * generic parser flags as `requiresTextInput` — the same words, and the same
+   * flag, as Command Code's `No, tell Command Code what to do differently`.
+   */
+  const menuWithTextBearingRow = {
+    type: 'multiple_choice' as const,
+    question: 'Do you want to make this edit?',
+    options: [
+      { number: 1, label: 'Yes', isDefault: true, requiresTextInput: false },
+      { number: 2, label: 'Yes, allow all edits during this session (shift+tab)', isDefault: false, requiresTextInput: false },
+      { number: 3, label: 'No, and tell Claude what to do differently (esc)', isDefault: false, requiresTextInput: true },
+    ],
+    status: 'pending' as const,
+  };
+
+  function createBodyRequest(worktreeId: string, body: Record<string, unknown>): NextRequest {
+    return new Request(`http://localhost:3000/api/worktrees/${worktreeId}/prompt-response`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }) as unknown as NextRequest;
+  }
+
+  beforeEach(async () => {
+    db = new Database(':memory:');
+    runMigrations(db);
+
+    const { setMockDb } = await import('@/lib/db/db-instance');
+    setMockDb(db);
+
+    const worktree: Worktree = {
+      id: 'test-wt',
+      name: 'Test Worktree',
+      path: '/path/to/test',
+      repositoryPath: '/path/to/repo',
+      repositoryName: 'TestRepo',
+      cliToolId: 'claude',
+    };
+    upsertWorktree(db, worktree);
+
+    vi.clearAllMocks();
+
+    const { sendKeys, sendSpecialKeys } = await import('@/lib/tmux/tmux');
+    vi.mocked(sendKeys).mockResolvedValue(undefined);
+    vi.mocked(sendSpecialKeys).mockResolvedValue(undefined);
+    mockIsRunning.mockResolvedValue(true);
+
+    const { captureSessionOutputFresh } = await import('@/lib/session/cli-session');
+    const { detectPrompt } = await import('@/lib/detection/prompt-detector');
+    vi.mocked(captureSessionOutputFresh).mockResolvedValue(CLAUDE_PERMISSION_FRAME);
+    vi.mocked(detectPrompt).mockReturnValue({
+      isPrompt: true,
+      promptData: menuWithTextBearingRow,
+      cleanContent: 'permission menu',
+    });
+  });
+
+  it('refuses a reason sent at the menu row with unresolvable_answer, and sends no key', async () => {
+    const { sendKeys, sendSpecialKeys } = await import('@/lib/tmux/tmux');
+
+    // What PromptPanel used to post for "3. No, and tell … differently" + a reason.
+    const request = createBodyRequest('test-wt', {
+      answer: 'この操作はしないでください',
+      promptType: 'multiple_choice',
+      defaultOptionNumber: 1,
+    });
+    const response = await promptResponse(request, { params: Promise.resolve({ id: 'test-wt' }) });
+    const data = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(data.success).toBe(false);
+    expect(data.reason).toBe('unresolvable_answer');
+    expect(data.message).toContain('Nothing was sent');
+    expect(sendKeys).not.toHaveBeenCalled();
+    expect(sendSpecialKeys).not.toHaveBeenCalled();
+  });
+
+  it('records nothing and resumes nothing for the refusal', async () => {
+    const request = createBodyRequest('test-wt', { answer: 'use the other directory instead' });
+    const response = await promptResponse(request, { params: Promise.resolve({ id: 'test-wt' }) });
+    expect((await response.json()).success).toBe(false);
+
+    const rows = db.prepare('SELECT id FROM chat_messages WHERE worktree_id = ?').all('test-wt');
+    expect(rows).toHaveLength(0);
+    expect(startPolling).not.toHaveBeenCalled();
+    expect(broadcastTerminalSnapshotAfterInteraction).not.toHaveBeenCalled();
+  });
+
+  it('still answers the same row by its number (non-vacuity)', async () => {
+    const { sendKeys, sendSpecialKeys } = await import('@/lib/tmux/tmux');
+
+    const request = createBodyRequest('test-wt', { answer: '3' });
+    const response = await promptResponse(request, { params: Promise.resolve({ id: 'test-wt' }) });
+    const data = await response.json();
+
+    expect(data.success).toBe(true);
+    expect(data.answer).toBe('3');
+    // offset = 3 - 1 = 2: the cursor walks to the "No" row, it does not Enter on "Yes".
+    expect(sendSpecialKeys).toHaveBeenCalledWith('claude-test-wt', ['Down', 'Down', 'Enter']);
+    expect(sendKeys).not.toHaveBeenCalled();
+  });
+
+  it('still resolves a semantic "no" onto that row', async () => {
+    const request = createBodyRequest('test-wt', { answer: 'no' });
+    const response = await promptResponse(request, { params: Promise.resolve({ id: 'test-wt' }) });
+    const data = await response.json();
+
+    expect(data.success).toBe(true);
+    expect(data.resolved).toMatchObject({ via: 'semantic', optionNumber: 3 });
+  });
+});

@@ -9,7 +9,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
 // Import will be created in implementation phase
-import { PromptPanel } from '@/components/worktree/PromptPanel';
+import { PromptPanel, optionTakesTypedText } from '@/components/worktree/PromptPanel';
+import { isTypedTextFieldOption } from '@/lib/detection/prompt-detect-multiple-choice';
 import type { YesNoPromptData, MultipleChoicePromptData, PromptData } from '@/types/models';
 
 describe('PromptPanel', () => {
@@ -263,14 +264,19 @@ describe('PromptPanel', () => {
   });
 
   describe('Text Input Option', () => {
+    // Issue #2573: the field is offered for an option that IS a text field on
+    // screen — Command Code's `Type something...` (#2522), as its reader
+    // publishes it — not for every `requiresTextInput` row.
     const multipleChoiceWithInput: MultipleChoicePromptData = {
       type: 'multiple_choice',
-      question: 'Select an option:',
+      question: 'Which commit message should the PR use?',
       options: [
-        { number: 1, label: 'Use default', isDefault: true },
-        { number: 2, label: 'Enter custom value', isDefault: false, requiresTextInput: true },
+        { number: 1, label: 'Use the generated message', isDefault: true, requiresTextInput: false },
+        { number: 2, label: 'Type something...', isDefault: false, requiresTextInput: true },
       ],
       status: 'pending',
+      submitMode: 'answer_only',
+      isAskUserQuestion: true,
     };
 
     it('should show text input when option with requiresTextInput is selected', async () => {
@@ -333,6 +339,120 @@ describe('PromptPanel', () => {
       await waitFor(() => {
         expect(onRespond).toHaveBeenCalledWith('custom value', undefined);
       });
+    });
+  });
+
+  describe('Menu rows that read as taking text (Issue #2573)', () => {
+    /**
+     * Command Code 1.53.1's permission dialog as the generic parser reads it off
+     * `tests/fixtures/command-code-live-2250/dialog-shell-command.txt`. Row 3 is
+     * `requiresTextInput` by its words and a plain menu row on screen: a reason
+     * typed at it reached nothing and the Enter after it confirmed `1. Yes`.
+     */
+    const commandCodePermission: MultipleChoicePromptData = {
+      type: 'multiple_choice',
+      question: 'Command Code needs to execute sleep 30.',
+      options: [
+        { number: 1, label: 'Yes', isDefault: true, requiresTextInput: false },
+        { number: 2, label: "Yes, don't ask again for `sleep` commands in this project", isDefault: false, requiresTextInput: false },
+        { number: 3, label: 'No, tell Command Code what to do differently', isDefault: false, requiresTextInput: true },
+      ],
+      status: 'pending',
+    };
+
+    it('offers no text field for the "No, tell … differently" row', async () => {
+      render(
+        <PromptPanel {...defaultProps} promptData={commandCodePermission} messageId="msg-1" visible={true} />
+      );
+
+      fireEvent.click(screen.getAllByRole('radio')[2]);
+
+      await waitFor(() => {
+        expect(screen.getAllByRole('radio')[2]).toBeChecked();
+      });
+      expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+    });
+
+    it('sends the option NUMBER for that row, never text', async () => {
+      const onRespond = vi.fn().mockResolvedValue(undefined);
+      render(
+        <PromptPanel
+          {...defaultProps}
+          promptData={commandCodePermission}
+          messageId="msg-1"
+          visible={true}
+          onRespond={onRespond}
+        />
+      );
+
+      fireEvent.click(screen.getAllByRole('radio')[2]);
+      fireEvent.click(screen.getByRole('button', { name: /submit|send|confirm/i }));
+
+      await waitFor(() => {
+        expect(onRespond).toHaveBeenCalledWith('3', undefined);
+      });
+      expect(onRespond).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not carry text typed for a field row over to a menu row', async () => {
+      // One option list with both kinds, so the switch happens inside one panel:
+      // text typed while the field row was selected must not be what the menu
+      // row submits.
+      const mixed: MultipleChoicePromptData = {
+        ...commandCodePermission,
+        options: [
+          ...commandCodePermission.options,
+          { number: 4, label: 'Type something...', isDefault: false, requiresTextInput: true },
+        ],
+      };
+      const onRespond = vi.fn().mockResolvedValue(undefined);
+      render(
+        <PromptPanel {...defaultProps} promptData={mixed} messageId="msg-1" visible={true} onRespond={onRespond} />
+      );
+
+      fireEvent.click(screen.getAllByRole('radio')[3]);
+      fireEvent.change(screen.getByRole('textbox'), { target: { value: 'use the other directory' } });
+      fireEvent.click(screen.getAllByRole('radio')[2]);
+      fireEvent.click(screen.getByRole('button', { name: /submit|send|confirm/i }));
+
+      await waitFor(() => {
+        expect(onRespond).toHaveBeenCalledWith('3', undefined);
+      });
+    });
+
+    it('agrees with the detection module about which rows take typed text', () => {
+      // The panel restates the rule because it cannot import that module; this is
+      // what keeps the copy from drifting. `false` and absent are both covered so a
+      // copy that ignored `requiresTextInput` would fail too.
+      const labels = [
+        'Yes',
+        'No, tell Command Code what to do differently',
+        'No, and tell Codex what to do differently (esc)',
+        'No, and tell Copilot what to do differently (Esc to stop)',
+        'No, and tell Claude what to do differently (esc)',
+        'Type something...',
+        'Type something... Give me a branch name and I will check it out before dispatching.',
+        'Type something.',
+        '  type something',
+        'Enter custom value',
+        'Type here to explain',
+        "Yes, and always allow for commands that start with 'npm run custom'",
+        'Something to type something',
+      ];
+      for (const label of labels) {
+        for (const requiresTextInput of [true, false, undefined]) {
+          const option = { number: 1, label, requiresTextInput };
+          expect(optionTakesTypedText(option), `${label} / ${String(requiresTextInput)}`).toBe(
+            isTypedTextFieldOption(option),
+          );
+        }
+      }
+      expect(labels.filter((label) => optionTakesTypedText({ label, requiresTextInput: true }))).toEqual([
+        'Type something...',
+        'Type something... Give me a branch name and I will check it out before dispatching.',
+        'Type something.',
+        '  type something',
+      ]);
     });
   });
 

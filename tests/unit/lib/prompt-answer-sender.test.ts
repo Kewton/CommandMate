@@ -13,9 +13,18 @@ vi.mock('@/lib/tmux/tmux', () => ({
   sendSpecialKeys: vi.fn().mockResolvedValue(undefined),
 }));
 
-import { sendPromptAnswer } from '@/lib/prompt-answer-sender';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import {
+  sendPromptAnswer,
+  FreeTextAnswerRejectedError,
+  FREE_TEXT_AT_MENU_ROW_REASON,
+} from '@/lib/prompt-answer-sender';
 import { sendKeys, sendSpecialKeys } from '@/lib/tmux/tmux';
-import type { PromptData } from '@/types/models';
+import { isTypedTextFieldOption } from '@/lib/detection/prompt-detect-multiple-choice';
+import { detectPromptWithOptions } from '@/lib/polling/response-checker';
+import type { CLIToolType } from '@/lib/cli-tools/types';
+import type { MultipleChoicePromptData, PromptData } from '@/types/models';
 
 describe('sendPromptAnswer', () => {
   beforeEach(() => {
@@ -743,5 +752,200 @@ describe('sendPromptAnswer', () => {
       // Should use promptData's default (2), not fallback's (1): offset = 1 - 2 = -1 -> 1 Up + Enter
       expect(sendSpecialKeys).toHaveBeenCalledWith('claude-test', ['Up', 'Enter']);
     });
+  });
+});
+
+// ===========================================================================
+// Issue #2573: free text aimed at a menu row
+// ===========================================================================
+
+const REPO_ROOT = path.resolve(__dirname, '../../..');
+
+/** A live capture, raw, as tmux emitted it. */
+function liveFrame(relativePath: string): string {
+  return readFileSync(path.join(REPO_ROOT, relativePath), 'utf8');
+}
+
+/**
+ * The prompt the product reads off a live capture — the same shared entry the
+ * response poller and `/current-output` use — so the rows under test are the
+ * rows the answer panels were actually handed, not a hand-written copy.
+ */
+function livePrompt(cliToolId: CLIToolType, frame: string): MultipleChoicePromptData {
+  const promptData = detectPromptWithOptions(frame, cliToolId).promptData;
+  if (promptData?.type !== 'multiple_choice') {
+    throw new Error(`fixture did not parse as multiple_choice for ${cliToolId}`);
+  }
+  return promptData;
+}
+
+/** The reason the Issue measured on Command Code 1.53.1: it ran the `mkdir` anyway. */
+const REASON = 'この操作はしないでください';
+
+describe('Issue #2573: free text aimed at a menu row', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  describe.each([
+    ['command-code', 'tests/fixtures/command-code-live-2250/dialog-shell-command.txt', 'No, tell Command Code what to do differently'],
+    ['command-code', 'tests/fixtures/command-code-live-2250/dialog-create-file.txt', 'No, tell Command Code what to do differently'],
+    ['codex', 'tests/unit/lib/detection/fixtures/codex-live-1628/approval-run-command.txt', 'No, and tell Codex what to do differently (esc)'],
+    ['copilot', 'tests/unit/lib/detection/fixtures/copilot-live-1885/permission-dialog.txt', 'No, and tell Copilot what to do differently (Esc to stop)'],
+  ] as Array<[CLIToolType, string, string]>)('%s permission dialog (%s)', (cliToolId, fixture, menuRowLabel) => {
+    const frame = liveFrame(fixture);
+    const promptData = livePrompt(cliToolId, frame);
+    const sessionName = `${cliToolId}-test`;
+
+    it('is the screen the Issue is about: option 3 reads as taking text, and is a menu row', () => {
+      const row = promptData.options.find((option) => option.number === 3);
+      expect(row).toMatchObject({ label: menuRowLabel, requiresTextInput: true, isDefault: false });
+      expect(isTypedTextFieldOption(row!)).toBe(false);
+      expect(promptData.options.find((option) => option.isDefault)?.number).toBe(1);
+    });
+
+    it('refuses free text before a single key is sent', async () => {
+      const sent = sendPromptAnswer({ sessionName, answer: REASON, cliToolId, promptData, frame });
+
+      await expect(sent).rejects.toBeInstanceOf(FreeTextAnswerRejectedError);
+      await expect(sent).rejects.toMatchObject({
+        reason: FREE_TEXT_AT_MENU_ROW_REASON,
+        optionNumbers: [3],
+      });
+      // No key at all: not the text, and above all not the Enter that would have
+      // confirmed the highlighted `1. Yes`.
+      expect(sendKeys).not.toHaveBeenCalled();
+      expect(sendSpecialKeys).not.toHaveBeenCalled();
+    });
+
+    it('still sends the option number for the same row (non-vacuity)', async () => {
+      await sendPromptAnswer({ sessionName, answer: '3', cliToolId, promptData, frame });
+
+      expect(sendKeys).toHaveBeenCalledWith(sessionName, '3', false);
+      expect(sendSpecialKeys).not.toHaveBeenCalled();
+    });
+  });
+
+  it('refuses a text-bearing row whose words only sit inside a quoted command', async () => {
+    // `/custom/` and `/enter\s+/` in TEXT_INPUT_PATTERNS match inside the command
+    // an approval row quotes. The row is an APPROVAL; free text sent at it would
+    // be confirmed by the Enter just the same.
+    const promptData: PromptData = {
+      type: 'multiple_choice',
+      question: 'Do you want to proceed?',
+      options: [
+        { number: 1, label: 'Yes', isDefault: true, requiresTextInput: false },
+        {
+          number: 2,
+          label: "Yes, and always allow for commands that start with 'npm run custom'",
+          isDefault: false,
+          requiresTextInput: true,
+        },
+        { number: 3, label: 'No', isDefault: false, requiresTextInput: false },
+      ],
+      status: 'pending',
+    };
+
+    await expect(
+      sendPromptAnswer({ sessionName: 'antigravity-test', answer: 'stop', cliToolId: 'antigravity', promptData }),
+    ).rejects.toMatchObject({ optionNumbers: [2] });
+    expect(sendKeys).not.toHaveBeenCalled();
+    expect(sendSpecialKeys).not.toHaveBeenCalled();
+  });
+
+  it('never quotes the answer back in the refusal (SEC-003)', async () => {
+    const frame = liveFrame('tests/fixtures/command-code-live-2250/dialog-shell-command.txt');
+    const promptData = livePrompt('command-code', frame);
+
+    await expect(
+      sendPromptAnswer({
+        sessionName: 'command-code-test',
+        answer: '<script>alert(1)</script>',
+        cliToolId: 'command-code',
+        promptData,
+        frame,
+      }),
+    ).rejects.toSatisfy((error: Error) => !error.message.includes('script'));
+  });
+
+  describe('the free-text field next door (Issue #2522) is untouched', () => {
+    it.each([
+      'question-default-on-free-text.txt',
+      'question-description-on-last-option.txt',
+    ])('types the text into Command Code’s `Type something...` field (%s)', async (name) => {
+      const frame = liveFrame(`tests/fixtures/command-code-askuserquestion-2522/${name}`);
+      const promptData = livePrompt('command-code', frame);
+      expect(promptData.options.some(isTypedTextFieldOption)).toBe(true);
+
+      await sendPromptAnswer({
+        sessionName: 'command-code-test',
+        answer: 'Fix the flaky test first',
+        cliToolId: 'command-code',
+        promptData,
+        frame,
+      });
+
+      expect(vi.mocked(sendKeys).mock.calls).toEqual([
+        ['command-code-test', 'Fix the flaky test first', false],
+        ['command-code-test', '', true],
+      ]);
+    });
+  });
+
+  it('does not judge a prompt with no text-bearing option (pre-#2573 behaviour, #1726)', async () => {
+    const promptData: PromptData = {
+      type: 'multiple_choice',
+      question: 'Choose:',
+      options: [
+        { number: 1, label: 'A', isDefault: true, requiresTextInput: false },
+        { number: 2, label: 'B', isDefault: false, requiresTextInput: false },
+      ],
+      status: 'pending',
+    };
+
+    await sendPromptAnswer({ sessionName: 'codex-test', answer: 'custom text', cliToolId: 'codex', promptData });
+
+    expect(sendKeys).toHaveBeenCalledWith('codex-test', 'custom text', false);
+  });
+
+  it('does not judge a call with no promptData', async () => {
+    await sendPromptAnswer({
+      sessionName: 'codex-test',
+      answer: 'custom text',
+      cliToolId: 'codex',
+      fallbackPromptType: 'multiple_choice',
+    });
+
+    expect(sendKeys).toHaveBeenCalledWith('codex-test', 'custom text', false);
+  });
+});
+
+describe('isTypedTextFieldOption (Issue #2573)', () => {
+  it.each([
+    ['Type something...', true],
+    ['Type something... Give me a branch name and I will check it out before dispatching.', true],
+    ['  type something', true],
+  ])('%s with requiresTextInput is a text field', (label, expected) => {
+    expect(isTypedTextFieldOption({ label, requiresTextInput: true })).toBe(expected);
+  });
+
+  it.each([
+    'No, tell Command Code what to do differently',
+    'No, and tell Codex what to do differently (esc)',
+    'No, and tell Claude what to do differently (esc)',
+    'Tell me differently',
+    'Enter custom value',
+    'Type here to explain',
+    "Yes, and always allow for commands that start with 'npm run custom'",
+    'Something to type something',
+  ])('%s is a menu row even with requiresTextInput', (label) => {
+    expect(isTypedTextFieldOption({ label, requiresTextInput: true })).toBe(false);
+  });
+
+  it('needs requiresTextInput: a picker label alone is not a field', () => {
+    // Claude's AskUserQuestion appends `Type something.`, which the generic
+    // patterns do not flag; this module does not re-classify what they left alone.
+    expect(isTypedTextFieldOption({ label: 'Type something.', requiresTextInput: false })).toBe(false);
+    expect(isTypedTextFieldOption({ label: 'Type something.' })).toBe(false);
   });
 });

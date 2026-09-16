@@ -11,6 +11,7 @@ import type { CLIToolType } from './cli-tools/types';
 import { normalizeFrame } from '@/lib/detection/tools/frame';
 import { getToolStatusDetector } from '@/lib/detection/tools/registry';
 import type { DialogAnswerMode, DialogVerdict } from '@/lib/detection/tools/types';
+import { isTypedTextFieldOption } from '@/lib/detection/prompt-detect-multiple-choice';
 import type { PromptData, PromptType, SubmitMode } from '@/types/models';
 import { isValidSubmitMode } from '@/types/models';
 import { invalidateCache } from './tmux/tmux-capture-cache';
@@ -72,6 +73,53 @@ export class PromptAnswerRejectedError extends Error {
     this.reason = ANSWER_MODE_KEYS_REASON;
     this.dialogKind = dialog.kind;
     this.answerMode = dialog.answerMode;
+  }
+}
+
+/**
+ * The reason code a caller gets back when free text meets a prompt whose
+ * text-bearing options are all menu rows (Issue #2573).
+ *
+ * The code `/prompt-response` already answers "this answer cannot be mapped onto
+ * a choice, and nothing was sent" with (#1681, #2522), so `respond` reports it
+ * without a new branch.
+ */
+export const FREE_TEXT_AT_MENU_ROW_REASON = 'unresolvable_answer';
+
+/**
+ * Free text refused BEFORE any key reached the pane (Issue #2573).
+ *
+ * A sibling of {@link PromptAnswerRejectedError}, not a use of it, because the
+ * two cite different evidence. That one cites the dialog the tool's own rules
+ * vouched for (`dialogKind` / `answerMode`), and no such verdict can decide this
+ * case: Command Code has had rules since Issue #2574, and the permission dialog
+ * this guard is first about is vouched `numbered` — the verdict that lets a
+ * DIGIT through — while the `AskUserQuestion` screen whose free text must keep
+ * working is deliberately not recognised by those rules at all
+ * (`tools/command-code/permission.ts`). `answerMode` says how a CHOICE is
+ * pressed; it says nothing about which row is a text field. So what this one
+ * cites is the rows.
+ *
+ * The message is fixed text, a tool id and option numbers, never the answer
+ * (SEC-003, as in `prompt-answer-semantic`): the answer is whatever the operator
+ * typed, and `/prompt-response` returns this message to the client verbatim.
+ */
+export class FreeTextAnswerRejectedError extends Error {
+  /** Machine-readable code, always {@link FREE_TEXT_AT_MENU_ROW_REASON}. */
+  readonly reason: string;
+  /** The options that read as taking text and are menu rows on this screen. */
+  readonly optionNumbers: readonly number[];
+
+  constructor(cliToolId: CLIToolType, optionNumbers: readonly number[]) {
+    super(
+      `Refused to type free text at ${cliToolId}'s prompt: option ${optionNumbers.join(', ')} `
+      + 'reads as taking your own words, but on this screen it is a menu row, not a text field. '
+      + 'The text would be ignored and the Enter after it would confirm whatever is highlighted. '
+      + 'Nothing was sent. Answer with the option number, then send the instructions as a message.'
+    );
+    this.name = 'FreeTextAnswerRejectedError';
+    this.reason = FREE_TEXT_AT_MENU_ROW_REASON;
+    this.optionNumbers = optionNumbers;
   }
 }
 
@@ -214,6 +262,61 @@ function buildNavigationKeys(offset: number): string[] {
   return Array.from({ length: Math.abs(offset) }, () => direction);
 }
 
+/**
+ * Refuse free text aimed at a menu row (Issue #2573).
+ *
+ * ## The hole
+ *
+ * `PromptPanel` / `MobilePromptSheet` sent the operator's TEXT instead of the
+ * option number whenever the selected option had `requiresTextInput`, and
+ * `respond <id> "<text>"` sends text by construction. Nothing below maps text
+ * onto a choice — the cursor arm takes digits only — so the text arm typed it at
+ * the dialog and pressed Enter. On Command Code 1.53.1's permission dialog
+ * (`3. No, tell Command Code what to do differently`) the characters are ignored
+ * and the Enter confirms the highlighted `1. Yes`: measured, a reason meaning
+ * "do not do this" ran the `mkdir` it was sent to stop, and `/prompt-response`
+ * answered `success: true`.
+ *
+ * ## Why it is keyed on the rows and not on "is the answer a number"
+ *
+ * Free text is the RIGHT answer on the screen next door. Command Code's
+ * `AskUserQuestion` ends in `Type something...`, a real `TextInput` (#2522), and
+ * both rows carry `requiresTextInput`. So the question is whether the prompt's
+ * text-bearing options include one measured to be a field
+ * ({@link isTypedTextFieldOption}); only when every one of them is a menu row is
+ * the text refused.
+ *
+ * ## What it deliberately does NOT do
+ *
+ * - It does not judge a prompt with NO `requiresTextInput` option, nor a call
+ *   with no `promptData`. Free text there has reached the pane since before this
+ *   Issue, and #1726 pins that sessions the rows cannot speak for keep doing so.
+ *   So the same Enter still sits under free text sent at, e.g., claude's
+ *   `1. Yes / 2. … / 3. No`; closing that is wider than a row-level guard.
+ * - It does not deliver the reason. Sending the number and then the text as a
+ *   message is the follow-up (#2573 対応内容 2). Issue #2574 has since removed the
+ *   Enter that would have landed the reason in the wrong place on command-code,
+ *   so what is still missing is a measurement, per tool, of where the input goes
+ *   once the digit has confirmed.
+ *
+ * @throws {FreeTextAnswerRejectedError} when the answer is not a number and every
+ *   text-bearing option of the multiple-choice prompt is a menu row.
+ */
+function assertFreeTextHasATextField(params: SendPromptAnswerParams): void {
+  if (/^\d+$/.test(params.answer)) return;
+  const { promptData } = params;
+  if (promptData?.type !== 'multiple_choice') return;
+
+  const textBearing = promptData.options.filter((option) => option.requiresTextInput === true);
+  if (textBearing.length === 0) return;
+  if (textBearing.some(isTypedTextFieldOption)) return;
+
+  throw new FreeTextAnswerRejectedError(
+    params.cliToolId,
+    textBearing.map((option) => option.number),
+  );
+}
+
 export interface SendPromptAnswerParams {
   sessionName: string;
   answer: string;
@@ -257,6 +360,11 @@ export async function sendPromptAnswer(params: SendPromptAnswerParams): Promise<
   // does is just as meaningless on an unnumbered button strip as typing the
   // digit is.
   const dialog = await assertAnswerModeAcceptsNumber(params);
+
+  // Issue #2573: the same promise for text. The text arm below types whatever it
+  // is given and presses Enter, so text aimed at a menu row has to stop here —
+  // before the branch — or the Enter confirms the highlighted default.
+  assertFreeTextHasATextField(params);
 
   // Determine if this is an arrow-key-navigated multiple-choice prompt.
   // Claude Code and Antigravity (agy) both render selection menus that only

@@ -20,7 +20,11 @@ import {
   judgePromptResponse,
   UNSUPPORTED_DIALOG_LAYOUT_REASON,
 } from '@/lib/polling/auto-yes-dialog-gate';
-import { sendPromptAnswer, PromptAnswerRejectedError } from '@/lib/prompt-answer-sender';
+import {
+  sendPromptAnswer,
+  PromptAnswerRejectedError,
+  FreeTextAnswerRejectedError,
+} from '@/lib/prompt-answer-sender';
 import { resolvePromptAnswer, PromptAnswerResolutionError, type AnswerResolution } from '@/lib/prompt-answer-semantic';
 import { getAskUserQuestion } from '@/lib/session/agent-event-state';
 import { answerStructuredDecision } from '@/lib/hooks/structured-decision-response';
@@ -466,6 +470,25 @@ export async function POST(
           reason: error.reason,
           dialogKind: error.dialogKind,
           answerMode: error.answerMode,
+        });
+        return NextResponse.json({
+          success: false,
+          reason: error.reason,
+          message: error.message,
+          answer: answer ?? '',
+        });
+      }
+      // Issue #2573: the same guarantee for text aimed at a menu row — the
+      // "No, tell … what to do differently" row PromptPanel used to send the
+      // reason at. Refused before a key, so the dialog is still up and the
+      // operator can answer it with the option number.
+      if (error instanceof FreeTextAnswerRejectedError) {
+        logger.info('prompt-response-refused', {
+          worktreeId: id,
+          cliToolId,
+          instanceId,
+          reason: error.reason,
+          optionNumbers: error.optionNumbers,
         });
         return NextResponse.json({
           success: false,
