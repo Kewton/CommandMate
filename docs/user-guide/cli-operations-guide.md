@@ -113,12 +113,14 @@ commandmate ls --id anvil-              # worktree IDプレフィックスでフ
 ### 出力例
 
 ```
-ID                                               NAME                  STATUS   REASON                          DEFAULT
------------------------------------------------  --------------------  -------  ------------------------------  ------
-localllm-test                                    main                  ready    input_prompt                    claude
-commandmate                                      develop               running  thinking_indicator              claude
-commandmate-issue-518                            feature/518-worktree  ready    no_recent_output (no evidence)  claude
-commandmate-main                                 main                  idle     -                               claude
+ID                     NAME                  STATUS   REASON                          DEFAULT  AUTO_YES
+---------------------  --------------------  -------  ------------------------------  -------  ---------------
+localllm-test          main                  ready    input_prompt                    claude   42:10
+commandmate            develop               running  thinking_indicator              claude   1:05:33
+commandmate-issue-518  feature/518-worktree  ready    no_recent_output (no evidence)  claude   off
+commandmate-issue-600  feature/600-sessions  waiting  prompt_detected                 claude   off
+commandmate-issue-644  feature/644-repos     waiting  -                               claude   03:12 (codex-2)
+commandmate-main       main                  idle     -                               claude   off
 ```
 
 > ID は **worktree ディレクトリ名**由来です（Issue #1621/#1645）。`/worktree-setup` が作る
@@ -165,6 +167,51 @@ commandmate ls --json \
 | `sessionStatusByCli.<tool>.statusEvidence` | `'positive'`（何かが肯定的に確認した）／`'none'`（読めなかった） |
 | `sessionStatusByCli.<tool>.sessionStatusReason` | スクレイパーの理由コード |
 | `sessionStatusByCli.<tool>.lastKnownStatus` / `lastKnownStatusAt` | 最後に**肯定的に確認できた**状態とその時刻。サーバーのメモリ上に保持（TTL 30 分、再起動でクリア、セッション停止で破棄） |
+
+### AUTO_YES列の意味（Issue #2575）
+
+その行の STATUS を出している instance のうち、**最初に Auto-Yes を失う instance の残り時間**です。
+`waiting` の行が `off` なら、**誰も答えない確認待ち**＝人が答えるまで進みません。push 通知の
+設定・購読に関係なく、この 1 列で判定できるというのがこの列の目的です。
+
+| 表示 | 意味 |
+|---|---|
+| `42:10` | 残り時間（1 時間未満は `MM:SS`） |
+| `1:05:33` | 残り時間（1 時間以上は `H:MM:SS`） |
+| `off` | 対象 instance の少なくとも 1 つが**未武装**。その行のプロンプトは人が答えないと進まない |
+| `on` | 武装しているが期限が無い（サーバーが `expiresAt: null` を返した場合。通常のサーバーでは出ません） |
+| `-` | **判定できない**。#2512 より古いサーバー（`autoYesByInstance` が無い）／`idle` 以外の行で STATUS を説明する instance が 1 つも無い |
+| `03:12 (codex-2)` | 対象が既定エージェントのプライマリ以外の instance。括弧内はそのまま `--instance` に渡せる値 |
+
+対象の選び方は STATUS ごとに決まります（`waiting` なら待っている instance、`running` なら処理中の
+instance、`ready` なら起動中の instance、`idle` なら `exited` の instance）。どれも該当しない `idle`
+の行だけは、武装している instance 全体にフォールバックします。
+
+> **残り時間は「答えが返る」保証ではありません。** 契約（`--contract`）の autoYes ポリシーが
+> 応答を差し止めることがあり、自由記述のプロンプトにはそもそも自動で返す答えがありません。
+> 何が差し止められたか・なぜ止まったかは
+> `commandmate capture <id> --json --instance <instanceId>` の `autoYes.lastSuppression` /
+> `autoYes.stopReason` に出ます。誰も答えないプロンプトは `commandmate wait <id>` が exit 10 で返します。
+
+> **`off` は最小値で決まります。** 同じ行で `claude` が未武装、`codex` に残り 10 分という場合、
+> 表示は `10:00` ではなく `off` です。答えの付かないプロンプトをカウントダウンで隠さないための
+> 仕様で、instance ごとの内訳は `--json` の `autoYesByInstance` に残っています。
+
+> **REASON と AUTO_YES は別のセッションの話かもしれません。** REASON はツール単位（既定ツールを
+> 優先）、AUTO_YES は instance 単位で選ばれるため、同じ行の 2 つのセルが別のセッションを指すことが
+> あります。括弧内の instance ID が、その行で実際に待っているセッションを特定する唯一の手掛かりに
+> なる場合があります。
+
+`--json` はこの列を**導出しません**。`sessionStatusByInstance` と `autoYesByInstance` を
+サーバーの行のまま返すので、instance ごとの内訳はそちらを読んでください。
+
+```bash
+# waiting かつ誰も答えない行だけを拾う（列区切りは 2 個以上の空白）
+commandmate ls | awk -F'  +' '$3 == "waiting" && $6 ~ /^off/'
+```
+
+> `$NF` ではなく `$6` を見ています。`off (codex-2)` の括弧は**空白 1 個**で繋がっているため、
+> `$NF` だと `(codex-2)` を拾ってしまい、多エージェントの行だけが漏れます。
 
 ---
 
