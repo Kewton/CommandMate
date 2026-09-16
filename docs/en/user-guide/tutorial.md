@@ -103,10 +103,15 @@ commandmate ls
 ```
 
 ```
-ID                    NAME  STATUS  DEFAULT
---------------------  ----  ------  -------
-commandmate-tutorial  main  idle    claude
+ID                    NAME  STATUS  REASON  DEFAULT  AUTO_YES
+--------------------  ----  ------  ------  -------  --------
+commandmate-tutorial  main  idle    -       claude   off
 ```
+
+> **REASON and AUTO_YES**: `REASON` is the evidence behind STATUS, and `AUTO_YES` is how long this
+> row has before it loses Auto-Yes. Nothing has been started yet, so they read `-` (the server gives
+> no reason) and `off` (not armed — a confirmation prompt on this row would wait for a human).
+> The [CLI Operations Guide](./cli-operations-guide.md#commandmate-ls) covers all six columns.
 
 > **Note**: CommandMate cannot register a path outside its managed root. The worktree you create in Step 5 has to live under that root too.
 

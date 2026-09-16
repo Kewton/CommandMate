@@ -880,11 +880,14 @@ describe('Issue #2573: free text aimed at a menu row', () => {
   });
 
   describe('the free-text field next door (Issue #2522) is untouched', () => {
-    it.each([
-      'question-default-on-free-text.txt',
-      'question-description-on-last-option.txt',
-    ])('types the text into Command Code’s `Type something...` field (%s)', async (name) => {
-      const frame = liveFrame(`tests/fixtures/command-code-askuserquestion-2522/${name}`);
+    // Only the capture whose `❯` rests ON the field. This describe used to run
+    // `question-description-on-last-option.txt` too — a screen whose cursor is on
+    // option 1 — and so pinned the #2584 defect as correct; that capture is now
+    // asserted the other way round below.
+    it('types the text into Command Code’s `Type something...` field', async () => {
+      const frame = liveFrame(
+        'tests/fixtures/command-code-askuserquestion-2522/question-default-on-free-text.txt',
+      );
       const promptData = livePrompt('command-code', frame);
       expect(promptData.options.some(isTypedTextFieldOption)).toBe(true);
 
@@ -938,6 +941,170 @@ describe('Issue #2573: free text aimed at a menu row', () => {
   });
 });
 
+// ===========================================================================
+// Issue #2584: free text while the cursor is on another row
+// ===========================================================================
+
+/** The two live `AskUserQuestion` captures whose field is NOT the cursor row. */
+const CURSOR_ELSEWHERE_FIXTURES: Array<[string, number]> = [
+  // [capture, the option number `Type something...` is on]
+  ['question-flat-short.txt', 4],
+  ['question-description-on-last-option.txt', 3],
+];
+
+describe('Issue #2584: free text while the cursor is on another row', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  describe.each(CURSOR_ELSEWHERE_FIXTURES)(
+    'Command Code AskUserQuestion (%s)',
+    (name, fieldNumber) => {
+      const frame = liveFrame(`tests/fixtures/command-code-askuserquestion-2522/${name}`);
+      const promptData = livePrompt('command-code', frame);
+      const sessionName = 'command-code-test';
+
+      it('is the screen the Issue is about: a real field, and the cursor elsewhere', () => {
+        const field = promptData.options.find((option) => option.number === fieldNumber);
+        expect(field).toMatchObject({ requiresTextInput: true });
+        expect(isTypedTextFieldOption(field!)).toBe(true);
+        // The `❯` is on option 1, so #2573's guard has nothing to say here: its
+        // question is whether ANY text-bearing row is a field, and this one is.
+        expect(promptData.options.find((option) => option.isDefault)?.number).toBe(1);
+        expect(promptData.options.some(isTypedTextFieldOption)).toBe(true);
+      });
+
+      it('refuses the free text before a single key is sent', async () => {
+        const sent = sendPromptAnswer({
+          sessionName,
+          answer: 'UAT-FREETEXT-KIWI',
+          cliToolId: 'command-code',
+          promptData,
+          frame,
+        });
+
+        await expect(sent).rejects.toBeInstanceOf(FreeTextAnswerRejectedError);
+        await expect(sent).rejects.toMatchObject({
+          reason: FREE_TEXT_AT_MENU_ROW_REASON,
+          kind: 'cursor_elsewhere',
+          optionNumbers: [fieldNumber],
+          cursorOptionNumber: 1,
+        });
+        // The measured failure, and the whole point: option 1 is NOT confirmed.
+        expect(sendKeys).not.toHaveBeenCalled();
+        expect(sendSpecialKeys).not.toHaveBeenCalled();
+      });
+
+      it('names the field and the row the Enter would have confirmed', async () => {
+        const sent = sendPromptAnswer({
+          sessionName,
+          answer: 'UAT-FREETEXT-KIWI',
+          cliToolId: 'command-code',
+          promptData,
+          frame,
+        });
+
+        await expect(sent).rejects.toSatisfy((error: Error) =>
+          error.message.includes(`option ${fieldNumber} is the text field`)
+          && error.message.includes('the cursor is on option 1')
+          && error.message.includes('Nothing was sent.'));
+      });
+
+      it('never quotes the answer back in the refusal (SEC-003)', async () => {
+        const sent = sendPromptAnswer({
+          sessionName,
+          answer: '<script>alert(1)</script>',
+          cliToolId: 'command-code',
+          promptData,
+          frame,
+        });
+
+        await expect(sent).rejects.toSatisfy(
+          (error: Error) => !error.message.includes('script'),
+        );
+      });
+
+      it('still answers the ordinary options on the same screen (non-vacuity)', async () => {
+        await sendPromptAnswer({
+          sessionName,
+          answer: '2',
+          cliToolId: 'command-code',
+          promptData,
+          frame,
+        });
+
+        expect(sendKeys).toHaveBeenCalledWith(sessionName, '2', false);
+        expect(sendSpecialKeys).not.toHaveBeenCalled();
+      });
+    },
+  );
+
+  it('sends the text once the cursor IS on the field', async () => {
+    // The same request, the same screen shape, the `❯` one row down: this is the
+    // half #2522 measured and the reason the guard is keyed on the cursor rather
+    // than on the tool or on the row type.
+    const frame = liveFrame(
+      'tests/fixtures/command-code-askuserquestion-2522/question-default-on-free-text.txt',
+    );
+    const promptData = livePrompt('command-code', frame);
+    expect(promptData.options.find((option) => option.isDefault)?.number).toBe(3);
+
+    await sendPromptAnswer({
+      sessionName: 'command-code-test',
+      answer: 'UAT-FREETEXT-KIWI',
+      cliToolId: 'command-code',
+      promptData,
+      frame,
+    });
+
+    expect(vi.mocked(sendKeys).mock.calls).toEqual([
+      ['command-code-test', 'UAT-FREETEXT-KIWI', false],
+      ['command-code-test', '', true],
+    ]);
+  });
+
+  it('does not judge a screen whose cursor no option carries (#999)', async () => {
+    // agy's picker publishes its highlight without `isDefault`. There is nothing
+    // to compare the field against, so the text goes as it did before #2584.
+    const promptData: PromptData = {
+      type: 'multiple_choice',
+      question: 'Which branch?',
+      options: [
+        { number: 1, label: 'develop', requiresTextInput: false },
+        { number: 2, label: 'Type something...', requiresTextInput: true },
+      ],
+      status: 'pending',
+    };
+
+    await sendPromptAnswer({
+      sessionName: 'antigravity-test',
+      answer: 'feature/x',
+      cliToolId: 'antigravity',
+      promptData,
+    });
+
+    expect(sendKeys).toHaveBeenCalledWith('antigravity-test', 'feature/x', false);
+  });
+
+  it('leaves #2573 to report a screen with no field at all', async () => {
+    // Disjoint by construction: every text-bearing row here is a menu row, so
+    // the #2584 guard returns before it looks at the cursor and the refusal that
+    // comes out is still `menu_row`.
+    const frame = liveFrame('tests/fixtures/command-code-live-2250/dialog-shell-command.txt');
+    const promptData = livePrompt('command-code', frame);
+    expect(promptData.options.some(isTypedTextFieldOption)).toBe(false);
+
+    const sent = sendPromptAnswer({
+      sessionName: 'command-code-test',
+      answer: REASON,
+      cliToolId: 'command-code',
+      promptData,
+      frame,
+    });
+
+    await expect(sent).rejects.toMatchObject({ kind: 'menu_row', cursorOptionNumber: null });
+  });
+});
 // ===========================================================================
 // Issue #2583: free text at a dialog with no text field on it at all
 // ===========================================================================

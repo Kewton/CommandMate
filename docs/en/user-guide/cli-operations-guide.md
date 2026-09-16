@@ -100,12 +100,14 @@ commandmate ls --id anvil-             # Filter by worktree id prefix
 ### Output Example
 
 ```
-ID                                               NAME                  STATUS   DEFAULT
------------------------------------------------  --------------------  -------  ------
-localllm-test                                    main                  ready    claude
-commandmate                                      develop               running  claude
-commandmate-issue-518                            feature/518-worktree  ready    claude
-commandmate-main                                 main                  idle     claude
+ID                     NAME                  STATUS   REASON                          DEFAULT  AUTO_YES
+---------------------  --------------------  -------  ------------------------------  -------  ---------------
+localllm-test          main                  ready    input_prompt                    claude   42:10
+commandmate            develop               running  thinking_indicator              claude   1:05:33
+commandmate-issue-518  feature/518-worktree  ready    no_recent_output (no evidence)  claude   off
+commandmate-issue-600  feature/600-sessions  waiting  prompt_detected                 claude   off
+commandmate-issue-644  feature/644-repos     waiting  -                               claude   03:12 (codex-2)
+commandmate-main       main                  idle     -                               claude   off
 ```
 
 > IDs derive from the **worktree directory name** (Issues #1621 / #1645). The directory names
@@ -120,6 +122,84 @@ commandmate-main                                 main                  idle     
 | `ready` | Session running, waiting for input (task completed) |
 | `running` | Agent executing a task |
 | `waiting` | Confirmation prompt active (Yes/No, etc.) |
+
+### REASON Column (Issue #1926)
+
+The **evidence** behind the STATUS beside it. The same `ready` can mean "the agent came back to its
+composer" (`input_prompt`) or "the frame could not be read and the output stopped, so `ready` is a
+fallback" (`no_recent_output`) — two different things the table could not tell apart before.
+
+| Value | Meaning |
+|---|---|
+| `input_prompt` | A composer (input prompt) was detected |
+| `thinking_indicator` | A thinking indicator was detected |
+| `prompt_detected` | A confirmation prompt was parsed |
+| `<reason> (no evidence)` | **No positive evidence** (`statusEvidence: 'none'`). The detection layer could not classify the frame, so the STATUS beside it is a fallback rather than a reading. Today that is exactly the `default` and `no_recent_output` reasons |
+| `-` | The server gives no reason: it predates #1926, the session is not running, or the tool has two or more instances and the aggregate dropped the reason |
+
+> A `(no evidence)` row does not mean "finished". Check the raw pane with
+> `commandmate capture <id> --pane`. When the same state holds for 60 seconds,
+> `commandmate wait` returns exit 10 (`type: 'unclassified'`).
+
+`--json` passes **the server's row through verbatim**: the reason and the evidence live under
+`sessionStatusByCli.<tool>` and are not lifted to the top level, so the payload matches
+`GET /api/worktrees`.
+
+```bash
+commandmate ls --json \
+  | jq -r '.[] | "\(.id)\t\(.sessionStatusByCli.claude.sessionStatusReason // "-")\t\(.sessionStatusByCli.claude.statusEvidence // "-")"'
+```
+
+| Field | Meaning |
+|---|---|
+| `sessionStatusByCli.<tool>.statusEvidence` | `'positive'` (something confirmed it) / `'none'` (the frame could not be read) |
+| `sessionStatusByCli.<tool>.sessionStatusReason` | The scraper's reason code |
+| `sessionStatusByCli.<tool>.lastKnownStatus` / `lastKnownStatusAt` | The last **positively confirmed** status and when. Held in server memory (TTL 30 minutes, cleared on restart, dropped when the session stops) |
+
+### AUTO_YES Column (Issue #2575)
+
+How much Auto-Yes is left on the instance that will lose it **first**, among the instances that
+explain this row's STATUS. A `waiting` row reading `off` is **a confirmation prompt nobody is going
+to answer** — it waits for a human. Reading that off this one column, with no push notification
+configured and no subscription, is what the column exists for.
+
+| Value | Meaning |
+|---|---|
+| `42:10` | Time left (`MM:SS` under an hour) |
+| `1:05:33` | Time left (`H:MM:SS` from an hour up) |
+| `off` | At least one of those instances is **not armed**, so a prompt on this row waits for a human |
+| `on` | Armed with no expiry the server named (`expiresAt: null`; the current server does not produce this shape) |
+| `-` | **Not known**: the server predates #2512 (no `autoYesByInstance`), or this row is not `idle` and no instance explains its STATUS |
+| `03:12 (codex-2)` | The cell is about an instance other than the default agent's primary. The id in parentheses is an `--instance` value verbatim |
+
+Which instances count is decided per STATUS: `waiting` takes the ones waiting, `running` the ones
+processing, `ready` the ones running, and `idle` the ones that exited. Only a bare `idle` row that
+nothing explains falls back to every armed instance.
+
+> **Time left is not a promise that the prompt gets answered.** A contract (`--contract`) autoYes
+> policy can withhold the answer, and a free-text prompt has no answer to give in the first place.
+> What was withheld and why it stopped are in
+> `commandmate capture <id> --json --instance <instanceId>` as `autoYes.lastSuppression` and
+> `autoYes.stopReason`. `commandmate wait <id>` returns exit 10 for a prompt no agent will clear.
+
+> **`off` wins because the cell is a minimum.** On a row where `claude` is unarmed and `codex` has
+> ten minutes left, the cell reads `off`, not `10:00` — a countdown must not bury a prompt nobody
+> will answer. The per-instance breakdown is still in `--json` under `autoYesByInstance`.
+
+> **REASON and AUTO_YES can be about different sessions.** REASON is chosen per tool (preferring the
+> worktree default), AUTO_YES per instance, so the two cells on one row need not agree. The instance
+> id in parentheses is sometimes the only thing on the line that identifies the waiting session.
+
+`--json` does **not** derive this column. It carries `sessionStatusByInstance` and
+`autoYesByInstance` as the server sent them, which is where the per-instance breakdown is.
+
+```bash
+# Only the rows that are waiting with nobody to answer (columns are split on 2+ spaces)
+commandmate ls | awk -F'  +' '$3 == "waiting" && $6 ~ /^off/'
+```
+
+> `$6`, not `$NF`: the parenthesis in `off (codex-2)` is joined by **a single space**, so `$NF`
+> would pick up `(codex-2)` and silently skip exactly the multi-agent rows.
 
 ---
 
