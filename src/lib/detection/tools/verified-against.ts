@@ -135,6 +135,14 @@ export const ANTIGRAVITY_VERIFIED_AGAINST = {
  * nobody took. When a live 1.53.x session is probed — the question screen, the
  * keys it accepts and what one of them advances — bump this to that exact
  * version with its own `capturedAt`.
+ *
+ * ## Not advanced by Issue #2574 either
+ *
+ * #2574 did send keys at a live 1.53.1 pane, but at the PERMISSION dialog, not
+ * the question screen: a bare digit commits it, which is the `submitMode` its
+ * `detectDialog` declares. The rule itself was read off the 1.40.1 and 1.49.0
+ * dialog frames above, and no 1.53.1 frame was added to the fixture directory,
+ * so the condition in the previous paragraph is still unmet.
  */
 export const COMMAND_CODE_VERIFIED_AGAINST = {
   version: '1.40.1',

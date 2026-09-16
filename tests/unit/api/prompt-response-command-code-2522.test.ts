@@ -267,6 +267,43 @@ describe('[#2522] answering the question screen', () => {
       [SESSION, '', true],
     ]);
   });
+
+  it('refuses that same TEXT when the cursor is on another row (#2584)', async () => {
+    // The Issue, through the body PromptPanel posts. `question-flat-short.txt`
+    // is the same screen with the `❯` on option 1 and `Type something...` on
+    // option 4 — measured on 1.53.1, the text was ignored and the Enter after it
+    // confirmed option 1 while this route answered `success: true`.
+    const { status, data } = await respond(f2522('question-flat-short.txt'), {
+      answer: 'UAT-FREETEXT-KIWI',
+    });
+
+    expect(status).toBe(200);
+    expect(data.success).toBe(false);
+    expect(data.reason).toBe('unresolvable_answer');
+    expect(data.message).toContain('option 4 is the text field');
+    expect(data.message).toContain('the cursor is on option 1');
+
+    // Above all: option 1 was not confirmed.
+    const keys = await keystrokes();
+    expect(keys.text).toEqual([]);
+    expect(keys.special).toEqual([]);
+  });
+
+  it('never returns the operator’s own words in that refusal (SEC-003)', async () => {
+    const { data } = await respond(f2522('question-flat-short.txt'), {
+      answer: '<script>alert(1)</script>',
+    });
+
+    expect(data.success).toBe(false);
+    expect(data.message).not.toContain('script');
+  });
+
+  it('still answers the ordinary options on that screen (non-vacuity)', async () => {
+    const { data } = await respond(f2522('question-flat-short.txt'), { answer: '2' });
+
+    expect(data.success).toBe(true);
+    expect((await keystrokes()).text).toEqual([[SESSION, '2', false]]);
+  });
 });
 
 describe('[#2522] the two refusals, told apart', () => {
@@ -315,17 +352,17 @@ describe('[#2522] the existing Command Code dialogs are untouched', () => {
     ['dialog-create-file.txt'],
     ['dialog-kill-task-1490.txt'],
     ['dialog-shell-1490.txt'],
-  ])('%s still answers through the generic parser, with its Enter', async (name) => {
+  ])('%s still answers through the generic parser, with no Enter after the digit', async (name) => {
     // The four permission dialogs have no tab strip, so the new reading declines
-    // them and they keep the `answer_then_enter` behaviour #2250 measured.
+    // them and the generic parser still builds their prompt. Issue #2574: the
+    // digit is a hotkey that commits the dialog (measured live on 1.53.1), so
+    // command-code's `detectDialog` declares `answer_only`, and the Enter that
+    // used to follow it — which submitted a composer draft — is no longer sent.
     const raw = readFileSync(path.join(LIVE_DIR, name), 'utf8');
     const { data } = await respond(raw, { answer: '1' });
 
     expect(data.success).toBe(true);
     const keys = await keystrokes();
-    expect(keys.text).toEqual([
-      [SESSION, '1', false],
-      [SESSION, '', true],
-    ]);
+    expect(keys.text).toEqual([[SESSION, '1', false]]);
   });
 });

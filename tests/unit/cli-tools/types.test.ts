@@ -7,6 +7,7 @@ import type { CLIToolType, ICLITool, CLIToolInfo, IImageCapableCLITool } from '@
 import { isImageCapableCLITool } from '@/lib/cli-tools/types';
 import { resolveComposerSpec } from '@/lib/cli-tools/composer-spec';
 import { resolveCaptureSpec } from '@/lib/cli-tools/capture-spec';
+import { resolveAgentModeSpec } from '@/lib/cli-tools/agent-mode-spec';
 import { resolveGracefulExitSpec } from '@/lib/cli-tools/graceful-exit';
 import { resolveLivenessSpec } from '@/lib/cli-tools/liveness-spec';
 import { NAVIGATION_KEY_VALUES } from '@/types/terminal-keys';
@@ -23,6 +24,11 @@ const contractMethods = (id: CLIToolType) => ({
   captureSpec: () => resolveCaptureSpec(id),
   navigationKeys: () => ({ keys: NAVIGATION_KEY_VALUES, leaderKey: null }),
   livenessSpec: () => resolveLivenessSpec(id),
+  // Issue #2592: the mode declaration is part of the contract now, so a mock
+  // that omits it no longer typechecks as an `ICLITool`. Answered from the real
+  // table for the same reason every line above is — the point of this helper is
+  // that a mock cannot drift from the interface.
+  agentModeSpec: () => resolveAgentModeSpec(id),
 });
 
 describe('CLITool Types', () => {

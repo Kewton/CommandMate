@@ -22,6 +22,38 @@ const ANIMATION_DURATION_MS = 300;
 /** Swipe threshold to dismiss in pixels */
 const SWIPE_DISMISS_THRESHOLD = 100;
 
+/**
+ * The option labels measured to be a text field on screen (Issue #2573).
+ *
+ * Restated — as `PromptPanel.tsx` restates it — from
+ * `TYPED_TEXT_FIELD_LABEL_PATTERNS` in `lib/detection/prompt-detect-multiple-choice`,
+ * which a client module cannot import (its graph reaches `lib/env`'s `fs`). Not
+ * imported from `PromptPanel` either: suites that mock that module for the split
+ * pane still render this sheet. `tests/unit/components/mobile/MobilePromptSheet.test.tsx`
+ * asserts this copy agrees with the detection module.
+ */
+const TYPED_TEXT_FIELD_LABEL_PATTERNS: readonly RegExp[] = [
+  /^[^\S\n]*type\s+something\b/i,
+];
+
+/**
+ * Whether the sheet should send the operator's TEXT for this option rather than
+ * its number (Issue #2573).
+ *
+ * `requiresTextInput` is true for both Command Code's `Type something...` (a real
+ * text field, #2522) and its permission dialog's `No, tell Command Code what to
+ * do differently` (a menu row). Text sent at the menu row reached no field, and
+ * the Enter after it confirmed the highlighted `1. Yes`. So only a measured text
+ * field takes text; a menu row is answered by its number, after which the tool is
+ * back at its composer for the instructions.
+ */
+export function optionTakesTypedText(
+  option: { readonly label: string; readonly requiresTextInput?: boolean },
+): boolean {
+  return option.requiresTextInput === true
+    && TYPED_TEXT_FIELD_LABEL_PATTERNS.some((pattern) => pattern.test(option.label));
+}
+
 /** Button style constants */
 const BUTTON_STYLES = {
   /** Common button base styles */
@@ -244,7 +276,9 @@ function PromptContent({
     return promptData.options.find(opt => opt.number === selectedOption) ?? null;
   }, [promptData, selectedOption]);
 
-  const requiresTextInput = selectedOptionData?.requiresTextInput === true;
+  // Issue #2573: the same rule PromptPanel applies — only an option that IS a
+  // text field on screen gets the field, and its text; a menu row sends its number.
+  const takesTypedText = selectedOptionData !== null && optionTakesTypedText(selectedOptionData);
   const isDisabled = answering || isSubmitting;
 
   // Handle yes/no button click
@@ -265,7 +299,7 @@ function PromptContent({
     if (isDisabled || selectedOption === null) return;
     setIsSubmitting(true);
     try {
-      const answer = requiresTextInput && textInputValue.trim()
+      const answer = takesTypedText && textInputValue.trim()
         ? textInputValue.trim()
         : selectedOption.toString();
       await onRespond(answer);
@@ -274,7 +308,7 @@ function PromptContent({
     } finally {
       setIsSubmitting(false);
     }
-  }, [isDisabled, onRespond, selectedOption, requiresTextInput, textInputValue]);
+  }, [isDisabled, onRespond, selectedOption, takesTypedText, textInputValue]);
 
   return (
     <div className="space-y-4">
@@ -322,7 +356,7 @@ function PromptContent({
           onSelectOption={setSelectedOption}
           textInputValue={textInputValue}
           onTextInputChange={setTextInputValue}
-          showTextInput={requiresTextInput}
+          showTextInput={takesTypedText}
           onSubmit={handleMultipleChoiceSubmit}
         />
       )}

@@ -20,7 +20,12 @@ import {
   judgePromptResponse,
   UNSUPPORTED_DIALOG_LAYOUT_REASON,
 } from '@/lib/polling/auto-yes-dialog-gate';
-import { sendPromptAnswer, PromptAnswerRejectedError } from '@/lib/prompt-answer-sender';
+import {
+  sendPromptAnswer,
+  PromptAnswerRejectedError,
+  FreeTextAnswerRejectedError,
+  FreeTextAtChoiceOnlyPromptError,
+} from '@/lib/prompt-answer-sender';
 import { resolvePromptAnswer, PromptAnswerResolutionError, type AnswerResolution } from '@/lib/prompt-answer-semantic';
 import { getAskUserQuestion } from '@/lib/session/agent-event-state';
 import { answerStructuredDecision } from '@/lib/hooks/structured-decision-response';
@@ -466,6 +471,31 @@ export async function POST(
           reason: error.reason,
           dialogKind: error.dialogKind,
           answerMode: error.answerMode,
+        });
+        return NextResponse.json({
+          success: false,
+          reason: error.reason,
+          message: error.message,
+          answer: answer ?? '',
+        });
+      }
+      // Issue #2573: the same guarantee for text aimed at a menu row — the
+      // "No, tell … what to do differently" row PromptPanel used to send the
+      // reason at. Issue #2583 extends it to the dialog with no such row at all
+      // (claude's and agy's Bash approvals), where a refusal typed as free text
+      // used to answer `success: true` and run the command. Both are refused
+      // before a key, so the dialog is still up and the operator can answer it
+      // with the option number. They share a reason code on purpose; what
+      // differs is only the evidence each can log.
+      if (error instanceof FreeTextAnswerRejectedError || error instanceof FreeTextAtChoiceOnlyPromptError) {
+        logger.info('prompt-response-refused', {
+          worktreeId: id,
+          cliToolId,
+          instanceId,
+          reason: error.reason,
+          ...(error instanceof FreeTextAnswerRejectedError
+            ? { optionNumbers: error.optionNumbers }
+            : { optionCount: error.optionCount }),
         });
         return NextResponse.json({
           success: false,

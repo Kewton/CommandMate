@@ -24,7 +24,7 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
 ### commandmate ls
   List worktrees with status.
 
-  commandmate ls                          # Table format (ID, NAME, STATUS, DEFAULT)
+  commandmate ls                          # Table format (ID, NAME, STATUS, REASON, DEFAULT, AUTO_YES)
   commandmate ls --json                   # JSON output (for agent consumption)
   commandmate ls --quiet                  # IDs only, one per line (for piping)
   commandmate ls --branch <prefix>        # Filter by branch name prefix
@@ -40,6 +40,42 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
     ready    - Session running, waiting for input (task completed)
     running  - Agent executing a task
     waiting  - Confirmation prompt active (Yes/No, etc.)
+
+  REASON values (Issue #1926):
+    The evidence behind the STATUS beside it. '<reason> (no evidence)' marks a
+    frame the detection layer could not classify, so the STATUS is a fallback
+    rather than a reading. '-' means the server gives no reason: it predates
+    #1926, the session is not running, or the tool has two or more instances and
+    the per-tool aggregate dropped it. 'commandmate ls --json' keeps the
+    per-tool rows under sessionStatusByCli.<tool>.
+
+  AUTO_YES values (Issue #2575):
+    Time left on the instance that will lose Auto-Yes FIRST, among the instances
+    that explain this row's STATUS (waiting: the ones waiting; running: the ones
+    processing; ready: the ones running; idle: the ones that exited -- a bare
+    idle row falls back to every armed instance).
+
+    MM:SS    - time left, under an hour (e.g. 42:10)
+    H:MM:SS  - time left, an hour or more (e.g. 1:05:33)
+    on       - armed, with no expiry the server named
+    off      - at least one of those instances is NOT armed, so a prompt on this
+               row waits for a human. 'waiting' + 'off' is a confirmation
+               prompt nobody is going to answer -- the cell to look for
+    -        - not known: the server predates #2512, or this row is not idle and
+               no instance explains its STATUS
+
+    A trailing ' (<instanceId>)' names the instance the cell is about, printed
+    when that is not the default agent's primary. Pass it to capture / send /
+    respond as --instance verbatim.
+
+    Time left is a fact about Auto-Yes, not a promise that the prompt gets
+    answered: a contract autoYes policy can withhold the answer, and a free-text
+    prompt has none to give. 'commandmate capture <id> --json --instance <id>'
+    carries autoYes.lastSuppression and autoYes.stopReason; 'commandmate wait'
+    returns exit 10 for a prompt no agent is going to clear.
+
+    Nothing here is derived in --json: it carries sessionStatusByInstance and
+    autoYesByInstance raw, which is where the per-instance breakdown is.
 
 ### commandmate sync
   Ask the server to re-scan repositories and sync worktrees to its database

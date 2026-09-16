@@ -4,6 +4,9 @@
  *
  * Issue #294: Schedule execution feature
  * [S1-014/S2-002] result column excluded from list endpoint for performance
+ * Issue #2577: each row carries `warning` — the blocked-tool-call line read off
+ *   the head of `result`, so a run the CLI called a success but whose tool
+ *   calls were refused does not list as a plain success
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -12,6 +15,11 @@ import { getWorktreeById } from '@/lib/db';
 import { isValidWorktreeId } from '@/lib/security/path-validator';
 import { createLogger } from '@/lib/logger';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
+import {
+  COMMAND_CODE_BLOCKED_WARNING_PREFIX,
+  EXECUTION_LOG_WARNING_HEAD_LENGTH,
+  readExecutionLogWarning,
+} from '@/lib/session/claude-executor';
 
 const logger = createLogger('api/execution-logs');
 
@@ -40,15 +48,31 @@ export async function GET(
     // [S1-014] Exclude result column from list API for performance
     // Return all execution logs with schedule name via LEFT JOIN
     // (includes logs from renamed/disabled schedules)
-    const logs = db.prepare(`
+    //
+    // Issue #2577: the one exception is the warning line claude-executor writes
+    // first when command-code reported blocked tool calls. Only rows whose
+    // result starts with the prefix hand back a bounded head, so the list still
+    // never reads the transcript itself.
+    const rows = db.prepare(`
       SELECT el.id, el.schedule_id, el.worktree_id, el.message, el.exit_code, el.status, el.started_at, el.completed_at, el.created_at,
-             se.name AS schedule_name
+             se.name AS schedule_name,
+             CASE WHEN substr(el.result, 1, ?) = ? THEN substr(el.result, 1, ?) END AS result_head
       FROM execution_logs el
       LEFT JOIN scheduled_executions se ON el.schedule_id = se.id
       WHERE el.worktree_id = ?
       ORDER BY el.created_at DESC
       LIMIT 100
-    `).all(id);
+    `).all(
+      COMMAND_CODE_BLOCKED_WARNING_PREFIX.length,
+      COMMAND_CODE_BLOCKED_WARNING_PREFIX,
+      EXECUTION_LOG_WARNING_HEAD_LENGTH,
+      id
+    ) as Array<Record<string, unknown> & { result_head: string | null }>;
+
+    const logs = rows.map(({ result_head: resultHead, ...log }) => ({
+      ...log,
+      warning: readExecutionLogWarning(resultHead),
+    }));
 
     return NextResponse.json({ logs }, { status: 200 });
   } catch (error) {

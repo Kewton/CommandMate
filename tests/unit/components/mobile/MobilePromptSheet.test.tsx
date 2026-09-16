@@ -8,8 +8,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
-import { MobilePromptSheet } from '@/components/mobile/MobilePromptSheet';
+import { MobilePromptSheet, optionTakesTypedText } from '@/components/mobile/MobilePromptSheet';
 import type { MobilePromptSheetProps } from '@/components/mobile/MobilePromptSheet';
+import { isTypedTextFieldOption } from '@/lib/detection/prompt-detect-multiple-choice';
 import type { YesNoPromptData, MultipleChoicePromptData } from '@/types/models';
 
 describe('MobilePromptSheet', () => {
@@ -231,6 +232,95 @@ describe('MobilePromptSheet', () => {
 
       expect(screen.getByText(/Option A/)).toBeInTheDocument();
       expect(screen.getByText(/Option B/)).toBeInTheDocument();
+    });
+  });
+
+  describe('Options that read as taking text (Issue #2573)', () => {
+    /**
+     * Command Code 1.53.1's permission dialog, as the generic parser reads it off
+     * `tests/fixtures/command-code-live-2250/dialog-shell-command.txt`. Row 3 is
+     * `requiresTextInput` by its words and a plain menu row on screen.
+     */
+    const commandCodePermission: MultipleChoicePromptData = {
+      type: 'multiple_choice',
+      question: 'Command Code needs to execute sleep 30.',
+      options: [
+        { number: 1, label: 'Yes', isDefault: true, requiresTextInput: false },
+        { number: 2, label: "Yes, don't ask again for `sleep` commands in this project", isDefault: false, requiresTextInput: false },
+        { number: 3, label: 'No, tell Command Code what to do differently', isDefault: false, requiresTextInput: true },
+      ],
+      status: 'pending',
+    };
+
+    /** Command Code's `AskUserQuestion`, whose last row is a real text field (#2522). */
+    const commandCodeQuestion: MultipleChoicePromptData = {
+      type: 'multiple_choice',
+      question: 'Which commit message should the PR use?',
+      options: [
+        { number: 1, label: 'Use the generated message', isDefault: true, requiresTextInput: false },
+        { number: 2, label: 'Type something...', isDefault: false, requiresTextInput: true },
+      ],
+      status: 'pending',
+      submitMode: 'answer_only',
+      isAskUserQuestion: true,
+    };
+
+    it('offers no text field for the menu row and sends its NUMBER', async () => {
+      const onRespond = vi.fn().mockResolvedValue(undefined);
+      render(
+        <MobilePromptSheet {...defaultProps} promptData={commandCodePermission} visible={true} onRespond={onRespond} />
+      );
+
+      fireEvent.click(screen.getAllByRole('radio')[2]);
+      await waitFor(() => {
+        expect(screen.getAllByRole('radio')[2]).toBeChecked();
+      });
+      expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: /submit|send|confirm/i }));
+      await waitFor(() => {
+        expect(onRespond).toHaveBeenCalledWith('3');
+      });
+    });
+
+    it('still offers the field for `Type something...` and sends the text', async () => {
+      const onRespond = vi.fn().mockResolvedValue(undefined);
+      render(
+        <MobilePromptSheet {...defaultProps} promptData={commandCodeQuestion} visible={true} onRespond={onRespond} />
+      );
+
+      fireEvent.click(screen.getAllByRole('radio')[1]);
+      const textInput = await screen.findByRole('textbox');
+      fireEvent.change(textInput, { target: { value: 'Fix the flaky test first' } });
+      fireEvent.click(screen.getByRole('button', { name: /submit|send|confirm/i }));
+
+      await waitFor(() => {
+        expect(onRespond).toHaveBeenCalledWith('Fix the flaky test first');
+      });
+    });
+
+    it('agrees with the detection module about which rows take typed text', () => {
+      const labels = [
+        'Yes',
+        'No, tell Command Code what to do differently',
+        'No, and tell Codex what to do differently (esc)',
+        'No, and tell Claude what to do differently (esc)',
+        'Type something...',
+        'Type something... Give me a branch name and I will check it out before dispatching.',
+        'Type something.',
+        'Enter custom value',
+        'Type here to explain',
+        "Yes, and always allow for commands that start with 'npm run custom'",
+        'Something to type something',
+      ];
+      for (const label of labels) {
+        for (const requiresTextInput of [true, false, undefined]) {
+          const option = { number: 1, label, requiresTextInput };
+          expect(optionTakesTypedText(option), `${label} / ${String(requiresTextInput)}`).toBe(
+            isTypedTextFieldOption(option),
+          );
+        }
+      }
     });
   });
 

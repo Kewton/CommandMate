@@ -1080,6 +1080,27 @@
     "changedRecently": "Changed",
     "changedRecentlyDetail": "Model changed from {from} to {to}. Tap to dismiss."
   },
+  "agentMode": {
+    "label": "Mode",
+    "cycleAria": "Cycle the agent permission mode (shift+tab)",
+    "cycleFromAria": "Cycle the agent permission mode. Currently {mode}. (shift+tab)",
+    "note": {
+      "codexModelCoupled": "Codex changes its model and reasoning effort along with the mode."
+    },
+    "noteShort": {
+      "codexModelCoupled": "Also switches model"
+    },
+    "mode": {
+      "default": "default",
+      "manual": "manual",
+      "accept-edits": "accept edits",
+      "plan": "plan",
+      "auto": "auto",
+      "autopilot": "autopilot",
+      "bypass": "permission bypass",
+      "dont-ask": "don't-ask"
+    }
+  },
   "sessionNote": {
     "menuItem": "Session note",
     "placeholder": "What is this session working on?",

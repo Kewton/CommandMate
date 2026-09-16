@@ -23,7 +23,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { Info, SlidersHorizontal, MessageSquare, ChevronDown, Sparkles } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import { Checkbox } from '@/components/ui';
@@ -38,7 +38,6 @@ import {
 import {
   getPermissionOptionsForTool,
   DEFAULT_PERMISSIONS,
-  COMMAND_CODE_YOLO_PERMISSION,
   MAX_SCHEDULE_NAME_LENGTH,
   MAX_SCHEDULE_MESSAGE_LENGTH,
 } from '@/config/schedule-config';
@@ -51,6 +50,8 @@ import {
   validateOpencodeTitle,
 } from '@/lib/cmate-cli-tool-parser';
 import { cronPrompt, messageDraftPrompt } from '@/lib/schedule-ai-prompt-templates';
+import { isCommandCodeDirectWriteToolsDenied } from '@/lib/cmate-validator';
+import { getCommandCodeWriteToolsWarningText } from './command-code-write-tools-warning';
 
 // ============================================================================
 // Types
@@ -252,6 +253,7 @@ export function ScheduleEditDialog({
   onSaved,
 }: ScheduleEditDialogProps) {
   const t = useTranslations('schedule');
+  const locale = useLocale();
   const isMobile = useIsMobile();
 
   // Resolve the agent roster: explicit instances when configured, otherwise the
@@ -319,14 +321,16 @@ export function ScheduleEditDialog({
   const permissionOptions = getPermissionOptionsForTool(form.cliToolId);
   const showPermission = permissionOptions.length > 0;
   // Issue #2454: `commandcode -p` blocks edit_file / write_file /
-  // shell_command / monitor_command / kill_shell unless it was launched with
-  // `--yolo`, and a blocked call still ends the run exit 0 with
-  // `subtype: "success"`. Every `--permission-mode` value therefore buys a
-  // read-only run that reports success, which is the failure this note exists
-  // to make visible *before* the schedule is saved rather than after a week of
-  // green execution logs that changed nothing.
-  const showCommandCodeReadOnlyNote =
-    form.cliToolId === 'command-code' && form.permission !== COMMAND_CODE_YOLO_PERMISSION;
+  // shell_command / monitor_command / kill_shell when the agent calls them
+  // directly unless it was launched with `--yolo`, and a blocked call still
+  // ends the run exit 0 with `subtype: "success"`. This note makes that visible
+  // *before* the schedule is saved rather than after a week of green execution
+  // logs that changed nothing.
+  // Issue #2576: the judgment is shared with the parser and the CMATE.md
+  // warnings banner, because a hand-edited CMATE.md never opens this dialog.
+  // It is "one of the five modes", not "not yolo": a row seeded with an empty
+  // Permission cell runs with `--yolo` and must not get the note.
+  const showCommandCodeWriteToolsDeniedNote = isCommandCodeDirectWriteToolsDenied(form.cliToolId, form.permission);
   // Issue #2044: both flags read the parser's Sets, so the dialog cannot offer a
   // field the CMATE.md grammar would reject — nor hide one it accepts.
   const showModel = TOOLS_WITH_MODEL_SUPPORT.has(form.cliToolId);
@@ -709,12 +713,12 @@ export function ScheduleEditDialog({
               </option>
             ))}
           </select>
-          {showCommandCodeReadOnlyNote && (
+          {showCommandCodeWriteToolsDeniedNote && (
             <p
               className="mt-1 text-xs text-warning-foreground"
-              data-testid="schedule-permission-readonly-note"
+              data-testid="schedule-permission-write-tools-denied-note"
             >
-              {t('edit.commandCodeReadOnlyNote')}
+              {getCommandCodeWriteToolsWarningText(locale).body}
             </p>
           )}
         </div>

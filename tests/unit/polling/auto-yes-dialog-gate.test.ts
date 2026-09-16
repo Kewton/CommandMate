@@ -29,11 +29,15 @@ import {
   stripBoxDrawing,
 } from '@/lib/detection/cli-patterns';
 import { detectPrompt } from '@/lib/detection/prompt-detector';
-import { TOOL_STATUS_DETECTORS } from '@/lib/detection/tools/registry';
+import { readCommandCodeQuestionDialog } from '@/lib/detection/tools/command-code/dialog';
+import { normalizeFrame } from '@/lib/detection/tools/frame';
+import { getToolStatusDetector, TOOL_STATUS_DETECTORS } from '@/lib/detection/tools/registry';
 import {
   AUTO_YES_DIALOG_GATE_DEFAULT_MODE,
   AUTO_YES_DIALOG_GATE_ENV_VAR,
   evaluateAutoYesDialogGate,
+  evaluateDialogPresence,
+  judgePromptResponse,
   resolveAutoYesDialogGateMode,
 } from '@/lib/polling/auto-yes-dialog-gate';
 import type { CLIToolType } from '@/lib/cli-tools/types';
@@ -82,7 +86,8 @@ describe('[#1928] the rollout table', () => {
       'vibe-local': 'legacy',
       // Issue #2250 / Epic #2249 決定 3: Command Code's `PreToolUse` fires AFTER
       // its permission dialog is answered, so a hook-driven `permissionDecision`
-      // cannot dismiss the dialog and there is no measured rule to gate on.
+      // cannot dismiss the dialog. Issue #2574 added a rule for that dialog and
+      // kept this row `legacy`; see the `[#2574]` block below for why.
       'command-code': 'legacy',
     });
   });
@@ -315,5 +320,60 @@ describe('[#1928] Issue #1896: an agent quoting a numbered list is never answere
     expect(
       evaluateAutoYesDialogGate('claude', 'multiple_choice', agentWroteAList).allowed,
     ).toBe(false);
+  });
+});
+
+describe('[#2574] command-code declares a dialog rule and is still not gated', () => {
+  const TESTS_FIXTURES = path.resolve(__dirname, '../../fixtures');
+  const PERMISSION = () =>
+    readFileSync(path.join(TESTS_FIXTURES, 'command-code-live-2250', 'dialog-shell-1490.txt'), 'utf8');
+  const QUESTION = () =>
+    readFileSync(path.join(TESTS_FIXTURES, 'command-code-askuserquestion-2522', 'question-flat-short.txt'), 'utf8');
+
+  it('has rules, and the table keeps it legacy', () => {
+    expect(getToolStatusDetector('command-code').hasDialogRules).toBe(true);
+    expect(resolveAutoYesDialogGateMode('command-code')).toBe('legacy');
+  });
+
+  it("answers an AskUserQuestion through `/prompt-response`'s presence check, because nothing judges it", () => {
+    // The acceptance condition the rollout row stands on. The question is read by
+    // its own reader (#2522), the permission rule does not recognise it, and under
+    // `legacy` that does not matter: presence is not judged and the route answers.
+    const raw = QUESTION();
+    const reading = readCommandCodeQuestionDialog(raw);
+    expect(reading.kind).toBe('prompt');
+    expect(getToolStatusDetector('command-code').detectDialog(normalizeFrame(raw))).toBeNull();
+
+    const presence = evaluateDialogPresence('command-code', 'multiple_choice', raw);
+    expect(presence).toMatchObject({ present: true, dialog: null, mode: 'legacy', gated: false });
+    expect(
+      judgePromptResponse(
+        { isPrompt: true, promptData: reading.kind === 'prompt' ? reading.prompt.promptData : undefined },
+        presence,
+      ),
+    ).toBeNull();
+
+    expect(evaluateAutoYesDialogGate('command-code', 'multiple_choice', asAutoYesSees(raw))).toMatchObject({
+      allowed: true,
+      gated: false,
+    });
+  });
+
+  it('would silence the question under enforce, which is why the row is not promoted', () => {
+    // The kill switch as the experiment. The permission dialog survives
+    // enforcement on the Auto-Yes spelling; the question does not, because the
+    // rule does not know it — and a question rule could not read the rule row
+    // `stripBoxDrawing` blanks off this spelling anyway.
+    process.env[AUTO_YES_DIALOG_GATE_ENV_VAR] = 'command-code=enforce';
+
+    expect(evaluateAutoYesDialogGate('command-code', 'multiple_choice', asAutoYesSees(PERMISSION()))).toMatchObject({
+      allowed: true,
+      gated: true,
+    });
+    expect(evaluateAutoYesDialogGate('command-code', 'multiple_choice', asAutoYesSees(QUESTION()))).toMatchObject({
+      allowed: false,
+      gated: true,
+      dialog: null,
+    });
   });
 });

@@ -450,3 +450,189 @@ export interface ToolLivenessSpec {
 export type ToolLivenessVerdict =
   | { readonly alive: true }
   | { readonly alive: false; readonly reason: string };
+
+// ---------------------------------------------------------------------------
+// Permission / approval mode cycling (Issue #2592)
+// ---------------------------------------------------------------------------
+
+/**
+ * Every permission-mode name CommandMate can name, across every tool.
+ *
+ * A **union of measured vocabularies**, not a model of one tool's state machine.
+ * Six of the eight supported CLIs put a mode on `shift+tab`, and no two spell
+ * their modes the same way or cycle the same members — claude has four and no
+ * "default", codex has two, Command Code cycles three but can *sit* in two more
+ * that its cycle skips. So the ids here are the superset, and which of them a
+ * given tool can be in is that tool's own {@link AgentModeSpec.cycle}.
+ *
+ * Measured 2026-09-16 across all eight tools at the production 200x60 geometry
+ * (Issue #2592), plus the footer tables #1927 (claude 2.1.240) and #2250
+ * (Command Code 1.40.1 / 1.49.0) already carried:
+ *
+ * | id              | who prints it                    | spelling on the pane            |
+ * |-----------------|----------------------------------|---------------------------------|
+ * | `manual`        | claude                           | `⏸ manual mode on`              |
+ * | `auto`          | claude                           | `⏵⏵ auto mode on`               |
+ * | `accept-edits`  | claude / Command Code / agy      | `⏵⏵ accept edits on`, `» accept edits on`, `accept-edits ·` |
+ * | `plan`          | all five                         | `⏸ plan mode on`, `plan mode`, `Plan mode (shift+tab to cycle)`, `plan` |
+ * | `autopilot`     | copilot                          | `autopilot` in the hint bar     |
+ * | `bypass`        | Command Code (NOT in its cycle)  | `» permission bypass on`        |
+ * | `dont-ask`      | Command Code (NOT in its cycle)  | `» don't-ask on`                |
+ * | `default`       | Command Code                     | `? for shortcuts` (its own row) |
+ *
+ * `bypass` and `dont-ask` are declared even though `shift+tab` cannot REACH
+ * them, and that is the point: a user who put Command Code in one of those from
+ * the terminal is in a state the pane can be read for, and leaving them out
+ * would make the reader fall through to whichever indicator matched next — on
+ * 1.53.1, where `? for shortcuts` is drawn in every mode, that fall-through is
+ * a chip that says `default` while the agent bypasses permissions.
+ */
+export const AGENT_MODE_IDS = [
+  'default',
+  'manual',
+  'accept-edits',
+  'plan',
+  'auto',
+  'autopilot',
+  'bypass',
+  'dont-ask',
+] as const;
+
+/** One permission mode a supported CLI can be in. */
+export type AgentModeId = typeof AGENT_MODE_IDS[number];
+
+/**
+ * The verdict for a frame nothing in {@link AgentModeSpec.indicators} matched.
+ *
+ * **Not a mode.** It is the reader declining to answer, and every consumer must
+ * treat it that way: the chip is not drawn, `capture --json` publishes the
+ * string rather than a guess, and nothing anywhere maps it to `default`.
+ *
+ * The distinction is load-bearing because four of the five tools draw NOTHING in
+ * their base mode (Issue #2592 §「設計に効く事実」3). If "no row" meant `default`
+ * then every frame captured mid-repaint, every frame whose footer scrolled out
+ * of the read window, and every future build that renames a row would publish a
+ * confident `default` for a pane that might be in `plan`. A missing chip is a
+ * question the operator can answer by looking at the terminal; a wrong chip is
+ * one they have no reason to ask.
+ */
+export const AGENT_MODE_UNKNOWN = 'unknown';
+
+/** What {@link AgentModeSpec.indicators} can be read to say about a frame. */
+export type AgentMode = AgentModeId | typeof AGENT_MODE_UNKNOWN;
+
+/** Whether `value` is a mode id (as opposed to {@link AGENT_MODE_UNKNOWN}). */
+export function isAgentModeId(value: string): value is AgentModeId {
+  return (AGENT_MODE_IDS as readonly string[]).includes(value);
+}
+
+/**
+ * One "this frame is in mode X" reading.
+ *
+ * `pattern` is applied to a **stripAnsi-ed** row. Every measured indicator lives
+ * inside SGR sequences on the wire — claude's footer arrives as
+ * `\x1b[38;5;220m⏵⏵ auto mode on\x1b[38;5;246m (shift+tab to cycle)` — so a
+ * pattern run against raw bytes matches nothing at all. `tests/fixtures/
+ * agent-mode-2592/` keeps ANSI-bearing frames so that regression fails a test
+ * rather than a user's screen.
+ */
+export interface AgentModeIndicator {
+  /** The mode this row proves the tool is in. */
+  readonly mode: AgentModeId;
+  /**
+   * Whole-row pattern, matched against the stripped row.
+   *
+   * No `/g` (keeps `.test()` stateless) and no nested quantifiers (ReDoS-safe),
+   * the same rule `cli-patterns.ts` documents for every pattern in this repo.
+   */
+  readonly pattern: RegExp;
+}
+
+/**
+ * A translator key for a caution the UI must print next to the mode button.
+ *
+ * A token rather than prose because the sentence is user-facing and has to be
+ * translated (`.eslintrc.json`'s i18n rule, Issue #1271), and because the tool
+ * declaring it has no way to call `useTranslations()`.
+ */
+export const AGENT_MODE_NOTE_IDS = ['codexModelCoupled'] as const;
+
+/** Which caution one tool's mode button carries, if any. */
+export type AgentModeNoteId = typeof AGENT_MODE_NOTE_IDS[number];
+
+/**
+ * How one tool cycles permission modes, and how its current mode is read
+ * (Issue #2592).
+ *
+ * Returned by `ICLITool.agentModeSpec()`, `null` for a tool that has no mode on
+ * `shift+tab`. The §4 D4 shape {@link ComposerSpec} / {@link CaptureSpec} /
+ * {@link ToolLivenessSpec} / {@link NavigationKeySpec} already take: the tool
+ * answers for itself and nothing outside `src/lib/cli-tools/**` branches on a
+ * `CLIToolType`.
+ *
+ * ## Why the mode is READ and not remembered
+ *
+ * CommandMate is not the only thing pressing this key. `commandmate attach`
+ * puts the operator in the same pane, the agent's own `/permissions` command
+ * moves the mode, and a restart of the CommandMate server forgets everything.
+ * A counter incremented per button press would be wrong after any of those and
+ * would stay wrong silently, which is exactly the failure #2592's B half exists
+ * to prevent ("B 無しの A は盲打ちになって使えない"). So the tool's own footer is
+ * the only source, and when it cannot be read the answer is
+ * {@link AGENT_MODE_UNKNOWN}.
+ *
+ * ## The #2032 invariant, restated
+ *
+ * {@link key} must be a key `sendSpecialKeys()` will actually deliver AND one
+ * this tool's {@link NavigationKeySpec} publishes, or the button draws a request
+ * the route answers 400 for (or, worse, validates and then throws mid-send —
+ * Issue #2032's exact shape). `tests/unit/lib/cli-tools/agent-mode-declaration-2592.test.ts`
+ * pins both halves against the real registry.
+ */
+export interface AgentModeSpec {
+  /**
+   * The key that advances the cycle — `BTab` for all five declaring tools.
+   *
+   * Declared rather than hard-coded so the invariant above is checkable, and so
+   * a tool that moves its binding changes one line.
+   */
+  readonly key: TerminalKey;
+  /**
+   * The cycle, in the order measured by pressing {@link key} repeatedly.
+   *
+   * The first element is where the measurement started, not a "default": claude
+   * has no default mode at all. A mode this tool can SIT in but cannot reach
+   * with {@link key} (Command Code's `bypass` / `dont-ask`) is deliberately
+   * absent here and present in {@link indicators} — the cycle is what the button
+   * does, the indicators are what the pane can say.
+   */
+  readonly cycle: readonly AgentModeId[];
+  /**
+   * How a mode is recognised, most specific FIRST.
+   *
+   * The reader returns the first match, so an indicator that is drawn in every
+   * mode (Command Code's `? for shortcuts` on 1.53.1) must come last or it wins
+   * over the row that actually names the mode.
+   */
+  readonly indicators: readonly AgentModeIndicator[];
+  /**
+   * How many non-blank rows from the bottom of the frame {@link indicators} may
+   * look at.
+   *
+   * A window, not the frame, for the reason `ToolLivenessSpec.aliveTailLines`
+   * is one: a mode row does not disappear when the mode changes, it scrolls up.
+   * Command Code renders INLINE (#2250 measured `alternate_on` 0), so a 1000-row
+   * capture of its pane holds every footer it has ever drawn, and a whole-frame
+   * test would answer with the oldest one forever.
+   */
+  readonly tailRows: number;
+  /**
+   * A caution this tool's button must carry, or `null`.
+   *
+   * codex alone today: its modes are coupled to the model and reasoning effort
+   * (`xhigh` ⇄ `medium`, measured 2026-09-16), so one press of a button labelled
+   * "mode" also moves the model tier. Issue #2592 §「設計に効く事実」4 requires
+   * that be visible rather than discovered.
+   */
+  readonly noteId: AgentModeNoteId | null;
+}

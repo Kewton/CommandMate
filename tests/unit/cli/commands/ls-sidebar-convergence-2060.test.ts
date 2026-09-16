@@ -211,6 +211,11 @@ describe('[#2060] ls and the sidebar converge on the route response', () => {
       expect(row).toHaveProperty('sessionStatusByCli');
       expect(row).toHaveProperty('sessionStatusByInstance');
       expect(row).toHaveProperty('agentInstances');
+      // Issue #2575: the AUTO_YES column reads this one, and its own suite runs
+      // on hand-written fixtures — which would stay green if the route stopped
+      // publishing the field. This assertion is against the REAL route output,
+      // so it is the one that would notice.
+      expect(row).toHaveProperty('autoYesByInstance');
     }
   });
 

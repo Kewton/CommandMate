@@ -41,6 +41,40 @@ const BUTTON_PRIMARY_STYLES = 'bg-accent-600 text-white hover:bg-accent-700 focu
 const BUTTON_SECONDARY_STYLES = 'bg-surface border-2 border-input hover:bg-muted text-foreground focus:ring-ring';
 
 /**
+ * The option labels measured to be a text field on screen (Issue #2573).
+ *
+ * Restated from `TYPED_TEXT_FIELD_LABEL_PATTERNS` in
+ * `lib/detection/prompt-detect-multiple-choice`, which this client module cannot
+ * import (that module's graph reaches `lib/env`, which imports `fs`).
+ * `tests/unit/components/PromptPanel.test.tsx` asserts the two predicates agree.
+ */
+const TYPED_TEXT_FIELD_LABEL_PATTERNS: readonly RegExp[] = [
+  /^[^\S\n]*type\s+something\b/i,
+];
+
+/**
+ * Whether the answer panels should send the operator's TEXT for this option,
+ * rather than its number (Issue #2573).
+ *
+ * `requiresTextInput` alone used to decide it, and it is true for two opposite
+ * rows: Command Code's `Type something...` (a real text field, #2522) and the
+ * permission dialog's `No, tell Command Code what to do differently` (a menu
+ * row). Sending the reason at the second typed nothing the dialog read and let
+ * the Enter after it confirm the highlighted `1. Yes`. A menu row is answered by
+ * its number — the tool then returns to its composer, where the instructions go
+ * as an ordinary message.
+ *
+ * `components/mobile/MobilePromptSheet.tsx` applies the same rule, so both
+ * surfaces send the same answer for the same option.
+ */
+export function optionTakesTypedText(
+  option: { readonly label: string; readonly requiresTextInput?: boolean },
+): boolean {
+  return option.requiresTextInput === true
+    && TYPED_TEXT_FIELD_LABEL_PATTERNS.some((pattern) => pattern.test(option.label));
+}
+
+/**
  * Props for PromptPanel component
  */
 /**
@@ -133,7 +167,9 @@ function PromptPanelContent({
     return promptData.options.find(opt => opt.number === selectedOption) ?? null;
   }, [promptData, selectedOption]);
 
-  const requiresTextInput = selectedOptionData?.requiresTextInput === true;
+  // Issue #2573: the text field is offered — and its text sent — only for an
+  // option that IS a text field on screen, not for every `requiresTextInput` row.
+  const takesTypedText = selectedOptionData !== null && optionTakesTypedText(selectedOptionData);
   const isDisabled = answering || isSubmitting;
 
   // Handle yes/no button click
@@ -157,8 +193,9 @@ function PromptPanelContent({
     if (isDisabled || selectedOption === null) return;
     setIsSubmitting(true);
     try {
-      // If text input is required and has value, send the text value
-      const answer = requiresTextInput && textInputValue.trim()
+      // A text field with a value sends the text; every other option, including
+      // a menu row that reads as taking text, sends its number (Issue #2573).
+      const answer = takesTypedText && textInputValue.trim()
         ? textInputValue.trim()
         : selectedOption.toString();
       await onRespond(answer, decisionId);
@@ -169,7 +206,7 @@ function PromptPanelContent({
     } finally {
       setIsSubmitting(false);
     }
-  }, [isDisabled, onRespond, decisionId, selectedOption, requiresTextInput, textInputValue]);
+  }, [isDisabled, onRespond, decisionId, selectedOption, takesTypedText, textInputValue]);
 
   // Issue #1932: the degraded form's own submit. Separate from the two above
   // because there is no `selectedOption` state behind it — the verdict comes
@@ -274,7 +311,7 @@ function PromptPanelContent({
           onSelectOption={setSelectedOption}
           textInputValue={textInputValue}
           onTextInputChange={setTextInputValue}
-          showTextInput={requiresTextInput}
+          showTextInput={takesTypedText}
           onSubmit={handleMultipleChoiceSubmit}
         />
       )}

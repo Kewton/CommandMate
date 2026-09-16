@@ -6,6 +6,7 @@
 # committed so the whole team shares them:
 #
 #   .commandmate/verify.yaml       verification gates  (Issue #1540)
+#   .commandmate/uat.yaml          UAT environment     (Issue #2590)
 #   .commandmate/tasks/*.yaml      execution contracts (Issue #1545)
 #
 # A config file that is silently ignored looks identical to one that is tracked
@@ -58,6 +59,7 @@ echo "commandmate config tracking (.gitignore):"
 
 # Configuration — must be committed and shared.
 expect tracked '.commandmate/verify.yaml'        'verification gates #1540'
+expect tracked '.commandmate/uat.yaml'           'UAT environment #2590'
 expect tracked '.commandmate/tasks/build.yaml'   'execution contract #1545'
 expect tracked '.commandmate/tasks/any-name.yaml' 'contract, arbitrary name'
 
@@ -66,6 +68,13 @@ expect ignored '.commandmate/attachments/a.png'  'chat attachment (runtime)'
 expect ignored '.commandmate/tasks/scratch.log'  'log beside a contract'
 expect ignored '.commandmate/tasks/notes.md'     'non-yaml beside a contract'
 expect ignored '.commandmate/cache.json'         'unknown runtime file'
+# The UAT run's own output. `uat.yaml` is configuration and committed; what a run
+# writes under report_dir (default .commandmate/uat/) is a generated artifact and
+# must not follow it in. The exception above names ONE file, not the prefix — this
+# pins that distinction, because `!/.commandmate/uat*` would have swept the run
+# directory in with it.
+expect ignored '.commandmate/uat/20260916-2590/uat-report.md' 'UAT run output (generated)'
+expect ignored '.commandmate/uat/20260916-2590/acceptance/issue-2590.json' 'UAT acceptance result (generated)'
 
 echo
 if [ "$fail" -eq 0 ]; then

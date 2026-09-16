@@ -1,0 +1,84 @@
+# .commandmate/uat.yaml — v1
+#
+# How to stand CommandMate itself up for a real-environment UAT, read by the
+# official cmate-uat Skill (Kewton/commandmate-skills, 0.1.0+). The contract is
+# skills/cmate-uat/references/uat-yaml-contract.md in that repository.
+#
+# This is the declarative form of what .claude/commands/uat.md and the recent
+# dev-reports/issue/<n>/uat/ runs did by hand (Issue #2590). Placeholders:
+# {port} {run_dir} {target}. `{pid}` is deliberately not used: the server is
+# started in the background, so every check finds it by its LISTENING port.
+#
+# ISOLATION IS THE POINT. A UAT server started from a worktree has grabbed the
+# production DB before, because settings resolution fell through to production.
+# "It listens on another port" proves nothing. So:
+#
+#   - `env -i` starts the server with no inherited variable (a CM_DB_PATH the
+#     caller exported would otherwise win), and CM_DB_PATH / CM_ROOT_DIR are set
+#     explicitly under {run_dir}.
+#   - tmux: the production code calls `tmux` with no socket argument, so it goes
+#     wherever TMUX points. TMUX is redirected to a PRIVATE server on
+#     /tmp/cmuat-{port}/tmux.sock (the technique tests/unit/config/
+#     tmux-live-test-safety.test.ts prescribes). That server is started first,
+#     from the caller's normal environment, because a tmux server born under
+#     `env -i` loses Keychain access and a claude session in it comes up logged
+#     out. Its pid is read off the socket with lsof, not with a tmux format
+#     string, because tmux's own pid format would collide with the Skill's
+#     `{pid}` placeholder. Every tmux command here names its socket with -S: with
+#     TMUX set in the caller (an agent running inside tmux), a bare
+#     `tmux kill-server` would hit the user's own server.
+#   - isolation.checks measures all of it on the running process, positive and
+#     negative, before any test case runs. Each check fails when pointed at a
+#     server that is not isolated (measured against the production :3000).
+#
+# The socket lives under /tmp rather than {run_dir} because a unix socket path is
+# capped at 104 bytes on macOS and {run_dir} is deep inside the worktree.
+version: 1
+env:
+  build: "npm run build:all"
+  # A LITERAL block (`|`) with explicit backslash continuations, on purpose.
+  # The first version was a folded block (`>-`) whose continuation lines were
+  # indented deeper, and YAML keeps the line break before a more-indented line:
+  # `env -i …` became a command of its own (it printed the environment and
+  # exited) and `node` started with the CALLER's environment. The DB and port
+  # still looked isolated only because the caller happened to export CM_DB_PATH
+  # and CM_PORT already, so the bare assignment lines rewrote them; TMUX came
+  # through untouched and the server's tmux calls pointed at the user's own
+  # server. The tmux isolation check is what caught it (2026-09-16), and
+  # tests/unit/config/uat-yaml-2590.test.ts now holds the shape.
+  up: |
+    set -e
+    mkdir -p {run_dir}/root
+    mkdir -p -m 700 /tmp/cmuat-{port}
+    tmux -S /tmp/cmuat-{port}/tmux.sock new-session -d -s keepalive 'sleep 86400'
+    env -i HOME="$HOME" PATH="$PATH" USER="$USER" LOGNAME="$LOGNAME" SHELL="$SHELL" \
+      LANG="${LANG:-en_US.UTF-8}" TERM="${TERM:-xterm-256color}" \
+      TMUX="/tmp/cmuat-{port}/tmux.sock,$(lsof -t /tmp/cmuat-{port}/tmux.sock | head -1),0" \
+      NODE_ENV=production CM_PORT={port} CM_BIND=127.0.0.1 \
+      CM_DB_PATH={run_dir}/uat.db CM_ROOT_DIR={run_dir}/root \
+      nohup node dist/server/server.js > {run_dir}/server.log 2>&1 &
+  # Stops ONLY what LISTENS on {port} (never a process merely connected to it,
+  # CommandMate#2473), waits up to 10 s, then removes the private tmux server.
+  # Written inline so it does not depend on where cmate-uat is installed.
+  down: |
+    P=$(lsof -nP -iTCP:{port} -sTCP:LISTEN -t)
+    [ -z "$P" ] || kill $P
+    i=0; while [ $i -lt 20 ] && lsof -nP -iTCP:{port} -sTCP:LISTEN -t >/dev/null; do sleep 0.5; i=$((i+1)); done
+    tmux -S /tmp/cmuat-{port}/tmux.sock kill-server 2>/dev/null || true
+    rm -rf /tmp/cmuat-{port}
+    ! lsof -nP -iTCP:{port} -sTCP:LISTEN -t >/dev/null
+  health: "curl -fsS -m 5 -o /dev/null http://127.0.0.1:{port}/api/worktrees"
+  health_timeout_sec: 90
+  port_range: [3010, 3030]
+isolation:
+  checks:
+    # The listener opened the run's own DB (positive).
+    - "P=$(lsof -nP -iTCP:{port} -sTCP:LISTEN -t | head -1); lsof -p $P -Fn | grep -qxF 'n{run_dir}/uat.db'"
+    # It opened NO other sqlite file (negative) — production is
+    # <checkout>/data/db.sqlite or ~/.../.commandmate/data/cm.db, and neither may appear.
+    - "P=$(lsof -nP -iTCP:{port} -sTCP:LISTEN -t | head -1); ! lsof -p $P -Fn | sed -n 's/^n//p' | grep -E '\\.(db|sqlite)(-wal|-shm)?$' | grep -vF '{run_dir}/uat.db'"
+    # Its tmux calls go to the private server: TMUX names the private socket.
+    - "P=$(lsof -nP -iTCP:{port} -sTCP:LISTEN -t | head -1); ps eww -p $P | tr ' ' '\\n' | grep -q '^TMUX=/tmp/cmuat-{port}/tmux.sock,'"
+    # The API sees only the sandbox root: every registered repository lives under {run_dir}/root.
+    - "curl -fsS -m 5 http://127.0.0.1:{port}/api/repositories | python3 -c \"import json,sys; d=json.load(sys.stdin); r=d if isinstance(d,list) else d.get('repositories',[]); sys.exit(0 if all(str(x.get('path','')).startswith('{run_dir}/root') for x in r) else 1)\""
+report_dir: ".commandmate/uat"

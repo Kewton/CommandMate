@@ -446,6 +446,18 @@
       "candidateLocal": [],
       "reason": "CommandMate 側に対応するファイルが存在しない（skills リポジトリ固有の skill）。",
       "measuredAt": "2026-08-01"
+    },
+    {
+      "counterpart": [
+        "skills/cmate-uat"
+      ],
+      "candidateLocal": [
+        ".claude/commands/uat.md",
+        ".claude/commands/uat-fix-loop.md"
+      ],
+      "reason": "同名に見える `.claude/commands/uat.md` は「移植元」ではなく独立に書き起こされた別文書である。uat.md は CommandMate 固有の起動手順（scripts/build-and-start.sh・scripts/stop.sh・CM_PORT・worktrees / repositories API・出力先 dev-reports/issue/<n>/uat/）に密結合し、Claude 固有の tool 名（TodoWrite・AskUserQuestion）と model: opus を指名している。cmate-uat は逆に .commandmate/uat.yaml で環境を受け取り、特定 Agent の tool 名も特定 project の path も 前提にしない汎用文書として書かれている（管理エージェントが Claude 以外・対象が CommandMate 以外、という運用が前提）。2026-09-16 実測で、uat.md の非空行 306 行のうち最も近い既存文書 （cmate-orchestrate の references/uat-contract.md）と共通する非空行は 2 行しかない。対応表に入れると「片方を編集したら他方も直せ」が常に偽になり、鳴っても誰も移植しないゲートになる。加えて挙動も意図的に食い違う: uat.md は 6-3 で不具合をその場で修正して再実行するが、cmate-uat は修正せず FAIL を記録して止め、修正は cmate-orchestrate の fix loop へ渡す。",
+      "revisitIf": "どちらかを他方からコピーして作り直した場合は、その時点で packages へ port-required として追加すること。",
+      "measuredAt": "2026-09-16"
     }
   ],
   "knownGap": "この対応表が検知できるのは CommandMate 側の編集だけである。skills 側が先に進んだ場合（#1613 がまさにその向き）は pin が変わらないので鳴らない。逆向きは `node scripts/skills-sync-map.mjs check --counterpart <dir>` を手元の checkout に対して実行して見る。CI から見るには cross-repo token が要るため、Issue #1612 の受入条件（token を増やさない）と衝突する。"

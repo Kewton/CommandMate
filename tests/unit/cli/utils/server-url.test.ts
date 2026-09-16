@@ -22,6 +22,7 @@ vi.mock('../../../../src/cli/utils/env-setup', () => ({
 import {
   resolveServerEndpoint,
   loadEffectiveEnv,
+  loadEnvFileValues,
   loadClientEnv,
 } from '../../../../src/cli/utils/server-url';
 import { removeTempDir } from '@tests/helpers/temp-dir';
@@ -124,6 +125,104 @@ describe('loadEffectiveEnv', () => {
     vi.stubEnv('CM_PORT', '3000');
 
     expect(loadEffectiveEnv().CM_PORT).toBe('3000');
+  });
+});
+
+/**
+ * Issue #2585: the third loader — the file and nothing but the file.
+ *
+ * loadEffectiveEnv() keeps `process.env` as a base layer because that is what daemon.start()
+ * hands the child, which is exact for a variable the .env *defines* and a guess for one it
+ * does not. `commandmate status` reads VAPID keys through this one instead, because there the
+ * guess decides whether a warning is printed at all: a shell that exported CM_VAPID_* silenced
+ * the "push is disabled" warning for a server that had no keys (#2575).
+ */
+describe('loadEnvFileValues', () => {
+  let dir: string;
+  let mainEnvPath: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'cm-2585-'));
+    mainEnvPath = join(dir, '.env');
+    envSetup.getEnvPath.mockReturnValue(mainEnvPath);
+  });
+
+  afterEach(() => {
+    removeTempDir(dir);
+    vi.unstubAllEnvs();
+  });
+
+  it('should return what the main .env defines', () => {
+    writeFileSync(mainEnvPath, 'CM_PORT=3101\nCM_VAPID_PUBLIC_KEY=BFileKey\n');
+
+    expect(loadEnvFileValues()).toEqual({ CM_PORT: '3101', CM_VAPID_PUBLIC_KEY: 'BFileKey' });
+  });
+
+  // THE bug (#2585). loadEffectiveEnv() answers 'BShellKey' here, and that answer is what
+  // `status` reported as the daemon's configuration.
+  it('should NOT report an exported variable the file does not define', () => {
+    writeFileSync(mainEnvPath, 'CM_PORT=3101\n');
+    vi.stubEnv('CM_VAPID_PUBLIC_KEY', 'BShellKey');
+
+    expect(loadEnvFileValues().CM_VAPID_PUBLIC_KEY).toBeUndefined();
+    // ...while the loader that models the daemon's own layering still does.
+    expect(loadEffectiveEnv().CM_VAPID_PUBLIC_KEY).toBe('BShellKey');
+  });
+
+  it('should let a file value stand even when the shell exports a different one', () => {
+    writeFileSync(mainEnvPath, 'CM_VAPID_SUBJECT=mailto:ops@example.com\n');
+    vi.stubEnv('CM_VAPID_SUBJECT', 'mailto:commandmate@localhost');
+
+    expect(loadEnvFileValues().CM_VAPID_SUBJECT).toBe('mailto:ops@example.com');
+  });
+
+  it('should layer a worktree .env over the main one', () => {
+    writeFileSync(mainEnvPath, 'CM_PORT=3101\nCM_BIND=127.0.0.1\n');
+    const worktreeEnvPath = join(dir, '135.env');
+    writeFileSync(worktreeEnvPath, 'CM_PORT=3135\n');
+
+    const env = loadEnvFileValues(worktreeEnvPath);
+
+    expect(env.CM_PORT).toBe('3135');
+    // Keys the worktree .env omits still come from the main one
+    expect(env.CM_BIND).toBe('127.0.0.1');
+  });
+
+  it('should fall back to the main .env when the worktree .env is absent', () => {
+    writeFileSync(mainEnvPath, 'CM_PORT=3101\n');
+
+    expect(loadEnvFileValues(join(dir, 'missing.env')).CM_PORT).toBe('3101');
+  });
+
+  it('should return an empty object when no .env exists at all', () => {
+    expect(loadEnvFileValues()).toEqual({});
+  });
+
+  // A read-only lookup, for the same reason loadClientEnv() is one: an injected value is an
+  // exported value for the rest of the process, which is exactly what this loader excludes.
+  //
+  // Asserted as "not the file's value" rather than "undefined" deliberately: the machine that
+  // found #2585 has CM_VAPID_PRIVATE_KEY exported in its own shell, which is the whole reason
+  // this loader exists, and an assertion that assumed an empty slot would fail there for the
+  // wrong reason.
+  it('should not write the parsed values into process.env', () => {
+    writeFileSync(mainEnvPath, 'CM_VAPID_PRIVATE_KEY=SecretFromFile\n');
+
+    loadEnvFileValues();
+
+    expect(process.env.CM_VAPID_PRIVATE_KEY).not.toBe('SecretFromFile');
+  });
+
+  // dotenv announces "[dotenv@x] injecting env (n) from ..." on stdout, the stream that
+  // carries `--json` payloads.
+  it('should print nothing to stdout', () => {
+    writeFileSync(mainEnvPath, 'CM_PORT=3101\n');
+    const stdout = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    loadEnvFileValues();
+
+    expect(stdout).not.toHaveBeenCalled();
+    stdout.mockRestore();
   });
 });
 
