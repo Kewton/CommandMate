@@ -91,16 +91,21 @@ describe('ls --json', () => {
     expect(row.id).toBe('wt1');
   });
 
-  it('leaves the table and --quiet exactly as they were', async () => {
+  it('keeps the tmux session name out of the table and out of --quiet', async () => {
     mockFetchResponse({
       worktrees: [{ id: 'wt1', name: 'wt1', cliToolId: 'claude', isSessionRunning: true }],
     });
     await runLs([]);
-    // Five columns, not six: the Issue lets the table stay narrow and puts the
-    // name in `--json` and in `instances`.
-    expect(lastLogged().split('\n')[0].trim().split(/\s+/)).toEqual([
-      'ID', 'NAME', 'STATUS', 'REASON', 'DEFAULT',
-    ]);
+    // What #2317 decided was that a `mcbd-<tool>-<worktree>[-<suffix>]` string —
+    // as long as the id it contains, plus a prefix — does not belong in a table
+    // read on an 80-column terminal; it belongs in `--json` and in `instances`.
+    // That is a judgement about THIS value's width, not a freeze of the column
+    // count, so Issue #2575 appending a short status word (`off` / `10:00`) is
+    // compatible with it. The first five columns are what must not move: they
+    // are read positionally.
+    const columns = lastLogged().split('\n')[0].trim().split(/\s+/);
+    expect(columns.slice(0, 5)).toEqual(['ID', 'NAME', 'STATUS', 'REASON', 'DEFAULT']);
+    expect(columns[5]).toBe('AUTO_YES');
     expect(lastLogged()).not.toContain('mcbd-');
   });
 });
