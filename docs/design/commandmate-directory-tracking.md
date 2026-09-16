@@ -1,6 +1,6 @@
 # `.commandmate/` の追跡ポリシー
 
-- **関連 Issue**: [#1540](https://github.com/Kewton/CommandMate/issues/1540)（verify.yaml）／[#1545](https://github.com/Kewton/CommandMate/issues/1545)（実行契約）
+- **関連 Issue**: [#1540](https://github.com/Kewton/CommandMate/issues/1540)（verify.yaml）／[#1545](https://github.com/Kewton/CommandMate/issues/1545)（実行契約）／[#2590](https://github.com/Kewton/CommandMate/issues/2590)（uat.yaml）
 - **確認コマンド**: `./scripts/check-commandmate-tracking.sh`
 - **CI ガード**: `tests/unit/config/commandmate-tracking.test.ts`
 
@@ -12,8 +12,14 @@
 
 | 種類 | 例 | Git 追跡 | 理由 |
 |---|---|:---:|---|
-| **設定**（人が書く宣言） | `verify.yaml`、`tasks/*.yaml` | ✅ **する** | チーム全員・全 worktree で同じ判定基準／同じ契約を共有する必要がある。レビュー対象でもある |
-| **ランタイムデータ**（アプリが書く） | `attachments/`、キャッシュ類 | ❌ しない | アプリが動くたびに増え続ける生成物。`dev-reports/` と同じ扱い |
+| **設定**（人が書く宣言） | `verify.yaml`、`uat.yaml`、`tasks/*.yaml` | ✅ **する** | チーム全員・全 worktree で同じ判定基準／同じ契約を共有する必要がある。レビュー対象でもある |
+| **ランタイムデータ**（アプリが書く） | `attachments/`、キャッシュ類、`uat/`（UAT run の成果物） | ❌ しない | アプリや run が動くたびに増え続ける生成物。`dev-reports/` と同じ扱い |
+
+**`uat.yaml` と `uat/` は名前が似ているが、表の行が違う。** 前者は「この製品はどう起動し・どう止め・
+隔離をどう実測するか」という人が書く宣言（Catalog の `cmate-uat` が読む）で、後者はその run が書く
+報告書・証跡・受入判定 JSON である。例外は**ファイル 1 本を名指す**こと —— `!/.commandmate/uat*`
+のように prefix で書くと run ディレクトリまで一緒に追跡対象へ入る。この区別は
+`check-commandmate-tracking.sh` が両方向で固定している。
 
 したがって `.gitignore` は **「全部除外 → 設定だけを例外にする」** という許可リスト方式で書く。
 新しい設定ファイルを `.commandmate/` に追加するときは、この文書と `.gitignore` の両方を更新すること。
@@ -25,6 +31,7 @@
 ```gitignore
 /.commandmate/*
 !/.commandmate/verify.yaml
+!/.commandmate/uat.yaml
 !/.commandmate/tasks/
 /.commandmate/tasks/*
 !/.commandmate/tasks/*.yaml
@@ -34,9 +41,11 @@
 
 1. `/.commandmate/*` — 配下をすべて除外（既定は「追跡しない」）
 2. `!/.commandmate/verify.yaml` — 検証ゲートの宣言だけ例外
-3. `!/.commandmate/tasks/` — **`tasks` ディレクトリ自体**の除外を解除
-4. `/.commandmate/tasks/*` — その中身は改めて全部除外
-5. `!/.commandmate/tasks/*.yaml` — 契約ファイル（`.yaml`）だけ例外
+3. `!/.commandmate/uat.yaml` — UAT 環境の宣言だけ例外。**ファイル 1 本を名指している**ので、
+   run の成果物（既定 `.commandmate/uat/`）は 1 の除外に残る
+4. `!/.commandmate/tasks/` — **`tasks` ディレクトリ自体**の除外を解除
+5. `/.commandmate/tasks/*` — その中身は改めて全部除外
+6. `!/.commandmate/tasks/*.yaml` — 契約ファイル（`.yaml`）だけ例外
 
 ---
 

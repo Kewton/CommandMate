@@ -192,10 +192,11 @@ LP のカード 4「Method as a system」の下に置くチップの並び（#25
 
 ID の並び（en / ja 共通。アルファベット順）:
 
-`cmate-acceptance-test` `cmate-delegate` `cmate-issue-authoring` `cmate-issue-refinement` `cmate-orchestrate` `cmate-orchestrate-monitor` `cmate-repository-analysis` `cmate-task-contract` `cmate-verify` `cmate-verify-advisor` `cmate-worker-development` `cmate-workspace-research` `cmate-worktree-cleanup` `cmate-worktree-setup`
+`cmate-acceptance-test` `cmate-delegate` `cmate-issue-authoring` `cmate-issue-refinement` `cmate-orchestrate` `cmate-orchestrate-monitor` `cmate-repository-analysis` `cmate-task-contract` `cmate-uat` `cmate-verify` `cmate-verify-advisor` `cmate-worker-development` `cmate-workspace-research` `cmate-worktree-cleanup` `cmate-worktree-setup`
 
-> **根拠**: 公式 Catalog `Kewton/commandmate-skills` の `skills/` 直下のディレクトリ 14 件
-> （2026-09-13 に `gh api repos/Kewton/commandmate-skills/contents/skills` で確認）。
+> **根拠**: 公式 Catalog `Kewton/commandmate-skills` の `skills/` 直下のディレクトリ 15 件
+> （2026-09-16 に `gh api repos/Kewton/commandmate-skills/contents/skills` で確認。`cmate-uat` 0.1.0 は
+> 同日に Catalog へ publish 済みで、`commandmate skill list` にも 15 件が出る）。
 > Catalog に Skill が増えたり減ったりしたら、LP より先にこの行を直す。見出しに件数を書かないのは、
 > Catalog が増えたときに見出しだけが古い数を言い続けないためである。
 

@@ -55,6 +55,7 @@ describe('.commandmate/ tracking policy', () => {
   // Configuration: committed and shared.
   it.each([
     ['.commandmate/verify.yaml', 'verification gates (#1540)'],
+    ['.commandmate/uat.yaml', 'UAT environment declaration (#2590)'],
     ['.commandmate/tasks/build.yaml', 'execution contract (#1545)'],
     ['.commandmate/tasks/any-name.yaml', 'contract under an arbitrary name'],
   ])('tracks %s — %s', (target) => {
@@ -67,6 +68,12 @@ describe('.commandmate/ tracking policy', () => {
     ['.commandmate/cache.json', 'unknown runtime file'],
     ['.commandmate/tasks/scratch.log', 'log dropped beside a contract'],
     ['.commandmate/tasks/notes.md', 'non-yaml dropped beside a contract'],
+    // uat.yaml is configuration and tracked; what a UAT run writes under
+    // report_dir is generated and must not follow it in. The exception names one
+    // FILE, and these two pin that: `!/.commandmate/uat*` as a prefix would have
+    // swept the whole run directory into the repository.
+    ['.commandmate/uat/20260916-2590/uat-report.md', 'UAT run report (generated)'],
+    ['.commandmate/uat/20260916-2590/acceptance/issue-2590.json', 'UAT acceptance result (generated)'],
   ])('ignores %s — %s', (target) => {
     expect(isIgnored(target)).toBe(true);
   });
