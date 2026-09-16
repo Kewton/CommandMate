@@ -124,6 +124,59 @@ export class FreeTextAnswerRejectedError extends Error {
 }
 
 /**
+ * Free text refused because NO row on the screen takes typed text (Issue #2583).
+ *
+ * ## The hole #2573 left
+ *
+ * {@link FreeTextAnswerRejectedError} looks for rows that READ as taking the
+ * operator's own words (`requiresTextInput`, i.e. `TEXT_INPUT_PATTERNS`) and
+ * only judges the answer when it finds at least one. A permission dialog with
+ * no such row was therefore never judged at all, and the text arm typed the
+ * answer and pressed Enter. Measured on 2026-09-16 against develop `9f4b4e29`:
+ *
+ * | tool | dialog | rows | result |
+ * |------|--------|------|--------|
+ * | Claude Code 2.1.273 | Bash command | `1. Yes` / `2. Yes, and always allow access to …` / `3. Yes, and switch to auto mode` / `4. No` | `success: true`, the `mkdir` RAN |
+ * | Antigravity 1.2.3 | Run this command? | `1. Yes, run command` / `2. Yes, and always allow …` / `3. Yes, … (Persist to settings.json)` / `4. No, cancel` | `success: true`, the `mkdir` RAN |
+ *
+ * Same screens, but with a path containing the word `custom`, `/custom/i`
+ * flagged the quoting row and #2573's guard refused. So what was left decided
+ * whether a refusal meaning "do not do this" approved instead: the SPELLING of
+ * the command being approved.
+ *
+ * ## What the caller is told, and why the count rather than the rows
+ *
+ * There is no row to name here — that is the whole condition — so the message
+ * cites how many options the screen has and points at the option number. It
+ * never quotes the answer (SEC-003, as in `prompt-answer-semantic`): the answer
+ * is whatever the operator typed and `/prompt-response` hands this message back
+ * to the client verbatim.
+ *
+ * Shares {@link FREE_TEXT_AT_MENU_ROW_REASON} with its sibling deliberately:
+ * the reason code is what `respond` and `/prompt-response` branch on, and both
+ * cases are the same promise to the caller — the answer could not be mapped onto
+ * a choice and NOTHING was sent.
+ */
+export class FreeTextAtChoiceOnlyPromptError extends Error {
+  /** Machine-readable code, always {@link FREE_TEXT_AT_MENU_ROW_REASON}. */
+  readonly reason: string;
+  /** How many options the screen offers, none of which is a text field. */
+  readonly optionCount: number;
+
+  constructor(cliToolId: CLIToolType, optionCount: number) {
+    super(
+      `Refused to type free text at ${cliToolId}'s prompt: none of its ${optionCount} options is a `
+      + 'text field on this screen, so the text would be ignored and the Enter after it would '
+      + 'confirm whatever is highlighted. Nothing was sent. Answer with the option number instead, '
+      + 'then send your instructions as a separate message.'
+    );
+    this.name = 'FreeTextAtChoiceOnlyPromptError';
+    this.reason = FREE_TEXT_AT_MENU_ROW_REASON;
+    this.optionCount = optionCount;
+  }
+}
+
+/**
  * The pane to judge the tool's own dialog rules against.
  *
  * Prefers the capture the caller already took — `/prompt-response` captures a
@@ -286,29 +339,71 @@ function buildNavigationKeys(offset: number): string[] {
  * ({@link isTypedTextFieldOption}); only when every one of them is a menu row is
  * the text refused.
  *
+ * ## Issue #2583: a screen with no text-bearing row is judged too
+ *
+ * The bullet that used to sit here said this guard does not judge a prompt with
+ * NO `requiresTextInput` option, citing #1726's pin — "sessions the rows cannot
+ * speak for keep behaving as they did". It named the hole it was leaving open in
+ * as many words (`the same Enter still sits under free text sent at, e.g.,
+ * claude's 1. Yes / 2. … / 3. No`), and #2583 then measured it: on claude 2.1.273
+ * and agy 1.2.3 a refusal typed at a Bash-approval dialog answered
+ * `success: true` and RAN the command. Whether it was refused came down to
+ * whether the quoted path happened to contain the word `custom`, which is
+ * `/custom/i` in `TEXT_INPUT_PATTERNS` — the spelling of someone else's argument.
+ *
+ * So the rule is now the one the guard's name always claimed: free text needs a
+ * text field, and a `multiple_choice` prompt whose rows are all choices has none.
+ *
+ * **What this costs, and why it is still the right trade.** #1726's pin is about
+ * AUTHORITY: that Issue reads the agent's own `AskUserQuestion` payload and must
+ * not let its absence narrow what a hook-less session accepts, because there the
+ * screen is the only authority. The rows judged here ARE the screen — the fresh
+ * capture `/prompt-response` re-verified, parsed by the same reader that draws
+ * the answer panels — so nothing is being second-guessed from a payload that is
+ * missing. What #1726 keeps is its actual subject: an out-of-RANGE number is
+ * still sent when no payload vouches for the list (this guard reads only
+ * non-numeric answers), and a call with no `promptData` at all still goes
+ * through untouched. The one case that regresses is an operator who has walked
+ * the cursor onto a row that opens a field the rows do not advertise — claude's
+ * `4. Type something.`, which no pattern flags — and sends text for it; they now
+ * get a refusal with the dialog still up instead of a silent approval. That
+ * direction is the safe one, and cursor position is #2584's subject, not this
+ * one's.
+ *
  * ## What it deliberately does NOT do
  *
- * - It does not judge a prompt with NO `requiresTextInput` option, nor a call
- *   with no `promptData`. Free text there has reached the pane since before this
- *   Issue, and #1726 pins that sessions the rows cannot speak for keep doing so.
- *   So the same Enter still sits under free text sent at, e.g., claude's
- *   `1. Yes / 2. … / 3. No`; closing that is wider than a row-level guard.
+ * - It does not judge a call with no `promptData`, nor a `multiple_choice` with
+ *   an empty option list. Both mean the rows are unknown, which is exactly where
+ *   #1726's pin still holds — and where `/prompt-response` has already refused
+ *   for its own reasons if the pane could be read at all.
  * - It does not deliver the reason. Sending the number and then the text as a
  *   message is the follow-up (#2573 対応内容 2). Issue #2574 has since removed the
  *   Enter that would have landed the reason in the wrong place on command-code,
  *   so what is still missing is a measurement, per tool, of where the input goes
  *   once the digit has confirmed.
  *
+ * @throws {FreeTextAtChoiceOnlyPromptError} when the answer is not a number and
+ *   no option of the multiple-choice prompt even reads as taking text (#2583).
  * @throws {FreeTextAnswerRejectedError} when the answer is not a number and every
- *   text-bearing option of the multiple-choice prompt is a menu row.
+ *   text-bearing option of the multiple-choice prompt is a menu row (#2573).
  */
 function assertFreeTextHasATextField(params: SendPromptAnswerParams): void {
   if (/^\d+$/.test(params.answer)) return;
   const { promptData } = params;
   if (promptData?.type !== 'multiple_choice') return;
+  // No rows to read is not the same as rows that take no text: a prompt this
+  // degraded says nothing about where characters land, so it keeps the
+  // pre-#2583 path (see the pin discussion above).
+  if (promptData.options.length === 0) return;
 
   const textBearing = promptData.options.filter((option) => option.requiresTextInput === true);
-  if (textBearing.length === 0) return;
+  // Issue #2583. Deliberately BEFORE the `isTypedTextFieldOption` reading below
+  // and never inside it: that reading decides between a field and a menu row on
+  // a screen that has at least one candidate, and this branch is the screen that
+  // has none.
+  if (textBearing.length === 0) {
+    throw new FreeTextAtChoiceOnlyPromptError(params.cliToolId, promptData.options.length);
+  }
   if (textBearing.some(isTypedTextFieldOption)) return;
 
   throw new FreeTextAnswerRejectedError(
@@ -361,9 +456,11 @@ export async function sendPromptAnswer(params: SendPromptAnswerParams): Promise<
   // digit is.
   const dialog = await assertAnswerModeAcceptsNumber(params);
 
-  // Issue #2573: the same promise for text. The text arm below types whatever it
-  // is given and presses Enter, so text aimed at a menu row has to stop here —
-  // before the branch — or the Enter confirms the highlighted default.
+  // Issue #2573 / #2583: the same promise for text. The text arm below types
+  // whatever it is given and presses Enter, so text aimed at a screen that has
+  // no text field on it — a menu row that reads as one, or a permission dialog
+  // whose rows are all choices — has to stop here, before the branch, or the
+  // Enter confirms the highlighted default.
   assertFreeTextHasATextField(params);
 
   // Determine if this is an arrow-key-navigated multiple-choice prompt.

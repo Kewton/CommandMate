@@ -18,6 +18,7 @@ import path from 'node:path';
 import {
   sendPromptAnswer,
   FreeTextAnswerRejectedError,
+  FreeTextAtChoiceOnlyPromptError,
   FREE_TEXT_AT_MENU_ROW_REASON,
 } from '@/lib/prompt-answer-sender';
 import { sendKeys, sendSpecialKeys } from '@/lib/tmux/tmux';
@@ -543,12 +544,18 @@ describe('sendPromptAnswer', () => {
     });
 
     it('should send text + Enter when answer is non-numeric for claude multi-choice', async () => {
+      // Issue #2583: the subject here is the ROUTING — a non-numeric answer does
+      // not take the cursor-nav arm — so the screen has to be one where free text
+      // is legal at all. `Type something...`, with the cursor resting on it, is
+      // the measured field (#2522); a list of plain choices is now refused before
+      // the branch this test is about is ever reached.
       const promptData: PromptData = {
         type: 'multiple_choice',
         question: 'Choose:',
         options: [
-          { number: 1, label: 'A', isDefault: true },
+          { number: 1, label: 'A', isDefault: false },
           { number: 2, label: 'B', isDefault: false },
+          { number: 3, label: 'Type something...', isDefault: true, requiresTextInput: true },
         ],
         status: 'pending',
       };
@@ -699,12 +706,16 @@ describe('sendPromptAnswer', () => {
     });
 
     it('should NOT skip Enter when submitMode=answer_only but answer is non-numeric', async () => {
+      // Issue #2583: same reason as the routing case above — `answer_only` is a
+      // rule about DIGITS, and the screen that shows it has to be one free text
+      // can reach, i.e. one with the cursor on a real text field.
       const promptData: PromptData = {
         type: 'multiple_choice',
         question: 'Choose:',
         options: [
-          { number: 1, label: 'A', isDefault: true },
+          { number: 1, label: 'A', isDefault: false },
           { number: 2, label: 'B', isDefault: false },
+          { number: 3, label: 'Type something...', isDefault: true, requiresTextInput: true },
         ],
         status: 'pending',
         submitMode: 'answer_only',
@@ -892,7 +903,11 @@ describe('Issue #2573: free text aimed at a menu row', () => {
     });
   });
 
-  it('does not judge a prompt with no text-bearing option (pre-#2573 behaviour, #1726)', async () => {
+  it('hands a prompt with no text-bearing option to Issue #2583’s branch', async () => {
+    // Was `does not judge a prompt with no text-bearing option (pre-#2573
+    // behaviour, #1726)`, and the free text it let through is what #2583
+    // measured running a `mkdir`. The rows are all choices, so there is nothing
+    // for the typed characters to land in.
     const promptData: PromptData = {
       type: 'multiple_choice',
       question: 'Choose:',
@@ -903,9 +918,12 @@ describe('Issue #2573: free text aimed at a menu row', () => {
       status: 'pending',
     };
 
-    await sendPromptAnswer({ sessionName: 'codex-test', answer: 'custom text', cliToolId: 'codex', promptData });
+    await expect(
+      sendPromptAnswer({ sessionName: 'codex-test', answer: 'custom text', cliToolId: 'codex', promptData }),
+    ).rejects.toBeInstanceOf(FreeTextAtChoiceOnlyPromptError);
 
-    expect(sendKeys).toHaveBeenCalledWith('codex-test', 'custom text', false);
+    expect(sendKeys).not.toHaveBeenCalled();
+    expect(sendSpecialKeys).not.toHaveBeenCalled();
   });
 
   it('does not judge a call with no promptData', async () => {
@@ -917,6 +935,155 @@ describe('Issue #2573: free text aimed at a menu row', () => {
     });
 
     expect(sendKeys).toHaveBeenCalledWith('codex-test', 'custom text', false);
+  });
+});
+
+// ===========================================================================
+// Issue #2583: free text at a dialog with no text field on it at all
+// ===========================================================================
+
+/**
+ * #2573 only judged a prompt that had at least one `requiresTextInput` row, so
+ * the permission dialogs whose rows are ALL choices were never judged: the text
+ * arm typed the answer and pressed Enter, and the Enter confirmed the
+ * highlighted `1. Yes`. Measured 2026-09-16 on claude 2.1.273 and agy 1.2.3
+ * against develop `9f4b4e29` — `/prompt-response` answered `success: true` and
+ * the `mkdir` the refusal was sent to stop RAN.
+ *
+ * ## Non-vacuity
+ *
+ * Every refusal below is paired with the same screen answered by its NUMBER,
+ * and asserted on the keys (`sendKeys` / `sendSpecialKeys` never called) rather
+ * than only on the throw, so a guard that refused everything, or one that threw
+ * after typing, fails this block. The screen next door — Command Code's
+ * `Type something...` field — keeps taking free text in the #2573 section above,
+ * which is what a guard that simply refused all text would break.
+ */
+describe('Issue #2583: free text at a dialog with no text field', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  describe.each([
+    [
+      'claude',
+      'tests/unit/lib/detection/fixtures/claude-live-1708/bash-approval-taskpanel.txt',
+      3,
+    ],
+    [
+      'antigravity',
+      'tests/fixtures/antigravity-live-2364/dialog-bash-oneline.txt',
+      4,
+    ],
+    [
+      'antigravity',
+      'tests/fixtures/antigravity-live-2364/dialog-create-file.txt',
+      2,
+    ],
+  ] as Array<[CLIToolType, string, number]>)('%s permission dialog (%s)', (cliToolId, fixture, denyOption) => {
+    const frame = liveFrame(fixture);
+    const promptData = livePrompt(cliToolId, frame);
+    const sessionName = `${cliToolId}-test`;
+
+    it('is the screen the Issue is about: not one row reads as taking text', () => {
+      expect(promptData.options.length).toBeGreaterThan(1);
+      expect(promptData.options.filter((option) => option.requiresTextInput === true)).toEqual([]);
+      // The cursor rests on the approving row, which is what the Enter after the
+      // typed text used to confirm.
+      expect(promptData.options.find((option) => option.isDefault)?.number ?? 1).toBe(1);
+      expect(promptData.options.find((option) => option.number === 1)?.label).toMatch(/^Yes/);
+    });
+
+    it('refuses free text before a single key is sent', async () => {
+      const sent = sendPromptAnswer({ sessionName, answer: REASON, cliToolId, promptData, frame });
+
+      await expect(sent).rejects.toBeInstanceOf(FreeTextAtChoiceOnlyPromptError);
+      await expect(sent).rejects.toMatchObject({
+        reason: FREE_TEXT_AT_MENU_ROW_REASON,
+        optionCount: promptData.options.length,
+      });
+      // Not the text, and above all not the Enter that ran the `mkdir`.
+      expect(sendKeys).not.toHaveBeenCalled();
+      expect(sendSpecialKeys).not.toHaveBeenCalled();
+    });
+
+    it('still answers the same screen by its option number (non-vacuity)', async () => {
+      await sendPromptAnswer({ sessionName, answer: String(denyOption), cliToolId, promptData, frame });
+
+      // claude and agy are the two cursor-navigated tools: the digit becomes
+      // Down×(n-1) + Enter rather than typed characters.
+      expect(sendSpecialKeys).toHaveBeenCalledWith(
+        sessionName,
+        [...Array.from({ length: denyOption - 1 }, () => 'Down'), 'Enter'],
+      );
+      expect(sendKeys).not.toHaveBeenCalled();
+    });
+  });
+
+  it('never quotes the answer back in the refusal (SEC-003)', async () => {
+    const frame = liveFrame('tests/unit/lib/detection/fixtures/claude-live-1708/bash-approval-taskpanel.txt');
+    const promptData = livePrompt('claude', frame);
+
+    await expect(
+      sendPromptAnswer({
+        sessionName: 'claude-test',
+        answer: '<script>alert(1)</script>',
+        cliToolId: 'claude',
+        promptData,
+        frame,
+      }),
+    ).rejects.toSatisfy((error: Error) => !error.message.includes('script'));
+  });
+
+  it('points the operator at the option number', async () => {
+    // The acceptance criterion `respond` inherits: the refusal has to say how to
+    // answer, because the operator reaching it typed words at a dialog that only
+    // takes a choice. `/prompt-response` returns this message verbatim and the
+    // CLI prints it after `Reason: unresolvable_answer`.
+    const promptData: PromptData = {
+      type: 'multiple_choice',
+      question: 'Do you want to proceed?',
+      options: [
+        { number: 1, label: 'Yes', isDefault: true },
+        { number: 2, label: 'No' },
+      ],
+      status: 'pending',
+    };
+
+    await expect(
+      sendPromptAnswer({ sessionName: 'gemini-test', answer: 'please stop', cliToolId: 'gemini', promptData }),
+    ).rejects.toThrow(/option number/);
+  });
+
+  it('leaves a yes/no prompt taking free text', async () => {
+    // The guard reads the ROWS of a multiple-choice prompt. A yes_no prompt has
+    // none, and its text arm is how `y` has always been answered.
+    const promptData: PromptData = {
+      type: 'yes_no',
+      question: 'Continue?',
+      options: ['yes', 'no'],
+      defaultOption: 'yes',
+      status: 'pending',
+    };
+
+    await sendPromptAnswer({ sessionName: 'gemini-test', answer: 'y', cliToolId: 'gemini', promptData });
+
+    expect(sendKeys).toHaveBeenCalledWith('gemini-test', 'y', false);
+  });
+
+  it('leaves a multiple_choice with no options at all alone (#1726’s pin, where it still holds)', async () => {
+    // No rows is not "rows that take no text": this prompt says nothing about
+    // where characters land, so it keeps the pre-#2583 path.
+    const promptData: PromptData = {
+      type: 'multiple_choice',
+      question: 'Choose:',
+      options: [],
+      status: 'pending',
+    };
+
+    await sendPromptAnswer({ sessionName: 'gemini-test', answer: 'anything at all', cliToolId: 'gemini', promptData });
+
+    expect(sendKeys).toHaveBeenCalledWith('gemini-test', 'anything at all', false);
   });
 });
 
