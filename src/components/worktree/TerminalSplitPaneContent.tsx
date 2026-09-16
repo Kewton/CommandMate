@@ -75,6 +75,7 @@ import { getTerminalDisplayCompaction } from '@/config/terminal-display-compacti
 import { NavigationButtons } from '@/components/worktree/NavigationButtons';
 import { TerminalEscapeHatch } from '@/components/worktree/TerminalEscapeHatch';
 import { OpencodeQuickKeys } from '@/components/worktree/OpencodeQuickKeys';
+import { AgentModeControl } from '@/components/worktree/AgentModeControl';
 import { UnsentComposerBar, hasUnsentComposerText } from '@/components/worktree/UnsentComposerBar';
 import {
   OpencodeSidebarNotice,
@@ -1020,6 +1021,33 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
           // including a ready agent with nothing to queue behind.
           isProcessing={isGenerating}
           showToast={showToast}
+          // Issue #2592: the permission-mode button + chip, in the composer's
+          // existing action row. Mounted on the FOOTER, which this component
+          // renders unconditionally, so the control is present on the terminal
+          // surface and on the chat surface alike — the chat surface is the one
+          // that needs it most, because it hides the very footer the mode is
+          // otherwise only legible from.
+          //
+          // The gate is passed as data, not decided here: `AgentModeControl`
+          // owns `canCycleAgentMode` so the "is a dialog on screen?" rule has one
+          // definition and one test. `terminal.sessionStatus` is the same merged
+          // verdict `isGenerating` above reads, and the four flags are the same
+          // ones the dialog card is driven by (#2254 / #2369) — so the button and
+          // the card can never both believe they own the frame.
+          agentModeSlot={
+            <AgentModeControl
+              worktreeId={worktreeId}
+              cliToolId={cliToolId}
+              instanceId={resolvedInstanceId}
+              agentMode={terminal.agentMode}
+              sessionStatus={terminal.sessionStatus}
+              isPromptWaiting={prompt.visible}
+              isSelectionListActive={terminal.isSelectionListActive}
+              isDismissablePanelActive={terminal.isDismissablePanelActive}
+              isUnclassifiedActive={terminal.isUnclassifiedActive}
+              onKeysSent={refresh}
+            />
+          }
           // Issue #1080: per-split Auto-Yes toggle now lives in the composer's
           // bottom meta row instead of its own full-width footer row.
           autoYesSlot={
@@ -1047,6 +1075,16 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       // Issue #2046: the opencode quick-key strip's session gate.
       agentSession.session,
       terminal.composerText,
+      // Issue #2592: the mode control's value and its four gate inputs.
+      // `terminal.isSelectionListActive` / `isUnclassifiedActive` reach the memo
+      // through `showNav` / `showEscapeHatch` above, but those are derived and
+      // also carry `!isChatSurface` — the gate reads the raw flags, so the raw
+      // flags are what has to be listed.
+      terminal.agentMode,
+      terminal.sessionStatus,
+      terminal.isSelectionListActive,
+      terminal.isDismissablePanelActive,
+      terminal.isUnclassifiedActive,
       terminal.isPagerActive,
       worktreeId,
       cliToolId,

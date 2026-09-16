@@ -1080,6 +1080,22 @@
     "changedRecently": "変更あり",
     "changedRecentlyDetail": "モデルが {from} から {to} に変わりました。タップで閉じます。"
   },
+  "agentMode": {
+    "label": "モード",
+    "cycleAria": "エージェントの権限モードを切り替える (shift+tab)",
+    "cycleFromAria": "エージェントの権限モードを切り替える。現在は {mode}。(shift+tab)",
+    "noteCodexModelCoupled": "Codex はモードと連動してモデルと推論の強さも変わります。",
+    "mode": {
+      "default": "default",
+      "manual": "manual",
+      "accept-edits": "accept edits",
+      "plan": "plan",
+      "auto": "auto",
+      "autopilot": "autopilot",
+      "bypass": "permission bypass",
+      "dont-ask": "don't-ask"
+    }
+  },
   "sessionNote": {
     "menuItem": "セッションメモ",
     "placeholder": "このセッションで何をしているか",

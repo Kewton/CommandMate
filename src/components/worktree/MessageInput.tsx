@@ -90,6 +90,23 @@ export interface MessageInputProps {
     content: string,
     options: { cliToolId: CLIToolType; instanceId?: string; imagePath?: string },
   ) => void;
+  /**
+   * Issue #2592: the agent's permission-mode control, rendered in the existing
+   * action row beside `InterruptButton` / `OpencodeSessionControls`.
+   *
+   * A slot rather than a prop bundle, for the reason {@link autoYesSlot} is one:
+   * the control needs this pane's frame-derived mode and its four dialog flags,
+   * and every one of those already lives in the caller (`useTerminalPanePolling`).
+   * Plumbing six more props through the composer to hand them straight back to a
+   * child would put the composer in the business of knowing what a permission
+   * mode is.
+   *
+   * **No row of its own, on either layout.** It joins the row that exists,
+   * because vertical space in the pane is already spoken for (#2106 / #2131) and
+   * every pixel a control takes comes out of `TerminalDisplay`. Callers without
+   * one (the sessions screen) pass nothing and nothing is drawn.
+   */
+  agentModeSlot?: React.ReactNode;
 }
 
 /**
@@ -141,7 +158,7 @@ function migrateLegacyDraftKey(worktreeId: string): void {
   }
 }
 
-export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSent, cliToolId, instanceId, isSessionRunning = false, pendingInsertText, onInsertConsumed, splitIndex = 0, onFocus, isProcessing = false, showToast, autoYesSlot, onOptimisticSend }: MessageInputProps) {
+export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSent, cliToolId, instanceId, isSessionRunning = false, pendingInsertText, onInsertConsumed, splitIndex = 0, onFocus, isProcessing = false, showToast, autoYesSlot, agentModeSlot, onOptimisticSend }: MessageInputProps) {
   const t = useTranslations('worktree');
   const [message, setMessage] = useState('');
   const [sending, setSending] = useState(false);
@@ -563,6 +580,10 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
               // showToast; the control falls back to an inline message there.
               showToast={showToast}
             />
+            {/* Issue #2592: the permission-mode button, in this row rather than a
+                new one. Renders nothing for a tool with no mode cycle and for a
+                caller that passes no slot. */}
+            {agentModeSlot}
             <InterruptButton
               worktreeId={worktreeId}
               cliToolId={cliToolId || 'claude'}
@@ -627,6 +648,9 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
               showToast={showToast}
             />
           )}
+
+          {/* Issue #2592 — see the mobile mount above. */}
+          {!isMobile && agentModeSlot}
 
           {/* Desktop: Interrupt Button */}
           {!isMobile && (

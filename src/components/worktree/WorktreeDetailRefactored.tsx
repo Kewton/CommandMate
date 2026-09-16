@@ -75,6 +75,7 @@ import { WorktreeDetailDesktop } from '@/components/worktree/WorktreeDetailDeskt
 import { UPLOADABLE_EXTENSIONS } from '@/config/uploadable-extensions';
 import { Modal } from '@/components/ui/Modal';
 import { AutoYesToggle } from '@/components/worktree/AutoYesToggle';
+import { AgentModeControl } from '@/components/worktree/AgentModeControl';
 import { BranchMismatchAlert } from '@/components/worktree/BranchMismatchAlert';
 import { getCliToolDisplayName, getInstanceLabel, getActiveInstanceLabel, type CLIToolType } from '@/lib/cli-tools/types';
 import { deriveCliStatus } from '@/types/sidebar';
@@ -225,6 +226,7 @@ const MobileComposer = memo(function MobileComposer({
   pendingInsertText,
   onInsertConsumed,
   autoYesSlot,
+  agentModeSlot,
 }: {
   worktreeId: string;
   cliToolId: CLIToolType;
@@ -242,6 +244,8 @@ const MobileComposer = memo(function MobileComposer({
   pendingInsertText?: string | null;
   onInsertConsumed?: () => void;
   autoYesSlot?: React.ReactNode;
+  /** Issue #2592: the permission-mode control, in the composer's action row. */
+  agentModeSlot?: React.ReactNode;
 }) {
   const optimisticSend = useChatOptimisticSend({ cliToolId, instanceId });
   return (
@@ -257,6 +261,7 @@ const MobileComposer = memo(function MobileComposer({
       onInsertConsumed={onInsertConsumed}
       onOptimisticSend={optimisticSend}
       autoYesSlot={autoYesSlot}
+      agentModeSlot={agentModeSlot}
     />
   );
 });
@@ -362,6 +367,14 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     isReconnecting,
     isSelectionListActive,
     isPagerActive,
+    // Issue #2592: the composer's permission-mode control reads these. The
+    // phone's composer is docked outside `MobileTerminalTab` — which owns the
+    // pane hook the PC split reads the same facts from — so they come off this
+    // controller's own poll instead.
+    isDismissablePanelActive,
+    isUnclassifiedActive,
+    sessionStatus,
+    agentMode,
     lastAutoResponse,
     loading,
     makeAutoYesToggleHandler,
@@ -932,6 +945,27 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                   showToast={showToast}
                   pendingInsertText={pendingInsertText}
                   onInsertConsumed={handleInsertConsumedSingle}
+                  // Issue #2592: the permission-mode button + chip, in the row
+                  // the composer already draws (slash / attach / interrupt).
+                  // Deliberately NOT a strip of its own next to the quick keys:
+                  // this screen's vertical budget is spent (#2106 keeps
+                  // `TerminalDisplay` above 250px at 360x640, and #2131 measured
+                  // the strip against it), and a control in an existing row
+                  // costs the terminal nothing.
+                  agentModeSlot={
+                    <AgentModeControl
+                      worktreeId={worktreeId}
+                      cliToolId={activeCliTab}
+                      instanceId={activeInstanceId}
+                      agentMode={agentMode}
+                      sessionStatus={sessionStatus}
+                      isPromptWaiting={state.prompt.visible}
+                      isSelectionListActive={isSelectionListActive}
+                      isDismissablePanelActive={isDismissablePanelActive}
+                      isUnclassifiedActive={isUnclassifiedActive}
+                      onKeysSent={fetchCurrentOutput}
+                    />
+                  }
                   // Issue #1080: Auto-Yes now lives in the composer meta row (moved off
                   // the sticky tab row). The active agent tab already names the tool, so
                   // the parenthetical tool name is suppressed here (showToolName=false).
