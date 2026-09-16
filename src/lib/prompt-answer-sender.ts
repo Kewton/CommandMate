@@ -134,52 +134,72 @@ async function readGuardFrame(params: SendPromptAnswerParams): Promise<string | 
  * - It never fires for a tool with no measured dialog rules
  *   (`hasDialogRules === false`: gemini, antigravity, vibe-local). Gating on
  *   rules that do not exist would silence those tools, which is the rollout
- *   mistake `auto-yes-dialog-gate` documents.
+ *   mistake `auto-yes-dialog-gate` documents. command-code has had rules since
+ *   Issue #2574 (before it, it belonged in this list and was missing from it);
+ *   they only ever answer `numbered`, so on that tool this guard never refuses
+ *   and its reading is used for the Enter instead (see {@link resolveSubmitMode}).
  * - It does not MAP the answer onto the dialog's buttons. Turning "3" into the
  *   two ←/→ presses that reach `Reject` is Issue P1-7's structured-decision
  *   work; this Issue only stops the wrong keystroke.
  *
+ * @returns The `numbered` dialog the tool vouched for on this frame, or null when
+ *   the guard did not read one (non-numeric answer, no rules, unreadable pane,
+ *   or no dialog on screen). Returned so the Enter decision is made off the
+ *   same reading rather than a second capture (Issue #2574).
  * @throws {PromptAnswerRejectedError} when the tool vouched for a dialog on this
  *   frame whose `answerMode` is not {@link TEXT_ANSWERABLE_ANSWER_MODE}.
  */
-async function assertAnswerModeAcceptsNumber(params: SendPromptAnswerParams): Promise<void> {
-  if (!/^\d+$/.test(params.answer)) return;
+async function assertAnswerModeAcceptsNumber(params: SendPromptAnswerParams): Promise<DialogVerdict | null> {
+  if (!/^\d+$/.test(params.answer)) return null;
 
   const detector = getToolStatusDetector(params.cliToolId);
-  if (!detector.hasDialogRules) return;
+  if (!detector.hasDialogRules) return null;
 
   const frame = await readGuardFrame(params);
-  if (frame === null) return;
+  if (frame === null) return null;
 
   const dialog = detector.detectDialog(normalizeFrame(frame));
-  if (dialog === null) return;
-  if (dialog.answerMode === TEXT_ANSWERABLE_ANSWER_MODE) return;
+  if (dialog === null) return null;
+  if (dialog.answerMode === TEXT_ANSWERABLE_ANSWER_MODE) return dialog;
 
   throw new PromptAnswerRejectedError(params.cliToolId, params.answer, dialog);
 }
 
 /**
- * Resolve the effective SubmitMode from promptData, fallback, and default.
- * Resolution order: promptData.submitMode -> fallbackSubmitMode -> 'answer_then_enter'.
+ * Resolve the effective SubmitMode from the dialog on screen, promptData, fallback, and default.
+ * Resolution order: dialog.submitMode -> promptData.submitMode -> fallbackSubmitMode -> 'answer_then_enter'.
  * Invalid values are normalized to 'answer_then_enter' via allowlist validation.
+ *
+ * Issue #2574: the dialog comes first because it is the tool's own measurement,
+ * read off the frame the answer is about to land on. `promptData` may have been
+ * built by the generic parser, which cannot see that a digit is a hotkey —
+ * Command Code's permission dialog was published with no `submitMode`, and the
+ * Enter sent after its `1` submitted whatever draft was waiting in the composer.
  *
  * @returns The resolved SubmitMode, guaranteed to be a valid value.
  */
-function resolveSubmitMode(params: SendPromptAnswerParams): SubmitMode {
+function resolveSubmitMode(params: SendPromptAnswerParams, dialog: DialogVerdict | null): SubmitMode {
   const fromPromptData = params.promptData?.type === 'multiple_choice'
     ? params.promptData.submitMode
     : undefined;
-  const raw = fromPromptData ?? params.fallbackSubmitMode ?? 'answer_then_enter';
+  const raw = dialog?.submitMode ?? fromPromptData ?? params.fallbackSubmitMode ?? 'answer_then_enter';
   return isValidSubmitMode(raw) ? raw : 'answer_then_enter';
 }
 
 /**
  * Determine whether the Enter key should be suppressed after sending the answer text.
  * answer_only mode applies only when the prompt is multiple_choice and the answer is numeric.
+ * A numbered dialog the tool vouched for is a multiple-choice prompt in its own right,
+ * which covers a caller that could not supply promptData (Issue #2574).
  */
-function shouldSuppressEnter(params: SendPromptAnswerParams, submitMode: SubmitMode): boolean {
+function shouldSuppressEnter(
+  params: SendPromptAnswerParams,
+  submitMode: SubmitMode,
+  dialog: DialogVerdict | null,
+): boolean {
   if (submitMode !== 'answer_only') return false;
-  const isMultipleChoice = params.promptData?.type === 'multiple_choice'
+  const isMultipleChoice = dialog !== null
+    || params.promptData?.type === 'multiple_choice'
     || params.fallbackPromptType === 'multiple_choice';
   return isMultipleChoice && /^\d+$/.test(params.answer);
 }
@@ -236,7 +256,7 @@ export async function sendPromptAnswer(params: SendPromptAnswerParams): Promise<
   // inside the text arm because the number->offset arithmetic the cursor arm
   // does is just as meaningless on an unnumbered button strip as typing the
   // digit is.
-  await assertAnswerModeAcceptsNumber(params);
+  const dialog = await assertAnswerModeAcceptsNumber(params);
 
   // Determine if this is an arrow-key-navigated multiple-choice prompt.
   // Claude Code and Antigravity (agy) both render selection menus that only
@@ -316,9 +336,9 @@ export async function sendPromptAnswer(params: SendPromptAnswerParams): Promise<
     await sendKeys(sessionName, answer, false);
 
     // Issue #616: Resolve submitMode and determine whether to suppress Enter
-    const resolvedSubmitMode = resolveSubmitMode(params);
+    const resolvedSubmitMode = resolveSubmitMode(params, dialog);
 
-    if (!shouldSuppressEnter(params, resolvedSubmitMode)) {
+    if (!shouldSuppressEnter(params, resolvedSubmitMode, dialog)) {
       // Wait a moment for the input to be processed
       await new Promise(resolve => setTimeout(resolve, TUI_TEXT_INPUT_WAIT_MS));
 

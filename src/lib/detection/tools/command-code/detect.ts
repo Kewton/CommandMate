@@ -50,9 +50,14 @@
  * branch below publishes `'positive'` outright rather than through
  * `resolveIdleEvidence`, so a rule added without changing that would never run.
  *
- * No `detectDialog` either: Epic #2249 決定 3 keeps Auto-Yes on the legacy
- * numbered-response path, because Command Code fires `PreToolUse` AFTER the
- * dialog is answered, so a hook-driven permission decision cannot dismiss it.
+ * Epic #2249 決定 3 keeps Auto-Yes on the legacy numbered-response path,
+ * because Command Code fires `PreToolUse` AFTER the dialog is answered, so a
+ * hook-driven permission decision cannot dismiss it. That is why this module
+ * had no `detectDialog` until Issue #2574 — and why the one it has now does not
+ * touch that decision. `./permission.ts` declares how the permission dialog
+ * takes an answer (`numbered`, and a digit that commits without an Enter), which
+ * is what `sendPromptAnswer` reads; the Auto-Yes gate still does not judge this
+ * tool, because its rollout row stays `legacy`.
  *
  * Issue #2369 added a second `afterPrompt` branch for the other screen the
  * shared chain could not read: the `/usage` panel, whose last row is
@@ -124,6 +129,7 @@ import {
   DISMISSABLE_PANEL_FOOTER_PATTERN,
 } from '../../selection-shape';
 import { readCommandCodeQuestionDialog } from './dialog';
+import { detectCommandCodePermissionDialog } from './permission';
 import { STATUS_REASON } from '../../status-reason';
 import { createToolStatusDetector } from '../run-detection';
 import { COMMAND_CODE_VERIFIED_AGAINST } from '../verified-against';
@@ -266,6 +272,12 @@ export const commandCodeStatusDetector = createToolStatusDetector({
     }
 
     return null;
+  },
+
+  // Issue #2574: the permission dialog's answer mode, for the sender. Not an
+  // Auto-Yes gate — see the module docblock and `./permission.ts`.
+  detectDialog(frame) {
+    return detectCommandCodePermissionDialog(frame);
   },
 
   afterThinking(frame): ToolStatusVerdict | null {
