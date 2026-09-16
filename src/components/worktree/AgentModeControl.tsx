@@ -220,7 +220,7 @@ export const AgentModeControl = memo(function AgentModeControl({
       </button>
       {readable ? (
         <span
-          className="flex-shrink-0 px-2 py-1 rounded-full bg-surface-muted text-xs text-muted-foreground"
+          className="flex-shrink-0 px-2 py-1 rounded-full bg-muted text-xs text-muted-foreground"
           data-testid="agent-mode-chip"
           data-agent-mode={agentMode}
         >
