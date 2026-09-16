@@ -81,6 +81,11 @@ logs/
 # 規則を変更したら scripts/check-commandmate-tracking.sh で確認すること。
 /.commandmate/*
 !/.commandmate/verify.yaml
+# 実機 UAT の環境宣言（Issue #2590、Catalog の cmate-uat が読む）。「この製品はどう起動し・
+# どう止め・隔離をどう実測するか」をリポジトリ単位で宣言したもので、verify.yaml と同じ「設定」
+# である（生成物ではない）。run の成果物は report_dir 側（既定 .commandmate/uat/）に出るので、
+# 上の /.commandmate/* で除外されたままになる。
+!/.commandmate/uat.yaml
 # 実行契約（Issue #1545 / Phase 2-1）。「誰がどんな制約で作業させたか」の記録なので
 # レビュー可能な形で追跡する。.yaml 以外（ログ等の副産物）は除外したままにする。
 !/.commandmate/tasks/
