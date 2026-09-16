@@ -1693,7 +1693,17 @@ describe('Issue #2555: compact (2)', () => {
     expect(fold).toMatch(/^<details class="card-more catalog-fold">\s*<summary id="catalog-h">/);
     expect(text(firstMatch(fold, /<summary\b[^>]*>[\s\S]*?<\/summary>/, 'the Catalog summary'))).toBe(label);
     expect(fold.match(/<ul class="chips" aria-labelledby="catalog-h">/g) ?? []).toHaveLength(1);
-    expect(fold.match(/<li><code>cmate-[^<]+<\/code><\/li>/g) ?? []).toHaveLength(14);
+    // Every Catalog ID sits inside the fold. The count comes from the §3d ID row
+    // rather than a literal: it was a literal 14 until cmate-uat made the Catalog
+    // 15 (#2590), and a literal has to be found and bumped by hand each time the
+    // Catalog grows — the very staleness §3d keeps the count out of the label for.
+    const catalogIds = [
+      ...(sectionBody('3d')
+        .split('\n')
+        .find((line) => line.startsWith('`cmate-')) ?? '').matchAll(/`([^`]+)`/g),
+    ];
+    expect(catalogIds.length, 'public-messaging.md §3d lists no Catalog IDs').toBeGreaterThan(0);
+    expect(fold.match(/<li><code>cmate-[^<]+<\/code><\/li>/g) ?? []).toHaveLength(catalogIds.length);
     expect(fold).not.toMatch(/<details\b[^>]*\bopen\b/);
     expect(fold).not.toMatch(/<(?:details|summary)\b[^>]*\b(?:role|tabindex|onclick)=/);
     // §3c is a paragraph a reader sees without opening anything.
