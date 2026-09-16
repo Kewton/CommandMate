@@ -18,6 +18,7 @@
  * | command-code   | 1.53.1   | permission-mode cycle            | default → accept edits → plan → default       |
  * | codex          | 0.154.0  | two-value toggle                 | Default ⇄ Plan                                |
  * | copilot        | 1.0.83   | mode cycle                       | default → plan → autopilot → default          |
+ * |                | 1.0.85   | (UAT) autopilot may read `autopilot (limited)` | same cycle                      |
  * | antigravity    | 1.2.4    | mode cycle                       | default → accept-edits → plan → default       |
  * | gemini         | 0.58.0   | `app.cycleApprovalMode` (docs)   | **NOT MEASURED** — see below                  |
  * | opencode       | 1.18.30  | agent switch, not a mode         | — (already shipped as #2046's quick keys)     |
@@ -174,6 +175,47 @@ const CODEX_MODE_SPEC: AgentModeSpec = {
 };
 
 /**
+ * One mode-naming segment of a status bar (Issue #2592).
+ *
+ * copilot and antigravity both put the mode into a row that is otherwise their
+ * status bar, as one segment among `·`-separated others, and neither puts it in
+ * a fixed place. The grammar, as measured on the live frames under
+ * `tests/fixtures/agent-mode-2592/`:
+ *
+ *   left boundary   start of row | `·` | a column gap (two spaces)
+ *   the word        `plan`, `accept-edits`, `autopilot` (+ an optional ` mode`)
+ *   qualifier       optional ` (limited)` — copilot 1.0.85 prints
+ *                   `autopilot (limited)` after the user answers its permission
+ *                   dialog with "Continue with limited permissions"
+ *   right boundary  `·` | a column gap | end of row
+ *
+ * The column gap on the LEFT is what agy 1.2.4 needs, and what the first cut of
+ * this file did not accept: agy draws `? for shortcuts` and the right-aligned
+ * `accept-edits · Gemini 3.8 Flash · hi` on the SAME row, 150 columns apart, so
+ * the mode word is preceded by spaces and nothing else. The first fixture had
+ * been built from the Issue's prose with the segment on a row of its own, where
+ * `^` matched — and the live UAT read `unknown` on every agy step.
+ *
+ * The gap is exactly two spaces immediately before the word rather than "two or
+ * more then any": each alternative is anchored at one position (`^`, a `·`, or
+ * the last two columns of a run), so the scan stays linear in the row width
+ * instead of re-walking every run of padding from every start position. A single
+ * space is deliberately NOT a boundary — that is what keeps prose such as
+ * `Follow the plan` from reading as a mode.
+ *
+ * @param word - Regex source for the mode word (no capture groups)
+ */
+function statusBarSegment(word: string): RegExp {
+  const gap = '[^\\S\\n]';
+  return new RegExp(
+    `(?:^${gap}*|·${gap}*|${gap}{2})${word}` +
+      `(?:${gap}\\([^()\\n]{1,32}\\))?` +
+      `(?:${gap}*·|${gap}{2}|${gap}*$)`,
+    'i',
+  );
+}
+
+/**
  * copilot's mode word, spliced into the hint bar.
  *
  * The bar is the last content row of the pane — `readCopilotBarRow` in
@@ -188,14 +230,26 @@ const CODEX_MODE_SPEC: AgentModeSpec = {
  * why the patterns below are delimiter-anchored rather than positional and why
  * nothing here requires `? help` to be present.
  *
+ * The UAT on 1.0.85 (`tests/fixtures/agent-mode-2592/copilot-*.txt`) placed the
+ * word directly after `← open sidebar`:
+ *
+ *   ` ← open sidebar · plan · / commands · ? help · tab next tab     GPT-5.6 Terra`
+ *   ` ← open sidebar · autopilot (limited) · / commands · tab next tab  GPT-5.6 Terra`
+ *
+ * The second is what copilot draws for the rest of the session once its
+ * autopilot permission dialog is answered "Continue with limited permissions";
+ * it is still autopilot, so {@link statusBarSegment} reads the parenthetical as a
+ * qualifier rather than as a different mode. Before the UAT it was read as
+ * nothing, and every autopilot step of the cycle published `unknown`.
+ *
  * No default indicator: the measurement found no word for it.
  */
 const COPILOT_MODE_SPEC: AgentModeSpec = {
   key: 'BTab',
   cycle: ['default', 'plan', 'autopilot'],
   indicators: [
-    { mode: 'autopilot', pattern: /(?:^|·)[^\S\n]*autopilot[^\S\n]*(?:·|[^\S\n]{2,}|$)/i },
-    { mode: 'plan', pattern: /(?:^|·)[^\S\n]*plan(?:[^\S\n]mode)?[^\S\n]*(?:·|[^\S\n]{2,}|$)/i },
+    { mode: 'autopilot', pattern: statusBarSegment('autopilot') },
+    { mode: 'plan', pattern: statusBarSegment('plan(?:[^\\S\\n]mode)?') },
   ],
   // The bar is the last content row. Two rows of slack and no more: copilot
   // renders in the alternate screen, and its transcript is measured (#1885 /
@@ -208,15 +262,26 @@ const COPILOT_MODE_SPEC: AgentModeSpec = {
 /**
  * antigravity's mode segment, at the right end of the footer.
  *
- * agy's footer is the last content row and carries the model chip at its right
- * end — `tests/fixtures/antigravity-live-2478/after-tool-turn.txt:32` reads
- * `                    Gemini 3.8 Flash · hig` (the one-column truncation
- * #1784 documents). #2592 measured `accept-edits ·` and `plan ·` appearing as a
- * segment of that same row on 1.2.4, with nothing drawn in default.
+ * agy's footer is the last content row. On 1.2.4 it is ONE row holding both the
+ * shortcut hint at the left edge and the model chip at the right, with the mode
+ * spliced in front of the chip (`tests/fixtures/agent-mode-2592/antigravity-*.txt`,
+ * captured live in the #2592 UAT, row 20, 200 columns):
  *
- * agy ALSO paints a mode banner inside its composer box, and that is deliberately
- * not read here: one row, the footer, is enough, and a banner inside the box is
- * the region `extractComposerText` walks. (It cannot collide today — agy is not
+ *   `? for shortcuts            …            accept-edits · Gemini 3.8 Flash · hi`
+ *   `? for shortcuts            …                    plan · Gemini 3.8 Flash · hi`
+ *   `? for shortcuts            …                           Gemini 3.8 Flash · hig`
+ *
+ * Nothing is drawn for default. The segment is preceded by a column gap and not
+ * by a `·`, which is the case {@link statusBarSegment}'s left boundary had to
+ * learn; see there.
+ *
+ * agy ALSO paints a mode banner inside its composer box
+ * (`> Plan mode: research & plan only (shift+tab to cycle)`), and that is
+ * deliberately not read here: one row, the footer, is enough. The banner matters
+ * to STATUS detection instead — it replaces the bare `>` the idle rule looks for,
+ * which is why `ANTIGRAVITY_PROMPT_PATTERN` in `lib/detection/cli-patterns.ts`
+ * accepts it — and it is the region `extractComposerText` walks. (It cannot
+ * collide with that today — agy is not
  * in `SUPPORTED_COMPOSER_TOOLS`, so `extractComposerText` short-circuits to
  * `unsupported_tool` and `UnsentComposerBar` can never draw for it. #2592's
  * §「設計に効く事実」5 is therefore answered by construction, and
@@ -227,8 +292,8 @@ const ANTIGRAVITY_MODE_SPEC: AgentModeSpec = {
   key: 'BTab',
   cycle: ['default', 'accept-edits', 'plan'],
   indicators: [
-    { mode: 'accept-edits', pattern: /(?:^|·)[^\S\n]*accept-edits[^\S\n]*(?:·|[^\S\n]{2,}|$)/i },
-    { mode: 'plan', pattern: /(?:^|·)[^\S\n]*plan(?:[^\S\n]mode)?[^\S\n]*(?:·|[^\S\n]{2,}|$)/i },
+    { mode: 'accept-edits', pattern: statusBarSegment('accept-edits') },
+    { mode: 'plan', pattern: statusBarSegment('plan(?:[^\\S\\n]mode)?') },
   ],
   tailRows: 2,
   noteId: null,

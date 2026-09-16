@@ -84,6 +84,34 @@ test.describe('[#2592] phone', () => {
     expect(box!.width).toBeGreaterThanOrEqual(MIN_TAP_TARGET_PX);
   });
 
+  test('prints codex\u2019s caution on a 360px phone without pushing the row off screen', async ({ page }) => {
+    // #2592 UAT F3: the caution used to live only in `title`, which a touch
+    // screen never shows. It is printed now — and the action row it joins is the
+    // narrowest place on this screen, so the check is also that nothing, the
+    // interrupt button least of all, was pushed past the right edge.
+    const narrow = PHONE_VIEWPORTS[1];
+    await page.setViewportSize({ width: narrow.width, height: narrow.height });
+    await seedActiveInstance(page, 'codex');
+    await mockAgentModeApi(page, { cliTool: 'codex', frame: 'codex-plan', agentMode: 'plan' });
+    await openMobile(page);
+
+    const note = page.locator('[data-testid="agent-mode-note"]');
+    await expect(note).toBeVisible();
+    const noteBox = await note.boundingBox();
+    expect(noteBox).not.toBeNull();
+    expect(noteBox!.width).toBeGreaterThan(0);
+    expect(noteBox!.x + noteBox!.width).toBeLessThanOrEqual(narrow.width);
+
+    const interrupt = await page.locator('[data-testid="interrupt-button"]').boundingBox();
+    expect(interrupt).not.toBeNull();
+    expect(interrupt!.x + interrupt!.width).toBeLessThanOrEqual(narrow.width);
+
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+    expect(overflow).toBeLessThanOrEqual(0);
+  });
+
   test('shows the mode the served frame is in', async ({ page }) => {
     const [viewport] = PHONE_VIEWPORTS;
     await page.setViewportSize({ width: viewport.width, height: viewport.height });

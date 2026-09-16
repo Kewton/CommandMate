@@ -37,7 +37,7 @@ maenokota@MAENOnoMac-Studio sandbox-repo % CODEX_HOME='/Users/maenokota/.codex' 
 
 › Ask Codex to do anything
 
-  gpt-6-astra medium · ~/uat3-20260916/sandbox-repo · Reply with one word                                                                                               Plan mode (shift+tab to cycle)
+  gpt-6-astra xhigh · ~/uat3-20260916/sandbox-repo · Reply with one word
 
 
 

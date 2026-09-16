@@ -1084,7 +1084,12 @@
     "label": "モード",
     "cycleAria": "エージェントの権限モードを切り替える (shift+tab)",
     "cycleFromAria": "エージェントの権限モードを切り替える。現在は {mode}。(shift+tab)",
-    "noteCodexModelCoupled": "Codex はモードと連動してモデルと推論の強さも変わります。",
+    "note": {
+      "codexModelCoupled": "Codex はモードと連動してモデルと推論の強さも変わります。"
+    },
+    "noteShort": {
+      "codexModelCoupled": "モデルも変わる"
+    },
     "mode": {
       "default": "default",
       "manual": "manual",

@@ -1,86 +1,95 @@
 # `agent-mode-2592` — permission-mode frames
 
 Frames for `detectAgentMode()` (`src/lib/detection/agent-mode.ts`), one per mode
-per declaring tool, plus one frame per tool in the state where **nothing names a
-mode**. Read by `tests/unit/lib/detection/agent-mode-2592.test.ts`.
+per declaring tool, plus frames in the state where **nothing names a mode**.
+Read by `tests/unit/lib/detection/agent-mode-2592.test.ts`,
+`antigravity-mode-banner-2592.test.ts`, `model-info-codex-trailer-2592.test.ts`,
+and the e2e spec `tests/e2e/agent-mode-control-2592.spec.ts`.
 
-Every file is a whole pane with its ANSI intact, at the geometry its base capture
-was taken at. That is deliberate and it is what the suite is for: the measured
-rows arrive wrapped in SGR (`\x1b[38;5;220m⏵⏵ auto mode on\x1b[38;5;246m …`), so a
-reader that forgets `stripAnsi` matches nothing at all, and a reader that scans
-the whole frame instead of a tail window answers with a footer from an hour ago.
-A stripped or trimmed fixture would let both defects through.
+Every file is a whole pane at the geometry it was captured at (1000/1001 rows,
+200 columns). That is deliberate: Command Code and codex render inline, so most
+of a capture is padding, and a reader that counts raw rows instead of content
+rows never reaches the footer. A trimmed fixture would hide that.
+
+## Why this directory was re-cut (2026-09-16, PR #2594 UAT)
+
+The first version of this directory built the antigravity, copilot and codex
+mode rows from **the Issue's prose** — the Issue recorded the spellings, not the
+frames. The pre-merge UAT then ran all five tools in an isolated environment and
+two of those reconstructions turned out to have the wrong SHAPE:
+
+- **antigravity** — the fixture put `accept-edits · Gemini …` on a row of its own.
+  On agy 1.2.4 it shares ONE row with `? for shortcuts`, 150 columns to its left.
+  The reader only accepted `^` / `·` before the word, matched the fixture, and
+  read `unknown` on every live step.
+- **copilot** — the fixture appended the word at the end of the bar. 1.0.85
+  puts it right after `← open sidebar`, and after the autopilot permission dialog
+  is answered "Continue with limited permissions" the word is
+  `autopilot (limited)`, which the reader did not accept.
+
+**Rule for anyone editing these files:** a fixture for a mode row must come from
+a live capture. If a live pane ever disagrees with a file here, fix the pattern in
+`src/lib/cli-tools/agent-mode-spec.ts` (or the detector) and re-cut the file from
+a new capture — never adjust the reader to match a fixture.
+
+The live source frames are in `dev-reports/issue/2592/uat-live-frames/` (not
+committed), together with the per-step cycle logs (`cycle-*.tsv`).
 
 ## Provenance
 
-Three kinds of file, and the distinction matters when one of these ever
-disagrees with a real pane.
+### A. Live captures (byte for byte, except one redaction)
 
-### A. Verbatim live captures (unmodified, byte for byte)
+| file | source | tool / version | shows |
+|---|---|---|---|
+| `antigravity-default.txt` | `uat-live-frames/antigravity-1.2.4-default-live.txt` | agy 1.2.4 | row 18 bare `>`, row 20 `? for shortcuts … Gemini 3.8 Flash · hig` |
+| `antigravity-accept-edits.txt` | `…/antigravity-1.2.4-accept-edits-live.txt` | agy 1.2.4 | row 18 `> Accept-edits mode: file edits auto-approved (shift+tab to cycle)`, row 20 `? for shortcuts … accept-edits · Gemini 3.8 Flash · hi` |
+| `antigravity-plan.txt` | `…/antigravity-1.2.4-plan-live.txt` | agy 1.2.4 | row 18 `> Plan mode: research & plan only (shift+tab to cycle)`, row 20 `? for shortcuts … plan · Gemini 3.8 Flash · hi` |
+| `copilot-autopilot-limited.txt` | `…/copilot-1.0.85-current-live.txt` | copilot 1.0.85 | row 1000 `← open sidebar · autopilot (limited) · / commands · tab next tab … GPT-5.6 Terra` |
+| `codex-plan.txt` | `…/codex-0.154.0-plan-with-thread-title-live.txt` | codex 0.154.0 | row 40 `gpt-6-astra medium · ~/… · Reply with one word … Plan mode (shift+tab to cycle)` |
+| `claude-auto.txt` | `tests/fixtures/claude-live-2247/boot-banner.txt` | claude 2.1.258 | `⏵⏵ auto mode on (shift+tab to cycle) · ← for agents` |
+| `command-code-default.txt` | `tests/fixtures/command-code-live-2250/boot-idle-1490.txt` | Command Code 1.49.0 | `? for shortcuts · taste on` |
+| `codex-default.txt` | `tests/fixtures/codex-live-2310/idle-composer.txt` | codex 0.15x | a status bar that ends in the path, no badge |
 
-| file | copied from | shows |
-|---|---|---|
-| `claude-auto.txt` | `tests/fixtures/claude-live-2247/boot-banner.txt` | `⏵⏵ auto mode on (shift+tab to cycle) · ← for agents` (claude 2.1.258) |
-| `command-code-default.txt` | `tests/fixtures/command-code-live-2250/boot-idle-1490.txt` | `? for shortcuts · taste on` (Command Code 1.49.0) |
-| `codex-default.txt` | `tests/fixtures/codex-live-2310/idle-composer.txt` | a status bar with **no** mode badge (codex 0.15x) |
-| `copilot-default.txt` | `tests/fixtures/tool-liveness-2070/copilot-ready-1080.txt` | the hint bar with **no** mode word (copilot 1.0.80) |
-| `antigravity-default.txt` | `tests/fixtures/antigravity-live-2478/after-tool-turn.txt` | a footer with **no** mode segment (agy, `Gemini 3.8 Flash · hig`) |
+The one redaction: the three antigravity files replace the account address on
+the banner's second row (row 7) with `user@example.com`. Nothing reads that row.
+The user name inside paths is left as captured, as the other live fixtures in
+this repository do.
 
-The four "default" rows are the load-bearing ones. Issue #2592
-§「設計に効く事実」3 says four of the five tools draw nothing in their base mode,
-and these are that claim as data: the suite asserts `unknown` on them, which is
-what stops anybody re-deriving `default` from "no row matched".
+The ANSI-bearing files are the three from older live directories (`claude-auto`,
+`command-code-default`, `codex-default`). The UAT captures were taken stripped,
+so the re-cut files carry no SGR; the older ANSI files are what keep the
+"forgot `stripAnsi`" failure covered.
 
-### B. One real row transplanted onto another real frame
+### B. A live frame with ONE row replaced by a live row from the UAT cycle log
 
-| file | body from | footer row from |
-|---|---|---|
-| `claude-manual.txt` | `claude-live-2247/boot-banner.txt` | row 1000 of `tests/unit/lib/tmux/fixtures/capture-claude-idle.txt`, verbatim |
+The cycle logs record the footer text of every step, whitespace collapsed. Each
+file below is the live frame named in the second column with exactly one row
+replaced (`diff` against the source shows a single-row change), re-padded so the
+right-aligned element keeps its live column.
 
-Both halves are live captures of the same tool at the same geometry; only the
-pairing is synthetic.
+| file | base frame | row | replaced with (from) |
+|---|---|---|---|
+| `copilot-default.txt` | copilot 1.0.85 live | 1000 | ` ← open sidebar · / commands · ? help · tab next tab` (`cycle-copilot-first.tsv` step 0) |
+| `copilot-plan.txt` | copilot 1.0.85 live | 1000 | ` ← open sidebar · plan · / commands · ? help · tab next tab` (step 1) |
+| `copilot-autopilot.txt` | copilot 1.0.85 live | 1000 | ` ← open sidebar · autopilot · / commands · tab next tab` (step 2 — note `? help` is gone) |
+| `codex-default-thread-title.txt` | codex 0.154.0 live | 40 | `gpt-6-astra xhigh · ~/… · Reply with one word`, no badge (`cycle-codex.tsv` step 2) |
+| `claude-manual.txt` | `claude-live-2247/boot-banner.txt` | 1000 | row 1000 of `tests/unit/lib/tmux/fixtures/capture-claude-idle.txt`, verbatim |
 
-### C. Reconstructed rows — the mode phrase substituted into a real row
+The transcript above the replaced row is the base frame's, so e.g.
+`codex-default-thread-title.txt` still shows `Model changed to … for Plan mode.`
+as its last notice. Nothing that reads these files looks there; the footer is the
+bottom-most match.
 
-The remaining files take a real captured row and splice in the spelling Issue
-#2592 measured on 2026-09-16 (private tmux socket, 200x60, repository root, the
-tools killed afterwards). The Issue records the spellings and not the frames, so
-the surrounding bytes — indentation, SGR, right-alignment, line width — are the
-real capture's and only the named phrase is the Issue's.
+### C. A real row with one phrase substituted
 
-| file | base row | substitution |
-|---|---|---|
-| `claude-accept-edits.txt` | claude footer, row 1000 | `⏵⏵ auto mode on` → `⏵⏵ accept edits on` |
-| `claude-plan.txt` | claude footer, row 1000 | `⏵⏵ auto mode on` → `⏸ plan mode on` |
-| `command-code-accept-edits.txt` | 1.49.0 idle frame | a new row `» accept edits on [shift+tab]` **above** the shortcut row (the 1.53.1 layout) |
-| `command-code-plan.txt` | 1.49.0 idle frame | a new row `plan mode [shift+tab]` above the shortcut row |
-| `command-code-bypass-1490.txt` | 1.49.0 idle frame | the shortcut row **replaced** by `» permission bypass on` (the 1.49.0 layout, where `ModeIndicator` swaps the row rather than adding one) |
-| `codex-plan.txt` | codex status bar | `Plan mode (shift+tab to cycle)` appended at the bar's right end |
-| `copilot-plan.txt` | copilot hint bar | ` · plan` spliced into the bar |
-| `copilot-autopilot.txt` | copilot hint bar | ` · autopilot` spliced in **and `· ? help` removed** — #2592 measured the bar losing that element in autopilot, so the element count is mode-dependent and a positional reader would break here |
-| `antigravity-accept-edits.txt` | agy footer | `accept-edits · ` in front of the model chip, the row keeping its width |
-| `antigravity-plan.txt` | agy footer | `plan · ` in front of the model chip |
-
-The claude spellings in (C) are not guesses: #1927's measurement table
-(`src/lib/detection/tools/claude/patterns.ts`, claude-cli 2.1.240 across all four
-permission modes) records `⏸ plan mode on (shift+tab to cycle)` and
-`⏵⏵ accept edits on (shift+tab to cycle)` verbatim, and #2592 re-confirmed the
-cycle on 2.1.273. The Command Code spellings are #2250's
-(`tests/fixtures/command-code-live-2250/README.md`, "The footer row is
-mode-dependent"), which lists all five of `ModeIndicator`'s strings.
-
-**Two tools' base-mode spelling is therefore the only thing in this directory
-that rests on #2592's prose alone**: codex's badge and copilot's words. If either
-ever reads differently on a live pane, fix the pattern in
-`src/lib/cli-tools/agent-mode-spec.ts` and re-cut the file here from a real
-capture — do not adjust the reader to match the fixture.
-
-## Regenerating
-
-Nothing here is generated at test time; the files are checked in. They were
-produced once by a script that does the substitutions above against the base
-captures named in the tables. Re-cutting one by hand is fine — the tables say
-exactly which row to touch.
+| file | base row | substitution | confirmed live by |
+|---|---|---|---|
+| `claude-accept-edits.txt` | claude footer, row 1000 | `⏵⏵ auto mode on` → `⏵⏵ accept edits on` | #1927's table (`src/lib/detection/tools/claude/patterns.ts`); UAT `cycle-claude.tsv` passed |
+| `claude-plan.txt` | claude footer, row 1000 | `⏵⏵ auto mode on` → `⏸ plan mode on` | #1927's table; `cycle-claude.tsv` step 3 prints the same row |
+| `command-code-accept-edits.txt` | 1.49.0 idle frame | new row `» accept edits on [shift+tab]` above the shortcut row | `cycle-command-code.tsv` step 1 (1.54.1) shows this exact stack |
+| `command-code-plan.txt` | 1.49.0 idle frame | new row `plan mode [shift+tab]` above the shortcut row | `cycle-command-code.tsv` step 2 |
+| `command-code-bypass-1490.txt` | 1.49.0 idle frame | shortcut row replaced by `» permission bypass on` | #2250's `ModeIndicator` list (1.49.0 layout). Not reachable by `shift+tab`, not in the UAT cycle |
+| `codex-plan-no-thread-title.txt` | codex 0.154.0 live, row 40 | `· Reply with one word` removed, badge kept at its column | not captured — stands for a session whose thread has no title yet, and is the only frame exercising the extractor's column-gap trailer |
 
 ## Not in this directory
 

@@ -213,17 +213,47 @@ describe('[#2592] the chip says only what the frame said', () => {
 });
 
 describe('[#2592] the codex model-coupling caution', () => {
-  it('is on codex’s button and nowhere else', () => {
-    // #2592 §「設計に効く事実」4: codex moves the model tier and reasoning effort
-    // with the mode (xhigh <-> medium, measured), so a press does more than the
-    // cap says. That has to be printed, not discovered.
-    const { unmount } = renderControl({ cliToolId: 'codex', agentMode: 'plan' });
-    expect(button().getAttribute('title')).toBe(
-      'Codex changes its model and reasoning effort along with the mode.',
-    );
-    unmount();
+  /**
+   * #2592 §「設計に効く事実」4: codex moves the model tier and reasoning effort
+   * with the mode (xhigh <-> medium, measured), so a press does more than the
+   * cap says. The first cut put that only in the button's `title`, and the UAT
+   * on a phone found it invisible — a touch screen never hovers. It is now
+   * printed beside the chip.
+   */
+  const FULL = 'Codex changes its model and reasoning effort along with the mode.';
 
-    renderControl({ cliToolId: 'claude' });
-    expect(button().getAttribute('title')).toBeNull();
+  it('is printed on screen for codex, whatever the mode reads as', () => {
+    for (const agentMode of ['plan', 'unknown'] as const) {
+      const { unmount } = renderControl({ cliToolId: 'codex', agentMode });
+      const note = screen.getByTestId('agent-mode-note');
+      expect(note.textContent, agentMode).toBe('Also switches model');
+      // Visible, not merely present: nothing on it hides it at any breakpoint.
+      expect(note.className).not.toMatch(/(^|\s)(hidden|sr-only|invisible)(\s|$)/);
+      unmount();
+    }
   });
+
+  it('keeps the full sentence for a pointer and for a screen reader', () => {
+    renderControl({ cliToolId: 'codex', agentMode: 'plan' });
+    const note = screen.getByTestId('agent-mode-note');
+    expect(note.getAttribute('title')).toBe(FULL);
+    expect(button().getAttribute('title')).toBe(FULL);
+
+    // The button is described by the full sentence, and the short caption is
+    // hidden from the accessibility tree so it is not read twice.
+    const describedBy = button().getAttribute('aria-describedby');
+    expect(describedBy).toBeTruthy();
+    expect(document.getElementById(describedBy!)?.textContent).toBe(FULL);
+    expect(note.getAttribute('aria-hidden')).toBe('true');
+  });
+
+  it.each(['claude', 'command-code', 'copilot', 'antigravity'] as const)(
+    'is absent for %s, which declares no caution',
+    (cliToolId) => {
+      renderControl({ cliToolId });
+      expect(screen.queryByTestId('agent-mode-note')).toBeNull();
+      expect(button().getAttribute('title')).toBeNull();
+      expect(button().getAttribute('aria-describedby')).toBeNull();
+    },
+  );
 });

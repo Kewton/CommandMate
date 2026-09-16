@@ -176,6 +176,15 @@ export const antigravityStatusDetector = createToolStatusDetector({
       };
     }
     // Idle: bare "> " input prompt visible and the response has completed.
+    //
+    // Issue #2592: "bare" includes the permission-mode banner agy paints into
+    // an EMPTY box while accept-edits / plan is on (`> Plan mode: research &
+    // plan only (shift+tab to cycle)`) — `promptPattern` accepts it, see
+    // ANTIGRAVITY_COMPOSER_MODE_BANNER_PATTERN. Without that, a resting pane in
+    // either mode reached the `default` floor as `running` + unclassified, and
+    // the mode button (which refuses unclassified frames) could switch INTO
+    // accept-edits once and never back out. The thinking check above still runs
+    // first, so a generating pane in those modes is still `running`.
     const { promptPattern } = getCliToolPatterns('antigravity');
     if (promptPattern.test(frame.lastLines)) {
       return {

@@ -52,9 +52,23 @@ const CASES: ReadonlyArray<[CLIToolType, string, AgentMode]> = [
   ['command-code', 'command-code-plan.txt', 'plan'],
   ['command-code', 'command-code-bypass-1490.txt', 'bypass'],
 
+  // codex 0.154.0, live (#2592 UAT): the badge sits right-aligned after a
+  // thread-title segment; and the same bar before the thread has a title.
   ['codex', 'codex-plan.txt', 'plan'],
+  ['codex', 'codex-plan-no-thread-title.txt', 'plan'],
+
+  // copilot 1.0.85 (#2592 UAT): the word follows `← open sidebar`, and once the
+  // autopilot permission dialog is answered "Continue with limited permissions"
+  // the segment reads `autopilot (limited)` for the rest of the session. That
+  // last frame is a verbatim live capture, and it read `unknown` before the UAT.
   ['copilot', 'copilot-plan.txt', 'plan'],
   ['copilot', 'copilot-autopilot.txt', 'autopilot'],
+  ['copilot', 'copilot-autopilot-limited.txt', 'autopilot'],
+
+  // antigravity 1.2.4, live (#2592 UAT): `? for shortcuts` and the mode segment
+  // share ONE row, 150 columns apart. The first fixture had the segment on a row
+  // of its own and the reader only accepted `^` / `·` on its left — every live
+  // step read `unknown`.
   ['antigravity', 'antigravity-accept-edits.txt', 'accept-edits'],
   ['antigravity', 'antigravity-plan.txt', 'plan'],
 ];
@@ -69,6 +83,9 @@ const CASES: ReadonlyArray<[CLIToolType, string, AgentMode]> = [
  */
 const SILENT_DEFAULT_FRAMES: ReadonlyArray<[CLIToolType, string]> = [
   ['codex', 'codex-default.txt'],
+  // The 0.154.0 bar in Default: the thread-title segment is there, the badge
+  // is not. A trailer is not a mode.
+  ['codex', 'codex-default-thread-title.txt'],
   ['copilot', 'copilot-default.txt'],
   ['antigravity', 'antigravity-default.txt'],
 ];
@@ -170,6 +187,29 @@ describe('[#2592] indicators do not fire on text that merely quotes them', () =>
       '  2. Yes, allow all edits this session [shift+tab]',
     ].join('\n');
     expect(detectAgentMode('command-code', dialog)).toBe(AGENT_MODE_UNKNOWN);
+  });
+
+  it('a single space is not a segment boundary, so prose ending in "plan" is not a mode', () => {
+    // The column gap agy needed (#2592 UAT) is TWO spaces. One is a word gap,
+    // and a footer-window row that happens to end in the word must not read as a
+    // mode — for either tool that uses the segment grammar.
+    for (const tool of ['copilot', 'antigravity'] as const) {
+      expect(detectAgentMode(tool, ' Follow the plan'), tool).toBe(AGENT_MODE_UNKNOWN);
+      expect(detectAgentMode(tool, ' switch to accept-edits'), tool).toBe(AGENT_MODE_UNKNOWN);
+    }
+  });
+
+  it('a column gap IS a boundary: agy\u2019s footer shape, stated directly', () => {
+    const row = `? for shortcuts${' '.repeat(150)}plan \u00b7 Gemini 3.8 Flash \u00b7 hi`;
+    expect(detectAgentMode('antigravity', row)).toBe('plan');
+  });
+
+  it('a qualifier must be a parenthetical, not any trailing word', () => {
+    // `autopilot (limited)` is autopilot. `autopilotx` and `autopilot mode2` are
+    // not segments of the grammar at all.
+    expect(detectAgentMode('copilot', ' \u2190 open sidebar \u00b7 autopilot (limited) \u00b7 / commands')).toBe('autopilot');
+    expect(detectAgentMode('copilot', ' \u2190 open sidebar \u00b7 autopilotx \u00b7 / commands')).toBe(AGENT_MODE_UNKNOWN);
+    expect(detectAgentMode('copilot', ' \u2190 open sidebar \u00b7 autopilot limited \u00b7 / commands')).toBe(AGENT_MODE_UNKNOWN);
   });
 
   it('copilot: a reply that contains the word "plan" in prose is not a mode', () => {

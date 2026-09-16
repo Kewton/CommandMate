@@ -45,12 +45,27 @@
  * pane is already spoken for (#2106 / #2131): every pixel a control takes comes
  * out of `TerminalDisplay`, which is `flex-1 min-h-0` while the composer is
  * `flex-shrink-0`.
+ *
+ * The row's WIDTH is spoken for too — on a 360px phone the slash, attach and
+ * interrupt buttons already take a third of it — so this control is the part
+ * that gives way: the `shift+tab` notation is dropped below `sm`, and the chip
+ * and the caution truncate rather than push the interrupt button off screen.
+ *
+ * ## The caution is printed, not hovered (Issue #2592 UAT)
+ *
+ * A tool can declare a caution (`AgentModeSpec.noteId`) — codex alone today,
+ * whose modes move the model tier and reasoning effort with them. The first cut
+ * put it in the button's `title`, which a touch screen never shows, and the UAT
+ * on a phone found nothing on screen said a press would change the model. It is
+ * now a visible caption beside the chip, with the full sentence kept in `title`
+ * for a pointer and wired to the button through `aria-describedby`.
  */
 
-import React, { memo, useCallback, useMemo } from 'react';
+import React, { memo, useCallback, useId, useMemo } from 'react';
 import { useTranslations } from 'next-intl';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { AGENT_MODE_TOOL_IDS, isReadableAgentMode } from '@/lib/detection/agent-mode';
+import { resolveAgentModeSpec } from '@/lib/cli-tools/agent-mode-spec';
 import { useSpecialKeys } from '@/hooks/useSpecialKeys';
 import { useKeyPressFeedback } from '@/hooks/useKeyPressFeedback';
 
@@ -147,6 +162,7 @@ export const AgentModeControl = memo(function AgentModeControl({
   onKeysSent,
 }: AgentModeControlProps) {
   const t = useTranslations('worktree');
+  const noteDomId = useId();
   const { activeKey, markPressed } = useKeyPressFeedback();
   const send = useSpecialKeys(worktreeId, cliToolId, instanceId, onKeysSent);
 
@@ -180,20 +196,23 @@ export const AgentModeControl = memo(function AgentModeControl({
   if (!toolHasAgentMode(cliToolId)) return null;
 
   const readable = isReadableAgentMode(agentMode);
-  // `codexModelCoupled` is the only note any tool declares (#2592 §4): codex's
-  // modes move the model tier and reasoning effort with them, so a press of this
-  // button changes more than the mode and the user has to be told before they
-  // press it rather than after.
-  const note = cliToolId === 'codex' ? t('agentMode.noteCodexModelCoupled') : null;
+  // The caution comes off the tool's own declaration rather than a tool-id
+  // check here. `codexModelCoupled` is the only one declared today (#2592 §4):
+  // codex's modes move the model tier and reasoning effort with them, so a press
+  // of this button changes more than the mode and the user has to be told before
+  // they press it rather than after.
+  const noteId = resolveAgentModeSpec(cliToolId)?.noteId ?? null;
+  const note = noteId ? t(`agentMode.note.${noteId}`) : null;
+  const noteShort = noteId ? t(`agentMode.noteShort.${noteId}`) : null;
   const modeLabel = readable ? t(`agentMode.mode.${agentMode}`) : null;
 
   return (
-    <div className="flex items-center gap-1 flex-shrink-0" data-testid="agent-mode-control">
+    <div className="flex items-center gap-1 min-w-0" data-testid="agent-mode-control">
       <button
         type="button"
         onClick={handleClick}
         disabled={!enabled}
-        className={`flex-shrink-0 px-2 py-1 rounded-full border text-xs font-medium transition-colors
+        className={`flex-shrink-0 min-w-[44px] px-2 py-1 rounded-full border text-xs font-medium transition-colors
           disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent
           ${activeKey === MODE_CYCLE_KEY
             ? 'border-accent-500 bg-accent-500 text-white'
@@ -205,6 +224,7 @@ export const AgentModeControl = memo(function AgentModeControl({
             : t('agentMode.cycleAria')
         }
         title={note ?? undefined}
+        aria-describedby={note ? noteDomId : undefined}
         data-testid="agent-mode-cycle-button"
         data-agent-mode={agentMode}
         data-enabled={String(enabled)}
@@ -212,20 +232,41 @@ export const AgentModeControl = memo(function AgentModeControl({
         {/* Issue #1271: the key notation is physical-key notation and is
             identical in every locale, so it is deliberately not translated. The
             words around it are. */}
-        <span className="flex items-center gap-1">
+        {/* `min-w-[44px]` above: with the key notation dropped below `sm`, the
+            label alone can be narrower than #1127's tap-target minimum. */}
+        <span className="flex items-center justify-center gap-1">
           <span>{t('agentMode.label')}</span>
           {/* eslint-disable-next-line no-restricted-syntax -- i18n(#1271): key notation */}
-          <span className="opacity-60">shift+tab</span>
+          <span className="hidden sm:inline opacity-60">shift+tab</span>
         </span>
       </button>
       {readable ? (
         <span
-          className="flex-shrink-0 px-2 py-1 rounded-full bg-muted text-xs text-muted-foreground"
+          className="min-w-0 truncate px-2 py-1 rounded-full bg-muted text-xs text-muted-foreground"
           data-testid="agent-mode-chip"
           data-agent-mode={agentMode}
         >
           {modeLabel}
         </span>
+      ) : null}
+      {note ? (
+        <>
+          {/* Visible on every device — see "The caution is printed, not
+              hovered" above. `aria-hidden` because the full sentence reaches a
+              screen reader through the button's `aria-describedby` instead, and
+              reading both would say the same thing twice. */}
+          <span
+            aria-hidden="true"
+            title={note}
+            className="min-w-0 truncate px-2 py-1 rounded-full border border-warning-border bg-warning-subtle text-xs text-warning-foreground"
+            data-testid="agent-mode-note"
+          >
+            {noteShort}
+          </span>
+          <span id={noteDomId} className="sr-only">
+            {note}
+          </span>
+        </>
       ) : null}
     </div>
   );
