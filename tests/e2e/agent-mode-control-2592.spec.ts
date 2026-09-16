@@ -242,19 +242,21 @@ test.describe('[#2592] desktop', () => {
  * the panes come out at the Issue's own 218px and 455px.
  *
  * `rowFits` is whether the composer row can hold its fixed controls at all.
- * Attach, mode button, interrupt, send and the gaps between them need 194px of
- * row, and a 218px pane has 174px: the send button ends 20px past the row and
- * the textarea is already 0px. That shortfall is the composer's own width
- * problem, which #2598 (a two-row PC composer) owns and this Issue leaves
- * alone; what this Issue guarantees there is that nothing is drawn on top of
- * anything else.
+ * Before #2598 the PC composer was one row: attach, mode button, interrupt,
+ * send and the gaps between them needed 194px, and a 218px pane has 174px, so
+ * the send button ended 20px past the row with the textarea at 0px — what this
+ * Issue guaranteed there was only that nothing was drawn on top of anything
+ * else. #2598 moved the controls to a toolbar row of their own, leaving the
+ * send button beside the textarea, and every pane below now fits (measured:
+ * `sendPastRow` 0 in all nine panes). The flag is kept so a future layout that
+ * cannot fit a pane says so here rather than by loosening the check.
  */
 const SPLIT_LAYOUTS = [
   {
     name: 'claude narrow, codex wide',
     widths: [218, 455, 272],
     panes: [
-      { min: 200, max: 230, notation: false, rowFits: false },
+      { min: 200, max: 230, notation: false, rowFits: true },
       { min: 440, max: 470, notation: true, rowFits: true },
       { min: 255, max: 290, notation: false, rowFits: true },
     ],
@@ -264,7 +266,7 @@ const SPLIT_LAYOUTS = [
     widths: [455, 218, 272],
     panes: [
       { min: 440, max: 470, notation: true, rowFits: true },
-      { min: 200, max: 230, notation: false, rowFits: false },
+      { min: 200, max: 230, notation: false, rowFits: true },
       { min: 255, max: 290, notation: false, rowFits: true },
     ],
   },
@@ -380,11 +382,12 @@ test.describe('[#2597] desktop split panes', () => {
         }
 
         // Not fixed by pushing the problem along. Where the row has room for its
-        // controls, the send button stays inside it; where it has not (the
-        // 218px pane, #2598's), the overshoot is bounded by the part of the
-        // mode button the row could not give back — one tap target, not the
-        // whole control. Dropping only `min-w-0` fails both: the send button
-        // leaves the 272px and 315px rows, and ends 236px past the 218px one.
+        // controls, the send button stays inside it; where it has not, the
+        // overshoot is bounded by the part of the mode button the row could not
+        // give back — one tap target, not the whole control. Dropping only
+        // `min-w-0` failed both on the one-row composer: the send button left
+        // the 272px and 315px rows, and ended 236px past the 218px one. Since
+        // #2598's two-row composer every layout here takes the first branch.
         if (expected.rowFits) {
           expect(boxContains(row, send), `${label}: send inside row`).toBe(true);
         } else {
