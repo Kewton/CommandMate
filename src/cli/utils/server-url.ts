@@ -63,6 +63,51 @@ export function loadEffectiveEnv(envPath?: string): NodeJS.ProcessEnv {
 }
 
 /**
+ * Read a single .env, without letting its values escape into `process.env`.
+ *
+ * `processEnv: {}` keeps dotenv from injecting what it parsed — this is a lookup, not a
+ * load. `quiet: true` suppresses the "[dotenv@x] injecting env" banner, which dotenv writes
+ * to stdout, the same stream `--json` output goes to.
+ */
+function parseEnvFile(path: string): Record<string, string> {
+  return dotenvConfig({ path, processEnv: {}, quiet: true }).parsed ?? {};
+}
+
+/**
+ * What the server's .env files actually *say*, with no `process.env` underlay at all
+ * (Issue #2585).
+ *
+ * The third of the three loaders in this file, and the only one that can answer "is this
+ * key configured for the daemon, or merely exported into the shell I am typing in?":
+ *
+ * - {@link loadEffectiveEnv} answers "where is the server?" and keeps the shell as a base
+ *   layer, because that is what `daemon.start()` hands the child. For a variable the .env
+ *   *defines* — CM_PORT, CM_BIND — the layering is exact.
+ * - For a variable the .env does NOT define, that base layer is a guess: it reports this
+ *   shell's value for a key the daemon may never have had. Harmless for CM_PORT (a shell
+ *   that exports it usually exported it to `start` too); wrong for a key pair, where the
+ *   answer decides whether `commandmate status` warns at all. `CM_VAPID_*` exported in the
+ *   terminal silenced the "push is disabled" warning for a server with no keys — #2575 then
+ *   spent an investigation on "why does my phone not buzz".
+ *
+ * So this returns file values only. An absent key reads as absent, which is the honest
+ * answer: whether the daemon was nonetheless launched with one exported is a question only
+ * the daemon can answer, and `status` asks it over HTTP rather than guessing here.
+ *
+ * @param envPath - A worktree .env layered over the main one; omit for the main server
+ */
+export function loadEnvFileValues(envPath?: string): Record<string, string> {
+  const mainEnvPath = getEnvPath();
+  const mainParsed = parseEnvFile(mainEnvPath);
+
+  // A worktree .env is optional: when absent, parsed is undefined and the main values stand
+  const ownParsed =
+    envPath === undefined || envPath === mainEnvPath ? {} : parseEnvFile(envPath);
+
+  return { ...mainParsed, ...ownParsed };
+}
+
+/**
  * Build the environment a *client* resolves its connection target from (Issue #1743).
  *
  * The layering is deliberately the mirror image of loadEffectiveEnv(), because the two
@@ -83,14 +128,15 @@ export function loadEffectiveEnv(envPath?: string): NodeJS.ProcessEnv {
  * reported the .env port.
  *
  * Resolution order: `process.env` > `~/.commandmate/.env` > resolveServerEndpoint() defaults.
+ *
+ * Neither of the two consults the file *alone*; {@link loadEnvFileValues} is the loader for
+ * the question where the shell must not appear as a layer at all.
  */
 export function loadClientEnv(): ServerEnv {
-  // quiet: dotenv's "injecting env" banner is written to stdout, where it would corrupt
-  //   machine-readable output such as `commandmate ls --json`.
-  // processEnv: this is a read-only lookup. Left to its default, dotenv would populate
-  //   process.env with every key the file defines, turning file values into "exported"
-  //   ones for the rest of the process — the precedence this function exists to avoid.
-  const parsed = dotenvConfig({ path: getEnvPath(), processEnv: {}, quiet: true }).parsed ?? {};
+  // parseEnvFile() is a read-only lookup: left to its defaults dotenv would populate
+  // process.env with every key the file defines, turning file values into "exported" ones
+  // for the rest of the process — the precedence this function exists to avoid.
+  const parsed = parseEnvFile(getEnvPath());
 
   // process.env last: an explicitly exported variable wins over the file (see above)
   return { ...parsed, ...process.env };

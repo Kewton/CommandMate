@@ -6,14 +6,19 @@
  * stdout goes wherever the launcher put it, and the person who notices "my phone
  * stopped buzzing" reaches for `status`.
  *
- * ## The two properties that matter
+ * ## The three properties that matter
  *
- *  1. **It reads the env the DAEMON runs with, not this process's.** `.env`
- *     outranks exported variables for the server child (#1266), so reading
- *     `process.env` here would report this shell's idea of the configuration. The
- *     shadowing test below is the one that goes red on that mistake — and it is
- *     the same mistake #1266 had to fix for `CM_ALLOWED_IPS`.
- *  2. **Silence on a healthy install.** Both Issues name the negative control
+ *  1. **It reports the DAEMON's configuration, not this process's.** Two tests
+ *     pin the two halves of that: a `.env` value outranks an exported one
+ *     (#1266), and an exported value with NOTHING in the `.env` is not the
+ *     daemon's at all (#2585). The second half is the one that was missing — a
+ *     shell with `CM_VAPID_*` exported silenced this warning for a server that
+ *     had no keys, and #2575 spent an investigation finding that out by hand.
+ *  2. **The running server outranks both.** It is the only party that knows what
+ *     it was launched with, so `status` asks it (`GET /api/push/vapid`) before
+ *     reporting. `fetch` is stubbed here and defaults to a refused connection, so
+ *     every test that does not set an answer is exercising the fallback.
+ *  3. **Silence on a healthy install.** Both Issues name the negative control
  *     explicitly. A `status` that always mentioned push would be scrolled past.
  *
  * The wording is NOT stubbed: `formatVapidReportLines` runs for real, so a message
@@ -65,6 +70,20 @@ const HEALTHY = {
   CM_VAPID_PRIVATE_KEY: 'PrivateKeyPlaceholder',
 };
 
+/** The URL the STATE_FILE above describes, i.e. the one the probe must dial. */
+const SERVER_URL = `http://127.0.0.1:${PORT}`;
+
+const fetchMock = vi.fn();
+
+/** `GET /api/push/vapid` answering as a server with, or without, a key pair. */
+function serverSays(configured: boolean): void {
+  fetchMock.mockResolvedValue({
+    ok: true,
+    status: 200,
+    json: async () => ({ configured, publicKey: configured ? 'BServerPublicKey' : null }),
+  } as unknown as Response);
+}
+
 describe('statusCommand VAPID report (Issues #2123 / #2124)', () => {
   let output: string[];
   let savedEnv: Record<string, string | undefined>;
@@ -86,6 +105,11 @@ describe('statusCommand VAPID report (Issues #2123 / #2124)', () => {
     vi.mocked(fs.existsSync).mockReturnValue(true);
     vi.mocked(fs.readFileSync).mockReturnValue(STATE_FILE);
     vi.mocked(dotenv.config).mockReturnValue({ parsed: {} });
+    // Default: nothing answers. A test that wants the server's verdict says so
+    // explicitly with serverSays(), so "which authority decided this" is always
+    // visible in the test that asserts it.
+    fetchMock.mockRejectedValue(new Error('connect ECONNREFUSED 127.0.0.1:3000'));
+    vi.stubGlobal('fetch', fetchMock);
   });
 
   afterEach(() => {
@@ -93,6 +117,8 @@ describe('statusCommand VAPID report (Issues #2123 / #2124)', () => {
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
     }
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
     vi.restoreAllMocks();
   });
 
@@ -189,5 +215,153 @@ describe('statusCommand VAPID report (Issues #2123 / #2124)', () => {
     await statusCommand({ all: true });
 
     expect(output.join('\n')).toContain('Push notifications are disabled');
+  });
+
+  /**
+   * Issue #2585: the half of "the daemon's configuration, not this process's" that the
+   * tests above never covered.
+   *
+   * The #1266 test pins `.env` BEATING an exported value. It says nothing about the case
+   * where the `.env` is silent — and there the old reader kept the shell's value, so a
+   * terminal with `CM_VAPID_*` exported read as a configured daemon. Measured
+   * 2026-09-16: `:60301` answered `{"configured":false,"publicKey":null}` with no
+   * `CM_VAPID_*` anywhere in its `.env`, and `status` run from such a shell printed
+   * nothing at all.
+   */
+  describe('the running server is the authority (Issue #2585)', () => {
+    /** The shell #2575 was typing in: the pair exported, the `.env` empty. */
+    function exportKeysInThisShell(): void {
+      process.env.CM_VAPID_PUBLIC_KEY = HEALTHY.CM_VAPID_PUBLIC_KEY;
+      process.env.CM_VAPID_PRIVATE_KEY = HEALTHY.CM_VAPID_PRIVATE_KEY;
+    }
+
+    it('warns when the keys are only in this shell and the server has none', async () => {
+      exportKeysInThisShell();
+      serverSays(false);
+
+      await statusCommand();
+
+      const text = output.join('\n');
+      expect(text).toContain('Push notifications are disabled');
+      expect(text).toContain('CM_VAPID_PUBLIC_KEY');
+      // The sentence that turns "why is my phone quiet" into one action.
+      expect(text).toContain('This shell exports');
+      expect(text).toContain('restart the server');
+      // Names only. A key value must never reach the terminal.
+      expect(text).not.toContain(HEALTHY.CM_VAPID_PUBLIC_KEY);
+    });
+
+    it('stays silent when the server is configured, whatever this shell exports', async () => {
+      exportKeysInThisShell();
+      process.env.CM_VAPID_SUBJECT = 'mailto:commandmate@localhost';
+      serverSays(true);
+
+      await statusCommand();
+
+      const text = output.join('\n');
+      expect(text).toContain('Status:  Running');
+      expect(text).not.toMatch(/[Pp]ush/);
+      expect(text).not.toContain('CM_VAPID');
+    });
+
+    // The reverse false report, and the reason the probe exists at all rather than just
+    // dropping `process.env`: a pair exported into the daemon at launch is in neither the
+    // `.env` nor this shell, and only the server can say it is there.
+    it('stays silent when the server is configured and nothing local says so', async () => {
+      serverSays(true);
+
+      await statusCommand();
+
+      const text = output.join('\n');
+      expect(text).toContain('Status:  Running');
+      expect(text).not.toMatch(/[Pp]ush/);
+    });
+
+    // The endpoint reports the keys and NOT the subject, so #2124's check has to survive
+    // a server that answers `configured: true`.
+    it('still warns about a subject APNs rejects when the server has the keys', async () => {
+      vi.mocked(dotenv.config).mockReturnValue({
+        parsed: { CM_VAPID_SUBJECT: 'mailto:commandmate@localhost' },
+      });
+      serverSays(true);
+
+      await statusCommand();
+
+      const text = output.join('\n');
+      expect(text).toContain('CM_VAPID_SUBJECT');
+      expect(text).toContain('APNs');
+      // The keys are on the server, so it must not also claim push is off.
+      expect(text).not.toContain('Push notifications are disabled');
+    });
+
+    // The documented fallback. A daemon that is "Running" but cannot be asked (auth on
+    // with no CM_AUTH_TOKEN, a wedged process, something else on the port) is reported
+    // from its `.env` — and never from this shell, which is the whole point.
+    it('falls back to the .env verdict, not the shell, when nothing answers', async () => {
+      exportKeysInThisShell();
+      // fetchMock is left at its default: connection refused.
+
+      await statusCommand();
+
+      expect(output.join('\n')).toContain('Push notifications are disabled');
+    });
+
+    it('ignores an answer that is not this endpoint answering', async () => {
+      exportKeysInThisShell();
+      // Auth is on and this invocation has no token: middleware redirects to /login.
+      fetchMock.mockResolvedValue({ ok: false, status: 302, json: async () => ({}) } as never);
+
+      await statusCommand();
+
+      expect(output.join('\n')).toContain('Push notifications are disabled');
+    });
+
+    it('tells the operator to restart when the .env has keys the server does not', async () => {
+      vi.mocked(dotenv.config).mockReturnValue({ parsed: { ...HEALTHY } });
+      serverSays(false);
+
+      await statusCommand();
+
+      const text = output.join('\n');
+      expect(text).toContain('Push notifications are disabled');
+      expect(text).toContain('predates that edit');
+      expect(text).toContain('commandmate stop && commandmate start');
+    });
+
+    it('asks the server it just reported on, under a deadline', async () => {
+      serverSays(false);
+
+      await statusCommand();
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const [url, init] = fetchMock.mock.calls[0];
+      expect(url).toBe(`${SERVER_URL}/api/push/vapid`);
+      // Manual redirect: a 302 to /login must stay a 302, not become an HTML 200.
+      expect(init.redirect).toBe('manual');
+      expect(init.signal).toBeInstanceOf(AbortSignal);
+    });
+
+    it('sends CM_AUTH_TOKEN so an authenticated server can answer', async () => {
+      vi.stubEnv('CM_AUTH_TOKEN', 'token-for-this-invocation');
+      serverSays(true);
+
+      await statusCommand();
+
+      const [, init] = fetchMock.mock.calls[0];
+      expect(init.headers.Authorization).toBe('Bearer token-for-this-invocation');
+    });
+
+    it('does not touch the network when the daemon is not running', async () => {
+      // `code`, not the message: PidManager.isProcessRunning() classifies on the errno
+      // and rethrows anything it does not recognise.
+      vi.spyOn(process, 'kill').mockImplementation(() => {
+        throw Object.assign(new Error('kill ESRCH'), { code: 'ESRCH' });
+      });
+
+      await statusCommand();
+
+      expect(output.join('\n')).toContain('Not running');
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
   });
 });

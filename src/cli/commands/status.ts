@@ -11,6 +11,7 @@ import { DaemonStatus, ExitCode, getErrorMessage, StatusOptions } from '../types
 import { CLILogger } from '../utils/logger';
 import { DaemonManager } from '../utils/daemon';
 import { getPidFilePath, getEnvPath, getPidsDir } from '../utils/env-setup';
+import { loadEnvFileValues } from '../utils/server-url';
 import { readPackageVersion } from '../utils/package-info';
 import { validateIssueNoResult } from '../utils/input-validators';
 import { getDetectorFreshness } from '../../lib/detection/version-probes';
@@ -24,6 +25,7 @@ import {
 import {
   formatVapidReportLines,
   inspectVapidConfig,
+  type VapidInspection,
 } from '../../lib/push/vapid';
 
 const logger = new CLILogger();
@@ -100,38 +102,193 @@ function printLocalhostConflict(status: DaemonStatus): void {
   }
 }
 
+/** `src/app/api/push/vapid/route.ts` — public key + a `configured` flag, no secrets. */
+const VAPID_PROBE_PATH = '/api/push/vapid';
+
+/**
+ * Budget for the probe below. A loopback round trip to a healthy server is ~2ms;
+ * anything near this bound is a server that cannot answer, and an unanswered
+ * probe costs nothing but the fallback.
+ */
+const VAPID_PROBE_TIMEOUT_MS = 1000;
+
+/**
+ * Ask the running server whether it actually holds a VAPID key pair (Issue #2585).
+ *
+ * The daemon is the only process that can answer: it was handed its environment at
+ * launch and has held it ever since, while every reader in this CLI is reconstructing
+ * that environment from the outside. `GET /api/push/vapid` already exists for the web
+ * client and returns `{configured, publicKey}` — the public key only, so this adds no
+ * exposure that the browser did not already have.
+ *
+ * @returns The server's verdict, or `null` when it did not give one — unreachable,
+ *   unauthenticated, answered by something that is not this server (#2113), or not
+ *   JSON. Every one of those is "I do not know", never "not configured": inventing a
+ *   warning out of a failed probe is how a diagnostic starts lying.
+ */
+async function probeServerVapid(baseUrl: string): Promise<boolean | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), VAPID_PROBE_TIMEOUT_MS);
+
+  try {
+    // The one `process.env` read this path keeps, and deliberately: a token is a fact
+    // about THIS invocation (the caller's credential), not about the daemon's
+    // configuration. Without it an authenticated server answers 302 to /login, which
+    // `redirect: 'manual'` keeps visible instead of following it to an HTML 200.
+    const token = process.env.CM_AUTH_TOKEN;
+    const response = await fetch(`${baseUrl}${VAPID_PROBE_PATH}`, {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      redirect: 'manual',
+      signal: controller.signal,
+    });
+
+    if (!response.ok) return null;
+
+    const payload: unknown = await response.json();
+    const configured = (payload as { configured?: unknown } | null)?.configured;
+    return typeof configured === 'boolean' ? configured : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Fold the server's answer into the verdict read off its `.env` (Issue #2585).
+ *
+ * They disagree in exactly two ways, and both are real situations rather than
+ * defensive padding:
+ *
+ * - **Server has keys, `.env` names none.** They were exported into the daemon at
+ *   launch. Unsupported (`commandmate init` writes the file), but real, and warning
+ *   about push being off on a server that is demonstrably sending it would be wrong.
+ * - **Server has none, `.env` names both.** The file was edited after the daemon
+ *   started. The warning stands — the running server still cannot send — and
+ *   {@link explainVapidMismatch} adds the sentence that makes it actionable.
+ *
+ * The subject (#2124) is never reconciled, because the endpoint does not report it:
+ * it stays whatever the `.env` says, which is the only VAPID value a running server
+ * cannot be asked about.
+ */
+function reconcileVapid(
+  fileVerdict: VapidInspection,
+  serverConfigured: boolean | null
+): VapidInspection {
+  if (serverConfigured === null || serverConfigured === fileVerdict.configured) {
+    return fileVerdict;
+  }
+
+  if (serverConfigured) {
+    return {
+      ...fileVerdict,
+      configured: true,
+      status: fileVerdict.subjectIssue === null ? 'ok' : 'invalid-subject',
+    };
+  }
+
+  return { ...fileVerdict, configured: false, status: 'unconfigured' };
+}
+
+/**
+ * The sentence that closes the gap between "push is off" and "but I set those keys!"
+ * (Issue #2585) — appended to the shared lines, never replacing them.
+ *
+ * Both branches exist because both were measured: #2575 spent an investigation on a
+ * shell that exported the pair for a server that never had it, and a `.env` edited
+ * under a running daemon is the same confusion with the file in the shell's place.
+ *
+ * @returns Extra lines, or nothing at all when the report needs no qualifier.
+ */
+function explainVapidMismatch(
+  verdict: VapidInspection,
+  fileVerdict: VapidInspection,
+  serverConfigured: boolean | null,
+  envPath: string
+): string[] {
+  // Push works. Nothing is being reported, so there is nothing to qualify.
+  if (verdict.configured) return [];
+
+  if (serverConfigured === false && fileVerdict.configured) {
+    return [
+      `  ${envPath} does set both keys, so the running server predates that edit:`,
+      '  restart it ("commandmate stop && commandmate start") to pick them up.',
+    ];
+  }
+
+  // Names only, never values — the same rule the shared lines follow.
+  const shellOnly = fileVerdict.missingKeys.filter(
+    (key) => (process.env[key] ?? '').trim() !== ''
+  );
+  if (shellOnly.length === 0) return [];
+
+  const pronoun = shellOnly.length > 1 ? 'them' : 'it';
+  return [
+    `  This shell exports ${shellOnly.join(' and ')}, but the server was not started`,
+    `  with ${pronoun}: set ${pronoun} in ${envPath} and restart the server.`,
+  ];
+}
+
 /**
  * Report the server's Web Push configuration, or nothing when it is healthy
- * (Issues #2123 / #2124).
+ * (Issues #2123 / #2124 / #2585).
  *
  * The Issues' acceptance condition is "the startup log OR `commandmate status`",
  * and this is the half that is still readable a week later — a daemon started in
  * the background writes its stdout wherever the launcher put it, and the reader
  * who notices "my phone stopped buzzing" reaches for `status`.
  *
- * Read from the env the DAEMON runs with (`getEffectiveEnv()`), not from this
- * process's own environment: `.env` outranks exported variables for the server
- * child (Issue #1266), so `process.env` here would report this shell's idea of
- * the configuration rather than the server's. Exactly what the `CM_ALLOWED_IPS`
- * line below already does.
+ * ## Who is asked, in order
  *
- * The residual imprecision is the same one that line carries: a variable exported
- * into the daemon's environment at launch and absent from `.env` is invisible
- * here. `commandmate init` writes all three VAPID variables into `.env`, so the
- * supported setup is covered; a hand-exported key pair would be reported as
- * unconfigured, which is why the startup log carries the same lines.
+ *  1. **The running server**, over `GET /api/push/vapid`. It is the only party
+ *     that knows what it was launched with, and #2585 is the proof that everything
+ *     else is inference.
+ *  2. **Its `.env` files alone** ({@link loadEnvFileValues}) — for the subject,
+ *     which the endpoint does not report, and for the whole verdict when the probe
+ *     comes back `null`.
+ *
+ * `process.env` is NOT a layer under either, which is the fix. This used to read
+ * `getEffectiveEnv()`, whose `{...process.env, ...parsed}` reproduces what
+ * `daemon.start()` hands the child — exact for a key the `.env` defines, a guess
+ * for one it does not. `CM_VAPID_*` exported in the calling terminal therefore
+ * read as the daemon's own configuration and silenced this warning for a server
+ * that had none (#2575, measured 2026-09-16: `:60301` answered
+ * `{"configured":false}` while `status` said nothing).
+ *
+ * ## When the server does not answer
+ *
+ * A stopped daemon never reaches this function — both callers return at
+ * "Not running". A *running* daemon that does not answer (auth on with no
+ * `CM_AUTH_TOKEN`, a wedged process, something else on the advertised port) falls
+ * back to the `.env` verdict, and never to the shell. The residual is then the
+ * mirror of the bug that was fixed: a pair exported into the daemon at launch and
+ * absent from `.env` reads as unconfigured, i.e. a warning that is not warranted.
+ * That direction is the deliberate one — a false warning names the variables and
+ * the file and can be checked in one command, whereas the silence it replaces is
+ * what #2575 could not diagnose at all.
  *
  * Silent on a healthy install — that silence is the negative control both Issues
  * ask for. Never throws: a diagnostic must not turn `status` into a failure.
  */
-function printVapidStatus(env: Readonly<Record<string, string | undefined>>): void {
+async function printVapidStatus(status: DaemonStatus, envPath: string): Promise<void> {
   try {
-    const lines = formatVapidReportLines(inspectVapidConfig(env));
+    const fileVerdict = inspectVapidConfig(loadEnvFileValues(envPath));
+    const serverConfigured = status.url ? await probeServerVapid(status.url) : null;
+    const verdict = reconcileVapid(fileVerdict, serverConfigured);
+
+    const lines = formatVapidReportLines(verdict);
     if (lines.length === 0) return;
 
     console.log('');
     logger.warn(lines[0]);
     for (const line of lines.slice(1)) {
+      console.log(line);
+    }
+    for (const line of explainVapidMismatch(verdict, fileVerdict, serverConfigured, envPath)) {
       console.log(line);
     }
   } catch {
@@ -224,7 +381,8 @@ async function showSingleStatus(issueNo?: number): Promise<void> {
   printLocalhostConflict(status);
 
   // Issue #2123 / #2124: whether Web Push can work at all on this server
-  printVapidStatus(daemonManager.getEffectiveEnv());
+  // Issue #2585: asked of the server, and read off its .env — never off this shell
+  await printVapidStatus(status, envPath);
 }
 
 /**
@@ -336,7 +494,8 @@ export async function statusCommand(options: StatusOptions = {}): Promise<void> 
     printLocalhostConflict(status);
 
     // Issue #2123 / #2124: whether Web Push can work at all on this server
-    printVapidStatus(daemonManager.getEffectiveEnv());
+    // Issue #2585: asked of the server, and read off its .env — never off this shell
+    await printVapidStatus(status, envPath);
 
     // Issue #332: Show IP restriction status
     // Issue #1266: read the env the server actually runs with. An exported CM_ALLOWED_IPS
