@@ -33,6 +33,7 @@
  * | tool        | line                                                             |
  * |-------------|------------------------------------------------------------------|
  * | codex       | footer:  `gpt-5.6-sol xhigh · ~/share/work/…`                     |
+ * | codex       | footer:  `gpt-6-astra medium · ~/… · <thread title>   Plan mode (…)` (0.154, #2592) |
  * | claude      | banner:  `▝▜█████▛▘  Opus 5 (1M context) with xhigh effort · Claude Max` |
  * | claude      | switch:  `  ⎿  Set model to Sonnet 5 for this session only` (#2361)  |
  * | antigravity | footer:  `? for shortcuts …               Gemini 3.7 Flash · hig` |
@@ -179,11 +180,50 @@ export function resolveEffortToken(
 export const CODEX_FOOTER_MODEL_PATTERN =
   /^\s*([^\s·]+)(?:\s+(minimal|low|medium|high|xhigh)\b)?/i;
 
+/**
+ * A codex status bar with something AFTER the path (Issue #2592).
+ *
+ * codex 0.154.0 appends two things to the bar the pattern above was written for,
+ * measured in the #2592 UAT (`tests/fixtures/agent-mode-2592/codex-*.txt`, row 40):
+ *
+ *   `  gpt-6-astra medium · ~/uat3-…/sandbox-repo · Reply with one word          Plan mode (shift+tab to cycle)`
+ *   `  gpt-6-astra xhigh · ~/uat3-…/sandbox-repo · Reply with one word`
+ *   `  gpt-6-astra medium · ~/uat3-…/sandbox-repo                                Plan mode (shift+tab to cycle)`
+ *
+ * — a `·` segment carrying the thread's title once the first turn has named it,
+ * and the right-aligned Plan-mode badge. `CODEX_STATUS_BAR_PATTERN` requires the
+ * row to END in the path, so every one of these read as "no status bar", and the
+ * model / effort latched from the one bar codex draws before the first turn
+ * (`xhigh`) stayed on screen for the rest of the session. That is how #2592's
+ * UAT found it: Plan mode moves codex to `medium`, the pane said so, and the UI
+ * kept saying `xhigh`.
+ *
+ * Deliberately a SECOND pattern here rather than a widened
+ * `CODEX_STATUS_BAR_PATTERN`. That one is the footer boundary the codex
+ * running/idle rules are windowed on (#1150), and the module docblock's rule —
+ * this module must never be the reason that boundary moves — stands. Widening a
+ * value reader cannot change a status verdict; widening the boundary can.
+ *
+ * The shape: head segment (`<model>[ <effort>]`), `·`, a path, then EITHER a
+ * further `·` segment OR a column gap (two spaces) before right-aligned text.
+ * The trailer must start at one of those two places, so a path followed by a
+ * single space and prose is still not a bar. {@link readCodexFooter}'s
+ * digit-or-effort check applies to rows matched either way.
+ *
+ * No /g. No nested quantifiers: `[^·]*` stops at the first `·`, and the two
+ * trailer alternatives each start with a literal or a fixed-width gap.
+ */
+export const CODEX_STATUS_BAR_WITH_TRAILER_PATTERN =
+  /^\s*\S[^·]*·\s*~?\/\S*(?:\s*·[^\n]*|[^\S\n]{2,}\S[^\n]*)$/;
+
 function readCodexFooter(line: string): ModelInfo | null {
   // Same "is this the status bar" question the detector asks, answered by the
   // same pattern (#1150). Imported read-only: this module must never be the
-  // reason that boundary moves.
-  if (!CODEX_STATUS_BAR_PATTERN.test(line)) return null;
+  // reason that boundary moves. Issue #2592 adds the trailer-bearing shape as a
+  // second, extractor-local reading — see CODEX_STATUS_BAR_WITH_TRAILER_PATTERN.
+  if (!CODEX_STATUS_BAR_PATTERN.test(line) && !CODEX_STATUS_BAR_WITH_TRAILER_PATTERN.test(line)) {
+    return null;
+  }
   const separator = line.indexOf('·');
   if (separator < 0) return null;
   const match = CODEX_FOOTER_MODEL_PATTERN.exec(line.slice(0, separator));

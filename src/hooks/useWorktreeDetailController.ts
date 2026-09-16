@@ -20,6 +20,7 @@
  */
 
 import React, { useEffect, useCallback, useMemo, useState, useRef } from 'react';
+import { AGENT_MODE_UNKNOWN } from '@/types/cli-tool-contracts';
 import { useRouter } from 'next/navigation';
 import { useWorktreeUIState } from '@/hooks/useWorktreeUIState';
 import { useIsMobile } from '@/hooks/useIsMobile';
@@ -107,6 +108,22 @@ interface CurrentOutputResponse {
   isSelectionListActive?: boolean;
   /** Issue #1017: Codex pager/edit-previous mode (subset of isSelectionListActive) */
   isPagerActive?: boolean;
+  /** Issue #2369: a dismiss-only overlay is on the pane (`Esc to close`). */
+  isDismissablePanelActive?: boolean;
+  /** Issue #1017: the frame is on screen and nobody could classify it. */
+  isUnclassifiedActive?: boolean;
+  /** Issue #2238: the merged status verdict (`idle`/`ready`/`running`/`waiting`). */
+  sessionStatus?: string;
+  /**
+   * Issue #2592: which permission mode the agent is in, or `'unknown'`.
+   *
+   * Read from the payload rather than derived from `fullOutput` here, unlike
+   * `useTerminalPanePolling` — this controller has ONE delivery path (its own
+   * HTTP poll) and consumes no `terminal_snapshot`, so there is no second path
+   * for a payload field to fall out of step with. `?? AGENT_MODE_UNKNOWN` covers
+   * a server that predates the field.
+   */
+  agentMode?: string;
   autoYes?: {
     enabled: boolean;
     expiresAt: number | null;
@@ -308,6 +325,15 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   const [isSelectionListActive, setIsSelectionListActive] = useState(false);
   // Issue #1017: Track Codex pager/edit-previous mode (drives pager keys on mobile)
   const [isPagerActive, setIsPagerActive] = useState(false);
+  // Issue #2592: what the phone's composer needs to decide whether the
+  // permission-mode button may be pressed, and what to put on its chip. The four
+  // flags below are the SAME frame facts the PC split reads off its own pane
+  // hook; the phone's composer is docked outside `MobileTerminalTab`, which owns
+  // that hook, so they have to reach it through this controller's own poll.
+  const [isDismissablePanelActive, setIsDismissablePanelActive] = useState(false);
+  const [isUnclassifiedActive, setIsUnclassifiedActive] = useState(false);
+  const [sessionStatus, setSessionStatus] = useState('');
+  const [agentMode, setAgentMode] = useState<string>(AGENT_MODE_UNKNOWN);
   // Issue #314: Track previous auto-yes enabled state for stop reason toast
   const prevAutoYesEnabledRef = useRef<boolean>(false);
   // Issue #314 / #499 Item 5: Pending stop reason toast (deferred until showToast is available)
@@ -751,6 +777,15 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       setIsSelectionListActive(data.isSelectionListActive ?? false);
       // Issue #1017: Update Codex pager/edit-previous mode from server
       setIsPagerActive(data.isPagerActive ?? false);
+      // Issue #2592: the mode itself and the three remaining gate inputs.
+      // Absent fields read as "nothing is on screen" / "no frame has landed",
+      // which is what every other flag above already does — and `agentMode`
+      // falls back to `unknown` rather than to a mode, because a server that
+      // does not publish it has told us nothing (see AGENT_MODE_UNKNOWN).
+      setIsDismissablePanelActive(data.isDismissablePanelActive ?? false);
+      setIsUnclassifiedActive(data.isUnclassifiedActive ?? false);
+      setSessionStatus(data.sessionStatus ?? '');
+      setAgentMode(data.agentMode ?? AGENT_MODE_UNKNOWN);
 
       // Issue #501: Update last server response timestamp for useAutoYes duplicate prevention
       setLastServerResponseTimestamp(data.lastServerResponseTimestamp ?? null);
@@ -1849,6 +1884,11 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     isReconnecting,
     isSelectionListActive,
     isPagerActive,
+    // Issue #2592: the phone composer's permission-mode control.
+    isDismissablePanelActive,
+    isUnclassifiedActive,
+    sessionStatus,
+    agentMode,
     lastAutoResponse,
     loading,
     makeAutoYesToggleHandler,

@@ -42,6 +42,8 @@ import type {
 import { useRealtime } from '@/hooks/useRealtimeConnection';
 import type { RealtimeEvent, TerminalSnapshotEvent, SessionStatusEvent } from '@/lib/realtime/types';
 import { extractComposerText } from '@/lib/detection/composer-text';
+import { detectAgentMode } from '@/lib/detection/agent-mode';
+import { AGENT_MODE_UNKNOWN, type AgentMode } from '@/types/cli-tool-contracts';
 import {
   DETAIL_PANE_POLLING_CADENCE,
   isGeneratingStatus,
@@ -198,6 +200,27 @@ export interface PaneTerminalState {
    * rendered text.
    */
   composerText: string;
+  /**
+   * The permission mode this pane's agent is in, or `'unknown'` (Issue #2592).
+   *
+   * Derived on the client from the frame this pane already holds, by the same
+   * `detectAgentMode` the server runs for `/current-output`. Deriving rather
+   * than reading a payload field is deliberate and is exactly the reasoning
+   * {@link composerText} records: `terminal_snapshot` (the WebSocket push) and
+   * `/current-output` (the HTTP poll, throttled to 15s while push is healthy)
+   * both carry the FRAME, so a value computed from the frame is equal on both
+   * paths by construction. A field carried by only one of them is blank for up
+   * to a whole fallback-poll interval on a pane whose first frame arrives by the
+   * other one — which is the defect #2240 fixed for `sessionStatus` and which
+   * #2592 explicitly asks not to re-enter.
+   *
+   * `'unknown'` — never `''` and never `'default'` — is the value for a tool
+   * with no mode cycle (opencode / vibe-local / gemini), for a dead session, and
+   * for a frame whose footer said nothing. See `AGENT_MODE_UNKNOWN`: four of the
+   * five tools that HAVE modes draw nothing at all in their base mode, so
+   * "no row" cannot be read as "default" without lying about the other four.
+   */
+  agentMode: AgentMode;
   attaching: boolean;
   autoScroll: boolean;
 }
@@ -305,6 +328,7 @@ export function useTerminalPanePolling({
     isDismissablePanelActive: false,
     isUnclassifiedActive: false,
     composerText: '',
+    agentMode: AGENT_MODE_UNKNOWN,
     attaching: true,
     autoScroll: true,
   }));
@@ -446,6 +470,14 @@ export function useTerminalPanePolling({
         ? extractComposerText(nextOutput, inFlightCliToolRef.current).text
         : '';
 
+      // Issue #2592: same treatment, same reason — off the frame, on every
+      // delivery path. A dead session has no mode: the pane that is left behind
+      // still shows the last footer it drew, and reporting it would let the chip
+      // outlive the agent it describes.
+      const agentMode = data.isRunning
+        ? detectAgentMode(inFlightCliToolRef.current, nextOutput)
+        : AGENT_MODE_UNKNOWN;
+
       setTerminal(prev => {
         // Overwrite output if we have content or the session is still running.
         // Issue #842: also overwrite (i.e. clear) once the session has stopped,
@@ -464,6 +496,7 @@ export function useTerminalPanePolling({
           isDismissablePanelActive: data.isDismissablePanelActive ?? false,
           isUnclassifiedActive: confirmedUnclassified,
           composerText,
+          agentMode,
           attaching: false,
         };
       });
@@ -559,6 +592,11 @@ export function useTerminalPanePolling({
       isDismissablePanelActive: false,
       isUnclassifiedActive: false,
       composerText: '',
+      // Issue #2592: cleared for the same reason the output above is. A
+      // different (worktree, tool, instance) is a different agent, and the
+      // previous one's mode chip must not sit over the new pane while its first
+      // frame is in flight — different tools do not even share a mode vocabulary.
+      agentMode: AGENT_MODE_UNKNOWN,
       attaching: true,
     }));
     setPrompt({ visible: false, data: null, messageId: null, answering: false });

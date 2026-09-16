@@ -3,6 +3,7 @@
  */
 
 import type {
+  AgentModeSpec,
   CaptureSpec,
   ComposerSpec,
   GracefulExitSpec,
@@ -330,6 +331,28 @@ export interface ICLITool {
    * every declaration has to keep.
    */
   navigationKeys(): NavigationKeySpec;
+
+  /**
+   * Declare how this tool cycles its permission mode, or `null` (Issue #2592).
+   *
+   * Six of the eight supported CLIs put a permission / approval mode on
+   * `shift+tab`, and until this Issue CommandMate had no way to send it from a
+   * surface: the terminal is read-only, so the only workaround was
+   * `commandmate attach` on the same machine. The SEND half was already there —
+   * `BTab` has been in every tool's {@link navigationKeys} since #473 and in the
+   * tmux allow-list since #2032 — what was missing was a declaration saying what
+   * the key MEANS for this tool and how the resulting mode is read back.
+   *
+   * Both halves are in one declaration because neither is useful alone: a button
+   * with no read-back is a blind press (four of the five declaring tools draw
+   * nothing in their base mode), and a read-back with no button is a label for a
+   * thing the operator still cannot change.
+   *
+   * See {@link AgentModeSpec} for the measurement table, and for why opencode
+   * (whose `BTab` switches agents, not modes), vibe-local (no binding) and
+   * gemini (binding documented, footer never measured) declare nothing.
+   */
+  agentModeSpec(): AgentModeSpec | null;
 }
 
 /**

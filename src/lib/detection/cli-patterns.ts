@@ -2126,13 +2126,60 @@ export const VIBE_LOCAL_PROMPT_PATTERN = /ctx:\d+%\s*[>❯]/m;
 export const VIBE_LOCAL_THINKING_PATTERN = /[\u2800-\u28FF]|Thinking|⠋|⠙|⠹|⠸|⠼|⠴|⠦|⠧|⠇|⠏|Running|Executing/;
 
 /**
+ * The banner agy paints INTO its empty input box while a non-default permission
+ * mode is on (Issue #2592).
+ *
+ * Measured on agy 1.2.4 in the #2592 UAT
+ * (`tests/fixtures/agent-mode-2592/antigravity-{accept-edits,plan}.txt`, row 18,
+ * between the box's two rules):
+ *
+ *   `> Accept-edits mode: file edits auto-approved (shift+tab to cycle)`
+ *   `> Plan mode: research & plan only (shift+tab to cycle)`
+ *
+ * It takes the place of the bare `>` an empty box shows in default — it is a
+ * placeholder, not typed text — so a reader that only accepts the bare glyph
+ * reads an idle accept-edits / plan pane as "no input box at all". Before this
+ * pattern existed that is exactly what happened: the status detector fell through
+ * to its `default` floor (`running` + `isUnclassifiedActive`), `commandmate ls`
+ * showed a resting agent as running, `wait` never completed, and
+ * `isAntigravityReady` refused every send. #2592 made those two modes one click
+ * away, so the hole had to close with it.
+ *
+ * The structure is matched rather than the two sentences: `<Name> mode: <text>
+ * (shift+tab to cycle)`, anchored on the key hint agy ends every banner with, so
+ * a third mode needs no edit here. What stays out is anything a user could have
+ * typed into the box — the trailing hint is the part nobody types.
+ *
+ * Whole-row, no `/g`, no nested quantifiers (`[^\n]*` is followed by a literal).
+ */
+export const ANTIGRAVITY_COMPOSER_MODE_BANNER_SOURCE =
+  '>[^\\S\\n]+[A-Z][A-Za-z-]*[^\\S\\n]mode:[^\\n]*\\(shift\\+tab to cycle\\)[^\\S\\n]*';
+
+/** {@link ANTIGRAVITY_COMPOSER_MODE_BANNER_SOURCE} as a single-row pattern. */
+export const ANTIGRAVITY_COMPOSER_MODE_BANNER_PATTERN = new RegExp(
+  `^${ANTIGRAVITY_COMPOSER_MODE_BANNER_SOURCE}$`,
+  'm',
+);
+
+/**
  * Antigravity (agy) interactive REPL prompt pattern (Issue #988)
  * agy shows a bare ">" input box line when waiting for user input. The input box
  * is always rendered (even while generating), so prompt presence alone does not
  * mean "ready" — running vs idle is resolved together with the thinking pattern /
  * footer status bar in status-detector.ts. (Confirmed on machine: line is "> ".)
+ *
+ * Issue #2592: or the mode banner that replaces the bare glyph in an EMPTY box
+ * while accept-edits / plan is on ({@link ANTIGRAVITY_COMPOSER_MODE_BANNER_PATTERN}).
+ * Every consumer of this pattern is asking "is agy's input box drawn and empty?"
+ * — the idle rule in `detection/tools/antigravity/detect.ts`, the survey guard
+ * beside it, `isAntigravityReady` (the send gate) and the liveness probe — and
+ * the answer does not depend on the permission mode, so the banner is folded in
+ * here once rather than at each of them.
  */
-export const ANTIGRAVITY_PROMPT_PATTERN = /^>\s*$/m;
+export const ANTIGRAVITY_PROMPT_PATTERN = new RegExp(
+  `^(?:>\\s*|${ANTIGRAVITY_COMPOSER_MODE_BANNER_SOURCE})$`,
+  'm',
+);
 
 /**
  * Antigravity (agy) thinking/processing pattern (Issue #988)

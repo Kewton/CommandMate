@@ -16,6 +16,7 @@ import {
 } from '../tmux/tmux';
 import { resolveComposerSpec } from './composer-spec';
 import { resolveCaptureSpec } from './capture-spec';
+import { resolveAgentModeSpec } from './agent-mode-spec';
 import { resolveGracefulExitSpec } from './graceful-exit';
 import { resolveLivenessSpec } from './liveness-spec';
 import { probeSessionLiveness } from './session-liveness';
@@ -28,6 +29,7 @@ import type {
   CaptureSpec,
   ComposerSpec,
   GracefulExitSpec,
+  AgentModeSpec,
   NavigationKeySpec,
   ToolLivenessSpec,
 } from '../../types/cli-tool-contracts';
@@ -669,6 +671,28 @@ export abstract class BaseCLITool implements ICLITool {
    */
   navigationKeys(): NavigationKeySpec {
     return { keys: NAVIGATION_KEY_VALUES, leaderKey: null };
+  }
+
+  /**
+   * Declare how this tool cycles its permission mode (Issue #2592).
+   *
+   * The default is `null` — "this tool has no mode on `shift+tab`" — and that is
+   * the answer for three of the eight: opencode (whose `BTab` switches AGENTS,
+   * and already has `OpencodeQuickKeys`' `agentPrev` button from #2046),
+   * vibe-local (measured: five presses, byte-identical frame) and gemini (its
+   * own docs bind `app.cycleApprovalMode`, but sign-in refused the CLI and the
+   * footer spelling was never measured — a button is a promise about what
+   * happens when it is pressed).
+   *
+   * The five that DO declare one are answered from `./agent-mode-spec`, the same
+   * §4 D4 arrangement `describeComposer()` / `captureSpec()` / `livenessSpec()`
+   * already take. Nothing overrides this method today; a tool would only need to
+   * if its mode could not be expressed as "a row that looks like this".
+   *
+   * @returns This tool's {@link AgentModeSpec}, or `null`
+   */
+  agentModeSpec(): AgentModeSpec | null {
+    return resolveAgentModeSpec(this.id);
   }
 }
 

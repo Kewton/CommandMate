@@ -10,6 +10,7 @@ import { CLI_TOOL_IDS, isValidInstanceId, type CLIToolType } from '@/lib/cli-too
 import { buildCurrentOutput } from '@/lib/session/current-output-builder';
 import { resolveSessionTarget } from '@/lib/session/resolve-session-target';
 import { getDetectorStalenessSnapshot } from '@/lib/detection/version-probes';
+import { detectAgentMode } from '@/lib/detection/agent-mode';
 import { isValidWorktreeId } from '@/lib/security/path-validator';
 import { createLogger } from '@/lib/logger';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
@@ -109,8 +110,31 @@ export async function GET(
     // limits this to authenticated surfaces (`capture --json` / `commandmate
     // status`), and the builder is also the WS terminal streamer's payload.
     const staleness = getDetectorStalenessSnapshot();
+
+    // Issue #2592: which permission mode the agent is in right now, read off the
+    // frame this payload already carries.
+    //
+    // Attached HERE rather than inside `buildCurrentOutput`, for the same reason
+    // `detector` above is: the builder is also the WebSocket terminal streamer's
+    // payload, and a field added there changes a wire event that is emitted from
+    // a module this change does not touch. The browser does not need it to,
+    // either — `terminal_snapshot` ships `fullOutput` verbatim, so the pane
+    // derives the mode from the frame on both delivery paths with the same pure
+    // function, which is #1879's arrangement for `composerText` and is what
+    // makes push and poll agree by construction rather than by two emitters
+    // remembering to publish the same value (#2240's lesson).
+    //
+    // What this field is for is the paths that have no frame reader: `commandmate
+    // capture --json` and anything else reading the HTTP contract. Always
+    // present, never absent — `'unknown'` is the answer for a tool with no mode
+    // cycle and for a frame that did not say, and a consumer must not read it as
+    // "default" (see AGENT_MODE_UNKNOWN).
+    const agentMode = detectAgentMode(target.cliToolId, payload.fullOutput);
+
     return NextResponse.json(
-      staleness === undefined ? payload : { ...payload, detector: { staleness } },
+      staleness === undefined
+        ? { ...payload, agentMode }
+        : { ...payload, agentMode, detector: { staleness } },
       { status: 200 }
     );
   } catch (error: unknown) {
