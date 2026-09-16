@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **feat(schedule): CMATE.md を直接編集した command-code スケジュールでも書き込み系ツール拒否の設定を警告する** (#2576): 有効な行の Permission が `--permission-mode` 系 5 値のとき、Logs タブ上部に警告バナーを出し、サーバログにも `parse:command-code-direct-write-tools-denied` を記録する。判定は `isCommandCodeDirectWriteToolsDenied()` 1 つを編集ダイアログ・バナー・パーサで共有し、実行時の `buildCliArgs` と一致させた（空セルを編集で開いたときの誤警告も解消）。警告はエラーと別経路の `collectScheduleWarnings()` で返すため、登録も実行も止めない。文言は「読み取り専用になる」ではなく「エージェントが直接呼ぶ書き込み系ツールが拒否される」とした
+
 ### Fixed
 
 - **fix(schedule): command-code のスケジュール実行でツール呼び出しが pre-tool hook に拒否されたとき、exit 0 / `completed` のまま警告なしで記録されるのを止め、実行ログ一覧の行に警告を出すようにした** (#2577): `claude-executor` が NDJSON を result 行だけに絞る前に `{"type":"event","event":{"type":"tool_hook_blocked",…}}` を読み、`toolName` と `hookOutput` を `Warning: command-code blocked N tool call(s) (tool_hook_blocked): write_file (1); M tool call(s) ran` の要約行＋理由行として実行ログの出力の先頭に書く（`ExecutionResult.warning` にも同じ要約行）。status は CLI の判定のまま変えないので、拒否のあと別経路で作業を終えた実行は `failed` にならず、非ゼロ終了・エラー subtype・タイムアウトは `failed` / `timeout` のまま警告だけが併記される。判定は `finalText` に依存しない。`GET /api/worktrees/:id/execution-logs` は result の先頭だけを読んで各行に `warning` を返し（本文は従来どおり返さない）、Logs タブは警告のある行に警告文を表示して completed を成功色で塗らない。成果物（ファイル生成・メール送信）ができたかの検証はしない。拒否イベントの実バイトは command-code 1.53.1 で採取した fixture（`tests/unit/session/fixtures/command-code-tool-hook-blocked-2577/`）
