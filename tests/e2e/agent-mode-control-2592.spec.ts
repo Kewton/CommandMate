@@ -23,16 +23,47 @@
  *    rather than as an attribute.
  *
  * No agent process is involved; `/api/` is mocked in the browser.
+ *
+ * ## Issue #2597: a PC split pane narrower than the control
+ *
+ * Three splits on a 1440px screen left a 218px pane, and in it the mode button
+ * (104px, `Mode shift+tab`) was drawn 52px past its own 52px wrapper, on top of
+ * the interrupt button. Two causes, two claims, both about layout — so both are
+ * measured here rather than in jsdom:
+ *
+ * 4. **Nothing in the row overlaps.** In every pane, the button stays inside
+ *    `agent-mode-control`, and the button, the chip and the caution keep clear
+ *    of the interrupt button and of each other. The chip and the caution are
+ *    compared by their PAINTED boxes (clipped by `overflow-hidden`), because
+ *    what they give up is clipped rather than moved.
+ * 5. **`shift+tab` follows the pane, not the viewport.** One viewport, panes of
+ *    different widths: the wide pane prints the notation and the narrow one
+ *    does not. claude is the narrow pane in one layout and the wide one in the
+ *    other, so the same tool shows both answers on the same screen size.
+ *
+ * Measured before the fix (1440x900, panes 473/236/236): wrapper 52px, button
+ * 104px, notation printed in all three panes. Dropping only `min-w-0` from the
+ * wrapper was measured too, and is worse: in the 218px pane the send button
+ * ends 236px past the composer's right edge.
  */
 
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import {
+  AGENT_MODE_SPLITS,
   DESKTOP_VIEWPORT,
+  E2E_AGENT_MODE_SPLIT_WORKTREE,
   E2E_AGENT_MODE_WORKTREE,
   PHONE_VIEWPORTS,
+  WIDEST_PORTRAIT_PHONE,
+  boxContains,
+  boxesInSplit,
+  boxesIntersect,
   mockAgentModeApi,
+  mockAgentModeSplitApi,
   rectOf,
   seedActiveInstance,
+  seedAgentModeSplits,
+  type Box,
   type SpecialKeyLog,
 } from './fixtures/agent-mode-helpers';
 
@@ -41,6 +72,13 @@ const MIN_TERMINAL_HEIGHT_PX = 250;
 
 /** #1127's tap-target minimum. */
 const MIN_TAP_TARGET_PX = 44;
+
+/**
+ * Mirror of `AGENT_MODE_NOTATION_MIN_CONTAINER_PX` (AgentModeControl.tsx): the
+ * composer-row width at which `shift+tab` is printed. Mirrored rather than
+ * imported because that module is a client component.
+ */
+const NOTATION_MIN_ROW_PX = 400;
 
 async function openMobile(page: import('@playwright/test').Page): Promise<void> {
   await page.goto(`/worktrees/${E2E_AGENT_MODE_WORKTREE}?pane=terminal`);
@@ -112,6 +150,22 @@ test.describe('[#2592] phone', () => {
     expect(overflow).toBeLessThanOrEqual(0);
   });
 
+  test('keeps the key notation off the widest portrait phone too (#2597)', async ({ page }) => {
+    // The notation used to be hidden below the `sm` VIEWPORT; it now answers to
+    // the composer row. Every portrait phone must still land on the hidden side,
+    // and the widest one is the closest to the line.
+    await page.setViewportSize({ ...WIDEST_PORTRAIT_PHONE });
+    await seedActiveInstance(page, 'codex');
+    await mockAgentModeApi(page, { cliTool: 'codex', frame: 'codex-plan', agentMode: 'plan' });
+    await openMobile(page);
+
+    await expect(page.locator('[data-testid="agent-mode-note"]')).toBeVisible();
+    await expect(page.locator('[data-testid="agent-mode-key-notation"]')).toBeHidden();
+    const row = await rectOf(page, 'composer-input-row');
+    expect(row).not.toBeNull();
+    expect(row!.width).toBeLessThan(NOTATION_MIN_ROW_PX);
+  });
+
   test('shows the mode the served frame is in', async ({ page }) => {
     const [viewport] = PHONE_VIEWPORTS;
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
@@ -178,5 +232,196 @@ test.describe('[#2592] desktop', () => {
     await page.waitForSelector('[data-testid="message-input-textarea"]', { timeout: 30_000 });
 
     await expect(page.locator('[data-testid="agent-mode-control"]')).toHaveCount(0);
+  });
+});
+
+
+/**
+ * Three PC split layouts on one 1440x900 screen (files panel open, which
+ * leaves the splits 945px). The width shares are pixel values on purpose, so
+ * the panes come out at the Issue's own 218px and 455px.
+ *
+ * `rowFits` is whether the composer row can hold its fixed controls at all.
+ * Attach, mode button, interrupt, send and the gaps between them need 194px of
+ * row, and a 218px pane has 174px: the send button ends 20px past the row and
+ * the textarea is already 0px. That shortfall is the composer's own width
+ * problem, which #2598 (a two-row PC composer) owns and this Issue leaves
+ * alone; what this Issue guarantees there is that nothing is drawn on top of
+ * anything else.
+ */
+const SPLIT_LAYOUTS = [
+  {
+    name: 'claude narrow, codex wide',
+    widths: [218, 455, 272],
+    panes: [
+      { min: 200, max: 230, notation: false, rowFits: false },
+      { min: 440, max: 470, notation: true, rowFits: true },
+      { min: 255, max: 290, notation: false, rowFits: true },
+    ],
+  },
+  {
+    name: 'claude wide, codex narrow',
+    widths: [455, 218, 272],
+    panes: [
+      { min: 440, max: 470, notation: true, rowFits: true },
+      { min: 200, max: 230, notation: false, rowFits: false },
+      { min: 255, max: 290, notation: false, rowFits: true },
+    ],
+  },
+  {
+    // Before the fix, even an even three-way split drew codex's caution over
+    // the interrupt button.
+    name: 'three equal panes',
+    widths: [1, 1, 1],
+    panes: [
+      { min: 300, max: 330, notation: false, rowFits: true },
+      { min: 300, max: 330, notation: false, rowFits: true },
+      { min: 300, max: 330, notation: false, rowFits: true },
+    ],
+  },
+] as const;
+
+const PANE_IDS = [
+  'composer-input-row',
+  'agent-mode-control',
+  'agent-mode-cycle-button',
+  'agent-mode-chip',
+  'agent-mode-note',
+  'interrupt-button',
+  'send-message-button',
+] as const;
+
+async function openSplits(page: Page, widths: readonly number[]): Promise<void> {
+  await seedAgentModeSplits(page, widths);
+  await mockAgentModeSplitApi(page);
+  await page.goto(`/worktrees/${E2E_AGENT_MODE_SPLIT_WORKTREE}`);
+  await expect(page.getByTestId('terminal-split-container')).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator('[data-testid^="terminal-split-pane-"]')).toHaveCount(
+    AGENT_MODE_SPLITS.length,
+  );
+  // Every pane has read its own frame: all three chips, and codex's caution.
+  await expect(page.locator('[data-testid="agent-mode-chip"]')).toHaveCount(AGENT_MODE_SPLITS.length);
+  await expect(page.locator('[data-testid="agent-mode-note"]')).toHaveCount(1);
+}
+
+function paneBox(page: Page, splitIndex: number): Promise<Box | null> {
+  return page.evaluate(idx => {
+    const el = document.querySelector(`[data-testid="terminal-split-pane-${idx}"]`);
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width, height: r.height };
+  }, splitIndex);
+}
+
+test.describe('[#2597] desktop split panes', () => {
+  test.use({ viewport: { ...DESKTOP_VIEWPORT } });
+
+  test.beforeEach(({ browserName }) => {
+    // PC-only split UI (the same self-skip the other split specs use).
+    test.skip(browserName !== 'chromium', 'PC-only split UI (chromium only)');
+  });
+
+  for (const layout of SPLIT_LAYOUTS) {
+    test(`nothing in the composer row overlaps: ${layout.name}`, async ({ page }) => {
+      await openSplits(page, layout.widths);
+
+      for (const [index, expected] of layout.panes.entries()) {
+        const tool = AGENT_MODE_SPLITS[index].cliTool;
+        const label = `${layout.name} / pane ${index} (${tool})`;
+        const pane = await paneBox(page, index);
+        const b = await boxesInSplit(page, index, PANE_IDS);
+
+        expect(pane, label).not.toBeNull();
+        expect(pane!.width, `${label}: pane width`).toBeGreaterThanOrEqual(expected.min);
+        expect(pane!.width, `${label}: pane width`).toBeLessThanOrEqual(expected.max);
+
+        const control = b['agent-mode-control']!.box;
+        const button = b['agent-mode-cycle-button']!.box;
+        const interrupt = b['interrupt-button']!.box;
+        const row = b['composer-input-row']!.box;
+        const send = b['send-message-button']!.box;
+
+        // eslint-disable-next-line no-console -- the measurement is the deliverable
+        console.log(`MEASURE-2597 ${label} ` + JSON.stringify({
+          pane: pane!.width,
+          row: row.width,
+          sendPastRow: send.right - row.right,
+          control: control.width,
+          button: button.width,
+          chip: b['agent-mode-chip']?.visible?.width ?? 0,
+          note: b['agent-mode-note']?.visible?.width ?? null,
+        }));
+
+        // The button never leaves its own box, and never reaches the interrupt.
+        expect(boxContains(control, button), `${label}: button inside control`).toBe(true);
+        expect(boxesIntersect(button, interrupt), `${label}: button vs interrupt`).toBe(false);
+        expect(boxesIntersect(control, interrupt), `${label}: control vs interrupt`).toBe(false);
+
+        // The captions give way by being clipped, so what they PAINT has to stay
+        // inside the control, clear of the button, the interrupt and each other.
+        const painted = (['agent-mode-chip', 'agent-mode-note'] as const)
+          .map(id => ({ id, box: b[id]?.visible ?? null }))
+          .filter((c): c is { id: typeof c.id; box: Box } => c.box !== null);
+        for (const caption of painted) {
+          const what = `${label}: ${caption.id}`;
+          expect(boxContains(control, caption.box), `${what} inside control`).toBe(true);
+          expect(boxesIntersect(caption.box, button), `${what} vs button`).toBe(false);
+          expect(boxesIntersect(caption.box, interrupt), `${what} vs interrupt`).toBe(false);
+        }
+        if (painted.length === 2) {
+          expect(boxesIntersect(painted[0].box, painted[1].box), `${label}: chip vs note`).toBe(false);
+        }
+
+        // The send button is not drawn over either, wherever it ends up.
+        expect(boxesIntersect(send, button), `${label}: send vs button`).toBe(false);
+        expect(boxesIntersect(send, interrupt), `${label}: send vs interrupt`).toBe(false);
+        for (const caption of painted) {
+          expect(boxesIntersect(send, caption.box), `${label}: send vs ${caption.id}`).toBe(false);
+        }
+
+        // Not fixed by pushing the problem along. Where the row has room for its
+        // controls, the send button stays inside it; where it has not (the
+        // 218px pane, #2598's), the overshoot is bounded by the part of the
+        // mode button the row could not give back — one tap target, not the
+        // whole control. Dropping only `min-w-0` fails both: the send button
+        // leaves the 272px and 315px rows, and ends 236px past the 218px one.
+        if (expected.rowFits) {
+          expect(boxContains(row, send), `${label}: send inside row`).toBe(true);
+        } else {
+          expect(send.right - row.right, `${label}: send overshoot`).toBeLessThanOrEqual(send.width);
+        }
+      }
+    });
+  }
+
+  test('prints shift+tab by pane width, not by viewport width', async ({ page }) => {
+    // Same 1440px viewport throughout — under the old `sm:` rule every pane
+    // below printed the notation.
+    // One tab per layout: the seed is guarded per tab (sessionStorage), so a
+    // new tab is what lets the second layout replace the first.
+    for (const layout of SPLIT_LAYOUTS.slice(0, 2)) {
+      const fresh = await page.context().newPage();
+      await openSplits(fresh, layout.widths);
+
+      for (const [index, expected] of layout.panes.entries()) {
+        const tool = AGENT_MODE_SPLITS[index].cliTool;
+        const label = `${layout.name} / pane ${index} (${tool})`;
+        const pane = fresh.getByTestId(`terminal-split-pane-${index}`);
+        const notation = pane.getByTestId('agent-mode-key-notation');
+        const button = pane.getByTestId('agent-mode-cycle-button');
+        const row = (await boxesInSplit(fresh, index, ['composer-input-row']))['composer-input-row']!.box;
+
+        if (expected.notation) {
+          await expect(notation, label).toBeVisible();
+          expect(row.width, `${label}: row width`).toBeGreaterThanOrEqual(NOTATION_MIN_ROW_PX);
+        } else {
+          await expect(notation, label).toBeHidden();
+          expect(row.width, `${label}: row width`).toBeLessThan(NOTATION_MIN_ROW_PX);
+        }
+        // Hidden from the eye only: the accessible name still carries the key.
+        await expect(button, label).toHaveAttribute('aria-label', /\(shift\+tab\)/);
+      }
+      await fresh.close();
+    }
   });
 });

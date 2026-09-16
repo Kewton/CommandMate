@@ -48,8 +48,35 @@
  *
  * The row's WIDTH is spoken for too — on a 360px phone the slash, attach and
  * interrupt buttons already take a third of it — so this control is the part
- * that gives way: the `shift+tab` notation is dropped below `sm`, and the chip
- * and the caution truncate rather than push the interrupt button off screen.
+ * that gives way: the `shift+tab` notation is dropped on a narrow row, and the
+ * chip and the caution truncate rather than push the interrupt button off
+ * screen.
+ *
+ * ## What gives way, and what does not (Issue #2597)
+ *
+ * A PC split pane can be far narrower than the viewport — three splits on a
+ * 1440px screen measured 218px — and two things went wrong there.
+ *
+ * - **The button left its own box.** The wrapper was a flex item with
+ *   `min-w-0`, so the row could squeeze it to nothing while the button inside
+ *   refused to shrink: 52px of wrapper, 104px of button, and the difference
+ *   drawn on top of the interrupt button. Dropping `min-w-0` alone does not
+ *   fix it — a flex wrapper's automatic minimum is its min-content, and the
+ *   `nowrap` chip and caution would then take their full width and push the
+ *   send button out of the composer instead (measured). So the wrapper is a
+ *   grid: the button sits in a `max-content` track and the captions in a
+ *   `minmax(0, max-content)` one, which makes the wrapper's minimum exactly
+ *   the button plus one gap. Only the captions give way.
+ * - **The notation answered to the viewport.** `hidden sm:inline` printed
+ *   `shift+tab` in every pane of a 1440px screen, however narrow. It now asks
+ *   the composer row (`@container` in `MessageInput`), the rule #2131 set for
+ *   `OpencodeQuickKeys`. See {@link AGENT_MODE_NOTATION_MIN_CONTAINER_PX}.
+ *
+ * The captions share one flex span with `overflow-hidden`. Inside it they
+ * shrink exactly as they did as direct children (flex shrinks them in
+ * proportion to their content, so a phone's row is unchanged to the pixel),
+ * and whatever their padding cannot give up is clipped at the span's edge
+ * instead of being painted over the interrupt button.
  *
  * ## The caution is printed, not hovered (Issue #2592 UAT)
  *
@@ -84,6 +111,33 @@ import { useKeyPressFeedback } from '@/hooks/useKeyPressFeedback';
  * the declarations from drifting.
  */
 const MODE_CYCLE_KEY = 'BTab';
+
+/**
+ * Composer-row width at or above which `shift+tab` is printed (Issue #2597).
+ *
+ * The container is `MessageInput`'s input row (`@container`), so the answer
+ * follows the pane, not the viewport. Declared as a constant so the number is
+ * reviewable, but the class below MUST spell the same value as a literal:
+ * Tailwind scans source text, so an interpolated `@min-[${N}px]:inline` would
+ * generate no CSS and hide the notation at every width (the #2131 rule).
+ *
+ * Measured with `getBoundingClientRect()` in Chromium (1440x900 with the files
+ * panel open for the splits; the row is 26px narrower than the composer box):
+ *
+ *   | where                               | row width | notation           |
+ *   |-------------------------------------|-----------|--------------------|
+ *   | phone, 360px portrait               | 318       | hidden, as before  |
+ *   | phone, 440px portrait (the widest)  | 398       | hidden, as before  |
+ *   | PC split pane 218px (the Issue's)   | 174       | hidden             |
+ *   | PC, three equal split panes (315px) | 271       | hidden             |
+ *   | PC split pane 455px (the Issue's)   | 411       | printed, as before |
+ *
+ * 400 sits between the widest portrait phone's row (398), whose look #2592's
+ * phone specs pin, and the 455px pane the Issue keeps the notation in (411).
+ * Below it the notation's 55px goes back to the row instead.
+ * `tests/e2e/agent-mode-control-2592.spec.ts` asserts both sides of it.
+ */
+export const AGENT_MODE_NOTATION_MIN_CONTAINER_PX = 400;
 
 export interface AgentModeControlProps {
   worktreeId: string;
@@ -207,12 +261,20 @@ export const AgentModeControl = memo(function AgentModeControl({
   const modeLabel = readable ? t(`agentMode.mode.${agentMode}`) : null;
 
   return (
-    <div className="flex items-center gap-1 min-w-0" data-testid="agent-mode-control">
+    // Issue #2597: a grid, not a flex row — see "What gives way" above. The
+    // button's track is `max-content`, so the wrapper can never be narrower
+    // than the button; the captions get the implicit `minmax(0, max-content)`
+    // track, so they are the only part that shrinks. No explicit second track:
+    // an empty one would still cost a gap when there is no caption to show.
+    <div
+      className="grid grid-flow-col grid-cols-[max-content] auto-cols-[minmax(0,max-content)] items-center gap-1"
+      data-testid="agent-mode-control"
+    >
       <button
         type="button"
         onClick={handleClick}
         disabled={!enabled}
-        className={`flex-shrink-0 min-w-[44px] px-2 py-1 rounded-full border text-xs font-medium transition-colors
+        className={`min-w-[44px] px-2 py-1 rounded-full border text-xs font-medium transition-colors
           disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent
           ${activeKey === MODE_CYCLE_KEY
             ? 'border-accent-500 bg-accent-500 text-white'
@@ -232,41 +294,55 @@ export const AgentModeControl = memo(function AgentModeControl({
         {/* Issue #1271: the key notation is physical-key notation and is
             identical in every locale, so it is deliberately not translated. The
             words around it are. */}
-        {/* `min-w-[44px]` above: with the key notation dropped below `sm`, the
-            label alone can be narrower than #1127's tap-target minimum. */}
+        {/* `min-w-[44px]` above: with the key notation dropped on a narrow row,
+            the label alone can be narrower than #1127's tap-target minimum. */}
+        {/* Issue #2597: a container query on the composer row, not `sm:` — keep
+            the literal in sync with AGENT_MODE_NOTATION_MIN_CONTAINER_PX. */}
         <span className="flex items-center justify-center gap-1">
           <span>{t('agentMode.label')}</span>
           {/* eslint-disable-next-line no-restricted-syntax -- i18n(#1271): key notation */}
-          <span className="hidden sm:inline opacity-60">shift+tab</span>
+          <span className="hidden @min-[400px]:inline opacity-60" data-testid="agent-mode-key-notation">shift+tab</span>
         </span>
       </button>
-      {readable ? (
+      {readable || note ? (
+        // Issue #2597: the clip box for both captions. `overflow-hidden` is what
+        // keeps a caption squeezed down to its padding from being painted past
+        // the control's right edge.
         <span
-          className="min-w-0 truncate px-2 py-1 rounded-full bg-muted text-xs text-muted-foreground"
-          data-testid="agent-mode-chip"
-          data-agent-mode={agentMode}
+          className="flex min-w-0 items-center gap-1 overflow-hidden"
+          data-testid="agent-mode-captions"
         >
-          {modeLabel}
-        </span>
-      ) : null}
-      {note ? (
-        <>
+          {readable ? (
+            <span
+              className="min-w-0 truncate px-2 py-1 rounded-full bg-muted text-xs text-muted-foreground"
+              data-testid="agent-mode-chip"
+              data-agent-mode={agentMode}
+            >
+              {modeLabel}
+            </span>
+          ) : null}
           {/* Visible on every device — see "The caution is printed, not
               hovered" above. `aria-hidden` because the full sentence reaches a
               screen reader through the button's `aria-describedby` instead, and
               reading both would say the same thing twice. */}
-          <span
-            aria-hidden="true"
-            title={note}
-            className="min-w-0 truncate px-2 py-1 rounded-full border border-warning-border bg-warning-subtle text-xs text-warning-foreground"
-            data-testid="agent-mode-note"
-          >
-            {noteShort}
-          </span>
-          <span id={noteDomId} className="sr-only">
-            {note}
-          </span>
-        </>
+          {note ? (
+            <span
+              aria-hidden="true"
+              title={note}
+              className="min-w-0 truncate px-2 py-1 rounded-full border border-warning-border bg-warning-subtle text-xs text-warning-foreground"
+              data-testid="agent-mode-note"
+            >
+              {noteShort}
+            </span>
+          ) : null}
+        </span>
+      ) : null}
+      {/* Outside the clip box: it is `sr-only`, i.e. absolutely positioned, so
+          it takes no grid track either. */}
+      {note ? (
+        <span id={noteDomId} className="sr-only">
+          {note}
+        </span>
       ) : null}
     </div>
   );
