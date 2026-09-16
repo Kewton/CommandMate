@@ -87,7 +87,73 @@ export class PromptAnswerRejectedError extends Error {
 export const FREE_TEXT_AT_MENU_ROW_REASON = 'unresolvable_answer';
 
 /**
- * Free text refused BEFORE any key reached the pane (Issue #2573).
+ * Which measurement refused the free text.
+ *
+ * Both refusals are the same promise to the caller — the text was not typed and
+ * the Enter after it was not pressed — and both are reported under
+ * {@link FREE_TEXT_AT_MENU_ROW_REASON}, because `respond` and `/prompt-response`
+ * branch on the reason code and the next step is the same either way: the dialog
+ * is still up, untouched. What differs is the evidence, and therefore the
+ * sentence the operator is shown.
+ *
+ * - `menu_row` (#2573): every text-bearing row on this screen is a MENU row, so
+ *   there is nowhere for the characters to land at all.
+ * - `cursor_elsewhere` (#2584): there IS a real text field, but the cursor is
+ *   resting on a different option, so the characters land nowhere and the Enter
+ *   confirms that option instead.
+ */
+export type FreeTextRefusalKind = 'menu_row' | 'cursor_elsewhere';
+
+/**
+ * The extra measurement a `cursor_elsewhere` refusal cites (Issue #2584).
+ *
+ * Optional on the error so the #2573 construction is unchanged; when it is
+ * absent the refusal is a `menu_row` one.
+ */
+export interface FreeTextRefusalDetail {
+  readonly kind: FreeTextRefusalKind;
+  /**
+   * The option the cursor rests on — i.e. the one the Enter after the text would
+   * have confirmed. For Command Code's `AskUserQuestion` this is a verified
+   * reading, not a guess: `tools/command-code/dialog.ts` cross-checks the `❯`
+   * row against the region's own cursor line and declines the whole screen
+   * (`default-unresolved`) when the two disagree.
+   */
+  readonly cursorOptionNumber: number;
+}
+
+/**
+ * The sentence for each refusal, built from a tool id and option numbers only.
+ *
+ * Fixed text, a tool id and option numbers, never the answer (SEC-003, as in
+ * `prompt-answer-semantic`): the answer is whatever the operator typed, and
+ * `/prompt-response` returns this message to the client verbatim.
+ *
+ * The two sentences sit side by side on purpose. They differ in the one thing
+ * the operator has to act on — what to do next — and that is only comparable
+ * when both are readable at once.
+ */
+function freeTextRefusalMessage(
+  cliToolId: CLIToolType,
+  optionNumbers: readonly number[],
+  detail: FreeTextRefusalDetail | undefined,
+): string {
+  const numbers = optionNumbers.join(', ');
+  if (detail === undefined) {
+    return `Refused to type free text at ${cliToolId}'s prompt: option ${numbers} `
+      + 'reads as taking your own words, but on this screen it is a menu row, not a text field. '
+      + 'The text would be ignored and the Enter after it would confirm whatever is highlighted. '
+      + 'Nothing was sent. Answer with the option number, then send the instructions as a message.';
+  }
+  return `Refused to type free text at ${cliToolId}'s prompt: option ${numbers} is the text field `
+    + `on this screen, but the cursor is on option ${detail.cursorOptionNumber}. The text would be `
+    + `ignored and the Enter after it would confirm option ${detail.cursorOptionNumber}. Nothing `
+    + 'was sent. Move the cursor onto the text field in the terminal and send the text again — '
+    + 'sending its option number does not move the cursor, it selects nothing.';
+}
+
+/**
+ * Free text refused BEFORE any key reached the pane (Issue #2573, #2584).
  *
  * A sibling of {@link PromptAnswerRejectedError}, not a use of it, because the
  * two cite different evidence. That one cites the dialog the tool's own rules
@@ -97,29 +163,37 @@ export const FREE_TEXT_AT_MENU_ROW_REASON = 'unresolvable_answer';
  * DIGIT through — while the `AskUserQuestion` screen whose free text must keep
  * working is deliberately not recognised by those rules at all
  * (`tools/command-code/permission.ts`). `answerMode` says how a CHOICE is
- * pressed; it says nothing about which row is a text field. So what this one
- * cites is the rows.
+ * pressed; it says nothing about which row is a text field, nor about which row
+ * the cursor is on. So what this one cites is the rows.
  *
- * The message is fixed text, a tool id and option numbers, never the answer
- * (SEC-003, as in `prompt-answer-semantic`): the answer is whatever the operator
- * typed, and `/prompt-response` returns this message to the client verbatim.
+ * One class rather than two because `/prompt-response` is out of reach of both
+ * Issues' scope and matches this type by `instanceof` to report the refusal at
+ * all; {@link FreeTextRefusalKind} is what tells the two cases apart.
  */
 export class FreeTextAnswerRejectedError extends Error {
   /** Machine-readable code, always {@link FREE_TEXT_AT_MENU_ROW_REASON}. */
   readonly reason: string;
-  /** The options that read as taking text and are menu rows on this screen. */
+  /**
+   * The text-bearing options this refusal is about: the menu rows for
+   * `menu_row`, the measured text field(s) for `cursor_elsewhere`.
+   */
   readonly optionNumbers: readonly number[];
+  /** Which measurement refused (Issue #2584). */
+  readonly kind: FreeTextRefusalKind;
+  /** The option the Enter would have confirmed, or null for `menu_row`. */
+  readonly cursorOptionNumber: number | null;
 
-  constructor(cliToolId: CLIToolType, optionNumbers: readonly number[]) {
-    super(
-      `Refused to type free text at ${cliToolId}'s prompt: option ${optionNumbers.join(', ')} `
-      + 'reads as taking your own words, but on this screen it is a menu row, not a text field. '
-      + 'The text would be ignored and the Enter after it would confirm whatever is highlighted. '
-      + 'Nothing was sent. Answer with the option number, then send the instructions as a message.'
-    );
+  constructor(
+    cliToolId: CLIToolType,
+    optionNumbers: readonly number[],
+    detail?: FreeTextRefusalDetail,
+  ) {
+    super(freeTextRefusalMessage(cliToolId, optionNumbers, detail));
     this.name = 'FreeTextAnswerRejectedError';
     this.reason = FREE_TEXT_AT_MENU_ROW_REASON;
     this.optionNumbers = optionNumbers;
+    this.kind = detail?.kind ?? 'menu_row';
+    this.cursorOptionNumber = detail?.cursorOptionNumber ?? null;
   }
 }
 
@@ -317,6 +391,85 @@ function assertFreeTextHasATextField(params: SendPromptAnswerParams): void {
   );
 }
 
+/**
+ * Refuse free text while the cursor is on another row (Issue #2584).
+ *
+ * ## The hole #2573 left open
+ *
+ * {@link assertFreeTextHasATextField} asks what KIND the text-bearing rows are,
+ * and lets the text through the moment one of them is a measured field. On
+ * Command Code's `AskUserQuestion` that is one question short, because the field
+ * is a row of a list and typed characters only reach it while the cursor is
+ * resting there. Measured on 1.53.1 (#2584), with `Type something...` on row 3
+ * and the `❯` on row 1:
+ *
+ * ```
+ * ❯ 1. apple
+ *   2. banana
+ *   3. Type something...
+ * ```
+ *
+ * `answer: "UAT-FREETEXT-KIWI"` was ignored, the Enter after it confirmed
+ * `apple`, and `/prompt-response` answered `success: true` — the same failure
+ * shape as #2573, reached through the screen #2573 deliberately exempts. The
+ * SAME request on the SAME screen with the `❯` on row 3 records the text, so
+ * nothing but the cursor decides which of the two it means.
+ *
+ * ## Why it refuses instead of moving the cursor there first
+ *
+ * The obvious alternative is to reuse the cursor arm: compute `field - cursor`
+ * and send that many Down presses before typing. The arithmetic is available —
+ * both numbers are read off the frame — but the KEYS are not measured for this
+ * screen. The cursor arm is claude's and agy's by construction
+ * (`isCursorNavMultiChoice`, and `tools/command-code/dialog.ts` says so where it
+ * publishes this prompt), and what IS measured for Command Code is the opposite
+ * input method: the digit is a hotkey that selects on its own, which is why the
+ * screen is published `answer_only` (#2574). #2522 measured the remaining half —
+ * the digit aimed at the field row selects nothing — so this repository has no
+ * measured keystroke that moves this cursor at all.
+ *
+ * Sending Down at it anyway would, if the list does not take arrow keys,
+ * reproduce exactly today's bug with extra keystrokes in front of it and still
+ * answer `success: true`. That is the mistake `assertAnswerModeAcceptsNumber`
+ * was written against: gate on the measurement, and stop the wrong keystroke
+ * rather than invent a mapping. Mapping the answer onto the field — teaching the
+ * sender to arm this cursor once the movement key has been measured live — is
+ * the follow-up, and it can be added under this guard without changing what any
+ * caller sees today.
+ *
+ * ## What it deliberately does NOT do
+ *
+ * - It does not fire on a prompt with no measured field: that is #2573's case
+ *   above (every text-bearing row is a menu row) or the pre-#2573 pass-through
+ *   (#1726), and neither changes here.
+ * - It does not fire when NO option carries the cursor. agy's picker publishes
+ *   its highlight without `isDefault` at all (`#999`), and a screen whose cursor
+ *   cannot be read is one this guard has nothing to say about — the same
+ *   fail-open {@link readGuardFrame} takes for an unreadable pane.
+ *
+ * @throws {FreeTextAnswerRejectedError} with `kind: 'cursor_elsewhere'` when the
+ *   answer is not a number, the prompt has a measured text field, and the cursor
+ *   is resting on some other option.
+ */
+function assertFreeTextCursorIsOnTheField(params: SendPromptAnswerParams): void {
+  if (/^\d+$/.test(params.answer)) return;
+  const { promptData } = params;
+  if (promptData?.type !== 'multiple_choice') return;
+
+  const fields = promptData.options.filter(isTypedTextFieldOption);
+  if (fields.length === 0) return;
+
+  const cursor = promptData.options.find((option) => option.isDefault === true);
+  if (cursor === undefined) return;
+  if (isTypedTextFieldOption(cursor)) return;
+
+  throw new FreeTextAnswerRejectedError(
+    params.cliToolId,
+    fields.map((option) => option.number),
+    { kind: 'cursor_elsewhere', cursorOptionNumber: cursor.number },
+  );
+}
+
 export interface SendPromptAnswerParams {
   sessionName: string;
   answer: string;
@@ -365,6 +518,12 @@ export async function sendPromptAnswer(params: SendPromptAnswerParams): Promise<
   // is given and presses Enter, so text aimed at a menu row has to stop here —
   // before the branch — or the Enter confirms the highlighted default.
   assertFreeTextHasATextField(params);
+
+  // Issue #2584: and the half #2573 left open. A prompt that HAS a real text
+  // field still swallows the characters while the cursor is on another row, and
+  // the Enter after them confirms that row — so the cursor has to be checked
+  // here too, before the branch.
+  assertFreeTextCursorIsOnTheField(params);
 
   // Determine if this is an arrow-key-navigated multiple-choice prompt.
   // Claude Code and Antigravity (agy) both render selection menus that only

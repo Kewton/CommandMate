@@ -267,6 +267,43 @@ describe('[#2522] answering the question screen', () => {
       [SESSION, '', true],
     ]);
   });
+
+  it('refuses that same TEXT when the cursor is on another row (#2584)', async () => {
+    // The Issue, through the body PromptPanel posts. `question-flat-short.txt`
+    // is the same screen with the `❯` on option 1 and `Type something...` on
+    // option 4 — measured on 1.53.1, the text was ignored and the Enter after it
+    // confirmed option 1 while this route answered `success: true`.
+    const { status, data } = await respond(f2522('question-flat-short.txt'), {
+      answer: 'UAT-FREETEXT-KIWI',
+    });
+
+    expect(status).toBe(200);
+    expect(data.success).toBe(false);
+    expect(data.reason).toBe('unresolvable_answer');
+    expect(data.message).toContain('option 4 is the text field');
+    expect(data.message).toContain('the cursor is on option 1');
+
+    // Above all: option 1 was not confirmed.
+    const keys = await keystrokes();
+    expect(keys.text).toEqual([]);
+    expect(keys.special).toEqual([]);
+  });
+
+  it('never returns the operator’s own words in that refusal (SEC-003)', async () => {
+    const { data } = await respond(f2522('question-flat-short.txt'), {
+      answer: '<script>alert(1)</script>',
+    });
+
+    expect(data.success).toBe(false);
+    expect(data.message).not.toContain('script');
+  });
+
+  it('still answers the ordinary options on that screen (non-vacuity)', async () => {
+    const { data } = await respond(f2522('question-flat-short.txt'), { answer: '2' });
+
+    expect(data.success).toBe(true);
+    expect((await keystrokes()).text).toEqual([[SESSION, '2', false]]);
+  });
 });
 
 describe('[#2522] the two refusals, told apart', () => {
