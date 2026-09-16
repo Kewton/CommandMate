@@ -529,7 +529,15 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
 
       <form onSubmit={handleSubmit} className="rounded-xl bg-surface border border-border shadow-sm px-3 py-2 focus-within:ring-2 focus-within:ring-accent-500/40 transition-shadow flex flex-col gap-1.5">
         {/* Issue #1080: input area (action buttons + textarea + send) */}
-        <div className={isMobile ? 'flex flex-col gap-1' : 'flex items-center gap-2'}>
+        {/* Issue #2597: `@container` makes this row the query container for
+            the controls inside it (AgentModeControl's `shift+tab`), so they
+            answer to the pane's width and not the viewport's. This element and
+            not `message-input-container`: it holds the controls on both
+            layouts, and the slash-command sheet (`fixed`) stays outside it. */}
+        <div
+          className={isMobile ? '@container flex flex-col gap-1' : '@container flex items-center gap-2'}
+          data-testid="composer-input-row"
+        >
         {/* Mobile: Row 1 - action buttons (slash command, attach, interrupt) */}
         {isMobile && (
           <div className="flex items-center gap-1">
