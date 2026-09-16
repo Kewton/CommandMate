@@ -101,10 +101,15 @@ commandmate ls
 ```
 
 ```
-ID                    NAME  STATUS  DEFAULT
---------------------  ----  ------  -------
-commandmate-tutorial  main  idle    claude
+ID                    NAME  STATUS  REASON  DEFAULT  AUTO_YES
+--------------------  ----  ------  ------  -------  --------
+commandmate-tutorial  main  idle    -       claude   off
 ```
+
+> **REASON と AUTO_YES**: `REASON` は STATUS の根拠、`AUTO_YES` はその行の Auto-Yes が切れるまでの
+> 残り時間です。まだ何も起動していないので、それぞれ `-`（サーバーが理由を返さない）と
+> `off`（武装していない＝確認プロンプトは人が答えるまで止まる）になります。
+> 6 列の読み方は [CLI 運用ガイド](./cli-operations-guide.md#commandmate-ls) にまとまっています。
 
 > **補足**: CommandMate は管理ルート外のパスを登録できません。Step 5 で作る worktree も、必ずルート配下に置く必要があります。
 
