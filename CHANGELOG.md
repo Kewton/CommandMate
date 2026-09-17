@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **feat(release): CHANGELOG 断片（changelog.d/）の検証・集約スクリプトを追加** (#2640): 並列 PR での CHANGELOG.md 競合を防ぐため、Issue ごとの断片ファイル（`changelog.d/<Issue番号>.md`）を扱う `scripts/changelog-fragments.mjs`（`check` / `preview` / `apply`）と仕様ドキュメント `changelog.d/README.md` を追加。
+
 - **feat(orchestrate): 契約検証にunit-relatedゲートを追加** (#2639): `/orchestrate` の検証（`wait --verify`）で、変更に関係するテストとリポジトリのファイルを読むテストだけを実行する `unit-related` ゲート（`scripts/run-related-unit-tests.mjs`）を既定に追加。テスト全体の実行をCIに任せることで、委任完了待ちの時間を短縮。
 
 ### Changed
