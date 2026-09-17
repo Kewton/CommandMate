@@ -257,4 +257,70 @@ describe('SearchBar', () => {
       );
     });
   });
+
+  // ============================================================================
+  // Narrow Panel Layout Tests [Issue #2635]
+  // ============================================================================
+
+  describe('narrow panel layout [Issue #2635]', () => {
+    it('should have flex-wrap in mode toggle row className', () => {
+      render(<SearchBar {...defaultProps} />);
+      const modeNameButton = screen.getByTestId('mode-name');
+      expect(modeNameButton.parentElement).toHaveClass('flex-wrap');
+    });
+
+    it('should have whitespace-nowrap in mode label className', () => {
+      render(<SearchBar {...defaultProps} />);
+      const modeNameButton = screen.getByTestId('mode-name');
+      const label = modeNameButton.previousElementSibling;
+      expect(label).toHaveClass('whitespace-nowrap');
+    });
+
+    it('should have whitespace-nowrap and flex-shrink-0 in both mode buttons when mode is name or content', () => {
+      const { rerender } = render(<SearchBar {...defaultProps} mode="name" />);
+
+      const modeNameButton = screen.getByTestId('mode-name');
+      const modeContentButton = screen.getByTestId('mode-content');
+
+      expect(modeNameButton).toHaveClass('whitespace-nowrap', 'flex-shrink-0');
+      expect(modeContentButton).toHaveClass('whitespace-nowrap', 'flex-shrink-0');
+
+      rerender(<SearchBar {...defaultProps} mode="content" />);
+
+      expect(modeNameButton).toHaveClass('whitespace-nowrap', 'flex-shrink-0');
+      expect(modeContentButton).toHaveClass('whitespace-nowrap', 'flex-shrink-0');
+    });
+
+    it('should render only 2 children and no w-6 element when query is empty and not searching', () => {
+      render(<SearchBar {...defaultProps} query="" isSearching={false} />);
+      const input = screen.getByTestId('search-input');
+      const inputRow = input.parentElement;
+
+      expect(inputRow?.children).toHaveLength(2);
+      expect(inputRow?.querySelector('.w-6')).toBeNull();
+    });
+
+    it('should render w-6 container with search-clear inside when query is not empty', () => {
+      render(<SearchBar {...defaultProps} query="abc" isSearching={false} />);
+      const input = screen.getByTestId('search-input');
+      const inputRow = input.parentElement;
+
+      const w6Container = inputRow?.querySelector('.w-6');
+      expect(w6Container).not.toBeNull();
+      const clearButton = screen.getByTestId('search-clear');
+      expect(w6Container).toContainElement(clearButton);
+    });
+
+    it('should render w-6 container with search-loading inside when searching with empty query', () => {
+      render(<SearchBar {...defaultProps} query="" isSearching={true} />);
+      const input = screen.getByTestId('search-input');
+      const inputRow = input.parentElement;
+
+      const w6Container = inputRow?.querySelector('.w-6');
+      expect(w6Container).not.toBeNull();
+      const loadingSpinner = screen.getByTestId('search-loading');
+      expect(w6Container).toContainElement(loadingSpinner);
+    });
+  });
 });
+
