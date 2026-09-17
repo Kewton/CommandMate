@@ -35,6 +35,7 @@ import {
   COPILOT_SEPARATOR_PATTERN,
   COPILOT_FOLDER_TRUST_ANSWER_KEY,
   isCopilotFolderTrustDialog,
+  readCopilotStatusBar,
   stripAnsi,
 } from '../detection/cli-patterns';
 import { resolveCopilotExecutable } from './copilot-executable';
@@ -128,6 +129,175 @@ const COPILOT_COMPOSER_ROW_PATTERN = /^[>❯](?:\s|$)/;
  * one that cannot be mistaken for a prompt, so it is what is sent.
  */
 export const COPILOT_EXIT_COMMAND = '/exit';
+
+/** How often the pane is read while waiting for `/model`'s answer (Issue #2623). */
+const COPILOT_MODEL_SWITCH_POLL_MS = 250;
+
+/**
+ * copilot's start-up row (Issue #2623).
+ *
+ * Measured on copilot 1.0.85 at the production 200x1000 geometry
+ * (`tests/fixtures/copilot-model-switch-2623.ts`). The composer — `❯` between
+ * two full-width rules — is on screen ~2.5 s after launch, but the row under it
+ * is not the status bar yet: it reads ` ● Loading: 6 hooks, 16 skills, 1 MCP
+ * server` (the glyph spins) for another 3–4.5 s, and only then becomes
+ * `← open sidebar · / commands · ? help · tab next tab`.
+ *
+ * Keys sent inside that window are drawn only once loading ends, and a line
+ * submitted there is not reliably run. All on a fresh launch:
+ *
+ *  - `/model <id>` and then the body 0.3 s later — the sequence `send --model`
+ *    produced: the `/model` line was held and ran when loading ended, the body
+ *    never ran. 4 of 4 (three through this module as it was, one of them with
+ *    an unsupported id; one with raw keys): three times it stayed in the
+ *    composer, once it was simply gone, as in the Issue's report (that run had
+ *    hooks wired, and neither `UserPromptSubmit` nor `Stop` fired);
+ *  - the body alone: sent through this module while the row read
+ *    `Loading: 16 skills`, it ran; typed with raw keys the moment the composer
+ *    appeared and submitted 0.1 s later (the row still a bare `Loading:`), it
+ *    stayed in the composer until a later Enter, sent by hand once loading had
+ *    ended;
+ *  - `/model`, then the body only once the switch row AND the idle status bar
+ *    were on screen: the turn ran and answered every time, and in the run with
+ *    hooks wired `UserPromptSubmit` and `Stop` both fired.
+ *
+ * The raw-key runs also show why the read-back after Enter did not catch it:
+ * the pane still drew an EMPTY composer 90 ms after the Enter and the body
+ * appeared ~0.7 s after it, so a 200 ms read-back reads `submitted`.
+ *
+ * `MCP Servers reloaded: 1 server connected`, which the Issue suspected, is not
+ * it. It is printed once per launch, 2–6 s after loading ends, whether or not
+ * `/model` was sent; a body typed one key at a time over the 5 s before it
+ * arrived intact, and a turn submitted 3 s before it ran through it.
+ */
+const COPILOT_LOADING_ROW_PATTERN = /^\s*\S\s+Loading:/;
+
+/**
+ * Whether copilot is still on its start-up row (Issue #2623).
+ *
+ * Reads the bottom non-blank row only — where the status bar goes — for the
+ * same reason as `readCopilotStatusBar`: a `Loading:` a reply happened to print
+ * higher up must not hold a send.
+ *
+ * @param lines - Frame rows, ANSI already stripped, in pane order
+ */
+export function isCopilotStartupLoading(lines: readonly string[]): boolean {
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (lines[i].trim() === '') continue;
+    return COPILOT_LOADING_ROW_PATTERN.test(lines[i]);
+  }
+  return false;
+}
+
+/**
+ * The rows `/model <id>` has printed so far for one model id (Issue #2623).
+ *
+ * `switched` counts both success forms, `rejected` keeps the refusal rows
+ * themselves so the caller can quote copilot's own words.
+ */
+export interface CopilotModelSwitchOutcomes {
+  switched: number;
+  rejected: string[];
+}
+
+/** What `/model <id>` has done, judged against the frame from before it was sent. */
+export type CopilotModelSwitchVerdict =
+  | { kind: 'switched' }
+  | { kind: 'rejected'; reason: string }
+  | { kind: 'pending' };
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Count what copilot has printed in answer to `/model <modelName>`
+ * (Issue #2623).
+ *
+ * The argument form never opens a picker (#1895); it prints one row into the
+ * transcript. The spellings, all measured on 1.0.85:
+ *
+ *   ● Model changed from gpt-5.6-terra (xhigh) to claude-sonnet-5 (medium) for this session
+ *   ● Switched model to: gpt-5.6-terra                (already on that model)
+ *   ✗ Model "claude-opus-4.6" is unsupported.         (not a model id)
+ *   ✗ Model "claude-opus-5" is unavailable.           (a model the plan does not include)
+ *
+ * The refusal rows are followed by the lists of valid ids (`   - "claude-sonnet-5"`),
+ * so every pattern is anchored at the row's own bullet and the id is matched
+ * whole — `gpt-5` must not count a switch to `gpt-5-mini`. 1.0.80 printed the
+ * same success row with `. Use /config to set default` on the end, which the
+ * lookahead still accepts.
+ *
+ * Counted rather than tested for presence because the pane keeps every earlier
+ * answer: a second `--model` send for the same id must wait for a NEW row.
+ *
+ * @param output - Pane capture; ANSI is stripped here
+ * @param modelName - The id that was (or is about to be) sent
+ */
+export function readCopilotModelSwitchOutcomes(output: string, modelName: string): CopilotModelSwitchOutcomes {
+  const id = escapeRegExp(modelName);
+  const switchedRows = [
+    new RegExp(`^\\s*●\\s+Model changed from .+ to ${id}(?=\\s|$)`),
+    new RegExp(`^\\s*●\\s+Switched model to:\\s*${id}\\s*$`),
+  ];
+  const rejectedRow = new RegExp(`^\\s*✗\\s+Model "${id}" is \\S`);
+
+  const outcomes: CopilotModelSwitchOutcomes = { switched: 0, rejected: [] };
+  for (const line of stripAnsi(output).split('\n')) {
+    if (switchedRows.some((pattern) => pattern.test(line))) {
+      outcomes.switched++;
+    } else if (rejectedRow.test(line)) {
+      outcomes.rejected.push(line.trim().replace(/^✗\s+/, ''));
+    }
+  }
+  return outcomes;
+}
+
+/**
+ * Has `/model <modelName>` answered since `before` was read? (Issue #2623)
+ *
+ * A refusal wins over a success: the two cannot both be new, and if a frame
+ * ever claimed they were, sending the body to a model nobody confirmed is the
+ * outcome to avoid.
+ */
+export function judgeCopilotModelSwitch(
+  before: CopilotModelSwitchOutcomes,
+  output: string,
+  modelName: string
+): CopilotModelSwitchVerdict {
+  const after = readCopilotModelSwitchOutcomes(output, modelName);
+  if (after.rejected.length > before.rejected.length) {
+    return { kind: 'rejected', reason: after.rejected[after.rejected.length - 1] };
+  }
+  if (after.switched > before.switched) {
+    return { kind: 'switched' };
+  }
+  return { kind: 'pending' };
+}
+
+/** The pane's bottom non-blank row, squeezed, for an error message a person reads. */
+function describeBottomRow(output: string): string {
+  const lines = stripAnsi(output).split('\n');
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const row = lines[i].trim().replace(/\s{2,}/g, '  ');
+    if (row === '') continue;
+    return JSON.stringify(row.length > 80 ? `${row.slice(0, 80)}…` : row);
+  }
+  return 'an empty pane';
+}
+
+/**
+ * What {@link CopilotTool.waitForPrompt} waits for (Issue #2623).
+ *
+ *   composer - the composer is drawn and copilot is past its start-up row.
+ *              Holds for a running turn too: copilot keeps the composer up
+ *              while it works, and that is what a plain send has always
+ *              accepted.
+ *   idle     - the same, and the status bar says no turn is running and the
+ *              composer is empty (`/ commands · ? help`; a composer holding
+ *              text shows `@ files · # issues` instead).
+ */
+type CopilotPromptReadiness = 'composer' | 'idle';
 
 /**
  * Copilot CLI tool implementation
@@ -447,19 +617,36 @@ export class CopilotTool extends BaseCLITool {
    * above: `sendUserMessage` and the terminal route both consult
    * `isPromptWaiting` (#1708/#1737) and refuse before reaching here.
    *
+   * Issue #2623 adds a third case, measured on 1.0.85: **composer on screen,
+   * copilot still starting — until loading ends (3–4.5 s).** The composer is drawn
+   * before hooks, skills and MCP servers have loaded, and a line submitted then
+   * is not reliably run (see {@link COPILOT_LOADING_ROW_PATTERN}). The `❯` alone
+   * used to end this wait in 0 ms right there, which is how `send --model` on a
+   * session it had just started typed a body that never ran.
+   *
+   * Timing out still only logs and lets the send proceed, as before; the caller
+   * that must not proceed ({@link sendModelCommand}) reads the result.
+   *
    * @param sessionName - tmux session name
    * @param timeoutMs - Optional timeout in ms (default: COPILOT_PROMPT_WAIT_TIMEOUT_MS)
+   * @param until - What counts as ready (Issue #2623, default `composer`)
+   * @returns Whether the pane got there, and the last frame read (ANSI stripped)
    */
-  private async waitForPrompt(sessionName: string, timeoutMs: number = COPILOT_PROMPT_WAIT_TIMEOUT_MS): Promise<void> {
+  private async waitForPrompt(
+    sessionName: string,
+    timeoutMs: number = COPILOT_PROMPT_WAIT_TIMEOUT_MS,
+    until: CopilotPromptReadiness = 'composer'
+  ): Promise<{ ready: boolean; output: string }> {
     const startTime = Date.now();
     const pollInterval = 500;
     let trustDialogHandled = false;
+    let output = '';
     while (Date.now() - startTime < timeoutMs) {
       try {
         const rawOutput = await capturePane(sessionName, 50);
-        const output = stripAnsi(rawOutput);
-        if (COPILOT_PROMPT_PATTERN.test(output)) {
-          return;
+        output = stripAnsi(rawOutput);
+        if (this.isReadyFor(until, output)) {
+          return { ready: true, output };
         }
         // Issue #1886: `startSession` returns early for a session that already
         // exists, so a pane adopted from outside CommandMate -- or one whose
@@ -478,7 +665,26 @@ export class CopilotTool extends BaseCLITool {
       }
       await new Promise((resolve) => setTimeout(resolve, pollInterval));
     }
-    logger.info('copilot-prompt-not-detected');
+    logger.info('copilot-prompt-not-detected', { until, bottomRow: describeBottomRow(output) });
+    return { ready: false, output };
+  }
+
+  /**
+   * The readiness test behind {@link waitForPrompt} (Issue #2623).
+   *
+   * `COPILOT_PROMPT_PATTERN` is still the composer test, unchanged: the
+   * folder-trust dialog has no `❯` at column 0, so it keeps reading as not ready
+   * (#1886). What is new is that the start-up row is never ready, and that
+   * `idle` asks the status bar as well.
+   *
+   * @param until - What counts as ready
+   * @param output - ANSI-stripped pane capture
+   */
+  private isReadyFor(until: CopilotPromptReadiness, output: string): boolean {
+    if (!COPILOT_PROMPT_PATTERN.test(output)) return false;
+    const lines = output.split('\n');
+    if (isCopilotStartupLoading(lines)) return false;
+    return until === 'composer' || readCopilotStatusBar(lines) === 'idle';
   }
 
   /**
@@ -590,10 +796,11 @@ export class CopilotTool extends BaseCLITool {
    *
    * Flow:
    * 1. Verify session exists
-   * 2. Send `/model <modelName>` + Enter
-   * 3. Wait for prompt recovery with extended timeout
+   * 2. Wait until copilot is idle (Issue #2623)
+   * 3. Send `/model <modelName>` + Enter
+   * 4. Wait for copilot's answer to it (Issue #2623); a refusal or no answer throws
    *
-   * Steps 3 and 4 of the original flow -- wait up to 5s for the picker, then
+   * The original flow's picker steps -- wait up to 5s for the picker, then
    * send Enter if it appeared -- are gone (Issue #1895). `/model` opens a picker
    * only when it is given NO argument; with one it switches in place and prints
    * `● Model changed from gpt-5.6-terra (xhigh) to gpt-5-mini (medium) for this
@@ -603,8 +810,37 @@ export class CopilotTool extends BaseCLITool {
    * expire, and the `C-m` it guarded was a bare Enter aimed at whatever was on
    * screen 5 seconds after a switch that had already finished.
    *
+   * Issue #2623 replaced "wait for the composer" with steps 2 and 4, because the
+   * composer is on screen before, during and after a switch and so proved
+   * nothing: that wait returned in 22 ms on every call, and `sendUserMessage`
+   * typed the body 0.3 s later into a copilot still loading
+   * ({@link COPILOT_LOADING_ROW_PATTERN}). Measured on 1.0.85:
+   *
+   * - **Idle before, not just drawn.** On a fresh launch the switch waited for
+   *   loading anyway (its row appeared 3.2 s after the keystroke); the body sent
+   *   behind it did not survive. And `/model` sent during a running turn
+   *   switched SILENTLY near the end of that turn — the status bar changed, no
+   *   row was printed — so there would be nothing to wait for. Sending it only
+   *   from an idle, empty composer makes step 4's row the one thing to look for,
+   *   and keeps `/model` from being spliced after text already in the composer.
+   * - **An answer after, not a composer.** An idle switch printed its row 0.4–1.2 s
+   *   after the keystroke, and the status-bar label can change first, so the
+   *   row is what is waited for ({@link readCopilotModelSwitchOutcomes} has the
+   *   four spellings). A
+   *   refusal is not a switch, yet the body used to follow it regardless: on a
+   *   launch it was left in the composer, and on a ready session nothing kept
+   *   it from the model already in effect. Now the caller is told, in copilot's
+   *   own words, and nothing else is typed.
+   *
+   * Both waits use {@link COPILOT_MODEL_SWITCH_TIMEOUT_MS} each. Running out
+   * throws rather than proceeds: a body sent without the answer is the defect
+   * this replaces. The one blind spot is a transcript long enough to scroll, if
+   * an older row for the same id leaves the top just as the new one lands: the
+   * count stands still, and that also throws rather than sends.
+   *
    * @param worktreeId - Worktree ID
    * @param modelName - Model name to switch to
+   * @throws Error when copilot is not idle, refuses the model, or does not answer
    */
   async sendModelCommand(worktreeId: string, modelName: string, instanceId?: string): Promise<void> {
     const sessionName = this.getSessionName(worktreeId, instanceId);
@@ -618,21 +854,66 @@ export class CopilotTool extends BaseCLITool {
     }
 
     try {
+      const idle = await this.waitForPrompt(sessionName, COPILOT_MODEL_SWITCH_TIMEOUT_MS, 'idle');
+      if (!idle.ready) {
+        throw new Error(
+          `copilot did not become idle within ${COPILOT_MODEL_SWITCH_TIMEOUT_MS}ms, so /model was not sent ` +
+            `(bottom row: ${describeBottomRow(idle.output)})`
+        );
+      }
+      const before = readCopilotModelSwitchOutcomes(idle.output, modelName);
+
       // Send /model <modelName> command with Enter. An argument means an
       // in-place switch, never a picker (Issue #1895).
       await sendKeys(sessionName, `/model ${modelName}`, true);
 
-      // Wait for prompt recovery with extended timeout for model switching
-      await this.waitForPrompt(sessionName, COPILOT_MODEL_SWITCH_TIMEOUT_MS);
-
-      // Invalidate cache after model switch
+      const verdict = await this.waitForModelSwitchOutcome(sessionName, modelName, before);
       invalidateCache(sessionName);
+
+      if (verdict.kind === 'rejected') {
+        logger.warn('copilot-model-rejected', { model: modelName, reason: verdict.reason });
+        throw new Error(`copilot refused it: ${verdict.reason}`);
+      }
+      if (verdict.kind === 'pending') {
+        logger.warn('copilot-model-switch-unconfirmed', { model: modelName, bottomRow: verdict.bottomRow });
+        throw new Error(
+          `copilot printed no answer to /model within ${COPILOT_MODEL_SWITCH_TIMEOUT_MS}ms ` +
+            `(bottom row: ${verdict.bottomRow}); the switch may still take effect, and nothing further was typed`
+        );
+      }
 
       logger.info('copilot-model-switched', { model: modelName });
     } catch (error: unknown) {
       const errorMessage = getErrorMessage(error);
       throw new Error(`Failed to switch Copilot model to ${modelName}: ${errorMessage}`);
     }
+  }
+
+  /**
+   * Poll until `/model <modelName>` has answered (Issue #2623).
+   *
+   * @param before - What the idle frame held before the command was sent
+   * @returns The verdict; `pending` carries the last bottom row for the error
+   */
+  private async waitForModelSwitchOutcome(
+    sessionName: string,
+    modelName: string,
+    before: CopilotModelSwitchOutcomes
+  ): Promise<Exclude<CopilotModelSwitchVerdict, { kind: 'pending' }> | { kind: 'pending'; bottomRow: string }> {
+    const startTime = Date.now();
+    let output = '';
+    while (Date.now() - startTime < COPILOT_MODEL_SWITCH_TIMEOUT_MS) {
+      await new Promise((resolve) => setTimeout(resolve, COPILOT_MODEL_SWITCH_POLL_MS));
+      try {
+        output = await capturePane(sessionName, 50);
+      } catch {
+        // Capture may fail - continue polling
+        continue;
+      }
+      const verdict = judgeCopilotModelSwitch(before, output, modelName);
+      if (verdict.kind !== 'pending') return verdict;
+    }
+    return { kind: 'pending', bottomRow: describeBottomRow(output) };
   }
 
   /**
