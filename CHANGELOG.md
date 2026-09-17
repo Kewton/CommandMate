@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **feat(release): CHANGELOG 断片（changelog.d/）の検証・集約スクリプトを追加** (#2640): 並列 PR での CHANGELOG.md 競合を防ぐため、Issue ごとの断片ファイル（`changelog.d/<Issue番号>.md`）を扱う `scripts/changelog-fragments.mjs`（`check` / `preview` / `apply`）と仕様ドキュメント `changelog.d/README.md` を追加。
+
+- **feat(orchestrate): 契約検証にunit-relatedゲートを追加** (#2639): `/orchestrate` の検証（`wait --verify`）で、変更に関係するテストとリポジトリのファイルを読むテストだけを実行する `unit-related` ゲート（`scripts/run-related-unit-tests.mjs`）を既定に追加。テスト全体の実行をCIに任せることで、委任完了待ちの時間を短縮。
+
 ### Changed
 
 - **ci: Unit Testsジョブを4本に分割してCIを短縮** (#2638): ci-pr.yml の Unit Tests ジョブを 4 本の matrix shards (1/4〜4/4) に分割して並列実行し、集約ジョブ test-unit-result (ubuntu-latest) で結果を束ねることで CI 実行時間を短縮。cancel-pr-runs-on-close.yml のジョブ数コメントおよび orchestrate.md の並列オーケストレーション記述を更新。
