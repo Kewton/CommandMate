@@ -8,7 +8,7 @@
 
 import { useCallback, useMemo, useRef } from 'react';
 import { useTranslations } from 'next-intl';
-import { SquareTerminal, Clock, Folder, Wrench, Info } from 'lucide-react';
+import { SquareTerminal, Clock, Files, Wrench, Info } from 'lucide-react';
 import { NotificationDot } from '@/components/common/NotificationDot';
 import type { DeepLinkPane } from '@/types/ui-state';
 
@@ -73,11 +73,12 @@ function toDeepLinkPane(tab: MobileTab): DeepLinkPane {
  * Tab configurations
  * Order: Terminal, History, Files, Memo, Info
  * Icons: lucide-react at 20px / strokeWidth 2 (see docs/design-system.md).
+ * Files uses the same `Files` icon as the PC Activity Bar's file tree (Issue #2616).
  */
 const TABS: TabConfig[] = [
   { id: 'terminal', labelKey: 'tabs.terminal', icon: <SquareTerminal size={20} aria-hidden="true" /> },
   { id: 'history', labelKey: 'tabs.history', icon: <Clock size={20} aria-hidden="true" /> },
-  { id: 'files', labelKey: 'tabs.files', icon: <Folder size={20} aria-hidden="true" /> },
+  { id: 'files', labelKey: 'tabs.files', icon: <Files size={20} aria-hidden="true" /> },
   { id: 'memo', labelKey: 'tabs.memo', icon: <Wrench size={20} aria-hidden="true" /> },
   { id: 'info', labelKey: 'tabs.info', icon: <Info size={20} aria-hidden="true" /> },
 ];

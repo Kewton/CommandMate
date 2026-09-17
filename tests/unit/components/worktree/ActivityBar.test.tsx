@@ -5,6 +5,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, render, screen, fireEvent } from '@testing-library/react';
+import { Files, StickyNote } from 'lucide-react';
 import { ActivityBar } from '@/components/worktree/ActivityBar';
 import { ACTIVITIES } from '@/config/activity-bar-config';
 import { TOOLTIP_DELAY_MS } from '@/components/common/Tooltip';
@@ -208,6 +209,58 @@ describe('ActivityBar', () => {
       const t = tab.getAttribute('title');
       expect(t === null || t === '').toBe(true);
     }
+  });
+
+  // Issue #2616: at 20px the single-sheet `File` the file tree used to show and
+  // the `StickyNote` of notes were the same dog-eared page. This regression only
+  // shows up visually, so the icons are pinned here: the config by identity, and
+  // the rendered buttons by the `lucide-<name>` class lucide puts on the svg.
+  describe('Icons (Issue #2616)', () => {
+    /** The `lucide-<name>` class(es) of the svg the given tab draws. */
+    function iconClassOf(tab: HTMLElement): string {
+      const svg = tab.querySelector('svg');
+      expect(svg).not.toBeNull();
+      return Array.from(svg!.classList)
+        .filter((c) => c.startsWith('lucide-'))
+        .sort()
+        .join(' ');
+    }
+
+    it('configures the file tree with the two-sheet `Files` icon', () => {
+      const files = ACTIVITIES.find((a) => a.id === 'files');
+      expect(files?.icon).toBe(Files);
+    });
+
+    it('keeps the file tree and notes on different icons', () => {
+      const files = ACTIVITIES.find((a) => a.id === 'files');
+      const notes = ACTIVITIES.find((a) => a.id === 'notes');
+      expect(notes?.icon).toBe(StickyNote);
+      expect(files?.icon).not.toBe(notes?.icon);
+    });
+
+    it('uses no icon twice across the activities', () => {
+      const icons = ACTIVITIES.map((a) => a.icon);
+      expect(new Set(icons).size).toBe(icons.length);
+      expect(icons).toHaveLength(10);
+    });
+
+    it('draws lucide-files for the file tree and lucide-sticky-note for notes', () => {
+      render(<ActivityBar active="files" onToggle={() => {}} />);
+      const filesTab = screen.getByTestId('activity-bar-button-files');
+      const notesTab = screen.getByTestId('activity-bar-button-notes');
+      expect(filesTab.querySelector('svg.lucide-files')).not.toBeNull();
+      expect(notesTab.querySelector('svg.lucide-sticky-note')).not.toBeNull();
+      expect(notesTab.querySelector('svg.lucide-files')).toBeNull();
+      expect(iconClassOf(filesTab)).not.toBe(iconClassOf(notesTab));
+    });
+
+    it('draws a distinct icon on every rendered tab', () => {
+      render(<ActivityBar active="files" onToggle={() => {}} />);
+      const classes = screen.getAllByRole('tab').map(iconClassOf);
+      expect(classes).toHaveLength(10);
+      for (const c of classes) expect(c).not.toBe('');
+      expect(new Set(classes).size).toBe(classes.length);
+    });
   });
 
   describe('Tooltip integration (Issue #730)', () => {
