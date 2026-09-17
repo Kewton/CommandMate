@@ -562,6 +562,46 @@ for each worktree:   # AGENT は tasks.tsv の担当
   実行し、その結果を exit code にする。ここが「完了したが壊れていた」を目視から exit code へ
   移す一点である。
 
+**Antigravity 担当は、完了の合図（`IMPL_COMPLETED`）を確かめてから裁定する。** agy は作業の途中でも
+ターンを閉じることがある。例えば、バックグラウンドで起動したコマンドの終了を `schedule`（数十秒後に自分を起こす）で待つとき。
+wait はそのターン終了を完了（`basis=hook_stop`）と読むので、作業が終わる前に検証が走る。
+
+2026-09-17 #2605 の実測（`logs/server.log`）:
+- 01:28:34 `schedule` の許可 → 01:28:36 stop → wait が完了と読んで検証を開始
+- その後 4 回、`schedule` で起き直しては閉じる、をくり返した
+- 最後の stop は 01:33:41 で、`IMPL_COMPLETED` もこのとき出た
+
+検証が途中の成果物ですべて通ると、未完成の変更がマージに進む。wait が返ったら、まず合図を確かめる:
+
+```bash
+commandmatedev capture "$WT" --instance antigravity --pane --tail 40 \
+  | perl -pe 's/\e\[[0-9;]*m//g' \
+  | grep -qE '^[[:space:]]*IMPL_COMPLETED[[:space:]]*$' && echo "signal: done" || echo "signal: not yet"
+```
+
+- **行全体が `IMPL_COMPLETED` である行だけ**を合図として数える。goal の文面（「最後に `IMPL_COMPLETED` とだけ出力する」）も
+  画面に表示されるので、部分一致では誤判定する
+- `not yet` なら、合図が出るまで待つ。作業が続いているかは、`capture --prompts` と commits の増加で確かめる
+- 合図が出たら、wait の検証が合図より前に始まっていないかを確かめる。
+  比べるのは、「wait が起動した直近の検証の開始時刻」と「最後のターン終了の時刻」（合図を出したターンの終了）の 2 つ:
+
+  ```bash
+  RUN_STARTED=$(curl -s "http://localhost:3000/api/worktrees/$WT/verify/runs" \
+    | jq -r '[.runs[] | select(.trigger == "wait")][0].startedAt')          # 例 2026-09-17T01:28:40.776Z
+  LAST_STOP=$(commandmatedev capture "$WT" --instance antigravity --json | jq -r '.lastStopEventAt')   # epoch ms
+  node -e "console.log(Date.parse(process.argv[1]) < Number(process.argv[2]) ? 'before-signal' : 'after-signal')" \
+    "$RUN_STARTED" "$LAST_STOP"
+  git -C "../commandmate-issue-${issue}" log -1 --format=%cI   # 最後のコミット時刻
+  git -C "../commandmate-issue-${issue}" status --porcelain    # 契約ファイル以外の変更が無いこと
+  ```
+
+  - **`after-signal`**: wait の exit code をそのまま使う
+  - **`before-signal`**: 最後のコミットが検証の開始より後か、作業ツリーに変更があれば、検証は途中の状態を見ている。
+    `commandmatedev verify "$WT" --json` で全ゲートを検証し直し、その結果で裁定する。
+    どちらも無ければ、検証は最終状態を見ている。exit 0 はそのまま採用し、exit 20 は 3-4 の「合図の前に始まった検証」に従う
+- #2605 の値: 検証の開始が 01:28:40.776Z、最後のターン終了が 01:33:41.574Z（`before-signal`）。
+  最後のワーカーのコミットは 01:27:47 で、作業ツリーはクリーンだった
+
 **完了検出が壊れているときは `verify --gates` へ退避する。** `wait --verify` はゲートの前に
 完了検出を通すので、検出層の欠陥が裁定そのものを止める。2026-08-24 に #2011（`isUnclassifiedActive`
 の回帰）でこれが起き、**3 ワーカーの `wait --verify` が `Unclassified interactive frame …
@@ -615,6 +655,17 @@ commandmatedev verify "$WT" --json    # 失敗したゲートと exit code を�
   - 残りのゲートがすべて PASS なら、オーケストレーターの裁定で合格として扱う
   - 裁定の根拠は PR の Test plan と summary に書く
   - ワーカーには再指示しない
+
+**合図の前に始まった検証**（Antigravity 担当。3-3 の「完了の合図」）で `env-clean` だけが落ちたとき:
+
+- 違反は、ワーカー自身がまだ動かしていたもの（バックグラウンドのテスト実行の listener `[self]`、
+  テストが作って後で消す `~/.commandmate-demo-vitest-*` など）であることが多い
+- 合図の後に `commandmatedev verify "$WT" --gates env-clean` を再実行する
+  （`work-evidence` と `scope` も一緒に走る）
+- 再実行が PASS で、かつ 3-3 の確認で「最後のコミットが検証の開始より前・作業ツリーに変更なし」なら、合格として扱う。
+  **再指示・切替の回数には数えない**。裁定の根拠は PR の Test plan と summary に書く
+- 再実行でも落ちたら、残っている違反について、下のワーカー起因の判定に戻る
+- #2605 がこの形だった: 検証の開始は 01:28、合図は 01:33。再実行は PASS で、コミットも変わっていなかった
 
 ワーカー起因なら、失敗ゲートと `logTail` を添えて同じ worker に再指示する（契約は据え置き。再送は素の send でよく、
 `--instance "$AGENT"` を付ける）。再指示は **同一 worktree につき最大2回**。
