@@ -4,6 +4,8 @@
 複数の並列 PR が `CHANGELOG.md` を直接編集してコンフリクトを起こすのを防ぐため、各 PR はこのディレクトリに断片ファイルを追加します。
 リリース時に `scripts/changelog-fragments.mjs apply` が断片ファイルをまとめて `CHANGELOG.md` に反映し、断片ファイルを削除します。
 
+`CHANGELOG.md` の `## [Unreleased]` には直接書かないでください。空であることを `tests/unit/scripts/changelog-fragments.test.ts` のガードが確かめています（空でないと `apply` も失敗します）。節はリリース時に `apply` が書きます。
+
 ## 断片ファイルの形式
 
 - **置き場所**: `changelog.d/<Issue番号>.md`（正規表現: `/^\d+\.md$/`、例: `1975.md`）

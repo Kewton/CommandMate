@@ -40,7 +40,7 @@ MAJOR.MINOR.PATCH
 ## Release Flow Overview
 
 ```
-Bump version on develop (package.json / package-lock.json / CHANGELOG.md)
+Bump version on develop (package.json / package-lock.json / CHANGELOG.md ← fragments collected from changelog.d/)
    ↓  chore: release vX.Y.Z
 PR "release: vX.Y.Z" (develop → main)  -- review approval required
    ↓  squash merge
@@ -119,49 +119,69 @@ npm version 0.10.1 --no-git-tag-version
 
 ### Step 3: Update CHANGELOG.md
 
-Insert a new section directly below `## [Unreleased]`.
+Each issue's entry reaches develop as a fragment, `changelog.d/<N>.md`, committed by its own PR (format: [`changelog.d/README.md`](../../changelog.d/README.md)). `## [Unreleased]` is kept empty (guarded by `tests/unit/scripts/changelog-fragments.test.ts`), so **do not write the `## [X.Y.Z]` section by hand** — generate it from the fragments in three steps.
 
-```markdown
-## [Unreleased]
+1. **Check what will go in**
 
-## [0.10.1] - 2026-07-17
+   ```bash
+   node scripts/changelog-fragments.mjs check; echo "CHECK=$?"   # must be 0
+   node scripts/changelog-fragments.mjs preview                    # prints the section exactly as it will be generated
+   ```
 
-> **Highlight**: Two to four sentences on what this release is about -- what was wrong and what changed. Include measured numbers where you have them.
+   If `CHECK` is not 0, fix the fragments named in the output first (`apply` writes nothing if even one fragment is invalid). Compare the issue numbers in `preview` with the issues the release PR lists — an issue without a fragment will not appear in the section.
 
-### Added
+2. **Generate the section** (JST date)
 
-- feat(scope): **Bold the point**. Supporting detail (#1234)
+   ```bash
+   node scripts/changelog-fragments.mjs apply --version 0.10.1 --date "$(TZ=Asia/Tokyo date +%F)"; echo "APPLY=$?"
+   git status --short -- CHANGELOG.md changelog.d   # only an M for CHANGELOG.md and a D per fragment
+   ```
 
-### Changed
+   `APPLY` must be 0. `apply` inserts the `## [0.10.1] - 2026-07-17` section directly below `## [Unreleased]` and deletes the fragments it collected (everything except `changelog.d/README.md`). If any line is left under `## [Unreleased]`, it stops with `Unreleased is not empty` and changes nothing.
 
-- fix(docs): **The point**. Supporting detail (#1234)
+3. **Add `> **Highlight**: …` directly below the generated heading**
 
-### Fixed
+   ```markdown
+   ## [Unreleased]
 
-- fix(cli): **The point**. Supporting detail (#1234)
+   ## [0.10.1] - 2026-07-17
 
-## [0.10.0] - 2026-07-16
-```
+   > **Highlight**: Two to four sentences on what this release is about -- what was wrong and what changed. Include measured numbers where you have them.
+
+   ### Added
+
+   - **feat(scope): Bold the point** (#1236): Supporting detail
+
+   ### Changed
+
+   - **fix(docs): The point** (#1235): Supporting detail
+
+   ### Fixed
+
+   - **fix(cli): The point** (#1234): Supporting detail
+
+   ## [0.10.0] - 2026-07-16
+   ```
 
 Conventions:
 
 - **Do not add compare links** (`[X.Y.Z]: https://github.com/.../compare/...`). They stop at `0.5.2` and have not been added since (leave the existing old ones in place)
-- Issue references use the **`(#1234)` form**. `(Issue #1234)` is the pre-v0.9.1 style
+- Issue references use the **`(#1234)` form**, placed right after the closing `**` of the summary. `(Issue #1234)` is the pre-v0.9.1 style
 - Prefix each entry with a conventional-commit scope (`feat(scope):`, `fix(scope):`, ...)
-- Dates are JST-based
-- Omit category headings that have no entries
+- Dates are JST-based (the `TZ=Asia/Tokyo date +%F` above)
+- Omit category headings that have no entries (`apply` never emits a section without fragments)
 
 See [`templates/changelog-entry.md`](../../.claude/skills/release/templates/changelog-entry.md) for details.
 
 ### Step 4: Commit & push
 
 ```bash
-git add package.json package-lock.json CHANGELOG.md
+git add package.json package-lock.json CHANGELOG.md changelog.d
 git commit -m "chore: release v0.10.1"
 git push origin develop
 ```
 
-Verify with `git diff --stat` that **only these three files** changed.
+Verify with `git diff --cached --stat` that **only these three files and the fragments deleted in Step 3 (`changelog.d/<N>.md`)** changed (`changelog.d/README.md` stays).
 
 ### Step 5: Release PR (develop → main)
 

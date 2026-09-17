@@ -328,6 +328,65 @@ describe('CLI execution', () => {
   });
 });
 
+/**
+ * Non-blank lines between `## [Unreleased]` and the next `## [` heading (Issue #2641).
+ *
+ * Entries wait in changelog.d/ until `apply` writes them at release time. A line
+ * written straight under `## [Unreleased]` brings back the conflict every parallel
+ * PR used to hit there, and makes the next `apply` refuse to run.
+ */
+function unreleasedNonBlankLines(changelog: string): string[] {
+  const lines = changelog.split(/\r?\n/);
+  const start = lines.findIndex((line) => /^## \[Unreleased\]\s*$/.test(line));
+  expect(start, 'CHANGELOG.md has no `## [Unreleased]` heading').toBeGreaterThanOrEqual(0);
+  const rest = lines.slice(start + 1);
+  const end = rest.findIndex((line) => /^## \[/.test(line));
+  return (end === -1 ? rest : rest.slice(0, end)).filter((line) => line.trim() !== '');
+}
+
+describe('unreleasedNonBlankLines', () => {
+  it('rejects an entry written under ## [Unreleased] (negative control)', () => {
+    const changelog = [
+      '# Changelog',
+      '',
+      '## [Unreleased]',
+      '',
+      '### Fixed',
+      '',
+      '- **fix(ui): fix bug** (#10): detail',
+      '',
+      '## [0.1.0] - 2026-01-01',
+      '',
+      '### Added',
+      '',
+      '- **feat(core): initial** (#1): initial release',
+      '',
+    ].join('\n');
+
+    expect(unreleasedNonBlankLines(changelog)).toEqual([
+      '### Fixed',
+      '- **fix(ui): fix bug** (#10): detail',
+    ]);
+  });
+
+  it('accepts an empty section and ignores entries of released versions', () => {
+    const changelog = [
+      '# Changelog',
+      '',
+      '## [Unreleased]',
+      '',
+      '## [0.1.0] - 2026-01-01',
+      '',
+      '### Added',
+      '',
+      '- **feat(core): initial** (#1): initial release',
+      '',
+    ].join('\n');
+
+    expect(unreleasedNonBlankLines(changelog)).toEqual([]);
+  });
+});
+
 describe('Guard: real repository changelog.d', () => {
   it('has changelog.d/README.md and readFragments reports no errors', () => {
     const changelogDir = path.join(REPO_ROOT, 'changelog.d');
@@ -335,5 +394,15 @@ describe('Guard: real repository changelog.d', () => {
 
     const { errors } = readFragments(changelogDir);
     expect(errors).toEqual([]);
+  });
+
+  it('keeps ## [Unreleased] in CHANGELOG.md empty (entries go to changelog.d/<N>.md)', () => {
+    const changelog = fs.readFileSync(path.join(REPO_ROOT, 'CHANGELOG.md'), 'utf-8');
+
+    expect(
+      unreleasedNonBlankLines(changelog),
+      'Write the entry to changelog.d/<N>.md instead (see changelog.d/README.md); ' +
+        '`node scripts/changelog-fragments.mjs apply` writes CHANGELOG.md at release time.'
+    ).toEqual([]);
   });
 });
