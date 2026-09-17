@@ -13,7 +13,7 @@
  */
 
 import type { ComponentType, SVGProps } from 'react';
-import { File, GitBranch, StickyNote, Calendar, Bot, Timer, ListTodo, Sparkles, ShieldCheck, KeyRound } from 'lucide-react';
+import { Files, GitBranch, StickyNote, Calendar, Bot, Timer, ListTodo, Sparkles, ShieldCheck, KeyRound } from 'lucide-react';
 
 /**
  * Unique identifier for an activity in the Activity Bar.
@@ -55,7 +55,9 @@ export interface ActivityDefinition {
  * navigation order (ArrowDown/ArrowUp).
  */
 export const ACTIVITIES: readonly ActivityDefinition[] = [
-  { id: 'files', labelKey: 'activityBar.files', icon: File },
+  // Issue #2616: the two-sheet `Files`, not the single-sheet `File` — at 20px
+  // `File` and `notes`' `StickyNote` both read as one dog-eared page.
+  { id: 'files', labelKey: 'activityBar.files', icon: Files },
   { id: 'git', labelKey: 'activityBar.git', icon: GitBranch },
   { id: 'notes', labelKey: 'activityBar.notes', icon: StickyNote },
   { id: 'schedules', labelKey: 'activityBar.schedules', icon: Calendar },

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **feat(ui): ファイルツリーのアイコンを2枚重ねにする** (#2616): PC の Activity Bar（スマホ横向き・タブレットも同じコンポーネント）で、ファイルツリーのアイコン（lucide `File`）がメモ（`StickyNote`）と 20px で見分けられなかったため、ファイルが2枚重なった lucide `Files` に変更。スマホ縦向きの下部タブの Files も `Folder` から `Files` に揃えた。これまで `Files` を使っていたターミナル上部の「Open Files」トグルは、ファイルツリーと同じアイコンにならないよう `PanelRight` に変更。ラベル・Tooltip・件数バッジ・aria 属性・キーボード操作・Activity の並び順は変更なし。Activity Bar の10項目でアイコンが重複しないこと、各ボタンが描く svg（`lucide-files` / `lucide-sticky-note` / `lucide-panel-right`）をテストで固定した。
+
 ### Fixed
 
 - **fix(test): agent-launch-plan-secrets-1933.test.ts の HOME 漏れを止める** (#2622): planFor() が全 CLI の prepareLaunch() を呼ぶ際に HOME や worktreePath が隔離されておらず、agy の ~/.gemini/config/hooks.json や claude の ~/.commandmate/hooks/claude-wt-1933-*.json が実環境に書き込まれ /tmp/cm-1933-worktree にゴミが残っていた問題を、private HOME / CODEX_HOME の stub 化と一時 worktreePath の利用、afterEach でのディレクトリ削除、および afterAll での実環境 mtime / エントリ不変ガードを追加して解消。

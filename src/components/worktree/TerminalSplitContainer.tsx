@@ -45,7 +45,7 @@ import React, {
 import { useTranslations } from 'next-intl';
 import {
   History,
-  Files,
+  PanelRight,
   AlignHorizontalDistributeCenter,
   Plus,
   Minus,
@@ -442,7 +442,8 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
    * cannot appear at all, instead of flipping a state with no visible effect —
    * `FilePanelSplit` renders no panel with no tabs and no diff, which is the
    * "press Files and nothing happens" complaint the Issue opens with. The count
-   * rides along as a badge, which is what tells the two "Files" apart at a
+   * rides along as a badge and the icon is `PanelRight` rather than the tree's
+   * `Files` (Issue #2616), which is what tells the two "Files" apart at a
    * glance: the Activity Bar's file TREE, and this panel of files you opened
    * from it.
    *
@@ -680,7 +681,9 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
                 : 'border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
             }`}
           >
-            <Files className="w-3.5 h-3.5 flex-shrink-0" aria-hidden="true" />
+            {/* Issue #2616: `Files` is the Activity Bar file tree's icon; this
+                toggle shows a side panel, so it must not share it. */}
+            <PanelRight className="w-3.5 h-3.5 flex-shrink-0" aria-hidden="true" />
             <span>{t('terminal.filesLabel')}</span>
             {openFileCount > 0 && (
               <span
