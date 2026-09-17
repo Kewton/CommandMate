@@ -32,6 +32,11 @@ export interface PaneResizerProps {
   onDoubleClick?: () => void;
   /** Minimum ratio (0.0-1.0) - informational only, parent must enforce (default: 0.1) */
   minRatio?: number;
+  /**
+   * Issue #2598: accessible name for a resizer that is not a pane divider (the
+   * composer's height handle). Defaults to the generic `paneResizer.label`.
+   */
+  ariaLabel?: string;
 }
 
 // ============================================================================
@@ -147,6 +152,7 @@ export const PaneResizer = memo(function PaneResizer({
   ariaValueNow = 50,
   onDoubleClick,
   minRatio: _minRatio = 0.1,
+  ariaLabel,
 }: PaneResizerProps) {
   const t = useTranslations('worktree');
   const [isDragging, setIsDragging] = useState(false);
@@ -300,11 +306,14 @@ export const PaneResizer = memo(function PaneResizer({
       aria-valuenow={ariaValueNow}
       aria-valuemin={0}
       aria-valuemax={100}
-      aria-label={t('paneResizer.label', {
-        arrows: isHorizontal
-          ? t('paneResizer.arrowsHorizontal')
-          : t('paneResizer.arrowsVertical'),
-      })}
+      aria-label={
+        ariaLabel ??
+        t('paneResizer.label', {
+          arrows: isHorizontal
+            ? t('paneResizer.arrowsHorizontal')
+            : t('paneResizer.arrowsVertical'),
+        })
+      }
       tabIndex={0}
       className={className}
       onMouseDown={handleMouseDown}

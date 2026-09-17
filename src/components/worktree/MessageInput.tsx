@@ -5,7 +5,7 @@
 
 'use client';
 
-import React, { memo, useState, useCallback, FormEvent, useRef, useEffect } from 'react';
+import React, { memo, useState, useCallback, FormEvent, useRef, useEffect, useLayoutEffect } from 'react';
 import { useTranslations } from 'next-intl';
 import { worktreeApi, handleApiError } from '@/lib/api-client';
 import type { CLIToolType } from '@/lib/cli-tools/types';
@@ -15,9 +15,15 @@ import { Button, Spinner } from '@/components/ui';
 import { SlashCommandSelector } from './SlashCommandSelector';
 import { InterruptButton } from './InterruptButton';
 import { OpencodeSessionControls } from './OpencodeSessionControls';
+import { PaneResizer } from './PaneResizer';
 import { useSlashCommands } from '@/hooks/useSlashCommands';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { useImageAttachment } from '@/hooks/useImageAttachment';
+import { useComposerHeight } from '@/hooks/useComposerHeight';
+import {
+  COMPOSER_AUTO_MAX_HEIGHT_PX,
+  COMPOSER_MIN_HEIGHT_PX,
+} from '@/config/composer-height';
 import type { SlashCommand } from '@/types/slash-commands';
 import { getSlashCommandTrigger } from '@/lib/slash-command-format';
 import type { ShowToast } from '@/types/markdown-editor';
@@ -107,6 +113,23 @@ export interface MessageInputProps {
    * one (the sessions screen) pass nothing and nothing is drawn.
    */
   agentModeSlot?: React.ReactNode;
+  /**
+   * Issue #2598: where this composer's textarea height is stored
+   * (`split:<n>` / `session-tile`, see `src/config/composer-height.ts`).
+   *
+   * Given, and on a PC, the composer draws a handle on its top edge: drag it up
+   * (or press ↑ on it) for a taller textarea, double-click it to return to
+   * auto-grow. Omitted — the phone's docked composer — nothing changes: no
+   * handle, nothing read, the auto-grow the composer has always had.
+   */
+  heightScope?: string;
+  /**
+   * Issue #2598: the tallest the textarea may be DRAWN, in px — the caller's
+   * answer to "how much can the body above give up" (`useComposerMaxHeight`).
+   * It bounds the drawing only; a stored height above it is kept and comes back
+   * when the bound rises. `null` / omitted: not measured yet, no bound.
+   */
+  maxHeight?: number | null;
 }
 
 /**
@@ -128,6 +151,21 @@ const DRAFT_STORAGE_KEY_PREFIX = 'commandmate:draft-message:';
  */
 const QUEUED_BUSY_TOAST_MESSAGE =
   'Queued (session busy) — your message will run after the current task finishes.';
+
+/** `useLayoutEffect` warns on the server; see `useIsMobile` for the same pattern. */
+const useIsomorphicLayoutEffect = typeof window !== 'undefined' ? useLayoutEffect : useEffect;
+
+/**
+ * Issue #2598: the handle's `aria-valuenow` — where the drawn height sits
+ * between the floor and the caller's bound, as the percentage `PaneResizer`
+ * reports. Auto-grow and an unmeasured bound report the floor's 0.
+ */
+function composerHeightPercent(height: number | null, maxHeight: number | null | undefined): number {
+  if (height === null || maxHeight === null || maxHeight === undefined) return 0;
+  const span = maxHeight - COMPOSER_MIN_HEIGHT_PX;
+  if (span <= 0) return 100;
+  return Math.round(Math.min(100, Math.max(0, ((height - COMPOSER_MIN_HEIGHT_PX) / span) * 100)));
+}
 
 /**
  * Issue #728: Per-(worktree, split) draft key. Falls back to the legacy
@@ -158,7 +196,7 @@ function migrateLegacyDraftKey(worktreeId: string): void {
   }
 }
 
-export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSent, cliToolId, instanceId, isSessionRunning = false, pendingInsertText, onInsertConsumed, splitIndex = 0, onFocus, isProcessing = false, showToast, autoYesSlot, agentModeSlot, onOptimisticSend }: MessageInputProps) {
+export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSent, cliToolId, instanceId, isSessionRunning = false, pendingInsertText, onInsertConsumed, splitIndex = 0, onFocus, isProcessing = false, showToast, autoYesSlot, agentModeSlot, onOptimisticSend, heightScope, maxHeight }: MessageInputProps) {
   const t = useTranslations('worktree');
   const [message, setMessage] = useState('');
   const [sending, setSending] = useState(false);
@@ -176,6 +214,26 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
   // Issue #4: Pass cliToolId to filter commands by CLI tool
   const isMobile = useIsMobile();
   const { groups, isCatalogStale } = useSlashCommands(worktreeId, cliToolId);
+
+  // Issue #2598: the stored textarea height and its handle — PC only. On a
+  // phone nothing is read or applied, so a height chosen on a desktop never
+  // reaches the phone's docked composer.
+  const resizable = !isMobile && !!heightScope;
+  const {
+    height: fixedHeight,
+    resizeBy: resizeHeightBy,
+    reset: resetHeight,
+  } = useComposerHeight({ worktreeId, scope: heightScope, maxHeight, enabled: resizable });
+  const handleHeightResize = useCallback(
+    (delta: number) => {
+      const drawn = textareaRef.current?.getBoundingClientRect().height ?? COMPOSER_MIN_HEIGHT_PX;
+      // PaneResizer reports downward movement as positive. The handle is on the
+      // composer's TOP edge and the composer is docked at the bottom, so pulling
+      // it up — a negative delta — is what makes the textarea taller.
+      resizeHeightBy(-delta, drawn);
+    },
+    [resizeHeightBy],
+  );
 
   // Issue #1166: the composer no longer lifts itself with a translateY hack.
   // The mobile shell (WorktreeDetailRefactored) now sizes its container to
@@ -235,19 +293,30 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
   }, [message, worktreeId, splitIndex]);
 
   /**
-   * Auto-resize textarea based on content
+   * Auto-resize textarea based on content.
+   *
+   * Issue #2598: a stored height wins — the textarea keeps it whatever it holds
+   * (it scrolls inside), including after a send empties it. Without one, the
+   * pre-#2598 auto-grow: one line when empty, the content's height up to the
+   * cap otherwise. The empty case now writes the 36px the `minHeight` below
+   * already enforced (it used to write 24px, which `minHeight` overrode).
+   * A layout effect, so a stored height is applied before the first paint
+   * instead of flashing the one-line composer first.
    */
-  useEffect(() => {
+  useIsomorphicLayoutEffect(() => {
     const textarea = textareaRef.current;
-    if (textarea) {
-      if (!message) {
-        textarea.style.height = '24px';
-      } else {
-        textarea.style.height = 'auto';
-        textarea.style.height = `${Math.min(textarea.scrollHeight, 160)}px`;
-      }
+    if (!textarea) return;
+    if (fixedHeight !== null) {
+      textarea.style.height = `${fixedHeight}px`;
+      return;
     }
-  }, [message]);
+    if (!message) {
+      textarea.style.height = `${COMPOSER_MIN_HEIGHT_PX}px`;
+    } else {
+      textarea.style.height = 'auto';
+      textarea.style.height = `${Math.min(textarea.scrollHeight, COMPOSER_AUTO_MAX_HEIGHT_PX)}px`;
+    }
+  }, [message, fixedHeight]);
 
   /**
    * Issue #485: Insert pending text into message input
@@ -482,6 +551,56 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     }
   }, [showCommandSelector, isFreeInputMode, isComposing, isMobile, submitMessage, handleCommandCancel]);
 
+  // Issue #2598: each toolbar control is one element for both layouts; only the
+  // wrappers around them differ (see the toolbar below).
+  const toolbarControls = (
+    <>
+      <Button
+        variant="ghost"
+        type="button"
+        onClick={openFileDialog}
+        disabled={isUploading || sending}
+        className="flex-shrink-0 p-2 text-muted-foreground hover:text-accent-600 hover:bg-accent-50 dark:hover:text-accent-400 dark:hover:bg-accent-900/30 rounded-full transition-colors disabled:text-muted-foreground/50 disabled:hover:bg-transparent"
+        aria-label={t('composer.attachImage')}
+        data-testid="attach-image-button"
+      >
+        {isUploading ? (
+          <Spinner size="md" />
+        ) : (
+          <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+          </svg>
+        )}
+      </Button>
+      {/* Issue #2038: opencode-only session operations (new / list / fork).
+          Renders nothing for every other tool — see OpencodeSessionControls. */}
+      <OpencodeSessionControls
+        worktreeId={worktreeId}
+        cliToolId={cliToolId || 'claude'}
+        instanceId={instanceId}
+        disabled={!isSessionRunning}
+        // Issue #2109: the composer's existing toast surface, so a 409
+        // from a session or share control says why instead of only
+        // reaching the console. Undefined at mounts that pass no
+        // showToast; the control falls back to an inline message there.
+        showToast={showToast}
+      />
+      {/* Issue #2592: the permission-mode button, in this row rather than a
+          new one. Renders nothing for a tool with no mode cycle and for a
+          caller that passes no slot. */}
+      {agentModeSlot}
+    </>
+  );
+
+  const interruptButton = (
+    <InterruptButton
+      worktreeId={worktreeId}
+      cliToolId={cliToolId || 'claude'}
+      instanceId={instanceId}
+      disabled={!isSessionRunning}
+    />
+  );
+
   return (
     <div
       ref={containerRef}
@@ -527,175 +646,180 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
         data-testid="image-file-input"
       />
 
-      <form onSubmit={handleSubmit} className="rounded-xl bg-surface border border-border shadow-sm px-3 py-2 focus-within:ring-2 focus-within:ring-accent-500/40 transition-shadow flex flex-col gap-1.5">
-        {/* Issue #1080: input area (action buttons + textarea + send) */}
-        <div className={isMobile ? 'flex flex-col gap-1' : 'flex items-center gap-2'}>
-        {/* Mobile: Row 1 - action buttons (slash command, attach, interrupt) */}
-        {isMobile && (
-          <div className="flex items-center gap-1">
-            <Button
-              variant="ghost"
-              type="button"
-              onClick={() => {
-                if (isFreeInputMode) {
-                  setIsFreeInputMode(false);
-                }
-                setShowCommandSelector(true);
-              }}
-              className="flex-shrink-0 p-2 text-muted-foreground hover:text-accent-600 hover:bg-accent-50 dark:hover:text-accent-400 dark:hover:bg-accent-900/30 rounded-full transition-colors"
-              aria-label={t('composer.showSlashCommands')}
-              data-testid="mobile-command-button"
-            >
-              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 20l4-16m2 16l4-16M6 9h14M4 15h14" />
-              </svg>
-            </Button>
-            <Button
-              variant="ghost"
-              type="button"
-              onClick={openFileDialog}
-              disabled={isUploading || sending}
-              className="flex-shrink-0 p-2 text-muted-foreground hover:text-accent-600 hover:bg-accent-50 dark:hover:text-accent-400 dark:hover:bg-accent-900/30 rounded-full transition-colors disabled:text-muted-foreground/50 disabled:hover:bg-transparent"
-              aria-label={t('composer.attachImage')}
-              data-testid="attach-image-button"
-            >
-              {isUploading ? (
-                <Spinner size="md" />
-              ) : (
-                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
-                </svg>
-              )}
-            </Button>
-            {/* Issue #2038: opencode-only session operations (new / list / fork).
-                Renders nothing for every other tool — see OpencodeSessionControls. */}
-            <OpencodeSessionControls
-              worktreeId={worktreeId}
-              cliToolId={cliToolId || 'claude'}
-              instanceId={instanceId}
-              disabled={!isSessionRunning}
-              // Issue #2109: the composer's existing toast surface, so a 409
-              // from a session or share control says why instead of only
-              // reaching the console. Undefined at mounts that pass no
-              // showToast; the control falls back to an inline message there.
-              showToast={showToast}
-            />
-            {/* Issue #2592: the permission-mode button, in this row rather than a
-                new one. Renders nothing for a tool with no mode cycle and for a
-                caller that passes no slot. */}
-            {agentModeSlot}
-            <InterruptButton
-              worktreeId={worktreeId}
-              cliToolId={cliToolId || 'claude'}
-              instanceId={instanceId}
-              disabled={!isSessionRunning}
+      {/* Issue #2598: `relative` anchors the height handle on the top edge. */}
+      <form onSubmit={handleSubmit} className="relative rounded-xl bg-surface border border-border shadow-sm px-3 py-2 focus-within:ring-2 focus-within:ring-accent-500/40 transition-shadow flex flex-col gap-1.5">
+        {/* Issue #2598: the height handle (PC, and only where the caller named a
+            scope). Absolutely positioned over the top border, so it costs the
+            composer no height. The handle keeps its own mousedown from moving
+            focus, so the textarea keeps the caret and nothing gets selected. */}
+        {resizable && (
+          <div
+            className="absolute inset-x-3 top-0 -translate-y-1/2"
+            data-testid="composer-resize-handle"
+            data-height-mode={fixedHeight === null ? 'auto' : 'fixed'}
+          >
+            <PaneResizer
+              orientation="vertical"
+              onResize={handleHeightResize}
+              onDoubleClick={resetHeight}
+              ariaLabel={t('composer.resizeHandle')}
+              ariaValueNow={composerHeightPercent(fixedHeight, maxHeight)}
             />
           </div>
         )}
-
-        {/* Desktop: Image attach button (inline) */}
-        {!isMobile && (
-          <Button
-            variant="ghost"
-            type="button"
-            onClick={openFileDialog}
-            disabled={isUploading || sending}
-            className="flex-shrink-0 p-2 text-muted-foreground hover:text-accent-600 hover:bg-accent-50 dark:hover:text-accent-400 dark:hover:bg-accent-900/30 rounded-full transition-colors disabled:text-muted-foreground/50 disabled:hover:bg-transparent"
-            aria-label={t('composer.attachImage')}
-            data-testid="attach-image-button"
-          >
-            {isUploading ? (
-              <Spinner size="md" />
+        {/* Issue #1080: input area (action buttons + textarea + send) */}
+        {/* Issue #2597: `@container` makes this row the query container for
+            the controls inside it (AgentModeControl's `shift+tab`), so they
+            answer to the pane's width and not the viewport's. This element and
+            not `message-input-container`: it holds the controls on both
+            layouts, and the slash-command sheet (`fixed`) stays outside it. */}
+        {/* Issue #2598: two rows on both layouts now — the toolbar over
+            [textarea][send]. It was one row on a PC, where every control but
+            the textarea refused to shrink and a 218px split pane left the
+            textarea 0px wide. The container is still this element and still as
+            wide as the composer, so #2597's threshold means what it meant. */}
+        <div
+          className="@container flex flex-col gap-1"
+          data-testid="composer-input-row"
+        >
+          {/* Row 1: the toolbar, [attach][opencode][mode] then [interrupt].
+              The phone puts the slash button first (a PC opens the selector by
+              typing `/`, as the hint says) and keeps the interrupt button in
+              line with the others, exactly as before; a PC holds it at the
+              right end. */}
+          <div className="flex items-center gap-1" data-testid="composer-toolbar">
+            {isMobile ? (
+              <>
+                <Button
+                  variant="ghost"
+                  type="button"
+                  onClick={() => {
+                    if (isFreeInputMode) {
+                      setIsFreeInputMode(false);
+                    }
+                    setShowCommandSelector(true);
+                  }}
+                  className="flex-shrink-0 p-2 text-muted-foreground hover:text-accent-600 hover:bg-accent-50 dark:hover:text-accent-400 dark:hover:bg-accent-900/30 rounded-full transition-colors"
+                  aria-label={t('composer.showSlashCommands')}
+                  data-testid="mobile-command-button"
+                >
+                  <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 20l4-16m2 16l4-16M6 9h14M4 15h14" />
+                  </svg>
+                </Button>
+                {toolbarControls}
+                {interruptButton}
+              </>
             ) : (
-              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
-              </svg>
+              <>
+                {/* PC: the controls that can outgrow a narrow split pane
+                    (opencode's four session buttons do in a 218px one) scroll
+                    sideways inside this group rather than push the interrupt
+                    button past the pane's clipped edge. `flex-1` is also what
+                    puts the interrupt button at the right end. */}
+                <div
+                  className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto scrollbar-hide"
+                  data-testid="composer-toolbar-start"
+                >
+                  {toolbarControls}
+                </div>
+                {/* `InterruptButton` takes no className; this group keeps it
+                    whole and always on screen. */}
+                <div className="flex flex-shrink-0 items-center" data-testid="composer-toolbar-end">
+                  {interruptButton}
+                </div>
+              </>
             )}
-          </Button>
-        )}
+          </div>
 
-        {/* Row 2 (mobile) / inline (desktop): message input + send */}
-        <div className="flex items-center gap-2 flex-1 min-w-0">
-          <textarea
-            ref={textareaRef}
-            data-testid="message-input-textarea"
-            value={message}
-            onChange={handleMessageChange}
-            onKeyDown={handleKeyDown}
-            onCompositionStart={handleCompositionStart}
-            onCompositionEnd={handleCompositionEnd}
-            onFocus={onFocus}
-            placeholder={t('composer.placeholder')}
-            disabled={sending}
-            rows={1}
-            // Issue #1128: mobile keyboard hints — the composer's primary action
-            // is to send, and it accepts free-form text.
-            inputMode="text"
-            enterKeyHint="send"
-            className="flex-1 outline-none bg-transparent resize-none overflow-y-auto scrollbar-thin"
-            style={{ minHeight: '36px', maxHeight: '160px', paddingTop: '8px', paddingBottom: '8px', lineHeight: '20px' }}
-          />
-
-          {/* Desktop: opencode session controls (Issue #2038) — renders nothing
-              for every other tool, see OpencodeSessionControls */}
-          {!isMobile && (
-            <OpencodeSessionControls
-              worktreeId={worktreeId}
-              cliToolId={cliToolId || 'claude'}
-              instanceId={instanceId}
-              disabled={!isSessionRunning}
-              // Issue #2109 — see the mobile mount above.
-              showToast={showToast}
-            />
-          )}
-
-          {/* Issue #2592 — see the mobile mount above. */}
-          {!isMobile && agentModeSlot}
-
-          {/* Desktop: Interrupt Button */}
-          {!isMobile && (
-            <InterruptButton
-              worktreeId={worktreeId}
-              cliToolId={cliToolId || 'claude'}
-              instanceId={instanceId}
-              disabled={!isSessionRunning}
-            />
-          )}
-
-          <Button
-            variant="ghost"
-            type="submit"
-            data-testid="send-message-button"
-            data-can-send={String((!!message.trim() || !!attachedImage) && !sending)}
-            disabled={(!message.trim() && !attachedImage) || sending}
-            className={`flex-shrink-0 p-2 rounded-full transition-colors disabled:hover:bg-transparent ${
-              (!!message.trim() || !!attachedImage) && !sending
-                ? 'bg-accent-600 text-white hover:bg-accent-700 shadow-sm'
-                : 'text-muted-foreground/50'
-            }`}
-            aria-label={t('composer.sendMessage')}
+          {/* Row 2: message input + send */}
+          {/* PC: `items-end`, so a send button beside a textarea made tall by
+              the handle sits at its bottom, next to the last line, instead of
+              floating at its middle. Same place for a one-line textarea. */}
+          <div
+            className={`flex ${isMobile ? 'items-center' : 'items-end'} gap-2 flex-1 min-w-0`}
+            data-testid="composer-textarea-row"
           >
-            {sending ? (
-              <Spinner size="md" />
-            ) : (
-              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-              </svg>
-            )}
-          </Button>
-        </div>
+            <textarea
+              ref={textareaRef}
+              data-testid="message-input-textarea"
+              value={message}
+              onChange={handleMessageChange}
+              onKeyDown={handleKeyDown}
+              onCompositionStart={handleCompositionStart}
+              onCompositionEnd={handleCompositionEnd}
+              onFocus={onFocus}
+              placeholder={t('composer.placeholder')}
+              disabled={sending}
+              rows={1}
+              // Issue #1128: mobile keyboard hints — the composer's primary action
+              // is to send, and it accepts free-form text.
+              inputMode="text"
+              enterKeyHint="send"
+              className="flex-1 outline-none bg-transparent resize-none overflow-y-auto scrollbar-thin"
+              // Issue #2598: a stored height is not bound by auto-grow's cap —
+              // the caller's `maxHeight` bounds it (see the effect above).
+              style={{
+                minHeight: `${COMPOSER_MIN_HEIGHT_PX}px`,
+                ...(fixedHeight === null ? { maxHeight: `${COMPOSER_AUTO_MAX_HEIGHT_PX}px` } : null),
+                paddingTop: '8px',
+                paddingBottom: '8px',
+                lineHeight: '20px',
+              }}
+            />
+
+            <Button
+              variant="ghost"
+              type="submit"
+              data-testid="send-message-button"
+              data-can-send={String((!!message.trim() || !!attachedImage) && !sending)}
+              disabled={(!message.trim() && !attachedImage) || sending}
+              className={`flex-shrink-0 p-2 rounded-full transition-colors disabled:hover:bg-transparent ${
+                (!!message.trim() || !!attachedImage) && !sending
+                  ? 'bg-accent-600 text-white hover:bg-accent-700 shadow-sm'
+                  : 'text-muted-foreground/50'
+              }`}
+              aria-label={t('composer.sendMessage')}
+            >
+              {sending ? (
+                <Spinner size="md" />
+              ) : (
+                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                </svg>
+              )}
+            </Button>
+          </div>
         </div>
 
         {/* Issue #1080: composer meta row — Auto-Yes (left) + keyboard hints (right).
             Renders when Auto-Yes is embedded (mobile + desktop) or on desktop for
             the hint pills (mobile Enter inserts a newline, so no Shift+Enter hint). */}
+        {/* Issue #2598: on a PC the row is its own `@container`, and the hints
+            are drawn only where the composer is wide enough for them AND the
+            Auto-Yes toggle. In a narrow split pane they used to wrap to a
+            second line and, being `flex-shrink-0`, squeeze the toggle beside
+            them to nothing. Keep the literal in sync with
+            COMPOSER_HINTS_MIN_CONTAINER_PX. */}
         {(autoYesSlot || !isMobile) && (
-          <div className="flex items-center justify-between gap-2 min-w-0" data-testid="composer-meta-row">
-            <div className="flex items-center gap-2 min-w-0 overflow-x-auto scrollbar-hide">
+          <div
+            className={`${isMobile ? '' : '@container '}flex items-center justify-between gap-2 min-w-0`}
+            data-testid="composer-meta-row"
+          >
+            {/* PC: `whitespace-nowrap` — a narrow pane scrolls the Auto-Yes
+                label (and its countdown) sideways instead of wrapping it onto a
+                second line of meta row. */}
+            <div
+              className={`flex items-center gap-2 min-w-0 overflow-x-auto scrollbar-hide${isMobile ? '' : ' whitespace-nowrap'}`}
+              data-testid="composer-auto-yes"
+            >
               {autoYesSlot}
             </div>
             {!isMobile && (
-              <div className="flex flex-shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground select-none">
+              <div
+                className="hidden @min-[420px]:flex flex-shrink-0 items-center gap-1.5 whitespace-nowrap text-[11px] text-muted-foreground select-none"
+                data-testid="composer-hints"
+              >
                 <Kbd>/</Kbd>
                 <span>{t('composer.commandsHint')}</span>
                 <span aria-hidden="true" className="opacity-50">·</span>

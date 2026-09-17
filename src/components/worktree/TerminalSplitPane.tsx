@@ -439,6 +439,12 @@ export interface TerminalSplitPaneProps {
   /** Navigation buttons + PromptPanel + MessageInput. */
   footer: React.ReactNode;
   /**
+   * Issue #2598: the body element (the `flex-1` box `terminal` is drawn in),
+   * for the caller that bounds the composer's height by what the body can give
+   * up. A callback ref works, so the caller can hold the element in state.
+   */
+  bodyRef?: React.Ref<HTMLDivElement>;
+  /**
    * Issue #2261: whether this split is currently filling the whole terminal row.
    * Presentational — the container owns the state and the layout; this only
    * drives which icon and which label the toggle shows.
@@ -490,6 +496,7 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
   onToggleMaximize,
   terminal,
   footer,
+  bodyRef,
   style,
   onDropInstance,
   draggedInstanceId,
@@ -899,7 +906,7 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
       </div>
 
       {/* Body: terminal display (or attach skeleton) */}
-      <div className="flex-1 min-h-0 relative">
+      <div ref={bodyRef} className="flex-1 min-h-0 relative" data-testid={`split-body-${splitIndex}`}>
         {attaching ? (
           <div
             data-testid={`terminal-attach-skeleton-${splitIndex}`}

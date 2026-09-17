@@ -117,6 +117,8 @@ import {
   useHistoryPaneState,
 } from '@/hooks/useHistoryPaneState';
 import { useSessionTileSurfaceMode } from '@/hooks/useSessionTileSurfaceMode';
+import { useComposerMaxHeight } from '@/hooks/useComposerHeight';
+import { SESSION_TILE_COMPOSER_HEIGHT_SCOPE } from '@/config/composer-height';
 import { worktreeApi } from '@/lib/api-client';
 import { deriveCliStatus } from '@/types/sidebar';
 import {
@@ -144,21 +146,38 @@ import type { SurfaceMode } from '@/types/ui-state';
  * the composer below the body is `shrink-0`, so every pixel the composer grows by
  * comes out of the body. The floor is what "the conversation is not crushed"
  * means, and it is chosen so that it never has to hold against the composer.
- * Worked from the classes (not measured in a browser):
+ *
+ * Issue #2598 made the PC composer two rows like the phone's (a toolbar over
+ * [textarea][send]), so both layouts now share one budget. Measured in Chromium
+ * at 1440x900 (`tests/e2e/sessions-composer-height-2598.spec.ts`; the rows
+ * without a measurement are worked from those):
  *
  * | | header | composer | body |
  * |---|---|---|---|
- * | desktop, one-line draft | 55px | 97px (one input row + the Auto-Yes row) | 408px |
- * | phone, one-line draft | 55px | 137px (`MessageInput`'s two-row layout) | 368px |
- * | desktop, textarea at its 160px cap | 55px | 221px | 284px |
- * | phone, textarea at its 160px cap | 55px | 261px | 244px |
+ * | one-line draft (PC, measured; phone) | 55px | 137px (two input rows + the Auto-Yes row) | 368px |
+ * | textarea auto-grown to its 160px cap | 55px | 261px | 244px |
+ * | PC, height handle at its bound (164px, measured) | 55px | 265px | 240px |
  *
  * 15rem = 240px sits under the worst row, so a draft as long as the composer
  * lets it get still leaves the transcript its floor with the send button on
  * screen. It also equals the two stacked floors below, so the terminal and
  * History always fit inside it.
+ *
+ * The PC height handle (#2598) is bounded by this same floor
+ * ({@link SESSION_TILE_BODY_FLOOR_PX}), which leaves it a 36–164px range: a tile
+ * can fix its textarea at a height — one line that scrolls, or anything up to
+ * about auto-grow's cap — but not grow it much past that. Raising the range
+ * would mean lowering this floor and the two #2510 floors that add up to it, a
+ * trade #2598 did not make.
  */
 export const SESSION_TILE_BODY_FLOOR_CLASS = 'min-h-[15rem]';
+
+/**
+ * {@link SESSION_TILE_BODY_FLOOR_CLASS} in px, for the composer's height handle
+ * (Issue #2598): a stored textarea height is drawn no taller than what keeps the
+ * body at this floor. Keep the two in sync (15rem at the root's 16px).
+ */
+export const SESSION_TILE_BODY_FLOOR_PX = 240;
 
 /**
  * The terminal's share of a tile body while History is stacked under it
@@ -167,7 +186,8 @@ export const SESSION_TILE_BODY_FLOOR_CLASS = 'min-h-[15rem]';
  * 3 : 2 of the body. Measured in a real browser before the composer existed
  * (#2510, 457px of body): 274px of terminal (~16 rows at the compact font) over
  * 183px of History. With the composer (#2512) the same ratio of the desktop's
- * 408px is ~245px over ~163px. The floors are what "neither pane is crushed"
+ * 408px was ~245px over ~163px, and of the two-row composer's 368px (#2598) it
+ * is ~221px over ~147px. The floors are what "neither pane is crushed"
  * means if the body gets shorter: together they equal
  * {@link SESSION_TILE_BODY_FLOOR_CLASS}, so they can never push the stack past
  * the body, and on a one-line draft they never bind and the ratio decides.
@@ -325,6 +345,13 @@ function SessionTileCard({
   );
   const isTerminalSurface = surfaceMode === 'terminal';
   const showStackedHistory = isTerminalSurface && historyVisible;
+
+  // Issue #2598: the composer's height handle, bounded by what the body can give
+  // up above its floor. Elements in state because the composer mounts only
+  // while the tile is on screen.
+  const [bodyEl, setBodyEl] = useState<HTMLDivElement | null>(null);
+  const [composerEl, setComposerEl] = useState<HTMLDivElement | null>(null);
+  const composerMaxHeight = useComposerMaxHeight(bodyEl, composerEl, SESSION_TILE_BODY_FLOOR_PX);
 
   // Issue #2511: the tile profile, not the worktree screen's. A tile is one of
   // up to twenty live panes on one screen, and the profile is what keeps that
@@ -573,6 +600,7 @@ function SessionTileCard({
           below takes its height out of this box — see
           SESSION_TILE_BODY_FLOOR_CLASS. */}
       <div
+        ref={setBodyEl}
         className={`min-w-0 flex-1 overflow-hidden ${SESSION_TILE_BODY_FLOOR_CLASS}`}
         data-testid={`session-tile-body-${worktree.id}`}
       >
@@ -659,6 +687,7 @@ function SessionTileCard({
       {/* Issue #2512: the composer, on both surfaces, only while on screen. */}
       {enabled && (
         <div
+          ref={setComposerEl}
           className="shrink-0 border-t border-border p-2"
           data-testid={`session-tile-composer-${worktree.id}`}
         >
@@ -671,6 +700,10 @@ function SessionTileCard({
             onMessageSent={handleMessageSent}
             pendingInsertText={composerInsert}
             onInsertConsumed={clearComposerInsert}
+            // Issue #2598: the tile's own height scope — not split 0's, whose
+            // draft it shares: the tile's body is a fixed card's, not a pane's.
+            heightScope={SESSION_TILE_COMPOSER_HEIGHT_SCOPE}
+            maxHeight={composerMaxHeight}
             autoYesSlot={
               <AutoYesToggle
                 enabled={autoYes.enabled}

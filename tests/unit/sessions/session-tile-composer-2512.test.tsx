@@ -153,6 +153,7 @@ vi.mock('@/hooks/useConnectivity', async (importOriginal) => {
 import {
   SessionTile,
   SESSION_TILE_BODY_FLOOR_CLASS,
+  SESSION_TILE_BODY_FLOOR_PX,
   SESSION_TILE_HISTORY_ROW_CLASS,
   SESSION_TILE_TERMINAL_ROW_CLASS,
   messagesForTileInstance,
@@ -427,8 +428,9 @@ describe('SessionTile composer (Issue #2512)', () => {
 
     it('leaves the body its floor even with the composer at its tallest', () => {
       // From the classes: a 55px header (Phase 2's measurement) and `MessageInput`
-      // on a phone with its textarea at the 160px cap — two input rows, the
-      // Auto-Yes row and the form chrome, plus the tile's own border and padding.
+      // with its textarea at the 160px cap — two input rows (the phone's layout,
+      // and since #2598 the PC's too), the Auto-Yes row and the form chrome, plus
+      // the tile's own border and padding.
       const HEADER_PX = 55;
       const TALLEST_COMPOSER_PX = 261;
       const tilePx = rem(SESSION_TILE_HEIGHT_CLASS, 'h-') * 16;
@@ -445,6 +447,48 @@ describe('SessionTile composer (Issue #2512)', () => {
       const tilePx = rem(SESSION_TILE_HEIGHT_CLASS, 'h-') * 16;
       expect(tilePx).toBeGreaterThanOrEqual(480);
       expect(tilePx).toBeLessThanOrEqual(560);
+    });
+
+    // Issue #2598: the height handle bounds the textarea by this floor in px.
+    it('spells the body floor in px as the same value as its class', () => {
+      expect(SESSION_TILE_BODY_FLOOR_PX).toBe(rem(SESSION_TILE_BODY_FLOOR_CLASS, 'min-h-') * 16);
+    });
+  });
+
+  // Issue #2598: the tile's composer carries the PC height handle, under a
+  // scope of its own — not split 0's, whose draft it shares.
+  describe('height handle (Issue #2598)', () => {
+    const tileTextarea = () =>
+      within(screen.getByTestId('session-tile-composer-wt-1')).getByTestId(
+        'message-input-textarea',
+      ) as HTMLTextAreaElement;
+
+    it('draws the handle on a PC', () => {
+      render(<SessionTile worktree={createWorktree()} enabled connectivity={ONLINE} />);
+      const composer = screen.getByTestId('session-tile-composer-wt-1');
+      expect(within(composer).getByTestId('composer-resize-handle')).toBeInTheDocument();
+      expect(within(composer).getByRole('separator')).toHaveAttribute('aria-orientation', 'vertical');
+    });
+
+    it('reads the session-tile key, never split 0’s', () => {
+      window.localStorage.setItem('commandmate:composer-height:wt-1:split:0', '300');
+      const { unmount } = render(
+        <SessionTile worktree={createWorktree()} enabled connectivity={ONLINE} />,
+      );
+      expect(tileTextarea().style.height).toBe('36px');
+      unmount();
+
+      window.localStorage.setItem('commandmate:composer-height:wt-1:session-tile', '90');
+      render(<SessionTile worktree={createWorktree()} enabled connectivity={ONLINE} />);
+      expect(tileTextarea().style.height).toBe('90px');
+    });
+
+    it('writes under the session-tile key', () => {
+      render(<SessionTile worktree={createWorktree()} enabled connectivity={ONLINE} />);
+      const handle = within(screen.getByTestId('session-tile-composer-wt-1')).getByRole('separator');
+      fireEvent.keyDown(handle, { key: 'ArrowUp' });
+      expect(window.localStorage.getItem('commandmate:composer-height:wt-1:session-tile')).toBe('46');
+      expect(window.localStorage.getItem('commandmate:composer-height:wt-1:split:0')).toBeNull();
     });
   });
 });

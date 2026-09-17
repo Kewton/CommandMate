@@ -16,7 +16,8 @@
     "removeAttachment": "添付を削除",
     "showSlashCommands": "スラッシュコマンドを表示",
     "attachImage": "画像を添付",
-    "sendMessage": "メッセージを送信"
+    "sendMessage": "メッセージを送信",
+    "resizeHandle": "入力欄の高さを変更します。上下の矢印キーで調整し、ダブルクリックで自動の高さに戻します。"
   },
   "interrupt": {
     "stopProcessing": "処理を中断"
