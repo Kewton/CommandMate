@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **fix(api): current-output の thinkingMessage をエージェント名固定から直す** (#2607): `GET /api/worktrees/:id/current-output`（`commandmate capture --json`）の `thinkingMessage` が文言固定だったため、Antigravity などどのエージェントのセッションでも `"Claude is thinking..."` を返していた（2026-09-17 に antigravity セッションで実測）。`buildCurrentOutput` が既存の `getCliToolDisplayName(cliToolId)` で表示名を引いて `"<表示名> is thinking..."`（例: `"Antigravity is thinking..."` / `"OpenCode is thinking..."`）を返すように修正。claude では従来どおり `"Claude is thinking..."`、`thinking` が false のときも従来どおり `null`。リポジトリ内にこの文字列を照合している呼び出し元は無く（型定義とドキュメントの claude の出力例のみ）、UI 表示にも影響しない。
+
 - **fix(test): db-migration-path のテストが、本番 DB の完全なコピーを HOME に残さないようにした** (#2605): `tests/unit/db-migration-path.test.ts` の 2 本は cwd と HOME を隔離せずに `migrateDbIfNeeded` を呼んでいた。そのため本番 DB（`data/db.sqlite`）がある作業ディレクトリ（`/release` が unit を回す main など）で実行するたびに、次の 2 つが起きていた。(1) 本番 DB がレガシー DB と誤認されて `~/.commandmate-test-<ms>/data/cm.db` へ丸ごとコピーされる、(2) `data/db.sqlite.bak` が上書きされる。テストを追加した 2026-02-03 から、残骸は 1,568 個・185 GiB に達していた（既存分は手動で削除済み）。修正では、2 本を「レガシー DB が見つからない」状態（空の一時ディレクトリへの `process.cwd()` の spy、`HOME` の stub、`DATABASE_PATH` を空にする）で呼び、`migrated === false` であること、ディレクトリ作成もコピーも起きないことを assert する。あわせて、隔離した変数を関数が実際に読んでいることを示す陽性対照を `tests/unit/db-migration-path-isolation.test.ts` に追加した（`isSystemDirectory` を sandbox の配下だけ部分 mock する。`os.tmpdir()` はシステムディレクトリとして拒否されるため）。両ファイルには、実際の HOME 直下の `.commandmate-test-*` が増えていないことを確かめるガードも入れた。`src/` の変更はない。
 
 - **fix(test): Catalog から install した Skill を sync-map の分類対象から外す** (#2595): `.claude/skills` および `.agents/skills` 内の `.commandmate-receipt.json` を持つディレクトリを未分類ガードから除外し、receipt 保持ディレクトリが `sync-map.json` に宣言されている場合は別エラーとして検出。
