@@ -213,6 +213,13 @@ export async function sendUserMessage(
   }
 
   // 3. Issue #576: Send /model command before message if model is specified (copilot only).
+  //
+  // Issue #2623: the body below is typed only once this resolves, and it now
+  // resolves only on copilot's own answer to `/model` — never merely because
+  // the composer is drawn, which it is while copilot is still loading and a
+  // body typed then is never run. A refused id (`✗ Model "…" is unsupported.`)
+  // or no answer rejects, so the send stops here with `stage: 'model'` and the
+  // body is not typed into a model nobody confirmed.
   if (copilotModel && cliToolId === 'copilot') {
     try {
       const copilotTool = cliTool as CopilotTool;

@@ -292,8 +292,66 @@ describe('sendUserMessage (Issue #1028)', () => {
     });
 
     expect(result).toEqual({ ok: false, stage: 'model', error: 'model switch failed' });
+    expect(tool.sendMessage).not.toHaveBeenCalled();
     expect(mockSendKeys).not.toHaveBeenCalled();
     expect(mockCreateMessage).not.toHaveBeenCalled();
+    expect(mockStartPolling).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Issue #2623. `sendModelCommand` now settles on copilot's answer to
+   * `/model`, which takes seconds on a copilot that is still loading; the body
+   * must not be typed before it settles. (It used to settle in 22 ms and the
+   * body followed 0.3 s later into a copilot that never ran it.)
+   */
+  it('types the copilot body only after the /model switch has settled', async () => {
+    let settleSwitch: () => void = () => undefined;
+    const sendModelCommand = vi.fn(
+      () => new Promise<void>((resolve) => {
+        settleSwitch = resolve;
+      })
+    );
+    const tool = makeTool({ sendModelCommand, getSessionName: vi.fn(() => 'copilot-session') });
+    mockGetTool.mockReturnValue(tool);
+
+    const pending = sendUserMessage(mockDb, {
+      worktreeId: 'wt-1',
+      content: 'do it',
+      cliToolId: 'copilot',
+      instanceId: 'copilot',
+      copilotModel: 'claude-sonnet-5',
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(sendModelCommand).toHaveBeenCalledWith('wt-1', 'claude-sonnet-5', 'copilot');
+    expect(tool.sendMessage).not.toHaveBeenCalled();
+
+    settleSwitch();
+    await expect(pending).resolves.toMatchObject({ ok: true });
+    expect(tool.sendMessage).toHaveBeenCalledWith('wt-1', 'do it', 'copilot');
+    expect(sendModelCommand.mock.invocationCallOrder[0]).toBeLessThan(
+      tool.sendMessage.mock.invocationCallOrder[0]
+    );
+  });
+
+  it('reports a refused copilot model in copilot\'s words and records nothing (Issue #2623)', async () => {
+    const refusal =
+      'Failed to switch Copilot model to claude-opus-4.6: copilot refused it: Model "claude-opus-4.6" is unsupported.';
+    const sendModelCommand = vi.fn().mockRejectedValue(new Error(refusal));
+    const tool = makeTool({ sendModelCommand, getSessionName: vi.fn(() => 'copilot-session') });
+    mockGetTool.mockReturnValue(tool);
+
+    const result = await sendUserMessage(mockDb, {
+      worktreeId: 'wt-1',
+      content: 'do it',
+      cliToolId: 'copilot',
+      copilotModel: 'claude-opus-4.6',
+    });
+
+    expect(result).toEqual({ ok: false, stage: 'model', error: refusal });
+    expect(tool.sendMessage).not.toHaveBeenCalled();
+    expect(mockCreateMessage).not.toHaveBeenCalled();
+    expect(mockUpdateLastUserMessage).not.toHaveBeenCalled();
     expect(mockStartPolling).not.toHaveBeenCalled();
   });
 
