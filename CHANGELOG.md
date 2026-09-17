@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **docs(orchestrate): Phase 2.5 の copilot 指定と wait/capture の送り先表記を修正** (#2608): `.claude/commands/orchestrate.md` の Phase 2.5（バグ根本原因分析）で copilot 1.0.85 が受け付けない `claude-opus-4.6` が指定されていた記述を `claude-sonnet-5` に更新し、send 直後に capture で画面のモデル表記を確認する手順を追加。あわせて wait での `--instance copilot` 抜けおよび capture での `--agent` 表記を `--instance copilot` に統一。
+
 - **fix(test): db-migration-path のテストが、本番 DB の完全なコピーを HOME に残さないようにした** (#2605): `tests/unit/db-migration-path.test.ts` の 2 本は cwd と HOME を隔離せずに `migrateDbIfNeeded` を呼んでいた。そのため本番 DB（`data/db.sqlite`）がある作業ディレクトリ（`/release` が unit を回す main など）で実行するたびに、次の 2 つが起きていた。(1) 本番 DB がレガシー DB と誤認されて `~/.commandmate-test-<ms>/data/cm.db` へ丸ごとコピーされる、(2) `data/db.sqlite.bak` が上書きされる。テストを追加した 2026-02-03 から、残骸は 1,568 個・185 GiB に達していた（既存分は手動で削除済み）。修正では、2 本を「レガシー DB が見つからない」状態（空の一時ディレクトリへの `process.cwd()` の spy、`HOME` の stub、`DATABASE_PATH` を空にする）で呼び、`migrated === false` であること、ディレクトリ作成もコピーも起きないことを assert する。あわせて、隔離した変数を関数が実際に読んでいることを示す陽性対照を `tests/unit/db-migration-path-isolation.test.ts` に追加した（`isSystemDirectory` を sandbox の配下だけ部分 mock する。`os.tmpdir()` はシステムディレクトリとして拒否されるため）。両ファイルには、実際の HOME 直下の `.commandmate-test-*` が増えていないことを確かめるガードも入れた。`src/` の変更はない。
 
 - **fix(test): Catalog から install した Skill を sync-map の分類対象から外す** (#2595): `.claude/skills` および `.agents/skills` 内の `.commandmate-receipt.json` を持つディレクトリを未分類ガードから除外し、receipt 保持ディレクトリが `sync-map.json` に宣言されている場合は別エラーとして検出。
