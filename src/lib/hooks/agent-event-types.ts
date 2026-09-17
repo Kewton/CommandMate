@@ -72,6 +72,25 @@ export const MAX_EVENT_DETAIL_LENGTH = 128;
 export const PERMISSION_REPLIED_DETAIL = 'permission_replied';
 
 /**
+ * The `stop` detail meaning "the turn ended, but the agent will resume on its
+ * own" (Issue #2614).
+ *
+ * A turn an agent closes while its own background work is still running — a
+ * timer it set, a command it sent to the background, a subagent — is not the
+ * end of the work: when that work finishes the agent is woken without anybody
+ * typing anything. antigravity's `schedule` measured it on 2026-09-17: four
+ * `Stop`s in five minutes, each one ~58 s before the agent woke itself, and
+ * `wait` read the first of them as the verdict.
+ *
+ * Named here rather than in a source's own file for the reason
+ * {@link PERMISSION_REPLIED_DETAIL} is: the source that writes it and the CLI
+ * that reads it (`src/cli/commands/wait.ts`, which cannot import this module
+ * and keeps a pinned copy) have to agree on it. Whether a source can say it at
+ * all is `AgentSourceCapabilities.stopReportsSelfResume`, declared below.
+ */
+export const SELF_RESUME_PENDING_DETAIL = 'self_resume_pending';
+
+/**
  * Who writes conversation history for a tool, besides the screen scraper
  * (Issue #2197).
  *
@@ -122,5 +141,23 @@ declare module './sources/types' {
      * check in that file's sibling asserts.
      */
     readonly transcriptHistory: TranscriptHistoryMode;
+    /**
+     * Whether this source's `stop` says, as {@link SELF_RESUME_PENDING_DETAIL},
+     * that the agent still has background work that will resume it
+     * (Issue #2614).
+     *
+     * Declared beside the word for the reason `transcriptHistory` is: a source
+     * that declares `true` is promising to write exactly that detail, and
+     * `commandmate wait` holds a completion on it only when this says so.
+     * `false` means "this tool's stop carries nothing CommandMate reads as
+     * such", not "this tool never resumes itself" — Claude Code does, and its
+     * `Stop` payload's `background_tasks` is the unmeasured candidate.
+     *
+     * `true` for antigravity alone, whose `Stop` payload carries `fullyIdle`
+     * ("true if all background tasks are done", agy's own hook contract).
+     * Pinned by value for every source in
+     * `tests/unit/hooks/sources/capabilities.test.ts`.
+     */
+    readonly stopReportsSelfResume: boolean;
   }
 }

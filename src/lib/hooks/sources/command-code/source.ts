@@ -251,6 +251,8 @@ export const commandCodeAgentEventSource: AgentEventSource = definePushHookSourc
     // The `<slug>` is `slugify(cwd)` and is deliberately not computed — the
     // reader finds the file by session id instead (Epic #2249 決定 4).
     transcriptHistory: 'pull',
+    // Issue #2614. Command Code's `Stop` payload names no background work.
+    stopReportsSelfResume: false,
   },
 
   // The four-row private table. See COMMAND_CODE_HOOK_EVENT_NAMES.

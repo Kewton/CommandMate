@@ -141,6 +141,8 @@ export const geminiAgentEventSource: AgentEventSource = definePushHookSource({
     resync: 'none',
     // Issue #2197. Nobody but the screen scraper records gemini replies.
     transcriptHistory: null,
+    // Issue #2614. Not audited; no stop detail is written.
+    stopReportsSelfResume: false,
   },
 
   // gemini's own table, kept in gemini's own module: four of the seven are

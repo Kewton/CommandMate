@@ -140,6 +140,11 @@ export const claudeAgentEventSource: AgentEventSource = definePushHookSource({
     // JSONL when the poller asks (#2121); the gate dispatches on this word
     // rather than on the tool id.
     transcriptHistory: 'pull',
+    // Issue #2614. Claude Code does resume itself (background tasks, session
+    // crons), and its `Stop` payload carries `background_tasks` /
+    // `session_crons` — but only the empty form has been captured, so nothing
+    // reads them yet and this stays false until a non-empty one is measured.
+    stopReportsSelfResume: false,
   },
 
   // S1. A plain name table is enough *for this tool* — one native name, one
