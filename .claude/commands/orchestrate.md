@@ -67,7 +67,7 @@ TodoWriteツールで作業計画を作成：
     antigravity のワーカーに `--instance antigravity` を付け忘れると Claude のセッションを待つことになる
   - Antigravity がワーカー起因で 2 回不合格になったら Claude に切り替える（3-5）
 - **レビュー系**（仕様レビュー、設計レビュー等）: 一部 `--agent codex` に依頼可
-- **バグ根本原因分析**（Phase 2.5）: `--agent copilot --model claude-opus-4.6` を指定
+- **バグ根本原因分析**（Phase 2.5）: `--agent copilot --model claude-sonnet-5` を指定
 
 ---
 
@@ -399,10 +399,13 @@ ${ISSUE_BODY}
 1. 事象の再現パスをコード上で特定
 2. 根本原因を特定（直接原因、設計上の問題、類似リスク）
 3. 対策案を策定（即座対策、恒久対策、予防策）" \
-    --agent copilot --model claude-opus-4.6 --auto-yes --duration 1h
+    --agent copilot --model claude-sonnet-5 --auto-yes --duration 1h
 
-  commandmatedev wait "$WORKTREE_ID" --timeout 3600 --on-prompt agent
-  commandmatedev capture "$WORKTREE_ID" --agent copilot
+  commandmatedev capture "$WORKTREE_ID" --instance copilot --pane --tail 20
+  # 画面のモデル表記を確認し、想定外のモデルで動いていないかを確かめる
+
+  commandmatedev wait "$WORKTREE_ID" --instance copilot --timeout 3600 --on-prompt agent
+  commandmatedev capture "$WORKTREE_ID" --instance copilot
 done
 ```
 
