@@ -15,6 +15,8 @@ developブランチをオーケストレーターとして、複数Issueの並�
 - `/orchestrate [Issue番号1] [Issue番号2] --phase design` （設計フェーズまで）
 - `/orchestrate [Issue番号1] [Issue番号2] --phase impl` （実装まで）
 - `/orchestrate [Issue番号1] [Issue番号2] --full` （UAT合格まで全自動）
+- `/orchestrate [Issue番号1] [Issue番号2] --assign 123=claude` （担当を Issue ごとに指定。1-2b の判定より優先）
+- `/orchestrate [Issue番号1] [Issue番号2] --claude-only` （振り分けを止め、全 Issue を Claude に回す）
 
 ## 前提条件
 - developブランチ上で実行すること
@@ -36,6 +38,8 @@ developブランチをオーケストレーターとして、複数Issueの並�
 - **issue_numbers**: 開発対象のIssue番号（スペース区切り、2つ以上）
 - **--phase**: 実行範囲の制限（design, impl, pr, uat）。省略時はPRマージまで
 - **--full**: UAT合格まで全自動で実行
+- **--assign `<N>=<claude|antigravity>`**: Issue #N の開発担当を指定する（複数回指定可）。1-2b の判定より優先
+- **--claude-only**: 1-2b の振り分けを行わず、全 Issue を Claude に回す（従来の動作）
 
 ---
 
@@ -44,7 +48,7 @@ developブランチをオーケストレーターとして、複数Issueの並�
 TodoWriteツールで作業計画を作成：
 
 ```
-- [ ] Phase 1: 依存関係分析・実行計画（ラベル分類含む）
+- [ ] Phase 1: 依存関係分析・実行計画（ラベル分類・難易度判定と担当割当を含む）
 - [ ] Phase 2: Worktree準備・実行契約の起案
 - [ ] Phase 2.5: 根本原因分析（バグIssueのみ、他エージェント経由）
 - [ ] Phase 3: 並列開発（契約付き send → wait --verify）
@@ -56,7 +60,12 @@ TodoWriteツールで作業計画を作成：
 ```
 
 **重要（エージェント指定ルール）**: `commandmatedev send` でワーカーにタスクを送信する際のエージェント指定は以下に従うこと：
-- **開発タスク**（`/pm-auto-issue2dev`, `/bug-fix` 等）: `--agent claude` を指定
+- **開発タスク**: 担当は 1-2b の難易度判定で決める。**易 → `--instance antigravity`**
+  （モデルは agy の既定。`--model` は渡さない）、**難 → `--instance claude`**
+  - 送り先は `--instance` で指定し、**send / wait / capture / respond で同じ値を渡す**。
+    `wait` には `--agent` が無く、worktree の既定エージェントは claude なので、
+    antigravity のワーカーに `--instance antigravity` を付け忘れると Claude のセッションを待つことになる
+  - Antigravity がワーカー起因で 2 回不合格になったら Claude に切り替える（3-5）
 - **レビュー系**（仕様レビュー、設計レビュー等）: 一部 `--agent codex` に依頼可
 - **バグ根本原因分析**（Phase 2.5）: `--agent copilot --model claude-opus-4.6` を指定
 
@@ -93,6 +102,38 @@ done
 - **BUG_ISSUES**: `bug` ラベルを持つIssue → Phase 2.5（根本原因分析）+ Phase 3（/bug-fix）
 - **FEATURE_ISSUES**: それ以外 → Phase 3（/pm-auto-issue2dev）
 
+### 1-2b. 難易度判定と担当割当
+
+各 Issue の本文（1-1 で取得済み）から難易度を判定し、開発担当を決める。
+**優先順位**: `--claude-only` ＞ `--assign <N>=<agent>` ＞ 下の判定表。
+
+**Claude に回す（1 つでも当てはまれば「難」）**
+
+| 観点 | 条件 |
+|---|---|
+| 危険な領域 | `src/lib/tmux/**`・セッション・`src/lib/detection/**`・`src/lib/polling/**`（Auto-Yes）・hooks・`src/lib/security/**`・DB migration・`src/lib/cli-tools/**`・`ws-server` を変更する（2-5 の対象を含む） |
+| 規模 | 「影響ファイル」が 4 件以上、または「対応方針」が複数 Phase に分かれている |
+| 原因 | バグで、原因が file:line まで特定されていない |
+| 未決事項 | 「要調査」「未決」「実機で決める」などが残っている、または設計書が必要 |
+| 検証 | 受入基準に、画面・実機での確認が必須の項目がある（e2e で代替できないもの） |
+| 依存 | 他の Issue と強依存（1-4）、または同じ関数の書き換えを伴う |
+| 新規 export | 新しいモジュールや公開関数を作り、その呼び出し元の配線も必要 |
+
+**Antigravity に回す（すべて満たせば「易」）**
+
+- 上の条件に 1 つも当てはまらない
+- 「影響ファイル」が 3 件以下で、「確定仕様」または「対応方針」が具体的に書かれている
+- 受入基準がすべて自動で検証できる（lint / typecheck / unit / e2e）
+- バグなら、原因（file:line）と対策が本文に書かれている
+
+**迷ったら Claude に回す。** 判定の根拠は 1 行で plan.md に残す（1-5）。
+Phase 8 の改善案（8-3）は、この根拠と実際の結果を突き合わせて書く。
+
+判定の背景（2026-09-17 のパイロット、#2595 / PR #2602）: テスト 1 ファイル・原因と確定仕様あり・
+受入基準がすべて自動、という Issue を Antigravity に回したところ、作業ルールをすべて守って
+実装は 5 分で終わった。Antigravity は `.claude/commands` を読まないので、`/pm-auto-issue2dev`
+のような多段ワークフローは使えない。Issue 本文だけで実装が決まる粒度のものに限る。
+
 ### 1-3. 依存関係の分析
 
 各Issueについて以下を分析：
@@ -116,7 +157,14 @@ mkdir -p workspace/orchestration/runs/$DATE
 ```
 
 実行計画を `workspace/orchestration/runs/$DATE/plan.md` に出力：
-- 対象Issue一覧
+- 対象Issue一覧（**難易度・担当・根拠**の列を含める。1-2b）
+
+  ```markdown
+  | Issue | 種別 | 難易度 | 担当 | 根拠 |
+  |---|---|---|---|---|
+  | #2595 | BUG | 易 | antigravity | テスト 1 ファイル／原因と確定仕様あり／受入基準すべて自動 |
+  | #2598 | FEATURE | 難 | claude | 影響ファイル 7 以上（新規 hook あり）／対応方針が Phase 2 段／実機での確認あり |
+  ```
 - 依存関係グラフ
 - 並列実行グループ
 - マージ推奨順序
@@ -254,6 +302,52 @@ CHANGELOG 側が**形式**の誤りで断片を見れば分かるのに対し、
 （実測: 変更前の `.claude/commands/orchestrate.md` に `grep -n` は 1 箇所も無く、上記 2 本の契約は
 オーケストレーターが手で足していた）ので、あわせて転記ブロックへ引き上げた。
 
+### 2-4-2. 担当ごとの goal の書き方
+
+**契約付き send では、goal の先頭にスラッシュコマンドを書いても起動しない。** 送信本文は
+`## 実行契約`（変更可能パス・完了条件）から始まり、goal はその後ろの `## タスク` に入るため、
+`/pm-auto-issue2dev 2598` は平文として届く（2026-09-17 #2598 で実測。ワーカーは skill を呼ばずに
+直接実装した）。goal には**スラッシュコマンドに頼らず、実装に必要な指示をすべて書く**。
+
+- **Claude 担当**: 従来どおり Issue 本文（事象・原因・対応方針・受入基準）と 2-4-1 の作業ルールを書く。
+  Claude は指示が薄くても Issue レビューや設計相当の確認を自発的に行う。
+- **Antigravity 担当**: `.claude/commands` を読まない（`.agents/skills` だけを探す）。
+  次の雛形の**すべての節**を書くこと。特に「確認を求めない」「`IMPL_COMPLETED`」「一時ファイルは `os.tmpdir()`」は
+  省かない。ワーカーが質問を書いてターンを終えると、Auto-Yes は答えられない。wait はそれを完了と読むので、
+  作業が途中のまま検証に進み、exit 20 か 21 になる。
+
+```yaml
+goal: |
+  https://github.com/Kewton/CommandMate/issues/<N> を実装する。
+  スラッシュコマンドは使わず、このメッセージの手順どおりに直接実装すること。
+  確認や質問は求めず、最後まで自分で進めること。
+
+  ## 事象 / 原因 / 確定仕様 / 受入基準
+  <Issue 本文から転記。原因は file:line つきで>
+
+  ## 実装の進め方
+  1. まず対象ファイルを読み、上の説明が実コードと合っているか確かめる。
+     食い違っていたら実コードを正とし、判断をコミットメッセージ本文に書く。
+  2. テストの陽性対照・陰性対照は、実リポジトリのファイルを書き換えずに示す
+     （`os.tmpdir()` 配下に `fs.mkdtempSync` で作り、`afterEach` で必ず削除する）。
+  3. 確認コマンド: `npx vitest run <対のテスト>`、`npm run lint`、`npx tsc --noEmit`。
+     `npm run test:unit` 全体は検証ゲートが回すので、自分で回さなくてよい。
+
+  ## 作業ルール（厳守）
+  - 変更してよいのは <scope.allow と同じ範囲> と、下の 2 つの断片ファイルだけ。
+  - tmux セッション、サーバ、バックグラウンドプロセスを起動しない。
+    `$HOME` 配下にファイルを作らない（一時ファイルは `os.tmpdir()` 配下のみ）。
+  - <2-4-1 の転記ブロック（断片ファイル 2 本と実例）>
+  - コミットは 1 つにまとめる。メッセージは `<type>(<scope>): <要約> (#<N>)`。
+    `.commandmate/tasks/issue-<N>.yaml` と `dev-reports/` はコミットに含めない。
+  - push と PR 作成はしない（オーケストレーターが行う）。
+  - すべて終わったら、最後に `IMPL_COMPLETED` とだけ出力する。
+```
+
+実例: パイロットの契約（#2595）は、この雛形のとおりに書いて一度で通った（goal は 3,282 文字。上限は 8,000 文字）。
+Antigravity は、雛形にあるルールのうち次のものをすべて守った:
+1 コミット・指定したメッセージ・scope 内・断片の形式・push/PR をしない・`IMPL_COMPLETED`・一時ディレクトリでの陰性対照。
+
 ### 2-5. tmux / セッションに触れる Issue の追加ルール（必須）
 
 `src/lib/tmux/**`・セッション名・`tmux` コマンドそのものを扱う Issue（#1163 / #1621 Phase 3 /
@@ -335,19 +429,31 @@ gh issue edit "$bug_issue" --repo Kewton/CommandMate --body "${CURRENT_BODY}${AN
 （両方渡すと exit 2）。stdout に task id が出るので控える（stderr の `Task created:` は人間向け）。
 
 ```bash
-for issue in $ISSUES; do
+# assign.tsv は 1-2b の結果（1 行 = "<issue>\t<claude|antigravity>"）
+while IFS="$(printf '\t')" read -r issue AGENT; do
   WT=$(commandmatedev ls --branch "feature/${issue}" --quiet)
-  TASK_ID=$(commandmatedev send "$WT" \
+  commandmatedev send "$WT" \
     --contract ".commandmate/tasks/issue-${issue}.yaml" \
-    --agent claude --auto-yes --duration 3h)
-  echo "$issue $WT $TASK_ID" >> "workspace/orchestration/runs/$DATE/tasks.tsv"
-done
+    --instance "$AGENT" --auto-yes --duration 3h \
+    > "workspace/orchestration/runs/$DATE/send-${issue}.out" 2> "workspace/orchestration/runs/$DATE/send-${issue}.err"
+  echo "exit=$? issue=${issue}"
+  TASK_ID=$(head -1 "workspace/orchestration/runs/$DATE/send-${issue}.out")
+  printf '%s\t%s\t%s\t%s\n' "$issue" "$WT" "$AGENT" "$TASK_ID" >> "workspace/orchestration/runs/$DATE/tasks.tsv"
+done < "workspace/orchestration/runs/$DATE/assign.tsv"
 ```
+
+stdout はパイプで切らずファイルに落とす（`| head` で切ると task が pending のまま残る）。
+send の後に task が `cliToolId` / `instanceId` = 担当に紐づいていることを
+`GET /api/worktrees/<WT>/tasks` で確かめる。
 
 契約の goal だけでは足りない Issue（`/bug-fix` の調査手順、Phase 2.5 の分析結果の参照など）は、
 **goal 本文にその指示を書く**。契約は送信メッセージそのものなので、素の send で送っていた文面は
-すべて goal に入る。Issue種別ごとのスラッシュコマンド（`/bug-fix`・`/pm-auto-issue2dev`）も
-goal の先頭行に書けばよい。
+すべて goal に入る。goal の先頭にスラッシュコマンドを書いても起動しないので、
+必要な手順は goal に書き下す（2-4-2）。
+
+- **冷間起動の失敗**: send が exit 99 で、stderr に `prompt not ready` と出たら、メッセージは送られていない
+  （Codex / Command Code で実測。Antigravity は #2478 以降のパイロットでは起きていない）。
+  約 2 分待ってから 1 回だけ再送する。再送では task が作り直されるので、tasks.tsv の task id を差し替える。
 
 - **スラッシュコマンドは CommandMate リポジトリの worktree でのみ有効**。外部リポジトリの worker に
   送ると `Unknown command` で無反応になる（send は exit 0、composer も空なので気づけない）。
@@ -379,6 +485,20 @@ MONITOR_HOOKS_BASE=origin/develop \
 
 介入先の tmux セッションは capture の `cliToolId` から導出されるので**指定は不要**（#1601）。
 既定インスタンス以外を見るときだけ `<worktree-id>@<instance-id>`（例 `w1@codex-2`）で指定する。
+**Antigravity のワーカーは `<worktree-id>@antigravity` で渡す**（worktree の既定は claude なので、
+付けないと Claude のペインを見る）。
+
+**Antigravity のワーカーでは monitor の画面判定が効かない。** 生成中の目印（`↓ N` / `esc to interrupt`）と
+プロンプトの目印（`❯ N.`）は Claude の画面の文言で、agy の画面（`esc to cancel`・点字スピナー・
+`Run this command?`）には当たらない。2026-09-17 のパイロットでは、59 回のポーリングがすべて
+`IDLE started=0` で、GENERATING と PROMPT は 1 回も出なかった。裁定に届いたのは `hooks-task.sh` の task 状態を
+読んでいたからである。Antigravity のワーカーについては次のように扱う:
+
+- `hooks-task.sh` を**必ず**付ける。`NOT_STARTED` / `IDLE` の表示は無視する
+- 着手の確認は `commandmatedev capture "$WT" --instance antigravity --prompts --limit 5`（Auto-Yes が応答した
+  許可ダイアログが時刻つきで並ぶ）か、commits / uncommitted の増加で行う
+- 画面を見るときは `commandmatedev capture "$WT" --instance antigravity --pane --tail 30` を使う
+  （`--json` の `content` は agy の画面では空行ばかりになることがある）
 
 **起動直後に `monitor hooks ERROR` が出ていないことを確認する（#1728）。** 出ていたら
 worktree-id が checkout に解決できておらず、`commits` / `uncommitted` は**測定値ではなく恒久 0** で、
@@ -404,13 +524,18 @@ MONITOR_WORKTREE_ROOT=.. MONITOR_HOOKS_BASE=origin/develop \
 ### 3-3. 完了待機と検証（`wait --verify`）
 
 ```bash
-for each worktree:
-  commandmatedev wait "$WT" --on-prompt human --verify --timeout 10800
+for each worktree:   # AGENT は tasks.tsv の担当
+  commandmatedev wait "$WT" --instance "$AGENT" --on-prompt human --verify --timeout 10800 \
+    > "workspace/orchestration/runs/$DATE/wait-${issue}.log" 2>&1
   echo "exit=$?"
 ```
 
+- `--instance "$AGENT"` を必ず付ける（`wait` に `--agent` は無い。付けないと既定の claude を待つ）。
 - `--on-prompt human` を必ず付ける。既定（`agent`）はプロンプト検出で即 exit 10 を返すため、
   監督ループが空回りする。
+- Antigravity のワーカーでは、Auto-Yes が許可ダイアログに応答している間も、wait のログに
+  `Prompt detected … Waiting for human response...` が繰り返し出る。応答済みかどうかは
+  `capture --prompts` の `[answered:auto]` で確かめる。このログだけを見て介入しないこと。
 - `--verify` は完了検出**後**に全ゲート（`work-evidence` ＋ `scope` ＋ verify.yaml の宣言ゲート）を
   実行し、その結果を exit code にする。ここが「完了したが壊れていた」を目視から exit code へ
   移す一点である。
@@ -436,10 +561,12 @@ build-cli,build-server,lint,build,typecheck,integration,unit
 | exit | 意味 | 対応 |
 |------|------|------|
 | `0` | 完了・検証合格 | Phase 4（設計突合）／Phase 6（マージ）へ進む |
-| `20` | 検証不合格（ゲートが落ちた） | 下記「20 の対応」。**再指示は上限2回**、超えたら人間へエスカレーション |
+| `20` | 検証不合格（ゲートが落ちた） | 下記「20 の対応」。**再指示は上限2回**。超えたら Antigravity 担当は Claude へ切替（3-5）、Claude 担当は人間へエスカレーション |
 | `21` | 作業証跡ゼロ（未着手） | 下記「21 の対応」 |
-| `10` | プロンプト検出 | `commandmatedev capture <WT>` で内容確認 → `commandmatedev respond <WT> "yes"` → 再度 wait |
+| `10` | プロンプト検出 | `commandmatedev capture <WT> --instance "$AGENT"` で内容確認 → `commandmatedev respond <WT> "<番号>" --instance "$AGENT"` → 再度 wait |
 | `124` | タイムアウト | capture で状況確認 → 追加指示 or ユーザーに報告 |
+
+以降の `capture` / `respond` / `send` にも、すべて `--instance "$AGENT"` を付ける。
 
 **20 の対応**（検証不合格）:
 
@@ -447,18 +574,42 @@ build-cli,build-server,lint,build,typecheck,integration,unit
 commandmatedev verify "$WT" --json    # 失敗したゲートと exit code を特定
 ```
 
-失敗ゲートと `logTail` を添えて同じ worker に再指示する（契約は据え置き。再送は素の send でよい）。
-再指示は **同一 worktree につき最大2回**。3回目に到達したら worker を止め、ユーザーに判断を仰ぐ。
+**先に、不合格がワーカー起因かを判定する。** 再指示と切替の回数に数えるのは、ワーカー起因の不合格だけである。
+
+- **ワーカー起因**: `lint` / `typecheck` / `unit` など宣言ゲートの失敗、`scope` 違反、`work-evidence` の不足、
+  および `env-clean` の違反のうちワーカーのコマンドが作ったもの
+- **ワーカー起因ではない**: `env-clean` の違反のうち、ワーカーの作業と結び付かないもの。
+  2026-09-17 のパイロットでは、`env-clean` だけが FAIL して exit 20 になった。違反は次の 3 件で、いずれもワーカーと無関係だった:
+  - 別リポジトリの orchestrate が消した `mcbd-*` セッション（`-`）
+  - 別プロセスの TCP listener（`-`）
+  - ワーカーの最初のツール呼び出しより前の時刻が名前に入った `~/.commandmate-test-<ms>`（`+`）
+
+  帰属は次の 3 つで確かめる:
+  - ワーカーが実行したコマンド: `capture --prompts --limit 100` の `Run this command?` と、そこに書かれた `start with '<cmd>'`
+  - 最初のツール呼び出しの時刻
+  - 違反項目の時刻（`~/.commandmate-test-<ms>` の `<ms>` など）
+
+  ワーカー起因でないと判定した場合の扱い:
+  - 残りのゲートがすべて PASS なら、オーケストレーターの裁定で合格として扱う
+  - 裁定の根拠は PR の Test plan と summary に書く
+  - ワーカーには再指示しない
+
+ワーカー起因なら、失敗ゲートと `logTail` を添えて同じ worker に再指示する（契約は据え置き。再送は素の send でよく、
+`--instance "$AGENT"` を付ける）。再指示は **同一 worktree につき最大2回**。
+3回目に到達したら、**Antigravity 担当は 3-5 の手順で Claude に切り替える**。**Claude 担当は** worker を止め、ユーザーに判断を仰ぐ。
 
 **21 の対応**（作業証跡ゼロ）: ワーカーは1行も書いていない。ほぼ常に起動側の問題なので capture で切り分ける。
 
 ```bash
-commandmatedev capture "$WT"
+commandmatedev capture "$WT" --instance "$AGENT" --pane --tail 30
 ```
 
-- **composer に本文が残っている** → Enter 未確定。`tmux send-keys -t "mcbd-claude-$WT" Enter` で確定させる
+- **composer に本文が残っている** → Enter 未確定。`tmux send-keys -t "mcbd-${AGENT}-$WT" Enter` で確定させる
   （`commandmatedev respond` は空文字を受け付けず exit 2 になるのでここでは使えない）。
-  tmux セッション名は `mcbd-<エージェント>-<worktree-id>` である
+  tmux セッション名は `mcbd-<エージェント>-<worktree-id>` である（Antigravity なら `mcbd-antigravity-<worktree-id>`）
+- **Antigravity のアンケート画面**（`How's the CLI experience so far? [1] Good … [0] Skip`）で止まっている →
+  Auto-Yes は答えず、`respond "0"` は `prompt_no_longer_active` になる。
+  `tmux send-keys -t "mcbd-antigravity-$WT" -l -- 0` で閉じる（2026-09-09 実測。2026-09-17 のパイロットでは出なかった）
 - **権限プロンプトで停止** → Enter で承認。monitor.sh に自動承認させる場合、送信先は
   capture の `cliToolId` から `mcbd-<cliToolId>-<worktree-id>[-<suffix>]` が導出されるので
   **オプション指定は要らない**（#1601）。`--session-prefix` は導出できないセッションを見るための
@@ -467,6 +618,40 @@ commandmatedev capture "$WT"
   存在しないペインへ撃つことになる）。届かなかった介入は stderr に `NOT delivered` と出る
 - **セッションが起動していない** → `commandmatedev ls` で存在確認、必要なら再送
 - 判別のための知見は orchestrate-monitor skill の STARTED ガード（`verify-completion.sh`）を参照
+
+### 3-5. Antigravity から Claude への切り替え
+
+Antigravity 担当の Issue が、ワーカー起因の不合格を 2 回再指示しても合格しなかったとき（3-4 の 3 回目）に行う。
+ユーザーには確認しない（2026-09-17 合意）。切り替えたことは 8-2 と 8-3 に必ず書く。
+
+1. **Antigravity のセッションだけを止める**。他のインスタンスは止めない。
+   ```bash
+   commandmatedev instances "$WT" kill antigravity
+   commandmatedev instances "$WT"        # antigravity の RUNNING が no であること
+   ```
+   止めるのは、次の task を作る**前**にする。env-clean のベースラインは task を作った時点で採られ、
+   ベースラインにあったセッションが後から消えると違反になるため。
+2. **Claude 用の契約** `.commandmate/tasks/issue-<N>-claude.yaml` を作る。
+   - `scope` / `verify` / `success` は元の契約と同じにする
+   - goal には、Claude 担当の通常の goal（2-4-2）に次の「引き継ぎ」節を足す
+     ```markdown
+     ## 引き継ぎ（前任: Antigravity、検証不合格 N 回）
+     - 前任のコミット: <git log --oneline origin/develop..HEAD の出力>
+     - 不合格だったゲートと logTail: <verify --json の該当部分。2 回分>
+     - 前任の変更を読み、正しい部分は残し、誤っている部分は直すこと。作り直してもよい。
+     - コミットは前任のコミットに追加してよい（1 つにまとめなくてよい）。
+     ```
+   - 前任のコミットがあるため、`work-evidence` は Claude が何もしなくても PASS する。
+     Claude が実際に作業したかは、commits の増加と 3-3 のゲートで確かめる
+3. **Claude に送る**。tasks.tsv の担当を `claude` に更新する（元の行は残し、切替の行を追記する）。
+   ```bash
+   AGENT=claude
+   commandmatedev send "$WT" --contract ".commandmate/tasks/issue-${issue}-claude.yaml" \
+     --instance claude --auto-yes --duration 3h \
+     > "workspace/orchestration/runs/$DATE/send-${issue}-claude.out" 2>&1
+   commandmatedev wait "$WT" --instance claude --on-prompt human --verify --timeout 10800
+   ```
+4. 以降は通常の Claude 担当として 3-4 に従う（ワーカー起因の不合格 2 回で人間へエスカレーション）。
 
 **`--phase design` 指定時**: 全ワーカーの設計フェーズ完了を確認して終了。
 
@@ -497,7 +682,7 @@ commandmatedev capture <worktree-id>
 
 ```bash
 commandmatedev send <worktree-id> "設計書の以下の点を修正してください: {具体的な指摘}" \
-  --auto-yes --duration 1h
+  --instance "$AGENT" --auto-yes --duration 1h
 ```
 
 修正指示は**契約を作り直さない**（契約は Issue 単位の宣言であり、1往復の指摘ではない）。
@@ -699,6 +884,13 @@ npm run build
 | #{N} | {title} | 完了 |
 | #{M} | {title} | 完了 |
 
+### 担当と結果（1-2b / 3-5）
+
+| Issue | 難易度 | 担当 | 判定の根拠 | 再指示 | 切替 | 実装時間 | 検証 | 帰属の裁定 |
+|-------|--------|------|-----------|--------|------|---------|------|-----------|
+| #{N} | 易 | antigravity | {plan.md の根拠} | 0 | なし | 5 分 | exit 20 → 合格扱い | env-clean の違反はワーカー起因でない（{根拠}） |
+| #{M} | 易 | antigravity → claude | {根拠} | 2 | 切替（{失敗ゲート}） | {分} | exit 0 | — |
+
 ### 実行フェーズ結果
 
 | Phase | 内容 | ステータス |
@@ -729,6 +921,23 @@ npm run build
 - 統合サマリー: workspace/orchestration/runs/{DATE}/summary.md
 ```
 
+### 8-3. 振り分けの改善案
+
+summary.md の末尾に「振り分けの改善案」節を書き、完了報告でユーザーにも示す。
+**次のどれかが起きた run では必須**（何も起きなかった run でも、気付いた点があれば書く）:
+
+- Antigravity から Claude への切り替え（3-5）
+- ワーカー起因でない不合格を、オーケストレーターの裁定で合格扱いにした（3-4）
+- 判定表と実際の結果が食い違った（「易」と判定したのに再指示が要った／「難」と判定したが小さい変更で終わった）
+- Antigravity 固有の停止（アンケート画面、冷間起動の失敗、monitor の誤判定など）
+
+各項目には次の 3 つを書く:
+
+1. **事実**: Issue、担当、何が起きたか（ゲート名・時刻・コマンド）
+2. **原因の見立て**: 判定表のどの観点が外れたか。または、道具のどの欠陥か
+3. **改善案**: 判定表の条件の足し引き、goal の雛形（2-4-2）の追記、道具の Issue 起票の要否。
+   起票はユーザーの了承を得てから行う
+
 ---
 
 ## エラーハンドリング
@@ -739,8 +948,12 @@ npm run build
 | CommandMateサーバー未起動 | `commandmatedev start --daemon` を案内 |
 | worktree作成失敗 | エラー表示、手動作成を案内 |
 | ワーカーのタイムアウト（exit 124） | captureで状況確認→追加指示 or ユーザーに報告 |
-| 検証不合格（exit 20） | `verify --json` で失敗ゲートを特定し再指示。上限2回で人間へエスカレーション |
+| 検証不合格（exit 20） | `verify --json` で失敗ゲートを特定し、先にワーカー起因かを判定（3-4）。ワーカー起因なら再指示。上限2回で、Antigravity 担当は Claude へ切替（3-5）、Claude 担当は人間へエスカレーション |
+| env-clean だけが FAIL（exit 20） | `capture --prompts` と違反項目の時刻で帰属を判定。ワーカー起因でなければ合格扱いにし、根拠を PR と summary に書く（3-4） |
 | 作業証跡ゼロ（exit 21） | captureでcomposer未確定・権限プロンプト・未起動を切り分け（Phase 3-4） |
+| send が exit 99（`prompt not ready`） | 未送信。約 2 分後に 1 回だけ再送し、task id を差し替える（3-1） |
+| Antigravity がアンケート画面で停止 | `tmux send-keys -t "mcbd-antigravity-$WT" -l -- 0` で閉じる（3-4） |
+| monitor が Antigravity を `IDLE` / `NOT_STARTED` と表示 | 画面判定が Claude 前提のため。task 状態と `capture --prompts` で判断する（3-2） |
 | 契約エラー（send が exit 2） | 契約の全エラーが一度に出るので、`docs/design/task-contract.md` と突き合わせて修正し再送 |
 | 品質チェック3回連続失敗 | ユーザーに報告して中断 |
 | コンフリクト解消失敗 | ユーザーに報告して中断 |
@@ -756,7 +969,7 @@ npm run build
 - [ ] 各Issueの CHANGELOG エントリと module-reference の注記が本体に一本化されている（6-4）
 - [ ] developブランチでの統合ビルド・テストが全パス
 - [ ] （--full時）UAT全テストPASS
-- [ ] 統合サマリーが出力されている
+- [ ] 統合サマリーが出力されている（「担当と結果」表を含む。3-5 の切替か 3-4 の帰属裁定があった run では「振り分けの改善案」も含む）
 
 ## 関連コマンド
 
