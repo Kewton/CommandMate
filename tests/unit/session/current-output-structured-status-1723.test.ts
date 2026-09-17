@@ -55,6 +55,7 @@ import {
   recordAgentEvent,
 } from '@/lib/session/agent-event-state';
 import type { AgentEventType } from '@/lib/hooks/agent-event-types';
+import { CLI_TOOL_IDS, getCliToolDisplayName, type CLIToolType } from '@/lib/cli-tools/types';
 import { buildClaude1000RowPermissionFrame } from '../../fixtures/claude-1000-row-prompt';
 
 const db = {} as Database.Database;
@@ -184,6 +185,47 @@ describe('buildCurrentOutput: a submitted prompt keeps the session running (Issu
     const payload = await buildCurrentOutput(db, 'wt-1', 'claude', 'claude');
 
     expect(payload.isUnclassifiedActive).toBe(true);
+  });
+});
+
+describe('buildCurrentOutput: thinkingMessage names the running tool (Issue #2607)', () => {
+  const NON_CLAUDE_TOOLS = CLI_TOOL_IDS.filter((tool) => tool !== 'claude');
+
+  function recordFor(tool: CLIToolType, event: AgentEventType): void {
+    recordAgentEvent('wt-1', tool, tool, { event, at: RECENTLY(), detail: null, sessionId: 'sess-1' });
+  }
+
+  beforeEach(() => {
+    vi.mocked(getLastServerResponseTimestamp).mockReturnValue(Date.now() - 60_000);
+  });
+
+  it.each(NON_CLAUDE_TOOLS)('does not publish "Claude" while %s is thinking', async (tool) => {
+    recordFor(tool, 'user_prompt_submit');
+
+    const payload = await buildCurrentOutput(db, 'wt-1', tool, tool);
+
+    expect(payload.thinking).toBe(true);
+    expect(payload.thinkingMessage).toBe(`${getCliToolDisplayName(tool)} is thinking...`);
+    expect(payload.thinkingMessage).not.toContain('Claude');
+  });
+
+  it('publishes the Antigravity name for the session the Issue was reported on', async () => {
+    recordFor('antigravity', 'user_prompt_submit');
+
+    const payload = await buildCurrentOutput(db, 'wt-1', 'antigravity', 'antigravity');
+
+    expect(payload.cliToolId).toBe('antigravity');
+    expect(payload.thinkingMessage).toBe('Antigravity is thinking...');
+  });
+
+  it('stays null once the turn is over', async () => {
+    recordFor('antigravity', 'user_prompt_submit');
+    recordFor('antigravity', 'stop');
+
+    const payload = await buildCurrentOutput(db, 'wt-1', 'antigravity', 'antigravity');
+
+    expect(payload.thinking).toBe(false);
+    expect(payload.thinkingMessage).toBeNull();
   });
 });
 
