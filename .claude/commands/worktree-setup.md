@@ -92,8 +92,9 @@ fi
 cd "$WORKTREE_DIR"
 
 # 依存関係インストール（node_modulesがない場合）
+# --include=dev: シェルが NODE_ENV=production だと vitest / eslint などが入らない
 if [ ! -d "node_modules" ]; then
-  npm install
+  npm install --include=dev
 fi
 
 # .envファイルにIssue固有設定を追加（存在しない場合）
