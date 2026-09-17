@@ -45,7 +45,7 @@ describe('Issue #1315: the published package excludes the Next.js build cache', 
     // booting it: /, /sessions, /repositories, /more, /api/worktrees and
     // /api/repositories all returned 200 without `.next/cache` present. Dropping
     // any of these entries instead of the cache would break that.
-    for (const entry of ['bin/', 'dist/', '.next/', 'public/', '.env.example']) {
+    for (const entry of ['bin/', 'dist/', '.next/', 'public/', '.env.example', 'release-notes/']) {
       expect(files).toContain(entry);
     }
   });
