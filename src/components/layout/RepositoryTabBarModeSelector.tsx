@@ -10,7 +10,7 @@
  * other string the strip renders reuses an existing key — repository names are
  * data, the status words are `common.status.*` via `SIDEBAR_STATUS_CONFIG`, the
  * attention count is `common.attention.badgeLabel`, the overflow trigger is
- * `common.nav.more`, and the popover's landmark / empty copy is
+ * `common.repoTabBar.overflow`, and the popover's landmark / empty copy is
  * `common.sidebar.*`.
  *
  * @module components/layout/RepositoryTabBarModeSelector

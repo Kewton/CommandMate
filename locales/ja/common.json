@@ -23,14 +23,13 @@
     "tileInstanceAriaLabel": "このタイルに表示するエージェントインスタンス"
   },
   "nav": {
-    "home": "ホーム",
     "chat": "チャット",
     "sessions": "セッション",
     "repositories": "リポジトリ",
     "repositoriesShort": "リポジトリ",
     "review": "レビュー",
     "reviewReport": "レビュー/レポート",
-    "more": "その他",
+    "more": "設定",
     "skills": "スキル"
   },
   "repositories": {
@@ -139,6 +138,7 @@
   },
   "repoTabBar": {
     "settingLabel": "リポジトリタブ帯",
+    "overflow": "ほかのリポジトリ",
     "mode": {
       "always": "常に表示",
       "collapsed": "サイドバー折りたたみ時のみ",

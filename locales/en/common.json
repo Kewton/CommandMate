@@ -23,14 +23,13 @@
     "tileInstanceAriaLabel": "Agent instance shown in this tile"
   },
   "nav": {
-    "home": "Home",
     "chat": "Chat",
     "sessions": "Sessions",
     "repositories": "Repositories",
     "repositoriesShort": "Repos",
     "review": "Review",
     "reviewReport": "Review/Report",
-    "more": "More",
+    "more": "Settings",
     "skills": "Skills"
   },
   "repositories": {
@@ -139,6 +138,7 @@
   },
   "repoTabBar": {
     "settingLabel": "Repository tabs",
+    "overflow": "More repositories",
     "mode": {
       "always": "Always show",
       "collapsed": "Only when the sidebar is collapsed",

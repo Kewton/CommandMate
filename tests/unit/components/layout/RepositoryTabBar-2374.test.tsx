@@ -474,6 +474,10 @@ describe('RepositoryTabBar (Issue #2374)', () => {
       });
 
       const trigger = screen.getByTestId('repository-tab-overflow');
+      // Issue #2642: its own key, so renaming nav.more to "Settings" cannot
+      // make this button read as the settings entry.
+      expect(trigger.getAttribute('aria-label')).toBe('common.repoTabBar.overflow');
+      expect(trigger.getAttribute('title')).toBe('common.repoTabBar.overflow');
       fireEvent.click(trigger);
 
       const menu = screen.getByTestId('repository-tab-overflow-menu');

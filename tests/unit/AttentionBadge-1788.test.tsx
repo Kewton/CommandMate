@@ -146,7 +146,7 @@ describe('GlobalMobileNav — attention bubble (Issue #1788)', () => {
   it('leaves the other tabs alone', () => {
     cacheMock.worktrees = [waiting('a')];
     render(<GlobalMobileNav />);
-    expect(screen.getByText('Home').closest('a')?.getAttribute('href')).toBe('/');
+    expect(screen.getByText('Settings').closest('a')?.getAttribute('href')).toBe('/more');
     expect(screen.getByText('Sessions').closest('a')?.getAttribute('href')).toBe('/sessions');
   });
 });
