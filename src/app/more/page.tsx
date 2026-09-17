@@ -12,6 +12,8 @@
  *
  * Issue #2201 adds the default output surface to that same section, for the
  * same reason: it is the other thing a newly opened branch inherits.
+ *
+ * Issue #2645: 見出しは `common.nav.more`、説明文は `common.settings.pageDescription`。
  */
 
 'use client';
@@ -36,9 +38,9 @@ export default function MorePage() {
     <AppShell>
       <div className="container-custom py-8 overflow-auto h-full">
         <div className="mb-6">
-          <h1 className="text-2xl font-bold text-foreground mb-2">More</h1>
+          <h1 className="text-2xl font-bold text-foreground mb-2">{tCommon('nav.more')}</h1>
           <p className="text-sm text-muted-foreground">
-            Settings, external apps, and more.
+            {tCommon('settings.pageDescription')}
           </p>
         </div>
 
