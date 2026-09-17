@@ -51,7 +51,11 @@
  * @vitest-environment node
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { mkdtempSync, readdirSync, realpathSync, statSync } from 'fs';
+import { homedir, tmpdir } from 'os';
+import { join } from 'path';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 import { getAgentEventSource } from '@/lib/hooks/sources/registry';
 import {
   AGENT_CORRELATION_ENV_VARS,
@@ -131,16 +135,61 @@ const ALLOWED_CORRELATION_NAMES = AGENT_CORRELATION_ENV_VARS;
 
 const originalEnv = { ...process.env };
 
+/**
+ * Real HOME directory and baseline measurements before any test stubs HOME (Issue #2622).
+ *
+ * `planFor()` exercises all registered agent event sources, including antigravity
+ * which writes `~/.gemini/config/hooks.json` and claude which writes into
+ * `~/.commandmate/hooks/`. Without isolation, this suite mutates the real user's
+ * global hooks.
+ */
+const realHome = homedir();
+const realGeminiHooksPath = join(realHome, '.gemini', 'config', 'hooks.json');
+const realCommandmateHooksDir = join(realHome, '.commandmate', 'hooks');
+
+function getRealGeminiHooksMtime(): number | null {
+  try {
+    return statSync(realGeminiHooksPath).mtimeMs;
+  } catch {
+    return null;
+  }
+}
+
+function countRealCommandmateHooksEntries(): number {
+  try {
+    return readdirSync(realCommandmateHooksDir).filter((name) => name.includes('wt-1933')).length;
+  } catch {
+    return 0;
+  }
+}
+
+const initialGeminiHooksMtime = getRealGeminiHooksMtime();
+const initialCommandmateHooksCount = countRealCommandmateHooksEntries();
+
+const dirs: string[] = [];
+let home: string;
+let worktree: string;
+
+function makeTempDir(prefix: string): string {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
+  dirs.push(dir);
+  return dir;
+}
+
 function planFor(cliToolId: CLIToolType): AgentLaunchPlan {
   return getAgentEventSource(cliToolId).prepareLaunch({
     target: { worktreeId: 'wt-1933', cliToolId, instanceId: cliToolId },
     executablePath: `/usr/local/bin/${cliToolId}`,
-    worktreePath: '/tmp/cm-1933-worktree',
+    worktreePath: worktree,
   });
 }
 
 describe('AgentLaunchPlan.env carries no secrets (Issue #1933 S18)', () => {
   beforeEach(() => {
+    home = makeTempDir('cmate-1933-home-');
+    worktree = makeTempDir('cmate-1933-wt-');
+    vi.stubEnv('HOME', home);
+    vi.stubEnv('CODEX_HOME', join(home, '.codex'));
     for (const [name, value] of Object.entries(PLANTED_SECRETS)) {
       process.env[name] = value;
     }
@@ -148,10 +197,24 @@ describe('AgentLaunchPlan.env carries no secrets (Issue #1933 S18)', () => {
   });
 
   afterEach(() => {
+    while (dirs.length > 0) {
+      const dir = dirs.pop();
+      if (dir) removeTempDir(dir);
+    }
+    vi.unstubAllEnvs();
     for (const name of [...Object.keys(PLANTED_SECRETS), SERVER_PORT_ENV_VAR, 'MCBD_PORT']) {
       if (originalEnv[name] === undefined) delete process.env[name];
       else process.env[name] = originalEnv[name];
     }
+  });
+
+  afterAll(() => {
+    while (dirs.length > 0) {
+      const dir = dirs.pop();
+      if (dir) removeTempDir(dir);
+    }
+    expect(getRealGeminiHooksMtime()).toBe(initialGeminiHooksMtime);
+    expect(countRealCommandmateHooksEntries()).toBe(initialCommandmateHooksCount);
   });
 
   it.each(CLI_TOOL_IDS)('%s: names no secret and leaks no secret value', (cliToolId) => {
