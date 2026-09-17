@@ -52,6 +52,13 @@
  *   flipping any of the other four to `'pull'` sends the gate looking for a
  *   reader that does not exist. Both are reddened by
  *   `tests/unit/polling/structured-history-gate-2197.test.ts` as well as here.
+ * - `stopReportsSelfResume` (Issue #2614) — read by `commandmate wait`, which
+ *   holds a completion on a `stop` whose detail says the agent will resume by
+ *   itself. Flipping antigravity to `false` lets `wait` report agy's
+ *   `schedule` stops as the end of the work again (the 2026-09-17 incident);
+ *   flipping any other source to `true` promises a detail nothing writes.
+ *   Reddened by `tests/unit/hooks/sources/antigravity-self-resume-2614.test.ts`
+ *   as well as here.
  *
  * @vitest-environment node
  */
@@ -79,6 +86,7 @@ const DECLARED_KEYS = [
   'eventIdentity',
   'resync',
   'transcriptHistory',
+  'stopReportsSelfResume',
 ] as const;
 
 type DeclaredRow = Pick<AgentSourceCapabilities, (typeof DECLARED_KEYS)[number]>;
@@ -99,6 +107,7 @@ const ALL_CAPABILITY_KEYS = [
   'permissionReplyReleasesPrompt',
   'resync',
   'sessionStartMayArriveLate',
+  'stopReportsSelfResume',
   'supportedEvents',
   'transcriptHistory',
 ];
@@ -122,6 +131,7 @@ const TABLE: Record<string, DeclaredRow> = {
     eventIdentity: null,
     resync: 'none',
     transcriptHistory: 'pull',
+    stopReportsSelfResume: false,
   },
   codex: {
     permissionHookPredictsDialog: true,
@@ -130,6 +140,7 @@ const TABLE: Record<string, DeclaredRow> = {
     eventIdentity: null,
     resync: 'none',
     transcriptHistory: 'pull',
+    stopReportsSelfResume: false,
   },
   gemini: {
     permissionHookPredictsDialog: false,
@@ -138,6 +149,7 @@ const TABLE: Record<string, DeclaredRow> = {
     eventIdentity: null,
     resync: 'none',
     transcriptHistory: null,
+    stopReportsSelfResume: false,
   },
   copilot: {
     permissionHookPredictsDialog: false,
@@ -146,6 +158,7 @@ const TABLE: Record<string, DeclaredRow> = {
     eventIdentity: null,
     resync: 'none',
     transcriptHistory: null,
+    stopReportsSelfResume: false,
   },
   opencode: {
     permissionHookPredictsDialog: false,
@@ -154,6 +167,7 @@ const TABLE: Record<string, DeclaredRow> = {
     eventIdentity: 'permission-id',
     resync: 'session-status-poll',
     transcriptHistory: 'push',
+    stopReportsSelfResume: false,
   },
   antigravity: {
     permissionHookPredictsDialog: false,
@@ -162,6 +176,7 @@ const TABLE: Record<string, DeclaredRow> = {
     eventIdentity: null,
     resync: 'none',
     transcriptHistory: 'pull',
+    stopReportsSelfResume: true,
   },
   // Issue #2251 (Epic #2249 Phase B). The seventh row, and it is gemini's rather
   // than claude's on the column that usually splits Claude-shaped tools:
@@ -179,6 +194,7 @@ const TABLE: Record<string, DeclaredRow> = {
     eventIdentity: null,
     resync: 'none',
     transcriptHistory: 'pull',
+    stopReportsSelfResume: false,
   },
 };
 
@@ -200,6 +216,7 @@ function declaredRow(capabilities: AgentSourceCapabilities): DeclaredRow {
     eventIdentity: capabilities.eventIdentity,
     resync: capabilities.resync,
     transcriptHistory: capabilities.transcriptHistory,
+    stopReportsSelfResume: capabilities.stopReportsSelfResume,
   };
 }
 
@@ -284,5 +301,14 @@ describe('[#1924] AgentSourceCapabilities — the table of §4 D3', () => {
 
     const scraperOnly = Object.keys(TABLE).filter((id) => TABLE[id].transcriptHistory === null);
     expect(scraperOnly).toEqual(['gemini', 'copilot']);
+  });
+
+  it('names exactly one source whose stop can say it will resume by itself (#2614)', () => {
+    // agy is the one tool whose `Stop` payload is known to state it (`fullyIdle`)
+    // and whose hook passes it on. Claude Code resumes itself too, but only an
+    // empty `background_tasks` has been captured, so it stays false until a
+    // non-empty one is.
+    const selfResuming = Object.keys(TABLE).filter((id) => TABLE[id].stopReportsSelfResume);
+    expect(selfResuming).toEqual(['antigravity']);
   });
 });
