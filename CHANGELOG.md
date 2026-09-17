@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **ci: Unit Testsジョブを4本に分割してCIを短縮** (#2638): ci-pr.yml の Unit Tests ジョブを 4 本の matrix shards (1/4〜4/4) に分割して並列実行し、集約ジョブ test-unit-result (ubuntu-latest) で結果を束ねることで CI 実行時間を短縮。cancel-pr-runs-on-close.yml のジョブ数コメントおよび orchestrate.md の並列オーケストレーション記述を更新。
+
 - **feat(ui): ファイルツリーのアイコンを2枚重ねにする** (#2616): PC の Activity Bar（スマホ横向き・タブレットも同じコンポーネント）で、ファイルツリーのアイコン（lucide `File`）がメモ（`StickyNote`）と 20px で見分けられなかったため、ファイルが2枚重なった lucide `Files` に変更。スマホ縦向きの下部タブの Files も `Folder` から `Files` に揃えた。これまで `Files` を使っていたターミナル上部の「Open Files」トグルは、ファイルツリーと同じアイコンにならないよう `PanelRight` に変更。ラベル・Tooltip・件数バッジ・aria 属性・キーボード操作・Activity の並び順は変更なし。Activity Bar の10項目でアイコンが重複しないこと、各ボタンが描く svg（`lucide-files` / `lucide-sticky-note` / `lucide-panel-right`）をテストで固定した。
 
 ### Fixed

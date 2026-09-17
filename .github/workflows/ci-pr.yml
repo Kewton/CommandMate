@@ -19,7 +19,8 @@ name: CI
 #
 #   job                                    n   median      max   timeout-minutes
 #   E2E Tests                             12    6.2m    16.2m    30
-#   Unit Tests                            12   12.3m    13.2m    30
+#   Unit Tests (shard N/4)                 -       -        -    20
+#   Unit Tests (aggregate)                 -       -        -    10
 #   Build                                 12    2.3m     2.5m    10
 #   Integration Tests                     12    2.1m     2.4m    10
 #   Type Check                            12    1.0m     1.1m    10
@@ -35,6 +36,12 @@ name: CI
 # that sample. It is the same shape as the three rows above it — a checkout and
 # one dependency-free Node script — and measured 0.3s over 128 route entries on
 # a developer machine, so it takes the same policy floor of 10.
+#
+# [Issue #2638] `Unit Tests` was split into four matrix shards
+# (`npm run test:unit -- --shard=N/4`, 407 files each) plus the `Unit Tests`
+# aggregate job that the `main` branch protection requires. Before the split it
+# measured 12.3m median / 13.2m max (n=12, 2026-08-19) and 15.9-17.1m on the six
+# develop push runs before 2026-09-18. Fill the two rows above from post-split runs.
 #
 # The distance to `max` is what keeps a healthy run from being cut. The tightest
 # ratio here is Unit Tests at 2.3x; everything on 10 has 4x or more. Unit Tests
@@ -433,7 +440,7 @@ jobs:
         run: npx tsc --noEmit
 
   test-unit:
-    name: Unit Tests
+    name: Unit Tests (shard ${{ matrix.shard }}/4)
     # [self-hosted] This repository's ephemeral self-hosted runners (labels:
     # self-hosted, Linux, ARM64, ubuntu-24.04), EXCEPT for a pull request opened
     # from a fork, which falls back to `ubuntu-latest`. CommandMate is public, so
@@ -443,10 +450,12 @@ jobs:
     # ever running them on our machines. See the identical change in
     # Kewton/commandmate-skills#226.
     runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'self-hosted' || 'ubuntu-latest' }}
-    # measured 12.3m median / 13.2m max (n=12). 30 rather than the ~26 that
-    # `max x 2` gives, because this suite grows with the test count and 13.2m
-    # is already the slowest thing in the workflow after E2E.
-    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    # [Issue #2638] 1 shard の見込みは 4〜5 分。実測前の暫定値（実測後に `max x 2, floor 10` で見直す）
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -487,10 +496,26 @@ jobs:
         run: npm ci --no-audit
 
       - name: Run unit tests
-        run: npm run test:unit
+        run: npm run test:unit -- --shard=${{ matrix.shard }}/4
         env:
           CI: 'true'
           NODE_OPTIONS: '--max-old-space-size=6144'
+
+  test-unit-result:
+    name: Unit Tests
+    # [Issue #2638] main のブランチ保護の必須チェック `Unit Tests` を、4 本の shard の結果から 1 つにまとめて報告する。
+    # checkout も npm ci もしないので、self-hosted の枠を使わずに GitHub-hosted で走らせる。
+    needs: test-unit
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Require every shard to pass
+        env:
+          RESULT: ${{ needs.test-unit.result }}
+        run: |
+          echo "Unit Tests shards: ${RESULT}"
+          test "${RESULT}" = "success"
 
   test-integration:
     name: Integration Tests

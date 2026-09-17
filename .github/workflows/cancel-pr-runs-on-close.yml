@@ -24,8 +24,11 @@ name: Cancel PR runs on close
 #   what those 44 runs concluded              success 33 / cancelled 10 (by
 #                                             hand) / failure 1
 #
-# One ci-pr.yml run is 12 jobs, 11 of them on our self-hosted runners, ~33
+# One ci-pr.yml run was 12 jobs, 11 of them on our self-hosted runners, ~33
 # runner-minutes total (measured on run 33745109236, the run for PR #2280).
+#
+# Since #2638 it is 16 jobs (Unit Tests became 4 shards plus an aggregate job
+# on ubuntu-latest), 14 of them on our self-hosted runners.
 #
 # WHY NOT `concurrency`. Per-PR `concurrency` (#2329) cancels the previous run
 # when a NEW PUSH lands on the same PR. Merging is not a push to the PR, and
