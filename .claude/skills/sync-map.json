@@ -328,7 +328,8 @@
         {
           "path": "scripts/classify-state.sh",
           "policy": "port-required",
-          "sha256": "41750af3480a11a5b4f2c74a2bc5dfd5111f41291a2ccca4a15f25ff502e072b"
+          "sha256": "3198dd4f30e248ae39a456eecf7c6eee5a28732f1516d2b473e29e083c6e7e8b",
+          "note": "#2606 で両側に反映済み（skills 0.9.0 / commandmate-skills#267、2026-09-17）。classify-state.sh が capture の cliToolId で目印の組を選び、antigravity のときは monitor-lib.sh の ml_agy_*（生成中・PROMPT・待機中の枠、realtimeSnippet と content の長い方の末尾 64 行を読む ml_agy_frame）で判定する。コメントを除いたコード差分は classify-state.sh が 0 行、monitor-lib.sh は移植前からある差分（skills 側だけの #59 の関数群と ML_CLI_TOOL_IDS の command-code）のみ。"
         },
         {
           "path": "scripts/hooks-git.sh",
@@ -345,7 +346,8 @@
         {
           "path": "scripts/monitor-lib.sh",
           "policy": "port-required",
-          "sha256": "79b468a2d112419aa4f5b6b4e1655d0a25844655c42ee83ad21e244764144c13"
+          "sha256": "c88759c637ca2b1da844ee28ddb160912428a839f576b23dfbc2b789ccc4ced6",
+          "note": "#2606 で両側に反映済み（skills 0.9.0 / commandmate-skills#267、2026-09-17）。classify-state.sh が capture の cliToolId で目印の組を選び、antigravity のときは monitor-lib.sh の ml_agy_*（生成中・PROMPT・待機中の枠、realtimeSnippet と content の長い方の末尾 64 行を読む ml_agy_frame）で判定する。コメントを除いたコード差分は classify-state.sh が 0 行、monitor-lib.sh は移植前からある差分（skills 側だけの #59 の関数群と ML_CLI_TOOL_IDS の command-code）のみ。"
         },
         {
           "path": "scripts/monitor.sh",

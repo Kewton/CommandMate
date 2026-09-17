@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **fix(skills): orchestrate-monitor の画面判定を Antigravity のペインでも効かせる** (#2606): `classify-state.sh` が capture の `cliToolId` で目印を選び、Antigravity では `monitor-lib.sh` に追加した agy 用判定（生成中 = ステータス行の `esc to cancel`・点字スピナー、プロンプト = `↑/↓ Navigate` フッター＋番号つき選択肢、待機中 = 入力欄の枠）を使うよう変更。`↑/↓ Navigate` のある画面では `esc to cancel` を生成中と読まない。上端寄せの agy ペインでは `realtimeSnippet` が空行ばかりになるため、`realtimeSnippet` と `content` の長い方から空行を除いた末尾を読む。Claude / Codex の判定は変更なし。
+
 - **fix(cli): エージェントの自己再開でターンが閉じても wait が完了と読まないようにする** (#2614): Antigravity が `schedule` のタイマーやバックグラウンドのコマンドを残したままターンを閉じたとき、`wait`（`--verify` と `ask` を含む）がその Stop を完了と読んでいた問題を修正。agy の `Stop` hook が payload の `fullyIdle: false`（agy 自身の「バックグラウンドタスクが残っている」宣言）を `--detail self_resume_pending` として relay に渡すようになり、新しい宣言 `stopReportsSelfResume`（antigravity のみ `true`）を持つソースでは、`wait` がその Stop を保留し、エージェントが自分で起き直してから閉じた最後の Stop で完了する。完了行は `basis=hook_stop` のまま、保留したときだけ `heldForSelfResume=<秒>` を付ける。起き直さない場合は Stop から 30 分で注記つきで完了し、`--timeout` / `--stall-timeout` はそれより短ければ優先される。
 
 - **fix(detection): Codex の Browser use 承認画面で状態表示と送信判定が食い違う問題を修正** (#2609): フッタが `enter to submit | esc to cancel` の Codex ツール呼び出し承認フォーム（`Field 1/1` / `1. Allow` / `2. Always allow` / `3. Cancel`）を、状態 API は `waiting` / `prompt_detected` と表示する一方、`detectCodexDialog` の入口ゲートが `press enter to confirm/select` しか認めず null を返していたため、`respond` が `prompt_no_longer_active`（exit 99）で拒否され、Auto-Yes も `unclassified-frame` で抑止されていた。実測したフッタ行そのものだけに一致する `CODEX_FORM_SUBMIT_FOOTER_PATTERN`（行全体アンカー）を追加して `detectCodexDialog` の入口ゲートで OR 判定し、`CODEX_SELECTION_LIST_PATTERN`（`detect.ts` の選択リスト分岐でも使う）は広げていない。`esc to cancel` だけ・文中への引用・回答済みブロックの scrollback は引き続き null。

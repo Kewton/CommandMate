@@ -153,6 +153,268 @@ ml_has_prompt_marker() {
   ml_pane_text "$1" | grep -aqE '❯ [0-9]+\.|Do you want to (proceed|make this edit)'
 }
 
+# --- Antigravity (agy) screen markers ------------------------------------------
+# Issue #2606. Every anchor above is Claude's wording, and none of it is on an
+# agy screen: agy says `esc to cancel` and draws a braille spinner while it
+# generates, stops drawing `? for shortcuts` after a tool turn (#2478), and asks
+# `Run this command?` / `Allow creation of this file?` above `> 1. Yes …` and an
+# `↑/↓ Navigate` footer. In the #2595 pilot all 59 polls of an agy worker came
+# out `IDLE started=0`. The functions below are agy's own markers; they sit next
+# to the Claude ones instead of replacing them, and classify-state.sh picks the
+# set from the payload's `cliToolId` (the same field #1601 derives the
+# intervention target from).
+#
+# The markers are read off the rows of agy's frame, measured on the live
+# captures in tests/fixtures/antigravity-live-2364/ (agy 1.1.27),
+# antigravity-live-2478/ (1.2.1) and agent-mode-2592/ (1.2.4), plus
+# ANTIGRAVITY_GENERATING_CAPTURE_V1_1_13 in tests/fixtures/model-info-captures.ts
+# (the one generating capture in the repository). The rules mirror the product's
+# own reading of the same screens (src/lib/detection/cli-patterns.ts,
+# src/lib/cli-tools/antigravity.ts) without importing it.
+#
+# Where the frame comes from matters as much as the markers. agy renders inline
+# in a 200x1000 pane and is top-anchored: until the transcript fills the pane,
+# its rows sit at the TOP and everything below is blank padding. realtimeSnippet
+# is the last 100 raw rows (current-output-builder.ts), so on such a pane it is
+# nothing but blank rows — no marker can be found there, whatever it looks for.
+# `content` is a suffix of the same capture (the rows from the poller's cursor
+# on), so the longer of the two is the one that reaches further up, and both end
+# at the same bottom row. The frame is that text with the blank padding dropped
+# and cut to its last ML_AGY_FRAME_ROWS rows — "the bottom of what agy drew",
+# which is where its live UI (status row, input box, dialog) always is.
+# ANSI and the nbsp are normalized as for the Claude path; the JSON string
+# escapes are undone too, because these rules read ROWS, while the Claude
+# anchors are substring matches over the still-escaped one-line value.
+
+# Rows kept from the bottom of the frame: the tallest dialog block the product
+# reads (ANTIGRAVITY_DIALOG_MAX_ROWS = 60), plus the footer and status rows.
+ML_AGY_FRAME_ROWS=64
+# How far up a spinner / retry line may sit: the product's 15-row detection
+# window (STATUS_CHECK_LINE_COUNT, src/lib/detection/tools/frame.ts).
+ML_AGY_TAIL_ROWS=15
+
+ML__SOH=$(printf '\001')
+ML__NL='
+'
+
+# ml__json_unescape: turn a JSON string body (read from stdin) back into rows.
+# `\\` is parked on a placeholder first so a literal backslash followed by `n`
+# in the pane text does not become a line break.
+ml__json_unescape() {
+  LC_ALL=C sed \
+    -e "s/\\\\\\\\/${ML__SOH}/g" \
+    -e "s/\\\\n/\\${ML__NL}/g" \
+    -e $'s/\\\\t/\t/g' \
+    -e 's/\\r//g' \
+    -e 's/\\"/"/g' \
+    -e "s/${ML__SOH}/\\\\/g"
+}
+
+# ml_agy_frame <file>: agy's frame as rows (see above), trailing blank rows
+# dropped, at most ML_AGY_FRAME_ROWS of them.
+ml_agy_frame() {
+  ml__snip=$(ml_json_scalar "$1" realtimeSnippet)
+  ml__cont=$(ml_json_scalar "$1" content)
+  [ "$ml__snip" = "null" ] && ml__snip=""
+  [ "$ml__cont" = "null" ] && ml__cont=""
+  if [ ${#ml__cont} -gt ${#ml__snip} ]; then
+    ml__src=$ml__cont
+  else
+    ml__src=$ml__snip
+  fi
+  printf '%s\n' "$ml__src" | ml_strip_ansi | ml__json_unescape \
+    | LC_ALL=C awk -v keep="$ML_AGY_FRAME_ROWS" '
+        { row[NR] = $0; if ($0 ~ /[^ \t]/) last = NR }
+        END {
+          first = last - keep + 1
+          if (first < 1) first = 1
+          for (i = first; i <= last; i++) print row[i]
+        }'
+}
+
+# ml__agy_signals <file>: one pass over the frame, printing a token per marker
+# that holds: `footer`, `dialog`, `busy`, `box`, `idle`, `retry`.
+# Plain awk on purpose (macOS awk, mawk and gawk alike, all byte-oriented under
+# LC_ALL=C): no interval expressions, no POSIX classes, and every non-ASCII
+# glyph is matched as a literal string with index(), never inside a bracket.
+ml__agy_signals() {
+  ml_agy_frame "$1" | LC_ALL=C awk \
+    -v tail_rows="$ML_AGY_TAIL_ROWS" \
+    -v RULE='─' -v UPDOWN='↑/↓' -v BULLET='●' -v ELBOW='⎿' -v TRI='▸' \
+    -v BR0=$'\xe2\xa0' -v BR1=$'\xe2\xa1' -v BR2=$'\xe2\xa2' -v BR3=$'\xe2\xa3' '
+    function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
+    function starts(s, p) { return index(s, p) == 1 }
+    # A horizontal rule: the turn separator, the input-box border, the line
+    # under a dialog header. Nothing but `─` (at least three).
+    function is_rule(s,   t, k) {
+      t = s
+      k = gsub(RULE, "", t)
+      return k >= 3 && t == ""
+    }
+    # The braille spinner (U+2800-U+28FF = E2 A0..A3 xx) opening a row.
+    function is_spinner(s) {
+      return starts(s, BR0) || starts(s, BR1) || starts(s, BR2) || starts(s, BR3)
+    }
+    # The input box row when it is empty: a bare `>`, or the permission-mode
+    # banner that replaces it (ANTIGRAVITY_PROMPT_PATTERN, #2592).
+    function is_prompt_row(s) {
+      return s == ">" || s ~ /^>[ \t]+[A-Z][A-Za-z-]*[ \t]mode:.*\(shift\+tab to cycle\)$/
+    }
+    # `↑/↓ Navigate`, the footer under every arrow-key screen agy owns
+    # (ANTIGRAVITY_NAVIGATE_FOOTER_PATTERN). Not anchored to the row start: the
+    # /model picker prefixes it with `Keyboard:`.
+    function has_footer(s,   p, rest) {
+      p = index(s, UPDOWN)
+      if (p == 0) return 0
+      rest = substr(s, p + length(UPDOWN))
+      sub(/^[ \t]+/, "", rest)
+      return starts(rest, "Navigate")
+    }
+    # A row that ends the dialog block when reading upward from the footer
+    # (ANTIGRAVITY_DIALOG_BOUNDARY_PATTERN): a rule, a tool / result / thought
+    # row, or a `>` row that is not a numbered option (the echoed prompt, the
+    # composer, the highlighted row of an unnumbered picker).
+    function is_boundary(s) {
+      if (is_rule(s)) return 1
+      if (starts(s, BULLET) || starts(s, ELBOW) || starts(s, TRI)) return 1
+      return starts(s, ">") && s !~ /^>[ \t]*[0-9]+\.[ \t]+[^ \t]/
+    }
+    function is_numbered(s) { return s ~ /^>?[ \t]*[0-9]+\.[ \t]+[^ \t]/ }
+    function skip_blank(i) {
+      while (i >= 1 && row[i] == "") i--
+      return i
+    }
+    { row[NR] = trim($0) }
+    END {
+      n = NR
+
+      # A selection screen is up: its footer is on one of the bottom three rows
+      # (the status row, and on /model a blank row, sit under it). Kept to the
+      # bottom so a `↑/↓ Navigate` quoted in the transcript — task text, the
+      # the summary a worker writes — is never read as a screen.
+      footer = 0
+      for (i = n; i >= 1 && i > n - 3; i--) {
+        if (has_footer(row[i])) { footer = i; break }
+      }
+
+      # A numbered dialog: at least two `N. label` rows between the footer and
+      # the nearest boundary above it, and not the Switch Model picker
+      # (isAntigravityNumberedDialog). The trust screen, /model and the
+      # slash-command popup draw unnumbered rows and stay out.
+      dialog = 0
+      if (footer) {
+        numbered = 0
+        picker = 0
+        floor = footer - 60
+        if (floor < 1) floor = 1
+        for (i = footer - 1; i >= floor; i--) {
+          if (is_boundary(row[i])) break
+          if (row[i] == "Switch Model") picker = 1
+          if (is_numbered(row[i])) numbered++
+        }
+        dialog = (numbered >= 2 && !picker)
+      }
+
+      # Generating: `esc to cancel` opening the status row, or the spinner row
+      # above the input box. `Generating` alone is NOT used — agy leaves thought
+      # summaries such as "Generating the specified file" in the transcript of a
+      # finished turn (idle-after-deny.txt).
+      busy = 0
+      for (i = n; i >= 1 && i > n - 3; i--) {
+        if (starts(row[i], "esc to cancel")) busy = 1
+      }
+      for (i = n; i >= 1 && i > n - tail_rows; i--) {
+        if (is_spinner(row[i])) busy = 1
+      }
+
+      # The input box at the bottom of the frame: rule / `>` (blank rows
+      # allowed under it, agy 1.2.1 leaves the box three rows tall) / rule /
+      # status row. Mirrors readInputBoxStatusRow (src/lib/cli-tools/antigravity.ts).
+      # The status row is optional and may hold nothing but the model label —
+      # the #2478 frame — which is why the footer text is not required.
+      box = 0
+      status = ""
+      i = n
+      if (i >= 1 && !is_rule(row[i])) { status = row[i]; i = skip_blank(i - 1) }
+      if (i >= 1 && is_rule(row[i])) {
+        i = skip_blank(i - 1)
+        if (i >= 1 && is_prompt_row(row[i])) {
+          i = skip_blank(i - 1)
+          if (i >= 1 && is_rule(row[i])) box = 1
+        }
+      }
+      # The box is drawn while agy generates too, so it means idle only
+      # together with the absence of the busy markers. `? for shortcuts` on the
+      # status row settles it on its own, as in isAntigravityReady.
+      idle = box && (status ~ /^\?[ \t]+for[ \t]+shortcuts/ || !busy)
+
+      # Backoff wording in the live rows. It is the wording of the Claude
+      # anchor, because no agy backoff screen has been captured.
+      retry = 0
+      for (i = n; i >= 1 && i > n - tail_rows; i--) {
+        line = tolower(row[i])
+        if (line ~ /retrying in [0-9]+s/ || line ~ /attempt [0-9]+\/[0-9]+/) retry = 1
+      }
+
+      if (footer) print "footer"
+      if (dialog) print "dialog"
+      if (busy) print "busy"
+      if (box) print "box"
+      if (idle) print "idle"
+      if (retry) print "retry"
+    }'
+}
+
+ml__agy_has() {
+  ml__agy_signals "$1" | grep -qx "$2"
+}
+
+# ml_agy_has_dialog_footer <file>: an agy selection screen is open (a
+# permission dialog, the trust screen, /model, the slash-command popup).
+ml_agy_has_dialog_footer() {
+  ml__agy_has "$1" footer
+}
+
+# ml_agy_has_prompt_marker <file>: an agy numbered dialog is waiting for an
+# answer — `↑/↓ Navigate` plus numbered options (`> 1. Yes`, `2. No, deny
+# creation`). The unnumbered screens are left to the server's
+# isPromptWaiting / sessionStatus, exactly as before.
+ml_agy_has_prompt_marker() {
+  ml__agy_has "$1" dialog
+}
+
+# ml_agy_has_gen_anchor <file>: agy is mid-turn (`esc to cancel` status row or
+# the spinner). Every agy selection screen ALSO prints `esc to cancel` on its
+# status row (dialog-create-file.txt, popup-slash-commands.txt), so the dialog
+# footer is evaluated first and vetoes the reading — an open dialog is a
+# prompt, never generation.
+ml_agy_has_gen_anchor() {
+  ml__agy_signals "$1" | awk '
+    $0 == "footer" { footer = 1 }
+    $0 == "busy" { busy = 1 }
+    END { exit !(busy && !footer) }'
+}
+
+# ml_agy_has_idle_box <file>: agy's empty input box is at the bottom of the
+# frame and agy is not generating. agy's counterpart of ml_has_idle_footer: the
+# footer text cannot be used because agy 1.2.1+ stops drawing it after a tool
+# turn (#2478), so the box itself is read.
+ml_agy_has_idle_box() {
+  ml__agy_has "$1" idle
+}
+
+# ml_agy_is_retrying <file>: ml_is_retrying for an agy pane. Same wording, read
+# on the live rows only, and vetoed by the idle box (agy's proof that the turn
+# is over) and by an open dialog, so a stale retry line can neither pin a
+# finished worker as alive nor hide a dialog behind GENERATING.
+ml_agy_is_retrying() {
+  ml__agy_signals "$1" | awk '
+    $0 == "retry" { retry = 1 }
+    $0 == "idle" { idle = 1 }
+    $0 == "footer" { footer = 1 }
+    END { exit !(retry && !idle && !footer) }'
+}
+
 # --- tmux session targeting ---------------------------------------------------
 # The pane an intervention is typed into is DERIVED from the capture payload, not
 # guessed from a fixed prefix.
