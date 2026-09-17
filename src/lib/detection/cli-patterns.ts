@@ -564,6 +564,44 @@ export const CODEX_SELECTION_LIST_PATTERN = /press\s+enter\s+to\s+(?:confirm|sel
 export const CODEX_APPROVAL_FOOTER_PATTERN = /esc\s+to\s+cancel/i;
 
 /**
+ * Codex CLI tool-call approval FORM footer (Issue #2609).
+ *
+ * Codex asks for some tool calls through a form rather than the classic
+ * approval list, and closes it with a different sentence. Measured on a live
+ * Browser use approval (2026-09-17, twice in one session):
+ *
+ * ```text
+ * • Calling 修正前の専用GUIを開く
+ *
+ *   Field 1/1
+ *   Allow Browser use to access http://127.0.0.1:60311?
+ *
+ *   origin: http://127.0.0.1:60311
+ *
+ *   › 1. Allow         Run the tool and continue.
+ *     2. Always allow  Run the tool and remember this choice for future tool calls.
+ *     3. Cancel        Cancel this tool call
+ *   enter to submit | esc to cancel
+ * ```
+ *
+ * No `press enter to confirm/select`, so {@link CODEX_SELECTION_LIST_PATTERN}
+ * misses it and `detectCodexDialog` returned null for a dialog the status
+ * detector reported as `waiting` — which `/prompt-response` read as
+ * `prompt_no_longer_active` and Auto-Yes as `unclassified-frame`.
+ *
+ * Deliberately a separate constant rather than another alternative in
+ * CODEX_SELECTION_LIST_PATTERN: that one also drives `detect.ts` branch 0.8, and
+ * this footer is consumed ONLY by `detectCodexDialog`'s entry gate. It is the
+ * whole measured row and nothing looser — `/m` + `^…$` against the trimmed
+ * footer rows `findNumberedOptionBlock` returns, so a sentence that merely
+ * contains "enter to submit", or "esc to cancel" on its own (the #1928 mutation
+ * that rewords the approval footer), still does not vouch for a block.
+ *
+ * No /g flag (keeps .test() stateless), no nested quantifiers (ReDoS-safe).
+ */
+export const CODEX_FORM_SUBMIT_FOOTER_PATTERN = /^enter\s+to\s+submit\s*\|\s*esc\s+to\s+cancel$/im;
+
+/**
  * Codex CLI pager / edit-previous (transcript) mode footer pattern (Issue #1017)
  *
  * When Codex enters its transcript pager / "edit previous message" mode, the

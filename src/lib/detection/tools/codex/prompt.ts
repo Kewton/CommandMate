@@ -21,6 +21,14 @@
  * readings of "is this codex's dialog?" would be two chances to disagree, and
  * this one is the one Auto-Yes acts on.
  *
+ * Issue #2609 added one more measured footer, and only that one: codex's
+ * tool-call approval FORM (`Field 1/1`, seen on a Browser use request) closes
+ * with `enter to submit | esc to cancel`
+ * ({@link CODEX_FORM_SUBMIT_FOOTER_PATTERN}). `detect.ts` already reported that
+ * frame `waiting` through its structural branch (#2310), so without it the two
+ * readings disagreed: `respond` answered `prompt_no_longer_active` for a prompt
+ * the status API was showing.
+ *
  * ## Why the footer and not the numbers
  *
  * Codex draws on the NORMAL screen, so its pane keeps scrollback: an approval
@@ -34,6 +42,7 @@
 import {
   CODEX_SELECTION_LIST_PATTERN,
   CODEX_APPROVAL_FOOTER_PATTERN,
+  CODEX_FORM_SUBMIT_FOOTER_PATTERN,
   stripBoxDrawing,
   type CodexLifecycleDialog,
 } from '../../cli-patterns';
@@ -111,7 +120,16 @@ export function detectCodexDialog(
   // The footer is the whole guard. It is positional as well as textual: only the
   // rows between the options and the status bar are looked at, so the same words
   // quoted inside a transcript hundreds of rows up cannot reach it.
-  if (!CODEX_SELECTION_LIST_PATTERN.test(block.footer)) return null;
+  //
+  // Issue #2609: the approval form's footer is admitted as its own measured row,
+  // not by widening the list pattern — an `esc to cancel` alone still vouches
+  // for nothing.
+  if (
+    !CODEX_SELECTION_LIST_PATTERN.test(block.footer) &&
+    !CODEX_FORM_SUBMIT_FOOTER_PATTERN.test(block.footer)
+  ) {
+    return null;
+  }
 
   // Issue #1160: an already-answered block still inside the window is not a
   // dialog. Codex keeps it on screen and goes on working underneath it.
