@@ -321,6 +321,16 @@ describe('MobileTabBar', () => {
         expect(hasIcon || tab.textContent).toBeTruthy();
       });
     });
+
+    // Issue #2616: the Files tab matches the PC Activity Bar's file tree, which
+    // draws lucide's two-sheet `Files` (it used to be `Folder` here).
+    it('should draw the lucide Files icon on the Files tab', () => {
+      render(<MobileTabBar {...defaultProps} />);
+
+      const filesTab = screen.getByRole('tab', { name: /files/i });
+      expect(filesTab.querySelector('svg.lucide-files')).not.toBeNull();
+      expect(filesTab.querySelector('svg.lucide-folder')).toBeNull();
+    });
   });
 
   describe('searchParams integration (Issue #600)', () => {
