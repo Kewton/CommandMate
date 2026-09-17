@@ -488,17 +488,30 @@ MONITOR_HOOKS_BASE=origin/develop \
 **Antigravity のワーカーは `<worktree-id>@antigravity` で渡す**（worktree の既定は claude なので、
 付けないと Claude のペインを見る）。
 
-**Antigravity のワーカーでは monitor の画面判定が効かない。** 生成中の目印（`↓ N` / `esc to interrupt`）と
-プロンプトの目印（`❯ N.`）は Claude の画面の文言で、agy の画面（`esc to cancel`・点字スピナー・
-`Run this command?`）には当たらない。2026-09-17 のパイロットでは、59 回のポーリングがすべて
-`IDLE started=0` で、GENERATING と PROMPT は 1 回も出なかった。裁定に届いたのは `hooks-task.sh` の task 状態を
-読んでいたからである。Antigravity のワーカーについては次のように扱う:
+**Antigravity のワーカーも monitor の画面判定で読める（#2606 で修正）。** 修正前は、生成中の目印
+（`↓ N` / `esc to interrupt`）とプロンプトの目印（`❯ N.`）が Claude の画面の文言だけで、agy の画面
+（`esc to cancel`・点字スピナー・`Run this command?`）には当たらなかった。しかも agy のペインは上端寄せ
+（200x1000）なので、判定が読んでいた `realtimeSnippet`（末尾 100 行）は空行ばかりだった。2026-09-17 の
+パイロットでは 59 回のポーリングがすべて `IDLE started=0` で、裁定に届いたのは `hooks-task.sh` の task 状態を
+読んでいたからである。現在の `classify-state.sh` は、capture の `cliToolId` が `antigravity` のときだけ
+agy 用の目印を使い、`realtimeSnippet` と `content` の長い方から空行を除いた末尾を読む:
 
-- `hooks-task.sh` を**必ず**付ける。`NOT_STARTED` / `IDLE` の表示は無視する
-- 着手の確認は `commandmatedev capture "$WT" --instance antigravity --prompts --limit 5`（Auto-Yes が応答した
-  許可ダイアログが時刻つきで並ぶ）か、commits / uncommitted の増加で行う
+- 生成中: ステータス行の `esc to cancel`、または点字スピナー。ただし `↑/↓ Navigate` フッターがある画面では
+  生成中と読まない（agy のダイアログもステータス行に `esc to cancel` を出すため）
+- プロンプト: `↑/↓ Navigate` フッター＋番号つきの選択肢（`> 1. Yes` など）
+- 待機中: 入力欄の枠（罫線 / `>` / 罫線 / ステータス行）。`? for shortcuts` には頼らない（#2478）
+
+Antigravity のワーカーについては次のように扱う:
+
+- `hooks-task.sh` は引き続き**必ず**付け、完了の一次ソースにする。ポーラーのカーソルが画面の最終行を
+  越えていると、`realtimeSnippet` にも `content` にもペインの行が無く、そのポーリングは `IDLE` になる
+- 着手の確認は `GENERATING` / `PROMPT` の行で行える。補助として
+  `commandmatedev capture "$WT" --instance antigravity --prompts --limit 5`（Auto-Yes が応答した
+  許可ダイアログが時刻つきで並ぶ）や commits / uncommitted の増加も使える
+- レート制限・API エラー（再送）の目印は Claude の文言のままで、agy の画面では当てにしない
+  （agy のその画面は実機キャプチャが無い）
 - 画面を見るときは `commandmatedev capture "$WT" --instance antigravity --pane --tail 30` を使う
-  （`--json` の `content` は agy の画面では空行ばかりになることがある）
+  （`--json` の `realtimeSnippet` / `content` は agy の画面では空行ばかりになることがある）
 
 **起動直後に `monitor hooks ERROR` が出ていないことを確認する（#1728）。** 出ていたら
 worktree-id が checkout に解決できておらず、`commits` / `uncommitted` は**測定値ではなく恒久 0** で、
@@ -953,7 +966,7 @@ summary.md の末尾に「振り分けの改善案」節を書き、完了報告
 | 作業証跡ゼロ（exit 21） | captureでcomposer未確定・権限プロンプト・未起動を切り分け（Phase 3-4） |
 | send が exit 99（`prompt not ready`） | 未送信。約 2 分後に 1 回だけ再送し、task id を差し替える（3-1） |
 | Antigravity がアンケート画面で停止 | `tmux send-keys -t "mcbd-antigravity-$WT" -l -- 0` で閉じる（3-4） |
-| monitor が Antigravity を `IDLE` / `NOT_STARTED` と表示 | 画面判定が Claude 前提のため。task 状態と `capture --prompts` で判断する（3-2） |
+| monitor が Antigravity を `IDLE` / `NOT_STARTED` と表示 | #2606 以降は agy 用の目印で読むので、生成中なら `GENERATING` になる。それでも出るのは、capture の `--json` にペインの行が無いポーリング。task 状態と `capture --prompts` で判断する（3-2） |
 | 契約エラー（send が exit 2） | 契約の全エラーが一度に出るので、`docs/design/task-contract.md` と突き合わせて修正し再送 |
 | 品質チェック3回連続失敗 | ユーザーに報告して中断 |
 | コンフリクト解消失敗 | ユーザーに報告して中断 |
