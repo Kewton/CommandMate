@@ -234,8 +234,13 @@ scope:
     - "tests/unit/<module>/**"
   deny: []             # 共有ファイル（CHANGELOG.md / docs/module-reference.md）は入れない。2-4-1 参照
 verify:
-  # キーごと省略が既定（= 全ゲート）。時間制約がある時だけ絞る
-  gates: [lint, typecheck, unit]
+  # 既定は unit-related（変更に関係するテスト＋リポジトリのファイルを読むテスト）。テスト全体が必要な Issue だけ unit にする（#2639）
+  gates: [lint, typecheck, unit-related]
+  gateDefinitions:
+    - id: unit-related
+      command: "node scripts/run-related-unit-tests.mjs --base origin/develop"
+      timeoutSec: 5400
+      mutex: cpu.heavy
 success:
   requireWorkEvidence: true
   requireScopeClean: true
@@ -246,7 +251,11 @@ success:
 - `scope.allow` は**Issueが触ると宣言した範囲**を書く。広すぎる allow は scope ゲートを無力化し、
   狭すぎる allow は正当な変更を不合格にする。迷ったら Phase 1 の依存関係分析で洗い出した
   ファイル集合をそのまま使う。
-- `verify.gates` を絞ると**絞ったゲートしか裁定しない**。既定（省略）を第一選択にする。
+- `verify.gates` を絞ると**絞ったゲートしか裁定しない**。`unit-related` は、変更に関係するテストと、
+  リポジトリのファイルを読むテストだけを実行する（`scripts/run-related-unit-tests.mjs`。import されない
+  ファイルが変わったときはテスト全体に切り替わる）。テスト全体の合否は CI の `Unit Tests` で見るので、
+  `unit-related` で裁定した PR は 6-2 の例外に従う。テストの共通設定・ヘルパーの変更や広い範囲の rename
+  など、テスト全体が必要な Issue では `gates: [lint, typecheck, unit]` にする（#2639）。
 
 ### 2-4-1. 共有ファイルはワーカーに書かせない（必須）
 
@@ -343,7 +352,7 @@ goal: |
   2. テストの陽性対照・陰性対照は、実リポジトリのファイルを書き換えずに示す
      （`os.tmpdir()` 配下に `fs.mkdtempSync` で作り、`afterEach` で必ず削除する）。
   3. 確認に使うコマンドは `npx vitest run <対のテスト>`、`npm run lint`、`npx tsc --noEmit` の 3 つだけにする。
-     テスト全体（`npm run test:unit`）は実行しないこと。全体は検証ゲートが実行する。
+     テスト全体（`npm run test:unit`）は実行しないこと。全体は検証ゲートか CI が実行する。
      <全体の実行が必要な Issue では、この 2 行を「最後に `npm run test:unit` を 1 回実行する」に差し替える>
   4. コマンドはすべてフォアグラウンドで実行し、終わるまで待ってから次の手順へ進む。
 
@@ -601,6 +610,7 @@ for each worktree:   # AGENT は tasks.tsv の担当
 - `--verify` は完了検出**後**に全ゲート（`work-evidence` ＋ `scope` ＋ verify.yaml の宣言ゲート）を
   実行し、その結果を exit code にする。ここが「完了したが壊れていた」を目視から exit code へ
   移す一点である。
+- 契約の `gates` が `unit-related` のとき、`--verify` の裁定はテスト全体を含まない。テスト全体の合否は CI の `Unit Tests` で見る（6-2 の例外）。
 
 **Antigravity 担当は、完了の合図（`IMPL_COMPLETED`）を確かめてから裁定する。** agy は作業の途中でも
 ターンを閉じることがある。例えば、バックグラウンドで起動したコマンドの終了を `schedule`（数十秒後に自分を起こす）で待つとき。
@@ -902,6 +912,9 @@ git push
 上記が通れば**フル CI の完走を待たずにマージしてよい**。develop 側の CI（12〜25 分）が安全網に
 なる。**最後の 1 本だけ**はフル CI を待つ。
 
+**例外: 契約の `gates` が `unit-related` の PR は、CI の `Unit Tests` が `pass` になってからマージする**（#2639）。
+ローカルの裁定がテスト全体を含まないため。ほかのジョブの扱いは上のとおり。
+
 マージ（または close）すると、**その PR の `pull_request` run は
 `.github/workflows/cancel-pr-runs-on-close.yml` が自動で止める**（Issue #2330）。**手でキャンセル
 しないこと。** マージ後に PR のチェックが `cancelled` と表示されるのは**正常であって失敗の証拠では
@@ -918,6 +931,8 @@ git push
 `pending` の扱いは 6-2 に従う: **6-2 のローカルゲート（refresh → マーカー走査 → `tsc` →
 影響テスト）を通していれば `pending` は待たなくてよい**。develop 側の CI が安全網になるからで、
 待つと 1 issue あたり 12〜25 分が消える。**最後の 1 本だけ**は全 `pass` を待つ。
+
+`unit-related` で裁定した PR では、`Unit Tests` のチェックが `pass` になってからマージする（6-2 の例外）。
 
 ### 6-4. 断片を本体へ一本化する（オーケストレーターの仕事）
 
