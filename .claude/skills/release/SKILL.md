@@ -52,6 +52,7 @@ develop <──merge -s ours── main      （祖先復元。squash で切れ�
 | PR は `develop → main` | v0.10.0 以降の実績（#1314 / #1325）。`release/vX.Y.Z` ブランチを切る旧手順（#1202）は使わない |
 | squash マージ | 上記 PR は squash される。その結果 **develop の祖先が切れる**ため、マージバックが必須になる |
 | マージバックは `-s ours` | squash 後は main の tree が develop と同一なので、内容ではなく**祖先関係だけを復元**する |
+| CHANGELOG の節は `apply` で生成 | エントリは PR ごとの断片（`changelog.d/<N>.md`）で develop に入る。並列の PR が `## [Unreleased]` で衝突しないようにするため（#2641） |
 | Release ノートは CHANGELOG 転記 | v0.10.0 以降の実績。`--generate-notes` は v0.9.1 までの形式 |
 | npm publish しない | `publish.yml` が Release 契機で自動実行する（OIDC / provenance 付き） |
 | リリース後も稼働サーバは旧 bundle のまま | primary checkout で build しないので `.next` は据え置き。**これは正常**（Phase 4-7 参照） |
@@ -248,33 +249,58 @@ npm version "${NEXT_VERSION}" --no-git-tag-version
 
 ### 2-2. CHANGELOG.md
 
-`## [Unreleased]` の直後に新セクションを挿入する。
+各 Issue のエントリは、PR ごとに `changelog.d/<N>.md` の断片として develop に入っている（形式は
+`changelog.d/README.md`）。`## [Unreleased]` は空のまま保たれている（`tests/unit/scripts/changelog-fragments.test.ts`
+のガード）。**`## [X.Y.Z]` の節は手で書かず**、次の 3 手順で断片から生成する。
 
-```markdown
-## [Unreleased]
+1. 入る内容を確認する
 
-## [X.Y.Z] - YYYY-MM-DD
+   ```bash
+   node scripts/changelog-fragments.mjs check; echo "CHECK=$?"   # 0 であること
+   node scripts/changelog-fragments.mjs preview                    # 生成される節をそのまま表示する
+   ```
 
-> **Highlight**: このリリースの中心を2〜4文で。何が問題で、何を変えたか。可能なら実測値を入れる。
+   - `CHECK=0` でなければ、出力に出たファイル名の断片を直してから進む（`apply` は不正な断片が 1 つでもあると何も書かずに止まる）
+   - `preview` の Issue 番号を、リリース PR に載せる対応 Issue と突き合わせる。断片が無い Issue は節に載らない
 
-### Added
-- feat(scope): **要点**。詳細説明 (#Issue番号)
+2. 節を生成する（日付は JST）
 
-### Changed
-- ...
+   ```bash
+   node scripts/changelog-fragments.mjs apply --version "${NEXT_VERSION}" --date "$(TZ=Asia/Tokyo date +%F)"; echo "APPLY=$?"
+   git status --short -- CHANGELOG.md changelog.d   # CHANGELOG.md の M と、断片ごとの D だけであること
+   ```
 
-### Fixed
-- ...
+   - `APPLY=0` であること。`apply` は `## [Unreleased]` の直後に `## [X.Y.Z] - YYYY-MM-DD` の節を挿入し、
+     集約した断片（`changelog.d/README.md` 以外）を削除する。節は Added → Changed → … → Fixed … の順、節の中は Issue 番号の降順
+   - `## [Unreleased]` に行が残っていると `Unreleased is not empty` で止まり、何も書き換えない。残っていた行は
+     断片（`changelog.d/<N>.md`）に移してからやり直す
 
-## [前のバージョン] - ...
-```
+3. 生成された節の見出しの直後に `> **Highlight**: …` を書き足す
+
+   ```markdown
+   ## [Unreleased]
+
+   ## [X.Y.Z] - YYYY-MM-DD
+
+   > **Highlight**: このリリースの中心を2〜4文で。何が問題で、何を変えたか。可能なら実測値を入れる。
+
+   ### Added
+
+   - **feat(scope): 要点** (#Issue番号): 詳細説明
+
+   ### Fixed
+
+   - **fix(scope): 要点** (#Issue番号): 詳細説明
+
+   ## [前のバージョン] - ...
+   ```
 
 規約:
 
 - **リンク参照（`[X.Y.Z]: https://github.com/...compare/...`）は追加しない**。0.5.2 で止まっており、近年のリリースでは付けていない
-- 日付は JST 基準
-- 該当が無いカテゴリの見出しは書かない
-- 各項目末尾に Issue 番号を `(#1234)` 形式で入れる
+- 日付は JST 基準（上の `TZ=Asia/Tokyo date +%F`）
+- 該当が無いカテゴリの見出しは書かない（`apply` は断片の無い節を出さない）
+- 各項目に Issue 番号を `(#1234)` 形式で入れる（断片の形式では要約の `**` を閉じた直後。`check` が確かめる）
 
 `templates/changelog-entry.md` も参照。
 
@@ -291,7 +317,7 @@ LP の hero には、prereq 行の下に版行が**静的に**書いてある（
 突き合わせるので、書き換え忘れは 2-3 の `npm run test:unit` で落ちる。
 
 ```bash
-# 日付は 2-2 で CHANGELOG に書いた見出しから取る（JST で書き直さない。二重管理になる）
+# 日付は 2-2 の apply が CHANGELOG に書いた見出しから取る（JST で書き直さない。二重管理になる）
 RELEASE_DATE=$(awk -v v="## [${NEXT_VERSION}] - " 'index($0, v) == 1 { print substr($0, length(v) + 1); exit }' CHANGELOG.md)
 # Release の総数。これから作る v${NEXT_VERSION} の 1 本を足し、10 の位で切り捨てる（"N+" は下限の概数）
 RELEASE_COUNT=$(gh api repos/Kewton/CommandMate/releases --paginate --jq '.[].tag_name' | wc -l | tr -d ' ')
@@ -366,6 +392,8 @@ npm run test:unit > /tmp/rel-unit.log 2>&1; echo "UNIT=$?"
 
 ```bash
 git add package.json package-lock.json CHANGELOG.md website/index.html
+# 2-2 の apply が削除した断片（changelog.d/<N>.md）の削除もこのコミットに含める:
+git add changelog.d
 # Phase 1.5-2 でカタログを --write した場合のみ:
 git add src/config/slash-commands-catalog.json locales/en/worktree.json locales/ja/worktree.json
 # Phase 1.5-3 で attestation を採り直した場合のみ（--write はこのファイルを書かないので、
@@ -377,8 +405,9 @@ git push origin develop
 
 変更は上記 4 ファイル（package.json ・ package-lock.json ・ CHANGELOG.md ・ website/index.html。
 **リコンサイルで差分が出た場合はカタログ＋locales の 3 ファイル、
-attestation を採り直した場合はさらに 1 ファイル**）であること（`git diff --stat` で確認）。
-リコンサイルで書き込みが無く attestation も動かさなかったときは基本 4 ファイルのみ
+attestation を採り直した場合はさらに 1 ファイル**）と、2-2 で削除した断片（`changelog.d/<N>.md`。
+`changelog.d/README.md` は残る）であること（`git diff --cached --stat` で確認）。
+リコンサイルで書き込みが無く attestation も動かさなかったときは基本 4 ファイル＋断片の削除のみ
 （website/index.html は 2-2a の版行 1 行）。
 
 > `git status` に `src/config/slash-commands-attestations.json` が出ているのに

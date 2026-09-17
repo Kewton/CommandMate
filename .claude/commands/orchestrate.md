@@ -232,6 +232,7 @@ scope:
   allow:               # Issueの影響範囲。requireScopeClean が true なら1件以上必須
     - "src/lib/<module>/**"
     - "tests/unit/<module>/**"
+    - "changelog.d/<N>.md"   # CHANGELOG の断片。ワーカーが実装と同じコミットに含める（2-4-1）
   deny: []             # 共有ファイル（CHANGELOG.md / docs/module-reference.md）は入れない。2-4-1 参照
 verify:
   # 既定は unit-related（変更に関係するテスト＋リポジトリのファイルを読むテスト）。テスト全体が必要な Issue だけ unit にする（#2639）
@@ -260,15 +261,23 @@ success:
 ### 2-4-1. 共有ファイルはワーカーに書かせない（必須）
 
 **`CHANGELOG.md` と `docs/module-reference.md` を `scope.allow` に入れてはならない。**
-代わりに各ワーカーには**断片ファイル**を書かせ、オーケストレーターがマージ時に本体へ一本化する。
+代わりに各ワーカーには**断片ファイル**を書かせる。2 つの扱いは次のように異なる:
+
+- **CHANGELOG**: ワーカーが `changelog.d/<N>.md` を書き、**実装と同じコミットに含める**（2-4 の雛形のとおり
+  `scope.allow` に `"changelog.d/<N>.md"` を入れる）。`CHANGELOG.md` へはリリース時に `/release` が
+  `node scripts/changelog-fragments.mjs apply` で集約する。オーケストレーターは書き写さない（6-4）
+- **module-reference**: ワーカーが `dev-reports/module-reference/issue-<N>.md` に書き（commit には入らない）、
+  従来どおりオーケストレーターがマージ時に本体へ一本化する（6-4）
 
 契約の「作業ルール（厳守）」に次をそのまま転記する:
 
 > - **`CHANGELOG.md` と `docs/module-reference.md` を編集しないでください**（scope 外です）。
->   代わりに次の 2 ファイルを書いてください。どちらも `dev-reports/` 配下なので commit には入りません。
->   - `dev-reports/changelog/issue-<N>.md` — `CHANGELOG.md` の `## [Unreleased]` にそのまま
->     貼れる **1 エントリ**（先頭は `- **<type>(<scope>): …** (#<N>): …`）。どの節
+>   代わりに次の 2 ファイルを書いてください。`changelog.d/<N>.md` は**実装と同じコミットに含めます**。
+>   `dev-reports/module-reference/issue-<N>.md` は `dev-reports/` 配下なので commit には入りません。
+>   - `changelog.d/<N>.md` — リリース時に `CHANGELOG.md` へ移される **1 エントリ**
+>     （2 行目。先頭は `- **<type>(<scope>): …** (#<N>): …`）。どの節
 >     （`### Added` / `### Changed` / `### Fixed`）に入るかを 1 行目にコメントで書く。
+>     書き終えたら `node scripts/changelog-fragments.mjs check` を実行し、exit 0 であることを確かめる。
 >     **形式は次の実例に合わせてください**（develop の `CHANGELOG.md` にある実エントリを丸ごと 1 本。
 >     エントリは**ファイル中では 1 行**で、下で折り返して見えるのは表示上の都合です）:
 >
@@ -277,10 +286,10 @@ success:
 >     - **fix(cli): `send` 直後の `wait` が「まだ始まっていない」を完了と読む問題を修正** (#1975): `wait` が `sessionStatus==='ready'` を完了と判定する直前に、**「このインスタンスに最後に渡されたプロンプト」と「エージェント自身が最後に報告したターン終了（`lastStopEventAt`）」を突き合わせる**ゲートを追加。`send` 直後は最新の構造化イベントが直前ターンの `stop` のままなので #1839 の `adoptTurnStart()` が何も採用せず、`turnStartedAt === null` が「決着済み」と読まれてアイドル composer をそのまま完了にしていた（隔離サーバ実測 2026-08-22 / copilot 1.0.80: `send`→`wait` 5 回中 3 回が約 0.3 秒・`basis=scraper_ready`・成果物ゼロで exit 0）。ゲートは `GET /api/worktrees/:id/messages?limit=1&unit=pairs` を `--instance`（無指定ならサーバが解決した `cliToolId`）でスコープして読む。**hook を出さないツールは挙動不変** — `structuredEvents.source.capabilities.supportedEvents`（#1924 の宣言値）が `stop` とターン開始語の両方を宣言しているソースだけがこのゲートに入り、legacy-relay（`supportedEvents: []`）と #1924 以前のサーバは従来経路のまま台帳も引かない。保留は `PENDING_PROMPT_HOLD_MS`=60 秒で打ち切り（hooks は全経路 fail-open なので `Stop` の取りこぼしで `wait` が返らなくなってはいけない）、`--timeout` / `--stall-timeout` はそれより短ければ従来どおり優先される。完了行の `basis=` は、エージェントが最新プロンプトの終了を報告していれば `hook_stop` になる（`scraper_ready` は「画面しか言っていない」という文書どおりの意味に戻る）。
 >     ```
 >
->     - `- **` で始めること — 集計は `grep -cE '^- \*\*'`（6-4 の検証手順）なので、外れるとエントリとして数えられません。
->     - `(#<N>)` は要約の**外**（`**` を閉じた後）に置くこと — `（Issue #<N>）` を要約の中に埋めると機械的に取り出せません。
->     - `<type>` は CLAUDE.md のコミットメッセージ規約と同じ語彙（`feat` / `fix` / `docs` / `refactor` / `test` / `chore` / `ci` / `style`）— リリースノート作成時の分類に使います。
->     - 1 エントリ＝1 行（折らない）— `CHANGELOG.md` は 1 エントリ 1 行で運用しています。本文がどれだけ長くても改行を入れません。
+>     - `- **` で始めること — 集計は `changelog-fragments.mjs check` と `grep -cE '^- \*\*'` なので、外れると `check` が不合格にし、エントリとしても数えられません。
+>     - `(#<N>)` は要約の**外**（`**` を閉じた後）に置き、`<N>` をファイル名と揃えること — `（Issue #<N>）` を要約の中に埋めると `check` が不合格にします。
+>     - `<type>` は CLAUDE.md のコミットメッセージ規約と同じ語彙（`feat` / `fix` / `docs` / `refactor` / `test` / `chore` / `ci` / `style`）— 断片の検証（上の check）はこれ以外を不合格にし、リリースノート作成時の分類にも使います。
+>     - 1 エントリ＝1 行（折らない）— `CHANGELOG.md` は 1 エントリ 1 行で運用しており、`check` も 3 行目以降に空行以外があると不合格にします。本文がどれだけ長くても改行を入れません。
 >   - `dev-reports/module-reference/issue-<N>.md` — `docs/module-reference.md` の表に足す注記を
 >     **行キー（`| \`path\` |`）ごと**に列挙する。既存行への追記なら「どの行に何を足すか」を書く。
 >     **既存行に足すときは `grep -n '^| \`<path>\`' docs/module-reference.md` を実行し、その出力
@@ -302,6 +311,8 @@ success:
 CI は中央値 38 分（self-hosted 1 台・11 ジョブ、同時 5〜6 本なら 55 分）なので、
 N 本のマージが N 回の直列 CI に化ける。実測では PR 21 本に対し CI 53 回（1 PR あたり 2.5 回）で、
 やり直しの大半がこの結合に起因していた。断片方式なら PR 間の強制直列がほぼ消える。
+2026-09-18 に、CHANGELOG の断片はコミットする方式に移った（#2640 / #2641）。オーケストレーターが 6-4 で `CHANGELOG.md` へ
+書き写す方式では、書き写した PR をマージするたびに残りの PR が `## [Unreleased]` で衝突していた（2026-09-17〜18 の run で計 7 回、手で解消）。
 
 `docs/module-reference.md` は **表**なので、両側保持で解決してはいけない（同じ行が 2 本になる）。
 断片方式ならこの解決自体が不要になる。
@@ -365,6 +376,7 @@ goal: |
   - <2-4-1 の転記ブロック（断片ファイル 2 本と実例）>
   - コミットは 1 つにまとめる。メッセージは `<type>(<scope>): <要約> (#<N>)`。
     `.commandmate/tasks/issue-<N>.yaml` と `dev-reports/` はコミットに含めない。
+    `changelog.d/<N>.md` は実装と同じコミットに含める。
   - push と PR 作成はしない（オーケストレーターが行う）。
   - すべて終わったら、最後に `IMPL_COMPLETED` とだけ出力する。
 ```
@@ -901,14 +913,17 @@ refresh のやり直し）。
 1 本マージするたびに、残りの各 PR で次を順に行う:
 
 ```bash
-git fetch origin && git merge origin/develop     # 衝突は意味を見て解消（機械解決は共有ファイルだけ）
+git fetch origin && git merge origin/develop     # 衝突は意味を見て解消（機械解決は module-reference などの共有ファイルだけ）
 git grep -l -E '^(<<<<<<< |>>>>>>> |={7}$)' -- .  # 0 件であること。ここは必ず全追跡ファイルを走査する
 npx tsc --noEmit                                  # 実際の統合破壊はここで出る
 CI=true npx vitest run <衝突したファイルに関係するテスト>   # 型に出ない相互作用はここで出る
 git push
 ```
 
-**マーカー走査を CHANGELOG などの決め打ちにしないこと。** 2026-08-22 に JSDoc ブロックコメントの
+機械的に解決してよい衝突は、`docs/module-reference.md` などの共有ファイルでだけ起こりうる。CHANGELOG の断片は
+Issue ごとに別ファイル（`changelog.d/<N>.md`）で、`CHANGELOG.md` はリリースまで書き換えないので、ここでは衝突しない（2-4-1）。
+
+**マーカー走査を共有ファイル（`docs/module-reference.md` など）の決め打ちにしないこと。** 2026-08-22 に JSDoc ブロックコメントの
 内側へ落ちた衝突マーカーをコミットした事例がある（**コメント内なので `tsc` は exit 0、
 関連テストも緑**だった）。
 
@@ -937,15 +952,15 @@ git push
 
 `unit-related` で裁定した PR では、`Unit Tests` のチェックが `pass` になってからマージする（6-2 の例外）。
 
-### 6-4. 断片を本体へ一本化する（オーケストレーターの仕事）
+### 6-4. module-reference の断片を本体へ一本化する（オーケストレーターの仕事）
 
-2-4-1 でワーカーに書かせた断片を、**オーケストレーターが PR ブランチ上で本体へ写してから
-push する**（マージの直前、6-2 の refresh と同じタイミング）。
+2-4-1 でワーカーに書かせた module-reference の断片を、**オーケストレーターが PR ブランチ上で
+本体へ写してから push する**（マージの直前、6-2 の refresh と同じタイミング）。
+CHANGELOG は書き写さない。ワーカーがコミットした `changelog.d/<N>.md` を、リリース時に `/release` が
+`CHANGELOG.md` へ集約する（2-4-1）。
 
 ```bash
 D=<worktree>
-# CHANGELOG: 断片を [Unreleased] の指定された節の先頭へ 1 エントリだけ挿入
-sed -n '2,$p' "$D/dev-reports/changelog/issue-<N>.md"   # 1 行目は節名のコメント
 # module-reference: 行キーごとに既存行の注記セルへ追記（行を増やさない）
 cat "$D/dev-reports/module-reference/issue-<N>.md"
 ```
@@ -953,14 +968,23 @@ cat "$D/dev-reports/module-reference/issue-<N>.md"
 一本化したら**必ず機械的に検証する**:
 
 ```bash
-# CHANGELOG: エントリ集合が develop と完全一致 ＋ 自分の 1 行だけ増えている
-diff <(git show origin/develop:CHANGELOG.md | grep -cE '^- \*\*') <(grep -cE '^- \*\*' CHANGELOG.md)
 # module-reference: 同じ行キーが 2 本になっていない
 awk -F'|' '/^\| `/{print $2}' docs/module-reference.md | sort | uniq -d
 ```
 
-**断片が無い PR はマージしない。** リリースノートに載らない Issue が出る（過去に実際に発生し、
-後追いで docs PR が必要になった）。
+CHANGELOG の断片は、同じタイミングで PR ブランチ上で次を確認する:
+
+```bash
+# changelog.d/<N>.md がこの PR のコミットに含まれている（未コミットの断片は出ない）
+git diff --name-status origin/develop...HEAD -- changelog.d/   # 状態 A（追加）の changelog.d/<N>.md の 1 行だけであること
+# 断片の書式が通る（他の断片も含めて全件を検証する）
+node scripts/changelog-fragments.mjs check; echo "CHECK=$?"     # CHECK=0 であること
+```
+
+**断片が無い PR はマージしない。** `changelog.d/<N>.md` がコミットに含まれていない PR も、
+module-reference の断片が無い PR も同じ扱いにする。リリースノートに載らない Issue が出る
+（過去に実際に発生し、後追いで docs PR が必要になった）。`check` が exit 0 にならない PR もマージしない
+（リリース時の `apply` は、1 つでも不正な断片があると何も書かずに止まる）。
 
 **`--phase pr` 指定時**: PR作成・マージ完了を確認して終了。
 
@@ -1097,7 +1121,7 @@ summary.md の末尾に「振り分けの改善案」節を書き、完了報告
 - [ ] 全Issueの開発が完了している（契約付き委任は `wait --verify` が exit 0）
 - [ ] 品質チェック全パス（ESLint, TypeScript, テスト, ビルド）
 - [ ] 全IssueのPRがdevelopにマージ済み
-- [ ] 各Issueの CHANGELOG エントリと module-reference の注記が本体に一本化されている（6-4）
+- [ ] 各Issueの `changelog.d/<N>.md` がコミットに含まれ（`check` が exit 0）、module-reference の注記が本体に一本化されている（6-4）
 - [ ] developブランチでの統合ビルド・テストが全パス
 - [ ] （--full時）UAT全テストPASS
 - [ ] 統合サマリーが出力されている（「担当と結果」表を含む。3-5 の切替か 3-4 の帰属裁定があった run では「振り分けの改善案」も含む）
