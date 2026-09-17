@@ -352,7 +352,7 @@ goal: |
   2. テストの陽性対照・陰性対照は、実リポジトリのファイルを書き換えずに示す
      （`os.tmpdir()` 配下に `fs.mkdtempSync` で作り、`afterEach` で必ず削除する）。
   3. 確認に使うコマンドは `npx vitest run <対のテスト>`、`npm run lint`、`npx tsc --noEmit` の 3 つだけにする。
-     テスト全体（`npm run test:unit`）は実行しないこと。全体は検証ゲートかCIが実行する。
+     テスト全体（`npm run test:unit`）は実行しないこと。全体は検証ゲートか CI が実行する。
      <全体の実行が必要な Issue では、この 2 行を「最後に `npm run test:unit` を 1 回実行する」に差し替える>
   4. コマンドはすべてフォアグラウンドで実行し、終わるまで待ってから次の手順へ進む。
 
