@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **fix(test): Catalog から install した Skill を sync-map の分類対象から外す** (#2595): `.claude/skills` および `.agents/skills` 内の `.commandmate-receipt.json` を持つディレクトリを未分類ガードから除外し、receipt 保持ディレクトリが `sync-map.json` に宣言されている場合は別エラーとして検出。
+
 ## [0.38.1] - 2026-09-17
 
 > **Highlight**: v0.38.0 で入れたモード切替ボタン（#2592）のせいで、PC の composer は添付・モード・中断・送信を入力欄と同じ 1 行に並べ、縮む部品が入力欄だけになっていた。1440×900 の画面を 3 分割すると 218px のペインで入力欄が 0px になって文字を打てず、モードボタンは中断ボタンの上に重なって描かれていた。ボタンが重ならないように直し（#2597）、PC の composer をスマホと同じ「上段ツールバー＋入力行」の 2 段にして、同じペインの入力欄を 130px まで戻した（#2598）。あわせて PC では入力欄の上辺をドラッグして高さを変えられるようになり、高さは worktree × 分割ごと（Sessions タイルは別枠）に保存される。

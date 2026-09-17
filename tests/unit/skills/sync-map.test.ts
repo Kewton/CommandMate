@@ -36,8 +36,9 @@
  */
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 const REPO_ROOT = path.resolve(__dirname, '../../..');
 const MAP_RELATIVE = '.claude/skills/sync-map.json';
@@ -92,12 +93,48 @@ function listFiles(root: string): string[] {
   return out.sort();
 }
 
+const SKILL_RECEIPT_FILENAME = '.commandmate-receipt.json';
+
+function partitionSkillDirs(root: string): { managed: string[]; installed: string[] } {
+  const managed: string[] = [];
+  const installed: string[] = [];
+  if (!fs.existsSync(root)) {
+    return { managed, installed };
+  }
+  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const receiptPath = path.join(root, entry.name, SKILL_RECEIPT_FILENAME);
+    if (fs.existsSync(receiptPath)) {
+      installed.push(entry.name);
+    } else {
+      managed.push(entry.name);
+    }
+  }
+  return { managed: managed.sort(), installed: installed.sort() };
+}
+
 function listDirs(root: string): string[] {
-  return fs
-    .readdirSync(root, { withFileTypes: true })
-    .filter((e) => e.isDirectory())
-    .map((e) => e.name)
-    .sort();
+  return partitionSkillDirs(root).managed;
+}
+
+function assertSkillClassification(
+  declared: string[],
+  root: string,
+  prefix = '.claude/skills/',
+): void {
+  expect(new Set(declared).size, 'duplicate package entries').toBe(declared.length);
+
+  const { managed, installed } = partitionSkillDirs(root);
+
+  const illicitlyDeclared = installed
+    .map((name) => `${prefix}${name}`)
+    .filter((loc) => declared.includes(loc));
+  expect(
+    illicitlyDeclared,
+    `installed skill with receipt must not be declared in ${MAP_RELATIVE}`,
+  ).toEqual([]);
+
+  expect(declared.slice().sort()).toEqual(managed.map((d) => `${prefix}${d}`).sort());
 }
 
 const sha256 = (absolute: string) =>
@@ -162,9 +199,10 @@ describe('skills sync map: shape and coverage', () => {
   it('classifies every skill directory exactly once', () => {
     // Guards the map against rotting the moment a skill is added: an unclassified
     // directory is neither watched nor knowingly exempted.
+    // Catalog-installed skills (.commandmate-receipt.json) are excluded from
+    // classification (Issue #2595).
     const declared = map.packages.map((p) => p.local).sort();
-    expect(new Set(declared).size, 'duplicate package entries').toBe(declared.length);
-    expect(declared).toEqual(listDirs(CLAUDE_SKILLS).map((d) => `.claude/skills/${d}`).sort());
+    assertSkillClassification(declared, CLAUDE_SKILLS);
     expect(mapped().length).toBeGreaterThanOrEqual(2);
     expect(localOnly().length).toBeGreaterThanOrEqual(1);
   });
@@ -275,3 +313,69 @@ describe('skills sync map: placement', () => {
     expect(fs.existsSync(path.join(REPO_ROOT, 'scripts/skills-sync-map.mjs'))).toBe(true);
   });
 });
+
+describe('skills sync map: catalog receipt isolation (Issue #2595)', () => {
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cmate-sync-map-test-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it('ignores directories with .commandmate-receipt.json when classifying skills', () => {
+    fs.mkdirSync(path.join(tempDir, 'managed-skill'));
+    const installedDir = path.join(tempDir, 'installed-skill');
+    fs.mkdirSync(installedDir);
+    fs.writeFileSync(path.join(installedDir, SKILL_RECEIPT_FILENAME), '{}');
+
+    // Only managed-skill is declared in sync-map
+    const declared = ['.claude/skills/managed-skill'];
+    expect(() => assertSkillClassification(declared, tempDir)).not.toThrow();
+
+    // listDirs also excludes the installed skill
+    expect(listDirs(tempDir)).toEqual(['managed-skill']);
+  });
+
+  it('fails when an unclassified directory without receipt exists (negative control)', () => {
+    fs.mkdirSync(path.join(tempDir, 'managed-skill'));
+    fs.mkdirSync(path.join(tempDir, 'unclassified-skill'));
+
+    const declared = ['.claude/skills/managed-skill'];
+    expect(() => assertSkillClassification(declared, tempDir)).toThrow();
+  });
+
+  it('fails when a receipt-bearing directory is declared in sync-map (fraud control)', () => {
+    fs.mkdirSync(path.join(tempDir, 'managed-skill'));
+    const installedDir = path.join(tempDir, 'installed-skill');
+    fs.mkdirSync(installedDir);
+    fs.writeFileSync(path.join(installedDir, SKILL_RECEIPT_FILENAME), '{}');
+
+    const declared = ['.claude/skills/managed-skill', '.claude/skills/installed-skill'];
+    expect(() => assertSkillClassification(declared, tempDir)).toThrow(
+      /installed skill with receipt must not be declared/,
+    );
+  });
+
+  it('excludes receipt-bearing directories from .agents/skills subset check', () => {
+    const claudeRoot = path.join(tempDir, 'claude');
+    const agentsRoot = path.join(tempDir, 'agents');
+    fs.mkdirSync(claudeRoot);
+    fs.mkdirSync(agentsRoot);
+
+    fs.mkdirSync(path.join(claudeRoot, 'shared-skill'));
+    fs.mkdirSync(path.join(agentsRoot, 'shared-skill'));
+
+    const installedAgent = path.join(agentsRoot, 'installed-agent-skill');
+    fs.mkdirSync(installedAgent);
+    fs.writeFileSync(path.join(installedAgent, SKILL_RECEIPT_FILENAME), '{}');
+
+    const claudeDirs = new Set(listDirs(claudeRoot));
+    for (const name of listDirs(agentsRoot)) {
+      expect(claudeDirs.has(name)).toBe(true);
+    }
+  });
+});
+
