@@ -333,7 +333,7 @@ describe('FileTreeView', () => {
       await waitFor(() => {
         const indexItem = screen.getByTestId('tree-item-index.ts');
         // Check for indentation using inline style (depth=1 -> 1.5rem)
-        expect(indexItem).toHaveStyle({ paddingLeft: '1.5rem' });
+        expect(indexItem.style.getPropertyValue('--tree-indent')).toBe('1.5rem');
       });
     });
 
@@ -343,7 +343,7 @@ describe('FileTreeView', () => {
       await waitFor(() => {
         const srcItem = screen.getByTestId('tree-item-src');
         // depth=0 -> 0.5rem
-        expect(srcItem).toHaveStyle({ paddingLeft: '0.5rem' });
+        expect(srcItem.style.getPropertyValue('--tree-indent')).toBe('0.5rem');
       });
     });
 
@@ -492,7 +492,7 @@ describe('FileTreeView', () => {
 
       // Check that the deep file has correct indentation (depth=6 -> 6.5rem)
       const deepFileItem = screen.getByTestId('tree-item-deep-file.ts');
-      expect(deepFileItem).toHaveStyle({ paddingLeft: '6.5rem' });
+      expect(deepFileItem.style.getPropertyValue('--tree-indent')).toBe('6.5rem');
     });
   });
 
@@ -508,7 +508,7 @@ describe('FileTreeView', () => {
       [6, '6.5rem'],
       [10, '10.5rem'],
       [20, '20.5rem'],
-    ])('should apply paddingLeft %s for depth %i', async (depth, expectedPadding) => {
+    ])('should apply --tree-indent %s for depth %i', async (depth, expectedPadding) => {
       // Test indentation by creating appropriate mock data
       // This is an integration test - the unit test would test getIndentStyle directly
       // For now, we verify through the root level (depth 0)
@@ -516,7 +516,7 @@ describe('FileTreeView', () => {
         render(<FileTreeView worktreeId="test-worktree" />);
         await waitFor(() => {
           const srcItem = screen.getByTestId('tree-item-src');
-          expect(srcItem).toHaveStyle({ paddingLeft: expectedPadding });
+          expect(srcItem.style.getPropertyValue('--tree-indent')).toBe(expectedPadding);
         });
       }
     });

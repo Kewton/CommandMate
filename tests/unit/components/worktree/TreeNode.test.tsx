@@ -11,6 +11,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, act, cleanup } from '@testing-library/react';
 import {
   TreeNode,
+  getIndentStyle,
   TREE_ROW_LEADING_PX,
   TREE_ROW_NAME_MIN_PX,
   TREE_ROW_SIZE_MIN_CONTAINER_PX,
@@ -41,13 +42,14 @@ const FILE: TreeItem = {
 
 function renderNode(
   item: TreeItem,
-  metadataDisplay?: FileMetadataDisplaySettings
+  metadataDisplay?: FileMetadataDisplaySettings,
+  depth = 0
 ) {
   return render(
     <TreeNode
       item={item}
       path=""
-      depth={0}
+      depth={depth}
       worktreeId="wt-1"
       expanded={new Set<string>()}
       cache={new Map()}
@@ -283,5 +285,58 @@ describe('TreeNode in a narrow panel [Issue #2631]', () => {
       TREE_ROW_DATE_MIN_CONTAINER_PX,
       TREE_ROW_SECOND_DATE_MIN_CONTAINER_PX,
     ]).toEqual([176, 296, 416]);
+  });
+});
+
+/**
+ * Issue #2634: In a narrow panel, deeply nested rows ran out of space for file
+ * names because indentation plus non-shrinking leading elements exceeded the
+ * panel width. Indentation is now passed via the `--tree-indent` CSS variable
+ * and capped by Tailwind class `pl-[min(var(--tree-indent),max(0.5rem,calc(100%_-_7rem)))]`.
+ *
+ * jsdom evaluates neither layout nor min(), so these tests pin the CSS
+ * variable calculation, presence of the exact class string, and the absence
+ * of an inline paddingLeft style.
+ */
+describe('TreeNode indentation capping in narrow panel [Issue #2634]', () => {
+  it('returns --tree-indent CSS variable for depth 0/1/6/20/25 and no paddingLeft', () => {
+    const cases: [number, string][] = [
+      [0, '0.5rem'],
+      [1, '1.5rem'],
+      [6, '6.5rem'],
+      [20, '20.5rem'],
+      [25, '20.5rem'],
+    ];
+    for (const [depth, expected] of cases) {
+      const style = getIndentStyle(depth) as Record<string, string>;
+      expect(style['--tree-indent']).toBe(expected);
+      expect(style.paddingLeft).toBeUndefined();
+    }
+  });
+
+  it('sets --tree-indent on rendered row style according to depth', () => {
+    renderNode(FILE, undefined, 6);
+    const row = screen.getByTestId('tree-item-app.ts');
+    expect(row.style.getPropertyValue('--tree-indent')).toBe('6.5rem');
+  });
+
+  it('includes the exact pl-[min(var(--tree-indent),max(0.5rem,calc(100%_-_7rem)))] class in className', () => {
+    renderNode(FILE);
+    const row = screen.getByTestId('tree-item-app.ts');
+    expect(row.className).toContain('pl-[min(var(--tree-indent),max(0.5rem,calc(100%_-_7rem)))]');
+  });
+
+  it('leaves inline style.paddingLeft empty so the class takes effect', () => {
+    renderNode(FILE, undefined, 6);
+    const row = screen.getByTestId('tree-item-app.ts');
+    expect(row.style.paddingLeft).toBe('');
+  });
+
+  it('flags an element with inline paddingLeft set (negative control)', () => {
+    const legacyRow = document.createElement('div');
+    legacyRow.style.paddingLeft = '6.5rem';
+    // The check for empty inline padding-left must reject the pre-fix element
+    expect(legacyRow.style.paddingLeft === '').toBe(false);
+    expect(legacyRow.style.paddingLeft).toBe('6.5rem');
   });
 });

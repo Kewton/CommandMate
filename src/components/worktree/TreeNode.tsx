@@ -168,20 +168,16 @@ export const TREE_ROW_SECOND_DATE_MIN_CONTAINER_PX =
 
 /**
  * Get indentation style based on depth
- * Uses inline styles instead of Tailwind classes to support unlimited depth
- * Tailwind CSS cannot generate dynamic class names at build time,
- * so we use inline styles to ensure proper indentation at any depth.
+ * Sets CSS variable `--tree-indent` (the row's class converts it to a capped padding-left).
  *
  * @param depth - The nesting depth (0 = root level)
- * @returns React.CSSProperties with paddingLeft set
+ * @returns React.CSSProperties with --tree-indent set
  */
 export function getIndentStyle(depth: number): React.CSSProperties {
-  // Maximum visual depth to prevent excessive indentation
   const maxVisualDepth = 20;
   const effectiveDepth = Math.min(depth, maxVisualDepth);
-  // Base padding of 0.5rem + 1rem per depth level
-  const paddingLeft = 0.5 + effectiveDepth * 1;
-  return { paddingLeft: `${paddingLeft}rem` };
+  const indent = 0.5 + effectiveDepth * 1;
+  return { '--tree-indent': `${indent}rem` } as React.CSSProperties;
 }
 
 // ============================================================================
@@ -441,7 +437,9 @@ export const TreeNode = memo(function TreeNode({
         tabIndex={0}
         // Issue #2631: `@container` makes the row the query container for its
         // name and metadata columns (TREE_ROW_SIZE_MIN_CONTAINER_PX).
-        className="@container flex items-center gap-2 py-1.5 pr-2 cursor-pointer hover:bg-muted rounded transition-colors"
+        // Issue #2634: Cap indent at (100% - 7rem) so deeply nested rows keep room
+        // for non-shrinking parts (60px) and minimum name width (52px).
+        className="@container flex items-center gap-2 py-1.5 pr-2 cursor-pointer hover:bg-muted rounded transition-colors pl-[min(var(--tree-indent),max(0.5rem,calc(100%_-_7rem)))]"
         style={combinedStyle}
         onClick={handleClick}
         onKeyDown={handleKeyDown}
