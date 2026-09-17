@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **fix(test): agent-launch-plan-secrets-1933.test.ts の HOME 漏れを止める** (#2622): planFor() が全 CLI の prepareLaunch() を呼ぶ際に HOME や worktreePath が隔離されておらず、agy の ~/.gemini/config/hooks.json や claude の ~/.commandmate/hooks/claude-wt-1933-*.json が実環境に書き込まれ /tmp/cm-1933-worktree にゴミが残っていた問題を、private HOME / CODEX_HOME の stub 化と一時 worktreePath の利用、afterEach でのディレクトリ削除、および afterAll での実環境 mtime / エントリ不変ガードを追加して解消。
 - **fix(skills): orchestrate-monitor の画面判定を Antigravity のペインでも効かせる** (#2606): `classify-state.sh` が capture の `cliToolId` で目印を選び、Antigravity では `monitor-lib.sh` に追加した agy 用判定（生成中 = ステータス行の `esc to cancel`・点字スピナー、プロンプト = `↑/↓ Navigate` フッター＋番号つき選択肢、待機中 = 入力欄の枠）を使うよう変更。`↑/↓ Navigate` のある画面では `esc to cancel` を生成中と読まない。上端寄せの agy ペインでは `realtimeSnippet` が空行ばかりになるため、`realtimeSnippet` と `content` の長い方から空行を除いた末尾を読む。Claude / Codex の判定は変更なし。
 
 - **fix(cli): エージェントの自己再開でターンが閉じても wait が完了と読まないようにする** (#2614): Antigravity が `schedule` のタイマーやバックグラウンドのコマンドを残したままターンを閉じたとき、`wait`（`--verify` と `ask` を含む）がその Stop を完了と読んでいた問題を修正。agy の `Stop` hook が payload の `fullyIdle: false`（agy 自身の「バックグラウンドタスクが残っている」宣言）を `--detail self_resume_pending` として relay に渡すようになり、新しい宣言 `stopReportsSelfResume`（antigravity のみ `true`）を持つソースでは、`wait` がその Stop を保留し、エージェントが自分で起き直してから閉じた最後の Stop で完了する。完了行は `basis=hook_stop` のまま、保留したときだけ `heldForSelfResume=<秒>` を付ける。起き直さない場合は Stop から 30 分で注記つきで完了し、`--timeout` / `--stall-timeout` はそれより短ければ優先される。
