@@ -322,7 +322,7 @@ const myState = globalThis.__myState ?? (globalThis.__myState = new Map<string, 
 | `src/config/mermaid-config.ts` | mermaid設定定数（securityLevel='strict'） |
 | `src/config/binary-extensions.ts` | バイナリファイル拡張子設定（検索除外用） |
 | `src/lib/file-search.ts` | ファイル内容検索ロジック（EXCLUDED_PATTERNSフィルタ、AbortControllerタイムアウト） |
-| `src/components/worktree/SearchBar.tsx` | 検索UIコンポーネント（検索入力、モード切替、ローディング表示。Issue #299: MOBILE_BREAKPOINT定数使用） |
+| `src/components/worktree/SearchBar.tsx` | 検索UIコンポーネント（検索入力、モード切替、ローディング表示。Issue #299: MOBILE_BREAKPOINT定数使用） **Issue #2635**: 狭幅パネル対応（モード切り替え行を `flex-wrap`、ラベルに `whitespace-nowrap`、`mode-name` / `mode-content` に `whitespace-nowrap flex-shrink-0`。検索語が空で読み込み中でもないときは読み込み／クリアボタンの枠（`w-6`）を描画しない） |
 | `src/hooks/useFileSearch.ts` | 検索状態管理フック（debounce処理、API呼び出し、結果管理） |
 | `src/components/worktree/MoveDialog.tsx` | ファイル移動先選択ダイアログ（Issue #162: ディレクトリツリーブラウザ、ルート選択、ネスト対応、updateTreeNode/findNodeByPath抽出） |
 | `src/components/ui/Modal.tsx` | モーダルダイアログコンポーネント（Z_INDEX.MODAL使用。Issue #1114: useExitAnimationでdata-state=closedのfade+zoom-out exitを200ms再生後にアンマウント） |
