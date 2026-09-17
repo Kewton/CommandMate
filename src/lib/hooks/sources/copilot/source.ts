@@ -233,6 +233,9 @@ export const copilotAgentEventSource: AgentEventSource = definePushHookSource({
     resync: 'none',
     // Issue #2197. Nobody but the screen scraper records copilot replies.
     transcriptHistory: null,
+    // Issue #2614. `stop_reason: end_turn` is not a statement about background
+    // work, and nothing else in copilot's `Stop` payload is.
+    stopReportsSelfResume: false,
   },
 
   // The same CamelCase dialect as Claude and codex — measured against six

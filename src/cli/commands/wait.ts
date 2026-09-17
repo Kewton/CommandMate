@@ -480,6 +480,95 @@ function reportsTurnBoundaries(data: CurrentOutputResponse): boolean {
   );
 }
 
+/**
+ * The `stop` detail meaning "the agent ended its turn with its own background
+ * work still running, and resumes by itself when that work finishes"
+ * (Issue #2614).
+ *
+ * A copy of `SELF_RESUME_PENDING_DETAIL` in `src/lib/hooks/agent-event-types.ts`
+ * for the reason {@link TURN_OPENING_EVENT_TYPES} is a copy: the CLI builds with
+ * `"paths": {}`. `tests/unit/cli/commands/wait-self-resume-2614.test.ts` pins the
+ * two together.
+ */
+export const SELF_RESUME_PENDING_DETAIL = 'self_resume_pending';
+
+/**
+ * The capability a source declares when its `stop` can carry
+ * {@link SELF_RESUME_PENDING_DETAIL} (Issue #2614).
+ *
+ * Read by name rather than through the mirrored type in `api-responses.ts`,
+ * which predates it: `structuredEvents.source.capabilities` is published as the
+ * source's whole declaration, so a newer server sends the key and an older one
+ * simply does not.
+ */
+export const SELF_RESUME_CAPABILITY = 'stopReportsSelfResume';
+
+/**
+ * How long `wait` holds a `stop` whose agent said it would resume by itself
+ * (Issue #2614).
+ *
+ * Measured 2026-09-17 against antigravity 1.2.4: a `schedule` of 60 s closed the
+ * turn, the agent woke 58 s after its `Stop` and did it again three more times,
+ * and the real end came five minutes after the first `Stop` — which is where
+ * `wait` had already reported `Completed (basis=hook_stop)` and started a
+ * verification against a half-finished worktree. The wake is not something to
+ * time: it is a `post_tool_use` that opens a new turn, and #1839's gate takes
+ * over from there. What needs a bound is only the case where it never comes.
+ *
+ * A timer's own length is not on the wire (the `schedule` arguments reach the
+ * permission receiver and stop there), and a command sent to the background has
+ * no length at all, so the bound is the one the server already uses for the
+ * same question the other way round: how long an open turn is trusted with
+ * nothing heard (`TURN_STALE_AFTER_MS` in `src/lib/session/provisional-turn.ts`,
+ * pinned equal by `wait-self-resume-2614.test.ts`). Every wake starts a new
+ * `stop` and a new hold, so an agent that keeps rescheduling never reaches it.
+ *
+ * A constant, like {@link PENDING_PROMPT_HOLD_MS}: `--timeout` and
+ * `--stall-timeout` below it still win.
+ */
+export const SELF_RESUME_HOLD_MS = 30 * 60 * 1000;
+
+/**
+ * Whether this tool's event source can say, on its `stop`, that the agent will
+ * resume by itself (Issue #2614).
+ *
+ * The same kind of gate as {@link reportsTurnBoundaries}, and it requires that
+ * one too: the hold below is released by a turn-opening event, and a source
+ * that cannot send one could only ever end the hold at its bound. A server that
+ * predates the declaration answers `false`, and so does every source but the one
+ * that writes the detail.
+ */
+function reportsSelfResume(data: CurrentOutputResponse): boolean {
+  const declared: Readonly<Record<string, unknown>> | undefined =
+    data.structuredEvents?.source?.capabilities;
+  return declared?.[SELF_RESUME_CAPABILITY] === true && reportsTurnBoundaries(data);
+}
+
+/**
+ * The instant of the `stop` this agent said it would resume from, or null
+ * (Issue #2614).
+ *
+ * Non-null only while that `stop` is still the newest thing the agent has said.
+ * The wake is a `post_tool_use` (antigravity reports the timer's own tool call
+ * finishing when it fires), which replaces the displayed event and opens a new
+ * turn, so this answers null from the first poll after it — and a later `stop`
+ * is a different instant, which is how a hold knows it is about a new one.
+ *
+ * On a server that publishes a turn record the `stop` must also be what closed
+ * that turn: a turn ended by `generation` or `session_end` belongs to a process
+ * that is gone, and nothing it scheduled is going to wake anything.
+ */
+function pendingSelfResumeStop(data: CurrentOutputResponse): number | null {
+  if (!reportsSelfResume(data)) return null;
+  const events = data.structuredEvents;
+  if (!events || events.lastEventType !== TURN_CLOSING_EVENT_TYPE) return null;
+  if (events.lastEventDetail !== SELF_RESUME_PENDING_DETAIL) return null;
+  // `closedBy` is the server's close-reason vocabulary; `'stop'` there is the
+  // agent's own `Stop`, the only close this hold is about.
+  if (publishesTurnRecord(data) && events.closedBy !== 'stop') return null;
+  return events.lastEventAt ?? null;
+}
+
 /** What the chat ledger could tell us about the newest prompt (Issue #1975). */
 type PromptLedgerRead =
   /** Epoch ms of the newest prompt sent to this instance, or null if it has had none. */
@@ -701,6 +790,25 @@ export async function pollWorktree(
   let autoYesAnsweringSince: number | null = null;
   const autoYesGraceSeconds = options.autoYesGrace ?? AUTO_YES_GRACE_DEFAULT_SECONDS;
   const autoYesGraceMs = autoYesGraceSeconds * 1000;
+  /**
+   * The self-resume hold in progress: the `stop` it is about, and when this wait
+   * first held on it (CLI clock). Null when none is (Issue #2614).
+   */
+  let selfResumeHold: { stopAt: number; since: number } | null = null;
+  /** Milliseconds spent in self-resume holds that have already ended (Issue #2614). */
+  let selfResumeHeldMs = 0;
+  /** Whether any poll of this wait was held for a self-resume (Issue #2614). */
+  let selfResumeHeld = false;
+  /**
+   * What the completion line adds when this wait held for a self-resume, or ''
+   * (Issue #2614). `basis=` keeps its word: the verdict is still the agent's own
+   * `Stop`, the hold only decided which one.
+   */
+  const selfResumeSuffix = (): string => {
+    if (!selfResumeHeld) return '';
+    const total = selfResumeHeldMs + (selfResumeHold ? Date.now() - selfResumeHold.since : 0);
+    return `, heldForSelfResume=${Math.round(total / 1000)}s`;
+  };
 
   while (true) {
     // Check timeout
@@ -742,6 +850,22 @@ export async function pollWorktree(
       // poll that ends in a prompt — the same turn is still open when the human
       // answers and `--on-prompt human` resumes polling.
       turnStartedAt = adoptTurnStart(data, startTime, turnStartedAt);
+
+      // Issue #2614: a self-resume hold is about one `stop`, and ends the first
+      // time that `stop` is no longer the newest word — the agent woke (a
+      // turn-opening event) or stopped again. Checked on every poll, ahead of
+      // every exit, because the wake usually lands on a `running` frame that
+      // never reaches the hold itself.
+      const selfResumeStopAt = pendingSelfResumeStop(data);
+      if (selfResumeHold !== null && selfResumeHold.stopAt !== selfResumeStopAt) {
+        const heldMs = Date.now() - selfResumeHold.since;
+        selfResumeHeldMs += heldMs;
+        selfResumeHold = null;
+        console.error(
+          `Note: ${worktreeId} has moved past the stop it said it would resume from ` +
+            `(held ${Math.round(heldMs / 1000)}s); judging its current state.`,
+        );
+      }
 
       // Prompt detected
       if (data.isPromptWaiting && data.promptData) {
@@ -989,7 +1113,9 @@ export async function pollWorktree(
       // merged. Path A is untouched — a session that went away really is
       // finished, and carries no flag anyway.
       if (!data.isRunning) {
-        console.error(`Completed: ${worktreeId} (basis=${COMPLETION_BASIS.SESSION_GONE})`);
+        console.error(
+          `Completed: ${worktreeId} (basis=${COMPLETION_BASIS.SESSION_GONE}${selfResumeSuffix()})`,
+        );
         return { exitCode: WaitExitCode.SUCCESS };
       }
 
@@ -1026,6 +1152,44 @@ export async function pollWorktree(
           );
           await sleep(POLL_INTERVAL_MS);
           continue;
+        }
+
+        // Issue #2614: the turn did end — the agent said so — but it also said
+        // that work of its own is still running in the background (a `schedule`
+        // timer, a backgrounded command), and that work wakes it with nobody
+        // typing anything. Measured 2026-09-17 on antigravity 1.2.4: four such
+        // stops ~58 s before each self-wake, and the first one was reported as
+        // `Completed (basis=hook_stop)` and verified five minutes before the
+        // work was done. So this `stop` is held until it is no longer the newest
+        // word (see `selfResumeStopAt` above), or until the bound.
+        //
+        // The bound is measured from whichever is further along: the `stop`
+        // itself (server clock — a negative age is skew, and the max discards
+        // it) or this wait's first sight of it. A session that said so hours ago
+        // and never woke is not held again.
+        if (selfResumeStopAt !== null) {
+          const now = Date.now();
+          if (selfResumeHold === null) selfResumeHold = { stopAt: selfResumeStopAt, since: now };
+          const heldMs = now - selfResumeHold.since;
+          const elapsedMs = Math.max(heldMs, now - selfResumeStopAt);
+          if (elapsedMs < SELF_RESUME_HOLD_MS) {
+            selfResumeHeld = true;
+            console.error(
+              `Waiting: ${worktreeId} ended its turn with background work still running ` +
+                `(stoppedAt=${new Date(selfResumeStopAt).toISOString()}, ` +
+                `lastEventDetail=${SELF_RESUME_PENDING_DETAIL}, ${describeTurnClose(data)}); ` +
+                'it resumes by itself when that work finishes. Not reporting completion ' +
+                `(held ${Math.round(heldMs / 1000)}s, at most ${SELF_RESUME_HOLD_MS / 1000}s ` +
+                'after the stop).',
+            );
+            await sleep(POLL_INTERVAL_MS);
+            continue;
+          }
+          console.error(
+            `Note: ${worktreeId} said at its stop ${Math.round(elapsedMs / 1000)}s ` +
+              'ago that background work was still running, and has not resumed since; ' +
+              'completing on that stop.',
+          );
         }
 
         // Issue #1975: the same frame, one question further back. #1839's gate
@@ -1083,7 +1247,7 @@ export async function pollWorktree(
           turnStartedAt !== null || answeredNewestPrompt
             ? COMPLETION_BASIS.HOOK_STOP
             : COMPLETION_BASIS.SCRAPER_READY;
-        console.error(`Completed: ${worktreeId} (basis=${basis})`);
+        console.error(`Completed: ${worktreeId} (basis=${basis}${selfResumeSuffix()})`);
         return { exitCode: WaitExitCode.SUCCESS };
       }
 
@@ -1320,6 +1484,21 @@ A prompt the agent has not answered yet (Issue #1975):
   60 s still win and return 124. A tool that posts no hooks (supportedEvents is
   empty) never enters this path at all. The completion line says which record
   decided it: basis=hook_stop when the agent reported the end of that turn.
+
+A turn the agent will resume by itself (Issue #2614):
+  An agent can end its turn while work of its own is still running in the
+  background — antigravity's schedule timer, a command it sent to the
+  background — and that work wakes it later with nobody typing anything. When
+  the tool's event source declares stopReportsSelfResume and the agent's stop
+  carries lastEventDetail=self_resume_pending, wait does not report that stop
+  as completion. It keeps polling until the agent wakes (a new turn opens) and
+  judges the stop that ends that turn instead; the completion line then adds
+  heldForSelfResume=<seconds>.
+
+  The hold is a constant 1800 s after the stop, not a flag: an agent that never
+  wakes is completed on its stop with a note, and --timeout / --stall-timeout
+  below that still win and return 124. Every wake starts a new hold, so an
+  agent that keeps rescheduling is waited for until it stops for good.
 
 A prompt the target's Auto-Yes is answering (Issue #2463):
   With --on-prompt agent, a prompt on a session whose Auto-Yes is on is not

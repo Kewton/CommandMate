@@ -61,6 +61,7 @@
  * @module lib/hooks/sources/antigravity/source
  */
 
+import { SELF_RESUME_PENDING_DETAIL, type AgentEventType } from '@/lib/hooks/agent-event-types';
 import {
   MAX_TOOL_NAME_LENGTH,
   type PermissionRequestPayload,
@@ -74,6 +75,7 @@ import type {
   Verdict,
 } from '../types';
 import {
+  ANTIGRAVITY_FULLY_IDLE_FIELD,
   ANTIGRAVITY_PERMISSION_TIMEOUT_SECONDS,
   buildAntigravityLaunchCommand,
   writeAntigravityHooksConfig,
@@ -166,6 +168,33 @@ export function encodeAntigravityVerdict(verdict: Verdict): Record<string, unkno
 }
 
 /**
+ * The subtype of one agy event, read off agy's own payload.
+ *
+ * `pre_tool_use` / `post_tool_use` carry the tool name under `toolCall`.
+ * `stop` carries {@link SELF_RESUME_PENDING_DETAIL} when agy says background
+ * work is still running (Issue #2614) — `fullyIdle` must be the boolean
+ * `false`; `true`, a missing field or any other type is a plain stop, which is
+ * what every `Stop` was before this Issue.
+ *
+ * In production the `Stop` arrives through the relay, which forwards its own
+ * `--detail` rather than this payload, and `./hooks-config` computes that flag
+ * from the same field. This is the source's reading of the payload itself, as
+ * the tool-name case already is.
+ */
+export function extractAntigravityEventDetail(
+  event: AgentEventType,
+  payload: Record<string, unknown>
+): string | null {
+  if (event === 'pre_tool_use' || event === 'post_tool_use') {
+    return boundDetail(readNestedString(payload, ['toolCall', 'name']));
+  }
+  if (event === 'stop' && payload[ANTIGRAVITY_FULLY_IDLE_FIELD] === false) {
+    return SELF_RESUME_PENDING_DETAIL;
+  }
+  return null;
+}
+
+/**
  * Antigravity as an event source.
  *
  * Registered in `../registry`. Nothing outside this directory imports it by
@@ -215,6 +244,11 @@ export const antigravityAgentEventSource: AgentEventSource = definePushHookSourc
     // nothing streams it, `../../../polling/structured-history-gate` reads it
     // when the `Stop` hook says a turn ended. See `./history`.
     transcriptHistory: 'pull',
+    // Issue #2614. agy's `Stop` says whether background work — a `schedule`
+    // timer, a backgrounded command — is still running (`fullyIdle`), and the
+    // `Stop` hook in `./hooks-config` passes a `false` on as
+    // `SELF_RESUME_PENDING_DETAIL`. See `extractDetail` below.
+    stopReportsSelfResume: true,
   },
 
   // Empty on purpose, and the only empty mapper list in the codebase. There is
@@ -241,10 +275,8 @@ export const antigravityAgentEventSource: AgentEventSource = definePushHookSourc
 
   // The tool name is nested under `toolCall`, and it is present on both
   // `PreToolUse` and `PostToolUse` payloads (checked against both fixtures).
-  extractDetail: (event, payload) =>
-    event === 'pre_tool_use' || event === 'post_tool_use'
-      ? boundDetail(readNestedString(payload, ['toolCall', 'name']))
-      : null,
+  // A `Stop` says whether background work remains (Issue #2614).
+  extractDetail: extractAntigravityEventDetail,
 
   // agy has no `PermissionRequest` event; its approvals ride on `PreToolUse`,
   // which #1779 registers against its own receiver.

@@ -32,8 +32,10 @@
  * ## Which events are registered
  *
  * `SessionStart`, `PostToolUse` and `Stop` go to the fire-and-forget event
- * receiver through the relay. `PreToolUse` goes somewhere else entirely, and
- * that split is the single most important thing in this module.
+ * receiver through the relay (`Stop` with one field read on the way, Issue
+ * #2614 — see {@link buildAntigravityStopHookCommand}). `PreToolUse` goes
+ * somewhere else entirely, and that split is the single most important thing
+ * in this module.
  *
  * The other three are safe *and measured to be safe*, which is not the same
  * claim twice:
@@ -73,7 +75,7 @@
 import { homedir } from 'os';
 import { join } from 'path';
 import { isValidInstanceId } from '@/lib/cli-tools/types';
-import type { AgentEventType } from '@/lib/hooks/agent-event-types';
+import { SELF_RESUME_PENDING_DETAIL, type AgentEventType } from '@/lib/hooks/agent-event-types';
 import {
   AUTH_TOKEN_ENV_VAR,
   buildAgentEventUrl,
@@ -235,6 +237,64 @@ export function buildAntigravityHookCommand(relayPath: string, event: AgentEvent
 }
 
 /**
+ * The `Stop` payload field that says whether agy has background work left
+ * (Issue #2614).
+ *
+ * agy's own hook contract, as embedded in its binary: `"fullyIdle": true, //
+ * true if all background tasks are done`. A `schedule` timer is one of those
+ * tasks — the transcript records it as "Tool is running as a background task …
+ * Timer: 60s" — and so is a `run_command` that outlived `WaitMsBeforeAsync`.
+ * Both wake the agent with a system message when they finish, with nobody
+ * typing anything, so a `Stop` carrying `false` is not the end of the work.
+ *
+ * Captured as `true` in `tests/fixtures/hooks/antigravity/stop.json`. agy's
+ * protojson writes zero values (`"executionNum": 0`, `"error": ""` in the same
+ * fixture), so `false` is spelled out rather than omitted.
+ */
+export const ANTIGRAVITY_FULLY_IDLE_FIELD = 'fullyIdle';
+
+/**
+ * The `Stop` command: the relay, told when agy still has background work
+ * (Issue #2614).
+ *
+ * The relay (`scripts/hooks/cmate-agent-event.sh`) rebuilds the body it posts
+ * from a handful of fields and drops the rest of the payload, so
+ * {@link ANTIGRAVITY_FULLY_IDLE_FIELD} never reaches the server on its own. This
+ * reads the payload once, and when it says `false` hands the relay
+ * `--detail self_resume_pending` — the relay's own flag, which lands in
+ * `structuredEvents.lastEventDetail` where `commandmate wait` reads it.
+ *
+ * Everything else is the plain relay invocation, byte for byte, and three
+ * properties are what keep it safe on a `Stop`:
+ *
+ *  - **It prints nothing.** agy obeys `{"decision":"continue"}` on this event's
+ *    stdout, so the payload goes to the relay through a pipe and the relay's
+ *    own `curl` output goes to `/dev/null`.
+ *  - **Whitespace is not trusted.** Go's protojson varies it on purpose, so the
+ *    check runs on the payload with blanks removed. A string value cannot fake
+ *    the match: a quote inside one is escaped, and `\"fullyIdle\"` does not read
+ *    as `"fullyIdle"`.
+ *  - **Anything but a literal `false` is the old command.** `true`, a missing
+ *    field and an empty payload all call the relay with exactly the arguments
+ *    {@link buildAntigravityHookCommand} gives it, so a future agy that stops
+ *    sending the field costs the hold in `wait` and nothing else.
+ *
+ * `tr` and `case` only — no `jq`, no `grep` — for the same reason the relay
+ * parses JSON with `sed`.
+ *
+ * @param relayPath - Absolute path to the relay script
+ */
+export function buildAntigravityStopHookCommand(relayPath: string): string {
+  const pending = `'"${ANTIGRAVITY_FULLY_IDLE_FIELD}":false'`;
+  return (
+    'p=$(cat); set --; ' +
+    `case "$(printf '%s' "$p" | tr -d ' \\t\\r\\n')" in ` +
+    `*${pending}*) set -- --detail ${SELF_RESUME_PENDING_DETAIL} ;; esac; ` +
+    `printf '%s' "$p" | ${buildAntigravityHookCommand(relayPath, 'stop')} "$@"`
+  );
+}
+
+/**
  * The `PreToolUse` command, whose stdout **is** the verdict (Issue #1779).
  *
  * Never the relay: that script writes its response body to `/dev/null`, and the
@@ -299,7 +359,11 @@ export function buildAntigravityHookConfig(relayPath: string): AntigravityHookCo
   for (const [nativeName, event] of ANTIGRAVITY_REGISTERED_HOOKS) {
     const handler: AntigravityHookHandler = {
       type: 'command',
-      command: buildAntigravityHookCommand(relayPath, event),
+      // Issue #2614: `Stop` alone carries a field the relay would drop.
+      command:
+        event === 'stop'
+          ? buildAntigravityStopHookCommand(relayPath)
+          : buildAntigravityHookCommand(relayPath, event),
       timeout: HOOK_TIMEOUT_SECONDS,
     };
     config[nativeName] = ANTIGRAVITY_GROUPED_EVENTS.has(nativeName)

@@ -174,6 +174,8 @@ function buildOpencodeSource(server: FakeServer): AgentEventSource {
       resync: 'session-status-poll',
       // Issue #2197: the tool this fixture stands for has no transcript reader.
       transcriptHistory: null,
+      // Issue #2614: nothing here writes a self-resume stop detail.
+      stopReportsSelfResume: false,
     },
 
     mappers: OPENCODE_MAPPERS.map(withConversation),

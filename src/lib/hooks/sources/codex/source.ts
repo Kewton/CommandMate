@@ -126,6 +126,8 @@ export const codexAgentEventSource: AgentEventSource = definePushHookSource({
     // `$CODEX_HOME/sessions/**/rollout-*-<session_id>.jsonl`, and the hook
     // payload names that file outright — see `./history`.
     transcriptHistory: 'pull',
+    // Issue #2614. codex's `Stop` payload names no background work.
+    stopReportsSelfResume: false,
   },
 
   // Same CamelCase dialect as Claude and copilot (#1757 §8.1). The table is
