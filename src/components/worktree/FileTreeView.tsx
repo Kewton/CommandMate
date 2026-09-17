@@ -32,6 +32,7 @@ import { useFileTreeExpandedState } from '@/hooks/useFileTreeExpandedState';
 import { useLocale, useTranslations } from 'next-intl';
 import { FilePlus, FolderPlus, AlertCircle, RefreshCw, RotateCcw } from 'lucide-react';
 import { Button, Skeleton } from '@/components/ui';
+import { Tooltip } from '@/components/common/Tooltip';
 
 // ============================================================================
 // Types
@@ -85,6 +86,34 @@ export interface FileTreeViewProps {
 
 /** Maximum number of concurrent directory fetches during tree reload */
 const CONCURRENT_LIMIT = 5;
+
+/**
+ * Tree width (px) at or above which the toolbar's create buttons print their
+ * labels beside the icons (Issue #2631).
+ *
+ * The container is the tree (`@container` on `file-tree-view`), so the answer
+ * follows the panel, not the viewport. The class below MUST spell the same
+ * value as a literal (`@min-[360px]:inline`): Tailwind scans source text, so an
+ * interpolated class would generate no CSS and hide the labels at every width
+ * (the #2131 rule).
+ *
+ * What has to fit on one line, from the classes (text-xs is 12px; a Japanese
+ * glyph is 1em wide): each button is 36px (padding, icon, gap) plus its label,
+ * the right-hand group is three 32px buttons with two gaps (104px, 120px while
+ * the refetch spinner shows), and the toolbar adds two gaps and 8px padding.
+ *
+ *   | locale | labels             | one line needs          |
+ *   |--------|--------------------|-------------------------|
+ *   | ja     | 72 + 96px          | 360px (376px refetching)|
+ *   | en     | about 47 + 78px    | about 317px             |
+ *
+ * 360 keeps the labels on a 360px phone and in a PC panel dragged that wide;
+ * the PC default (18%, about 210px) and a phone held sideways (about 100px)
+ * get icon-only buttons, which keep their name in `aria-label` and a tooltip.
+ * Where the line is still short (ja while refetching), the toolbar wraps the
+ * right-hand group onto a second line instead of squeezing the buttons.
+ */
+export const FILE_TREE_TOOLBAR_LABEL_MIN_CONTAINER_PX = 360;
 
 // ============================================================================
 // Main Component
@@ -629,39 +658,60 @@ export const FileTreeView = memo(function FileTreeView({
       data-testid="file-tree-view"
       role="tree"
       aria-label={t('fileTree.label')}
-      className={`overflow-auto bg-surface ${className}`}
+      // Issue #2631: `@container` makes the tree the query container for the
+      // toolbar labels below (FILE_TREE_TOOLBAR_LABEL_MIN_CONTAINER_PX). The
+      // tree and not the toolbar: the toolbar holds the metadata popover
+      // (`absolute`), and some engines have given a query container layout
+      // containment, i.e. a stacking context the rows (containers of their
+      // own) would paint over. Everything `fixed` here is portalled out.
+      className={`@container overflow-auto bg-surface ${className}`}
     >
       {/* [Issue #300/#888] Toolbar: root-level create actions + manual refresh.
           Always rendered so the manual refresh button (Issue #888) is available
           even when no create callbacks are wired in. */}
+      {/* Issue #2631: the create buttons used to give their width away to the
+          right-hand group in a narrow panel, breaking their labels one
+          character per line and shrinking the icons to dots. Now nothing in
+          them shrinks (the tooltip wrapper is the flex item, so it repeats
+          `flex-shrink-0`, see #2307), the labels are drawn only where the
+          whole line fits, and the toolbar wraps rather than squeezes. */}
       <div
         data-testid="file-tree-toolbar"
-        className="flex items-center gap-1 p-1 border-b border-border"
+        className="flex flex-wrap items-center gap-1 p-1 border-b border-border"
       >
         {onNewFile && (
-          /* Issue #1061: dense toolbar control — base padding/hover-lift would change the dense feel — 残置 */
-          <button
-            data-testid="toolbar-new-file-button"
-            onClick={() => onNewFile('')}
-            className="flex items-center gap-1 px-2 py-1 text-xs text-muted-foreground hover:bg-muted rounded transition-colors"
-          >
-            <FilePlus className="w-4 h-4" aria-hidden="true" />
-            <span>{t('fileTree.newFile')}</span>
-          </button>
+          <Tooltip content={t('fileTree.newFile')} placement="bottom" className="flex-shrink-0">
+            {/* Issue #1061: dense toolbar control — base padding/hover-lift would change the dense feel — 残置 */}
+            {/* No `title`: the Tooltip above renders the label, and a native one would stack on it. */}
+            <button
+              data-testid="toolbar-new-file-button"
+              onClick={() => onNewFile('')}
+              aria-label={t('fileTree.newFile')}
+              className="flex flex-shrink-0 items-center gap-1 whitespace-nowrap px-2 py-1 text-xs text-muted-foreground hover:bg-muted rounded transition-colors"
+            >
+              <FilePlus className="w-4 h-4 flex-shrink-0" aria-hidden="true" />
+              <span className="hidden @min-[360px]:inline">{t('fileTree.newFile')}</span>
+            </button>
+          </Tooltip>
         )}
         {onNewDirectory && (
-          /* Issue #1061: dense toolbar control — base padding/hover-lift would change the dense feel — 残置 */
-          <button
-            data-testid="toolbar-new-directory-button"
-            onClick={() => onNewDirectory('')}
-            className="flex items-center gap-1 px-2 py-1 text-xs text-muted-foreground hover:bg-muted rounded transition-colors"
-          >
-            <FolderPlus className="w-4 h-4" aria-hidden="true" />
-            <span>{t('fileTree.newDirectory')}</span>
-          </button>
+          <Tooltip content={t('fileTree.newDirectory')} placement="bottom" className="flex-shrink-0">
+            {/* Issue #1061: dense toolbar control — base padding/hover-lift would change the dense feel — 残置 */}
+            <button
+              data-testid="toolbar-new-directory-button"
+              onClick={() => onNewDirectory('')}
+              aria-label={t('fileTree.newDirectory')}
+              className="flex flex-shrink-0 items-center gap-1 whitespace-nowrap px-2 py-1 text-xs text-muted-foreground hover:bg-muted rounded transition-colors"
+            >
+              <FolderPlus className="w-4 h-4 flex-shrink-0" aria-hidden="true" />
+              <span className="hidden @min-[360px]:inline">{t('fileTree.newDirectory')}</span>
+            </button>
+          </Tooltip>
         )}
         {/* Right-aligned group: metadata toggle + refetch indicator + manual refresh button. */}
-        <div className="ml-auto flex items-center gap-1">
+        {/* Issue #2631: `flex-wrap` so a panel narrower than the group wraps its
+            buttons instead of overflowing the tree sideways. */}
+        <div className="ml-auto flex flex-wrap items-center justify-end gap-1">
           {/* [Issue #969] Toggle which metadata columns show inline per file row. */}
           <FileMetadataToggle settings={metadataDisplay} onToggle={toggleMetadata} />
           {/* [Issue #706] Compact refetch indicator. The tree DOM (and its
