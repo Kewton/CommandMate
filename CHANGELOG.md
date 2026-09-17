@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **feat(ui): ファイルツリーのアイコンを2枚重ねにする** (#2616): PC の Activity Bar（スマホ横向き・タブレットも同じコンポーネント）で、ファイルツリーのアイコン（lucide `File`）がメモ（`StickyNote`）と 20px で見分けられなかったため、ファイルが2枚重なった lucide `Files` に変更。スマホ縦向きの下部タブの Files も `Folder` から `Files` に揃えた。これまで `Files` を使っていたターミナル上部の「Open Files」トグルは、ファイルツリーと同じアイコンにならないよう `PanelRight` に変更。ラベル・Tooltip・件数バッジ・aria 属性・キーボード操作・Activity の並び順は変更なし。Activity Bar の10項目でアイコンが重複しないこと、各ボタンが描く svg（`lucide-files` / `lucide-sticky-note` / `lucide-panel-right`）をテストで固定した。
+
 ### Fixed
 
 - **fix(skills): orchestrate-monitor の画面判定を Antigravity のペインでも効かせる** (#2606): `classify-state.sh` が capture の `cliToolId` で目印を選び、Antigravity では `monitor-lib.sh` に追加した agy 用判定（生成中 = ステータス行の `esc to cancel`・点字スピナー、プロンプト = `↑/↓ Navigate` フッター＋番号つき選択肢、待機中 = 入力欄の枠）を使うよう変更。`↑/↓ Navigate` のある画面では `esc to cancel` を生成中と読まない。上端寄せの agy ペインでは `realtimeSnippet` が空行ばかりになるため、`realtimeSnippet` と `content` の長い方から空行を除いた末尾を読む。Claude / Codex の判定は変更なし。

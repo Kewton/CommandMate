@@ -859,6 +859,16 @@ describe('TerminalSplitContainer panel toggle availability (Issue #2259)', () =>
       ).toBeNull();
     });
 
+    // Issue #2616: `Files` is now the Activity Bar file tree's icon, so this
+    // toggle (a side panel of the files you opened) draws `PanelRight` to keep
+    // the two "Files" apart.
+    it('draws the PanelRight icon, not the file tree\'s Files icon', () => {
+      setupWithOpenFiles({ tabCount: 1, hasDiff: false });
+      const btn = screen.getByTestId('toggle-file-panel');
+      expect(btn.querySelector('svg.lucide-panel-right')).not.toBeNull();
+      expect(btn.querySelector('svg.lucide-files')).toBeNull();
+    });
+
     it('points aria-controls / aria-expanded at the file panel region', () => {
       setupWithOpenFiles({ tabCount: 1, hasDiff: false });
       const btn = screen.getByTestId('toggle-file-panel');
