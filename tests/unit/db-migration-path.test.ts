@@ -4,9 +4,24 @@
  * Tests for db-migration-path.ts
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest';
+import fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { homedir } from 'os';
+
+// Real home directory before stubbing (Issue #2605)
+const realHome = homedir();
+
+function countRealHomeTestEntries(): number {
+  try {
+    return fs.readdirSync(realHome).filter((name) => name.startsWith('.commandmate-test-')).length;
+  } catch {
+    return 0;
+  }
+}
+
+const initialTestEntriesCount = countRealHomeTestEntries();
 
 import {
   getLegacyDbPaths,
@@ -31,6 +46,38 @@ vi.mock('@/lib/logger', () => ({
 
 
 describe('db-migration-path', () => {
+  let emptyTmpDirs: string[] = [];
+
+  function createEmptyTmpDir(): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-empty-'));
+    emptyTmpDirs.push(dir);
+    return dir;
+  }
+
+  function cleanupEmptyTmpDirs(): void {
+    for (const dir of emptyTmpDirs) {
+      try {
+        if (fs.existsSync(dir)) {
+          fs.rmSync(dir, { recursive: true, force: true });
+        }
+      } catch {
+        // ignore
+      }
+    }
+    emptyTmpDirs = [];
+  }
+
+  afterEach(() => {
+    cleanupEmptyTmpDirs();
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  afterAll(() => {
+    cleanupEmptyTmpDirs();
+    expect(countRealHomeTestEntries()).toBeLessThanOrEqual(initialTestEntriesCount);
+  });
+
   describe('resolveAndValidatePath', () => {
     afterEach(() => {
       vi.restoreAllMocks();
@@ -174,10 +221,24 @@ describe('db-migration-path', () => {
 
     describe('when checking results', () => {
       it('should return valid MigrationResult object', () => {
-        // Use a path in home directory
-        const targetPath = path.join(homedir(), `.commandmate-test-${Date.now()}`, 'data', 'cm.db');
+        const emptyDir = createEmptyTmpDir();
+        vi.spyOn(process, 'cwd').mockReturnValue(emptyDir);
+        vi.stubEnv('HOME', emptyDir);
+        vi.stubEnv('DATABASE_PATH', '');
+
+        const mkdirSpy = vi.spyOn(fs, 'mkdirSync');
+        const copySpy = vi.spyOn(fs, 'copyFileSync');
+
+        // Target uses the real home obtained before stubbing, but won't be created
+        const targetPath = path.join(realHome, `.commandmate-test-${Date.now()}-results`, 'data', 'cm.db');
 
         const result = migrateDbIfNeeded(targetPath);
+
+        // Assert migration was not performed and no directories or files were created
+        expect(result.migrated).toBe(false);
+        expect(fs.existsSync(path.dirname(targetPath))).toBe(false);
+        expect(mkdirSpy).not.toHaveBeenCalled();
+        expect(copySpy).not.toHaveBeenCalled();
 
         // Result should be a valid MigrationResult
         expect(result).toHaveProperty('migrated');
@@ -192,8 +253,22 @@ describe('db-migration-path', () => {
 
   describe('MigrationResult interface', () => {
     it('should have correct structure', () => {
-      const targetPath = path.join(homedir(), `.commandmate-test-${Date.now()}`, 'data', 'cm.db');
+      const emptyDir = createEmptyTmpDir();
+      vi.spyOn(process, 'cwd').mockReturnValue(emptyDir);
+      vi.stubEnv('HOME', emptyDir);
+      vi.stubEnv('DATABASE_PATH', '');
+
+      const mkdirSpy = vi.spyOn(fs, 'mkdirSync');
+      const copySpy = vi.spyOn(fs, 'copyFileSync');
+
+      const targetPath = path.join(realHome, `.commandmate-test-${Date.now()}-structure`, 'data', 'cm.db');
       const result = migrateDbIfNeeded(targetPath);
+
+      // Assert migration was not performed and no directories or files were created
+      expect(result.migrated).toBe(false);
+      expect(fs.existsSync(path.dirname(targetPath))).toBe(false);
+      expect(mkdirSpy).not.toHaveBeenCalled();
+      expect(copySpy).not.toHaveBeenCalled();
 
       // Check result structure
       expect(result).toHaveProperty('migrated');
