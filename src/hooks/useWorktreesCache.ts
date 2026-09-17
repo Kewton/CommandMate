@@ -163,6 +163,9 @@ export function useWorktreesCache(): UseWorktreesCacheReturn {
    */
   const retryAttemptRef = useRef(0);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Issue #2643: the last fetch failed. A re-fetch of an empty cache after a
+  // failure goes back to "loading" so no commit reads as "loaded and empty".
+  const lastFetchFailedRef = useRef(false);
   const refreshRef = useRef<() => Promise<void>>(async () => {});
 
   const cancelRetry = useCallback(() => {
@@ -182,6 +185,12 @@ export function useWorktreesCache(): UseWorktreesCacheReturn {
   const refresh = useCallback(async () => {
     try {
       setError(null);
+      // Issue #2643: retrying an empty cache after a failure is a load, not a
+      // settled empty list. A successful-but-empty cache is left alone so its
+      // polls do not flip the spinner on and off.
+      if (lastFetchFailedRef.current && worktreesRef.current.length === 0) {
+        setIsLoading(true);
+      }
       const response = await fetch('/api/worktrees');
       // Issue #2059: an unauthenticated request resolves as the /login HTML
       // page with status 200, and a proxy interstitial resolves as HTML too.
@@ -208,8 +217,13 @@ export function useWorktreesCache(): UseWorktreesCacheReturn {
       startTransition(() => {
         setWorktrees(wts);
         setRepositories(repos);
+        // Issue #2643: 読込完了は一覧と同じ transition で確定させる。transition の外で
+        // false にすると「isLoading=false かつ一覧が空」のコミットが一度挟まり、
+        // `/` がリポジトリ 0 件の画面を一瞬出す。
+        setIsLoading(false);
       });
       worktreesRef.current = wts;
+      lastFetchFailedRef.current = false;
       // A success ends the ladder: cancel a scheduled retry and rearm the
       // sequence for a future empty-cache failure.
       retryAttemptRef.current = 0;
@@ -221,7 +235,9 @@ export function useWorktreesCache(): UseWorktreesCacheReturn {
       // (WorktreesCacheProvider always supplies externalWorktrees, so that
       // effect early-returns). This is the reachable call site.
       console.error('[useWorktreesCache] Failed to fetch worktrees:', fetchError);
+      lastFetchFailedRef.current = true;
       setError(fetchError);
+      setIsLoading(false);
 
       // Retry only while the cache is still empty — see the constant's doc.
       const attempt = retryAttemptRef.current;
@@ -233,8 +249,6 @@ export function useWorktreesCache(): UseWorktreesCacheReturn {
           void refreshRef.current();
         }, INITIAL_LOAD_RETRY_DELAYS_MS[attempt]);
       }
-    } finally {
-      setIsLoading(false);
     }
   }, [cancelRetry]);
 

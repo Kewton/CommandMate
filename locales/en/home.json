@@ -1,23 +1,4 @@
 {
-  "title": "Overview",
-  "running": "running",
-  "waiting": "waiting",
-  "sessionOverview": {
-    "title": "Session Overview",
-    "recentSessions": "Recent sessions",
-    "viewAll": "View all"
-  },
-  "sessionSummary": {
-    "loading": "Loading session summary",
-    "running": "Running",
-    "waiting": "Waiting",
-    "waitingLinkLabel": "{count} worktrees waiting — open the review list"
-  },
-  "recentSessions": {
-    "empty": "No recent sessions yet.",
-    "cta": "Register a repository to get started",
-    "loading": "Loading recent sessions"
-  },
   "onboarding": {
     "title": "Getting started",
     "dismiss": "Dismiss getting started",
@@ -28,25 +9,6 @@
     "actions": {
       "registerRepository": "Register",
       "sendFirstMessage": "Open sessions"
-    }
-  },
-  "todo": {
-    "title": "ToDo",
-    "repository": "Repository",
-    "open": "{count} open",
-    "noRepositories": "No repositories yet. Add one from the Repositories screen to start adding todos.",
-    "inputPlaceholder": "Add a todo…",
-    "add": "Add",
-    "loading": "Loading todos",
-    "empty": "No todos yet.",
-    "markAsDone": "Mark as done",
-    "markAsNotDone": "Mark as not done",
-    "delete": "Delete todo",
-    "errors": {
-      "load": "Failed to load todos",
-      "add": "Failed to add todo",
-      "update": "Failed to update todo",
-      "delete": "Failed to delete todo"
     }
   },
   "assistant": {

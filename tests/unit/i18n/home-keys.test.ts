@@ -48,41 +48,12 @@ describe('home i18n keys (Issue #1072)', () => {
     expect(en).toEqual(ja);
   });
 
-  it('includes the heading title and subline count labels', () => {
-    for (const locale of ['en', 'ja']) {
-      const keys = leafKeys(loadHome(locale));
-      for (const expected of ['title', 'running', 'waiting']) {
-        expect(keys, `${locale} missing ${expected}`).toContain(expected);
-      }
-    }
-  });
-
   /**
-   * Issue #1197: SessionOverviewTile / RecentSessionsList resolve these at
-   * runtime. The global next-intl mock echoes keys, so a component test cannot
-   * catch a missing dictionary entry — only a real-dictionary assert like this
-   * stops `home.sessionOverview.title` from rendering verbatim in the UI.
-   */
-  it('includes the session overview tile and recent sessions keys', () => {
-    for (const locale of ['en', 'ja']) {
-      const keys = leafKeys(loadHome(locale));
-      for (const expected of [
-        'sessionOverview.title',
-        'sessionOverview.recentSessions',
-        'sessionOverview.viewAll',
-        'recentSessions.empty',
-      ]) {
-        expect(keys, `${locale} missing ${expected}`).toContain(expected);
-      }
-    }
-  });
-
-  /**
-   * Issue #1199: OnboardingChecklist / RecentSessionsList resolve these at
+   * Issue #1199: OnboardingChecklist resolves these at
    * runtime. Same rationale as the block above — the echoing next-intl mock
    * makes component tests blind to a missing dictionary entry.
    */
-  it('includes the onboarding checklist and empty-state CTA keys', () => {
+  it('includes the onboarding checklist keys', () => {
     for (const locale of ['en', 'ja']) {
       const keys = leafKeys(loadHome(locale));
       for (const expected of [
@@ -92,7 +63,6 @@ describe('home i18n keys (Issue #1072)', () => {
         'onboarding.steps.sendFirstMessage',
         'onboarding.actions.registerRepository',
         'onboarding.actions.sendFirstMessage',
-        'recentSessions.cta',
       ]) {
         expect(keys, `${locale} missing ${expected}`).toContain(expected);
       }
@@ -100,34 +70,15 @@ describe('home i18n keys (Issue #1072)', () => {
   });
 
   /**
-   * Issue #1274: TodoWidget / AssistantChatPanel / AssistantMessageList /
-   * AssistantMessageInput / HomeSessionSummary resolve these at runtime. Same
+   * Issue #1274: AssistantChatPanel / AssistantMessageList /
+   * AssistantMessageInput resolve these at runtime. Same
    * rationale as the blocks above — the echoing next-intl mock makes component
    * tests blind to a missing dictionary entry.
    */
-  it('includes the todo widget, assistant panel and session summary keys', () => {
+  it('includes the assistant panel keys', () => {
     for (const locale of ['en', 'ja']) {
       const keys = leafKeys(loadHome(locale));
       for (const expected of [
-        'sessionSummary.loading',
-        'sessionSummary.running',
-        'sessionSummary.waiting',
-        'recentSessions.loading',
-        'todo.title',
-        'todo.repository',
-        'todo.open',
-        'todo.noRepositories',
-        'todo.inputPlaceholder',
-        'todo.add',
-        'todo.loading',
-        'todo.empty',
-        'todo.markAsDone',
-        'todo.markAsNotDone',
-        'todo.delete',
-        'todo.errors.load',
-        'todo.errors.add',
-        'todo.errors.update',
-        'todo.errors.delete',
         'assistant.repositoryLabel',
         'assistant.cliLabel',
         'assistant.noRepositories',
@@ -181,25 +132,6 @@ describe('home i18n keys (Issue #1072)', () => {
   it('keeps every English label byte-identical to the pre-i18n markup', () => {
     const en = loadHome('en');
     const expected: Record<string, string> = {
-      'sessionSummary.loading': 'Loading session summary',
-      'sessionSummary.running': 'Running',
-      'sessionSummary.waiting': 'Waiting',
-      'recentSessions.loading': 'Loading recent sessions',
-      'todo.title': 'ToDo',
-      'todo.repository': 'Repository',
-      'todo.noRepositories':
-        'No repositories yet. Add one from the Repositories screen to start adding todos.',
-      'todo.inputPlaceholder': 'Add a todo…',
-      'todo.add': 'Add',
-      'todo.loading': 'Loading todos',
-      'todo.empty': 'No todos yet.',
-      'todo.markAsDone': 'Mark as done',
-      'todo.markAsNotDone': 'Mark as not done',
-      'todo.delete': 'Delete todo',
-      'todo.errors.load': 'Failed to load todos',
-      'todo.errors.add': 'Failed to add todo',
-      'todo.errors.update': 'Failed to update todo',
-      'todo.errors.delete': 'Failed to delete todo',
       'assistant.repositoryLabel': 'Repository to Work In',
       'assistant.cliLabel': 'Assistant CLI',
       'assistant.noRepositories': 'No repositories',
@@ -251,16 +183,11 @@ describe('home i18n keys (Issue #1072)', () => {
    * Issue #1274: key parity only proves ja *has* an entry, not that anyone
    * translated it — a copy-paste of the English value passes every other check
    * here and ships English text to a Japanese user.
-   *
-   * `todo.title` is the sole intentional exception: "ToDo" is the product's
-   * term for the widget and is left as-is in both locales.
    */
   it('translates every label rather than leaving it in English', () => {
     const en = loadHome('en');
     const ja = loadHome('ja');
-    const INTENTIONALLY_IDENTICAL = new Set(['todo.title']);
     for (const key of leafKeys(en)) {
-      if (INTENTIONALLY_IDENTICAL.has(key)) continue;
       const enValue = key
         .split('.')
         .reduce<unknown>((acc, part) => (acc as Record<string, unknown>)[part], en);
@@ -278,7 +205,6 @@ describe('home i18n keys (Issue #1072)', () => {
    */
   it('keeps interpolation placeholders intact in both locales', () => {
     const placeholders: Record<string, string[]> = {
-      'todo.open': ['{count}'],
       'assistant.toolNotInstalled': ['{name}'],
       'assistant.startDirectory': ['{repository}', '{path}'],
       'assistant.thinking': ['{label}'],

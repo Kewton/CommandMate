@@ -3,8 +3,8 @@
  *
  * The file name is historical: this page listed worktrees in a main-content
  * table when the suite was written. Since Issue #600 / #1052 / #1072 the route
- * is a dashboard — the branch list lives in the sidebar, and the main column is
- * a bento grid (Overview heading, Session Overview, ToDo, quick actions).
+ * is a dashboard — the branch list lives in the sidebar. `/` は開く画面を決めて
+ * 移動する。E2E サーバーは一覧が空なので空状態（初回ガイド）を表示する（Issue #2643）。
  *
  * [Issue #1180] Re-pointed at that UI. What changed and why the old assertions
  * could not simply be re-selected:
@@ -31,15 +31,12 @@ test.describe('Home Page', () => {
     await page.goto('/');
   });
 
-  test('should display page header and title', async ({ page }) => {
+  test('should display the first-run screen when no repository is registered', async ({ page }) => {
     // Header wordmark
     await expect(page.getByRole('heading', { name: /CommandMate/i, level: 1 })).toBeVisible();
 
-    // Functional page heading that replaced the removed banner subtitle (#1072)
-    await expect(page.getByRole('heading', { name: 'Overview', level: 1 })).toBeVisible();
-
-    // Live session subline rendered alongside it
-    await expect(page.getByTestId('home-subline')).toBeVisible();
+    await expect(page.getByTestId('home-empty')).toBeVisible();
+    await expect(page.getByTestId('home-add-repository')).toHaveAttribute('href', '/repositories');
   });
 
   test('should display "Branches" section heading', async ({ page }) => {
@@ -114,16 +111,16 @@ test.describe('Home Page', () => {
 
   test('should be responsive', async ({ page }) => {
     // The desktop header is hidden on mobile (GlobalMobileNav takes over), so
-    // assert on the page heading, which is present in both layouts.
-    const overview = page.getByRole('heading', { name: 'Overview', level: 1 });
+    // assert on the empty state's link, which is present in both layouts.
+    const addRepository = page.getByTestId('home-add-repository');
 
     // Check mobile viewport
     await page.setViewportSize({ width: 375, height: 667 });
-    await expect(overview).toBeVisible();
+    await expect(addRepository).toBeVisible();
 
     // Check desktop viewport
     await page.setViewportSize({ width: 1920, height: 1080 });
-    await expect(overview).toBeVisible();
+    await expect(addRepository).toBeVisible();
   });
 
   // TODO: Footer未実装のためスキップ
