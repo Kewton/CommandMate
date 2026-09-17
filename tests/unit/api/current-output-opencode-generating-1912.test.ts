@@ -124,7 +124,8 @@ describe('GET /api/worktrees/:id/current-output — opencode isGenerating (Issue
     expect(body.sessionStatusReason).toBe('opencode_processing_indicator');
     expect(body.isGenerating).toBe(true);
     expect(body.thinking).toBe(true);
-    expect(body.thinkingMessage).not.toBeNull();
+    // Issue #2607: the tool's own name, not a fixed "Claude".
+    expect(body.thinkingMessage).toBe('OpenCode is thinking...');
   });
 
   it('sets isGenerating while opencode works on an answered numbered prompt', async () => {

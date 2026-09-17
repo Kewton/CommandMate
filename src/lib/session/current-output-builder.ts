@@ -33,7 +33,11 @@ import {
 import { UNCLASSIFIED_PROMPT_TYPE, type ChatMessage, type UnclassifiedFrameRecord } from '@/types/models';
 import { createLogger } from '@/lib/logger';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
-import { capturedLineCountIsCursor, type CLIToolType } from '@/lib/cli-tools/types';
+import {
+  capturedLineCountIsCursor,
+  getCliToolDisplayName,
+  type CLIToolType,
+} from '@/lib/cli-tools/types';
 import type {
   SessionTargetConflict,
   SessionTargetResolvedBy,
@@ -2016,7 +2020,9 @@ async function buildPayload(
     isComplete: isPromptWaiting,
     isGenerating: merged.thinking,
     thinking: merged.thinking,
-    thinkingMessage: merged.thinking ? 'Claude is thinking...' : null,
+    // Issue #2607: named after the tool actually running. A fixed "Claude" was
+    // published for every agent, and `capture --json` readers took it at its word.
+    thinkingMessage: merged.thinking ? `${getCliToolDisplayName(cliToolId)} is thinking...` : null,
     isPromptWaiting,
     promptData,
     autoYes: {
