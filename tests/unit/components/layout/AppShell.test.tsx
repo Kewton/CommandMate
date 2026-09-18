@@ -150,6 +150,23 @@ describe('AppShell', () => {
         expect(sidebarContainer.className).toMatch(/hidden|w-0|-translate-x/);
       }
     });
+
+    it('reserves the bottom nav height AND the safe-area inset on mobile (Issue #2695)', () => {
+      // <GlobalMobileNav> is `h-14` (56px) plus `pb-safe`, so a main reserving only
+      // fixed 56px padding is short by env(safe-area-inset-bottom) and its content is covered
+      // on devices where that inset is non-zero (viewportFit: 'cover', #1131).
+      render(
+        <Wrapper>
+          <AppShell>
+            <div>Content</div>
+          </AppShell>
+        </Wrapper>
+      );
+
+      const main = screen.getByRole('main');
+      expect(main.className).toMatch(/\bpb-nav-safe\b/);
+      expect(main.className).not.toMatch(/\bpb-14\b/);
+    });
   });
 
   describe('Children rendering', () => {

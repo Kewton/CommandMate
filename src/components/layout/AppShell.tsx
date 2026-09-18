@@ -187,7 +187,7 @@ export const AppShell = memo(function AppShell({ children }: AppShellProps) {
 
         {/* Main content */}
         <main
-          className={`flex-1 min-h-0 overflow-hidden ${showGlobalNav ? 'pb-14' : ''}`}
+          className={`flex-1 min-h-0 overflow-hidden ${showGlobalNav ? 'pb-nav-safe' : ''}`}
           role="main"
           data-view-transition="content"
         >
