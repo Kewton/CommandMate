@@ -12,8 +12,8 @@
  * closed as `error` rather than `failed`: no gate reached a verdict about the
  * work, which is exactly the distinction `error` encodes.
  *
- * Follows the shape of {@link reconcileAllAssistantExecutions}
- * (`src/lib/assistant/non-interactive-execution-reconciler.ts`).
+ * Modelled on the Assistant Chat execution reconciler, which Issue #2655
+ * removed together with the feature.
  *
  * @module lib/verification/verification-reconciler
  */
