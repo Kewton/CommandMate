@@ -26,8 +26,10 @@ import { render, screen, fireEvent, cleanup, act, waitFor } from '@testing-libra
 const pushMock = vi.fn();
 let currentPathname = '/';
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ push: pushMock }),
   usePathname: () => currentPathname,
+}));
+vi.mock('@/components/providers/ViewTransitionsProvider', () => ({
+  useViewTransitionRouter: () => ({ push: pushMock, replace: vi.fn() }),
 }));
 
 vi.mock('next-themes', () => ({

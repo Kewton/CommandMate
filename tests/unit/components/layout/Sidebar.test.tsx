@@ -13,6 +13,36 @@ import { ToastProvider } from '@/components/common/Toast';
 import { SidebarProvider, useSidebarContext } from '@/contexts/SidebarContext';
 import { WorktreeSelectionProvider } from '@/contexts/WorktreeSelectionContext';
 import type { Worktree } from '@/types/models';
+import { ATTENTION_REVIEW_HREF } from '@/config/review-config';
+
+// Issue #2684: Mock TransitionLink to verify nav links use it
+const mockTransitionLink = vi.fn(
+  ({
+    href,
+    children,
+    ...props
+  }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { href: string }) => (
+    <a href={href} data-mocked-transition-link="true" {...props}>
+      {children}
+    </a>
+  )
+);
+vi.mock('@/components/view-transitions/TransitionLink', () => ({
+  TransitionLink: (props: React.AnchorHTMLAttributes<HTMLAnchorElement> & { href: string }) =>
+    mockTransitionLink(props),
+}));
+
+// Issue #2684: Mock useAttentionCount to verify review nav href branching
+const { mockAttentionCount } = vi.hoisted(() => ({
+  mockAttentionCount: { current: 0 },
+}));
+vi.mock('@/hooks/useAttentionCount', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/hooks/useAttentionCount')>();
+  return {
+    ...actual,
+    useAttentionCount: () => ({ count: mockAttentionCount.current, worktrees: [] }),
+  };
+});
 
 // Issue #1274: Sidebar wording resolves through `common.sidebar.*` /
 // `common.nav.repositories`. Back it with the real dictionary so the English
@@ -115,6 +145,8 @@ describe('Sidebar', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockPush.mockClear();
+    mockTransitionLink.mockClear();
+    mockAttentionCount.current = 0;
     localStorage.clear();
     (worktreeApi.getAll as ReturnType<typeof vi.fn>).mockResolvedValue({
       worktrees: mockWorktrees,
@@ -661,6 +693,73 @@ describe('Sidebar', () => {
       expect(review).toHaveTextContent('Review');
       // No cache provider in this suite, so nothing needs attention.
       expect(screen.queryByTestId('sidebar-nav-review-count')).toBeNull();
+    });
+
+    it('renders the three nav links through TransitionLink (Issue #2684)', async () => {
+      render(
+        <Wrapper>
+          <Sidebar />
+        </Wrapper>
+      );
+
+      const repositories = await screen.findByTestId('sidebar-nav-repositories');
+      const sessions = await screen.findByTestId('sidebar-nav-sessions');
+      const review = await screen.findByTestId('sidebar-nav-review');
+
+      expect(repositories).toHaveAttribute('data-mocked-transition-link', 'true');
+      expect(repositories).toHaveAttribute('href', '/repositories');
+
+      expect(sessions).toHaveAttribute('data-mocked-transition-link', 'true');
+      expect(sessions).toHaveAttribute('href', '/sessions');
+
+      expect(review).toHaveAttribute('data-mocked-transition-link', 'true');
+      expect(review).toHaveAttribute('href', '/review');
+
+      expect(mockTransitionLink).toHaveBeenCalledWith(
+        expect.objectContaining({
+          'data-testid': 'sidebar-nav-repositories',
+          href: '/repositories',
+        })
+      );
+      expect(mockTransitionLink).toHaveBeenCalledWith(
+        expect.objectContaining({
+          'data-testid': 'sidebar-nav-sessions',
+          href: '/sessions',
+        })
+      );
+      expect(mockTransitionLink).toHaveBeenCalledWith(
+        expect.objectContaining({
+          'data-testid': 'sidebar-nav-review',
+          href: '/review',
+        })
+      );
+    });
+
+    it('routes review nav to ATTENTION_REVIEW_HREF when attentionCount > 0 and /review when 0 (Issue #2684)', async () => {
+      mockAttentionCount.current = 0;
+      const { unmount } = render(
+        <Wrapper>
+          <Sidebar />
+        </Wrapper>
+      );
+
+      const reviewZero = await screen.findByTestId('sidebar-nav-review');
+      expect(reviewZero).toHaveAttribute('href', '/review');
+      expect(screen.queryByTestId('sidebar-nav-review-count')).toBeNull();
+
+      unmount();
+
+      mockAttentionCount.current = 2;
+      render(
+        <Wrapper>
+          <Sidebar />
+        </Wrapper>
+      );
+
+      const reviewAttention = await screen.findByTestId('sidebar-nav-review');
+      expect(reviewAttention).toHaveAttribute('href', ATTENTION_REVIEW_HREF);
+      expect(reviewAttention).toHaveAttribute('href', '/review?filter=approval');
+      expect(screen.getByTestId('sidebar-nav-review-count')).toHaveTextContent('2');
     });
 
     it('labels the Repositories row with visible text only — no tooltip, no aria-label (Issue #2644)', async () => {

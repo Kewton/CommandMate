@@ -77,6 +77,7 @@ vi.mock('@/hooks/useLocaleSwitch', () => ({
 
 import { CommandPalette, isTypingTarget } from '@/components/common/CommandPalette';
 import { ToastProvider } from '@/components/common/Toast';
+import { ViewTransitionsProvider } from '@/components/providers/ViewTransitionsProvider';
 import { CommandPaletteProvider } from '@/contexts/CommandPaletteContext';
 import { KeyboardShortcutsProvider } from '@/contexts/KeyboardShortcutsContext';
 import { KeyboardShortcutsOverlay } from '@/components/common/KeyboardShortcutsOverlay';
@@ -104,9 +105,11 @@ function renderPalette() {
     // Issue #1400: the toast now lives in the app-wide ToastProvider, not inside
     // CommandPalette, so the sync-success assertion needs the shared host.
     <ToastProvider>
-      <CommandPaletteProvider>
-        <CommandPalette />
-      </CommandPaletteProvider>
+      <ViewTransitionsProvider>
+        <CommandPaletteProvider>
+          <CommandPalette />
+        </CommandPaletteProvider>
+      </ViewTransitionsProvider>
     </ToastProvider>
   );
 }
@@ -148,6 +151,7 @@ describe('CommandPalette (Issue #1053)', () => {
 
   afterEach(() => {
     cleanup();
+    delete (document as any).startViewTransition;
     vi.unstubAllGlobals();
     vi.clearAllMocks();
   });
@@ -317,6 +321,55 @@ describe('CommandPalette (Issue #1053)', () => {
     expect(pushMock).toHaveBeenCalledWith('/sessions');
     // palette closes after running a command
     expect(screen.queryByTestId('command-palette')).toBeNull();
+  });
+
+  it('routes navigation through View Transitions (Issue #2684)', () => {
+    if (typeof (document as any).startViewTransition !== 'function') {
+      Object.defineProperty(document, 'startViewTransition', {
+        value: () => {},
+        writable: true,
+        configurable: true,
+      });
+    }
+    const startViewTransitionSpy = vi
+      .spyOn(document, 'startViewTransition')
+      .mockImplementation(
+        (
+          callbackOptions?: ViewTransitionUpdateCallback | StartViewTransitionOptions
+        ): ViewTransition => {
+          if (typeof callbackOptions === 'function') {
+            void callbackOptions();
+          } else if (
+            callbackOptions &&
+            typeof callbackOptions === 'object' &&
+            'update' in callbackOptions &&
+            typeof callbackOptions.update === 'function'
+          ) {
+            void callbackOptions.update();
+          }
+          return {
+            finished: Promise.resolve(),
+            ready: Promise.resolve(),
+            updateCallbackDone: Promise.resolve(),
+            skipTransition: vi.fn(),
+            types: new Set() as unknown as ViewTransitionTypeSet,
+          };
+        }
+      );
+
+    try {
+      renderPalette();
+      pressKey(window, { key: 'k', metaKey: true });
+
+      const sessions = screen.getByText('common.nav.sessions');
+      fireEvent.click(sessions);
+
+      expect(startViewTransitionSpy).toHaveBeenCalledTimes(1);
+      expect(pushMock).toHaveBeenCalledWith('/sessions');
+    } finally {
+      startViewTransitionSpy.mockRestore();
+      delete (document as any).startViewTransition;
+    }
   });
 
   it('keyboard nav works after open without a click (auto-focused input + Enter)', async () => {
