@@ -14,8 +14,7 @@
  *     only in layout metadata / manifest / CLI --help, none of which render.
  *   - The "Worktrees" h2 is gone; the sidebar header is a Repositories / Sessions / Review navigation list (Issue #2644).
  *   - Search is "Search branches..." in the sidebar, not "Search worktrees".
- *   - Sort is a dropdown (Updated / Repository / Branch / Status) with a
- *     separate direction toggle, not Name / Updated / Path buttons with ↑↓ text.
+ *   - Sort is a dropdown (Updated / Repository name / Branch name / Status) with a worded direction toggle (Newest first / Oldest first, …), not Name / Updated / Path buttons with ↑↓ text.
  *   - "Refresh" is the "Sync branches" button.
  *
  * These specs assert app chrome only, so they hold with zero worktrees — which
@@ -55,13 +54,14 @@ test.describe('Home Page', () => {
     // Trigger is labelled with the active sort key; default is Updated (desc)
     const sortTrigger = page.getByRole('button', { name: /Sort by/i });
     await expect(sortTrigger).toBeVisible();
-    await expect(page.getByRole('button', { name: /Sort (ascending|descending)/i })).toBeVisible();
+    await expect(sortTrigger).toContainText('Updated');
+    await expect(page.getByRole('button', { name: /^(Newest first|Oldest first)$/ })).toBeVisible();
 
     // Opening the dropdown lists the sidebar sort keys
     await sortTrigger.click();
     const listbox = page.getByRole('listbox', { name: 'Sort options' });
     await expect(listbox).toBeVisible();
-    for (const label of ['Updated', 'Repository', 'Branch', 'Status']) {
+    for (const label of ['Updated', 'Repository name', 'Branch name', 'Status']) {
       await expect(listbox.getByRole('option', { name: label })).toBeVisible();
     }
   });
@@ -87,15 +87,14 @@ test.describe('Home Page', () => {
   });
 
   test('should toggle sort direction when clicking sort direction button', async ({ page }) => {
-    // Default sidebar sort is Updated, descending
-    const directionButton = page.getByRole('button', { name: 'Sort descending' });
+    // Default sidebar sort is Updated, descending — shown as words
+    const directionButton = page.getByRole('button', { name: 'Newest first' });
     await expect(directionButton).toBeVisible();
 
     await directionButton.click();
 
-    // The button relabels itself rather than showing an ↑/↓ glyph as it once did
-    await expect(page.getByRole('button', { name: 'Sort ascending' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Sort descending' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Oldest first' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Newest first' })).toHaveCount(0);
   });
 
   test('should navigate to header navigation link', async ({ page }) => {

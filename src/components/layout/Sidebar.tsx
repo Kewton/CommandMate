@@ -19,11 +19,12 @@
  * an inline sort. The fetch/PUT against `/api/sidebar/group-order` stays here.
  *
  * Issue #2644: header is now a nav list (Repositories+sync / Sessions / Review with count) + view/sort controls; "Branches" heading and the pill are gone.
+ * Issue #2648: the view and sort controls are words (a labelled <select> and a labelled sort control), laid out as a two-column grid.
  */
 
 'use client';
 
-import React, { memo, useState, useMemo, useCallback, useEffect, useLayoutEffect, useRef, useDeferredValue } from 'react';
+import React, { memo, useState, useMemo, useCallback, useEffect, useLayoutEffect, useRef, useDeferredValue, useId } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useTranslations } from 'next-intl';
@@ -82,8 +83,7 @@ const SIDEBAR_SCROLL_TOP_STORAGE_KEY = 'mcbd-sidebar-scroll-top';
 
 /**
  * Shared Tailwind size for the sidebar header action icons (Issue #946).
- * Applied to the view-mode toggle, the sort selector icons and the sync button
- * so the header icons share a single, easily-tunable size (16px).
+ * Applied to the sync button icon (Issue #946).
  */
 const HEADER_ICON_CLASS = 'w-4 h-4';
 
@@ -536,8 +536,12 @@ export const Sidebar = memo(function Sidebar() {
             />
           </li>
         </ul>
-        <div data-testid="sidebar-list-controls" className="flex flex-wrap items-center gap-1 px-2">
-          <ViewModeToggle viewMode={viewMode} onToggle={setViewMode} />
+        <div
+          data-testid="sidebar-list-controls"
+          className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-2 gap-y-1.5 px-2"
+        >
+          <ViewModeSelect viewMode={viewMode} onChange={setViewMode} />
+          <span className="whitespace-nowrap text-xs text-sidebar-muted">{t('sort.label')}</span>
           <SortSelector />
         </div>
       </div>
@@ -870,39 +874,41 @@ function SidebarNavLink({
   );
 }
 
-/** View mode toggle button */
-function ViewModeToggle({
+/**
+ * View mode select (Issue #2648): the list layout as words instead of an icon.
+ * Renders two cells of the header's controls grid — the label and the select.
+ */
+function ViewModeSelect({
   viewMode,
-  onToggle,
+  onChange,
 }: {
   viewMode: ViewMode;
-  onToggle: (mode: ViewMode) => void;
+  onChange: (mode: ViewMode) => void;
 }) {
   const t = useTranslations('common');
-  const handleClick = () => {
-    onToggle(viewMode === 'grouped' ? 'flat' : 'grouped');
-  };
+  const selectId = useId();
 
   return (
-    <Tooltip content={t('tooltips.viewMode')} placement="bottom">
-      <button
-        data-testid="view-mode-toggle"
-        type="button"
-        onClick={handleClick}
-        aria-label={viewMode === 'grouped' ? t('sidebar.switchToFlatView') : t('sidebar.switchToGroupedView')}
-        className="
-          p-1 rounded-md text-sidebar-muted hover:text-sidebar-foreground hover:bg-sidebar-hover
-          focus:outline-none focus:ring-2 focus:ring-ring
-          transition-colors
-        "
+    <>
+      <label htmlFor={selectId} className="whitespace-nowrap text-xs text-sidebar-muted">
+        {t('sidebar.viewLabel')}
+      </label>
+      <select
+        id={selectId}
+        data-testid="view-mode-select"
+        value={viewMode}
+        onChange={(event) => {
+          const next = event.target.value;
+          // The <select> can only emit the values rendered below; the guard is
+          // for the type.
+          if (next === 'grouped' || next === 'flat') onChange(next);
+        }}
+        className="w-full min-w-0 truncate rounded border border-sidebar-border bg-sidebar px-1.5 py-1 text-xs text-sidebar-foreground hover:bg-sidebar-hover focus:outline-none focus:ring-2 focus:ring-ring"
       >
-        {viewMode === 'grouped' ? (
-          <FlatListIcon className={HEADER_ICON_CLASS} />
-        ) : (
-          <GroupIcon className={HEADER_ICON_CLASS} />
-        )}
-      </button>
-    </Tooltip>
+        <option value="grouped">{t('sidebar.viewMode.grouped')}</option>
+        <option value="flat">{t('sidebar.viewMode.flat')}</option>
+      </select>
+    </>
   );
 }
 
@@ -917,21 +923,6 @@ function ChevronIcon({ isExpanded }: { isExpanded: boolean }) {
       strokeWidth={2}
     >
       <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-    </svg>
-  );
-}
-
-/** Flat list icon */
-function FlatListIcon({ className = 'w-3 h-3' }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-      strokeWidth={2}
-    >
-      <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
     </svg>
   );
 }

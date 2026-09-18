@@ -620,18 +620,6 @@ describe('Sidebar', () => {
         expect(svg?.getAttribute('class')).toContain('h-4');
       });
 
-      it('renders the view-mode-toggle icon at w-4 h-4', async () => {
-        render(
-          <Wrapper>
-            <Sidebar />
-          </Wrapper>
-        );
-
-        const toggle = await screen.findByTestId('view-mode-toggle');
-        const svg = toggle.querySelector('svg');
-        expect(svg?.getAttribute('class')).toContain('w-4');
-        expect(svg?.getAttribute('class')).toContain('h-4');
-      });
 
       it('renders the sync icon at w-4 h-4', async () => {
         render(
@@ -719,41 +707,61 @@ describe('Sidebar', () => {
       }
     );
 
-    it('shows an action tooltip when hovering the view mode toggle', async () => {
+    it('shows the view as a labelled select with worded options (Issue #2648)', async () => {
       render(
         <Wrapper>
           <Sidebar />
         </Wrapper>
       );
 
-      const toggle = await screen.findByTestId('view-mode-toggle');
-      // Native title is replaced by the shared Tooltip.
-      expect(toggle).not.toHaveAttribute('title');
-
-      fireEvent.mouseEnter(toggle);
-      const tooltip = await screen.findByRole('tooltip', { hidden: true });
-      expect(tooltip).toHaveTextContent('Toggle view mode (grouped / flat)');
+      const select = (await screen.findByTestId('view-mode-select')) as HTMLSelectElement;
+      expect(select.tagName).toBe('SELECT');
+      expect(screen.getByLabelText('View')).toBe(select);
+      expect(select).toHaveValue('grouped');
+      expect(Array.from(select.options).map((o) => [o.value, o.textContent])).toEqual([
+        ['grouped', 'Repository'],
+        ['flat', 'Branch'],
+      ]);
+      expect(select.closest('[data-testid="tooltip-wrapper"]')).toBeNull();
     });
 
-    // Issue #1341: this tooltip is the widest of the header actions and used to
-    // be clipped by the sidebar (default 224px / min 160px) because it rendered
-    // as an absolutely-positioned child. It now escapes to document.body.
-    it('portals the view mode tooltip out of the sidebar so it cannot be clipped', async () => {
+    it('switches to the flat list when "Branch" is chosen (Issue #2648)', async () => {
       render(
         <Wrapper>
           <Sidebar />
         </Wrapper>
       );
 
-      const toggle = await screen.findByTestId('view-mode-toggle');
-      fireEvent.mouseEnter(toggle);
+      await waitFor(() => {
+        expect(screen.getAllByTestId('group-header').length).toBeGreaterThan(0);
+      });
+      fireEvent.change(screen.getByTestId('view-mode-select'), { target: { value: 'flat' } });
+      await waitFor(() => {
+        expect(screen.queryAllByTestId('group-header')).toHaveLength(0);
+      });
+      expect(localStorage.getItem('mcbd-sidebar-view-mode')).toBe('flat');
+    });
 
-      const tooltip = await screen.findByRole('tooltip', { hidden: true });
-      expect(tooltip.parentElement).toBe(document.body);
-      expect(tooltip.className).toMatch(/\bfixed\b/);
-      // The trigger itself stays put inside the sidebar.
-      expect(screen.getByTestId('sidebar')).toContainElement(toggle);
-      expect(screen.getByTestId('sidebar')).not.toContainElement(tooltip);
+    it('shows the sort order and its direction as words (Issue #2648)', async () => {
+      render(
+        <Wrapper>
+          <Sidebar />
+        </Wrapper>
+      );
+
+      const trigger = await screen.findByRole('button', { name: 'Sort by Updated' });
+      expect(trigger).toHaveTextContent('Updated');
+      const direction = screen.getByRole('button', { name: 'Newest first' });
+      expect(direction).toHaveTextContent('Newest first');
+
+      fireEvent.click(direction);
+      expect(await screen.findByRole('button', { name: 'Oldest first' })).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Sort by Updated' }));
+      expect(screen.getByRole('option', { name: 'Repository name' })).toBeInTheDocument();
+      expect(screen.getByRole('option', { name: 'Branch name' })).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('option', { name: 'Status' }));
+      expect(await screen.findByRole('button', { name: 'Needs attention first' })).toBeInTheDocument();
     });
 
     it('shows an action tooltip when hovering the sync button', async () => {
@@ -831,7 +839,7 @@ describe('Sidebar', () => {
       });
     });
 
-    it('should show view mode toggle button', async () => {
+    it('should show the view mode select', async () => {
       render(
         <Wrapper>
           <Sidebar />
@@ -839,7 +847,7 @@ describe('Sidebar', () => {
       );
 
       await waitFor(() => {
-        expect(screen.getByTestId('view-mode-toggle')).toBeInTheDocument();
+        expect(screen.getByTestId('view-mode-select')).toBeInTheDocument();
       });
     });
 
@@ -1008,7 +1016,7 @@ describe('Sidebar', () => {
   // buttons must wrap onto multiple lines instead of overflowing horizontally
   // and overlapping the adjacent ActivityBar.
   describe('Responsive header wrapping (Issue #976)', () => {
-    it('puts the view and sort controls in their own wrapping row (Issue #2644)', async () => {
+    it('lays the view and sort controls out as a label / control grid (Issue #2648)', async () => {
       render(
         <Wrapper>
           <Sidebar />
@@ -1016,10 +1024,18 @@ describe('Sidebar', () => {
       );
 
       const controls = await screen.findByTestId('sidebar-list-controls');
-      expect(controls.className).toMatch(/flex-wrap/);
-      expect(screen.getByTestId('sidebar-header')).toContainElement(controls);
-      expect(controls).toContainElement(screen.getByTestId('view-mode-toggle'));
-      expect(controls).toContainElement(screen.getByTestId('sort-selector-base'));
+      expect(controls).toHaveClass('grid', 'grid-cols-[auto_minmax(0,1fr)]');
+      const cells = Array.from(controls.children) as HTMLElement[];
+      expect(cells).toHaveLength(4);
+      expect(cells[0].tagName).toBe('LABEL');
+      expect(cells[0]).toHaveTextContent('View');
+      expect(cells[1]).toBe(screen.getByTestId('view-mode-select'));
+      expect(cells[2]).toHaveTextContent('Sort');
+      expect(cells[3]).toBe(screen.getByTestId('sort-selector-base'));
+      // The sort control may shrink and wrap inside its cell, never widen it.
+      expect(cells[3]).toHaveClass('min-w-0');
+      expect(cells[3].firstElementChild).toHaveClass('flex', 'flex-wrap', 'min-w-0');
+      expect(screen.getByText('Updated')).toHaveClass('min-w-0', 'truncate');
     });
 
     it('keeps the Repositories row shrinkable so the sync button stays inside the sidebar (Issue #2644)', async () => {
