@@ -113,7 +113,6 @@ bin/
 src/
 ├── app/           # Next.js App Router
 │   ├── api/       # APIルート
-│   ├── chat/      # Assistant Chat画面
 │   ├── login/     # ログイン画面（Issue #331, #383）
 │   ├── proxy/     # 外部アプリプロキシルート（Issue #42）
 │   ├── sessions/  # Sessions画面（Issue #600）

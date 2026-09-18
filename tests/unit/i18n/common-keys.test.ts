@@ -5,7 +5,7 @@
  * locale would surface the raw key string in production and go undetected.
  * The global next-intl mock (tests/setup.ts) echoes the full key, which means
  * component tests stay green even when the real dictionary has no entry — so
- * the nav labels shared by CommandPalette and HomeQuickActions need a
+ * the nav labels shared by Header, GlobalMobileNav and CommandPalette need a
  * real-dictionary guard here, mirroring command-palette-keys / home-keys.
  */
 
@@ -37,9 +37,8 @@ function resolve(dict: Record<string, unknown>, key: string): unknown {
     .reduce<unknown>((acc, part) => (acc as Record<string, unknown>)?.[part], dict);
 }
 
-/** Every nav key the palette and Home's quick actions request at runtime. */
+/** Every nav key the header, the mobile nav and the palette request at runtime. */
 const NAV_KEYS = [
-  'chat',
   'sessions',
   'repositories',
   'review',
@@ -59,7 +58,6 @@ const NAV_KEYS = [
  * that the component tests' mocked `t()` could never catch on its own.
  */
 const EN_NAV_LABELS: Record<string, string> = {
-  chat: 'Chat',
   sessions: 'Sessions',
   repositories: 'Repositories',
   review: 'Review',
@@ -179,6 +177,12 @@ describe('common i18n keys (Issue #1197)', () => {
     expect(en).toEqual(ja);
   });
 
+  it('no longer carries the retired Chat nav label (Issue #2649)', () => {
+    for (const locale of ['en', 'ja']) {
+      expect(resolve(loadCommon(locale), 'nav.chat'), `${locale}: nav.chat`).toBeUndefined();
+    }
+  });
+
   it('resolves every shared nav label in both locales', () => {
     for (const locale of ['en', 'ja']) {
       const dict = loadCommon(locale);
@@ -193,7 +197,7 @@ describe('common i18n keys (Issue #1197)', () => {
   /**
    * Guards the specific regression this Issue's migration could introduce: if
    * a locale silently kept the key path as its value (or a copy/paste left the
-   * dotted key in place), the UI would render "nav.chat" and every mocked test
+   * dotted key in place), the UI would render "nav.sessions" and every mocked test
    * would still pass.
    */
   it('never uses a raw key path as a nav label', () => {

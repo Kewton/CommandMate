@@ -23,7 +23,6 @@
     "tileInstanceAriaLabel": "このタイルに表示するエージェントインスタンス"
   },
   "nav": {
-    "chat": "チャット",
     "sessions": "セッション",
     "repositories": "リポジトリ",
     "repositoriesShort": "リポジトリ",

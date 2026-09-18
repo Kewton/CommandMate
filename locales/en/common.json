@@ -23,7 +23,6 @@
     "tileInstanceAriaLabel": "Agent instance shown in this tile"
   },
   "nav": {
-    "chat": "Chat",
     "sessions": "Sessions",
     "repositories": "Repositories",
     "repositoriesShort": "Repos",

@@ -752,9 +752,9 @@
    * [Issue #2232] Markdown inside a chat bubble.
    *
    * A namespace of its own, NOT a second consumer of `.assistant-md`. That class
-   * is shared by History's conversation cards and `/chat`'s
-   * `AssistantMessageList`, so every value below would have landed on two other
-   * surfaces this Issue is required not to touch. The rules are deliberately
+   * belongs to History's conversation cards (the Assistant Chat list that also
+   * used it was removed in Issue #2649), so every value below would have landed
+   * on a surface this Issue is required not to touch. The rules are deliberately
    * close to `.assistant-md` — same structure, same tokens — because the
    * difference between the two surfaces is DENSITY, not typography: a bubble
    * renders at `text-sm` with no height clamp, so its blocks get a little more
