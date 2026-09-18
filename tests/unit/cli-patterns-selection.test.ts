@@ -17,6 +17,8 @@ import {
   ANTIGRAVITY_SELECTION_LIST_PATTERN,
   CODEX_PAGER_FOOTER_PATTERN,
   CODEX_SELECTION_LIST_PATTERN,
+  CODEX_APPROVAL_FOOTER_PATTERN,
+  CODEX_FORM_SUBMIT_FOOTER_PATTERN,
 } from '@/lib/detection/cli-patterns';
 
 describe('OPENCODE_SELECTION_LIST_PATTERN', () => {
@@ -286,5 +288,58 @@ describe('CODEX_PAGER_FOOTER_PATTERN (Issue #1017)', () => {
   it('should NOT match regular conversational output', () => {
     expect(CODEX_PAGER_FOOTER_PATTERN.test('Here is the implementation of the scroll handler.')).toBe(false);
     expect(CODEX_PAGER_FOOTER_PATTERN.test('I will edit the file and run the tests.')).toBe(false);
+  });
+});
+
+describe('CODEX_FORM_SUBMIT_FOOTER_PATTERN (Issue #2609)', () => {
+  /** The footer row of codex's Browser use approval form, as measured. */
+  const MEASURED = 'enter to submit | esc to cancel';
+
+  it('should be a RegExp without the global flag (no /g)', () => {
+    expect(CODEX_FORM_SUBMIT_FOOTER_PATTERN).toBeInstanceOf(RegExp);
+    expect(CODEX_FORM_SUBMIT_FOOTER_PATTERN.global).toBe(false);
+  });
+
+  it('should match the measured approval-form footer row', () => {
+    expect(CODEX_FORM_SUBMIT_FOOTER_PATTERN.test(MEASURED)).toBe(true);
+    expect(CODEX_FORM_SUBMIT_FOOTER_PATTERN.test('Enter to submit | Esc to cancel')).toBe(true);
+  });
+
+  it('should match the row when it is one of several footer rows', () => {
+    // `findNumberedOptionBlock` joins every trimmed row under the options with
+    // `\n`, so the measured row has to be recognised as a row of that string.
+    expect(CODEX_FORM_SUBMIT_FOOTER_PATTERN.test(`some hint\n${MEASURED}`)).toBe(true);
+    expect(CODEX_FORM_SUBMIT_FOOTER_PATTERN.test(`${MEASURED}\nsome hint`)).toBe(true);
+  });
+
+  it('should NOT match either half on its own', () => {
+    expect(CODEX_FORM_SUBMIT_FOOTER_PATTERN.test('enter to submit')).toBe(false);
+    expect(CODEX_FORM_SUBMIT_FOOTER_PATTERN.test('esc to cancel')).toBe(false);
+    expect(CODEX_FORM_SUBMIT_FOOTER_PATTERN.test('enter to submit | esc to go back')).toBe(false);
+    // The #1928 mutation of the approval list footer keeps "esc to cancel";
+    // it must not be rescued by this pattern.
+    expect(CODEX_FORM_SUBMIT_FOOTER_PATTERN.test('Press enter to proceed or esc to cancel')).toBe(false);
+  });
+
+  it('should NOT match the words inside a longer sentence', () => {
+    // Whole-row anchor: prose that quotes the footer is not the footer.
+    expect(CODEX_FORM_SUBMIT_FOOTER_PATTERN.test(`The form says "${MEASURED}".`)).toBe(false);
+    expect(CODEX_FORM_SUBMIT_FOOTER_PATTERN.test(`Type your answer, then ${MEASURED}`)).toBe(false);
+    expect(CODEX_FORM_SUBMIT_FOOTER_PATTERN.test(`${MEASURED} the run`)).toBe(false);
+    expect(CODEX_FORM_SUBMIT_FOOTER_PATTERN.test('tab to add notes | enter to submit answer | esc to interrupt')).toBe(false);
+  });
+
+  it('should NOT match the existing codex list footers (no overlap)', () => {
+    expect(CODEX_FORM_SUBMIT_FOOTER_PATTERN.test('Press enter to confirm or esc to cancel')).toBe(false);
+    expect(CODEX_FORM_SUBMIT_FOOTER_PATTERN.test('Press enter to confirm or esc to go back')).toBe(false);
+    expect(CODEX_FORM_SUBMIT_FOOTER_PATTERN.test('Press enter to select reasoning effort, or esc to dismiss.')).toBe(false);
+  });
+
+  it('leaves CODEX_SELECTION_LIST_PATTERN unwidened, while the approval verb still reads it', () => {
+    // The list pattern also drives detect.ts branch 0.8 (NavigationButtons), so
+    // #2609 did not add this footer to it.
+    expect(CODEX_SELECTION_LIST_PATTERN.test(MEASURED)).toBe(false);
+    // …and the approval/picker split after the gate classifies it as approval.
+    expect(CODEX_APPROVAL_FOOTER_PATTERN.test(MEASURED)).toBe(true);
   });
 });

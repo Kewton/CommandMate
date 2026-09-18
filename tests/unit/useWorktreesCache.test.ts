@@ -5,6 +5,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { useEffect } from 'react';
 import { renderHook, waitFor, act } from '@testing-library/react';
 import {
   useWorktreesCache,
@@ -147,6 +148,35 @@ describe('useWorktreesCache()', () => {
     });
 
     expect(result.current.worktrees).toEqual([]);
+  });
+
+  it('commits isLoading=false in the same render as the list (Issue #2643)', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        worktrees: [{ id: 'wt-1', name: 'main' }],
+        repositories: [{ path: '/repo', name: 'repo', worktreeCount: 1, visible: true, enabled: true }],
+      }),
+    });
+
+    const commits: Array<{ isLoading: boolean; worktrees: number; repositories: number }> = [];
+    renderHook(() => {
+      const value = useWorktreesCache();
+      useEffect(() => {
+        commits.push({
+          isLoading: value.isLoading,
+          worktrees: value.worktrees.length,
+          repositories: value.repositories.length,
+        });
+      });
+      return value;
+    });
+
+    await waitFor(() => {
+      expect(commits.at(-1)).toEqual({ isLoading: false, worktrees: 1, repositories: 1 });
+    });
+    // `/` はこの途中状態を「一覧が空」と読んでしまう
+    expect(commits).not.toContainEqual({ isLoading: false, worktrees: 0, repositories: 0 });
   });
 
   describe('polling constants', () => {

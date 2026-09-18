@@ -57,10 +57,6 @@ vi.mock('@/contexts/SidebarContext', () => ({
   }),
 }));
 
-vi.mock('@/hooks/useUpdateCheck', () => ({
-  useUpdateCheck: () => ({ data: null, loading: false, error: null }),
-}));
-
 const mockCache: { current: UseWorktreesCacheReturn | null } = { current: null };
 vi.mock('@/components/providers/WorktreesCacheProvider', () => ({
   useOptionalWorktreesCacheContext: () => mockCache.current,

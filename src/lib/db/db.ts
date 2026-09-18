@@ -105,19 +105,8 @@ export {
   MemoDbError,
 } from './memo-db';
 
-// todo-db (repository-scoped Home ToDo widget)
-export {
-  getTodosByRepositoryId,
-  getAllTodos,
-  getTodoById,
-  createTodo,
-  updateTodo,
-  deleteTodo,
-} from './todo-db';
-export type { RepositoryTodo } from './todo-db';
-
 // worktree-todo-db (branch-scoped ToDo list, Issue #1015)
-// Aliased to avoid colliding with the repository-scoped todo-db exports above.
+// Exported under Worktree-prefixed aliases (the API routes import these names).
 export {
   getTodosByWorktreeId,
   getTodoById as getWorktreeTodoById,
@@ -153,41 +142,6 @@ export {
   updateDailyReportContent,
 } from './daily-report-db';
 export type { DailyReport } from './daily-report-db';
-
-// assistant-conversation-db
-export {
-  getAssistantConversationById,
-  getAssistantConversationByRepositoryAndCliTool,
-  createAssistantConversation,
-  updateAssistantConversation,
-  createAssistantMessage,
-  updateAssistantMessageStatus,
-  getAssistantMessages,
-  getAssistantMessageById,
-  archiveAllAssistantMessages,
-  archiveAssistantMessagesFrom,
-  createAssistantExecution,
-  updateAssistantExecution,
-  getAssistantExecutionById,
-  getLatestAssistantExecutionByConversation,
-  getRunningAssistantExecutionByConversation,
-  listRunningAssistantExecutions,
-  getAssistantSessionState,
-  updateAssistantSessionState,
-  deleteAssistantSessionState,
-} from './assistant-conversation-db';
-export type {
-  AssistantConversation,
-  AssistantConversationStatus,
-  AssistantConversationExecutionMode,
-  AssistantMessage,
-  AssistantMessageRole,
-  AssistantMessageType,
-  AssistantMessageDeliveryStatus,
-  AssistantExecution,
-  AssistantExecutionStatus,
-  AssistantSessionState,
-} from './assistant-conversation-db';
 
 // push-subscriptions-db (Web Push, Issue #1125)
 export {

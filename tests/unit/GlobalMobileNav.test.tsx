@@ -35,6 +35,16 @@ vi.mock('next-intl', async () => {
   return createRealIntlMock(() => intlLocale.current);
 });
 
+// Issue #2642: the branch-drawer button only exists under a SidebarProvider.
+// Default to "no provider" so every pre-existing test keeps describing the bar
+// without it; the dedicated describe below opts in.
+const sidebarMock = vi.hoisted(() => ({
+  value: null as null | { isMobileDrawerOpen: boolean; openMobileDrawer: () => void },
+}));
+vi.mock('@/contexts/SidebarContext', () => ({
+  useOptionalSidebarContext: () => sidebarMock.value,
+}));
+
 import { GlobalMobileNav } from '@/components/mobile/GlobalMobileNav';
 
 describe('GlobalMobileNav', () => {
@@ -42,15 +52,16 @@ describe('GlobalMobileNav', () => {
     mockPathname.mockReturnValue('/');
     mockRouterPush.mockClear();
     intlLocale.current = 'en';
+    sidebarMock.value = null;
   });
 
-  it('should render 5 tabs: Home, Chat, Sessions, Review, More', () => {
+  it('should render 3 tabs: Sessions, Review, Settings', () => {
     render(<GlobalMobileNav />);
-    expect(screen.getByText('Home')).toBeDefined();
-    expect(screen.getByText('Chat')).toBeDefined();
     expect(screen.getByText('Sessions')).toBeDefined();
     expect(screen.getByText('Review')).toBeDefined();
-    expect(screen.getByText('More')).toBeDefined();
+    expect(screen.getByText('Settings')).toBeDefined();
+    expect(screen.queryByText('Home')).toBeNull();
+    expect(screen.queryByText('Chat')).toBeNull();
   });
 
   it('should NOT render Repositories tab (it is under More)', () => {
@@ -60,25 +71,24 @@ describe('GlobalMobileNav', () => {
   });
 
   it('should have correct hrefs for tabs', () => {
-    render(<GlobalMobileNav />);
-    const homeLink = screen.getByText('Home').closest('a');
-    const chatLink = screen.getByText('Chat').closest('a');
+    const { container } = render(<GlobalMobileNav />);
     const sessionsLink = screen.getByText('Sessions').closest('a');
     const reviewLink = screen.getByText('Review').closest('a');
-    const moreLink = screen.getByText('More').closest('a');
+    const moreLink = screen.getByText('Settings').closest('a');
 
-    expect(homeLink?.getAttribute('href')).toBe('/');
-    expect(chatLink?.getAttribute('href')).toBe('/chat');
     expect(sessionsLink?.getAttribute('href')).toBe('/sessions');
     expect(reviewLink?.getAttribute('href')).toBe('/review');
     expect(moreLink?.getAttribute('href')).toBe('/more');
+    expect(container.querySelector('a[href="/"]')).toBeNull();
+    expect(container.querySelector('a[href="/chat"]')).toBeNull();
   });
 
-  it('should highlight active Home tab when on /', () => {
+  it('marks no tab active on / (Issue #2642)', () => {
     mockPathname.mockReturnValue('/');
-    render(<GlobalMobileNav />);
-    const homeLink = screen.getByText('Home').closest('a');
-    expect(homeLink?.className).toContain('text-accent-600');
+    const { container } = render(<GlobalMobileNav />);
+    for (const link of Array.from(container.querySelectorAll('a'))) {
+      expect(link.className).not.toContain('text-accent-600');
+    }
   });
 
   it('should highlight active Sessions tab when on /sessions', () => {
@@ -95,10 +105,10 @@ describe('GlobalMobileNav', () => {
     expect(reviewLink?.className).toContain('text-accent-600');
   });
 
-  it('should highlight active More tab when on /more', () => {
+  it('should highlight active Settings tab when on /more', () => {
     mockPathname.mockReturnValue('/more');
     render(<GlobalMobileNav />);
-    const moreLink = screen.getByText('More').closest('a');
+    const moreLink = screen.getByText('Settings').closest('a');
     expect(moreLink?.className).toContain('text-accent-600');
   });
 
@@ -130,8 +140,8 @@ describe('GlobalMobileNav', () => {
   // these tests exist purely to catch the class being dropped later.
   describe('label wrapping (Issue #1211)', () => {
     it.each([
-      ['en', ['Home', 'Chat', 'Sessions', 'Review', 'More']],
-      ['ja', ['ホーム', 'チャット', 'セッション', 'レビュー', 'その他']],
+      ['en', ['Sessions', 'Review', 'Settings']],
+      ['ja', ['セッション', 'レビュー', '設定']],
     ] as const)('keeps every %s tab label on one line', (locale, labels) => {
       intlLocale.current = locale;
       render(<GlobalMobileNav />);
@@ -169,18 +179,16 @@ describe('GlobalMobileNav', () => {
       intlLocale.current = 'ja';
       render(<GlobalMobileNav />);
 
-      expect(screen.getByText('ホーム')).toBeDefined();
-      expect(screen.getByText('チャット')).toBeDefined();
       expect(screen.getByText('セッション')).toBeDefined();
       expect(screen.getByText('レビュー')).toBeDefined();
-      expect(screen.getByText('その他')).toBeDefined();
+      expect(screen.getByText('設定')).toBeDefined();
     });
 
     it('leaves no English tab label behind under the ja locale', () => {
       intlLocale.current = 'ja';
       render(<GlobalMobileNav />);
 
-      for (const label of ['Home', 'Chat', 'Sessions', 'Review', 'More']) {
+      for (const label of ['Sessions', 'Review', 'Settings']) {
         expect(screen.queryByText(label), `"${label}" is still hardcoded English`).toBeNull();
       }
     });
@@ -199,6 +207,69 @@ describe('GlobalMobileNav', () => {
       const sessionsLink = screen.getByText('セッション').closest('a');
       expect(sessionsLink?.getAttribute('href')).toBe('/sessions');
       expect(sessionsLink?.className).toContain('text-accent-600');
+    });
+  });
+
+  describe('branch drawer button (Issue #2642)', () => {
+    it('renders the branch button as the first slot of the bar', () => {
+      sidebarMock.value = { isMobileDrawerOpen: false, openMobileDrawer: vi.fn() };
+      render(<GlobalMobileNav />);
+
+      const button = screen.getByTestId('mobile-nav-open-sidebar');
+      expect(button).toBeDefined();
+      expect(screen.getByTestId('global-mobile-nav').querySelector('div')!.firstElementChild).toBe(button);
+      expect(button.getAttribute('type')).toBe('button');
+    });
+
+    it('labels the button "Branches" in en and "ブランチ" in ja, on one line', () => {
+      sidebarMock.value = { isMobileDrawerOpen: false, openMobileDrawer: vi.fn() };
+      const { unmount } = render(<GlobalMobileNav />);
+      expect(screen.getByTestId('mobile-nav-open-sidebar').textContent).toContain('Branches');
+      expect(
+        screen.getByTestId('mobile-nav-open-sidebar').querySelector('span')?.className
+      ).toContain('whitespace-nowrap');
+      unmount();
+
+      intlLocale.current = 'ja';
+      render(<GlobalMobileNav />);
+      expect(screen.getByTestId('mobile-nav-open-sidebar').textContent).toContain('ブランチ');
+      expect(
+        screen.getByTestId('mobile-nav-open-sidebar').querySelector('span')?.className
+      ).toContain('whitespace-nowrap');
+    });
+
+    it('matches the other slots and shows the menu icon', () => {
+      sidebarMock.value = { isMobileDrawerOpen: false, openMobileDrawer: vi.fn() };
+      render(<GlobalMobileNav />);
+
+      const button = screen.getByTestId('mobile-nav-open-sidebar');
+      expect(button.className).toContain('flex-1');
+      expect(button.className).toContain('text-xs');
+      expect(button.querySelector('svg.lucide-menu')).not.toBeNull();
+    });
+
+    it('opens the mobile drawer on click', () => {
+      const openMobileDrawer = vi.fn();
+      sidebarMock.value = { isMobileDrawerOpen: false, openMobileDrawer };
+      render(<GlobalMobileNav />);
+
+      fireEvent.click(screen.getByTestId('mobile-nav-open-sidebar'));
+      expect(openMobileDrawer).toHaveBeenCalledTimes(1);
+    });
+
+    it('omits only the button when there is no SidebarProvider', () => {
+      sidebarMock.value = null;
+      render(<GlobalMobileNav />);
+
+      expect(screen.queryByTestId('mobile-nav-open-sidebar')).toBeNull();
+      expect(screen.getByTestId('global-mobile-nav')).toBeDefined();
+    });
+
+    it('does not render the bar while the drawer is open', () => {
+      sidebarMock.value = { isMobileDrawerOpen: true, openMobileDrawer: vi.fn() };
+      render(<GlobalMobileNav />);
+
+      expect(screen.queryByTestId('global-mobile-nav')).toBeNull();
     });
   });
 });

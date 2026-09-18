@@ -13,22 +13,20 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import { VersionSection } from '@/components/worktree/VersionSection';
 import type { UpdateCheckResponse } from '@/lib/api-client';
+import { makeAppUpdateValue } from '@tests/helpers/app-update-context';
 
-// Mock useUpdateCheck hook
-const mockUseUpdateCheck = vi.fn();
-vi.mock('@/hooks/useUpdateCheck', () => ({
-  useUpdateCheck: () => mockUseUpdateCheck(),
+// Issue #2654: VersionSection and the banner read AppUpdateContext.
+const mockUseAppUpdate = vi.fn();
+vi.mock('@/contexts/AppUpdateContext', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/contexts/AppUpdateContext')>()),
+  useAppUpdate: () => mockUseAppUpdate(),
 }));
 
 describe('VersionSection', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     // Default: no update, loaded
-    mockUseUpdateCheck.mockReturnValue({
-      data: null,
-      loading: false,
-      error: null,
-    });
+    mockUseAppUpdate.mockReturnValue(makeAppUpdateValue());
   });
 
   it('should render version number', () => {
@@ -53,11 +51,7 @@ describe('VersionSection', () => {
   });
 
   it('should show loading indicator when loading', () => {
-    mockUseUpdateCheck.mockReturnValue({
-      data: null,
-      loading: true,
-      error: null,
-    });
+    mockUseAppUpdate.mockReturnValue(makeAppUpdateValue({ checking: true }));
 
     render(<VersionSection version="v0.2.3" />);
 
@@ -83,11 +77,7 @@ describe('VersionSection', () => {
       updateCommand: 'npm install -g commandmate@latest',
     };
 
-    mockUseUpdateCheck.mockReturnValue({
-      data: mockData,
-      loading: false,
-      error: null,
-    });
+    mockUseAppUpdate.mockReturnValue(makeAppUpdateValue({ updateInfo: mockData }));
 
     render(<VersionSection version="v0.2.3" />);
 
@@ -107,11 +97,7 @@ describe('VersionSection', () => {
       updateCommand: null,
     };
 
-    mockUseUpdateCheck.mockReturnValue({
-      data: mockData,
-      loading: false,
-      error: null,
-    });
+    mockUseAppUpdate.mockReturnValue(makeAppUpdateValue({ updateInfo: mockData }));
 
     render(<VersionSection version="v0.2.3" />);
 
@@ -131,11 +117,7 @@ describe('VersionSection', () => {
       updateCommand: null,
     };
 
-    mockUseUpdateCheck.mockReturnValue({
-      data: mockData,
-      loading: false,
-      error: null,
-    });
+    mockUseAppUpdate.mockReturnValue(makeAppUpdateValue({ updateInfo: mockData }));
 
     render(<VersionSection version="v0.2.3" />);
 
@@ -143,11 +125,7 @@ describe('VersionSection', () => {
   });
 
   it('should not show banner when data is null (error)', () => {
-    mockUseUpdateCheck.mockReturnValue({
-      data: null,
-      loading: false,
-      error: 'Network error',
-    });
+    mockUseAppUpdate.mockReturnValue(makeAppUpdateValue({ updateInfo: null }));
 
     render(<VersionSection version="v0.2.3" />);
 

@@ -50,6 +50,8 @@ import { getInstanceLabel, type AgentInstance, type CLIToolType } from '@/lib/cl
 import { useCopyFeedback } from '@/hooks/useCopyFeedback';
 import { AGENT_INSTANCE_DND_MIME } from '@/components/worktree/TerminalSplitPane';
 import { PcDisplaySizeSelector } from '@/components/layout/PcDisplaySizeSelector';
+import { AppUpdateButton } from '@/components/common/AppUpdateButton';
+import { useAppUpdate } from '@/contexts/AppUpdateContext';
 
 // ============================================================================
 // Constants
@@ -751,7 +753,6 @@ interface DesktopHeaderProps {
   description?: string;
   status: WorktreeStatus;
   gitStatus?: GitStatus;
-  onBackClick: () => void;
   onInfoClick: () => void;
   /**
    * Optional sidebar toggle callback.
@@ -965,14 +966,13 @@ function useDesktopHeaderFit(
   return { pillBudget: current.pillBudget, squeezed: current.squeezed };
 }
 
-/** Desktop header with hamburger menu, back button, worktree name, repository, status, and info button */
+/** Desktop header with worktree name, repository, status, and info button */
 export const DesktopHeader = memo(function DesktopHeader({
   worktreeName,
   repositoryName,
   description: worktreeDescription,
   status,
   gitStatus,
-  onBackClick,
   onInfoClick,
   hasUpdate,
   worktreeStatus,
@@ -1086,6 +1086,17 @@ export const DesktopHeader = memo(function DesktopHeader({
 
   const showKillButton = Boolean(onKillSession) && activeInstanceRunning;
 
+  // Issue #2654: <AppUpdateButton> sits in the controls group, so whether it is
+  // there — and which label it carries — changes how wide that group is. It is
+  // a child with its own context subscription, so it appears (when the check
+  // resolves) and changes width (while the update runs) without re-rendering
+  // this header; the fit would keep a stale budget and the identity group would
+  // collide instead of folding. Folding it into the key below is what makes the
+  // header re-measure on both edges. The button's own visibility rule lives in
+  // the button; these are the facts it reads.
+  const appUpdate = useAppUpdate();
+  const appUpdateKey = `${appUpdate.updateInfo?.latestVersion ?? ''}:${appUpdate.hasUpdate}:${appUpdate.state}`;
+
   // Issue #2481: everything, besides the pill budget itself, that changes how
   // wide the row is. A change here may have made room, so the fit restarts
   // from MAX_HEADER_AGENT_PILLS. The verification chip is a node and cannot be
@@ -1100,6 +1111,7 @@ export const DesktopHeader = memo(function DesktopHeader({
     gitStatus?.isDirty ? 'dirty' : '',
     showKillButton ? 'end' : '',
     awaitingInstruction ? 'awaiting' : '',
+    appUpdateKey,
     ...headerItems.map(
       (it) => `${it.item.id}:${getInstanceLabel(it.item)}:${it.status}:${it.isActive ? 'active' : ''}`
     ),
@@ -1120,42 +1132,18 @@ export const DesktopHeader = memo(function DesktopHeader({
       data-testid="desktop-header"
       className="flex items-center justify-between gap-3 px-4 py-3 bg-surface border-b border-border"
     >
-      {/* Left: Back button and title (Issue #747: hamburger moved to ActivityBar).
+      {/* Left: status and title (Issue #747: hamburger moved to ActivityBar;
+          Issue #2647: the Home button and its divider were removed).
           Issue #2481: `min-w-0` makes this group — not the controls on the
           right — the one that gives way on a narrow header: the name, branch
-          and chip title truncate. The back link, divider and dot keep their
-          width. Clipped only as the fit's last resort, because the chip's
-          reason popover hangs out of this group and a clip would cut it. */}
+          and chip title truncate. The dot keeps its width. Clipped only as the
+          fit's last resort, because the chip's reason popover hangs out of this
+          group and a clip would cut it. */}
       <div
         ref={identityRef}
         data-testid="desktop-header-identity"
         className={`flex items-center gap-3 min-w-0${headerFit.squeezed ? ' overflow-x-clip' : ''}`}
       >
-        {/* Issue #1061: paddingless nav link — Button base px-4 py-2 would enlarge/misalign the header back control — 残置 */}
-        <button
-          type="button"
-          onClick={onBackClick}
-          className="flex flex-shrink-0 items-center gap-1 text-muted-foreground hover:text-foreground transition-colors"
-          aria-label={tWorktree('detail.goBack')}
-          data-testid="worktree-back-button"
-        >
-          <svg
-            className="w-5 h-5"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-            aria-hidden="true"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0a1 1 0 01-1-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 01-1 1h-2z"
-            />
-          </svg>
-          <span className="text-sm font-medium">{tWorktree('detail.home')}</span>
-        </button>
-        <div className="w-px h-6 flex-shrink-0 bg-border" aria-hidden="true" />
         {/* Worktree-level status (Issue #1078: unified StatusDot visual language) */}
         <StatusDot
           data-testid="desktop-status-indicator"
@@ -1486,6 +1474,10 @@ export const DesktopHeader = memo(function DesktopHeader({
             ))}
           </select>
         )}
+        {/* Issue #2654: app update entry point. Lives in the controls group,
+            which never shrinks (#2481), so it is never clipped; a narrow
+            header folds agent pills instead. */}
+        <AppUpdateButton />
         {/* Issue #917: PC display-size selector. The global Header (where it
             also lives) is suppressed on /worktrees/[id] (useLayoutConfig
             showGlobalNav:false), so it is surfaced here too. PC only — the

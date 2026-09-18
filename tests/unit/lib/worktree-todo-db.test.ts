@@ -15,6 +15,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Database from 'better-sqlite3';
 import { runMigrations } from '@/lib/db/db-migrations';
+import * as dbBarrel from '@/lib/db';
 import { upsertWorktree, deleteWorktreesByIds } from '@/lib/db';
 import {
   getTodosByWorktreeId,
@@ -236,5 +237,22 @@ describe('worktree-todo-db', () => {
         .all(worktreeId);
       expect(rows).toHaveLength(0);
     });
+  });
+});
+
+describe('@/lib/db barrel after the Home ToDo removal (Issue #2650)', () => {
+  it('no longer exports the repository-scoped ToDo functions', () => {
+    for (const name of ['getTodosByRepositoryId', 'getAllTodos', 'getTodoById', 'createTodo', 'updateTodo', 'deleteTodo']) {
+      expect(name in dbBarrel, name).toBe(false);
+    }
+  });
+
+  it('still exports the branch ToDo functions under their aliases', () => {
+    expect(typeof dbBarrel.getTodosByWorktreeId).toBe('function');
+    expect(typeof dbBarrel.getWorktreeTodoById).toBe('function');
+    expect(typeof dbBarrel.createWorktreeTodo).toBe('function');
+    expect(typeof dbBarrel.updateWorktreeTodo).toBe('function');
+    expect(typeof dbBarrel.deleteWorktreeTodo).toBe('function');
+    expect(typeof dbBarrel.reorderWorktreeTodos).toBe('function');
   });
 });

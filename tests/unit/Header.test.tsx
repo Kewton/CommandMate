@@ -59,35 +59,46 @@ describe('Header', () => {
     expect(screen.getByText('MyApp')).toBeDefined();
   });
 
-  it('should render 5 navigation links: Home, Sessions, Repos, Review/Report, More', () => {
+  it('should render 4 navigation links: Sessions, Repos, Review/Report, Settings', () => {
     render(<Header />);
-    expect(screen.getByText('Home')).toBeDefined();
     expect(screen.getByText('Sessions')).toBeDefined();
     expect(screen.getByText('Repos')).toBeDefined();
     expect(screen.getByText('Review/Report')).toBeDefined();
-    expect(screen.getByText('More')).toBeDefined();
+    expect(screen.getByText('Settings')).toBeDefined();
+    expect(screen.queryByText('Home')).toBeNull();
+    expect(screen.queryByText('Chat')).toBeNull();
   });
 
   it('should have correct hrefs for navigation links', () => {
     render(<Header />);
-    const homeLink = screen.getByText('Home').closest('a');
     const sessionsLink = screen.getByText('Sessions').closest('a');
     const reposLink = screen.getByText('Repos').closest('a');
     const reviewLink = screen.getByText('Review/Report').closest('a');
-    const moreLink = screen.getByText('More').closest('a');
+    const moreLink = screen.getByText('Settings').closest('a');
 
-    expect(homeLink?.getAttribute('href')).toBe('/');
     expect(sessionsLink?.getAttribute('href')).toBe('/sessions');
     expect(reposLink?.getAttribute('href')).toBe('/repositories');
     expect(reviewLink?.getAttribute('href')).toBe('/review');
     expect(moreLink?.getAttribute('href')).toBe('/more');
   });
 
-  it('should highlight the active Home link when on /', () => {
+  it('should not mark any nav link active on / (Issue #2642)', () => {
     mockPathname.mockReturnValue('/');
     render(<Header />);
-    const homeLink = screen.getByText('Home').closest('a');
-    expect(homeLink?.className).toContain('text-accent-600');
+    const nav = screen.getByRole('navigation');
+    expect(nav.querySelectorAll('a[aria-current="page"]').length).toBe(0);
+  });
+
+  it('keeps the logo linking to / (Issue #2642)', () => {
+    render(<Header />);
+    expect(screen.getByText('CommandMate').closest('a')?.getAttribute('href')).toBe('/');
+  });
+
+  it('has no / or /chat link inside the nav (Issue #2642)', () => {
+    render(<Header />);
+    const nav = screen.getByRole('navigation');
+    expect(nav.querySelector('a[href="/"]')).toBeNull();
+    expect(nav.querySelector('a[href="/chat"]')).toBeNull();
   });
 
   it('should highlight the active Sessions link when on /sessions', () => {
@@ -140,19 +151,17 @@ describe('Header', () => {
       intlLocale.current = 'ja';
       render(<Header />);
 
-      expect(screen.getByText('ホーム')).toBeDefined();
-      expect(screen.getByText('チャット')).toBeDefined();
       expect(screen.getByText('セッション')).toBeDefined();
       expect(screen.getByText('リポジトリ')).toBeDefined();
       expect(screen.getByText('レビュー/レポート')).toBeDefined();
-      expect(screen.getByText('その他')).toBeDefined();
+      expect(screen.getByText('設定')).toBeDefined();
     });
 
     it('leaves no English nav label behind under the ja locale', () => {
       intlLocale.current = 'ja';
       render(<Header />);
 
-      for (const label of ['Home', 'Chat', 'Sessions', 'Repos', 'Review/Report', 'More']) {
+      for (const label of ['Sessions', 'Repos', 'Review/Report', 'Settings']) {
         expect(screen.queryByText(label), `"${label}" is still hardcoded English`).toBeNull();
       }
     });

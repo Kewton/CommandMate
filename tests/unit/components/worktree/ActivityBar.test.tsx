@@ -3,11 +3,14 @@
  * @vitest-environment jsdom
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { act, render, screen, fireEvent } from '@testing-library/react';
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { Files, StickyNote } from 'lucide-react';
 import { ActivityBar } from '@/components/worktree/ActivityBar';
 import { ACTIVITIES } from '@/config/activity-bar-config';
 import { TOOLTIP_DELAY_MS } from '@/components/common/Tooltip';
+import { installRadixJsdomPolyfills } from '@tests/helpers/radix-jsdom';
+import { AuthProvider } from '@/contexts/AuthContext';
 
 // Issue #1277: this file asserts rendered wording (tab aria-labels / tooltips
 // resolved from ACTIVITIES[].labelKey), so it must go through the real
@@ -26,10 +29,26 @@ vi.mock('@/contexts/SidebarContext', () => ({
   useSidebarContext: () => ({ isOpen: sidebarMock.isOpen, toggle: sidebarMock.toggle }),
 }));
 
+const routerMock = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn() }));
+vi.mock('next/navigation', () => ({
+  useRouter: () => routerMock,
+}));
+
+const themeMock = vi.hoisted(() => ({ theme: 'dark' as string | undefined, setTheme: vi.fn() }));
+vi.mock('next-themes', () => ({
+  useTheme: () => ({ theme: themeMock.theme, setTheme: themeMock.setTheme }),
+}));
+
+const localeMock = vi.hoisted(() => ({ switchLocale: vi.fn() }));
+vi.mock('@/hooks/useLocaleSwitch', () => ({
+  useLocaleSwitch: () => ({ currentLocale: 'en', switchLocale: localeMock.switchLocale }),
+}));
+
 describe('ActivityBar', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     sidebarMock.isOpen = true;
+    themeMock.theme = 'dark';
   });
 
   it('renders all 10 activity tabs', () => {
@@ -210,6 +229,58 @@ describe('ActivityBar', () => {
     }
   });
 
+  // Issue #2616: at 20px the single-sheet `File` the file tree used to show and
+  // the `StickyNote` of notes were the same dog-eared page. This regression only
+  // shows up visually, so the icons are pinned here: the config by identity, and
+  // the rendered buttons by the `lucide-<name>` class lucide puts on the svg.
+  describe('Icons (Issue #2616)', () => {
+    /** The `lucide-<name>` class(es) of the svg the given tab draws. */
+    function iconClassOf(tab: HTMLElement): string {
+      const svg = tab.querySelector('svg');
+      expect(svg).not.toBeNull();
+      return Array.from(svg!.classList)
+        .filter((c) => c.startsWith('lucide-'))
+        .sort()
+        .join(' ');
+    }
+
+    it('configures the file tree with the two-sheet `Files` icon', () => {
+      const files = ACTIVITIES.find((a) => a.id === 'files');
+      expect(files?.icon).toBe(Files);
+    });
+
+    it('keeps the file tree and notes on different icons', () => {
+      const files = ACTIVITIES.find((a) => a.id === 'files');
+      const notes = ACTIVITIES.find((a) => a.id === 'notes');
+      expect(notes?.icon).toBe(StickyNote);
+      expect(files?.icon).not.toBe(notes?.icon);
+    });
+
+    it('uses no icon twice across the activities', () => {
+      const icons = ACTIVITIES.map((a) => a.icon);
+      expect(new Set(icons).size).toBe(icons.length);
+      expect(icons).toHaveLength(10);
+    });
+
+    it('draws lucide-files for the file tree and lucide-sticky-note for notes', () => {
+      render(<ActivityBar active="files" onToggle={() => {}} />);
+      const filesTab = screen.getByTestId('activity-bar-button-files');
+      const notesTab = screen.getByTestId('activity-bar-button-notes');
+      expect(filesTab.querySelector('svg.lucide-files')).not.toBeNull();
+      expect(notesTab.querySelector('svg.lucide-sticky-note')).not.toBeNull();
+      expect(notesTab.querySelector('svg.lucide-files')).toBeNull();
+      expect(iconClassOf(filesTab)).not.toBe(iconClassOf(notesTab));
+    });
+
+    it('draws a distinct icon on every rendered tab', () => {
+      render(<ActivityBar active="files" onToggle={() => {}} />);
+      const classes = screen.getAllByRole('tab').map(iconClassOf);
+      expect(classes).toHaveLength(10);
+      for (const c of classes) expect(c).not.toBe('');
+      expect(new Set(classes).size).toBe(classes.length);
+    });
+  });
+
   describe('Tooltip integration (Issue #730)', () => {
     beforeEach(() => {
       vi.useFakeTimers();
@@ -249,6 +320,209 @@ describe('ActivityBar', () => {
       // screen readers announce the label exactly once.
       expect(tab).toHaveAttribute('aria-label');
       expect(tab).not.toHaveAttribute('aria-describedby');
+    });
+  });
+
+  describe('Settings menu (Issue #2645)', () => {
+    beforeAll(() => installRadixJsdomPolyfills());
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
+    it('renders the settings gear button outside tablist at the bottom', () => {
+      render(<ActivityBar active="files" onToggle={() => {}} />);
+      const button = screen.getByTestId('activity-bar-settings');
+      expect(button).toHaveAttribute('aria-label', 'Settings');
+      expect(button).toHaveAttribute('aria-haspopup', 'menu');
+      expect(button).toHaveAttribute('aria-expanded', 'false');
+      expect(button.querySelector('svg.lucide-settings')).not.toBeNull();
+
+      expect(button).not.toHaveAttribute('role', 'tab');
+      const tablist = screen.getByRole('tablist');
+      expect(tablist).not.toContainElement(button);
+      expect(screen.getAllByRole('tab')).toHaveLength(10);
+
+      expect(tablist.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+
+      const mtAuto = button.closest('.mt-auto');
+      expect(mtAuto).not.toBeNull();
+      const activityBar = screen.getByTestId('activity-bar');
+      expect(activityBar.lastElementChild).toBe(mtAuto);
+    });
+
+    it('opens the dropdown menu with items, radios, and default checked states', () => {
+      render(<ActivityBar active="files" onToggle={() => {}} />);
+      const button = screen.getByTestId('activity-bar-settings');
+      fireEvent.keyDown(button, { key: 'Enter' });
+
+      expect(screen.getByRole('menu')).toBeInTheDocument();
+      expect(button).toHaveAttribute('aria-expanded', 'true');
+
+      const menuitems = screen.getAllByRole('menuitem').map((el) => el.textContent);
+      expect(menuitems).toEqual(['Settings', 'Skills', 'GitHub']);
+
+      const radios = screen.getAllByRole('menuitemradio').map((el) => el.textContent);
+      expect(radios).toEqual(['Light', 'Dark', 'System', 'English', '日本語']);
+
+      expect(screen.getByRole('menuitemradio', { name: 'Dark' })).toHaveAttribute('data-state', 'checked');
+      expect(screen.getByRole('menuitemradio', { name: 'Light' })).toHaveAttribute('data-state', 'unchecked');
+      expect(screen.getByRole('menuitemradio', { name: 'English' })).toHaveAttribute('data-state', 'checked');
+    });
+
+    it('marks System as checked when theme is undefined', () => {
+      themeMock.theme = undefined;
+      render(<ActivityBar active="files" onToggle={() => {}} />);
+      fireEvent.keyDown(screen.getByTestId('activity-bar-settings'), { key: 'Enter' });
+
+      expect(screen.getByRole('menuitemradio', { name: 'System' })).toHaveAttribute('data-state', 'checked');
+    });
+
+    it('displays the app version when NEXT_PUBLIC_APP_VERSION is set', () => {
+      vi.stubEnv('NEXT_PUBLIC_APP_VERSION', '9.9.9');
+      render(<ActivityBar active="files" onToggle={() => {}} />);
+      fireEvent.keyDown(screen.getByTestId('activity-bar-settings'), { key: 'Enter' });
+
+      expect(screen.getByTestId('activity-bar-settings-version')).toHaveTextContent('CommandMate v9.9.9');
+    });
+
+    it('handles navigation, theme change, locale change, and external link without triggering onToggle or toggleSidebar', () => {
+      const onToggle = vi.fn();
+      render(<ActivityBar active="files" onToggle={onToggle} />);
+      const button = screen.getByTestId('activity-bar-settings');
+      const openMenu = () => {
+        fireEvent.keyDown(button, { key: 'Enter' });
+      };
+
+      // Settings
+      openMenu();
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Settings' }));
+      expect(routerMock.push).toHaveBeenCalledWith('/more');
+
+      // Skills
+      openMenu();
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Skills' }));
+      expect(routerMock.push).toHaveBeenCalledWith('/skills');
+
+      // Light & System
+      openMenu();
+      fireEvent.click(screen.getByRole('menuitemradio', { name: 'Light' }));
+      expect(themeMock.setTheme).toHaveBeenCalledWith('light');
+
+      openMenu();
+      fireEvent.click(screen.getByRole('menuitemradio', { name: 'System' }));
+      expect(themeMock.setTheme).toHaveBeenCalledWith('system');
+
+      // 日本語
+      openMenu();
+      fireEvent.click(screen.getByRole('menuitemradio', { name: '日本語' }));
+      expect(localeMock.switchLocale).toHaveBeenCalledWith('ja');
+
+      // GitHub
+      openMenu();
+      const githubItem = screen.getByRole('menuitem', { name: 'GitHub' });
+      expect(githubItem.tagName).toBe('A');
+      expect(githubItem).toHaveAttribute('href', 'https://github.com/kewton/MyCodeBranchDesk');
+      expect(githubItem).toHaveAttribute('target', '_blank');
+      expect(githubItem).toHaveAttribute('rel', 'noopener noreferrer');
+
+      // Neither onToggle nor sidebarMock.toggle should have been called
+      expect(onToggle).not.toHaveBeenCalled();
+      expect(sidebarMock.toggle).not.toHaveBeenCalled();
+    });
+
+    it('does not show Logout item when AuthProvider is not present', () => {
+      render(<ActivityBar active="files" onToggle={() => {}} />);
+      fireEvent.keyDown(screen.getByTestId('activity-bar-settings'), { key: 'Enter' });
+      expect(screen.queryByRole('menuitem', { name: 'Logout' })).toBeNull();
+    });
+
+    it('shows Logout item when authEnabled is true and logs out on click', async () => {
+      const originalLocation = window.location;
+      const hrefSetter = vi.fn();
+      const locationObj = { ...originalLocation };
+      Object.defineProperty(locationObj, 'href', {
+        get: () => 'http://localhost/',
+        set: (val: string) => {
+          hrefSetter(val);
+        },
+        configurable: true,
+      });
+      Object.defineProperty(window, 'location', {
+        writable: true,
+        configurable: true,
+        value: locationObj,
+      });
+
+      const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+      global.fetch = fetchMock as unknown as typeof fetch;
+
+      try {
+        render(
+          <AuthProvider authEnabled>
+            <ActivityBar active="files" onToggle={() => {}} />
+          </AuthProvider>
+        );
+        fireEvent.keyDown(screen.getByTestId('activity-bar-settings'), { key: 'Enter' });
+        const logoutItem = screen.getByRole('menuitem', { name: 'Logout' });
+        expect(logoutItem).toBeInTheDocument();
+
+        fireEvent.click(logoutItem);
+
+        expect(fetchMock).toHaveBeenCalledWith('/api/auth/logout', { method: 'POST' });
+        await waitFor(() => {
+          expect(hrefSetter).toHaveBeenCalledWith('/login');
+        });
+      } finally {
+        Object.defineProperty(window, 'location', {
+          writable: true,
+          configurable: true,
+          value: originalLocation,
+        });
+      }
+    });
+
+    it('still navigates to /login even if logout fetch rejects', async () => {
+      const originalLocation = window.location;
+      const hrefSetter = vi.fn();
+      const locationObj = { ...originalLocation };
+      Object.defineProperty(locationObj, 'href', {
+        get: () => 'http://localhost/',
+        set: (val: string) => {
+          hrefSetter(val);
+        },
+        configurable: true,
+      });
+      Object.defineProperty(window, 'location', {
+        writable: true,
+        configurable: true,
+        value: locationObj,
+      });
+
+      const fetchMock = vi.fn().mockRejectedValue(new Error('Network failure'));
+      global.fetch = fetchMock as unknown as typeof fetch;
+
+      try {
+        render(
+          <AuthProvider authEnabled>
+            <ActivityBar active="files" onToggle={() => {}} />
+          </AuthProvider>
+        );
+        fireEvent.keyDown(screen.getByTestId('activity-bar-settings'), { key: 'Enter' });
+        const logoutItem = screen.getByRole('menuitem', { name: 'Logout' });
+
+        fireEvent.click(logoutItem);
+
+        expect(fetchMock).toHaveBeenCalledWith('/api/auth/logout', { method: 'POST' });
+        await waitFor(() => {
+          expect(hrefSetter).toHaveBeenCalledWith('/login');
+        });
+      } finally {
+        Object.defineProperty(window, 'location', {
+          writable: true,
+          configurable: true,
+          value: originalLocation,
+        });
+      }
     });
   });
 });

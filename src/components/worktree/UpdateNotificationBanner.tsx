@@ -2,6 +2,8 @@
  * UpdateNotificationBanner Component
  * Issue #257: Version update notification feature
  * Issue #1198: one-click self-update button
+ * Issue #2654: reads AppUpdateContext; the state machine and the confirm dialog
+ * live in AppUpdateProvider
  *
  * [MF-001] Separated from WorktreeDetailRefactored.tsx to maintain SRP.
  * Displays update notification when a newer version is available.
@@ -12,41 +14,10 @@
 
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { ApiError, appApi } from '@/lib/api-client';
+import { useAppUpdate } from '@/contexts/AppUpdateContext';
 import { Button } from '@/components/ui/Button';
-import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Spinner } from '@/components/ui/Spinner';
-
-/** Props for UpdateNotificationBanner */
-export interface UpdateNotificationBannerProps {
-  hasUpdate: boolean;
-  latestVersion: string | null;
-  releaseUrl: string | null;
-  updateCommand: string | null;
-  installType: 'global' | 'local' | 'npx' | 'unknown';
-}
-
-/**
- * Banner lifecycle.
- * `no-restart` is a terminal success state, not a failure: the update landed
- * but this server has no PID file, so it keeps running the old version.
- */
-type UpdateState =
-  | 'idle'
-  | 'confirming'
-  | 'starting'
-  | 'updating'
-  | 'no-restart'
-  | 'timeout'
-  | 'error';
-
-/** How often the liveness probe runs while waiting for the restart */
-const POLL_INTERVAL_MS = 2000;
-
-/** Give up waiting for the server to come back after this long */
-const UPDATE_TIMEOUT_MS = 5 * 60 * 1000;
 
 /** Fixed command shown when the user has to finish the update by hand */
 const MANUAL_UPDATE_COMMAND = 'commandmate update';
@@ -61,107 +32,36 @@ const NPX_UPDATE_COMMAND = 'npx commandmate@latest';
 
 /**
  * Banner displaying version update notification.
- * Only renders when hasUpdate is true.
+ * Shown while an update is available, and also after one was started
+ * (a recheck may no longer report an update once the new version is installed).
  *
  * Features:
  * - i18n support (worktree.update.* keys)
  * - GitHub Releases link (target="_blank", rel="noopener noreferrer")
  * - Install-type-specific update command display
- * - One-click self-update (global installs only, Issue #1198)
+ * - One-click self-update (global / npx installs, Issue #1198 / #1395)
  * - Database preservation notice
  * - Accessibility: role="status" for screen reader announcement (WCAG 4.1.3)
  */
-export function UpdateNotificationBanner({
-  hasUpdate,
-  latestVersion,
-  releaseUrl,
-  updateCommand,
-  installType,
-}: UpdateNotificationBannerProps) {
+export function UpdateNotificationBanner() {
   const t = useTranslations('worktree');
-  const [state, setState] = useState<UpdateState>('idle');
-  const [logPath, setLogPath] = useState<string | null>(null);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const { updateInfo, hasUpdate, canSelfUpdate, state, logPath, errorKey, openConfirm } =
+    useAppUpdate();
 
-  // Survives re-renders so a restart that completes between two polls is not
-  // missed, and so the effect below can stay keyed on `state` alone.
-  const seenDownRef = useRef(false);
+  // Shown while an update is available, and also after one was started
+  // (a recheck may no longer report an update once the new version is installed).
+  if (!updateInfo || (!hasUpdate && state === 'idle')) {
+    return null;
+  }
 
+  const { latestVersion, releaseUrl, updateCommand, installType } = updateInfo;
   const isGlobal = installType === 'global';
   // Issue #1395: an npx server can update in place now — the route relaunches it
   // from a fresh npx cache — so it gets the update button like a global install.
   const isNpx = installType === 'npx';
-  const canSelfUpdate = isGlobal || isNpx;
   // Issue #1395: `commandmate update` is a no-op under npx (§4.3), so the manual
   // fallback shown on timeout/error must be the npx relaunch command instead.
   const manualCommand = isNpx ? NPX_UPDATE_COMMAND : MANUAL_UPDATE_COMMAND;
-
-  const handleConfirm = useCallback(async () => {
-    setState('starting');
-    try {
-      const result = await appApi.startUpdate();
-      setLogPath(result.logPath);
-      // Issue #1198 決定3: with no PID file the update never stops this server,
-      // so waiting for it to drop would hang until the timeout.
-      setState(result.willRestart ? 'updating' : 'no-restart');
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 400) {
-        setErrorMessage(t('update.errorNotGlobal'));
-      } else if (error instanceof ApiError && error.status === 409) {
-        setErrorMessage(t('update.errorInProgress'));
-      } else {
-        setErrorMessage(t('update.errorGeneric'));
-      }
-      setState('error');
-    }
-  }, [t]);
-
-  /**
-   * Watch the server go down and come back, then reload onto the new version.
-   *
-   * `commandmate update` stops the server before `npm install -g` and only
-   * starts it again afterwards (update.ts steps 6-9), so the outage is tens of
-   * seconds — far wider than POLL_INTERVAL_MS. Probe failures here are the
-   * expected signal and are swallowed by appApi.ping(): the update must not
-   * spray connection-error toasts.
-   */
-  useEffect(() => {
-    if (state !== 'updating') return;
-
-    let cancelled = false;
-    const startedAt = Date.now();
-    seenDownRef.current = false;
-
-    const timer = setInterval(async () => {
-      if (cancelled) return;
-
-      if (Date.now() - startedAt > UPDATE_TIMEOUT_MS) {
-        setState('timeout');
-        return;
-      }
-
-      const alive = await appApi.ping();
-      if (cancelled) return;
-
-      if (!alive) {
-        seenDownRef.current = true;
-        return;
-      }
-      if (seenDownRef.current) {
-        window.location.reload();
-      }
-    }, POLL_INTERVAL_MS);
-
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
-  }, [state]);
-
-  if (!hasUpdate) {
-    return null;
-  }
-
   const isBusy = state === 'starting' || state === 'updating';
 
   return (
@@ -186,7 +86,7 @@ export function UpdateNotificationBanner({
           variant="primary"
           size="sm"
           className="mb-2"
-          onClick={() => setState('confirming')}
+          onClick={openConfirm}
           data-testid="update-now-button"
         >
           {t('update.updateNow')}
@@ -231,7 +131,7 @@ export function UpdateNotificationBanner({
       {state === 'error' && (
         <div className="mb-2" data-testid="update-error">
           <p className="text-sm font-medium text-accent-800">{t('update.errorTitle')}</p>
-          <p className="text-xs text-accent-600 mt-1">{errorMessage}</p>
+          <p className="text-xs text-accent-600 mt-1">{errorKey ? t(errorKey) : null}</p>
           <code className="block bg-accent-100 rounded px-2 py-1 mt-1 text-xs text-accent-900 font-mono">
             {manualCommand}
           </code>
@@ -268,15 +168,6 @@ export function UpdateNotificationBanner({
       <p className="text-xs text-accent-500 mt-2">
         {t('update.dataPreserved')}
       </p>
-
-      <ConfirmDialog
-        isOpen={state === 'confirming'}
-        title={t('update.confirmTitle')}
-        description={t('update.confirmDescription', { version: latestVersion ?? '' })}
-        confirmLabel={t('update.confirmButton')}
-        onConfirm={handleConfirm}
-        onCancel={() => setState('idle')}
-      />
     </div>
   );
 }

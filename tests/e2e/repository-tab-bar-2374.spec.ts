@@ -11,6 +11,11 @@
  * no worktrees of its own; `/api/worktrees` and `/api/sidebar/group-order` are
  * stubbed in the browser. Nothing is written to the server's DB, so the
  * destructive specs running in parallel are unaffected.
+ *
+ * Issue #2643: the strip is asserted from `/sessions`, not `/`. The stub returns
+ * a non-empty worktree list, so `/` now redirects (to the last opened branch, or
+ * `/sessions`). The strip lives in `AppShell`, so `/sessions` shows the same one
+ * and the tabs are tested without riding on that redirect.
  */
 
 import { test, expect, type Page } from '@playwright/test';
@@ -152,7 +157,7 @@ test.describe('Repository tab bar (Issue #2374)', () => {
   test('appears with the sidebar collapsed and keeps the sidebar order', async ({
     page,
   }) => {
-    await page.goto('/');
+    await page.goto('/sessions');
 
     const bar = page.getByTestId('repository-tab-bar');
     await expect(bar).toBeVisible();
@@ -170,7 +175,7 @@ test.describe('Repository tab bar (Issue #2374)', () => {
   test('lists the same branches as the sidebar group, and closes on Escape', async ({
     page,
   }) => {
-    await page.goto('/');
+    await page.goto('/sessions');
     await expect(page.getByTestId('repository-tab')).toHaveCount(2);
 
     await page.getByTestId('repository-tab').filter({ hasText: 'alpha-app' }).click();
@@ -199,7 +204,7 @@ test.describe('Repository tab bar (Issue #2374)', () => {
   });
 
   test('closes on an outside click', async ({ page }) => {
-    await page.goto('/');
+    await page.goto('/sessions');
     await expect(page.getByTestId('repository-tab')).toHaveCount(2);
 
     await page.getByTestId('repository-tab').filter({ hasText: 'alpha-app' }).click();
@@ -210,7 +215,7 @@ test.describe('Repository tab bar (Issue #2374)', () => {
   });
 
   test('navigates to the branch when a row is clicked', async ({ page }) => {
-    await page.goto('/');
+    await page.goto('/sessions');
     await expect(page.getByTestId('repository-tab')).toHaveCount(2);
 
     await page.getByTestId('repository-tab').filter({ hasText: 'zebra-tools' }).click();
@@ -234,7 +239,7 @@ test.describe('Repository tab bar (Issue #2374)', () => {
       window.localStorage.setItem(key as string, 'true');
     }, SIDEBAR_OPEN_KEY);
 
-    await page.goto('/');
+    await page.goto('/sessions');
     await expect(page.getByTestId('sidebar')).toBeVisible();
     await expect(page.getByTestId('repository-tab-bar')).toHaveCount(0);
   });
@@ -242,7 +247,7 @@ test.describe('Repository tab bar (Issue #2374)', () => {
   test('does not wrap with eight repositories at 1366x768', async ({ page }) => {
     await page.setViewportSize({ width: 1366, height: 768 });
     await stubWorktrees(page, MANY_WORKTREES);
-    await page.goto('/');
+    await page.goto('/sessions');
 
     await expect(page.getByTestId('repository-tab')).toHaveCount(8);
 
@@ -331,7 +336,7 @@ test.describe('Repository tab bar without a scrollbar (Issue #2480)', () => {
     try {
       const page = await browser.newPage({ baseURL, viewport: { width: 1024, height: 768 } });
       await stubWorktrees(page, MANY_WORKTREES);
-      await page.goto('/');
+      await page.goto('/sessions');
       await expect(page.getByTestId('repository-tab')).toHaveCount(8);
 
       // Even without the flag, Chromium on macOS draws overlay scrollbars;
@@ -377,7 +382,7 @@ test.describe('Repository tab bar without a scrollbar (Issue #2480)', () => {
   test('scrolls sideways under a vertical mouse wheel, and still under a trackpad swipe', async ({
     page,
   }) => {
-    await page.goto('/');
+    await page.goto('/sessions');
     await expect(page.getByTestId('repository-tab')).toHaveCount(8);
     expect(await stripScrollLeft(page)).toBe(0);
 
@@ -395,7 +400,7 @@ test.describe('Repository tab bar without a scrollbar (Issue #2480)', () => {
   });
 
   test('reaches a scrolled-out tab through the "…" menu', async ({ page }) => {
-    await page.goto('/');
+    await page.goto('/sessions');
     await expect(page.getByTestId('repository-tab')).toHaveCount(8);
     expect(await isTabInsideStrip(page, 'repository-number-7')).toBe(false);
 
@@ -433,8 +438,10 @@ test.describe('Repository tab bar without a scrollbar (Issue #2480)', () => {
       timeout: 60_000,
     });
 
-    // `/worktrees/[id]` renders its own AppShell, so every navigation below
-    // arrives at a freshly mounted strip scrolled to its start.
+    // Issue #2682: the shell — and with it the strip — is mounted once, by the
+    // root layout, and survives every navigation below. So what is asserted
+    // here is the strip scrolling the current tab back into view, not a fresh
+    // mount happening to start at the right place.
 
     // Go to the last repository through the "…" menu and its popover; on
     // arrival its tab is the one in view, which pushes the first tab out...

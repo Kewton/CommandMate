@@ -10,9 +10,39 @@ import { render, screen, waitFor, fireEvent, act } from '@testing-library/react'
 import React from 'react';
 import { Sidebar, parseGroupCollapsed } from '@/components/layout/Sidebar';
 import { ToastProvider } from '@/components/common/Toast';
-import { SidebarProvider } from '@/contexts/SidebarContext';
+import { SidebarProvider, useSidebarContext } from '@/contexts/SidebarContext';
 import { WorktreeSelectionProvider } from '@/contexts/WorktreeSelectionContext';
 import type { Worktree } from '@/types/models';
+import { ATTENTION_REVIEW_HREF } from '@/config/review-config';
+
+// Issue #2684: Mock TransitionLink to verify nav links use it
+const mockTransitionLink = vi.fn(
+  ({
+    href,
+    children,
+    ...props
+  }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { href: string }) => (
+    <a href={href} data-mocked-transition-link="true" {...props}>
+      {children}
+    </a>
+  )
+);
+vi.mock('@/components/view-transitions/TransitionLink', () => ({
+  TransitionLink: (props: React.AnchorHTMLAttributes<HTMLAnchorElement> & { href: string }) =>
+    mockTransitionLink(props),
+}));
+
+// Issue #2684: Mock useAttentionCount to verify review nav href branching
+const { mockAttentionCount } = vi.hoisted(() => ({
+  mockAttentionCount: { current: 0 },
+}));
+vi.mock('@/hooks/useAttentionCount', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/hooks/useAttentionCount')>();
+  return {
+    ...actual,
+    useAttentionCount: () => ({ count: mockAttentionCount.current, worktrees: [] }),
+  };
+});
 
 // Issue #1274: Sidebar wording resolves through `common.sidebar.*` /
 // `common.nav.repositories`. Back it with the real dictionary so the English
@@ -115,6 +145,8 @@ describe('Sidebar', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockPush.mockClear();
+    mockTransitionLink.mockClear();
+    mockAttentionCount.current = 0;
     localStorage.clear();
     (worktreeApi.getAll as ReturnType<typeof vi.fn>).mockResolvedValue({
       worktrees: mockWorktrees,
@@ -579,16 +611,16 @@ describe('Sidebar', () => {
   });
 
   describe('Header content', () => {
-    it('should display Branches title', async () => {
+    it('does not render a "Branches" heading (Issue #2644)', async () => {
       render(
         <Wrapper>
           <Sidebar />
         </Wrapper>
       );
 
-      await waitFor(() => {
-        expect(screen.getByText('Branches')).toBeInTheDocument();
-      });
+      await screen.findByTestId('sidebar-nav');
+      expect(screen.queryByRole('heading', { level: 2 })).toBeNull();
+      expect(screen.queryByText('Branches')).toBeNull();
     });
 
     // Issue #880: header link to the repository management page
@@ -620,18 +652,6 @@ describe('Sidebar', () => {
         expect(svg?.getAttribute('class')).toContain('h-4');
       });
 
-      it('renders the view-mode-toggle icon at w-4 h-4', async () => {
-        render(
-          <Wrapper>
-            <Sidebar />
-          </Wrapper>
-        );
-
-        const toggle = await screen.findByTestId('view-mode-toggle');
-        const svg = toggle.querySelector('svg');
-        expect(svg?.getAttribute('class')).toContain('w-4');
-        expect(svg?.getAttribute('class')).toContain('h-4');
-      });
 
       it('renders the sync icon at w-4 h-4', async () => {
         render(
@@ -652,67 +672,196 @@ describe('Sidebar', () => {
   // shared Tooltip component (action-oriented text, native `title` removed,
   // aria-label preserved for screen readers).
   describe('Header action tooltips (Issue #882)', () => {
-    it('shows an action tooltip when hovering the Repositories link', async () => {
+    it('renders Repositories / Sessions / Review as labelled links (Issue #2644)', async () => {
       render(
         <Wrapper>
           <Sidebar />
         </Wrapper>
       );
 
-      const link = await screen.findByRole('link', { name: 'Repositories' });
-      fireEvent.mouseEnter(link);
-
-      const tooltip = await screen.findByRole('tooltip', { hidden: true });
-      expect(tooltip).toHaveTextContent('Manage repositories (add / sync)');
+      const nav = await screen.findByTestId('sidebar-nav');
+      expect(nav.tagName).toBe('UL');
+      expect(screen.getByTestId('sidebar-header')).toContainElement(nav);
+      const repositories = screen.getByTestId('sidebar-nav-repositories');
+      expect(repositories).toHaveAttribute('href', '/repositories');
+      expect(repositories).toHaveTextContent('Repositories');
+      const sessions = screen.getByTestId('sidebar-nav-sessions');
+      expect(sessions).toHaveAttribute('href', '/sessions');
+      expect(sessions).toHaveTextContent('Sessions');
+      const review = screen.getByTestId('sidebar-nav-review');
+      expect(review).toHaveAttribute('href', '/review');
+      expect(review).toHaveTextContent('Review');
+      // No cache provider in this suite, so nothing needs attention.
+      expect(screen.queryByTestId('sidebar-nav-review-count')).toBeNull();
     });
 
-    it('drops the native title on the Repositories link but keeps aria-label', async () => {
+    it('renders the three nav links through TransitionLink (Issue #2684)', async () => {
       render(
         <Wrapper>
           <Sidebar />
         </Wrapper>
       );
 
-      const link = await screen.findByRole('link', { name: 'Repositories' });
+      const repositories = await screen.findByTestId('sidebar-nav-repositories');
+      const sessions = await screen.findByTestId('sidebar-nav-sessions');
+      const review = await screen.findByTestId('sidebar-nav-review');
+
+      expect(repositories).toHaveAttribute('data-mocked-transition-link', 'true');
+      expect(repositories).toHaveAttribute('href', '/repositories');
+
+      expect(sessions).toHaveAttribute('data-mocked-transition-link', 'true');
+      expect(sessions).toHaveAttribute('href', '/sessions');
+
+      expect(review).toHaveAttribute('data-mocked-transition-link', 'true');
+      expect(review).toHaveAttribute('href', '/review');
+
+      expect(mockTransitionLink).toHaveBeenCalledWith(
+        expect.objectContaining({
+          'data-testid': 'sidebar-nav-repositories',
+          href: '/repositories',
+        })
+      );
+      expect(mockTransitionLink).toHaveBeenCalledWith(
+        expect.objectContaining({
+          'data-testid': 'sidebar-nav-sessions',
+          href: '/sessions',
+        })
+      );
+      expect(mockTransitionLink).toHaveBeenCalledWith(
+        expect.objectContaining({
+          'data-testid': 'sidebar-nav-review',
+          href: '/review',
+        })
+      );
+    });
+
+    it('routes review nav to ATTENTION_REVIEW_HREF when attentionCount > 0 and /review when 0 (Issue #2684)', async () => {
+      mockAttentionCount.current = 0;
+      const { unmount } = render(
+        <Wrapper>
+          <Sidebar />
+        </Wrapper>
+      );
+
+      const reviewZero = await screen.findByTestId('sidebar-nav-review');
+      expect(reviewZero).toHaveAttribute('href', '/review');
+      expect(screen.queryByTestId('sidebar-nav-review-count')).toBeNull();
+
+      unmount();
+
+      mockAttentionCount.current = 2;
+      render(
+        <Wrapper>
+          <Sidebar />
+        </Wrapper>
+      );
+
+      const reviewAttention = await screen.findByTestId('sidebar-nav-review');
+      expect(reviewAttention).toHaveAttribute('href', ATTENTION_REVIEW_HREF);
+      expect(reviewAttention).toHaveAttribute('href', '/review?filter=approval');
+      expect(screen.getByTestId('sidebar-nav-review-count')).toHaveTextContent('2');
+    });
+
+    it('labels the Repositories row with visible text only — no tooltip, no aria-label (Issue #2644)', async () => {
+      render(
+        <Wrapper>
+          <Sidebar />
+        </Wrapper>
+      );
+
+      const link = await screen.findByTestId('sidebar-nav-repositories');
       expect(link).not.toHaveAttribute('title');
-      expect(link).toHaveAttribute('aria-label', 'Repositories');
+      expect(link).not.toHaveAttribute('aria-label');
+      expect(link.closest('[data-testid="tooltip-wrapper"]')).toBeNull();
     });
 
-    it('shows an action tooltip when hovering the view mode toggle', async () => {
+    it.each(['sidebar-nav-repositories', 'sidebar-nav-sessions', 'sidebar-nav-review'])(
+      'closes the mobile drawer when %s is clicked (Issue #2644)',
+      async (testId) => {
+        function DrawerProbe() {
+          const { isMobileDrawerOpen, openMobileDrawer } = useSidebarContext();
+          return (
+            <button
+              type="button"
+              data-testid="drawer-probe"
+              data-open={String(isMobileDrawerOpen)}
+              onClick={openMobileDrawer}
+            />
+          );
+        }
+        render(
+          <Wrapper>
+            <DrawerProbe />
+            <Sidebar />
+          </Wrapper>
+        );
+
+        fireEvent.click(screen.getByTestId('drawer-probe'));
+        expect(screen.getByTestId('drawer-probe')).toHaveAttribute('data-open', 'true');
+
+        const link = await screen.findByTestId(testId);
+        link.addEventListener('click', (event) => event.preventDefault());
+        fireEvent.click(link);
+        expect(screen.getByTestId('drawer-probe')).toHaveAttribute('data-open', 'false');
+      }
+    );
+
+    it('shows the view as a labelled select with worded options (Issue #2648)', async () => {
       render(
         <Wrapper>
           <Sidebar />
         </Wrapper>
       );
 
-      const toggle = await screen.findByTestId('view-mode-toggle');
-      // Native title is replaced by the shared Tooltip.
-      expect(toggle).not.toHaveAttribute('title');
-
-      fireEvent.mouseEnter(toggle);
-      const tooltip = await screen.findByRole('tooltip', { hidden: true });
-      expect(tooltip).toHaveTextContent('Toggle view mode (grouped / flat)');
+      const select = (await screen.findByTestId('view-mode-select')) as HTMLSelectElement;
+      expect(select.tagName).toBe('SELECT');
+      expect(screen.getByLabelText('View')).toBe(select);
+      expect(select).toHaveValue('grouped');
+      expect(Array.from(select.options).map((o) => [o.value, o.textContent])).toEqual([
+        ['grouped', 'Repository'],
+        ['flat', 'Branch'],
+        ['sessions', 'Session'],
+      ]);
+      expect(select.closest('[data-testid="tooltip-wrapper"]')).toBeNull();
     });
 
-    // Issue #1341: this tooltip is the widest of the header actions and used to
-    // be clipped by the sidebar (default 224px / min 160px) because it rendered
-    // as an absolutely-positioned child. It now escapes to document.body.
-    it('portals the view mode tooltip out of the sidebar so it cannot be clipped', async () => {
+    it('switches to the flat list when "Branch" is chosen (Issue #2648)', async () => {
       render(
         <Wrapper>
           <Sidebar />
         </Wrapper>
       );
 
-      const toggle = await screen.findByTestId('view-mode-toggle');
-      fireEvent.mouseEnter(toggle);
+      await waitFor(() => {
+        expect(screen.getAllByTestId('group-header').length).toBeGreaterThan(0);
+      });
+      fireEvent.change(screen.getByTestId('view-mode-select'), { target: { value: 'flat' } });
+      await waitFor(() => {
+        expect(screen.queryAllByTestId('group-header')).toHaveLength(0);
+      });
+      expect(localStorage.getItem('mcbd-sidebar-view-mode')).toBe('flat');
+    });
 
-      const tooltip = await screen.findByRole('tooltip', { hidden: true });
-      expect(tooltip.parentElement).toBe(document.body);
-      expect(tooltip.className).toMatch(/\bfixed\b/);
-      // The trigger itself stays put inside the sidebar.
-      expect(screen.getByTestId('sidebar')).toContainElement(toggle);
-      expect(screen.getByTestId('sidebar')).not.toContainElement(tooltip);
+    it('shows the sort order and its direction as words (Issue #2648)', async () => {
+      render(
+        <Wrapper>
+          <Sidebar />
+        </Wrapper>
+      );
+
+      const trigger = await screen.findByRole('button', { name: 'Sort by Updated' });
+      expect(trigger).toHaveTextContent('Updated');
+      const direction = screen.getByRole('button', { name: 'Newest first' });
+      expect(direction).toHaveTextContent('Newest first');
+
+      fireEvent.click(direction);
+      expect(await screen.findByRole('button', { name: 'Oldest first' })).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Sort by Updated' }));
+      expect(screen.getByRole('option', { name: 'Repository name' })).toBeInTheDocument();
+      expect(screen.getByRole('option', { name: 'Branch name' })).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('option', { name: 'Status' }));
+      expect(await screen.findByRole('button', { name: 'Needs attention first' })).toBeInTheDocument();
     });
 
     it('shows an action tooltip when hovering the sync button', async () => {
@@ -790,7 +939,7 @@ describe('Sidebar', () => {
       });
     });
 
-    it('should show view mode toggle button', async () => {
+    it('should show the view mode select', async () => {
       render(
         <Wrapper>
           <Sidebar />
@@ -798,7 +947,7 @@ describe('Sidebar', () => {
       );
 
       await waitFor(() => {
-        expect(screen.getByTestId('view-mode-toggle')).toBeInTheDocument();
+        expect(screen.getByTestId('view-mode-select')).toBeInTheDocument();
       });
     });
 
@@ -967,43 +1116,55 @@ describe('Sidebar', () => {
   // buttons must wrap onto multiple lines instead of overflowing horizontally
   // and overlapping the adjacent ActivityBar.
   describe('Responsive header wrapping (Issue #976)', () => {
-    it('lets the header row wrap so the action buttons drop to a new line when narrow', async () => {
+    it('lays the view and sort controls out as a label / control grid (Issue #2648)', async () => {
       render(
         <Wrapper>
           <Sidebar />
         </Wrapper>
       );
 
-      const header = await screen.findByTestId('sidebar-header');
-      const row = header.firstElementChild as HTMLElement;
-      expect(row.className).toMatch(/flex-wrap/);
+      const controls = await screen.findByTestId('sidebar-list-controls');
+      expect(controls).toHaveClass('grid', 'grid-cols-[auto_minmax(0,1fr)]');
+      const cells = Array.from(controls.children) as HTMLElement[];
+      expect(cells).toHaveLength(4);
+      expect(cells[0].tagName).toBe('LABEL');
+      expect(cells[0]).toHaveTextContent('View');
+      expect(cells[1]).toBe(screen.getByTestId('view-mode-select'));
+      expect(cells[2]).toHaveTextContent('Sort');
+      expect(cells[3]).toBe(screen.getByTestId('sort-selector-base'));
+      // The sort control may shrink and wrap inside its cell, never widen it.
+      expect(cells[3]).toHaveClass('min-w-0');
+      expect(cells[3].firstElementChild).toHaveClass('flex', 'flex-wrap', 'min-w-0');
+      expect(screen.getByText('Updated')).toHaveClass('min-w-0', 'truncate');
     });
 
-    it('lets the action button group itself wrap so icons stay within the sidebar width', async () => {
+    it('keeps the Repositories row shrinkable so the sync button stays inside the sidebar (Issue #2644)', async () => {
       render(
         <Wrapper>
           <Sidebar />
         </Wrapper>
       );
 
-      // The Repositories link lives inside the action button group; walk up to
-      // that group container and assert it can wrap internally as a last resort.
-      const link = await screen.findByRole('link', { name: 'Repositories' });
-      const actions = link.closest('div.flex.flex-wrap') as HTMLElement;
-      expect(actions).not.toBeNull();
-      expect(actions.className).toMatch(/flex-wrap/);
+      const link = await screen.findByTestId('sidebar-nav-repositories');
+      expect(link).toHaveClass('min-w-0');
+      expect(link).toHaveClass('flex-1');
+      const row = link.parentElement as HTMLElement;
+      expect(row.tagName).toBe('LI');
+      expect(row).toHaveClass('min-w-0');
+      expect(row).toContainElement(screen.getByLabelText('Sync branches'));
     });
 
-    it('keeps the Branches heading shrinkable (min-w-0) and truncatable so it never pushes the buttons out', async () => {
+    it('truncates the nav labels instead of widening the row (Issue #2644)', async () => {
       render(
         <Wrapper>
           <Sidebar />
         </Wrapper>
       );
 
-      const heading = await screen.findByText('Branches');
-      expect(heading).toHaveClass('min-w-0');
-      expect(heading).toHaveClass('truncate');
+      await screen.findByTestId('sidebar-nav');
+      const label = screen.getByText('Sessions');
+      expect(label).toHaveClass('min-w-0');
+      expect(label).toHaveClass('truncate');
     });
   });
 

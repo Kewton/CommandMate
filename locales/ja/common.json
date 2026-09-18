@@ -23,14 +23,12 @@
     "tileInstanceAriaLabel": "このタイルに表示するエージェントインスタンス"
   },
   "nav": {
-    "home": "ホーム",
-    "chat": "チャット",
     "sessions": "セッション",
     "repositories": "リポジトリ",
     "repositoriesShort": "リポジトリ",
     "review": "レビュー",
     "reviewReport": "レビュー/レポート",
-    "more": "その他",
+    "more": "設定",
     "skills": "スキル"
   },
   "repositories": {
@@ -112,8 +110,12 @@
     "branchesLoadFailed": "ブランチを取得できませんでした",
     "retryLoadBranches": "再試行",
     "dragToReorderGroup": "ドラッグでグループを並べ替え",
-    "switchToFlatView": "フラット表示に切り替え",
-    "switchToGroupedView": "グループ表示に切り替え"
+    "viewLabel": "表示",
+    "viewMode": {
+      "grouped": "リポジトリ",
+      "flat": "ブランチ",
+      "sessions": "セッション"
+    }
   },
   "confirmDelete": "「{name}」を削除しますか？",
   "favorites": {
@@ -125,10 +127,7 @@
   "syncAuthError": "認証エラー",
   "syncButtonLabel": "ブランチを同期",
   "tooltips": {
-    "viewMode": "表示モード切替（グループ / フラット）",
-    "sort": "ブランチの並び替え",
-    "sync": "worktree を同期",
-    "repositories": "リポジトリを管理（追加・同期）"
+    "sync": "worktree を同期"
   },
   "displaySize": {
     "ariaLabel": "表示サイズ",
@@ -139,6 +138,7 @@
   },
   "repoTabBar": {
     "settingLabel": "リポジトリタブ帯",
+    "overflow": "ほかのリポジトリ",
     "mode": {
       "always": "常に表示",
       "collapsed": "サイドバー折りたたみ時のみ",
@@ -164,10 +164,24 @@
   "sort": {
     "options": "並び替えオプション",
     "updatedAt": "更新日時",
-    "repositoryName": "リポジトリ",
-    "branchName": "ブランチ",
+    "repositoryName": "リポジトリ名",
+    "branchName": "ブランチ名",
     "status": "ステータス",
-    "lastSent": "最終送信"
+    "lastSent": "最終送信",
+    "label": "並び",
+    "sortBy": "並び順: {label}",
+    "ascending": "昇順に並び替え",
+    "descending": "降順に並び替え",
+    "ascShort": "昇順",
+    "descShort": "降順",
+    "direction": {
+      "newestFirst": "新しい順",
+      "oldestFirst": "古い順",
+      "aToZ": "A→Z",
+      "zToA": "Z→A",
+      "attentionFirst": "要対応が先",
+      "attentionLast": "要対応が後"
+    }
   },
   "branchItem": {
     "cliToolStatus": "CLI ツールのステータス",
@@ -185,6 +199,16 @@
     "description": "サーバーは {serverVersion} になりましたが、このタブは {clientVersion} のままです。最新の状態にするには再読み込みしてください。",
     "reload": "再読み込み",
     "dismiss": "閉じる"
+  },
+  "whatsNew": {
+    "title": "新機能と改善（v{from} → v{to}）",
+    "highlight": "ハイライト",
+    "added": "新機能",
+    "improved": "改善",
+    "fixed": "修正",
+    "empty": "この更新の詳細はリリースページをご覧ください。",
+    "releaseLink": "リリースページを開く",
+    "close": "閉じる"
   },
   "meta": {
     "description": "Claude CLI と tmux セッションによる Git worktree 管理"
@@ -214,6 +238,7 @@
   },
   "settings": {
     "title": "設定",
+    "pageDescription": "新しいブランチの既定、通知、外部アプリなどを設定します。",
     "defaultSurfaceMode": {
       "title": "出力面の既定",
       "description": "セッションの出力側を最初に何で開くかです。ターミナル（tmux の画面そのまま）か、チャット（会話の履歴）を選べます。開いたあとはセッションのヘッダーからいつでも切り替えられます。",

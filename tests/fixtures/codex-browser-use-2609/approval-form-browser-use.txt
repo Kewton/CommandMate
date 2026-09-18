@@ -1,0 +1,12 @@
+• Calling 修正前の専用GUIを開く
+
+  Field 1/1
+  Allow Browser use to access http://127.0.0.1:60311?
+
+  origin: http://127.0.0.1:60311
+
+  › 1. Allow         Run the tool and continue.
+    2. Always allow  Run the tool and remember this choice for future tool calls.
+    3. Cancel        Cancel this tool call
+  enter to submit | esc to cancel
+

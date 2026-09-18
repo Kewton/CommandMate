@@ -23,14 +23,12 @@
     "tileInstanceAriaLabel": "Agent instance shown in this tile"
   },
   "nav": {
-    "home": "Home",
-    "chat": "Chat",
     "sessions": "Sessions",
     "repositories": "Repositories",
     "repositoriesShort": "Repos",
     "review": "Review",
     "reviewReport": "Review/Report",
-    "more": "More",
+    "more": "Settings",
     "skills": "Skills"
   },
   "repositories": {
@@ -112,8 +110,12 @@
     "branchesLoadFailed": "Failed to load branches",
     "retryLoadBranches": "Retry",
     "dragToReorderGroup": "Drag to reorder group",
-    "switchToFlatView": "Switch to flat view",
-    "switchToGroupedView": "Switch to grouped view"
+    "viewLabel": "View",
+    "viewMode": {
+      "grouped": "Repository",
+      "flat": "Branch",
+      "sessions": "Session"
+    }
   },
   "confirmDelete": "Delete \"{name}\"?",
   "favorites": {
@@ -125,10 +127,7 @@
   "syncAuthError": "Authentication error",
   "syncButtonLabel": "Sync branches",
   "tooltips": {
-    "viewMode": "Toggle view mode (grouped / flat)",
-    "sort": "Sort branches",
-    "sync": "Sync worktrees",
-    "repositories": "Manage repositories (add / sync)"
+    "sync": "Sync worktrees"
   },
   "displaySize": {
     "ariaLabel": "Display size",
@@ -139,6 +138,7 @@
   },
   "repoTabBar": {
     "settingLabel": "Repository tabs",
+    "overflow": "More repositories",
     "mode": {
       "always": "Always show",
       "collapsed": "Only when the sidebar is collapsed",
@@ -164,10 +164,24 @@
   "sort": {
     "options": "Sort options",
     "updatedAt": "Updated",
-    "repositoryName": "Repository",
-    "branchName": "Branch",
+    "repositoryName": "Repository name",
+    "branchName": "Branch name",
     "status": "Status",
-    "lastSent": "Last Sent"
+    "lastSent": "Last Sent",
+    "label": "Sort",
+    "sortBy": "Sort by {label}",
+    "ascending": "Sort ascending",
+    "descending": "Sort descending",
+    "ascShort": "ASC",
+    "descShort": "DESC",
+    "direction": {
+      "newestFirst": "Newest first",
+      "oldestFirst": "Oldest first",
+      "aToZ": "A→Z",
+      "zToA": "Z→A",
+      "attentionFirst": "Needs attention first",
+      "attentionLast": "Needs attention last"
+    }
   },
   "branchItem": {
     "cliToolStatus": "CLI tool status",
@@ -185,6 +199,16 @@
     "description": "The server is now on {serverVersion}, but this tab is still on {clientVersion}. Reload to get the latest.",
     "reload": "Reload",
     "dismiss": "Dismiss"
+  },
+  "whatsNew": {
+    "title": "What's new (v{from} → v{to})",
+    "highlight": "Highlights",
+    "added": "New",
+    "improved": "Improved",
+    "fixed": "Fixed",
+    "empty": "See the release page for the details of this update.",
+    "releaseLink": "Open the release page",
+    "close": "Close"
   },
   "meta": {
     "description": "Git worktree management with Claude CLI and tmux sessions"
@@ -214,6 +238,7 @@
   },
   "settings": {
     "title": "Settings",
+    "pageDescription": "Defaults for new branches, notifications, external apps, and more.",
     "defaultSurfaceMode": {
       "title": "Default output surface",
       "description": "Which surface a session's output half opens in: the live terminal, or the conversation transcript. You can still switch either way from the session header.",

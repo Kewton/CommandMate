@@ -1,14 +1,15 @@
 /**
  * @vitest-environment jsdom
  *
- * The global "N need your attention" badge (Issue #1788) — sidebar pill and
- * mobile nav bubble.
+ * The global "N need your attention" count (Issue #1788) — the count chip on
+ * the sidebar's Review row (Issue #2644, which replaced the sidebar pill) and
+ * the mobile nav bubble.
  *
  * Wording resolves through the real dictionary rather than the key-echoing
  * global mock, so these assertions prove `common.attention.*` exists.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import React from 'react';
 import type { Worktree } from '@/types/models';
@@ -69,7 +70,9 @@ vi.mock('@/components/providers/WorktreesCacheProvider', () => ({
     ({ worktrees: cacheMock.worktrees, repositories: [], isLoading: false, error: null, refresh: async () => {} }),
 }));
 
-import { AttentionBadge } from '@/components/layout/AttentionBadge';
+import { Sidebar } from '@/components/layout/Sidebar';
+import { SidebarProvider } from '@/contexts/SidebarContext';
+import { WorktreeSelectionProvider } from '@/contexts/WorktreeSelectionContext';
 import { GlobalMobileNav } from '@/components/mobile/GlobalMobileNav';
 
 function waiting(id: string): Worktree {
@@ -89,34 +92,74 @@ beforeEach(() => {
   intlLocale.current = 'en';
 });
 
-describe('AttentionBadge — sidebar pill (Issue #1788)', () => {
-  it('renders nothing at zero', () => {
-    render(<AttentionBadge />);
-    expect(screen.queryByTestId('attention-badge')).toBeNull();
+describe('Sidebar Review row — attention count (Issue #2644)', () => {
+  function renderSidebar() {
+    return render(
+      <SidebarProvider>
+        <WorktreeSelectionProvider externalWorktrees={cacheMock.worktrees} externalRepositories={[]}>
+          <Sidebar />
+        </WorktreeSelectionProvider>
+      </SidebarProvider>,
+    );
+  }
+
+  beforeEach(() => {
+    // The sidebar loads the saved repository group order on mount.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ json: async () => ({ success: true, order: null }) }),
+    );
   });
 
-  it('shows the count and links to the approval filter', () => {
-    cacheMock.worktrees = [waiting('a'), waiting('b')];
-    render(<AttentionBadge />);
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
 
-    const badge = screen.getByTestId('attention-badge');
-    expect(badge.getAttribute('href')).toBe('/review?filter=approval');
-    expect(screen.getByTestId('attention-badge-count').textContent).toBe('2');
-    expect(screen.getByText('Needs attention')).toBeDefined();
-    expect(badge.getAttribute('aria-label')).toBe('2 worktrees need your attention');
+  it('renders no count at zero, and keeps the plain /review href', () => {
+    renderSidebar();
+    expect(screen.queryByTestId('sidebar-nav-review-count')).toBeNull();
+    expect(screen.getByTestId('sidebar-nav-review').getAttribute('href')).toBe('/review');
+  });
+
+  it('shows the count and points Review at the approval filter', () => {
+    cacheMock.worktrees = [waiting('a'), waiting('b')];
+    renderSidebar();
+
+    const count = screen.getByTestId('sidebar-nav-review-count');
+    expect(count.textContent).toBe('2');
+    expect(count.getAttribute('aria-label')).toBe('2 worktrees need your attention');
+    expect(screen.getByTestId('sidebar-nav-review').getAttribute('href')).toBe('/review?filter=approval');
+    expect(screen.getByTestId('sidebar-nav-review')).toContainElement(count);
   });
 
   it('is visible without hover — no opacity-0 reveal (touch devices)', () => {
     cacheMock.worktrees = [waiting('a')];
-    render(<AttentionBadge />);
-    expect(screen.getByTestId('attention-badge').className).not.toContain('opacity-0');
+    renderSidebar();
+    expect(screen.getByTestId('sidebar-nav-review-count').className).not.toContain('opacity-0');
+  });
+
+  it('caps the count at 99+ so it cannot widen the row', () => {
+    cacheMock.worktrees = Array.from({ length: 120 }, (_, i) => waiting(`wt-${i}`));
+    renderSidebar();
+    expect(screen.getByTestId('sidebar-nav-review-count').textContent).toBe('99+');
   });
 
   it('renders Japanese wording from the ja dictionary', () => {
     intlLocale.current = 'ja';
     cacheMock.worktrees = [waiting('a')];
-    render(<AttentionBadge />);
-    expect(screen.getByText('要対応')).toBeDefined();
+    renderSidebar();
+    expect(screen.getByTestId('sidebar-nav-review').textContent).toContain('レビュー');
+    expect(screen.getByTestId('sidebar-nav-review-count').getAttribute('aria-label')).toBe(
+      '要対応のワークツリーが 1 件あります',
+    );
+  });
+
+  it('marks only the current page with aria-current="page"', () => {
+    mockPathname.mockReturnValue('/review');
+    renderSidebar();
+    expect(screen.getByTestId('sidebar-nav-review').getAttribute('aria-current')).toBe('page');
+    expect(screen.getByTestId('sidebar-nav-sessions').getAttribute('aria-current')).toBeNull();
+    expect(screen.getByTestId('sidebar-nav-repositories').getAttribute('aria-current')).toBeNull();
   });
 });
 
@@ -146,7 +189,7 @@ describe('GlobalMobileNav — attention bubble (Issue #1788)', () => {
   it('leaves the other tabs alone', () => {
     cacheMock.worktrees = [waiting('a')];
     render(<GlobalMobileNav />);
-    expect(screen.getByText('Home').closest('a')?.getAttribute('href')).toBe('/');
+    expect(screen.getByText('Settings').closest('a')?.getAttribute('href')).toBe('/more');
     expect(screen.getByText('Sessions').closest('a')?.getAttribute('href')).toBe('/sessions');
   });
 });

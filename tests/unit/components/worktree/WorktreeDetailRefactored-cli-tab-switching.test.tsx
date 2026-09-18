@@ -94,11 +94,6 @@ vi.mock('@/hooks/useSlashCommands', () => ({
   }),
 }));
 
-const mockUseUpdateCheck = vi.fn();
-vi.mock('@/hooks/useUpdateCheck', () => ({
-  useUpdateCheck: () => mockUseUpdateCheck(),
-}));
-
 // Issue #730: 2-column layout; history moved into TerminalContainer.
 vi.mock('@/components/worktree/WorktreeDesktopLayout', () => ({
   WorktreeDesktopLayout: ({
@@ -388,7 +383,6 @@ describe('WorktreeDetailRefactored CLI tab switching (Issue #736)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockIsMobile.mockReturnValue(false);
-    mockUseUpdateCheck.mockReturnValue({ data: null, loading: false, error: null });
     useTerminalPanePollingMock.mockImplementation(
       ({ cliToolId }: { worktreeId: string; cliToolId: string }) => makePaneState(cliToolId)
     );

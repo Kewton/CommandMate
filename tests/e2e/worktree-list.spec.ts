@@ -3,8 +3,8 @@
  *
  * The file name is historical: this page listed worktrees in a main-content
  * table when the suite was written. Since Issue #600 / #1052 / #1072 the route
- * is a dashboard — the branch list lives in the sidebar, and the main column is
- * a bento grid (Overview heading, Session Overview, ToDo, quick actions).
+ * is a dashboard — the branch list lives in the sidebar. `/` は開く画面を決めて
+ * 移動する。E2E サーバーは一覧が空なので空状態（初回ガイド）を表示する（Issue #2643）。
  *
  * [Issue #1180] Re-pointed at that UI. What changed and why the old assertions
  * could not simply be re-selected:
@@ -12,10 +12,9 @@
  *     page. Issue #1072 removed the welcome banner and demoted the tautological
  *     "CommandMate" h1 to a functional "Overview" heading. The string survives
  *     only in layout metadata / manifest / CLI --help, none of which render.
- *   - The "Worktrees" h2 is now the sidebar's "Branches" h2.
+ *   - The "Worktrees" h2 is gone; the sidebar header is a Repositories / Sessions / Review navigation list (Issue #2644).
  *   - Search is "Search branches..." in the sidebar, not "Search worktrees".
- *   - Sort is a dropdown (Updated / Repository / Branch / Status) with a
- *     separate direction toggle, not Name / Updated / Path buttons with ↑↓ text.
+ *   - Sort is a dropdown (Updated / Repository name / Branch name / Status) with a worded direction toggle (Newest first / Oldest first, …), not Name / Updated / Path buttons with ↑↓ text.
  *   - "Refresh" is the "Sync branches" button.
  *
  * These specs assert app chrome only, so they hold with zero worktrees — which
@@ -31,19 +30,19 @@ test.describe('Home Page', () => {
     await page.goto('/');
   });
 
-  test('should display page header and title', async ({ page }) => {
+  test('should display the first-run screen when no repository is registered', async ({ page }) => {
     // Header wordmark
     await expect(page.getByRole('heading', { name: /CommandMate/i, level: 1 })).toBeVisible();
 
-    // Functional page heading that replaced the removed banner subtitle (#1072)
-    await expect(page.getByRole('heading', { name: 'Overview', level: 1 })).toBeVisible();
-
-    // Live session subline rendered alongside it
-    await expect(page.getByTestId('home-subline')).toBeVisible();
+    await expect(page.getByTestId('home-empty')).toBeVisible();
+    await expect(page.getByTestId('home-add-repository')).toHaveAttribute('href', '/repositories');
   });
 
-  test('should display "Branches" section heading', async ({ page }) => {
-    await expect(page.getByRole('heading', { name: 'Branches', level: 2 })).toBeVisible();
+  test('should display the sidebar navigation', async ({ page }) => {
+    const nav = page.getByTestId('sidebar-nav');
+    await expect(nav.getByRole('link', { name: 'Repositories' })).toBeVisible();
+    await expect(nav.getByRole('link', { name: 'Sessions' })).toBeVisible();
+    await expect(nav.getByRole('link', { name: 'Review' })).toBeVisible();
   });
 
   test('should display search input', async ({ page }) => {
@@ -55,13 +54,14 @@ test.describe('Home Page', () => {
     // Trigger is labelled with the active sort key; default is Updated (desc)
     const sortTrigger = page.getByRole('button', { name: /Sort by/i });
     await expect(sortTrigger).toBeVisible();
-    await expect(page.getByRole('button', { name: /Sort (ascending|descending)/i })).toBeVisible();
+    await expect(sortTrigger).toContainText('Updated');
+    await expect(page.getByRole('button', { name: /^(Newest first|Oldest first)$/ })).toBeVisible();
 
     // Opening the dropdown lists the sidebar sort keys
     await sortTrigger.click();
     const listbox = page.getByRole('listbox', { name: 'Sort options' });
     await expect(listbox).toBeVisible();
-    for (const label of ['Updated', 'Repository', 'Branch', 'Status']) {
+    for (const label of ['Updated', 'Repository name', 'Branch name', 'Status']) {
       await expect(listbox.getByRole('option', { name: label })).toBeVisible();
     }
   });
@@ -87,15 +87,14 @@ test.describe('Home Page', () => {
   });
 
   test('should toggle sort direction when clicking sort direction button', async ({ page }) => {
-    // Default sidebar sort is Updated, descending
-    const directionButton = page.getByRole('button', { name: 'Sort descending' });
+    // Default sidebar sort is Updated, descending — shown as words
+    const directionButton = page.getByRole('button', { name: 'Newest first' });
     await expect(directionButton).toBeVisible();
 
     await directionButton.click();
 
-    // The button relabels itself rather than showing an ↑/↓ glyph as it once did
-    await expect(page.getByRole('button', { name: 'Sort ascending' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Sort descending' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Oldest first' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Newest first' })).toHaveCount(0);
   });
 
   test('should navigate to header navigation link', async ({ page }) => {
@@ -114,16 +113,16 @@ test.describe('Home Page', () => {
 
   test('should be responsive', async ({ page }) => {
     // The desktop header is hidden on mobile (GlobalMobileNav takes over), so
-    // assert on the page heading, which is present in both layouts.
-    const overview = page.getByRole('heading', { name: 'Overview', level: 1 });
+    // assert on the empty state's link, which is present in both layouts.
+    const addRepository = page.getByTestId('home-add-repository');
 
     // Check mobile viewport
     await page.setViewportSize({ width: 375, height: 667 });
-    await expect(overview).toBeVisible();
+    await expect(addRepository).toBeVisible();
 
     // Check desktop viewport
     await page.setViewportSize({ width: 1920, height: 1080 });
-    await expect(overview).toBeVisible();
+    await expect(addRepository).toBeVisible();
   });
 
   // TODO: Footer未実装のためスキップ

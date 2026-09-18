@@ -2,8 +2,10 @@
  * Header Component
  * Main application header with navigation
  *
- * Issue #600: UX refresh - PC 5-screen horizontal navigation
- * Home | Sessions | Repos | Review | More
+ * Issue #600: UX refresh - PC horizontal navigation
+ * Sessions | Repos | Review | Settings
+ *
+ * Issue #2642: Home / Chat を外して 4 項目にした。ロゴは `/` へのリンクのまま
  */
 
 'use client';
@@ -17,6 +19,7 @@ import { PcDisplaySizeSelector } from './PcDisplaySizeSelector';
 import { RepositoryTabBarModeSelector } from './RepositoryTabBarModeSelector';
 import { ThemeToggle } from '@/components/common/ThemeToggle';
 import { ConnectionStatusIndicator } from '@/components/common/ConnectionStatusIndicator';
+import { AppUpdateButton } from '@/components/common/AppUpdateButton';
 import { Kbd } from '@/components/ui/Kbd';
 import { useCommandPalette } from '@/contexts/CommandPaletteContext';
 
@@ -33,8 +36,6 @@ export interface HeaderProps {
  * ("Review/Report") preserves that /review also covers reports.
  */
 const NAV_ITEMS: Array<{ labelKey: string; href: string; isActive: (pathname: string) => boolean }> = [
-  { labelKey: 'nav.home', href: '/', isActive: (p) => p === '/' },
-  { labelKey: 'nav.chat', href: '/chat', isActive: (p) => p.startsWith('/chat') },
   { labelKey: 'nav.sessions', href: '/sessions', isActive: (p) => p.startsWith('/sessions') },
   { labelKey: 'nav.repositoriesShort', href: '/repositories', isActive: (p) => p.startsWith('/repositories') },
   { labelKey: 'nav.reviewReport', href: '/review', isActive: (p) => p.startsWith('/review') },
@@ -42,7 +43,7 @@ const NAV_ITEMS: Array<{ labelKey: string; href: string; isActive: (pathname: st
 ];
 
 /**
- * Application header with branding and 5-screen navigation.
+ * Application header with branding and 4-screen navigation.
  *
  * @example
  * ```tsx
@@ -122,6 +123,8 @@ export function Header({ title = 'CommandMate' }: HeaderProps) {
             <PcDisplaySizeSelector />
             {/* Repository tab strip visibility (Issue #2374) - hidden on mobile */}
             <RepositoryTabBarModeSelector />
+            {/* App update entry point (Issue #2654) - hidden on mobile */}
+            <AppUpdateButton />
             {/* Theme toggle promoted to the header (Issue #1071) */}
             <ThemeToggle />
             <a

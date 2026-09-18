@@ -38,7 +38,6 @@ const REQUIRED: Array<{ namespace: string; keys: string[] }> = [
       'inApp.waitingToast',
     ],
   },
-  { namespace: 'home', keys: ['sessionSummary.waitingLinkLabel'] },
 ];
 
 describe('Issue #1788 i18n keys exist in both dictionaries', () => {
@@ -59,7 +58,6 @@ describe('Issue #1788 i18n keys exist in both dictionaries', () => {
     for (const locale of LOCALES) {
       expect(resolve(load(locale, 'common'), 'attention.badgeLabel')).toContain('{count}');
       expect(resolve(load(locale, 'notifications'), 'inApp.waitingToast')).toContain('{name}');
-      expect(resolve(load(locale, 'home'), 'sessionSummary.waitingLinkLabel')).toContain('{count}');
     }
   });
 

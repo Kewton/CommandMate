@@ -40,7 +40,7 @@ MAJOR.MINOR.PATCH
 ## リリースフロー全体像
 
 ```
-develop でバージョン更新（package.json / package-lock.json / CHANGELOG.md）
+develop でバージョン更新（package.json / package-lock.json / CHANGELOG.md ← changelog.d/ の断片を集約）
    ↓  chore: release vX.Y.Z
 PR "release: vX.Y.Z"（develop → main）※レビュー承認必須
    ↓  squash マージ
@@ -132,49 +132,76 @@ npm version 0.10.1 --no-git-tag-version
 
 ### Step 3: CHANGELOG.md の更新
 
-`## [Unreleased]` の直後に新セクションを挿入します。
+各 Issue のエントリは、PR ごとに `changelog.d/<N>.md` の断片として develop に入っています（形式は [`changelog.d/README.md`](../changelog.d/README.md)）。`## [Unreleased]` は空のまま保たれているので（`tests/unit/scripts/changelog-fragments.test.ts` のガード）、**`## [X.Y.Z]` の節は手で書かず**、次の 3 手順で断片から生成します。
 
-```markdown
-## [Unreleased]
+1. **入る内容を確認する**
 
-## [0.10.1] - 2026-07-17
+   ```bash
+   node scripts/changelog-fragments.mjs check; echo "CHECK=$?"   # 0 であること
+   node scripts/changelog-fragments.mjs preview                    # 生成される節をそのまま表示する
+   ```
 
-> **Highlight**: このリリースの中心を2〜4文で。何が問題で、何を変えたか。実測値があれば入れる。
+   `CHECK=0` でなければ、出力に出たファイル名の断片を直してから進みます（`apply` は不正な断片が 1 つでもあると何も書かずに止まります）。`preview` の Issue 番号を、リリース PR に載せる対応 Issue と突き合わせてください。断片が無い Issue は節に載りません。
 
-### Added
+2. **節を生成する**（日付は JST）
 
-- feat(scope): **要点を太字で**。補足説明 (#1234)
+   ```bash
+   node scripts/changelog-fragments.mjs apply --version 0.10.1 --date "$(TZ=Asia/Tokyo date +%F)"; echo "APPLY=$?"
+   git status --short -- CHANGELOG.md changelog.d   # CHANGELOG.md の M と、断片ごとの D だけであること
+   ```
 
-### Changed
+   `APPLY=0` であること。`apply` は `## [Unreleased]` の直後に `## [0.10.1] - 2026-07-17` の節を挿入し、集約した断片（`changelog.d/README.md` 以外）を削除します。`## [Unreleased]` に行が残っていると `Unreleased is not empty` で止まり、何も書き換えません。
 
-- fix(docs): **要点**。補足説明 (#1234)
+3. **生成された節の見出しの直後に `> **Highlight**: …` を書き足す**
 
-### Fixed
+   ```markdown
+   ## [Unreleased]
 
-- fix(cli): **要点**。補足説明 (#1234)
+   ## [0.10.1] - 2026-07-17
 
-## [0.10.0] - 2026-07-16
-```
+   > **Highlight**: このリリースの中心を2〜4文で。何が問題で、何を変えたか。実測値があれば入れる。
+
+   ### Added
+
+   - **feat(scope): 要点を太字で** (#1236): 補足説明
+
+   ### Changed
+
+   - **fix(docs): 要点** (#1235): 補足説明
+
+   ### Fixed
+
+   - **fix(cli): 要点** (#1234): 補足説明
+
+   ## [0.10.0] - 2026-07-16
+   ```
 
 規約:
 
 - **比較リンク（`[X.Y.Z]: https://github.com/.../compare/...`）は追加しない**。`0.5.2` で止まっており、以降のリリースでは付けていません（既存の古いリンクはそのまま残す）
-- Issue 番号は **`(#1234)` 形式**。`(Issue #1234)` は v0.9.1 以前の旧表記
+- Issue 番号は **`(#1234)` 形式**で、要点の `**` を閉じた直後に置く。`(Issue #1234)` は v0.9.1 以前の旧表記
 - conventional prefix（`feat(scope):` / `fix(scope):` 等）を付ける
-- 日付は JST 基準
-- 該当が無いカテゴリの見出しは書かない
+- 日付は JST 基準（上の `TZ=Asia/Tokyo date +%F`）
+- 該当が無いカテゴリの見出しは書かない（`apply` は断片の無い節を出さない）
 
 詳細は [`templates/changelog-entry.md`](../.claude/skills/release/templates/changelog-entry.md) を参照。
+
+### Step 3b: release-notes/X.Y.Z.json の作成
+
+アプリの「新機能と改善」ダイアログが読む、日本語と英語のリリースノートを作ります。
+選ぶ項目・文の書き方・形式は [`/release` スキルの 2-2b](../.claude/skills/release/SKILL.md) が正本です。
+作ったら `npx vitest run tests/unit/release-notes/release-notes-files.test.ts` で検査します。
 
 ### Step 4: コミット & push
 
 ```bash
-git add package.json package-lock.json CHANGELOG.md
+git add package.json package-lock.json CHANGELOG.md changelog.d
+git add release-notes/0.10.1.json
 git commit -m "chore: release v0.10.1"
 git push origin develop
 ```
 
-変更は**この3ファイルのみ**であることを `git diff --stat` で確認してください。
+変更が [`/release` スキルの 2-4](../.claude/skills/release/SKILL.md) に書かれたファイルだけであることを、commit の前に `git diff --cached --stat` で確認してください。
 
 ### Step 5: リリース PR（develop → main）
 

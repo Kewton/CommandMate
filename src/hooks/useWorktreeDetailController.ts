@@ -20,8 +20,8 @@
  */
 
 import React, { useEffect, useCallback, useMemo, useState, useRef } from 'react';
+import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { AGENT_MODE_UNKNOWN } from '@/types/cli-tool-contracts';
-import { useRouter } from 'next/navigation';
 import { useWorktreeUIState } from '@/hooks/useWorktreeUIState';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { useSidebarContext } from '@/contexts/SidebarContext';
@@ -43,7 +43,7 @@ import { useToast } from '@/components/common/Toast';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { useAutoYes } from '@/hooks/useAutoYes';
 import { buildPromptResponseBody } from '@/lib/prompt-response-body-builder';
-import { useUpdateCheck } from '@/hooks/useUpdateCheck';
+import { useAppUpdate } from '@/contexts/AppUpdateContext';
 import { type AutoYesToggleParams } from '@/components/worktree/AutoYesToggle';
 import type { AutoYesStopReason } from '@/config/auto-yes-config';
 import type { Worktree, ChatMessage, LivePromptData, FileContent } from '@/types/models';
@@ -70,6 +70,7 @@ import { encodePathForUrl } from '@/lib/url-path-encoder';
 import { useHistoryFilters } from '@/hooks/useHistoryFilters';
 import { useDiffViewerState } from '@/hooks/useDiffViewerState';
 import { useVisibilityRecovery } from '@/hooks/useVisibilityRecovery';
+import { SESSION_INSTANCE_QUERY_PARAM } from '@/lib/sidebar-utils';
 
 // ============================================================================
 // Constants
@@ -208,7 +209,6 @@ const DEFAULT_WORKTREE_NAME = 'Unknown';
  */
 
 export function useWorktreeDetailController({ worktreeId }: { worktreeId: string }) {
-  const router = useRouter();
   const isMobile = useIsMobile();
   // Issue #874: ref mirror so the message/output fetchers (which read state via
   // refs to keep a stable identity) can mobile-gate the `instance` query param
@@ -218,6 +218,11 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   // Issue #747: the sidebar toggle moved into the ActivityBar (which reads
   // SidebarContext directly), so DesktopHeader no longer needs `toggle` here.
   const { openMobileDrawer } = useSidebarContext();
+  const router = useRouter();
+  const pathname = usePathname();
+  // Issue #2656: the sidebar's sessions view opens `/worktrees/<id>?instance=<instanceId>`.
+  const searchParams = useSearchParams();
+  const requestedInstanceId = searchParams?.get(SESSION_INSTANCE_QUERY_PARAM) ?? null;
   const { state, actions } = useWorktreeUIState();
   const tWorktree = useTranslations('worktree');
   const tError = useTranslations('error');
@@ -876,6 +881,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     visibleInstances,
     visibleInstanceIds,
     toggleInstanceVisible,
+    showInstances,
   } = useMobileSelectedInstances({ worktreeId, roster: agentInstances });
 
   // Mobile tabs are the per-device visible subset; PC uses the full roster.
@@ -914,6 +920,76 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       setActiveCliTab(inst.cliTool);
     }
   }, [displayedInstances, activeInstanceId, activeCliTab, setActiveCliTab]);
+
+  // Issue #2656: `?instance=<id>` from the sidebar's sessions view.
+  //
+  // Waits for THIS worktree's roster (`rosterReady`) — before that the roster
+  // is the default seed and an alias like `claude-2` would look unknown. Then:
+  // an id in the roster becomes the active instance (on the phone it is also
+  // made visible first, or the reconcile effect above would switch it back),
+  // and, on the PC, `instanceSelectionRequest` gets a new token so the PC layout
+  // routes it exactly like a header pill click (split 0 if shown nowhere, focus
+  // move if another split shows it). The PC acknowledges the token, which
+  // clears the request, so a later remount of the PC layout cannot re-apply it. An id
+  // NOT in the roster (a running instance outside it) changes nothing. Either
+  // way the parameter is removed with `router.replace` (same path, other query
+  // parameters kept, no scroll), which re-renders without remounting the page.
+  //
+  // `handledInstanceParamRef` makes one URL apply once even though the effect
+  // re-runs until the replaced URL arrives; it is cleared when the parameter
+  // disappears, so clicking the same row again applies again.
+  const [instanceSelectionRequest, setInstanceSelectionRequest] =
+    useState<{ instanceId: string; token: number } | null>(null);
+  const instanceSelectionTokenRef = useRef(0);
+  const handledInstanceParamRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (requestedInstanceId === null) {
+      handledInstanceParamRef.current = null;
+      return;
+    }
+    if (!rosterReady) return;
+    if (handledInstanceParamRef.current === requestedInstanceId) return;
+    handledInstanceParamRef.current = requestedInstanceId;
+
+    if (agentInstances.some((inst) => inst.id === requestedInstanceId)) {
+      if (isMobileRef.current) {
+        // The phone shows `activeInstanceId` directly; no PC request is left behind.
+        showInstances([requestedInstanceId]);
+        setActiveInstanceId(requestedInstanceId);
+      } else {
+        setActiveInstanceId(requestedInstanceId);
+        instanceSelectionTokenRef.current += 1;
+        setInstanceSelectionRequest({
+          instanceId: requestedInstanceId,
+          token: instanceSelectionTokenRef.current,
+        });
+      }
+    }
+
+    const params = new URLSearchParams(searchParams?.toString() ?? '');
+    params.delete(SESSION_INSTANCE_QUERY_PARAM);
+    const query = params.toString();
+    const basePath = pathname ?? `/worktrees/${worktreeId}`;
+    router.replace(query ? `${basePath}?${query}` : basePath, { scroll: false });
+  }, [
+    requestedInstanceId,
+    rosterReady,
+    agentInstances,
+    showInstances,
+    setActiveInstanceId,
+    searchParams,
+    pathname,
+    worktreeId,
+    router,
+  ]);
+
+  // Issue #2656: the PC layout calls this once it has applied a request. Only
+  // the matching token clears it, so a newer request is never dropped.
+  const acknowledgeInstanceSelection = useCallback((token: number) => {
+    setInstanceSelectionRequest((current) =>
+      current !== null && current.token === token ? null : current
+    );
+  }, []);
 
   // Issue #379: Disable auto-follow for full-screen TUI tools (OpenCode, Copilot).
   // These tools render in alternate screen mode where menus appear at the top.
@@ -1086,11 +1162,6 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     },
     [setActiveActivity]
   );
-
-  /** Handle back button click - navigate to portal */
-  const handleBackClick = useCallback(() => {
-    router.push('/');
-  }, [router]);
 
   /** Handle worktree status change via dropdown */
   const handleWorktreeStatusChange = useCallback(async (newStatus: 'ready' | 'in_progress' | 'in_review' | 'done' | null) => {
@@ -1559,9 +1630,8 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     }
   }, [worktreeId, showToast]);
 
-  // Update check hook (Issue #278: hasUpdate state for DesktopHeader/MobileTabBar)
-  const { data: updateCheckData } = useUpdateCheck();
-  const hasUpdate = updateCheckData?.hasUpdate ?? false;
+  // Issue #278 / #2654: app-wide update state (AppUpdateProvider) for DesktopHeader/MobileTabBar
+  const { hasUpdate } = useAppUpdate();
 
   // Auto-yes hook
   const { lastAutoResponse } = useAutoYes({
@@ -1820,7 +1890,6 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     handleActivityToggle,
     handleAgentInstancesChange,
     handleAutoYesToggle,
-    handleBackClick,
     handleCloseDiff,
     handleDelete,
     handleDiffSelect,
@@ -1870,6 +1939,8 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     handleUpload,
     handleVibeLocalContextWindowChange,
     rosterReady,
+    instanceSelectionRequest,
+    acknowledgeInstanceSelection,
     handleVibeLocalModelChange,
     handleWorktreeStatusChange,
     hasUpdate,

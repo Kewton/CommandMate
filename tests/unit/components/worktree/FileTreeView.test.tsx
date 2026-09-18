@@ -6,8 +6,11 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
-import { FileTreeView } from '@/components/worktree/FileTreeView';
+import { render, screen, fireEvent, waitFor, act, within } from '@testing-library/react';
+import {
+  FileTreeView,
+  FILE_TREE_TOOLBAR_LABEL_MIN_CONTAINER_PX,
+} from '@/components/worktree/FileTreeView';
 import { FILE_TREE_POLL_INTERVAL_MS } from '@/config/file-polling-config';
 import { getFileTreeExpandedStorageKey } from '@/hooks/useFileTreeExpandedState';
 import type { TreeResponse } from '@/types/models';
@@ -330,7 +333,7 @@ describe('FileTreeView', () => {
       await waitFor(() => {
         const indexItem = screen.getByTestId('tree-item-index.ts');
         // Check for indentation using inline style (depth=1 -> 1.5rem)
-        expect(indexItem).toHaveStyle({ paddingLeft: '1.5rem' });
+        expect(indexItem.style.getPropertyValue('--tree-indent')).toBe('1.5rem');
       });
     });
 
@@ -340,7 +343,7 @@ describe('FileTreeView', () => {
       await waitFor(() => {
         const srcItem = screen.getByTestId('tree-item-src');
         // depth=0 -> 0.5rem
-        expect(srcItem).toHaveStyle({ paddingLeft: '0.5rem' });
+        expect(srcItem.style.getPropertyValue('--tree-indent')).toBe('0.5rem');
       });
     });
 
@@ -489,7 +492,7 @@ describe('FileTreeView', () => {
 
       // Check that the deep file has correct indentation (depth=6 -> 6.5rem)
       const deepFileItem = screen.getByTestId('tree-item-deep-file.ts');
-      expect(deepFileItem).toHaveStyle({ paddingLeft: '6.5rem' });
+      expect(deepFileItem.style.getPropertyValue('--tree-indent')).toBe('6.5rem');
     });
   });
 
@@ -505,7 +508,7 @@ describe('FileTreeView', () => {
       [6, '6.5rem'],
       [10, '10.5rem'],
       [20, '20.5rem'],
-    ])('should apply paddingLeft %s for depth %i', async (depth, expectedPadding) => {
+    ])('should apply --tree-indent %s for depth %i', async (depth, expectedPadding) => {
       // Test indentation by creating appropriate mock data
       // This is an integration test - the unit test would test getIndentStyle directly
       // For now, we verify through the root level (depth 0)
@@ -513,7 +516,7 @@ describe('FileTreeView', () => {
         render(<FileTreeView worktreeId="test-worktree" />);
         await waitFor(() => {
           const srcItem = screen.getByTestId('tree-item-src');
-          expect(srcItem).toHaveStyle({ paddingLeft: expectedPadding });
+          expect(srcItem.style.getPropertyValue('--tree-indent')).toBe(expectedPadding);
         });
       }
     });
@@ -2068,6 +2071,155 @@ describe('FileTreeView', () => {
 
       fireEvent.click(screen.getByTestId('file-tree-reset-button'));
       expect(onResetView).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  /**
+   * Issue #2631: in a narrow panel (the PC default of 18% is about 210px; a
+   * phone held sideways leaves about 100px) the toolbar's "New File" / "New
+   * Directory" broke one character per line and their icons shrank to dots,
+   * because the buttons gave their width away to the right-hand group.
+   *
+   * jsdom has no layout and evaluates no container query, so these tests pin
+   * the classes the narrow layout depends on — which element is the query
+   * container, what refuses to shrink, what may wrap, and from which width the
+   * labels are drawn. How it looks at real widths is checked in the UAT.
+   */
+  describe('narrow panel toolbar (Issue #2631)', () => {
+    const CREATE_BUTTONS = ['toolbar-new-file-button', 'toolbar-new-directory-button'] as const;
+
+    const classesOf = (el: Element | null): string[] =>
+      (el?.getAttribute('class') ?? '').split(/\s+/).filter(Boolean);
+
+    const cannotShrink = (el: Element | null): boolean => {
+      const classes = classesOf(el);
+      return classes.includes('shrink-0') || classes.includes('flex-shrink-0');
+    };
+
+    /**
+     * The parts of a create control that can still be squeezed by its
+     * siblings. The toolbar's flex item (the tooltip wrapper once the button is
+     * wrapped), every element between it and the button, and the icon must
+     * refuse to shrink, and the label must not break.
+     */
+    function squeezableParts(button: HTMLElement, toolbar: HTMLElement): string[] {
+      const parts: string[] = [];
+      for (let el: HTMLElement | null = button; el && el !== toolbar; el = el.parentElement) {
+        if (!cannotShrink(el)) parts.push(`flex item <${el.tagName.toLowerCase()}>`);
+      }
+      if (!cannotShrink(button.querySelector('svg'))) parts.push('icon');
+      if (!classesOf(button).includes('whitespace-nowrap')) parts.push('label wraps');
+      return parts;
+    }
+
+    async function renderToolbar() {
+      render(
+        <FileTreeView worktreeId="test-worktree" onNewFile={vi.fn()} onNewDirectory={vi.fn()} />
+      );
+      await waitFor(() => {
+        expect(screen.getByTestId('file-tree-view')).toBeInTheDocument();
+      });
+      return screen.getByTestId('file-tree-toolbar');
+    }
+
+    it('flags the pre-fix markup (negative control for squeezableParts)', () => {
+      // The toolbar as it was on develop 011d948e, spelled out so the helper
+      // is shown to catch the defect without touching the component.
+      render(
+        <div data-testid="pre-fix-toolbar" className="flex items-center gap-1 p-1 border-b border-border">
+          <button
+            data-testid="pre-fix-button"
+            className="flex items-center gap-1 px-2 py-1 text-xs text-muted-foreground hover:bg-muted rounded transition-colors"
+          >
+            <svg className="w-4 h-4" aria-hidden="true" />
+            <span>新規ディレクトリ</span>
+          </button>
+          <div className="ml-auto flex items-center gap-1" />
+        </div>
+      );
+      expect(
+        squeezableParts(screen.getByTestId('pre-fix-button'), screen.getByTestId('pre-fix-toolbar'))
+      ).toEqual(['flex item <button>', 'icon', 'label wraps']);
+    });
+
+    it('keeps both create buttons whole: nothing in them shrinks and the label never wraps', async () => {
+      const toolbar = await renderToolbar();
+      for (const testId of CREATE_BUTTONS) {
+        expect(squeezableParts(screen.getByTestId(testId), toolbar)).toEqual([]);
+      }
+    });
+
+    it('makes the tree the query container and lets the toolbar and its right-hand group wrap', async () => {
+      const toolbar = await renderToolbar();
+      expect(classesOf(screen.getByTestId('file-tree-view'))).toContain('@container');
+      expect(classesOf(toolbar)).toContain('flex-wrap');
+
+      const group = screen.getByTestId('file-tree-refresh-button').parentElement;
+      expect(group?.parentElement).toBe(toolbar);
+      expect(classesOf(group)).toEqual(expect.arrayContaining(['ml-auto', 'flex-wrap']));
+    });
+
+    it('draws the labels only from the container threshold up', async () => {
+      await renderToolbar();
+      for (const testId of CREATE_BUTTONS) {
+        const label = screen.getByTestId(testId).querySelector('span');
+        const classes = classesOf(label);
+        expect(classes).toContain('hidden');
+        // The literal must match the constant (Tailwind cannot see an interpolation).
+        expect(classes).toContain(`@min-[${FILE_TREE_TOOLBAR_LABEL_MIN_CONTAINER_PX}px]:inline`);
+      }
+      // Wide enough for both labels and the right-hand group on one line
+      // (ja needs about 352px of toolbar), narrow enough for a 360px phone.
+      expect(FILE_TREE_TOOLBAR_LABEL_MIN_CONTAINER_PX).toBe(360);
+    });
+
+    it('names each button with aria-label, keeping the wording and order', async () => {
+      const toolbar = await renderToolbar();
+      const newFile = screen.getByTestId('toolbar-new-file-button');
+      const newDirectory = screen.getByTestId('toolbar-new-directory-button');
+
+      expect(newFile).toHaveAttribute('aria-label', 'worktree.fileTree.newFile');
+      expect(newDirectory).toHaveAttribute('aria-label', 'worktree.fileTree.newDirectory');
+      expect(within(toolbar).getByRole('button', { name: 'worktree.fileTree.newFile' })).toBe(newFile);
+      expect(newFile).toHaveTextContent('worktree.fileTree.newFile');
+      expect(newDirectory).toHaveTextContent('worktree.fileTree.newDirectory');
+
+      const order = [
+        newFile,
+        newDirectory,
+        screen.getByTestId('file-metadata-toggle-button'),
+        screen.getByTestId('file-tree-refresh-button'),
+        screen.getByTestId('file-tree-reset-button'),
+      ];
+      for (let i = 1; i < order.length; i++) {
+        expect(
+          order[i - 1].compareDocumentPosition(order[i]) & Node.DOCUMENT_POSITION_FOLLOWING
+        ).toBeTruthy();
+      }
+    });
+
+    it('shows the label in a tooltip on hover and on keyboard focus', async () => {
+      await renderToolbar();
+      const newFile = screen.getByTestId('toolbar-new-file-button');
+      // No native title: the tooltip already renders the label.
+      expect(newFile).not.toHaveAttribute('title');
+
+      fireEvent.mouseEnter(newFile.parentElement as HTMLElement);
+      expect(await screen.findByRole('tooltip', { hidden: true })).toHaveTextContent(
+        'worktree.fileTree.newFile'
+      );
+      fireEvent.mouseLeave(newFile.parentElement as HTMLElement);
+      await waitFor(() => {
+        expect(screen.queryByRole('tooltip', { hidden: true })).not.toBeInTheDocument();
+      });
+
+      const newDirectory = screen.getByTestId('toolbar-new-directory-button');
+      act(() => {
+        newDirectory.focus();
+      });
+      expect(screen.getByRole('tooltip', { hidden: true })).toHaveTextContent(
+        'worktree.fileTree.newDirectory'
+      );
     });
   });
 });

@@ -200,31 +200,33 @@ export const SearchBar = memo(function SearchBar({
         />
 
         {/* Loading / Clear Button */}
-        <div className="flex-shrink-0 w-6 h-6 flex items-center justify-center">
-          {isSearching ? (
-            <LoadingSpinner />
-          ) : query ? (
-            <button
-              type="button"
-              data-testid="search-clear"
-              onClick={handleClear}
-              className="p-1 text-muted-foreground hover:text-foreground rounded transition-colors"
-              aria-label={t('search.clear')}
-            >
-              <ClearIcon />
-            </button>
-          ) : null}
-        </div>
+        {(isSearching || !!query) && (
+          <div className="flex-shrink-0 w-6 h-6 flex items-center justify-center">
+            {isSearching ? (
+              <LoadingSpinner />
+            ) : query ? (
+              <button
+                type="button"
+                data-testid="search-clear"
+                onClick={handleClear}
+                className="p-1 text-muted-foreground hover:text-foreground rounded transition-colors"
+                aria-label={t('search.clear')}
+              >
+                <ClearIcon />
+              </button>
+            ) : null}
+          </div>
+        )}
       </div>
 
       {/* Mode Toggle Row */}
-      <div className="flex items-center gap-1">
-        <span className="text-xs text-muted-foreground mr-1">{t('search.mode')}</span>
+      <div className="flex flex-wrap items-center gap-1">
+        <span className="text-xs text-muted-foreground mr-1 whitespace-nowrap">{t('search.mode')}</span>
         <button
           type="button"
           data-testid="mode-name"
           onClick={() => onModeChange('name')}
-          className={`px-2 py-0.5 text-xs rounded transition-colors ${
+          className={`px-2 py-0.5 text-xs rounded transition-colors whitespace-nowrap flex-shrink-0 ${
             mode === 'name'
               ? 'bg-accent-100 dark:bg-accent-900 text-accent-700 dark:text-accent-300 font-medium'
               : 'bg-muted text-muted-foreground hover:bg-muted/80'
@@ -237,7 +239,7 @@ export const SearchBar = memo(function SearchBar({
           type="button"
           data-testid="mode-content"
           onClick={() => onModeChange('content')}
-          className={`px-2 py-0.5 text-xs rounded transition-colors ${
+          className={`px-2 py-0.5 text-xs rounded transition-colors whitespace-nowrap flex-shrink-0 ${
             mode === 'content'
               ? 'bg-accent-100 dark:bg-accent-900 text-accent-700 dark:text-accent-300 font-medium'
               : 'bg-muted text-muted-foreground hover:bg-muted/80'

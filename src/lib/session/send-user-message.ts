@@ -8,9 +8,13 @@
  * appear in Message History.
  *
  * Responsibilities (in order):
- *   1. savePendingAssistantResponse  — persist the previous assistant reply
- *   2. orphan detection              — Issue #379 duplicate-message guard
- *   3. copilot /model command        — Issue #576 (copilot only)
+ *   1. copilot /model command        — Issue #576 (copilot only); then wait for
+ *                                      the poller still watching the previous
+ *                                      turn to record it (Issue #2630)
+ *   2. savePendingAssistantResponse  — persist the previous assistant reply;
+ *                                      the user-row stamp is read just before
+ *                                      it, after step 1 (Issue #2630)
+ *   3. orphan detection              — Issue #379 duplicate-message guard
  *   4. send to CLI tool              — image branch / ICLITool.sendMessage
  *   5. createMessage (role: 'user')  — INSERT INTO chat_messages (History source)
  *   5b. broadcastMessage('message')  — Issue #2195, push the user row to every
@@ -39,7 +43,7 @@ import {
 } from '@/lib/db';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { isImageCapableCLITool, type CLIToolType } from '@/lib/cli-tools/types';
-import { startPolling } from '@/lib/polling/response-poller';
+import { startPolling, getActivePollers } from '@/lib/polling/response-poller';
 import { savePendingAssistantResponse } from '@/lib/assistant-response-saver';
 import { broadcastMessage } from '@/lib/ws-server';
 import { MESSAGES_INVALIDATED_EVENT_TYPE } from '@/lib/realtime/types';
@@ -104,6 +108,50 @@ function getErrorMessage(error: unknown): string {
 }
 
 /**
+ * How long a copilot body waits, after its `/model` switch, for the response
+ * poller still watching the previous turn to record that turn (Issue #2630).
+ *
+ * Two of the poller's ticks (`POLLING_INTERVAL`, 2 s) and a second of margin.
+ * The switch ends with `invalidateCache`, so the first tick that starts after
+ * it reads a fresh, idle frame; the second tick covers one that was already
+ * in flight with an older capture. Past this bound the body is sent anyway:
+ * a live poller that did not stop has declined to record the frame (an empty
+ * or duplicate reply), and waiting longer would not change its answer.
+ */
+export const PREVIOUS_TURN_RECORD_TIMEOUT_MS = 5_000;
+
+/** How often {@link waitForPreviousTurnRecorded} re-reads the poller registry. */
+const PREVIOUS_TURN_RECORD_CHECK_MS = 100;
+
+/**
+ * Wait until no response poller is watching this instance (Issue #2630).
+ *
+ * copilot's replies are recorded by the response poller alone:
+ * `savePendingAssistantResponse` returns early for every alternate-screen tool
+ * (Issue #1292). The poller records a turn only from a frame in which that turn
+ * is the newest one, and a copilot chain stops itself once it has recorded one
+ * — so a chain that is still registered once copilot has gone idle is one that
+ * has not recorded the turn yet.
+ *
+ * @param worktreeId - Target worktree
+ * @param resolvedInstanceId - The instance, already resolved to its id
+ * @returns false when the chain was still registered at the deadline
+ */
+async function waitForPreviousTurnRecorded(
+  worktreeId: string,
+  resolvedInstanceId: string
+): Promise<boolean> {
+  // The key `getPollerKey` (lib/polling/response-poller-core) builds.
+  const pollerKey = `${worktreeId}:${resolvedInstanceId}`;
+  const deadline = Date.now() + PREVIOUS_TURN_RECORD_TIMEOUT_MS;
+  while (getActivePollers().includes(pollerKey)) {
+    if (Date.now() >= deadline) return false;
+    await new Promise((resolve) => setTimeout(resolve, PREVIOUS_TURN_RECORD_CHECK_MS));
+  }
+  return true;
+}
+
+/**
  * Send a validated user message to the CLI tool and record it in history.
  *
  * On CLI send failure (or copilot /model failure) it returns an `ok: false`
@@ -162,11 +210,71 @@ export async function sendUserMessage(
     };
   }
 
+  // 1. Issue #576: Send /model command before message if model is specified (copilot only).
+  //
+  // Issue #2623: the body below is typed only once this resolves, and it now
+  // resolves only on copilot's own answer to `/model` — never merely because
+  // the composer is drawn, which it is while copilot is still loading and a
+  // body typed then is never run. A refused id (`✗ Model "…" is unsupported.`)
+  // or no answer rejects, so the send stops here with `stage: 'model'` and the
+  // body is not typed into a model nobody confirmed.
+  //
+  // Issue #2630: that wait is also why this step now comes FIRST. It waits for
+  // copilot to be idle — up to 30 s when the send arrives mid-turn — so the
+  // previous turn can end inside it, and everything that used to run before it
+  // described the moment the request arrived rather than the moment the body is
+  // typed. A failed switch returns before anything below has run, which loses
+  // nothing: the only tool that gets here is copilot, whose pending-response
+  // save is a no-op (#1292), and the poller watching its previous turn is left
+  // running because `startPolling` below is never reached.
+  if (copilotModel && cliToolId === 'copilot') {
+    try {
+      const copilotTool = cliTool as CopilotTool;
+      await copilotTool.sendModelCommand(worktreeId, copilotModel, instanceId);
+      logger.info('copilot-model-command-sent', { model: copilotModel });
+    } catch (error) {
+      logger.error('failed-to-send-model-command:', { error: getErrorMessage(error) });
+      return { ok: false, stage: 'model', error: getErrorMessage(error) };
+    }
+
+    // Issue #2630: copilot is idle now, and if the previous turn ended during the
+    // switch its reply is still unrecorded: the poller watching it ticks every
+    // 2 s, and the body typed next makes the NEXT prompt the newest turn on the
+    // pane, after which that poller — and the fresh one `startPolling` starts
+    // below — extract only what follows it. Measured on copilot 1.0.85 (UAT
+    // TC-2623-06): the turn stopped 5.6 s before `/model` answered, the body
+    // followed 0.3 s after the answer, and the reply never reached History.
+    // Typing only once that poller has recorded the turn and stopped closes the
+    // window; a send to an already idle copilot finds no poller and waits for
+    // nothing.
+    const recorded = await waitForPreviousTurnRecorded(worktreeId, resolvedInstanceId);
+    if (!recorded) {
+      logger.warn('previous-turn-poller-still-running', {
+        worktreeId,
+        instanceId: resolvedInstanceId,
+        waitedMs: PREVIOUS_TURN_RECORD_TIMEOUT_MS,
+      });
+    }
+  }
+
   // Generate the user-message timestamp BEFORE saving the pending response so
   // ordering holds: assistantResponse < userMessage.
+  //
+  // Issue #2630: and only AFTER step 1. This is the row `wait`'s #1975 gate
+  // (src/cli/commands/wait.ts `outstandingPrompt`) compares with the agent's
+  // last `stop`: a stamp taken when the request arrived was older than a
+  // previous turn that ended during the `/model` wait, so that turn's `stop`
+  // read as the end of this one and `wait` completed before the body reached
+  // copilot. Read here, it is later than any turn that ended before the body is
+  // typed and earlier than the `stop` of the turn the body starts. copilot's
+  // body send cannot move a previous turn's end past it either: its composer
+  // wait holds only while copilot is still loading (no turn is running) or
+  // behind a dialog (refused by the prompt guard above), and returns at once
+  // while a turn is running. A send without `--model` skips step 1, so its stamp
+  // is read at the same point as before.
   const userMessageTimestamp = new Date();
 
-  // 1. Save any pending assistant response before sending the new user message.
+  // 2. Save any pending assistant response before sending the new user message.
   try {
     await savePendingAssistantResponse(db, worktreeId, cliToolId, userMessageTimestamp, instanceId);
   } catch (error) {
@@ -174,7 +282,7 @@ export async function sendUserMessage(
     logger.error('failed-to-save-pending-assistant-response:', { error: getErrorMessage(error) });
   }
 
-  // 2. Clean up orphaned user messages (Issue #379: duplicate message prevention).
+  // 3. Clean up orphaned user messages (Issue #379: duplicate message prevention).
   // If the most recent message for THIS INSTANCE is a user message with the same
   // content, the assistant never responded and the user is retrying. Remove it
   // (only after the retry message is persisted) to prevent duplicates.
@@ -192,6 +300,10 @@ export async function sendUserMessage(
   // NULL and read back as the primary instance), so the orphan they are would
   // survive as a visible duplicate. Same expression as #2196's
   // `findUnkeyedUserMessages`.
+  //
+  // Issue #2630: read after step 2 as before, and now after step 1 too. A reply
+  // the poller recorded during the `/model` wait is the newest row by then, so
+  // the user row above it is no longer mistaken for one nobody answered.
   let orphanedMessageIdToDelete: string | null = null;
   try {
     const recentMessages = getMessages(db, worktreeId, {
@@ -210,18 +322,6 @@ export async function sendUserMessage(
   } catch (error) {
     // Log but don't fail - cleanup candidate discovery is best-effort
     logger.error('failed-to-detect-orphaned-messages:', { error: getErrorMessage(error) });
-  }
-
-  // 3. Issue #576: Send /model command before message if model is specified (copilot only).
-  if (copilotModel && cliToolId === 'copilot') {
-    try {
-      const copilotTool = cliTool as CopilotTool;
-      await copilotTool.sendModelCommand(worktreeId, copilotModel, instanceId);
-      logger.info('copilot-model-command-sent', { model: copilotModel });
-    } catch (error) {
-      logger.error('failed-to-send-model-command:', { error: getErrorMessage(error) });
-      return { ok: false, stage: 'model', error: getErrorMessage(error) };
-    }
   }
 
   // 4. Send message to CLI tool.

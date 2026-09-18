@@ -26,15 +26,14 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname } from 'next/navigation';
+import { useViewTransitionRouter } from '@/components/providers/ViewTransitionsProvider';
 import { useLocale, useTranslations } from 'next-intl';
 import { useTheme } from 'next-themes';
 import { Command } from 'cmdk';
 import {
   type LucideIcon,
   Search,
-  Home,
-  MessageSquare,
   AlignJustify,
   FolderGit2,
   CircleCheck,
@@ -76,8 +75,6 @@ import type { Worktree } from '@/types/models';
  * spend one of the few top-level slots on it.
  */
 const NAV_ITEMS = [
-  { key: 'home', href: '/' },
-  { key: 'chat', href: '/chat' },
   { key: 'sessions', href: '/sessions' },
   { key: 'repositories', href: '/repositories' },
   { key: 'review', href: '/review' },
@@ -85,10 +82,8 @@ const NAV_ITEMS = [
   { key: 'more', href: '/more' },
 ] as const;
 
-/** lucide icon per navigation target (GlobalMobileNav set + Chat / Repos). */
+/** lucide icon per navigation target (GlobalMobileNav set + Repos / Skills). */
 const NAV_ICONS: Record<string, LucideIcon> = {
-  home: Home,
-  chat: MessageSquare,
   sessions: AlignJustify,
   repositories: FolderGit2,
   review: CircleCheck,
@@ -492,7 +487,7 @@ interface RecentRow {
 export function CommandPalette() {
   const { open, setOpen } = useCommandPalette();
   const { setOpen: setShortcutsOpen } = useKeyboardShortcuts();
-  const router = useRouter();
+  const router = useViewTransitionRouter();
   // Issue #2376: which worktree the browser is on, so "delegate to myself" can
   // be recognised. Half the test; the other half is the visible chat surface.
   const pathname = usePathname();

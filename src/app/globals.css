@@ -609,6 +609,14 @@
     padding-bottom: env(safe-area-inset-bottom, 0px);
   }
 
+  /* Issue #2695: the bottom tab bar is `h-14` (56px) PLUS pb-safe, so
+     a main that only reserves `pb-14` is short by the inset and its content is
+     covered on devices where env(safe-area-inset-bottom) is non-zero
+     (viewportFit: 'cover', Issue #1131). Reserve both. */
+  .pb-nav-safe {
+    padding-bottom: calc(3.5rem + env(safe-area-inset-bottom, 0px));
+  }
+
   /* Custom scrollbar — [Issue #1082] tokenized so the thumb follows the theme
      (was a fixed slate). --input tracks the light/dark form-border shade. */
   .scrollbar-thin {
@@ -752,9 +760,9 @@
    * [Issue #2232] Markdown inside a chat bubble.
    *
    * A namespace of its own, NOT a second consumer of `.assistant-md`. That class
-   * is shared by History's conversation cards and `/chat`'s
-   * `AssistantMessageList`, so every value below would have landed on two other
-   * surfaces this Issue is required not to touch. The rules are deliberately
+   * belongs to History's conversation cards (the Assistant Chat list that also
+   * used it was removed in Issue #2649), so every value below would have landed
+   * on a surface this Issue is required not to touch. The rules are deliberately
    * close to `.assistant-md` — same structure, same tokens — because the
    * difference between the two surfaces is DENSITY, not typography: a bubble
    * renders at `text-sm` with no height clamp, so its blocks get a little more

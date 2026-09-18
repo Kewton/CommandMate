@@ -13,7 +13,6 @@
 
 import { Suspense, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { AppShell } from '@/components/layout';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui';
 import ReviewTab from '@/components/review/ReviewTab';
 import ReportTab from '@/components/review/ReportTab';
@@ -34,48 +33,46 @@ export default function ReviewPage() {
   const [pageTab, setPageTab] = useState<PageTab>('review');
 
   return (
-    <AppShell>
-      <div className="container-custom py-8 overflow-auto h-full">
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold text-foreground mb-2">{t('page.title')}</h1>
-          <p className="text-sm text-muted-foreground">
-            {t('page.description')}
-          </p>
-        </div>
-
-        {/* Page-level tabs */}
-        <Tabs
-          value={pageTab}
-          onValueChange={(value) => setPageTab(value as PageTab)}
-        >
-          <TabsList className="mb-6 w-full justify-start" data-testid="page-tabs">
-            {PAGE_TABS.map((tab) => (
-              <TabsTrigger
-                key={tab.value}
-                value={tab.value}
-                data-testid={`page-tab-${tab.value}`}
-              >
-                {t(tab.labelKey)}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-
-          <TabsContent value="review">
-            {/* Issue #1788: ReviewTab reads `?filter=` through useSearchParams,
-                which needs a Suspense boundary above it or the route opts out of
-                static rendering at build time. */}
-            <Suspense fallback={null}>
-              <ReviewTab />
-            </Suspense>
-          </TabsContent>
-          <TabsContent value="report">
-            <ReportTab />
-          </TabsContent>
-          <TabsContent value="template">
-            <TemplateTab />
-          </TabsContent>
-        </Tabs>
+    <div className="container-custom py-8 overflow-auto h-full">
+      <div className="mb-6">
+        <h1 className="text-2xl font-bold text-foreground mb-2">{t('page.title')}</h1>
+        <p className="text-sm text-muted-foreground">
+          {t('page.description')}
+        </p>
       </div>
-    </AppShell>
+
+      {/* Page-level tabs */}
+      <Tabs
+        value={pageTab}
+        onValueChange={(value) => setPageTab(value as PageTab)}
+      >
+        <TabsList className="mb-6 w-full justify-start" data-testid="page-tabs">
+          {PAGE_TABS.map((tab) => (
+            <TabsTrigger
+              key={tab.value}
+              value={tab.value}
+              data-testid={`page-tab-${tab.value}`}
+            >
+              {t(tab.labelKey)}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+
+        <TabsContent value="review">
+          {/* Issue #1788: ReviewTab reads `?filter=` through useSearchParams,
+              which needs a Suspense boundary above it or the route opts out of
+              static rendering at build time. */}
+          <Suspense fallback={null}>
+            <ReviewTab />
+          </Suspense>
+        </TabsContent>
+        <TabsContent value="report">
+          <ReportTab />
+        </TabsContent>
+        <TabsContent value="template">
+          <TemplateTab />
+        </TabsContent>
+      </Tabs>
+    </div>
   );
 }

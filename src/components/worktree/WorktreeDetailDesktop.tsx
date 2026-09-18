@@ -84,6 +84,14 @@ export interface WorktreeDetailDesktopProps {
   activeInstanceId: string;
   /** Issue #869: set the active agent instance (also syncs activeCliTab). */
   setActiveInstanceId: (instanceId: string) => void;
+  /**
+   * Issue #2656: an instance chosen outside this screen (the sidebar's
+   * sessions view), token-stamped by the controller. Applied once per token,
+   * exactly like a header pill click, so the primary split shows it.
+   */
+  instanceSelectionRequest?: { instanceId: string; token: number } | null;
+  /** Issue #2656: tells the controller a request was applied (clears it). */
+  onInstanceSelectionHandled?: (token: number) => void;
   hasUpdate: boolean;
   lastAutoResponse: string | null;
 
@@ -101,7 +109,6 @@ export interface WorktreeDetailDesktopProps {
   verification: WorktreeVerificationState;
 
   // Header actions
-  onBackClick: () => void;
   onInfoClick: () => void;
   onWorktreeStatusChange: (status: 'ready' | 'in_progress' | 'in_review' | 'done' | null) => void;
 
@@ -218,13 +225,14 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
   rosterReady,
   activeInstanceId,
   setActiveInstanceId,
+  instanceSelectionRequest = null,
+  onInstanceSelectionHandled,
   hasUpdate,
   lastAutoResponse,
   activeActivity,
   onActivityToggle,
   onActivityOpen,
   verification,
-  onBackClick,
   onInfoClick,
   onWorktreeStatusChange,
   pendingInsertTextMap,
@@ -381,6 +389,20 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
     },
     [setActiveInstanceId],
   );
+
+  // Issue #2656: route an instance picked in the sidebar's sessions view
+  // through the same path as a header pill click (split 0 if shown nowhere,
+  // focus move if another split shows it). The token guard keeps a re-created
+  // `handleHeaderInstanceSelect` from re-applying an old request within this
+  // mount; acknowledging clears the request so a remount cannot either.
+  const appliedInstanceRequestTokenRef = React.useRef(0);
+  React.useEffect(() => {
+    if (!instanceSelectionRequest) return;
+    if (instanceSelectionRequest.token === appliedInstanceRequestTokenRef.current) return;
+    appliedInstanceRequestTokenRef.current = instanceSelectionRequest.token;
+    handleHeaderInstanceSelect(instanceSelectionRequest.instanceId);
+    onInstanceSelectionHandled?.(instanceSelectionRequest.token);
+  }, [instanceSelectionRequest, handleHeaderInstanceSelect, onInstanceSelectionHandled]);
 
   /**
    * Issue #1816: the header chip opens the Verification pane.
@@ -817,7 +839,7 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
             main 軸に min-width:auto が効き、子孫 FilePanelSplit の固定幅ペインの
             コンテンツ要求まで膨張して FilePanel が viewport 外へ押し出される問題を防ぐ */}
         <div className="flex flex-col flex-1 min-h-0 min-w-0">
-          {/* Desktop Header with back button, status, and info */}
+          {/* Desktop Header with status and info */}
           <DesktopHeader
             worktreeName={worktreeName}
             repositoryName={
@@ -828,7 +850,6 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
             description={worktree?.description}
             status={worktreeStatus}
             gitStatus={worktree?.gitStatus}
-            onBackClick={onBackClick}
             onInfoClick={onInfoClick}
             hasUpdate={hasUpdate}
             worktreeStatus={worktree?.status ?? null}

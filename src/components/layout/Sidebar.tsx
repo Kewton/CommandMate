@@ -17,15 +17,20 @@
  * header's `RepositoryTabBar` re-orders in the same commit as a drag here, and
  * the ordering itself is `orderBranchGroups()` from sidebar-utils rather than
  * an inline sort. The fetch/PUT against `/api/sidebar/group-order` stays here.
+ *
+ * Issue #2644: header is now a nav list (Repositories+sync / Sessions / Review with count) + view/sort controls; "Branches" heading and the pill are gone.
+ * Issue #2648: the view and sort controls are words (a labelled <select> and a labelled sort control), laid out as a two-column grid.
+ * Issue #2656: a third view, "sessions", lists one row per agent instance (status first); a row opens its branch with ?instance=.
  */
 
 'use client';
 
-import React, { memo, useState, useMemo, useCallback, useEffect, useLayoutEffect, useRef, useDeferredValue } from 'react';
-import Link from 'next/link';
+import React, { memo, useState, useMemo, useCallback, useEffect, useLayoutEffect, useRef, useDeferredValue, useId } from 'react';
+import { TransitionLink } from '@/components/view-transitions/TransitionLink';
+import { usePathname } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useViewTransitionRouter } from '@/components/providers/ViewTransitionsProvider';
-import { Database } from 'lucide-react';
+import { AlignJustify, CircleCheck, Database, type LucideIcon } from 'lucide-react';
 import {
   DndContext,
   PointerSensor,
@@ -45,14 +50,15 @@ import { useWorktreeSelection } from '@/contexts/WorktreeSelectionContext';
 import { useSidebarContext } from '@/contexts/SidebarContext';
 import { BranchListItem } from '@/components/sidebar/BranchListItem';
 import { SortSelector } from '@/components/sidebar/SortSelector';
-import { Button, GroupIcon, Input, Skeleton } from '@/components/ui';
+import { Button, GroupIcon, Input, Skeleton, StatusDot } from '@/components/ui';
 import { Tooltip } from '@/components/common/Tooltip';
 import { TruncationTooltip } from '@/components/common/TruncationTooltip';
 import { LocaleSwitcher } from '@/components/common/LocaleSwitcher';
 import { ThemeToggle } from '@/components/common/ThemeToggle';
 import { LogoutButton } from '@/components/common/LogoutButton';
 import { useToast } from '@/components/common/Toast';
-import { AttentionBadge } from '@/components/layout/AttentionBadge';
+import { ATTENTION_REVIEW_HREF } from '@/config/review-config';
+import { useAttentionCount } from '@/hooks/useAttentionCount';
 import { repositoryApi, ApiError } from '@/lib/api-client';
 import { toBranchItem } from '@/types/sidebar';
 import type { SidebarBranchItem } from '@/types/sidebar';
@@ -61,10 +67,14 @@ import {
   buildHiddenRepositoryPathSet,
   filterWorktreesByVisibility,
   orderBranchGroups,
+  buildSessionRows,
+  buildSessionRowHref,
+  sortSessionRows,
+  isValidViewMode,
 } from '@/lib/sidebar-utils';
 import { useWorktreeList } from '@/hooks/useWorktreeList';
 import type { ViewMode } from '@/lib/sidebar-utils';
-import type { BranchGroup } from '@/lib/sidebar-utils';
+import type { BranchGroup, SessionRow } from '@/lib/sidebar-utils';
 
 // ============================================================================
 // Constants
@@ -78,8 +88,7 @@ const SIDEBAR_SCROLL_TOP_STORAGE_KEY = 'mcbd-sidebar-scroll-top';
 
 /**
  * Shared Tailwind size for the sidebar header action icons (Issue #946).
- * Applied to the view-mode toggle, sync button, sort selector and Repositories
- * link so the five header icons share a single, easily-tunable size (16px).
+ * Applied to the sync button icon (Issue #946).
  */
 const HEADER_ICON_CLASS = 'w-4 h-4';
 
@@ -160,6 +169,8 @@ export const Sidebar = memo(function Sidebar() {
     setRepositoryOrder,
   } = useSidebarContext();
   const t = useTranslations('common');
+  const pathname = usePathname() ?? '';
+  const { count: attentionCount } = useAttentionCount();
   const [searchQuery, setSearchQuery] = useState('');
   const branchListRef = useRef<HTMLDivElement>(null);
 
@@ -361,6 +372,16 @@ export const Sidebar = memo(function Sidebar() {
   // Adapt groupedItems to match previous interface (null when flat mode)
   const groupedBranches = viewMode === 'grouped' ? orderedGroups : null;
 
+  // Issue #2656: one row per agent instance. Built from the same filtered,
+  // hover-frozen list as the flat view, so search and the freeze apply as-is.
+  const sessionRows = useMemo(
+    () =>
+      viewMode === 'sessions'
+        ? sortSessionRows(buildSessionRows(flatBranches), sortKey, sortDirection)
+        : [],
+    [viewMode, flatBranches, sortKey, sortDirection]
+  );
+
   // Persist groupCollapsed to localStorage
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -390,7 +411,8 @@ export const Sidebar = memo(function Sidebar() {
   // on viewMode change. Intentionally NOT triggered by every list-length change —
   // that would cause visible scroll jumps whenever the hover-freeze/unfreeze cycle
   // briefly changes the rendered item count.
-  const hasAnyItems = flatBranches.length > 0 || (groupedBranches?.length ?? 0) > 0;
+  const hasAnyItems =
+    flatBranches.length > 0 || (groupedBranches?.length ?? 0) > 0 || sessionRows.length > 0;
   useEffect(() => {
     const branchList = branchListRef.current;
     if (!branchList) return;
@@ -413,6 +435,16 @@ export const Sidebar = memo(function Sidebar() {
     saveBranchListScroll();
     selectWorktree(branchId);
     router.push(`/worktrees/${branchId}`);
+    closeMobileDrawer();
+  }, [saveBranchListScroll, selectWorktree, router, closeMobileDrawer]);
+
+  // Issue #2656: a session row opens its branch with that instance selected.
+  // The worktree screen reads `?instance=`, selects the instance once the
+  // roster is loaded, and removes the query again.
+  const handleSessionClick = useCallback((row: SessionRow) => {
+    saveBranchListScroll();
+    selectWorktree(row.worktreeId);
+    router.push(buildSessionRowHref(row));
     closeMobileDrawer();
   }, [saveBranchListScroll, selectWorktree, router, closeMobileDrawer]);
 
@@ -452,9 +484,12 @@ export const Sidebar = memo(function Sidebar() {
   );
 
   // Check if list is empty (for both modes)
-  const isEmpty = viewMode === 'flat'
-    ? flatBranches.length === 0
-    : (groupedBranches?.length ?? 0) === 0;
+  const isEmpty =
+    viewMode === 'grouped'
+      ? (groupedBranches?.length ?? 0) === 0
+      : viewMode === 'sessions'
+        ? sessionRows.length === 0
+        : flatBranches.length === 0;
 
   // Issue #2059: "no branches" now means exactly that. The two states that used
   // to be indistinguishable from it get their own rendering:
@@ -483,35 +518,61 @@ export const Sidebar = memo(function Sidebar() {
       {/* Header */}
       <div
         data-testid="sidebar-header"
-        className="flex-shrink-0 px-4 py-4 border-b border-sidebar-border"
+        className="flex-shrink-0 space-y-2 border-b border-sidebar-border px-2 py-2"
       >
-        {/* Issue #976: wrap the heading + actions when the sidebar is narrow so
-            the button group drops to a new line instead of overflowing
-            horizontally into the adjacent ActivityBar. flex-wrap on both the row
-            and the actions group keeps everything within the sidebar width
-            without an overflow clip (which would crop the Sort dropdown). */}
-        <div className="flex flex-wrap items-center justify-between gap-y-2">
-          <h2 className="min-w-0 truncate text-lg font-semibold text-sidebar-foreground">{t('sidebar.branches')}</h2>
-          <div className="flex flex-wrap items-center gap-1">
-            <ViewModeToggle viewMode={viewMode} onToggle={setViewMode} />
-            <SortSelector />
+        <ul data-testid="sidebar-nav" className="space-y-0.5">
+          <li className="flex min-w-0 items-center gap-1">
+            <SidebarNavLink
+              href="/repositories"
+              icon={Database}
+              label={t('nav.repositories')}
+              testId="sidebar-nav-repositories"
+              isActive={pathname.startsWith('/repositories')}
+              onNavigate={closeMobileDrawer}
+            />
             <SyncButton refreshWorktrees={refreshWorktrees} />
-            <Tooltip content={t('tooltips.repositories')} placement="bottom">
-              <Link
-                href="/repositories"
-                aria-label={t('nav.repositories')}
-                className="p-1 rounded-md text-sidebar-muted hover:text-sidebar-foreground hover:bg-sidebar-hover
-                  focus:outline-none focus:ring-2 focus:ring-ring
-                  transition-colors inline-flex items-center"
-              >
-                <Database className={HEADER_ICON_CLASS} aria-hidden="true" />
-              </Link>
-            </Tooltip>
-          </div>
+          </li>
+          <li className="flex min-w-0">
+            <SidebarNavLink
+              href="/sessions"
+              icon={AlignJustify}
+              label={t('nav.sessions')}
+              testId="sidebar-nav-sessions"
+              isActive={pathname.startsWith('/sessions')}
+              onNavigate={closeMobileDrawer}
+            />
+          </li>
+          <li className="flex min-w-0">
+            <SidebarNavLink
+              href={attentionCount > 0 ? ATTENTION_REVIEW_HREF : '/review'}
+              icon={CircleCheck}
+              label={t('nav.review')}
+              testId="sidebar-nav-review"
+              isActive={pathname.startsWith('/review')}
+              onNavigate={closeMobileDrawer}
+              trailing={
+                attentionCount > 0 ? (
+                  <span
+                    data-testid="sidebar-nav-review-count"
+                    role="status"
+                    aria-label={t('attention.badgeLabel', { count: attentionCount })}
+                    className="flex-shrink-0 rounded-full bg-warning-subtle px-1.5 text-xs font-semibold leading-5 tabular-nums text-warning-foreground"
+                  >
+                    {attentionCount > 99 ? '99+' : attentionCount}
+                  </span>
+                ) : null
+              }
+            />
+          </li>
+        </ul>
+        <div
+          data-testid="sidebar-list-controls"
+          className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-2 gap-y-1.5 px-2"
+        >
+          <ViewModeSelect viewMode={viewMode} onChange={setViewMode} />
+          <span className="whitespace-nowrap text-xs text-sidebar-muted">{t('sort.label')}</span>
+          <SortSelector />
         </div>
-        {/* Issue #1788: global "N need your attention" badge. Header only —
-            the rows below belong to Issue #1787. Renders nothing at zero. */}
-        <AttentionBadge />
       </div>
 
       {/* Search */}
@@ -562,6 +623,16 @@ export const Sidebar = memo(function Sidebar() {
           <div className="px-4 py-8 text-center text-sidebar-muted">
             {searchQuery ? t('sidebar.noBranchesFound') : t('sidebar.noBranchesAvailable')}
           </div>
+        ) : viewMode === 'sessions' ? (
+          // Issue #2656: sessions view — no DnD, no groups
+          sessionRows.map((row) => (
+            <SessionListItem
+              key={row.key}
+              row={row}
+              isSelected={row.worktreeId === selectedWorktreeId}
+              onClick={handleSessionClick}
+            />
+          ))
         ) : viewMode === 'grouped' && groupedBranches ? (
           // Grouped view with DnD reordering
           <DndContext
@@ -804,41 +875,125 @@ function GroupHeader({
   );
 }
 
-/** View mode toggle button */
-function ViewModeToggle({
-  viewMode,
-  onToggle,
+/**
+ * One row of the sidebar's top navigation (Repositories / Sessions / Review).
+ * The label is visible text, so the row needs no tooltip and no aria-label.
+ */
+function SidebarNavLink({
+  href,
+  icon: Icon,
+  label,
+  testId,
+  isActive,
+  onNavigate,
+  trailing,
 }: {
-  viewMode: ViewMode;
-  onToggle: (mode: ViewMode) => void;
+  href: string;
+  icon: LucideIcon;
+  label: string;
+  testId: string;
+  isActive: boolean;
+  onNavigate: () => void;
+  trailing?: React.ReactNode;
 }) {
-  const t = useTranslations('common');
-  const handleClick = () => {
-    onToggle(viewMode === 'grouped' ? 'flat' : 'grouped');
-  };
-
   return (
-    <Tooltip content={t('tooltips.viewMode')} placement="bottom">
-      <button
-        data-testid="view-mode-toggle"
-        type="button"
-        onClick={handleClick}
-        aria-label={viewMode === 'grouped' ? t('sidebar.switchToFlatView') : t('sidebar.switchToGroupedView')}
-        className="
-          p-1 rounded-md text-sidebar-muted hover:text-sidebar-foreground hover:bg-sidebar-hover
-          focus:outline-none focus:ring-2 focus:ring-ring
-          transition-colors
-        "
-      >
-        {viewMode === 'grouped' ? (
-          <FlatListIcon className={HEADER_ICON_CLASS} />
-        ) : (
-          <GroupIcon className={HEADER_ICON_CLASS} />
-        )}
-      </button>
-    </Tooltip>
+    <TransitionLink
+      href={href}
+      data-testid={testId}
+      aria-current={isActive ? 'page' : undefined}
+      onClick={onNavigate}
+      className={`flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-sidebar-hover hover:text-sidebar-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+        isActive ? 'bg-sidebar-hover font-medium text-sidebar-foreground' : 'text-sidebar-muted'
+      }`}
+    >
+      <Icon className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+      {trailing}
+    </TransitionLink>
   );
 }
+
+/**
+ * View mode select (Issue #2648): the list layout as words instead of an icon.
+ * Renders two cells of the header's controls grid — the label and the select.
+ */
+function ViewModeSelect({
+  viewMode,
+  onChange,
+}: {
+  viewMode: ViewMode;
+  onChange: (mode: ViewMode) => void;
+}) {
+  const t = useTranslations('common');
+  const selectId = useId();
+
+  return (
+    <>
+      <label htmlFor={selectId} className="whitespace-nowrap text-xs text-sidebar-muted">
+        {t('sidebar.viewLabel')}
+      </label>
+      <select
+        id={selectId}
+        data-testid="view-mode-select"
+        value={viewMode}
+        onChange={(event) => {
+          const next = event.target.value;
+          // The <select> can only emit the values rendered below; the guard is
+          // for the type.
+          if (isValidViewMode(next)) onChange(next);
+        }}
+        className="w-full min-w-0 truncate rounded border border-sidebar-border bg-sidebar px-1.5 py-1 text-xs text-sidebar-foreground hover:bg-sidebar-hover focus:outline-none focus:ring-2 focus:ring-ring"
+      >
+        <option value="grouped">{t('sidebar.viewMode.grouped')}</option>
+        <option value="flat">{t('sidebar.viewMode.flat')}</option>
+        <option value="sessions">{t('sidebar.viewMode.sessions')}</option>
+      </select>
+    </>
+  );
+}
+
+/**
+ * One agent instance in the sessions view (Issue #2656): status dot, agent
+ * label (bold), then branch · repository (muted). Selected = its branch is the
+ * one open, so every row of that branch is highlighted.
+ */
+const SessionListItem = memo(function SessionListItem({
+  row,
+  isSelected,
+  onClick,
+}: {
+  row: SessionRow;
+  isSelected: boolean;
+  onClick: (row: SessionRow) => void;
+}) {
+  const t = useTranslations('common');
+  const statusLabel = t(`status.${row.status}`);
+
+  return (
+    <button
+      type="button"
+      data-testid="session-list-item"
+      data-session-key={row.key}
+      onClick={() => onClick(row)}
+      aria-current={isSelected ? 'true' : undefined}
+      className={`w-full min-w-0 px-4 py-2 flex items-center gap-3 text-left hover:bg-sidebar-hover transition-colors focus:outline-none focus:ring-2 focus:ring-inset focus:ring-ring ${
+        isSelected ? 'bg-sidebar-hover border-l-2 border-accent-500' : 'border-l-2 border-transparent'
+      }`}
+    >
+      <StatusDot
+        status={row.status}
+        size="lg"
+        label={row.exited ? `${statusLabel} (${t('branchItem.agentExited')})` : statusLabel}
+      />
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-semibold text-sidebar-foreground">{row.label}</span>
+        <span className="block truncate text-xs text-sidebar-muted">
+          {row.branchName} · {row.repositoryName}
+        </span>
+      </span>
+    </button>
+  );
+});
 
 /** Chevron icon for collapse/expand */
 function ChevronIcon({ isExpanded }: { isExpanded: boolean }) {
@@ -851,21 +1006,6 @@ function ChevronIcon({ isExpanded }: { isExpanded: boolean }) {
       strokeWidth={2}
     >
       <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-    </svg>
-  );
-}
-
-/** Flat list icon */
-function FlatListIcon({ className = 'w-3 h-3' }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-      strokeWidth={2}
-    >
-      <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
     </svg>
   );
 }

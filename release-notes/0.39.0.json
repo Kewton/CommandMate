@@ -1,0 +1,94 @@
+{
+  "version": "0.39.0",
+  "date": "2026-09-19",
+  "highlight": {
+    "ja": "サイドバーの上端がリポジトリ・セッション・レビューの画面移動ナビになり、画面を移ってもサイドバーとヘッダーが作り直されなくなりました。",
+    "en": "The top of the sidebar is now navigation for Repositories, Sessions and Review, and moving between screens no longer rebuilds the sidebar and header."
+  },
+  "added": [
+    {
+      "ja": "サイドバーの表示に「セッション」が加わり、エージェント 1 つを 1 行で一覧できるようになりました。",
+      "en": "The sidebar can now show Sessions, listing one row per agent."
+    },
+    {
+      "ja": "更新のあとに「新機能と改善」が表示されるようになりました。",
+      "en": "After an update, a list of what is new and improved is now shown."
+    },
+    {
+      "ja": "ブランチ画面のアクティビティバーの一番下に、設定メニューの歯車ボタンが付きました。",
+      "en": "A settings menu is now available from the gear button at the bottom of the activity bar."
+    },
+    {
+      "ja": "レビュー行に要対応の件数が表示されるようになりました。",
+      "en": "The Review row now shows how many items need your attention."
+    }
+  ],
+  "improved": [
+    {
+      "ja": "画面を移ってもサイドバーとヘッダーが作り直されなくなり、スクロール位置や並びが保たれるようになりました。",
+      "en": "Moving between screens no longer rebuilds the sidebar and header, so scroll position and ordering are kept."
+    },
+    {
+      "ja": "サイドバーのナビとコマンドパレットからの移動も、ほかの画面移動と同じクロスフェードになりました。",
+      "en": "Navigating from the sidebar and the command palette now uses the same crossfade as elsewhere."
+    },
+    {
+      "ja": "更新があるとき、画面右上の「Update」ボタンからそのまま更新できるようになりました。",
+      "en": "When an update is available, you can now start it from the Update button at the top right."
+    },
+    {
+      "ja": "サイドバーの表示切替と並び替えが、アイコンではなく文字で選べるようになりました。",
+      "en": "The sidebar's view switch and sort order are now chosen by text instead of icons."
+    },
+    {
+      "ja": "PC の入力欄が、手動で高さを変えたあとも内容に応じて伸び縮みするようになりました。手動の高さは縮まないための下限として扱われます。",
+      "en": "The desktop composer now grows and shrinks with its content even after a manual resize, and the manual height is kept as a floor."
+    },
+    {
+      "ja": "ファイルツリーのアイコンが見分けやすくなりました。",
+      "en": "The file tree icon is now easier to tell apart."
+    },
+    {
+      "ja": "スマホの下部ナビに「ブランチ」ボタンが加わりました。",
+      "en": "A Branch button has been added to the bottom navigation on phones."
+    },
+    {
+      "ja": "ホーム画面とアシスタントチャットを廃止しました。ホームを開くと、最後に見ていたブランチに移動します。",
+      "en": "The Home screen and Assistant Chat have been removed. Opening Home now takes you to the branch you last viewed."
+    }
+  ],
+  "fixed": [
+    {
+      "ja": "画面を移るときのスピナーが、画面全体ではなく本文の中央に出るようになりました。",
+      "en": "The spinner shown while moving between screens now appears centered in the content area instead of covering the screen."
+    },
+    {
+      "ja": "スマホで、ページの一番下が下部ナビに隠れる問題を直しました。",
+      "en": "Fixed the bottom of the page being hidden behind the bottom navigation on phones."
+    },
+    {
+      "ja": "ファイルツリーの幅を狭めたときに、ファイル名が消えたりツールバーの文字が折り返したりする問題を直しました。",
+      "en": "Fixed file names disappearing and toolbar text wrapping when the file tree panel is narrow."
+    },
+    {
+      "ja": "検索欄が狭い幅で崩れる問題を直しました。",
+      "en": "Fixed the search box breaking at narrow widths."
+    },
+    {
+      "ja": "Copilot をモデル指定で起動すると、依頼の本文が実行されない問題を直しました。",
+      "en": "Fixed the message body not running when Copilot is started with a model specified."
+    },
+    {
+      "ja": "作業中の Copilot にモデル指定で送ったとき、前の応答が履歴に残らない問題を直しました。",
+      "en": "Fixed an earlier reply going missing from the history when sending to a busy Copilot with a model specified."
+    },
+    {
+      "ja": "Codex の確認画面で、状態表示と送信の判定が食い違う問題を直しました。",
+      "en": "Fixed the status display and send detection disagreeing on Codex approval screens."
+    },
+    {
+      "ja": "エージェントが自分で作業を再開するとき、待機が途中で完了と判断される問題を直しました。",
+      "en": "Fixed a wait finishing early when an agent resumes its own work."
+    }
+  ]
+}

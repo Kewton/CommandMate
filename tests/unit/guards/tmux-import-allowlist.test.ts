@@ -25,7 +25,7 @@
  *    can hold the allowlist to a count. The count lives here.
  * 2. **`overrides.files` is matched with minimatch.** A literal Next.js dynamic
  *    segment written as `src/app/api/worktrees/[id]/route.ts` is a *character
- *    class* and matches `.../i/route.ts` — not the real directory. Five of the 28
+ *    class* and matches `.../i/route.ts` — not the real directory. Five of the 22
  *    entries have `[id]` in them; unescaped, they would silently stop exempting
  *    their file and lint would go red on day one. They are escaped as `\[id\]`.
  * 3. **ESLint 8's core `no-restricted-imports` never sees `await import()` or
@@ -62,11 +62,6 @@ const GATEWAY_GLOBS = ['src/lib/tmux/**', 'src/lib/cli-tools/**'];
  * They are excluded from the progress metric.
  */
 const PERMANENT_EXEMPT = [
-  'src/app/api/assistant/conversation/route.ts',
-  'src/app/api/assistant/current-output/route.ts',
-  'src/app/api/assistant/session/route.ts',
-  'src/app/api/assistant/start/route.ts',
-  'src/app/api/assistant/terminal/route.ts',
   'src/app/api/worktrees/[id]/route.ts',
   'src/app/api/worktrees/route.ts',
   'src/cli/commands/capture.ts',
@@ -89,7 +84,6 @@ const STAGED_REMOVAL = [
   'src/components/Terminal.tsx',
   'src/lib/auto-yes-poller.ts',
   'src/lib/pasted-text-helper.ts',
-  'src/lib/polling/assistant-conversation-poller.ts',
   'src/lib/polling/global-session-poller.ts',
   'src/lib/polling/response-checker.ts',
   'src/lib/prompt-answer-sender.ts',
@@ -284,14 +278,16 @@ describe('lib/tmux import guard: ESLint configuration', () => {
 });
 
 describe('lib/tmux import guard: the allowlist', () => {
-  it('is exactly 12 permanent + 16 staged files', () => {
+  it('is exactly 7 permanent + 15 staged files', () => {
     // 19 -> 18: #1905 moved `kill-session/route.ts` onto `ICLITool.killSession`.
     // 18 -> 16: #1906 moved `terminal/route.ts` and `send-user-message.ts` onto
     // `ICLITool.sendMessage` / `ICLITool.isRunning`, deleting the copilot
     // `sendKeys` + delayed-Enter bypass that was the reason both reached tmux.
-    expect(PERMANENT_EXEMPT).toHaveLength(12);
-    expect(STAGED_REMOVAL).toHaveLength(16);
-    expect(ALLOWLIST).toHaveLength(28);
+    // 12 -> 7 and 16 -> 15: Issue #2655 deleted Assistant Chat — its five API
+    // routes and its conversation poller.
+    expect(PERMANENT_EXEMPT).toHaveLength(7);
+    expect(STAGED_REMOVAL).toHaveLength(15);
+    expect(ALLOWLIST).toHaveLength(22);
   });
 
   it('keeps the two groups sorted, deduplicated and disjoint', () => {

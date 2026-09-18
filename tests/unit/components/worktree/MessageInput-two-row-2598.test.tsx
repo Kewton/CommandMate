@@ -22,7 +22,7 @@
  * @vitest-environment jsdom
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MessageInput } from '@/components/worktree/MessageInput';
 import {
@@ -75,6 +75,17 @@ function testIdsIn(el: HTMLElement): string[] {
 }
 
 const modeSlot = <div data-testid="fake-agent-mode">mode</div>;
+
+let originalScrollHeight: PropertyDescriptor | undefined;
+function mockScrollHeight(value: number) {
+  originalScrollHeight ??= Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollHeight');
+  Object.defineProperty(HTMLElement.prototype, 'scrollHeight', { configurable: true, get: () => value });
+}
+afterEach(() => {
+  if (originalScrollHeight) Object.defineProperty(HTMLElement.prototype, 'scrollHeight', originalScrollHeight);
+  else delete (HTMLElement.prototype as unknown as Record<string, unknown>).scrollHeight;
+  originalScrollHeight = undefined;
+});
 
 describe('MessageInput two-row layout (Issue #2598)', () => {
   const defaultProps = createDefaultProps();
@@ -220,7 +231,7 @@ describe('MessageInput two-row layout (Issue #2598)', () => {
       expect(textarea.style.maxHeight).toBe('160px');
     });
 
-    it('applies the stored height of its own worktree and scope, without the 160px cap', () => {
+    it('applies the stored value as a floor, with maxHeight set to max(floor, 160)', () => {
       window.localStorage.setItem(getComposerHeightStorageKey('test-worktree', SPLIT_0), '300');
       window.localStorage.setItem(
         getComposerHeightStorageKey('test-worktree', SESSION_TILE_COMPOSER_HEIGHT_SCOPE),
@@ -229,8 +240,8 @@ describe('MessageInput two-row layout (Issue #2598)', () => {
       render(<MessageInput {...defaultProps} worktreeId="test-worktree" heightScope={SPLIT_0} />);
       const textarea = getTextarea();
       expect(textarea.style.height).toBe('300px');
-      expect(textarea.style.maxHeight).toBe('');
-      expect(screen.getByTestId('composer-resize-handle')).toHaveAttribute('data-height-mode', 'fixed');
+      expect(textarea.style.maxHeight).toBe('300px');
+      expect(screen.getByTestId('composer-resize-handle')).toHaveAttribute('data-height-mode', 'floor');
     });
 
     it('draws a stored height no taller than maxHeight, and keeps what is stored', () => {
@@ -248,7 +259,7 @@ describe('MessageInput two-row layout (Issue #2598)', () => {
       expect(getTextarea().style.height).toBe('300px');
     });
 
-    it('grows when pulled up or on ArrowUp, shrinks on ArrowDown, and stores it', () => {
+    it('grows when pulled up or on ArrowUp, lowers floor on ArrowDown, and stores it', () => {
       const key = getComposerHeightStorageKey('test-worktree', SPLIT_0);
       window.localStorage.setItem(key, '100');
       render(
@@ -267,17 +278,18 @@ describe('MessageInput two-row layout (Issue #2598)', () => {
       expect(getTextarea().style.height).toBe('140px');
       fireEvent.keyDown(handle, { key: 'ArrowDown' });
       fireEvent.keyDown(handle, { key: 'ArrowDown' });
+      // Floor lowers by 20px
       expect(getTextarea().style.height).toBe('120px');
       expect(window.localStorage.getItem(key)).toBe('120');
     });
 
-    it('keeps the stored height after a send empties the composer', async () => {
-      window.localStorage.setItem(getComposerHeightStorageKey('test-worktree', SPLIT_0), '200');
+    it('shrinks to the stored floor after a send empties the composer', async () => {
+      window.localStorage.setItem(getComposerHeightStorageKey('test-worktree', SPLIT_0), '120');
       render(<MessageInput {...defaultProps} worktreeId="test-worktree" heightScope={SPLIT_0} />);
       typeMessage('hello');
       fireEvent.click(screen.getByTestId('send-message-button'));
       await waitFor(() => expect(getTextarea()).toHaveValue(''));
-      expect(getTextarea().style.height).toBe('200px');
+      expect(getTextarea().style.height).toBe('120px');
     });
 
     it('returns to auto-grow on a double-click, and forgets the stored height', () => {
@@ -296,6 +308,56 @@ describe('MessageInput two-row layout (Issue #2598)', () => {
       render(<MessageInput {...defaultProps} worktreeId="test-worktree" heightScope={SPLIT_0} />);
       expect(getTextarea().style.height).toBe('36px');
       expect(screen.getByTestId('composer-resize-handle')).toHaveAttribute('data-height-mode', 'auto');
+    });
+
+    it('shrinks to the floor when input content is shorter than the floor', () => {
+      window.localStorage.setItem(getComposerHeightStorageKey('test-worktree', SPLIT_0), '120');
+      render(<MessageInput {...defaultProps} worktreeId="test-worktree" heightScope={SPLIT_0} />);
+      typeMessage('one line');
+      expect(getTextarea().style.height).toBe('120px');
+    });
+
+    it('grows with content when input is longer than the floor', () => {
+      window.localStorage.setItem(getComposerHeightStorageKey('test-worktree', SPLIT_0), '60');
+      mockScrollHeight(100);
+      render(<MessageInput {...defaultProps} worktreeId="test-worktree" heightScope={SPLIT_0} />);
+      typeMessage('longer message');
+      expect(getTextarea().style.height).toBe('100px');
+    });
+
+    it('does not grow beyond the auto max height (160px)', () => {
+      window.localStorage.setItem(getComposerHeightStorageKey('test-worktree', SPLIT_0), '60');
+      mockScrollHeight(400);
+      render(<MessageInput {...defaultProps} worktreeId="test-worktree" heightScope={SPLIT_0} />);
+      typeMessage('very long message');
+      expect(getTextarea().style.height).toBe('160px');
+    });
+
+    it('clamps both drawn height and CSS maxHeight with caller maxHeight', () => {
+      window.localStorage.setItem(getComposerHeightStorageKey('test-worktree', SPLIT_0), '60');
+      mockScrollHeight(400);
+      render(
+        <MessageInput {...defaultProps} worktreeId="test-worktree" heightScope={SPLIT_0} maxHeight={120} />,
+      );
+      typeMessage('very long message');
+      const textarea = getTextarea();
+      expect(textarea.style.height).toBe('120px');
+      expect(textarea.style.maxHeight).toBe('120px');
+    });
+
+    it('updates drawn height when maxHeight changes', () => {
+      window.localStorage.setItem(getComposerHeightStorageKey('test-worktree', SPLIT_0), '60');
+      mockScrollHeight(400);
+      const { rerender } = render(
+        <MessageInput {...defaultProps} worktreeId="test-worktree" heightScope={SPLIT_0} maxHeight={120} />,
+      );
+      typeMessage('very long message');
+      expect(getTextarea().style.height).toBe('120px');
+
+      rerender(
+        <MessageInput {...defaultProps} worktreeId="test-worktree" heightScope={SPLIT_0} maxHeight={200} />,
+      );
+      expect(getTextarea().style.height).toBe('160px');
     });
   });
 });

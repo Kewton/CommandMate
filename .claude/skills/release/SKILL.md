@@ -52,7 +52,9 @@ develop <──merge -s ours── main      （祖先復元。squash で切れ�
 | PR は `develop → main` | v0.10.0 以降の実績（#1314 / #1325）。`release/vX.Y.Z` ブランチを切る旧手順（#1202）は使わない |
 | squash マージ | 上記 PR は squash される。その結果 **develop の祖先が切れる**ため、マージバックが必須になる |
 | マージバックは `-s ours` | squash 後は main の tree が develop と同一なので、内容ではなく**祖先関係だけを復元**する |
+| CHANGELOG の節は `apply` で生成 | エントリは PR ごとの断片（`changelog.d/<N>.md`）で develop に入る。並列の PR が `## [Unreleased]` で衝突しないようにするため（#2641） |
 | Release ノートは CHANGELOG 転記 | v0.10.0 以降の実績。`--generate-notes` は v0.9.1 までの形式 |
+| アプリ内の「新機能と改善」は `release-notes/X.Y.Z.json` | 画面の言語（ja / en）に合わせて出すため。CHANGELOG は日本語だけなので、そのままは出せない（2-2b） |
 | npm publish しない | `publish.yml` が Release 契機で自動実行する（OIDC / provenance 付き） |
 | リリース後も稼働サーバは旧 bundle のまま | primary checkout で build しないので `.next` は据え置き。**これは正常**（Phase 4-7 参照） |
 
@@ -248,33 +250,58 @@ npm version "${NEXT_VERSION}" --no-git-tag-version
 
 ### 2-2. CHANGELOG.md
 
-`## [Unreleased]` の直後に新セクションを挿入する。
+各 Issue のエントリは、PR ごとに `changelog.d/<N>.md` の断片として develop に入っている（形式は
+`changelog.d/README.md`）。`## [Unreleased]` は空のまま保たれている（`tests/unit/scripts/changelog-fragments.test.ts`
+のガード）。**`## [X.Y.Z]` の節は手で書かず**、次の 3 手順で断片から生成する。
 
-```markdown
-## [Unreleased]
+1. 入る内容を確認する
 
-## [X.Y.Z] - YYYY-MM-DD
+   ```bash
+   node scripts/changelog-fragments.mjs check; echo "CHECK=$?"   # 0 であること
+   node scripts/changelog-fragments.mjs preview                    # 生成される節をそのまま表示する
+   ```
 
-> **Highlight**: このリリースの中心を2〜4文で。何が問題で、何を変えたか。可能なら実測値を入れる。
+   - `CHECK=0` でなければ、出力に出たファイル名の断片を直してから進む（`apply` は不正な断片が 1 つでもあると何も書かずに止まる）
+   - `preview` の Issue 番号を、リリース PR に載せる対応 Issue と突き合わせる。断片が無い Issue は節に載らない
 
-### Added
-- feat(scope): **要点**。詳細説明 (#Issue番号)
+2. 節を生成する（日付は JST）
 
-### Changed
-- ...
+   ```bash
+   node scripts/changelog-fragments.mjs apply --version "${NEXT_VERSION}" --date "$(TZ=Asia/Tokyo date +%F)"; echo "APPLY=$?"
+   git status --short -- CHANGELOG.md changelog.d   # CHANGELOG.md の M と、断片ごとの D だけであること
+   ```
 
-### Fixed
-- ...
+   - `APPLY=0` であること。`apply` は `## [Unreleased]` の直後に `## [X.Y.Z] - YYYY-MM-DD` の節を挿入し、
+     集約した断片（`changelog.d/README.md` 以外）を削除する。節は Added → Changed → … → Fixed … の順、節の中は Issue 番号の降順
+   - `## [Unreleased]` に行が残っていると `Unreleased is not empty` で止まり、何も書き換えない。残っていた行は
+     断片（`changelog.d/<N>.md`）に移してからやり直す
 
-## [前のバージョン] - ...
-```
+3. 生成された節の見出しの直後に `> **Highlight**: …` を書き足す
+
+   ```markdown
+   ## [Unreleased]
+
+   ## [X.Y.Z] - YYYY-MM-DD
+
+   > **Highlight**: このリリースの中心を2〜4文で。何が問題で、何を変えたか。可能なら実測値を入れる。
+
+   ### Added
+
+   - **feat(scope): 要点** (#Issue番号): 詳細説明
+
+   ### Fixed
+
+   - **fix(scope): 要点** (#Issue番号): 詳細説明
+
+   ## [前のバージョン] - ...
+   ```
 
 規約:
 
 - **リンク参照（`[X.Y.Z]: https://github.com/...compare/...`）は追加しない**。0.5.2 で止まっており、近年のリリースでは付けていない
-- 日付は JST 基準
-- 該当が無いカテゴリの見出しは書かない
-- 各項目末尾に Issue 番号を `(#1234)` 形式で入れる
+- 日付は JST 基準（上の `TZ=Asia/Tokyo date +%F`）
+- 該当が無いカテゴリの見出しは書かない（`apply` は断片の無い節を出さない）
+- 各項目に Issue 番号を `(#1234)` 形式で入れる（断片の形式では要約の `**` を閉じた直後。`check` が確かめる）
 
 `templates/changelog-entry.md` も参照。
 
@@ -291,7 +318,7 @@ LP の hero には、prereq 行の下に版行が**静的に**書いてある（
 突き合わせるので、書き換え忘れは 2-3 の `npm run test:unit` で落ちる。
 
 ```bash
-# 日付は 2-2 で CHANGELOG に書いた見出しから取る（JST で書き直さない。二重管理になる）
+# 日付は 2-2 の apply が CHANGELOG に書いた見出しから取る（JST で書き直さない。二重管理になる）
 RELEASE_DATE=$(awk -v v="## [${NEXT_VERSION}] - " 'index($0, v) == 1 { print substr($0, length(v) + 1); exit }' CHANGELOG.md)
 # Release の総数。これから作る v${NEXT_VERSION} の 1 本を足し、10 の位で切り捨てる（"N+" は下限の概数）
 RELEASE_COUNT=$(gh api repos/Kewton/CommandMate/releases --paginate --jq '.[].tag_name' | wc -l | tr -d ' ')
@@ -323,6 +350,78 @@ git diff -- website/index.html   # 版行の 1 行だけが変わっているこ
   `gh api` の失敗で `floor` が `0` になった場合、スクリプトは**書かずに exit 1** で止まる。
   値を手で埋めて進めず、原因（CHANGELOG の見出し・`gh auth status`）を直してから再実行する
 - `git diff` が版行の 1 行以外を含んでいたら中断する（置換対象のマークアップが変わっている）
+
+### 2-2b. リリースノート（release-notes/X.Y.Z.json）
+
+画面の「新機能と改善」ダイアログ（Issue #2651）が読むファイル。UI の言語に合わせて出すため、
+**日本語（`ja`）と英語（`en`）の両方**を書く。CHANGELOG の転記ではない（CHANGELOG は日本語だけで、
+開発者向けの詳細を含むため）。形式の正本は `src/lib/app-update/release-notes.ts`（Issue #2646）。
+
+作り方:
+
+1. 2-2 で書いた `## [X.Y.Z]` の節を読む
+2. **利用者が画面や CLI で気づく変更だけ**を選ぶ。次は入れない
+   - 先頭が `fix(test` / `test(` / `docs(` / `chore(` / `ci(` / `refactor(` / `build(` / `style(` の項目
+   - テスト・CI・検証ゲート・開発用スキル（`.claude/` / `.agents/`）・内部の整理だけの変更
+3. 分類する: `### Added` → `added`、`### Changed` → `improved`、`### Fixed` と `### Security` → `fixed`。
+   `### Removed` / `### Deprecated` は `improved` に「〜を廃止しました。」の形で入れる
+4. 1 項目を 1 文にする
+   - 利用者の目線で、何ができるようになったか・何が直ったかを書く
+     （例: 「狭い画面でもファイル名が表示されるようになりました。」 / "File names now stay visible in a narrow panel."）
+   - **プレーンテキスト**で書く。Markdown（`**` やバッククォート）・HTML・URL・Issue 番号・関数名・
+     ファイルパス・testid は書かない（画面はそのまま文字として出す）
+   - `ja` は 80 字以内、`en` は 160 字以内を目安にする（上限は 500 文字）
+   - `ja` と `en` は同じ内容にする（片方にだけ情報を足さない）
+   - 1 区分 30 件まで。超えるときは近い項目をまとめる
+5. `highlight` は CHANGELOG の `> **Highlight**:` を 1〜2 文に要約する（書き方は 4 と同じ）
+6. 利用者向けの項目が 1 つも無いリリースでもファイルは作る。そのときは 3 つの配列を空にし、
+   `highlight` を「内部の改善のみのリリースです。」 / "This release contains internal improvements only." にする
+7. Write ツールで `release-notes/${NEXT_VERSION}.json` を作る（`release-notes/` が無ければ作る）。
+   `version` は `NEXT_VERSION`、`date` は 2-2a の `RELEASE_DATE`（CHANGELOG の見出しの日付）にする
+
+```json
+{
+  "version": "0.39.0",
+  "date": "2026-09-20",
+  "highlight": {
+    "ja": "更新があるとき、画面右上の「Update」ボタンからそのまま更新できるようになりました。",
+    "en": "When an update is available, you can now start it from the Update button at the top right."
+  },
+  "added": [
+    {
+      "ja": "更新のあとに、新機能と改善の一覧が表示されるようになりました。",
+      "en": "After an update, a list of what is new is now shown."
+    }
+  ],
+  "improved": [],
+  "fixed": [
+    {
+      "ja": "情報画面を閉じると、更新後にページが再読み込みされない問題を直しました。",
+      "en": "Fixed the page not reloading after an update when the info dialog had been closed."
+    }
+  ]
+}
+```
+
+| 項目 | 規則 |
+|---|---|
+| ファイル名 | `X.Y.Z.json`（`v` を付けない） |
+| `version` | ファイル名の版と同じ文字列 |
+| `date` | `YYYY-MM-DD` |
+| `highlight` | `{ "ja", "en" }`。無ければ `null` |
+| `added` / `improved` / `fixed` | `{ "ja", "en" }` の配列。各 30 件まで。無ければ `[]` |
+| `ja` / `en` | 空白だけは不可。500 文字以内 |
+
+規則に反するファイルは、画面ではファイルごと無視される（エラーは出ず、何も表示されない）。
+**書いたら必ず次で検査する**:
+
+```bash
+npx vitest run tests/unit/release-notes/release-notes-files.test.ts > /tmp/rel-notes.log 2>&1; echo "NOTES=$?"
+```
+
+- `NOTES=0` であること。0 以外なら `/tmp/rel-notes.log` に出たファイル名と理由を見て直し、再実行する
+- 2-3 の `npm run test:unit` もこのテストを含むが、ノートの誤りはここで先に潰す
+- GitHub Release のノート（4-3）はこれまでどおり CHANGELOG の転記。このファイルは使わない
 
 ### 2-3. 品質ゲート
 
@@ -366,6 +465,9 @@ npm run test:unit > /tmp/rel-unit.log 2>&1; echo "UNIT=$?"
 
 ```bash
 git add package.json package-lock.json CHANGELOG.md website/index.html
+git add "release-notes/${NEXT_VERSION}.json"
+# 2-2 の apply が削除した断片（changelog.d/<N>.md）の削除もこのコミットに含める:
+git add changelog.d
 # Phase 1.5-2 でカタログを --write した場合のみ:
 git add src/config/slash-commands-catalog.json locales/en/worktree.json locales/ja/worktree.json
 # Phase 1.5-3 で attestation を採り直した場合のみ（--write はこのファイルを書かないので、
@@ -375,11 +477,12 @@ git commit -m "chore: release v${NEXT_VERSION}"
 git push origin develop
 ```
 
-変更は上記 4 ファイル（package.json ・ package-lock.json ・ CHANGELOG.md ・ website/index.html。
-**リコンサイルで差分が出た場合はカタログ＋locales の 3 ファイル、
-attestation を採り直した場合はさらに 1 ファイル**）であること（`git diff --stat` で確認）。
-リコンサイルで書き込みが無く attestation も動かさなかったときは基本 4 ファイルのみ
-（website/index.html は 2-2a の版行 1 行）。
+変更は上記 5 ファイル（package.json ・ package-lock.json ・ CHANGELOG.md ・ website/index.html ・
+release-notes/X.Y.Z.json。**リコンサイルで差分が出た場合はカタログ＋locales の 3 ファイル、
+attestation を採り直した場合はさらに 1 ファイル**）と、2-2 で削除した断片（`changelog.d/<N>.md`。
+`changelog.d/README.md` は残る）であること（commit の前に `git diff --cached --stat` で確認）。
+リコンサイルで書き込みが無く attestation も動かさなかったときは基本 5 ファイルのみ＋断片の削除
+（website/index.html は 2-2a の版行 1 行、release-notes/X.Y.Z.json は 2-2b で作った新規ファイル）。
 
 > `git status` に `src/config/slash-commands-attestations.json` が出ているのに
 > `New commands` が 0 件だった場合、それは**上流の削除か版の採り直し**である。

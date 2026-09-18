@@ -3,16 +3,24 @@
  * Shared route-level Suspense fallback for App Router loading.tsx files
  * (Issue #1118).
  *
- * Deliberately shape-free. All seven `loading.tsx` files share this one
+ * Deliberately shape-free. All six `loading.tsx` files share this one
  * fallback, so it cannot know which screen is arriving; any page outline it
- * draws is wrong for the other six. [Issue #1184] it drew a heading plus two
+ * draws is wrong for the other five. [Issue #1184] it drew a heading plus two
  * side-by-side cards — the Home bento outline — so every navigation briefly
  * flashed what read as a half-rendered Home. Keep it an indeterminate
  * indicator, not a content skeleton.
  *
- * It still fills the viewport: pages render their own AppShell, so this
- * renders with no shell around it, and covering the viewport is what keeps the
- * swap into the real shell from flashing blank or jumping (the #1118 intent).
+ * The root layout renders the AppShell (Issue #2682), so inside the shell this
+ * fallback fills the main area. It does that with `h-full`, not `flex-1`:
+ * `<main data-view-transition="content">` is `display: block` (it is itself a
+ * flex *item* of the shell column), so a `flex-1` child is not a flex item and
+ * the rule is inert — Issue #2683 shipped `flex-1` and the dots rendered in a
+ * 192px band at the top of the main area. The pages rendered inside the shell
+ * fill `<main>` the same way (`h-full` on their root element); the one that does
+ * not is the mobile worktree screen, which carries its own viewport height.
+ *
+ * `min-h-[12rem]` is the floor for routes rendered without a shell, where the
+ * parent's height is auto and `h-full` resolves to auto (Issue #2683).
  *
  * Dots use `bg-muted-foreground`, not the `Skeleton` primitive's `bg-muted` —
  * a slab colour for large placeholder blocks that is invisible at dot size on
@@ -39,7 +47,7 @@ export function RouteLoading() {
 
   return (
     <div
-      className="flex min-h-screen w-full items-center justify-center p-8"
+      className="flex w-full h-full min-h-[12rem] items-center justify-center p-8"
       role="status"
       aria-label={t('loadingPage')}
       data-testid="route-loading"

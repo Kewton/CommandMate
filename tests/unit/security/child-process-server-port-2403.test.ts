@@ -34,11 +34,11 @@
  * present. The two measurements are here.
  *
  *  1. A real child, started with the sanitized environment, reads `CM_PORT`
- *    back — the positive statement every call site inherits, since all six pass
+ *    back — the positive statement every call site inherits, since all five pass
  *    the same `env`. An object that merely still has the key and a process that
  *    can actually read it are not the same claim, which is the reason #1942 and
  *    #1996 start real processes too.
- *  2. None of the six call sites reads the variable, scanned from their source
+ *  2. None of the five call sites reads the variable, scanned from their source
  *    rather than asserted from memory. So "present" and "absent" are the same
  *    input to all of them, and the placement cannot change their behaviour in
  *    either direction.
@@ -73,7 +73,6 @@ const CONFIGURED_PORT = '60301';
  * own module and its barrel re-export are not call sites and are not here.
  */
 const SANITIZED_CHILD_CALL_SITES: readonly string[] = [
-  'src/lib/assistant/non-interactive-runner.ts',
   'src/lib/updates/agent-updater.ts',
   'src/lib/cli-tools/copilot-executable.ts',
   'src/lib/slash-command-catalog.ts',
@@ -157,7 +156,8 @@ describe('the sanitized-child call sites are indifferent to it (Issue #2403)', (
         'sanitizeEnvForChildProcess'
       );
     }
-    expect(SANITIZED_CHILD_CALL_SITES).toHaveLength(6);
+    // 6 -> 5: Issue #2655 deleted `src/lib/assistant/non-interactive-runner.ts`.
+    expect(SANITIZED_CHILD_CALL_SITES).toHaveLength(5);
   });
 
   it.each(SANITIZED_CHILD_CALL_SITES)('%s reads no port from the environment', (relativePath) => {
@@ -169,7 +169,7 @@ describe('the sanitized-child call sites are indifferent to it (Issue #2403)', (
 
   it('would notice if one of them started reading it', () => {
     // Positive control for the regex, so an expression that matches nothing
-    // cannot report six clean files.
+    // cannot report five clean files.
     expect('const port = getServerPort();').toMatch(PORT_READERS);
     expect('process.env.CM_PORT').toMatch(PORT_READERS);
     expect("process.env.CM_PORTAL_URL").not.toMatch(PORT_READERS);

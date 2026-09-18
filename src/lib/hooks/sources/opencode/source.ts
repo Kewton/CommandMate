@@ -375,6 +375,8 @@ export const opencodeAgentEventSource: AgentEventSource = definePullEventSource(
     // the reply out of the SSE stream, so the gate asks whether the
     // subscription is live rather than asking for the turn.
     transcriptHistory: 'push',
+    // Issue #2614. Not audited; `session.idle` carries only the session id.
+    stopReportsSelfResume: false,
   },
 
   // C4. Predicates, not a name table: see ./mappers.

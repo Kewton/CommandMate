@@ -8,8 +8,16 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, act } from '@testing-library/react';
-import { TreeNode } from '@/components/worktree/TreeNode';
+import { render, screen, fireEvent, act, cleanup } from '@testing-library/react';
+import {
+  TreeNode,
+  getIndentStyle,
+  TREE_ROW_LEADING_PX,
+  TREE_ROW_NAME_MIN_PX,
+  TREE_ROW_SIZE_MIN_CONTAINER_PX,
+  TREE_ROW_DATE_MIN_CONTAINER_PX,
+  TREE_ROW_SECOND_DATE_MIN_CONTAINER_PX,
+} from '@/components/worktree/TreeNode';
 import { TRUNCATION_TOOLTIP_DELAY_MS } from '@/components/common/TruncationTooltip';
 import type { TreeItem } from '@/types/models';
 import type { FileMetadataDisplaySettings } from '@/hooks/useFileMetadataDisplay';
@@ -34,13 +42,14 @@ const FILE: TreeItem = {
 
 function renderNode(
   item: TreeItem,
-  metadataDisplay?: FileMetadataDisplaySettings
+  metadataDisplay?: FileMetadataDisplaySettings,
+  depth = 0
 ) {
   return render(
     <TreeNode
       item={item}
       path=""
-      depth={0}
+      depth={depth}
       worktreeId="wt-1"
       expanded={new Set<string>()}
       cache={new Map()}
@@ -136,5 +145,198 @@ describe('TreeNode metadata display [Issue #969]', () => {
     const dir: TreeItem = { name: 'src', type: 'directory', itemCount: 3 };
     renderNode(dir);
     expect(screen.getByTestId('tree-item-size')).toHaveTextContent('3 items');
+  });
+});
+
+/**
+ * Issue #2631: in a narrow panel the name gave way to the metadata columns
+ * (`flex-shrink-0`) and was cut to one character ("README.md" -> "F…" beside
+ * "81 B"). Each row is now its own query container, so the answer follows the
+ * width the row has left after its indentation: the columns are drawn only
+ * from a threshold up, and once they are, the name keeps a minimum width and
+ * the columns give way instead.
+ *
+ * jsdom has no layout and evaluates no container query, so these tests pin the
+ * classes; how it looks at real widths is checked in the UAT.
+ */
+describe('TreeNode in a narrow panel [Issue #2631]', () => {
+  const ALL_COLUMNS: FileMetadataDisplaySettings = {
+    showSize: true,
+    showCreated: true,
+    showModified: true,
+  };
+  const NAME_MIN_CLASS = `@min-[${TREE_ROW_SIZE_MIN_CONTAINER_PX}px]:min-w-16`;
+
+  const classesOf = (el: Element | null): string[] =>
+    (el?.getAttribute('class') ?? '').split(/\s+/).filter(Boolean);
+
+  const cannotShrink = (el: Element | null): boolean => {
+    const classes = classesOf(el);
+    return classes.includes('shrink-0') || classes.includes('flex-shrink-0');
+  };
+
+  /**
+   * Why the name of `row` can still be cut short by its metadata columns, read
+   * from classes: a column that refuses to shrink, or a name with no minimum
+   * width once the columns are drawn.
+   */
+  function nameLosesTo(row: HTMLElement, name: HTMLElement): string[] {
+    const reasons: string[] = [];
+    for (const column of Array.from(row.querySelectorAll('[data-testid^="tree-item-"]'))) {
+      if (cannotShrink(column)) reasons.push(`${column.getAttribute('data-testid')} does not shrink`);
+    }
+    if (!classesOf(name).includes(NAME_MIN_CLASS)) reasons.push('name has no minimum width');
+    return reasons;
+  }
+
+  it('flags the pre-fix row (negative control for nameLosesTo)', () => {
+    // The row as it was on develop 011d948e, spelled out so the helper is
+    // shown to catch the defect without touching the component.
+    render(
+      <div data-testid="pre-fix-row" className="flex items-center gap-2 py-1.5 pr-2">
+        <span className="w-4 h-4" />
+        <svg className="w-5 h-5" aria-hidden="true" />
+        <span data-testid="pre-fix-name" className="flex-1 truncate text-sm text-foreground">
+          README.md
+        </span>
+        <span data-testid="tree-item-size" className="text-xs text-muted-foreground flex-shrink-0">
+          81 B
+        </span>
+      </div>
+    );
+    expect(
+      nameLosesTo(screen.getByTestId('pre-fix-row'), screen.getByTestId('pre-fix-name'))
+    ).toEqual(['tree-item-size does not shrink', 'name has no minimum width']);
+  });
+
+  it('makes each row its own query container', () => {
+    renderNode(FILE);
+    expect(classesOf(screen.getByTestId('tree-item-app.ts'))).toContain('@container');
+  });
+
+  it('lets the columns give way to the name, file and directory alike', () => {
+    renderNode(FILE, ALL_COLUMNS);
+    const row = screen.getByTestId('tree-item-app.ts');
+    expect(nameLosesTo(row, screen.getByText('app.ts'))).toEqual([]);
+    expect(row.querySelectorAll('[data-testid^="tree-item-"]')).toHaveLength(3);
+
+    cleanup();
+    renderNode({ name: 'src', type: 'directory', itemCount: 3 });
+    expect(nameLosesTo(screen.getByTestId('tree-item-src'), screen.getByText('src'))).toEqual([]);
+  });
+
+  it('gives the name its minimum width only once the columns can be drawn', () => {
+    renderNode(FILE);
+    const name = screen.getByText('app.ts');
+    // An unconditional minimum would push a deeply indented row past the
+    // panel's edge; below the threshold the name is the only thing that grows.
+    expect(classesOf(name).filter((c) => c.startsWith('min-w-'))).toEqual([]);
+    expect(classesOf(name)).toEqual(expect.arrayContaining(['flex-1', 'truncate', NAME_MIN_CLASS]));
+    // min-w-16 is 4rem.
+    expect(TREE_ROW_NAME_MIN_PX).toBe(64);
+  });
+
+  it('keeps the chevron and the icon at their size', () => {
+    renderNode(FILE);
+    const fileRow = screen.getByTestId('tree-item-app.ts');
+    const [chevronSlot, icon] = Array.from(fileRow.children);
+    expect(cannotShrink(chevronSlot)).toBe(true);
+    expect(icon).toBe(screen.getByTestId('file-icon'));
+    expect(cannotShrink(icon)).toBe(true);
+
+    cleanup();
+    renderNode({ name: 'src', type: 'directory', itemCount: 3 });
+    const dirRow = screen.getByTestId('tree-item-src');
+    expect(cannotShrink(dirRow.children[0])).toBe(true);
+    expect(cannotShrink(screen.getByTestId('folder-icon'))).toBe(true);
+  });
+
+  it('draws each column only from its threshold up', () => {
+    renderNode(FILE, { showSize: true, showCreated: false, showModified: true });
+    const size = classesOf(screen.getByTestId('tree-item-size'));
+    const modifiedAlone = classesOf(screen.getByTestId('tree-item-modified'));
+    // The literals must match the constants (Tailwind cannot see an interpolation).
+    expect(size).toEqual(
+      expect.arrayContaining(['hidden', `@min-[${TREE_ROW_SIZE_MIN_CONTAINER_PX}px]:block`, 'truncate'])
+    );
+    expect(modifiedAlone).toEqual(
+      expect.arrayContaining(['hidden', `@min-[${TREE_ROW_DATE_MIN_CONTAINER_PX}px]:block`, 'truncate'])
+    );
+
+    cleanup();
+    renderNode(FILE, ALL_COLUMNS);
+    expect(classesOf(screen.getByTestId('tree-item-created'))).toContain(
+      `@min-[${TREE_ROW_DATE_MIN_CONTAINER_PX}px]:block`
+    );
+    // Beside the created column, the modified column needs room for both.
+    expect(classesOf(screen.getByTestId('tree-item-modified'))).toContain(
+      `@min-[${TREE_ROW_SECOND_DATE_MIN_CONTAINER_PX}px]:block`
+    );
+  });
+
+  it('derives the thresholds from the row parts, so the name minimum never overflows the row', () => {
+    // chevron 16 + gap 8 + icon 20 + gap 8
+    expect(TREE_ROW_LEADING_PX).toBe(52);
+    expect(TREE_ROW_SIZE_MIN_CONTAINER_PX).toBeGreaterThanOrEqual(
+      TREE_ROW_LEADING_PX + TREE_ROW_NAME_MIN_PX
+    );
+    expect([
+      TREE_ROW_SIZE_MIN_CONTAINER_PX,
+      TREE_ROW_DATE_MIN_CONTAINER_PX,
+      TREE_ROW_SECOND_DATE_MIN_CONTAINER_PX,
+    ]).toEqual([176, 296, 416]);
+  });
+});
+
+/**
+ * Issue #2634: In a narrow panel, deeply nested rows ran out of space for file
+ * names because indentation plus non-shrinking leading elements exceeded the
+ * panel width. Indentation is now passed via the `--tree-indent` CSS variable
+ * and capped by Tailwind class `pl-[min(var(--tree-indent),max(0.5rem,calc(100%_-_7rem)))]`.
+ *
+ * jsdom evaluates neither layout nor min(), so these tests pin the CSS
+ * variable calculation, presence of the exact class string, and the absence
+ * of an inline paddingLeft style.
+ */
+describe('TreeNode indentation capping in narrow panel [Issue #2634]', () => {
+  it('returns --tree-indent CSS variable for depth 0/1/6/20/25 and no paddingLeft', () => {
+    const cases: [number, string][] = [
+      [0, '0.5rem'],
+      [1, '1.5rem'],
+      [6, '6.5rem'],
+      [20, '20.5rem'],
+      [25, '20.5rem'],
+    ];
+    for (const [depth, expected] of cases) {
+      const style = getIndentStyle(depth) as Record<string, string>;
+      expect(style['--tree-indent']).toBe(expected);
+      expect(style.paddingLeft).toBeUndefined();
+    }
+  });
+
+  it('sets --tree-indent on rendered row style according to depth', () => {
+    renderNode(FILE, undefined, 6);
+    const row = screen.getByTestId('tree-item-app.ts');
+    expect(row.style.getPropertyValue('--tree-indent')).toBe('6.5rem');
+  });
+
+  it('includes the exact pl-[min(var(--tree-indent),max(0.5rem,calc(100%_-_7rem)))] class in className', () => {
+    renderNode(FILE);
+    const row = screen.getByTestId('tree-item-app.ts');
+    expect(row.className).toContain('pl-[min(var(--tree-indent),max(0.5rem,calc(100%_-_7rem)))]');
+  });
+
+  it('leaves inline style.paddingLeft empty so the class takes effect', () => {
+    renderNode(FILE, undefined, 6);
+    const row = screen.getByTestId('tree-item-app.ts');
+    expect(row.style.paddingLeft).toBe('');
+  });
+
+  it('flags an element with inline paddingLeft set (negative control)', () => {
+    const legacyRow = document.createElement('div');
+    legacyRow.style.paddingLeft = '6.5rem';
+    // The check for empty inline padding-left must reject the pre-fix element
+    expect(legacyRow.style.paddingLeft === '').toBe(false);
+    expect(legacyRow.style.paddingLeft).toBe('6.5rem');
   });
 });

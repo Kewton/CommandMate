@@ -54,10 +54,6 @@ vi.mock('@/contexts/SidebarContext', () => ({
   }),
 }));
 
-vi.mock('@/hooks/useUpdateCheck', () => ({
-  useUpdateCheck: () => ({ data: null, loading: false, error: null }),
-}));
-
 // Controllable cache context: each test assigns the desired snapshot (or null).
 const mockCache: { current: UseWorktreesCacheReturn | null } = { current: null };
 vi.mock('@/components/providers/WorktreesCacheProvider', () => ({
@@ -377,5 +373,31 @@ describe('useWorktreeDetailController — kill session (Issue #1171)', () => {
 
     await act(async () => { resolveKill?.(); await Promise.resolve(); });
     await waitFor(() => expect(result.current.killTarget).toBeNull());
+  });
+});
+
+describe('useWorktreeDetailController — back navigation removal (Issue #2653)', () => {
+  beforeEach(() => {
+    mockCache.current = null;
+    mockFetch.mockReset();
+    global.fetch = mockFetch as unknown as typeof fetch;
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('does not return handleBackClick', () => {
+    mockFetch.mockImplementation(() => new Promise(() => {}));
+    const { result } = renderHook(() =>
+      useWorktreeDetailController({ worktreeId: 'wt-1' })
+    );
+
+    expect('handleBackClick' in result.current).toBe(false);
+  });
+
+  it('verifies handleBackClick is removed from controller return type', () => {
+    // @ts-expect-error handleBackClick was removed (Issue #2653)
+    type _ControllerHasNoBack = Pick<ReturnType<typeof useWorktreeDetailController>, 'handleBackClick'>;
   });
 });

@@ -111,22 +111,73 @@ export function formatFileSize(bytes: number | undefined): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+// ============================================================================
+// Narrow-row layout (Issue #2631)
+// ============================================================================
+
+/**
+ * Width (px) of what precedes the name in a row: the chevron slot (16), a gap
+ * (8), the file / folder icon (20) and a gap (8). Neither the slot nor the
+ * icon shrinks.
+ */
+export const TREE_ROW_LEADING_PX = 52;
+
+/**
+ * Minimum width (px) of the name once any metadata column can be drawn. The
+ * class below spells it as `min-w-16` (4rem): about nine characters of
+ * `README.md`, or five Japanese glyphs.
+ */
+export const TREE_ROW_NAME_MIN_PX = 64;
+
+/** Room (px) kept for the size / item-count column and its gap ("1023.9 KB"). */
+const SIZE_COLUMN_PX = 60;
+
+/** Room (px) kept for a relative-time column and its gap ("about 11 hours ago"). */
+const DATE_COLUMN_PX = 120;
+
+/**
+ * Row width (px) at or above which the size column is drawn, and from which
+ * the name keeps `TREE_ROW_NAME_MIN_PX`.
+ *
+ * Each row is its own query container (`@container`), so the width is what the
+ * row has left after its indentation: a nested row drops its columns before a
+ * top-level row does. Before #2631 the columns were `flex-shrink-0` and always
+ * drawn, so in a narrow panel the name was cut to one character. Now below the
+ * threshold the name has the row to itself, and above it the name keeps its
+ * minimum and the columns (`truncate`) give way instead.
+ *
+ * The classes below MUST spell the same values as literals
+ * (`@min-[176px]:block`, `@min-[176px]:min-w-16`): Tailwind scans source text,
+ * so an interpolated class would generate no CSS (the #2131 rule).
+ */
+export const TREE_ROW_SIZE_MIN_CONTAINER_PX =
+  TREE_ROW_LEADING_PX + TREE_ROW_NAME_MIN_PX + SIZE_COLUMN_PX; // 176
+
+/** Row width (px) at or above which a created / modified column is drawn (`@min-[296px]:block`). */
+export const TREE_ROW_DATE_MIN_CONTAINER_PX =
+  TREE_ROW_SIZE_MIN_CONTAINER_PX + DATE_COLUMN_PX; // 296
+
+/**
+ * Row width (px) at or above which the modified column is drawn when the
+ * created column is on too, so both dates fit (`@min-[416px]:block`). Chosen
+ * by the setting, not by whether this item has a birthtime, so the column
+ * starts at the same width on every row.
+ */
+export const TREE_ROW_SECOND_DATE_MIN_CONTAINER_PX =
+  TREE_ROW_DATE_MIN_CONTAINER_PX + DATE_COLUMN_PX; // 416
+
 /**
  * Get indentation style based on depth
- * Uses inline styles instead of Tailwind classes to support unlimited depth
- * Tailwind CSS cannot generate dynamic class names at build time,
- * so we use inline styles to ensure proper indentation at any depth.
+ * Sets CSS variable `--tree-indent` (the row's class converts it to a capped padding-left).
  *
  * @param depth - The nesting depth (0 = root level)
- * @returns React.CSSProperties with paddingLeft set
+ * @returns React.CSSProperties with --tree-indent set
  */
 export function getIndentStyle(depth: number): React.CSSProperties {
-  // Maximum visual depth to prevent excessive indentation
   const maxVisualDepth = 20;
   const effectiveDepth = Math.min(depth, maxVisualDepth);
-  // Base padding of 0.5rem + 1rem per depth level
-  const paddingLeft = 0.5 + effectiveDepth * 1;
-  return { paddingLeft: `${paddingLeft}rem` };
+  const indent = 0.5 + effectiveDepth * 1;
+  return { '--tree-indent': `${indent}rem` } as React.CSSProperties;
 }
 
 // ============================================================================
@@ -157,7 +208,7 @@ export const FolderIcon = memo(function FolderIcon({ open }: { open: boolean }) 
   return (
     <svg
       data-testid="folder-icon"
-      className="w-5 h-5 text-warning"
+      className="w-5 h-5 flex-shrink-0 text-warning"
       fill="currentColor"
       viewBox="0 0 24 24"
       aria-hidden="true"
@@ -231,7 +282,7 @@ export const FileIcon = memo(function FileIcon({ extension }: { extension?: stri
   return (
     <svg
       data-testid="file-icon"
-      className={`w-5 h-5 ${iconColor}`}
+      className={`w-5 h-5 flex-shrink-0 ${iconColor}`}
       fill="none"
       stroke="currentColor"
       viewBox="0 0 24 24"
@@ -384,7 +435,11 @@ export const TreeNode = memo(function TreeNode({
         aria-selected={false}
         aria-expanded={isDirectory ? isExpanded : undefined}
         tabIndex={0}
-        className="flex items-center gap-2 py-1.5 pr-2 cursor-pointer hover:bg-muted rounded transition-colors"
+        // Issue #2631: `@container` makes the row the query container for its
+        // name and metadata columns (TREE_ROW_SIZE_MIN_CONTAINER_PX).
+        // Issue #2634: Cap indent at (100% - 7rem) so deeply nested rows keep room
+        // for non-shrinking parts (60px) and minimum name width (52px).
+        className="@container flex items-center gap-2 py-1.5 pr-2 cursor-pointer hover:bg-muted rounded transition-colors pl-[min(var(--tree-indent),max(0.5rem,calc(100%_-_7rem)))]"
         style={combinedStyle}
         onClick={handleClick}
         onKeyDown={handleKeyDown}
@@ -396,7 +451,7 @@ export const TreeNode = memo(function TreeNode({
       >
         {/* Chevron for directories */}
         {isDirectory ? (
-          <span className="w-4 h-4 flex items-center justify-center">
+          <span className="w-4 h-4 flex-shrink-0 flex items-center justify-center">
             {loading ? (
               <Spinner size="xs" variant="accent" />
             ) : (
@@ -404,7 +459,7 @@ export const TreeNode = memo(function TreeNode({
             )}
           </span>
         ) : (
-          <span className="w-4 h-4" />
+          <span className="w-4 h-4 flex-shrink-0" />
         )}
 
         {/* Icon */}
@@ -418,10 +473,13 @@ export const TreeNode = memo(function TreeNode({
         {/* [Issue #859/#975] One JS tooltip (Portal) shows the full name plus the
             file's metadata (size/created/modified) on hover, replacing both the
             slow native `title` and the previous separate metadata tooltip. */}
+        {/* Issue #2631: no minimum below the size threshold (an unconditional
+            one would push a deeply indented row past the panel's edge); from
+            it up, `min-w-16` (TREE_ROW_NAME_MIN_PX) wins over the columns. */}
         <TruncationTooltip
           content={item.name}
           metadata={metadataTooltip}
-          className="flex-1 truncate text-sm text-foreground"
+          className="flex-1 truncate text-sm text-foreground @min-[176px]:min-w-16"
         >
           {searchMode === 'name' && searchQuery ? (
             <HighlightedText text={item.name} query={searchQuery} />
@@ -431,10 +489,13 @@ export const TreeNode = memo(function TreeNode({
         </TruncationTooltip>
 
         {/* [Issue #969] File size or item count — toggleable inline column */}
+        {/* Issue #2631: each column is drawn only from its threshold up
+            (TREE_ROW_*_MIN_CONTAINER_PX) and may shrink (`truncate`), so the
+            name keeps its minimum. The full values stay in the tooltip. */}
         {metadataDisplay.showSize && (
           <span
             data-testid="tree-item-size"
-            className="text-xs text-muted-foreground flex-shrink-0"
+            className="hidden @min-[176px]:block truncate text-xs text-muted-foreground"
           >
             {isDirectory
               ? item.itemCount !== undefined && t('fileTree.itemCount', { count: item.itemCount })
@@ -446,7 +507,7 @@ export const TreeNode = memo(function TreeNode({
         {!isDirectory && metadataDisplay.showCreated && item.birthtime && (
           <span
             data-testid="tree-item-created"
-            className="text-xs text-muted-foreground flex-shrink-0"
+            className="hidden @min-[296px]:block truncate text-xs text-muted-foreground"
           >
             {formatRelativeTime(item.birthtime, dateFnsLocale)}
           </span>
@@ -456,7 +517,9 @@ export const TreeNode = memo(function TreeNode({
         {!isDirectory && metadataDisplay.showModified && item.mtime && (
           <span
             data-testid="tree-item-modified"
-            className="text-xs text-muted-foreground flex-shrink-0"
+            className={`hidden ${
+              metadataDisplay.showCreated ? '@min-[416px]:block' : '@min-[296px]:block'
+            } truncate text-xs text-muted-foreground`}
           >
             {formatRelativeTime(item.mtime, dateFnsLocale)}
           </span>

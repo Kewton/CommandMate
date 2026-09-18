@@ -43,6 +43,8 @@ vi.mock('@/hooks/useIsMobile', () => ({
   MOBILE_BREAKPOINT: 768,
 }));
 
+const drawerMock = vi.hoisted(() => ({ openMobileDrawer: vi.fn() }));
+
 vi.mock('@/contexts/SidebarContext', () => ({
   useSidebarContext: () => ({
     isOpen: true,
@@ -50,7 +52,7 @@ vi.mock('@/contexts/SidebarContext', () => ({
     isMobileDrawerOpen: false,
     toggle: vi.fn(),
     setWidth: vi.fn(),
-    openMobileDrawer: vi.fn(),
+    openMobileDrawer: drawerMock.openMobileDrawer,
     closeMobileDrawer: vi.fn(),
   }),
   SidebarProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
@@ -68,10 +70,6 @@ vi.mock('@/hooks/useSlashCommands', () => ({
     refresh: vi.fn(),
     isCatalogStale: false,
   }),
-}));
-
-vi.mock('@/hooks/useUpdateCheck', () => ({
-  useUpdateCheck: () => ({ data: null, loading: false, error: null }),
 }));
 
 vi.mock('@/hooks/useFileTabs', () => ({
@@ -446,5 +444,17 @@ describe('[#2395] mobile screen: palette entry point and composer target', () =>
     await waitFor(() => {
       expect(screen.getByTestId('agent-pane-composer-target').textContent).toBe('codex');
     });
+  });
+
+  it('opens sidebar drawer via menu button and has no back button (Issue #2653)', async () => {
+    render(<WorktreeDetailRefactored worktreeId={WORKTREE_ID} />);
+
+    const menuButton = await screen.findByTestId('mobile-header-menu-button');
+    expect(menuButton).toHaveAttribute('aria-label', 'Menu');
+
+    fireEvent.click(menuButton);
+    expect(drawerMock.openMobileDrawer).toHaveBeenCalledTimes(1);
+
+    expect(screen.queryByRole('button', { name: 'Back' })).toBeNull();
   });
 });

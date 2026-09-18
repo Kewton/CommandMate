@@ -419,7 +419,12 @@
     "errorNotGlobal": "CommandMate はグローバルインストールではないため、自己更新できません。",
     "errorInProgress": "アップデートは既に実行中です。",
     "errorGeneric": "アップデートを開始できませんでした。手動でコマンドを実行してください:",
-    "logHint": "アップデートログ: {path}"
+    "logHint": "アップデートログ: {path}",
+    "buttonLabel": "Update v{version}",
+    "buttonAriaLabel": "CommandMate を v{version} にアップデート",
+    "buttonReleaseAriaLabel": "v{version} のリリースページを開く",
+    "buttonUpdating": "更新中…",
+    "statusDialogTitle": "アップデートの状態"
   },
   "terminal": {
     "historyLabel": "履歴",
@@ -926,7 +931,20 @@
     "todo": "ToDo",
     "skills": "スキル",
     "verification": "検証",
-    "env": "環境変数"
+    "env": "環境変数",
+    "settings": "設定",
+    "settingsMenu": {
+      "settings": "設定",
+      "skills": "スキル",
+      "theme": "テーマ",
+      "themeLight": "ライト",
+      "themeDark": "ダーク",
+      "themeSystem": "システム",
+      "language": "言語",
+      "github": "GitHub",
+      "logout": "ログアウト",
+      "version": "CommandMate {version}"
+    }
   },
   "branchMismatch": {
     "changedFrom": "ブランチが",
@@ -1016,8 +1034,6 @@
     "logs": "ログ",
     "hide": "隠す",
     "show": "表示",
-    "goBack": "ワークツリー一覧に戻る",
-    "home": "ホーム",
     "viewInfo": "ワークツリーの情報を表示",
     "info": "情報",
     "infoModalTitle": "ワークツリー情報",

@@ -85,6 +85,8 @@ const codexSource: AgentEventSource = definePushHookSource({
     resync: 'none',
     // Issue #2197: the tool this fixture stands for has no transcript reader.
     transcriptHistory: null,
+    // Issue #2614: nothing here writes a self-resume stop detail.
+    stopReportsSelfResume: false,
   },
 
   // Same CamelCase dialect as Claude — measured, not assumed (#1757 §8.1).
@@ -194,6 +196,8 @@ describe('copilot: same spellings, different order, shorter fuse', () => {
       resync: 'none',
       // Issue #2197: the tool this fixture stands for has no transcript reader.
       transcriptHistory: null,
+      // Issue #2614: nothing here writes a self-resume stop detail.
+      stopReportsSelfResume: false,
     },
     mappers: fromNameTable(CAMEL_CASE_HOOK_EVENT_NAMES),
     conversationIdFields: SESSION_ID_FIELDS,
@@ -259,6 +263,8 @@ describe('gemini: four of the seven are spelled differently', () => {
       resync: 'none',
       // Issue #2197: the tool this fixture stands for has no transcript reader.
       transcriptHistory: null,
+      // Issue #2614: nothing here writes a self-resume stop detail.
+      stopReportsSelfResume: false,
     },
     mappers: fromNameTable(GEMINI_EVENT_NAMES),
     conversationIdFields: SESSION_ID_FIELDS,
@@ -327,6 +333,8 @@ describe('antigravity: no event name, no cwd, camelCase, fail-closed', () => {
       // abstraction can express either, so this one stays on the value that
       // exercises the "no second writer" path.
       transcriptHistory: null,
+      // Issue #2614: nothing here writes a self-resume stop detail.
+      stopReportsSelfResume: false,
     },
 
     mappers: [agyToolName],

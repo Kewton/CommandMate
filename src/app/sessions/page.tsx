@@ -23,7 +23,6 @@ import { useState, useMemo, useCallback, useEffect } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { ArrowDown, ArrowUp } from 'lucide-react';
-import { AppShell } from '@/components/layout';
 import { PullToRefresh } from '@/components/common/PullToRefresh';
 import { SessionTileGrid, SessionsViewModeSelector } from '@/components/sessions';
 import { useIsMobile } from '@/hooks/useIsMobile';
@@ -257,7 +256,7 @@ export default function SessionsPage() {
   }, []);
 
   return (
-    <AppShell>
+    <>
       {/* Issue #1128: pull-to-refresh (mobile) — the wrapper owns the scroll
           container so the gesture only fires at the top and native PTR is
           suppressed. `refresh` re-fetches the shared worktrees cache. */}
@@ -535,6 +534,6 @@ export default function SessionsPage() {
           </>
         )}
       </PullToRefresh>
-    </AppShell>
+    </>
   );
 }

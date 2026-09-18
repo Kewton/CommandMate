@@ -31,6 +31,7 @@ import React, {
 } from 'react';
 import {
   isValidSortKey,
+  isValidViewMode,
   isValidRepoTabBarMode,
   readRepositoryOrderCache,
   persistRepositoryOrderCache,
@@ -328,7 +329,7 @@ export function SidebarProvider({
     state.viewMode,
     () => state.viewMode,
     (stored) => {
-      if (stored === 'grouped' || stored === 'flat') {
+      if (isValidViewMode(stored)) {
         dispatch({ type: 'SET_VIEW_MODE', viewMode: stored });
       }
     },

@@ -3,11 +3,21 @@
  * Issue #545: Copilot CLI support
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { CopilotTool, COPILOT_EXIT_COMMAND } from '@/lib/cli-tools/copilot';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { readFileSync } from 'fs';
+import path from 'path';
+import {
+  CopilotTool,
+  COPILOT_EXIT_COMMAND,
+  isCopilotStartupLoading,
+  judgeCopilotModelSwitch,
+  readCopilotModelSwitchOutcomes,
+} from '@/lib/cli-tools/copilot';
 import { resolveCopilotExecutable } from '@/lib/cli-tools/copilot-executable';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { COPILOT_EXIT_WAIT_MS, TUI_EXIT_WAIT_MS } from '@/config/cli-tool-timing-config';
+import { COPILOT_MODEL_SWITCH_TIMEOUT_MS } from '@/config/copilot-constants';
+import { COPILOT_MODEL_SWITCH_2623_FRAMES as FRAMES } from '../../fixtures/copilot-model-switch-2623';
 
 // Mock child_process execFile so nothing here can spawn a real process
 vi.mock('child_process', async () => {
@@ -60,6 +70,78 @@ vi.mock('@/lib/logger', () => ({
     }),
   }),
 }));
+
+/** A promise's outcome, readable while fake timers are being advanced. */
+interface Tracked {
+  state: 'pending' | 'resolved' | 'rejected';
+  error?: string;
+  /** Fake-clock ms from `track()` to settling. */
+  settledAt?: number;
+}
+
+function track(promise: Promise<unknown>): Tracked {
+  const startedAt = Date.now();
+  const tracked: Tracked = { state: 'pending' };
+  promise.then(
+    () => {
+      tracked.state = 'resolved';
+      tracked.settledAt = Date.now() - startedAt;
+    },
+    (error: unknown) => {
+      tracked.state = 'rejected';
+      tracked.error = error instanceof Error ? error.message : String(error);
+      tracked.settledAt = Date.now() - startedAt;
+    },
+  );
+  return tracked;
+}
+
+/**
+ * A copilot pane the test can change, answering `/model` the way the capture
+ * after it did (Issue #2623). Times are fake-clock ms from `fakePane()`.
+ */
+interface FakePane {
+  show(frame: string): void;
+  /** Show `frame` `delayMs` after `/model <model>` is typed. */
+  onModel(model: string, delayMs: number, frame: string): void;
+  modelSentAt: number | null;
+  bodySentAt: number | null;
+}
+
+async function fakePane(initial: string): Promise<FakePane> {
+  const tmux = await import('@/lib/tmux/tmux');
+  const createdAt = Date.now();
+  let frame = initial;
+  const reactions = new Map<string, readonly [number, string]>();
+  const pane: FakePane = {
+    show: (next) => {
+      frame = next;
+    },
+    onModel: (model, delayMs, next) => {
+      reactions.set(`/model ${model}`, [delayMs, next]);
+    },
+    modelSentAt: null,
+    bodySentAt: null,
+  };
+  vi.mocked(tmux.capturePane).mockImplementation(async () => frame);
+  vi.mocked(tmux.sendKeys).mockImplementation(async (_sessionName: string, keys: string) => {
+    if (keys.startsWith('/model ')) {
+      pane.modelSentAt ??= Date.now() - createdAt;
+      const reaction = reactions.get(keys);
+      if (reaction) setTimeout(() => pane.show(reaction[1]), reaction[0]);
+    } else {
+      pane.bodySentAt ??= Date.now() - createdAt;
+    }
+  });
+  return pane;
+}
+
+/** Put the tmux mocks back to the factory's answers after a {@link fakePane} test. */
+async function restorePaneMocks(): Promise<void> {
+  const tmux = await import('@/lib/tmux/tmux');
+  vi.mocked(tmux.capturePane).mockResolvedValue('');
+  vi.mocked(tmux.sendKeys).mockResolvedValue(undefined);
+}
 
 describe('CopilotTool', () => {
   let tool: CopilotTool;
@@ -190,21 +272,23 @@ describe('CopilotTool', () => {
     it('should send /model command and Enter to session', async () => {
       vi.useFakeTimers();
 
-      const { hasSession, sendKeys, capturePane } = await import('@/lib/tmux/tmux');
+      const { hasSession, sendKeys } = await import('@/lib/tmux/tmux');
       vi.mocked(hasSession).mockResolvedValue(true);
-      vi.mocked(capturePane).mockResolvedValue('> ');
+      const pane = await fakePane(FRAMES.SWITCH_BEFORE());
+      pane.onModel('gpt-5.6-terra', 300, FRAMES.SWITCH_AFTER());
 
-      const promise = tool.sendModelCommand('test-wt', 'gpt-5-mini');
-      await vi.advanceTimersByTimeAsync(40000);
-      await promise;
+      const run = track(tool.sendModelCommand('test-wt', 'gpt-5.6-terra'));
+      await vi.advanceTimersByTimeAsync(2000);
 
+      expect(run.state).toBe('resolved');
       expect(sendKeys).toHaveBeenCalledWith(
         'mcbd-copilot-test-wt',
-        '/model gpt-5-mini',
+        '/model gpt-5.6-terra',
         true
       );
 
       vi.useRealTimers();
+      await restorePaneMocks();
     });
 
     it('should never send a bare Enter after an argument-form /model (Issue #1895)', async () => {
@@ -217,8 +301,10 @@ describe('CopilotTool', () => {
       // The pane is nonetheless mocked as a picker here, which is the strongest
       // form of the assertion: even if copilot DID somehow show one, the
       // argument form must not answer it on the operator's behalf. The old code
-      // waited 5s for exactly this screen and then sent `C-m` into it.
-      const { hasSession, capturePane, sendSpecialKey } = await import('@/lib/tmux/tmux');
+      // waited 5s for exactly this screen and then sent `C-m` into it. Since
+      // Issue #2623 a picker is not an idle copilot, so `/model` is not even
+      // typed into it.
+      const { hasSession, capturePane, sendKeys, sendSpecialKey } = await import('@/lib/tmux/tmux');
       vi.mocked(hasSession).mockResolvedValue(true);
       vi.mocked(capturePane).mockResolvedValue(
         [
@@ -228,28 +314,258 @@ describe('CopilotTool', () => {
         ].join('\n'),
       );
 
-      const promise = tool.sendModelCommand('test-wt', 'gpt-5-mini');
+      const run = track(tool.sendModelCommand('test-wt', 'gpt-5-mini'));
       await vi.advanceTimersByTimeAsync(40000);
-      await promise.catch(() => undefined);
 
+      expect(run.state).toBe('rejected');
       expect(sendSpecialKey).not.toHaveBeenCalledWith('mcbd-copilot-test-wt', 'C-m');
+      expect(sendKeys).not.toHaveBeenCalled();
 
       vi.useRealTimers();
     });
+  });
 
-    it('should wait for prompt recovery after model switch', async () => {
+  /**
+   * Issue #2623: `send --agent copilot --model <id>` started copilot, typed
+   * `/model`, and typed the body 0.3 s later — and the body never ran. The wait
+   * between the two was "is a composer on screen", which copilot 1.0.85 answers
+   * yes to before it has finished loading, during a switch and after it, so it
+   * returned in 22 ms. Every frame below is a live 1.0.85 capture
+   * (`tests/fixtures/copilot-model-switch-2623.ts`); the `BOOT_*` ones come from
+   * separate launches of the same build.
+   */
+  describe('sendModelCommand waits for copilot, then for its answer (Issue #2623)', () => {
+    beforeEach(async () => {
       vi.useFakeTimers();
-
-      const { hasSession, capturePane } = await import('@/lib/tmux/tmux');
+      const { hasSession } = await import('@/lib/tmux/tmux');
       vi.mocked(hasSession).mockResolvedValue(true);
-      vi.mocked(capturePane).mockResolvedValue('> ');
+    });
 
-      const promise = tool.sendModelCommand('test-wt', 'gpt-5-mini');
-      await vi.advanceTimersByTimeAsync(40000);
-
-      await expect(promise).resolves.toBeUndefined();
-
+    afterEach(async () => {
       vi.useRealTimers();
+      await restorePaneMocks();
+    });
+
+    it('does not type /model while copilot is still loading, and returns on the switch row', async () => {
+      const pane = await fakePane(FRAMES.BOOT_LOADING());
+      setTimeout(() => pane.show(FRAMES.BOOT_IDLE()), 3000);
+      pane.onModel('claude-sonnet-5', 400, FRAMES.BOOT_SWITCHED_IDLE());
+
+      const run = track(tool.sendModelCommand('wt', 'claude-sonnet-5'));
+      await vi.advanceTimersByTimeAsync(2900);
+      expect(pane.modelSentAt).toBeNull();
+
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(pane.modelSentAt).toBeGreaterThanOrEqual(3000);
+      expect(run.state).toBe('resolved');
+      expect(run.settledAt).toBeGreaterThanOrEqual((pane.modelSentAt ?? 0) + 400);
+    });
+
+    it('is not satisfied by the composer coming back: it waits for the row', async () => {
+      // The old wait's exit condition holds on every one of these reads.
+      const pane = await fakePane(FRAMES.SWITCH_BEFORE());
+      pane.onModel('gpt-5.6-terra', 1200, FRAMES.SWITCH_AFTER());
+
+      const run = track(tool.sendModelCommand('wt', 'gpt-5.6-terra'));
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(run.state).toBe('pending');
+
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(run.state).toBe('resolved');
+    });
+
+    it('waits for a NEW row when the pane already holds an answer for that id', async () => {
+      // SWITCH_AFTER already reads `… to gpt-5.6-terra (medium) …`.
+      const pane = await fakePane(FRAMES.SWITCH_AFTER());
+      pane.onModel('gpt-5.6-terra', 500, FRAMES.SAME_MODEL_AFTER());
+
+      const run = track(tool.sendModelCommand('wt', 'gpt-5.6-terra'));
+      await vi.advanceTimersByTimeAsync(400);
+      expect(run.state).toBe('pending');
+
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(run.state).toBe('resolved');
+    });
+
+    it.each([
+      ['claude-opus-4.6', 'UNSUPPORTED_BEFORE', 'UNSUPPORTED_AFTER', 'Model "claude-opus-4.6" is unsupported.'],
+      ['claude-opus-5', 'UNAVAILABLE_BEFORE', 'UNAVAILABLE_AFTER', 'Model "claude-opus-5" is unavailable.'],
+    ] as const)('reports a refused id (%s) in copilot\'s words and types nothing else', async (model, before, after, words) => {
+      const tmux = await import('@/lib/tmux/tmux');
+      const pane = await fakePane(FRAMES[before]());
+      pane.onModel(model, 400, FRAMES[after]());
+
+      const run = track(tool.sendModelCommand('wt', model));
+      await vi.advanceTimersByTimeAsync(2000);
+
+      expect(run.state).toBe('rejected');
+      expect(run.error).toBe(`Failed to switch Copilot model to ${model}: copilot refused it: ${words}`);
+      expect(tmux.sendKeys).toHaveBeenCalledTimes(1);
+      expect(tmux.sendSpecialKey).not.toHaveBeenCalled();
+      expect(tmux.sendSpecialKeys).not.toHaveBeenCalled();
+    });
+
+    it('does not type /model into a running turn: it waits for the turn to end', async () => {
+      // Measured: `/model` sent 1.6 s into a turn switched with NO row at all
+      // (WORKING_SWITCHED_SILENTLY / WORKING_SWITCH_TURN_ENDED), so there would
+      // have been nothing to wait for. After the turn it prints one.
+      const pane = await fakePane(FRAMES.WORKING_SWITCHED_SILENTLY());
+      setTimeout(() => pane.show(FRAMES.WORKING_SWITCH_TURN_ENDED()), 10_000);
+      pane.onModel('claude-haiku-4.5', 400, FRAMES.BUSY_SWITCH_AFTER_TURN());
+
+      const run = track(tool.sendModelCommand('wt', 'claude-haiku-4.5'));
+      await vi.advanceTimersByTimeAsync(9_900);
+      expect(pane.modelSentAt).toBeNull();
+
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(pane.modelSentAt).toBeGreaterThanOrEqual(10_000);
+      expect(run.state).toBe('resolved');
+    });
+
+    it.each([
+      ['still loading', 'BOOT_LOADING', 'Loading: 6 hooks, 16 skills'],
+      ['holding text in the composer', 'IDLE_COMPOSER_HOLDS_TEXT', '@ files · # issues'],
+    ] as const)('refuses without typing anything when copilot is %s for the whole window', async (_label, frame, shown) => {
+      const tmux = await import('@/lib/tmux/tmux');
+      await fakePane(FRAMES[frame]());
+
+      const run = track(tool.sendModelCommand('wt', 'claude-sonnet-5'));
+      await vi.advanceTimersByTimeAsync(COPILOT_MODEL_SWITCH_TIMEOUT_MS + 1000);
+
+      expect(run.state).toBe('rejected');
+      expect(run.error).toContain(
+        `copilot did not become idle within ${COPILOT_MODEL_SWITCH_TIMEOUT_MS}ms, so /model was not sent`
+      );
+      expect(run.error).toContain(shown);
+      expect(tmux.sendKeys).not.toHaveBeenCalled();
+    });
+
+    it('fails, rather than proceeds, when no answer ever arrives', async () => {
+      // SWITCH_BEFORE already holds one row for claude-sonnet-5; the count never moves.
+      const tmux = await import('@/lib/tmux/tmux');
+      await fakePane(FRAMES.SWITCH_BEFORE());
+
+      const run = track(tool.sendModelCommand('wt', 'claude-sonnet-5'));
+      await vi.advanceTimersByTimeAsync(COPILOT_MODEL_SWITCH_TIMEOUT_MS - 1000);
+      expect(run.state).toBe('pending');
+
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(run.state).toBe('rejected');
+      expect(run.error).toContain(
+        `copilot printed no answer to /model within ${COPILOT_MODEL_SWITCH_TIMEOUT_MS}ms`
+      );
+      expect(tmux.sendKeys).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('sendMessage waits out the start-up row (Issue #2623)', () => {
+    beforeEach(async () => {
+      vi.useFakeTimers();
+      const { hasSession } = await import('@/lib/tmux/tmux');
+      vi.mocked(hasSession).mockResolvedValue(true);
+    });
+
+    afterEach(async () => {
+      vi.useRealTimers();
+      await restorePaneMocks();
+    });
+
+    it('types the body only once loading has ended', async () => {
+      const pane = await fakePane(FRAMES.BOOT_LOADING());
+      setTimeout(() => pane.show(FRAMES.BOOT_IDLE()), 3000);
+
+      const run = track(tool.sendMessage('wt', 'hello'));
+      await vi.advanceTimersByTimeAsync(2900);
+      expect(pane.bodySentAt).toBeNull();
+
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(pane.bodySentAt).toBeGreaterThanOrEqual(3000);
+      expect(run.state).toBe('resolved');
+    });
+
+    it('still sends into a running turn at once, as before', async () => {
+      // Only the start-up row holds a plain send; `waitForPrompt` has always
+      // returned on a working copilot's composer (#1906's measurement).
+      const pane = await fakePane(FRAMES.WORKING_SWITCHED_SILENTLY());
+
+      const run = track(tool.sendMessage('wt', 'hello'));
+      await vi.advanceTimersByTimeAsync(2000);
+
+      expect(pane.bodySentAt).not.toBeNull();
+      expect(pane.bodySentAt).toBeLessThan(100);
+      expect(run.state).toBe('resolved');
+    });
+  });
+
+  describe('reading /model answers (Issue #2623)', () => {
+    it.each([
+      ['BOOT_LOADING', true],
+      ['BOOT_SWITCH_HELD_WHILE_LOADING', true],
+      ['BOOT_IDLE', false],
+      ['BOOT_IDLE_MCP_RELOADED', false],
+      ['BOOT_SWITCHED_IDLE', false],
+      ['BOOT_BODY_STUCK_BEHIND_SWITCH', false],
+      ['WORKING_SWITCHED_SILENTLY', false],
+      ['SWITCH_AFTER', false],
+    ] as const)('isCopilotStartupLoading(%s) is %s', (frame, expected) => {
+      expect(isCopilotStartupLoading(FRAMES[frame]().split('\n'))).toBe(expected);
+    });
+
+    it('reads only the bottom row for the start-up state', () => {
+      // A reply that prints the start-up row's wording must not hold a send.
+      const lines = FRAMES.BOOT_IDLE().split('\n');
+      lines[20] = ' ● Loading: 6 hooks, 16 skills';
+      expect(isCopilotStartupLoading(lines)).toBe(false);
+    });
+
+    it.each([
+      ['SWITCH_BEFORE', 'SWITCH_AFTER', 'gpt-5.6-terra', { kind: 'switched' }],
+      // The label turns first; that is not the answer.
+      ['SWITCH_BEFORE', 'SWITCH_LABEL_FIRST', 'gpt-5.6-terra', { kind: 'pending' }],
+      ['SAME_MODEL_BEFORE', 'SAME_MODEL_AFTER', 'gpt-5.6-terra', { kind: 'switched' }],
+      ['UNSUPPORTED_BEFORE', 'UNSUPPORTED_AFTER', 'claude-opus-4.6',
+        { kind: 'rejected', reason: 'Model "claude-opus-4.6" is unsupported.' }],
+      ['UNAVAILABLE_BEFORE', 'UNAVAILABLE_AFTER', 'claude-opus-5',
+        { kind: 'rejected', reason: 'Model "claude-opus-5" is unavailable.' }],
+      // The two answers above list valid ids (`   - "claude-sonnet-5"`); those rows are not answers.
+      ['UNSUPPORTED_BEFORE', 'UNSUPPORTED_AFTER', 'claude-sonnet-5', { kind: 'pending' }],
+      ['UNSUPPORTED_BEFORE', 'UNSUPPORTED_AFTER', 'claude-opus-5', { kind: 'pending' }],
+      // An id that is a prefix of the switched-to id is not the switched-to id.
+      ['SWITCH_BEFORE', 'SWITCH_AFTER', 'gpt-5', { kind: 'pending' }],
+      ['SWITCH_BEFORE', 'SWITCH_AFTER', 'gpt-5.6', { kind: 'pending' }],
+      // A row already on screen is not an answer to this command.
+      ['SWITCH_AFTER', 'SAME_MODEL_BEFORE', 'gpt-5.6-terra', { kind: 'pending' }],
+      // A switch made during a turn prints nothing.
+      ['UNAVAILABLE_AFTER', 'WORKING_SWITCHED_SILENTLY', 'claude-haiku-4.5', { kind: 'pending' }],
+      ['UNAVAILABLE_AFTER', 'WORKING_SWITCH_TURN_ENDED', 'claude-haiku-4.5', { kind: 'pending' }],
+    ] as const)('%s -> %s for %s', (before, after, model, expected) => {
+      const baseline = readCopilotModelSwitchOutcomes(FRAMES[before](), model);
+      expect(judgeCopilotModelSwitch(baseline, FRAMES[after](), model)).toEqual(expected);
+    });
+
+    it('counts the success row with and without the effort suffix, and 1.0.80\'s longer one', () => {
+      expect(readCopilotModelSwitchOutcomes(FRAMES.BUSY_SWITCH_AFTER_TURN(), 'claude-haiku-4.5').switched).toBe(1);
+      expect(readCopilotModelSwitchOutcomes(FRAMES.BOOT_SWITCHED_IDLE(), 'claude-sonnet-5').switched).toBe(1);
+
+      // `● Model changed from gpt-5.6-terra (xhigh) to gpt-5-mini (medium) for this
+      // session. Use /config to set default`, with its ANSI still on.
+      const frame1080 = readFileSync(
+        path.resolve(__dirname, '../lib/detection/fixtures/copilot-picker-1895/model-arg-immediate.txt'),
+        'utf8'
+      );
+      expect(frame1080).toContain('\x1b[');
+      expect(readCopilotModelSwitchOutcomes(frame1080, 'gpt-5-mini')).toEqual({ switched: 1, rejected: [] });
+      expect(readCopilotModelSwitchOutcomes(frame1080, 'gpt-5').switched).toBe(0);
+    });
+
+    it('matches the id literally and never reads the composer', () => {
+      const frame = [
+        ' ● Model changed from gpt-5.6-terra (xhigh) to gpt-5x6-terra (medium) for this session',
+        '❯ /model gpt-5.6-terra',
+        '❯ ● Switched model to: gpt-5.6-terra',
+      ].join('\n');
+      expect(readCopilotModelSwitchOutcomes(frame, 'gpt-5.6-terra')).toEqual({ switched: 0, rejected: [] });
+      expect(readCopilotModelSwitchOutcomes(frame, 'gpt-5x6-terra').switched).toBe(1);
     });
   });
 

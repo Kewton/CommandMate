@@ -58,11 +58,25 @@ export const isValidSortKey = (key: string): key is SortKey =>
 export type SortDirection = 'asc' | 'desc';
 
 /**
- * View mode for sidebar display
+ * Every sidebar view mode, as a const array (single source of truth for the
+ * type, the localStorage validator and the view select).
  * - grouped: Branches grouped by repository name
  * - flat: Traditional flat list
+ * - sessions: One row per agent instance (Issue #2656)
  */
-export type ViewMode = 'grouped' | 'flat';
+export const VIEW_MODES = ['grouped', 'flat', 'sessions'] as const;
+
+/** View mode for sidebar display. See {@link VIEW_MODES}. */
+export type ViewMode = typeof VIEW_MODES[number];
+
+/**
+ * Type guard for a stored / selected {@link ViewMode} (Issue #2656).
+ *
+ * @param value - Candidate string (localStorage, or a <select> value)
+ * @returns true when `value` is one of {@link VIEW_MODES}
+ */
+export const isValidViewMode = (value: string): value is ViewMode =>
+  (VIEW_MODES as ReadonlyArray<string>).includes(value);
 
 /**
  * When the header's repository tab bar is shown (Issue #2374).
@@ -496,6 +510,140 @@ export function groupBranches(
     repositoryName,
     branches: sortBranches(groupMap.get(repositoryName)!, sortKey, direction),
   }));
+}
+
+// ============================================================================
+// Session rows (Issue #2656)
+// ============================================================================
+
+/**
+ * One agent instance of one branch, as the sidebar's "sessions" view lists it
+ * (Issue #2656).
+ */
+export interface SessionRow {
+  /** `${worktreeId}:${instanceId}` — unique across the list (React key). */
+  key: string;
+  /** Worktree the instance belongs to. */
+  worktreeId: string;
+  /** Agent-instance id (`claude`, `codex-2`, ...). */
+  instanceId: string;
+  /** Display label: the branch item's `cliStatusLabels[instanceId]`, else the id. */
+  label: string;
+  /** This instance's own status (not the branch aggregate). */
+  status: BranchStatus;
+  /** Branch name (`SidebarBranchItem.name`). */
+  branchName: string;
+  /** Repository display name. */
+  repositoryName: string;
+  /**
+   * The BRANCH's last activity. There is no per-instance activity time, so
+   * every row of one branch shares it.
+   */
+  lastActivity?: Date | string;
+  /** The tmux session is there but the agent is gone (Issue #2070). */
+  exited: boolean;
+}
+
+/**
+ * Expand branch items into one row per agent instance (Issue #2656).
+ *
+ * The rows are exactly the entries of each item's `cliStatus`, i.e. the
+ * configured roster plus any running instance outside it (see
+ * `deriveSidebarCliStatus` in `@/types/sidebar`). Order: items in the given
+ * order, and within an item the `cliStatus` insertion order (roster first).
+ * An item without `cliStatus` contributes no rows.
+ *
+ * @param items - Branch items (already filtered by the sidebar search)
+ * @returns A new array of rows
+ */
+export function buildSessionRows(items: ReadonlyArray<SidebarBranchItem>): SessionRow[] {
+  const rows: SessionRow[] = [];
+  for (const item of items) {
+    const exitedIds = new Set(item.exitedInstanceIds ?? []);
+    for (const [instanceId, status] of Object.entries(item.cliStatus ?? {})) {
+      rows.push({
+        key: `${item.id}:${instanceId}`,
+        worktreeId: item.id,
+        instanceId,
+        label: item.cliStatusLabels?.[instanceId] ?? instanceId,
+        status: status ?? 'idle',
+        branchName: item.name,
+        repositoryName: item.repositoryName,
+        lastActivity: item.lastActivity,
+        exited: exitedIds.has(instanceId),
+      });
+    }
+  }
+  return rows;
+}
+
+/**
+ * Query parameter that tells the worktree screen which agent instance to
+ * select (Issue #2656). Read and removed by `useWorktreeDetailController`.
+ */
+export const SESSION_INSTANCE_QUERY_PARAM = 'instance';
+
+/**
+ * Where a session row leads: its worktree, with the instance in the query
+ * (Issue #2656).
+ *
+ * @example buildSessionRowHref({ worktreeId: 'wt-1', instanceId: 'codex-2' })
+ *   // => '/worktrees/wt-1?instance=codex-2'
+ */
+export function buildSessionRowHref(row: Pick<SessionRow, 'worktreeId' | 'instanceId'>): string {
+  return `/worktrees/${row.worktreeId}?${SESSION_INSTANCE_QUERY_PARAM}=${encodeURIComponent(row.instanceId)}`;
+}
+
+/** Epoch ms of a row's activity; a missing time sorts as the oldest (0). */
+function sessionRowTime(row: SessionRow): number {
+  if (!row.lastActivity) return 0;
+  return row.lastActivity instanceof Date
+    ? row.lastActivity.getTime()
+    : new Date(row.lastActivity).getTime();
+}
+
+/**
+ * Sort session rows (Issue #2656).
+ *
+ * 1. Status first, by {@link STATUS_PRIORITY} (waiting → ready → running →
+ *    generating → idle) — always ascending, whatever `direction` is —
+ *    EXCEPT when `sortKey === 'status'`, where this stage IS the user's sort
+ *    and follows `direction` (asc = waiting first, desc = idle first).
+ * 2. Then the selected key, with `sortBranches()`'s direction semantics:
+ *    `updatedAt` / `lastSent` compare `lastActivity` (desc = newest first),
+ *    `repositoryName` / `branchName` compare case-insensitively (asc = A→Z).
+ *    For `status` this stage is `lastActivity`, newest first.
+ * 3. Ties keep the input order (`Array.prototype.sort` is stable), i.e. the
+ *    branch order and then the roster order from {@link buildSessionRows}.
+ *
+ * @returns A new sorted array (the input is not mutated)
+ */
+export function sortSessionRows(
+  rows: ReadonlyArray<SessionRow>,
+  sortKey: SortKey,
+  direction: SortDirection
+): SessionRow[] {
+  const sign = direction === 'asc' ? 1 : -1;
+  return rows.slice().sort((a, b) => {
+    const priorityDelta = STATUS_PRIORITY[a.status] - STATUS_PRIORITY[b.status];
+    if (sortKey === 'status') {
+      if (priorityDelta !== 0) return priorityDelta * sign;
+      return sessionRowTime(b) - sessionRowTime(a);
+    }
+    if (priorityDelta !== 0) return priorityDelta;
+
+    switch (sortKey) {
+      case 'updatedAt':
+      case 'lastSent':
+        return (sessionRowTime(a) - sessionRowTime(b)) * sign;
+      case 'repositoryName':
+        return a.repositoryName.toLowerCase().localeCompare(b.repositoryName.toLowerCase()) * sign;
+      case 'branchName':
+        return a.branchName.toLowerCase().localeCompare(b.branchName.toLowerCase()) * sign;
+      default:
+        return 0;
+    }
+  });
 }
 
 // ============================================================================

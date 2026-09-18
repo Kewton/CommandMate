@@ -28,12 +28,6 @@ vi.mock('next/link', () => ({
     React.createElement('a', { href, ...props }, children),
 }));
 
-// Mock AppShell
-vi.mock('@/components/layout', () => ({
-  AppShell: ({ children }: { children: React.ReactNode }) =>
-    React.createElement('div', { 'data-testid': 'app-shell' }, children),
-}));
-
 // Mock review-config. Issue #1788: spread the real module rather than listing
 // constants by hand — the filter vocabulary and the deep-link helpers moved here,
 // and an exhaustive literal mock breaks (with an import-time error, not a

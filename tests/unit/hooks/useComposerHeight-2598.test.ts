@@ -171,7 +171,7 @@ describe('useComposerHeight', () => {
     expect(result.current.height).toBeNull();
   });
 
-  it('loads the stored height for its own key', () => {
+  it('loads the stored floor for its own key', () => {
     writeComposerHeight(WT, 'split:0', 180);
     writeComposerHeight(WT, 'split:1', 90);
     const { result } = renderHook(() => useComposerHeight({ worktreeId: WT, scope: 'split:1' }));
@@ -214,7 +214,7 @@ describe('useComposerHeight', () => {
     expect(result.current.height).toBe(COMPOSER_MIN_HEIGHT_PX);
   });
 
-  it('clamps what it draws without rewriting what it stored', () => {
+  it('clamps what it draws without rewriting the floor it stored', () => {
     writeComposerHeight(WT, 'split:0', 300);
     const { result, rerender } = renderHook(
       ({ max }: { max: number | null }) =>
@@ -234,7 +234,7 @@ describe('useComposerHeight', () => {
     expect(result.current.height).toBe(300);
   });
 
-  it('drags from the clamped height the user sees, not from the hidden stored one', () => {
+  it('drags from the clamped floor the user sees, not from the hidden stored one', () => {
     writeComposerHeight(WT, 'split:0', 300);
     const { result } = renderHook(() =>
       useComposerHeight({ worktreeId: WT, scope: 'split:0', maxHeight: 120 }),
@@ -244,7 +244,7 @@ describe('useComposerHeight', () => {
     expect(readComposerHeight(WT, 'split:0')).toBe(100);
   });
 
-  it('reset forgets the height and returns to auto-grow', () => {
+  it('reset forgets the floor and returns to auto-grow', () => {
     writeComposerHeight(WT, 'split:0', 300);
     const { result } = renderHook(() => useComposerHeight({ worktreeId: WT, scope: 'split:0' }));
     act(() => result.current.reset());

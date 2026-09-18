@@ -54,7 +54,6 @@ const baseProps = {
   worktreeName: 'feature/749-worktree',
   repositoryName: 'CommandMate',
   status: 'idle' as const,
-  onBackClick: vi.fn(),
   onInfoClick: vi.fn(),
 };
 

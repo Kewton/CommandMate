@@ -11,6 +11,7 @@
 
 import React, { memo, useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react';
 import { useTranslations } from 'next-intl';
+import { ChevronDown } from 'lucide-react';
 import { Tooltip } from '@/components/common/Tooltip';
 import type { SortKey, SortDirection } from '@/lib/sidebar-utils';
 
@@ -74,7 +75,41 @@ export interface SortSelectorBaseProps {
    * while other consumers (e.g. Sessions page) omit it and keep the original size.
    */
   iconClassName?: string;
+  /**
+   * Issue #2648: show the current sort label as text followed by a chevron,
+   * instead of the sort icon, at every breakpoint. Takes precedence over
+   * `compact`. The sidebar passes it; omitted callers keep the icon trigger.
+   */
+  showLabel?: boolean;
+  /**
+   * Issue #2648: words for the direction toggle, per sort key. When the
+   * current key has an entry, the toggle shows `directionLabels[key][direction]`
+   * as text (and uses it as its aria-label) instead of an arrow, and the
+   * dropdown shows the same word beside the selected option instead of
+   * ASC / DESC. Keys without an entry keep the arrow.
+   */
+  directionLabels?: Partial<Record<SortKey, { asc: string; desc: string }>>;
 }
+
+/** Icon-only trigger (the original look; kept for callers without `showLabel`). */
+const ICON_TRIGGER_CLASS =
+  'flex items-center gap-1 px-2 py-1 rounded text-xs text-sidebar-muted hover:text-sidebar-foreground hover:bg-sidebar-hover focus:outline-none focus:ring-2 focus:ring-ring transition-colors';
+
+/** Text trigger for `showLabel` (Issue #2648): shrinks and truncates in a narrow sidebar. */
+const LABELLED_TRIGGER_CLASS =
+  'flex min-w-0 max-w-full items-center gap-1 rounded border border-sidebar-border px-2 py-1 text-xs text-sidebar-foreground hover:bg-sidebar-hover focus:outline-none focus:ring-2 focus:ring-ring transition-colors';
+
+/** Arrow direction toggle (the original look). */
+const ICON_DIRECTION_CLASS =
+  'p-1 rounded text-sidebar-muted hover:text-sidebar-foreground hover:bg-sidebar-hover focus:outline-none focus:ring-2 focus:ring-ring transition-colors';
+
+/**
+ * Worded direction toggle (Issue #2648). Never wraps inside itself, and
+ * truncates instead of overflowing when a long label ("Needs attention first")
+ * meets a 160px sidebar; the full text stays in aria-label.
+ */
+const LABELLED_DIRECTION_CLASS =
+  'min-w-0 max-w-full truncate rounded px-2 py-1 text-xs text-sidebar-muted hover:text-sidebar-foreground hover:bg-sidebar-hover focus:outline-none focus:ring-2 focus:ring-ring transition-colors';
 
 // ============================================================================
 // Component
@@ -96,6 +131,8 @@ export const SortSelectorBase = memo(function SortSelectorBase({
   options,
   defaultDirections,
   compact,
+  showLabel = false,
+  directionLabels,
   tooltip,
   iconClassName = 'w-3 h-3',
 }: SortSelectorBaseProps) {
@@ -184,7 +221,9 @@ export const SortSelectorBase = memo(function SortSelectorBase({
     onSortDirectionChange(sortDirection === 'asc' ? 'desc' : 'asc');
   }, [sortDirection, onSortDirectionChange]);
 
-  const currentLabel = options.find((opt) => opt.key === sortKey)?.label || 'Sort';
+  const currentLabel = options.find((opt) => opt.key === sortKey)?.label || t('sort.label');
+  const currentDirectionLabel = directionLabels?.[sortKey]?.[sortDirection];
+  const shortDirection = sortDirection === 'asc' ? t('sort.ascShort') : t('sort.descShort');
 
   const triggerButton = (
     <button
@@ -192,23 +231,31 @@ export const SortSelectorBase = memo(function SortSelectorBase({
       onClick={handleToggle}
       aria-expanded={isOpen}
       aria-haspopup="listbox"
-      aria-label={`Sort by ${currentLabel}`}
-      className="
-        flex items-center gap-1 px-2 py-1 rounded
-        text-xs text-sidebar-muted hover:text-sidebar-foreground hover:bg-sidebar-hover
-        focus:outline-none focus:ring-2 focus:ring-ring
-        transition-colors
-      "
+      aria-label={t('sort.sortBy', { label: currentLabel })}
+      className={showLabel ? LABELLED_TRIGGER_CLASS : ICON_TRIGGER_CLASS}
     >
-      <SortIcon className={iconClassName} />
-      <span className={compact ? 'hidden' : 'hidden sm:inline'}>{currentLabel}</span>
+      {showLabel ? (
+        <>
+          <span className="min-w-0 truncate">{currentLabel}</span>
+          <ChevronDown className="h-3 w-3 flex-shrink-0" aria-hidden="true" />
+        </>
+      ) : (
+        <>
+          <SortIcon className={iconClassName} />
+          <span className={compact ? 'hidden' : 'hidden sm:inline'}>{currentLabel}</span>
+        </>
+      )}
     </button>
   );
 
   return (
-    <div ref={containerRef} className="relative" data-testid="sort-selector-base">
+    <div
+      ref={containerRef}
+      className={showLabel ? 'relative min-w-0' : 'relative'}
+      data-testid="sort-selector-base"
+    >
       {/* Trigger button */}
-      <div className="flex items-center gap-1">
+      <div className={showLabel ? 'flex min-w-0 flex-wrap items-center gap-1' : 'flex items-center gap-1'}>
         {tooltip ? (
           <Tooltip content={tooltip} placement="bottom">
             {triggerButton}
@@ -221,18 +268,18 @@ export const SortSelectorBase = memo(function SortSelectorBase({
         <button
           type="button"
           onClick={handleToggleDirection}
-          aria-label={sortDirection === 'asc' ? 'Sort ascending' : 'Sort descending'}
-          className="
-            p-1 rounded text-sidebar-muted hover:text-sidebar-foreground hover:bg-sidebar-hover
-            focus:outline-none focus:ring-2 focus:ring-ring
-            transition-colors
-          "
+          aria-label={
+            currentDirectionLabel ??
+            (sortDirection === 'asc' ? t('sort.ascending') : t('sort.descending'))
+          }
+          className={currentDirectionLabel ? LABELLED_DIRECTION_CLASS : ICON_DIRECTION_CLASS}
         >
-          {sortDirection === 'asc' ? (
-            <ArrowUpIcon className={iconClassName} />
-          ) : (
-            <ArrowDownIcon className={iconClassName} />
-          )}
+          {currentDirectionLabel ??
+            (sortDirection === 'asc' ? (
+              <ArrowUpIcon className={iconClassName} />
+            ) : (
+              <ArrowDownIcon className={iconClassName} />
+            ))}
         </button>
       </div>
 
@@ -261,8 +308,8 @@ export const SortSelectorBase = memo(function SortSelectorBase({
               aria-selected={sortKey === option.key}
               onClick={() => handleSelectKey(option.key)}
               className={`
-                w-full px-3 py-2 text-left text-sm
-                flex items-center justify-between
+                w-full px-3 py-2 text-left text-sm whitespace-nowrap
+                flex items-center justify-between gap-3
                 hover:bg-sidebar-hover transition-colors
                 ${sortKey === option.key ? 'text-accent-700 dark:text-accent-400' : 'text-sidebar-muted'}
               `}
@@ -270,7 +317,7 @@ export const SortSelectorBase = memo(function SortSelectorBase({
               <span>{option.label}</span>
               {sortKey === option.key && (
                 <span className="text-xs">
-                  {sortDirection === 'asc' ? 'ASC' : 'DESC'}
+                  {directionLabels?.[option.key]?.[sortDirection] ?? shortDirection}
                 </span>
               )}
             </button>

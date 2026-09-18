@@ -15,6 +15,12 @@ import type { SortOption } from '@/components/sidebar/SortSelectorBase';
 import type { SortKey, SortDirection } from '@/lib/sidebar-utils';
 import { TOOLTIP_DELAY_MS } from '@/components/common/Tooltip';
 
+const intlLocale = vi.hoisted(() => ({ current: 'en' }));
+vi.mock('next-intl', async () => {
+  const { createRealIntlMock } = await import('@tests/helpers/real-intl');
+  return createRealIntlMock(() => intlLocale.current);
+});
+
 const TEST_OPTIONS: SortOption[] = [
   { key: 'repositoryName', label: 'Repository' },
   { key: 'status', label: 'Status' },
@@ -192,8 +198,8 @@ describe('SortSelectorBase', () => {
   });
 
   // Issue #946: the sort/direction icon size must be controllable per-consumer so
-  // the sidebar header can enlarge them WITHOUT affecting the Sessions page, which
-  // shares this component and must keep the original w-3 h-3 size.
+  // the sidebar header can enlarge them WITHOUT affecting callers that do not pass iconClassName
+  // and must keep the original w-3 h-3 size.
   describe('icon sizing (Issue #946)', () => {
     it('defaults the sort and direction icons to w-3 h-3 when iconClassName is omitted (Sessions regression guard)', () => {
       const { container } = renderSelector();
@@ -220,6 +226,100 @@ describe('SortSelectorBase', () => {
         expect(cls).not.toContain('w-3');
       });
     });
+  });
+});
+
+describe('SortSelectorBase worded labels (Issue #2648)', () => {
+  beforeEach(() => {
+    intlLocale.current = 'en';
+  });
+
+  const DIRECTION_LABELS = {
+    lastSent: { asc: 'Oldest first', desc: 'Newest first' },
+    repositoryName: { asc: 'A→Z', desc: 'Z→A' },
+  };
+
+  it('showLabel: renders the current label as text and a chevron, no sort icon', () => {
+    const { container } = render(
+      <SortSelectorBase sortKey="lastSent" sortDirection="desc" onSortKeyChange={vi.fn()}
+        onSortDirectionChange={vi.fn()} options={TEST_OPTIONS} showLabel />,
+    );
+    const trigger = screen.getByRole('button', { name: 'Sort by Last Sent' });
+    expect(trigger.textContent).toBe('Last Sent');
+    const label = trigger.querySelector('span');
+    expect(label?.className).toContain('truncate');
+    expect(label?.className).not.toContain('hidden');
+    expect(trigger.querySelectorAll('svg')).toHaveLength(1);
+    expect(trigger.querySelector('svg')?.getAttribute('class')).toContain('lucide-chevron-down');
+    // The SortIcon path is gone.
+    expect(container.querySelector('path[d="M3 4h13M3 8h9m-9 4h6m4 0l4-4m0 0l4 4m-4-4v12"]')).toBeNull();
+  });
+
+  it('directionLabels: the toggle shows the word and uses it as its aria-label', () => {
+    const onDir = vi.fn();
+    render(
+      <SortSelectorBase sortKey="lastSent" sortDirection="desc" onSortKeyChange={vi.fn()}
+        onSortDirectionChange={onDir} options={TEST_OPTIONS} showLabel directionLabels={DIRECTION_LABELS} />,
+    );
+    const dir = screen.getByRole('button', { name: 'Newest first' });
+    expect(dir.textContent).toBe('Newest first');
+    expect(dir.querySelector('svg')).toBeNull();
+    // Issue #2648: a long word truncates instead of overflowing a 160px sidebar.
+    expect(dir.className).toContain('min-w-0');
+    expect(dir.className).toContain('max-w-full');
+    expect(dir.className).toContain('truncate');
+    fireEvent.click(dir);
+    expect(onDir).toHaveBeenCalledWith('asc');
+  });
+
+  it('directionLabels: the dropdown shows the word next to the selected option', () => {
+    render(
+      <SortSelectorBase sortKey="repositoryName" sortDirection="asc" onSortKeyChange={vi.fn()}
+        onSortDirectionChange={vi.fn()} options={TEST_OPTIONS} showLabel directionLabels={DIRECTION_LABELS} />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Sort by Repository' }));
+    const selected = screen.getAllByRole('option').find((o) => o.getAttribute('aria-selected') === 'true')!;
+    expect(selected.textContent).toBe('RepositoryA→Z');
+    expect(screen.queryByText('ASC')).toBeNull();
+  });
+
+  it('a key without directionLabels keeps the arrow and the dictionary aria-label', () => {
+    render(
+      <SortSelectorBase sortKey="status" sortDirection="asc" onSortKeyChange={vi.fn()}
+        onSortDirectionChange={vi.fn()} options={TEST_OPTIONS} showLabel directionLabels={DIRECTION_LABELS} />,
+    );
+    const dir = screen.getByRole('button', { name: 'Sort ascending' });
+    expect(dir.querySelector('svg')).not.toBeNull();
+  });
+
+  it('reads its wording from the ja dictionary', () => {
+    intlLocale.current = 'ja';
+    render(
+      <SortSelectorBase sortKey="status" sortDirection="desc" onSortKeyChange={vi.fn()}
+        onSortDirectionChange={vi.fn()} options={TEST_OPTIONS} />,
+    );
+    expect(screen.getByRole('button', { name: '並び順: Status' })).toBeDefined();
+    expect(screen.getByRole('button', { name: '降順に並び替え' })).toBeDefined();
+    fireEvent.click(screen.getByRole('button', { name: '並び順: Status' }));
+    expect(screen.getByText('降順')).toBeDefined();
+  });
+
+  it('falls back to the dictionary "Sort" label when the key is not among the options', () => {
+    render(
+      <SortSelectorBase sortKey="branchName" sortDirection="asc" onSortKeyChange={vi.fn()}
+        onSortDirectionChange={vi.fn()} options={TEST_OPTIONS} showLabel />,
+    );
+    expect(screen.getByRole('button', { name: 'Sort by Sort' }).textContent).toBe('Sort');
+  });
+
+  it('without showLabel the trigger keeps the icon and the hidden sm:inline label (regression)', () => {
+    render(
+      <SortSelectorBase sortKey="lastSent" sortDirection="desc" onSortKeyChange={vi.fn()}
+        onSortDirectionChange={vi.fn()} options={TEST_OPTIONS} />,
+    );
+    const trigger = screen.getByRole('button', { name: 'Sort by Last Sent' });
+    expect(trigger.querySelector('span')?.className).toBe('hidden sm:inline');
+    expect(trigger.querySelector('.lucide-chevron-down')).toBeNull();
   });
 });
 

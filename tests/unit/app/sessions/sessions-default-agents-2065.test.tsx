@@ -30,11 +30,6 @@ vi.mock('next/link', () => ({
     React.createElement('a', { href, ...props }, children),
 }));
 
-vi.mock('@/components/layout', () => ({
-  AppShell: ({ children }: { children: React.ReactNode }) =>
-    React.createElement('div', { 'data-testid': 'app-shell' }, children),
-}));
-
 vi.mock('@/hooks/useIsMobile', () => ({ useIsMobile: () => false, MOBILE_BREAKPOINT: 768 }));
 
 let mockWorktrees: Array<Record<string, unknown>> = [];

@@ -57,7 +57,7 @@ responsibility:
 | **CLI tools** | `src/lib/cli-tools/` | Strategy-pattern abstraction over each supported agent CLI (Claude, Codex, Gemini, Vibe Local, OpenCode, GitHub Copilot), including type definitions and per-tool implementations. |
 | **Git** | `src/lib/git/` | Git operations, worktree management, and repository cloning. |
 | **Schedules / CMATE** | `src/lib/cmate-parser.ts`, `src/types/cmate.ts` | Parsing and validation of `CMATE.md` (schedules, etc.). |
-| **Version / updates** | `src/lib/version-checker.ts`, `src/hooks/useUpdateCheck.ts` | GitHub release version checks and update-notification UI. |
+| **Version / updates** | `src/lib/version-checker.ts`, `src/contexts/AppUpdateContext.tsx` | GitHub release version checks, the app-wide update state and the update UI. |
 
 UI lives under `src/components/` (`common/`, `home/`, `layout/`, `mobile/`,
 `providers/`, `review/`, `sidebar/`, `worktree/`, `auth/`), with React hooks in

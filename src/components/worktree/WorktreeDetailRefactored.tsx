@@ -306,7 +306,6 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     handleActivityToggle,
     handleAgentInstancesChange,
     handleAutoYesToggle,
-    handleBackClick,
     handleCloseDiff,
     handleDelete,
     handleDiffSelect,
@@ -386,6 +385,8 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     pendingInsertText,
     pendingInsertTextMap,
     rosterReady,
+    instanceSelectionRequest,
+    acknowledgeInstanceSelection,
     setActiveInstanceId,
     setFocusedSplitIndex,
     setHistorySubTab,
@@ -594,13 +595,14 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           rosterReady={rosterReady}
           activeInstanceId={activeInstanceId}
           setActiveInstanceId={setActiveInstanceId}
+          instanceSelectionRequest={instanceSelectionRequest}
+          onInstanceSelectionHandled={acknowledgeInstanceSelection}
           hasUpdate={hasUpdate}
           lastAutoResponse={lastAutoResponse}
           activeActivity={activeActivity}
           onActivityToggle={handleActivityToggle}
           onActivityOpen={handleActivityOpen}
           verification={verification}
-          onBackClick={handleBackClick}
           onInfoClick={handleInfoClick}
           onWorktreeStatusChange={handleWorktreeStatusChange}
           pendingInsertTextMap={pendingInsertTextMap}
@@ -736,7 +738,6 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                 repositoryName={worktree?.repositoryName}
                 status={worktreeStatus}
                 gitStatus={worktree?.gitStatus}
-                onBackClick={handleBackClick}
                 onMenuClick={openMobileDrawer}
               />
             </div>

@@ -84,12 +84,8 @@
     },
     {
       "files": [
-        // 2) 恒久除外 (permanent, 12 files): no corresponding CLITool / gateway entry point exists.
-        "src/app/api/assistant/conversation/route.ts",
-        "src/app/api/assistant/current-output/route.ts",
-        "src/app/api/assistant/session/route.ts",
-        "src/app/api/assistant/start/route.ts",
-        "src/app/api/assistant/terminal/route.ts",
+        // 2) 恒久除外 (permanent, 7 files): no corresponding CLITool / gateway entry point exists.
+        // Issue #2655 removed the five Assistant Chat API routes with the feature.
         "src/app/api/worktrees/\\[id\\]/route.ts",
         "src/app/api/worktrees/route.ts",
         "src/cli/commands/capture.ts",
@@ -104,10 +100,11 @@
     },
     {
       "files": [
-        // 3) 段階解消 (staged removal, 16 files): the only progress metric.
+        // 3) 段階解消 (staged removal, 15 files): the only progress metric.
         // #1905 removed kill-session/route.ts: it kills through ICLITool.killSession now.
         // #1906 removed terminal/route.ts and send-user-message.ts: both dropped the
         // copilot sendKeys bypass and now send through ICLITool.sendMessage.
+        // Issue #2655 removed the Assistant Chat conversation poller with the feature.
         "src/app/api/worktrees/\\[id\\]/capture/route.ts",
         "src/app/api/worktrees/\\[id\\]/clear-composer/route.ts",
         "src/app/api/worktrees/\\[id\\]/special-keys/route.ts",
@@ -115,7 +112,6 @@
         "src/components/Terminal.tsx",
         "src/lib/auto-yes-poller.ts",
         "src/lib/pasted-text-helper.ts",
-        "src/lib/polling/assistant-conversation-poller.ts",
         "src/lib/polling/global-session-poller.ts",
         "src/lib/polling/response-checker.ts",
         "src/lib/prompt-answer-sender.ts",
