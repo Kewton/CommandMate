@@ -23,12 +23,6 @@ vi.mock('next/link', () => ({
     React.createElement('a', { href, ...props }, children),
 }));
 
-// Mock AppShell
-vi.mock('@/components/layout', () => ({
-  AppShell: ({ children }: { children: React.ReactNode }) =>
-    React.createElement('div', { 'data-testid': 'app-shell' }, children),
-}));
-
 // Mock status-colors (Issue #1304: labels are `common.status.*` keys, resolved
 // at render — this suite asserts layout/behaviour, not wording, so the keys are
 // echoed by the global next-intl mock. Wording is covered by status-colors-keys.)

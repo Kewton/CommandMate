@@ -12,12 +12,6 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import RepositoriesPage from '@/app/repositories/page';
 
-// AppShell pulls in the full layout (sidebar/header/contexts); stub it to a
-// passthrough so we can render the page body in isolation.
-vi.mock('@/components/layout', () => ({
-  AppShell: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-}));
-
 // Stub the heavy child components with identifiable markers so we can assert
 // their relative order in the DOM.
 vi.mock('@/components/repository', () => ({

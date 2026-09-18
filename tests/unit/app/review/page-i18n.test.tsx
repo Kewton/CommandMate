@@ -19,11 +19,6 @@ vi.mock('next-intl', async () => {
   return createRealIntlMock(() => locale.current);
 });
 
-vi.mock('@/components/layout', () => ({
-  AppShell: ({ children }: { children: React.ReactNode }) =>
-    React.createElement('div', { 'data-testid': 'app-shell' }, children),
-}));
-
 // The tab bodies own their own data fetching; this page-level shell test only
 // covers the heading and the tab triggers.
 vi.mock('@/components/review/ReviewTab', () => ({

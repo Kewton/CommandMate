@@ -14,10 +14,6 @@ vi.mock('next/navigation', () => ({
   useParams: () => mockParams,
 }));
 
-vi.mock('@/components/layout', () => ({
-  AppShell: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-}));
-
 vi.mock('@/components/worktree/WorktreeDetailRefactored', () => ({
   WorktreeDetailRefactored: ({ worktreeId }: { worktreeId: string }) => (
     <div data-testid="detail" data-worktree-id={worktreeId} />

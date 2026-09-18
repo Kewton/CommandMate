@@ -22,7 +22,6 @@ import { useEffect, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { AppShell } from '@/components/layout';
 import { useWorktreesCacheContext } from '@/components/providers/WorktreesCacheProvider';
 import { OnboardingChecklist } from '@/components/home/OnboardingChecklist';
 import { Button, Spinner } from '@/components/ui';
@@ -68,54 +67,52 @@ export default function Home() {
   }, [shouldRedirect, visibleWorktreeIds, router]);
 
   return (
-    <AppShell>
-      <div className="container-custom py-8 overflow-auto h-full">
-        {hasLoadError ? (
-          <div data-testid="home-load-error" role="alert" className="py-16 text-center">
-            <p className="text-sm text-muted-foreground">{t('sidebar.branchesLoadFailed')}</p>
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              className="mt-3"
-              data-testid="home-load-retry"
-              onClick={() => {
-                void refresh();
-              }}
-            >
-              {t('sidebar.retryLoadBranches')}
-            </Button>
-          </div>
-        ) : isEmpty ? (
-          <div data-testid="home-empty">
-            <OnboardingChecklist
-              worktrees={worktrees}
-              repositories={repositories}
-              isLoading={false}
-              error={null}
-            />
-            <div className="text-center">
-              <p className="text-sm text-muted-foreground">{t('sidebar.noBranchesAvailable')}</p>
-              <Link
-                href="/repositories"
-                data-testid="home-add-repository"
-                className="mt-3 inline-block rounded-md bg-accent-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-accent-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:bg-accent-500 dark:hover:bg-accent-600"
-              >
-                {t('repositories.add')}
-              </Link>
-            </div>
-          </div>
-        ) : (
-          <div
-            data-testid="home-loading"
-            role="status"
-            aria-label={t('loadingPage')}
-            className="flex justify-center py-16"
+    <div className="container-custom py-8 overflow-auto h-full">
+      {hasLoadError ? (
+        <div data-testid="home-load-error" role="alert" className="py-16 text-center">
+          <p className="text-sm text-muted-foreground">{t('sidebar.branchesLoadFailed')}</p>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            className="mt-3"
+            data-testid="home-load-retry"
+            onClick={() => {
+              void refresh();
+            }}
           >
-            <Spinner size="lg" variant="muted" />
+            {t('sidebar.retryLoadBranches')}
+          </Button>
+        </div>
+      ) : isEmpty ? (
+        <div data-testid="home-empty">
+          <OnboardingChecklist
+            worktrees={worktrees}
+            repositories={repositories}
+            isLoading={false}
+            error={null}
+          />
+          <div className="text-center">
+            <p className="text-sm text-muted-foreground">{t('sidebar.noBranchesAvailable')}</p>
+            <Link
+              href="/repositories"
+              data-testid="home-add-repository"
+              className="mt-3 inline-block rounded-md bg-accent-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-accent-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:bg-accent-500 dark:hover:bg-accent-600"
+            >
+              {t('repositories.add')}
+            </Link>
           </div>
-        )}
-      </div>
-    </AppShell>
+        </div>
+      ) : (
+        <div
+          data-testid="home-loading"
+          role="status"
+          aria-label={t('loadingPage')}
+          className="flex justify-center py-16"
+        >
+          <Spinner size="lg" variant="muted" />
+        </div>
+      )}
+    </div>
   );
 }

@@ -36,11 +36,6 @@ vi.mock('next/link', () => ({
     React.createElement('a', { href, ...props }, children),
 }));
 
-vi.mock('@/components/layout', () => ({
-  AppShell: ({ children }: { children: React.ReactNode }) =>
-    React.createElement('div', { 'data-testid': 'app-shell' }, children),
-}));
-
 vi.mock('@/lib/date-utils', () => ({
   formatRelativeTime: () => '2 hours ago',
   formatRelativeTimeShort: () => '2h ago',

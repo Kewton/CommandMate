@@ -438,8 +438,10 @@ test.describe('Repository tab bar without a scrollbar (Issue #2480)', () => {
       timeout: 60_000,
     });
 
-    // `/worktrees/[id]` renders its own AppShell, so every navigation below
-    // arrives at a freshly mounted strip scrolled to its start.
+    // Issue #2682: the shell — and with it the strip — is mounted once, by the
+    // root layout, and survives every navigation below. So what is asserted
+    // here is the strip scrolling the current tab back into view, not a fresh
+    // mount happening to start at the right place.
 
     // Go to the last repository through the "…" menu and its popover; on
     // arrival its tab is the one in view, which pushes the first tab out...
