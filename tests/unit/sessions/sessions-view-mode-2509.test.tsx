@@ -30,11 +30,6 @@ vi.mock('next/link', () => ({
     React.createElement('a', { href, ...props }, children),
 }));
 
-vi.mock('@/components/layout', () => ({
-  AppShell: ({ children }: { children: React.ReactNode }) =>
-    React.createElement('div', { 'data-testid': 'app-shell' }, children),
-}));
-
 vi.mock('@/lib/date-utils', () => ({
   formatRelativeTime: () => '2 hours ago',
   formatRelativeTimeShort: () => '2h ago',
@@ -83,10 +78,15 @@ function createWorktree(overrides: Record<string, unknown> = {}) {
   };
 }
 
-/** The element PullToRefresh puts its className on — the page's wrapper. */
-function wrapperClassList(): string {
-  const shell = screen.getByTestId('app-shell');
-  const wrapper = shell.firstElementChild;
+/**
+ * The element PullToRefresh puts its className on — the page's wrapper.
+ *
+ * Issue #2682 moved the shell into the root layout, so the page no longer
+ * renders one: the wrapper is now the first element the page itself puts in
+ * the render container.
+ */
+function wrapperClassList(container: HTMLElement): string {
+  const wrapper = container.firstElementChild;
   expect(wrapper).not.toBeNull();
   return wrapper!.className;
 }
@@ -160,18 +160,18 @@ describe('Sessions view mode (Issue #2509)', () => {
     it('keeps container-custom in list mode', () => {
       mockWorktrees = [createWorktree()];
 
-      render(<SessionsPage />);
+      const { container } = render(<SessionsPage />);
 
-      expect(wrapperClassList()).toContain('container-custom');
+      expect(wrapperClassList(container)).toContain('container-custom');
     });
 
     it('drops container-custom for a full-width grid in tile mode', () => {
       window.localStorage.setItem(SESSIONS_VIEW_MODE_STORAGE_KEY, 'tile');
       mockWorktrees = [createWorktree()];
 
-      render(<SessionsPage />);
+      const { container } = render(<SessionsPage />);
 
-      const classes = wrapperClassList();
+      const classes = wrapperClassList(container);
       expect(classes).not.toContain('container-custom');
       expect(classes).toContain('w-full');
     });

@@ -15,7 +15,6 @@
 'use client';
 
 import { useCallback, useState } from 'react';
-import { AppShell } from '@/components/layout';
 import { PullToRefresh } from '@/components/common/PullToRefresh';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { RepositoryList, RepositoryManager } from '@/components/repository';
@@ -39,24 +38,22 @@ export default function RepositoriesPage() {
   }, []);
 
   return (
-    <AppShell>
-      <PullToRefresh
-        onRefresh={handlePullRefresh}
-        enabled={isMobile}
-        className="container-custom py-8 h-full"
-      >
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold text-foreground mb-2">Repositories</h1>
-          <p className="text-sm text-muted-foreground">
-            Manage repositories and worktrees.
-          </p>
-        </div>
+    <PullToRefresh
+      onRefresh={handlePullRefresh}
+      enabled={isMobile}
+      className="container-custom py-8 h-full"
+    >
+      <div className="mb-6">
+        <h1 className="text-2xl font-bold text-foreground mb-2">Repositories</h1>
+        <p className="text-sm text-muted-foreground">
+          Manage repositories and worktrees.
+        </p>
+      </div>
 
-        <div className="space-y-6">
-          <RepositoryManager onRepositoryAdded={handleChanged} />
-          <RepositoryList refreshKey={refreshKey} onChanged={handleChanged} />
-        </div>
-      </PullToRefresh>
-    </AppShell>
+      <div className="space-y-6">
+        <RepositoryManager onRepositoryAdded={handleChanged} />
+        <RepositoryList refreshKey={refreshKey} onChanged={handleChanged} />
+      </div>
+    </PullToRefresh>
   );
 }

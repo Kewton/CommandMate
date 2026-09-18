@@ -81,7 +81,7 @@ export default function AppError({ error, reset }: AppErrorProps) {
     <main
       data-testid="app-error"
       data-error-kind={offline ? 'chunk-offline' : chunk ? 'chunk-reload' : 'unexpected'}
-      className="flex min-h-screen flex-col items-center justify-center gap-6 bg-background px-6 pt-safe pb-safe text-center"
+      className="flex min-h-full flex-col items-center justify-center gap-6 bg-background px-6 pt-safe pb-safe text-center"
     >
       <div className="space-y-2">
         <h1 className="text-2xl font-semibold text-foreground">{title}</h1>

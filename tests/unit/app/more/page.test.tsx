@@ -19,12 +19,6 @@ vi.mock('next-intl', async () => {
   return createRealIntlMock(() => intlLocale.current);
 });
 
-// Mock AppShell to a passthrough so we don't pull in the full layout tree.
-vi.mock('@/components/layout', () => ({
-  AppShell: ({ children }: { children: React.ReactNode }) =>
-    React.createElement('div', { 'data-testid': 'app-shell' }, children),
-}));
-
 // Mock next/link
 vi.mock('next/link', () => ({
   default: ({ children, href, ...props }: { children: React.ReactNode; href: string; [key: string]: unknown }) =>
@@ -55,8 +49,10 @@ describe('More page (Issue #1081)', () => {
     render(React.createElement(MorePage));
 
     // Wait for ExternalAppsManager to settle its initial fetch.
+    // Issue #2682: the page no longer draws the shell, so the page's own
+    // heading is what says "this render has happened".
     await waitFor(() => {
-      expect(screen.getByTestId('app-shell')).toBeInTheDocument();
+      expect(screen.getByRole('heading', { level: 1 })).toBeInTheDocument();
     });
 
     const headings = screen.getAllByText('External Apps');
@@ -79,7 +75,7 @@ describe('heading (Issue #2645)', () => {
     render(React.createElement(MorePage));
 
     await waitFor(() => {
-      expect(screen.getByTestId('app-shell')).toBeInTheDocument();
+      expect(screen.getByRole('heading', { level: 1 })).toBeInTheDocument();
     });
 
     const h1 = screen.getByRole('heading', { level: 1 });
@@ -93,7 +89,7 @@ describe('heading (Issue #2645)', () => {
     render(React.createElement(MorePage));
 
     await waitFor(() => {
-      expect(screen.getByTestId('app-shell')).toBeInTheDocument();
+      expect(screen.getByRole('heading', { level: 1 })).toBeInTheDocument();
     });
 
     const h1 = screen.getByRole('heading', { level: 1 });

@@ -3,6 +3,7 @@ import { getLocale, getMessages, getTimeZone, getTranslations } from 'next-intl/
 import { GeistSans } from 'geist/font/sans';
 import { GeistMono } from 'geist/font/mono';
 import { AppProviders } from '@/components/providers/AppProviders';
+import { AppShellGate } from '@/components/layout/AppShellGate';
 import './globals.css';
 
 // [Issue #1305] `description` is locale-dependent, and t() cannot be called at
@@ -59,7 +60,7 @@ export default async function RootLayout({
     >
       <body className="min-h-screen bg-background">
         <AppProviders locale={locale} messages={messages as Record<string, unknown>} timeZone={timeZone} authEnabled={!!process.env.CM_AUTH_TOKEN_HASH}>
-          {children}
+          <AppShellGate>{children}</AppShellGate>
         </AppProviders>
       </body>
     </html>

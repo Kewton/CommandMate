@@ -7,7 +7,6 @@
 'use client';
 
 import { useParams } from 'next/navigation';
-import { AppShell } from '@/components/layout';
 import { SkillDetailView } from '@/components/skills/SkillDetailView';
 
 export default function SkillDetailPage() {
@@ -15,10 +14,8 @@ export default function SkillDetailPage() {
   const skillId = typeof params.skillId === 'string' ? params.skillId : '';
 
   return (
-    <AppShell>
-      <div className="container-custom py-8 overflow-auto h-full">
-        <SkillDetailView skillId={skillId} />
-      </div>
-    </AppShell>
+    <div className="container-custom py-8 overflow-auto h-full">
+      <SkillDetailView skillId={skillId} />
+    </div>
   );
 }

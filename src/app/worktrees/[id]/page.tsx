@@ -9,7 +9,6 @@
 
 import { useEffect } from 'react';
 import { useParams } from 'next/navigation';
-import { AppShell } from '@/components/layout';
 import { WorktreeDetailRefactored } from '@/components/worktree/WorktreeDetailRefactored';
 import { writeLastOpenedWorktreeId } from '@/lib/last-opened-worktree';
 
@@ -22,8 +21,6 @@ export default function WorktreeDetailPage() {
   }, [worktreeId]);
 
   return (
-    <AppShell>
-      <WorktreeDetailRefactored worktreeId={worktreeId} />
-    </AppShell>
+    <WorktreeDetailRefactored worktreeId={worktreeId} />
   );
 }
