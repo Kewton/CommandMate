@@ -419,7 +419,12 @@
     "errorNotGlobal": "CommandMate is not installed globally, so it cannot update itself.",
     "errorInProgress": "An update is already running.",
     "errorGeneric": "The update could not be started. Run the command manually:",
-    "logHint": "Update log: {path}"
+    "logHint": "Update log: {path}",
+    "buttonLabel": "Update v{version}",
+    "buttonAriaLabel": "Update CommandMate to v{version}",
+    "buttonReleaseAriaLabel": "Open the v{version} release page",
+    "buttonUpdating": "Updating…",
+    "statusDialogTitle": "Update status"
   },
   "terminal": {
     "historyLabel": "History",

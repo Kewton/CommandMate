@@ -419,7 +419,12 @@
     "errorNotGlobal": "CommandMate はグローバルインストールではないため、自己更新できません。",
     "errorInProgress": "アップデートは既に実行中です。",
     "errorGeneric": "アップデートを開始できませんでした。手動でコマンドを実行してください:",
-    "logHint": "アップデートログ: {path}"
+    "logHint": "アップデートログ: {path}",
+    "buttonLabel": "Update v{version}",
+    "buttonAriaLabel": "CommandMate を v{version} にアップデート",
+    "buttonReleaseAriaLabel": "v{version} のリリースページを開く",
+    "buttonUpdating": "更新中…",
+    "statusDialogTitle": "アップデートの状態"
   },
   "terminal": {
     "historyLabel": "履歴",

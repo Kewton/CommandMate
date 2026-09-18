@@ -43,7 +43,7 @@ import { useToast } from '@/components/common/Toast';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { useAutoYes } from '@/hooks/useAutoYes';
 import { buildPromptResponseBody } from '@/lib/prompt-response-body-builder';
-import { useUpdateCheck } from '@/hooks/useUpdateCheck';
+import { useAppUpdate } from '@/contexts/AppUpdateContext';
 import { type AutoYesToggleParams } from '@/components/worktree/AutoYesToggle';
 import type { AutoYesStopReason } from '@/config/auto-yes-config';
 import type { Worktree, ChatMessage, LivePromptData, FileContent } from '@/types/models';
@@ -1559,9 +1559,8 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     }
   }, [worktreeId, showToast]);
 
-  // Update check hook (Issue #278: hasUpdate state for DesktopHeader/MobileTabBar)
-  const { data: updateCheckData } = useUpdateCheck();
-  const hasUpdate = updateCheckData?.hasUpdate ?? false;
+  // Issue #278 / #2654: app-wide update state (AppUpdateProvider) for DesktopHeader/MobileTabBar
+  const { hasUpdate } = useAppUpdate();
 
   // Auto-yes hook
   const { lastAutoResponse } = useAutoYes({

@@ -73,9 +73,13 @@ describe('Issue #278 Acceptance: fetch Data Cache fix & Info notification indica
       expect(conditionalPattern.test(source)).toBe(true);
     });
 
-    it('should pass hasUpdate prop to DesktopHeader and use useUpdateCheck', () => {
+    it('should pass hasUpdate prop to DesktopHeader and use useAppUpdate', () => {
       // Issue #755: the PC DesktopHeader render moved to WorktreeDetailDesktop.tsx,
-      // and the useUpdateCheck hook moved into the useWorktreeDetailController hook.
+      // and the update check moved into the useWorktreeDetailController hook.
+      // Issue #2654: that check is no longer a hook of its own — the state is
+      // app-wide now, so the controller reads hasUpdate from useAppUpdate()
+      // (src/contexts/AppUpdateContext.tsx). The old per-component hook under
+      // src/hooks/ was deleted, so its name must not survive anywhere.
       const desktopSource = readFileSync(
         resolve(ROOT, 'src/components/worktree/WorktreeDetailDesktop.tsx'),
         'utf-8'
@@ -84,12 +88,12 @@ describe('Issue #278 Acceptance: fetch Data Cache fix & Info notification indica
       // Verify DesktopHeader receives hasUpdate prop
       expect(desktopSource).toContain('hasUpdate={hasUpdate}');
 
-      // Verify useUpdateCheck hook is used (now in the controller hook)
+      // Verify the app-wide update context is what the controller reads
       const controllerSource = readFileSync(
         resolve(ROOT, 'src/hooks/useWorktreeDetailController.ts'),
         'utf-8'
       );
-      expect(controllerSource).toContain('useUpdateCheck');
+      expect(controllerSource).toContain('useAppUpdate');
     });
   });
 

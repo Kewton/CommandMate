@@ -14,9 +14,8 @@
 
 'use client';
 
-import { useMemo } from 'react';
 import { useTranslations } from 'next-intl';
-import { useUpdateCheck } from '@/hooks/useUpdateCheck';
+import { useAppUpdate } from '@/contexts/AppUpdateContext';
 import { UpdateNotificationBanner } from './UpdateNotificationBanner';
 
 /**
@@ -30,26 +29,14 @@ export interface VersionSectionProps {
 
 /**
  * Version display section with optional update notification.
- * Integrates useUpdateCheck hook and UpdateNotificationBanner.
+ * Reads AppUpdateContext (Issue #2654) for the in-flight check; the banner
+ * reads the same context for the update itself.
  *
  * Used in both InfoModal and MobileInfoContent for DRY compliance.
- * Memoizes banner props to avoid unnecessary child re-renders.
  */
 export function VersionSection({ version, className }: VersionSectionProps) {
   const t = useTranslations('worktree');
-  const { data, loading } = useUpdateCheck();
-
-  /** Memoize banner props to prevent unnecessary object allocation on re-renders */
-  const bannerProps = useMemo(() => {
-    if (!data || !data.hasUpdate) return null;
-    return {
-      hasUpdate: data.hasUpdate,
-      latestVersion: data.latestVersion,
-      releaseUrl: data.releaseUrl,
-      updateCommand: data.updateCommand,
-      installType: data.installType,
-    } as const;
-  }, [data]);
+  const { checking } = useAppUpdate();
 
   return (
     <div className={className} data-testid="version-section">
@@ -58,13 +45,13 @@ export function VersionSection({ version, className }: VersionSectionProps) {
       </h2>
       <p className="text-sm text-foreground">{version}</p>
 
-      {loading && (
+      {checking && (
         <p className="text-xs text-muted-foreground mt-1" data-testid="version-loading">
           ...
         </p>
       )}
 
-      {bannerProps && <UpdateNotificationBanner {...bannerProps} />}
+      <UpdateNotificationBanner />
     </div>
   );
 }

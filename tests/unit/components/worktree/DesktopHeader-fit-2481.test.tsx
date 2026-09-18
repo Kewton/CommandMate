@@ -25,6 +25,7 @@ import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, act } from '@testing-library/react';
 import { DesktopHeader } from '@/components/worktree/WorktreeDetailSubComponents';
+import { makeAppUpdateValue, makeUpdateInfo } from '@tests/helpers/app-update-context';
 import type { AgentInstance, CLIToolType } from '@/lib/cli-tools/types';
 import type { Worktree } from '@/types/models';
 
@@ -32,6 +33,14 @@ vi.mock('next-intl', async () => {
   const { createRealIntlMock } = await import('@tests/helpers/real-intl');
   return createRealIntlMock('en');
 });
+
+// Issue #2654: the Update button joins the controls group, so its width is part
+// of the arithmetic below. Steered from the context rather than a prop.
+const mockUseAppUpdate = vi.fn();
+vi.mock('@/contexts/AppUpdateContext', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/contexts/AppUpdateContext')>()),
+  useAppUpdate: () => mockUseAppUpdate(),
+}));
 
 type InstanceStatusMap = NonNullable<Worktree['sessionStatusByInstance']>;
 
@@ -73,6 +82,8 @@ const WIDTH = {
   /** A chip's badges: they get what the identity group has beyond this. */
   identityBesideBadges: 300,
   badges: 150,
+  /** Issue #2654: the "Update v{version}" button, when an update is available. */
+  updateButton: 120,
 };
 
 let headerWidth = 1600;
@@ -85,7 +96,8 @@ function renderedControlsWidth(): number {
     WIDTH.controls +
     pills * WIDTH.pill +
     (document.querySelector('[data-testid="desktop-agent-status-overflow"]') ? WIDTH.overflowTrigger : 0) +
-    (document.querySelector('[data-testid="desktop-kill-session"]') ? WIDTH.endButton : 0)
+    (document.querySelector('[data-testid="desktop-kill-session"]') ? WIDTH.endButton : 0) +
+    (document.querySelector('[data-testid="app-update-button"]') ? WIDTH.updateButton : 0)
   );
 }
 
@@ -142,6 +154,7 @@ let restoreSpies: Array<() => void> = [];
 beforeEach(() => {
   headerWidth = 1600;
   observers.length = 0;
+  mockUseAppUpdate.mockReturnValue(makeAppUpdateValue());
   vi.stubGlobal('ResizeObserver', FakeResizeObserver);
   const clientWidth = vi
     .spyOn(Element.prototype, 'clientWidth', 'get')
@@ -383,6 +396,43 @@ describe('DesktopHeader fit to width (Issue #2481)', () => {
     });
     expect(inlinePillIds()).toEqual([]);
     expect(screen.getByTestId('desktop-awaiting-instruction-badge')).toBeDefined();
+  });
+
+  /**
+   * Issue #2654: the Update button lands in the controls group, which never
+   * shrinks — so the room for it has to come from the agent pills, the same
+   * way the End button's does. The button appears when the update check
+   * resolves, long after the header first rendered, so this also pins that the
+   * header re-measures on that edge rather than letting the identity group
+   * collide.
+   */
+  it('folds a pill to make room for the Update button, and gives it back afterwards', () => {
+    const instances = roster(6);
+    const props = {
+      ...baseProps,
+      instances,
+      activeInstanceId: 'claude-0',
+      sessionStatusByInstance: allRunning(instances),
+    };
+    headerWidth = 1000;
+    const { rerender } = render(<DesktopHeader {...props} verificationChip={chip()} />);
+    const withoutUpdate = inlinePillIds().length;
+    expect(screen.queryByTestId('app-update-button')).toBeNull();
+    expect(withoutUpdate).toBeGreaterThan(0);
+
+    mockUseAppUpdate.mockReturnValue(
+      makeAppUpdateValue({ updateInfo: makeUpdateInfo({ installType: 'global' }) })
+    );
+    rerender(<DesktopHeader {...props} verificationChip={chip()} />);
+    expect(screen.getByTestId('app-update-button')).toBeDefined();
+    expect(inlinePillIds().length).toBeLessThan(withoutUpdate);
+    expect(screen.getByTestId('desktop-header-identity').className).not.toContain('overflow-x-clip');
+    expectControlsReachable();
+
+    mockUseAppUpdate.mockReturnValue(makeAppUpdateValue());
+    rerender(<DesktopHeader {...props} verificationChip={chip()} />);
+    expect(screen.queryByTestId('app-update-button')).toBeNull();
+    expect(inlinePillIds()).toHaveLength(withoutUpdate);
   });
 
   it('does not fold idle instances: their dots cost no budget', () => {

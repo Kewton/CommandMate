@@ -54,10 +54,6 @@ vi.mock('@/contexts/SidebarContext', () => ({
   }),
 }));
 
-vi.mock('@/hooks/useUpdateCheck', () => ({
-  useUpdateCheck: () => ({ data: null, loading: false, error: null }),
-}));
-
 // Controllable cache context: each test assigns the desired snapshot (or null).
 const mockCache: { current: UseWorktreesCacheReturn | null } = { current: null };
 vi.mock('@/components/providers/WorktreesCacheProvider', () => ({

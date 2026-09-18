@@ -50,6 +50,8 @@ import { getInstanceLabel, type AgentInstance, type CLIToolType } from '@/lib/cl
 import { useCopyFeedback } from '@/hooks/useCopyFeedback';
 import { AGENT_INSTANCE_DND_MIME } from '@/components/worktree/TerminalSplitPane';
 import { PcDisplaySizeSelector } from '@/components/layout/PcDisplaySizeSelector';
+import { AppUpdateButton } from '@/components/common/AppUpdateButton';
+import { useAppUpdate } from '@/contexts/AppUpdateContext';
 
 // ============================================================================
 // Constants
@@ -1084,6 +1086,17 @@ export const DesktopHeader = memo(function DesktopHeader({
 
   const showKillButton = Boolean(onKillSession) && activeInstanceRunning;
 
+  // Issue #2654: <AppUpdateButton> sits in the controls group, so whether it is
+  // there — and which label it carries — changes how wide that group is. It is
+  // a child with its own context subscription, so it appears (when the check
+  // resolves) and changes width (while the update runs) without re-rendering
+  // this header; the fit would keep a stale budget and the identity group would
+  // collide instead of folding. Folding it into the key below is what makes the
+  // header re-measure on both edges. The button's own visibility rule lives in
+  // the button; these are the facts it reads.
+  const appUpdate = useAppUpdate();
+  const appUpdateKey = `${appUpdate.updateInfo?.latestVersion ?? ''}:${appUpdate.hasUpdate}:${appUpdate.state}`;
+
   // Issue #2481: everything, besides the pill budget itself, that changes how
   // wide the row is. A change here may have made room, so the fit restarts
   // from MAX_HEADER_AGENT_PILLS. The verification chip is a node and cannot be
@@ -1098,6 +1111,7 @@ export const DesktopHeader = memo(function DesktopHeader({
     gitStatus?.isDirty ? 'dirty' : '',
     showKillButton ? 'end' : '',
     awaitingInstruction ? 'awaiting' : '',
+    appUpdateKey,
     ...headerItems.map(
       (it) => `${it.item.id}:${getInstanceLabel(it.item)}:${it.status}:${it.isActive ? 'active' : ''}`
     ),
@@ -1460,6 +1474,10 @@ export const DesktopHeader = memo(function DesktopHeader({
             ))}
           </select>
         )}
+        {/* Issue #2654: app update entry point. Lives in the controls group,
+            which never shrinks (#2481), so it is never clipped; a narrow
+            header folds agent pills instead. */}
+        <AppUpdateButton />
         {/* Issue #917: PC display-size selector. The global Header (where it
             also lives) is suppressed on /worktrees/[id] (useLayoutConfig
             showGlobalNav:false), so it is surfaced here too. PC only — the

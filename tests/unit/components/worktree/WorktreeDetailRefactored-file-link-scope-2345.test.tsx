@@ -73,10 +73,6 @@ vi.mock('@/hooks/useSlashCommands', () => ({
   }),
 }));
 
-vi.mock('@/hooks/useUpdateCheck', () => ({
-  useUpdateCheck: () => ({ data: null, loading: false, error: null }),
-}));
-
 // The desktop file-tab store, so `handleFilePathClick` on PC is observable as a
 // call rather than as a panel that would need the whole layout to render.
 vi.mock('@/hooks/useFileTabs', () => ({

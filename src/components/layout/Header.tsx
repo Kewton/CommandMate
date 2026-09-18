@@ -19,6 +19,7 @@ import { PcDisplaySizeSelector } from './PcDisplaySizeSelector';
 import { RepositoryTabBarModeSelector } from './RepositoryTabBarModeSelector';
 import { ThemeToggle } from '@/components/common/ThemeToggle';
 import { ConnectionStatusIndicator } from '@/components/common/ConnectionStatusIndicator';
+import { AppUpdateButton } from '@/components/common/AppUpdateButton';
 import { Kbd } from '@/components/ui/Kbd';
 import { useCommandPalette } from '@/contexts/CommandPaletteContext';
 
@@ -122,6 +123,8 @@ export function Header({ title = 'CommandMate' }: HeaderProps) {
             <PcDisplaySizeSelector />
             {/* Repository tab strip visibility (Issue #2374) - hidden on mobile */}
             <RepositoryTabBarModeSelector />
+            {/* App update entry point (Issue #2654) - hidden on mobile */}
+            <AppUpdateButton />
             {/* Theme toggle promoted to the header (Issue #1071) */}
             <ThemeToggle />
             <a

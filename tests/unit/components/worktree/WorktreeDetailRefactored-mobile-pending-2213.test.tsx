@@ -70,10 +70,6 @@ vi.mock('@/hooks/useSlashCommands', () => ({
   }),
 }));
 
-vi.mock('@/hooks/useUpdateCheck', () => ({
-  useUpdateCheck: () => ({ data: null, loading: false, error: null }),
-}));
-
 vi.mock('@/hooks/useFileTabs', () => ({
   useFileTabs: () => [
     { tabs: [], activeIndex: null },
