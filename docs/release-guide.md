@@ -186,15 +186,22 @@ npm version 0.10.1 --no-git-tag-version
 
 詳細は [`templates/changelog-entry.md`](../.claude/skills/release/templates/changelog-entry.md) を参照。
 
+### Step 3b: release-notes/X.Y.Z.json の作成
+
+アプリの「新機能と改善」ダイアログが読む、日本語と英語のリリースノートを作ります。
+選ぶ項目・文の書き方・形式は [`/release` スキルの 2-2b](../.claude/skills/release/SKILL.md) が正本です。
+作ったら `npx vitest run tests/unit/release-notes/release-notes-files.test.ts` で検査します。
+
 ### Step 4: コミット & push
 
 ```bash
 git add package.json package-lock.json CHANGELOG.md changelog.d
+git add release-notes/0.10.1.json
 git commit -m "chore: release v0.10.1"
 git push origin develop
 ```
 
-変更は**この3ファイルと、Step 3 で削除した断片（`changelog.d/<N>.md`）のみ**であることを `git diff --cached --stat` で確認してください（`changelog.d/README.md` は残ります）。
+変更が [`/release` スキルの 2-4](../.claude/skills/release/SKILL.md) に書かれたファイルだけであることを、commit の前に `git diff --cached --stat` で確認してください。
 
 ### Step 5: リリース PR（develop → main）
 
