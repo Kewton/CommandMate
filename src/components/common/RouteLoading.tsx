@@ -3,16 +3,17 @@
  * Shared route-level Suspense fallback for App Router loading.tsx files
  * (Issue #1118).
  *
- * Deliberately shape-free. All seven `loading.tsx` files share this one
+ * Deliberately shape-free. All six `loading.tsx` files share this one
  * fallback, so it cannot know which screen is arriving; any page outline it
- * draws is wrong for the other six. [Issue #1184] it drew a heading plus two
+ * draws is wrong for the other five. [Issue #1184] it drew a heading plus two
  * side-by-side cards — the Home bento outline — so every navigation briefly
  * flashed what read as a half-rendered Home. Keep it an indeterminate
  * indicator, not a content skeleton.
  *
- * It still fills the viewport: pages render their own AppShell, so this
- * renders with no shell around it, and covering the viewport is what keeps the
- * swap into the real shell from flashing blank or jumping (the #1118 intent).
+ * The root layout renders the AppShell (Issue #2682), so inside the shell this
+ * fallback fills the main area (`flex-1`). On routes rendered without a shell,
+ * an absolute minimum height guarantees the container does not collapse
+ * (Issue #2683).
  *
  * Dots use `bg-muted-foreground`, not the `Skeleton` primitive's `bg-muted` —
  * a slab colour for large placeholder blocks that is invisible at dot size on
@@ -39,7 +40,7 @@ export function RouteLoading() {
 
   return (
     <div
-      className="flex min-h-screen w-full items-center justify-center p-8"
+      className="flex w-full flex-1 min-h-[12rem] items-center justify-center p-8"
       role="status"
       aria-label={t('loadingPage')}
       data-testid="route-loading"
