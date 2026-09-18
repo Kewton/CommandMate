@@ -28,7 +28,9 @@ import {
   MOBILE_APPROVE_MESSAGE,
   MOBILE_VIEWPORT,
   SCENES,
+  SESSIONS_VIEW_MODE,
   SIDEBAR_OPEN_STORAGE_KEY,
+  SIDEBAR_VIEW_MODE_STORAGE_KEY,
   SLASH_PALETTE_COMMANDS,
   SURFACE_MODE_STORAGE_KEY_PREFIX,
   SceneUnavailableError,
@@ -59,7 +61,11 @@ import {
 } from '../../../../.claude/skills/demo-video/scripts/record-scenes';
 import { deriveWorktreeId } from '@/lib/git/worktree-id';
 import { removeTempDir } from '@tests/helpers/temp-dir';
-import { SIDEBAR_OPEN_STORAGE_KEY as PRODUCT_SIDEBAR_OPEN_KEY } from '@/contexts/SidebarContext';
+import {
+  SIDEBAR_OPEN_STORAGE_KEY as PRODUCT_SIDEBAR_OPEN_KEY,
+  SIDEBAR_VIEW_MODE_STORAGE_KEY as PRODUCT_SIDEBAR_VIEW_MODE_KEY,
+} from '@/contexts/SidebarContext';
+import { VIEW_MODES } from '@/lib/sidebar-utils';
 import {
   ACTIVITY_CLOSED_SENTINEL as PRODUCT_ACTIVITY_CLOSED,
   getActivityBarStorageKey,
@@ -252,6 +258,11 @@ describe('SCENES', () => {
       'reply-file-link',
       'mobile-approve',
       'mobile-file-link',
+      // Issue #2702: the v0.39.0 UI cut.
+      'sessions-list',
+      'jump-to-session',
+      'shell-persist',
+      'mobile-branches',
     ]);
   });
 
@@ -323,7 +334,38 @@ describe('SCENES', () => {
       'respond-from-mobile',
       'mobile-approve',
       'mobile-file-link',
+      'mobile-branches',
     ]);
+  });
+});
+
+/**
+ * The v0.39.0 UI cut (Issue #2702): the sidebar view it films is a stored
+ * preference, so the scenes seed it rather than clicking it into place.
+ */
+describe('the #2702 UI scenes', () => {
+  const scene = (id: string) => SCENES.find((s) => s.id === id)! as BrowserScene;
+  const seeded = (id: string) =>
+    scene(id).seedStorage!({ ...parseRecordArgs(ARGS, {}), timeoutMs: 30 }, {} as DemoState);
+
+  it('spells the view-mode key and value the product spells', () => {
+    expect(SIDEBAR_VIEW_MODE_STORAGE_KEY).toBe(PRODUCT_SIDEBAR_VIEW_MODE_KEY);
+    expect(VIEW_MODES).toContain(SESSIONS_VIEW_MODE);
+  });
+
+  it('opens the sessions view, with the sidebar open on the PC scenes', () => {
+    // `/sessions` collapses the sidebar, so the PC scenes film from
+    // `/repositories` and say the sidebar is open instead of assuming it.
+    for (const id of ['jump-to-session', 'shell-persist']) {
+      const entries = seeded(id);
+      expect(entries[SIDEBAR_OPEN_STORAGE_KEY], id).toBe('true');
+      expect(entries[SIDEBAR_VIEW_MODE_STORAGE_KEY], id).toBe(SESSIONS_VIEW_MODE);
+    }
+    // sessions-list switches the view on camera, so it seeds only the sidebar.
+    expect(seeded('sessions-list')[SIDEBAR_OPEN_STORAGE_KEY]).toBe('true');
+    expect(seeded('sessions-list')[SIDEBAR_VIEW_MODE_STORAGE_KEY]).toBeUndefined();
+    // The drawer is what opens the sidebar on a phone; only the view is seeded.
+    expect(seeded('mobile-branches')[SIDEBAR_VIEW_MODE_STORAGE_KEY]).toBe(SESSIONS_VIEW_MODE);
   });
 });
 

@@ -1,0 +1,46 @@
+# demo-video storyboard (Issue #2702) — v0.39.0 の UI 刷新
+#
+# 軸は「UI を刷新した」ではなく「次に自分が要る場所だけが出る画面になった」。
+# テロップの文言は release-notes/0.39.0.json（レビュー済みの日英）から起こしている。
+# 尺・テロップの規則は default.yaml の冒頭コメントと scripts/storyboard.ts を参照。
+
+version: 1
+duration: 30
+output: ui-0390
+scenes:
+  - id: title
+    type: card
+    duration: 3
+    telop: { ja: "CommandMate v0.39.0", en: "CommandMate v0.39.0" }
+  - id: sessions-list
+    type: record
+    duration: 7
+    viewport: pc
+    telop:
+      ja: "応答待ちが、いつも先頭"
+      en: "Waiting on you, always first"
+  - id: jump-to-session
+    type: record
+    duration: 6
+    viewport: pc
+    telop:
+      ja: "押した行のセッションへ直行"
+      en: "Click a row, land in that session"
+  - id: shell-persist
+    type: record
+    duration: 6
+    viewport: pc
+    telop:
+      ja: "移動しても位置は保たれる"
+      en: "Move around, keep your place"
+  - id: mobile-branches
+    type: record
+    duration: 4
+    viewport: mobile
+    telop:
+      ja: "下のバーからブランチ一覧へ"
+      en: "Reach it from the phone bottom bar"
+  - id: outro
+    type: card
+    duration: 4
+    telop: { ja: "github.com/Kewton/CommandMate", en: "github.com/Kewton/CommandMate" }

@@ -338,8 +338,9 @@ describe('every storyboard committed to the repository', () => {
   it('finds every storyboard, so the per-file check below cannot be vacuous', () => {
     // 12 product-highlight cuts (#1811 added contract-verify and install-skill)
     // + 8 tutorial cuts (#1813 took them from 5 to 8) + the skill's default,
-    // contract-verify and readme-hero (#2381) cuts in both install roots.
-    expect(files.length).toBe(26);
+    // contract-verify, readme-hero (#2381) and ui-0390 (#2702) cuts in both
+    // install roots.
+    expect(files.length).toBe(28);
   });
 
   const parseCommitted = (relative: string) =>
