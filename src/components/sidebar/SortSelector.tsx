@@ -62,6 +62,20 @@ export const SortSelector = memo(function SortSelector() {
     [t]
   );
 
+  // Issue #2648: the direction toggle says what the order means for each key
+  // ("Newest first", "A→Z", "Needs attention first") instead of an arrow.
+  // asc/desc follow sortBranches(): updatedAt desc = newest first, the name
+  // keys asc = A→Z, status asc = STATUS_PRIORITY ascending = waiting first.
+  const directionLabels = useMemo(
+    () => ({
+      updatedAt: { asc: t('sort.direction.oldestFirst'), desc: t('sort.direction.newestFirst') },
+      repositoryName: { asc: t('sort.direction.aToZ'), desc: t('sort.direction.zToA') },
+      branchName: { asc: t('sort.direction.aToZ'), desc: t('sort.direction.zToA') },
+      status: { asc: t('sort.direction.attentionFirst'), desc: t('sort.direction.attentionLast') },
+    }),
+    [t]
+  );
+
   return (
     <SortSelectorBase
       sortKey={sortKey}
@@ -70,8 +84,8 @@ export const SortSelector = memo(function SortSelector() {
       onSortDirectionChange={setSortDirection}
       options={options}
       defaultDirections={SIDEBAR_DEFAULT_DIRECTIONS}
-      compact
-      tooltip={t('tooltips.sort')}
+      showLabel
+      directionLabels={directionLabels}
       iconClassName="w-4 h-4"
     />
   );

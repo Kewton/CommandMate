@@ -128,8 +128,8 @@ const EN_SHARED_CHROME: Record<string, string> = {
   'status.unknown': 'Unknown',
   'sort.options': 'Sort options',
   'sort.updatedAt': 'Updated',
-  'sort.repositoryName': 'Repository',
-  'sort.branchName': 'Branch',
+  'sort.repositoryName': 'Repository name',
+  'sort.branchName': 'Branch name',
   'sort.status': 'Status',
   'branchItem.cliToolStatus': 'CLI tool status',
   'branchItem.hasUnread': 'Has unread messages',
@@ -154,8 +154,6 @@ const EN_SHARED_CHROME: Record<string, string> = {
   // `nav.more`, which now reads "Settings".
   'repoTabBar.overflow': 'More repositories',
   'sidebar.dragToReorderGroup': 'Drag to reorder group',
-  'sidebar.switchToFlatView': 'Switch to flat view',
-  'sidebar.switchToGroupedView': 'Switch to grouped view',
   menu: 'Menu',
   back: 'Back',
   sending: 'Sending...',
@@ -383,6 +381,90 @@ describe('common i18n keys (Issue #1197)', () => {
         );
         expect(new Set(labels).size, `${locale}: two statuses share a label`).toBe(labels.length);
       }
+    });
+  });
+
+  describe('keys removed with the icon-only controls (Issue #2648)', () => {
+    const REMOVED = [
+      'tooltips.viewMode',
+      'tooltips.sort',
+      'sidebar.switchToFlatView',
+      'sidebar.switchToGroupedView',
+    ];
+    it.each(['en', 'ja'])('%s/common.json no longer has them', (locale) => {
+      const dict = loadCommon(locale);
+      for (const key of REMOVED) {
+        expect(resolve(dict, key), `${locale}: ${key}`).toBeUndefined();
+      }
+    });
+  });
+
+  /**
+   * Issue #2648: the sidebar's view select and sort control speak in words.
+   * Some English strings are also what the e2e suite and the pre-#2648 markup
+   * use, so they are pinned; `A→Z` / `Z→A` are the same in both locales on
+   * purpose and are therefore not part of EN_SHARED_CHROME.
+   */
+  describe('sidebar view / sort wording (Issue #2648)', () => {
+    const KEYS = [
+      'sidebar.viewLabel',
+      'sidebar.viewMode.grouped',
+      'sidebar.viewMode.flat',
+      'sort.label',
+      'sort.sortBy',
+      'sort.ascending',
+      'sort.descending',
+      'sort.ascShort',
+      'sort.descShort',
+      'sort.direction.newestFirst',
+      'sort.direction.oldestFirst',
+      'sort.direction.aToZ',
+      'sort.direction.zToA',
+      'sort.direction.attentionFirst',
+      'sort.direction.attentionLast',
+    ];
+
+    it('resolves every key to a non-empty string in both locales', () => {
+      for (const locale of ['en', 'ja']) {
+        const dict = loadCommon(locale);
+        for (const key of KEYS) {
+          const value = resolve(dict, key);
+          expect(typeof value, `${locale}: ${key}`).toBe('string');
+          expect((value as string).length, `${locale}: ${key}`).toBeGreaterThan(0);
+        }
+      }
+    });
+
+    it('keeps the {label} slot in sort.sortBy', () => {
+      for (const locale of ['en', 'ja']) {
+        expect(resolve(loadCommon(locale), 'sort.sortBy')).toContain('{label}');
+      }
+    });
+
+    it('keeps the English strings the old markup and the e2e suite use', () => {
+      const en = loadCommon('en');
+      expect(resolve(en, 'sort.sortBy')).toBe('Sort by {label}');
+      expect(resolve(en, 'sort.ascending')).toBe('Sort ascending');
+      expect(resolve(en, 'sort.descending')).toBe('Sort descending');
+      expect(resolve(en, 'sort.ascShort')).toBe('ASC');
+      expect(resolve(en, 'sort.descShort')).toBe('DESC');
+      expect(resolve(en, 'sort.label')).toBe('Sort');
+      expect(resolve(en, 'sort.direction.newestFirst')).toBe('Newest first');
+      expect(resolve(en, 'sort.direction.oldestFirst')).toBe('Oldest first');
+    });
+
+    it('uses the decided Japanese wording', () => {
+      const ja = loadCommon('ja');
+      expect(resolve(ja, 'sidebar.viewLabel')).toBe('表示');
+      expect(resolve(ja, 'sidebar.viewMode.grouped')).toBe('リポジトリ');
+      expect(resolve(ja, 'sidebar.viewMode.flat')).toBe('ブランチ');
+      expect(resolve(ja, 'sort.label')).toBe('並び');
+      expect(resolve(ja, 'sort.repositoryName')).toBe('リポジトリ名');
+      expect(resolve(ja, 'sort.branchName')).toBe('ブランチ名');
+      expect(resolve(ja, 'sort.direction.newestFirst')).toBe('新しい順');
+      expect(resolve(ja, 'sort.direction.oldestFirst')).toBe('古い順');
+      expect(resolve(ja, 'sort.direction.attentionFirst')).toBe('要対応が先');
+      expect(resolve(ja, 'sort.direction.attentionLast')).toBe('要対応が後');
     });
   });
 });

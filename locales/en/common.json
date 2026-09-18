@@ -111,8 +111,11 @@
     "branchesLoadFailed": "Failed to load branches",
     "retryLoadBranches": "Retry",
     "dragToReorderGroup": "Drag to reorder group",
-    "switchToFlatView": "Switch to flat view",
-    "switchToGroupedView": "Switch to grouped view"
+    "viewLabel": "View",
+    "viewMode": {
+      "grouped": "Repository",
+      "flat": "Branch"
+    }
   },
   "confirmDelete": "Delete \"{name}\"?",
   "favorites": {
@@ -124,8 +127,6 @@
   "syncAuthError": "Authentication error",
   "syncButtonLabel": "Sync branches",
   "tooltips": {
-    "viewMode": "Toggle view mode (grouped / flat)",
-    "sort": "Sort branches",
     "sync": "Sync worktrees"
   },
   "displaySize": {
@@ -163,10 +164,24 @@
   "sort": {
     "options": "Sort options",
     "updatedAt": "Updated",
-    "repositoryName": "Repository",
-    "branchName": "Branch",
+    "repositoryName": "Repository name",
+    "branchName": "Branch name",
     "status": "Status",
-    "lastSent": "Last Sent"
+    "lastSent": "Last Sent",
+    "label": "Sort",
+    "sortBy": "Sort by {label}",
+    "ascending": "Sort ascending",
+    "descending": "Sort descending",
+    "ascShort": "ASC",
+    "descShort": "DESC",
+    "direction": {
+      "newestFirst": "Newest first",
+      "oldestFirst": "Oldest first",
+      "aToZ": "A→Z",
+      "zToA": "Z→A",
+      "attentionFirst": "Needs attention first",
+      "attentionLast": "Needs attention last"
+    }
   },
   "branchItem": {
     "cliToolStatus": "CLI tool status",
