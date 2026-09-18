@@ -173,15 +173,23 @@ Conventions:
 
 See [`templates/changelog-entry.md`](../../.claude/skills/release/templates/changelog-entry.md) for details.
 
+### Step 3b: Write release-notes/X.Y.Z.json
+
+The in-app "What's new" dialog reads a Japanese and English summary of each release.
+Which entries to include, how to phrase them and the file format are defined in
+[step 2-2b of the `/release` skill](../../.claude/skills/release/SKILL.md), which is the source of truth.
+Validate the file with `npx vitest run tests/unit/release-notes/release-notes-files.test.ts`.
+
 ### Step 4: Commit & push
 
 ```bash
 git add package.json package-lock.json CHANGELOG.md changelog.d
+git add release-notes/0.10.1.json
 git commit -m "chore: release v0.10.1"
 git push origin develop
 ```
 
-Verify with `git diff --cached --stat` that **only these three files and the fragments deleted in Step 3 (`changelog.d/<N>.md`)** changed (`changelog.d/README.md` stays).
+Before committing, verify with `git diff --cached --stat` that only the files listed in [step 2-4 of the `/release` skill](../../.claude/skills/release/SKILL.md) changed.
 
 ### Step 5: Release PR (develop → main)
 
