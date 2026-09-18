@@ -1029,8 +1029,6 @@
     "logs": "Logs",
     "hide": "Hide",
     "show": "Show",
-    "goBack": "Go back to worktree list",
-    "home": "Home",
     "viewInfo": "View worktree information",
     "info": "Info",
     "infoModalTitle": "Worktree Information",

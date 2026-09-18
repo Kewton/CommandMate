@@ -4,6 +4,7 @@
  */
 
 import { test, expect } from '@playwright/test';
+import { mockWorktreeApi } from './fixtures/terminal-split-helpers';
 
 test.describe('Worktree Detail Page', () => {
   // Note: These tests assume at least one worktree exists
@@ -29,23 +30,15 @@ test.describe('Worktree Detail Page', () => {
     }
   });
 
-  test('should display back link', async ({ page }) => {
-    // Navigate to a detail page (using a mock ID)
+  test('should not display the Home (back) control', async ({ page }) => {
+    // Issue #2647: the desktop header no longer has a Home button. The API is
+    // mocked so the header really renders — a loading or error screen has no
+    // header, and would pass this check even before the change.
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await mockWorktreeApi(page, ['test-worktree']);
     await page.goto('/worktrees/test-worktree');
-
-    // Wait a bit for page to load
-    await page.waitForTimeout(500);
-
-    // Check for the back control (even if worktree doesn't exist).
-    // Issue #1277: selected by data-testid — its accessible name is now
-    // localized (worktree.detail.goBack), so matching English text would break
-    // under any non-en locale.
-    const backLink = page.getByTestId('worktree-back-button');
-
-    // Back control should exist in the layout
-    if (await backLink.count() > 0) {
-      await expect(backLink).toBeVisible();
-    }
+    await expect(page.getByTestId('desktop-header')).toBeVisible();
+    await expect(page.getByTestId('worktree-back-button')).toHaveCount(0);
   });
 
   test('should display tab navigation', async ({ page }) => {
@@ -184,8 +177,8 @@ test.describe('Worktree Detail Page', () => {
 
     // Page should still be accessible on mobile
     // Check if any key elements are visible.
-    // Issue #1277: this viewport renders MobileHeader (not the DesktopHeader
-    // back control), so assert on the mobile header's existing stable testid
+    // Issue #1277: this viewport renders MobileHeader (not the DesktopHeader),
+    // so assert on the mobile header's existing stable testid
     // rather than an English accessible name.
     const mobileHeader = page.getByTestId('mobile-header');
 

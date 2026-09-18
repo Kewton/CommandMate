@@ -303,8 +303,6 @@ const REQUIRED: Record<string, string[]> = {
     'detail.logs',
     'detail.hide',
     'detail.show',
-    'detail.goBack',
-    'detail.home',
     'detail.viewInfo',
     'detail.info',
     'detail.infoModalTitle',
@@ -520,4 +518,12 @@ describe('worktree git/panel i18n keys (Issue #1277)', () => {
       }
     }
   );
+
+  describe('removed Home button keys (Issue #2647)', () => {
+    it.each(LOCALES)('%s/worktree.json has neither detail.goBack nor detail.home', (locale) => {
+      const dict = load(locale, 'worktree');
+      expect(resolve(dict, 'detail.goBack')).toBeUndefined();
+      expect(resolve(dict, 'detail.home')).toBeUndefined();
+    });
+  });
 });

@@ -600,7 +600,6 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           onActivityToggle={handleActivityToggle}
           onActivityOpen={handleActivityOpen}
           verification={verification}
-          onBackClick={handleBackClick}
           onInfoClick={handleInfoClick}
           onWorktreeStatusChange={handleWorktreeStatusChange}
           pendingInsertTextMap={pendingInsertTextMap}

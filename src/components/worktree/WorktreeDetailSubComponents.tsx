@@ -751,7 +751,6 @@ interface DesktopHeaderProps {
   description?: string;
   status: WorktreeStatus;
   gitStatus?: GitStatus;
-  onBackClick: () => void;
   onInfoClick: () => void;
   /**
    * Optional sidebar toggle callback.
@@ -965,14 +964,13 @@ function useDesktopHeaderFit(
   return { pillBudget: current.pillBudget, squeezed: current.squeezed };
 }
 
-/** Desktop header with hamburger menu, back button, worktree name, repository, status, and info button */
+/** Desktop header with worktree name, repository, status, and info button */
 export const DesktopHeader = memo(function DesktopHeader({
   worktreeName,
   repositoryName,
   description: worktreeDescription,
   status,
   gitStatus,
-  onBackClick,
   onInfoClick,
   hasUpdate,
   worktreeStatus,
@@ -1120,42 +1118,18 @@ export const DesktopHeader = memo(function DesktopHeader({
       data-testid="desktop-header"
       className="flex items-center justify-between gap-3 px-4 py-3 bg-surface border-b border-border"
     >
-      {/* Left: Back button and title (Issue #747: hamburger moved to ActivityBar).
+      {/* Left: status and title (Issue #747: hamburger moved to ActivityBar;
+          Issue #2647: the Home button and its divider were removed).
           Issue #2481: `min-w-0` makes this group — not the controls on the
           right — the one that gives way on a narrow header: the name, branch
-          and chip title truncate. The back link, divider and dot keep their
-          width. Clipped only as the fit's last resort, because the chip's
-          reason popover hangs out of this group and a clip would cut it. */}
+          and chip title truncate. The dot keeps its width. Clipped only as the
+          fit's last resort, because the chip's reason popover hangs out of this
+          group and a clip would cut it. */}
       <div
         ref={identityRef}
         data-testid="desktop-header-identity"
         className={`flex items-center gap-3 min-w-0${headerFit.squeezed ? ' overflow-x-clip' : ''}`}
       >
-        {/* Issue #1061: paddingless nav link — Button base px-4 py-2 would enlarge/misalign the header back control — 残置 */}
-        <button
-          type="button"
-          onClick={onBackClick}
-          className="flex flex-shrink-0 items-center gap-1 text-muted-foreground hover:text-foreground transition-colors"
-          aria-label={tWorktree('detail.goBack')}
-          data-testid="worktree-back-button"
-        >
-          <svg
-            className="w-5 h-5"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-            aria-hidden="true"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0a1 1 0 01-1-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 01-1 1h-2z"
-            />
-          </svg>
-          <span className="text-sm font-medium">{tWorktree('detail.home')}</span>
-        </button>
-        <div className="w-px h-6 flex-shrink-0 bg-border" aria-hidden="true" />
         {/* Worktree-level status (Issue #1078: unified StatusDot visual language) */}
         <StatusDot
           data-testid="desktop-status-indicator"

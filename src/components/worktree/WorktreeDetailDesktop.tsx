@@ -101,7 +101,6 @@ export interface WorktreeDetailDesktopProps {
   verification: WorktreeVerificationState;
 
   // Header actions
-  onBackClick: () => void;
   onInfoClick: () => void;
   onWorktreeStatusChange: (status: 'ready' | 'in_progress' | 'in_review' | 'done' | null) => void;
 
@@ -224,7 +223,6 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
   onActivityToggle,
   onActivityOpen,
   verification,
-  onBackClick,
   onInfoClick,
   onWorktreeStatusChange,
   pendingInsertTextMap,
@@ -817,7 +815,7 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
             main 軸に min-width:auto が効き、子孫 FilePanelSplit の固定幅ペインの
             コンテンツ要求まで膨張して FilePanel が viewport 外へ押し出される問題を防ぐ */}
         <div className="flex flex-col flex-1 min-h-0 min-w-0">
-          {/* Desktop Header with back button, status, and info */}
+          {/* Desktop Header with status and info */}
           <DesktopHeader
             worktreeName={worktreeName}
             repositoryName={
@@ -828,7 +826,6 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
             description={worktree?.description}
             status={worktreeStatus}
             gitStatus={worktree?.gitStatus}
-            onBackClick={onBackClick}
             onInfoClick={onInfoClick}
             hasUpdate={hasUpdate}
             worktreeStatus={worktree?.status ?? null}
