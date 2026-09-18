@@ -6,6 +6,8 @@
 import type { Worktree, ChatMessage, WorktreeMemo } from '@/types/models';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { SlashCommandGroup } from '@/types/slash-commands';
+// Issue #2651: type-only import, so the module's `fs/promises` never reaches the client bundle.
+import type { ReleaseNote } from '@/lib/app-update/release-notes';
 import {
   API_NO_TIMEOUT,
   API_REACHABILITY_REPORT_INTERVAL_MS,
@@ -1308,6 +1310,14 @@ export interface UpdateStartResponse {
 }
 
 /**
+ * Response of GET /api/app/release-notes
+ * Issue #2651: notes for every version v with from < v <= to, newest first
+ */
+export interface ReleaseNotesResponse {
+  notes: ReleaseNote[];
+}
+
+/**
  * App-level API client
  * Issue #257: Application-wide endpoints (not worktree-specific)
  */
@@ -1360,6 +1370,20 @@ export const appApi = {
     } catch {
       return false;
     }
+  },
+
+  /**
+   * Bundled release notes between two versions (Issue #2651).
+   *
+   * @param from - the version the user last saw (exclusive)
+   * @param to - the version now running (inclusive)
+   * @throws ApiError on a non-2xx response or a transport failure
+   */
+  async getReleaseNotes(from: string, to: string): Promise<ReleaseNotesResponse> {
+    const query = new URLSearchParams({ from, to });
+    return fetchApi<ReleaseNotesResponse>(`/api/app/release-notes?${query.toString()}`, {
+      method: 'GET',
+    });
   },
 };
 
