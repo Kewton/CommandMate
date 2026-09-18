@@ -12,7 +12,7 @@
  *     page. Issue #1072 removed the welcome banner and demoted the tautological
  *     "CommandMate" h1 to a functional "Overview" heading. The string survives
  *     only in layout metadata / manifest / CLI --help, none of which render.
- *   - The "Worktrees" h2 is now the sidebar's "Branches" h2.
+ *   - The "Worktrees" h2 is gone; the sidebar header is a Repositories / Sessions / Review navigation list (Issue #2644).
  *   - Search is "Search branches..." in the sidebar, not "Search worktrees".
  *   - Sort is a dropdown (Updated / Repository / Branch / Status) with a
  *     separate direction toggle, not Name / Updated / Path buttons with ↑↓ text.
@@ -42,8 +42,11 @@ test.describe('Home Page', () => {
     await expect(page.getByTestId('home-subline')).toBeVisible();
   });
 
-  test('should display "Branches" section heading', async ({ page }) => {
-    await expect(page.getByRole('heading', { name: 'Branches', level: 2 })).toBeVisible();
+  test('should display the sidebar navigation', async ({ page }) => {
+    const nav = page.getByTestId('sidebar-nav');
+    await expect(nav.getByRole('link', { name: 'Repositories' })).toBeVisible();
+    await expect(nav.getByRole('link', { name: 'Sessions' })).toBeVisible();
+    await expect(nav.getByRole('link', { name: 'Review' })).toBeVisible();
   });
 
   test('should display search input', async ({ page }) => {
