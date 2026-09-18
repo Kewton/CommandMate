@@ -385,6 +385,8 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     pendingInsertText,
     pendingInsertTextMap,
     rosterReady,
+    instanceSelectionRequest,
+    acknowledgeInstanceSelection,
     setActiveInstanceId,
     setFocusedSplitIndex,
     setHistorySubTab,
@@ -593,6 +595,8 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           rosterReady={rosterReady}
           activeInstanceId={activeInstanceId}
           setActiveInstanceId={setActiveInstanceId}
+          instanceSelectionRequest={instanceSelectionRequest}
+          onInstanceSelectionHandled={acknowledgeInstanceSelection}
           hasUpdate={hasUpdate}
           lastAutoResponse={lastAutoResponse}
           activeActivity={activeActivity}

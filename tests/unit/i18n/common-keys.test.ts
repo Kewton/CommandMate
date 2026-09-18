@@ -414,6 +414,7 @@ describe('common i18n keys (Issue #1197)', () => {
       'sidebar.viewLabel',
       'sidebar.viewMode.grouped',
       'sidebar.viewMode.flat',
+      'sidebar.viewMode.sessions',
       'sort.label',
       'sort.sortBy',
       'sort.ascending',
@@ -462,6 +463,7 @@ describe('common i18n keys (Issue #1197)', () => {
       expect(resolve(ja, 'sidebar.viewLabel')).toBe('表示');
       expect(resolve(ja, 'sidebar.viewMode.grouped')).toBe('リポジトリ');
       expect(resolve(ja, 'sidebar.viewMode.flat')).toBe('ブランチ');
+      expect(resolve(ja, 'sidebar.viewMode.sessions')).toBe('セッション');
       expect(resolve(ja, 'sort.label')).toBe('並び');
       expect(resolve(ja, 'sort.repositoryName')).toBe('リポジトリ名');
       expect(resolve(ja, 'sort.branchName')).toBe('ブランチ名');

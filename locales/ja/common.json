@@ -113,7 +113,8 @@
     "viewLabel": "表示",
     "viewMode": {
       "grouped": "リポジトリ",
-      "flat": "ブランチ"
+      "flat": "ブランチ",
+      "sessions": "セッション"
     }
   },
   "confirmDelete": "「{name}」を削除しますか？",

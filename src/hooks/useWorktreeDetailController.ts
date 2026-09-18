@@ -20,6 +20,7 @@
  */
 
 import React, { useEffect, useCallback, useMemo, useState, useRef } from 'react';
+import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { AGENT_MODE_UNKNOWN } from '@/types/cli-tool-contracts';
 import { useWorktreeUIState } from '@/hooks/useWorktreeUIState';
 import { useIsMobile } from '@/hooks/useIsMobile';
@@ -69,6 +70,7 @@ import { encodePathForUrl } from '@/lib/url-path-encoder';
 import { useHistoryFilters } from '@/hooks/useHistoryFilters';
 import { useDiffViewerState } from '@/hooks/useDiffViewerState';
 import { useVisibilityRecovery } from '@/hooks/useVisibilityRecovery';
+import { SESSION_INSTANCE_QUERY_PARAM } from '@/lib/sidebar-utils';
 
 // ============================================================================
 // Constants
@@ -216,6 +218,11 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   // Issue #747: the sidebar toggle moved into the ActivityBar (which reads
   // SidebarContext directly), so DesktopHeader no longer needs `toggle` here.
   const { openMobileDrawer } = useSidebarContext();
+  const router = useRouter();
+  const pathname = usePathname();
+  // Issue #2656: the sidebar's sessions view opens `/worktrees/<id>?instance=<instanceId>`.
+  const searchParams = useSearchParams();
+  const requestedInstanceId = searchParams?.get(SESSION_INSTANCE_QUERY_PARAM) ?? null;
   const { state, actions } = useWorktreeUIState();
   const tWorktree = useTranslations('worktree');
   const tError = useTranslations('error');
@@ -874,6 +881,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     visibleInstances,
     visibleInstanceIds,
     toggleInstanceVisible,
+    showInstances,
   } = useMobileSelectedInstances({ worktreeId, roster: agentInstances });
 
   // Mobile tabs are the per-device visible subset; PC uses the full roster.
@@ -912,6 +920,76 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       setActiveCliTab(inst.cliTool);
     }
   }, [displayedInstances, activeInstanceId, activeCliTab, setActiveCliTab]);
+
+  // Issue #2656: `?instance=<id>` from the sidebar's sessions view.
+  //
+  // Waits for THIS worktree's roster (`rosterReady`) — before that the roster
+  // is the default seed and an alias like `claude-2` would look unknown. Then:
+  // an id in the roster becomes the active instance (on the phone it is also
+  // made visible first, or the reconcile effect above would switch it back),
+  // and, on the PC, `instanceSelectionRequest` gets a new token so the PC layout
+  // routes it exactly like a header pill click (split 0 if shown nowhere, focus
+  // move if another split shows it). The PC acknowledges the token, which
+  // clears the request, so a later remount of the PC layout cannot re-apply it. An id
+  // NOT in the roster (a running instance outside it) changes nothing. Either
+  // way the parameter is removed with `router.replace` (same path, other query
+  // parameters kept, no scroll), which re-renders without remounting the page.
+  //
+  // `handledInstanceParamRef` makes one URL apply once even though the effect
+  // re-runs until the replaced URL arrives; it is cleared when the parameter
+  // disappears, so clicking the same row again applies again.
+  const [instanceSelectionRequest, setInstanceSelectionRequest] =
+    useState<{ instanceId: string; token: number } | null>(null);
+  const instanceSelectionTokenRef = useRef(0);
+  const handledInstanceParamRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (requestedInstanceId === null) {
+      handledInstanceParamRef.current = null;
+      return;
+    }
+    if (!rosterReady) return;
+    if (handledInstanceParamRef.current === requestedInstanceId) return;
+    handledInstanceParamRef.current = requestedInstanceId;
+
+    if (agentInstances.some((inst) => inst.id === requestedInstanceId)) {
+      if (isMobileRef.current) {
+        // The phone shows `activeInstanceId` directly; no PC request is left behind.
+        showInstances([requestedInstanceId]);
+        setActiveInstanceId(requestedInstanceId);
+      } else {
+        setActiveInstanceId(requestedInstanceId);
+        instanceSelectionTokenRef.current += 1;
+        setInstanceSelectionRequest({
+          instanceId: requestedInstanceId,
+          token: instanceSelectionTokenRef.current,
+        });
+      }
+    }
+
+    const params = new URLSearchParams(searchParams?.toString() ?? '');
+    params.delete(SESSION_INSTANCE_QUERY_PARAM);
+    const query = params.toString();
+    const basePath = pathname ?? `/worktrees/${worktreeId}`;
+    router.replace(query ? `${basePath}?${query}` : basePath, { scroll: false });
+  }, [
+    requestedInstanceId,
+    rosterReady,
+    agentInstances,
+    showInstances,
+    setActiveInstanceId,
+    searchParams,
+    pathname,
+    worktreeId,
+    router,
+  ]);
+
+  // Issue #2656: the PC layout calls this once it has applied a request. Only
+  // the matching token clears it, so a newer request is never dropped.
+  const acknowledgeInstanceSelection = useCallback((token: number) => {
+    setInstanceSelectionRequest((current) =>
+      current !== null && current.token === token ? null : current
+    );
+  }, []);
 
   // Issue #379: Disable auto-follow for full-screen TUI tools (OpenCode, Copilot).
   // These tools render in alternate screen mode where menus appear at the top.
@@ -1861,6 +1939,8 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     handleUpload,
     handleVibeLocalContextWindowChange,
     rosterReady,
+    instanceSelectionRequest,
+    acknowledgeInstanceSelection,
     handleVibeLocalModelChange,
     handleWorktreeStatusChange,
     hasUpdate,

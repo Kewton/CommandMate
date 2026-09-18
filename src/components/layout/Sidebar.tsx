@@ -20,6 +20,7 @@
  *
  * Issue #2644: header is now a nav list (Repositories+sync / Sessions / Review with count) + view/sort controls; "Branches" heading and the pill are gone.
  * Issue #2648: the view and sort controls are words (a labelled <select> and a labelled sort control), laid out as a two-column grid.
+ * Issue #2656: a third view, "sessions", lists one row per agent instance (status first); a row opens its branch with ?instance=.
  */
 
 'use client';
@@ -49,7 +50,7 @@ import { useWorktreeSelection } from '@/contexts/WorktreeSelectionContext';
 import { useSidebarContext } from '@/contexts/SidebarContext';
 import { BranchListItem } from '@/components/sidebar/BranchListItem';
 import { SortSelector } from '@/components/sidebar/SortSelector';
-import { Button, GroupIcon, Input, Skeleton } from '@/components/ui';
+import { Button, GroupIcon, Input, Skeleton, StatusDot } from '@/components/ui';
 import { Tooltip } from '@/components/common/Tooltip';
 import { TruncationTooltip } from '@/components/common/TruncationTooltip';
 import { LocaleSwitcher } from '@/components/common/LocaleSwitcher';
@@ -66,10 +67,14 @@ import {
   buildHiddenRepositoryPathSet,
   filterWorktreesByVisibility,
   orderBranchGroups,
+  buildSessionRows,
+  buildSessionRowHref,
+  sortSessionRows,
+  isValidViewMode,
 } from '@/lib/sidebar-utils';
 import { useWorktreeList } from '@/hooks/useWorktreeList';
 import type { ViewMode } from '@/lib/sidebar-utils';
-import type { BranchGroup } from '@/lib/sidebar-utils';
+import type { BranchGroup, SessionRow } from '@/lib/sidebar-utils';
 
 // ============================================================================
 // Constants
@@ -367,6 +372,16 @@ export const Sidebar = memo(function Sidebar() {
   // Adapt groupedItems to match previous interface (null when flat mode)
   const groupedBranches = viewMode === 'grouped' ? orderedGroups : null;
 
+  // Issue #2656: one row per agent instance. Built from the same filtered,
+  // hover-frozen list as the flat view, so search and the freeze apply as-is.
+  const sessionRows = useMemo(
+    () =>
+      viewMode === 'sessions'
+        ? sortSessionRows(buildSessionRows(flatBranches), sortKey, sortDirection)
+        : [],
+    [viewMode, flatBranches, sortKey, sortDirection]
+  );
+
   // Persist groupCollapsed to localStorage
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -396,7 +411,8 @@ export const Sidebar = memo(function Sidebar() {
   // on viewMode change. Intentionally NOT triggered by every list-length change —
   // that would cause visible scroll jumps whenever the hover-freeze/unfreeze cycle
   // briefly changes the rendered item count.
-  const hasAnyItems = flatBranches.length > 0 || (groupedBranches?.length ?? 0) > 0;
+  const hasAnyItems =
+    flatBranches.length > 0 || (groupedBranches?.length ?? 0) > 0 || sessionRows.length > 0;
   useEffect(() => {
     const branchList = branchListRef.current;
     if (!branchList) return;
@@ -419,6 +435,16 @@ export const Sidebar = memo(function Sidebar() {
     saveBranchListScroll();
     selectWorktree(branchId);
     router.push(`/worktrees/${branchId}`);
+    closeMobileDrawer();
+  }, [saveBranchListScroll, selectWorktree, router, closeMobileDrawer]);
+
+  // Issue #2656: a session row opens its branch with that instance selected.
+  // The worktree screen reads `?instance=`, selects the instance once the
+  // roster is loaded, and removes the query again.
+  const handleSessionClick = useCallback((row: SessionRow) => {
+    saveBranchListScroll();
+    selectWorktree(row.worktreeId);
+    router.push(buildSessionRowHref(row));
     closeMobileDrawer();
   }, [saveBranchListScroll, selectWorktree, router, closeMobileDrawer]);
 
@@ -458,9 +484,12 @@ export const Sidebar = memo(function Sidebar() {
   );
 
   // Check if list is empty (for both modes)
-  const isEmpty = viewMode === 'flat'
-    ? flatBranches.length === 0
-    : (groupedBranches?.length ?? 0) === 0;
+  const isEmpty =
+    viewMode === 'grouped'
+      ? (groupedBranches?.length ?? 0) === 0
+      : viewMode === 'sessions'
+        ? sessionRows.length === 0
+        : flatBranches.length === 0;
 
   // Issue #2059: "no branches" now means exactly that. The two states that used
   // to be indistinguishable from it get their own rendering:
@@ -594,6 +623,16 @@ export const Sidebar = memo(function Sidebar() {
           <div className="px-4 py-8 text-center text-sidebar-muted">
             {searchQuery ? t('sidebar.noBranchesFound') : t('sidebar.noBranchesAvailable')}
           </div>
+        ) : viewMode === 'sessions' ? (
+          // Issue #2656: sessions view — no DnD, no groups
+          sessionRows.map((row) => (
+            <SessionListItem
+              key={row.key}
+              row={row}
+              isSelected={row.worktreeId === selectedWorktreeId}
+              onClick={handleSessionClick}
+            />
+          ))
         ) : viewMode === 'grouped' && groupedBranches ? (
           // Grouped view with DnD reordering
           <DndContext
@@ -901,16 +940,60 @@ function ViewModeSelect({
           const next = event.target.value;
           // The <select> can only emit the values rendered below; the guard is
           // for the type.
-          if (next === 'grouped' || next === 'flat') onChange(next);
+          if (isValidViewMode(next)) onChange(next);
         }}
         className="w-full min-w-0 truncate rounded border border-sidebar-border bg-sidebar px-1.5 py-1 text-xs text-sidebar-foreground hover:bg-sidebar-hover focus:outline-none focus:ring-2 focus:ring-ring"
       >
         <option value="grouped">{t('sidebar.viewMode.grouped')}</option>
         <option value="flat">{t('sidebar.viewMode.flat')}</option>
+        <option value="sessions">{t('sidebar.viewMode.sessions')}</option>
       </select>
     </>
   );
 }
+
+/**
+ * One agent instance in the sessions view (Issue #2656): status dot, agent
+ * label (bold), then branch · repository (muted). Selected = its branch is the
+ * one open, so every row of that branch is highlighted.
+ */
+const SessionListItem = memo(function SessionListItem({
+  row,
+  isSelected,
+  onClick,
+}: {
+  row: SessionRow;
+  isSelected: boolean;
+  onClick: (row: SessionRow) => void;
+}) {
+  const t = useTranslations('common');
+  const statusLabel = t(`status.${row.status}`);
+
+  return (
+    <button
+      type="button"
+      data-testid="session-list-item"
+      data-session-key={row.key}
+      onClick={() => onClick(row)}
+      aria-current={isSelected ? 'true' : undefined}
+      className={`w-full min-w-0 px-4 py-2 flex items-center gap-3 text-left hover:bg-sidebar-hover transition-colors focus:outline-none focus:ring-2 focus:ring-inset focus:ring-ring ${
+        isSelected ? 'bg-sidebar-hover border-l-2 border-accent-500' : 'border-l-2 border-transparent'
+      }`}
+    >
+      <StatusDot
+        status={row.status}
+        size="lg"
+        label={row.exited ? `${statusLabel} (${t('branchItem.agentExited')})` : statusLabel}
+      />
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-semibold text-sidebar-foreground">{row.label}</span>
+        <span className="block truncate text-xs text-sidebar-muted">
+          {row.branchName} · {row.repositoryName}
+        </span>
+      </span>
+    </button>
+  );
+});
 
 /** Chevron icon for collapse/expand */
 function ChevronIcon({ isExpanded }: { isExpanded: boolean }) {

@@ -61,6 +61,11 @@
   （`STATUS_PRIORITY` が既に `waiting` を先頭に置いており、降順＝「idle を先に」が
   表現できなくなるため）。グループ表示ではリポジトリ単位のグルーピングを保ったまま
   各グループ内で適用する
+- **セッション表示（Issue #2656）**: エージェント（インスタンス）1 つを 1 行で並べる表示。
+  行は `buildSessionRows()` がブランチの `cliStatus` から作り、ドットはそのインスタンス自身の
+  状態を出す。並びは `sortSessionRows()` が状態（`STATUS_PRIORITY` 昇順＝要対応が先）を常に先にし、
+  次に選んだ並び順を使う。エージェントごとの最終活動時刻は無いので「更新日時」はブランチの
+  `updatedAt`。並び順が「ステータス」のときだけ、状態の段が向き（要対応が先／後）に従う
 - **次アクション**: `getNextAction()`（`src/lib/session/next-action-helper.ts`）は
   辞書キー（`nextAction.*`）を返す。サイドバー行では `waiting` と `awaitingInstruction` の
   ときだけ**インライン表示**し（hover 限定はタッチ端末で永久に不可視になるため）、

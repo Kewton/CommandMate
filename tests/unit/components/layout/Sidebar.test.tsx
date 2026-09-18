@@ -721,6 +721,7 @@ describe('Sidebar', () => {
       expect(Array.from(select.options).map((o) => [o.value, o.textContent])).toEqual([
         ['grouped', 'Repository'],
         ['flat', 'Branch'],
+        ['sessions', 'Session'],
       ]);
       expect(select.closest('[data-testid="tooltip-wrapper"]')).toBeNull();
     });
