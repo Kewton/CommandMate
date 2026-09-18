@@ -11,9 +11,16 @@
  * indicator, not a content skeleton.
  *
  * The root layout renders the AppShell (Issue #2682), so inside the shell this
- * fallback fills the main area (`flex-1`). On routes rendered without a shell,
- * an absolute minimum height guarantees the container does not collapse
- * (Issue #2683).
+ * fallback fills the main area. It does that with `h-full`, not `flex-1`:
+ * `<main data-view-transition="content">` is `display: block` (it is itself a
+ * flex *item* of the shell column), so a `flex-1` child is not a flex item and
+ * the rule is inert — Issue #2683 shipped `flex-1` and the dots rendered in a
+ * 192px band at the top of the main area. The pages rendered inside the shell
+ * fill `<main>` the same way (`h-full` on their root element); the one that does
+ * not is the mobile worktree screen, which carries its own viewport height.
+ *
+ * `min-h-[12rem]` is the floor for routes rendered without a shell, where the
+ * parent's height is auto and `h-full` resolves to auto (Issue #2683).
  *
  * Dots use `bg-muted-foreground`, not the `Skeleton` primitive's `bg-muted` —
  * a slab colour for large placeholder blocks that is invisible at dot size on
@@ -40,7 +47,7 @@ export function RouteLoading() {
 
   return (
     <div
-      className="flex w-full flex-1 min-h-[12rem] items-center justify-center p-8"
+      className="flex w-full h-full min-h-[12rem] items-center justify-center p-8"
       role="status"
       aria-label={t('loadingPage')}
       data-testid="route-loading"

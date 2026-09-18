@@ -44,22 +44,31 @@ describe('RouteLoading', () => {
   it('fills the main area and centers the indicator so the swap into the real page stays stable', () => {
     render(<RouteLoading />);
     const root = screen.getByTestId('route-loading');
-    // Filling the shell's main area keeps the layout stable while min-h-[12rem]
-    // prevents collapsing on routes rendered without AppShell (Issue #2683).
-    expect(root.className).toContain('flex-1');
+    // Filling the shell's main area with h-full keeps the layout stable while
+    // min-h-[12rem] prevents collapsing on routes rendered without AppShell (Issue #2683, #2692).
+    expect(root.className).toContain('h-full');
     expect(root.className).toContain('min-h-[12rem]');
     expect(root.className).toContain('items-center');
     expect(root.className).toContain('justify-center');
   });
 
-  it('does not depend on viewport height or percentage height, providing flex-1 and a minimum height floor', () => {
+  it('does not depend on viewport height, and fills the parent with h-full over a minimum height floor', () => {
     render(<RouteLoading />);
     const root = screen.getByTestId('route-loading');
     expect(root.className).not.toContain('min-h-screen');
     expect(root.className).not.toContain('h-screen');
     expect(root.className).not.toContain('min-h-full');
-    expect(root.className).not.toContain('h-full');
-    expect(root.className).toContain('flex-1');
+    expect(root.className).toContain('h-full');
+    expect(root.className).toContain('min-h-[12rem]');
+  });
+
+  it('fills a parent with a definite height, and keeps the floor when the parent is auto (Issue #2683 follow-up)', () => {
+    render(<RouteLoading />);
+    const root = screen.getByTestId('route-loading');
+    // `flex-1` was inert: <main data-view-transition="content"> is display:block,
+    // so the fallback was never a flex item and sat in a 192px band at the top.
+    expect(root.className).not.toMatch(/(^|\s)flex-1(\s|$)/);
+    expect(root.className).toContain('h-full');
     expect(root.className).toContain('min-h-[12rem]');
   });
 
