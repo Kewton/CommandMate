@@ -16,9 +16,9 @@
  *   2. The English/Japanese assertions used `getByText('Send'/'Cancel')`, which
  *      have not rendered on `/` since the home page became a dashboard (#1052 /
  *      #1072) — `common.send` / `common.cancel` are the worktree detail message
- *      form. They are replaced with the home heading (`home.title`) and the live
- *      session subline (`home.running` / `home.waiting`), which are on this page
- *      and are translated.
+ *      form. They now use the link in `/`'s empty state
+ *      (`common.repositories.add`), which is on this page and is translated
+ *      (Issue #2643).
  *
  * The `[data-testid="locale-switcher"]` lives in the sidebar, which is a closed
  * drawer on mobile — so only the desktop specs assert on it.
@@ -40,9 +40,8 @@ test.describe('Locale Switcher', () => {
     await expect(select).toHaveValue('en');
 
     // English text should be visible
-    await expect(page.getByRole('heading', { name: 'Overview', level: 1 })).toBeVisible();
-    await expect(page.getByTestId('home-subline')).toContainText('running');
-    await expect(page.getByTestId('home-subline')).toContainText('waiting');
+    await expect(page.getByTestId('home-add-repository')).toHaveText('Add Repository');
+    await expect(page.getByTestId('home-add-repository')).toBeVisible();
   });
 
   test('should switch to Japanese via Cookie', async ({ page, context }) => {
@@ -57,9 +56,7 @@ test.describe('Locale Switcher', () => {
     await page.waitForLoadState('networkidle');
 
     // Japanese text should be visible
-    await expect(page.getByRole('heading', { name: '概要', level: 1 })).toBeVisible();
-    await expect(page.getByTestId('home-subline')).toContainText('実行中');
-    await expect(page.getByTestId('home-subline')).toContainText('待機中');
+    await expect(page.getByTestId('home-add-repository')).toHaveText('リポジトリを追加');
 
     // LocaleSwitcher should show "ja"
     const select = page.locator('[data-testid="locale-switcher"]');
@@ -73,12 +70,12 @@ test.describe('Locale Switcher', () => {
     // Switch through the UI so the cookie under test is the one the app writes
     // (setLocaleCookie), not one the test planted. selectOption triggers a reload.
     await page.locator('[data-testid="locale-switcher"]').selectOption('ja');
-    await expect(page.getByRole('heading', { name: '概要', level: 1 })).toBeVisible();
+    await expect(page.getByTestId('home-add-repository')).toHaveText('リポジトリを追加');
 
     // Reload and verify persistence
     await page.reload();
     await page.waitForLoadState('networkidle');
-    await expect(page.getByRole('heading', { name: '概要', level: 1 })).toBeVisible();
+    await expect(page.getByTestId('home-add-repository')).toHaveText('リポジトリを追加');
     await expect(page.locator('[data-testid="locale-switcher"]')).toHaveValue('ja');
 
     // Verify the security flags setLocaleCookie promises
@@ -102,7 +99,8 @@ test.describe('Locale Switcher', () => {
     await page.waitForLoadState('networkidle');
 
     // Should fallback to English
-    await expect(page.getByRole('heading', { name: 'Overview', level: 1 })).toBeVisible();
+    await expect(page.getByTestId('home-add-repository')).toHaveText('Add Repository');
+    await expect(page.getByTestId('home-add-repository')).toBeVisible();
 
     const select = page.locator('[data-testid="locale-switcher"]');
     await expect(select).toHaveValue('en');
@@ -124,8 +122,6 @@ test.describe('Locale Switcher - Mobile', () => {
     await page.waitForLoadState('networkidle');
 
     // Japanese text should be visible on mobile
-    await expect(page.getByRole('heading', { name: '概要', level: 1 })).toBeVisible();
-    await expect(page.getByTestId('home-subline')).toContainText('実行中');
-    await expect(page.getByTestId('home-subline')).toContainText('待機中');
+    await expect(page.getByTestId('home-add-repository')).toHaveText('リポジトリを追加');
   });
 });

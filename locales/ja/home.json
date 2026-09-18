@@ -1,23 +1,4 @@
 {
-  "title": "概要",
-  "running": "実行中",
-  "waiting": "待機中",
-  "sessionOverview": {
-    "title": "セッション概要",
-    "recentSessions": "最近のセッション",
-    "viewAll": "すべて表示"
-  },
-  "sessionSummary": {
-    "loading": "セッション概要を読み込み中",
-    "running": "実行中",
-    "waiting": "待機中",
-    "waitingLinkLabel": "入力待ち {count} 件 — レビュー一覧を開く"
-  },
-  "recentSessions": {
-    "empty": "最近のセッションはまだありません。",
-    "cta": "まずリポジトリを登録しましょう",
-    "loading": "最近のセッションを読み込み中"
-  },
   "onboarding": {
     "title": "はじめかた",
     "dismiss": "はじめかたを閉じる",
@@ -28,25 +9,6 @@
     "actions": {
       "registerRepository": "登録する",
       "sendFirstMessage": "セッションを開く"
-    }
-  },
-  "todo": {
-    "title": "ToDo",
-    "repository": "リポジトリ",
-    "open": "残り{count}件",
-    "noRepositories": "リポジトリがまだありません。Repositories 画面から追加すると ToDo を登録できます。",
-    "inputPlaceholder": "ToDo を追加…",
-    "add": "追加",
-    "loading": "ToDo を読み込み中",
-    "empty": "ToDo はまだありません。",
-    "markAsDone": "完了にする",
-    "markAsNotDone": "未完了に戻す",
-    "delete": "ToDo を削除",
-    "errors": {
-      "load": "ToDo の読み込みに失敗しました",
-      "add": "ToDo の追加に失敗しました",
-      "update": "ToDo の更新に失敗しました",
-      "delete": "ToDo の削除に失敗しました"
     }
   },
   "assistant": {

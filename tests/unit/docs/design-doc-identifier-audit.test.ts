@@ -202,6 +202,11 @@ const DECLARED: readonly Declared[] = [
     why: '#2200 が削除した `MessageListProps` のフィールド。`generatingContent` と同じ §9 の否定的実測の記録で引かれており、同行の「#2200 で削除済み」注記が両方を覆う（#2212）',
   },
   {
+    text: 'RecentSessionsList',
+    category: 'history',
+    why: 'Issue #2643 が削除した Home の「最近のセッション」部品。§6.1 の DR3-005 が `sessionStatusByCli` を読む 14 ファイルの実測（当時）として引いており、同じ箇所に削除済みと注記した',
+  },
+  {
     text: 'tests/unit/hooks/sources/event-id-validation.test.ts',
     category: 'planned',
     why: '§11 が「新規」と明記したテスト。§13.2 S1〜S3 の受入条件の置き場',
@@ -311,7 +316,8 @@ describe('DECLARED is reviewable', () => {
       // same shape as `getStatusCaptureLines` — §9 / §10.13 / §15.3 / §15.4 now
       // state the deletion, so `history` describes what the document says rather
       // than what a reader would have to already know. The split is unchanged.
-      history: 5,
+      // Issue #2643 deleted `RecentSessionsList` (5 -> 6).
+      history: 6,
       external: 5,
       prose: 1,
       'test-only': 1,
