@@ -17,15 +17,18 @@
  * header's `RepositoryTabBar` re-orders in the same commit as a drag here, and
  * the ordering itself is `orderBranchGroups()` from sidebar-utils rather than
  * an inline sort. The fetch/PUT against `/api/sidebar/group-order` stays here.
+ *
+ * Issue #2644: header is now a nav list (Repositories+sync / Sessions / Review with count) + view/sort controls; "Branches" heading and the pill are gone.
  */
 
 'use client';
 
 import React, { memo, useState, useMemo, useCallback, useEffect, useLayoutEffect, useRef, useDeferredValue } from 'react';
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useViewTransitionRouter } from '@/components/providers/ViewTransitionsProvider';
-import { Database } from 'lucide-react';
+import { AlignJustify, CircleCheck, Database, type LucideIcon } from 'lucide-react';
 import {
   DndContext,
   PointerSensor,
@@ -52,7 +55,8 @@ import { LocaleSwitcher } from '@/components/common/LocaleSwitcher';
 import { ThemeToggle } from '@/components/common/ThemeToggle';
 import { LogoutButton } from '@/components/common/LogoutButton';
 import { useToast } from '@/components/common/Toast';
-import { AttentionBadge } from '@/components/layout/AttentionBadge';
+import { ATTENTION_REVIEW_HREF } from '@/config/review-config';
+import { useAttentionCount } from '@/hooks/useAttentionCount';
 import { repositoryApi, ApiError } from '@/lib/api-client';
 import { toBranchItem } from '@/types/sidebar';
 import type { SidebarBranchItem } from '@/types/sidebar';
@@ -78,8 +82,8 @@ const SIDEBAR_SCROLL_TOP_STORAGE_KEY = 'mcbd-sidebar-scroll-top';
 
 /**
  * Shared Tailwind size for the sidebar header action icons (Issue #946).
- * Applied to the view-mode toggle, sync button, sort selector and Repositories
- * link so the five header icons share a single, easily-tunable size (16px).
+ * Applied to the view-mode toggle, the sort selector icons and the sync button
+ * so the header icons share a single, easily-tunable size (16px).
  */
 const HEADER_ICON_CLASS = 'w-4 h-4';
 
@@ -160,6 +164,8 @@ export const Sidebar = memo(function Sidebar() {
     setRepositoryOrder,
   } = useSidebarContext();
   const t = useTranslations('common');
+  const pathname = usePathname() ?? '';
+  const { count: attentionCount } = useAttentionCount();
   const [searchQuery, setSearchQuery] = useState('');
   const branchListRef = useRef<HTMLDivElement>(null);
 
@@ -483,35 +489,57 @@ export const Sidebar = memo(function Sidebar() {
       {/* Header */}
       <div
         data-testid="sidebar-header"
-        className="flex-shrink-0 px-4 py-4 border-b border-sidebar-border"
+        className="flex-shrink-0 space-y-2 border-b border-sidebar-border px-2 py-2"
       >
-        {/* Issue #976: wrap the heading + actions when the sidebar is narrow so
-            the button group drops to a new line instead of overflowing
-            horizontally into the adjacent ActivityBar. flex-wrap on both the row
-            and the actions group keeps everything within the sidebar width
-            without an overflow clip (which would crop the Sort dropdown). */}
-        <div className="flex flex-wrap items-center justify-between gap-y-2">
-          <h2 className="min-w-0 truncate text-lg font-semibold text-sidebar-foreground">{t('sidebar.branches')}</h2>
-          <div className="flex flex-wrap items-center gap-1">
-            <ViewModeToggle viewMode={viewMode} onToggle={setViewMode} />
-            <SortSelector />
+        <ul data-testid="sidebar-nav" className="space-y-0.5">
+          <li className="flex min-w-0 items-center gap-1">
+            <SidebarNavLink
+              href="/repositories"
+              icon={Database}
+              label={t('nav.repositories')}
+              testId="sidebar-nav-repositories"
+              isActive={pathname.startsWith('/repositories')}
+              onNavigate={closeMobileDrawer}
+            />
             <SyncButton refreshWorktrees={refreshWorktrees} />
-            <Tooltip content={t('tooltips.repositories')} placement="bottom">
-              <Link
-                href="/repositories"
-                aria-label={t('nav.repositories')}
-                className="p-1 rounded-md text-sidebar-muted hover:text-sidebar-foreground hover:bg-sidebar-hover
-                  focus:outline-none focus:ring-2 focus:ring-ring
-                  transition-colors inline-flex items-center"
-              >
-                <Database className={HEADER_ICON_CLASS} aria-hidden="true" />
-              </Link>
-            </Tooltip>
-          </div>
+          </li>
+          <li className="flex min-w-0">
+            <SidebarNavLink
+              href="/sessions"
+              icon={AlignJustify}
+              label={t('nav.sessions')}
+              testId="sidebar-nav-sessions"
+              isActive={pathname.startsWith('/sessions')}
+              onNavigate={closeMobileDrawer}
+            />
+          </li>
+          <li className="flex min-w-0">
+            <SidebarNavLink
+              href={attentionCount > 0 ? ATTENTION_REVIEW_HREF : '/review'}
+              icon={CircleCheck}
+              label={t('nav.review')}
+              testId="sidebar-nav-review"
+              isActive={pathname.startsWith('/review')}
+              onNavigate={closeMobileDrawer}
+              trailing={
+                attentionCount > 0 ? (
+                  <span
+                    data-testid="sidebar-nav-review-count"
+                    role="status"
+                    aria-label={t('attention.badgeLabel', { count: attentionCount })}
+                    className="flex-shrink-0 rounded-full bg-warning-subtle px-1.5 text-xs font-semibold leading-5 tabular-nums text-warning-foreground"
+                  >
+                    {attentionCount > 99 ? '99+' : attentionCount}
+                  </span>
+                ) : null
+              }
+            />
+          </li>
+        </ul>
+        <div data-testid="sidebar-list-controls" className="flex flex-wrap items-center gap-1 px-2">
+          <ViewModeToggle viewMode={viewMode} onToggle={setViewMode} />
+          <SortSelector />
         </div>
-        {/* Issue #1788: global "N need your attention" badge. Header only —
-            the rows below belong to Issue #1787. Renders nothing at zero. */}
-        <AttentionBadge />
       </div>
 
       {/* Search */}
@@ -801,6 +829,44 @@ function GroupHeader({
         <span className="text-sidebar-muted font-normal tabular-nums pr-2">{branchCount}</span>
       </button>
     </div>
+  );
+}
+
+/**
+ * One row of the sidebar's top navigation (Repositories / Sessions / Review).
+ * The label is visible text, so the row needs no tooltip and no aria-label.
+ */
+function SidebarNavLink({
+  href,
+  icon: Icon,
+  label,
+  testId,
+  isActive,
+  onNavigate,
+  trailing,
+}: {
+  href: string;
+  icon: LucideIcon;
+  label: string;
+  testId: string;
+  isActive: boolean;
+  onNavigate: () => void;
+  trailing?: React.ReactNode;
+}) {
+  return (
+    <Link
+      href={href}
+      data-testid={testId}
+      aria-current={isActive ? 'page' : undefined}
+      onClick={onNavigate}
+      className={`flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-sidebar-hover hover:text-sidebar-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+        isActive ? 'bg-sidebar-hover font-medium text-sidebar-foreground' : 'text-sidebar-muted'
+      }`}
+    >
+      <Icon className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+      {trailing}
+    </Link>
   );
 }
 

@@ -10,7 +10,7 @@ import { render, screen, waitFor, fireEvent, act } from '@testing-library/react'
 import React from 'react';
 import { Sidebar, parseGroupCollapsed } from '@/components/layout/Sidebar';
 import { ToastProvider } from '@/components/common/Toast';
-import { SidebarProvider } from '@/contexts/SidebarContext';
+import { SidebarProvider, useSidebarContext } from '@/contexts/SidebarContext';
 import { WorktreeSelectionProvider } from '@/contexts/WorktreeSelectionContext';
 import type { Worktree } from '@/types/models';
 
@@ -579,16 +579,16 @@ describe('Sidebar', () => {
   });
 
   describe('Header content', () => {
-    it('should display Branches title', async () => {
+    it('does not render a "Branches" heading (Issue #2644)', async () => {
       render(
         <Wrapper>
           <Sidebar />
         </Wrapper>
       );
 
-      await waitFor(() => {
-        expect(screen.getByText('Branches')).toBeInTheDocument();
-      });
+      await screen.findByTestId('sidebar-nav');
+      expect(screen.queryByRole('heading', { level: 2 })).toBeNull();
+      expect(screen.queryByText('Branches')).toBeNull();
     });
 
     // Issue #880: header link to the repository management page
@@ -652,31 +652,72 @@ describe('Sidebar', () => {
   // shared Tooltip component (action-oriented text, native `title` removed,
   // aria-label preserved for screen readers).
   describe('Header action tooltips (Issue #882)', () => {
-    it('shows an action tooltip when hovering the Repositories link', async () => {
+    it('renders Repositories / Sessions / Review as labelled links (Issue #2644)', async () => {
       render(
         <Wrapper>
           <Sidebar />
         </Wrapper>
       );
 
-      const link = await screen.findByRole('link', { name: 'Repositories' });
-      fireEvent.mouseEnter(link);
-
-      const tooltip = await screen.findByRole('tooltip', { hidden: true });
-      expect(tooltip).toHaveTextContent('Manage repositories (add / sync)');
+      const nav = await screen.findByTestId('sidebar-nav');
+      expect(nav.tagName).toBe('UL');
+      expect(screen.getByTestId('sidebar-header')).toContainElement(nav);
+      const repositories = screen.getByTestId('sidebar-nav-repositories');
+      expect(repositories).toHaveAttribute('href', '/repositories');
+      expect(repositories).toHaveTextContent('Repositories');
+      const sessions = screen.getByTestId('sidebar-nav-sessions');
+      expect(sessions).toHaveAttribute('href', '/sessions');
+      expect(sessions).toHaveTextContent('Sessions');
+      const review = screen.getByTestId('sidebar-nav-review');
+      expect(review).toHaveAttribute('href', '/review');
+      expect(review).toHaveTextContent('Review');
+      // No cache provider in this suite, so nothing needs attention.
+      expect(screen.queryByTestId('sidebar-nav-review-count')).toBeNull();
     });
 
-    it('drops the native title on the Repositories link but keeps aria-label', async () => {
+    it('labels the Repositories row with visible text only — no tooltip, no aria-label (Issue #2644)', async () => {
       render(
         <Wrapper>
           <Sidebar />
         </Wrapper>
       );
 
-      const link = await screen.findByRole('link', { name: 'Repositories' });
+      const link = await screen.findByTestId('sidebar-nav-repositories');
       expect(link).not.toHaveAttribute('title');
-      expect(link).toHaveAttribute('aria-label', 'Repositories');
+      expect(link).not.toHaveAttribute('aria-label');
+      expect(link.closest('[data-testid="tooltip-wrapper"]')).toBeNull();
     });
+
+    it.each(['sidebar-nav-repositories', 'sidebar-nav-sessions', 'sidebar-nav-review'])(
+      'closes the mobile drawer when %s is clicked (Issue #2644)',
+      async (testId) => {
+        function DrawerProbe() {
+          const { isMobileDrawerOpen, openMobileDrawer } = useSidebarContext();
+          return (
+            <button
+              type="button"
+              data-testid="drawer-probe"
+              data-open={String(isMobileDrawerOpen)}
+              onClick={openMobileDrawer}
+            />
+          );
+        }
+        render(
+          <Wrapper>
+            <DrawerProbe />
+            <Sidebar />
+          </Wrapper>
+        );
+
+        fireEvent.click(screen.getByTestId('drawer-probe'));
+        expect(screen.getByTestId('drawer-probe')).toHaveAttribute('data-open', 'true');
+
+        const link = await screen.findByTestId(testId);
+        link.addEventListener('click', (event) => event.preventDefault());
+        fireEvent.click(link);
+        expect(screen.getByTestId('drawer-probe')).toHaveAttribute('data-open', 'false');
+      }
+    );
 
     it('shows an action tooltip when hovering the view mode toggle', async () => {
       render(
@@ -967,43 +1008,47 @@ describe('Sidebar', () => {
   // buttons must wrap onto multiple lines instead of overflowing horizontally
   // and overlapping the adjacent ActivityBar.
   describe('Responsive header wrapping (Issue #976)', () => {
-    it('lets the header row wrap so the action buttons drop to a new line when narrow', async () => {
+    it('puts the view and sort controls in their own wrapping row (Issue #2644)', async () => {
       render(
         <Wrapper>
           <Sidebar />
         </Wrapper>
       );
 
-      const header = await screen.findByTestId('sidebar-header');
-      const row = header.firstElementChild as HTMLElement;
-      expect(row.className).toMatch(/flex-wrap/);
+      const controls = await screen.findByTestId('sidebar-list-controls');
+      expect(controls.className).toMatch(/flex-wrap/);
+      expect(screen.getByTestId('sidebar-header')).toContainElement(controls);
+      expect(controls).toContainElement(screen.getByTestId('view-mode-toggle'));
+      expect(controls).toContainElement(screen.getByTestId('sort-selector-base'));
     });
 
-    it('lets the action button group itself wrap so icons stay within the sidebar width', async () => {
+    it('keeps the Repositories row shrinkable so the sync button stays inside the sidebar (Issue #2644)', async () => {
       render(
         <Wrapper>
           <Sidebar />
         </Wrapper>
       );
 
-      // The Repositories link lives inside the action button group; walk up to
-      // that group container and assert it can wrap internally as a last resort.
-      const link = await screen.findByRole('link', { name: 'Repositories' });
-      const actions = link.closest('div.flex.flex-wrap') as HTMLElement;
-      expect(actions).not.toBeNull();
-      expect(actions.className).toMatch(/flex-wrap/);
+      const link = await screen.findByTestId('sidebar-nav-repositories');
+      expect(link).toHaveClass('min-w-0');
+      expect(link).toHaveClass('flex-1');
+      const row = link.parentElement as HTMLElement;
+      expect(row.tagName).toBe('LI');
+      expect(row).toHaveClass('min-w-0');
+      expect(row).toContainElement(screen.getByLabelText('Sync branches'));
     });
 
-    it('keeps the Branches heading shrinkable (min-w-0) and truncatable so it never pushes the buttons out', async () => {
+    it('truncates the nav labels instead of widening the row (Issue #2644)', async () => {
       render(
         <Wrapper>
           <Sidebar />
         </Wrapper>
       );
 
-      const heading = await screen.findByText('Branches');
-      expect(heading).toHaveClass('min-w-0');
-      expect(heading).toHaveClass('truncate');
+      await screen.findByTestId('sidebar-nav');
+      const label = screen.getByText('Sessions');
+      expect(label).toHaveClass('min-w-0');
+      expect(label).toHaveClass('truncate');
     });
   });
 

@@ -126,8 +126,7 @@
   "tooltips": {
     "viewMode": "Toggle view mode (grouped / flat)",
     "sort": "Sort branches",
-    "sync": "Sync worktrees",
-    "repositories": "Manage repositories (add / sync)"
+    "sync": "Sync worktrees"
   },
   "displaySize": {
     "ariaLabel": "Display size",

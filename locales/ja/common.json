@@ -126,8 +126,7 @@
   "tooltips": {
     "viewMode": "表示モード切替（グループ / フラット）",
     "sort": "ブランチの並び替え",
-    "sync": "worktree を同期",
-    "repositories": "リポジトリを管理（追加・同期）"
+    "sync": "worktree を同期"
   },
   "displaySize": {
     "ariaLabel": "表示サイズ",
