@@ -184,6 +184,16 @@
     "reload": "Reload",
     "dismiss": "Dismiss"
   },
+  "whatsNew": {
+    "title": "What's new (v{from} → v{to})",
+    "highlight": "Highlights",
+    "added": "New",
+    "improved": "Improved",
+    "fixed": "Fixed",
+    "empty": "See the release page for the details of this update.",
+    "releaseLink": "Open the release page",
+    "close": "Close"
+  },
   "meta": {
     "description": "Git worktree management with Claude CLI and tmux sessions"
   },

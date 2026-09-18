@@ -184,6 +184,16 @@
     "reload": "再読み込み",
     "dismiss": "閉じる"
   },
+  "whatsNew": {
+    "title": "新機能と改善（v{from} → v{to}）",
+    "highlight": "ハイライト",
+    "added": "新機能",
+    "improved": "改善",
+    "fixed": "修正",
+    "empty": "この更新の詳細はリリースページをご覧ください。",
+    "releaseLink": "リリースページを開く",
+    "close": "閉じる"
+  },
   "meta": {
     "description": "Claude CLI と tmux セッションによる Git worktree 管理"
   },

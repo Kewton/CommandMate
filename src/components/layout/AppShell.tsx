@@ -15,6 +15,9 @@
  * the header. It lives at this level rather than inside `Header` because
  * `/worktrees/*` hides the header entirely (`showGlobalNav: false`) and that is
  * the screen users switch branches from most.
+ *
+ * Issue #2651: both branches mount the What's-new dialog next to the
+ * version-drift banner.
  */
 
 'use client';
@@ -32,6 +35,7 @@ import { MobileConnectionBanner } from '@/components/mobile/MobileConnectionBann
 import { CommandPalette } from '@/components/common/CommandPalette';
 import { KeyboardShortcutsOverlay } from '@/components/common/KeyboardShortcutsOverlay';
 import { VersionMismatchBanner } from './VersionMismatchBanner';
+import { WhatsNewDialog } from '@/components/common/WhatsNewDialog';
 import {
   shouldShowRepositoryTabBar,
   DEFAULT_REPO_TAB_BAR_MODE,
@@ -199,6 +203,8 @@ export const AppShell = memo(function AppShell({ children }: AppShellProps) {
         <KeyboardShortcutsOverlay />
         {/* Version-drift reload nudge (#1338/#1356) - app-wide, single instance. */}
         <VersionMismatchBanner />
+        {/* What's new after an update (Issue #2651) - app-wide, single instance. */}
+        <WhatsNewDialog />
       </div>
     );
   }
@@ -265,6 +271,8 @@ export const AppShell = memo(function AppShell({ children }: AppShellProps) {
       <KeyboardShortcutsOverlay />
       {/* Version-drift reload nudge (#1338/#1356) - app-wide, single instance. */}
       <VersionMismatchBanner />
+      {/* What's new after an update (Issue #2651) - app-wide, single instance. */}
+      <WhatsNewDialog />
     </div>
   );
 });
