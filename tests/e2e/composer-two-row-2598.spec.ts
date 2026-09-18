@@ -361,7 +361,7 @@ test.describe('[#2598] the height handle', () => {
     await expect.poll(() => textareaHeight(page, 0)).toBe(t1 - 10);
     expect(await bodyHeight(page, 0)).toBeCloseTo(b1 + 10, 0);
 
-    // Pulling down (the other way) shrinks it back to the floor.
+    // 下に引くと下限が 36px まで下がる (Pulling down lowers the floor back to 36px).
     await dragHandle(page, 0, 400);
     await expect.poll(() => textareaHeight(page, 0)).toBe(COMPOSER_MIN_HEIGHT_PX);
   });
@@ -468,14 +468,14 @@ test.describe('[#2598] the height handle', () => {
     await expect.poll(() => textareaHeight(page, 0)).toBe(160);
   });
 
-  test('keeps the fixed height after a send, and keeps the caret while dragging', async ({ page }) => {
+  test('shrinks to the floor after a send, and keeps the caret while dragging', async ({ page }) => {
     await open(page, PRE_2598.oneSplit.widths);
     const textarea = page.getByTestId('terminal-split-pane-0').getByTestId('message-input-textarea');
     await textarea.click();
     await textarea.pressSequentially('draft');
     await dragHandle(page, 0, -80);
     await expect.poll(() => textareaHeight(page, 0)).toBeGreaterThan(100);
-    const fixed = await textareaHeight(page, 0);
+    const floor = await textareaHeight(page, 0);
     // The drag took no focus and selected nothing; the draft is intact.
     await expect(textarea).toBeFocused();
     await expect(textarea).toHaveValue('draft');
@@ -483,6 +483,6 @@ test.describe('[#2598] the height handle', () => {
 
     await page.keyboard.press('Enter');
     await expect(textarea).toHaveValue('');
-    expect(await textareaHeight(page, 0)).toBe(fixed);
+    expect(await textareaHeight(page, 0)).toBe(floor);
   });
 });
