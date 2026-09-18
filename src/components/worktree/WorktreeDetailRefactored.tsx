@@ -306,7 +306,6 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     handleActivityToggle,
     handleAgentInstancesChange,
     handleAutoYesToggle,
-    handleBackClick,
     handleCloseDiff,
     handleDelete,
     handleDiffSelect,
@@ -735,7 +734,6 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                 repositoryName={worktree?.repositoryName}
                 status={worktreeStatus}
                 gitStatus={worktree?.gitStatus}
-                onBackClick={handleBackClick}
                 onMenuClick={openMobileDrawer}
               />
             </div>

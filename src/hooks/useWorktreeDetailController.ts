@@ -21,7 +21,6 @@
 
 import React, { useEffect, useCallback, useMemo, useState, useRef } from 'react';
 import { AGENT_MODE_UNKNOWN } from '@/types/cli-tool-contracts';
-import { useRouter } from 'next/navigation';
 import { useWorktreeUIState } from '@/hooks/useWorktreeUIState';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { useSidebarContext } from '@/contexts/SidebarContext';
@@ -208,7 +207,6 @@ const DEFAULT_WORKTREE_NAME = 'Unknown';
  */
 
 export function useWorktreeDetailController({ worktreeId }: { worktreeId: string }) {
-  const router = useRouter();
   const isMobile = useIsMobile();
   // Issue #874: ref mirror so the message/output fetchers (which read state via
   // refs to keep a stable identity) can mobile-gate the `instance` query param
@@ -1087,11 +1085,6 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     [setActiveActivity]
   );
 
-  /** Handle back button click - navigate to portal */
-  const handleBackClick = useCallback(() => {
-    router.push('/');
-  }, [router]);
-
   /** Handle worktree status change via dropdown */
   const handleWorktreeStatusChange = useCallback(async (newStatus: 'ready' | 'in_progress' | 'in_review' | 'done' | null) => {
     try {
@@ -1820,7 +1813,6 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     handleActivityToggle,
     handleAgentInstancesChange,
     handleAutoYesToggle,
-    handleBackClick,
     handleCloseDiff,
     handleDelete,
     handleDiffSelect,
