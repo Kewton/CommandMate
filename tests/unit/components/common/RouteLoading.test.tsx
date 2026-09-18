@@ -41,14 +41,26 @@ describe('RouteLoading', () => {
     });
   });
 
-  it('fills the viewport and centers the indicator so the swap into the real shell stays stable', () => {
+  it('fills the main area and centers the indicator so the swap into the real page stays stable', () => {
     render(<RouteLoading />);
     const root = screen.getByTestId('route-loading');
-    // Occupying the full viewport keeps the #1118 intent: no blank flash and no
-    // scrollbar/height jump when the real page mounts its own AppShell.
-    expect(root.className).toContain('min-h-screen');
+    // Filling the shell's main area keeps the layout stable while min-h-[12rem]
+    // prevents collapsing on routes rendered without AppShell (Issue #2683).
+    expect(root.className).toContain('flex-1');
+    expect(root.className).toContain('min-h-[12rem]');
     expect(root.className).toContain('items-center');
     expect(root.className).toContain('justify-center');
+  });
+
+  it('does not depend on viewport height or percentage height, providing flex-1 and a minimum height floor', () => {
+    render(<RouteLoading />);
+    const root = screen.getByTestId('route-loading');
+    expect(root.className).not.toContain('min-h-screen');
+    expect(root.className).not.toContain('h-screen');
+    expect(root.className).not.toContain('min-h-full');
+    expect(root.className).not.toContain('h-full');
+    expect(root.className).toContain('flex-1');
+    expect(root.className).toContain('min-h-[12rem]');
   });
 
   describe('neutral shape (Issue #1184)', () => {
