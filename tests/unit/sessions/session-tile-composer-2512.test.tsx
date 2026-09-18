@@ -483,7 +483,7 @@ describe('SessionTile composer (Issue #2512)', () => {
       expect(tileTextarea().style.height).toBe('90px');
     });
 
-    it('writes under the session-tile key', () => {
+    it('writes the floor under the session-tile key on ArrowUp', () => {
       render(<SessionTile worktree={createWorktree()} enabled connectivity={ONLINE} />);
       const handle = within(screen.getByTestId('session-tile-composer-wt-1')).getByRole('separator');
       fireEvent.keyDown(handle, { key: 'ArrowUp' });

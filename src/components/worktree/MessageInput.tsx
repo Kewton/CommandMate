@@ -220,10 +220,11 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
   // reaches the phone's docked composer.
   const resizable = !isMobile && !!heightScope;
   const {
-    height: fixedHeight,
+    height: heightFloor,
     resizeBy: resizeHeightBy,
     reset: resetHeight,
   } = useComposerHeight({ worktreeId, scope: heightScope, maxHeight, enabled: resizable });
+  const cssBound = typeof maxHeight === 'number' && Number.isFinite(maxHeight) ? maxHeight : Infinity;
   const handleHeightResize = useCallback(
     (delta: number) => {
       const drawn = textareaRef.current?.getBoundingClientRect().height ?? COMPOSER_MIN_HEIGHT_PX;
@@ -295,28 +296,25 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
   /**
    * Auto-resize textarea based on content.
    *
-   * Issue #2598: a stored height wins — the textarea keeps it whatever it holds
-   * (it scrolls inside), including after a send empties it. Without one, the
-   * pre-#2598 auto-grow: one line when empty, the content's height up to the
-   * cap otherwise. The empty case now writes the 36px the `minHeight` below
-   * already enforced (it used to write 24px, which `minHeight` overrode).
-   * A layout effect, so a stored height is applied before the first paint
-   * instead of flashing the one-line composer first.
+   * Issue #2681: a stored height acts as a floor (minimum height), not a fixed
+   * height. The textarea always auto-grows with content up to
+   * COMPOSER_AUTO_MAX_HEIGHT_PX (and bounded by maxHeight). When empty or shorter
+   * than the floor, it shrinks down to the floor. A layout effect, so the floor
+   * height is applied before the first paint instead of flashing the one-line composer first.
    */
   useIsomorphicLayoutEffect(() => {
     const textarea = textareaRef.current;
     if (!textarea) return;
-    if (fixedHeight !== null) {
-      textarea.style.height = `${fixedHeight}px`;
+    const bound = typeof maxHeight === 'number' && Number.isFinite(maxHeight) ? maxHeight : Infinity;
+    const floor = Math.min(heightFloor ?? COMPOSER_MIN_HEIGHT_PX, bound);
+    if (!message) {
+      textarea.style.height = `${floor}px`;
       return;
     }
-    if (!message) {
-      textarea.style.height = `${COMPOSER_MIN_HEIGHT_PX}px`;
-    } else {
-      textarea.style.height = 'auto';
-      textarea.style.height = `${Math.min(textarea.scrollHeight, COMPOSER_AUTO_MAX_HEIGHT_PX)}px`;
-    }
-  }, [message, fixedHeight]);
+    textarea.style.height = 'auto';
+    const content = Math.min(textarea.scrollHeight, COMPOSER_AUTO_MAX_HEIGHT_PX);
+    textarea.style.height = `${Math.min(Math.max(floor, content), bound)}px`;
+  }, [message, heightFloor, maxHeight]);
 
   /**
    * Issue #485: Insert pending text into message input
@@ -656,14 +654,14 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
           <div
             className="absolute inset-x-3 top-0 -translate-y-1/2"
             data-testid="composer-resize-handle"
-            data-height-mode={fixedHeight === null ? 'auto' : 'fixed'}
+            data-height-mode={heightFloor === null ? 'auto' : 'floor'}
           >
             <PaneResizer
               orientation="vertical"
               onResize={handleHeightResize}
               onDoubleClick={resetHeight}
               ariaLabel={t('composer.resizeHandle')}
-              ariaValueNow={composerHeightPercent(fixedHeight, maxHeight)}
+              ariaValueNow={composerHeightPercent(heightFloor, maxHeight)}
             />
           </div>
         )}
@@ -757,11 +755,11 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
               inputMode="text"
               enterKeyHint="send"
               className="flex-1 outline-none bg-transparent resize-none overflow-y-auto scrollbar-thin"
-              // Issue #2598: a stored height is not bound by auto-grow's cap —
-              // the caller's `maxHeight` bounds it (see the effect above).
+              // Issue #2681: a stored height acts as a floor, bounded by maxHeight.
+              // Content auto-grows up to COMPOSER_AUTO_MAX_HEIGHT_PX (and maxHeight).
               style={{
-                minHeight: `${COMPOSER_MIN_HEIGHT_PX}px`,
-                ...(fixedHeight === null ? { maxHeight: `${COMPOSER_AUTO_MAX_HEIGHT_PX}px` } : null),
+                minHeight: `${Math.min(heightFloor ?? COMPOSER_MIN_HEIGHT_PX, cssBound)}px`,
+                maxHeight: `${Math.min(Math.max(heightFloor ?? 0, COMPOSER_AUTO_MAX_HEIGHT_PX), cssBound)}px`,
                 paddingTop: '8px',
                 paddingBottom: '8px',
                 lineHeight: '20px',

@@ -1,19 +1,20 @@
 /**
- * useComposerHeight — the PC composer's stored textarea height (Issue #2598).
+ * useComposerHeight — the PC composer's stored textarea height (Issue #2598, #2681).
  *
  * Two hooks and the pure functions under them:
  *
- * - {@link useComposerHeight} is the composer's side: which height (if any) is
+ * - {@link useComposerHeight} is the composer's side: which height floor (if any) is
  *   stored for this worktree and scope, what is actually drawn once the
  *   caller's upper bound is applied, and the two operations the handle needs.
  * - {@link useComposerMaxHeight} is the caller's side: the tallest the textarea
  *   may be before the body above the composer drops below its floor.
  *
- * ## No stored height means auto-grow
+ * ## 保存値は下限（floor）
  *
- * `height === null` is not "0" or "the minimum": it tells the composer to keep
- * the auto-grow it has always had (36px up to 160px). A double-click on the
- * handle removes the entry and returns there.
+ * 保存値は下限であって固定高さではない。内容が下限より短ければ下限まで、
+ * 長ければ `COMPOSER_AUTO_MAX_HEIGHT_PX` まで伸びる。
+ * ハンドルを下げると下限が下がる（縮小して固定されるのではない）。床は `COMPOSER_MIN_HEIGHT_PX`。
+ * ダブルクリックは下限を消して既定（36px）に戻す。
  *
  * ## Clamping is display-only
  *
@@ -127,17 +128,17 @@ export interface UseComposerHeightOptions {
 }
 
 export interface UseComposerHeightResult {
-  /** What is stored, unbounded by `maxHeight`. `null` = auto-grow. */
+  /** What is stored as the height floor, unbounded by `maxHeight`. `null` = default auto-grow floor. */
   storedHeight: number | null;
-  /** What to draw: the stored height within the bounds, or `null` for auto-grow. */
+  /** What to draw as the height floor within the bounds, or `null` for default auto-grow floor. */
   height: number | null;
   /**
-   * Grow (positive) or shrink by `delta` pixels and store the result.
+   * Grow (positive) or lower (negative) the floor by `delta` pixels and store the result.
    * `currentHeight` is the textarea's drawn height, the starting point when no
-   * height is stored yet (the first drag starts from what auto-grow drew).
+   * floor is stored yet (the first drag starts from what auto-grow drew).
    */
   resizeBy: (delta: number, currentHeight: number) => void;
-  /** Forget the stored height (auto-grow again). */
+  /** Forget the stored floor (returns to default auto-grow floor). */
   reset: () => void;
 }
 
