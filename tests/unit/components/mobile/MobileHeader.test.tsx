@@ -111,27 +111,12 @@ describe('MobileHeader', () => {
     });
   });
 
-  describe('Back Button', () => {
-    it('should render back button when onBackClick is provided', () => {
-      const onBackClick = vi.fn();
-      render(<MobileHeader {...defaultProps} onBackClick={onBackClick} />);
+  describe('Home button removed (Issue #2653)', () => {
+    it('should not render home/back button even when menu is present', () => {
+      const { container } = render(<MobileHeader {...defaultProps} onMenuClick={vi.fn()} />);
 
-      expect(screen.getByRole('button', { name: /back|return/i })).toBeInTheDocument();
-    });
-
-    it('should not render back button when onBackClick is not provided', () => {
-      render(<MobileHeader {...defaultProps} />);
-
-      expect(screen.queryByRole('button', { name: /back|return/i })).not.toBeInTheDocument();
-    });
-
-    it('should call onBackClick when back button is clicked', () => {
-      const onBackClick = vi.fn();
-      render(<MobileHeader {...defaultProps} onBackClick={onBackClick} />);
-
-      fireEvent.click(screen.getByRole('button', { name: /back|return/i }));
-
-      expect(onBackClick).toHaveBeenCalled();
+      expect(screen.queryByRole('button', { name: /back|return/i })).toBeNull();
+      expect(container.querySelector('path[d^="M3 12l2-2"]')).toBeNull();
     });
   });
 
@@ -141,6 +126,7 @@ describe('MobileHeader', () => {
       render(<MobileHeader {...defaultProps} onMenuClick={onMenuClick} />);
 
       expect(screen.getByRole('button', { name: /menu/i })).toBeInTheDocument();
+      expect(screen.getByTestId('mobile-header-menu-button')).toBeInTheDocument();
     });
 
     it('should not render menu button when onMenuClick is not provided', () => {
@@ -159,20 +145,17 @@ describe('MobileHeader', () => {
     });
   });
 
-  describe('Both Buttons', () => {
-    it('should render both buttons when both handlers are provided', () => {
-      const onBackClick = vi.fn();
+  describe('Menu and palette buttons', () => {
+    it('should render both menu and palette buttons with menu appearing first', () => {
       const onMenuClick = vi.fn();
-      render(
-        <MobileHeader
-          {...defaultProps}
-          onBackClick={onBackClick}
-          onMenuClick={onMenuClick}
-        />
-      );
+      render(<MobileHeader {...defaultProps} onMenuClick={onMenuClick} />);
 
-      expect(screen.getByRole('button', { name: /back|return/i })).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: /menu/i })).toBeInTheDocument();
+      const menu = screen.getByTestId('mobile-header-menu-button');
+      const trigger = screen.getByTestId('mobile-header-command-palette-trigger');
+
+      expect(menu).toBeInTheDocument();
+      expect(trigger).toBeInTheDocument();
+      expect(menu.compareDocumentPosition(trigger) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
     });
   });
 
@@ -228,15 +211,15 @@ describe('MobileHeader', () => {
     });
 
     it('should support keyboard navigation for buttons', () => {
-      const onBackClick = vi.fn();
-      render(<MobileHeader {...defaultProps} onBackClick={onBackClick} />);
+      const onMenuClick = vi.fn();
+      render(<MobileHeader {...defaultProps} onMenuClick={onMenuClick} />);
 
-      const backButton = screen.getByRole('button', { name: /back|return/i });
-      backButton.focus();
-      fireEvent.keyDown(backButton, { key: 'Enter', code: 'Enter' });
-      fireEvent.click(backButton);
+      const menuButton = screen.getByRole('button', { name: /menu/i });
+      menuButton.focus();
+      fireEvent.keyDown(menuButton, { key: 'Enter', code: 'Enter' });
+      fireEvent.click(menuButton);
 
-      expect(onBackClick).toHaveBeenCalled();
+      expect(onMenuClick).toHaveBeenCalled();
     });
   });
 
@@ -260,7 +243,7 @@ describe('MobileHeader', () => {
     it('should render the trigger even with no other header actions', () => {
       // `/worktrees/*` is the one mobile route with no GlobalMobileNav, so this
       // header is the only chrome that can carry the palette there. It must not
-      // be conditional on the back / menu callbacks.
+      // be conditional on the menu callback.
       render(<MobileHeader {...defaultProps} />);
 
       expect(screen.queryByRole('button', { name: /menu/i })).not.toBeInTheDocument();
@@ -316,12 +299,10 @@ describe('MobileHeader', () => {
     });
 
     it('should position buttons at edges', () => {
-      const onBackClick = vi.fn();
       const onMenuClick = vi.fn();
       render(
         <MobileHeader
           {...defaultProps}
-          onBackClick={onBackClick}
           onMenuClick={onMenuClick}
         />
       );
@@ -334,6 +315,69 @@ describe('MobileHeader', () => {
         innerContainer?.className.includes('flex') ||
         innerContainer?.className.includes('justify-between')
       ).toBe(true);
+    });
+  });
+
+  describe('Layout (Issue #2653)', () => {
+    function PaletteProbe() {
+      const { open } = useCommandPalette();
+      return <span data-testid="palette-open">{open ? 'open' : 'closed'}</span>;
+    }
+
+    it('places menu button in left slot and command palette trigger in right slot', () => {
+      const onMenuClick = vi.fn();
+      render(<MobileHeader {...defaultProps} onMenuClick={onMenuClick} />);
+
+      const row = screen.getByTestId('mobile-header').firstElementChild as HTMLElement;
+      expect(row.children).toHaveLength(3);
+
+      expect(row.children[0]).toContainElement(screen.getByTestId('mobile-header-menu-button'));
+      expect(row.children[2]).not.toContainElement(screen.getByTestId('mobile-header-menu-button'));
+
+      const rightButtons = row.children[2].querySelectorAll('button');
+      expect(rightButtons).toHaveLength(1);
+      expect(rightButtons[0]).toBe(screen.getByTestId('mobile-header-command-palette-trigger'));
+
+      expect(row.children[0].className).toContain('w-10');
+      expect(row.children[0].className).toContain('flex-shrink-0');
+      expect(row.children[2].className).toContain('w-10');
+      expect(row.children[2].className).toContain('flex-shrink-0');
+    });
+
+    it('leaves left slot empty when onMenuClick is not provided', () => {
+      render(<MobileHeader {...defaultProps} />);
+
+      const row = screen.getByTestId('mobile-header').firstElementChild as HTMLElement;
+      expect(row.children[0].children).toHaveLength(0);
+      expect(screen.queryByTestId('mobile-header-menu-button')).toBeNull();
+    });
+
+    it('includes -ml-2 on menu button and -mr-2 on search button', () => {
+      render(<MobileHeader {...defaultProps} onMenuClick={vi.fn()} />);
+
+      const menuButton = screen.getByTestId('mobile-header-menu-button');
+      const searchButton = screen.getByTestId('mobile-header-command-palette-trigger');
+      expect(menuButton.className).toContain('-ml-2');
+      expect(searchButton.className).toContain('-mr-2');
+    });
+
+    it('calls onMenuClick once when menu button is clicked and keeps palette closed', () => {
+      const onMenuClick = vi.fn();
+      render(
+        <CommandPaletteProvider>
+          <PaletteProbe />
+          <MobileHeader {...defaultProps} onMenuClick={onMenuClick} />
+        </CommandPaletteProvider>
+      );
+
+      fireEvent.click(screen.getByTestId('mobile-header-menu-button'));
+      expect(onMenuClick).toHaveBeenCalledTimes(1);
+      expect(screen.getByTestId('palette-open').textContent).toBe('closed');
+    });
+
+    it('verifies MobileHeaderProps has no onBackClick with type assertion', () => {
+      // @ts-expect-error onBackClick was removed (Issue #2653)
+      type _MobileHeaderHasNoBack = Pick<MobileHeaderProps, 'onBackClick'>;
     });
   });
 });

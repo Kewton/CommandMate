@@ -13,6 +13,8 @@
  * route regardless. The palette was therefore mounted and unreachable: ⌘K is
  * not a gesture a phone has. This header is the surviving chrome on that
  * screen, hence the button.
+ *
+ * Issue #2653: 左上はサイドバー（ブランチ一覧）を開くボタン。Home ボタンは削除
  */
 
 'use client';
@@ -43,9 +45,7 @@ export interface MobileHeaderProps {
   status: WorktreeStatus;
   /** Git status for branch display (Issue #111) */
   gitStatus?: GitStatus;
-  /** Optional callback for back button */
-  onBackClick?: () => void;
-  /** Optional callback for menu button */
+  /** Optional callback for the top-left button that opens the sidebar (branch list) drawer */
   onMenuClick?: () => void;
 }
 
@@ -81,12 +81,11 @@ const Icon = memo(function Icon({ path, className = 'w-6 h-6' }: IconProps) {
 
 /** Icon path definitions */
 const ICON_PATHS = {
-  back: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0a1 1 0 01-1-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 01-1 1h-2z',
   menu: 'M4 6h16M4 12h16M4 18h16',
   // Issue #2395: the command palette trigger. A magnifier, matching the icon
   // `GlobalMobileNav` uses for the same action on every other route — drawn as
   // a path here rather than imported from lucide so it inherits this header's
-  // own stroke weight and 24px box, like its two neighbours.
+  // own stroke weight and 24px box, like the menu button.
   search: 'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z',
 } as const;
 
@@ -105,7 +104,6 @@ export function MobileHeader({
   repositoryName,
   status,
   gitStatus,
-  onBackClick,
   onMenuClick,
 }: MobileHeaderProps) {
   const t = useTranslations('common');
@@ -125,17 +123,19 @@ export function MobileHeader({
       className="sticky top-0 inset-x-0 bg-surface border-b border-border shadow-sm pt-safe z-40"
     >
       <div className="flex items-center justify-between h-14 px-4">
-        {/* Left section: Back button or spacer */}
+        {/* Left section: sidebar (branch list) drawer button, or a spacer.
+            Issue #2653: replaces the Home button that used to sit here. */}
         <div className="w-10 flex-shrink-0">
-          {onBackClick && (
+          {onMenuClick && (
             <Button
               variant="ghost"
               type="button"
-              onClick={onBackClick}
-              aria-label={t('back')}
+              data-testid="mobile-header-menu-button"
+              onClick={onMenuClick}
+              aria-label={t('menu')}
               className="p-2 -ml-2 rounded-full hover:bg-muted transition-colors dark:text-foreground"
             >
-              <Icon path={ICON_PATHS.back} />
+              <Icon path={ICON_PATHS.menu} />
             </Button>
           )}
         </div>
@@ -185,8 +185,9 @@ export function MobileHeader({
           </div>
         </div>
 
-        {/* Right section: command palette trigger (Issue #2395) + menu button */}
-        <div className="flex-shrink-0 flex items-center justify-end">
+        {/* Right section: command palette trigger (Issue #2395). `w-10`
+            mirrors the left slot so the title stays centred (Issue #2653). */}
+        <div className="w-10 flex-shrink-0 flex items-center justify-end">
           <Button
             variant="ghost"
             type="button"
@@ -194,22 +195,10 @@ export function MobileHeader({
             onClick={() => setCommandPaletteOpen(true)}
             aria-label={tPalette('mobileTrigger')}
             title={tPalette('mobileTrigger')}
-            className="p-2 rounded-full hover:bg-muted transition-colors dark:text-foreground"
+            className="p-2 -mr-2 rounded-full hover:bg-muted transition-colors dark:text-foreground"
           >
             <Icon path={ICON_PATHS.search} />
           </Button>
-
-          {onMenuClick && (
-            <Button
-              variant="ghost"
-              type="button"
-              onClick={onMenuClick}
-              aria-label={t('menu')}
-              className="p-2 -mr-2 rounded-full hover:bg-muted transition-colors dark:text-foreground"
-            >
-              <Icon path={ICON_PATHS.menu} />
-            </Button>
-          )}
         </div>
       </div>
     </header>
