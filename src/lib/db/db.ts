@@ -105,19 +105,8 @@ export {
   MemoDbError,
 } from './memo-db';
 
-// todo-db (repository-scoped Home ToDo widget)
-export {
-  getTodosByRepositoryId,
-  getAllTodos,
-  getTodoById,
-  createTodo,
-  updateTodo,
-  deleteTodo,
-} from './todo-db';
-export type { RepositoryTodo } from './todo-db';
-
 // worktree-todo-db (branch-scoped ToDo list, Issue #1015)
-// Aliased to avoid colliding with the repository-scoped todo-db exports above.
+// Exported under Worktree-prefixed aliases (the API routes import these names).
 export {
   getTodosByWorktreeId,
   getTodoById as getWorktreeTodoById,
