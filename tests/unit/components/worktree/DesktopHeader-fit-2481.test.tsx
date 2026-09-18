@@ -59,8 +59,8 @@ const LONG_CHIP_TITLE = 'a much longer task title';
 /**
  * The browser's arithmetic, reduced to the parts the fit reacts to: the
  * controls group keeps its full width and the identity group gets the rest.
- * The identity group's content cannot be narrower than `identityMin` (back
- * link, dot, the name's floor and the chip's badges), so below that it
+ * The identity group's content cannot be narrower than `identityMin` (dot,
+ * the name's floor and the chip's badges), so below that it
  * overflows — which is the signal the fit folds on.
  */
 const WIDTH = {
@@ -173,7 +173,6 @@ const baseProps = {
   worktreeName: 'feature/2481-worktree',
   repositoryName: 'CommandMate',
   status: 'running' as const,
-  onBackClick: vi.fn(),
   onInfoClick: vi.fn(),
   onWorktreeStatusChange: vi.fn(),
   worktreeStatus: 'in_progress' as const,
@@ -262,9 +261,9 @@ describe('DesktopHeader width contract (Issue #2481)', () => {
     expect(screen.getByTestId('fake-verification-chip').parentElement?.className).toMatch(/\bmin-w-0\b/);
   });
 
-  it('never shrinks the back link, the Info button or the status dropdown', () => {
+  it('never shrinks the Info button or the status dropdown', () => {
     renderSixWorking(1600);
-    for (const testId of ['worktree-back-button', 'desktop-info-button', 'desktop-status-dropdown']) {
+    for (const testId of ['desktop-info-button', 'desktop-status-dropdown']) {
       expect(screen.getByTestId(testId).className).toMatch(/\bflex-shrink-0\b/);
     }
   });

@@ -378,7 +378,6 @@ describe('DesktopHeader instance status pill', () => {
     worktreeName: 'feature/2042',
     repositoryName: 'CommandMate',
     status: 'idle' as const,
-    onBackClick: vi.fn(),
     onInfoClick: vi.fn(),
   };
 

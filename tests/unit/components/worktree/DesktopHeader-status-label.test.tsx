@@ -12,10 +12,18 @@
  * fixes is "English shown to a Japanese user".
  */
 
+import type { ComponentProps } from 'react';
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, cleanup } from '@testing-library/react';
 import { DesktopHeader } from '@/components/worktree/WorktreeDetailSubComponents';
+import type { WorktreeDetailDesktopProps } from '@/components/worktree/WorktreeDetailDesktop';
 import type { WorktreeStatusType } from '@/config/status-colors';
+
+// Issue #2647: onBackClick is gone from both prop contracts.
+// @ts-expect-error onBackClick was removed from DesktopHeader
+type _DesktopHeaderHasNoBack = Pick<ComponentProps<typeof DesktopHeader>, 'onBackClick'>;
+// @ts-expect-error onBackClick was removed from WorktreeDetailDesktop
+type _DesktopHasNoBack = Pick<WorktreeDetailDesktopProps, 'onBackClick'>;
 
 const locale = vi.hoisted(() => ({ current: 'en' }));
 
@@ -27,7 +35,6 @@ vi.mock('next-intl', async () => {
 const baseProps = {
   worktreeName: 'feature/1304-status-colors',
   repositoryName: 'CommandMate',
-  onBackClick: vi.fn(),
   onInfoClick: vi.fn(),
 };
 
@@ -78,6 +85,29 @@ describe('DesktopHeader worktree status label (Issue #1304)', () => {
       for (const status of Object.keys(EN) as WorktreeStatusType[]) {
         expect(statusLabel(status)).not.toMatch(/[A-Za-z]/);
       }
+    });
+  });
+
+  describe('DesktopHeader has no Home button (Issue #2647)', () => {
+    it('renders no Home button, label, or divider in en and has status dot as first child', () => {
+      cleanup();
+      locale.current = 'en';
+      render(<DesktopHeader {...baseProps} status="idle" />);
+      expect(screen.queryByTestId('worktree-back-button')).toBeNull();
+      expect(screen.queryByText('Home')).toBeNull();
+      expect(screen.queryByLabelText('Go back to worktree list')).toBeNull();
+      const identity = screen.getByTestId('desktop-header-identity');
+      expect(identity.firstElementChild?.getAttribute('data-testid')).toBe('desktop-status-indicator');
+      expect(identity.querySelector('div.w-px')).toBeNull();
+    });
+
+    it('renders no Home button or label in ja', () => {
+      cleanup();
+      locale.current = 'ja';
+      render(<DesktopHeader {...baseProps} status="idle" />);
+      expect(screen.queryByTestId('worktree-back-button')).toBeNull();
+      expect(screen.queryByText('ホーム')).toBeNull();
+      expect(screen.queryByLabelText('ワークツリー一覧に戻る')).toBeNull();
     });
   });
 });
