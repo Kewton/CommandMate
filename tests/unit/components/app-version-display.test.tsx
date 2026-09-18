@@ -77,15 +77,6 @@ vi.mock('@/hooks/useSlashCommands', () => ({
   }),
 }));
 
-// Mock useUpdateCheck hook (Issue #257)
-vi.mock('@/hooks/useUpdateCheck', () => ({
-  useUpdateCheck: () => ({
-    data: null,
-    loading: false,
-    error: null,
-  }),
-}));
-
 // Mock child components
 vi.mock('@/components/worktree/WorktreeDesktopLayout', () => ({
   WorktreeDesktopLayout: ({

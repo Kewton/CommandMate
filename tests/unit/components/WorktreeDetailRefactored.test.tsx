@@ -10,6 +10,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, fireEvent, act } from '@testing-library/react';
 import { WorktreeDetailRefactored } from '@/components/worktree/WorktreeDetailRefactored';
 import { ConfirmProvider } from '@/components/ui/ConfirmDialog';
+import { makeAppUpdateValue, makeUpdateInfo } from '@tests/helpers/app-update-context';
 
 // Mock next/navigation
 const mockPush = vi.fn();
@@ -73,10 +74,11 @@ vi.mock('@/hooks/useSlashCommands', () => ({
   }),
 }));
 
-// Mock useUpdateCheck hook (Issue #278: IMP-SF-001)
-const mockUseUpdateCheck = vi.fn();
-vi.mock('@/hooks/useUpdateCheck', () => ({
-  useUpdateCheck: () => mockUseUpdateCheck(),
+// Issue #278 / #2654: the update state is app-wide (AppUpdateProvider) now.
+const mockUseAppUpdate = vi.fn();
+vi.mock('@/contexts/AppUpdateContext', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/contexts/AppUpdateContext')>()),
+  useAppUpdate: () => mockUseAppUpdate(),
 }));
 
 // Mock child components to isolate unit tests
@@ -298,12 +300,8 @@ describe('WorktreeDetailRefactored', () => {
     vi.clearAllMocks();
     mockIsMobile.mockReturnValue(false);
 
-    // Default useUpdateCheck mock: no update available (Issue #278)
-    mockUseUpdateCheck.mockReturnValue({
-      data: null,
-      loading: false,
-      error: null,
-    });
+    // Default: no update available (Issue #278 / #2654)
+    mockUseAppUpdate.mockReturnValue(makeAppUpdateValue());
 
     mockFetch.mockImplementation((url: string) => {
       if (url.includes('/messages')) {
@@ -1388,29 +1386,29 @@ describe('WorktreeDetailRefactored', () => {
     });
   });
 
-  describe('Update Notification Indicator (Issue #278, IMP-SF-001)', () => {
+  describe('Update Notification Indicator (Issue #278, IMP-SF-001 / #2654)', () => {
     it('should show info-update-indicator when update is available (Desktop)', async () => {
       mockIsMobile.mockReturnValue(false);
-      mockUseUpdateCheck.mockReturnValue({
-        data: { hasUpdate: true, latestVersion: '2.0.0', currentVersion: '1.0.0' },
-        loading: false,
-        error: null,
-      });
+      mockUseAppUpdate.mockReturnValue(
+        makeAppUpdateValue({
+          updateInfo: makeUpdateInfo({ latestVersion: '2.0.0', currentVersion: '1.0.0' }),
+        })
+      );
 
       render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
 
       await waitFor(() => {
         expect(screen.getByTestId('info-update-indicator')).toBeInTheDocument();
       });
+      // Issue #2654: the PC header also carries the update entry point.
+      expect(screen.getByTestId('app-update-button')).toBeInTheDocument();
     });
 
     it('should not show info-update-indicator when no update is available (Desktop)', async () => {
       mockIsMobile.mockReturnValue(false);
-      mockUseUpdateCheck.mockReturnValue({
-        data: { hasUpdate: false },
-        loading: false,
-        error: null,
-      });
+      mockUseAppUpdate.mockReturnValue(
+        makeAppUpdateValue({ updateInfo: makeUpdateInfo({ hasUpdate: false }) })
+      );
 
       render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
 
@@ -1422,11 +1420,7 @@ describe('WorktreeDetailRefactored', () => {
 
     it('should not show info-update-indicator when data is null (Desktop)', async () => {
       mockIsMobile.mockReturnValue(false);
-      mockUseUpdateCheck.mockReturnValue({
-        data: null,
-        loading: false,
-        error: null,
-      });
+      mockUseAppUpdate.mockReturnValue(makeAppUpdateValue());
 
       render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
 
@@ -1438,11 +1432,11 @@ describe('WorktreeDetailRefactored', () => {
 
     it('should pass hasUpdate prop to MobileTabBar when update is available (Mobile)', async () => {
       mockIsMobile.mockReturnValue(true);
-      mockUseUpdateCheck.mockReturnValue({
-        data: { hasUpdate: true, latestVersion: '2.0.0', currentVersion: '1.0.0' },
-        loading: false,
-        error: null,
-      });
+      mockUseAppUpdate.mockReturnValue(
+        makeAppUpdateValue({
+          updateInfo: makeUpdateInfo({ latestVersion: '2.0.0', currentVersion: '1.0.0' }),
+        })
+      );
 
       render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
 
@@ -1450,15 +1444,15 @@ describe('WorktreeDetailRefactored', () => {
         // The mocked MobileTabBar renders a mobile-update-indicator when hasUpdate is true
         expect(screen.getByTestId('mobile-update-indicator')).toBeInTheDocument();
       });
+      // Issue #2654: the Update button is PC-only; the phone keeps the Info tab.
+      expect(screen.queryByTestId('app-update-button')).not.toBeInTheDocument();
     });
 
     it('should not pass hasUpdate to MobileTabBar when no update is available (Mobile)', async () => {
       mockIsMobile.mockReturnValue(true);
-      mockUseUpdateCheck.mockReturnValue({
-        data: { hasUpdate: false },
-        loading: false,
-        error: null,
-      });
+      mockUseAppUpdate.mockReturnValue(
+        makeAppUpdateValue({ updateInfo: makeUpdateInfo({ hasUpdate: false }) })
+      );
 
       render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
 

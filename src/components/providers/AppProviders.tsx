@@ -22,6 +22,7 @@ import { WorktreesCacheProvider } from '@/components/providers/WorktreesCachePro
 import { ViewTransitionsProvider } from '@/components/providers/ViewTransitionsProvider';
 import { RealtimeProvider } from '@/hooks/useRealtimeConnection';
 import { ConfirmProvider } from '@/components/ui/ConfirmDialog';
+import { AppUpdateProvider } from '@/contexts/AppUpdateContext';
 import { ToastProvider } from '@/components/common/Toast';
 import { WaitingToastListener } from '@/components/notifications/WaitingToastListener';
 import { WaitingSoundListener } from '@/components/notifications/WaitingSoundListener';
@@ -78,13 +79,18 @@ export function AppProviders({ children, locale, messages, timeZone, authEnabled
                       {/* Issue #1130: `?` keyboard-shortcuts help overlay open state. */}
                       <KeyboardShortcutsProvider>
                         <ConfirmProvider>
-                          {/* Issue #1141: View Transitions wraps the routed content. */}
-                          <ViewTransitionsProvider>
-                            {children}
-                          </ViewTransitionsProvider>
-                          {/* Issue #1124: registers the Service Worker (prod only)
-                              and shows the update-available prompt. */}
-                          <ServiceWorkerRegistrar />
+                          {/* Issue #2654: app-wide update state. Above the routed
+                              content so the restart watch survives modals and
+                              navigation. */}
+                          <AppUpdateProvider>
+                            {/* Issue #1141: View Transitions wraps the routed content. */}
+                            <ViewTransitionsProvider>
+                              {children}
+                            </ViewTransitionsProvider>
+                            {/* Issue #1124: registers the Service Worker (prod only)
+                                and shows the update-available prompt. */}
+                            <ServiceWorkerRegistrar />
+                          </AppUpdateProvider>
                         </ConfirmProvider>
                       </KeyboardShortcutsProvider>
                     </CommandPaletteProvider>

@@ -64,6 +64,12 @@ const UPDATE_KEYS = [
   'errorInProgress',
   'errorGeneric',
   'logHint',
+  // Issue #2654 (app-wide update state + the PC "Update v{version}" button)
+  'buttonLabel',
+  'buttonAriaLabel',
+  'buttonReleaseAriaLabel',
+  'buttonUpdating',
+  'statusDialogTitle',
 ];
 
 describe('worktree.update i18n keys (Issue #1198)', () => {
@@ -102,7 +108,11 @@ describe('worktree.update i18n keys (Issue #1198)', () => {
   it('translates the update strings rather than leaving them in English', () => {
     const en = loadWorktree('en');
     const ja = loadWorktree('ja');
-    const translatable = UPDATE_KEYS.filter((key) => key !== 'latestVersion');
+    // Issue #2654: `buttonLabel` stays "Update v{version}" in ja by decision —
+    // the header button says the same thing in both locales.
+    const translatable = UPDATE_KEYS.filter(
+      (key) => key !== 'latestVersion' && key !== 'buttonLabel'
+    );
     for (const key of translatable) {
       expect(
         resolve(ja, `update.${key}`),
@@ -121,6 +131,23 @@ describe('worktree.update i18n keys (Issue #1198)', () => {
       expect(resolve(dict, 'update.latestVersion') as string).toContain('{version}');
       expect(resolve(dict, 'update.confirmDescription') as string).toContain('{version}');
       expect(resolve(dict, 'update.logHint') as string).toContain('{path}');
+      // Issue #2654: the header button and its two accessible names all name
+      // the version they would move the user to.
+      expect(resolve(dict, 'update.buttonLabel') as string).toContain('{version}');
+      expect(resolve(dict, 'update.buttonAriaLabel') as string).toContain('{version}');
+      expect(resolve(dict, 'update.buttonReleaseAriaLabel') as string).toContain('{version}');
     }
+  });
+
+  /**
+   * Issue #2654: the button label is deliberately identical in both locales —
+   * pin that, so a future "translate everything" pass has to be a decision
+   * rather than an accident.
+   */
+  it('keeps the update button label identical in en and ja (Issue #2654)', () => {
+    const en = loadWorktree('en');
+    const ja = loadWorktree('ja');
+    expect(resolve(ja, 'update.buttonLabel')).toBe('Update v{version}');
+    expect(resolve(ja, 'update.buttonLabel')).toBe(resolve(en, 'update.buttonLabel'));
   });
 });
