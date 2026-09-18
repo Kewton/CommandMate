@@ -26,7 +26,8 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname } from 'next/navigation';
+import { useViewTransitionRouter } from '@/components/providers/ViewTransitionsProvider';
 import { useLocale, useTranslations } from 'next-intl';
 import { useTheme } from 'next-themes';
 import { Command } from 'cmdk';
@@ -486,7 +487,7 @@ interface RecentRow {
 export function CommandPalette() {
   const { open, setOpen } = useCommandPalette();
   const { setOpen: setShortcutsOpen } = useKeyboardShortcuts();
-  const router = useRouter();
+  const router = useViewTransitionRouter();
   // Issue #2376: which worktree the browser is on, so "delegate to myself" can
   // be recognised. Half the test; the other half is the visible chat surface.
   const pathname = usePathname();

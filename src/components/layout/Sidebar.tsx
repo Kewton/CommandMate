@@ -26,7 +26,7 @@
 'use client';
 
 import React, { memo, useState, useMemo, useCallback, useEffect, useLayoutEffect, useRef, useDeferredValue, useId } from 'react';
-import Link from 'next/link';
+import { TransitionLink } from '@/components/view-transitions/TransitionLink';
 import { usePathname } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useViewTransitionRouter } from '@/components/providers/ViewTransitionsProvider';
@@ -897,7 +897,7 @@ function SidebarNavLink({
   trailing?: React.ReactNode;
 }) {
   return (
-    <Link
+    <TransitionLink
       href={href}
       data-testid={testId}
       aria-current={isActive ? 'page' : undefined}
@@ -909,7 +909,7 @@ function SidebarNavLink({
       <Icon className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
       <span className="min-w-0 flex-1 truncate">{label}</span>
       {trailing}
-    </Link>
+    </TransitionLink>
   );
 }
 
