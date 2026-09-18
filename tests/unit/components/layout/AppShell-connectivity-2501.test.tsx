@@ -144,7 +144,7 @@ describe('AppShell connection banner (mobile)', () => {
     // The banner is at the top of the column; the nav keeps its own place and
     // the main region keeps the padding that clears it.
     expect(screen.getByTestId('global-mobile-nav')).toBeInTheDocument();
-    expect(screen.getByRole('main').className).toMatch(/\bpb-14\b/);
+    expect(screen.getByRole('main').className).toMatch(/\bpb-nav-safe\b/);
   });
 
   it('still shows on /worktrees/* where the global nav is hidden', () => {
