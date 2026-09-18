@@ -926,7 +926,20 @@
     "todo": "ToDo",
     "skills": "スキル",
     "verification": "検証",
-    "env": "環境変数"
+    "env": "環境変数",
+    "settings": "設定",
+    "settingsMenu": {
+      "settings": "設定",
+      "skills": "スキル",
+      "theme": "テーマ",
+      "themeLight": "ライト",
+      "themeDark": "ダーク",
+      "themeSystem": "システム",
+      "language": "言語",
+      "github": "GitHub",
+      "logout": "ログアウト",
+      "version": "CommandMate {version}"
+    }
   },
   "branchMismatch": {
     "changedFrom": "ブランチが",
