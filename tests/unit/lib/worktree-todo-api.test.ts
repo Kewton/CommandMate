@@ -9,6 +9,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import * as todoApiModule from '@/lib/api/todo-api';
 import { worktreeTodoApi, type WorktreeTodoItem } from '@/lib/api/todo-api';
 
 const TODO: WorktreeTodoItem = {
@@ -139,5 +140,12 @@ describe('worktreeTodoApi', () => {
     mockFetchOnce({ todos: [] });
     await worktreeTodoApi.list('repo/feature x');
     expect(global.fetch).toHaveBeenCalledWith('/api/worktrees/repo%2Ffeature%20x/todos');
+  });
+});
+
+describe('todo-api module after the Home ToDo removal (Issue #2650)', () => {
+  it('exports only the branch ToDo client', () => {
+    expect('todoApi' in todoApiModule).toBe(false);
+    expect(Object.keys(todoApiModule).sort()).toEqual(['WORKTREE_TODO_STATUSES', 'worktreeTodoApi']);
   });
 });

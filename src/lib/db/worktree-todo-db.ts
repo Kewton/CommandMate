@@ -7,8 +7,7 @@
  *
  * Mirrors the worktree_memos pattern (memo-db.ts): the table only stores
  * `worktree_id`, and rows are removed via ON DELETE CASCADE when the worktree
- * is deleted. Distinct from repository_todos (todo-db.ts), which is
- * repository-scoped (Home widget). Issue #1015.
+ * is deleted. Issue #1015.
  */
 
 import { randomUUID } from 'crypto';

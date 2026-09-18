@@ -159,6 +159,15 @@ describe('db-migrations', () => {
       expect(history.find(m => m.version === 17)?.name).toBe('add-scheduled-executions-and-execution-logs');
     });
 
+    it('keeps the repository_todos table (Issue #2650; dropped in #2657)', () => {
+      runMigrations(db);
+
+      const table = db.prepare(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='repository_todos'"
+      ).get() as { name: string } | undefined;
+      expect(table?.name).toBe('repository_todos');
+    });
+
     it('should create assistant conversation tables', () => {
       runMigrations(db);
 
