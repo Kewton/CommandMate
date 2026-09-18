@@ -39,16 +39,14 @@ vi.mock('next-intl', async () => {
   return createRealIntlMock('en');
 });
 
-const NAV_LABELS = ['Home', 'Chat', 'Sessions', 'Repos', 'Review/Report', 'More'] as const;
+const NAV_LABELS = ['Sessions', 'Repos', 'Review/Report', 'Settings'] as const;
 
 const ROUTE_CASES: Array<{ pathname: string; activeLabel: (typeof NAV_LABELS)[number] }> = [
-  { pathname: '/', activeLabel: 'Home' },
-  { pathname: '/chat', activeLabel: 'Chat' },
   { pathname: '/sessions', activeLabel: 'Sessions' },
   { pathname: '/sessions/abc123', activeLabel: 'Sessions' },
   { pathname: '/repositories', activeLabel: 'Repos' },
   { pathname: '/review', activeLabel: 'Review/Report' },
-  { pathname: '/more', activeLabel: 'More' },
+  { pathname: '/more', activeLabel: 'Settings' },
 ];
 
 function getNavLink(label: string): HTMLElement {
@@ -81,14 +79,15 @@ describe('Header navigation active indicator', () => {
     render(<Header />);
 
     expect(getNavLink('Sessions').className).toContain('after:scale-x-100');
-    expect(getNavLink('Home').className).toContain('after:scale-x-0');
+    expect(getNavLink('Repos').className).toContain('after:scale-x-0');
   });
 
-  it('does not mark Home as active on non-root routes', () => {
-    usePathnameMock.mockReturnValue('/chat');
+  it.each(['/', '/chat'])('does not mark any nav link active on %s (Issue #2642)', (pathname) => {
+    usePathnameMock.mockReturnValue(pathname);
     render(<Header />);
 
-    expect(getNavLink('Home')).not.toHaveAttribute('aria-current');
-    expect(getNavLink('Chat')).toHaveAttribute('aria-current', 'page');
+    for (const label of NAV_LABELS) {
+      expect(getNavLink(label)).not.toHaveAttribute('aria-current');
+    }
   });
 });

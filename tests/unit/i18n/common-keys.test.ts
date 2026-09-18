@@ -39,7 +39,6 @@ function resolve(dict: Record<string, unknown>, key: string): unknown {
 
 /** Every nav key the palette and Home's quick actions request at runtime. */
 const NAV_KEYS = [
-  'home',
   'chat',
   'sessions',
   'repositories',
@@ -60,12 +59,13 @@ const NAV_KEYS = [
  * that the component tests' mocked `t()` could never catch on its own.
  */
 const EN_NAV_LABELS: Record<string, string> = {
-  home: 'Home',
   chat: 'Chat',
   sessions: 'Sessions',
   repositories: 'Repositories',
   review: 'Review',
-  more: 'More',
+  // Issue #2642: /more is "Settings" now; the overflow trigger that used to
+  // borrow this key moved to `repoTabBar.overflow`.
+  more: 'Settings',
   repositoriesShort: 'Repos',
   reviewReport: 'Review/Report',
 };
@@ -150,6 +150,9 @@ const EN_SHARED_CHROME: Record<string, string> = {
   'sidebar.searchBranches': 'Search branches...',
   'sidebar.noBranchesFound': 'No branches found',
   'sidebar.noBranchesAvailable': 'No branches available',
+  // Issue #2642: the repository strip's "…" trigger stopped borrowing
+  // `nav.more`, which now reads "Settings".
+  'repoTabBar.overflow': 'More repositories',
   'sidebar.dragToReorderGroup': 'Drag to reorder group',
   'sidebar.switchToFlatView': 'Switch to flat view',
   'sidebar.switchToGroupedView': 'Switch to grouped view',
@@ -232,6 +235,27 @@ describe('common i18n keys (Issue #1197)', () => {
     const en = loadCommon('en');
     expect(resolve(en, 'nav.repositoriesShort')).not.toBe(resolve(en, 'nav.repositories'));
     expect(resolve(en, 'nav.reviewReport')).not.toBe(resolve(en, 'nav.review'));
+  });
+
+  describe('nav rename (Issue #2642)', () => {
+    it('labels nav.more as the Settings entry in both locales', () => {
+      expect(resolve(loadCommon('ja'), 'nav.more')).toBe('設定');
+      expect(resolve(loadCommon('en'), 'nav.more')).toBe('Settings');
+    });
+
+    it('no longer ships nav.home in either locale', () => {
+      for (const locale of ['en', 'ja']) {
+        expect(resolve(loadCommon(locale), 'nav.home'), `${locale} still has nav.home`).toBeUndefined();
+      }
+    });
+
+    it('keeps the repository overflow label distinct from nav.more', () => {
+      for (const locale of ['en', 'ja']) {
+        const dict = loadCommon(locale);
+        expect(resolve(dict, 'repoTabBar.overflow'), `${locale} missing repoTabBar.overflow`).toBeTruthy();
+        expect(resolve(dict, 'repoTabBar.overflow')).not.toBe(resolve(dict, 'nav.more'));
+      }
+    });
   });
 
   it('includes the repository list empty-state copy', () => {

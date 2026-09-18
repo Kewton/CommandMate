@@ -482,8 +482,8 @@ export const RepositoryTabBar = memo(function RepositoryTabBar() {
           data-testid="repository-tab-overflow"
           aria-haspopup="menu"
           aria-expanded={isOverflowMenuOpen}
-          aria-label={t('nav.more')}
-          title={t('nav.more')}
+          aria-label={t('repoTabBar.overflow')}
+          title={t('repoTabBar.overflow')}
           onClick={() => {
             setOpenRepository(null);
             setAnchorRect(null);

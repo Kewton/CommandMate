@@ -33,8 +33,6 @@ import { Command } from 'cmdk';
 import {
   type LucideIcon,
   Search,
-  Home,
-  MessageSquare,
   AlignJustify,
   FolderGit2,
   CircleCheck,
@@ -76,8 +74,6 @@ import type { Worktree } from '@/types/models';
  * spend one of the few top-level slots on it.
  */
 const NAV_ITEMS = [
-  { key: 'home', href: '/' },
-  { key: 'chat', href: '/chat' },
   { key: 'sessions', href: '/sessions' },
   { key: 'repositories', href: '/repositories' },
   { key: 'review', href: '/review' },
@@ -85,10 +81,8 @@ const NAV_ITEMS = [
   { key: 'more', href: '/more' },
 ] as const;
 
-/** lucide icon per navigation target (GlobalMobileNav set + Chat / Repos). */
+/** lucide icon per navigation target (GlobalMobileNav set + Repos / Skills). */
 const NAV_ICONS: Record<string, LucideIcon> = {
-  home: Home,
-  chat: MessageSquare,
   sessions: AlignJustify,
   repositories: FolderGit2,
   review: CircleCheck,

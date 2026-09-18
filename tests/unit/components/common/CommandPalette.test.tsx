@@ -266,6 +266,47 @@ describe('CommandPalette (Issue #1053)', () => {
 
   // --- Navigation group ------------------------------------------------------
 
+  it('no longer lists Home or Chat in the navigation group (Issue #2642)', () => {
+    renderPalette();
+    pressKey(window, { key: 'k', metaKey: true });
+
+    expect(screen.queryByText('common.nav.home')).toBeNull();
+    expect(screen.queryByText('common.nav.chat')).toBeNull();
+    expect(screen.getByText('common.nav.more')).toBeInTheDocument();
+  });
+
+  it('pushes /more when the Settings navigation item is selected (Issue #2642)', () => {
+    renderPalette();
+    pressKey(window, { key: 'k', metaKey: true });
+
+    fireEvent.click(screen.getByText('common.nav.more'));
+    expect(pushMock).toHaveBeenCalledWith('/more');
+  });
+
+  it('drops a stored Recent that only points at the removed nav items (Issue #2642)', () => {
+    localStorage.setItem(
+      'cm.palette.recents',
+      JSON.stringify([{ kind: 'nav', id: 'home' }, { kind: 'nav', id: 'chat' }])
+    );
+    renderPalette();
+    pressKey(window, { key: 'k', metaKey: true });
+
+    expect(screen.queryByText('commandPalette.groups.recent')).toBeNull();
+  });
+
+  it('keeps the surviving Recent entries and skips the removed ones (Issue #2642)', () => {
+    localStorage.setItem(
+      'cm.palette.recents',
+      JSON.stringify([{ kind: 'nav', id: 'home' }, { kind: 'nav', id: 'sessions' }])
+    );
+    renderPalette();
+    pressKey(window, { key: 'k', metaKey: true });
+
+    expect(screen.getByText('commandPalette.groups.recent')).toBeInTheDocument();
+    expect(screen.getAllByText('common.nav.sessions').length).toBeGreaterThanOrEqual(2);
+    expect(screen.queryByText('common.nav.home')).toBeNull();
+  });
+
   it('renders navigation items and pushes the route on select', () => {
     renderPalette();
     pressKey(window, { key: 'k', metaKey: true });
@@ -288,7 +329,7 @@ describe('CommandPalette (Issue #1053)', () => {
 
     fireEvent.change(input, { target: { value: 'sessions' } });
     await waitFor(() => {
-      expect(screen.queryByText('common.nav.home')).toBeNull();
+      expect(screen.queryByText('common.nav.review')).toBeNull();
     });
 
     // Enter on the focused element selects the single filtered item.
@@ -304,7 +345,7 @@ describe('CommandPalette (Issue #1053)', () => {
 
     await waitFor(() => {
       expect(screen.getByText('common.nav.sessions')).toBeInTheDocument();
-      expect(screen.queryByText('common.nav.home')).toBeNull();
+      expect(screen.queryByText('common.nav.review')).toBeNull();
     });
   });
 
