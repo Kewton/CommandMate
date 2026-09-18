@@ -207,6 +207,41 @@ const DECLARED: readonly Declared[] = [
     why: 'Issue #2643 が削除した Home の「最近のセッション」部品。§6.1 の DR3-005 が `sessionStatusByCli` を読む 14 ファイルの実測（当時）として引いており、同じ箇所に削除済みと注記した',
   },
   {
+    text: 'src/app/api/assistant/{conversation,current-output,session,start,terminal}/route.ts',
+    category: 'history',
+    why: 'Issue #2655 が Assistant Chat と一緒に削除した 5 本の route。§4 D4 の routes 内訳表が Phase 1 時点の恒久除外として引いており、同じ行に削除済みと注記した',
+  },
+  {
+    text: 'src/app/api/assistant/conversation/route.ts',
+    category: 'history',
+    why: 'Issue #2655 が削除した route。付録 A の #1 行（Phase 1 の初期リスト）が実測記録として引いており、同じ行に削除済みと注記した',
+  },
+  {
+    text: 'src/app/api/assistant/current-output/route.ts',
+    category: 'history',
+    why: 'Issue #2655 が削除した route。付録 A の #2 行（Phase 1 の初期リスト）が実測記録として引いており、同じ行に削除済みと注記した',
+  },
+  {
+    text: 'src/app/api/assistant/session/route.ts',
+    category: 'history',
+    why: 'Issue #2655 が削除した route。付録 A の #3 行（Phase 1 の初期リスト）が実測記録として引いており、同じ行に削除済みと注記した',
+  },
+  {
+    text: 'src/app/api/assistant/start/route.ts',
+    category: 'history',
+    why: 'Issue #2655 が削除した route。付録 A の #4 行（Phase 1 の初期リスト）が実測記録として引いており、同じ行に削除済みと注記した',
+  },
+  {
+    text: 'src/app/api/assistant/terminal/route.ts',
+    category: 'history',
+    why: 'Issue #2655 が削除した route。付録 A の #5 行（Phase 1 の初期リスト）が実測記録として引いており、同じ行に削除済みと注記した',
+  },
+  {
+    text: 'src/lib/polling/assistant-conversation-poller.ts',
+    category: 'history',
+    why: 'Issue #2655 が削除した poller。§4 D4 の pollers 行と付録 A の #19 行が Phase 1 時点の段階解消対象として引いており、両方に削除済みと注記した',
+  },
+  {
     text: 'tests/unit/hooks/sources/event-id-validation.test.ts',
     category: 'planned',
     why: '§11 が「新規」と明記したテスト。§13.2 S1〜S3 の受入条件の置き場',
@@ -317,7 +352,8 @@ describe('DECLARED is reviewable', () => {
       // state the deletion, so `history` describes what the document says rather
       // than what a reader would have to already know. The split is unchanged.
       // Issue #2643 deleted `RecentSessionsList` (5 -> 6).
-      history: 6,
+      // Issue #2655 deleted Assistant Chat's server side: seven more path spans (6 -> 13).
+      history: 13,
       external: 5,
       prose: 1,
       'test-only': 1,

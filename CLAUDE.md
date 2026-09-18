@@ -146,7 +146,6 @@ src/
 ├── hooks/         # カスタムフック（useContextMenu等）
 ├── lib/           # ユーティリティ・ビジネスロジック
 │   ├── api/       # APIユーティリティ（Issue #600）
-│   ├── assistant/ # Assistant Chat実行（コンテキスト生成・非インタラクティブ実行）
 │   ├── browser-compat/ # ブラウザ互換シム（Fullscreen API等、Issue #763）
 │   ├── cli-tools/ # CLIツール抽象化層
 │   ├── db/        # データベース（Issue #481）

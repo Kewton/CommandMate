@@ -387,7 +387,7 @@ interface TurnRecord {
 | カテゴリ | ファイル数 | 対象と使用 API | 区分 | 解消の道筋 |
 |---|---|---|---|---|
 | routes（`src/app/api/**`） | 11 | assistant 5（`hasSession` / `capturePane`）／ `worktrees/route.ts`・`worktrees/[id]/route.ts`（`listSessions`）／ `worktrees/[id]/{capture,kill-session,special-keys,terminal}`（`capturePane` / `killSession` / `sendKeys` / `invalidateCache`） | 恒久除外 7 ＋ 段階解消 4 | 下の routes 内訳表のとおり。段階解消 4 件は Phase 2 |
-| pollers | 4 | `src/lib/auto-yes-poller.ts`（`invalidateCache`）／ `src/lib/polling/assistant-conversation-poller.ts`（`hasSession`）／ `src/lib/polling/global-session-poller.ts`（`hasSession`）／ `src/lib/polling/response-checker.ts`（`CACHE_MAX_CAPTURE_LINES` / `isCaptureWindowSaturated`） | **段階解消（4）** | D4 は禁止対象に poller を名指ししているのに、初版はこの 4 本をどちらの区分にも置いていなかった。**読み取りは第 2 のゲートウェイ（`captureSessionOutput`）と `ICLITool.isRunning` 経由に寄せ、キャッシュ無効化と capture 上限は `session` ファサード**（`src/lib/session/` に `invalidateSessionCache()` / `getCaptureWindow()` を新設し、行数は `ICLITool.captureSpec()` から取る）を通す。Phase 2（#1905 / #1906 と同じ層） |
+| pollers | 4 | `src/lib/auto-yes-poller.ts`（`invalidateCache`）／ `src/lib/polling/assistant-conversation-poller.ts`（`hasSession`。Issue #2655 で削除済み）／ `src/lib/polling/global-session-poller.ts`（`hasSession`）／ `src/lib/polling/response-checker.ts`（`CACHE_MAX_CAPTURE_LINES` / `isCaptureWindowSaturated`） | **段階解消（4）** | D4 は禁止対象に poller を名指ししているのに、初版はこの 4 本をどちらの区分にも置いていなかった。**読み取りは第 2 のゲートウェイ（`captureSessionOutput`）と `ICLITool.isRunning` 経由に寄せ、キャッシュ無効化と capture 上限は `session` ファサード**（`src/lib/session/` に `invalidateSessionCache()` / `getCaptureWindow()` を新設し、行数は `ICLITool.captureSpec()` から取る）を通す。Phase 2（#1905 / #1906 と同じ層） |
 | ws / broadcast | 6 | `src/lib/ws-server.ts`（control-mode transport / flags / metrics）／ `src/lib/realtime/terminal-broadcast.ts`（`invalidateCache`）／ `src/lib/session-key-sender.ts`・`src/lib/prompt-answer-sender.ts`（`sendKeys` / `sendSpecialKeys` / `invalidateCache`）／ `src/lib/pasted-text-helper.ts`（`capturePane` / `sendKeys`）／ `src/lib/session-cleanup.ts`（`killSession` / `hasSession` / `clearAllCache`） | **恒久除外 1（`ws-server`）＋ 段階解消 5** | キー送出系（`session-key-sender` / `prompt-answer-sender` / `pasted-text-helper`）は `ICLITool.sendMessage` と special-keys 経路へ、`session-cleanup` は `ICLITool.killSession` へ、`terminal-broadcast` のキャッシュ無効化は上記ファサードへ寄せる。**`ws-server` の control-mode transport / flags / metrics は tmux トランスポートそのもの**で対応する `ICLITool` メソッドが存在しないため**恒久除外** |
 | client（型のみ import ＋ フラグ参照） | 4 | `src/components/worktree/NavigationButtons.tsx`・`src/components/worktree/TerminalEscapeHatch.tsx`（`import type { NavigationKey }`）／ `src/components/Terminal.tsx`・`src/app/worktrees/[id]/terminal/page.tsx`（`isTmuxControlModeEnabledForClient`） | **段階解消（4）** | 型 2 件は `NavigationKey` の型モジュール移設で解消（上記決定。`allowTypeImports` は採らない）。フラグ 2 件は `isTmuxControlModeEnabledForClient` を client 安全モジュール（`src/config/` か `src/lib/browser-compat/`）へ移設して解消 |
 | cli（`src/cli/**`） | 1 | `src/cli/commands/capture.ts`（`../../lib/tmux/transcript-squeeze`。`src/cli/**` の違反はこれだけ） | 恒久除外 | tmux プロセスに触れない純粋な文字列関数で、D4 が防ごうとしている「ツール固有の前後処理の迂回」に当たらない。`src/lib/text/` 等へ移設できたら allowlist から外す（別 Issue） |
@@ -397,7 +397,7 @@ interface TurnRecord {
 
 | 区分 | 対象 | 理由 |
 |---|---|---|
-| 恒久除外 | `src/app/api/assistant/{conversation,current-output,session,start,terminal}/route.ts`（5 件） | `hasSession` / `capturePane`。Assistant Chat のセッションには対応する `ICLITool` インスタンスが存在しない |
+| 恒久除外 | `src/app/api/assistant/{conversation,current-output,session,start,terminal}/route.ts`（5 件。Issue #2655 で Assistant Chat ごと削除済み） | `hasSession` / `capturePane`。Assistant Chat のセッションには対応する `ICLITool` インスタンスが存在しない |
 | 恒久除外 | `src/app/api/worktrees/route.ts`、`src/app/api/worktrees/[id]/route.ts`（2 件） | `listSessions`（tmux セッションの全列挙）に対応する `ICLITool` メソッドが無い |
 | 段階解消 | `src/app/api/worktrees/[id]/{capture,kill-session,special-keys,terminal}/route.ts`（4 件） | 対応する経路がある（`capture` は `captureSessionOutput`、他は `ICLITool` メソッド）。Phase 2 で置換する |
 
@@ -1275,11 +1275,11 @@ Stage 4 が develop `90b67eb9` に対して実測し、**追加の対処を要�
 
 | # | パス | 使用している tmux API | import の綴り | カテゴリ | 区分 | 寄せ先 |
 |---|---|---|---|---|---|---|
-| 1 | `src/app/api/assistant/conversation/route.ts` | `hasSession` | `@/lib/tmux/**` | routes | 恒久除外 | —（Assistant Chat のセッションに対応する `ICLITool` インスタンスが無い） |
-| 2 | `src/app/api/assistant/current-output/route.ts` | `capturePane` / `hasSession` | `@/lib/tmux/**` | routes | 恒久除外 | 同上 |
-| 3 | `src/app/api/assistant/session/route.ts` | `hasSession` | `@/lib/tmux/**` | routes | 恒久除外 | 同上 |
-| 4 | `src/app/api/assistant/start/route.ts` | `hasSession` | `@/lib/tmux/**` | routes | 恒久除外 | 同上 |
-| 5 | `src/app/api/assistant/terminal/route.ts` | `hasSession` | `@/lib/tmux/**` | routes | 恒久除外 | 同上 |
+| 1 | `src/app/api/assistant/conversation/route.ts` | `hasSession` | `@/lib/tmux/**` | routes | 恒久除外 | —（Assistant Chat のセッションに対応する `ICLITool` インスタンスが無い。#1〜#5 は Issue #2655 で削除済み） |
+| 2 | `src/app/api/assistant/current-output/route.ts` | `capturePane` / `hasSession` | `@/lib/tmux/**` | routes | 恒久除外 | 同上（削除済み） |
+| 3 | `src/app/api/assistant/session/route.ts` | `hasSession` | `@/lib/tmux/**` | routes | 恒久除外 | 同上（削除済み） |
+| 4 | `src/app/api/assistant/start/route.ts` | `hasSession` | `@/lib/tmux/**` | routes | 恒久除外 | 同上（削除済み） |
+| 5 | `src/app/api/assistant/terminal/route.ts` | `hasSession` | `@/lib/tmux/**` | routes | 恒久除外 | 同上（削除済み） |
 | 6 | `src/app/api/worktrees/[id]/capture/route.ts` | `hasSession` / `capturePane` | `@/lib/tmux/**` | routes | 段階解消 | `captureSessionOutput`（第 2 のゲートウェイ） |
 | 7 | `src/app/api/worktrees/[id]/kill-session/route.ts` | `killSession` | `@/lib/tmux/**` | routes | 段階解消 | `ICLITool.killSession`（#1905。陽性テスト対象） |
 | 8 | `src/app/api/worktrees/[id]/route.ts` | `listSessions` | `@/lib/tmux/**` | routes | 恒久除外 | —（`listSessions` に対応する `ICLITool` メソッドが無い） |
@@ -1293,7 +1293,7 @@ Stage 4 が develop `90b67eb9` に対して実測し、**追加の対処を要�
 | 16 | `src/components/worktree/TerminalEscapeHatch.tsx` | **型のみ** `NavigationKey` | `@/lib/tmux/**` | client（型のみ） | 段階解消 | 同 15 |
 | 17 | `src/lib/auto-yes-poller.ts` | `invalidateCache` | **`./tmux/**`** | pollers | 段階解消 | `session` ファサード（`invalidateSessionCache()`） |
 | 18 | `src/lib/pasted-text-helper.ts` | `capturePane` / `sendKeys` | **`./tmux/**`** | ws / broadcast | 段階解消 | `ICLITool.sendMessage` ＋ `captureSessionOutput` |
-| 19 | `src/lib/polling/assistant-conversation-poller.ts` | `hasSession` | `@/lib/tmux/**` | pollers | 段階解消 | `ICLITool.isRunning` |
+| 19 | `src/lib/polling/assistant-conversation-poller.ts` | `hasSession` | `@/lib/tmux/**` | pollers | 段階解消 | `ICLITool.isRunning`（Issue #2655 で削除済み） |
 | 20 | `src/lib/polling/global-session-poller.ts` | `hasSession` | `@/lib/tmux/**` | pollers | 段階解消 | `ICLITool.isRunning` |
 | 21 | `src/lib/polling/response-checker.ts` | `CACHE_MAX_CAPTURE_LINES` / `isCaptureWindowSaturated` | `@/lib/tmux/**` | pollers | 段階解消 | `captureSpec()` ＋ `session` ファサード（capture 上限） |
 | 22 | `src/lib/prompt-answer-sender.ts` | `sendKeys` / `sendSpecialKeys` / `invalidateCache` | **`./tmux/**`** | ws / broadcast | 段階解消 | `ICLITool`（送信 / special-keys）＋ `session` ファサード |
