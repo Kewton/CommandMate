@@ -230,4 +230,51 @@ describe('useWorktreesCache — failed first load (Issue #2059)', () => {
     });
     expect(mockFetch).toHaveBeenCalledTimes(callsBeforeUnmount);
   });
+
+  it('goes back to loading while an empty cache retries after a failure (Issue #2643)', async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ error: 'boom' }, 500));
+    const { result } = renderHook(() => useWorktreesCache());
+    await waitFor(() => {
+      expect(result.current.error).not.toBeNull();
+    });
+    expect(result.current.isLoading).toBe(false);
+
+    let resolveRetry!: (value: Response) => void;
+    mockFetch.mockReturnValueOnce(new Promise<Response>((resolve) => { resolveRetry = resolve; }));
+    let pending!: Promise<void>;
+    act(() => {
+      pending = result.current.refresh();
+    });
+    // 応答待ちの間: エラーは消え、読込中に戻っている（「読込完了・空・エラーなし」にならない）
+    expect(result.current.error).toBeNull();
+    expect(result.current.isLoading).toBe(true);
+
+    await act(async () => {
+      resolveRetry(jsonResponse({ worktrees: [{ id: 'wt-1' }], repositories: [] }));
+      await pending;
+    });
+    expect(result.current.isLoading).toBe(false);
+    expect(result.current.worktrees).toHaveLength(1);
+  });
+
+  it('keeps isLoading false when an empty list that loaded fine is fetched again (Issue #2643)', async () => {
+    mockFetch.mockResolvedValue(jsonResponse({ worktrees: [], repositories: [] }));
+    const { result } = renderHook(() => useWorktreesCache());
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    let resolveAgain!: (value: Response) => void;
+    mockFetch.mockReturnValueOnce(new Promise<Response>((resolve) => { resolveAgain = resolve; }));
+    let pending!: Promise<void>;
+    act(() => {
+      pending = result.current.refresh();
+    });
+    expect(result.current.isLoading).toBe(false);
+    await act(async () => {
+      resolveAgain(jsonResponse({ worktrees: [], repositories: [] }));
+      await pending;
+    });
+    expect(result.current.isLoading).toBe(false);
+  });
 });

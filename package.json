@@ -33,7 +33,8 @@
     "!.next/cache",
     "public/",
     "scripts/hooks/",
-    ".env.example"
+    ".env.example",
+    "release-notes/"
   ],
   "scripts": {
     "dev": "tsx server.ts",
