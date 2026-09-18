@@ -30,16 +30,35 @@
  *   - The toggle is rendered OUTSIDE the `role="tablist"` element so it is not
  *     part of the roving-tabindex Arrow/Home/End navigation and does not change
  *     the tab count or WAI-ARIA tablist semantics.
+ *
+ * Issue #2645:
+ *   - The settings menu button (gear) lives at the BOTTOM of the ActivityBar
+ *     (pinned via `mt-auto`). Rendered OUTSIDE the `role="tablist"` element.
  */
 
 'use client';
 
 import React, { memo, useCallback, useRef } from 'react';
 import { useTranslations } from 'next-intl';
-import { Menu } from 'lucide-react';
+import { useTheme } from 'next-themes';
+import { Menu, Settings } from 'lucide-react';
 import { ACTIVITIES, type ActivityId } from '@/config/activity-bar-config';
 import { Tooltip } from '@/components/common/Tooltip';
 import { useSidebarContext } from '@/contexts/SidebarContext';
+import { useAuthEnabled } from '@/contexts/AuthContext';
+import { useLocaleSwitch } from '@/hooks/useLocaleSwitch';
+import { useViewTransitionRouter } from '@/components/providers/ViewTransitionsProvider';
+import { LOCALE_LABELS, SUPPORTED_LOCALES } from '@/config/i18n-config';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/DropdownMenu';
 
 export interface ActivityBarProps {
   /** Currently active activity, or null when ActivityPane is closed. */
@@ -57,6 +76,92 @@ export interface ActivityBarProps {
 
 const ACTIVITY_BAR_ID = 'worktree-activity-bar';
 const ACTIVITY_PANE_ID = 'worktree-activity-pane';
+
+const GITHUB_URL = 'https://github.com/kewton/MyCodeBranchDesk';
+
+/**
+ * Issue #2645: the settings menu at the bottom of the ActivityBar.
+ *
+ * Outside the tablist for the same reason as the sidebar toggle (#747): it is
+ * not an activity, so it must not join the roving-tabindex navigation or the
+ * tab count. Local to this file on purpose.
+ */
+function ActivityBarSettingsMenu() {
+  const t = useTranslations('worktree');
+  const router = useViewTransitionRouter();
+  const { theme, setTheme } = useTheme();
+  const { currentLocale, switchLocale } = useLocaleSwitch();
+  const authEnabled = useAuthEnabled();
+  const label = t('activityBar.settings');
+  // Read at render time (not module scope) so a test can stub it.
+  const appVersion = process.env.NEXT_PUBLIC_APP_VERSION;
+
+  // Same flow as LogoutButton: always land on /login, even if the call fails.
+  const handleLogout = useCallback(async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+      window.location.href = '/login';
+    } catch {
+      window.location.href = '/login';
+    }
+  }, []);
+
+  return (
+    <DropdownMenu>
+      <Tooltip content={label} placement="right">
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            data-testid="activity-bar-settings"
+            aria-label={label}
+            className="flex items-center justify-center h-12 w-12 text-muted-foreground transition-colors hover:text-surface-foreground hover:bg-muted-foreground/10 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-inset"
+          >
+            <Settings size={20} aria-hidden="true" />
+          </button>
+        </DropdownMenuTrigger>
+      </Tooltip>
+      <DropdownMenuContent side="right" align="end" className="w-56">
+        <DropdownMenuLabel data-testid="activity-bar-settings-version">
+          {t('activityBar.settingsMenu.version', {
+            version: appVersion ? `v${appVersion}` : '-',
+          })}
+        </DropdownMenuLabel>
+        <DropdownMenuItem onSelect={() => router.push('/more')}>
+          {t('activityBar.settingsMenu.settings')}
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => router.push('/skills')}>
+          {t('activityBar.settingsMenu.skills')}
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuLabel>{t('activityBar.settingsMenu.theme')}</DropdownMenuLabel>
+        <DropdownMenuRadioGroup value={theme ?? 'system'} onValueChange={(value) => setTheme(value)}>
+          <DropdownMenuRadioItem value="light">{t('activityBar.settingsMenu.themeLight')}</DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="dark">{t('activityBar.settingsMenu.themeDark')}</DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="system">{t('activityBar.settingsMenu.themeSystem')}</DropdownMenuRadioItem>
+        </DropdownMenuRadioGroup>
+        <DropdownMenuLabel>{t('activityBar.settingsMenu.language')}</DropdownMenuLabel>
+        <DropdownMenuRadioGroup value={currentLocale} onValueChange={(value) => switchLocale(value)}>
+          {SUPPORTED_LOCALES.map((locale) => (
+            <DropdownMenuRadioItem key={locale} value={locale}>
+              {LOCALE_LABELS[locale]}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem asChild>
+          <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer">
+            {t('activityBar.settingsMenu.github')}
+          </a>
+        </DropdownMenuItem>
+        {authEnabled && (
+          <DropdownMenuItem onSelect={() => { void handleLogout(); }}>
+            {t('activityBar.settingsMenu.logout')}
+          </DropdownMenuItem>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
 
 export const ActivityBar = memo(function ActivityBar({
   active,
@@ -174,6 +279,10 @@ export const ActivityBar = memo(function ActivityBar({
             </Tooltip>
           );
         })}
+      </div>
+      {/* Issue #2645: settings menu, pinned to the bottom of the bar. */}
+      <div className="mt-auto">
+        <ActivityBarSettingsMenu />
       </div>
     </div>
   );
