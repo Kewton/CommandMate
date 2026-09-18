@@ -113,7 +113,8 @@
     "viewLabel": "View",
     "viewMode": {
       "grouped": "Repository",
-      "flat": "Branch"
+      "flat": "Branch",
+      "sessions": "Session"
     }
   },
   "confirmDelete": "Delete \"{name}\"?",

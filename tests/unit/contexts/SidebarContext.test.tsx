@@ -247,6 +247,18 @@ describe('SidebarContext', () => {
       expect(screen.getByTestId('viewMode').textContent).toBe('flat');
     });
 
+    it('should load the sessions view mode from localStorage (Issue #2656)', () => {
+      localStorage.setItem(SIDEBAR_VIEW_MODE_STORAGE_KEY, 'sessions');
+
+      render(
+        <SidebarProvider>
+          <TestConsumer />
+        </SidebarProvider>
+      );
+
+      expect(screen.getByTestId('viewMode').textContent).toBe('sessions');
+    });
+
     it('should use default when localStorage has invalid value', () => {
       localStorage.setItem(SIDEBAR_VIEW_MODE_STORAGE_KEY, 'invalid');
 
