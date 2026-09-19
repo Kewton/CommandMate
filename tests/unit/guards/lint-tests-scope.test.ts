@@ -126,7 +126,12 @@ describe('lint scope covers tests/ (Issue #2719)', () => {
     const pkg = JSON.parse(readFileSync(PACKAGE_JSON, 'utf-8')) as {
       scripts: Record<string, string>;
     };
-    expect(pkg.scripts.lint).toContain('eslint src tests');
+    // Issue #2736 replaced the directory enumeration with `eslint .`, so `tests/`
+    // is covered by the repository-wide walk rather than by being named. The
+    // intent of this assertion is unchanged — it still says "the lint command
+    // reaches tests/" — only the spelling that satisfies it has moved.
+    // tests/unit/guards/lint-repo-scope.test.ts owns the rest of that contract.
+    expect(pkg.scripts.lint).toContain('eslint .');
   });
 
   it('has exactly one `tests/**` override entry', () => {

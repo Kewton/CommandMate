@@ -51,11 +51,13 @@ const require_ = createRequire(import.meta.url);
 const SCRIPTS_GLOB = 'scripts/**';
 
 /**
- * The CommonJS override. Two elements, not one: `bin/` is a shebang entry point
- * and `.cjs` is an extension that *declares* CommonJS, and both are exempt for the
- * same reason, so they share an entry.
+ * The CommonJS override. One entry for every spelling of "this file is CommonJS on
+ * purpose": `bin/` is a shebang entry point, `.cjs` is an extension that *declares*
+ * CommonJS, and `next.config.js` is a `module.exports = ` config file — Issue #2736
+ * added the third when `eslint .` first reached the repository root. All three are
+ * exempt for the same reason, so they share an entry.
  */
-const COMMONJS_FILES = ['bin/**', '**/*.cjs'];
+const COMMONJS_FILES = ['bin/**', '**/*.cjs', 'next.config.js'];
 
 /**
  * 段階解消 — real debt parked at `warn` so the scope change could land at exit 0.
@@ -107,8 +109,8 @@ const scriptsOverrides = rc.overrides.filter(
 
 /**
  * The CommonJS entry is found by `files.includes("bin/**")`, never by comparing
- * `files` to `["bin/**"]` — it is a two-element array, so an equality search finds
- * nothing and the assertions below would pass vacuously.
+ * `files` to `["bin/**"]` — it is a multi-element array (three since #2736), so an
+ * equality search finds nothing and the assertions below would pass vacuously.
  */
 const commonjsOverrides = rc.overrides.filter((o) => o.files.includes('bin/**'));
 
@@ -143,9 +145,15 @@ describe('lint scope covers scripts/ and bin/ (Issue #2732)', () => {
     const lint = pkg.scripts.lint;
     const [targets, ext] = lint.split('--ext');
 
-    for (const dir of ['src', 'tests', 'scripts', 'bin']) {
-      expect(targets.trim().split(/\s+/), `${dir} must be a lint target`).toContain(dir);
-    }
+    // Issue #2736 inverted the scheme: the directories are no longer enumerated,
+    // `eslint .` walks the repository and `.eslintrc.json` lists the exclusions.
+    // The intent here is unchanged — `scripts/` and `bin/` must be inside the lint
+    // scope — but what proves it is now the repository-wide walk, so this asserts
+    // that walk is in place and lint-repo-scope.test.ts pins what it may skip.
+    expect(
+      targets.trim().split(/\s+/),
+      '`eslint .` is what puts scripts/ and bin/ in scope (#2736)',
+    ).toEqual(['eslint', '.']);
     // `.mjs` is what 12 of the scripts are written in and `.cjs` is what the two
     // spawned remote fixtures are: without both, widening the directory list lints
     // a third of `scripts/` and nothing else.
@@ -157,7 +165,7 @@ describe('lint scope covers scripts/ and bin/ (Issue #2732)', () => {
     expect(scriptsOverrides).toHaveLength(1);
   });
 
-  it('has exactly one CommonJS override, covering bin/ and every .cjs', () => {
+  it('has exactly one CommonJS override, covering bin/, every .cjs and next.config.js', () => {
     expect(commonjsOverrides).toHaveLength(1);
     expect(commonjsOverrides[0].files).toEqual(COMMONJS_FILES);
   });
