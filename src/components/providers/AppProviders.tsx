@@ -23,6 +23,8 @@ import { ViewTransitionsProvider } from '@/components/providers/ViewTransitionsP
 import { RealtimeProvider } from '@/hooks/useRealtimeConnection';
 import { ConfirmProvider } from '@/components/ui/ConfirmDialog';
 import { AppUpdateProvider } from '@/contexts/AppUpdateContext';
+import { SettingsDialogProvider } from '@/contexts/SettingsDialogContext';
+import { SettingsDialog } from '@/components/settings';
 import { ToastProvider } from '@/components/common/Toast';
 import { WaitingToastListener } from '@/components/notifications/WaitingToastListener';
 import { WaitingSoundListener } from '@/components/notifications/WaitingSoundListener';
@@ -83,13 +85,20 @@ export function AppProviders({ children, locale, messages, timeZone, authEnabled
                               content so the restart watch survives modals and
                               navigation. */}
                           <AppUpdateProvider>
-                            {/* Issue #1141: View Transitions wraps the routed content. */}
-                            <ViewTransitionsProvider>
-                              {children}
-                            </ViewTransitionsProvider>
-                            {/* Issue #1124: registers the Service Worker (prod only)
-                                and shows the update-available prompt. */}
-                            <ServiceWorkerRegistrar />
+                            {/* Issue #2708: app-wide settings-modal state,
+                                outside the routed content so the modal
+                                survives navigation. */}
+                            <SettingsDialogProvider>
+                              {/* Issue #1141: View Transitions wraps the routed content. */}
+                              <ViewTransitionsProvider>
+                                {children}
+                              </ViewTransitionsProvider>
+                              {/* Issue #1124: registers the Service Worker (prod only)
+                                  and shows the update-available prompt. */}
+                              <ServiceWorkerRegistrar />
+                              {/* Issue #2708: the only settings modal in the app. */}
+                              <SettingsDialog />
+                            </SettingsDialogProvider>
                           </AppUpdateProvider>
                         </ConfirmProvider>
                       </KeyboardShortcutsProvider>
