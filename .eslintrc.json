@@ -65,6 +65,23 @@
       }
     ]
   },
+  // Issue #2736: `npm run lint` is `eslint .` now, so the repository is lint-visible
+  // by default and only these seven paths are excluded. Every one of them is
+  // .gitignore'd AND holds zero tracked files (build output / run residue), which is
+  // the only admissible reason to be here — tests/unit/guards/lint-repo-scope.test.ts
+  // re-measures both facts on every run. `node_modules/` is ESLint's own default and
+  // is deliberately absent; `.claude/` and `.agents/` are absent because ESLint 8
+  // ignores dot-directories by default (that same guard pins the resulting set, so
+  // the default cannot silently swallow a new one).
+  "ignorePatterns": [
+    ".next/",
+    "coverage/",
+    "dev-reports/",
+    "dist/",
+    "next-env.d.ts",
+    "skills/backups/",
+    "workspace/"
+  ],
   // Entries 1-3 — Issue #1922 / §4 D4: allowlist for the no-restricted-imports rule
   // above. Split into three entries on purpose so the classification is machine-readable
   // (tests/unit/guards/tmux-import-allowlist.test.ts pins each list exactly).
@@ -191,11 +208,41 @@
         // 7) Issue #2732: permanent, not debt. package.json has no "type", so this
         // repository is CommonJS by default; bin/commandmate.js is a shebang entry point
         // whose body is one require(), and a .cjs extension IS a CommonJS declaration.
+        // Issue #2736 added next.config.js for the same reason: `eslint .` reaches it now,
+        // and `module.exports = ` + `require()` is the correct spelling for a Next config
+        // in a CommonJS package - not debt, so it is exempt permanently rather than staged.
         "bin/**",
-        "**/*.cjs"
+        "**/*.cjs",
+        "next.config.js"
       ],
       "rules": {
         "@typescript-eslint/no-require-imports": "off"
+      }
+    },
+    {
+      "files": [
+        // 8) Issue #2736: real debt that `eslint .` newly reaches. Parked at "warn" so the
+        // scope change lands at exit 0; Issue #2737 fixes the six findings and deletes
+        // this entry. Do not widen it.
+        "public/sw.js",
+        "website/main.js"
+      ],
+      "rules": {
+        "@typescript-eslint/no-unused-vars": "warn",
+        "@typescript-eslint/no-unused-expressions": "warn"
+      }
+    },
+    {
+      "files": [
+        // 9) Issue #2736: server.ts:803 `await import('./src/lib/tmux/read-mode')` trips the
+        // tmux dynamic-import selector (#1922 §4 D4, DR4-005). The comment at server.ts:794-801
+        // says a static import breaks Next's AsyncLocalStorage bootstrap and kills the first
+        // request, so this is NOT fixable by hoisting. Parked at "warn" to unblock `eslint .`;
+        // Issue #2738 decides what it becomes.
+        "server.ts"
+      ],
+      "rules": {
+        "no-restricted-syntax": "warn"
       }
     }
   ]
