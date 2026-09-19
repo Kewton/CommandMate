@@ -22,9 +22,9 @@
  * on this branch rather than assumed:
  *
  * 1. **ESLint cannot hold the allowlist to a count.** `npm run lint` does cover
- *    `tests/` as well as `src` since Issue #2719, but a rule set has no way to say
- *    "these 22 files and no others are exempt" — an added `overrides` entry is
- *    always green. The count lives here.
+ *    `tests/` (Issue #2719) and `scripts/` + `bin/` (Issue #2732) as well as `src`,
+ *    but a rule set has no way to say "these 22 files and no others are exempt" — an
+ *    added `overrides` entry is always green. The count lives here.
  * 2. **`overrides.files` is matched with minimatch.** A literal Next.js dynamic
  *    segment written as `src/app/api/worktrees/[id]/route.ts` is a *character
  *    class* and matches `.../i/route.ts` — not the real directory. Five of the 22
@@ -98,6 +98,27 @@ const STAGED_REMOVAL = [
 
 const ALLOWLIST = [...PERMANENT_EXEMPT, ...STAGED_REMOVAL].slice().sort();
 
+/**
+ * The `scripts/` column of the same allowlist, opened by Issue #2732 when
+ * `npm run lint` grew to cover `scripts/` and `bin/`.
+ *
+ * §4 D4 governs this column exactly as it governs the `src/` ones: **entries may
+ * only ever be deleted from it; adding one is forbidden.** It is pinned as a
+ * sorted path enumeration and never as a directory-wide `off` — a `scripts/**`
+ * exemption would silently exempt every file put there afterwards.
+ *
+ * Both files are development measurement harnesses rather than the
+ * route / CLI / poller / job-executor that §4 D4 requires to go through
+ * `ICLITool`: `legacy-tmux-probe/probe.ts` measures legacy tmux (<3.2)
+ * reading-mode behaviour directly, and calling it through the gateway would erase
+ * the very thing it measures, while `canary/session.ts` is the canary's session
+ * substrate, whose job is to ask tmux directly whether a session is alive.
+ */
+const SCRIPTS_EXEMPT = [
+  'scripts/canary/session.ts',
+  'scripts/legacy-tmux-probe/probe.ts',
+] as const;
+
 // --------------------------------------------------------------------------
 // .eslintrc.json access
 // --------------------------------------------------------------------------
@@ -138,6 +159,22 @@ const rc = readEslintRc();
  * entries rather than `rc.overrides` wholesale.
  */
 const srcOverrides = rc.overrides.filter((o) => o.files.some((f) => f.startsWith('src/')));
+
+/**
+ * The `scripts/` exemption, selected by shape rather than by position: every
+ * element of `files` names something under `scripts/` and the entry turns
+ * `no-restricted-imports` off. A directory-wide `scripts/**` written this way is
+ * caught by both assertions below — it fails the enumeration and the ban.
+ */
+const scriptsExemptOverrides = rc.overrides.filter(
+  (o) =>
+    o.files.length > 0 &&
+    o.files.every((f) => f.startsWith('scripts/')) &&
+    o.rules?.['no-restricted-imports'] === 'off',
+);
+
+/** Every override that targets `scripts/` as a directory. */
+const scriptsDirOverrides = rc.overrides.filter((o) => o.files.includes('scripts/**'));
 
 // --------------------------------------------------------------------------
 // Programmatic ESLint, deliberately reading the repo's real rule config
@@ -456,4 +493,65 @@ describe('lib/tmux import guard: dynamic access stays at zero', () => {
     }
     expect(offenders).toEqual([]);
   });
+});
+
+describe('lib/tmux import guard: the scripts/ exemption (Issue #2732)', () => {
+  it('matches .eslintrc.json exactly, as one sorted enumeration', () => {
+    expect(scriptsExemptOverrides).toHaveLength(1);
+    expect(scriptsExemptOverrides[0].files.map(unescapeGlob)).toEqual([...SCRIPTS_EXEMPT]);
+    expect([...SCRIPTS_EXEMPT]).toEqual([...SCRIPTS_EXEMPT].slice().sort());
+    expect(new Set(SCRIPTS_EXEMPT).size).toBe(SCRIPTS_EXEMPT.length);
+  });
+
+  it('never exempts scripts/ by directory', () => {
+    // §4 D4: the allowlist is a path enumeration, so `scripts/**` may carry the
+    // scope override's other rules but never `no-restricted-imports`. Without this
+    // assertion the enumeration above can be made irrelevant by one extra line,
+    // and nothing else in the repository would notice.
+    expect(scriptsDirOverrides.length).toBeGreaterThan(0);
+    for (const override of scriptsDirOverrides) {
+      expect(
+        Object.keys(override.rules ?? {}),
+        'a scripts/** override may not switch off no-restricted-imports — ' +
+          'enumerate the individual files instead (§4 D4)',
+      ).not.toContain('no-restricted-imports');
+    }
+  });
+
+  it('keeps the dynamic-access selectors live inside scripts/', () => {
+    // The scope override re-declares `no-restricted-syntax` to drop the i18n
+    // selector; switching the key off instead would take the tmux dynamic-import
+    // and require selectors with it, across the whole of scripts/.
+    for (const override of scriptsDirOverrides) {
+      const declared = override.rules?.['no-restricted-syntax'];
+      if (declared === undefined) continue;
+      expect(declared, 'no-restricted-syntax may not be switched off for scripts/').not.toBe('off');
+      const entry = declared as [string, ...{ selector: string }[]];
+      expect(entry[0]).toBe('error');
+      expect(entry.slice(1)).toEqual(tmuxSyntaxSelectors());
+    }
+  });
+
+  it('names only files that exist and still import tmux directly', async () => {
+    // Positive control, the same shape the src/ side uses: matching the config is
+    // not enough, because an exemption outlives the import it was written for.
+    const exempt = makeEslint({ withAllowlist: true });
+    const unexempt = makeEslint({ withAllowlist: false });
+
+    for (const rel of SCRIPTS_EXEMPT) {
+      const abs = join(REPO_ROOT, rel);
+      expect(existsSync(abs), `${rel} is exempt but not on disk`).toBe(true);
+      const text = readFileSync(abs, 'utf-8');
+
+      expect(
+        await lintOne(unexempt, abs, text),
+        `${rel} no longer imports tmux directly — delete its exemption`,
+      ).toContain('error:no-restricted-imports');
+
+      expect(
+        await lintOne(exempt, abs, text),
+        `${rel} is listed in the exemption but still reported`,
+      ).not.toContain('error:no-restricted-imports');
+    }
+  }, 60_000);
 });

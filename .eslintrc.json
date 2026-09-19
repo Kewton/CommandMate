@@ -70,6 +70,9 @@
   // (tests/unit/guards/tmux-import-allowlist.test.ts pins each list exactly).
   // Entry 4 is unrelated to tmux: it is the tests/ scope override added by Issue #2719
   // (pinned by tests/unit/guards/lint-tests-scope.test.ts).
+  // Entries 5-7 are the scripts/ + bin/ scope override added by Issue #2732 (pinned by
+  // tests/unit/guards/lint-scripts-scope.test.ts); entry 6 is a second tmux allowlist and
+  // is pinned by tmux-import-allowlist.test.ts alongside entries 1-3.
   // NOTE: "[id]" is escaped as "\\[id\\]" because overrides.files is matched with
   // minimatch - an unescaped "[id]" is a character class and matches "i" or "d", not the
   // literal Next.js dynamic-segment directory.
@@ -139,6 +142,63 @@
         "no-restricted-syntax": "off",
         "no-restricted-imports": "off",
         "@next/next/no-assign-module-variable": "off"
+      }
+    },
+    {
+      "files": [
+        // 5) Issue #2732: `npm run lint` now covers scripts/ and bin/ too.
+        // `no-restricted-syntax` is RE-DECLARED here, not switched off: the root rule
+        // holds three selectors and only the first (the i18n literal detector, #1271) is
+        // a false positive on scripts/. The other two are the tmux dynamic-import /
+        // require ban (#1922 §4 D4, DR4-005), which must stay live here — so they are
+        // copied verbatim, still at "error". Keep them byte-identical to the root rule
+        // (tests/unit/guards/lint-scripts-scope.test.ts deep-equals the two).
+        // The three "warn" entries below are staged debt (7 findings), promoted back to
+        // "error" by Issue #2733 as each one reaches zero.
+        "scripts/**"
+      ],
+      "rules": {
+        "no-restricted-syntax": [
+          "error",
+          {
+            "selector": "ImportExpression[source.value=/(^|\\/)tmux(\\/|$)/]",
+            "message": "Issue #1922 (§4 D4, DR4-005): ESLint 8's core no-restricted-imports only sees static import / export ... from, so a dynamic import() or require() of src/lib/tmux/** would slip past it. Same rule as the static form: go through the CLITool gateway or captureSessionOutput. There is no allowlist for this one - keep it at zero."
+          },
+          {
+            "selector": "CallExpression[callee.name='require'][arguments.0.value=/(^|\\/)tmux(\\/|$)/]",
+            "message": "Issue #1922 (§4 D4, DR4-005): ESLint 8's core no-restricted-imports only sees static import / export ... from, so a dynamic import() or require() of src/lib/tmux/** would slip past it. Same rule as the static form: go through the CLITool gateway or captureSessionOutput. There is no allowlist for this one - keep it at zero."
+          }
+        ],
+        "@typescript-eslint/no-unused-vars": "warn",
+        "@typescript-eslint/no-explicit-any": "warn",
+        "@typescript-eslint/no-this-alias": "warn"
+      }
+    },
+    {
+      "files": [
+        // 6) Issue #2732 / §4 D4: the tmux allowlist as a sorted path enumeration, never
+        // a directory-wide "off" — pinned by tests/unit/guards/tmux-import-allowlist.test.ts
+        // (SCRIPTS_EXEMPT). Additions are forbidden; deletions only. Both files are
+        // development measurement harnesses, not route / CLI / poller / job-executor, and
+        // probe.ts measures legacy tmux (<3.2) reading-mode behaviour directly — routing it
+        // through the gateway would erase the very thing it measures.
+        "scripts/canary/session.ts",
+        "scripts/legacy-tmux-probe/probe.ts"
+      ],
+      "rules": {
+        "no-restricted-imports": "off"
+      }
+    },
+    {
+      "files": [
+        // 7) Issue #2732: permanent, not debt. package.json has no "type", so this
+        // repository is CommonJS by default; bin/commandmate.js is a shebang entry point
+        // whose body is one require(), and a .cjs extension IS a CommonJS declaration.
+        "bin/**",
+        "**/*.cjs"
+      ],
+      "rules": {
+        "@typescript-eslint/no-require-imports": "off"
       }
     }
   ]
