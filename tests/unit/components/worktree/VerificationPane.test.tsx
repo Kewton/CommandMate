@@ -42,15 +42,6 @@ const CONFIG_PRESENT: VerifyConfigResponse = {
   error: null,
 };
 
-/** A repository with no `.commandmate/verify.yaml` at all. */
-const CONFIG_ABSENT: VerifyConfigResponse = {
-  exists: false,
-  path: '.commandmate/verify.yaml',
-  gates: [],
-  options: null,
-  plannedGateIds: [],
-  error: null,
-};
 
 vi.mock('next-intl', async () => {
   const { createRealIntlMock } = await import('@tests/helpers/real-intl');

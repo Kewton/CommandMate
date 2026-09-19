@@ -6,7 +6,7 @@
 import { describe, it, expect } from 'vitest';
 import { sanitizeMessage, buildSummaryPrompt, buildMetricsSection, MAX_TOTAL_MESSAGE_LENGTH } from '@/lib/summary-prompt-builder';
 import { MAX_MESSAGE_LENGTH } from '@/lib/session/claude-executor';
-import { MAX_PROMPT_LENGTH, MAX_USER_DATA_LENGTH, MAX_ISSUE_CONTEXT_LENGTH, MAX_METRICS_SECTION_LENGTH } from '@/config/review-config';
+import { MAX_PROMPT_LENGTH, MAX_USER_DATA_LENGTH, MAX_METRICS_SECTION_LENGTH } from '@/config/review-config';
 import type { VibeMetrics } from '@/lib/metrics/vibe-metrics';
 import type { ChatMessage } from '@/types/models';
 import type { RepositoryCommitLogs, IssueInfo } from '@/types/git';

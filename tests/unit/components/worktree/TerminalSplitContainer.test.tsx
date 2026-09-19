@@ -961,12 +961,6 @@ describe('[#2421] TerminalSplitContainer 2x2 grid', () => {
     // Every `<number>fr` in the template, wherever it sits — the row track is
     // `minmax(280px, 0.5fr)`, so splitting on spaces would miss it entirely and
     // report a sum of 0 for a perfectly good template.
-    const frSum = (template: string): number =>
-      [...template.matchAll(/([\d.]+)fr/g)].reduce(
-        (total, match) => total + parseFloat(match[1]),
-        0,
-      );
-
     const frFactors = (template: string): number[] =>
       [...template.matchAll(/([\d.]+)fr/g)].map((m) => parseFloat(m[1]));
 

@@ -12,18 +12,15 @@
  */
 
 import type { ReactElement } from 'react';
-import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act, createEvent } from '@testing-library/react';
 import { MarkdownEditor } from '@/components/worktree/MarkdownEditor';
 import { ToastProvider } from '@/components/common/Toast';
 import { ConfirmProvider } from '@/components/ui/ConfirmDialog';
-import type { ViewMode } from '@/types/markdown-editor';
 import {
   LOCAL_STORAGE_KEY,
   LOCAL_STORAGE_KEY_SPLIT_RATIO,
-  LOCAL_STORAGE_KEY_MAXIMIZED,
   LOCAL_STORAGE_KEY_AUTO_SAVE,
-  AUTO_SAVE_DEBOUNCE_MS,
 } from '@/types/markdown-editor';
 
 // Issue #1275: this file asserts rendered wording (the save toast, the ESC

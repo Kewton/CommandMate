@@ -538,8 +538,6 @@ describe('auto-yes-manager', () => {
   describe('Issue #161: pollAutoYes thinking state skip', () => {
     it('should skip prompt detection when thinking state is detected', async () => {
       const { captureSessionOutput } = await import('@/lib/session/cli-session');
-      const { detectThinking } = await import('@/lib/detection/cli-patterns');
-      const { detectPrompt } = await import('@/lib/detection/prompt-detector');
       const { sendKeys } = await import('@/lib/tmux/tmux');
 
       vi.useFakeTimers();

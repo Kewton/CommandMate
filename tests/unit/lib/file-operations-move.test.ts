@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { join, sep } from 'path';
+import { join } from 'path';
 import { mkdirSync, writeFileSync, existsSync, symlinkSync, readFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { moveFileOrDirectory } from '@/lib/file-operations';

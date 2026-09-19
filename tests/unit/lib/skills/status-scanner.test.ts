@@ -20,7 +20,6 @@ import { runMigrations } from '@/lib/db/db-migrations';
 import { upsertSkillInstallation } from '@/lib/skills/installed-state';
 import {
   SKILL_RECEIPT_FILENAME,
-  buildSkillInstallReceipt,
   serializeSkillInstallReceipt,
 } from '@/lib/skills/install-plan';
 import { computeSha256Hex } from '@/lib/skills/integrity';

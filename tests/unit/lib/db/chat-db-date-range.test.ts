@@ -82,7 +82,6 @@ describe('getMessagesByDateRange', () => {
   it('should return messages within date range', () => {
     const dayStart = new Date('2026-04-02T00:00:00').getTime();
     const dayMid = new Date('2026-04-02T12:00:00').getTime();
-    const dayEnd = new Date('2026-04-02T23:59:59.999').getTime();
     const prevDay = new Date('2026-04-01T23:00:00').getTime();
     const nextDay = new Date('2026-04-03T01:00:00').getTime();
 

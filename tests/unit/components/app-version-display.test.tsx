@@ -106,7 +106,7 @@ vi.mock('@/components/worktree/TerminalDisplay', () => ({
 }));
 
 vi.mock('@/components/worktree/HistoryPane', () => ({
-  HistoryPane: ({ messages, worktreeId }: { messages: unknown[]; worktreeId: string }) => (
+  HistoryPane: ({ messages: _messages, worktreeId }: { messages: unknown[]; worktreeId: string }) => (
     <div data-testid="history-pane">
       <span data-testid="history-worktree-id">{worktreeId}</span>
     </div>
@@ -129,7 +129,7 @@ vi.mock('@/components/mobile/MobileHeader', () => ({
 }));
 
 vi.mock('@/components/mobile/MobileTabBar', () => ({
-  MobileTabBar: ({ activeTab, onTabChange }: { activeTab: string; onTabChange: (tab: string) => void }) => (
+  MobileTabBar: ({ activeTab: _activeTab, onTabChange }: { activeTab: string; onTabChange: (tab: string) => void }) => (
     <nav data-testid="mobile-tab-bar">
       <button data-testid="tab-info" onClick={() => onTabChange('info')}>Info</button>
       <button data-testid="tab-terminal" onClick={() => onTabChange('terminal')}>Terminal</button>

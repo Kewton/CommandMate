@@ -11,7 +11,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 // Import will be created in implementation phase
 import { PromptPanel, optionTakesTypedText } from '@/components/worktree/PromptPanel';
 import { isTypedTextFieldOption } from '@/lib/detection/prompt-detect-multiple-choice';
-import type { YesNoPromptData, MultipleChoicePromptData, PromptData } from '@/types/models';
+import type { YesNoPromptData, MultipleChoicePromptData } from '@/types/models';
 
 describe('PromptPanel', () => {
   const defaultProps = {

@@ -10,7 +10,6 @@ import {
   validateAntigravityModelName,
   parseAndValidateCliToolColumn,
   TOOLS_WITH_MODEL_SUPPORT,
-  type ParsedCliToolColumn,
 } from '@/lib/cmate-cli-tool-parser';
 import { MODEL_NAME_PATTERN, MAX_MODEL_NAME_LENGTH } from '@/config/copilot-constants';
 import { MAX_ANTIGRAVITY_MODEL_NAME_LENGTH } from '@/config/antigravity-constants';
