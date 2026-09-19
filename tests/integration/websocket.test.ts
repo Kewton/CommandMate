@@ -3,7 +3,7 @@
  * TDD Approach: Red (test first) -> Green (implement) -> Refactor
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createServer, Server as HTTPServer } from 'http';
 import WebSocket from 'ws';
 import { setupWebSocket, closeWebSocket } from '@/lib/ws-server';

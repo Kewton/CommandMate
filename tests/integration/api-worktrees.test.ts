@@ -9,7 +9,7 @@ import { GET as getWorktreeById } from '@/app/api/worktrees/[id]/route';
 import { PATCH as patchWorktreeById } from '@/app/api/worktrees/[id]/route';
 import Database from 'better-sqlite3';
 import { runMigrations } from '@/lib/db/db-migrations';
-import { upsertWorktree, createMessage } from '@/lib/db';
+import { upsertWorktree } from '@/lib/db';
 import { setDefaultSelectedAgents } from '@/lib/db/app-settings-db';
 import { DEFAULT_SELECTED_AGENTS } from '@/lib/selected-agents-validator';
 import type { Worktree } from '@/types/models';

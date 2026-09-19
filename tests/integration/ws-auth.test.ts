@@ -33,7 +33,7 @@ describe('WebSocket Authentication', () => {
   });
 
   it('should verify token from parsed cookie header', async () => {
-    const { generateToken, hashToken, parseCookies, AUTH_COOKIE_NAME } = await import('@/lib/security/auth');
+    const { generateToken, hashToken } = await import('@/lib/security/auth');
     const token = generateToken();
     const hash = hashToken(token);
 
