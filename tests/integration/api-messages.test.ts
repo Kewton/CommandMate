@@ -145,7 +145,7 @@ describe('GET /api/worktrees/:id/messages', () => {
       timestamp: new Date('2025-01-17T11:00:00Z'),
     });
 
-    const message3 = createMessage(db, {
+    createMessage(db, {
       worktreeId: 'test-worktree',
       role: 'user',
       content: 'Message 3',

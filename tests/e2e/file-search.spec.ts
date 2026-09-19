@@ -168,7 +168,6 @@ test.describe('File Search Feature', () => {
           await page.waitForTimeout(400);
 
           // Check for no results message
-          const noResults = page.locator('[data-testid="file-tree-no-results"]');
           // This may or may not appear depending on the worktree content
           // Just verify the page doesn't crash
           await expect(page.locator('body')).toBeVisible();
@@ -262,8 +261,6 @@ test.describe('File Search Feature', () => {
 
           // Verify .env files are not in the results
           // (they should be excluded by EXCLUDED_PATTERNS)
-          const fileTree = page.locator('[data-testid="file-tree-view"]');
-          const envFileItem = fileTree.locator('text=.env');
           // Count should be 0 or the file should not contain sensitive content
           // This is a basic check - actual security is enforced server-side
           await expect(page.locator('body')).toBeVisible();

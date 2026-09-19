@@ -8,12 +8,10 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import Database from 'better-sqlite3';
 import { runMigrations } from '@/lib/db/db-migrations';
-import { upsertWorktree, getWorktrees } from '@/lib/db';
 import {
   createRepository,
   getRepositoryByPath,
   getExcludedRepositories,
-  getExcludedRepositoryPaths,
   disableRepository,
   restoreRepository,
   ensureEnvRepositoriesRegistered,
