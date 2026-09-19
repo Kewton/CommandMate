@@ -172,33 +172,73 @@ describe('lint:sh covers scripts/**.sh (Issue #2734)', () => {
    * "shellcheck unavailable" look green are `continue-on-error` (above) and an
    * `if:` that skips the step, so both are closed here.
    */
-  it('installs shellcheck if needed and still fails when it is unavailable', () => {
+  it('cannot be skipped, and is bounded while it fetches', () => {
     const step = shellcheckStep();
-    const run = step.run ?? '';
 
     expect(
       Object.keys(step),
       'an `if:` on this step would skip the check instead of failing it',
     ).not.toContain('if');
 
-    // Install first (conditionally — the `ubuntu-latest` fallback for fork PRs
-    // already ships shellcheck), then refuse to continue without it.
-    expect(run).toContain('apt-get install');
-    expect(
-      run,
-      'the step must still exit non-zero when shellcheck cannot be obtained',
-    ).toMatch(/command -v shellcheck[^\n]*exit 1/);
-
-    // Local runs are on 0.11.0 and apt on the runner serves ~0.9.0; print it so a
-    // CI-only difference in findings is readable from the log.
-    expect(run).toContain('shellcheck --version');
-
-    // apt on these runners has measured 10.4m samples (#1844). Unbounded waiting
-    // is what #1830 exists to prevent.
+    // Unbounded network waiting is what #1830 exists to prevent, and the
+    // Playwright deps step on this same hardware has 10.4m samples (#1844).
     expect(
       step['timeout-minutes'],
-      'the apt install must be bounded (#1830 / #1844)',
+      'the download must be bounded (#1830 / #1844)',
     ).toEqual(expect.any(Number));
+  });
+
+  /**
+   * The version is pinned, and the condition for installing is "is the pinned
+   * version here", not "is shellcheck here". Run 35454963546 is why: apt served
+   * `shellcheck (0.9.0-1)` and `lint:sh` failed on two SC2002 (useless cat)
+   * findings that **local 0.11.0 does not emit at all** — SC2002 left the default
+   * set in 0.10.0 and is not in `--list-optional`. `ubuntu-latest`, the fork-PR
+   * fallback, is Ubuntu 24.04 and ships the same 0.9.0, so an existence check
+   * would have run 0.9.0 down every path.
+   *
+   * The property being defended is that CI and a developer's machine see the same
+   * finding set. This file cannot run shellcheck to measure that (it is not part
+   * of `npm ci`), so it pins the shape instead: one version literal, used to build
+   * the download URL, and re-checked after the install so the wrong binary on PATH
+   * fails the job rather than linting with it.
+   */
+  it('pins the shellcheck version rather than taking whatever is installed', () => {
+    const step = shellcheckStep();
+    const run = step.run ?? '';
+    const version = (step.env as Record<string, unknown> | undefined)
+      ?.SHELLCHECK_VERSION;
+
+    expect(
+      version,
+      'the step must pin an exact shellcheck version via env.SHELLCHECK_VERSION',
+    ).toMatch(/^\d+\.\d+\.\d+$/);
+
+    // apt is the thing that went wrong: Ubuntu 24.04 (both runner flavours) has
+    // 0.9.0 and no way to ask it for anything else.
+    expect(
+      run,
+      'apt only offers 0.9.0 on these runners — fetch the pinned release instead',
+    ).not.toContain('apt-get install');
+
+    // The pin has to drive the download, or the literal and the binary drift.
+    expect(run).toContain(
+      'koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}',
+    );
+    expect(run).toContain('shellcheck-v${SHELLCHECK_VERSION}.linux.');
+
+    // Fail-closed backstop, and the reason a stale hash or an earlier PATH entry
+    // cannot quietly lint with the wrong version.
+    expect(
+      run,
+      'the step must re-verify the version and exit non-zero on a mismatch',
+    ).toMatch(/test "\$\([^)]*\)" = "\$SHELLCHECK_VERSION"/);
+    expect(run, 'a bad download must be fatal').toContain('curl -fsSL');
+    expect(run).toContain('set -euo pipefail');
+
+    // In the log on purpose: a CI-only difference in findings is answered by this
+    // line instead of by another run.
+    expect(run).toContain('shellcheck --version');
   });
 
   /**
