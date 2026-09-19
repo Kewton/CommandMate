@@ -131,21 +131,14 @@
       "files": [
         // 4) Issue #2719: `npm run lint` now covers tests/ as well as src/.
         // The three "off" rules are src-only policies that are wrong to apply to
-        // test code; the six "warn" rules are staged debt (a later Issue raises
-        // them back to "error" one at a time).
+        // test code. Issue #2721 cleared the last of the staged debt, so the six
+        // "warn" entries are gone and every other rule is the inherited "error".
         "tests/**"
       ],
       "rules": {
         "no-restricted-syntax": "off",
         "no-restricted-imports": "off",
-        "@next/next/no-assign-module-variable": "off",
-
-        "@typescript-eslint/no-unused-vars": "warn",
-        "@typescript-eslint/no-explicit-any": "warn",
-        "react-hooks/rules-of-hooks": "warn",
-        "@typescript-eslint/no-require-imports": "warn",
-        "@typescript-eslint/no-this-alias": "warn",
-        "prefer-const": "warn"
+        "@next/next/no-assign-module-variable": "off"
       }
     }
   ]

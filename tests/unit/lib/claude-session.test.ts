@@ -10,13 +10,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { existsSync, readFileSync } from 'fs';
 import { findClaudeLaunchIndex } from '@tests/helpers/claude-launch-command';
-import { useIsolatedAgentHooksDir } from '@tests/helpers/agent-hooks-dir';
+import { registerIsolatedAgentHooksDir } from '@tests/helpers/agent-hooks-dir';
 import { PERMISSION_DENY_RULES } from '@/lib/hooks/hook-settings-generator';
 
 // Issue #1722 writes a hooks settings file on every session start. Without this
 // the suite would litter the developer's real `~/.commandmate/hooks`, and the
 // launch assertions would be reading a path that outlives the run.
-useIsolatedAgentHooksDir('claude-session');
+registerIsolatedAgentHooksDir('claude-session');
 
 // Mock tmux module before importing claude-session
 // Issue #393 (R3F002): Added sendSpecialKey for stopClaudeSession() C-d migration

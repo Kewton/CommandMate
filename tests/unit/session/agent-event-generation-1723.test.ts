@@ -16,11 +16,11 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { useIsolatedAgentHooksDir } from '@tests/helpers/agent-hooks-dir';
+import { registerIsolatedAgentHooksDir } from '@tests/helpers/agent-hooks-dir';
 
 // Issue #1722 writes a hooks settings file on every session start; keep it out
 // of the developer's real `~/.commandmate/hooks`.
-useIsolatedAgentHooksDir('agent-event-generation-1723');
+registerIsolatedAgentHooksDir('agent-event-generation-1723');
 
 vi.mock('@/lib/tmux/tmux', () => ({
   hasSession: vi.fn(),

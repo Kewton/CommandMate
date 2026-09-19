@@ -16,6 +16,16 @@ import {
 } from '../../../scripts/run-related-unit-tests.mjs';
 import { removeTempDir } from '@tests/helpers/temp-dir';
 
+/**
+ * The options object `main()` hands its `run` dependency at every call site.
+ * The parameter itself arrives as `unknown`: the script's JSDoc types it from a
+ * `= {}` default, so a narrower annotation on the double is not assignable.
+ */
+interface RunOptions {
+  cwd: string;
+  env: NodeJS.ProcessEnv;
+}
+
 describe('classifyChanges', () => {
   it('classifies src/x.tsx alone as related', () => {
     const result = classifyChanges(['src/x.tsx']);
@@ -200,10 +210,10 @@ describe('main', () => {
   });
 
   it('handles related mode: exit 1 on failure, runs both, logs outputs and passes --changed, mergeBase, --passWithNoTests', () => {
-    const calls: { cmd: string; args: string[]; opts: any }[] = [];
+    const calls: { cmd: string; args: string[]; opts: RunOptions }[] = [];
     let callCount = 0;
-    const run = (cmd: string, args: string[], opts: any) => {
-      calls.push({ cmd, args, opts });
+    const run = (cmd: string, args: string[], opts: unknown) => {
+      calls.push({ cmd, args, opts: opts as RunOptions });
       callCount++;
       // 1st call fails (1), 2nd call succeeds (0)
       return callCount === 1 ? 1 : 0;
@@ -251,9 +261,9 @@ describe('main', () => {
   });
 
   it('handles full mode: calls only npm run test:unit', () => {
-    const calls: { cmd: string; args: string[]; opts: any }[] = [];
-    const run = (cmd: string, args: string[], opts: any) => {
-      calls.push({ cmd, args, opts });
+    const calls: { cmd: string; args: string[]; opts: RunOptions }[] = [];
+    const run = (cmd: string, args: string[], opts: unknown) => {
+      calls.push({ cmd, args, opts: opts as RunOptions });
       return 0;
     };
 

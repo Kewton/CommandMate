@@ -77,7 +77,7 @@ export const HOOKS_STATE_DIR_ENV = 'MONITOR_HOOKS_STATE_DIR';
  * @param prefix - Directory name prefix, so a stray sandbox names its suite
  * @returns A getter for the current test's state directory
  */
-export function useIsolatedHooksStateDir(prefix: string): () => string {
+export function registerIsolatedHooksStateDir(prefix: string): () => string {
   let dir = '';
   let previous: string | undefined;
 
@@ -137,8 +137,8 @@ function failIfSilent(stderr: string, context: string, wanted: string): void {
       'mh_report_once() returns silently when $MONITOR_HOOKS_STATE_DIR/warned-<key>',
       'already exists, and the pid-keyed fallback ($TMPDIR/cm-monitor-hooks-$$) is',
       'shared with every past run that drew the same pid. Check that this suite',
-      'still calls useIsolatedHooksStateDir() and still passes the result into the',
-      'spawn env.',
+      'still calls registerIsolatedHooksStateDir() and still passes the result',
+      'into the spawn env.',
     ].join('\n'),
   );
 }

@@ -97,7 +97,6 @@ function firstLine(child: ChildProcess, label: string, timeoutMs = 15_000): Prom
   return new Promise((resolve, reject) => {
     let out = '';
     let err = '';
-    let timer: NodeJS.Timeout | undefined;
     const onOut = (chunk: Buffer): void => {
       out += chunk.toString();
       const newline = out.indexOf('\n');
@@ -117,7 +116,7 @@ function firstLine(child: ChildProcess, label: string, timeoutMs = 15_000): Prom
       if (error) reject(error);
       else resolve(line);
     }
-    timer = setTimeout(() => finish(new Error(`${label}: no output within ${timeoutMs}ms: ${err.trim()}`)), timeoutMs);
+    const timer = setTimeout(() => finish(new Error(`${label}: no output within ${timeoutMs}ms: ${err.trim()}`)), timeoutMs);
     child.stdout?.on('data', onOut);
     child.stderr?.on('data', onErr);
     child.on('exit', onExit);

@@ -29,6 +29,9 @@ class MockTerminal {
   constructor(opts: Record<string, unknown>) {
     this.options = { ...opts };
     constructorOptions.push(opts);
+    // モックの最後のインスタンスをテスト側から参照するための登録。コンストラクタの
+    // 外からは生成されたインスタンスに触れないので、ここで書く以外の形が取れない。
+    // eslint-disable-next-line @typescript-eslint/no-this-alias -- 生成直後のインスタンスをテストへ公開する唯一の手段
     lastTerminal = this;
   }
 }
