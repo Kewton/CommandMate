@@ -1575,4 +1575,60 @@ describe('Sidebar', () => {
       });
     });
   });
+
+  describe('Footer settings entry (Issue #2706)', () => {
+    function DrawerProbe() {
+      const { isMobileDrawerOpen, openMobileDrawer } = useSidebarContext();
+      return (
+        <button
+          type="button"
+          data-testid="drawer-probe"
+          data-open={String(isMobileDrawerOpen)}
+          onClick={openMobileDrawer}
+        />
+      );
+    }
+
+    it('renders the settings entry in the footer pointing to /more', async () => {
+      render(
+        <Wrapper>
+          <Sidebar />
+        </Wrapper>
+      );
+
+      const link = await screen.findByTestId('sidebar-settings');
+      expect(link.tagName).toBe('A');
+      expect(link.getAttribute('href')).toBe('/more');
+      expect(link.getAttribute('aria-label')).toBe('Settings');
+      expect(link.querySelector('svg')).not.toBeNull();
+      expect(link.closest('[data-testid="tooltip-wrapper"]')?.className).toContain('flex-shrink-0');
+
+      // 位置
+      const select = screen.getByTestId('locale-switcher');
+      expect(link.compareDocumentPosition(select) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+      expect(link.closest('[data-testid="sidebar"]')).not.toBeNull();
+      expect(link.closest('[data-testid="sidebar-header"]')).toBeNull();
+
+      // 既存要素が消えていないこと
+      expect(screen.getByTestId('locale-switcher')).toBeInTheDocument();
+    });
+
+    it('closes the mobile drawer when clicked', async () => {
+      render(
+        <Wrapper>
+          <DrawerProbe />
+          <Sidebar />
+        </Wrapper>
+      );
+
+      fireEvent.click(screen.getByTestId('drawer-probe'));
+      expect(screen.getByTestId('drawer-probe')).toHaveAttribute('data-open', 'true');
+
+      const link = await screen.findByTestId('sidebar-settings');
+      link.addEventListener('click', (event) => event.preventDefault());
+      fireEvent.click(link);
+      expect(screen.getByTestId('drawer-probe')).toHaveAttribute('data-open', 'false');
+    });
+  });
 });
+
