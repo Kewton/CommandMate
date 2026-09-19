@@ -22,6 +22,7 @@
  * Issue #2648: the view and sort controls are words (a labelled <select> and a labelled sort control), laid out as a two-column grid.
  * Issue #2656: a third view, "sessions", lists one row per agent instance (status first); a row opens its branch with ?instance=.
  * Issue #2706: フッターの言語セレクトの左に設定ボタン（`/more` へのリンク）。スマホのブランチ画面には他に設定への入口が無い。
+ * Issue #2709: フッターの設定ボタンは PC ではモーダル、スマホでは `/more` へ。
  */
 
 'use client';
@@ -60,6 +61,8 @@ import { LogoutButton } from '@/components/common/LogoutButton';
 import { useToast } from '@/components/common/Toast';
 import { ATTENTION_REVIEW_HREF } from '@/config/review-config';
 import { useAttentionCount } from '@/hooks/useAttentionCount';
+import { useIsMobile } from '@/hooks/useIsMobile';
+import { useSettingsDialog } from '@/contexts/SettingsDialogContext';
 import { repositoryApi, ApiError } from '@/lib/api-client';
 import { toBranchItem } from '@/types/sidebar';
 import type { SidebarBranchItem } from '@/types/sidebar';
@@ -1114,7 +1117,27 @@ const SyncButton = memo(function SyncButton({
  */
 function SidebarSettingsButton({ onNavigate }: { onNavigate: () => void }) {
   const t = useTranslations('common');
+  const isMobile = useIsMobile();
+  const { open: openSettings } = useSettingsDialog();
   const label = t('settings.title');
+
+  // Issue #2709: on PC a plain left-click opens the settings modal instead of
+  // navigating. The phone keeps the page — a two-column dialog has nowhere to
+  // go at 390px, and /more is the target of its own tab in GlobalMobileNav.
+  // A modified click stays a link on both, so /more still opens in a new tab.
+  const handleClick = useCallback(
+    (event: React.MouseEvent<HTMLAnchorElement>) => {
+      // The drawer closes either way; on PC it is already closed.
+      onNavigate();
+      if (isMobile) return;
+      if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+        return;
+      }
+      event.preventDefault();
+      openSettings();
+    },
+    [isMobile, onNavigate, openSettings]
+  );
 
   return (
     // `flex-shrink-0` goes on the Tooltip, not on the link: the wrapper span is
@@ -1125,7 +1148,8 @@ function SidebarSettingsButton({ onNavigate }: { onNavigate: () => void }) {
         href="/more"
         data-testid="sidebar-settings"
         aria-label={label}
-        onClick={onNavigate}
+        aria-haspopup={isMobile ? undefined : 'dialog'}
+        onClick={handleClick}
         className="p-1.5 rounded-md text-sidebar-muted hover:text-sidebar-foreground hover:bg-sidebar-hover focus:outline-none focus:ring-2 focus:ring-ring transition-colors"
       >
         <Settings size={20} aria-hidden="true" />

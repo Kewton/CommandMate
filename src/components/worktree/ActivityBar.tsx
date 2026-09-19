@@ -34,6 +34,10 @@
  * Issue #2645:
  *   - The settings menu button (gear) lives at the BOTTOM of the ActivityBar
  *     (pinned via `mt-auto`). Rendered OUTSIDE the `role="tablist"` element.
+ *
+ * Issue #2709:
+ *   - 歯車メニューの「設定」は `/more` へ遷移せず設定モーダルを開く。開くのは
+ *     `onCloseAutoFocus` の `queueMicrotask` で、Radix がフォーカスを歯車へ戻した後。
  */
 
 'use client';
@@ -48,6 +52,7 @@ import { useSidebarContext } from '@/contexts/SidebarContext';
 import { useAuthEnabled } from '@/contexts/AuthContext';
 import { useLocaleSwitch } from '@/hooks/useLocaleSwitch';
 import { useViewTransitionRouter } from '@/components/providers/ViewTransitionsProvider';
+import { useSettingsDialog } from '@/contexts/SettingsDialogContext';
 import { LOCALE_LABELS, SUPPORTED_LOCALES } from '@/config/i18n-config';
 import {
   DropdownMenu,
@@ -92,6 +97,13 @@ function ActivityBarSettingsMenu() {
   const { theme, setTheme } = useTheme();
   const { currentLocale, switchLocale } = useLocaleSwitch();
   const authEnabled = useAuthEnabled();
+  const { open: openSettings } = useSettingsDialog();
+  // Issue #2709: raised by the Settings item, read once the menu has closed.
+  // The modal must open AFTER Radix has restored focus to the gear, not
+  // instead of it: the modal's focus trap records whatever is focused at open
+  // time as the element to return to when it closes. Suppressing Radix's
+  // restore would leave that as <body> and lose the way back.
+  const openSettingsAfterClose = useRef(false);
   const label = t('activityBar.settings');
   // Read at render time (not module scope) so a test can stub it.
   const appVersion = process.env.NEXT_PUBLIC_APP_VERSION;
@@ -120,13 +132,31 @@ function ActivityBarSettingsMenu() {
           </button>
         </DropdownMenuTrigger>
       </Tooltip>
-      <DropdownMenuContent side="right" align="end" className="w-56">
+      <DropdownMenuContent
+        side="right"
+        align="end"
+        className="w-56"
+        onCloseAutoFocus={() => {
+          if (!openSettingsAfterClose.current) return;
+          openSettingsAfterClose.current = false;
+          // Radix's own onCloseAutoFocus handler (which focuses the trigger)
+          // runs right after this one in the same task — composeEventHandlers
+          // would skip it entirely if we called preventDefault() here. The
+          // microtask therefore lands after the gear has focus, which is what
+          // the modal's focus trap records as the element to return to.
+          queueMicrotask(openSettings);
+        }}
+      >
         <DropdownMenuLabel data-testid="activity-bar-settings-version">
           {t('activityBar.settingsMenu.version', {
             version: appVersion ? `v${appVersion}` : '-',
           })}
         </DropdownMenuLabel>
-        <DropdownMenuItem onSelect={() => router.push('/more')}>
+        <DropdownMenuItem
+          onSelect={() => {
+            openSettingsAfterClose.current = true;
+          }}
+        >
           {t('activityBar.settingsMenu.settings')}
         </DropdownMenuItem>
         <DropdownMenuItem onSelect={() => router.push('/skills')}>
