@@ -186,6 +186,11 @@ describe('lint scope covers scripts/ and bin/ (Issue #2732)', () => {
     expect(entry.slice(1)).toEqual(rootSyntaxWithoutI18n());
   });
 
+  /**
+   * Since Issue #2733 the staging is finished, so this also pins the count at
+   * zero: `warn` is no longer an available answer for a rule that fires in
+   * `scripts/`.
+   */
   it('sets every other rule in the override to `warn`, from the staged list', () => {
     const nonOff = Object.entries(scriptsRules()).filter(
       ([rule, value]) => rule !== 'no-restricted-syntax' && value !== 'off',
@@ -201,6 +206,15 @@ describe('lint scope covers scripts/ and bin/ (Issue #2732)', () => {
     for (const [rule] of nonOff) {
       expect(staged.has(rule), `${rule} is not one of the staged-debt rules`).toBe(true);
     }
+
+    // Issue #2733: the staged debt is paid off. A new `warn` here would be a
+    // finding routed around `npm run lint`'s exit code rather than fixed, and
+    // nothing else in CI would notice.
+    expect(
+      entriesWithSeverity('warn'),
+      'the scripts/** override may not downgrade anything to "warn" any more — ' +
+        'fix the finding, or disable the line with a reason',
+    ).toEqual([]);
   });
 
   it('switches nothing else off for scripts/', () => {
