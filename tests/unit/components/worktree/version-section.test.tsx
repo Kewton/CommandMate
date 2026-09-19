@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { VersionSection } from '@/components/worktree/VersionSection';
 import type { UpdateCheckResponse } from '@/lib/api-client';
 import { makeAppUpdateValue } from '@tests/helpers/app-update-context';

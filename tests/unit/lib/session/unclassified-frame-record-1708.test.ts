@@ -30,7 +30,7 @@ import {
 } from '@/lib/detection/unclassified-frame-tracker';
 import { UNCLASSIFIED_PROMPT_TYPE } from '@/types/models';
 import { buildClaudeIdleComposerFrame } from '../../../fixtures/claude-idle-composer';
-import type { PromptData, Worktree, YesNoPromptData } from '@/types/models';
+import type { Worktree, YesNoPromptData } from '@/types/models';
 
 const WORKTREE_ID = 'wt-unclassified-1708';
 

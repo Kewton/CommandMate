@@ -24,7 +24,6 @@ import {
   SEARCH_MAX_RESULTS,
 } from '@/lib/file-search';
 import * as fs from 'fs/promises';
-import * as path from 'path';
 
 // Mock fs/promises
 vi.mock('fs/promises');

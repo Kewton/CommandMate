@@ -95,20 +95,6 @@ const COPILOT_PROMPT_PANE = readFileSync(
   'utf8',
 );
 
-/** A permission prompt, transcribed from the shape a live claude pane carries. */
-const PROMPT_PANE = [
-  '❯ apply the refactor',
-  '',
-  '⏺ I need permission to edit the file.',
-  '',
-  'Do you want to make this edit to useVirtualKeyboard.ts?',
-  '❯ 1. Yes',
-  '  2. Yes, allow all edits during this session (shift+tab)',
-  '  3. No',
-  '',
-  'Esc to cancel · Tab to amend',
-].join('\n');
-
 /**
  * A finished claude turn with no prompt on it — the response guard's input.
  *

@@ -838,7 +838,6 @@ describe('MessageInput', () => {
     });
 
     it('shows a warning toast after a successful send when the session is busy (isProcessing=true)', async () => {
-      const { worktreeApi } = await import('@/lib/api-client');
       const showToast = vi.fn();
 
       render(
@@ -861,7 +860,6 @@ describe('MessageInput', () => {
     });
 
     it('does NOT show a toast when the session is idle (isProcessing=false)', async () => {
-      const { worktreeApi } = await import('@/lib/api-client');
       const showToast = vi.fn();
 
       render(
@@ -885,7 +883,6 @@ describe('MessageInput', () => {
     });
 
     it('does NOT show a toast when isProcessing is omitted (default idle behavior unchanged)', async () => {
-      const { worktreeApi } = await import('@/lib/api-client');
       const showToast = vi.fn();
 
       render(<MessageInput {...defaultProps} showToast={showToast} />);

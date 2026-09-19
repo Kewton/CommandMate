@@ -612,7 +612,6 @@ describe('[#2460] who answered and who confirmed', () => {
 
 describe('[#2460] countToolApprovalEntries', () => {
   it('counts chips per kind, not rows', () => {
-    const byId = rowsById();
     const approval = normalMessage('audit', {
       messageType: 'prompt',
       summary: `${PERMISSION_REQUEST_ALLOW_SUMMARY_PREFIX} · tool=Bash`,

@@ -852,7 +852,7 @@ describe('CloneManager - basePath resolution', () => {
 });
 
   it('should fall back to process.cwd() when neither config.basePath nor WORKTREE_BASE_PATH is set', () => {
-    const cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue('/test/cwd/fallback');
+    vi.spyOn(process, 'cwd').mockReturnValue('/test/cwd/fallback');
 
     const manager = new CloneManager(db);
     const targetPath = manager.getTargetPath('my-repo');

@@ -22,8 +22,6 @@ import {
   writeBinaryFile,
   createErrorResult,
   readFileLineRange,
-  FileOperationResult,
-  FileOperationErrorCode,
 } from '@/lib/file-operations';
 import { VIEWER_CHUNK_LINE_SIZE } from '@/config/file-viewer-config';
 import { removeTempDir } from '@tests/helpers/temp-dir';
