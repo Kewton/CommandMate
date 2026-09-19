@@ -239,6 +239,13 @@
   "settings": {
     "title": "設定",
     "pageDescription": "新しいブランチの既定、通知、外部アプリなどを設定します。",
+    "sections": {
+      "quickLinks": "クイックリンク",
+      "general": "一般",
+      "notifications": "通知",
+      "externalApps": "External Apps",
+      "about": "About"
+    },
     "defaultSurfaceMode": {
       "title": "出力面の既定",
       "description": "セッションの出力側を最初に何で開くかです。ターミナル（tmux の画面そのまま）か、チャット（会話の履歴）を選べます。開いたあとはセッションのヘッダーからいつでも切り替えられます。",
