@@ -12,3 +12,5 @@ export {
   SettingsExternalAppsSection,
   SettingsAboutSection,
 } from './SettingsPanel';
+
+export { SettingsDialog } from './SettingsDialog';
