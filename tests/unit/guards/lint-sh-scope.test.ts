@@ -65,6 +65,35 @@ function lintSh(): string {
   return script;
 }
 
+interface WorkflowStep extends Record<string, unknown> {
+  name?: string;
+  run?: string;
+  'timeout-minutes'?: number;
+}
+
+type WorkflowJob = Record<string, unknown> & { steps?: WorkflowStep[] };
+
+function lintJob(): WorkflowJob {
+  const workflow = parse(readFileSync(CI_WORKFLOW, 'utf-8')) as {
+    jobs: Record<string, WorkflowJob>;
+  };
+  const job = workflow.jobs.lint;
+  expect(job, 'ci-pr.yml must still have a `lint` job').toBeTruthy();
+  return job;
+}
+
+/** The single step of the CI Lint job that runs `npm run lint:sh`. */
+function shellcheckStep(): WorkflowStep {
+  const steps = (lintJob().steps ?? []).filter((step) =>
+    (step.run ?? '').includes('npm run lint:sh'),
+  );
+  expect(
+    steps,
+    'the CI Lint job must run `npm run lint:sh` in exactly one step',
+  ).toHaveLength(1);
+  return steps[0];
+}
+
 /** Every `.sh` under `scripts/`, at any depth. */
 function shellScripts(recursive: boolean): string[] {
   return (readdirSync(SCRIPTS_DIR, { recursive }) as string[])
@@ -124,31 +153,52 @@ describe('lint:sh covers scripts/**.sh (Issue #2734)', () => {
   });
 
   it('runs `lint:sh` in CI without letting the job swallow the result', () => {
-    const workflow = parse(readFileSync(CI_WORKFLOW, 'utf-8')) as {
-      jobs: Record<
-        string,
-        { steps?: { name?: string; run?: string }[] } & Record<string, unknown>
-      >;
-    };
-    const lintJob = workflow.jobs.lint;
-    expect(lintJob, 'ci-pr.yml must still have a `lint` job').toBeTruthy();
-
-    const steps = lintJob.steps ?? [];
-    const shellcheckSteps = steps.filter((step) =>
-      (step.run ?? '').includes('npm run lint:sh'),
-    );
-    expect(
-      shellcheckSteps,
-      'the CI Lint job must run `npm run lint:sh` in exactly one step',
-    ).toHaveLength(1);
+    const step = shellcheckStep();
 
     // Issue #2719 removed `continue-on-error` from this job; a step-level one
     // would put it straight back for the check added here.
-    expect(Object.keys(lintJob)).not.toContain('continue-on-error');
+    expect(Object.keys(lintJob())).not.toContain('continue-on-error');
     expect(
-      Object.keys(shellcheckSteps[0]),
+      Object.keys(step),
       'the shellcheck step must not opt out of its own result',
     ).not.toContain('continue-on-error');
+  });
+
+  /**
+   * The step is fail-closed, and that is the whole contract. PR #2742 proved the
+   * guard works — the self-hosted runner had no shellcheck and the Lint job went
+   * red (run 35454416714) — and the fix was to install it first, not to let the
+   * step pass when the tool is missing. The two escape hatches that would make
+   * "shellcheck unavailable" look green are `continue-on-error` (above) and an
+   * `if:` that skips the step, so both are closed here.
+   */
+  it('installs shellcheck if needed and still fails when it is unavailable', () => {
+    const step = shellcheckStep();
+    const run = step.run ?? '';
+
+    expect(
+      Object.keys(step),
+      'an `if:` on this step would skip the check instead of failing it',
+    ).not.toContain('if');
+
+    // Install first (conditionally — the `ubuntu-latest` fallback for fork PRs
+    // already ships shellcheck), then refuse to continue without it.
+    expect(run).toContain('apt-get install');
+    expect(
+      run,
+      'the step must still exit non-zero when shellcheck cannot be obtained',
+    ).toMatch(/command -v shellcheck[^\n]*exit 1/);
+
+    // Local runs are on 0.11.0 and apt on the runner serves ~0.9.0; print it so a
+    // CI-only difference in findings is readable from the log.
+    expect(run).toContain('shellcheck --version');
+
+    // apt on these runners has measured 10.4m samples (#1844). Unbounded waiting
+    // is what #1830 exists to prevent.
+    expect(
+      step['timeout-minutes'],
+      'the apt install must be bounded (#1830 / #1844)',
+    ).toEqual(expect.any(Number));
   });
 
   /**

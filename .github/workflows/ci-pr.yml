@@ -381,17 +381,41 @@ jobs:
       - name: Run ESLint
         run: npm run lint
 
-      # [Issue #2734] shellcheck is NOT installed here. The GitHub-hosted
-      # `ubuntu-latest` image (fork PRs) ships it, and this repository's
-      # self-hosted runners carry 0.11.0, so `apt-get install` would only add a
-      # step that can fail on our own hardware. The guard is fail-closed on
-      # purpose: a runner without shellcheck must stop the job, not skip the
-      # check silently. `npm run lint:sh` is kept out of `npm run lint` because
-      # the `lint` gate of `.commandmate/verify.yaml` also calls it and workers
-      # do not all have shellcheck.
+      # [Issue #2734] shellcheck has to be installed here. The Issue was written
+      # against `shellcheck --version` measured on a developer Mac and claimed the
+      # self-hosted runners carried 0.11.0; they do not. PR #2742's Lint job (run
+      # 35454416714, job 105927060937, machine b3ef735ce5c7, $HOME=/home/ubuntu/_work)
+      # printed `shellcheck not found on this runner` and exited 1 — the ephemeral
+      # container is not the host it was measured on. The GitHub-hosted
+      # `ubuntu-latest` image that fork PRs fall back to DOES ship it, which is why
+      # the install is conditional rather than unconditional.
+      #
+      # Install, then fail closed — never fail open. `continue-on-error` or an `if`
+      # that skips the step would turn "shellcheck is missing" into a green check,
+      # and the whole point of this step is that `.sh` findings stop a PR. #2719
+      # removed `continue-on-error` from this job; do not reintroduce it here.
+      #
+      # `timeout-minutes: 5`: this runner's apt mirror is measurably slow — the
+      # `Install Playwright system dependencies` step above (#1844) has a 0.20m
+      # median with 7.6m / 9.2m / 10.4m samples on the same hardware. That step can
+      # afford to be abandoned; this one cannot, so it gets a cap instead of a
+      # `continue-on-error`, and a mirror that slow fails the job loudly.
+      #
+      # `shellcheck --version` in the log on purpose: local runs use 0.11.0 while
+      # apt here serves ~0.9.0, so when a finding appears or disappears only in CI
+      # the version is already in the log instead of needing another run to find.
+      #
+      # `npm run lint:sh` is kept out of `npm run lint` because the `lint` gate of
+      # `.commandmate/verify.yaml` also calls it and workers do not all have
+      # shellcheck.
       - name: Shell script lint
+        timeout-minutes: 5
         run: |
-          command -v shellcheck >/dev/null || { echo "shellcheck not found on this runner"; exit 1; }
+          if ! command -v shellcheck >/dev/null; then
+            sudo apt-get update && sudo apt-get install -y shellcheck
+          fi
+          command -v shellcheck >/dev/null || { echo "shellcheck unavailable on this runner"; exit 1; }
+          shellcheck --version
           npm run lint:sh
 
   type-check:
