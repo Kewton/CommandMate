@@ -339,8 +339,6 @@ jobs:
     # Kewton/commandmate-skills#226.
     runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'self-hosted' || 'ubuntu-latest' }}
     timeout-minutes: 10 # measured 0.7m median / 0.9m max (n=12); floor of the policy
-    # TODO: Remove continue-on-error after fixing existing lint issues
-    continue-on-error: true
     steps:
       - name: Checkout
         uses: actions/checkout@v4

@@ -44,7 +44,7 @@
     "build:all": "npm run build && npm run build:cli && npm run build:server",
     "prepublishOnly": "npm run build:all",
     "start": "NODE_ENV=production node dist/server/server.js",
-    "lint": "eslint src --ext .js,.jsx,.ts,.tsx",
+    "lint": "eslint src tests --ext .js,.jsx,.ts,.tsx",
     "check:tracking": "./scripts/check-commandmate-tracking.sh",
     "check:detector-freshness": "tsx scripts/check-detector-freshness.ts",
     "test": "NODE_ENV=test vitest",

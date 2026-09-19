@@ -65,9 +65,11 @@
       }
     ]
   },
-  // Issue #1922 / §4 D4: allowlist for the no-restricted-imports rule above.
-  // Split into three entries on purpose so the classification is machine-readable
+  // Entries 1-3 — Issue #1922 / §4 D4: allowlist for the no-restricted-imports rule
+  // above. Split into three entries on purpose so the classification is machine-readable
   // (tests/unit/guards/tmux-import-allowlist.test.ts pins each list exactly).
+  // Entry 4 is unrelated to tmux: it is the tests/ scope override added by Issue #2719
+  // (pinned by tests/unit/guards/lint-tests-scope.test.ts).
   // NOTE: "[id]" is escaped as "\\[id\\]" because overrides.files is matched with
   // minimatch - an unescaped "[id]" is a character class and matches "i" or "d", not the
   // literal Next.js dynamic-segment directory.
@@ -123,6 +125,27 @@
       ],
       "rules": {
         "no-restricted-imports": "off"
+      }
+    },
+    {
+      "files": [
+        // 4) Issue #2719: `npm run lint` now covers tests/ as well as src/.
+        // The three "off" rules are src-only policies that are wrong to apply to
+        // test code; the six "warn" rules are staged debt (a later Issue raises
+        // them back to "error" one at a time).
+        "tests/**"
+      ],
+      "rules": {
+        "no-restricted-syntax": "off",
+        "no-restricted-imports": "off",
+        "@next/next/no-assign-module-variable": "off",
+
+        "@typescript-eslint/no-unused-vars": "warn",
+        "@typescript-eslint/no-explicit-any": "warn",
+        "react-hooks/rules-of-hooks": "warn",
+        "@typescript-eslint/no-require-imports": "warn",
+        "@typescript-eslint/no-this-alias": "warn",
+        "prefer-const": "warn"
       }
     }
   ]

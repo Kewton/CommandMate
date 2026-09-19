@@ -126,7 +126,8 @@ video-to-gif/
 
 テストは `tests/unit/skills/video-to-gif/` にあり `npm run test:unit` に含まれる
 （`.claude/skills/**` に置くと CI では 1 度も実行されない。root tsconfig が `.claude/**` を
-除外しており、`npm run lint` は `eslint src` にスコープされているため）。
+除外しているためです。`npm run lint` は Issue #2719 以降 `src` と `tests` を見ますが、
+`.claude/**` は対象外のままです）。
 
 スキルは `.claude/skills/` と `.agents/skills/` の**両方に byte-identical で置く**。
 公式の install 先は `.agents/skills` のみ（Codex / Antigravity が読む）で、Claude は

@@ -1,8 +1,9 @@
 /**
  * Tests for the root tsconfig type-check scope (Issue #1265).
  *
- * `npm run lint` is scoped to `eslint src`, so a stray .ts outside src/ is
- * invisible to it and only surfaces when CI runs `npx tsc --noEmit`. Issue #1200
+ * `npm run lint` is scoped to `eslint src tests` (Issue #2719), so a stray .ts
+ * outside both is invisible to it and only surfaces when CI runs
+ * `npx tsc --noEmit`. Issue #1200
  * (website/) and #1201 (scripts/spike/) both hit this. The fix anchors `include`
  * to the directories the app actually owns; these tests are the CI guard on it,
  * since no linter covers this file.
