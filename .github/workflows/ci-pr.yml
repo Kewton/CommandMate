@@ -381,6 +381,19 @@ jobs:
       - name: Run ESLint
         run: npm run lint
 
+      # [Issue #2734] shellcheck is NOT installed here. The GitHub-hosted
+      # `ubuntu-latest` image (fork PRs) ships it, and this repository's
+      # self-hosted runners carry 0.11.0, so `apt-get install` would only add a
+      # step that can fail on our own hardware. The guard is fail-closed on
+      # purpose: a runner without shellcheck must stop the job, not skip the
+      # check silently. `npm run lint:sh` is kept out of `npm run lint` because
+      # the `lint` gate of `.commandmate/verify.yaml` also calls it and workers
+      # do not all have shellcheck.
+      - name: Shell script lint
+        run: |
+          command -v shellcheck >/dev/null || { echo "shellcheck not found on this runner"; exit 1; }
+          npm run lint:sh
+
   type-check:
     name: Type Check
     # [self-hosted] This repository's ephemeral self-hosted runners (labels:
