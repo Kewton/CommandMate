@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { renderHook, act, waitFor } from '@testing-library/react';
+import { renderHook, act } from '@testing-library/react';
 
 // Import will be created in implementation phase
 import { usePromptAnimation } from '@/hooks/usePromptAnimation';
@@ -234,7 +234,7 @@ describe('usePromptAnimation', () => {
     });
 
     it('should return empty class when not animating and visible', () => {
-      const { result, rerender } = renderHook(
+      const { result } = renderHook(
         ({ visible }) => usePromptAnimation({ visible }),
         { initialProps: { visible: true } }
       );

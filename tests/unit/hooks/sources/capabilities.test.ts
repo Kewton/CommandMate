@@ -79,7 +79,7 @@ import type { AgentEventSource, AgentSourceCapabilities } from '@/lib/hooks/sour
  * The five columns Issue #1924 adds, plus the one Issue #2197 does. Order is the
  * order of §4 D3's code block, with the new column last.
  */
-const DECLARED_KEYS = [
+const _DECLARED_KEYS = [
   'permissionHookPredictsDialog',
   'sessionStartMayArriveLate',
   'permissionReplyReleasesPrompt',
@@ -89,7 +89,7 @@ const DECLARED_KEYS = [
   'stopReportsSelfResume',
 ] as const;
 
-type DeclaredRow = Pick<AgentSourceCapabilities, (typeof DECLARED_KEYS)[number]>;
+type DeclaredRow = Pick<AgentSourceCapabilities, (typeof _DECLARED_KEYS)[number]>;
 
 /**
  * Every key on the interface, new and pre-existing.

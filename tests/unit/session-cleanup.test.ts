@@ -5,7 +5,7 @@
  * TDD Approach: Write tests first (Red), then implement (Green), then refactor
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { CLI_TOOL_IDS, type CLIToolType } from '@/lib/cli-tools/types';
 
 // Mock response-poller before importing
@@ -57,7 +57,6 @@ import {
   cleanupMultipleWorktrees,
   killWorktreeSession,
   syncWorktreesAndCleanup,
-  type WorktreeCleanupResult,
 } from '@/lib/session-cleanup';
 import { stopPolling as stopResponsePolling } from '@/lib/polling/response-poller';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
@@ -77,7 +76,7 @@ describe('Session Cleanup Utility', () => {
     it('should call killSession for all CLI tools', async () => {
       const killSessionFn = vi.fn().mockResolvedValue(true);
 
-      const result = await cleanupWorktreeSessions('wt-1', killSessionFn);
+      await cleanupWorktreeSessions('wt-1', killSessionFn);
 
       // Should call killSession once for every registered CLI tool
       expect(killSessionFn).toHaveBeenCalledTimes(CLI_TOOL_IDS.length);

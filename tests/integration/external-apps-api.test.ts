@@ -8,7 +8,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { runMigrations } from '@/lib/db/db-migrations';
 import { createExternalApp } from '@/lib/external-apps/db';
-import type { CreateExternalAppInput, ExternalApp } from '@/types/external-apps';
+import type { CreateExternalAppInput } from '@/types/external-apps';
 
 // Mock the database instance
 vi.mock('@/lib/db/db-instance', () => {

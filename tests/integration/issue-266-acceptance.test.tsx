@@ -151,7 +151,7 @@ vi.mock('@/components/mobile/MobileHeader', () => ({
 }));
 
 vi.mock('@/components/mobile/MobileTabBar', () => ({
-  MobileTabBar: ({ activeTab, onTabChange }: { activeTab: string; onTabChange: (tab: string) => void }) => (
+  MobileTabBar: ({ activeTab: _activeTab, onTabChange }: { activeTab: string; onTabChange: (tab: string) => void }) => (
     <nav data-testid="mobile-tab-bar">
       <button onClick={() => onTabChange('terminal')}>Terminal</button>
       <button onClick={() => onTabChange('history')}>History</button>

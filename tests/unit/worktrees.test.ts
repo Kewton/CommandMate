@@ -7,7 +7,6 @@ import { describe, it, expect, vi, beforeAll, beforeEach, afterAll, afterEach } 
 import { exec } from 'child_process';
 import fs from 'fs';
 import path from 'path';
-import type { Worktree } from '@/types/models';
 import { makeTempDir, removeTempDir } from '@tests/helpers/temp-dir';
 
 // Mock child_process - use a factory so the mock function does NOT inherit

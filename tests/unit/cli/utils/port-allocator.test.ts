@@ -198,10 +198,8 @@ describe('port-allocator', () => {
 
     describe('markAllocated', () => {
       it('should prevent re-allocation of marked ports', async () => {
-        let callCount = 0;
         const mockServer = {
           listen: vi.fn((_port: number, cb: () => void) => {
-            callCount++;
             cb();
             return mockServer;
           }),

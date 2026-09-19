@@ -23,8 +23,6 @@ import {
   validateWebPMagicBytes,
   validateSvgContent,
   validateImageContent,
-  type ImageExtensionValidator,
-  type ImageValidationResult,
 } from '@/config/image-extensions';
 
 describe('IMAGE_EXTENSIONS', () => {

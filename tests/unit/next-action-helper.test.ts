@@ -11,7 +11,6 @@ import {
   getReviewStatus,
   isNextActionKey,
   NEXT_ACTION_KEYS,
-  type ReviewStatus,
 } from '@/lib/session/next-action-helper';
 import type { SessionStatus } from '@/lib/detection/status-detector';
 import type { PromptType } from '@/types/models';

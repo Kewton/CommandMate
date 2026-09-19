@@ -8,7 +8,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { useFileTabs, MAX_FILE_TABS, fileTabsReducer, selectTabsToClose } from '@/hooks/useFileTabs';
-import type { FileTabsState, FileTabsAction, FileTab, FileTabsActions } from '@/hooks/useFileTabs';
+import type { FileTabsState, FileTabsAction, FileTab } from '@/hooks/useFileTabs';
 import type { FileContent } from '@/types/models';
 
 // ============================================================================

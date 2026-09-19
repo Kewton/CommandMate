@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { PUT, POST, DELETE, PATCH } from '@/app/api/worktrees/[id]/files/[...path]/route';
+import { PUT, DELETE, PATCH } from '@/app/api/worktrees/[id]/files/[...path]/route';
 import { NextRequest } from 'next/server';
 import Database from 'better-sqlite3';
 import { runMigrations } from '@/lib/db/db-migrations';

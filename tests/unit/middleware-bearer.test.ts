@@ -114,7 +114,7 @@ describe('middleware Bearer token support', () => {
   it('scenario 5: No auth credentials - redirects to /login', async () => {
     const { middleware } = await import('../../src/middleware');
     const req = createMockRequest({});
-    const result = await middleware(req as never);
+    await middleware(req as never);
     // Without valid cookie or bearer, and no Authorization header,
     // should redirect to /login
     expect(mockNextResponseRedirect).toHaveBeenCalled();
@@ -123,7 +123,7 @@ describe('middleware Bearer token support', () => {
   it('scenario 6: Invalid Bearer only - returns 401 JSON', async () => {
     const { middleware } = await import('../../src/middleware');
     const req = createMockRequest({ authHeader: 'Bearer invalid-token' });
-    const result = await middleware(req as never);
+    await middleware(req as never);
     // With Authorization header present but invalid token,
     // should return 401 JSON (not redirect)
     expect(mockNextResponseJson).toHaveBeenCalledWith(

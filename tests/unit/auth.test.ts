@@ -77,7 +77,7 @@ describe('auth module', () => {
 
   describe('verifyToken', () => {
     it('should return true for a valid token with matching hash', async () => {
-      const { generateToken, hashToken, verifyToken } = await import('@/lib/security/auth');
+      const { generateToken, hashToken } = await import('@/lib/security/auth');
       const token = generateToken();
       const hash = hashToken(token);
       // Set up environment

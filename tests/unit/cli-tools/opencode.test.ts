@@ -337,7 +337,7 @@ describe('OpenCodeTool', () => {
 
       // Speed up test by mocking setTimeout
       vi.useFakeTimers();
-      const promise = tool.startSession('test-123', '/test/path');
+      void tool.startSession('test-123', '/test/path');
       // Advance through all setTimeout calls
       await vi.runAllTimersAsync();
       vi.useRealTimers();

@@ -148,7 +148,6 @@ test.describe('Recursive Delete Flow', () => {
       await page.waitForTimeout(300);
 
       // For files, divider appears after Rename (before Delete)
-      const contextMenu = page.locator('[data-testid="context-menu"]');
       const divider = page.locator('[data-testid="context-menu-divider"]');
 
       // Divider should exist

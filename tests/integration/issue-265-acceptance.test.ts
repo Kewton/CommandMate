@@ -324,13 +324,10 @@ describe('Issue #265 Acceptance Test: CLI path cache invalidation and broken ses
       vi.mocked(createSession).mockResolvedValue();
       vi.mocked(sendKeys).mockResolvedValue();
 
-      let captureCallCount = 0;
       vi.mocked(capturePane).mockImplementation(async () => {
-        captureCallCount++;
         return '> '; // Prompt available immediately
       });
 
-      const startTime = Date.now();
       const promise = startClaudeSession(TEST_SESSION_OPTIONS);
 
       // Advance exactly: 100ms (sanitize) + 1 poll interval + stability delay

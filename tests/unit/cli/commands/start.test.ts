@@ -91,7 +91,7 @@ describe('startCommand', () => {
 
       const mockChild = {
         pid: 12345,
-        on: vi.fn((event: string, callback: (code: number) => void) => {
+        on: vi.fn((event: string, _callback: (code: number) => void) => {
           if (event === 'close') {
             // Don't call callback to avoid process.exit
           }
