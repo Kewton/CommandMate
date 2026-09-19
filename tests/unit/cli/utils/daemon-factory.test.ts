@@ -36,7 +36,6 @@ import {
 import { DaemonManager } from '../../../../src/cli/utils/daemon';
 
 describe('DaemonManagerFactory', () => {
-  const mockConfigDir = path.join(homedir(), '.commandmate');
 
   beforeEach(() => {
     vi.clearAllMocks();

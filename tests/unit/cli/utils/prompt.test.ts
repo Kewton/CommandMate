@@ -3,7 +3,7 @@
  * Issue #119: Interactive init support
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { homedir } from 'os';
 import { resolve } from 'path';
 

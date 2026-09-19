@@ -120,7 +120,7 @@ describe('install-context', () => {
       vi.mocked(fs.realpathSync).mockReturnValue('/real/path');
       vi.mocked(fs.existsSync).mockReturnValue(true);
 
-      const configDir = getConfigDir();
+      getConfigDir();
 
       // realpathSync should be called for symlink resolution
       expect(fs.realpathSync).toHaveBeenCalled();

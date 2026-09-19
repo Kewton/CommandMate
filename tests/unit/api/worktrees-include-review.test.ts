@@ -3,7 +3,7 @@
  * Issue #600: UX refresh - API extension for review screen
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 
 // Mock dependencies
 vi.mock('@/lib/db/db-instance', () => ({

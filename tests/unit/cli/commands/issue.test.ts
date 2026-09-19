@@ -6,7 +6,7 @@
  * gh CLI availability check, exit codes.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createIssueCommand } from '../../../../src/cli/commands/issue';
 
 // Mock child_process

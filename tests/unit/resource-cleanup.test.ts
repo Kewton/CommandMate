@@ -65,7 +65,7 @@ import {
   MCP_PROCESS_PATTERNS,
   MAX_PS_OUTPUT_BYTES,
 } from '@/lib/resource-cleanup';
-import { getAutoYesStateCompositeKeys, getAutoYesPollerCompositeKeys, deleteAutoYesState, stopAutoYesPolling, extractWorktreeId } from '@/lib/polling/auto-yes-manager';
+import { getAutoYesStateCompositeKeys, getAutoYesPollerCompositeKeys, deleteAutoYesState, stopAutoYesPolling } from '@/lib/polling/auto-yes-manager';
 import { stopScheduleForWorktree, getScheduleWorktreeIds } from '@/lib/schedule-manager';
 import { execFile } from 'child_process';
 import { existsSync } from 'fs';

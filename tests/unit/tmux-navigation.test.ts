@@ -26,7 +26,6 @@ import {
   isAllowedSpecialKey,
   sendSpecialKeysAndInvalidate,
   SPECIAL_KEY_VALUES,
-  sendSpecialKeys,
 } from '@/lib/tmux/tmux';
 import {
   ANSWER_KEY_VALUES,

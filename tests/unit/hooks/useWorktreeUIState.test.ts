@@ -10,7 +10,7 @@ import { renderHook, act } from '@testing-library/react';
 import { useWorktreeUIState, worktreeUIReducer } from '@/hooks/useWorktreeUIState';
 import type { WorktreeUIState } from '@/types/ui-state';
 import type { WorktreeUIAction } from '@/types/ui-actions';
-import type { ChatMessage, PromptData, YesNoPromptData } from '@/types/models';
+import type { ChatMessage, YesNoPromptData } from '@/types/models';
 import { createInitialUIState } from '@/types/ui-state';
 
 describe('worktreeUIReducer', () => {

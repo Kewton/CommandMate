@@ -7,7 +7,6 @@ import { describe, it, expect } from 'vitest';
 import {
   PORT_CONSTRAINTS,
   VALID_TARGET_HOSTS,
-  PATH_PREFIX_PATTERN,
   VALID_APP_TYPES,
   APP_TYPE_LABELS,
   isValidPort,

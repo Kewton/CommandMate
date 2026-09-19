@@ -84,7 +84,6 @@ const FIXTURES = join(process.cwd(), 'tests/fixtures/hooks/opencode');
 const WT = 'wt-2045';
 const PORT = 4795;
 const T0 = 1_800_000_000_000;
-const SESSION = 'ses_0000000000000000000000000';
 const TARGET = { worktreeId: WT, cliToolId: 'opencode', instanceId: 'opencode' } as const;
 const VAPID_ENV = ['CM_VAPID_PUBLIC_KEY', 'CM_VAPID_PRIVATE_KEY', 'CM_VAPID_SUBJECT'] as const;
 
