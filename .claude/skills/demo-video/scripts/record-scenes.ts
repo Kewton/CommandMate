@@ -617,6 +617,37 @@ export async function clickUntilEffective(
   }
 }
 
+/**
+ * `selectOption` until it takes, for the same reason `clickUntilEffective`
+ * exists: the sidebar is server-rendered, and a change event fired before
+ * hydration only moves the DOM value, which React discards on its first
+ * controlled render. `isDone` is what the selection was for, not the value.
+ */
+export async function selectUntilEffective(
+  select: Locator,
+  value: string,
+  isDone: () => Promise<boolean>,
+  what: string,
+  timeoutMs: number,
+  attemptMs = 2000,
+  pollMs = 250,
+): Promise<void> {
+  const page = select.page();
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if (await isDone()) return;
+    await select.selectOption(value);
+    const attemptUntil = Date.now() + attemptMs;
+    while (Date.now() < attemptUntil) {
+      await page.waitForTimeout(pollMs);
+      if (await isDone()) return;
+    }
+    if (Date.now() >= deadline) {
+      throw new Error(`selected ${value} on ${what} for ${timeoutMs}ms but it never took effect`);
+    }
+  }
+}
+
 /** `POST` a JSON body, failing with the status the server actually returned. */
 export async function postJson(url: string, body: unknown): Promise<unknown> {
   const response = await fetch(url, {
@@ -717,6 +748,53 @@ export const ACTIVITY_BAR_STORAGE_KEY_PREFIX = 'commandmate.worktree.activeActiv
 export const ACTIVITY_CLOSED_SENTINEL = '__closed__';
 export const CHAT_TOOL_ACTIVITY_STORAGE_KEY = 'commandmate:chatShowToolActivity';
 export const SURFACE_MODE_STORAGE_KEY_PREFIX = 'commandmate.worktree.surfaceMode-';
+
+/**
+ * The sidebar's saved view mode and the value that lists one row per agent
+ * instance (`SIDEBAR_VIEW_MODE_STORAGE_KEY` / `VIEW_MODES`, #2656). Spelled
+ * here for the same reason as the keys above, and pinned by the test.
+ */
+export const SIDEBAR_VIEW_MODE_STORAGE_KEY = 'mcbd-sidebar-view-mode';
+export const SESSIONS_VIEW_MODE = 'sessions';
+
+/**
+ * A cassette that has only just been started is not yet parked on `@input`, and
+ * a send fired at that pane comes back 500 ("typed but unsent") — the product
+ * gives up after 4 submit attempts of its own. Waiting on `isSessionRunning`
+ * is not enough: the tmux session exists before the prompt is painted. So the
+ * raise is retried on a bounded loop, and stops as soon as the session is busy
+ * (whether this call or an earlier scene's put it there).
+ */
+export const SEND_RETRY_ATTEMPTS = 6;
+export const SEND_RETRY_INTERVAL_MS = 5_000;
+
+async function raisePrompt(
+  baseUrl: string,
+  options: RecordOptions,
+  deps: WaitDeps = defaultWaitDeps,
+): Promise<void> {
+  const target = { id: options.worktreeId, path: options.worktreePath };
+  for (let attempt = 1; attempt <= SEND_RETRY_ATTEMPTS; attempt += 1) {
+    const current = await waitForWorktree(
+      baseUrl,
+      target,
+      (worktree) => worktree.isSessionRunning === true,
+      'showing a live agent session',
+      options.timeoutMs,
+      deps,
+    );
+    if (current.isProcessing === true || current.isWaitingForResponse === true) return;
+    try {
+      await postJson(`${baseUrl}/api/worktrees/${options.worktreeId}/send`, {
+        content: options.message,
+      });
+      return;
+    } catch (error) {
+      if (attempt === SEND_RETRY_ATTEMPTS) throw error;
+      await deps.sleep(SEND_RETRY_INTERVAL_MS);
+    }
+  }
+}
 
 /** `?view=chat`: the deep link that opens a split's output surface as chat. */
 export const CHAT_VIEW_QUERY = 'view=chat';
@@ -1694,6 +1772,207 @@ export const SCENES: Scene[] = [
       await viewer.waitFor({ state: 'visible', timeout: options.timeoutMs });
       await viewer.getByTestId('copy-content-button').waitFor({ state: 'visible', timeout: options.timeoutMs });
       await page.waitForTimeout(1800);
+    },
+  },
+  // ---------------------------------------------- v0.39.0 UI cut (#2702) ----
+  {
+    id: 'sessions-list',
+    title: 'One row per agent, the session waiting on an answer first',
+    viewport: 'pc',
+    // `/sessions` collapses the sidebar (autoCollapseSidebar), so this cut
+    // films the sidebar from `/repositories`, where it is open — and says so
+    // explicitly rather than relying on the stored default.
+    seedStorage: () => ({ [SIDEBAR_OPEN_STORAGE_KEY]: 'true' }),
+    // A row can only sort to the top for needing an answer if a session really
+    // is waiting. The prompt is raised off camera the same way attention-badge
+    // raises it: an idle cassette is parked on `@input` until something is sent.
+    prepare: async ({ baseUrl, options }) => {
+      await raisePrompt(baseUrl, options);
+      await waitForWorktree(
+        baseUrl,
+        { id: options.worktreeId, path: options.worktreePath },
+        (worktree) => worktree.isWaitingForResponse === true,
+        'waiting for a response',
+        options.timeoutMs,
+      );
+    },
+    run: async ({ page, baseUrl, options }) => {
+      await gotoLocalized(page, `${baseUrl}/repositories`, options.locale);
+      await page.getByTestId('branch-list').waitFor({ state: 'visible' });
+
+      // The switch is the shot: the list goes from branches to one row per
+      // agent instance (`buildSessionRows` expands each branch's cliStatus).
+      const rows = page.getByTestId('session-list-item');
+      await selectUntilEffective(
+        page.getByTestId('view-mode-select'),
+        SESSIONS_VIEW_MODE,
+        async () => (await rows.count()) > 0,
+        'the sidebar view',
+        options.timeoutMs,
+      );
+      await rows.first().waitFor({ state: 'visible', timeout: options.timeoutMs });
+      // `sortSessionRows` sorts by STATUS_PRIORITY before the selected key, so
+      // the waiting session is the top row whatever the sort says. Its dot
+      // carries the status as an accessible name, which is what is filmed.
+      await rows
+        .first()
+        .locator('span[aria-label]')
+        .first()
+        .waitFor({ state: 'visible', timeout: options.timeoutMs });
+      // Hold the finished frame; nothing is being decided here.
+      await page.waitForTimeout(2500);
+    },
+  },
+  {
+    id: 'jump-to-session',
+    title: 'A session row opens that instance, not just its branch',
+    viewport: 'pc',
+    seedStorage: () => ({
+      [SIDEBAR_OPEN_STORAGE_KEY]: 'true',
+      [SIDEBAR_VIEW_MODE_STORAGE_KEY]: SESSIONS_VIEW_MODE,
+    }),
+    // Filmable on its own as well as after sessions-list: the rows exist as
+    // soon as the branch carries agent instances, waiting or not.
+    prepare: ({ baseUrl, options }) =>
+      waitForWorktree(
+        baseUrl,
+        { id: options.worktreeId, path: options.worktreePath },
+        (worktree) => worktree.isSessionRunning === true,
+        'showing a live agent session',
+        options.timeoutMs,
+      ).then(() => undefined),
+    run: async ({ page, baseUrl, options }) => {
+      await gotoLocalized(page, `${baseUrl}/repositories`, options.locale);
+      const rows = page.getByTestId('session-list-item');
+      await rows.first().waitFor({ state: 'visible', timeout: options.timeoutMs });
+
+      // `data-session-key` is `${worktreeId}:${instanceId}` — the pair the href
+      // is built from (`buildSessionRowHref`), so the take can name the
+      // instance it expects to land on instead of trusting the first tab.
+      const key = await rows.first().getAttribute('data-session-key');
+      if (key === null) {
+        throw new Error('session row is missing data-session-key');
+      }
+      // The row is a button, so a click before hydration does nothing at all.
+      // The detail screen strips `?instance=` with router.replace once it has
+      // selected the instance, so the URL is only asserted down to the branch.
+      const landed = async () =>
+        new URL(page.url()).pathname === `/worktrees/${options.worktreeId}`;
+      await clickUntilEffective(rows.first(), landed, 'the session row', options.timeoutMs);
+      await page.getByTestId('activity-bar').waitFor({ state: 'visible', timeout: options.timeoutMs });
+      await page.waitForTimeout(2000);
+    },
+  },
+  {
+    id: 'shell-persist',
+    title: 'Navigating swaps the main area, never the shell',
+    viewport: 'pc',
+    seedStorage: () => ({
+      [SIDEBAR_OPEN_STORAGE_KEY]: 'true',
+      [SIDEBAR_VIEW_MODE_STORAGE_KEY]: SESSIONS_VIEW_MODE,
+    }),
+    prepare: ({ baseUrl, options }) =>
+      waitForWorktree(
+        baseUrl,
+        { id: options.worktreeId, path: options.worktreePath },
+        () => true,
+        'present in the worktree list',
+        options.timeoutMs,
+      ).then(() => undefined),
+    run: async ({ page, baseUrl, options }) => {
+      await gotoLocalized(page, `${baseUrl}/repositories`, options.locale);
+      const list = page.getByTestId('branch-list');
+      await list.waitFor({ state: 'visible' });
+      await page
+        .getByTestId('session-list-item')
+        .first()
+        .waitFor({ state: 'visible', timeout: options.timeoutMs });
+
+      // Since #2682 the shell is mounted once by the root layout, so this
+      // attribute survives a route change. A shell that is rebuilt drops it,
+      // which is exactly the regression the scene claims is gone — the
+      // assertion after the round trip reads it back.
+      await page.getByTestId('sidebar-container').evaluate((element) => {
+        element.setAttribute('data-demo-shell-mark', '1');
+      });
+      // Scrolled to the end so the restored offset is unambiguous. A list that
+      // fits leaves it at 0, and the assertion below still holds.
+      const offset = await list.evaluate((element) => {
+        element.scrollTop = element.scrollHeight;
+        return element.scrollTop;
+      });
+
+      // Nav rows are TransitionLinks. Clicked before hydration they navigate
+      // the document instead of the route, which would rebuild the shell and
+      // fail the assertion below for a reason that is not the product's.
+      const at = (pathname: string) => async () => new URL(page.url()).pathname === pathname;
+      await clickUntilEffective(
+        page.getByTestId('sidebar-nav-review'),
+        at('/review'),
+        'the review nav row',
+        options.timeoutMs,
+      );
+      await clickUntilEffective(
+        page.getByTestId('sidebar-nav-repositories'),
+        at('/repositories'),
+        'the repositories nav row',
+        options.timeoutMs,
+      );
+
+      const mark = await page.getByTestId('sidebar-container').getAttribute('data-demo-shell-mark');
+      if (mark !== '1') {
+        throw new Error(
+          'the shell was rebuilt by the route change: AppShellGate is no longer mounting it once (#2682)',
+        );
+      }
+      // waitForFunction rather than a sleep: the offset is restored inside a
+      // requestAnimationFrame, and 2px of rounding is not a regression.
+      await page.waitForFunction(
+        ([selector, want]: [string, number]) => {
+          const element = document.querySelector(selector);
+          return element !== null && Math.abs(element.scrollTop - want) <= 2;
+        },
+        ['[data-testid="branch-list"]', offset] as [string, number],
+        { timeout: options.timeoutMs },
+      );
+      await page.waitForTimeout(1500);
+    },
+  },
+  {
+    id: 'mobile-branches',
+    title: 'The phone reaches the branch list from the bottom bar',
+    viewport: 'mobile',
+    seedStorage: () => ({ [SIDEBAR_VIEW_MODE_STORAGE_KEY]: SESSIONS_VIEW_MODE }),
+    prepare: ({ baseUrl, options }) =>
+      waitForWorktree(
+        baseUrl,
+        { id: options.worktreeId, path: options.worktreePath },
+        () => true,
+        'present in the worktree list',
+        options.timeoutMs,
+      ).then(() => undefined),
+    run: async ({ page, baseUrl, options }) => {
+      // The bottom bar is drawn everywhere except the branch screen
+      // (`useLayoutConfig`), so the take starts on `/sessions`.
+      await gotoLocalized(page, `${baseUrl}/sessions`, options.locale);
+      const bar = page.getByTestId('global-mobile-nav');
+      await bar.waitFor({ state: 'visible', timeout: options.timeoutMs });
+
+      // `sidebar-container` is in the DOM either way — closed, it is only
+      // translated off screen — so the overlay, which is rendered solely while
+      // the drawer is open, is what says the tap took.
+      const overlay = page.getByTestId('drawer-overlay');
+      await clickUntilEffective(
+        page.getByTestId('mobile-nav-open-sidebar'),
+        () => overlay.isVisible(),
+        'the branches button',
+        options.timeoutMs,
+      );
+      // GlobalMobileNav returns null while the drawer is open (both are fixed
+      // z-50 and the bar would paint over the drawer), so the bar leaving the
+      // DOM is the proof the drawer took the screen.
+      await bar.waitFor({ state: 'detached', timeout: options.timeoutMs });
+      await page.waitForTimeout(1500);
     },
   },
 ];

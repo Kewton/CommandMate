@@ -65,6 +65,7 @@ describe('demo-video skill mirroring', () => {
       'storyboard/contract-verify.yaml',
       'storyboard/default.yaml',
       'storyboard/readme-hero.yaml',
+      'storyboard/ui-0390.yaml',
       'templates/card.html',
       'templates/code-card.html',
       'templates/telop.html',
