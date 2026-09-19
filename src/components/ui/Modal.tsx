@@ -1,11 +1,14 @@
 /**
  * Modal Component
  * A reusable modal dialog component
+ *
+ * Issue #2715: 背景クリックで閉じる処理はパネルのラッパー側にある。
+ * backdrop はラッパーの下に描画されクリックを受け取れないため
  */
 
 'use client';
 
-import React, { useEffect, useId } from 'react';
+import React, { useEffect, useId, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslations } from 'next-intl';
 import { cva } from 'class-variance-authority';
@@ -80,6 +83,8 @@ export function Modal({
     EXIT_ANIMATION_DURATION_MS
   );
   const dataState = isExiting ? 'closed' : 'open';
+  const pressStartedOnBackdrop = useRef(false);
+  const releaseLandedOnBackdrop = useRef(false);
 
   // Close on escape key (Issue #104: skip if disableClose is true)
   useEffect(() => {
@@ -113,16 +118,43 @@ export function Modal({
   // Use portal to render at document.body level, escaping any parent stacking context
   return createPortal(
     <div className="fixed inset-0 overflow-y-auto" style={{ zIndex: Z_INDEX.MODAL }}>
-      {/* Backdrop - Issue #104: skip onClick if disableClose is true */}
+      {/* Backdrop — visual only. [Issue #2715] The click handler cannot live
+          here: the wrapper below is a positioned element that comes later in
+          DOM order and spans the whole container (`min-h-full`), so it paints
+          above this element and receives every click outside the panel. This
+          element never sees one. */}
       {/* [Issue #1050/#1114] data-state drives the fade enter/exit animations. */}
       <div
         data-state={dataState}
+        aria-hidden="true"
         className="fixed inset-0 bg-black/50 transition-opacity data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:duration-200 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:duration-200 data-[state=closed]:fill-mode-forwards"
-        onClick={disableClose || isExiting ? undefined : onClose}
       />
 
-      {/* Modal */}
-      <div className="relative flex min-h-full items-center justify-center p-2 sm:p-4">
+      {/* Modal. [Issue #2715] Also the click-outside surface — see above.
+          Both the press and the release must land on this element itself: a
+          click whose mousedown and mouseup differ is dispatched on their
+          nearest common ancestor, which is this very element.
+          [Issue #104] disableClose still suppresses closing. */}
+      <div
+        data-testid="modal-backdrop-surface"
+        className="relative flex min-h-full items-center justify-center p-2 sm:p-4"
+        onMouseDown={(event) => {
+          pressStartedOnBackdrop.current = event.target === event.currentTarget;
+        }}
+        onMouseUp={(event) => {
+          releaseLandedOnBackdrop.current = event.target === event.currentTarget;
+        }}
+        onClick={(event) => {
+          const startedOutside = pressStartedOnBackdrop.current;
+          const endedOutside = releaseLandedOnBackdrop.current;
+          pressStartedOnBackdrop.current = false;
+          releaseLandedOnBackdrop.current = false;
+          if (!startedOutside || !endedOutside) return;
+          if (disableClose || isExiting) return;
+          if (event.target !== event.currentTarget) return;
+          onClose();
+        }}
+      >
         <div
           ref={modalRef}
           data-state={dataState}
