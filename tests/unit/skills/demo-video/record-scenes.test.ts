@@ -3,8 +3,8 @@
  *
  * Importing the script from here is also what puts it under `npx tsc --noEmit`:
  * `.claude/**` is outside the root tsconfig `include` (Issue #1265) and outside
- * `eslint src`, so a file there is only type-checked when something in tests/
- * pulls it in.
+ * the `eslint src tests` scope (Issue #2719), so a file there is only type-checked
+ * when something in tests/ pulls it in.
  *
  * @vitest-environment node
  */

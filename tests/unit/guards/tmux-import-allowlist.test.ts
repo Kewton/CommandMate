@@ -21,8 +21,10 @@
  * Three ways this guard could exist and still guard nothing, all of them measured
  * on this branch rather than assumed:
  *
- * 1. **`npm run lint` only looks at `src`** (`package.json`), so nothing in ESLint
- *    can hold the allowlist to a count. The count lives here.
+ * 1. **ESLint cannot hold the allowlist to a count.** `npm run lint` does cover
+ *    `tests/` as well as `src` since Issue #2719, but a rule set has no way to say
+ *    "these 22 files and no others are exempt" — an added `overrides` entry is
+ *    always green. The count lives here.
  * 2. **`overrides.files` is matched with minimatch.** A literal Next.js dynamic
  *    segment written as `src/app/api/worktrees/[id]/route.ts` is a *character
  *    class* and matches `.../i/route.ts` — not the real directory. Five of the 22
@@ -126,6 +128,16 @@ function unescapeGlob(pattern: string): string {
 }
 
 const rc = readEslintRc();
+
+/**
+ * The tmux allowlist proper. Issue #2719 added a fourth `overrides` entry for
+ * `tests/**` that has nothing to do with this guard — it switches off the src-only
+ * policies (the i18n selector and this import ban) for test code, which never had
+ * a CLITool gateway to go through in the first place. Everything below is about
+ * the entries that actually exempt production files, so it reads the src-targeting
+ * entries rather than `rc.overrides` wholesale.
+ */
+const srcOverrides = rc.overrides.filter((o) => o.files.some((f) => f.startsWith('src/')));
 
 // --------------------------------------------------------------------------
 // Programmatic ESLint, deliberately reading the repo's real rule config
@@ -271,7 +283,8 @@ describe('lib/tmux import guard: ESLint configuration', () => {
   it('has no allowlist for the dynamic-access selectors', () => {
     // A `no-restricted-syntax` override would silently drop the i18n selector for
     // those files (DR2-005), so the dynamic form is kept at exactly zero instead.
-    for (const override of rc.overrides) {
+    // (`tests/**` does switch it off, by design — see `srcOverrides` above.)
+    for (const override of srcOverrides) {
       expect(Object.keys(override.rules ?? {})).not.toContain('no-restricted-syntax');
     }
   });
@@ -301,9 +314,9 @@ describe('lib/tmux import guard: the allowlist', () => {
   });
 
   it('matches .eslintrc.json entry for entry, in order', () => {
-    const groups = rc.overrides.map((o) => o.files.map(unescapeGlob));
+    const groups = srcOverrides.map((o) => o.files.map(unescapeGlob));
     expect(groups).toEqual([[...GATEWAY_GLOBS], [...PERMANENT_EXEMPT], [...STAGED_REMOVAL]]);
-    for (const override of rc.overrides) {
+    for (const override of srcOverrides) {
       expect(override.rules?.['no-restricted-imports']).toBe('off');
     }
   });

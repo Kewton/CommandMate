@@ -1,9 +1,9 @@
 /**
  * Shell-level gate for the demo-video skill (Issue #1553).
  *
- * `npm run lint` is scoped to `eslint src` and the root tsconfig deliberately
- * excludes `.claude/**` (Issue #1265), so nothing else in CI ever looks at these
- * files. `bash -n` here is the equivalent of orchestrate-monitor's syntax.test.ts.
+ * `npm run lint` is scoped to `eslint src tests` (Issue #2719) and the root
+ * tsconfig deliberately excludes `.claude/**` (Issue #1265), so nothing else in CI
+ * ever looks at these files. `bash -n` here is the equivalent of orchestrate-monitor's syntax.test.ts.
  *
  * @vitest-environment node
  */

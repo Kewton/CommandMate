@@ -76,7 +76,15 @@ beforeAll(() => {
   // 上書き・無効化していないこと。最小構成は overrides を再現しないので、
   // 誰かが上書きを足したらこのテストの前提が崩れる。その時は黙って通すのでは
   // なく赤にして、上書きを再現するかテストを分けるかを選ばせる。
-  const overriding = (config.overrides ?? []).filter((o) => o.rules && RULE in o.rules);
+  //
+  // Issue #2719 で lint 対象が `tests/` にも広がり、`tests/**` の overrides が
+  // このルールを `off` にした（テストコードに i18n の文言直書き検出を当てるのは
+  // 誤りであるため）。下の fixture は `src/components/` の .tsx なので `tests/**`
+  // には一致せず、このテストの前提は崩れていない。したがって「テストを分ける」を
+  // 選び、ガードの対象を fixture に一致しうる overrides ＝ src を見るものに絞る。
+  const overriding = (config.overrides ?? []).filter(
+    (o) => o.rules && RULE in o.rules && o.files.some((f) => f.startsWith('src/')),
+  );
   expect(overriding).toEqual([]);
 
   eslint = new ESLint({
