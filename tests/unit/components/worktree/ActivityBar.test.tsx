@@ -44,6 +44,14 @@ vi.mock('@/hooks/useLocaleSwitch', () => ({
   useLocaleSwitch: () => ({ currentLocale: 'en', switchLocale: localeMock.switchLocale }),
 }));
 
+// Issue #2709: the Settings item opens the modal instead of navigating. This
+// file only needs to know that `open()` was reached; where focus lands is
+// measured with the real provider in ActivityBar-settings-modal-2709.test.tsx.
+const settingsDialogMock = vi.hoisted(() => ({ open: vi.fn(), close: vi.fn() }));
+vi.mock('@/contexts/SettingsDialogContext', () => ({
+  useSettingsDialog: () => ({ isOpen: false, open: settingsDialogMock.open, close: settingsDialogMock.close }),
+}));
+
 describe('ActivityBar', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -385,7 +393,7 @@ describe('ActivityBar', () => {
       expect(screen.getByTestId('activity-bar-settings-version')).toHaveTextContent('CommandMate v9.9.9');
     });
 
-    it('handles navigation, theme change, locale change, and external link without triggering onToggle or toggleSidebar', () => {
+    it('handles navigation, theme change, locale change, and external link without triggering onToggle or toggleSidebar', async () => {
       const onToggle = vi.fn();
       render(<ActivityBar active="files" onToggle={onToggle} />);
       const button = screen.getByTestId('activity-bar-settings');
@@ -393,10 +401,14 @@ describe('ActivityBar', () => {
         fireEvent.keyDown(button, { key: 'Enter' });
       };
 
-      // Settings
+      // Settings (Issue #2709: opens the modal, does not navigate).
+      // Radix raises `onCloseAutoFocus` from a setTimeout(0) after the menu
+      // unmounts, and the handler defers `open()` by one microtask, so this
+      // cannot be asserted synchronously after the click.
       openMenu();
       fireEvent.click(screen.getByRole('menuitem', { name: 'Settings' }));
-      expect(routerMock.push).toHaveBeenCalledWith('/more');
+      await waitFor(() => expect(settingsDialogMock.open).toHaveBeenCalledTimes(1));
+      expect(routerMock.push).not.toHaveBeenCalled();
 
       // Skills
       openMenu();
