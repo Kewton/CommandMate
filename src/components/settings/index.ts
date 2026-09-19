@@ -3,3 +3,12 @@ export { DefaultAgentsSettings } from './DefaultAgentsSettings';
 export { DefaultSurfaceModeSettings } from './DefaultSurfaceModeSettings';
 export { AgentUpdatesCard } from './AgentUpdatesCard';
 export type { AgentUpdatesCardProps, AgentUpdateInstance } from './AgentUpdatesCard';
+
+export {
+  SettingsPanel,
+  SettingsQuickLinksSection,
+  SettingsGeneralSection,
+  SettingsNotificationsSection,
+  SettingsExternalAppsSection,
+  SettingsAboutSection,
+} from './SettingsPanel';
