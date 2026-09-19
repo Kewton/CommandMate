@@ -168,10 +168,7 @@
             "selector": "CallExpression[callee.name='require'][arguments.0.value=/(^|\\/)tmux(\\/|$)/]",
             "message": "Issue #1922 (§4 D4, DR4-005): ESLint 8's core no-restricted-imports only sees static import / export ... from, so a dynamic import() or require() of src/lib/tmux/** would slip past it. Same rule as the static form: go through the CLITool gateway or captureSessionOutput. There is no allowlist for this one - keep it at zero."
           }
-        ],
-        "@typescript-eslint/no-unused-vars": "warn",
-        "@typescript-eslint/no-explicit-any": "warn",
-        "@typescript-eslint/no-this-alias": "warn"
+        ]
       }
     },
     {

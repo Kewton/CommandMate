@@ -82,15 +82,16 @@ function migrate() {
     console.log('  - Added column: prompt_data (TEXT, nullable)');
     console.log('  - Added index: idx_messages_type (message_type, worktree_id)');
     console.log(`  - Updated ${result.changes} existing records`);
-  } catch (error: any) {
+  } catch (error: unknown) {
     // Rollback on error
     try {
       db.exec('ROLLBACK');
-    } catch (rollbackError) {
+    } catch {
       // Ignore rollback errors
     }
 
-    console.error('\n❌ Migration failed:', error.message);
+    const message = error instanceof Error ? error.message : String(error);
+    console.error('\n❌ Migration failed:', message);
     console.error(error);
     process.exit(1);
   } finally {

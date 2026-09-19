@@ -106,6 +106,7 @@ export class BetterSqlite3CompatAdapter {
    * - 入れ子は SAVEPOINT で吸収（better-sqlite3 と同じ戦略）
    */
   transaction(fn) {
+    // eslint-disable-next-line @typescript-eslint/no-this-alias -- wrapped は呼び出し側の this を fn.apply(this, args) へ転送するため function 式である必要があり、そこからアダプタ自身へ届く別名が要る
     const self = this;
     const wrapped = function (...args) {
       const depth = self.#txDepth;
