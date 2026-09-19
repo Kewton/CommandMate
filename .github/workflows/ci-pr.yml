@@ -381,6 +381,87 @@ jobs:
       - name: Run ESLint
         run: npm run lint
 
+      # [Issue #2734] shellcheck is PINNED here, and the condition is "is the
+      # pinned version present", not "is shellcheck present". Two CI runs paid for
+      # that distinction:
+      #
+      #   - run 35454416714 (job 105927060937, machine b3ef735ce5c7,
+      #     $HOME=/home/ubuntu/_work): the Issue claimed the self-hosted runners
+      #     carried 0.11.0 — that was measured on a developer Mac, not in this
+      #     ephemeral container. The step printed "shellcheck not found on this
+      #     runner" and exited 1.
+      #   - run 35454963546 (job 105928508382): installing from apt fixed that and
+      #     produced `Setting up shellcheck (0.9.0-1)`, which then failed
+      #     `lint:sh` with two SC2002 (useless cat) findings —
+      #     `stop-server.sh:124` and `build-and-start.sh:217`. **Local 0.11.0 does
+      #     not emit SC2002 at all**: it was dropped from the default set in
+      #     0.10.0 and is not even in `shellcheck --list-optional`, so
+      #     `--include=SC2002` on 0.11.0 is also silent (measured).
+      #
+      # `ubuntu-latest` — the fallback for fork PRs — is Ubuntu 24.04 and ships the
+      # same 0.9.0, so an existence check would have run 0.9.0 down every path. The
+      # `--exclude` set stays {SC2086, SC2317, SC2116}: it is pinned by exact match
+      # in tests/unit/guards/lint-sh-scope.test.ts and #2739 builds on that set, so
+      # adding SC2002 would turn it into a version-difference absorber instead of a
+      # list of known debt. Pin the tool instead. Bump SHELLCHECK_VERSION and the
+      # version developers run locally together, never one alone.
+      #
+      # Fail closed at every step — never fail open. `set -euo pipefail` + `curl -f`
+      # make a bad download fatal, and the `test` after the install refuses to lint
+      # with the wrong version even if something else on PATH answers first. A
+      # `continue-on-error`, or an `if:` that skips the step, would turn any of this
+      # into a green check; #2719 removed `continue-on-error` from this job, so do
+      # not reintroduce it here.
+      #
+      # `timeout-minutes: 5`: unbounded network waiting is what #1830 exists to
+      # prevent, and the `Install Playwright system dependencies` step above (#1844)
+      # measured 7.6m / 9.2m / 10.4m samples on this same hardware. The tarball is
+      # 2.5 MB (x86_64) / 6.8 MB (aarch64).
+      #
+      # `npm run lint:sh` is kept out of `npm run lint` because the `lint` gate of
+      # `.commandmate/verify.yaml` also calls it and workers do not all have
+      # shellcheck.
+      - name: Shell script lint
+        timeout-minutes: 5
+        env:
+          SHELLCHECK_VERSION: '0.11.0'
+        run: |
+          set -euo pipefail
+
+          # Always exits 0 so the comparison below sees "none" rather than tripping
+          # `set -e` on a runner with no shellcheck at all.
+          installed() {
+            command -v shellcheck >/dev/null || { echo none; return 0; }
+            shellcheck --version | awk '/^version:/{print $2}'
+          }
+
+          if [ "$(installed)" != "$SHELLCHECK_VERSION" ]; then
+            # koalaman publishes linux.x86_64 and linux.aarch64, which is exactly
+            # what `uname -m` reports on both runner flavours; the case is here so
+            # an unknown machine fails loudly instead of 404-ing on a guessed name.
+            case "$(uname -m)" in
+              x86_64 | amd64) arch=x86_64 ;;
+              aarch64 | arm64) arch=aarch64 ;;
+              *) echo "::error::no pinned shellcheck build for $(uname -m)"; exit 1 ;;
+            esac
+            url="https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.linux.${arch}.tar.xz"
+            # Unpack outside the checkout so the workspace stays clean.
+            dir="$(mktemp -d)"
+            curl -fsSL "$url" | tar -xJf - -C "$dir"
+            sudo install -m 0755 "$dir/shellcheck-v${SHELLCHECK_VERSION}/shellcheck" /usr/local/bin/shellcheck
+            rm -rf "$dir"
+            # `installed()` above already executed /usr/bin/shellcheck on
+            # ubuntu-latest, so bash has that path hashed; without this the checks
+            # below would keep measuring the 0.9.0 we just replaced.
+            hash -r
+          fi
+
+          # In the log on purpose: a finding that appears or disappears only in CI
+          # is answered by this line instead of by another run.
+          shellcheck --version
+          test "$(installed)" = "$SHELLCHECK_VERSION"
+          npm run lint:sh
+
   type-check:
     name: Type Check
     # [self-hosted] This repository's ephemeral self-hosted runners (labels:
