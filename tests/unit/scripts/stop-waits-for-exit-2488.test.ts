@@ -48,6 +48,7 @@
  */
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -266,7 +267,6 @@ function writePidFile(sandbox: string, pid: number): void {
 /** A port nobody listens on: bound, read back, released. */
 function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
-    const net = require('node:net') as typeof import('node:net');
     const server = net.createServer();
     server.once('error', reject);
     server.listen(0, '127.0.0.1', () => {

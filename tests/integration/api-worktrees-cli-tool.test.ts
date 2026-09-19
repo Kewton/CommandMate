@@ -38,6 +38,13 @@ vi.mock('@/lib/session/cli-session', async (importOriginal) => ({
   captureSessionOutput: vi.fn(() => Promise.resolve('')),
 }));
 
+/** The fields this suite reads off one entry of the route's JSON body. */
+interface WorktreeListEntry {
+  id: string;
+  cliToolId?: string;
+  isSessionRunning: boolean;
+}
+
 /** Build a listSessions() entry for a worktree's primary session of a CLI tool. */
 function sessionEntry(cliToolId: string, worktreeId: string) {
   return { name: `mcbd-${cliToolId}-${worktreeId}`, windows: 1, attached: false };
@@ -146,19 +153,19 @@ describe('GET /api/worktrees - CLI Tool Support', () => {
     expect(data.worktrees).toHaveLength(3);
 
     // Check Claude worktree (running)
-    const claudeWt = data.worktrees.find((wt: any) => wt.id === 'claude-wt');
+    const claudeWt = data.worktrees.find((wt: WorktreeListEntry) => wt.id === 'claude-wt');
     expect(claudeWt).toBeDefined();
     expect(claudeWt.cliToolId).toBe('claude');
     expect(claudeWt.isSessionRunning).toBe(true);
 
     // Check Codex worktree (not running)
-    const codexWt = data.worktrees.find((wt: any) => wt.id === 'codex-wt');
+    const codexWt = data.worktrees.find((wt: WorktreeListEntry) => wt.id === 'codex-wt');
     expect(codexWt).toBeDefined();
     expect(codexWt.cliToolId).toBe('codex');
     expect(codexWt.isSessionRunning).toBe(false);
 
     // Check Gemini worktree (running)
-    const geminiWt = data.worktrees.find((wt: any) => wt.id === 'gemini-wt');
+    const geminiWt = data.worktrees.find((wt: WorktreeListEntry) => wt.id === 'gemini-wt');
     expect(geminiWt).toBeDefined();
     expect(geminiWt.cliToolId).toBe('gemini');
     expect(geminiWt.isSessionRunning).toBe(true);
@@ -186,7 +193,7 @@ describe('GET /api/worktrees - CLI Tool Support', () => {
     expect(response.status).toBe(200);
 
     const data = await response.json();
-    const defaultWt = data.worktrees.find((wt: any) => wt.id === 'default-wt');
+    const defaultWt = data.worktrees.find((wt: WorktreeListEntry) => wt.id === 'default-wt');
 
     expect(defaultWt).toBeDefined();
     expect(defaultWt.cliToolId).toBe('claude');

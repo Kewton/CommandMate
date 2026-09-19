@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { TmuxControlRegistry } from '@/lib/tmux/tmux-control-registry';
+import type { TmuxControlClient } from '@/lib/tmux/tmux-control-client';
 
 describe('TmuxControlRegistry', () => {
   beforeEach(() => {
@@ -19,7 +20,7 @@ describe('TmuxControlRegistry', () => {
         onEvent,
         sendInput: vi.fn(),
         resize: vi.fn(),
-      } as any),
+      } as unknown as TmuxControlClient),
     });
 
     const unsubA = registry.subscribe('s1', 'a', vi.fn());
@@ -49,7 +50,7 @@ describe('TmuxControlRegistry', () => {
         onEvent: vi.fn(() => vi.fn()),
         sendInput,
         resize,
-      } as any),
+      } as unknown as TmuxControlClient),
     });
 
     registry.subscribe('s1', 'a', vi.fn());
@@ -84,7 +85,7 @@ describe('TmuxControlRegistry', () => {
           sendInput,
           resize: vi.fn(),
           setSessionName,
-        } as any),
+        } as unknown as TmuxControlClient),
       });
       return { registry, sendInput, setSessionName, emitEvent: (event: unknown) => emit(event) };
     }

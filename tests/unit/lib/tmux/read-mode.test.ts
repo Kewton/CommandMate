@@ -296,6 +296,9 @@ describe('reconcileReadModeBinding', () => {
   });
 
   it('is idempotent when the existing binding is already ours', async () => {
+    // 宣言より後の `seen = first.scriptPath;` で代入し、list-keys のクロージャが
+    // その値を後から読むため const にはできない。
+    // eslint-disable-next-line prefer-const -- 宣言後に代入し、先に作ったクロージャが後からその値を読む
     let seen: string | undefined;
     const calls = mockTmux((argv) => {
       if (argv[0] === 'list-commands') return POPUP_HELP;

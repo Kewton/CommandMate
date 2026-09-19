@@ -65,7 +65,7 @@ import {
   CLAUDE_SESSION_ERROR_REGEX_PATTERNS,
 } from '@/lib/detection/cli-patterns';
 import { findClaudeLaunchIndex, sendKeysCommands } from '@tests/helpers/claude-launch-command';
-import { useIsolatedAgentHooksDir } from '@tests/helpers/agent-hooks-dir';
+import { registerIsolatedAgentHooksDir } from '@tests/helpers/agent-hooks-dir';
 
 const TEST_SESSION_OPTIONS = {
   worktreeId: 'test-worktree',
@@ -74,7 +74,7 @@ const TEST_SESSION_OPTIONS = {
 const TEST_SESSION_NAME = 'mcbd-claude-test-worktree';
 
 // Issue #1722 writes a hooks settings file on every session start.
-useIsolatedAgentHooksDir('issue-265');
+registerIsolatedAgentHooksDir('issue-265');
 
 describe('Issue #265 Acceptance Test: CLI path cache invalidation and broken session recovery', () => {
   beforeEach(() => {

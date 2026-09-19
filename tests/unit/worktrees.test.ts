@@ -5,6 +5,7 @@
 
 import { describe, it, expect, vi, beforeAll, beforeEach, afterAll, afterEach } from 'vitest';
 import { exec } from 'child_process';
+import type { ChildProcess, ExecOptions } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { makeTempDir, removeTempDir } from '@tests/helpers/temp-dir';
@@ -15,6 +16,19 @@ import { makeTempDir, removeTempDir } from '@tests/helpers/temp-dir';
 vi.mock('child_process', () => ({
   exec: vi.fn(),
 }));
+
+/**
+ * The callback shape these doubles actually drive. Stripping
+ * `util.promisify.custom` (see the factory above) means `promisify(exec)`
+ * resolves with the FIRST callback value, so `scanWorktrees`'s
+ * `const { stdout } = await execAsync(...)` needs the `{ stdout, stderr }`
+ * object in the position `exec`'s own typing calls `stdout: string`.
+ */
+type ExecCallback = (
+  err: (Error & { code?: number }) | null,
+  stdout: string | { stdout: string; stderr: string },
+  stderr: string
+) => void;
 
 // Import functions after mocking
 import {
@@ -55,10 +69,10 @@ describe('Worktree Management', () => {
     vi.clearAllMocks();
     // Set up default implementation that works with promisify
     vi.mocked(exec).mockImplementation(
-      ((cmd: string, opts: any, callback: (err: Error | null, stdout: string, stderr: string) => void) => {
+      ((cmd: string, opts: ExecOptions, callback: ExecCallback) => {
         if (callback) callback(null, '', '');
-        return {} as any;
-      }) as any
+        return {} as ChildProcess;
+      }) as unknown as typeof exec
     );
   });
 
@@ -203,10 +217,10 @@ invalid line
 /path/to/feature-foo def456 [feature/foo]`;
 
       vi.mocked(exec).mockImplementationOnce(
-        ((cmd: string, opts: any, callback: (err: Error | null, stdout: string, stderr: string) => void) => {
-          callback(null, { stdout: mockOutput, stderr: '' } as any, '');
-          return {} as any;
-        }) as any
+        ((cmd: string, opts: ExecOptions, callback: ExecCallback) => {
+          callback(null, { stdout: mockOutput, stderr: '' }, '');
+          return {} as ChildProcess;
+        }) as unknown as typeof exec
       );
 
       const result = await scanWorktrees(repoRoot);
@@ -253,12 +267,12 @@ invalid line
       // is present, so git still runs and its exit 128 is what returns [].
       const notARepo = repoDir('not-a-repo');
       vi.mocked(exec).mockImplementationOnce(
-        ((cmd: string, opts: any, callback: (err: Error | null, stdout: string, stderr: string) => void) => {
-          const error = new Error('not a git repository') as any;
+        ((cmd: string, opts: ExecOptions, callback: ExecCallback) => {
+          const error: Error & { code?: number } = new Error('not a git repository');
           error.code = 128;
           callback(error, '', 'fatal: not a git repository');
-          return {} as any;
-        }) as any
+          return {} as ChildProcess;
+        }) as unknown as typeof exec
       );
 
       const result = await scanWorktrees(notARepo);
@@ -273,12 +287,12 @@ invalid line
 
     it('should return empty array for non-git directory', async () => {
       vi.mocked(exec).mockImplementationOnce(
-        ((cmd: string, opts: any, callback: (err: Error | null, stdout: string, stderr: string) => void) => {
-          const error = new Error('not a git repository') as any;
+        ((cmd: string, opts: ExecOptions, callback: ExecCallback) => {
+          const error: Error & { code?: number } = new Error('not a git repository');
           error.code = 128;
           callback(error, '', 'fatal: not a git repository');
-          return {} as any;
-        }) as any
+          return {} as ChildProcess;
+        }) as unknown as typeof exec
       );
 
       const result = await scanWorktrees('/tmp');
@@ -288,12 +302,12 @@ invalid line
 
     it('should throw on unexpected git errors', async () => {
       vi.mocked(exec).mockImplementationOnce(
-        ((cmd: string, opts: any, callback: (err: Error | null, stdout: string, stderr: string) => void) => {
-          const error = new Error('permission denied') as any;
+        ((cmd: string, opts: ExecOptions, callback: ExecCallback) => {
+          const error: Error & { code?: number } = new Error('permission denied');
           error.code = 1;
           callback(error, '', 'permission denied');
-          return {} as any;
-        }) as any
+          return {} as ChildProcess;
+        }) as unknown as typeof exec
       );
 
       await expect(scanWorktrees(repoRoot)).rejects.toThrow(
@@ -305,10 +319,10 @@ invalid line
       const mockOutput = '/path/with spaces/main abc123 [main]';
 
       vi.mocked(exec).mockImplementationOnce(
-        ((cmd: string, opts: any, callback: (err: Error | null, stdout: string, stderr: string) => void) => {
-          callback(null, { stdout: mockOutput, stderr: '' } as any, '');
-          return {} as any;
-        }) as any
+        ((cmd: string, opts: ExecOptions, callback: ExecCallback) => {
+          callback(null, { stdout: mockOutput, stderr: '' }, '');
+          return {} as ChildProcess;
+        }) as unknown as typeof exec
       );
 
       const result = await scanWorktrees(repoRoot);
@@ -321,10 +335,10 @@ invalid line
       const mockOutput = './relative/path abc123 [main]';
 
       vi.mocked(exec).mockImplementationOnce(
-        ((cmd: string, opts: any, callback: (err: Error | null, stdout: string, stderr: string) => void) => {
-          callback(null, { stdout: mockOutput, stderr: '' } as any, '');
-          return {} as any;
-        }) as any
+        ((cmd: string, opts: ExecOptions, callback: ExecCallback) => {
+          callback(null, { stdout: mockOutput, stderr: '' }, '');
+          return {} as ChildProcess;
+        }) as unknown as typeof exec
       );
 
       const result = await scanWorktrees(repoRoot);

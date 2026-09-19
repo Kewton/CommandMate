@@ -11,6 +11,8 @@ vi.mock('@/lib/tmux/tmux', () => ({
 
 import { ControlModeTmuxTransport } from '@/lib/tmux/control-mode-tmux-transport';
 import { capturePane, hasSession, sendKeys, sendSpecialKey } from '@/lib/tmux/tmux';
+import type { TmuxControlEvent } from '@/lib/tmux/tmux-control-parser';
+import type { TmuxControlRegistry } from '@/lib/tmux/tmux-control-registry';
 
 describe('ControlModeTmuxTransport', () => {
   const registry = {
@@ -24,7 +26,11 @@ describe('ControlModeTmuxTransport', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    transport = new ControlModeTmuxTransport({ registry: registry as any });
+    // A four-method double, not a whole registry: the transport only reaches for
+    // hasSession / subscribe / sendInput / resize.
+    transport = new ControlModeTmuxTransport({
+      registry: registry as unknown as TmuxControlRegistry,
+    });
   });
 
   it('should expose control mode capabilities', () => {
@@ -68,7 +74,7 @@ describe('ControlModeTmuxTransport', () => {
     const onError = vi.fn();
     const onExit = vi.fn();
 
-    let eventHandler: ((event: any) => void) | null = null;
+    let eventHandler: ((event: TmuxControlEvent) => void) | null = null;
     registry.subscribe.mockImplementation((_sessionName, _subscriberId, handler) => {
       eventHandler = handler;
       return vi.fn();

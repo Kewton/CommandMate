@@ -216,7 +216,7 @@ function loggedActions(): string[] {
 }
 
 /** Wire the session-state pair into one mutable row, as the real poller sees it. */
-function useLiveSessionState(initial: number): void {
+function wireLiveSessionState(initial: number): void {
   let lastCapturedLine = initial;
   getSessionState.mockImplementation(() => ({ lastCapturedLine, inProgressMessageId: null }));
   updateSessionState.mockImplementation((...args: unknown[]) => {
@@ -235,7 +235,7 @@ beforeEach(() => {
   transcriptState.written.clear();
   isSessionRunning.mockResolvedValue(true);
   captureSessionOutput.mockResolvedValue(codexPane());
-  useLiveSessionState(CACHE_MAX_CAPTURE_LINES - 1);
+  wireLiveSessionState(CACHE_MAX_CAPTURE_LINES - 1);
 });
 
 afterEach(() => {

@@ -152,7 +152,7 @@ function savedAssistantContents(): string[] {
  * reads back exactly what it wrote. Without this, a test could keep feeding a
  * hand-picked cursor and never notice that the product re-pins its own state.
  */
-function useLiveSessionState(initial: number): { current: () => number } {
+function wireLiveSessionState(initial: number): { current: () => number } {
   let lastCapturedLine = initial;
   getSessionState.mockImplementation(() => ({ lastCapturedLine, inProgressMessageId: null }));
   updateSessionState.mockImplementation((...args: unknown[]) => {
@@ -202,7 +202,7 @@ describe('Issue #1670: saturated inline sessions keep recording replies', () => 
     // Three consecutive turns against a permanently full window, with the poller's
     // own session_states writes fed back in. Pre-fix, turn 1 pinned the cursor at
     // the window and turns 2-3 were dropped with already-saved-up-to-line.
-    const state = useLiveSessionState(0);
+    const state = wireLiveSessionState(0);
     const bodies = ['first reply', 'second reply', 'third reply'];
 
     for (const body of bodies) {
@@ -223,7 +223,7 @@ describe('Issue #1670: saturated inline sessions keep recording replies', () => 
 
   it.each(INLINE_TOOLS)('%s recovers from a session_states row already pinned at the window', async (tool) => {
     // The stuck state as found in production, with no DB repair applied first.
-    useLiveSessionState(CACHE_MAX_CAPTURE_LINES);
+    wireLiveSessionState(CACHE_MAX_CAPTURE_LINES);
     captureSessionOutput.mockResolvedValue(pane(tool, 'reply after the pane saturated', CACHE_MAX_CAPTURE_LINES));
 
     expect(await checkForResponse('wt-1', tool)).toBe(true);
@@ -235,7 +235,7 @@ describe('Issue #1670: saturated inline sessions keep recording replies', () => 
     // 10000-line window, written by the prompt path's totalLines bookkeeping.
     // It was fixed by hand in production; that hand-fix is what must stop being
     // necessary.
-    useLiveSessionState(9999);
+    wireLiveSessionState(9999);
     captureSessionOutput.mockResolvedValue(pane('codex', 'reply the operator never saw saved', CACHE_MAX_CAPTURE_LINES));
 
     expect(await checkForResponse('wt-1', 'codex')).toBe(true);
@@ -246,7 +246,7 @@ describe('Issue #1670: saturated inline sessions keep recording replies', () => 
     // Anchoring is the other half of the fix: with the cursor disabled but
     // extraction still starting AT lastCapturedLine, the poller would save the
     // last row or two of a long reply instead of the reply.
-    useLiveSessionState(CACHE_MAX_CAPTURE_LINES - 1);
+    wireLiveSessionState(CACHE_MAX_CAPTURE_LINES - 1);
     const turn = TURN_BUILDERS.codex('');
     const body = Array.from({ length: 400 }, (_, i) => `• reply row ${i + 1}`);
     const rows = [turn.echo, '', ...body, ...turn.footer];
@@ -267,7 +267,7 @@ describe('Issue #1670: dedup still holds without the cursor', () => {
     // Disabling the cursor removes what used to suppress re-saves, so content
     // dedup has to take over — otherwise the fix would append the same reply
     // every 2 s, which is worse than the bug.
-    useLiveSessionState(CACHE_MAX_CAPTURE_LINES);
+    wireLiveSessionState(CACHE_MAX_CAPTURE_LINES);
     captureSessionOutput.mockResolvedValue(pane('codex', 'static finished reply', CACHE_MAX_CAPTURE_LINES));
 
     expect(await checkForResponse('wt-1', 'codex')).toBe(true);
@@ -280,7 +280,7 @@ describe('Issue #1670: dedup still holds without the cursor', () => {
   it('records an identical reply again in a later turn', async () => {
     // Content dedup is per polling cycle, not permanent: a repeated "完了しました。"
     // is a real reply and dropping it would reproduce the reported symptom.
-    useLiveSessionState(CACHE_MAX_CAPTURE_LINES);
+    wireLiveSessionState(CACHE_MAX_CAPTURE_LINES);
     captureSessionOutput.mockResolvedValue(pane('codex', '完了しました。', CACHE_MAX_CAPTURE_LINES));
 
     expect(await checkForResponse('wt-1', 'codex')).toBe(true);
@@ -303,7 +303,7 @@ describe('Issue #1670: the cursor survives below the window', () => {
   const echoIndex = unsaturated.split('\n').findIndex(line => line.startsWith('› update'));
 
   it('codex records the reply while the cursor is still behind it', async () => {
-    useLiveSessionState(echoIndex + 1);
+    wireLiveSessionState(echoIndex + 1);
     captureSessionOutput.mockResolvedValue(unsaturated);
 
     expect(await checkForResponse('wt-1', 'codex')).toBe(true);
@@ -314,7 +314,7 @@ describe('Issue #1670: the cursor survives below the window', () => {
     const probe = extractResponse(unsaturated, echoIndex + 1, 'codex');
     expect(probe?.captureWindowSaturated).toBe(false);
 
-    useLiveSessionState(probe!.lineCount); // what the save above writes back
+    wireLiveSessionState(probe!.lineCount); // what the save above writes back
     captureSessionOutput.mockResolvedValue(unsaturated);
 
     expect(await checkForResponse('wt-1', 'codex')).toBe(false);

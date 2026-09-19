@@ -122,7 +122,7 @@ function savedAssistantContents(): string[] {
     .map(([, m]) => stripAnsi(String(m.content)));
 }
 
-function useLiveSessionState(initial: number): void {
+function wireLiveSessionState(initial: number): void {
   let lastCapturedLine = initial;
   getSessionState.mockImplementation(() => ({ lastCapturedLine, inProgressMessageId: null }));
   updateSessionState.mockImplementation((...args: unknown[]) => {
@@ -194,7 +194,7 @@ describe('[#2400] a saturated codex pane saves the reply, not the status bar', (
   });
 
   it('the saved assistant message is the reply', async () => {
-    useLiveSessionState(CACHE_MAX_CAPTURE_LINES);
+    wireLiveSessionState(CACHE_MAX_CAPTURE_LINES);
     captureSessionOutput.mockResolvedValue(pane());
 
     expect(await checkForResponse('wt-1', 'codex')).toBe(true);
@@ -212,7 +212,7 @@ describe('[#2400] a saturated codex pane saves the reply, not the status bar', (
     // The acceptance condition stated as its own test: whatever else changes,
     // the one thing that must never reach `chat_messages` again is a message
     // whose entire content is codex's `model · cwd` row.
-    useLiveSessionState(CACHE_MAX_CAPTURE_LINES);
+    wireLiveSessionState(CACHE_MAX_CAPTURE_LINES);
     captureSessionOutput.mockResolvedValue(pane());
 
     await checkForResponse('wt-1', 'codex');
@@ -233,7 +233,7 @@ describe('[#2400] content dedup no longer locks on a constant row', () => {
     // `isDuplicateResponse` refused everything that followed — the pane could
     // not record a reply again for the rest of the session. Different replies
     // must now produce different content, which is what unlocks it.
-    useLiveSessionState(0);
+    wireLiveSessionState(0);
     const bodies = ['first saturated reply', 'second saturated reply', 'third saturated reply'];
 
     for (const body of bodies) {
@@ -250,7 +250,7 @@ describe('[#2400] content dedup no longer locks on a constant row', () => {
   it('still refuses to re-save the same finished screen on every tick', async () => {
     // Dedup is load-bearing without the line cursor (#1670), so the fix must not
     // buy turn-to-turn recording by disabling it.
-    useLiveSessionState(CACHE_MAX_CAPTURE_LINES);
+    wireLiveSessionState(CACHE_MAX_CAPTURE_LINES);
     captureSessionOutput.mockResolvedValue(pane());
 
     expect(await checkForResponse('wt-1', 'codex')).toBe(true);

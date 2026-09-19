@@ -151,7 +151,7 @@ describe('CommandPalette (Issue #1053)', () => {
 
   afterEach(() => {
     cleanup();
-    delete (document as any).startViewTransition;
+    delete (document as Partial<Document>).startViewTransition;
     vi.unstubAllGlobals();
     vi.clearAllMocks();
   });
@@ -324,7 +324,7 @@ describe('CommandPalette (Issue #1053)', () => {
   });
 
   it('routes navigation through View Transitions (Issue #2684)', () => {
-    if (typeof (document as any).startViewTransition !== 'function') {
+    if (typeof document.startViewTransition !== 'function') {
       Object.defineProperty(document, 'startViewTransition', {
         value: () => {},
         writable: true,
@@ -368,7 +368,7 @@ describe('CommandPalette (Issue #1053)', () => {
       expect(pushMock).toHaveBeenCalledWith('/sessions');
     } finally {
       startViewTransitionSpy.mockRestore();
-      delete (document as any).startViewTransition;
+      delete (document as Partial<Document>).startViewTransition;
     }
   });
 

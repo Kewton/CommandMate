@@ -62,14 +62,18 @@ import { stopPolling as stopResponsePolling } from '@/lib/polling/response-polle
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { killSession } from '@/lib/tmux/tmux';
 import { syncWorktreesToDB } from '@/lib/git/worktrees';
+import type Database from 'better-sqlite3';
+import type { ICLITool } from '@/lib/cli-tools/types';
+import type { Worktree } from '@/types/models';
 
 describe('Session Cleanup Utility', () => {
   beforeEach(() => {
     vi.resetAllMocks();
     // Re-apply default mock for CLIToolManager.getInstance after reset
+    // killWorktreeSession() only reaches for getTool(), so the double stops there.
     vi.mocked(CLIToolManager.getInstance).mockReturnValue({
       getTool: vi.fn(),
-    } as any);
+    } as unknown as CLIToolManager);
   });
 
   describe('cleanupWorktreeSessions', () => {
@@ -209,7 +213,7 @@ describe('Session Cleanup Utility', () => {
         isRunning: vi.fn().mockResolvedValue(true),
         getSessionName: vi.fn().mockReturnValue('claude-wt-1'),
       };
-      vi.mocked(CLIToolManager.getInstance().getTool).mockReturnValue(mockTool as any);
+      vi.mocked(CLIToolManager.getInstance().getTool).mockReturnValue(mockTool as unknown as ICLITool);
       vi.mocked(killSession).mockResolvedValue(true);
 
       const result = await killWorktreeSession('wt-1', 'claude');
@@ -225,7 +229,7 @@ describe('Session Cleanup Utility', () => {
         isRunning: vi.fn().mockResolvedValue(false),
         getSessionName: vi.fn(),
       };
-      vi.mocked(CLIToolManager.getInstance().getTool).mockReturnValue(mockTool as any);
+      vi.mocked(CLIToolManager.getInstance().getTool).mockReturnValue(mockTool as unknown as ICLITool);
 
       const result = await killWorktreeSession('wt-1', 'claude');
 
@@ -246,10 +250,11 @@ describe('Session Cleanup Utility', () => {
 
   // Issue #526: syncWorktreesAndCleanup() tests
   describe('syncWorktreesAndCleanup', () => {
-    const mockDb = {} as any;
+    // syncWorktreesToDB is mocked, so the handle is only ever passed through.
+    const mockDb = {} as Database.Database;
     const mockWorktrees = [
       { id: 'wt-1', name: 'main', path: '/path', repositoryPath: '/repo', repositoryName: 'repo' },
-    ] as any[];
+    ] as Worktree[];
 
     it('should call syncWorktreesToDB and return result when no deletions', async () => {
       vi.mocked(syncWorktreesToDB).mockReturnValue({ deletedIds: [], upsertedCount: 1 });
@@ -269,7 +274,7 @@ describe('Session Cleanup Utility', () => {
         isRunning: vi.fn().mockResolvedValue(false),
         getSessionName: vi.fn(),
       };
-      vi.mocked(CLIToolManager.getInstance().getTool).mockReturnValue(mockTool as any);
+      vi.mocked(CLIToolManager.getInstance().getTool).mockReturnValue(mockTool as unknown as ICLITool);
 
       const result = await syncWorktreesAndCleanup(mockDb, mockWorktrees);
 

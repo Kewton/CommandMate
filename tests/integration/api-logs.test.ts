@@ -114,7 +114,7 @@ describe('GET /api/worktrees/:id/logs/:filename', () => {
       isFile: () => true,
       size: mockLogContent.length,
       mtime: new Date('2025-01-17T10:30:45Z'),
-    } as any);
+    } as unknown as import('fs').Stats);
     vi.mocked(fs.default.readFile).mockResolvedValue(mockLogContent);
 
     const request = new Request(

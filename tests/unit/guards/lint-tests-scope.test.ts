@@ -8,9 +8,11 @@
  * the i18n literal detector (#1271) and the tmux-gateway ban (#1922) both describe
  * how the product must be written, and a test that hard-codes a label or drives
  * tmux directly is doing its job — 328 of the 522 findings measured on develop were
- * that kind of false positive. The override turns those three off permanently, and
- * downgrades six genuine-debt rules to `warn` so the scope change lands at exit 0
- * (194 real findings) instead of holding every PR hostage to a cleanup Issue.
+ * that kind of false positive. The override turns those three off permanently. It
+ * also downgraded six genuine-debt rules to `warn` so the scope change could land
+ * at exit 0 (194 real findings) instead of holding every PR hostage to a cleanup
+ * Issue; Issue #2721 cleared the last 76 of those findings and deleted all six
+ * entries, so the override is now three `off` rules and nothing else.
  *
  * ## What this file pins, and why ESLint cannot pin it itself
  *
@@ -24,6 +26,8 @@
  * Issues promote these back to `error` one at a time, and each promotion is a
  * deletion from the override. What keeps that honest is the last test in this file
  * — a rule may only leave the list once `tests/` actually has zero findings for it.
+ * All six have now left, so that test re-measures all six on every run and
+ * `STAGED_WARN` must keep its six entries for it to have anything to measure.
  *
  * @vitest-environment node
  */
@@ -55,8 +59,13 @@ const PERMANENT_OFF = [
 ];
 
 /**
- * 段階解消 — real debt, temporarily `warn`. A follow-up Issue deletes each entry
- * (restoring the inherited `error`) once the corresponding findings are gone.
+ * 段階解消 — real debt that was temporarily `warn`. A follow-up Issue deleted each
+ * entry (restoring the inherited `error`) once the corresponding findings were
+ * gone; Issue #2721 deleted the last of them.
+ *
+ * **Do not shorten this list.** It is no longer a description of the override —
+ * it is the set the promotion-contract test below re-lints. An entry removed here
+ * stops being measured, which is the opposite of what promoting it was for.
  */
 const STAGED_WARN = [
   '@typescript-eslint/no-unused-vars',
@@ -128,6 +137,11 @@ describe('lint scope covers tests/ (Issue #2719)', () => {
     expect(entriesWithSeverity('off')).toEqual([...PERMANENT_OFF].sort());
   });
 
+  /**
+   * Since Issue #2721 the staging is finished, so this also pins the count at
+   * zero: `warn` is no longer an available answer for a rule that fires in
+   * `tests/`.
+   */
   it('sets every other rule in the override to `warn`, from the staged list', () => {
     const rules = testsRules();
     const nonOff = Object.entries(rules).filter(([, value]) => value !== 'off');
@@ -143,6 +157,15 @@ describe('lint scope covers tests/ (Issue #2719)', () => {
     for (const [rule] of nonOff) {
       expect(staged.has(rule), `${rule} is not one of the staged-debt rules`).toBe(true);
     }
+
+    // Issue #2721: the staged debt is paid off. A new `warn` here would be a
+    // finding routed around `npm run lint`'s exit code rather than fixed, and
+    // nothing else in CI would notice.
+    expect(
+      entriesWithSeverity('warn'),
+      'the tests/** override may not downgrade anything to "warn" any more — ' +
+        'fix the finding, or disable the line with a reason',
+    ).toEqual([]);
   });
 
   it('does not let the CI Lint job swallow its own result', () => {
@@ -163,40 +186,66 @@ describe('lint scope covers tests/ (Issue #2719)', () => {
   /**
    * The promotion contract. Deleting a `warn` entry hands that rule back to the
    * inherited `error`, which is only safe once `tests/` is clean of it — so this
-   * re-measures, rather than trusting, every rule that has left the list. While
-   * all six are still staged the loop body never runs and nothing is linted.
+   * re-measures, rather than trusting, every rule that has left the list. Since
+   * Issue #2721 that is all six, permanently.
+   *
+   * One ESLint instance carrying every promoted rule, not one per rule: the walk
+   * over `tests/` dominates the cost and repeating it is pure waste. Measured on
+   * develop with all six promoted — 6 instances 44.0s, 1 instance 8.3s.
+   *
+   * Each rule is raised to `error` **keeping the options the root config gives
+   * it**, so this measures what `npm run lint` measures. `no-unused-vars` is the
+   * one that matters: its `^_` ignore patterns live in the root `rules`, and
+   * re-linting with stock options would report variables the real run allows.
    */
   it('only allows a staged rule to be dropped once tests/ is clean of it', async () => {
     const stillStaged = new Set(entriesWithSeverity('warn'));
     const promoted = STAGED_WARN.filter((rule) => !stillStaged.has(rule));
 
-    for (const rule of promoted) {
-      const eslint = new ESLint({
-        useEslintrc: false,
-        cwd: REPO_ROOT,
-        baseConfig: {
-          root: true,
-          parser: require_.resolve('@typescript-eslint/parser'),
-          parserOptions: {
-            ecmaVersion: 2022,
-            sourceType: 'module',
-            ecmaFeatures: { jsx: true },
-          },
-          plugins: ['@typescript-eslint', 'react-hooks'],
-          rules: { [rule]: 'error' },
-        } as unknown as Linter.Config,
-      });
+    // Nothing promoted: no walk, the way it was while all six were staged.
+    if (promoted.length === 0) return;
 
-      const results = await eslint.lintFiles(['tests/**/*.ts', 'tests/**/*.tsx']);
-      const offenders = results
-        .filter((r) => r.messages.some((m) => m.ruleId === rule))
-        .map((r) => r.filePath.slice(REPO_ROOT.length + 1));
+    const rules = Object.fromEntries(
+      promoted.map((rule) => {
+        const configured = rc.rules[rule];
+        return [rule, Array.isArray(configured) ? ['error', ...configured.slice(1)] : 'error'];
+      }),
+    );
 
-      expect(
-        offenders,
-        `${rule} was removed from the tests/** override, so it is an error again — ` +
-          `fix these files or put the "warn" entry back`,
-      ).toEqual([]);
+    const eslint = new ESLint({
+      useEslintrc: false,
+      cwd: REPO_ROOT,
+      baseConfig: {
+        root: true,
+        parser: require_.resolve('@typescript-eslint/parser'),
+        parserOptions: {
+          ecmaVersion: 2022,
+          sourceType: 'module',
+          ecmaFeatures: { jsx: true },
+        },
+        plugins: ['@typescript-eslint', 'react-hooks'],
+        rules,
+      } as unknown as Linter.Config,
+    });
+
+    const results = await eslint.lintFiles(['tests/**/*.ts', 'tests/**/*.tsx']);
+
+    // Per rule, so the failure names which rule regressed and where — a flat
+    // file list would leave that to be worked out by hand.
+    const offenders: Record<string, string[]> = {};
+    for (const result of results) {
+      const file = result.filePath.slice(REPO_ROOT.length + 1);
+      for (const message of result.messages) {
+        if (!message.ruleId || !promoted.includes(message.ruleId)) continue;
+        const files = (offenders[message.ruleId] ??= []);
+        if (!files.includes(file)) files.push(file);
+      }
     }
+
+    expect(
+      offenders,
+      'these rules were removed from the tests/** override, so they are errors ' +
+        'again — fix the files listed or put their "warn" entries back',
+    ).toEqual({});
   }, 180_000);
 });
