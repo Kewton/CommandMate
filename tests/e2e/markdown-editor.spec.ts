@@ -379,7 +379,6 @@ test.describe('Markdown Editor', () => {
       await page.waitForTimeout(500);
 
       // If save was successful, dirty indicator should disappear
-      const dirtyIndicator = page.locator('[data-testid="dirty-indicator"]');
       // Note: This may still show if there's an error, so we check visibility
       // The actual save test would need a proper backend setup
     });
