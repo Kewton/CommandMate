@@ -6,7 +6,7 @@
  */
 
 import React from 'react';
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { act, renderHook } from '@testing-library/react';
 import { RealtimeProvider, useRealtime } from '@/hooks/useRealtimeConnection';
 import { MockWebSocket, installMockWebSocket } from '@tests/helpers/mock-websocket';

@@ -5,7 +5,7 @@
  * Tests delegation to DocsReader utility (SF-003 SRP).
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createDocsCommand } from '../../../../src/cli/commands/docs';
 
 // Mock DocsReader

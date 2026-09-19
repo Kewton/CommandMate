@@ -1366,7 +1366,7 @@ describe('clearCache', () => {
   });
 
   it('should clear both commandsCache and skillsCache', async () => {
-    const { loadSlashCommands, loadSkills, getCachedCommands, clearCache } = await import(
+    const { loadSlashCommands, getCachedCommands, clearCache } = await import(
       '@/lib/slash-commands'
     );
 

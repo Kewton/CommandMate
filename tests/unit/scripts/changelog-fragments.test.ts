@@ -10,7 +10,6 @@ import path from 'path';
 import child_process from 'child_process';
 import { removeTempDir } from '@tests/helpers/temp-dir';
 import {
-  SECTION_ORDER,
   parseFragment,
   readFragments,
   renderSection,
