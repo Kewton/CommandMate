@@ -147,28 +147,42 @@ export const ANTIGRAVITY_VERIFIED_AGAINST = {
  * ## Not advanced by Issue #2754 either — and that Issue is why
  *
  * #2754 finally did the probe the paragraph above asked for: a live **1.54.1**
- * session on a private tmux socket at 200x1000, thirteen captures in
+ * session on a private tmux socket at 200x1000, twenty-six captures in
  * `tests/fixtures/command-code-askuserquestion-2754/`, and every key in the
  * screen's footer sent ONE AT A TIME with a capture on each side of it. By the
  * letter of that paragraph the stamp could move to 1.54.1. It does not, because
- * what the probe measured is that **the rules do not answer for 1.54.1**:
+ * what the probe measured is that **the rules still do not answer for 1.54.1**.
  *
- *  - 1.54.1 marks an answered tab with `✔` (U+2714), which is in neither
- *    `COMMAND_CODE_TAB_SELECTED_MARKERS` nor its hollow half, so
- *    `isCommandCodeQuestionTabRow` refuses the strip and eleven of the thirteen
- *    frames are not recognised as this screen at all;
- *  - three of them — the cursor resting on `❯ Submit`, with and without a
- *    footer, and the `❯ notes:` row that `n` opens — publish `ready` /
- *    `input_prompt`, i.e. #2521's 偽完了 on a real capture;
- *  - the footer itself is drawn only when the call carries MORE THAN ONE
- *    question, so it is not available as a marker.
+ * One of the two defects it found has since been fixed. **#2753** added
+ * `COMMAND_CODE_TAB_ANSWERED_MARKERS` (`✔`, U+2714) after the probe showed that
+ * a strip like `✔ Party size | ● Update scope | ◯ Review` failed
+ * `isCommandCodeQuestionTabRow` outright, so one answered question took eight of
+ * these frames — seven checkbox screens and a single-select — out of the reader
+ * and into the generic parser, which answered them as single-select lists with
+ * `[ ] ` still on the labels. Those eight now read correctly.
+ *
+ * What the probe measured that is STILL true on this build:
+ *
+ *  - **the cursor can leave the option list.** 1.54.1 draws `❯ Submit`,
+ *    `❯ Next` and, after `n`, `❯ notes:` — and the region reading counts
+ *    cursors inside the numbered run, so six captures of a live, unanswered
+ *    question publish `ready` / `input_prompt`, i.e. #2521's 偽完了 on a real
+ *    capture rather than on the synthetic frame it was argued from;
+ *  - **the Review page is answerable by accident.** Enter on `❯ Submit` opens a
+ *    second confirm (`❯ 1. Submit` / `2. Cancel`), which the generic parser
+ *    reads as a two-option prompt whose default COMMITS the human's answers;
+ *  - **the new footer lands inside the last option's label** on both frames the
+ *    reader does read, because 1.53.0 drew nothing under the option run and the
+ *    tail walk folds whatever follows it. The footer is also drawn only when the
+ *    call carries MORE THAN ONE question, so it is not usable as a marker either.
  *
  * This stamp answers "which build were these rules read off", and
  * {@link getDetectorFreshness} turns it into "are they current". Moving it to
- * 1.54.1 would make the probe say the rules were measured against a build they
- * demonstrably misread — the fail-open version of the #2304 precedent rather
- * than an application of it. Advance it when #2755 re-reads the rules off those
- * frames, to the version whose frames the new rules were read from.
+ * 1.54.1 while nine of the twenty-six captures are still misread would make the
+ * probe say the rules were measured against a build they demonstrably misread —
+ * the fail-open version of the #2304 precedent rather than an application of it.
+ * Advance it when #2755 re-reads the rules off those frames, to the version
+ * whose frames the new rules were read from.
  */
 export const COMMAND_CODE_VERIFIED_AGAINST = {
   version: '1.40.1',

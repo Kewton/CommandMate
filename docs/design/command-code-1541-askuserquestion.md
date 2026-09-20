@@ -1,7 +1,8 @@
 # 実機実測: Command Code 1.54.1 の `AskUserQuestion` 画面とキー意味論
 
 - **Issue**: [#2754](https://github.com/Kewton/CommandMate/issues/2754)（親 [#2756](https://github.com/Kewton/CommandMate/issues/2756)、Blocks [#2755](https://github.com/Kewton/CommandMate/issues/2755)）
-- **ステータス**: 実測完了（**検出ルールの変更なし**。`src/` の変更は `verified-against.ts` の docblock のみ）
+- **ステータス**: 実測完了（**本 Issue は検出ルールを変えていない**。`src/` の変更は `verified-against.ts` の docblock のみ）
+- **本書の後に入った修正**: 実測中に **#2753**（squash `9b58b26e`）が develop へ入り、本書 §1-5 が指摘した `✔` の問題を閉じた。**「1.54.1 が何を描くか」の実測（§3 / §4）は 1 行も変わっていない**。変わったのは「検出チェーンがそのフレームをどう読むか」（§1-5 / §1-12 / §5）だけである
 - **検証日**: 2026-09-20
 - **対象**: Command Code **1.54.1**（`command-code@1.54.1`、全フレームのバナー行 `# Command Code v1.54.1`）
 - **プラットフォーム**: macOS (Darwin 27.0.0) / `/opt/homebrew/bin/commandcode` / model `deepseek-v4.1-flash`
@@ -22,16 +23,19 @@
 | 2 | 確定行のラベル | 最後の質問では `Submit`、それ以外では **`Next`**。どちらも番号なし | `multiselect-cursor-on-next.txt` |
 | 3 | フッタ | **質問が 1 つだけのときは 1 行も描かれない**。複数質問のときだけ `Enter to select \| … \| Esc to cancel` が出る。したがって**フッタは 1.54.1 の question 画面の必要条件ではない** | `tabs-single-question.txt`（無）/ `multiselect-initial.txt`（有） |
 | 4 | 質問 1 つのときのタブ行 | **`● Update scope \| ◯ Review` の 2 セル**。`Review` セルは常に付く。**1 セル行は発生しない**（＝ `segments.length < 2` の緩和は不要） | `tabs-single-question.txt` |
-| 5 | 回答済みタブ | `✔`（U+2714）。**この 1 文字が `isCommandCodeQuestionTabRow` を落とし**、質問 1 つ答えた時点で以降の全画面が #2521 の region reading に届かなくなる | `singleselect-answered-tabs.txt` |
+| 5 | 回答済みタブ | `✔`（U+2714）。実測時点では**この 1 文字が `isCommandCodeQuestionTabRow` を落とし**、質問 1 つ答えた時点で以降の全画面が #2521 の region reading に届かなかった。**#2753 が `COMMAND_CODE_TAB_ANSWERED_MARKERS` を追加して修正済み**で、現在は `✔` 付きタブ行もタブ行として読まれる（描画そのものは変わっていない） | `singleselect-answered-tabs.txt` |
 | 6 | `Enter` の意味 | 単一選択では確定。**複数選択の選択肢行では「その行のトグル」**で、質問は出たまま。`Submit` 行では**送信ではなく Review ページへ遷移** | §4 |
 | 7 | `1`–`9` の意味 | 単一選択では即確定＋次へ。**複数選択ではトグル（カーソルは動かない）**。カーソルが一覧から外れていると**完全に無反応** | §4 |
 | 8 | `Space` | フッタに載っていないが効く。**ただしカーソルが一度も動いていないと無反応**、`Submit` 行にいるときは**見えていない行（実測では option 1）をトグルする**。フレームからは効き先が判らない | §4 |
 | 9 | `Esc` | **1 打で質問ごと取り消し**（`└ User declined to answer questions`）。タブは戻らない。notes 入力を開いていても同じ | §4 |
 | 10 | `n` / `c` | `n` は `❯ notes:` 入力行を挿入（破壊的ではない）。`c` は**1 打でダイアログを閉じ、その時点の回答を「相談したい」として送る**。どちらも確認なし | §4 |
 | 11 | 未文書キー `d` | **フッタにない `d` が複数選択を終了させる**。未回答のまま押すと `⚠ You have not answered all questions` ＋ `No answer` で Review ページへ | §4 |
-| 12 | いまの検出チェーンの読み | 26 枚中 **17 枚が誤読**。うち **6 枚は `ready`/`input_prompt`（＝ #2521 の偽完了）**、7 枚はチェックボックス一覧が単一選択 payload として出てくる | §5 |
+| 12 | 検出チェーンの読み（**#2753 適用前**） | 26 枚中 **17 枚が誤読**。うち 6 枚は `ready`/`input_prompt`（＝ #2521 の偽完了）、7 枚はチェックボックス一覧が `[ ] ` 付きラベルの単一選択 payload になる（利用者報告の「複数選べない」） | §5 |
+| 13 | 検出チェーンの読み（**#2753 適用後 ＝ 現在**） | 26 枚中 **9 枚が誤読**に減った。残るのは **6 枚の `ready`/`input_prompt`（`❯` が一覧の外）** と **Review ページ 1 枚（既定回答が送信になる）**、**フッタが最後の選択肢に畳み込まれている 2 枚** | §5 |
 
 ### 1.1 #2755 が特に依拠すべき結論
+
+キー意味論（1ー6）は実測そのもので、#2753 では変わらない。検出側の課題（7ー8）だけが #2753 で削られた。
 
 1. **`Submit` 行の実描画は `❯ Submit`**（§1-1）。合成フレームで代用する必要はもう無い。
 2. **偽完了の条件は「`Submit` という単語」ではなく「`❯` が選択肢一覧の外に出たこと」**。`Submit` / `Next` / `notes:` の 3 種で同じ結果になる（§5）。
@@ -39,6 +43,8 @@
 4. **確定には 2 段ある**: 選択肢 → `Submit`/`Next` 行 → Review ページの `1. Submit`。GUI から確定させるなら Review ページまで渡る必要がある。
 5. **送信対象から外すべきキー**: `Space`（効き先がフレームから判らない）、`Esc`（1 打で取り消し）、`c`（1 打で送信）、`d`（未文書の終了）、`n`（モード切替）。**`1`–`9` はカーソルが一覧にあるときだけ有効**。
 6. **自由文行にフォーカスがあると数字は文字として入る**（§4）。GUI の自由文経路は「行に移動してから打つ」ことが必須で、移動していないと composer ではなくこの行に落ちるのではなく、**数字がトグルではなく本文になる**。
+7. **（#2753 で閉じた）`✔` タブ行の語彙追加は済んでいる**。#2755 で再度やる必要は無い。この修正で 8 枚が誤った payload から抜けた。
+8. **残っているのは 3 つ**: (a) `❯` が一覧外の 6 枚の偽完了、(b) Review ページの `1. Submit` / `2. Cancel` が回答可能な payload として出る（**既定回答が選択ではなく送信になる**）、(c) 新フッタが最後の選択肢のラベルに畳み込まれる。
 
 ---
 
@@ -244,33 +250,36 @@ Which files should I update?
 
 ---
 
-## 5. いまの検出チェーンが 1.54.1 をどう読むか（実測）
+## 5. 検出チェーンが 1.54.1 をどう読むか（実測）
 
-`askuserquestion-1541-2754.test.ts` が 26 枚すべてについて固定している。要約:
+`askuserquestion-1541-2754.test.ts` が 26 枚すべてについて固定している。
+**実測中に #2753 が入ったので、表は「適用前」と「適用後（＝現在）」を分けて書く。**
+どちらも .txt は同一で、変わったのは読み手の側だけである。
+
+### 5.1 #2753 適用後（＝現在の実態）
 
 | 読み | 枚数 | 該当 | 正しいか |
 |---|---|---|---|
-| `waiting` / `command_code_selection_list` / `hasActivePrompt:false`（#2521 のフォールバック） | 6 | `tabs-single-question` / `multiselect-next-row-not-last-question` / `multiselect-cursor-on-option-1-after-nav` / `multiselect-cursor-on-option-3-nothing-checked` / `multiselect-up-from-option-1-wraps-to-last` / `multiselect-enter-toggled-option-1` | **正しい** |
-| `waiting` / `prompt_detected` / `hasActivePrompt:true`（`readCommandCodeQuestionDialog` が読んだ） | 1 | `singleselect-initial-unanswered-tabs` | **半分誤り** — 選択肢 4 のラベルに**新フッタ 1 行がまるごと畳み込まれている** |
-| `waiting` / `prompt_detected` / `hasActivePrompt:true`（**汎用パーサ**が読んだ） | 10 | `singleselect-answered-tabs` / `multiselect-initial` / `multiselect-two-checked` / `multiselect-cursor-on-option-2` / `multiselect-space-untoggled-cursor-row` / `multiselect-free-text-*` 3 枚 / `review-page-*` 2 枚 | **誤り** — チェックボックス一覧が `[ ] ` 付きラベルの単一選択 payload になる |
+| `waiting` / `command_code_selection_list` / `hasActivePrompt:false`（#2521 のフォールバック） | 14 | `tabs-single-question` / `multiselect-next-row-not-last-question` / `multiselect-cursor-on-option-1-after-nav` / `multiselect-cursor-on-option-3-nothing-checked` / `multiselect-up-from-option-1-wraps-to-last` / `multiselect-enter-toggled-option-1` / `multiselect-initial` / `multiselect-two-checked` / `multiselect-cursor-on-option-2` / `multiselect-space-untoggled-cursor-row` / `multiselect-free-text-*` 3 枚 / `review-page-unanswered-warning` | **正しい** — うち後半 8 枚が #2753 で移ってきた分 |
+| `waiting` / `prompt_detected` / `hasActivePrompt:true`（`readCommandCodeQuestionDialog` が読んだ） | 2 | `singleselect-initial-unanswered-tabs` / `singleselect-answered-tabs` | **半分誤り** — 最後の選択肢のラベルに**新フッタ 1 行がまるごと畳み込まれている**（`requiresTextInput` 付きのまま） |
+| `waiting` / `prompt_detected` / `hasActivePrompt:true`（**汎用パーサ**が読んだ） | 1 | `review-page-submit-cancel` | **誤り** — `1. Submit` / `2. Cancel` が回答可能な payload になり、**既定回答が「選択」ではなく「送信」になる** |
 | `ready` / `input_prompt` / `hasActivePrompt:false`（偽完了） | 6 | `multiselect-cursor-on-submit` / `-no-footer` / `multiselect-up-from-option-1-lands-on-submit` / `multiselect-cursor-on-next` / `multiselect-notes-row-open` / `multiselect-submit-row-space-ticked-option-1` | **誤り** — `commandmate wait` が exit 0 する |
 | `ready` / `input_prompt`（質問が本当に消えている） | 2 | `not-applicable-question-cancelled` / `not-applicable-chat-disposition` | **正しい** |
 | `running` / `thinking_indicator` | 1 | `not-applicable-cancelled-from-notes-row` | **正しい** |
 
-### 5.1 誤読の原因は 2 つあり、独立している
+誤読は **9 枚**（フッタ畳み込み 2 ＋ Review ページ 1 ＋ 偽完了 6）。
 
-1. **`✔`（U+2714）がタブ行判定を落とす。**
-   `COMMAND_CODE_TAB_SEGMENT_PATTERN`（`selection-shape.ts`）は各セルの先頭記号が
-   `●◉⦿` か `◯○◌⚪` であることを要求する。1.54.1 の回答済みタブは `✔` なので
-   `isCommandCodeQuestionTabRow` が false を返し、region が見つからず、#2521 以前と同じく
-   汎用パーサに落ちる。**質問を 1 つ答えるだけで起きる。**
-2. **`❯` が選択肢一覧の外に出ると region reading の「カーソルは 1 つ」条件を満たさない。**
-   `Submit` / `Next` / `notes:` の 3 種。`Submit` という単語の問題ではない。
+### 5.2 #2753 適用前（実測時点。何が直ったかの記録）
 
-この 2 つは互いを含意しない（`✔` が無くても `❯ Submit` なら偽完了になる）。**#2755 は両方塞ぐ
-必要がある。**
+同じ 26 枚で誤読は **17 枚**だった。差分の 8 枚は次のとおりで、**すべてタブ行に `✔` を含むフレーム**である:
 
-### 5.2 汎用パーサが出す payload の実例（`multiselect-initial.txt`）
+| 採取 | 適用前 | 適用後 |
+|---|---|---|
+| `multiselect-initial` / `multiselect-two-checked` / `multiselect-cursor-on-option-2` / `multiselect-space-untoggled-cursor-row` / `multiselect-free-text-focused` / `multiselect-free-text-typed` / `multiselect-free-text-digit-appended` | `waiting` / `prompt_detected` / `act:true`。**チェックボックス一覧が `[ ] ` 付きラベルの単一選択 payload になる**（利用者報告の「複数選べない」） | `waiting` / `command_code_selection_list` / `act:false`（#2521 のフォールバック） |
+| `singleselect-answered-tabs` | `waiting` / `prompt_detected` / `act:true`（汎用パーサ）。`question` にタブ行より上の transcript 行が混入 | `waiting` / `prompt_detected` / `act:true`（**#2522 のリーダが読んだ**）。`question` は `Rental car?` のみ |
+| `review-page-unanswered-warning` | `waiting` / `prompt_detected` / `act:true` | `waiting` / `command_code_selection_list` / `act:false`（`numbering-unreadable`。`1.` が 2 回描かれるため） |
+
+適用前の payload の実例（`multiselect-initial.txt`、**現在は出ない**）:
 
 ```json
 { "type": "multiple_choice",
@@ -285,10 +294,28 @@ Which files should I update?
   "isAskUserQuestion": true }
 ```
 
-`respond 1` はここで**ボックスを 1 つ付けて止まる**。`multiselect-cursor-on-option-2.txt` では
-`isDefault` が `[✔] README.md` に付くので、**`respond --default` は人が付けた答えを外す**。
+`respond 1` はここで**ボックスを 1 つ付けて止まる**のだった。`multiselect-cursor-on-option-2.txt`
+では `isDefault` が `[✔] README.md` に付いたので、`respond --default` が人の答えを外した。
+**どちらも #2753 で出なくなった**（`askuserquestion-1541-2754.test.ts` の
+`no longer hands a checkbox list to the single-select answer path` が、どの採取からも
+`[ ]` / `[✔]` 付きラベルが payload に漏れないことを走査で固定している）。
 
----
+### 5.3 誤読の原因は 2 つあり、独立している。#2753 は片方を閉じた
+
+1. ~~**`✔`（U+2714）がタブ行判定を落とす。**~~ → **#2753 で修正済み。**
+   `COMMAND_CODE_TAB_SEGMENT_PATTERN`（`selection-shape.ts`）は各セルの先頭記号が
+   `●◉⦿` か `◯○◌⚪` であることを要求していたため、1.54.1 の回答済みタブ `✔` を含む行が
+   タブ行にならず、region が見つからず、汎用パーサに落ちていた。#2753 が
+   `COMMAND_CODE_TAB_ANSWERED_MARKERS = '✔'` を足し、述語を
+   `selected > 0 && others > 0` に変えた（`✔ one | ✔ two` は従来どおり非タブ行）。
+2. **`❯` が選択肢一覧の外に出ると region reading の「カーソルは 1 つ」条件を満たさない。**
+   → **未対応。#2755 の担当。** `Submit` / `Next` / `notes:` の 3 種で、`Submit` という
+   単語の問題ではない。タブ行がどれだけ綺麗でも落ちる。
+
+この 2 つは互いを含意しない。1 が閉じた今、**26 枚中 16 枚がこの画面として認識され、
+15 枚が region reading に読まれる**（16 枚目の `review-page-unanswered-warning` は
+認識された上で `1.` の重複により `numbering-unreadable` で降りる）。**残り 10 枚のうち
+6 枚が 2 の偽完了**である。
 
 ## 6. 判断: 1.54.1 の新フッタを検出に使うか
 
@@ -299,9 +326,11 @@ Which files should I update?
    （`tabs-single-question.txt` / `multiselect-cursor-on-submit-no-footer.txt`）。フッタを
    手がかりにすると、いちばん危ない「1 問だけ・フッタ無し・`❯ Submit`」の画面をちょうど取り逃す。
 2. **いま既に害になっている。** フッタが出ている単一選択では、`findNumberedOptionBlock` の
-   末尾走査がフッタ行を**最後の選択肢の説明として畳み込む**ので、選択肢 4 のラベルが
-   `Type something... Enter to select | Arrow keys to navigate | …` になる
-   （`singleselect-initial-unanswered-tabs.txt`）。#2755 がまずやるべきは「フッタを手がかりに
+   末尾走査がフッタ行を**最後の選択肢の説明として畳み込む**ので、最後の選択肢のラベルが
+   `Type something... Enter to select | Arrow keys to navigate | …` になり、
+   `requiresTextInput` も立ったままになる。読めている 2 枚の**両方**で起きている
+   （`singleselect-initial-unanswered-tabs.txt` の選択肢 4 と、#2753 で読めるようになった
+   `singleselect-answered-tabs.txt` の選択肢 3）。#2755 がまずやるべきは「フッタを手がかりに
    足す」ことではなく「**フッタを選択肢から切り離す**」ことである。
 
 `COMMAND_CODE_SELECTION_LIST_FOOTER` は #2753 の「やらないこと」どおり**変更していない**。
@@ -315,8 +344,9 @@ Which files should I update?
 と `src/lib/detection/tools/verified-against.ts` の docblock に書いた。要点:
 
 - このスタンプは `getDetectorFreshness` が「ルールは installed の版に対して測られているか」を
-  答えるための入力である。本 Issue が測ったのは **ルールが 1.54.1 に対して答えられていない**
-  ことなので、`1.54.1` と書くと測定結果と逆のことを probe が言う
+  答えるための入力である。#2753 が `✔` の側を閉じた後も、**26 枚中 9 枚はまだ誤読されている**
+  （偽完了 6 ＋ Review ページ 1 ＋ フッタ畳み込み 2、§5.1）。この状態で `1.54.1` と書くと、
+  測定結果と逆のことを probe が言う
 - #2304 の前例（再採取してルールが変わらなければ上げない）を**逆向きに**適用することになる
 - 独立した事情として、`npm run check:detector-freshness` はいま入っている CLI と比べるため、
   1.54.1 と書いても STALE のままになる（§9 参照）
@@ -328,14 +358,22 @@ Which files should I update?
 
 ## 8. #2755 への申し送り
 
+**#2753 で済んだもの**（再実装しないこと）:
+
+| # | 済んだこと | 根拠 |
+|---|---|---|
+| A | タブ行の記号に `✔`（U+2714）を足す。`COMMAND_CODE_TAB_ANSWERED_MARKERS` として 3 家族目になり、述語は `selected > 0 && others > 0` へ。これで 8 枚が誤った payload から抜けた | §5.2, §5.3-1 |
+
+**残っているもの**:
+
 | # | 申し送り | 根拠 |
 |---|---|---|
-| 1 | `❯ Submit` / `❯ Next` / `❯ notes:` の 3 種を「カーソルが一覧の外にある question 画面」として拾う。単語ではなく**一覧の外**が条件 | §5.1-2 |
-| 2 | タブ行の記号に `✔`（U+2714）を足す（`COMMAND_CODE_TAB_*_MARKERS` は 3 家族になる。`✔` は「回答済み」で、selected でも unselected でもない） | §5.1-1 |
+| 1 | `❯ Submit` / `❯ Next` / `❯ notes:` の 3 種を「カーソルが一覧の外にある question 画面」として拾う。単語ではなく**一覧の外**が条件。ここが 6 枚の偽完了の原因で、#2753 では 1 枚も減っていない | §5.3-2 |
+| 2 | Review ページ（`❯ 1. Submit` / `2. Cancel`）を汎用パーサに渡さない。いまは回答可能な payload になり、**既定回答が選択ではなく「送信」になる**。1 つ手前の `review-page-unanswered-warning` は `numbering-unreadable` で降りるのに、`review-page-submit-cancel` は降りない | §5.1 |
 | 3 | 送ってよいキーは **`1`–`9`（カーソルが一覧にあるときのみ）** と **`↑`/`↓`**。`Space` / `Esc` / `c` / `d` / `n` は送らない | §4.3, §4.5, §4.6 |
 | 4 | 複数選択を確定させるには **`Submit`/`Next` 行 → `Enter` → Review ページ → `1`（または `Enter`）** の 2 段が要る。1 段目だけでは送信されない | §4.2 |
 | 5 | 自由文を送るなら**先に自由文行へカーソルを移す**。移す前に文字を送ると数字はトグルとして解釈され、移した後は数字も本文に入る | §4.1, §4.2 |
-| 6 | `findNumberedOptionBlock` の末尾走査からフッタ行を除外する（さもないと最後の選択肢のラベルが汚れたまま） | §6-2 |
+| 6 | `findNumberedOptionBlock` の末尾走査からフッタ行を除外する。いま読めている 2 枚（`singleselect-initial-unanswered-tabs` / `singleselect-answered-tabs`）は最後の選択肢のラベルにフッタ 1 行を抱えており、`requiresTextInput` も立ったままである | §6-2, §5.1 |
 | 7 | **未測**: `←`/`→` のタブ移動、単一選択での `Space`/`d`、`Ctrl+V`/`Ctrl+G` | §4.7 |
 
 ---
@@ -347,6 +385,7 @@ Which files should I update?
 | **手元の版** | 起動時点で `command-code@1.54.1`（Issue の想定どおり）。ただし起動直後に Command Code 自身が `◼ [update-notice] update available: v1.58.0 (installing in the background — a restart applies it)` を出し、**測定中にグローバルの npm パッケージを 1.58.0 に置き換えた** | こちらからは `npm install` 等を一切実行していない。**読んでいたプロセスは起動時の 1.54.1 のまま**で、全 26 フレームがバナー行 `# Command Code v1.54.1` を持つ（テストで固定）。以後この機で再採取すると 1.58.0 になるため、**別の測定になる** |
 | **測定中に `Esc` で質問が消えた** | `notes:` 入力を開いた状態で `Esc` を送ったところ、notes だけでなく**質問ごと取り消された** | 消えた事実を `not-applicable-cancelled-from-notes-row.txt` として採取。選択肢行でも同じことを確認（`not-applicable-question-cancelled.txt`）。**本番セッションには送っていない** |
 | **`n` / `c` が破壊的か** | `n` は入力行を足すだけ、`c` はダイアログを閉じて回答を送るだけ。ファイル書き込み・セッション変更は観測していない | 両方とも採取して記録。`c` は 1 打で送信されるので §8-3 の除外対象にした |
-| **既存スイープが新採取で落ちたか** | `tests/unit/lib/chat/dialog-frame-2326.test.ts` の crop 期待一覧が 7 行不足で落ちた | プロダクトコードは直さず、**一覧に 7 行足した**（Issue 本文が明示的に許可している「採取が増えたことによる期待一覧の更新」） |
+| **既存スイープが新採取で落ちたか** | `tests/unit/lib/chat/dialog-frame-2326.test.ts` の crop 期待一覧が落ちた。最初のコミット時点で 7 行不足、**#2753 を取り込んだ後にさらに 8 行**（`✔` タブのフレームが認識されるようになったため）で、合計 15 行 | プロダクトコードは直さず、**一覧に行を足した**（Issue 本文が明示的に許可している「採取が増えたことによる期待一覧の更新」）。#2753 のテスト（`command-code-answered-tabs-2753.test.ts`）は 1 文字も触っていない |
+| **マージ順による期待値の入れ替え** | 実測と並行して #2753 が develop に入り、`askuserquestion-1541-2754.test.ts` の「チェーンが今 publish するもの」9 行と `dialog-frame-2326.test.ts` の 1 行が不一致になった | **採取した .txt と「1.54.1 が何を描くか」の記述は 1 バイトも変えず**、検出チェーン側の期待値（§1-12/13、§5、§8 と 2 テスト）だけを #2753 適用後の実測に更新した |
 | **複数選択を自力で出せたか** | 出せた。エージェントに `ask_user_question` の呼び出しを直接指示して再現 | 本物のリポジトリは使っていない |
 | **`Submit` 行にカーソルがある画面を再現できたか** | **できた**。合成フレームでの代用はしていない | `multiselect-cursor-on-submit.txt` ほか |
