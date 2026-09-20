@@ -183,10 +183,11 @@ describe('SELECTION_LIST_REASONS Set', () => {
     // the chat surface's UNCLASSIFIED card, whose 1-9 / y / n keys are typed
     // into the picker's `Type to search models...` box.
     expect(SELECTION_LIST_REASONS.has(STATUS_REASON.COMMAND_CODE_SELECTION_LIST)).toBe(true);
+    expect(SELECTION_LIST_REASONS.has(STATUS_REASON.COMMAND_CODE_PLAN_REVIEW)).toBe(true);
   });
 
-  it('should have exactly 10 entries', () => {
-    expect(SELECTION_LIST_REASONS.size).toBe(10);
+  it('should have exactly 11 entries', () => {
+    expect(SELECTION_LIST_REASONS.size).toBe(11);
   });
 
   it('should not contain unrelated reasons', () => {
