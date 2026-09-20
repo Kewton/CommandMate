@@ -37,7 +37,12 @@ import { isPathSafe, resolveAndValidateRealPath } from '@/lib/security/path-vali
 import path from 'path';
 import { createLogger } from '@/lib/logger';
 import { AntigravityTool } from '@/lib/cli-tools/antigravity';
-import { validateCopilotModelName, validateAntigravityModelName } from '@/lib/cmate-cli-tool-parser';
+import type { ClaudeTool } from '@/lib/cli-tools/claude';
+import {
+  validateCopilotModelName,
+  validateAntigravityModelName,
+  validateClaudeModelName,
+} from '@/lib/cmate-cli-tool-parser';
 import { broadcastSessionStatus } from '@/lib/realtime/terminal-broadcast';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 
@@ -56,7 +61,7 @@ interface SendMessageRequest {
   cliToolId?: CLIToolType;  // Optional: override the worktree's default CLI tool
   instanceId?: string;  // Issue #868: agent instance ID (defaults to primary === cliToolId)
   imagePath?: string;  // Issue #474: relative path within .commandmate/attachments/
-  model?: string;  // Issue #576/#989: AI model name for Copilot or Antigravity agent
+  model?: string;  // Issue #576/#989/#2771: AI model name for Copilot, Antigravity or Claude agent
   /**
    * Issue #1737: send even if only the agent's structured events report an open
    * dialog. The escape hatch for a hook-reported dialog nothing ever released —
@@ -244,17 +249,24 @@ export async function POST(
     // (`PUT /api/worktrees/:id/instances/opencode`), which is durable, visible,
     // and applies without touching anybody's defaults. Switching a *running*
     // opencode session is Issue #2046's question.
+    //
+    // Issue #2771 adds claude, on antigravity's terms rather than copilot's:
+    // `claude --model` is a launch flag, and the in-session switch is the very
+    // `/model` trap named above. So it is honoured when this send STARTS the
+    // session and refused when the session is already running — see below.
     if (body.model) {
-      // model is only supported for copilot and antigravity
-      if (cliToolId !== 'copilot' && cliToolId !== 'antigravity') {
+      // model is only supported for copilot, antigravity and claude
+      if (cliToolId !== 'copilot' && cliToolId !== 'antigravity' && cliToolId !== 'claude') {
         return NextResponse.json(
-          { error: 'The model parameter is only supported for copilot and antigravity agents' },
+          { error: 'The model parameter is only supported for copilot, antigravity and claude agents' },
           { status: 400 }
         );
       }
       const modelValidation = cliToolId === 'antigravity'
         ? validateAntigravityModelName(body.model)
-        : validateCopilotModelName(body.model);
+        : cliToolId === 'claude'
+          ? validateClaudeModelName(body.model)
+          : validateCopilotModelName(body.model);
       if (!modelValidation.valid) {
         return NextResponse.json(
           { error: `Invalid model name: ${modelValidation.reason}` },
@@ -297,12 +309,29 @@ export async function POST(
       );
     }
 
+    // Issue #2771: the same rule for claude, for the same reason. The model is
+    // fixed when the process starts; driving `/model` in a live session is not an
+    // option, because Enter on that picker rewrites the operator's global default
+    // (#1495 / #2297). A 400 here is what stops a caller believing the model
+    // changed when nothing did.
+    if (body.model && cliToolId === 'claude' && running) {
+      return NextResponse.json(
+        { error: 'Claude model can only be set when starting a new session. Stop the current Claude session and resend with --model to switch models.' },
+        { status: 400 }
+      );
+    }
+
     // Start CLI tool session if not running
     if (!running) {
       try {
         if (cliToolId === 'antigravity' && body.model) {
           const antigravityTool = cliTool as AntigravityTool;
           await antigravityTool.startSession(id, worktree.path, instanceId, body.model);
+        } else if (cliToolId === 'claude' && body.model) {
+          // Issue #2771: `ICLITool.startSession` has no model parameter; the
+          // concrete class does (via `BaseCLITool`), exactly as antigravity's.
+          const claudeTool = cliTool as ClaudeTool;
+          await claudeTool.startSession(id, worktree.path, instanceId, body.model);
         } else {
           await cliTool.startSession(id, worktree.path, instanceId);
         }

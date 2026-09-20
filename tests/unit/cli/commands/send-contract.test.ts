@@ -407,7 +407,7 @@ describe('send option validation happens before the task row is created', () => 
     {
       name: '--model without a model-capable --agent',
       argv: ['wt1', ...CONTRACT, '--model', 'gpt-5-mini'],
-      error: 'Error: --model option requires --agent copilot or --agent antigravity',
+      error: 'Error: --model option requires --agent copilot, --agent antigravity or --agent claude',
     },
     {
       name: '--model value',

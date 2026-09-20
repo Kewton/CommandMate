@@ -214,7 +214,8 @@ export abstract class BaseCLITool implements ICLITool {
    * @param worktreeId - Worktree ID
    * @param worktreePath - Worktree path
    * @param instanceId - Agent instance ID (defaults to the primary instance)
-   * @param model - Model to launch with; only antigravity honours it (#989)
+   * @param model - Model to launch with; antigravity (#989) and claude (#2771)
+   *   honour it, every other tool ignores it
    */
   protected abstract launchSession(
     worktreeId: string,
@@ -255,7 +256,8 @@ export abstract class BaseCLITool implements ICLITool {
    * @param worktreeId - Worktree ID
    * @param worktreePath - Worktree path
    * @param instanceId - Agent instance ID (defaults to the primary instance)
-   * @param model - Model to launch with; only antigravity honours it (#989)
+   * @param model - Model to launch with; antigravity (#989) and claude (#2771)
+   *   honour it, every other tool ignores it
    * @throws Whatever {@link launchSession} threw — unchanged, after reporting
    */
   async startSession(

@@ -396,10 +396,12 @@ describe('POST /api/worktrees/:id/send - CLI Tool Support', () => {
       expect(response.status).toBe(400);
     });
 
+    // Issue #2771: claude takes a model now, so the tool that stands for "one
+    // that does not" is codex. The assertion is unchanged.
     it('should reject model when cliToolId is not copilot', async () => {
       const worktree: Worktree = {
         id: 'test-model-claude',
-        name: 'Test Model Claude',
+        name: 'Test Model Codex',
         path: '/path/to/test',
         repositoryPath: '/path/to/repo',
         repositoryName: 'TestRepo',
@@ -409,7 +411,7 @@ describe('POST /api/worktrees/:id/send - CLI Tool Support', () => {
       const request = new Request('http://localhost:3000/api/worktrees/test-model-claude/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: 'Test', model: 'gpt-5-mini', cliToolId: 'claude' }),
+        body: JSON.stringify({ content: 'Test', model: 'gpt-5-mini', cliToolId: 'codex' }),
       });
 
       const response = await sendMessage(request as unknown as import('next/server').NextRequest, { params: Promise.resolve({ id: 'test-model-claude' }) });
@@ -518,10 +520,11 @@ describe('POST /api/worktrees/:id/send - CLI Tool Support', () => {
       expect(data.error).toContain('model');
     });
 
+    // Issue #2771: codex, not claude — see the copilot describe above.
     it('should reject model when cliToolId is neither copilot nor antigravity', async () => {
       const worktree: Worktree = {
         id: 'test-agy-model-claude',
-        name: 'Test Antigravity Model Claude',
+        name: 'Test Antigravity Model Codex',
         path: '/path/to/test',
         repositoryPath: '/path/to/repo',
         repositoryName: 'TestRepo',
@@ -531,13 +534,95 @@ describe('POST /api/worktrees/:id/send - CLI Tool Support', () => {
       const request = new Request('http://localhost:3000/api/worktrees/test-agy-model-claude/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: 'Test', model: 'Gemini 3.1 Pro (High)', cliToolId: 'claude' }),
+        body: JSON.stringify({ content: 'Test', model: 'Gemini 3.1 Pro (High)', cliToolId: 'codex' }),
       });
 
       const response = await sendMessage(request as unknown as import('next/server').NextRequest, { params: Promise.resolve({ id: 'test-agy-model-claude' }) });
       expect(response.status).toBe(400);
       const data = await response.json();
       expect(data.error).toContain('antigravity');
+    });
+  });
+
+  describe('Claude model parameter (Issue #2771)', () => {
+    async function send(id: string, body: Record<string, unknown>) {
+      upsertWorktree(db, {
+        id,
+        name: 'Test Claude Model',
+        path: '/path/to/test',
+        repositoryPath: '/path/to/repo',
+        repositoryName: 'TestRepo',
+      });
+      const request = new Request(`http://localhost:3000/api/worktrees/${id}/send`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      return sendMessage(request as unknown as import('next/server').NextRequest, {
+        params: Promise.resolve({ id }),
+      });
+    }
+
+    it('starts a new session with the model when claude is not running', async () => {
+      const { startClaudeSession } = await import('@/lib/session/claude-session');
+
+      const response = await send('test-claude-model-new', { content: 'Test', cliToolId: 'claude', model: 'sonnet' });
+
+      expect(response.status).toBe(201);
+      expect(startClaudeSession).toHaveBeenCalledWith({
+        worktreeId: 'test-claude-model-new',
+        worktreePath: '/path/to/test',
+        instanceId: undefined,
+        model: 'sonnet',
+      });
+    });
+
+    it('accepts the context-window suffix the other two validators refuse', async () => {
+      const { startClaudeSession } = await import('@/lib/session/claude-session');
+
+      const response = await send('test-claude-model-1m', { content: 'Test', cliToolId: 'claude', model: 'opus[1m]' });
+
+      expect(response.status).toBe(201);
+      expect(startClaudeSession).toHaveBeenCalledWith(expect.objectContaining({ model: 'opus[1m]' }));
+    });
+
+    it('passes no model when none was requested (the launch is unchanged)', async () => {
+      const { startClaudeSession } = await import('@/lib/session/claude-session');
+
+      const response = await send('test-claude-model-none', { content: 'Test', cliToolId: 'claude' });
+
+      expect(response.status).toBe(201);
+      expect(startClaudeSession).toHaveBeenCalledWith({
+        worktreeId: 'test-claude-model-none',
+        worktreePath: '/path/to/test',
+        instanceId: undefined,
+        model: undefined,
+      });
+    });
+
+    it('rejects a model change when claude is already running', async () => {
+      const { isClaudeRunning, startClaudeSession, sendMessageToClaude } = await import('@/lib/session/claude-session');
+      vi.mocked(isClaudeRunning).mockResolvedValueOnce(true);
+
+      const response = await send('test-claude-model-running', { content: 'Test', cliToolId: 'claude', model: 'sonnet' });
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toContain('Claude model can only be set when starting a new session');
+      expect(startClaudeSession).not.toHaveBeenCalled();
+      expect(sendMessageToClaude).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['shell metacharacters', 'sonnet; rm -rf /'],
+      ['an antigravity display name', 'Claude Sonnet 5 (Thinking)'],
+    ])('rejects %s', async (_name, model) => {
+      const { startClaudeSession } = await import('@/lib/session/claude-session');
+
+      const response = await send('test-claude-model-bad', { content: 'Test', cliToolId: 'claude', model });
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toContain('Invalid model name');
+      expect(startClaudeSession).not.toHaveBeenCalled();
     });
   });
 

@@ -297,6 +297,7 @@ commandmate sync                           # サーバーのworktree再スキャ
 # メッセージ送信（送り先の指定は --instance 単独形。--agent はroster外のアドホック起動用、Issue #1638）
 commandmate send <worktree-id> "メッセージ"                    # エージェントにメッセージ送信
 commandmate send <worktree-id> "メッセージ" --instance codex   # 送り先指定（wait/respond/capture等も同じフラグ）
+commandmate send <worktree-id> "メッセージ" --instance claude --model sonnet  # モデル指定（claude/antigravityは新規起動時のみ有効。稼働中は400）
 commandmate send <worktree-id> "メッセージ" --auto-yes         # Auto-Yes有効化して送信
 commandmate send <worktree-id> "メッセージ" --auto-yes --duration 3h  # Auto-Yes時間指定
 
