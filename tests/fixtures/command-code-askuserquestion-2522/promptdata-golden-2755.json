@@ -1,0 +1,258 @@
+{
+  "question-default-on-free-text": {
+    "type": "multiple_choice",
+    "question": "What should the commit message say?",
+    "options": [
+      {
+        "number": 1,
+        "label": "Use the generated message",
+        "isDefault": false,
+        "requiresTextInput": false
+      },
+      {
+        "number": 2,
+        "label": "Use the Issue title",
+        "isDefault": false,
+        "requiresTextInput": false
+      },
+      {
+        "number": 3,
+        "label": "Type something...",
+        "isDefault": true,
+        "requiresTextInput": true
+      }
+    ],
+    "status": "pending",
+    "instructionText": "What should the commit message say?\n\n  1. Use the generated message\n  2. Use the Issue title\n❯ 3. Type something...",
+    "approvalTarget": "What should the commit message say?\n\n  1. Use the generated message\n  2. Use the Issue title\n❯ 3. Type something...",
+    "submitMode": "answer_only",
+    "isAskUserQuestion": true
+  },
+  "question-description-indent-0-1-2": {
+    "type": "multiple_choice",
+    "question": "Pick the gate set to run before each dispatch",
+    "options": [
+      {
+        "number": 1,
+        "label": "Lint and unit only fastest, skips the build",
+        "isDefault": true,
+        "requiresTextInput": false
+      },
+      {
+        "number": 2,
+        "label": "Lint, unit and build the set CI runs on pull requests.",
+        "isDefault": false,
+        "requiresTextInput": false
+      },
+      {
+        "number": 3,
+        "label": "Everything, integration included the slowest set and the only complete one.",
+        "isDefault": false,
+        "requiresTextInput": false
+      }
+    ],
+    "status": "pending",
+    "instructionText": "Pick the gate set to run before each dispatch\n\n❯ 1. Lint and unit only\nfastest, skips the build\n  2. Lint, unit and build\n the set CI runs on pull requests.\n  3. Everything, integration included\n  the slowest set and the only complete one.",
+    "approvalTarget": "Pick the gate set to run before each dispatch\n\n❯ 1. Lint and unit only\nfastest, skips the build\n  2. Lint, unit and build\n the set CI runs on pull requests.\n  3. Everything, integration included\n  the slowest set and the only complete one.",
+    "submitMode": "answer_only",
+    "isAskUserQuestion": true
+  },
+  "question-description-on-last-option": {
+    "type": "multiple_choice",
+    "question": "Which branch should the worker start from?",
+    "options": [
+      {
+        "number": 1,
+        "label": "develop",
+        "isDefault": true,
+        "requiresTextInput": false
+      },
+      {
+        "number": 2,
+        "label": "main",
+        "isDefault": false,
+        "requiresTextInput": false
+      },
+      {
+        "number": 3,
+        "label": "Type something... Give me a branch name and I will check it out before dispatching.",
+        "isDefault": false,
+        "requiresTextInput": true
+      }
+    ],
+    "status": "pending",
+    "instructionText": "Which branch should the worker start from?\n\n❯ 1. develop\n  2. main\n  3. Type something...\n     Give me a branch name and I will check it out before dispatching.",
+    "approvalTarget": "Which branch should the worker start from?\n\n❯ 1. develop\n  2. main\n  3. Type something...\n     Give me a branch name and I will check it out before dispatching.",
+    "submitMode": "answer_only",
+    "isAskUserQuestion": true
+  },
+  "question-flat-short-ansi-crlf": {
+    "type": "multiple_choice",
+    "question": "Approve proceeding from the plan into worktree creation and dispatch?",
+    "options": [
+      {
+        "number": 1,
+        "label": "Prepare worktrees + dispatch (Recommended) I create the worktrees and pause for you to answer.",
+        "isDefault": true,
+        "requiresTextInput": false
+      },
+      {
+        "number": 2,
+        "label": "Worktrees only, then pause I create the worktrees and stop for inspection.",
+        "isDefault": false,
+        "requiresTextInput": false
+      },
+      {
+        "number": 3,
+        "label": "Stop at the plan No worktrees, no workers.",
+        "isDefault": false,
+        "requiresTextInput": false
+      },
+      {
+        "number": 4,
+        "label": "Type something...",
+        "isDefault": false,
+        "requiresTextInput": true
+      }
+    ],
+    "status": "pending",
+    "instructionText": "Approve proceeding from the plan into worktree creation and dispatch?\n\n❯ 1. Prepare worktrees + dispatch (Recommended)\n     I create the worktrees and pause for you to answer.\n  2. Worktrees only, then pause\n     I create the worktrees and stop for inspection.\n  3. Stop at the plan\n     No worktrees, no workers.\n  4. Type something...",
+    "approvalTarget": "Approve proceeding from the plan into worktree creation and dispatch?\n\n❯ 1. Prepare worktrees + dispatch (Recommended)\n     I create the worktrees and pause for you to answer.\n  2. Worktrees only, then pause\n     I create the worktrees and stop for inspection.\n  3. Stop at the plan\n     No worktrees, no workers.\n  4. Type something...",
+    "submitMode": "answer_only",
+    "isAskUserQuestion": true
+  },
+  "question-flat-short": {
+    "type": "multiple_choice",
+    "question": "Approve proceeding from the plan into worktree creation and dispatch?",
+    "options": [
+      {
+        "number": 1,
+        "label": "Prepare worktrees + dispatch (Recommended) I create the worktrees and pause for you to answer.",
+        "isDefault": true,
+        "requiresTextInput": false
+      },
+      {
+        "number": 2,
+        "label": "Worktrees only, then pause I create the worktrees and stop for inspection.",
+        "isDefault": false,
+        "requiresTextInput": false
+      },
+      {
+        "number": 3,
+        "label": "Stop at the plan No worktrees, no workers.",
+        "isDefault": false,
+        "requiresTextInput": false
+      },
+      {
+        "number": 4,
+        "label": "Type something...",
+        "isDefault": false,
+        "requiresTextInput": true
+      }
+    ],
+    "status": "pending",
+    "instructionText": "Approve proceeding from the plan into worktree creation and dispatch?\n\n❯ 1. Prepare worktrees + dispatch (Recommended)\n     I create the worktrees and pause for you to answer.\n  2. Worktrees only, then pause\n     I create the worktrees and stop for inspection.\n  3. Stop at the plan\n     No worktrees, no workers.\n  4. Type something...",
+    "approvalTarget": "Approve proceeding from the plan into worktree creation and dispatch?\n\n❯ 1. Prepare worktrees + dispatch (Recommended)\n     I create the worktrees and pause for you to answer.\n  2. Worktrees only, then pause\n     I create the worktrees and stop for inspection.\n  3. Stop at the plan\n     No worktrees, no workers.\n  4. Type something...",
+    "submitMode": "answer_only",
+    "isAskUserQuestion": true
+  },
+  "question-japanese-fullwidth": {
+    "type": "multiple_choice",
+    "question": "プランの内容で worktree を作成して dispatch してもよいですか？",
+    "options": [
+      {
+        "number": 1,
+        "label": "worktree を作って dispatch する（推奨） worktree を作成し、最初のワーカープロンプトで 停止します。",
+        "isDefault": true,
+        "requiresTextInput": false
+      },
+      {
+        "number": 2,
+        "label": "worktree の作成まで 作成後に停止し、確認できるようにします。",
+        "isDefault": false,
+        "requiresTextInput": false
+      },
+      {
+        "number": 3,
+        "label": "プランのまま停止する",
+        "isDefault": false,
+        "requiresTextInput": false
+      },
+      {
+        "number": 4,
+        "label": "Type something... ここに自由入力すると、その内容で進めます。",
+        "isDefault": false,
+        "requiresTextInput": true
+      }
+    ],
+    "status": "pending",
+    "instructionText": "プランの内容で worktree を作成して dispatch してもよいですか？\n\n❯ 1. worktree を作って dispatch する（推奨）\n     worktree を作成し、最初のワーカープロンプトで\n 停止します。\n  2. worktree の作成まで\n     作成後に停止し、確認できるようにします。\n  3. プランのまま停止する\n  4. Type something...\n     ここに自由入力すると、その内容で進めます。",
+    "approvalTarget": "プランの内容で worktree を作成して dispatch してもよいですか？\n\n❯ 1. worktree を作って dispatch する（推奨）\n     worktree を作成し、最初のワーカープロンプトで\n 停止します。\n  2. worktree の作成まで\n     作成後に停止し、確認できるようにします。\n  3. プランのまま停止する\n  4. Type something...\n     ここに自由入力すると、その内容で進めます。",
+    "submitMode": "answer_only",
+    "isAskUserQuestion": true
+  },
+  "question-taller-than-detection-windows": {
+    "type": "multiple_choice",
+    "question": "Approve proceeding from the plan into worktree creation and dispatch?",
+    "options": [
+      {
+        "number": 1,
+        "label": "Prepare worktrees + dispatch (Recommended) description row 1 of option 1, wrapped by the pane at 200 columns description row 2 of option 1, wrapped by the pane at 200 columns description row 3 of option 1, wrapped by the pane at 200 columns description row 4 of option 1, wrapped by the pane at 200 columns description row 5 of option 1, wrapped by the pane at 200 columns description row 6 of option 1, wrapped by the pane at 200 columns description row 7 of option 1, wrapped by the pane at 200 columns description row 8 of option 1, wrapped by the pane at 200 columns description row 9 of option 1, wrapped by the pane at 200 columns description row 10 of option 1, wrapped by the pane at 200 columns description row 11 of option 1, wrapped by the pane at 200 columns description row 12 of option 1, wrapped by the pane at 200 columns description row 13 of option 1, wrapped by the pane at 200 columns description row 14 of option 1, wrapped by the pane at 200 columns description row 15 of option 1, wrapped by the pane at 200 columns description row 16 of option 1, wrapped by the pane at 200 columns description row 17 of option 1, wrapped by the pane at 200 columns description row 18 of option 1, wrapped by the pane at 200 columns description row 19 of option 1, wrapped by the pane at 200 columns description row 20 of option 1, wrapped by the pane at 200 columns description row 21 of option 1, wrapped by the pane at 200 columns description row 22 of option 1, wrapped by the pane at 200 columns description row 23 of option 1, wrapped by the pane at 200 columns description row 24 of option 1, wrapped by the pane at 200 columns description row 25 of option 1, wrapped by the pane at 200 columns description row 26 of option 1, wrapped by the pane at 200 columns description row 27 of option 1, wrapped by the pane at 200 columns description row 28 of option 1, wrapped by the pane at 200 columns description row 29 of option 1, wrapped by the pane at 200 columns description row 30 of option 1, wrapped by the pane at 200 columns and this row is where the wrap lands.",
+        "isDefault": true,
+        "requiresTextInput": false
+      },
+      {
+        "number": 2,
+        "label": "Worktrees only, then pause",
+        "isDefault": false,
+        "requiresTextInput": false
+      },
+      {
+        "number": 3,
+        "label": "Stop at the plan",
+        "isDefault": false,
+        "requiresTextInput": false
+      },
+      {
+        "number": 4,
+        "label": "Type something...",
+        "isDefault": false,
+        "requiresTextInput": true
+      }
+    ],
+    "status": "pending",
+    "instructionText": "Approve proceeding from the plan into worktree creation and dispatch?\n\n❯ 1. Prepare worktrees + dispatch (Recommended)\n     description row 1 of option 1, wrapped by the pane at 200 columns\n     description row 2 of option 1, wrapped by the pane at 200 columns\n     description row 3 of option 1, wrapped by the pane at 200 columns\n     description row 4 of option 1, wrapped by the pane at 200 columns\n     description row 5 of option 1, wrapped by the pane at 200 columns\n     description row 6 of option 1, wrapped by the pane at 200 columns\n     description row 7 of option 1, wrapped by the pane at 200 columns\n     description row 8 of option 1, wrapped by the pane at 200 columns\n     description row 9 of option 1, wrapped by the pane at 200 columns\n     description row 10 of option 1, wrapped by the pane at 200 columns\n     description row 11 of option 1, wrapped by the pane at 200 columns\n     description row 12 of option 1, wrapped by the pane at 200 columns\n     description row 13 of option 1, wrapped by the pane at 200 columns\n     description row 14 of option 1, wrapped by the pane at 200 columns\n     description row 15 of option 1, wrapped by the pane at 200 columns\n     description row 16 of option 1, wrapped by the pane at 200 columns\n     description row 17 of option 1, wrapped by the pane at 200 columns\n     description row 18 of option 1, wrapped by the pane at 200 columns\n     description row 19 of option 1, wrapped by the pane at 200 columns\n     description row 20 of option 1, wrapped by the pane at 200 columns\n     description row 21 of option 1, wrapped by the pane at 200 columns\n     description row 22 of option 1, wrapped by the pane at 200 columns\n     description row 23 of option 1, wrapped by the pane at 200 columns\n     description row 24 of option 1, wrapped by the pane at 200 columns\n     description row 25 of option 1, wrapped by the pane at 200 columns\n     description row 26 of option 1, wrapped by the pane at 200 columns\n     description row 27 of option 1, wrapped by the pane at 200 columns\n     description row 28 of option 1, wrapped by the pane at 200 columns\n     description row 29 of option 1, wrapped by the pane at 200 columns\n     description row 30 of option 1, wrapped by the pane at 200 columns\n and this row is where the wrap lands.\n  2. Worktrees only, then pause\n  3. Stop at the plan\n  4. Type something...",
+    "approvalTarget": "Approve proceeding from the plan into worktree creation and dispatch?\n\n❯ 1. Prepare worktrees + dispatch (Recommended)\n     description row 1 of option 1, wrapped by the pane at 200 columns\n     description row 2 of option 1, wrapped by the pane at 200 columns\n     description row 3 of option 1, wrapped by the pane at 200 columns\n     description row 4 of option 1, wrapped by the pane at 200 columns\n     description row 5 of option 1, wrapped by the pane at 200 columns\n     description row 6 of option 1, wrapped by the pane at 200 columns\n     description row 7 of option 1, wrapped by the pane at 200 columns\n     description row 8 of option 1, wrapped by the pane at 200 columns\n     description row 9 of option 1, wrapped by the pane at 200 columns\n     description row 10 of option 1, wrapped by the pane at 200 columns\n     description row 11 of option 1, wrapped by the pane at 200 columns\n     description row 12 of option 1, wrapped by the pane at 200 columns\n     description row 13 of option 1, wrapped by the pane at 200 columns\n     description row 14 of option 1, wrapped by the pane at 200 columns\n     description row 15 of option 1, wrapped by the pane at 200 columns\n     description row 16 of option 1, wrapped by the pane at 200 columns\n     description row 17 of option 1, wrapped by the pane at 200 columns\n     description row 18 of option 1, wrapped by the pane at 200 columns\n     description row 19 of option 1, wrapped by the pane at 200 columns\n     description row 20 of option 1, wrapped by the pane at 200 columns\n     description row 21 of option 1, wrapped by the pane at 200 columns\n     description row 22 of option 1, wrapped by the pane at 200 columns\n     description row 23 of option 1, wrapped by the pane at 200 columns\n     description row 24 of option 1, wrapped by the pane at 200 columns\n     description row 25 of option 1, wrapped by the pane at 200 columns\n     description row 26 of option 1, wrapped by the pane at 200 columns\n     description row 27 of option 1, wrapped by the pane at 200 columns\n     description row 28 of option 1, wrapped by the pane at 200 columns\n     description row 29 of option 1, wrapped by the pane at 200 columns\n     description row 30 of option 1, wrapped by the pane at 200 columns\n and this row is where the wrap lands.\n  2. Worktrees only, then pause\n  3. Stop at the plan\n  4. Type something...",
+    "submitMode": "answer_only",
+    "isAskUserQuestion": true
+  },
+  "question-wrapped-no-question-mark": {
+    "type": "multiple_choice",
+    "question": "Choose how much of the dispatch plan I should carry out now, bearing in mind that the worktrees are cheap to create and expensive to clean up, and that the workers will start spending turns the moment they are dispatched",
+    "options": [
+      {
+        "number": 1,
+        "label": "Everything in the plan",
+        "isDefault": true,
+        "requiresTextInput": false
+      },
+      {
+        "number": 2,
+        "label": "Worktrees only",
+        "isDefault": false,
+        "requiresTextInput": false
+      },
+      {
+        "number": 3,
+        "label": "Nothing yet",
+        "isDefault": false,
+        "requiresTextInput": false
+      }
+    ],
+    "status": "pending",
+    "instructionText": "Choose how much of the dispatch plan I should carry out now, bearing in mind that\nthe worktrees are cheap to create and expensive to clean up, and that the workers\nwill start spending turns the moment they are dispatched\n\n❯ 1. Everything in the plan\n  2. Worktrees only\n  3. Nothing yet",
+    "approvalTarget": "Choose how much of the dispatch plan I should carry out now, bearing in mind that\nthe worktrees are cheap to create and expensive to clean up, and that the workers\nwill start spending turns the moment they are dispatched\n\n❯ 1. Everything in the plan\n  2. Worktrees only\n  3. Nothing yet",
+    "submitMode": "answer_only",
+    "isAskUserQuestion": true
+  }
+}

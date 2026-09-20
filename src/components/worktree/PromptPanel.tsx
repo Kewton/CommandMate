@@ -21,7 +21,7 @@ import {
   type PromptQuestionChoices,
 } from '@/components/worktree/prompt-decision-id';
 import { ErrorBoundary } from '@/components/error/ErrorBoundary';
-import { RadioGroup, RadioGroupItem, Button, Spinner } from '@/components/ui';
+import { Checkbox, RadioGroup, RadioGroupItem, Button, Spinner } from '@/components/ui';
 import { usePromptAnimation } from '@/hooks/usePromptAnimation';
 
 /** Animation duration for prompt panel transitions */
@@ -72,6 +72,54 @@ export function optionTakesTypedText(
 ): boolean {
   return option.requiresTextInput === true
     && TYPED_TEXT_FIELD_LABEL_PATTERNS.some((pattern) => pattern.test(option.label));
+}
+
+/**
+ * Which question the panel is currently showing (Issue #2755).
+ *
+ * One `AskUserQuestion` call carries several questions and the picker walks
+ * them **in the same card**: answering question 1 repaints the pane with
+ * question 2 and the poller hands the new payload to a component that was never
+ * unmounted. Both surfaces initialised their selection in a `useState`
+ * initialiser, which runs once, so question 2 opened with question 1's ticks
+ * already on it — and on a checkbox screen those ticks are an answer.
+ *
+ * So the state is reset when the QUESTION changes and left alone otherwise. The
+ * key is what identifies a question and nothing else: its text, its position in
+ * the call, and its option numbers and labels. Deliberately NOT `checked` or
+ * `isDefault` — those move on every poll as the operator ticks boxes and walks
+ * the cursor in the terminal, and keying on them would throw away a selection
+ * being made right now, which is the other half of what this Issue asks for.
+ */
+export function promptQuestionKey(promptData: PanelPromptData): string {
+  const parts: string[] = [promptData.question];
+  if (promptData.type === 'multiple_choice') {
+    parts.push(String(promptData.askUserQuestion?.questionIndex ?? ''));
+    for (const option of promptData.options) parts.push(`${option.number}:${option.label}`);
+  }
+  return parts.join('\u0000');
+}
+
+/** The single-select cursor row, which is the panel's initial radio selection. */
+function initialSelectedOption(promptData: PanelPromptData): number | null {
+  if (promptData.type !== 'multiple_choice') return null;
+  // A checkbox question has no single selection to pre-fill: its initial state
+  // is the set of boxes the pane already shows as ticked.
+  if (promptData.multiSelect === true) return null;
+  return promptData.options.find((opt) => opt.isDefault)?.number ?? null;
+}
+
+/**
+ * The boxes the terminal already shows as ticked (Issue #2755).
+ *
+ * The panel opens on the screen's own state rather than on nothing, because the
+ * answer it sends is the FINAL set and the sender reaches it by toggling the
+ * difference. Opening empty would offer the operator a "select nothing" they
+ * did not ask for, and sending it would untick what they had ticked at the pane.
+ */
+function initialCheckedNumbers(promptData: PanelPromptData): number[] {
+  if (promptData.type !== 'multiple_choice' || promptData.multiSelect !== true) return [];
+  return promptData.options.filter((opt) => opt.checked === true).map((opt) => opt.number);
 }
 
 /**
@@ -151,15 +199,38 @@ function PromptPanelContent({
   cliToolName,
 }: PromptPanelContentProps) {
   const t = useTranslations('prompt');
-  const [selectedOption, setSelectedOption] = useState<number | null>(() => {
-    if (promptData.type === 'multiple_choice') {
-      const defaultOpt = promptData.options.find(opt => opt.isDefault);
-      return defaultOpt?.number ?? null;
-    }
-    return null;
-  });
+  const [selectedOption, setSelectedOption] = useState<number | null>(
+    () => initialSelectedOption(promptData),
+  );
+  // Issue #2755: the boxes ticked on a checkbox question, as the operator has
+  // them right now. Ascending order is applied at submit time, not here, so a
+  // click never reorders the list under the pointer.
+  const [checkedNumbers, setCheckedNumbers] = useState<readonly number[]>(
+    () => initialCheckedNumbers(promptData),
+  );
   const [textInputValue, setTextInputValue] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Issue #2755: reset when the QUESTION changes, and only then. The card is
+  // not remounted between the questions of one `AskUserQuestion` call, so a
+  // `useState` initialiser is not enough — see {@link promptQuestionKey}.
+  // Written as the documented "adjust state during render" pattern rather than
+  // an effect: React re-renders this component immediately with the new state
+  // and nothing downstream ever sees the stale selection.
+  const questionKey = promptQuestionKey(promptData);
+  const [seenQuestionKey, setSeenQuestionKey] = useState(questionKey);
+  if (questionKey !== seenQuestionKey) {
+    setSeenQuestionKey(questionKey);
+    setSelectedOption(initialSelectedOption(promptData));
+    setCheckedNumbers(initialCheckedNumbers(promptData));
+    setTextInputValue('');
+  }
+
+  /** The checkbox question's options, or null when this is not one (#2755). */
+  const multiSelectOptions = promptData.type === 'multiple_choice'
+    && promptData.multiSelect === true
+    ? promptData.options
+    : null;
 
   // Memoize selected option data to avoid recalculation on every render
   const selectedOptionData = useMemo(() => {
@@ -169,8 +240,27 @@ function PromptPanelContent({
 
   // Issue #2573: the text field is offered — and its text sent — only for an
   // option that IS a text field on screen, not for every `requiresTextInput` row.
-  const takesTypedText = selectedOptionData !== null && optionTakesTypedText(selectedOptionData);
+  // Issue #2755: on a checkbox question the same rule reads the TICKED rows —
+  // ticking `Type something...` is how that screen offers its text field.
+  const checkedTextFieldNumbers = useMemo(
+    () =>
+      (multiSelectOptions ?? [])
+        .filter((opt) => checkedNumbers.includes(opt.number) && optionTakesTypedText(opt))
+        .map((opt) => opt.number),
+    [multiSelectOptions, checkedNumbers],
+  );
+  const takesTypedText = multiSelectOptions !== null
+    ? checkedTextFieldNumbers.length > 0
+    : selectedOptionData !== null && optionTakesTypedText(selectedOptionData);
   const isDisabled = answering || isSubmitting;
+
+  const handleToggleOption = useCallback((optionNumber: number, checked: boolean) => {
+    setCheckedNumbers((previous) =>
+      checked
+        ? previous.includes(optionNumber) ? previous : [...previous, optionNumber]
+        : previous.filter((n) => n !== optionNumber),
+    );
+  }, []);
 
   // Handle yes/no button click
   const handleYesNoClick = useCallback(async (answer: 'yes' | 'no') => {
@@ -207,6 +297,33 @@ function PromptPanelContent({
       setIsSubmitting(false);
     }
   }, [isDisabled, onRespond, decisionId, selectedOption, takesTypedText, textInputValue]);
+
+  /**
+   * Submit a checkbox question (Issue #2755).
+   *
+   * The answer is the SET, ascending, de-duplicated and comma-separated —
+   * `"1,3"` — because that is what the sender turns into toggles against the
+   * boxes on screen. A ticked `Type something...` sends the TEXT and nothing
+   * else: the two cannot be combined, since typing into that row is what ticks
+   * it and the other numbers would be swallowed by the field.
+   */
+  const handleMultiSelectSubmit = useCallback(async () => {
+    if (isDisabled) return;
+    const numbers = [...checkedNumbers].sort((a, b) => a - b);
+    if (numbers.length === 0) return;
+    const answer = takesTypedText ? textInputValue.trim() : numbers.join(',');
+    if (answer === '') return;
+    setIsSubmitting(true);
+    try {
+      await onRespond(answer, decisionId);
+    } catch (error) {
+      if (process.env.NODE_ENV !== 'production') {
+        console.error('[PromptPanel] Failed to respond:', error);
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
+  }, [isDisabled, onRespond, decisionId, checkedNumbers, takesTypedText, textInputValue]);
 
   // Issue #1932: the degraded form's own submit. Separate from the two above
   // because there is no `selectedOption` state behind it — the verdict comes
@@ -302,8 +419,22 @@ function PromptPanelContent({
         />
       )}
 
-      {/* Multiple Choice Prompt */}
-      {promptData.type === 'multiple_choice' && (
+      {/* Multiple Choice Prompt. Issue #2755: a checkbox question is drawn by
+          its own component — a RadioGroup cannot express "two of these" — and
+          everything else keeps the radio list byte for byte. */}
+      {promptData.type === 'multiple_choice' && multiSelectOptions !== null && (
+        <MultiSelectPromptActions
+          promptData={promptData}
+          disabled={isDisabled}
+          checkedNumbers={checkedNumbers}
+          onToggleOption={handleToggleOption}
+          textInputValue={textInputValue}
+          onTextInputChange={setTextInputValue}
+          showTextInput={takesTypedText}
+          onSubmit={handleMultiSelectSubmit}
+        />
+      )}
+      {promptData.type === 'multiple_choice' && multiSelectOptions === null && (
         <MultipleChoicePromptActions
           promptData={promptData}
           disabled={isDisabled}
@@ -795,6 +926,132 @@ function MultipleChoicePromptActions({
         type="button"
         onClick={onSubmit}
         disabled={disabled || selectedOption === null}
+        className={`w-full ${BUTTON_BASE_STYLES} ${BUTTON_PRIMARY_STYLES}`}
+      >
+        {t('submit')}
+      </button>
+    </div>
+  );
+}
+
+/** Props for MultiSelectPromptActions component (Issue #2755). */
+interface MultiSelectPromptActionsProps {
+  promptData: MultipleChoicePromptData;
+  disabled: boolean;
+  /** Option numbers currently ticked, in click order. */
+  checkedNumbers: readonly number[];
+  onToggleOption: (optionNumber: number, checked: boolean) => void;
+  textInputValue: string;
+  onTextInputChange: (value: string) => void;
+  showTextInput: boolean;
+  onSubmit: () => void;
+}
+
+/**
+ * The answer affordance for a CHECKBOX question (Issue #2755).
+ *
+ * A separate component from {@link MultipleChoicePromptActions} rather than a
+ * mode inside it, for the reason the Issue gives for not splitting the PR: a
+ * `RadioGroup` is structurally one-of-N, so the moment the payload says several
+ * answers are allowed the control has to be a different one. Keeping the radio
+ * list untouched is also what lets 受入基準 (c) pin that single-select screens
+ * did not move.
+ *
+ * ## What the rows say
+ *
+ * Each box opens on `option.checked` — the state the TERMINAL is in — so the
+ * card and the pane agree before the operator touches anything. There is no
+ * `Default` badge: on this screen the `❯` is a cursor marking the row a key
+ * would toggle, not a pre-selected answer, and labelling it "default" is
+ * exactly the misreading that had `respond --default` untick somebody's choice.
+ *
+ * Submit is live as soon as one box is ticked — the same rule the radio list
+ * uses for `selectedOption === null` — except when the ticked set includes the
+ * free-text row, which sends its TEXT and therefore needs some.
+ */
+function MultiSelectPromptActions({
+  promptData,
+  disabled,
+  checkedNumbers,
+  onToggleOption,
+  textInputValue,
+  onTextInputChange,
+  showTextInput,
+  onSubmit,
+}: MultiSelectPromptActionsProps) {
+  const groupName = useId();
+  const t = useTranslations('prompt');
+
+  const getOptionClasses = useCallback((checked: boolean) => {
+    const baseClasses = 'flex items-start gap-3 p-3 rounded-lg cursor-pointer transition-all';
+    const selectionClasses = checked
+      ? 'bg-accent-50 dark:bg-accent-900/30 border-2 border-accent-500'
+      : 'bg-surface border-2 border-border hover:border-input';
+    const disabledClasses = disabled ? 'opacity-50 cursor-not-allowed' : '';
+    return `${baseClasses} ${selectionClasses} ${disabledClasses}`;
+  }, [disabled]);
+
+  const nothingTicked = checkedNumbers.length === 0;
+  const textMissing = showTextInput && textInputValue.trim() === '';
+
+  return (
+    <div className="space-y-3" data-testid="multi-select-prompt-actions">
+      <p className="text-xs text-muted-foreground" data-testid="multi-select-hint">
+        {t('multiSelectHint')}
+      </p>
+      <fieldset>
+        <legend className="sr-only">{t('selectAllThatApply')}</legend>
+        <div
+          role="group"
+          aria-label={t('selectAllThatApply')}
+          className="flex flex-col gap-2"
+        >
+          {promptData.options.map((option) => {
+            const checked = checkedNumbers.includes(option.number);
+            return (
+              <label key={option.number} className={getOptionClasses(checked)}>
+                <Checkbox
+                  checked={checked}
+                  onCheckedChange={(next) => onToggleOption(option.number, next === true)}
+                  disabled={disabled}
+                  className="mt-1"
+                  data-testid={`multi-select-option-${option.number}`}
+                  aria-label={`${option.number}. ${option.label}`}
+                />
+                <div className="flex-1">
+                  <span className="font-medium">{option.number}. {option.label}</span>
+                  {option.description && (
+                    <p className="mt-0.5 text-sm text-muted-foreground">{option.description}</p>
+                  )}
+                </div>
+              </label>
+            );
+          })}
+        </div>
+      </fieldset>
+
+      {/* The free-text row's field. Ticking `Type something...` is how this
+          screen offers one, and its text is sent INSTEAD of the numbers. */}
+      {showTextInput && (
+        <div className="mt-3">
+          <label htmlFor={`multi-text-input-${groupName}`} className="sr-only">{t('customValueInput')}</label>
+          <input
+            id={`multi-text-input-${groupName}`}
+            type="text"
+            value={textInputValue}
+            onChange={(e) => onTextInputChange(e.target.value)}
+            disabled={disabled}
+            placeholder={t('enterValuePlaceholder')}
+            className="w-full px-4 py-2 border-2 border-input dark:bg-muted dark:text-foreground rounded-lg focus:outline-none focus:border-accent-500 disabled:opacity-50"
+          />
+        </div>
+      )}
+
+      <button
+        type="button"
+        data-testid="multi-select-submit"
+        onClick={onSubmit}
+        disabled={disabled || nothingTicked || textMissing}
         className={`w-full ${BUTTON_BASE_STYLES} ${BUTTON_PRIMARY_STYLES}`}
       >
         {t('submit')}

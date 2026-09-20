@@ -18,18 +18,37 @@ const read = (name: string): string => readFileSync(path.join(FIXTURE_DIR, name)
 const FRAME = 'multiselect-answered-tabs.txt';
 
 describe('回答済みタブ（✔）付きの AskUserQuestion (Issue #2753)', () => {
-  it('複数選択として認識し、回答不能（unsupported）と答える', () => {
+  // Issue #2755 がこの 2 ケースを反転させた。#2753 の時点では複数選択に回答手段が
+  // 無かったので `unsupported`（＝手動操作フォールバック）が正しい終着点だったが、
+  // #2755 が検出・型・UI・送信を通したので、同じフレームは**回答可能な複数選択
+  // payload** になる。#2753 が本当に固定したかったこと——`✔` 付きタブ行が
+  // タブ行として読まれること、ラベルに `[ ]` / `[x]` が残らないこと——は
+  // 下で引き続き固定している。
+  it('複数選択として読み、checked 付きの payload を返す（#2755 で回答可能に）', () => {
     const reading = readCommandCodeQuestionDialog(read(FRAME));
-    expect(reading.kind).toBe('unsupported');
-    expect(reading.kind === 'unsupported' ? reading.reason : null).toBe('multi-select');
+    expect(reading.kind).toBe('prompt');
+    if (reading.kind !== 'prompt') return;
+    const data = reading.prompt.promptData;
+    expect(data?.type).toBe('multiple_choice');
+    if (data?.type !== 'multiple_choice') return;
+    expect(data.multiSelect).toBe(true);
+    expect(data.options).toHaveLength(5);
+    // `3. [x] Update the desktop page too` だけがチェック済み。
+    expect(data.options.map((o) => o.checked)).toEqual([false, false, true, false, false]);
+    // ラベルからチェックボックスが剥がれている（#2753 が報告した「複数選べない」
+    // の見た目そのもの）。
+    for (const option of data.options) {
+      expect(option.label).not.toMatch(/^\[[ xX✔]\]/);
+    }
   });
 
-  it('検出チェーンは回答可能な promptData を publish しない', () => {
+  it('検出チェーンは複数選択 payload を publish する', () => {
     const verdict = commandCodeStatusDetector.detect(normalizeFrame(read(FRAME)));
     expect(verdict.status).toBe('waiting');
-    expect(verdict.reason).toBe(STATUS_REASON.COMMAND_CODE_SELECTION_LIST);
-    expect(verdict.hasActivePrompt).toBe(false);
-    expect(verdict.promptDetection?.promptData).toBeUndefined();
+    expect(verdict.reason).toBe(STATUS_REASON.PROMPT_DETECTED);
+    expect(verdict.hasActivePrompt).toBe(true);
+    const data = verdict.promptDetection?.promptData;
+    expect(data?.type === 'multiple_choice' && data.multiSelect).toBe(true);
   });
 
   it('チャット面の番号ボタン抑止が効く（region が読める）', () => {

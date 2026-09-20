@@ -29,6 +29,7 @@ import { MobileTerminalActionsSheet } from '@/components/mobile/MobileTerminalAc
 import { ErrorBoundary } from '@/components/error/ErrorBoundary';
 import { MessageInput } from '@/components/worktree/MessageInput';
 import type { ShowToast } from '@/types/markdown-editor';
+import type { LivePromptData } from '@/types/models';
 import { NavigationButtons } from '@/components/worktree/NavigationButtons';
 import { Button } from '@/components/ui/Button';
 import { FileViewer } from '@/components/worktree/FileViewer';
@@ -269,6 +270,19 @@ const MobileComposer = memo(function MobileComposer({
 // ============================================================================
 // Main Component
 // ============================================================================
+
+/**
+ * Is this a CHECKBOX question? (Issue #2755)
+ *
+ * The same predicate `TerminalSplitPaneContent` applies to its own Auto-Yes
+ * gate, restated here for the phone sheet. It is the one prompt shape Auto-Yes
+ * never answers — `resolveBaseAnswer` returns null, because a digit ticks a box
+ * and the confirm is a separate row — so hiding its sheet under Auto-Yes left a
+ * live question answerable by nobody.
+ */
+function isMultiSelectPrompt(promptData: LivePromptData | null | undefined): boolean {
+  return promptData?.type === 'multiple_choice' && promptData.multiSelect === true;
+}
 
 /**
  * WorktreeDetailRefactored - Integrated worktree detail component
@@ -996,7 +1010,10 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
               inFlow
             />
 
-            {!autoYesEnabled && (
+            {/* Issue #2755: a checkbox question is shown whatever Auto-Yes is
+                doing — it is the one prompt Auto-Yes is measured never to
+                answer, so hiding it left the screen answerable by nobody. */}
+            {(!autoYesEnabled || isMultiSelectPrompt(state.prompt.data)) && (
               <MobilePromptSheet
                 promptData={state.prompt.data}
                 visible={state.prompt.visible}

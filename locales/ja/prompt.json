@@ -9,6 +9,8 @@
   "submit": "送信",
   "yesNoGroupLabel": "はい / いいえ の選択肢",
   "selectAnOption": "選択肢を選んでください",
+  "selectAllThatApply": "当てはまるものをすべて選んでください",
+  "multiSelectHint": "複数選べます。チェックした項目だけがエージェントに送られます。",
   "customValueInput": "カスタム値の入力",
   "unclassifiedTitle": "ダイアログが開いていますが、選択肢を読み取れませんでした。",
   "unclassifiedInstruction": "ターミナルで応答するか、{command} で選択肢の「番号」を送ってください。番号つきダイアログでは「yes」「no」といった語は解決されません。",

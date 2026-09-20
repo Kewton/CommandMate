@@ -35,6 +35,67 @@ describe('auto-yes-resolver', () => {
     });
   });
 
+  describe('multi-select (checkbox) prompts — Issue #2755', () => {
+    /**
+     * Measured on Command Code 1.54.1: on a checkbox question a digit TOGGLES
+     * a box and the confirm is a separate `Submit` / `Next` row. So "the
+     * default option" is not an answer — it is half of one, and sending it
+     * would tick something and stop, leaving the agent blocked and the log
+     * saying it was answered. Worse, the `❯` often rests on a box the human
+     * has already ticked, where the same keystroke UNticks it.
+     *
+     * Auto-Yes therefore refuses the prompt outright. The answer UIs stay
+     * visible while it is on for exactly this reason.
+     */
+    const checkbox: MultipleChoicePromptData = {
+      type: 'multiple_choice',
+      question: 'Which caches should I clear?',
+      multiSelect: true,
+      options: [
+        { number: 1, label: 'node_modules', isDefault: true, checked: false },
+        { number: 2, label: 'dist', isDefault: false, checked: true },
+        { number: 3, label: 'coverage', isDefault: false, checked: false },
+      ],
+      status: 'pending',
+    };
+
+    it('sends nothing, even though every option is answerable on its own', () => {
+      expect(resolveAutoAnswer(checkbox)).toBeNull();
+    });
+
+    it('sends nothing when the cursor rests on an already ticked box', () => {
+      expect(
+        resolveAutoAnswer({
+          ...checkbox,
+          options: [
+            { number: 1, label: 'node_modules', isDefault: false, checked: false },
+            { number: 2, label: 'dist', isDefault: true, checked: true },
+          ],
+        })
+      ).toBeNull();
+    });
+
+    it('still answers the same screen without the flag', () => {
+      // The flag is what decides it, not the labels: the same option list read
+      // as a single-select is answered exactly as it always was.
+      const { multiSelect: _multiSelect, ...singleSelect } = checkbox;
+      expect(resolveAutoAnswer(singleSelect as MultipleChoicePromptData)).toBe('1');
+    });
+
+    it('is a base rule, so no policy can turn it back into an answer', () => {
+      // `AutoYesPolicy` can only ever suppress (#1547). Stated here because
+      // "allow-listed with multiple_choice allowed" is the configuration an
+      // operator would reach for when a checkbox question stops being answered.
+      expect(
+        resolveAutoAnswerWithPolicy(checkbox, {
+          mode: 'allow-listed',
+          allowPromptTypes: ['multiple_choice', 'yes_no'],
+          denyPatterns: [],
+        })
+      ).toEqual({ answer: null, suppressedBy: null });
+    });
+  });
+
   describe('multiple_choice prompts', () => {
     it('should return default option number when available', () => {
       const promptData: MultipleChoicePromptData = {
