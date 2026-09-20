@@ -90,6 +90,19 @@ export const STATUS_REASON = {
    * the sentence that identifies it was measured on one tool.
    */
   COMMAND_CODE_DISMISSABLE_PANEL: 'command_code_dismissable_panel',
+  /**
+   * Issue #2761: Command Code's plan review overlay.
+   *
+   * `Approve ctrl+a   executes the plan` / `Cancel esc` under the plan, with a
+   * line cursor the arrows move and a comment box every typed character lands
+   * in. A member of `SELECTION_LIST_REASONS`: a human has to drive it, the arrow
+   * pad is the right control, and `wait` must stop on it (exit 10) rather than
+   * poll a blocked agent. Its own token rather than
+   * {@link STATUS_REASON.COMMAND_CODE_SELECTION_LIST} so an operator reading
+   * `capture --json` can tell "a plan is waiting for approval" from "a picker is
+   * open".
+   */
+  COMMAND_CODE_PLAN_REVIEW: 'command_code_plan_review',
   COPILOT_SELECTION_LIST: 'copilot_selection_list',
   CODEX_SELECTION_LIST: 'codex_selection_list',
   /** Issue #1017: Codex pager / edit-previous (transcript) mode. */
