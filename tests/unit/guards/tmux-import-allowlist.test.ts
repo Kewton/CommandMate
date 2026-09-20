@@ -13,18 +13,20 @@
  * this one".
  *
  * The lists below are that pin. Editing `.eslintrc.json` without editing this file
- * turns the suite red, and the only edit this file should ever receive is a
- * **deletion** from `STAGED_REMOVAL`.
+ * turns the suite red, and the only edits this file should ever receive are
+ * **deletions** — from `STAGED_REMOVAL`, or from `DYNAMIC_TMUX_IMPORT_EXEMPT`.
  *
  * ## Why the guard is re-run here instead of trusted
  *
  * Three ways this guard could exist and still guard nothing, all of them measured
  * on this branch rather than assumed:
  *
- * 1. **ESLint cannot hold the allowlist to a count.** `npm run lint` does cover
- *    `tests/` (Issue #2719) and `scripts/` + `bin/` (Issue #2732) as well as `src`,
- *    but a rule set has no way to say "these 22 files and no others are exempt" — an
- *    added `overrides` entry is always green. The count lives here.
+ * 1. **ESLint cannot hold the allowlist to a count.** `npm run lint` is `eslint .`
+ *    since Issue #2736 — it covered `tests/` (#2719) and `scripts/` + `bin/` (#2732)
+ *    before that, and now defaults to the whole repository — but a rule set has no way
+ *    to say "these 22 files and no others are exempt": an added `overrides` entry is
+ *    always green. The count lives here. (Widening the scope is also how
+ *    `server.ts:803` became visible at all — see `DYNAMIC_TMUX_IMPORT_EXEMPT`.)
  * 2. **`overrides.files` is matched with minimatch.** A literal Next.js dynamic
  *    segment written as `src/app/api/worktrees/[id]/route.ts` is a *character
  *    class* and matches `.../i/route.ts` — not the real directory. Five of the 22
@@ -119,6 +121,38 @@ const SCRIPTS_EXEMPT = [
   'scripts/legacy-tmux-probe/probe.ts',
 ] as const;
 
+/**
+ * The dynamic-`import()` column of the same exemption (Issue #2738).
+ *
+ * `server.ts:803` reaches `initReadMode` through
+ * `await import('./src/lib/tmux/read-mode')`, which is precisely what the
+ * `ImportExpression` selector bans (#1922 §4 D4, DR4-005) — and whose message says
+ * *"There is no allowlist for this one - keep it at zero"*. It went unseen because
+ * `server.ts` had never been inside the lint scope; Issue #2736 turned `npm run lint`
+ * into `eslint .` and it appeared.
+ *
+ * **This column may only ever be deleted from. Adding to it is forbidden.** Delete it
+ * once the #1623 bootstrap constraint is gone and the call can be spelled normally.
+ *
+ * Two reasons it is an exemption and not a fix:
+ *
+ * 1. A top-level static import cannot be used here at all. Pulling a module graph into
+ *    `server.ts`'s eval-time graph perturbs Next's AsyncLocalStorage bootstrap under
+ *    `tsx server.ts` and the first request that compiles middleware dies. Written down
+ *    in three places: `server.ts:794-801`, `src/lib/tmux/read-mode.ts:392-398` and
+ *    `docs/design/1623-tmux-reading-mode.md` D1.
+ * 2. **Hoisting is not the cheaper fix, it is the worse one.** The static form would
+ *    need an *addition* to the `no-restricted-imports` allowlist, and the same §4 D4
+ *    forbids additions to that list ("may only shrink"). Trading a one-line dynamic
+ *    exemption for a permanent static one is strictly backwards.
+ *
+ * The exemption is selective and never `"off"`: the `server.ts` override re-declares
+ * `no-restricted-syntax` as the root array **minus the `ImportExpression` selector**,
+ * so the i18n detector (#1271) and the `require()` detector stay live inside the file.
+ * The negative control below is what holds that.
+ */
+const DYNAMIC_TMUX_IMPORT_EXEMPT = ['server.ts'] as const;
+
 // --------------------------------------------------------------------------
 // .eslintrc.json access
 // --------------------------------------------------------------------------
@@ -131,6 +165,7 @@ interface EslintOverride {
 interface EslintRcShape {
   rules: Record<string, unknown>;
   overrides: EslintOverride[];
+  ignorePatterns?: string[];
 }
 
 /**
@@ -175,6 +210,37 @@ const scriptsExemptOverrides = rc.overrides.filter(
 
 /** Every override that targets `scripts/` as a directory. */
 const scriptsDirOverrides = rc.overrides.filter((o) => o.files.includes('scripts/**'));
+
+/** The selectors of a `no-restricted-syntax` entry, or `[]` when it is not the array form. */
+const selectorsOf = (v: unknown): string[] =>
+  Array.isArray(v) ? v.slice(1).map((e) => (e as { selector: string }).selector) : [];
+
+const hasImportExpr = (s: string[]): boolean => s.some((x) => x.startsWith('ImportExpression'));
+
+/**
+ * The dynamic-`import()` exemption, selected by **structure** rather than by wording:
+ * "re-declares `no-restricted-syntax` as an array, and that array has no
+ * `ImportExpression` selector". Selecting on `files` would pin a name instead of the
+ * property that matters, and "any override without an `ImportExpression` selector"
+ * would sweep in `tests/**` (which switches the whole key `off`) plus every override
+ * that never mentions the rule — neither of which exempts anything from this selector.
+ */
+const exemptOverrides = rc.overrides.filter((o) => {
+  const v = o.rules?.['no-restricted-syntax'];
+  return Array.isArray(v) && !hasImportExpr(selectorsOf(v));
+});
+
+/** The root entry with the `ImportExpression` selector removed — what an exempt override must equal. */
+function rootMinusImportExpression(): unknown[] {
+  const entry = rc.rules['no-restricted-syntax'] as unknown[];
+  return [entry[0], ...entry.slice(1).filter((e) => !hasImportExpr([(e as { selector: string }).selector]))];
+}
+
+/** The root entry reduced to the `ImportExpression` selector alone. */
+function importExpressionSelectors(): unknown[] {
+  const entry = rc.rules['no-restricted-syntax'] as unknown[];
+  return entry.slice(1).filter((e) => hasImportExpr([(e as { selector: string }).selector]));
+}
 
 // --------------------------------------------------------------------------
 // Programmatic ESLint, deliberately reading the repo's real rule config
@@ -222,6 +288,45 @@ function makeEslint(options: { withAllowlist: boolean }): ESLint {
   return new ESLint({ useEslintrc: false, cwd: REPO_ROOT, baseConfig });
 }
 
+/**
+ * An ESLint carrying **only** the dynamic-`import()` selector, with every override's own
+ * `no-restricted-syntax` reduced the same way: one that keeps the selector (`scripts/**`)
+ * keeps it, one that switches the key `off` (`tests/**`) stays off, and the `server.ts`
+ * entry — whose array has no `ImportExpression` selector at all — loses the key and falls
+ * back to the base. That last part is the point of the instrument: the repo-wide scan runs
+ * with the exemption **lifted**, so `server.ts` has to show up in the result and a stale
+ * exemption (the import gone, the override left behind) fails just as loudly as a new one.
+ *
+ * Reducing to a single selector is also what makes the finding attributable: both tmux
+ * selectors carry the same `message`, so with the `require()` one loaded there would be no
+ * way to tell which spelling a report came from.
+ */
+function makeImportExpressionEslint(): ESLint {
+  const overrides = rc.overrides.map((o) => {
+    const declared = o.rules?.['no-restricted-syntax'];
+    if (!Array.isArray(declared)) return o;
+    const kept = declared.slice(1).filter((e) => hasImportExpr([(e as { selector: string }).selector]));
+    const rules: Record<string, unknown> = { ...o.rules };
+    if (kept.length > 0) rules['no-restricted-syntax'] = ['error', ...kept];
+    else delete rules['no-restricted-syntax'];
+    return { ...o, rules };
+  });
+
+  const baseConfig = {
+    root: true,
+    parser: require_.resolve('@typescript-eslint/parser'),
+    parserOptions: {
+      ecmaVersion: 2022,
+      sourceType: 'module',
+      ecmaFeatures: { jsx: true },
+    },
+    rules: { 'no-restricted-syntax': ['error', ...importExpressionSelectors()] },
+    overrides,
+  } as unknown as Linter.Config;
+
+  return new ESLint({ useEslintrc: false, cwd: REPO_ROOT, baseConfig });
+}
+
 const TMUX_RULES = new Set(['no-restricted-imports', 'no-restricted-syntax']);
 
 async function lintOne(eslint: ESLint, filePath: string, text: string): Promise<string[]> {
@@ -261,6 +366,41 @@ function candidateSources(): { rel: string; text: string }[] {
   return walk(join(REPO_ROOT, 'src'))
     .map((abs) => ({ rel: relative(REPO_ROOT, abs).split(sep).join('/'), text: readFileSync(abs, 'utf-8') }))
     .filter((f) => f.text.includes('tmux'))
+    .sort((a, b) => (a.rel < b.rel ? -1 : 1));
+}
+
+/**
+ * `npm run lint` is `eslint .` (Issue #2736), so a repo-wide scan has to walk what the
+ * shipped command walks: every linted extension, minus ESLint's own `node_modules`
+ * default, minus the dot-directories ESLint 8 skips by default, minus the shipped
+ * `ignorePatterns`. `tests/unit/guards/lint-repo-scope.test.ts` owns those three facts;
+ * here they are only reproduced so the scan does not quietly look at a smaller repo.
+ */
+const REPO_LINTED_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs'];
+const IGNORED_DIR_PREFIXES = (rc.ignorePatterns ?? []).filter((p) => p.endsWith('/'));
+const IGNORED_FILES = new Set((rc.ignorePatterns ?? []).filter((p) => !p.endsWith('/')));
+
+function walkRepo(dir: string, acc: string[] = []): string[] {
+  for (const entry of readdirSync(dir)) {
+    if (entry.startsWith('.') || entry === 'node_modules') continue;
+    const full = join(dir, entry);
+    const rel = relative(REPO_ROOT, full).split(sep).join('/');
+    if (IGNORED_DIR_PREFIXES.some((p) => `${rel}/`.startsWith(p)) || IGNORED_FILES.has(rel)) continue;
+    if (statSync(full).isDirectory()) walkRepo(full, acc);
+    else if (REPO_LINTED_EXTENSIONS.some((e) => entry.endsWith(e))) acc.push(rel);
+  }
+  return acc;
+}
+
+/**
+ * Every repo-wide candidate for a dynamic tmux `import()`. Neither half of the prefilter
+ * can hide one: an `ImportExpression` whose specifier has a `tmux` path segment
+ * necessarily contains both the substring `tmux` and the spelling `import(`.
+ */
+function dynamicImportCandidates(): { rel: string; text: string }[] {
+  return walkRepo(REPO_ROOT)
+    .map((rel) => ({ rel, text: readFileSync(join(REPO_ROOT, rel), 'utf-8') }))
+    .filter((f) => f.text.includes('tmux') && /\bimport\s*\(/.test(f.text))
     .sort((a, b) => (a.rel < b.rel ? -1 : 1));
 }
 
@@ -554,4 +694,59 @@ describe('lib/tmux import guard: the scripts/ exemption (Issue #2732)', () => {
       ).not.toContain('error:no-restricted-imports');
     }
   }, 60_000);
+});
+
+describe('lib/tmux import guard: the dynamic-import() exemption (Issue #2738)', () => {
+  it('matches .eslintrc.json exactly: server.ts and nothing else', () => {
+    // Deleting the override makes this an empty set; adding a second file makes it two.
+    expect(exemptOverrides.flatMap((o) => o.files.map(unescapeGlob)).sort()).toEqual([
+      ...DYNAMIC_TMUX_IMPORT_EXEMPT,
+    ]);
+    expect(existsSync(join(REPO_ROOT, 'server.ts'))).toBe(true);
+  });
+
+  it('exempts only the ImportExpression selector, leaving i18n and require() live', () => {
+    // `"off"` would be the one-word way to silence server.ts and would take the i18n
+    // detector (#1271) and the `require()` detector (DR4-005) with it. The override is a
+    // verbatim copy of the root array minus one selector instead, and this deep-equals it.
+    expect(exemptOverrides).toHaveLength(1);
+    const expected = rootMinusImportExpression();
+    expect(expected).toHaveLength(3); // "error" + the i18n selector + the require() selector
+    expect(exemptOverrides[0].rules?.['no-restricted-syntax']).toEqual(expected);
+  });
+
+  it('reports the dynamic form everywhere else (positive control)', async () => {
+    const eslint = makeEslint({ withAllowlist: true });
+    const source = "const load = async () => (await import('./src/lib/tmux/read-mode')).initReadMode;";
+    expect(await lintOne(eslint, join(REPO_ROOT, 'src/lib/foo.ts'), source)).toEqual([
+      'error:no-restricted-syntax',
+    ]);
+    // ...and the same text inside the exempt file is silent, which is the exemption.
+    expect(await lintOne(eslint, join(REPO_ROOT, 'server.ts'), source)).toEqual([]);
+  });
+
+  it('still reports a tmux require() inside server.ts (negative control)', async () => {
+    // The exemption is for `import()` only. If the override ever becomes `"off"`, or the
+    // require() selector is dropped from the copy, this goes green-to-empty and fails.
+    const eslint = makeEslint({ withAllowlist: true });
+    const source = "const { initReadMode } = require('./src/lib/tmux/read-mode');";
+    expect(await lintOne(eslint, join(REPO_ROOT, 'server.ts'), source)).toEqual([
+      'error:no-restricted-syntax',
+    ]);
+  });
+
+  it('is the only dynamic tmux import in the repository', async () => {
+    // Run with the exemption lifted (see makeImportExpressionEslint): the offenders are
+    // then exactly the files that need one. Equality both ways — nothing outside
+    // server.ts, and server.ts is not a leftover exemption for an import already gone.
+    const eslint = makeImportExpressionEslint();
+    const offenders: string[] = [];
+    for (const file of dynamicImportCandidates()) {
+      const reported = (await eslint.lintText(file.text, { filePath: join(REPO_ROOT, file.rel) }))
+        .flatMap((r) => r.messages)
+        .filter((m) => m.ruleId === 'no-restricted-syntax');
+      if (reported.length > 0) offenders.push(file.rel);
+    }
+    expect(offenders.sort()).toEqual([...DYNAMIC_TMUX_IMPORT_EXEMPT]);
+  }, 120_000);
 });
