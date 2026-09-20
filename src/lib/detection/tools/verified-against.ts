@@ -143,6 +143,32 @@ export const ANTIGRAVITY_VERIFIED_AGAINST = {
  * `detectDialog` declares. The rule itself was read off the 1.40.1 and 1.49.0
  * dialog frames above, and no 1.53.1 frame was added to the fixture directory,
  * so the condition in the previous paragraph is still unmet.
+ *
+ * ## Not advanced by Issue #2754 either — and that Issue is why
+ *
+ * #2754 finally did the probe the paragraph above asked for: a live **1.54.1**
+ * session on a private tmux socket at 200x1000, thirteen captures in
+ * `tests/fixtures/command-code-askuserquestion-2754/`, and every key in the
+ * screen's footer sent ONE AT A TIME with a capture on each side of it. By the
+ * letter of that paragraph the stamp could move to 1.54.1. It does not, because
+ * what the probe measured is that **the rules do not answer for 1.54.1**:
+ *
+ *  - 1.54.1 marks an answered tab with `✔` (U+2714), which is in neither
+ *    `COMMAND_CODE_TAB_SELECTED_MARKERS` nor its hollow half, so
+ *    `isCommandCodeQuestionTabRow` refuses the strip and eleven of the thirteen
+ *    frames are not recognised as this screen at all;
+ *  - three of them — the cursor resting on `❯ Submit`, with and without a
+ *    footer, and the `❯ notes:` row that `n` opens — publish `ready` /
+ *    `input_prompt`, i.e. #2521's 偽完了 on a real capture;
+ *  - the footer itself is drawn only when the call carries MORE THAN ONE
+ *    question, so it is not available as a marker.
+ *
+ * This stamp answers "which build were these rules read off", and
+ * {@link getDetectorFreshness} turns it into "are they current". Moving it to
+ * 1.54.1 would make the probe say the rules were measured against a build they
+ * demonstrably misread — the fail-open version of the #2304 precedent rather
+ * than an application of it. Advance it when #2755 re-reads the rules off those
+ * frames, to the version whose frames the new rules were read from.
  */
 export const COMMAND_CODE_VERIFIED_AGAINST = {
   version: '1.40.1',

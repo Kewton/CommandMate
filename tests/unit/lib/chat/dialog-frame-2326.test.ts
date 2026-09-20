@@ -266,6 +266,15 @@ describe('[#2326] the reading fires on Command Code frames and no others', () =>
     // `not-applicable-*` frames — an ordinary numbered answer, the Review tab, an
     // answered question under a fresh composer — are all uncropped, which is the
     // half that says #2522 widened nothing.
+    //
+    // Issue #2754 added twenty-six live 1.54.1 captures and the sweep grew by
+    // exactly SEVEN — the ones whose tab strip carries no `✔` AND whose `❯` is
+    // still on an option row. 1.54.1 marks an answered tab with U+2714, which is
+    // in neither tab-marker family, and it lets the cursor leave the list
+    // altogether (`❯ Submit`, `❯ Next`, `❯ notes:`); either one is enough for the
+    // reading to decline. That is the measurement, not a widening: see the
+    // directory's README and
+    // `tests/unit/detection/tools/command-code/askuserquestion-1541-2754.test.ts`.
     const cropped = everyCapture()
       .filter((file) => extractCommandCodeSelectionListFrame(fs.readFileSync(file, 'utf8')) !== null)
       .map((file) => path.relative(FIXTURE_ROOT, file));
@@ -288,6 +297,13 @@ describe('[#2326] the reading fires on Command Code frames and no others', () =>
       'command-code-askuserquestion-2522/unsupported-last-option-tail-too-long.txt',
       'command-code-askuserquestion-2522/unsupported-multi-select-checkboxes.txt',
       'command-code-askuserquestion-2522/unsupported-region-too-tall.txt',
+      'command-code-askuserquestion-2754/multiselect-cursor-on-option-1-after-nav.txt',
+      'command-code-askuserquestion-2754/multiselect-cursor-on-option-3-nothing-checked.txt',
+      'command-code-askuserquestion-2754/multiselect-enter-toggled-option-1.txt',
+      'command-code-askuserquestion-2754/multiselect-next-row-not-last-question.txt',
+      'command-code-askuserquestion-2754/multiselect-up-from-option-1-wraps-to-last.txt',
+      'command-code-askuserquestion-2754/singleselect-initial-unanswered-tabs.txt',
+      'command-code-askuserquestion-2754/tabs-single-question.txt',
     ]);
     // The sweep walks every fixture in the repository, so its runtime grows with
     // the corpus, not with this Issue. It crossed vitest's 5s default on
