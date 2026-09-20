@@ -108,7 +108,7 @@ async function offlineFallback(request) {
     // Navigation responses are intentionally NOT cached: they may contain
     // authenticated content. Only the offline fallback page is served on error.
     return await fetch(request);
-  } catch (err) {
+  } catch {
     const cache = await caches.open(CACHE_NAME);
     const offline = await cache.match(OFFLINE_URL);
     return offline || Response.error();
@@ -123,7 +123,7 @@ self.addEventListener('fetch', function (event) {
   let url;
   try {
     url = new URL(request.url);
-  } catch (err) {
+  } catch {
     return;
   }
 
@@ -197,7 +197,7 @@ function replaceStaleNotifications(title, options) {
           stale[i].close();
         }
       })
-      .catch(function (err) {
+      .catch(function (_err) {
         // A registration that cannot enumerate its notifications still has to
         // show one. Showing the replacement below is what keeps the promise;
         // on this path the tag alone collapses the stale card on most engines.
@@ -213,7 +213,7 @@ self.addEventListener('push', function (event) {
   var payload = {};
   try {
     payload = event.data ? event.data.json() : {};
-  } catch (err) {
+  } catch {
     payload = {};
   }
 
@@ -275,7 +275,7 @@ self.addEventListener('notificationclick', function (event) {
             if (new URL(client.url).pathname === targetUrl && 'focus' in client) {
               return client.focus();
             }
-          } catch (err) {
+          } catch {
             // ignore malformed client URL
           }
         }

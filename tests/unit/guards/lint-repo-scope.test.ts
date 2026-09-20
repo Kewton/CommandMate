@@ -26,6 +26,8 @@
  *    about it. Checking `ignorePatterns` alone cannot see this, so the last test
  *    pins the *result*: the set of tracked, lintable files that `isPathIgnored()`
  *    rejects must equal the known list exactly.
+ * 3. **`overrides` containing resolved debt.** Neither `public/sw.js` nor `website/main.js`
+ *    may appear in `overrides` (Issue #2737 resolved their staged debt).
  *
  * File counts are deliberately absent — this Issue and #2732 both add guards, so
  * any absolute number is stale on arrival. Coverage is asserted as a set, not a size.
@@ -79,8 +81,14 @@ const KNOWN_UNLINTED = [
 // Config access
 // --------------------------------------------------------------------------
 
+interface EslintOverride {
+  files?: string | string[];
+  rules?: Record<string, unknown>;
+}
+
 interface EslintRcShape {
   ignorePatterns: string[];
+  overrides?: EslintOverride[];
 }
 
 /**
@@ -139,6 +147,7 @@ describe('lint scope is the whole repository (Issue #2736)', () => {
    * The load-bearing assertion. `ignorePatterns` is the only way to remove a file
    * from `npm run lint` without anything else noticing, so an entry has to earn its
    * place twice over: git must already ignore it, and it must hold nothing tracked.
+   * Also asserts `.eslintrc.json` overrides does not contain `public/sw.js` or `website/main.js` (Issue #2737).
    */
   it('excludes only build output — every ignorePatterns entry is gitignored and untracked', () => {
     expect(rc.ignorePatterns, '.eslintrc.json must declare ignorePatterns').toBeInstanceOf(Array);
@@ -159,6 +168,23 @@ describe('lint scope is the whole repository (Issue #2736)', () => {
         `\`${pattern}\` は git 管理下のファイルを含む。lint の除外にしてよいのは` +
           'ビルド成果物だけである',
       ).toBe(0);
+    }
+
+    // .eslintrc.json の overrides に files が public/sw.js か website/main.js を含むエントリが存在しないこと (Issue #2737)
+    for (const override of rc.overrides ?? []) {
+      const files = Array.isArray(override.files)
+        ? override.files
+        : override.files
+          ? [override.files]
+          : [];
+      expect(
+        files,
+        '`public/sw.js` must not be in .eslintrc.json overrides (Issue #2737)',
+      ).not.toContain('public/sw.js');
+      expect(
+        files,
+        '`website/main.js` must not be in .eslintrc.json overrides (Issue #2737)',
+      ).not.toContain('website/main.js');
     }
   });
 

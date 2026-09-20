@@ -77,7 +77,11 @@
       document.body.appendChild(textarea);
       textarea.select();
       try {
-        document.execCommand('copy') ? resolve() : reject(new Error('copy rejected'));
+        if (document.execCommand('copy')) {
+          resolve();
+        } else {
+          reject(new Error('copy rejected'));
+        }
       } catch (err) {
         reject(err);
       } finally {

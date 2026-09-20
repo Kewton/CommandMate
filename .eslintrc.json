@@ -221,19 +221,6 @@
     },
     {
       "files": [
-        // 8) Issue #2736: real debt that `eslint .` newly reaches. Parked at "warn" so the
-        // scope change lands at exit 0; Issue #2737 fixes the six findings and deletes
-        // this entry. Do not widen it.
-        "public/sw.js",
-        "website/main.js"
-      ],
-      "rules": {
-        "@typescript-eslint/no-unused-vars": "warn",
-        "@typescript-eslint/no-unused-expressions": "warn"
-      }
-    },
-    {
-      "files": [
         // 9) Issue #2736: server.ts:803 `await import('./src/lib/tmux/read-mode')` trips the
         // tmux dynamic-import selector (#1922 §4 D4, DR4-005). The comment at server.ts:794-801
         // says a static import breaks Next's AsyncLocalStorage bootstrap and kills the first
