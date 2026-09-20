@@ -1149,10 +1149,41 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
           // bottom meta row instead of its own full-width footer row.
           // Issue #2766: the direct-input toggle rides the SAME slot as
           // Auto-Yes rather than getting one of its own. `autoYesSlot` is a
-          // `ReactNode`, so a Fragment carries both, and the row it lands in
-          // (`composer-auto-yes`) already scrolls sideways under #2598's
-          // `@container` rule -- which is what keeps a second control from
-          // squeezing the Auto-Yes label in a 4-split pane.
+          // `ReactNode`, so a Fragment carries both, and it goes AFTER the
+          // Auto-Yes toggle so the switch keeps the left edge of the strip
+          // (`composer-auto-yes` scrolls sideways; whatever is first is what
+          // stays painted in a narrow pane).
+          //
+          // ## Why the toggle disappears between 420px and 520px of meta row
+          //
+          // #2598's budget is one line of meta row, and the row's Auto-Yes half
+          // is what pays for anything added to it. Measured in Chromium at
+          // 1440x900 (tests/e2e/composer-two-row-2598.spec.ts, `MEASURE-2598`):
+          //
+          //   | item                               | width |
+          //   |------------------------------------|-------|
+          //   | hints (`@min-[420px]`) + its gap   | 195px |
+          //   | Auto-Yes ON, copilot / antigravity | 216 / 236px |
+          //   | this toggle + its gap              |  87px |
+          //
+          // So a row that draws the hints needs 195 + 236 + 87 = 518px before a
+          // second control fits beside a full Auto-Yes. Below that the strip
+          // scrolls, and the e2e asserts the Auto-Yes control is NOT clipped
+          // wherever the hints are drawn — the two-split pane and every pane of
+          // the 2x2 grid are 431px of row, which is exactly the band where the
+          // hints have already taken the room.
+          //
+          // Hence `@min-[420px]:hidden @min-[520px]:inline-flex` over a base
+          // `inline-flex`: drawn below 420 (no hints, the strip is the whole
+          // row — a 3-split pane keeps the toggle), yielded to the hints in the
+          // band, and drawn again once the row can carry all three. Raising
+          // COMPOSER_HINTS_MIN_CONTAINER_PX instead would be the other way to
+          // free the band, but that constant is `MessageInput`'s and the e2e
+          // pins the hints ON at two splits.
+          //
+          // Keep the two literals as literals: Tailwind scans source text, so
+          // an interpolated class generates no CSS and the toggle would be
+          // drawn at every width (the #2131 rule, restated in composer-layout).
           autoYesSlot={
             <>
               <AutoYesToggle
@@ -1171,7 +1202,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
                 title={directInputToggleAria}
                 disabled={!terminal.isRunning}
                 onClick={handleDirectInputToggle}
-                className={`shrink-0 min-h-[28px] px-2 rounded-md border text-[11px] font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                className={`shrink-0 inline-flex @min-[420px]:hidden @min-[520px]:inline-flex items-center h-[22px] px-2 rounded-md border text-[11px] font-medium leading-none transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
                   directInputOpen
                     ? 'bg-info-subtle border-info-border text-info-foreground'
                     : 'bg-surface border-border text-muted-foreground hover:bg-muted'
