@@ -38,7 +38,9 @@ import { CLI_TOOL_IDS, type CLIToolType } from '@/lib/cli-tools/types';
 import { isSendableSpecialKey } from '@/lib/tmux/tmux';
 import {
   CLAUDE_NAVIGATION_KEY_VALUES,
+  COMMAND_CODE_NAVIGATION_KEY_VALUES,
   NAVIGATION_KEY_VALUES,
+  PLAN_APPROVE_KEY,
   SESSION_SCOPE_KEY,
   SESSION_SCOPE_KEY_TOOL_IDS,
   OPENCODE_DIRECT_KEY_VALUES,
@@ -102,8 +104,8 @@ describe('Issue #2046: every tool but opencode declares the pre-#2046 set, uncha
     );
   });
 
-  it.each(SESSION_SCOPE_TOOLS)('%s publishes the base pad plus `s`, and nothing else', (id) => {
-    const spec = manager.getTool(id).navigationKeys();
+  it('claude publishes the base pad plus `s`, and nothing else', () => {
+    const spec = manager.getTool('claude').navigationKeys();
 
     expect(spec.keys).toEqual([...CLAUDE_NAVIGATION_KEY_VALUES]);
     expect(spec.leaderKey).toBeNull();
@@ -112,6 +114,16 @@ describe('Issue #2046: every tool but opencode declares the pre-#2046 set, uncha
     expect(
       spec.keys.filter((key) => !(NAVIGATION_KEY_VALUES as readonly string[]).includes(key)),
     ).toEqual([SESSION_SCOPE_KEY]);
+  });
+
+  it('command-code publishes the base pad plus `s` and `C-a`, and nothing else', () => {
+    const spec = manager.getTool('command-code').navigationKeys();
+
+    expect(spec.keys).toEqual([...COMMAND_CODE_NAVIGATION_KEY_VALUES]);
+    expect(spec.leaderKey).toBeNull();
+    expect(
+      spec.keys.filter((key) => !(NAVIGATION_KEY_VALUES as readonly string[]).includes(key)),
+    ).toEqual([SESSION_SCOPE_KEY, PLAN_APPROVE_KEY]);
   });
 
   it('gives `s` to the claude family and to NOBODY else', () => {
