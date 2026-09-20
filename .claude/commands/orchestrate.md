@@ -436,7 +436,9 @@ goal: |
      （`os.tmpdir()` 配下に `fs.mkdtempSync` で作り、`afterEach` で必ず削除する）。
   3. 確認に使うコマンドは `npx vitest run <対のテスト>`、`npm run lint`、`npx tsc --noEmit` の 3 つだけにする。
      テスト全体（`npm run test:unit`）は実行しないこと。全体は検証ゲートか CI が実行する。
-     <全体の実行が必要な Issue では、この 2 行を「最後に `npm run test:unit` を 1 回実行する」に差し替える>
+     <差し替えてよいのは「テストの共通設定・ヘルパーを変える」「広い範囲の rename」など、
+      対のテストでは破損が見えない Issue だけ。**Issue の受入基準に `npm run test:unit` と
+      書いてあることは差し替えの理由にならない**（下の「差し替えの条件」を参照）>
   4. コマンドはすべてフォアグラウンドで実行し、終わるまで待ってから次の手順へ進む。
 
   ## 作業ルール（厳守）
@@ -479,8 +481,22 @@ Antigravity はコミットの後にテスト全体をバックグラウンド�
 
 - **禁止は「テスト全体」に限る**。対のテスト・lint・tsc は数十秒で終わるので、ワーカーが自分で確かめられる
 - **待ち方は肯定形で書く**。特定の機能名を出して禁じると、かえってその機能を意識させるおそれがあるため
-- **全体の実行が必要な Issue では、3 の該当行を差し替える**。例: テストの共通設定・ヘルパーを変える Issue、広い範囲の rename
 - **守られる保証は無い**。3-3 の合図確認は、この指示の有無にかかわらず行う
+
+**差し替えの条件（2026-09-20 の run で狭めた）**: 差し替えてよいのは
+**対のテストでは破損が見えない Issue**（テストの共通設定・ヘルパーを変える、広い範囲の rename）**だけ**である。
+**Issue の受入基準に `npm run test:unit` と書いてあることは、差し替えの理由にならない。**
+
+理由は排他が片側にしか無いこと: `verify` の重いゲートは `mutex: cpu.heavy` を取るが、
+**ワーカーが goal の指示で直接叩く `npm run test:unit` は mutex を取らない**。
+両者が同じマシンで重なると、テストが全部通っているのにティアダウンの race でゲートが落ちる。
+
+実測（2026-09-20、#2770 / #2771 の run）: #2771 の `integration` ゲートと #2770 のワーカーの
+`npm run test:unit` が重なり、**`Test Files 117 passed / Tests 1532 passed` で失敗テストはゼロなのに exit 1**
+（`EnvironmentTeardownError: Closing rpc while "onUserConsoleLog" was pending`、load average 17 超）。
+負荷が下がってから同じコミットで単独再実行すると exit 0 で再現しなかった。
+このとき goal に `npm run test:unit` を書いたのはオーケストレーターで、理由は
+**Issue の受入基準にそう書いてあったから**だった。
 
 **このために起きる不利**:
 
@@ -810,6 +826,11 @@ commandmatedev verify "$WT" --json    # 失敗したゲートと exit code を�
 
 - **ワーカー起因**: `lint` / `typecheck` / `unit` など宣言ゲートの失敗、`scope` 違反、`work-evidence` の不足、
   および `env-clean` の違反のうちワーカーのコマンドが作ったもの
+- **ワーカー起因ではない**: 宣言ゲートが落ちたが、**そのゲートの出力で失敗したテストが 0 件**のもの
+  （ティアダウンの race。`Test Files N passed / Tests M passed` なのに exit 1 で、原因が
+  `EnvironmentTeardownError` などの未処理 rejection 1 件だけ）。**負荷が下がってから
+  `commandmatedev verify "$WT" --gates <落ちたゲート>` で単独再実行し、再現しなければワーカー起因ではない**
+  （2026-09-20 の #2771 で実測。原因は 2-4-2 の「差し替えの条件」にある mutex の非対称）
 - **ワーカー起因ではない**: `env-clean` の違反のうち、ワーカーの作業と結び付かないもの。
   2026-09-17 のパイロットでは、`env-clean` だけが FAIL して exit 20 になった。違反は次の 3 件で、いずれもワーカーと無関係だった:
   - 別リポジトリの orchestrate が消した `mcbd-*` セッション（`-`）
