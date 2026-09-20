@@ -6,7 +6,7 @@ description: |
   Reads context from review-context.json and outputs review-result.json.
   Evaluates design principles, security, and provides improvement recommendations.
 tools: Read,Write,Bash,Grep,Glob
-model: opus
+model: inherit
 ---
 
 # Architecture Review Agent

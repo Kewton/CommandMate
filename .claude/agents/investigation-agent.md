@@ -6,7 +6,7 @@ description: |
   Reads context from investigation-context.json and outputs investigation-result.json.
   Analyzes error logs, identifies root cause, and recommends solutions.
 tools: Read,Write,Bash,Edit,Grep,Glob
-model: opus
+model: inherit
 ---
 
 # Issue Investigation Agent

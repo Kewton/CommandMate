@@ -6,7 +6,7 @@ description: |
   Reads context from issue-review-context.json and outputs issue-review-result.json.
   Evaluates consistency, correctness, and impact scope of Issue descriptions.
 tools: Read,Write,Bash,Grep,Glob
-model: opus
+model: inherit
 ---
 
 # Issue Review Agent

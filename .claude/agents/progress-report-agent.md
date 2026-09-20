@@ -6,7 +6,7 @@ description: |
   Reads context from progress-context.json and outputs progress-report.md.
   Summarizes all phase results and suggests next steps.
 tools: Read,Write,Bash,Grep,Glob
-model: opus
+model: inherit
 ---
 
 # Progress Report Agent

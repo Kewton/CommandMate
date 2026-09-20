@@ -6,7 +6,7 @@ description: |
   Reads context from apply-review-context.json and outputs apply-review-result.json.
   Updates design policy documents based on must-fix and should-fix items from review.
 tools: Read,Write,Bash,Edit,Grep,Glob
-model: opus
+model: inherit
 ---
 
 # Apply Review Agent
