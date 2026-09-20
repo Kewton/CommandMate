@@ -975,6 +975,12 @@
     "close": "閉じる (Esc)",
     "closeAria": "この画面を閉じる (Esc)"
   },
+  "planApproveKeys": {
+    "toolbarLabel": "このプランを承認",
+    "approve": "プランを承認 (Ctrl+A)",
+    "approveAria": "このプランを承認して実行する (Ctrl+A)",
+    "note": "承認するとプランが実行されます。やめる場合は上の Esc を押してください。"
+  },
   "selectionKeys": {
     "numbersToolbarLabel": "選択肢の番号キー",
     "numbersCaption": "選択",

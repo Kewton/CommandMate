@@ -975,6 +975,12 @@
     "close": "Close (Esc)",
     "closeAria": "Close this screen (Esc)"
   },
+  "planApproveKeys": {
+    "toolbarLabel": "Approve this plan",
+    "approve": "Approve plan (Ctrl+A)",
+    "approveAria": "Approve this plan and run it (Ctrl+A)",
+    "note": "Approving runs the plan. Use Esc above to cancel instead."
+  },
   "selectionKeys": {
     "numbersToolbarLabel": "Option number keys",
     "numbersCaption": "Pick",
