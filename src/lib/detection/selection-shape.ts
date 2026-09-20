@@ -282,10 +282,26 @@ const COMMAND_CODE_CURSOR_GLYPH = '❯';
 const COMMAND_CODE_TAB_SELECTED_MARKERS = '●◉⦿';
 /** The hollow half of {@link COMMAND_CODE_TAB_SELECTED_MARKERS}'s pair. */
 const COMMAND_CODE_TAB_UNSELECTED_MARKERS = '◯○◌⚪';
+/**
+ * The ANSWERED half, measured on 1.54.1 (Issue #2753).
+ *
+ * A multi-question `AskUserQuestion` keeps one tab per question and marks the
+ * ones already answered: `✔ Party size | ✔ Rental car | ● Update scope | ◯ Review`.
+ * Before this family existed the whole strip failed the cell test, the reader answered
+ * `none`, and the generic parser read the checkbox list under it as a single
+ * select — see the Issue for the capture.
+ *
+ * U+2714 and nothing else. `✓` (U+2713) and `☑` (U+2611) are the shapes a check
+ * mark could take; neither has been seen on a pane, and this reading is shared
+ * with `ChatSurface` and `extractCommandCodeSelectionListFrame`, which run for
+ * EVERY tool — so an unmeasured glyph here widens what other tools' frames can
+ * be claimed as this screen.
+ */
+const COMMAND_CODE_TAB_ANSWERED_MARKERS = '✔';
 
 /** One `<marker> <label>` cell of the tab strip. */
 const COMMAND_CODE_TAB_SEGMENT_PATTERN = new RegExp(
-  `^\\s*([${COMMAND_CODE_TAB_SELECTED_MARKERS}${COMMAND_CODE_TAB_UNSELECTED_MARKERS}])\\s+\\S`,
+  `^\\s*([${COMMAND_CODE_TAB_SELECTED_MARKERS}${COMMAND_CODE_TAB_UNSELECTED_MARKERS}${COMMAND_CODE_TAB_ANSWERED_MARKERS}])\\s+\\S`,
 );
 
 /**
@@ -298,22 +314,25 @@ const COMMAND_CODE_TAB_SEGMENT_PATTERN = new RegExp(
  *    the structure and the one prose never has in this position;
  *  - **every cell is `<marker> <label>`.** A row that is a strip for its first
  *    cell and prose for its second is prose;
- *  - **at least one filled marker and at least one hollow one.** A tab strip
+ *  - **at least one filled marker, and at least one other cell.** A tab strip
  *    says which tab has the screen. A row of identical bullets does not, and
- *    `● one | ● two` is exactly the list-with-a-pipe this rules out.
+ *    `● one | ● two` is exactly the list-with-a-pipe this rules out. The other
+ *    cell may be hollow (not answered yet) or the `✔` of an answered tab
+ *    (measured on 1.54.1 — Issue #2753); what may not be missing is the filled
+ *    one, so `✔ one | ✔ two` is still refused.
  */
 function isCommandCodeQuestionTabRow(line: string): boolean {
   const segments = line.split('|');
   if (segments.length < 2) return false;
   let selected = 0;
-  let unselected = 0;
+  let others = 0;
   for (const segment of segments) {
     const match = COMMAND_CODE_TAB_SEGMENT_PATTERN.exec(segment);
     if (match === null) return false;
     if (COMMAND_CODE_TAB_SELECTED_MARKERS.includes(match[1])) selected += 1;
-    else unselected += 1;
+    else others += 1;
   }
-  return selected > 0 && unselected > 0;
+  return selected > 0 && others > 0;
 }
 
 /**

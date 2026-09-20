@@ -297,6 +297,7 @@ describe('[#2326] the reading fires on Command Code frames and no others', () =>
       'command-code-askuserquestion-2522/unsupported-last-option-tail-too-long.txt',
       'command-code-askuserquestion-2522/unsupported-multi-select-checkboxes.txt',
       'command-code-askuserquestion-2522/unsupported-region-too-tall.txt',
+      'command-code-askuserquestion-2753/multiselect-answered-tabs.txt',
       'command-code-askuserquestion-2754/multiselect-cursor-on-option-1-after-nav.txt',
       'command-code-askuserquestion-2754/multiselect-cursor-on-option-3-nothing-checked.txt',
       'command-code-askuserquestion-2754/multiselect-enter-toggled-option-1.txt',
