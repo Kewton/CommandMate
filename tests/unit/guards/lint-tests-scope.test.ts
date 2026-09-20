@@ -173,7 +173,11 @@ describe('lint scope covers tests/ (Issue #2719)', () => {
     ).toEqual([]);
   });
 
-  it('does not let the CI Lint job swallow its own result', () => {
+  /**
+   * Issue #2749: #2719 removed continue-on-error from the lint job, but the same
+   * gap remained on type-check. At the time of removal, tsc --noEmit was exit 0.
+   */
+  it('does not let the CI Lint or Type Check job swallow its own result', () => {
     const workflow = parse(readFileSync(CI_WORKFLOW, 'utf-8')) as {
       jobs: Record<string, { steps?: { name?: string; 'continue-on-error'?: unknown }[] } & Record<string, unknown>>;
     };
@@ -181,6 +185,16 @@ describe('lint scope covers tests/ (Issue #2719)', () => {
     expect(lintJob, 'ci-pr.yml must still have a `lint` job').toBeTruthy();
     expect(Object.keys(lintJob)).not.toContain('continue-on-error');
     for (const step of lintJob.steps ?? []) {
+      expect(
+        Object.keys(step),
+        `step "${step.name ?? '(unnamed)'}" must not opt out of its own result`,
+      ).not.toContain('continue-on-error');
+    }
+
+    const typeCheckJob = workflow.jobs['type-check'];
+    expect(typeCheckJob, 'ci-pr.yml must still have a `type-check` job').toBeTruthy();
+    expect(Object.keys(typeCheckJob)).not.toContain('continue-on-error');
+    for (const step of typeCheckJob.steps ?? []) {
       expect(
         Object.keys(step),
         `step "${step.name ?? '(unnamed)'}" must not opt out of its own result`,
