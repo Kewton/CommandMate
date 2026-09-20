@@ -6,6 +6,16 @@ import { exactTarget } from './tmux';
 const logger = createLogger('tmux-control-client');
 const DEFAULT_CONTROL_CLIENT_IDLE_TIMEOUT_MS = 30_000;
 
+/**
+ * Bytes of user input per `send-keys -H` command (Issue #2767).
+ *
+ * A control-mode client's stdin is a stream of tmux COMMANDS, one per line — it
+ * is not the pane's keyboard. Input is therefore delivered as `send-keys -H`
+ * followed by the bytes in hex, and a long paste is split so no single command
+ * line grows without bound (256 bytes is 767 characters of hex).
+ */
+export const CONTROL_SEND_KEYS_CHUNK_BYTES = 256;
+
 export interface TmuxControlClientOptions {
   tmuxBinary?: string;
   idleTimeoutMs?: number;
@@ -96,12 +106,28 @@ export class TmuxControlClient {
     };
   }
 
+  /**
+   * Deliver user input to the pane (Issue #2767).
+   *
+   * A control-mode client's stdin is where tmux COMMANDS are written, not the
+   * pane's keyboard. Before #2767 the raw input was written straight through, so
+   * a line typed in the browser terminal ran as a tmux command (`kill-server` +
+   * Enter took down every session) and never reached the pane. The input is now
+   * wrapped in `send-keys -H` with the bytes in hex: not one character of the
+   * input appears in the line that is written, so it cannot be parsed as a command.
+   */
   sendInput(input: string): void {
-    if (!this.child?.stdin.writable) {
+    if (!this.child?.stdin.writable || this.sessionName === null) {
       throw new Error('Tmux control client is not writable');
     }
     this.touch();
-    this.child.stdin.write(input);
+    const bytes = Buffer.from(input, 'utf8');
+    for (let offset = 0; offset < bytes.length; offset += CONTROL_SEND_KEYS_CHUNK_BYTES) {
+      const hex = Array.from(bytes.subarray(offset, offset + CONTROL_SEND_KEYS_CHUNK_BYTES), (byte) =>
+        byte.toString(16).padStart(2, '0')
+      ).join(' ');
+      this.child.stdin.write(`send-keys -t ${exactTarget(this.sessionName)} -H ${hex}\n`);
+    }
   }
 
   resize(cols: number, rows: number): void {
