@@ -38,7 +38,7 @@
 import { BaseCLITool } from './base';
 import type { CLIToolType } from './types';
 import type { NavigationKeySpec } from '@/types/cli-tool-contracts';
-import { CLAUDE_NAVIGATION_KEY_VALUES } from '@/types/terminal-keys';
+import { COMMAND_CODE_NAVIGATION_KEY_VALUES } from '@/types/terminal-keys';
 import {
   hasSession,
   createSession,
@@ -186,9 +186,13 @@ export class CommandCodeTool extends BaseCLITool {
    * screen (`readSelectionListShape`), not on the tool id. The key is declared
    * anyway so the two halves of the claude family cannot drift apart, and
    * declaring a key nobody draws sends nothing.
+   *
+   * **Issue #2760 adds `C-a`.** The plan review overlay (measured on 1.58.0) ends
+   * in `Approve ctrl+a   executes the plan` / `Cancel esc`, and ctrl+a is the only
+   * way to approve. claude does not declare it: there it is "move to line start".
    */
   navigationKeys(): NavigationKeySpec {
-    return { keys: CLAUDE_NAVIGATION_KEY_VALUES, leaderKey: null };
+    return { keys: COMMAND_CODE_NAVIGATION_KEY_VALUES, leaderKey: null };
   }
 
   /**

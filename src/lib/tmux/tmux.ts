@@ -13,6 +13,7 @@ import { createLogger } from '@/lib/logger';
 import { NAVIGATION_KEY_VALUES, type NavigationKey, type TerminalKey } from '@/types/terminal-keys';
 import type { KeySequence } from '../../types/cli-tool-contracts';
 import {
+  escapeTrailingSemicolon,
   keySequenceArgs,
   runKeySequence,
   type KeySequenceTransport,
@@ -504,11 +505,17 @@ export async function sendKeys(
 
   // execFile() passes arguments directly without shell interpretation,
   // so no shell-level escaping is needed
+  //
+  // Issue #2769: tmux is NOT a shell, but it does read each argument, and a `;`
+  // at the end of one is its command separator. Unescaped, `go;` + `C-m` makes
+  // tmux run `send-keys go` and then a command called `C-m` — which fails, so
+  // the whole call throws and nothing reaches the pane.
+  const legacyKeys = escapeTrailingSemicolon(keys);
   const args = options?.literal
     ? keySequenceArgs(exactTarget(sessionName), { kind: 'literal', text: keys })
     : sendEnter
-      ? ['send-keys', '-t', exactTarget(sessionName), keys, 'C-m']
-      : ['send-keys', '-t', exactTarget(sessionName), keys];
+      ? ['send-keys', '-t', exactTarget(sessionName), legacyKeys, 'C-m']
+      : ['send-keys', '-t', exactTarget(sessionName), legacyKeys];
 
   try {
     await execFileAsync('tmux', args, { timeout: DEFAULT_TIMEOUT });
@@ -622,6 +629,11 @@ const ALLOWED_SPECIAL_KEYS = new Set([
   // from user-controlled text.
   'C-x', 'C-p', 'C-t',
   'a', 'l', 'n', 't', 'm', 'g', 'u', 'r', 'c',
+  // Issue #2760: Command Code's plan review is approved with ctrl+a and with
+  // nothing else. Deliverable for every session, declared by Command Code alone
+  // (`COMMAND_CODE_NAVIGATION_KEY_VALUES`), so the route answers 400 for every
+  // other tool — the same arrangement as `s` above.
+  'C-a',
 ]);
 
 /**
