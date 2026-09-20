@@ -288,6 +288,7 @@ describe('[#2326] the reading fires on Command Code frames and no others', () =>
       'command-code-askuserquestion-2522/unsupported-last-option-tail-too-long.txt',
       'command-code-askuserquestion-2522/unsupported-multi-select-checkboxes.txt',
       'command-code-askuserquestion-2522/unsupported-region-too-tall.txt',
+      'command-code-askuserquestion-2753/multiselect-answered-tabs.txt',
     ]);
     // The sweep walks every fixture in the repository, so its runtime grows with
     // the corpus, not with this Issue. It crossed vitest's 5s default on

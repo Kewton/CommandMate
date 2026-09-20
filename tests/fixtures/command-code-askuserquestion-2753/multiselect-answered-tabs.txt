@@ -1,0 +1,28 @@
+# Command Code v1.54.1
+# models: deepseek-v4-flash-(latest) · taste-1
+# /private/tmp/cc-multiselect-probe/sample-repo
+
+❯ Update the trip guide page from the reference image.
+
+✻ Thought for 5 seconds [ctrl+o to expand]
+
+⠶ I compared the reference image with the current HTML. The differences are below.
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+✔ Party size | ✔ Rental car | ✔ Rain plan | ● Update scope | ◯ Review
+
+How far should this update go? (select all that apply)
+
+❯ 1. [ ] Regenerate the map images
+        Rebuilds the maps for the new route and swaps the base64 payload.
+  2. [ ] Add a reservation table
+        Adds the price / meeting point / status table from the reference image.
+  3. [x] Update the desktop page too
+        Applies the same change to guide_2026.html.
+  4. [ ] Add a trip-highlights block
+        Adds the block from the bottom right of the reference image.
+  5. [ ] Type something...
+  Submit
+
+Enter to select | Arrow keys to navigate | 1-9 quick select | n notes | c chat | Esc to cancel
