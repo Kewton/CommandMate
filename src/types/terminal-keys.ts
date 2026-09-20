@@ -149,6 +149,39 @@ export const CLAUDE_NAVIGATION_KEY_VALUES = [
  */
 export const SESSION_SCOPE_KEY_TOOL_IDS = ['claude', 'command-code'] as const;
 
+/**
+ * The key that approves Command Code's plan review (Issue #2760).
+ *
+ * That overlay ends in `Approve ctrl+a   executes the plan` / `Cancel esc`, and
+ * ctrl+a is the ONLY way to approve it (measured on 1.58.0 at 200x1000). A tmux
+ * key name, delivered as 0x01.
+ *
+ * In neither the shared pad nor the claude-family pad: on claude's composer
+ * ctrl+a is "move to the start of the line", so there is no screen of claude's
+ * that a button for it could serve.
+ */
+export const PLAN_APPROVE_KEY = 'C-a';
+
+/**
+ * What a Command Code pane may be sent: the claude-family pad plus
+ * {@link PLAN_APPROVE_KEY}.
+ *
+ * Returned by `CommandCodeTool.navigationKeys()`. `CLAUDE_NAVIGATION_KEY_VALUES`
+ * itself is untouched, so claude's vocabulary does not widen by a single key.
+ */
+export const COMMAND_CODE_NAVIGATION_KEY_VALUES = [
+  ...CLAUDE_NAVIGATION_KEY_VALUES,
+  PLAN_APPROVE_KEY,
+] as const;
+
+/**
+ * The tool ids whose `navigationKeys()` carry {@link PLAN_APPROVE_KEY}.
+ *
+ * Read by the chat surface, which cannot call `navigationKeys()` — the same
+ * reason and the same shape as {@link SESSION_SCOPE_KEY_TOOL_IDS}.
+ */
+export const PLAN_APPROVE_KEY_TOOL_IDS = ['command-code'] as const;
+
 // ---------------------------------------------------------------------------
 // Per-tool vocabularies (Issue #2046)
 // ---------------------------------------------------------------------------
@@ -240,6 +273,8 @@ export const TERMINAL_KEY_VALUES = [
   ...NAVIGATION_KEY_VALUES,
   // Issue #2297: claude / Command Code declare it; nothing else does.
   SESSION_SCOPE_KEY,
+  // Issue #2760: Command Code alone declares it.
+  PLAN_APPROVE_KEY,
   OPENCODE_LEADER_KEY,
   ...OPENCODE_DIRECT_KEY_VALUES,
   // Issue #2254: `n` is in the base pad now — see OPENCODE_CHORD_ONLY_VALUES.

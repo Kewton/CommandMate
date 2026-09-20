@@ -1,0 +1,46 @@
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+Plan review: Trip guide refresh — wave 2 · ~/.commandcode/plans/trip-guide-wave2.md · v1
+Review the plan like a PR — type on any line to comment, enter pins it under the line.
+
+   1   # Trip guide refresh — wave 2
+   2    
+   3   ## 0. Facts checked before planning
+   4    
+   5   - `main` is at **`abc1234`**, no open PR, and the only worktree is `main`
+       (as the requester reported).
+   6   - The profile `.sample/profiles/guide.json` has **`verified: false`**, so the
+       planner needs **`--allow-unverified`** (otherwise it exits 3 with
+       `unverified_profile`).
+   7    
+   8   ## 1. Steps
+   9    
+  10   1. Run the planner in dry-run mode and confirm it exits 0 with `status:
+       partial`, then read `plan.json`.
+  11   2. Check that the wave order is #12 → #11 and that `merge_order` is
+       12,11.
+  12   3. Confirm the plan `scope` does not include `.sample/**`, `workspace/**` or
+       `NOTES.md`, and that it does not ask to widen `ScopeValue`.
+  13   4. If a stop condition is hit, do not dispatch; hand the result back to the
+       requester.
+  14    
+  15   ## 2. Files this plan expects to touch
+  16    
+  17   -
+       `packages/schema/src/{spec.ts,api.ts,index.test.ts,vocabulary.yaml,docs/semantics
+       .md,samples/negatives/index.json}`
+  18   - `packages/engine/src/{check,normalize,diagnostics}.ts` (+ `.test.ts`)
+  19    
+  20   ## 3. Report
+  21    
+  22   Items 1–8 per issue (PR / squash commit / gates and CI), then one closing
+       `DONE:` line.
+  23    
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+ REVIEW 
+Approve ctrl+a   executes the plan
+Cancel esc
+
+type + enter to comment · quick: ? why  x cut  ! risky · ctrl+g $EDITOR

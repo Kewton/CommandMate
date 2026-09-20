@@ -96,6 +96,7 @@ import {
 } from '@/lib/polling/prompt-dedup-state';
 import { STATUS_CAPTURE_LINES } from '@/config/status-capture-config';
 import { CACHE_MAX_CAPTURE_LINES, isCaptureWindowSaturated } from '@/lib/tmux/tmux-capture-cache';
+import { selectRealtimeSnippetRows } from '@/lib/realtime-snippet';
 import {
   getAgentEventDropCounts,
   getAskUserQuestion,
@@ -1915,7 +1916,9 @@ async function buildPayload(
   // once, here, above the first reader. The 100 rows are also what the payload
   // publishes, which is the property both fields rest on: what they claim can be
   // checked against the rows printed next to them in `capture --json`.
-  const realtimeSnippet = lines.slice(-100).join('\n');
+  // Issue #2768: still "the 100 rows this payload publishes" — but anchored to
+  // the last content row when the plain tail is entirely blank (top-anchored panes).
+  const realtimeSnippet = selectRealtimeSnippetRows(lines).join('\n');
 
   // Issue #2095: gated on the tool because the anchors are opencode's own box
   // drawing. Every other CLI's detection is untouched by construction — nothing
