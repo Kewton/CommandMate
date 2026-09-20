@@ -129,10 +129,13 @@ describe('send command action', () => {
     expect(mockExit).toHaveBeenCalledWith(2); // CONFIG_ERROR
   });
 
+  // Issue #2771: claude takes a model now, so the agent that stands for "one that
+  // does not" is codex. With `claude` here the check would pass and this test —
+  // which mocks no fetch — would go on to POST to whatever server is on :3000.
   it('rejects --model with non-copilot agent', async () => {
     const { createSendCommand } = await import('../../../../src/cli/commands/send');
     const cmd = createSendCommand();
-    await cmd.parseAsync(['node', 'send', 'wt1', 'hello', '--agent', 'claude', '--model', 'gpt-5-mini']);
+    await cmd.parseAsync(['node', 'send', 'wt1', 'hello', '--agent', 'codex', '--model', 'gpt-5-mini']);
     expect(mockConsoleError).toHaveBeenCalledWith(
       expect.stringContaining('--model')
     );

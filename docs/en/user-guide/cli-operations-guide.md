@@ -291,6 +291,7 @@ commandmate send "$WT" "Quick check" --agent codex --instance codex-3 --register
 | `--instance <id>` | **Recommended way to name the target.** Instance id: `<agent>` or `<agent>-<n>` (e.g. `codex`, `claude-2`). Starts the session if it is not running | The agent's primary instance |
 | `--agent <id>` | Ad-hoc CLI tool for an instance the roster does not know (claude, codex, gemini, vibe-local, opencode, copilot, antigravity) | The roster value / worktree default |
 | `--register` | Register the `--instance` session into the roster | - |
+| `--model <model>` | Model to use (copilot / antigravity / claude only). **copilot** switches inside the session. **antigravity and claude take it as a launch flag**: it applies only when this send starts the session, and a running session answers 400 (stop the session and resend to switch). For claude the value is an alias (`sonnet` / `opus` / `opus[1m]`) or a full id (`claude-sonnet-5`). The target must be named (`--instance` or `--agent`) | The tool's default |
 | `--auto-yes` | Enable auto-yes before sending | - |
 | `--duration <d>` | Auto-yes duration (1h, 3h, 8h) | 1h |
 | `--stop-pattern <p>` | Auto-yes stop condition (regex) | - |
