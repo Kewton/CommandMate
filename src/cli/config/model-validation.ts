@@ -2,6 +2,7 @@
  * Model Validation (CLI subset copy)
  * Issue #588: Subset of cmate-cli-tool-parser.ts for CLI build (DR2-002)
  * Issue #989: Added Antigravity model name validation (Phase B)
+ * Issue #2771: Added Claude model name validation
  *
  * This file duplicates MODEL_NAME_PATTERN, MAX_MODEL_NAME_LENGTH,
  * ANTIGRAVITY_MODEL_NAME_PATTERN, MAX_ANTIGRAVITY_MODEL_NAME_LENGTH,
@@ -78,6 +79,41 @@ export function validateAntigravityModelName(modelName: string): { valid: boolea
   }
   if (modelName.length > MAX_ANTIGRAVITY_MODEL_NAME_LENGTH) {
     return { valid: false, reason: `Model name exceeds ${MAX_ANTIGRAVITY_MODEL_NAME_LENGTH} characters` };
+  }
+  return { valid: true };
+}
+
+/**
+ * Claude model name allowed pattern (CLI subset copy).
+ * Must match claude-constants.ts CLAUDE_MODEL_NAME_PATTERN exactly.
+ */
+export const CLAUDE_MODEL_NAME_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9\-._/:@[\]]*$/;
+
+/**
+ * Maximum Claude model name length.
+ * Must match claude-constants.ts MAX_CLAUDE_MODEL_NAME_LENGTH exactly.
+ */
+export const MAX_CLAUDE_MODEL_NAME_LENGTH = 128;
+
+/**
+ * Validate a Claude model name (reject approach).
+ * Must produce identical results to cmate-cli-tool-parser.ts validateClaudeModelName().
+ *
+ * @param modelName - Model name to validate
+ * @returns Validation result
+ */
+export function validateClaudeModelName(modelName: string): { valid: boolean; reason?: string } {
+  if (/[\x00-\x1f\x7f]/.test(modelName)) {
+    return { valid: false, reason: 'Model name contains control characters' };
+  }
+  if (modelName.trim() === '') {
+    return { valid: false, reason: 'Model name must not be empty' };
+  }
+  if (!CLAUDE_MODEL_NAME_PATTERN.test(modelName)) {
+    return { valid: false, reason: 'Model name contains invalid characters' };
+  }
+  if (modelName.length > MAX_CLAUDE_MODEL_NAME_LENGTH) {
+    return { valid: false, reason: `Model name exceeds ${MAX_CLAUDE_MODEL_NAME_LENGTH} characters` };
   }
   return { valid: true };
 }

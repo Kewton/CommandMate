@@ -32,6 +32,8 @@ import { createLogger } from '@/lib/logger';
 import { CLAUDE_RESTART_DELAY_MS } from '@/config/cli-tool-timing-config';
 import { deriveSessionSuffix } from '@/lib/cli-tools/types';
 import { CLAUDE_CLI_TOOL_ID } from '@/lib/hooks/sources';
+import { shellQuote } from '@/lib/hooks/hook-settings-generator';
+import { validateClaudeModelName } from '@/lib/cmate-cli-tool-parser';
 import {
   beginAgentSession,
   buildAgentLaunchCommandLine,
@@ -390,6 +392,20 @@ export interface ClaudeSessionOptions {
   worktreePath: string;
   /** Optional agent instance ID (Issue #868). Defaults to the primary instance. */
   instanceId?: string;
+  /**
+   * Issue #2771: model to launch with, passed to the CLI as `--model <model>`.
+   *
+   * Honoured on the CREATION path only. A session that already exists keeps the
+   * model it was started with — the reuse branch returns before the launch
+   * command is built — so the send route refuses a model for a running session
+   * rather than accepting one that would be silently ignored.
+   *
+   * Not remembered: a later start without it (a restart after a crash, a send
+   * that finds the session gone) launches on the operator's default again. That
+   * is the safe direction — the default is the operator's own choice — and the
+   * durable alternative is a per-instance setting, which this is not.
+   */
+  model?: string;
 }
 
 /**
@@ -545,7 +561,17 @@ export async function waitForPrompt(
 export async function startClaudeSession(
   options: ClaudeSessionOptions
 ): Promise<void> {
-  const { worktreeId, worktreePath, instanceId } = options;
+  const { worktreeId, worktreePath, instanceId, model } = options;
+
+  // Issue #2771: the model is about to be typed into a shell. The route and the
+  // CLI have both validated it already; this is the copy that cannot be
+  // forgotten by a future caller, and it runs before anything is created.
+  if (model !== undefined) {
+    const modelValidation = validateClaudeModelName(model);
+    if (!modelValidation.valid) {
+      throw new Error(`Invalid Claude model name: ${modelValidation.reason}`);
+    }
+  }
 
   // Check if Claude is installed
   const claudeAvailable = await isClaudeInstalled();
@@ -620,11 +646,18 @@ export async function startClaudeSession(
     // Issue #1759: which config file gets written, and whether one is written
     // at all, belongs to the tool's `AgentEventSource` (S3/S4). Claude's
     // delegates to `buildClaudeLaunchCommand`, unchanged.
-    const launchCommand = buildAgentLaunchCommandLine({
+    const baseLaunchCommand = buildAgentLaunchCommandLine({
       target: { worktreeId, cliToolId: CLAUDE_CLI_TOOL_ID, instanceId },
       executablePath: claudePath,
       worktreePath,
     });
+    // Issue #2771: `--model` goes AFTER the rendered line, the shape
+    // `AntigravityTool` uses, so the env assignments stay in front of the
+    // executable. Single-quoted because `opus[1m]` is a glob to the pane's zsh.
+    // The flag outranks a `model` in the worktree's `.claude/settings.local.json`
+    // and the operator's `~/.claude/settings.json` (measured on 2.1.278).
+    const launchCommand =
+      model === undefined ? baseLaunchCommand : `${baseLaunchCommand} --model ${shellQuote(model)}`;
 
     // Start Claude CLI in interactive mode using dynamically resolved path
     await sendKeys(sessionName, launchCommand, true);

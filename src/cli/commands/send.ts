@@ -12,7 +12,11 @@ import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
 import { parseDurationToMs, ALLOWED_DURATIONS } from '../config/duration-constants';
 import { isCliToolId, CLI_TOOL_IDS } from '../config/cli-tool-ids';
 import { AGENT_OPTION_DESCRIPTION, INSTANCE_OPTION_DESCRIPTION } from '../config/agent-target-options';
-import { validateCopilotModelName, validateAntigravityModelName } from '../config/model-validation';
+import {
+  validateCopilotModelName,
+  validateAntigravityModelName,
+  validateClaudeModelName,
+} from '../config/model-validation';
 import { fetchAgentInstances, saveAgentInstances, defaultAlias, MAX_AGENT_INSTANCES } from '../utils/agent-instances';
 import {
   isInstanceSelector,
@@ -219,7 +223,11 @@ export function createSendCommand(): Command {
     .option('--instance <id>', `${INSTANCE_OPTION_DESCRIPTION} ${INSTANCE_ALIAS_HELP_SUFFIX}`)
     .option('--agent <agent>', AGENT_OPTION_DESCRIPTION)
     .option('--register', 'Register the --instance session into the agent-instance roster (needs --agent unless the instance id is itself a CLI tool id)')
-    .option('--model <model>', 'Specify AI model for Copilot or Antigravity agent')
+    .option(
+      '--model <model>',
+      'Specify AI model for a Copilot, Antigravity or Claude agent. For Antigravity and Claude it is a launch'
+        + ' flag: it applies only when this send starts the session, and a running session answers 400'
+    )
     .option('--auto-yes', 'Enable auto-yes before sending (session-wide, no policy guard; for unattended runs prefer --contract with an autoYes policy)')
     .option('--duration <duration>', `Auto-yes duration (${ALLOWED_DURATIONS.join(', ')})`)
     .option('--stop-pattern <pattern>', 'Auto-yes stop pattern (regex). Matched against terminal output; cannot block commands (use the task contract\'s autoYes.denyPatterns for that)')
@@ -329,17 +337,24 @@ worktree and send a short message that tells the agent to read that file.
         // not repeating `--agent copilot` — the tool-dependent option was being
         // validated before the tool was known (design §4 D5 決定 3). Still ahead
         // of every side effect: resolution only reads.
+        //
+        // Issue #2771: claude joins the list. `agent` is undefined when neither
+        // --instance nor --agent was given, and the server would then pick the
+        // worktree's default tool — which the CLI cannot know, so it cannot pick
+        // a validator either. The target has to be named.
         if (options.model) {
-          if (agent !== 'copilot' && agent !== 'antigravity') {
+          if (agent !== 'copilot' && agent !== 'antigravity' && agent !== 'claude') {
             console.error(
-              'Error: --model option requires --agent copilot or --agent antigravity'
+              'Error: --model option requires --agent copilot, --agent antigravity or --agent claude'
               + ' (or an --instance registered as one)'
             );
             process.exit(ExitCode.CONFIG_ERROR);
           }
           const modelValidation = agent === 'antigravity'
             ? validateAntigravityModelName(options.model)
-            : validateCopilotModelName(options.model);
+            : agent === 'claude'
+              ? validateClaudeModelName(options.model)
+              : validateCopilotModelName(options.model);
           if (!modelValidation.valid) {
             console.error(`Error: Invalid model name: ${modelValidation.reason}`);
             process.exit(ExitCode.CONFIG_ERROR);
@@ -360,7 +375,13 @@ worktree and send a short message that tells the agent to read that file.
         }
 
         // --auto-yes: enable auto-yes first (unless --model is specified, then after send) [DR2-02]
-        if (options.autoYes && !options.model) {
+        //
+        // Issue #2771: claude is the exception to the exception. The deferral
+        // exists so Auto-Yes does not answer copilot's `/model` interaction; a
+        // claude model is a launch flag with no interaction to protect, and a
+        // contract send must have Auto-Yes on BEFORE the worker starts working.
+        const deferAutoYes = Boolean(options.model) && agent !== 'claude';
+        if (options.autoYes && !deferAutoYes) {
           await enableAutoYes(client, worktreeId, options, autoYesDurationMs, agent, instanceId);
         }
 
@@ -452,7 +473,7 @@ worktree and send a short message that tells the agent to read that file.
 
         // Issue #576: Enable auto-yes AFTER send when --model is specified
         // This avoids auto-yes interfering with the /model command interaction
-        if (options.autoYes && options.model) {
+        if (options.autoYes && deferAutoYes) {
           await enableAutoYes(client, worktreeId, options, autoYesDurationMs, agent, instanceId);
         }
       } catch (error) {

@@ -69,12 +69,16 @@ export class ClaudeTool extends BaseCLITool implements IImageCapableCLITool {
    * @param worktreeId - Worktree ID
    * @param worktreePath - Worktree path
    * @param instanceId - Optional agent instance ID (defaults to primary)
+   * @param model - Issue #2771: model to launch with (`claude --model <model>`).
+   *   Launch-time only, like antigravity's (#989): the caller must not pass one
+   *   for a session that is already running.
    */
-  protected async launchSession(worktreeId: string, worktreePath: string, instanceId?: string): Promise<void> {
+  protected async launchSession(worktreeId: string, worktreePath: string, instanceId?: string, model?: string): Promise<void> {
     const options: ClaudeSessionOptions = {
       worktreeId,
       worktreePath,
       instanceId,
+      model,
     };
 
     await startClaudeSession(options);

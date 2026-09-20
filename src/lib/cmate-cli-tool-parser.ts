@@ -19,6 +19,7 @@
 
 import { MODEL_NAME_PATTERN, MAX_MODEL_NAME_LENGTH } from '@/config/copilot-constants';
 import { ANTIGRAVITY_MODEL_NAME_PATTERN, MAX_ANTIGRAVITY_MODEL_NAME_LENGTH } from '@/config/antigravity-constants';
+import { CLAUDE_MODEL_NAME_PATTERN, MAX_CLAUDE_MODEL_NAME_LENGTH } from '@/config/claude-constants';
 import {
   OPENCODE_RUN_NAME_PATTERN,
   MAX_OPENCODE_RUN_NAME_LENGTH,
@@ -377,6 +378,40 @@ export function validateAntigravityModelName(modelName: string): { valid: boolea
   // Length validation
   if (modelName.length > MAX_ANTIGRAVITY_MODEL_NAME_LENGTH) {
     return { valid: false, reason: `Model name exceeds ${MAX_ANTIGRAVITY_MODEL_NAME_LENGTH} characters` };
+  }
+
+  return { valid: true };
+}
+
+/**
+ * Validate a Claude model name using the reject approach (no sanitization).
+ * Issue #2771: `claude --model` takes an alias (`sonnet`, `opus`, `opus[1m]`) or
+ * a full id (`claude-sonnet-5`, `claude-opus-5[1m]`, a Bedrock / Vertex id). The
+ * brackets are why Copilot's pattern cannot be reused, and the display names
+ * Antigravity accepts ("Gemini 3.1 Pro (High)") are not something Claude takes.
+ *
+ * @param modelName - Model name to validate
+ * @returns Validation result with optional reason for rejection
+ */
+export function validateClaudeModelName(modelName: string): { valid: boolean; reason?: string } {
+  // Control character rejection
+  if (/[\x00-\x1f\x7f]/.test(modelName)) {
+    return { valid: false, reason: 'Model name contains control characters' };
+  }
+
+  // Empty / whitespace-only rejection
+  if (modelName.trim() === '') {
+    return { valid: false, reason: 'Model name must not be empty' };
+  }
+
+  // Pattern validation (leading alphanumeric required, DR4-001)
+  if (!CLAUDE_MODEL_NAME_PATTERN.test(modelName)) {
+    return { valid: false, reason: 'Model name contains invalid characters' };
+  }
+
+  // Length validation
+  if (modelName.length > MAX_CLAUDE_MODEL_NAME_LENGTH) {
+    return { valid: false, reason: `Model name exceeds ${MAX_CLAUDE_MODEL_NAME_LENGTH} characters` };
   }
 
   return { valid: true };
