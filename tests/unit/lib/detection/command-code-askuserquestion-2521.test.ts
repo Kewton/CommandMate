@@ -65,6 +65,7 @@ import {
   readSelectionListShape,
   shouldOfferOptionNumbers,
 } from '@/lib/detection/selection-shape';
+import { readCommandCodeQuestionDialog } from '@/lib/detection/tools/command-code/dialog';
 import { stripAnsi } from '@/lib/detection/ansi';
 import { isUnclassifiedFrame } from '@/lib/session/status-evidence';
 
@@ -279,13 +280,37 @@ describe('[#2521] B. the reading declines everything it was not measured on', ()
     ).toBeNull();
   });
 
-  it('declines a cursor that is not on an option row', () => {
-    // An idle composer redrawn under the dialog is the shape this covers.
-    expect(
-      readCommandCodeQuestionRegion(
-        questionScreen({ rows: ['  1. one', '  2. two', '', '❯ Ask your question...'] }),
-      ),
-    ).toBeNull();
+  it('reads a cursor that is not on an option row, and says so (Issue #2755)', () => {
+    // This case INVERTED in #2755. It used to assert `null`, on the reasoning
+    // that an idle composer redrawn under the dialog is the shape it covers.
+    // 1.54.1 then turned out to draw three rows of its OWN that the cursor
+    // rests on — `Submit`, `Next`, and the `notes:` input `n` opens — and
+    // declining them handed six live captures of an unanswered question back to
+    // the composer check, which published `ready` off the dialog's own `❯` row
+    // (#2521's 偽完了 again, `commandmate wait` exiting 0 on all six).
+    //
+    // The region is therefore read, and WHERE the cursor sits is reported. The
+    // composer case is not reintroduced by that: a real repaint draws the
+    // composer's own rule BELOW the dialog, which moves the region's top edge
+    // past it — the case two tests down pins exactly that, and this synthetic
+    // frame differs from it only by leaving that rule out.
+    const region = readCommandCodeQuestionRegion(
+      questionScreen({ rows: ['  1. one', '  2. two', '', '❯ Ask your question...'] }),
+    );
+    expect(region).not.toBeNull();
+    expect(region?.cursorOnOptionRow).toBe(false);
+
+    // And what the reader does with it: the manual-operation fallback, never an
+    // answerable payload.
+    const reading = readCommandCodeQuestionDialog(
+      questionScreen({ rows: ['  1. one', '  2. two', '', '❯ Ask your question...'] }),
+    );
+    expect(reading.kind).toBe('unsupported');
+    if (reading.kind === 'unsupported') expect(reading.reason).toBe('cursor-outside-options');
+  });
+
+  it('still says the cursor IS on an option row for the measured screen', () => {
+    expect(readCommandCodeQuestionRegion(questionScreen())?.cursorOnOptionRow).toBe(true);
   });
 
   it('declines a rule too short to be the seam', () => {

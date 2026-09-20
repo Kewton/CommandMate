@@ -8,61 +8,54 @@
  * **explicitly**, one row per capture, so the frames #2754 measured are
  * asserted rather than merely committed.
  *
- * ## What is pinned here is TODAY's reading, not the right one
+ * ## What is pinned here is TODAY's reading
  *
- * #2754 measures and records; it changes no rule of its own. The table below is
- * the chain's verdict as it stands **after #2753**, which landed while these
- * captures were being taken and closed one of the two conditions this file was
- * first written against.
+ * #2754 measured and recorded; it changed no rule of its own, so the table
+ * below opened as the chain's verdict **after #2753** with nine rows marked as
+ * defects #2755 would have to close. **#2755 then closed all nine**, and the
+ * table is what it closed them to. `changedIn2755` marks the twenty-three rows
+ * whose verdict moved.
  *
- * What #2753 fixed shows up here as eight rows that moved off a wrong payload:
- * `multiselect-initial`, `multiselect-two-checked`,
- * `multiselect-cursor-on-option-2`, `multiselect-space-untoggled-cursor-row`,
- * the three `multiselect-free-text-*` frames and `singleselect-answered-tabs`.
- * Before it, the generic parser answered all eight — the seven checkbox frames
- * as a single-select list whose labels still carried their `[ ] ` prefix, which
- * is what a user reported as "cannot pick more than one". They now answer
- * `unsupported` / `multi-select` (the #2521 fallback), and the single-select one
- * is read in full by #2522's reader. `review-page-unanswered-warning` moved with
- * them, to `unsupported` / `numbering-unreadable`.
+ * What moved, in three families:
  *
- * Rows still marked `changesIn2755` are what is LEFT, in three families:
+ *  - **six frames published `ready` / `input_prompt`** — a live, unanswered
+ *    question read as a finished turn, with `commandmate wait` exiting 0 on
+ *    every one. It happened whenever the `❯` had left the option list: on
+ *    `❯ Submit`, on `❯ Next`, and on the `❯ notes:` row that `n` opens. They
+ *    are now recognised and declined (`cursor-outside-options`), which is
+ *    #2521's manual-operation fallback rather than a payload — a digit sent
+ *    while the cursor is off the list is measured to do nothing;
+ *  - **the review page handed `1. Submit` / `2. Cancel` to the answer path**
+ *    with the default on `Submit`, so answering the default COMMITTED whatever
+ *    the human had ticked. Both review captures are now recognised as what they
+ *    are and declined, which takes them away from Auto-Yes entirely;
+ *  - **thirteen checkbox screens were declined outright and both readable
+ *    single-selects carried the new footer inside their last option's label.**
+ *    The checkbox screens are now read — `multiSelect: true`, a `checked` flag
+ *    per row, the box stripped off the label — and the footer, with the
+ *    `Submit` row above it, is no longer folded into anything.
  *
- *  - **six frames publish `ready` / `input_prompt`** — a live, unanswered
- *    question read as a finished turn. `commandmate wait` exits 0 on every one
- *    of them. It happens whenever the `❯` has left the option list: on
- *    `❯ Submit`, on `❯ Next`, and on the `❯ notes:` row that `n` opens. #2521
- *    argued the first of those from a synthetic frame; these are captures;
- *  - **the review page hands `1. Submit` / `2. Cancel` to the answer path**
- *    (`review-page-submit-cancel`), with the default on `Submit`. Answering the
- *    default there does not pick an option — it COMMITS whatever the human has
- *    ticked so far. It is the only frame of this screen left where the generic
- *    parser still produces an actionable payload;
- *  - **both frames the reader reads in full carry the new footer inside their
- *    last option's label**, `requiresTextInput` and all
- *    (`singleselect-initial-unanswered-tabs`, `singleselect-answered-tabs`).
- *    #2753 made the second of those readable; it did not unfold the footer.
- *
- * Making one of these rows go red is what #2755 looks like from here; changing
- * a rule to make one green early is what this Issue's 逸脱時の扱い forbids.
+ * The three `not-applicable-*` rows are the control: the question is genuinely
+ * gone on all three and none of their verdicts moved.
  *
  * ## What decides whether a frame is recognised at all
  *
- * Sixteen of the twenty-six are recognised as this screen, and the condition is
- * now a single one: **the `❯` has to be on a numbered row.** 1.54.1 lets the
- * cursor leave the list entirely — onto `Submit`, `Next` or the `notes:` input —
- * and the region reading counts cursors inside the numbered run, so those six
- * frames are declined however clean their tab strip is. Fifteen of the sixteen
- * are also READ (`crop: true`); `review-page-unanswered-warning` is recognised
- * and then declined for drawing `1.` twice.
+ * Twenty-three of the twenty-six are recognised as this screen: everything but
+ * the three captures taken after the question was cancelled or sent as chat.
+ * Being recognised and being ANSWERABLE are two questions now — thirteen
+ * checkbox screens and two single-selects are read in full, the six with the
+ * cursor off the list and the two review pages are recognised and declined —
+ * and keeping them apart is what stops a live question reaching the composer
+ * check that publishes `ready`.
  *
- * It used to be two. The other was **no `✔` on the tab strip**: 1.54.1 marks an
- * ANSWERED tab with U+2714, which was in neither
- * `COMMAND_CODE_TAB_SELECTED_MARKERS` (`●◉⦿`) nor
+ * It used to be one condition, and before #2753 two. The first was **no `✔` on
+ * the tab strip**: 1.54.1 marks an ANSWERED tab with U+2714, which was in
+ * neither `COMMAND_CODE_TAB_SELECTED_MARKERS` (`●◉⦿`) nor
  * `COMMAND_CODE_TAB_UNSELECTED_MARKERS` (`◯○◌⚪`), so one answered question
  * anywhere in the call took the whole strip out of `isCommandCodeQuestionTabRow`.
- * #2753 added `COMMAND_CODE_TAB_ANSWERED_MARKERS`, and that condition is gone —
- * which is why the case below asserts that a `✔` strip IS recognised.
+ * #2753 added `COMMAND_CODE_TAB_ANSWERED_MARKERS`. The second was **the `❯` has
+ * to be on a numbered row**, which #2755 removed — see the case below, which
+ * asserts both halves of what replaced it.
  *
  * Provenance, the keys that were sent and what each one did:
  * `tests/fixtures/command-code-askuserquestion-2754/README.md` and
@@ -76,7 +69,10 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { IDLE_EVIDENCE_ENV_VAR } from '@/config/detection-evidence-config';
 import { stripAnsi } from '@/lib/detection/cli-patterns';
-import { extractCommandCodeSelectionListFrame } from '@/lib/detection/selection-shape';
+import {
+  extractCommandCodeSelectionListFrame,
+  readCommandCodeReviewPage,
+} from '@/lib/detection/selection-shape';
 import { detectSessionStatus, STATUS_REASON } from '@/lib/detection/status-detector';
 import { readCommandCodeQuestionDialog } from '@/lib/detection/tools/command-code/dialog';
 import { isMultipleChoicePrompt } from '../../../../helpers/prompt-type-guards';
@@ -115,8 +111,8 @@ interface Expectation {
   crop: boolean;
   /** The screen, and what this capture is here to state. */
   pins: string;
-  /** True when #2755 is expected to publish something else for this frame. */
-  changesIn2755: boolean;
+  /** True when Issue #2755 moved what the chain publishes for this frame. */
+  changedIn2755: boolean;
 }
 
 /**
@@ -126,7 +122,7 @@ interface Expectation {
  * says what the frame IS, not how it was reached.
  */
 const EXPECTATIONS: readonly Expectation[] = [
-  // ---- the `❯` is on an option row: the #2521 / #2522 reading fires -------
+  // ---- single-select: read in full, and #2755 unfolded the footer ---------
   {
     frame: 'singleselect-initial-unanswered-tabs',
     status: 'waiting',
@@ -134,8 +130,8 @@ const EXPECTATIONS: readonly Expectation[] = [
     hasActivePrompt: true,
     dialog: 'prompt',
     crop: true,
-    pins: 'the positive control: a SINGLE-select question with nothing answered yet, read in full by the #2522 reader (`submitMode: answer_only`) — except that 1.54.1 draws a footer under the last option and `findNumberedOptionBlock` folds it into option 4\'s LABEL',
-    changesIn2755: true,
+    pins: 'the positive control: a SINGLE-select question with nothing answered yet, read in full by the #2522 reader (`submitMode: answer_only`). #2755 took the 1.54.1 hint bar back OUT of option 4\'s label, where the tail walk had folded it',
+    changedIn2755: true,
   },
   {
     frame: 'singleselect-answered-tabs',
@@ -144,168 +140,158 @@ const EXPECTATIONS: readonly Expectation[] = [
     hasActivePrompt: true,
     dialog: 'prompt',
     crop: true,
-    pins: 'the same question one tab later, under `✔ Party size | ● Rental car | …`. #2753 taught the strip the `✔`, so this reads in full too — and inherits the same folded footer, now on option 3. Before #2753 the reader declined and the generic parser answered with a `question` that had swallowed the transcript rows above the strip',
-    changesIn2755: true,
+    pins: 'the same question one tab later, under `✔ Party size | ● Rental car | …`. #2753 taught the strip the `✔` so this reads in full too, and #2755 unfolded the same footer from option 3',
+    changedIn2755: true,
   },
+
+  // ---- multi-select: #2755 turned the decline into a reading --------------
+  // Every row here answered `unsupported` / `multi-select` before this Issue —
+  // #2521's manual-operation fallback, correct while nothing could answer a
+  // checkbox screen and wrong the moment something could. They now carry
+  // `multiSelect: true`, a `checked` flag per row and labels with the box
+  // stripped off.
   {
     frame: 'tabs-single-question',
     status: 'waiting',
-    reason: STATUS_REASON.COMMAND_CODE_SELECTION_LIST,
-    hasActivePrompt: false,
-    dialog: 'unsupported',
-    dialogReason: 'multi-select',
+    reason: STATUS_REASON.PROMPT_DETECTED,
+    hasActivePrompt: true,
+    dialog: 'prompt',
     crop: true,
-    pins: 'ONE question, so the strip is `● Update scope | ◯ Review` — TWO cells, which is what settles #2754\'s open question about `segments.length < 2` — and the screen carries NO footer, because 1.54.1 only draws one when the call has more than one question',
-    changesIn2755: false,
+    pins: 'ONE question, so the strip is `● Update scope | ◯ Review` — TWO cells, which is what settles #2754\'s open question about `segments.length < 2` — and the screen carries NO footer, because 1.54.1 only draws one when the call has more than one question. A checkbox list with a `Submit` row, so #2755 reads it',
+    changedIn2755: true,
   },
   {
     frame: 'multiselect-next-row-not-last-question',
     status: 'waiting',
-    reason: STATUS_REASON.COMMAND_CODE_SELECTION_LIST,
-    hasActivePrompt: false,
-    dialog: 'unsupported',
-    dialogReason: 'multi-select',
+    reason: STATUS_REASON.PROMPT_DETECTED,
+    hasActivePrompt: true,
+    dialog: 'prompt',
     crop: true,
-    pins: 'the confirm row of a multi-select that is NOT the last question reads `Next`, not `Submit`',
-    changesIn2755: false,
+    pins: 'the confirm row of a multi-select that is NOT the last question reads `Next`, not `Submit`. #2755 accepts either: what the row does is commit this question, and which of the two words it uses is what tells the send arm whether a Review page follows',
+    changedIn2755: true,
   },
   {
     frame: 'multiselect-cursor-on-option-1-after-nav',
     status: 'waiting',
-    reason: STATUS_REASON.COMMAND_CODE_SELECTION_LIST,
-    hasActivePrompt: false,
-    dialog: 'unsupported',
-    dialogReason: 'multi-select',
+    reason: STATUS_REASON.PROMPT_DETECTED,
+    hasActivePrompt: true,
+    dialog: 'prompt',
     crop: true,
-    pins: 'the `❯` back on option 1 after three `↑`. Byte-identical to the frame before any arrow key was pressed, which is the point: the pane does NOT show whether the list has reported a highlight, and `Space` behaves differently in the two states',
-    changesIn2755: false,
+    pins: 'the `❯` back on option 1 after three `↑`. Byte-identical to the frame before any arrow key was pressed, which is the point: the pane does NOT show whether the list has reported a highlight, and `Space` behaves differently in the two states — the measurement that keeps `Space` out of the send arm',
+    changedIn2755: true,
   },
   {
     frame: 'multiselect-cursor-on-option-3-nothing-checked',
     status: 'waiting',
-    reason: STATUS_REASON.COMMAND_CODE_SELECTION_LIST,
-    hasActivePrompt: false,
-    dialog: 'unsupported',
-    dialogReason: 'multi-select',
+    reason: STATUS_REASON.PROMPT_DETECTED,
+    hasActivePrompt: true,
+    dialog: 'prompt',
     crop: true,
-    pins: 'the `❯` on the last option with NO box ticked — the frame `d` was pressed on, so it is the before-side of the undocumented finish key',
-    changesIn2755: false,
+    pins: 'the `❯` on the last option with NO box ticked — the frame `d` was pressed on, so it is the before-side of the undocumented finish key. Every `checked` is false here, which is the empty end of the symmetric difference',
+    changedIn2755: true,
   },
   {
     frame: 'multiselect-up-from-option-1-wraps-to-last',
     status: 'waiting',
-    reason: STATUS_REASON.COMMAND_CODE_SELECTION_LIST,
-    hasActivePrompt: false,
-    dialog: 'unsupported',
-    dialogReason: 'multi-select',
+    reason: STATUS_REASON.PROMPT_DETECTED,
+    hasActivePrompt: true,
+    dialog: 'prompt',
     crop: true,
-    pins: 'the FIRST `↑` on a fresh screen wraps inside the option list to the last option — it does NOT jump to `Submit`. The second `↑` from option 1 does. Two presses of the same key, two destinations, and the frames before them are byte-identical',
-    changesIn2755: false,
+    pins: 'the FIRST `↑` on a fresh screen wraps inside the option list to the last option — it does NOT jump to `Submit`. The second `↑` from option 1 does. Two presses of the same key, two destinations, which is why the send arm walks DOWN to the confirm row and never up',
+    changedIn2755: true,
   },
   {
     frame: 'multiselect-enter-toggled-option-1',
     status: 'waiting',
-    reason: STATUS_REASON.COMMAND_CODE_SELECTION_LIST,
-    hasActivePrompt: false,
-    dialog: 'unsupported',
-    dialogReason: 'multi-select',
+    reason: STATUS_REASON.PROMPT_DETECTED,
+    hasActivePrompt: true,
+    dialog: 'prompt',
     crop: true,
-    pins: 'one `Enter` on a multi-select option row TOGGLED it (`❯ 1. [✔] Shallow`) and left the question up. Enter is not a confirm on this screen — which is the single most load-bearing fact for #2755\'s send arm',
-    changesIn2755: false,
+    pins: 'one `Enter` on a multi-select option row TOGGLED it (`❯ 1. [✔] Shallow`) and left the question up. Enter is not a confirm on this screen — the single most load-bearing fact for #2755\'s send arm, and the reason it uses digits for the toggles',
+    changedIn2755: true,
   },
-
-  // ---- a `✔` on the strip, and #2753 made these eight readable ------------
-  // Every one of them answered `waiting` / `prompt_detected` / `hasActivePrompt:
-  // true` before #2753, with the checkbox still on the label. The verdicts here
-  // ARE that fix; the `pins` text is the 1.54.1 rendering, which did not move.
   {
     frame: 'multiselect-initial',
     status: 'waiting',
-    reason: STATUS_REASON.COMMAND_CODE_SELECTION_LIST,
-    hasActivePrompt: false,
-    dialog: 'unsupported',
-    dialogReason: 'multi-select',
+    reason: STATUS_REASON.PROMPT_DETECTED,
+    hasActivePrompt: true,
+    dialog: 'prompt',
     crop: true,
     pins: 'a multi-select under TWO answered tabs, every box empty. Five options and the `❯` on option 1. The reported bug: before #2753 this published a five-option single-select whose labels read `[ ] calc.js`',
-    changesIn2755: false,
+    changedIn2755: true,
   },
   {
     frame: 'multiselect-two-checked',
     status: 'waiting',
-    reason: STATUS_REASON.COMMAND_CODE_SELECTION_LIST,
-    hasActivePrompt: false,
-    dialog: 'unsupported',
-    dialogReason: 'multi-select',
+    reason: STATUS_REASON.PROMPT_DETECTED,
+    hasActivePrompt: true,
+    dialog: 'prompt',
     crop: true,
-    pins: 'the same screen after the digits `2` and `4`: two `[✔]` boxes and the `❯` still on option 1, because a digit toggles without moving the cursor',
-    changesIn2755: false,
+    pins: 'the same screen after the digits `2` and `4`: two `[✔]` boxes and the `❯` still on option 1, because a digit toggles without moving the cursor. `checked` is true for exactly 2 and 4',
+    changedIn2755: true,
   },
   {
     frame: 'multiselect-cursor-on-option-2',
     status: 'waiting',
-    reason: STATUS_REASON.COMMAND_CODE_SELECTION_LIST,
-    hasActivePrompt: false,
-    dialog: 'unsupported',
-    dialogReason: 'multi-select',
+    reason: STATUS_REASON.PROMPT_DETECTED,
+    hasActivePrompt: true,
+    dialog: 'prompt',
     crop: true,
-    pins: 'the `❯` moved onto an ALREADY TICKED box. Before #2753 the payload called option 2 the default, so answering the default would have UNticked it; the fallback is what stops that',
-    changesIn2755: false,
+    pins: 'the `❯` moved onto an ALREADY TICKED box. The old payload called it the default, so answering the default would have UNticked it; #2755 reports it as `isDefault` AND `checked`, and refuses `--default` on the payload outright',
+    changedIn2755: true,
   },
   {
     frame: 'multiselect-space-untoggled-cursor-row',
     status: 'waiting',
-    reason: STATUS_REASON.COMMAND_CODE_SELECTION_LIST,
-    hasActivePrompt: false,
-    dialog: 'unsupported',
-    dialogReason: 'multi-select',
+    reason: STATUS_REASON.PROMPT_DETECTED,
+    hasActivePrompt: true,
+    dialog: 'prompt',
     crop: true,
     pins: 'one `Space` later: option 2 is `[ ]` again. `Space` toggles the cursor row — but only once the list has reported a highlight (see the byte-identity note on `multiselect-cursor-on-option-1-after-nav`)',
-    changesIn2755: false,
+    changedIn2755: true,
   },
   {
     frame: 'multiselect-free-text-focused',
     status: 'waiting',
-    reason: STATUS_REASON.COMMAND_CODE_SELECTION_LIST,
-    hasActivePrompt: false,
-    dialog: 'unsupported',
-    dialogReason: 'multi-select',
+    reason: STATUS_REASON.PROMPT_DETECTED,
+    hasActivePrompt: true,
+    dialog: 'prompt',
     crop: true,
-    pins: 'the `❯` on `5. [ ] Type something...`, the TextInput row. The free-text row is NUMBERED and carries a checkbox of its own in a multi-select',
-    changesIn2755: false,
+    pins: 'the `❯` on `5. [ ] Type something...`, the TextInput row. The free-text row is NUMBERED and carries a checkbox of its own in a multi-select, so it reads as an option with both `requiresTextInput` and `checked`',
+    changedIn2755: true,
   },
   {
     frame: 'multiselect-free-text-typed',
     status: 'waiting',
-    reason: STATUS_REASON.COMMAND_CODE_SELECTION_LIST,
-    hasActivePrompt: false,
-    dialog: 'unsupported',
-    dialogReason: 'multi-select',
+    reason: STATUS_REASON.PROMPT_DETECTED,
+    hasActivePrompt: true,
+    dialog: 'prompt',
     crop: true,
     pins: 'text typed into that row: the placeholder is gone AND the row\'s own box ticks ITSELF (`[✔] docs/api.md`) while the characters arrive. No Enter was pressed, and Enter there changes nothing at all',
-    changesIn2755: false,
+    changedIn2755: true,
   },
   {
     frame: 'multiselect-free-text-digit-appended',
     status: 'waiting',
-    reason: STATUS_REASON.COMMAND_CODE_SELECTION_LIST,
-    hasActivePrompt: false,
-    dialog: 'unsupported',
-    dialogReason: 'multi-select',
+    reason: STATUS_REASON.PROMPT_DETECTED,
+    hasActivePrompt: true,
+    dialog: 'prompt',
     crop: true,
-    pins: 'a `1` sent while that row has focus lands IN THE TEXT (`docs/api.md1`) and toggles nothing. Quick-select is dead the moment the cursor leaves the list — the half of the free-text path #2755 has to get right',
-    changesIn2755: false,
+    pins: 'a `1` sent while that row has focus lands IN THE TEXT (`docs/api.md1`) and toggles nothing. Quick-select is dead the moment the cursor leaves the list — which is why #2755 refuses to send free text unless the cursor is already on the field (#2584\'s guard, kept)',
+    changedIn2755: true,
   },
 
-  // ---- the review page, the second confirm ---------------------------------
+  // ---- the review page: recognised and declined (#2755 §7) ----------------
   {
     frame: 'review-page-submit-cancel',
     status: 'waiting',
-    reason: STATUS_REASON.PROMPT_DETECTED,
-    hasActivePrompt: true,
-    dialog: 'none',
+    reason: STATUS_REASON.COMMAND_CODE_SELECTION_LIST,
+    hasActivePrompt: false,
+    dialog: 'unsupported',
+    dialogReason: 'review-page',
     crop: false,
-    pins: 'Enter on `❯ Submit` does NOT submit: it opens a Review page — the answers, then `❯ 1. Submit` / `  2. Cancel` and `← to go back and edit`. The generic parser reads that two-option list as the prompt and puts the default on `Submit`, which is the one place left where answering a default COMMITS instead of choosing',
-    changesIn2755: true,
+    pins: 'Enter on `❯ Submit` does NOT submit: it opens a Review page — the answers, then `❯ 1. Submit` / `  2. Cancel` and `← to go back and edit`. The generic parser used to read that two-option list as the prompt with the default on `Submit`, so answering a default COMMITTED instead of choosing. #2755 recognises the page and declines it, which takes it away from Auto-Yes entirely',
+    changedIn2755: true,
   },
   {
     frame: 'review-page-unanswered-warning',
@@ -313,72 +299,82 @@ const EXPECTATIONS: readonly Expectation[] = [
     reason: STATUS_REASON.COMMAND_CODE_SELECTION_LIST,
     hasActivePrompt: false,
     dialog: 'unsupported',
-    dialogReason: 'numbering-unreadable',
+    dialogReason: 'review-page',
     crop: false,
-    pins: 'the same Review page reached by the UNDOCUMENTED `d`, which ends a multi-select from any row: `⚠ You have not answered all questions` over a `No answer`. `1.` is drawn twice on it — once for the question, once for `Submit` — so the region reading declines the numbering. That decline only became reachable once #2753 let the `✔ Cleanup | ● Review` strip count as a strip at all',
-    changesIn2755: false,
+    pins: 'the same Review page reached by the UNDOCUMENTED `d`, which ends a multi-select from any row: `⚠ You have not answered all questions` over a `No answer`. It declined for a numbering reason before (`1.` is drawn twice); #2755 names it for what it is, and the send arm refuses to confirm a page carrying this warning',
+    changedIn2755: true,
   },
 
-  // ---- the `❯` has left the list: the turn is published as finished -------
+  // ---- the `❯` has left the list: no longer a finished turn ---------------
+  // All six published `ready` / `input_prompt` before #2755 — a live question
+  // read as a finished turn, `commandmate wait` exiting 0 on every one. The
+  // condition is the cursor's POSITION, not the word it rests on, which is why
+  // `Next` and `notes:` are in this group alongside `Submit`.
   {
     frame: 'multiselect-cursor-on-submit',
-    status: 'ready',
-    reason: STATUS_REASON.INPUT_PROMPT,
+    status: 'waiting',
+    reason: STATUS_REASON.COMMAND_CODE_SELECTION_LIST,
     hasActivePrompt: false,
-    dialog: 'none',
-    crop: false,
-    pins: 'THE frame #2754 was raised for: `❯ Submit` — U+276F, one space, the word, no number and nothing else on the row. The option list has no cursor left, so the composer check answers on `❯ Submit` itself',
-    changesIn2755: true,
+    dialog: 'unsupported',
+    dialogReason: 'cursor-outside-options',
+    crop: true,
+    pins: 'THE frame #2754 was raised for: `❯ Submit` — U+276F, one space, the word, no number and nothing else on the row. The option list has no cursor left, and before #2755 the composer check answered on `❯ Submit` itself',
+    changedIn2755: true,
   },
   {
     frame: 'multiselect-cursor-on-submit-no-footer',
-    status: 'ready',
-    reason: STATUS_REASON.INPUT_PROMPT,
+    status: 'waiting',
+    reason: STATUS_REASON.COMMAND_CODE_SELECTION_LIST,
     hasActivePrompt: false,
-    dialog: 'none',
-    crop: false,
-    pins: 'the same `❯ Submit` on a ONE-question screen, where 1.54.1 draws no footer either. The worst shape on the tool: no footer, no `✔`, no cursor in the list, and a `ready` verdict',
-    changesIn2755: true,
+    dialog: 'unsupported',
+    dialogReason: 'cursor-outside-options',
+    crop: true,
+    pins: 'the same `❯ Submit` on a ONE-question screen, where 1.54.1 draws no footer either. The worst shape on the tool, and the reason the footer is not used as evidence that this screen is up',
+    changedIn2755: true,
   },
   {
     frame: 'multiselect-up-from-option-1-lands-on-submit',
-    status: 'ready',
-    reason: STATUS_REASON.INPUT_PROMPT,
+    status: 'waiting',
+    reason: STATUS_REASON.COMMAND_CODE_SELECTION_LIST,
     hasActivePrompt: false,
-    dialog: 'none',
-    crop: false,
-    pins: 'one `↑` from option 1 jumps straight to `❯ Submit`, skipping the free-text row — the shortest deterministic route to the confirm, and a third `ready` frame',
-    changesIn2755: true,
+    dialog: 'unsupported',
+    dialogReason: 'cursor-outside-options',
+    crop: true,
+    pins: 'one `↑` from option 1 jumps straight to `❯ Submit`, skipping the free-text row — the shortest deterministic route to the confirm, and a third frame that used to read `ready`',
+    changedIn2755: true,
   },
   {
     frame: 'multiselect-cursor-on-next',
-    status: 'ready',
-    reason: STATUS_REASON.INPUT_PROMPT,
+    status: 'waiting',
+    reason: STATUS_REASON.COMMAND_CODE_SELECTION_LIST,
     hasActivePrompt: false,
-    dialog: 'none',
-    crop: false,
-    pins: '`❯ Next` — the same row on a question that is not the last one. The false completion is about the cursor leaving the list, not about the word `Submit`',
-    changesIn2755: true,
+    dialog: 'unsupported',
+    dialogReason: 'cursor-outside-options',
+    crop: true,
+    pins: '`❯ Next` — the same row on a question that is not the last one. Proof that the false completion was about the cursor leaving the list and not about the word `Submit`, which is what #2755 generalised the condition to',
+    changedIn2755: true,
   },
   {
     frame: 'multiselect-notes-row-open',
-    status: 'ready',
-    reason: STATUS_REASON.INPUT_PROMPT,
+    status: 'waiting',
+    reason: STATUS_REASON.COMMAND_CODE_SELECTION_LIST,
     hasActivePrompt: false,
-    dialog: 'none',
-    crop: false,
-    pins: '`n` opened `❯ notes: Add notes on this design…` between the free-text row and `Submit`. The question is still up, the cursor has left the list, and the turn reads as finished — a false completion nobody had written down before this Issue',
-    changesIn2755: true,
+    dialog: 'unsupported',
+    dialogReason: 'cursor-outside-options',
+    crop: true,
+    pins: '`n` opened `❯ notes: Add notes on this design…` between the free-text row and `Submit`. The question is still up and the cursor has left the list — a third label for the same condition, and the one that makes a word list untenable',
+    changedIn2755: true,
   },
   {
     frame: 'multiselect-submit-row-space-ticked-option-1',
-    status: 'ready',
-    reason: STATUS_REASON.INPUT_PROMPT,
+    status: 'waiting',
+    reason: STATUS_REASON.COMMAND_CODE_SELECTION_LIST,
     hasActivePrompt: false,
-    dialog: 'none',
-    crop: false,
-    pins: 'one `Space` sent with the `❯` resting on `Submit` ticked OPTION 1 — a row the cursor is nowhere near. The visible cursor does not say which row `Space` will hit, which is why #2755 must not send it',
-    changesIn2755: true,
+    dialog: 'unsupported',
+    dialogReason: 'cursor-outside-options',
+    crop: true,
+    pins: 'one `Space` sent with the `❯` resting on `Submit` ticked OPTION 1 — a row the cursor is nowhere near. The visible cursor does not say which row `Space` will hit, which is why #2755 never sends it',
+    changedIn2755: true,
   },
 
   // ---- the question is genuinely gone --------------------------------------
@@ -389,8 +385,8 @@ const EXPECTATIONS: readonly Expectation[] = [
     hasActivePrompt: false,
     dialog: 'none',
     crop: false,
-    pins: 'one `Esc` on an option row took the whole tool call down — `└ User declined to answer questions` and a fresh composer. `ready` is CORRECT here, and that is what says the six `ready` rows above are not',
-    changesIn2755: false,
+    pins: 'one `Esc` on an option row took the whole tool call down — `└ User declined to answer questions` and a fresh composer. `ready` is CORRECT here, and that is what says the six rows above were not',
+    changedIn2755: false,
   },
   {
     frame: 'not-applicable-chat-disposition',
@@ -400,7 +396,7 @@ const EXPECTATIONS: readonly Expectation[] = [
     dialog: 'none',
     crop: false,
     pins: 'one `c` closed the dialog with the answers given so far — `└ User wants to discuss the questions instead of answering`. `ready` is correct here too, and the key that got there is a bare letter with no confirmation',
-    changesIn2755: false,
+    changedIn2755: false,
   },
   {
     frame: 'not-applicable-cancelled-from-notes-row',
@@ -410,7 +406,7 @@ const EXPECTATIONS: readonly Expectation[] = [
     dialog: 'none',
     crop: false,
     pins: 'one `Esc` sent with the `notes:` input open took the whole tool call down, not just the notes row. Caught mid-turn, so this one reads `running` — a correct verdict, and the record of a key that removed a question while it was being measured',
-    changesIn2755: false,
+    changedIn2755: false,
   },
 ];
 
@@ -531,22 +527,19 @@ describe('[#2754] what the chain publishes for each 1.54.1 frame TODAY', () => {
       if (readCommandCodeQuestionDialog(raw).kind !== 'none') recognised.push(name);
     }
 
-    // Twelve frames carry an answered tab, and the ones still holding their
-    // cursor in the list are read.
+    // Twelve frames carry an answered tab, and every one of them is recognised.
     expect(withTick.length).toBe(12);
     const tickedAndDeclined = withTick.filter(
       (name) => readCommandCodeQuestionDialog(frame(name)).kind === 'none',
     );
-    expect(tickedAndDeclined.sort()).toEqual([
-      'multiselect-cursor-on-submit',
-      'multiselect-notes-row-open',
-      'review-page-submit-cancel',
-    ]);
+    expect(tickedAndDeclined).toEqual([]);
 
-    // The condition that is left, stated both ways: every declined question
-    // screen has its `❯` off the option list, and every recognised one has it
-    // on. `cursorRowOf` reads the LAST `❯` row, which on this screen is the
-    // cursor (the composer's own `❯` is not drawn while a question is up).
+    // The condition #2755 replaced it with, stated both ways: a frame is
+    // recognised exactly when the question UI is on it, and the `❯` being off
+    // the option list is now a PROPERTY of a recognised frame rather than a
+    // reason to decline one. `cursorRowOf` reads the LAST `❯` row, which on
+    // this screen is the cursor (the composer's own `❯` is not drawn while a
+    // question is up).
     const cursorRowOf = (raw: string): string | undefined =>
       stripAnsi(raw)
         .split('\n')
@@ -555,30 +548,36 @@ describe('[#2754] what the chain publishes for each 1.54.1 frame TODAY', () => {
         .pop();
     const isOptionRow = (row: string | undefined): boolean => /^❯\s+\d+\.\s/.test(row ?? '');
 
-    for (const name of recognised) {
-      expect(isOptionRow(cursorRowOf(frame(name))), `${name} has no cursor in the list`).toBe(true);
+    // Read in full ⇔ the cursor is on a numbered row. The frames where it is
+    // not are recognised and declined with `cursor-outside-options`, which is
+    // the whole of #2755 §8 in one assertion.
+    for (const { frame: name, dialog, dialogReason } of EXPECTATIONS) {
+      if (dialog === 'prompt') {
+        expect(isOptionRow(cursorRowOf(frame(name))), `${name} has no cursor in the list`).toBe(true);
+      }
+      if (dialogReason === 'cursor-outside-options') {
+        expect(isOptionRow(cursorRowOf(frame(name))), `${name} has a cursor in the list`).toBe(false);
+      }
     }
-    expect(recognised).toHaveLength(16);
 
-    // Sixteen frames are RECOGNISED as this screen; fifteen are also READ by the
-    // region reading. The odd one out is `review-page-unanswered-warning`: its
-    // `❯ 1. Submit` is a cursor on a numbered row, but the page draws `1.`
-    // twice, so `readCommandCodeQuestionRegion` declines the numbering while
-    // `hasCommandCodeQuestionChrome` still says this is the question screen.
-    // That gap is the whole point of #2522's `unsupported` verdict, and it is
-    // why the crop sweep in `dialog-frame-2326.test.ts` lists fifteen and not
-    // sixteen of this directory's frames.
+    // Twenty-three frames are RECOGNISED as this screen — everything but the
+    // three where the question is genuinely gone. Twenty-one are also CROPPED;
+    // the two that are not are the review pages, which have no option list to
+    // crop to (`readCommandCodeQuestionRegion` declines their doubled `1.`)
+    // and are recognised by their own reading instead.
+    expect(recognised).toHaveLength(23);
     const cropped = EXPECTATIONS.filter(
       (e) => extractCommandCodeSelectionListFrame(frame(e.frame)) !== null,
     ).map((e) => e.frame);
-    expect(cropped).toHaveLength(15);
-    expect(recognised.filter((name) => !cropped.includes(name))).toEqual([
+    expect(cropped).toHaveLength(21);
+    expect(recognised.filter((name) => !cropped.includes(name)).sort()).toEqual([
+      'review-page-submit-cancel',
       'review-page-unanswered-warning',
     ]);
   });
 });
 
-describe('[#2754] what #2753 closed, and the three failures #2755 still has to', () => {
+describe('[#2755] what this directory publishes now that the rules were re-read', () => {
   beforeEach(() => {
     process.env[IDLE_EVIDENCE_ENV_VAR] = 'command-code=enforce';
   });
@@ -586,15 +585,15 @@ describe('[#2754] what #2753 closed, and the three failures #2755 still has to',
     delete process.env[IDLE_EVIDENCE_ENV_VAR];
   });
 
-  it('calls six live question screens finished turns', () => {
-    // The `wait` consequence, said once rather than read out of the table: on
-    // each of these a human is looking at an unanswered question and
-    // `commandmate wait` exits 0.
-    const falselyFinished = EXPECTATIONS.filter((e) => e.status === 'ready' && e.changesIn2755).map(
-      (e) => e.frame,
-    );
+  it('no longer calls six live question screens finished turns', () => {
+    // The `wait` consequence, said once rather than read out of the table. On
+    // each of these a human is looking at an unanswered question, and until
+    // #2755 `commandmate wait` exited 0 on every one of them.
+    const cursorOutside = EXPECTATIONS.filter(
+      (e) => e.dialogReason === 'cursor-outside-options',
+    ).map((e) => e.frame);
 
-    expect(falselyFinished.sort()).toEqual([
+    expect(cursorOutside.sort()).toEqual([
       'multiselect-cursor-on-next',
       'multiselect-cursor-on-submit',
       'multiselect-cursor-on-submit-no-footer',
@@ -603,25 +602,25 @@ describe('[#2754] what #2753 closed, and the three failures #2755 still has to',
       'multiselect-up-from-option-1-lands-on-submit',
     ]);
 
-    for (const name of falselyFinished) {
+    for (const name of cursorOutside) {
       const result = detectSessionStatus(frame(name), 'command-code');
-      expect(result.status).toBe('ready');
-      expect(result.hasActivePrompt).toBe(false);
+      expect(result.status, name).toBe('waiting');
+      expect(result.reason, name).toBe(STATUS_REASON.COMMAND_CODE_SELECTION_LIST);
+      // Not answerable — a digit is measured to do nothing while the `❯` is off
+      // the list — so there is no payload, and the operator gets the
+      // arrow-driven card instead of a session that looks finished.
+      expect(result.hasActivePrompt, name).toBe(false);
+      expect(result.promptDetection?.promptData, name).toBeUndefined();
     }
   });
 
-  it('no longer hands a checkbox list to the single-select answer path', () => {
-    // This case used to pin the defect; #2753 closed it, so it pins the fix.
-    // `unsupported-multi-select-checkboxes` (#2522) states that a digit TOGGLES
-    // a box, so a single-select payload would report an answer that ticked
-    // something and stopped. On 1.54.1 the guard was skipped whenever a tab
-    // carried a `✔`, and the labels arrived with the box still attached
-    // (`[ ] calc.js`) — the reported "cannot pick more than one".
-    //
-    // The regression this now watches for is the box ever reaching a payload
-    // again, from ANY frame in the directory. `✔` on a strip is not what the
-    // assertion keys on, because the next build may mark an answered tab some
-    // other way; a `[ ]` or `[✔]` inside an option label is the defect itself.
+  it('reads every checkbox screen as a multi-select payload, box off the label', () => {
+    // The inversion of #2754's `no longer hands a checkbox list to the
+    // single-select answer path`. That case pinned the DECLINE #2753 restored;
+    // this one pins the reading #2755 replaced it with, and keeps the half that
+    // still matters: a `[ ]` or `[✔]` must never reach a payload, from any
+    // frame in the directory.
+    const multiSelect: string[] = [];
     for (const { frame: name } of EXPECTATIONS) {
       const data = detectSessionStatus(frame(name), 'command-code').promptDetection?.promptData;
       if (!isMultipleChoicePrompt(data)) continue;
@@ -630,53 +629,77 @@ describe('[#2754] what #2753 closed, and the three failures #2755 still has to',
           /^\[[ ✔x]\]/,
         );
       }
+      if (data.multiSelect === true) multiSelect.push(name);
     }
+    expect(multiSelect).toHaveLength(13);
 
-    // And the frame the bug was reported from answers the fallback instead.
-    const reading = readCommandCodeQuestionDialog(frame('multiselect-initial'));
-    expect(reading.kind).toBe('unsupported');
-    if (reading.kind === 'unsupported') expect(reading.reason).toBe('multi-select');
-    expect(detectSessionStatus(frame('multiselect-initial'), 'command-code').hasActivePrompt).toBe(
-      false,
-    );
-  });
-
-  it('still makes the default answer a SUBMIT on the review page', () => {
-    // The same defect one screen later, and the one #2753 did not reach: the
-    // Review page is a real numbered list, so the generic parser answers it with
-    // a two-option `multiple_choice` whose default is `Submit`. Answering that
-    // default does not pick anything — it COMMITS whatever the human has ticked
-    // so far, from a payload nobody meant to expose. `❯ 1. Submit` is also how
-    // `multiselect-cursor-on-option-2`'s untick used to read: `isDefault` follows
-    // the `❯`, wherever the `❯` happens to be.
-    const result = detectSessionStatus(frame('review-page-submit-cancel'), 'command-code');
-    const data = result.promptDetection?.promptData;
-    expect(result.hasActivePrompt).toBe(true);
+    // And the frame the bug was reported from is answerable, with the state the
+    // pane shows carried as `checked` rather than as text in the label.
+    const reading = readCommandCodeQuestionDialog(frame('multiselect-two-checked'));
+    expect(reading.kind).toBe('prompt');
+    if (reading.kind !== 'prompt') return;
+    const data = reading.prompt.promptData;
     expect(isMultipleChoicePrompt(data)).toBe(true);
     if (!isMultipleChoicePrompt(data)) return;
-
-    expect(data.options.map((o) => o.label)).toEqual(['Submit', 'Cancel']);
-    const chosen = data.options.find((o) => o.isDefault);
-    expect(chosen?.number).toBe(1);
-    expect(chosen?.label).toBe('Submit');
-
-    // The #2521 symptom on the same frame: the question text has swallowed the
-    // transcript rows above the tab strip.
-    expect(data.question).toContain('[User answered questions]');
+    expect(data.multiSelect).toBe(true);
+    expect(data.options.map((o) => o.label)).toEqual([
+      'calc.js Update calc.js.',
+      'README.md Update README.md.',
+      'docs Update the docs directory.',
+      'tests Update the tests.',
+      'Type something...',
+    ]);
+    expect(data.options.filter((o) => o.checked === true).map((o) => o.number)).toEqual([2, 4]);
+    // The `❯` is still option 1 — a digit toggles without moving the cursor —
+    // and that is `isDefault`, which on this screen means "the row a key would
+    // toggle" and not "the answer".
+    expect(data.options.find((o) => o.isDefault)?.number).toBe(1);
   });
 
-  it('folds the new 1.54.1 footer into the last option of both frames it CAN read', () => {
-    // The failure that is easiest to miss, because the reading "works": 1.53.0
-    // drew nothing under the last option, so the tail walk had nothing to fold.
-    // 1.54.1 draws the hint bar there, and it lands in the label — with
-    // `requiresTextInput` still set, so the row is offered as the free-text one.
-    // #2753 made the second of these readable and inherited the same fold.
-    const folded = [
-      ['singleselect-initial-unanswered-tabs', 4, 'Type something... '],
-      ['singleselect-answered-tabs', 3, 'Type something... '],
+  it('no longer makes the default answer a SUBMIT on the review page', () => {
+    // The defect one screen later, and the one #2753 did not reach: the Review
+    // page is a real numbered list, so the generic parser answered it with a
+    // two-option `multiple_choice` whose default was `Submit`. Answering that
+    // default did not pick anything — it COMMITTED whatever the human had
+    // ticked, from a payload nobody meant to expose, with Auto-Yes free to fire
+    // on it. #2755 recognises the page and declines it.
+    for (const name of ['review-page-submit-cancel', 'review-page-unanswered-warning']) {
+      const result = detectSessionStatus(frame(name), 'command-code');
+      expect(result.hasActivePrompt, name).toBe(false);
+      expect(result.promptDetection?.promptData, name).toBeUndefined();
+
+      const reading = readCommandCodeQuestionDialog(frame(name));
+      expect(reading.kind, name).toBe('unsupported');
+      if (reading.kind === 'unsupported') expect(reading.reason, name).toBe('review-page');
+    }
+
+    // Read as what they are, including the half that must never be taken for an
+    // answered page.
+    expect(readCommandCodeReviewPage(frame('review-page-submit-cancel'))).toEqual({
+      hasUnansweredWarning: false,
+      cursorOnSubmit: true,
+    });
+    expect(readCommandCodeReviewPage(frame('review-page-unanswered-warning'))).toEqual({
+      hasUnansweredWarning: true,
+      cursorOnSubmit: true,
+    });
+    // Not a review page: the question screens it sits between.
+    expect(readCommandCodeReviewPage(frame('multiselect-cursor-on-submit'))).toBeNull();
+    expect(readCommandCodeReviewPage(frame('singleselect-answered-tabs'))).toBeNull();
+  });
+
+  it('no longer folds the new 1.54.1 footer into the last option', () => {
+    // The failure that was easiest to miss, because the reading "worked":
+    // 1.53.0 drew nothing under the last option, so the tail walk had nothing
+    // to fold. 1.54.1 draws the hint bar there — and, on a multi-select, the
+    // `Submit` row above it — and both landed in the label.
+    const unfolded = [
+      ['singleselect-initial-unanswered-tabs', 4, 'Type something...'],
+      ['singleselect-answered-tabs', 3, 'Type something...'],
+      ['multiselect-initial', 5, 'Type something...'],
     ] as const;
 
-    for (const [name, count, head] of folded) {
+    for (const [name, count, label] of unfolded) {
       const reading = readCommandCodeQuestionDialog(frame(name));
       expect(reading.kind, name).toBe('prompt');
       if (reading.kind !== 'prompt') continue;
@@ -687,20 +710,33 @@ describe('[#2754] what #2753 closed, and the three failures #2755 still has to',
 
       expect(data.options, name).toHaveLength(count);
       const last = data.options[count - 1];
-      expect(last?.label, name).toBe(
-        `${head}Enter to select | Arrow keys to navigate | 1-9 quick select | n notes | c chat | Esc to cancel`,
-      );
+      expect(last?.label, name).toBe(label);
+      expect(last?.label, name).not.toContain('Submit');
+      expect(last?.label, name).not.toContain('Enter to select');
+      // Still the free-text row, which is the flag the fold used to carry along
+      // with the footer.
       expect(last?.requiresTextInput, name).toBe(true);
     }
   });
 
-  it('leaves 1.53.0-shaped multi-selects on the fallback they were given', () => {
-    // The half that says neither #2754 nor #2753 widened anything: a checkbox
-    // screen with no answered tab at all is declined exactly as #2521 / #2522
-    // wrote it. #2753 changed which strips count as strips, not what a checkbox
-    // list is worth once one is found.
+  it('still declines a checkbox list with no confirm row', () => {
+    // The half of #2522's decline that #2755 kept. `tabs-single-question` DOES
+    // draw a `Submit`, so it is read; the 1.53.0-shaped synthetic frame in the
+    // #2522 directory draws none, and without one nothing measured says how the
+    // question is committed — ticking boxes there would leave the operator
+    // exactly where #2522 found them.
     const reading = readCommandCodeQuestionDialog(frame('tabs-single-question'));
-    expect(reading.kind).toBe('unsupported');
-    if (reading.kind === 'unsupported') expect(reading.reason).toBe('multi-select');
+    expect(reading.kind).toBe('prompt');
+
+    const noConfirmRow = readFileSync(
+      path.resolve(
+        __dirname,
+        '../../../../fixtures/command-code-askuserquestion-2522/unsupported-multi-select-checkboxes.txt',
+      ),
+      'utf8',
+    );
+    const declined = readCommandCodeQuestionDialog(noConfirmRow);
+    expect(declined.kind).toBe('unsupported');
+    if (declined.kind === 'unsupported') expect(declined.reason).toBe('multi-select');
   });
 });
