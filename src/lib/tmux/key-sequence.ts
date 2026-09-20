@@ -58,6 +58,29 @@
 import { isKeySequenceKeyName, type KeySequence } from '../../types/cli-tool-contracts';
 
 /**
+ * Make `text` survive tmux's own reading of a `send-keys` argument (Issue #2769).
+ *
+ * tmux treats a `;` at the END of an argument as its command separator — even
+ * under `-l`, even after `--`, even though `execFile` never involved a shell —
+ * and drops it; `\;` is how it is told the semicolon is text. Measured on
+ * tmux 3.5a against a raw pty:
+ *
+ *     'a;'   -> a      (the `;` is gone, rc 0)      ';'   -> nothing at all
+ *     'a\;'  -> a;     (one backslash consumed)     'a;;' -> a;
+ *     'a;b'  -> a;b    (only a TRAILING `;` counts)
+ *
+ * One rule covers every case: when the text ends in `;`, put one backslash in
+ * front of that last `;`. tmux removes exactly that backslash, so `a;` arrives
+ * as `a;` and a body that really ends in `\;` arrives as `\;` too.
+ *
+ * @param text - Text about to be placed in a `send-keys` argv entry
+ * @returns The same text, escaped only if its last character is `;`
+ */
+export function escapeTrailingSemicolon(text: string): string {
+  return text.endsWith(';') ? `${text.slice(0, -1)}\\;` : text;
+}
+
+/**
  * The `tmux` arguments that send one step to a pane.
  *
  * @param target - An exact tmux target, i.e. `exactTarget(sessionName)`
@@ -71,7 +94,10 @@ export function keySequenceArgs(target: string, step: KeySequence): string[] {
     // `-l` stops the key-table lookup; `--` stops the getopt parse. Both are
     // required: without `-l` a body of `Escape` is the ESC key, and without
     // `--` a body of `-l` is consumed as a flag and nothing is sent at all.
-    return ['send-keys', '-t', target, '-l', '--', step.text];
+    //
+    // Neither protects a TRAILING `;`, which tmux takes for its command
+    // separator and drops — see {@link escapeTrailingSemicolon}.
+    return ['send-keys', '-t', target, '-l', '--', escapeTrailingSemicolon(step.text)];
   }
   if (!isKeySequenceKeyName(step.name)) {
     throw new Error(`Invalid key sequence key name: ${step.name}`);
