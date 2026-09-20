@@ -629,6 +629,11 @@ const ALLOWED_SPECIAL_KEYS = new Set([
   // from user-controlled text.
   'C-x', 'C-p', 'C-t',
   'a', 'l', 'n', 't', 'm', 'g', 'u', 'r', 'c',
+  // Issue #2760: Command Code's plan review is approved with ctrl+a and with
+  // nothing else. Deliverable for every session, declared by Command Code alone
+  // (`COMMAND_CODE_NAVIGATION_KEY_VALUES`), so the route answers 400 for every
+  // other tool — the same arrangement as `s` above.
+  'C-a',
 ]);
 
 /**
