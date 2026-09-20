@@ -266,6 +266,22 @@ describe('[#2326] the reading fires on Command Code frames and no others', () =>
     // `not-applicable-*` frames — an ordinary numbered answer, the Review tab, an
     // answered question under a fresh composer — are all uncropped, which is the
     // half that says #2522 widened nothing.
+    //
+    // Issue #2754 added twenty-six live 1.54.1 captures and the sweep grew by
+    // FIFTEEN of them — every frame whose `❯` is still on an option row. The
+    // eleven that stay out are the ones where the cursor has LEFT the list
+    // (`❯ Submit`, `❯ Next`, `❯ notes:`), the two frames taken after the question
+    // was cancelled, and the review page, whose `1.` is drawn twice.
+    //
+    // Eight of those fifteen only joined once #2753 landed. Measured before it,
+    // the tab strip of a multi-question call failed the cell test as soon as one
+    // question was answered — `✔` (U+2714) was in neither marker family — so
+    // `multiselect-initial`, `multiselect-two-checked`, `multiselect-cursor-on-
+    // option-2`, `multiselect-space-untoggled-cursor-row`, the three free-text
+    // frames and `singleselect-answered-tabs` fell through to the generic parser
+    // instead. #2753 added the family; these eight are that fix, swept. See the
+    // directory's README and
+    // `tests/unit/detection/tools/command-code/askuserquestion-1541-2754.test.ts`.
     const cropped = everyCapture()
       .filter((file) => extractCommandCodeSelectionListFrame(fs.readFileSync(file, 'utf8')) !== null)
       .map((file) => path.relative(FIXTURE_ROOT, file));
@@ -289,6 +305,21 @@ describe('[#2326] the reading fires on Command Code frames and no others', () =>
       'command-code-askuserquestion-2522/unsupported-multi-select-checkboxes.txt',
       'command-code-askuserquestion-2522/unsupported-region-too-tall.txt',
       'command-code-askuserquestion-2753/multiselect-answered-tabs.txt',
+      'command-code-askuserquestion-2754/multiselect-cursor-on-option-1-after-nav.txt',
+      'command-code-askuserquestion-2754/multiselect-cursor-on-option-2.txt',
+      'command-code-askuserquestion-2754/multiselect-cursor-on-option-3-nothing-checked.txt',
+      'command-code-askuserquestion-2754/multiselect-enter-toggled-option-1.txt',
+      'command-code-askuserquestion-2754/multiselect-free-text-digit-appended.txt',
+      'command-code-askuserquestion-2754/multiselect-free-text-focused.txt',
+      'command-code-askuserquestion-2754/multiselect-free-text-typed.txt',
+      'command-code-askuserquestion-2754/multiselect-initial.txt',
+      'command-code-askuserquestion-2754/multiselect-next-row-not-last-question.txt',
+      'command-code-askuserquestion-2754/multiselect-space-untoggled-cursor-row.txt',
+      'command-code-askuserquestion-2754/multiselect-two-checked.txt',
+      'command-code-askuserquestion-2754/multiselect-up-from-option-1-wraps-to-last.txt',
+      'command-code-askuserquestion-2754/singleselect-answered-tabs.txt',
+      'command-code-askuserquestion-2754/singleselect-initial-unanswered-tabs.txt',
+      'command-code-askuserquestion-2754/tabs-single-question.txt',
     ]);
     // The sweep walks every fixture in the repository, so its runtime grows with
     // the corpus, not with this Issue. It crossed vitest's 5s default on
