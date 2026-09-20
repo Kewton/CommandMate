@@ -6,7 +6,7 @@ description: |
   Reads context from acceptance-context.json and outputs acceptance-result.json.
   Verifies all acceptance criteria are met.
 tools: Read,Write,Bash,Edit,Grep,Glob
-model: opus
+model: inherit
 ---
 
 # Acceptance Test Agent

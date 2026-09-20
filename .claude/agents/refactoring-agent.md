@@ -6,7 +6,7 @@ description: |
   Reads context from refactor-context.json and outputs refactor-result.json.
   Applies SOLID principles and design patterns.
 tools: Read,Write,Bash,Edit,Grep,Glob
-model: opus
+model: inherit
 ---
 
 # Refactoring Agent
