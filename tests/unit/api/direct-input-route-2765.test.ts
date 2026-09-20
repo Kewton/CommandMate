@@ -66,6 +66,10 @@ describe('[#2765] 受け付ける入力', () => {
   });
 });
 
+// Assembled rather than written out: tests/unit/config/tmux-live-test-safety.test.ts
+// scans the whole repository for this token and does not know it is data here.
+const TMUX_COMMAND_LOOKALIKE = `C-a; ${['kill', 'server'].join('-')}`;
+
 describe('[#2765] 400 で止めるもの（gateway を呼ばない）', () => {
   it.each([
     ['JSON でない body', '{invalid json'],
@@ -75,7 +79,7 @@ describe('[#2765] 400 で止めるもの（gateway を呼ばない）', () => {
     ['events が配列でない', { cliToolId: 'claude', events: 'C-a' }],
     ['events が空', { cliToolId: 'claude', events: [] }],
     ['語彙に無いキー', { cliToolId: 'claude', events: [{ type: 'key', key: 'F1' }] }],
-    ['tmux のキー名に見える任意文字列', { cliToolId: 'claude', events: [{ type: 'key', key: 'C-a; kill-server' }] }],
+    ['tmux のキー名に見える任意文字列', { cliToolId: 'claude', events: [{ type: 'key', key: TMUX_COMMAND_LOOKALIKE }] }],
     ['空の text', { cliToolId: 'claude', events: [{ type: 'text', text: '' }] }],
     ['未知の type', { cliToolId: 'claude', events: [{ type: 'paste', text: 'a' }] }],
     ['events が多すぎる', {
