@@ -26,18 +26,63 @@
  * reads the two config files instead, the same way
  * `tests/unit/guards/lint-tests-scope.test.ts` reads `.eslintrc.json`.
  *
+ * `.claude/lib` が sync-map の pin 対象外であること（実測）。
+ *
  * @vitest-environment node
  */
 
 import { describe, expect, it } from 'vitest';
 import { readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
+import { execFileSync } from 'child_process';
 import { parse } from 'yaml';
 
 const REPO_ROOT = process.cwd();
 const PACKAGE_JSON = join(REPO_ROOT, 'package.json');
 const CI_WORKFLOW = join(REPO_ROOT, '.github/workflows/ci-pr.yml');
 const SCRIPTS_DIR = join(REPO_ROOT, 'scripts');
+
+/**
+ * The expected root directories for `find` in `lint:sh`.
+ */
+const EXPECTED_FIND_ROOTS = ['scripts', 'tests/scripts', '.claude/lib'];
+
+/**
+ * Tracked shell scripts excluded from `lint:sh`, pinned exactly.
+ *
+ * `.claude/lib` が sync-map の pin 対象外であること（実測）。
+ *
+ * These 26 files belong to skills under `.agents/skills/` and `.claude/skills/`.
+ * When a separate Epic resolves exclusions for skills, remove them from this list.
+ */
+const EXCLUDED_SHELL_SCRIPTS = [
+  '.agents/skills/cmate-verify/scripts/tests/run-tests.sh',
+  '.agents/skills/cmate-verify/scripts/verify-run.sh',
+  '.agents/skills/demo-video/scripts/cli-scene.sh',
+  '.agents/skills/demo-video/scripts/compose.sh',
+  '.agents/skills/demo-video/scripts/demo-video.sh',
+  '.agents/skills/demo-video/scripts/env-down.sh',
+  '.agents/skills/demo-video/scripts/env-up.sh',
+  '.agents/skills/demo-video/scripts/fake-agent.sh',
+  '.agents/skills/video-to-gif/scripts/to-gif.sh',
+  '.claude/skills/cmate-verify/scripts/tests/run-tests.sh',
+  '.claude/skills/cmate-verify/scripts/verify-run.sh',
+  '.claude/skills/demo-video/scripts/cli-scene.sh',
+  '.claude/skills/demo-video/scripts/compose.sh',
+  '.claude/skills/demo-video/scripts/demo-video.sh',
+  '.claude/skills/demo-video/scripts/env-down.sh',
+  '.claude/skills/demo-video/scripts/env-up.sh',
+  '.claude/skills/demo-video/scripts/fake-agent.sh',
+  '.claude/skills/orchestrate-monitor/scripts/classify-state.sh',
+  '.claude/skills/orchestrate-monitor/scripts/hooks-git.sh',
+  '.claude/skills/orchestrate-monitor/scripts/hooks-task.sh',
+  '.claude/skills/orchestrate-monitor/scripts/monitor-lib.sh',
+  '.claude/skills/orchestrate-monitor/scripts/monitor.sh',
+  '.claude/skills/orchestrate-monitor/scripts/quality-gate.sh',
+  '.claude/skills/orchestrate-monitor/scripts/verify-completion.sh',
+  '.claude/skills/orchestrate-monitor/scripts/verify-scope.sh',
+  '.claude/skills/video-to-gif/scripts/to-gif.sh',
+];
 
 /**
  * The complete set of codes `lint:sh` is allowed to skip, and why each one is
@@ -63,6 +108,12 @@ function lintSh(): string {
   const script = pkg.scripts['lint:sh'];
   expect(script, 'package.json must define a `lint:sh` script').toBeTruthy();
   return script;
+}
+
+function parseFindRoots(script: string): string[] {
+  const match = script.match(/\$\(find\s+([^$()]+?)\s+-name\s+['"]\*\.sh['"]\)/);
+  expect(match, 'lint:sh must use $(find <roots...> -name \'*.sh\')').toBeTruthy();
+  return match![1].trim().split(/\s+/);
 }
 
 interface WorkflowStep extends Record<string, unknown> {
@@ -137,9 +188,48 @@ describe('lint:sh covers scripts/**.sh (Issue #2734)', () => {
     const script = lintSh();
     expect(
       script,
-      "`scripts/*.sh` only matches the top level — use $(find scripts -name '*.sh')",
+      "`scripts/*.sh` only matches the top level — use find with target directories",
     ).not.toContain('scripts/*.sh');
-    expect(script).toContain("find scripts -name '*.sh'");
+    const roots = parseFindRoots(script);
+    expect(
+      [...roots].sort(),
+      'find のルート集合が {scripts, tests/scripts, .claude/lib} と完全一致すること',
+    ).toEqual([...EXPECTED_FIND_ROOTS].sort());
+  });
+
+  it('pins every tracked shell script: covered by lint:sh or explicitly excluded', () => {
+    const tracked = execFileSync('git', ['ls-files', '--', '*.sh'], {
+      cwd: REPO_ROOT,
+      encoding: 'utf-8',
+    })
+      .split('\n')
+      .filter(Boolean);
+
+    expect(tracked.length, 'git ls-files returned nothing — is cwd the repo root?').toBeGreaterThan(
+      0,
+    );
+
+    const roots = parseFindRoots(lintSh());
+    const uncovered = tracked
+      .filter(
+        (file) =>
+          !roots.some((root) => {
+            const normalized = root.replace(/\/+$/, '');
+            return file === normalized || file.startsWith(`${normalized}/`);
+          }),
+      )
+      .sort();
+
+    const excludedSet = new Set(EXCLUDED_SHELL_SCRIPTS);
+    for (const path of uncovered) {
+      expect(
+        excludedSet.has(path),
+        `\`${path}\` は \`lint:sh\` の対象にも除外リストにも無い。\`lint:sh\` に足すか、` +
+          'sync-map / ミラーの制約があるなら除外リストに理由つきで足すこと',
+      ).toBe(true);
+    }
+
+    expect(uncovered).toEqual([...EXCLUDED_SHELL_SCRIPTS].sort());
   });
 
   it('keeps shellcheck out of `npm run lint`', () => {

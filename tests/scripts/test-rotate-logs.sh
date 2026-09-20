@@ -87,18 +87,13 @@ create_file_mb() {
     dd if=/dev/zero of="$filepath" bs=1048576 count="$size_mb" 2>/dev/null
 }
 
-# Helper: create a file of a specific size in bytes
-create_file_bytes() {
-    local filepath="$1"
-    local size_bytes="$2"
-    dd if=/dev/zero of="$filepath" bs=1 count="$size_bytes" 2>/dev/null
-}
-
 # Helper: source the test environment and function
 source_rotate() {
     LOG_FILE="$TEST_LOG_DIR/server.log"
     export LOG_FILE TEST_LOG_DIR
+    # shellcheck source=/dev/null
     source "$TEST_TMPDIR/test-env.sh"
+    # shellcheck source=/dev/null
     source "$TEST_TMPDIR/rotate-func.sh"
 }
 

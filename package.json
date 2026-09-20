@@ -45,7 +45,7 @@
     "prepublishOnly": "npm run build:all",
     "start": "NODE_ENV=production node dist/server/server.js",
     "lint": "eslint . --ext .js,.jsx,.ts,.tsx,.mjs,.cjs",
-    "lint:sh": "shellcheck -x -P scripts --severity=style --exclude=SC2086,SC2317,SC2116 $(find scripts -name '*.sh')",
+    "lint:sh": "shellcheck -x -P scripts --severity=style --exclude=SC2086,SC2317,SC2116 $(find scripts tests/scripts .claude/lib -name '*.sh')",
     "check:tracking": "./scripts/check-commandmate-tracking.sh",
     "check:detector-freshness": "tsx scripts/check-detector-freshness.ts",
     "test": "NODE_ENV=test vitest",
