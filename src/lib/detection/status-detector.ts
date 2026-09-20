@@ -137,6 +137,8 @@ export const SELECTION_LIST_REASONS = new Set<string>([
   // unclassified floor, whose controls are the answer characters and whose
   // answer characters go into the picker's search box.
   STATUS_REASON.COMMAND_CODE_SELECTION_LIST,
+  // Issue #2761: Command Code's plan review. Arrow-driven, human-only.
+  STATUS_REASON.COMMAND_CODE_PLAN_REVIEW,
   STATUS_REASON.COPILOT_SELECTION_LIST,
   STATUS_REASON.CODEX_SELECTION_LIST,
   // Issue #1017: Codex pager/edit-previous mode also drives NavigationButtons.

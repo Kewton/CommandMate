@@ -193,6 +193,29 @@ export const DISMISSABLE_PANEL_FOOTER_PATTERN =
   /^\s*(?:press|hit|type)?\s*(?:<)?esc(?:ape)?(?:>)?\s+to\s+(?:close|dismiss|exit)\b[\s.·•]*$/im;
 
 /**
+ * The two footer rows of Command Code's plan review overlay (Issue #2761).
+ *
+ * Measured on 1.58.0 at 200x1000. The overlay is a rule, a `Plan review: <title>
+ * · <path> · v1` header, the plan with a line-number gutter, a second rule, a
+ * ` REVIEW ` badge and then, verbatim:
+ *
+ *     Approve ctrl+a   executes the plan
+ *     Cancel esc
+ *
+ * BOTH rows, adjacent, because each half alone is weak: `Cancel esc` is two
+ * words any picker might print, and `Approve` is a word an agent writes in a
+ * plan. Multi-line on purpose — it is tested against a joined tail
+ * (`NormalizedFrame.lastLines`, or the tail {@link readSelectionListShape}
+ * builds), never against a single row.
+ *
+ * Swept against every fixture in `tests/fixtures` and
+ * `tests/unit/lib/detection/fixtures` when this was written (300 files): the
+ * only match is the plan review capture itself.
+ */
+export const COMMAND_CODE_PLAN_REVIEW_FOOTER =
+  /^\s*Approve\s+ctrl\+a\b[^\n]*\n\s*Cancel\s+esc\s*$/im;
+
+/**
  * How many rows from the end of the content the dismiss footer is looked for.
  *
  * The same 15-row tail the detection chain hands a tool module as
@@ -925,6 +948,11 @@ export interface SelectionListShape {
   commitsDefaultOnEnter: boolean;
   /** A search/filter box is on the dialog, so a typed character is not a choice. */
   hasFilterInput: boolean;
+  /**
+   * The footer is Command Code's plan review (Issue #2761): `ctrl+a` approves,
+   * and EVERY typed character — digits included — becomes a comment on the plan.
+   */
+  offersPlanApprove: boolean;
 }
 
 /** The reading for a frame that carries no dialog at all. */
@@ -933,6 +961,7 @@ const EMPTY_SHAPE: SelectionListShape = {
   offersSessionScope: false,
   commitsDefaultOnEnter: false,
   hasFilterInput: false,
+  offersPlanApprove: false,
 };
 
 /** The last {@link SELECTION_SHAPE_TAIL_LINE_COUNT} rows that carry content. */
@@ -989,13 +1018,14 @@ export function readSelectionListShape(frame: string | null | undefined): Select
     offersSessionScope: SESSION_SCOPE_FOOTER_PATTERN.test(tail),
     commitsDefaultOnEnter: SET_AS_DEFAULT_FOOTER_PATTERN.test(tail),
     hasFilterInput: FILTER_INPUT_PATTERN.test(tail),
+    offersPlanApprove: COMMAND_CODE_PLAN_REVIEW_FOOTER.test(tail),
   };
 }
 
 /**
  * Whether the card may draw a `1`…`N` row for this shape.
  *
- * Two refusals, both measured rather than defensive:
+ * Three refusals, all measured rather than defensive:
  *
  *  - **a session-scope footer.** On claude's `/model` a number key commits AND
  *    rewrites the global default in one press (probed live on 2.1.260), so a
@@ -1004,7 +1034,14 @@ export function readSelectionListShape(frame: string | null | undefined): Select
  *  - **a filter input.** copilot's `/model` and Command Code's picker put a
  *    focused search box on the dialog, where a `4` is four characters of a
  *    query and not the fourth model.
+ *  - **a plan review.** Every character typed there is a comment on the plan,
+ *    and the plan's own text is full of `1.` `2.` rows.
  */
 export function shouldOfferOptionNumbers(shape: SelectionListShape): boolean {
-  return shape.optionCount > 0 && !shape.offersSessionScope && !shape.hasFilterInput;
+  return (
+    shape.optionCount > 0 &&
+    !shape.offersSessionScope &&
+    !shape.hasFilterInput &&
+    !shape.offersPlanApprove
+  );
 }
