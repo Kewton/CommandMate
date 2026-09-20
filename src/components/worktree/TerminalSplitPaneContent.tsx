@@ -62,7 +62,7 @@ import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from '
 import { X } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
 import type { AgentInstance, CLIToolType } from '@/lib/cli-tools/types';
-import { isAnswerablePromptData } from '@/types/models';
+import { isAnswerablePromptData, type LivePromptData } from '@/types/models';
 import { TerminalSplitPane } from '@/components/worktree/TerminalSplitPane';
 import {
   formatAgentModelLabel,
@@ -130,6 +130,22 @@ import { Tooltip } from '@/components/common/Tooltip';
  * HistoryPane (`history`) under their own domain objects. This drops the direct
  * prop count to 13 (<= 15) with no behavior change.
  */
+/**
+ * Is this a CHECKBOX question? (Issue #2755)
+ *
+ * The one prompt shape Auto-Yes is measured never to answer: a number ticks a
+ * box and the confirm is a separate row, so `resolveBaseAnswer` returns null
+ * for it rather than send half an answer. That makes it the one shape whose
+ * answer UI must stay visible while Auto-Yes is ON — hiding it left a live
+ * question that could be answered neither automatically nor by hand.
+ *
+ * Restated per surface rather than shared, like {@link optionTakesTypedText}
+ * next door: these are 'use client' modules and suites mock them apart.
+ */
+function isMultiSelectPrompt(promptData: LivePromptData | null | undefined): boolean {
+  return promptData?.type === 'multiple_choice' && promptData.multiSelect === true;
+}
+
 export interface TerminalSplitPaneContentProps extends TerminalSplitPaneCoreProps {
   /** Issue #869: instances selectable for this split (excludes other-split instances; includes own). */
   availableInstances: AgentInstance[];
@@ -602,7 +618,14 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   // gates its in-flight bubble on (`live.sessionStatus === 'running'`), so both
   // halves of the split read one verdict.
   const isGenerating = terminal.sessionStatus === 'running';
-  const showPrompt = prompt.visible && !autoYesEnabled;
+  // Issue #2755: Auto-Yes hides the answer panel, because the poller is
+  // supposed to be answering instead — and on a CHECKBOX question it is
+  // measured never to answer at all (`resolveBaseAnswer` returns null: a digit
+  // ticks a box and the confirm is a separate row, so a default is half an
+  // answer). Hiding the panel there left a screen nobody could answer, by hand
+  // or automatically, until the operator turned Auto-Yes off. So a multi-select
+  // prompt is shown whatever Auto-Yes is doing; nothing is auto-sent either way.
+  const showPrompt = prompt.visible && (!autoYesEnabled || isMultiSelectPrompt(prompt.data));
   // Issue #1932: the approval this pane's dialog addresses, when the payload
   // names one. Null for every scraper-read prompt and for every source that
   // publishes no per-decision id, which is what keeps those on the pane path.
