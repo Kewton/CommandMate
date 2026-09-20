@@ -42,6 +42,7 @@ import type {
 import { useRealtime } from '@/hooks/useRealtimeConnection';
 import type { RealtimeEvent, TerminalSnapshotEvent, SessionStatusEvent } from '@/lib/realtime/types';
 import { extractComposerText } from '@/lib/detection/composer-text';
+import { buildRealtimeSnippet } from '@/lib/realtime-snippet';
 import { detectAgentMode } from '@/lib/detection/agent-mode';
 import { AGENT_MODE_UNKNOWN, type AgentMode } from '@/types/cli-tool-contracts';
 import {
@@ -649,7 +650,7 @@ export function useTerminalPanePolling({
       lastSnapshotVersionRef.current = snap.version;
       markPushHealthy();
 
-      const realtimeSnippet = snap.output.split('\n').slice(-100).join('\n');
+      const realtimeSnippet = buildRealtimeSnippet(snap.output);
       applySnapshot({
         fullOutput: snap.output,
         realtimeSnippet,

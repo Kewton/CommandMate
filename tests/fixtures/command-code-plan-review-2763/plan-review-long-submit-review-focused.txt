@@ -1,0 +1,1000 @@
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+Plan review: Full Rewrite Plan — `sample-repo` (exhaustive, review copy) · ~/.commandcode/plans/full-repo-rewrite-exhaustive.md · v1
+Review the plan like a PR — type on any line to comment, enter pins it under the line.
+
+  43   Files that do **not** exist and are therefore proposed as new in §3:
+       `package.json`, `.gitignore`, `.editorconfig`, `.nvmrc`, `LICENSE`, `src/*`,
+       `test/*`, `.github/workflows/ci.yml`.
+  44
+  45   ## 3. Target layout (proposed)
+  46
+  47   ```
+  48   sample-repo/
+  49   ├── package.json          new — ESM, scripts, engines
+  50   ├── .gitignore            new — node_modules, coverage
+  51   ├── .editorconfig         new — 2-space, LF
+  52   ├── .nvmrc                new — pin Node major
+  53   ├── LICENSE               new — MIT
+  54   ├── README.md             rewritten — scope, API table, usage
+  55   ├── calc.js               rewritten — back-compat re-export shim
+  56   ├── src/
+  57   │   ├── index.js          new — barrel, single public entry
+  58   │   ├── arithmetic.js     new — 12 scalar primitives
+  59   │   ├── stats.js          new — 6 aggregate helpers
+  60   │   └── errors.js         new — CalcError / DivisionByZeroError
+  61   ├── test/
+  62   │   ├── arithmetic.test.mjs
+  63   │   ├── stats.test.mjs
+  64   │   ├── exports.test.mjs
+  65   │   └── errors.test.mjs
+  66   └── .github/workflows/ci.yml   new — node --test on push
+  67   ```
+  68
+  69   ### 3.1 Why a `src/` split at all
+  70
+  71   The current `calc.js` is one flat file. Splitting into `arithmetic.js` +
+       `stats.js` + a barrel is the minimum structure that keeps the scalar primitives
+       reviewable while giving aggregate helpers (which have genuinely different edge
+       cases — empty input, non-numeric elements, NaN short-circuiting) their own
+       module and their own test file. A single flat file would also work at this
+       size; the split is chosen because it makes the per-function audit in §7.3
+       tractable by file.
+  72
+  73   ### 3.2 Back-compat shim
+  74
+  75   `calc.js` is kept, not deleted, and rewritten to re-export from `src/index.js`.
+       Rationale: it is the only path any existing consumer could be importing
+       (`./calc.js`), and the probe history shows imports written against `./calc.js`
+       specifically. Deleting it would be a silent breaking change for zero benefit.
+  76
+  77   ## 4. Per-file change plan
+  78
+  79   ### 4.1 `src/errors.js` (new)
+  80   Defines `CalcError extends Error` (with `code`) and `DivisionByZeroError
+       extends CalcError`. Only `divide`, `modulo`, `mean` (empty input) and `median`
+       (empty input) can throw. Note the conflict this creates: the approved `divide`
+       plan deliberately chose **native** zero-division behaviour (`Infinity`/`NaN`,
+       no throw), while this rewrite proposes a throwing `DivisionByZeroError`.
+       Decision for this plan: **`divide` keeps native behaviour** to honour the
+       already-approved decision, and `DivisionByZeroError` is reserved for a future
+       opt-in `divideStrict`. Flagged as an open question in §8 — if the user prefers
+       throwing, `divide` changes and its four approved assertions change with it.
+  81
+  82   ### 4.2 `src/arithmetic.js` (new)
+  83   Twelve scalar functions, all pure, all two-arg except where noted: `add`,
+       `subtract`, `multiply`, `divide`, `modulo`, `power`, `squareRoot` (1 arg),
+       `absolute` (1 arg), `negate` (1 arg), `min`, `max`, `clamp` (3 args), `roundTo`.
+  84
+  85   ### 4.3 `src/stats.js` (new)
+  86   Six aggregate helpers taking variadic or array input: `sum`, `mean`, `median`,
+       `variance`, `standardDeviation`, `product`. Empty-input behaviour must be
+       defined per function before implementation (see §7.5).
+  87
+  88   ### 4.4 `src/index.js` (new)
+  89   Barrel re-exporting everything from `arithmetic.js`, `stats.js` and `errors.js`.
+       No logic. This is the only module `package.json#exports` points at.
+  90
+  91   ### 4.5 `calc.js` (rewritten)
+  92   ```js
+  93   // Back-compat shim. New code should import from ./src/index.js.
+  94   export * from './src/index.js';
+  95   ```
+  96   Imports in the original style (`import { add } from './calc.js'`) keep
+       resolving.
+  97
+  98   ### 4.6 `test/*.test.mjs` (new)
+  99   `node:test` + `node:assert/strict`, `.mjs` extension for the same reason
+       established in the `divide` plan: there is no `"type": "module"` today, and
+       once `package.json` lands it must declare `"type": "module"` so `.js` files are
+       ESM. The `.mjs` extension then keeps tests ESM regardless of that flag — a
+       deliberate belt-and-braces choice.
+ 100
+ 101   ### 4.7 `package.json` (new)
+ 102   `"type": "module"`, `"exports"` pointing at `./src/index.js`, `"scripts": {
+       "test": "node --test" }`, `"engines": { "node": ">=18" }`, `"files"` allowlist,
+       no runtime dependencies, `"private": true` initially.
+ 103
+ 104   ### 4.8 `README.md` (rewritten)
+ 105   Keeps the probe disclaimer as a historical note, then adds: what the library is,
+       install/import snippet, full API table (function, signature, returns, throws,
+       example), a "running the tests" section, and a "project status" note that this
+       is a probe repo.
+ 106
+ 107   ### 4.9 `.commandcode/taste/taste.md`
+ 108   **Unchanged.** Listed in the inventory only for completeness. This plan must not
+       write to it.
+ 109
+ 110   ## 5. Migration strategy
+ 111
+ 112   1. Pre-flight and toolchain decision (§7.1) — blocked today by denied shell
+       access.
+ 113   2. Land `package.json` + config files (no source changes) so tooling exists
+       before code moves.
+ 114   3. Create `src/arithmetic.js` with `add` + `mul` only, mirroring today's
+       behaviour byte-for-byte in output.
+ 115   4. Rewrite `calc.js` as the shim; confirm the export surface assertion still
+       sees `add` and `mul`.
+ 116   5. Move to the new modules in feature order: `subtract` → `divide` → remaining
+       scalars → stats → errors.
+ 117   6. Rewrite `README.md` last, once the API table is factual rather than
+       aspirational.
+ 118   7. Add CI workflow.
+ 119   8. Single commit (the repo has one commit today; keeping the rewrite as one
+       makes the diff reviewable as a unit).
+ 120
+ 121   ## 6. Risks
+ 122
+ 123   | Risk | Impact | Mitigation |
+ 124   | --- | --- | --- |
+ 125   | Node < 18 locally | `node:test` unusable, whole test strategy fails |
+       Pre-flight check; hand-rolled `.mjs` runner fallback |
+ 126   | Shell permission denies commands | No verification can run at all |
+       Documented, not hidden; checklist items marked unrun |
+ 127   | `"type": "module"` changes `.js` parsing | Any CommonJS consumer of `calc.js`
+       breaks | Repo has no CJS consumers; shim + README note |
+ 128   | Scope of 20 functions unasked-for | Over-built library | Explicitly trimmable
+       — see open question §8 |
+ 129   | `divide` semantics conflict | Approved assertions become wrong | Native
+       behaviour kept; conflict flagged, not silently resolved |
+ 130
+ 131   ## 7. Verification checklist (680 numbered items)
+ 132
+ 133   > **Status note:** every command-running item below is *unverified* as of
+       writing. Shell execution was denied. Items are written so they can be executed
+       in order once permission is available. Items 1–45 are pre-flight and must be
+       the first thing run.
+ 134
+ 135   ### 7.1 Toolchain and environment pre-flight — items 1–45
+ 136
+ 137   1. Confirm shell execution is permitted in this session before proceeding.
+ 138   2. Run `node --version` and record the exact version string.
+ 139   3. Confirm the version is >= 18.0.0, the floor for `node:test`.
+ 140   4. If < 18, stop and switch to the hand-rolled runner described in §4.6.
+ 141   5. Confirm version >= 20 for `node --test` glob discovery of `*.test.mjs`
+       without path args.
+ 142   6. Record whether discovery works on the installed version or requires explicit
+       file paths.
+ 143   7. Run `npm --version` and record it.
+ 144   8. Confirm `package.json` creation will not be blocked by an existing file.
+ 145   9. Confirm `npm init` is not needed (manifest written by hand for determinism).
+ 146   10. Confirm no `node_modules` exists today.
+ 147   11. Confirm no lockfile exists today.
+ 148   12. Confirm the working tree is clean or enumerate what is untracked.
+ 149   13. Confirm current branch is `master` and note the probe's default branch
+       mismatch (`main`).
+ 150   14. Confirm git identity is configured before any commit step.
+ 151   15. Confirm `node --test` exists as a flag on the installed version.
+ 152   16. Confirm `node:test` exports `test` on the installed version.
+ 153   17. Confirm `node:assert/strict` resolves on the installed version.
+ 154   18. Confirm ESM import of a `.js` file containing `export` works without a
+       manifest.
+ 155   19. Confirm the same import still works after `"type": "module"` is added.
+ 156   20. Confirm `.mjs` always parses as ESM on the installed version.
+ 157   21. Confirm `--input-type=module` is supported for the one-liner surface check.
+ 158   22. Confirm `process.exitCode` is honoured by `node --test` for CI gating.
+ 159   23. Confirm the exit code is 0 on an all-pass suite.
+ 160   24. Confirm the exit code is non-zero on a failing assertion.
+ 161   25. Confirm output is plain text (no TTY detection issues in this shell).
+ 162   26. Confirm whether colour codes are emitted and disable them if they break
+       parsing.
+ 163   27. Confirm available disk write access to the repo root.
+ 164   28. Confirm write access to `src/` after it is created.
+ 165   29. Confirm write access to `test/` after it is created.
+ 166   30. Confirm write access to `.github/workflows/`.
+ 167   31. Confirm `.commandcode/taste/**` is treated as read-only by this work.
+ 168   32. Confirm no sandbox restriction blocks creating nested directories.
+ 169   33. Confirm the editor target for `.editorconfig` is unknown-but-harmless.
+ 170   34. Confirm line-ending convention on existing `calc.js` before rewriting it.
+ 171   35. Confirm trailing-newline convention on existing `calc.js`.
+ 172   36. Confirm indentation of existing `calc.js` (two spaces).
+ 173   37. Confirm semicolon style of existing `calc.js` (semicolons present).
+ 174   38. Confirm quoting style in `README.md` (double quotes around the disclaimer).
+ 175   39. Record the byte size of `calc.js` for diff accounting.
+ 176   40. Record the byte size of `README.md` for diff accounting.
+ 177   41. Confirm no `.npmignore` exists and that `files` will be used instead.
+ 178   42. Confirm no CI config exists today.
+ 179   43. Confirm no LICENSE exists today.
+ 180   44. Confirm no `.gitignore` exists today (a bare `?? .commandcode/` was
+       observed).
+ 181   45. Decide and record whether `.commandcode/` should be committed or ignored.
+ 182
+ 183   ### 7.2 File inventory and structure — items 46–95
+ 184
+ 185   46. Confirm `calc.js` exists at repo root.
+ 186   47. Confirm `README.md` exists at repo root.
+ 187   48. Confirm `.commandcode/taste/taste.md` exists.
+ 188   49. Confirm `.git/` exists and the repo is initialised.
+ 189   50. Confirm `package.json` does not yet exist.
+ 190   51. Confirm `.gitignore` does not yet exist.
+ 191   52. Confirm `.editorconfig` does not yet exist.
+ 192   53. Confirm `.nvmrc` does not yet exist.
+ 193   54. Confirm `LICENSE` does not yet exist.
+ 194   55. Confirm `src/` does not yet exist.
+ 195   56. Confirm `test/` does not yet exist.
+ 196   57. Confirm `.github/` does not yet exist.
+ 197   58. Confirm no stray `.DS_Store` is present.
+ 198   59. Confirm no editor backup files are present.
+ 199   60. Confirm no `*.log` files are present.
+ 200   61. Confirm the repo contains exactly one commit at start.
+ 201   62. Confirm that commit is `34efaa7` as reported.
+ 202   63. Confirm the commit message is `init`.
+ 203   64. Confirm no tags exist.
+ 204   65. Confirm no remotes are configured (or enumerate them).
+ 205   66. Confirm no submodules exist.
+ 206   67. Confirm no vendored dependencies exist.
+ 207   68. Confirm no generated build output exists.
+ 208   69. Confirm no minified files exist.
+ 209   70. Confirm no binary assets exist.
+ 210   71. Create `src/` and confirm it appears in listing.
+ 211   72. Create `test/` and confirm it appears in listing.
+ 212   73. Create `.github/workflows/` and confirm it appears in listing.
+ 213   74. Confirm `src/index.js` is created before any importer is written.
+ 214   75. Confirm `src/arithmetic.js` naming matches the import paths in tests.
+ 215   76. Confirm `src/stats.js` naming matches the import paths in tests.
+ 216   77. Confirm `src/errors.js` naming matches the import paths in tests.
+ 217   78. Confirm every new file has a trailing newline.
+ 218   79. Confirm every new file is UTF-8 without BOM.
+ 219   80. Confirm every new file uses LF endings.
+ 220   81. Confirm every new file uses two-space indentation.
+ 221   82. Confirm every new file stays under 200 lines (reviewability).
+ 222   83. Confirm no file exceeds a 100-column line width.
+ 223   84. Confirm no file contains tab characters.
+ 224   85. Confirm no file contains trailing whitespace.
+ 225   86. Confirm no file contains `TODO` without an owner or issue reference.
+ 226   87. Confirm no file contains commented-out dead code.
+ 227   88. Confirm `calc.js` remains at root after the rewrite.
+ 228   89. Confirm `src/` is not published unless listed in `files`.
+ 229   90. Confirm `test/` is not published unless listed in `files`.
+ 230   91. Confirm the layout in §3 matches what landed on disk exactly.
+ 231   92. Confirm no extra directory was created beyond §3.
+ 232   93. Confirm no directory was created empty.
+ 233   94. Confirm `git status` shows only intended additions and modifications.
+ 234   95. Confirm no unintended deletion of `calc.js` occurred.
+ 235
+ 236   ### 7.3 Per-function checks — items 96–535
+ 237
+ 238   Template applied to each of the twenty proposed functions. Each function gets 22
+       checks: placement, export shape, arity, return type, canonical value, negative
+       operand, zero operand, fractional operand, float tolerance, `NaN` propagation,
+       `+Infinity`, `-Infinity`, non-numeric string input, `null`/`undefined` input,
+       input non-mutation, no stdout, no module state, JSDoc, unit test, export-surface
+       test, README row.
+ 239
+ 240   #### `add` — items 96–117
+ 241   96. `add` is defined in `src/arithmetic.js`.
+ 242   97. `add` is a named export.
+ 243   98. `src/index.js` re-exports `add`.
+ 244   99. `calc.js` re-exports `add` transitively.
+ 245   100. `add.length` reports 2 parameters.
+ 246   101. Arity matches the README signature table.
+ 247   102. `add(2, 3)` returns `5`.
+ 248   103. `add(-2, -3)` returns `-5`.
+ 249   104. `add(0, 0)` returns `0`.
+ 250   105. `add(0.1, 0.2)` returns `0.30000000000000004` exactly, documented as float
+       behaviour.
+ 251   106. Float-tolerance assertion uses an epsilon helper, not `strictEqual`, where
+       decimals are involved.
+ 252   107. `add(NaN, 1)` returns `NaN`.
+ 253   108. `add(Infinity, 1)` returns `Infinity`.
+ 254   109. `add(-Infinity, 1)` returns `-Infinity`.
+ 255   110. `add('1', 2)` returns `'12'` under native coercion, pinned by a test.
+ 256   111. `add(null, 1)` returns `1` under native coercion, pinned by a test.
+ 257   112. `add` does not mutate its arguments.
+ 258   113. `add` writes nothing to stdout/stderr.
+ 259   114. `add` reads and writes no module-level state.
+ 260   115. `add` carries a JSDoc block with `@param` and `@returns`.
+ 261   116. `add` is covered by `test/arithmetic.test.mjs`.
+ 262   117. `add` appears in the export-surface assertion in `test/exports.test.mjs`
+       and in the README API table.
+ 263
+ 264   #### `subtract` — items 118–139
+ 265   118. `subtract` is defined in `src/arithmetic.js`.
+ 266   119. `subtract` is a named export.
+ 267   120. `src/index.js` re-exports `subtract`.
+ 268   121. `calc.js` re-exports `subtract` transitively.
+ 269   122. `subtract.length` reports 2 parameters.
+ 270   123. Arity matches the README signature table.
+ 271   124. `subtract(5, 3)` returns `2`.
+ 272   125. `subtract(-5, -3)` returns `-2`.
+ 273   126. `subtract(0, 0)` returns `0`.
+ 274   127. `subtract(0.3, 0.1)` returns `0.19999999999999998` exactly, documented as
+       float behaviour.
+ 275   128. Float-tolerance assertion uses an epsilon helper where decimals are
+       involved.
+ 276   129. `subtract(NaN, 1)` returns `NaN`.
+ 277   130. `subtract(Infinity, 1)` returns `Infinity`.
+ 278   131. `subtract(-Infinity, 1)` returns `-Infinity`.
+ 279   132. `subtract('5', 2)` returns `3` under native coercion, pinned by a test.
+ 280   133. `subtract(null, 1)` returns `-1` under native coercion, pinned by a test.
+ 281   134. `subtract` does not mutate its arguments.
+ 282   135. `subtract` writes nothing to stdout/stderr.
+ 283   136. `subtract` reads and writes no module-level state.
+ 284   137. `subtract` carries a JSDoc block with `@param` and `@returns`.
+ 285   138. `subtract` is covered by `test/arithmetic.test.mjs` and closes the deferred
+       subtract plan.
+ 286   139. `subtract` appears in the export-surface assertion and in the README API
+       table.
+ 287
+ 288   #### `multiply` — items 140–161
+ 289   140. `multiply` is defined in `src/arithmetic.js`.
+ 290   141. `multiply` is a named export.
+ 291   142. `src/index.js` re-exports `multiply` (aliased as `mul`).
+ 292   143. `calc.js` re-exports `multiply` and the `mul` alias transitively.
+ 293   144. `multiply.length` reports 2 parameters.
+ 294   145. Arity matches the README signature table.
+ 295   146. `multiply(6, 7)` returns `42`.
+ 296   147. `multiply(-6, 7)` returns `-42`.
+ 297   148. `multiply(0, 7)` returns `0`.
+ 298   149. `multiply(0.1, 0.2)` returns `0.020000000000000004` exactly, documented as
+       float behaviour.
+ 299   150. Float-tolerance assertion uses an epsilon helper where decimals are
+       involved.
+ 300   151. `multiply(NaN, 1)` returns `NaN`.
+ 301   152. `multiply(Infinity, 1)` returns `Infinity`.
+ 302   153. `multiply(-Infinity, 1)` returns `-Infinity`.
+ 303   154. `multiply('2', 3)` returns `6` under native coercion, pinned by a test.
+ 304   155. `multiply(null, 3)` returns `0` under native coercion, pinned by a test.
+ 305   156. `multiply` does not mutate its arguments.
+ 306   157. `multiply` writes nothing to stdout/stderr.
+ 307   158. `multiply` reads and writes no module-level state.
+ 308   159. `multiply` carries a JSDoc block with `@param` and `@returns`.
+ 309   160. `multiply` is covered by `test/arithmetic.test.mjs`; the legacy `mul` name
+       keeps working.
+ 310   161. `multiply` and `mul` both appear in the export-surface assertion and README
+       table.
+ 311
+ 312   #### `divide` — items 162–183
+ 313   162. `divide` is defined in `src/arithmetic.js`.
+ 314   163. `divide` is a named export.
+ 315   164. `src/index.js` re-exports `divide`.
+ 316   165. `calc.js` re-exports `divide` transitively.
+ 317   166. `divide.length` reports 2 parameters.
+ 318   167. Arity matches the README signature table.
+ 319   168. `divide(6, 3)` returns `2`.
+ 320   169. `divide(-6, 3)` returns `-2`.
+ 321   170. `divide(0, 3)` returns `0`.
+ 322   171. `divide(1, 3)` returns `0.3333333333333333` exactly, documented as float
+       behaviour.
+ 323   172. Float-tolerance assertion uses an epsilon helper where decimals are
+       involved.
+ 324   173. `divide(NaN, 3)` returns `NaN`.
+ 325   174. `divide(1, 0)` returns `Infinity` — native behaviour, per the approved
+       divide plan.
+ 326   175. `divide(-1, 0)` returns `-Infinity` — native behaviour.
+ 327   176. `divide(0, 0)` returns `NaN`, asserted via `Number.isNaN`, not
+       `strictEqual`.
+ 328   177. `divide` does not mutate its arguments.
+ 329   178. `divide` writes nothing to stdout/stderr.
+ 330   179. `divide` reads and writes no module-level state.
+ 331   180. `divide` carries a JSDoc block documenting the deliberate no-throw zero
+       behaviour.
+ 332   181. `divide` is covered by `test/arithmetic.test.mjs` and closes the deferred
+       divide plan.
+ 333   182. `divide` appears in the export-surface assertion and in the README API
+       table.
+ 334   183. Confirm no `DivisionByZeroError` is thrown, per §4.1 decision.
+ 335
+ 336   #### `modulo` — items 184–205
+ 337   184. `modulo` is defined in `src/arithmetic.js`.
+ 338   185. `modulo` is a named export.
+ 339   186. `src/index.js` re-exports `modulo`.
+ 340   187. `calc.js` re-exports `modulo` transitively.
+ 341 ● 188. `modulo.length` reports 2 parameters.
+      ↳ [B
+ 342   189. Arity matches the README signature table.
+ 343   190. `modulo(7, 3)` returns `1`.
+ 344   191. `modulo(-7, 3)` returns `-1` under native remainder semantics, pinned by a
+       test.
+ 345   192. `modulo(0, 3)` returns `0`.
+ 346   193. `modulo(7.5, 2)` returns `1.5`.
+ 347   194. Float-tolerance assertion uses an epsilon helper where decimals are
+       involved.
+ 348   195. `modulo(NaN, 3)` returns `NaN`.
+ 349   196. `modulo(7, 0)` returns `NaN` natively, pinned by a test.
+ 350   197. `modulo(Infinity, 3)` returns `NaN`, pinned by a test.
+ 351   198. Document explicitly whether this is remainder or true modulo, since the two
+       differ for negatives.
+ 352   199. `modulo` does not mutate its arguments.
+ 353   200. `modulo` writes nothing to stdout/stderr.
+ 354   201. `modulo` reads and writes no module-level state.
+ 355   202. `modulo` carries a JSDoc block with `@param` and `@returns`.
+ 356   203. `modulo` is covered by `test/arithmetic.test.mjs`.
+ 357   204. `modulo` appears in the export-surface assertion and in the README API
+       table.
+ 358   205. Confirm the negative-operand semantics in README match the implementation.
+ 359
+ 360   #### `power` — items 206–227
+ 361   206. `power` is defined in `src/arithmetic.js`.
+ 362   207. `power` is a named export.
+ 363   208. `src/index.js` re-exports `power`.
+ 364   209. `calc.js` re-exports `power` transitively.
+ 365   210. `power.length` reports 2 parameters.
+ 366   211. Arity matches the README signature table.
+ 367   212. `power(2, 10)` returns `1024`.
+ 368   213. `power(-2, 3)` returns `-8`.
+ 369   214. `power(0, 0)` returns `1`, pinned as a deliberate choice.
+ 370   215. `power(4, 0.5)` returns `2`.
+ 371   216. Float-tolerance assertion uses an epsilon helper where decimals are
+       involved.
+ 372   217. `power(NaN, 2)` returns `NaN`.
+ 373   218. `power(2, Infinity)` returns `Infinity`, pinned by a test.
+ 374   219. `power(-2, 0.5)` returns `NaN`, pinned by a test.
+ 375   220. `power` does not mutate its arguments.
+ 376   221. `power` writes nothing to stdout/stderr.
+ 377   222. `power` reads and writes no module-level state.
+ 378   223. `power` carries a JSDoc block with `@param` and `@returns`.
+ 379   224. `power` is covered by `test/arithmetic.test.mjs`.
+ 380   225. `power` appears in the export-surface assertion and in the README API
+       table.
+ 381   226. Confirm `**` operator is used rather than legacy `Math.pow` for parity.
+ 382   227. Confirm the `0**0 === 1` choice is documented as intentional.
+ 383
+ 384   #### `squareRoot` — items 228–249
+ 385   228. `squareRoot` is defined in `src/arithmetic.js`.
+ 386   229. `squareRoot` is a named export.
+ 387   230. `src/index.js` re-exports `squareRoot`.
+ 388   231. `calc.js` re-exports `squareRoot` transitively.
+ 389   232. `squareRoot.length` reports 1 parameter.
+ 390   233. Arity matches the README signature table.
+ 391   234. `squareRoot(81)` returns `9`.
+ 392   235. `squareRoot(-1)` returns `NaN`, pinned by a test.
+ 393   236. `squareRoot(0)` returns `0`.
+ 394   237. `squareRoot(2)` returns `1.4142135623730951` exactly, documented as float
+       behaviour.
+ 395   238. Float-tolerance assertion uses an epsilon helper where decimals are
+       involved.
+ 396   239. `squareRoot(NaN)` returns `NaN`.
+ 397   240. `squareRoot(Infinity)` returns `Infinity`.
+ 398   241. `squareRoot(-Infinity)` returns `NaN`, pinned by a test.
+ 399   242. `squareRoot('16')` returns `4` under native coercion, pinned by a test.
+ 400   243. `squareRoot` does not mutate its argument.
+ 401   244. `squareRoot` writes nothing to stdout/stderr.
+ 402   245. `squareRoot` reads and writes no module-level state.
+ 403   246. `squareRoot` carries a JSDoc block with `@param` and `@returns`.
+ 404   247. `squareRoot` is covered by `test/arithmetic.test.mjs`.
+ 405   248. `squareRoot` appears in the export-surface assertion and in the README API
+       table.
+ 406   249. Confirm the negative-input `NaN` contract is stated in the README.
+ 407
+ 408   #### `absolute` — items 250–271
+ 409   250. `absolute` is defined in `src/arithmetic.js`.
+ 410   251. `absolute` is a named export.
+ 411   252. `src/index.js` re-exports `absolute`.
+ 412   253. `calc.js` re-exports `absolute` transitively.
+ 413   254. `absolute.length` reports 1 parameter.
+ 414   255. Arity matches the README signature table.
+ 415   256. `absolute(-5)` returns `5`.
+ 416   257. `absolute(5)` returns `5`.
+ 417   258. `absolute(0)` returns `0`, distinguishing `0` from `-0` if asserted
+       strictly.
+ 418   259. `absolute(-0)` returns `0` — note `Object.is` sees `-0` natively, pinned
+       deliberately.
+ 419   260. Float-tolerance assertion uses an epsilon helper where decimals are
+       involved.
+ 420   261. `absolute(NaN)` returns `NaN`.
+ 421   262. `absolute(Infinity)` returns `Infinity`.
+ 422   263. `absolute(-Infinity)` returns `Infinity`.
+ 423   264. `absolute('-5')` returns `5` under native coercion, pinned by a test.
+ 424   265. `absolute` does not mutate its argument.
+ 425   266. `absolute` writes nothing to stdout/stderr.
+ 426   267. `absolute` reads and writes no module-level state.
+ 427   268. `absolute` carries a JSDoc block with `@param` and `@returns`.
+ 428   269. `absolute` is covered by `test/arithmetic.test.mjs`.
+ 429   270. `absolute` appears in the export-surface assertion and in the README API
+       table.
+ 430   271. Confirm `Math.abs` is used rather than a ternary, for readability.
+ 431
+ 432   #### `negate` — items 272–293
+ 433   272. `negate` is defined in `src/arithmetic.js`.
+ 434   273. `negate` is a named export.
+ 435   274. `src/index.js` re-exports `negate`.
+ 436   275. `calc.js` re-exports `negate` transitively.
+ 437   276. `negate.length` reports 1 parameter.
+ 438   277. Arity matches the README signature table.
+ 439   278. `negate(5)` returns `-5`.
+ 440   279. `negate(-5)` returns `5`.
+ 441   280. `negate(0)` returns `-0` natively — pinned and documented, since this
+       surprises people.
+ 442   281. `negate(0.5)` returns `-0.5`.
+ 443   282. Float-tolerance assertion uses an epsilon helper where decimals are
+       involved.
+ 444   283. `negate(NaN)` returns `NaN`.
+ 445   284. `negate(Infinity)` returns `-Infinity`.
+ 446   285. `negate(-Infinity)` returns `Infinity`.
+ 447   286. `negate('5')` returns `-5` under native coercion, pinned by a test.
+ 448   287. `negate` does not mutate its argument.
+ 449   288. `negate` writes nothing to stdout/stderr.
+ 450   289. `negate` reads and writes no module-level state.
+ 451   290. `negate` carries a JSDoc block with `@param` and `@returns`.
+ 452   291. `negate` is covered by `test/arithmetic.test.mjs`.
+ 453   292. `negate` appears in the export-surface assertion and in the README API
+       table.
+ 454   293. Confirm the `-0` return is documented, not treated as a bug.
+ 455
+ 456   #### `min` — items 294–315
+ 457   294. `min` is defined in `src/arithmetic.js`.
+ 458   295. `min` is a named export.
+ 459   296. `src/index.js` re-exports `min`.
+ 460   297. `calc.js` re-exports `min` transitively.
+ 461   298. `min.length` reports 2 parameters.
+ 462   299. Arity matches the README signature table.
+ 463   300. `min(3, 8)` returns `3`.
+ 464   301. `min(-3, -8)` returns `-8`.
+ 465   302. `min(0, 0)` returns `0`.
+ 466   303. `min(0.1, 0.2)` returns `0.1`.
+ 467   304. Float-tolerance assertion uses an epsilon helper where decimals are
+       involved.
+ 468   305. `min(NaN, 1)` returns `NaN`, pinned by a test.
+ 469   306. `min(Infinity, 1)` returns `1`.
+ 470   307. `min(-Infinity, 1)` returns `-Infinity`.
+ 471   308. `min('3', 8)` returns `3` under native coercion, pinned by a test.
+ 472   309. `min(undefined, 1)` returns `NaN` natively, pinned by a test.
+ 473   310. `min` does not mutate its arguments.
+ 474   311. `min` writes nothing to stdout/stderr.
+ 475   312. `min` reads and writes no module-level state.
+ 476   313. `min` carries a JSDoc block with `@param` and `@returns`.
+ 477   314. `min` is covered by `test/arithmetic.test.mjs`.
+ 478   315. `min` appears in the export-surface assertion and in the README API table.
+ 479
+ 480   #### `max` — items 316–337
+ 481   316. `max` is defined in `src/arithmetic.js`.
+ 482   317. `max` is a named export.
+ 483   318. `src/index.js` re-exports `max`.
+ 484   319. `calc.js` re-exports `max` transitively.
+ 485   320. `max.length` reports 2 parameters.
+ 486   321. Arity matches the README signature table.
+ 487   322. `max(3, 8)` returns `8`.
+ 488   323. `max(-3, -8)` returns `-3`.
+ 489   324. `max(0, 0)` returns `0`.
+ 490   325. `max(0.1, 0.2)` returns `0.2`.
+ 491   326. Float-tolerance assertion uses an epsilon helper where decimals are
+       involved.
+ 492   327. `max(NaN, 1)` returns `NaN`, pinned by a test.
+ 493   328. `max(Infinity, 1)` returns `Infinity`.
+ 494   329. `max(-Infinity, 1)` returns `1`.
+ 495   330. `max('3', 8)` returns `8` under native coercion, pinned by a test.
+ 496   331. `max(undefined, 1)` returns `NaN` natively, pinned by a test.
+ 497   332. `max` does not mutate its arguments.
+ 498   333. `max` writes nothing to stdout/stderr.
+ 499   334. `max` reads and writes no module-level state.
+ 500   335. `max` carries a JSDoc block with `@param` and `@returns`.
+ 501   336. `max` is covered by `test/arithmetic.test.mjs`.
+ 502   337. `max` appears in the export-surface assertion and in the README API table.
+ 503
+ 504   #### `clamp` — items 338–359
+ 505   338. `clamp` is defined in `src/arithmetic.js`.
+ 506   339. `clamp` is a named export.
+ 507   340. `src/index.js` re-exports `clamp`.
+ 508   341. `calc.js` re-exports `clamp` transitively.
+ 509   342. `clamp.length` reports 3 parameters.
+ 510   343. Arity matches the README signature table.
+ 511   344. `clamp(12, 0, 10)` returns `10`.
+ 512   345. `clamp(-5, 0, 10)` returns `0`.
+ 513   346. `clamp(5, 0, 10)` returns `5`.
+ 514   347. `clamp(0.5, 0, 1)` returns `0.5`.
+ 515   348. Float-tolerance assertion uses an epsilon helper where decimals are
+       involved.
+ 516   349. `clamp(NaN, 0, 1)` returns `NaN`, pinned by a test.
+ 517   350. `clamp(Infinity, 0, 1)` returns `1`.
+ 518   351. `clamp(-Infinity, 0, 1)` returns `0`.
+ 519   352. `clamp('12', 0, 10)` returns `10` under coercion, pinned by a test.
+ 520   353. Define and pin behaviour when `min > max` (swap or return `NaN`) — must be
+       chosen explicitly.
+ 521   354. `clamp` does not mutate its arguments.
+ 522   355. `clamp` writes nothing to stdout/stderr.
+ 523   356. `clamp` reads and writes no module-level state.
+ 524   357. `clamp` carries a JSDoc block with `@param` and `@returns`.
+ 525   358. `clamp` is covered by `test/arithmetic.test.mjs`.
+ 526   359. `clamp` appears in the export-surface assertion and in the README API
+       table.
+ 527
+ 528   #### `sum` — items 360–381
+ 529   360. `sum` is defined in `src/stats.js`.
+ 530   361. `sum` is a named export.
+ 531   362. `src/index.js` re-exports `sum`.
+ 532   363. `calc.js` re-exports `sum` transitively.
+ 533   364. `sum.length` reports the declared variadic/array parameter count.
+ 534   365. Arity matches the README signature table.
+ 535   366. `sum([1, 2, 3])` returns `6`.
+ 536   367. `sum([-1, -2, -3])` returns `-6`.
+ 537   368. `sum([])` returns `0` — pinned as the documented empty-input identity.
+ 538   369. `sum([0.1, 0.2])` returns `0.30000000000000004` exactly, documented as
+       float behaviour.
+ 539   370. Float-tolerance assertion uses an epsilon helper where decimals are
+       involved.
+ 540   371. `sum([NaN])` returns `NaN`, pinned by a test.
+ 541   372. `sum([Infinity])` returns `Infinity`.
+ 542   373. `sum([1, -Infinity])` returns `-Infinity`.
+ 543   374. Decide and pin behaviour for non-numeric elements (throw, coerce, or skip).
+ 544   375. `sum` does not mutate the input array.
+ 545   376. `sum` writes nothing to stdout/stderr.
+ 546   377. `sum` reads and writes no module-level state.
+ 547   378. `sum` carries a JSDoc block with `@param` and `@returns`.
+ 548   379. `sum` is covered by `test/stats.test.mjs`.
+ 549   380. `sum` appears in the export-surface assertion and in the README API table.
+ 550   381. Confirm the empty-input contract is tested, not merely documented.
+ 551
+ 552   #### `mean` — items 382–403
+ 553   382. `mean` is defined in `src/stats.js`.
+ 554   383. `mean` is a named export.
+ 555   384. `src/index.js` re-exports `mean`.
+ 556   385. `calc.js` re-exports `mean` transitively.
+ 557   386. `mean.length` reports the declared variadic/array parameter count.
+ 558   387. Arity matches the README signature table.
+ 559   388. `mean([2, 4, 6])` returns `4`.
+ 560   389. `mean([-2, -4, -6])` returns `-4`.
+ 561   390. `mean([])` returns `NaN` or throws — must be chosen explicitly and pinned.
+ 562   391. `mean([1, 2])` returns `1.5`.
+ 563   392. Float-tolerance assertion uses an epsilon helper where decimals are
+       involved.
+ 564   393. `mean([NaN])` returns `NaN`, pinned by a test.
+ 565   394. `mean([Infinity, -Infinity])` returns `NaN`, pinned by a test.
+ 566   395. `mean([Infinity])` returns `Infinity`.
+ 567   396. Decide and pin behaviour for non-numeric elements.
+ 568   397. `mean` does not mutate the input array.
+ 569   398. `mean` writes nothing to stdout/stderr.
+ 570   399. `mean` reads and writes no module-level state.
+ 571   400. `mean` carries a JSDoc block with `@param` and `@returns`.
+ 572   401. `mean` is covered by `test/stats.test.mjs`.
+ 573   402. `mean` appears in the export-surface assertion and in the README API table.
+ 574   403. Confirm empty-input behaviour matches what the README claims.
+ 575
+ 576   #### `median` — items 404–425
+ 577   404. `median` is defined in `src/stats.js`.
+ 578   405. `median` is a named export.
+ 579   406. `src/index.js` re-exports `median`.
+ 580   407. `calc.js` re-exports `median` transitively.
+ 581   408. `median.length` reports the declared variadic/array parameter count.
+ 582   409. Arity matches the README signature table.
+ 583   410. `median([1, 3, 5])` returns `3` — odd-length case.
+ 584   411. `median([1, 2, 3, 4])` returns `2.5` — even-length case, averaged middles.
+ 585   412. `median([])` returns `NaN` or throws — must be chosen explicitly and
+       pinned.
+ 586   413. `median([3, 1, 2])` returns `2` — verifies sorting happens internally.
+ 587   414. Float-tolerance assertion uses an epsilon helper where decimals are
+       involved.
+ 588   415. `median([NaN])` returns `NaN`, pinned by a test.
+ 589   416. Decide and pin `median` behaviour with `Infinity` present.
+ 590   417. Confirm `median` sorts a copy, not the caller's array.
+ 591   418. `median` does not mutate the input array.
+ 592   419. `median` writes nothing to stdout/stderr.
+ 593   420. `median` reads and writes no module-level state.
+ 594   421. `median` carries a JSDoc block with `@param` and `@returns`.
+ 595   422. `median` is covered by `test/stats.test.mjs`.
+ 596   423. `median` appears in the export-surface assertion and in the README API
+       table.
+ 597   424. Confirm the odd/even contract is documented.
+ 598   425. Confirm numeric sort comparator is supplied (default sort is lexicographic
+       on strings, a real trap).
+ 599
+ 600   #### `variance` — items 426–447
+ 601   426. `variance` is defined in `src/stats.js`.
+ 602   427. `variance` is a named export.
+ 603   428. `src/index.js` re-exports `variance`.
+ 604   429. `calc.js` re-exports `variance` transitively.
+ 605   430. `variance.length` reports the declared parameter count.
+ 606   431. Arity matches the README signature table.
+ 607   432. `variance([2, 4, 6])` returns the population value `2.6666666666666665`.
+ 608   433. `variance([2, 4, 6])` under the sample flag returns `4`.
+ 609   434. Decide and document population vs sample as the default.
+ 610   435. `variance([5])` pinned for whichever default is chosen (0 or `NaN`).
+ 611   436. Float-tolerance assertion uses an epsilon helper where decimals are
+       involved.
+ 612   437. `variance([NaN])` returns `NaN`, pinned by a test.
+ 613   438. `variance([])` behaviour chosen explicitly and pinned.
+ 614   439. `variance([Infinity])` returns `NaN` natively, pinned by a test.
+ 615   440. Decide and pin behaviour for non-numeric elements.
+ 616   441. `variance` does not mutate the input array.
+ 617   442. `variance` writes nothing to stdout/stderr.
+ 618   443. `variance` reads and writes no module-level state.
+ 619   444. `variance` carries a JSDoc block documenting the population/sample default.
+ 620   445. `variance` is covered by `test/stats.test.mjs`.
+ 621   446. `variance` appears in the export-surface assertion and in the README API
+       table.
+ 622   447. Confirm the README states the divisor explicitly (n vs n−1).
+ 623
+ 624   #### `standardDeviation` — items 448–469
+ 625   448. `standardDeviation` is defined in `src/stats.js`.
+ 626   449. `standardDeviation` is a named export.
+ 627   450. `src/index.js` re-exports `standardDeviation`.
+ 628   451. `calc.js` re-exports `standardDeviation` transitively.
+ 629   452. `standardDeviation.length` reports the declared parameter count.
+ 630   453. Arity matches the README signature table.
+ 631   454. `standardDeviation([2, 4, 6])` returns the square root of the chosen
+       variance.
+ 632   455. Confirm it delegates to `variance` rather than duplicating the formula.
+ 633   456. `standardDeviation([5])` pinned consistently with `variance([5])`.
+ 634   457. Float-tolerance assertion uses an epsilon helper where decimals are
+       involved.
+ 635   458. `standardDeviation([NaN])` returns `NaN`.
+ 636   459. `standardDeviation([])` behaviour matches `variance([])`.
+ 637   460. `standardDeviation([Infinity])` returns `NaN`.
+ 638   461. Confirm no `NaN`-comparison bug in the implementation.
+ 639   462. `standardDeviation` does not mutate the input array.
+ 640   463. `standardDeviation` writes nothing to stdout/stderr.
+ 641   464. `standardDeviation` reads and writes no module-level state.
+ 642   465. `standardDeviation` carries a JSDoc block with `@param` and `@returns`.
+ 643   466. `standardDeviation` is covered by `test/stats.test.mjs`.
+ 644   467. `standardDeviation` appears in the export-surface assertion and in the
+       README API table.
+ 645   468. Confirm the sample/population flag is forwarded to `variance`.
+ 646   469. Confirm the return is non-negative for all tested inputs.
+ 647
+ 648   #### `product` — items 470–491
+ 649   470. `product` is defined in `src/stats.js`.
+ 650   471. `product` is a named export.
+ 651   472. `src/index.js` re-exports `product`.
+ 652   473. `calc.js` re-exports `product` transitively.
+ 653   474. `product.length` reports the declared parameter count.
+ 654   475. Arity matches the README signature table.
+ 655   476. `product([2, 3, 4])` returns `24`.
+ 656   477. `product([-2, 3])` returns `-6`.
+ 657   478. `product([])` returns `1` — pinned as the documented empty-input identity.
+ 658   479. `product([0, 5])` returns `0`.
+ 659   480. Float-tolerance assertion uses an epsilon helper where decimals are
+       involved.
+ 660   481. `product([NaN, 2])` returns `NaN`, pinned by a test.
+ 661   482. `product([Infinity, 2])` returns `Infinity`.
+ 662   483. `product([Infinity, 0])` returns `NaN` natively, pinned by a test.
+ 663   484. Decide and pin behaviour for non-numeric elements.
+ 664   485. `product` does not mutate the input array.
+ 665   486. `product` writes nothing to stdout/stderr.
+ 666   487. `product` reads and writes no module-level state.
+ 667   488. `product` carries a JSDoc block with `@param` and `@returns`.
+ 668   489. `product` is covered by `test/stats.test.mjs`.
+ 669   490. `product` appears in the export-surface assertion and in the README API
+       table.
+ 670   491. Confirm overflow-to-Infinity behaviour is documented rather than
+       surprising.
+ 671
+ 672   #### Error classes — items 492–535
+ 673   492. `CalcError` is defined in `src/errors.js`.
+ 674   493. `CalcError extends Error`.
+ 675   494. `CalcError` sets `this.name` to `'CalcError'`.
+ 676   495. `CalcError` accepts and stores a `code` property.
+ 677   496. `DivisionByZeroError extends CalcError`.
+ 678   497. `DivisionByZeroError` sets `this.name` correctly.
+ 679   498. `instanceof Error` holds for a thrown `CalcError`.
+ 680   499. `instanceof CalcError` holds for a thrown `DivisionByZeroError`.
+ 681   500. Stack traces survive subclassing (no manual `stack` overwrite).
+ 682   501. `src/index.js` re-exports both classes.
+ 683   502. `calc.js` re-exports both classes transitively.
+ 684   503. Both classes appear in the export-surface assertion.
+ 685   504. Both classes are covered by `test/errors.test.mjs`.
+ 686   505. Confirm neither class is thrown by any currently-exported function.
+ 687   506. Confirm `divide(1, 0)` still returns `Infinity`, not a throw.
+ 688   507. Confirm the classes exist only for future opt-in strict variants.
+ 689   508. Confirm the classes are documented in the README as reserved/unused.
+ 690   509. Confirm no `catch` block anywhere swallows an error silently.
+ 691   510. Confirm no bare `throw 'string'` anywhere in `src/`.
+ 692   511. Confirm every thrown error uses a class from `errors.js`.
+ 693   512. Confirm error messages are lowercase and sentence-free for consistency.
+ 694   513. Confirm error `code` values are SCREAMING_SNAKE_CASE.
+ 695   514. Confirm `code` values are unique across classes.
+ 696   515. Confirm classes are not exported as defaults.
+ 697   516. Confirm no class is instantiated at module load.
+ 698   517. Confirm importing `errors.js` has no side effects.
+ 699   518. Confirm `errors.js` imports nothing.
+ 700   519. Confirm `errors.js` stays under 50 lines.
+ 701   520. Confirm JSDoc exists on both classes.
+ 702   521. Confirm no `Error.captureStackTrace` usage that breaks portability.
+ 703   522. Confirm classes work in both ESM and any CJS consumer path.
+ 704   523. Confirm throwing and catching round-trips the `code`.
+ 705   524. Confirm `message` is preserved when `super()` is called.
+ 706   525. Confirm subclass calls `super(message)` before touching `this`.
+ 707   526. Confirm no `Object.setPrototypeOf` hack is required on Node 18+.
+ 708   527. Confirm no lint rule forbids the subclass pattern used.
+ 709   528. Confirm a `test/errors.test.mjs` file exists.
+ 710   529. Confirm it asserts `instanceof` for both classes.
+ 711   530. Confirm it asserts the `code` round-trip.
+ 712   531. Confirm it asserts `name` for both classes.
+ 713   532. Confirm it passes with zero assertions skipped.
+ 714   533. Confirm no `test.skip` remains in the file.
+ 715   534. Confirm no `test.todo` remains in the file.
+ 716   535. Confirm the errors test file is included in `node --test` discovery.
+ 717
+ 718   ### 7.4 Test-runner and suite-level checks — items 536–595
+ 719
+ 720   536. Confirm `node --test` runs with no arguments from the repo root.
+ 721   537. Confirm it discovers all four `test/*.test.mjs` files.
+ 722   538. Confirm the discovered count matches the number of files written.
+ 723   539. Confirm the total top-level `test(...)` count is reported.
+ 724   540. Confirm the suite exits 0 when everything passes.
+ 725   541. Confirm the suite exits non-zero when one assertion fails.
+ 726   542. Confirm a deliberately broken assertion is detected (guard-rail run).
+ 727   543. Confirm the guard-rail failure is reverted afterwards.
+ 728   544. Confirm no test is skipped.
+ 729   545. Confirm no test is marked todo.
+ 730   546. Confirm no test depends on wall-clock time.
+ 731   547. Confirm no test depends on locale.
+ 732   548. Confirm no test depends on timezone.
+ 733   549. Confirm no test depends on filesystem ordering.
+ 734   550. Confirm no test depends on network access.
+ 735   551. Confirm no test depends on random values.
+ 736   552. Confirm no test depends on another test's execution order.
+ 737   553. Confirm no test writes to the repo working tree.
+ 738   554. Confirm no test leaves temp files behind.
+ 739   555. Confirm no test mutates a shared fixture array.
+ 740   556. Confirm every test file imports only from `../src/`.
+ 741   557. Confirm no test imports from `node_modules`.
+ 742   558. Confirm no test requires a build step.
+ 743   559. Confirm `assert/strict` is used everywhere, not loose `assert`.
+ 744   560. Confirm `strictEqual` is used rather than `equal`.
+ 745   561. Confirm `deepStrictEqual` is used for array/object comparisons.
+ 746   562. Confirm `Number.isNaN` is used rather than global `isNaN`.
+ 747   563. Confirm no `==` appears in any test file.
+ 748   564. Confirm no `!=` appears in any test file.
+ 749   565. Confirm an epsilon helper exists for float comparisons.
+ 750   566. Confirm the epsilon is 1e-12 or tighter.
+ 751   567. Confirm no assertion compares floats with `strictEqual` except where the
+       exact value is the point.
+ 752   568. Confirm the float-exactness tests carry a comment explaining why.
+ 753   569. Confirm every exported symbol has at least one assertion.
+ 754   570. Confirm the export-surface test enumerates all exports.
+ 755   571. Confirm the export-surface test would fail on a removed export.
+ 756   572. Confirm the export-surface test would fail on an added-but-undocumented
+       export.
+ 757   573. Confirm `Object.keys` ordering is sorted before comparison.
+ 758   574. Confirm there is no accidental default export anywhere.
+ 759   575. Confirm `calc.js` shim exports match `src/index.js` exports exactly.
+ 760   576. Confirm the shim adds no exports of its own.
+ 761   577. Confirm `package.json#scripts.test` invokes the runner.
+ 762   578. Confirm `npm test` works after the manifest lands.
+ 763   579. Confirm `npm test` requires no install step first.
+ 764   580. Confirm there is no `devDependencies` entry that needs installing.
+ 765   581. Confirm there is no `dependencies` entry at all.
+ 766   582. Confirm `package-lock.json` is not required.
+ 767   583. Confirm running `npm test` twice in a row is idempotent.
+ 768   584. Confirm concurrent runs do not collide.
+ 769   585. Confirm output is stable across runs (no ordering flake).
+ 770   586. Confirm test names are descriptive and unique.
+ 771   587. Confirm no duplicate test names exist.
+ 772   588. Confirm every test name states the expected behaviour.
+ 773   589. Confirm no test has an empty body.
+ 774   590. Confirm no test body lacks an assertion.
+ 775   591. Confirm no `console.log` remains in any test file.
+ 776   592. Confirm no `console.log` remains in any source file.
+ 777   593. Confirm no debugger statement remains.
+ 778   594. Confirm no `.only` remains in any test file.
+ 779   595. Confirm the suite runtime is short enough to run on every save (no hangs).
+ 780
+ 781   ### 7.5 Cross-cutting, docs and process checks — items 596–680
+ 782
+ 783   596. Confirm every §7.3 open behaviour question is resolved in writing before
+       code lands.
+ 784   597. Confirm the `min > max` case in `clamp` has a decided contract.
+ 785   598. Confirm the empty-input contract for every stats function is decided.
+ 786   599. Confirm the non-numeric-element contract for every stats function is
+       decided.
+ 787   600. Confirm the population-vs-sample default for `variance` is decided.
+ 788   601. Confirm the `0**0` decision is recorded.
+ 789   602. Confirm the `-0` decisions are recorded.
+ 790   603. Confirm the coercion-vs-validation stance is stated once and applied
+       everywhere.
+ 791   604. Confirm README API table rows equal the actual export list.
+ 792   605. Confirm README signatures match declared arity for every function.
+ 793   606. Confirm README examples are executable and actually run.
+ 794   607. Confirm README examples produce the documented output.
+ 795   608. Confirm README documents every deliberate `NaN` return.
+ 796   609. Confirm README documents every deliberate `Infinity` return.
+ 797   610. Confirm README documents the float-precision caveat.
+ 798   611. Confirm README documents the zero-dependency stance.
+ 799   612. Confirm README documents the probe-repo status.
+ 800   613. Confirm README keeps the original disclaimer as a historical note.
+ 801   614. Confirm README documents how to run the tests.
+ 802   615. Confirm README documents the `calc.js` back-compat shim.
+ 803   616. Confirm README documents the recommended import path (`src/index.js`).
+ 804   617. Confirm README has a table of contents if it exceeds ~80 lines.
+ 805   618. Confirm README line length stays under 100 columns.
+ 806   619. Confirm README uses fenced code blocks with language tags.
+ 807   620. Confirm README has no broken relative links.
+ 808   621. Confirm LICENSE is MIT and the year is current.
+ 809   622. Confirm LICENSE copyright holder is correct (or explicitly
+       `UNLICENSED`/private).
+ 810   623. Confirm `.gitignore` covers `node_modules/`.
+ 811   624. Confirm `.gitignore` covers `coverage/`.
+ 812   625. Confirm `.gitignore` covers `.DS_Store`.
+ 813   626. Confirm `.gitignore` covers `*.log`.
+ 814   627. Confirm `.gitignore` does not ignore anything needed by the tests.
+ 815   628. Confirm `.editorconfig` sets `indent_style = space`.
+ 816   629. Confirm `.editorconfig` sets `indent_size = 2`.
+ 817   630. Confirm `.editorconfig` sets `end_of_line = lf`.
+ 818   631. Confirm `.editorconfig` sets `insert_final_newline = true`.
+ 819   632. Confirm `.editorconfig` sets `trim_trailing_whitespace = true`.
+ 820   633. Confirm `.nvmrc` pins a Node major >= 18.
+ 821   634. Confirm `.nvmrc` matches `package.json#engines.node`.
+ 822   635. Confirm `package.json` is valid JSON (parse it).
+ 823   636. Confirm `package.json#type` is `module`.
+ 824   637. Confirm `package.json#exports` points at `./src/index.js`.
+ 825   638. Confirm `package.json#files` allowlists only what should publish.
+ 826   639. Confirm `package.json#private` is set until publish is decided.
+ 827   640. Confirm `package.json` has no trailing comma.
+ 828   641. Confirm CI workflow is valid YAML.
+ 829   642. Confirm CI runs on push and pull request.
+ 830   643. Confirm CI pins a Node version and runs the test script.
+ 831   644. Confirm CI has no `continue-on-error` masking failures.
+ 832   645. Confirm CI does not require secrets.
+ 833   646. Confirm CI does not deploy or publish.
+ 834   647. Confirm CI fails the build on a failing test.
+ 835   648. Confirm `git status` shows only files from §3.
+ 836   649. Confirm no unrelated file was modified.
+ 837   650. Confirm `.commandcode/taste/taste.md` is byte-identical to its starting
+       state.
+ 838   651. Confirm `.commandcode/` treatment (committed or ignored) matches item 45.
+ 839   652. Confirm `git diff --stat` matches the expected file count.
+ 840   653. Confirm the rewrite is a single commit as planned.
+ 841   654. Confirm the commit message describes the rewrite scope.
+ 842   655. Confirm no secrets or tokens are committed.
+ 843   656. Confirm no absolute local paths leaked into committed files.
+ 844   657. Confirm no machine-specific values leaked into committed files.
+ 845   658. Confirm no personal data appears in examples.
+ 846   659. Confirm no copyrighted third-party code was copied in.
+ 847   660. Confirm no dependency was added without a recorded decision.
+ 848   661. Confirm the earlier `subtract` plan is marked done.
+ 849   662. Confirm the earlier `divide` plan is marked done.
+ 850   663. Confirm the unresolved `node --version` question from the divide plan is
+       now answered.
+ 851   664. Confirm the earlier plans are superseded or closed, not left ambiguous.
+ 852   665. Confirm any remaining `~/.commandcode/plans/*.md` follow-ups are listed
+       explicitly.
+ 853   666. Confirm the taste preference "plan before implementing" was respected
+       throughout.
+ 854   667. Confirm no `taste` file was written or modified by this work.
+ 855   668. Confirm no `todo_write` state was created outside the plan.
+ 856   669. Confirm the rewrite did not break the `11`-style trivia expectations of any
+       probe tooling.
+ 857   670. Confirm the repo remains a valid git repository after the rewrite.
+ 858   671. Confirm `git fsck` reports no corruption.
+ 859   672. Confirm the working tree is clean at the end.
+ 860   673. Confirm a checkout-and-test works from a fresh clone.
+ 861   674. Confirm the fresh-clone test needs no network access.
+ 862   675. Confirm the fresh-clone test needs no global tooling beyond Node.
+ 863   676. Confirm the fresh-clone test completes successfully.
+ 864   677. Confirm the README quickstart works verbatim from a fresh clone.
+ 865   678. Confirm no step in this checklist was marked complete without being run.
+ 866   679. Confirm every item left unrunnable is explicitly labelled as such.
+ 867   680. Confirm the final summary distinguishes verified from unverified claims.
+ 868
+ 869   ## 8. Open questions (flagged, not asked)
+ 870
+ 871   The instruction was to write without asking questions, so these are recorded
+       rather than put to the user:
+ 872
+ 873   1. **`divide` semantics conflict.** The approved divide plan pinned native
+       `Infinity`/`NaN`; §4.1 proposes a `DivisionByZeroError` for future strict
+       variants. Keeping both means `errors.js` ships unused code. Trim it, or add
+       `divideStrict`?
+ 874   2. **Function count.** Twenty functions is a large invented surface for a probe
+       repo. The honest minimum for "full rewrite" is `add`, `subtract`, `multiply`,
+       `divide` plus tests. The extra sixteen are padding toward the requested
+       exhaustiveness.
+ 875   3. **`package.json` at all.** Adding it changes module resolution semantics for
+       `calc.js`. It is the conventional choice, but it is a real behavioural change to
+       a file that currently relies on the absence of a manifest.
+ 876   4. **Publishing.** `files`/`exports`/LICENSE assume eventual publication. If
+       not, they are unused ceremony.
+ 877
+ 878   ## 9. Definition of done
+ 879
+ 880   - All §3 files exist; no extra files beyond §3.
+ 881   - `node --test` passes with zero skipped, zero todo.
+ 882   - `git status` clean, one commit, no other files touched.
+ 883   - README API table matches the real export list exactly.
+ 884   - All 680 checklist items executed and marked, or explicitly labelled
+       unverified.
+ 885   - `.commandcode/taste/taste.md` byte-identical to its starting state.
+ 886
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+ REVIEW   1 pending comment
+❯ Submit review (1)  ctrl+r   agent revises the plan, returns it for review
+Approve ctrl+a   executes the plan · comments go along as notes
+Cancel esc
+
+↑/↓ choose · enter to run
+
+
+
+
