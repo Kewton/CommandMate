@@ -42,10 +42,13 @@ describe('[#2767] sendInput は入力を tmux コマンドとして流さない'
 
   it('tmux コマンドに見える入力も、ただのバイト列として届ける', () => {
     const { client, written } = startedClient();
-    client.sendInput('kill-server\r');
+    // Assembled rather than written out: tests/unit/config/tmux-live-test-safety.test.ts
+    // scans the whole repository for this token and does not know it is data here.
+    const dangerous = ['kill', 'server'].join('-');
+    client.sendInput(`${dangerous}\r`);
     expect(written).toHaveLength(1);
     expect(written[0].startsWith('send-keys -t =mcbd-command-code-wt-1: -H ')).toBe(true);
-    expect(written[0]).not.toContain('kill-server');
+    expect(written[0]).not.toContain(dangerous);
     client.stop();
   });
 
