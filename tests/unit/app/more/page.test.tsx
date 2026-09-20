@@ -98,3 +98,32 @@ describe('heading (Issue #2645)', () => {
     expect(screen.getByText(jaCommon.settings.pageDescription)).toBeInTheDocument();
   });
 });
+
+describe('delegates its body to SettingsPanel (Issue #2707)', () => {
+  it('renders the panel\'s five section headings and nothing else at h1', async () => {
+    render(React.createElement(MorePage));
+
+    await waitFor(() => {
+      expect(screen.getAllByRole('heading', { level: 2 })).toHaveLength(5);
+    });
+
+    expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual([
+      'Quick Links',
+      'General',
+      'Notifications',
+      'External Apps',
+      'About',
+    ]);
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
+  });
+
+  it('no longer repeats the page title as a section heading', async () => {
+    render(React.createElement(MorePage));
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { level: 1 })).toBeInTheDocument();
+    });
+
+    expect(screen.queryAllByText('Settings').filter((el) => el.tagName === 'H2')).toHaveLength(0);
+  });
+});

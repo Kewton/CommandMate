@@ -64,6 +64,8 @@ if [ -f "$_LOAD_ENV_PROJECT_DIR/.env" ]; then
         var_name="${line%%=*}"
         # Skip if variable is already set in environment
         if [ -z "${!var_name+x}" ]; then
+            # $line は KEY=VALUE 全体なので export "FOO=bar" の形であり、変数名の間接 export ではない
+            # shellcheck disable=SC2163
             export "$line"
         fi
     done < "$_LOAD_ENV_PROJECT_DIR/.env"

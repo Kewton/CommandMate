@@ -1,0 +1,29 @@
+{
+  "version": "0.39.1",
+  "date": "2026-09-20",
+  "highlight": {
+    "ja": "パソコンでは設定がダイアログで開くようになり、画面を移動せずに変更できます。モーダルが背景のクリックで閉じない問題も直しました。",
+    "en": "On a computer, settings now open in a dialog so you can change them without leaving the page. Clicking outside a dialog to close it also works again."
+  },
+  "added": [
+    {
+      "ja": "サイドバーの下部から設定を開けるようになりました。",
+      "en": "You can now open settings from the bottom of the sidebar."
+    },
+    {
+      "ja": "パソコンでは、設定が画面を移動せずダイアログで開くようになりました。",
+      "en": "On a computer, settings now open in a dialog instead of moving you to another page."
+    }
+  ],
+  "improved": [],
+  "fixed": [
+    {
+      "ja": "ダイアログの外側をクリックしても閉じないことがある問題を直しました。",
+      "en": "Fixed dialogs sometimes not closing when you clicked outside them."
+    },
+    {
+      "ja": "スマートフォンで、画面下のナビゲーションに本文がわずかに重なる問題を直しました。",
+      "en": "Fixed content slightly overlapping the bottom navigation bar on phones."
+    }
+  ]
+}

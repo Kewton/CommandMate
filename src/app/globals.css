@@ -609,12 +609,13 @@
     padding-bottom: env(safe-area-inset-bottom, 0px);
   }
 
-  /* Issue #2695: the bottom tab bar is `h-14` (56px) PLUS pb-safe, so
-     a main that only reserves `pb-14` is short by the inset and its content is
-     covered on devices where env(safe-area-inset-bottom) is non-zero
-     (viewportFit: 'cover', Issue #1131). Reserve both. */
+  /* Issue #2695 / #2700: the bottom tab bar is three things stacked —
+     its `border-t` (1px), its `h-14` body (56px = 3.5rem) and `pb-safe`
+     (env(safe-area-inset-bottom), non-zero under viewportFit: 'cover', Issue
+     #1131). A main that reserves less than the sum has its content covered by
+     the difference. #2695 added the inset; the border is the last 1px. */
   .pb-nav-safe {
-    padding-bottom: calc(3.5rem + env(safe-area-inset-bottom, 0px));
+    padding-bottom: calc(3.5rem + 1px + env(safe-area-inset-bottom, 0px));
   }
 
   /* Custom scrollbar — [Issue #1082] tokenized so the thumb follows the theme

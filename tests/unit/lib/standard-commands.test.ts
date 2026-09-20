@@ -901,7 +901,6 @@ describe('catalog ≡ attestation \ exclusions (Issue #2026)', () => {
 // stays here is what is specific to these two tools.
 describe('copilot / opencode catalog reconcile (Issue #1913)', () => {
   const COPILOT_1_0_80 = attestedFor('copilot');
-  const OPENCODE_1_18_21 = attestedFor('opencode');
 
   // The two phantoms this reconcile removed. Both are recorded in
   // src/config/slash-commands-exclusions.json so catalog:refresh stops

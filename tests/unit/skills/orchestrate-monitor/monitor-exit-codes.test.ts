@@ -9,7 +9,7 @@ import {
   HOOKS_STATE_DIR_ENV,
   expectDiagnostic,
   expectDiagnosticLines,
-  useIsolatedHooksStateDir,
+  registerIsolatedHooksStateDir,
 } from '@tests/helpers/hooks-git-diagnostics';
 import {
   REAL_SHELL_SUBPROCESS_TIMEOUT_MS,
@@ -36,8 +36,8 @@ import {
  * cleaned up. A run that drew a pid some earlier run had used found the marker
  * for `myrepo-feature-x.status` already present and printed nothing, and the
  * assertions below then failed as `expected '' to contain '…'`. The suite was
- * green by coincidence, not by construction. `useIsolatedHooksStateDir` makes
- * the marker store per test; see tests/helpers/hooks-git-diagnostics.ts.
+ * green by coincidence, not by construction. `registerIsolatedHooksStateDir`
+ * makes the marker store per test; see tests/helpers/hooks-git-diagnostics.ts.
  */
 const SCRIPTS = path.join(process.cwd(), '.claude/skills/orchestrate-monitor/scripts');
 const HOOKS_GIT = path.join(SCRIPTS, 'hooks-git.sh');
@@ -63,7 +63,7 @@ const HARD_TIMEOUT_MS = REAL_SHELL_SUBPROCESS_TIMEOUT_MS;
  * worktree ids, so a file-wide directory lets the first test that hits
  * `myrepo-feature-x.*` silence the ones after it.
  */
-const stateDir = useIsolatedHooksStateDir('monitor-exit-codes');
+const stateDir = registerIsolatedHooksStateDir('monitor-exit-codes');
 
 function git(cwd: string, ...args: string[]): void {
   execFileSync(REAL_GIT, ['-c', 'user.email=t@t', '-c', 'user.name=t', ...args], {

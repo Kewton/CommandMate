@@ -14,7 +14,7 @@ import { MarkdownEditor } from '@/components/worktree/MarkdownEditor';
 // Mock useIsMobile hook at module level (required by vitest)
 const mockIsMobileReturn = vi.fn(() => true);
 vi.mock('@/hooks/useIsMobile', () => ({
-  useIsMobile: (...args: unknown[]) => mockIsMobileReturn(),
+  useIsMobile: () => mockIsMobileReturn(),
   MOBILE_BREAKPOINT: 768,
 }));
 

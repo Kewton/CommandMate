@@ -83,7 +83,7 @@ const FIXTURE: VerificationFixture = {
 };
 
 test.describe('Verification pane (Issue #1816)', () => {
-  test.beforeEach(async ({ page }, testInfo) => {
+  test.beforeEach(async ({ page: _page }, testInfo) => {
     test.skip(testInfo.project.name !== 'chromium', 'PC-only Activity Bar pane (chromium only)');
   });
 

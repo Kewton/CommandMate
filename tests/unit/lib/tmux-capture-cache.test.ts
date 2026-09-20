@@ -182,7 +182,6 @@ describe('tmux-capture-cache', () => {
 
     it('should perform full sweep on setCachedCapture [SEC4-002]', () => {
       vi.useFakeTimers();
-      const now = Date.now();
 
       // Set multiple entries
       setCachedCapture('session-1', 'output1', 100);

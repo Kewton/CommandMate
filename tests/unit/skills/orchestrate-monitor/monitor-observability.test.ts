@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 import {
   HOOKS_STATE_DIR_ENV,
   expectDiagnostic,
-  useIsolatedHooksStateDir,
+  registerIsolatedHooksStateDir,
 } from '@tests/helpers/hooks-git-diagnostics';
 import {
   REAL_SHELL_SUBPROCESS_TIMEOUT_MS,
@@ -33,7 +33,7 @@ const FIXTURES = fileURLToPath(new URL('./fixtures', import.meta.url));
  * (`myrepo-feature-x`, `nope-nope`) and leave it behind, and those are the
  * markers that silenced the diagnostics the other two suites assert on.
  */
-const stateDir = useIsolatedHooksStateDir('monitor-observability');
+const stateDir = registerIsolatedHooksStateDir('monitor-observability');
 
 // Same loop parameters as monitor-resend.test.ts (Issue #1527): polls, not
 // seconds, drive every decision, so --interval 0 removes the wall clock and

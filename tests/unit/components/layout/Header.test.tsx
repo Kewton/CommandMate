@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import React from 'react';
 import { Header } from '@/components/layout/Header';
 
@@ -29,6 +29,12 @@ vi.mock('@/components/common/ThemeToggle', () => ({
 
 vi.mock('@/components/layout/PcDisplaySizeSelector', () => ({
   PcDisplaySizeSelector: () => <div data-testid="pc-display-size-selector" />,
+}));
+
+// Issue #2709: "Settings" opens the settings modal rather than navigating.
+const settingsDialogMock = vi.hoisted(() => ({ open: vi.fn(), close: vi.fn() }));
+vi.mock('@/contexts/SettingsDialogContext', () => ({
+  useSettingsDialog: () => ({ isOpen: false, open: settingsDialogMock.open, close: settingsDialogMock.close }),
 }));
 
 // Issue #1206: the accessible names below are the real English labels, so
@@ -89,5 +95,68 @@ describe('Header navigation active indicator', () => {
     for (const label of NAV_LABELS) {
       expect(getNavLink(label)).not.toHaveAttribute('aria-current');
     }
+  });
+});
+
+describe('Settings opens the modal (Issue #2709)', () => {
+  beforeEach(() => {
+    usePathnameMock.mockReturnValue('/');
+    settingsDialogMock.open.mockClear();
+  });
+
+  it('stays a link to /more that advertises the dialog', () => {
+    render(<Header />);
+
+    const link = getNavLink('Settings');
+    expect(link.tagName).toBe('A');
+    expect(link.getAttribute('href')).toBe('/more');
+    expect(link.getAttribute('aria-haspopup')).toBe('dialog');
+  });
+
+  it('leaves the other nav links without aria-haspopup', () => {
+    render(<Header />);
+
+    for (const label of ['Sessions', 'Repos', 'Review/Report'] as const) {
+      expect(getNavLink(label).getAttribute('aria-haspopup')).toBeNull();
+    }
+  });
+
+  it('opens the modal on a plain left-click', () => {
+    render(<Header />);
+
+    fireEvent.click(getNavLink('Settings'));
+
+    expect(settingsDialogMock.open).toHaveBeenCalledTimes(1);
+  });
+
+  it('prevents the anchor default so the page does not navigate', () => {
+    render(<Header />);
+
+    const event = new MouseEvent('click', { bubbles: true, cancelable: true });
+    getNavLink('Settings').dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it.each([
+    ['⌘/Ctrl', { metaKey: true }],
+    ['Ctrl', { ctrlKey: true }],
+    ['Shift', { shiftKey: true }],
+    ['middle click', { button: 1 }],
+  ])('leaves a %s click to the browser', (_label, init) => {
+    render(<Header />);
+    const link = getNavLink('Settings');
+    link.addEventListener('click', (event) => event.preventDefault());
+
+    fireEvent.click(link, init);
+
+    expect(settingsDialogMock.open).not.toHaveBeenCalled();
+  });
+
+  it('still marks Settings as the current page on /more', () => {
+    usePathnameMock.mockReturnValue('/more');
+    render(<Header />);
+
+    expect(getNavLink('Settings')).toHaveAttribute('aria-current', 'page');
   });
 });

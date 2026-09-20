@@ -74,11 +74,12 @@ function main() {
     db.exec('COMMIT');
 
     console.log('\n✅ Migration completed successfully!');
-  } catch (error: any) {
+  } catch (error: unknown) {
     try {
       db.exec('ROLLBACK');
     } catch {}
-    console.error('\n❌ Error:', error.message);
+    const message = error instanceof Error ? error.message : String(error);
+    console.error('\n❌ Error:', message);
     throw error;
   } finally {
     db.close();

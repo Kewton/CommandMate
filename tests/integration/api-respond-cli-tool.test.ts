@@ -92,7 +92,7 @@ describe('POST /api/worktrees/:id/respond - CLI Tool Support', () => {
       // Create prompt message. cliToolId must match the asking tool: the route
       // resolves the session from message.cliToolId first (Issue #868), so an
       // unset value would default to 'claude' and mis-target the session.
-      const promptMessage: Partial<ChatMessage> = {
+      const promptMessage: Omit<ChatMessage, 'id' | 'archived'> = {
         worktreeId: 'claude-test',
         cliToolId: 'claude',
         role: 'assistant',
@@ -106,7 +106,7 @@ describe('POST /api/worktrees/:id/respond - CLI Tool Support', () => {
         },
         timestamp: new Date(),
       };
-      const message = createMessage(db, promptMessage as any);
+      const message = createMessage(db, promptMessage);
 
       const request = new Request('http://localhost:3000/api/worktrees/claude-test/respond', {
         method: 'POST',
@@ -144,7 +144,7 @@ describe('POST /api/worktrees/:id/respond - CLI Tool Support', () => {
       upsertWorktree(db, worktree);
 
       // Create prompt message (cliToolId identifies the asking tool for session routing)
-      const promptMessage: Partial<ChatMessage> = {
+      const promptMessage: Omit<ChatMessage, 'id' | 'archived'> = {
         worktreeId: 'codex-test',
         cliToolId: 'codex',
         role: 'assistant',
@@ -161,7 +161,7 @@ describe('POST /api/worktrees/:id/respond - CLI Tool Support', () => {
         },
         timestamp: new Date(),
       };
-      const message = createMessage(db, promptMessage as any);
+      const message = createMessage(db, promptMessage);
 
       const request = new Request('http://localhost:3000/api/worktrees/codex-test/respond', {
         method: 'POST',
@@ -197,7 +197,7 @@ describe('POST /api/worktrees/:id/respond - CLI Tool Support', () => {
       upsertWorktree(db, worktree);
 
       // Create prompt message (cliToolId identifies the asking tool for session routing)
-      const promptMessage: Partial<ChatMessage> = {
+      const promptMessage: Omit<ChatMessage, 'id' | 'archived'> = {
         worktreeId: 'gemini-test',
         cliToolId: 'gemini',
         role: 'assistant',
@@ -211,7 +211,7 @@ describe('POST /api/worktrees/:id/respond - CLI Tool Support', () => {
         },
         timestamp: new Date(),
       };
-      const message = createMessage(db, promptMessage as any);
+      const message = createMessage(db, promptMessage);
 
       const request = new Request('http://localhost:3000/api/worktrees/gemini-test/respond', {
         method: 'POST',

@@ -6,7 +6,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
-import * as path from 'path';
 import { logSecurityEvent, SecurityEvent, maskSensitiveData } from '../../../../src/cli/utils/security-logger';
 
 vi.mock('fs');

@@ -234,3 +234,128 @@ describe('Modal focus trap (Issue #1127)', () => {
     expect(document.activeElement).toBe(last);
   });
 });
+
+describe('closing on an outside press (Issue #2715)', () => {
+  afterEach(() => {
+    cleanup();
+    document.body.style.overflow = 'unset';
+  });
+
+  it('closes when clicking on the outside backdrop surface', () => {
+    const onClose = vi.fn();
+    render(
+      <Modal isOpen onClose={onClose} title="Outside">
+        <p>content</p>
+      </Modal>
+    );
+    const surface = screen.getByTestId('modal-backdrop-surface');
+    fireEvent.mouseDown(surface);
+    fireEvent.mouseUp(surface);
+    fireEvent.click(surface);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not close when clicking inside the panel', () => {
+    const onClose = vi.fn();
+    render(
+      <Modal isOpen onClose={onClose} title="Inside">
+        <p>content</p>
+      </Modal>
+    );
+    const panel = screen.getByTestId('modal-panel');
+    fireEvent.mouseDown(panel);
+    fireEvent.mouseUp(panel);
+    fireEvent.click(panel);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('does not close when pressing inside and releasing outside', () => {
+    const onClose = vi.fn();
+    render(
+      <Modal isOpen onClose={onClose} title="DragOut">
+        <p>content</p>
+      </Modal>
+    );
+    const panel = screen.getByTestId('modal-panel');
+    const surface = screen.getByTestId('modal-backdrop-surface');
+    fireEvent.mouseDown(panel);
+    fireEvent.mouseUp(surface);
+    fireEvent.click(surface);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('does not close when pressing outside and releasing inside', () => {
+    const onClose = vi.fn();
+    render(
+      <Modal isOpen onClose={onClose} title="DragIn">
+        <p>content</p>
+      </Modal>
+    );
+    const panel = screen.getByTestId('modal-panel');
+    const surface = screen.getByTestId('modal-backdrop-surface');
+    fireEvent.mouseDown(surface);
+    fireEvent.mouseUp(panel);
+    fireEvent.click(surface);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('does not close on outside click when disableClose is true', () => {
+    const onClose = vi.fn();
+    render(
+      <Modal isOpen onClose={onClose} title="Disabled" disableClose>
+        <p>content</p>
+      </Modal>
+    );
+    const surface = screen.getByTestId('modal-backdrop-surface');
+    fireEvent.mouseDown(surface);
+    fireEvent.mouseUp(surface);
+    fireEvent.click(surface);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('does not close on outside click during exit animation', () => {
+    const onClose = vi.fn();
+    const { rerender } = render(
+      <Modal isOpen onClose={onClose} title="Exiting">
+        <p>content</p>
+      </Modal>
+    );
+    rerender(
+      <Modal isOpen={false} onClose={onClose} title="Exiting">
+        <p>content</p>
+      </Modal>
+    );
+    const surface = screen.getByTestId('modal-backdrop-surface');
+    fireEvent.mouseDown(surface);
+    fireEvent.mouseUp(surface);
+    fireEvent.click(surface);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('has null onclick on the backdrop element', () => {
+    const { baseElement } = render(
+      <Modal isOpen onClose={() => {}} title="BackdropCheck">
+        <p>content</p>
+      </Modal>
+    );
+    const backdrop = baseElement.querySelector('.bg-black\\/50') as HTMLElement;
+    expect(backdrop).not.toBeNull();
+    expect(backdrop.onclick).toBeNull();
+  });
+
+  it('calls onClose only once when multiple clicks fire for a single mouseDown/mouseUp pair', () => {
+    const onClose = vi.fn();
+    render(
+      <Modal isOpen onClose={onClose} title="MultiClick">
+        <p>content</p>
+      </Modal>
+    );
+    const surface = screen.getByTestId('modal-backdrop-surface');
+    fireEvent.mouseDown(surface);
+    fireEvent.mouseUp(surface);
+    fireEvent.click(surface);
+    fireEvent.click(surface);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});
+

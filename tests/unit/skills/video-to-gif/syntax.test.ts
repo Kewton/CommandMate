@@ -1,9 +1,9 @@
 /**
  * Shell-level gate for the video-to-gif skill.
  *
- * `npm run lint` is scoped to `eslint src` and the root tsconfig deliberately
- * excludes `.claude/**` (Issue #1265), so nothing else in CI ever looks at these
- * files. This is the equivalent of demo-video's scripts-syntax.test.ts.
+ * `npm run lint` is scoped to `eslint src tests` (Issue #2719) and the root
+ * tsconfig deliberately excludes `.claude/**` (Issue #1265), so nothing else in CI
+ * ever looks at these files. This is the equivalent of demo-video's scripts-syntax.test.ts.
  *
  * @vitest-environment node
  */

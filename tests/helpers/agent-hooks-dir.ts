@@ -27,7 +27,7 @@ import { removeTempDir } from './temp-dir';
  * @returns A getter for the directory, for suites that want to inspect what was
  *   written
  */
-export function useIsolatedAgentHooksDir(prefix: string): () => string {
+export function registerIsolatedAgentHooksDir(prefix: string): () => string {
   let dir = '';
   let previous: string | undefined;
 

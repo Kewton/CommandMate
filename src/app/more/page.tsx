@@ -2,37 +2,22 @@
  * More Page (/more)
  *
  * Issue #600: UX refresh - Settings, External Apps, Help, Auth.
- * Contains ExternalAppsManager moved from Home page.
  * On mobile, Repositories is accessible from here.
  *
- * Issue #2065 adds the Settings section, and it goes ABOVE Notifications: it is
- * the first setting that changes what a *new* branch looks like, so it belongs
- * next to the quick links a user follows to create one, not below the
- * per-device notification plumbing.
- *
- * Issue #2201 adds the default output surface to that same section, for the
- * same reason: it is the other thing a newly opened branch inherits.
- *
  * Issue #2645: 見出しは `common.nav.more`、説明文は `common.settings.pageDescription`。
+ *
+ * Issue #2707: 中身は `SettingsPanel` に移した。このページが持つのは
+ * `<h1>` と説明文とページの余白だけで、同じ中身を PC の設定モーダル（#2708）も描く。
  */
 
 'use client';
 
-import Link from 'next/link';
 import { useTranslations } from 'next-intl';
-import { Card } from '@/components/ui';
-import { ExternalAppsManager } from '@/components/external-apps';
-import { NotificationsSettings } from '@/components/notifications';
-import {
-  AgentUpdatesCard,
-  DefaultAgentsSettings,
-  DefaultSurfaceModeSettings,
-} from '@/components/settings';
+import { SettingsPanel } from '@/components/settings';
 
 export default function MorePage() {
-  const tNotifications = useTranslations('notifications');
   const tCommon = useTranslations('common');
-  const tSkills = useTranslations('skills');
+
   return (
     <div className="container-custom py-8 overflow-auto h-full">
       <div className="mb-6">
@@ -42,73 +27,7 @@ export default function MorePage() {
         </p>
       </div>
 
-      {/* Quick Links */}
-      <div className="mb-8">
-        <h2 className="text-lg font-semibold mb-4 text-foreground">Quick Links</h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <Link
-            href="/repositories"
-            className="block"
-            data-testid="more-link-repositories"
-          >
-            <Card hover className="transition-colors hover:border-accent-300 dark:hover:border-accent-700">
-              <div className="text-sm font-medium text-foreground">Repositories</div>
-              <div className="text-xs text-muted-foreground">Manage repositories and worktrees</div>
-            </Card>
-          </Link>
-          <Link href="/skills" className="block" data-testid="more-link-skills">
-            <Card hover className="transition-colors hover:border-accent-300 dark:hover:border-accent-700">
-              <div className="text-sm font-medium text-foreground">{tCommon('nav.skills')}</div>
-              <div className="text-xs text-muted-foreground">{tSkills('page.description')}</div>
-            </Card>
-          </Link>
-          <Link href="/skills/installed" className="block" data-testid="more-link-skills-installed">
-            <Card hover className="transition-colors hover:border-accent-300 dark:hover:border-accent-700">
-              <div className="text-sm font-medium text-foreground">{tSkills('dashboard.title')}</div>
-              <div className="text-xs text-muted-foreground">{tSkills('dashboard.description')}</div>
-            </Card>
-          </Link>
-        </div>
-      </div>
-
-      {/* Settings (Issue #2065) */}
-      <div className="mb-8">
-        <h2 className="text-lg font-semibold mb-4 text-foreground">{tCommon('settings.title')}</h2>
-        <div className="space-y-4">
-          <DefaultAgentsSettings />
-          {/* Issue #2201: below the agent roster, because it answers the next
-              question a new branch raises — "and what do I look at while it
-              works" — and it is also the only mount that seeds the browser's
-              copy of the setting (see surface-mode-config). */}
-          <DefaultSurfaceModeSettings />
-          {/* Issue #2069: beside the default-agent list rather than in its own
-              section — both answer "which agent CLIs does this machine run",
-              and the roster above is where a user notices a tool at all. */}
-          <AgentUpdatesCard />
-        </div>
-      </div>
-
-      {/* Notifications */}
-      <div className="mb-8">
-        <h2 className="text-lg font-semibold mb-4 text-foreground">{tNotifications('title')}</h2>
-        <NotificationsSettings />
-      </div>
-
-      {/* External Apps */}
-      <div className="mb-8">
-        <h2 className="text-lg font-semibold mb-4 text-foreground">External Apps</h2>
-        <ExternalAppsManager />
-      </div>
-
-      {/* About */}
-      <div className="mb-8">
-        <h2 className="text-lg font-semibold mb-4 text-foreground">About</h2>
-        <Card>
-          <div className="text-sm text-muted-foreground">
-            CommandMate - A local control plane for agent CLIs.
-          </div>
-        </Card>
-      </div>
+      <SettingsPanel />
     </div>
   );
 }

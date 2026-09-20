@@ -22,6 +22,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { makeTempDir, removeTempDir } from '@tests/helpers/temp-dir';
 import {
@@ -323,7 +324,7 @@ describe('opencode local-provider config generation (Issue #1908)', () => {
 
     it('falls back to ~/.config/opencode', () => {
       expect(opencodeGlobalConfigDir({})).toBe(
-        path.join(require('os').homedir(), '.config', 'opencode')
+        path.join(os.homedir(), '.config', 'opencode')
       );
     });
 
@@ -331,7 +332,7 @@ describe('opencode local-provider config generation (Issue #1908)', () => {
       // A recursive mkdir under /proc never returns on Linux, and this module
       // does one in global mode.
       expect(opencodeGlobalConfigDir({ XDG_CONFIG_HOME: '/proc/self/fd' })).toBe(
-        path.join(require('os').homedir(), '.config', 'opencode')
+        path.join(os.homedir(), '.config', 'opencode')
       );
     });
   });

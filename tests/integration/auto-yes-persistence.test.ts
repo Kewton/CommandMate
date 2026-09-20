@@ -62,7 +62,6 @@ describe('Auto-Yes State Persistence (Issue #153)', () => {
       getActivePollerCount,
       clearAllAutoYesStates,
       clearAllPollerStates,
-      stopAllAutoYesPolling,
     } = await import('@/lib/polling/auto-yes-manager');
 
     // Clear any existing state
@@ -155,7 +154,7 @@ describe('Auto-Yes State Persistence (Issue #153)', () => {
   // Issue #225 [Stage 3 SF-004]: Custom duration persistence across module reload
   test('should persist 3-hour duration in-memory state after module reload', async () => {
     // 1. Initial module load - set state with custom 3-hour duration
-    const { setAutoYesEnabled, getAutoYesState, clearAllAutoYesStates, clearAllPollerStates } =
+    const { setAutoYesEnabled, clearAllAutoYesStates, clearAllPollerStates } =
       await import('@/lib/polling/auto-yes-manager');
 
     // Clear any existing state

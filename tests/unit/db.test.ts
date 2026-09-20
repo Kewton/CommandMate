@@ -5,11 +5,10 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Database from 'better-sqlite3';
-import type { Worktree, ChatMessage } from '@/types/models';
+import type { Worktree } from '@/types/models';
 
 // Import functions that we'll implement
 import {
-  initDatabase,
   getWorktrees,
   getWorktreeById,
   upsertWorktree,

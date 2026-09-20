@@ -4,6 +4,9 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 
 // Mock logger module (Issue #480)
 const { mockLogger } = vi.hoisted(() => {
@@ -445,10 +448,6 @@ More text here.
       // Test the core validation logic: validateCmatePath compares realpath results
       // and throws if the file is not within the worktree directory.
       // We test this by creating a temp directory structure.
-      const os = require('os');
-      const fs = require('fs');
-      const path = require('path');
-
       const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cmate-test-'));
       const worktreeDir = path.join(tmpDir, 'worktree');
       const outsideDir = path.join(tmpDir, 'outside');

@@ -3,10 +3,21 @@
  * TDD Approach: Red (test first) -> Green (implement) -> Refactor
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createServer, Server as HTTPServer } from 'http';
 import WebSocket from 'ws';
 import { setupWebSocket, closeWebSocket } from '@/lib/ws-server';
+
+/**
+ * A frame the server sends back to a subscriber, as far as this suite reads it.
+ * `data` is whatever the broadcasting client put in the envelope, so the two
+ * payload keys used below are both optional.
+ */
+interface BroadcastFrame {
+  type: string;
+  worktreeId: string;
+  data: { content?: string; message?: string };
+}
 
 describe('WebSocket Server', () => {
   let httpServer: HTTPServer;
@@ -103,7 +114,7 @@ describe('WebSocket Server', () => {
     await new Promise((resolve) => setTimeout(resolve, 100));
 
     // Send broadcast message to 'test-worktree'
-    const receivedMessages: any[] = [];
+    const receivedMessages: { client: number; message: BroadcastFrame }[] = [];
 
     client1.on('message', (data) => {
       receivedMessages.push({ client: 1, message: JSON.parse(data.toString()) });
@@ -165,8 +176,8 @@ describe('WebSocket Server', () => {
 
     await new Promise((resolve) => setTimeout(resolve, 100));
 
-    const room1Messages: any[] = [];
-    const room2Messages: any[] = [];
+    const room1Messages: BroadcastFrame[] = [];
+    const room2Messages: BroadcastFrame[] = [];
 
     room1Client1.on('message', (data) => {
       room1Messages.push(JSON.parse(data.toString()));
@@ -228,7 +239,7 @@ describe('WebSocket Server', () => {
     client1.close();
     await new Promise((resolve) => setTimeout(resolve, 100));
 
-    const client2Messages: any[] = [];
+    const client2Messages: BroadcastFrame[] = [];
     client2.on('message', (data) => {
       client2Messages.push(JSON.parse(data.toString()));
     });
@@ -280,7 +291,7 @@ describe('WebSocket Server', () => {
     client.send(JSON.stringify({ type: 'unsubscribe', worktreeId: 'test-room' }));
     await new Promise((resolve) => setTimeout(resolve, 100));
 
-    const messages: any[] = [];
+    const messages: BroadcastFrame[] = [];
     client.on('message', (data) => {
       messages.push(JSON.parse(data.toString()));
     });

@@ -239,6 +239,14 @@
   "settings": {
     "title": "Settings",
     "pageDescription": "Defaults for new branches, notifications, external apps, and more.",
+    "sections": {
+      "quickLinks": "Quick Links",
+      "general": "General",
+      "notifications": "Notifications",
+      "externalApps": "External Apps",
+      "about": "About"
+    },
+    "categoriesLabel": "Settings categories",
     "defaultSurfaceMode": {
       "title": "Default output surface",
       "description": "Which surface a session's output half opens in: the live terminal, or the conversation transcript. You can still switch either way from the session header.",

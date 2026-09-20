@@ -21,6 +21,8 @@
  * Issue #2644: header is now a nav list (Repositories+sync / Sessions / Review with count) + view/sort controls; "Branches" heading and the pill are gone.
  * Issue #2648: the view and sort controls are words (a labelled <select> and a labelled sort control), laid out as a two-column grid.
  * Issue #2656: a third view, "sessions", lists one row per agent instance (status first); a row opens its branch with ?instance=.
+ * Issue #2706: フッターの言語セレクトの左に設定ボタン（`/more` へのリンク）。スマホのブランチ画面には他に設定への入口が無い。
+ * Issue #2709: フッターの設定ボタンは PC ではモーダル、スマホでは `/more` へ。
  */
 
 'use client';
@@ -30,7 +32,7 @@ import { TransitionLink } from '@/components/view-transitions/TransitionLink';
 import { usePathname } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useViewTransitionRouter } from '@/components/providers/ViewTransitionsProvider';
-import { AlignJustify, CircleCheck, Database, type LucideIcon } from 'lucide-react';
+import { AlignJustify, CircleCheck, Database, Settings, type LucideIcon } from 'lucide-react';
 import {
   DndContext,
   PointerSensor,
@@ -59,6 +61,8 @@ import { LogoutButton } from '@/components/common/LogoutButton';
 import { useToast } from '@/components/common/Toast';
 import { ATTENTION_REVIEW_HREF } from '@/config/review-config';
 import { useAttentionCount } from '@/hooks/useAttentionCount';
+import { useIsMobile } from '@/hooks/useIsMobile';
+import { useSettingsDialog } from '@/contexts/SettingsDialogContext';
 import { repositoryApi, ApiError } from '@/lib/api-client';
 import { toBranchItem } from '@/types/sidebar';
 import type { SidebarBranchItem } from '@/types/sidebar';
@@ -673,10 +677,13 @@ export const Sidebar = memo(function Sidebar() {
         )}
       </div>
 
-      {/* Footer: Language Switcher + Theme Toggle + Logout */}
+      {/* Footer: Settings + Language Switcher + Theme Toggle + Logout */}
       <div className="flex-shrink-0 px-4 py-3 border-t border-sidebar-border space-y-2">
         <div className="flex items-center gap-2">
-          <div className="flex-1">
+          {/* Issue #2706: the only way into /more from a branch screen on a
+              phone — `/worktrees/*` renders no GlobalMobileNav. */}
+          <SidebarSettingsButton onNavigate={closeMobileDrawer} />
+          <div className="flex-1 min-w-0">
             <LocaleSwitcher />
           </div>
           <ThemeToggle />
@@ -1101,3 +1108,52 @@ const SyncButton = memo(function SyncButton({
     </>
   );
 });
+
+/**
+ * Issue #2706: the settings entry in the sidebar footer, left of the
+ * language select. An anchor rather than a button so a modified click still
+ * opens /more in a new tab, and so #2709 can turn a plain left-click into
+ * the PC settings modal without changing the markup.
+ */
+function SidebarSettingsButton({ onNavigate }: { onNavigate: () => void }) {
+  const t = useTranslations('common');
+  const isMobile = useIsMobile();
+  const { open: openSettings } = useSettingsDialog();
+  const label = t('settings.title');
+
+  // Issue #2709: on PC a plain left-click opens the settings modal instead of
+  // navigating. The phone keeps the page — a two-column dialog has nowhere to
+  // go at 390px, and /more is the target of its own tab in GlobalMobileNav.
+  // A modified click stays a link on both, so /more still opens in a new tab.
+  const handleClick = useCallback(
+    (event: React.MouseEvent<HTMLAnchorElement>) => {
+      // The drawer closes either way; on PC it is already closed.
+      onNavigate();
+      if (isMobile) return;
+      if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+        return;
+      }
+      event.preventDefault();
+      openSettings();
+    },
+    [isMobile, onNavigate, openSettings]
+  );
+
+  return (
+    // `flex-shrink-0` goes on the Tooltip, not on the link: the wrapper span is
+    // what sits in the footer's flex row (Issue #2307), so the link's own
+    // shrink rule would never be consulted.
+    <Tooltip content={label} placement="top" className="flex-shrink-0">
+      <TransitionLink
+        href="/more"
+        data-testid="sidebar-settings"
+        aria-label={label}
+        aria-haspopup={isMobile ? undefined : 'dialog'}
+        onClick={handleClick}
+        className="p-1.5 rounded-md text-sidebar-muted hover:text-sidebar-foreground hover:bg-sidebar-hover focus:outline-none focus:ring-2 focus:ring-ring transition-colors"
+      >
+        <Settings size={20} aria-hidden="true" />
+      </TransitionLink>
+    </Tooltip>
+  );
+}

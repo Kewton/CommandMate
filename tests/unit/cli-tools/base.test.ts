@@ -16,22 +16,22 @@ class TestCLITool extends BaseCLITool {
   readonly name = 'Test CLI Tool';
   readonly command = 'test-cli';
 
-  async isRunning(worktreeId: string): Promise<boolean> {
+  async isRunning(_worktreeId: string): Promise<boolean> {
     return false;
   }
 
   // Issue #2009: `startSession` is now BaseCLITool's own (it wraps the launch in
   // the one place a start failure becomes a notification), so a tool implements
   // the launch instead.
-  protected async launchSession(worktreeId: string, worktreePath: string): Promise<void> {
+  protected async launchSession(_worktreeId: string, _worktreePath: string): Promise<void> {
     // テスト用のスタブ実装
   }
 
-  async sendMessage(worktreeId: string, message: string): Promise<void> {
+  async sendMessage(_worktreeId: string, _message: string): Promise<void> {
     // テスト用のスタブ実装
   }
 
-  async killSession(worktreeId: string): Promise<void> {
+  async killSession(_worktreeId: string): Promise<void> {
     // テスト用のスタブ実装
   }
 }

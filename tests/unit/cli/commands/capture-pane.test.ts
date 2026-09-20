@@ -30,7 +30,6 @@ const RAW_PANE = fs.readFileSync(
   'utf-8'
 );
 
-const WORKTREE = { id: 'wt1', name: 'wt1', cliToolId: 'claude', agentInstances: [] };
 
 async function runCapture(argv: string[]): Promise<void> {
   const { createCaptureCommand } = await import('@/cli/commands/capture');

@@ -79,7 +79,7 @@ describe('CLI Auth Options', () => {
 
   describe('Token generation for --auth', () => {
     it('should generate a valid token and hash pair', async () => {
-      const { generateToken, hashToken, verifyToken } = await import('@/lib/security/auth');
+      const { generateToken, hashToken } = await import('@/lib/security/auth');
       const token = generateToken();
       const hash = hashToken(token);
 

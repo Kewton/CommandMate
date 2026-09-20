@@ -23,7 +23,6 @@ import {
   getCloneJobsByStatus,
 } from '@/lib/db/db-repository';
 import { upsertWorktree } from '@/lib/db/worktree-db';
-import type { CloneJobStatus } from '@/types/clone';
 
 describe('Repository DB Operations', () => {
   let db: Database.Database;

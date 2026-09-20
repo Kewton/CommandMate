@@ -80,7 +80,7 @@ describe('useWebSocket', () => {
   });
 
   it('announces the client bundle version on every (re)connect (#1338/#1356)', () => {
-    const { result } = renderHook(() => useWebSocket({ reconnectBaseDelay: 1000 }));
+    renderHook(() => useWebSocket({ reconnectBaseDelay: 1000 }));
     const ws1 = MockWebSocket.last();
     act(() => ws1.mockOpen());
 

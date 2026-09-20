@@ -102,7 +102,6 @@ const SHIM_DIR = path.join(ISO_DIR, 'bin');
 const SHIM_LOG = path.join(ISO_DIR, 'tmux-calls.log');
 
 const PORT = Number(process.env.MEASURE_PORT ?? 3511);
-const BASE_URL = `http://127.0.0.1:${PORT}`;
 
 /** A real 1000-line `capture-pane -e` frame of a busy Claude session. */
 const FIXTURE = path.join(REPO_ROOT, 'tests', 'unit', 'lib', 'tmux', 'fixtures', 'capture-claude-busy.txt');

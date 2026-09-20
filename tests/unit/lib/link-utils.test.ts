@@ -12,7 +12,6 @@ import {
   sanitizeHref,
   REHYPE_SANITIZE_SCHEMA,
 } from '@/lib/link-utils';
-import type { LinkType } from '@/lib/link-utils';
 
 // ============================================================================
 // classifyLink Tests

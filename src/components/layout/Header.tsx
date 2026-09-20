@@ -6,6 +6,7 @@
  * Sessions | Repos | Review | Settings
  *
  * Issue #2642: Home / Chat を外して 4 項目にした。ロゴは `/` へのリンクのまま
+ * Issue #2709: 「設定」は `/more` へのリンクのまま、素の左クリックだけ設定モーダルを開く
  */
 
 'use client';
@@ -22,6 +23,7 @@ import { ConnectionStatusIndicator } from '@/components/common/ConnectionStatusI
 import { AppUpdateButton } from '@/components/common/AppUpdateButton';
 import { Kbd } from '@/components/ui/Kbd';
 import { useCommandPalette } from '@/contexts/CommandPaletteContext';
+import { useSettingsDialog } from '@/contexts/SettingsDialogContext';
 
 export interface HeaderProps {
   title?: string;
@@ -35,11 +37,17 @@ export interface HeaderProps {
  * ("Repos") keeps the space-x-6 row from overflowing, and `reviewReport`
  * ("Review/Report") preserves that /review also covers reports.
  */
-const NAV_ITEMS: Array<{ labelKey: string; href: string; isActive: (pathname: string) => boolean }> = [
+const NAV_ITEMS: Array<{
+  labelKey: string;
+  href: string;
+  isActive: (pathname: string) => boolean;
+  /** Issue #2709: a plain left-click opens the settings modal instead. */
+  opensSettings?: boolean;
+}> = [
   { labelKey: 'nav.sessions', href: '/sessions', isActive: (p) => p.startsWith('/sessions') },
   { labelKey: 'nav.repositoriesShort', href: '/repositories', isActive: (p) => p.startsWith('/repositories') },
   { labelKey: 'nav.reviewReport', href: '/review', isActive: (p) => p.startsWith('/review') },
-  { labelKey: 'nav.more', href: '/more', isActive: (p) => p.startsWith('/more') },
+  { labelKey: 'nav.more', href: '/more', isActive: (p) => p.startsWith('/more'), opensSettings: true },
 ];
 
 /**
@@ -66,6 +74,24 @@ export function Header({ title = 'CommandMate' }: HeaderProps) {
     setModKey(isMac ? '⌘' : 'Ctrl');
   }, []);
 
+  const { open: openSettings } = useSettingsDialog();
+
+  // Issue #2709: "Settings" stays an <a href="/more"> — the active
+  // underline, the accessible name and ⌘-click / middle-click all depend on it
+  // being a real link — but a plain left-click opens the modal instead of
+  // navigating. TransitionLink runs this handler first and bails on
+  // defaultPrevented, so the modified-click path is untouched.
+  const handleSettingsClick = React.useCallback(
+    (event: React.MouseEvent<HTMLAnchorElement>) => {
+      if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+        return;
+      }
+      event.preventDefault();
+      openSettings();
+    },
+    [openSettings]
+  );
+
   return (
     <header className="sticky top-0 z-50 border-b border-border bg-background supports-[backdrop-filter]:bg-background/80 backdrop-blur-md">
       <div className="container-custom">
@@ -89,6 +115,8 @@ export function Header({ title = 'CommandMate' }: HeaderProps) {
                   key={item.href}
                   href={item.href}
                   aria-current={active ? 'page' : undefined}
+                  aria-haspopup={item.opensSettings ? 'dialog' : undefined}
+                  onClick={item.opensSettings ? handleSettingsClick : undefined}
                   className={`relative py-1 text-sm font-medium transition-colors after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:rounded-full after:bg-accent-600 dark:after:bg-accent-400 after:origin-center motion-safe:after:transition-transform after:duration-200 after:ease-[var(--motion-ease-out)] ${
                     active
                       ? 'text-accent-600 dark:text-accent-400 after:scale-x-100'

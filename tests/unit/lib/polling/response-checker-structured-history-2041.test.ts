@@ -64,7 +64,7 @@ vi.mock('@/lib/polling/structured-history-gate', () => ({
 }));
 
 import { checkForResponse } from '@/lib/polling/response-checker';
-import { getPollerKey, stopPolling } from '@/lib/polling/response-poller-core';
+import { stopPolling } from '@/lib/polling/response-poller-core';
 import { isStructuredHistoryWriterLive } from '@/lib/polling/structured-history-gate';
 
 /** `OPENCODE_PANE_HEIGHT`; what production actually captures. */

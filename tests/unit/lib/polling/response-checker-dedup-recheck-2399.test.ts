@@ -268,7 +268,7 @@ function loggedActions(): string[] {
  * it wrote. Without this a test keeps feeding a hand-picked cursor and never
  * notices the product re-pinning its own state.
  */
-function useLiveSessionState(initial: number): void {
+function wireLiveSessionState(initial: number): void {
   let lastCapturedLine = initial;
   getSessionState.mockImplementation(() => ({ lastCapturedLine, inProgressMessageId: null }));
   updateSessionState.mockImplementation((...args: unknown[]) => {
@@ -279,7 +279,7 @@ function useLiveSessionState(initial: number): void {
 function arm(tool: CLIToolType): void {
   stopPolling(WT, tool);
   captureSessionOutput.mockResolvedValue(paneFor(tool));
-  useLiveSessionState(tool === 'claude' ? 1000 : CACHE_MAX_CAPTURE_LINES - 1);
+  wireLiveSessionState(tool === 'claude' ? 1000 : CACHE_MAX_CAPTURE_LINES - 1);
 }
 
 beforeEach(() => {

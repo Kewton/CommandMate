@@ -193,7 +193,7 @@ describe('AgentSettingsPane', () => {
     it('should call API when selecting a new agent to make exactly 2', async () => {
       // Start with only gemini selected (internally after unchecking one from [claude, codex])
       // To test the full flow: uncheck claude from [claude, codex], then check gemini
-      const { rerender } = render(
+      render(
         <AgentSettingsPane {...defaultProps} selectedAgents={['claude', 'codex']} />
       );
 

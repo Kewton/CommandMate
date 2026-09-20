@@ -8,7 +8,7 @@ import {
   HOOKS_STATE_DIR_ENV,
   expectDiagnostic,
   expectDiagnosticLines,
-  useIsolatedHooksStateDir,
+  registerIsolatedHooksStateDir,
 } from '@tests/helpers/hooks-git-diagnostics';
 import {
   REAL_SHELL_SUBPROCESS_TIMEOUT_MS,
@@ -47,8 +47,9 @@ import {
  * recycles, and which nothing ever deletes. The observed failure was this file's
  * `shared-name.ambiguous-basename` marker surviving from some earlier run and
  * silencing the line, reported as `expected '' to contain 'monitor hooks WARN:'`.
- * `useIsolatedHooksStateDir` gives each test its own store, so the assertions
- * measure `hooks-git.sh` rather than the pid the kernel happened to hand out.
+ * `registerIsolatedHooksStateDir` gives each test its own store, so the
+ * assertions measure `hooks-git.sh` rather than the pid the kernel happened to
+ * hand out.
  */
 const SCRIPTS = path.join(process.cwd(), '.claude/skills/orchestrate-monitor/scripts');
 const HOOKS_GIT = path.join(SCRIPTS, 'hooks-git.sh');
@@ -60,7 +61,7 @@ const HOOKS_GIT = path.join(SCRIPTS, 'hooks-git.sh');
 const HARD_TIMEOUT_MS = REAL_SHELL_SUBPROCESS_TIMEOUT_MS;
 
 /** One once-per-worker marker store per test (Issue #2089). */
-const stateDir = useIsolatedHooksStateDir('hooks-git-resolution');
+const stateDir = registerIsolatedHooksStateDir('hooks-git-resolution');
 
 /** Absolute, so a test never depends on how the runner's PATH is ordered. */
 const REAL_GIT = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();

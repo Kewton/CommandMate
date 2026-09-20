@@ -32,11 +32,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import Database from 'better-sqlite3';
 import { runMigrations } from '@/lib/db/db-migrations';
-import { useIsolatedAgentHooksDir } from '@tests/helpers/agent-hooks-dir';
+import { registerIsolatedAgentHooksDir } from '@tests/helpers/agent-hooks-dir';
 
 // #1722 writes a hooks settings file on every session start; without this the
 // suite would litter the developer's real ~/.commandmate/hooks.
-useIsolatedAgentHooksDir('session-start-failure-push-2000');
+registerIsolatedAgentHooksDir('session-start-failure-push-2000');
 
 let db: Database.Database;
 

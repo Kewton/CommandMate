@@ -18,7 +18,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { execFileSync } from 'child_process';
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'fs';
+import { mkdtempSync, readFileSync, readdirSync, realpathSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import type { NextRequest } from 'next/server';

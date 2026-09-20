@@ -10,7 +10,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { FilePanelTabs } from '@/components/worktree/FilePanelTabs';
 import type { FileTab } from '@/hooks/useFileTabs';
-import type { FileContent } from '@/types/models';
 
 // Issue #1275: this file asserts rendered wording (the per-tab close label), so
 // it must resolve keys through the real dictionary. The global mock in

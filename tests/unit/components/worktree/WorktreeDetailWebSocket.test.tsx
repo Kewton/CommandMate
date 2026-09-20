@@ -3,7 +3,7 @@
  * Issue #36: Yes/No回答時の不要なリロード・スクロールリセットを修正
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import type { ChatMessage } from '@/types/models';
 import { answerablePromptOf } from '../../../helpers/prompt-type-guards';
 

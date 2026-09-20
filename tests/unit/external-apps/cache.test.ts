@@ -8,7 +8,6 @@ import Database from 'better-sqlite3';
 import { runMigrations } from '@/lib/db/db-migrations';
 import { createExternalApp, updateExternalApp, deleteExternalApp } from '@/lib/external-apps/db';
 import { ExternalAppCache, externalAppCache, resetCacheInstance } from '@/lib/external-apps/cache';
-import type { CreateExternalAppInput } from '@/types/external-apps';
 
 describe('External Apps Cache', () => {
   let testDb: Database.Database;
@@ -231,7 +230,7 @@ describe('External Apps Cache', () => {
         `).run(Date.now(), Date.now());
 
         // Before invalidation - cache still has old data
-        const beforeInvalidate = await cache.getByPathPrefix('commandmate_issue/200');
+        await cache.getByPathPrefix('commandmate_issue/200');
         // Note: This might return the new app because getByPathPrefix checks isStale()
         // but we're testing the explicit invalidation flow
 
